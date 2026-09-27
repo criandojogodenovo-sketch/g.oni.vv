@@ -1,0 +1,139 @@
+name: release
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+    inputs:
+      store_pw:
+        description: 'Senha da keystore (apenas p/ o job init-keystore)'
+        required: false
+        default: ''
+      key_alias:
+        description: 'Alias da chave (apenas p/ o job init-keystore)'
+        required: false
+        default: 'vv'
+      key_pw:
+        description: 'Senha da chave (apenas p/ o job init-keystore)'
+        required: false
+        default: ''
+
+jobs:
+  core-tests:
+    name: Testes do core (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar build dos testes
+        run: cmake -S tests -B build-tests -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compilar
+        run: cmake --build build-tests --parallel
+
+      - name: Executar suíte do core
+        run: ctest --test-dir build-tests --output-on-failure
+
+  build-release:
+    name: APK release arm64 (assinado via secrets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Instalar componentes Android fixos (NDK/CMake/SDK 34)
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install "ndk;26.3.11579264" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Decodificar keystore dos secrets
+        env:
+          VV_KEYSTORE: ${{ secrets.VV_KEYSTORE }}
+        run: |
+          if [ -n "$VV_KEYSTORE" ]; then
+            mkdir -p app/keystore
+            printf '%s' "$VV_KEYSTORE" | base64 -d > app/keystore/vv-release.jks
+            echo "VV_SIGNING=1" >> "$GITHUB_ENV"
+            echo "Keystore decodificada — assinatura release ativa."
+          else
+            echo "VV_SIGNING=0" >> "$GITHUB_ENV"
+            echo "::warning::Secret VV_KEYSTORE ausente — o APK sai UNSIGNED. Rode o job init-keystore, guarde a keystore offline e configure os secrets VV_*."
+          fi
+
+      - name: assembleRelease
+        env:
+          VV_STORE_PW: ${{ secrets.VV_STORE_PW }}
+          VV_KEY_ALIAS: ${{ secrets.VV_KEY_ALIAS }}
+          VV_KEY_PW: ${{ secrets.VV_KEY_PW }}
+        run: ./gradlew assembleRelease --stacktrace --no-daemon
+
+      - name: Verificar assinatura (apksigner)
+        if: env.VV_SIGNING == '1'
+        run: $ANDROID_HOME/build-tools/34.0.0/apksigner verify --print-certs app/build/outputs/apk/release/*.apk
+
+      - name: "Conteúdo do APK (verificação — lib arm64, sem dex próprio)"
+        run: unzip -l app/build/outputs/apk/release/*.apk
+
+      - name: Publicar artifact do APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: goni-vv-0.1.0-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+  init-keystore:
+    name: init-keystore (gera a keystore uma vez — guardar offline)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Gerar keystore PKCS12 (uma vez)
+        env:
+          PW_STORE: ${{ inputs.store_pw || secrets.VV_STORE_PW }}
+          PW_ALIAS: ${{ inputs.key_alias || secrets.VV_KEY_ALIAS || 'vv' }}
+          PW_KEY: ${{ inputs.key_pw || secrets.VV_KEY_PW }}
+        run: |
+          if [ -z "$PW_STORE" ] || [ -z "$PW_KEY" ]; then
+            echo "::error::Informe 'store_pw' e 'key_pw' no workflow_dispatch (ou configure os secrets VV_STORE_PW/VV_KEY_PW)."
+            exit 1
+          fi
+          keytool -genkeypair -v -keystore vv-release.jks -storetype PKCS12 \
+            -alias "$PW_ALIAS" -keyalg RSA -keysize 2048 -validity 10950 \
+            -storepass "$PW_STORE" -keypass "$PW_KEY" \
+            -dname "CN=G.One VV, OU=VV, O=G.One VV, L=Luanda, ST=Luanda, C=AO"
+
+      - name: Publicar artifact da keystore
+        uses: actions/upload-artifact@v4
+        with:
+          name: vv-release-keystore
+          path: vv-release.jks
+          if-no-files-found: error
+
+      - name: Instruções para o dono (sumário do job)
+        run: |
+          {
+            echo "## init-keystore — próximos passos"
+            echo ""
+            echo "1. Baixe o artifact **vv-release-keystore** e guarde OFFLINE (sem ele não há updates com a mesma assinatura)."
+            echo "2. Anote as senhas usadas no dispatch (ou nos secrets VV_STORE_PW / VV_KEY_PW)."
+            echo "3. Gere o base64: \`base64 -w0 vv-release.jks\`"
+            echo "4. Configure os secrets: **VV_KEYSTORE** (base64), **VV_STORE_PW**, **VV_KEY_ALIAS**, **VV_KEY_PW**."
+            echo "5. Rode o workflow de novo — o artifact do APK vira **-signed**."
+            echo ""
+            echo "Atenção: trocar de keystore muda a assinatura — exige desinstalar/reinstalar no device."
+          } >> "$GITHUB_STEP_SUMMARY"
