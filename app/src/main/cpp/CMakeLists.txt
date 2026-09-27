@@ -32,6 +32,8 @@ add_library(goni_vv SHARED
         ui/UiContext.cpp
         ui/stb/stb_truetype.h
         platform/Log.h
+        platform/CrashHandler.h
+        platform/CrashHandler.cpp
         platform/EglContext.h
         platform/EglContext.cpp
         platform/InputState.h

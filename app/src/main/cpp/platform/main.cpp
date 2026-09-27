@@ -7,6 +7,7 @@
 #include "core/Scene.h"
 #include "core/Time.h"
 #include "platform/Log.h"
+#include "platform/CrashHandler.h"
 #include "platform/EglContext.h"
 #include "platform/InputState.h"
 #include "render/Renderer.h"
@@ -100,6 +101,9 @@ void frame() {
 } // namespace
 
 void android_main(android_app* app) {
+    // diagnóstico: crash log em <internalDataPath>/goni_crash.log (passo 7)
+    installCrashHandler(app->activity ? app->activity->internalDataPath : nullptr);
+
     app->onAppCmd = onAppCmd;
     app->onInputEvent = onInputEvent;
     LOGI("G.One VV 0.1.0 — F1 (passo 6: UI immediate-mode)");
