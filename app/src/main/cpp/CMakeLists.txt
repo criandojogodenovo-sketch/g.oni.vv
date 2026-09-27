@@ -26,6 +26,11 @@ add_library(goni_vv SHARED
         render/QuadBatch.h
         render/Renderer.h
         render/Renderer.cpp
+        ui/FontAtlas.h
+        ui/FontAtlas.cpp
+        ui/UiContext.h
+        ui/UiContext.cpp
+        ui/stb/stb_truetype.h
         platform/Log.h
         platform/EglContext.h
         platform/EglContext.cpp
