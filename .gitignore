@@ -1,0 +1,22 @@
+# Gradle
+.gradle/
+build/
+app/build/
+app/.cxx/
+
+# Keystore / segredos — NUNCA comitar
+app/keystore/
+*.jks
+*.keystore
+local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Builds de teste locais
+build-tests/
+
+# Logs locais
+*.log

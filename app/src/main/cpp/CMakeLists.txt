@@ -1,0 +1,17 @@
+# app/src/main/cpp/CMakeLists.txt — G.One VV 0.1.0 (F1)
+# Core C++17 + NativeActivity (native_app_glue do NDK).
+cmake_minimum_required(VERSION 3.22.1)
+project(goni_vv LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Shim do sistema para NativeActivity (fonte oficial do NDK).
+add_library(native_app_glue STATIC
+        ${ANDROID_NDK}/sources/android/native_app_glue/android_native_app_glue.c)
+target_include_directories(native_app_glue PUBLIC
+        ${ANDROID_NDK}/sources/android/native_app_glue)
+
+# Fontes do goni_vv entram incrementalmente nos passos 3..7 da F1
+# (um bloco por commit: platform, core, render, ui, diagnóstico).

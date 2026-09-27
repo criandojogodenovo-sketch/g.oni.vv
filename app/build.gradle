@@ -1,0 +1,80 @@
+// app/build.gradle — G.One VV 0.1.0 (F1)
+// Mobile-first: arm64-v8a, minSdk 24, NativeActivity, landscape travado.
+// Zero Kotlin/Java próprio (hasCode=false — shim do sistema apenas).
+plugins {
+    id 'com.android.application'
+}
+
+// ---- Assinatura release (CI) ------------------------------------------------
+// O CI decodifica o secret VV_KEYSTORE (base64) em app/keystore/vv-release.jks
+// e exporta VV_STORE_PW / VV_KEY_ALIAS / VV_KEY_PW. Sem secrets, o build segue
+// e o APK sai UNSIGNED (nunca debug como entregável).
+def ksFile = file('keystore/vv-release.jks')
+def vvStorePw = System.getenv('VV_STORE_PW')
+def vvKeyAlias = System.getenv('VV_KEY_ALIAS')
+def vvKeyPw = System.getenv('VV_KEY_PW')
+def hasReleaseSigning = ksFile.exists() && vvStorePw && vvKeyAlias && vvKeyPw
+
+android {
+    namespace 'vv.goni'
+    compileSdk 34
+    ndkVersion '26.3.11579264'
+
+    defaultConfig {
+        applicationId 'vv.goni'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0'
+
+        ndk {
+            abiFilters 'arm64-v8a'   // device de teste: Realme C33 (720x1600)
+        }
+
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=c++_static'
+                cppFlags '-std=c++17'
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path 'src/main/cpp/CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+
+    if (hasReleaseSigning) {
+        signingConfigs {
+            release {
+                storeFile ksFile
+                storePassword vvStorePw
+                keyAlias vvKeyAlias
+                keyPassword vvKeyPw
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
+            // sem signingConfig => APK release UNSIGNED (nunca debug como entregável)
+        }
+    }
+
+    buildFeatures {
+        buildConfig false
+        // Obs.: o AGP 8.5 sempre emite um classes.dex mínimo contendo apenas a
+        // classe R auto-gerada (vazia) — nenhum Java/Kotlin próprio existe aqui.
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+}
