@@ -22,6 +22,10 @@ add_library(goni_vv SHARED
         core/Scene.cpp
         core/Time.h
         core/Time.cpp
+        math/Math.h
+        render/QuadBatch.h
+        render/Renderer.h
+        render/Renderer.cpp
         platform/Log.h
         platform/EglContext.h
         platform/EglContext.cpp

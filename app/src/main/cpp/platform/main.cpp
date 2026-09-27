@@ -8,12 +8,14 @@
 #include "platform/Log.h"
 #include "platform/EglContext.h"
 #include "platform/InputState.h"
+#include "render/Renderer.h"
 
 using namespace vv;
 
 namespace {
 
 EglContext g_egl;
+Renderer   g_renderer;
 InputState g_input;
 Scene      g_scene;
 Time       g_time;
@@ -22,10 +24,16 @@ bool       g_ready = false;
 void onAppCmd(android_app* app, i32 cmd) {
     switch (cmd) {
         case APP_CMD_INIT_WINDOW:
-            g_ready = g_egl.init(app->window);
-            if (!g_ready) {
+            if (!g_egl.init(app->window)) {
                 LOGE("boot: EGL falhou");
+                break;
             }
+            if (!g_renderer.init()) {
+                LOGE("boot: renderer falhou");
+                break;
+            }
+            g_renderer.resize(g_egl.width(), g_egl.height());
+            g_ready = true;
             break;
         case APP_CMD_WINDOW_RESIZED:
         case APP_CMD_CONFIG_CHANGED:
@@ -33,6 +41,7 @@ void onAppCmd(android_app* app, i32 cmd) {
             break;
         case APP_CMD_TERM_WINDOW:
             g_ready = false;
+            g_renderer.shutdown();
             g_egl.shutdown();
             break;
         case APP_CMD_DESTROY:
@@ -84,8 +93,8 @@ void android_main(android_app* app) {
             g_time.endStep();
         }
 
-        glClearColor(0.0784314f, 0.0784314f, 0.0784314f, 1.0f);   // BG #141414
-        glClear(GL_COLOR_BUFFER_BIT);
+        g_renderer.beginFrame();   // clear mono BG (PLACEHOLDER F1)
+        g_renderer.endFrame();     // sem submissões ainda — entra UI no passo 6
         g_egl.swap();
         g_input.clearEdges();   // edges já consumidas neste frame
     }
