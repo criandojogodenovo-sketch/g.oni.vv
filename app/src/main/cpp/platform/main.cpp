@@ -1,9 +1,10 @@
 // platform/main.cpp — android_main (glue) da G.One VV 0.1.0 — F1.
-// Passo 3 (platform): EGL→GLES3, clear cinza mono, AInputQueue→InputState.
-// O loop de timestep fixo entra no passo 4 (core); render/UI nos passos 5-6.
+// Passos: platform (3), loop de timestep fixo (4). Render/UI entram nos passos 5-6.
 #include <android_native_app_glue.h>
 #include <GLES3/gl3.h>
 
+#include "core/Scene.h"
+#include "core/Time.h"
 #include "platform/Log.h"
 #include "platform/EglContext.h"
 #include "platform/InputState.h"
@@ -14,7 +15,9 @@ namespace {
 
 EglContext g_egl;
 InputState g_input;
-bool g_ready = false;
+Scene      g_scene;
+Time       g_time;
+bool       g_ready = false;
 
 void onAppCmd(android_app* app, i32 cmd) {
     switch (cmd) {
@@ -49,8 +52,9 @@ i32 onInputEvent(android_app* /*app*/, AInputEvent* event) {
 void android_main(android_app* app) {
     app->onAppCmd = onAppCmd;
     app->onInputEvent = onInputEvent;
-    LOGI("G.One VV 0.1.0 — F1 (passo 3: platform)");
+    LOGI("G.One VV 0.1.0 — F1 (passo 4: core + timestep fixo)");
 
+    double last = nowSeconds();
     while (true) {
         int ident = 0, events = 0;
         android_poll_source* source = nullptr;
@@ -65,8 +69,21 @@ void android_main(android_app* app) {
             }
         }
         if (!g_ready) {
+            last = nowSeconds();
             continue;
         }
+
+        const double nowT = nowSeconds();
+        const double realDt = nowT - last;
+        last = nowT;
+
+        // Loop de timestep fixo (guard anti-spiral dentro de Time).
+        const u32 steps = g_time.beginFrame(realDt);
+        for (u32 s = 0; s < steps; ++s) {
+            // update fixo — F1: sem componentes/sistemas (apenas consome o passo)
+            g_time.endStep();
+        }
+
         glClearColor(0.0784314f, 0.0784314f, 0.0784314f, 1.0f);   // BG #141414
         glClear(GL_COLOR_BUFFER_BIT);
         g_egl.swap();

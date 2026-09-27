@@ -16,6 +16,12 @@ target_include_directories(native_app_glue PUBLIC
 # Fontes do goni_vv (passos incrementais da F1: platform → core → render → ui → diagnóstico).
 add_library(goni_vv SHARED
         core/Types.h
+        core/Handle.h
+        core/Tic.h
+        core/Scene.h
+        core/Scene.cpp
+        core/Time.h
+        core/Time.cpp
         platform/Log.h
         platform/EglContext.h
         platform/EglContext.cpp
