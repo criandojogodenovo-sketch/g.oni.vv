@@ -114,6 +114,10 @@ jobs:
             echo "::error::Informe 'store_pw' e 'key_pw' no workflow_dispatch (ou configure os secrets VV_STORE_PW/VV_KEY_PW)."
             exit 1
           fi
+          if [ "$PW_STORE" != "$PW_KEY" ]; then
+            echo "::error::PKCS12 exige store_pw == key_pw (keytool mapeia a senha da chave para a senha da keystore)."
+            exit 1
+          fi
           keytool -genkeypair -v -keystore vv-release.jks -storetype PKCS12 \
             -alias "$PW_ALIAS" -keyalg RSA -keysize 2048 -validity 10950 \
             -storepass "$PW_STORE" -keypass "$PW_KEY" \
