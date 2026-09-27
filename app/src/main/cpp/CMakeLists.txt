@@ -13,5 +13,21 @@ add_library(native_app_glue STATIC
 target_include_directories(native_app_glue PUBLIC
         ${ANDROID_NDK}/sources/android/native_app_glue)
 
-# Fontes do goni_vv entram incrementalmente nos passos 3..7 da F1
-# (um bloco por commit: platform, core, render, ui, diagnóstico).
+# Fontes do goni_vv (passos incrementais da F1: platform → core → render → ui → diagnóstico).
+add_library(goni_vv SHARED
+        core/Types.h
+        platform/Log.h
+        platform/EglContext.h
+        platform/EglContext.cpp
+        platform/InputState.h
+        platform/InputState.cpp
+        platform/main.cpp)
+
+target_include_directories(goni_vv PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(goni_vv
+        native_app_glue
+        android
+        EGL
+        GLESv3
+        log)
