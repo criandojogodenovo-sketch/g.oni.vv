@@ -22,6 +22,8 @@ add_library(goni_vv SHARED
         render/Mesh.cpp
         render/Material.h
         render/Material.cpp
+        render/Cube.h
+        render/Cube.cpp
         render/QuadBatch.h
         render/Renderer.h
         render/Renderer.cpp
