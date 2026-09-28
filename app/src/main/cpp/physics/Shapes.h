@@ -157,5 +157,45 @@ void segSegClosest(const Segment& s1, const Segment& s2, Vec3& c1, Vec3& c2);
 void segBoxClosest(const Segment& seg, const Vec3& c, const Vec3& h,
                    const Quat& rot, Vec3& outSeg, Vec3& outBox);
 
+// ---- sweep contínuo (F4-A.3) + CCD adaptativo ---------------------------------
+
+struct SweepResult {
+    bool hit = false;
+    f32  toi = 1.0f;        // fração do delta no primeiro contacto [0,1]
+    Vec3 normal{0.0f, 0.0f, 0.0f};   // normal de contacto (aponta contra o movimento)
+};
+
+// sweep(shapeA, delta, shapeB) → TOI + normal, para sphere e capsule contra
+// AABB/OBB (as duas famílias da spec). O núcleo (sweepSegBox) aceita um
+// segmento arbitrário — o PhysicsSystem passa a capsule já rotacionada.
+SweepResult sweep(const Sphere& a, const Vec3& delta, const AABB& b);
+SweepResult sweep(const Sphere& a, const Vec3& delta, const OBB& b);
+SweepResult sweep(const Capsule& a, const Vec3& delta, const AABB& b);
+SweepResult sweep(const Capsule& a, const Vec3& delta, const OBB& b);
+
+// CCD adaptativo: se |delta| > raio_eff (r da forma), divide o sweep em
+// ceil(|delta|/raio_eff) substeps (máx 8) — nunca tunela paredes finas.
+// Núcleo: avanço conservador dentro de cada substep (o passo (d−r)/|delta|
+// é seguro porque cada ponto do segmento anda exatamente |delta|).
+SweepResult sweepSegBox(const Segment& seg, f32 r, const Vec3& delta,
+                        const Vec3& c, const Vec3& h, const Quat& rot);
+
+// ---- depenetração (MTD — mínimo vetor de separação) ----------------------------
+// normal aponta de B para A (empurra A para fora de B). Usada pelo
+// PhysicsSystem em sobreposições discretas e pelo repel Character↔Character.
+struct Contact {
+    bool hit = false;
+    Vec3 normal{0.0f, 0.0f, 0.0f};
+    f32  depth = 0.0f;        // profundidade de penetração (hit=true)
+    f32  separation = 0.0f;   // distância entre superfícies (hit=false; 0 se tocando)
+};
+
+Contact depenetrate(const Sphere& a, const Sphere& b);
+Contact depenetrate(const Sphere& a, const AABB& b);
+Contact depenetrate(const Sphere& a, const OBB& b);
+Contact depenetrate(const Capsule& a, const Capsule& b);
+Contact depenetrate(const Capsule& a, const AABB& b);
+Contact depenetrate(const Capsule& a, const OBB& b);
+
 } // namespace phys
 } // namespace vv

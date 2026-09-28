@@ -191,5 +191,192 @@ bool intersects(const Capsule& a, const OBB& b) {
     return dot(d, d) <= a.radius * a.radius;
 }
 
+// ---- sweep + CCD (F4-A.3) ------------------------------------------------------
+
+namespace {
+
+// Contacto discreto segmento↔caixa: distância + par de pontos +, se o
+// segmento estiver DENTRO, normal de eixo menos penetrado (MTD aproximado).
+Contact segBoxContact(const Segment& seg, f32 r, const Vec3& c, const Vec3& h,
+                      const Quat& rot) {
+    Contact out;
+    const Quat inv{-rot.x, -rot.y, -rot.z, rot.w};
+    const Vec3 la = inv.rotate(seg.a - c);
+    const Vec3 lb = inv.rotate(seg.b - c);
+
+    // ponto do segmento mais raso em relação à caixa (ternária na SDF)
+    const Vec3 ab = lb - la;
+    f32 lo = 0.0f, hi = 1.0f;
+    for (int i = 0; i < 40; ++i) {
+        const f32 m1 = lo + (hi - lo) / 3.0f;
+        const f32 m2 = hi - (hi - lo) / 3.0f;
+        if (boxSDF(la + ab * m1, Vec3{0, 0, 0}, h) <
+            boxSDF(la + ab * m2, Vec3{0, 0, 0}, h)) {
+            hi = m2;
+        } else {
+            lo = m1;
+        }
+    }
+    const Vec3 pl = la + ab * ((lo + hi) * 0.5f);
+    const f32 sdf = boxSDF(pl, Vec3{0, 0, 0}, h);
+
+    if (sdf > 0.0f) {
+        // fora: par de pontos mais próximos, normal = segPt − boxPt
+        const Vec3 cl{pl.x < -h.x ? -h.x : (pl.x > h.x ? h.x : pl.x),
+                      pl.y < -h.y ? -h.y : (pl.y > h.y ? h.y : pl.y),
+                      pl.z < -h.z ? -h.z : (pl.z > h.z ? h.z : pl.z)};
+        const Vec3 segPt = rot.rotate(pl) + c;
+        const Vec3 boxPt = rot.rotate(cl) + c;
+        const Vec3 d = segPt - boxPt;
+        const f32 dist = length(d);
+        out.separation = dist;          // usado pelo avanço conservador
+        if (dist > r) {
+            return out;   // sem contacto (dist > raio)
+        }
+        out.hit = true;
+        out.depth = r - dist;
+        out.normal = dist > 1e-9f ? d * (1.0f / dist) : Vec3{0, 1, 0};
+        return out;
+    }
+
+    // dentro (ou na superfície): sai pelo eixo de MENOR penetração
+    const f32 qx = std::fabs(pl.x) - h.x;
+    const f32 qy = std::fabs(pl.y) - h.y;
+    const f32 qz = std::fabs(pl.z) - h.z;
+    f32 m = qx; i32 axis = 0;
+    if (qy > m) { m = qy; axis = 1; }
+    if (qz > m) { m = qz; axis = 2; }
+    const f32 sign = (axis == 0 ? pl.x : axis == 1 ? pl.y : pl.z) < 0.0f ? -1.0f : 1.0f;
+    Vec3 nl{0, 0, 0};
+    if (axis == 0) nl.x = sign;
+    if (axis == 1) nl.y = sign;
+    if (axis == 2) nl.z = sign;
+    out.hit = true;
+    out.separation = 0.0f;
+    out.normal = rot.rotate(nl);
+    out.depth = r - (-m);          // r + m (m < 0); clampado abaixo
+    if (out.depth < 1e-4f) out.depth = 1e-4f;
+    return out;
+}
+
+} // namespace
+
+Contact depenetrate(const Sphere& a, const Sphere& b) {
+    Contact out;
+    const Vec3 d = a.center - b.center;
+    const f32 dist = length(d);
+    const f32 rr = a.r + b.r;
+    if (dist > rr) { out.separation = dist - rr; return out; }
+    out.hit = true;
+    out.depth = rr - dist;
+    out.normal = dist > 1e-9f ? d * (1.0f / dist) : Vec3{0, 1, 0};
+    return out;
+}
+
+Contact depenetrate(const Sphere& a, const AABB& b) {
+    return segBoxContact(Segment{a.center, a.center}, a.r,
+                         aabbCenter(b), aabbExtent(b), Quat::identity());
+}
+
+Contact depenetrate(const Sphere& a, const OBB& b) {
+    return segBoxContact(Segment{a.center, a.center}, a.r,
+                         b.center, b.halfExtents, b.rot);
+}
+
+Contact depenetrate(const Capsule& a, const Capsule& b) {
+    Contact out;
+    Vec3 p1, p2;
+    segSegClosest(capsuleSegment(a), capsuleSegment(b), p1, p2);
+    const Vec3 d = p1 - p2;
+    const f32 dist = length(d);
+    const f32 rr = a.radius + b.radius;
+    if (dist > rr) { out.separation = dist - rr; return out; }
+    out.hit = true;
+    out.depth = rr - dist;
+    out.normal = dist > 1e-9f ? d * (1.0f / dist) : Vec3{0, 1, 0};
+    return out;
+}
+
+Contact depenetrate(const Capsule& a, const AABB& b) {
+    return segBoxContact(capsuleSegment(a), a.radius,
+                         aabbCenter(b), aabbExtent(b), Quat::identity());
+}
+
+Contact depenetrate(const Capsule& a, const OBB& b) {
+    return segBoxContact(capsuleSegment(a), a.radius,
+                         b.center, b.halfExtents, b.rot);
+}
+
+SweepResult sweepSegBox(const Segment& seg0, f32 r, const Vec3& delta,
+                        const Vec3& c, const Vec3& h, const Quat& rot) {
+    SweepResult out;
+    const f32 dLen = length(delta);
+    if (dLen < 1e-9f) {
+        const Contact ct = segBoxContact(seg0, r, c, h, rot);
+        if (ct.hit) {
+            out.hit = true;
+            out.toi = 0.0f;
+            out.normal = ct.normal;
+        }
+        return out;
+    }
+
+    // CCD adaptativo da spec: substeps de tamanho ≤ raio (máx 8)
+    const u32 n = static_cast<u32>(std::ceil(dLen / r));
+    const u32 sub = n < 1u ? 1u : (n > 8u ? 8u : n);
+
+    for (u32 k = 0; k < sub; ++k) {
+        const f32 t0 = static_cast<f32>(k) / static_cast<f32>(sub);
+        const f32 t1 = static_cast<f32>(k + 1) / static_cast<f32>(sub);
+        const Segment sk{seg0.a + delta * t0, seg0.b + delta * t0};
+
+        // discreto no início da janela (começou a sobrepor → contacto aqui)
+        const Contact start = segBoxContact(sk, r, c, h, rot);
+        if (start.hit) {
+            out.hit = true;
+            out.toi = t0;
+            out.normal = start.normal;
+            return out;
+        }
+
+        // contínuo na janela: avanço conservador — o passo (d−r)/|delta| é
+        // seguro porque cada ponto do segmento anda exatamente |delta| por
+        // unidade de t, logo a distância nunca diminui mais depressa
+        f32 t = t0;
+        for (int it = 0; it < 24 && t < t1; ++it) {
+            const Segment st{seg0.a + delta * t, seg0.b + delta * t};
+            const Contact ct = segBoxContact(st, r, c, h, rot);
+            if (ct.hit) {
+                out.hit = true;
+                out.toi = t;
+                out.normal = ct.normal;
+                return out;
+            }
+            t += (ct.separation - r) / dLen;
+        }
+    }
+    return out;   // sem contacto no delta todo
+}
+
+SweepResult sweep(const Sphere& a, const Vec3& delta, const AABB& b) {
+    return sweepSegBox(Segment{a.center, a.center}, a.r, delta,
+                       aabbCenter(b), aabbExtent(b), Quat::identity());
+}
+
+SweepResult sweep(const Sphere& a, const Vec3& delta, const OBB& b) {
+    return sweepSegBox(Segment{a.center, a.center}, a.r, delta,
+                       b.center, b.halfExtents, b.rot);
+}
+
+SweepResult sweep(const Capsule& a, const Vec3& delta, const AABB& b) {
+    return sweepSegBox(capsuleSegment(a), a.radius, delta,
+                       aabbCenter(b), aabbExtent(b), Quat::identity());
+}
+
+SweepResult sweep(const Capsule& a, const Vec3& delta, const OBB& b) {
+    return sweepSegBox(capsuleSegment(a), a.radius, delta,
+                       b.center, b.halfExtents, b.rot);
+}
+
 } // namespace phys
 } // namespace vv

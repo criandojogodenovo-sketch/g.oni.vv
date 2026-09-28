@@ -183,3 +183,120 @@ TEST(capsule_segment_e_sdf_helpers) {
     // ponto no mundo (3,0,0) → local (0,0,-3): distância à face z = 2
     EXPECT(nearEqF(pointObbSDF(rot, Vec3{3, 0, 0}), 2.0f));
 }
+
+// ---- sweep + CCD (F4-A.3) -----------------------------------------------------------------
+
+TEST(sweep_esfera_aabb_cara_toi_e_normal_analiticos) {
+    const Sphere s{Vec3{-5, 0, 0}, 0.5f};
+    const AABB box{Vec3{0, -1, -1}, Vec3{1, 1, 1}};
+    const SweepResult r = sweep(s, Vec3{5, 0, 0}, box);
+    EXPECT(r.hit);
+    EXPECT(nearEqF(r.toi, 0.9f, 1e-3f));       // contacto com centro em x=−0.5
+    EXPECT(vecNearF(r.normal, Vec3{-1, 0, 0}, 1e-3f));
+}
+
+TEST(sweep_esfera_passa_acima_sem_contacto) {
+    const Sphere s{Vec3{-5, 0, 0}, 0.5f};
+    const AABB box{Vec3{0, -1, -1}, Vec3{1, 1, 1}};
+    const SweepResult r = sweep(s, Vec3{5, 3, 0}, box);   // no ponto mais próximo y=2.7
+    EXPECT(!r.hit);
+    EXPECT(nearEqF(r.toi, 1.0f));
+}
+
+TEST(sweep_esfera_obb_face_rotacionada_45) {
+    OBB box;
+    box.halfExtents = Vec3{1, 1, 1};
+    box.rot = Quat::axisAngle(Vec3{0, 1, 0}, kPi * 0.25f);
+    // aproxima-se na direção da normal da face local −X:
+    // u = (cos45, 0, −sin45); contacto quando x' local = −(1+0.5) → toi 0.7
+    const Vec3 u{0.70710678f, 0.0f, -0.70710678f};
+    const Sphere s{u * (-5.0f), 0.5f};
+    const SweepResult r = sweep(s, u * 5.0f, box);
+    EXPECT(r.hit);
+    EXPECT(nearEqF(r.toi, 0.7f, 1e-3f));
+    EXPECT(vecNearF(r.normal, u * (-1.0f), 1e-3f));
+}
+
+TEST(sweep_capsule_aabb_pe_analitico) {
+    const Capsule c{Vec3{-3, 1, 0}, 0.3f, 0.5f};   // segmento y∈[0.5,1.5]
+    const AABB box{Vec3{0, -1, -1}, Vec3{1, 2, 1}};
+    const SweepResult r = sweep(c, Vec3{3, 0, 0}, box);
+    EXPECT(r.hit);
+    EXPECT(nearEqF(r.toi, 0.9f, 1e-3f));           // segmento para em x=−0.3
+    EXPECT(vecNearF(r.normal, Vec3{-1, 0, 0}, 1e-3f));
+}
+
+TEST(sweep_capsule_deitada_eixo_proprio) {
+    // capsule rodada 90° em Z: segmento ao longo de X, x∈[−3.5,−2.5], y=1
+    Capsule c;
+    c.center = Vec3{-3, 1, 0};
+    c.radius = 0.3f;
+    c.halfHeight = 0.5f;
+    // segmento manual (o sistema roda o eixo Y local pelo TIC):
+    Segment seg{Vec3{-3.5f, 1, 0}, Vec3{-2.5f, 1, 0}};
+    const AABB box{Vec3{0, 0, -1}, Vec3{1, 2, 1}};
+    const SweepResult r = sweepSegBox(seg, c.radius, Vec3{3, 0, 0},
+                                      aabbCenter(box), aabbExtent(box),
+                                      Quat::identity());
+    EXPECT(r.hit);
+    EXPECT(nearEqF(r.toi, 2.2f / 3.0f, 1e-3f));    // ponta chega a x=−0.3
+    EXPECT(vecNearF(r.normal, Vec3{-1, 0, 0}, 1e-3f));
+}
+
+TEST(ccd_nao_tunela_parede_fina_a_alta_velocidade) {
+    // parede com 0.1 de espessura; |delta| = 20 ≫ r = 0.2 (substeps = 8)
+    const Sphere s{Vec3{0, 0, -10}, 0.2f};
+    const AABB parede{Vec3{-2, -2, -0.05f}, Vec3{2, 2, 0.05f}};
+    const SweepResult r = sweep(s, Vec3{0, 0, 20}, parede);
+    EXPECT(r.hit);
+    EXPECT(nearEqF(r.toi, 9.75f / 20.0f, 1e-3f));  // centro para em z=−0.25 (face −0.05)
+    EXPECT(vecNearF(r.normal, Vec3{0, 0, -1}, 1e-3f));
+
+    // capsule a alta velocidade contra a mesma parede
+    const Capsule c{Vec3{0, 1, -10}, 0.3f, 0.5f};
+    const SweepResult r2 = sweep(c, Vec3{0, 0, 20}, parede);
+    EXPECT(r2.hit);
+    EXPECT(nearEqF(r2.toi, (10.0f - 0.3f - 0.05f) / 20.0f, 5e-3f));
+    EXPECT(vecNearF(r2.normal, Vec3{0, 0, -1}, 1e-3f));
+}
+
+TEST(ccd_move_afasta_sem_contacto_e_parte_de_dentro) {
+    const Sphere s{Vec3{5, 0, 0}, 0.5f};
+    const AABB box{Vec3{0, -1, -1}, Vec3{1, 1, 1}};
+    EXPECT(!sweep(s, Vec3{5, 0, 0}, box).hit);     // afasta-se
+
+    // começa dentro → TOI 0 e normal de saída (+x: face mais próxima)
+    const Sphere dentro{Vec3{0.9f, 0, 0}, 0.5f};
+    const SweepResult r = sweep(dentro, Vec3{0.1f, 0, 0}, box);
+    EXPECT(r.hit && nearEqF(r.toi, 0.0f));
+    EXPECT(r.normal.x > 0.9f);
+}
+
+TEST(depenetracao_esferas_e_capsules_mtd_exatos) {
+    const Contact cs = depenetrate(Sphere{Vec3{0, 0, 0}, 0.5f},
+                                   Sphere{Vec3{0.8f, 0, 0}, 0.5f});
+    EXPECT(cs.hit);
+    EXPECT(nearEqF(cs.depth, 0.2f, 1e-4f));
+    EXPECT(vecNearF(cs.normal, Vec3{-1, 0, 0}, 1e-4f));  // afasta A de B (A está à esquerda)
+
+    const Contact cp = depenetrate(Capsule{Vec3{0, 0, 0}, 0.3f, 0.5f},
+                                   Capsule{Vec3{0.5f, 0, 0}, 0.3f, 0.5f});
+    EXPECT(cp.hit);
+    EXPECT(nearEqF(cp.depth, 0.1f, 1e-4f));              // 0.6 − 0.5
+    EXPECT(vecNearF(cp.normal, Vec3{-1, 0, 0}, 1e-4f));
+
+    const Contact longe = depenetrate(Sphere{Vec3{0, 0, 0}, 0.5f},
+                                      Sphere{Vec3{5, 0, 0}, 0.5f});
+    EXPECT(!longe.hit);
+}
+
+TEST(depenetracao_capsule_no_chao_normal_para_cima) {
+    const AABB chao{Vec3{-10, -1, -10}, Vec3{10, 0, 10}};
+    // base da esfera em y = 0.25−(0.5+0.3) = −0.55 → 0.55 de penetração? não:
+    // segmento base y = −0.25; distância ao topo do chão (y=0) = 0.25 < r →
+    // depth = r − 0.25 = 0.05
+    const Contact c = depenetrate(Capsule{Vec3{0, 0.25f, 0}, 0.3f, 0.5f}, chao);
+    EXPECT(c.hit);
+    EXPECT(nearEqF(c.depth, 0.05f, 1e-3f));
+    EXPECT(vecNearF(c.normal, Vec3{0, 1, 0}, 1e-3f));
+}
