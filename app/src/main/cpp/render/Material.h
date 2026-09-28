@@ -24,4 +24,9 @@ private:
     i32 locModel_ = -1;
 };
 
+// F3: alias pedido pela spec — MeshRenderer guarda `Material*`. A F3 tem um
+// único material (o lit da F2, intacto); quando surgir o segundo material
+// (fase de luzes), Material vira base comum e o alias é removido.
+using Material = LitMaterial;
+
 } // namespace vv

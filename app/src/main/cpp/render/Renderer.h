@@ -33,6 +33,9 @@ public:
     i32 width() const { return w_; }
     i32 height() const { return h_; }
 
+    // F3: material lit partilhado — presets/serializer ligam MeshRenderer.material aqui.
+    LitMaterial* litMaterial() { return &lit_; }
+
 private:
     // UI (F1)
     u32 prog_ = 0;

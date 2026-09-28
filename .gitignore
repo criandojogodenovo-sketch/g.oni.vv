@@ -15,8 +15,9 @@ local.properties
 *.iml
 .vscode/
 
-# Builds de teste locais
+# Builds locais (testes Linux + lib via toolchain NDK)
 build-tests/
+build-android/
 
 # Logs locais
 *.log

@@ -1,8 +1,10 @@
 #pragma once
-// math/Math.h — álgebra linear mínima do engine (F2).
+// math/Math.h — álgebra linear mínima do engine (F2/F3).
 // Column-major (layout compatível com glUniformMatrix4fv sem transpose),
 // ângulos em radianos internamente, sistema right-handed, clip space -1..1.
 // F1 mantém Mat4::ortho (UI). F2 acrescenta Vec3 e o pipeline 3D (perspective/lookAt).
+// F3 acrescenta Quat (rotação de Transform3D) — toMat4() reproduz EXATAMENTE
+// as convenções de Mat4::rotX/rotY/rotZ (validado pelos testes do CI Linux).
 #include <cmath>
 #include "core/Types.h"
 
@@ -164,6 +166,95 @@ struct Mat4 {
         r.m[12] = -(right + left) / rl;
         r.m[13] = -(top + bottom) / tb;
         r.m[14] = -(zFar + zNear) / fn;
+        r.m[15] = 1.0f;
+        return r;
+    }
+};
+
+// Quat — rotação unitária (x, y, z, w). Base da rotação de Transform3D (F3).
+// Convenções: right-handed, eixos Y-up, mesmas direções de Mat4::rotX/Y/Z.
+// Euler usa a ordem YXZ (yaw→pitch→roll, padrão Y-up): roll aplica primeiro,
+// depois pitch, depois yaw — fromEuler/toEuler são inversos fora do polo
+// (pitch ±90°), onde roll colapsa para 0 (gimbal, documentado).
+struct Quat {
+    f32 x = 0.0f;
+    f32 y = 0.0f;
+    f32 z = 0.0f;
+    f32 w = 1.0f;
+
+    static constexpr Quat identity() { return Quat{0.0f, 0.0f, 0.0f, 1.0f}; }
+
+    // Rotação de `radians` em torno de `axis` (eixo é normalizado internamente).
+    static Quat axisAngle(const Vec3& axis, f32 radians) {
+        const Vec3 a = normalized(axis);
+        const f32  h = radians * 0.5f;
+        const f32  s = std::sin(h);
+        return Quat{a.x * s, a.y * s, a.z * s, std::cos(h)};
+    }
+
+    // Euler YXZ em radianos: q = qy(yaw) * qx(pitch) * qz(roll).
+    static Quat fromEuler(f32 pitchX, f32 yawY, f32 rollZ) {
+        return axisAngle(Vec3{0.0f, 1.0f, 0.0f}, yawY) *
+               axisAngle(Vec3{1.0f, 0.0f, 0.0f}, pitchX) *
+               axisAngle(Vec3{0.0f, 0.0f, 1.0f}, rollZ);
+    }
+
+    // Extrai o euler YXZ de volta (radianos). No polo (pitch ±90°) roll sai 0.
+    static void toEuler(const Quat& q, f32& pitchX, f32& yawY, f32& rollZ) {
+        const Mat4 m = q.toMat4();
+        const f32  sp = -m.m[9];                     // sin(pitch) = -R[1][2]
+        if (sp < 0.99995f && sp > -0.99995f) {
+            pitchX = std::asin(sp);
+            yawY   = std::atan2(m.m[8], m.m[10]);    // R[0][2], R[2][2]
+            rollZ  = std::atan2(m.m[1], m.m[5]);     // R[1][0], R[1][1]
+        } else {
+            pitchX = sp > 0.0f ? 1.5707963f : -1.5707963f;
+            rollZ  = 0.0f;
+            yawY   = std::atan2(-m.m[1], m.m[0]);    // polo: yaw-roll resolvível
+        }
+    }
+
+    constexpr Quat operator*(const Quat& o) const {
+        return Quat{w * o.x + x * o.w + y * o.z - z * o.y,
+                    w * o.y - x * o.z + y * o.w + z * o.x,
+                    w * o.z + x * o.y - y * o.x + z * o.w,
+                    w * o.w - x * o.x - y * o.y - z * o.z};
+    }
+
+    f32  norm() const { return std::sqrt(x * x + y * y + z * z + w * w); }
+    void normalize() {
+        const f32 n = norm();
+        if (n > 1e-8f) {
+            x /= n; y /= n; z /= n; w /= n;
+        }
+    }
+
+    // Roda v por q (q unitário): v' = v + 2w(qv×v) + 2 qv×(qv×v).
+    Vec3 rotate(const Vec3& v) const {
+        const Vec3 qv{x, y, z};
+        const Vec3 t  = cross(qv, v);
+        const Vec3 tt = cross(qv, t);
+        return Vec3{v.x + 2.0f * (w * t.x + tt.x),
+                    v.y + 2.0f * (w * t.y + tt.y),
+                    v.z + 2.0f * (w * t.z + tt.z)};
+    }
+
+    // Matriz de rotação column-major — igual a Mat4::rotX/Y/Z para os mesmos ângulos.
+    Mat4 toMat4() const {
+        const f32 xx = x + x, yy = y + y, zz = z + z;
+        const f32 xy = x * yy, xz = x * zz, yz = y * zz;
+        const f32 wx = w * xx, wy = w * yy, wz = w * zz;
+        const f32 xx2 = x * xx, yy2 = y * yy, zz2 = z * zz;
+        Mat4 r{};
+        r.m[0]  = 1.0f - (yy2 + zz2);
+        r.m[4]  = xy - wz;
+        r.m[8]  = xz + wy;
+        r.m[1]  = xy + wz;
+        r.m[5]  = 1.0f - (xx2 + zz2);
+        r.m[9]  = yz - wx;
+        r.m[2]  = xz - wy;
+        r.m[6]  = yz + wx;
+        r.m[10] = 1.0f - (xx2 + yy2);
         r.m[15] = 1.0f;
         return r;
     }

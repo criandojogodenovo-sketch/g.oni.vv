@@ -1,4 +1,4 @@
-# app/src/main/cpp/CMakeLists.txt — G.One VV 0.1.0 (F1)
+# app/src/main/cpp/CMakeLists.txt — G.One VV (F1→F3)
 # Core C++17 + NativeActivity (native_app_glue do NDK).
 cmake_minimum_required(VERSION 3.22.1)
 project(goni_vv LANGUAGES C CXX)
@@ -7,15 +7,24 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Fontes do goni_vv (passos incrementais da F1: platform → core → render → ui → diagnóstico).
+# Fontes do goni_vv (F3: componentes + registry/store; presets/serializer/ui entram nos próximos passos).
 add_library(goni_vv SHARED
         core/Types.h
         core/Handle.h
         core/Tic.h
+        core/Component.h
+        core/ComponentStorage.h
+        core/ComponentRegistry.h
+        core/ComponentRegistry.cpp
+        core/ComponentStore.h
+        core/ComponentStore.cpp
         core/Scene.h
         core/Scene.cpp
         core/Time.h
         core/Time.cpp
+        components/Transform3D.h
+        components/MeshRenderer.h
+        components/InputMap.h
         math/Math.h
         render/Vertex.h
         render/Mesh.h
