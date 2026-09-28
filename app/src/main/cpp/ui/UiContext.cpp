@@ -93,6 +93,47 @@ bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
     return pressed;
 }
 
+bool UiContext::slider(u64 id, f32 x, f32 y, f32 w, f32 h, f32 minV, f32 maxV, f32& value) {
+    const bool down = input_ && input_->down(0);
+    f32 px = -1.0f, py = -1.0f;
+    if (input_) {
+        input_->pos(0, px, py);
+    }
+    const bool inside = (px >= x && px < x + w && py >= y && py < y + h);
+
+    if (down && inside && active_ == 0) {
+        active_ = id;
+    }
+    bool changed = false;
+    if (active_ == id && down) {
+        // dedo capturado: segue horizontalmente (mesmo fora do track — gesto contínuo)
+        const f32 t = (px - x) / (w > 1.0f ? w : 1.0f);
+        const f32 nv = minV + (maxV - minV) * (t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t));
+        if (nv != value) {
+            value = nv;
+            changed = true;
+        }
+    }
+    if (active_ == id && !down) {
+        active_ = 0;
+    }
+
+    // trilho + preenchimento + thumb (tema mono, sem cores novas)
+    const f32 cy = y + h * 0.5f - 2.0f;
+    panel(x, cy, w, 4.0f, theme::LINE);
+    const f32 t = (maxV > minV) ? (value - minV) / (maxV - minV) : 0.0f;
+    const f32 fillW = w * (t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t));
+    if (fillW > 0.0f) {
+        panel(x, cy, fillW, 4.0f, theme::TEXT);
+    }
+    const f32 thumbW = 10.0f;
+    const f32 thumbX = x + fillW - thumbW * 0.5f;
+    const f32 ty     = y + h * 0.5f - 12.0f;
+    panel(thumbX < x ? x : (thumbX > x + w - thumbW ? x + w - thumbW : thumbX), ty,
+          thumbW, 24.0f, theme::ACCENT);
+    return changed;
+}
+
 void UiContext::toolbar(bool outClicks[3]) {
     static const char* kNames[3] = { "Menu", "Play", "Settings" };
 

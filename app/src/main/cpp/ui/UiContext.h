@@ -36,6 +36,18 @@ public:
     void label(f32 xBaseline, f32 yBaseline, const char* text, const f32 color[4]);
     bool button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text);
 
+    // F3: slider horizontal immediate-mode (Inspector do Transform3D).
+    // Escreve em `value` (clamp [minV,maxV]); devolve true se mudou este frame.
+    // Partilha o mesmo active_ dos botões — um widget interativo por gesto.
+    bool slider(u64 id, f32 x, f32 y, f32 w, f32 h, f32 minV, f32 maxV, f32& value);
+
+    // F3: accessors usados pelos painéis do editor (EditorUi).
+    bool hasFont() const { return font_ && font_->ok(); }
+    f32  fontWidth(const char* text) const { return font_ ? font_->widthOf(text) : 0.0f; }
+    f32  fontHeight() const { return font_ ? font_->height() : 0.0f; }
+    f32  screenWidth() const { return sw_; }
+    f32  screenHeight() const { return sh_; }
+
     // layout landscape F1
     void toolbar(bool outClicks[3]);   // exatamente 3 botões: Menu, Play, Settings
     void statusLine(const char* text); // fps + contagem de TICs

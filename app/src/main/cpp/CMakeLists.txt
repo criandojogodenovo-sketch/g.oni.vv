@@ -47,6 +47,8 @@ add_library(goni_vv SHARED
         ui/FontAtlas.cpp
         ui/UiContext.h
         ui/UiContext.cpp
+        ui/EditorUi.h
+        ui/EditorUi.cpp
         ui/stb/stb_truetype.h
         platform/Log.h
         platform/CrashHandler.h
