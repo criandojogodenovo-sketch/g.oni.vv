@@ -21,6 +21,7 @@ bool EglContext::init(ANativeWindow* window) {
         EGL_GREEN_SIZE, 8,
         EGL_BLUE_SIZE, 8,
         EGL_ALPHA_SIZE, 8,
+        EGL_DEPTH_SIZE, 24,   // F2: depth buffer para o depth test do pass 3D
         EGL_NONE
     };
     EGLConfig config = nullptr;

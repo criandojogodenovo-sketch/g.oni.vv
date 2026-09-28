@@ -17,6 +17,11 @@ add_library(goni_vv SHARED
         core/Time.h
         core/Time.cpp
         math/Math.h
+        render/Vertex.h
+        render/Mesh.h
+        render/Mesh.cpp
+        render/Material.h
+        render/Material.cpp
         render/QuadBatch.h
         render/Renderer.h
         render/Renderer.cpp
