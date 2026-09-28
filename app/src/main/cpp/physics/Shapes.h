@@ -137,5 +137,25 @@ inline Vec3 closestPointOnSegment(const Vec3& a, const Vec3& b, const Vec3& p) {
     return a + ab * tc;
 }
 
+// ---- interseções puras (F4-A.2 — bool, sem alocação, determinísticas) --------
+bool intersects(const Sphere& a, const Sphere& b);
+bool intersects(const Sphere& a, const AABB& b);
+bool intersects(const Sphere& a, const OBB& b);
+bool intersects(const Sphere& a, const Capsule& b);
+bool intersects(const AABB& a, const AABB& b);
+bool intersects(const OBB& a, const OBB& b);       // SAT 15 eixos (6 face + 9 aresta)
+bool intersects(const Capsule& a, const Capsule& b);
+bool intersects(const Capsule& a, const AABB& b);  // base da depenetração do sistema
+bool intersects(const Capsule& a, const OBB& b);
+
+// Pontos mais próximos entre dois segmentos (clampados) — base de Capsule/Capsule.
+void segSegClosest(const Segment& s1, const Segment& s2, Vec3& c1, Vec3& c2);
+
+// Pontos mais próximos entre segmento e caixa (OBB generalizada; AABB = rot
+// identidade). Busca ternária — a distância a um conjunto convexo ao longo de
+// um segmento é convexa, logo o mínimo é único.
+void segBoxClosest(const Segment& seg, const Vec3& c, const Vec3& h,
+                   const Quat& rot, Vec3& outSeg, Vec3& outBox);
+
 } // namespace phys
 } // namespace vv

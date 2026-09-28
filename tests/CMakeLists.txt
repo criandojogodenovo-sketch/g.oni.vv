@@ -15,6 +15,7 @@ add_executable(test_core
         test_math.cpp
         test_cube.cpp
         test_camera.cpp
+        test_shapes.cpp
         test_grid.cpp
         test_components.cpp
         test_transform.cpp
@@ -30,7 +31,9 @@ add_executable(test_core
         ${CORE_DIR}/core/TransformSystem.cpp
         # GL-free (cubo e câmara são lógica pura — sem contexto OpenGL)
         ${CORE_DIR}/render/Cube.cpp
-        ${CORE_DIR}/render/Camera.cpp)
+        ${CORE_DIR}/render/Camera.cpp
+        # F4: física pura (sem GL)
+        ${CORE_DIR}/physics/Shapes.cpp)
 
 target_include_directories(test_core PRIVATE ${CORE_DIR})
 
