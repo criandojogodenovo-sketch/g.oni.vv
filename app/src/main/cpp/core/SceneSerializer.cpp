@@ -1,10 +1,13 @@
 #include "core/SceneSerializer.h"
+#include "components/BodyComp.h"
 #include "components/InputMap.h"
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
 #include "core/ComponentStore.h"
 #include "core/Scene.h"
 #include <cstdio>
+#include <cstring>
+#include <variant>
 #include <vector>
 
 namespace vv {
@@ -65,6 +68,95 @@ void appendComponentJson(Json& arr, const InputMap* im) {
     Json c = Json::makeObject();
     c.addMember("type", Json::makeString("InputMap"));
     arr.addItem(std::move(c));
+}
+
+// F4: BodyComp — tipo do corpo + parâmetros LOCAIS da forma. velocity e
+// grounded são runtime (não persistidos: corpo novo nasce em repouso).
+void appendComponentJson(Json& arr, const BodyComp* b) {
+    if (!b) {
+        return;
+    }
+    Json c = Json::makeObject();
+    c.addMember("type", Json::makeString("BodyComp"));
+    c.addMember("body", Json::makeString(BodyComp::typeName(b->type)));
+    c.addMember("shape", Json::makeString(BodyComp::shapeName(b->shape)));
+    if (const phys::Sphere* sp = std::get_if<phys::Sphere>(&b->shape)) {
+        c.addMember("r", Json::makeNumber(sp->r));
+        c.addMember("center", vec3ToJson(sp->center));
+    } else if (const phys::AABB* bx = std::get_if<phys::AABB>(&b->shape)) {
+        c.addMember("min", vec3ToJson(bx->min));
+        c.addMember("max", vec3ToJson(bx->max));
+    } else if (const phys::OBB* ob = std::get_if<phys::OBB>(&b->shape)) {
+        Json he = Json::makeArray();
+        he.addItem(Json::makeNumber(ob->halfExtents.x));
+        he.addItem(Json::makeNumber(ob->halfExtents.y));
+        he.addItem(Json::makeNumber(ob->halfExtents.z));
+        c.addMember("he", std::move(he));
+        Json q = Json::makeArray();
+        q.addItem(Json::makeNumber(ob->rot.x));
+        q.addItem(Json::makeNumber(ob->rot.y));
+        q.addItem(Json::makeNumber(ob->rot.z));
+        q.addItem(Json::makeNumber(ob->rot.w));
+        c.addMember("rot", std::move(q));
+    } else if (const phys::Capsule* cp = std::get_if<phys::Capsule>(&b->shape)) {
+        c.addMember("r", Json::makeNumber(cp->radius));
+        c.addMember("hh", Json::makeNumber(cp->halfHeight));
+        c.addMember("center", vec3ToJson(cp->center));
+    }
+    arr.addItem(std::move(c));
+}
+
+void fillBodyComp(BodyComp* b, const Json& comp) {
+    if (!b) {
+        return;
+    }
+    if (const Json* j = comp.find("body"); j && j->type == Json::Type::String) {
+        if (j->string == "character") b->type = BodyType::Character;
+        else if (j->string == "rigid") b->type = BodyType::Rigid;
+        else b->type = BodyType::Static;
+    }
+    const Json* js = comp.find("shape");
+    const char* shape = (js && js->type == Json::Type::String) ? js->string.c_str() : "";
+    if (std::strcmp(shape, "sphere") == 0) {
+        phys::Sphere sp{};
+        if (const Json* j = comp.find("r"); j && j->type == Json::Type::Number) {
+            sp.r = static_cast<f32>(j->number);
+        }
+        readVec3(comp.find("center"), sp.center);
+        b->shape = sp;
+    } else if (std::strcmp(shape, "aabb") == 0) {
+        phys::AABB bx{};
+        readVec3(comp.find("min"), bx.min);
+        readVec3(comp.find("max"), bx.max);
+        b->shape = bx;
+    } else if (std::strcmp(shape, "obb") == 0) {
+        phys::OBB ob{};
+        if (const Json* j = comp.find("he");
+            j && j->type == Json::Type::Array && j->items.size() == 3) {
+            ob.halfExtents = Vec3{static_cast<f32>(j->items[0].number),
+                                  static_cast<f32>(j->items[1].number),
+                                  static_cast<f32>(j->items[2].number)};
+        }
+        if (const Json* j = comp.find("rot");
+            j && j->type == Json::Type::Array && j->items.size() == 4) {
+            ob.rot = Quat{static_cast<f32>(j->items[0].number),
+                          static_cast<f32>(j->items[1].number),
+                          static_cast<f32>(j->items[2].number),
+                          static_cast<f32>(j->items[3].number)};
+        }
+        b->shape = ob;
+    } else if (std::strcmp(shape, "capsule") == 0) {
+        phys::Capsule cp{};
+        if (const Json* j = comp.find("r"); j && j->type == Json::Type::Number) {
+            cp.radius = static_cast<f32>(j->number);
+        }
+        if (const Json* j = comp.find("hh"); j && j->type == Json::Type::Number) {
+            cp.halfHeight = static_cast<f32>(j->number);
+        }
+        readVec3(comp.find("center"), cp.center);
+        b->shape = cp;
+    }
+    // shape ausente/desconhecida → default do componente (capsule)
 }
 
 void fillTransform3D(Transform3D* tr, const Json& comp) {
@@ -147,6 +239,7 @@ bool save(const Scene& scene, const char* path) {
         appendComponentJson(comps, cs.transforms().find(t.handle));
         appendComponentJson(comps, cs.meshRenderers().find(t.handle));
         appendComponentJson(comps, cs.inputMaps().find(t.handle));
+        appendComponentJson(comps, cs.bodies().find(t.handle));
         jt.addMember("components", std::move(comps));
 
         tics.addItem(std::move(jt));
@@ -241,8 +334,10 @@ bool load(Scene& scene, const char* path, const LoadCtx& ctx) {
                 fillTransform3D(store.get<Transform3D>(h), jc);
             } else if (jt2->string == "MeshRenderer") {
                 fillMeshRenderer(store.get<MeshRenderer>(h), jc, ctx);
+            } else if (jt2->string == "BodyComp") {
+                fillBodyComp(store.get<BodyComp>(h), jc);
             }
-            // InputMap: sem dados na F3 — presença basta
+            // InputMap: sem dados — presença basta
         }
     }
     return true;

@@ -18,6 +18,10 @@ public:
 
     Mat4 world = Mat4::identity();   // cache do TRS — mantida por TransformSystem
 
+    // F4: marcada true quando o cache fica obsoleto (a física move pos entre
+    // passos). updateWorld() e o TransformSystem limpam-na ao refrescar.
+    bool worldDirty = false;
+
     // TRS: v' = T·R·S·v (escala primeiro, depois rotação, depois translação).
     Mat4 computeMatrix() const {
         const Mat4 rs = Mat4::mul(rot.toMat4(),
@@ -26,7 +30,10 @@ public:
     }
 
     // Recalcula e guarda o cache (usado por TransformSystem e pelo Inspector).
-    void updateWorld() { world = computeMatrix(); }
+    void updateWorld() {
+        world = computeMatrix();
+        worldDirty = false;
+    }
 };
 
 } // namespace vv

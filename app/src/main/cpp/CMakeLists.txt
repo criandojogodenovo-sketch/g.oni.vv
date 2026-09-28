@@ -32,6 +32,7 @@ add_library(goni_vv SHARED
         core/Time.cpp
         components/Transform3D.h
         components/MeshRenderer.h
+        components/BodyComp.h
         components/InputMap.h
         physics/Shapes.h
         math/Math.h

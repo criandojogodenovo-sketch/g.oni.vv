@@ -78,10 +78,11 @@ TEST(registry_registo_find_factory) {
     const Handle h = s.create("tic");
 
     // ordem de registo fixa (contrato do ctor)
-    EXPECT(store.registry().count() == 3u);
+    EXPECT(store.registry().count() == 4u);
     EXPECT(store.registry().find("Transform3D") == 0);
     EXPECT(store.registry().find("MeshRenderer") == 1);
     EXPECT(store.registry().find("InputMap") == 2);
+    EXPECT(store.registry().find("BodyComp") == 3);
     EXPECT(store.registry().find("Desconhecido") == -1);
 
     // factory por id e por nome
@@ -138,7 +139,7 @@ TEST(store_sem_dono_recusa_add) {
     ComponentStore store(nullptr);   // situação só de teste — fora da Scene
     EXPECT(!store.hasAny(Handle::invalid()));
     // add sem Scene não pode crashar: devolve nullptr
-    EXPECT(store.registry().count() == 3u);   // registry vive mesmo sem dono
+    EXPECT(store.registry().count() == 4u);   // registry vive mesmo sem dono
 }
 
 TEST(tic_api_add_get_remove_componente) {

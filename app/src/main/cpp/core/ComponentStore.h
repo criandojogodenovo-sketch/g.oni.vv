@@ -17,6 +17,7 @@
 #include "core/Component.h"
 #include "core/ComponentRegistry.h"
 #include "core/ComponentStorage.h"
+#include "components/BodyComp.h"
 #include "components/InputMap.h"
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
@@ -88,9 +89,11 @@ public:
     ComponentStorage<Transform3D>&  transforms()      { return transforms_; }
     ComponentStorage<MeshRenderer>& meshRenderers()   { return meshRenderers_; }
     ComponentStorage<InputMap>&     inputMaps()       { return inputMaps_; }
+    ComponentStorage<BodyComp>&     bodies()          { return bodies_; }
     const ComponentStorage<Transform3D>&  transforms() const      { return transforms_; }
     const ComponentStorage<MeshRenderer>& meshRenderers() const   { return meshRenderers_; }
     const ComponentStorage<InputMap>&     inputMaps() const       { return inputMaps_; }
+    const ComponentStorage<BodyComp>&     bodies() const          { return bodies_; }
 
     const ComponentRegistry& registry() const { return registry_; }
 
@@ -104,6 +107,7 @@ private:
     ComponentStorage<Transform3D>   transforms_;
     ComponentStorage<MeshRenderer>  meshRenderers_;
     ComponentStorage<InputMap>      inputMaps_;
+    ComponentStorage<BodyComp>      bodies_;
     ComponentRegistry               registry_;
 };
 
@@ -131,6 +135,14 @@ inline const ComponentStorage<MeshRenderer>& ComponentStore::storageOf<MeshRende
 template <>
 inline const ComponentStorage<InputMap>& ComponentStore::storageOf<InputMap>() const {
     return inputMaps_;
+}
+template <>
+inline ComponentStorage<BodyComp>& ComponentStore::storageOf<BodyComp>() {
+    return bodies_;
+}
+template <>
+inline const ComponentStorage<BodyComp>& ComponentStore::storageOf<BodyComp>() const {
+    return bodies_;
 }
 
 } // namespace vv

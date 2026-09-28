@@ -16,6 +16,7 @@ add_executable(test_core
         test_cube.cpp
         test_camera.cpp
         test_shapes.cpp
+        test_physics.cpp
         test_grid.cpp
         test_components.cpp
         test_transform.cpp
@@ -33,7 +34,9 @@ add_executable(test_core
         ${CORE_DIR}/render/Cube.cpp
         ${CORE_DIR}/render/Camera.cpp
         # F4: física pura (sem GL)
-        ${CORE_DIR}/physics/Shapes.cpp)
+        ${CORE_DIR}/physics/Shapes.cpp
+        ${CORE_DIR}/core/TransformSystem.cpp)
+
 
 target_include_directories(test_core PRIVATE ${CORE_DIR})
 
