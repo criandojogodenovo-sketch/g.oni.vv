@@ -18,6 +18,8 @@ add_library(goni_vv SHARED
         core/ComponentRegistry.cpp
         core/ComponentStore.h
         core/ComponentStore.cpp
+        core/Presets.h
+        core/Presets.cpp
         core/Scene.h
         core/Scene.cpp
         core/Time.h
