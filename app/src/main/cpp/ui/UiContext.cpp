@@ -24,11 +24,30 @@ void UiContext::beginFrame(Renderer* renderer, const InputState* input,
     sh_ = screenH;
     solids_.clear();
     glyphs_.clear();
+
+    // F4.1: estado de scroll POR FRAME (os slots com offset persistem)
+    scrollCur_    = kNoScroll;
+    inScroll_     = false;
+    scrollPending_ = false;
+    pendingId_    = 0;
+    tapValid_     = false;
+    clip_         = {0.0f, 0.0f, 1e9f, 1e9f};
+}
+
+// ---- emissão com clip (F4.1) -----------------------------------------------
+bool UiContext::emitTo(QuadBatch& b, f32 x, f32 y, f32 w, f32 h,
+                       f32 u0, f32 v0, f32 u1, f32 v1, const f32 color[4]) {
+    scroll::Clipped cl;
+    if (!scroll::clipQuad(x, y, w, h, u0, v0, u1, v1, clip_, cl)) {
+        return false;
+    }
+    b.quad(cl.x, cl.y, cl.w, cl.h, cl.u0, cl.v0, cl.u1, cl.v1,
+           color[0], color[1], color[2], color[3]);
+    return true;
 }
 
 void UiContext::panel(f32 x, f32 y, f32 w, f32 h, const f32 color[4]) {
-    solids_.quad(x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f,
-                 color[0], color[1], color[2], color[3]);
+    emitTo(solids_, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, color);
 }
 
 void UiContext::frame(f32 x, f32 y, f32 w, f32 h, f32 t, const f32 color[4]) {
@@ -51,9 +70,8 @@ void UiContext::label(f32 xBaseline, f32 yBaseline, const char* text, const f32 
             continue;
         }
         const Glyph& g = font_->glyph(c);
-        glyphs_.quad(penX + g.xoff, yBaseline + g.yoff, g.w, g.h,
-                     g.u0, g.v0, g.u1, g.v1,
-                     color[0], color[1], color[2], color[3]);
+        emitTo(glyphs_, penX + g.xoff, yBaseline + g.yoff, g.w, g.h,
+               g.u0, g.v0, g.u1, g.v1, color);
         penX += g.xadv;
     }
 }
@@ -68,7 +86,9 @@ bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
     }
     const bool inside = (px >= x && px < x + w && py >= y && py < y + h);
 
-    if (down && inside && active_ == 0) {
+    // F4.1: dentro de região de scroll o botão só DESENHA — o scroll reclama
+    // o gesto e o painel re-despacha o tap (scroll::buttonCaptures).
+    if (down && inside && active_ == 0 && scroll::buttonCaptures(inScroll_)) {
         active_ = id;
     }
     if (active_ == id && !down) {
@@ -101,7 +121,10 @@ bool UiContext::slider(u64 id, f32 x, f32 y, f32 w, f32 h, f32 minV, f32 maxV, f
     }
     const bool inside = (px >= x && px < x + w && py >= y && py < y + h);
 
-    if (down && inside && active_ == 0) {
+    // F4.1: slider mantém a prioridade de captura DENTRO da região de scroll
+    // (regra da spec: drag horizontal num slider = slider). Ao reclamar,
+    // cancela o claim pendente do scroll (endScroll vê active_ != 0).
+    if (down && inside && active_ == 0 && scroll::sliderCaptures(inScroll_)) {
         active_ = id;
     }
     bool changed = false;
@@ -132,6 +155,125 @@ bool UiContext::slider(u64 id, f32 x, f32 y, f32 w, f32 h, f32 minV, f32 maxV, f
     panel(thumbX < x ? x : (thumbX > x + w - thumbW ? x + w - thumbW : thumbX), ty,
           thumbW, 24.0f, theme::ACCENT);
     return changed;
+}
+
+// ---- scroll (F4.1) ----------------------------------------------------------
+void UiContext::beginScroll(u64 id, const UiRect& region, f32 contentHeight) {
+    // slot por id (procura; senão primeiro livre)
+    i32 slot = kNoScroll;
+    for (u32 i = 0; i < kMaxScrollSlots; ++i) {
+        if (scrollSlots_[i].used && scrollSlots_[i].id == id) {
+            slot = static_cast<i32>(i);
+            break;
+        }
+    }
+    if (slot == kNoScroll) {
+        for (u32 i = 0; i < kMaxScrollSlots; ++i) {
+            if (!scrollSlots_[i].used) {
+                scrollSlots_[i].used = true;
+                scrollSlots_[i].id = id;
+                slot = static_cast<i32>(i);
+                break;
+            }
+        }
+    }
+    if (slot == kNoScroll) {
+        return;   // sem slots — ignora a região (não devia acontecer: 2 usos)
+    }
+
+    ScrollSlot& s = scrollSlots_[slot];
+    scrollCur_ = slot;
+    inScroll_  = true;
+    s.region   = region;
+    s.contentH = contentHeight;
+    s.st.offset = scroll::clampOffset(s.st.offset, contentHeight, region.h);
+    clip_      = region;
+
+    if (!input_) {
+        return;
+    }
+
+    if (s.st.active) {
+        // gesto em curso: arrasta (ou termina no release)
+        if (input_->down(0)) {
+            f32 px, py;
+            input_->pos(0, px, py);
+            scroll::dragTo(s.st, px, py, contentHeight, region.h);
+        } else {
+            f32 px, py;
+            input_->pos(0, px, py);
+            if (scroll::endDrag(s.st)) {
+                tapValid_ = true;
+                tapX_ = px;
+                tapY_ = py;
+            }
+            if (active_ == id) {
+                active_ = 0;
+            }
+        }
+        return;
+    }
+
+    // press edge dentro da região → claim ADIADO para endScroll (os widgets
+    // desenhados entre begin/end têm prioridade — slider reivindica, botão não)
+    if (input_->pressed(0) && active_ == 0) {
+        f32 px, py;
+        input_->pos(0, px, py);
+        if (scroll::inside(region, px, py)) {
+            scrollPending_ = true;
+            pendingId_     = id;
+        }
+    }
+}
+
+void UiContext::endScroll() {
+    if (scrollCur_ == kNoScroll) {
+        inScroll_ = false;
+        return;
+    }
+    ScrollSlot& s = scrollSlots_[scrollCur_];
+
+    // resolve o claim pendente: nenhum widget reclamou → scroll reclama agora
+    if (scrollPending_ && pendingId_ == s.id && active_ == 0 && input_) {
+        f32 px, py;
+        input_->pos(0, px, py);
+        if (input_->down(0)) {
+            scroll::beginDrag(s.st, px, py);
+            active_ = s.id;
+        } else {
+            // tap de 1 frame (press+release no mesmo frame) → re-despacha
+            tapValid_ = true;
+            tapX_ = px;
+            tapY_ = py;
+        }
+    }
+    scrollPending_ = false;
+    pendingId_     = 0;
+
+    // indicador discreto (só com overflow) — ainda com o clip ativo
+    if (scroll::maxOffset(s.contentH, s.region.h) > 0.0f) {
+        f32 bx, by, bw, bh;
+        scroll::indicator(s.region, s.contentH, s.st.offset, bx, by, bw, bh);
+        emitTo(solids_, bx, by, bw, bh, 0.0f, 0.0f, 1.0f, 1.0f, theme::ACCENT);
+    }
+
+    inScroll_ = false;
+    clip_     = {0.0f, 0.0f, 1e9f, 1e9f};
+    scrollCur_ = kNoScroll;
+}
+
+f32 UiContext::scrollOffset() const {
+    return scrollCur_ != kNoScroll ? scrollSlots_[scrollCur_].st.offset : 0.0f;
+}
+
+bool UiContext::scrollTap(f32& x, f32& y) {
+    if (!tapValid_) {
+        return false;
+    }
+    x = tapX_;
+    y = tapY_;
+    tapValid_ = false;
+    return true;
 }
 
 void UiContext::toolbar(bool outClicks[3]) {

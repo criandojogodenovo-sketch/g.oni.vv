@@ -2,9 +2,14 @@
 // ui/UiContext.h — UI immediate-mode em C++ (tema mono, landscape).
 // Fluxo: beginFrame → widgets (panel/label/button) → endFrame (submete batches).
 // Layout F1: toolbar topo (exatamente 3 botões) + viewport + status line inferior.
+// F4.1: primitivo de scroll — beginScroll(id, region, contentHeight) /
+// endScroll() com drag-to-scroll, clamp e indicador (matemática em
+// ui/ScrollMath.h, GL-free e testada no CI); quads desenhados dentro da
+// região são RECORTADOS por interseção (sem glScissor — quad batch único).
 #include "render/QuadBatch.h"
 #include "render/Renderer.h"
 #include "ui/FontAtlas.h"
+#include "ui/ScrollMath.h"
 #include "platform/InputState.h"
 
 namespace vv {
@@ -18,9 +23,7 @@ constexpr f32 TEXT[4]   = {0.9019608f, 0.9019608f, 0.9019608f, 1.0f}; // #E6E6E6
 constexpr f32 ACCENT[4] = {0.9607843f, 0.9607843f, 0.9607843f, 1.0f}; // #F5F5F5
 }
 
-struct UiRect {
-    f32 x, y, w, h;
-};
+// UiRect vive em ui/ScrollMath.h (matemática GL-free partilhada)
 
 class UiContext {
 public:
@@ -40,6 +43,16 @@ public:
     // Escreve em `value` (clamp [minV,maxV]); devolve true se mudou este frame.
     // Partilha o mesmo active_ dos botões — um widget interativo por gesto.
     bool slider(u64 id, f32 x, f32 y, f32 w, f32 h, f32 minV, f32 maxV, f32& value);
+
+    // F4.1: região de scroll reutilizável (immediate-mode; estado por id em
+    // slots fixos — o offset persiste entre frames). Entre begin/end, os quads
+    // de panel/label são recortados à região e os BOTÕES só desenham (o tap é
+    // re-despachado pelo painel via scrollTap — drag em qualquer sítio =
+    // scroll; sliders mantêm a prioridade de captura).
+    void beginScroll(u64 id, const UiRect& region, f32 contentHeight);
+    void endScroll();
+    f32  scrollOffset() const;   // offset da região aberta (após beginScroll)
+    bool scrollTap(f32& x, f32& y);   // consome o tap re-despachado (1 frame)
 
     // F3: accessors usados pelos painéis do editor (EditorUi).
     bool hasFont() const { return font_ && font_->ok(); }
@@ -66,6 +79,10 @@ public:
     static constexpr f32 kStatusH  = 40.0f;
 
 private:
+    // emite um quad recortado pelo clip_ (panel/label passam por aqui)
+    bool emitTo(QuadBatch& b, f32 x, f32 y, f32 w, f32 h,
+                f32 u0, f32 v0, f32 u1, f32 v1, const f32 color[4]);
+
     Renderer*         renderer_ = nullptr;
     const InputState* input_ = nullptr;
     FontAtlas*        font_ = nullptr;
@@ -74,6 +91,25 @@ private:
     u64               active_ = 0;   // botão pressionado (immediate mode)
     QuadBatch         solids_;
     QuadBatch         glyphs_;
+
+    // ---- F4.1: scroll -------------------------------------------------------
+    struct ScrollSlot {
+        u64          id = 0;
+        bool         used = false;
+        scroll::State st;
+        UiRect       region{};
+        f32          contentH = 0.0f;
+    };
+    static constexpr u32 kMaxScrollSlots = 8;
+    static constexpr i32 kNoScroll = -1;
+    ScrollSlot scrollSlots_[kMaxScrollSlots];
+    i32        scrollCur_    = kNoScroll;   // região aberta neste frame
+    bool       inScroll_     = false;       // entre begin/endScroll
+    bool       scrollPending_= false;       // press edge à espera de claim
+    u64        pendingId_    = 0;
+    UiRect     clip_         = {0.0f, 0.0f, 1e9f, 1e9f};
+    bool       tapValid_     = false;
+    f32        tapX_ = 0.0f, tapY_ = 0.0f;
 };
 
 } // namespace vv

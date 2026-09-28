@@ -10,6 +10,7 @@ set(CORE_DIR ${CMAKE_CURRENT_LIST_DIR}/../app/src/main/cpp)
 
 add_executable(test_core
         test_main.cpp
+        test_scroll.cpp
         test_scene.cpp
         test_time.cpp
         test_math.cpp
