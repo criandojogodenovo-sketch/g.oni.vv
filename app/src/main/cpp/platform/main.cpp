@@ -45,7 +45,7 @@ bool       g_ready = false;
 // ---- F2: viewport 3D -------------------------------------------------------
 Camera g_camera;              // orbit: 1 dedo = yaw/pitch, pinch = zoom (FIXA — F8)
 Mesh   g_cubeMesh;            // cubo procedural (PLACEHOLDER — F5 importa mesh)
-Grid   g_grid;                // grid de chão com fade (PLACEHOLDER — F8)
+Grid   g_grid;                // grid de chão: quad 4 vértices + shader (F3.1; F8 pode virar gizmo)
 
 // ---- F3: editor ------------------------------------------------------------
 editor::EditorState g_editor;        // seleção + overlays
@@ -256,7 +256,7 @@ void frame() {
     const Mat4 proj = g_camera.proj(w / h);
     const Mat4 vp = Mat4::mul(proj, view);
     const DrawStats st3d = drawTics(vp);
-    const DrawStats stGrid = g_grid.draw(vp, g_camera.eye());
+    const DrawStats stGrid = g_grid.draw(vp, g_camera.eye(), g_camera.dist);
 
     // ---- pass UI: immediate-mode da F1 por cima (sem depth — nunca ocluída)
     g_ui.beginFrame(&g_renderer, &g_input, w, h);
@@ -352,7 +352,7 @@ void android_main(android_app* app) {
 
     app->onAppCmd = onAppCmd;
     app->onInputEvent = onInputEvent;
-    LOGI("G.One VV 0.3.0 — F3 (componentes, presets, editor)");
+    LOGI("G.One VV 0.3.1 — F3.1 (clamps de câmara + grid shader)");
 
     double last = nowSeconds();
     while (true) {

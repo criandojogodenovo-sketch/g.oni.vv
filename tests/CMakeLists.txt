@@ -15,6 +15,7 @@ add_executable(test_core
         test_math.cpp
         test_cube.cpp
         test_camera.cpp
+        test_grid.cpp
         test_components.cpp
         test_transform.cpp
         test_presets.cpp
