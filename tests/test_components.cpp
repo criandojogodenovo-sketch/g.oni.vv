@@ -141,6 +141,103 @@ TEST(store_sem_dono_recusa_add) {
     EXPECT(store.registry().count() == 3u);   // registry vive mesmo sem dono
 }
 
+TEST(tic_api_add_get_remove_componente) {
+    Scene s;   // Scene é dona do store; Tic::addComponent passa por lá
+    const Handle h = s.create("tic");
+    Tic* t = s.get(h);
+    EXPECT(t->scene == &s);
+
+    Transform3D* tr = t->addComponent<Transform3D>();
+    EXPECT(tr != nullptr);
+    EXPECT(tr->owner == t);
+    EXPECT(t->getComponent<Transform3D>() == tr);
+
+    // add<T>(init) copia dados e preserva o owner do storage
+    Transform3D init;
+    init.pos = Vec3{3.0f, 4.0f, 5.0f};
+    const Handle h2 = s.create("outro");
+    Transform3D* tr2 = s.get(h2)->addComponent<Transform3D>(init);
+    EXPECT(tr2 != nullptr);
+    EXPECT(tr2->owner != nullptr && tr2->owner != t);   // owner = o novo Tic
+    EXPECT(tr2->pos.x == 3.0f && tr2->pos.y == 4.0f && tr2->pos.z == 5.0f);
+    EXPECT(!t->addComponent(*tr));   // duplicado do mesmo tipo → nullptr
+
+    InputMap* im = t->addComponent<InputMap>();
+    EXPECT(im != nullptr);
+    EXPECT(s.components().hasAny(h));
+
+    EXPECT(t->removeComponent<InputMap>());
+    EXPECT(t->getComponent<InputMap>() == nullptr);
+    EXPECT(!t->removeComponent<InputMap>());
+}
+
+TEST(tic_sem_scene_recusa_composicao) {
+    Tic solto;   // nunca passou pela Scene::create
+    EXPECT(solto.addComponent<Transform3D>() == nullptr);
+    EXPECT(solto.getComponent<Transform3D>() == nullptr);
+    EXPECT(!solto.removeComponent<Transform3D>());
+}
+
+TEST(scene_destroy_remove_componentes_do_tic) {
+    Scene s;
+    const Handle h = s.create("a");
+    s.get(h)->addComponent<Transform3D>();
+    s.get(h)->addComponent<MeshRenderer>();
+
+    EXPECT(s.components().transforms().size() == 1u);
+    EXPECT(s.components().meshRenderers().size() == 1u);
+    EXPECT(s.components().hasAny(h));
+
+    EXPECT(s.destroy(h));
+    EXPECT(!s.components().hasAny(h));                 // removidos no destroy
+    EXPECT(s.components().transforms().size() == 0u);
+    EXPECT(s.components().meshRenderers().size() == 0u);
+
+    // slot reutilizado: novo TIC nasce limpo, sem herdar componentes
+    const Handle b = s.create("b");
+    EXPECT(b.index == h.index);
+    EXPECT(s.get(b)->getComponent<Transform3D>() == nullptr);
+    EXPECT(!s.components().hasAny(b));
+}
+
+TEST(scene_clear_limpa_tics_e_componentes) {
+    Scene s;
+    const Handle a = s.create("a");
+    const Handle b = s.create("b");
+    s.get(a)->addComponent<Transform3D>();
+    s.get(b)->addComponent<Transform3D>();
+    s.get(b)->addComponent<MeshRenderer>();
+
+    s.clear();
+    EXPECT(s.count() == 0u);
+    EXPECT(s.components().transforms().size() == 0u);
+    EXPECT(s.components().meshRenderers().size() == 0u);
+    EXPECT(!s.alive(a) && !s.alive(b));
+
+    // após clear, criar de novo reutiliza índices na ordem ascendente
+    const Handle c = s.create("c");
+    const Handle d = s.create("d");
+    EXPECT(c.index == 0u && d.index == 1u);
+}
+
+TEST(forEachActive_visita_so_os_ativos) {
+    Scene s;
+    const Handle a = s.create("a");
+    const Handle b = s.create("b");
+    s.create("c");
+    s.destroy(b);
+
+    u32 visitados = 0;
+    bool viuA = false, viuB = false;
+    s.forEachActive([&](const Tic& t) {
+        ++visitados;
+        if (t.handle == a) viuA = true;
+        if (t.handle == b) viuB = true;
+    });
+    EXPECT(visitados == 2u);   // 'b' está destruído
+    EXPECT(viuA && !viuB);
+}
+
 TEST(transform3d_trs_matrix) {
     Transform3D tr;
     tr.pos = Vec3{1.0f, 2.0f, 3.0f};

@@ -8,6 +8,12 @@
 // attach()/detach() são chamados AQUI (add/remove) — o storage conhece o Tic*
 // dono (passado pelo ComponentStore, que conhece a Scene). Componente solto
 // (owner nullptr) nunca entra no storage: add exige Tic* não-nulo.
+//
+// items é std::deque (não vector): ponteiros para componentes (devolvidos por
+// add/find) ficam válidos mesmo quando outros TICs ganham componentes depois —
+// um vector realocaria no push_back e deixaria esses ponteiros pendentes.
+// owners fica com vector: Handle é valor, realocação é inofensiva.
+#include <deque>
 #include <type_traits>
 #include <vector>
 #include "core/Component.h"
@@ -85,7 +91,7 @@ public:
     const C&     at(u32 i) const { return items[i]; }
     Handle       owner(u32 i) const { return owners[i]; }
 
-    std::vector<C>      items;    // dados (SoA: paralelo a owners)
+    std::deque<C>       items;    // dados (SoA: paralelo a owners; endereços estáveis)
     std::vector<Handle> owners;   // donos (mesmo índice)
 };
 

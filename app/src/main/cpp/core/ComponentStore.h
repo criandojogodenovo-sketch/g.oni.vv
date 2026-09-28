@@ -31,6 +31,10 @@ struct Tic;
 // com Scene apenas declarada (sem warnings de tipo incompleto).
 Tic* resolveTic(Scene* scene, Handle h);
 
+// Bolsa de componentes de uma Scene — mesmo padrão (defs no .cpp).
+ComponentStore&       storeOf(Scene* scene);
+const ComponentStore& storeOf(const Scene* scene);
+
 class ComponentStore {
 public:
     explicit ComponentStore(Scene* owner);

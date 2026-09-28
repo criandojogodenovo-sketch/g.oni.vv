@@ -7,6 +7,14 @@ Tic* resolveTic(Scene* scene, Handle h) {
     return scene ? scene->get(h) : nullptr;
 }
 
+ComponentStore& storeOf(Scene* scene) {
+    return scene->components();
+}
+
+const ComponentStore& storeOf(const Scene* scene) {
+    return scene->components();
+}
+
 // Ordem de registo FIXA — o serializer e os testes assumem estes ids:
 // 0=Transform3D, 1=MeshRenderer, 2=InputMap.
 ComponentStore::ComponentStore(Scene* owner) : scene_(owner) {

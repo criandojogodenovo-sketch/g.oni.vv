@@ -17,6 +17,7 @@ Handle Scene::create(std::string name, i32 parent) {
     t.name = std::move(name);
     t.active = true;
     t.parent = parent;
+    t.scene = this;                       // F3: liga o dono dos storages
     ++active_;
     return t.handle;
 }
@@ -26,11 +27,13 @@ bool Scene::destroy(Handle h) {
         return false;   // handle obsoleto, nulo ou já destruído — no-op seguro
     }
     Tic& t = slots_[h.index];
+    components_.removeAll(h);   // F3: detach + remove antes de libertar o slot
     t.active = false;
     t.name.clear();
     t.name.shrink_to_fit();
     t.parent = -1;
-    t.handle.generation += 1u;   // bump: handles antigos deste slot ficam obsoletos
+    t.scene = nullptr;          // F3: Tic solto não aceita composição
+    t.handle.generation += 1u;  // bump: handles antigos deste slot ficam obsoletos
     freeList_.push_back(h.index);
     --active_;
     return true;
@@ -63,6 +66,18 @@ Handle Scene::find(const std::string& name) const {
         }
     }
     return Handle::invalid();
+}
+
+void Scene::clear() {
+    // Destrói de cima para baixo: free-list termina em ordem ascendente,
+    // logo o próximo create() reutiliza os índices baixos primeiro (0,1,2…)
+    // — recarregar uma cena recria os slots na ordem esperada.
+    for (u32 i = static_cast<u32>(slots_.size()); i > 0; --i) {
+        const u32 idx = i - 1;
+        if (slots_[idx].active) {
+            destroy(slots_[idx].handle);
+        }
+    }
 }
 
 } // namespace vv
