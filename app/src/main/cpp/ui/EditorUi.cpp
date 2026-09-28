@@ -1,5 +1,7 @@
 #include "ui/EditorUi.h"
 #include "components/InputMap.h"
+#include "components/TouchControls.h"
+#include <cmath>
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
 #include "core/Scene.h"
@@ -188,6 +190,47 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st) {
     }
 
     return edited;
+}
+
+void drawTouchControls(UiContext& ui, const TouchControls& tc, f32 sw, f32 sh) {
+    const TouchControls::Layout l = TouchControls::layout(sw, sh);
+
+    // joystick: base em quadro + knob quadrado (mono brutalist — só retângulos)
+    ui.frame(l.joyCX - l.joyR, l.joyCY - l.joyR, 2.0f * l.joyR, 2.0f * l.joyR,
+             2.0f, theme::LINE);
+    ui.panel(l.joyCX - 1.0f, l.joyCY - 1.0f, 2.0f, 2.0f, theme::LINE);
+    f32 kx = tc.baseX();
+    f32 ky = tc.baseY();
+    bool active = false;
+    if (tc.joystickActive()) {
+        active = true;
+        f32 dx = tc.knobX() - tc.baseX();
+        f32 dy = tc.knobY() - tc.baseY();
+        const f32 len = std::sqrt(dx * dx + dy * dy);
+        if (len > l.joyR) {
+            dx *= l.joyR / len;
+            dy *= l.joyR / len;
+        }
+        kx = tc.baseX() + dx;
+        ky = tc.baseY() + dy;
+    }
+    const f32 ks = 44.0f;
+    ui.panel(kx - ks * 0.5f, ky - ks * 0.5f, ks, ks,
+             active ? theme::ACCENT : theme::PANEL);
+    ui.frame(kx - ks * 0.5f, ky - ks * 0.5f, ks, ks, 1.0f, theme::LINE);
+
+    // botão JUMP: premido = invertido (tema mono)
+    const bool held = tc.buttonHeld();
+    if (held) {
+        ui.panel(l.btnX, l.btnY, l.btnW, l.btnH, theme::TEXT);
+    }
+    ui.frame(l.btnX, l.btnY, l.btnW, l.btnH, 2.0f, held ? theme::PANEL : theme::ACCENT);
+    if (ui.hasFont()) {
+        const f32 tw = ui.fontWidth("JUMP");
+        const f32 th = ui.fontHeight();
+        ui.label(l.btnX + (l.btnW - tw) * 0.5f, l.btnY + l.btnH * 0.5f + th * 0.30f,
+                 "JUMP", held ? theme::PANEL : theme::TEXT);
+    }
 }
 
 int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st) {

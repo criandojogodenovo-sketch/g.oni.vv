@@ -42,6 +42,10 @@ public:
     f32  knobX() const { return joyX_; }   // pos do dedo (px ecrã)
     f32  knobY() const { return joyY_; }
     bool buttonHeld() const { return btnHeld_; }
+    // o slot está reclamado por um controlo (câmara não pode usar o dedo)
+    bool ownsSlot(u32 slot) const {
+        return joySlot_ == static_cast<i32>(slot) || btnSlot_ == static_cast<i32>(slot);
+    }
     f32  baseX() const { return baseX_; }  // centro do joystick no layout
     f32  baseY() const { return baseY_; }
 

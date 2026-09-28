@@ -22,6 +22,7 @@ namespace vv {
 
 class Scene;
 class InputState;
+class TouchControls;
 
 namespace editor {
 
@@ -44,6 +45,10 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st);
 // (pos/rot em graus/scale). Já atualiza tr->updateWorld() ao editar.
 // Devolve true se algum slider alterou valores neste frame.
 bool drawInspector(UiContext& ui, Scene& scene, EditorState& st);
+
+// F4: controlos de toque (só em modo Play, só se algum TIC ativo tem o
+// componente) — joystick quadrado + botão JUMP no quad batch, tema mono.
+void drawTouchControls(UiContext& ui, const TouchControls& tc, f32 sw, f32 sh);
 
 // Overlays. Devolvem a escolha do frame:
 //   drawPlusMenu → 0 nada, 1..3 = PresetKind (1=Player, 2=Character, 3=Static)

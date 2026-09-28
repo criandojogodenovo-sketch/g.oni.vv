@@ -9,6 +9,7 @@
 #include <cstdio>
 
 #include "components/MeshRenderer.h"
+#include "components/TouchControls.h"
 #include "components/Transform3D.h"
 #include "core/Presets.h"
 #include "core/Scene.h"
@@ -16,6 +17,8 @@
 #include "core/Tick.h"
 #include "core/Time.h"
 #include "core/TransformSystem.h"
+#include "physics/InputSource.h"
+#include "physics/PhysicsSystem.h"
 #include "platform/Log.h"
 #include "platform/CrashHandler.h"
 #include "platform/EglContext.h"
@@ -52,6 +55,10 @@ editor::EditorState g_editor;        // seleção + overlays
 TickGroups          g_systems;       // runner (não-dono)
 TransformSystem     g_transformSystem;
 
+// ---- F4: física + modo Play ------------------------------------------------
+phys::PhysicsSystem g_physics;       // TickGroup::Physics (só avança em Play)
+bool                g_playMode = false;   // botão Play da toolbar liga/desliga
+
 char g_scenePath[512] = "";          // <internalDataPath>/scene.goni
 
 // estado do touch → câmara (entre frames)
@@ -73,8 +80,15 @@ void showToast(const char* msg) {
     g_toastT = 1.8f;
 }
 
-void updateCameraOrbit(const InputState& in, const UiRect& view) {
-    const u32 active = in.activePointers();
+// claimedMask: slots reclamados pelos TouchControls (joystick/botão) — a
+// câmara de orbit ignora esses dedos (F4)
+void updateCameraOrbit(const InputState& in, const UiRect& view, u32 claimedMask) {
+    u32 active = 0;
+    for (u32 s = 0; s < kMaxPointerSlots; ++s) {
+        if (in.down(s) && !(claimedMask & (1u << s))) {
+            ++active;
+        }
+    }
     if (active == 0) {
         g_gestureInView = false;
         g_orbitActive = false;
@@ -83,11 +97,12 @@ void updateCameraOrbit(const InputState& in, const UiRect& view) {
     }
 
     // F3: o PRIMEIRO toque decide o dono do gesto. Se nasceu num painel
-    // (Hierarchy/Inspector/toolbar), a câmara não orbita — mesmo que o dedo
-    // depois atravesse o viewport.
+    // (Hierarchy/Inspector/toolbar) ou num controlo de toque (F4), a câmara
+    // não orbita — mesmo que o dedo depois atravesse o viewport.
     if (!g_gestureInView) {
         for (u32 s = 0; s < kMaxPointerSlots; ++s) {
             if (!in.pressed(s)) continue;
+            if (claimedMask & (1u << s)) break;   // nasceu num controlo
             f32 x, y;
             in.pos(s, x, y);
             if (x >= view.x && x < view.x + view.w && y >= view.y && y < view.y + view.h) {
@@ -101,11 +116,12 @@ void updateCameraOrbit(const InputState& in, const UiRect& view) {
     }
 
     if (active >= 2) {
-        // pinch: distância entre os dois primeiros dedos ativos
+        // pinch: distância entre os dois primeiros dedos ativos (não reclamados)
         f32 x0 = 0, y0 = 0, x1 = 0, y1 = 0;
         bool got0 = false, got1 = false;
         for (u32 s = 0; s < kMaxPointerSlots && !(got0 && got1); ++s) {
             if (!in.down(s)) continue;
+            if (claimedMask & (1u << s)) continue;
             f32 x, y;
             in.pos(s, x, y);
             if (!got0) { x0 = x; y0 = y; got0 = true; }
@@ -125,6 +141,7 @@ void updateCameraOrbit(const InputState& in, const UiRect& view) {
     if (active == 1) {
         for (u32 s = 0; s < kMaxPointerSlots; ++s) {
             if (!in.down(s)) continue;
+            if (claimedMask & (1u << s)) continue;
             f32 x, y;
             in.pos(s, x, y);
             if (g_orbitActive) {
@@ -139,6 +156,49 @@ void updateCameraOrbit(const InputState& in, const UiRect& view) {
     } else {
         g_orbitActive = false;
     }
+}
+
+// F4: alimenta os TouchControls ativos (só em modo Play) e devolve a máscara
+// de slots reclamados (a câmara ignora esses dedos)
+u32 feedTouchControls(f32 w, f32 h, bool& outDrawn, TouchControls** outTc) {
+    u32 claimed = 0;
+    outDrawn = false;
+    *outTc = nullptr;
+    if (!g_playMode) {
+        return 0;
+    }
+    auto& tcs = g_scene.components().touchControls();
+    TouchControls* first = nullptr;
+    for (u32 i = 0; i < tcs.size(); ++i) {
+        Tic* t = g_scene.get(tcs.owner(i));
+        if (!t || !t->active) {
+            continue;
+        }
+        TouchControls& tc = tcs.at(i);
+        if (!first) {
+            first = &tc;
+            *outTc = &tc;
+            outDrawn = true;
+        }
+        for (u32 s = 0; s < kMaxPointerSlots; ++s) {
+            if (g_input.pressed(s)) {
+                f32 x, y;
+                g_input.pos(s, x, y);
+                if (tc.touchBegin(s, x, y, w, h)) {
+                    claimed |= (1u << s);
+                }
+            } else if (g_input.down(s) && tc.ownsSlot(s)) {
+                f32 x, y;
+                g_input.pos(s, x, y);
+                tc.touchMove(s, x, y);
+                claimed |= (1u << s);
+            }
+            if (g_input.released(s)) {
+                tc.touchEnd(s);
+            }
+        }
+    }
+    return claimed;
 }
 // ---------------------------------------------------------------------------
 
@@ -247,8 +307,23 @@ void frame() {
     const f32 w = static_cast<f32>(g_egl.width());
     const f32 h = static_cast<f32>(g_egl.height());
 
+    // F4: TouchControls primeiro (só em modo Play) — os dedos que nasceram
+    // nos controlos não vão para a câmara
+    bool tcDrawn = false;
+    TouchControls* tcDraw = nullptr;
+    const u32 claimed = feedTouchControls(w, h, tcDrawn, &tcDraw);
+
     // input do frame anterior → câmara (só gestos nascidos no viewport central)
-    updateCameraOrbit(g_input, editor::centerRect(w, h));
+    updateCameraOrbit(g_input, editor::centerRect(w, h), claimed);
+
+    // F4: base de movimento do input = câmara (stick-cima afasta da câmara)
+    {
+        const f32 sy = std::sin(g_camera.yaw);
+        const f32 cy = std::cos(g_camera.yaw);
+        g_physics.frame.fwd = Vec3{-sy, 0.0f, -cy};
+        g_physics.frame.right = Vec3{cy, 0.0f, -sy};
+    }
+    g_physics.enabled = g_playMode;   // física só avança em modo Play
 
     // ---- pass 3D: clear color+depth, TICs com MeshRenderer + grid com fade
     g_renderer.beginFrame();
@@ -267,7 +342,11 @@ void frame() {
         g_editor.fileMenu = !g_editor.fileMenu;   // F3: Menu abre Save/Load
         g_editor.plusMenu = false;
     }
-    if (clicks[1]) { LOGI("ui: botão Play"); }
+    if (clicks[1]) {
+        g_playMode = !g_playMode;                 // F4: Play liga/desliga a simulação
+        showToast(g_playMode ? "modo play" : "modo editor");
+        LOGI("ui: modo %s", g_playMode ? "play (física ativa)" : "editor");
+    }
     if (clicks[2]) { LOGI("ui: botão Settings"); }
 
     // F3: painéis do editor (Hierarquia esquerda, Inspector direita)
@@ -292,6 +371,11 @@ void frame() {
                 LOGI("editor: %s criado", presetName(kind));
             }
         }
+    }
+
+    // F4: controlos de toque por cima de tudo (só em modo Play)
+    if (tcDrawn && tcDraw) {
+        editor::drawTouchControls(g_ui, *tcDraw, w, h);
     }
 
     // overlay Menu → Save/Load .goni
@@ -347,8 +431,9 @@ void android_main(android_app* app) {
                       app->activity->internalDataPath);
     }
 
-    // F3: systems do engine (ordem interna ao grupo = registo)
+    // F3/F4: systems do engine (ordem interna ao grupo = registo)
     g_systems.add(TickGroup::Update, &g_transformSystem);
+    g_systems.add(TickGroup::Physics, &g_physics);   // entre Update e PostUpdate
 
     app->onAppCmd = onAppCmd;
     app->onInputEvent = onInputEvent;
