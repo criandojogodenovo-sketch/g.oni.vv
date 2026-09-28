@@ -1,5 +1,5 @@
-// tests/test_systems.cpp — F3: TickGroups (ordem Pre→Up→Post→Render) e
-// TransformSystem (cache world atualizado a partir de pos/rot/scale).
+// tests/test_systems.cpp — F3/F4: TickGroups (ordem Pre→Up→Physics→Post→Render)
+// e TransformSystem (cache world atualizado a partir de pos/rot/scale).
 #include "TestFramework.h"
 #include <vector>
 #include "components/MeshRenderer.h"
@@ -26,25 +26,26 @@ TEST(tickgroups_rodam_na_ordem_pre_update_post_render) {
     Scene s;
     std::vector<u32> log;
 
-    RecordingSystem pre(0, &log), up(1, &log), post(2, &log), render(3, &log);
+    RecordingSystem pre(0, &log), up(1, &log), fis(2, &log), post(3, &log), render(4, &log);
     // registra FORA da ordem — a ordem vem do grupo, não do registo
     TickGroups tg;
     EXPECT(tg.add(TickGroup::Render, &render));
     EXPECT(tg.add(TickGroup::PostUpdate, &post));
     EXPECT(tg.add(TickGroup::PreUpdate, &pre));
     EXPECT(tg.add(TickGroup::Update, &up));
+    EXPECT(tg.add(TickGroup::Physics, &fis));
 
     tg.run(s, 1.0f / 60.0f);
-    EXPECT(log.size() == 4u);
-    EXPECT(log[0] == 0u && log[1] == 1u && log[2] == 2u && log[3] == 3u);
+    EXPECT(log.size() == 5u);
+    EXPECT(log[0] == 0u && log[1] == 1u && log[2] == 2u && log[3] == 3u && log[4] == 4u);
 
     // dois no mesmo grupo: ordem de registo dentro do grupo
     log.clear();
-    RecordingSystem up2(4, &log);
+    RecordingSystem up2(5, &log);
     EXPECT(tg.add(TickGroup::Update, &up2));
     tg.run(s, 1.0f / 60.0f);
-    EXPECT(log.size() == 5u);
-    EXPECT(log[1] == 1u && log[2] == 4u);   // up (1) antes de up2 (4)
+    EXPECT(log.size() == 6u);
+    EXPECT(log[1] == 1u && log[2] == 5u);   // up (1) antes de up2 (5)
 }
 
 TEST(tickgroups_recusa_excesso_e_nulos) {

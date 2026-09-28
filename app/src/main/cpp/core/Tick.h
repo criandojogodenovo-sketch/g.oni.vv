@@ -1,13 +1,14 @@
 #pragma once
-// core/Tick.h — TickGroups + base System (F3).
+// core/Tick.h — TickGroups + base System (F3; grupo Physics entra na F4).
 //
 // Ordem de execução por passo fixo do loop:
-//   PreUpdate → Update → PostUpdate → Render   (a UI da F1 é desenhada DEPOIS,
-//   por cima — não é um TickGroup).
+//   PreUpdate → Update → Physics → PostUpdate → Render   (a UI da F1 é
+//   desenhada DEPOIS, por cima — não é um TickGroup).
 //
-// F3 registra apenas o TransformSystem no grupo Update; F4 (física) registra
-// o passo de corpos em PreUpdate/Update/PostUpdate. Os ponteiros não são donos
-// — os systems vivem no main (ou no dono do runner) com tempo de vida maior.
+// F3 registra o TransformSystem no grupo Update; a F4 registra o
+// PhysicsSystem no NOVO grupo Physics, entre Update e PostUpdate (a física
+// consome o cache world fresco do Update e o PostUpdate/Render veem corpos
+// já movidos). Os ponteiros não são donos — os systems vivem no main.
 #include "core/Types.h"
 
 namespace vv {
@@ -17,9 +18,10 @@ class Scene;
 enum class TickGroup : u32 {
     PreUpdate  = 0,
     Update     = 1,
-    PostUpdate = 2,
-    Render     = 3,
-    Count      = 4,
+    Physics    = 2,   // F4: física core (corpos, sweep+slide)
+    PostUpdate = 3,
+    Render     = 4,
+    Count      = 5,
 };
 
 class System {
