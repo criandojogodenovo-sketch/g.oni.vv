@@ -12,8 +12,14 @@ add_executable(test_core
         test_main.cpp
         test_scene.cpp
         test_time.cpp
+        test_math.cpp
+        test_cube.cpp
+        test_camera.cpp
         ${CORE_DIR}/core/Scene.cpp
-        ${CORE_DIR}/core/Time.cpp)
+        ${CORE_DIR}/core/Time.cpp
+        # GL-free (cubo e câmara são lógica pura — sem contexto OpenGL)
+        ${CORE_DIR}/render/Cube.cpp
+        ${CORE_DIR}/render/Camera.cpp)
 
 target_include_directories(test_core PRIVATE ${CORE_DIR})
 

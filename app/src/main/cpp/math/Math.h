@@ -14,14 +14,14 @@ struct Vec3 {
     f32 z = 0.0f;
 
     Vec3() = default;
-    Vec3(f32 ix, f32 iy, f32 iz) : x(ix), y(iy), z(iz) {}
+    constexpr Vec3(f32 ix, f32 iy, f32 iz) : x(ix), y(iy), z(iz) {}
 
-    Vec3 operator+(const Vec3& o) const { return {x + o.x, y + o.y, z + o.z}; }
-    Vec3 operator-(const Vec3& o) const { return {x - o.x, y - o.y, z - o.z}; }
-    Vec3 operator-() const { return {-x, -y, -z}; }
-    Vec3 operator*(f32 s) const { return {x * s, y * s, z * s}; }
+    constexpr Vec3 operator+(const Vec3& o) const { return {x + o.x, y + o.y, z + o.z}; }
+    constexpr Vec3 operator-(const Vec3& o) const { return {x - o.x, y - o.y, z - o.z}; }
+    constexpr Vec3 operator-() const { return {-x, -y, -z}; }
+    constexpr Vec3 operator*(f32 s) const { return {x * s, y * s, z * s}; }
 
-    Vec3& operator+=(const Vec3& o) { x += o.x; y += o.y; z += o.z; return *this; }
+    constexpr Vec3& operator+=(const Vec3& o) { x += o.x; y += o.y; z += o.z; return *this; }
 };
 
 inline f32 dot(const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }

@@ -20,6 +20,7 @@ CubeMeshData makeCube(f32 size) {
 
     const f32 h = size * 0.5f;
     u16 vi = 0;
+    u32 ii = 0;
     for (const Face& f : kFaces) {
         const u16 base = vi;
         static constexpr f32 kSigns[4][2] = {
@@ -31,10 +32,11 @@ CubeMeshData makeCube(f32 size) {
             vtx.normal = f.n;
         }
         // dois triângulos por face: (0,1,2) e (0,2,3) — CCW visto de fora
-        u16 ii = 0;
-        out.indices[ii++] = base;         out.indices[ii++] = static_cast<u16>(base + 1);
+        out.indices[ii++] = base;
+        out.indices[ii++] = static_cast<u16>(base + 1);
         out.indices[ii++] = static_cast<u16>(base + 2);
-        out.indices[ii++] = base;         out.indices[ii++] = static_cast<u16>(base + 2);
+        out.indices[ii++] = base;
+        out.indices[ii++] = static_cast<u16>(base + 2);
         out.indices[ii++] = static_cast<u16>(base + 3);
     }
     return out;
