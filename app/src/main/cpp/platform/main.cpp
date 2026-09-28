@@ -201,7 +201,7 @@ void android_main(android_app* app) {
 
     app->onAppCmd = onAppCmd;
     app->onInputEvent = onInputEvent;
-    LOGI("G.One VV 0.1.0 — F1 (passo 6: UI immediate-mode)");
+    LOGI("G.One VV 0.2.0 — F2 (passo 6: primeiro objeto 3D)");
 
     double last = nowSeconds();
     while (true) {

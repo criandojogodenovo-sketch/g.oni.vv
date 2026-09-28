@@ -92,13 +92,13 @@ jobs:
       - name: Publicar artifact do APK
         uses: actions/upload-artifact@v4
         with:
-          name: goni-vv-0.1.0-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
+          name: goni-vv-0.2.0-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
       - name: Exportar nome do artifact p/ o job de verificação
         id: apk-name
-        run: echo "artifact_name=goni-vv-0.1.0-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}" >> "$GITHUB_OUTPUT"
+        run: echo "artifact_name=goni-vv-0.2.0-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}" >> "$GITHUB_OUTPUT"
 
   verify-entry-symbols:
     name: verify-entry-symbols (gate ANativeActivity_onCreate / android_main)
