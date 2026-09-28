@@ -23,6 +23,9 @@ add_library(goni_vv SHARED
         core/Json.h
         core/SceneSerializer.h
         core/SceneSerializer.cpp
+        core/Tick.h
+        core/TransformSystem.h
+        core/TransformSystem.cpp
         core/Scene.h
         core/Scene.cpp
         core/Time.h
