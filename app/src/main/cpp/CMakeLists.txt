@@ -7,12 +7,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Shim do sistema para NativeActivity (fonte oficial do NDK).
-add_library(native_app_glue STATIC
-        ${ANDROID_NDK}/sources/android/native_app_glue/android_native_app_glue.c)
-target_include_directories(native_app_glue PUBLIC
-        ${ANDROID_NDK}/sources/android/native_app_glue)
-
 # Fontes do goni_vv (passos incrementais da F1: platform → core → render → ui → diagnóstico).
 add_library(goni_vv SHARED
         core/Types.h
@@ -42,8 +36,27 @@ add_library(goni_vv SHARED
 
 target_include_directories(goni_vv PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+# Shim do sistema para NativeActivity (fonte oficial do NDK).
+# FIX UnsatisfiedLinkError: o glue tem de ser compilado DENTRO de goni_vv.
+# Antes era uma static library ligada por nome — como nenhum objeto de goni_vv
+# referencia ANativeActivity_onCreate, o linker não extraía
+# android_native_app_glue.o do .a e o símbolo de entrada nunca chegava ao
+# libgoni_vv.so → UnsatisfiedLinkError no arranque do NativeActivity.
+if(ANDROID)
+        set(VV_GLUE_DIR ${ANDROID_NDK}/sources/android/native_app_glue)
+        target_sources(goni_vv PRIVATE ${VV_GLUE_DIR}/android_native_app_glue.c)
+        target_include_directories(goni_vv PRIVATE ${VV_GLUE_DIR})
+        # Preserva os símbolos de entrada na ligação (defensivo: o -u força o
+        # linker a resolver os símbolos, extraindo os objetos que os definem,
+        # mesmo que o glue um dia volte a ser static library). Forma
+        # -Wl,-u,SYMBOL: um token por símbolo (o CMake deduplica flags -u
+        # repetidos, o que deixaria o segundo símbolo órfão).
+        target_link_options(goni_vv PRIVATE
+                -Wl,-u,ANativeActivity_onCreate
+                -Wl,-u,android_main)
+endif()
+
 target_link_libraries(goni_vv
-        native_app_glue
         android
         EGL
         GLESv3
