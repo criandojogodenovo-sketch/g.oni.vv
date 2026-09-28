@@ -1,4 +1,5 @@
 #include "core/Presets.h"
+#include "components/BodyComp.h"
 #include "components/InputMap.h"
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
@@ -12,6 +13,7 @@ const char* presetName(PresetKind kind) {
         case PresetKind::PlayerBody3D:    return "PlayerBody3D";
         case PresetKind::CharacterBody3D: return "CharacterBody3D";
         case PresetKind::StaticBody3D:    return "StaticBody3D";
+        case PresetKind::RigidBody3D:     return "RigidBody3D";
         default:                          return "Tic";
     }
 }
@@ -45,9 +47,12 @@ Handle createTicFromPreset(Scene& scene, PresetKind kind,
         return Handle::invalid();
     }
 
+    // corpos com cápsula assentam a base no y=0 (raio 0.3 + meia-altura 0.25)
+    const f32 baseY = (kind == PresetKind::PlayerBody3D ||
+                       kind == PresetKind::CharacterBody3D) ? 0.55f : 0.5f;
     Transform3D* tr = tic->addComponent<Transform3D>();
     if (tr) {
-        tr->pos = Vec3{0.0f, 0.5f, 0.0f};   // assente no grid (igual ao F2)
+        tr->pos = Vec3{0.0f, baseY, 0.0f};
         tr->updateWorld();
     }
 
@@ -58,7 +63,29 @@ Handle createTicFromPreset(Scene& scene, PresetKind kind,
     }
 
     if (kind == PresetKind::PlayerBody3D) {
-        tic->addComponent<InputMap>();   // vazio na F3 — bindings são F4
+        tic->addComponent<InputMap>();   // SEM TouchControls — via Inspector (F4-D)
+    }
+
+    // F4: corpo de física do preset
+    if (BodyComp* b = tic->addComponent<BodyComp>()) {
+        switch (kind) {
+            case PresetKind::PlayerBody3D:
+            case PresetKind::CharacterBody3D:
+                b->type = BodyType::Character;
+                b->shape = phys::Capsule{Vec3{0.0f, 0.0f, 0.0f}, 0.3f, 0.25f};
+                break;
+            case PresetKind::StaticBody3D:
+                b->type = BodyType::Static;
+                b->shape = phys::OBB{Vec3{0.0f, 0.0f, 0.0f},
+                                     Vec3{0.5f, 0.5f, 0.5f}, Quat::identity()};
+                break;
+            case PresetKind::RigidBody3D:
+                b->type = BodyType::Rigid;
+                b->shape = phys::Sphere{Vec3{0.0f, 0.0f, 0.0f}, 0.5f};
+                break;
+            default:
+                break;
+        }
     }
     return h;
 }

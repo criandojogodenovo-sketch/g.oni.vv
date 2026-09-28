@@ -1,14 +1,13 @@
 #pragma once
 // core/Presets.h — presets de TIC do diálogo "+" (F3).
 //
-// Receita da spec:
-//   PlayerBody3D    = TIC + Transform3D + MeshRenderer(cubo) + InputMap(vazio)
-//   CharacterBody3D = TIC + Transform3D + MeshRenderer(cubo)
-//   StaticBody3D    = TIC + Transform3D + MeshRenderer(cubo)
-//
-// PLACEHOLDER DELIBERADO: os três presets são IGUAIS fora do InputMap — os
-// corpos (física/cinemática) chegam na F4 e é lá que passam a diferir. O
-// nome do preset é o contrato; os componentes hoje são os da F3.
+// Receita da spec (F4):
+//   PlayerBody3D    = T + Mesh(cubo) + InputMap(vazio) + Body{Character, capsule}
+//   CharacterBody3D = T + Mesh(cubo) + Body{Character, capsule}
+//   StaticBody3D    = T + Mesh(cubo) + Body{Static, OBB 0.5³}
+//   RigidBody3D     = T + Mesh(cubo) + Body{Rigid, sphere r 0.5}
+// TouchControls NÃO vem nos presets — adicionável via Inspector a qualquer
+// TIC com InputMap (F4-D).
 //
 // Sem assets: o mesh dos presets é o cubo procedural da F2 (ponteiro não-dono
 // partilhado); o material é o lit do Renderer. Transform default: pos
@@ -26,7 +25,8 @@ enum class PresetKind : u32 {
     PlayerBody3D    = 0,
     CharacterBody3D = 1,
     StaticBody3D    = 2,
-    Count           = 3,
+    RigidBody3D     = 3,
+    Count           = 4,
 };
 
 // Nome canônico do preset (usado no menu "+" e como nome base do TIC).

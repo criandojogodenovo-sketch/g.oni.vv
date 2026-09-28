@@ -4,6 +4,7 @@
 // não no CI, conforme a spec.)
 #include "TestFramework.h"
 #include <cstring>
+#include "components/BodyComp.h"
 #include "components/InputMap.h"
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
@@ -17,6 +18,7 @@ TEST(preset_nomes_canonicos) {
     EXPECT(std::strcmp(presetName(PresetKind::PlayerBody3D), "PlayerBody3D") == 0);
     EXPECT(std::strcmp(presetName(PresetKind::CharacterBody3D), "CharacterBody3D") == 0);
     EXPECT(std::strcmp(presetName(PresetKind::StaticBody3D), "StaticBody3D") == 0);
+    EXPECT(std::strcmp(presetName(PresetKind::RigidBody3D), "RigidBody3D") == 0);
 }
 
 TEST(preset_player_tem_inputmap_outros_nao) {
@@ -80,7 +82,7 @@ TEST(preset_transform_default_assente_no_grid) {
     Transform3D* tr = s.get(h)->getComponent<Transform3D>();
     EXPECT(tr != nullptr);
     EXPECT(nearEqF(tr->pos.x, 0.0f));
-    EXPECT(nearEqF(tr->pos.y, 0.5f));   // cubo de 1 unidade assente no chão
+    EXPECT(nearEqF(tr->pos.y, 0.55f));   // cápsula (0.3+0.25) assente no chão
     EXPECT(nearEqF(tr->pos.z, 0.0f));
     EXPECT(tr->rot.x == 0.0f && tr->rot.y == 0.0f && tr->rot.z == 0.0f && tr->rot.w == 1.0f);
     EXPECT(nearEqF(tr->scale.x, 1.0f) && nearEqF(tr->scale.y, 1.0f) && nearEqF(tr->scale.z, 1.0f));
@@ -88,5 +90,44 @@ TEST(preset_transform_default_assente_no_grid) {
     // world cache já atualizada → o primeiro draw já nasce posicionado
     f32 out[4];
     Mat4::transformPoint4(tr->world, Vec3{0.0f, -0.5f, 0.0f}, out);
-    EXPECT(nearEqF(out[1], 0.0f, 1e-5f));   // base do cubo toca y=0
+    EXPECT(nearEqF(out[1], 0.05f, 1e-5f));   // base do cubo a 5 cm do chão
+}
+
+// ---- F4: corpos dos presets --------------------------------------------------
+
+TEST(preset_corpos_f4_por_receita) {
+    Scene s;
+    const Handle p = createTicFromPreset(s, PresetKind::PlayerBody3D, nullptr, nullptr);
+    const Handle c = createTicFromPreset(s, PresetKind::CharacterBody3D, nullptr, nullptr);
+    const Handle st = createTicFromPreset(s, PresetKind::StaticBody3D, nullptr, nullptr);
+    const Handle rb = createTicFromPreset(s, PresetKind::RigidBody3D, nullptr, nullptr);
+
+    // Player: Character + cápsula 0.3/0.25
+    const BodyComp* bp = s.get(p)->getComponent<BodyComp>();
+    EXPECT(bp != nullptr && bp->type == BodyType::Character);
+    EXPECT(bp->shape.index() == 3u);
+    EXPECT(nearEqF(std::get<phys::Capsule>(bp->shape).radius, 0.3f));
+    EXPECT(nearEqF(std::get<phys::Capsule>(bp->shape).halfHeight, 0.25f));
+
+    // CharacterBody: igual sem InputMap
+    const BodyComp* bc = s.get(c)->getComponent<BodyComp>();
+    EXPECT(bc != nullptr && bc->type == BodyType::Character);
+    EXPECT(s.get(c)->getComponent<InputMap>() == nullptr);
+
+    // Static: OBB 0.5³
+    const BodyComp* bs = s.get(st)->getComponent<BodyComp>();
+    EXPECT(bs != nullptr && bs->type == BodyType::Static);
+    EXPECT(bs->shape.index() == 2u);
+    EXPECT(nearEqF(std::get<phys::OBB>(bs->shape).halfExtents.x, 0.5f));
+
+    // Rigid: esfera r 0.5
+    const BodyComp* br = s.get(rb)->getComponent<BodyComp>();
+    EXPECT(br != nullptr && br->type == BodyType::Rigid);
+    EXPECT(br->shape.index() == 0u);
+    EXPECT(nearEqF(std::get<phys::Sphere>(br->shape).r, 0.5f));
+    EXPECT(s.get(rb)->getComponent<InputMap>() == nullptr);
+
+    // Nenhum preset nasce com TouchControls (adicionável via Inspector)
+    EXPECT(s.get(p)->getComponent<TouchControls>() == nullptr);
+    EXPECT(s.get(c)->getComponent<TouchControls>() == nullptr);
 }

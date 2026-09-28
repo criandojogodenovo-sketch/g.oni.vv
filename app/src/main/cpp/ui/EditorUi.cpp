@@ -14,12 +14,14 @@ namespace {
 constexpr f32 kPad       = 12.0f;
 constexpr f32 kHeaderH   = 48.0f;
 constexpr f32 kRowH      = 52.0f;
-constexpr f32 kSliderRow = 48.0f;
+constexpr f32 kSliderRow = 36.0f;
 constexpr f32 kMenuW     = 340.0f;
 
 constexpr u64 kIdPlus      = 40;
 constexpr u64 kIdRowBase   = 1000;
 constexpr u64 kIdSliderBase = 2000;
+constexpr u64 kIdVelX      = 2100;
+constexpr u64 kIdAddTc     = 3001;
 
 // Toque (edge de press) fora do rect → fecha overlays.
 bool pressedOutside(const InputState& in, f32 x, f32 y, f32 w, f32 h) {
@@ -125,17 +127,17 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st) {
         return false;
     }
 
-    f32 cy = y + kHeaderH + 6.0f;
+    f32 cy = y + kHeaderH + 4.0f;
     char clipped[40];
     std::snprintf(clipped, sizeof(clipped), "%s", tic->name.c_str());
-    ui.label(x + kPad, cy + 10.0f, clipped, theme::ACCENT);
-    cy += 40.0f;
+    ui.label(x + kPad, cy + 8.0f, clipped, theme::ACCENT);
+    cy += 30.0f;
 
     bool edited = false;
 
     if (Transform3D* tr = tic->getComponent<Transform3D>()) {
-        ui.label(x + kPad, cy + 10.0f, "Transform3D", theme::TEXT);
-        cy += 34.0f;
+        ui.label(x + kPad, cy + 8.0f, "Transform3D", theme::TEXT);
+        cy += 26.0f;
         ui.panel(x + kPad, cy - 3.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
 
         struct Row { const char* label; f32 min, max; const char* fmt; f32* value; };
@@ -176,17 +178,49 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st) {
     }
 
     if (const MeshRenderer* mr = tic->getComponent<MeshRenderer>()) {
-        ui.label(x + kPad, cy + 10.0f, "MeshRenderer", theme::TEXT);
-        cy += 34.0f;
-        ui.label(x + kPad + 12.0f, cy + 10.0f, mr->mesh ? "mesh: cube" : "mesh: -", theme::TEXT);
-        cy += 34.0f;
+        ui.label(x + kPad + 12.0f, cy + 8.0f,
+                 mr->mesh ? "mesh: cube" : "mesh: -", theme::TEXT);
+        cy += 26.0f;
     }
 
+    if (const InputMap* im = tic->getComponent<InputMap>()) {
+        char line[48];
+        std::snprintf(line, sizeof(line), "input: %s",
+                      im->source ? "fonte ligada" : "sem fonte");
+        ui.label(x + kPad + 12.0f, cy + 8.0f, line, theme::TEXT);
+        cy += 26.0f;
+    }
+
+    // F4: BodyComp — tipo/forma/estado + slider de velocidade (lança corpos
+    // para testar CCD e empurrões no device)
+    if (BodyComp* b = tic->getComponent<BodyComp>()) {
+        char line[64];
+        std::snprintf(line, sizeof(line), "body: %s - %s - chao: %s",
+                      BodyComp::typeName(b->type), BodyComp::shapeName(b->shape),
+                      b->grounded ? "sim" : "nao");
+        ui.label(x + kPad, cy + 8.0f, line, theme::ACCENT);
+        cy += 26.0f;
+
+        f32 vx = b->velocity.x;
+        if (sliderRow(ui, kIdVelX, x, cy, "velx", -60.0f, 60.0f, vx, "%.1f")) {
+            b->velocity.x = vx;
+        }
+        cy += kSliderRow;
+    }
+
+    // F4: TouchControls adicionável a qualquer TIC com InputMap (não-criável
+    // no resto: layout fixo; UI criável é F6)
     if (tic->getComponent<InputMap>()) {
-        ui.label(x + kPad, cy + 10.0f, "InputMap", theme::TEXT);
-        cy += 34.0f;
-        ui.label(x + kPad + 12.0f, cy + 10.0f, "(vazio - F4)", theme::TEXT);
-        cy += 34.0f;
+        if (!tic->getComponent<TouchControls>()) {
+            if (ui.button(kIdAddTc, x + kPad, cy + 2.0f, w - 2.0f * kPad, 34.0f,
+                          "add TouchControls")) {
+                tic->addComponent<TouchControls>();
+            }
+            cy += 42.0f;
+        } else {
+            ui.label(x + kPad + 12.0f, cy + 8.0f, "tc: stick + jump", theme::TEXT);
+            cy += 26.0f;
+        }
     }
 
     return edited;
@@ -235,7 +269,7 @@ void drawTouchControls(UiContext& ui, const TouchControls& tc, f32 sw, f32 sh) {
 
 int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st) {
     const f32 w = kMenuW;
-    const f32 h = kHeaderH + 3.0f * 64.0f + kPad;
+    const f32 h = kHeaderH + 4.0f * 64.0f + kPad;
     const f32 x = (sw - w) * 0.5f;
     const f32 y = (sh - h) * 0.5f;
 
@@ -250,8 +284,9 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "CRIAR TIC", theme::TEXT);
 
     int chosen = 0;
-    const char* names[3] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D"};
-    for (int i = 0; i < 3; ++i) {
+    const char* names[4] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
+                            "RigidBody3D"};
+    for (int i = 0; i < 4; ++i) {
         if (ui.button(static_cast<u64>(20 + i), x + kPad, y + kHeaderH + i * 64.0f,
                       w - 2.0f * kPad, 56.0f, names[i])) {
             chosen = i + 1;
