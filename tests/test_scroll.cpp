@@ -1,12 +1,23 @@
 // tests/test_scroll.cpp — F4.1: primitivo de scroll (ui/ScrollMath.h, GL-free).
 // Clamp de offset, drag sem passar do fim, tap-vs-drag, protocolo de claim
-// (slider > scroll > botão dentro de região), clip de quads com UV e
-// geometria do indicador.
+// (slider > scroll > botão dentro de região), clip de quads com UV,
+// geometria do indicador e ATINGIBILIDADE do conteúdo dos painéis
+// (ui/EditorLayout.h — Inspector com BodyComp/add TouchControls no fundo,
+// Hierarchy com >10 TICs).
 #include "TestFramework.h"
 #include "ui/ScrollMath.h"
+#include "ui/EditorLayout.h"
+#include "core/Presets.h"
+#include "core/Scene.h"
+#include "components/Transform3D.h"
+#include "components/MeshRenderer.h"
+#include "components/InputMap.h"
+#include "components/BodyComp.h"
+#include "components/TouchControls.h"
 
 using namespace vv;
 using namespace vv::scroll;
+using namespace vv::editor;
 using ::test::nearEqF;
 
 TEST(scroll_maxoffset_e_clamp) {
@@ -146,4 +157,83 @@ TEST(scroll_indicador_geometria) {
     // sem overflow → t=0 (o chamador nem desenha: maxOffset == 0)
     indicator(region, 300.0f, 0.0f, bx, by, bw, bh);
     EXPECT(nearEqF(by, region.y));
+}
+
+// ---------------------------------------------------------------------------
+// ATINGIBILIDADE (o bloqueio do dono no C33): o fundo do Inspector e as
+// linhas >10 da Hierarchy têm de ficar alcançáveis com o scroll no máximo.
+// ---------------------------------------------------------------------------
+
+TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
+    Scene s;
+    const Handle h = createTicFromPreset(s, PresetKind::PlayerBody3D, nullptr, nullptr);
+    Tic* tic = s.get(h);
+    EXPECT(tic->getComponent<Transform3D>() != nullptr);
+    EXPECT(tic->getComponent<MeshRenderer>() != nullptr);
+    EXPECT(tic->getComponent<InputMap>() != nullptr);
+    EXPECT(tic->getComponent<BodyComp>() != nullptr);
+
+    // receita completa do Player: nome 30 + transform 350 + mesh 26 +
+    // input 26 + body 62 + add TouchControls 42 = 536
+    const f32 contentH = inspectorContentHeight(*tic);
+    EXPECT(nearEqF(contentH, 536.0f));
+
+    // C33 (pior caso: superfície mais baixa que a teórica) — lista 500 px:
+    // sem scroll o fundo do botão fica FORA da região (o bug reportado)
+    const f32 listH = 500.0f;
+    const f32 contentTop = 140.0f;   // y=88 + cabeçalho 48 + 4
+    const f32 btnBottom0 = contentTop + inspectorAddTcTop(contentH) + 34.0f;
+    EXPECT(btnBottom0 > contentTop + listH);
+
+    // com o offset no MÁXIMO o botão fica inteiro dentro da região —
+    // "add TouchControls" clicável mesmo após scroll
+    const f32 off = clampOffset(999.0f, contentH, listH);
+    EXPECT(nearEqF(off, contentH - listH));
+    const f32 btnTop = contentTop + inspectorAddTcTop(contentH) - off;
+    EXPECT(btnTop >= contentTop);
+    EXPECT(btnTop + 34.0f <= contentTop + listH);
+
+    // com TouchControls presente o botão dá lugar à label (42 → 26)
+    EXPECT(tic->addComponent<TouchControls>() != nullptr);
+    EXPECT(nearEqF(inspectorContentHeight(*tic), 520.0f));
+}
+
+TEST(scroll_hierarquia_todos_os_tics_atingeis) {
+    Scene s;
+    for (u32 i = 0; i < 14; ++i) {
+        s.create("t");
+    }
+    EXPECT(s.count() == 14u);
+
+    const f32 contentH = hierarchyContentHeight(14);
+    EXPECT(nearEqF(contentH, 728.0f));   // 14 × 52
+
+    const f32 listTop = 136.0f;   // y=88 + cabeçalho 48
+    const f32 listH = 540.0f;     // painel 592 − cabeçalho (C33 teórico)
+
+    // sem scroll a linha 13 (a 14.ª) fica cortada — o comportamento antigo
+    const f32 row13_0 = listTop + 13.0f * kRowH;
+    EXPECT(row13_0 + kRowH > listTop + listH);
+
+    // com o scroll no máximo TODAS as linhas cabem na região, incluindo a 13
+    const f32 off = clampOffset(999.0f, contentH, listH);
+    EXPECT(nearEqF(off, 188.0f));
+    const f32 row13 = listTop + 13.0f * kRowH - off;
+    EXPECT(row13 >= listTop);
+    EXPECT(row13 + kRowH <= listTop + listH);
+}
+
+TEST(scroll_hierarquia_row_sob_tap) {
+    const f32 listTop = 136.0f;
+    const f32 off = 188.0f;   // máximo do teste anterior (14 TICs)
+
+    // tap no meio da linha 13 com o offset no máximo → índice 13
+    EXPECT(hierarchyRowAtTap(listTop + 13.0f * kRowH - off + 10.0f,
+                             listTop, off, 14) == 13);
+    // topo da lista → linha 0; acima da lista e além do fim → -1
+    EXPECT(hierarchyRowAtTap(listTop + 5.0f, listTop, 0.0f, 14) == 0);
+    EXPECT(hierarchyRowAtTap(listTop - 1.0f, listTop, 0.0f, 14) == -1);
+    EXPECT(hierarchyRowAtTap(listTop + 15.0f * kRowH, listTop, 0.0f, 14) == -1);
+    // lista vazia → sempre -1
+    EXPECT(hierarchyRowAtTap(listTop + 10.0f, listTop, 0.0f, 0) == -1);
 }

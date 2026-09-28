@@ -1,10 +1,34 @@
-# G.One VV 0.4.0 — F4
+# G.One VV 0.4.1 — F4.1
 
 Engine com editor. A F2 deixou o pipeline 3D mínimo (cubo hardcoded, câmara de
 orbit, grid com fade); a F3 transformou os TIC em entidades reais com
 componentes, presets de criação, editor (Hierarchy + Inspector) e serialização
 de cena `.goni` com migrações. Mobile-first: arm64-v8a, minSdk 24, landscape
 travado (`sensorLandscape`). Device de teste: Realme C33 (720x1600).
+
+## Escopo F4.1 (implementado)
+Scroll como primitivo de UI, aplicado ao Inspector e à Hierarchy — conteúdo
+mais alto que o painel fica alcançável (desbloqueia a verificação da F4 no
+device). Só scroll (CLÁUSULA CALMA): sem safe-area, sem colapsáveis, sem
+física, sem render 3D.
+- `ui/ScrollMath.h` (GL-free, testada no CI): clamp `[0, content − visible]`,
+  drag-to-scroll com clamp nos dois extremos, limiar tap (12 px) vs drag,
+  protocolo de claim (slider > scroll > botão dentro de região), clip de
+  quads por interseção com UV proporcional, geometria do indicador
+- `UiContext::beginScroll(id, region, contentHeight)` / `endScroll()` —
+  slots por id (offset persiste), botões dentro da região só desenham (o tap
+  é re-despachado pelo painel — "add TouchControls" clicável mesmo após
+  scroll), sliders mantêm prioridade, indicador fino ACCENT só com overflow;
+  recorte por interseção (sem glScissor no quad batch único)
+- Hierarchy: lista TODOS os TICs (fim do corte em ~10 linhas da F3); tap na
+  linha seleciona via `hierarchyRowAtTap`
+- Inspector: BodyComp, `velx` e o botão "add TouchControls" no fundo ficam
+  sempre alcançáveis; `ui/EditorLayout.h` é a fonte ÚNICA das alturas de
+  conteúdo (desenho e testes partilham os números)
+- Gestos sem conflito: drag na região = scroll; drag no slider = slider;
+  tap = seleção/ação; viewport central NÃO é região de scroll (orbit/pinch
+  intactos)
+- CI: suíte do core (122 testes) + APK assinado
 
 ## Escopo F4 (implementado)
 Física core num novo `TickGroup::Physics` (entre Update e PostUpdate) —
@@ -66,6 +90,9 @@ Sem física (BodyComp é F4), sem luzes, sem assets, sem animação, sem linguag
 (CLÁUSULA CALMA).
 
 ## Histórico
+- **F4.1 (0.4.1)**: scroll como primitivo de UI — Inspector e Hierarchy com
+  ScrollRegion (clamp, drag-vs-tap, indicador, tap re-despachado); fundo dos
+  painéis alcançável no device.
 - **F4 (0.4.0)**: física core — 4 formas + sweep/CCD, BodyComp, slide do
   Character, Rigid primitivo, TouchControls (modo Play) e preset RigidBody3D.
 - **F3.1 (0.3.1)**: porto do editor — clamps generosos de câmara (zoom 300,
@@ -82,7 +109,7 @@ Sem física (BodyComp é F4), sem luzes, sem assets, sem animação, sem linguag
    → o job **init-keystore** gera o artifact `vv-release-keystore` (baixe e guarde OFFLINE).
 2. `base64 -w0 vv-release.jks` → configure os secrets:
    `VV_KEYSTORE` (base64), `VV_STORE_PW`, `VV_KEY_ALIAS`, `VV_KEY_PW`.
-3. Todo push publica o artifact `goni-vv-0.4.0-release-signed` (APK arm64).
+3. Todo push publica o artifact `goni-vv-0.4.1-release-signed` (APK arm64).
    Sem secrets: sai `-UNSIGNED` (nunca debug).
 
 Trocar a keystore muda a assinatura — exige desinstalar/reinstalar no device.
@@ -92,6 +119,21 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
 
 ## Testes do core (Linux)
 `cmake -S tests -B build-tests && cmake --build build-tests && ctest --test-dir build-tests`
+
+## Verificação no Realme C33 (dono) — F4.1 (scroll)
+1. Instalar o APK 0.4.1 → confirmar "0.4.1" nas infos da app.
+2. **Inspector**: selecionar o PlayerBody3D → arrastar PARA CIMA na lista →
+   o conteúdo desce e revela `body: …`, `velx` e o botão **add TouchControls**
+   no fundo → tocar no botão (clicável após o scroll) → aparece "tc: stick +
+   jump"; o indicador fino aparece à direita só quando há overflow.
+3. **Hierarchy**: criar 12+ TICs (repetir "+") → arrastar a lista → TODAS as
+   linhas alcançáveis; tap numa linha que estava cortada seleciona (frame
+   branco + Inspector mostra o TIC).
+4. **Gestos sem conflito**: arrastar na pista de um slider (px/py/velx) muda
+   o valor e NÃO faz scroll; arrastar fora da pista faz scroll; o viewport
+   central continua a orbitar/pinçar como sempre.
+5. **Limites**: no topo e no fundo o scroll para (não passa do fim); soltar
+   sem mover = tap (não scrolla).
 
 ## Verificação no Realme C33 (dono) — F4
 1. Instalar o APK 0.4.0 → confirmar "0.4.0" nas infos da app.

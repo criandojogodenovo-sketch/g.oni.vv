@@ -2,7 +2,7 @@
 #include "TestFramework.h"
 
 int main() {
-    std::printf("== testes do core — G.One VV 0.3.0 ==\n");
+    std::printf("== testes do core — G.One VV 0.4.1 ==\n");
     for (const auto& c : ::test::cases()) {
         const int before = ::test::failures();
         c.fn();
