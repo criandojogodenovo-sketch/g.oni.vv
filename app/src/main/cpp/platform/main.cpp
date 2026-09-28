@@ -1,13 +1,21 @@
-// platform/main.cpp — android_main (glue) da G.One VV — F2.
-// Fluxo: glue → EGL/GLES3 (depth 24) → loop de timestep fixo →
-//        pass 3D (cubo+grid, depth test) → pass UI (sem depth) → swap.
+// platform/main.cpp — android_main (glue) da G.One VV — F3.
+// Fluxo: glue → EGL/GLES3 (depth 24) → loop de timestep fixo
+//        → TickGroups (Pre→Up→Post→Render; TransformSystem no Update)
+//        → pass 3D (todos os TICs com MeshRenderer + grid, depth test)
+//        → pass UI (toolbar F1 + Hierarchy/Inspector/menus F3, sem depth).
 #include <android_native_app_glue.h>
 #include <GLES3/gl3.h>
 #include <cmath>
 #include <cstdio>
 
+#include "components/MeshRenderer.h"
+#include "components/Transform3D.h"
+#include "core/Presets.h"
 #include "core/Scene.h"
+#include "core/SceneSerializer.h"
+#include "core/Tick.h"
 #include "core/Time.h"
+#include "core/TransformSystem.h"
 #include "platform/Log.h"
 #include "platform/CrashHandler.h"
 #include "platform/EglContext.h"
@@ -17,6 +25,7 @@
 #include "render/Grid.h"
 #include "render/Mesh.h"
 #include "render/Renderer.h"
+#include "ui/EditorUi.h"
 #include "ui/FontAtlas.h"
 #include "ui/UiContext.h"
 
@@ -34,21 +43,63 @@ Time       g_time;
 bool       g_ready = false;
 
 // ---- F2: viewport 3D -------------------------------------------------------
-Camera g_camera;              // orbit: 1 dedo = yaw/pitch, pinch = zoom
+Camera g_camera;              // orbit: 1 dedo = yaw/pitch, pinch = zoom (FIXA — F8)
 Mesh   g_cubeMesh;            // cubo procedural (PLACEHOLDER — F5 importa mesh)
 Grid   g_grid;                // grid de chão com fade (PLACEHOLDER — F8)
+
+// ---- F3: editor ------------------------------------------------------------
+editor::EditorState g_editor;        // seleção + overlays
+TickGroups          g_systems;       // runner (não-dono)
+TransformSystem     g_transformSystem;
+
+char g_scenePath[512] = "";          // <internalDataPath>/scene.goni
 
 // estado do touch → câmara (entre frames)
 bool g_orbitActive = false;
 f32  g_orbitX = 0.0f;
 f32  g_orbitY = 0.0f;
 f32  g_pinchPrev = 0.0f;
-constexpr f32 kOrbitSens = 0.0075f;   // rad/px (~0,43° por pixel)
+bool g_gestureInView = false;        // F3: gesto nasce só dentro do viewport central
+constexpr f32 kOrbitSens = 0.0075f;  // rad/px (~0,43° por pixel)
 
 DrawStats g_lastUiStats;   // métricas do pass UI (disponíveis 1 frame depois)
 
-void updateCameraOrbit(const InputState& in) {
+// toast (mensagem transitória acima da status line — feedback Save/Load/criação)
+char g_toast[96] = "";
+f32  g_toastT = 0.0f;
+
+void showToast(const char* msg) {
+    std::snprintf(g_toast, sizeof(g_toast), "%s", msg);
+    g_toastT = 1.8f;
+}
+
+void updateCameraOrbit(const InputState& in, const UiRect& view) {
     const u32 active = in.activePointers();
+    if (active == 0) {
+        g_gestureInView = false;
+        g_orbitActive = false;
+        g_pinchPrev = 0.0f;
+        return;
+    }
+
+    // F3: o PRIMEIRO toque decide o dono do gesto. Se nasceu num painel
+    // (Hierarchy/Inspector/toolbar), a câmara não orbita — mesmo que o dedo
+    // depois atravesse o viewport.
+    if (!g_gestureInView) {
+        for (u32 s = 0; s < kMaxPointerSlots; ++s) {
+            if (!in.pressed(s)) continue;
+            f32 x, y;
+            in.pos(s, x, y);
+            if (x >= view.x && x < view.x + view.w && y >= view.y && y < view.y + view.h) {
+                g_gestureInView = true;
+            }
+            break;   // só o primeiro pointer com edge interessa
+        }
+    }
+    if (!g_gestureInView) {
+        return;
+    }
+
     if (active >= 2) {
         // pinch: distância entre os dois primeiros dedos ativos
         f32 x0 = 0, y0 = 0, x1 = 0, y1 = 0;
@@ -107,7 +158,7 @@ void onAppCmd(android_app* app, i32 cmd) {
                 break;
             }
             g_renderer.resize(g_egl.width(), g_egl.height());
-            // F2: geometria procedural do viewport 3D
+            // F3: geometria procedural do viewport (mesh partilhado dos presets)
             {
                 const CubeMeshData cube = makeCube(1.0f);
                 if (!g_cubeMesh.create(cube.vertices.data(),
@@ -153,20 +204,58 @@ i32 onInputEvent(android_app* /*app*/, AInputEvent* event) {
     return g_input.process(event) ? 1 : 0;
 }
 
+// pass 3D: desenha TODOS os TICs com MeshRenderer (F3) — já não é um cubo
+// hardcoded: o modelo vem do Transform3D do mesmo dono (cache world).
+DrawStats drawTics(const Mat4& vp) {
+    DrawStats st{};
+    const ComponentStore& comps = g_scene.components();
+    const auto& mrs = comps.meshRenderers();
+    for (u32 i = 0; i < mrs.size(); ++i) {
+        const MeshRenderer& mr = mrs.at(i);
+        if (!mr.mesh) {
+            continue;   // sem mesh (tag "none" de cena antiga) — nada a desenhar
+        }
+        Mat4 model = Mat4::identity();
+        if (const Transform3D* tr = comps.transforms().find(mrs.owner(i))) {
+            model = tr->world;   // mantido por TransformSystem (grupo Update)
+        }
+        st = st + g_renderer.drawMesh(*mr.mesh, model, vp);
+    }
+    return st;
+}
+
+void drawToast() {
+    if (g_toastT <= 0.0f || !g_ui.hasFont()) {
+        return;
+    }
+    const f32 w = static_cast<f32>(g_egl.width());
+    const f32 sh = static_cast<f32>(g_egl.height());
+    const f32 alpha = g_toastT < 1.0f ? g_toastT : 1.0f;
+    const f32 tw = g_ui.fontWidth(g_toast);
+    const f32 bw = tw + 32.0f;
+    const f32 bh = 44.0f;
+    const f32 bx = (w - bw) * 0.5f;
+    const f32 by = sh - UiContext::kStatusH - bh - 18.0f;
+    const f32 bg[4] = {theme::PANEL[0], theme::PANEL[1], theme::PANEL[2], 0.95f * alpha};
+    const f32 tx[4] = {theme::TEXT[0], theme::TEXT[1], theme::TEXT[2], alpha};
+    g_ui.panel(bx, by, bw, bh, bg);
+    g_ui.frame(bx, by, bw, bh, 1.0f, tx);
+    g_ui.label(bx + 16.0f, by + bh * 0.5f + g_ui.fontHeight() * 0.30f, g_toast, tx);
+}
+
 void frame() {
     const f32 w = static_cast<f32>(g_egl.width());
     const f32 h = static_cast<f32>(g_egl.height());
 
-    // input do frame anterior → câmara (orbit/pinch), antes de clearEdges
-    updateCameraOrbit(g_input);
+    // input do frame anterior → câmara (só gestos nascidos no viewport central)
+    updateCameraOrbit(g_input, editor::centerRect(w, h));
 
-    // ---- pass 3D: clear color+depth, cubo assente no grid, linhas com fade
+    // ---- pass 3D: clear color+depth, TICs com MeshRenderer + grid com fade
     g_renderer.beginFrame();
     const Mat4 view = g_camera.view();
     const Mat4 proj = g_camera.proj(w / h);
     const Mat4 vp = Mat4::mul(proj, view);
-    const Mat4 model = Mat4::translation(0.0f, 0.5f, 0.0f);   // cubo assente no chão
-    const DrawStats st3d = g_renderer.drawMesh(g_cubeMesh, model, vp);
+    const DrawStats st3d = drawTics(vp);
     const DrawStats stGrid = g_grid.draw(vp, g_camera.eye());
 
     // ---- pass UI: immediate-mode da F1 por cima (sem depth — nunca ocluída)
@@ -174,9 +263,62 @@ void frame() {
 
     bool clicks[3] = {false, false, false};
     g_ui.toolbar(clicks);   // exatamente 3 botões (Menu, Play, Settings)
-    if (clicks[0]) { LOGI("ui: botão Menu"); }
+    if (clicks[0]) {
+        g_editor.fileMenu = !g_editor.fileMenu;   // F3: Menu abre Save/Load
+        g_editor.plusMenu = false;
+    }
     if (clicks[1]) { LOGI("ui: botão Play"); }
     if (clicks[2]) { LOGI("ui: botão Settings"); }
+
+    // F3: painéis do editor (Hierarquia esquerda, Inspector direita)
+    if (editor::drawHierarchy(g_ui, g_scene, g_editor)) {
+        g_editor.plusMenu = true;   // "+" no cabeçalho abre os presets
+        g_editor.fileMenu = false;
+    }
+    editor::drawInspector(g_ui, g_scene, g_editor);   // sliders editam o Transform3D
+
+    // overlay "+" → presets (cria e seleciona)
+    if (g_editor.plusMenu) {
+        const int choice = editor::drawPlusMenu(g_ui, g_input, w, h, g_editor);
+        if (choice > 0) {
+            const PresetKind kind = static_cast<PresetKind>(choice - 1);
+            const Handle hnew = createTicFromPreset(g_scene, kind, &g_cubeMesh,
+                                                    g_renderer.litMaterial());
+            if (hnew.valid()) {
+                g_editor.selected = hnew;
+                char msg[64];
+                std::snprintf(msg, sizeof(msg), "%s criado", presetName(kind));
+                showToast(msg);
+                LOGI("editor: %s criado", presetName(kind));
+            }
+        }
+    }
+
+    // overlay Menu → Save/Load .goni
+    if (g_editor.fileMenu) {
+        const int choice = editor::drawFileMenu(g_ui, g_input, w, h, g_editor);
+        if (choice == 1 && g_scenePath[0]) {
+            const bool ok = SceneSerializer::save(g_scene, g_scenePath);
+            char msg[64];
+            std::snprintf(msg, sizeof(msg), ok ? "cena salva (%u tics)" : "falha ao salvar",
+                          g_scene.count());
+            showToast(msg);
+            LOGI("editor: %s → %s", msg, g_scenePath);
+        } else if (choice == 2 && g_scenePath[0]) {
+            SceneSerializer::LoadCtx ctx;
+            ctx.cubeMesh = &g_cubeMesh;
+            ctx.material = g_renderer.litMaterial();
+            const bool ok = SceneSerializer::load(g_scene, g_scenePath, ctx);
+            char msg[64];
+            std::snprintf(msg, sizeof(msg), ok ? "cena carregada (%u tics)" : "falha ao carregar",
+                          g_scene.count());
+            showToast(msg);
+            g_editor.selected = Handle::invalid();   // seleção antiga não sobrevive ao load
+            LOGI("editor: %s ← %s", msg, g_scenePath);
+        }
+    }
+
+    drawToast();
 
     // status line inferior: fps + TICs + vértices desenhados + draw calls
     // (parte da UI usa as métricas do frame anterior — lag de 1 frame)
@@ -190,18 +332,27 @@ void frame() {
     g_ui.endFrame();                       // submete solids + glyphs
     g_lastUiStats = g_renderer.endFrame(); // desenha a UI por cima do 3D
     g_egl.swap();
-    g_input.clearEdges();   // edges já consumidas pela UI neste frame
+    g_input.clearEdges();   // edges já consumidas pela UI/câmara neste frame
 }
 
 } // namespace
 
 void android_main(android_app* app) {
-    // diagnóstico: crash log em <internalDataPath>/goni_crash.log (passo 7)
+    // diagnóstico: crash log em <internalDataPath>/goni_crash.log (passo 7 F1)
     installCrashHandler(app->activity ? app->activity->internalDataPath : nullptr);
+
+    // F3: path da cena serializada (<internalDataPath>/scene.goni)
+    if (app->activity && app->activity->internalDataPath) {
+        std::snprintf(g_scenePath, sizeof(g_scenePath), "%s/scene.goni",
+                      app->activity->internalDataPath);
+    }
+
+    // F3: systems do engine (ordem interna ao grupo = registo)
+    g_systems.add(TickGroup::Update, &g_transformSystem);
 
     app->onAppCmd = onAppCmd;
     app->onInputEvent = onInputEvent;
-    LOGI("G.One VV 0.2.0 — F2 (passo 6: primeiro objeto 3D)");
+    LOGI("G.One VV 0.3.0 — F3 (componentes, presets, editor)");
 
     double last = nowSeconds();
     while (true) {
@@ -229,11 +380,17 @@ void android_main(android_app* app) {
         // Loop de timestep fixo (guard anti-spiral dentro de Time).
         const u32 steps = g_time.beginFrame(realDt);
         for (u32 s = 0; s < steps; ++s) {
-            // update fixo — F1: sem componentes/sistemas (apenas consome o passo)
+            // F3: cada passo fixo roda os TickGroups na ordem
+            // PreUpdate → Update → PostUpdate → Render
+            g_systems.run(g_scene, static_cast<f32>(g_time.fixedDt));
             g_time.endStep();
         }
 
         frame();
+
+        if (g_toastT > 0.0f) {
+            g_toastT -= static_cast<f32>(realDt);
+        }
 
         g_fpsAccum += realDt;
         ++g_fpsFrames;
