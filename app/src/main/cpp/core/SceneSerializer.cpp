@@ -2,6 +2,7 @@
 #include "components/BodyComp.h"
 #include "components/InputMap.h"
 #include "components/MeshRenderer.h"
+#include "components/TouchControls.h"
 #include "components/Transform3D.h"
 #include "core/ComponentStore.h"
 #include "core/Scene.h"
@@ -67,6 +68,16 @@ void appendComponentJson(Json& arr, const InputMap* im) {
     }
     Json c = Json::makeObject();
     c.addMember("type", Json::makeString("InputMap"));
+    arr.addItem(std::move(c));
+}
+
+// F4: TouchControls — só a PRESENÇA (layout fixo, sem dados a persistir)
+void appendComponentJson(Json& arr, const TouchControls* tc) {
+    if (!tc) {
+        return;
+    }
+    Json c = Json::makeObject();
+    c.addMember("type", Json::makeString("TouchControls"));
     arr.addItem(std::move(c));
 }
 
@@ -240,6 +251,7 @@ bool save(const Scene& scene, const char* path) {
         appendComponentJson(comps, cs.meshRenderers().find(t.handle));
         appendComponentJson(comps, cs.inputMaps().find(t.handle));
         appendComponentJson(comps, cs.bodies().find(t.handle));
+        appendComponentJson(comps, cs.touchControls().find(t.handle));
         jt.addMember("components", std::move(comps));
 
         tics.addItem(std::move(jt));

@@ -494,3 +494,49 @@ TEST(tc_segundo_toque_na_almofada_e_ignorado) {
     EXPECT(!tc.touchBegin(1, l.joyCX + 10.0f, l.joyCY, 1600.0f, 720.0f));
     tc.touchEnd(0);
 }
+
+// ---- InputMap ← TouchControls irmão + serializer TC (F4-D) ----------------------
+
+TEST(character_com_touchcontrols_irmao_move_e_salta) {
+    Scene s;
+    makeBody(s, "chao", BodyType::Static, Vec3{0, -0.5f, 0},
+             phys::OBB{Vec3{0, 0, 0}, Vec3{10, 0.5f, 10}, Quat::identity()});
+    const Handle p = makeBody(s, "player", BodyType::Character, Vec3{0, 0.55f, 0},
+                              phys::Capsule{Vec3{0, 0, 0}, 0.3f, 0.25f});
+    s.get(p)->addComponent<InputMap>();   // SEM source explícita
+    TouchControls* tc = s.get(p)->addComponent<TouchControls>();
+
+    const auto l = TouchControls::layout(1600.0f, 720.0f);
+    phys::PhysicsSystem sys;
+    sys.enabled = true;
+    sys.gravity = 0.0f;
+
+    // sem toque → parado
+    sys.tick(s, 1.0f / 60.0f);
+    EXPECT(nearEqF(s.get(p)->getComponent<Transform3D>()->pos.x, 0.0f));
+
+    // stick para a direita → move na base da câmara (frame.right)
+    EXPECT(tc->touchBegin(0, l.joyCX, l.joyCY, 1600.0f, 720.0f));
+    tc->touchMove(0, l.joyCX + l.joyR, l.joyCY);   // eixo x = 1
+    sys.tick(s, 1.0f / 60.0f);
+    EXPECT(nearEqF(s.get(p)->getComponent<Transform3D>()->pos.x,
+                   sys.charSpeed / 60.0f, 1e-4f));
+    tc->touchEnd(0);
+}
+
+TEST(touchcontrols_serializer_presenca) {
+    Scene a;
+    const Handle h = a.create("player");
+    a.get(h)->addComponent<Transform3D>();
+    a.get(h)->addComponent<InputMap>();
+    a.get(h)->addComponent<TouchControls>();
+
+    const char* path = "/tmp/goni_test_tc.goni";
+    EXPECT(SceneSerializer::save(a, path));
+    Scene b;
+    EXPECT(SceneSerializer::load(b, path, SceneSerializer::LoadCtx{}));
+    Tic* t = b.get(b.find("player"));
+    EXPECT(t != nullptr);
+    EXPECT(t->getComponent<TouchControls>() != nullptr);
+    EXPECT(t->getComponent<InputMap>() != nullptr);
+}

@@ -2,6 +2,7 @@
 // primitivo, repel). Construída sobre as primitivas puras de physics/Shapes.
 #include "physics/PhysicsSystem.h"
 #include "components/BodyComp.h"
+#include "components/TouchControls.h"
 #include "physics/InputSource.h"
 #include "components/InputMap.h"
 #include "components/Transform3D.h"
@@ -289,12 +290,17 @@ void PhysicsSystem::tick(Scene& scene, f32 dt) {
         Vec2 ax{0.0f, 0.0f};
         bool wantsJump = false;
         if (InputMap* im = store.inputMaps().find(w.owner)) {
-            const InputSource* src = im->source;   // fonte explícita
+            // fonte explícita OU o TouchControls IRMÃO do mesmo TIC (F4-D);
+            // resolvido de novo a cada tick — fonte destruída nunca pendura
+            const InputSource* src = im->source;
+            if (!src) {
+                src = store.touchControls().find(w.owner);
+            }
             if (src) {
                 ax = src->axis();
                 wantsJump = src->action("jump");
             }
-            // sem fonte explícita: TouchControls irmão entra na F4-D
+            // sem fonte → o TIC não recebe input (fica parado, só gravidade)
         }
         const Vec3 want = frame.right * ax.x + frame.fwd * ax.y;
         w.velocity.x = want.x * charSpeed;
