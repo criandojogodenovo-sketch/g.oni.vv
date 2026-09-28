@@ -35,6 +35,10 @@ add_library(goni_vv SHARED
         components/BodyComp.h
         components/InputMap.h
         physics/Shapes.h
+        physics/Shapes.cpp
+        physics/InputSource.h
+        physics/PhysicsSystem.h
+        physics/PhysicsSystem.cpp
         math/Math.h
         render/Vertex.h
         render/Mesh.h

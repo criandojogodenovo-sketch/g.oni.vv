@@ -162,6 +162,7 @@ void segBoxClosest(const Segment& seg, const Vec3& c, const Vec3& h,
 struct SweepResult {
     bool hit = false;
     f32  toi = 1.0f;        // fração do delta no primeiro contacto [0,1]
+    f32  depth = 0.0f;      // profundidade no contacto discreto (toi==0)
     Vec3 normal{0.0f, 0.0f, 0.0f};   // normal de contacto (aponta contra o movimento)
 };
 

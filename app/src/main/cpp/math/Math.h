@@ -10,6 +10,14 @@
 
 namespace vv {
 
+struct Vec2 {
+    f32 x = 0.0f;
+    f32 y = 0.0f;
+
+    Vec2() = default;
+    constexpr Vec2(f32 ix, f32 iy) : x(ix), y(iy) {}
+};
+
 struct Vec3 {
     f32 x = 0.0f;
     f32 y = 0.0f;

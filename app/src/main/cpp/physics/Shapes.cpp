@@ -230,12 +230,14 @@ Contact segBoxContact(const Segment& seg, f32 r, const Vec3& c, const Vec3& h,
         const Vec3 d = segPt - boxPt;
         const f32 dist = length(d);
         out.separation = dist;          // usado pelo avanço conservador
-        if (dist > r) {
-            return out;   // sem contacto (dist > raio)
-        }
-        out.hit = true;
-        out.depth = r - dist;
+        // normal (gradiente da SDF) SEMPRE preenchida — o avanço conservador
+        // usa-a para o passo exato mesmo sem contacto
         out.normal = dist > 1e-9f ? d * (1.0f / dist) : Vec3{0, 1, 0};
+        if (dist > r) {
+            return out;   // fora — não é contacto; o avanço conservador decide
+        }
+        out.hit = true;              // tocando (== r) ou penetrando (< r)
+        out.depth = r - dist;
         return out;
     }
 
@@ -335,24 +337,63 @@ SweepResult sweepSegBox(const Segment& seg0, f32 r, const Vec3& delta,
         if (start.hit) {
             out.hit = true;
             out.toi = t0;
+            out.depth = start.depth;
             out.normal = start.normal;
             return out;
         }
 
         // contínuo na janela: avanço conservador — o passo (d−r)/|delta| é
         // seguro porque cada ponto do segmento anda exatamente |delta| por
-        // unidade de t, logo a distância nunca diminui mais depressa
+        // unidade de t, logo a distância nunca diminui mais depressa.
+        // Encostado (gap≈0): sonda de diferença finita distingue APROXIMAÇÃO
+        // (bissecção do primeiro toque) de deslize tangencial (deixa passar).
         f32 t = t0;
-        for (int it = 0; it < 24 && t < t1; ++it) {
+        int stalls = 0;
+        for (int it = 0; it < 32 && t < t1; ++it) {
             const Segment st{seg0.a + delta * t, seg0.b + delta * t};
             const Contact ct = segBoxContact(st, r, c, h, rot);
             if (ct.hit) {
                 out.hit = true;
                 out.toi = t;
+                out.depth = ct.depth;
                 out.normal = ct.normal;
                 return out;
             }
-            t += (ct.separation - r) / dLen;
+            const f32 gap = ct.separation - r;
+            // passo EXATO: a normal do contacto é o gradiente da SDF; pela
+            // convexidade dist(t) ≥ dist(0) − t·rate (tangente), logo o passo
+            // nunca salta o primeiro contacto — converge em 1-2 iterações
+            const f32 rate = std::fabs(dot(delta, ct.normal));
+            if (gap > 1e-5f && rate > 1e-6f) {
+                t += gap / rate;
+                stalls = 0;
+                continue;
+            }
+            if (gap > 1e-5f) {
+                break;   // afasta-se ou desliza puro: sem contacto à frente
+            }
+            const f32 probe = t + 1e-3f < t1 ? t + 1e-3f : t1;
+            const Segment sn{seg0.a + delta * probe, seg0.b + delta * probe};
+            const Contact cn = segBoxContact(sn, r, c, h, rot);
+            if (cn.hit) {
+                // aproxima devagar: bissecção do primeiro toque em [t, probe]
+                f32 lo = t, hi = probe;
+                for (int b = 0; b < 10; ++b) {
+                    const f32 mid = (lo + hi) * 0.5f;
+                    const Segment sm{seg0.a + delta * mid, seg0.b + delta * mid};
+                    if (segBoxContact(sm, r, c, h, rot).hit) {
+                        hi = mid;
+                    } else {
+                        lo = mid;
+                    }
+                }
+                t = hi;   // próxima iteração: contacto em t
+                continue;
+            }
+            if (++stalls >= 2) {
+                break;   // deslize tangencial — não bloqueia o movimento
+            }
+            t = probe;
         }
     }
     return out;   // sem contacto no delta todo

@@ -1,18 +1,20 @@
 #pragma once
-// components/InputMap.h — mapa de entrada do TIC (F3).
+// components/InputMap.h — mapa de entrada do TIC (F3; fonte na F4).
 //
-// PLACEHOLDER — NÃO É IMPLEMENTAÇÃO FINAL.
-// Motivo: o preset PlayerBody3D da spec nasce com InputMap(vazio); bindings
-// de ação (eixo/botão → ação) só fazem sentido com física/personagem — F4
-// preenche os campos. Hoje o componente existe, é registrado no registry e
-// serializa (presença round-trip), mas não tem dados nem comportamento.
+// F4: o InputMap liga ZERO OU UMA fonte de input (physics/InputSource.h).
+// O PhysicsSystem lê axis()/action() da fonte ligada a cada tick; sem fonte
+// (source == nullptr E sem TouchControls irmão), o TIC não recebe input.
+// O campo é um ponteiro NÃO-DONO — o fluxo default resolve a fonte de novo
+// a cada tick (nunca fica pendente; ver InputSource.h).
 #include "core/Component.h"
 
 namespace vv {
 
+struct InputSource;
+
 class InputMap : public Component {
 public:
-    // F4: bindings ação → tecla/pointer. Vazio na F3 por design (CLÁUSULA CALMA).
+    const InputSource* source = nullptr;   // fonte ligada (não-dono; pode ser nula)
 };
 
 } // namespace vv

@@ -35,6 +35,7 @@ add_executable(test_core
         ${CORE_DIR}/render/Camera.cpp
         # F4: física pura (sem GL)
         ${CORE_DIR}/physics/Shapes.cpp
+        ${CORE_DIR}/physics/PhysicsSystem.cpp
         ${CORE_DIR}/core/TransformSystem.cpp)
 
 
