@@ -92,7 +92,7 @@ jobs:
       - name: Publicar artifact do APK
         uses: actions/upload-artifact@v4
         with:
-          name: goni-vv-0.3.1-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
+          name: goni-vv-0.4.0-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 

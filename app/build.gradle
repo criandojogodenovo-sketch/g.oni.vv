@@ -1,4 +1,4 @@
-// app/build.gradle — G.One VV 0.3.1 (F3.1)
+// app/build.gradle — G.One VV 0.4.0 (F4)
 // Mobile-first: arm64-v8a, minSdk 24, NativeActivity, landscape travado.
 // Zero Kotlin/Java próprio (hasCode=false — shim do sistema apenas).
 plugins {
@@ -24,8 +24,8 @@ android {
         applicationId 'vv.goni'
         minSdk 24
         targetSdk 34
-        versionCode 4
-        versionName '0.3.1'
+        versionCode 5
+        versionName '0.4.0'
 
         ndk {
             abiFilters 'arm64-v8a'   // device de teste: Realme C33 (720x1600)

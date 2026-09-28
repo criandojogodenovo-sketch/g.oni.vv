@@ -437,7 +437,7 @@ void android_main(android_app* app) {
 
     app->onAppCmd = onAppCmd;
     app->onInputEvent = onInputEvent;
-    LOGI("G.One VV 0.3.1 — F3.1 (clamps de câmara + grid shader)");
+    LOGI("G.One VV 0.4.0 — F4 (física core + touch controls)");
 
     double last = nowSeconds();
     while (true) {

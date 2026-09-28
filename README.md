@@ -1,10 +1,32 @@
-# G.One VV 0.3.1 — F3.1
+# G.One VV 0.4.0 — F4
 
 Engine com editor. A F2 deixou o pipeline 3D mínimo (cubo hardcoded, câmara de
 orbit, grid com fade); a F3 transformou os TIC em entidades reais com
 componentes, presets de criação, editor (Hierarchy + Inspector) e serialização
 de cena `.goni` com migrações. Mobile-first: arm64-v8a, minSdk 24, landscape
 travado (`sensorLandscape`). Device de teste: Realme C33 (720x1600).
+
+## Escopo F4 (implementado)
+Física core num novo `TickGroup::Physics` (entre Update e PostUpdate) —
+`physics/` é C++ puro, host-testável, sem GL:
+- Formas: `Sphere`, `AABB`, `OBB` (rotQuat), `Capsule` (eixo Y local do TIC);
+  interseções puras (sphere×{sphere,AABB,OBB,Capsule}, AABB×AABB, OBB×OBB SAT
+  15 eixos, Capsule×Capsule) e sweep contínuo com TOI+normal para sphere/
+  capsule contra AABB/OBB com CCD adaptativo (substeps máx 8 + avanço
+  conservador exato via gradiente da SDF — nunca tunela paredes finas)
+- `BodyComp` (Static/Character/Rigid + shape variant + velocity + grounded);
+  `PhysicsSystem`: Character com input e slide estilo `move_and_slide`
+  (remove a componente normal; iterações extra para cantos), repel entre
+  Characters, Rigid com gravidade + colisão primitiva contra Static +
+  amortecimento no chão. PLACEHOLDER DE SOLVER: dois Rigid empilhados
+  intersectam (sem stacking/resting, documentado)
+- `TouchControls` mínimo e FIXO (joystick esquerda + botão JUMP direita, tema
+  mono, desenhado só em modo Play) como fonte de `InputSource`; `InputMap`
+  liga zero ou uma fonte (sem fonte → sem input); UI criável = F6
+- Presets: Player/Character/Static ganham Body, NOVO RigidBody3D; TouchControls
+  adicionável via Inspector; Inspector mostra BodyComp (tipo·forma·chão) com
+  slider `velx` para lançar corpos no device (testes de CCD/empurrão)
+- CI: suíte do core (113 testes) + APK assinado
 
 ## Escopo F3.1 (implementado)
 A pedido do dono no C33: remover as barreiras artificiais de câmara e baratear
@@ -38,12 +60,14 @@ presets, serialização, física ou UI de editor).
 - `platform/main.cpp`: pass 3D desenha todos os TICs com MeshRenderer
   (fim do cubo hardcoded); TickGroups por passo fixo; gate da câmara
   (gestos só nascem no viewport central)
-- CI: `verify-entry-symbols` + suíte do core (74 testes) + APK assinado
+- CI: `verify-entry-symbols` + suíte do core (113 testes) + APK assinado
 
 Sem física (BodyComp é F4), sem luzes, sem assets, sem animação, sem linguagem
 (CLÁUSULA CALMA).
 
 ## Histórico
+- **F4 (0.4.0)**: física core — 4 formas + sweep/CCD, BodyComp, slide do
+  Character, Rigid primitivo, TouchControls (modo Play) e preset RigidBody3D.
 - **F3.1 (0.3.1)**: porto do editor — clamps generosos de câmara (zoom 300,
   pitch 89°) e grid de linhas → quad de shader (4 vértices, fade adaptativo,
   anti-moiré); near/far recalibrados.
@@ -58,7 +82,7 @@ Sem física (BodyComp é F4), sem luzes, sem assets, sem animação, sem linguag
    → o job **init-keystore** gera o artifact `vv-release-keystore` (baixe e guarde OFFLINE).
 2. `base64 -w0 vv-release.jks` → configure os secrets:
    `VV_KEYSTORE` (base64), `VV_STORE_PW`, `VV_KEY_ALIAS`, `VV_KEY_PW`.
-3. Todo push publica o artifact `goni-vv-0.3.1-release-signed` (APK arm64).
+3. Todo push publica o artifact `goni-vv-0.4.0-release-signed` (APK arm64).
    Sem secrets: sai `-UNSIGNED` (nunca debug).
 
 Trocar a keystore muda a assinatura — exige desinstalar/reinstalar no device.
@@ -69,20 +93,30 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
 ## Testes do core (Linux)
 `cmake -S tests -B build-tests && cmake --build build-tests && ctest --test-dir build-tests`
 
-## Verificação no Realme C33 (dono)
-1. Instalar o APK release → landscape: toolbar (3 botões), Hierarchy à esquerda,
-   Inspector à direita, viewport com grid no centro, status line (fps/tics/verts/dc).
-2. Tocar **+** (cabeçalho Hierarchy) → escolher um preset → o TIC aparece na
-   lista e o cubo nasce assente no grid.
-3. Selecionar o TIC → Inspector mostra Transform3D → arrastar sliders
-   (px/py/pz, rx/ry/rz, sx/sy/sz) → o cubo move/roda/escala no viewport.
-4. Orbit: 1 dedo no viewport central; pinch = zoom; painéis não orbitam.
-5. Menu → **Save cena** → toast "cena salva (N tics)". Matar a app, reabrir,
-   criar outro TIC, Menu → **Load cena** → os TICs salvos voltam com as edições
-   (ficheiro em `/data/user/0/vv.goni/files/scene.goni`).
-6. Câmara F3.1: pinch afasta até 300 (a cena vira um ponto e o grid NUNCA
-   mostra a borda) e aproxima até ~1; orbit até ver quase de cima (pitch ~89°)
-   sem inversão; sem faíscas/z-fighting em nenhum zoom. O grid agora custa
-   4 vértices — confirme a queda de `verts` e a subida de `fps` na status line
-   face à F3 (baseline 19 fps @ 3 TICs).
-7. Crash log: `/data/user/0/vv.goni/files/goni_crash.log` (mesma rotina da F1).
+## Verificação no Realme C33 (dono) — F4
+1. Instalar o APK 0.4.0 → confirmar "0.4.0" nas infos da app.
+2. **Montar a arena** (modo editor):
+   - Chão: **+** → StaticBody3D → Inspector: `py −0.5`, `sx 5`, `sy 1`, `sz 5`
+     (OBB 5×1×5 com topo em y=0).
+   - Parede fina rotacionada: **+** → StaticBody3D → `px 1.85`, `py 0.5`,
+     `sx 4`, `sy 1`, `sz 0.2`, `ry 30`.
+   - Player: **+** → PlayerBody3D (nasce em (0, 0.55, 0)).
+3. **TouchControls**: com o player selecionado → Inspector → botão
+   **add TouchControls** → tocar **Play** (toast "modo play") → joystick à
+   esquerda empurra o player; botão **JUMP** salta quando `grounded`;
+   empurrar contra a parede → **colide e desliza**, nunca atravessa.
+4. **CCD**: em modo editor, selecionar o player → `velx 40` → **Play** →
+   o player é lançado contra a parede fina e **não tunela** (para/encosta).
+5. **Rigid**: **+** → RigidBody3D → `py 3` → **Play** → cai e **para no chão**;
+   `velx 8` → desliza e abranda; empurrar o player contra a bola → bloqueia
+   (empurrão = `velx` no Inspector). Dois Rigid empilhados intersectam
+   (PLACEHOLDER de solver aceite).
+6. **Modo editor**: sem Play não há painel de controlos nem física; orbit
+   (1 dedo) e pinch continuam; gestos nos controlos não giram a câmara.
+7. Menu → **Save/Load cena** persiste os corpos (BodyComp round-trip).
+8. Status line: fps/tics/verts/dc; crash log em
+   `/data/user/0/vv.goni/files/goni_crash.log`.
+
+## Verificação F3.1 (câmara + grid)
+- Pinch afasta até 300 sem a borda do grid aparecer; aproxima até ~1; orbit
+  até ~89° sem inversão; sem z-fighting; grid custa 4 vértices (status line).
