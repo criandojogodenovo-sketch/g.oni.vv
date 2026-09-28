@@ -34,6 +34,8 @@ add_library(goni_vv SHARED
         components/MeshRenderer.h
         components/BodyComp.h
         components/InputMap.h
+        components/TouchControls.h
+        components/TouchControls.cpp
         physics/Shapes.h
         physics/Shapes.cpp
         physics/InputSource.h

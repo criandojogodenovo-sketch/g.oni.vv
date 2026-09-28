@@ -6,6 +6,7 @@
 #include "components/BodyComp.h"
 #include "components/InputMap.h"
 #include "components/MeshRenderer.h"
+#include "components/TouchControls.h"
 #include "components/Transform3D.h"
 #include "core/ComponentStore.h"
 #include "core/Scene.h"
@@ -428,4 +429,68 @@ TEST(dois_rigids_empilhados_intersectam_aceite_placeholder) {
     EXPECT(bt->grounded);
     EXPECT(nearEqF(s.get(topo)->getComponent<Transform3D>()->pos.y, 0.5f, 1e-2f));
     EXPECT(bodyOf(s, s.find("base"))->grounded);
+}
+
+// ---- TouchControls (F4-D, input GL-free) -------------------------------------
+
+TEST(tc_layout_e_zonas_de_toque) {
+    const auto l = TouchControls::layout(1600.0f, 720.0f);
+    EXPECT(l.joyCX == 150.0f && l.joyR == 75.0f);
+    EXPECT(l.btnX + l.btnW <= 1600.0f);
+    EXPECT(l.btnY + l.btnH <= 720.0f - 40.0f);   // respeita a status line
+
+    TouchControls tc;
+    // dentro do joystick
+    EXPECT(tc.touchBegin(0, l.joyCX, l.joyCY, 1600.0f, 720.0f));
+    tc.touchEnd(0);
+    // fora de tudo → toque livre (câmara)
+    EXPECT(!tc.touchBegin(1, 800.0f, 300.0f, 1600.0f, 720.0f));
+    tc.touchEnd(1);
+}
+
+TEST(tc_eixo_do_joystick_com_clamp) {
+    const auto l = TouchControls::layout(1600.0f, 720.0f);
+    TouchControls tc;
+    EXPECT(tc.axis().x == 0.0f && tc.axis().y == 0.0f);   // sem toque
+
+    EXPECT(tc.touchBegin(0, l.joyCX, l.joyCY, 1600.0f, 720.0f));
+    EXPECT(tc.axis().x == 0.0f && tc.axis().y == 0.0f);   // no centro
+
+    tc.touchMove(0, l.joyCX + 0.8f * l.joyR, l.joyCY);
+    EXPECT(nearEqF(tc.axis().x, 0.8f, 1e-4f));
+    EXPECT(nearEqF(tc.axis().y, 0.0f));
+
+    tc.touchMove(0, l.joyCX, l.joyCY - l.joyR);           // cima do ecrã
+    EXPECT(nearEqF(tc.axis().y, 1.0f, 1e-4f));            // y+ = CIMA
+
+    tc.touchMove(0, l.joyCX + 3.0f * l.joyR, l.joyCY);    // além do raio
+    EXPECT(nearEqF(tc.axis().x, 1.0f, 1e-4f));            // clamp a 1
+
+    tc.touchEnd(0);
+    EXPECT(tc.axis().x == 0.0f && tc.axis().y == 0.0f);   // largou
+}
+
+TEST(tc_botao_jump_e_acoes_desconhecidas) {
+    const auto l = TouchControls::layout(1600.0f, 720.0f);
+    TouchControls tc;
+    const f32 bx = l.btnX + l.btnW * 0.5f;
+    const f32 by = l.btnY + l.btnH * 0.5f;
+    EXPECT(!tc.action("jump"));                 // sem toque
+    EXPECT(!tc.action("fire"));
+
+    EXPECT(tc.touchBegin(2, bx, by, 1600.0f, 720.0f));
+    EXPECT(tc.action("jump"));                  // premido
+    EXPECT(!tc.action("fire"));                 // nomes desconhecidos → false
+
+    tc.touchEnd(2);
+    EXPECT(!tc.action("jump"));                 // largou
+}
+
+TEST(tc_segundo_toque_na_almofada_e_ignorado) {
+    const auto l = TouchControls::layout(1600.0f, 720.0f);
+    TouchControls tc;
+    EXPECT(tc.touchBegin(0, l.joyCX, l.joyCY, 1600.0f, 720.0f));
+    // joystick já ocupado → segundo toque lá NÃO é consumido (vai à câmara)
+    EXPECT(!tc.touchBegin(1, l.joyCX + 10.0f, l.joyCY, 1600.0f, 720.0f));
+    tc.touchEnd(0);
 }
