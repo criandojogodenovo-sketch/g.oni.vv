@@ -311,3 +311,72 @@ TEST(characters_sobrepostos_repelem_se_mutuamente) {
     EXPECT(dxa < -0.05f);
     EXPECT(dxb > 0.39f);   // B não é invadido (fica onde estava ou recua)
 }
+
+// ---- PhysicsSystem: Rigid (F4-C) -----------------------------------------------
+
+TEST(rigid_cai_para_no_chao_e_nunca_atravessa) {
+    Scene s;
+    makeBody(s, "chao", BodyType::Static, Vec3{0, -0.5f, 0},
+             phys::OBB{Vec3{0, 0, 0}, Vec3{10, 0.5f, 10}, Quat::identity()});
+    const Handle b = makeBody(s, "bola", BodyType::Rigid, Vec3{0, 3.0f, 0},
+                              phys::Sphere{Vec3{0, 0, 0}, 0.5f});
+
+    phys::PhysicsSystem sys;
+    sys.enabled = true;
+    f32 minY = 3.0f;
+    for (int i = 0; i < 120; ++i) {           // 2 s: cai de 3 e assenta
+        sys.tick(s, 1.0f / 60.0f);
+        const f32 y = s.get(b)->getComponent<Transform3D>()->pos.y;
+        if (y < minY) minY = y;
+        EXPECT(y >= 0.499f);                  // fundo da esfera nunca passa y=0
+    }
+    const BodyComp* bc = bodyOf(s, b);
+    EXPECT(bc->grounded);
+    EXPECT(nearEqF(bc->velocity.y, 0.0f));
+    EXPECT(nearEqF(minY, 0.5f, 5e-3f));       // repousa com o fundo no chão
+}
+
+TEST(rigid_lancado_nao_atravessa_parede_fina) {
+    Scene s;
+    makeBody(s, "chao", BodyType::Static, Vec3{0, -0.5f, 0},
+             phys::OBB{Vec3{0, 0, 0}, Vec3{10, 0.5f, 10}, Quat::identity()});
+    makeBody(s, "parede", BodyType::Static, Vec3{1.35f, 1.0f, 0},
+             phys::OBB{Vec3{0, 0, 0}, Vec3{0.65f, 1.0f, 1.0f}, Quat::identity()});
+    const Handle b = makeBody(s, "bala", BodyType::Rigid, Vec3{-5, 0.5f, 0},
+                              phys::Sphere{Vec3{0, 0, 0}, 0.5f});
+    s.get(b)->getComponent<BodyComp>()->velocity = Vec3{60.0f, 0.0f, 0.0f};   // 1 unidade/tick
+
+    phys::PhysicsSystem sys;
+    sys.enabled = true;
+    for (int i = 0; i < 30; ++i) {
+        sys.tick(s, 1.0f / 60.0f);
+        const f32 x = s.get(b)->getComponent<Transform3D>()->pos.x;
+        EXPECT(x <= 0.2f + 1e-2f);            // face da parede (0.7) − raio
+    }
+    EXPECT(bodyOf(s, b)->grounded);
+}
+
+TEST(rigid_empurrado_desliza_e_abranda_no_chao) {
+    Scene s;
+    makeBody(s, "chao", BodyType::Static, Vec3{0, -0.5f, 0},
+             phys::OBB{Vec3{0, 0, 0}, Vec3{10, 0.5f, 10}, Quat::identity()});
+    const Handle b = makeBody(s, "bola", BodyType::Rigid, Vec3{-2, 0.5f, 0},
+                              phys::Sphere{Vec3{0, 0, 0}, 0.5f});
+    s.get(b)->getComponent<BodyComp>()->velocity = Vec3{8.0f, 0.0f, 0.0f};    // empurrão
+
+    phys::PhysicsSystem sys;
+    sys.enabled = true;
+    f32 x0 = -2.0f, maxX = -2.0f, prevVel = 8.0f;
+    for (int i = 0; i < 60; ++i) {
+        sys.tick(s, 1.0f / 60.0f);
+        const f32 x = s.get(b)->getComponent<Transform3D>()->pos.x;
+        const f32 vx = bodyOf(s, b)->velocity.x;
+        EXPECT(x > x0 - 1e-4f);               // nunca recua
+        maxX = x > maxX ? x : maxX;
+        EXPECT(vx <= prevVel + 1e-4f);        // amortecimento só abranda
+        prevVel = vx;
+        x0 = x;
+    }
+    EXPECT(maxX > -0.8f);                     // deslizou ~1.2+ (8 u/s com damping 6/s)
+    EXPECT(prevVel < 0.5f);                   // e abrandou quase a parar
+}
