@@ -1,4 +1,5 @@
 #include "render/Renderer.h"
+#include "render/Mesh.h"
 #include "math/Math.h"
 #include "platform/Log.h"
 #include <GLES3/gl3.h>
@@ -7,6 +8,7 @@ namespace vv {
 
 namespace {
 
+// Shader do batch de quads da UI (F1, mantido).
 constexpr char kVsSrc[] = R"(#version 300 es
 layout(location = 0) in vec2 aPos;
 layout(location = 1) in vec2 aUV;
@@ -49,6 +51,7 @@ GLuint compileShader(GLenum type, const char* src) {
 } // namespace
 
 bool Renderer::init() {
+    // ---- pass UI (F1)
     const GLuint vs = compileShader(GL_VERTEX_SHADER, kVsSrc);
     const GLuint fs = compileShader(GL_FRAGMENT_SHADER, kFsSrc);
     if (!vs || !fs) {
@@ -97,7 +100,13 @@ bool Renderer::init() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    LOGI("Renderer: init ok (clear mono + batch de quads — PLACEHOLDER F1)");
+    // ---- pass 3D (F2)
+    if (!lit_.init()) {
+        LOGE("Renderer: material lit falhou");
+        return false;
+    }
+
+    LOGI("Renderer: pipeline 3D (Mesh/LitMaterial) + batch de quads UI pronto");
     return true;
 }
 
@@ -111,7 +120,24 @@ void Renderer::resize(i32 w, i32 h) {
 
 void Renderer::beginFrame() {
     glClearColor(0.0784314f, 0.0784314f, 0.0784314f, 1.0f);   // BG #141414
-    glClear(GL_COLOR_BUFFER_BIT);
+    glDepthMask(GL_TRUE);                                     // restore pós-grid
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+}
+
+DrawStats Renderer::drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp) {
+    if (!mesh.ok()) {
+        return {};
+    }
+    lit_.use();
+    lit_.setVP(vp);
+    lit_.setModel(model);
+    // pass 3D: depth visível (faces frontais ocluem as traseiras) + cull
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+    mesh.bind();
+    mesh.draw();
+    glBindVertexArray(0);
+    return {mesh.indexCount(), 1};
 }
 
 void Renderer::submit(const QuadBatch& batch, u32 texture) {
@@ -122,10 +148,13 @@ void Renderer::submit(const QuadBatch& batch, u32 texture) {
     }
 }
 
-void Renderer::endFrame() {
+DrawStats Renderer::endFrame() {
     if (subCount_ == 0) {
-        return;
+        return {};
     }
+    // pass UI por cima do 3D: sem depth test/write, sem cull (winding y-down)
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
     const Mat4 proj = Mat4::ortho(0.0f, static_cast<f32>(w_), static_cast<f32>(h_), 0.0f,
                                   -1.0f, 1.0f);   // y para baixo (origem topo-esquerda)
     glUseProgram(prog_);
@@ -138,19 +167,24 @@ void Renderer::endFrame() {
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(vao_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    DrawStats st;
     for (u32 i = 0; i < subCount_; ++i) {
         const QuadBatch& b = *subs_[i].batch;
         glBindTexture(GL_TEXTURE_2D, subs_[i].tex);
         glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(b.vertexBytes()),
                      b.vertices(), GL_DYNAMIC_DRAW);
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(b.vertexCount()));
+        st.vertices += b.vertexCount();
+        st.drawCalls += 1;
     }
     glBindVertexArray(0);
     glDisable(GL_BLEND);
     subCount_ = 0;
+    return st;
 }
 
 void Renderer::shutdown() {
+    lit_.destroy();
     if (vbo_)      { glDeleteBuffers(1, &vbo_); vbo_ = 0; }
     if (vao_)      { glDeleteVertexArrays(1, &vao_); vao_ = 0; }
     if (whiteTex_) { glDeleteTextures(1, &whiteTex_); whiteTex_ = 0; }
