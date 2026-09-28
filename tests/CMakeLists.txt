@@ -18,11 +18,13 @@ add_executable(test_core
         test_components.cpp
         test_transform.cpp
         test_presets.cpp
+        test_serializer.cpp
         ${CORE_DIR}/core/Scene.cpp
         ${CORE_DIR}/core/Time.cpp
         ${CORE_DIR}/core/ComponentRegistry.cpp
         ${CORE_DIR}/core/ComponentStore.cpp
         ${CORE_DIR}/core/Presets.cpp
+        ${CORE_DIR}/core/SceneSerializer.cpp
         # GL-free (cubo e câmara são lógica pura — sem contexto OpenGL)
         ${CORE_DIR}/render/Cube.cpp
         ${CORE_DIR}/render/Camera.cpp)
