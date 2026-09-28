@@ -38,6 +38,8 @@ jobs:
   build-release:
     name: APK release arm64 (assinado via secrets)
     runs-on: ubuntu-latest
+    outputs:
+      artifact_name: ${{ steps.apk-name.outputs.artifact_name }}
     steps:
       - uses: actions/checkout@v4
 
@@ -93,6 +95,60 @@ jobs:
           name: goni-vv-0.1.0-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+
+      - name: Exportar nome do artifact p/ o job de verificação
+        id: apk-name
+        run: echo "artifact_name=goni-vv-0.1.0-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}" >> "$GITHUB_OUTPUT"
+
+  verify-entry-symbols:
+    name: verify-entry-symbols (gate ANativeActivity_onCreate / android_main)
+    needs: build-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar APK release
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-release.outputs.artifact_name }}
+          path: apk
+
+      - name: Extrair libgoni_vv.so do APK (arm64-v8a)
+        run: |
+          set -euo pipefail
+          APK="$(find apk -type f -name '*.apk' | head -n 1)"
+          echo "APK: ${APK}"
+          mkdir -p libcheck
+          unzip -q "${APK}" 'lib/arm64-v8a/*' -d libcheck
+          SO="libcheck/lib/arm64-v8a/libgoni_vv.so"
+          test -f "${SO}" || { echo "::error::libgoni_vv.so não encontrada no APK"; exit 1; }
+          echo "SO=${SO}" >> "$GITHUB_ENV"
+
+      - name: "nm -D — confirmar exportação dos símbolos de entrada"
+        run: |
+          set -euo pipefail
+          SO="${SO}"
+          # nm -D lê ELF aarch64 no binutils do runner; readelf é o fallback
+          # arquitetura-agnóstico caso nm não reconheça o formato.
+          if nm -D "${SO}" > dynsyms.txt 2> nm.err; then
+            echo "Ferramenta: nm -D"
+          else
+            echo "nm não leu o ELF ($(cat nm.err)) — usando readelf --dyn-syms"
+            readelf --dyn-syms "${SO}" > dynsyms.txt
+          fi
+          echo "--- .dynsym (símbolos de entrada) ---"
+          grep -E 'ANativeActivity_onCreate|android_main' dynsyms.txt || true
+          grep -q 'ANativeActivity_onCreate' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: ANativeActivity_onCreate — o APK vai crashar com UnsatisfiedLinkError no arranque."; exit 1; }
+          grep -q 'android_main' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: android_main — entry point do glue não foi ligado."; exit 1; }
+          echo "OK: ANativeActivity_onCreate e android_main exportados em libgoni_vv.so"
+
+      - name: Verificar assinatura (apksigner)
+        run: |
+          set -euo pipefail
+          APK="$(find apk -type f -name '*.apk' | head -n 1)"
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          APKSIGNER="$(ls "${SDK}"/build-tools/*/apksigner | sort -V | tail -n 1)"
+          "${APKSIGNER}" verify --print-certs "${APK}"
 
   init-keystore:
     name: init-keystore (gera a keystore uma vez — guardar offline)
