@@ -1,4 +1,4 @@
-# app/src/main/cpp/CMakeLists.txt — G.One VV (F1→F3)
+# app/src/main/cpp/CMakeLists.txt — G.One VV (F1→F4)
 # Core C++17 + NativeActivity (native_app_glue do NDK).
 cmake_minimum_required(VERSION 3.22.1)
 project(goni_vv LANGUAGES C CXX)
@@ -33,6 +33,7 @@ add_library(goni_vv SHARED
         components/Transform3D.h
         components/MeshRenderer.h
         components/InputMap.h
+        physics/Shapes.h
         math/Math.h
         render/Vertex.h
         render/Mesh.h
