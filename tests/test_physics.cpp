@@ -380,3 +380,52 @@ TEST(rigid_empurrado_desliza_e_abranda_no_chao) {
     EXPECT(maxX > -0.8f);                     // deslizou ~1.2+ (8 u/s com damping 6/s)
     EXPECT(prevVel < 0.5f);                   // e abrandou quase a parar
 }
+
+// ---- Character ↔ Rigid e PLACEHOLDER de solver (F4-C) --------------------------
+
+TEST(character_nao_atravessa_bola_rigid) {
+    Scene s;
+    makeBody(s, "chao", BodyType::Static, Vec3{0, -0.5f, 0},
+             phys::OBB{Vec3{0, 0, 0}, Vec3{10, 0.5f, 10}, Quat::identity()});
+    makeBody(s, "bola", BodyType::Rigid, Vec3{1.5f, 0.5f, 0},
+             phys::Sphere{Vec3{0, 0, 0}, 0.5f});
+    const Handle p = makeBody(s, "player", BodyType::Character, Vec3{0, 0.55f, 0},
+                              phys::Capsule{Vec3{0, 0, 0}, 0.3f, 0.25f});
+    FakeSource src;
+    s.get(p)->addComponent<InputMap>()->source = &src;
+    src.ax = Vec2{1.0f, 0.0f};   // anda para +x, contra a bola
+
+    phys::PhysicsSystem sys;
+    sys.enabled = true;
+    sys.gravity = 0.0f;          // isola o bloqueio horizontal
+    for (int i = 0; i < 40; ++i) {
+        sys.tick(s, 1.0f / 60.0f);
+        const f32 x = s.get(p)->getComponent<Transform3D>()->pos.x;
+        // contacto: centro da bola (1.5) − raio bola (0.5) − raio cápsula (0.3)
+        EXPECT(x <= 0.7f + 1e-3f);
+    }
+    EXPECT(s.get(p)->getComponent<Transform3D>()->pos.x > 0.6f);   // encostado
+}
+
+TEST(dois_rigids_empilhados_intersectam_aceite_placeholder) {
+    // PLACEHOLDER DE SOLVER (spec F4-C): sem stacking/resting, o Rigid de
+    // cima ATRAVESSA o de baixo e vai ao chão — o teste documenta o comportamento
+    Scene s;
+    makeBody(s, "chao", BodyType::Static, Vec3{0, -0.5f, 0},
+             phys::OBB{Vec3{0, 0, 0}, Vec3{10, 0.5f, 10}, Quat::identity()});
+    makeBody(s, "base", BodyType::Rigid, Vec3{0, 0.5f, 0},
+             phys::Sphere{Vec3{0, 0, 0}, 0.5f});
+    const Handle topo = makeBody(s, "topo", BodyType::Rigid, Vec3{0, 1.4f, 0},
+                                 phys::Sphere{Vec3{0, 0, 0}, 0.5f});
+
+    phys::PhysicsSystem sys;
+    sys.enabled = true;
+    for (int i = 0; i < 90; ++i) {
+        sys.tick(s, 1.0f / 60.0f);
+    }
+    // ambos assentam NO CHÃO (o topo atravessou a base — aceite e documentado)
+    const BodyComp* bt = bodyOf(s, topo);
+    EXPECT(bt->grounded);
+    EXPECT(nearEqF(s.get(topo)->getComponent<Transform3D>()->pos.y, 0.5f, 1e-2f));
+    EXPECT(bodyOf(s, s.find("base"))->grounded);
+}

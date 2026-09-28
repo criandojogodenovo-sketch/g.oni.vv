@@ -135,16 +135,24 @@ SweepResult PhysicsSystem::sweepVariant(const WorldBody& a, const Vec3& delta,
         return {};   // mover-caixa não existe nos presets da F4
     }
 
-    // alvos curvos (sphere/capsule): depenetração discreta — sem túnel na
-    // prática porque o CCD do moveBody limita o avanço por substep
+    // alvo ESFERA: sweep contínuo (bloqueia sem penetrar — Rigids/bolas)
+    if (b.kind == 0) {
+        if (a.kind == 0) {
+            return sweepSegSphere(phys::Segment{a.center, a.center}, a.r, delta,
+                                  b.center, b.r);
+        }
+        if (a.kind == 2) {
+            return sweepSegSphere(phys::Segment{a.segA, a.segB}, a.r, delta,
+                                  b.center, b.r);
+        }
+        return {};
+    }
+
+    // alvos CÁPSULA: depenetração discreta (Characters encostados — o repel
+    // resolve a sobreposição; sem túnel relevante a velocidades de input)
     Contact ct;
-    if (a.kind == 0 && b.kind == 0) {
-        ct = depenetrate(phys::Sphere{a.center, a.r}, phys::Sphere{b.center, b.r});
-    } else if (a.kind == 0 && b.kind == 2) {
+    if (a.kind == 0 && b.kind == 2) {
         ct = sphCapMTD(a, b);
-    } else if (a.kind == 2 && b.kind == 0) {
-        ct = sphCapMTD(b, a);
-        ct.normal = ct.normal * -1.0f;   // normal era de B para A → inverte
     } else {   // capsule ↔ capsule
         ct = capCapMTD(a, b);
     }
@@ -298,7 +306,10 @@ void PhysicsSystem::tick(Scene& scene, f32 dt) {
         if (w.velocity.y < -kMaxFallSpeed) {
             w.velocity.y = -kMaxFallSpeed;
         }
-        moveBody(w, w.velocity * dt, bodies, true, true, false);
+        // Rigid entra como OBSTÁCULO (o player não atravessa a bola) — sem
+        // transferência de momento: o empurrão na F4 é feito editando a
+        // velocity do Rigid no Inspector (colisão primitiva, sem solver)
+        moveBody(w, w.velocity * dt, bodies, true, true, true);
         if (w.grounded && w.velocity.y < 0.0f) {
             w.velocity.y = 0.0f;
         }

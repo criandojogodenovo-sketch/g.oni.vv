@@ -399,6 +399,60 @@ SweepResult sweepSegBox(const Segment& seg0, f32 r, const Vec3& delta,
     return out;   // sem contacto no delta todo
 }
 
+SweepResult sweepSegSphere(const Segment& seg0, f32 r, const Vec3& delta,
+                           const Vec3& center, f32 targetR) {
+    SweepResult out;
+    const f32 R = r + targetR;   // esfera alvo expandida pelo raio do mover
+    const f32 dLen = length(delta);
+
+    // contacto discreto segmento↔esfera (ponto mais próximo do segmento)
+    auto probe = [&](f32 t, Contact& ct) {
+        const Vec3 p = seg0.a + delta * t;
+        const Vec3 cp = closestPointOnSegment(seg0.a + delta * t,
+                                              seg0.b + delta * t, center);
+        const Vec3 d = cp - center;
+        const f32 dist = length(d);
+        ct.separation = dist - R;
+        ct.normal = dist > 1e-9f ? d * (1.0f / dist) : Vec3{0, 1, 0};
+        ct.hit = dist <= R;
+        ct.depth = ct.hit ? R - dist : 0.0f;
+    };
+
+    const u32 n = static_cast<u32>(std::ceil(dLen / r));
+    const u32 sub = n < 1u ? 1u : (n > 8u ? 8u : n);
+    f32 t = 0.0f;
+    int stalls = 0;
+    for (u32 k = 0; k < sub; ++k) {
+        const f32 t1 = static_cast<f32>(k + 1) / static_cast<f32>(sub);
+        while (t < t1) {
+            Contact ct;
+            probe(t, ct);
+            if (ct.hit) {
+                out.hit = true;
+                out.toi = t;
+                out.depth = ct.depth;
+                out.normal = ct.normal;
+                return out;
+            }
+            const f32 gap = ct.separation;
+            const f32 rate = std::fabs(dot(delta, ct.normal));
+            if (gap > 1e-5f && rate > 1e-6f) {
+                t += gap / rate;   // passo exato (convexidade — ver sweepSegBox)
+                stalls = 0;
+                continue;
+            }
+            if (gap > 1e-5f) {
+                break;   // afasta-se ou tangencia
+            }
+            if (++stalls >= 2) {
+                break;
+            }
+            t += 1e-3f;
+        }
+    }
+    return out;
+}
+
 SweepResult sweep(const Sphere& a, const Vec3& delta, const AABB& b) {
     return sweepSegBox(Segment{a.center, a.center}, a.r, delta,
                        aabbCenter(b), aabbExtent(b), Quat::identity());

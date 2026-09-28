@@ -5,7 +5,9 @@
 //   1. RIGID   — gravidade + sweep/slide contra Static (cai, para, desliza);
 //                amortecimento horizontal no chão. SEM solver de
 //                stacking/resting: dois Rigid empilhados PODEM intersectar —
-//                PLACEHOLDER de solver, aceite pela spec e documentado.
+//                PLACEHOLDER DE SOLVER, aceite pela spec e documentado no
+//                relatório da fase (o Rigid não colide com Rigid: a bola de
+//                cima atravessa a de baixo e vai ao chão).
 //   2. CHARACTER — input (InputSource do InputMap) → velocidade horizontal;
 //                gravidade; jump (action("jump") com grounded); sweep contra
 //                Static + Character (+Rigid como obstáculo) com SLIDE estilo

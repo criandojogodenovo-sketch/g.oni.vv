@@ -176,10 +176,14 @@ SweepResult sweep(const Capsule& a, const Vec3& delta, const OBB& b);
 
 // CCD adaptativo: se |delta| > raio_eff (r da forma), divide o sweep em
 // ceil(|delta|/raio_eff) substeps (máx 8) — nunca tunela paredes finas.
-// Núcleo: avanço conservador dentro de cada substep (o passo (d−r)/|delta|
-// é seguro porque cada ponto do segmento anda exatamente |delta|).
+// Núcleo: avanço conservador com passo EXATO via gradiente da SDF (a
+// convexidade da distância garante que o passo nunca salta o 1.º contacto).
 SweepResult sweepSegBox(const Segment& seg, f32 r, const Vec3& delta,
                         const Vec3& c, const Vec3& h, const Quat& rot);
+// Sweep segmento↔esfera (esfera alvo expandida pelo raio do mover) — usado
+// pelo PhysicsSystem para blocos contínuos contra Rigids (bolas).
+SweepResult sweepSegSphere(const Segment& seg, f32 r, const Vec3& delta,
+                           const Vec3& center, f32 targetR);
 
 // ---- depenetração (MTD — mínimo vetor de separação) ----------------------------
 // normal aponta de B para A (empurra A para fora de B). Usada pelo
