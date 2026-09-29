@@ -13,11 +13,12 @@
 #include <string>
 #include <unordered_map>
 #include "assets/ResourceManager.h"
+#include "render/Mesh.h"
+#include "render/Texture.h"
+// (os dois headers são GL-free — o GL vive nos .cpp; o unique_ptr abaixo
+// precisa do tipo COMPLETO quando main.cpp instancia o destrutor do cache)
 
 namespace vv {
-
-class Mesh;
-class Texture;
 
 class GpuAssets {
 public:
