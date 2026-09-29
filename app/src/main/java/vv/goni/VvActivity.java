@@ -7,22 +7,30 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.MediaStore;
+import android.provider.Settings;
 
 /**
- * F5.1-C — EXCEÇÃO DOCUMENTADA à regra "zero Java" (docs/SAF_EXCEPTION.md).
+ * F5.2 — ponte Java mínima do ARMAZENAMENTO (sucessora da exceção SAF).
  *
- * O SAF (ACTION_OPEN_DOCUMENT_TREE / ACTION_OPEN_DOCUMENT /
- * ACTION_CREATE_DOCUMENT) devolve o resultado por
- * Activity.onActivityResult — e NativeActivity NÃO reencaminha esse
- * resultado ao nativo. Sem esta subclasse não é possível escolher pastas
- * do armazenamento. Superfície Java mínima: abrir os pickers do sistema e
- * reencaminhar (request, result, uri, flags) por JNI.
+ * FLUXO All Files Access (o mesmo do Godot e de outros editores):
+ *   1. o editor pergunta in-app ("Precisa de acesso a todos os ficheiros…");
+ *   2. "Permitir" → JNI chama openAllFilesSettings() AQUI — lança
+ *      Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION com a URI
+ *      "package:<pkg>" (abre a janela de permissões DESTE app);
+ *   3. o utilizador ativa o interruptor manualmente e volta;
+ *   4. onActivityResult reencaminha o resultado por JNI (fila p/ o thread
+ *      da engine) → nativo verifica Environment.isExternalStorageManager()
+ *      → concedido = File API POSIX direta (Downloads, Documents, etc.);
+ *      recusado = modo app-private (getExternalFilesDir).
+ *
+ * O SAF tree picker (ACTION_OPEN_DOCUMENT_TREE e afins) foi REMOVIDO — mais
+ * complexo e menos familiar (docs/SAF_EXCEPTION.md registra a decisão). A
+ * superfície Java sobrevive PORQUE NativeActivity não reencaminha
+ * onActivityResult nem lança intents de settings sem uma subclasse.
  */
 public class VvActivity extends NativeActivity {
-    // DEVE espelhar platform/Saf.h (vv::saf::kReq*)
-    static final int REQ_PICK_TREE = 4201;
-    static final int REQ_IMPORT = 4202;
-    static final int REQ_EXPORT = 4203;
+    // DEVE espelhar platform/StoragePerm.h (vv::storage::kReqAllFiles)
+    static final int REQ_ALL_FILES = 4301;
 
     private static native void nativeOnActivityResult(
             int requestCode, int resultCode, Uri uri, int flags);
@@ -32,51 +40,19 @@ public class VvActivity extends NativeActivity {
         super.onActivityResult(requestCode, resultCode, data);
         Uri uri = (data != null) ? data.getData() : null;
         int flags = (data != null) ? data.getFlags() : 0;
-
-        // persistência da permissão: SEM takePersistableUriPermission a
-        // concessão morre com o processo (o objetivo é a pasta sobreviver
-        // entre arranques do editor). Falha silenciosa — o nativo trata
-        // URI sem persistência como utilizável só nesta sessão.
-        if (uri != null
-                && (flags & Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) != 0) {
-            try {
-                getContentResolver().takePersistableUriPermission(uri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION |
-                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-            } catch (SecurityException ignored) {
-            }
-        }
         nativeOnActivityResult(requestCode, resultCode, uri, flags);
     }
 
-    void openTreePicker(int requestCode) {
+    // F5.2 — abre a janela de permissões DO APP (All Files Access).
+    // startActivityForResult (não startActivity): o volta-chega passa pelo
+    // onActivityResult → o nativo re-verifica isExternalStorageManager.
+    // Falha (action sem activity no aparelho) → resultado CANCELED imediato
+    // (o nativo trata como "sem concessão", modo app-private).
+    void openAllFilesSettings(int requestCode) {
         try {
-            startActivityForResult(
-                    new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), requestCode);
-        } catch (Exception e) {
-            nativeOnActivityResult(requestCode, RESULT_CANCELED, null, 0);
-        }
-    }
-
-    void openImportPicker(int requestCode) {
-        try {
-            Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-            i.addCategory(Intent.CATEGORY_OPENABLE);
-            i.setType("*/*");   // obj/gltf/glb/png — decisão por extensão no nativo
-            startActivityForResult(i, requestCode);
-        } catch (Exception e) {
-            nativeOnActivityResult(requestCode, RESULT_CANCELED, null, 0);
-        }
-    }
-
-    void openExportPicker(int requestCode, String suggestedName) {
-        try {
-            Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-            i.addCategory(Intent.CATEGORY_OPENABLE);
-            i.setType("application/octet-stream");
-            if (suggestedName != null) {
-                i.putExtra(Intent.EXTRA_TITLE, suggestedName);
-            }
+            Intent i = new Intent(
+                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
             startActivityForResult(i, requestCode);
         } catch (Exception e) {
             nativeOnActivityResult(requestCode, RESULT_CANCELED, null, 0);

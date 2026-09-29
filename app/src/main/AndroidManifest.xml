@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- F5.1-C: hasCode="true" — EXCEÇÃO documentada (docs/SAF_EXCEPTION.md).
-         O SAF exige uma subclasse de NativeActivity para reencaminhar
-         onActivityResult (picker de pasta + import/export sem PC). -->
+    <!-- F5.1-C/F5.2: hasCode="true" — EXCEÇÃO documentada
+         (docs/SAF_EXCEPTION.md). NativeActivity não lança a janela de
+         permissões nem reencaminha onActivityResult sem uma subclasse: a
+         VvActivity lança ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION
+         (All Files Access — F5.2) e reencaminha o resultado por JNI. -->
     <application
         android:label="G.One VV"
         android:hasCode="true"

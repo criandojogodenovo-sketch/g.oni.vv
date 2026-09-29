@@ -1,7 +1,8 @@
-// app/build.gradle — G.One VV (F1→F5.1)
+// app/build.gradle — G.One VV (F1→F5.2)
 // Mobile-first: arm64-v8a, minSdk 24, landscape travado.
-// F5.1-C: hasCode=true (VvActivity/SafIo) — exceção SAF documentada em
-// docs/SAF_EXCEPTION.md (o resto continua zero Kotlin/Java).
+// F5.2: hasCode=true (VvActivity) — exceção documentada em
+// docs/SAF_EXCEPTION.md: All Files Access (janela de permissões + forward
+// do onActivityResult por JNI); o resto continua zero Kotlin/Java.
 plugins {
     id 'com.android.application'
 }
@@ -70,8 +71,9 @@ android {
 
     buildFeatures {
         buildConfig false
-        // F5.1-C: hasCode=true — o dex contém VvActivity + SafIo (exceção
-        // SAF, docs/SAF_EXCEPTION.md); nenhum outro Java/Kotlin próprio.
+        // F5.2: hasCode=true — o dex contém só VvActivity (exceção
+        // All Files Access, docs/SAF_EXCEPTION.md); nenhum outro
+        // Java/Kotlin próprio.
     }
 
     lint {

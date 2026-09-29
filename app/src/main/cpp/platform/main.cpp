@@ -19,7 +19,6 @@
 #include "core/PlaySnapshot.h"
 #include "core/Presets.h"
 #include "core/Project.h"
-#include "core/SafStorage.h"
 #include "core/Scene.h"
 #include "core/SceneSerializer.h"
 #include "core/Tick.h"
@@ -31,8 +30,10 @@
 #include "platform/EngineLog.h"
 #include "platform/CrashHandler.h"
 #include "platform/EglContext.h"
+#include "platform/FileApi.h"
 #include "platform/InputState.h"
-#include "platform/SafBridge.h"
+#include "platform/StorageBridge.h"
+#include "platform/StoragePerm.h"
 #include "render/Camera.h"
 #include "render/Cube.h"
 #include "render/Grid.h"
@@ -76,21 +77,19 @@ PlaySnapshot        g_playSnap;
 
 // ---- F5-A: projeto .goni + storage -----------------------------------------
 // Raiz = getExternalFilesDir (externalDataPath; fallback internalDataPath).
-// O projeto vive nesta pasta: project.goni + scenes/ + meshes/ + textures/.
-// Boot abre o projeto existente ou cria "projeto" — e recarrega a cena
-// ativa (persistida no manifesto) após cada arranque.
+// O projeto vive SEMPRE nesta pasta (app-private, sem permissões):
+// project.goni + scenes/ + meshes/ + textures/. O I/O de FICHEIROS do
+// utilizador (import/export) passa pelo fluxo All Files Access (F5.2) com
+// File API direta — ver storage::PermFlow + fileapi.
 std::unique_ptr<FsStorage> g_storage;
 Project    g_project;
 bool       g_projectReady = false;   // storage + projeto com cena válida
 
-// ---- F5.1-C: SAF — pasta do projeto escolhida pelo utilizador ---------------
-// Router: FsStorage (getExternalFilesDir) = primário; SafStorage (URI
-// concedida) = secundário. Cancelou/URI inválida → primário (fallback).
-RoutingStorage* g_router = nullptr;   // construído no boot (nunca nulo no loop)
-std::unique_ptr<SafStorage> g_safStorage;
-saf::SafStateMachine        g_safState;
-std::vector<u8>  g_pendingExport;   // bytes do export à espera da URI
-std::string      g_pendingExportName;
+// ---- F5.2: All Files Access — fluxo de permissão + File API direta ---------
+storage::PermFlow g_perm;                  // máquina de estado (GL-free)
+std::vector<fileapi::Candidate> g_importCands;  // candidatos de Download/Documents
+std::vector<std::string> g_logLines;            // tail do engine.log p/ o viewer
+std::vector<std::string> g_logDumps;            // crash-*.dump p/ o viewer
 
 // ---- F5-E: assets de runtime (cache CPU → cache GPU) ------------------------
 // Refs relativas ("meshes/x.obj#0", "textures/y.png") → MeshData/RawImage no
@@ -153,11 +152,11 @@ void applyContentRect(android_app* app) {
 void refreshCatalog() {
     g_catalog.meshes.clear();
     g_catalog.textures.clear();
-    if (!g_router) {
+    if (!g_storage) {
         return;
     }
     std::vector<std::string> files;
-    if (g_router->listDir(Project::kDirMeshes, files)) {
+    if (g_storage->listDir(Project::kDirMeshes, files)) {
         for (const std::string& f : files) {
             const size_t dot = f.rfind('.');
             const std::string ext = dot == std::string::npos ? "" : f.substr(dot + 1);
@@ -168,7 +167,7 @@ void refreshCatalog() {
         }
     }
     files.clear();
-    if (g_router->listDir(Project::kDirTextures, files)) {
+    if (g_storage->listDir(Project::kDirTextures, files)) {
         for (const std::string& f : files) {
             const size_t dot = f.rfind('.');
             const std::string ext = dot == std::string::npos ? "" : f.substr(dot + 1);
@@ -214,134 +213,83 @@ SceneSerializer::LoadCtx makeLoadCtx() {
     return ctx;
 }
 
-// ---- F5.1-C: SAF — ativação da pasta escolhida + import/export --------------
+// ---- F5.2: All Files Access — import/export por File API direta -------------
 
-// ativa a pasta SAF como raiz do projeto (abre/cria "projeto" lá dentro,
-// persiste a URI p/ o próximo arranque e recarrega a cena ativa)
-void activateSafProject(const std::string& treeUri) {
-    SafBackend* backend = saf::safJniBackend();
-    if (!backend || !g_router || !g_storage) {
-        showToast("SAF indisponível");
-        return;
+// forward: usados pelo handler de retorno e pelas tentativas
+void openImportScan();
+void beginExportToDownloads();
+
+// VERIFICAÇÃO fresca da permissão (1 chamada JNI estática por tentativa —
+// o utilizador pode ter ativado as definições sem voltar pela app)
+bool storageGrantedNow(bool* outSupported) {
+    bool mgr = false;
+    const bool supported = storage::jniStorageApiSupported(&mgr);
+    if (outSupported) {
+        *outSupported = supported;
     }
-    g_safStorage = std::make_unique<SafStorage>(backend, treeUri);
-    Project proj;
-    if (!Project::openOrCreate(*g_safStorage, "projeto", proj)) {
-        g_safStorage.reset();
-        showToast("pasta sem projeto (URI inválida?)");
-        return;
+    if (supported) {
+        g_perm.setMode(mgr ? storage::Mode::AllFiles : storage::Mode::AppPrivate);
     }
-    g_project = std::move(proj);
-    g_router->bind(g_storage.get(), g_safStorage.get());
-    g_router->useSecondary(true);
-    // persiste a URI p/ reabrir no próximo arranque (ficheiro no raiz do
-    // app — NÃO dentro da pasta escolhida)
-    g_storage->writeText("saf_tree.txt", treeUri);
-    g_projectReady = true;
-    g_resources.setStorage(g_router);
-    g_resources.releaseAll();
-    g_gpu.releaseAll();
-    refreshCatalog();
-    // cena ativa do projeto na pasta escolhida
-    const SceneSerializer::LoadCtx ctx = makeLoadCtx();
-    if (g_project.loadActiveScene(*g_router, g_scene, ctx)) {
-        LOGI("saf: projeto ativo na pasta concedida (%u tics)", g_scene.count());
-    } else {
-        LOGI("saf: projeto novo/sem cena carregável na pasta concedida");
-    }
-    g_editor.selected = Handle::invalid();
-    showToast("pasta do projeto ativa");
+    return supported && mgr;
 }
 
-// resultado do picker IMPORT: lê o ficheiro da URI e copia para o projeto
-// (por extensão: obj/gltf/glb → meshes/, png → textures/)
-void importFromSaf(const std::string& docUri) {
-    if (!g_router) {
+// handler injetado — chamado pelo bridge quando a Activity volta das
+// definições (kReqAllFiles). NO THREAD DA ENGINE (pollResult no loop):
+// re-verifica isExternalStorageManager e retoma a ação pendente.
+void onStorageResult(void* /*user*/, const saf::SafResult& r) {
+    if (r.request != storage::kReqAllFiles) {
+        elog::warn("storage: resultado de req=%d ignorado (esperado %d)",
+                   r.request, storage::kReqAllFiles);
         return;
     }
-    const std::string name = saf::safJniDisplayName(docUri);
-    const std::vector<u8> bytes = saf::safJniReadSingle(docUri);
-    if (bytes.empty() || name.empty()) {
-        showToast("import falhou (ficheiro vazio?)");
+    bool mgr = false;
+    const bool supported = storage::jniStorageApiSupported(&mgr);
+    const bool granted = supported && mgr;
+    g_perm.onSettingsReturn(granted);
+    elog::info("storage: retorno das definicoes — supported=%d mgr=%d → %s "
+               "(modo %s)", supported ? 1 : 0, mgr ? 1 : 0,
+               granted ? "CONCEDIDO" : "negado/sem accao",
+               storage::modeLabel(g_perm.mode()));
+    if (!granted) {
+        showToast("acesso não ativado — modo app-private");
         return;
     }
-    std::string lower = name;
-    for (char& c : lower) {
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-    }
-    const size_t dot = lower.rfind('.');
-    const std::string ext = dot == std::string::npos ? "" : lower.substr(dot + 1);
-    const char* dir = nullptr;
-    if (ext == "obj" || ext == "gltf" || ext == "glb") {
-        dir = Project::kDirMeshes;
-    } else if (ext == "png") {
-        dir = Project::kDirTextures;
-    } else {
-        showToast("tipo não suportado (obj/gltf/glb/png)");
-        return;
-    }
-    // nome de destino sanitizado
-    std::string safe = lower;
-    for (char& c : safe) {
-        if (c == '/' || c == '\\' || c == ':') c = '_';
-    }
-    const std::string rel = std::string(dir) + "/" + safe;
-    if (g_router->writeBytes(rel, bytes.data(), bytes.size())) {
-        refreshCatalog();
-        char msg[96];
-        std::snprintf(msg, sizeof(msg), "importado: %s", rel.c_str());
-        showToast(msg);
-        LOGI("saf: import %s (%zu bytes)", rel.c_str(), bytes.size());
-    } else {
-        showToast("falha ao gravar no projeto");
+    showToast("acesso concedido — File API direta");
+    // retoma a ação que abriu o diálogo (1 import, 2 export)
+    const storage::Action act = g_perm.takePendingAction();
+    if (act == storage::Action::Import) {
+        openImportScan();
+    } else if (act == storage::Action::Export) {
+        beginExportToDownloads();
     }
 }
 
-// resultado do picker EXPORT: grava os bytes preparados na URI escolhida
-void exportToSaf(const std::string& docUri) {
-    if (g_pendingExport.empty()) {
-        showToast("nada para exportar");
-        return;
-    }
-    if (saf::safJniWriteSingle(docUri, g_pendingExport.data(), g_pendingExport.size())) {
-        char msg[96];
-        std::snprintf(msg, sizeof(msg), "exportado: %s", g_pendingExportName.c_str());
-        showToast(msg);
-        LOGI("saf: export %s (%zu bytes)", g_pendingExportName.c_str(),
-             g_pendingExport.size());
-    } else {
-        showToast("falha ao exportar (permissão?)");
-    }
-}
-
-// handler injetado — chamado pelo bridge JNI quando a Activity responde
-void onSafResult(void* /*user*/, const saf::SafResult& r) {
-    g_safState.onResult(r);
-    if (r.request == saf::kReqPickTree) {
-        if (g_safState.uriUsable() && saf::flagsReadWrite(r.flags)) {
-            activateSafProject(g_safState.grantedUri());
-        } else {
-            showToast("pasta não escolhida (fallback local)");
+// varre Download/ e Documents/ (File API direta) e abre o overlay IMPORT
+void openImportScan() {
+    g_importCands.clear();
+    for (int i = 0; i < fileapi::kImportDirCount; ++i) {
+        const std::string dir = std::string(fileapi::kExternalRoot) + "/" +
+                                fileapi::kImportDirs[i];
+        std::vector<fileapi::Candidate> part;
+        if (fileapi::listCandidates(dir, part)) {
+            elog::info("fileapi: %s → %u candidato(s)", dir.c_str(),
+                       (unsigned)part.size());
+            for (const fileapi::Candidate& c : part) {
+                g_importCands.push_back(c);
+            }
         }
-    } else if (r.request == saf::kReqImport) {
-        if (g_safState.uriUsable()) {
-            importFromSaf(g_safState.grantedUri());
-        } else {
-            showToast("import cancelado");
-        }
-    } else if (r.request == saf::kReqExport) {
-        if (g_safState.uriUsable()) {
-            exportToSaf(g_safState.grantedUri());
-        } else {
-            showToast("export cancelado");
-        }
+        // pasta ausente/sem acesso: o errno já foi logado pela FileApi
     }
-    g_safState.reset();
+    if (g_importCands.empty()) {
+        showToast("nenhum obj/gltf/glb/png em Download/Documents");
+        return;
+    }
+    g_editor.importMenu = true;
 }
 
-// prepara e lança o Export via SAF (captura o mesh AGORA — o resultado
-// chega assincronamente depois)
-void beginSafExport() {
+// EXPORT: mesh do TIC selecionado → /storage/emulated/0/Download/GOneVV/
+// export/export_<nome>.obj (File API direta, visível no gestor de ficheiros)
+void beginExportToDownloads() {
     Tic* tsel = g_scene.get(g_editor.selected);
     MeshRenderer* mrs = tsel ? tsel->getComponent<MeshRenderer>() : nullptr;
     if (!mrs) {
@@ -363,18 +311,116 @@ void beginSafExport() {
     }
     char nameBuf[40];
     std::snprintf(nameBuf, sizeof(nameBuf), "%.30s", tsel->name.c_str());
-    g_pendingExportName = "export_" + std::string(nameBuf) + ".obj";
-    for (char& c : g_pendingExportName) {
+    std::string outName = "export_" + std::string(nameBuf) + ".obj";
+    for (char& c : outName) {
         if (c == '/' || c == '\\' || c == ':' || c == '#') c = '_';
     }
     const std::string obj = exportObj(*src);
-    g_pendingExport.assign(obj.begin(), obj.end());
-    g_safState.begin(saf::kReqExport);
-    if (!saf::openExportPicker(nullptr, saf::kReqExport,
-                               g_pendingExportName.c_str())) {
-        g_safState.reset();
-        g_pendingExport.clear();
-        showToast("SAF indisponível");
+    const std::string path = std::string(fileapi::kExternalRoot) + "/" +
+                             fileapi::kExportRelDir + "/" + outName;
+    if (fileapi::writeAll(path, obj.data(), obj.size())) {
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "exportado: %s/%s",
+                      fileapi::kExportRelDir, outName.c_str());
+        showToast(msg);
+        elog::info("fileapi: export %s (%zu bytes) — File API direta",
+                   path.c_str(), obj.size());
+    } else {
+        showToast("falha ao exportar (causa no engine.log)");
+        elog::error("fileapi: export %s FALHOU — %s", path.c_str(),
+                    fileapi::errnoText().c_str());
+    }
+}
+
+// TENTATIVA de import: concedido → varre já; senão → DIÁLOGO (1ª vez do
+// fluxo) com a ação pendente; sem suporte → fallback app-private
+void attemptImport() {
+    if (!g_projectReady) {
+        showToast("sem projeto — import indisponível");
+        return;
+    }
+    bool supported = false;
+    if (storageGrantedNow(&supported)) {
+        openImportScan();
+        return;
+    }
+    if (g_perm.requestAction(storage::Action::Import, supported)) {
+        g_editor.storageDialog = true;   // o main desenha o diálogo
+        elog::info("storage: diálogo All Files aberto (import pendente)");
+    } else if (!supported) {
+        showToast("sistema sem All Files Access — modo app-private");
+    }
+}
+
+// TENTATIVA de export (mesma forma do import)
+void attemptExport() {
+    bool supported = false;
+    if (storageGrantedNow(&supported)) {
+        beginExportToDownloads();
+        return;
+    }
+    if (g_perm.requestAction(storage::Action::Export, supported)) {
+        g_editor.storageDialog = true;
+        elog::info("storage: diálogo All Files aberto (export pendente)");
+    } else if (!supported) {
+        showToast("sistema sem All Files Access — modo app-private");
+    }
+}
+
+// escolha do DIÁLOGO ("Permitir"/"Cancelar") — processada no frame em que
+// drawStorageDialog devolve != 0
+void onStorageDialogChoice(int choice) {
+    if (choice == 1) {
+        g_perm.dialogAccept();
+        if (g_perm.consumeOpenSettings()) {
+            if (storage::jniOpenAllFilesSettings()) {
+                elog::info("storage: %s lançada — à espera do retorno",
+                           storage::kSettingsAction);
+            } else {
+                g_perm.dialogCancel();
+                showToast("não consegui abrir as definições");
+                elog::error("storage: lançamento de %s FALHOU",
+                            storage::kSettingsAction);
+            }
+        }
+    } else if (choice == 2) {
+        g_perm.dialogCancel();
+        showToast("sem acesso — modo app-private");
+        elog::info("storage: utilizador recusou (modo app-private)");
+    }
+}
+
+// IMPORT: copia o candidato escolhido para o projeto (por extensão:
+// obj/gltf/glb → meshes/, png → textures/) — File API lê, FsStorage grava
+void importCandidate(size_t idx) {
+    if (idx >= g_importCands.size() || !g_storage) {
+        return;
+    }
+    const fileapi::Candidate& c = g_importCands[idx];
+    std::vector<u8> bytes;
+    if (!fileapi::readAll(c.path, bytes) || bytes.empty()) {
+        showToast("leitura falhou (causa no engine.log)");
+        return;
+    }
+    const char* dir = (c.kind == 'm') ? Project::kDirMeshes
+                                      : Project::kDirTextures;
+    // nome de destino sanitizado
+    std::string safe = c.name;
+    for (char& ch : safe) {
+        if (ch == '/' || ch == '\\' || ch == ':') ch = '_';
+    }
+    const std::string rel = std::string(dir) + "/" + safe;
+    if (g_storage->writeBytes(rel, bytes.data(), bytes.size())) {
+        refreshCatalog();
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "importado: %s", rel.c_str());
+        showToast(msg);
+        elog::info("fileapi: import %s (%zu bytes) de %s", rel.c_str(),
+                   bytes.size(), c.path.c_str());
+    } else {
+        showToast("falha ao gravar no projeto");
+        elog::error("fileapi: import %s — gravação no projeto falhou",
+                    rel.c_str());
     }
 }
 
@@ -559,9 +605,10 @@ void onAppCmd(android_app* app, i32 cmd) {
                 elog::error("[boot 4/6] renderer FALHOU (shaders/materiais)");
                 break;
             }
-            // F5-E: caches de assets ligados ao storage ATIVO (router F5.1-C)
-            if (g_router) {
-                g_resources.setStorage(g_router);
+            // F5-E: caches de assets ligados ao storage do projeto (F5.2:
+            // app-private — o SAF router foi removido)
+            if (g_storage) {
+                g_resources.setStorage(g_storage.get());
                 g_gpu.init(&g_resources);
                 if (g_pipeline) {
                     // F5.1-A: ASTC só quando a extensão KHR existe (C33/Mali
@@ -581,7 +628,7 @@ void onAppCmd(android_app* app, i32 cmd) {
             // LoadCtx liga o cubo procedural, tag "cube" das cenas antigas)
             if (g_projectReady) {
                 const SceneSerializer::LoadCtx ctx = makeLoadCtx();
-                if (g_project.loadActiveScene(*g_router, g_scene, ctx)) {
+                if (g_project.loadActiveScene(*g_storage, g_scene, ctx)) {
                     elog::info("[boot 6/6] scene OK → editor ('%s', %u tics)",
                                g_project.activeScenePath()->c_str(), g_scene.count());
                 } else {
@@ -732,19 +779,25 @@ void frame() {
         showToast(g_playMode ? "modo play" : "modo editor");
     }
     if (clicks[2]) {
-        // F5.1-hotfix: Settings abre o menu (Exportar logs)
+        // F5.1-hotfix/F5.2: Settings abre o menu (logs + armazenamento)
         g_editor.settingsMenu = !g_editor.settingsMenu;
         g_editor.fileMenu = false;
         g_editor.plusMenu = false;
         elog::info("ui: menu Settings %s", g_editor.settingsMenu ? "aberto" : "fechado");
     }
 
-    // F5.1-hotfix (parte 1.4): overlay Settings → Exportar logs
+    // F5.1-hotfix (1.4) + F5.2: overlay Settings — Exportar logs / Ver logs /
+    // Acesso a ficheiros… + linha do modo de armazenamento ativo
     if (g_editor.settingsMenu) {
-        const int choice = editor::drawSettingsMenu(g_ui, g_input, w, h, g_editor);
+        const char* modeText = g_perm.mode() == storage::Mode::Unknown
+                                   ? ""
+                                   : storage::modeLabel(g_perm.mode());
+        const int choice = editor::drawSettingsMenu(g_ui, g_input, w, h, g_editor,
+                                                    modeText);
         if (choice == 1) {
+            // export para Downloads/GOneVV/logs (MediaStore — sem permissões)
             int copied = 0;
-            if (saf::jniExportLogsToDownloads(&copied) && copied >= 0) {
+            if (storage::jniExportLogsToDownloads(&copied) && copied >= 0) {
                 char msg[96];
                 std::snprintf(msg, sizeof(msg), "logs exportados: %d → %s",
                               copied, elog::kDownloadsRelPath);
@@ -755,8 +808,32 @@ void frame() {
                 showToast("export falhou (sem ficheiros? API<29?)");
                 elog::warn("logs: export falhou (copied=%d)", copied);
             }
+        } else if (choice == 2) {
+            // F5.2: VER LOGS in-app — tail do engine.log + crash dumps
+            g_logLines.clear();
+            g_logDumps.clear();
+            elog::readTail(g_logLines, 300);
+            elog::listDumps(g_logDumps);
+            g_editor.logViewer = true;
+            g_editor.logViewerJustOpened = true;
+            elog::info("logs: viewer aberto (%u linhas, %u dump(s))",
+                       (unsigned)g_logLines.size(), (unsigned)g_logDumps.size());
+        } else if (choice == 3) {
+            // F5.2: "Acesso a ficheiros…" — mesmo fluxo do diálogo (sem ação
+            // pendente: se conceder, o próximo import/export funciona direto)
+            bool supported = false;
+            if (storageGrantedNow(&supported)) {
+                showToast("acesso já concedido (all files)");
+            } else if (g_perm.requestAction(storage::Action::None, supported)) {
+                g_editor.storageDialog = true;
+            } else if (!supported) {
+                showToast("sistema sem All Files Access — modo app-private");
+            }
         }
     }
+
+    // F5.2: DIÁLOGO/IMPORT/LOGS desenhados DEPOIS dos painéis (ordem =
+    // z-order) — ver o bloco imediatamente antes de drawToast()
 
     // F5-E: catálogo dos seletores — refresh quando um seletor ABRE
     if (g_editor.assetMenu != 0 && g_editor.assetMenu != g_prevAssetMenu) {
@@ -856,11 +933,13 @@ void frame() {
 
     // overlay Menu → Save/Load cena do projeto (F5-A: caminhos relativos,
     // cena ativa guardada em scenes/<ativa>.goni + manifesto persistido)
+    // F5.2: menu de ficheiro com 5 itens — Save/Load/Export OBJ/Importar…/
+    // Export Downloads (o "Pasta (SAF)" foi REMOVIDO com o fluxo SAF)
     if (g_editor.fileMenu) {
         const int choice = editor::drawFileMenu(g_ui, g_input, w, h, g_editor);
         if (choice == 1 && g_projectReady) {
-            const bool ok = g_project.saveActiveScene(*g_router, g_scene) &&
-                            g_project.saveManifest(*g_router);
+            const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
+                            g_project.saveManifest(*g_storage);
             char msg[64];
             std::snprintf(msg, sizeof(msg), ok ? "cena salva (%u tics)" : "falha ao salvar",
                           g_scene.count());
@@ -868,7 +947,7 @@ void frame() {
             LOGI("editor: %s → %s", msg, g_project.activeScenePath()->c_str());
         } else if (choice == 2 && g_projectReady) {
             const SceneSerializer::LoadCtx ctx = makeLoadCtx();
-            const bool ok = g_project.loadActiveScene(*g_router, g_scene, ctx);
+            const bool ok = g_project.loadActiveScene(*g_storage, g_scene, ctx);
             char msg[64];
             std::snprintf(msg, sizeof(msg), ok ? "cena carregada (%u tics)" : "falha ao carregar",
                           g_scene.count());
@@ -902,7 +981,7 @@ void frame() {
                     }
                     const std::string rel =
                         std::string(Project::kDirMeshes) + "/" + outName;
-                    if (g_router->writeText(rel, exportObj(*src))) {
+                    if (g_storage->writeText(rel, exportObj(*src))) {
                         char msg[96];
                         std::snprintf(msg, sizeof(msg), "export: %s", rel.c_str());
                         showToast(msg);
@@ -912,25 +991,34 @@ void frame() {
                     }
                 }
             }
-        } else if (choice == 4 && g_projectReady) {
-            // F5.1-C: escolher a PASTA do projeto (SAF) — o resultado
-            // chega assincronamente via onSafResult
-            g_safState.begin(saf::kReqPickTree);
-            if (!saf::openTreePicker(nullptr, saf::kReqPickTree)) {
-                g_safState.reset();
-                showToast("SAF indisponível");
-            }
-        } else if (choice == 5 && g_projectReady) {
-            // F5.1-C: importar ficheiro (SAF) → copia p/ meshes/ ou textures/
-            g_safState.begin(saf::kReqImport);
-            if (!saf::openImportPicker(nullptr, saf::kReqImport)) {
-                g_safState.reset();
-                showToast("SAF indisponível");
-            }
-        } else if (choice == 6 && g_projectReady) {
-            // F5.1-C: export via SAF (CREATE_DOCUMENT; mesh capturado já)
-            beginSafExport();
+        } else if (choice == 4) {
+            // F5.2: IMPORTAR — All Files Access → varre Download/Documents →
+            // overlay de escolha → cópia para meshes/ ou textures/
+            attemptImport();
+        } else if (choice == 5) {
+            // F5.2: EXPORT DOWNLOADS — All Files Access → Download/GOneVV/export
+            attemptExport();
         }
+    }
+
+    // F5.2: overlays de armazenamento — DEPOIS dos painéis (ordem = z-order):
+    // diálogo de permissão → import → viewer de logs (por cima de tudo)
+    if (g_editor.storageDialog) {
+        const int ch = editor::drawStorageDialog(g_ui, g_input, w, h, g_editor);
+        if (ch != 0) {
+            onStorageDialogChoice(ch);
+        }
+    }
+    if (g_editor.importMenu) {
+        const int pick = editor::drawImportMenu(g_ui, g_input, w, h, g_editor,
+                                                g_importCands);
+        if (pick > 0) {
+            importCandidate(static_cast<size_t>(pick - 1));
+        }
+    }
+    if (g_editor.logViewer) {
+        editor::drawLogViewer(g_ui, g_input, w, h, g_editor,
+                              g_logLines, g_logDumps);
     }
 
     drawToast();
@@ -963,7 +1051,7 @@ void android_main(android_app* app) {
     // O boot ainda não tem os paths da activity? O elog usa o fallback
     // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu
     // lá (JNI_OnLoad corre ANTES do android_main).
-    elog::info("G.One VV 0.6.1 — F5.1-hotfix (crash dump + logs; boot progresso por passos)");
+    elog::info("G.One VV 0.6.2 — F5.2 (All Files Access + File API direta + log viewer)");
     {
         const char* root0 = app->activity
             ? (app->activity->externalDataPath ? app->activity->externalDataPath
@@ -985,6 +1073,8 @@ void android_main(android_app* app) {
     // F5-A: storage do projeto — raiz getExternalFilesDir (sem permissões
     // desde a API 19); fallback = internalDataPath. Boot abre o projeto
     // existente ou cria "projeto" (manifesto + estrutura completa).
+    // F5.2: SEM SAF router — o projeto vive SEMPRE app-private; o I/O de
+    // ficheiros do utilizador passa pelo fluxo All Files Access.
     {
         const char* root = nullptr;
         if (app->activity) {
@@ -998,37 +1088,12 @@ void android_main(android_app* app) {
             g_texCache = std::make_unique<TextureCache>(*g_storage);
             g_pipeline = std::make_unique<TexturePipeline>(g_hwCompressor,
                                                            *g_texCache);
-            // F5.1-C: router (primário FsStorage; SAF liga depois) + JNI/SAF
-            g_router = new RoutingStorage(g_storage.get(), nullptr);
-            saf::setHandler(&onSafResult, nullptr);
+            // F5.2: ponte Java (janela de permissões + retorno + export logs)
+            storage::setHandler(&onStorageResult, nullptr);
             if (app->activity) {
-                saf::initJava(app->activity->vm, app->activity->clazz);
-                if (saf::safInitJniBackend(app->activity->vm, app->activity->env,
-                                          app->activity->clazz)) {
-                    // reabre a última pasta SAF concedida (URI persistida)
-                    std::string savedUri;
-                    if (g_storage->readText("saf_tree.txt", savedUri) &&
-                        !savedUri.empty()) {
-                        g_safStorage = std::make_unique<SafStorage>(
-                            saf::safJniBackend(), savedUri);
-                        Project safProj;
-                        if (Project::openOrCreate(*g_safStorage, "projeto",
-                                                  safProj)) {
-                            g_project = std::move(safProj);
-                            g_router->bind(g_storage.get(), g_safStorage.get());
-                            g_router->useSecondary(true);
-                            g_projectReady = true;
-                            LOGI("saf: pasta concedida reaberta: %s",
-                                 savedUri.c_str());
-                        } else {
-                            g_safStorage.reset();
-                            LOGE("saf: URI persistida sem projeto válido — fallback local");
-                        }
-                    }
-                }
+                storage::initJava(app->activity->vm, app->activity->clazz);
             }
-            if (!g_router->usingSecondary() &&
-                Project::openOrCreate(*g_storage, "projeto", g_project)) {
+            if (Project::openOrCreate(*g_storage, "projeto", g_project)) {
                 g_projectReady = g_project.activeScenePath() != nullptr;
                 elog::info("projeto: '%s' pronto em %s (%u cena(s), ativa=%s)",
                            g_project.name.c_str(), root,
@@ -1040,13 +1105,23 @@ void android_main(android_app* app) {
         } else {
             elog::error("projeto: sem externalDataPath/internalDataPath — editor sem persistência");
         }
+        // F5.2: estado da permissão NO ARRANQUE (o Settings mostra o modo;
+        // API < 30 → sem suporte → app-private sem nunca pedir)
+        {
+            bool mgr = false;
+            const bool supported = storage::jniStorageApiSupported(&mgr);
+            g_perm.setMode(storage::resolveMode(supported, mgr));
+            elog::info("storage: All Files Access — supported=%d manager=%d → modo %s",
+                       supported ? 1 : 0, mgr ? 1 : 0,
+                       storage::modeLabel(g_perm.mode()));
+        }
         // [boot 2/6] storage — passo crítico do arranque (ficheiro legível
         // no device: se o boot morrer aqui, o dono vê exatamente onde)
-        elog::info("[boot 2/6] storage %s (raiz=%s, saf=%s)",
+        elog::info("[boot 2/6] storage %s (raiz=%s, modo=%s)",
                    g_storage ? "OK" : "FALHOU",
                    app->activity && app->activity->externalDataPath
                        ? "external" : "-",
-                   g_router && g_router->usingSecondary() ? "saf" : "local");
+                   storage::modeLabel(g_perm.mode()));
     }
 
     // F3/F4: systems do engine (ordem interna ao grupo = registo)
@@ -1076,12 +1151,13 @@ void android_main(android_app* app) {
             continue;
         }
 
-        // F5.1-hotfix (auditoria JNI): resultados SAF chegam do thread da
-        // UI e são processados AQUI (thread da engine, EGL corrente) — o
-        // handler toca em storage/scene/GPU e não pode correr no thread
-        // Java (crash garantido sem contexto GL). Se a janela não está
-        // pronta, o resultado fica na fila e é consumido mais tarde.
-        while (saf::pollResult()) {
+        // F5.1-hotfix (auditoria JNI) / F5.2: resultados da Activity (retorno
+        // das definições de permissão) chegam do thread da UI e são
+        // processados AQUI (thread da engine, EGL corrente) — o handler toca
+        // em storage/scene/GPU e não pode correr no thread Java (crash
+        // garantido sem contexto GL). Se a janela não está pronta, o
+        // resultado fica na fila e é consumido mais tarde.
+        while (storage::pollResult()) {
         }
 
         const double nowT = nowSeconds();

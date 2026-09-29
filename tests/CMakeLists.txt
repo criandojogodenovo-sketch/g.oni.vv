@@ -18,7 +18,6 @@ add_executable(test_core
         test_resources.cpp
         test_import_gltf.cpp
         test_gltf_textures.cpp
-        test_saf.cpp
         test_f51_roundtrip.cpp
         test_assets.cpp
         test_storage.cpp
@@ -48,7 +47,6 @@ add_executable(test_core
         ${CORE_DIR}/core/Project.cpp
         ${CORE_DIR}/core/ProjectStorage.cpp
         ${CORE_DIR}/core/FsStorage.cpp
-        ${CORE_DIR}/core/SafStorage.cpp
         # F5: assets (importadores GL-free)
         ${CORE_DIR}/assets/ObjImporter.cpp
         ${CORE_DIR}/assets/ObjExporter.cpp

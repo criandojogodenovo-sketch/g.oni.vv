@@ -23,8 +23,6 @@ add_library(goni_vv SHARED
         core/Json.h
         core/ProjectStorage.h
         core/ProjectStorage.cpp
-        core/SafStorage.h
-        core/SafStorage.cpp
         core/FsStorage.h
         core/FsStorage.cpp
         assets/Assets.h
@@ -137,9 +135,9 @@ add_library(goni_vv SHARED
         platform/EglContext.cpp
         platform/InputState.h
         platform/InputState.cpp
-        # F5.1-C: ponte SAF (device-only — a suíte core compila sem estes TUs)
-        platform/SafBridge.cpp
-        platform/SafIoJni.cpp
+        # F5.2: ponte All Files Access (device-only — a suíte core compila
+        # sem este TU; FileApi.h é compilado no core)
+        platform/StorageBridge.cpp
         platform/main.cpp)
 
 target_include_directories(goni_vv PRIVATE
