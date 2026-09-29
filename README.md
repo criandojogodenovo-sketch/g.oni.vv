@@ -1,4 +1,4 @@
-# G.One VV 0.6.1 — F5.1-hotfix (crash dump + engine.log sem PC; auditoria JNI/SAF)
+# G.One VV 0.6.2 — F5.2 (All Files Access + File API direta + log viewer in-app)
 
 Engine com editor, projeto `.goni` e AGORA maturação de assets: compressão
 de texturas de hardware (ETC2 garantido em GLES3; ASTC 4x4/6x6 quando a
@@ -16,6 +16,48 @@ OBJ/glTF/GLB, loader de PNG com mipmaps, export (cena + OBJ round-trip),
 ResourceManager com cache e editor que aceita assets importados. Mobile-first:
 arm64-v8a, minSdk 24, landscape travado (`sensorLandscape`). Device de teste:
 Realme C33 (720x1600).
+
+## Escopo F5.2 (implementado)
+Objetivo: o fluxo correto de permissões de armazenamento (o mesmo do Godot) +
+diagnóstico in-app — no C33, o 0.6.1 mostrava "SAF indisponível" sem nunca
+pedir permissão; o SAF tree picker foi REMOVIDO.
+
+1. **Diálogo in-app (item 1)** — ao tentar Importar/Export pela primeira vez:
+   overlay mono "ARMAZENAMENTO — Precisa de acesso a todos os ficheiros para
+   importar/exportar projetos" com **Permitir/Cancelar** (mensagem quebrada
+   pela fonte real; toque fora fecha). Máquina de estado GL-free em
+   `platform/StoragePerm.h` (testada no CI: diálogo só na 1ª tentativa,
+   cancelar volta a Idle, sem nag em loop).
+2. **Abrir settings (item 2)** — "Permitir" → `VvActivity.openAllFilesSettings(4301)`
+   lança **`ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION`** com `package:vv.goni`
+   (a janela de permissões DO app). Constante `kSettingsAction` afervel no CI.
+3. **Verificar + File API direta (item 3)** — o retorno chega por
+   `onActivityResult` → fila JNI → thread da engine → `Environment.isExternalStorageManager()`
+   re-verificada; concedido → **File API POSIX direta**: import varre
+   `Download/` + `Documents/` (obj/gltf/glb/png, ordenado, overlay de escolha)
+   e copia para `meshes/`/`textures/`; export grava
+   `Download/GOneVV/export/export_<nome>.obj` (visível no gestor).
+4. **Log viewer in-app (item 4)** — Settings → "Ver logs": viewer com SCROLL
+   (id 43, auto-scroll para o fim) desenha o tail do `engine.log` + a lista de
+   `crash-*.dump` — **funcional sem export**.
+5. **Boot self-check (item 5)** — `fileapi::logStorageSelfCheck` no arranque:
+   `getExternalFilesDir` (null?) + errno de cada opendir/fopen falhado no
+   `engine.log` — a CAUSA de qualquer falha de storage fica registrada.
+6. **Fallbacks (item 6)** — recusa ou API < 30 → modo **app-private**
+   (`getExternalFilesDir`, sem permissões); o Settings mostra sempre
+   "armazenamento: all files / app-private" + botão "Acesso a ficheiros…".
+7. **Testes CI (item 7)** — 26 novas verificações no hospedeiro: constantes
+   do fluxo, resolveMode, diálogo (mostrado 1×/permitir/cancelar/negado),
+   intent (consumeOpenSettings), permissão verificada (onSettingsReturn +
+   ação retomada), fallback sem suporte, File API (lista/roundtrip/errno),
+   self-check, readTail/listDumps, e 4 testes de UI (diálogo, import,
+   viewer, settings) com fonte real e taps injetados.
+
+SAF removido: `SafIo.java`, `SafIoJni.cpp`, `core/SafStorage` e o item
+"Pasta (SAF)" saíram; `docs/SAF_EXCEPTION.md` documenta o All Files Access
+como caminho primário (com nota de Play Policy). A ponte Java mínima
+(VvActivity) continua — `NativeActivity` não lança a janela de permissões nem
+reencaminha `onActivityResult`.
 
 ## Escopo F5.1-hotfix (implementado)
 Objetivo: o 0.6.0 crasha no arranque no C33 e o dono não tem PC/logcat — a
@@ -204,6 +246,7 @@ Sem física (BodyComp é F4), sem luzes, sem assets, sem animação, sem linguag
 (CLÁUSULA CALMA).
 
 ## Histórico
+- **F5.2 (0.6.2)**: All Files Access (diálogo → settings → File API direta) + remoção do SAF tree picker + log viewer in-app + boot self-check com errno — 254 testes.
 - **F5.1 (0.6.0)**: maturação de assets em 4 sub-blocos.
 - **F5.1-hotfix (0.6.1)**: crash dump permanente + engine.log com rotação e boot progress por passos + export p/ Downloads/GOneVV/logs (MediaStore) + auditoria/fix da ponte JNI SAF (JNI_OnLoad/RegisterNatives, higiene de exceções, resultado SAF no thread da engine) — 243 testes. **A** — vendors
   etcpak 2.1 (BSD) e astc-encoder 5.3.0 (Apache-2.0), CompressedImage com
@@ -291,6 +334,34 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — F5.2 (All Files Access + log viewer)
+1. Instalar o APK **0.6.2** → confirmar "0.6.2" nas infos.
+2. **Diálogo**: Menu → **Importar…** → aparece o overlay "ARMAZENAMENTO —
+   Precisa de acesso a todos os ficheiros para importar/exportar projetos"
+   com **Permitir / Cancelar** (na 1ª tentativa de import/export).
+3. **Settings do sistema**: tocar **Permitir** → abre a janela de permissões
+   DO G.One VV ("All files access"); ativar o interruptor → voltar à app →
+   toast "acesso concedido — File API direta" e a lista de ficheiros de
+   Download/Documents abre em "IMPORTAR" (o import da ação pendente é
+   RETOMADO automaticamente).
+4. **Import**: tocar num .obj/.glb/.png da lista → toast "importado:
+   meshes/…" (ou textures/) e o ficheiro aparece nos seletores do Inspector.
+5. **Export**: selecionar um TIC com mesh → Menu → **Export Downloads** →
+   toast "exportado: Download/GOneVV/export/export_…" → abrir
+   **Download/GOneVV/export/** no gestor de ficheiros → o OBJ está lá.
+6. **Log viewer**: Settings → **"Ver logs"** → o viewer mostra o tail do
+   engine.log com scroll (abre no FIM) + os crash dumps; **sem export**.
+   A linha "self-check: … getExternalFilesDir=… fopen(…) OK" aparece no
+   arranque do log; se algo falhar, a linha diz `errno=N (causa)`.
+7. **Modo no Settings**: Settings mostra "armazenamento: all files" (após
+   conceder) ou "app-private" (se recusar); **"Acesso a ficheiros…"** abre a
+   janela de permissões a qualquer momento.
+8. **Fallback**: recusar no diálogo → toast "sem acesso — modo app-private";
+   os fluxos Save/Load/Export OBJ do projeto continuam a funcionar
+   (app-private não precisa de permissões).
+9. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
+   textura embutida), F5 (Save/Load), F4.2 (Play/scroll).
 
 ## Verificação no Realme C33 (dono) — F5.1 (assets maduros)
 1. Instalar o APK 0.6.1 → confirmar "0.6.1" nas infos.
