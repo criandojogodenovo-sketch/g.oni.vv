@@ -95,7 +95,7 @@ jobs:
       - name: Publicar artifact do APK
         uses: actions/upload-artifact@v4
         with:
-          name: goni-vv-0.6.0-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
+          name: goni-vv-0.6.1-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
@@ -140,12 +140,16 @@ jobs:
             readelf --dyn-syms "${SO}" > dynsyms.txt
           fi
           echo "--- .dynsym (símbolos de entrada) ---"
-          grep -E 'ANativeActivity_onCreate|android_main' dynsyms.txt || true
+          grep -E 'ANativeActivity_onCreate|android_main|JNI_OnLoad|Java_vv_goni_VvActivity_nativeOnActivityResult' dynsyms.txt || true
           grep -q 'ANativeActivity_onCreate' dynsyms.txt \
             || { echo "::error::SÍMBOLO AUSENTE: ANativeActivity_onCreate — o APK vai crashar com UnsatisfiedLinkError no arranque."; exit 1; }
           grep -q 'android_main' dynsyms.txt \
             || { echo "::error::SÍMBOLO AUSENTE: android_main — entry point do glue não foi ligado."; exit 1; }
-          echo "OK: ANativeActivity_onCreate e android_main exportados em libgoni_vv.so"
+          grep -q 'JNI_OnLoad' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: JNI_OnLoad — registo explícito de nativos (F5.1-hotfix) não foi ligado."; exit 1; }
+          grep -q 'Java_vv_goni_VvActivity_nativeOnActivityResult' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: Java_vv_goni_VvActivity_nativeOnActivityResult — ponte SAF/Java sem o callback JNI."; exit 1; }
+          echo "OK: ANativeActivity_onCreate, android_main, JNI_OnLoad e Java_vv_goni_VvActivity_nativeOnActivityResult exportados em libgoni_vv.so"
 
       - name: Verificar assinatura (apksigner)
         run: |

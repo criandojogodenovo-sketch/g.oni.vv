@@ -1,4 +1,4 @@
-# G.One VV 0.6.0 — F5.1 (compressão de texturas + texturas embutidas + SAF)
+# G.One VV 0.6.1 — F5.1-hotfix (crash dump + engine.log sem PC; auditoria JNI/SAF)
 
 Engine com editor, projeto `.goni` e AGORA maturação de assets: compressão
 de texturas de hardware (ETC2 garantido em GLES3; ASTC 4x4/6x6 quando a
@@ -16,6 +16,43 @@ OBJ/glTF/GLB, loader de PNG com mipmaps, export (cena + OBJ round-trip),
 ResourceManager com cache e editor que aceita assets importados. Mobile-first:
 arm64-v8a, minSdk 24, landscape travado (`sensorLandscape`). Device de teste:
 Realme C33 (720x1600).
+
+## Escopo F5.1-hotfix (implementado)
+Objetivo: o 0.6.0 crasha no arranque no C33 e o dono não tem PC/logcat — a
+engine passa a **autodiagnosticar-se em ficheiros legíveis** e a ponte JNI/SAF
+foi auditada e corrigida (docs/AUDIT_SAF_JNI.md).
+
+1. **Log writer (parte 1.1)** — `vv::elog::info/warn/error` faz DUAS coisas:
+   `__android_log_write` (logcat) + append a `Android/data/vv.goni/files/logs/`
+   (= `getExternalFilesDir("logs")`) com rotação por tamanho: 3 ficheiros de
+   1MB (`engine.log` + `.1` + `.2`, o mais velho descartado). Thread-safe;
+   ativo desde a 1ª linha (o `JNI_OnLoad` usa o caminho fallback antes do
+   `android_main`).
+2. **Boot progress (parte 1.2)** — cada passo crítico do arranque escreve um
+   marcador: `[boot 2/6] storage`, `[boot 5/6] physics` (android_main),
+   `[boot 1/6] contentRect`, `[boot 3/6] fonts`, `[boot 4/6] renderer`,
+   `[boot 6/6] scene OK → editor` (INIT_WINDOW). O dono vê EXATAMENTE onde o
+   boot parou.
+3. **Crash dump (parte 1.3)** — handlers C++ para SIGSEGV/SIGABRT/SIGBUS/
+   SIGFPE (SA_ONSTACK + sigaltstack): recolhem o stacktrace via
+   `_Unwind_Backtrace` (bionic `backtrace()` só existe API 33+; C33 é 31/32)
+   e resolvem módulo+função+offset com `dladdr()` → `crash-<timestamp>.dump`
+   no MESMO diretório, formato legível sem ndk-stack
+   (`#03 pc 0x1a2b3c  libgoni_vv.so (função+0x88)`) + pc/lr/sp do fault
+   (arm64). Ativo em TODAS as builds (release incluída); re-raise mantém o
+   tombstone do sistema.
+4. **Export de logs (parte 1.4)** — botão **Settings → "Exportar logs"**:
+   copia TODOS os ficheiros de `getExternalFilesDir("logs")` para
+   `Downloads/GOneVV/logs/` via MediaStore (API 29+, SEM
+   WRITE_EXTERNAL_STORAGE; export repetido substitui). Caminho definido pela
+   constante única `vv::elog::kDownloadsRelPath` (afervel no CI).
+5. **Auditoria JNI/SAF (parte 2)** — evidência no APK 0.6.0 real: manifest,
+   dex e símbolos OK (crash é runtime). Fixes: `JNI_OnLoad` com
+   `RegisterNatives` explícito (falha morre no arranque COM log), higiene de
+   exceções JNI em toda a ponte, resultado SAF DIFERIDO para o thread da
+   engine (o handler antigo corria no thread da UI e chamava GL sem contexto
+   EGL), guardas nulos + logging por método. Detalhe em
+   **docs/AUDIT_SAF_JNI.md**.
 
 ## Escopo F5 (implementado)
 - **Projeto e storage (F5-A)**: `core/ProjectStorage` (interface única —
@@ -167,7 +204,8 @@ Sem física (BodyComp é F4), sem luzes, sem assets, sem animação, sem linguag
 (CLÁUSULA CALMA).
 
 ## Histórico
-- **F5.1 (0.6.0)**: maturação de assets em 4 sub-blocos. **A** — vendors
+- **F5.1 (0.6.0)**: maturação de assets em 4 sub-blocos.
+- **F5.1-hotfix (0.6.1)**: crash dump permanente + engine.log com rotação e boot progress por passos + export p/ Downloads/GOneVV/logs (MediaStore) + auditoria/fix da ponte JNI SAF (JNI_OnLoad/RegisterNatives, higiene de exceções, resultado SAF no thread da engine) — 243 testes. **A** — vendors
   etcpak 2.1 (BSD) e astc-encoder 5.3.0 (Apache-2.0), CompressedImage com
   cadeia de mips completa em CPU (blob contíguo), HardwareCompressor (ASTC
   se GL_KHR_texture_compression_astc_ldr, senão ETC2; <256px fica RGBA),
@@ -234,8 +272,28 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
 ## Testes do core (Linux)
 `cmake -S tests -B build-tests && cmake --build build-tests && ctest --test-dir build-tests`
 
+## Verificação no Realme C33 (dono) — F5.1-hotfix (diagnóstico sem PC)
+1. Instalar o APK **0.6.1** → abrir. **Se abrir**: ir a
+   `Android/data/vv.goni/files/logs/` (gestor de ficheiros) → `engine.log`
+   deve mostrar a sequência completa:
+   `[boot 2/6] storage OK` … `[boot 1/6] contentRect OK` …
+   `[boot 3/6] fonts OK` … `[boot 4/6] renderer OK` …
+   `[boot 6/6] scene OK → editor`.
+2. **Export**: toolbar **Settings → "Exportar logs"** → toast "logs
+   exportados: N" → abrir **Downloads/GOneVV/logs/** no gestor de ficheiros →
+   `engine.log` visível e abrível no telefone.
+3. **Se ainda assim crashar**: o mesmo gestor de ficheiros mostra
+   `Android/data/vv.goni/files/logs/crash-<data>.dump` (e a marca `CRASH` no
+   fim do `engine.log`) — enviar o dump; ele diz o SINAL e a função C++
+   exata com offset. Exportar também pelo botão Settings (o dump vai junto).
+4. **SAF depois do fix**: Menu → Pasta (SAF) → escolher pasta → a app
+   continua viva (o resultado agora é processado no thread certo) → Importar
+   um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
+5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
+   textura), F5 (Save/Load), F4.2 (Play/scroll).
+
 ## Verificação no Realme C33 (dono) — F5.1 (assets maduros)
-1. Instalar o APK 0.6.0 → confirmar "0.6.0" nas infos.
+1. Instalar o APK 0.6.1 → confirmar "0.6.1" nas infos.
 2. **Compressão**: importar um PNG 2K/4K (Menu → Importar…) → aplicar como
    textura → a status line mostra `etc2` (ou `astc4`/`astc6` no Mali do C33)
    no fim da linha; logcat `GpuAssets: textura … 4096x4096 ETC2 RGB via
