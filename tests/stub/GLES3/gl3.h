@@ -40,6 +40,7 @@ typedef intptr_t      GLsizeiptr;
 #define GL_DYNAMIC_DRAW 0x88E8
 #define GL_FLOAT 0x1406
 #define GL_TRIANGLES 0x0004
+#define GL_TRIANGLE_STRIP 0x0005
 #define GL_UNSIGNED_SHORT 0x1403
 
 #define GL_FRAGMENT_SHADER 0x8B30
@@ -99,6 +100,7 @@ inline void glUniformMatrix4fv(GLint, GLsizei, GLboolean, const GLfloat*) {}
 inline void glUniform1i(GLint, GLint) {}
 inline void glUniform1f(GLint, GLfloat) {}
 inline void glUniform3f(GLint, GLfloat, GLfloat, GLfloat) {}
+inline void glUniform2f(GLint, GLfloat, GLfloat) {}
 
 inline void glGenBuffers(GLsizei n, GLuint* t) { if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 1u + i; }
 inline void glDeleteBuffers(GLsizei, const GLuint*) {}

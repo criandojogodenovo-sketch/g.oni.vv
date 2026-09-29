@@ -37,8 +37,14 @@ jobs:
 
       # F5.1: paridade de compilação do main.cpp no hospedeiro (stubs) —
       # erros de símbolo no main.cpp apareciam só no job do NDK
-      - name: Check de sintaxe do main.cpp (stubs)
+      - name: Check de sintaxe dos TUs device-only (stubs)
         run: ./scripts/check_main.sh
+
+      # F5.2: paridade de LINK da lib inteira (CMake da app) — o check de
+      # sintaxe não apanha símbolos ausentes (FileApi.cpp fora do CMake da
+      # app só explodia no job do NDK)
+      - name: Paridade de ligação da lib goni_vv (stubs)
+        run: ./scripts/link_parity.sh
 
   build-release:
     name: APK release arm64 (assinado via secrets)

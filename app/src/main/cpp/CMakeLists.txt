@@ -131,6 +131,9 @@ add_library(goni_vv SHARED
         platform/EngineLog.cpp
         platform/CrashHandler.h
         platform/CrashHandler.cpp
+        # F5.2: File API direta (POSIX; compilado também na suíte do core)
+        platform/FileApi.h
+        platform/FileApi.cpp
         platform/EglContext.h
         platform/EglContext.cpp
         platform/InputState.h
