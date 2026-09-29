@@ -14,10 +14,8 @@
 
 #include "platform/CrashHandler.h"
 
-#include <cxxabi.h>
 #include <dlfcn.h>
 #include <fcntl.h>
-#include <link.h>
 #include <signal.h>
 #include <cstdio>
 #include <cstring>
