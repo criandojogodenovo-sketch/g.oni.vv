@@ -10,6 +10,7 @@ set(CORE_DIR ${CMAKE_CURRENT_LIST_DIR}/../app/src/main/cpp)
 
 add_executable(test_core
         test_main.cpp
+        test_logs_crash.cpp
         test_ui.cpp
         test_project.cpp
         test_import_obj.cpp
@@ -103,6 +104,7 @@ add_executable(test_core
         ${CORE_DIR}/ui/EditorUi.cpp
         ${CORE_DIR}/ui/FontAtlas.cpp
         ${CORE_DIR}/platform/InputState.cpp
+        ${CORE_DIR}/platform/EngineLog.cpp
         ${CORE_DIR}/render/Renderer.cpp
         ${CORE_DIR}/render/Mesh.cpp
         ${CORE_DIR}/render/Material.cpp

@@ -129,6 +129,8 @@ add_library(goni_vv SHARED
         ui/EditorUi.cpp
         ui/stb/stb_truetype.h
         platform/Log.h
+        platform/EngineLog.h
+        platform/EngineLog.cpp
         platform/CrashHandler.h
         platform/CrashHandler.cpp
         platform/EglContext.h
