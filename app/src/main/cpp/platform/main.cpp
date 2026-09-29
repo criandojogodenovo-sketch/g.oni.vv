@@ -317,8 +317,6 @@ void drawToast() {
         return;
     }
     const f32 alpha = g_toastT < 1.0f ? g_toastT : 1.0f;
-    const f32 tw = g_ui.fontWidth(g_toast);
-    const f32 bw = tw + 32.0f;
     const f32 bh = 44.0f;
     // F4.2: toast dentro da safe-area (acima da status line, que também vive
     // no contentRect)
@@ -326,13 +324,20 @@ void drawToast() {
     const f32 oy = g_ui.safeTop();
     const f32 aw = static_cast<f32>(g_egl.width()) - ox - g_ui.safeRight();
     const f32 ah = static_cast<f32>(g_egl.height()) - oy - g_ui.safeBottom();
+    // F4.2/B2: o texto do toast nunca excede a área útil menos as margens
+    char toastFit[sizeof(g_toast)];
+    textfit::ellipsize(g_toast, aw - 64.0f,
+                       [](const char* s) { return g_ui.fontWidth(s); },
+                       toastFit, sizeof(toastFit));
+    const f32 tw = g_ui.fontWidth(toastFit);
+    const f32 bw = tw + 32.0f;
     const f32 bx = ox + (aw - bw) * 0.5f;
     const f32 by = oy + ah - UiContext::kStatusH - bh - 18.0f;
     const f32 bg[4] = {theme::PANEL[0], theme::PANEL[1], theme::PANEL[2], 0.95f * alpha};
     const f32 tx[4] = {theme::TEXT[0], theme::TEXT[1], theme::TEXT[2], alpha};
     g_ui.panel(bx, by, bw, bh, bg);
     g_ui.frame(bx, by, bw, bh, 1.0f, tx);
-    g_ui.label(bx + 16.0f, by + bh * 0.5f + g_ui.fontHeight() * 0.30f, g_toast, tx);
+    g_ui.label(bx + 16.0f, by + bh * 0.5f + g_ui.fontHeight() * 0.30f, toastFit, tx);
 }
 
 void frame() {

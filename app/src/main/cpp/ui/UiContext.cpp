@@ -76,6 +76,26 @@ void UiContext::label(f32 xBaseline, f32 yBaseline, const char* text, const f32 
     }
 }
 
+// F4.2/B2: mede; se exceder maxW trunca com "..." (ASCII — o atlas da F1 não
+// tem U+2026) pelo maior prefixo que caiba. Sem fonte → no-op (igual label).
+void UiContext::labelFitted(f32 xBaseline, f32 yBaseline, const char* text,
+                            const f32 color[4], f32 maxW) {
+    if (!hasFont() || !text) {
+        return;
+    }
+    if (fontWidth(text) <= maxW) {
+        label(xBaseline, yBaseline, text, color);
+        return;
+    }
+    char buf[256];
+    textfit::ellipsize(text, maxW,
+                       [this](const char* s) { return fontWidth(s); },
+                       buf, sizeof(buf));
+    if (buf[0]) {
+        label(xBaseline, yBaseline, buf, color);
+    }
+}
+
 bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
     bool pressed = false;
 
@@ -105,10 +125,20 @@ bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
     frame(x, y, w, h, 1.0f, theme::LINE);
 
     if (font_ && font_->ok() && text) {
-        const f32 tw = font_->widthOf(text);
+        // F4.2/B2: o texto do botão nunca sai do rect — nomes longos de TIC
+        // na Hierarchy eram cortados pela borda do botão
+        char fit[256];
+        const char* shown = text;
+        if (font_->widthOf(text) > w - 8.0f) {
+            textfit::ellipsize(text, w - 8.0f,
+                               [this](const char* s) { return font_->widthOf(s); },
+                               fit, sizeof(fit));
+            shown = fit;
+        }
+        const f32 tw = font_->widthOf(shown);
         const f32 th = font_->height();
         // baseline ≈ centro + 0.30*altura (aproximação do ascent do atlas)
-        label(x + (w - tw) * 0.5f, y + h * 0.5f + th * 0.30f, text, txt);
+        label(x + (w - tw) * 0.5f, y + h * 0.5f + th * 0.30f, shown, txt);
     }
     return pressed;
 }
@@ -297,7 +327,8 @@ void UiContext::statusLine(const char* text) {
 
     if (font_ && font_->ok() && text) {
         const f32 th = font_->height();
-        label(r.x + 12.0f, r.y + kStatusH * 0.5f + th * 0.30f, text, theme::TEXT);
+        labelFitted(r.x + 12.0f, r.y + kStatusH * 0.5f + th * 0.30f, text,
+                    theme::TEXT, r.w - 24.0f);
     }
 }
 

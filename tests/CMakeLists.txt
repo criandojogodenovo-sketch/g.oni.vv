@@ -11,6 +11,7 @@ set(CORE_DIR ${CMAKE_CURRENT_LIST_DIR}/../app/src/main/cpp)
 add_executable(test_core
         test_main.cpp
         test_safearea.cpp
+        test_textfit.cpp
         test_scroll.cpp
         test_scene.cpp
         test_time.cpp

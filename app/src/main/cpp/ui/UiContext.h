@@ -16,6 +16,7 @@
 #include "ui/FontAtlas.h"
 #include "ui/ScrollMath.h"
 #include "ui/SafeArea.h"
+#include "ui/TextFit.h"
 #include "platform/InputState.h"
 
 namespace vv {
@@ -43,6 +44,10 @@ public:
     void panel(f32 x, f32 y, f32 w, f32 h, const f32 color[4]);
     void frame(f32 x, f32 y, f32 w, f32 h, f32 thickness, const f32 color[4]);
     void label(f32 xBaseline, f32 yBaseline, const char* text, const f32 color[4]);
+    // F4.2/B2: label que NUNCA excede maxW — mede e trunca com "..." se
+    // precisar (ui/TextFit.h). Todo texto dentro de painéis usa isto.
+    void labelFitted(f32 xBaseline, f32 yBaseline, const char* text,
+                     const f32 color[4], f32 maxW);
     bool button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text);
 
     // F3: slider horizontal immediate-mode (Inspector do Transform3D).

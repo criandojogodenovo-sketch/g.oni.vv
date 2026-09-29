@@ -37,7 +37,8 @@ f32 deg2rad(f32 d) { return d * 0.01745329252f; }
 // y já vem em coords de ECRÃ (cy − offset feito pelo chamador).
 bool sliderRow(UiContext& ui, u64 id, f32 x, f32 y, const char* labelText,
                f32 minV, f32 maxV, f32& value, const char* fmt) {
-    ui.label(x + kPad, y + kSliderRow * 0.5f + 9.0f, labelText, theme::TEXT);
+    ui.labelFitted(x + kPad, y + kSliderRow * 0.5f + 9.0f, labelText,
+                   theme::TEXT, 84.0f - kPad - 6.0f);   // B2: até ao trilho
     const f32 trackX = x + 84.0f;
     const f32 trackW = 118.0f;
     const bool changed = ui.slider(id, trackX, y, trackW, kSliderRow, minV, maxV, value);
@@ -111,7 +112,8 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
     ui.endScroll();
 
     if (nTics == 0) {
-        ui.label(x + kPad, listTop + kRowH, "(vazio - use +)", theme::TEXT);
+        ui.labelFitted(x + kPad, listTop + kRowH, "(vazio - use +)", theme::TEXT,
+                       w - 2.0f * kPad);
     }
 
     // tap re-despachado → seleção da linha sob o dedo (mesmo após scroll)
@@ -158,7 +160,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st) {
     Tic* tic = scene.get(st.selected);
     if (!tic) {
         st.selected = Handle::invalid();
-        ui.label(x + kPad, y + kHeaderH + kRowH, "(nada selecionado)", theme::LINE);
+        ui.labelFitted(x + kPad, y + kHeaderH + kRowH, "(nada selecionado)",
+                       theme::LINE, w - 2.0f * kPad);
         return false;
     }
 
@@ -172,9 +175,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st) {
     const f32 off = ui.scrollOffset();
 
     f32 cy = contentTop;   // coords de CONTEÚDO; widgets em (cy − off)
-    char clipped[40];
-    std::snprintf(clipped, sizeof(clipped), "%s", tic->name.c_str());
-    ui.label(x + kPad, (cy - off) + 8.0f, clipped, theme::ACCENT);
+    ui.labelFitted(x + kPad, (cy - off) + 8.0f, tic->name.c_str(), theme::ACCENT,
+                   w - 2.0f * kPad);   // B2: ellipsis em vez de corte cego
     cy += 30.0f;
 
     bool edited = false;
@@ -222,8 +224,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st) {
     }
 
     if (const MeshRenderer* mr = tic->getComponent<MeshRenderer>()) {
-        ui.label(x + kPad + 12.0f, (cy - off) + 8.0f,
-                 mr->mesh ? "mesh: cube" : "mesh: -", theme::TEXT);
+        ui.labelFitted(x + kPad + 12.0f, (cy - off) + 8.0f,
+                       mr->mesh ? "mesh: cube" : "mesh: -", theme::TEXT,
+                       w - 2.0f * kPad - 12.0f);
         cy += 26.0f;
     }
 
@@ -231,7 +234,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st) {
         char line[48];
         std::snprintf(line, sizeof(line), "input: %s",
                       im->source ? "fonte ligada" : "sem fonte");
-        ui.label(x + kPad + 12.0f, (cy - off) + 8.0f, line, theme::TEXT);
+        ui.labelFitted(x + kPad + 12.0f, (cy - off) + 8.0f, line, theme::TEXT,
+                       w - 2.0f * kPad - 12.0f);
         cy += 26.0f;
     }
 
@@ -242,7 +246,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st) {
         std::snprintf(line, sizeof(line), "body: %s - %s - chao: %s",
                       BodyComp::typeName(b->type), BodyComp::shapeName(b->shape),
                       b->grounded ? "sim" : "nao");
-        ui.label(x + kPad, (cy - off) + 8.0f, line, theme::ACCENT);
+        ui.labelFitted(x + kPad, (cy - off) + 8.0f, line, theme::ACCENT,
+                       w - 2.0f * kPad);   // B2: a label que cortava no C33
         cy += 26.0f;
 
         f32 vx = b->velocity.x;
@@ -261,7 +266,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st) {
                       "add TouchControls");   // só desenha (F4.1)
             cy += 42.0f;
         } else {
-            ui.label(x + kPad + 12.0f, (cy - off) + 8.0f, "tc: stick + jump", theme::TEXT);
+            ui.labelFitted(x + kPad + 12.0f, (cy - off) + 8.0f, "tc: stick + jump",
+                           theme::TEXT, w - 2.0f * kPad - 12.0f);
             cy += 26.0f;
         }
     }
