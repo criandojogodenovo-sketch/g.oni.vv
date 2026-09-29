@@ -65,10 +65,23 @@ public:
     f32  scrollOffset() const;   // offset da região aberta (após beginScroll)
     bool scrollTap(f32& x, f32& y);   // consome o tap re-despachado (1 frame)
 
+    // hooks de TESTE (CI): leitura dos batches emitidos no frame — permitem
+    // aos testes de hospedeiro aferir a geometria REAL desenhada pelos
+    // painéis (linhas sequenciais, sem sobreposição, scroll a revelar o fundo)
+    const QuadBatch& solidsForTest() const { return solids_; }
+    const QuadBatch& glyphsForTest() const { return glyphs_; }
+
     // F3: accessors usados pelos painéis do editor (EditorUi).
     bool hasFont() const { return font_ && font_->ok(); }
     f32  fontWidth(const char* text) const { return font_ ? font_->widthOf(text) : 0.0f; }
     f32  fontHeight() const { return font_ ? font_->height() : 0.0f; }
+    // F5.0-fix: métricas verticais REAIS da fonte assada (fallback 28 px sem
+    // fonte — o caso dos testes de hospedeiro sem atlas). O layout deriva
+    // destes números as alturas de linha — nunca mais de constantes cegas.
+    TextMetrics textMetrics() const {
+        return hasFont() ? TextMetrics{font_->ascent(), font_->descent()}
+                         : TextMetrics{};
+    }
     f32  screenWidth() const { return sw_; }
     f32  screenHeight() const { return sh_; }
 

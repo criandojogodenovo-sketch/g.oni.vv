@@ -15,13 +15,9 @@ constexpr u64 kIdPlus      = 40;
 constexpr u64 kIdScrollHier = 41;   // F4.1: região de scroll da Hierarchy
 constexpr u64 kIdScrollInsp = 42;   // F4.1: região de scroll do Inspector
 constexpr u64 kIdRowBase   = 1000;
-constexpr u64 kIdSliderBase = 2000;
-constexpr u64 kIdVelX      = 2100;
-constexpr u64 kIdAddTc     = 3001;
-constexpr u64 kIdMeshSel   = 5001;   // F5-E: linha "mesh: …" abre seletor
-constexpr u64 kIdTexSel    = 5002;   // F5-E: linha "tex: …" abre seletor
 constexpr u64 kIdAssetBase = 6000;   // F5-E: itens do seletor de assets
-constexpr f32 kAddTcH      = 34.0f;   // altura do botão "add TouchControls"
+// ids do Inspector (sliders/botões) vivem em ui/EditorLayout.h — o PLANO é
+// a fonte única das posições E dos ids (F5.0-fix).
 
 // Toque (edge de press) fora do rect → fecha overlays.
 bool pressedOutside(const InputState& in, f32 x, f32 y, f32 w, f32 h) {
@@ -43,20 +39,24 @@ const char* assetBasename(const std::string& ref) {
 }
 
 // Linha do Inspector: label + slider + valor; aplica em `value` via setter.
-// y já vem em coords de ECRÃ (cy − offset feito pelo chamador).
-bool sliderRow(UiContext& ui, u64 id, f32 x, f32 y, const char* labelText,
+// (rowTop, rowH, tm) vêm do PLANO — a baseline é centrada nas métricas REAIS
+// da fonte (F5.0-fix: o "+8" antigo deixava o bloco de 28 px invadir a linha
+// de cima).
+bool sliderRow(UiContext& ui, u64 id, f32 x, f32 rowTop, f32 rowH,
+               const TextMetrics& tm, const char* labelText,
                f32 minV, f32 maxV, f32& value, const char* fmt) {
-    ui.labelFitted(x + kPad, y + kSliderRow * 0.5f + 9.0f, labelText,
+    const f32 baseline = inspBaseline(rowTop, rowH, tm);
+    ui.labelFitted(x + kPad, baseline, labelText,
                    theme::TEXT, 84.0f - kPad - 6.0f);   // B2: até ao trilho
     const f32 trackX = x + 84.0f;
     const f32 trackW = 118.0f;
-    const bool changed = ui.slider(id, trackX, y, trackW, kSliderRow, minV, maxV, value);
+    const bool changed = ui.slider(id, trackX, rowTop, trackW, rowH, minV, maxV, value);
 
     char val[24];
     std::snprintf(val, sizeof(val), fmt, value);
     if (ui.hasFont()) {
         const f32 tw = ui.fontWidth(val);
-        ui.label(x + kPanelW - kPad - tw, y + kSliderRow * 0.5f + 9.0f, val, theme::TEXT);
+        ui.label(x + kPanelW - kPad - tw, baseline, val, theme::TEXT);
     }
     return changed;
 }
@@ -147,9 +147,10 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
 }
 
 // ---------------------------------------------------------------------------
-// INSPECTOR — componentes do TIC com scroll (F4.1): BodyComp, velx e o botão
-// "add TouchControls" no fundo ficam sempre alcançáveis. Slider mantém
-// prioridade de captura; tap re-despachado aciona o botão do fundo.
+// INSPECTOR — F5.0-fix: o layout vem do PLANO (ui/EditorLayout.h) — linhas em
+// ordem com y cumulativo e alturas derivadas das MÉTRICAS REAIS da fonte.
+// O desenho NÃO tem nenhum "+=" próprio: consome o plano e só subtrai o
+// offset do scroll. contentHeight = fundo da última linha (soma REAL).
 // ---------------------------------------------------------------------------
 bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                    const AssetCatalog* catalog) {
@@ -178,68 +179,54 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         return false;
     }
 
-    // região de scroll: abaixo do cabeçalho; conteúdo medido por
-    // inspectorContentHeight (fonte única — ui/EditorLayout.h)
+    // ---- PLANO (fonte única): perfil → linhas sequenciais com y cumulativo
+    const TextMetrics tm = ui.textMetrics();
+    const InspProfile prof = inspectorProfile(*tic);
+    const bool selectable = (catalog != nullptr);
+    InspRow plan[20];
+    const u32 nRows = inspectorPlan(prof, tm, selectable, plan);
+    const f32 contentH = inspectorContentHeight(prof, tm, selectable);
+
+    // região de scroll: abaixo do cabeçalho
     const f32 contentTop = y + kHeaderH + 4.0f;
     const f32 listH = h - kHeaderH - 4.0f;
-    const f32 contentH = inspectorContentHeight(*tic);
 
     ui.beginScroll(kIdScrollInsp, {x, contentTop, w, listH}, contentH);
     const f32 off = ui.scrollOffset();
 
-    f32 cy = contentTop;   // coords de CONTEÚDO; widgets em (cy − off)
-    ui.labelFitted(x + kPad, (cy - off) + 8.0f, tic->name.c_str(), theme::ACCENT,
-                   w - 2.0f * kPad);   // B2: ellipsis em vez de corte cego
-    cy += 30.0f;
-
-    bool edited = false;
-
-    if (Transform3D* tr = tic->getComponent<Transform3D>()) {
-        ui.label(x + kPad, (cy - off) + 8.0f, "Transform3D", theme::TEXT);
-        cy += 26.0f;
-        ui.panel(x + kPad, (cy - off) - 3.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
-
-        struct Row { const char* label; f32 min, max; const char* fmt; f32* value; };
-        f32 posArr[3] = {tr->pos.x, tr->pos.y, tr->pos.z};
-        // rot em graus (extrai do quat a cada frame)
+    // ---- payloads (os VALORES continuam a ser lidos dos componentes; as
+    // POSIÇÕES vêm todas do plano)
+    Transform3D* tr = tic->getComponent<Transform3D>();
+    struct SliderSpec { const char* label; f32 min, max; const char* fmt; f32* value; };
+    f32 posArr[3] = {};
+    f32 rotDeg[3] = {};
+    f32 sclArr[3] = {};
+    if (tr) {
+        posArr[0] = tr->pos.x; posArr[1] = tr->pos.y; posArr[2] = tr->pos.z;
         f32 ex = 0.0f, ey = 0.0f, ez = 0.0f;
-        Quat::toEuler(tr->rot, ex, ey, ez);
-        f32 rotDeg[3] = {rad2deg(ex), rad2deg(ey), rad2deg(ez)};
-        f32 sclArr[3] = {tr->scale.x, tr->scale.y, tr->scale.z};
-
-        Row rows[9] = {
-            {"px", -20.0f, 20.0f, "%.2f", &posArr[0]},
-            {"py", -20.0f, 20.0f, "%.2f", &posArr[1]},
-            {"pz", -20.0f, 20.0f, "%.2f", &posArr[2]},
-            {"rx", -180.0f, 180.0f, "%.0f", &rotDeg[0]},
-            {"ry", -180.0f, 180.0f, "%.0f", &rotDeg[1]},
-            {"rz", -180.0f, 180.0f, "%.0f", &rotDeg[2]},
-            {"sx", 0.1f, 5.0f, "%.2f", &sclArr[0]},
-            {"sy", 0.1f, 5.0f, "%.2f", &sclArr[1]},
-            {"sz", 0.1f, 5.0f, "%.2f", &sclArr[2]},
-        };
-
-        u64 id = kIdSliderBase;
-        for (Row& rw : rows) {
-            if (sliderRow(ui, id++, x, cy - off, rw.label, rw.min, rw.max, *rw.value, rw.fmt)) {
-                edited = true;
-            }
-            cy += kSliderRow;
-        }
-
-        // escreve de volta no componente (rot: graus → quat YXZ)
-        tr->pos = Vec3{posArr[0], posArr[1], posArr[2]};
-        tr->rot = Quat::fromEuler(deg2rad(rotDeg[0]), deg2rad(rotDeg[1]), deg2rad(rotDeg[2]));
-        tr->scale = Vec3{sclArr[0], sclArr[1], sclArr[2]};
-        if (edited) {
-            tr->updateWorld();   // feedback imediato (TransformSystem reconfirma no passo)
-        }
+        Quat::toEuler(tr->rot, ex, ey, ez);   // rot em graus (extrai do quat)
+        rotDeg[0] = rad2deg(ex); rotDeg[1] = rad2deg(ey); rotDeg[2] = rad2deg(ez);
+        sclArr[0] = tr->scale.x; sclArr[1] = tr->scale.y; sclArr[2] = tr->scale.z;
     }
-
-    if (const MeshRenderer* mr = tic->getComponent<MeshRenderer>()) {
-        // F5-E: linha mesh com ORIGEM — botão abre o seletor de meshes/
-        // (só desenha dentro do scroll; tap re-despachado no fim)
-        char meshLabel[64];
+    SliderSpec rows9[9] = {
+        {"px", -20.0f, 20.0f, "%.2f", &posArr[0]},
+        {"py", -20.0f, 20.0f, "%.2f", &posArr[1]},
+        {"pz", -20.0f, 20.0f, "%.2f", &posArr[2]},
+        {"rx", -180.0f, 180.0f, "%.0f", &rotDeg[0]},
+        {"ry", -180.0f, 180.0f, "%.0f", &rotDeg[1]},
+        {"rz", -180.0f, 180.0f, "%.0f", &rotDeg[2]},
+        {"sx", 0.1f, 5.0f, "%.2f", &sclArr[0]},
+        {"sy", 0.1f, 5.0f, "%.2f", &sclArr[1]},
+        {"sz", 0.1f, 5.0f, "%.2f", &sclArr[2]},
+    };
+    const MeshRenderer* mr = tic->getComponent<MeshRenderer>();
+    const InputMap* im = tic->getComponent<InputMap>();
+    BodyComp* bc = tic->getComponent<BodyComp>();
+    char meshLabel[64] = "";
+    char texLabel[64] = "";
+    char inputLine[48] = "";
+    char bodyLine[64] = "";
+    if (mr) {
         if (!mr->meshPath.empty()) {
             std::snprintf(meshLabel, sizeof(meshLabel), "mesh: %s",
                           assetBasename(mr->meshPath));
@@ -247,18 +234,6 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             std::snprintf(meshLabel, sizeof(meshLabel), "mesh: %s",
                           mr->mesh ? "cube" : "-");
         }
-        const f32 meshTop = cy - off;
-        if (catalog) {
-            ui.button(kIdMeshSel, x + kPad, meshTop + 2.0f, w - 2.0f * kPad,
-                      26.0f, meshLabel);
-        } else {
-            ui.labelFitted(x + kPad + 12.0f, meshTop + 8.0f, meshLabel,
-                           theme::TEXT, w - 2.0f * kPad - 12.0f);
-        }
-        cy += 26.0f;
-
-        // F5-E: linha tex — textura albedo do material (seletor de textures/)
-        char texLabel[64];
         if (!mr->texPath.empty()) {
             std::snprintf(texLabel, sizeof(texLabel), "tex: %s",
                           assetBasename(mr->texPath));
@@ -266,81 +241,148 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             std::snprintf(texLabel, sizeof(texLabel), "tex: %s",
                           mr->texture ? "ligada" : "none");
         }
-        const f32 texTop = cy - off;
-        if (catalog) {
-            ui.button(kIdTexSel, x + kPad, texTop + 2.0f, w - 2.0f * kPad,
-                      26.0f, texLabel);
-        } else {
-            ui.labelFitted(x + kPad + 12.0f, texTop + 8.0f, texLabel,
-                           theme::TEXT, w - 2.0f * kPad - 12.0f);
-        }
-        cy += 26.0f;
     }
-
-    if (const InputMap* im = tic->getComponent<InputMap>()) {
-        char line[48];
-        std::snprintf(line, sizeof(line), "input: %s",
+    if (im) {
+        std::snprintf(inputLine, sizeof(inputLine), "input: %s",
                       im->source ? "fonte ligada" : "sem fonte");
-        ui.labelFitted(x + kPad + 12.0f, (cy - off) + 8.0f, line, theme::TEXT,
-                       w - 2.0f * kPad - 12.0f);
-        cy += 26.0f;
     }
-
-    // F4: BodyComp — tipo/forma/estado + slider de velocidade (lança corpos
-    // para testar CCD e empurrões no device)
-    if (BodyComp* b = tic->getComponent<BodyComp>()) {
-        char line[64];
-        std::snprintf(line, sizeof(line), "body: %s - %s - chao: %s",
-                      BodyComp::typeName(b->type), BodyComp::shapeName(b->shape),
-                      b->grounded ? "sim" : "nao");
-        ui.labelFitted(x + kPad, (cy - off) + 8.0f, line, theme::ACCENT,
-                       w - 2.0f * kPad);   // B2: a label que cortava no C33
-        cy += 26.0f;
-
-        f32 vx = b->velocity.x;
-        if (sliderRow(ui, kIdVelX, x, cy - off, "velx", -60.0f, 60.0f, vx, "%.1f")) {
-            b->velocity.x = vx;
-        }
-        cy += kSliderRow;
+    if (bc) {
+        std::snprintf(bodyLine, sizeof(bodyLine), "body: %s - %s - chao: %s",
+                      BodyComp::typeName(bc->type), BodyComp::shapeName(bc->shape),
+                      bc->grounded ? "sim" : "nao");
     }
+    // linhas de texto (Label) NA MESMA ORDEM do plano: input → body → tc
+    const char* labelTexts[3];
+    const f32 (*labelColors[3])[4];
+    f32 labelInsets[3];
+    u32 nLabels = 0;
+    if (im) {
+        labelTexts[nLabels] = inputLine;
+        labelColors[nLabels] = &theme::TEXT;
+        labelInsets[nLabels] = 12.0f;
+        ++nLabels;
+    }
+    if (bc) {
+        labelTexts[nLabels] = bodyLine;
+        labelColors[nLabels] = &theme::ACCENT;
+        labelInsets[nLabels] = 0.0f;
+        ++nLabels;
+    }
+    if (im && prof.tc) {
+        labelTexts[nLabels] = "tc: stick + jump";
+        labelColors[nLabels] = &theme::TEXT;
+        labelInsets[nLabels] = 12.0f;
+        ++nLabels;
+    }
+    u32 labelIdx = 0;
 
-    // F4: TouchControls adicionável a qualquer TIC com InputMap (não-criável
-    // no resto: layout fixo; UI criável é F6). O botão vive no FUNDO da lista
-    // e é acionado por tap re-despachado (clicável mesmo após scroll).
-    if (tic->getComponent<InputMap>()) {
-        if (!tic->getComponent<TouchControls>()) {
-            ui.button(kIdAddTc, x + kPad, (cy - off) + 2.0f, w - 2.0f * kPad, kAddTcH,
-                      "add TouchControls");   // só desenha (F4.1)
-            cy += 42.0f;
-        } else {
-            ui.labelFitted(x + kPad + 12.0f, (cy - off) + 8.0f, "tc: stick + jump",
+    bool edited = false;
+    bool trEdited = false;
+    u32 sliderIdx = 0;
+
+    // ---- desenho: UMA passagem pelo plano; nenhum cursor local
+    for (u32 i = 0; i < nRows; ++i) {
+        const InspRow& r = plan[i];
+        const f32 ry = contentTop + r.y - off;   // topo da linha em ECRÃ
+        switch (r.kind) {
+        case InspRow::Kind::Name:
+            ui.labelFitted(x + kPad, inspBaseline(ry, r.h, tm), tic->name.c_str(),
+                           theme::ACCENT, w - 2.0f * kPad);   // B2: ellipsis
+            break;
+        case InspRow::Kind::Section:
+            ui.label(x + kPad, inspBaseline(ry, r.h, tm), "Transform3D", theme::TEXT);
+            ui.panel(x + kPad, ry + r.h - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
+            break;
+        case InspRow::Kind::Slider:
+            if (tr && sliderIdx < 9) {
+                const SliderSpec& sp = rows9[sliderIdx];
+                if (sliderRow(ui, r.id, x, ry, r.h, tm, sp.label, sp.min, sp.max,
+                              *sp.value, sp.fmt)) {
+                    trEdited = true;
+                    edited = true;
+                }
+            }
+            ++sliderIdx;
+            break;
+        case InspRow::Kind::Velx:
+            if (bc) {
+                f32 vx = bc->velocity.x;
+                if (sliderRow(ui, r.id, x, ry, r.h, tm, "velx", -60.0f, 60.0f,
+                              vx, "%.1f")) {
+                    bc->velocity.x = vx;
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::MeshButton:
+            // botão da linha INTEIRA, centrado na linha do plano (o botão
+            // antigo sangrava 2 px para a linha de baixo)
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      meshLabel);
+            break;
+        case InspRow::Kind::TexButton:
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      texLabel);
+            break;
+        case InspRow::Kind::MeshLabel:
+            ui.labelFitted(x + kPad + 12.0f, inspBaseline(ry, r.h, tm), meshLabel,
                            theme::TEXT, w - 2.0f * kPad - 12.0f);
-            cy += 26.0f;
+            break;
+        case InspRow::Kind::TexLabel:
+            ui.labelFitted(x + kPad + 12.0f, inspBaseline(ry, r.h, tm), texLabel,
+                           theme::TEXT, w - 2.0f * kPad - 12.0f);
+            break;
+        case InspRow::Kind::Label:
+            // input: → body: → tc: — payload NA ORDEM do plano (labelIdx)
+            if (labelIdx < nLabels) {
+                const f32 inset = labelInsets[labelIdx];
+                ui.labelFitted(x + kPad + inset, inspBaseline(ry, r.h, tm),
+                               labelTexts[labelIdx], *labelColors[labelIdx],
+                               w - 2.0f * kPad - inset);
+                ++labelIdx;
+            }
+            break;
+        case InspRow::Kind::AddTc:
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      "add TouchControls");
+            break;
         }
+    }
+
+    // escreve de volta no componente (rot: graus → quat YXZ)
+    if (tr && trEdited) {
+        tr->pos = Vec3{posArr[0], posArr[1], posArr[2]};
+        tr->rot = Quat::fromEuler(deg2rad(rotDeg[0]), deg2rad(rotDeg[1]), deg2rad(rotDeg[2]));
+        tr->scale = Vec3{sclArr[0], sclArr[1], sclArr[2]};
+        tr->updateWorld();   // feedback imediato (TransformSystem reconfirma)
     }
 
     ui.endScroll();
 
-    // tap re-despachado → botão "add TouchControls" (hit-test do rect em ecrã)
+    // tap re-despachado → linhas interativas do PLANO (hit-test do rect em
+    // ecrã, igual ao que foi desenhado — nunca diverge)
     f32 tx, ty;
-    if (ui.scrollTap(tx, ty) && tic->getComponent<InputMap>() &&
-        !tic->getComponent<TouchControls>()) {
-        const f32 btnTop = contentTop + inspectorAddTcTop(contentH) - off;
-        if (tx >= x + kPad && tx < x + w - kPad &&
-            ty >= btnTop && ty < btnTop + kAddTcH) {
-            tic->addComponent<TouchControls>();
-        }
-    }
-
-    // F5-E: tap re-despachado → seletores de mesh/tex (rects em ecrã)
-    if (ui.scrollTap(tx, ty) && catalog) {
-        const f32 meshTopScr = contentTop + inspectorMeshTop(*tic) - off;
-        const f32 texTopScr = meshTopScr + 26.0f;
-        if (tx >= x + kPad && tx < x + w - kPad) {
-            if (ty >= meshTopScr && ty < meshTopScr + 26.0f) {
-                st.assetMenu = 1;
-            } else if (ty >= texTopScr && ty < texTopScr + 26.0f) {
-                st.assetMenu = 2;
+    if (ui.scrollTap(tx, ty)) {
+        for (u32 i = 0; i < nRows; ++i) {
+            const InspRow& r = plan[i];
+            if (r.kind != InspRow::Kind::AddTc &&
+                r.kind != InspRow::Kind::MeshButton &&
+                r.kind != InspRow::Kind::TexButton) {
+                continue;
+            }
+            const f32 ry = contentTop + r.y - off;
+            if (tx < x + kPad || tx >= x + w - kPad) {
+                continue;
+            }
+            if (ty < ry + 2.0f || ty >= ry + r.h - 2.0f) {
+                continue;   // mesmo rect do botão desenhado (+2/−2)
+            }
+            if (r.kind == InspRow::Kind::AddTc) {
+                tic->addComponent<TouchControls>();   // F4: cria no TIC
+            } else if (r.kind == InspRow::Kind::MeshButton) {
+                st.assetMenu = 1;                     // F5-E: seletor de meshes
+            } else {
+                st.assetMenu = 2;                     // F5-E: seletor de texturas
             }
         }
     }

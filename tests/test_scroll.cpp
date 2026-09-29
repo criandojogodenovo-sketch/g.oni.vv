@@ -173,29 +173,54 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     EXPECT(tic->getComponent<InputMap>() != nullptr);
     EXPECT(tic->getComponent<BodyComp>() != nullptr);
 
-    // receita completa do Player: nome 30 + transform 350 + mesh 26 + tex 26
-    // (F5-E) + input 26 + body 62 + add TouchControls 42 = 562
-    const f32 contentH = inspectorContentHeight(*tic);
-    EXPECT(nearEqF(contentH, 562.0f));
+    // F5.0-fix: o conteúdo vem do PLANO (fonte única) com as métricas
+    // fallback = sans 28 px (o caso do device). Receita completa do Player
+    // (sem catálogo → mesh/tex são LABELS de 34): nome 34 + transform
+    // (34 + 9×36) + mesh 34 + tex 34 + input 34 + body 34 + velx 36 +
+    // add TouchControls 42 = 606
+    const TextMetrics m{};
+    const InspProfile prof = inspectorProfile(*tic);
+    InspRow plan[20];
+    const u32 n = inspectorPlan(prof, m, false, plan);
+    const f32 contentH = inspectorContentHeight(prof, m, false);
+    EXPECT(nearEqF(contentH, 606.0f));
+
+    // cursor Y PARTILHADO: linhas sequenciais (y estritamente crescente, sem
+    // reinício por secção), todas dentro do conteúdo, e o fundo do plano =
+    // contentHeight (a soma REAL das alturas)
+    f32 prevTop = -1.0f;
+    f32 prevBottom = 0.0f;
+    u32 addTcIdx = n;
+    for (u32 i = 0; i < n; ++i) {
+        EXPECT(plan[i].y >= prevBottom);   // começa onde a anterior acabou
+        EXPECT(plan[i].y > prevTop);       // Ys DISTINTOS (nada desenha em cima)
+        EXPECT(plan[i].y + plan[i].h <= contentH + 0.01f);
+        prevTop = plan[i].y;
+        prevBottom = plan[i].y + plan[i].h;
+        if (plan[i].kind == InspRow::Kind::AddTc) addTcIdx = i;
+    }
+    EXPECT(addTcIdx + 1 == n);   // "add TouchControls" é a ÚLTIMA linha
+    EXPECT(nearEqF(plan[addTcIdx].y + plan[addTcIdx].h, contentH));
 
     // C33 (pior caso: superfície mais baixa que a teórica) — lista 500 px:
     // sem scroll o fundo do botão fica FORA da região (o bug reportado)
     const f32 listH = 500.0f;
     const f32 contentTop = 140.0f;   // y=88 + cabeçalho 48 + 4
-    const f32 btnBottom0 = contentTop + inspectorAddTcTop(contentH) + 34.0f;
+    const f32 btnBottom0 = contentTop + plan[addTcIdx].y + plan[addTcIdx].h;
     EXPECT(btnBottom0 > contentTop + listH);
 
     // com o offset no MÁXIMO o botão fica inteiro dentro da região —
     // "add TouchControls" clicável mesmo após scroll
     const f32 off = clampOffset(999.0f, contentH, listH);
     EXPECT(nearEqF(off, contentH - listH));
-    const f32 btnTop = contentTop + inspectorAddTcTop(contentH) - off;
+    const f32 btnTop = contentTop + plan[addTcIdx].y - off;
     EXPECT(btnTop >= contentTop);
-    EXPECT(btnTop + 34.0f <= contentTop + listH);
+    EXPECT(btnTop + plan[addTcIdx].h <= contentTop + listH + 0.01f);
 
-    // com TouchControls presente o botão dá lugar à label (42 → 26)
+    // com TouchControls presente o botão dá lugar à label tc (42 → 34)
     EXPECT(tic->addComponent<TouchControls>() != nullptr);
-    EXPECT(nearEqF(inspectorContentHeight(*tic), 546.0f));
+    EXPECT(nearEqF(inspectorContentHeight(inspectorProfile(*tic), m, false),
+                   598.0f));
 }
 
 TEST(scroll_hierarquia_todos_os_tics_atingeis) {
@@ -241,7 +266,7 @@ TEST(scroll_hierarquia_row_sob_tap) {
 // ---------------------------------------------------------------------------
 // F5-E: as linhas de mesh/tex do Inspector (seletores de assets) ficam em
 // coords de conteúdo conhecidas — atingíveis com scroll, como o botão do
-// fundo. inspectorMeshTop é a fonte única usada pelo hit-test do tap.
+// fundo. O PLANO é a fonte única usada pelo desenho E pelo hit-test do tap.
 // ---------------------------------------------------------------------------
 
 TEST(scroll_linhas_mesh_tex_atingiveis_no_scroll) {
@@ -249,14 +274,24 @@ TEST(scroll_linhas_mesh_tex_atingiveis_no_scroll) {
     const Handle h = createTicFromPreset(s, PresetKind::PlayerBody3D, nullptr, nullptr);
     Tic* tic = s.get(h);
 
-    // topo da linha mesh (Player tem Transform3D): nome + transform
-    const f32 meshTop = inspectorMeshTop(*tic);
-    EXPECT(nearEqF(meshTop, 30.0f + 26.0f + 9.0f * 36.0f + 2.0f));
-    const f32 texTop = meshTop + 26.0f;
-    EXPECT(nearEqF(texTop + 26.0f, meshTop + 52.0f));   // blocos adjacentes
+    const TextMetrics m{};
+    const InspProfile prof = inspectorProfile(*tic);
+    InspRow plan[20];
+    const u32 n = inspectorPlan(prof, m, true, plan);   // seletores ativos
+    u32 meshIdx = n, texIdx = n;
+    for (u32 i = 0; i < n; ++i) {
+        if (plan[i].kind == InspRow::Kind::MeshButton) meshIdx = i;
+        if (plan[i].kind == InspRow::Kind::TexButton) texIdx = i;
+    }
+    EXPECT(meshIdx < n);
+    EXPECT(texIdx == meshIdx + 1);   // mesh e tex ADJACENTES
 
-    // pior caso C33 (lista 500 px): conteúdo 562 — scroll ativa
-    const f32 contentH = inspectorContentHeight(*tic);
+    // topo da linha mesh (Player tem Transform3D): nome 34 + secção 34 + 9×36
+    EXPECT(nearEqF(plan[meshIdx].y, 34.0f + 34.0f + 9.0f * 36.0f));
+    EXPECT(nearEqF(plan[texIdx].y, plan[meshIdx].y + plan[meshIdx].h));
+
+    // pior caso C33 (lista 500 px): conteúdo 610 — scroll ativa
+    const f32 contentH = inspectorContentHeight(prof, m, true);
     const f32 listH = 500.0f;
     EXPECT(contentH > listH);
     const f32 off = clampOffset(999.0f, contentH, listH);
@@ -264,7 +299,7 @@ TEST(scroll_linhas_mesh_tex_atingiveis_no_scroll) {
 
     // com o offset no máximo, o topo da linha mesh continua dentro da lista
     const f32 contentTop = 140.0f;
-    const f32 meshScr = contentTop + meshTop - off;
+    const f32 meshScr = contentTop + plan[meshIdx].y - off;
     EXPECT(meshScr >= contentTop);
-    EXPECT(meshScr + 26.0f <= contentTop + listH);
+    EXPECT(meshScr + plan[meshIdx].h <= contentTop + listH + 0.01f);
 }

@@ -94,6 +94,14 @@ bool FontAtlas::loadFromPaths(const char* const* paths, u32 count, f32 heightPx)
             g.xadv = b.xadvance;
             g.w = static_cast<f32>(b.x1 - b.x0);
             g.h = static_cast<f32>(b.y1 - b.y0);
+            // F5.0-fix: métricas verticais REAIS — o maior bloco entre todos
+            // os glifos assados (topo mais alto acima do baseline + fundo dos
+            // descendentes abaixo). O layout do Inspector deriva as alturas
+            // das linhas destes números (fonte 28 px no device).
+            const f32 top    = -b.yoff;                       // baseline → topo
+            const f32 bottom = b.yoff + g.h;                  // baseline → fundo
+            if (top > ascent_)  ascent_  = top;
+            if (bottom > descent_) descent_ = bottom;
         }
         height_ = heightPx;
         return true;

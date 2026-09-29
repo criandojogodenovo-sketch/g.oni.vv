@@ -5,8 +5,24 @@
 //
 // Coordenadas de CONTEÚDO: origem no topo da lista (debaixo do cabeçalho do
 // painel); o scroll converte para ecrã com screenY = contentY − offset.
+//
+// F5.0-fix (bug do C33: texto do Inspector sobreposto em "pilhas"):
+// ── CAUSA RAIZ ── as linhas do Inspector tinham alturas FIXAS (26/30 px)
+// pensadas para uma fonte pequena, mas o device carrega a fonte a 28 px
+// (bloco de glifo ≈ 22 + 6 px). O baseline "+8" fazia o bloco de texto
+// começar 10 px ACIMA do topo da linha — cada label invadia a linha de
+// cima (tex × input sobrepunham 7 px; velx × tc 3 px; nome × Transform3D
+// encostavam). O cursor Y era SEMPRE partilhado e sequencial — a sobreposição
+// era dos BLOCOS DE GLIFO, não das linhas. Nenhum teste apanhava: no
+// hospedeiro não há fonte (hasFont() = false → texto invisível).
+// ── FIX ── (1) as alturas das linhas derivam das MÉTRICAS REAIS da fonte
+// (TextMetrics do atlas; fallback 28 px) via inspectorPlan(); (2) o plano é
+// a FONTE ÚNICA: o desenho consome as linhas na ordem (y cumulativo, sem um
+// único "+=" solto), contentHeight = fundo da última linha, e os testes de
+// CI aferem o MESMO plano + a geometria REAL dos glifos.
 #include "core/Types.h"
 #include <cmath>
+#include "ui/FontAtlas.h"   // TextMetrics (GL-free)
 #include "core/Scene.h"
 #include "components/Transform3D.h"
 #include "components/MeshRenderer.h"
@@ -21,7 +37,6 @@ namespace editor {
 constexpr f32 kPad       = 12.0f;
 constexpr f32 kHeaderH   = 48.0f;
 constexpr f32 kRowH      = 52.0f;
-constexpr f32 kSliderRow = 36.0f;
 constexpr f32 kMenuW     = 340.0f;
 
 // altura do conteúdo da Hierarchy: uma linha por TIC ativo
@@ -29,46 +44,142 @@ inline f32 hierarchyContentHeight(u32 ticCount) {
     return static_cast<f32>(ticCount) * kRowH;
 }
 
-// altura do conteúdo do Inspector — DEVE espelhar a ordem e as alturas de
-// drawInspector (testes do CI aferem os totais das receitas dos presets)
-inline f32 inspectorContentHeight(const Tic& tic) {
-    f32 cy = 0.0f;
-    cy += 30.0f;                                   // nome do TIC
-    if (tic.getComponent<Transform3D>()) {
-        cy += 26.0f + 9.0f * kSliderRow;           // cabeçalho + 9 sliders
-    }
-    if (tic.getComponent<MeshRenderer>()) {
-        cy += 26.0f + 26.0f;                       // mesh: origem + tex (F5-E)
-    }
-    if (tic.getComponent<InputMap>()) {
-        cy += 26.0f;                               // input: fonte
-    }
-    if (tic.getComponent<BodyComp>()) {
-        cy += 26.0f + kSliderRow;                  // body: tipo·forma·chão + velx
-    }
-    if (tic.getComponent<InputMap>()) {
-        if (!tic.getComponent<TouchControls>()) {
-            cy += 42.0f;                           // botão "add TouchControls"
-        } else {
-            cy += 26.0f;                           // label "tc: stick + jump"
+// ---- ids dos widgets do Inspector (antes no anon ns do EditorUi.cpp —
+// o plano e o hit-test do tap re-despachado partilham-nos)
+constexpr u64 kInspectorSliderBase = 2000;   // 9 sliders do Transform3D
+constexpr u64 kInspectorVelX       = 2100;   // slider velx do BodyComp
+constexpr u64 kInspectorAddTc      = 3001;   // botão "add TouchControls"
+constexpr u64 kInspectorMeshSel    = 5001;   // F5-E: linha "mesh: …"
+constexpr u64 kInspectorTexSel     = 5002;   // F5-E: linha "tex: …"
+
+// ---- Inspector: alturas derivadas das MÉTRICAS DA FONTE (F5.0-fix) ---------
+// Bloco de texto = ascent + descent (reais do atlas). Cada linha acrescenta
+// a folga mínima para o bloco caber INTEIRO dentro da linha — nunca mais
+// glifos a invadir a linha vizinha.
+inline f32 inspTextRowH(const TextMetrics& m)   { return m.block() + 6.0f; }  // labels
+inline f32 inspButtonRowH(const TextMetrics& m) { return m.block() + 8.0f; }  // botões
+inline f32 inspSliderRowH(const TextMetrics& m) { return m.block() + 8.0f; }  // sliders
+inline f32 inspAddTcH(const TextMetrics& m)     { return m.block() + 14.0f; } // botão do fundo
+
+// baseline CENTRADA do bloco de texto dentro da linha (topo = baseline −
+// ascent, fundo = baseline + descent) — substitui a convenção "+8" que
+// provocava a invasão de 10 px acima do topo da linha.
+inline f32 inspBaseline(f32 rowTop, f32 rowH, const TextMetrics& m) {
+    return rowTop + (rowH - m.block()) * 0.5f + m.ascent;
+}
+
+// ---- perfil de componentes do TIC (a presença que o plano reflete) --------
+struct InspProfile {
+    bool tr = false;   // Transform3D  (cabeçalho + 9 sliders)
+    bool mr = false;   // MeshRenderer  (linhas mesh/tex)
+    bool im = false;   // InputMap      (linha input + addTc/tc)
+    bool bc = false;   // BodyComp      (linha body + slider velx)
+    bool tc = false;   // TouchControls (muda addTc ↔ label tc)
+};
+
+inline InspProfile inspectorProfile(const Tic& tic) {
+    InspProfile p;
+    p.tr = tic.getComponent<Transform3D>() != nullptr;
+    p.mr = tic.getComponent<MeshRenderer>() != nullptr;
+    p.im = tic.getComponent<InputMap>() != nullptr;
+    p.bc = tic.getComponent<BodyComp>() != nullptr;
+    p.tc = tic.getComponent<TouchControls>() != nullptr;
+    return p;
+}
+
+// ---- o PLANO do Inspector — FONTE ÚNICA do layout --------------------------
+// Linhas em ORDEM, com y CUMULATIVO em coords de conteúdo (o desenho só
+// subtrai o offset do scroll; nenhum consumidor faz "+=" próprio).
+struct InspRow {
+    enum class Kind : u8 {
+        Name,        // nome do TIC (accent)
+        Section,     // cabeçalho "Transform3D" + separador no fundo da linha
+        Slider,      // slider do Transform3D (9× — payload por índice)
+        MeshButton,  // F5-E: "mesh: …" (selecionável se houver catálogo)
+        MeshLabel,   // F5-E: "mesh: …" só leitura (sem catálogo)
+        TexButton,   // F5-E: "tex: …" (selecionável)
+        TexLabel,    // F5-E: "tex: …" só leitura
+        Label,       // linha de texto (input/body/tc)
+        Velx,        // slider velx do BodyComp
+        AddTc,       // botão "add TouchControls" no fundo
+    };
+    Kind kind;
+    f32  y;     // topo da linha em COORDS DE CONTEÚDO (cumulativo)
+    f32  h;     // altura da linha (derivada das métricas da fonte)
+    u64  id;    // id do widget interativo (0 = só desenho)
+};
+
+inline u32 inspectorRowCount(const InspProfile& p, bool selectable) {
+    u32 n = 1;                                          // nome
+    if (p.tr) n += 1 + 9;                               // secção + 9 sliders
+    if (p.mr) n += 2;                                   // mesh + tex
+    if (p.im) n += 1;                                   // input
+    if (p.bc) n += 2;                                   // body + velx
+    if (p.im) n += 1;                                   // addTc OU tc
+    (void)selectable;
+    return n;
+}
+
+// constrói o plano (rows deve ter capacidade inspectorRowCount; devolve count)
+inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
+                         bool selectable, InspRow* rows) {
+    const f32 textH = inspTextRowH(m);
+    const f32 btnH  = inspButtonRowH(m);
+    const f32 sldH  = inspSliderRowH(m);
+    const f32 addH  = inspAddTcH(m);
+
+    u32 n = 0;
+    f32 y = 0.0f;
+    auto push = [&](InspRow::Kind kind, f32 h, u64 id) {
+        rows[n].kind = kind;
+        rows[n].y    = y;
+        rows[n].h    = h;
+        rows[n].id   = id;
+        ++n;
+        y += h;   // ← o ÚNICO avanço de cursor: y += altura_linha
+    };
+
+    push(InspRow::Kind::Name, textH, 0);
+    if (p.tr) {
+        push(InspRow::Kind::Section, textH, 0);
+        for (u32 i = 0; i < 9; ++i) {
+            push(InspRow::Kind::Slider, sldH, kInspectorSliderBase + i);
         }
     }
-    return cy;
-}
-
-// topo (coords de CONTEÚDO) da linha "mesh:" — o tap re-despachado do
-// scroll usa isto p/ abrir o seletor de assets (F5-E); tex = topo + 26.
-inline f32 inspectorMeshTop(const Tic& tic) {
-    f32 cy = 30.0f;                                // nome do TIC
-    if (tic.getComponent<Transform3D>()) {
-        cy += 26.0f + 9.0f * kSliderRow;
+    if (p.mr) {
+        push(selectable ? InspRow::Kind::MeshButton : InspRow::Kind::MeshLabel,
+             selectable ? btnH : textH, selectable ? kInspectorMeshSel : 0);
+        push(selectable ? InspRow::Kind::TexButton : InspRow::Kind::TexLabel,
+             selectable ? btnH : textH, selectable ? kInspectorTexSel : 0);
     }
-    return cy + 2.0f;                              // +2 = offset do botão
+    if (p.im) {
+        push(InspRow::Kind::Label, textH, 0);           // input:
+    }
+    if (p.bc) {
+        push(InspRow::Kind::Label, textH, 0);           // body:
+        push(InspRow::Kind::Velx, sldH, kInspectorVelX);
+    }
+    if (p.im) {
+        if (!p.tc) {
+            push(InspRow::Kind::AddTc, addH, kInspectorAddTc);
+        } else {
+            push(InspRow::Kind::Label, textH, 0);       // tc: stick + jump
+        }
+    }
+    return n;
 }
 
-// topo do botão "add TouchControls" em coords de conteúdo (fundo = topo + 34;
-// o conteúdo acaba 6 px abaixo do botão — margem)
-inline f32 inspectorAddTcTop(f32 contentH) { return contentH - 40.0f; }
+// altura REAL do conteúdo = fundo da última linha do plano (o Y final do
+// cursor partilhado). Sem linhas → 0.
+inline f32 inspectorContentHeight(const InspProfile& p, const TextMetrics& m,
+                                  bool selectable) {
+    InspRow rows[20];
+    const u32 n = inspectorPlan(p, m, selectable, rows);
+    if (n == 0) {
+        return 0.0f;
+    }
+    return rows[n - 1].y + rows[n - 1].h;
+}
 
 // Hierarchy: índice da linha sob um tap em coords de ECRÃ (com o offset do
 // scroll aplicado) — -1 se fora da lista

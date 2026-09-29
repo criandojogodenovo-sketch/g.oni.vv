@@ -33,6 +33,30 @@ public:
     void pos(u32 slot, f32& x, f32& y) const { x = slots_[slot].x; y = slots_[slot].y; }
     u32  activePointers() const;
 
+    // hooks de TESTE (CI): reproduzem no hospedeiro o mesmo estado que o
+    // glue produz no device — press edge + down + move + release por slot.
+    // Os testes de UI (scroll/sliders/taps) injetam gestos com isto.
+    void injectDown(u32 slot, f32 x, f32 y) {
+        slots_[slot].down = true;
+        slots_[slot].id   = 100 + static_cast<i32>(slot);
+        slots_[slot].x    = x;
+        slots_[slot].y    = y;
+        pressed_[slot]    = true;
+    }
+    void injectMove(u32 slot, f32 x, f32 y) {
+        if (slots_[slot].down) {
+            slots_[slot].x = x;
+            slots_[slot].y = y;
+        }
+    }
+    void injectUp(u32 slot) {
+        if (slots_[slot].down) {
+            slots_[slot].down = false;
+            slots_[slot].id   = -1;
+            released_[slot]   = true;
+        }
+    }
+
 private:
     i32  slotOfId(i32 id) const;
     void claim(i32 id, f32 x, f32 y);

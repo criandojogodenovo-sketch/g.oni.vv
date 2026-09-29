@@ -94,12 +94,19 @@ TEST(safearea_layout_todo_dentro_do_content_rect) {
 // contentRect) o overflow é detetado → scroll ativa → BodyComp/velx/add
 // TouchControls alcançáveis.
 TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
-    const f32 contentH = 536.0f;   // receita do Player (aferida na F4.1)
-
-    // ANTES do fix: painel = superfície inteira menos toolbar/status
+    // histórico (F4.2): com a receita ANTIGA (536 px) e o painel inflado o
+    // scroll morria — maxOffset 0
+    const f32 contentOld = 536.0f;
     const f32 listOld = (720.0f - kToolbarH - kStatusH) - kHeaderH - 4.0f;
     EXPECT(nearEqF(listOld, 540.0f));
-    EXPECT(nearEqF(scroll::maxOffset(contentH, listOld), 0.0f));   // scroll MORTO (bug)
+    EXPECT(nearEqF(scroll::maxOffset(contentOld, listOld), 0.0f));   // bug antigo
+
+    // F5.0-fix: a receita vem do PLANO (métricas fallback 28 px = device) —
+    // Player completo sem TouchControls, sem catálogo (mesh/tex labels 34) → 606
+    const InspProfile prof{true, true, true, true, false};
+    const TextMetrics m{};
+    const f32 contentH = inspectorContentHeight(prof, m, false);
+    EXPECT(nearEqF(contentH, 606.0f));
 
     // DEPOIS: painel dentro do contentRect [0,24,·,628] (status 24 + nav 92)
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);
@@ -109,14 +116,20 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     EXPECT(nearEqF(listH, 424.0f));
     const f32 mo = scroll::maxOffset(contentH, listH);
     EXPECT(mo > 0.0f);                        // scroll ATIVA
-    EXPECT(nearEqF(mo, 112.0f));              // 536 − 424
+    EXPECT(nearEqF(mo, 182.0f));              // 606 − 424
 
-    // com o offset no máximo, o botão do fundo fica INTEIRO dentro da lista
+    // com o offset no máximo, a ÚLTIMA linha do plano (add TouchControls)
+    // fica INTEIRA dentro da lista
+    InspRow plan[20];
+    const u32 n = inspectorPlan(prof, m, false, plan);
+    EXPECT(n > 0);
+    const InspRow& last = plan[n - 1];
+    EXPECT(last.kind == InspRow::Kind::AddTc);
     const f32 contentTop = panel.y + kHeaderH + 4.0f;
     const f32 off = scroll::clampOffset(999.0f, contentH, listH);
-    const f32 btnTop = contentTop + inspectorAddTcTop(contentH) - off;
+    const f32 btnTop = contentTop + last.y - off;
     EXPECT(btnTop >= contentTop);
-    EXPECT(btnTop + 34.0f <= contentTop + listH);   // botão "add TouchControls"
+    EXPECT(btnTop + last.h <= contentTop + listH + 0.01f);   // botão completo
 }
 
 // Hierarchy com insets: com >10 TICs todas as linhas continuam alcançáveis

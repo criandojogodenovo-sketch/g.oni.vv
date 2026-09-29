@@ -136,9 +136,14 @@ bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
             shown = fit;
         }
         const f32 tw = font_->widthOf(shown);
-        const f32 th = font_->height();
-        // baseline ≈ centro + 0.30*altura (aproximação do ascent do atlas)
-        label(x + (w - tw) * 0.5f, y + h * 0.5f + th * 0.30f, shown, txt);
+        // F5.0-fix: baseline centrada com as métricas REAIS do bloco de
+        // texto (topo = baseline − ascent, fundo = baseline + descent) —
+        // antes era a aproximação 0.30*altura, que com a fonte a 28 px
+        // deixava os glifos descerem para a linha de baixo.
+        const f32 asc = font_->ascent();
+        const f32 desc = font_->descent();
+        const f32 baseline = y + (h - asc - desc) * 0.5f + asc;
+        label(x + (w - tw) * 0.5f, baseline, shown, txt);
     }
     return pressed;
 }

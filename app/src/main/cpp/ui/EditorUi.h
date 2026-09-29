@@ -32,6 +32,15 @@
 // abre seletores (overlay mono) com o conteúdo de meshes/ e textures/ do
 // projeto; o Menu ganha "Export OBJ" (mesh do TIC selecionado → meshes/).
 // O catálogo (listas de nomes) é refresh pelo main a partir do ProjectStorage.
+//
+// F5.0-fix (bug do C33: texto do Inspector sobreposto em pilhas): o layout
+// do Inspector vem do PLANO (ui/EditorLayout.h) — linhas sequenciais com
+// cursor Y partilhado (y += altura_linha, nenhum reinício por secção) e
+// alturas derivadas das MÉTRICAS REAIS da fonte (TextMetrics do atlas; as
+// linhas antigas de 26 px eram pequenas demais para a fonte de 28 px — o
+// bloco de glifos invadia a linha de cima). O desenho não tem "+=" próprio:
+// consome o plano e subtrai o offset do scroll; contentHeight = fundo da
+// última linha; o hit-test do tap re-despachado usa o MESMO plano.
 #include "core/Handle.h"
 #include "ui/UiContext.h"
 #include "ui/EditorLayout.h"
