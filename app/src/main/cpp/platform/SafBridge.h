@@ -38,4 +38,10 @@ bool safJniWriteSingle(const std::string& docUri, const void* data, size_t n);
 bool safInitJniBackend(void* vm, void* envPtr, void* activityObject);
 SafBackend* safJniBackend();
 
+// F5.1-hotfix (parte 1.4): export dos logs para Downloads/GOneVV/logs
+// (MediaStore, lado Java). true = chamada Java executada; *outCount =
+// ficheiros copiados (negativo = falha Java: -1 excepção, -2 API<29,
+// -3 sem ficheiros).
+bool jniExportLogsToDownloads(int* outCount);
+
 } // namespace vv::saf

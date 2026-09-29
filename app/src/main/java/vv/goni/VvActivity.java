@@ -1,8 +1,12 @@
 package vv.goni;
 
 import android.app.NativeActivity;
+import android.content.ContentValues;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
+import android.provider.MediaStore;
 
 /**
  * F5.1-C — EXCEÇÃO DOCUMENTADA à regra "zero Java" (docs/SAF_EXCEPTION.md).
@@ -76,6 +80,62 @@ public class VvActivity extends NativeActivity {
             startActivityForResult(i, requestCode);
         } catch (Exception e) {
             nativeOnActivityResult(requestCode, RESULT_CANCELED, null, 0);
+        }
+    }
+
+    // F5.1-hotfix (parte 1.4) — EXPORT DOS LOGS para o Downloads PÚBLICO.
+    // Copia TODOS os ficheiros de getExternalFilesDir("logs") (engine.log,
+    // rotações .1/.2 e crash-*.dump) para Downloads/<relPath>/ via MediaStore
+    // — API 29+ (C33 é Android 12), SEM permissão WRITE_EXTERNAL_STORAGE.
+    // Chamado POR JNI do thread nativo (ContentResolver é thread-safe; não
+    // toca na UI). relPath vem do nativo (vv::elog::kDownloadsRelPath =
+    // "Download/GOneVV/logs") — constante única aferida no CI.
+    // Devolve o nº de ficheiros copiados; negativo = falha (-1 excepção,
+    // -2 API < 29, -3 sem ficheiros, -4 sem storage externo).
+    int exportLogsToDownloads(String relPath) {
+        try {
+            if (Build.VERSION.SDK_INT < 29) return -2;
+            if (relPath == null || relPath.isEmpty()) return -1;
+            java.io.File dir = getExternalFilesDir("logs");
+            java.io.File[] files = (dir != null) ? dir.listFiles() : null;
+            if (files == null || files.length == 0) return -3;
+            int count = 0;
+            for (java.io.File f : files) {
+                if (!f.isFile()) continue;
+                // export repetido SUBSTITUI (query+delete pelo mesmo nome)
+                deleteDownload(relPath, f.getName());
+                ContentValues cv = new ContentValues();
+                cv.put(MediaStore.MediaColumns.DISPLAY_NAME, f.getName());
+                cv.put(MediaStore.MediaColumns.MIME_TYPE, "text/plain");
+                cv.put(MediaStore.MediaColumns.RELATIVE_PATH, relPath);
+                Uri uri = getContentResolver().insert(
+                        MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+                if (uri == null) continue;
+                java.io.InputStream in = new java.io.FileInputStream(f);
+                java.io.OutputStream os = getContentResolver().openOutputStream(uri);
+                if (os == null) { in.close(); continue; }
+                byte[] buf = new byte[16 * 1024];
+                int n;
+                while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+                os.flush();
+                os.close();
+                in.close();
+                count++;
+            }
+            return count;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    private void deleteDownload(String relPath, String name) {
+        try {
+            String sel = MediaStore.MediaColumns.RELATIVE_PATH + "=? AND " +
+                         MediaStore.MediaColumns.DISPLAY_NAME + "=?";
+            String[] args = { relPath, name };
+            getContentResolver().delete(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI, sel, args);
+        } catch (Exception ignored) {
         }
     }
 }

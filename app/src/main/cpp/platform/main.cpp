@@ -713,6 +713,7 @@ void frame() {
     if (clicks[0]) {
         g_editor.fileMenu = !g_editor.fileMenu;   // F3: Menu abre Save/Load
         g_editor.plusMenu = false;
+        g_editor.settingsMenu = false;
     }
     if (clicks[1]) {
         g_playMode = !g_playMode;                 // F4: Play liga/desliga a simulação
@@ -730,7 +731,32 @@ void frame() {
         }
         showToast(g_playMode ? "modo play" : "modo editor");
     }
-    if (clicks[2]) { LOGI("ui: botão Settings"); }
+    if (clicks[2]) {
+        // F5.1-hotfix: Settings abre o menu (Exportar logs)
+        g_editor.settingsMenu = !g_editor.settingsMenu;
+        g_editor.fileMenu = false;
+        g_editor.plusMenu = false;
+        elog::info("ui: menu Settings %s", g_editor.settingsMenu ? "aberto" : "fechado");
+    }
+
+    // F5.1-hotfix (parte 1.4): overlay Settings → Exportar logs
+    if (g_editor.settingsMenu) {
+        const int choice = editor::drawSettingsMenu(g_ui, g_input, w, h, g_editor);
+        if (choice == 1) {
+            int copied = 0;
+            if (saf::jniExportLogsToDownloads(&copied) && copied >= 0) {
+                char msg[96];
+                std::snprintf(msg, sizeof(msg), "logs exportados: %d → %s",
+                              copied, elog::kDownloadsRelPath);
+                showToast(msg);
+                elog::info("logs: exportados %d ficheiro(s) para %s",
+                           copied, elog::kDownloadsRelPath);
+            } else {
+                showToast("export falhou (sem ficheiros? API<29?)");
+                elog::warn("logs: export falhou (copied=%d)", copied);
+            }
+        }
+    }
 
     // F5-E: catálogo dos seletores — refresh quando um seletor ABRE
     if (g_editor.assetMenu != 0 && g_editor.assetMenu != g_prevAssetMenu) {

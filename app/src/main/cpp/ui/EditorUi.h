@@ -68,6 +68,7 @@ struct EditorState {
     Handle selected = Handle::invalid();   // TIC selecionado na Hierarchy
     bool   plusMenu = false;               // overlay de criação aberto
     bool   fileMenu = false;               // overlay Menu (Save/Load) aberto
+    bool   settingsMenu = false;           // F5.1-hotfix: overlay Settings aberto
     int    assetMenu = 0;                  // F5-E: 0 fechado; 1 = seletor mesh;
                                            //       2 = seletor textura
 };
@@ -113,6 +114,10 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st);
 int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st,
                   const AssetCatalog& catalog);
+// F5.1-hotfix: menu do botão Settings → 0 nada, 1 = "Exportar logs"
+// (copia logs/ e crash dumps para Downloads/GOneVV/logs via MediaStore).
+int drawSettingsMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                     EditorState& st);
 
 } // namespace editor
 

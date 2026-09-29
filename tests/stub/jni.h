@@ -34,6 +34,7 @@ struct JNIEnv {
     jmethodID GetMethodID(jclass, const char*, const char*) { return nullptr; }
     jmethodID GetStaticMethodID(jclass, const char*, const char*) { return nullptr; }
     jobject CallObjectMethod(jobject, jmethodID, ...) { return nullptr; }
+    jint CallIntMethod(jobject, jmethodID, ...) { return 0; }
     jobject CallStaticObjectMethod(jclass, jmethodID, ...) { return nullptr; }
     jboolean CallStaticBooleanMethod(jclass, jmethodID, ...) { return JNI_FALSE; }
     void CallVoidMethod(jobject, jmethodID, ...) {}

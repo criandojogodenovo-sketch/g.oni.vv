@@ -9,6 +9,7 @@
 // activity (FindClass num thread nativo usa o classloader de sistema, que
 // não vê classes da app — workaround padrão loadClass).
 #include "platform/SafBridge.h"
+#include "platform/EngineLog.h"
 #include <jni.h>
 #include <cstring>
 
@@ -118,6 +119,42 @@ bool openExportPicker(void* activityObject, i32 request,
         env->DeleteLocalRef(jname);
     }
     return !env->ExceptionCheck();
+}
+
+// F5.1-hotfix (parte 1.4): export dos logs → Downloads público (MediaStore).
+// Chama VvActivity.exportLogsToDownloads("Download/GOneVV/logs") — o path é
+// a constante única vv::elog::kDownloadsRelPath (afervel no CI). true = a
+// chamada Java correu (código de retorno em *outCount; negativo = falha).
+bool jniExportLogsToDownloads(int* outCount) {
+    JNIEnv* env = envOrNull();
+    if (!env || !g_activity || !g_activityCls) {
+        return false;
+    }
+    static jmethodID midExportLogs = nullptr;   // cache (classe vive o processo)
+    if (!midExportLogs) {
+        midExportLogs = env->GetMethodID(
+            g_activityCls, "exportLogsToDownloads", "(Ljava/lang/String;)I");
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            return false;
+        }
+        if (!midExportLogs) {
+            return false;
+        }
+    }
+    jstring jrel = env->NewStringUTF(vv::elog::kDownloadsRelPath);
+    const jint r = env->CallIntMethod(g_activity, midExportLogs, jrel);
+    if (jrel) {
+        env->DeleteLocalRef(jrel);
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return false;
+    }
+    if (outCount) {
+        *outCount = static_cast<int>(r);
+    }
+    return true;
 }
 
 } // namespace vv::saf

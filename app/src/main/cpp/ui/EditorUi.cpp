@@ -516,6 +516,42 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     return chosen;
 }
 
+int drawSettingsMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                     EditorState& st) {
+    // F5.1-hotfix: menu do botão Settings — mono, mesmo padrão dos overlays.
+    constexpr int kItems = 1;
+    const f32 w = kMenuW;
+    const f32 h = kHeaderH + static_cast<f32>(kItems) * 64.0f + kPad;
+    const f32 ox = ui.safeLeft();
+    const f32 oy = ui.safeTop();
+    const f32 aw = sw - ox - ui.safeRight();
+    const f32 ah = sh - oy - ui.safeBottom();
+    const f32 x = ox + (aw - w) * 0.5f;
+    const f32 y = oy + (ah - h) * 0.5f;
+
+    if (pressedOutside(in, x, y, w, h)) {
+        st.settingsMenu = false;
+        return 0;
+    }
+
+    ui.panel(x, y, w, h, theme::PANEL);
+    ui.frame(x, y, w, h, 2.0f, theme::ACCENT);
+    const f32 th = ui.fontHeight();
+    ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "SETTINGS", theme::TEXT);
+
+    int chosen = 0;
+    const char* labels[kItems] = {"Exportar logs"};
+    for (int i = 0; i < kItems; ++i) {
+        if (ui.button(static_cast<u64>(40 + i), x + kPad,
+                      y + kHeaderH + static_cast<f32>(i) * 64.0f,
+                      w - 2.0f * kPad, 56.0f, labels[i])) {
+            chosen = i + 1;
+            st.settingsMenu = false;
+        }
+    }
+    return chosen;
+}
+
 // ---------------------------------------------------------------------------
 // F5-E: SELETOR DE ASSETS — overlay mono com "cube/none" + ficheiros de
 // meshes/ ou textures/ (cap 5 ficheiros; sem scroll no overlay — F8).
