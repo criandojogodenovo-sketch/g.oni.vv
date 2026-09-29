@@ -31,6 +31,7 @@ void UiContext::beginFrame(Renderer* renderer, const InputState* input,
     scrollPending_ = false;
     pendingId_    = 0;
     tapValid_     = false;
+    tapSlot_      = kNoScroll;   // F5.0-fix
     clip_         = {0.0f, 0.0f, 1e9f, 1e9f};
 }
 
@@ -241,6 +242,7 @@ void UiContext::beginScroll(u64 id, const UiRect& region, f32 contentHeight) {
                 tapValid_ = true;
                 tapX_ = px;
                 tapY_ = py;
+                tapSlot_ = scrollCur_;   // F5.0-fix: dono do tap
             }
             if (active_ == id) {
                 active_ = 0;
@@ -280,6 +282,7 @@ void UiContext::endScroll() {
             tapValid_ = true;
             tapX_ = px;
             tapY_ = py;
+            tapSlot_ = scrollCur_;   // F5.0-fix: dono do tap
         }
     }
     scrollPending_ = false;
@@ -301,9 +304,16 @@ f32 UiContext::scrollOffset() const {
     return scrollCur_ != kNoScroll ? scrollSlots_[scrollCur_].st.offset : 0.0f;
 }
 
-bool UiContext::scrollTap(f32& x, f32& y) {
+// F5.0-fix: o tap é re-despachado POR ID — só a região que gerou o gesto o
+// consome. Antes era global (primeiro scrollTap ganhava): a Hierarchy,
+// desenhada antes do Inspector, comia o tap do painel direito e os botões
+// do Inspector (mesh/tex/add TouchControls) não acionavam no device.
+bool UiContext::scrollTap(u64 id, f32& x, f32& y) {
     if (!tapValid_) {
         return false;
+    }
+    if (tapSlot_ == kNoScroll || scrollSlots_[tapSlot_].id != id) {
+        return false;   // tap de OUTRA região — NÃO consome
     }
     x = tapX_;
     y = tapY_;

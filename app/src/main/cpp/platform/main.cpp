@@ -713,7 +713,7 @@ void android_main(android_app* app) {
 
     app->onAppCmd = onAppCmd;
     app->onInputEvent = onInputEvent;
-    LOGI("G.One VV 0.5.0 — F5 (projeto .goni + import OBJ/glTF/GLB + texturas + export + cache)");
+    LOGI("G.One VV 0.5.1 — F5.0-fix (Inspector: cursor Y partilhado + alturas cientes da fonte + scroll)");
 
     double last = nowSeconds();
     while (true) {

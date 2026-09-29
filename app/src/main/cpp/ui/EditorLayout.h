@@ -52,6 +52,11 @@ constexpr u64 kInspectorAddTc      = 3001;   // botão "add TouchControls"
 constexpr u64 kInspectorMeshSel    = 5001;   // F5-E: linha "mesh: …"
 constexpr u64 kInspectorTexSel     = 5002;   // F5-E: linha "tex: …"
 
+// ids das regiões de scroll (F4.1) — o tap re-despachado é POR ID (F5.0-fix:
+// a Hierarchy comia o tap do Inspector quando a consulta era global)
+constexpr u64 kHierarchyScrollId = 41;
+constexpr u64 kInspectorScrollId = 42;
+
 // ---- Inspector: alturas derivadas das MÉTRICAS DA FONTE (F5.0-fix) ---------
 // Bloco de texto = ascent + descent (reais do atlas). Cada linha acrescenta
 // a folga mínima para o bloco caber INTEIRO dentro da linha — nunca mais

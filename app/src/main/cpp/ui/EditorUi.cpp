@@ -129,8 +129,9 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
     }
 
     // tap re-despachado → seleção da linha sob o dedo (mesmo após scroll)
+    // F5.0-fix: POR ID — a Hierarchy só consome taps nascidos nela
     f32 tx, ty;
-    if (ui.scrollTap(tx, ty) && scroll::inside(listRegion, tx, ty)) {
+    if (ui.scrollTap(kHierarchyScrollId, tx, ty) && scroll::inside(listRegion, tx, ty)) {
         const i32 sel = hierarchyRowAtTap(ty, listTop, off, nTics);
         if (sel >= 0) {
             u32 i = 0;
@@ -362,7 +363,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     // tap re-despachado → linhas interativas do PLANO (hit-test do rect em
     // ecrã, igual ao que foi desenhado — nunca diverge)
     f32 tx, ty;
-    if (ui.scrollTap(tx, ty)) {
+    if (ui.scrollTap(kInspectorScrollId, tx, ty)) {
         for (u32 i = 0; i < nRows; ++i) {
             const InspRow& r = plan[i];
             if (r.kind != InspRow::Kind::AddTc &&

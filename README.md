@@ -1,4 +1,4 @@
-# G.One VV 0.5.0 — F5 (projeto .goni + assets)
+# G.One VV 0.5.1 — F5.0-fix (Inspector sem sobreposição)
 
 Engine com editor e AGORA com projeto e assets. A F5 trouxe o formato de
 projeto `.goni` (pasta com manifesto, cenas, meshes e texturas), importadores
@@ -157,6 +157,16 @@ Sem física (BodyComp é F4), sem luzes, sem assets, sem animação, sem linguag
 (CLÁUSULA CALMA).
 
 ## Histórico
+- **F5.0-fix (0.5.1)**: bug do C33 no Inspector (texto sobreposto em pilhas:
+  nome×Transform3D, mesh/tex/input/body×sz, tc×velx) — o cursor Y SEMPRE foi
+  partilhado e sequencial; a causa raiz eram as linhas de 26/30 px (baseline
+  '+8') para uma fonte de 28 px: o bloco de glifos invadia a linha de cima.
+  O Inspector agora vem de um PLANO único (EditorLayout.h) com cursor Y
+  cumulativo, alturas derivadas das MÉTRICAS REAIS da fonte (ascent/descent
+  medidos no bake), baseline centrado, contentHeight = fundo da última linha
+  e tap re-despachado POR REGIÃO (a Hierarchy comia o tap do Inspector).
+  UI real testada no CI com fonte embutida: 0 colisões glifo-a-glifo (o
+  código antigo apanhava 13 com a mesma fonte); 203 testes.
 - **F5 (0.5.0)**: projeto `.goni` com pasta (manifesto + scenes/meshes/
   textures, refs relativos, reopen persistente), import OBJ e glTF/GLB
   (hierarquia + materiais básicos), PNG com mipmaps e gate 4K→2K, export
@@ -184,7 +194,7 @@ Sem física (BodyComp é F4), sem luzes, sem assets, sem animação, sem linguag
    → o job **init-keystore** gera o artifact `vv-release-keystore` (baixe e guarde OFFLINE).
 2. `base64 -w0 vv-release.jks` → configure os secrets:
    `VV_KEYSTORE` (base64), `VV_STORE_PW`, `VV_KEY_ALIAS`, `VV_KEY_PW`.
-3. Todo push publica o artifact `goni-vv-0.5.0-release-signed` (APK arm64).
+3. Todo push publica o artifact `goni-vv-0.5.1-release-signed` (APK arm64).
    Sem secrets: sai `-UNSIGNED` (nunca debug).
 
 Trocar a keystore muda a assinatura — exige desinstalar/reinstalar no device.
@@ -195,8 +205,23 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
 ## Testes do core (Linux)
 `cmake -S tests -B build-tests && cmake --build build-tests && ctest --test-dir build-tests`
 
+## Verificação no Realme C33 (dono) — F5.0-fix (Inspector sem sobreposição)
+1. Instalar o APK 0.5.1 → confirmar "0.5.1" nas infos da app.
+2. **Sem sobreposição**: selecionar o PlayerBody3D (com TouchControls e um
+   asset importado) → no Inspector o nome, `Transform3D`, os 9 sliders,
+   `mesh:`, `tex:`, `input:`, `body:`, `velx` e `tc:` estão cada um na SUA
+   linha — nada desenhado em cima de outra linha.
+3. **Scroll por cima**: arrastar para cima no painel → o conteúdo desce
+   inteiro (indicador à direita); o ÚLTIMO campo (tc) chega ao fundo sem
+   corte e sem saltar.
+4. **Sliders/taps com scroll**: arrastar um slider horizontalmente → muda o
+   valor e NÃO faz scroll; tap em `mesh:` / `tex:` abre o seletor; tap em
+   `add TouchControls` cria o componente.
+5. Regressão F5: repetir a verificação da F5 abaixo (projeto, import, gate
+   4K, export, cache) — nada mudou nesses fluxos.
+
 ## Verificação no Realme C33 (dono) — F5 (projeto + assets)
-1. Instalar o APK 0.5.0 → confirmar "0.5.0" nas infos da app.
+1. Instalar o APK 0.5.1 → confirmar "0.5.1" nas infos da app.
 2. **Projeto**: primeiro arranque cria a estrutura
    (`adb shell ls /sdcard/Android/data/<pkg>/files/` → `project.goni`,
    `scenes/`, `meshes/`, `textures/`); criar TICs → Menu → Save cena →

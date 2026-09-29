@@ -63,13 +63,26 @@ public:
     void beginScroll(u64 id, const UiRect& region, f32 contentHeight);
     void endScroll();
     f32  scrollOffset() const;   // offset da região aberta (após beginScroll)
-    bool scrollTap(f32& x, f32& y);   // consome o tap re-despachado (1 frame)
+    // F5.0-fix: tap re-despachado POR ID — o tap nasce da região `id` e só
+    // essa o consome (antes era global: a Hierarchy, desenhada primeiro,
+    // comia o tap do Inspector e os botões do painel direito morriam)
+    bool scrollTap(u64 id, f32& x, f32& y);
 
     // hooks de TESTE (CI): leitura dos batches emitidos no frame — permitem
     // aos testes de hospedeiro aferir a geometria REAL desenhada pelos
     // painéis (linhas sequenciais, sem sobreposição, scroll a revelar o fundo)
     const QuadBatch& solidsForTest() const { return solids_; }
     const QuadBatch& glyphsForTest() const { return glyphs_; }
+    // offset PERSISTENTE de uma região por id (fora do begin/end — o
+    // scrollOffset() só vale com a região aberta; os testes leem depois)
+    f32 scrollOffsetForTest(u64 id) const {
+        for (u32 i = 0; i < kMaxScrollSlots; ++i) {
+            if (scrollSlots_[i].used && scrollSlots_[i].id == id) {
+                return scrollSlots_[i].st.offset;
+            }
+        }
+        return 0.0f;
+    }
 
     // F3: accessors usados pelos painéis do editor (EditorUi).
     bool hasFont() const { return font_ && font_->ok(); }
@@ -148,6 +161,7 @@ private:
     UiRect     clip_         = {0.0f, 0.0f, 1e9f, 1e9f};
     bool       tapValid_     = false;
     f32        tapX_ = 0.0f, tapY_ = 0.0f;
+    i32        tapSlot_      = kNoScroll;   // F5.0-fix: slot dono do tap
 };
 
 } // namespace vv

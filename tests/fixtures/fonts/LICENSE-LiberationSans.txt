@@ -1,0 +1,8 @@
+Liberation Sans Regular — usada APENAS nos testes de hospedeiro (CI) para
+assar o atlas de fonte a 28 px e aferir a geometria REAL dos glifos (não
+vai no APK).
+
+Copyright (c) 2012 Red Hat, Inc.
+Licensed under the SIL Open Font License, Version 1.1.
+https://openfontlicense.org — a fonte pode ser redistribuída com ou sem
+modificação desde que esta licença acompanhe as cópias.

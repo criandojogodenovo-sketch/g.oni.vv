@@ -10,6 +10,7 @@ set(CORE_DIR ${CMAKE_CURRENT_LIST_DIR}/../app/src/main/cpp)
 
 add_executable(test_core
         test_main.cpp
+        test_ui.cpp
         test_project.cpp
         test_import_obj.cpp
         test_resources.cpp
@@ -58,15 +59,32 @@ add_executable(test_core
         ${CORE_DIR}/physics/Shapes.cpp
         ${CORE_DIR}/physics/PhysicsSystem.cpp
         ${CORE_DIR}/components/TouchControls.cpp
-        ${CORE_DIR}/core/TransformSystem.cpp)
+        ${CORE_DIR}/core/TransformSystem.cpp
+        # F5.0-fix: UI REAL no hospedeiro — FontAtlas (stbtt), UiContext,
+        # EditorUi e InputState compilam contra os stubs GLES3/android
+        # (tests/stub) e os testes aferem os batches de CPU (sem GL real)
+        ${CORE_DIR}/ui/UiContext.cpp
+        ${CORE_DIR}/ui/EditorUi.cpp
+        ${CORE_DIR}/ui/FontAtlas.cpp
+        ${CORE_DIR}/platform/InputState.cpp
+        ${CORE_DIR}/render/Renderer.cpp
+        ${CORE_DIR}/render/Mesh.cpp
+        ${CORE_DIR}/render/Material.cpp
+        ${CORE_DIR}/render/Texture.cpp)
 
 
-target_include_directories(test_core PRIVATE ${CORE_DIR})
+target_include_directories(test_core PRIVATE
+        # stubs PRIMEIRO: <GLES3/gl3.h> e <android/input.h> resolvem para os
+        # no-ops do hospedeiro (a build Android usa o NDK, sem estes caminhos)
+        ${CMAKE_CURRENT_LIST_DIR}/stub
+        ${CORE_DIR})
 
 # fixtures PNG p/ test_assets (caminho absoluto injetado — ctest roda no
-# diretório de build, o caminho relativo não serviria)
+# diretório de build, o caminho relativo não serviria) + fonte real p/ os
+# testes de UI (Liberation Sans, OFL — só CI, não vai no APK)
 target_compile_definitions(test_core PRIVATE
-        FIXTURE_DIR="${CMAKE_CURRENT_LIST_DIR}/fixtures")
+        FIXTURE_DIR="${CMAKE_CURRENT_LIST_DIR}/fixtures"
+        FONT_FIXTURE="${CMAKE_CURRENT_LIST_DIR}/fixtures/fonts/LiberationSans-Regular.ttf")
 
 enable_testing()
 add_test(NAME core COMMAND test_core)
