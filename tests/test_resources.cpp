@@ -9,6 +9,7 @@
 #include "FakeStorage.h"
 
 using namespace vv;
+using ::test::nearEqF;
 
 namespace {
 
@@ -199,4 +200,170 @@ TEST(rm_releaseAll_zera_cache_e_estatistica) {
     // cache continua utilizável após releaseAll
     EXPECT(rm.mesh("meshes/a.obj", err) != nullptr);
     EXPECT(rm.meshLoads() == 1u);
+}
+
+// ---- F5-C: despacho .gltf/.glb no ResourceManager ---------------------------
+
+namespace {
+// base64 encode mínimo (fixture de data: URI)
+std::string b64enc(const std::vector<u8>& b) {
+    static const char* tbl =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    size_t i = 0;
+    for (; i + 2 < b.size(); i += 3) {
+        const u32 v = (u32(b[i]) << 16) | (u32(b[i + 1]) << 8) | b[i + 2];
+        out += tbl[(v >> 18) & 63]; out += tbl[(v >> 12) & 63];
+        out += tbl[(v >> 6) & 63];  out += tbl[v & 63];
+    }
+    if (i < b.size()) {
+        u32 v = u32(b[i]) << 16;
+        if (i + 1 < b.size()) v |= u32(b[i + 1]) << 8;
+        out += tbl[(v >> 18) & 63]; out += tbl[(v >> 12) & 63];
+        out += (i + 1 < b.size()) ? tbl[(v >> 6) & 63] : '=';
+        out += '=';
+    }
+    return out;
+}
+
+// .gltf com DOIS meshes (tris independentes) embutidos em data URI
+std::string twoMeshGltf() {
+    std::vector<u8> bin;
+    auto pushF = [&bin](f32 v) { u8 t[4]; std::memcpy(t, &v, 4); bin.insert(bin.end(), t, t + 4); };
+    // mesh0: 3 verts @0; mesh1: 3 verts @36; índices implícitos (não-indexado)
+    for (int i = 0; i < 3; ++i) { pushF(0); pushF(0); pushF(0); }
+    for (int i = 0; i < 3; ++i) { pushF(1); pushF(1); pushF(1); }
+    char j[700];
+    std::snprintf(j, sizeof(j),
+        "{\"asset\":{\"version\":\"2.0\"},"
+        "\"buffers\":[{\"uri\":\"data:application/octet-stream;base64,%s\","
+        "\"byteLength\":%u}],"
+        "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+        "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":36}],"
+        "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":3,"
+        "\"type\":\"VEC3\"},{\"bufferView\":1,\"componentType\":5126,"
+        "\"count\":3,\"type\":\"VEC3\"}],"
+        "\"meshes\":[{\"name\":\"a\",\"primitives\":[{\"attributes\":{\"POSITION\":0}}]},"
+        "{\"name\":\"b\",\"primitives\":[{\"attributes\":{\"POSITION\":1}}]}]}",
+        b64enc(bin).c_str(), static_cast<u32>(bin.size()));
+    return j;
+}
+} // namespace
+
+TEST(rm_despacha_gltf_com_subrefs_e_cache_de_modelo) {
+    FakeStorage st;
+    st.writeText("meshes/par.gltf", twoMeshGltf());
+
+    ResourceManager rm;
+    rm.setStorage(&st);
+    std::string err;
+
+    // ficheiro com 2 meshes sem '#' → erro claro pedindo sub-ref
+    EXPECT(rm.mesh("meshes/par.gltf", err) == nullptr);
+    EXPECT(err.find("#<i>") != std::string::npos);
+
+    const MeshData* m0 = rm.mesh("meshes/par.gltf#0", err);
+    const MeshData* m1 = rm.mesh("meshes/par.gltf#1", err);
+    EXPECT(m0 != nullptr && m1 != nullptr);
+    EXPECT(m0->name == "a" && m1->name == "b");
+    EXPECT(m0->vertices.size() == 3u && m1->vertices.size() == 3u);
+    // o MODELO foi parseado UMA vez (cache de modelo compartilhado entre refs)
+    EXPECT(rm.meshLoads() == 1u);
+    EXPECT(rm.modelCount() == 1u);
+
+    // cache hit por ref (sem carga nova)
+    EXPECT(rm.mesh("meshes/par.gltf#0", err) == m0);
+    EXPECT(rm.meshLoads() == 1u);
+
+    // sub-ref fora do range → erro claro
+    EXPECT(rm.mesh("meshes/par.gltf#5", err) == nullptr);
+    EXPECT(err.find("fora do range") != std::string::npos);
+
+    // release do ref; releaseAll derruba modelo + refs
+    rm.releaseMesh("meshes/par.gltf#0");
+    EXPECT(!rm.hasMesh("meshes/par.gltf#0"));
+    rm.releaseAll();
+    EXPECT(rm.meshCount() == 0u && rm.modelCount() == 0u);
+    EXPECT(rm.mesh("meshes/par.gltf#1", err) != nullptr);
+    EXPECT(rm.meshLoads() == 1u);   // recarregou o modelo (agora 1 parse pós-clear)
+}
+
+TEST(rm_glb_via_storage_e_obj_mistos) {
+    FakeStorage st;
+    // .glb mínimo: header + JSON chunk + BIN chunk (1 tri não-indexado)
+    std::vector<u8> bin;
+    auto pushF = [&bin](f32 v) { u8 t[4]; std::memcpy(t, &v, 4); bin.insert(bin.end(), t, t + 4); };
+    for (int i = 0; i < 3; ++i) { pushF(0.5f); pushF(0.25f); pushF(0.125f); }
+    const char* jsonBody =
+        "{\"asset\":{\"version\":\"2.0\"},"
+        "\"buffers\":[{\"byteLength\":36}],"
+        "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36}],"
+        "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":3,"
+        "\"type\":\"VEC3\"}],"
+        "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}]}";
+    std::string json = jsonBody;
+    while (json.size() % 4 != 0) json += ' ';
+    std::vector<u8> binPad = bin;
+    while (binPad.size() % 4 != 0) binPad.push_back(0);
+
+    std::vector<u8> glb;
+    auto u32v = [&glb](u32 v) { u8 t[4]; std::memcpy(t, &v, 4); glb.insert(glb.end(), t, t + 4); };
+    u32v(0x46546C67u); u32v(2);
+    u32v(12 + 8 + static_cast<u32>(json.size()) + 8 + static_cast<u32>(binPad.size()));
+    u32v(static_cast<u32>(json.size())); u32v(0x4E4F534Au);
+    glb.insert(glb.end(), json.begin(), json.end());
+    u32v(static_cast<u32>(binPad.size())); u32v(0x004E4942u);
+    glb.insert(glb.end(), binPad.begin(), binPad.end());
+    st.writeBytes("meshes/tri.glb", glb.data(), glb.size());
+    st.writeText("meshes/quad.obj", exportObj(sampleMesh()));
+
+    ResourceManager rm;
+    rm.setStorage(&st);
+    std::string err;
+    const MeshData* g = rm.mesh("meshes/tri.glb", err);   // 1 mesh → uso direto
+    EXPECT(g != nullptr);
+    EXPECT(g->vertices.size() == 3u);
+    EXPECT(nearEqF(g->vertices[1].pos.y, 0.25f));
+    EXPECT(rm.mesh("meshes/quad.obj", err) != nullptr);
+    EXPECT(rm.meshLoads() == 2u);   // 1 parse por ficheiro
+
+    // .glb corrompido (magic errado, tamanho mínimo válido) → erro claro
+    const u8 badMagic[20] = {'X', 'X', 'X', 'X', 2, 0, 0, 0, 20, 0, 0, 0};
+    st.writeBytes("meshes/mau.glb", badMagic, sizeof(badMagic));
+    EXPECT(rm.mesh("meshes/mau.glb", err) == nullptr);
+    EXPECT(err.find("magic") != std::string::npos);
+}
+
+TEST(rm_gltf_buffer_externo_resolvido_pelo_storage) {
+    FakeStorage st;
+    // buffers externos são relativos à PASTA do .gltf
+    std::vector<u8> bin;
+    auto pushF = [&bin](f32 v) { u8 t[4]; std::memcpy(t, &v, 4); bin.insert(bin.end(), t, t + 4); };
+    for (int i = 0; i < 3; ++i) { pushF(2); pushF(3); pushF(4); }
+    st.writeBytes("meshes/scene.bin", bin.data(), bin.size());
+    st.writeText("meshes/ext.gltf",
+        "{\"asset\":{\"version\":\"2.0\"},"
+        "\"buffers\":[{\"uri\":\"scene.bin\",\"byteLength\":36}],"
+        "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36}],"
+        "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":3,"
+        "\"type\":\"VEC3\"}],"
+        "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}]}");
+
+    ResourceManager rm;
+    rm.setStorage(&st);
+    std::string err;
+    const MeshData* m = rm.mesh("meshes/ext.gltf", err);
+    EXPECT(m != nullptr);
+    EXPECT(m->vertices.size() == 3u);
+    EXPECT(nearEqF(m->vertices[0].pos.x, 2.0f));
+
+    // buffer externo ausente → erro claro com o nome do ficheiro
+    st.writeText("meshes/parte.gltf",
+        "{\"asset\":{\"version\":\"2.0\"},"
+        "\"buffers\":[{\"uri\":\"falta.bin\",\"byteLength\":36}],"
+        "\"meshes\":[]}");
+    ResourceManager rm2;
+    rm2.setStorage(&st);
+    EXPECT(rm2.mesh("meshes/parte.gltf", err) == nullptr);
+    EXPECT(err.find("falta.bin") != std::string::npos);
 }
