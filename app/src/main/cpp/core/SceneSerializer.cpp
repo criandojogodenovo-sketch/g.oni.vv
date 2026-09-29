@@ -57,8 +57,17 @@ void appendComponentJson(Json& arr, const MeshRenderer* mr) {
     }
     Json c = Json::makeObject();
     c.addMember("type", Json::makeString("MeshRenderer"));
-    // F3: único mesh do engine — tag fixa; F5 (assets) estende para nomes.
-    c.addMember("mesh", Json::makeString(mr->mesh ? "cube" : "none"));
+    if (!mr->meshPath.empty()) {
+        // F5: asset importado — a REF relativa é a verdade; "mesh":"file" é
+        // a tag de compat (v1 antiga tinha só "cube"/"none")
+        c.addMember("mesh", Json::makeString("file"));
+        c.addMember("meshPath", Json::makeString(mr->meshPath));
+    } else {
+        c.addMember("mesh", Json::makeString(mr->mesh ? "cube" : "none"));
+    }
+    if (!mr->texPath.empty()) {
+        c.addMember("texPath", Json::makeString(mr->texPath));
+    }
     arr.addItem(std::move(c));
 }
 
@@ -191,9 +200,29 @@ void fillMeshRenderer(MeshRenderer* mr, const Json& comp, const LoadCtx& ctx) {
         return;
     }
     const Json* m = comp.find("mesh");
-    const bool wantsCube = m && m->type == Json::Type::String && m->string == "cube";
-    mr->mesh = wantsCube ? ctx.cubeMesh : nullptr;
-    mr->material = wantsCube ? ctx.material : nullptr;
+    const Json* mp = comp.find("meshPath");
+    const bool hasPath = mp && mp->type == Json::Type::String && !mp->string.empty();
+    if (hasPath) {
+        // F5-E: ref relativa → resolver do device (cache de GPU); sem
+        // resolver, o TIC entra sem mesh mas mantém a ref p/ rebind
+        mr->meshPath = mp->string;
+        mr->mesh = ctx.resolveMesh ? ctx.resolveMesh(mr->meshPath) : nullptr;
+        mr->material = mr->mesh ? ctx.material : nullptr;
+    } else {
+        const bool wantsCube = m && m->type == Json::Type::String && m->string == "cube";
+        mr->mesh = wantsCube ? ctx.cubeMesh : nullptr;
+        mr->material = wantsCube ? ctx.material : nullptr;
+        mr->meshPath.clear();
+    }
+    // F5-E: textura do material (opcional)
+    const Json* tp = comp.find("texPath");
+    if (tp && tp->type == Json::Type::String && !tp->string.empty()) {
+        mr->texPath = tp->string;
+        mr->texture = ctx.resolveTex ? ctx.resolveTex(mr->texPath) : nullptr;
+    } else {
+        mr->texPath.clear();
+        mr->texture = nullptr;
+    }
 }
 
 } // namespace

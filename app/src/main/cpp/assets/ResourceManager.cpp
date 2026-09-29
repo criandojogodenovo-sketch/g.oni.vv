@@ -198,16 +198,57 @@ bool ResourceManager::hasMesh(const std::string& ref) const {
     return meshes_.count(ref) != 0;
 }
 
+const RawImage* ResourceManager::image(const std::string& relPath,
+                                       std::string& err, std::string* warn) {
+    err.clear();
+    if (warn) {
+        warn->clear();
+    }
+    const auto it = images_.find(relPath);
+    if (it != images_.end()) {
+        return it->second.get();   // cache hit — sem I/O
+    }
+    if (!storage_) {
+        err = "sem storage ligado ao ResourceManager";
+        return nullptr;
+    }
+    std::vector<u8> bytes;
+    if (!storage_->readBytes(relPath, bytes) || bytes.empty()) {
+        err = "ficheiro não encontrado: " + relPath;
+        return nullptr;
+    }
+    auto img = std::make_shared<RawImage>();
+    if (!loadPng(bytes.data(), bytes.size(), *img, err)) {
+        err = "PNG inválido (" + relPath + "): " + err;
+        return nullptr;
+    }
+    ++imageLoads_;
+    // gate 2K na CARGA (o aviso sai só na 1ª vez; do cache não repete)
+    std::string gateWarn;
+    downscaleTo2K(*img, gateWarn);
+    if (warn && !gateWarn.empty()) {
+        *warn = gateWarn;
+    }
+    const auto res = images_.emplace(relPath, std::move(img));
+    return res.first->second.get();
+}
+
 void ResourceManager::releaseMesh(const std::string& ref) {
     meshes_.erase(ref);
     // se o ref é um modelo glTF/GLB, o modelo inteiro sai do cache
     models_.erase(ref);
 }
 
+void ResourceManager::releaseImage(const std::string& relPath) {
+    images_.erase(relPath);
+}
+
 void ResourceManager::releaseAll() {
     meshes_.clear();
     models_.clear();
-    meshLoads_ = 0;   // estatística acompanha o ciclo de vida do cache
+    images_.clear();
+    meshLoads_ = 0;
+    imageLoads_ = 0;   // estatística acompanha o ciclo de vida do cache
 }
 
 } // namespace vv

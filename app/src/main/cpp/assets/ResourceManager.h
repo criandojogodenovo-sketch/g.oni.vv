@@ -27,6 +27,7 @@
 #include <unordered_map>
 #include "assets/Assets.h"
 #include "assets/GltfImporter.h"
+#include "assets/PngLoader.h"
 #include "core/ProjectStorage.h"
 
 namespace vv {
@@ -46,13 +47,22 @@ public:
 
     bool hasMesh(const std::string& ref) const;
 
+    // .png → loadPng + gate 2K (aviso sai em `warn` na 1ª carga; do cache
+    // sai sem re-ler). Devolve nullptr + `err` quando falha.
+    const RawImage* image(const std::string& relPath, std::string& err,
+                          std::string* warn = nullptr);
+
     void releaseMesh(const std::string& ref);
+    void releaseImage(const std::string& relPath);
+
     void releaseAll();
 
     // telemetria (testes + status line do editor)
     u32 meshCount() const { return static_cast<u32>(meshes_.size()); }
     u32 modelCount() const { return static_cast<u32>(models_.size()); }
-    u32 meshLoads() const { return meshLoads_; }   // parses reais de ficheiro
+    u32 meshLoads() const { return meshLoads_; }    // parses reais de ficheiro
+    u32 imageCount() const { return static_cast<u32>(images_.size()); }
+    u32 imageLoads() const { return imageLoads_; }
 
 private:
     // parse de .gltf/.glb com cache do MODELO (path sem '#')
@@ -62,7 +72,9 @@ private:
     ProjectStorage* storage_ = nullptr;
     std::unordered_map<std::string, std::shared_ptr<const MeshData>> meshes_;
     std::unordered_map<std::string, std::shared_ptr<const GltfModel>> models_;
+    std::unordered_map<std::string, std::shared_ptr<const RawImage>> images_;
     u32 meshLoads_ = 0;
+    u32 imageLoads_ = 0;
 };
 
 } // namespace vv

@@ -43,6 +43,8 @@ add_library(goni_vv SHARED
         assets/stb/stb_image.h
         render/Texture.h
         render/Texture.cpp
+        render/GpuAssets.h
+        render/GpuAssets.cpp
         core/Project.h
         core/Project.cpp
         core/SceneSerializer.h

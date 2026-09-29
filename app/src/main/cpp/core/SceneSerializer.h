@@ -30,20 +30,28 @@
 #include "core/Json.h"
 #include "core/Types.h"
 #include "render/Material.h"   // Material = alias de LitMaterial (não admite fwd-decl)
+#include <functional>
 
 namespace vv {
 
 class Scene;
 class Mesh;
+class Texture;
 
 namespace SceneSerializer {
 
 constexpr u32 kVersion = 1;
 
 // Recursos de runtime ligados aos MeshRenderers no load.
+// F5-E: além da tag "cube", MeshRenderers com asset importado rebindam via
+// RESOLVERS — o device liga ref → Mesh*/Texture* do ResourceManager/GpuAssets;
+// testes usam sentinelas. Resolver ausente/que falha → ponteiro null (a
+// hierarquia entra na mesma; rebind é possível recarregar).
 struct LoadCtx {
     Mesh*      cubeMesh = nullptr;   // tag "cube" → este mesh
     Material*  material = nullptr;   // material lit partilhado
+    std::function<Mesh*(const std::string&)> resolveMesh;       // ref relativa
+    std::function<const Texture*(const std::string&)> resolveTex; // textura
 };
 
 // F5: texto ↔ cena (storage-agnostic; Project usa estes).

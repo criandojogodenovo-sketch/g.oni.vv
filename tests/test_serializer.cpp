@@ -203,3 +203,91 @@ TEST(serializer_ficheiro_ausente_ou_corrompido_falha_sem_destruir) {
     EXPECT(s.count() == 1u);   // cena NÃO foi limpa por um ficheiro corrompido
     std::remove(kTmpPath);
 }
+
+// ---- F5-E: refs relativas + resolvers no LoadCtx -----------------------------
+
+TEST(serializer_refs_relativas_roundtrip_com_resolvers) {
+    Scene s;
+    const Handle h = createTicFromPreset(s, PresetKind::StaticBody3D,
+                                         reinterpret_cast<Mesh*>(0x1),
+                                         reinterpret_cast<Material*>(0x2));
+    MeshRenderer* mr = s.get(h)->getComponent<MeshRenderer>();
+    mr->mesh = reinterpret_cast<Mesh*>(0x1);
+    mr->meshPath = "meshes/sphere.obj#0";
+    mr->texPath = "textures/wood.png";
+
+    EXPECT(SceneSerializer::save(s, kTmpPath));
+
+    // no JSON: tag "file" + meshPath + texPath
+    Json doc;
+    {
+        FILE* f = std::fopen(kTmpPath, "rb");
+        char buf[4096];
+        const size_t n = std::fread(buf, 1, sizeof(buf), f);
+        std::fclose(f);
+        EXPECT(Json::parse(buf, n, doc));
+    }
+    const Json* jt = doc.find("tics")->items[0].find("components")->items[1].find("meshPath");
+    EXPECT(jt && jt->string == "meshes/sphere.obj#0");
+    const Json* tp = doc.find("tics")->items[0].find("components")->items[1].find("texPath");
+    EXPECT(tp && tp->string == "textures/wood.png");
+
+    // load com resolvers sentinelas — refs rebindam para os objetos atuais
+    Scene s2;
+    SceneSerializer::LoadCtx ctx;
+    ctx.material = reinterpret_cast<Material*>(0x20);
+    ctx.resolveMesh = [](const std::string& ref) -> Mesh* {
+        return ref == "meshes/sphere.obj#0" ? reinterpret_cast<Mesh*>(0x10) : nullptr;
+    };
+    ctx.resolveTex = [](const std::string& ref) -> const Texture* {
+        return ref == "textures/wood.png" ? reinterpret_cast<const Texture*>(0x30) : nullptr;
+    };
+    EXPECT(SceneSerializer::load(s2, kTmpPath, ctx));
+
+    const Handle h2 = s2.find("StaticBody3D");
+    EXPECT(h2.valid());
+    MeshRenderer* mr2 = s2.get(h2)->getComponent<MeshRenderer>();
+    EXPECT(mr2 != nullptr);
+    EXPECT(mr2->meshPath == "meshes/sphere.obj#0");
+    EXPECT(mr2->mesh == reinterpret_cast<Mesh*>(0x10));        // resolver ligou
+    EXPECT(mr2->material == ctx.material);                     // material volta
+    EXPECT(mr2->texPath == "textures/wood.png");
+    EXPECT(mr2->texture == reinterpret_cast<const Texture*>(0x30));
+    std::remove(kTmpPath);
+}
+
+TEST(serializer_ref_sem_resolver_fica_null_mas_mantem_ref) {
+    Scene s;
+    const Handle h = createTicFromPreset(s, PresetKind::StaticBody3D, nullptr, nullptr);
+    MeshRenderer* mr = s.get(h)->getComponent<MeshRenderer>();
+    mr->mesh = reinterpret_cast<Mesh*>(0x1);
+    mr->meshPath = "meshes/faltando.obj";
+    EXPECT(SceneSerializer::save(s, kTmpPath));
+
+    Scene s2;
+    SceneSerializer::LoadCtx ctx{};   // SEM resolvers (ex.: asset removido)
+    EXPECT(SceneSerializer::load(s2, kTmpPath, ctx));
+    MeshRenderer* mr2 = s2.get(s2.find("StaticBody3D"))->getComponent<MeshRenderer>();
+    EXPECT(mr2->mesh == nullptr && mr2->material == nullptr);
+    EXPECT(mr2->meshPath == "meshes/faltando.obj");   // ref sobrevive p/ rebind
+    std::remove(kTmpPath);
+}
+
+TEST(serializer_resolver_que_falha_nao_crasha) {
+    Scene s;
+    const Handle h = createTicFromPreset(s, PresetKind::StaticBody3D, nullptr, nullptr);
+    s.get(h)->getComponent<MeshRenderer>()->meshPath = "meshes/x.gltf#1";
+    s.get(h)->getComponent<MeshRenderer>()->texPath = "textures/nao_existe.png";
+    EXPECT(SceneSerializer::save(s, kTmpPath));
+
+    Scene s2;
+    SceneSerializer::LoadCtx ctx;
+    ctx.resolveMesh = [](const std::string&) -> Mesh* { return nullptr; };
+    ctx.resolveTex = [](const std::string&) -> const Texture* { return nullptr; };
+    EXPECT(SceneSerializer::load(s2, kTmpPath, ctx));
+    MeshRenderer* mr2 = s2.get(s2.find("StaticBody3D"))->getComponent<MeshRenderer>();
+    EXPECT(mr2->mesh == nullptr && mr2->texture == nullptr);
+    EXPECT(mr2->material == nullptr);   // sem mesh → sem material
+    EXPECT(mr2->meshPath == "meshes/x.gltf#1" && mr2->texPath == "textures/nao_existe.png");
+    std::remove(kTmpPath);
+}
