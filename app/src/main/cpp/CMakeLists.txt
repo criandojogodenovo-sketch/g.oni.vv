@@ -34,6 +34,8 @@ add_library(goni_vv SHARED
         assets/ResourceManager.cpp
         assets/GltfImporter.h
         assets/GltfImporter.cpp
+        assets/GltfInstantiate.h
+        assets/GltfInstantiate.cpp
         core/Project.h
         core/Project.cpp
         core/SceneSerializer.h

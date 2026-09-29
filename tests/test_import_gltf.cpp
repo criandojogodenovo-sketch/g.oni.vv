@@ -525,3 +525,226 @@ TEST(glb_invalido_falha_sem_crash) {
     EXPECT(!parseGlb(trunc, sizeof(trunc), {}, model, err));
     EXPECT(err.find("excede") != std::string::npos);
 }
+
+// ---- F5-C/3: instância de glTF numa cena ------------------------------------
+#include "assets/GltfInstantiate.h"
+#include "assets/ResourceManager.h"
+#include "components/MeshRenderer.h"
+#include "components/Transform3D.h"
+#include "core/Scene.h"
+#include "FakeStorage.h"
+
+namespace {
+
+// .gltf com DOIS meshes (tris independentes) embutidos em data URI
+std::string twoMeshGltf() {
+    std::vector<u8> bin;
+    auto pushF = [&bin](f32 v) {
+        u8 t[4]; std::memcpy(t, &v, 4); bin.insert(bin.end(), t, t + 4);
+    };
+    for (int i = 0; i < 3; ++i) { pushF(0); pushF(0); pushF(0); }
+    for (int i = 0; i < 3; ++i) { pushF(1); pushF(1); pushF(1); }
+    char j[700];
+    std::snprintf(j, sizeof(j),
+        "{\"asset\":{\"version\":\"2.0\"},"
+        "\"buffers\":[{\"uri\":\"data:application/octet-stream;base64,%s\","
+        "\"byteLength\":%u}],"
+        "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+        "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":36}],"
+        "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":3,"
+        "\"type\":\"VEC3\"},{\"bufferView\":1,\"componentType\":5126,"
+        "\"count\":3,\"type\":\"VEC3\"}],"
+        "\"meshes\":[{\"name\":\"a\",\"primitives\":[{\"attributes\":{\"POSITION\":0}}]},"
+        "{\"name\":\"b\",\"primitives\":[{\"attributes\":{\"POSITION\":1}}]}]}",
+        b64encodeBytes(bin).c_str(), static_cast<u32>(bin.size()));
+    return j;
+}
+
+struct BindSentinel {
+    int calls = 0;
+    std::vector<std::string> refs;
+};
+
+Mesh* sentinelBind(void* user, const std::string& ref) {
+    BindSentinel* s = static_cast<BindSentinel*>(user);
+    ++s->calls;
+    s->refs.push_back(ref);
+    // sentinela determinística por hash do ref (não é desreferenciado)
+    return reinterpret_cast<Mesh*>(static_cast<uintptr_t>(0xC0DE00 + s->calls));
+}
+
+} // namespace
+
+TEST(gltf_instantiate_hierarquia_trs_e_bind) {
+    GltfModel model;
+    // nó 0: "corpo" com mesh 0; nó 1: "braco" com mesh 1, PAI = nó 0 (filho
+    // vem DEPOIS); nó 2: vazio; nó 3: "perna" com mesh 0, pai = nó 0, e
+    // aparece ANTES do pai no array (referência cruzada)
+    GltfNode corpo;
+    corpo.name = "corpo";
+    corpo.mesh = 0;
+    corpo.translation = Vec3{1, 0, 0};
+    model.nodes.push_back(corpo);
+
+    GltfNode braco;
+    braco.name = "braco";
+    braco.mesh = 1;
+    braco.parent = 0;
+    braco.translation = Vec3{0, 2, 0};
+    braco.rotation = Quat{0, 0.3826834f, 0, 0.9238795f};
+    braco.scale = Vec3{2, 2, 2};
+    model.nodes.push_back(braco);
+
+    GltfNode vazio;
+    vazio.name = "vazio";
+    vazio.parent = 0;
+    model.nodes.push_back(vazio);
+
+    GltfNode perna;
+    perna.name = "perna";
+    perna.mesh = 0;
+    perna.parent = 0;
+    model.nodes.push_back(perna);
+
+    model.meshes.resize(2);
+    model.meshes[0].name = "geometria_a";
+    model.meshes[1].name = "geometria_b";
+
+    Scene scene;
+    BindSentinel sent;
+    GltfInstantiateCtx ctx;
+    ctx.bindMesh = &sentinelBind;
+    ctx.user = &sent;
+    Material* fakeMat = reinterpret_cast<Material*>(0xFEED);
+    ctx.material = fakeMat;
+
+    const Handle root = gltfInstantiate(scene, model, "meshes/robot.gltf", ctx);
+    EXPECT(root.valid());
+    EXPECT(scene.count() == 4u);
+    EXPECT(sent.calls == 3);   // só nós com mesh chamam o bind
+
+    const Handle hCorpo = scene.find("corpo");
+    const Handle hBraco = scene.find("braco");
+    const Handle hVazio = scene.find("vazio");
+    const Handle hPerna = scene.find("perna");
+    EXPECT(hCorpo.valid() && hBraco.valid() && hVazio.valid() && hPerna.valid());
+
+    Tic* tCorpo = scene.get(hCorpo);
+    Tic* tBraco = scene.get(hBraco);
+    Tic* tVazio = scene.get(hVazio);
+    Tic* tPerna = scene.get(hPerna);
+
+    // hierarquia: braço/perna/vazio pendurados no corpo (índice do slot)
+    EXPECT(tBraco->parent == tCorpo->handle.index);
+    EXPECT(tPerna->parent == tCorpo->handle.index);
+    EXPECT(tVazio->parent == tCorpo->handle.index);
+    EXPECT(tCorpo->parent == -1);
+
+    // TRS → Transform3D
+    const Transform3D* trB = tBraco->getComponent<Transform3D>();
+    EXPECT(trB != nullptr);
+    EXPECT(vecNearF(trB->pos, Vec3{0, 2, 0}));
+    EXPECT(vecNearF(trB->scale, Vec3{2, 2, 2}));
+    EXPECT(nearEqF(trB->rot.y, 0.3826834f, 1e-5f));
+
+    // MeshRenderer: ref "path#meshOriginal" + bind + material
+    MeshRenderer* mrB = tBraco->getComponent<MeshRenderer>();
+    EXPECT(mrB != nullptr);
+    EXPECT(mrB->meshPath == "meshes/robot.gltf#1");
+    EXPECT(mrB->mesh != nullptr);
+    EXPECT(mrB->material == fakeMat);
+    EXPECT(tCorpo->getComponent<MeshRenderer>()->meshPath == "meshes/robot.gltf#0");
+    EXPECT(tPerna->getComponent<MeshRenderer>()->meshPath == "meshes/robot.gltf#0");
+    // nó vazio: SEM MeshRenderer
+    EXPECT(tVazio->getComponent<MeshRenderer>() == nullptr);
+
+    // bind recebeu os refs esperados
+    EXPECT(sent.refs[0] == "meshes/robot.gltf#0");
+    EXPECT(sent.refs[1] == "meshes/robot.gltf#1");
+}
+
+TEST(gltf_instantiate_bind_nulo_entra_sem_mesh) {
+    GltfModel model;
+    GltfNode n;
+    n.name = "solo";
+    n.mesh = 0;
+    model.nodes.push_back(n);
+    model.meshes.resize(1);
+
+    Scene scene;
+    GltfInstantiateCtx ctx;   // bindMesh nulo — testes sem device
+    const Handle h = gltfInstantiate(scene, model, "meshes/x.gltf", ctx);
+    EXPECT(h.valid());
+    Tic* t = scene.get(h);
+    EXPECT(t != nullptr);
+    // hierarquia e componentes entram; mesh fica null (rebind no reload)
+    EXPECT(t->getComponent<Transform3D>() != nullptr);
+    MeshRenderer* mr = t->getComponent<MeshRenderer>();
+    EXPECT(mr != nullptr);
+    EXPECT(mr->mesh == nullptr && mr->material == nullptr);
+    EXPECT(mr->meshPath == "meshes/x.gltf#0");
+}
+
+TEST(gltf_instantiate_modelo_vazio_nao_toca_cena) {
+    Scene scene;
+    scene.create("preexistente");
+    GltfModel vazio;
+    GltfInstantiateCtx ctx;
+    EXPECT(!gltfInstantiate(scene, vazio, "meshes/nada.gltf", ctx).valid());
+    EXPECT(scene.count() == 1u);
+}
+
+TEST(gltf_e2e_storage_cache_instantiate) {
+    // caminho completo: .gltf no storage → ResourceManager (refs "path#i")
+    // → gltfInstantiate → cada meshPath do TIC resolve no cache
+    FakeStorage st;
+    st.writeText("meshes/par.gltf", twoMeshGltf());
+
+    ResourceManager rm;
+    rm.setStorage(&st);
+    std::string err;
+    // pré-carga do modelo via 1º ref (o bind do device faria isto)
+    EXPECT(rm.mesh("meshes/par.gltf#0", err) != nullptr);
+
+    // monta o modelo por parse direto (o RM não expõe GltfModel — re-parse
+    // local do MESMO texto para a instância) e dá-lhe nós com hierarquia
+    const std::string text = twoMeshGltf();
+    GltfModel model;
+    EXPECT(parseGltf(text.data(), text.size(), {}, {}, model, err));
+    EXPECT(model.meshes.size() == 2u);
+    GltfNode na;
+    na.name = "a";
+    na.mesh = 0;
+    model.nodes.push_back(na);
+    GltfNode nb;
+    nb.name = "b";
+    nb.mesh = 1;
+    nb.parent = 0;
+    model.nodes.push_back(nb);
+
+    Scene scene;
+    BindSentinel sent;
+    GltfInstantiateCtx ctx;
+    ctx.bindMesh = &sentinelBind;
+    ctx.user = &sent;
+    const Handle root = gltfInstantiate(scene, model, "meshes/par.gltf", ctx);
+    EXPECT(sent.calls == 2);
+    EXPECT(root.valid());
+    EXPECT(scene.count() == 2u);   // dois nós com mesh
+    const Handle hb = scene.find("b");
+    EXPECT(hb.valid() && scene.get(hb)->parent == scene.get(root)->handle.index);
+
+    // TODA ref escrita pelos TICs resolve no ResourceManager — o contrato
+    // que o device usa para ligar Mesh* sem caminhos absolutos
+    scene.forEachActive([&](Tic& t) {
+        if (MeshRenderer* mr = t.getComponent<MeshRenderer>()) {
+            std::string err2;
+            const MeshData* md = rm.mesh(mr->meshPath, err2);
+            EXPECT(md != nullptr);
+            EXPECT(err2.empty());
+            EXPECT(md->ok());
+        }
+    });
+    // e o parse do ficheiro não foi repetido (cache de modelo)
+    EXPECT(rm.meshLoads() == 1u);
+}
