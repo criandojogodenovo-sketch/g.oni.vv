@@ -186,7 +186,6 @@ public:
     // acesso p/ os helpers de documento único (fora do anon namespace)
     static JNIEnv* envOfPublic() { return envOf(); }
 
-    jclass cls() const { return clsRef(); }
 
 public:
     static bool initClass(JavaVM* vm, JNIEnv* env, jclass ioCls) {
