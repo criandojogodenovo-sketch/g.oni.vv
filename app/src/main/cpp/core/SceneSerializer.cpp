@@ -221,6 +221,17 @@ Json migrate(Json doc) {
 }
 
 bool save(const Scene& scene, const char* path) {
+    const std::string text = dump(scene);
+    FILE* f = std::fopen(path, "wb");
+    if (!f) {
+        return false;
+    }
+    const size_t n = text.size();
+    const bool ok = std::fwrite(text.data(), 1, n, f) == n && std::fclose(f) == 0;
+    return ok;
+}
+
+std::string dump(const Scene& scene) {
     Json root = Json::makeObject();
     root.addMember("version", Json::makeNumber(kVersion));
 
@@ -258,15 +269,7 @@ bool save(const Scene& scene, const char* path) {
     });
 
     root.addMember("tics", std::move(tics));
-
-    const std::string text = root.dump();
-    FILE* f = std::fopen(path, "wb");
-    if (!f) {
-        return false;
-    }
-    const size_t n = text.size();
-    const bool ok = std::fwrite(text.data(), 1, n, f) == n && std::fclose(f) == 0;
-    return ok;
+    return root.dump();
 }
 
 bool load(Scene& scene, const char* path, const LoadCtx& ctx) {
@@ -281,7 +284,10 @@ bool load(Scene& scene, const char* path, const LoadCtx& ctx) {
         text.append(buf, n);
     }
     std::fclose(f);
+    return loadText(scene, text, ctx);
+}
 
+bool loadText(Scene& scene, const std::string& text, const LoadCtx& ctx) {
     Json doc;
     if (!Json::parse(text.data(), text.size(), doc)) {
         return false;

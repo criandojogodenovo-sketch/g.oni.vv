@@ -23,6 +23,10 @@
 // (sem "version", tics sem "active") abrem na v1. Tipos de componente
 // desconhecidos são IGNORADOS no load (política forward-compat: uma cena
 // salva por versão futura abre aqui sem os componentes que não existem).
+//
+// F5: dump()/loadText() expõem o formato como TEXTO — o Project transporta
+// a cena pela interface ProjectStorage (sem passar por caminhos de FS),
+// pronto para SAF na F5.2; save()/load(path) continuam como wrappers.
 #include "core/Json.h"
 #include "core/Types.h"
 #include "render/Material.h"   // Material = alias de LitMaterial (não admite fwd-decl)
@@ -42,6 +46,11 @@ struct LoadCtx {
     Material*  material = nullptr;   // material lit partilhado
 };
 
+// F5: texto ↔ cena (storage-agnostic; Project usa estes).
+std::string dump(const Scene& scene);
+bool loadText(Scene& scene, const std::string& text, const LoadCtx& ctx);
+
+// Ficheiro direto (wrappers de dump/loadText — API da F3 mantida).
 bool save(const Scene& scene, const char* path);
 bool load(Scene& scene, const char* path, const LoadCtx& ctx);
 

@@ -21,6 +21,10 @@ add_library(goni_vv SHARED
         core/Presets.h
         core/Presets.cpp
         core/Json.h
+        core/ProjectStorage.h
+        core/ProjectStorage.cpp
+        core/Project.h
+        core/Project.cpp
         core/SceneSerializer.h
         core/SceneSerializer.cpp
         core/Tick.h
