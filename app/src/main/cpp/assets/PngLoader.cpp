@@ -1,7 +1,12 @@
-// assets/PngLoader.cpp — decode PNG (stb_image) + gate 4K→2K (F5-D).
+// assets/PngLoader.cpp — decode PNG (stb_image) + gate 2K do fallback (F5-D).
 //
 // ÚNICO TU com STB_IMAGE_IMPLEMENTATION (header vendor em assets/stb/).
+// A partir da F5.1-A o gate 2K só se aplica ao FALLBACK sem compressão de
+// hardware (a decisão vive em TexturePipeline; com ETC2/ASTC a textura 4K
+// entra inteira). A matemática do box 2×2 é partilhada com os mips
+// (assets/MipGen).
 #include "assets/PngLoader.h"
+#include "assets/MipGen.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
@@ -52,34 +57,13 @@ bool downscaleTo2K(RawImage& img, std::string& warn) {
     const u32 origW = img.width;
     const u32 origH = img.height;
     while (img.width > kLimit || img.height > kLimit) {
-        const u32 nw = img.width > 1 ? img.width / 2 : 1;
-        const u32 nh = img.height > 1 ? img.height / 2 : 1;
-        std::vector<u8> reduced(static_cast<size_t>(nw) * nh * 4);
-        for (u32 y = 0; y < nh; ++y) {
-            for (u32 x = 0; x < nw; ++x) {
-                // box 2×2 (cantos ímpares usam o último pixel disponível)
-                const u32 x0 = x * 2;
-                const u32 y0 = y * 2;
-                const u32 x1 = (x0 + 1 < img.width) ? x0 + 1 : x0;
-                const u32 y1 = (y0 + 1 < img.height) ? y0 + 1 : y0;
-                for (int c = 0; c < 4; ++c) {
-                    const u32 sum =
-                        img.rgba[(static_cast<size_t>(y0) * img.width + x0) * 4 + c] +
-                        img.rgba[(static_cast<size_t>(y0) * img.width + x1) * 4 + c] +
-                        img.rgba[(static_cast<size_t>(y1) * img.width + x0) * 4 + c] +
-                        img.rgba[(static_cast<size_t>(y1) * img.width + x1) * 4 + c];
-                    reduced[(static_cast<size_t>(y) * nw + x) * 4 + c] =
-                        static_cast<u8>(sum / 4u);
-                }
-            }
-        }
-        img.width = nw;
-        img.height = nh;
-        img.rgba = std::move(reduced);
+        RawImage reduced;
+        halveImageRGBA(img, reduced);   // box 2×2 (mesma matemática dos mips)
+        img = std::move(reduced);
     }
-    char buf[96];
+    char buf[112];
     std::snprintf(buf, sizeof(buf),
-                  "textura %ux%u reduzida para %ux%u (gate 2K; compressao real = F5.1)",
+                  "textura %ux%u reduzida para %ux%u (gate 2K: sem compressão de hardware)",
                   origW, origH, img.width, img.height);
     warn = buf;
     return true;

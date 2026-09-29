@@ -50,7 +50,36 @@ add_executable(test_core
         ${CORE_DIR}/assets/GltfImporter.cpp
         ${CORE_DIR}/assets/GltfInstantiate.cpp
         ${CORE_DIR}/assets/PngLoader.cpp
+        ${CORE_DIR}/assets/MipGen.cpp
         ${CORE_DIR}/assets/TextureCompressor.cpp
+        ${CORE_DIR}/assets/Etc2Compressor.cpp
+        ${CORE_DIR}/assets/AstcCompressor.cpp
+        # F5.1-A: vendors de compressão (licenças preservadas nas pastas)
+        ${CORE_DIR}/vendor/etcpak/ProcessRGB.cpp
+        ${CORE_DIR}/vendor/etcpak/Tables.cpp
+        ${CORE_DIR}/vendor/etcpak/Dither.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_averages_and_directions.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_block_sizes.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_color_quantize.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_color_unquantize.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_compress_symbolic.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_compute_variance.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_decompress_symbolic.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_diagnostic_trace.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_entry.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_find_best_partitioning.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_ideal_endpoints_and_weights.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_image.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_integer_sequence.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_mathlib.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_mathlib_softfloat.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_partition_tables.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_percentile_tables.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_pick_best_endpoint_format.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_quantization.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_symbolic_physical.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_weight_align.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_weight_quant_xfer_tables.cpp
         ${CORE_DIR}/core/TransformSystem.cpp
         # GL-free (cubo e câmara são lógica pura — sem contexto OpenGL)
         ${CORE_DIR}/render/Cube.cpp
@@ -77,7 +106,44 @@ target_include_directories(test_core PRIVATE
         # stubs PRIMEIRO: <GLES3/gl3.h> e <android/input.h> resolvem para os
         # no-ops do hospedeiro (a build Android usa o NDK, sem estes caminhos)
         ${CMAKE_CURRENT_LIST_DIR}/stub
-        ${CORE_DIR})
+        ${CORE_DIR}
+        ${CORE_DIR}/vendor/etcpak
+        ${CORE_DIR}/vendor/astc-encoder)
+
+# F5.1-A: flags por TU dos vendors (idênticas à build do APK; ver lá a
+# nota — SSE4.1 no hospedeiro x86_64, NEON auto no arm64, -fsigned-char
+# para a matemática de char do astc-encoder).
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
+        set_source_files_properties(
+                ${CORE_DIR}/vendor/etcpak/ProcessRGB.cpp
+                ${CORE_DIR}/vendor/etcpak/Tables.cpp
+                ${CORE_DIR}/vendor/etcpak/Dither.cpp
+                PROPERTIES COMPILE_OPTIONS "-msse4.1;-w")
+endif()
+set_source_files_properties(
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_averages_and_directions.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_block_sizes.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_color_quantize.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_color_unquantize.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_compress_symbolic.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_compute_variance.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_decompress_symbolic.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_diagnostic_trace.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_entry.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_find_best_partitioning.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_ideal_endpoints_and_weights.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_image.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_integer_sequence.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_mathlib.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_mathlib_softfloat.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_partition_tables.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_percentile_tables.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_pick_best_endpoint_format.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_quantization.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_symbolic_physical.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_weight_align.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_weight_quant_xfer_tables.cpp
+        PROPERTIES COMPILE_OPTIONS "-w;-fsigned-char")
 
 # fixtures PNG p/ test_assets (caminho absoluto injetado — ctest roda no
 # diretório de build, o caminho relativo não serviria) + fonte real p/ os

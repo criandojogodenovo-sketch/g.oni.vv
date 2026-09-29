@@ -118,7 +118,7 @@ TEST(gate_4k_reduz_para_2k_com_aviso) {
     EXPECT(!warn.empty());
     EXPECT(warn.find("4096x4096") != std::string::npos);
     EXPECT(warn.find("2048x2048") != std::string::npos);
-    EXPECT(warn.find("F5.1") != std::string::npos);
+    EXPECT(warn.find("gate 2K") != std::string::npos);
 }
 
 TEST(gate_multiplas_reducoes_ate_caber) {
@@ -199,4 +199,295 @@ TEST(compressor_entrada_invalida_falha) {
     EXPECT(!pc.compress(vazio, out, err));
     EXPECT(!err.empty());
     EXPECT(!out.ok());
+}
+
+// ---- F5.1-A: compressão ETC2/ASTC + mips em CPU ------------------------------
+#include "assets/MipGen.h"
+#include <cstring>
+#include <set>
+
+TEST(mips_helpers_contagens_e_tamanhos) {
+    EXPECT(mipCountFor(64, 64) == 7u);    // 64,32,16,8,4,2,1
+    EXPECT(mipCountFor(8, 8) == 4u);      // 8,4,2,1
+    EXPECT(mipCountFor(70, 66) == 7u);    // 70 → 35..1 (7 níveis)
+    EXPECT(mipCountFor(1, 1) == 1u);
+    EXPECT(mipCountFor(2048, 4) == 12u);  // 2048..1
+
+    // ETC2 RGB: 8 bytes por bloco 4×4; RGBA EAC: 16
+    EXPECT(mipBytesFor(CompressedFormat::ETC2_RGB, 64, 64) == 2048u);
+    EXPECT(mipBytesFor(CompressedFormat::ETC2_RGBA, 64, 64) == 4096u);
+    // dimensões não múltiplas de 4: teto por bloco
+    EXPECT(mipBytesFor(CompressedFormat::ETC2_RGB, 66, 70) ==
+           static_cast<size_t>(17) * 18 * 8);
+    // ASTC: 16 bytes por bloco (4×4 ou 6×6)
+    EXPECT(mipBytesFor(CompressedFormat::ASTC_4x4, 64, 64) == 4096u);
+    EXPECT(mipBytesFor(CompressedFormat::ASTC_6x6, 64, 64) ==
+           static_cast<size_t>(11) * 11 * 16);
+    EXPECT(mipBytesFor(CompressedFormat::RGBA8, 8, 8) == 256u);
+
+    EXPECT(formatIsCompressed(CompressedFormat::RGBA8) == false);
+    EXPECT(formatIsCompressed(CompressedFormat::ETC2_RGB) == true);
+    EXPECT(std::string(formatName(CompressedFormat::ETC2_RGB)) == "ETC2 RGB");
+    EXPECT(std::string(formatName(CompressedFormat::ETC2_RGBA)) == "ETC2 EAC");
+    EXPECT(std::string(formatName(CompressedFormat::ASTC_4x4)) == "ASTC 4x4");
+}
+
+TEST(mip_chain_dims_e_box) {
+    RawImage in = fillImg(8, 8, 200, 100, 50, 255);
+    std::vector<RawImage> chain;
+    genMipChainRGBA(in, chain);
+    EXPECT(chain.size() == 4u);   // 8,4,2,1
+    EXPECT(chain[0].width == 8u && chain[0].height == 8u);
+    EXPECT(chain[1].width == 4u && chain[2].width == 2u &&
+           chain[3].width == 1u && chain[3].height == 1u);
+    // sólido: todos os níveis mantêm a cor
+    for (const RawImage& m : chain) {
+        for (size_t i = 0; i < m.rgba.size(); i += 4) {
+            EXPECT(m.rgba[i] == 200 && m.rgba[i + 1] == 100 &&
+                   m.rgba[i + 2] == 50 && m.rgba[i + 3] == 255);
+        }
+    }
+    // dims ímpares: 5x3 → 2x1 → 1x1 (último px replica)
+    RawImage odd = fillImg(5, 3, 10, 20, 30, 40);
+    std::vector<RawImage> chain2;
+    genMipChainRGBA(odd, chain2);
+    EXPECT(chain2.size() == 3u);
+    EXPECT(chain2[1].width == 2u && chain2[1].height == 1u);
+    // média box 2×2: pixels (0..1)x(0..1) de cor constante → igual
+    EXPECT(chain2[1].rgba[0] == 10 && chain2[1].rgba[1] == 20 &&
+           chain2[1].rgba[2] == 30 && chain2[1].rgba[3] == 40);
+}
+
+TEST(etc2_solido_rgb_dimensoes_e_blocos_identicos) {
+    Etc2Compressor c;
+    c.heuristics = false;   // caminho ETC1-style determinístico
+
+    RawImage in = fillImg(64, 64, 255, 0, 0, 255);
+    CompressedImage out;
+    std::string err;
+    EXPECT(c.compress(in, out, err));
+    EXPECT(err.empty());
+    EXPECT(out.ok());
+    EXPECT(in.ok());   // entrada não mutada
+    EXPECT(out.format == CompressedFormat::ETC2_RGB);   // opaco → RGB8
+    EXPECT(out.width == 64u && out.height == 64u);
+    EXPECT(out.mips.size() == 7u);
+
+    // nível 0: 16×16 blocos × 8 bytes = 2048
+    EXPECT(out.mips[0].width == 64u && out.mips[0].height == 64u);
+    EXPECT(out.mips[0].offset == 0u);
+    EXPECT(out.mips[0].size == 2048u);
+    // soma dos níveis = tamanho do blob (blob contíguo sem buracos)
+    size_t total = 0;
+    u32 prevEnd = 0;
+    for (const CompressedMip& m : out.mips) {
+        EXPECT(m.offset == prevEnd);
+        prevEnd = m.offset + m.size;
+        total += m.size;
+    }
+    EXPECT(total == out.data.size());
+
+    // sólido: TODOS os blocos 8 bytes do nível 0 são idênticos
+    for (u32 b = 1; b < out.mips[0].size / 8u; ++b) {
+        EXPECT(std::memcmp(out.data.data() + b * 8, out.data.data(), 8) == 0);
+    }
+}
+
+TEST(etc2_rgba_eac_estrutura_e_blob_alinhado) {
+    Etc2Compressor c;
+    c.heuristics = false;
+
+    // alpha com gradiente → RGBA8_EAC (16 bytes por bloco)
+    RawImage in;
+    in.width = 64;
+    in.height = 64;
+    in.rgba.resize(64u * 64u * 4u);
+    for (u32 y = 0; y < 64; ++y) {
+        for (u32 x = 0; x < 64; ++x) {
+            u8* px = &in.rgba[(y * 64u + x) * 4];
+            px[0] = 40; px[1] = 80; px[2] = 120;
+            px[3] = static_cast<u8>(x * 4);
+        }
+    }
+    CompressedImage out;
+    std::string err;
+    EXPECT(c.compress(in, out, err));
+    EXPECT(out.format == CompressedFormat::ETC2_RGBA);
+    EXPECT(out.mips[0].size == 4096u);   // 16×16 blocos × 16 bytes
+
+    // offsets alinhados ao tamanho do nível (blob contíguo, sem sobreposição)
+    u32 expectOff = 0;
+    for (const CompressedMip& m : out.mips) {
+        EXPECT(m.offset == expectOff);
+        EXPECT(m.size == mipBytesFor(out.format, m.width, m.height));
+        expectOff += m.size;
+    }
+    EXPECT(expectOff == out.data.size());
+}
+
+TEST(etc2_pad_nao_multiplo_de_4) {
+    Etc2Compressor c;
+    c.heuristics = false;
+    RawImage in = fillImg(66, 70, 10, 200, 30, 255);
+    CompressedImage out;
+    std::string err;
+    EXPECT(c.compress(in, out, err));
+    EXPECT(out.width == 66u && out.height == 70u);   // dims preservadas
+    // teto por bloco: ceil(66/4)=17 × ceil(70/4)=18 × 8 bytes
+    EXPECT(out.mips[0].size == static_cast<u32>(17 * 18 * 8));
+    EXPECT(out.mips.size() == 7u);   // max(66,70)=70 → 7 níveis
+}
+
+TEST(etc2_gradiente_responde_e_deterministico) {
+    RawImage in;
+    in.width = 256;
+    in.height = 256;
+    in.rgba.resize(256u * 256u * 4u);
+    for (u32 y = 0; y < 256; ++y) {
+        for (u32 x = 0; x < 256; ++x) {
+            u8* px = &in.rgba[(y * 256u + x) * 4];
+            px[0] = static_cast<u8>(x);
+            px[1] = static_cast<u8>(y);
+            px[2] = static_cast<u8>((x + y) / 2u);
+            px[3] = 255;
+        }
+    }
+    Etc2Compressor c1, c2;
+    c1.heuristics = false;
+    c2.heuristics = false;
+    CompressedImage o1, o2;
+    std::string err;
+    EXPECT(c1.compress(in, o1, err));
+    EXPECT(c2.compress(in, o2, err));
+    // determinístico: mesma entrada → mesmo blob
+    EXPECT(o1.data.size() == o2.data.size());
+    EXPECT(std::memcmp(o1.data.data(), o2.data.data(), o1.data.size()) == 0);
+
+    // gradiente: os blocos NÃO são todos iguais (o codificador responde)
+    std::set<std::string> uniq;
+    for (u32 b = 0; b < o1.mips[0].size / 8u; ++b) {
+        uniq.insert(std::string(reinterpret_cast<const char*>(o1.data.data()) + b * 8, 8));
+    }
+    EXPECT(uniq.size() > 32u);
+}
+
+TEST(astc_4x4_estrutura_e_tamanhos) {
+    AstcCompressor c(4);
+    RawImage in;
+    in.width = 64;
+    in.height = 64;
+    in.rgba.resize(64u * 64u * 4u);
+    for (u32 y = 0; y < 64; ++y) {
+        for (u32 x = 0; x < 64; ++x) {
+            u8* px = &in.rgba[(y * 64u + x) * 4];
+            px[0] = static_cast<u8>(x * 4);
+            px[1] = static_cast<u8>(y * 4);
+            px[2] = 128;
+            px[3] = 255;
+        }
+    }
+    CompressedImage out;
+    std::string err;
+    EXPECT(c.compress(in, out, err));
+    EXPECT(err.empty());
+    EXPECT(out.ok());
+    EXPECT(out.format == CompressedFormat::ASTC_4x4);
+    EXPECT(out.mips.size() == 7u);
+    EXPECT(out.mips[0].size == 4096u);   // 16×16 blocos × 16 bytes
+    // cadeia: 4096+1024+256+64+16+16+16
+    EXPECT(out.data.size() == 5488u);
+    u32 expectOff = 0;
+    for (const CompressedMip& m : out.mips) {
+        EXPECT(m.offset == expectOff);
+        expectOff += m.size;
+    }
+    EXPECT(expectOff == out.data.size());
+}
+
+TEST(astc_6x6_tamanho_por_bloco) {
+    AstcCompressor c(6);
+    EXPECT(c.blockX() == 6u);
+    RawImage in = fillImg(64, 64, 5, 10, 15, 255);
+    CompressedImage out;
+    std::string err;
+    EXPECT(c.compress(in, out, err));
+    EXPECT(out.format == CompressedFormat::ASTC_6x6);
+    // ceil(64/6) = 11 → 11×11 blocos × 16 bytes
+    EXPECT(out.mips[0].size == static_cast<u32>(11 * 11 * 16));
+    // bloco inválido → fixa em 4
+    AstcCompressor c7(7);
+    EXPECT(c7.blockX() == 4u);
+}
+
+TEST(auto_selecao_astc_etc2_e_gate_256) {
+    HardwareCompressor hw;
+
+    // < 256px em qualquer dimensão → RGBA8 (sem compressão, 1 mip)
+    {
+        RawImage in = fillImg(128, 128, 1, 2, 3, 255);
+        CompressedImage out;
+        std::string err;
+        EXPECT(hw.compress(in, out, err));
+        EXPECT(out.format == CompressedFormat::RGBA8);
+        EXPECT(out.mips.size() == 1u);
+        EXPECT(out.data == in.rgba);
+        EXPECT(hw.lastFormat() == CompressedFormat::RGBA8);
+    }
+    // borda exata: 255x256 → não comprime; 256x256 → comprime
+    {
+        RawImage in = fillImg(255, 256, 1, 2, 3, 255);
+        CompressedImage out;
+        std::string err;
+        EXPECT(hw.compress(in, out, err));
+        EXPECT(out.format == CompressedFormat::RGBA8);
+    }
+    {
+        RawImage in = fillImg(256, 256, 1, 2, 3, 255);
+        CompressedImage out;
+        std::string err;
+        EXPECT(HardwareCompressor::compressible(256, 256));
+        EXPECT(!HardwareCompressor::compressible(255, 256));
+
+        // ASTC disponível → ASTC 4x4
+        hw.setAstcSupported(true);
+        EXPECT(hw.compress(in, out, err));
+        EXPECT(out.format == CompressedFormat::ASTC_4x4);
+        EXPECT(hw.lastFormat() == CompressedFormat::ASTC_4x4);
+
+        // sem ASTC, opaco → ETC2 RGB
+        hw.setAstcSupported(false);
+        CompressedImage out2;
+        EXPECT(hw.compress(in, out2, err));
+        EXPECT(out2.format == CompressedFormat::ETC2_RGB);
+        EXPECT(hw.lastFormat() == CompressedFormat::ETC2_RGB);
+
+        // sem ASTC, com alpha → ETC2 EAC
+        RawImage inA = fillImg(256, 256, 10, 20, 30, 128);
+        CompressedImage out3;
+        EXPECT(hw.compress(inA, out3, err));
+        EXPECT(out3.format == CompressedFormat::ETC2_RGBA);
+    }
+    // entrada inválida falha com erro
+    {
+        RawImage vazio;
+        CompressedImage out;
+        std::string err;
+        EXPECT(!hw.compress(vazio, out, err));
+        EXPECT(!err.empty());
+    }
+}
+
+TEST(passthrough_estrutura_um_mip) {
+    PassthroughCompressor pc;
+    RawImage in = fillImg(32, 16, 9, 8, 7, 6);
+    CompressedImage out;
+    std::string err;
+    EXPECT(pc.compress(in, out, err));
+    EXPECT(err.empty());
+    EXPECT(out.ok());
+    EXPECT(out.format == CompressedFormat::RGBA8);
+    EXPECT(out.mips.size() == 1u);
+    EXPECT(out.mips[0].size == 32u * 16u * 4u);
+    EXPECT(out.mips[0].offset == 0u);
+    EXPECT(out.data == in.rgba);
 }

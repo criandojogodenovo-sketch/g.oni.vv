@@ -40,7 +40,37 @@ add_library(goni_vv SHARED
         assets/PngLoader.cpp
         assets/TextureCompressor.h
         assets/TextureCompressor.cpp
+        assets/MipGen.h
+        assets/MipGen.cpp
+        assets/Etc2Compressor.cpp
+        assets/AstcCompressor.cpp
         assets/stb/stb_image.h
+        # F5.1-A: vendors de compressão (licenças preservadas nas pastas)
+        vendor/etcpak/ProcessRGB.cpp
+        vendor/etcpak/Tables.cpp
+        vendor/etcpak/Dither.cpp
+        vendor/astc-encoder/astcenc_averages_and_directions.cpp
+        vendor/astc-encoder/astcenc_block_sizes.cpp
+        vendor/astc-encoder/astcenc_color_quantize.cpp
+        vendor/astc-encoder/astcenc_color_unquantize.cpp
+        vendor/astc-encoder/astcenc_compress_symbolic.cpp
+        vendor/astc-encoder/astcenc_compute_variance.cpp
+        vendor/astc-encoder/astcenc_decompress_symbolic.cpp
+        vendor/astc-encoder/astcenc_diagnostic_trace.cpp
+        vendor/astc-encoder/astcenc_entry.cpp
+        vendor/astc-encoder/astcenc_find_best_partitioning.cpp
+        vendor/astc-encoder/astcenc_ideal_endpoints_and_weights.cpp
+        vendor/astc-encoder/astcenc_image.cpp
+        vendor/astc-encoder/astcenc_integer_sequence.cpp
+        vendor/astc-encoder/astcenc_mathlib.cpp
+        vendor/astc-encoder/astcenc_mathlib_softfloat.cpp
+        vendor/astc-encoder/astcenc_partition_tables.cpp
+        vendor/astc-encoder/astcenc_percentile_tables.cpp
+        vendor/astc-encoder/astcenc_pick_best_endpoint_format.cpp
+        vendor/astc-encoder/astcenc_quantization.cpp
+        vendor/astc-encoder/astcenc_symbolic_physical.cpp
+        vendor/astc-encoder/astcenc_weight_align.cpp
+        vendor/astc-encoder/astcenc_weight_quant_xfer_tables.cpp
         render/Texture.h
         render/Texture.cpp
         render/GpuAssets.h
@@ -99,7 +129,47 @@ add_library(goni_vv SHARED
         platform/InputState.cpp
         platform/main.cpp)
 
-target_include_directories(goni_vv PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(goni_vv PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/etcpak
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/astc-encoder)
+
+# F5.1-A: flags por TU dos vendors.
+#  • etcpak: usa SSE4.1 quando disponível (x86_64 — hospedeiro/CI; no
+#    Android arm64 o caminho NEON liga sozinho via __ARM_NEON).
+#  • astc-encoder: SIMD auto-detectado pelos headers (NEON no arm64);
+#    -fsigned-char estabiliza a matemática de char em ARM.
+if(NOT ANDROID)
+        set_source_files_properties(
+                vendor/etcpak/ProcessRGB.cpp
+                vendor/etcpak/Tables.cpp
+                vendor/etcpak/Dither.cpp
+                PROPERTIES COMPILE_OPTIONS "-msse4.1;-w")
+endif()
+set_source_files_properties(
+        vendor/astc-encoder/astcenc_averages_and_directions.cpp
+        vendor/astc-encoder/astcenc_block_sizes.cpp
+        vendor/astc-encoder/astcenc_color_quantize.cpp
+        vendor/astc-encoder/astcenc_color_unquantize.cpp
+        vendor/astc-encoder/astcenc_compress_symbolic.cpp
+        vendor/astc-encoder/astcenc_compute_variance.cpp
+        vendor/astc-encoder/astcenc_decompress_symbolic.cpp
+        vendor/astc-encoder/astcenc_diagnostic_trace.cpp
+        vendor/astc-encoder/astcenc_entry.cpp
+        vendor/astc-encoder/astcenc_find_best_partitioning.cpp
+        vendor/astc-encoder/astcenc_ideal_endpoints_and_weights.cpp
+        vendor/astc-encoder/astcenc_image.cpp
+        vendor/astc-encoder/astcenc_integer_sequence.cpp
+        vendor/astc-encoder/astcenc_mathlib.cpp
+        vendor/astc-encoder/astcenc_mathlib_softfloat.cpp
+        vendor/astc-encoder/astcenc_partition_tables.cpp
+        vendor/astc-encoder/astcenc_percentile_tables.cpp
+        vendor/astc-encoder/astcenc_pick_best_endpoint_format.cpp
+        vendor/astc-encoder/astcenc_quantization.cpp
+        vendor/astc-encoder/astcenc_symbolic_physical.cpp
+        vendor/astc-encoder/astcenc_weight_align.cpp
+        vendor/astc-encoder/astcenc_weight_quant_xfer_tables.cpp
+        PROPERTIES COMPILE_OPTIONS "-w;-fsigned-char")
 
 # Shim do sistema para NativeActivity (fonte oficial do NDK).
 # FIX UnsatisfiedLinkError: o glue tem de ser compilado DENTRO de goni_vv.

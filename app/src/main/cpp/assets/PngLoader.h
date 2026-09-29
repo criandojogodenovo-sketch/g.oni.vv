@@ -5,10 +5,11 @@
 // dependências). Qualquer PNG (bit depth/espacamento de cor) decodifica
 // para RGBA 8-bit — o formato que o pipeline do engine consome.
 //
-// GATE DE TAMANHO (F5): 1K/2K passam como estão; texturas 4K (ou maiores)
-// são reduzidas por fator 2 (box 2×2) até caber em 2048 — com AVISO ao
-// chamador. O gate REAL (compressão ASTC/ETC2) é a F5.1; aqui o objetivo é
-// não subir uma textura gigante para a GPU do C33 sem precisar.
+// GATE DE TAMANHO (F5; política da F5.1-A vive no TexturePipeline): com
+// compressão de hardware (ETC2/ASTC) texturas 4K entram INTEIRAS — ETC2 4K
+// ≈ 8 MB de VRAM, aceitável. Sem compressão (fallback raro: textura
+// recusada pelo gate <256px ou device sem caminho) reduz por fator 2
+// (box 2×2) até caber em 2048, com AVISO ao chamador.
 //
 // GL-free: testável no CI Linux (fixtures em tests/fixtures/).
 #include <cstddef>
