@@ -28,6 +28,7 @@
 #include "physics/InputSource.h"
 #include "physics/PhysicsSystem.h"
 #include "platform/Log.h"
+#include "platform/EngineLog.h"
 #include "platform/CrashHandler.h"
 #include "platform/EglContext.h"
 #include "platform/InputState.h"
@@ -521,12 +522,41 @@ u32    g_fpsFrames = 0;
 void onAppCmd(android_app* app, i32 cmd) {
     switch (cmd) {
         case APP_CMD_INIT_WINDOW:
+            // F5.1-hotfix: boot em passos numerados — cada passo escreve
+            // "[boot N/6] <nome> OK/FALHOU" no engine.log. A ordem dentro
+            // do INIT_WINDOW segue a numeração (contentRect → fonts →
+            // renderer → scene); storage/physics já correram no android_main.
             if (!g_egl.init(app->window)) {
-                LOGE("boot: EGL falhou");
+                elog::error("[boot 1/6] contentRect FALHOU (EGL init)");
                 break;
             }
+            g_renderer.resize(g_egl.width(), g_egl.height());
+            applyContentRect(app);   // F4.2: safe-area desde o primeiro frame
+            elog::info("[boot 1/6] contentRect OK (surface %dx%d)",
+                       (int)g_egl.width(), (int)g_egl.height());
+            // F1 sem assets: fonte do sistema (primeira que existir vence)
+            if (!g_font.loadFromPaths(kSystemFontPaths, kSystemFontPathCount, 28.0f)) {
+                elog::error("[boot 3/6] fonts FALHOU — nenhuma fonte do sistema — UI sem texto");
+            } else {
+                elog::info("[boot 3/6] fonts OK (sistema, 28px)");
+            }
+            g_ui.init();
+            g_ui.setFont(&g_font);
+            // F3: geometria procedural do viewport (mesh partilhado dos presets)
+            {
+                const CubeMeshData cube = makeCube(1.0f);
+                if (!g_cubeMesh.create(cube.vertices.data(),
+                                       static_cast<u32>(cube.vertices.size()),
+                                       cube.indices.data(),
+                                       static_cast<u32>(cube.indices.size()))) {
+                    elog::error("[boot 4/6] renderer FALHOU no passo: mesh do cubo");
+                }
+                if (!g_grid.init()) {
+                    elog::error("[boot 4/6] renderer FALHOU no passo: grid de chão");
+                }
+            }
             if (!g_renderer.init()) {
-                LOGE("boot: renderer falhou");
+                elog::error("[boot 4/6] renderer FALHOU (shaders/materiais)");
                 break;
             }
             // F5-E: caches de assets ligados ao storage ATIVO (router F5.1-C)
@@ -540,47 +570,29 @@ void onAppCmd(android_app* app, i32 cmd) {
                     g_hwCompressor.setAstcSupported(astc);
                     g_gpu.setPipeline(g_pipeline.get());
                     g_texCache->resetStats();
-                    LOGI("f5.1: compressão de texturas ativa — ASTC %s (fallback ETC2), cache %s",
-                         astc ? "SIM" : "não",
-                         g_projectReady ? "textures/cache" : "off");
+                    elog::info("f5.1: compressão de texturas ativa — ASTC %s (fallback ETC2), cache %s",
+                               astc ? "SIM" : "não",
+                               g_projectReady ? "textures/cache" : "off");
                 }
             }
-            g_renderer.resize(g_egl.width(), g_egl.height());
-            applyContentRect(app);   // F4.2: safe-area desde o primeiro frame
-            // F3: geometria procedural do viewport (mesh partilhado dos presets)
-            {
-                const CubeMeshData cube = makeCube(1.0f);
-                if (!g_cubeMesh.create(cube.vertices.data(),
-                                       static_cast<u32>(cube.vertices.size()),
-                                       cube.indices.data(),
-                                       static_cast<u32>(cube.indices.size()))) {
-                    LOGE("boot: mesh do cubo falhou");
-                }
-                if (!g_grid.init()) {
-                    LOGE("boot: grid de chão falhou");
-                }
-            }
-            // F1 sem assets: fonte do sistema (primeira que existir vence)
-            if (!g_font.loadFromPaths(kSystemFontPaths, kSystemFontPathCount, 28.0f)) {
-                LOGE("boot: nenhuma fonte do sistema carregada — UI sem texto");
-            }
-            g_ui.init();
-            g_ui.setFont(&g_font);
+            elog::info("[boot 4/6] renderer OK (shaders, materiais, geometria)");
             // F5-A/3: recarrega a CENA ATIVA do projeto (refs relativos
             // intactos; resolvers de mesh chegam na F5-E — por agora o
             // LoadCtx liga o cubo procedural, tag "cube" das cenas antigas)
             if (g_projectReady) {
                 const SceneSerializer::LoadCtx ctx = makeLoadCtx();
                 if (g_project.loadActiveScene(*g_router, g_scene, ctx)) {
-                    LOGI("projeto: cena ativa '%s' carregada (%u tics)",
-                         g_project.activeScenePath()->c_str(), g_scene.count());
+                    elog::info("[boot 6/6] scene OK → editor ('%s', %u tics)",
+                               g_project.activeScenePath()->c_str(), g_scene.count());
                 } else {
-                    LOGE("projeto: falha ao carregar a cena ativa '%s'",
-                         g_project.activeScenePath()->c_str());
+                    elog::error("[boot 6/6] scene FALHOU ('%s') — editor arranca com cena vazia",
+                                g_project.activeScenePath()->c_str());
                 }
+            } else {
+                elog::warn("[boot 6/6] scene SEM PROJETO — editor sem persistência");
             }
             g_ready = true;
-            LOGI("boot: janela pronta %dx%d", (int)g_egl.width(), (int)g_egl.height());
+            elog::info("boot: janela pronta %dx%d", (int)g_egl.width(), (int)g_egl.height());
             break;
         case APP_CMD_WINDOW_RESIZED:
         case APP_CMD_CONFIG_CHANGED:
@@ -921,8 +933,28 @@ void frame() {
 } // namespace
 
 void android_main(android_app* app) {
-    // diagnóstico: crash log em <internalDataPath>/goni_crash.log (passo 7 F1)
+    // F5.1-hotfix: log DUPLO (logcat + ficheiro) desde a 1ª linha.
+    // O boot ainda não tem os paths da activity? O elog usa o fallback
+    // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu
+    // lá (JNI_OnLoad corre ANTES do android_main).
+    elog::info("G.One VV 0.6.1 — F5.1-hotfix (crash dump + logs; boot progresso por passos)");
+    {
+        const char* root0 = app->activity
+            ? (app->activity->externalDataPath ? app->activity->externalDataPath
+                                               : app->activity->internalDataPath)
+            : nullptr;
+        if (root0) {
+            static char logsDir[512];
+            std::snprintf(logsDir, sizeof(logsDir), "%s/logs", root0);
+            elog::init(logsDir);
+        }
+    }
+    // F5.1-hotfix: crash dump legível (SIGSEGV/SIGABRT/SIGBUS/SIGFPE →
+    // crash-<ts>.dump no MESMO diretório do engine.log) — instalado em 3/6;
+    // por agora o handler F1 (goni_crash.log) continua como fallback.
     installCrashHandler(app->activity ? app->activity->internalDataPath : nullptr);
+    elog::info("logs: %s (ativo=%d)", elog::dir()[0] ? elog::dir() : "<só-logcat>",
+               elog::active() ? 1 : 0);
 
     // F5-A: storage do projeto — raiz getExternalFilesDir (sem permissões
     // desde a API 19); fallback = internalDataPath. Boot abre o projeto
@@ -972,25 +1004,32 @@ void android_main(android_app* app) {
             if (!g_router->usingSecondary() &&
                 Project::openOrCreate(*g_storage, "projeto", g_project)) {
                 g_projectReady = g_project.activeScenePath() != nullptr;
-                LOGI("projeto: '%s' pronto em %s (%u cena(s), ativa=%s)",
-                     g_project.name.c_str(), root,
-                     (unsigned)g_project.scenes.size(),
-                     g_projectReady ? g_project.activeScenePath()->c_str() : "-");
+                elog::info("projeto: '%s' pronto em %s (%u cena(s), ativa=%s)",
+                           g_project.name.c_str(), root,
+                           (unsigned)g_project.scenes.size(),
+                           g_projectReady ? g_project.activeScenePath()->c_str() : "-");
             } else {
-                LOGE("projeto: storage inutilizável em %s — editor sem persistência", root);
+                elog::error("projeto: storage inutilizável em %s — editor sem persistência", root);
             }
         } else {
-            LOGE("projeto: sem externalDataPath/internalDataPath — editor sem persistência");
+            elog::error("projeto: sem externalDataPath/internalDataPath — editor sem persistência");
         }
+        // [boot 2/6] storage — passo crítico do arranque (ficheiro legível
+        // no device: se o boot morrer aqui, o dono vê exatamente onde)
+        elog::info("[boot 2/6] storage %s (raiz=%s, saf=%s)",
+                   g_storage ? "OK" : "FALHOU",
+                   app->activity && app->activity->externalDataPath
+                       ? "external" : "-",
+                   g_router && g_router->usingSecondary() ? "saf" : "local");
     }
 
     // F3/F4: systems do engine (ordem interna ao grupo = registo)
     g_systems.add(TickGroup::Update, &g_transformSystem);
     g_systems.add(TickGroup::Physics, &g_physics);   // entre Update e PostUpdate
+    elog::info("[boot 5/6] physics OK (tickgroups Update+Physics registados)");
 
     app->onAppCmd = onAppCmd;
     app->onInputEvent = onInputEvent;
-    LOGI("G.One VV 0.6.0 — F5.1 (ETC2/ASTC + cache de texturas; texturas embutidas glTF; SAF import/export)");
 
     double last = nowSeconds();
     while (true) {
