@@ -474,3 +474,22 @@ TEST(elog_listdumps_recentes_primeiro) {
     EXPECT(out.empty());
     rmrf(kTestLogsDir);
 }
+
+// ---------------------------------------------------------------------------
+// F5.2 (item 5): o fopen do PRÓPRIO engine.log falho é seguro e DIAGNOSTICADO
+// (logcat no device/stderr no hospedeiro) — o elog fica inativo sem crashar
+// ---------------------------------------------------------------------------
+
+TEST(elog_init_em_pasta_nao_criavel_e_seguro) {
+    // mkdir -p não consegue criar DENTRO de /proc (raiz read-only) → open
+    // falha → elog inativo; as chamadas seguintes NÃO crasham
+    EXPECT(!vv::elog::init("/proc/goni-vv-teste-impossivel/logs"));
+    EXPECT(!vv::elog::active());
+    vv::elog::info("nada acontece");
+    vv::elog::writeLine('E', "nada acontece 2");
+    std::vector<std::string> lines;
+    EXPECT(vv::elog::readTail(lines, 10) == 0);
+    std::vector<std::string> dumps;
+    EXPECT(!vv::elog::listDumps(dumps));
+    vv::elog::shutdown();
+}

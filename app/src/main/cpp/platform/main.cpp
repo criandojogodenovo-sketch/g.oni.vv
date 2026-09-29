@@ -1077,11 +1077,18 @@ void android_main(android_app* app) {
     // ficheiros do utilizador passa pelo fluxo All Files Access.
     {
         const char* root = nullptr;
+        const bool isExternal = app->activity &&
+                                app->activity->externalDataPath != nullptr;
         if (app->activity) {
             root = app->activity->externalDataPath
                        ? app->activity->externalDataPath
                        : app->activity->internalDataPath;
         }
+        // F5.2 (item 5): BOOT SELF-CHECK — o resultado do mapeamento
+        // (getExternalFilesDir null?) e o errno de cada fopen/opendir
+        // falhado ficam no engine.log ANTES de qualquer I/O pesado. Se algo
+        // falhar mais tarde, a CAUSA do storage já está registrada aqui.
+        fileapi::logStorageSelfCheck(root, isExternal);
         if (root) {
             g_storage = std::make_unique<FsStorage>(root);
             // F5.1-A: cache/pipeline vivem enquanto o storage viver

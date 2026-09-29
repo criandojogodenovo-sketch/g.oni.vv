@@ -9,6 +9,7 @@
 #include "platform/EngineLog.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -51,6 +52,20 @@ bool openLocked() {
     std::snprintf(path, sizeof(path), "%s/engine.log", g_dir.c_str());
     // O_APPEND: cada write é atómico (vários threads, sem interleave)
     g_fd = ::open(path, O_WRONLY | O_APPEND | O_CREAT, 0644);
+    if (g_fd < 0) {
+        // F5.2: falha de fopen do PRÓPRIO log tem de dizer porquê — só
+        // logcat (o ficheiro é que falhou); o self-check do boot (FileApi)
+        // registra a mesma causa em linhas "self-check: … errno=…".
+        const int e = errno;
+#ifdef __ANDROID__
+        __android_log_print(ANDROID_LOG_WARN, "GONI_VV",
+                            "elog: open(%s) FALHOU — errno=%d (%s)",
+                            path, e, std::strerror(e));
+#else
+        std::fprintf(stderr, "elog: open(%s) FALHOU — errno=%d (%s)\n",
+                     path, e, std::strerror(e));
+#endif
+    }
     return g_fd >= 0;
 }
 
