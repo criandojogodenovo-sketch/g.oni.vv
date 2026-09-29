@@ -33,6 +33,13 @@
 // projeto; o Menu ganha "Export OBJ" (mesh do TIC selecionado → meshes/).
 // O catálogo (listas de nomes) é refresh pelo main a partir do ProjectStorage.
 //
+// F5.2: ARMAZENAMENTO — overlays do fluxo All Files Access (diálogo
+// "Precisa de acesso a todos os ficheiros?" com Permitir/Cancelar), overlay
+// de IMPORT com os ficheiros de Download/Documents (File API direta) e o
+// VIEWER de logs in-app (engine.log + crash-*.dump, scroll, tema mono).
+// O Settings mostra o modo de armazenamento ativo e ganha "Ver logs" e
+// "Acesso a ficheiros…".
+//
 // F5.0-fix (bug do C33: texto do Inspector sobreposto em pilhas): o layout
 // do Inspector vem do PLANO (ui/EditorLayout.h) — linhas sequenciais com
 // cursor Y partilhado (y += altura_linha, nenhum reinício por secção) e
@@ -41,9 +48,17 @@
 // bloco de glifos invadia a linha de cima). O desenho não tem "+=" próprio:
 // consome o plano e subtrai o offset do scroll; contentHeight = fundo da
 // última linha; o hit-test do tap re-despachado usa o MESMO plano.
+//
+// F5.2: IDs — faixas exclusivas por overlay (UiContext é immediate-mode:
+// dois widgets com o MESMO id no mesmo frame partilham o gesto). Toolbar
+// 1..3 · hierarquia 40/1000+ · scroll 41/42/43 · presets 20..23 · menu de
+// ficheiro 30..3x · SETTINGS 4400+ · assets 6000+ · IMPORT 6100+ · diálogo
+// de armazenamento 6300+ · viewer de logs 6400+.
 #include "core/Handle.h"
 #include "ui/UiContext.h"
 #include "ui/EditorLayout.h"
+#include "platform/FileApi.h"
+#include "platform/StoragePerm.h"
 
 namespace vv {
 
@@ -71,6 +86,11 @@ struct EditorState {
     bool   settingsMenu = false;           // F5.1-hotfix: overlay Settings aberto
     int    assetMenu = 0;                  // F5-E: 0 fechado; 1 = seletor mesh;
                                            //       2 = seletor textura
+    // F5.2: overlays de armazenamento/logs
+    bool   storageDialog = false;          // diálogo All Files Access visível
+    bool   importMenu = false;             // overlay IMPORT (Download/Documents)
+    bool   logViewer = false;              // viewer de logs visível
+    bool   logViewerJustOpened = false;    // 1 frame: auto-scroll p/ o fundo
 };
 
 // Rect do viewport central (entre os painéis) — usado para o gate da câmara.
@@ -116,8 +136,29 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorSta
                   const AssetCatalog& catalog);
 // F5.1-hotfix: menu do botão Settings → 0 nada, 1 = "Exportar logs"
 // (copia logs/ e crash dumps para Downloads/GOneVV/logs via MediaStore).
+// F5.2: 2 = "Ver logs" (viewer in-app), 3 = "Acesso a ficheiros…" (abre as
+// definições do sistema); storageMode (não-nulo) desenha a linha
+// "armazenamento: …" com o modo ativo.
 int drawSettingsMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
-                     EditorState& st);
+                     EditorState& st, const char* storageMode = "");
+
+// F5.2: DIÁLOGO All Files Access — 0 nada, 1 = "Permitir" (o main lança o
+// intent das definições), 2 = "Cancelar". Fecha com toque fora.
+int drawStorageDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                      EditorState& st);
+
+// F5.2: overlay IMPORT — candidatos de Download/Documents (File API direta).
+// Devolve 0 nada; i+1 = candidato i escolhido. Cap 8 linhas (mono, sem
+// scroll — F8). vazio → mensagem "nenhum ficheiro suportado".
+int drawImportMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                   EditorState& st, const std::vector<fileapi::Candidate>& cands);
+
+// F5.2: VIEWER de logs — engine.log (tail) + crash dumps, scroll (id 43),
+// tema mono, fecha com toque fora ou botão "fechar". Auto-scroll para o
+// fundo no 1º frame (st.logViewerJustOpened).
+void drawLogViewer(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                   EditorState& st, const std::vector<std::string>& lines,
+                   const std::vector<std::string>& dumps);
 
 } // namespace editor
 

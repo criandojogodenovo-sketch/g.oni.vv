@@ -68,6 +68,10 @@ public:
     // comia o tap do Inspector e os botões do painel direito morriam)
     bool scrollTap(u64 id, f32& x, f32& y);
 
+    // F5.2: define o offset de UMA região por id (viewer de logs salta para
+    // o fundo ao abrir). O valor é clampado no próximo beginScroll da região.
+    void scrollSetOffset(u64 id, f32 offset);
+
     // hooks de TESTE (CI): leitura dos batches emitidos no frame — permitem
     // aos testes de hospedeiro aferir a geometria REAL desenhada pelos
     // painéis (linhas sequenciais, sem sobreposição, scroll a revelar o fundo)

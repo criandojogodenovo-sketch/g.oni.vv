@@ -2,6 +2,7 @@
 // ui/EditorLayout.h — layout PURO dos painéis do editor (F4.1), sem GL —
 // host-testável. Fonte ÚNICA das alturas de conteúdo que alimentam o scroll:
 // o desenho (EditorUi.cpp) e os testes de CI partilham estes números.
+#include "ui/ScrollMath.h"   // UiRect (os overlays F5.2 também partilham)
 //
 // Coordenadas de CONTEÚDO: origem no topo da lista (debaixo do cabeçalho do
 // painel); o scroll converte para ecrã com screenY = contentY − offset.
@@ -56,6 +57,7 @@ constexpr u64 kInspectorTexSel     = 5002;   // F5-E: linha "tex: …"
 // a Hierarchy comia o tap do Inspector quando a consulta era global)
 constexpr u64 kHierarchyScrollId = 41;
 constexpr u64 kInspectorScrollId = 42;
+constexpr u64 kLogsScrollId      = 43;   // F5.2: viewer de logs in-app
 
 // ---- Inspector: alturas derivadas das MÉTRICAS DA FONTE (F5.0-fix) ---------
 // Bloco de texto = ascent + descent (reais do atlas). Cada linha acrescenta
@@ -198,6 +200,39 @@ inline i32 hierarchyRowAtTap(f32 tapY, f32 listTop, f32 offset, u32 ticCount) {
         return -1;
     }
     return row;
+}
+
+// ---- F5.2: overlays de armazenamento (fonte ÚNICA das geometrias — o
+// desenho e os testes de tap partilham estas fórmulas) ----------------------
+
+// menu/overlay centrado na área útil (ox/oy = origem da safe-area; aw/ah =
+// área útil). h é por overlay.
+inline UiRect centeredMenuRect(f32 ox, f32 oy, f32 aw, f32 ah, f32 h) {
+    return {ox + (aw - kMenuW) * 0.5f, oy + (ah - h) * 0.5f, kMenuW, h};
+}
+
+// DIÁLOGO "Precisa de acesso a todos os ficheiros?": título (kHeaderH) +
+// 3 linhas de mensagem + 2 botões (Permitir/Cancelar lado a lado)
+inline f32 storageDialogHeight() {
+    return kHeaderH + 3.0f * 34.0f + 72.0f + kPad;
+}
+inline void storageDialogButtons(const UiRect& dlg, UiRect& permitir,
+                                 UiRect& cancelar) {
+    const f32 btnTop = dlg.y + kHeaderH + 3.0f * 34.0f + 8.0f;
+    const f32 gap = kPad;
+    const f32 w = (kMenuW - 2.0f * kPad - gap) * 0.5f;
+    permitir = {dlg.x + kPad, btnTop, w, 56.0f};
+    cancelar = {dlg.x + kPad + w + gap, btnTop, w, 56.0f};
+}
+
+// overlay IMPORT: título + N linhas (40 px, espaçadas 48 — como o seletor
+// de assets); devolve o rect da linha `i` (0-based)
+inline UiRect importRowRect(const UiRect& menu, u32 i) {
+    return {menu.x + kPad, menu.y + kHeaderH + static_cast<f32>(i) * 48.0f,
+            kMenuW - 2.0f * kPad, 40.0f};
+}
+inline f32 importMenuHeight(u32 rows) {
+    return kHeaderH + static_cast<f32>(rows) * 48.0f + kPad;
 }
 
 } // namespace editor

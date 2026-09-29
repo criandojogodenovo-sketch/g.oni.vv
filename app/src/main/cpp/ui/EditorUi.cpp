@@ -14,6 +14,8 @@ namespace {
 constexpr u64 kIdPlus      = 40;
 constexpr u64 kIdScrollHier = 41;   // F4.1: região de scroll da Hierarchy
 constexpr u64 kIdScrollInsp = 42;   // F4.1: região de scroll do Inspector
+// F5.2: viewer de logs usa kLogsScrollId (43, EditorLayout.h — compartilhado
+// com os testes)
 constexpr u64 kIdRowBase   = 1000;
 constexpr u64 kIdAssetBase = 6000;   // F5-E: itens do seletor de assets
 // ids do Inspector (sliders/botões) vivem em ui/EditorLayout.h — o PLANO é
@@ -517,39 +519,298 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 }
 
 int drawSettingsMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
-                     EditorState& st) {
+                     EditorState& st, const char* storageMode) {
     // F5.1-hotfix: menu do botão Settings — mono, mesmo padrão dos overlays.
-    constexpr int kItems = 1;
-    const f32 w = kMenuW;
-    const f32 h = kHeaderH + static_cast<f32>(kItems) * 64.0f + kPad;
+    // F5.2: 3 itens + linha do modo de armazenamento ativo.
+    constexpr int kItems = 3;
+    constexpr f32 kModeLineH = 30.0f;
+    const bool showMode = storageMode && storageMode[0];
+    const f32 h = kHeaderH + (showMode ? kModeLineH : 0.0f) +
+                  static_cast<f32>(kItems) * 64.0f + kPad;
     const f32 ox = ui.safeLeft();
     const f32 oy = ui.safeTop();
     const f32 aw = sw - ox - ui.safeRight();
     const f32 ah = sh - oy - ui.safeBottom();
-    const f32 x = ox + (aw - w) * 0.5f;
+    const f32 x = ox + (aw - kMenuW) * 0.5f;
     const f32 y = oy + (ah - h) * 0.5f;
 
-    if (pressedOutside(in, x, y, w, h)) {
+    if (pressedOutside(in, x, y, kMenuW, h)) {
         st.settingsMenu = false;
         return 0;
     }
 
-    ui.panel(x, y, w, h, theme::PANEL);
-    ui.frame(x, y, w, h, 2.0f, theme::ACCENT);
+    ui.panel(x, y, kMenuW, h, theme::PANEL);
+    ui.frame(x, y, kMenuW, h, 2.0f, theme::ACCENT);
     const f32 th = ui.fontHeight();
     ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "SETTINGS", theme::TEXT);
 
+    // F5.2: modo de armazenamento ativo (o item 6 do escopo — o dono vê
+    // sempre QUAL modo está em uso)
+    f32 itemsTop = y + kHeaderH;
+    if (showMode) {
+        char line[48];
+        std::snprintf(line, sizeof(line), "armazenamento: %s", storageMode);
+        ui.labelFitted(x + kPad, y + kHeaderH + kModeLineH * 0.5f + th * 0.30f,
+                       line, theme::LINE, kMenuW - 2.0f * kPad);
+        itemsTop += kModeLineH;
+    }
+
     int chosen = 0;
-    const char* labels[kItems] = {"Exportar logs"};
+    const char* labels[kItems] = {"Exportar logs", "Ver logs",
+                                  "Acesso a ficheiros…"};
     for (int i = 0; i < kItems; ++i) {
-        if (ui.button(static_cast<u64>(40 + i), x + kPad,
-                      y + kHeaderH + static_cast<f32>(i) * 64.0f,
-                      w - 2.0f * kPad, 56.0f, labels[i])) {
+        if (ui.button(static_cast<u64>(4400 + i), x + kPad,
+                      itemsTop + static_cast<f32>(i) * 64.0f,
+                      kMenuW - 2.0f * kPad, 56.0f, labels[i])) {
             chosen = i + 1;
             st.settingsMenu = false;
         }
     }
     return chosen;
+}
+
+// ---------------------------------------------------------------------------
+// F5.2: DIÁLOGO All Files Access — "Precisa de acesso a todos os ficheiros
+// para importar/exportar projetos" + Permitir/Cancelar (tema mono).
+// A mensagem é quebrada em ATÉ 3 linhas que caibam no painel (medidas com
+// a fonte real — nunca sai do rect).
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// quebra por palavras (greedy) em até maxLines linhas de até cap-1 chars;
+// devolve o nº de linhas usadas (texto que não couber fica na última)
+int wrapText3(UiContext& ui, const char* text, f32 maxW, int maxLines,
+              char out[][96]) {
+    for (int i = 0; i < maxLines; ++i) {
+        out[i][0] = '\0';
+    }
+    if (!text || !ui.hasFont() || maxLines <= 0) {
+        return 0;
+    }
+    int line = 0;
+    const char* p = text;
+    while (*p && line < maxLines) {
+        const char* word = p;
+        while (*p && *p != ' ') ++p;          // fim da palavra
+        const size_t wlen = static_cast<size_t>(p - word);
+        while (*p == ' ') ++p;                // espaços entre palavras
+
+        char candidate[96];
+        if (out[line][0]) {
+            std::snprintf(candidate, sizeof(candidate), "%s %.*s", out[line],
+                          static_cast<int>(wlen), word);
+        } else {
+            std::snprintf(candidate, sizeof(candidate), "%.*s",
+                          static_cast<int>(wlen), word);
+        }
+        if (ui.fontWidth(candidate) <= maxW || !out[line][0]) {
+            std::snprintf(out[line], 96, "%s", candidate);
+        } else {
+            ++line;                            // a palavra não cabe → nova linha
+            if (line < maxLines) {
+                std::snprintf(out[line], 96, "%.*s", static_cast<int>(wlen), word);
+            }
+        }
+        // palavra MAIOR que a linha inteira: trunca (não há em texto fixo)
+    }
+    int used = 0;
+    for (int i = 0; i < maxLines; ++i) {
+        if (out[i][0]) used = i + 1;
+    }
+    return used;
+}
+
+} // namespace
+
+int drawStorageDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                      EditorState& st) {
+    const f32 h = storageDialogHeight();
+    const f32 ox = ui.safeLeft();
+    const f32 oy = ui.safeTop();
+    const f32 aw = sw - ox - ui.safeRight();
+    const f32 ah = sh - oy - ui.safeBottom();
+    const UiRect dlg = centeredMenuRect(ox, oy, aw, ah, h);
+
+    if (pressedOutside(in, dlg.x, dlg.y, dlg.w, dlg.h)) {
+        st.storageDialog = false;   // toque fora = cancelar (sem ação)
+        return 0;
+    }
+
+    ui.panel(dlg.x, dlg.y, dlg.w, dlg.h, theme::PANEL);
+    ui.frame(dlg.x, dlg.y, dlg.w, dlg.h, 2.0f, theme::ACCENT);
+    const f32 th = ui.fontHeight();
+    ui.label(dlg.x + kPad, dlg.y + kHeaderH * 0.5f + th * 0.30f,
+             "ARMAZENAMENTO", theme::TEXT);
+
+    // mensagem EXATA do escopo, quebrada para caber
+    char rows[3][96];
+    wrapText3(ui,
+              "Precisa de acesso a todos os ficheiros para importar/exportar "
+              "projetos",
+              kMenuW - 2.0f * kPad, 3, rows);
+    for (int i = 0; i < 3; ++i) {
+        if (rows[i][0]) {
+            ui.labelFitted(dlg.x + kPad,
+                           dlg.y + kHeaderH + static_cast<f32>(i) * 34.0f + 20.0f,
+                           rows[i], theme::TEXT, dlg.w - 2.0f * kPad);
+        }
+    }
+
+    // botões lado a lado (faixa de ids exclusiva 6300+)
+    UiRect allow{}, cancel{};
+    storageDialogButtons(dlg, allow, cancel);
+    int chosen = 0;
+    if (ui.button(6301, allow.x, allow.y, allow.w, allow.h, "Permitir")) {
+        chosen = 1;
+        st.storageDialog = false;
+    }
+    if (ui.button(6302, cancel.x, cancel.y, cancel.w, cancel.h, "Cancelar")) {
+        chosen = 2;
+        st.storageDialog = false;
+    }
+    return chosen;
+}
+
+// ---------------------------------------------------------------------------
+// F5.2: overlay IMPORT — ficheiros suportados de Download/Documents (File
+// API direta; o main copia o escolhido para o projeto). Cap 8 (mono).
+// ---------------------------------------------------------------------------
+
+int drawImportMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                   EditorState& st,
+                   const std::vector<fileapi::Candidate>& cands) {
+    // cap de linhas no overlay (sem scroll — F8)
+    constexpr size_t kMaxRows = 8;
+    const size_t shown = cands.size() < kMaxRows ? cands.size() : kMaxRows;
+
+    const f32 h = importMenuHeight(static_cast<u32>(shown) + 1u);
+    const f32 ox = ui.safeLeft();
+    const f32 oy = ui.safeTop();
+    const f32 aw = sw - ox - ui.safeRight();
+    const f32 ah = sh - oy - ui.safeBottom();
+    const f32 x = ox + (aw - kMenuW) * 0.5f;
+    const f32 y = oy + (ah - h) * 0.5f;
+
+    if (pressedOutside(in, x, y, kMenuW, h)) {
+        st.importMenu = false;
+        return 0;
+    }
+
+    ui.panel(x, y, kMenuW, h, theme::PANEL);
+    ui.frame(x, y, kMenuW, h, 2.0f, theme::ACCENT);
+    const f32 th = ui.fontHeight();
+    ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "IMPORTAR",
+             theme::TEXT);
+
+    int chosen = 0;
+    if (cands.empty()) {
+        ui.labelFitted(x + kPad, y + kHeaderH + 30.0f,
+                       "(nenhum obj/gltf/glb/png em Download/Documents)",
+                       theme::LINE, kMenuW - 2.0f * kPad);
+        return 0;
+    }
+    for (size_t i = 0; i < shown; ++i) {
+        // rótulo: nome + tipo (m/t → mesh/textura)
+        char label[80];
+        std::snprintf(label, sizeof(label), "%s  [%s]", cands[i].name.c_str(),
+                      cands[i].kind == 'm' ? "mesh" : "tex");
+        const UiRect row = importRowRect({x, y, kMenuW, h}, static_cast<u32>(i));
+        if (ui.button(6100 + static_cast<u64>(i), row.x, row.y, row.w, row.h,
+                      label)) {
+            chosen = static_cast<int>(i) + 1;
+            st.importMenu = false;
+        }
+    }
+    if (cands.size() > kMaxRows) {
+        char more[48];
+        std::snprintf(more, sizeof(more), "+%u ficheiros (cap do overlay)",
+                      static_cast<unsigned>(cands.size() - kMaxRows));
+        ui.labelFitted(x + kPad,
+                       importRowRect({x, y, kMenuW, h},
+                                     static_cast<u32>(shown)).y + 20.0f,
+                       more, theme::LINE, kMenuW - 2.0f * kPad);
+    }
+    return chosen;
+}
+
+// ---------------------------------------------------------------------------
+// F5.2: VIEWER de logs — engine.log (tail) + crash dumps com scroll (id 43),
+// tema mono. Funcional SEM export: é a mesma leitura POSIX que o export faz.
+// ---------------------------------------------------------------------------
+
+void drawLogViewer(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                   EditorState& st, const std::vector<std::string>& lines,
+                   const std::vector<std::string>& dumps) {
+    const f32 ox = ui.safeLeft();
+    const f32 oy = ui.safeTop();
+    const f32 aw = sw - ox - ui.safeRight();
+    const f32 ah = sh - oy - ui.safeBottom();
+    // painel GRANDE central (86% × 80% da área útil — o log precisa de espaço)
+    const f32 w = aw * 0.86f;
+    const f32 h = ah * 0.80f;
+    const f32 x = ox + (aw - w) * 0.5f;
+    const f32 y = oy + (ah - h) * 0.5f;
+
+    if (pressedOutside(in, x, y, w, h)) {
+        st.logViewer = false;
+        return;
+    }
+
+    ui.panel(x, y, w, h, theme::PANEL);
+    ui.frame(x, y, w, h, 2.0f, theme::ACCENT);
+    const f32 th = ui.fontHeight();
+    ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f,
+             "LOGS (engine.log + crashes)", theme::TEXT);
+    if (ui.button(6401, x + w - kPad - 96.0f, y + 4.0f, 96.0f, 36.0f, "fechar")) {
+        st.logViewer = false;
+        return;
+    }
+    ui.panel(x + kPad, y + kHeaderH - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
+
+    // conteúdo: altura REAL = linhas (block da fonte) + secção de dumps
+    const TextMetrics tm = ui.textMetrics();
+    const f32 rowH = tm.block() + 6.0f;
+    const f32 dumpsH = dumps.empty() ? 0.0f : (34.0f + static_cast<f32>(dumps.size()) * rowH);
+    const f32 contentH = 34.0f + static_cast<f32>(lines.size()) * rowH + dumpsH;
+
+    const f32 listTop = y + kHeaderH;
+    const UiRect region{x, listTop, w, h - kHeaderH};
+    ui.beginScroll(kLogsScrollId, region, contentH);
+    const f32 off = ui.scrollOffset();
+
+    auto baselineOf = [&](f32 rowTop) {
+        return rowTop + rowH * 0.5f + tm.ascent - tm.block() * 0.5f;
+    };
+
+    f32 cy = listTop - off;
+    ui.labelFitted(x + kPad, baselineOf(cy + 4.0f),
+                   lines.empty() ? "(log vazio)" : "engine.log:",
+                   theme::LINE, w - 2.0f * kPad);
+    cy += 34.0f;
+    for (const std::string& l : lines) {
+        // logs são longos — labelFitted corta na largura do painel
+        ui.labelFitted(x + kPad, baselineOf(cy), l.c_str(), theme::TEXT,
+                       w - 2.0f * kPad);
+        cy += rowH;
+    }
+    if (!dumps.empty()) {
+        ui.labelFitted(x + kPad, baselineOf(cy + 4.0f), "crash dumps:",
+                       theme::ACCENT, w - 2.0f * kPad);
+        cy += 34.0f;
+        for (const std::string& d : dumps) {
+            ui.labelFitted(x + kPad, baselineOf(cy), d.c_str(), theme::TEXT,
+                           w - 2.0f * kPad);
+            cy += rowH;
+        }
+    }
+    ui.endScroll();
+
+    // F5.2: 1º frame após abrir → salta para o FIM (o recente é o que importa)
+    if (st.logViewerJustOpened) {
+        ui.scrollSetOffset(kLogsScrollId, contentH);   // beginScroll clampa
+        st.logViewerJustOpened = false;
+    }
 }
 
 // ---------------------------------------------------------------------------

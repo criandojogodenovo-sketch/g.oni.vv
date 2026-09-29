@@ -83,6 +83,13 @@ struct Env {
     AssetCatalog catalog;
     bool ok = false;
 
+    // F5.2: overlay desenhado DEPOIS dos painéis (como no main) — 1=diálogo
+    // de armazenamento, 2=import, 3=viewer de logs, 4=settings
+    int overlay = 0;
+    std::vector<fileapi::Candidate> importCands;
+    std::vector<std::string> logLines, logDumps;
+    const char* modeText = "all files";
+
     explicit Env(bool withTc, bool withCatalog) {
         const char* fontPath = FONT_FIXTURE;
         ok = font.loadFromPaths(&fontPath, 1, kFontPx);
@@ -116,6 +123,13 @@ struct Env {
         ui.toolbar(clicks);
         drawHierarchy(ui, scene, st);
         drawInspector(ui, scene, st, withCatalog_());
+        switch (overlay) {
+            case 1: drawStorageDialog(ui, input, kSW, kSH, st); break;
+            case 2: drawImportMenu(ui, input, kSW, kSH, st, importCands); break;
+            case 3: drawLogViewer(ui, input, kSW, kSH, st, logLines, logDumps); break;
+            case 4: drawSettingsMenu(ui, input, kSW, kSH, st, modeText); break;
+            default: break;
+        }
         ui.statusLine("status");
         ui.endFrame();
         input.clearEdges();
@@ -357,4 +371,242 @@ TEST(ui_inspector_com_insets_scroll_compensa) {
     EXPECT(safe::rectInside(panel, safe::contentRect(kSW, kSH, in)));
     f32 ox = 0.0f, oy = 0.0f;
     EXPECT(worstGlyphPenetration(e.ui, ox, oy) <= 2.0f);   // sem sobreposição
+}
+
+// ---------------------------------------------------------------------------
+// F5.2: overlays de armazenamento — diálogo All Files Access, overlay IMPORT,
+// viewer de logs e Settings com modo (taps injetados; a geometria vem das
+// fórmulas partilhadas em ui/EditorLayout.h — o MESMO cálculo do desenho).
+// Env.overlay faz os overlays serem DESENHADOS nos frames (como no main).
+// ---------------------------------------------------------------------------
+
+namespace {
+// fecha o gesto (tap completo) num rect
+void tapAt(Env& e, f32 x, f32 y) {
+    e.input.injectDown(0, x, y);
+    e.frame();
+    e.input.injectUp(0);
+    e.frame();
+}
+} // namespace
+
+// DIÁLOGO: toque fora fecha; "Permitir" → 1; "Cancelar" → 2
+TEST(ui_storage_dialogo_permitir_cancelar_fora) {
+    Env e(false, false);
+    EXPECT(e.ok);
+    e.overlay = 1;
+
+    // 1) toque fora (canto superior esquerdo, na toolbar) → fecha sem ação
+    e.st.storageDialog = true;
+    e.frame();   // 1º frame: desenha o diálogo (o gesto ainda não nasceu)
+    tapAt(e, 40.0f, 40.0f);
+    EXPECT(e.st.storageDialog == false);
+
+    // 2) "Permitir" → devolve 1 no frame do release
+    const UiRect dlg = centeredMenuRect(0.0f, 0.0f, kSW, kSH, storageDialogHeight());
+    UiRect allow{}, cancel{};
+    storageDialogButtons(dlg, allow, cancel);
+
+    e.st.storageDialog = true;
+    e.frame();
+    e.input.injectDown(0, allow.x + allow.w * 0.5f, allow.y + allow.h * 0.5f);
+    e.frame();          // press: botão reclama o gesto
+    e.input.injectUp(0);
+    e.frame();          // release: botão dispara DENTRO do drawStorageDialog
+    EXPECT(e.st.storageDialog == false);   // o frame de release fechou o diálogo
+
+    // valor devolvido 1 (Permitir): dois ciclos dentro do MESMO beginFrame
+    {
+        e.ui.beginFrame(nullptr, &e.input, kSW, kSH);
+        EditorState st2;
+        st2.storageDialog = true;
+        e.input.injectDown(0, allow.x + allow.w * 0.5f, allow.y + allow.h * 0.5f);
+        drawStorageDialog(e.ui, e.input, kSW, kSH, st2);   // press
+        e.input.injectUp(0);
+        const int v = drawStorageDialog(e.ui, e.input, kSW, kSH, st2);   // release
+        e.ui.endFrame();
+        e.input.clearEdges();
+        EXPECT(v == 1);
+        EXPECT(st2.storageDialog == false);
+    }
+
+    // 3) "Cancelar" → devolve 2 (mesmo padrão)
+    {
+        e.ui.beginFrame(nullptr, &e.input, kSW, kSH);
+        EditorState st3;
+        st3.storageDialog = true;
+        e.input.injectDown(0, cancel.x + cancel.w * 0.5f, cancel.y + cancel.h * 0.5f);
+        drawStorageDialog(e.ui, e.input, kSW, kSH, st3);
+        e.input.injectUp(0);
+        const int v = drawStorageDialog(e.ui, e.input, kSW, kSH, st3);
+        e.ui.endFrame();
+        e.input.clearEdges();
+        EXPECT(v == 2);
+        EXPECT(st3.storageDialog == false);
+    }
+}
+
+// IMPORT: pick devolve i+1; vazio mantém aberta e devolve 0
+TEST(ui_import_overlay_pick_e_vazio) {
+    Env e(false, false);
+    EXPECT(e.ok);
+    e.overlay = 2;
+
+    std::vector<fileapi::Candidate> cands;
+    for (int i = 0; i < 3; ++i) {
+        fileapi::Candidate c;
+        c.name = "casa" + std::to_string(i) + ".obj";
+        c.path = "/Download/" + c.name;
+        c.kind = 'm';
+        cands.push_back(c);
+    }
+    cands.push_back({"madeira.png", "/Download/madeira.png", 't'});
+    e.importCands = cands;
+
+    const f32 h = importMenuHeight(5);
+    const f32 x = (kSW - kMenuW) * 0.5f;
+    const f32 y = (kSH - h) * 0.5f;
+
+    // tap na 2ª linha → o drawImportMenu do release devolve 2 (2 ciclos no
+    // MESMO beginFrame: press → release)
+    const UiRect row1 = importRowRect({x, y, kMenuW, h}, 1);
+    {
+        e.ui.beginFrame(nullptr, &e.input, kSW, kSH);
+        EditorState st2;
+        st2.importMenu = true;
+        e.input.injectDown(0, row1.x + 20.0f, row1.y + 20.0f);
+        drawImportMenu(e.ui, e.input, kSW, kSH, st2, cands);
+        e.input.injectUp(0);
+        const int v = drawImportMenu(e.ui, e.input, kSW, kSH, st2, cands);
+        e.ui.endFrame();
+        e.input.clearEdges();
+        EXPECT(v == 2);
+        EXPECT(st2.importMenu == false);
+    }
+
+    // vazio → devolve 0 e o tap DENTRO não fecha
+    std::vector<fileapi::Candidate> none;
+    e.importCands = none;
+    e.st.importMenu = true;
+    e.frame();
+    tapAt(e, x + kMenuW * 0.5f, y + h * 0.5f);
+    EXPECT(e.st.importMenu == true);
+
+    // toque FORA fecha
+    tapAt(e, 40.0f, 40.0f);
+    EXPECT(e.st.importMenu == false);
+}
+
+// LOG VIEWER: auto-scroll para o fundo no 1º frame + drag revela/clampa no fim
+TEST(ui_log_viewer_scroll_e_autoscroll_fundo) {
+    Env e(false, false);
+    EXPECT(e.ok);
+    e.overlay = 3;
+
+    std::vector<std::string> lines;
+    for (int i = 0; i < 60; ++i) {
+        char b[48];
+        std::snprintf(b, sizeof(b), "%02d-29 10:00:00.000 I/GONI: linha-%02d", 9, i);
+        lines.emplace_back(b);
+    }
+    e.logLines = lines;
+    e.logDumps = {"crash-300.dump - signal: SIGSEGV (11)"};
+
+    // geometria do painel (86% × 80% da área útil) + conteúdo real
+    const f32 w = kSW * 0.86f, h = kSH * 0.80f;
+    const f32 x = (kSW - w) * 0.5f, y = (kSH - h) * 0.5f;
+    const f32 listTop = y + kHeaderH;
+    const f32 regionH = h - kHeaderH;
+    const TextMetrics tm = e.ui.textMetrics();
+    const f32 rowH = tm.block() + 6.0f;
+    const f32 contentH = 34.0f + 60.0f * rowH + (34.0f + 1.0f * rowH);
+    EXPECT(contentH > regionH);   // tem de transbordar
+
+    // 1º frame com justOpened → offset = contentH cru (set após endScroll);
+    // o 2º frame clampa para o MÁXIMO da região — fundo visível
+    e.st.logViewer = true;
+    e.st.logViewerJustOpened = true;
+    e.frame();
+    e.frame();
+    EXPECT(nearEqF(e.ui.scrollOffsetForTest(kLogsScrollId),
+                   scroll::maxOffset(contentH, regionH), 0.5f));
+
+    // drag para cima a partir do fundo: fica no máximo (clamp)
+    e.input.injectDown(0, x + w * 0.5f, y + h * 0.8f);
+    e.frame();
+    e.input.injectMove(0, x + w * 0.5f, y - 500.0f);
+    e.frame();
+    e.input.injectUp(0);
+    e.frame();
+    EXPECT(nearEqF(e.ui.scrollOffsetForTest(kLogsScrollId),
+                   scroll::maxOffset(contentH, regionH), 0.5f));
+
+    // a ÚLTIMA linha fica inteira dentro da região com esse offset
+    const f32 lastTop = listTop + contentH -
+                        e.ui.scrollOffsetForTest(kLogsScrollId);
+    EXPECT(lastTop <= listTop + regionH + 0.01f);
+
+    // botão "fechar" (topo direito do painel) fecha o viewer
+    tapAt(e, x + w - kPad - 48.0f, y + 22.0f);
+    EXPECT(e.st.logViewer == false);
+}
+
+// SETTINGS: modo visível, 3 itens com devolução 1/2/3 — faixa de ids 4400+
+// (sem colisão com o "+" da Hierarchy id 40 no MESMO frame)
+TEST(ui_settings_menu_modo_e_tres_itens) {
+    Env e(false, false);
+    EXPECT(e.ok);
+    e.overlay = 4;
+    e.modeText = "all files";
+
+    e.st.settingsMenu = true;
+    e.frame();   // settings sobre o editor completo
+    f32 ox = 0.0f, oy = 0.0f;
+    EXPECT(worstGlyphPenetration(e.ui, ox, oy) <= 2.0f);   // sem sobreposição
+
+    // rects dos 3 itens (formula do drawSettingsMenu)
+    const f32 modeH = 30.0f;
+    const f32 h = kHeaderH + modeH + 3.0f * 64.0f + kPad;
+    const f32 x = (kSW - kMenuW) * 0.5f;
+    const f32 y = (kSH - h) * 0.5f;
+    const f32 itemsTop = y + kHeaderH + modeH;
+
+    for (int i = 0; i < 3; ++i) {
+        e.st.settingsMenu = true;
+        e.frame();
+        e.input.injectDown(0, x + kMenuW * 0.5f,
+                           itemsTop + static_cast<f32>(i) * 64.0f + 28.0f);
+        e.frame();
+        e.input.injectUp(0);
+        e.frame();
+        // devolução ANTES de fechar (st mutado no frame de release): reabre
+        // e valida o valor com o gesto consumido — o mesmo padrão dos outros
+        e.ui.beginFrame(nullptr, &e.input, kSW, kSH);
+        EditorState st2;
+        st2.settingsMenu = true;
+        const int v = drawSettingsMenu(e.ui, e.input, kSW, kSH, st2, "all files");
+        e.ui.endFrame();
+        e.input.clearEdges();
+        e.input.injectUp(0);
+        if (i == 0) {
+            EXPECT(v == 0);   // gesto já consumido pelo frame anterior
+            EXPECT(e.st.settingsMenu == false);   // o frame anterior fechou
+        }
+    }
+    // devoluções DIRETAS dos 3 itens (gestos limpos, um por vez)
+    for (int i = 0; i < 3; ++i) {
+        e.ui.beginFrame(nullptr, &e.input, kSW, kSH);
+        EditorState st2;
+        st2.settingsMenu = true;
+        e.input.injectDown(0, x + kMenuW * 0.5f,
+                           itemsTop + static_cast<f32>(i) * 64.0f + 28.0f);
+        // press processado na 1ª chamada; release na 2ª
+        drawSettingsMenu(e.ui, e.input, kSW, kSH, st2, "all files");
+        e.input.injectUp(0);
+        const int v = drawSettingsMenu(e.ui, e.input, kSW, kSH, st2, "all files");
+        e.ui.endFrame();
+        e.input.clearEdges();
+        EXPECT(v == i + 1);
+        EXPECT(st2.settingsMenu == false);
+    }
 }

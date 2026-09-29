@@ -321,6 +321,17 @@ bool UiContext::scrollTap(u64 id, f32& x, f32& y) {
     return true;
 }
 
+// F5.2: offset por id (viewer de logs salta para o fundo ao abrir) — o
+// valor cru fica no slot; beginScroll clampa contra o contentH da região.
+void UiContext::scrollSetOffset(u64 id, f32 offset) {
+    for (u32 i = 0; i < kMaxScrollSlots; ++i) {
+        if (scrollSlots_[i].used && scrollSlots_[i].id == id) {
+            scrollSlots_[i].st.offset = offset;
+            return;
+        }
+    }
+}
+
 void UiContext::toolbar(bool outClicks[3]) {
     static const char* kNames[3] = { "Menu", "Play", "Settings" };
 
