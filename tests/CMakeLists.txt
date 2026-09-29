@@ -14,6 +14,7 @@ add_executable(test_core
         test_import_obj.cpp
         test_resources.cpp
         test_import_gltf.cpp
+        test_assets.cpp
         test_storage.cpp
         test_safearea.cpp
         test_textfit.cpp
@@ -47,6 +48,7 @@ add_executable(test_core
         ${CORE_DIR}/assets/ResourceManager.cpp
         ${CORE_DIR}/assets/GltfImporter.cpp
         ${CORE_DIR}/assets/GltfInstantiate.cpp
+        ${CORE_DIR}/assets/PngLoader.cpp
         ${CORE_DIR}/core/TransformSystem.cpp
         # GL-free (cubo e câmara são lógica pura — sem contexto OpenGL)
         ${CORE_DIR}/render/Cube.cpp
@@ -59,6 +61,11 @@ add_executable(test_core
 
 
 target_include_directories(test_core PRIVATE ${CORE_DIR})
+
+# fixtures PNG p/ test_assets (caminho absoluto injetado — ctest roda no
+# diretório de build, o caminho relativo não serviria)
+target_compile_definitions(test_core PRIVATE
+        FIXTURE_DIR="${CMAKE_CURRENT_LIST_DIR}/fixtures")
 
 enable_testing()
 add_test(NAME core COMMAND test_core)
