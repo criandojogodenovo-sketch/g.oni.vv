@@ -1,10 +1,47 @@
-# G.One VV 0.4.2 — F4.2
+# G.One VV 0.5.0 — F5 (projeto .goni + assets)
 
-Engine com editor. A F2 deixou o pipeline 3D mínimo (cubo hardcoded, câmara de
-orbit, grid com fade); a F3 transformou os TIC em entidades reais com
-componentes, presets de criação, editor (Hierarchy + Inspector) e serialização
-de cena `.goni` com migrações. Mobile-first: arm64-v8a, minSdk 24, landscape
-travado (`sensorLandscape`). Device de teste: Realme C33 (720x1600).
+Engine com editor e AGORA com projeto e assets. A F5 trouxe o formato de
+projeto `.goni` (pasta com manifesto, cenas, meshes e texturas), importadores
+OBJ/glTF/GLB, loader de PNG com mipmaps, export (cena + OBJ round-trip),
+ResourceManager com cache e editor que aceita assets importados. Mobile-first:
+arm64-v8a, minSdk 24, landscape travado (`sensorLandscape`). Device de teste:
+Realme C33 (720x1600).
+
+## Escopo F5 (implementado)
+- **Projeto e storage (F5-A)**: `core/ProjectStorage` (interface única —
+  F5.2/SAF entra como outra implementação) + `core/FsStorage` (POSIX; no
+  device a raiz é `getExternalFilesDir()`, sem permissões) + `core/Project`
+  (manifesto `project.goni`: nome/versão/cenas/settings verbatim; refs
+  RELATIVOS; `scenes/` `meshes/` `textures/`). Boot abre o projeto existente
+  ou cria "projeto"; a cena ativa volta do disco a cada arranque; Menu
+  Save/Load opera no projeto. Guarda de caminhos: `../`, absoluto e `//`
+  recusados em toda a interface.
+- **Import OBJ (F5-B)**: `assets/ObjImporter` (v/vn/vt, todas as formas de
+  canto, fan de polígonos, dedup de cantos, grupos g/o + usemtl com ranges,
+  índices negativos, CRLF, limite u16 sobre vértices ÚNICOS) +
+  `assets/ObjExporter` (round-trip testado) + `assets/ResourceManager`
+  (cache CPU por ref: 1 carga, ponteiro estável).
+- **Import glTF/GLB (F5-C)**: `assets/GltfImporter` — accessors
+  bounds-checked (POSITION/NORMAL/TEXCOORD_0, índices u8/u16/u32),
+  bufferViews com byteStride, data URIs base64, buffers externos relativos à
+  pasta do .gltf, container GLB validado, materiais básicos (name +
+  baseColorFactor), nós → hierarquia (TRS). `assets/GltfInstantiate` cria
+  TICs com parent/Transform3D/MeshRenderer com ref `path#i`.
+- **Texturas (F5-D)**: `assets/PngLoader` (stb_image vendor, RGBA 8-bit) com
+  gate 1K/2K OK, 4K+ reduzido para 2K com aviso; `assets/TextureCompressor`
+  (interface; passthrough na F5 — ASTC/ETC2 é F5.1); `render/Texture`
+  (glTexImage2D + glGenerateMipmap, LINEAR_MIPMAP_LINEAR, REPEAT).
+- **Export + editor (F5-E)**: Menu ganha "Export OBJ" (mesh do TIC →
+  `meshes/export_<tic>.obj`); Inspector mostra `mesh:`/`tex:` com a origem do
+  asset e abre SELETORES de `meshes/` e `textures/`; status line mostra
+  objetos de GPU (`am`/`at`); `render/GpuAssets` garante 1 ref = 1 objeto GL
+  (memória de GPU não duplica); `MeshRenderer` persiste `meshPath`/`texPath`
+  no `.goni` com resolvers no load.
+- CI: parsers OBJ/glTF/GLB, round-trip, cache, caminhos relativos e gate 4K
+  cobertos por testes (196 no total).
+
+Sem skinning/animação (F7), sem editor de materiais (F8), sem streaming (F9),
+sem compressão ASTC/ETC2 (F5.1), sem SAF (F5.2) — CLÁUSULA CALMA.
 
 ## Escopo F4.2 (implementado)
 Três bugs vistos no C33, corrigidos com CLÁUSULA CALMA (só layout/UiContext/
@@ -120,6 +157,11 @@ Sem física (BodyComp é F4), sem luzes, sem assets, sem animação, sem linguag
 (CLÁUSULA CALMA).
 
 ## Histórico
+- **F5 (0.5.0)**: projeto `.goni` com pasta (manifesto + scenes/meshes/
+  textures, refs relativos, reopen persistente), import OBJ e glTF/GLB
+  (hierarquia + materiais básicos), PNG com mipmaps e gate 4K→2K, export
+  cena/.goni + OBJ round-trip, ResourceManager com cache (CPU e GPU sem
+  duplicação), seletores de assets no Inspector; 196 testes.
 - **F4.2 (0.4.2)**: correções do device — safe-area do sistema (scroll do
   Inspector ativa com a nav bar contabilizada), truncagem de labels com
   ellipsis e sandbox do Play (pose de editor restaurada ao sair); 135 testes.
@@ -142,7 +184,7 @@ Sem física (BodyComp é F4), sem luzes, sem assets, sem animação, sem linguag
    → o job **init-keystore** gera o artifact `vv-release-keystore` (baixe e guarde OFFLINE).
 2. `base64 -w0 vv-release.jks` → configure os secrets:
    `VV_KEYSTORE` (base64), `VV_STORE_PW`, `VV_KEY_ALIAS`, `VV_KEY_PW`.
-3. Todo push publica o artifact `goni-vv-0.4.2-release-signed` (APK arm64).
+3. Todo push publica o artifact `goni-vv-0.5.0-release-signed` (APK arm64).
    Sem secrets: sai `-UNSIGNED` (nunca debug).
 
 Trocar a keystore muda a assinatura — exige desinstalar/reinstalar no device.
@@ -152,6 +194,27 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
 
 ## Testes do core (Linux)
 `cmake -S tests -B build-tests && cmake --build build-tests && ctest --test-dir build-tests`
+
+## Verificação no Realme C33 (dono) — F5 (projeto + assets)
+1. Instalar o APK 0.5.0 → confirmar "0.5.0" nas infos da app.
+2. **Projeto**: primeiro arranque cria a estrutura
+   (`adb shell ls /sdcard/Android/data/<pkg>/files/` → `project.goni`,
+   `scenes/`, `meshes/`, `textures/`); criar TICs → Menu → Save cena →
+   fechar a app → reabrir → os TICs VOLVEM (cena ativa do projeto).
+3. **Import**: `adb push esfera.obj /sdcard/Android/data/<pkg>/files/meshes/`
+   e `adb push madeira.png .../textures/` → abrir a app → selecionar um TIC →
+   no Inspector tocar em `mesh: cube` → escolher `esfera.obj` no seletor →
+   o mesh importa e renderiza num TIC; tocar em `tex: none` → escolher
+   `madeira.png` → a textura aplica no material.
+4. **Gate 4K**: empurrar uma textura 4096×4096 → ao aplicar aparece o toast
+   "textura 4096x4096 reduzida para 2048x2048 (gate 2K; compressao real =
+   F5.1)" (1× por carga).
+5. **Export**: selecionar o TIC com asset → Menu → Export OBJ → toast
+   `export: meshes/export_<nome>.obj`; `adb shell ls .../meshes/` confirma.
+6. **Cache de GPU**: dois TICs com o MESMO asset → status line mostra
+   `am 1` (um objeto de GL, não dois).
+7. **Regressões**: safe-area/scroll/labels/sandbox da F4.2 continuam
+   funcionando; física continua só no Play; tema mono, 3 botões, landscape.
 
 ## Verificação no Realme C33 (dono) — F4.2 (safe-area + labels + sandbox)
 1. Instalar o APK 0.4.2 → confirmar "0.4.2" nas infos da app.

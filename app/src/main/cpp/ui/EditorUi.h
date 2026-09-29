@@ -27,6 +27,11 @@
 // de android_app->contentRect). Com a altura real dos painéis, o overflow do
 // Inspector é detetado e o scroll ativa no C33 (B1); gestos atrás da nav bar
 // não orbitam a câmara (centerRect com insets).
+//
+// F5-E: ASSETS — o Inspector mostra a origem do MeshRenderer (mesh/tex) e
+// abre seletores (overlay mono) com o conteúdo de meshes/ e textures/ do
+// projeto; o Menu ganha "Export OBJ" (mesh do TIC selecionado → meshes/).
+// O catálogo (listas de nomes) é refresh pelo main a partir do ProjectStorage.
 #include "core/Handle.h"
 #include "ui/UiContext.h"
 #include "ui/EditorLayout.h"
@@ -42,10 +47,20 @@ namespace editor {
 // re-export: a largura dos painéis agora vive em ui/SafeArea.h (fonte única)
 constexpr f32 kPanelW = safe::kPanelW;
 
+// F5-E: catálogo de assets do projeto (nomes DENTRO de meshes/ e textures/,
+// ordenados — o main faz listDir no storage; vazio = pasta sem assets).
+// Nota F5: sem scroll no seletor (lista capada) — mais assets = F8.
+struct AssetCatalog {
+    std::vector<std::string> meshes;     // nomes de ficheiros ("quad.obj")
+    std::vector<std::string> textures;   // nomes de ficheiros ("wood.png")
+};
+
 struct EditorState {
     Handle selected = Handle::invalid();   // TIC selecionado na Hierarchy
     bool   plusMenu = false;               // overlay de criação aberto
     bool   fileMenu = false;               // overlay Menu (Save/Load) aberto
+    int    assetMenu = 0;                  // F5-E: 0 fechado; 1 = seletor mesh;
+                                           //       2 = seletor textura
 };
 
 // Rect do viewport central (entre os painéis) — usado para o gate da câmara.
@@ -60,11 +75,15 @@ UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in);
 bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st);
 
 // Painel direito: componentes do TIC selecionado COM SCROLL — Transform3D
-// com 9 sliders (pos/rot graus/scale), MeshRenderer, InputMap, BodyComp
-// (tipo·forma·chão + velx) e botão "add TouchControls" no fundo, sempre
-// alcançável. Já atualiza tr->updateWorld() ao editar.
+// com 9 sliders (pos/rot graus/scale), MeshRenderer (mesh + tex com seletor
+// de assets, F5-E), InputMap, BodyComp (tipo·forma·chão + velx) e botão
+// "add TouchControls" no fundo, sempre alcançável. Já atualiza
+// tr->updateWorld() ao editar.
+// `catalog` (não-dono, pode ser null) habilita os SELETORES: sem catálogo as
+// linhas de mesh/tex são só leitura (modo degradação, usado nos testes).
 // Devolve true se algum slider alterou valores neste frame.
-bool drawInspector(UiContext& ui, Scene& scene, EditorState& st);
+bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
+                   const AssetCatalog* catalog = nullptr);
 
 // F4: controlos de toque (só em modo Play, só se algum TIC ativo tem o
 // componente) — joystick quadrado + botão JUMP no quad batch, tema mono.
@@ -76,10 +95,15 @@ void drawTouchControls(UiContext& ui, const TouchControls& tc, f32 sw, f32 sh);
 // Overlays. Devolvem a escolha do frame:
 //   drawPlusMenu → 0 nada, 1..4 = PresetKind (1=Player, 2=Character,
 //                  3=Static, 4=Rigid)
-//   drawFileMenu → 0 nada, 1 = save, 2 = load
-// Ambos fecham com toque fora do painel (mutam st) e centrados na safe-area.
+//   drawFileMenu → 0 nada, 1 = save, 2 = load, 3 = export OBJ (F5-E)
+//   drawAssetMenu → 0 nada; >0 = item 1-based do seletor ativo
+//                    (st.assetMenu: 1 = meshes → 1 = "cube", 2.. = ficheiros;
+//                     2 = texturas → 1 = "none", 2.. = ficheiros)
+// Todos fecham com toque fora do painel (mutam st) e centrados na safe-area.
 int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st);
 int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st);
+int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st,
+                  const AssetCatalog& catalog);
 
 } // namespace editor
 

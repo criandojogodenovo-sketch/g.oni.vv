@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <memory>
 
+#include "assets/ObjExporter.h"
 #include "components/MeshRenderer.h"
 #include "components/TouchControls.h"
 #include "components/Transform3D.h"
@@ -84,6 +85,12 @@ bool       g_projectReady = false;   // storage + projeto com cena válida
 ResourceManager g_resources;
 GpuAssets       g_gpu;
 
+// F5-E: catálogo de assets p/ os seletores do Inspector (refresh ao abrir)
+editor::AssetCatalog g_catalog;
+int                  g_prevAssetMenu = 0;
+
+char g_selectedName[40] = "";   // nome do TIC p/ o ficheiro de export
+
 // estado do touch → câmara (entre frames)
 bool g_orbitActive = false;
 f32  g_orbitX = 0.0f;
@@ -119,6 +126,51 @@ void applyContentRect(android_app* app) {
          "insets L%.0f T%.0f R%.0f B%.0f",
          (int)sw, (int)sh, cr.left, cr.top, cr.right, cr.bottom,
          (double)ins.left, (double)ins.top, (double)ins.right, (double)ins.bottom);
+}
+
+// F5-E: atualiza o catálogo (listDir nas pastas do projeto, filtro por ext.)
+void refreshCatalog() {
+    g_catalog.meshes.clear();
+    g_catalog.textures.clear();
+    if (!g_storage) {
+        return;
+    }
+    std::vector<std::string> files;
+    if (g_storage->listDir(Project::kDirMeshes, files)) {
+        for (const std::string& f : files) {
+            const size_t dot = f.rfind('.');
+            const std::string ext = dot == std::string::npos ? "" : f.substr(dot + 1);
+            if (ext == "obj" || ext == "gltf" || ext == "glb" ||
+                ext == "OBJ" || ext == "glTF" || ext == "GLB") {
+                g_catalog.meshes.push_back(f);
+            }
+        }
+    }
+    files.clear();
+    if (g_storage->listDir(Project::kDirTextures, files)) {
+        for (const std::string& f : files) {
+            const size_t dot = f.rfind('.');
+            const std::string ext = dot == std::string::npos ? "" : f.substr(dot + 1);
+            if (ext == "png" || ext == "PNG") {
+                g_catalog.textures.push_back(f);
+            }
+        }
+    }
+}
+
+// F5-E: MeshData do cubo procedural (export do TIC sem asset importado)
+MeshData cubeToMeshData() {
+    const CubeMeshData c = makeCube(1.0f);
+    MeshData m;
+    m.name = "cube";
+    m.vertices.assign(c.vertices.begin(), c.vertices.end());
+    m.indices.assign(c.indices.begin(), c.indices.end());
+    MeshData::Group g;
+    g.name = "cube";
+    g.firstIndex = 0;
+    g.indexCount = static_cast<u32>(m.indices.size());
+    m.groups.push_back(g);
+    return m;
 }
 
 // F5-E: LoadCtx canônico do device — resolvers ligam refs relativas aos
@@ -461,12 +513,18 @@ void frame() {
     }
     if (clicks[2]) { LOGI("ui: botão Settings"); }
 
+    // F5-E: catálogo dos seletores — refresh quando um seletor ABRE
+    if (g_editor.assetMenu != 0 && g_editor.assetMenu != g_prevAssetMenu) {
+        refreshCatalog();
+    }
+    g_prevAssetMenu = g_editor.assetMenu;
+
     // F3: painéis do editor (Hierarquia esquerda, Inspector direita)
     if (editor::drawHierarchy(g_ui, g_scene, g_editor)) {
         g_editor.plusMenu = true;   // "+" no cabeçalho abre os presets
         g_editor.fileMenu = false;
     }
-    editor::drawInspector(g_ui, g_scene, g_editor);   // sliders editam o Transform3D
+    editor::drawInspector(g_ui, g_scene, g_editor, &g_catalog);   // sliders + seletores
 
     // overlay "+" → presets (cria e seleciona)
     if (g_editor.plusMenu) {
@@ -481,6 +539,53 @@ void frame() {
                 std::snprintf(msg, sizeof(msg), "%s criado", presetName(kind));
                 showToast(msg);
                 LOGI("editor: %s criado", presetName(kind));
+            }
+        }
+    }
+
+    // F5-E: seletor de assets aberto → aplica no MeshRenderer selecionado
+    if (g_editor.assetMenu != 0) {
+        const int pick = editor::drawAssetMenu(g_ui, g_input, w, h, g_editor, g_catalog);
+        if (pick > 0) {
+            Tic* tsel = g_scene.get(g_editor.selected);
+            MeshRenderer* mrs = tsel ? tsel->getComponent<MeshRenderer>() : nullptr;
+            if (mrs && g_editor.assetMenu == 1) {
+                if (pick == 1) {   // cube procedural
+                    mrs->mesh = &g_cubeMesh;
+                    mrs->material = g_renderer.litMaterial();
+                    mrs->meshPath.clear();
+                    showToast("mesh: cube");
+                } else {
+                    const std::string rel =
+                        std::string("meshes/") + g_catalog.meshes[static_cast<size_t>(pick - 2)];
+                    if (Mesh* m = g_gpu.mesh(rel)) {
+                        mrs->mesh = m;
+                        mrs->material = g_renderer.litMaterial();
+                        mrs->meshPath = rel;
+                        showToast("mesh aplicado");
+                        LOGI("editor: mesh %s aplicado", rel.c_str());
+                    } else {
+                        showToast("falha ao carregar mesh");
+                    }
+                }
+            } else if (mrs && g_editor.assetMenu == 2) {
+                if (pick == 1) {   // none
+                    mrs->texture = nullptr;
+                    mrs->texPath.clear();
+                    showToast("tex: none");
+                } else {
+                    const std::string rel =
+                        std::string("textures/") + g_catalog.textures[static_cast<size_t>(pick - 2)];
+                    std::string warn;
+                    if (const Texture* tex = g_gpu.texture(rel, &warn)) {
+                        mrs->texture = tex;
+                        mrs->texPath = rel;
+                        showToast(warn.empty() ? "textura aplicada" : warn.c_str());
+                        LOGI("editor: textura %s aplicada", rel.c_str());
+                    } else {
+                        showToast("falha ao carregar textura");
+                    }
+                }
             }
         }
     }
@@ -511,6 +616,43 @@ void frame() {
             showToast(msg);
             g_editor.selected = Handle::invalid();   // seleção antiga não sobrevive ao load
             LOGI("editor: %s ← %s", msg, g_project.activeScenePath()->c_str());
+        } else if (choice == 3 && g_projectReady) {
+            // F5-E: Export OBJ — mesh do TIC selecionado → meshes/export_<nome>.obj
+            Tic* tsel = g_scene.get(g_editor.selected);
+            MeshRenderer* mrs = tsel ? tsel->getComponent<MeshRenderer>() : nullptr;
+            if (!mrs) {
+                showToast("selecione um TIC com mesh");
+            } else {
+                std::string err;
+                const MeshData* src = nullptr;
+                MeshData cubeCopy;
+                if (!mrs->meshPath.empty()) {
+                    src = g_resources.mesh(mrs->meshPath, err);
+                } else if (mrs->mesh == &g_cubeMesh) {
+                    cubeCopy = cubeToMeshData();
+                    src = &cubeCopy;
+                }
+                if (!src || !src->ok()) {
+                    showToast("mesh não disponível p/ export");
+                } else {
+                    std::snprintf(g_selectedName, sizeof(g_selectedName), "%.30s",
+                                  tsel->name.c_str());
+                    std::string outName = "export_" + std::string(g_selectedName) + ".obj";
+                    for (char& c : outName) {
+                        if (c == '/' || c == '\\' || c == ':' || c == '#') c = '_';
+                    }
+                    const std::string rel =
+                        std::string(Project::kDirMeshes) + "/" + outName;
+                    if (g_storage->writeText(rel, exportObj(*src))) {
+                        char msg[96];
+                        std::snprintf(msg, sizeof(msg), "export: %s", rel.c_str());
+                        showToast(msg);
+                        LOGI("editor: export OBJ → %s", rel.c_str());
+                    } else {
+                        showToast("falha ao exportar OBJ");
+                    }
+                }
+            }
         }
     }
 
@@ -519,10 +661,12 @@ void frame() {
     // status line inferior: fps + TICs + vértices desenhados + draw calls
     // (parte da UI usa as métricas do frame anterior — lag de 1 frame)
     const DrawStats total = st3d + stGrid + g_lastUiStats;
-    char status[96];
-    std::snprintf(status, sizeof(status), "fps %d  tics %u  verts %u  dc %u",
+    char status[112];
+    std::snprintf(status, sizeof(status),
+                  "fps %d  tics %u  verts %u  dc %u  am %u at %u",
                   static_cast<int>(g_fps + 0.5f), g_scene.count(),
-                  total.vertices, total.drawCalls);
+                  total.vertices, total.drawCalls,
+                  g_gpu.meshCount(), g_gpu.textureCount());
     g_ui.statusLine(status);
 
     g_ui.endFrame();                       // submete solids + glyphs
@@ -569,7 +713,7 @@ void android_main(android_app* app) {
 
     app->onAppCmd = onAppCmd;
     app->onInputEvent = onInputEvent;
-    LOGI("G.One VV 0.4.2 — F4.2 (safe-area + labels + sandbox do Play)");
+    LOGI("G.One VV 0.5.0 — F5 (projeto .goni + import OBJ/glTF/GLB + texturas + export + cache)");
 
     double last = nowSeconds();
     while (true) {

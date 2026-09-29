@@ -38,7 +38,7 @@ inline f32 inspectorContentHeight(const Tic& tic) {
         cy += 26.0f + 9.0f * kSliderRow;           // cabeçalho + 9 sliders
     }
     if (tic.getComponent<MeshRenderer>()) {
-        cy += 26.0f;                               // mesh: cube
+        cy += 26.0f + 26.0f;                       // mesh: origem + tex (F5-E)
     }
     if (tic.getComponent<InputMap>()) {
         cy += 26.0f;                               // input: fonte
@@ -54,6 +54,16 @@ inline f32 inspectorContentHeight(const Tic& tic) {
         }
     }
     return cy;
+}
+
+// topo (coords de CONTEÚDO) da linha "mesh:" — o tap re-despachado do
+// scroll usa isto p/ abrir o seletor de assets (F5-E); tex = topo + 26.
+inline f32 inspectorMeshTop(const Tic& tic) {
+    f32 cy = 30.0f;                                // nome do TIC
+    if (tic.getComponent<Transform3D>()) {
+        cy += 26.0f + 9.0f * kSliderRow;
+    }
+    return cy + 2.0f;                              // +2 = offset do botão
 }
 
 // topo do botão "add TouchControls" em coords de conteúdo (fundo = topo + 34;

@@ -173,10 +173,10 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     EXPECT(tic->getComponent<InputMap>() != nullptr);
     EXPECT(tic->getComponent<BodyComp>() != nullptr);
 
-    // receita completa do Player: nome 30 + transform 350 + mesh 26 +
-    // input 26 + body 62 + add TouchControls 42 = 536
+    // receita completa do Player: nome 30 + transform 350 + mesh 26 + tex 26
+    // (F5-E) + input 26 + body 62 + add TouchControls 42 = 562
     const f32 contentH = inspectorContentHeight(*tic);
-    EXPECT(nearEqF(contentH, 536.0f));
+    EXPECT(nearEqF(contentH, 562.0f));
 
     // C33 (pior caso: superfície mais baixa que a teórica) — lista 500 px:
     // sem scroll o fundo do botão fica FORA da região (o bug reportado)
@@ -195,7 +195,7 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
 
     // com TouchControls presente o botão dá lugar à label (42 → 26)
     EXPECT(tic->addComponent<TouchControls>() != nullptr);
-    EXPECT(nearEqF(inspectorContentHeight(*tic), 520.0f));
+    EXPECT(nearEqF(inspectorContentHeight(*tic), 546.0f));
 }
 
 TEST(scroll_hierarquia_todos_os_tics_atingeis) {
@@ -236,4 +236,35 @@ TEST(scroll_hierarquia_row_sob_tap) {
     EXPECT(hierarchyRowAtTap(listTop + 15.0f * kRowH, listTop, 0.0f, 14) == -1);
     // lista vazia → sempre -1
     EXPECT(hierarchyRowAtTap(listTop + 10.0f, listTop, 0.0f, 0) == -1);
+}
+
+// ---------------------------------------------------------------------------
+// F5-E: as linhas de mesh/tex do Inspector (seletores de assets) ficam em
+// coords de conteúdo conhecidas — atingíveis com scroll, como o botão do
+// fundo. inspectorMeshTop é a fonte única usada pelo hit-test do tap.
+// ---------------------------------------------------------------------------
+
+TEST(scroll_linhas_mesh_tex_atingiveis_no_scroll) {
+    Scene s;
+    const Handle h = createTicFromPreset(s, PresetKind::PlayerBody3D, nullptr, nullptr);
+    Tic* tic = s.get(h);
+
+    // topo da linha mesh (Player tem Transform3D): nome + transform
+    const f32 meshTop = inspectorMeshTop(*tic);
+    EXPECT(nearEqF(meshTop, 30.0f + 26.0f + 9.0f * 36.0f + 2.0f));
+    const f32 texTop = meshTop + 26.0f;
+    EXPECT(nearEqF(texTop + 26.0f, meshTop + 52.0f));   // blocos adjacentes
+
+    // pior caso C33 (lista 500 px): conteúdo 562 — scroll ativa
+    const f32 contentH = inspectorContentHeight(*tic);
+    const f32 listH = 500.0f;
+    EXPECT(contentH > listH);
+    const f32 off = clampOffset(999.0f, contentH, listH);
+    EXPECT(nearEqF(off, contentH - listH));
+
+    // com o offset no máximo, o topo da linha mesh continua dentro da lista
+    const f32 contentTop = 140.0f;
+    const f32 meshScr = contentTop + meshTop - off;
+    EXPECT(meshScr >= contentTop);
+    EXPECT(meshScr + 26.0f <= contentTop + listH);
 }

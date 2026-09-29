@@ -18,6 +18,9 @@ constexpr u64 kIdRowBase   = 1000;
 constexpr u64 kIdSliderBase = 2000;
 constexpr u64 kIdVelX      = 2100;
 constexpr u64 kIdAddTc     = 3001;
+constexpr u64 kIdMeshSel   = 5001;   // F5-E: linha "mesh: …" abre seletor
+constexpr u64 kIdTexSel    = 5002;   // F5-E: linha "tex: …" abre seletor
+constexpr u64 kIdAssetBase = 6000;   // F5-E: itens do seletor de assets
 constexpr f32 kAddTcH      = 34.0f;   // altura do botão "add TouchControls"
 
 // Toque (edge de press) fora do rect → fecha overlays.
@@ -32,6 +35,12 @@ bool pressedOutside(const InputState& in, f32 x, f32 y, f32 w, f32 h) {
 
 f32 rad2deg(f32 r) { return r * 57.29577951f; }
 f32 deg2rad(f32 d) { return d * 0.01745329252f; }
+
+// nome curto do asset p/ a linha do Inspector (basename da ref)
+const char* assetBasename(const std::string& ref) {
+    const size_t slash = ref.rfind('/');
+    return ref.c_str() + (slash == std::string::npos ? 0 : slash + 1);
+}
 
 // Linha do Inspector: label + slider + valor; aplica em `value` via setter.
 // y já vem em coords de ECRÃ (cy − offset feito pelo chamador).
@@ -142,7 +151,8 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
 // "add TouchControls" no fundo ficam sempre alcançáveis. Slider mantém
 // prioridade de captura; tap re-despachado aciona o botão do fundo.
 // ---------------------------------------------------------------------------
-bool drawInspector(UiContext& ui, Scene& scene, EditorState& st) {
+bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
+                   const AssetCatalog* catalog) {
     // F4.2: painel inteiro dentro do contentRect — a altura REAL alimenta o
     // beginScroll → o overflow do Inspector é detetado e o scroll ativa (B1)
     const UiRect panel = safe::inspectorPanelRect(ui.screenWidth(), ui.screenHeight(),
@@ -227,9 +237,43 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st) {
     }
 
     if (const MeshRenderer* mr = tic->getComponent<MeshRenderer>()) {
-        ui.labelFitted(x + kPad + 12.0f, (cy - off) + 8.0f,
-                       mr->mesh ? "mesh: cube" : "mesh: -", theme::TEXT,
-                       w - 2.0f * kPad - 12.0f);
+        // F5-E: linha mesh com ORIGEM — botão abre o seletor de meshes/
+        // (só desenha dentro do scroll; tap re-despachado no fim)
+        char meshLabel[64];
+        if (!mr->meshPath.empty()) {
+            std::snprintf(meshLabel, sizeof(meshLabel), "mesh: %s",
+                          assetBasename(mr->meshPath));
+        } else {
+            std::snprintf(meshLabel, sizeof(meshLabel), "mesh: %s",
+                          mr->mesh ? "cube" : "-");
+        }
+        const f32 meshTop = cy - off;
+        if (catalog) {
+            ui.button(kIdMeshSel, x + kPad, meshTop + 2.0f, w - 2.0f * kPad,
+                      26.0f, meshLabel);
+        } else {
+            ui.labelFitted(x + kPad + 12.0f, meshTop + 8.0f, meshLabel,
+                           theme::TEXT, w - 2.0f * kPad - 12.0f);
+        }
+        cy += 26.0f;
+
+        // F5-E: linha tex — textura albedo do material (seletor de textures/)
+        char texLabel[64];
+        if (!mr->texPath.empty()) {
+            std::snprintf(texLabel, sizeof(texLabel), "tex: %s",
+                          assetBasename(mr->texPath));
+        } else {
+            std::snprintf(texLabel, sizeof(texLabel), "tex: %s",
+                          mr->texture ? "ligada" : "none");
+        }
+        const f32 texTop = cy - off;
+        if (catalog) {
+            ui.button(kIdTexSel, x + kPad, texTop + 2.0f, w - 2.0f * kPad,
+                      26.0f, texLabel);
+        } else {
+            ui.labelFitted(x + kPad + 12.0f, texTop + 8.0f, texLabel,
+                           theme::TEXT, w - 2.0f * kPad - 12.0f);
+        }
         cy += 26.0f;
     }
 
@@ -285,6 +329,19 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st) {
         if (tx >= x + kPad && tx < x + w - kPad &&
             ty >= btnTop && ty < btnTop + kAddTcH) {
             tic->addComponent<TouchControls>();
+        }
+    }
+
+    // F5-E: tap re-despachado → seletores de mesh/tex (rects em ecrã)
+    if (ui.scrollTap(tx, ty) && catalog) {
+        const f32 meshTopScr = contentTop + inspectorMeshTop(*tic) - off;
+        const f32 texTopScr = meshTopScr + 26.0f;
+        if (tx >= x + kPad && tx < x + w - kPad) {
+            if (ty >= meshTopScr && ty < meshTopScr + 26.0f) {
+                st.assetMenu = 1;
+            } else if (ty >= texTopScr && ty < texTopScr + 26.0f) {
+                st.assetMenu = 2;
+            }
         }
     }
 
@@ -381,7 +438,7 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 
 int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st) {
     const f32 w = kMenuW;
-    const f32 h = kHeaderH + 2.0f * 64.0f + kPad;
+    const f32 h = kHeaderH + 3.0f * 64.0f + kPad;   // F5-E: + Export OBJ
     // F4.2: centrado no viewport ÚTIL (dentro do contentRect)
     const f32 ox = ui.safeLeft();
     const f32 oy = ui.safeTop();
@@ -408,6 +465,74 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     if (ui.button(31, x + kPad, y + kHeaderH + 64.0f, w - 2.0f * kPad, 56.0f, "Load cena")) {
         chosen = 2;
         st.fileMenu = false;
+    }
+    if (ui.button(32, x + kPad, y + kHeaderH + 128.0f, w - 2.0f * kPad, 56.0f,
+                  "Export OBJ")) {
+        chosen = 3;
+        st.fileMenu = false;
+    }
+    return chosen;
+}
+
+// ---------------------------------------------------------------------------
+// F5-E: SELETOR DE ASSETS — overlay mono com "cube/none" + ficheiros de
+// meshes/ ou textures/ (cap 5 ficheiros; sem scroll no overlay — F8).
+// Devolve 1-based (1 = cube/none, 2.. = ficheiros), 0 = nada este frame.
+// ---------------------------------------------------------------------------
+int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                  EditorState& st, const AssetCatalog& catalog) {
+    const bool pickMesh = (st.assetMenu == 1);
+    const std::vector<std::string>& files =
+        pickMesh ? catalog.meshes : catalog.textures;
+
+    // cap de ficheiros no overlay (mono, sem scroll — F8 traz scroll)
+    constexpr size_t kMaxFiles = 5;
+    const size_t shown = files.size() < kMaxFiles ? files.size() : kMaxFiles;
+
+    const f32 w = kMenuW;
+    const f32 h = kHeaderH + (1.0f + static_cast<f32>(shown)) * 48.0f + kPad;
+    const f32 ox = ui.safeLeft();
+    const f32 oy = ui.safeTop();
+    const f32 aw = sw - ox - ui.safeRight();
+    const f32 ah = sh - oy - ui.safeBottom();
+    const f32 x = ox + (aw - w) * 0.5f;
+    const f32 y = oy + (ah - h) * 0.5f;
+
+    if (pressedOutside(in, x, y, w, h)) {
+        st.assetMenu = 0;
+        return 0;
+    }
+
+    ui.panel(x, y, w, h, theme::PANEL);
+    ui.frame(x, y, w, h, 2.0f, theme::ACCENT);
+    const f32 th = ui.fontHeight();
+    ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f,
+             pickMesh ? "MESH" : "TEXTURA", theme::TEXT);
+
+    int chosen = 0;
+    // item 0: cube (mesh) / none (textura)
+    const char* first = pickMesh ? "cube (procedural)" : "none";
+    if (ui.button(kIdAssetBase, x + kPad, y + kHeaderH, w - 2.0f * kPad, 40.0f,
+                  first)) {
+        chosen = 1;
+        st.assetMenu = 0;
+    }
+    for (size_t i = 0; i < shown; ++i) {
+        if (ui.button(kIdAssetBase + 1 + static_cast<u64>(i), x + kPad,
+                      y + kHeaderH + static_cast<f32>(i + 1) * 48.0f,
+                      w - 2.0f * kPad, 40.0f, files[i].c_str())) {
+            chosen = static_cast<int>(i) + 2;
+            st.assetMenu = 0;
+        }
+    }
+    if (files.size() > kMaxFiles) {
+        // aviso mono de cap (sem scroll no overlay)
+        char more[48];
+        std::snprintf(more, sizeof(more), "+%u ficheiros (cap do overlay)",
+                      static_cast<unsigned>(files.size() - kMaxFiles));
+        ui.labelFitted(x + kPad,
+                       y + kHeaderH + static_cast<f32>(shown + 1) * 48.0f + 12.0f,
+                       more, theme::LINE, w - 2.0f * kPad);
     }
     return chosen;
 }
