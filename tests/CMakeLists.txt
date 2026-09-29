@@ -12,6 +12,7 @@ add_executable(test_core
         test_main.cpp
         test_safearea.cpp
         test_textfit.cpp
+        test_play.cpp
         test_scroll.cpp
         test_scene.cpp
         test_time.cpp

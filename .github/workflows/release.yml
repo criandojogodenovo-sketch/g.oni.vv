@@ -38,8 +38,6 @@ jobs:
   build-release:
     name: APK release arm64 (assinado via secrets)
     runs-on: ubuntu-latest
-    outputs:
-      artifact_name: ${{ steps.apk-name.outputs.artifact_name }}
     steps:
       - uses: actions/checkout@v4
 
@@ -92,23 +90,25 @@ jobs:
       - name: Publicar artifact do APK
         uses: actions/upload-artifact@v4
         with:
-          name: goni-vv-0.4.1-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
+          name: goni-vv-0.4.2-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
-
-      - name: Exportar nome do artifact p/ o job de verificação
-        id: apk-name
-        run: echo "artifact_name=goni-vv-0.3.1-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}" >> "$GITHUB_OUTPUT"
 
   verify-entry-symbols:
     name: verify-entry-symbols (gate ANativeActivity_onCreate / android_main)
     needs: build-release
     runs-on: ubuntu-latest
     steps:
+      # F4.2: download por PATTERN — o nome do artifact contém 'vv' (igual ao
+      # secret VV_KEY_ALIAS), e o GitHub DESCARTA outputs que contêm segredo
+      # mascarado ('Skip output since it may contain secret'). Outputs com o
+      # nome do artifact eram silenciosamente esvaziados; com pattern o job
+      # é robusto ao mascaramento e a mudanças de versão.
       - name: Baixar APK release
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.build-release.outputs.artifact_name }}
+          pattern: '*-release*'
+          merge-multiple: true
           path: apk
 
       - name: Extrair libgoni_vv.so do APK (arm64-v8a)

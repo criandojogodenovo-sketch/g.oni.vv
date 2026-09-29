@@ -11,6 +11,7 @@
 #include "components/MeshRenderer.h"
 #include "components/TouchControls.h"
 #include "components/Transform3D.h"
+#include "core/PlaySnapshot.h"
 #include "core/Presets.h"
 #include "core/Scene.h"
 #include "core/SceneSerializer.h"
@@ -58,6 +59,9 @@ TransformSystem     g_transformSystem;
 // ---- F4: física + modo Play ------------------------------------------------
 phys::PhysicsSystem g_physics;       // TickGroup::Physics (só avança em Play)
 bool                g_playMode = false;   // botão Play da toolbar liga/desliga
+// F4.2/B3: sandbox do Play — pose de editor capturada ao ENTRAR, restaurada
+// ao SAIR (a simulação é descartada; a física continua a correr só no Play)
+PlaySnapshot        g_playSnap;
 
 char g_scenePath[512] = "";          // <internalDataPath>/scene.goni
 
@@ -384,8 +388,19 @@ void frame() {
     }
     if (clicks[1]) {
         g_playMode = !g_playMode;                 // F4: Play liga/desliga a simulação
+        if (g_playMode) {
+            // F4.2/B3: ENTRAR → snapshot da pose de editor
+            playSnapshotCapture(g_scene, g_playSnap);
+            LOGI("ui: modo play — snapshot de %u transforms / %u bodies",
+                 (unsigned)g_playSnap.transforms.size(),
+                 (unsigned)g_playSnap.bodies.size());
+        } else {
+            // F4.2/B3: SAIR → repõe a pose de editor e descarta a simulação
+            playSnapshotRestore(g_scene, g_playSnap);
+            LOGI("ui: modo editor — pose restaurada (%u transforms)",
+                 (unsigned)g_playSnap.transforms.size());
+        }
         showToast(g_playMode ? "modo play" : "modo editor");
-        LOGI("ui: modo %s", g_playMode ? "play (física ativa)" : "editor");
     }
     if (clicks[2]) { LOGI("ui: botão Settings"); }
 
@@ -477,7 +492,7 @@ void android_main(android_app* app) {
 
     app->onAppCmd = onAppCmd;
     app->onInputEvent = onInputEvent;
-    LOGI("G.One VV 0.4.0 — F4 (física core + touch controls)");
+    LOGI("G.One VV 0.4.2 — F4.2 (safe-area + labels + sandbox do Play)");
 
     double last = nowSeconds();
     while (true) {

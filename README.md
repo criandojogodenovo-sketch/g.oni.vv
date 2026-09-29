@@ -1,10 +1,40 @@
-# G.One VV 0.4.1 — F4.1
+# G.One VV 0.4.2 — F4.2
 
 Engine com editor. A F2 deixou o pipeline 3D mínimo (cubo hardcoded, câmara de
 orbit, grid com fade); a F3 transformou os TIC em entidades reais com
 componentes, presets de criação, editor (Hierarchy + Inspector) e serialização
 de cena `.goni` com migrações. Mobile-first: arm64-v8a, minSdk 24, landscape
 travado (`sensorLandscape`). Device de teste: Realme C33 (720x1600).
+
+## Escopo F4.2 (implementado)
+Três bugs vistos no C33, corrigidos com CLÁUSULA CALMA (só layout/UiContext/
+EditorUi + testes; zero física nova, zero componentes novos, zero render 3D;
+mono/3 botões/landscape intactos):
+- **B1 — safe-area (fix raiz do scroll morto)**: a UI assumia a superfície
+  EGL inteira, mas a nav bar tapava o fundo dos painéis → o Inspector media
+  contentHeight 536 contra um visibleHeight inflado (540) → maxOffset 0 →
+  scroll nunca ativava. O main lê `android_app->contentRect`
+  (`APP_CMD_CONTENT_RECT_CHANGED`) e injeta `safe::Insets` (novo
+  `ui/SafeArea.h`, GL-free, fonte única das constantes de layout) — toolbar,
+  painéis, viewport, status line, toast, TouchControls e overlays vivem
+  DENTRO do contentRect; com a altura real do painel o overflow é detetado e
+  o scroll ativa. Diagnóstico no logcat: `safearea: surface … content …
+  insets …`
+- **B2 — labels cortadas**: novo `ui/TextFit.h` (GL-free) +
+  `UiContext::labelFitted` — toda label mede antes de desenhar e trunca com
+  reticência ASCII `...` (o atlas não tem U+2026) mantendo o maior prefixo
+  que caiba: nome do TIC, `body: rigid - sphere - chao: sim` (o caso
+  reportado), mesh/input/tc, texto dos botões (linhas da Hierarchy), status
+  line e toast
+- **B3 — sandbox do Play**: novo `core/PlaySnapshot.h` — ENTRAR no Play
+  captura pos/rot/scale de todos os Transform3D + velocity/grounded de todos
+  os BodyComp; SAIR repõe a pose de editor EXATA e descarta a simulação
+  (TIC destruído no Play é saltado; handle generacional nunca recria). A
+  física (TickGroup::Physics) continua a correr SÓ durante o Play (gate
+  `enabled` inalterado)
+- CI: fix do workflow — o output `artifact_name` era descartado pelo
+  mascaramento do secret `VV_KEY_ALIAS` ("vv"); o gate verify-entry-symbols
+  passa a baixar por `pattern` (robusto a segredos e a mudanças de versão)
 
 ## Escopo F4.1 (implementado)
 Scroll como primitivo de UI, aplicado ao Inspector e à Hierarchy — conteúdo
@@ -90,6 +120,9 @@ Sem física (BodyComp é F4), sem luzes, sem assets, sem animação, sem linguag
 (CLÁUSULA CALMA).
 
 ## Histórico
+- **F4.2 (0.4.2)**: correções do device — safe-area do sistema (scroll do
+  Inspector ativa com a nav bar contabilizada), truncagem de labels com
+  ellipsis e sandbox do Play (pose de editor restaurada ao sair); 135 testes.
 - **F4.1 (0.4.1)**: scroll como primitivo de UI — Inspector e Hierarchy com
   ScrollRegion (clamp, drag-vs-tap, indicador, tap re-despachado); fundo dos
   painéis alcançável no device.
@@ -109,7 +142,7 @@ Sem física (BodyComp é F4), sem luzes, sem assets, sem animação, sem linguag
    → o job **init-keystore** gera o artifact `vv-release-keystore` (baixe e guarde OFFLINE).
 2. `base64 -w0 vv-release.jks` → configure os secrets:
    `VV_KEYSTORE` (base64), `VV_STORE_PW`, `VV_KEY_ALIAS`, `VV_KEY_PW`.
-3. Todo push publica o artifact `goni-vv-0.4.1-release-signed` (APK arm64).
+3. Todo push publica o artifact `goni-vv-0.4.2-release-signed` (APK arm64).
    Sem secrets: sai `-UNSIGNED` (nunca debug).
 
 Trocar a keystore muda a assinatura — exige desinstalar/reinstalar no device.
@@ -119,6 +152,25 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
 
 ## Testes do core (Linux)
 `cmake -S tests -B build-tests && cmake --build build-tests && ctest --test-dir build-tests`
+
+## Verificação no Realme C33 (dono) — F4.2 (safe-area + labels + sandbox)
+1. Instalar o APK 0.4.2 → confirmar "0.4.2" nas infos da app.
+2. **B1/scroll**: selecionar o PlayerBody3D → com a nav bar visível, o
+   Inspector agora DETETA o overflow (indicador fino à direita) → arrastar
+   para cima revela `body: …`, `velx` e o botão **add TouchControls** no
+   fundo, SEM nada tapado pela nav bar; toolbar, status line e painéis todos
+   dentro da área visível. (Opcional: `adb logcat | grep safearea` mostra a
+   superfície, o contentRect e os insets detetados.)
+3. **B2/labels**: com um Rigid no chão, a linha `body: rigid - sphere - chao:
+   sim` aparece inteira OU termina em `...` — nunca cortada a meio; nomes
+   longos de TIC na Hierarchy terminam em `...` dentro do botão.
+4. **B3/sandbox**: dar **Play** → deixar o corpo cair/mover (stick + JUMP) →
+   sair do Play → os TICs voltam EXATAMENTE à pose de editor (o corpo
+   "desce" de volta ao sítio original); entrar/sair repetidas vezes mantém
+   a pose estável.
+5. **Regressões**: orbit/pinch no viewport central intactos; gestos atrás da
+   nav bar não orbitam a câmara; scroll dos painéis continua com limites no
+   topo/fundo; slider continua com prioridade sobre o scroll.
 
 ## Verificação no Realme C33 (dono) — F4.1 (scroll)
 1. Instalar o APK 0.4.1 → confirmar "0.4.1" nas infos da app.
