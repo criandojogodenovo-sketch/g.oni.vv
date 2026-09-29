@@ -16,6 +16,7 @@
 //
 // O handler é INJETADO (ResultHandler): no device é o bridge JNI; nos
 // testes do CI é um fake que alimenta resultados simulados.
+#include <mutex>
 #include <string>
 #include "core/Types.h"
 
@@ -49,6 +50,45 @@ inline bool flagsReadWrite(i32 flags) {
 }
 
 using ResultHandler = void (*)(void* user, const SafResult& result);
+
+// F5.1-hotfix (auditoria JNI, fix 3): fila de 1 slot que DESACOPLA o thread
+// da UI (onActivityResult) do thread da engine. Antes o handler corria no
+// thread Java — sem contexto EGL — e chamava releaseAll/loadActiveScene com
+// GL = crash. Agora o JNI só faz push; o loop nativo faz poll e processa no
+// thread certo. GL-free / testável no hospedeiro.
+class PendingResult {
+public:
+    void push(const SafResult& r) {
+        std::lock_guard<std::mutex> lk(mu_);
+        if (valid_) {
+            dropped_ = true;   // resultado anterior não consumido — sobrepõe
+        }
+        r_ = r;
+        valid_ = true;
+    }
+
+    // consome o resultado pendente; false se não há nada
+    bool poll(SafResult* out) {
+        std::lock_guard<std::mutex> lk(mu_);
+        if (!valid_) {
+            return false;
+        }
+        if (out) {
+            *out = r_;
+        }
+        valid_ = false;
+        return true;
+    }
+
+    // true se algum resultado foi descartado por sobreposição (diagnóstico)
+    bool droppedAny() const { return dropped_; }
+
+private:
+    std::mutex mu_;
+    bool valid_ = false;
+    bool dropped_ = false;
+    SafResult r_;
+};
 
 // máquina de estado pura (sem Android) — partilhada por device/testes
 class SafStateMachine {

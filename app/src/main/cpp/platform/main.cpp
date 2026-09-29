@@ -1076,6 +1076,14 @@ void android_main(android_app* app) {
             continue;
         }
 
+        // F5.1-hotfix (auditoria JNI): resultados SAF chegam do thread da
+        // UI e são processados AQUI (thread da engine, EGL corrente) — o
+        // handler toca em storage/scene/GPU e não pode correr no thread
+        // Java (crash garantido sem contexto GL). Se a janela não está
+        // pronta, o resultado fica na fila e é consumido mais tarde.
+        while (saf::pollResult()) {
+        }
+
         const double nowT = nowSeconds();
         const double realDt = nowT - last;
         last = nowT;

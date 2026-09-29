@@ -243,3 +243,45 @@ TEST(routing_storage_router_rejeita_ops_de_recursos_nulos) {
     EXPECT(prim.dirs.count("textures") == 1u);
     EXPECT(saf.dirs.size() == 1u);   // só o secundário criou
 }
+
+// ---------------------------------------------------------------------------
+// F5.1-hotfix (auditoria JNI): fila UI-thread → engine-thread
+// ---------------------------------------------------------------------------
+
+TEST(pending_result_push_poll_roundtrip) {
+    saf::PendingResult q;
+    saf::SafResult out;
+    EXPECT(!q.poll(&out));   // vazio → false
+
+    saf::SafResult r;
+    r.request = saf::kReqPickTree;
+    r.ok = true;
+    r.uri = "content://tree/pasta";
+    r.flags = saf::kFlagRead | saf::kFlagWrite;
+    q.push(r);
+
+    EXPECT(q.poll(&out));
+    EXPECT(out.request == saf::kReqPickTree);
+    EXPECT(out.ok);
+    EXPECT(out.uri == "content://tree/pasta");
+    EXPECT(out.flags == (saf::kFlagRead | saf::kFlagWrite));
+    EXPECT(!q.poll(&out));   // consumido
+    EXPECT(!q.droppedAny()); // nada descartado
+}
+
+TEST(pending_result_sobrepoe_e_marca_dropped) {
+    saf::PendingResult q;
+    saf::SafResult a;
+    a.request = saf::kReqImport;
+    a.uri = "primeiro";
+    saf::SafResult b;
+    b.request = saf::kReqExport;
+    b.uri = "segundo";
+    q.push(a);
+    q.push(b);   // sobreposição (resultado anterior não consumido)
+
+    saf::SafResult out;
+    EXPECT(q.poll(&out));
+    EXPECT(out.uri == "segundo");   // só o ÚLTIMO interessa
+    EXPECT(q.droppedAny());         // e o descarte fica registrado
+}

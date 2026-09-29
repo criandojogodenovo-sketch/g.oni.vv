@@ -16,6 +16,7 @@ typedef jint jsize;
 typedef void* jmethodID;
 
 #define JNI_OK 0
+#define JNI_ERR (-1)
 #define JNI_VERSION_1_6 0x00010006
 #define JNI_TRUE 1
 #define JNI_FALSE 0
@@ -29,8 +30,16 @@ typedef _jobject* jstring;
 typedef _jobject* jbyteArray;
 typedef _jobject* jobjectArray;
 
+typedef struct {
+    const char* name;
+    const char* signature;
+    void* fnPtr;
+} JNINativeMethod;
+
 struct JNIEnv {
     jclass GetObjectClass(jobject) { return nullptr; }
+    jclass FindClass(const char*) { return nullptr; }
+    jint RegisterNatives(jclass, const JNINativeMethod*, jint) { return JNI_OK; }
     jmethodID GetMethodID(jclass, const char*, const char*) { return nullptr; }
     jmethodID GetStaticMethodID(jclass, const char*, const char*) { return nullptr; }
     jobject CallObjectMethod(jobject, jmethodID, ...) { return nullptr; }

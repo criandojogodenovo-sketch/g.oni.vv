@@ -3,6 +3,7 @@
 // estáticas Java (DocumentsContract). Falha Java → false/null — nunca
 // exceção que atravessa a JNI.
 #include "core/SafStorage.h"
+#include "platform/EngineLog.h"
 #include "platform/Log.h"
 #include <jni.h>
 #include <string>
@@ -19,31 +20,46 @@ jstring toJString(JNIEnv* env, const std::string& s) {
 
 class SafJniBackend final : public SafBackend {
 public:
-    // cache de métodos — chamar 1× no boot (após saf::initJava)
+    // cache de métodos — chamar 1× no boot (após saf::initJava).
+    // AUDITORIA F5.1-hotfix: cada lookup loga OK/FAIL (no engine.log — se
+    // o boot morrer aqui, o ficheiro diz QUAL método/assinatura falhou).
     bool init(JNIEnv* env, jclass ioCls, jobject activity, jstring treeUri) {
-        midExists_ = env->GetStaticMethodID(
-            ioCls, "ioExists",
-            "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Z");
-        midMakeDirs_ = env->GetStaticMethodID(
-            ioCls, "ioMakeDirs",
-            "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Z");
-        midList_ = env->GetStaticMethodID(
-            ioCls, "ioList",
-            "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)"
-            "[Ljava/lang/String;");
-        midRead_ = env->GetStaticMethodID(
-            ioCls, "ioRead",
-            "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)[B");
-        midWrite_ = env->GetStaticMethodID(
-            ioCls, "ioWrite",
-            "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;[B)Z");
+        struct Lookup { jmethodID* mid; const char* name; const char* sig; };
+        const Lookup lookups[] = {
+            { &midExists_,  "ioExists",
+              "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Z" },
+            { &midMakeDirs_, "ioMakeDirs",
+              "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Z" },
+            { &midList_,    "ioList",
+              "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)"
+              "[Ljava/lang/String;" },
+            { &midRead_,    "ioRead",
+              "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)[B" },
+            { &midWrite_,   "ioWrite",
+              "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;[B)Z" },
+        };
+        bool allOk = true;
+        for (const Lookup& lk : lookups) {
+            *lk.mid = env->GetStaticMethodID(ioCls, lk.name, lk.sig);
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+            }
+            if (!*lk.mid) {
+                elog::error("jni/saf: SafIo.%s NÃO encontrada (%s)",
+                            lk.name, lk.sig);
+                allOk = false;
+            } else {
+                elog::info("jni/saf: SafIo.%s OK", lk.name);
+            }
+        }
         ctx_ = env->NewGlobalRef(activity);
         uri_ = static_cast<jstring>(env->NewGlobalRef(treeUri));
         if (env->ExceptionCheck()) {
             env->ExceptionClear();
+            elog::error("jni/saf: NewGlobalRef(ctx/uri) falhou");
             return false;
         }
-        return midExists_ && midMakeDirs_ && midList_ && midRead_ && midWrite_;
+        return allOk;
     }
 
     bool initSingles(JNIEnv* env) {
@@ -57,11 +73,23 @@ public:
         midWriteSingle_ = env->GetStaticMethodID(
             clsRef(), "ioWriteSingle",
             "(Landroid/content/Context;Ljava/lang/String;[B)Z");
+        bool allOk = true;
+        if (!midDisplayName_) {
+            elog::error("jni/saf: SafIo.ioDisplayName NÃO encontrada");
+            allOk = false;
+        }
+        if (!midReadSingle_) {
+            elog::error("jni/saf: SafIo.ioReadSingle NÃO encontrada");
+            allOk = false;
+        }
+        if (!midWriteSingle_) {
+            elog::error("jni/saf: SafIo.ioWriteSingle NÃO encontrada");
+            allOk = false;
+        }
         if (env->ExceptionCheck()) {
             env->ExceptionClear();
-            return false;
         }
-        return midDisplayName_ && midReadSingle_ && midWriteSingle_;
+        return allOk;
     }
 
     jmethodID midDisplayName() const { return midDisplayName_; }
@@ -214,30 +242,52 @@ bool g_safBackendReady = false;
 } // namespace
 
 // exposto para o main.cpp: prepara o backend JNI (device)
+// AUDITORIA F5.1-hotfix: cada passo verificado (null check + exceção) e
+// logado — o boot mostra exatamente onde a ponte SAF falhou.
 bool safInitJniBackend(void* vm, void* envPtr, void* activityObject) {
     JavaVM* vmP = static_cast<JavaVM*>(vm);
     JNIEnv* env = static_cast<JNIEnv*>(envPtr);
     jobject activity = static_cast<jobject>(activityObject);
     if (!vmP || !env || !activity) {
+        elog::error("jni/saf: init backend — argumentos nulos (vm/env/activity)");
         return false;
     }
+    elog::info("jni/saf: init backend JNI");
     jclass actCls = env->GetObjectClass(activity);
     // SafIo via classloader da activity (FindClass nativo não vê classes da app)
     jmethodID midLoader = env->GetMethodID(actCls, "getClassLoader",
                                            "()Ljava/lang/ClassLoader;");
+    if (!midLoader || env->ExceptionCheck()) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        elog::error("jni/saf: getClassLoader indisponível na activity");
+        return false;
+    }
     jobject loader = env->CallObjectMethod(activity, midLoader);
+    if (!loader || env->ExceptionCheck()) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        elog::error("jni/saf: classloader da activity é null");
+        return false;
+    }
     jclass loaderCls = env->GetObjectClass(loader);
     jmethodID midLoad = env->GetMethodID(
         loaderCls, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+    if (!midLoad || env->ExceptionCheck()) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        elog::error("jni/saf: loadClass indisponível no classloader");
+        return false;
+    }
     jstring jname = env->NewStringUTF("vv.goni.SafIo");
     jclass ioCls = static_cast<jclass>(
         env->CallObjectMethod(loader, midLoad, jname));
     env->DeleteLocalRef(jname);
     if (!ioCls || env->ExceptionCheck()) {
-        env->ExceptionClear();
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        elog::error("jni/saf: loadClass(vv.goni.SafIo) FALHOU — classe ausente do dex?");
         return false;
     }
+    elog::info("jni/saf: vv.goni.SafIo carregada");
     if (!SafJniBackend::initClass(vmP, env, ioCls)) {
+        elog::error("jni/saf: initClass falhou (global ref?)");
         return false;
     }
     // URI inicial vazia — a verdadeira chega quando o utilizador escolhe
@@ -247,7 +297,10 @@ bool safInitJniBackend(void* vm, void* envPtr, void* activityObject) {
     if (!g_safBackendReady) {
         return false;
     }
-    return g_safBackend.initSingles(env);
+    const bool singles = g_safBackend.initSingles(env);
+    elog::info("jni/saf: backend pronto (io=%s singles=%s)",
+               "ok", singles ? "ok" : "FALHA");
+    return singles;
 }
 
 SafBackend* safJniBackend() {

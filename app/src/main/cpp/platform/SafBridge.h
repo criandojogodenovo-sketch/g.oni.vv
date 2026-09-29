@@ -19,6 +19,12 @@ namespace vv::saf {
 // handler dos resultados — injetado por main.cpp ANTES de abrir pickers
 void setHandler(ResultHandler fn, void* user);
 
+// F5.1-hotfix (auditoria): consome UM resultado SAF diferido (fila UI →
+// engine) e dispara o handler NO THREAD CHAMADOR. O loop da engine chama
+// por frame — o processamento (storage/GL) nunca corre no thread da UI.
+// false = nada pendente.
+bool pollResult();
+
 // cache de env/classe/métodos — chamar 1× no android_main com o
 // app->activity (o thread do NativeActivity já está anexado à VM)
 void initJava(void* vm, void* activityObject);
