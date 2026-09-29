@@ -11,6 +11,7 @@ set(CORE_DIR ${CMAKE_CURRENT_LIST_DIR}/../app/src/main/cpp)
 add_executable(test_core
         test_main.cpp
         test_project.cpp
+        test_import_obj.cpp
         test_storage.cpp
         test_safearea.cpp
         test_textfit.cpp
@@ -38,6 +39,8 @@ add_executable(test_core
         ${CORE_DIR}/core/Project.cpp
         ${CORE_DIR}/core/ProjectStorage.cpp
         ${CORE_DIR}/core/FsStorage.cpp
+        # F5: assets (importadores GL-free)
+        ${CORE_DIR}/assets/ObjImporter.cpp
         ${CORE_DIR}/core/TransformSystem.cpp
         # GL-free (cubo e câmara são lógica pura — sem contexto OpenGL)
         ${CORE_DIR}/render/Cube.cpp

@@ -30,6 +30,8 @@ CubeMeshData makeCube(f32 size) {
             Vertex& vtx = out.vertices[vi++];
             vtx.pos    = f.n * h + f.u * (sg[0] * h) + f.v * (sg[1] * h);
             vtx.normal = f.n;
+            // F5: UV por face — canto (-1,-1) = (0,0), (+1,+1) = (1,1)
+            vtx.uv = Vec2{(sg[0] + 1.0f) * 0.5f, (sg[1] + 1.0f) * 0.5f};
         }
         // dois triângulos por face: (0,1,2) e (0,2,3) — CCW visto de fora
         out.indices[ii++] = base;

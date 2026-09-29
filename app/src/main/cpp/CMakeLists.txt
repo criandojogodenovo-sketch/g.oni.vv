@@ -25,6 +25,9 @@ add_library(goni_vv SHARED
         core/ProjectStorage.cpp
         core/FsStorage.h
         core/FsStorage.cpp
+        assets/Assets.h
+        assets/ObjImporter.h
+        assets/ObjImporter.cpp
         core/Project.h
         core/Project.cpp
         core/SceneSerializer.h
