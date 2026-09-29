@@ -35,6 +35,11 @@ jobs:
       - name: Executar suíte do core
         run: ctest --test-dir build-tests --output-on-failure
 
+      # F5.1: paridade de compilação do main.cpp no hospedeiro (stubs) —
+      # erros de símbolo no main.cpp apareciam só no job do NDK
+      - name: Check de sintaxe do main.cpp (stubs)
+        run: ./scripts/check_main.sh
+
   build-release:
     name: APK release arm64 (assinado via secrets)
     runs-on: ubuntu-latest

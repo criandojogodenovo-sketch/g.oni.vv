@@ -15,6 +15,7 @@ add_executable(test_core
         test_import_obj.cpp
         test_resources.cpp
         test_import_gltf.cpp
+        test_gltf_textures.cpp
         test_assets.cpp
         test_storage.cpp
         test_safearea.cpp
@@ -48,6 +49,7 @@ add_executable(test_core
         ${CORE_DIR}/assets/ObjExporter.cpp
         ${CORE_DIR}/assets/ResourceManager.cpp
         ${CORE_DIR}/assets/GltfImporter.cpp
+        ${CORE_DIR}/assets/GltfTextures.cpp
         ${CORE_DIR}/assets/GltfInstantiate.cpp
         ${CORE_DIR}/assets/PngLoader.cpp
         ${CORE_DIR}/assets/MipGen.cpp

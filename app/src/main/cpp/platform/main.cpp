@@ -582,8 +582,22 @@ void frame() {
                         mrs->mesh = m;
                         mrs->material = g_renderer.litMaterial();
                         mrs->meshPath = rel;
-                        showToast("mesh aplicado");
-                        LOGI("editor: mesh %s aplicado", rel.c_str());
+                        bool withTex = false;
+                        // F5.1-B: textura embutida do glTF/GLB aplica-se logo
+                        // (import sem PC — o material fica referenciado)
+                        const std::string texRel = g_resources.meshTextureFor(rel);
+                        if (!texRel.empty()) {
+                            std::string twarn;
+                            if (const Texture* tex = g_gpu.texture(texRel, &twarn)) {
+                                mrs->texture = tex;
+                                mrs->texPath = texRel;
+                                withTex = true;
+                            }
+                        }
+                        showToast(withTex ? "mesh aplicado (+textura)" : "mesh aplicado");
+                        LOGI("editor: mesh %s aplicado%s%s", rel.c_str(),
+                             withTex ? " com textura " : "",
+                             withTex ? mrs->texPath.c_str() : "");
                     } else {
                         showToast("falha ao carregar mesh");
                     }

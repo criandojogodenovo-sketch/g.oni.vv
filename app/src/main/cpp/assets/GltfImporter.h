@@ -38,16 +38,34 @@ struct GltfNode {
     Vec3 scale{1.0f, 1.0f, 1.0f};
 };
 
+// imagem embutida do glTF (F5.1-B): bytes decodificados + mime. Textura
+// EXTERNA (uri não-data) fica com bytes vazios e o uri em `uriPath` — o
+// índice continua alinhado com o array `images` do ficheiro.
+struct GltfImage {
+    std::vector<u8> bytes;    // vazio = externa/não suportada
+    std::string mime;         // "image/png" (o engine só consome PNG)
+    std::string uriPath;      // uri externa (pass-through p/ refs relativas)
+};
+
 // material básico (PBR mínimo; interp. p/ lit acontece no device)
 struct GltfMaterial {
     std::string name;
     f32 baseColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    i32 baseColorTex = -1;    // índice em GltfModel::images (-1 = sem)
 };
 
 struct GltfModel {
     std::vector<MeshData> meshes;      // 1 MeshData por glTF mesh
     std::vector<GltfMaterial> materials;
     std::vector<GltfNode> nodes;
+    std::vector<GltfImage> images;     // F5.1-B: texturas embutidas/externas
+    // material de CADA mesh de saída (primeiro material usado pelas
+    // primitivas; -1 = nenhum) — alinhado com meshes
+    std::vector<i32> meshMaterial;
+    // F5.1-B: caminho relativo da textura extraída por mesh ("textures/
+    // gltf_<hash>.png"), PREENCHIDO pelo ResourceManager no load (dedup
+    // por hash); vazio = sem textura. Alinhado com meshes.
+    std::vector<std::string> meshTexture;
 
     bool ok() const { return !meshes.empty(); }
 };

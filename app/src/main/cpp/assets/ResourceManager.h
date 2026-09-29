@@ -52,6 +52,10 @@ public:
     const RawImage* image(const std::string& relPath, std::string& err,
                           std::string* warn = nullptr);
 
+    // F5.1-B: caminho da textura extraída do glTF/GLB para o mesh de `ref`
+    // ("meshes/x.glb#0" → "textures/gltf_<hash>.png"; "" = sem textura).
+    std::string meshTextureFor(const std::string& ref) const;
+
     void releaseMesh(const std::string& ref);
     void releaseImage(const std::string& relPath);
 

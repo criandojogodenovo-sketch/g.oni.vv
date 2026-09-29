@@ -14,6 +14,10 @@ namespace vv {
 
 class CompressedImage;
 
+// F5.1-A: true se a extensão GL_KHR_texture_compression_astc_ldr existir
+// (device — chamar com contexto GL vivo; no hospedeiro devolve false).
+bool glAstcSupported();
+
 class Texture {
 public:
     Texture() = default;

@@ -203,6 +203,71 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
         return false;
     }
 
+    // ---- images (F5.1-B: texturas embutidas base64 ou bufferView) ----------
+    if (const Json* ji = doc.find("images"); ji && ji->type == Json::Type::Array) {
+        for (const Json& im : ji->items) {
+            GltfImage gi;
+            const Json* uri = im.find("uri");
+            if (uri && uri->type == Json::Type::String && !uri->string.empty()) {
+                const std::string& u = uri->string;
+                constexpr char kPngDataPfx[] = "data:image/png;base64,";
+                if (u.compare(0, sizeof(kPngDataPfx) - 1, kPngDataPfx) == 0) {
+                    if (!base64Decode(u.c_str() + (sizeof(kPngDataPfx) - 1),
+                                      u.size() - (sizeof(kPngDataPfx) - 1),
+                                      gi.bytes)) {
+                        err = "glTF: data: URI de imagem base64 inválida";
+                        return false;
+                    }
+                    gi.mime = "image/png";
+                } else if (u.compare(0, 5, "data:") == 0) {
+                    gi.mime = "desconhecido";   // mime não-PNG — ignora (sem falha)
+                } else {
+                    gi.uriPath = u;             // textura EXTERNA
+                }
+            } else if (const Json* bv = im.find("bufferView");
+                       bv && bv->type == Json::Type::Number) {
+                // textura EMBUTIDA no binário (GLB): bytes do bufferView
+                if (!jviews) {
+                    err = "glTF: imagem sem bufferViews";
+                    return false;
+                }
+                const i32 vi = static_cast<i32>(bv->number);
+                if (vi < 0 || vi >= static_cast<i32>(jviews->items.size())) {
+                    err = "glTF: bufferView da imagem fora do range";
+                    return false;
+                }
+                ViewSpan span;
+                if (!resolveView(buffers, jviews->items[static_cast<size_t>(vi)],
+                                 0, 1, span)) {
+                    err = "glTF: bufferView da imagem fora do buffer";
+                    return false;
+                }
+                gi.bytes.assign(span.data, span.data + span.byteLength);
+                if (const Json* mt = im.find("mimeType");
+                    mt && mt->type == Json::Type::String) {
+                    gi.mime = mt->string;
+                }
+            }
+            out.images.push_back(std::move(gi));
+        }
+    }
+
+    // ---- textures (fontes de imagem; F5.1-B) --------------------------------
+    std::vector<i32> textureSources;
+    if (const Json* jt = doc.find("textures"); jt && jt->type == Json::Type::Array) {
+        textureSources.reserve(jt->items.size());
+        for (const Json& t : jt->items) {
+            i32 src = -1;
+            if (const Json* s = t.find("source"); s && s->type == Json::Type::Number) {
+                if (s->number >= 0 &&
+                    s->number < static_cast<f64>(out.images.size())) {
+                    src = static_cast<i32>(s->number);
+                }
+            }
+            textureSources.push_back(src);
+        }
+    }
+
     // ---- materials (básico) --------------------------------------------------
     if (const Json* jm = doc.find("materials"); jm && jm->type == Json::Type::Array) {
         for (const Json& m : jm->items) {
@@ -215,6 +280,16 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                     bc && bc->type == Json::Type::Array && bc->items.size() == 4) {
                     for (int i = 0; i < 4; ++i) {
                         gm.baseColor[i] = static_cast<f32>(bc->items[i].number);
+                    }
+                }
+                if (const Json* bt = pbr->find("baseColorTexture");
+                    bt && bt->type == Json::Type::Object) {
+                    if (const Json* ix = bt->find("index");
+                        ix && ix->type == Json::Type::Number &&
+                        ix->number >= 0 &&
+                        ix->number < static_cast<f64>(textureSources.size())) {
+                        gm.baseColorTex =
+                            textureSources[static_cast<size_t>(ix->number)];
                     }
                 }
             }
@@ -310,6 +385,7 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
         if (const Json* n = jm.find("name"); n && n->type == Json::Type::String) {
             md.name = n->string;
         }
+        i32 meshMatIdx = -1;   // primeiro material das primitivas (F5.1-B)
         const Json* jprims = jm.find("primitives");
         if (!jprims || jprims->type != Json::Type::Array) {
             err = "glTF: mesh sem primitives";
@@ -383,6 +459,9 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                 jmat && jmat->type == Json::Type::Number &&
                 static_cast<size_t>(jmat->number) < out.materials.size()) {
                 grp.material = out.materials[static_cast<size_t>(jmat->number)].name;
+                if (meshMatIdx < 0) {
+                    meshMatIdx = static_cast<i32>(jmat->number);
+                }
             }
             grp.firstIndex = static_cast<u32>(md.indices.size());
 
@@ -432,6 +511,7 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
         }
         if (md.ok()) {
             out.meshes.push_back(std::move(md));
+            out.meshMaterial.push_back(meshMatIdx);   // alinhado com meshes
         }
     }
 

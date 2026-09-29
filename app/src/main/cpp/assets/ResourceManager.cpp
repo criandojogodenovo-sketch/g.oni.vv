@@ -5,6 +5,7 @@
 // bytes + parseGlb. Refs "path#i" (sub-mesh) fazem aliasing do modelo em
 // cache — o parse acontece UMA vez por ficheiro.
 #include "assets/ResourceManager.h"
+#include "assets/GltfTextures.h"
 #include "assets/ObjImporter.h"
 #include <cstring>
 
@@ -115,6 +116,17 @@ ResourceManager::loadModel(const std::string& path, std::string& err) {
         return nullptr;
     }
 
+    // F5.1-B: extrai texturas embutidas (base64/GLB) para textures/ com
+    // dedup por hash — falha de extração NÃO invalida o mesh (err2 anotado
+    // no log via err de retorno do chamador... aqui apenas segue sem textura)
+    {
+        std::vector<std::string> meshTex;
+        std::string texErr;
+        if (extractGltfTextures(*storage_, *model, meshTex, texErr)) {
+            model->meshTexture = std::move(meshTex);
+        }
+    }
+
     const auto res = models_.emplace(path, std::move(model));
     return res.first->second;
 }
@@ -182,6 +194,24 @@ const MeshData* ResourceManager::mesh(const std::string& ref, std::string& err) 
 
     err = "formato de mesh não suportado: ." + ext;
     return nullptr;
+}
+
+std::string ResourceManager::meshTextureFor(const std::string& ref) const {
+    std::string path;
+    i32 sub = -1;
+    splitSubRef(ref, path, sub);
+    const auto it = models_.find(path);
+    if (it == models_.end()) {
+        return "";
+    }
+    const GltfModel& m = *it->second;
+    if (sub < 0) {
+        sub = m.meshes.size() == 1 ? 0 : -1;   // mesma regra do mesh()
+    }
+    if (sub < 0 || sub >= static_cast<i32>(m.meshTexture.size())) {
+        return "";
+    }
+    return m.meshTexture[static_cast<size_t>(sub)];
 }
 
 void ResourceManager::adoptMesh(const std::string& ref, MeshData&& data) {

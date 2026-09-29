@@ -34,6 +34,8 @@ add_library(goni_vv SHARED
         assets/ResourceManager.cpp
         assets/GltfImporter.h
         assets/GltfImporter.cpp
+        assets/GltfTextures.h
+        assets/GltfTextures.cpp
         assets/GltfInstantiate.h
         assets/GltfInstantiate.cpp
         assets/PngLoader.h
