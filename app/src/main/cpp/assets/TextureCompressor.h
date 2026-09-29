@@ -56,6 +56,11 @@ class TextureCompressor {
 public:
     virtual ~TextureCompressor() = default;
 
+    // este compressor consegue comprimir UMA textura w×h? (gate de tamanho
+    // e/ou disponibilidade de formato — o TexturePipeline decide o gate 4K
+    // com base nisto: true = 4K entra inteira; false = downscale 2K + aviso)
+    virtual bool canCompress(u32 w, u32 h) const = 0;
+
     // comprime `in` (RGBA8) gerando TODOS os mips em `out`
     virtual bool compress(const RawImage& in, CompressedImage& out,
                           std::string& err) = 0;
@@ -69,6 +74,7 @@ public:
 // (texturas < 256px e fallback sem suporte de hardware).
 class PassthroughCompressor final : public TextureCompressor {
 public:
+    bool canCompress(u32 /*w*/, u32 /*h*/) const override { return false; }
     bool compress(const RawImage& in, CompressedImage& out,
                   std::string& err) override;
     const char* name() const override { return "passthrough"; }
@@ -80,10 +86,17 @@ public:
 // pelo decoder dos testes do CI); no device usa true (T/H/planar melhoram).
 class Etc2Compressor final : public TextureCompressor {
 public:
+    bool canCompress(u32 w, u32 h) const override {
+        return compressible(w, h);
+    }
     bool compress(const RawImage& in, CompressedImage& out,
                   std::string& err) override;
     const char* name() const override { return "etc2"; }
     bool heuristics = true;
+
+    // regra do gate: ambas as dims >= 256 (overhead de bloco supera o
+    // ganho em sprites pequenos)
+    static bool compressible(u32 w, u32 h) { return w >= 256u && h >= 256u; }
 };
 
 // F5.1-A: ASTC LDR linear via astc-encoder (vendor/astc-encoder, Apache-2.0).
@@ -91,6 +104,9 @@ public:
 class AstcCompressor final : public TextureCompressor {
 public:
     explicit AstcCompressor(u32 block = 4);
+    bool canCompress(u32 w, u32 h) const override {
+        return Etc2Compressor::compressible(w, h);
+    }
     bool compress(const RawImage& in, CompressedImage& out,
                   std::string& err) override;
     const char* name() const override { return "astc"; }
@@ -108,9 +124,14 @@ public:
     void setAstcSupported(bool s) { astcSupported_ = s; }
     bool astcSupported() const { return astcSupported_; }
 
-    // regra do gate: ambas as dims >= 256 → comprime; menor → RGBA (custo
-    // de bloco > ganho em sprites pequenos)
-    static bool compressible(u32 w, u32 h);
+    // ETC2 é garantido em GLES 3.0+ → a disponibilidade NÃO depende da
+    // extensão ASTC; o gate é só o tamanho (<256 → RGBA).
+    bool canCompress(u32 w, u32 h) const override {
+        return compressible(w, h);
+    }
+    static bool compressible(u32 w, u32 h) {
+        return Etc2Compressor::compressible(w, h);
+    }
 
     bool compress(const RawImage& in, CompressedImage& out,
                   std::string& err) override;

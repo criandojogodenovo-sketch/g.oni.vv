@@ -64,9 +64,22 @@ inline void glDeleteTextures(GLint, const GLuint*) {}
 inline void glBindTexture(GLenum, GLuint) {}
 inline void glPixelStorei(GLenum, GLint) {}
 inline void glTexImage2D(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void*) {}
+inline void glCompressedTexImage2D(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLsizei, const void*) {}
 inline void glTexParameteri(GLenum, GLenum, GLint) {}
 inline void glGenerateMipmap(GLenum) {}
 inline void glActiveTexture(GLenum) {}
+
+// F5.1-A: consulta de extensões (glAstcSupported usa glGetStringi)
+#define GL_NUM_EXTENSIONS 0x821D
+#define GL_EXTENSIONS 0x1F03
+#define GL_COMPRESSED_RGB8_ETC2 0x9274
+#define GL_COMPRESSED_RGBA8_ETC2_EAC 0x9278
+#define GL_COMPRESSED_RGBA_ASTC_4x4_KHR 0x93B0
+#define GL_COMPRESSED_RGBA_ASTC_6x6_KHR 0x93B4
+inline const GLubyte* glGetString(GLenum) { return reinterpret_cast<const GLubyte*>(""); }
+inline void glGetIntegerv(GLenum p, GLint* v) { if (v) *v = (p == GL_NUM_EXTENSIONS) ? 0 : 0; }
+inline const GLubyte* glGetStringi(GLenum, GLuint) { return reinterpret_cast<const GLubyte*>(""); }
+inline GLenum glGetError() { return 0; }
 
 inline GLuint glCreateShader(GLenum) { return 1; }
 inline void glShaderSource(GLuint, GLsizei, const GLchar* const*, const GLint*) {}

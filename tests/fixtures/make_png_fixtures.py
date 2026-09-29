@@ -29,6 +29,22 @@ for y in range(8):
     rows.append(row)
 open("tests/fixtures/alpha8.png", "wb").write(png(8, 8, 6, rows))
 
+# 3) F5.1-A: RGB 4096x4096 sólido verde (gate 4K com compressão — o PNG
+# sólido deflate para alguns KB; decodifica para 64 MB de RGBA)
+rows = [b"\x00" + bytes([20, 180, 60] * 4096) for _ in range(4096)]
+open("tests/fixtures/green4096.png", "wb").write(png(4096, 4096, 2, rows))
+
+# 4) F5.1-A: RGB 256x256 sólido azul (borda exata do gate <256)
+rows = [b"\x00" + bytes([30, 40, 220] * 256) for _ in range(256)]
+open("tests/fixtures/blue256.png", "wb").write(png(256, 256, 2, rows))
+
+# 5) F5.1-B: RGBA 4x4 sólido amarelo p/ textura embutida base64 no glTF
+rows = [b"\x00" + bytes([255, 220, 40, 255] * 4) for _ in range(4)]
+open("tests/fixtures/yellow4.png", "wb").write(png(4, 4, 6, rows))
+
 print("fixtures:",
-      os.path.getsize("tests/fixtures/red16.png"), "B e",
-      os.path.getsize("tests/fixtures/alpha8.png"), "B")
+      os.path.getsize("tests/fixtures/red16.png"), "B;",
+      os.path.getsize("tests/fixtures/alpha8.png"), "B;",
+      os.path.getsize("tests/fixtures/green4096.png"), "B;",
+      os.path.getsize("tests/fixtures/blue256.png"), "B;",
+      os.path.getsize("tests/fixtures/yellow4.png"), "B")

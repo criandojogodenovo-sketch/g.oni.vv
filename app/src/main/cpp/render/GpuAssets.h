@@ -15,20 +15,25 @@
 #include "assets/ResourceManager.h"
 #include "render/Mesh.h"
 #include "render/Texture.h"
-// (os dois headers são GL-free — o GL vive nos .cpp; o unique_ptr abaixo
+// (os headers acima são GL-free — o GL vive nos .cpp; o unique_ptr abaixo
 // precisa do tipo COMPLETO quando main.cpp instancia o destrutor do cache)
 
 namespace vv {
+
+class TexturePipeline;
 
 class GpuAssets {
 public:
     // rm não-dono (tem de viver enquanto o GpuAssets viver)
     void init(ResourceManager* rm) { rm_ = rm; }
+    // F5.1-A: pipeline de texturas (cache disco + compressão) — opcional;
+    // sem pipeline, o caminho legacy F5 (passthrough) é usado.
+    void setPipeline(TexturePipeline* p) { pipeline_ = p; }
 
     // nullptr se a ref não resolve (erro no RM ou upload GL falhou)
     Mesh* mesh(const std::string& ref);
 
-    // aviso (gate 2K) sai só na carga do cache CPU — o chamador mostra em toast
+    // aviso (gate 2K no fallback) sai da carga — o chamador mostra em toast
     const Texture* texture(const std::string& relPath, std::string* warn = nullptr);
 
     void releaseAll();
@@ -39,6 +44,7 @@ public:
 
 private:
     ResourceManager* rm_ = nullptr;
+    TexturePipeline* pipeline_ = nullptr;
     std::unordered_map<std::string, std::unique_ptr<Mesh>> gpuMeshes_;
     std::unordered_map<std::string, std::unique_ptr<Texture>> gpuTextures_;
 };

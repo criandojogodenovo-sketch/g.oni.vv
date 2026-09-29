@@ -10,6 +10,8 @@
 #include <memory>
 
 #include "assets/ObjExporter.h"
+#include "assets/TextureCache.h"
+#include "assets/TexturePipeline.h"
 #include "components/MeshRenderer.h"
 #include "components/TouchControls.h"
 #include "components/Transform3D.h"
@@ -84,6 +86,13 @@ bool       g_projectReady = false;   // storage + projeto com cena válida
 // TICs que partilham a mesma ref partilham o MESMO objeto de GPU.
 ResourceManager g_resources;
 GpuAssets       g_gpu;
+
+// F5.1-A: compressão + cache de texturas (o HardwareCompressor decide
+// ASTC vs ETC2 conforme a extensão detectada no boot; o cache em disco
+// evita re-comprimir o mesmo PNG entre arranques)
+HardwareCompressor g_hwCompressor;
+std::unique_ptr<TextureCache>    g_texCache;
+std::unique_ptr<TexturePipeline> g_pipeline;
 
 // F5-E: catálogo de assets p/ os seletores do Inspector (refresh ao abrir)
 editor::AssetCatalog g_catalog;
@@ -337,6 +346,17 @@ void onAppCmd(android_app* app, i32 cmd) {
             if (g_storage) {
                 g_resources.setStorage(g_storage.get());
                 g_gpu.init(&g_resources);
+                if (g_pipeline) {
+                    // F5.1-A: ASTC só quando a extensão KHR existe (C33/Mali
+                    // tem; sem a extensão o HardwareCompressor cai p/ ETC2)
+                    const bool astc = glAstcSupported();
+                    g_hwCompressor.setAstcSupported(astc);
+                    g_gpu.setPipeline(g_pipeline.get());
+                    g_texCache->resetStats();
+                    LOGI("f5.1: compressão de texturas ativa — ASTC %s (fallback ETC2), cache %s",
+                         astc ? "SIM" : "não",
+                         g_projectReady ? "textures/cache" : "off");
+                }
             }
             g_renderer.resize(g_egl.width(), g_egl.height());
             applyContentRect(app);   // F4.2: safe-area desde o primeiro frame
@@ -693,6 +713,10 @@ void android_main(android_app* app) {
         }
         if (root) {
             g_storage = std::make_unique<FsStorage>(root);
+            // F5.1-A: cache/pipeline vivem enquanto o storage viver
+            g_texCache = std::make_unique<TextureCache>(*g_storage);
+            g_pipeline = std::make_unique<TexturePipeline>(g_hwCompressor,
+                                                           *g_texCache);
             if (Project::openOrCreate(*g_storage, "projeto", g_project)) {
                 g_projectReady = g_project.activeScenePath() != nullptr;
                 LOGI("projeto: '%s' pronto em %s (%u cena(s), ativa=%s)",

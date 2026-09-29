@@ -51,6 +51,8 @@ add_executable(test_core
         ${CORE_DIR}/assets/GltfInstantiate.cpp
         ${CORE_DIR}/assets/PngLoader.cpp
         ${CORE_DIR}/assets/MipGen.cpp
+        ${CORE_DIR}/assets/TextureCache.cpp
+        ${CORE_DIR}/assets/TexturePipeline.cpp
         ${CORE_DIR}/assets/TextureCompressor.cpp
         ${CORE_DIR}/assets/Etc2Compressor.cpp
         ${CORE_DIR}/assets/AstcCompressor.cpp

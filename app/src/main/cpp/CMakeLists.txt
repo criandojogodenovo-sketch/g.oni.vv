@@ -42,6 +42,10 @@ add_library(goni_vv SHARED
         assets/TextureCompressor.cpp
         assets/MipGen.h
         assets/MipGen.cpp
+        assets/TextureCache.h
+        assets/TextureCache.cpp
+        assets/TexturePipeline.h
+        assets/TexturePipeline.cpp
         assets/Etc2Compressor.cpp
         assets/AstcCompressor.cpp
         assets/stb/stb_image.h

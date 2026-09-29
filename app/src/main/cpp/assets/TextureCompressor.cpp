@@ -85,10 +85,6 @@ bool PassthroughCompressor::compress(const RawImage& in, CompressedImage& out,
 
 // ---- HardwareCompressor (F5.1-A: ASTC se extensão, senão ETC2; <256 → RGBA) --
 
-bool HardwareCompressor::compressible(u32 w, u32 h) {
-    return w >= 256u && h >= 256u;
-}
-
 bool HardwareCompressor::compress(const RawImage& in, CompressedImage& out,
                                   std::string& err) {
     err.clear();

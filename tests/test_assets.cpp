@@ -491,3 +491,247 @@ TEST(passthrough_estrutura_um_mip) {
     EXPECT(out.mips[0].offset == 0u);
     EXPECT(out.data == in.rgba);
 }
+
+// ---- F5.1-A: cache em disco + pipeline (gate 4K) ------------------------------
+#include "assets/TextureCache.h"
+#include "assets/TexturePipeline.h"
+#include "FakeStorage.h"
+
+namespace {
+
+std::vector<u8> readFixture(const std::string& name) {
+    // (a versão const char* está acima; esta recebe std::string p/ variar)
+    std::string path = std::string(FIXTURE_DIR) + "/" + name;
+    FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) {
+        return {};
+    }
+    std::vector<u8> bytes;
+    u8 buf[4096];
+    size_t n;
+    while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+        bytes.insert(bytes.end(), buf, buf + n);
+    }
+    std::fclose(f);
+    return bytes;
+}
+
+} // namespace
+
+TEST(cache_hash_distingue_conteudo) {
+    const u8 a[] = {1, 2, 3, 4};
+    const u8 b[] = {1, 2, 3, 5};
+    const u8 a2[] = {1, 2, 3, 4};
+    const u64 ha = TextureCache::hashBytes(a, sizeof(a));
+    EXPECT(ha == TextureCache::hashBytes(a2, sizeof(a2)));
+    EXPECT(ha != TextureCache::hashBytes(b, sizeof(b)));
+    EXPECT(TextureCache::hashBytes(nullptr, 0) ==
+           0xcbf29ce484222325ull);   // FNV offset basis
+    // nome de ficheiro determinístico
+    EXPECT(TextureCache::fileNameFor(1, CompressedFormat::ETC2_RGB) ==
+           TextureCache::fileNameFor(1, CompressedFormat::ASTC_4x4));
+}
+
+TEST(cache_store_load_roundtrip_hit) {
+    FakeStorage st;
+    TextureCache cache(st);
+
+    CompressedImage img;
+    img.format = CompressedFormat::ETC2_RGB;
+    img.width = 8;
+    img.height = 8;
+    img.data.resize(32);
+    for (size_t i = 0; i < img.data.size(); ++i) {
+        img.data[i] = static_cast<u8>(i * 7);
+    }
+    CompressedMip m;
+    m.width = 8; m.height = 8; m.offset = 0; m.size = 32;
+    img.mips.push_back(m);
+
+    const u64 hash = 0x1234567890abcdefull;
+    std::string err;
+    EXPECT(cache.store(hash, img, err));
+    EXPECT(err.empty());
+    // o ficheiro apareceu em textures/cache/
+    std::vector<std::string> files;
+    EXPECT(st.listDir(TextureCache::kDir, files));
+    EXPECT(files.size() == 1u);
+
+    CompressedImage out;
+    EXPECT(cache.load(hash, out, err));
+    EXPECT(err.empty());
+    EXPECT(out.format == img.format);
+    EXPECT(out.width == 8u && out.height == 8u);
+    EXPECT(out.data == img.data);
+    EXPECT(out.mips.size() == 1u);
+    EXPECT(out.mips[0].size == 32u);
+    EXPECT(cache.hits() == 1u);
+}
+
+TEST(cache_miss_corrompido_e_hash_divergente) {
+    FakeStorage st;
+    TextureCache cache(st);
+
+    // 1) ausente → miss
+    CompressedImage out;
+    std::string err;
+    EXPECT(!cache.load(42, out, err));
+    EXPECT(!err.empty());
+    EXPECT(cache.misses() == 1u);
+
+    // 2) ficheiro corrompido → miss (nunca crash)
+    CompressedImage img;
+    img.format = CompressedFormat::ETC2_RGBA;
+    img.width = 4; img.height = 4;
+    img.data.assign(64, 0xAB);
+    CompressedMip m;
+    m.width = 4; m.height = 4; m.offset = 0; m.size = 64;
+    img.mips.push_back(m);
+    const u64 hash = 77;
+    EXPECT(cache.store(hash, img, err));
+    const std::string rel =
+        std::string(TextureCache::kDir) + "/" + TextureCache::fileNameFor(hash, img.format);
+    st.files[rel] = "lixo que não é um cache";   // corrompe por cima
+    EXPECT(!cache.load(hash, out, err));
+    EXPECT(!err.empty());
+
+    // 3) truncado → miss
+    std::vector<u8> truncado(img.data.size() + 28 + 16);
+    st.files[rel].assign(reinterpret_cast<const char*>(truncado.data()), 30);
+    EXPECT(!cache.load(hash, out, err));
+
+    // 4) hash divergente (header incoerente) → miss
+    EXPECT(cache.load(hash + 1, out, err) == false);
+    EXPECT(cache.hits() == 0u);
+}
+
+TEST(cache_png_alterado_invalida_entrada_antiga_permanece) {
+    FakeStorage st;
+    TextureCache cache(st);
+    HardwareCompressor hw;   // ETC2 (hospedeiro sem ASTC marcado)
+    hw.setAstcSupported(false);
+
+    const std::vector<u8> png = readFixture("blue256.png");
+    EXPECT(png.size() > 8u);
+
+    // 1ª carga: miss → comprime → store
+    TexturePipeline pipe(hw, cache);
+    CompressedImage out;
+    TextureLoadInfo info;
+    std::string err;
+    const u64 h1 = TextureCache::hashBytes(png.data(), png.size());
+    EXPECT(pipe.process(png.data(), png.size(), "blue256.png", out, info, err));
+    EXPECT(err.empty());
+    EXPECT(!info.cacheHit);
+    EXPECT(info.format == CompressedFormat::ETC2_RGB);
+    EXPECT(std::string(info.via) == "compress");
+    EXPECT(pipe.lastHash() == h1);
+
+    // 2ª carga do MESMO PNG: hit do disco, blob idêntico
+    CompressedImage out2;
+    TextureLoadInfo info2;
+    EXPECT(pipe.process(png.data(), png.size(), "blue256.png", out2, info2, err));
+    EXPECT(info2.cacheHit);
+    EXPECT(std::string(info2.via) == "cache");
+    EXPECT(out2.data == out.data);
+    EXPECT(cache.hits() == 1u && cache.misses() == 1u);
+
+    // PNG ALTERADO (um byte muda) → hash novo → miss → nova entrada
+    std::vector<u8> png2 = png;
+    png2[png2.size() - 1] ^= 0xFF;
+    CompressedImage out3;
+    TextureLoadInfo info3;
+    EXPECT(pipe.process(png2.data(), png2.size(), "blue256b.png", out3, info3, err));
+    EXPECT(!info3.cacheHit);
+    EXPECT(cache.misses() == 2u);
+    // 2 ficheiros no cache (o antigo permanece — limpeza é manual)
+    std::vector<std::string> files;
+    EXPECT(st.listDir(TextureCache::kDir, files));
+    EXPECT(files.size() == 2u);
+    // e o original ainda faz hit
+    CompressedImage out4;
+    TextureLoadInfo info4;
+    EXPECT(pipe.process(png.data(), png.size(), "blue256.png", out4, info4, err));
+    EXPECT(info4.cacheHit);
+}
+
+TEST(pipeline_4k_com_compressao_nao_reduz) {
+    FakeStorage st;
+    TextureCache cache(st);
+    HardwareCompressor hw;
+    hw.setAstcSupported(false);   // ETC2 (garantido) — 4K mantém
+
+    const std::vector<u8> png = readFixture("green4096.png");
+    EXPECT(png.size() > 8u);
+
+    TexturePipeline pipe(hw, cache);
+    CompressedImage out;
+    TextureLoadInfo info;
+    std::string err;
+    EXPECT(pipe.process(png.data(), png.size(), "green4096.png", out, info, err));
+    EXPECT(err.empty());
+    EXPECT(info.warn.empty());          // com compressão NÃO há aviso
+    EXPECT(out.width == 4096u && out.height == 4096u);   // SEM downscale
+    EXPECT(out.format == CompressedFormat::ETC2_RGB);
+    // critério: 4K ETC2 RGB ≈ 8 MB — 2048 blocos/linha × 8 bytes
+    EXPECT(out.mips[0].size == 4096u * 4096u / 2u);
+    EXPECT(out.mips[0].size == 8388608u);
+    EXPECT(out.mips.size() == 13u);     // 4096 → 1
+    // hit na 2ª carga
+    CompressedImage out2;
+    TextureLoadInfo info2;
+    EXPECT(pipe.process(png.data(), png.size(), "green4096.png", out2, info2, err));
+    EXPECT(info2.cacheHit);
+    EXPECT(out2.data.size() == out.data.size());
+}
+
+TEST(pipeline_sem_compressao_4k_reduz_2k_com_aviso) {
+    FakeStorage st;
+    TextureCache cache(st);
+    PassthroughCompressor passthrough;   // fallback: nunca comprime
+
+    const std::vector<u8> png = readFixture("green4096.png");
+    TexturePipeline pipe(passthrough, cache);
+    CompressedImage out;
+    TextureLoadInfo info;
+    std::string err;
+    EXPECT(pipe.process(png.data(), png.size(), "green4096.png", out, info, err));
+    EXPECT(err.empty());
+    EXPECT(out.width == 2048u && out.height == 2048u);   // gate 2K
+    EXPECT(!info.warn.empty());                          // COM aviso
+    EXPECT(out.format == CompressedFormat::RGBA8);
+    EXPECT(std::string(info.via) == "raw");
+    EXPECT(cache.misses() == 1u);
+    // o RGBA do fallback TAMBÉM fica em cache — 2ª carga é hit
+    CompressedImage out2;
+    TextureLoadInfo info2;
+    EXPECT(pipe.process(png.data(), png.size(), "green4096.png", out2, info2, err));
+    EXPECT(info2.cacheHit);
+    EXPECT(out2.width == 2048u);   // vem do cache já reduzido
+    EXPECT(cache.hits() == 1u);
+}
+
+TEST(pipeline_pequena_256_borda_exata_e_png_invalido) {
+    FakeStorage st;
+    TextureCache cache(st);
+    HardwareCompressor hw;
+    TexturePipeline pipe(hw, cache);
+
+    // 256×256 → comprime (borda exata do gate)
+    const std::vector<u8> blue = readFixture("blue256.png");
+    CompressedImage out;
+    TextureLoadInfo info;
+    std::string err;
+    EXPECT(pipe.process(blue.data(), blue.size(), "blue256.png", out, info, err));
+    EXPECT(out.format == CompressedFormat::ETC2_RGB);
+    EXPECT(out.width == 256u);
+
+    // PNG inválido → erro claro, nada em cache
+    const u8 lixo[] = "isto nao e um png";
+    CompressedImage out2;
+    TextureLoadInfo info2;
+    EXPECT(!pipe.process(lixo, sizeof(lixo), "lixo.png", out2, info2, err));
+    EXPECT(err.find("lixo.png") != std::string::npos);
+    // vazio → erro
+    EXPECT(!pipe.process(nullptr, 0, "vazio.png", out2, info2, err));
+}

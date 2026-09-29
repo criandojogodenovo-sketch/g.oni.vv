@@ -1,6 +1,8 @@
-// render/GpuAssets.cpp — 1 ref → 1 objeto GL (F5-E, device).
+// render/GpuAssets.cpp — 1 ref → 1 objeto GL (F5-E; texturas F5.1-A).
 #include "render/GpuAssets.h"
 #include "assets/TextureCompressor.h"
+#include "assets/TexturePipeline.h"
+#include "platform/Log.h"
 #include "render/Mesh.h"
 #include "render/Texture.h"
 
@@ -42,16 +44,49 @@ const Texture* GpuAssets::texture(const std::string& relPath, std::string* warn)
         }
         return it->second.get();
     }
+
+    // F5.1-A: caminho canônico — PNG bytes → pipeline (cache disco +
+    // compressão ETC2/ASTC com cadeia de mips em CPU) → glCompressedTexImage2D
+    if (pipeline_ && rm_->storage()) {
+        std::vector<u8> bytes;
+        if (!rm_->storage()->readBytes(relPath, bytes) || bytes.empty()) {
+            LOGE("GpuAssets: textura não encontrada: %s", relPath.c_str());
+            return nullptr;
+        }
+        CompressedImage comp;
+        TextureLoadInfo info;
+        std::string perr;
+        if (!pipeline_->process(bytes.data(), bytes.size(), relPath.c_str(),
+                                comp, info, perr)) {
+            LOGE("GpuAssets: textura %s falhou: %s", relPath.c_str(),
+                 perr.c_str());
+            return nullptr;
+        }
+        if (warn && !info.warn.empty()) {
+            *warn = info.warn;
+        }
+        LOGI("GpuAssets: textura %s %ux%u %s via %s%s", relPath.c_str(),
+             comp.width, comp.height, formatName(comp.format), info.via,
+             info.warn.empty() ? "" : info.warn.c_str());
+        auto t = std::make_unique<Texture>();
+        if (!t->createFromCompressed(comp)) {
+            return nullptr;
+        }
+        Texture* raw = t.get();
+        gpuTextures_.emplace(relPath, std::move(t));
+        return raw;
+    }
+
+    // legacy F5 (sem pipeline): RawImage → passthrough → GL
     std::string err;
     const RawImage* img = rm_->image(relPath, err, warn);
     if (!img || !img->ok()) {
         return nullptr;
     }
-    // caminho canônico F5: RawImage → passthrough → GL (F5.1 troca aqui)
     static PassthroughCompressor kCompressor;
     CompressedImage comp;
-    std::string cerr;
-    if (!kCompressor.compress(*img, comp, cerr)) {
+    std::string cerr2;
+    if (!kCompressor.compress(*img, comp, cerr2)) {
         return nullptr;
     }
     auto t = std::make_unique<Texture>();
