@@ -15,6 +15,8 @@
 // Compila no hospedeiro (CI Linux) — __android_log_write só sob __ANDROID__.
 // Thread-safe (mutex); NÃO usar dentro do signal handler (o handler usa
 // open/write cru — ver CrashHandler.cpp).
+#include <string>
+#include <vector>
 
 namespace vv::elog {
 
@@ -56,5 +58,19 @@ void error(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 // núcleo sem formatação (o CrashHandler e os testes usam diretamente);
 // level = 'I' | 'W' | 'E'. Escreve "<ts> <level>/GONI: <line>\n".
 void writeLine(char level, const char* line);
+
+// ---- F5.2: LOG VIEWER in-app (Settings → "Ver logs") -----------------------
+// Lê as ÚLTIMAS maxLines linhas do engine.log (rotação incluída: ativo, e
+// se faltarem linhas continua nos backups .1/.2 — o histórico recente é o
+// que importa no diagnóstico). Ordem: a mais ANTIGA primeiro (como no
+// ficheiro). Linhas > kViewerLineMax chars são truncadas na leitura.
+// Devolve o nº de linhas lidas (0 = sem log ativo/vazio).
+constexpr int kViewerLineMax = 200;   // chars por linha no viewer (labelFitted corta em px)
+
+int readTail(std::vector<std::string>& out, int maxLines);
+
+// nomes dos dumps de crash no diretório ativo ("crash-<ts>.dump", ordenados
+// do mais RECENTE para o mais antigo). false = sem diretório ativo.
+bool listDumps(std::vector<std::string>& out);
 
 } // namespace vv::elog

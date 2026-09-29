@@ -8,11 +8,14 @@
 // boot tem dezenas de linhas, nunca no caminho quente do frame.
 #include "platform/EngineLog.h"
 
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <mutex>
 #include <string>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -213,6 +216,117 @@ void error(const char* fmt, ...) {
     va_start(ap, fmt);
     vwrite('E', fmt, ap);
     va_end(ap);
+}
+
+// ---- F5.2: log viewer (Settings → "Ver logs") ------------------------------
+//
+// readTail: lê o ficheiro ATIVO do fim para o começo (janela de 256KB no
+// máximo — o viewer nunca parte o frame por um ficheiro de 1MB); se o ativo
+// não tem linhas suficientes, continua nos backups .1/.2 (histórico recente).
+int readTail(std::vector<std::string>& out, int maxLines) {
+    out.clear();
+    if (maxLines <= 0) {
+        return 0;
+    }
+    std::lock_guard<std::mutex> lk(g_mu);
+    if (g_dir.empty()) {
+        return 0;
+    }
+    // ordem de leitura: .2 → .1 → ativo (antigo primeiro)
+    char path[512];
+    std::vector<std::string> parts;
+    for (int i = g_backups; i >= 1; --i) {
+        std::snprintf(path, sizeof(path), "%s/engine.log.%d", g_dir.c_str(), i);
+        parts.emplace_back(path);
+    }
+    std::snprintf(path, sizeof(path), "%s/engine.log", g_dir.c_str());
+    parts.emplace_back(path);
+
+    constexpr long kWindow = 256L * 1024L;
+    for (const std::string& p : parts) {
+        if (static_cast<int>(out.size()) >= maxLines) {
+            break;
+        }
+        FILE* f = std::fopen(p.c_str(), "rb");
+        if (!f) {
+            continue;   // backup ausente = normal (sem rotação ainda)
+        }
+        std::fseek(f, 0, SEEK_END);
+        const long size = std::ftell(f);
+        const long start = size > kWindow ? size - kWindow : 0;
+        std::fseek(f, start, SEEK_SET);
+        std::string data;
+        if (size > start) {
+            data.resize(static_cast<size_t>(size - start));
+            const size_t got = std::fread(&data[0], 1, data.size(), f);
+            data.resize(got);
+        }
+        std::fclose(f);
+        // começa numa linha inteira (janela pode ter cortado a 1ª a meio)
+        if (start > 0) {
+            const size_t nl = data.find('\n');
+            if (nl != std::string::npos) {
+                data.erase(0, nl + 1);
+            } else {
+                data.clear();
+            }
+        }
+        // separa linhas; mantém só as que faltam para o pedido
+        size_t pos = 0;
+        std::vector<std::string> lines;
+        while (pos < data.size()) {
+            size_t nl = data.find('\n', pos);
+            std::string line = data.substr(pos, nl == std::string::npos
+                                                  ? std::string::npos
+                                                  : nl - pos);
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            if (!line.empty()) {
+                if (static_cast<int>(line.size()) > kViewerLineMax) {
+                    line.resize(kViewerLineMax);
+                }
+                lines.push_back(line);
+            }
+            if (nl == std::string::npos) {
+                break;
+            }
+            pos = nl + 1;
+        }
+        // do backup só entram as linhas que faltam (as MAIS RECENTES dele:
+        // é o fim que liga ao ficheiro seguinte)
+        const int missing = maxLines - static_cast<int>(out.size());
+        const size_t first =
+            lines.size() > static_cast<size_t>(missing)
+                ? lines.size() - static_cast<size_t>(missing) : 0;
+        for (size_t i = first; i < lines.size(); ++i) {
+            out.push_back(lines[i]);
+        }
+    }
+    return static_cast<int>(out.size());
+}
+
+bool listDumps(std::vector<std::string>& out) {
+    out.clear();
+    std::lock_guard<std::mutex> lk(g_mu);
+    if (g_dir.empty()) {
+        return false;
+    }
+    DIR* d = ::opendir(g_dir.c_str());
+    if (!d) {
+        return false;
+    }
+    while (dirent* e = ::readdir(d)) {
+        const std::string n = e->d_name;
+        if (n.rfind("crash-", 0) == 0 &&
+            n.size() > 5 && n.compare(n.size() - 5, 5, ".dump") == 0) {
+            out.push_back(n);
+        }
+    }
+    ::closedir(d);
+    // mais RECENTE primeiro (timestamp decrescente do nome crash-<unixtime>)
+    std::sort(out.begin(), out.end(), std::greater<std::string>());
+    return true;
 }
 
 } // namespace vv::elog
