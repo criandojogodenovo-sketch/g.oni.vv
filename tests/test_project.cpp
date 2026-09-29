@@ -257,3 +257,20 @@ TEST(projeto_sem_cena_ativa_falha_sem_crash) {
     EXPECT(!p.saveActiveScene(st, s));
     EXPECT(!p.loadActiveScene(st, s, SceneSerializer::LoadCtx{}));
 }
+
+TEST(projeto_openOrCreate_abre_ou_cria_no_boot) {
+    FakeStorage st;
+    Project p;
+    // 1º boot: não há manifesto → cria com o nome dado
+    EXPECT(Project::openOrCreate(st, "boot1", p));
+    EXPECT(p.name == "boot1");
+    EXPECT(st.exists("scenes/main.goni"));
+    // 2º boot: abre o MESMO projeto (não cria, não renomeia)
+    Project q;
+    EXPECT(Project::openOrCreate(st, "outro_nome", q));
+    EXPECT(q.name == "boot1");
+    EXPECT(q.scenes == p.scenes);
+    // storage quebrado (rel-dir raiz imutável no FakeStorage — simula via
+    // guarda: manifesto existe E open falha E createNew falha não é possível
+    // no FakeStorage; o contrato aberto/criado já está coberto acima).
+}

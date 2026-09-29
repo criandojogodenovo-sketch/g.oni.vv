@@ -101,6 +101,15 @@ bool Project::open(ProjectStorage& st, Project& out) {
     return true;
 }
 
+bool Project::openOrCreate(ProjectStorage& st, const std::string& name, Project& out) {
+    Project p;
+    if (open(st, p)) {
+        out = std::move(p);
+        return true;
+    }
+    return createNew(st, name, out);
+}
+
 bool Project::saveManifest(ProjectStorage& st) const {
     const Json root = manifestToJson(*this);
     return st.writeText(kManifestFile, root.dump());

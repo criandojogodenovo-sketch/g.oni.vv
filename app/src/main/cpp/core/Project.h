@@ -55,6 +55,10 @@ public:
     // false se ausente, corrompido ou com refs inválidos.
     static bool open(ProjectStorage& st, Project& out);
 
+    // Fluxo do boot: abre o projeto existente; se não houver, cria um novo
+    // com `name`. false só se ambas falharem (storage inutilizável).
+    static bool openOrCreate(ProjectStorage& st, const std::string& name, Project& out);
+
     // Escreve o manifesto (createNew e qualquer mudança de estado chamam isto).
     bool saveManifest(ProjectStorage& st) const;
 

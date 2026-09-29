@@ -7,12 +7,15 @@
 #include <GLES3/gl3.h>
 #include <cmath>
 #include <cstdio>
+#include <memory>
 
 #include "components/MeshRenderer.h"
 #include "components/TouchControls.h"
 #include "components/Transform3D.h"
+#include "core/FsStorage.h"
 #include "core/PlaySnapshot.h"
 #include "core/Presets.h"
+#include "core/Project.h"
 #include "core/Scene.h"
 #include "core/SceneSerializer.h"
 #include "core/Tick.h"
@@ -63,7 +66,15 @@ bool                g_playMode = false;   // botão Play da toolbar liga/desliga
 // ao SAIR (a simulação é descartada; a física continua a correr só no Play)
 PlaySnapshot        g_playSnap;
 
-char g_scenePath[512] = "";          // <internalDataPath>/scene.goni
+
+// ---- F5-A: projeto .goni + storage -----------------------------------------
+// Raiz = getExternalFilesDir (externalDataPath; fallback internalDataPath).
+// O projeto vive nesta pasta: project.goni + scenes/ + meshes/ + textures/.
+// Boot abre o projeto existente ou cria "projeto" — e recarrega a cena
+// ativa (persistida no manifesto) após cada arranque.
+std::unique_ptr<FsStorage> g_storage;
+Project    g_project;
+bool       g_projectReady = false;   // storage + projeto com cena válida
 
 // estado do touch → câmara (entre frames)
 bool g_orbitActive = false;
@@ -263,6 +274,21 @@ void onAppCmd(android_app* app, i32 cmd) {
             }
             g_ui.init();
             g_ui.setFont(&g_font);
+            // F5-A/3: recarrega a CENA ATIVA do projeto (refs relativos
+            // intactos; resolvers de mesh chegam na F5-E — por agora o
+            // LoadCtx liga o cubo procedural, tag "cube" das cenas antigas)
+            if (g_projectReady) {
+                SceneSerializer::LoadCtx ctx;
+                ctx.cubeMesh = &g_cubeMesh;
+                ctx.material = g_renderer.litMaterial();
+                if (g_project.loadActiveScene(*g_storage, g_scene, ctx)) {
+                    LOGI("projeto: cena ativa '%s' carregada (%u tics)",
+                         g_project.activeScenePath()->c_str(), g_scene.count());
+                } else {
+                    LOGE("projeto: falha ao carregar a cena ativa '%s'",
+                         g_project.activeScenePath()->c_str());
+                }
+            }
             g_ready = true;
             LOGI("boot: janela pronta %dx%d", (int)g_egl.width(), (int)g_egl.height());
             break;
@@ -433,27 +459,29 @@ void frame() {
         editor::drawTouchControls(g_ui, *tcDraw, w, h);
     }
 
-    // overlay Menu → Save/Load .goni
+    // overlay Menu → Save/Load cena do projeto (F5-A: caminhos relativos,
+    // cena ativa guardada em scenes/<ativa>.goni + manifesto persistido)
     if (g_editor.fileMenu) {
         const int choice = editor::drawFileMenu(g_ui, g_input, w, h, g_editor);
-        if (choice == 1 && g_scenePath[0]) {
-            const bool ok = SceneSerializer::save(g_scene, g_scenePath);
+        if (choice == 1 && g_projectReady) {
+            const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
+                            g_project.saveManifest(*g_storage);
             char msg[64];
             std::snprintf(msg, sizeof(msg), ok ? "cena salva (%u tics)" : "falha ao salvar",
                           g_scene.count());
             showToast(msg);
-            LOGI("editor: %s → %s", msg, g_scenePath);
-        } else if (choice == 2 && g_scenePath[0]) {
+            LOGI("editor: %s → %s", msg, g_project.activeScenePath()->c_str());
+        } else if (choice == 2 && g_projectReady) {
             SceneSerializer::LoadCtx ctx;
             ctx.cubeMesh = &g_cubeMesh;
             ctx.material = g_renderer.litMaterial();
-            const bool ok = SceneSerializer::load(g_scene, g_scenePath, ctx);
+            const bool ok = g_project.loadActiveScene(*g_storage, g_scene, ctx);
             char msg[64];
             std::snprintf(msg, sizeof(msg), ok ? "cena carregada (%u tics)" : "falha ao carregar",
                           g_scene.count());
             showToast(msg);
             g_editor.selected = Handle::invalid();   // seleção antiga não sobrevive ao load
-            LOGI("editor: %s ← %s", msg, g_scenePath);
+            LOGI("editor: %s ← %s", msg, g_project.activeScenePath()->c_str());
         }
     }
 
@@ -480,10 +508,30 @@ void android_main(android_app* app) {
     // diagnóstico: crash log em <internalDataPath>/goni_crash.log (passo 7 F1)
     installCrashHandler(app->activity ? app->activity->internalDataPath : nullptr);
 
-    // F3: path da cena serializada (<internalDataPath>/scene.goni)
-    if (app->activity && app->activity->internalDataPath) {
-        std::snprintf(g_scenePath, sizeof(g_scenePath), "%s/scene.goni",
-                      app->activity->internalDataPath);
+    // F5-A: storage do projeto — raiz getExternalFilesDir (sem permissões
+    // desde a API 19); fallback = internalDataPath. Boot abre o projeto
+    // existente ou cria "projeto" (manifesto + estrutura completa).
+    {
+        const char* root = nullptr;
+        if (app->activity) {
+            root = app->activity->externalDataPath
+                       ? app->activity->externalDataPath
+                       : app->activity->internalDataPath;
+        }
+        if (root) {
+            g_storage = std::make_unique<FsStorage>(root);
+            if (Project::openOrCreate(*g_storage, "projeto", g_project)) {
+                g_projectReady = g_project.activeScenePath() != nullptr;
+                LOGI("projeto: '%s' pronto em %s (%u cena(s), ativa=%s)",
+                     g_project.name.c_str(), root,
+                     (unsigned)g_project.scenes.size(),
+                     g_projectReady ? g_project.activeScenePath()->c_str() : "-");
+            } else {
+                LOGE("projeto: storage inutilizável em %s — editor sem persistência", root);
+            }
+        } else {
+            LOGE("projeto: sem externalDataPath/internalDataPath — editor sem persistência");
+        }
     }
 
     // F3/F4: systems do engine (ordem interna ao grupo = registo)
