@@ -250,8 +250,10 @@ bool safInitJniBackend(void* vm, void* envPtr, void* activityObject) {
     return g_safBackend.initSingles(env);
 }
 
-SafJniBackend* safJniBackend() {
-    return g_safBackendReady ? &g_safBackend : nullptr;
+SafBackend* safJniBackend() {
+    return g_safBackendReady
+               ? static_cast<SafBackend*>(&g_safBackend)
+               : nullptr;
 }
 
 // ---- documento único: import/export de ficheiros ----------------------------
