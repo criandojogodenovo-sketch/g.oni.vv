@@ -1,6 +1,7 @@
-// app/build.gradle — G.One VV 0.4.0 (F4)
-// Mobile-first: arm64-v8a, minSdk 24, NativeActivity, landscape travado.
-// Zero Kotlin/Java próprio (hasCode=false — shim do sistema apenas).
+// app/build.gradle — G.One VV (F1→F5.1)
+// Mobile-first: arm64-v8a, minSdk 24, landscape travado.
+// F5.1-C: hasCode=true (VvActivity/SafIo) — exceção SAF documentada em
+// docs/SAF_EXCEPTION.md (o resto continua zero Kotlin/Java).
 plugins {
     id 'com.android.application'
 }
@@ -69,8 +70,8 @@ android {
 
     buildFeatures {
         buildConfig false
-        // Obs.: o AGP 8.5 sempre emite um classes.dex mínimo contendo apenas a
-        // classe R auto-gerada (vazia) — nenhum Java/Kotlin próprio existe aqui.
+        // F5.1-C: hasCode=true — o dex contém VvActivity + SafIo (exceção
+        // SAF, docs/SAF_EXCEPTION.md); nenhum outro Java/Kotlin próprio.
     }
 
     lint {
