@@ -124,13 +124,15 @@ void Renderer::beginFrame() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
-DrawStats Renderer::drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp) {
+DrawStats Renderer::drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp,
+                             const Texture* tex) {
     if (!mesh.ok()) {
         return {};
     }
     lit_.use();
     lit_.setVP(vp);
     lit_.setModel(model);
+    lit_.setTexture(tex);   // F5-E: albedo opcional (unit 0 + uHasTex)
     // pass 3D: depth visível (faces frontais ocluem as traseiras) + cull
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);

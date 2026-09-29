@@ -30,6 +30,7 @@
 #include "render/Camera.h"
 #include "render/Cube.h"
 #include "render/Grid.h"
+#include "render/GpuAssets.h"
 #include "render/Mesh.h"
 #include "render/Renderer.h"
 #include "ui/EditorUi.h"
@@ -76,6 +77,13 @@ std::unique_ptr<FsStorage> g_storage;
 Project    g_project;
 bool       g_projectReady = false;   // storage + projeto com cena válida
 
+// ---- F5-E: assets de runtime (cache CPU → cache GPU) ------------------------
+// Refs relativas ("meshes/x.obj#0", "textures/y.png") → MeshData/RawImage no
+// ResourceManager (CPU, 1 parse) → Mesh*/Texture* no GpuAssets (GL, 1 upload).
+// TICs que partilham a mesma ref partilham o MESMO objeto de GPU.
+ResourceManager g_resources;
+GpuAssets       g_gpu;
+
 // estado do touch → câmara (entre frames)
 bool g_orbitActive = false;
 f32  g_orbitX = 0.0f;
@@ -111,6 +119,26 @@ void applyContentRect(android_app* app) {
          "insets L%.0f T%.0f R%.0f B%.0f",
          (int)sw, (int)sh, cr.left, cr.top, cr.right, cr.bottom,
          (double)ins.left, (double)ins.top, (double)ins.right, (double)ins.bottom);
+}
+
+// F5-E: LoadCtx canônico do device — resolvers ligam refs relativas aos
+// objetos de GPU em cache (1 ref = 1 upload; memória de GPU não duplica)
+SceneSerializer::LoadCtx makeLoadCtx() {
+    SceneSerializer::LoadCtx ctx;
+    ctx.cubeMesh = &g_cubeMesh;
+    ctx.material = g_renderer.litMaterial();
+    ctx.resolveMesh = [](const std::string& ref) -> Mesh* {
+        return g_gpu.mesh(ref);
+    };
+    ctx.resolveTex = [](const std::string& ref) -> const Texture* {
+        std::string warn;
+        const Texture* t = g_gpu.texture(ref, &warn);
+        if (!warn.empty()) {
+            showToast(warn.c_str());   // gate 2K — aviso 1× por carga
+        }
+        return t;
+    };
+    return ctx;
 }
 
 // claimedMask: slots reclamados pelos TouchControls (joystick/botão) — a
@@ -253,6 +281,11 @@ void onAppCmd(android_app* app, i32 cmd) {
                 LOGE("boot: renderer falhou");
                 break;
             }
+            // F5-E: caches de assets ligados ao storage do projeto
+            if (g_storage) {
+                g_resources.setStorage(g_storage.get());
+                g_gpu.init(&g_resources);
+            }
             g_renderer.resize(g_egl.width(), g_egl.height());
             applyContentRect(app);   // F4.2: safe-area desde o primeiro frame
             // F3: geometria procedural do viewport (mesh partilhado dos presets)
@@ -278,9 +311,7 @@ void onAppCmd(android_app* app, i32 cmd) {
             // intactos; resolvers de mesh chegam na F5-E — por agora o
             // LoadCtx liga o cubo procedural, tag "cube" das cenas antigas)
             if (g_projectReady) {
-                SceneSerializer::LoadCtx ctx;
-                ctx.cubeMesh = &g_cubeMesh;
-                ctx.material = g_renderer.litMaterial();
+                const SceneSerializer::LoadCtx ctx = makeLoadCtx();
                 if (g_project.loadActiveScene(*g_storage, g_scene, ctx)) {
                     LOGI("projeto: cena ativa '%s' carregada (%u tics)",
                          g_project.activeScenePath()->c_str(), g_scene.count());
@@ -337,7 +368,7 @@ DrawStats drawTics(const Mat4& vp) {
         if (const Transform3D* tr = comps.transforms().find(mrs.owner(i))) {
             model = tr->world;   // mantido por TransformSystem (grupo Update)
         }
-        st = st + g_renderer.drawMesh(*mr.mesh, model, vp);
+        st = st + g_renderer.drawMesh(*mr.mesh, model, vp, mr.texture);
     }
     return st;
 }
@@ -472,9 +503,7 @@ void frame() {
             showToast(msg);
             LOGI("editor: %s → %s", msg, g_project.activeScenePath()->c_str());
         } else if (choice == 2 && g_projectReady) {
-            SceneSerializer::LoadCtx ctx;
-            ctx.cubeMesh = &g_cubeMesh;
-            ctx.material = g_renderer.litMaterial();
+            const SceneSerializer::LoadCtx ctx = makeLoadCtx();
             const bool ok = g_project.loadActiveScene(*g_storage, g_scene, ctx);
             char msg[64];
             std::snprintf(msg, sizeof(msg), ok ? "cena carregada (%u tics)" : "falha ao carregar",

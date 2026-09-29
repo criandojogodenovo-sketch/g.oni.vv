@@ -14,6 +14,7 @@
 namespace vv {
 
 class Mesh;
+class Texture;
 
 class Renderer {
 public:
@@ -21,8 +22,10 @@ public:
     void resize(i32 w, i32 h);
     void beginFrame();  // clear mono (BG #141414) + depth
 
-    // pass 3D: desenha com depth test + backface cull; devolve métricas
-    DrawStats drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp);
+    // pass 3D: desenha com depth test + backface cull; devolve métricas.
+    // F5-E: tex opcional — albedo do material (nullptr = cinza F2)
+    DrawStats drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp,
+                       const Texture* tex = nullptr);
 
     // pass UI (F1 mantido): submissões desenhadas em endFrame, sem depth
     void submit(const QuadBatch& batch, u32 texture);
