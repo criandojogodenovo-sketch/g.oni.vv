@@ -14,6 +14,8 @@
 
 #include "platform/CrashHandler.h"
 
+#include <cstdint>
+
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <signal.h>
