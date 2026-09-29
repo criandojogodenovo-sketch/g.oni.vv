@@ -80,6 +80,24 @@ void showToast(const char* msg) {
     g_toastT = 1.8f;
 }
 
+// F4.2 (B1): converte android_app->contentRect em Insets e injeta na UI.
+// Diagnóstico no device: esta linha do logcat mostra a superfície EGL, o
+// contentRect bruto e os insets resultantes (nav/status bar) — a causa raiz
+// do scroll morto no Inspector era a altura visível inflada pela nav bar.
+void applyContentRect(android_app* app) {
+    const i32 sw = g_egl.width();
+    const i32 sh = g_egl.height();
+    const ARect& cr = app->contentRect;
+    const safe::Insets ins = safe::insetsFromContentRect(
+        static_cast<f32>(sw), static_cast<f32>(sh),
+        cr.left, cr.top, cr.right, cr.bottom);
+    g_ui.setSafeArea(ins);
+    LOGI("safearea: surface %dx%d content [%d %d %d %d] "
+         "insets L%.0f T%.0f R%.0f B%.0f",
+         (int)sw, (int)sh, cr.left, cr.top, cr.right, cr.bottom,
+         (double)ins.left, (double)ins.top, (double)ins.right, (double)ins.bottom);
+}
+
 // claimedMask: slots reclamados pelos TouchControls (joystick/botão) — a
 // câmara de orbit ignora esses dedos (F4)
 void updateCameraOrbit(const InputState& in, const UiRect& view, u32 claimedMask) {
@@ -181,16 +199,19 @@ u32 feedTouchControls(f32 w, f32 h, bool& outDrawn, TouchControls** outTc) {
             outDrawn = true;
         }
         for (u32 s = 0; s < kMaxPointerSlots; ++s) {
+            // F4.2: w/h chegam como ÁREA ÚTIL; o toque vem em coords de ecrã
+            // → converte para o espaço do layout dos controlos (mesma
+            // transformação que drawTouchControls usa ao desenhar)
             if (g_input.pressed(s)) {
                 f32 x, y;
                 g_input.pos(s, x, y);
-                if (tc.touchBegin(s, x, y, w, h)) {
+                if (tc.touchBegin(s, x - g_ui.safeLeft(), y - g_ui.safeTop(), w, h)) {
                     claimed |= (1u << s);
                 }
             } else if (g_input.down(s) && tc.ownsSlot(s)) {
                 f32 x, y;
                 g_input.pos(s, x, y);
-                tc.touchMove(s, x, y);
+                tc.touchMove(s, x - g_ui.safeLeft(), y - g_ui.safeTop());
                 claimed |= (1u << s);
             }
             if (g_input.released(s)) {
@@ -218,6 +239,7 @@ void onAppCmd(android_app* app, i32 cmd) {
                 break;
             }
             g_renderer.resize(g_egl.width(), g_egl.height());
+            applyContentRect(app);   // F4.2: safe-area desde o primeiro frame
             // F3: geometria procedural do viewport (mesh partilhado dos presets)
             {
                 const CubeMeshData cube = makeCube(1.0f);
@@ -244,6 +266,12 @@ void onAppCmd(android_app* app, i32 cmd) {
         case APP_CMD_CONFIG_CHANGED:
             g_egl.refreshSize();
             g_renderer.resize(g_egl.width(), g_egl.height());
+            applyContentRect(app);   // F4.2: barras podem ter mudado
+            break;
+        case APP_CMD_CONTENT_RECT_CHANGED:
+            // F4.2 (fix raiz do B1): o sistema avisou que a área desenhável
+            // mudou (nav/status bar a aparecer/esconder) → reinsetar TUDO
+            applyContentRect(app);
             break;
         case APP_CMD_TERM_WINDOW:
             g_ready = false;
@@ -288,14 +316,18 @@ void drawToast() {
     if (g_toastT <= 0.0f || !g_ui.hasFont()) {
         return;
     }
-    const f32 w = static_cast<f32>(g_egl.width());
-    const f32 sh = static_cast<f32>(g_egl.height());
     const f32 alpha = g_toastT < 1.0f ? g_toastT : 1.0f;
     const f32 tw = g_ui.fontWidth(g_toast);
     const f32 bw = tw + 32.0f;
     const f32 bh = 44.0f;
-    const f32 bx = (w - bw) * 0.5f;
-    const f32 by = sh - UiContext::kStatusH - bh - 18.0f;
+    // F4.2: toast dentro da safe-area (acima da status line, que também vive
+    // no contentRect)
+    const f32 ox = g_ui.safeLeft();
+    const f32 oy = g_ui.safeTop();
+    const f32 aw = static_cast<f32>(g_egl.width()) - ox - g_ui.safeRight();
+    const f32 ah = static_cast<f32>(g_egl.height()) - oy - g_ui.safeBottom();
+    const f32 bx = ox + (aw - bw) * 0.5f;
+    const f32 by = oy + ah - UiContext::kStatusH - bh - 18.0f;
     const f32 bg[4] = {theme::PANEL[0], theme::PANEL[1], theme::PANEL[2], 0.95f * alpha};
     const f32 tx[4] = {theme::TEXT[0], theme::TEXT[1], theme::TEXT[2], alpha};
     g_ui.panel(bx, by, bw, bh, bg);
@@ -311,10 +343,13 @@ void frame() {
     // nos controlos não vão para a câmara
     bool tcDrawn = false;
     TouchControls* tcDraw = nullptr;
-    const u32 claimed = feedTouchControls(w, h, tcDrawn, &tcDraw);
+    const f32 tcW = w - g_ui.safeLeft() - g_ui.safeRight();   // F4.2: área útil
+    const f32 tcH = h - g_ui.safeTop() - g_ui.safeBottom();
+    const u32 claimed = feedTouchControls(tcW, tcH, tcDrawn, &tcDraw);
 
-    // input do frame anterior → câmara (só gestos nascidos no viewport central)
-    updateCameraOrbit(g_input, editor::centerRect(w, h), claimed);
+    // input do frame anterior → câmara (só gestos nascidos no viewport
+    // central da SAFE-AREA — gestos atrás da nav bar não orbitam, F4.2)
+    updateCameraOrbit(g_input, editor::centerRect(w, h, g_ui.safeArea()), claimed);
 
     // F4: base de movimento do input = câmara (stick-cima afasta da câmara)
     {

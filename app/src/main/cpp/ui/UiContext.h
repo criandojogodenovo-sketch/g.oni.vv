@@ -6,10 +6,16 @@
 // endScroll() com drag-to-scroll, clamp e indicador (matemática em
 // ui/ScrollMath.h, GL-free e testada no CI); quads desenhados dentro da
 // região são RECORTADOS por interseção (sem glScissor — quad batch único).
+// F4.2: safe-area — o main lê android_app->contentRect e injeta os Insets
+// (setSafeArea); toolbarRect/statusRect/viewportRect passam a viver DENTRO
+// do contentRect (matemática em ui/SafeArea.h, GL-free e testada) — com a
+// altura real dos painéis o overflow do Inspector é detetado e o scroll
+// ativa no C33 (B1).
 #include "render/QuadBatch.h"
 #include "render/Renderer.h"
 #include "ui/FontAtlas.h"
 #include "ui/ScrollMath.h"
+#include "ui/SafeArea.h"
 #include "platform/InputState.h"
 
 namespace vv {
@@ -65,18 +71,31 @@ public:
     void toolbar(bool outClicks[3]);   // exatamente 3 botões: Menu, Play, Settings
     void statusLine(const char* text); // fps + contagem de TICs
 
+    // F4.2: safe-area do sistema (nav/status bar). Insets default = 0 →
+    // comportamento antigo (superfície inteira). O main injeta os Insets
+    // derivados de android_app->contentRect; TODOS os rects abaixo (e os
+    // painéis do EditorUi, que leem safeArea()) ficam dentro do contentRect.
+    void setSafeArea(const safe::Insets& in) { safe_ = in; }
+    const safe::Insets& safeArea() const { return safe_; }
+    f32 safeLeft()   const { return safe_.left; }
+    f32 safeTop()    const { return safe_.top; }
+    f32 safeRight()  const { return safe_.right; }
+    f32 safeBottom() const { return safe_.bottom; }
+
+    // rects do layout — delegam em safe::* (fonte única, testada no CI)
     UiRect toolbarRect() const {
-        return {0.0f, 0.0f, sw_, kToolbarH};
+        return safe::toolbarRect(sw_, sh_, safe_);
     }
     UiRect statusRect() const {
-        return {0.0f, sh_ - kStatusH, sw_, kStatusH};
+        return safe::statusRect(sw_, sh_, safe_);
     }
     UiRect viewportRect() const {
-        return {0.0f, kToolbarH, sw_, sh_ - kToolbarH - kStatusH};
+        return safe::viewportRect(sw_, sh_, safe_);
     }
 
-    static constexpr f32 kToolbarH = 88.0f;
-    static constexpr f32 kStatusH  = 40.0f;
+    // re-export: as constantes agora vivem em ui/SafeArea.h (fonte única)
+    static constexpr f32 kToolbarH = safe::kToolbarH;
+    static constexpr f32 kStatusH  = safe::kStatusH;
 
 private:
     // emite um quad recortado pelo clip_ (panel/label passam por aqui)
@@ -88,6 +107,7 @@ private:
     FontAtlas*        font_ = nullptr;
     f32               sw_ = 0.0f;
     f32               sh_ = 0.0f;
+    safe::Insets      safe_{};       // F4.2: insetos do sistema (default 0)
     u64               active_ = 0;   // botão pressionado (immediate mode)
     QuadBatch         solids_;
     QuadBatch         glyphs_;

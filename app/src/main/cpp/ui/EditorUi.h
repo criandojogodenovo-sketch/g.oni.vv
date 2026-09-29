@@ -21,6 +21,12 @@
 // fora do painel. IDs: toolbar 1..3 (F1), scroll 41/42, hierarquia 40 e
 // 1000+, presets 20..23, menu de ficheiro 30..31, sliders 2000+, velx 2100,
 // add TouchControls 3001.
+//
+// F4.2: safe-area — os painéis e o viewport central passam a viver DENTRO do
+// contentRect do sistema (ui/SafeArea.h; insets injetados pelo main a partir
+// de android_app->contentRect). Com a altura real dos painéis, o overflow do
+// Inspector é detetado e o scroll ativa no C33 (B1); gestos atrás da nav bar
+// não orbitam a câmara (centerRect com insets).
 #include "core/Handle.h"
 #include "ui/UiContext.h"
 #include "ui/EditorLayout.h"
@@ -33,7 +39,8 @@ class TouchControls;
 
 namespace editor {
 
-constexpr f32 kPanelW = 300.0f;   // largura dos painéis laterais
+// re-export: a largura dos painéis agora vive em ui/SafeArea.h (fonte única)
+constexpr f32 kPanelW = safe::kPanelW;
 
 struct EditorState {
     Handle selected = Handle::invalid();   // TIC selecionado na Hierarchy
@@ -42,7 +49,10 @@ struct EditorState {
 };
 
 // Rect do viewport central (entre os painéis) — usado para o gate da câmara.
+// Versão SEM safe-area (insets zero) mantida para compat/testes.
 UiRect centerRect(f32 sw, f32 sh);
+// F4.2: com insets do sistema — gestos atrás da nav/status bar não orbitam.
+UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in);
 
 // Painel esquerdo: lista de TICs COM SCROLL (todas as entradas, sem corte) +
 // botão "+" no cabeçalho. Tap numa linha seleciona (re-despacho do scroll).
@@ -58,13 +68,16 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st);
 
 // F4: controlos de toque (só em modo Play, só se algum TIC ativo tem o
 // componente) — joystick quadrado + botão JUMP no quad batch, tema mono.
+// F4.2: posicionados dentro da safe-area (o layout fixo do TouchControls é
+// recalculado para a área útil e deslocado pelos insets — nada atrás da
+// nav bar).
 void drawTouchControls(UiContext& ui, const TouchControls& tc, f32 sw, f32 sh);
 
 // Overlays. Devolvem a escolha do frame:
 //   drawPlusMenu → 0 nada, 1..4 = PresetKind (1=Player, 2=Character,
 //                  3=Static, 4=Rigid)
 //   drawFileMenu → 0 nada, 1 = save, 2 = load
-// Ambos fecham com toque fora do painel (mutam st).
+// Ambos fecham com toque fora do painel (mutam st) e centrados na safe-area.
 int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st);
 int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st);
 

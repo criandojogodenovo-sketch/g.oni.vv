@@ -53,8 +53,13 @@ bool sliderRow(UiContext& ui, u64 id, f32 x, f32 y, const char* labelText,
 } // namespace
 
 UiRect centerRect(f32 sw, f32 sh) {
-    return {kPanelW, UiContext::kToolbarH,
-            sw - 2.0f * kPanelW, sh - UiContext::kToolbarH - UiContext::kStatusH};
+    return centerRect(sw, sh, safe::Insets{});   // sem safe-area (compat/testes)
+}
+
+// F4.2: viewport central DENTRO do contentRect — gestos que nascem atrás da
+// nav/status bar não orbitam a câmara (matemática em ui/SafeArea.h).
+UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in) {
+    return safe::centerRect(sw, sh, in);
 }
 
 // ---------------------------------------------------------------------------
@@ -62,10 +67,13 @@ UiRect centerRect(f32 sw, f32 sh) {
 // da F3). Drag na lista = scroll; tap numa linha = seleciona (re-despacho).
 // ---------------------------------------------------------------------------
 bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
-    const f32 x = 0.0f;
-    const f32 y = UiContext::kToolbarH;
-    const f32 w = kPanelW;
-    const f32 h = ui.screenHeight() - UiContext::kToolbarH - UiContext::kStatusH;
+    // F4.2: painel inteiro dentro do contentRect (insets do sistema)
+    const UiRect panel = safe::hierarchyPanelRect(ui.screenWidth(), ui.screenHeight(),
+                                                  ui.safeArea());
+    const f32 x = panel.x;
+    const f32 y = panel.y;
+    const f32 w = panel.w;
+    const f32 h = panel.h;
 
     ui.panel(x, y, w, h, theme::PANEL);
     ui.panel(x + w - 1.0f, y, 1.0f, h, theme::LINE);   // separador direito
@@ -130,10 +138,14 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
 // prioridade de captura; tap re-despachado aciona o botão do fundo.
 // ---------------------------------------------------------------------------
 bool drawInspector(UiContext& ui, Scene& scene, EditorState& st) {
-    const f32 x = ui.screenWidth() - kPanelW;
-    const f32 y = UiContext::kToolbarH;
-    const f32 w = kPanelW;
-    const f32 h = ui.screenHeight() - UiContext::kToolbarH - UiContext::kStatusH;
+    // F4.2: painel inteiro dentro do contentRect — a altura REAL alimenta o
+    // beginScroll → o overflow do Inspector é detetado e o scroll ativa (B1)
+    const UiRect panel = safe::inspectorPanelRect(ui.screenWidth(), ui.screenHeight(),
+                                                  ui.safeArea());
+    const f32 x = panel.x;
+    const f32 y = panel.y;
+    const f32 w = panel.w;
+    const f32 h = panel.h;
 
     ui.panel(x, y, w, h, theme::PANEL);
     ui.panel(x, y, 1.0f, h, theme::LINE);   // separador esquerdo
@@ -271,12 +283,21 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st) {
 }
 
 void drawTouchControls(UiContext& ui, const TouchControls& tc, f32 sw, f32 sh) {
-    const TouchControls::Layout l = TouchControls::layout(sw, sh);
+    // F4.2: layout fixo recalculado para a ÁREA ÚTIL (superfície menos insets)
+    // e deslocado pela origem do contentRect — nada desenhado atrás da
+    // nav/status bar. TouchControls.cpp fica intocado (CLÁUSULA CALMA).
+    const f32 ox = ui.safeLeft();
+    const f32 oy = ui.safeTop();
+    const f32 aw = sw - ui.safeLeft() - ui.safeRight();
+    const f32 ah = sh - ui.safeTop() - ui.safeBottom();
+    const TouchControls::Layout l = TouchControls::layout(aw, ah);
+    const f32 jx = ox + l.joyCX;
+    const f32 jy = oy + l.joyCY;
 
     // joystick: base em quadro + knob quadrado (mono brutalist — só retângulos)
-    ui.frame(l.joyCX - l.joyR, l.joyCY - l.joyR, 2.0f * l.joyR, 2.0f * l.joyR,
+    ui.frame(jx - l.joyR, jy - l.joyR, 2.0f * l.joyR, 2.0f * l.joyR,
              2.0f, theme::LINE);
-    ui.panel(l.joyCX - 1.0f, l.joyCY - 1.0f, 2.0f, 2.0f, theme::LINE);
+    ui.panel(jx - 1.0f, jy - 1.0f, 2.0f, 2.0f, theme::LINE);
     f32 kx = tc.baseX();
     f32 ky = tc.baseY();
     bool active = false;
@@ -293,20 +314,24 @@ void drawTouchControls(UiContext& ui, const TouchControls& tc, f32 sw, f32 sh) {
         ky = tc.baseY() + dy;
     }
     const f32 ks = 44.0f;
+    kx += ox;   // F4.2: base/knob vivem em coords locais da safe-area
+    ky += oy;
     ui.panel(kx - ks * 0.5f, ky - ks * 0.5f, ks, ks,
              active ? theme::ACCENT : theme::PANEL);
     ui.frame(kx - ks * 0.5f, ky - ks * 0.5f, ks, ks, 1.0f, theme::LINE);
 
     // botão JUMP: premido = invertido (tema mono)
     const bool held = tc.buttonHeld();
+    const f32 bx2 = ox + l.btnX;
+    const f32 by2 = oy + l.btnY;
     if (held) {
-        ui.panel(l.btnX, l.btnY, l.btnW, l.btnH, theme::TEXT);
+        ui.panel(bx2, by2, l.btnW, l.btnH, theme::TEXT);
     }
-    ui.frame(l.btnX, l.btnY, l.btnW, l.btnH, 2.0f, held ? theme::PANEL : theme::ACCENT);
+    ui.frame(bx2, by2, l.btnW, l.btnH, 2.0f, held ? theme::PANEL : theme::ACCENT);
     if (ui.hasFont()) {
         const f32 tw = ui.fontWidth("JUMP");
         const f32 thh = ui.fontHeight();
-        ui.label(l.btnX + (l.btnW - tw) * 0.5f, l.btnY + l.btnH * 0.5f + thh * 0.30f,
+        ui.label(bx2 + (l.btnW - tw) * 0.5f, by2 + l.btnH * 0.5f + thh * 0.30f,
                  "JUMP", held ? theme::PANEL : theme::TEXT);
     }
 }
@@ -314,8 +339,13 @@ void drawTouchControls(UiContext& ui, const TouchControls& tc, f32 sw, f32 sh) {
 int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st) {
     const f32 w = kMenuW;
     const f32 h = kHeaderH + 4.0f * 64.0f + kPad;
-    const f32 x = (sw - w) * 0.5f;
-    const f32 y = (sh - h) * 0.5f;
+    // F4.2: centrado no viewport ÚTIL (dentro do contentRect)
+    const f32 ox = ui.safeLeft();
+    const f32 oy = ui.safeTop();
+    const f32 aw = sw - ox - ui.safeRight();
+    const f32 ah = sh - oy - ui.safeBottom();
+    const f32 x = ox + (aw - w) * 0.5f;
+    const f32 y = oy + (ah - h) * 0.5f;
 
     if (pressedOutside(in, x, y, w, h)) {
         st.plusMenu = false;
@@ -343,8 +373,13 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st) {
     const f32 w = kMenuW;
     const f32 h = kHeaderH + 2.0f * 64.0f + kPad;
-    const f32 x = (sw - w) * 0.5f;
-    const f32 y = (sh - h) * 0.5f;
+    // F4.2: centrado no viewport ÚTIL (dentro do contentRect)
+    const f32 ox = ui.safeLeft();
+    const f32 oy = ui.safeTop();
+    const f32 aw = sw - ox - ui.safeRight();
+    const f32 ah = sh - oy - ui.safeBottom();
+    const f32 x = ox + (aw - w) * 0.5f;
+    const f32 y = oy + (ah - h) * 0.5f;
 
     if (pressedOutside(in, x, y, w, h)) {
         st.fileMenu = false;

@@ -284,7 +284,7 @@ void UiContext::toolbar(bool outClicks[3]) {
     panel(r.x, r.y + r.h - 1.0f, r.w, 1.0f, theme::LINE);   // separador inferior
 
     for (u32 i = 0; i < 3; ++i) {
-        const f32 bx = kPad + static_cast<f32>(i) * (kBtnW + kBtnGap);
+        const f32 bx = r.x + kPad + static_cast<f32>(i) * (kBtnW + kBtnGap);
         const f32 by = (kToolbarH - kBtnH) * 0.5f;
         outClicks[i] = button(1 + i, bx, by, kBtnW, kBtnH, kNames[i]);
     }
@@ -297,7 +297,7 @@ void UiContext::statusLine(const char* text) {
 
     if (font_ && font_->ok() && text) {
         const f32 th = font_->height();
-        label(12.0f, r.y + kStatusH * 0.5f + th * 0.30f, text, theme::TEXT);
+        label(r.x + 12.0f, r.y + kStatusH * 0.5f + th * 0.30f, text, theme::TEXT);
     }
 }
 
