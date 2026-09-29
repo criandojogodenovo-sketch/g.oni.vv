@@ -26,3 +26,11 @@ implementação JNI (`platform/SafIoJni.cpp`) existe só na build Android.
 - `android:hasCode="true"` no manifest (AGP volta a dexar as 2 classes).
 - O AGP 8.5 já emitia um `classes.dex` mínimo; o impacto no APK é ~2-3 KB.
 - Tema mono, 3 botões, landscape e o resto da app não mudam.
+
+## F5.1-hotfix (0.6.1) — ampliação da exceção
+
+`VvActivity.exportLogsToDownloads(relPath)` usa MediaStore (API 29+) para
+copiar `getExternalFilesDir("logs")` → `Downloads/GOneVV/logs/` — chamado
+por JNI do nativo (botão Settings → "Exportar logs"). Continua a MESMA
+superfície Java mínima (sem permissões novas; ContentResolver é thread-safe
+e não toca na UI). Detalhes: docs/AUDIT_SAF_JNI.md.
