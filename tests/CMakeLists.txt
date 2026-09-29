@@ -105,6 +105,7 @@ add_executable(test_core
         ${CORE_DIR}/ui/FontAtlas.cpp
         ${CORE_DIR}/platform/InputState.cpp
         ${CORE_DIR}/platform/EngineLog.cpp
+        ${CORE_DIR}/platform/CrashHandler.cpp
         ${CORE_DIR}/render/Renderer.cpp
         ${CORE_DIR}/render/Mesh.cpp
         ${CORE_DIR}/render/Material.cpp

@@ -949,10 +949,10 @@ void android_main(android_app* app) {
             elog::init(logsDir);
         }
     }
-    // F5.1-hotfix: crash dump legível (SIGSEGV/SIGABRT/SIGBUS/SIGFPE →
-    // crash-<ts>.dump no MESMO diretório do engine.log) — instalado em 3/6;
-    // por agora o handler F1 (goni_crash.log) continua como fallback.
-    installCrashHandler(app->activity ? app->activity->internalDataPath : nullptr);
+    // F5.1-hotfix: crash dump PERMANENTE (todas as builds) — SIGSEGV/ABRT/
+    // BUS/FPE → crash-<ts>.dump legível (função+offset) no MESMO diretório
+    // do engine.log; o dump também é marcado no log ("CRASH …").
+    vv::crash::install(elog::dir());
     elog::info("logs: %s (ativo=%d)", elog::dir()[0] ? elog::dir() : "<só-logcat>",
                elog::active() ? 1 : 0);
 

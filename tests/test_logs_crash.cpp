@@ -17,6 +17,10 @@
 #include <vector>
 
 #include "platform/EngineLog.h"
+#include "platform/CrashHandler.h"
+
+#include <sys/wait.h>
+#include <unistd.h>
 
 using namespace vv;
 
@@ -158,4 +162,91 @@ TEST(log_downloads_path_constant) {
     // Environment.DIRECTORY_DOWNLOADS == "Download" — o Java monta
     // <REL>/… a partir desta constante ÚNICA (recebida por JNI).
     EXPECT(std::string(vv::elog::kDownloadsRelPath) == "Download/GOneVV/logs");
+}
+
+// ---------------------------------------------------------------------------
+// parte 1.2 — crash dump
+// ---------------------------------------------------------------------------
+
+TEST(crash_writeDumpFromFrames_formato_legivel) {
+    rmrf(kTestDir);
+    ::mkdir(kTestDir, 0755);
+    void* pcs[8];
+    const int n = vv::crash::captureFrames(pcs, 8);
+    EXPECT(n >= 2);   // este teste + o runner de casos já dão ≥2 frames
+
+    const std::string path = std::string(kTestDir) + "/crash-test.dump";
+    EXPECT(vv::crash::writeDumpFromFrames(path.c_str(), "SIGSEGV", 11,
+                                          nullptr, pcs, n) == 0);
+    const std::string data = slurp(path);
+    EXPECT(data.find("crash dump") != std::string::npos);
+    EXPECT(data.find("signal: SIGSEGV (11)") != std::string::npos);
+    EXPECT(data.find("frames: ") != std::string::npos);
+    // frames com pc + offset relativo à base do módulo (legível sem ndk-stack)
+    EXPECT(data.find("#00 pc 0x") != std::string::npos);
+    EXPECT(data.find("libgoni_vv") != std::string::npos ||
+           data.find("test_core") != std::string::npos);
+    // a 2ª frame referência o símbolo do TESTE atual (dladdr resolve)
+    EXPECT(data.find("test_") != std::string::npos);
+    rmrf(kTestDir);
+}
+
+// handler REAL num subprocesso: instala, levanta SIGSEGV, verifica que o
+// dump aparece com o nome do sinal e frames (o CI Linux executa o MESMO
+// código que o device corre no boot).
+void child_raises_sigsegv(const char* dir) {
+    vv::crash::install(dir);
+    ::raise(SIGSEGV);   // handler → dump → re-raise default → morte por sinal
+    ::_exit(0);         // não deve chegar aqui
+}
+
+TEST(crash_handler_captura_sigsegv_num_subprocesso) {
+    rmrf(kTestDir);
+    ::mkdir(kTestDir, 0755);
+    const pid_t pid = ::fork();
+    EXPECT(pid >= 0);
+    if (pid == 0) {
+        child_raises_sigsegv(kTestDir);   // nunca retorna
+    }
+    int status = 0;
+    EXPECT(::waitpid(pid, &status, 0) == pid);
+    EXPECT(WIFSIGNALED(status));        // morreu POR SIGSEGV (re-raise)
+    EXPECT(WTERMSIG(status) == SIGSEGV);
+
+    // o dump existe e tem o formato esperado
+    const std::string path = std::string(kTestDir) + "/crash-test.dump";
+    // o handler usa crash-<unixtime>.dump — procurar o ficheiro real
+    std::string found;
+    DIR* d = ::opendir(kTestDir);
+    if (d) {
+        while (dirent* e = ::readdir(d)) {
+            const std::string n = e->d_name;
+            if (n.rfind("crash-", 0) == 0 &&
+                n.rfind(".dump") == n.size() - 5) {
+                found = std::string(kTestDir) + "/" + n;
+            }
+        }
+        ::closedir(d);
+    }
+    EXPECT(!found.empty());
+    const std::string data = found.empty() ? "" : slurp(found);
+    EXPECT(data.find("signal: SIGSEGV (11)") != std::string::npos);
+    EXPECT(data.find("#00 pc ") != std::string::npos ||
+           data.find("#-1 pc ") != std::string::npos ||
+           data.find("frames: ") != std::string::npos);
+
+    // e o engine.log (se existir no dir) recebe a marca "CRASH"
+    vv::elog::init(kTestDir);
+    vv::elog::info("linha-normal-do-boot");
+    vv::elog::shutdown();
+    rmrf(kTestDir);
+}
+
+TEST(crash_signalName_cobre_os_4_sinais) {
+    EXPECT(std::string(vv::crash::signalName(SIGSEGV)) == "SIGSEGV");
+    EXPECT(std::string(vv::crash::signalName(SIGABRT)) == "SIGABRT");
+    EXPECT(std::string(vv::crash::signalName(SIGBUS)) == "SIGBUS");
+    EXPECT(std::string(vv::crash::signalName(SIGFPE)) == "SIGFPE");
+    EXPECT(vv::crash::writeDumpFromFrames(nullptr, "SIGSEGV", 11, nullptr,
+                                          nullptr, 0) != 0);   // path null → erro, sem crash
 }
