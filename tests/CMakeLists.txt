@@ -17,6 +17,7 @@ add_executable(test_core
         test_import_gltf.cpp
         test_gltf_textures.cpp
         test_saf.cpp
+        test_f51_roundtrip.cpp
         test_assets.cpp
         test_storage.cpp
         test_safearea.cpp

@@ -133,6 +133,9 @@ add_library(goni_vv SHARED
         platform/EglContext.cpp
         platform/InputState.h
         platform/InputState.cpp
+        # F5.1-C: ponte SAF (device-only — a suíte core compila sem estes TUs)
+        platform/SafBridge.cpp
+        platform/SafIoJni.cpp
         platform/main.cpp)
 
 target_include_directories(goni_vv PRIVATE

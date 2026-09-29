@@ -481,7 +481,9 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 
 int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st) {
     const f32 w = kMenuW;
-    const f32 h = kHeaderH + 3.0f * 64.0f + kPad;   // F5-E: + Export OBJ
+    // F5-E: + Export OBJ; F5.1-C: + Pasta(SAF)/Importar/Export SAF
+    constexpr int kItems = 6;
+    const f32 h = kHeaderH + static_cast<f32>(kItems) * 64.0f + kPad;
     // F4.2: centrado no viewport ÚTIL (dentro do contentRect)
     const f32 ox = ui.safeLeft();
     const f32 oy = ui.safeTop();
@@ -501,18 +503,15 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "MENU", theme::TEXT);
 
     int chosen = 0;
-    if (ui.button(30, x + kPad, y + kHeaderH, w - 2.0f * kPad, 56.0f, "Save cena")) {
-        chosen = 1;
-        st.fileMenu = false;
-    }
-    if (ui.button(31, x + kPad, y + kHeaderH + 64.0f, w - 2.0f * kPad, 56.0f, "Load cena")) {
-        chosen = 2;
-        st.fileMenu = false;
-    }
-    if (ui.button(32, x + kPad, y + kHeaderH + 128.0f, w - 2.0f * kPad, 56.0f,
-                  "Export OBJ")) {
-        chosen = 3;
-        st.fileMenu = false;
+    const char* labels[kItems] = {"Save cena", "Load cena", "Export OBJ",
+                                  "Pasta (SAF)", "Importar…", "Export SAF"};
+    for (int i = 0; i < kItems; ++i) {
+        if (ui.button(static_cast<u64>(30 + i), x + kPad,
+                      y + kHeaderH + static_cast<f32>(i) * 64.0f,
+                      w - 2.0f * kPad, 56.0f, labels[i])) {
+            chosen = i + 1;
+            st.fileMenu = false;
+        }
     }
     return chosen;
 }

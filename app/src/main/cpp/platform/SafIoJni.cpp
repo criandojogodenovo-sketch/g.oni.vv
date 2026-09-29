@@ -9,6 +9,7 @@
 #include <vector>
 
 namespace vv {
+namespace saf {
 
 namespace {
 
@@ -44,6 +45,30 @@ public:
         }
         return midExists_ && midMakeDirs_ && midList_ && midRead_ && midWrite_;
     }
+
+    bool initSingles(JNIEnv* env) {
+        // métodos de documento ÚNICO (import/export — URI de ficheiro, não árvore)
+        midDisplayName_ = env->GetStaticMethodID(
+            clsRef(), "ioDisplayName",
+            "(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;");
+        midReadSingle_ = env->GetStaticMethodID(
+            clsRef(), "ioReadSingle",
+            "(Landroid/content/Context;Ljava/lang/String;)[B");
+        midWriteSingle_ = env->GetStaticMethodID(
+            clsRef(), "ioWriteSingle",
+            "(Landroid/content/Context;Ljava/lang/String;[B)Z");
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            return false;
+        }
+        return midDisplayName_ && midReadSingle_ && midWriteSingle_;
+    }
+
+    jmethodID midDisplayName() const { return midDisplayName_; }
+    jmethodID midReadSingle() const { return midReadSingle_; }
+    jmethodID midWriteSingle() const { return midWriteSingle_; }
+    jobject context() const { return ctx_; }
+    jclass cls() const { return clsRef(); }
 
     bool listFiles(const std::string& treeUri, const std::string& relDir,
                    std::vector<std::string>& out) const override {
@@ -157,6 +182,10 @@ private:
     }
     static JavaVM* g_vm;
 
+public:
+    // acesso p/ os helpers de documento único (fora do anon namespace)
+    static JNIEnv* envOfPublic() { return envOf(); }
+
     jclass cls() const { return clsRef(); }
 
 public:
@@ -171,6 +200,9 @@ public:
     jmethodID midList_ = nullptr;
     jmethodID midRead_ = nullptr;
     jmethodID midWrite_ = nullptr;
+    jmethodID midDisplayName_ = nullptr;
+    jmethodID midReadSingle_ = nullptr;
+    jmethodID midWriteSingle_ = nullptr;
     jobject ctx_ = nullptr;
     jstring uri_ = nullptr;
 };
@@ -213,17 +245,79 @@ bool safInitJniBackend(void* vm, void* envPtr, void* activityObject) {
     jstring empty = env->NewStringUTF("");
     g_safBackendReady = g_safBackend.init(env, ioCls, activity, empty);
     env->DeleteLocalRef(empty);
-    return g_safBackendReady;
+    if (!g_safBackendReady) {
+        return false;
+    }
+    return g_safBackend.initSingles(env);
 }
 
-SafBackend* safJniBackend() {
+SafJniBackend* safJniBackend() {
     return g_safBackendReady ? &g_safBackend : nullptr;
 }
 
-void safJniBackendSetUri(const std::string& treeUri) {
-    // (device: a árvore muda só com nova concessão; o SafStorage real
-    // é reconstruído no main.cpp — aqui nada a fazer por agora)
-    (void)treeUri;
+// ---- documento único: import/export de ficheiros ----------------------------
+
+std::string safJniDisplayName(const std::string& docUri) {
+    JNIEnv* env = SafJniBackend::envOfPublic();
+    if (!g_safBackendReady || !env) {
+        return "";
+    }
+    jstring s = static_cast<jstring>(env->CallStaticObjectMethod(
+        g_safBackend.cls(), g_safBackend.midDisplayName(), g_safBackend.context(),
+        env->NewStringUTF(docUri.c_str())));
+    if (env->ExceptionCheck() || !s) {
+        env->ExceptionClear();
+        return "";
+    }
+    const char* c = env->GetStringUTFChars(s, nullptr);
+    std::string out = c ? c : "";
+    if (c) {
+        env->ReleaseStringUTFChars(s, c);
+    }
+    env->DeleteLocalRef(s);
+    return out;
 }
 
+std::vector<u8> safJniReadSingle(const std::string& docUri) {
+    std::vector<u8> out;
+    JNIEnv* env = SafJniBackend::envOfPublic();
+    if (!g_safBackendReady || !env) {
+        return out;
+    }
+    auto arr = static_cast<jbyteArray>(env->CallStaticObjectMethod(
+        g_safBackend.cls(), g_safBackend.midReadSingle(),
+        g_safBackend.context(), env->NewStringUTF(docUri.c_str())));
+    if (env->ExceptionCheck() || !arr) {
+        env->ExceptionClear();
+        return out;
+    }
+    const jsize n = env->GetArrayLength(arr);
+    out.resize(static_cast<size_t>(n));
+    if (n > 0) {
+        env->GetByteArrayRegion(arr, 0, n, reinterpret_cast<jbyte*>(out.data()));
+    }
+    env->DeleteLocalRef(arr);
+    return out;
+}
+
+bool safJniWriteSingle(const std::string& docUri, const void* data, size_t n) {
+    JNIEnv* env = SafJniBackend::envOfPublic();
+    if (!g_safBackendReady || !env) {
+        return false;
+    }
+    jbyteArray arr = env->NewByteArray(static_cast<jsize>(n));
+    if (!arr) {
+        return false;
+    }
+    env->SetByteArrayRegion(arr, 0, static_cast<jsize>(n),
+                            static_cast<const jbyte*>(data));
+    const jboolean r = env->CallStaticBooleanMethod(
+        g_safBackend.cls(), g_safBackend.midWriteSingle(), g_safBackend.context(),
+        env->NewStringUTF(docUri.c_str()), arr);
+    env->DeleteLocalRef(arr);
+    env->ExceptionClear();
+    return r == JNI_TRUE;
+}
+
+} // namespace saf
 } // namespace vv

@@ -19,6 +19,7 @@
 #include "core/PlaySnapshot.h"
 #include "core/Presets.h"
 #include "core/Project.h"
+#include "core/SafStorage.h"
 #include "core/Scene.h"
 #include "core/SceneSerializer.h"
 #include "core/Tick.h"
@@ -30,6 +31,7 @@
 #include "platform/CrashHandler.h"
 #include "platform/EglContext.h"
 #include "platform/InputState.h"
+#include "platform/SafBridge.h"
 #include "render/Camera.h"
 #include "render/Cube.h"
 #include "render/Grid.h"
@@ -79,6 +81,15 @@ PlaySnapshot        g_playSnap;
 std::unique_ptr<FsStorage> g_storage;
 Project    g_project;
 bool       g_projectReady = false;   // storage + projeto com cena válida
+
+// ---- F5.1-C: SAF — pasta do projeto escolhida pelo utilizador ---------------
+// Router: FsStorage (getExternalFilesDir) = primário; SafStorage (URI
+// concedida) = secundário. Cancelou/URI inválida → primário (fallback).
+RoutingStorage* g_router = nullptr;   // construído no boot (nunca nulo no loop)
+std::unique_ptr<SafStorage> g_safStorage;
+saf::SafStateMachine        g_safState;
+std::vector<u8>  g_pendingExport;   // bytes do export à espera da URI
+std::string      g_pendingExportName;
 
 // ---- F5-E: assets de runtime (cache CPU → cache GPU) ------------------------
 // Refs relativas ("meshes/x.obj#0", "textures/y.png") → MeshData/RawImage no
@@ -141,11 +152,11 @@ void applyContentRect(android_app* app) {
 void refreshCatalog() {
     g_catalog.meshes.clear();
     g_catalog.textures.clear();
-    if (!g_storage) {
+    if (!g_router) {
         return;
     }
     std::vector<std::string> files;
-    if (g_storage->listDir(Project::kDirMeshes, files)) {
+    if (g_router->listDir(Project::kDirMeshes, files)) {
         for (const std::string& f : files) {
             const size_t dot = f.rfind('.');
             const std::string ext = dot == std::string::npos ? "" : f.substr(dot + 1);
@@ -156,7 +167,7 @@ void refreshCatalog() {
         }
     }
     files.clear();
-    if (g_storage->listDir(Project::kDirTextures, files)) {
+    if (g_router->listDir(Project::kDirTextures, files)) {
         for (const std::string& f : files) {
             const size_t dot = f.rfind('.');
             const std::string ext = dot == std::string::npos ? "" : f.substr(dot + 1);
@@ -200,6 +211,182 @@ SceneSerializer::LoadCtx makeLoadCtx() {
         return t;
     };
     return ctx;
+}
+
+// ---- F5.1-C: SAF — ativação da pasta escolhida + import/export --------------
+
+// ativa a pasta SAF como raiz do projeto (abre/cria "projeto" lá dentro,
+// persiste a URI p/ o próximo arranque e recarrega a cena ativa)
+void activateSafProject(const std::string& treeUri) {
+    SafBackend* backend = saf::safJniBackend();
+    if (!backend || !g_router || !g_storage) {
+        showToast("SAF indisponível");
+        return;
+    }
+    g_safStorage = std::make_unique<SafStorage>(backend, treeUri);
+    Project proj;
+    if (!Project::openOrCreate(*g_safStorage, "projeto", proj)) {
+        g_safStorage.reset();
+        showToast("pasta sem projeto (URI inválida?)");
+        return;
+    }
+    g_project = std::move(proj);
+    g_router->bind(g_storage.get(), g_safStorage.get());
+    g_router->useSecondary(true);
+    // persiste a URI p/ reabrir no próximo arranque (ficheiro no raiz do
+    // app — NÃO dentro da pasta escolhida)
+    g_storage->writeText("saf_tree.txt", treeUri);
+    g_projectReady = true;
+    g_resources.setStorage(g_router);
+    g_resources.releaseAll();
+    g_gpu.releaseAll();
+    refreshCatalog();
+    // cena ativa do projeto na pasta escolhida
+    const SceneSerializer::LoadCtx ctx = makeLoadCtx();
+    if (g_project.loadActiveScene(*g_router, g_scene, ctx)) {
+        LOGI("saf: projeto ativo na pasta concedida (%u tics)", g_scene.count());
+    } else {
+        LOGI("saf: projeto novo/sem cena carregável na pasta concedida");
+    }
+    g_editor.selected = Handle::invalid();
+    showToast("pasta do projeto ativa");
+}
+
+// resultado do picker IMPORT: lê o ficheiro da URI e copia para o projeto
+// (por extensão: obj/gltf/glb → meshes/, png → textures/)
+void importFromSaf(const std::string& docUri) {
+    if (!g_router) {
+        return;
+    }
+    const std::string name = saf::safJniDisplayName(docUri);
+    const std::vector<u8> bytes = saf::safJniReadSingle(docUri);
+    if (bytes.empty() || name.empty()) {
+        showToast("import falhou (ficheiro vazio?)");
+        return;
+    }
+    std::string lower = name;
+    for (char& c : lower) {
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    }
+    const size_t dot = lower.rfind('.');
+    const std::string ext = dot == std::string::npos ? "" : lower.substr(dot + 1);
+    const char* dir = nullptr;
+    if (ext == "obj" || ext == "gltf" || ext == "glb") {
+        dir = Project::kDirMeshes;
+    } else if (ext == "png") {
+        dir = Project::kDirTextures;
+    } else {
+        showToast("tipo não suportado (obj/gltf/glb/png)");
+        return;
+    }
+    // nome de destino sanitizado
+    std::string safe = lower;
+    for (char& c : safe) {
+        if (c == '/' || c == '\\' || c == ':') c = '_';
+    }
+    const std::string rel = std::string(dir) + "/" + safe;
+    if (g_router->writeBytes(rel, bytes.data(), bytes.size())) {
+        refreshCatalog();
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "importado: %s", rel.c_str());
+        showToast(msg);
+        LOGI("saf: import %s (%zu bytes)", rel.c_str(), bytes.size());
+    } else {
+        showToast("falha ao gravar no projeto");
+    }
+}
+
+// resultado do picker EXPORT: grava os bytes preparados na URI escolhida
+void exportToSaf(const std::string& docUri) {
+    if (g_pendingExport.empty()) {
+        showToast("nada para exportar");
+        return;
+    }
+    if (saf::safJniWriteSingle(docUri, g_pendingExport.data(), g_pendingExport.size())) {
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "exportado: %s", g_pendingExportName.c_str());
+        showToast(msg);
+        LOGI("saf: export %s (%zu bytes)", g_pendingExportName.c_str(),
+             g_pendingExport.size());
+    } else {
+        showToast("falha ao exportar (permissão?)");
+    }
+}
+
+// handler injetado — chamado pelo bridge JNI quando a Activity responde
+void onSafResult(void* /*user*/, const saf::SafResult& r) {
+    g_safState.onResult(r);
+    if (r.request == saf::kReqPickTree) {
+        if (g_safState.uriUsable() && saf::flagsReadWrite(r.flags)) {
+            activateSafProject(g_safState.grantedUri());
+        } else {
+            showToast("pasta não escolhida (fallback local)");
+        }
+    } else if (r.request == saf::kReqImport) {
+        if (g_safState.uriUsable()) {
+            importFromSaf(g_safState.grantedUri());
+        } else {
+            showToast("import cancelado");
+        }
+    } else if (r.request == saf::kReqExport) {
+        if (g_safState.uriUsable()) {
+            exportToSaf(g_safState.grantedUri());
+        } else {
+            showToast("export cancelado");
+        }
+    }
+    g_safState.reset();
+}
+
+// prepara e lança o Export via SAF (captura o mesh AGORA — o resultado
+// chega assincronamente depois)
+void beginSafExport() {
+    Tic* tsel = g_scene.get(g_editor.selected);
+    MeshRenderer* mrs = tsel ? tsel->getComponent<MeshRenderer>() : nullptr;
+    if (!mrs) {
+        showToast("selecione um TIC com mesh");
+        return;
+    }
+    std::string err;
+    const MeshData* src = nullptr;
+    MeshData cubeCopy;
+    if (!mrs->meshPath.empty()) {
+        src = g_resources.mesh(mrs->meshPath, err);
+    } else if (mrs->mesh == &g_cubeMesh) {
+        cubeCopy = cubeToMeshData();
+        src = &cubeCopy;
+    }
+    if (!src || !src->ok()) {
+        showToast("mesh não disponível p/ export");
+        return;
+    }
+    char nameBuf[40];
+    std::snprintf(nameBuf, sizeof(nameBuf), "%.30s", tsel->name.c_str());
+    g_pendingExportName = "export_" + std::string(nameBuf) + ".obj";
+    for (char& c : g_pendingExportName) {
+        if (c == '/' || c == '\\' || c == ':' || c == '#') c = '_';
+    }
+    const std::string obj = exportObj(*src);
+    g_pendingExport.assign(obj.begin(), obj.end());
+    g_safState.begin(saf::kReqExport);
+    if (!saf::openExportPicker(nullptr, saf::kReqExport,
+                               g_pendingExportName.c_str())) {
+        g_safState.reset();
+        g_pendingExport.clear();
+        showToast("SAF indisponível");
+    }
+}
+
+// rótulo curto do formato p/ a status line (F5.1-D)
+const char* shortTexFormat(CompressedFormat f) {
+    switch (f) {
+        case CompressedFormat::RGBA8:     return "rgba";
+        case CompressedFormat::ETC2_RGB:  return "etc2";
+        case CompressedFormat::ETC2_RGBA: return "eac";
+        case CompressedFormat::ASTC_4x4:  return "astc4";
+        case CompressedFormat::ASTC_6x6:  return "astc6";
+        default:                          return "?";
+    }
 }
 
 // claimedMask: slots reclamados pelos TouchControls (joystick/botão) — a
@@ -342,9 +529,9 @@ void onAppCmd(android_app* app, i32 cmd) {
                 LOGE("boot: renderer falhou");
                 break;
             }
-            // F5-E: caches de assets ligados ao storage do projeto
-            if (g_storage) {
-                g_resources.setStorage(g_storage.get());
+            // F5-E: caches de assets ligados ao storage ATIVO (router F5.1-C)
+            if (g_router) {
+                g_resources.setStorage(g_router);
                 g_gpu.init(&g_resources);
                 if (g_pipeline) {
                     // F5.1-A: ASTC só quando a extensão KHR existe (C33/Mali
@@ -384,7 +571,7 @@ void onAppCmd(android_app* app, i32 cmd) {
             // LoadCtx liga o cubo procedural, tag "cube" das cenas antigas)
             if (g_projectReady) {
                 const SceneSerializer::LoadCtx ctx = makeLoadCtx();
-                if (g_project.loadActiveScene(*g_storage, g_scene, ctx)) {
+                if (g_project.loadActiveScene(*g_router, g_scene, ctx)) {
                     LOGI("projeto: cena ativa '%s' carregada (%u tics)",
                          g_project.activeScenePath()->c_str(), g_scene.count());
                 } else {
@@ -634,8 +821,8 @@ void frame() {
     if (g_editor.fileMenu) {
         const int choice = editor::drawFileMenu(g_ui, g_input, w, h, g_editor);
         if (choice == 1 && g_projectReady) {
-            const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
-                            g_project.saveManifest(*g_storage);
+            const bool ok = g_project.saveActiveScene(*g_router, g_scene) &&
+                            g_project.saveManifest(*g_router);
             char msg[64];
             std::snprintf(msg, sizeof(msg), ok ? "cena salva (%u tics)" : "falha ao salvar",
                           g_scene.count());
@@ -643,7 +830,7 @@ void frame() {
             LOGI("editor: %s → %s", msg, g_project.activeScenePath()->c_str());
         } else if (choice == 2 && g_projectReady) {
             const SceneSerializer::LoadCtx ctx = makeLoadCtx();
-            const bool ok = g_project.loadActiveScene(*g_storage, g_scene, ctx);
+            const bool ok = g_project.loadActiveScene(*g_router, g_scene, ctx);
             char msg[64];
             std::snprintf(msg, sizeof(msg), ok ? "cena carregada (%u tics)" : "falha ao carregar",
                           g_scene.count());
@@ -677,7 +864,7 @@ void frame() {
                     }
                     const std::string rel =
                         std::string(Project::kDirMeshes) + "/" + outName;
-                    if (g_storage->writeText(rel, exportObj(*src))) {
+                    if (g_router->writeText(rel, exportObj(*src))) {
                         char msg[96];
                         std::snprintf(msg, sizeof(msg), "export: %s", rel.c_str());
                         showToast(msg);
@@ -687,20 +874,42 @@ void frame() {
                     }
                 }
             }
+        } else if (choice == 4 && g_projectReady) {
+            // F5.1-C: escolher a PASTA do projeto (SAF) — o resultado
+            // chega assincronamente via onSafResult
+            g_safState.begin(saf::kReqPickTree);
+            if (!saf::openTreePicker(nullptr, saf::kReqPickTree)) {
+                g_safState.reset();
+                showToast("SAF indisponível");
+            }
+        } else if (choice == 5 && g_projectReady) {
+            // F5.1-C: importar ficheiro (SAF) → copia p/ meshes/ ou textures/
+            g_safState.begin(saf::kReqImport);
+            if (!saf::openImportPicker(nullptr, saf::kReqImport)) {
+                g_safState.reset();
+                showToast("SAF indisponível");
+            }
+        } else if (choice == 6 && g_projectReady) {
+            // F5.1-C: export via SAF (CREATE_DOCUMENT; mesh capturado já)
+            beginSafExport();
         }
     }
 
     drawToast();
 
     // status line inferior: fps + TICs + vértices desenhados + draw calls
+    // + F5.1-D: formato de textura da última carga + hits/misses do cache
     // (parte da UI usa as métricas do frame anterior — lag de 1 frame)
     const DrawStats total = st3d + stGrid + g_lastUiStats;
-    char status[112];
+    char status[128];
     std::snprintf(status, sizeof(status),
-                  "fps %d  tics %u  verts %u  dc %u  am %u at %u",
+                  "fps %d  tics %u  verts %u  dc %u  am %u at %u  %s c%u/%u",
                   static_cast<int>(g_fps + 0.5f), g_scene.count(),
                   total.vertices, total.drawCalls,
-                  g_gpu.meshCount(), g_gpu.textureCount());
+                  g_gpu.meshCount(), g_gpu.textureCount(),
+                  shortTexFormat(g_hwCompressor.lastFormat()),
+                  g_texCache ? g_texCache->hits() : 0u,
+                  g_texCache ? g_texCache->misses() : 0u);
     g_ui.statusLine(status);
 
     g_ui.endFrame();                       // submete solids + glyphs
@@ -731,7 +940,37 @@ void android_main(android_app* app) {
             g_texCache = std::make_unique<TextureCache>(*g_storage);
             g_pipeline = std::make_unique<TexturePipeline>(g_hwCompressor,
                                                            *g_texCache);
-            if (Project::openOrCreate(*g_storage, "projeto", g_project)) {
+            // F5.1-C: router (primário FsStorage; SAF liga depois) + JNI/SAF
+            g_router = new RoutingStorage(g_storage.get(), nullptr);
+            saf::setHandler(&onSafResult, nullptr);
+            if (app->activity) {
+                saf::initJava(app->activity->vm, app->activity->clazz);
+                if (saf::safInitJniBackend(app->activity->vm, app->activity->env,
+                                          app->activity->clazz)) {
+                    // reabre a última pasta SAF concedida (URI persistida)
+                    std::string savedUri;
+                    if (g_storage->readText("saf_tree.txt", savedUri) &&
+                        !savedUri.empty()) {
+                        g_safStorage = std::make_unique<SafStorage>(
+                            saf::safJniBackend(), savedUri);
+                        Project safProj;
+                        if (Project::openOrCreate(*g_safStorage, "projeto",
+                                                  safProj)) {
+                            g_project = std::move(safProj);
+                            g_router->bind(g_storage.get(), g_safStorage.get());
+                            g_router->useSecondary(true);
+                            g_projectReady = true;
+                            LOGI("saf: pasta concedida reaberta: %s",
+                                 savedUri.c_str());
+                        } else {
+                            g_safStorage.reset();
+                            LOGE("saf: URI persistida sem projeto válido — fallback local");
+                        }
+                    }
+                }
+            }
+            if (!g_router->usingSecondary() &&
+                Project::openOrCreate(*g_storage, "projeto", g_project)) {
                 g_projectReady = g_project.activeScenePath() != nullptr;
                 LOGI("projeto: '%s' pronto em %s (%u cena(s), ativa=%s)",
                      g_project.name.c_str(), root,
@@ -751,7 +990,7 @@ void android_main(android_app* app) {
 
     app->onAppCmd = onAppCmd;
     app->onInputEvent = onInputEvent;
-    LOGI("G.One VV 0.5.1 — F5.0-fix (Inspector: cursor Y partilhado + alturas cientes da fonte + scroll)");
+    LOGI("G.One VV 0.6.0 — F5.1 (ETC2/ASTC + cache de texturas; texturas embutidas glTF; SAF import/export)");
 
     double last = nowSeconds();
     while (true) {

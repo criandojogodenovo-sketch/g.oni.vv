@@ -1,4 +1,14 @@
-# G.One VV 0.5.1 — F5.0-fix (Inspector sem sobreposição)
+# G.One VV 0.6.0 — F5.1 (compressão de texturas + texturas embutidas + SAF)
+
+Engine com editor, projeto `.goni` e AGORA maturação de assets: compressão
+de texturas de hardware (ETC2 garantido em GLES3; ASTC 4x4/6x6 quando a
+extensão KHR existe) com mips completos em CPU e cache em disco
+(`textures/cache/`, keyed pelo hash do PNG — 2ª carga é hit; PNG alterado
+invalida), extração de texturas embutidas em glTF/GLB (base64 ou BIN chunk)
+para `textures/gltf_<hash>.png` com dedup, e SAF (Storage Access Framework)
+para escolher a pasta do projeto, importar e exportar SEM PC. Mobile-first:
+arm64-v8a, minSdk 24, landscape travado (`sensorLandscape`). Device de
+teste: Realme C33 (720x1600).
 
 Engine com editor e AGORA com projeto e assets. A F5 trouxe o formato de
 projeto `.goni` (pasta com manifesto, cenas, meshes e texturas), importadores
@@ -157,6 +167,25 @@ Sem física (BodyComp é F4), sem luzes, sem assets, sem animação, sem linguag
 (CLÁUSULA CALMA).
 
 ## Histórico
+- **F5.1 (0.6.0)**: maturação de assets em 4 sub-blocos. **A** — vendors
+  etcpak 2.1 (BSD) e astc-encoder 5.3.0 (Apache-2.0), CompressedImage com
+  cadeia de mips completa em CPU (blob contíguo), HardwareCompressor (ASTC
+  se GL_KHR_texture_compression_astc_ldr, senão ETC2; <256px fica RGBA),
+  cache em disco `textures/cache/` (header LE + hash FNV-1a do PNG; hit/miss
+  contados; corrupção → miss), gate 4K REAL (com compressão 4K entra inteira
+  — ETC2 4K ≈ 8 MB; fallback sem compressão reduz para 2K com aviso),
+  `glCompressedTexImage2D` por nível. **B** — parser glTF lê `images`
+  (data:image/png;base64 e bufferView do GLB) + `textures` + materiais com
+  `baseColorTexture`; extração para `textures/gltf_<hash>.png` com DEDUP por
+  hash (N materiais → 1 ficheiro); aplicar um mesh glb no Inspector aplica
+  logo a textura. **C** — SAF com exceção documentada à regra zero-Java
+  (docs/SAF_EXCEPTION.md): VvActivity (pickers + takePersistableUriPermission
+  + JNI), SafIo sobre DocumentsContract (sem androidx), SafStorage com
+  backend injetável + RoutingStorage (fallback getExternalFilesDir).
+  **D** — menu: Pasta (SAF)/Importar…/Export SAF; status line mostra o
+  formato da textura (etc2/eac/astc4/astc6/rgba) e hits/misses do cache;
+  round-trip completo testado no CI (glb → extração → ETC2+cache → export
+  OBJ → reimport → cena recarregada). 232 testes.
 - **F5.0-fix (0.5.1)**: bug do C33 no Inspector (texto sobreposto em pilhas:
   nome×Transform3D, mesh/tex/input/body×sz, tc×velx) — o cursor Y SEMPRE foi
   partilhado e sequencial; a causa raiz eram as linhas de 26/30 px (baseline
@@ -204,6 +233,27 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
 
 ## Testes do core (Linux)
 `cmake -S tests -B build-tests && cmake --build build-tests && ctest --test-dir build-tests`
+
+## Verificação no Realme C33 (dono) — F5.1 (assets maduros)
+1. Instalar o APK 0.6.0 → confirmar "0.6.0" nas infos.
+2. **Compressão**: importar um PNG 2K/4K (Menu → Importar…) → aplicar como
+   textura → a status line mostra `etc2` (ou `astc4`/`astc6` no Mali do C33)
+   no fim da linha; logcat `GpuAssets: textura … 4096x4096 ETC2 RGB via
+   compress` (sem "reduzida").
+3. **Cache**: aplicar a MESMA textura outra vez (ou reiniciar a app e
+   aplicar) → status line mostra `c1/1` (1 hit, 1 miss) e o logcat diz
+   `via cache`. Alterar o PNG e importar de novo → nova entrada (hash novo).
+4. **glTF/GLB com textura embutida**: importar um .glb com textura interna →
+   aplicar no TIC → toast "mesh aplicado (+textura)" e o modelo aparece
+   texturizado; a pasta do projeto passa a ter `textures/gltf_<hash>.png`.
+5. **SAF**: Menu → **Pasta (SAF)** → escolher/criar uma pasta no armazenamento
+   → toast "pasta do projeto ativa"; Menu → **Importar…** → escolher um
+   .obj/.glb/.png → toast "importado: …" e aparece nos seletores; Menu →
+   **Export SAF** → gravar o OBJ noutro sítio (Downloads, p.ex.) → toast
+   "exportado: …". Fechar a app e reabrir → a pasta SAF volta a ser a raiz
+   do projeto (URI persistida).
+6. **Regressões F5/F4.2**: cena Save/Load, gate 2K sem compressão (toast de
+   aviso — agora só no fallback), Play snapshot, scroll do Inspector.
 
 ## Verificação no Realme C33 (dono) — F5.0-fix (Inspector sem sobreposição)
 1. Instalar o APK 0.5.1 → confirmar "0.5.1" nas infos da app.

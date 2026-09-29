@@ -229,4 +229,56 @@ public final class SafIo {
             return false;
         }
     }
+    // -------- documento ÚNICO (import/export de ficheiros) -------------------
+
+    /** Nome de exibição de um documento (URI única), "" se falhar. */
+    public static String ioDisplayName(Context ctx, String uri) {
+        try {
+            ContentResolver cr = ctx.getContentResolver();
+            Uri doc = Uri.parse(uri);
+            try (Cursor c = cr.query(doc,
+                    new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME},
+                    null, null, null)) {
+                if (c != null && c.moveToFirst()) {
+                    String n = docName(c);
+                    return n != null ? n : "";
+                }
+            }
+            return "";
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** Lê um documento único (URI de ficheiro). null se falhar. */
+    public static byte[] ioReadSingle(Context ctx, String uri) {
+        try {
+            ContentResolver cr = ctx.getContentResolver();
+            java.io.InputStream in = cr.openInputStream(Uri.parse(uri));
+            if (in == null) return null;
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[16 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            in.close();
+            return out.toByteArray();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Escreve um documento único (URI de ACTION_CREATE_DOCUMENT). */
+    public static boolean ioWriteSingle(Context ctx, String uri, byte[] data) {
+        try {
+            ContentResolver cr = ctx.getContentResolver();
+            java.io.OutputStream os = cr.openOutputStream(Uri.parse(uri));
+            if (os == null) return false;
+            os.write(data);
+            os.flush();
+            os.close();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
 }

@@ -10,6 +10,8 @@
 // Este TU só entra na build ANDROID (usa JNI; o CI compila a suíte core
 // sem ele — o mesmo se aplica a SafIoJni.cpp).
 #include <string>
+#include <vector>
+#include "core/SafStorage.h"
 #include "platform/Saf.h"
 
 namespace vv::saf {
@@ -25,5 +27,15 @@ bool openTreePicker(void* activityObject, i32 request);
 bool openImportPicker(void* activityObject, i32 request);
 bool openExportPicker(void* activityObject, i32 request,
                       const char* suggestedName);
+
+// ---- documento ÚNICO (import/export de ficheiros, não árvore) ---------------
+// implementados em SafIoJni.cpp; ""/false se o Java falhar
+std::string safJniDisplayName(const std::string& docUri);
+std::vector<u8> safJniReadSingle(const std::string& docUri);
+bool safJniWriteSingle(const std::string& docUri, const void* data, size_t n);
+
+// backend SAF (SafStorage usa) + init a partir do android_main
+bool safInitJniBackend(void* vm, void* envPtr, void* activityObject);
+SafBackend* safJniBackend();
 
 } // namespace vv::saf

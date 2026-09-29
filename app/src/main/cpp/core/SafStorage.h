@@ -57,9 +57,14 @@ private:
 // quando há URI concedida; fallback = primário (cancelou/URI inválida).
 class RoutingStorage final : public ProjectStorage {
 public:
-    // ambos não-donos
+    // ambos não-donos (podem chegar nulos e ligar depois — bind)
     RoutingStorage(ProjectStorage* primary, ProjectStorage* secondary)
         : primary_(primary), secondary_(secondary) {}
+
+    void bind(ProjectStorage* primary, ProjectStorage* secondary) {
+        primary_ = primary;
+        secondary_ = secondary;
+    }
 
     void useSecondary(bool on) { onSecondary_ = on; }
     bool usingSecondary() const { return onSecondary_; }
