@@ -54,7 +54,10 @@ bool sliderRow(UiContext& ui, u64 id, f32 x, f32 y, const char* labelText,
 } // namespace
 
 UiRect centerRect(f32 sw, f32 sh) {
-    return centerRect(sw, sh, safe::Insets{});   // sem safe-area (compat/testes)
+    // QUALIFICADO: chamada não-qualificada era ambígua no NDK clang — o ADL
+    // puxava vv::safe::centerRect (o tipo do argumento é safe::Insets) para
+    // além de vv::editor::centerRect (mesma assinatura). O CI apanhou.
+    return safe::centerRect(sw, sh, safe::Insets{});   // sem safe-area (compat/testes)
 }
 
 // F4.2: viewport central DENTRO do contentRect — gestos que nascem atrás da
