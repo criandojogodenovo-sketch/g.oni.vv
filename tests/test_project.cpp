@@ -4,75 +4,17 @@
 // (a implementação POSIX real é testada em test_storage.cpp).
 #include "TestFramework.h"
 #include <cstdio>
-#include <map>
-#include <set>
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
 #include "core/Presets.h"
 #include "core/Project.h"
-#include "core/ProjectStorage.h"
 #include "core/Scene.h"
+#include "FakeStorage.h"
 
 using namespace vv;
 using ::test::nearEqF;
 
 namespace {
-
-// FakeStorage — ProjectStorage em memória (mesmo contrato de guarda de
-// caminhos: ops recusam rel-path inválido como as implementações reais).
-struct FakeStorage final : public ProjectStorage {
-    std::string rootPath = "/fake";
-    std::map<std::string, std::string> files;
-    std::set<std::string> dirs;
-
-    std::string root() const override { return rootPath; }
-    bool makeDirs(const std::string& relDir) override {
-        if (!validRelPath(relDir)) return false;
-        dirs.insert(relDir);
-        return true;
-    }
-    bool exists(const std::string& relPath) const override {
-        if (!validRelPath(relPath)) return false;
-        return files.count(relPath) != 0 || dirs.count(relPath) != 0;
-    }
-    bool writeText(const std::string& relPath, const std::string& text) override {
-        if (!validRelPath(relPath)) return false;
-        files[relPath] = text;
-        return true;
-    }
-    bool readText(const std::string& relPath, std::string& out) const override {
-        if (!validRelPath(relPath)) return false;
-        const auto it = files.find(relPath);
-        if (it == files.end()) return false;
-        out = it->second;
-        return true;
-    }
-    bool writeBytes(const std::string& relPath, const void* data, size_t n) override {
-        if (!validRelPath(relPath)) return false;
-        files[relPath].assign(static_cast<const char*>(data), n);
-        return true;
-    }
-    bool readBytes(const std::string& relPath, std::vector<u8>& out) const override {
-        if (!validRelPath(relPath)) return false;
-        const auto it = files.find(relPath);
-        if (it == files.end()) return false;
-        out.assign(it->second.begin(), it->second.end());
-        return true;
-    }
-    bool listDir(const std::string& relDir,
-                 std::vector<std::string>& outFiles) const override {
-        if (!validRelPath(relDir) || dirs.count(relDir) == 0) return false;
-        outFiles.clear();
-        const std::string prefix = relDir + "/";
-        for (const auto& kv : files) {
-            if (kv.first.compare(0, prefix.size(), prefix) == 0 &&
-                kv.first.find('/', prefix.size()) == std::string::npos) {
-                outFiles.push_back(kv.first.substr(prefix.size()));
-            }
-        }
-        return true;
-    }
-};
 
 } // namespace
 

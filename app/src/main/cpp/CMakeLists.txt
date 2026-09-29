@@ -28,6 +28,10 @@ add_library(goni_vv SHARED
         assets/Assets.h
         assets/ObjImporter.h
         assets/ObjImporter.cpp
+        assets/ObjExporter.h
+        assets/ObjExporter.cpp
+        assets/ResourceManager.h
+        assets/ResourceManager.cpp
         core/Project.h
         core/Project.cpp
         core/SceneSerializer.h

@@ -12,6 +12,7 @@ add_executable(test_core
         test_main.cpp
         test_project.cpp
         test_import_obj.cpp
+        test_resources.cpp
         test_storage.cpp
         test_safearea.cpp
         test_textfit.cpp
@@ -41,6 +42,8 @@ add_executable(test_core
         ${CORE_DIR}/core/FsStorage.cpp
         # F5: assets (importadores GL-free)
         ${CORE_DIR}/assets/ObjImporter.cpp
+        ${CORE_DIR}/assets/ObjExporter.cpp
+        ${CORE_DIR}/assets/ResourceManager.cpp
         ${CORE_DIR}/core/TransformSystem.cpp
         # GL-free (cubo e câmara são lógica pura — sem contexto OpenGL)
         ${CORE_DIR}/render/Cube.cpp
