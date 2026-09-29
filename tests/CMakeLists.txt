@@ -49,6 +49,7 @@ add_executable(test_core
         ${CORE_DIR}/assets/GltfImporter.cpp
         ${CORE_DIR}/assets/GltfInstantiate.cpp
         ${CORE_DIR}/assets/PngLoader.cpp
+        ${CORE_DIR}/assets/TextureCompressor.cpp
         ${CORE_DIR}/core/TransformSystem.cpp
         # GL-free (cubo e câmara são lógica pura — sem contexto OpenGL)
         ${CORE_DIR}/render/Cube.cpp

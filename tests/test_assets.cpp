@@ -159,3 +159,44 @@ TEST(gate_box_media_exata_por_quadrantes) {
         EXPECT(px[3] == 255);
     }
 }
+
+// ---- F5-D/2: interface TextureCompressor (passthrough da F5) -----------------
+#include "assets/TextureCompressor.h"
+
+TEST(compressor_passthrough_identidade) {
+    PassthroughCompressor pc;
+    EXPECT(std::string(pc.name()) == "passthrough");
+
+    RawImage in = fillImg(32, 16, 200, 100, 50, 255);
+    CompressedImage out;
+    std::string err;
+    EXPECT(pc.compress(in, out, err));
+    EXPECT(err.empty());
+    EXPECT(out.ok());
+    EXPECT(out.format == CompressedFormat::RGBA8);
+    EXPECT(out.width == 32u && out.height == 16u);
+    EXPECT(out.data == in.rgba);   // bytes saem como entraram
+    // entrada não mutada
+    EXPECT(in.width == 32u && in.height == 16u && in.ok());
+
+    // caminho do pipeline: decode PNG → compressor → formato aceitável
+    const std::vector<u8> bytes = readFixture("alpha8.png");
+    RawImage img;
+    EXPECT(loadPng(bytes.data(), bytes.size(), img, err));
+    std::string warn;
+    downscaleTo2K(img, warn);   // 8x8: sem efeito
+    CompressedImage comp;
+    EXPECT(pc.compress(img, comp, err));
+    EXPECT(comp.width == 8u && comp.height == 8u);
+    EXPECT(comp.data.size() == 8u * 8u * 4u);
+}
+
+TEST(compressor_entrada_invalida_falha) {
+    PassthroughCompressor pc;
+    RawImage vazio;
+    CompressedImage out;
+    std::string err;
+    EXPECT(!pc.compress(vazio, out, err));
+    EXPECT(!err.empty());
+    EXPECT(!out.ok());
+}

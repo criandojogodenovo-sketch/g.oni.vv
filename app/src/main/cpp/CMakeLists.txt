@@ -38,7 +38,11 @@ add_library(goni_vv SHARED
         assets/GltfInstantiate.cpp
         assets/PngLoader.h
         assets/PngLoader.cpp
+        assets/TextureCompressor.h
+        assets/TextureCompressor.cpp
         assets/stb/stb_image.h
+        render/Texture.h
+        render/Texture.cpp
         core/Project.h
         core/Project.cpp
         core/SceneSerializer.h
