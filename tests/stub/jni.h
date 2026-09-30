@@ -68,4 +68,15 @@ struct JNIEnv {
 
 struct JavaVM {
     jint GetEnv(void**, jint) { return JNI_OK; }
+    // F5.3 (TAREFA 3): attach de threads — só assinaturas para o CHECK DE
+    // SINTAXE de StorageBridge.cpp no hospedeiro (o NDK tem o jni.h real)
+    jint AttachCurrentThread(JNIEnv**, void*) { return JNI_OK; }
+    jint DetachCurrentThread() { return JNI_OK; }
+};
+
+// F5.3: argumentos do attach (nome da thread aparece nos logs do device)
+struct JavaVMAttachArgs {
+    jint version;
+    const char* name;
+    jobject group;
 };

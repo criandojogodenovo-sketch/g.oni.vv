@@ -333,7 +333,8 @@ void beginExportToDownloads() {
 }
 
 // TENTATIVA de import: concedido → varre já; senão → DIÁLOGO (1ª vez do
-// fluxo) com a ação pendente; sem suporte → fallback app-private
+// fluxo) com a ação pendente; bloqueado → mensagem HONESTA com a causa real
+// (F5.3: handshake em baixo NUNCA é reportado como "sistema sem suporte")
 void attemptImport() {
     if (!g_projectReady) {
         showToast("sem projeto — import indisponível");
@@ -344,31 +345,50 @@ void attemptImport() {
         openImportScan();
         return;
     }
-    if (g_perm.requestAction(storage::Action::Import, supported)) {
-        g_editor.storageDialog = true;   // o main desenha o diálogo
-        elog::info("storage: diálogo All Files aberto (import pendente)");
-    } else if (!supported) {
-        showToast("sistema sem All Files Access — modo app-private");
+    const storage::BlockReason why =
+        storage::blockReason(storage::handshakeOk(), supported);
+    if (why == storage::BlockReason::None) {
+        if (g_perm.requestAction(storage::Action::Import, true)) {
+            g_editor.storageDialog = true;   // o main desenha o diálogo
+            elog::info("storage: diálogo All Files aberto (import pendente)");
+        }
+        return;
+    }
+    showToast(storage::blockMessage(why));
+    elog::error("storage: import bloqueado — %s", storage::blockMessage(why));
+    if (why == storage::BlockReason::Unsupported) {
+        // marca o estado Unsupported no fluxo (o Settings mostra app-private)
+        g_perm.requestAction(storage::Action::Import, false);
     }
 }
 
-// TENTATIVA de export (mesma forma do import)
+// TENTATIVA de export (mesma forma do import — mensagens honestas)
 void attemptExport() {
     bool supported = false;
     if (storageGrantedNow(&supported)) {
         beginExportToDownloads();
         return;
     }
-    if (g_perm.requestAction(storage::Action::Export, supported)) {
-        g_editor.storageDialog = true;
-        elog::info("storage: diálogo All Files aberto (export pendente)");
-    } else if (!supported) {
-        showToast("sistema sem All Files Access — modo app-private");
+    const storage::BlockReason why =
+        storage::blockReason(storage::handshakeOk(), supported);
+    if (why == storage::BlockReason::None) {
+        if (g_perm.requestAction(storage::Action::Export, true)) {
+            g_editor.storageDialog = true;
+            elog::info("storage: diálogo All Files aberto (export pendente)");
+        }
+        return;
+    }
+    showToast(storage::blockMessage(why));
+    elog::error("storage: export bloqueado — %s", storage::blockMessage(why));
+    if (why == storage::BlockReason::Unsupported) {
+        g_perm.requestAction(storage::Action::Export, false);
     }
 }
 
 // escolha do DIÁLOGO ("Permitir"/"Cancelar") — processada no frame em que
-// drawStorageDialog devolve != 0
+// drawStorageDialog devolve != 0. O diálogo só existe pós-handshake, mas a
+// Activity pode ter sido recriada entretanto — a falha do lançamento é
+// diagnosticada com a causa REAL (handshake vs intent).
 void onStorageDialogChoice(int choice) {
     if (choice == 1) {
         g_perm.dialogAccept();
@@ -378,9 +398,17 @@ void onStorageDialogChoice(int choice) {
                            storage::kSettingsAction);
             } else {
                 g_perm.dialogCancel();
-                showToast("não consegui abrir as definições");
-                elog::error("storage: lançamento de %s FALHOU",
-                            storage::kSettingsAction);
+                if (!storage::handshakeOk()) {
+                    showToast("ponte Java indisponível (handshake)");
+                    elog::error("storage: lançamento de %s FALHOU — ponte Java "
+                                "indisponível (handshake)",
+                                storage::kSettingsAction);
+                } else {
+                    showToast("não consegui abrir as definições");
+                    elog::error("storage: lançamento de %s FALHOU (handshake "
+                                "OK — intent sem activity no aparelho?)",
+                                storage::kSettingsAction);
+                }
             }
         }
     } else if (choice == 2) {
@@ -821,13 +849,25 @@ void frame() {
         } else if (choice == 3) {
             // F5.2: "Acesso a ficheiros…" — mesmo fluxo do diálogo (sem ação
             // pendente: se conceder, o próximo import/export funciona direto)
+            // F5.3: mensagens honestas (handshake ≠ sistema sem suporte)
             bool supported = false;
             if (storageGrantedNow(&supported)) {
                 showToast("acesso já concedido (all files)");
-            } else if (g_perm.requestAction(storage::Action::None, supported)) {
-                g_editor.storageDialog = true;
-            } else if (!supported) {
-                showToast("sistema sem All Files Access — modo app-private");
+            } else {
+                const storage::BlockReason why =
+                    storage::blockReason(storage::handshakeOk(), supported);
+                if (why == storage::BlockReason::None) {
+                    if (g_perm.requestAction(storage::Action::None, true)) {
+                        g_editor.storageDialog = true;
+                    }
+                } else {
+                    showToast(storage::blockMessage(why));
+                    elog::error("storage: acesso a ficheiros bloqueado — %s",
+                                storage::blockMessage(why));
+                    if (why == storage::BlockReason::Unsupported) {
+                        g_perm.requestAction(storage::Action::None, false);
+                    }
+                }
             }
         }
     }

@@ -26,6 +26,7 @@
 // thread anexado.
 #include "platform/StorageBridge.h"
 #include "platform/EngineLog.h"
+#include "platform/JniAttach.h"
 #include <jni.h>
 #include <cstring>
 
@@ -70,15 +71,42 @@ void* g_handlerUser = nullptr;
 // fila UI-thread → engine-thread (ver Saf.h — PendingResult)
 saf::PendingResult g_pending;
 
-JNIEnv* envOrNull() {
+// F5.3 (TAREFA 3) — env do thread CHAMADOR, com ATTACH explícito.
+// O thread do glue (android_main) e o thread da engine nascem desanexados:
+// GetEnv devolve JNI_EDETACHED. O attach é decidido por jni::planAttach
+// (tabela pura afervel no CI), é NOMEADO ("goni-engine" — aparece no
+// logcat/jstack) e PERMANENTE (sem Detach — os threads vivem até ao fim do
+// processo). Cada falha é logada COM O CÓDIGO DE ERRO. Nenhum JNIEnv* é
+// assumido não-nulo.
+JNIEnv* attachedEnv() {
     if (!g_vm) {
-        return nullptr;
+        return nullptr;   // sem registo da activity (handshake) — sem VM
     }
     JNIEnv* env = nullptr;
-    if (g_vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
-        return nullptr;
+    const jint rc = g_vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+    const jni::AttachAction plan = jni::planAttach(rc);
+    if (plan == jni::AttachAction::Use) {
+        return env;
     }
-    return env;
+    if (plan == jni::AttachAction::Attach) {
+        JavaVMAttachArgs args {};
+        args.version = JNI_VERSION_1_6;
+        args.name    = jni::kEngineThreadName;
+        args.group   = nullptr;
+        const jint arc = g_vm->AttachCurrentThread(&env, &args);
+        if (arc != jni::kJniOk || !env) {
+            elog::error("jni: AttachCurrentThread('%s') FALHOU rc=%d — "
+                        "chamadas Java indisponíveis neste thread",
+                        jni::kEngineThreadName, static_cast<int>(arc));
+            return nullptr;
+        }
+        elog::info("jni: thread '%s' anexado à VM (AttachCurrentThread OK)",
+                   jni::kEngineThreadName);
+        return env;   // SEM Detach: thread da engine vive até ao fim
+    }
+    elog::error("jni: GetEnv FALHOU rc=%d (%s) — chamadas Java indisponíveis",
+                static_cast<int>(rc), jni::attachActionLabel(plan));
+    return nullptr;
 }
 
 // limpa exceção pendente e devolve true se havia uma (para log)
@@ -234,7 +262,7 @@ bool jniStorageApiSupported(bool* outManager) {
     if (outManager) {
         *outManager = false;
     }
-    JNIEnv* env = envOrNull();
+    JNIEnv* env = attachedEnv();
     if (!env) {
         return false;   // sem VM → sem suporte apurável (device só)
     }
@@ -279,7 +307,7 @@ bool jniOpenAllFilesSettings() {
                    "indisponível (handshake)");
         return false;
     }
-    JNIEnv* env = envOrNull();
+    JNIEnv* env = attachedEnv();
     if (!env) {
         elog::warn("jni: openAllFilesSettings indisponível — env do thread "
                    "chamador indisponível");
@@ -292,7 +320,7 @@ bool jniOpenAllFilesSettings() {
 
 // 4) export dos logs → Downloads público (MediaStore). Mantido do hotfix.
 bool jniExportLogsToDownloads(int* outCount) {
-    JNIEnv* env = envOrNull();
+    JNIEnv* env = attachedEnv();
     if (!env || !g_activity || !g_midExportLogs) {
         return false;
     }

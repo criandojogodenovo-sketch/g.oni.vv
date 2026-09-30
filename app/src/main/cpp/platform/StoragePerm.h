@@ -72,6 +72,47 @@ inline const char* modeLabel(Mode m) {
     }
 }
 
+// F5.3 — causa REAL do bloqueio de import/export (mensagens honestas).
+//
+// REGRESSÃO QUE ESTE ENUM FIXA: no 0.6.2 o C33 mostrava "sistema sem All
+// Files Access" quando a causa verdadeira era a PONTE JAVA MORTA (handshake
+// nunca concluído — GetEnv EDETACHED no thread do glue). systemSupported
+// false significa duas coisas diferentes e a mensagem tem de distinguir:
+//   BridgeDown   — a VvActivity não se registou no native (handshake);
+//   Unsupported  — o SISTEMA não tem a API (Android < 11: sem
+//                  isExternalStorageManager).
+enum class BlockReason {
+    None,          // pode prosseguir (handshake OK + sistema suporta)
+    BridgeDown,    // ponte Java indisponível (handshake)
+    Unsupported    // sistema sem All Files Access (API < 30)
+};
+
+// mapeamento puro afervel no CI: handshake em baixo SOBREPUJA o sistema —
+// sem ponte nem dá para perguntar ao sistema, logo a causa reportada é a
+// ponte (nunca mentir dizendo que o sistema não suporta)
+inline BlockReason blockReason(bool handshakeOk, bool systemSupported) {
+    if (!handshakeOk) {
+        return BlockReason::BridgeDown;
+    }
+    if (!systemSupported) {
+        return BlockReason::Unsupported;
+    }
+    return BlockReason::None;
+}
+
+// mensagens EXATAS do toast/log (constantes únicas afervéis no CI — o
+// teste de regressão trava estas strings)
+inline const char* blockMessage(BlockReason r) {
+    switch (r) {
+        case BlockReason::BridgeDown:
+            return "ponte Java indisponível (handshake)";
+        case BlockReason::Unsupported:
+            return "sistema sem All Files Access — modo app-private";
+        default:
+            return "";
+    }
+}
+
 // resolução do modo: sem suporte OU sem concessão → app-private.
 inline Mode resolveMode(bool systemSupported, bool isManager) {
     if (!systemSupported) {
