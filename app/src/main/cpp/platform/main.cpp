@@ -49,6 +49,7 @@
 #include "ui/UiEditor.h"   // 0.7.0: editor de UI dedicado (viewport 2D,
                             // teclado in-app, menu contextual, diálogos)
 #include "ui/UiRuntime.h"  // 0.7.0: runtime da UI criável (draw/hit/ações)
+#include "ui/SceneFx.h"   // 0.7.1: transições de cena (fade/slide)
 
 using namespace vv;
 
@@ -322,6 +323,10 @@ struct PlayUiPress {
 // renderer); sceneExists consulta o manifesto do projeto; loadScene chega
 // na 0.7.1 (transições fade/slide) — sem callback a ação é HONESTA (toast
 // "0.7.1", nunca um sucesso falso).
+// (fwd: definidos mais abaixo — a seção de storage/projeto/cenas)
+void loadSceneByName(const std::string& name, ui::SceneSwap style);
+SceneSerializer::LoadCtx makeLoadCtx();
+void refreshCatalog();
 ui::UiActionCtx makeUiActionCtx() {
     ui::UiActionCtx ctx;
     ctx.sceneExists = [](const std::string& name, void*) -> bool {
@@ -337,7 +342,11 @@ ui::UiActionCtx makeUiActionCtx() {
         }
         return false;
     };
-    ctx.loadScene = nullptr;   // 0.7.1: Scene.Load/Transition em Play
+    // 0.7.1: Scene.Load (instantâneo) / Scene.Transition (fade/slide em
+    // Play) — o estilo chega pelo callback, a ação já validou a existência
+    ctx.loadScene = [](const std::string& name, ui::SceneSwap style, void*) {
+        loadSceneByName(name, style);
+    };
     ctx.spawnPreset = [](PresetKind kind, void*) -> Handle {
         return createTicFromPreset(g_scene, kind, &g_cubeMesh,
                                    g_renderer.litMaterial());
@@ -414,6 +423,132 @@ void drawCanvasPlay(f32 w, f32 h) {
             ui::drawCanvas(g_ui, *c, w, h, g_ui.safeArea());
         }
     });
+}
+
+// ---- 0.7.1: CENAS MÚLTIPLAS + TRANSIÇÕES ---------------------------------
+// Cada cena = um .goni próprio no manifesto (Project::scenes). A troca
+// GUARDA a cena ATUAL no ficheiro dela, muda a ativa, persiste o manifesto
+// e carrega a nova (LoadCtx canônico — refs relativos re-ligam). Em PLAY a
+// troca anda dentro de uma TRANSIÇÃO (fade/slide): o swap acontece no
+// PONTO MÉDIO, com o ecrã tapado — nunca se vê a troca a seco.
+ui::SceneTransition g_sceneTrans;
+u32                  g_sceneTransIdx = 0xFFFFFFFFu;   // índice alvo
+f32                  g_frameDt = 0.0f;                // dt real do frame
+
+// troca DIRETA de cena (sem transição — editor / Scene.Load)
+void doSwitchScene(u32 idx) {
+    if (!g_projectReady || !g_storage || idx >= g_project.scenes.size() ||
+        idx == g_project.activeScene) {
+        return;
+    }
+    // 1) guarda a cena ATUAL no ficheiro dela (nada se perde na troca)
+    if (!g_project.saveActiveScene(*g_storage, g_scene)) {
+        showToast("falha ao salvar a cena atual");
+        elog::error("cena: salvar a cena ativa '%s' FALHOU antes da troca",
+                    g_project.activeScenePath()
+                        ? g_project.activeScenePath()->c_str()
+                        : "?");
+        return;   // sem gravar, sem trocar (a cena atual fica intacta)
+    }
+    // 2) muda a ativa + persiste o manifesto
+    g_project.activeScene = idx;
+    g_project.saveManifest(*g_storage);
+    // 3) carrega a nova (LoadCtx canônico: refs relativos re-ligam)
+    const SceneSerializer::LoadCtx ctx = makeLoadCtx();
+    if (g_project.loadActiveScene(*g_storage, g_scene, ctx)) {
+        char name[48];
+        editor::sceneDisplayName(g_project.scenes[idx], name, sizeof(name));
+        char msg[64];
+        std::snprintf(msg, sizeof(msg), "cena: %s", name);
+        showToast(msg);
+        elog::info("cena: trocou para '%s' (%u tics)", name,
+                   (unsigned)g_scene.count());
+    } else {
+        showToast("falha ao carregar a cena");
+        elog::error("cena: load de '%s' FALHOU", g_project.scenes[idx].c_str());
+    }
+    g_editor.selected = Handle::invalid();   // seleção não sobrevive à troca
+    g_editor.selElement = -1;
+    g_playUi.armed = false;
+    refreshCatalog();
+}
+
+// arranca a TRANSIÇÃO (em Play): o swap corre no ponto médio
+void startSceneTransition(u32 idx, const char* name, bool slide) {
+    g_sceneTrans.active = true;
+    g_sceneTrans.style = slide ? ui::SceneTransition::Style::Slide
+                                : ui::SceneTransition::Style::Fade;
+    g_sceneTrans.t = 0.0f;
+    g_sceneTrans.target = name ? name : "";
+    g_sceneTransIdx = idx;
+    elog::info("cena: transicao %s para '%s' iniciada",
+               slide ? "slide" : "fade", g_sceneTrans.target.c_str());
+}
+
+// carrega por NOME (ação declarativa — o estilo decide instantâneo/transição)
+void loadSceneByName(const std::string& name, ui::SceneSwap style) {
+    if (!g_projectReady || !g_storage) {
+        showToast("sem projeto — cenas indisponiveis");
+        return;
+    }
+    const std::string rel =
+        std::string(Project::kDirScenes) + "/" + name + ".goni";
+    for (u32 i = 0; i < g_project.scenes.size(); ++i) {
+        if (g_project.scenes[i] == rel) {
+            if (style != ui::SceneSwap::Instant && g_editor.playMode) {
+                startSceneTransition(i, name.c_str(),
+                                     style == ui::SceneSwap::Slide);
+            } else {
+                doSwitchScene(i);   // editor ou Scene.Load: troca direta
+            }
+            return;
+        }
+    }
+    char msg[96];
+    std::snprintf(msg, sizeof(msg), "cena '%s' nao existe", name.c_str());
+    showToast(msg);
+}
+
+// CRIA uma cena nova com nome (teclado in-app): guarda a atual, regista a
+// nova no manifesto (ativa) e escreve o .goni VAZIO dela
+void createSceneNamed(const std::string& name) {
+    if (!g_projectReady || !g_storage || name.empty()) {
+        return;
+    }
+    // 0) duplicados NUNCA passam (o addScene ATIVA a existente em vez de
+    // falhar — sem este guard o .goni dela seria APAGADO pela cena vazia)
+    const std::string rel =
+        std::string(Project::kDirScenes) + "/" + name + ".goni";
+    for (const std::string& s : g_project.scenes) {
+        if (s == rel) {
+            showToast("cena ja existe");
+            elog::warn("cena: '%s' ja existe no projeto", name.c_str());
+            return;
+        }
+    }
+    // 1) a cena ATUAL vai para o ficheiro DELA (antes da troca)
+    if (!g_project.saveActiveScene(*g_storage, g_scene)) {
+        showToast("falha ao salvar a cena atual");
+        return;
+    }
+    // 2) regista a nova e torna-a ativa
+    if (!g_project.addScene(name)) {
+        showToast("nome de cena invalido");
+        return;
+    }
+    // 3) cena VAZIA em memória → escreve o .goni novo + manifesto
+    g_scene.clear();
+    g_editor.selected = Handle::invalid();
+    g_editor.selElement = -1;
+    const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
+                    g_project.saveManifest(*g_storage);
+    char msg[64];
+    std::snprintf(msg, sizeof(msg), ok ? "cena criada: %s"
+                                        : "cena criada (manifesto falhou)",
+                  name.c_str());
+    showToast(msg);
+    elog::info("cena: '%s' criada e ativa (%u cena(s) no projeto)",
+               name.c_str(), (unsigned)g_project.scenes.size());
 }
 
 // ---- 0.6.7: lifecycle GL -----------------------------------------------------
@@ -1209,6 +1344,15 @@ void frame() {
     const f32 w = static_cast<f32>(g_egl.width());
     const f32 h = static_cast<f32>(g_egl.height());
 
+    // 0.7.1 — TRANSIÇÃO DE CENA: avança o relógio e faz o SWAP no ponto
+    // médio (com o ecrã tapado — doSwitchScene guarda/carrega as cenas)
+    if (ui::transitionStep(g_sceneTrans, g_frameDt)) {
+        if (g_sceneTransIdx < g_project.scenes.size()) {
+            doSwitchScene(g_sceneTransIdx);
+        }
+        g_sceneTransIdx = 0xFFFFFFFFu;
+    }
+
     // F4: TouchControls primeiro (só em modo Play) — os dedos que nasceram
     // nos controlos não vão para a câmara
     bool tcDrawn = false;
@@ -1319,6 +1463,8 @@ void frame() {
         }
         drawToast();
         statusLine(st3d, stGrid);
+        // 0.7.1: o overlay da transição por cima de TUDO (a troca ao escuro)
+        ui::transitionDraw(g_ui, g_sceneTrans, w, h);
         g_ui.endFrame();                       // submete solids + glyphs
         g_lastUiStats = g_renderer.endFrame(); // UI por cima do 3D
         g_egl.swap();
@@ -1547,7 +1693,10 @@ void frame() {
             showToast(msg);
             g_editor.selected = Handle::invalid();   // seleção antiga não sobrevive ao load
             LOGI("editor: %s ← %s", msg, g_project.activeScenePath()->c_str());
-        } else if (choice == 3 && g_projectReady) {
+        } else if (choice == 3) {
+            // 0.7.1: CENAS — lista/nova/trocar (o overlay desenha-se depois)
+            g_editor.scenesMenu = true;
+        } else if (choice == 4 && g_projectReady) {
             // F5-E: Export OBJ — mesh do TIC selecionado → meshes/export_<nome>.obj
             Tic* tsel = g_scene.get(g_editor.selected);
             MeshRenderer* mrs = tsel ? tsel->getComponent<MeshRenderer>() : nullptr;
@@ -1584,14 +1733,14 @@ void frame() {
                     }
                 }
             }
-        } else if (choice == 4) {
+        } else if (choice == 5) {
             // F5.2: IMPORTAR — All Files Access → varre Download/Documents →
             // overlay de escolha → cópia para meshes/ ou textures/
             attemptImport();
-        } else if (choice == 5) {
+        } else if (choice == 6) {
             // F5.2: EXPORT DOWNLOADS — All Files Access → Download/GOneVV/export
             attemptExport();
-        } else if (choice == 6) {
+        } else if (choice == 7) {
             // 0.6.7: SAIR PARA PROJETOS — auto-save da cena + volta ao
             // gestor SEM matar a app. A activity termina-se (finish() pela
             // ponte Java — o gestor está na back stack); o APP_CMD_TERM_WINDOW
@@ -1704,19 +1853,44 @@ void frame() {
     }
     if (g_editor.textInput) {
         const char* title = g_editor.textPurpose == 0 ? "RENOMEAR TIC"
+                            : g_editor.textPurpose == 1 ? "NOME DA NOVA CENA"
                             : g_editor.textPurpose == 2 ? "TEXTO DO ELEMENTO"
                                                         : "ALVO DA ACAO";
         const int ch =
             editor::drawTextInput(g_ui, g_input, w, h, g_editor, title);
         if (ch == 1) {
-            if (editor::commitTextInput(g_scene, g_editor)) {
+            if (g_editor.textPurpose == 1) {
+                // 0.7.1: NOVA CENA (o nome vem do teclado in-app)
+                createSceneNamed(g_editor.textBuf);
+            } else if (editor::commitTextInput(g_scene, g_editor)) {
                 showToast("aplicado");
+            }
+        }
+    }
+
+    // 0.7.1 — OVERLAY CENAS: lista do projeto (a ativa marcada) + nova/trocar
+    // (menu de EDITOR — em Play a troca vem pela ação declarativa com
+    // transição; aqui a troca é direta)
+    if (g_editor.scenesMenu && g_projectReady) {
+        const int pick = editor::drawScenesMenu(
+            g_ui, g_input, w, h, g_editor, g_project.scenes,
+            g_project.activeScene);
+        if (pick == 1) {
+            // nova cena: o TECLADO in-app pede o nome (propósito 1)
+            editor::openTextInput(g_editor, 1, Handle{}, -1, "");
+        } else if (pick >= 2) {
+            const u32 idx = static_cast<u32>(pick - 2);
+            if (idx != g_project.activeScene) {
+                doSwitchScene(idx);
             }
         }
     }
 
     drawToast();
     statusLine(st3d, stGrid);
+
+    // 0.7.1: o overlay da transição por cima de TUDO no editor também
+    ui::transitionDraw(g_ui, g_sceneTrans, w, h);
 
     g_ui.endFrame();                       // submete solids + glyphs
     g_lastUiStats = g_renderer.endFrame(); // desenha a UI por cima do 3D
@@ -1730,11 +1904,10 @@ void android_main(android_app* app) {
     // F5.1-hotfix: log DUPLO (logcat + ficheiro) desde a 1ª linha.
     // O boot ainda não tem os paths da activity? O elog usa o fallback
     // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu
-    elog::info("G.One VV 0.7.0 — UI criável: editor de UI dedicado "
-               "(separador 3D|UI, WYSIWYG, ancoragens) + gestão completa de "
-               "TICs (desselecionar, menu contextual com renomear/remover/"
-               "duplicar, visibilidade, cor por TIC) + teclado in-app "
-               "(0.6.10 seletor de textura; 0.6.9 gizmos; 0.6.8 play mode)");
+    elog::info("G.One VV 0.7.1 — cenas múltiplas + transições fade/slide "
+               "(overlay CENAS, Scene.Load/Scene.Transition declarativas em "
+               "Play; 0.7.0 UI criável + editor de UI + gestão de TICs; "
+               "0.6.10 seletor de textura)");
     {
         const char* root0 = app->activity
             ? (app->activity->externalDataPath ? app->activity->externalDataPath
@@ -1777,6 +1950,8 @@ void android_main(android_app* app) {
                                         // uiMode/seleção de elemento (0.7.0)
     g_playSnap = PlaySnapshot{};
     g_playUi = PlayUiPress{};   // 0.7.0: nenhum on-click de UI armado
+    g_sceneTrans = ui::SceneTransition{};   // 0.7.1: transição morta
+    g_sceneTransIdx = 0xFFFFFFFFu;
     g_scene.clear();
     g_input.resetAll();
     g_project = Project{};
@@ -1949,6 +2124,7 @@ void android_main(android_app* app) {
         const double nowT = nowSeconds();
         const double realDt = nowT - last;
         last = nowT;
+        g_frameDt = static_cast<f32>(realDt);   // 0.7.1: relógio da transição
 
         // Loop de timestep fixo (guard anti-spiral dentro de Time).
         const u32 steps = g_time.beginFrame(realDt);

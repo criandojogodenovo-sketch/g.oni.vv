@@ -1,4 +1,4 @@
-# G.One VV 0.7.0 — UI criável: editor de UI dedicado + gestão completa de TICs (0.6.10: seletor de textura; 0.6.9: gizmos; 0.6.8: play mode)
+# G.One VV 0.7.1 — cenas múltiplas + transições fade/slide (0.7.0: UI criável + gestão de TICs; 0.6.10: seletor de textura)
 
 Engine com editor, projeto `.goni` e maturação de assets (compressão ETC2/ASTC
 com cache, extração de texturas glTF/GLB, import OBJ/glTF/GLB/PNG, export
@@ -6,7 +6,50 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 (`sensorLandscape`). Devices de teste: Realme C33 (720x1600) e Realme
 RMX3624 (Android 13).
 
-## Escopo 0.7.0 (implementado — F6: UI criável core + editor de UI + gestão de TICs)
+## Escopo 0.7.1 (implementado — F6: cenas múltiplas + transições)
+
+**CENAS MÚLTIPLAS** — cada cena é um `.goni` próprio no manifesto do
+projeto (`Project::scenes`; a estrutura já existia desde a F5 — a 0.7.1
+traz a UI e o fluxo completo):
+
+- **Overlay CENAS** (Menu → "Cenas…"): lista as cenas do projeto com a
+  ATIVA marcada, botão "+ Nova cena" (teclado in-app — zero IME) e troca
+  com um toque; a lista faz scroll quando excede 6 linhas;
+- **Criar cena**: guarda a cena ATUAL no ficheiro dela, regista a nova no
+  manifesto (ativa), escreve o `.goni` VAZIO dela e persiste o manifesto;
+  duplicados são recusados com toast claro (o guard impede que a cena
+  existente seja substituída pela vazia);
+- **Trocar de cena**: guarda a atual → muda a ativa → persiste o manifesto
+  → carrega a nova (refs relativos re-ligam pelo LoadCtx canônico); a
+  seleção não sobrevive à troca; falha de save aborta SEM trocar (a cena
+  atual fica intacta);
+- **Persistência**: fechar/reabrir mantém a cena ativa (manifesto).
+
+**TRANSIÇÕES (fade / slide)** — `ui/SceneFx.h` puro e afervel:
+
+- **`Scene.Transition` como ação declarativa** (novo tipo de ação do
+  Button/Menu, com alvo = nome da cena e estilo `fade`|`slide` no
+  Inspector de UI — botão "estilo" cicla; serializa como `act: "trans"` +
+  `param`);
+- **`Scene.Load` = troca instantânea** (ação `scene`, como na 0.7.0 —
+  agora ligada ao carregador real);
+- **Em Play** a transição tapa o ecrã e faz o SWAP no PONTO MÉDIO (nunca
+  se vê a troca a seco): fade = quad preto fullscreen com alpha em rampa
+  0→1→0; slide = quad que cobre vindo da esquerda e sai pela direita;
+  duração 0.6 s; o overlay desenha-se por cima de TUDO (também no editor,
+  para transições futuras);
+- **Honestidade**: cena inexistente → toast claro; sem carregador →
+  "sem carregador" (nunca sucesso falso).
+
+Testes 367→372 (+5 em `test_scenes.cpp`): criar/trocar/persistir cenas
+e2e no FakeStorage (A→B→A com round-trip de TICs e reopen do manifesto),
+transição pura (swap UMA vez no ponto médio, cover em rampa, inativa =
+custo zero), draw fade/slide nos batches (fullscreen/alpha; ida pela
+esquerda, volta pela direita), overlay CENAS (lista/marca ativa/troca/
+nova/fora fecha) e ações Scene.Load (instant) / Scene.Transition
+(fade default, slide por param) + round-trip `.goni` com `act: trans`.
+
+## Escopo 0.7.0 (histórico — F6: UI criável core + editor de UI + gestão de TICs)
 
 **UI CRIÁVEL (componente `UiCanvas`)** — qualquer TIC pode ter um canvas
 de elementos 2D desenhados POR CIMA da cena em Play (pass UI sem depth —
@@ -644,6 +687,32 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.7.1 (cenas múltiplas + transições; APK CUMULATIVO)
+
+Instalar o APK 0.7.1 (artifact `goni-vv-0.7.1-release-signed` do run do
+fecho). Roteiro cumulativo — o da 0.7.0 continua a aplicar-se:
+
+1. **Lista de cenas**: Menu → "Cenas…" → o overlay lista "main" (ou a cena
+   do projeto) com ">" na ativa;
+2. **Nova cena**: "+ Nova cena" → digitar "nivel2" (teclado in-app) → OK →
+   cena vazia ativa (toast "cena criada"); criar um cubo e voltar a
+   "Cenas…" → tocar na cena antiga → o cubo ANTERIOR volta (nada se perdeu
+   na troca); repetir o nome → toast "cena ja existe";
+3. **Persistir**: Sair para projetos → reabrir → a cena ativa é a mesma
+   (manifesto);
+4. **Transição fade em Play**: numa cena com UI, criar um Button com
+   acao "trans", alvo "nivel2", estilo "fade" → Play → tocar o botão → o
+   ecrã escurece até preto, a cena TROCA ao escuro e volta a clarear
+   (nunca se vê a troca a seco);
+5. **Transição slide**: mudar o estilo para "slide" (Inspector UI) →
+   repetir → o quadro preto cobre pela esquerda e sai pela direita;
+6. **Scene.Load**: acao "scene" → Play → tocar → troca INSTANTÂNEA (sem
+   transição) — os dois comportamentos convivem;
+7. **Cena inexistente**: alvo "xyz" → Play → tocar → toast
+   "cena 'xyz' nao existe";
+8. **Regressões**: UI criável/gestão de TICs (0.7.0), gizmos, seletor de
+   textura, import, logs — tudo como antes (o APK é cumulativo).
 
 ## Verificação no Realme C33 (dono) — 0.7.0 (UI criável + gestão de TICs; APK CUMULATIVO)
 

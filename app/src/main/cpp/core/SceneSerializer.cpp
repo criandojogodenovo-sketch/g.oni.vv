@@ -140,6 +140,11 @@ void appendComponentJson(Json& arr, const UiCanvas* canvas) {
         if (e.action != UiElement::Action::None) {
             je.addMember("act", Json::makeString(uiActionName(e.action)));
             je.addMember("target", Json::makeString(e.target));
+            // 0.7.1 — estilo da transição (Scene.Transition): fade|slide
+            if (e.action == UiElement::Action::TransitionScene &&
+                !e.param.empty()) {
+                je.addMember("param", Json::makeString(e.param));
+            }
         }
         elems.addItem(std::move(je));
     }
@@ -360,9 +365,14 @@ void fillUiCanvas(UiCanvas* canvas, const Json& comp) {
         else if (std::strcmp(act, "toggle") == 0) e.action = UiElement::Action::TogglePanel;
         else if (std::strcmp(act, "scene") == 0) e.action = UiElement::Action::LoadScene;
         else if (std::strcmp(act, "spawn") == 0) e.action = UiElement::Action::Spawn;
+        else if (std::strcmp(act, "trans") == 0) e.action = UiElement::Action::TransitionScene;
         else                                     e.action = UiElement::Action::None;
         if (e.action != UiElement::Action::None) {
             e.target = readStr("target");
+            if (const Json* j = je.find("param");
+                j && j->type == Json::Type::String) {
+                e.param = j->string;   // 0.7.1: fade|slide (ausente = fade)
+            }
         }
         canvas->elements.push_back(std::move(e));
     }

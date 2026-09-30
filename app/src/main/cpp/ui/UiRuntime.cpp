@@ -346,11 +346,14 @@ UiActionResult applyUiAction(Scene& scene, const UiElement& e,
             break;
         }
 
-        case UiElement::Action::LoadScene: {
-            // 0.7.1: o carregamento vive no CHAMADOR (transição/projeto);
+        case UiElement::Action::LoadScene:
+        case UiElement::Action::TransitionScene: {
+            // 0.7.1: o carregamento vive no CHAMADOR (projeto/transição);
             // aqui decide-se se a cena existe (toast honesto se não). Sem
-            // callback loadScene (0.7.0) a ação NÃO finge sucesso — o toast
-            // diz "0.7.1" até o wiring das transições chegar.
+            // callback loadScene a ação NÃO finge sucesso — o toast diz o
+            // que falta. Scene.Load = troca INSTANTÂNEA; Scene.Transition =
+            // fade/slide conforme o param do elemento.
+            const bool trans = e.action == UiElement::Action::TransitionScene;
             if (target.empty()) {
                 std::snprintf(out.toast, sizeof(out.toast), "acao sem alvo");
                 out.wantToast = true;
@@ -367,19 +370,28 @@ UiActionResult applyUiAction(Scene& scene, const UiElement& e,
             }
             if (!ctx.loadScene) {
                 std::snprintf(out.toast, sizeof(out.toast),
-                              "cena '%s': carrega na 0.7.1", target.c_str());
+                              "cena '%s': sem carregador", target.c_str());
                 std::snprintf(out.log, sizeof(out.log),
-                              "ui: cena '%s' existe — loadScene chega na 0.7.1",
+                              "ui: cena '%s' existe — loadScene nao ligado",
                               target.c_str());
                 out.wantToast = true;
                 break;
             }
-            ctx.loadScene(target, ctx.user);
+            const SceneSwap style =
+                !trans ? SceneSwap::Instant
+                       : (uiElementTransition(e) == UiElement::Transition::Slide
+                              ? SceneSwap::Slide
+                              : SceneSwap::Fade);
+            ctx.loadScene(target, style, ctx.user);
             out.acted = true;
-            std::snprintf(out.toast, sizeof(out.toast), "cena: %s",
-                          target.c_str());
-            std::snprintf(out.log, sizeof(out.log), "ui: cena '%s' a carregar",
-                          target.c_str());
+            std::snprintf(out.toast, sizeof(out.toast),
+                          trans ? "cena: %s (%s)" : "cena: %s",
+                          target.c_str(),
+                          style == SceneSwap::Slide ? "slide" : "fade");
+            std::snprintf(out.log, sizeof(out.log),
+                          "ui: cena '%s' a carregar (%s)", target.c_str(),
+                          style == SceneSwap::Instant ? "instantaneo"
+                          : style == SceneSwap::Slide ? "slide" : "fade");
             break;
         }
 

@@ -141,6 +141,9 @@ add_library(goni_vv SHARED
         ui/UiRuntime.cpp
         ui/UiEditor.h
         ui/UiEditor.cpp
+        # 0.7.1: transições de cena (fade/slide)
+        ui/SceneFx.h
+        ui/SceneFx.cpp
         # 0.6.9: gizmos de transformação (Mover/Rodar/Escalar — hit-test
         # 3D + drag com âncoras + desenho projetado em linhas de ecrã)
         ui/Gizmo.cpp

@@ -56,6 +56,9 @@ add_executable(test_core
         # editor dedicado (viewport 2D, teclado in-app, gestão de TICs, cor)
         test_uicanvas.cpp
         test_uieditor.cpp
+        # 0.7.1: cenas múltiplas + transições (projeto e2e, SceneFx puro,
+        # overlay CENAS, ações Scene.Load/Transition)
+        test_scenes.cpp
         ${CORE_DIR}/core/Scene.cpp
         ${CORE_DIR}/core/Time.cpp
         ${CORE_DIR}/core/ComponentRegistry.cpp
@@ -128,6 +131,8 @@ add_executable(test_core
         ${CORE_DIR}/components/UiCanvas.cpp
         ${CORE_DIR}/ui/UiRuntime.cpp
         ${CORE_DIR}/ui/UiEditor.cpp
+        # 0.7.1: transições de cena (fade/slide — puro + draw em batch)
+        ${CORE_DIR}/ui/SceneFx.cpp
         # 0.6.9: gizmos (hit-test/drag/snapping GL-free + desenho em batch)
         ${CORE_DIR}/ui/Gizmo.cpp
         ${CORE_DIR}/ui/FontAtlas.cpp

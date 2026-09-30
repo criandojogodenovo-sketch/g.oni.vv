@@ -178,6 +178,9 @@ u32 uiInspectorRowCount(const UiElement& e, const TextMetrics& m) {
         if (e.action != UiElement::Action::None) {
             ++n;   // alvo
         }
+        if (e.action == UiElement::Action::TransitionScene) {
+            ++n;   // 0.7.1: estilo fade|slide
+        }
     }
     ++n;         // remover
     return n;
@@ -221,6 +224,9 @@ u32 uiInspectorPlan(const UiElement& e, const TextMetrics& m, UiInspRow* rows,
         push(UiInspRow::Kind::ActType, btnH, kUiInspAct);
         if (e.action != UiElement::Action::None) {
             push(UiInspRow::Kind::ActTarget, btnH, kUiInspTarget);
+        }
+        if (e.action == UiElement::Action::TransitionScene) {
+            push(UiInspRow::Kind::StyleBtn, btnH, kUiInspStyle);   // 0.7.1
         }
     }
     push(UiInspRow::Kind::Remove, btnH, kUiInspRemove);
@@ -378,6 +384,17 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                       label);
             break;
         }
+        case UiInspRow::Kind::StyleBtn: {
+            // 0.7.1 — estilo da Scene.Transition: fade ↔ slide
+            const bool slide =
+                uiElementTransition(e) == UiElement::Transition::Slide;
+            char label[40];
+            std::snprintf(label, sizeof(label), "estilo: %s",
+                          slide ? "slide" : "fade");
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      label);
+            break;
+        }
         case UiInspRow::Kind::Remove:
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       "remover elemento");
@@ -430,9 +447,9 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                                   e.text.c_str());
                     break;
                 case UiInspRow::Kind::ActType: {
-                    // cicla none → show → hide → toggle → scene → spawn
-                    const u32 next = e.action == UiElement::Action::None ? 1
-                        : (static_cast<u32>(e.action) % 5u) + 1u;
+                    // cicla none → show → hide → toggle → scene → spawn →
+                    // trans (0.7.1) → none
+                    const u32 next = (static_cast<u32>(e.action) + 1u) % 7u;
                     e.action = static_cast<UiElement::Action>(next);
                     edited = true;
                     break;
@@ -440,6 +457,14 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                 case UiInspRow::Kind::ActTarget:
                     openTextInput(st, 3, st.selected, st.selElement,
                                   e.target.c_str());
+                    break;
+                case UiInspRow::Kind::StyleBtn:
+                    // 0.7.1 — fade ↔ slide (o default é fade)
+                    e.param =
+                        uiElementTransition(e) == UiElement::Transition::Slide
+                            ? "fade"
+                            : "slide";
+                    edited = true;
                     break;
                 case UiInspRow::Kind::Remove:
                     canvas->elements.erase(

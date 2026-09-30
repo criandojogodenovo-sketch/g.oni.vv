@@ -633,10 +633,10 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st) {
     const f32 w = kMenuW;
     // F5-E: + Export OBJ; F5.2: + Importar…/Export Downloads (All Files
-    // Access) — o "Pasta (SAF)" foi REMOVIDO com o fluxo SAF.
+    // Access). 0.7.1: + "Cenas…" (lista/nova/trocar — F6 cenas múltiplas).
     // 0.6.7: + "Sair para projetos" (auto-save no main + volta ao gestor
     // SEM matar a app — VvActivity.finish() pela ponte Java)
-    constexpr int kItems = 6;
+    constexpr int kItems = 7;
     const f32 h = kHeaderH + static_cast<f32>(kItems) * 64.0f + kPad;
     // F4.2: centrado no viewport ÚTIL (dentro do contentRect)
     const f32 ox = ui.safeLeft();
@@ -657,9 +657,9 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "MENU", theme::TEXT);
 
     int chosen = 0;
-    const char* labels[kItems] = {"Save cena", "Load cena", "Export OBJ",
-                                  "Importar…", "Export Downloads",
-                                  "Sair para projetos"};
+    const char* labels[kItems] = {"Save cena", "Load cena", "Cenas…",
+                                  "Export OBJ", "Importar…",
+                                  "Export Downloads", "Sair para projetos"};
     for (int i = 0; i < kItems; ++i) {
         if (ui.button(static_cast<u64>(30 + i), x + kPad,
                       y + kHeaderH + static_cast<f32>(i) * 64.0f,
@@ -667,6 +667,100 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
             chosen = i + 1;
             st.fileMenu = false;
         }
+    }
+    return chosen;
+}
+
+// ---------------------------------------------------------------------------
+// 0.7.1 — CENAS: overlay com a lista do manifesto (+ nova/trocar)
+// ---------------------------------------------------------------------------
+
+const char* sceneDisplayName(const std::string& sceneRelPath, char* out,
+                             size_t outCap) {
+    // basename sem extensão: "scenes/main.goni" → "main"
+    size_t start = sceneRelPath.rfind('/');
+    start = start == std::string::npos ? 0 : start + 1;
+    size_t end = sceneRelPath.rfind('.');
+    if (end == std::string::npos || end < start) {
+        end = sceneRelPath.size();
+    }
+    const size_t len = end > start ? end - start : 0;
+    std::snprintf(out, outCap, "%.*s", static_cast<int>(len),
+                  sceneRelPath.c_str() + start);
+    return out;
+}
+
+int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                   EditorState& st, const std::vector<std::string>& scenes,
+                   u32 activeScene) {
+    const f32 w = kMenuW;
+    const f32 rowH = 48.0f;
+    // cabeçalho + botão nova cena + lista (cap de 6 linhas visíveis — o
+    // scroll id 44 revela o resto; contentH REAL alimenta o beginScroll)
+    const u32 shown = scenes.size() < 6u ? static_cast<u32>(scenes.size()) : 6u;
+    const f32 listH = static_cast<f32>(shown) * rowH;
+    const f32 h = kHeaderH + 56.0f + 8.0f + listH + kPad;
+    const f32 ox = ui.safeLeft();
+    const f32 oy = ui.safeTop();
+    const f32 aw = sw - ox - ui.safeRight();
+    const f32 ah = sh - oy - ui.safeBottom();
+    const f32 x = ox + (aw - w) * 0.5f;
+    const f32 y = oy + (ah - h) * 0.5f;
+
+    if (pressedOutside(in, x, y, w, h)) {
+        st.scenesMenu = false;
+        return 0;
+    }
+
+    ui.panel(x, y, w, h, theme::PANEL);
+    ui.frame(x, y, w, h, 2.0f, theme::ACCENT);
+    const f32 th = ui.fontHeight();
+    ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "CENAS", theme::TEXT);
+
+    // + Nova cena (fica FIXO no topo da lista — sempre alcançável)
+    const f32 newBtnY = y + kHeaderH;
+    const bool newScene = ui.button(6700, x + kPad, newBtnY,
+                                    w - 2.0f * kPad, 56.0f, "+ Nova cena");
+
+    // lista: região de scroll (id 44) com a altura REAL do conteúdo
+    const f32 listTop = newBtnY + 56.0f + 8.0f;
+    const UiRect region{x, listTop, w, listH};
+    const f32 contentH = static_cast<f32>(scenes.size()) * rowH;
+    ui.beginScroll(44, region, contentH);
+    const f32 off = ui.scrollOffset();
+    for (size_t i = 0; i < scenes.size(); ++i) {
+        char name[48];
+        sceneDisplayName(scenes[i], name, sizeof(name));
+        char label[56];
+        std::snprintf(label, sizeof(label), "%s%s",
+                      i == activeScene ? "> " : "  ", name);
+        const f32 ry = listTop + static_cast<f32>(i) * rowH - off;
+        ui.button(6710 + static_cast<u64>(i), x + kPad, ry + 2.0f,
+                  w - 2.0f * kPad, rowH - 4.0f, label);   // só desenha (scroll)
+        if (i == activeScene) {
+            ui.frame(x + kPad, ry + 2.0f, w - 2.0f * kPad, rowH - 4.0f,
+                     2.0f, theme::ACCENT);
+        }
+    }
+    ui.endScroll();
+    if (scenes.empty()) {
+        ui.labelFitted(x + kPad, listTop + rowH * 0.5f, "(sem cenas)",
+                       theme::LINE, w - 2.0f * kPad);
+    }
+
+    // tap re-despachado → escolha da linha (a MESMA geometria desenhada)
+    int chosen = 0;
+    f32 tx = 0.0f, ty = 0.0f;
+    if (newScene) {
+        chosen = 1;
+    } else if (ui.scrollTap(44, tx, ty)) {
+        const i32 row = static_cast<i32>((ty - listTop + off) / rowH);
+        if (row >= 0 && static_cast<u32>(row) < scenes.size()) {
+            chosen = row + 2;
+        }
+    }
+    if (chosen != 0) {
+        st.scenesMenu = false;
     }
     return chosen;
 }
@@ -1147,12 +1241,13 @@ void closeAllOverlays(EditorState& st) {
     st.importMenu = false;
     st.logViewer = false;
     st.logViewerJustOpened = false;
-    // 0.7.0 — os overlays da gestão de TICs/UI também fecham (a SELEÇÃO e
-    // o offset dos scrolls são estado de painel e ficam intactos)
+    // 0.7.0/0.7.1 — os overlays da gestão de TICs/UI/cenas também fecham
+    // (a SELEÇÃO e o offset dos scrolls são estado de painel e ficam)
     st.contextMenu = false;
     st.removeDialog = false;
     st.textInput = false;
     st.elDrag = false;
+    st.scenesMenu = false;
 }
 
 // Orbit da câmara — extraído do main.cpp (era globais + função estática).

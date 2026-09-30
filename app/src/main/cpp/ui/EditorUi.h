@@ -114,6 +114,7 @@ struct EditorState {
     Handle contextTic{};            // TIC alvo do menu contextual
     bool   removeDialog = false;    // confirmação de remoção (substitui o
                                     // "apagar" sem confirmação)
+    bool   scenesMenu = false;      // 0.7.1: overlay CENAS (lista/nova/trocar)
 
     // desselecionar no viewport 3D: arm no press, limpa no release se o dedo
     // não se mexeu (tap ≠ drag de orbit)
@@ -288,6 +289,21 @@ int drawSettingsMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 // intent das definições), 2 = "Cancelar". Fecha com toque fora.
 int drawStorageDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                       EditorState& st);
+
+// 0.7.1 — OVERLAY CENAS: lista as cenas do projeto (a ATIVA com frame
+// ACCENT; scroll id 44) + botão "+ Nova cena". Devolve:
+//   0 = nada este frame; 1 = "+ Nova cena"; 2.. = trocar para a cena
+//   (pick-2 = índice 0-based em `scenes`)
+// `scenes` são os caminhos relativos do manifesto ("scenes/main.goni") —
+// o nome mostrado é o basename sem extensão.
+int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                   EditorState& st, const std::vector<std::string>& scenes,
+                   u32 activeScene);
+
+// nome de exibição da cena ("scenes/main.goni" → "main") — partilhado
+// com os testes (FONTE ÚNICA do rótulo).
+const char* sceneDisplayName(const std::string& sceneRelPath, char* out,
+                             size_t outCap);
 
 // F5.2: overlay IMPORT — candidatos de Download/Documents (File API direta).
 // Devolve 0 nada; i+1 = candidato i escolhido. Cap 8 linhas (mono, sem

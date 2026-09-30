@@ -53,9 +53,13 @@ struct UiElement {
         ShowPanel = 1,      // alvo = nome do elemento a mostrar
         HidePanel = 2,      // alvo = nome do elemento a esconder
         TogglePanel = 3,    // alvo = nome do elemento a alternar
-        LoadScene = 4,      // alvo = nome da cena (0.7.1; param = fade/slide)
+        LoadScene = 4,      // alvo = nome da cena; troca INSTANTÂNEA
         Spawn = 5,          // alvo = preset (PlayerBody3D/…)
+        TransitionScene = 6, // 0.7.1: alvo = cena; param = fade|slide
     };
+
+    // estilo da transição (0.7.1): "fade" (default) ou "slide"
+    enum class Transition : u8 { Fade = 0, Slide = 1 };
 
     Kind kind = Kind::Panel;
     AnchorH anchorH = AnchorH::Left;
@@ -67,6 +71,8 @@ struct UiElement {
     std::string image;   // Image: ref relativa da textura ("textures/x.png")
     std::string target;  // alvo da ação: nome do elemento/preset/cena (Menu:
                          // o alvo por LINHA sobrepõe-se — "label>alvo")
+    std::string param;   // 0.7.1: parâmetro da ação (TransitionScene:
+                         // "fade" default | "slide")
 
     f32 ox = 0.0f, oy = 0.0f;   // offset do ponto de âncora (px)
     f32 w = 200.0f, h = 80.0f;  // tamanho (px)
@@ -92,14 +98,21 @@ inline const char* uiElementKindName(UiElement::Kind k) {
 // rótulo curto do tipo de ação (serializer + editor)
 inline const char* uiActionName(UiElement::Action a) {
     switch (a) {
-        case UiElement::Action::None:        return "none";
-        case UiElement::Action::ShowPanel:   return "show";
-        case UiElement::Action::HidePanel:   return "hide";
-        case UiElement::Action::TogglePanel: return "toggle";
-        case UiElement::Action::LoadScene:   return "scene";
-        case UiElement::Action::Spawn:       return "spawn";
+        case UiElement::Action::None:            return "none";
+        case UiElement::Action::ShowPanel:       return "show";
+        case UiElement::Action::HidePanel:       return "hide";
+        case UiElement::Action::TogglePanel:     return "toggle";
+        case UiElement::Action::LoadScene:       return "scene";
+        case UiElement::Action::Spawn:           return "spawn";
+        case UiElement::Action::TransitionScene: return "trans";
     }
     return "?";
+}
+
+// estilo de transição do elemento (param; default fade)
+inline UiElement::Transition uiElementTransition(const UiElement& e) {
+    return e.param == "slide" ? UiElement::Transition::Slide
+                              : UiElement::Transition::Fade;
 }
 
 class UiCanvas : public Component {

@@ -308,7 +308,7 @@ TEST(uicanvas_acao_spawn_e_cena_honesta) {
     out = applyUiAction(s, e, ctx);
     EXPECT(!out.acted && out.wantToast);
 
-    // LoadScene SEM o callback da 0.7.1: NÃO finge sucesso
+    // LoadScene SEM o callback do carregador: NÃO finge sucesso
     bool asked = false;
     ctx.sceneExists = [](const std::string&, void* u) -> bool {
         *static_cast<bool*>(u) = true;
@@ -319,9 +319,9 @@ TEST(uicanvas_acao_spawn_e_cena_honesta) {
     e.action = UiElement::Action::LoadScene;
     e.target = "cena2";
     out = applyUiAction(s, e, ctx);
-    EXPECT(!out.acted);   // 0.7.0: o wiring chega na 0.7.1
+    EXPECT(!out.acted);   // sem carregador nada carrega
     EXPECT(out.wantToast);
-    EXPECT(std::string(out.toast).find("0.7.1") != std::string::npos);
+    EXPECT(std::string(out.toast).find("sem carregador") != std::string::npos);
     EXPECT(asked);   // mas a EXISTÊNCIA foi consultada
 
     // cena que NÃO existe → toast "nao existe" (sem chegar ao load)
@@ -330,16 +330,31 @@ TEST(uicanvas_acao_spawn_e_cena_honesta) {
     EXPECT(!out.acted);
     EXPECT(std::string(out.toast).find("nao existe") != std::string::npos);
 
-    // COM o callback (o contrato da 0.7.1): acted + alvo passado certo
+    // COM o callback (o contrato da 0.7.1): acted + alvo/estilo passados
     std::string loaded;
-    ctx.loadScene = [](const std::string& name, void* user) {
-        *static_cast<std::string*>(user) = name;
+    int gotStyle = -1;
+    ctx.loadScene = [](const std::string& name, vv::ui::SceneSwap style,
+                      void* user) {
+        auto* got = static_cast<std::pair<std::string, int>*>(user);
+        got->first = name;
+        got->second = static_cast<int>(style);
     };
-    ctx.user = &loaded;
+    std::pair<std::string, int> got{"", -1};
+    ctx.user = &got;
     ctx.sceneExists = [](const std::string&, void*) -> bool { return true; };
     out = applyUiAction(s, e, ctx);
     EXPECT(out.acted);
-    EXPECT(loaded == "cena2");
+    EXPECT(got.first == "cena2");
+    // LoadScene = instantâneo; TransitionScene (0.7.1) = fade/slide
+    EXPECT(got.second == static_cast<int>(vv::ui::SceneSwap::Instant));
+    e.action = UiElement::Action::TransitionScene;   // 0.7.1
+    e.param = "slide";
+    out = applyUiAction(s, e, ctx);
+    EXPECT(out.acted);
+    EXPECT(got.second == static_cast<int>(vv::ui::SceneSwap::Slide));
+    e.param.clear();   // default = fade
+    out = applyUiAction(s, e, ctx);
+    EXPECT(got.second == static_cast<int>(vv::ui::SceneSwap::Fade));
 }
 
 // ---- 5. desenho (rects reais emitidos) ----------------------------------------------

@@ -314,6 +314,7 @@ constexpr u64 kUiInspText   = 8013;
 constexpr u64 kUiInspAct    = 8014;
 constexpr u64 kUiInspTarget = 8015;
 constexpr u64 kUiInspRemove = 8016;
+constexpr u64 kUiInspStyle  = 8017;   // 0.7.1: "estilo: fade|slide" (trans)
 
 // regiões de scroll novas: Inspector de UI (46). 41/42/43 = hierarquia/
 // inspector/logs (acima)

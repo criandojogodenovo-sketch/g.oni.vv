@@ -87,8 +87,9 @@ struct UiInspRow {
         AnchorH,        // "ancora H: ..." (cicla esquerda/centro/direita)
         AnchorV,        // "ancora V: ..." (cicla topo/meio/fundo)
         TextBtn,        // "texto: ..." (abre o teclado)
-        ActType,        // "acao: ..." (cicla none/show/hide/toggle/scene/spawn)
+        ActType,        // "acao: ..." (cicla none/show/hide/toggle/scene/spawn/trans)
         ActTarget,      // "alvo: ..." (abre o teclado)
+        StyleBtn,       // 0.7.1: "estilo: fade|slide" (cicla) — acao trans
         Remove,         // "remover elemento"
     };
     Kind kind;

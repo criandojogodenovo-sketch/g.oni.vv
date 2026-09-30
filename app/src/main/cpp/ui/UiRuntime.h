@@ -98,11 +98,16 @@ CanvasHit hitTestCanvas(const Scene& scene, f32 x, f32 y, f32 sw, f32 sh,
 
 // ---- ações declarativas --------------------------------------------------------
 
+// estilo com que a cena troca (o callback do main decide o que faz)
+enum class SceneSwap : u8 { Instant = 0, Fade = 1, Slide = 2 };
+
 // dependências do main (padrão de AssetResolvers — testes usam stubs)
 struct UiActionCtx {
-    // 0.7.1: cena existe? / carrega (transição vivem no chamador)
+    // 0.7.1: cena existe? / carrega (com o estilo pedido: instantâneo nas
+    // ações Scene.Load, fade/slide nas Scene.Transition)
     bool (*sceneExists)(const std::string& name, void* user) = nullptr;
-    void (*loadScene)(const std::string& name, void* user) = nullptr;
+    void (*loadScene)(const std::string& name, SceneSwap style,
+                      void* user) = nullptr;
     // spawn: cria o TIC do preset (o main liga ao createTicFromPreset)
     Handle (*spawnPreset)(PresetKind kind, void* user) = nullptr;
     void* user = nullptr;
@@ -116,8 +121,9 @@ struct UiActionResult {
 };
 
 // aplica a AÇÃO do elemento (Show/Hide/Toggle panel por nome em QUALQUER
-// canvas; LoadScene/Spawn via callbacks). `target` permite o MENU passar o
-// alvo da LINHA em vez do alvo do elemento (nullptr = usa e.target).
+// canvas; LoadScene/TransitionScene/Spawn via callbacks). `target` permite
+// o MENU passar o alvo da LINHA em vez do alvo do elemento (nullptr = usa
+// e.target).
 UiActionResult applyUiAction(Scene& scene, const UiElement& e,
                              const UiActionCtx& ctx,
                              const char* targetOverride = nullptr);
