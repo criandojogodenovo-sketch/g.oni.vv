@@ -155,9 +155,9 @@ painel branco. O EditText só definia `setTextColor` quase-branco.
   assinado com a keystore dos secrets (`VV_KEYSTORE`/`VV_STORE_PW`/
   `VV_KEY_ALIAS`/`VV_KEY_PW`) — artifact
   `goni-vv-0.6.7-release-signed` do workflow `release`.
-- sha256: computar do artifact no GitHub Actions (Actions → release →
-  build-release → artifact) — o binário final do CI é a fonte da verdade;
-  anotar aqui após o download (o hash local seria de build não-assinada).
+- sha256 do APK assinado (artifact `goni-vv-0.6.7-release-signed`, run
+  36717845547):
+  `bb973a81a309e3261efc5ef71a183f6de56c81731ce2f1ebc8b87ecff1bd81a5`
 
 ## 12. Verificação no device (roteiro C33 — resumo)
 
