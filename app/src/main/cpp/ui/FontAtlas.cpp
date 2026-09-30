@@ -54,9 +54,24 @@ u32 makeTexture(const u8* bitmap, i32 w, i32 h) {
 
 } // namespace
 
+void FontAtlas::destroy() {
+    // 0.6.7 — chamado no APP_CMD_TERM_WINDOW com o contexto AINDA corrente:
+    // devolve o nome da textura ao contexto que vai morrer e regressa ao
+    // estado pré-bake. O próximo loadFromPaths (novo contexto) re-faz tudo —
+    // bake + glTexImage2D + métricas. Sem isto, o guard `if (tex_)` saltava
+    // o re-upload e os glifos saíam brancos ("cubinhos" do C33).
+    if (tex_ != 0) {
+        glDeleteTextures(1, &tex_);
+        tex_ = 0;
+    }
+    height_ = 0.0f;
+    ascent_ = 0.0f;
+    descent_ = 0.0f;
+}
+
 bool FontAtlas::loadFromPaths(const char* const* paths, u32 count, f32 heightPx) {
     if (tex_) {
-        return true;   // já carregado
+        return true;   // já carregado NESTE contexto (upload duplicado = desperdício)
     }
 
     constexpr i32 kW = 512;

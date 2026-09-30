@@ -1,8 +1,32 @@
 // GLES3/gl3.h — stub de hospedeiro (CI/diagnóstico): nenhuma GL real, tudo
 // no-op. Suficiente para compilar FontAtlas/Renderer sem NDK; os objetos GL
 // são fictícios e nunca são desenhados (os testes leem os batches de CPU).
+//
+// 0.6.7 (lifecycle GL): CONTADORES de chamadas relevantes do lifecycle
+// (glGenTextures/glDeleteTextures/glTexImage2D/glBufferData…) num estado
+// global `glstub::stats` — os testes do lifecycle aferem que o atlas é
+// re-uploadado após destroy() e que NINGUÉM assume recursos vivos entre
+// contexts. Zerar com glstub::reset() no início de cada caso.
 #pragma once
 #include <cstdint>
+
+namespace glstub {
+struct Stats {
+    int genTextures = 0;
+    int deleteTextures = 0;
+    int texImage2D = 0;          // uploads de atlas/textura não-comprimida
+    int compressedTexImage2D = 0;
+    int genBuffers = 0;
+    int deleteBuffers = 0;
+    int bufferData = 0;
+    int genVertexArrays = 0;
+    int deleteVertexArrays = 0;
+    int createProgram = 0;
+    int deleteProgram = 0;
+};
+inline Stats stats;              // inline C++17: 1 instância por binário
+inline void reset() { stats = Stats{}; }
+} // namespace glstub
 
 typedef unsigned int  GLenum;
 typedef unsigned int  GLuint;
@@ -60,12 +84,12 @@ typedef intptr_t      GLsizeiptr;
 #define GL_DEPTH_WRITEMASK 0x0B72
 #define GL_LESS 0x0201
 
-inline void glGenTextures(GLint n, GLuint* t) { if (t) for (GLint i = 0; i < n; ++i) t[i] = 1u + i; }
-inline void glDeleteTextures(GLint, const GLuint*) {}
+inline void glGenTextures(GLint n, GLuint* t) { glstub::stats.genTextures += (int)n; if (t) for (GLint i = 0; i < n; ++i) t[i] = 1u + i; }
+inline void glDeleteTextures(GLint n, const GLuint*) { glstub::stats.deleteTextures += (int)n; }
 inline void glBindTexture(GLenum, GLuint) {}
 inline void glPixelStorei(GLenum, GLint) {}
-inline void glTexImage2D(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void*) {}
-inline void glCompressedTexImage2D(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLsizei, const void*) {}
+inline void glTexImage2D(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void*) { ++glstub::stats.texImage2D; }
+inline void glCompressedTexImage2D(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLsizei, const void*) { ++glstub::stats.compressedTexImage2D; }
 inline void glTexParameteri(GLenum, GLenum, GLint) {}
 inline void glGenerateMipmap(GLenum) {}
 inline void glActiveTexture(GLenum) {}
@@ -89,11 +113,11 @@ inline void glGetShaderiv(GLuint, GLenum, GLint* ok) { if (ok) *ok = GL_TRUE; }
 inline void glGetShaderInfoLog(GLuint, GLsizei, GLsizei*, GLchar*) {}
 inline void glGetProgramInfoLog(GLuint, GLsizei, GLsizei*, GLchar*) {}
 inline void glDeleteShader(GLuint) {}
-inline GLuint glCreateProgram() { return 1; }
+inline GLuint glCreateProgram() { ++glstub::stats.createProgram; return 1; }
 inline void glAttachShader(GLuint, GLuint) {}
 inline void glLinkProgram(GLuint) {}
 inline void glGetProgramiv(GLuint, GLenum, GLint* ok) { if (ok) *ok = GL_TRUE; }
-inline void glDeleteProgram(GLuint) {}
+inline void glDeleteProgram(GLuint) { ++glstub::stats.deleteProgram; }
 inline void glUseProgram(GLuint) {}
 inline GLint glGetUniformLocation(GLuint, const GLchar*) { return 0; }
 inline void glUniformMatrix4fv(GLint, GLsizei, GLboolean, const GLfloat*) {}
@@ -102,12 +126,12 @@ inline void glUniform1f(GLint, GLfloat) {}
 inline void glUniform3f(GLint, GLfloat, GLfloat, GLfloat) {}
 inline void glUniform2f(GLint, GLfloat, GLfloat) {}
 
-inline void glGenBuffers(GLsizei n, GLuint* t) { if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 1u + i; }
-inline void glDeleteBuffers(GLsizei, const GLuint*) {}
+inline void glGenBuffers(GLsizei n, GLuint* t) { glstub::stats.genBuffers += (int)n; if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 1u + i; }
+inline void glDeleteBuffers(GLsizei n, const GLuint*) { glstub::stats.deleteBuffers += (int)n; }
 inline void glBindBuffer(GLenum, GLuint) {}
-inline void glBufferData(GLenum, intptr_t, const void*, GLenum) {}
-inline void glGenVertexArrays(GLsizei n, GLuint* t) { if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 1u + i; }
-inline void glDeleteVertexArrays(GLsizei, const GLuint*) {}
+inline void glBufferData(GLenum, intptr_t, const void*, GLenum) { ++glstub::stats.bufferData; }
+inline void glGenVertexArrays(GLsizei n, GLuint* t) { glstub::stats.genVertexArrays += (int)n; if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 1u + i; }
+inline void glDeleteVertexArrays(GLsizei n, const GLuint*) { glstub::stats.deleteVertexArrays += (int)n; }
 inline void glBindVertexArray(GLuint) {}
 inline void glEnableVertexAttribArray(GLuint) {}
 inline void glVertexAttribPointer(GLuint, GLint, GLenum, GLboolean, GLsizei, const void*) {}

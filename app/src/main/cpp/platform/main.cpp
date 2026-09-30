@@ -129,9 +129,51 @@ DrawStats g_lastUiStats;   // métricas do pass UI (disponíveis 1 frame depois)
 char g_toast[96] = "";
 f32  g_toastT = 0.0f;
 
+// ---- 0.6.7: lifecycle GL -----------------------------------------------------
+// Contadores de janela: distinguem o 1º arranque (boot frio) das RE-CRIAÇÕES
+// do contexto EGL (voltar do fundo/recents sem matar a app — o caso que
+// deixava os glifos brancos "cubinhos" no C33). NENHUM recurso GL é assumido
+// vivo entre TERM_WINDOW e INIT_WINDOW: tudo é destruído no term (com o
+// contexto ainda corrente) e re-criado/re-uploaded no init.
+u32 g_windowInits = 0;   // APP_CMD_INIT_WINDOW vistos nesta execução
+u32 g_windowTerms = 0;   // APP_CMD_TERM_WINDOW vistos (contexto morto)
+
 void showToast(const char* msg) {
     std::snprintf(g_toast, sizeof(g_toast), "%s", msg);
     g_toastT = 1.8f;
+}
+
+// 0.6.7: desliga os MeshRenderers dos objetos de GPU que vão morrer.
+// O g_gpu.releaseAll() APAGA os Mesh*/Texture* (unique_ptr + glDelete*) — os
+// ponteiros não-donos dos componentes ficariam PENDENTES (use-after-free no
+// próximo drawTics). Política:
+//   • &g_cubeMesh é um objeto ESTÁTICO re-criado NO SITIO no próximo init —
+//     o ponteiro continua válido (Mesh::destroy só zera os ids);
+//   • meshes/texturas do GpuAssets são APAGADOS → mesh/texture = nullptr;
+//     o reload da cena no INIT_WINDOW re-resolve via g_gpu.mesh/texture();
+//   • material aponta para o LitMaterial DO RENDERER (objeto estático,
+//     re-init no sitio) — mantém-se.
+// As refs RELATIVAS (meshPath/texPath) ficam intactas — são a fonte da
+// verdade para o re-bind (serializer).
+u32 detachRenderersFromGpu() {
+    u32 detached = 0;
+    auto& mrs = g_scene.components().meshRenderers();
+    for (u32 i = 0; i < mrs.size(); ++i) {
+        MeshRenderer& mr = mrs.at(i);
+        bool drop = false;
+        if (mr.mesh && mr.mesh != &g_cubeMesh) {
+            mr.mesh = nullptr;
+            drop = true;
+        }
+        if (mr.texture) {
+            mr.texture = nullptr;
+            drop = true;
+        }
+        if (drop) {
+            ++detached;
+        }
+    }
+    return detached;
 }
 
 // F4.2 (B1): converte android_app->contentRect em Insets e injeta na UI.
@@ -599,7 +641,22 @@ u32    g_fpsFrames = 0;
 
 void onAppCmd(android_app* app, i32 cmd) {
     switch (cmd) {
-        case APP_CMD_INIT_WINDOW:
+        case APP_CMD_INIT_WINDOW: {
+            // 0.6.7 — diagnóstico do lifecycle: o 2º (e seguintes)
+            // INIT_WINDOW nesta execução são RE-CRIAÇÕES do contexto EGL
+            // (voltar do fundo/recents/reentrar no editor sem matar a app).
+            // Neste caso NENHUM recurso GL do ciclo anterior sobrevive — o
+            // TERM_WINDOW destruiu-os todos — e o boot abaixo re-cria e
+            // re-upe TUDO (fonte, cubo, grid, renderer, assets do g_gpu).
+            const bool contextRecreated = (g_windowTerms > 0);
+            ++g_windowInits;
+            if (contextRecreated) {
+                elog::warn("lifecycle: INIT_WINDOW #%u — contexto EGL "
+                           "RE-CRIADO (janela re-aberta sem matar a app; "
+                           "recursos GL do ciclo anterior foram libertos "
+                           "no TERM_WINDOW #%u — re-upload de tudo)",
+                           g_windowInits, g_windowTerms);
+            }
             // F5.1-hotfix: boot em passos numerados — cada passo escreve
             // "[boot N/6] <nome> OK/FALHOU" no engine.log. A ordem dentro
             // do INIT_WINDOW segue a numeração (contentRect → fonts →
@@ -612,11 +669,17 @@ void onAppCmd(android_app* app, i32 cmd) {
             applyContentRect(app);   // F4.2: safe-area desde o primeiro frame
             elog::info("[boot 1/6] contentRect OK (surface %dx%d)",
                        (int)g_egl.width(), (int)g_egl.height());
-            // F1 sem assets: fonte do sistema (primeira que existir vence)
+            // F1 sem assets: fonte do sistema (primeira que existir vence).
+            // 0.6.7: após TERM_WINDOW o atlas está destruído (tex_ == 0) →
+            // isto é um RE-BAKE + RE-UPLOAD no contexto novo. O guard do
+            // loadFromPaths só evita o upload duplicado no MESMO contexto.
             if (!g_font.loadFromPaths(kSystemFontPaths, kSystemFontPathCount, 28.0f)) {
                 elog::error("[boot 3/6] fonts FALHOU — nenhuma fonte do sistema — UI sem texto");
             } else {
-                elog::info("[boot 3/6] fonts OK (sistema, 28px)");
+                elog::info("[boot 3/6] fonts OK (sistema, 28px)%s",
+                           contextRecreated
+                               ? " — RE-UPLOAD no contexto novo (lifecycle)"
+                               : "");
             }
             g_ui.init();
             g_ui.setFont(&g_font);
@@ -673,6 +736,7 @@ void onAppCmd(android_app* app, i32 cmd) {
             g_ready = true;
             elog::info("boot: janela pronta %dx%d", (int)g_egl.width(), (int)g_egl.height());
             break;
+        }
         case APP_CMD_WINDOW_RESIZED:
         case APP_CMD_CONFIG_CHANGED:
             g_egl.refreshSize();
@@ -685,11 +749,42 @@ void onAppCmd(android_app* app, i32 cmd) {
             applyContentRect(app);
             break;
         case APP_CMD_TERM_WINDOW:
+            // 0.6.7 (fix dos "cubinhos"): o EglContext::shutdown destrói a
+            // SURFACE E O CONTEXTO — TODOS os ids GL ficam órfãos. O código
+            // antigo só libertava cubo/grid/renderer: o atlas da fonte
+            // (tex_ != 0 stale → o guard saltava o re-upload) e os mapas do
+            // GpuAssets (Mesh*/Texture* com handles mortos) sobreviviam ao
+            // term e o próximo INIT_WINDOW usava-os → texto branco em quads
+            // e draws contra ids inválidos.
+            //
+            // Ordem obrigatória (tudo com o contexto AINDA corrente, o
+            // g_egl.shutdown é o ÚLTIMO a correr):
+            //   1. detach dos MeshRenderers (ponteiros de GPU vão morrer);
+            //   2. g_gpu.releaseAll() — glDelete* dos meshes/texturas;
+            //   3. g_font.destroy() — glDeleteTextures do atlas + reset;
+            //   4. cubo/grid/renderer (como antes);
+            //   5. EGL por fim.
+            // NENHUM recurso GL é assumido vivo entre term/init — o boot do
+            // INIT_WINDOW re-cria e re-upe tudo (fonte incluída).
             g_ready = false;
-            g_cubeMesh.destroy();
-            g_grid.destroy();
-            g_renderer.shutdown();
-            g_egl.shutdown();
+            {
+                const u32 detached = detachRenderersFromGpu();
+                const u32 gpuMeshes = g_gpu.meshCount();
+                const u32 gpuTextures = g_gpu.textureCount();
+                g_gpu.releaseAll();          // unique_ptr → ~Mesh/~Texture → glDelete*
+                g_font.destroy();            // atlas: glDeleteTextures + reset das métricas
+                g_cubeMesh.destroy();
+                g_grid.destroy();
+                g_renderer.shutdown();      // programa UI + VAO/VBO + whiteTex + lit
+                g_egl.shutdown();            // POR FIM: surface + contexto morrem
+                ++g_windowTerms;
+                elog::info("lifecycle: TERM_WINDOW #%u — contexto EGL destruído; "
+                           "libertados: %u mesh(es) gpu, %u textura(s) gpu, "
+                           "atlas da fonte (re-bake no próximo init), %u "
+                           "MeshRenderer(es) desligados; NENHUM recurso GL "
+                           "assumido vivo no próximo INIT_WINDOW",
+                           g_windowTerms, gpuMeshes, gpuTextures, detached);
+            }
             break;
         case APP_CMD_DESTROY:
             g_ready = false;

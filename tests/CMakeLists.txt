@@ -41,6 +41,9 @@ add_executable(test_core
         test_presets.cpp
         test_serializer.cpp
         test_systems.cpp
+        # 0.6.7: lifecycle GL — re-upload de recursos após TERM/INIT_WINDOW
+        # (fix dos "cubinhos" do C33; contadores do stub GLES3)
+        test_lifecycle.cpp
         ${CORE_DIR}/core/Scene.cpp
         ${CORE_DIR}/core/Time.cpp
         ${CORE_DIR}/core/ComponentRegistry.cpp
@@ -122,7 +125,9 @@ add_executable(test_core
         ${CORE_DIR}/render/Renderer.cpp
         ${CORE_DIR}/render/Mesh.cpp
         ${CORE_DIR}/render/Material.cpp
-        ${CORE_DIR}/render/Texture.cpp)
+        ${CORE_DIR}/render/Texture.cpp
+        # 0.6.7: GpuAssets na suíte — releaseAll/re-upload após TERM_WINDOW
+        ${CORE_DIR}/render/GpuAssets.cpp)
 
 
 target_include_directories(test_core PRIVATE
