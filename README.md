@@ -1,4 +1,4 @@
-# G.One VV 0.6.7 — lifecycle GL + gestão de projetos (fix dos "cubinhos" + apagar projeto + Sair para projetos)
+# G.One VV 0.6.8 — Play Mode com janela própria (0.6.7: lifecycle GL + gestão de projetos)
 
 Engine com editor, projeto `.goni` e maturação de assets (compressão ETC2/ASTC
 com cache, extração de texturas glTF/GLB, import OBJ/glTF/GLB/PNG, export
@@ -6,7 +6,25 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 (`sensorLandscape`). Devices de teste: Realme C33 (720x1600) e Realme
 RMX3624 (Android 13).
 
-## Escopo 0.6.7 (implementado)
+## Escopo 0.6.8 (implementado)
+
+**PLAY MODE COM JANELA PRÓPRIA.** Dois modos de UI com transição Play/Stop:
+o **EDITOR** (toolbar de 3 botões + Hierarchy + Inspector + menus — intactos)
+e o **PLAY** (viewport fullscreen + TouchControls ancorados na safe-area +
+barra superior mínima). Em PLAY: painéis de edição e toolbar ESCONDIDOS
+(early return no frame — nunca desenhados); o botão Stop (id 5, faixa
+exclusiva) devolve ao editor com a pose restaurada (PlaySnapshot intacto) e
+os painéis repostos exatamente (scroll/seleção vivem fora das flags de
+overlay). A barra PLAY mostra o estado "a correr · fps N", o botão Stop e o
+aviso "simulação — alterações descartadas ao parar" (labelFitted — nunca
+sai da barra). O ORBIT fica DESATIVADO em play (1 dedo = controlos): a
+lógica de orbit foi extraída do main para `editor::updateCameraOrbit`
+(`OrbitState` puro, regra F3 do dono-do-gesto e pinch intactos) com guard
+`playMode` que reseta o gesto pendente — o orbit volta a funcionar ao sair.
+O estado do modo vive em `EditorState.playMode` (não numa global do main) —
+a transição completa editor→play→editor é testável na suíte.
+
+## Escopo 0.6.7 (histórico)
 
 **1 — LIFECYCLE GL (fix dos "cubinhos" do C33).** Sair do editor
 (home/recents) e reentrar SEM matar a app deixava TODO o texto em quads
@@ -457,6 +475,24 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.6.8 (play mode)
+
+1. Instalar o APK 0.6.8 (artifact `goni-vv-0.6.8-release-signed`).
+2. Entrar num projeto com um TIC PlayerBody3D + TouchControls (add
+   TouchControls no Inspector) e mover a câmara para um ângulo reconhecível.
+3. **Play**: tocar no botão Play da toolbar → esperado: a toolbar e os
+   painéis SUMIR; fica o viewport fullscreen + a barra PLAY no topo com
+   "Stop", "a correr · fps N" e o aviso "simulação — alterações
+   descartadas ao parar"; o joystick à esquerda-baixo e o JUMP à
+   direita-baixo, SEM sobrepor nada (nem a barra, nem a status line).
+4. **Orbit desativado**: em play, arrastar 1 dedo no viewport (fora dos
+   controlos) NÃO mexe a câmara; pinch também não.
+5. Simular (andar com o stick/saltar) → tocar **Stop** → esperado: volta ao
+   EDITOR com a pose ANTERIOR ao play (não a pós-simulação), painéis e
+   seleção exatamente como antes, orbit a funcionar de novo.
+6. Regressões: Save/Load, gizmos ainda não existem (0.6.9), lifecycle
+   0.6.7 (home → voltar → texto normal).
 
 ## Verificação no Realme C33 (dono) — 0.6.7 (lifecycle GL + gestão de projetos)
 
