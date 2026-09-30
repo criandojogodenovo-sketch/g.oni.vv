@@ -1097,9 +1097,18 @@ void android_main(android_app* app) {
                                                            *g_texCache);
             // F5.2: ponte Java (janela de permissões + retorno + export logs)
             storage::setHandler(&onStorageResult, nullptr);
-            if (app->activity) {
-                storage::initJava(app->activity->vm, app->activity->clazz);
-            }
+            // F5.3 — HANDSHAKE INVERTIDO (docs/HANDSHAKE_AUDIT.md): o native
+            // NÃO tenta descobrir a activity sozinho. O android_main corre no
+            // thread do glue (pthread) que NÃO está anexado à VM — GetEnv
+            // devolvia JNI_EDETACHED e a ponte morria com "env/activity
+            // indisponíveis" (causa única de todas as features Java-dependentes
+            // falharem desde a 0.6.0). É a VvActivity (thread da UI, sempre
+            // anexado) que se registra: onCreate → nativeRegisterActivity,
+            // onResume reforça. Pendente aqui é NORMAL — o android_main corre
+            // antes de super.onCreate terminar; o refresco vem com o onResume.
+            elog::info("jni: handshake invertido — à espera de "
+                       "java: onCreate → nativeRegisterActivity "
+                       "(onResume reforça)");
             if (Project::openOrCreate(*g_storage, "projeto", g_project)) {
                 g_projectReady = g_project.activeScenePath() != nullptr;
                 elog::info("projeto: '%s' pronto em %s (%u cena(s), ativa=%s)",
@@ -1113,14 +1122,26 @@ void android_main(android_app* app) {
             elog::error("projeto: sem externalDataPath/internalDataPath — editor sem persistência");
         }
         // F5.2: estado da permissão NO ARRANQUE (o Settings mostra o modo;
-        // API < 30 → sem suporte → app-private sem nunca pedir)
+        // API < 30 → sem suporte → app-private sem nunca pedir).
+        // F5.3: o estado do HANDSHAKE entra na mesma linha — se a ponte
+        // Java estiver morta, o log diz "handshake=0" (a causa real) em vez
+        // de sugerir que o sistema é que não suporta All Files Access.
         {
             bool mgr = false;
             const bool supported = storage::jniStorageApiSupported(&mgr);
             g_perm.setMode(storage::resolveMode(supported, mgr));
-            elog::info("storage: All Files Access — supported=%d manager=%d → modo %s",
+            elog::info("storage: All Files Access — handshake=%d supported=%d "
+                       "manager=%d → modo %s",
+                       storage::handshakeOk() ? 1 : 0,
                        supported ? 1 : 0, mgr ? 1 : 0,
                        storage::modeLabel(g_perm.mode()));
+            if (!storage::handshakeOk()) {
+                // pendente no boot é NORMAL (android_main corre dentro do
+                // onCreate); se persistir no primeiro import/export, a
+                // mensagem certa é "ponte Java indisponível (handshake)"
+                elog::warn("jni: handshake pendente no boot — onResume deve "
+                           "registar (java: onCreate → nativeRegisterActivity)");
+            }
         }
         // [boot 2/6] storage — passo crítico do arranque (ficheiro legível
         // no device: se o boot morrer aqui, o dono vê exatamente onde)

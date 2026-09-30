@@ -5,12 +5,26 @@ import android.content.ContentValues;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.provider.Settings;
+import android.util.Log;
 
 /**
  * F5.2 — ponte Java mínima do ARMAZENAMENTO (sucessora da exceção SAF).
+ *
+ * F5.3 — HANDSHAKE INVERTIDO: é ESTA activity que se registra no nativo
+ * (nativeRegisterActivity) — nunca o contrário. O android_main corre no
+ * thread do glue (pthread), que NÃO está anexado à VM: GetEnv devolvia
+ * JNI_EDETACHED e a ponte morria com "env/activity indisponíveis" — causa
+ * única de todas as features Java-dependentes falharem desde a 0.6.0
+ * (docs/HANDSHAKE_AUDIT.md). O thread da UI (aqui) está SEMPRE anexado.
+ *
+ * Sequência garantida: super.onCreate() faz System.loadLibrary
+ * (lib_name = goni_vv) → JNI_OnLoad corre os RegisterNatives → SÓ DEPOIS
+ * corre o corpo deste onCreate → nativeRegisterActivity resolve sempre.
+ * onResume reforça (idempotente — re-caches e substitui o GlobalRef).
  *
  * FLUXO All Files Access (o mesmo do Godot e de outros editores):
  *   1. o editor pergunta in-app ("Precisa de acesso a todos os ficheiros…");
@@ -32,8 +46,38 @@ public class VvActivity extends NativeActivity {
     // DEVE espelhar platform/StoragePerm.h (vv::storage::kReqAllFiles)
     static final int REQ_ALL_FILES = 4301;
 
+    // F5.3 — registo da activity no nativo (handshake invertido). A origem
+    // ("onCreate"/"onResume") entra no engine.log para o log viewer do C33
+    // mostrar a sequência completa do handshake.
+    private static native void nativeRegisterActivity(
+            VvActivity activity, String origin);
+
     private static native void nativeOnActivityResult(
             int requestCode, int resultCode, Uri uri, int flags);
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        Log.i("GONI", "java: onCreate → nativeRegisterActivity");
+        try {
+            nativeRegisterActivity(this, "onCreate");
+        } catch (Throwable t) {
+            // nunca crashar por causa da ponte — o diagnóstico está no logcat
+            // e o nativo reporta o handshake pendente no boot do engine.log
+            Log.e("GONI", "java: nativeRegisterActivity FALHOU (onCreate)", t);
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        Log.i("GONI", "java: onResume → nativeRegisterActivity (reforço)");
+        try {
+            nativeRegisterActivity(this, "onResume");
+        } catch (Throwable t) {
+            Log.e("GONI", "java: nativeRegisterActivity FALHOU (onResume)", t);
+        }
+    }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {

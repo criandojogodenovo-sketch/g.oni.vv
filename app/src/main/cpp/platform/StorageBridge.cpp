@@ -2,33 +2,46 @@
 // device-only). Sucessora da SafBridge (F5.1-C): a fila PendingResult, o
 // JNI_OnLoad com RegisterNatives e a higiene de exceções JNI (auditoria do
 // hotfix) são MANTIDAS; os pickers SAF foram REMOVIDOS e a ponte agora só:
+//   0. recebe o REGISTO da activity (handshake INVERTIDO — F5.3,
+//      docs/HANDSHAKE_AUDIT.md: é a VvActivity — thread da UI, sempre
+//      anexado à VM — que se registra; o native nunca mais tenta descobrir
+//      a activity do thread do glue, cujo GetEnv devolvia JNI_EDETACHED);
 //   1. verifica Environment.isExternalStorageManager();
 //   2. lança ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION;
 //   3. reencaminha o resultado (onActivityResult → fila → thread da engine);
 //   4. exporta logs por MediaStore (sem permissões, API 29+).
 //
-// Java → nativo: VvActivity.onActivityResult chama o método estático nativo
-// nativeOnActivityResult — registado EXPLICITAMENTE em JNI_OnLoad via
+// Java → nativo: VvActivity.onCreate/onResume chamam nativeRegisterActivity
+// e onActivityResult chama o método estático nativo
+// nativeOnActivityResult — ambos registados EXPLICITAMENTE em JNI_OnLoad via
 // RegisterNatives (auditoria F5.1-hotfix: se falhar, o log diz exatamente
 // qual método no arranque). O resultado NÃO é processado no thread da UI:
 // entra na fila PendingResult e o loop da engine consome no thread certo
 // (GL/estado coerentes — fix do crash de picker mantido).
 //
 // FindClass num thread nativo usa o classloader de sistema (não vê classes
-// da app) — VvActivity resolvida no JNI_OnLoad (thread da UI) e SafIo já
-// não existe (removida com o SAF); Environment é classe de SISTEMA —
-// FindClass direto funciona de qualquer thread.
+// da app) — VvActivity é resolvida no nativeRegisterActivity (o jobject vem
+// de Java) e no JNI_OnLoad (thread da UI, dentro do loadLibrary);
+// Environment é classe de SISTEMA — FindClass direto funciona de qualquer
+// thread anexado.
 #include "platform/StorageBridge.h"
 #include "platform/EngineLog.h"
 #include <jni.h>
 #include <cstring>
 
-// forward declaration FILE-SCOPE do método nativo (definido no fundo deste
-// ficheiro) — o JNI_OnLoad (também file-scope) regista-o por ponteiro
+// forward declarations FILE-SCOPE dos métodos nativos (definidos no fundo
+// deste ficheiro) — o JNI_OnLoad (também file-scope) regista-os por ponteiro
 extern "C" JNIEXPORT void JNICALL
 Java_vv_goni_VvActivity_nativeOnActivityResult(JNIEnv* env, jclass,
                                                jint request, jint result,
                                                jobject uri, jint flags);
+extern "C" JNIEXPORT void JNICALL
+Java_vv_goni_VvActivity_nativeRegisterActivity(JNIEnv* env, jclass,
+                                               jobject activity,
+                                               jstring origin);
+
+// forward declarations FILE-SCOPE dos métodos nativos (definidos no fundo
+// deste ficheiro) — o JNI_OnLoad (também file-scope) regista-os por ponteiro
 
 namespace vv::storage {
 
@@ -40,6 +53,11 @@ jclass g_activityCls = nullptr;
 
 jmethodID g_midOpenAllFiles = nullptr;   // VvActivity.openAllFilesSettings(I)V
 jmethodID g_midExportLogs = nullptr;     // VvActivity.exportLogsToDownloads(String)I
+
+// F5.3 — estado do handshake invertido: 1º registo da VvActivity visto
+// (mesmo parcial) e veredito (vm + GlobalRef + método crítico OK)
+bool g_registrationSeen = false;
+bool g_handshake = false;
 
 // isExternalStorageManager (android.os.Environment, estático, API 30+)
 jclass   g_envCls = nullptr;
@@ -72,11 +90,40 @@ bool clearPendingException(JNIEnv* env) {
     return false;
 }
 
+// cache dos MÉTODOS da activity (chamado do registo — thread da UI).
+// AUDITORIA (mantida): cada lookup verifica/clear exceção — um
+// NoSuchMethodError pendente contaminava TODAS as chamadas JNI seguintes.
+void cacheActivityMethods(JNIEnv* env) {
+    g_midOpenAllFiles = env->GetMethodID(
+        g_activityCls, "openAllFilesSettings", "(I)V");
+    if (!g_midOpenAllFiles || clearPendingException(env)) {
+        g_midOpenAllFiles = nullptr;
+        elog::error("jni: VvActivity.openAllFilesSettings(I)V NÃO encontrada");
+    } else {
+        elog::info("jni: VvActivity.openAllFilesSettings OK");
+    }
+
+    g_midExportLogs = env->GetMethodID(
+        g_activityCls, "exportLogsToDownloads", "(Ljava/lang/String;)I");
+    if (!g_midExportLogs || clearPendingException(env)) {
+        g_midExportLogs = nullptr;
+        elog::error("jni: VvActivity.exportLogsToDownloads NÃO encontrada");
+    } else {
+        elog::info("jni: VvActivity.exportLogsToDownloads OK");
+    }
+}
+
 } // namespace
 
 void setHandler(saf::ResultHandler fn, void* user) {
     g_handler = fn;
     g_handlerUser = user;
+}
+
+// F5.3 — true pós-handshake invertido (registo da VvActivity + método
+// crítico do fluxo All Files cacheado). false = ponte Java indisponível.
+bool handshakeOk() {
+    return g_handshake;
 }
 
 // consome UM resultado diferido e dispara o handler no thread CHAMADOR (o
@@ -94,36 +141,89 @@ bool pollResult() {
     return true;
 }
 
-void initJava(void* vm, void* activityObject) {
-    g_vm = static_cast<JavaVM*>(vm);
-    JNIEnv* env = envOrNull();
-    if (!env || !activityObject) {
-        elog::error("jni: initJava — env/activity indisponíveis (vm=%p)", vm);
+// ---- REGISTO da activity (handshake INVERTIDO — F5.3) -----------------------
+//
+// Chamado da VvActivity.onCreate e onResume (thread da UI, SEMPRE anexado
+// à VM). Guarda a JavaVM + GlobalRef da activity + métodos. Idempotente:
+// o re-registo (onResume) substitui o GlobalRef e re-cacha os métodos —
+// sobrevive a recriação da activity.
+extern "C" JNIEXPORT void JNICALL
+Java_vv_goni_VvActivity_nativeRegisterActivity(JNIEnv* env, jclass,
+                                               jobject activity,
+                                               jstring origin) {
+    if (!env || !activity) {
+        elog::error("jni: nativeRegisterActivity — env/activity nulos");
         return;
     }
-    elog::info("jni: initJava — cache de activity/classes/métodos (All Files)");
-    g_activity = env->NewGlobalRef(static_cast<jobject>(activityObject));
-    g_activityCls = static_cast<jclass>(
-        env->NewGlobalRef(env->GetObjectClass(g_activity)));
-
-    // AUDITORIA (mantida): cada lookup verifica/clear exceção — um
-    // NoSuchMethodError pendente contaminava TODAS as chamadas JNI seguintes.
-    g_midOpenAllFiles = env->GetMethodID(
-        g_activityCls, "openAllFilesSettings", "(I)V");
-    if (!g_midOpenAllFiles || clearPendingException(env)) {
-        g_midOpenAllFiles = nullptr;
-        elog::error("jni: VvActivity.openAllFilesSettings(I)V NÃO encontrada");
-    } else {
-        elog::info("jni: VvActivity.openAllFilesSettings OK");
+    // 1) eco do lado Java no engine.log — o log viewer do C33 mostra a
+    //    sequência completa: "java: onCreate → nativeRegisterActivity"
+    const char* o = origin ? env->GetStringUTFChars(origin, nullptr) : nullptr;
+    elog::info("java: %s → nativeRegisterActivity", o ? o : "?");
+    if (o) {
+        env->ReleaseStringUTFChars(origin, o);
+    }
+    if (clearPendingException(env)) {
+        elog::warn("jni: nativeRegisterActivity — exceção ao ler a origem");
     }
 
-    g_midExportLogs = env->GetMethodID(
-        g_activityCls, "exportLogsToDownloads", "(Ljava/lang/String;)I");
-    if (!g_midExportLogs || clearPendingException(env)) {
-        g_midExportLogs = nullptr;
-        elog::error("jni: VvActivity.exportLogsToDownloads NÃO encontrada");
+    // 2) JavaVM — GetJavaVM no thread anexado (UI) nunca falha; se falhar,
+    //    loga e sai (handshake parcial, mensagens dirão "handshake")
+    JavaVM* vm = nullptr;
+    if (env->GetJavaVM(&vm) != JNI_OK || !vm) {
+        elog::error("jni: GetJavaVM FALHOU no registo (thread da UI não "
+                    "anexado?!) — handshake incompleto");
+        g_registrationSeen = true;
+        g_handshake = false;
+        return;
+    }
+    g_vm = vm;
+
+    // 3) GlobalRef da activity + classe — substitui os anteriores (o
+    //    onResume re-regista; sem isto, recriação da activity deixa ref morta)
+    if (g_activity) {
+        env->DeleteGlobalRef(g_activity);
+        g_activity = nullptr;
+    }
+    if (g_activityCls) {
+        env->DeleteGlobalRef(g_activityCls);
+        g_activityCls = nullptr;
+    }
+    g_activity = env->NewGlobalRef(activity);
+    if (!g_activity) {
+        elog::error("jni: NewGlobalRef(activity) FALHOU — handshake incompleto");
+        g_registrationSeen = true;
+        g_handshake = false;
+        return;
+    }
+    g_activityCls = static_cast<jclass>(
+        env->NewGlobalRef(env->GetObjectClass(g_activity)));
+    if (!g_activityCls || clearPendingException(env)) {
+        g_activityCls = nullptr;
+        elog::error("jni: GetObjectClass/NewGlobalRef FALHOU — handshake incompleto");
+        g_registrationSeen = true;
+        g_handshake = false;
+        return;
+    }
+
+    // 4) métodos da activity (higiene de exceções — cacheActivityMethods)
+    cacheActivityMethods(env);
+
+    // 5) veredito: o método crítico do fluxo All Files tem de existir;
+    //    exportLogs é diagnóstico (falhar não bloqueia o fluxo de permissão)
+    const bool first = !g_registrationSeen;
+    g_registrationSeen = true;
+    g_handshake = g_midOpenAllFiles != nullptr;
+    if (g_handshake) {
+        elog::info(first ? "native: activity registada"
+                         : "native: activity re-registada (onResume — reforço)");
+        elog::info("jni: handshake OK — vm=%p activity=%p openAllFiles=%d "
+                   "exportLogs=%d",
+                   reinterpret_cast<void*>(vm),
+                   reinterpret_cast<void*>(g_activity),
+                   g_midOpenAllFiles ? 1 : 0, g_midExportLogs ? 1 : 0);
     } else {
-        elog::info("jni: VvActivity.exportLogsToDownloads OK");
+        elog::error("native: registo PARCIAL — openAllFilesSettings ausente "
+                    "(dex/assinatura divergente?) — ponte Java indisponível");
     }
 }
 
@@ -171,11 +271,18 @@ bool jniStorageApiSupported(bool* outManager) {
 }
 
 // 2) abre a janela de permissões do sistema (o resultado volta por
-// onActivityResult(kReqAllFiles) → nativeOnActivityResult → fila)
+// onActivityResult(kReqAllFiles) → nativeOnActivityResult → fila).
+// Diagnóstico honesto: handshake por fazer ≠ env indisponível no thread.
 bool jniOpenAllFilesSettings() {
+    if (!handshakeOk()) {
+        elog::warn("jni: openAllFilesSettings indisponível — ponte Java "
+                   "indisponível (handshake)");
+        return false;
+    }
     JNIEnv* env = envOrNull();
-    if (!env || !g_activity || !g_midOpenAllFiles) {
-        elog::warn("jni: openAllFilesSettings indisponível (bridge não pronto)");
+    if (!env) {
+        elog::warn("jni: openAllFilesSettings indisponível — env do thread "
+                   "chamador indisponível");
         return false;
     }
     env->CallVoidMethod(g_activity, g_midOpenAllFiles,
@@ -213,7 +320,8 @@ bool jniExportLogsToDownloads(int* outCount) {
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
     // log em ficheiro desde ANTES do android_main (fallback do device)
     vv::elog::init(vv::elog::androidFallbackDir());
-    vv::elog::info("jni: JNI_OnLoad — G.One VV 0.6.2 (registo explícito de nativos)");
+    vv::elog::info("jni: JNI_OnLoad — G.One VV 0.6.2 (registo explícito de "
+                   "nativos; handshake invertido — F5.3)");
 
     JNIEnv* env = nullptr;
     if (!vm || vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
@@ -222,6 +330,9 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
     }
 
     static const JNINativeMethod kMethods[] = {
+        { const_cast<char*>("nativeRegisterActivity"),
+          const_cast<char*>("(Lvv/goni/VvActivity;Ljava/lang/String;)V"),
+          reinterpret_cast<void*>(&Java_vv_goni_VvActivity_nativeRegisterActivity) },
         { const_cast<char*>("nativeOnActivityResult"),
           const_cast<char*>("(IIILandroid/net/Uri;I)V"),
           reinterpret_cast<void*>(&Java_vv_goni_VvActivity_nativeOnActivityResult) },
@@ -236,13 +347,15 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
                         "(dex ausente? hasCode=false?)");
         return JNI_ERR;
     }
-    if (env->RegisterNatives(cls, kMethods, 1) != JNI_OK) {
+    if (env->RegisterNatives(cls, kMethods, 2) != JNI_OK) {
         env->ExceptionClear();
-        vv::elog::error("jni: JNI_OnLoad — RegisterNatives(nativeOnActivityResult "
-                        "(IIILandroid/net/Uri;I)V) FALHOU (assinatura divergente?)");
+        vv::elog::error("jni: JNI_OnLoad — RegisterNatives FALHOU "
+                        "(nativeRegisterActivity/nativeOnActivityResult — "
+                        "assinatura divergente?)");
         return JNI_ERR;
     }
-    vv::elog::info("jni: JNI_OnLoad — nativeOnActivityResult registado OK (1 método)");
+    vv::elog::info("jni: JNI_OnLoad — nativeRegisterActivity + "
+                   "nativeOnActivityResult registados OK (2 métodos)");
     return JNI_VERSION_1_6;
 }
 

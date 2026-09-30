@@ -2,11 +2,20 @@
 // platform/StorageBridge.h — ponte nativo ↔ Java do ARMAZENAMENTO (F5.2,
 // device-only). Sucessora da ponte SAF (F5.1-C) com o fluxo All Files Access:
 //
-//   1. jniStorageApiSupported()   → Environment.isExternalStorageManager()
-//                                   (API 30+; API < 30 = sem suporte);
-//   2. jniOpenAllFilesSettings()  → VvActivity.openAllFilesSettings(kReqAllFiles)
-//                                   (ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-//   3. o retorno chega por Java_vv_goni_VvActivity_nativeOnActivityResult →
+//   HANDSHAKE INVERTIDO (F5.3 — docs/HANDSHAKE_AUDIT.md): é a VvActivity
+//   (thread da UI, SEMPRE anexado à VM) que se registra no nativo —
+//   onCreate → nativeRegisterActivity(this,"onCreate"), onResume reforça.
+//   O native NUNCA mais tenta descobrir a activity sozinho (o thread do
+//   glue não está anexado: GetEnv = JNI_EDETACHED — a causa única de
+//   todas as pontes mortas 0.6.0→0.6.2).
+//
+//   1. handshakeOk()             → registo Java concluído (vm + GlobalRef
+//                                  + métodos da activity cacheados);
+//   2. jniStorageApiSupported()  → Environment.isExternalStorageManager()
+//                                  (API 30+; API < 30 = sem suporte);
+//   3. jniOpenAllFilesSettings() → VvActivity.openAllFilesSettings(kReqAllFiles)
+//                                  (ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+//   4. o retorno chega por Java_vv_goni_VvActivity_nativeOnActivityResult →
 //      fila PendingResult → pollResult() no THREAD DA ENGINE (nunca na UI —
 //      regra do hotfix F5.1 mantida) → PermFlow::onSettingsReturn(granted).
 //
@@ -32,9 +41,11 @@ void setHandler(ResultHandler fn, void* user);
 // (storage/GL) nunca corre no thread da UI. false = nada pendente.
 bool pollResult();
 
-// cache de env/classe/métodos — chamar 1× no android_main com o
-// app->activity (o thread do NativeActivity já está anexado à VM)
-void initJava(void* vm, void* activityObject);
+// F5.3 — true quando o handshake invertido concluiu: a VvActivity registou-
+// se (nativeRegisterActivity), a VM foi guardada e o método crítico do
+// fluxo All Files (openAllFilesSettings) foi encontrado. false = ponte
+// Java indisponível (handshake) — as mensagens têm de reportar ESTA causa.
+bool handshakeOk();
 
 // 1) VERIFICAÇÃO da permissão (Environment.isExternalStorageManager()).
 //    false em *supported = API < 30 (o método não existe) → fluxo fallback.

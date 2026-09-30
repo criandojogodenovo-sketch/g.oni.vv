@@ -146,7 +146,7 @@ jobs:
             readelf --dyn-syms "${SO}" > dynsyms.txt
           fi
           echo "--- .dynsym (símbolos de entrada) ---"
-          grep -E 'ANativeActivity_onCreate|android_main|JNI_OnLoad|Java_vv_goni_VvActivity_nativeOnActivityResult' dynsyms.txt || true
+          grep -E 'ANativeActivity_onCreate|android_main|JNI_OnLoad|Java_vv_goni_VvActivity_nativeOnActivityResult|Java_vv_goni_VvActivity_nativeRegisterActivity' dynsyms.txt || true
           grep -q 'ANativeActivity_onCreate' dynsyms.txt \
             || { echo "::error::SÍMBOLO AUSENTE: ANativeActivity_onCreate — o APK vai crashar com UnsatisfiedLinkError no arranque."; exit 1; }
           grep -q 'android_main' dynsyms.txt \
@@ -155,7 +155,34 @@ jobs:
             || { echo "::error::SÍMBOLO AUSENTE: JNI_OnLoad — registo explícito de nativos (F5.1-hotfix) não foi ligado."; exit 1; }
           grep -q 'Java_vv_goni_VvActivity_nativeOnActivityResult' dynsyms.txt \
             || { echo "::error::SÍMBOLO AUSENTE: Java_vv_goni_VvActivity_nativeOnActivityResult — ponte SAF/Java sem o callback JNI."; exit 1; }
-          echo "OK: ANativeActivity_onCreate, android_main, JNI_OnLoad e Java_vv_goni_VvActivity_nativeOnActivityResult exportados em libgoni_vv.so"
+          grep -q 'Java_vv_goni_VvActivity_nativeRegisterActivity' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: Java_vv_goni_VvActivity_nativeRegisterActivity — handshake invertido (F5.3) sem o método de registo."; exit 1; }
+          echo "OK: ANativeActivity_onCreate, android_main, JNI_OnLoad, Java_vv_goni_VvActivity_nativeOnActivityResult e Java_vv_goni_VvActivity_nativeRegisterActivity exportados em libgoni_vv.so"
+
+      # F5.3 (TAREFA 1 institucionalizada): gate do MANIFEST BINÁRIO do APK
+      # real — aferições que provaram que 0.6.2 tinha o manifest correto mas
+      # a ponte morria em runtime (docs/HANDSHAKE_AUDIT.md). hasCode=true +
+      # launcher VvActivity + lib_name goni_vv têm de estar em TODO build.
+      - name: "Gate do manifest binário (hasCode + VvActivity + lib_name)"
+        run: |
+          set -euo pipefail
+          APK="$(find apk -type f -name '*.apk' | head -n 1)"
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          AAPT2="$(ls "${SDK}"/build-tools/*/aapt2 | sort -V | tail -n 1)"
+          "${AAPT2}" dump xmltree "${APK}" --file AndroidManifest.xml > manifest.txt
+          cat manifest.txt
+          # 1) hasCode=true (tipo 0x12 = boolean, valor 0x1) — a VvActivity
+          #    (dex) é instanciada pelo sistema, não a NativeActivity nua
+          grep -E 'android:hasCode.*(type 0x12\)0x1|=true|0x1$)' manifest.txt \
+            || { echo "::error::MANIFEST: hasCode != true — VvActivity não seria instanciada (todas as pontes JNI morrem)."; exit 1; }
+          # 2) launcher activity é a VvActivity (que faz o handshake invertido)
+          grep -q 'vv.goni.VvActivity' manifest.txt \
+            || { echo "::error::MANIFEST: activity vv.goni.VvActivity ausente — handshake invertido impossível."; exit 1; }
+          # 3) meta-data lib_name = goni_vv (loadLibrary no super.onCreate —
+          #    sem ele, JNI_OnLoad/RegisterNatives nunca correm)
+          grep -q 'goni_vv' manifest.txt \
+            || { echo "::error::MANIFEST: meta-data android.app.lib_name != goni_vv."; exit 1; }
+          echo "OK: manifest binário — hasCode=true, vv.goni.VvActivity como activity, lib_name=goni_vv"
 
       - name: Verificar assinatura (apksigner)
         run: |

@@ -30,6 +30,8 @@ typedef _jobject* jstring;
 typedef _jobject* jbyteArray;
 typedef _jobject* jobjectArray;
 
+struct JavaVM;   // forward (JNIEnv::GetJavaVM referencia antes da definição)
+
 typedef struct {
     const char* name;
     const char* signature;
@@ -60,6 +62,8 @@ struct JNIEnv {
     void GetByteArrayRegion(jbyteArray, jsize, jsize, jbyte*) {}
     void SetByteArrayRegion(jbyteArray, jsize, jsize, const jbyte*) {}
     jobject GetObjectArrayElement(jobjectArray, jsize) { return nullptr; }
+    // F5.3: GetJavaVM é usado no registo da activity (handshake invertido)
+    jint GetJavaVM(JavaVM**) { return JNI_OK; }
 };
 
 struct JavaVM {
