@@ -116,8 +116,7 @@ e máscara de gestos (drag em gizmo NÃO orbita). Escrita no Transform3D
 
 ## 8. HEAD da sub-fase
 
-- HEAD de fecho: ver `git log -1` no push desta sub-fase (release 0.6.9,
-  versionCode 18).
+- HEAD de fecho: 241117a (0.6.9-d) — release 0.6.9, versionCode 18.
 
 ## 9. Suíte de testes
 
@@ -131,7 +130,8 @@ e máscara de gestos (drag em gizmo NÃO orbita). Escrita no Transform3D
 - `build-release` (NDK r26): `assembleRelease` + `apksigner verify`.
 - `verify-entry-symbols`: `nm -D` + `jni_parity.py dynsyms.txt` + gate do
   manifest binário.
-- Estado no fecho: ver §11.
+- CI da sub-fase (run 36722491747, HEAD 241117a): core-tests **verde**,
+  build-release **verde** (APK assinado), verify-entry-symbols **verde**.
 
 ## 11. APK
 
@@ -140,7 +140,9 @@ e máscara de gestos (drag em gizmo NÃO orbita). Escrita no Transform3D
   `goni-vv-0.6.9-release-signed` do workflow `release`.
 - **APK CUMULATIVO**: cobre 0.6.7 (lifecycle GL + gestão de projetos) +
   0.6.8 (play mode) + 0.6.9 (gizmos).
-- sha256: anotar do artifact do CI (prática das sub-fases anteriores).
+- sha256 do APK assinado (artifact `goni-vv-0.6.9-release-signed`, run
+  36722491747):
+  `77f611027565220197700e0814fae3e909fb3926c34559ccf117505895746753`
 
 ## 12. Verificação no device (roteiro C33 — resumo)
 
