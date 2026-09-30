@@ -1410,9 +1410,10 @@ void android_main(android_app* app) {
     // F5.1-hotfix: log DUPLO (logcat + ficheiro) desde a 1ª linha.
     // O boot ainda não tem os paths da activity? O elog usa o fallback
     // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu
-    elog::info("G.One VV 0.6.8 — play mode com janela própria (viewport "
-               "fullscreen + touchcontrols + play bar com Stop/fps/aviso; "
-               "orbit desativado em play; pose restaurada ao parar)");
+    elog::info("G.One VV 0.6.9 — gizmos de transformação (Mover/Rodar/"
+               "Escalar com hit-test 3D e snapping; cores de eixo nos "
+               "gizmos como exceção documentada ao tema mono; 0.6.8 play "
+               "mode; 0.6.7 lifecycle GL + gestão de projetos)");
     {
         const char* root0 = app->activity
             ? (app->activity->externalDataPath ? app->activity->externalDataPath

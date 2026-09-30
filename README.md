@@ -1,4 +1,4 @@
-# G.One VV 0.6.8 — Play Mode com janela própria (0.6.7: lifecycle GL + gestão de projetos)
+# G.One VV 0.6.9 — gizmos de transformação (0.6.8: play mode; 0.6.7: lifecycle GL + gestão de projetos)
 
 Engine com editor, projeto `.goni` e maturação de assets (compressão ETC2/ASTC
 com cache, extração de texturas glTF/GLB, import OBJ/glTF/GLB/PNG, export
@@ -6,7 +6,44 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 (`sensorLandscape`). Devices de teste: Realme C33 (720x1600) e Realme
 RMX3624 (Android 13).
 
-## Escopo 0.6.8 (implementado)
+## Escopo 0.6.9 (implementado)
+
+**GIZMOS DE TRANSFORMAÇÃO — Mover / Rodar / Escalar** (só no TIC
+selecionado, SÓ em EDITOR — nunca em PLAY):
+
+- **Mover:** 3 setas por eixo + 3 quads de plano (XY/XZ/YZ) — drag ao longo
+  do eixo (projeção no eixo; ruído fora do eixo é ignorado) ou no plano
+  (decomposição nos 2 eixos do plano);
+- **Rodar:** 3 anéis por eixo — drag angular no plano do anel (ângulo do
+  dedo em torno do centro projetado; sinal corrigido pela orientação do
+  eixo face à câmara; rotação GLOBAL — pré-multiplicação);
+- **Escalar:** 3 handles por eixo + handle central uniforme (arrasto
+  radial por distâncias em px ao centro); clamp em 0.05 (nunca
+  zero/negativo);
+- **Hit-test 3D:** raio do toque contra eixos/anéis/handles — distâncias
+  em PX de ecrã sobre a geometria PROJETADA (o MESMO critério do desenho);
+  eixo sob press DESTACADO (branco ACCENT + traço mais grosso);
+- **Seletor de modo na toolbar** (grupo à direita — os 3 botões
+  Menu/Play/Settings ficam INTACTOS): [Mover][Rodar][Escalar] + [Snap]
+  (toggle);
+- **Snapping opcional:** mover ao grid de 0.5 u, rodar a 15°, escalar em
+  passos de 0.25;
+- **Gestos:** drag em gizmo NÃO orbita a câmara (o slot que apanha o
+  gizmo é reclamado — a máscara vai ao `editor::updateCameraOrbit`); drag
+  fora do gizmo = orbit normal;
+- **Escrita no Transform3D** (pos/rot/scale) com âncoras (pose final =
+  âncora + delta — o jitter nunca se acumula) + `updateWorld()` imediato;
+- **CORES DE EIXO (X vermelho / Y verde / Z azul): EXCEÇÃO DOCUMENTADA ao
+  tema mono, SÓ nos gizmos 3D** — a UI 2D mantém o tema mono intacto;
+- **Desenho:** projeção da geometria 3D para segmentos de ecrã
+  (`QuadBatch::line` novo — retângulo rotacionado), SEM depth (sempre
+  visível) e por baixo dos painéis (z-order de editor); tamanho de ecrã
+  CONSTANTE (~16% da distância da câmara).
+
+O núcleo (projeção/raio/hit-test/drag/snapping) é GL-free e testado no CI
+Linux (26 testes novos em `tests/test_gizmo.cpp`).
+
+## Escopo 0.6.8 (histórico)
 
 **PLAY MODE COM JANELA PRÓPRIA.** Dois modos de UI com transição Play/Stop:
 o **EDITOR** (toolbar de 3 botões + Hierarchy + Inspector + menus — intactos)
@@ -475,6 +512,30 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.6.9 (gizmos; APK CUMULATIVO)
+
+Instalar o APK 0.6.9 (artifact `goni-vv-0.6.9-release-signed`) — cobre
+TAMBÉM a 0.6.7 (lifecycle/apagar/sair) e a 0.6.8 (play mode).
+
+1. Abrir um projeto → criar/selecionar um TIC → o GIZMO aparece no TIC
+   (modo Mover por omissão): 3 setas (X vermelho, Y verde, Z azul) + 3
+   quadradinhos de plano;
+2. **Mover:** tocar na seta X (destaca-se a branco) e arrastar → o TIC
+   mexe SÓ em X; arrastar um quadradinho de plano → move nos 2 eixos do
+   plano; a câmara NÃO orbita durante o drag (arrastar fora do gizmo
+   orbita normalmente);
+3. **Rodar** (botão Rodar na toolbar): 3 anéis; arrastar o anel → roda no
+   eixo do anel; com Snap, saltos de 15°;
+4. **Escalar** (botão Escalar): 3 handles + quadrado central; o central
+   escala uniforme; com Snap, passos de 0.25; nunca desaparece (clamp);
+5. **Snap:** ligar/desligar na toolbar — mover salta ao grid de 0.5;
+6. **Inspector coerente:** depois de um drag, os sliders do Transform3D
+   mostram a pose nova (pos/rot/scale);
+7. **PLAY:** tocar Play → o gizmo DESAPARECE (nada de edição em play);
+   Stop → o gizmo volta na pose restaurada;
+8. Regressões 0.6.8 (play bar/touchcontrols/orbit) e 0.6.7 (lifecycle
+   home/voltar; sair para projetos; apagar projeto; nome visível).
 
 ## Verificação no Realme C33 (dono) — 0.6.8 (play mode)
 
