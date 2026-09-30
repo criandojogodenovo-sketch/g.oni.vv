@@ -1,14 +1,10 @@
-# G.One VV 0.6.3 — F5.3 (handshake Java↔native invertido + All Files Access honesto)
+# G.One VV 0.6.4 — F5.4 (Gestor de Projetos SAF multi-pasta + fix do handshake: loadLibrary no Java)
 
-Engine com editor, projeto `.goni` e AGORA maturação de assets: compressão
-de texturas de hardware (ETC2 garantido em GLES3; ASTC 4x4/6x6 quando a
-extensão KHR existe) com mips completos em CPU e cache em disco
-(`textures/cache/`, keyed pelo hash do PNG — 2ª carga é hit; PNG alterado
-invalida), extração de texturas embutidas em glTF/GLB (base64 ou BIN chunk)
-para `textures/gltf_<hash>.png` com dedup, e SAF (Storage Access Framework)
-para escolher a pasta do projeto, importar e exportar SEM PC. Mobile-first:
-arm64-v8a, minSdk 24, landscape travado (`sensorLandscape`). Device de
-teste: Realme C33 (720x1600).
+Engine com editor, projeto `.goni` e maturação de assets (compressão ETC2/ASTC
+com cache, extração de texturas glTF/GLB, import OBJ/glTF/GLB/PNG, export
+OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
+(`sensorLandscape`). Devices de teste: Realme C33 (720x1600) e Realme
+RMX3624 (Android 13).
 
 Engine com editor e AGORA com projeto e assets. A F5 trouxe o formato de
 projeto `.goni` (pasta com manifesto, cenas, meshes e texturas), importadores
@@ -17,7 +13,47 @@ ResourceManager com cache e editor que aceita assets importados. Mobile-first:
 arm64-v8a, minSdk 24, landscape travado (`sensorLandscape`). Device de teste:
 Realme C33 (720x1600).
 
-## Escopo F5.3 (implementado)
+## Escopo F5.4 (implementado)
+
+**PARTE 1 — fix do `UnsatisfiedLinkError` (RMX3624, Android 13).** O
+logcat mostrava `No implementation found for void
+vv.goni.VvActivity.nativeRegisterActivity(...)` no onCreate E no onResume —
+o handshake nunca ficava OK e todo import/export falhava com "ponte Java
+indisponível (handshake)". Causa raiz (docs/HANDSHAKE_AUDIT.md §6): o
+`android.app.NativeActivity` carrega a lib com `dlopen(RTLD_LOCAL)` CRUO
+(`loadNativeCode_native`) — um dlopen cru NÃO corre o `JNI_OnLoad` nem
+registra a lib no mapa de resolução do JVM, logo o `RegisterNatives` da
+0.6.3 nunca correu no device e a busca por nome não via a lib (a premissa
+"super.onCreate faz System.loadLibrary" era FALSA — o hospedeiro testava o
+C++ direto, a RESOLUÇÃO não era modelada). FIX em 2 camadas: (1)
+`static { System.loadLibrary("goni_vv"); }` na VvActivity — o JNI_OnLoad
+corre de verdade, o RegisterNatives executa e a lib entra no mapa do JVM;
+(2) `ensureNativesRegistered()` idempotente no 1º nativeRegisterActivity
+via GetObjectClass + `JNI_OnLoad` TOLERANTE (FindClass/RegisterNatives a
+falhar NUNCA devolvem JNI_ERR — logam e adiam para a 2ª camada). GATE NOVO
+pedido pelo dono: `scripts/jni_parity.py` no CI afere TODO native da
+VvActivity.java contra a tabela RegisterNatives (nome+assinatura), o static
+loadLibrary obrigatório e, no release, os símbolos `Java_vv_goni_VvActivity_*`
+no `.dynsym` do .so real — na 1ª execução apanhou um bug latente real
+(assinatura de nativeOnActivityResult com um 'I' a mais; corrigida).
+
+**PARTE 2 — Gestor de Projetos (estilo Godot, múltiplas pastas).** A app
+abre agora no ecrã **"Projetos"** (ProjectManagerActivity, launcher novo):
+lista dos projetos já criados (vazia na 1ª instalação), toque abre direto
+no editor, long-press remove da lista (a pasta NÃO é apagada). "+" → nome →
+seletor de pastas do sistema (SAF, `ACTION_OPEN_DOCUMENT_TREE`) → a pasta
+de CADA projeto é escolhida por ele: cada escolha gera um URI próprio,
+guardado com `takePersistableUriPermission` — projetos diferentes em
+pastas diferentes, NUNCA se misturam, MESMO SEM All Files Access. A
+estrutura (project.goni, scenes/, meshes/, textures/) é criada na pasta
+colhida e o editor abre esse projeto (SafStorage: ProjectStorage sobre a
+árvore SAF — o editor não sabe a diferença). A lista vive em
+`projects.json` no app-private (não depende do handshake nem de
+permissões). O All Files Access mantém-se EXATAMENTE como estava, só para
+import/export de assets soltos DENTRO de um projeto aberto
+(Download/Documents) — as duas coisas COEXISTEM.
+
+## Escopo F5.3 (histórico — handshake invertido)
 Objetivo: a ponte Java↔native LIGAR DE VERDADE em runtime (handshake
 INVERTIDO: a activity Java registra-se no native), para o fluxo All Files
 Access funcionar no C33: diálogo → settings do app → permissão ativada →
@@ -294,6 +330,7 @@ Sem física (BodyComp é F4), sem luzes, sem assets, sem animação, sem linguag
 (CLÁUSULA CALMA).
 
 ## Histórico
+- **F5.4 (0.6.4)**: Gestor de Projetos (SAF multi-pasta, takePersistableUriPermission por projeto, SafStorage = ProjectStorage sobre SAF, fallback app-private intacto) + fix do UnsatisfiedLinkError (JNI_OnLoad nunca corria no device — dlopen do NativeActivity não chama; static loadLibrary na VvActivity + registo idempotente pós-handshake + gate jni_parity.py que apanhou um bug latente de assinatura) — 272 testes (docs/HANDSHAKE_AUDIT.md §6).
 - **F5.2 (0.6.2)**: All Files Access (diálogo → settings → File API direta) + remoção do SAF tree picker + log viewer in-app + boot self-check com errno — 254 testes.
 - **F5.3 (0.6.3)**: handshake Java↔native INVERTIDO (VvActivity regista-se no native — onCreate + onResume; causa única das pontes mortas 0.6.0→0.6.2: GetEnv EDETACHED no thread do glue) + attach de threads nomeado + mensagens honestas ("ponte Java indisponível (handshake)") + gate do manifest binário no CI — 264 testes (docs/HANDSHAKE_AUDIT.md).
 - **F5.1 (0.6.0)**: maturação de assets em 4 sub-blocos.
@@ -384,7 +421,43 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
 
-## Verificação no Realme C33 (dono) — F5.3 (handshake + All Files Access real)
+## Verificação no Realme C33 E RMX3624 (dono) — F5.4
+> A regressão do handshake APARECEU no RMX3624 (Android 13) — a fase só
+> fecha VERIFIED depois de passar nos DOIS devices.
+
+1. Instalar o APK **0.6.4** (instalação nova ou por cima; a lista de
+   projetos começa vazia).
+2. **Ecrã inicial = "Projetos"** (NÃO o editor): lista vazia com a mensagem
+   "Nenhum projeto".
+3. **Criar projeto**: "+ Novo projeto" → nome → o seletor de pastas do
+   sistema abre (SAF) → escolher uma pasta (ex.: Documents/JogoA) → a
+   estrutura entra no editor. No log viewer (Settings → Ver logs):
+   `java: onCreate → nativeRegisterActivity` → `native: activity registada`
+   → `jni: handshake OK — … saf=4/4` → `java: openProject → fila` →
+   `projeto: '<nome>' pronto (SAF)`.
+4. **Volta ao gestor**: voltar (back) desde o editor → a lista mostra o
+   projeto (nome + pasta). **Criar um 2º projeto numa pasta DIFERENTE**
+   (ex.: Documents/JogoB) → ambos aparecem na lista e abrem
+   independentemente (nada se mistura).
+5. **Persistência**: fechar a app (swipe) → abrir de novo → a lista
+   continua lá; tocar num projeto abre-o com as cenas gravadas.
+6. **Sem All Files Access**: os dois projetos funcionam COMPLETOS (save/
+   load/scene) SEM conceder All Files Access — o SAF dos projetos é
+   independente.
+7. **All Files Access coexiste**: num projeto aberto, Menu → Importar… →
+   diálogo → Permitir → janela do app → import de Download/Documents →
+   export para Download/GOneVV/export (igual 0.6.3).
+8. **Mensagens honestas**: se algo falhar por ponte, o toast/log diz
+   **"ponte Java indisponível (handshake)"** — nunca "sistema sem suporte".
+9. **Sem UnsatisfiedLinkError**: no logcat (adb, se disponível) NÃO existe
+   `UnsatisfiedLinkError` no arranque; no engine.log a linha
+   `jni: JNI_OnLoad — G.One VV 0.6.4 … registado(s)` aparece ANTES do
+   `java: onCreate → nativeRegisterActivity`.
+10. **Regressões**: F5.3 (import/export All Files), F5.2 (log viewer,
+    modo no Settings), F5.1 (status line, cache), F5 (Save/Load), F4.2
+    (Play/scroll).
+
+## Verificação no Realme C33 (dono) — F5.3 (histórico)
 1. Instalar o APK **0.6.3** → confirmar "0.6.3" nas infos.
 2. **Handshake no log viewer** (SEM PC): abrir a app → Settings → **"Ver
    logs"** → a sequência completa tem de aparecer:

@@ -84,3 +84,25 @@ Caminho alternativo se o Play recusar: voltar a um picker de ficheiro único
   de todas as pontes mortas 0.6.0→0.6.2 era o `initJava` do thread do glue
   (`GetEnv` = `JNI_EDETACHED`); attach de threads nomeado + mensagens
   honestas (docs/HANDSHAKE_AUDIT.md com a evidência do APK 0.6.2 real).
+
+## F5.4 (0.6.4) — o SAF VOLTA, pela porta certa: Gestor de Projetos
+
+A remoção do tree picker na F5.2 resolvia o fluxo de PERMISSÕES, mas criava
+uma limitação de produto: o projeto vivia SEMPRE no app-private
+(getExternalFilesDir). A F5.4 reintroduz o SAF com um papel EXATO e
+complementar — os dois fluxos COEXISTEM, não se substituem:
+
+- **SAF (ACTION_OPEN_DOCUMENT_TREE) — SÓ no ecrã inicial**: escolher a
+  pasta de CADA projeto no Gestor de Projetos. Cada escolha gera um URI
+  próprio com takePersistableUriPermission — projetos diferentes em pastas
+  diferentes, sem depender de All Files Access. O I/O do projeto corre por
+  core/SafStorage (ProjectStorage sobre a árvore SAF; fds via
+  ParcelFileDescriptor.detachFd).
+- **All Files Access (MANAGE_APP_ALL_FILES_ACCESS_PERMISSION) — só para
+  import/export de assets soltos DENTRO de um projeto já aberto**
+  (varrimento de Download/Documents, export para Download/GOneVV/export):
+  exatamente o fluxo F5.2, intacto.
+
+A lista de projetos (projects.json) vive no app-private — não depende
+nem do handshake nem de permissões. Sem handshake, o boot cai no modo
+app-private com a mensagem honesta "ponte Java indisponível (handshake)".

@@ -238,14 +238,14 @@ public class VvActivity extends NativeActivity {
      *  native (fechar é o que persiste no provider); -1 = falha */
     int bridgeOpenFd(String docUri, String mode) {
         try {
-            android.content.res.AssetFileDescriptor afd =
+            android.os.ParcelFileDescriptor pfd =
                     getContentResolver().openFileDescriptor(
                             Uri.parse(docUri),
                             (mode != null && !mode.isEmpty()) ? mode : "r");
-            if (afd == null) {
+            if (pfd == null) {
                 return -1;
             }
-            return afd.detachFd();
+            return pfd.detachFd();
         } catch (Exception e) {
             Log.e("GONI", "bridgeOpenFd FALHOU (" + docUri + ", " + mode + ")", e);
             return -1;
