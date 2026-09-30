@@ -1,4 +1,4 @@
-# G.One VV 0.6.5 — F5.4-hotfix (SAF sem duplicação de ficheiros + Salvar materializa assets nas subpastas)
+# G.One VV 0.6.7 — lifecycle GL + gestão de projetos (fix dos "cubinhos" + apagar projeto + Sair para projetos)
 
 Engine com editor, projeto `.goni` e maturação de assets (compressão ETC2/ASTC
 com cache, extração de texturas glTF/GLB, import OBJ/glTF/GLB/PNG, export
@@ -6,14 +6,50 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 (`sensorLandscape`). Devices de teste: Realme C33 (720x1600) e Realme
 RMX3624 (Android 13).
 
-Engine com editor e AGORA com projeto e assets. A F5 trouxe o formato de
-projeto `.goni` (pasta com manifesto, cenas, meshes e texturas), importadores
-OBJ/glTF/GLB, loader de PNG com mipmaps, export (cena + OBJ round-trip),
-ResourceManager com cache e editor que aceita assets importados. Mobile-first:
-arm64-v8a, minSdk 24, landscape travado (`sensorLandscape`). Device de teste:
-Realme C33 (720x1600).
+## Escopo 0.6.7 (implementado)
 
-## Escopo F5.4 (implementado)
+**1 — LIFECYCLE GL (fix dos "cubinhos" do C33).** Sair do editor
+(home/recents) e reentrar SEM matar a app deixava TODO o texto em quads
+brancos: o `APP_CMD_TERM_WINDOW` destrói o contexto EGL (o
+`EglContext::shutdown` mata surface E contexto — todos os ids GL ficam
+órfãos), mas o `FontAtlas` guardava `tex_ != 0` (guard "já carregado") e o
+2º `APP_CMD_INIT_WINDOW` NUNCA re-upava o atlas → o pass UI amostrava uma
+textura órfã = quads brancos. O mesmo acontecia aos mapas do `GpuAssets`
+(`releaseAll()` existia mas ninguém chamava). FIX: `FontAtlas::destroy()`
+novo (`glDeleteTextures` + reset do id E das métricas — chamado no
+TERM_WINDOW com o contexto ainda corrente; o guard passa a impedir só o
+upload duplicado no MESMO contexto); TERM_WINDOW com ordem obrigatória
+detach dos MeshRenderers → `g_gpu.releaseAll()` → `g_font.destroy()` →
+cubo/grid → renderer → `g_egl.shutdown()` POR FIM; INIT_WINDOW loga a
+RE-CRIAÇÃO do contexto e confirma o RE-BAKE + RE-UPLOAD. NENHUM recurso GL
+é assumido vivo entre term/init (a cena é recarregada do disco e os
+resolvers re-upam os assets).
+
+**2 — APAGAR PROJETO no gestor.** Long-press numa entrada → diálogo com o
+nome e a pasta e DUAS ações: "Remover da lista" (a pasta fica — como
+antes) e "Apagar projeto" → confirmação EXPLÍCITA separada ("Apagar
+projeto X? Não pode ser desfeito — a PASTA e TODOS os ficheiros são
+apagados") → `VvProjects.deleteProject` novo remove a pasta via File API
+(`DocumentsContract.deleteDocument` no URI de documento da raiz) + sai da
+lista; a permissão persistente é libertada e a lista refresca.
+
+**3 — "Sair para projetos" no editor.** Menu → 6º item: auto-save da cena
+(cena + manifesto + assets de runtime materializados) → a activity
+termina-se (`VvActivity.bridgeFinish` novo, chamado por
+`jniFinishToLauncher` na ponte JNI) e o GESTOR retoma da back stack SEM
+matar a app. Reentrar arranca um NOVO `android_main` — que agora faz RESET
+de estado na entrada (TickGroups.clear() novo — sem isto a física seria
+registada 2× e daria dois passos por frame; InputState.resetAll() novo;
+cena/editor/play/projeto/catalog resetados) com um contexto EGL novo
+(re-upload de tudo — o fix 1 cobre a reentrada).
+
+**4 — fix do nome do projeto invisível.** O diálogo de novo projeto herda
+o tema CLARO do manifest (`Theme.NoTitleBar.Fullscreen`) → painel branco;
+o EditText tinha só texto quase-branco = texto branco sobre fundo branco
+durante a digitação. Fix determinístico sem `res/`: fundo escuro
+explícito (0xFF1E222A) + texto claro + hint + `requestFocus()` pós-show.
+
+## Escopo F5.4 (histórico)
 
 **PARTE 1 — fix do `UnsatisfiedLinkError` (RMX3624, Android 13).** O
 logcat mostrava `No implementation found for void
@@ -421,6 +457,45 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.6.7 (lifecycle GL + gestão de projetos)
+
+Instalar o APK 0.6.7 (artifact `goni-vv-0.6.7-release-signed` do CI). O
+roteiro cobre os três fixes; o log viewer in-app (Settings → Ver logs)
+mostra as linhas `lifecycle:` se algo falhar.
+
+**A — lifecycle GL (cubinhos):**
+1. Abrir um projeto no gestor → criar/mover um TIC → **botão home** (ou
+   recents) → voltar à app SEM a matar;
+2. Esperado: o texto (toolbar, Hierarchy, Inspector, status line) renderiza
+   NORMAL — sem quads brancos;
+3. Settings → Ver logs: procurar `lifecycle: INIT_WINDOW #2 — contexto
+   EGL RE-CRIADO` e `[boot 3/6] fonts OK … RE-UPLOAD no contexto novo`;
+   e no sair: `lifecycle: TERM_WINDOW #1 — … NENHUM recurso GL assumido
+   vivo`.
+
+**B — apagar projeto (com confirmação):**
+1. No gestor, criar um projeto de teste (ex.: "lixo") com uma pasta à
+   escolha → entrar nele → criar um TIC → Menu → Sair para projetos;
+2. Long-press na entrada "lixo" → "Apagar projeto" → confirmação
+   ("Não pode ser desfeito") → "Apagar";
+3. Esperado: Toast "projeto apagado", a entrada SAI da lista e a pasta
+   escolhida desaparece do gestor de ficheiros do sistema;
+4. Repetir com "Remover da lista" noutro projeto: a pasta PERMANECE
+   (comportamento antigo intacto).
+
+**C — Sair para projetos (sem matar a app):**
+1. No editor: mover/rodar um TIC → Menu → "Sair para projetos";
+2. Esperado: volta ao GESTOR (a app não fecha/reinicia — sem splash), a
+   cena foi auto-salva (toast "cena salva — a sair…");
+3. Reentrar no MESMO projeto: cena carregada com o TIC na pose deixada,
+   texto normal, física a 1× velocidade (play não acelerado);
+4. Ver logs: `editor: sair p/ projetos — auto-save OK` e `lifecycle:
+   REENTRADA do android_main`.
+
+**D — nome do projeto visível:**
+1. Gestor → "+ Novo projeto" → digitar: o texto digitado TEM de estar
+   visível (campo escuro, texto claro, cursor a piscar).
 
 ## Verificação no Realme C33 E RMX3624 (dono) — F5.4-hotfix (0.6.5)
 > A regressão do handshake APARECEU no RMX3624 (Android 13) — a fase só

@@ -1234,9 +1234,9 @@ void android_main(android_app* app) {
     // F5.1-hotfix: log DUPLO (logcat + ficheiro) desde a 1ª linha.
     // O boot ainda não tem os paths da activity? O elog usa o fallback
     // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu
-    elog::info("G.One VV 0.6.5 — F5.4-hotfix (SAF sem duplicação: findFile "
-               "+ octet-stream + probe tri-estado; Salvar materializa "
-               "assets: meshes/cube.obj)");
+    elog::info("G.One VV 0.6.7 — lifecycle GL + gestão de projetos (re-upload "
+               "de TODOS os recursos GL no re-init do contexto; apagar "
+               "projeto no gestor; 'Sair para projetos' sem matar a app)");
     {
         const char* root0 = app->activity
             ? (app->activity->externalDataPath ? app->activity->externalDataPath
