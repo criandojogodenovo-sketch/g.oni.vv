@@ -22,6 +22,13 @@
 #include <string>
 #include <vector>
 
+// sys/memfd.h não existe em todos os sistemas (a glibc fornece o SÍMBOLO
+// desde a 2.27) — protótipo explícito, assinatura estável da glibc
+extern "C" int memfd_create(const char* name, unsigned int flags);
+#ifndef MFD_CLOEXEC
+#define MFD_CLOEXEC 0x0001U
+#endif
+
 #include <jni.h>   // FAKE (tests/stub é o primeiro include dir)
 
 #include "platform/StorageBridge.h"
@@ -38,6 +45,8 @@ extern "C" void Java_vv_goni_VvActivity_nativeRegisterActivity(
         JNIEnv*, jclass, jobject activity, jstring origin);
 extern "C" void Java_vv_goni_VvActivity_nativeOnActivityResult(
         JNIEnv*, jclass, jint request, jint result, jobject uri, jint flags);
+extern "C" void Java_vv_goni_VvActivity_nativeOpenProject(
+        JNIEnv*, jclass, jstring treeUri, jstring name);
 extern "C" jint JNI_OnLoad(JavaVM* vm, void*);
 
 namespace {
@@ -362,7 +371,7 @@ TEST(handshake_partial_registration_fails) {
 }
 
 // ---------------------------------------------------------------------------
-// JNI_OnLoad — registo EXPLÍCITO dos 2 nativos (fallback: VM anexada)
+// JNI_OnLoad — registo EXPLÍCITO dos 3 nativos (fallback: VM anexada)
 // ---------------------------------------------------------------------------
 
 TEST(jni_onload_registers_two_natives) {
@@ -375,15 +384,17 @@ TEST(jni_onload_registers_two_natives) {
 
     EXPECT(rc == JNI_VERSION_1_6);
     EXPECT(g_jni.register_natives_calls == 1);
-    EXPECT(g_jni.register_natives_names.size() == 2);
-    EXPECT(g_jni.register_natives_sigs.size() == 2);
-    bool hasRegister = false, hasResult = false;
+    EXPECT(g_jni.register_natives_names.size() == 3);
+    EXPECT(g_jni.register_natives_sigs.size() == 3);
+    bool hasRegister = false, hasResult = false, hasOpenProject = false;
     for (const std::string& n : g_jni.register_natives_names) {
         if (n == "nativeRegisterActivity") hasRegister = true;
         if (n == "nativeOnActivityResult") hasResult = true;
+        if (n == "nativeOpenProject") hasOpenProject = true;
     }
     EXPECT(hasRegister);   // handshake invertido registado
     EXPECT(hasResult);     // retorno das definições registado
+    EXPECT(hasOpenProject);   // F5.4: projeto do gestor registado
 
     // F5.4 — assinaturas EXATAS: uma divergência Java↔tabela é outra forma
     // de UnsatisfiedLinkError (RegisterNatives casa a string inteira)
@@ -395,6 +406,10 @@ TEST(jni_onload_registers_two_natives) {
         if (g_jni.register_natives_names[i] == "nativeOnActivityResult") {
             EXPECT(g_jni.register_natives_sigs[i] ==
                    "(IILandroid/net/Uri;I)V");   // F5.4: gate apanhou o 'I' a mais da tabela antiga
+        }
+        if (g_jni.register_natives_names[i] == "nativeOpenProject") {
+            EXPECT(g_jni.register_natives_sigs[i] ==
+                   "(Ljava/lang/String;Ljava/lang/String;)V");
         }
     }
 
@@ -440,17 +455,49 @@ TEST(jni_onload_findclass_failure_soft_recovery) {
 
     EXPECT(vv::storage::handshakeOk());
     EXPECT(g_jni.register_natives_calls == 1);   // registo recuperado AQUI
-    EXPECT(g_jni.register_natives_names.size() == 2);
-    bool hasRegister = false, hasResult = false;
+    EXPECT(g_jni.register_natives_names.size() == 3);
+    bool hasRegister = false, hasResult = false, hasOpenProject = false;
     for (const std::string& n : g_jni.register_natives_names) {
         if (n == "nativeRegisterActivity") hasRegister = true;
         if (n == "nativeOnActivityResult") hasResult = true;
+        if (n == "nativeOpenProject") hasOpenProject = true;
     }
     EXPECT(hasRegister);
     EXPECT(hasResult);
+    EXPECT(hasOpenProject);
     // a classe veio do GetObjectClass (a FindClass falhada ficou gravada 1×)
     EXPECT(countContaining(g_jni.find_class_calls, "vv/goni/VvActivity") == 1);
     const auto lines = logLines();
     EXPECT(countContaining(lines, "nativo(s) registado(s)") == 1);
+    vv::elog::init(kTestLogs);
+}
+
+// ---------------------------------------------------------------------------
+// F5.4 — nativeOpenProject: o projeto escolhido no gestor chega à fila que
+// o android_main consome (o "stub Java" é o VvProjects.launchEditor →
+// VvActivity.onCreate → nativeOpenProject do device)
+// ---------------------------------------------------------------------------
+
+TEST(saf_native_open_project_enqueues) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    drainQueue();
+    g_jni.reset();
+
+    Java_vv_goni_VvActivity_nativeOpenProject(
+        g_jni.env, kFakeCls, g_jni.newString("content://tree/pasta-x"),
+        g_jni.newString("meu jogo"));
+
+    vv::storage::ProjectRequest got;
+    EXPECT(vv::storage::projectSlot().tryPoll(&got));
+    EXPECT(got.treeUri == "content://tree/pasta-x");
+    EXPECT(got.name == "meu jogo");
+    EXPECT(countContaining(logLines(), "java: openProject → fila") == 1);
+
+    // uri vazia = extras perdidos — NÃO enfileira (log diz a causa)
+    Java_vv_goni_VvActivity_nativeOpenProject(
+        g_jni.env, kFakeCls, g_jni.newString(""), g_jni.newString("x"));
+    EXPECT(!vv::storage::projectSlot().tryPoll(&got));
+    EXPECT(countContaining(logLines(), "treeUri VAZIA") == 1);
     vv::elog::init(kTestLogs);
 }

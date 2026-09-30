@@ -19,6 +19,7 @@
 #include "core/PlaySnapshot.h"
 #include "core/Presets.h"
 #include "core/Project.h"
+#include "core/SafStorage.h"
 #include "core/Scene.h"
 #include "core/SceneSerializer.h"
 #include "core/Tick.h"
@@ -76,12 +77,14 @@ PlaySnapshot        g_playSnap;
 
 
 // ---- F5-A: projeto .goni + storage -----------------------------------------
-// Raiz = getExternalFilesDir (externalDataPath; fallback internalDataPath).
-// O projeto vive SEMPRE nesta pasta (app-private, sem permissões):
-// project.goni + scenes/ + meshes/ + textures/. O I/O de FICHEIROS do
-// utilizador (import/export) passa pelo fluxo All Files Access (F5.2) com
-// File API direta — ver storage::PermFlow + fileapi.
-std::unique_ptr<FsStorage> g_storage;
+// F5.4 (Gestor de Projetos): a raiz é a PASTA ESCOLHIDA pelo utilizador no
+// ecrã inicial (SafStorage sobre o URI de árvore SAF com permissão
+// persistente — cada projeto na sua pasta, sem All Files Access). Sem
+// projeto SAF (lançamento direto/timeout/handshake em baixo) cai no
+// FsStorage app-private (getExternalFilesDir — comportamento 0.6.x).
+// O I/O de FICHEIROS do utilizador (import/export) continua pelo fluxo
+// All Files Access (F5.2) com File API direta — COEXISTE com o SAF.
+std::unique_ptr<ProjectStorage> g_storage;
 Project    g_project;
 bool       g_projectReady = false;   // storage + projeto com cena válida
 
@@ -1110,11 +1113,12 @@ void android_main(android_app* app) {
     elog::info("logs: %s (ativo=%d)", elog::dir()[0] ? elog::dir() : "<só-logcat>",
                elog::active() ? 1 : 0);
 
-    // F5-A: storage do projeto — raiz getExternalFilesDir (sem permissões
-    // desde a API 19); fallback = internalDataPath. Boot abre o projeto
-    // existente ou cria "projeto" (manifesto + estrutura completa).
-    // F5.2: SEM SAF router — o projeto vive SEMPRE app-private; o I/O de
-    // ficheiros do utilizador passa pelo fluxo All Files Access.
+    // F5-A: storage do projeto — F5.4: GESTOR DE PROJETOS. O arranque
+    // ESPERE (até 3s) pelo projeto escolhido no ecrã inicial: a VvActivity
+    // empurra em nativeOpenProject (extras do Intent) → ProjectSlot.
+    // Chegou + handshake OK → SafStorage sobre a pasta SAF (a estrutura
+    // project.goni/scenes/meshes/textures é criada por openOrCreate).
+    // Sem projeto SAF → fallback app-private (comportamento 0.6.x).
     {
         const char* root = nullptr;
         const bool isExternal = app->activity &&
@@ -1126,40 +1130,74 @@ void android_main(android_app* app) {
         }
         // F5.2 (item 5): BOOT SELF-CHECK — o resultado do mapeamento
         // (getExternalFilesDir null?) e o errno de cada fopen/opendir
-        // falhado ficam no engine.log ANTES de qualquer I/O pesado. Se algo
-        // falhar mais tarde, a CAUSA do storage já está registrada aqui.
+        // falhado ficam no engine.log ANTES de qualquer I/O pesado.
         fileapi::logStorageSelfCheck(root, isExternal);
-        if (root) {
-            g_storage = std::make_unique<FsStorage>(root);
+
+        elog::info("storage: à espera do projeto do gestor (ProjectSlot, "
+                   "timeout 3000ms)");
+        storage::ProjectRequest req;
+        bool safReady = false;
+        if (storage::projectSlot().waitFor(&req, 3000)) {
+            if (storage::handshakeOk()) {
+                g_storage = std::make_unique<SafStorage>(storage::jniSafIo(),
+                                                         req.treeUri);
+                if (Project::openOrCreate(*g_storage, req.name, g_project)) {
+                    safReady = true;
+                    g_projectReady = g_project.activeScenePath() != nullptr;
+                    elog::info("projeto: '%s' pronto (SAF) — %u cena(s), "
+                               "ativa=%s",
+                               g_project.name.c_str(),
+                               (unsigned)g_project.scenes.size(),
+                               g_projectReady
+                                   ? g_project.activeScenePath()->c_str()
+                                   : "-");
+                } else {
+                    elog::error("projeto: '%s' SAF inutilizável — fallback "
+                                "app-private",
+                                req.name.c_str());
+                    g_storage.reset();
+                }
+            } else {
+                elog::error("storage: projeto '%s' recebido mas ponte Java "
+                            "indisponível (handshake) — modo app-private",
+                            req.name.c_str());
+            }
+        } else {
+            elog::info("storage: sem projeto SAF no arranque (timeout ou "
+                       "lançamento direto) — modo app-private");
+        }
+
+        if (!safReady) {
+            if (root) {
+                g_storage = std::make_unique<FsStorage>(root);
+                // F5.2: ponte Java (janela de permissões + retorno + export logs)
+                storage::setHandler(&onStorageResult, nullptr);
+                if (Project::openOrCreate(*g_storage, "projeto", g_project)) {
+                    g_projectReady = g_project.activeScenePath() != nullptr;
+                    elog::info("projeto: '%s' pronto em %s (%u cena(s), "
+                               "ativa=%s)",
+                               g_project.name.c_str(), root,
+                               (unsigned)g_project.scenes.size(),
+                               g_projectReady
+                                   ? g_project.activeScenePath()->c_str()
+                                   : "-");
+                } else {
+                    elog::error("projeto: storage inutilizável em %s — editor "
+                                "sem persistência", root);
+                }
+            } else {
+                elog::error("projeto: sem externalDataPath/internalDataPath — "
+                            "editor sem persistência");
+            }
+        } else {
+            // F5.2: ponte Java (janela de permissões + retorno + export logs)
+            storage::setHandler(&onStorageResult, nullptr);
+        }
+        if (g_storage) {
             // F5.1-A: cache/pipeline vivem enquanto o storage viver
             g_texCache = std::make_unique<TextureCache>(*g_storage);
             g_pipeline = std::make_unique<TexturePipeline>(g_hwCompressor,
                                                            *g_texCache);
-            // F5.2: ponte Java (janela de permissões + retorno + export logs)
-            storage::setHandler(&onStorageResult, nullptr);
-            // F5.3 — HANDSHAKE INVERTIDO (docs/HANDSHAKE_AUDIT.md): o native
-            // NÃO tenta descobrir a activity sozinho. O android_main corre no
-            // thread do glue (pthread) que NÃO está anexado à VM — GetEnv
-            // devolvia JNI_EDETACHED e a ponte morria com "env/activity
-            // indisponíveis" (causa única de todas as features Java-dependentes
-            // falharem desde a 0.6.0). É a VvActivity (thread da UI, sempre
-            // anexado) que se registra: onCreate → nativeRegisterActivity,
-            // onResume reforça. Pendente aqui é NORMAL — o android_main corre
-            // antes de super.onCreate terminar; o refresco vem com o onResume.
-            elog::info("jni: handshake invertido — à espera de "
-                       "java: onCreate → nativeRegisterActivity "
-                       "(onResume reforça)");
-            if (Project::openOrCreate(*g_storage, "projeto", g_project)) {
-                g_projectReady = g_project.activeScenePath() != nullptr;
-                elog::info("projeto: '%s' pronto em %s (%u cena(s), ativa=%s)",
-                           g_project.name.c_str(), root,
-                           (unsigned)g_project.scenes.size(),
-                           g_projectReady ? g_project.activeScenePath()->c_str() : "-");
-            } else {
-                elog::error("projeto: storage inutilizável em %s — editor sem persistência", root);
-            }
-        } else {
-            elog::error("projeto: sem externalDataPath/internalDataPath — editor sem persistência");
         }
         // F5.2: estado da permissão NO ARRANQUE (o Settings mostra o modo;
         // API < 30 → sem suporte → app-private sem nunca pedir).
@@ -1175,20 +1213,15 @@ void android_main(android_app* app) {
                        storage::handshakeOk() ? 1 : 0,
                        supported ? 1 : 0, mgr ? 1 : 0,
                        storage::modeLabel(g_perm.mode()));
-            if (!storage::handshakeOk()) {
-                // pendente no boot é NORMAL (android_main corre dentro do
-                // onCreate); se persistir no primeiro import/export, a
-                // mensagem certa é "ponte Java indisponível (handshake)"
-                elog::warn("jni: handshake pendente no boot — onResume deve "
-                           "registar (java: onCreate → nativeRegisterActivity)");
-            }
         }
         // [boot 2/6] storage — passo crítico do arranque (ficheiro legível
         // no device: se o boot morrer aqui, o dono vê exatamente onde)
-        elog::info("[boot 2/6] storage %s (raiz=%s, modo=%s)",
+        elog::info("[boot 2/6] storage %s (origem=%s, modo=%s)",
                    g_storage ? "OK" : "FALHOU",
-                   app->activity && app->activity->externalDataPath
-                       ? "external" : "-",
+                   safReady ? "SAF (pasta escolhida)"
+                            : (app->activity && app->activity->externalDataPath
+                                   ? "app-private (external)"
+                                   : "app-private (internal)"),
                    storage::modeLabel(g_perm.mode()));
     }
 

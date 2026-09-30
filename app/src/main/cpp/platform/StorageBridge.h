@@ -22,10 +22,17 @@
 // O lado C++ é chamado do loop principal; o I/O de ficheiros em si é POSIX
 // direto (platform/FileApi.cpp) — a Java só abre a janela de permissões e
 // reencaminha o resultado, mais o export de logs por MediaStore (1.4).
+// F5.4 (Gestor de Projetos): a ponte ganhou TAMBÉM os métodos SAF da
+// VvActivity (bridgeRootDoc/bridgeOpenFd/bridgeList/bridgeCreate/
+// bridgeDelete) — o I/O do projeto sobre a pasta escolhida no gestor
+// passa por AQUI (core/SafStorage → SafIo → JniSafIo → Java). O SAF dos
+// projetos COEXISTE com o All Files Access (import/export de assets).
 //
-// Este TU só entra na build ANDROID (usa JNI; o CI compila a SUÍTE core sem
-// ele e o check_main.sh valida a sintaxe com o stub jni.h).
+// Este TU só entra na build ANDROID (usa JNI; a suíte core compila-o com
+// o stub jni.h — tests/stub/jni.h — e o check_main.sh valida a sintaxe).
 #include "platform/Saf.h"            // SafResult/PendingResult/ResultHandler
+#include "platform/SafIo.h"          // SafIo/SafEntry (interface do I/O SAF)
+#include "platform/ProjectSlot.h"    // fila do projeto (Activity→boot)
 #include "platform/StoragePerm.h"    // kReqAllFiles (mesmo valor no Java)
 
 namespace vv::storage {
@@ -40,6 +47,16 @@ void setHandler(ResultHandler fn, void* user);
 // THREAD CHAMADOR. O loop da engine chama por frame — o processamento
 // (storage/GL) nunca corre no thread da UI. false = nada pendente.
 bool pollResult();
+
+// F5.4 — fila do projeto escolhido no Gestor de Projetos: a VvActivity
+// empurra em nativeOpenProject; o android_main espera (timeout) antes de
+// montar o storage. O MESMO objeto serve o device e os testes.
+ProjectSlot& projectSlot();
+
+// F5.4 — implementação SafIo sobre a ponte JNI (métodos bridge da
+// VvActivity). Singleton interno; sem handshake as operações falham com
+// err = "ponte Java indisponível (handshake)".
+SafIo* jniSafIo();
 
 // F5.3 — true quando o handshake invertido concluiu: a VvActivity registou-
 // se (nativeRegisterActivity), a VM foi guardada e o método crítico do

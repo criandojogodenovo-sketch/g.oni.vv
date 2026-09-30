@@ -5,28 +5,47 @@
          (docs/SAF_EXCEPTION.md). NativeActivity não lança a janela de
          permissões nem reencaminha onActivityResult sem uma subclasse: a
          VvActivity lança ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION
-         (All Files Access — F5.2) e reencaminha o resultado por JNI. -->
+         (All Files Access — F5.2) e reencaminha o resultado por JNI; e
+         desde a F5.4 é ela que recebe o projeto escolhido no Gestor
+         (extras) e o reencaminha por nativeOpenProject. -->
     <application
         android:label="G.One VV"
         android:hasCode="true"
         android:allowBackup="false"
         android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
 
+        <!-- F5.4: ECRÃ INICIAL — Gestor de Projetos (estilo Godot). A lista
+             vive em projects.json (app-private); o "+" escolhe a pasta de
+             CADA projeto via SAF (ACTION_OPEN_DOCUMENT_TREE + permissão
+             persistente). Projetos diferentes em pastas diferentes, sem
+             All Files Access. -->
         <activity
-            android:name="vv.goni.VvActivity"
+            android:name="vv.goni.ProjectManagerActivity"
             android:label="G.One VV"
             android:screenOrientation="sensorLandscape"
             android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden">
 
-            <meta-data
-                android:name="android.app.lib_name"
-                android:value="goni_vv" />
-
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+
+        <!-- Editor (NativeActivity). lib_name mantém-se AQUI (o framework
+             dlopen'a esta activity); o System.loadLibrary REAL corre no
+             static init da VvActivity (F5.4 — JNI_OnLoad só corre por
+             loadLibrary; o dlopen do framework não o chama). -->
+        <activity
+            android:name="vv.goni.VvActivity"
+            android:label="G.One VV"
+            android:screenOrientation="sensorLandscape"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="goni_vv" />
         </activity>
     </application>
 </manifest>

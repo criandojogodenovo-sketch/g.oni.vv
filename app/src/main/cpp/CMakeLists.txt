@@ -25,6 +25,11 @@ add_library(goni_vv SHARED
         core/ProjectStorage.cpp
         core/FsStorage.h
         core/FsStorage.cpp
+        # F5.4: projeto sobre a pasta SAF escolhida no Gestor de Projetos
+        platform/SafIo.h
+        platform/ProjectSlot.h
+        core/SafStorage.h
+        core/SafStorage.cpp
         assets/Assets.h
         assets/ObjImporter.h
         assets/ObjImporter.cpp

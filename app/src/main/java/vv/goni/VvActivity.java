@@ -3,10 +3,12 @@ package vv.goni;
 import android.app.NativeActivity;
 import android.content.ContentValues;
 import android.content.Intent;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.util.Log;
@@ -81,6 +83,12 @@ public class VvActivity extends NativeActivity {
     private static native void nativeOnActivityResult(
             int requestCode, int resultCode, Uri uri, int flags);
 
+    // F5.4 — Gestor de Projetos: entrega ao native o projeto escolhido no
+    // ecrã inicial (URI da pasta SAF + nome) — o boot do android_main está
+    // À ESPERA na fila ProjectSlot (timeout 3s). Chamado UMA vez, do
+    // onCreate, após o handshake (a fila só faz sentido com a ponte viva).
+    private static native void nativeOpenProject(String treeUri, String name);
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -91,6 +99,23 @@ public class VvActivity extends NativeActivity {
             // nunca crashar por causa da ponte — o diagnóstico está no logcat
             // e o nativo reporta o handshake pendente no boot do engine.log
             Log.e("GONI", "java: nativeRegisterActivity FALHOU (onCreate)", t);
+        }
+
+        // F5.4 — projeto escolhido no Gestor de Projetos (extras do Intent).
+        // SÓ chega aqui quem veio do gestor: VvProjects.launchEditor põe os
+        // extras; o android_main consome a fila e monta o SafStorage.
+        Intent it = getIntent();
+        final String treeUri = it != null ? it.getStringExtra(VvProjects.EXTRA_PROJECT_URI) : null;
+        final String name = it != null ? it.getStringExtra(VvProjects.EXTRA_PROJECT_NAME) : null;
+        if (treeUri != null && !treeUri.isEmpty()) {
+            Log.i("GONI", "java: onCreate → nativeOpenProject ('"
+                    + ((name != null && !name.isEmpty()) ? name : "projeto") + "')");
+            try {
+                nativeOpenProject(treeUri,
+                        (name != null && !name.isEmpty()) ? name : "projeto");
+            } catch (Throwable t) {
+                Log.e("GONI", "java: nativeOpenProject FALHOU (ponte?)", t);
+            }
         }
     }
 
@@ -182,6 +207,103 @@ public class VvActivity extends NativeActivity {
             getContentResolver().delete(
                     MediaStore.Downloads.EXTERNAL_CONTENT_URI, sel, args);
         } catch (Exception ignored) {
+        }
+    }
+
+    // ================= F5.4 — ponte SAF (chamados PELO NATIVO) ================
+    //
+    // Métodos de INSTÂNCIA (o native tem o GlobalRef desta activity):
+    // recebem/devolvem URIs de documento como String; o ContentResolver/
+    // DocumentsContract é daqui. Erros devolvem SENTINELA (-1/null/false)
+    // SEM excepção propagada — o native loga a causa (mensagens honestas).
+    //
+    // Estes métodos servem APENAS o I/O do projeto (pasta escolhida no
+    // gestor). O import/export de assets soltos continua pelo fluxo All
+    // Files Access (openAllFilesSettings acima) — as duas coisas coexistem.
+
+    /** tree URI → URI de DOCUMENTO da raiz (o único salto tree→doc) */
+    String bridgeRootDoc(String treeUri) {
+        try {
+            Uri tree = Uri.parse(treeUri);
+            Uri doc = DocumentsContract.buildDocumentUriUsingTree(tree,
+                    DocumentsContract.getTreeDocumentId(tree));
+            return doc != null ? doc.toString() : null;
+        } catch (Exception e) {
+            Log.e("GONI", "bridgeRootDoc FALHOU (" + treeUri + ")", e);
+            return null;
+        }
+    }
+
+    /** abre um documento como fd ("r"/"w"); detachFd = o fd passa a ser do
+     *  native (fechar é o que persiste no provider); -1 = falha */
+    int bridgeOpenFd(String docUri, String mode) {
+        try {
+            android.content.res.AssetFileDescriptor afd =
+                    getContentResolver().openFileDescriptor(
+                            Uri.parse(docUri),
+                            (mode != null && !mode.isEmpty()) ? mode : "r");
+            if (afd == null) {
+                return -1;
+            }
+            return afd.detachFd();
+        } catch (Exception e) {
+            Log.e("GONI", "bridgeOpenFd FALHOU (" + docUri + ", " + mode + ")", e);
+            return -1;
+        }
+    }
+
+    /** filhos de um diretório — flat [uri0,name0,mime0,uri1,…]; null = falha */
+    String[] bridgeList(String dirDocUri) {
+        try {
+            Uri dir = Uri.parse(dirDocUri);
+            Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(dir,
+                    DocumentsContract.getDocumentId(dir));
+            java.util.ArrayList<String> out = new java.util.ArrayList<>();
+            Cursor c = getContentResolver().query(children,
+                    new String[]{
+                            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                            DocumentsContract.Document.COLUMN_MIME_TYPE},
+                    null, null, null);
+            if (c == null) {
+                return null;
+            }
+            while (c.moveToNext()) {
+                Uri child = DocumentsContract.buildDocumentUriUsingTree(
+                        dir, c.getString(0));
+                out.add(child != null ? child.toString() : "");
+                out.add(c.getString(1));
+                out.add(c.getString(2));
+            }
+            c.close();
+            return out.toArray(new String[0]);
+        } catch (Exception e) {
+            Log.e("GONI", "bridgeList FALHOU (" + dirDocUri + ")", e);
+            return null;
+        }
+    }
+
+    /** cria documento (ficheiro/pasta) num pai; devolve o URI ou null */
+    String bridgeCreate(String parentDocUri, String mime, String name) {
+        try {
+            Uri created = DocumentsContract.createDocument(getContentResolver(),
+                    Uri.parse(parentDocUri), mime, name);
+            return created != null ? created.toString() : null;
+        } catch (Exception e) {
+            Log.e("GONI", "bridgeCreate FALHOU (" + parentDocUri + ", "
+                    + mime + ", " + name + ")", e);
+            return null;
+        }
+    }
+
+    /** apaga documento; false = recusado/ausente */
+    boolean bridgeDelete(String docUri) {
+        try {
+            return DocumentsContract.deleteDocument(getContentResolver(),
+                    Uri.parse(docUri));
+        } catch (Exception e) {
+            Log.e("GONI", "bridgeDelete FALHOU (" + docUri + ")", e);
+            return false;
         }
     }
 }

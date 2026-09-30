@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <cstdarg>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <string>
 #include <utility>
@@ -119,11 +120,36 @@ struct JniFake {
     int refs_new = 0;
     int refs_del = 0;
 
+    // F5.4: arrays fake de strings (conteúdo guardado aqui; os elementos
+    // materializam como jstrings no GetObjectArrayElement)
+    std::map<void*, std::vector<std::string>> fake_arrays;
+
+    // F5.4 — a "Java fake" (a VvActivity do teste): callbacks por método
+    // bridge; não definidos = comportamento de falha honesta (sentinela)
+    std::function<std::string(const std::string&)> bridge_root_doc;
+    std::function<int(const std::string&, const std::string&)> bridge_open_fd;
+    std::function<std::vector<std::string>(const std::string&)> bridge_list;
+    std::function<std::string(const std::string&, const std::string&,
+                              const std::string&)> bridge_create;
+    std::function<bool(const std::string&)> bridge_delete;
+
     jstring newString(const char* s) {
         void* p = reinterpret_cast<void*>(static_cast<intptr_t>(
             0x50000000L + strings.size()));
         strings[p] = s;
         return static_cast<jstring>(p);
+    }
+
+    // nome do methodID ("?" se desconhecido)
+    std::string midName(jmethodID m) const {
+        auto it = mid_names.find(m);
+        return it != mid_names.end() ? it->second : "?";
+    }
+
+    // conteúdo de uma jstring fabricada (por valor — o mapa pode crescer)
+    std::string strOf(jstring s) const {
+        auto it = strings.find(reinterpret_cast<void*>(s));
+        return it != strings.end() ? it->second : std::string();
     }
 };
 
@@ -213,10 +239,67 @@ struct JNIEnv {
         return static_cast<jmethodID>(mid);
     }
 
-    jobject CallObjectMethod(jobject, jmethodID, ...) { return nullptr; }
+    jobject CallObjectMethod(jobject, jmethodID m, ...) {
+        const std::string name = g_jni.midName(m);
+        if (name == "toString") {
+            return nullptr;   // comportamento antigo (uri→string fica "")
+        }
+        va_list ap;
+        va_start(ap, m);
+        if (name == "bridgeRootDoc" && g_jni.bridge_root_doc) {
+            jstring jt = va_arg(ap, jstring);
+            va_end(ap);
+            const std::string r = g_jni.bridge_root_doc(g_jni.strOf(jt));
+            return r.empty() ? nullptr : g_jni.newString(r.c_str());
+        }
+        if (name == "bridgeCreate" && g_jni.bridge_create) {
+            jstring jp = va_arg(ap, jstring);
+            jstring jm = va_arg(ap, jstring);
+            jstring jn = va_arg(ap, jstring);
+            va_end(ap);
+            const std::string r = g_jni.bridge_create(
+                g_jni.strOf(jp), g_jni.strOf(jm), g_jni.strOf(jn));
+            return r.empty() ? nullptr : g_jni.newString(r.c_str());
+        }
+        if (name == "bridgeList" && g_jni.bridge_list) {
+            jstring jd = va_arg(ap, jstring);
+            va_end(ap);
+            const std::vector<std::string> flat = g_jni.bridge_list(g_jni.strOf(jd));
+            void* p = reinterpret_cast<void*>(static_cast<intptr_t>(
+                0x60000000L + g_jni.fake_arrays.size()));
+            g_jni.fake_arrays[p] = flat;
+            return static_cast<jobject>(p);
+        }
+        va_end(ap);
+        return nullptr;
+    }
 
-    jint CallIntMethod(jobject, jmethodID, ...) {
+    jint CallIntMethod(jobject, jmethodID m, ...) {
+        const std::string name = g_jni.midName(m);
+        va_list ap;
+        va_start(ap, m);
+        if (name == "bridgeOpenFd" && g_jni.bridge_open_fd) {
+            jstring ju = va_arg(ap, jstring);
+            jstring jm = va_arg(ap, jstring);
+            va_end(ap);
+            return static_cast<jint>(
+                g_jni.bridge_open_fd(g_jni.strOf(ju), g_jni.strOf(jm)));
+        }
+        va_end(ap);
         return static_cast<jint>(g_jni.export_int_result);
+    }
+
+    jboolean CallBooleanMethod(jobject, jmethodID m, ...) {
+        const std::string name = g_jni.midName(m);
+        va_list ap;
+        va_start(ap, m);
+        if (name == "bridgeDelete" && g_jni.bridge_delete) {
+            jstring jd = va_arg(ap, jstring);
+            va_end(ap);
+            return g_jni.bridge_delete(g_jni.strOf(jd)) ? JNI_TRUE : JNI_FALSE;
+        }
+        va_end(ap);
+        return JNI_FALSE;
     }
 
     jobject CallStaticObjectMethod(jclass, jmethodID, ...) { return nullptr; }
@@ -256,11 +339,23 @@ struct JNIEnv {
 
     jboolean ExceptionCheck() { return JNI_FALSE; }
     void ExceptionClear() {}
-    jsize GetArrayLength(jbyteArray) { return 0; }
+    jsize GetArrayLength(jobjectArray a) {
+        auto it = g_jni.fake_arrays.find(reinterpret_cast<void*>(a));
+        return it == g_jni.fake_arrays.end()
+                   ? 0
+                   : static_cast<jsize>(it->second.size());
+    }
     jbyteArray NewByteArray(jsize) { return nullptr; }
     void GetByteArrayRegion(jbyteArray, jsize, jsize, jbyte*) {}
     void SetByteArrayRegion(jbyteArray, jsize, jsize, const jbyte*) {}
-    jobject GetObjectArrayElement(jobjectArray, jsize) { return nullptr; }
+    jobject GetObjectArrayElement(jobjectArray a, jsize i) {
+        auto it = g_jni.fake_arrays.find(reinterpret_cast<void*>(a));
+        if (it == g_jni.fake_arrays.end() || i < 0 ||
+            i >= static_cast<jsize>(it->second.size())) {
+            return nullptr;
+        }
+        return g_jni.newString(it->second[static_cast<size_t>(i)].c_str());
+    }
 
     // F5.3: registo da activity (handshake invertido)
     jint GetJavaVM(JavaVM** vm) {

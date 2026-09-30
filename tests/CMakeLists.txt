@@ -13,6 +13,7 @@ add_executable(test_core
         test_logs_crash.cpp
         test_storageperm.cpp
         test_handshake.cpp
+        test_saf_project.cpp
         test_ui.cpp
         test_project.cpp
         test_import_obj.cpp
@@ -48,6 +49,9 @@ add_executable(test_core
         ${CORE_DIR}/core/Project.cpp
         ${CORE_DIR}/core/ProjectStorage.cpp
         ${CORE_DIR}/core/FsStorage.cpp
+        # F5.4: SafStorage — ProjectStorage sobre a pasta SAF escolhida no
+        # Gestor (testado contra o FakeSafIo deste TU)
+        ${CORE_DIR}/core/SafStorage.cpp
         # F5: assets (importadores GL-free)
         ${CORE_DIR}/assets/ObjImporter.cpp
         ${CORE_DIR}/assets/ObjExporter.cpp

@@ -40,9 +40,9 @@ extern "C" JNIEXPORT void JNICALL
 Java_vv_goni_VvActivity_nativeRegisterActivity(JNIEnv* env, jclass,
                                                jobject activity,
                                                jstring origin);
-
-// forward declarations FILE-SCOPE dos métodos nativos (definidos no fundo
-// deste ficheiro) — o JNI_OnLoad (também file-scope) regista-os por ponteiro
+extern "C" JNIEXPORT void JNICALL
+Java_vv_goni_VvActivity_nativeOpenProject(JNIEnv* env, jclass,
+                                          jstring treeUri, jstring name);
 
 namespace vv::storage {
 
@@ -54,6 +54,19 @@ jclass g_activityCls = nullptr;
 
 jmethodID g_midOpenAllFiles = nullptr;   // VvActivity.openAllFilesSettings(I)V
 jmethodID g_midExportLogs = nullptr;     // VvActivity.exportLogsToDownloads(String)I
+
+// F5.4 — mids da ponte SAF (métodos de INSTÂNCIA da VvActivity, chamados
+// do thread da engine com attachedEnv; a Java trata DocumentsContract,
+// ContentResolver e ParcelFileDescriptor — o native só recebe URIs e fds)
+jmethodID g_midRootDoc = nullptr;  // bridgeRootDoc(String)String
+jmethodID g_midOpenFd  = nullptr;  // bridgeOpenFd(String,String)I
+jmethodID g_midList    = nullptr;  // bridgeList(String)[Ljava/lang/String;
+jmethodID g_midCreate  = nullptr;  // bridgeCreate(String,String,String)String
+jmethodID g_midDelete  = nullptr;  // bridgeDelete(String)Z
+
+// F5.4 — fila do projeto escolhido no Gestor (a activity empurra, o boot
+// espera com timeout)
+ProjectSlot g_projectSlot;
 
 // F5.3 — estado do handshake invertido: 1º registo da VvActivity visto
 // (mesmo parcial) e veredito (vm + GlobalRef + método crítico OK)
@@ -143,6 +156,11 @@ const JNINativeMethod kNativeMethods[] = {
       // JNI_OnLoad começasse a correr com o fix do loadLibrary
       const_cast<char*>("(IILandroid/net/Uri;I)V"),
       reinterpret_cast<void*>(&Java_vv_goni_VvActivity_nativeOnActivityResult) },
+    { const_cast<char*>("nativeOpenProject"),
+      // F5.4 — Gestor de Projetos: a VvActivity entrega o projeto escolhido
+      // no SAF (extras do Intent) → fila ProjectSlot → boot do android_main
+      const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)V"),
+      reinterpret_cast<void*>(&Java_vv_goni_VvActivity_nativeOpenProject) },
 };
 constexpr int kNativeMethodCount =
     static_cast<int>(sizeof(kNativeMethods) / sizeof(kNativeMethods[0]));
@@ -189,6 +207,37 @@ void cacheActivityMethods(JNIEnv* env) {
         elog::error("jni: VvActivity.exportLogsToDownloads NÃO encontrada");
     } else {
         elog::info("jni: VvActivity.exportLogsToDownloads OK");
+    }
+
+    // F5.4 — ponte SAF do Gestor de Projetos (todas na mesma classe: ou
+    // existem todas ou o dex divergiu — o veredito exige as críticas)
+    struct BridgeMid {
+        jmethodID* mid;
+        const char* name;
+        const char* sig;
+        bool critical;
+    };
+    const BridgeMid kBridgeMids[] = {
+        { &g_midRootDoc, "bridgeRootDoc",
+          "(Ljava/lang/String;)Ljava/lang/String;", true },
+        { &g_midOpenFd, "bridgeOpenFd",
+          "(Ljava/lang/String;Ljava/lang/String;)I", true },
+        { &g_midList, "bridgeList",
+          "(Ljava/lang/String;)[Ljava/lang/String;", true },
+        { &g_midCreate, "bridgeCreate",
+          "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", true },
+        { &g_midDelete, "bridgeDelete",
+          "(Ljava/lang/String;)Z", false },
+    };
+    for (const BridgeMid& b : kBridgeMids) {
+        *b.mid = env->GetMethodID(g_activityCls, b.name, b.sig);
+        if (!*b.mid || clearPendingException(env)) {
+            *b.mid = nullptr;
+            elog::error("jni: VvActivity.%s NÃO encontrada%s", b.name,
+                        b.critical ? " — CRÍTICA (I/O do projeto SAF)" : "");
+        } else {
+            elog::info("jni: VvActivity.%s OK", b.name);
+        }
     }
 }
 
@@ -299,21 +348,30 @@ Java_vv_goni_VvActivity_nativeRegisterActivity(JNIEnv* env, jclass,
     // 4) métodos da activity (higiene de exceções — cacheActivityMethods)
     cacheActivityMethods(env);
 
-    // 5) veredito: o método crítico do fluxo All Files tem de existir;
-    //    exportLogs é diagnóstico (falhar não bloqueia o fluxo de permissão)
+    // 5) veredito: os métodos CRÍTICOS têm de existir — o fluxo All Files
+    //    (openAllFilesSettings) E a ponte SAF do projeto (rootDoc/openFd/
+    //    list/create); exportLogs e bridgeDelete são diagnóstico (falhar
+    //    não bloqueia o fluxo principal)
     const bool first = !g_registrationSeen;
     g_registrationSeen = true;
-    g_handshake = g_midOpenAllFiles != nullptr;
+    g_handshake = g_midOpenAllFiles != nullptr &&
+                  g_midRootDoc != nullptr &&
+                  g_midOpenFd  != nullptr &&
+                  g_midList    != nullptr &&
+                  g_midCreate  != nullptr;
     if (g_handshake) {
         elog::info(first ? "native: activity registada"
                          : "native: activity re-registada (onResume — reforço)");
         elog::info("jni: handshake OK — vm=%p activity=%p openAllFiles=%d "
-                   "exportLogs=%d",
+                   "saf=%d/4 exportLogs=%d",
                    reinterpret_cast<void*>(vm),
                    reinterpret_cast<void*>(g_activity),
-                   g_midOpenAllFiles ? 1 : 0, g_midExportLogs ? 1 : 0);
+                   g_midOpenAllFiles ? 1 : 0,
+                   (g_midRootDoc ? 1 : 0) + (g_midOpenFd ? 1 : 0) +
+                   (g_midList ? 1 : 0) + (g_midCreate ? 1 : 0),
+                   g_midExportLogs ? 1 : 0);
     } else {
-        elog::error("native: registo PARCIAL — openAllFilesSettings ausente "
+        elog::error("native: registo PARCIAL — método crítico ausente "
                     "(dex/assinatura divergente?) — ponte Java indisponível");
     }
 }
@@ -401,6 +459,202 @@ bool jniExportLogsToDownloads(int* outCount) {
     return true;
 }
 
+// ---- F5.4: I/O SAF do projeto (SafIo sobre a ponte JNI) --------------------
+//
+// O native NÃO fala DocumentsContract: cada operação vira uma chamada a um
+// método bridge da VvActivity (thread anexado por attachedEnv; a activity
+// é o GlobalRef do handshake). Toda falha devolve false + err com a causa
+// REAL — sem handshake é SEMPRE "ponte Java indisponível (handshake)".
+namespace {
+
+// pré-condições comuns de cada bridge (mensagem honesta em cada saída)
+JNIEnv* safBegin(std::string& err) {
+    if (!g_handshake) {
+        err = "ponte Java indisponível (handshake)";
+        return nullptr;
+    }
+    JNIEnv* env = attachedEnv();
+    if (!env) {
+        err = "thread da engine sem env (attach falhou — ver engine.log)";
+        return nullptr;
+    }
+    return env;
+}
+
+// consome um jstring devolvido pela Java (null → false)
+bool pickString(JNIEnv* env, jobject jstr, std::string& out) {
+    if (!jstr) {
+        return false;
+    }
+    const char* c = env->GetStringUTFChars(static_cast<jstring>(jstr), nullptr);
+    if (c) {
+        out = c;
+        env->ReleaseStringUTFChars(static_cast<jstring>(jstr), c);
+    }
+    env->DeleteLocalRef(jstr);
+    return !out.empty();
+}
+
+// JniSafIo — SafIo via os métodos bridge da activity. O resolveChild usa
+// o default da interface (list + filtrar por nome).
+class JniSafIo final : public SafIo {
+public:
+    bool rootDoc(const std::string& treeUri, std::string& outDocUri,
+                 std::string& err) override {
+        JNIEnv* env = safBegin(err);
+        if (!env || !g_midRootDoc) {
+            if (env && !g_midRootDoc) err = "bridgeRootDoc ausente (handshake parcial)";
+            return false;
+        }
+        jstring jt = env->NewStringUTF(treeUri.c_str());
+        jobject r = env->CallObjectMethod(g_activity, g_midRootDoc, jt);
+        env->DeleteLocalRef(jt);
+        if (clearPendingException(env)) {
+            err = "bridgeRootDoc lançou excepção (tree uri inválida?)";
+            return false;
+        }
+        if (!pickString(env, r, outDocUri)) {
+            err = "bridgeRootDoc devolveu null (uri inválida?)";
+            return false;
+        }
+        return true;
+    }
+
+    bool openFd(const std::string& docUri, const char* mode, int* outFd,
+                std::string& err) override {
+        *outFd = -1;
+        JNIEnv* env = safBegin(err);
+        if (!env || !g_midOpenFd) {
+            if (env && !g_midOpenFd) err = "bridgeOpenFd ausente (handshake parcial)";
+            return false;
+        }
+        jstring ju = env->NewStringUTF(docUri.c_str());
+        jstring jm = env->NewStringUTF(mode ? mode : "r");
+        const jint fd = env->CallIntMethod(g_activity, g_midOpenFd, ju, jm);
+        env->DeleteLocalRef(ju);
+        env->DeleteLocalRef(jm);
+        if (clearPendingException(env)) {
+            err = "bridgeOpenFd lançou excepção (documento ausente? provider recusou?)";
+            return false;
+        }
+        if (fd < 0) {
+            err = "bridgeOpenFd devolveu -1 (documento ausente ou provider recusou)";
+            return false;
+        }
+        *outFd = static_cast<int>(fd);
+        return true;
+    }
+
+    bool list(const std::string& dirDocUri, std::vector<SafEntry>& out,
+              std::string& err) override {
+        out.clear();
+        JNIEnv* env = safBegin(err);
+        if (!env || !g_midList) {
+            if (env && !g_midList) err = "bridgeList ausente (handshake parcial)";
+            return false;
+        }
+        jstring jd = env->NewStringUTF(dirDocUri.c_str());
+        jobject r = env->CallObjectMethod(g_activity, g_midList, jd);
+        env->DeleteLocalRef(jd);
+        if (clearPendingException(env)) {
+            err = "bridgeList lançou excepção (pasta ausente? provider recusou?)";
+            return false;
+        }
+        if (!r) {
+            err = "bridgeList devolveu null (pasta ausente? provider recusou?)";
+            return false;
+        }
+        const jsize n = env->GetArrayLength(static_cast<jobjectArray>(r));
+        out.reserve(static_cast<size_t>(n / 3));
+        for (jsize i = 0; i + 2 < n; i += 3) {
+            SafEntry e;
+            e.uri = stringAt(env, r, i);
+            e.name = stringAt(env, r, i + 1);
+            e.mime = stringAt(env, r, i + 2);
+            out.push_back(std::move(e));
+        }
+        env->DeleteLocalRef(r);
+        return true;
+    }
+
+    bool create(const std::string& parentDocUri, const char* mime,
+                const char* displayName, std::string& outDocUri,
+                std::string& err) override {
+        outDocUri.clear();
+        JNIEnv* env = safBegin(err);
+        if (!env || !g_midCreate) {
+            if (env && !g_midCreate) err = "bridgeCreate ausente (handshake parcial)";
+            return false;
+        }
+        jstring jp = env->NewStringUTF(parentDocUri.c_str());
+        jstring jm = env->NewStringUTF(mime ? mime : "application/octet-stream");
+        jstring jn = env->NewStringUTF(displayName ? displayName : "sem-nome");
+        jobject r = env->CallObjectMethod(g_activity, g_midCreate, jp, jm, jn);
+        env->DeleteLocalRef(jp);
+        env->DeleteLocalRef(jm);
+        env->DeleteLocalRef(jn);
+        if (clearPendingException(env)) {
+            err = "bridgeCreate lançou excepção (pai ausente? nome inválido?)";
+            return false;
+        }
+        if (!pickString(env, r, outDocUri)) {
+            err = "bridgeCreate devolveu null (criação recusada pelo provider)";
+            return false;
+        }
+        return true;
+    }
+
+    bool remove(const std::string& docUri, std::string& err) override {
+        JNIEnv* env = safBegin(err);
+        if (!env || !g_midDelete) {
+            if (env && !g_midDelete) err = "bridgeDelete ausente (handshake parcial)";
+            return false;
+        }
+        jstring jd = env->NewStringUTF(docUri.c_str());
+        const jboolean ok =
+            env->CallBooleanMethod(g_activity, g_midDelete, jd);
+        env->DeleteLocalRef(jd);
+        if (clearPendingException(env)) {
+            err = "bridgeDelete lançou excepção";
+            return false;
+        }
+        if (!ok) {
+            err = "bridgeDelete devolveu false (provider recusou)";
+            return false;
+        }
+        return true;
+    }
+
+private:
+    // elemento i de um String[] fake/real (higiene de local ref)
+    static std::string stringAt(JNIEnv* env, jobject arr, jsize i) {
+        jobject el = env->GetObjectArrayElement(
+            static_cast<jobjectArray>(arr), i);
+        if (!el) {
+            return "";
+        }
+        std::string s;
+        const char* c = env->GetStringUTFChars(static_cast<jstring>(el), nullptr);
+        if (c) {
+            s = c;
+            env->ReleaseStringUTFChars(static_cast<jstring>(el), c);
+        }
+        env->DeleteLocalRef(el);
+        return s;
+    }
+};
+
+} // namespace
+
+ProjectSlot& projectSlot() {
+    return g_projectSlot;
+}
+
+SafIo* jniSafIo() {
+    static JniSafIo io;   // sem estado próprio — tudo no bridge/handshake
+    return &io;
+}
+
 } // namespace vv::storage
 
 // ---- JNI_OnLoad: registo EXPLÍCITO dos métodos nativos ----------------------
@@ -477,4 +731,40 @@ Java_vv_goni_VvActivity_nativeOnActivityResult(JNIEnv* env, jclass,
     vv::elog::info("storage: onActivityResult req=%d ok=%d (enfileirado p/ "
                    "thread da engine)", request, r.ok ? 1 : 0);
     vv::storage::g_pending.push(r);
+}
+
+// ---- F5.4: projeto escolhido no Gestor de Projetos --------------------------
+//
+// Corre NO THREAD DA UI (VvActivity.onCreate, após o handshake): apenas
+// converte e enfileira no ProjectSlot — o android_main espera (com
+// timeout) e monta o SafStorage no thread da engine. Sobrepõe (1 slot).
+extern "C" JNIEXPORT void JNICALL
+Java_vv_goni_VvActivity_nativeOpenProject(JNIEnv* env, jclass,
+                                          jstring treeUri, jstring name) {
+    if (!env || !treeUri) {
+        vv::elog::error("jni: nativeOpenProject — uri ausente");
+        return;
+    }
+    const char* u = env->GetStringUTFChars(treeUri, nullptr);
+    const char* n = name ? env->GetStringUTFChars(name, nullptr) : nullptr;
+    vv::elog::info("java: openProject → fila (nome=%s) — boot monta o "
+                   "storage sobre a pasta SAF", (n && n[0]) ? n : "projeto");
+    vv::storage::ProjectRequest r;
+    r.treeUri = u ? u : "";
+    r.name = (n && n[0]) ? n : "projeto";
+    if (u) {
+        env->ReleaseStringUTFChars(treeUri, u);
+    }
+    if (n) {
+        env->ReleaseStringUTFChars(name, n);
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
+    if (r.treeUri.empty()) {
+        vv::elog::error("jni: nativeOpenProject — treeUri VAZIA (extras do "
+                        "intent perdidos?) — projeto não enfileirado");
+        return;
+    }
+    vv::storage::g_projectSlot.push(r);
 }

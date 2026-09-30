@@ -165,7 +165,13 @@ jobs:
             || { echo "::error::SÍMBOLO AUSENTE: Java_vv_goni_VvActivity_nativeOnActivityResult — ponte SAF/Java sem o callback JNI."; exit 1; }
           grep -q 'Java_vv_goni_VvActivity_nativeRegisterActivity' dynsyms.txt \
             || { echo "::error::SÍMBOLO AUSENTE: Java_vv_goni_VvActivity_nativeRegisterActivity — handshake invertido (F5.3) sem o método de registo."; exit 1; }
-          echo "OK: ANativeActivity_onCreate, android_main, JNI_OnLoad, Java_vv_goni_VvActivity_nativeOnActivityResult e Java_vv_goni_VvActivity_nativeRegisterActivity exportados em libgoni_vv.so"
+          grep -q 'Java_vv_goni_VvActivity_nativeOpenProject' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: Java_vv_goni_VvActivity_nativeOpenProject — Gestor de Projetos (F5.4) sem o método de abertura do projeto."; exit 1; }
+          # F5.4 (pedido do dono): PARIDADE COMPLETA Java↔.so — o gate afere
+          # TODOS os natives da VvActivity.java contra o .dynsym real (não só
+          # a lista fixa acima) + assinaturas contra a tabela RegisterNatives
+          python3 scripts/jni_parity.py dynsyms.txt
+          echo "OK: ANativeActivity_onCreate, android_main, JNI_OnLoad e TODOS os natives da VvActivity (registo, resultado, openProject) exportados em libgoni_vv.so"
 
       # F5.3 (TAREFA 1 institucionalizada): gate do MANIFEST BINÁRIO do APK
       # real — aferições que provaram que 0.6.2 tinha o manifest correto mas
@@ -183,7 +189,10 @@ jobs:
           #    (dex) é instanciada pelo sistema, não a NativeActivity nua
           grep -E 'android:hasCode.*(type 0x12\)0x1|=true|0x1$)' manifest.txt \
             || { echo "::error::MANIFEST: hasCode != true — VvActivity não seria instanciada (todas as pontes JNI morrem)."; exit 1; }
-          # 2) launcher activity é a VvActivity (que faz o handshake invertido)
+          # 2) activities da ponte: ProjectManagerActivity (F5.4 — gestor é
+          #    o LAUNCHER) e VvActivity (handshake + bridges SAF)
+          grep -q 'vv.goni.ProjectManagerActivity' manifest.txt \
+            || { echo "::error::MANIFEST: vv.goni.ProjectManagerActivity ausente — Gestor de Projetos (F5.4) não é o ecrã inicial."; exit 1; }
           grep -q 'vv.goni.VvActivity' manifest.txt \
             || { echo "::error::MANIFEST: activity vv.goni.VvActivity ausente — handshake invertido impossível."; exit 1; }
           # 3) meta-data lib_name = goni_vv (loadLibrary no super.onCreate —
