@@ -47,6 +47,8 @@ add_executable(test_core
         # 0.6.8: play mode com janela própria (transição, sem painéis,
         # touchcontrols sem sobreposição, pose restaurada, orbit off)
         test_playui.cpp
+        # 0.6.9: gizmos de transformação (hit-test/drag/snapping/desenho)
+        test_gizmo.cpp
         ${CORE_DIR}/core/Scene.cpp
         ${CORE_DIR}/core/Time.cpp
         ${CORE_DIR}/core/ComponentRegistry.cpp
