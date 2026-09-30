@@ -574,8 +574,9 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
 
 ## Verificação no Realme C33 (dono) — 0.6.10 (seletor de textura; APK CUMULATIVO)
 
-Instalar o APK 0.6.10 (artifact `goni-vv-0.6.10-release-signed`) — cobre
-TAMBÉM a 0.6.9 (gizmos), 0.6.8 (play mode) e 0.6.7 (lifecycle/apagar/sair).
+Instalar o APK 0.6.10 (artifact `goni-vv-0.6.10-release-signed` do run
+36748264165; sha256 e detalhes no `docs/RELATORIO-F6.md`) — cobre TAMBÉM a
+0.6.9 (gizmos), 0.6.8 (play mode) e 0.6.7 (lifecycle/apagar/sair).
 
 1. **Importar** um PNG (Menu → Importar… → escolher o screenshot de
    Download) → toast de import OK → `textures/screenshot-….png` no projeto
