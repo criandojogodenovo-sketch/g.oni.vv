@@ -49,6 +49,9 @@ add_executable(test_core
         test_playui.cpp
         # 0.6.9: gizmos de transformação (hit-test/drag/snapping/desenho)
         test_gizmo.cpp
+        # F6: wiring do seletor de textura (dispatch puro + sequência do
+        # main + bind no stub GL + round-trip .goni — o fix do C33 0.6.9)
+        test_assetpick.cpp
         ${CORE_DIR}/core/Scene.cpp
         ${CORE_DIR}/core/Time.cpp
         ${CORE_DIR}/core/ComponentRegistry.cpp

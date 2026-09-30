@@ -7,6 +7,11 @@
 // global `glstub::stats` — os testes do lifecycle aferem que o atlas é
 // re-uploadado após destroy() e que NINGUÉM assume recursos vivos entre
 // contexts. Zerar com glstub::reset() no início de cada caso.
+//
+// F6 (seletor de textura): registo de BIND — o teste do wiring aferiu que o
+// render binda a textura aplicada (glBindTexture com o id certo + uHasTex=1
+// via glUniform1f; nullptr → uHasTex=0 SEM bind). Inócuo para os outros
+// testes (apenas grava números).
 #pragma once
 #include <cstdint>
 
@@ -23,6 +28,10 @@ struct Stats {
     int deleteVertexArrays = 0;
     int createProgram = 0;
     int deleteProgram = 0;
+    // F6: binds de textura + último uniform float (uHasTex do LitMaterial)
+    int boundTextures = 0;
+    unsigned int lastBoundTexture = 0;
+    float lastUniform1f = -1.0f;
 };
 inline Stats stats;              // inline C++17: 1 instância por binário
 inline void reset() { stats = Stats{}; }
@@ -86,7 +95,7 @@ typedef intptr_t      GLsizeiptr;
 
 inline void glGenTextures(GLint n, GLuint* t) { glstub::stats.genTextures += (int)n; if (t) for (GLint i = 0; i < n; ++i) t[i] = 1u + i; }
 inline void glDeleteTextures(GLint n, const GLuint*) { glstub::stats.deleteTextures += (int)n; }
-inline void glBindTexture(GLenum, GLuint) {}
+inline void glBindTexture(GLenum, GLuint t) { ++glstub::stats.boundTextures; glstub::stats.lastBoundTexture = t; }
 inline void glPixelStorei(GLenum, GLint) {}
 inline void glTexImage2D(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void*) { ++glstub::stats.texImage2D; }
 inline void glCompressedTexImage2D(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLsizei, const void*) { ++glstub::stats.compressedTexImage2D; }
@@ -122,7 +131,7 @@ inline void glUseProgram(GLuint) {}
 inline GLint glGetUniformLocation(GLuint, const GLchar*) { return 0; }
 inline void glUniformMatrix4fv(GLint, GLsizei, GLboolean, const GLfloat*) {}
 inline void glUniform1i(GLint, GLint) {}
-inline void glUniform1f(GLint, GLfloat) {}
+inline void glUniform1f(GLint, GLfloat v) { glstub::stats.lastUniform1f = v; }
 inline void glUniform3f(GLint, GLfloat, GLfloat, GLfloat) {}
 inline void glUniform2f(GLint, GLfloat, GLfloat) {}
 

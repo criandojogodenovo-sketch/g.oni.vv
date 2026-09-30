@@ -431,6 +431,25 @@ SceneSerializer::LoadCtx makeLoadCtx() {
     return ctx;
 }
 
+// F6: resolvers do seletor de assets (injetados no applyAssetPick — a
+// lógica de aplicação é PURA em ui/EditorUi e afervel no CI; aqui só se
+// liga aos objetos reais de runtime: GpuAssets/ResourceManager/cubo/lit)
+editor::AssetResolvers makeAssetResolvers() {
+    editor::AssetResolvers res;
+    res.mesh = [](const std::string& ref) -> Mesh* {
+        return g_gpu.mesh(ref);
+    };
+    res.texture = [](const std::string& ref, std::string* warn) -> const Texture* {
+        return g_gpu.texture(ref, warn);
+    };
+    res.meshTextureFor = [](const std::string& ref) -> std::string {
+        return g_resources.meshTextureFor(ref);   // textura embutida glTF/GLB
+    };
+    res.cubeMesh = &g_cubeMesh;
+    res.material = g_renderer.litMaterial();
+    return res;
+}
+
 // ---- F5.2: All Files Access — import/export por File API direta -------------
 
 // forward: usados pelo handler de retorno e pelas tentativas
@@ -1274,63 +1293,26 @@ void frame() {
         }
     }
 
-    // F5-E: seletor de assets aberto → aplica no MeshRenderer selecionado
+    // F5-E/F6: seletor de assets aberto → aplica no MeshRenderer selecionado.
+    // F6 (fix do C33 0.6.9): o menuKind é capturado ANTES do drawAssetMenu —
+    // o seletor FECHA a si próprio no clique (st.assetMenu = 0 dentro do
+    // draw) e o dispatch antigo lia g_editor.assetMenu DEPOIS da chamada
+    // (sempre 0 → bloco morto desde a F5-E: a escolha nunca chegava ao
+    // componente; o C33 via "tex: none" eterno, cubo cinzento e NENHUMA
+    // linha no engine.log). A lógica vive agora em editor::applyAssetPick
+    // (pura, afervel no CI) e o resultado traz o toast + a linha de log.
     if (g_editor.assetMenu != 0) {
+        const int menuKind = g_editor.assetMenu;   // ANTES do draw (o pick fecha)
         const int pick = editor::drawAssetMenu(g_ui, g_input, w, h, g_editor, g_catalog);
         if (pick > 0) {
-            Tic* tsel = g_scene.get(g_editor.selected);
-            MeshRenderer* mrs = tsel ? tsel->getComponent<MeshRenderer>() : nullptr;
-            if (mrs && g_editor.assetMenu == 1) {
-                if (pick == 1) {   // cube procedural
-                    mrs->mesh = &g_cubeMesh;
-                    mrs->material = g_renderer.litMaterial();
-                    mrs->meshPath.clear();
-                    showToast("mesh: cube");
-                } else {
-                    const std::string rel =
-                        std::string("meshes/") + g_catalog.meshes[static_cast<size_t>(pick - 2)];
-                    if (Mesh* m = g_gpu.mesh(rel)) {
-                        mrs->mesh = m;
-                        mrs->material = g_renderer.litMaterial();
-                        mrs->meshPath = rel;
-                        bool withTex = false;
-                        // F5.1-B: textura embutida do glTF/GLB aplica-se logo
-                        // (import sem PC — o material fica referenciado)
-                        const std::string texRel = g_resources.meshTextureFor(rel);
-                        if (!texRel.empty()) {
-                            std::string twarn;
-                            if (const Texture* tex = g_gpu.texture(texRel, &twarn)) {
-                                mrs->texture = tex;
-                                mrs->texPath = texRel;
-                                withTex = true;
-                            }
-                        }
-                        showToast(withTex ? "mesh aplicado (+textura)" : "mesh aplicado");
-                        LOGI("editor: mesh %s aplicado%s%s", rel.c_str(),
-                             withTex ? " com textura " : "",
-                             withTex ? mrs->texPath.c_str() : "");
-                    } else {
-                        showToast("falha ao carregar mesh");
-                    }
-                }
-            } else if (mrs && g_editor.assetMenu == 2) {
-                if (pick == 1) {   // none
-                    mrs->texture = nullptr;
-                    mrs->texPath.clear();
-                    showToast("tex: none");
-                } else {
-                    const std::string rel =
-                        std::string("textures/") + g_catalog.textures[static_cast<size_t>(pick - 2)];
-                    std::string warn;
-                    if (const Texture* tex = g_gpu.texture(rel, &warn)) {
-                        mrs->texture = tex;
-                        mrs->texPath = rel;
-                        showToast(warn.empty() ? "textura aplicada" : warn.c_str());
-                        LOGI("editor: textura %s aplicada", rel.c_str());
-                    } else {
-                        showToast("falha ao carregar textura");
-                    }
-                }
+            const editor::AssetPickOutcome out =
+                editor::applyAssetPick(g_scene, g_editor.selected, menuKind, pick,
+                                       g_catalog, makeAssetResolvers());
+            if (out.toast[0] != '\0') {
+                showToast(out.toast);
+            }
+            if (out.log[0] != '\0') {
+                LOGI("%s", out.log);
             }
         }
     }
@@ -1490,10 +1472,10 @@ void android_main(android_app* app) {
     // F5.1-hotfix: log DUPLO (logcat + ficheiro) desde a 1ª linha.
     // O boot ainda não tem os paths da activity? O elog usa o fallback
     // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu
-    elog::info("G.One VV 0.6.9 — gizmos de transformação (Mover/Rodar/"
-               "Escalar com hit-test 3D e snapping; cores de eixo nos "
-               "gizmos como exceção documentada ao tema mono; 0.6.8 play "
-               "mode; 0.6.7 lifecycle GL + gestão de projetos)");
+    elog::info("G.One VV 0.6.10 — seletor de textura do Inspector de "
+               "verdade (wiring material/textura — fix do C33 0.6.9; "
+               "0.6.9 gizmos; 0.6.8 play mode; 0.6.7 lifecycle GL + gestão "
+               "de projetos)");
     {
         const char* root0 = app->activity
             ? (app->activity->externalDataPath ? app->activity->externalDataPath

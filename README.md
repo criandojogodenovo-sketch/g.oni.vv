@@ -1,4 +1,4 @@
-# G.One VV 0.6.9 + F5.5 — All Files Access de verdade (0.6.9: gizmos; 0.6.8: play mode; 0.6.7: lifecycle GL + gestão de projetos)
+# G.One VV 0.6.10 — Seletor de textura de verdade (fix do wiring do C33; 0.6.9: gizmos; 0.6.8: play mode; 0.6.7: lifecycle GL + gestão de projetos)
 
 Engine com editor, projeto `.goni` e maturação de assets (compressão ETC2/ASTC
 com cache, extração de texturas glTF/GLB, import OBJ/glTF/GLB/PNG, export
@@ -6,7 +6,42 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 (`sensorLandscape`). Devices de teste: Realme C33 (720x1600) e Realme
 RMX3624 (Android 13).
 
-## Escopo F5.5 (implementado — fix do All Files Access no C33)
+## Escopo 0.6.10 (implementado — fix do seletor de textura do C33)
+
+**WIRING DO SELETOR DE TEXTURA DO INSPECTOR**: no C33 (0.6.9), após
+importar um PNG (import OK, `textures/screenshot-….png` no projeto) e tocar
+`tex:` escolhendo a imagem, NADA acontecia — o estado ficava `tex: none`,
+o cubo continuava cinzento e o engine.log não registava linha de aplicação
+nem de erro. CAUSA RAIZ: `drawAssetMenu` fecha o seletor NO CLIQUE
+(`st.assetMenu = 0` antes do return) e o dispatch do main lia
+`g_editor.assetMenu` DEPOIS da chamada → sempre 0 → o bloco `if (pick >
+0)` era **código morto desde a F5-E (0.5.0)** — a escolha nunca chegava ao
+MeshRenderer (o mesmo no seletor de mesh):
+
+- **Dispatch puro e afervel** — `editor::applyAssetPick` (ui/EditorUi):
+  escolher textura → atualiza `texture` + `texPath` do MeshRenderer do TIC
+  selecionado (o render é immediate-mode: `drawTics` lê `mr->texture` a
+  cada frame → o bind acontece no frame seguinte, sem flags dirty);
+  escolher mesh → `mesh`/`material`/`meshPath` + textura embutida do
+glTF/GLB quando existe;
+- **Fix da ordem** — o `menuKind` é capturado ANTES do `drawAssetMenu`
+  (o seletor fecha-se a si próprio no clique; o protocolo da sequência está
+  travado por teste com um clique REAL injetado);
+- **Remover textura** — `none` no seletor liberta a referência (Inspector
+  volta a `tex: none`, cubo cinzento);
+- **Falha honesta** — carga que falha mantém o estado ANTERIOR intacto +
+  toast + linha `FALHOU` no log;
+- **Logging** — `material: textura aplicada <ref>` / `material: textura
+  removida` no engine.log (visível no log viewer do C33);
+- **Persistência intacta** — a ref já era gravada no `.goni`
+  (`SceneSerializer`): Save → Load preserva a textura aplicada (o
+  re-resolve via `LoadCtx` já existia);
+- **Testes CI** — `test_assetpick.cpp` (11 casos): escolher muda o estado,
+  sequência do main (o bug da ordem), bind confirmado no stub GL
+  (`glBindTexture` + `uHasTex=1/0`), round-trip `.goni`, remover volta a
+  none, aviso do gate no toast, alvos inválidos sem crash.
+
+## Escopo F5.5 (histórico — fix do All Files Access no C33)
 
 **MANAGE_EXTERNAL_STORAGE DECLARADO** (fix do C33 0.6.9): sem a declaração,
 o sistema não tinha o que conceder — a app não aparecia na lista "Acesso a
@@ -536,6 +571,31 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.6.10 (seletor de textura; APK CUMULATIVO)
+
+Instalar o APK 0.6.10 (artifact `goni-vv-0.6.10-release-signed`) — cobre
+TAMBÉM a 0.6.9 (gizmos), 0.6.8 (play mode) e 0.6.7 (lifecycle/apagar/sair).
+
+1. **Importar** um PNG (Menu → Importar… → escolher o screenshot de
+   Download) → toast de import OK → `textures/screenshot-….png` no projeto
+   (status line `at` sobe);
+2. **Aplicar**: selecionar o TIC (cubo) → tocar na linha **`tex:`** do
+   Inspector → o seletor TEXTURA abre com o screenshot na lista → tocar a
+   imagem → **o cubo mostra a textura** e o Inspector passa a
+   **`tex: screenshot-…`** (o estado agora muda de verdade);
+3. **Log viewer**: Settings → Ver logs → procurar a linha
+   `material: textura aplicada textures/screenshot-….png`;
+4. **Persistência**: Menu → **Save** → **Load** (ou sair para projetos e
+   reentrar) → o cubo continua com a textura aplicada (a ref está no
+   `.goni` e é re-resolvida no load);
+5. **Remover**: tocar `tex:` de novo → **none** → o Inspector volta a
+   `tex: none` e o cubo ao cinzento → log
+   `material: textura removida`;
+6. **Mesh (mesmo fix)**: tocar `mesh:` → escolher um ficheiro de `meshes/`
+   → o mesh muda de verdade (toast + linha `editor: mesh … aplicado`);
+7. **Regressões**: 0.6.9 (gizmos), 0.6.8 (play mode), 0.6.7 (lifecycle GL,
+   apagar/sair), F5.5 (All Files Access — import/export continuam OK).
 
 ## Verificação no Realme C33 (dono) — F5.5 (All Files Access de verdade)
 

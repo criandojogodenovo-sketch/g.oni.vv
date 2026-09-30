@@ -881,6 +881,110 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     return chosen;
 }
 
+// ---------------------------------------------------------------------------
+// F6: DISPATCH da escolha do seletor — applyAssetPick (o wiring que faltava).
+// Era o bloco do main.cpp que nunca corria: drawAssetMenu fecha o seletor no
+// clique (st.assetMenu = 0) e o dispatch lia g_editor.assetMenu DEPOIS →
+// código morto desde a F5-E. A mesma lógica, agora PURA e afervel no CI.
+// ---------------------------------------------------------------------------
+AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int pick,
+                                const AssetCatalog& catalog, const AssetResolvers& res) {
+    AssetPickOutcome out;
+    if (pick <= 0) {
+        return out;   // nada escolhido neste frame
+    }
+    Tic* tic = scene.get(selected);
+    MeshRenderer* mr = tic ? tic->getComponent<MeshRenderer>() : nullptr;
+    if (!mr) {
+        return out;   // TIC morto ou sem MeshRenderer — sem crash, sem ação
+    }
+
+    if (menuKind == 1) {
+        // ---- seletor de MESHES -------------------------------------------
+        if (pick == 1) {   // cube procedural
+            mr->mesh = res.cubeMesh;
+            mr->material = res.material;
+            mr->meshPath.clear();
+            out.applied = true;
+            std::snprintf(out.toast, sizeof(out.toast), "mesh: cube");
+            std::snprintf(out.log, sizeof(out.log), "editor: mesh cube aplicado");
+        } else {
+            const size_t idx = static_cast<size_t>(pick - 2);
+            if (idx >= catalog.meshes.size()) {
+                return out;   // fora do catálogo — sem crash
+            }
+            const std::string rel = std::string("meshes/") + catalog.meshes[idx];
+            if (Mesh* m = res.mesh ? res.mesh(rel) : nullptr) {
+                mr->mesh = m;
+                mr->material = res.material;
+                mr->meshPath = rel;
+                // F5.1-B: textura embutida do glTF/GLB aplica-se logo
+                // (import sem PC — o material fica referenciado)
+                bool withTex = false;
+                if (res.meshTextureFor) {
+                    const std::string texRel = res.meshTextureFor(rel);
+                    if (!texRel.empty()) {
+                        std::string warn;
+                        if (const Texture* tex = res.texture ? res.texture(texRel, &warn)
+                                                             : nullptr) {
+                            mr->texture = tex;
+                            mr->texPath = texRel;
+                            withTex = true;
+                        }
+                    }
+                }
+                out.applied = true;
+                std::snprintf(out.toast, sizeof(out.toast), "%s",
+                              withTex ? "mesh aplicado (+textura)" : "mesh aplicado");
+                if (withTex) {
+                    std::snprintf(out.log, sizeof(out.log),
+                                  "editor: mesh %s aplicado com textura %s",
+                                  rel.c_str(), mr->texPath.c_str());
+                } else {
+                    std::snprintf(out.log, sizeof(out.log),
+                                  "editor: mesh %s aplicado", rel.c_str());
+                }
+            } else {
+                // carga falhou — o estado ANTERIOR fica intacto
+                std::snprintf(out.toast, sizeof(out.toast), "falha ao carregar mesh");
+                std::snprintf(out.log, sizeof(out.log),
+                              "editor: mesh %s FALHOU ao carregar", rel.c_str());
+            }
+        }
+    } else if (menuKind == 2) {
+        // ---- seletor de TEXTURAS -----------------------------------------
+        if (pick == 1) {   // none → liberta a referência
+            mr->texture = nullptr;
+            mr->texPath.clear();
+            out.applied = true;
+            std::snprintf(out.toast, sizeof(out.toast), "tex: none");
+            std::snprintf(out.log, sizeof(out.log), "material: textura removida");
+        } else {
+            const size_t idx = static_cast<size_t>(pick - 2);
+            if (idx >= catalog.textures.size()) {
+                return out;   // fora do catálogo — sem crash
+            }
+            const std::string rel = std::string("textures/") + catalog.textures[idx];
+            std::string warn;
+            if (const Texture* tex = res.texture ? res.texture(rel, &warn) : nullptr) {
+                mr->texture = tex;
+                mr->texPath = rel;
+                out.applied = true;
+                std::snprintf(out.toast, sizeof(out.toast), "%s",
+                              warn.empty() ? "textura aplicada" : warn.c_str());
+                std::snprintf(out.log, sizeof(out.log),
+                              "material: textura aplicada %s", rel.c_str());
+            } else {
+                // carga falhou — o estado ANTERIOR fica intacto
+                std::snprintf(out.toast, sizeof(out.toast), "falha ao carregar textura");
+                std::snprintf(out.log, sizeof(out.log),
+                              "material: textura %s FALHOU ao carregar", rel.c_str());
+            }
+        }
+    }
+    return out;
+}
+
 
 // ---------------------------------------------------------------------------
 // 0.6.8 — PLAY MODE com janela própria

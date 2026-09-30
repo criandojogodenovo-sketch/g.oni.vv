@@ -184,6 +184,55 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st);
 int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st,
                   const AssetCatalog& catalog);
+
+// ---- F6: DISPATCH da escolha do seletor (wiring material/textura) ------------
+//
+// FIX do C33 (0.6.9): tocar "tex:" → escolher o PNG importado → NADA acontecia
+// (estado ficava "tex: none", cubo sem textura, engine.log sem linha de
+// aplicação NEM de erro). CAUSA RAIZ: drawAssetMenu fecha o seletor NO CLIQUE
+// (st.assetMenu = 0 antes do return) e o dispatch no main.cpp lia
+// g_editor.assetMenu DEPOIS da chamada → sempre 0 → o bloco `if (pick > 0)`
+// era CÓDIGO MORTO desde a F5-E (0.5.0): a escolha nunca chegava ao
+// MeshRenderer. O mesmo no seletor de mesh.
+//
+// A lógica de aplicação vive AGORA aqui — função PURA (GL-free, resolvers
+// injetados, afervel no CI; o padrão de StoragePerm.h/JniAttach.h). O
+// chamador captura o menuKind ANTES de drawAssetMenu e aplica o pick depois.
+// O render é immediate-mode (drawTics lê mr->texture a CADA frame → o bind
+// acontece no frame seguinte sem flags dirty); a persistência já gravava
+// texPath no .goni (SceneSerializer) — só o wiring é que estava partido.
+
+// (Texture/Mesh vêm já forward-declarados em namespace vv via MeshRenderer.h
+// no cadeia de includes; LitMaterial está completo via render/Material.h)
+
+// Resolvers do device — o main liga-os ao GpuAssets/ResourceManager/cubo
+// procedural/material lit (injeção → os testes usam stubs).
+struct AssetResolvers {
+    Mesh* (*mesh)(const std::string& ref) = nullptr;   // GpuAssets::mesh
+    const Texture* (*texture)(const std::string& relPath, std::string* warn) = nullptr;
+    std::string (*meshTextureFor)(const std::string& ref) = nullptr;  // glTF embutida
+    Mesh*       cubeMesh = nullptr;      // cubo procedural do main
+    LitMaterial* material = nullptr;    // lit do renderer
+};
+
+// Resultado de uma escolha (feedbacks ficam pelo chamador: toast + engine.log)
+struct AssetPickOutcome {
+    bool applied = false;   // a escolha CHEGOU ao MeshRenderer
+    char toast[64] = "";    // "" → sem toast
+    char log[160] = "";     // "" → sem linha no engine.log
+};
+
+// Aplica a escolha do seletor no MeshRenderer do TIC selecionado.
+//   menuKind: 1 = seletor de meshes, 2 = seletor de texturas (o valor de
+//             EditorState::assetMenu CAPTURADO ANTES do drawAssetMenu)
+//   pick:     1 = cube (mesh) / none (textura); 2.. = ficheiro do catálogo
+// Regras: escolher textura → texture + texPath + log "material: textura
+// aplicada <ref>"; remover (pick 1) → liberta a referência + log "material:
+// textura removida"; carga que falha → estado ANTERIOR intacto + toast de
+// falha; TIC morto/sem MeshRenderer/pick fora do catálogo → outcome vazio.
+AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int pick,
+                                const AssetCatalog& catalog, const AssetResolvers& res);
+
 // F5.1-hotfix: menu do botão Settings → 0 nada, 1 = "Exportar logs"
 // (copia logs/ e crash dumps para Downloads/GOneVV/logs via MediaStore).
 // F5.2: 2 = "Ver logs" (viewer in-app), 3 = "Acesso a ficheiros…" (abre as
