@@ -132,6 +132,9 @@ add_library(goni_vv SHARED
         ui/UiContext.cpp
         ui/EditorUi.h
         ui/EditorUi.cpp
+        # 0.6.9: gizmos de transformação (Mover/Rodar/Escalar — hit-test
+        # 3D + drag com âncoras + desenho projetado em linhas de ecrã)
+        ui/Gizmo.cpp
         ui/stb/stb_truetype.h
         platform/Log.h
         platform/EngineLog.h

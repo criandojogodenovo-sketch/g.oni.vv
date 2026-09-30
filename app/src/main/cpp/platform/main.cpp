@@ -43,6 +43,7 @@
 #include "render/Mesh.h"
 #include "render/Renderer.h"
 #include "ui/EditorUi.h"
+#include "ui/Gizmo.h"
 #include "ui/FontAtlas.h"
 #include "ui/UiContext.h"
 
@@ -119,6 +120,180 @@ char g_selectedName[40] = "";   // nome do TIC p/ o ficheiro de export
 // 0.6.8: estado do gesto de orbit ENTRE frames — extraído para editor::
 // (OrbitState puro, afervel no CI; a lógica vive em EditorUi.cpp)
 editor::OrbitState g_orbit;
+
+// ---- 0.6.9: gizmos de transformação ------------------------------------------
+// Só no TIC selecionado, SÓ EM EDITOR (nunca em PLAY). O hit-test 3D corre
+// ANTES do orbit (o slot que apanha o gizmo NÃO orbita); o drag escreve no
+// Transform3D com âncoras (pose final = âncora + delta) e updateWorld().
+editor::GizmoModeState g_gizmoMode;
+gizmo::GizmoState       g_gizmo;
+
+// direção do mundo de um eixo/plano do gizmo (main-side)
+Vec3 axisDirLocal(gizmo::Axis a) {
+    switch (a) {
+        case gizmo::Axis::X: return {1.0f, 0.0f, 0.0f};
+        case gizmo::Axis::Y: return {0.0f, 1.0f, 0.0f};
+        case gizmo::Axis::Z: return {0.0f, 0.0f, 1.0f};
+        default:             return {0.0f, 0.0f, 0.0f};
+    }
+}
+
+void applyGizmoDrag(const Mat4& vp, const Vec3& origin,
+                    const gizmo::ViewBasis& basis, f32 sw, f32 sh,
+                    f32 px, f32 py);
+
+// alimenta o gizmo (hit-test no press + drag) e devolve a máscara de slots
+// reclamados (a câmara ignora esses dedos — drag em gizmo NÃO orbita)
+u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
+              const gizmo::ViewBasis& basis) {
+    if (!gizmo::visible(g_editor.playMode, true)) {
+        g_gizmo.active = gizmo::Axis::None;
+        g_gizmo.hovered = gizmo::Axis::None;
+        g_gizmo.dragSlot = -1;
+        return 0;
+    }
+    // drag em curso: segue o MESMO slot
+    if (g_gizmo.active != gizmo::Axis::None && g_gizmo.dragSlot >= 0) {
+        const u32 slot = static_cast<u32>(g_gizmo.dragSlot);
+        if (g_input.down(slot)) {
+            f32 px, py;
+            g_input.pos(slot, px, py);
+            applyGizmoDrag(vp, origin, basis, sw, sh, px, py);
+            return 1u << slot;
+        }
+        // dedo levantado — drag termina
+        g_gizmo.active = gizmo::Axis::None;
+        g_gizmo.dragSlot = -1;
+        g_gizmo.hovered = gizmo::Axis::None;
+    }
+    // press edge → hit-test 3D (só se o gesto nasce no viewport central)
+    const UiRect view = editor::centerRect(sw, sh, g_ui.safeArea());
+    for (u32 slot = 0; slot < kMaxPointerSlots; ++slot) {
+        if (!g_input.pressed(slot)) {
+            continue;
+        }
+        f32 px, py;
+        g_input.pos(slot, px, py);
+        if (px < view.x || px >= view.x + view.w || py < view.y ||
+            py >= view.y + view.h) {
+            continue;   // nasceu fora do viewport (painéis/toolbar)
+        }
+        const gizmo::Axis hit = gizmo::pickAxis(g_gizmo.mode, vp, origin, len,
+                                                sw, sh, px, py);
+        if (hit == gizmo::Axis::None) {
+            continue;
+        }
+        // apanhou o gizmo: âncoras + claimed
+        g_gizmo.active = hit;
+        g_gizmo.hovered = hit;
+        g_gizmo.dragSlot = static_cast<i32>(slot);
+        Tic* t = g_scene.get(g_editor.selected);
+        if (t) {
+            if (Transform3D* tr = t->getComponent<Transform3D>()) {
+                g_gizmo.anchorPos = tr->pos;
+                g_gizmo.anchorRot = tr->rot;
+                g_gizmo.anchorScale = tr->scale;
+            }
+        }
+        applyGizmoDrag(vp, origin, basis, sw, sh, px, py);
+        return 1u << slot;
+    }
+    // hover (sem press): destaque do alvo sob o dedo (feedback visual)
+    for (u32 slot = 0; slot < kMaxPointerSlots; ++slot) {
+        if (g_input.down(slot)) {
+            f32 px, py;
+            g_input.pos(slot, px, py);
+            g_gizmo.hovered = gizmo::pickAxis(g_gizmo.mode, vp, origin, len,
+                                               sw, sh, px, py);
+            break;
+        }
+    }
+    return 0;
+}
+
+// aplica o drag do gizmo ao Transform3D do TIC selecionado (âncoras)
+void applyGizmoDrag(const Mat4& vp, const Vec3& origin,
+                    const gizmo::ViewBasis& basis, f32 sw, f32 sh,
+                    f32 px, f32 py) {
+    Tic* t = g_scene.get(g_editor.selected);
+    if (!t || g_gizmo.active == gizmo::Axis::None) {
+        return;
+    }
+    Transform3D* tr = t->getComponent<Transform3D>();
+    if (!tr) {
+        return;
+    }
+    const gizmo::Axis a = g_gizmo.active;
+    const bool snap = g_gizmoMode.snap;
+    const f32 cx = sw * 0.5f;
+    const f32 cy = sh * 0.5f;
+
+    if (g_gizmo.mode == gizmo::Mode::Move) {
+        if (a == gizmo::Axis::X || a == gizmo::Axis::Y || a == gizmo::Axis::Z) {
+            // hits no PLANO DE VISTA por origin (nunca degenera: o plano é
+            // ⟂ ao olhar e passa pelo gizmo)
+            const Vec3 n = basis.fwd;
+            bool ok0 = false, ok1 = false;
+            const Vec3 h0 = g_gizmo.anchorHit;
+            const Vec3 h1 = gizmo::planeHit(basis, n, origin, px, py, sw, sh,
+                                            ok1);
+            (void)ok0;
+            if (!ok1) {
+                return;
+            }
+            tr->pos = gizmo::dragMoveAxis(g_gizmo.anchorPos,
+                                          axisDirLocal(a), h0, h1, snap);
+        } else {
+            // plano de drag (XY/XZ/YZ)
+            const Vec3 n = a == gizmo::Axis::XY ? Vec3{0, 0, 1}
+                          : a == gizmo::Axis::XZ ? Vec3{0, 1, 0}
+                                                : Vec3{1, 0, 0};
+            bool ok1 = false;
+            const Vec3 h0 = g_gizmo.anchorHit;
+            const Vec3 h1 = gizmo::planeHit(basis, n, origin, px, py, sw, sh,
+                                            ok1);
+            if (!ok1) {
+                return;
+            }
+            tr->pos = gizmo::dragMovePlane(g_gizmo.anchorPos, n, h0, h1, snap);
+        }
+    } else if (g_gizmo.mode == gizmo::Mode::Rotate) {
+        const Vec3 axis = axisDirLocal(a);
+        f32 ox = 0.0f, oy = 0.0f;
+        if (!gizmo::projectPoint(vp, origin, sw, sh, ox, oy)) {
+            return;
+        }
+        const f32 ang = std::atan2(py - oy, px - ox);
+        tr->rot = gizmo::dragRotate(g_gizmo.anchorRot, axis, basis.fwd,
+                                    g_gizmo.anchorAngle, ang, snap);
+    } else {
+        f32 ox = 0.0f, oy = 0.0f;
+        if (!gizmo::projectPoint(vp, origin, sw, sh, ox, oy)) {
+            return;
+        }
+        if (a == gizmo::Axis::Center) {
+            const f32 d = std::sqrt((px - ox) * (px - ox) + (py - oy) * (py - oy));
+            tr->scale = gizmo::dragScaleUniform(g_gizmo.anchorScale,
+                                                g_gizmo.anchorDist, d, snap);
+        } else {
+            const Vec3 n = basis.fwd;
+            bool ok1 = false;
+            const Vec3 h0 = g_gizmo.anchorHit;
+            const Vec3 h1 = gizmo::planeHit(basis, n, origin, px, py, sw, sh,
+                                            ok1);
+            if (!ok1) {
+                return;
+            }
+            tr->scale = gizmo::dragScaleAxis(g_gizmo.anchorScale, a,
+                                             axisDirLocal(a), h0, h1, snap);
+        }
+    }
+    // escreve no Transform3D COM worldDirty: o cache é recalculado já neste
+    // frame (feedback imediato) e o TransformSystem reconfirma no passo
+    tr->updateWorld();
+    tr->worldDirty = false;   // cache coerente com a nova pose
+    (void)cx; (void)cy;
+}
 
 DrawStats g_lastUiStats;   // métricas do pass UI (disponíveis 1 frame depois)
 
@@ -814,13 +989,38 @@ void frame() {
     const f32 tcH = h - g_ui.safeTop() - g_ui.safeBottom();
     const u32 claimed = feedTouchControls(tcW, tcH, tcDrawn, &tcDraw);
 
+    // 0.6.9: gizmos — vp/base da câmara ANTES do orbit (o hit-test precisa
+    // delas para reclamar o slot que apanha o gizmo). Só em EDITOR com TIC
+    // selecionado que tenha Transform3D; o drag escreve no componente via
+    // âncoras (feedGizmo) e o slot reclamado NÃO orbita.
+    u32 gizmoClaimed = 0;
+    Tic* gizmoTic = g_scene.get(g_editor.selected);
+    Transform3D* gizmoTr =
+        (gizmoTic && gizmoTic->active) ? gizmoTic->getComponent<Transform3D>()
+                                        : nullptr;
+    if (gizmo::visible(g_editor.playMode, gizmoTr != nullptr)) {
+        const Mat4 gview = g_camera.view();
+        const Mat4 gproj = g_camera.proj(w / h);
+        const Mat4 gvp = Mat4::mul(gproj, gview);
+        const gizmo::ViewBasis gbasis = gizmo::viewBasis(g_camera, w / h);
+        const f32 glen = gizmo::gizmoLength(g_camera.dist);
+        // sincroniza o modo/snap da toolbar com o estado do gizmo
+        g_gizmo.mode = static_cast<gizmo::Mode>(g_gizmoMode.mode);
+        g_gizmo.snap = g_gizmoMode.snap;
+        gizmoClaimed = feedGizmo(gvp, gizmoTr->pos, glen, w, h, gbasis);
+    } else {
+        g_gizmo.active = gizmo::Axis::None;
+        g_gizmo.hovered = gizmo::Axis::None;
+    }
+
     // input do frame anterior → câmara (só gestos nascidos no viewport
     // central da SAFE-AREA — gestos atrás da nav bar não orbitam, F4.2)
     // 0.6.8: orbit DESATIVADO em play (guard playMode dentro — 1 dedo =
     // controlos); lógica extraída p/ editor:: (afervel no CI)
+    // 0.6.9: claimed | gizmoClaimed — drag em gizmo NÃO orbita
     editor::updateCameraOrbit(g_camera, g_orbit, g_input,
                                editor::centerRect(w, h, g_ui.safeArea()),
-                               claimed, g_editor.playMode);
+                               claimed | gizmoClaimed, g_editor.playMode);
 
     // F4: base de movimento do input = câmara (stick-cima afasta da câmara)
     {
@@ -871,8 +1071,16 @@ void frame() {
     }
 
     // ---- 0.6.8: EDITOR — toolbar + painéis + menus (como sempre) ----------
+    // 0.6.9: gizmo PRIMEIRO (as linhas ficam POR BAIXO dos painéis —
+    // z-order correto de editor) e só com seleção em EDITOR
+    if (gizmo::visible(g_editor.playMode, gizmoTr != nullptr)) {
+        gizmo::drawGizmo(g_ui, vp, gizmoTr->pos,
+                         gizmo::gizmoLength(g_camera.dist), g_gizmo.mode,
+                         g_gizmo.hovered);
+    }
     bool clicks[3] = {false, false, false};
     g_ui.toolbar(clicks);   // exatamente 3 botões (Menu, Play, Settings)
+    editor::drawGizmoToolbar(g_ui, g_input, g_gizmoMode);   // 0.6.9: M/R/E+Snap
     if (clicks[0]) {
         g_editor.fileMenu = !g_editor.fileMenu;   // F3: Menu abre Save/Load
         g_editor.plusMenu = false;

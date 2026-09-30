@@ -160,6 +160,18 @@ void closeAllOverlays(EditorState& st);
 // clicado (o main sai do play: PlaySnapshot restore + painéis repostos).
 bool drawPlayBar(UiContext& ui, const InputState& in, f32 sw, f32 sh, int fps);
 
+// ---- 0.6.9: GIZMOS DE TRANSFORMAÇÃO (seletor na toolbar) ---------------------
+
+// Grupo à DIREITA da toolbar (os 3 botões Menu/Play/Settings ficam INTACTOS
+// à esquerda): [Mover][Rodar][Escalar] + [Snap] — só em EDITOR. O botão do
+// modo ATIVO fica invertido (fill ACCENT + frame) e o Snap mostra o estado
+// ("Snap" vs "Snap on"). Mutam st.gizmoMode/st.gizmoSnap conforme os cliques.
+struct GizmoModeState {
+    int  mode = 0;      // 0=Mover, 1=Rodar, 2=Escalar (gizmo::Mode)
+    bool snap = false;  // toggle de snapping
+};
+void drawGizmoToolbar(UiContext& ui, const InputState& in, GizmoModeState& st);
+
 // Overlays. Devolvem a escolha do frame:
 //   drawPlusMenu → 0 nada, 1..4 = PresetKind (1=Player, 2=Character,
 //                  3=Static, 4=Rigid)

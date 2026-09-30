@@ -42,6 +42,13 @@ public:
 
     // widgets
     void panel(f32 x, f32 y, f32 w, f32 h, const f32 color[4]);
+    // 0.6.9 — segmento de ecrã com espessura (gizmos 3D projetados). Sem
+    // clip (emitido FORA das regiões de scroll; o gizmo vive no viewport).
+    void drawLine(f32 x0, f32 y0, f32 x1, f32 y1, f32 thickness,
+                  const f32 color[4]) {
+        solids_.line(x0, y0, x1, y1, thickness,
+                    color[0], color[1], color[2], color[3]);
+    }
     void frame(f32 x, f32 y, f32 w, f32 h, f32 thickness, const f32 color[4]);
     void label(f32 xBaseline, f32 yBaseline, const char* text, const f32 color[4]);
     // F4.2/B2: label que NUNCA excede maxW — mede e trunca com "..." se

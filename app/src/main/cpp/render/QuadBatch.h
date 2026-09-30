@@ -2,6 +2,11 @@
 // render/QuadBatch.h — batch de quads 2D (pos+uv+cor) para a UI.
 // Vértices acumulados na CPU; o Renderer sobe e desenha em endFrame.
 // Parte do PLACEHOLDER de render da F1 (ver Renderer.h).
+//
+// 0.6.9: line() — SEGMENTO de ecrã com espessura (retângulo ROTACIONADO
+// por 6 vértices) para os gizmos de transformação (eixos/anéis projetados
+// no espaço de ecrã). O quad comum continua axis-aligned (UI).
+#include <cmath>
 #include <vector>
 #include "core/Types.h"
 
@@ -28,6 +33,33 @@ public:
             {x,     y,     u0, v0, r, g, b, a},
             {x + w, y + h, u1, v1, r, g, b, a},
             {x + w, y,     u1, v0, r, g, b, a},
+        };
+        verts_.insert(verts_.end(), v, v + 6);
+    }
+
+    // 0.6.9 — segmento (x0,y0)→(x1,y1) com espessura em px: retângulo
+    // ROTACIONADO alinhado à direção do segmento (normal = perpendicular
+    // normalizada × meia-espessura). Degenerado (len < ε) = não emite.
+    // SEM clip (chamado fora de regiões de scroll — os gizmos vivem no
+    // viewport central, onde o clip_ é infinito).
+    void line(f32 x0, f32 y0, f32 x1, f32 y1, f32 thickness,
+              f32 r, f32 g, f32 b, f32 a) {
+        const f32 dx = x1 - x0;
+        const f32 dy = y1 - y0;
+        const f32 len = std::sqrt(dx * dx + dy * dy);
+        if (len < 1e-5f) {
+            return;
+        }
+        const f32 half = thickness * 0.5f;
+        const f32 nx = -dy / len * half;
+        const f32 ny =  dx / len * half;
+        const QuadVertex v[6] = {
+            {x0 + nx, y0 + ny, 0.0f, 0.0f, r, g, b, a},
+            {x0 - nx, y0 - ny, 0.0f, 1.0f, r, g, b, a},
+            {x1 - nx, y1 - ny, 1.0f, 1.0f, r, g, b, a},
+            {x0 + nx, y0 + ny, 0.0f, 0.0f, r, g, b, a},
+            {x1 - nx, y1 - ny, 1.0f, 1.0f, r, g, b, a},
+            {x1 + nx, y1 + ny, 1.0f, 0.0f, r, g, b, a},
         };
         verts_.insert(verts_.end(), v, v + 6);
     }

@@ -115,15 +115,17 @@ o conceito de "modo de UI": o play era um gate da física, não da interface.
 - `build-release` (NDK r26): `assembleRelease` + `apksigner verify`.
 - `verify-entry-symbols`: `nm -D` + `jni_parity.py dynsyms.txt` + gate do
   manifest binário.
-- Estado no fecho: ver §11 (runs desta sub-fase).
+- CI da sub-fase (run 36719750016, HEAD 35b96da): core-tests **verde**,
+  build-release **verde** (APK assinado), verify-entry-symbols **verde**.
 
 ## 11. APK
 
 - `app-release.apk` (arm64-v8a), versionCode 17, versionName "0.6.8",
   assinado com a keystore dos secrets — artifact
   `goni-vv-0.6.8-release-signed` do workflow `release`.
-- sha256: anotar do artifact do CI (a mesma prática da 0.6.7 — o binário
-  do CI é a fonte da verdade).
+- sha256 do APK assinado (artifact `goni-vv-0.6.8-release-signed`, run
+  36719750016):
+  `dd7647cc2a0451c4171834337a519dfb63d0d2938c09526573ec3b6168703eb5`
 
 ## 12. Verificação no device (roteiro C33 — resumo)
 

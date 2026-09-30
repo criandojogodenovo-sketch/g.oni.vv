@@ -1016,5 +1016,49 @@ bool drawPlayBar(UiContext& ui, const InputState& in, f32 sw, f32 sh, int fps) {
     return stopClicked;
 }
 
+
+// ---------------------------------------------------------------------------
+// 0.6.9 — seletor de modo do gizmo na toolbar (grupo à direita)
+// ---------------------------------------------------------------------------
+
+void drawGizmoToolbar(UiContext& ui, const InputState& in, GizmoModeState& st) {
+    // o grupo vive na FAIXA DA TOOLBAR (mesma altura dos 3 botões), à
+    // direita; os 3 botões Menu/Play/Settings ficam intactos à esquerda.
+    const UiRect bar = ui.toolbarRect();
+    const f32 btnW = 150.0f;
+    const f32 btnH = 56.0f;
+    const f32 snapW = 120.0f;
+    const f32 gap = 10.0f;
+    const f32 by = bar.y + (safe::kToolbarH - btnH) * 0.5f;
+    // 4 controlos alinhados à direita: [Mover][Rodar][Escalar][Snap]
+    const f32 totalW = 3.0f * btnW + snapW + 3.0f * gap;
+    f32 x = bar.x + bar.w - totalW - kPad;
+    if (x < bar.x + kPad + 3.0f * (240.0f + 16.0f)) {
+        x = bar.x + kPad + 3.0f * (240.0f + 16.0f);   // nunca por cima dos 3
+    }
+
+    static const char* kModeNames[3] = {"Mover", "Rodar", "Escalar"};
+    for (int i = 0; i < 3; ++i) {
+        const u64 id = kGizmoModeMoveId + static_cast<u64>(i);
+        if (ui.button(id, x, by, btnW, btnH, kModeNames[i])) {
+            st.mode = i;
+        }
+        if (st.mode == i) {
+            // modo ATIVO: frame ACCENT por cima do botão (inversível demais
+            // faria os rótulos ilegíveis a 28px — o frame salienta)
+            ui.frame(x, by, btnW, btnH, 2.0f, theme::ACCENT);
+        }
+        x += btnW + gap;
+    }
+    // Snap (toggle — o rótulo mostra o estado)
+    if (ui.button(kGizmoSnapId, x, by, snapW, btnH,
+                  st.snap ? "Snap on" : "Snap")) {
+        st.snap = !st.snap;
+    }
+    if (st.snap) {
+        ui.frame(x, by, snapW, btnH, 2.0f, theme::ACCENT);
+    }
+    (void)in;
+}
 } // namespace editor
 } // namespace vv

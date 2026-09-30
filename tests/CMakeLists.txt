@@ -115,6 +115,8 @@ add_executable(test_core
         # (tests/stub) e os testes aferem os batches de CPU (sem GL real)
         ${CORE_DIR}/ui/UiContext.cpp
         ${CORE_DIR}/ui/EditorUi.cpp
+        # 0.6.9: gizmos (hit-test/drag/snapping GL-free + desenho em batch)
+        ${CORE_DIR}/ui/Gizmo.cpp
         ${CORE_DIR}/ui/FontAtlas.cpp
         ${CORE_DIR}/platform/InputState.cpp
         ${CORE_DIR}/platform/EngineLog.cpp
