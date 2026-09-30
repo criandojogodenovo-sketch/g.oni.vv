@@ -65,6 +65,7 @@ namespace vv {
 class Scene;
 class InputState;
 class TouchControls;
+class Camera;
 
 namespace editor {
 
@@ -91,6 +92,13 @@ struct EditorState {
     bool   importMenu = false;             // overlay IMPORT (Download/Documents)
     bool   logViewer = false;              // viewer de logs visível
     bool   logViewerJustOpened = false;    // 1 frame: auto-scroll p/ o fundo
+
+    // 0.6.8 — MODO DE UI (EDITOR ↔ PLAY). Em PLAY: viewport fullscreen +
+    // TouchControls + BARRA PLAY MÍNIMA (Stop/fps/aviso); SEM toolbar,
+    // SEM painéis de edição, SEM menus, orbit DESATIVADO (1 dedo =
+    // controlos). O estado vive AQUI (não numa global do main) para a
+    // transição completa editor→play→editor ser testável na suíte.
+    bool   playMode = false;
 };
 
 // Rect do viewport central (entre os painéis) — usado para o gate da câmara.
@@ -121,6 +129,36 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
 // recalculado para a área útil e deslocado pelos insets — nada atrás da
 // nav bar).
 void drawTouchControls(UiContext& ui, const TouchControls& tc, f32 sw, f32 sh);
+
+// ---- 0.6.8: PLAY MODE com janela própria ------------------------------------
+
+// Estado do gesto de orbit ENTRE frames (era globais do main — agora é
+// puro/testável: o main cria um OrbitState e passa por referência).
+struct OrbitState {
+    bool active = false;         // 1 dedo em orbit
+    f32  x = 0.0f, y = 0.0f;     // último ponto do dedo de orbit
+    f32  pinchPrev = 0.0f;      // distância entre dedos no frame anterior
+    bool gestureInView = false;  // F3: gesto nasce só no viewport central
+};
+
+// Orbit da câmara (extraído do main p/ ser afervel no CI).
+// Regra F3: o PRIMEIRO toque decide o dono do gesto (nascido no viewport
+// central e não reclamado pelos TouchControls). 1 dedo = yaw/pitch,
+// ≥2 dedos = pinch. 0.6.8: playMode=true DESATIVA o orbit (1 dedo =
+// controlos) e RESETA o gesto pendente — o estado fica limpo p/ o regresso.
+void updateCameraOrbit(Camera& cam, OrbitState& st, const InputState& in,
+                       const UiRect& view, u32 claimedMask, bool playMode);
+
+// Fecha TODOS os overlays/menus (transição EDITOR→PLAY: em play nada de
+// edição fica aberto; ao parar, os PAINÉIS voltam exatamente — os offsets
+// de scroll e a seleção vivem fora destas flags e ficam intactos).
+void closeAllOverlays(EditorState& st);
+
+// Barra PLAY mínima (topo, mesma altura da toolbar, dentro da safe-area):
+// botão Stop à esquerda + "a correr" + fps + aviso "simulação — alterações
+// descartadas ao parar" à direita. Devolve true no frame em que Stop é
+// clicado (o main sai do play: PlaySnapshot restore + painéis repostos).
+bool drawPlayBar(UiContext& ui, const InputState& in, f32 sw, f32 sh, int fps);
 
 // Overlays. Devolvem a escolha do frame:
 //   drawPlusMenu → 0 nada, 1..4 = PresetKind (1=Player, 2=Character,

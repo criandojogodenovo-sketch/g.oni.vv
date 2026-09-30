@@ -1,5 +1,6 @@
 #include "ui/EditorUi.h"
 #include "components/InputMap.h"
+#include "render/Camera.h"
 #include "components/TouchControls.h"
 #include <cmath>
 #include "components/MeshRenderer.h"
@@ -878,6 +879,141 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                        more, theme::LINE, w - 2.0f * kPad);
     }
     return chosen;
+}
+
+
+// ---------------------------------------------------------------------------
+// 0.6.8 — PLAY MODE com janela própria
+// ---------------------------------------------------------------------------
+
+void closeAllOverlays(EditorState& st) {
+    st.plusMenu = false;
+    st.fileMenu = false;
+    st.settingsMenu = false;
+    st.assetMenu = 0;
+    st.storageDialog = false;
+    st.importMenu = false;
+    st.logViewer = false;
+    st.logViewerJustOpened = false;
+}
+
+// Orbit da câmara — extraído do main.cpp (era globais + função estática).
+// A lógica é INTACTA (regra F3 do dono-do-gesto, pinch, clamps da Camera);
+// o que muda: o estado vive num OrbitState puro e o PLAY desliga o orbit.
+void updateCameraOrbit(Camera& cam, OrbitState& st, const InputState& in,
+                       const UiRect& view, u32 claimedMask, bool playMode) {
+    // 0.6.8: em PLAY o orbit está DESATIVADO — 1 dedo = controlos de toque.
+    // O gesto pendente é RESETADO (um drag que começou no editor e o Play
+    // entretanto não pode continuar a orbitar) e o estado fica limpo para
+    // o regresso ao editor.
+    if (playMode) {
+        st.active = false;
+        st.gestureInView = false;
+        st.pinchPrev = 0.0f;
+        return;
+    }
+
+    u32 active = 0;
+    for (u32 s = 0; s < kMaxPointerSlots; ++s) {
+        if (in.down(s) && !(claimedMask & (1u << s))) {
+            ++active;
+        }
+    }
+    if (active == 0) {
+        st.gestureInView = false;
+        st.active = false;
+        st.pinchPrev = 0.0f;
+        return;
+    }
+
+    // F3: o PRIMEIRO toque decide o dono do gesto. Se nasce num painel
+    // (Hierarchy/Inspector/toolbar) ou num controlo de toque (F4), a câmara
+    // não orbita — mesmo que o dedo depois atravessasse o viewport.
+    if (!st.gestureInView) {
+        for (u32 s = 0; s < kMaxPointerSlots; ++s) {
+            if (!in.pressed(s)) continue;
+            if (claimedMask & (1u << s)) break;   // nasceu num controlo
+            f32 x, y;
+            in.pos(s, x, y);
+            if (x >= view.x && x < view.x + view.w && y >= view.y && y < view.y + view.h) {
+                st.gestureInView = true;
+            }
+            break;   // só o primeiro pointer com edge interessa
+        }
+    }
+    if (!st.gestureInView) {
+        return;
+    }
+
+    constexpr f32 kSens = 0.0075f;   // rad/px (~0,43° por pixel) — como no main
+    if (active >= 2) {
+        // pinch: distância entre os dois primeiros dedos ativos (não reclamados)
+        f32 x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        bool got0 = false, got1 = false;
+        for (u32 s = 0; s < kMaxPointerSlots && !(got0 && got1); ++s) {
+            if (!in.down(s)) continue;
+            if (claimedMask & (1u << s)) continue;
+            f32 x, y;
+            in.pos(s, x, y);
+            if (!got0) { x0 = x; y0 = y; got0 = true; }
+            else       { x1 = x; y1 = y; got1 = true; }
+        }
+        if (got0 && got1) {
+            const f32 d = std::sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
+            if (st.pinchPrev > 0.0f && d > 1.0f) {
+                cam.zoomBy(st.pinchPrev / d);   // dedos afastam → aproxima
+            }
+            st.pinchPrev = d;
+        }
+        st.active = false;
+        return;
+    }
+    st.pinchPrev = 0.0f;
+    if (active == 1) {
+        for (u32 s = 0; s < kMaxPointerSlots; ++s) {
+            if (!in.down(s)) continue;
+            if (claimedMask & (1u << s)) continue;
+            f32 x, y;
+            in.pos(s, x, y);
+            if (st.active) {
+                cam.orbit((x - st.x) * kSens, (y - st.y) * kSens);
+            }
+            st.x = x;
+            st.y = y;
+            st.active = true;
+            break;
+        }
+    } else {
+        st.active = false;
+    }
+}
+
+bool drawPlayBar(UiContext& ui, const InputState& in, f32 sw, f32 sh, int fps) {
+    // F4.2: barra na faixa da toolbar, DENTRO da safe-area (nada atrás da
+    // nav/status bar). Tema mono — mesma linguagem da toolbar.
+    const UiRect r = playBarRect(sw, sh, ui.safeArea());
+    ui.panel(r.x, r.y, r.w, r.h, theme::PANEL);
+    ui.panel(r.x, r.y + r.h - 1.0f, r.w, 1.0f, theme::LINE);
+
+    // Stop (id 5 — faixa exclusiva; ver EditorLayout.h)
+    const UiRect stop = playStopButtonRect(r);
+    const bool stopClicked = ui.button(kPlayStopId, stop.x, stop.y, stop.w,
+                                       stop.h, "Stop");
+
+    if (ui.hasFont()) {
+        const f32 th = ui.fontHeight();
+        const f32 cy = r.y + r.h * 0.5f + th * 0.30f;
+        // estado "a correr" + fps ao lado do Stop
+        char run[64];
+        std::snprintf(run, sizeof(run), "a correr · fps %d", fps);
+        ui.label(stop.x + stop.w + 24.0f, cy, run, theme::TEXT);
+        // aviso à direita: nunca sai da barra (labelFitted)
+        const f32 warnW = r.w * 0.5f;
+        ui.labelFitted(r.x + r.w - warnW - kPad, cy,
+                       "simulação — alterações descartadas ao parar",
+                       theme::LINE, warnW);
+    }
+    return stopClicked;
 }
 
 } // namespace editor

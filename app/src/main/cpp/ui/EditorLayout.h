@@ -3,6 +3,7 @@
 // host-testável. Fonte ÚNICA das alturas de conteúdo que alimentam o scroll:
 // o desenho (EditorUi.cpp) e os testes de CI partilham estes números.
 #include "ui/ScrollMath.h"   // UiRect (os overlays F5.2 também partilham)
+#include "ui/SafeArea.h"     // 0.6.8: playBarRect usa safe::toolbarRect/kToolbarH
 //
 // Coordenadas de CONTEÚDO: origem no topo da lista (debaixo do cabeçalho do
 // painel); o scroll converte para ecrã com screenY = contentY − offset.
@@ -234,6 +235,29 @@ inline UiRect importRowRect(const UiRect& menu, u32 i) {
 inline f32 importMenuHeight(u32 rows) {
     return kHeaderH + static_cast<f32>(rows) * 48.0f + kPad;
 }
+
+// ---- 0.6.8: PLAY BAR (fonte ÚNICA das geometrias — desenho e testes) --------
+
+// Botão Stop da play bar (id 5 — faixa livre entre a toolbar 1..3 e os
+// presets 20..23): MESMO tamanho/posição que os botões da toolbar (esquerda,
+// 240x56, centrado na altura de 88 px).
+constexpr u64 kPlayStopId = 5;
+
+inline UiRect playBarRect(f32 sw, f32 sh, const safe::Insets& i) {
+    // mesma faixa da toolbar (kToolbarH) — o PLAY substitui a toolbar no topo
+    return safe::toolbarRect(sw, sh, i);
+}
+inline UiRect playStopButtonRect(const UiRect& bar) {
+    return {bar.x + kPad, bar.y + (safe::kToolbarH - 56.0f) * 0.5f,
+            240.0f, 56.0f};
+}
+
+// ids do seletor de modo do gizmo (0.6.9 — reservados já p/ não colidir):
+// toolbar Mover/Rodar/Escalar = 7/8/9, Snap = 10
+constexpr u64 kGizmoModeMoveId    = 7;
+constexpr u64 kGizmoModeRotateId  = 8;
+constexpr u64 kGizmoModeScaleId   = 9;
+constexpr u64 kGizmoSnapId        = 10;
 
 } // namespace editor
 } // namespace vv

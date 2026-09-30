@@ -71,9 +71,10 @@ TransformSystem     g_transformSystem;
 
 // ---- F4: física + modo Play ------------------------------------------------
 phys::PhysicsSystem g_physics;       // TickGroup::Physics (só avança em Play)
-bool                g_playMode = false;   // botão Play da toolbar liga/desliga
 // F4.2/B3: sandbox do Play — pose de editor capturada ao ENTRAR, restaurada
 // ao SAIR (a simulação é descartada; a física continua a correr só no Play)
+// 0.6.8: o MODO (editor↔play) vive em g_editor.playMode (EditorState) — a
+// transição completa é testável na suíte; o snapshot continua aqui.
 PlaySnapshot        g_playSnap;
 
 
@@ -115,13 +116,9 @@ int                  g_prevAssetMenu = 0;
 
 char g_selectedName[40] = "";   // nome do TIC p/ o ficheiro de export
 
-// estado do touch → câmara (entre frames)
-bool g_orbitActive = false;
-f32  g_orbitX = 0.0f;
-f32  g_orbitY = 0.0f;
-f32  g_pinchPrev = 0.0f;
-bool g_gestureInView = false;        // F3: gesto nasce só dentro do viewport central
-constexpr f32 kOrbitSens = 0.0075f;  // rad/px (~0,43° por pixel)
+// 0.6.8: estado do gesto de orbit ENTRE frames — extraído para editor::
+// (OrbitState puro, afervel no CI; a lógica vive em EditorUi.cpp)
+editor::OrbitState g_orbit;
 
 DrawStats g_lastUiStats;   // métricas do pass UI (disponíveis 1 frame depois)
 
@@ -510,82 +507,25 @@ const char* shortTexFormat(CompressedFormat f) {
     }
 }
 
-// claimedMask: slots reclamados pelos TouchControls (joystick/botão) — a
-// câmara de orbit ignora esses dedos (F4)
-void updateCameraOrbit(const InputState& in, const UiRect& view, u32 claimedMask) {
-    u32 active = 0;
-    for (u32 s = 0; s < kMaxPointerSlots; ++s) {
-        if (in.down(s) && !(claimedMask & (1u << s))) {
-            ++active;
-        }
-    }
-    if (active == 0) {
-        g_gestureInView = false;
-        g_orbitActive = false;
-        g_pinchPrev = 0.0f;
-        return;
-    }
+// 0.6.8: ENTRA no play — snapshot da pose + menus fechados (em play não há
+// edição; ao parar, os PAINÉIS voltam exatamente — scroll/seleção vivem
+// fora das flags de overlay e ficam intactos)
+void enterPlayMode() {
+    g_editor.playMode = true;
+    editor::closeAllOverlays(g_editor);
+    playSnapshotCapture(g_scene, g_playSnap);
+    LOGI("ui: modo play — snapshot de %u transforms / %u bodies",
+         (unsigned)g_playSnap.transforms.size(),
+         (unsigned)g_playSnap.bodies.size());
+}
 
-    // F3: o PRIMEIRO toque decide o dono do gesto. Se nasceu num painel
-    // (Hierarchy/Inspector/toolbar) ou num controlo de toque (F4), a câmara
-    // não orbita — mesmo que o dedo depois atravesse o viewport.
-    if (!g_gestureInView) {
-        for (u32 s = 0; s < kMaxPointerSlots; ++s) {
-            if (!in.pressed(s)) continue;
-            if (claimedMask & (1u << s)) break;   // nasceu num controlo
-            f32 x, y;
-            in.pos(s, x, y);
-            if (x >= view.x && x < view.x + view.w && y >= view.y && y < view.y + view.h) {
-                g_gestureInView = true;
-            }
-            break;   // só o primeiro pointer com edge interessa
-        }
-    }
-    if (!g_gestureInView) {
-        return;
-    }
-
-    if (active >= 2) {
-        // pinch: distância entre os dois primeiros dedos ativos (não reclamados)
-        f32 x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-        bool got0 = false, got1 = false;
-        for (u32 s = 0; s < kMaxPointerSlots && !(got0 && got1); ++s) {
-            if (!in.down(s)) continue;
-            if (claimedMask & (1u << s)) continue;
-            f32 x, y;
-            in.pos(s, x, y);
-            if (!got0) { x0 = x; y0 = y; got0 = true; }
-            else       { x1 = x; y1 = y; got1 = true; }
-        }
-        if (got0 && got1) {
-            const f32 d = std::sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
-            if (g_pinchPrev > 0.0f && d > 1.0f) {
-                g_camera.zoomBy(g_pinchPrev / d);   // dedos afastam → aproxima
-            }
-            g_pinchPrev = d;
-        }
-        g_orbitActive = false;
-        return;
-    }
-    g_pinchPrev = 0.0f;
-    if (active == 1) {
-        for (u32 s = 0; s < kMaxPointerSlots; ++s) {
-            if (!in.down(s)) continue;
-            if (claimedMask & (1u << s)) continue;
-            f32 x, y;
-            in.pos(s, x, y);
-            if (g_orbitActive) {
-                g_camera.orbit((x - g_orbitX) * kOrbitSens,
-                               (y - g_orbitY) * kOrbitSens);
-            }
-            g_orbitX = x;
-            g_orbitY = y;
-            g_orbitActive = true;
-            break;
-        }
-    } else {
-        g_orbitActive = false;
-    }
+// 0.6.8: SAI do play — repõe a pose de editor (PlaySnapshot intacto) e a UI
+// de EDITOR volta com os painéis nos seus sítios exatos
+void leavePlayMode() {
+    g_editor.playMode = false;
+    playSnapshotRestore(g_scene, g_playSnap);
+    LOGI("ui: modo editor — pose restaurada (%u transforms)",
+         (unsigned)g_playSnap.transforms.size());
 }
 
 // F4: alimenta os TouchControls ativos (só em modo Play) e devolve a máscara
@@ -594,7 +534,7 @@ u32 feedTouchControls(f32 w, f32 h, bool& outDrawn, TouchControls** outTc) {
     u32 claimed = 0;
     outDrawn = false;
     *outTc = nullptr;
-    if (!g_playMode) {
+    if (!g_editor.playMode) {   // 0.6.8: modo de UI no EditorState
         return 0;
     }
     auto& tcs = g_scene.components().touchControls();
@@ -846,6 +786,22 @@ void drawToast() {
     g_ui.label(bx + 16.0f, by + bh * 0.5f + g_ui.fontHeight() * 0.30f, toastFit, tx);
 }
 
+// 0.6.8: status line inferior partilhada pelos DOIS modos (fps/tics/verts/
+// dc/formato/cache — em play também é útil e não é painel de edição)
+void statusLine(const DrawStats& st3d, const DrawStats& stGrid) {
+    const DrawStats total = st3d + stGrid + g_lastUiStats;
+    char status[128];
+    std::snprintf(status, sizeof(status),
+                  "fps %d  tics %u  verts %u  dc %u  am %u at %u  %s c%u/%u",
+                  static_cast<int>(g_fps + 0.5f), g_scene.count(),
+                  total.vertices, total.drawCalls,
+                  g_gpu.meshCount(), g_gpu.textureCount(),
+                  shortTexFormat(g_hwCompressor.lastFormat()),
+                  g_texCache ? g_texCache->hits() : 0u,
+                  g_texCache ? g_texCache->misses() : 0u);
+    g_ui.statusLine(status);
+}
+
 void frame() {
     const f32 w = static_cast<f32>(g_egl.width());
     const f32 h = static_cast<f32>(g_egl.height());
@@ -860,7 +816,11 @@ void frame() {
 
     // input do frame anterior → câmara (só gestos nascidos no viewport
     // central da SAFE-AREA — gestos atrás da nav bar não orbitam, F4.2)
-    updateCameraOrbit(g_input, editor::centerRect(w, h, g_ui.safeArea()), claimed);
+    // 0.6.8: orbit DESATIVADO em play (guard playMode dentro — 1 dedo =
+    // controlos); lógica extraída p/ editor:: (afervel no CI)
+    editor::updateCameraOrbit(g_camera, g_orbit, g_input,
+                               editor::centerRect(w, h, g_ui.safeArea()),
+                               claimed, g_editor.playMode);
 
     // F4: base de movimento do input = câmara (stick-cima afasta da câmara)
     {
@@ -869,7 +829,7 @@ void frame() {
         g_physics.frame.fwd = Vec3{-sy, 0.0f, -cy};
         g_physics.frame.right = Vec3{cy, 0.0f, -sy};
     }
-    g_physics.enabled = g_playMode;   // física só avança em modo Play
+    g_physics.enabled = g_editor.playMode;   // física só avança em modo Play
 
     // ---- pass 3D: clear color+depth, TICs com MeshRenderer + grid com fade
     g_renderer.beginFrame();
@@ -882,6 +842,35 @@ void frame() {
     // ---- pass UI: immediate-mode da F1 por cima (sem depth — nunca ocluída)
     g_ui.beginFrame(&g_renderer, &g_input, w, h);
 
+    if (g_editor.playMode) {
+        // ---- 0.6.8: PLAY — janela própria ----------------------------------
+        // Viewport fullscreen (painéis/toolbar escondidos) + TouchControls
+        // (ancorados na safe-area — desenhados no bloco partilhado abaixo)
+        // + barra superior mínima. ORBIT DESATIVADO (o guard playMode do
+        // editor::updateCameraOrbit já correu acima — 1 dedo = controlos).
+        const bool stop = editor::drawPlayBar(g_ui, g_input, w, h,
+                                              static_cast<int>(g_fps + 0.5f));
+        if (stop) {
+            // Stop → EDITOR: pose restaurada (PlaySnapshot) + painéis
+            // repostos EXATAMENTE (os scrolls/seleção nunca foram tocados)
+            leavePlayMode();
+            showToast("modo editor");
+        }
+        // TouchControls por cima de tudo (só existem em play — o feed no
+        // início do frame já devolveu 0 claimed e tcDrawn=false no editor)
+        if (tcDrawn && tcDraw) {
+            editor::drawTouchControls(g_ui, *tcDraw, w, h);
+        }
+        drawToast();
+        statusLine(st3d, stGrid);
+        g_ui.endFrame();                       // submete solids + glyphs
+        g_lastUiStats = g_renderer.endFrame(); // UI por cima do 3D
+        g_egl.swap();
+        g_input.clearEdges();
+        return;
+    }
+
+    // ---- 0.6.8: EDITOR — toolbar + painéis + menus (como sempre) ----------
     bool clicks[3] = {false, false, false};
     g_ui.toolbar(clicks);   // exatamente 3 botões (Menu, Play, Settings)
     if (clicks[0]) {
@@ -890,20 +879,13 @@ void frame() {
         g_editor.settingsMenu = false;
     }
     if (clicks[1]) {
-        g_playMode = !g_playMode;                 // F4: Play liga/desliga a simulação
-        if (g_playMode) {
-            // F4.2/B3: ENTRAR → snapshot da pose de editor
-            playSnapshotCapture(g_scene, g_playSnap);
-            LOGI("ui: modo play — snapshot de %u transforms / %u bodies",
-                 (unsigned)g_playSnap.transforms.size(),
-                 (unsigned)g_playSnap.bodies.size());
-        } else {
-            // F4.2/B3: SAIR → repõe a pose de editor e descarta a simulação
-            playSnapshotRestore(g_scene, g_playSnap);
-            LOGI("ui: modo editor — pose restaurada (%u transforms)",
-                 (unsigned)g_playSnap.transforms.size());
+        // F4/0.6.8: Play abre a JANELA PLAY (sem painéis de edição, orbit
+        // desativado); Stop (na play bar) volta ao EDITOR com a pose
+        // restaurada (PlaySnapshot) e os painéis repostos exatamente.
+        if (!g_editor.playMode) {
+            enterPlayMode();
+            showToast("modo play");
         }
-        showToast(g_playMode ? "modo play" : "modo editor");
     }
     if (clicks[2]) {
         // F5.1-hotfix/F5.2: Settings abre o menu (logs + armazenamento)
@@ -1206,21 +1188,7 @@ void frame() {
     }
 
     drawToast();
-
-    // status line inferior: fps + TICs + vértices desenhados + draw calls
-    // + F5.1-D: formato de textura da última carga + hits/misses do cache
-    // (parte da UI usa as métricas do frame anterior — lag de 1 frame)
-    const DrawStats total = st3d + stGrid + g_lastUiStats;
-    char status[128];
-    std::snprintf(status, sizeof(status),
-                  "fps %d  tics %u  verts %u  dc %u  am %u at %u  %s c%u/%u",
-                  static_cast<int>(g_fps + 0.5f), g_scene.count(),
-                  total.vertices, total.drawCalls,
-                  g_gpu.meshCount(), g_gpu.textureCount(),
-                  shortTexFormat(g_hwCompressor.lastFormat()),
-                  g_texCache ? g_texCache->hits() : 0u,
-                  g_texCache ? g_texCache->misses() : 0u);
-    g_ui.statusLine(status);
+    statusLine(st3d, stGrid);
 
     g_ui.endFrame();                       // submete solids + glyphs
     g_lastUiStats = g_renderer.endFrame(); // desenha a UI por cima do 3D
@@ -1275,8 +1243,7 @@ void android_main(android_app* app) {
                    g_windowInits, g_windowTerms);
     }
     g_systems.clear();
-    g_editor = editor::EditorState{};
-    g_playMode = false;
+    g_editor = editor::EditorState{};   // inclui playMode = false (0.6.8)
     g_playSnap = PlaySnapshot{};
     g_scene.clear();
     g_input.resetAll();
@@ -1291,9 +1258,7 @@ void android_main(android_app* app) {
     g_toast[0] = '\0';
     g_toastT = 0.0f;
     g_lastUiStats = DrawStats{};
-    g_orbitActive = false;
-    g_gestureInView = false;
-    g_pinchPrev = 0.0f;
+    g_orbit = editor::OrbitState{};
     g_texCache.reset();       // referenciam o storage antigo — libertados
     g_pipeline.reset();        // ANTES dele (remontados quando houver storage)
     g_storage.reset();   // o antigo é destruído; remontado abaixo

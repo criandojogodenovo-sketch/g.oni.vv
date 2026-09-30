@@ -44,6 +44,9 @@ add_executable(test_core
         # 0.6.7: lifecycle GL — re-upload de recursos após TERM/INIT_WINDOW
         # (fix dos "cubinhos" do C33; contadores do stub GLES3)
         test_lifecycle.cpp
+        # 0.6.8: play mode com janela própria (transição, sem painéis,
+        # touchcontrols sem sobreposição, pose restaurada, orbit off)
+        test_playui.cpp
         ${CORE_DIR}/core/Scene.cpp
         ${CORE_DIR}/core/Time.cpp
         ${CORE_DIR}/core/ComponentRegistry.cpp
