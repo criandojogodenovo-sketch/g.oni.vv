@@ -170,13 +170,30 @@ public class ProjectManagerActivity extends Activity {
         list.setVisibility(projects.isEmpty() ? View.GONE : View.VISIBLE);
     }
 
-    /** "+" → nome do projeto → picker SAF da pasta DESTE projeto */
+    /**
+     * 0.6.7 — "+" → nome do projeto → picker SAF da pasta DESTE projeto.
+     *
+     * FIX DO BUG DO NOME INVISÍVEL: o tema da app é
+     * Theme.NoTitleBar.Fullscreen (claro — o manifest aplica-o à activity) e
+     * o AlertDialog herdava esse tema claro → painel BRANCO. O EditText já
+     * tinha texto quase-branco (0xFFE6E6E6) = texto branco sobre fundo
+     * branco: durante a digitação o utilizador NÃO VIA o que escrevia. O
+     * campo agora tem FUNDO ESCURO explícito (0xFF1E222A) + cor de texto
+     * clara + hint — legível em QUALQUER tema de diálogo do sistema.
+     */
     private void askNewProject() {
         final EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setText(pendingName);
         input.setSelection(input.getText().length());
+        // 0.6.7: contraste garantido — fundo escuro + texto claro + hint
+        // (o diálogo herda o tema CLARO do manifest; sem fundo explícito o
+        // texto claro desaparecia no branco do painel)
+        input.setBackgroundColor(0xFF1E222A);
         input.setTextColor(0xFFE6E6E6);
+        input.setHintTextColor(0xFF8A939B);
+        input.setHint("nome do projeto");
+        input.setPadding(dp(12), dp(10), dp(12), dp(10));
         new AlertDialog.Builder(this)
                 .setTitle("Nome do projeto")
                 .setMessage("No passo seguinte escolha a PASTA onde este projeto fica (só dele).")
@@ -188,6 +205,8 @@ public class ProjectManagerActivity extends Activity {
                 })
                 .setNegativeButton("Cancelar", null)
                 .show();
+        // foco + teclado já abertos: digitar logo
+        input.requestFocus();
     }
 
     private void pickFolder() {
@@ -249,36 +268,74 @@ public class ProjectManagerActivity extends Activity {
         VvProjects.launchEditor(this, projects.get(pos));
     }
 
-    /** long-press: remove da LISTA (a pasta escolhida NÃO é apagada) */
+    /**
+     * long-press: DUAS ações distintas (0.6.7):
+     *   • "Remover da lista" — só tira da lista; a pasta fica intacta
+     *     (voltar a adicionar a mesma pasta reabre o projeto);
+     *   • "Apagar projeto" — diálogo de confirmação SEPARADO e explícito
+     *     ("Apagar projeto X? Não pode ser desfeito") → remove a PASTA via
+     *     File API (DocumentsContract.deleteDocument) + sai da lista +
+     *     liberta a permissão persistente.
+     */
     private void confirmRemove(int pos) {
         if (pos < 0 || pos >= projects.size()) {
             return;
         }
         final VvProjects.Entry e = projects.get(pos);
         new AlertDialog.Builder(this)
-                .setTitle("Remover da lista")
-                .setMessage("Remover “" + e.name + "” da lista?\n\n"
-                        + "A pasta e os ficheiros do projeto NÃO são apagados "
-                        + "(voltar a adicionar a mesma pasta reabre o projeto).")
-                .setPositiveButton("Remover", (d, w) -> {
-                    List<VvProjects.Entry> ps = VvProjects.load(this);
-                    int i = VvProjects.indexOfUri(ps, e.uri);
-                    if (i >= 0) {
-                        ps.remove(i);
-                        VvProjects.save(this, ps);
-                        try {
-                            // liberta a permissão persistente do URI removido
-                            getContentResolver().releasePersistableUriPermission(
-                                    Uri.parse(e.uri),
-                                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                                            | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-                        } catch (Exception ignored) {
-                        }
-                    }
-                    reload();
+                .setTitle(e.name)
+                .setMessage(shortUri(e.uri))
+                .setNeutralButton("Remover da lista", (d, w) -> {
+                    removeFromList(e);
+                })
+                .setPositiveButton("Apagar projeto", (d, w) -> {
+                    confirmDelete(e);
                 })
                 .setNegativeButton("Cancelar", null)
                 .show();
+    }
+
+    /** remove da LISTA (a pasta escolhida NÃO é apagada) */
+    private void removeFromList(VvProjects.Entry e) {
+        List<VvProjects.Entry> ps = VvProjects.load(this);
+        int i = VvProjects.indexOfUri(ps, e.uri);
+        if (i >= 0) {
+            ps.remove(i);
+            VvProjects.save(this, ps);
+            releasePermission(e.uri);
+        }
+        reload();
+    }
+
+    /** 0.6.7 — confirmação EXPLÍCITA antes de apagar a pasta de verdade */
+    private void confirmDelete(VvProjects.Entry e) {
+        new AlertDialog.Builder(this)
+                .setTitle("Apagar projeto")
+                .setMessage("Apagar projeto “" + e.name + "”?\n\n"
+                        + "A PASTA e TODOS os ficheiros do projeto são "
+                        + "apagados do armazenamento.\nNão pode ser desfeito.")
+                .setPositiveButton("Apagar", (d, w) -> {
+                    boolean gone = VvProjects.deleteProject(this, e);
+                    releasePermission(e.uri);
+                    reload();
+                    Toast.makeText(this,
+                            gone ? "projeto apagado (" + e.name + ")"
+                                 : "pasta não apagada — entrada removida da lista",
+                            Toast.LENGTH_LONG).show();
+                })
+                .setNegativeButton("Cancelar", null)
+                .show();
+    }
+
+    private void releasePermission(String uri) {
+        try {
+            // liberta a permissão persistente do URI removido
+            getContentResolver().releasePersistableUriPermission(
+                    Uri.parse(uri),
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        } catch (Exception ignored) {
+        }
     }
 
     private static String shortUri(String uri) {

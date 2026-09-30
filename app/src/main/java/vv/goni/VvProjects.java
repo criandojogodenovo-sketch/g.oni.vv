@@ -208,4 +208,46 @@ public final class VvProjects {
         i.putExtra(EXTRA_PROJECT_NAME, e.name);
         a.startActivity(i);
     }
+
+    /**
+     * 0.6.7 — APAGA o projeto de verdade: a PASTA escolhida no SAF é
+     * removida via File API (DocumentsContract.deleteDocument no URI de
+     * documento da raiz — a mesma File API de escrita que criou a
+     * estrutura) e a entrada sai da lista (projects.json).
+     *
+     * CHAMADO SÓ APÓS o diálogo de confirmação explícita do
+     * ProjectManagerActivity ("Apagar projeto X? Não pode ser desfeito") —
+     * este método NÃO pergunta nada.
+     *
+     * Devolve true se a pasta foi apagada (a entrada sai da lista mesmo se
+     * a pasta já não existir — sem pasta não há projeto). A permissão
+     * persistente do URI é libertada no ProjectManagerActivity.
+     */
+    public static boolean deleteProject(Context c, Entry e) {
+        // 1) apagar a PASTA (DocumentContract = File API do SAF; o URI de
+        //    árvore vira o URI de documento da raiz — o mesmo salto do
+        //    createStructure)
+        boolean folderGone = false;
+        try {
+            Uri tree = Uri.parse(e.uri);
+            Uri root = DocumentsContract.buildDocumentUriUsingTree(tree,
+                    DocumentsContract.getTreeDocumentId(tree));
+            folderGone = DocumentsContract.deleteDocument(
+                    c.getContentResolver(), root);
+        } catch (Exception ex) {
+            // providers podem recusar pastas raiz partilhadas — o log diz
+            // a causa; a entrada da lista é removida à mesma (pasta que a
+            // app não consegue apagar não devia continuar listada como
+            // projeto utilizável)
+            Log.e(TAG, "projetos: apagar a pasta de '" + e.name + "' falhou", ex);
+        }
+        // 2) remover da LISTA (a pasta sumir = o projeto sumiu)
+        List<Entry> ps = load(c);
+        int i = indexOfUri(ps, e.uri);
+        if (i >= 0) {
+            ps.remove(i);
+            save(c, ps);
+        }
+        return folderGone;
+    }
 }
