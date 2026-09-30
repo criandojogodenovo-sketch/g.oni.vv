@@ -78,6 +78,13 @@ bool jniOpenAllFilesSettings();
 // -3 sem ficheiros).
 bool jniExportLogsToDownloads(int* outCount);
 
+// 0.6.7 — "Sair para projetos": pede à activity para se TERMINAR (a
+// ProjectManagerActivity está por baixo na back stack — o gesto volta ao
+// gestor SEM matar a app). Chamado pelo editor após o auto-save; os
+// recursos GL são libertados pelo APP_CMD_TERM_WINDOW que se segue.
+// true = a chamada Java correu (o finish é postado na UI thread do Java).
+bool jniFinishToLauncher();
+
 // F5.4 — hook da SUÍTE (nunca em produção): repõe o guard do registo
 // idempotente dos nativos para um caso de teste re-exercitar o
 // RegisterNatives (a função vive no StorageBridge.cpp).

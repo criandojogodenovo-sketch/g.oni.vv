@@ -27,6 +27,7 @@
 #include "core/Scene.h"
 #include "core/SceneSerializer.h"
 #include "core/Presets.h"
+#include "platform/StorageBridge.h"
 #include "render/Cube.h"
 #include "render/GpuAssets.h"
 #include "render/Mesh.h"
@@ -34,12 +35,20 @@
 #include "ui/FontAtlas.h"
 #include "FakeStorage.h"
 
+// fake JNI (o mesmo papel do test_handshake): a "activity" registra-se no
+// nativo e o teste verifica que a ponte do "Sair para projetos" chega à
+// Java (bridgeFinish).
+#include <jni.h>
+
 using namespace vv;
 using ::test::nearEqF;
 
 namespace {
 const char* kFontPath = FONT_FIXTURE;
 }
+
+extern "C" void Java_vv_goni_VvActivity_nativeRegisterActivity(
+        JNIEnv*, jclass, jobject activity, jstring origin);
 
 // ---- atlas: destroy + re-upload (o coração do fix) --------------------------
 
@@ -264,4 +273,33 @@ TEST(lifecycle_sair_reentrar_cena_preservada_e_meshes_religados) {
         EXPECT(mrs.at(i).mesh == &cubeMesh);
         EXPECT(mrs.at(i).mesh != nullptr && mrs.at(i).mesh->ok());
     }
+}
+
+// ---- "Sair para projetos": a ponte Java (bridgeFinish) -----------------------
+
+TEST(lifecycle_sair_para_projetos_ponte_java_chegada) {
+    g_jni.reset();
+    // a "activity" registra-se (handshake invertido — o papel do Java fake)
+    const jobject kFakeActivity =
+        reinterpret_cast<jobject>(static_cast<intptr_t>(0xA001));
+    const jclass kFakeCls =
+        reinterpret_cast<jclass>(static_cast<intptr_t>(0xA002));
+    Java_vv_goni_VvActivity_nativeRegisterActivity(
+        g_jni.env, kFakeCls, kFakeActivity, g_jni.newString("onCreate"));
+    EXPECT(vv::storage::handshakeOk());
+
+    // "Menu → Sair para projetos" no editor: o main chama a ponte —
+    // tem de chegar à Java como bridgeFinish() (o fake grava a chamada)
+    EXPECT(vv::storage::jniFinishToLauncher());
+    bool chegou = false;
+    for (const auto& c : g_jni.void_calls) {
+        if (c.first == "bridgeFinish") {
+            chegou = true;
+        }
+    }
+    EXPECT(chegou);
+    // (o caminho "sem handshake" recusa com mensagem honesta — o mesmo
+    // guard de jniOpenAllFilesSettings, já coberto pelo padrão do
+    // test_handshake; aqui não há hook para des-registar a ponte)
+    g_jni.reset();
 }

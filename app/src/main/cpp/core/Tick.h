@@ -46,6 +46,16 @@ public:
         return true;
     }
 
+    // 0.6.7 — esvazia TODOS os grupos (reentrada do android_main: a lib
+    // fica carregada no processo e o TickGroups é estático — sem isto, a
+    // 2ª sessão registaria TransformSystem/PhysicsSystem DUAS vezes e a
+    // física daria DOIS passos por frame).
+    void clear() {
+        for (u32 g = 0; g < static_cast<u32>(TickGroup::Count); ++g) {
+            counts_[g] = 0;
+        }
+    }
+
     // Roda todos os grupos em ordem — chamado UMA VEZ por passo fixo.
     void run(Scene& scene, f32 dt) const {
         for (u32 g = 0; g < static_cast<u32>(TickGroup::Count); ++g) {

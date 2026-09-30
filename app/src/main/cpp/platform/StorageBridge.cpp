@@ -54,6 +54,9 @@ jclass g_activityCls = nullptr;
 
 jmethodID g_midOpenAllFiles = nullptr;   // VvActivity.openAllFilesSettings(I)V
 jmethodID g_midExportLogs = nullptr;     // VvActivity.exportLogsToDownloads(String)I
+// 0.6.7 — "Sair para projetos" (diagnóstico, como bridgeDelete: falhar
+// não bloqueia o fluxo principal — o editor mostra um toast honesto)
+jmethodID g_midFinish = nullptr;         // VvActivity.bridgeFinish()V
 
 // F5.4 — mids da ponte SAF (métodos de INSTÂNCIA da VvActivity, chamados
 // do thread da engine com attachedEnv; a Java trata DocumentsContract,
@@ -210,6 +213,18 @@ void cacheActivityMethods(JNIEnv* env) {
         elog::error("jni: VvActivity.exportLogsToDownloads NÃO encontrada");
     } else {
         elog::info("jni: VvActivity.exportLogsToDownloads OK");
+    }
+
+    // 0.6.7 — sair para o gestor (bridgeFinish). NÃO crítico: sem ele o
+    // botão "Sair para projetos" mostra um toast honesto, o resto do
+    // editor funciona.
+    g_midFinish = env->GetMethodID(g_activityCls, "bridgeFinish", "()V");
+    if (!g_midFinish || clearPendingException(env)) {
+        g_midFinish = nullptr;
+        elog::error("jni: VvActivity.bridgeFinish NÃO encontrada — 'Sair p/ "
+                    "projetos' indisponível (o resto do editor intacto)");
+    } else {
+        elog::info("jni: VvActivity.bridgeFinish OK (sair p/ o gestor)");
     }
 
     // F5.4 — ponte SAF do Gestor de Projetos (todas na mesma classe: ou
@@ -464,6 +479,31 @@ bool jniExportLogsToDownloads(int* outCount) {
     }
     if (outCount) {
         *outCount = static_cast<int>(r);
+    }
+    return true;
+}
+
+// 0.6.7 — "Sair para projetos": a activity termina-se (finish() no Java,
+// postado na UI thread) e o processo CONTINUA VIVO — o gestor
+// (ProjectManagerActivity) retoma da back stack. O APP_CMD_TERM_WINDOW
+// que se segue liberta os recursos GL (lifecycle 0.6.7-a); reentrar no
+// editor arranca um NOVO android_main (reset de estado) com um NOVO
+// contexto EGL (re-upload de tudo).
+bool jniFinishToLauncher() {
+    if (!handshakeOk()) {
+        elog::error("jni: bridgeFinish indisponível — ponte Java "
+                   "indisponível (handshake)");
+        return false;
+    }
+    JNIEnv* env = attachedEnv();
+    if (!env || !g_midFinish) {
+        elog::error("jni: bridgeFinish indisponível — env/mid ausentes");
+        return false;
+    }
+    env->CallVoidMethod(g_activity, g_midFinish);
+    if (clearPendingException(env)) {
+        elog::error("jni: bridgeFinish lançou excepção");
+        return false;
     }
     return true;
 }

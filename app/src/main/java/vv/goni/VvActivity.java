@@ -368,4 +368,23 @@ public class VvActivity extends NativeActivity {
             return false;
         }
     }
+
+    /**
+     * 0.6.7 — "Sair para projetos": termina ESTA activity e volta ao Gestor
+     * de Projetos (ProjectManagerActivity está por baixo na back stack —
+     * é o LAUNCHER, lançou o editor com startActivity). O processo NÃO
+     * morre: os recursos GL são libertados pelo APP_CMD_TERM_WINDOW do
+     * nativo (lifecycle 0.6.7) e reentrar no editor arranca um novo
+     * android_main com contexto EGL novo (re-upload de tudo — sem os
+     * "cubinhos"). Chamado POR JNI do thread da engine; o finish() é
+     * postado para a UI thread (higiene de threading Android).
+     */
+    void bridgeFinish() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                finish();
+            }
+        });
+    }
 }

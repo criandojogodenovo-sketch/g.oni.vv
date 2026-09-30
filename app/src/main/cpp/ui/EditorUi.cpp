@@ -484,8 +484,10 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st) {
     const f32 w = kMenuW;
     // F5-E: + Export OBJ; F5.2: + Importar…/Export Downloads (All Files
-    // Access) — o "Pasta (SAF)" foi REMOVIDO com o fluxo SAF
-    constexpr int kItems = 5;
+    // Access) — o "Pasta (SAF)" foi REMOVIDO com o fluxo SAF.
+    // 0.6.7: + "Sair para projetos" (auto-save no main + volta ao gestor
+    // SEM matar a app — VvActivity.finish() pela ponte Java)
+    constexpr int kItems = 6;
     const f32 h = kHeaderH + static_cast<f32>(kItems) * 64.0f + kPad;
     // F4.2: centrado no viewport ÚTIL (dentro do contentRect)
     const f32 ox = ui.safeLeft();
@@ -507,7 +509,8 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 
     int chosen = 0;
     const char* labels[kItems] = {"Save cena", "Load cena", "Export OBJ",
-                                  "Importar…", "Export Downloads"};
+                                  "Importar…", "Export Downloads",
+                                  "Sair para projetos"};
     for (int i = 0; i < kItems; ++i) {
         if (ui.button(static_cast<u64>(30 + i), x + kPad,
                       y + kHeaderH + static_cast<f32>(i) * 64.0f,

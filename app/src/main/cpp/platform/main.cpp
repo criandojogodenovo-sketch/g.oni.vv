@@ -1151,6 +1151,37 @@ void frame() {
         } else if (choice == 5) {
             // F5.2: EXPORT DOWNLOADS — All Files Access → Download/GOneVV/export
             attemptExport();
+        } else if (choice == 6) {
+            // 0.6.7: SAIR PARA PROJETOS — auto-save da cena + volta ao
+            // gestor SEM matar a app. A activity termina-se (finish() pela
+            // ponte Java — o gestor está na back stack); o APP_CMD_TERM_WINDOW
+            // que se segue liberta TODOS os recursos GL (lifecycle 0.6.7-a);
+            // reentrar arranca um novo android_main com contexto novo.
+            if (g_projectReady && g_storage) {
+                const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
+                                g_project.saveManifest(*g_storage);
+                std::vector<std::string> matWritten;
+                std::string matErr;
+                persistSceneAssets(*g_storage, g_scene, matWritten, matErr);
+                for (const std::string& rel : matWritten) {
+                    LOGI("editor: asset materializado ao sair → %s", rel.c_str());
+                }
+                showToast(ok ? "cena salva — a sair…" : "save falhou — a sair…");
+                elog::info("editor: sair p/ projetos — auto-save %s (%u tics, "
+                           "%u asset(s) materializado(s))",
+                           ok ? "OK" : "FALHOU", g_scene.count(),
+                           (unsigned)matWritten.size());
+            } else {
+                elog::warn("editor: sair p/ projetos SEM projeto — nada a "
+                           "auto-salvar");
+            }
+            if (storage::jniFinishToLauncher()) {
+                elog::info("editor: finish() pedido à activity — o gestor "
+                           "retoma (app viva)");
+            } else {
+                showToast("não consegui sair (ponte Java — ver logs)");
+                elog::error("editor: jniFinishToLauncher FALHOU — fica no editor");
+            }
         }
     }
 
@@ -1203,7 +1234,6 @@ void android_main(android_app* app) {
     // F5.1-hotfix: log DUPLO (logcat + ficheiro) desde a 1ª linha.
     // O boot ainda não tem os paths da activity? O elog usa o fallback
     // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu
-    // lá (JNI_OnLoad corre ANTES do android_main).
     elog::info("G.One VV 0.6.5 — F5.4-hotfix (SAF sem duplicação: findFile "
                "+ octet-stream + probe tri-estado; Salvar materializa "
                "assets: meshes/cube.obj)");
@@ -1224,6 +1254,49 @@ void android_main(android_app* app) {
     vv::crash::install(elog::dir());
     elog::info("logs: %s (ativo=%d)", elog::dir()[0] ? elog::dir() : "<só-logcat>",
                elog::active() ? 1 : 0);
+
+    // 0.6.7 — REENTRADA do android_main: a lib goni_vv fica CARREGADA no
+    // processo (o static init NÃO volta a correr) e uma NOVA VvActivity
+    // (reentrar no editor depois de "Sair para projetos") arranca ESTE
+    // android_main PELA 2ª VEZ — os globais estáticos trazem o estado da
+    // sessão anterior. Reset de TODO o estado de editor/cena/play/input:
+    //   • os recursos GL já foram destruídos no TERM_WINDOW (0.6.7-a) —
+    //     nada aqui toca em GL;
+    //   • os storages/projeto são remontados ABAIXO (slot do gestor ou
+    //     fallback app-private) — os unique_ptr substituem os antigos;
+    //   • TickGroups É esvaziado: sem isto, a física seria registada 2× e
+    //     daria DOIS passos por frame;
+    //   • g_windowInits/g_windowTerms NÃO são resetados — são contadores
+    //     do PROCESSO (o INIT_WINDOW da reentrada loga "contexto
+    //     RE-CRIADO", que é a verdade).
+    if (g_windowInits > 0 || g_windowTerms > 0) {
+        elog::info("lifecycle: REENTRADA do android_main (janelas anteriores: "
+                   "%u init(s), %u term(s)) — reset do estado de editor",
+                   g_windowInits, g_windowTerms);
+    }
+    g_systems.clear();
+    g_editor = editor::EditorState{};
+    g_playMode = false;
+    g_playSnap = PlaySnapshot{};
+    g_scene.clear();
+    g_input.resetAll();
+    g_project = Project{};
+    g_projectReady = false;
+    g_prevAssetMenu = 0;
+    g_catalog.meshes.clear();
+    g_catalog.textures.clear();
+    g_importCands.clear();
+    g_logLines.clear();
+    g_logDumps.clear();
+    g_toast[0] = '\0';
+    g_toastT = 0.0f;
+    g_lastUiStats = DrawStats{};
+    g_orbitActive = false;
+    g_gestureInView = false;
+    g_pinchPrev = 0.0f;
+    g_texCache.reset();       // referenciam o storage antigo — libertados
+    g_pipeline.reset();        // ANTES dele (remontados quando houver storage)
+    g_storage.reset();   // o antigo é destruído; remontado abaixo
 
     // F5-A: storage do projeto — F5.4: GESTOR DE PROJETOS. O arranque
     // ESPERE (até 3s) pelo projeto escolhido no ecrã inicial: a VvActivity

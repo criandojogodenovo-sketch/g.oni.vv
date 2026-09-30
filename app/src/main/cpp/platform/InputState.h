@@ -26,6 +26,17 @@ public:
     // limpa as edges do frame (chamar ao fim do frame, após a UI consumir)
     void clearEdges();
 
+    // 0.6.7 — reset TOTAL (slots + edges): reentrada do android_main (a
+    // lib fica carregada no processo; toques da sessão anterior não podem
+    // vingar como "pressed" na sessão nova)
+    void resetAll() {
+        for (u32 i = 0; i < kMaxPointerSlots; ++i) {
+            slots_[i] = PointerSlot{};
+            pressed_[i] = false;
+            released_[i] = false;
+        }
+    }
+
     // consulta
     bool down(u32 slot) const     { return slots_[slot].down; }
     bool pressed(u32 slot) const  { return pressed_[slot]; }
