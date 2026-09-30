@@ -257,3 +257,116 @@ TEST(gizmo_mover_desenho_emite_linhas) {
     EXPECT(quads >= 21u);
     ui.endFrame();
 }
+
+// ==== COMMIT 0.6.9-b: RODAR (3 anéis por eixo; drag angular no plano) ===========
+
+TEST(gizmo_rodar_hit_test_anel_z_no_plano_xy) {
+    Env e;
+    // ponto do anel Z (plano XY) a 45°: (cos45, sin45, 0)*len — a >22px dos
+    // anéis X (plano YZ) e Y (plano XZ) e longe do centro
+    const f32 s = std::sqrt(2.0f) * 0.5f;
+    const Vec3 p{s * e.len, s * e.len, 0.0f};
+    f32 px = 0.0f, py = 0.0f;
+    EXPECT(e.proj(p, px, py));
+    const Axis hit = pickAxis(Mode::Rotate, e.vp, Vec3{}, e.len, kSW, kSH,
+                              px, py);
+    EXPECT(hit == Axis::Z);
+}
+
+TEST(gizmo_rodar_hit_test_anel_x_no_plano_yz) {
+    Env e;
+    // ponto do anel X (plano YZ) a 45°: (0, cos45, sin45)*len
+    const f32 s = std::sqrt(2.0f) * 0.5f;
+    const Vec3 p{0.0f, s * e.len, s * e.len};
+    f32 px = 0.0f, py = 0.0f;
+    EXPECT(e.proj(p, px, py));
+    EXPECT(pickAxis(Mode::Rotate, e.vp, Vec3{}, e.len, kSW, kSH, px, py)
+           == Axis::X);
+}
+
+TEST(gizmo_rodar_drag_aplica_o_delta_angular_no_eixo) {
+    Env e;
+    // âncora em 0 rad; drag até +30° em torno do CENTRO projetado da origem
+    f32 ox = 0.0f, oy = 0.0f;
+    EXPECT(e.proj(Vec3{}, ox, oy));
+    const f32 a0 = std::atan2(0.0f - oy, 100.0f - ox);        // dedo a +X
+    const f32 a1 = a0 + 30.0f * 3.14159265f / 180.0f;        // +30°
+
+    // eixo Z: fwd tem componente Z negativa (câmara olha −Z do mundo a
+    // partir de +Z) → o sinal do delta é corrigido pelo facing
+    const Quat q = dragRotate(Quat::identity(), Vec3{0, 0, 1}, e.basis.fwd,
+                               a0, a1, false);
+    EXPECT(!(q.x == 0.0f && q.y == 0.0f && q.z == 0.0f &&
+             q.w == 1.0f));   // não é identity
+    // propriedade: rodar o eixo X unitário dá exatamente axisAngle(Z,±30°)
+    // — o mesmo cálculo de sinal, feito INDEPENDENTEMENTE aqui
+    const f32 facing = dot(Vec3{0, 0, 1}, e.basis.fwd);
+    const f32 delta = facing < 0.0f ? -(a1 - a0) : (a1 - a0);
+    const Quat esperado = Quat::axisAngle(Vec3{0, 0, 1}, delta);
+    const Vec3 vx = q.rotate(Vec3{1, 0, 0});
+    const Vec3 ve = esperado.rotate(Vec3{1, 0, 0});
+    EXPECT(::test::vecNearF(vx, ve));
+    // e o ângulo EFETIVO é 30° (|seno do meio-ângulo| coerente)
+    EXPECT(std::fabs(std::fabs(q.w) - std::cos(delta * 0.5f)) < 1e-4f);
+}
+
+TEST(gizmo_rodar_drag_snap_15_graus) {
+    Env e;
+    f32 ox = 0.0f, oy = 0.0f;
+    EXPECT(e.proj(Vec3{}, ox, oy));
+    const f32 a0 = 0.0f;
+    // 11.4° → com snap cai em 15°; 40° → 45°
+    const f32 a11 = 11.4f * 3.14159265f / 180.0f;
+    const f32 a40 = 40.0f * 3.14159265f / 180.0f;
+    const Quat q11 = dragRotate(Quat::identity(), Vec3{0, 0, 1},
+                                e.basis.fwd, a0, a11, true);
+    const Quat q40 = dragRotate(Quat::identity(), Vec3{0, 0, 1},
+                                e.basis.fwd, a0, a40, true);
+    const f32 facing = dot(Vec3{0, 0, 1}, e.basis.fwd);
+    const f32 sinal = facing < 0.0f ? -1.0f : 1.0f;
+    EXPECT(std::fabs(std::fabs(q11.w) - std::cos(15.0f * 3.14159265f / 180.0f *
+                                                 0.5f)) < 1e-4f);
+    EXPECT(std::fabs(std::fabs(q40.w) - std::cos(45.0f * 3.14159265f / 180.0f *
+                                                 0.5f)) < 1e-4f);
+    (void)sinal;
+    // SEM snap: o ângulo exato do drag
+    const Quat qe = dragRotate(Quat::identity(), Vec3{0, 0, 1},
+                               e.basis.fwd, a0, a11, false);
+    EXPECT(std::fabs(std::fabs(qe.w) -
+                     std::cos(a11 * 0.5f)) < 1e-4f);
+}
+
+TEST(gizmo_rodar_eixos_independentes) {
+    // rodar em Y e X aplica-se nos eixos certos (propriedade: o quat roda
+    // um vetor ortogonal ao eixo SEM o mover na direção do eixo)
+    Env e;
+    const Quat qy = dragRotate(Quat::identity(), Vec3{0, 1, 0},
+                               e.basis.fwd, 0.0f, 0.5f, false);
+    const Vec3 vy = qy.rotate(Vec3{0, 1, 0});
+    EXPECT(nearEqF(vy.y, 1.0f));   // eixo do giro fica imóvel
+    const Quat qx = dragRotate(Quat::identity(), Vec3{1, 0, 0},
+                               e.basis.fwd, 0.0f, 0.5f, false);
+    const Vec3 vx2 = qx.rotate(Vec3{1, 0, 0});
+    EXPECT(nearEqF(vx2.x, 1.0f));
+}
+
+TEST(gizmo_rodar_desenho_emite_os_3_aneis) {
+    Env e;
+    FontAtlas font;
+    const char* path = FONT_FIXTURE;
+    EXPECT(font.loadFromPaths(&path, 1, 28.0f));
+    UiContext ui;
+    ui.init();
+    ui.setFont(&font);
+    ui.setSafeArea(vv::safe::Insets{});
+    ui.beginFrame(nullptr, nullptr, kSW, kSH);
+    drawGizmo(ui, e.vp, Vec3{}, e.len, Mode::Rotate, Axis::None);
+    const u32 quads = ui.solidsForTest().vertexCount() / 6;
+    // 3 anéis × 48 segmentos = 144 linhas
+    EXPECT(quads >= 144u);
+    // anel destacado: MESMOS segmentos com espessura maior (não menos quads)
+    ui.beginFrame(nullptr, nullptr, kSW, kSH);
+    drawGizmo(ui, e.vp, Vec3{}, e.len, Mode::Rotate, Axis::Y);
+    EXPECT(ui.solidsForTest().vertexCount() / 6 >= 144u);
+    ui.endFrame();
+}
