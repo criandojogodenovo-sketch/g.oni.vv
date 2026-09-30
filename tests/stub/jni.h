@@ -132,6 +132,12 @@ struct JniFake {
     std::function<std::string(const std::string&, const std::string&,
                               const std::string&)> bridge_create;
     std::function<bool(const std::string&)> bridge_delete;
+    // F5.4-hotfix — bridgeFindFile (tri-estado): devolve URI / "" (ausência
+    // confirmada) / null (query falhou) — find_file_null = chamadas restantes
+    // a devolver null (indecidido), para simular falha pontual + recuperação
+    std::function<std::string(const std::string&, const std::string&)> bridge_find_file;
+    int find_file_null = 0;            // nº de chamadas que devolvem null
+    int  find_file_calls = 0;          // aferir a repetição da query
 
     jstring newString(const char* s) {
         void* p = reinterpret_cast<void*>(static_cast<intptr_t>(
@@ -269,6 +275,24 @@ struct JNIEnv {
                 0x60000000L + g_jni.fake_arrays.size()));
             g_jni.fake_arrays[p] = flat;
             return static_cast<jobject>(p);
+        }
+        if (name == "bridgeFindFile") {
+            jstring jd = va_arg(ap, jstring);
+            jstring jn = va_arg(ap, jstring);
+            va_end(ap);
+            ++g_jni.find_file_calls;
+            if (g_jni.find_file_null > 0) {
+                --g_jni.find_file_null;
+                return nullptr;   // null = query FALHOU (indecidido)
+            }
+            if (!g_jni.bridge_find_file) {
+                return nullptr;   // sem callback = falha honesta
+            }
+            // "" VÁLIDO aqui (ausência confirmada) — NÃO é null: o contrato
+            // tri-estado do bridge distingue as duas respostas
+            const std::string r = g_jni.bridge_find_file(g_jni.strOf(jd),
+                                                         g_jni.strOf(jn));
+            return g_jni.newString(r.c_str());
         }
         va_end(ap);
         return nullptr;

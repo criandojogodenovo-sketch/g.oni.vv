@@ -56,8 +56,13 @@ bool manifestFromJson(const Json& root, Project& out) {
 } // namespace
 
 bool Project::createNew(ProjectStorage& st, const std::string& name, Project& out) {
-    if (st.exists(kManifestFile)) {
-        return false;   // nunca destruir um projeto existente
+    // F5.4-hotfix: só criar com AUSÊNCIA CONFIRMADA (probe). Com um bool,
+    // "verificação falhou" e "não existe" eram a mesma resposta — o boot
+    // criava o projeto POR CIMA de ficheiros que estavam lá (o SAF nunca
+    // sobrescreve por nome → "project.goni (2)", "main.goni (1).json"…).
+    // Unknown = existência indecidida → NUNCA criar (falha honesta).
+    if (st.probe(kManifestFile) != Presence::Absent) {
+        return false;   // existe OU indecidível — nunca destruir/duplicar
     }
     if (!st.makeDirs(kDirScenes) || !st.makeDirs(kDirMeshes) || !st.makeDirs(kDirTextures)) {
         return false;

@@ -64,16 +64,23 @@ SafStorage::SafStorage(storage::SafIo* io, std::string treeUri)
     : io_(io), root_(std::move(treeUri)) {}
 
 const char* SafStorage::mimeForName(const std::string& name) {
+    // F5.4-hotfix (CAUSA RAIZ da duplicação "main.goni (1).json"): os
+    // providers reais passam o displayName por FileUtils.buildUniqueFile(mime,
+    // nome) no createDocument — com um mime cuja extensão canónica diverge da
+    // do ficheiro, o provider REESCREVE o nome ("x.goni" + application/json →
+    // "x.goni.json"). O nome no disco passava a divergir do nome procurado →
+    // a verificação de existência falhava em TODO boot → createDocument de
+    // novo → sufixo anticolisão " (1)", " (2)"… a crescer para sempre.
+    // REGRA: application/octet-stream é o caminho "nome verbatim" (o
+    // buildUniqueFile preserva-o SEM acrescentar extensão); application/json
+    // só para .json (extensão == canónica do mime — nada muda).
     const size_t dot = name.rfind('.');
     std::string ext = dot == std::string::npos ? "" : name.substr(dot + 1);
     for (char& c : ext) {
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
-    if (ext == "goni" || ext == "json") return "application/json";
-    if (ext == "obj" || ext == "gltf")  return "text/plain";
-    if (ext == "glb")                   return "model/gltf-binary";
-    if (ext == "png")                   return "image/png";
-    return "application/octet-stream";
+    if (ext == "json") return "application/json";
+    return "application/octet-stream";   // .goni/.obj/.gltf/.glb/.png/…
 }
 
 bool SafStorage::resolveDir(const std::string& relDir, bool createMissing,
@@ -173,12 +180,22 @@ bool SafStorage::makeDirs(const std::string& relDir) {
 }
 
 bool SafStorage::exists(const std::string& relPath) const {
+    return probe(relPath) == Presence::Present;
+}
+
+// F5.4-hotfix — sonda TRI-ESTADO com recursão honesta:
+//   cache quente → Present; pai não-Present → herda (Absent confirmado pela
+//   MESMA recursão, Unknown herdado); resolveChild ERRO → Unknown;
+//   resolveChild ok + achou → Present; ok + não achou → Absent CONFIRMADO.
+// É esta distinção que impede o createNew de correr por cima de um
+// provider em falha (o bug do boot que duplicava).
+Presence SafStorage::probe(const std::string& relPath) const {
     if (!io_ || !validRelPath(relPath)) {
-        return false;
+        return Presence::Unknown;
     }
     // cache quente (resolve de dirs já conhecidos não toca no provider)
     if (dirUris_.count(relPath) || fileUris_.count(relPath)) {
-        return true;
+        return Presence::Present;
     }
     const size_t slash = relPath.rfind('/');
     const std::string parentRel =
@@ -186,14 +203,23 @@ bool SafStorage::exists(const std::string& relPath) const {
     const std::string leaf =
         slash == std::string::npos ? relPath : relPath.substr(slash + 1);
     std::string err, parentUri, uri;
+    if (!parentRel.empty()) {
+        const Presence pp = probe(parentRel);
+        if (pp != Presence::Present) {
+            // pai ausente CONFIRMADO → filho também ausente (mesma recursão;
+            // pai Unknown → filho indecidido)
+            return pp == Presence::Absent ? Presence::Absent
+                                          : Presence::Unknown;
+        }
+    }
     if (!resolveDir(parentRel, false, parentUri, err)) {
-        return false;   // pai ausente → não existe (sem log — pergunta válida)
+        return Presence::Unknown;   // provider falhou — NÃO decidir
     }
     bool found = false;
     if (!io_->resolveChild(parentUri, leaf.c_str(), found, uri, err)) {
-        return false;
+        return Presence::Unknown;   // query falhou — NÃO decidir
     }
-    return found;
+    return found ? Presence::Present : Presence::Absent;
 }
 
 bool SafStorage::writeText(const std::string& relPath, const std::string& text) {
@@ -210,9 +236,11 @@ bool SafStorage::writeBytes(const std::string& relPath, const void* data,
         elog::error("saf: write %s — %s", relPath.c_str(), err.c_str());
         return false;
     }
+    // "wt" = WRITE + TRUNCATE explícito (o doc já existia — resolvido em
+    // cima; reabrir e truncar é o que SOBRESCREVE sem criar "nome (1)")
     int fd = -1;
-    if (!io_->openFd(uri, "w", &fd, err)) {
-        elog::error("saf: open(w) %s — %s", relPath.c_str(), err.c_str());
+    if (!io_->openFd(uri, "wt", &fd, err)) {
+        elog::error("saf: open(wt) %s — %s", relPath.c_str(), err.c_str());
         return false;
     }
     FdGuard g{fd};
@@ -221,6 +249,10 @@ bool SafStorage::writeBytes(const std::string& relPath, const void* data,
                     relPath.c_str(), errno, errnoText().c_str());
         return false;
     }
+    // F5.4-hotfix: linha clara por escrita bem-sucedida — o "Ver logs" do
+    // device mostra exatamente o que foi gravado e com que tamanho (o dono
+    // confirma assets no sítio sem abrir o gestor de ficheiros)
+    elog::info("saf: write %s — %zu bytes", relPath.c_str(), n);
     return true;   // FdGuard fecha → o provider persiste
 }
 

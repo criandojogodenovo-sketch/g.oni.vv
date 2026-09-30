@@ -1,4 +1,4 @@
-# G.One VV 0.6.4 — F5.4 (Gestor de Projetos SAF multi-pasta + fix do handshake: loadLibrary no Java)
+# G.One VV 0.6.5 — F5.4-hotfix (SAF sem duplicação de ficheiros + Salvar materializa assets nas subpastas)
 
 Engine com editor, projeto `.goni` e maturação de assets (compressão ETC2/ASTC
 com cache, extração de texturas glTF/GLB, import OBJ/glTF/GLB/PNG, export
@@ -330,6 +330,7 @@ Sem física (BodyComp é F4), sem luzes, sem assets, sem animação, sem linguag
 (CLÁUSULA CALMA).
 
 ## Histórico
+- **F5.4-hotfix (0.6.5)**: SAF SEM duplicação ("main.goni (1).json", "project.goni (2)" em TODO boot): (1) causa raiz = mime `application/json` para `.goni` → o provider renomeia no createDocument (FileUtils.buildUniqueFile acrescenta extensão canónica) e o nome no disco divergia do nome procurado → verificação falhava → createDocument de novo; (2) `bridgeFindFile` NOVA — pesquisa EXATA por displayName com query fresca ao provider ANTES de qualquer createDocument (método CRÍTICO do handshake; repetição em falha de query); (3) contrato TRI-ESTADO — "não sei" (provider em falha) NUNCA decide criação: `Presence::probe` em FsStorage/SafStorage + createNew só cria com ausência CONFIRMADA; (4) mime octet-stream para tudo menos .json (nome verbatim); (5) abertura "wt" (truncate) no doc EXISTENTE — nunca create por cima; (6) CURA dos projetos 0.6.4: ficheiros já renomeados ("x.goni.json") reabrem e continuam a ser usados — as cópias " (1)"/" (2)" são lixo a apagar manualmente; Salvar materializa assets em-runtime: cubo procedural → meshes/cube.obj (formato OBJ já definido, idempotente) e todo write loga `saf: write <rel> — N bytes` (visível no Ver logs); fake do SAF agora MODELA rename+colisão do provider — 279 testes.
 - **F5.4 (0.6.4)**: Gestor de Projetos (SAF multi-pasta, takePersistableUriPermission por projeto, SafStorage = ProjectStorage sobre SAF, fallback app-private intacto) + fix do UnsatisfiedLinkError (JNI_OnLoad nunca corria no device — dlopen do NativeActivity não chama; static loadLibrary na VvActivity + registo idempotente pós-handshake + gate jni_parity.py que apanhou um bug latente de assinatura) — 272 testes (docs/HANDSHAKE_AUDIT.md §6).
 - **F5.2 (0.6.2)**: All Files Access (diálogo → settings → File API direta) + remoção do SAF tree picker + log viewer in-app + boot self-check com errno — 254 testes.
 - **F5.3 (0.6.3)**: handshake Java↔native INVERTIDO (VvActivity regista-se no native — onCreate + onResume; causa única das pontes mortas 0.6.0→0.6.2: GetEnv EDETACHED no thread do glue) + attach de threads nomeado + mensagens honestas ("ponte Java indisponível (handshake)") + gate do manifest binário no CI — 264 testes (docs/HANDSHAKE_AUDIT.md).
@@ -421,41 +422,49 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
 
-## Verificação no Realme C33 E RMX3624 (dono) — F5.4
+## Verificação no Realme C33 E RMX3624 (dono) — F5.4-hotfix (0.6.5)
 > A regressão do handshake APARECEU no RMX3624 (Android 13) — a fase só
 > fecha VERIFIED depois de passar nos DOIS devices.
 
-1. Instalar o APK **0.6.4** (instalação nova ou por cima; a lista de
-   projetos começa vazia).
-2. **Ecrã inicial = "Projetos"** (NÃO o editor): lista vazia com a mensagem
-   "Nenhum projeto".
-3. **Criar projeto**: "+ Novo projeto" → nome → o seletor de pastas do
-   sistema abre (SAF) → escolher uma pasta (ex.: Documents/JogoA) → a
-   estrutura entra no editor. No log viewer (Settings → Ver logs):
-   `java: onCreate → nativeRegisterActivity` → `native: activity registada`
-   → `jni: handshake OK — … saf=4/4` → `java: openProject → fila` →
-   `projeto: '<nome>' pronto (SAF)`.
-4. **Volta ao gestor**: voltar (back) desde o editor → a lista mostra o
-   projeto (nome + pasta). **Criar um 2º projeto numa pasta DIFERENTE**
-   (ex.: Documents/JogoB) → ambos aparecem na lista e abrem
+1. Instalar o APK **0.6.5** (por cima da 0.6.4 SEM apagar os dados — os
+   projetos da lista continuam lá).
+2. **ANTI-DUPLICAÇÃO (o bug desta fase)**: abrir um projeto criado pela
+   0.6.4 (ou criar um novo) → adicionar/editar algo → Salvar → fechar a
+   app (swipe) → abrir de novo → Salvar outra vez → repetir 2–3×. NO
+   gestor de ficheiros, a pasta do projeto tem de continuar com EXATAMENTE
+   um `project.goni`, um `scenes/main.goni` — NENHUM ` (1)`/` (2)`. O
+   projecto 0.6.4 que tinha `project.goni.json`/`main.goni.json` continua
+   a abrir (cura) SEM criar ficheiros novos; as cópias ` (1)`/` (2)` antigas
+   são lixo inofensivo — podem ser apagadas à mão.
+3. **Salvar materializa assets**: criar um TIC (preset Cube) → Menu →
+   Salvar → Settings → Ver logs: tem de aparecer
+   `saf: write meshes/cube.obj — N bytes` (e `file: write …` no modo
+   app-private). No gestor de ficheiros: `meshes/cube.obj` existe com
+   conteúdo (OBJ de texto — abre em qualquer editor). Salvar de novo NÃO
+   reescreve (idempotente).
+4. **Ecrã inicial = "Projetos"** (NÃO o editor). **Criar projeto**: "+
+   Novo projeto" → nome → seletor de pastas (SAF) → Documents/JogoA →
+   editor. No log viewer: `java: onCreate → nativeRegisterActivity` →
+   `native: activity registada` → `jni: handshake OK — … saf=5/5` →
+   `java: openProject → fila` → `projeto: '<nome>' pronto (SAF)`.
+5. **2º projeto em pasta DIFERENTE** (Documents/JogoB) → ambos abrem
    independentemente (nada se mistura).
-5. **Persistência**: fechar a app (swipe) → abrir de novo → a lista
-   continua lá; tocar num projeto abre-o com as cenas gravadas.
-6. **Sem All Files Access**: os dois projetos funcionam COMPLETOS (save/
-   load/scene) SEM conceder All Files Access — o SAF dos projetos é
-   independente.
-7. **All Files Access coexiste**: num projeto aberto, Menu → Importar… →
-   diálogo → Permitir → janela do app → import de Download/Documents →
+6. **Persistência**: fechar a app (swipe) → abrir de novo → a lista
+   continua; tocar num projeto abre-o com as cenas gravadas — e ao Salvar
+   NÃO crescem ficheiros na pasta (ponto 2).
+7. **Sem All Files Access**: os projetos funcionam COMPLETOS (save/load/
+   scene) SEM conceder All Files Access.
+8. **All Files Access coexiste**: num projeto aberto, Menu → Importar… →
+   import de Download/Documents para meshes//textures/ (subpasta certa);
    export para Download/GOneVV/export (igual 0.6.3).
-8. **Mensagens honestas**: se algo falhar por ponte, o toast/log diz
+9. **Mensagens honestas**: se algo falhar por ponte, o toast/log diz
    **"ponte Java indisponível (handshake)"** — nunca "sistema sem suporte".
-9. **Sem UnsatisfiedLinkError**: no logcat (adb, se disponível) NÃO existe
-   `UnsatisfiedLinkError` no arranque; no engine.log a linha
-   `jni: JNI_OnLoad — G.One VV 0.6.4 … registado(s)` aparece ANTES do
-   `java: onCreate → nativeRegisterActivity`.
-10. **Regressões**: F5.3 (import/export All Files), F5.2 (log viewer,
-    modo no Settings), F5.1 (status line, cache), F5 (Save/Load), F4.2
-    (Play/scroll).
+10. **Sem UnsatisfiedLinkError**: no engine.log a linha
+    `jni: JNI_OnLoad — G.One VV 0.6.5 … registado(s)` aparece ANTES do
+    `java: onCreate → nativeRegisterActivity`.
+11. **Regressões**: F5.4 (gestor, multi-pasta), F5.3 (import/export All
+    Files), F5.2 (log viewer, modo no Settings), F5.1 (status line,
+    cache), F5 (Save/Load), F4.2 (Play/scroll).
 
 ## Verificação no Realme C33 (dono) — F5.3 (histórico)
 1. Instalar o APK **0.6.3** → confirmar "0.6.3" nas infos.

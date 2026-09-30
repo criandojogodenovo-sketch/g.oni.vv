@@ -296,6 +296,68 @@ public class VvActivity extends NativeActivity {
         }
     }
 
+    /**
+     * F5.4-hotfix (bug "main.goni (1).json / project.goni (2) em TODO boot") —
+     * pesquisa EXATA por displayName na pasta-alvo, com query FRESCA ao
+     * provider (DocumentsContract child query, uma passagem). NÃO é o
+     * bridgeList/listDir da primeira tentativa: é a verificação dedicada que
+     * o native exige ANTES de qualquer createDocument.
+     *
+     * Contrato (tri-estado — o native distingue os três):
+     *   URI não-vazio → documento EXISTE (reabrir este URI, escrever "wt");
+     *   "" (vazia)    → a query correu e NÃO achou — ausência CONFIRMADA
+     *                   (só aqui o native pode chamar bridgeCreate);
+     *   null          → a query FALHOU (exceção/recusa) — existência
+     *                   INDECIDIDA; o native NUNCA cria por cima de "não sei".
+     *
+     * Compat (cura dos projetos criados pela 0.6.4): alguns providers
+     * renomeiam o displayName no createDocument (extensão canónica do mime
+     * divergente — "x.goni" + application/json → "x.goni.json"). Se o nome
+     * exato não existir, aceita-se o mesmo nome com ".json" acrescentado —
+     * o projeto 0.6.4 abre sem criar novos duplicados. As cópias
+     * "nome (1)", "nome (2)"… NUNCA são escolhidas (ambíguas — lixo a
+     * apagar manualmente pelo utilizador, sem risco de escolha errada).
+     */
+    String bridgeFindFile(String dirDocUri, String name) {
+        try {
+            Uri dir = Uri.parse(dirDocUri);
+            Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(
+                    dir, DocumentsContract.getDocumentId(dir));
+            Cursor c = getContentResolver().query(children,
+                    new String[]{
+                            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                            DocumentsContract.Document.COLUMN_DISPLAY_NAME},
+                    null, null, null);
+            if (c == null) {
+                return null;   // query recusada → indecidido
+            }
+            String exact = null;
+            String compat = null;
+            final String compatName = name + ".json";
+            while (c.moveToNext()) {
+                String n = c.getString(1);
+                if (n == null) {
+                    continue;
+                }
+                if (n.equals(name)) {
+                    exact = DocumentsContract.buildDocumentUriUsingTree(
+                            dir, c.getString(0)).toString();
+                    break;   // exato ganha sempre — pode sair cedo
+                }
+                if (compat == null && n.equals(compatName)) {
+                    compat = DocumentsContract.buildDocumentUriUsingTree(
+                            dir, c.getString(0)).toString();
+                }
+            }
+            c.close();
+            String out = (exact != null) ? exact : compat;
+            return (out != null) ? out : "";   // "" = ausência confirmada
+        } catch (Exception e) {
+            Log.e("GONI", "bridgeFindFile FALHOU (" + dirDocUri + ", " + name + ")", e);
+            return null;   // exceção → indecidido
+        }
+    }
+
     /** apaga documento; false = recusado/ausente */
     boolean bridgeDelete(String docUri) {
         try {

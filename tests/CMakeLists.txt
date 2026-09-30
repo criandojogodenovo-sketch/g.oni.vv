@@ -14,6 +14,7 @@ add_executable(test_core
         test_storageperm.cpp
         test_handshake.cpp
         test_saf_project.cpp
+        test_assetpersist.cpp
         test_ui.cpp
         test_project.cpp
         test_import_obj.cpp
@@ -48,6 +49,8 @@ add_executable(test_core
         ${CORE_DIR}/core/SceneSerializer.cpp
         ${CORE_DIR}/core/Project.cpp
         ${CORE_DIR}/core/ProjectStorage.cpp
+        # F5.4-hotfix: Salvar materializa assets em-runtime (cubo → meshes/)
+        ${CORE_DIR}/core/AssetPersist.cpp
         ${CORE_DIR}/core/FsStorage.cpp
         # F5.4: SafStorage — ProjectStorage sobre a pasta SAF escolhida no
         # Gestor (testado contra o FakeSafIo deste TU)

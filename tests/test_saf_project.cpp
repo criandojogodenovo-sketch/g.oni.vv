@@ -31,6 +31,8 @@ extern "C" int memfd_create(const char* name, unsigned int flags);
 #include "platform/StorageBridge.h"
 #include "core/Project.h"
 #include "core/SafStorage.h"
+#include "core/Scene.h"
+#include "components/MeshRenderer.h"
 #include "platform/ProjectSlot.h"
 #include "platform/SafIo.h"
 
@@ -58,6 +60,9 @@ struct FakeSafIo final : public storage::SafIo {
     std::map<std::string, Node> docs;
     int nextId = 1;
     std::map<int, std::string> openWrites;   // fd → docUri (mode "w")
+    // F5.4-hotfix: injeção de falha — list/resolveChild falham (provider
+    // recusou a query). O SafStorage tem de responder Unknown/nunca criar.
+    bool failQueries = false;
 
     FakeSafIo() {
         Node root;
@@ -92,6 +97,10 @@ struct FakeSafIo final : public storage::SafIo {
     bool list(const std::string& dirDocUri, std::vector<storage::SafEntry>& out,
               std::string& err) override {
         const auto it = docs.find(dirDocUri);
+        if (failQueries) {
+            err = "provider recusou a query (injetado)";
+            return false;
+        }
         if (it == docs.end() || !it->second.isDir) {
             err = "não é pasta: " + dirDocUri;
             return false;
@@ -110,6 +119,14 @@ struct FakeSafIo final : public storage::SafIo {
         return true;
     }
 
+    // F5.4-hotfix — modela o DocumentsContract.createDocument REAL
+    // (FileUtils.buildUniqueFile):
+    //   • application/octet-stream → nome verbatim (sem extensão nova);
+    //   • application/json com extensão desconhecida do mime → o provider
+    //     ACRESCENTA ".json" ("main.goni" → "main.goni.json") — é exatamente
+    //     o rename que duplicava no device;
+    //   • colisão de nome → base + " (n)" + extensão ("main.goni (1).json").
+    // A suíte antiga só modelava a colisão — o rename passava invisível.
     bool create(const std::string& parentDocUri, const char* mime,
                 const char* displayName, std::string& outDocUri,
                 std::string& err) override {
@@ -118,19 +135,56 @@ struct FakeSafIo final : public storage::SafIo {
             err = "pai não é pasta: " + parentDocUri;
             return false;
         }
-        // semântica do provider: duplicado NÃO falha — cria "nome (1)"
-        std::string finalName = displayName;
-        while (!childNamed(parentDocUri, finalName).empty()) {
-            finalName += " (1)";
+        const std::string m = mime ? mime : "";
+        std::string base = displayName;
+        std::string ext;
+        if (m == "application/json") {
+            // ext "json" é a canónica do mime → mantém; ext desconhecida
+            // ("goni") → o provider trata como parte do base + acrescenta
+            const size_t dot = base.rfind('.');
+            const std::string leafExt =
+                dot == std::string::npos ? "" : base.substr(dot + 1);
+            if (leafExt != "json") {
+                ext = "json";   // rename do provider (device real)
+            }
+        }
+        std::string finalName = ext.empty() ? base : base + "." + ext;
+        for (int n = 1; !childNamed(parentDocUri, finalName).empty(); ++n) {
+            finalName = base + " (" + std::to_string(n) + ")" +
+                        (ext.empty() ? "" : "." + ext);
         }
         const std::string id = newId();
         Node n;
         n.name = finalName;
-        n.mime = mime;
-        n.isDir = (std::string(mime) == storage::kSafDirMime);
+        n.mime = m;
+        n.isDir = (m == storage::kSafDirMime);
         docs[id] = n;
         it->second.kids.push_back(id);
         outDocUri = id;
+        return true;
+    }
+
+    // mesmo CONTRATO do bridgeFindFile no device: exato primeiro; compat
+    // "name + .json" (cura dos ficheiros renomeados pela 0.6.4); erro →
+    // false (nunca "não existe" por falha alheia)
+    bool resolveChild(const std::string& dirDocUri, const char* name,
+                      bool& found, std::string& outUri,
+                      std::string& err) override {
+        found = false;
+        outUri.clear();
+        if (failQueries) {
+            err = "provider recusou a query (injetado)";
+            return false;
+        }
+        std::string hit = childNamed(dirDocUri, name);
+        if (hit.empty()) {
+            hit = childNamed(dirDocUri, std::string(name) + ".json");
+        }
+        if (hit.empty()) {
+            return true;   // ausência CONFIRMADA (found=false, sem erro)
+        }
+        found = true;
+        outUri = hit;
         return true;
     }
 
@@ -168,8 +222,9 @@ struct FakeSafIo final : public storage::SafIo {
             *outFd = fd;
             return true;
         }
-        // "w": o modelo guarda um DUP do memfd aberto — o fd devolvido ao
-        // SafStorage é fechado por ele (no device é o COMMIT no provider);
+        // "w"/"wt" (F5.4-hotfix: o SafStorage abre "wt" — WRITE+TRUNCATE
+        // explícito): o modelo guarda um DUP do memfd aberto — o fd devolvido
+        // ao SafStorage é fechado por ele (no device é o COMMIT no provider);
         // o original sobrevive para o flushWrites() ler o que foi escrito.
         // Sem o dup, o kernel reutilizava o nº do fd fechado e a 2ª escrita
         // sobrepunha a 1ª no mapa (fd=3 para sempre).
@@ -356,6 +411,174 @@ TEST(saf_storage_missing_and_invalid_paths) {
 }
 
 // ---------------------------------------------------------------------------
+// F5.4-hotfix — ANTI-DUPLICAÇÃO. O bug do device ("main.goni (1).json",
+// "project.goni (2)" em TODO boot): o provider renomeava o displayName no
+// createDocument (mime json + ext desconhecida) e o nome no disco divergia
+// do nome procurado → verificação falhava → createDocument de novo. O fake
+// agora MODELA o rename + a colisão; estes testes falhariam com o código
+// da 0.6.4.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// contagem de documentos por nome + detetor de sufixo anticolisão
+int countNamed(const FakeSafIo& io, const std::string& name) {
+    int n = 0;
+    for (const auto& kv : io.docs) {
+        if (kv.second.name == name) {
+            ++n;
+        }
+    }
+    return n;
+}
+int countCollisions(const FakeSafIo& io) {
+    int n = 0;
+    for (const auto& kv : io.docs) {
+        if (kv.second.name.find(" (1)") != std::string::npos ||
+            kv.second.name.find(" (2)") != std::string::npos) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+} // namespace
+
+// O TESTE pedido pelo dono: criar projeto → FECHAR → reabrir → editar →
+// guardar de novo — NENHUM sufixo (1)/(2) pode aparecer.
+TEST(saf_no_duplication_across_reopen) {
+    FakeSafIo io;
+    {
+        // "boot 1" — criar
+        SafStorage st(&io, "content://tree/x");
+        Project p;
+        EXPECT(Project::openOrCreate(st, "meu jogo", p));
+        EXPECT(io.flushWrites() >= 2);
+    }
+    {
+        // "boot 2" — reabrir (storage NOVO = caches limpas, como no reboot),
+        // editar e guardar de novo
+        SafStorage st(&io, "content://tree/x");
+        Project p;
+        EXPECT(Project::openOrCreate(st, "meu jogo", p));   // ABRE (não cria)
+        EXPECT(p.name == "meu jogo");
+        EXPECT(p.scenes.size() == 1);
+        Scene edit;
+        const Handle h = edit.create("caixa");
+        EXPECT(h.valid());
+        MeshRenderer* mr = edit.get(h)->addComponent<MeshRenderer>();
+        mr->meshPath = "";   // procedural
+        EXPECT(p.saveActiveScene(st, edit));
+        EXPECT(p.saveManifest(st));
+        EXPECT(io.flushWrites() >= 2);
+    }
+    {
+        // "boot 3" — reabrir outra vez e regravar o manifesto
+        SafStorage st(&io, "content://tree/x");
+        Project p;
+        EXPECT(Project::open(st, p));
+        EXPECT(p.saveManifest(st));
+        EXPECT(io.flushWrites() >= 1);
+    }
+    // EXATAMENTE um manifesto e uma cena — zero duplicados, zero renames
+    EXPECT(countNamed(io, "project.goni") == 1);
+    EXPECT(countNamed(io, "main.goni") == 1);
+    EXPECT(countCollisions(io) == 0);
+    for (const auto& kv : io.docs) {
+        // o provider NUNCA recebeu json-mime para .goni → sem ".goni.json"
+        EXPECT(kv.second.name.find(".goni.json") == std::string::npos);
+    }
+    // e o projeto continua a abrir com o conteúdo intacto
+    SafStorage st(&io, "content://tree/x");
+    Project p;
+    EXPECT(Project::open(st, p));
+    EXPECT(p.name == "meu jogo");
+    Scene cena;
+    SceneSerializer::LoadCtx ctx;
+    EXPECT(p.loadActiveScene(st, cena, ctx));
+    EXPECT(cena.find("caixa").valid());
+}
+
+// CURA dos projetos criados pela 0.6.4 (ficheiros já renomeados pelo
+// provider): reabre os ".goni.json" e reutiliza-os — nunca cria por cima.
+TEST(saf_heal_provider_renamed_files) {
+    FakeSafIo io;
+    {
+        // legado 0.6.4: o provider guardou com ".json" acrescentado
+        SafStorage st(&io, "content://tree/x");
+        Project p;
+        EXPECT(Project::openOrCreate(st, "legado", p));
+        EXPECT(io.flushWrites() >= 2);
+        // simula o rename do provider 0.6.4 nos documentos já gravados
+        // (o fake da 0.6.4 gravava verbatim; o device guardava "x.goni.json")
+    }
+    // força os nomes que o provider real produziu na 0.6.4
+    for (auto& kv : io.docs) {
+        if (kv.second.name == "project.goni") {
+            kv.second.name = "project.goni.json";
+        } else if (kv.second.name == "main.goni") {
+            kv.second.name = "main.goni.json";
+        }
+    }
+    {
+        // reabrir: o resolveChild (contrato bridgeFindFile) cura via
+        // compat "nome + .json" — abre o legado SEM criar novos ficheiros
+        SafStorage st(&io, "content://tree/x");
+        Project p;
+        EXPECT(Project::openOrCreate(st, "legado", p));
+        EXPECT(p.name == "legado");
+        EXPECT(p.scenes.size() == 1);
+        EXPECT(p.saveManifest(st));
+        EXPECT(io.flushWrites() >= 1);
+    }
+    // o manifesto continua ÚNICO (agora com o nome legado) — nada cresceu
+    EXPECT(countNamed(io, "project.goni.json") == 1);
+    EXPECT(countNamed(io, "main.goni.json") == 1);
+    EXPECT(countNamed(io, "project.goni") == 0);
+    EXPECT(countCollisions(io) == 0);
+}
+
+// probe TRI-ESTADO + recusa de criação com provider em falha (regra do
+// dono: createDocument SÓ depois de ausência CONFIRMADA — "não sei" nunca cria)
+TEST(saf_probe_tri_state_and_create_refusal) {
+    FakeSafIo io;
+    SafStorage st(&io, "content://tree/x");
+
+    // Absent CONFIRMADO (pai existe, nome não está lá)
+    EXPECT(st.makeDirs("scenes"));
+    EXPECT(st.probe("scenes/nope.goni") == Presence::Absent);
+    // Present
+    EXPECT(st.writeText("scenes/nope.goni", "{}"));
+    EXPECT(io.flushWrites() >= 1);
+    EXPECT(st.probe("scenes/nope.goni") == Presence::Present);
+    EXPECT(st.exists("scenes/nope.goni"));
+    // Absent herdado (pai confirmado ausente)
+    EXPECT(st.probe("nao-existe/f.x") == Presence::Absent);
+    // pai inválido/absoluto → Unknown (indecidido, honesto)
+    EXPECT(st.probe("/absoluto") == Presence::Unknown);
+
+    // provider em falha → Unknown E a escrita falha SEM criar nada
+    io.failQueries = true;
+    EXPECT(st.probe("scenes/outro.goni") == Presence::Unknown);
+    EXPECT(st.probe("project.goni") == Presence::Unknown);
+    EXPECT(!st.writeText("scenes/outro.goni", "{}"));   // recusa (não decide)
+    EXPECT(!st.exists("scenes/outro.goni"));
+    io.failQueries = false;
+    std::vector<std::string> files;
+    EXPECT(st.listDir("scenes", files));
+    EXPECT(files.size() == 1);          // só nope.goni — nada foi criado
+    EXPECT(files[0] == "nope.goni");
+
+    // e createNew sobre provider em falha NÃO cria o projeto (nem duplica)
+    FakeSafIo io2;
+    io2.failQueries = true;
+    SafStorage st2(&io2, "content://tree/x");
+    Project p;
+    EXPECT(!Project::openOrCreate(st2, "x", p));   // probe Unknown → recusa
+    EXPECT(io2.docs.size() == 1);                  // só a raiz — nada criado
+}
+
+// ---------------------------------------------------------------------------
 // Ponte JNI do SAF (JniSafIo) — fumo no hospedeiro com o fake JNI.
 // Determinístico quanto à ordem dos casos: o handshake começa em BAIXO
 // (registo com método crítico ausente) para aferir a mensagem honesta e
@@ -448,4 +671,65 @@ TEST(saf_jni_bridge_smoke_and_honest_errors) {
     err.clear();
     EXPECT(!vv::storage::jniSafIo()->remove("fake://outro", err));
     EXPECT(err.find("false") != std::string::npos);
+}
+
+// F5.4-hotfix — bridgeFindFile (verificação DEDICADA de existência) pela
+// JniSafIo: contrato TRI-ESTADO (URI / "" confirmado / null indecidido) +
+// repetição da query em falha. É esta verificação que o native exige antes
+// de QUALQUER bridgeCreate (a regra do dono contra os " (1)").
+TEST(saf_jni_find_file_tri_state_and_retry) {
+    g_jni.reset();
+    fakeRegisters("onCreate");
+    EXPECT(vv::storage::handshakeOk());   // bridgeFindFile é CRÍTICA — presente
+
+    bool found = false;
+    std::string uri, err;
+
+    // 1) exato → found + uri
+    g_jni.bridge_find_file = [](const std::string&, const std::string& n) {
+        return n == "project.goni" ? std::string("content://doc/pj") : std::string("");
+    };
+    EXPECT(vv::storage::jniSafIo()->resolveChild("content://doc/raiz",
+                                                 "project.goni", found, uri, err));
+    EXPECT(found && uri == "content://doc/pj");
+    EXPECT(err.empty());
+
+    // 2) "" → ausência CONFIRMADA (found=false SEM erro — só aqui se cria)
+    EXPECT(vv::storage::jniSafIo()->resolveChild("content://doc/raiz",
+                                                 "main.goni", found, uri, err));
+    EXPECT(!found && uri.empty());
+    EXPECT(err.empty());   // NÃO é erro — é ausência confirmada
+
+    // 3) null SEMPRE (query falhou) → erro; a query repetiu UMA vez antes
+    //    de desistir (não confiar num único insucesso p/ decidir criação)
+    g_jni.find_file_calls = 0;
+    g_jni.find_file_null = 99;          // todas as chamadas falham
+    EXPECT(!vv::storage::jniSafIo()->resolveChild("content://doc/raiz",
+                                                  "x.goni", found, uri, err));
+    EXPECT(!found);
+    EXPECT(err.find("null") != std::string::npos);
+    EXPECT(g_jni.find_file_calls == 2);   // 1ª tentativa + repetição fresca
+
+    // 4) null na 1ª chamada, query fresca ACHA na 2ª → recupera (found)
+    g_jni.find_file_calls = 0;
+    g_jni.find_file_null = 1;           // só a 1ª falha
+    g_jni.bridge_find_file = [](const std::string&, const std::string& n) {
+        return n == "flaky.goni" ? std::string("content://doc/f")
+                                 : std::string("");
+    };
+    EXPECT(vv::storage::jniSafIo()->resolveChild("content://doc/raiz",
+                                                 "flaky.goni", found, uri, err));
+    EXPECT(found && uri == "content://doc/f");
+    EXPECT(g_jni.find_file_calls == 2);
+
+    // 5) bridgeFindFile AUSENTE no dex → registo PARCIAL: handshake fica em
+    //    BAIXO (é CRÍTICA — sem ela o createDocument duplicaria) e toda a
+    //    ponte responde a causa honesta
+    g_jni.reset();
+    g_jni.fail_methods["bridgeFindFile"] = true;
+    fakeRegisters("onCreate");
+    EXPECT(!vv::storage::handshakeOk());
+    EXPECT(!vv::storage::jniSafIo()->resolveChild("content://doc/raiz",
+                                                  "y.goni", found, uri, err));
+    EXPECT(err == "ponte Java indisponível (handshake)");
 }

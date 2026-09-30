@@ -2,6 +2,7 @@
 //
 // POSIX puro (dirent/stat/fopen): compila no NDK E no CI Linux sem Android.
 #include "core/FsStorage.h"
+#include "platform/EngineLog.h"
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
@@ -53,6 +54,17 @@ bool realExists(const std::string& realPath) {
     return ::stat(realPath.c_str(), &st) == 0;
 }
 
+// F5.4-hotfix — sonda tri-estado real (mesma semântica do SafStorage::probe):
+// ENOENT é AUSÊNCIA CONFIRMADA; qualquer outro errno é INDECIDIDO (nunca
+// minta "não existe" — criar por cima de um "não sei" duplica ficheiros).
+Presence realProbe(const std::string& realPath) {
+    struct stat st{};
+    if (::stat(realPath.c_str(), &st) == 0) {
+        return Presence::Present;
+    }
+    return errno == ENOENT ? Presence::Absent : Presence::Unknown;
+}
+
 bool readWholeFile(const std::string& realPath, std::string& out) {
     FILE* f = std::fopen(realPath.c_str(), "rb");
     if (!f) {
@@ -95,6 +107,14 @@ bool FsStorage::exists(const std::string& relPath) const {
     return !real.empty() && realExists(real);
 }
 
+Presence FsStorage::probe(const std::string& relPath) const {
+    const std::string real = joinRelPath(root_, relPath);
+    if (real.empty()) {
+        return Presence::Unknown;   // path inválido — indecidido (honesto)
+    }
+    return realProbe(real);
+}
+
 bool FsStorage::writeText(const std::string& relPath, const std::string& text) {
     const std::string real = joinRelPath(root_, relPath);
     if (real.empty()) {
@@ -105,7 +125,13 @@ bool FsStorage::writeText(const std::string& relPath, const std::string& text) {
     if (slash != std::string::npos && !ensureRealDir(real.substr(0, slash))) {
         return false;
     }
-    return writeWholeFile(real, text.data(), text.size());
+    if (!writeWholeFile(real, text.data(), text.size())) {
+        return false;
+    }
+    // F5.4-hotfix: linha clara por escrita (o "Ver logs" do device mostra o
+    // que foi gravado e com que tamanho — sem abrir gestor de ficheiros)
+    elog::info("file: write %s — %zu bytes", relPath.c_str(), text.size());
+    return true;
 }
 
 bool FsStorage::readText(const std::string& relPath, std::string& out) const {
@@ -122,7 +148,11 @@ bool FsStorage::writeBytes(const std::string& relPath, const void* data, size_t 
     if (slash != std::string::npos && !ensureRealDir(real.substr(0, slash))) {
         return false;
     }
-    return writeWholeFile(real, data, n);
+    if (!writeWholeFile(real, data, n)) {
+        return false;
+    }
+    elog::info("file: write %s — %zu bytes", relPath.c_str(), n);
+    return true;
 }
 
 bool FsStorage::readBytes(const std::string& relPath, std::vector<u8>& out) const {

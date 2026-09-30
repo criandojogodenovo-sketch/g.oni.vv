@@ -34,6 +34,9 @@ public:
 
     bool makeDirs(const std::string& relDir) override;
     bool exists(const std::string& relPath) const override;
+    // F5.4-hotfix: tri-estado — resolveChild sobre o pai; exceção/recusa do
+    // provider → Unknown (NUNCA "não existe" por erro alheio)
+    Presence probe(const std::string& relPath) const override;
     bool writeText(const std::string& relPath, const std::string& text) override;
     bool readText(const std::string& relPath, std::string& out) const override;
     bool writeBytes(const std::string& relPath, const void* data, size_t n) override;

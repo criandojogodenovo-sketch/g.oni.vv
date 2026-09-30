@@ -15,6 +15,7 @@
 #include "components/MeshRenderer.h"
 #include "components/TouchControls.h"
 #include "components/Transform3D.h"
+#include "core/AssetPersist.h"
 #include "core/FsStorage.h"
 #include "core/PlaySnapshot.h"
 #include "core/Presets.h"
@@ -983,6 +984,20 @@ void frame() {
         if (choice == 1 && g_projectReady) {
             const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
                             g_project.saveManifest(*g_storage);
+            // F5.4-hotfix: Salvar materializa os assets que só existem em
+            // runtime (cubo procedural → meshes/cube.obj, formato OBJ já
+            // definido). Cada tipo de asset fica na SUBPASTA certa — a
+            // escrita em si loga "saf: write meshes/cube.obj — N bytes"
+            // (visível no "Ver logs"). Falha do asset NÃO desfaz a cena
+            // salva — o erro fica logado com a causa real.
+            std::vector<std::string> matWritten;
+            std::string matErr;
+            if (!persistSceneAssets(*g_storage, g_scene, matWritten, matErr)) {
+                elog::error("editor: salvar assets — %s", matErr.c_str());
+            }
+            for (const std::string& rel : matWritten) {
+                LOGI("editor: asset materializado no Salvar → %s", rel.c_str());
+            }
             char msg[64];
             std::snprintf(msg, sizeof(msg), ok ? "cena salva (%u tics)" : "falha ao salvar",
                           g_scene.count());
@@ -1094,8 +1109,9 @@ void android_main(android_app* app) {
     // O boot ainda não tem os paths da activity? O elog usa o fallback
     // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu
     // lá (JNI_OnLoad corre ANTES do android_main).
-    elog::info("G.One VV 0.6.4 — F5.4 (Gestor de Projetos SAF + fix do "
-               "handshake: loadLibrary no Java)");
+    elog::info("G.One VV 0.6.5 — F5.4-hotfix (SAF sem duplicação: findFile "
+               "+ octet-stream + probe tri-estado; Salvar materializa "
+               "assets: meshes/cube.obj)");
     {
         const char* root0 = app->activity
             ? (app->activity->externalDataPath ? app->activity->externalDataPath

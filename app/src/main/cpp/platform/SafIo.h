@@ -64,8 +64,14 @@ public:
     virtual bool remove(const std::string& docUri, std::string& err) = 0;
 
     // resolve um FILHO por nome — found=true + outUri se existe.
-    // Implementação DEFAULT sobre list() (a Java não precisa de um método
-    // extra; o JniSafIo usa list e filtra aqui).
+    // CONTRATO TRI-ESTADO (F5.4-hotfix — a semântica que mata a duplicação):
+    //   true  + found=true  → existe (reabrir outUri; escrever "wt")
+    //   true  + found=false → ausência CONFIRMADA (só aqui se chama create)
+    //   false              → a VERIFICAÇÃO falhou (err com a causa) — o
+    //                        chamador NUNCA decide criação por "não sei"
+    // Implementação DEFAULT sobre list() (o modelo de testes; o JniSafIo no
+    // device usa a query DEDICADA bridgeFindFile — displayName exato, não
+    // confia no list da primeira tentativa).
     virtual bool resolveChild(const std::string& dirDocUri, const char* name,
                               bool& found, std::string& outUri,
                               std::string& err) {

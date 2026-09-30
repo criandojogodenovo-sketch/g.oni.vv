@@ -18,6 +18,20 @@
 
 namespace vv {
 
+// F5.4-hotfix — sonda TRI-ESTADO de existência. O bug "main.goni (1).json /
+// project.goni (2) em TODO boot" existiu porque um bool confundia duas
+// respostas diferentes: "não existe" (CONFIRMADO por verificação ok) e
+// "não sei" (a verificação é que falhou — provider recusou/excepção).
+// Criar por cima de um "não sei" é o que gera duplicados: o SAF nunca
+// sobrescreve por nome — createDocument em cima de nome existente cria
+// "nome (1)". Regra do projeto: só se cria com Absent CONFIRMADO; com
+// Unknown NUNCA se cria nem se sobrescreve (falha honesta).
+enum class Presence : u8 {
+    Unknown,   // a verificação falhou — existência INDECIDIDA
+    Absent,    // verificação correu e o documento NÃO está lá
+    Present,   // verificação correu e o documento ESTÁ lá
+};
+
 class ProjectStorage {
 public:
     virtual ~ProjectStorage() = default;
@@ -29,6 +43,11 @@ public:
     virtual bool makeDirs(const std::string& relDir) = 0;
 
     virtual bool exists(const std::string& relPath) const = 0;
+
+    // Sonda tri-estado (ver ProjectStorage::Presence). Implementações:
+    //  - FsStorage: stat (ENOENT → Absent; outro errno → Unknown);
+    //  - SafStorage: resolveChild sobre o pai (exceção/recusa → Unknown).
+    virtual Presence probe(const std::string& relPath) const = 0;
 
     virtual bool writeText(const std::string& relPath, const std::string& text) = 0;
     virtual bool readText(const std::string& relPath, std::string& out) const = 0;

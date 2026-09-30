@@ -23,6 +23,8 @@ public:
     std::string root() const override { return root_; }
     bool makeDirs(const std::string& relDir) override;
     bool exists(const std::string& relPath) const override;
+    // F5.4-hotfix: tri-estado (ENOENT → Absent; outro errno → Unknown)
+    Presence probe(const std::string& relPath) const override;
     bool writeText(const std::string& relPath, const std::string& text) override;
     bool readText(const std::string& relPath, std::string& out) const override;
     bool writeBytes(const std::string& relPath, const void* data, size_t n) override;

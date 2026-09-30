@@ -23,6 +23,8 @@ add_library(goni_vv SHARED
         core/Json.h
         core/ProjectStorage.h
         core/ProjectStorage.cpp
+        core/AssetPersist.h
+        core/AssetPersist.cpp
         core/FsStorage.h
         core/FsStorage.cpp
         # F5.4: projeto sobre a pasta SAF escolhida no Gestor de Projetos

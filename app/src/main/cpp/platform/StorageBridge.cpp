@@ -63,6 +63,9 @@ jmethodID g_midOpenFd  = nullptr;  // bridgeOpenFd(String,String)I
 jmethodID g_midList    = nullptr;  // bridgeList(String)[Ljava/lang/String;
 jmethodID g_midCreate  = nullptr;  // bridgeCreate(String,String,String)String
 jmethodID g_midDelete  = nullptr;  // bridgeDelete(String)Z
+// F5.4-hotfix — verificação de existência DEDICADA (query exata por
+// displayName; o createDocument só pode correr após ausência CONFIRMADA)
+jmethodID g_midFindFile = nullptr; // bridgeFindFile(String,String)String
 
 // F5.4 — fila do projeto escolhido no Gestor (a activity empurra, o boot
 // espera com timeout)
@@ -226,6 +229,10 @@ void cacheActivityMethods(JNIEnv* env) {
           "(Ljava/lang/String;)[Ljava/lang/String;", true },
         { &g_midCreate, "bridgeCreate",
           "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", true },
+        // F5.4-hotfix — CRÍTICA: sem esta verificação o createDocument
+        // duplica ("nome (1)"); o anti-duplicação depende dela
+        { &g_midFindFile, "bridgeFindFile",
+          "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", true },
         { &g_midDelete, "bridgeDelete",
           "(Ljava/lang/String;)Z", false },
     };
@@ -350,25 +357,27 @@ Java_vv_goni_VvActivity_nativeRegisterActivity(JNIEnv* env, jclass,
 
     // 5) veredito: os métodos CRÍTICOS têm de existir — o fluxo All Files
     //    (openAllFilesSettings) E a ponte SAF do projeto (rootDoc/openFd/
-    //    list/create); exportLogs e bridgeDelete são diagnóstico (falhar
-    //    não bloqueia o fluxo principal)
+    //    list/create/findFile); exportLogs e bridgeDelete são diagnóstico
+    //    (falhar não bloqueia o fluxo principal)
     const bool first = !g_registrationSeen;
     g_registrationSeen = true;
     g_handshake = g_midOpenAllFiles != nullptr &&
                   g_midRootDoc != nullptr &&
                   g_midOpenFd  != nullptr &&
                   g_midList    != nullptr &&
-                  g_midCreate  != nullptr;
+                  g_midCreate  != nullptr &&
+                  g_midFindFile != nullptr;
     if (g_handshake) {
         elog::info(first ? "native: activity registada"
                          : "native: activity re-registada (onResume — reforço)");
         elog::info("jni: handshake OK — vm=%p activity=%p openAllFiles=%d "
-                   "saf=%d/4 exportLogs=%d",
+                   "saf=%d/5 exportLogs=%d",
                    reinterpret_cast<void*>(vm),
                    reinterpret_cast<void*>(g_activity),
                    g_midOpenAllFiles ? 1 : 0,
                    (g_midRootDoc ? 1 : 0) + (g_midOpenFd ? 1 : 0) +
-                   (g_midList ? 1 : 0) + (g_midCreate ? 1 : 0),
+                   (g_midList ? 1 : 0) + (g_midCreate ? 1 : 0) +
+                   (g_midFindFile ? 1 : 0),
                    g_midExportLogs ? 1 : 0);
     } else {
         elog::error("native: registo PARCIAL — método crítico ausente "
@@ -495,8 +504,9 @@ bool pickString(JNIEnv* env, jobject jstr, std::string& out) {
     return !out.empty();
 }
 
-// JniSafIo — SafIo via os métodos bridge da activity. O resolveChild usa
-// o default da interface (list + filtrar por nome).
+// JniSafIo — SafIo via os métodos bridge da activity. O resolveChild usa a
+// verificação DEDICADA bridgeFindFile (query exata por displayName — F5.4-
+// hotfix: o anti-duplicação NÃO confia no list da primeira tentativa).
 class JniSafIo final : public SafIo {
 public:
     bool rootDoc(const std::string& treeUri, std::string& outDocUri,
@@ -625,6 +635,61 @@ public:
         return true;
     }
 
+    // F5.4-hotfix — verificação de existência DEDICADA (bridgeFindFile):
+    //   URI  → found=true (existe — reabrir este URI, escrever "wt")
+    //   ""   → found=false SEM erro (ausência CONFIRMADA — só aqui se cria)
+    //   null → erro (query falhou) — o chamador NUNCA decide por "não sei"
+    // Uma repetição em erro de query (provider ocasionalmente lento) —
+    // nunca confiar num único insucesso para decidir criação.
+    bool resolveChild(const std::string& dirDocUri, const char* name,
+                      bool& found, std::string& outUri,
+                      std::string& err) override {
+        found = false;
+        outUri.clear();
+        if (!name || !name[0]) {
+            err = "resolveChild — nome vazio";
+            return false;
+        }
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            JNIEnv* env = safBegin(err);
+            if (!env || !g_midFindFile) {
+                if (env && !g_midFindFile) {
+                    err = "bridgeFindFile ausente (handshake parcial)";
+                }
+                return false;
+            }
+            jstring jd = env->NewStringUTF(dirDocUri.c_str());
+            jstring jn = env->NewStringUTF(name);
+            jobject r = env->CallObjectMethod(g_activity, g_midFindFile, jd, jn);
+            env->DeleteLocalRef(jd);
+            env->DeleteLocalRef(jn);
+            if (clearPendingException(env)) {
+                err = "bridgeFindFile lançou excepção (pasta ausente? provider recusou?)";
+                continue;   // 1 repetição — query fresca
+            }
+            if (!r) {
+                err = "bridgeFindFile devolveu null (query falhou — indecidido)";
+                continue;   // 1 repetição — query fresca
+            }
+            // ler a string SEM o pickString ("" aqui é RESPOSTA, não erro)
+            const char* c = env->GetStringUTFChars(static_cast<jstring>(r), nullptr);
+            const std::string s = c ? c : "";
+            if (c) {
+                env->ReleaseStringUTFChars(static_cast<jstring>(r), c);
+            }
+            env->DeleteLocalRef(r);
+            if (s.empty()) {
+                err.clear();   // resposta válida — sem erro arrastado da 1ª tentativa
+                return true;   // ausência CONFIRMADA (found=false, sem erro)
+            }
+            found = true;
+            outUri = s;
+            err.clear();
+            return true;
+        }
+        return false;   // as duas tentativas falharam — err já tem a causa
+    }
+
 private:
     // elemento i de um String[] fake/real (higiene de local ref)
     static std::string stringAt(JNIEnv* env, jobject arr, jsize i) {
@@ -673,7 +738,7 @@ SafIo* jniSafIo() {
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
     // log em ficheiro desde ANTES do android_main (fallback do device)
     vv::elog::init(vv::elog::androidFallbackDir());
-    vv::elog::info("jni: JNI_OnLoad — G.One VV 0.6.4 (registo explícito de "
+    vv::elog::info("jni: JNI_OnLoad — G.One VV 0.6.5 (registo explícito de "
                    "nativos; loadLibrary no Java — F5.4)");
 
     JNIEnv* env = nullptr;
