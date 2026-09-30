@@ -46,6 +46,14 @@ jobs:
       - name: Paridade de ligação da lib goni_vv (stubs)
         run: ./scripts/link_parity.sh
 
+      # F5.4: PARIDADE JNI — cada `native` da VvActivity.java tem de estar
+      # na tabela RegisterNatives com a MESMA assinatura (apanhou já na 1ª
+      # execução um 'I' a mais em nativeOnActivityResult) e o static
+      # System.loadLibrary tem de existir (o dlopen do NativeActivity não
+      # corre o JNI_OnLoad — causa raiz do UnsatisfiedLinkError na 0.6.3)
+      - name: Paridade JNI (VvActivity ↔ RegisterNatives)
+        run: python3 scripts/jni_parity.py
+
   build-release:
     name: APK release arm64 (assinado via secrets)
     runs-on: ubuntu-latest

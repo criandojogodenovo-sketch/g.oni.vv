@@ -368,6 +368,7 @@ TEST(handshake_partial_registration_fails) {
 TEST(jni_onload_registers_two_natives) {
     rmrf(kTestLogs);
     g_jni.reset();
+    vv::storage::resetNativesRegistrationForTest();   // F5.4: re-exercitar registo
     g_jni.vm_attached = true;              // loadLibrary corre no thread da UI
 
     const jint rc = JNI_OnLoad(fakeVm(), nullptr);
@@ -375,6 +376,7 @@ TEST(jni_onload_registers_two_natives) {
     EXPECT(rc == JNI_VERSION_1_6);
     EXPECT(g_jni.register_natives_calls == 1);
     EXPECT(g_jni.register_natives_names.size() == 2);
+    EXPECT(g_jni.register_natives_sigs.size() == 2);
     bool hasRegister = false, hasResult = false;
     for (const std::string& n : g_jni.register_natives_names) {
         if (n == "nativeRegisterActivity") hasRegister = true;
@@ -383,10 +385,72 @@ TEST(jni_onload_registers_two_natives) {
     EXPECT(hasRegister);   // handshake invertido registado
     EXPECT(hasResult);     // retorno das definições registado
 
+    // F5.4 — assinaturas EXATAS: uma divergência Java↔tabela é outra forma
+    // de UnsatisfiedLinkError (RegisterNatives casa a string inteira)
+    for (size_t i = 0; i < g_jni.register_natives_names.size(); ++i) {
+        if (g_jni.register_natives_names[i] == "nativeRegisterActivity") {
+            EXPECT(g_jni.register_natives_sigs[i] ==
+                   "(Lvv/goni/VvActivity;Ljava/lang/String;)V");
+        }
+        if (g_jni.register_natives_names[i] == "nativeOnActivityResult") {
+            EXPECT(g_jni.register_natives_sigs[i] ==
+                   "(IILandroid/net/Uri;I)V");   // F5.4: gate apanhou o 'I' a mais da tabela antiga
+        }
+    }
+
     // FindClass da VvActivity a partir do JNI_OnLoad (thread da UI)
     EXPECT(countContaining(g_jni.find_class_calls, "vv/goni/VvActivity") == 1);
 
     // JNI_OnLoad re-inicializou o elog com o fallback do device ("" no
     // hospedeiro) — repor um diretório de teste para os casos seguintes
+    vv::elog::init(kTestLogs);
+}
+
+// ---------------------------------------------------------------------------
+// F5.4 — CAUSA RAIZ RMX3624: JNI_OnLoad TOLERANTE + recuperação no handshake.
+// O NativeActivity carrega a lib com dlopen(RTLD_LOCAL) — o JNI_OnLoad não
+// corria e o RegisterNatives nunca acontecia no device. Com o
+// System.loadLibrary no static init da VvActivity o JNI_OnLoad volta a
+// correr; e SE o FindClass falhar (classloader inesperado), o JNI_OnLoad
+// NÃO devolve JNI_ERR (mataria o load e o arranque) — o registo é
+// recuperado no 1º nativeRegisterActivity via GetObjectClass.
+// ---------------------------------------------------------------------------
+
+TEST(jni_onload_findclass_failure_soft_recovery) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    g_jni.reset();
+    vv::storage::resetNativesRegistrationForTest();
+    g_jni.vm_attached = true;
+    g_jni.vvactivity_class_ok = false;     // FindClass não encontra a classe
+
+    const jint rc = JNI_OnLoad(fakeVm(), nullptr);
+
+    // TOLERANTE: devolve a versão (NUNCA JNI_ERR — isso mataria o
+    // System.loadLibrary e com ele o arranque da app)
+    EXPECT(rc == JNI_VERSION_1_6);
+    EXPECT(g_jni.register_natives_calls == 0);   // não registou (sem classe)
+
+    // RECUPERAÇÃO: o 1º registo da activity re-tenta via GetObjectClass —
+    // o mesmo caminho que o device agora percorre com o static loadLibrary
+    // (o JNI_OnLoad re-iniciou o elog com o fallback do device — repor o
+    // log em ficheiro antes do registo)
+    EXPECT(vv::elog::init(kTestLogs));
+    javaRegisters("onCreate");
+
+    EXPECT(vv::storage::handshakeOk());
+    EXPECT(g_jni.register_natives_calls == 1);   // registo recuperado AQUI
+    EXPECT(g_jni.register_natives_names.size() == 2);
+    bool hasRegister = false, hasResult = false;
+    for (const std::string& n : g_jni.register_natives_names) {
+        if (n == "nativeRegisterActivity") hasRegister = true;
+        if (n == "nativeOnActivityResult") hasResult = true;
+    }
+    EXPECT(hasRegister);
+    EXPECT(hasResult);
+    // a classe veio do GetObjectClass (a FindClass falhada ficou gravada 1×)
+    EXPECT(countContaining(g_jni.find_class_calls, "vv/goni/VvActivity") == 1);
+    const auto lines = logLines();
+    EXPECT(countContaining(lines, "nativo(s) registado(s)") == 1);
     vv::elog::init(kTestLogs);
 }

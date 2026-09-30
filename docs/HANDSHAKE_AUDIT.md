@@ -124,3 +124,70 @@ VvActivity.onResume()   → nativeRegisterActivity(this, "onResume")   ─┤ re
   `java: onCreate → nativeRegisterActivity` →
   `native: activity registada` →
   `storage: All Files Access — handshake=1 supported=1 manager=…`
+
+## 6. F5.4 (0.6.4) — a 3ª camada: JNI_OnLoad NUNCA correu no device
+
+**Evidência (RMX3624, Android 13, 0.6.3, logcat):**
+
+```
+java.lang.UnsatisfiedLinkError: No implementation found for void
+vv.goni.VvActivity.nativeRegisterActivity(vv.goni.VvActivity, java.lang.String)
+(tried Java_vv_goni_VvActivity_nativeRegisterActivity and Ja…)
+    at vv.goni.VvActivity.onCreate(VvActivity.java:63)
+    …
+    at vv.goni.VvActivity.onResume(VvActivity.java:76)
+```
+
+A 0.6.3 corrigiu a DIREÇÃO do handshake (a activity regista-se no native) e
+o ATTACH dos threads — mas o registo dos nativos dependia do `JNI_OnLoad`,
+e o `JNI_OnLoad` nunca chegou a correr no device. Cadeia causal:
+
+1. `android.app.NativeActivity` NÃO faz `System.loadLibrary` — o framework
+   carrega a lib com `dlopen(RTLD_LAZY | RTLD_LOCAL)` DIRETO dentro de
+   `loadNativeCode_native` (`android_app_NativeActivity.cpp`). O meta-data
+   `android.app.lib_name` só diz AO framework QUE lib abrir.
+2. Um `dlopen` cru não invoca `JNI_OnLoad` (isso é feito pelo caminho
+   `Runtime.loadLibrary0 → nativeLoad` do ART, apenas em
+   `System.loadLibrary`).
+3. Logo o `RegisterNatives` do `JNI_OnLoad` nunca correu no device; e a
+   busca por nome (`Java_vv_goni_VvActivity_nativeRegisterActivity`) não
+   encontra a lib: ela não está no mapa de libraries do JVM (só
+   `System.loadLibrary` lá a coloca) nem no escopo global (`RTLD_LOCAL`).
+4. A declaração comentada na VvActivity ("super.onCreate() faz
+   System.loadLibrary → JNI_OnLoad corre os RegisterNatives") era uma
+   premissa FALSA — o hospedeiro testava o C++ diretamente contra o fake
+   JNI e a RESOLUÇÃO (dlopen vs loadLibrary) não era modelada. Auditorias
+   estáticas (manifest, dex, .dynsym) estavam todas certas e provam apenas
+   potencial — não resolução.
+
+**FIX (2 camadas + gate):**
+
+- **1ª camada (primária)**: `static { System.loadLibrary("goni_vv"); }` no
+  static initializer da `VvActivity` — corre na instanciação da classe
+  (ANTES do onCreate), chama o `JNI_OnLoad` de verdade (RegisterNatives) e
+  coloca a lib no mapa de resolução do JVM. O `dlopen` do framework depois
+  reaproveita a MESMA lib (idempotente). Bónus: o `FindClass` do `JNI_OnLoad`
+  passa a correr com o classloader da APP (quem chama o loadLibrary).
+- **2ª camada (defesa)**: `ensureNativesRegistered()` idempotente no
+  StorageBridge — o 1º `nativeRegisterActivity` re-tenta o
+  `RegisterNatives` via `GetObjectClass(activity)` (não depende de
+  FindClass nem de classloader). E o `JNI_OnLoad` ficou TOLERANTE:
+  `FindClass`/`RegisterNatives` a falhar NÃO devolvem `JNI_ERR` (isso
+  mataria o loadLibrary = app morta no arranque) — logam e adiam para a 2ª
+  camada.
+- **Gate (CI, pedido do dono)**: `scripts/jni_parity.py` afere em TODO
+  build que (a) TODO `native` da VvActivity.java está na tabela
+  RegisterNatives com a MESMA assinatura, (b) o static
+  `System.loadLibrary` existe, e (c) no job de release, os símbolos
+  `Java_vv_goni_VvActivity_*` estão exportados no `.dynsym` do .so real.
+  **Na 1ª execução o gate apanhou um bug latente real**: a tabela registava
+  `nativeOnActivityResult` com `(IIILandroid/net/Uri;I)V` (um `I` a mais —
+  a Java declara `(int, int, Uri, int)`), o que teria feito o
+  `RegisterNatives` falhar em runtime logo que o fix do loadLibrary
+  ativasse o `JNI_OnLoad`. Corrigido para `(IILandroid/net/Uri;I)V`.
+
+**Verificação (C33 E RMX3624)**: o logcat deixa de ter
+`UnsatisfiedLinkError`; o engine.log (log viewer in-app) mostra a sequência
+completa `jni: JNI_OnLoad — … registado(s)` → `java: onCreate →
+nativeRegisterActivity` → `native: activity registada` → `jni: handshake
+OK` → `storage: All Files Access — handshake=1 …`.

@@ -118,6 +118,57 @@ bool clearPendingException(JNIEnv* env) {
     return false;
 }
 
+// ---- F5.4: registo IDEMPOTENTE dos nativos (defesa em profundidade) --------
+//
+// CAUSA RAIZ do UnsatisfiedLinkError no RMX3624 (0.6.3): o
+// android.app.NativeActivity carrega a lib com dlopen(RTLD_LOCAL) DIRETO
+// (loadNativeCode_native) — um dlopen cru NÃO corre o JNI_OnLoad nem
+// coloca a lib no mapa de resolução do JVM, logo o RegisterNatives nunca
+// corria no device e a busca por nome não via a lib. O FIX primário é o
+// System.loadLibrary no static init da VvActivity (agora o JNI_OnLoad
+// corre de verdade). ESTA função é a 2ª camada: re-tenta o registo a
+// partir do 1º nativeRegisterActivity via GetObjectClass (funciona mesmo
+// que o FindClass do JNI_OnLoad falhe por qualquer razão de classloader).
+// A tabela é ÚNICA — o scripts/jni_parity.py afere-a contra os natives
+// declarados na VvActivity.java (nome + assinatura) em TODO build.
+const JNINativeMethod kNativeMethods[] = {
+    { const_cast<char*>("nativeRegisterActivity"),
+      const_cast<char*>("(Lvv/goni/VvActivity;Ljava/lang/String;)V"),
+      reinterpret_cast<void*>(&Java_vv_goni_VvActivity_nativeRegisterActivity) },
+    { const_cast<char*>("nativeOnActivityResult"),
+      // F5.4 (gate jni_parity apanhou isto): a Java declara
+      // (int, int, Uri, int) → (IILandroid/net/Uri;I)V — a tabela antiga
+      // tinha UM 'I' a mais (IIIL...), um bug latente que faria o
+      // RegisterNatives falhar em runtime (NoSuchMethodError) logo que o
+      // JNI_OnLoad começasse a correr com o fix do loadLibrary
+      const_cast<char*>("(IILandroid/net/Uri;I)V"),
+      reinterpret_cast<void*>(&Java_vv_goni_VvActivity_nativeOnActivityResult) },
+};
+constexpr int kNativeMethodCount =
+    static_cast<int>(sizeof(kNativeMethods) / sizeof(kNativeMethods[0]));
+
+bool g_nativesRegistered = false;
+
+// regista (1×) a tabela acima na classe dada. cls pode vir de FindClass
+// (JNI_OnLoad) OU de GetObjectClass(activity) (handshake) — o registo é
+// POR CLASSE, não por instância. Falha NÃO é fatal: loga e o próximo
+// registo re-tenta (o idempotente é o estado g_nativesRegistered).
+void ensureNativesRegistered(JNIEnv* env, jclass cls) {
+    if (!env || !cls || g_nativesRegistered) {
+        return;
+    }
+    if (env->RegisterNatives(cls, kNativeMethods, kNativeMethodCount) == JNI_OK) {
+        g_nativesRegistered = true;
+        elog::info("jni: %d nativo(s) registado(s) — nativeRegisterActivity + "
+                   "nativeOnActivityResult (resolução garantida)",
+                   kNativeMethodCount);
+    } else {
+        env->ExceptionClear();
+        elog::error("jni: RegisterNatives FALHOU (assinatura divergente?) — "
+                    "re-tentativa no próximo registo da activity");
+    }
+}
+
 // cache dos MÉTODOS da activity (chamado do registo — thread da UI).
 // AUDITORIA (mantida): cada lookup verifica/clear exceção — um
 // NoSuchMethodError pendente contaminava TODAS as chamadas JNI seguintes.
@@ -142,6 +193,12 @@ void cacheActivityMethods(JNIEnv* env) {
 }
 
 } // namespace
+
+// F5.4 — hook da SUÍTE (nunca chamado em produção): repõe o guard do
+// registo idempotente para um caso de teste re-exercitar o RegisterNatives.
+void resetNativesRegistrationForTest() {
+    g_nativesRegistered = false;
+}
 
 void setHandler(saf::ResultHandler fn, void* user) {
     g_handler = fn;
@@ -232,6 +289,12 @@ Java_vv_goni_VvActivity_nativeRegisterActivity(JNIEnv* env, jclass,
         g_handshake = false;
         return;
     }
+
+    // 3.5) F5.4 — reforço do registo dos nativos via GetObjectClass: se o
+    //      JNI_OnLoad não correu (dlopen do framework) ou o FindClass dele
+    //      falhou, ESTE é o ponto que garante a resolução dos métodos
+    //      nativos (idempotente — ver ensureNativesRegistered)
+    ensureNativesRegistered(env, g_activityCls);
 
     // 4) métodos da activity (higiene de exceções — cacheActivityMethods)
     cacheActivityMethods(env);
@@ -342,48 +405,40 @@ bool jniExportLogsToDownloads(int* outCount) {
 
 // ---- JNI_OnLoad: registo EXPLÍCITO dos métodos nativos ----------------------
 //
-// Mantido da auditoria F5.1-hotfix: se algo falhar, o crash/log acontece NO
-// ARRANQUE com a causa escrita no engine.log (elog usa o fallback android
-// porque o android_main ainda não correu).
+// F5.4 (causa raiz RMX3624): este JNI_OnLoad SÓ corre se a lib for
+// carregada via System.loadLibrary — o que o static init da VvActivity
+// agora faz (o dlopen do framework não chama esta função). Com o
+// loadLibrary a partir da classe da app, o classloader usado pelo
+// FindClass aqui é o da APP — vê as classes da aplicação.
+//
+// TOLERANTE (novo): FindClass/RegisterNatives a falhar NÃO devolve
+// JNI_ERR — isso mataria o System.loadLibrary (excepção no static init
+// da activity = app morta no arranque). A falha fica logada e o registo
+// é re-tentado no 1º nativeRegisterActivity via GetObjectClass (2ª
+// camada — ensureNativesRegistered).
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
     // log em ficheiro desde ANTES do android_main (fallback do device)
     vv::elog::init(vv::elog::androidFallbackDir());
-    vv::elog::info("jni: JNI_OnLoad — G.One VV 0.6.3 (registo explícito de "
-                   "nativos; handshake invertido — F5.3)");
+    vv::elog::info("jni: JNI_OnLoad — G.One VV 0.6.4 (registo explícito de "
+                   "nativos; loadLibrary no Java — F5.4)");
 
     JNIEnv* env = nullptr;
     if (!vm || vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
         vv::elog::error("jni: JNI_OnLoad — GetEnv falhou (VM incompatível?)");
-        return JNI_ERR;
+        return JNI_ERR;   // sem VM compatível a falha é honesta (load morre)
     }
 
-    static const JNINativeMethod kMethods[] = {
-        { const_cast<char*>("nativeRegisterActivity"),
-          const_cast<char*>("(Lvv/goni/VvActivity;Ljava/lang/String;)V"),
-          reinterpret_cast<void*>(&Java_vv_goni_VvActivity_nativeRegisterActivity) },
-        { const_cast<char*>("nativeOnActivityResult"),
-          const_cast<char*>("(IIILandroid/net/Uri;I)V"),
-          reinterpret_cast<void*>(&Java_vv_goni_VvActivity_nativeOnActivityResult) },
-    };
-
-    // JNI_OnLoad corre no thread que chamou System.loadLibrary (UI thread,
-    // dentro de NativeActivity.onCreate) — FindClass VÊ as classes da app.
+    // FindClass no thread que chamou System.loadLibrary (UI, static init
+    // da VvActivity) — classloader da app, vê as classes da aplicação.
     jclass cls = env->FindClass("vv/goni/VvActivity");
     if (!cls) {
         env->ExceptionClear();
-        vv::elog::error("jni: JNI_OnLoad — FindClass(vv/goni/VvActivity) FALHOU "
-                        "(dex ausente? hasCode=false?)");
-        return JNI_ERR;
+        vv::elog::warn("jni: JNI_OnLoad — FindClass(vv/goni/VvActivity) "
+                       "FALHOU (classloader inesperado) — registo adiado p/ "
+                       "o 1º nativeRegisterActivity (GetObjectClass)");
+        return JNI_VERSION_1_6;   // NÃO JNI_ERR — não matar o arranque
     }
-    if (env->RegisterNatives(cls, kMethods, 2) != JNI_OK) {
-        env->ExceptionClear();
-        vv::elog::error("jni: JNI_OnLoad — RegisterNatives FALHOU "
-                        "(nativeRegisterActivity/nativeOnActivityResult — "
-                        "assinatura divergente?)");
-        return JNI_ERR;
-    }
-    vv::elog::info("jni: JNI_OnLoad — nativeRegisterActivity + "
-                   "nativeOnActivityResult registados OK (2 métodos)");
+    vv::storage::ensureNativesRegistered(env, cls);
     return JNI_VERSION_1_6;
 }
 

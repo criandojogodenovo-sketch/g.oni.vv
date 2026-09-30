@@ -61,4 +61,9 @@ bool jniOpenAllFilesSettings();
 // -3 sem ficheiros).
 bool jniExportLogsToDownloads(int* outCount);
 
+// F5.4 — hook da SUÍTE (nunca em produção): repõe o guard do registo
+// idempotente dos nativos para um caso de teste re-exercitar o
+// RegisterNatives (a função vive no StorageBridge.cpp).
+void resetNativesRegistrationForTest();
+
 } // namespace vv::storage

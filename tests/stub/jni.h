@@ -99,9 +99,13 @@ struct JniFake {
     std::map<void*, std::string> mid_names;     // methodID → nome
     int  mid_counter = 0;
 
-    // registo de nativos (RegisterNatives)
+    // registo de nativos (RegisterNatives) — F5.4: também as ASSINATURAS,
+    // para os testes afervelarem a paridade nome+assinatura (a divergência
+    // de assinatura entre a Java e a tabela era uma classe de bug possível
+    // do UnsatisfiedLinkError)
     int register_natives_calls = 0;
     std::vector<std::string> register_natives_names;
+    std::vector<std::string> register_natives_sigs;
 
     // chamadas gravadas
     std::vector<std::pair<std::string, long>> void_calls;   // (método, arg int)
@@ -184,6 +188,7 @@ struct JNIEnv {
         ++g_jni.register_natives_calls;
         for (jint i = 0; i < n; ++i) {
             g_jni.register_natives_names.push_back(m[i].name);
+            g_jni.register_natives_sigs.push_back(m[i].signature);
         }
         return JNI_OK;
     }

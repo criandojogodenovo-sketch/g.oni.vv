@@ -21,10 +21,24 @@ import android.util.Log;
  * única de todas as features Java-dependentes falharem desde a 0.6.0
  * (docs/HANDSHAKE_AUDIT.md). O thread da UI (aqui) está SEMPRE anexado.
  *
- * Sequência garantida: super.onCreate() faz System.loadLibrary
- * (lib_name = goni_vv) → JNI_OnLoad corre os RegisterNatives → SÓ DEPOIS
- * corre o corpo deste onCreate → nativeRegisterActivity resolve sempre.
- * onResume reforça (idempotente — re-caches e substitui o GlobalRef).
+ * Sequência garantida (0.6.4 — causa raiz do UnsatisfiedLinkError no
+ * RMX3624, Android 13): o android.app.NativeActivity NÃO faz
+ * System.loadLibrary — o framework carrega a lib com dlopen(RTLD_LOCAL)
+ * DIRETO (loadNativeCode_native em android_app_NativeActivity.cpp) e um
+ * dlopen cru NUNCA chama o JNI_OnLoad nem coloca a lib no mapa de
+ * resolução do JVM. Consequência na 0.6.3: o RegisterNatives do
+ * JNI_OnLoad nunca correu no device e a busca por nome não via a lib →
+ * "No implementation found" em TODA chamada nativa (o hospedeiro testava
+ * o C++ diretamente — a RESOLUÇÃO não era modelada). FIX: o static
+ * initializer abaixo carrega a lib NO Java — JNI_OnLoad corre (registo)
+ * e a lib entra no mapa do JVM; o dlopen do framework depois reaproveita
+ * a MESMA lib já carregada (idempotente). onResume reforça o registo
+ * (idempotente — re-caches e substitui o GlobalRef).
+ *
+ * Defesa em profundidade (native): se MESMO assim o registo do JNI_OnLoad
+ * falhar por qualquer razão de classloader, o 1º nativeRegisterActivity
+ * re-tenta o RegisterNatives via GetObjectClass (sem FindClass) — ver
+ * ensureNativesRegistered em platform/StorageBridge.cpp.
  *
  * FLUXO All Files Access (o mesmo do Godot e de outros editores):
  *   1. o editor pergunta in-app ("Precisa de acesso a todos os ficheiros…");
@@ -45,6 +59,18 @@ import android.util.Log;
 public class VvActivity extends NativeActivity {
     // DEVE espelhar platform/StoragePerm.h (vv::storage::kReqAllFiles)
     static final int REQ_ALL_FILES = 4301;
+
+    static {
+        // F5.4 — CARREGAMENTO DA LIB NO JAVA (fix do UnsatisfiedLinkError do
+        // RMX3624). O meta-data android.app.lib_name serve APENAS para o
+        // framework decidir QUE lib abrir com dlopen(RTLD_LOCAL) — isso não
+        // corre o JNI_OnLoad nem registra a lib no JVM. O System.loadLibrary
+        // de verdade corre AQUI (inicialização da classe, antes de onCreate):
+        // chama o JNI_OnLoad (RegisterNatives) e coloca a lib no mapa de
+        // resolução — nativeRegisterActivity/nativeOnActivityResult passam a
+        // resolver sempre, no onCreate e no onResume.
+        System.loadLibrary("goni_vv");
+    }
 
     // F5.3 — registo da activity no nativo (handshake invertido). A origem
     // ("onCreate"/"onResume") entra no engine.log para o log viewer do C33
