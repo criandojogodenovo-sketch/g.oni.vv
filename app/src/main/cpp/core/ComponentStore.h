@@ -22,6 +22,7 @@
 #include "components/TouchControls.h"
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
+#include "components/UiCanvas.h"   // 0.7.0: UI criável
 
 namespace vv {
 
@@ -92,11 +93,13 @@ public:
     ComponentStorage<InputMap>&     inputMaps()       { return inputMaps_; }
     ComponentStorage<BodyComp>&     bodies()          { return bodies_; }
     ComponentStorage<TouchControls>& touchControls()  { return touchControls_; }
+    ComponentStorage<UiCanvas>&     uiCanvases()      { return uiCanvases_; }
     const ComponentStorage<Transform3D>&  transforms() const      { return transforms_; }
     const ComponentStorage<MeshRenderer>& meshRenderers() const   { return meshRenderers_; }
     const ComponentStorage<InputMap>&     inputMaps() const       { return inputMaps_; }
     const ComponentStorage<BodyComp>&     bodies() const          { return bodies_; }
     const ComponentStorage<TouchControls>& touchControls() const  { return touchControls_; }
+    const ComponentStorage<UiCanvas>&     uiCanvases() const      { return uiCanvases_; }
 
     const ComponentRegistry& registry() const { return registry_; }
 
@@ -112,6 +115,7 @@ private:
     ComponentStorage<InputMap>      inputMaps_;
     ComponentStorage<BodyComp>      bodies_;
     ComponentStorage<TouchControls> touchControls_;
+    ComponentStorage<UiCanvas>      uiCanvases_;   // 0.7.0: UI criável
     ComponentRegistry               registry_;
 };
 
@@ -155,6 +159,14 @@ inline ComponentStorage<TouchControls>& ComponentStore::storageOf<TouchControls>
 template <>
 inline const ComponentStorage<TouchControls>& ComponentStore::storageOf<TouchControls>() const {
     return touchControls_;
+}
+template <>
+inline ComponentStorage<UiCanvas>& ComponentStore::storageOf<UiCanvas>() {
+    return uiCanvases_;
+}
+template <>
+inline const ComponentStorage<UiCanvas>& ComponentStore::storageOf<UiCanvas>() const {
+    return uiCanvases_;
 }
 
 } // namespace vv

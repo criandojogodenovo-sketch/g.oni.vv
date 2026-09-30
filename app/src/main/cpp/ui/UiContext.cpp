@@ -14,6 +14,9 @@ constexpr f32 kPad    = 16.0f;
 void UiContext::init() {
     solids_.reserve(kMaxQuadsUi);
     glyphs_.reserve(kMaxQuadsUi);
+    for (u32 i = 0; i < kMaxImageBatches; ++i) {
+        images_[i].reserve(64);   // 0.7.0: poucas imagens por frame
+    }
 }
 
 void UiContext::beginFrame(Renderer* renderer, const InputState* input,
@@ -24,6 +27,11 @@ void UiContext::beginFrame(Renderer* renderer, const InputState* input,
     sh_ = screenH;
     solids_.clear();
     glyphs_.clear();
+    for (u32 i = 0; i < kMaxImageBatches; ++i) {   // 0.7.0
+        images_[i].clear();
+        imageTex_[i] = 0;
+    }
+    imageCount_ = 0;
 
     // F4.1: estado de scroll POR FRAME (os slots com offset persistem)
     scrollCur_    = kNoScroll;
@@ -358,11 +366,43 @@ void UiContext::statusLine(const char* text) {
     }
 }
 
+// 0.7.0 — quad texturado da UI criável (elemento Image): resolve a ref,
+// aloca (ou cria) o batch da textura e emite o quad (uv 0..1, cor = tint).
+bool UiContext::imageQuad(f32 x, f32 y, f32 w, f32 h, const std::string& ref,
+                          const f32 color[4]) {
+    if (!imgResolve_ || ref.empty()) {
+        return false;
+    }
+    const Texture* tex = imgResolve_(ref);
+    if (!tex || !tex->ok()) {
+        return false;
+    }
+    const u32 id = tex->handle();
+    u32 slot = imageCount_;
+    for (u32 i = 0; i < imageCount_; ++i) {
+        if (imageTex_[i] == id) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == imageCount_) {
+        if (imageCount_ >= kMaxImageBatches) {
+            return false;   // cap de texturas por frame (documentado)
+        }
+        imageTex_[slot] = id;
+        ++imageCount_;
+    }
+    return emitTo(images_[slot], x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, color);
+}
+
 void UiContext::endFrame() {
     if (!renderer_) {
         return;
     }
     renderer_->submit(solids_, renderer_->whiteTexture());
+    for (u32 i = 0; i < imageCount_; ++i) {   // 0.7.0: imagens ENTRE os
+        renderer_->submit(images_[i], imageTex_[i]);   // solids e os glifos
+    }
     if (font_ && font_->ok()) {
         renderer_->submit(glyphs_, font_->texture());
     }

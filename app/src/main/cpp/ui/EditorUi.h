@@ -99,6 +99,37 @@ struct EditorState {
     // controlos). O estado vive AQUI (não numa global do main) para a
     // transição completa editor→play→editor ser testável na suíte.
     bool   playMode = false;
+
+    // ---- 0.7.0 — UI CRIÁVEL + GESTÃO DE TICs ---------------------------------
+    bool   uiMode = false;          // separador "3D | UI": true = viewport 2D
+                                    // dedicado à UI (editor WYSIWYG)
+    i32    selElement = -1;         // elemento selecionado no canvas do TIC
+                                    // selecionado (−1 = nenhum)
+    bool   elDrag = false;         // drag WYSIWYG em curso (viewport 2D)
+    f32    elDragX = 0.0f;         // pos do dedo no frame anterior (px ecrã)
+    f32    elDragY = 0.0f;
+
+    // gestão de TICs — menu contextual (⋮ na Hierarchy) + diálogos
+    bool   contextMenu = false;     // menu Renomear/Remover/Duplicar/Visibilidade
+    Handle contextTic{};            // TIC alvo do menu contextual
+    bool   removeDialog = false;    // confirmação de remoção (substitui o
+                                    // "apagar" sem confirmação)
+
+    // desselecionar no viewport 3D: arm no press, limpa no release se o dedo
+    // não se mexeu (tap ≠ drag de orbit)
+    bool   deselectArm = false;
+    f32    deselectX = 0.0f, deselectY = 0.0f;
+
+    // TECLADO IN-APP + input de texto (renomear/texto de elemento/alvo de
+    // ação; NOME DE CENA na 0.7.1). Zero IME de sistema (frágil em
+    // NativeActivity) — overlay mono com A-Z, 0-9, '_', '-', espaço.
+    bool   textInput = false;       // overlay do teclado visível
+    int    textPurpose = 0;         // 0 = renomear TIC, 1 = nome de cena,
+                                    // 2 = texto de elemento, 3 = alvo de ação
+    Handle textTic{};               // alvo do renomear
+    i32    textElement = -1;        // alvo do texto/alvo (índice no canvas)
+    char   textBuf[40] = "";       // buffer em edição
+    u32    textLen = 0;
 };
 
 // Rect do viewport central (entre os painéis) — usado para o gate da câmara.
@@ -159,6 +190,18 @@ void closeAllOverlays(EditorState& st);
 // descartadas ao parar" à direita. Devolve true no frame em que Stop é
 // clicado (o main sai do play: PlaySnapshot restore + painéis repostos).
 bool drawPlayBar(UiContext& ui, const InputState& in, f32 sw, f32 sh, int fps);
+
+// ---- 0.7.0: UI CRIÁVEL + GESTÃO DE TICs (ui/UiEditor.h tem o resto) ----------
+
+// separador "3D | UI" da toolbar (só em EDITOR): muda st.uiMode — o
+// viewport central passa a ser o editor 2D dedicado à UI criável.
+void drawModeToggle(UiContext& ui, EditorState& st);
+
+// DESSELECCIONAR no viewport 3D: arm no press edge dentro do viewport,
+// limpa a seleção no release se o dedo não se mexeu (tap ≠ drag de orbit).
+// Puro e afervel no CI (o main chama por frame com a máscara de claims).
+bool viewportTapClearsSelection(EditorState& st, const InputState& in,
+                                 const UiRect& view, u32 claimedMask);
 
 // ---- 0.6.9: GIZMOS DE TRANSFORMAÇÃO (seletor na toolbar) ---------------------
 

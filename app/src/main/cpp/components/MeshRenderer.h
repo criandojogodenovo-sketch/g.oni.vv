@@ -23,6 +23,12 @@ public:
     // F5-D: textura opcional do material (não-dono; ligada pelo GpuAssets)
     const Texture* texture = nullptr;
 
+    // 0.7.0 — COR POR TIC (gestão de TICs): tint multiplicativo do albedo no
+    // shader lit (uniform uTint; default branco = comportamento 0.6.x byte
+    // a byte). Sliders R/G/B no Inspector; serializado no .goni
+    // ("tint":[r,g,b], default [1,1,1] quando ausente).
+    f32 tint[3] = {1.0f, 1.0f, 1.0f};
+
     // F5-C/E: refs relativas do asset — vazias = procedural ("cube"/sem tex).
     // Vivem no componente para o serializer e para a UI mostrarem a origem.
     std::string meshPath;

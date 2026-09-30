@@ -26,6 +26,14 @@ struct Tic {
     i32         parent = -1;   // índice do slot do TIC pai; -1 = sem pai
     Scene*      scene  = nullptr;   // F3: dono dos storages de componentes
 
+    // 0.7.0 — VISIBILIDADE de render (gestão de TICs): TIC invisível NÃO
+    // desenha em editor nem em Play (o pass 3D salta-o), mas a FÍSICA e a
+    // LÓGICA continuam a correr (corpos colidem, ticks avançam — invisível
+    // ≠ desligado; quem quer desligar usa `active`). Serializado no .goni
+    // ("visible", default true); toggle (olho) na Hierarchy + checkbox no
+    // Inspector.
+    bool        visible = true;
+
     // ---- composição (F3) ----------------------------------------------------
     // storeOf() (decl. em ComponentStore.h, def. em ComponentStore.cpp) evita
     // acesso a membro de tipo incompleto na fase 1 — sem warnings e sem ciclo.

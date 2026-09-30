@@ -1,4 +1,4 @@
-# G.One VV 0.6.10 — Seletor de textura de verdade (fix do wiring do C33; 0.6.9: gizmos; 0.6.8: play mode; 0.6.7: lifecycle GL + gestão de projetos)
+# G.One VV 0.7.0 — UI criável: editor de UI dedicado + gestão completa de TICs (0.6.10: seletor de textura; 0.6.9: gizmos; 0.6.8: play mode)
 
 Engine com editor, projeto `.goni` e maturação de assets (compressão ETC2/ASTC
 com cache, extração de texturas glTF/GLB, import OBJ/glTF/GLB/PNG, export
@@ -6,7 +6,80 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 (`sensorLandscape`). Devices de teste: Realme C33 (720x1600) e Realme
 RMX3624 (Android 13).
 
-## Escopo 0.6.10 (implementado — fix do seletor de textura do C33)
+## Escopo 0.7.0 (implementado — F6: UI criável core + editor de UI + gestão de TICs)
+
+**UI CRIÁVEL (componente `UiCanvas`)** — qualquer TIC pode ter um canvas
+de elementos 2D desenhados POR CIMA da cena em Play (pass UI sem depth —
+a UI nunca é ocluída):
+
+- **Elementos**: Panel, Label, Button, Image (textura do projeto via ref
+  relativa — placeholder mono com moldura+diagonal quando a textura não
+  existe/ainda não carregou);
+- **Ancoragens 3×3** (esquerda/centro/direita × topo/meio/fundo): o rect de
+cada elemento vive relativo ao PONTO DE ÂNCORA da safe-area — resolução-
+independente (aferido em 2 resoluções no CI); mudar a âncora PRESERVA a
+posição absoluta (`setAnchor`);
+- **Ações declarativas on-click**: mostrar/esconder/alternar panel (por
+  NOME, em qualquer canvas), carregar cena (alvo validado contra o
+  manifesto; o carregamento em Play chega na 0.7.1 com as transições — o
+  toast é HONESTO, nunca finge sucesso) e spawn de preset
+  (PlayerBody3D/CharacterBody3D/StaticBody3D/RigidBody3D);
+- **Hit-test em Play**: o TOPO ganha (z-order), só Button/Menu são
+  interativos; o toque num botão da UI é RECLAMADO (não vai aos
+  TouchControls nem à câmara); o press ARMA e o release DENTRO do mesmo
+  elemento dispara (o gesto clássico de botão);
+- **Serialização**: `UiCanvas` completo no `.goni` (elementos com kind/
+  nome/texto/rect/cor/visível/âncoras/ação+alvo) — builds antigas IGNORAM
+  o componente (forward-compat do serializer).
+
+**EDITOR DE UI DEDICADO (separador "3D | UI" na toolbar)**:
+
+- O botão "UI" troca o viewport central: deixa de mostrar a cena 3D e
+  passa a mostrar o canvas do TIC selecionado em ESCALA-CABER (nunca
+  corta; o espaço de design é o ecrã inteiro) com moldura do "ecrã";
+- **WYSIWYG**: tap seleciona o elemento sob o dedo (o de CIMA ganha),
+  drag MOVE (ox/oy pelo delta em design px), tap no vazio DESSELECCIONA;
+  os gizmos e o orbit ficam DESLIGADOS no modo UI;
+- **Inspector de UI** (painel direito, quando há elemento selecionado):
+  pos x/y, largura/altura, cor R/G/B, visível, âncoras (ciclam), texto
+  (teclado in-app), ação + alvo, remover elemento — plano com y cumulativo
+  (o contrato F5.0-fix) e scroll;
+- **"+" do modo UI cria elementos** (Panel/Label/Button/Image; o canvas é
+  criado à primeira no TIC selecionado) e SELECIONA o novo — WYSIWYG
+  imediato.
+
+**GESTÃO COMPLETA DE TICs**:
+
+- **Desselecionar**: tocar no VAZIO do viewport (tap parado — drag continua
+  a orbitar) ou da Hierarchy limpa a seleção;
+- **Menu contextual** (botão "..." na linha da Hierarchy — o long-press da
+  spec é o atalho alternativo; o botão é determinístico e aferível):
+  **Renomear** (teclado in-app) / **Remover** (diálogo de CONFIRMAÇÃO —
+  substitui o apagar sem aviso) / **Duplicar** (todos os componentes por
+  valor + nome único Godot-style ".001") / **Visibilidade**;
+- **Visibilidade**: toggle "O/X" na Hierarchy + checkbox "visivel" no
+  Inspector; TIC invisível NÃO desenha em editor nem em Play — a FÍSICA e
+  a LÓGICA continuam (invisível ≠ desligado);
+- **Cor por TIC**: sliders R/G/B no Inspector (MeshRenderer) — tint
+  multiplicativo no shader lit (`uTint`; branco default = comportamento
+  0.6.x byte a byte);
+- **Teclado in-app**: A-Z, 0-9, '_', '-', espaço, APAGA, OK/Cancelar —
+  ZERO IME de sistema (frágil em NativeActivity); geometria partilhada
+  com os testes (sem sobreposição, dentro da safe-area).
+
+**Serialização nova**: `visible` (TIC; ausente = visível), `tint` (R/G/B;
+ausente = branco), componente `UiCanvas`. Testes 337→367 (+30):
+âncoras em 2 resoluções, hit-test (topo/interativos/invisíveis), ações
+declarativas (toggle por nome, spawn, cena honesta), menu por linha,
+desenho sem sobreposição, round-trip `.goni` completo, cenas 0.6.x a
+abrir com defaults, toggle 3D|UI, viewport 2D (scale-to-fit, WYSIWYG
+seleciona/move/desseleciona), plano do Inspector de UI, teclado
+(geometria + digitar/apagar/OK/cancelar/vazio/sufixo único), menu
+contextual (4 ações), remoção com confirmação, desselecionar (viewport
+tap≠drag, vazio da Hierarchy), cor por TIC (sliders + bind no stub GL),
+toolbar sem sobreposição em 2 larguras.
+
+## Escopo 0.6.10 (histórico — fix do seletor de textura do C33)
 
 **WIRING DO SELETOR DE TEXTURA DO INSPECTOR**: no C33 (0.6.9), após
 importar um PNG (import OK, `textures/screenshot-….png` no projeto) e tocar
@@ -571,6 +644,40 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.7.0 (UI criável + gestão de TICs; APK CUMULATIVO)
+
+Instalar o APK 0.7.0 (artifact `goni-vv-0.7.0-release-signed` do run do
+fecho). Roteiro cumulativo — os anteriores continuam a aplicar-se:
+
+1. **Separador 3D | UI**: com um TIC selecionado, tocar "UI" na toolbar →
+   o viewport central fica um ecrã 2D escuro com moldura (sem cena 3D);
+   voltar a "3D" devolve a cena com os gizmos;
+2. **Criar UI**: no modo UI, "+" → Button → o botão aparece CENTRADO e
+   selecionado no viewport 2D e o painel direito mostra o INSPECTOR UI
+   (x/y/lar/alt/cor R-G-B/visivel/ancoras/texto/acao/remover);
+3. **WYSIWYG**: arrastar o botão no viewport 2D move-o; tocar num sítio
+   vazio desseleciona; tocar de novo seleciona;
+4. **Ancoragem**: no Inspector UI, "ancora H" até "direita" → o elemento
+   NÃO salta de posição; girar o ecrã/reabrir continua colado à direita;
+5. **Ação declarativa**: criar um Panel + um Button; no Button: acao =
+   "toggle", alvo = nome do Panel (via teclado in-app — tocar "texto"/
+   "alvo" abre o TECLADO; nada de IME do sistema); Play → tocar o botão
+   alterna o Panel (a UI fica POR CIMA da cena);
+6. **Gestão de TICs**: "..." numa linha da Hierarchy → Renomear (teclado
+   in-app; OK aplica, Cancelar não mexe) / Remover (pede confirmação) /
+   Duplicar (cópia com ".001") / Visibilidade; o OLHO "O/X" na linha
+   alterna na hora; TIC invisível desaparece do editor E do Play (a
+   física continua — um chão invisível ainda segura);
+7. **Desselecionar**: tocar no vazio do viewport 3D ou abaixo da última
+   linha da Hierarchy limpa a seleção (arrastar continua a orbitar);
+8. **Cor por TIC**: TIC com mesh → sliders "cor R/G/B" no Inspector → o
+   cubo tinge-se no frame seguinte; Save → Load preserva (e `none`/branco
+   = o cinzento de sempre);
+9. **Teclado in-app**: renomear um TIC → digitar → APAGA → OK; as teclas
+   nunca se sobrepõem e o diálogo vive na safe-area;
+10. **Regressões**: gizmos/play mode/seletores de textura/import/logs —
+    tudo como na 0.6.10 (o APK é cumulativo).
 
 ## Verificação no Realme C33 (dono) — 0.6.10 (seletor de textura; APK CUMULATIVO)
 

@@ -24,8 +24,9 @@ public:
 
     // pass 3D: desenha com depth test + backface cull; devolve métricas.
     // F5-E: tex opcional — albedo do material (nullptr = cinza F2)
+    // 0.7.0: tint opcional — cor por TIC (nullptr = branco, o de sempre)
     DrawStats drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp,
-                       const Texture* tex = nullptr);
+                       const Texture* tex = nullptr, const f32* tint = nullptr);
 
     // pass UI (F1 mantido): submissões desenhadas em endFrame, sem depth
     void submit(const QuadBatch& batch, u32 texture);
@@ -57,7 +58,9 @@ private:
         const QuadBatch* batch;
         u32 tex;
     };
-    Submission subs_[2];
+    // 0.7.0: até 6 submissões por frame — solids + até 4 batches de
+    // IMAGENS da UI criável (um por textura) + glifos (era 2)
+    Submission subs_[6];
     u32 subCount_ = 0;
 };
 

@@ -4,6 +4,7 @@
 #include "components/MeshRenderer.h"
 #include "components/TouchControls.h"
 #include "components/Transform3D.h"
+#include "components/UiCanvas.h"
 #include "core/ComponentStore.h"
 #include "core/Scene.h"
 #include <cstdio>
@@ -68,6 +69,15 @@ void appendComponentJson(Json& arr, const MeshRenderer* mr) {
     if (!mr->texPath.empty()) {
         c.addMember("texPath", Json::makeString(mr->texPath));
     }
+    // 0.7.0 — cor por TIC: tint R/G/B só é gravado quando NÃO é o branco
+    // default (ficheiros 0.6.x abrem sem o campo → branco)
+    if (mr->tint[0] != 1.0f || mr->tint[1] != 1.0f || mr->tint[2] != 1.0f) {
+        Json tint = Json::makeArray();
+        tint.addItem(Json::makeNumber(mr->tint[0]));
+        tint.addItem(Json::makeNumber(mr->tint[1]));
+        tint.addItem(Json::makeNumber(mr->tint[2]));
+        c.addMember("tint", std::move(tint));
+    }
     arr.addItem(std::move(c));
 }
 
@@ -87,6 +97,53 @@ void appendComponentJson(Json& arr, const TouchControls* tc) {
     }
     Json c = Json::makeObject();
     c.addMember("type", Json::makeString("TouchControls"));
+    arr.addItem(std::move(c));
+}
+
+// 0.7.0 — UiCanvas: elementos de UI criável (kind/nome/texto/rect/cor/
+// visível/âncoras/ação on-click). Texto multilinha (Menu/Article) via '\n'
+// nativo do JSON (string com escape).
+void appendComponentJson(Json& arr, const UiCanvas* canvas) {
+    if (!canvas) {
+        return;
+    }
+    Json c = Json::makeObject();
+    c.addMember("type", Json::makeString("UiCanvas"));
+    Json elems = Json::makeArray();
+    for (const UiElement& e : canvas->elements) {
+        Json je = Json::makeObject();
+        je.addMember("kind", Json::makeString(uiElementKindName(e.kind)));
+        je.addMember("name", Json::makeString(e.name));
+        if (!e.text.empty()) {
+            je.addMember("text", Json::makeString(e.text));
+        }
+        if (!e.image.empty()) {
+            je.addMember("image", Json::makeString(e.image));
+        }
+        je.addMember("x", Json::makeNumber(e.ox));
+        je.addMember("y", Json::makeNumber(e.oy));
+        je.addMember("w", Json::makeNumber(e.w));
+        je.addMember("h", Json::makeNumber(e.h));
+        Json col = Json::makeArray();
+        for (int i = 0; i < 4; ++i) {
+            col.addItem(Json::makeNumber(e.color[i]));
+        }
+        je.addMember("color", std::move(col));
+        je.addMember("visible", Json::makeBool(e.visible));
+        // âncoras: "ah"/"av" = left|center|right / top|middle|bottom
+        const char* ah = e.anchorH == UiElement::AnchorH::Left ? "left"
+                       : e.anchorH == UiElement::AnchorH::Center ? "center" : "right";
+        const char* av = e.anchorV == UiElement::AnchorV::Top ? "top"
+                       : e.anchorV == UiElement::AnchorV::Middle ? "middle" : "bottom";
+        je.addMember("ah", Json::makeString(ah));
+        je.addMember("av", Json::makeString(av));
+        if (e.action != UiElement::Action::None) {
+            je.addMember("act", Json::makeString(uiActionName(e.action)));
+            je.addMember("target", Json::makeString(e.target));
+        }
+        elems.addItem(std::move(je));
+    }
+    c.addMember("elements", std::move(elems));
     arr.addItem(std::move(c));
 }
 
@@ -223,6 +280,92 @@ void fillMeshRenderer(MeshRenderer* mr, const Json& comp, const LoadCtx& ctx) {
         mr->texPath.clear();
         mr->texture = nullptr;
     }
+    // 0.7.0 — cor por TIC: "tint":[r,g,b] opcional (ausente = branco)
+    mr->tint[0] = mr->tint[1] = mr->tint[2] = 1.0f;
+    if (const Json* jt = comp.find("tint");
+        jt && jt->type == Json::Type::Array && jt->items.size() == 3) {
+        for (int i = 0; i < 3; ++i) {
+            mr->tint[i] = static_cast<f32>(jt->items[static_cast<size_t>(i)].number);
+        }
+    }
+}
+
+// 0.7.0 — UiCanvas: reconstrói os elementos do .goni. Campos ausentes =
+// defaults do componente (forward-compat: elementos de versões futuras com
+// kinds desconhecidos são IGNORADOS — a política do serializer).
+void fillUiCanvas(UiCanvas* canvas, const Json& comp) {
+    if (!canvas) {
+        return;
+    }
+    canvas->elements.clear();
+    const Json* elems = comp.find("elements");
+    if (!elems || elems->type != Json::Type::Array) {
+        return;
+    }
+    for (const Json& je : elems->items) {
+        UiElement e;
+        const Json* jk = je.find("kind");
+        const char* kind = (jk && jk->type == Json::Type::String) ? jk->string.c_str() : "";
+        if (std::strcmp(kind, "panel") == 0)        e.kind = UiElement::Kind::Panel;
+        else if (std::strcmp(kind, "label") == 0)   e.kind = UiElement::Kind::Label;
+        else if (std::strcmp(kind, "button") == 0)  e.kind = UiElement::Kind::Button;
+        else if (std::strcmp(kind, "image") == 0)   e.kind = UiElement::Kind::Image;
+        else if (std::strcmp(kind, "menu") == 0)    e.kind = UiElement::Kind::Menu;
+        else if (std::strcmp(kind, "card") == 0)    e.kind = UiElement::Kind::Card;
+        else if (std::strcmp(kind, "article") == 0) e.kind = UiElement::Kind::Article;
+        else {
+            continue;   // kind desconhecido — ignora (forward-compat)
+        }
+        if (const Json* j = je.find("name"); j && j->type == Json::Type::String) {
+            e.name = j->string;
+        }
+        if (const Json* j = je.find("text"); j && j->type == Json::Type::String) {
+            e.text = j->string;
+        }
+        if (const Json* j = je.find("image"); j && j->type == Json::Type::String) {
+            e.image = j->string;
+        }
+        auto readF = [&je](const char* key, f32 def) -> f32 {
+            const Json* j = je.find(key);
+            return (j && j->type == Json::Type::Number) ? static_cast<f32>(j->number) : def;
+        };
+        e.ox = readF("x", 0.0f);
+        e.oy = readF("y", 0.0f);
+        e.w  = readF("w", 200.0f);
+        e.h  = readF("h", 80.0f);
+        if (const Json* jc = je.find("color");
+            jc && jc->type == Json::Type::Array && jc->items.size() == 4) {
+            for (int i = 0; i < 4; ++i) {
+                e.color[i] = static_cast<f32>(jc->items[static_cast<size_t>(i)].number);
+            }
+        }
+        if (const Json* j = je.find("visible"); j && j->type == Json::Type::Bool) {
+            e.visible = j->boolean;
+        }
+        auto readStr = [&je](const char* key) -> const char* {
+            const Json* j = je.find(key);
+            return (j && j->type == Json::Type::String) ? j->string.c_str() : "";
+        };
+        const char* ah = readStr("ah");
+        if (std::strcmp(ah, "center") == 0)      e.anchorH = UiElement::AnchorH::Center;
+        else if (std::strcmp(ah, "right") == 0)  e.anchorH = UiElement::AnchorH::Right;
+        else                                     e.anchorH = UiElement::AnchorH::Left;
+        const char* av = readStr("av");
+        if (std::strcmp(av, "middle") == 0)      e.anchorV = UiElement::AnchorV::Middle;
+        else if (std::strcmp(av, "bottom") == 0) e.anchorV = UiElement::AnchorV::Bottom;
+        else                                     e.anchorV = UiElement::AnchorV::Top;
+        const char* act = readStr("act");
+        if (std::strcmp(act, "show") == 0)       e.action = UiElement::Action::ShowPanel;
+        else if (std::strcmp(act, "hide") == 0)  e.action = UiElement::Action::HidePanel;
+        else if (std::strcmp(act, "toggle") == 0) e.action = UiElement::Action::TogglePanel;
+        else if (std::strcmp(act, "scene") == 0) e.action = UiElement::Action::LoadScene;
+        else if (std::strcmp(act, "spawn") == 0) e.action = UiElement::Action::Spawn;
+        else                                     e.action = UiElement::Action::None;
+        if (e.action != UiElement::Action::None) {
+            e.target = readStr("target");
+        }
+        canvas->elements.push_back(std::move(e));
+    }
 }
 
 } // namespace
@@ -279,6 +422,11 @@ std::string dump(const Scene& scene) {
         jt.addMember("id", Json::makeNumber(id++));
         jt.addMember("name", Json::makeString(t.name));
         jt.addMember("active", Json::makeBool(t.active));
+        // 0.7.0 — visibilidade do TIC (gestão de TICs): só gravada quando
+        // ESCONDIDO (ficheiros 0.6.x abrem visíveis — default true)
+        if (!t.visible) {
+            jt.addMember("visible", Json::makeBool(false));
+        }
         const i32 parentPos =
             (t.parent >= 0 && static_cast<u32>(t.parent) < slotToPos.size())
                 ? slotToPos[static_cast<u32>(t.parent)] : -1;
@@ -292,6 +440,7 @@ std::string dump(const Scene& scene) {
         appendComponentJson(comps, cs.inputMaps().find(t.handle));
         appendComponentJson(comps, cs.bodies().find(t.handle));
         appendComponentJson(comps, cs.touchControls().find(t.handle));
+        appendComponentJson(comps, cs.uiCanvases().find(t.handle));   // 0.7.0
         jt.addMember("components", std::move(comps));
 
         tics.addItem(std::move(jt));
@@ -338,9 +487,13 @@ bool loadText(Scene& scene, const std::string& text, const LoadCtx& ctx) {
         const char* name =
             (jname && jname->type == Json::Type::String) ? jname->string.c_str() : "tic";
         created.push_back(scene.create(name));
-        if (const Json* ja = jt.find("active"); ja && ja->type == Json::Type::Bool) {
-            if (Tic* t = scene.get(created.back())) {
+        if (Tic* t = scene.get(created.back())) {
+            if (const Json* ja = jt.find("active"); ja && ja->type == Json::Type::Bool) {
                 t->active = ja->boolean;
+            }
+            // 0.7.0 — visibilidade (ausente = true, o default do campo)
+            if (const Json* jv = jt.find("visible"); jv && jv->type == Json::Type::Bool) {
+                t->visible = jv->boolean;
             }
         }
     }
@@ -383,8 +536,10 @@ bool loadText(Scene& scene, const std::string& text, const LoadCtx& ctx) {
                 fillMeshRenderer(store.get<MeshRenderer>(h), jc, ctx);
             } else if (jt2->string == "BodyComp") {
                 fillBodyComp(store.get<BodyComp>(h), jc);
+            } else if (jt2->string == "UiCanvas") {
+                fillUiCanvas(store.get<UiCanvas>(h), jc);   // 0.7.0
             }
-            // InputMap: sem dados — presença basta
+            // InputMap/TouchControls: sem dados — presença basta
         }
     }
     return true;

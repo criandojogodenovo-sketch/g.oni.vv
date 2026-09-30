@@ -81,6 +81,9 @@ UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in) {
 // ---------------------------------------------------------------------------
 // HIERARQUIA — lista COMPLETA de TICs com scroll (F4.1: fim do corte maxRows
 // da F3). Drag na lista = scroll; tap numa linha = seleciona (re-despacho).
+// 0.7.0 (gestão de TICs): cada linha tem o OLHO (visibilidade — toggle
+// imediato) e o "..." (menu contextual Renomear/Remover/Duplicar/
+// Visibilidade); tap no VAZIO da lista DESSELECIONA.
 // ---------------------------------------------------------------------------
 bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
     // F4.2: painel inteiro dentro do contentRect (insets do sistema)
@@ -111,6 +114,10 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
     ui.beginScroll(kIdScrollHier, listRegion, contentH);
     const f32 off = ui.scrollOffset();
 
+    // 0.7.0: geometria da linha — [nome][olho 40][... 40] (com gaps de 6)
+    const f32 kEyeW = 40.0f;
+    const f32 nameW = w - 2.0f * kPad - 2.0f * kEyeW - 12.0f;
+
     u32 row = 0;
     scene.forEachActive([&](const Tic& t) {
         const f32 ry = listTop + static_cast<f32>(row) * kRowH - off;
@@ -119,10 +126,20 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
         char clipped[40];
         std::snprintf(clipped, sizeof(clipped), "%.30s", t.name.c_str());
         ui.button(kIdRowBase + t.handle.index, x + kPad, ry + 4.0f,
-                  w - 2.0f * kPad, kRowH - 8.0f, clipped);   // só desenha (F4.1)
+                  nameW, kRowH - 8.0f, clipped);   // só desenha (F4.1)
         if (st.selected == t.handle) {
-            ui.frame(x + kPad, ry + 4.0f, w - 2.0f * kPad, kRowH - 8.0f, 2.0f, theme::ACCENT);
+            ui.frame(x + kPad, ry + 4.0f, nameW, kRowH - 8.0f, 2.0f, theme::ACCENT);
         }
+        // 0.7.0 — olho (visibilidade): "O" visível / "X" escondido (o atlas
+        // é ASCII — mono brutalist; o estado também está no Inspector)
+        char eye[2] = {t.visible ? 'O' : 'X', '\0'};
+        ui.button(kHierEyeBase + t.handle.index, x + kPad + nameW + 6.0f,
+                  ry + 4.0f, kEyeW, kRowH - 8.0f, eye);
+        // 0.7.0 — "..." abre o menu contextual (Renomear/Remover/Duplicar/
+        // Visibilidade); o long-press da spec é o atalho alternativo — o
+        // botão é determinístico e aferível no CI
+        ui.button(kHierDotsBase + t.handle.index, x + kPad + nameW + 6.0f + kEyeW + 6.0f,
+                  ry + 4.0f, kEyeW, kRowH - 8.0f, "...");
     });
     ui.endScroll();
 
@@ -131,16 +148,37 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                        w - 2.0f * kPad);
     }
 
-    // tap re-despachado → seleção da linha sob o dedo (mesmo após scroll)
-    // F5.0-fix: POR ID — a Hierarchy só consome taps nascidos nela
+    // tap re-despachado → seleção/olho/... da linha sob o dedo (mesmo após
+    // scroll); F5.0-fix: POR ID — a Hierarchy só consome taps nascidos nela.
+    // 0.7.0: tap no VAZIO da lista (abaixo da última linha) DESSELECIONA.
     f32 tx, ty;
     if (ui.scrollTap(kHierarchyScrollId, tx, ty) && scroll::inside(listRegion, tx, ty)) {
         const i32 sel = hierarchyRowAtTap(ty, listTop, off, nTics);
-        if (sel >= 0) {
+        if (sel < 0) {
+            st.selected = Handle::invalid();   // 0.7.0: desselecionar no vazio
+        } else {
             u32 i = 0;
             scene.forEachActive([&](const Tic& t) {
                 if (i == static_cast<u32>(sel)) {
-                    st.selected = t.handle;
+                    // 0.7.0: hit-test da linha em três zonas (nome/olho/...)
+                    const f32 ry = listTop + static_cast<f32>(i) * kRowH - off;
+                    const f32 eyeX = x + kPad + nameW + 6.0f;
+                    const f32 dotsX = eyeX + kEyeW + 6.0f;
+                    if (ty >= ry + 4.0f && ty < ry + kRowH - 4.0f &&
+                        tx >= eyeX && tx < eyeX + kEyeW) {
+                        // OLHO: toggle de visibilidade IMEDIATO
+                        if (Tic* tt = scene.get(t.handle)) {
+                            tt->visible = !tt->visible;
+                        }
+                    } else if (ty >= ry + 4.0f && ty < ry + kRowH - 4.0f &&
+                               tx >= dotsX && tx < dotsX + kEyeW) {
+                        // "...": menu contextual
+                        st.contextMenu = true;
+                        st.contextTic = t.handle;
+                    } else {
+                        st.selected = t.handle;   // nome: seleciona
+                        st.selElement = -1;   // elemento de UI: nova seleção
+                    }
                 }
                 ++i;
             });
@@ -187,7 +225,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     const TextMetrics tm = ui.textMetrics();
     const InspProfile prof = inspectorProfile(*tic);
     const bool selectable = (catalog != nullptr);
-    InspRow plan[20];
+    InspRow plan[32];
     const u32 nRows = inspectorPlan(prof, tm, selectable, plan);
     const f32 contentH = inspectorContentHeight(prof, tm, selectable);
 
@@ -226,6 +264,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     const MeshRenderer* mr = tic->getComponent<MeshRenderer>();
     const InputMap* im = tic->getComponent<InputMap>();
     BodyComp* bc = tic->getComponent<BodyComp>();
+    // 0.7.0: o tint é EDITÁVEL (sliders R/G/B) — ponteiro mutável
+    MeshRenderer* mrEdit = tic->getComponent<MeshRenderer>();
     char meshLabel[64] = "";
     char texLabel[64] = "";
     char inputLine[48] = "";
@@ -283,6 +323,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     bool edited = false;
     bool trEdited = false;
     u32 sliderIdx = 0;
+    u32 colorIdx = 0;   // 0.7.0: payload dos ColorSlider (0=R, 1=G, 2=B)
 
     // ---- desenho: UMA passagem pelo plano; nenhum cursor local
     for (u32 i = 0; i < nRows; ++i) {
@@ -293,6 +334,28 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             ui.labelFitted(x + kPad, inspBaseline(ry, r.h, tm), tic->name.c_str(),
                            theme::ACCENT, w - 2.0f * kPad);   // B2: ellipsis
             break;
+        case InspRow::Kind::VisToggle: {
+            // 0.7.0 — checkbox de visibilidade do TIC (mesmo estado do olho
+            // da Hierarchy; TIC invisível não desenha em editor nem Play)
+            char vis[32];
+            std::snprintf(vis, sizeof(vis), "visivel: %s",
+                          tic->visible ? "sim" : "nao");
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      vis);
+            break;
+        }
+        case InspRow::Kind::ColorSlider: {
+            // 0.7.0 — cor por TIC: sliders R/G/B do tint do MeshRenderer
+            if (mrEdit) {
+                static const char* kColLabels[3] = {"cor R", "cor G", "cor B"};
+                if (sliderRow(ui, r.id, x, ry, r.h, tm, kColLabels[colorIdx],
+                              0.0f, 1.0f, mrEdit->tint[colorIdx], "%.2f")) {
+                    edited = true;
+                }
+            }
+            ++colorIdx;
+            break;
+        }
         case InspRow::Kind::Section:
             ui.label(x + kPad, inspBaseline(ry, r.h, tm), "Transform3D", theme::TEXT);
             ui.panel(x + kPad, ry + r.h - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
@@ -371,7 +434,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             const InspRow& r = plan[i];
             if (r.kind != InspRow::Kind::AddTc &&
                 r.kind != InspRow::Kind::MeshButton &&
-                r.kind != InspRow::Kind::TexButton) {
+                r.kind != InspRow::Kind::TexButton &&
+                r.kind != InspRow::Kind::VisToggle) {
                 continue;
             }
             const f32 ry = contentTop + r.y - off;
@@ -385,8 +449,10 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 tic->addComponent<TouchControls>();   // F4: cria no TIC
             } else if (r.kind == InspRow::Kind::MeshButton) {
                 st.assetMenu = 1;                     // F5-E: seletor de meshes
-            } else {
+            } else if (r.kind == InspRow::Kind::TexButton) {
                 st.assetMenu = 2;                     // F5-E: seletor de texturas
+            } else if (r.kind == InspRow::Kind::VisToggle) {
+                tic->visible = !tic->visible;         // 0.7.0: checkbox
             }
         }
     }
@@ -448,9 +514,88 @@ void drawTouchControls(UiContext& ui, const TouchControls& tc, f32 sw, f32 sh) {
     }
 }
 
+// 0.7.0 — separador "3D | UI" na toolbar: MUDA o modo do viewport
+// central (3D = cena com orbit/gizmos; UI = viewport 2D dedicado à UI
+// criável). O botão do modo ATIVO fica com frame ACCENT (a linguagem do
+// seletor do gizmo). Não corre em PLAY (a toolbar não existe em play).
+void drawModeToggle(UiContext& ui, EditorState& st) {
+    const UiRect r = toolbarModeRect(ui.screenWidth(), ui.screenHeight(),
+                                     ui.safeArea());
+    if (ui.button(kMode3dId, r.x, r.y, 96.0f, r.h, "3D")) {
+        st.uiMode = false;
+        st.selElement = -1;
+        st.elDrag = false;
+    }
+    if (ui.button(kModeUiId, r.x + 96.0f + 8.0f, r.y, 96.0f, r.h, "UI")) {
+        st.uiMode = true;
+    }
+    // frame do modo ATIVO
+    if (!st.uiMode) {
+        ui.frame(r.x, r.y, 96.0f, r.h, 2.0f, theme::ACCENT);
+    } else {
+        ui.frame(r.x + 96.0f + 8.0f, r.y, 96.0f, r.h, 2.0f, theme::ACCENT);
+    }
+}
+
+// 0.7.0 — DESSELECCIONAR no viewport 3D: arm no press edge dentro do
+// viewport central (não reclamado); limpa no release se o dedo NÃO se
+// mexeu além do limiar (tap ≠ drag de orbit/gizmo). Puro e afervel.
+bool viewportTapClearsSelection(EditorState& st, const InputState& in,
+                                 const UiRect& view, u32 claimedMask) {
+    // arm: press edge do slot 0 dentro do viewport, não reclamado (só se
+    // ainda NÃO armado — um press edge persistente não re-arma com a pos
+    // nova; o drag de orbit continua a ser drag)
+    if (in.pressed(0) && !st.deselectArm && !(claimedMask & 1u)) {
+        f32 px = 0.0f, py = 0.0f;
+        in.pos(0, px, py);
+        if (px >= view.x && px < view.x + view.w && py >= view.y &&
+            py < view.y + view.h) {
+            st.deselectArm = true;
+            st.deselectX = px;
+            st.deselectY = py;
+        }
+    }
+    if (!st.deselectArm) {
+        return false;
+    }
+    // release do slot 0: foi um tap parado dentro do viewport?
+    if (!in.released(0)) {
+        // dedo deslizou além do limiar → drag (orbit/gizmo), cancela o arm
+        if (in.down(0)) {
+            f32 px = 0.0f, py = 0.0f;
+            in.pos(0, px, py);
+            const f32 dx = px - st.deselectX;
+            const f32 dy = py - st.deselectY;
+            if (dx * dx + dy * dy > 14.0f * 14.0f) {
+                st.deselectArm = false;
+            }
+        }
+        return false;
+    }
+    st.deselectArm = false;
+    f32 px = 0.0f, py = 0.0f;
+    in.pos(0, px, py);
+    const f32 dx = px - st.deselectX;
+    const f32 dy = py - st.deselectY;
+    if (dx * dx + dy * dy > 14.0f * 14.0f) {
+        return false;   // arrastou — foi orbit/gizmo, não um tap
+    }
+    if (px < view.x || px >= view.x + view.w || py < view.y ||
+        py >= view.y + view.h) {
+        return false;
+    }
+    st.selected = Handle::invalid();
+    st.selElement = -1;
+    return true;
+}
+
 int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st) {
+    // 0.7.0: no modo UI o "+" cria ELEMENTOS (Panel/Label/Button/Image);
+    // no 3D cria TICs de preset (como sempre). O main despacha pelo modo.
+    const bool uiMode = st.uiMode;
+    const int kItems = uiMode ? 4 : 4;
     const f32 w = kMenuW;
-    const f32 h = kHeaderH + 4.0f * 64.0f + kPad;
+    const f32 h = kHeaderH + static_cast<f32>(kItems) * 64.0f + kPad;
     // F4.2: centrado no viewport ÚTIL (dentro do contentRect)
     const f32 ox = ui.safeLeft();
     const f32 oy = ui.safeTop();
@@ -467,14 +612,17 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     ui.panel(x, y, w, h, theme::PANEL);
     ui.frame(x, y, w, h, 2.0f, theme::ACCENT);
     const f32 th = ui.fontHeight();
-    ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "CRIAR TIC", theme::TEXT);
+    ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f,
+             uiMode ? "CRIAR ELEMENTO UI" : "CRIAR TIC", theme::TEXT);
 
     int chosen = 0;
     const char* names[4] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
                             "RigidBody3D"};
-    for (int i = 0; i < 4; ++i) {
+    const char* elems[4] = {"Panel", "Label", "Button", "Image"};
+    const char* const* labels = uiMode ? elems : names;
+    for (int i = 0; i < kItems; ++i) {
         if (ui.button(static_cast<u64>(20 + i), x + kPad, y + kHeaderH + i * 64.0f,
-                      w - 2.0f * kPad, 56.0f, names[i])) {
+                      w - 2.0f * kPad, 56.0f, labels[i])) {
             chosen = i + 1;
             st.plusMenu = false;
         }
@@ -999,6 +1147,12 @@ void closeAllOverlays(EditorState& st) {
     st.importMenu = false;
     st.logViewer = false;
     st.logViewerJustOpened = false;
+    // 0.7.0 — os overlays da gestão de TICs/UI também fecham (a SELEÇÃO e
+    // o offset dos scrolls são estado de painel e ficam intactos)
+    st.contextMenu = false;
+    st.removeDialog = false;
+    st.textInput = false;
+    st.elDrag = false;
 }
 
 // Orbit da câmara — extraído do main.cpp (era globais + função estática).
@@ -1128,17 +1282,28 @@ bool drawPlayBar(UiContext& ui, const InputState& in, f32 sw, f32 sh, int fps) {
 void drawGizmoToolbar(UiContext& ui, const InputState& in, GizmoModeState& st) {
     // o grupo vive na FAIXA DA TOOLBAR (mesma altura dos 3 botões), à
     // direita; os 3 botões Menu/Play/Settings ficam intactos à esquerda.
+    // 0.7.0: o limite esquerdo passou a ser o FIM do separador "3D | UI"
+    // (toolbarModeEndX) — nunca por cima dele; em ecrãs estreitos os botões
+    // ENCOLHEM em vez de sobreporem (nada sobreposto, o critério da fase).
     const UiRect bar = ui.toolbarRect();
-    const f32 btnW = 150.0f;
+    f32 btnW = 150.0f;
     const f32 btnH = 56.0f;
     const f32 snapW = 120.0f;
     const f32 gap = 10.0f;
     const f32 by = bar.y + (safe::kToolbarH - btnH) * 0.5f;
-    // 4 controlos alinhados à direita: [Mover][Rodar][Escalar][Snap]
-    const f32 totalW = 3.0f * btnW + snapW + 3.0f * gap;
-    f32 x = bar.x + bar.w - totalW - kPad;
-    if (x < bar.x + kPad + 3.0f * (240.0f + 16.0f)) {
-        x = bar.x + kPad + 3.0f * (240.0f + 16.0f);   // nunca por cima dos 3
+
+    const f32 leftBound =
+        toolbarModeEndX(ui.screenWidth(), ui.screenHeight(), ui.safeArea());
+    const f32 avail = bar.x + bar.w - kPad - leftBound;
+    // 4 controlos: [Mover][Rodar][Escalar][Snap] — encolhe os 3 de modo se
+    // não couber (min 80px; o Snap é fixo)
+    const f32 wanted = 3.0f * btnW + snapW + 3.0f * gap;
+    if (wanted > avail && avail > snapW + 3.0f * 80.0f + 3.0f * gap) {
+        btnW = (avail - snapW - 3.0f * gap) / 3.0f;
+    }
+    f32 x = bar.x + bar.w - kPad - (3.0f * btnW + snapW + 3.0f * gap);
+    if (x < leftBound) {
+        x = leftBound;   // defesa: nunca por cima do separador
     }
 
     static const char* kModeNames[3] = {"Mover", "Rodar", "Escalar"};

@@ -13,11 +13,13 @@
 // ativa no C33 (B1).
 #include "render/QuadBatch.h"
 #include "render/Renderer.h"
+#include "render/Texture.h"   // 0.7.0: quads texturados da UI criável
 #include "ui/FontAtlas.h"
 #include "ui/ScrollMath.h"
 #include "ui/SafeArea.h"
 #include "ui/TextFit.h"
 #include "platform/InputState.h"
+#include <string>
 
 namespace vv {
 
@@ -84,6 +86,22 @@ public:
     // painéis (linhas sequenciais, sem sobreposição, scroll a revelar o fundo)
     const QuadBatch& solidsForTest() const { return solids_; }
     const QuadBatch& glyphsForTest() const { return glyphs_; }
+    // 0.7.0: batch de IMAGENS da UI criável (quads texturados — o elemento
+    // Image). Até 4 texturas distintas por frame; ordem de submissão:
+    // solids → imagens (ordem de 1ª utilização) → glifos.
+    const QuadBatch& imagesForTest() const { return images_[0]; }
+    u32 imageBatchCountForTest() const { return imageCount_; }
+
+    // 0.7.0: resolver de ref relativa → Texture (o main liga ao GpuAssets;
+    // null/sem textura → imageQuad devolve false e o chamador desenha o
+    // PLACEHOLDER mono — moldura + diagonais)
+    void setImageResolver(const Texture* (*resolve)(const std::string&)) {
+        imgResolve_ = resolve;
+    }
+    // emite um quad TEXTURADO com a textura resolvida da ref (uv 0..1,
+    // cor = tint). false = sem resolver/textura (placeholder no chamador).
+    bool imageQuad(f32 x, f32 y, f32 w, f32 h, const std::string& ref,
+                   const f32 color[4]);
     // offset PERSISTENTE de uma região por id (fora do begin/end — o
     // scrollOffset() só vale com a região aberta; os testes leem depois)
     f32 scrollOffsetForTest(u64 id) const {
@@ -153,6 +171,13 @@ private:
     u64               active_ = 0;   // botão pressionado (immediate mode)
     QuadBatch         solids_;
     QuadBatch         glyphs_;
+
+    // 0.7.0 — imagens da UI criável: até 4 batches (um por textura)
+    static constexpr u32 kMaxImageBatches = 4;
+    QuadBatch         images_[kMaxImageBatches];
+    u32               imageTex_[kMaxImageBatches] = {};
+    u32               imageCount_ = 0;
+    const Texture*    (*imgResolve_)(const std::string&) = nullptr;
 
     // ---- F4.1: scroll -------------------------------------------------------
     struct ScrollSlot {

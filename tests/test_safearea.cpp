@@ -101,12 +101,14 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     EXPECT(nearEqF(listOld, 540.0f));
     EXPECT(nearEqF(scroll::maxOffset(contentOld, listOld), 0.0f));   // bug antigo
 
-    // F5.0-fix: a receita vem do PLANO (métricas fallback 28 px = device) —
-    // Player completo sem TouchControls, sem catálogo (mesh/tex labels 34) → 606
+    // F5.0-fix: a receita vem do PLANO (métricas fallback 28 px = device).
+    // 0.7.0: o plano ganhou as linhas NOVAS da gestão de TICs — "visivel"
+    // (btnH) + cor R/G/B (3× sldH) — Player completo sem TouchControls e sem
+    // catálogo: 606 (F5.0) + 144 (novo) = 750
     const InspProfile prof{true, true, true, true, false};
     const TextMetrics m{};
     const f32 contentH = inspectorContentHeight(prof, m, false);
-    EXPECT(nearEqF(contentH, 606.0f));
+    EXPECT(nearEqF(contentH, 750.0f));
 
     // DEPOIS: painel dentro do contentRect [0,24,·,628] (status 24 + nav 92)
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);
@@ -116,11 +118,11 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     EXPECT(nearEqF(listH, 424.0f));
     const f32 mo = scroll::maxOffset(contentH, listH);
     EXPECT(mo > 0.0f);                        // scroll ATIVA
-    EXPECT(nearEqF(mo, 182.0f));              // 606 − 424
+    EXPECT(nearEqF(mo, 326.0f));              // 750 − 424
 
     // com o offset no máximo, a ÚLTIMA linha do plano (add TouchControls)
     // fica INTEIRA dentro da lista
-    InspRow plan[20];
+    InspRow plan[32];
     const u32 n = inspectorPlan(prof, m, false, plan);
     EXPECT(n > 0);
     const InspRow& last = plan[n - 1];

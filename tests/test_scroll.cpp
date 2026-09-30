@@ -175,15 +175,15 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
 
     // F5.0-fix: o conteúdo vem do PLANO (fonte única) com as métricas
     // fallback = sans 28 px (o caso do device). Receita completa do Player
-    // (sem catálogo → mesh/tex são LABELS de 34): nome 34 + transform
-    // (34 + 9×36) + mesh 34 + tex 34 + input 34 + body 34 + velx 36 +
-    // add TouchControls 42 = 606
+    // (sem catálogo → mesh/tex são LABELS de 34): nome 34 + VISIVEL 36
+    // (0.7.0) + transform (34 + 9×36) + mesh 34 + tex 34 + COR R/G/B 3×36
+    // (0.7.0) + input 34 + body 34 + velx 36 + add TouchControls 42 = 750
     const TextMetrics m{};
     const InspProfile prof = inspectorProfile(*tic);
-    InspRow plan[20];
+    InspRow plan[32];
     const u32 n = inspectorPlan(prof, m, false, plan);
     const f32 contentH = inspectorContentHeight(prof, m, false);
-    EXPECT(nearEqF(contentH, 606.0f));
+    EXPECT(nearEqF(contentH, 750.0f));
 
     // cursor Y PARTILHADO: linhas sequenciais (y estritamente crescente, sem
     // reinício por secção), todas dentro do conteúdo, e o fundo do plano =
@@ -220,7 +220,7 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     // com TouchControls presente o botão dá lugar à label tc (42 → 34)
     EXPECT(tic->addComponent<TouchControls>() != nullptr);
     EXPECT(nearEqF(inspectorContentHeight(inspectorProfile(*tic), m, false),
-                   598.0f));
+                   742.0f));
 }
 
 TEST(scroll_hierarquia_todos_os_tics_atingeis) {
@@ -276,7 +276,7 @@ TEST(scroll_linhas_mesh_tex_atingiveis_no_scroll) {
 
     const TextMetrics m{};
     const InspProfile prof = inspectorProfile(*tic);
-    InspRow plan[20];
+    InspRow plan[32];
     const u32 n = inspectorPlan(prof, m, true, plan);   // seletores ativos
     u32 meshIdx = n, texIdx = n;
     for (u32 i = 0; i < n; ++i) {
@@ -286,11 +286,12 @@ TEST(scroll_linhas_mesh_tex_atingiveis_no_scroll) {
     EXPECT(meshIdx < n);
     EXPECT(texIdx == meshIdx + 1);   // mesh e tex ADJACENTES
 
-    // topo da linha mesh (Player tem Transform3D): nome 34 + secção 34 + 9×36
-    EXPECT(nearEqF(plan[meshIdx].y, 34.0f + 34.0f + 9.0f * 36.0f));
+    // topo da linha mesh (Player tem Transform3D): nome 34 + VISIVEL 36
+    // (0.7.0) + secção 34 + 9×36
+    EXPECT(nearEqF(plan[meshIdx].y, 34.0f + 36.0f + 34.0f + 9.0f * 36.0f));
     EXPECT(nearEqF(plan[texIdx].y, plan[meshIdx].y + plan[meshIdx].h));
 
-    // pior caso C33 (lista 500 px): conteúdo 610 — scroll ativa
+    // pior caso C33 (lista 500 px): conteúdo 754 — scroll ativa
     const f32 contentH = inspectorContentHeight(prof, m, true);
     const f32 listH = 500.0f;
     EXPECT(contentH > listH);

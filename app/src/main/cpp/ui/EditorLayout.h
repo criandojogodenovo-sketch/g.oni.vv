@@ -53,6 +53,8 @@ constexpr u64 kInspectorVelX       = 2100;   // slider velx do BodyComp
 constexpr u64 kInspectorAddTc      = 3001;   // botão "add TouchControls"
 constexpr u64 kInspectorMeshSel    = 5001;   // F5-E: linha "mesh: …"
 constexpr u64 kInspectorTexSel     = 5002;   // F5-E: linha "tex: …"
+constexpr u64 kInspectorVis        = 5200;   // 0.7.0: "visivel: sim/nao"
+constexpr u64 kInspectorColBase    = 5300;   // 0.7.0: sliders R/G/B (+i)
 
 // ids das regiões de scroll (F4.1) — o tap re-despachado é POR ID (F5.0-fix:
 // a Hierarchy comia o tap do Inspector quando a consulta era global)
@@ -110,6 +112,8 @@ struct InspRow {
         Label,       // linha de texto (input/body/tc)
         Velx,        // slider velx do BodyComp
         AddTc,       // botão "add TouchControls" no fundo
+        VisToggle,   // 0.7.0: "visivel: sim/nao" (checkbox do TIC)
+        ColorSlider, // 0.7.0: sliders R/G/B do tint do MeshRenderer
     };
     Kind kind;
     f32  y;     // topo da linha em COORDS DE CONTEÚDO (cumulativo)
@@ -117,10 +121,12 @@ struct InspRow {
     u64  id;    // id do widget interativo (0 = só desenho)
 };
 
+// payload do ColorSlider por índice (0=R, 1=G, 2=B) — o desenho e o
+// hit-test partilham esta ordem
 inline u32 inspectorRowCount(const InspProfile& p, bool selectable) {
-    u32 n = 1;                                          // nome
+    u32 n = 2;                                          // nome + visivel
     if (p.tr) n += 1 + 9;                               // secção + 9 sliders
-    if (p.mr) n += 2;                                   // mesh + tex
+    if (p.mr) n += 2 + 3;                               // mesh + tex + R/G/B
     if (p.im) n += 1;                                   // input
     if (p.bc) n += 2;                                   // body + velx
     if (p.im) n += 1;                                   // addTc OU tc
@@ -148,6 +154,7 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
     };
 
     push(InspRow::Kind::Name, textH, 0);
+    push(InspRow::Kind::VisToggle, btnH, kInspectorVis);   // 0.7.0
     if (p.tr) {
         push(InspRow::Kind::Section, textH, 0);
         for (u32 i = 0; i < 9; ++i) {
@@ -159,6 +166,10 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
              selectable ? btnH : textH, selectable ? kInspectorMeshSel : 0);
         push(selectable ? InspRow::Kind::TexButton : InspRow::Kind::TexLabel,
              selectable ? btnH : textH, selectable ? kInspectorTexSel : 0);
+        // 0.7.0 — cor por TIC (sliders R/G/B do tint)
+        for (u32 i = 0; i < 3; ++i) {
+            push(InspRow::Kind::ColorSlider, sldH, kInspectorColBase + i);
+        }
     }
     if (p.im) {
         push(InspRow::Kind::Label, textH, 0);           // input:
@@ -181,7 +192,7 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
 // cursor partilhado). Sem linhas → 0.
 inline f32 inspectorContentHeight(const InspProfile& p, const TextMetrics& m,
                                   bool selectable) {
-    InspRow rows[20];
+    InspRow rows[32];
     const u32 n = inspectorPlan(p, m, selectable, rows);
     if (n == 0) {
         return 0.0f;
@@ -258,6 +269,72 @@ constexpr u64 kGizmoModeMoveId    = 7;
 constexpr u64 kGizmoModeRotateId  = 8;
 constexpr u64 kGizmoModeScaleId   = 9;
 constexpr u64 kGizmoSnapId        = 10;
+
+// ---- 0.7.0 — UI criável + gestão de TICs: ids e geometria (faixas EXCLUSIVAS) --
+
+// separador "3D | UI" da toolbar (depois dos 3 botões Menu/Play/Settings,
+// ANTES do grupo do gizmo — ver toolbarModeRect)
+constexpr u64 kMode3dId = 11;
+constexpr u64 kModeUiId = 12;
+
+// botões de olho/⋮ da Hierarchy (faixas ALTAS: + handle.index — nunca
+// colidem com as linhas 1000+ nem com os sliders 2000+ do Inspector)
+constexpr u64 kHierEyeBase  = 100000;
+constexpr u64 kHierDotsBase = 200000;
+
+// menu contextual (⋮): Renomear/Remover/Duplicar/Visibilidade
+constexpr u64 kCtxRenameId  = 6500;
+constexpr u64 kCtxRemoveId  = 6501;
+constexpr u64 kCtxDuplicId  = 6502;
+constexpr u64 kCtxVisibleId = 6503;
+// diálogo de confirmação de remoção
+constexpr u64 kRemoveConfirmId = 6510;
+constexpr u64 kRemoveCancelId  = 6511;
+
+// teclado in-app (6600 + row*10 + col); linha de baixo tem ids próprios
+constexpr u64 kKbBase     = 6600;
+constexpr u64 kKbSpaceId  = 6650;
+constexpr u64 kKbDashId   = 6651;
+constexpr u64 kKbBackId   = 6652;
+constexpr u64 kKbOkId     = 6653;
+constexpr u64 kKbCancelId = 6654;
+
+// Inspector de ELEMENTO de UI (sliders 8000..8005; botões 8010+)
+constexpr u64 kUiInspX      = 8000;
+constexpr u64 kUiInspY      = 8001;
+constexpr u64 kUiInspW      = 8002;
+constexpr u64 kUiInspH      = 8003;
+constexpr u64 kUiInspR      = 8004;
+constexpr u64 kUiInspG      = 8005;
+constexpr u64 kUiInspB      = 8006;
+constexpr u64 kUiInspVis    = 8010;
+constexpr u64 kUiInspAnchH  = 8011;
+constexpr u64 kUiInspAnchV  = 8012;
+constexpr u64 kUiInspText   = 8013;
+constexpr u64 kUiInspAct    = 8014;
+constexpr u64 kUiInspTarget = 8015;
+constexpr u64 kUiInspRemove = 8016;
+
+// regiões de scroll novas: Inspector de UI (46). 41/42/43 = hierarquia/
+// inspector/logs (acima)
+constexpr u64 kUiInspScrollId = 46;
+
+// presets de ELEMENTO no "+" do modo UI (mesma faixa 20+i do menu de TICs —
+// os menus são mutuamente exclusivos: o + abre um OU outro conforme o modo)
+// 0=Panel, 1=Label, 2=Button, 3=Image (0.7.3 acrescenta Menu/Card/Article)
+
+// rect do separador "3D | UI" na faixa da toolbar (esq.: após os 3 botões)
+inline UiRect toolbarModeRect(f32 sw, f32 sh, const safe::Insets& i) {
+    const UiRect bar = safe::toolbarRect(sw, sh, i);
+    const f32 x = bar.x + 16.0f + 3.0f * (240.0f + 16.0f) + 8.0f;
+    return {x, bar.y + (safe::kToolbarH - 56.0f) * 0.5f, 2.0f * 96.0f + 8.0f,
+            56.0f};
+}
+// fim X do separador — o grupo do gizmo alinha a partir daqui (nunca sobrepõe)
+inline f32 toolbarModeEndX(f32 sw, f32 sh, const safe::Insets& i) {
+    const UiRect m = toolbarModeRect(sw, sh, i);
+    return m.x + m.w + 8.0f;
+}
 
 } // namespace editor
 } // namespace vv

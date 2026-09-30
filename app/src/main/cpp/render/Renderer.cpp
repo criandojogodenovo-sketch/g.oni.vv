@@ -125,7 +125,7 @@ void Renderer::beginFrame() {
 }
 
 DrawStats Renderer::drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp,
-                             const Texture* tex) {
+                             const Texture* tex, const f32* tint) {
     if (!mesh.ok()) {
         return {};
     }
@@ -133,6 +133,7 @@ DrawStats Renderer::drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp
     lit_.setVP(vp);
     lit_.setModel(model);
     lit_.setTexture(tex);   // F5-E: albedo opcional (unit 0 + uHasTex)
+    lit_.setTint(tint);     // 0.7.0: cor por TIC (nullptr = branco, o de sempre)
     // pass 3D: depth visível (faces frontais ocluem as traseiras) + cull
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
@@ -143,7 +144,7 @@ DrawStats Renderer::drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp
 }
 
 void Renderer::submit(const QuadBatch& batch, u32 texture) {
-    if (subCount_ < 2 && !batch.empty()) {
+    if (subCount_ < 6 && !batch.empty()) {   // 0.7.0: 6 submissões (imagens da UI)
         subs_[subCount_].batch = &batch;
         subs_[subCount_].tex = texture;
         ++subCount_;

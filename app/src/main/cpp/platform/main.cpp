@@ -46,6 +46,9 @@
 #include "ui/Gizmo.h"
 #include "ui/FontAtlas.h"
 #include "ui/UiContext.h"
+#include "ui/UiEditor.h"   // 0.7.0: editor de UI dedicado (viewport 2D,
+                            // teclado in-app, menu contextual, diálogos)
+#include "ui/UiRuntime.h"  // 0.7.0: runtime da UI criável (draw/hit/ações)
 
 using namespace vv;
 
@@ -300,6 +303,118 @@ DrawStats g_lastUiStats;   // métricas do pass UI (disponíveis 1 frame depois)
 // toast (mensagem transitória acima da status line — feedback Save/Load/criação)
 char g_toast[96] = "";
 f32  g_toastT = 0.0f;
+void showToast(const char* msg);   // fwd: usada pelo feedCanvasPlay (abaixo)
+
+// ---- 0.7.0: UI criável em PLAY (hit-test + ações declarativas) -------------
+// estado do on-click: press ARMA (o slot fica reclamado — não vai à câmara
+// nem aos controlos), release DENTRO do mesmo elemento DISPARA a ação (o
+// gesto clássico de botão). Puro o suficiente p/ ser reproduzido no CI
+// (o hitTestCanvas/applyUiAction são afervéis; aqui só a sequência).
+struct PlayUiPress {
+    bool armed = false;
+    u32  slot = 0;
+    Handle tic{};
+    i32  element = -1;
+    i32  menuItem = -1;
+} g_playUi;
+
+// UiActionCtx do device: spawn liga ao createTicFromPreset (cubo/lit do
+// renderer); sceneExists consulta o manifesto do projeto; loadScene chega
+// na 0.7.1 (transições fade/slide) — sem callback a ação é HONESTA (toast
+// "0.7.1", nunca um sucesso falso).
+ui::UiActionCtx makeUiActionCtx() {
+    ui::UiActionCtx ctx;
+    ctx.sceneExists = [](const std::string& name, void*) -> bool {
+        if (!g_projectReady) {
+            return false;
+        }
+        const std::string rel =
+            std::string(Project::kDirScenes) + "/" + name + ".goni";
+        for (const std::string& s : g_project.scenes) {
+            if (s == rel) {
+                return true;
+            }
+        }
+        return false;
+    };
+    ctx.loadScene = nullptr;   // 0.7.1: Scene.Load/Transition em Play
+    ctx.spawnPreset = [](PresetKind kind, void*) -> Handle {
+        return createTicFromPreset(g_scene, kind, &g_cubeMesh,
+                                   g_renderer.litMaterial());
+    };
+    return ctx;
+}
+
+// hit-test dos canvases em Play (press/release); devolve a máscara de slots
+// reclamados pelos botões da UI (o dedo não vai aos TouchControls)
+u32 feedCanvasPlay(f32 w, f32 h) {
+    u32 claimed = 0;
+    for (u32 s = 0; s < kMaxPointerSlots; ++s) {
+        if (!g_input.pressed(s)) {
+            continue;
+        }
+        f32 x = 0.0f, y = 0.0f;
+        g_input.pos(s, x, y);
+        const ui::CanvasHit hit =
+            ui::hitTestCanvas(g_scene, x, y, w, h, g_ui.safeArea());
+        if (hit.valid) {
+            g_playUi.armed = true;
+            g_playUi.slot = s;
+            g_playUi.tic = hit.tic;
+            g_playUi.element = hit.element;
+            g_playUi.menuItem = hit.menuItem;
+            claimed |= 1u << s;
+        }
+    }
+    if (g_playUi.armed && g_input.released(g_playUi.slot)) {
+        f32 x = 0.0f, y = 0.0f;
+        g_input.pos(g_playUi.slot, x, y);
+        const ui::CanvasHit hit =
+            ui::hitTestCanvas(g_scene, x, y, w, h, g_ui.safeArea());
+        if (hit.valid && hit.tic == g_playUi.tic &&
+            hit.element == g_playUi.element) {
+            Tic* t = g_scene.get(hit.tic);
+            UiCanvas* c = t ? t->getComponent<UiCanvas>() : nullptr;
+            if (c && hit.element >= 0 &&
+                hit.element < static_cast<i32>(c->elements.size())) {
+                UiElement& e = c->elements[static_cast<size_t>(hit.element)];
+                const char* targetOverride = nullptr;
+                std::string tgt;
+                if (e.kind == UiElement::Kind::Menu && g_playUi.menuItem >= 0) {
+                    std::string label;
+                    if (ui::menuLineAt(e, static_cast<u32>(g_playUi.menuItem),
+                                       label, tgt)) {
+                        targetOverride = tgt.c_str();
+                    }
+                }
+                const ui::UiActionResult out =
+                    ui::applyUiAction(g_scene, e, makeUiActionCtx(),
+                                      targetOverride);
+                if (out.wantToast) {
+                    showToast(out.toast);
+                }
+                if (out.log[0] != '\0') {
+                    LOGI("%s", out.log);
+                }
+            }
+        }
+        g_playUi.armed = false;
+    }
+    return claimed;
+}
+
+// desenha TODOS os canvases ativos e visíveis (UI por cima da cena)
+void drawCanvasPlay(f32 w, f32 h) {
+    g_scene.forEachActive([&](const Tic& t) {
+        if (!t.visible) {
+            return;
+        }
+        if (const UiCanvas* c =
+                g_scene.components().uiCanvases().find(t.handle)) {
+            ui::drawCanvas(g_ui, *c, w, h, g_ui.safeArea());
+        }
+    });
+}
 
 // ---- 0.6.7: lifecycle GL -----------------------------------------------------
 // Contadores de janela: distinguem o 1º arranque (boot frio) das RE-CRIAÇÕES
@@ -746,6 +861,7 @@ const char* shortTexFormat(CompressedFormat f) {
 void enterPlayMode() {
     g_editor.playMode = true;
     editor::closeAllOverlays(g_editor);
+    g_playUi.armed = false;   // 0.7.0: nenhum on-click armado atravessa a transição
     playSnapshotCapture(g_scene, g_playSnap);
     LOGI("ui: modo play — snapshot de %u transforms / %u bodies",
          (unsigned)g_playSnap.transforms.size(),
@@ -856,6 +972,12 @@ void onAppCmd(android_app* app, i32 cmd) {
             }
             g_ui.init();
             g_ui.setFont(&g_font);
+            // 0.7.0: resolver de texturas da UI criável (elemento Image — ref
+            // relativa → Texture do GpuAssets; o mesmo cache do material)
+            g_ui.setImageResolver([](const std::string& ref) -> const Texture* {
+                std::string warn;
+                return g_gpu.texture(ref, &warn);
+            });
             // F3: geometria procedural do viewport (mesh partilhado dos presets)
             {
                 const CubeMeshData cube = makeCube(1.0f);
@@ -1014,6 +1136,9 @@ i32 onInputEvent(android_app* /*app*/, AInputEvent* event) {
 
 // pass 3D: desenha TODOS os TICs com MeshRenderer (F3) — já não é um cubo
 // hardcoded: o modelo vem do Transform3D do mesmo dono (cache world).
+// 0.7.0: TIC INVISÍVEL não desenha (gestão de TICs — física/lógica
+// continuam; só o render salta) e o TINT do MeshRenderer (cor por TIC,
+// sliders R/G/B do Inspector) vai ao drawMesh.
 DrawStats drawTics(const Mat4& vp) {
     DrawStats st{};
     const ComponentStore& comps = g_scene.components();
@@ -1023,11 +1148,15 @@ DrawStats drawTics(const Mat4& vp) {
         if (!mr.mesh) {
             continue;   // sem mesh (tag "none" de cena antiga) — nada a desenhar
         }
+        const Tic* owner = g_scene.get(mrs.owner(i));
+        if (owner && !owner->visible) {
+            continue;   // 0.7.0: invisível — o editor e o play NÃO desenham
+        }
         Mat4 model = Mat4::identity();
         if (const Transform3D* tr = comps.transforms().find(mrs.owner(i))) {
             model = tr->world;   // mantido por TransformSystem (grupo Update)
         }
-        st = st + g_renderer.drawMesh(*mr.mesh, model, vp, mr.texture);
+        st = st + g_renderer.drawMesh(*mr.mesh, model, vp, mr.texture, mr.tint);
     }
     return st;
 }
@@ -1086,18 +1215,30 @@ void frame() {
     TouchControls* tcDraw = nullptr;
     const f32 tcW = w - g_ui.safeLeft() - g_ui.safeRight();   // F4.2: área útil
     const f32 tcH = h - g_ui.safeTop() - g_ui.safeBottom();
-    const u32 claimed = feedTouchControls(tcW, tcH, tcDrawn, &tcDraw);
+    u32 claimed = feedTouchControls(tcW, tcH, tcDrawn, &tcDraw);
+
+    // 0.7.0: UI criável em PLAY — hit-test por cima dos controlos (press
+    // armado; o slot reclamado não vai à câmara); o DRAW acontece no bloco
+    // do play (depois da play bar, antes dos TouchControls)
+    u32 canvasClaimed = 0;
+    if (g_editor.playMode) {
+        canvasClaimed = feedCanvasPlay(w, h);
+    } else {
+        g_playUi.armed = false;
+    }
 
     // 0.6.9: gizmos — vp/base da câmara ANTES do orbit (o hit-test precisa
     // delas para reclamar o slot que apanha o gizmo). Só em EDITOR com TIC
     // selecionado que tenha Transform3D; o drag escreve no componente via
     // âncoras (feedGizmo) e o slot reclamado NÃO orbita.
+    // 0.7.0: também NÃO em modo UI (o viewport central é o editor 2D — os
+    // gizmos são 3D; o orbit também fica desligado no modo UI)
     u32 gizmoClaimed = 0;
     Tic* gizmoTic = g_scene.get(g_editor.selected);
     Transform3D* gizmoTr =
         (gizmoTic && gizmoTic->active) ? gizmoTic->getComponent<Transform3D>()
                                         : nullptr;
-    if (gizmo::visible(g_editor.playMode, gizmoTr != nullptr)) {
+    if (gizmo::visible(g_editor.playMode || g_editor.uiMode, gizmoTr != nullptr)) {
         const Mat4 gview = g_camera.view();
         const Mat4 gproj = g_camera.proj(w / h);
         const Mat4 gvp = Mat4::mul(gproj, gview);
@@ -1117,9 +1258,21 @@ void frame() {
     // 0.6.8: orbit DESATIVADO em play (guard playMode dentro — 1 dedo =
     // controlos); lógica extraída p/ editor:: (afervel no CI)
     // 0.6.9: claimed | gizmoClaimed — drag em gizmo NÃO orbita
+    // 0.7.0: orbit também DESATIVADO em modo UI (o viewport central é o
+    // editor 2D da UI — arrastar elementos não pode orbitar por baixo)
     editor::updateCameraOrbit(g_camera, g_orbit, g_input,
                                editor::centerRect(w, h, g_ui.safeArea()),
-                               claimed | gizmoClaimed, g_editor.playMode);
+                               claimed | gizmoClaimed | canvasClaimed,
+                               g_editor.playMode || g_editor.uiMode);
+
+    // 0.7.0 — DESSELECCIONAR: tap parado no vazio do viewport 3D limpa a
+    // seleção (só em editor 3D; o modo UI desseleciona o ELEMENTO no
+    // drawUiViewport, e a Hierarchy trata do seu vazio)
+    if (!g_editor.playMode && !g_editor.uiMode) {
+        editor::viewportTapClearsSelection(
+            g_editor, g_input, editor::centerRect(w, h, g_ui.safeArea()),
+            claimed | gizmoClaimed);
+    }
 
     // F4: base de movimento do input = câmara (stick-cima afasta da câmara)
     {
@@ -1143,10 +1296,11 @@ void frame() {
 
     if (g_editor.playMode) {
         // ---- 0.6.8: PLAY — janela própria ----------------------------------
-        // Viewport fullscreen (painéis/toolbar escondidos) + TouchControls
-        // (ancorados na safe-area — desenhados no bloco partilhado abaixo)
-        // + barra superior mínima. ORBIT DESATIVADO (o guard playMode do
-        // editor::updateCameraOrbit já correu acima — 1 dedo = controlos).
+        // Viewport fullscreen (painéis/toolbar escondidos) + UI CRIÁVEL por
+        // cima da cena (0.7.0 — canvases dos TICs ativos/visíveis) +
+        // TouchControls (ancorados na safe-area) + barra superior mínima.
+        // ORBIT DESATIVADO (o guard playMode do editor::updateCameraOrbit já
+        // correu acima — 1 dedo = controlos/botões da UI).
         const bool stop = editor::drawPlayBar(g_ui, g_input, w, h,
                                               static_cast<int>(g_fps + 0.5f));
         if (stop) {
@@ -1155,6 +1309,9 @@ void frame() {
             leavePlayMode();
             showToast("modo editor");
         }
+        // 0.7.0: UI criável POR CIMA da cena (antes dos controlos — os
+        // botões da UI ficam por baixo do joystick/jump quando sobrepõem)
+        drawCanvasPlay(w, h);
         // TouchControls por cima de tudo (só existem em play — o feed no
         // início do frame já devolveu 0 claimed e tcDrawn=false no editor)
         if (tcDrawn && tcDraw) {
@@ -1172,14 +1329,24 @@ void frame() {
     // ---- 0.6.8: EDITOR — toolbar + painéis + menus (como sempre) ----------
     // 0.6.9: gizmo PRIMEIRO (as linhas ficam POR BAIXO dos painéis —
     // z-order correto de editor) e só com seleção em EDITOR
-    if (gizmo::visible(g_editor.playMode, gizmoTr != nullptr)) {
+    // 0.7.0: gizmos só no modo 3D (o modo UI desenha o viewport 2D no
+    // MESMO sítio — nunca os dois)
+    if (gizmo::visible(g_editor.playMode || g_editor.uiMode, gizmoTr != nullptr)) {
         gizmo::drawGizmo(g_ui, vp, gizmoTr->pos,
                          gizmo::gizmoLength(g_camera.dist), g_gizmo.mode,
                          g_gizmo.hovered);
     }
     bool clicks[3] = {false, false, false};
     g_ui.toolbar(clicks);   // exatamente 3 botões (Menu, Play, Settings)
-    editor::drawGizmoToolbar(g_ui, g_input, g_gizmoMode);   // 0.6.9: M/R/E+Snap
+    // 0.7.0: separador "3D | UI" (a seguir aos 3 botões) + viewport 2D no
+    // modo UI (antes dos painéis — z-order de editor, como o gizmo)
+    editor::drawModeToggle(g_ui, g_editor);
+    if (g_editor.uiMode) {
+        editor::drawUiViewport(g_ui, g_scene, g_editor, g_input, w, h);
+    }
+    if (!g_editor.uiMode) {
+        editor::drawGizmoToolbar(g_ui, g_input, g_gizmoMode);   // 0.6.9: M/R/E+Snap
+    }
     if (clicks[0]) {
         g_editor.fileMenu = !g_editor.fileMenu;   // F3: Menu abre Save/Load
         g_editor.plusMenu = false;
@@ -1269,26 +1436,47 @@ void frame() {
     }
     g_prevAssetMenu = g_editor.assetMenu;
 
-    // F3: painéis do editor (Hierarquia esquerda, Inspector direita)
+    // F3: painéis do editor (Hierarquia esquerda, Inspector direita).
+    // 0.7.0: no modo UI com ELEMENTO selecionado o painel direito mostra o
+    // INSPECTOR DE UI (pos/size/cor/texto/visivel/âncoras/ação); sem elemento
+    // (ou em 3D) o Inspector de TICs de sempre.
     if (editor::drawHierarchy(g_ui, g_scene, g_editor)) {
         g_editor.plusMenu = true;   // "+" no cabeçalho abre os presets
         g_editor.fileMenu = false;
     }
-    editor::drawInspector(g_ui, g_scene, g_editor, &g_catalog);   // sliders + seletores
+    const bool uiInsp =
+        g_editor.uiMode && g_editor.selElement >= 0;
+    if (uiInsp) {
+        editor::drawUiInspector(g_ui, g_scene, g_editor, g_input);
+    } else {
+        editor::drawInspector(g_ui, g_scene, g_editor, &g_catalog);   // sliders + seletores
+    }
 
-    // overlay "+" → presets (cria e seleciona)
+    // overlay "+" → presets de TIC (3D) OU elementos de UI (modo UI, 0.7.0)
     if (g_editor.plusMenu) {
         const int choice = editor::drawPlusMenu(g_ui, g_input, w, h, g_editor);
         if (choice > 0) {
-            const PresetKind kind = static_cast<PresetKind>(choice - 1);
-            const Handle hnew = createTicFromPreset(g_scene, kind, &g_cubeMesh,
-                                                    g_renderer.litMaterial());
-            if (hnew.valid()) {
-                g_editor.selected = hnew;
-                char msg[64];
-                std::snprintf(msg, sizeof(msg), "%s criado", presetName(kind));
-                showToast(msg);
-                LOGI("editor: %s criado", presetName(kind));
+            if (g_editor.uiMode) {
+                // 0.7.0: cria o elemento no canvas do TIC selecionado (cria
+                // o canvas à primeira) e seleciona-o — WYSIWYG imediato
+                if (editor::uiAddElement(g_scene, g_editor,
+                                         static_cast<u32>(choice - 1), w, h)) {
+                    showToast("elemento UI criado");
+                    LOGI("editor: elemento UI criado (kind %d)", choice - 1);
+                } else {
+                    showToast("selecione um TIC na Hierarchy");
+                }
+            } else {
+                const PresetKind kind = static_cast<PresetKind>(choice - 1);
+                const Handle hnew = createTicFromPreset(g_scene, kind, &g_cubeMesh,
+                                                        g_renderer.litMaterial());
+                if (hnew.valid()) {
+                    g_editor.selected = hnew;
+                    char msg[64];
+                    std::snprintf(msg, sizeof(msg), "%s criado", presetName(kind));
+                    showToast(msg);
+                    LOGI("editor: %s criado", presetName(kind));
+                }
             }
         }
     }
@@ -1457,6 +1645,76 @@ void frame() {
                               g_logLines, g_logDumps);
     }
 
+    // 0.7.0 — GESTÃO DE TICs: menu contextual (⋮) → Renomear/Remover/
+    // Duplicar/Visibilidade; diálogo de remoção COM CONFIRMAÇÃO; teclado
+    // in-app (renomear/texto de elemento/alvo de ação). Por cima de tudo —
+    // a ordem de desenho é o z-order.
+    if (g_editor.contextMenu) {
+        Tic* ct = g_scene.get(g_editor.contextTic);
+        if (!ct) {
+            g_editor.contextMenu = false;   // o TIC morreu entretanto
+        } else {
+            const int ch =
+                editor::drawContextMenu(g_ui, g_input, w, h, g_editor,
+                                        ct->name.c_str(), ct->visible);
+            if (ch == 1) {
+                // RENOMEAR: teclado in-app (zero IME de sistema)
+                editor::openTextInput(g_editor, 0, g_editor.contextTic, -1,
+                                      ct->name.c_str());
+            } else if (ch == 2) {
+                // REMOVER: com confirmação (substitui o apagar sem aviso)
+                g_editor.removeDialog = true;
+            } else if (ch == 3) {
+                // DUPLICAR: todos os componentes por valor + nome único
+                const Handle dup =
+                    editor::duplicateTic(g_scene, g_editor.contextTic);
+                if (dup.valid()) {
+                    g_editor.selected = dup;
+                    showToast("TIC duplicado");
+                    if (const Tic* nd = g_scene.get(dup)) {
+                        LOGI("editor: TIC duplicado → '%s'", nd->name.c_str());
+                    }
+                }
+            } else if (ch == 4) {
+                // VISIBILIDADE: toggle (o olho da Hierarchy atalha o mesmo)
+                ct->visible = !ct->visible;
+            }
+        }
+    }
+    if (g_editor.removeDialog) {
+        Tic* ct = g_scene.get(g_editor.contextTic);
+        if (!ct) {
+            g_editor.removeDialog = false;
+        } else {
+            const int ch =
+                editor::drawRemoveDialog(g_ui, g_input, w, h, g_editor,
+                                         ct->name.c_str());
+            if (ch == 1) {
+                char gone[48];
+                std::snprintf(gone, sizeof(gone), "%.40s", ct->name.c_str());
+                g_scene.destroy(g_editor.contextTic);
+                if (g_editor.selected == g_editor.contextTic) {
+                    g_editor.selected = Handle::invalid();
+                    g_editor.selElement = -1;
+                }
+                showToast("TIC removido");
+                LOGI("editor: TIC '%s' removido", gone);
+            }
+        }
+    }
+    if (g_editor.textInput) {
+        const char* title = g_editor.textPurpose == 0 ? "RENOMEAR TIC"
+                            : g_editor.textPurpose == 2 ? "TEXTO DO ELEMENTO"
+                                                        : "ALVO DA ACAO";
+        const int ch =
+            editor::drawTextInput(g_ui, g_input, w, h, g_editor, title);
+        if (ch == 1) {
+            if (editor::commitTextInput(g_scene, g_editor)) {
+                showToast("aplicado");
+            }
+        }
+    }
+
     drawToast();
     statusLine(st3d, stGrid);
 
@@ -1472,10 +1730,11 @@ void android_main(android_app* app) {
     // F5.1-hotfix: log DUPLO (logcat + ficheiro) desde a 1ª linha.
     // O boot ainda não tem os paths da activity? O elog usa o fallback
     // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu
-    elog::info("G.One VV 0.6.10 — seletor de textura do Inspector de "
-               "verdade (wiring material/textura — fix do C33 0.6.9; "
-               "0.6.9 gizmos; 0.6.8 play mode; 0.6.7 lifecycle GL + gestão "
-               "de projetos)");
+    elog::info("G.One VV 0.7.0 — UI criável: editor de UI dedicado "
+               "(separador 3D|UI, WYSIWYG, ancoragens) + gestão completa de "
+               "TICs (desselecionar, menu contextual com renomear/remover/"
+               "duplicar, visibilidade, cor por TIC) + teclado in-app "
+               "(0.6.10 seletor de textura; 0.6.9 gizmos; 0.6.8 play mode)");
     {
         const char* root0 = app->activity
             ? (app->activity->externalDataPath ? app->activity->externalDataPath
@@ -1514,8 +1773,10 @@ void android_main(android_app* app) {
                    g_windowInits, g_windowTerms);
     }
     g_systems.clear();
-    g_editor = editor::EditorState{};   // inclui playMode = false (0.6.8)
+    g_editor = editor::EditorState{};   // inclui playMode = false (0.6.8) e
+                                        // uiMode/seleção de elemento (0.7.0)
     g_playSnap = PlaySnapshot{};
+    g_playUi = PlayUiPress{};   // 0.7.0: nenhum on-click de UI armado
     g_scene.clear();
     g_input.resetAll();
     g_project = Project{};

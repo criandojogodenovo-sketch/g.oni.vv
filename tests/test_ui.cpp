@@ -183,7 +183,7 @@ TEST(ui_inspector_sem_sobreposicao_glifos_c33) {
     const Tic* tic = e.scene.get(e.selected);
     const TextMetrics tm = e.ui.textMetrics();
     const InspProfile prof = inspectorProfile(*tic);
-    InspRow plan[20];
+    InspRow plan[32];
     const u32 n = inspectorPlan(prof, tm, true, plan);
     for (u32 i = 1; i < n; ++i) {
         EXPECT(plan[i].y > plan[i - 1].y);   // sequencial, sem reinício
@@ -241,7 +241,7 @@ TEST(ui_scroll_revela_ultimo_campo) {
     EXPECT(off > 0.0f);
 
     // a ÚLTIMA linha do plano fica INTEIRA dentro da região com o offset
-    InspRow plan[20];
+    InspRow plan[32];
     const u32 n = inspectorPlan(prof, tm, true, plan);
     const InspRow& last = plan[n - 1];
     const f32 lastTop = contentTop + last.y - off;
@@ -276,7 +276,7 @@ TEST(ui_slider_captura_dentro_do_scroll) {
     // da Liberation ~ iguais ao fallback) — derivado do PLANO com as métricas
     // reais para não divergir do desenho
     const TextMetrics tm = e.ui.textMetrics();
-    InspRow plan[20];
+    InspRow plan[32];
     const u32 n = inspectorPlan(inspectorProfile(*tic), tm, true, plan);
     f32 pxY = -1.0f;
     for (u32 i = 0; i < n; ++i) {
@@ -309,7 +309,7 @@ TEST(ui_tap_redespachado_botoes_do_plano) {
     const Tic* tic = e.scene.get(e.selected);
     const TextMetrics tm = e.ui.textMetrics();
     const InspProfile prof = inspectorProfile(*tic);
-    InspRow plan[20];
+    InspRow plan[32];
     const u32 n = inspectorPlan(prof, tm, true, plan);
     const UiRect panel = safe::inspectorPanelRect(kSW, kSH, safe::Insets{});
     const f32 contentTop = panel.y + kHeaderH + 4.0f;
@@ -337,8 +337,17 @@ TEST(ui_tap_redespachado_botoes_do_plano) {
     e.frame();
     EXPECT(e.st.assetMenu == 2);
 
-    // tap no botão "add TouchControls" → cria o componente no TIC
-    e.input.injectDown(0, panel.x + panel.w * 0.5f, contentTop + addTc->y + 10.0f);
+    // tap no botão "add TouchControls" → cria o componente no TIC.
+    // 0.7.0: o plano ganhou linhas (visivel + R/G/B) e o botão do fundo
+    // ficou ALÉM da 1ª página → ROLA até ao fundo e usa a posição COM o
+    // offset (o MESMO cálculo do re-despacho: contentTop + y − off)
+    e.frame();   // cria o slot de scroll do Inspector
+    const f32 contentH = inspectorContentHeight(prof, tm, true);
+    const f32 listH = panel.h - kHeaderH - 4.0f;
+    const f32 off = scroll::clampOffset(9999.0f, contentH, listH);
+    e.ui.scrollSetOffset(kInspectorScrollId, off);
+    e.input.injectDown(0, panel.x + panel.w * 0.5f,
+                       contentTop + addTc->y - off + 10.0f);
     e.input.injectUp(0);
     e.frame();
     EXPECT(e.scene.get(e.selected)->getComponent<TouchControls>() != nullptr);

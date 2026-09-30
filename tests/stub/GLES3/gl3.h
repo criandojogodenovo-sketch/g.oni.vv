@@ -12,6 +12,10 @@
 // render binda a textura aplicada (glBindTexture com o id certo + uHasTex=1
 // via glUniform1f; nullptr → uHasTex=0 SEM bind). Inócuo para os outros
 // testes (apenas grava números).
+//
+// 0.7.0 (cor por TIC): registo do glUniform3f (uTint do LitMaterial) — o
+// teste aferiu que o render aplica o tint do MeshRenderer (sliders R/G/B) e
+// que nullptr = branco (1,1,1). Mesmo padrão: grava, não interfere.
 #pragma once
 #include <cstdint>
 
@@ -32,6 +36,9 @@ struct Stats {
     int boundTextures = 0;
     unsigned int lastBoundTexture = 0;
     float lastUniform1f = -1.0f;
+    // 0.7.0: último uniform vec3 (uTint — cor por TIC)
+    float lastUniform3f[3] = {-1.0f, -1.0f, -1.0f};
+    int uniform3fCalls = 0;
 };
 inline Stats stats;              // inline C++17: 1 instância por binário
 inline void reset() { stats = Stats{}; }
@@ -132,7 +139,12 @@ inline GLint glGetUniformLocation(GLuint, const GLchar*) { return 0; }
 inline void glUniformMatrix4fv(GLint, GLsizei, GLboolean, const GLfloat*) {}
 inline void glUniform1i(GLint, GLint) {}
 inline void glUniform1f(GLint, GLfloat v) { glstub::stats.lastUniform1f = v; }
-inline void glUniform3f(GLint, GLfloat, GLfloat, GLfloat) {}
+inline void glUniform3f(GLint, GLfloat x, GLfloat y, GLfloat z) {
+    glstub::stats.lastUniform3f[0] = x;
+    glstub::stats.lastUniform3f[1] = y;
+    glstub::stats.lastUniform3f[2] = z;
+    ++glstub::stats.uniform3fCalls;
+}
 inline void glUniform2f(GLint, GLfloat, GLfloat) {}
 
 inline void glGenBuffers(GLsizei n, GLuint* t) { glstub::stats.genBuffers += (int)n; if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 1u + i; }

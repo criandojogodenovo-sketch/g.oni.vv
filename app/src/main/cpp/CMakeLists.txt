@@ -105,6 +105,9 @@ add_library(goni_vv SHARED
         components/InputMap.h
         components/TouchControls.h
         components/TouchControls.cpp
+        # 0.7.0: UI criável (UiCanvas — elementos + ações declarativas)
+        components/UiCanvas.h
+        components/UiCanvas.cpp
         physics/Shapes.h
         physics/Shapes.cpp
         physics/InputSource.h
@@ -132,6 +135,12 @@ add_library(goni_vv SHARED
         ui/UiContext.cpp
         ui/EditorUi.h
         ui/EditorUi.cpp
+        # 0.7.0: UI criável — runtime (layout ancorado/draw/hit-test/ações)
+        # e editor dedicado (viewport 2D WYSIWYG, teclado in-app, diálogos)
+        ui/UiRuntime.h
+        ui/UiRuntime.cpp
+        ui/UiEditor.h
+        ui/UiEditor.cpp
         # 0.6.9: gizmos de transformação (Mover/Rodar/Escalar — hit-test
         # 3D + drag com âncoras + desenho projetado em linhas de ecrã)
         ui/Gizmo.cpp

@@ -52,6 +52,10 @@ add_executable(test_core
         # F6: wiring do seletor de textura (dispatch puro + sequência do
         # main + bind no stub GL + round-trip .goni — o fix do C33 0.6.9)
         test_assetpick.cpp
+        # 0.7.0: UI criável — runtime (âncoras/hit-test/ações/serialização) e
+        # editor dedicado (viewport 2D, teclado in-app, gestão de TICs, cor)
+        test_uicanvas.cpp
+        test_uieditor.cpp
         ${CORE_DIR}/core/Scene.cpp
         ${CORE_DIR}/core/Time.cpp
         ${CORE_DIR}/core/ComponentRegistry.cpp
@@ -120,6 +124,10 @@ add_executable(test_core
         # (tests/stub) e os testes aferem os batches de CPU (sem GL real)
         ${CORE_DIR}/ui/UiContext.cpp
         ${CORE_DIR}/ui/EditorUi.cpp
+        # 0.7.0: UI criável (componente + runtime + editor dedicado)
+        ${CORE_DIR}/components/UiCanvas.cpp
+        ${CORE_DIR}/ui/UiRuntime.cpp
+        ${CORE_DIR}/ui/UiEditor.cpp
         # 0.6.9: gizmos (hit-test/drag/snapping GL-free + desenho em batch)
         ${CORE_DIR}/ui/Gizmo.cpp
         ${CORE_DIR}/ui/FontAtlas.cpp

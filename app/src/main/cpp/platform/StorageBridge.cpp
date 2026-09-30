@@ -778,7 +778,7 @@ SafIo* jniSafIo() {
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
     // log em ficheiro desde ANTES do android_main (fallback do device)
     vv::elog::init(vv::elog::androidFallbackDir());
-    vv::elog::info("jni: JNI_OnLoad — G.One VV 0.6.10 (registo explícito de "
+    vv::elog::info("jni: JNI_OnLoad — G.One VV 0.7.0 (registo explícito de "
                    "nativos; loadLibrary no Java — F5.4)");
 
     JNIEnv* env = nullptr;

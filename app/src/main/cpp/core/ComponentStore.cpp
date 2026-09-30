@@ -16,7 +16,8 @@ const ComponentStore& storeOf(const Scene* scene) {
 }
 
 // Ordem de registo FIXA — o serializer e os testes assumem estes ids:
-// 0=Transform3D, 1=MeshRenderer, 2=InputMap, 3=BodyComp, 4=TouchControls.
+// 0=Transform3D, 1=MeshRenderer, 2=InputMap, 3=BodyComp, 4=TouchControls,
+// 5=UiCanvas (0.7.0 — adicionado NO FIM: ids antigos intactos).
 ComponentStore::ComponentStore(Scene* owner) : scene_(owner) {
     registry_.add("Transform3D", [](ComponentStore& s, Handle h) {
         return s.add<Transform3D>(h) != nullptr;
@@ -33,6 +34,9 @@ ComponentStore::ComponentStore(Scene* owner) : scene_(owner) {
     registry_.add("TouchControls", [](ComponentStore& s, Handle h) {
         return s.add<TouchControls>(h) != nullptr;
     });
+    registry_.add("UiCanvas", [](ComponentStore& s, Handle h) {
+        return s.add<UiCanvas>(h) != nullptr;
+    });
 }
 
 void ComponentStore::removeAll(Handle h) {
@@ -41,6 +45,7 @@ void ComponentStore::removeAll(Handle h) {
     inputMaps_.remove(h);
     bodies_.remove(h);
     touchControls_.remove(h);
+    uiCanvases_.remove(h);
 }
 
 bool ComponentStore::hasAny(Handle h) const {
@@ -48,7 +53,8 @@ bool ComponentStore::hasAny(Handle h) const {
            meshRenderers_.find(h) != nullptr ||
            inputMaps_.find(h) != nullptr ||
            bodies_.find(h) != nullptr ||
-           touchControls_.find(h) != nullptr;
+           touchControls_.find(h) != nullptr ||
+           uiCanvases_.find(h) != nullptr;
 }
 
 } // namespace vv
