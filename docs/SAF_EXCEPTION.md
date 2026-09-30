@@ -79,3 +79,8 @@ Caminho alternativo se o Play recusar: voltar a um picker de ficheiro único
 - **F5.2 (0.6.2)**: SAF tree picker REMOVIDO (SafIo.java e SafIoJni.cpp
   apagados); All Files Access documentado como caminho primário; log viewer
   in-app (Settings → "Ver logs") funcional sem export.
+- **F5.3 (0.6.3)**: HANDSHAKE INVERTIDO — a VvActivity registra-se no
+  native (`nativeRegisterActivity` no onCreate + onResume); a causa única
+  de todas as pontes mortas 0.6.0→0.6.2 era o `initJava` do thread do glue
+  (`GetEnv` = `JNI_EDETACHED`); attach de threads nomeado + mensagens
+  honestas (docs/HANDSHAKE_AUDIT.md com a evidência do APK 0.6.2 real).

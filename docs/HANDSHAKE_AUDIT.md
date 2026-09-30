@@ -103,3 +103,24 @@ VvActivity.onResume()   → nativeRegisterActivity(this, "onResume")   ─┤ re
   Java" chama o export JNI diretamente contra um JNIEnv falso controlável),
   attach de threads, fluxo de permissão completo e regressão das mensagens
   (causa verdadeira vs sistema).
+
+## 5. Verificação (0.6.3)
+
+- **Suíte do core**: `tests/test_handshake.cpp` — a ponte JNI INTEIRA
+  (StorageBridge.cpp) compila na suíte com o fake JNI controlável
+  (`tests/stub/jni.h`); o teste chama `nativeRegisterActivity` diretamente
+  (o "stub Java" da TAREFA 5): registo onCreate, re-registo onResume
+  (GlobalRefs substituídos), registo parcial (método crítico ausente),
+  attach EDETACHED → `AttachCurrentThread('goni-engine')`, attach com
+  falha (rc no log), fluxo de permissão completo (diálogo → intent 4301 →
+  onActivityResult → fila → Granted + ação retomada), regressão das
+  mensagens honestas (causa ponte ≠ sistema) e `JNI_OnLoad` com 2 nativos.
+  254→264 testes.
+- **CI**: `check_main.sh` (sintaxe) + `link_parity.sh` (ligação dos 68 TUs
+  da app) verdes; gate NOVO `aapt2 dump xmltree` afere
+  hasCode/VvActivity/lib_name em TODO build; `verify-entry-symbols` exige
+  também `Java_vv_goni_VvActivity_nativeRegisterActivity` no `.dynsym`.
+- **Aceitação no C33** (log viewer mostra a sequência):
+  `java: onCreate → nativeRegisterActivity` →
+  `native: activity registada` →
+  `storage: All Files Access — handshake=1 supported=1 manager=…`

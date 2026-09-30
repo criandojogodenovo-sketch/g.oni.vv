@@ -1,8 +1,26 @@
-// tests/stub/jni.h — stub de hospedeiro: assinaturas mínimas de JNI para o
-// CHECK DE SINTAXE de platform/SafBridge.cpp e SafIoJni.cpp no CI (o NDK
-// tem o jni.h real; estes TU não são linkados no hospedeiro).
+// tests/stub/jni.h — FAKE JNI CONTROLÁVEL para o hospedeiro (F5.3).
+//
+// HISTÓRIA: era um stub mínimo de assinaturas para o CHECK DE SINTAXE de
+// StorageBridge.cpp no CI (o NDK tem o jni.h real). Com o handshake
+// INVERTIDO (F5.3), o StorageBridge.cpp passou a compilar DENTRO da suíte
+// de testes (tests/CMakeLists.txt) e o "stub Java regista activity" da
+// TAREFA 5 é literal: o teste chama Java_vv_goni_VvActivity_nativeRegisterActivity
+// diretamente contra este fake — o mesmo código que corre no device é
+// exercido no hospedeiro (registo, attach, fluxo de permissão, mensagens).
+//
+// O estado fake (g_jni) é uma variável inline C++17 — UMA instância por
+// binário, partilhada entre o TU do bridge e o TU de testes. reset() volta
+// ao estado inicial no início de cada caso.
+//
+// A build Android NUNCA vê este ficheiro (include dirs dos testes só).
 #pragma once
 #include <cstdint>
+#include <cstdarg>
+#include <cstring>
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
 
 typedef int32_t jint;
 typedef int64_t jlong;
@@ -13,10 +31,12 @@ typedef int16_t jshort;
 typedef float jfloat;
 typedef double jdouble;
 typedef jint jsize;
-typedef void* jmethodID;
 
 #define JNI_OK 0
 #define JNI_ERR (-1)
+#define JNI_EDETACHED (-2)
+#define JNI_EEXIST (-3)
+#define JNI_EINVAL (-4)
 #define JNI_VERSION_1_6 0x00010006
 #define JNI_TRUE 1
 #define JNI_FALSE 0
@@ -29,8 +49,10 @@ typedef _jobject* jclass;
 typedef _jobject* jstring;
 typedef _jobject* jbyteArray;
 typedef _jobject* jobjectArray;
+typedef void* jmethodID;
 
-struct JavaVM;   // forward (JNIEnv::GetJavaVM referencia antes da definição)
+struct JNIEnv;
+struct JavaVM;
 
 typedef struct {
     const char* name;
@@ -38,23 +60,195 @@ typedef struct {
     void* fnPtr;
 } JNINativeMethod;
 
+// F5.3: argumentos do attach (o nome da thread aparece nos logs do device)
+typedef struct JavaVMAttachArgs {
+    jint version;
+    const char* name;
+    jobject group;
+} JavaVMAttachArgs;
+
+// helper: ponteiro fake a partir de um valor pequeno (os ponteiros opacos
+// do fake nunca são desreferenciados — só comparados/gravados)
+template <typename T>
+inline T fakePtr(intptr_t v) {
+    return reinterpret_cast<T>(static_cast<intptr_t>(v));
+}
+
+// ---- estado fake global (inline = 1 instância por binário) ------------------
+struct JniFake {
+    void reset() { *this = JniFake{}; }
+
+    // env fake entregue a Java/attach (ponteiro opaco — o fake JNIEnv vive
+    // por baixo); as chamadas reais passam-no de volta como JNIEnv*
+    JNIEnv* env = fakePtr<JNIEnv*>(0x3000);
+
+    // VM: thread atual anexado? (GetEnv: anexado → OK; senão → EDETACHED,
+    // como a JNI real). attach_rc/getjavavm_rc simulam falhas com código.
+    bool vm_attached = false;
+    int  attach_rc = 0;      // rc do AttachCurrentThread (0 = OK)
+    int  getjavavm_rc = 0;   // rc do GetJavaVM (0 = OK)
+    std::string attached_thread_name;    // nome passado no attach
+    int  attach_calls = 0;
+    int  detach_calls = 0;
+
+    // FindClass / métodos
+    bool environment_class_ok = true;
+    bool vvactivity_class_ok = true;
+    std::vector<std::string> find_class_calls;
+    std::map<std::string, bool> fail_methods;   // nome → devolver nullptr
+    std::map<void*, std::string> mid_names;     // methodID → nome
+    int  mid_counter = 0;
+
+    // registo de nativos (RegisterNatives)
+    int register_natives_calls = 0;
+    std::vector<std::string> register_natives_names;
+
+    // chamadas gravadas
+    std::vector<std::pair<std::string, long>> void_calls;   // (método, arg int)
+    std::vector<std::string> static_bool_calls;
+    bool manager_result = false;     // valor de isExternalStorageManager()
+    int  export_int_result = 3;      // resultado do exportLogsToDownloads
+    std::string last_new_string;     // última NewStringUTF
+
+    // strings fabricadas (NewStringUTF → GetStringUTFChars)
+    std::map<void*, std::string> strings;
+    int refs_new = 0;
+    int refs_del = 0;
+
+    jstring newString(const char* s) {
+        void* p = reinterpret_cast<void*>(static_cast<intptr_t>(
+            0x50000000L + strings.size()));
+        strings[p] = s;
+        return static_cast<jstring>(p);
+    }
+};
+
+inline JniFake g_jni;
+
+// instância única da VM fake (os testes passam fakeVm() ao JNI_OnLoad)
+inline JavaVM* fakeVm();
+
+// ---- JavaVM fake ------------------------------------------------------------
+struct JavaVM {
+    jint GetEnv(void** pe, jint) {
+        if (g_jni.vm_attached) {
+            *pe = fakePtr<void*>(0x3000);
+            return JNI_OK;
+        }
+        return JNI_EDETACHED;
+    }
+    jint AttachCurrentThread(JNIEnv** pe, void* thr_args) {
+        ++g_jni.attach_calls;
+        if (g_jni.attach_rc == 0) {
+            g_jni.vm_attached = true;
+            if (thr_args) {
+                g_jni.attached_thread_name =
+                    static_cast<JavaVMAttachArgs*>(thr_args)->name
+                        ? static_cast<JavaVMAttachArgs*>(thr_args)->name
+                        : "";
+            }
+            *pe = fakePtr<JNIEnv*>(0x3000);
+        }
+        return static_cast<jint>(g_jni.attach_rc);
+    }
+    jint DetachCurrentThread() {
+        ++g_jni.detach_calls;
+        g_jni.vm_attached = false;
+        return JNI_OK;
+    }
+};
+
+inline JavaVM* fakeVm() {
+    static JavaVM vm;   // única por binário (C++11: init thread-safe)
+    return &vm;
+}
+
+// ---- JNIEnv fake ------------------------------------------------------------
 struct JNIEnv {
-    jclass GetObjectClass(jobject) { return nullptr; }
-    jclass FindClass(const char*) { return nullptr; }
-    jint RegisterNatives(jclass, const JNINativeMethod*, jint) { return JNI_OK; }
-    jmethodID GetMethodID(jclass, const char*, const char*) { return nullptr; }
-    jmethodID GetStaticMethodID(jclass, const char*, const char*) { return nullptr; }
+    jclass GetObjectClass(jobject o) { return o; }
+
+    jclass FindClass(const char* n) {
+        g_jni.find_class_calls.push_back(n);
+        if (std::strcmp(n, "android/os/Environment") == 0) {
+            return g_jni.environment_class_ok ? fakePtr<jclass>(0x1001)
+                                              : nullptr;
+        }
+        if (std::strcmp(n, "vv/goni/VvActivity") == 0) {
+            return g_jni.vvactivity_class_ok ? fakePtr<jclass>(0x1002)
+                                             : nullptr;
+        }
+        return nullptr;
+    }
+
+    jint RegisterNatives(jclass, const JNINativeMethod* m, jint n) {
+        ++g_jni.register_natives_calls;
+        for (jint i = 0; i < n; ++i) {
+            g_jni.register_natives_names.push_back(m[i].name);
+        }
+        return JNI_OK;
+    }
+
+    jmethodID GetMethodID(jclass, const char* n, const char* sig) {
+        if (g_jni.fail_methods[n]) {
+            return nullptr;
+        }
+        void* mid = reinterpret_cast<void*>(
+            static_cast<intptr_t>(0x2000 + ++g_jni.mid_counter));
+        g_jni.mid_names[mid] = n;
+        return static_cast<jmethodID>(mid);
+    }
+
+    jmethodID GetStaticMethodID(jclass, const char* n, const char* sig) {
+        if (g_jni.fail_methods[n]) {
+            return nullptr;
+        }
+        void* mid = reinterpret_cast<void*>(
+            static_cast<intptr_t>(0x2000 + ++g_jni.mid_counter));
+        g_jni.mid_names[mid] = n;
+        return static_cast<jmethodID>(mid);
+    }
+
     jobject CallObjectMethod(jobject, jmethodID, ...) { return nullptr; }
-    jint CallIntMethod(jobject, jmethodID, ...) { return 0; }
+
+    jint CallIntMethod(jobject, jmethodID, ...) {
+        return static_cast<jint>(g_jni.export_int_result);
+    }
+
     jobject CallStaticObjectMethod(jclass, jmethodID, ...) { return nullptr; }
-    jboolean CallStaticBooleanMethod(jclass, jmethodID, ...) { return JNI_FALSE; }
-    void CallVoidMethod(jobject, jmethodID, ...) {}
-    jobject NewGlobalRef(jobject o) { return o; }
-    void DeleteGlobalRef(jobject) {}
+
+    jboolean CallStaticBooleanMethod(jclass, jmethodID, ...) {
+        g_jni.static_bool_calls.push_back("isExternalStorageManager");
+        return g_jni.manager_result ? JNI_TRUE : JNI_FALSE;
+    }
+
+    void CallVoidMethod(jobject, jmethodID m, ...) {
+        // gravar o método + o 1º vararg inteiro (request code do
+        // openAllFilesSettings(4301) — exatamente o que o device passa)
+        va_list ap;
+        va_start(ap, m);
+        const jint arg = va_arg(ap, jint);
+        va_end(ap);
+        const std::string& name = g_jni.mid_names.count(reinterpret_cast<void*>(m))
+                                      ? g_jni.mid_names[reinterpret_cast<void*>(m)]
+                                      : "?";
+        g_jni.void_calls.push_back({name, static_cast<long>(arg)});
+    }
+
+    jobject NewGlobalRef(jobject o) { ++g_jni.refs_new; return o; }
+    void DeleteGlobalRef(jobject) { ++g_jni.refs_del; }
     void DeleteLocalRef(jobject) {}
-    jstring NewStringUTF(const char*) { return nullptr; }
-    const char* GetStringUTFChars(jstring, jboolean*) { return nullptr; }
+
+    jstring NewStringUTF(const char* s) {
+        g_jni.last_new_string = s ? s : "";
+        return g_jni.newString(s ? s : "");
+    }
+
+    const char* GetStringUTFChars(jstring s, jboolean*) {
+        auto it = g_jni.strings.find(reinterpret_cast<void*>(s));
+        return it != g_jni.strings.end() ? it->second.c_str() : "";
+    }
     void ReleaseStringUTFChars(jstring, const char*) {}
+
     jboolean ExceptionCheck() { return JNI_FALSE; }
     void ExceptionClear() {}
     jsize GetArrayLength(jbyteArray) { return 0; }
@@ -62,21 +256,10 @@ struct JNIEnv {
     void GetByteArrayRegion(jbyteArray, jsize, jsize, jbyte*) {}
     void SetByteArrayRegion(jbyteArray, jsize, jsize, const jbyte*) {}
     jobject GetObjectArrayElement(jobjectArray, jsize) { return nullptr; }
-    // F5.3: GetJavaVM é usado no registo da activity (handshake invertido)
-    jint GetJavaVM(JavaVM**) { return JNI_OK; }
-};
 
-struct JavaVM {
-    jint GetEnv(void**, jint) { return JNI_OK; }
-    // F5.3 (TAREFA 3): attach de threads — só assinaturas para o CHECK DE
-    // SINTAXE de StorageBridge.cpp no hospedeiro (o NDK tem o jni.h real)
-    jint AttachCurrentThread(JNIEnv**, void*) { return JNI_OK; }
-    jint DetachCurrentThread() { return JNI_OK; }
-};
-
-// F5.3: argumentos do attach (nome da thread aparece nos logs do device)
-struct JavaVMAttachArgs {
-    jint version;
-    const char* name;
-    jobject group;
+    // F5.3: registo da activity (handshake invertido)
+    jint GetJavaVM(JavaVM** vm) {
+        *vm = fakeVm();
+        return static_cast<jint>(g_jni.getjavavm_rc);
+    }
 };

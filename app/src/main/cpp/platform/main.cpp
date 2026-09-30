@@ -1091,7 +1091,7 @@ void android_main(android_app* app) {
     // O boot ainda não tem os paths da activity? O elog usa o fallback
     // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu
     // lá (JNI_OnLoad corre ANTES do android_main).
-    elog::info("G.One VV 0.6.2 — F5.2 (All Files Access + File API direta + log viewer)");
+    elog::info("G.One VV 0.6.3 — F5.3 (handshake Java↔native + All Files Access honesto)");
     {
         const char* root0 = app->activity
             ? (app->activity->externalDataPath ? app->activity->externalDataPath

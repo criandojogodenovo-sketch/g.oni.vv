@@ -1,4 +1,4 @@
-# G.One VV 0.6.2 — F5.2 (All Files Access + File API direta + log viewer in-app)
+# G.One VV 0.6.3 — F5.3 (handshake Java↔native invertido + All Files Access honesto)
 
 Engine com editor, projeto `.goni` e AGORA maturação de assets: compressão
 de texturas de hardware (ETC2 garantido em GLES3; ASTC 4x4/6x6 quando a
@@ -16,6 +16,54 @@ OBJ/glTF/GLB, loader de PNG com mipmaps, export (cena + OBJ round-trip),
 ResourceManager com cache e editor que aceita assets importados. Mobile-first:
 arm64-v8a, minSdk 24, landscape travado (`sensorLandscape`). Device de teste:
 Realme C33 (720x1600).
+
+## Escopo F5.3 (implementado)
+Objetivo: a ponte Java↔native LIGAR DE VERDADE em runtime (handshake
+INVERTIDO: a activity Java registra-se no native), para o fluxo All Files
+Access funcionar no C33: diálogo → settings do app → permissão ativada →
+File API direta. Mensagens de erro honestas (causa real).
+
+No C33 (0.6.2), o engine.log mostrava `jni: initJava env/activity
+indisponíveis (vm=0x…)` → `supported=0 manager=0 modo app-private` →
+`export falhou (copied=0)`. Causa única: o `android_main` corre no thread do
+glue (pthread) que NÃO está anexado à VM — `GetEnv` devolvia `JNI_EDETACHED`
+e a ponte morria no arranque. As auditorias estáticas (manifest/dex/símbolos)
+estavam corretas — o bug era o handshake runtime
+(docs/HANDSHAKE_AUDIT.md tem o despejo do manifest do APK 0.6.2 REAL).
+
+1. **APK real verificado (item 1)** — o 0.6.2 do CI despejado:
+   `hasCode=true`, launcher=`vv.goni.VvActivity`, `lib_name=goni_vv` —
+   o sistema instancia a VvActivity; o dex não tinha onCreate/onResume
+   (nunca se registrava). Gate NOVO no CI (`aapt2 dump xmltree`) afere o
+   manifest binário em TODO build.
+2. **Handshake invertido (item 2)** — `VvActivity.onCreate()` chama
+   `nativeRegisterActivity(this,"onCreate")` (após `super.onCreate`, quando
+   o loadLibrary/JNI_OnLoad já correu); `onResume()` reforça (idempotente —
+   GlobalRefs substituídos). O native guarda `JavaVM` + `GlobalRef` + métodos
+   e loga: `java: onCreate → nativeRegisterActivity` →
+   `native: activity registada` → no boot `handshake=1`. A chamada
+   `initJava` do android_main foi REMOVIDA (o native não descobre a
+   activity sozinho — era a causa).
+3. **Attach de threads (item 3)** — qualquer thread da engine que chame
+   Java faz `AttachCurrentThread` NOMEADO (`goni-engine`, via
+   `JavaVMAttachArgs`) e PERMANENTE (sem Detach); decisões na tabela pura
+   `platform/JniAttach.h` (JNI_OK→usa; EDETACHED→attach; resto→falha com o
+   CÓDIGO no log). Nenhum `JNIEnv*` assumido não-nulo.
+4. **Fluxo All Files pós-handshake + mensagens honestas (item 4)** —
+   diálogo → `ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION` →
+   `isExternalStorageManager()` no retorno → File API direta. Se o
+   handshake falhar, toast/log diz **"ponte Java indisponível (handshake)"**
+   — NUNCA "sistema sem All Files Access" (0.6.2 mentia sobre a causa;
+   `blockReason`/`blockMessage` em `StoragePerm.h` distinguem ponte vs
+   sistema, testados no CI).
+5. **Testes CI (item 5)** — `tests/test_handshake.cpp` + a ponte JNI
+   INTEIRA compilando na suíte com um fake JNI controlável
+   (`tests/stub/jni.h`): handshake simulado (o teste chama
+   `nativeRegisterActivity` — o papel do "stub Java"), re-registro
+   onResume, registo parcial, attach com/sem falha (rc logado), fluxo de
+   permissão completo (diálogo → intent 4301 → onActivityResult → fila →
+   Granted + ação retomada), regressão das mensagens honestas e
+   `JNI_OnLoad` com 2 nativos. 254→264 testes.
 
 ## Escopo F5.2 (implementado)
 Objetivo: o fluxo correto de permissões de armazenamento (o mesmo do Godot) +
@@ -247,6 +295,7 @@ Sem física (BodyComp é F4), sem luzes, sem assets, sem animação, sem linguag
 
 ## Histórico
 - **F5.2 (0.6.2)**: All Files Access (diálogo → settings → File API direta) + remoção do SAF tree picker + log viewer in-app + boot self-check com errno — 254 testes.
+- **F5.3 (0.6.3)**: handshake Java↔native INVERTIDO (VvActivity regista-se no native — onCreate + onResume; causa única das pontes mortas 0.6.0→0.6.2: GetEnv EDETACHED no thread do glue) + attach de threads nomeado + mensagens honestas ("ponte Java indisponível (handshake)") + gate do manifest binário no CI — 264 testes (docs/HANDSHAKE_AUDIT.md).
 - **F5.1 (0.6.0)**: maturação de assets em 4 sub-blocos.
 - **F5.1-hotfix (0.6.1)**: crash dump permanente + engine.log com rotação e boot progress por passos + export p/ Downloads/GOneVV/logs (MediaStore) + auditoria/fix da ponte JNI SAF (JNI_OnLoad/RegisterNatives, higiene de exceções, resultado SAF no thread da engine) — 243 testes. **A** — vendors
   etcpak 2.1 (BSD) e astc-encoder 5.3.0 (Apache-2.0), CompressedImage com
@@ -334,6 +383,29 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — F5.3 (handshake + All Files Access real)
+1. Instalar o APK **0.6.3** → confirmar "0.6.3" nas infos.
+2. **Handshake no log viewer** (SEM PC): abrir a app → Settings → **"Ver
+   logs"** → a sequência completa tem de aparecer:
+   `java: onCreate → nativeRegisterActivity` →
+   `native: activity registada` →
+   `jni: handshake OK — vm=… openAllFiles=1 exportLogs=1` →
+   `storage: All Files Access — handshake=1 supported=1 manager=? …`
+   (`manager=1` se a permissão já estava concedida; `0` na 1ª instalação).
+3. **Import**: Menu → **Importar…** → o diálogo "Precisa de acesso a todos
+   os ficheiros…" aparece → **Permitir** → abre a janela de permissões DO
+   app ("All files access") → ativar o interruptor → voltar → toast "acesso
+   concedido — File API direta" e a lista de Download/Documents abre (import
+   retomado). 4. **Export**: com um TIC com mesh → Menu → **Export
+   Downloads** → toast "exportado: Download/GOneVV/export/…" e o OBJ no
+   gestor de ficheiros.
+5. **Mensagem honesta (se algo falhar)**: se a ponte Java estiver em baixo,
+   o toast/log diz **"ponte Java indisponível (handshake)"** — NUNCA
+   "sistema sem All Files Access" (a causa real). O C33 (Android 12) SUPORTA
+   All Files Access — se viu essa mensagem no 0.6.2, era a mentira antiga.
+6. **Regressões**: F5.2 (diálogo/perm/fallback/log viewer), F5.1 (status
+   line `etc2/astc4`, cache `c1/1`), F5 (Save/Load), F4.2 (Play/scroll).
 
 ## Verificação no Realme C33 (dono) — F5.2 (All Files Access + log viewer)
 1. Instalar o APK **0.6.2** → confirmar "0.6.2" nas infos.

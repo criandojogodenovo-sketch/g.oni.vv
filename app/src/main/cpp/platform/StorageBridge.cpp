@@ -348,7 +348,7 @@ bool jniExportLogsToDownloads(int* outCount) {
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
     // log em ficheiro desde ANTES do android_main (fallback do device)
     vv::elog::init(vv::elog::androidFallbackDir());
-    vv::elog::info("jni: JNI_OnLoad — G.One VV 0.6.2 (registo explícito de "
+    vv::elog::info("jni: JNI_OnLoad — G.One VV 0.6.3 (registo explícito de "
                    "nativos; handshake invertido — F5.3)");
 
     JNIEnv* env = nullptr;

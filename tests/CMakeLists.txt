@@ -12,6 +12,7 @@ add_executable(test_core
         test_main.cpp
         test_logs_crash.cpp
         test_storageperm.cpp
+        test_handshake.cpp
         test_ui.cpp
         test_project.cpp
         test_import_obj.cpp
@@ -106,6 +107,11 @@ add_executable(test_core
         ${CORE_DIR}/platform/EngineLog.cpp
         ${CORE_DIR}/platform/FileApi.cpp
         ${CORE_DIR}/platform/CrashHandler.cpp
+        # F5.3: a PONTE JNI inteira compila na suíte com o fake JNI
+        # (tests/stub/jni.h) — o handshake inverso é testado no hospedeiro
+        # (o teste chama Java_vv_goni_VvActivity_nativeRegisterActivity
+        # diretamente, o papel do "stub Java")
+        ${CORE_DIR}/platform/StorageBridge.cpp
         ${CORE_DIR}/render/Renderer.cpp
         ${CORE_DIR}/render/Mesh.cpp
         ${CORE_DIR}/render/Material.cpp
