@@ -1248,6 +1248,8 @@ void closeAllOverlays(EditorState& st) {
     st.textInput = false;
     st.elDrag = false;
     st.scenesMenu = false;
+    st.fileBrowser = false;   // 0.7.2: o browser também fecha ao entrar em play
+    st.applyAsk = false;
 }
 
 // Orbit da câmara — extraído do main.cpp (era globais + função estática).

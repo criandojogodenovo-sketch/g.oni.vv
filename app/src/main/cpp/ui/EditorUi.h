@@ -115,6 +115,8 @@ struct EditorState {
     bool   removeDialog = false;    // confirmação de remoção (substitui o
                                     // "apagar" sem confirmação)
     bool   scenesMenu = false;      // 0.7.1: overlay CENAS (lista/nova/trocar)
+    bool   fileBrowser = false;     // 0.7.2: overlay NAVEGADOR de ficheiros
+    bool   applyAsk = false;        // 0.7.2: diálogo "aplicar ao TIC?" pós-import
 
     // desselecionar no viewport 3D: arm no press, limpa no release se o dedo
     // não se mexeu (tap ≠ drag de orbit)

@@ -320,6 +320,16 @@ constexpr u64 kUiInspStyle  = 8017;   // 0.7.1: "estilo: fade|slide" (trans)
 // inspector/logs (acima)
 constexpr u64 kUiInspScrollId = 46;
 
+// 0.7.2 — navegador de ficheiros: raízes 6850..6854, subir 6860, fechar
+// 6899, linhas da lista 6870+; diálogo aplicar-após-import 6900/6901
+constexpr u64 kBrowserRootBase = 6850;
+constexpr u64 kBrowserUpId     = 6860;
+constexpr u64 kBrowserRowBase  = 6870;
+constexpr u64 kBrowserCloseId  = 6899;
+constexpr u64 kApplyYesId      = 6900;
+constexpr u64 kApplyNoId       = 6901;
+constexpr u64 kBrowserScrollId = 45;   // região de scroll da lista
+
 // presets de ELEMENTO no "+" do modo UI (mesma faixa 20+i do menu de TICs —
 // os menus são mutuamente exclusivos: o + abre um OU outro conforme o modo)
 // 0=Panel, 1=Label, 2=Button, 3=Image (0.7.3 acrescenta Menu/Card/Article)

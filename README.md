@@ -1,4 +1,4 @@
-# G.One VV 0.7.1 — cenas múltiplas + transições fade/slide (0.7.0: UI criável + gestão de TICs; 0.6.10: seletor de textura)
+# G.One VV 0.7.2 — import robusto: navegador + galeria + aplicar (0.7.1: cenas + transições; 0.7.0: UI criável + gestão de TICs)
 
 Engine com editor, projeto `.goni` e maturação de assets (compressão ETC2/ASTC
 com cache, extração de texturas glTF/GLB, import OBJ/glTF/GLB/PNG, export
@@ -6,7 +6,40 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 (`sensorLandscape`). Devices de teste: Realme C33 (720x1600) e Realme
 RMX3624 (Android 13).
 
-## Escopo 0.7.1 (implementado — F6: cenas múltiplas + transições)
+## Escopo 0.7.2 (implementado — F6: import robusto — navegador + galeria + aplicar)
+
+**NAVEGADOR DE FICHEIROS IN-APP** (Importar… abre o NAVEGADOR — substitui a
+lista fixa Download/Documents da 0.6.x):
+
+- **Navegar QUALQUER pasta** do armazenamento (com o All Files Access
+  concedido): diretorias primeiro (ordenadas), ficheiros só os suportados
+  (.obj/.gltf/.glb/.png — case-insensitive); subir com "^ Subir" (a raiz
+  fica na raiz); a lista faz scroll (id 45) quando excede 8 linhas;
+- **A GALERIA nas raízes navegáveis**: [Raiz][Download][Docs][Camera]
+  [Pictures] — DCIM/Camera (fotos da câmara) e Pictures entram como raízes
+  próprias (um toque chega);
+- **O CAMINHO é VISÍVEL no topo** do overlay: o caminho inteiro quando
+  cabe; quando não cabe corta o INÍCIO e guarda o FIM ("…DCIM/Camera" — é
+  onde o dono está);
+- **Pasta vazia/sem acesso → mensagem COM O CAMINHO** dentro do overlay
+  (nunca um toast cego); o opendir falho também loga o errno no engine.log;
+- **Aplicar-após-import**: ao importar com um TIC selecionado (com
+  MeshRenderer), a engine PERGUNTA "Aplicar ao TIC?" — Sim aplica já a
+  textura/mesh pelo MESMO caminho do seletor do Inspector
+  (`applyAssetPick`: ref do projeto + resolvers de GPU + toast/log
+  honestos); Nao deixa só importado (aplicável depois nos seletores).
+
+Testes 372→380 (+8 em `test_browser.cpp`): `listDirEntries` (diretorias
+primeiro ordenadas, ficheiros suportados com .PNG case-insensitive,
+subpastas, pasta inexistente → false), `parentPath`, raízes com a galeria,
+rótulo do caminho (inteiro quando cabe; corta o início guardando o fim;
+nunca excede a largura), mensagem vazia COM O CAMINHO, overlay (raízes
+1..5 / subir 6 / entradas 7+; pasta vazia desenha a mensagem; fora
+fecha), diálogo aplicar (Nao não mexe; Sim liga texture+texPath pelo
+caminho do seletor) e e2e do import (listar → ler → gravar no projeto →
+catálogo → aplicar no TIC).
+
+## Escopo 0.7.1 (histórico — F6: cenas múltiplas + transições)
 
 **CENAS MÚLTIPLAS** — cada cena é um `.goni` próprio no manifesto do
 projeto (`Project::scenes`; a estrutura já existia desde a F5 — a 0.7.1
@@ -687,6 +720,33 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.7.2 (import robusto; APK CUMULATIVO)
+
+Instalar o APK 0.7.2 (artifact `goni-vv-0.7.2-release-signed` do run do
+fecho). Roteiro cumulativo — o da 0.7.1 continua a aplicar-se:
+
+1. **Navegador**: Menu → Importar… → abre o NAVEGADOR na Download (com o
+   all-files concedido); o CAMINHO atual aparece no topo (barra escura);
+2. **Galeria**: tocar "Camera" → as fotos de DCIM/Camera aparecem
+   ("tex: IMG_….jpg" não — só .png/.obj/.gltf/.glb; fotos da câmara em
+   .png aparecem); "Pictures" idem; "Raiz" despeja tudo o que há;
+3. **Subir/descer**: tocar uma pasta entra ("^ Subir" volta); na raiz o
+   Subir fica na raiz;
+4. **Pasta vazia**: entrar numa pasta sem ficheiros suportados → a
+   mensagem "(vazio) <caminho>" aparece DENTRO do overlay (nunca um toast
+   que não diz onde);
+5. **Importar + aplicar**: selecionar um TIC com mesh → Importar… →
+   navegar até um .png → tocar → pergunta "Aplicar 'x.png' ao TIC?" →
+   Sim → a textura liga (Inspector "tex: x.png"; o cubo mostra a imagem);
+   Nao → fica só importado (aplicável depois no seletor tex:);
+6. **Sem seleção**: importar sem TIC selecionado → só o toast
+   "importado: textures/x.png" (sem pergunta);
+7. **Permissão**: sem all-files → o diálogo de armazenamento (o fluxo da
+   0.6.10 continua); "Raiz" numa pasta sem acesso → "(sem acesso)
+   <caminho>" + errno no engine.log;
+8. **Regressões**: cenas/transições (0.7.1), UI criável/gestão de TICs
+   (0.7.0), seletor de textura do Inspector, export, logs.
 
 ## Verificação no Realme C33 (dono) — 0.7.1 (cenas múltiplas + transições; APK CUMULATIVO)
 

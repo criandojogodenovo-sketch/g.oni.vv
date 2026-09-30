@@ -22,6 +22,7 @@
 // Visibilidade (toggle). O olho na Hierarchy atalha a visibilidade.
 #include "components/UiCanvas.h"
 #include "core/Handle.h"
+#include "platform/FileApi.h"   // 0.7.2: DirEntry do navegador
 #include "ui/EditorLayout.h"
 #include "ui/SafeArea.h"
 #include "ui/ScrollMath.h"
@@ -171,6 +172,31 @@ bool commitTextInput(Scene& scene, EditorState& st);
 // da engine são PascalCase; o buffer fica uniforme), dígitos, '_', '-',
 // espaço. Filtro defensivo (o teclado só OFERECE estas teclas).
 bool uiTextCharAllowed(char c);
+
+// ---- 0.7.2: navegador de ficheiros + aplicar-após-import ------------------
+
+// rótulo do CAMINHO atual (mostra ONDE procura; quando não cabe corta o
+// INÍCIO e guarda o FIM: "...DCIM/Camera")
+std::string browserPathLabel(const std::string& cwd, f32 maxW,
+                             f32 (*measure)(const std::string&, void*),
+                             void* user);
+
+// mensagem de pasta VAZIA / sem acesso COM O CAMINHO (nunca um toast cego)
+std::string browserEmptyMessage(const std::string& cwd, bool opendirFailed);
+
+// overlay NAVEGADOR (0.7.2): raízes (Raiz/Download/Docs/Camera/Pictures) +
+// [^ Subir] + lista com scroll (id 45 — diretorias primeiro) + caminho no
+// TOPO. Devolve: 0 nada; 1..5 = raiz i; 6 = subir; 7.. = entrada (pick−7).
+// Fecha com "fechar" ou toque fora (muta st.fileBrowser).
+int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                    EditorState& st, const std::string& cwd,
+                    const std::vector<fileapi::DirEntry>& entries,
+                    bool opendirFailed);
+
+// diálogo APLICAR-APÓS-IMPORT: 0 nada / 1 = Sim (aplica) / 2 = Nao.
+// Fecha com toque fora (= Nao).
+int drawApplyDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                    EditorState& st, const char* fileName, const char* ticName);
 
 } // namespace editor
 } // namespace vv

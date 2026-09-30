@@ -59,6 +59,9 @@ add_executable(test_core
         # 0.7.1: cenas múltiplas + transições (projeto e2e, SceneFx puro,
         # overlay CENAS, ações Scene.Load/Transition)
         test_scenes.cpp
+        # 0.7.2: import robusto (navegador com galeria, caminho visível,
+        # aplicar-após-import)
+        test_browser.cpp
         ${CORE_DIR}/core/Scene.cpp
         ${CORE_DIR}/core/Time.cpp
         ${CORE_DIR}/core/ComponentRegistry.cpp

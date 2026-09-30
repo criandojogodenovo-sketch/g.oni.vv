@@ -24,6 +24,22 @@ constexpr const char* kExternalRoot = "/storage/emulated/0";
 constexpr const char* kImportDirs[] = {"Download", "Documents"};
 constexpr int       kImportDirCount = 2;
 
+// 0.7.2 — RAÍZES NAVEGÁVEIS do browser de ficheiros (o all-files cobre
+// TUDO; estas são os atalhos do dono). A GALERIA entra como raiz própria:
+// DCIM/Camera (fotos da câmara) e Pictures (screenshots/downloads de img).
+struct BrowserRoot {
+    const char* label;   // rótulo do botão no overlay
+    const char* path;    // caminho absoluto
+};
+constexpr BrowserRoot kBrowserRoots[] = {
+    {"Raiz", "/storage/emulated/0"},
+    {"Download", "/storage/emulated/0/Download"},
+    {"Docs", "/storage/emulated/0/Documents"},
+    {"Camera", "/storage/emulated/0/DCIM/Camera"},   // galeria: fotos
+    {"Pictures", "/storage/emulated/0/Pictures"},    // galeria: imagens
+};
+constexpr int kBrowserRootCount = 5;
+
 // pasta de EXPORT no armazenamento público (relativa a kExternalRoot) —
 // o ficheiro fica em Download/GOneVV/export/export_<nome>.obj
 constexpr const char* kExportRelDir = "Download/GOneVV/export";
@@ -35,6 +51,16 @@ struct Candidate {
     char kind;          // 'm' = mesh (obj/gltf/glb), 't' = textura (png)
 };
 
+// 0.7.2 — entrada do NAVEGADOR de ficheiros: diretorias E ficheiros
+// suportados (dirs primeiro, ordenados por nome case-insensitive; os
+// ficheiros só os suportados — kind 'm'/'t'; diretorias kind 0).
+struct DirEntry {
+    std::string name;   // basename
+    std::string path;   // caminho absoluto
+    bool isDir;
+    char kind;          // 0 = diretoria; 'm' = mesh; 't' = textura
+};
+
 // extensão → tipo ('m'/'t'), 0 = não suportado (case-insensitive)
 char kindOfExtension(const std::string& name);
 
@@ -42,6 +68,15 @@ char kindOfExtension(const std::string& name);
 // nome — case-insensitive). false = opendir falhou (sem acesso/pasta
 // ausente — errno já logado).
 bool listCandidates(const std::string& dir, std::vector<Candidate>& out);
+
+// 0.7.2 — lista o CONTEÚDO de UMA pasta para o navegador (diretorias
+// primeiro + ficheiros suportados; ambos ordenados por nome
+// case-insensitive). false = opendir falhou (errno logado; `out` fica
+// vazio — o chamador mostra a mensagem COM O CAMINHO, nunca um toast cego).
+bool listDirEntries(const std::string& dir, std::vector<DirEntry>& out);
+
+// 0.7.2 — pai de um caminho absoluto ("/a/b/c" → "/a/b"; "/" → "/").
+std::string parentPath(const std::string& dir);
 
 // leitura binária inteira. false = fopen falhou (errno logado).
 bool readAll(const std::string& path, std::vector<u8>& out);

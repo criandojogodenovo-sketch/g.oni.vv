@@ -876,5 +876,213 @@ bool commitTextInput(Scene& scene, EditorState& st) {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// 0.7.2 — NAVEGADOR DE FICHEIROS + APLICAR-APÓS-IMPORT
+// ---------------------------------------------------------------------------
+
+std::string browserPathLabel(const std::string& cwd, f32 maxW,
+                             f32 (*measure)(const std::string&, void*),
+                             void* user) {
+    if (!measure || cwd.empty()) {
+        return cwd;
+    }
+    if (measure(cwd, user) <= maxW) {
+        return cwd;   // cabe inteiro — o caminho TODO visível
+    }
+    // não cabe: corta o INÍCIO e guarda o FIM (o dono quer ver ONDE está:
+    // "...DCIM/Camera" diz mais que "storage/emulated/0/D...")
+    const std::string dots = "...";
+    if (measure(dots, user) > maxW) {
+        return "";   // nem as reticências cabem — nada a mostrar
+    }
+    size_t lo = 0;
+    size_t hi = cwd.size();
+    while (lo + 1 < hi) {
+        const size_t mid = (lo + hi) / 2;
+        const std::string cand = dots + cwd.substr(mid);
+        if (measure(cand, user) <= maxW) {
+            hi = mid;   // ainda cabe — pode cortar mais do início
+        } else {
+            lo = mid;   // não cabe — corta mais ainda
+        }
+    }
+    const std::string out =
+        hi < cwd.size() ? dots + cwd.substr(hi) : cwd;
+    return measure(out, user) <= maxW ? out : dots;   // defesa numérica
+}
+
+std::string browserEmptyMessage(const std::string& cwd, bool opendirFailed) {
+    // COM O CAMINHO — nunca um toast cego (o dono vê onde procurou)
+    char buf[160];
+    std::snprintf(buf, sizeof(buf), "%s: %s",
+                  opendirFailed ? "(sem acesso)" : "(vazio)", cwd.c_str());
+    return buf;
+}
+
+int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                    EditorState& st, const std::string& cwd,
+                    const std::vector<fileapi::DirEntry>& entries,
+                    bool opendirFailed) {
+    // painel GRANDE (o browser precisa de espaço): 92% da área útil
+    const f32 ox = ui.safeLeft();
+    const f32 oy = ui.safeTop();
+    const f32 aw = sw - ox - ui.safeRight();
+    const f32 ah = sh - oy - ui.safeBottom();
+    const f32 w = aw * 0.92f > 900.0f ? 900.0f : aw * 0.92f;
+    const f32 rowH = 48.0f;
+    constexpr u32 kMaxRows = 8;   // linhas visíveis (o scroll revela o resto)
+    const u32 shown = entries.size() < kMaxRows
+                           ? static_cast<u32>(entries.size())
+                           : kMaxRows;
+    const f32 listH = static_cast<f32>(shown) * rowH;
+    const f32 h = kHeaderH + 34.0f /*caminho*/ + 52.0f /*raízes*/ + 8.0f +
+                  52.0f /*subir*/ + 8.0f + listH + kPad;
+    const f32 x = ox + (aw - w) * 0.5f;
+    const f32 y = oy + (ah - h) * 0.5f;
+
+    // toque fora fecha (cancela o import)
+    f32 px = -1.0f, py = -1.0f;
+    if (in.pressed(0)) {
+        in.pos(0, px, py);
+    }
+    if (in.pressed(0) &&
+        !(px >= x && px < x + w && py >= y && py < y + h)) {
+        st.fileBrowser = false;
+        return 0;
+    }
+
+    ui.panel(x, y, w, h, theme::PANEL);
+    ui.frame(x, y, w, h, 2.0f, theme::ACCENT);
+    const f32 th = ui.fontHeight();
+    ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "NAVEGADOR",
+             theme::TEXT);
+    if (ui.button(kBrowserCloseId, x + w - kPad - 96.0f, y + 4.0f, 96.0f,
+                  36.0f, "fechar")) {
+        st.fileBrowser = false;
+        return 0;
+    }
+
+    // CAMINHO NO TOPO — mostra ONDE procura (corta o início quando longo)
+    const f32 pathY = y + kHeaderH + 6.0f;
+    ui.panel(x + kPad, pathY - 18.0f, w - 2.0f * kPad, 30.0f, theme::BG);
+    const TextMetrics tm = ui.textMetrics();
+    const std::string pathText = browserPathLabel(
+        cwd, w - 2.0f * kPad - 16.0f,
+        [](const std::string& s, void* user) -> f32 {
+            return static_cast<UiContext*>(user)->fontWidth(s.c_str());
+        },
+        &ui);
+    ui.labelFitted(x + kPad + 8.0f, pathY + tm.ascent, pathText.c_str(),
+                   theme::ACCENT, w - 2.0f * kPad - 16.0f);
+
+    // raízes: [Raiz][Download][Docs][Camera][Pictures] (a galeria incluída)
+    const f32 rootsY = pathY + 34.0f - 18.0f + 12.0f;
+    const f32 rootW = (w - 2.0f * kPad - 4.0f * 6.0f) / 5.0f;
+    int chosen = 0;
+    for (int i = 0; i < fileapi::kBrowserRootCount; ++i) {
+        if (ui.button(kBrowserRootBase + static_cast<u64>(i),
+                      x + kPad + static_cast<f32>(i) * (rootW + 6.0f), rootsY,
+                      rootW, 40.0f, fileapi::kBrowserRoots[i].label)) {
+            chosen = i + 1;
+        }
+    }
+
+    // subir (o pai; na raiz não faz nada — o main trata)
+    const f32 upY = rootsY + 52.0f;
+    if (ui.button(kBrowserUpId, x + kPad, upY, w - 2.0f * kPad, 44.0f,
+                  "^ Subir")) {
+        chosen = 6;
+    }
+
+    // lista: diretorias primeiro (ordem do listDirEntries); scroll id 45
+    const f32 listTop = upY + 52.0f;
+    const UiRect region{x, listTop, w, listH};
+    const f32 contentH = static_cast<f32>(entries.size()) * rowH;
+    ui.beginScroll(kBrowserScrollId, region, contentH);
+    const f32 off = ui.scrollOffset();
+    for (size_t i = 0; i < entries.size(); ++i) {
+        const f32 ry = listTop + static_cast<f32>(i) * rowH - off;
+        char label[72];
+        if (entries[i].isDir) {
+            std::snprintf(label, sizeof(label), "/ %s",
+                          entries[i].name.c_str());
+        } else {
+            std::snprintf(label, sizeof(label), "%s %s",
+                          entries[i].kind == 'm' ? "mesh:" : "tex:",
+                          entries[i].name.c_str());
+        }
+        ui.button(kBrowserRowBase + static_cast<u64>(i), x + kPad, ry + 2.0f,
+                  w - 2.0f * kPad, rowH - 4.0f, label);   // só desenha (scroll)
+    }
+    ui.endScroll();
+    if (entries.empty()) {
+        // mensagem COM O CAMINHO (nunca toast cego)
+        const std::string msg = browserEmptyMessage(cwd, opendirFailed);
+        ui.labelFitted(x + kPad, listTop + rowH * 0.5f + tm.ascent,
+                       msg.c_str(), theme::LINE, w - 2.0f * kPad);
+    }
+
+    // tap re-despachado → linha da lista (a MESMA geometria desenhada)
+    f32 tx = 0.0f, ty = 0.0f;
+    if (chosen == 0 && ui.scrollTap(kBrowserScrollId, tx, ty)) {
+        const i32 row = static_cast<i32>((ty - listTop + off) / rowH);
+        if (row >= 0 && static_cast<u32>(row) < entries.size()) {
+            chosen = row + 7;
+        }
+    }
+    return chosen;
+}
+
+int drawApplyDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                    EditorState& st, const char* fileName, const char* ticName) {
+    const f32 h = storageDialogHeight();   // título + linhas + 2 botões
+    const f32 ox = ui.safeLeft();
+    const f32 oy = ui.safeTop();
+    const f32 aw = sw - ox - ui.safeRight();
+    const f32 ah = sh - oy - ui.safeBottom();
+    const UiRect dlg = centeredMenuRect(ox, oy, aw, ah, h);
+
+    // toque fora = Nao (o import já ficou feito; só não se aplica)
+    f32 px = -1.0f, py = -1.0f;
+    if (in.pressed(0)) {
+        in.pos(0, px, py);
+    }
+    if (in.pressed(0) &&
+        !(px >= dlg.x && px < dlg.x + dlg.w && py >= dlg.y &&
+          py < dlg.y + dlg.h)) {
+        st.applyAsk = false;
+        return 2;
+    }
+
+    ui.panel(dlg.x, dlg.y, dlg.w, dlg.h, theme::PANEL);
+    ui.frame(dlg.x, dlg.y, dlg.w, dlg.h, 2.0f, theme::ACCENT);
+    const f32 th = ui.fontHeight();
+    ui.label(dlg.x + kPad, dlg.y + kHeaderH * 0.5f + th * 0.30f,
+             "APLICAR AO TIC?", theme::TEXT);
+
+    char line[96];
+    std::snprintf(line, sizeof(line), "Aplicar '%s' ao TIC '%s'?",
+                  fileName ? fileName : "?", ticName ? ticName : "?");
+    ui.labelFitted(dlg.x + kPad, dlg.y + kHeaderH + 20.0f, line, theme::TEXT,
+                   dlg.w - 2.0f * kPad);
+    ui.labelFitted(dlg.x + kPad, dlg.y + kHeaderH + 54.0f,
+                   "Pode aplicar depois nos seletores do Inspector.",
+                   theme::LINE, dlg.w - 2.0f * kPad);
+
+    UiRect yes{}, no{};
+    storageDialogButtons(dlg, yes, no);
+    int chosen = 0;
+    if (ui.button(kApplyYesId, yes.x, yes.y, yes.w, yes.h, "Sim")) {
+        chosen = 1;
+        st.applyAsk = false;
+    }
+    if (ui.button(kApplyNoId, no.x, no.y, no.w, no.h, "Nao")) {
+        chosen = 2;
+        st.applyAsk = false;
+    }
+    return chosen;
+}
+
 } // namespace editor
 } // namespace vv

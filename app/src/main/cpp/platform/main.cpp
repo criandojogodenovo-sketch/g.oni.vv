@@ -551,6 +551,77 @@ void createSceneNamed(const std::string& name) {
                name.c_str(), (unsigned)g_project.scenes.size());
 }
 
+// ---- 0.7.2: NAVEGADOR DE FICHEIROS + APLICAR-APÓS-IMPORT --------------------
+// O IMPORT robusto: navegar QUALQUER pasta do armazenamento (all-files),
+// com a GALERIA (DCIM/Camera, Pictures) nas raízes, o CAMINHO visível no
+// topo, e a pergunta "aplicar ao TIC?" quando há um TIC com MeshRenderer
+// selecionado no fim do import.
+struct FileBrowserState {
+    bool open = false;
+    std::string cwd;                            // onde está a procurar
+    std::vector<fileapi::DirEntry> entries;     // conteúdo listado
+    bool failed = false;                        // opendir falhou
+} g_browser;
+struct ApplyAskState {
+    bool open = false;
+    char kind = 0;          // 'm' mesh | 't' textura
+    std::string rel;       // ref relativa importada ("textures/x.png")
+    std::string fileName;  // basename (p/ o diálogo)
+} g_applyAsk;
+
+// abre/re-carrega uma pasta do navegador
+void browserOpen(const std::string& path) {
+    g_browser.cwd = path;
+    g_browser.failed = !fileapi::listDirEntries(path, g_browser.entries);
+    g_browser.open = true;
+    elog::info("browser: %s (%u entrada(s)%s)", path.c_str(),
+               (unsigned)g_browser.entries.size(),
+               g_browser.failed ? ", opendir FALHOU" : "");
+}
+
+// copia o ficheiro escolhido para o projeto (a MESMA lógica do import
+// antigo) e PERGUNTA se se aplica ao TIC selecionado
+void browserImportFile(const fileapi::DirEntry& e) {
+    if (!g_storage || e.isDir) {
+        return;
+    }
+    std::vector<u8> bytes;
+    if (!fileapi::readAll(e.path, bytes) || bytes.empty()) {
+        showToast("leitura falhou (causa no engine.log)");
+        elog::error("browser: leitura de '%s' FALHOU — %s", e.path.c_str(),
+                    fileapi::errnoText().c_str());
+        return;
+    }
+    const char* dir = e.kind == 'm' ? Project::kDirMeshes : Project::kDirTextures;
+    std::string safe = e.name;
+    for (char& ch : safe) {
+        if (ch == '/' || ch == '\\' || ch == ':') ch = '_';
+    }
+    const std::string rel = std::string(dir) + "/" + safe;
+    if (!g_storage->writeBytes(rel, bytes.data(), bytes.size())) {
+        showToast("falha ao gravar no projeto");
+        elog::error("browser: import %s — gravação no projeto falhou",
+                    rel.c_str());
+        return;
+    }
+    refreshCatalog();
+    elog::info("browser: import %s (%zu bytes) de %s", rel.c_str(),
+               bytes.size(), e.path.c_str());
+
+    // APLICAR-APÓS-IMPORT: só se há TIC selecionado COM MeshRenderer
+    Tic* tsel = g_scene.get(g_editor.selected);
+    if (tsel && tsel->getComponent<MeshRenderer>()) {
+        g_applyAsk.open = true;
+        g_applyAsk.kind = e.kind;
+        g_applyAsk.rel = rel;
+        g_applyAsk.fileName = e.name;
+    } else {
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "importado: %s", rel.c_str());
+        showToast(msg);
+    }
+}
+
 // ---- 0.6.7: lifecycle GL -----------------------------------------------------
 // Contadores de janela: distinguem o 1º arranque (boot frio) das RE-CRIAÇÕES
 // do contexto EGL (voltar do fundo/recents sem matar a app — o caso que
@@ -858,9 +929,9 @@ void beginExportToDownloads() {
     }
 }
 
-// TENTATIVA de import: concedido → varre já; senão → DIÁLOGO (1ª vez do
-// fluxo) com a ação pendente; bloqueado → mensagem HONESTA com a causa real
-// (F5.3: handshake em baixo NUNCA é reportado como "sistema sem suporte")
+// TENTATIVA de import: concedido → abre o NAVEGADOR (0.7.2: qualquer pasta
+// + galeria, com o caminho visível); senão → DIÁLOGO (1ª vez do fluxo) com a
+// ação pendente; bloqueado → mensagem HONESTA com a causa real
 void attemptImport() {
     if (!g_projectReady) {
         showToast("sem projeto — import indisponível");
@@ -868,7 +939,7 @@ void attemptImport() {
     }
     bool supported = false;
     if (storageGrantedNow(&supported)) {
-        openImportScan();
+        browserOpen(std::string(fileapi::kExternalRoot) + "/Download");
         return;
     }
     const storage::BlockReason why =
@@ -1886,6 +1957,66 @@ void frame() {
         }
     }
 
+    // 0.7.2 — NAVEGADOR de ficheiros: raízes/subir/lista (o caminho vive no
+    // topo do overlay); diretorias navegam, ficheiros IMPORTAM
+    if (g_editor.fileBrowser && g_browser.open) {
+        const int pick = editor::drawFileBrowser(
+            g_ui, g_input, w, h, g_editor, g_browser.cwd, g_browser.entries,
+            g_browser.failed);
+        if (pick >= 1 && pick <= fileapi::kBrowserRootCount) {
+            browserOpen(fileapi::kBrowserRoots[pick - 1].path);
+        } else if (pick == 6) {
+            browserOpen(fileapi::parentPath(g_browser.cwd));
+        } else if (pick >= 7) {
+            const size_t i = static_cast<size_t>(pick - 7);
+            if (i < g_browser.entries.size()) {
+                if (g_browser.entries[i].isDir) {
+                    browserOpen(g_browser.entries[i].path);
+                } else {
+                    browserImportFile(g_browser.entries[i]);
+                    g_browser.open = false;   // fecha ao importar
+                    g_editor.fileBrowser = false;
+                }
+            }
+        }
+    }
+
+    // 0.7.2 — APLICAR-APÓS-IMPORT: textura/mesh importada + TIC com
+    // MeshRenderer selecionado → "aplicar ao TIC?" (Sim aplica já)
+    if (g_editor.applyAsk && g_applyAsk.open) {
+        Tic* tsel = g_scene.get(g_editor.selected);
+        const char* ticName = tsel ? tsel->name.c_str() : "?";
+        const int ch = editor::drawApplyDialog(g_ui, g_input, w, h, g_editor,
+                                               g_applyAsk.fileName.c_str(),
+                                               ticName);
+        if (ch == 1) {
+            // Sim: aplica via applyAssetPick (o MESMO caminho do seletor —
+            // ref do projeto + resolvers de GPU + toast/log honestos)
+            const std::vector<std::string>& cat =
+                g_applyAsk.kind == 'm' ? g_catalog.meshes : g_catalog.textures;
+            const std::string base = g_applyAsk.kind == 'm'
+                                         ? std::string("meshes/")
+                                         : std::string("textures/");
+            for (size_t i = 0; i < cat.size(); ++i) {
+                if (base + cat[i] == g_applyAsk.rel) {
+                    const int menuKind = g_applyAsk.kind == 'm' ? 1 : 2;
+                    const editor::AssetPickOutcome out = editor::applyAssetPick(
+                        g_scene, g_editor.selected, menuKind,
+                        static_cast<int>(i) + 2, g_catalog,
+                        makeAssetResolvers());
+                    if (out.toast[0] != '\0') {
+                        showToast(out.toast);
+                    }
+                    if (out.log[0] != '\0') {
+                        LOGI("%s", out.log);
+                    }
+                    break;
+                }
+            }
+            g_applyAsk.open = false;
+        }
+    }
+
     drawToast();
     statusLine(st3d, stGrid);
 
@@ -1904,10 +2035,10 @@ void android_main(android_app* app) {
     // F5.1-hotfix: log DUPLO (logcat + ficheiro) desde a 1ª linha.
     // O boot ainda não tem os paths da activity? O elog usa o fallback
     // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu
-    elog::info("G.One VV 0.7.1 — cenas múltiplas + transições fade/slide "
-               "(overlay CENAS, Scene.Load/Scene.Transition declarativas em "
-               "Play; 0.7.0 UI criável + editor de UI + gestão de TICs; "
-               "0.6.10 seletor de textura)");
+    elog::info("G.One VV 0.7.2 — import robusto: navegador de ficheiros "
+               "com galeria (DCIM/Camera, Pictures), caminho visível e "
+               "aplicar-após-import (0.7.1 cenas + transições; 0.7.0 UI "
+               "criável + gestão de TICs)");
     {
         const char* root0 = app->activity
             ? (app->activity->externalDataPath ? app->activity->externalDataPath
@@ -1952,6 +2083,8 @@ void android_main(android_app* app) {
     g_playUi = PlayUiPress{};   // 0.7.0: nenhum on-click de UI armado
     g_sceneTrans = ui::SceneTransition{};   // 0.7.1: transição morta
     g_sceneTransIdx = 0xFFFFFFFFu;
+    g_browser = FileBrowserState{};   // 0.7.2: browser fechado
+    g_applyAsk = ApplyAskState{};
     g_scene.clear();
     g_input.resetAll();
     g_project = Project{};

@@ -127,6 +127,79 @@ bool listCandidates(const std::string& dir, std::vector<Candidate>& out) {
     return true;
 }
 
+// ---- 0.7.2: navegador de ficheiros ---------------------------------------------
+
+namespace {
+
+bool entryNameLess(const DirEntry& a, const DirEntry& b) {
+    std::string la = a.name, lb = b.name;
+    for (char& c : la) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    for (char& c : lb) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return la < lb;
+}
+
+} // namespace
+
+bool listDirEntries(const std::string& dir, std::vector<DirEntry>& out) {
+    out.clear();
+    errno = 0;
+    DIR* d = ::opendir(dir.c_str());
+    if (!d) {
+        captureErrno("opendir", dir.c_str());
+        return false;
+    }
+    std::vector<DirEntry> dirs;
+    std::vector<DirEntry> files;
+    const std::string sep = (!dir.empty() && dir.back() == '/') ? "" : "/";
+    while (dirent* e = ::readdir(d)) {
+        const std::string name = e->d_name;
+        if (name == "." || name == "..") {
+            continue;
+        }
+        DirEntry de;
+        de.name = name;
+        de.path = dir + sep + name;
+        de.kind = 0;
+        // diretoria? (d_type best-effort; DT_UNKNOWN → stat)
+        bool isDir = e->d_type == DT_DIR;
+        if (e->d_type == DT_UNKNOWN) {
+            struct stat st;
+            if (::stat(de.path.c_str(), &st) == 0) {
+                isDir = S_ISDIR(st.st_mode);
+            }
+        }
+        de.isDir = isDir;
+        if (isDir) {
+            dirs.push_back(de);   // TODAS as diretorias (navegar = subir/descer)
+        } else if (kindOfExtension(name) != 0) {
+            de.kind = kindOfExtension(name);
+            files.push_back(de);  // só ficheiros suportados
+        }
+        // ficheiro não suportado → fora da lista (o browser é de IMPORT)
+    }
+    ::closedir(d);
+    std::sort(dirs.begin(), dirs.end(), entryNameLess);
+    std::sort(files.begin(), files.end(), entryNameLess);
+    out.insert(out.end(), dirs.begin(), dirs.end());     // diretorias primeiro
+    out.insert(out.end(), files.begin(), files.end());
+    return true;
+}
+
+std::string parentPath(const std::string& dir) {
+    if (dir.size() <= 1) {
+        return "/";   // raiz (e caminhos degenerados) → fica na raiz
+    }
+    const size_t slash = dir.rfind('/');
+    if (slash == std::string::npos || slash == 0) {
+        return "/";
+    }
+    return dir.substr(0, slash);
+}
+
 bool readAll(const std::string& path, std::vector<u8>& out) {
     out.clear();
     errno = 0;
