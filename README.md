@@ -1,4 +1,4 @@
-# G.One VV 0.7.2 — import robusto: navegador + galeria + aplicar (0.7.1: cenas + transições; 0.7.0: UI criável + gestão de TICs)
+# G.One VV 0.7.3 — joystick editável + compostos Menu/Card/Article (fecho da campanha 0.7: UI criável)
 
 Engine com editor, projeto `.goni` e maturação de assets (compressão ETC2/ASTC
 com cache, extração de texturas glTF/GLB, import OBJ/glTF/GLB/PNG, export
@@ -6,7 +6,52 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 (`sensorLandscape`). Devices de teste: Realme C33 (720x1600) e Realme
 RMX3624 (Android 13).
 
-## Escopo 0.7.2 (implementado — F6: import robusto — navegador + galeria + aplicar)
+## Escopo 0.7.3 (implementado — F6: joystick editável + compostos)
+
+**JOYSTICK/TOUCHCONTROLS EDITÁVEL** — o widget de input passa a ser uma
+instância EDITÁVEL ("a UI do Player passa a ser esta instância"):
+
+- **Campos do componente** (pos/tamanho/sensibilidade/cor), editáveis no
+  Inspector de UI e serializados no `.goni` (quando não-default; os
+  `.goni` da 0.6.x abrem com o layout fixo de sempre);
+- **Pos em frações da área útil** (resolução-independente; o default
+  reproduz o layout fixo 0.6.x no ecrã de referência 1600×720),
+  **tamanho** escala o raio (base 75px), **sensibilidade** multiplica o
+  eixo (clamp no círculo unitário — sens 1 = o comportamento 0.6.x
+  exato), **cor** tinge a base/o knob (default = LINE do tema mono);
+- **PROXY no viewport 2D**: o joystick do TIC selecionado desenha-se com
+  a MESMA geometria do Play (layoutFor), arrastável (pos, com clamp
+  0..1) e selecionável — mesmo SEM canvas (o early-return da dica só
+  corre quando não há canvas NEM joystick);
+- **"+" do modo UI ganha 8 itens**: Panel/Label/Button/Image +
+  Menu/Card/Article + **Joystick** (adiciona o componente ao TIC e
+  seleciona-o para edição);
+- **O INPUT em Play segue o EDIT**: `touchBegin` claima na posição NOVA
+  e o eixo vem escalado pela sensibilidade (aferido no CI);
+- **Inspector do joystick**: pos X/Y, tamanho, sensib., cor R/G/B,
+  "remover joystick" (o InputMap fica — sem fonte até nova adição).
+
+**COMPOSTOS** (elementos de UI compostos, criáveis pelo "+"):
+
+- **Menu**: lista vertical de botões — o texto é uma linha por item no
+  formato "label>alvo" (alvo opcional; sem '>' o alvo é o próprio
+  label); cada item dispara a AÇÃO do elemento com o alvo da LINHA;
+  hit-test por linha (já aferido na 0.7.0);
+- **Card**: panel + moldura + título no topo com separador;
+- **Article**: texto multilinha com WRAP pela largura (greedy por
+  palavras; nunca sai do rect).
+
+Testes 380→386 (+6 em `test_joystick.cpp`): layout derivado dos campos
+(default reproduz o fixo; pos/tamanho mandam; o layout fixo continua),
+o edit afeta o INPUT (claim na posição nova; eixo × sens com clamp; sens
+1 = 0.6.x), serialização (round-trip dos campos; `.goni` 0.6.x abre com
+defaults), proxy no viewport 2D (sem canvas; tap seleciona; drag move
+relX/relY com clamp; plano do inspector com y cumulativo; remover tira o
+componente), compostos (Menu 3 itens desenha; Article faz wrap — dezenas
+de glifos dentro da largura; round-trip completo; uiAddElement aceita
+4..6 e recusa 7), "+" com 8 itens (Joystick adiciona e seleciona).
+
+## Escopo 0.7.2 (histórico — F6: import robusto — navegador + galeria + aplicar)
 
 **NAVEGADOR DE FICHEIROS IN-APP** (Importar… abre o NAVEGADOR — substitui a
 lista fixa Download/Documents da 0.6.x):
@@ -720,6 +765,31 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.7.3 (joystick editável + compostos; APK CUMULATIVO — FECHO DA CAMPANHA 0.7)
+
+Instalar o APK 0.7.3 (artifact `goni-vv-0.7.3-release-signed` do run do
+fecho). Roteiro cumulativo — os anteriores continuam a aplicar-se:
+
+1. **Joystick no modo UI**: selecionar o Player (com TouchControls) →
+   modo UI → o joystick aparece como um QUADRO com knob no viewport 2D
+   (mesmo sem elementos de UI);
+2. **Editar**: arrastar o joystick move-o; selecioná-lo abre o
+   INSPECTOR DO JOYSTICK (pos X/Y, tamanho, sensib., cor R/G/B, remover);
+   mexer no tamanho cresce/encolhe o quadro; a cor tinge a base/knob;
+3. **O edit afeta o Play**: Play → o joystick está ONDE se pôs, do
+   TAMANHO escolhido; mover o dedo 1/4 do raio com sensib. 2 anda o
+   DOBRO (o eixo escala); a física responde;
+4. **Adicionar**: "+" no modo UI → Joystick → o TIC ganha o componente
+   (e fica selecionado); "remover joystick" tira-o (add TouchControls do
+   Inspector de 3D continua a funcionar);
+5. **Persistência**: Save → Load preserva pos/tamanho/sens/cor; um
+   projeto 0.6.x abre com o joystick no sítio de sempre;
+6. **Compostos**: "+" → Menu (lista vertical; "Jogar>cena2" por linha
+   dispara a ação com o alvo da linha) / Card (moldura + título) /
+   Article (texto comprido faz wrap dentro da largura);
+7. **Regressões**: navegador/cenas/transições/UI criável/gestão de
+   TICs/gizmos — tudo como antes (o APK é cumulativo e fecha a campanha).
 
 ## Verificação no Realme C33 (dono) — 0.7.2 (import robusto; APK CUMULATIVO)
 

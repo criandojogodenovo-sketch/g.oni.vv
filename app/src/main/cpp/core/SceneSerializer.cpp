@@ -90,13 +90,38 @@ void appendComponentJson(Json& arr, const InputMap* im) {
     arr.addItem(std::move(c));
 }
 
-// F4: TouchControls — só a PRESENÇA (layout fixo, sem dados a persistir)
+// F4: TouchControls — presença + campos EDITÁVEIS (0.7.3: pos/tamanho/
+// sensibilidade/cor do joystick; só gravados quando NÃO-default — os
+// .goni da 0.6.x continuam a abrir com o layout fixo de sempre)
 void appendComponentJson(Json& arr, const TouchControls* tc) {
     if (!tc) {
         return;
     }
     Json c = Json::makeObject();
     c.addMember("type", Json::makeString("TouchControls"));
+    const bool defPos = tc->relX == 0.09375f && tc->relY == 0.7361f;
+    const bool defRest = tc->size == 1.0f && tc->sens == 1.0f &&
+                         tc->colR == 0.1804f && tc->colG == 0.1804f &&
+                         tc->colB == 0.1804f;
+    if (!defPos) {
+        Json pos = Json::makeArray();
+        pos.addItem(Json::makeNumber(tc->relX));
+        pos.addItem(Json::makeNumber(tc->relY));
+        c.addMember("pos", std::move(pos));
+    }
+    if (tc->size != 1.0f) {
+        c.addMember("size", Json::makeNumber(tc->size));
+    }
+    if (tc->sens != 1.0f) {
+        c.addMember("sens", Json::makeNumber(tc->sens));
+    }
+    if (!defRest || tc->colR != 0.1804f) {
+        Json col = Json::makeArray();
+        col.addItem(Json::makeNumber(tc->colR));
+        col.addItem(Json::makeNumber(tc->colG));
+        col.addItem(Json::makeNumber(tc->colB));
+        c.addMember("color", std::move(col));
+    }
     arr.addItem(std::move(c));
 }
 
@@ -378,6 +403,31 @@ void fillUiCanvas(UiCanvas* canvas, const Json& comp) {
     }
 }
 
+// 0.7.3 — TouchControls: campos editáveis (ausentes = defaults que
+// reproduzem o layout fixo da 0.6.x)
+void fillTouchControls(TouchControls* tc, const Json& comp) {
+    if (!tc) {
+        return;
+    }
+    if (const Json* jp = comp.find("pos");
+        jp && jp->type == Json::Type::Array && jp->items.size() == 2) {
+        tc->relX = static_cast<f32>(jp->items[0].number);
+        tc->relY = static_cast<f32>(jp->items[1].number);
+    }
+    if (const Json* j = comp.find("size"); j && j->type == Json::Type::Number) {
+        tc->size = static_cast<f32>(j->number);
+    }
+    if (const Json* j = comp.find("sens"); j && j->type == Json::Type::Number) {
+        tc->sens = static_cast<f32>(j->number);
+    }
+    if (const Json* jc = comp.find("color");
+        jc && jc->type == Json::Type::Array && jc->items.size() == 3) {
+        tc->colR = static_cast<f32>(jc->items[0].number);
+        tc->colG = static_cast<f32>(jc->items[1].number);
+        tc->colB = static_cast<f32>(jc->items[2].number);
+    }
+}
+
 } // namespace
 
 Json migrate(Json doc) {
@@ -548,8 +598,10 @@ bool loadText(Scene& scene, const std::string& text, const LoadCtx& ctx) {
                 fillBodyComp(store.get<BodyComp>(h), jc);
             } else if (jt2->string == "UiCanvas") {
                 fillUiCanvas(store.get<UiCanvas>(h), jc);   // 0.7.0
+            } else if (jt2->string == "TouchControls") {
+                fillTouchControls(store.get<TouchControls>(h), jc);   // 0.7.3
             }
-            // InputMap/TouchControls: sem dados — presença basta
+            // InputMap: sem dados — presença basta
         }
     }
     return true;

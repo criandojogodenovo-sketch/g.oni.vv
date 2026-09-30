@@ -105,6 +105,8 @@ struct EditorState {
                                     // dedicado à UI (editor WYSIWYG)
     i32    selElement = -1;         // elemento selecionado no canvas do TIC
                                     // selecionado (−1 = nenhum)
+    bool   selJoystick = false;    // 0.7.3: o joystick (TouchControls) do TIC
+                                    // selecionado está em edição no viewport 2D
     bool   elDrag = false;         // drag WYSIWYG em curso (viewport 2D)
     f32    elDragX = 0.0f;         // pos do dedo no frame anterior (px ecrã)
     f32    elDragY = 0.0f;

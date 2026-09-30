@@ -863,8 +863,8 @@ TEST(uieditor_plus_modo_ui_cria_elementos_no_canvas) {
     // "+" da Hierarchy abre o menu (no modo UI: CRIAR ELEMENTO UI)
     e.tap(300.0f - 12.0f - 28.0f, 88.0f + 24.0f);   // botão + do cabeçalho
     EXPECT(e.st.plusMenu);
-    // 4 itens: Panel/Label/Button/Image (ids 20..23) — o MESMO menu
-    const f32 h = kHeaderH + 4.0f * 64.0f + kPad;
+    // 0.7.3: 8 itens (Panel/Label/Button/Image/Menu/Card/Article/Joystick)
+    const f32 h = kHeaderH + 8.0f * 64.0f + kPad;
     const f32 y = (kSH - h) * 0.5f + kHeaderH + 2.0f * 64.0f + 28.0f;   // Button
     e.tap(800.0f, y);
     EXPECT(!e.st.plusMenu);

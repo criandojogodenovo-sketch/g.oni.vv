@@ -1,7 +1,11 @@
 // components/TouchControls.cpp — input dos controlos de toque (GL-free).
-// Layout fixo da F4: joystick à esquerda, botão "jump" à direita, ambos
-// ancorados acima da status line. Tolerância de 1.3× no raio/rect para dedos
-// imprecisos (touchscreen do C33).
+//
+// 0.7.3: o layout é DERIVADO dos campos editáveis do componente (pos em
+// frações da área útil, tamanho em escala do raio) — o default reproduz o
+// layout fixo da 0.6.x no ecrã de referência 1600×720. A sensibilidade
+// multiplica o eixo (clamp no círculo unitário). O botão jump mantém o
+// ancorário à direita (o arrastável é o joystick). Tolerância de 1.3× no
+// raio/rect para dedos imprecisos (touchscreen do C33).
 #include "components/TouchControls.h"
 #include <cmath>
 #include <cstring>
@@ -27,8 +31,22 @@ TouchControls::Layout TouchControls::layout(f32 sw, f32 sh) {
     return l;
 }
 
+TouchControls::Layout TouchControls::layoutFor(f32 aw, f32 ah) const {
+    // frações da ÁREA ÚTIL (resolução-independente); raio escala com o
+    // campo `size` (base 75px); o botão jump mantém o ancorário da direita
+    Layout l{};
+    l.joyCX = relX * aw;
+    l.joyCY = relY * ah;
+    l.joyR  = 75.0f * (size > 0.05f ? size : 0.05f);
+    l.btnW  = 110.0f;
+    l.btnH  = 110.0f;
+    l.btnX  = aw - 150.0f - l.btnW * 0.5f;
+    l.btnY  = l.joyCY - l.btnH * 0.5f;   // alinhado ao joystick
+    return l;
+}
+
 bool TouchControls::touchBegin(u32 slot, f32 x, f32 y, f32 sw, f32 sh) {
-    const Layout l = layout(sw, sh);
+    const Layout l = layoutFor(sw, sh);   // 0.7.3: layout EDITÁVEL
     baseX_ = l.joyCX;
     baseY_ = l.joyCY;
     radius_ = l.joyR;
@@ -78,6 +96,10 @@ Vec2 TouchControls::axis() const {
         return Vec2{0.0f, 0.0f};
     }
     Vec2 a{(joyX_ - baseX_) / radius_, -(joyY_ - baseY_) / radius_};   // y do ecrã cresce para baixo
+    // 0.7.3 — SENSIBILIDADE: multiplica o vetor e volta a clamps no círculo
+    // unitário (sens 1 = o comportamento 0.6.x exato)
+    a.x *= sens;
+    a.y *= sens;
     const f32 len = std::sqrt(a.x * a.x + a.y * a.y);
     if (len > 1.0f) {
         a.x /= len;

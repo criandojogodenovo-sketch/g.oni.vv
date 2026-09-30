@@ -461,21 +461,24 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
 }
 
 void drawTouchControls(UiContext& ui, const TouchControls& tc, f32 sw, f32 sh) {
-    // F4.2: layout fixo recalculado para a ÁREA ÚTIL (superfície menos insets)
+    // F4.2: layout recalculado para a ÁREA ÚTIL (superfície menos insets)
     // e deslocado pela origem do contentRect — nada desenhado atrás da
-    // nav/status bar. TouchControls.cpp fica intocado (CLÁUSULA CALMA).
+    // nav/status bar. 0.7.3: o layout vem dos CAMPOS EDITÁVEIS do
+    // componente (pos/tamanho/cor — o joystick do Player é esta instância).
     const f32 ox = ui.safeLeft();
     const f32 oy = ui.safeTop();
     const f32 aw = sw - ui.safeLeft() - ui.safeRight();
     const f32 ah = sh - ui.safeTop() - ui.safeBottom();
-    const TouchControls::Layout l = TouchControls::layout(aw, ah);
+    const TouchControls::Layout l = tc.layoutFor(aw, ah);
     const f32 jx = ox + l.joyCX;
     const f32 jy = oy + l.joyCY;
+    // cor EDITÁVEL do joystick (default = LINE do tema mono)
+    const f32 joyCol[4] = {tc.colR, tc.colG, tc.colB, 1.0f};
 
     // joystick: base em quadro + knob quadrado (mono brutalist — só retângulos)
     ui.frame(jx - l.joyR, jy - l.joyR, 2.0f * l.joyR, 2.0f * l.joyR,
-             2.0f, theme::LINE);
-    ui.panel(jx - 1.0f, jy - 1.0f, 2.0f, 2.0f, theme::LINE);
+             2.0f, joyCol);
+    ui.panel(jx - 1.0f, jy - 1.0f, 2.0f, 2.0f, joyCol);
     f32 kx = tc.baseX();
     f32 ky = tc.baseY();
     bool active = false;
@@ -496,7 +499,7 @@ void drawTouchControls(UiContext& ui, const TouchControls& tc, f32 sw, f32 sh) {
     ky += oy;
     ui.panel(kx - ks * 0.5f, ky - ks * 0.5f, ks, ks,
              active ? theme::ACCENT : theme::PANEL);
-    ui.frame(kx - ks * 0.5f, ky - ks * 0.5f, ks, ks, 1.0f, theme::LINE);
+    ui.frame(kx - ks * 0.5f, ky - ks * 0.5f, ks, ks, 1.0f, joyCol);
 
     // botão JUMP: premido = invertido (tema mono)
     const bool held = tc.buttonHeld();
@@ -591,9 +594,10 @@ bool viewportTapClearsSelection(EditorState& st, const InputState& in,
 
 int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st) {
     // 0.7.0: no modo UI o "+" cria ELEMENTOS (Panel/Label/Button/Image);
-    // no 3D cria TICs de preset (como sempre). O main despacha pelo modo.
+    // 0.7.3: + os COMPOSTOS (Menu/Card/Article) e o JOYSTICK (widget de
+    // TouchControls editável). No 3D cria TICs de preset (como sempre).
     const bool uiMode = st.uiMode;
-    const int kItems = uiMode ? 4 : 4;
+    const int kItems = uiMode ? 8 : 4;
     const f32 w = kMenuW;
     const f32 h = kHeaderH + static_cast<f32>(kItems) * 64.0f + kPad;
     // F4.2: centrado no viewport ÚTIL (dentro do contentRect)
@@ -618,7 +622,9 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     int chosen = 0;
     const char* names[4] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
                             "RigidBody3D"};
-    const char* elems[4] = {"Panel", "Label", "Button", "Image"};
+    // 0.7.3: Menu/Card/Article (compostos) + Joystick (TouchControls)
+    const char* elems[8] = {"Panel", "Label", "Button", "Image",
+                            "Menu", "Card", "Article", "Joystick"};
     const char* const* labels = uiMode ? elems : names;
     for (int i = 0; i < kItems; ++i) {
         if (ui.button(static_cast<u64>(20 + i), x + kPad, y + kHeaderH + i * 64.0f,

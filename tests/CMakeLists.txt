@@ -62,6 +62,9 @@ add_executable(test_core
         # 0.7.2: import robusto (navegador com galeria, caminho visível,
         # aplicar-após-import)
         test_browser.cpp
+        # 0.7.3: joystick editável (layout derivado dos campos + input) e
+        # compostos Menu/Card/Article (desenho + serialização)
+        test_joystick.cpp
         ${CORE_DIR}/core/Scene.cpp
         ${CORE_DIR}/core/Time.cpp
         ${CORE_DIR}/core/ComponentRegistry.cpp

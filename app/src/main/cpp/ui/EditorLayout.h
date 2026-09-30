@@ -315,6 +315,15 @@ constexpr u64 kUiInspAct    = 8014;
 constexpr u64 kUiInspTarget = 8015;
 constexpr u64 kUiInspRemove = 8016;
 constexpr u64 kUiInspStyle  = 8017;   // 0.7.1: "estilo: fade|slide" (trans)
+// 0.7.3 — inspector do JOYSTICK (TouchControls editável)
+constexpr u64 kJoyX      = 8020;   // pos X (fração da área útil 0..1)
+constexpr u64 kJoyY      = 8021;
+constexpr u64 kJoySize   = 8022;   // escala do raio
+constexpr u64 kJoySens   = 8023;   // sensibilidade
+constexpr u64 kJoyR      = 8024;   // cor R/G/B
+constexpr u64 kJoyG      = 8025;
+constexpr u64 kJoyB      = 8026;
+constexpr u64 kJoyRemove = 8030;   // remover o componente
 
 // regiões de scroll novas: Inspector de UI (46). 41/42/43 = hierarquia/
 // inspector/logs (acima)

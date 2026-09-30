@@ -69,11 +69,13 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
     ui.frame(view.x, view.y, view.w, view.h, 1.0f, theme::LINE);
 
     Tic* tic = scene.get(st.selected);
+    // 0.7.3: o joystick (TouchControls) é editável mesmo SEM canvas — o
+    // early-return da dica só corre quando não há canvas NEM joystick
     UiCanvas* canvas = tic ? tic->getComponent<UiCanvas>() : nullptr;
-    if (!canvas || canvas->elements.empty()) {
-        if (st.selElement >= 0) {
-            st.selElement = -1;
-        }
+    TouchControls* joy = tic ? tic->getComponent<TouchControls>() : nullptr;
+    if (!canvas && !joy) {
+        st.selElement = -1;
+        st.selJoystick = false;
         st.elDrag = false;
         const TextMetrics tm = ui.textMetrics();
         ui.labelFitted(view.x + kPad, view.y + view.h * 0.5f + tm.ascent,
@@ -81,6 +83,10 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
                            : "(selecione um TIC na Hierarchy)",
                        theme::LINE, view.w - 2.0f * kPad);
         return;
+    }
+    static const UiCanvas kEmptyCanvas;   // canvas de LEITURA (só joystick)
+    if (!canvas) {
+        canvas = const_cast<UiCanvas*>(&kEmptyCanvas);
     }
     if (st.selElement >= static_cast<i32>(canvas->elements.size())) {
         st.selElement = -1;
@@ -92,6 +98,38 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
 
     // moldura do espaço de design (o "ecrã" onde a UI vive em Play)
     ui.frame(t.ox, t.oy, sw * t.scale, sh * t.scale, 1.0f, theme::LINE);
+
+    // 0.7.3 — PROXY do joystick (TouchControls do TIC): a MESMA geometria
+    // do Play (layoutFor sobre o espaço de design), desenhada escalada;
+    // arrastável (pos) e selecionável para o Inspector de UI (o `joy` vem
+    // do topo da função — o canvas pode até não existir)
+    f32 joyX0 = 0.0f, joyY0 = 0.0f, joyX1 = 0.0f, joyY1 = 0.0f;
+    if (joy) {
+        const TouchControls::Layout jl = joy->layoutFor(sw, sh);
+        const f32 jr = jl.joyR * t.scale;
+        joyX0 = t.ox + jl.joyCX * t.scale - jr;
+        joyY0 = t.oy + jl.joyCY * t.scale - jr;
+        joyX1 = t.ox + jl.joyCX * t.scale + jr;
+        joyY1 = t.oy + jl.joyCY * t.scale + jr;
+        const f32 joyCol[4] = {joy->colR, joy->colG, joy->colB, 1.0f};
+        ui.frame(joyX0, joyY0, joyX1 - joyX0, joyY1 - joyY0,
+                 st.selJoystick ? 3.0f : 2.0f,
+                 st.selJoystick ? theme::ACCENT : joyCol);
+        // knob no centro + rótulo
+        const f32 ks = 44.0f * t.scale;
+        const f32 kx = (joyX0 + joyX1) * 0.5f;
+        const f32 ky = (joyY0 + joyY1) * 0.5f;
+        ui.panel(kx - ks * 0.5f, ky - ks * 0.5f, ks, ks, theme::PANEL);
+        ui.frame(kx - ks * 0.5f, ky - ks * 0.5f, ks, ks, 1.0f, joyCol);
+        if (ui.hasFont()) {
+            const TextMetrics tm2 = ui.textMetrics();
+            ui.labelFitted(joyX0, joyY1 + 4.0f + tm2.ascent, "joystick",
+                           theme::LINE, joyX1 - joyX0);
+        }
+    } else if (st.selJoystick) {
+        st.selJoystick = false;   // o componente sumiu — limpa a seleção
+        st.elDrag = false;
+    }
 
     // elementos (ordem do array = z-order; o último fica por cima)
     for (size_t i = 0; i < canvas->elements.size(); ++i) {
@@ -107,15 +145,26 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
     if (anyOverlayOpen(st)) {
         return;
     }
-    if (st.elDrag && st.selElement >= 0) {
+    if (st.elDrag && (st.selElement >= 0 || st.selJoystick)) {
         if (in.down(0)) {
             f32 px = 0.0f, py = 0.0f;
             in.pos(0, px, py);
             const f32 dx = (px - st.elDragX) / (t.scale > 0.0f ? t.scale : 1.0f);
             const f32 dy = (py - st.elDragY) / (t.scale > 0.0f ? t.scale : 1.0f);
-            UiElement& e = canvas->elements[static_cast<size_t>(st.selElement)];
-            e.ox += dx;
-            e.oy += dy;
+            if (st.selJoystick && joy) {
+                // 0.7.3: o drag do joystick move pos (frações da área útil)
+                joy->relX += dx / sw;
+                joy->relY += dy / sh;
+                if (joy->relX < 0.0f) joy->relX = 0.0f;
+                if (joy->relX > 1.0f) joy->relX = 1.0f;
+                if (joy->relY < 0.0f) joy->relY = 0.0f;
+                if (joy->relY > 1.0f) joy->relY = 1.0f;
+            } else if (st.selElement >= 0) {
+                UiElement& e =
+                    canvas->elements[static_cast<size_t>(st.selElement)];
+                e.ox += dx;
+                e.oy += dy;
+            }
             st.elDragX = px;
             st.elDragY = py;
         } else {
@@ -142,7 +191,15 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
                 }
             }
             st.selElement = hit;   // −1 = tap no vazio → desseleciona
+            st.selJoystick = false;
             if (hit >= 0) {
+                st.elDrag = true;
+                st.elDragX = px;
+                st.elDragY = py;
+            } else if (joy && px >= joyX0 && px < joyX1 && py >= joyY0 &&
+                       py < joyY1) {
+                // o tap apanhou o PROXY do joystick (depois dos elementos)
+                st.selJoystick = true;
                 st.elDrag = true;
                 st.elDragX = px;
                 st.elDragY = py;
@@ -242,6 +299,160 @@ f32 uiInspectorContentHeight(const UiElement& e, const TextMetrics& m) {
     return rows[n - 1].y + rows[n - 1].h;
 }
 
+// ---- 0.7.3: plano do INSPECTOR DO JOYSTICK ---------------------------------
+// pos X/Y (frações 0..1) + tamanho + sensibilidade + cor R/G/B + remover —
+// o MESMO contrato de y cumulativo (linhas sequenciais, fonte única)
+u32 uiJoystickPlan(const TextMetrics& m, UiInspRow* rows, u32 cap) {
+    const f32 textH = inspTextRowH(m);
+    const f32 btnH  = inspButtonRowH(m);
+    const f32 sldH  = inspSliderRowH(m);
+
+    u32 n = 0;
+    f32 y = 0.0f;
+    auto push = [&](UiInspRow::Kind kind, f32 h, u64 id) {
+        if (n >= cap) {
+            return;
+        }
+        rows[n].kind = kind;
+        rows[n].y    = y;
+        rows[n].h    = h;
+        rows[n].id   = id;
+        ++n;
+        y += h;
+    };
+
+    push(UiInspRow::Kind::Name, textH, 0);
+    push(UiInspRow::Kind::PosX, sldH, kJoyX);
+    push(UiInspRow::Kind::PosY, sldH, kJoyY);
+    push(UiInspRow::Kind::SizeW, sldH, kJoySize);   // payload: tamanho
+    push(UiInspRow::Kind::Sens, sldH, kJoySens);
+    push(UiInspRow::Kind::ColR, sldH, kJoyR);
+    push(UiInspRow::Kind::ColG, sldH, kJoyG);
+    push(UiInspRow::Kind::ColB, sldH, kJoyB);
+    push(UiInspRow::Kind::Remove, btnH, kJoyRemove);
+    return n;
+}
+
+f32 uiJoystickContentHeight(const TextMetrics& m) {
+    UiInspRow rows[16];
+    const u32 n = uiJoystickPlan(m, rows, 16);
+    if (n == 0) {
+        return 0.0f;
+    }
+    return rows[n - 1].y + rows[n - 1].h;
+}
+
+// 0.7.3 — INSPECTOR DO JOYSTICK (TouchControls editável): sliders pos
+// X/Y (frações), tamanho, sensibilidade, cor R/G/B + remover. O plano
+// (uiJoystickPlan) é a FONTE ÚNICA — o mesmo contrato de y cumulativo.
+namespace {
+bool drawJoystickInspector(UiContext& ui, EditorState& st, Tic* tic,
+                           TouchControls* joy, f32 x, f32 y, f32 w, f32 h) {
+    const TextMetrics tm = ui.textMetrics();
+    ui.panel(x, y, w, h, theme::PANEL);
+    ui.panel(x, y, 1.0f, h, theme::LINE);
+    ui.label(x + kPad, y + kHeaderH * 0.5f + tm.block() * 0.30f,
+             "INSPECTOR UI", theme::TEXT);
+    ui.panel(x + kPad, y + kHeaderH - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
+
+    char nameLine[64];
+    std::snprintf(nameLine, sizeof(nameLine), "joystick  (%.24s)",
+                  tic->name.c_str());
+
+    UiInspRow plan[16];
+    const u32 n = uiJoystickPlan(tm, plan, 16);
+    const f32 contentH = uiJoystickContentHeight(tm);
+    const f32 contentTop = y + kHeaderH + 4.0f;
+    ui.beginScroll(kUiInspScrollId, {x, contentTop, w, h - kHeaderH - 4.0f},
+                   contentH);
+    const f32 off = ui.scrollOffset();
+
+    bool edited = false;
+    for (u32 i = 0; i < n; ++i) {
+        const UiInspRow& r = plan[i];
+        const f32 ry = contentTop + r.y - off;
+        switch (r.kind) {
+        case UiInspRow::Kind::Name:
+            ui.labelFitted(x + kPad, inspBaseline(ry, r.h, tm), nameLine,
+                           theme::ACCENT, w - 2.0f * kPad);
+            break;
+        case UiInspRow::Kind::PosX:
+            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "pos X", 0.0f, 1.0f,
+                            joy->relX, "%.2f")) {
+                edited = true;
+            }
+            break;
+        case UiInspRow::Kind::PosY:
+            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "pos Y", 0.0f, 1.0f,
+                            joy->relY, "%.2f")) {
+                edited = true;
+            }
+            break;
+        case UiInspRow::Kind::SizeW:   // payload: TAMANHO (escala do raio)
+            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "tamanho", 0.4f, 2.0f,
+                            joy->size, "%.2f")) {
+                edited = true;
+            }
+            break;
+        case UiInspRow::Kind::Sens:    // SENSIBILIDADE do joystick
+            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "sensib.", 0.2f, 3.0f,
+                            joy->sens, "%.2f")) {
+                edited = true;
+            }
+            break;
+        case UiInspRow::Kind::ColR:
+            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "cor R", 0.0f, 1.0f,
+                            joy->colR, "%.2f")) {
+                edited = true;
+            }
+            break;
+        case UiInspRow::Kind::ColG:
+            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "cor G", 0.0f, 1.0f,
+                            joy->colG, "%.2f")) {
+                edited = true;
+            }
+            break;
+        case UiInspRow::Kind::ColB:
+            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "cor B", 0.0f, 1.0f,
+                            joy->colB, "%.2f")) {
+                edited = true;
+            }
+            break;
+        case UiInspRow::Kind::Remove:
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      "remover joystick");
+            break;
+        default:
+            break;
+        }
+    }
+    ui.endScroll();
+
+    // tap re-despachado → REMOVER (o único botão; sliders capturam sozinhos)
+    f32 tx = 0.0f, ty = 0.0f;
+    if (ui.scrollTap(kUiInspScrollId, tx, ty)) {
+        for (u32 i = 0; i < n; ++i) {
+            const UiInspRow& r = plan[i];
+            if (r.kind != UiInspRow::Kind::Remove) {
+                continue;
+            }
+            const f32 ry = contentTop + r.y - off;
+            if (tx < x + kPad || tx >= x + w - kPad) {
+                continue;
+            }
+            if (ty < ry + 2.0f || ty >= ry + r.h - 2.0f) {
+                continue;
+            }
+            // remove o COMPONENTE do TIC (o InputMap continua; sem fonte)
+            tic->removeComponent<TouchControls>();
+            st.selJoystick = false;
+            edited = true;
+        }
+    }
+    return edited;
+}
+} // namespace
+
 bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                      const InputState& in) {
     (void)in;
@@ -262,6 +473,16 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
     ui.panel(x + kPad, y + kHeaderH - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
 
     Tic* tic = scene.get(st.selected);
+    // 0.7.3 — JOYSTICK selecionado: o painel mostra o INSPECTOR DO
+    // JOYSTICK (pos/tamanho/sens/cor/remover do TouchControls do TIC)
+    TouchControls* joySel =
+        (tic && st.selJoystick) ? tic->getComponent<TouchControls>() : nullptr;
+    if (joySel) {
+        return drawJoystickInspector(ui, st, tic, joySel, x, y, w, h);
+    }
+    if (st.selJoystick) {
+        st.selJoystick = false;   // o componente sumiu — cai no fluxo normal
+    }
     UiCanvas* canvas = tic ? tic->getComponent<UiCanvas>() : nullptr;
     if (!canvas || st.selElement < 0 ||
         st.selElement >= static_cast<i32>(canvas->elements.size())) {
@@ -495,12 +716,13 @@ bool uiAddElement(Scene& scene, EditorState& st, u32 kind, f32 sw, f32 sh) {
     if (!canvas) {
         return false;
     }
-    if (kind > 3) {
-        return false;   // 0.7.3 acrescenta os compostos
+    if (kind > 6) {
+        return false;   // 0..3 = base (0.7.0); 4..6 = compostos (0.7.3)
     }
     const UiElement::Kind k = static_cast<UiElement::Kind>(kind);
     const i32 idx = canvas->addElement(k, sw, sh);
     st.selElement = idx;
+    st.selJoystick = false;   // a seleção passou para o elemento novo
     return true;
 }
 

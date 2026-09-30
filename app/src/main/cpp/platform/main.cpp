@@ -1662,7 +1662,7 @@ void frame() {
         g_editor.fileMenu = false;
     }
     const bool uiInsp =
-        g_editor.uiMode && g_editor.selElement >= 0;
+        g_editor.uiMode && (g_editor.selElement >= 0 || g_editor.selJoystick);
     if (uiInsp) {
         editor::drawUiInspector(g_ui, g_scene, g_editor, g_input);
     } else {
@@ -1674,10 +1674,30 @@ void frame() {
         const int choice = editor::drawPlusMenu(g_ui, g_input, w, h, g_editor);
         if (choice > 0) {
             if (g_editor.uiMode) {
-                // 0.7.0: cria o elemento no canvas do TIC selecionado (cria
-                // o canvas à primeira) e seleciona-o — WYSIWYG imediato
-                if (editor::uiAddElement(g_scene, g_editor,
-                                         static_cast<u32>(choice - 1), w, h)) {
+                if (choice == 8) {
+                    // 0.7.3 — JOYSTICK: widget de TouchControls EDITÁVEL no
+                    // TIC selecionado (a UI do Player passa a ser esta
+                    // instância); seleciona-o no viewport 2D
+                    Tic* tic = g_scene.get(g_editor.selected);
+                    if (!tic) {
+                        showToast("selecione um TIC na Hierarchy");
+                    } else {
+                        TouchControls* tc = tic->getComponent<TouchControls>();
+                        if (!tc) {
+                            tc = tic->addComponent<TouchControls>();
+                        }
+                        if (tc) {
+                            g_editor.selJoystick = true;
+                            g_editor.selElement = -1;
+                            showToast("joystick adicionado");
+                            LOGI("editor: joystick (TouchControls) adicionado");
+                        }
+                    }
+                } else if (editor::uiAddElement(g_scene, g_editor,
+                                               static_cast<u32>(choice - 1),
+                                               w, h)) {
+                    // 0.7.0: cria o elemento no canvas do TIC selecionado
+                    // (cria o canvas à primeira) e seleciona-o — WYSIWYG
                     showToast("elemento UI criado");
                     LOGI("editor: elemento UI criado (kind %d)", choice - 1);
                 } else {
@@ -2035,10 +2055,10 @@ void android_main(android_app* app) {
     // F5.1-hotfix: log DUPLO (logcat + ficheiro) desde a 1ª linha.
     // O boot ainda não tem os paths da activity? O elog usa o fallback
     // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu
-    elog::info("G.One VV 0.7.2 — import robusto: navegador de ficheiros "
-               "com galeria (DCIM/Camera, Pictures), caminho visível e "
-               "aplicar-após-import (0.7.1 cenas + transições; 0.7.0 UI "
-               "criável + gestão de TICs)");
+    elog::info("G.One VV 0.7.3 — joystick editável (a UI do Player é a "
+               "instância) + compostos Menu/Card/Article (0.7.2 navegador "
+               "com galeria; 0.7.1 cenas + transições; 0.7.0 UI criável + "
+               "gestão de TICs — fecho da campanha 0.7)");
     {
         const char* root0 = app->activity
             ? (app->activity->externalDataPath ? app->activity->externalDataPath

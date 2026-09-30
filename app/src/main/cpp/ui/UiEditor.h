@@ -91,7 +91,8 @@ struct UiInspRow {
         ActType,        // "acao: ..." (cicla none/show/hide/toggle/scene/spawn/trans)
         ActTarget,      // "alvo: ..." (abre o teclado)
         StyleBtn,       // 0.7.1: "estilo: fade|slide" (cicla) — acao trans
-        Remove,         // "remover elemento"
+        Sens,           // 0.7.3: slider de sensibilidade (joystick)
+        Remove,         // "remover elemento"/"remover joystick"
     };
     Kind kind;
     f32  y;
@@ -108,6 +109,11 @@ u32 uiInspectorRowCount(const UiElement& e, const TextMetrics& m);
 u32 uiInspectorPlan(const UiElement& e, const TextMetrics& m, UiInspRow* rows,
                     u32 cap);
 f32  uiInspectorContentHeight(const UiElement& e, const TextMetrics& m);
+
+// 0.7.3 — plano do INSPECTOR DO JOYSTICK (TouchControls editável: pos/
+// tamanho/sensibilidade/cor/remover; o MESMO contrato de y cumulativo)
+u32 uiJoystickPlan(const TextMetrics& m, UiInspRow* rows, u32 cap);
+f32  uiJoystickContentHeight(const TextMetrics& m);
 
 // desenha o Inspector de UI no painel direito (substitui o de TICs quando
 // há elemento selecionado em modo UI). Devolve true se algum valor mudou.

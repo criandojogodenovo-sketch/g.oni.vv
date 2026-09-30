@@ -449,8 +449,10 @@ TEST(tc_layout_e_zonas_de_toque) {
 }
 
 TEST(tc_eixo_do_joystick_com_clamp) {
-    const auto l = TouchControls::layout(1600.0f, 720.0f);
+    // 0.7.3: o input usa o layout EDITÁVEL (layoutFor — o default reproduz
+    // o fixo no ecrã de referência; nos taps usa-se o MESMO layout)
     TouchControls tc;
+    const auto l = tc.layoutFor(1600.0f, 720.0f);
     EXPECT(tc.axis().x == 0.0f && tc.axis().y == 0.0f);   // sem toque
 
     EXPECT(tc.touchBegin(0, l.joyCX, l.joyCY, 1600.0f, 720.0f));
