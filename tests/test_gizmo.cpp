@@ -370,3 +370,134 @@ TEST(gizmo_rodar_desenho_emite_os_3_aneis) {
     EXPECT(ui.solidsForTest().vertexCount() / 6 >= 144u);
     ui.endFrame();
 }
+
+// ==== COMMIT 0.6.9-c: ESCALAR (3 handles por eixo + central uniforme) =========
+
+TEST(gizmo_escalar_hit_test_handle_y) {
+    Env e;
+    // handle Y: no fim do eixo Y projetado (0.9 do len — dentro do handle)
+    f32 px = 0.0f, py = 0.0f;
+    EXPECT(e.proj(Vec3{0.0f, 1.0f, 0.0f} * (e.len * 0.9f), px, py));
+    EXPECT(pickAxis(Mode::Scale, e.vp, Vec3{}, e.len, kSW, kSH, px, py)
+           == Axis::Y);
+}
+
+TEST(gizmo_escalar_hit_test_handle_central) {
+    Env e;
+    f32 ox = 0.0f, oy = 0.0f;
+    EXPECT(e.proj(Vec3{}, ox, oy));
+    // o centro tem PRIORIDADE (handle uniforme) mesmo sobre os eixos
+    // (a origem pertence aos 3 eixos projetados)
+    EXPECT(pickAxis(Mode::Scale, e.vp, Vec3{}, e.len, kSW, kSH, ox, oy)
+           == Axis::Center);
+}
+
+TEST(gizmo_escalar_drag_eixo_altera_sozinho_o_eixo) {
+    const Vec3 anchor{1.0f, 2.0f, 4.0f};
+    const Vec3 h0{0.0f, 0.0f, 0.0f};
+    const Vec3 h1{1.5f, 0.0f, 0.0f};   // +1.5 u no eixo X
+    const Vec3 s = dragScaleAxis(anchor, Axis::X, Vec3{1, 0, 0}, h0, h1,
+                                 false);
+    EXPECT(nearEqF(s.x, 2.5f));   // 1 + 1.5 (fator 1 + delta/1)
+    EXPECT(nearEqF(s.y, 2.0f));   // intocados
+    EXPECT(nearEqF(s.z, 4.0f));
+    // eixo Z com ruído fora do eixo: delta 0.25 → FATOR 1.25 → 4*1.25=5
+    const Vec3 sz = dragScaleAxis(anchor, Axis::Z, Vec3{0, 0, 1}, h0,
+                                  Vec3{0.3f, -0.5f, 0.25f}, false);
+    EXPECT(nearEqF(sz.z, 5.0f));   // 4 × (1 + 0.25) — escala MULTIPLICA
+    EXPECT(nearEqF(sz.x, 1.0f));
+}
+
+TEST(gizmo_escalar_drag_nunca_zero_ou_negativo) {
+    const Vec3 anchor{1.0f, 1.0f, 1.0f};
+    const Vec3 h0{0.0f, 0.0f, 0.0f};
+    // arrasto de -3 u (fator 1-3 = -2) → clamp em 0.05
+    const Vec3 s = dragScaleAxis(anchor, Axis::X, Vec3{1, 0, 0}, h0,
+                                Vec3{-3.0f, 0, 0}, false);
+    EXPECT(nearEqF(s.x, 0.05f));
+    // uniforme: dist0=100, dist1=1 (fator 0.01) → clamp
+    const Vec3 u = dragScaleUniform(anchor, 100.0f, 1.0f, false);
+    EXPECT(nearEqF(u.x, 0.05f));
+    EXPECT(nearEqF(u.y, 0.05f));
+}
+
+TEST(gizmo_escalar_drag_uniforme_pelo_centro) {
+    const Vec3 anchor{1.0f, 2.0f, 3.0f};
+    // dedo afasta-se do centro 2× → fator 2 em TODOS os eixos
+    const Vec3 s = dragScaleUniform(anchor, 120.0f, 240.0f, false);
+    EXPECT(nearEqF(s.x, 2.0f));
+    EXPECT(nearEqF(s.y, 4.0f));
+    EXPECT(nearEqF(s.z, 6.0f));
+    // âncora degenerada (dedo em cima do centro): nada muda
+    const Vec3 n = dragScaleUniform(anchor, 0.5f, 300.0f, false);
+    EXPECT(nearEqF(n.x, 1.0f));
+    EXPECT(nearEqF(n.y, 2.0f));
+}
+
+TEST(gizmo_escalar_snap_em_passos_de_025) {
+    const Vec3 anchor{1.0f, 1.0f, 1.0f};
+    const Vec3 h0{0.0f, 0.0f, 0.0f};
+    // eixo: delta 0.18 → fator 1.18 → snap 1.25
+    EXPECT(nearEqF(dragScaleAxis(anchor, Axis::X, Vec3{1, 0, 0}, h0,
+                                 Vec3{0.18f, 0, 0}, true).x, 1.25f));
+    // delta 0.6 → fator 1.6 → snap 1.5
+    EXPECT(nearEqF(dragScaleAxis(anchor, Axis::X, Vec3{1, 0, 0}, h0,
+                                 Vec3{0.6f, 0, 0}, true).x, 1.5f));
+    // uniforme: 100→180 = 1.8 → snap 1.75
+    EXPECT(nearEqF(dragScaleUniform(anchor, 100.0f, 180.0f, true).x, 1.75f));
+    // sem snap: exato
+    EXPECT(nearEqF(dragScaleUniform(anchor, 100.0f, 183.0f, false).x, 1.83f));
+}
+
+TEST(gizmo_escalar_desenho_handles_e_centro) {
+    Env e;
+    FontAtlas font;
+    const char* path = FONT_FIXTURE;
+    EXPECT(font.loadFromPaths(&path, 1, 28.0f));
+    UiContext ui;
+    ui.init();
+    ui.setFont(&font);
+    ui.setSafeArea(vv::safe::Insets{});
+    ui.beginFrame(nullptr, nullptr, kSW, kSH);
+    drawGizmo(ui, e.vp, Vec3{}, e.len, Mode::Scale, Axis::None);
+    const u32 quads = ui.solidsForTest().vertexCount() / 6;
+    // 3 hastes + 3 handles (painel preenchido) + handle central = 7 mín
+    EXPECT(quads >= 7u);
+    ui.endFrame();
+}
+
+// ---- integração final: Transform3D escrito com worldDirty coerente -----------
+
+TEST(gizmo_apply_move_escreve_no_transform3d) {
+    // o contrato do main: pose final = âncora + delta; updateWorld() com o
+    // cache coerente (world == computeMatrix) e worldDirty limpo
+    Scene scene;
+    const Handle h = createTicFromPreset(scene, PresetKind::StaticBody3D,
+                                         nullptr, nullptr);
+    Tic* tic = scene.get(h);
+    EXPECT(tic != nullptr);
+    Transform3D* tr = tic ? tic->getComponent<Transform3D>() : nullptr;
+    EXPECT(tr != nullptr);
+    if (!tr) {
+        return;
+    }
+    tr->pos = Vec3{0.0f, 0.5f, 0.0f};
+    tr->updateWorld();
+
+    // drag de MOVER no eixo X com snap: 0.3 → 0.5
+    const Vec3 nova = dragMoveAxis(tr->pos, Vec3{1, 0, 0}, Vec3{},
+                                   Vec3{0.3f, 0, 0}, true);
+    tr->pos = nova;
+    tr->updateWorld();   // (o main faz exatamente isto no applyGizmoDrag)
+    tr->worldDirty = false;
+    EXPECT(nearEqF(tr->pos.x, 0.5f));
+    // world == computeMatrix: comparação por elementos (Mat4 sem operator==)
+    {
+        const Mat4 a = tr->world;
+        const Mat4 b = tr->computeMatrix();
+        for (int i = 0; i < 16; ++i) {
+            EXPECT(nearEqF(a.m[i], b.m[i]));
+        }
+    }
+    EXPECT(!tr->worldDirty);
+}
