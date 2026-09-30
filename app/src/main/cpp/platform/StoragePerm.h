@@ -216,4 +216,35 @@ private:
     int       attempts_ = 0;
 };
 
+// F5.5 — RE-VERIFICAÇÃO NO RESUME (política pura; o main fornece a leitura
+// JNI de Environment.isExternalStorageManager e chama isto no APP_CMD_RESUME).
+//
+// PORQUÊ: o retorno das definições chega normalmente pelo onActivityResult
+// (o Java corre-o ANTES do onResume — ver VvActivity), mas NEM TODO ocrã de
+// settings OEM termina com setResult: alguns voltam SEM resultado nenhum e o
+// fluxo ficaria eternamente em PendingSettings. O resume é o ponto
+// GARANTIDO de re-checagem (a activity está visível outra vez).
+//
+// CONTRATO (o main cumpre esta ordem):
+//   1. ANTES de chamar, DRENAR a fila de resultados (pollResult) — se o
+//      onActivityResult já correu, o onSettingsReturn tratou do retorno e
+//      resumeRecheck devolve false SEM mexer no estado (nada duplica);
+//   2. ainda PendingSettings → decide AQUI com a verificação FRESCA:
+//        concedido  → Granted + modo AllFiles (o main retoma a ação
+//                     pendente via takePendingAction — import prossegue);
+//        recusado   → Idle + modo AppPrivate (o main mostra o toast claro
+//                     "acesso não ativado" — SEM relançar as definições:
+//                     nenhuma repetição automática, nenhum loop);
+//   3. sem PendingSettings (Idle/Granted/Unsupported/DialogOpen) → false.
+//
+// Devolve true se o estado foi consumido NESTE ponto (o main loga
+// "storage: all-files granted=1/0" e mostra o toast correspondente).
+inline bool resumeRecheck(PermFlow& f, bool systemSupported, bool isManager) {
+    if (f.state() != FlowState::PendingSettings) {
+        return false;
+    }
+    f.onSettingsReturn(systemSupported && isManager);
+    return true;
+}
+
 } // namespace vv::storage

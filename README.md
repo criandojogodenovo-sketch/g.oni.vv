@@ -1,4 +1,4 @@
-# G.One VV 0.6.9 — gizmos de transformação (0.6.8: play mode; 0.6.7: lifecycle GL + gestão de projetos)
+# G.One VV 0.6.9 + F5.5 — All Files Access de verdade (0.6.9: gizmos; 0.6.8: play mode; 0.6.7: lifecycle GL + gestão de projetos)
 
 Engine com editor, projeto `.goni` e maturação de assets (compressão ETC2/ASTC
 com cache, extração de texturas glTF/GLB, import OBJ/glTF/GLB/PNG, export
@@ -6,7 +6,31 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 (`sensorLandscape`). Devices de teste: Realme C33 (720x1600) e Realme
 RMX3624 (Android 13).
 
-## Escopo 0.6.9 (implementado)
+## Escopo F5.5 (implementado — fix do All Files Access no C33)
+
+**MANAGE_EXTERNAL_STORAGE DECLARADO** (fix do C33 0.6.9): sem a declaração,
+o sistema não tinha o que conceder — a app não aparecia na lista "Acesso a
+todos os ficheiros" (o Godot aparecia "Permitida") e o toggle na página da
+app não concedia nada (`isExternalStorageManager()` sempre `false`):
+
+- **Manifest**: `<uses-permission android:name="android.permission.
+  MANAGE_EXTERNAL_STORAGE" />` — sem física/render/componentes (CLÁUSULA
+  CALMA; decisão e implicação Play Policy documentadas em
+  `docs/SAF_EXCEPTION.md`);
+- **Fluxo mantido**: diálogo in-app → "Permitir" →
+  `ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION` → voltar → re-verificar
+  `isExternalStorageManager()` → prosseguir import/export;
+- **Re-verificação no resume** (`APP_CMD_RESUME`): drena a fila do
+  `onActivityResult` primeiro; se o retorno nunca chegou (ecrã OEM sem
+  `setResult`), verifica fresco e decide — `storage::resumeRecheck`
+  (política pura, afervel no CI). Recusa → toast claro SEM loop;
+- **Log de transição**: `storage: all-files granted=1/0` no engine.log a
+cada transição (boot / retorno / resume / variação por tentativa) — visível
+no log viewer;
+- **Gate CI**: o manifest BINÁRIO do APK passou a ser aferido (aapt2) — a
+  permissão tem de estar presente em TODO build.
+
+## Escopo 0.6.9 (histórico)
 
 **GIZMOS DE TRANSFORMAÇÃO — Mover / Rodar / Escalar** (só no TIC
 selecionado, SÓ em EDITOR — nunca em PLAY):
@@ -512,6 +536,33 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — F5.5 (All Files Access de verdade)
+
+APK: **0.6.9 + F5.5** (versão mantida — mesmo versionCode 18; distinguível
+pelo sha256 no `docs/RELATORIO-F5.5.md` e pela linha do log viewer abaixo).
+
+1. **Lista do sistema**: Definições do Android → Privacidade →
+   **"Acesso a todos os ficheiros"** (ou "Permissão de todos os ficheiros")
+   → a **G.One VV AGORA APARECE** na lista (antes só o Godot aparecia).
+2. **Fluxo pelo editor**: abrir um projeto → Menu → **Importar…** → diálogo
+   "Precisa de acesso a todos os ficheiros…" → **Permitir** → abre a página
+   DA APP nas definições → **ativar o interruptor** → voltar → toast "acesso
+   concedido — File API direta" e a lista de ficheiros de **Download/Documents
+   abre SEM re-pedir** (import retomado).
+3. **Export**: com um TIC com mesh → Menu → **Export Downloads** → toast
+   "exportado: Download/GOneVV/export/…" → confirmar no gestor de ficheiros
+   em `Download/GOneVV/export/`.
+4. **Log viewer**: Settings → **"Ver logs"** → procurar
+   `storage: all-files granted=1` (depois de conceder; `granted=0` antes).
+   A linha aparece no boot, no retorno das definições e na re-verificação
+   do resume — cada transição logada.
+5. **Recusar (fallback)**: (não conceder / desativar o interruptor) →
+   tentar importar → recusa no diálogo ou ao voltar → toast claro
+   "acesso não ativado — modo app-private" — SEM repetições/loop; o
+   projeto (SAF) continua a funcionar completo.
+6. **Regressões**: 0.6.9 (gizmos), 0.6.8 (play mode), 0.6.7 (lifecycle GL,
+   apagar projeto, sair para projetos), F5.4 (gestor multi-pasta).
 
 ## Verificação no Realme C33 (dono) — 0.6.9 (gizmos; APK CUMULATIVO)
 

@@ -48,15 +48,23 @@ em si é POSIX direto — a Java só abre a janela de permissões.
 
 - `android:hasCode="true"` no manifest (AGP volta a dexar a 1 classe).
 - Tema mono, 3 botões, landscape e o resto da app não mudam.
-- **Nenhuma permissão no manifest**: `MANAGE_EXTERNAL_STORAGE` NÃO é
-  declarado — a app nunca o pede no arranque (nem na instalação); pede-o
-  APENAS via a janela de settings quando o utilizador tenta importar/exportar.
+- **`MANAGE_EXTERNAL_STORAGE` ESTÁ DECLARADO** (F5.5 — ver secção abaixo):
+  sem a declaração, o sistema NÃO TEM O QUE CONCEDER — a app não aparecia na
+  lista "Acesso a todos os ficheiros" e `isExternalStorageManager()` era
+  sempre `false`. A permissão continua a NÃO ser pedida no arranque: é
+  concedida apenas pelo interruptor das definições, quando o utilizador
+  tenta importar/exportar.
 
 ## Play Policy (se um dia publicar)
 
 `MANAGE_EXTERNAL_STORAGE` é **permissão restrita** no Google Play: requer
-submissão de justificação (vídeo demonstrando o fluxo + declaração). A
-justificação da G.One VV:
+submissão de justificação (vídeo demonstrando o fluxo + declaração) e a
+declaração no manifest é o pré-requisito para o fluxo ser sequer proposto à
+análise. A F5.2 removeu a declaração "por cautela" com a suposição ERRADA de
+que o interruptor das definições funcionaria sem ela — não funciona: a
+declaração é o que faz a app APARECER na lista "Acesso a todos os ficheiros"
+e o que dá ao sistema uma permissão para conceder (F5.5 corrigiu isto —
+ver secção abaixo). A justificação da G.One VV:
 
 > O G.One VV é um editor de jogos 3D que importa modelos (OBJ/glTF/GLB) e
 > texturas (PNG) escolhidos pelo utilizador e exporta modelos criados no
@@ -67,9 +75,16 @@ justificação da G.One VV:
 > utilizador sem duplicar a biblioteca de mídia (MediaStore não cobre
 > navegação por extensão em pastas arbitrárias).
 
-Caminho alternativo se o Play recusar: voltar a um picker de ficheiro único
-(`ACTION_OPEN_DOCUMENT`) — a File API e a UI já estão isoladas atrás de
-`fileapi::*`/`storage::*`, o custo da troca é local.
+**Decisão F5.5 (documentada)**: declarar `MANAGE_EXTERNAL_STORAGE` é
+PERMITIDO — a restrição do Play aplica-se à PUBLICAÇÃO, não à declaração.
+Distribuir por APK/sideload (o caso atual do C33) não passa pela análise do
+Play. Se um dia publicar na Play Store: (a) submeter a justificação acima
+(o fluxo — diálogo → janela do sistema → toggle — é exatamente o que o Play
+recomenda para apps de gestão de ficheiros/editores), ou (b) migrar para
+SAF/MediaStore — a File API e a UI já estão isoladas atrás de
+`fileapi::*`/`storage::*`, o custo da troca é local (a alternativa
+`ACTION_OPEN_DOCUMENT` por ficheiro já foi avaliada na F5.2 e é o fallback
+documentado).
 
 ## Histórico
 
@@ -106,3 +121,44 @@ complementar — os dois fluxos COEXISTEM, não se substituem:
 A lista de projetos (projects.json) vive no app-private — não depende
 nem do handshake nem de permissões. Sem handshake, o boot cai no modo
 app-private com a mensagem honesta "ponte Java indisponível (handshake)".
+
+## F5.5 — All Files Access DE VERDADE (fix do C33 0.6.9)
+
+No C33 com o 0.6.9, a G.One VV NÃO aparecia na lista "Acesso a todos os
+ficheiros" (enquanto o Godot aparecia "Permitida") e o interruptor na
+página da app não concedia nada. **Causa**: o manifest não declarava
+`android.permission.MANAGE_EXTERNAL_STORAGE` — removido na F5.2 por cautela
+Play Policy (a secção "Consequências" acima chegou a documentar como opção
+que a permissão NÃO era declarada). Sem a declaração, o sistema não tem o
+que conceder e `Environment.isExternalStorageManager()` é sempre `false` —
+o fluxo de settings nunca pode funcionar, por muito correto que esteja.
+
+O que mudou (só manifest + lógica de verificação + docs — CLÁUSULA CALMA,
+zero física/render/componentes):
+
+1. **Manifest**: `<uses-permission android:name="android.permission.
+   MANAGE_EXTERNAL_STORAGE" />` — a declaração é o que faz a app APARECER
+   na lista "Acesso a todos os ficheiros" e o que dá ao interruptor uma
+   permissão para conceder. A app continua a NÃO pedir nada no arranque.
+2. **Fluxo mantido** (exatamente como na F5.2): diálogo in-app → "Permitir"
+   → `ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION` (URI `package:`) →
+   voltar → re-verificar `isExternalStorageManager()` → prosseguir para
+   import/export.
+3. **Re-verificação no RESUME** (`APP_CMD_RESUME` do nativo — o
+   "re-verificar no onResume" do fluxo): o caminho normal é o
+   `onActivityResult` (corre ANTES do `onResume`), mas nem todo o ecrã de
+   settings OEM termina com `setResult` — o resume drena a fila primeiro e,
+   se o fluxo ainda está `PendingSettings`, verifica fresco e decide ali
+   (`storage::resumeRecheck` em `platform/StoragePerm.h`, política pura
+   afervel no CI). Recusa → toast claro, SEM relançar definições (sem
+   loop). Ação retomada sempre 1× (nem o resultado tardio duplica).
+4. **Log de transição**: `storage: all-files granted=1/0 (...)` no
+   engine.log a cada transição — boot, retorno das definições,
+   re-verificação no resume e variações detetadas por tentativa — visível
+   no log viewer in-app (Settings → "Ver logs").
+5. **Gate CI**: o job `verify-entry-symbols` passou a exigir a permissão no
+   manifest BINÁRIO do APK (aapt2 dump) — regressão impossível de passar
+   despercebida.
+
+Implicação Play Policy: ver secção "Play Policy" acima — declarar é
+permitido; publicar exige justificação ou migração para SAF/MediaStore.

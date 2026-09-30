@@ -437,6 +437,22 @@ SceneSerializer::LoadCtx makeLoadCtx() {
 void openImportScan();
 void beginExportToDownloads();
 
+// F5.5 — LOG DE TRANSIÇÃO do all-files ("storage: all-files granted=1/0" —
+// visível no log viewer do C33). force=true nos pontos onde TODO o valor
+// observado deve sair (boot, retorno das definições, re-verificação no
+// resume); nas tentativas de import/export só quando MUDA desde a última
+// linha (sem spam — a mesma verificação corre a cada tentativa).
+int g_grantedLogged = -1;   // último granted=N logado (-1 = nunca)
+
+void logAllFilesGranted(bool granted, const char* where, bool force = false) {
+    const int g = granted ? 1 : 0;
+    if (!force && g == g_grantedLogged) {
+        return;
+    }
+    g_grantedLogged = g;
+    elog::info("storage: all-files granted=%d (%s)", g, where);
+}
+
 // VERIFICAÇÃO fresca da permissão (1 chamada JNI estática por tentativa —
 // o utilizador pode ter ativado as definições sem voltar pela app)
 bool storageGrantedNow(bool* outSupported) {
@@ -448,7 +464,39 @@ bool storageGrantedNow(bool* outSupported) {
     if (supported) {
         g_perm.setMode(mgr ? storage::Mode::AllFiles : storage::Mode::AppPrivate);
     }
+    // F5.5: transição detetada numa TENTATIVA (ex.: o utilizador concedeu/
+    // revogou nas definições do sistema e voltou sem passar pelo fluxo da
+    // app) — só loga quando o valor é DIFERENTE da última linha.
+    logAllFilesGranted(supported && mgr, "verificacao por tentativa");
     return supported && mgr;
+}
+
+// F5.5 — CAUDA do retorno das definições (toast claro + ação retomada 1×),
+// SEM transição de estado: o chamador já fez onSettingsReturn (o
+// onStorageResult diretamente, ou o resumeRecheck do APP_CMD_RESUME).
+// A recusa NUNCA relança as definições (nenhum loop — a próxima tentativa
+// é SEMPRE iniciada pelo utilizador).
+void resumePendingAfterReturn(bool granted) {
+    if (!granted) {
+        showToast("acesso não ativado — modo app-private");
+        return;
+    }
+    showToast("acesso concedido — File API direta");
+    // retoma a ação que abriu o diálogo (1 import, 2 export; None = foi
+    // aberto pelo Settings "Acesso a ficheiros…" — nada a retomar)
+    const storage::Action act = g_perm.takePendingAction();
+    if (act == storage::Action::Import) {
+        openImportScan();
+    } else if (act == storage::Action::Export) {
+        beginExportToDownloads();
+    }
+}
+
+// F5.5 — transição COMPLETA do retorno das definições (concedido ou não),
+// pelo onActivityResult (onStorageResult): estado + toast + ação retomada.
+void finishStorageReturn(bool granted) {
+    g_perm.onSettingsReturn(granted);
+    resumePendingAfterReturn(granted);
 }
 
 // handler injetado — chamado pelo bridge quando a Activity volta das
@@ -463,23 +511,14 @@ void onStorageResult(void* /*user*/, const saf::SafResult& r) {
     bool mgr = false;
     const bool supported = storage::jniStorageApiSupported(&mgr);
     const bool granted = supported && mgr;
-    g_perm.onSettingsReturn(granted);
+    logAllFilesGranted(granted, "retorno das definicoes", /*force=*/true);
+    // F5.5: a transição inteira (estado + toast + ação retomada) vive em
+    // finishStorageReturn — partilhada com a re-verificação do RESUME
+    finishStorageReturn(granted);
     elog::info("storage: retorno das definicoes — supported=%d mgr=%d → %s "
                "(modo %s)", supported ? 1 : 0, mgr ? 1 : 0,
                granted ? "CONCEDIDO" : "negado/sem accao",
                storage::modeLabel(g_perm.mode()));
-    if (!granted) {
-        showToast("acesso não ativado — modo app-private");
-        return;
-    }
-    showToast("acesso concedido — File API direta");
-    // retoma a ação que abriu o diálogo (1 import, 2 export)
-    const storage::Action act = g_perm.takePendingAction();
-    if (act == storage::Action::Import) {
-        openImportScan();
-    } else if (act == storage::Action::Export) {
-        beginExportToDownloads();
-    }
 }
 
 // varre Download/ e Documents/ (File API direta) e abre o overlay IMPORT
@@ -863,6 +902,47 @@ void onAppCmd(android_app* app, i32 cmd) {
             // mudou (nav/status bar a aparecer/esconder) → reinsetar TUDO
             applyContentRect(app);
             break;
+        case APP_CMD_RESUME: {
+            // F5.5 — All Files Access: RE-VERIFICAÇÃO NO RETORNO (o
+            // "re-verificar no onResume" do fluxo). O caminho normal do
+            // retorno das definições é o onActivityResult (o Java corre-o
+            // ANTES do onResume), que enfileira p/ ESTE thread — a fila é
+            // drenada AQUI primeiro para que o retorno seja tratado pelo
+            // onStorageResult (a ordem natural; o drain é a mesma chamada
+            // do loop da engine, fila mutex-guarded). Se DEPOIS do drain o
+            // fluxo continua PendingSettings (ecrã de settings OEM que
+            // termina SEM setResult / volta pelos recents), a verificação
+            // FRESCA de isExternalStorageManager decide AGORA via
+            // resumeRecheck (política pura afervel no CI):
+            //   concedido → Granted + ação pendente RETOMADA (o import
+            //              prossegue sem re-pedir — o caminho feliz);
+            //   recusado → Idle + toast claro "acesso não ativado" SEM
+            //              relançar as definições (nenhum loop).
+            // Nada corre sem fluxo pendente (arranque frio e voltas do
+            // fundo incluídas — o guard é o estado do fluxo, não o cmd).
+            // NOTA: SEM setMode aqui antes do recheck — setMode(AllFiles)
+            // põe o estado em Granted e o recheck tem de ver PendingSettings.
+            while (storage::pollResult()) {
+            }
+            if (g_perm.state() == storage::FlowState::PendingSettings) {
+                bool mgr = false;
+                const bool supported = storage::jniStorageApiSupported(&mgr);
+                if (storage::resumeRecheck(g_perm, supported, mgr)) {
+                    // concedido ⟺ modo ficou AllFiles (PendingSettings
+                    // implica que NÃO era AllFiles antes do recheck)
+                    const bool granted =
+                        g_perm.mode() == storage::Mode::AllFiles;
+                    logAllFilesGranted(granted, "re-verificacao no resume",
+                                       /*force=*/true);
+                    elog::info("storage: resume sem onActivityResult — "
+                               "decisao aqui (supported=%d mgr=%d → modo %s)",
+                               supported ? 1 : 0, mgr ? 1 : 0,
+                               storage::modeLabel(g_perm.mode()));
+                    resumePendingAfterReturn(granted);
+                }
+            }
+            break;
+        }
         case APP_CMD_TERM_WINDOW:
             // 0.6.7 (fix dos "cubinhos"): o EglContext::shutdown destrói a
             // SURFACE E O CONTEXTO — TODOS os ids GL ficam órfãos. O código
@@ -1572,6 +1652,9 @@ void android_main(android_app* app) {
                        storage::handshakeOk() ? 1 : 0,
                        supported ? 1 : 0, mgr ? 1 : 0,
                        storage::modeLabel(g_perm.mode()));
+            // F5.5: granted=1/0 da transição de BOOT (a 1ª linha do
+            // all-files que o log viewer mostra num arranque frio)
+            logAllFilesGranted(supported && mgr, "boot", /*force=*/true);
         }
         // [boot 2/6] storage — passo crítico do arranque (ficheiro legível
         // no device: se o boot morrer aqui, o dono vê exatamente onde)

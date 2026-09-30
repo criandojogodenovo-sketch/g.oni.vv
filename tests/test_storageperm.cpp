@@ -9,6 +9,9 @@
 //   fallback     → recusa/sem suporte → AppPrivate (sem diálogo em loop)
 //   File API     → listCandidates/readAll/writeAll/errno em /tmp
 //   fila de reto → PendingResult com kReqAllFiles (retorno das settings)
+//   F5.5 resume  → resumeRecheck: conceder→resume→import prossegue;
+//                  recusar→toast claro SEM loop; drain-primeiro e resultado
+//                  tardio NUNCA duplicam a ação retomada (1×)
 #include "TestFramework.h"
 #include <dirent.h>
 #include <sys/stat.h>
@@ -174,6 +177,129 @@ TEST(storage_fluxo_settings_sem_concessao) {
     // e pode tentar de novo (diálogo volta)
     EXPECT(f.requestAction(Action::Import, true));
 }
+
+// ---------------------------------------------------------------------------
+// F5.5 — RE-VERIFICAÇÃO NO RESUME (resumeRecheck): o caminho em que o
+// onActivityResult NUNCA chega (ecrã de settings OEM sem setResult / volta
+// pelos recents) — o APP_CMD_RESUME do main verifica isExternalStorageManager
+// FRESCO e decide ali. Contrato do main: drenar a fila ANTES de chamar.
+// ---------------------------------------------------------------------------
+
+// CONCEDER → RESUME → IMPORT PROSSEGUE (o caminho feliz da F5.5): o
+// utilizador ativa o toggle, volta SEM resultado nenhum, e o resume decide
+TEST(storage_resume_concede_import_prossegue) {
+    PermFlow f;
+    EXPECT(f.requestAction(Action::Import, true));
+    f.dialogAccept();
+    EXPECT(f.consumeOpenSettings());   // intent lançado; resultado NUNCA veio
+
+    // RESUME: verificação fresca diz CONCEDIDO → transição feita AQUI
+    EXPECT(storage::resumeRecheck(f, /*systemSupported=*/true,
+                                  /*isManager=*/true));
+    EXPECT(f.state() == FlowState::Granted);
+    EXPECT(f.mode() == Mode::AllFiles);
+
+    // o IMPORT prossegue SEM re-pedir: a ação pendente sai 1×
+    EXPECT(f.takePendingAction() == Action::Import);
+    EXPECT(f.takePendingAction() == Action::None);
+
+    // tentativa seguinte NEM pergunta (o main executa direto)
+    EXPECT(!f.requestAction(Action::Export, true));
+}
+
+// RECUSAR → RESUME → TOAST CLARO SEM LOOP: voltou sem ativar o toggle —
+// Idle + app-private + ação abortada; NADA se auto-relança (só uma NOVA
+// tentativa do utilizador volta a abrir o diálogo)
+TEST(storage_resume_recusa_toast_claro_sem_loop) {
+    PermFlow f;
+    EXPECT(f.requestAction(Action::Import, true));
+    f.dialogAccept();
+    EXPECT(f.consumeOpenSettings());
+
+    // RESUME com o toggle desligado → recusa decidida AQUI (toast claro do
+    // main: "acesso não ativado — modo app-private")
+    EXPECT(storage::resumeRecheck(f, true, false));
+    EXPECT(f.state() == FlowState::Idle);
+    EXPECT(f.mode() == Mode::AppPrivate);
+    EXPECT(f.takePendingAction() == Action::None);   // SEM retoma
+
+    // SEM LOOP: o resume NÃO reabre definições nem diálogo — a próxima
+    // tentativa é SEMPRE do utilizador (e pergunta de novo, sem nag)
+    EXPECT(f.requestAction(Action::Import, true));
+    EXPECT(f.dialogOpen());
+    // e o pedido de intent NUNCA ficou pendente da recusa do resume
+    EXPECT(!f.consumeOpenSettings());
+}
+
+// GUARD do resume: sem PendingSettings o recheck NÃO mexe em NADA (o
+// resume de arranque frio e as voltas do fundo ficam de fora do fluxo)
+TEST(storage_resume_sem_pendente_nao_mexe) {
+    PermFlow f;
+    // arranque frio: Idle (antes mesmo do boot verificar) — nada corre
+    EXPECT(!storage::resumeRecheck(f, true, true));
+    EXPECT(f.state() == FlowState::Idle);
+    EXPECT(f.mode() == Mode::Unknown);   // nem o modo foi tocado
+
+    // já concedido (boot/boot anterior): Granted mantém-se
+    f.setMode(Mode::AllFiles);
+    EXPECT(!storage::resumeRecheck(f, true, true));
+    EXPECT(f.state() == FlowState::Granted);
+
+    // diálogo ABERTO (ainda não foi às definições): o resume não decide
+    PermFlow g;
+    EXPECT(g.requestAction(Action::Import, true));
+    EXPECT(!storage::resumeRecheck(g, true, true));
+    EXPECT(g.dialogOpen());
+
+    // API < 30 no resume: sem suporte → recusa (nunca concede o impossível)
+    PermFlow h;
+    EXPECT(h.requestAction(Action::Import, true));
+    h.dialogAccept();
+    EXPECT(storage::resumeRecheck(h, false, true));
+    EXPECT(h.state() == FlowState::Idle);
+    EXPECT(h.mode() == Mode::AppPrivate);
+}
+
+// CONTRATO drain-primeiro: o onActivityResult corre ANTES do onResume
+// (lifecycle Java) — tratado pelo onSettingsReturn, o recheck do resume
+// que se segue devolve false SEM mexer (o import NUNCA corre 2×)
+TEST(storage_resume_drain_primeiro_resultado_tratado_nao_duplica) {
+    PermFlow f;
+    EXPECT(f.requestAction(Action::Import, true));
+    f.dialogAccept();
+    EXPECT(f.consumeOpenSettings());
+
+    // 1) o retorno CHEGOU pela fila (caminho normal): ação retomada AQUI
+    f.onSettingsReturn(true);
+    EXPECT(f.takePendingAction() == Action::Import);
+
+    // 2) o resume que se segue: estado JÁ não é PendingSettings → false
+    //    e nenhuma SEGUNDA retoma acontece
+    EXPECT(!storage::resumeRecheck(f, true, true));
+    EXPECT(f.state() == FlowState::Granted);
+    EXPECT(f.takePendingAction() == Action::None);
+}
+
+// CORRIDA INVERSA (resultado TARDO): o resume decide sem o resultado; o
+// onActivityResult chega DEPOIS ao loop da engine — onSettingsReturn(true)
+// é idempotente e a ação JÁ foi consumida (o export NUNCA corre 2×)
+TEST(storage_resume_resultado_tardio_nao_duplica) {
+    PermFlow f;
+    EXPECT(f.requestAction(Action::Export, true));
+    f.dialogAccept();
+    EXPECT(f.consumeOpenSettings());
+
+    // o resume decide PRIMEIRO (ecrã OEM sem setResult): concedido
+    EXPECT(storage::resumeRecheck(f, true, true));
+    EXPECT(f.takePendingAction() == Action::Export);   // retomado 1×
+
+    // o resultado tardio chega: Granted mantém-se e NÃO há 2ª ação
+    f.onSettingsReturn(true);
+    EXPECT(f.state() == FlowState::Granted);
+    EXPECT(f.mode() == Mode::AllFiles);
+    EXPECT(f.takePendingAction() == Action::None);
+}
+
 
 // ---------------------------------------------------------------------------
 // FALLBACK: sistema sem All Files Access (API < 30) → NUNCA pede, modo

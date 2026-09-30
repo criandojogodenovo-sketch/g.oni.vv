@@ -1,6 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- F5.5 (fix C33 0.6.9): MANAGE_EXTERNAL_STORAGE DECLARADO — sem esta
+         declaração o sistema NÃO TEM O QUE CONCEDER: a app não aparecia na
+         lista "Acesso a todos os ficheiros" (enquanto o Godot aparecia
+         "Permitida") e Environment.isExternalStorageManager() era sempre
+         false — o fluxo diálogo → ACTION_MANAGE_APP_ALL_FILES_ACCESS_
+         PERMISSION → toggle NUNCA podia conceder nada (docs/SAF_EXCEPTION.md
+         — decisão Play Policy revista: declarar é permitido; se publicar na
+         Play, justificar o uso ou migrar para SAF/MediaStore). A permissão
+         NÃO é pedida no arranque: só via a janela de settings, quando o
+         utilizador tenta importar/exportar. -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
     <!-- F5.1-C/F5.2: hasCode="true" — EXCEÇÃO documentada
          (docs/SAF_EXCEPTION.md). NativeActivity não lança a janela de
          permissões nem reencaminha onActivityResult sem uma subclasse: a

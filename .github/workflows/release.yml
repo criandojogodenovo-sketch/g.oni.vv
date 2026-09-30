@@ -203,7 +203,15 @@ jobs:
           #    sem ele, JNI_OnLoad/RegisterNatives nunca correm)
           grep -q 'goni_vv' manifest.txt \
             || { echo "::error::MANIFEST: meta-data android.app.lib_name != goni_vv."; exit 1; }
-          echo "OK: manifest binário — hasCode=true, vv.goni.VvActivity como activity, lib_name=goni_vv"
+          # 4) F5.5 (fix C33 0.6.9): MANAGE_EXTERNAL_STORAGE DECLARADO no
+          #    manifest BINÁRIO — sem a declaração o sistema não tem o que
+          #    conceder (a app não aparecia na lista "Acesso a todos os
+          #    ficheiros" e isExternalStorageManager() era sempre false —
+          #    o fluxo de settings nunca podia funcionar). A presença é
+          #    complementada pela verificação no device (lista + toggle).
+          grep -q 'android.permission.MANAGE_EXTERNAL_STORAGE' manifest.txt \
+            || { echo "::error::MANIFEST: uses-permission MANAGE_EXTERNAL_STORAGE ausente — o sistema não tem o que conceder (All Files Access morto; ver docs/SAF_EXCEPTION.md)."; exit 1; }
+          echo "OK: manifest binário — hasCode=true, vv.goni.VvActivity como activity, lib_name=goni_vv, MANAGE_EXTERNAL_STORAGE declarado"
 
       - name: Verificar assinatura (apksigner)
         run: |
