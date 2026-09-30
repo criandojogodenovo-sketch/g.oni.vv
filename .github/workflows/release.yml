@@ -118,6 +118,10 @@ jobs:
     needs: build-release
     runs-on: ubuntu-latest
     steps:
+      # F5.4: checkout OBRIGATÓRIO — o gate agora corre o jni_parity.py
+      # (paridade Java↔tabela↔.dynsym), que vive no repo
+      - uses: actions/checkout@v4
+
       # F4.2: download por PATTERN — o nome do artifact contém 'vv' (igual ao
       # secret VV_KEY_ALIAS), e o GitHub DESCARTA outputs que contêm segredo
       # mascarado ('Skip output since it may contain secret'). Outputs com o
@@ -154,7 +158,7 @@ jobs:
             readelf --dyn-syms "${SO}" > dynsyms.txt
           fi
           echo "--- .dynsym (símbolos de entrada) ---"
-          grep -E 'ANativeActivity_onCreate|android_main|JNI_OnLoad|Java_vv_goni_VvActivity_nativeOnActivityResult|Java_vv_goni_VvActivity_nativeRegisterActivity' dynsyms.txt || true
+          grep -E 'ANativeActivity_onCreate|android_main|JNI_OnLoad|Java_vv_goni_VvActivity_nativeOnActivityResult|Java_vv_goni_VvActivity_nativeRegisterActivity|Java_vv_goni_VvActivity_nativeOpenProject' dynsyms.txt || true
           grep -q 'ANativeActivity_onCreate' dynsyms.txt \
             || { echo "::error::SÍMBOLO AUSENTE: ANativeActivity_onCreate — o APK vai crashar com UnsatisfiedLinkError no arranque."; exit 1; }
           grep -q 'android_main' dynsyms.txt \
