@@ -18,7 +18,7 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 (`sensorLandscape`). Devices de teste: Realme C33 (720x1600) e Realme
 RMX3624 (Android 13).
 
-Relatórios 1-16 das sub-fases: `docs/RELATORIO-0.7.{4,5,6,7,8}.md` (com os
+Relatórios 1-16 das sub-fases: `docs/RELATORIO-0.7.{4,5,6,7,8,9}.md` (com os
 sha256 dos APKs assinados).
 
 ## Escopo 0.7.9 (implementado — grab-lock dos gizmos)
