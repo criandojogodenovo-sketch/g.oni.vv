@@ -1,3 +1,7 @@
+# G.One VV 0.8.1 — animação: import de clips glTF (channels/samplers → clips nomeados)
+
+<!-- (0.8.0 abaixo — histórico) -->
+
 # G.One VV 0.8.0 — animação: timeline + keyframes + AnimationPlayer + primitivas mesh procedurais
 
 <!-- (0.7.10 abaixo — histórico) -->
@@ -27,7 +31,37 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 RMX3624 (Android 13).
 
 Relatórios 1-16 das sub-fases: `docs/RELATORIO-0.7.{4,5,6,7,8,9,10}.md` e
-`docs/RELATORIO-0.8.0.md` (com os sha256 dos APKs assinados).
+`docs/RELATORIO-0.8.{0,1}.md` (com os sha256 dos APKs assinados).
+
+## Escopo 0.8.1 (implementado — campanha F7: clips glTF)
+
+**PARSER DE ANIMAÇÕES glTF** (`assets/GltfImporter`): o `GltfModel` ganha
+`animations` — cada uma com `channels` (nó alvo + path
+translation/rotation/scale + sampler) e `samplers` (times do accessor
+`input`, values do `output` VEC3/VEC4). Interpolação LINEAR é a
+reproduzida; STEP é tolerada como linear; CUBICSPLINE extrai o VALOR do
+meio do layout [in, valor, out] (dívidas documentadas).
+
+**CONVERSOR** (`assets/GltfAnim` — `gltfAttachClips`): as animações de um
+.glb/.gltf aplicado a um TIC viram CLIPS NOMEADOS no AnimationPlayer
+(cria-o se não existe): os canais do NÓ RAIZ mapeiam para tracks
+TicPos/TicRot (quat→Euler graus)/TicScale; canais de OUTROS nós são
+saltados (joints pedem a 0.8.2 — skinning). O import acontece no fluxo
+"aplicar ao TIC?" do navegador (mesh gltf/glb → mesh + clips no mesmo
+gesto, com toast "clips importados"); `ResourceManager::model()` expõe o
+modelo em cache (1 parse por ficheiro).
+
+**SELETOR DE CLIPS NA TIMELINE**: botão "clip: <nome>" no header → lista
+com os clips (nome + nº de tracks + ativo marcado) + "novo (edit)"; o clip
+escolhido passa a ser o ATIVO (playback E edição — a timeline toda opera
+sobre o clip ativo); trocar de clip recolhe o tempo a zero. Round-trip
+.goni dos clips importados (mesma serialização da 0.8.0).
+
+Suíte 481→489 (+8: parser [channels/samplers/times/values/VEC4/CUBICSPLINE
+meio], attach [clips nomeados, cria player+transform, acrescenta ao edit
+com o importado ativo, sem animações não mexe], playback [o TIC move-se,
+loop], round-trip .goni do importado, seletor de clips [troca de ativo,
+novo edit reutiliza, edição no clip ativo]).
 
 ## Escopo 0.8.0 (implementado — campanha F7: a cena ganha MOVIMENTO)
 
@@ -1143,6 +1177,31 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.8.1 (clips glTF; APK CUMULATIVO)
+
+Instalar o APK 0.8.1 (artifact `goni-vv-0.8.1-release-signed` do run do
+job `build-release`). Esperado em cada passo:
+
+1. **Import com animação**: importar um `.glb` COM animação (ex.: um
+   personagem do Sketchfab com idle/walk) pelo navegador → "aplicar ao
+   TIC?" → **Sim** → o mesh aplica E o toast "clips importados (timeline)"
+   aparece; a timeline abre com o clip IMPORTADO ativo;
+2. **Lista de clips**: botão "clip: <nome>" no header da timeline → a
+   lista mostra os clips do ficheiro (nome + nº de tracks, o ativo com
+   `*`) + "novo (edit)";
+3. **Trocar de clip**: escolher outro clip → a timeline mostra os tracks
+   DELE e o playback REPRODUZ esse clip (o tempo recomeça a 0);
+4. **Playback do importado**: Play na timeline → o TIC mexe-se conforme o
+   clip (posição/rotação/escala do nó raiz); em Play de jogo idem;
+5. **Edição misturada**: "novo (edit)" → +track/keys no clip próprio — os
+   clips importados ficam intactos;
+6. **Persistência**: gravar/reabrir o projeto → os clips importados
+   (nomes, tracks, keys) voltam exatos e reproduzem;
+7. **Sem animações**: importar um .glb SEM animação → comportamento da
+   0.7.x (mesh aplica, nada de clips, sem toast de clips);
+8. **Regressões**: 0.8.0 (timeline/primitivas/preview), 0.7.10/0.7.9
+   (frustum/gizmos), import OBJ/glTF de texturas intacto.
 
 ## Verificação no Realme C33 (dono) — 0.8.0 (animação + primitivas; APK CUMULATIVO)
 

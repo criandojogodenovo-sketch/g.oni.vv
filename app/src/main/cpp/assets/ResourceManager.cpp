@@ -131,6 +131,21 @@ ResourceManager::loadModel(const std::string& path, std::string& err) {
     return res.first->second;
 }
 
+std::shared_ptr<const GltfModel>
+ResourceManager::model(const std::string& ref, std::string& err) {
+    err.clear();
+    std::string path;
+    i32 sub = -1;
+    splitSubRef(ref, path, sub);
+    const std::string ext = lowerExt(path);
+    if (ext != "gltf" && ext != "glb") {
+        err = "não é gltf/glb: " + path;
+        return nullptr;
+    }
+    // loadModel é o MESMO caminho do mesh() — 1 parse por ficheiro (cache)
+    return loadModel(path, err);
+}
+
 const MeshData* ResourceManager::mesh(const std::string& ref, std::string& err) {
     err.clear();
     const auto it = meshes_.find(ref);

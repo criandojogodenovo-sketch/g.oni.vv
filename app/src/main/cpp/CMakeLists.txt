@@ -45,6 +45,8 @@ add_library(goni_vv SHARED
         assets/GltfTextures.cpp
         assets/GltfInstantiate.h
         assets/GltfInstantiate.cpp
+        assets/GltfAnim.h
+        assets/GltfAnim.cpp
         assets/PngLoader.h
         assets/PngLoader.cpp
         assets/TextureCompressor.h

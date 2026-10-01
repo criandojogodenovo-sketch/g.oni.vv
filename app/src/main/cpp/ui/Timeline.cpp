@@ -130,7 +130,12 @@ void drawTimeline(UiContext& ui, const InputState& in, Scene& scene,
     if (!pl) {
         return;
     }
-    AnimClip* clip = pl->editClip();
+    // 0.8.1: a timeline edita/reproduz o clip ATIVO (o seletor troca);
+    // sem clips nasce o "edit" (0.8.0)
+    AnimClip* clip = pl->activeClipPtr();
+    if (!clip) {
+        clip = pl->editClip();
+    }
 
     const f32 sw = ui.screenWidth();
     const f32 sh = ui.screenHeight();
@@ -193,8 +198,18 @@ void drawTimeline(UiContext& ui, const InputState& in, Scene& scene,
         char spd[32];
         std::snprintf(spd, sizeof(spd), "vel %.1fx", pl->speed);
         ui.labelFitted(r.x + r.w - 164.0f, r.y + 4.0f, spd, theme::LINE, 96.0f);
+        // 0.8.1 — seletor de CLIPS (importados de glTF + "edit"): abre a
+        // lista; o clip escolhido passa a ser o ATIVO (playback e edição)
+        char clipBtn[40];
+        std::snprintf(clipBtn, sizeof(clipBtn), "clip: %s",
+                      clip->name.c_str());
+        if (ui.button(kIdClip, r.x + 376.0f, by, 176.0f, bh, clipBtn)) {
+            tl.clipMenu = !tl.clipMenu;
+            tl.addTrackMenu = false;
+        }
         if (ui.button(kIdAddTrack, r.x + r.w - 60.0f, by, 48.0f, bh, "+")) {
             tl.addTrackMenu = !tl.addTrackMenu;
+            tl.clipMenu = false;
         }
     }
 
@@ -410,6 +425,71 @@ void drawTimeline(UiContext& ui, const InputState& in, Scene& scene,
         std::snprintf(tc, sizeof(tc), "%.2fs", pl->time);
         ui.labelFitted(cx + 4.0f, rulerY + kRulerH - 2.0f, tc, theme::ACCENT,
                        64.0f);
+    }
+
+    // ---- overlay de CLIPS (0.8.1): lista + "novo (edit)" --------------------
+    if (tl.clipMenu) {
+        const u32 nClips = static_cast<u32>(pl->clips.size());
+        const u32 shown = nClips < 6 ? nClips : 6;
+        const f32 w = 300.0f;
+        const f32 h = kHeaderH + (static_cast<f32>(shown) + 1.0f) * 44.0f + 12.0f;
+        const f32 x = ui.safeLeft() + (sw - ui.safeLeft() - ui.safeRight() - w) * 0.5f;
+        const f32 y = ui.safeTop() + (sh - ui.safeTop() - ui.safeBottom() - h) * 0.5f;
+        bool outside = false;
+        if (in.pressed(0)) {
+            f32 px = 0.0f, py = 0.0f;
+            in.pos(0, px, py);
+            outside = px < x || px >= x + w || py < y || py >= y + h;
+        }
+        if (outside) {
+            tl.clipMenu = false;
+        } else {
+            ui.panel(x, y, w, h, theme::PANEL);
+            ui.frame(x, y, w, h, 2.0f, theme::ACCENT);
+            ui.label(x + 12.0f, y + kHeaderH * 0.5f + th * 0.30f, "CLIPS",
+                     theme::TEXT);
+            for (u32 i = 0; i < shown; ++i) {
+                char lab[64];
+                std::snprintf(lab, sizeof(lab), "%s%s (%u track%s)",
+                              pl->clips[i].name.c_str(),
+                              static_cast<i32>(i) == pl->activeClip ? " *" : "",
+                              static_cast<u32>(pl->clips[i].tracks.size()),
+                              pl->clips[i].tracks.size() == 1 ? "" : "s");
+                if (ui.button(kIdClipItem + static_cast<u64>(i), x + 12.0f,
+                              y + kHeaderH + static_cast<f32>(i) * 44.0f,
+                              w - 24.0f, 36.0f, lab)) {
+                    pl->activeClip = static_cast<i32>(i);
+                    pl->time = 0.0f;   // trocou de clip → recomeça limpo
+                    pl->resetDir();
+                    tl.clipMenu = false;
+                    tl.selTrack = -1;
+                    tl.selKey = -1;
+                }
+            }
+            if (ui.button(kIdClipNew, x + 12.0f,
+                          y + kHeaderH + static_cast<f32>(shown) * 44.0f,
+                          w - 24.0f, 36.0f, "novo (edit)")) {
+                // reutiliza um clip "edit" existente ou acrescenta
+                i32 idx = -1;
+                for (size_t i = 0; i < pl->clips.size(); ++i) {
+                    if (pl->clips[i].name == "edit") {
+                        idx = static_cast<i32>(i);
+                        break;
+                    }
+                }
+                if (idx < 0) {
+                    AnimClip c;
+                    c.name = "edit";
+                    pl->clips.push_back(std::move(c));
+                    idx = static_cast<i32>(pl->clips.size()) - 1;
+                }
+                pl->activeClip = idx;
+                pl->time = 0.0f;
+                tl.clipMenu = false;
+                tl.selTrack = -1;
+                tl.selKey = -1;
+            }
+        }
     }
 
     // ---- overlay "+track" (centrado, fecha com toque fora) ------------------

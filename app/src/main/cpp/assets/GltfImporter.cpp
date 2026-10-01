@@ -594,6 +594,119 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
         err = err.empty() ? "glTF: nenhum mesh com triângulos" : err;
         return false;
     }
+
+    // ---- animations (0.8.1, F7): channels/samplers → GltfAnimation --------
+    // O converter para CLIPS do AnimationPlayer vive em assets/GltfAnim
+    // (o parser fica GL-free puro; interpolação LINEAR é a suportada — STEP
+    // tolerada como linear, CUBICSPLINE extrai o valor do MEIO [in,val,out]).
+    if (const Json* janims = doc.find("animations");
+        janims && janims->type == Json::Type::Array) {
+        for (size_t ai = 0; ai < janims->items.size(); ++ai) {
+            const Json& ja = janims->items[ai];
+            GltfAnimation anim;
+            if (const Json* n = ja.find("name"); n && n->type == Json::Type::String &&
+                !n->string.empty()) {
+                anim.name = n->string;
+            } else {
+                anim.name = "anim " + std::to_string(ai);
+            }
+            // samplers: input (SCALAR f32) + output (VEC3/VEC4 f32)
+            if (const Json* jsam = ja.find("samplers");
+                jsam && jsam->type == Json::Type::Array) {
+                for (const Json& js : jsam->items) {
+                    GltfAnimSampler s;
+                    bool ok = true;
+                    if (const Json* in = js.find("input");
+                        in && in->type == Json::Type::Number) {
+                        std::vector<u8> raw;
+                        size_t count = 0, cc = 0, cs = 0;
+                        if (readAccessor(static_cast<i32>(in->number), raw, count,
+                                         cc, cs) &&
+                            cc == 1 && cs == 4) {
+                            s.times.resize(count);
+                            std::memcpy(s.times.data(), raw.data(),
+                                        count * sizeof(f32));
+                        } else {
+                            ok = false;
+                        }
+                    } else {
+                        ok = false;
+                    }
+                    if (ok) {
+                        if (const Json* outj = js.find("output");
+                            outj && outj->type == Json::Type::Number) {
+                            std::vector<u8> raw;
+                            size_t count = 0, cc = 0, cs = 0;
+                            if (readAccessor(static_cast<i32>(outj->number), raw,
+                                             count, cc, cs) &&
+                                (cc == 3 || cc == 4) && cs == 4) {
+                                s.components = static_cast<u32>(cc);
+                                s.values.resize(count * cc);
+                                std::memcpy(s.values.data(), raw.data(),
+                                            count * cc * sizeof(f32));
+                            } else {
+                                ok = false;
+                            }
+                        } else {
+                            ok = false;
+                        }
+                    }
+                    if (ok) {
+                        // CUBICSPLINE: [in, valor, out] por key → fica o MEIO
+                        std::string interp = "LINEAR";
+                        if (const Json* ip = js.find("interpolation");
+                            ip && ip->type == Json::Type::String) {
+                            interp = ip->string;
+                        }
+                        if (interp == "CUBICSPLINE" &&
+                            s.values.size() == s.times.size() * 3u * s.components) {
+                            std::vector<f32> mid(s.times.size() * s.components);
+                            for (size_t k = 0; k < s.times.size(); ++k) {
+                                std::memcpy(&mid[k * s.components],
+                                            &s.values[(k * 3 + 1) * s.components],
+                                            s.components * sizeof(f32));
+                            }
+                            s.values = std::move(mid);
+                        }
+                        // STEP: tolerada como linear (dívida documentada)
+                        anim.samplers.push_back(std::move(s));
+                    }
+                }
+            }
+            // channels: (nó, path) → sampler
+            if (const Json* jch = ja.find("channels");
+                jch && jch->type == Json::Type::Array) {
+                for (const Json& jc : jch->items) {
+                    GltfAnimChannel ch;
+                    if (const Json* js = jc.find("sampler");
+                        js && js->type == Json::Type::Number) {
+                        ch.sampler = static_cast<i32>(js->number);
+                    }
+                    const Json* jt = jc.find("target");
+                    if (jt && jt->type == Json::Type::Object) {
+                        if (const Json* n = jt->find("node");
+                            n && n->type == Json::Type::Number) {
+                            ch.node = static_cast<i32>(n->number);
+                        }
+                        if (const Json* p = jt->find("path");
+                            p && p->type == Json::Type::String) {
+                            if (p->string == "rotation") {
+                                ch.path = GltfAnimChannel::Path::Rotation;
+                            } else if (p->string == "scale") {
+                                ch.path = GltfAnimChannel::Path::Scale;
+                            } else {
+                                ch.path = GltfAnimChannel::Path::Translation;
+                            }
+                        }
+                    }
+                    anim.channels.push_back(std::move(ch));
+                }
+            }
+            if (!anim.channels.empty() && !anim.samplers.empty()) {
+                out.animations.push_back(std::move(anim));
+            }
+        }
+    }
     return true;
 }
 

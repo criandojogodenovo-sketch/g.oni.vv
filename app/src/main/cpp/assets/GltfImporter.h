@@ -13,8 +13,9 @@
 //   materials          — básico: name + pbrMetallicRoughness.baseColorFactor
 //                        (o device mapeia para o Material lit partilhado —
 //                        uniforms por material são fase de luzes)
-//   scene/nodes        — hierarquia simples (name/mesh/pai/TRS); skinning e
-//                        animação = F7 (nós com skin são ignorados)
+//   scene/nodes        — hierarquia simples (name/mesh/pai/TRS)
+//   animations         — 0.8.1 (F7): channels/samplers → GltfAnimation
+//                        (skin/weights ficam para a 0.8.2)
 //
 // CONVENÇÕES: glTF é Y-up / right-handed / metros — o engine é igual, não
 // há transformação. Sem dedup de vértices (glTF já é indexado). Limite u16
@@ -54,11 +55,37 @@ struct GltfMaterial {
     i32 baseColorTex = -1;    // índice em GltfModel::images (-1 = sem)
 };
 
+// ---- 0.8.1 (F7): ANIMAÇÕES ------------------------------------------------
+// Um sampler = curva de um canal (times do accessor `input`, values do
+// `output`); um channel liga (nó alvo, path) a um sampler. Interpolação:
+// LINEAR (default) é a que o AnimationPlayer reproduz; STEP é tolerada
+// como linear (dívida); CUBICSPLINE tem layout [in, valor, out] por key —
+// extraímos o VALOR (meio) e seguimos linear (dívida documentada).
+struct GltfAnimSampler {
+    std::vector<f32> times;    // input: SCALAR f32 (segundos)
+    std::vector<f32> values;   // output: VEC3 (translation/scale) ou VEC4 (rotation)
+    u32 components = 3;        // 3 ou 4 floats por key
+};
+
+struct GltfAnimChannel {
+    enum class Path : u8 { Translation = 0, Rotation = 1, Scale = 2 };
+    i32  node = -1;            // nó alvo (índice em GltfModel::nodes)
+    Path path = Path::Translation;
+    i32  sampler = -1;         // índice em GltfAnimation::samplers
+};
+
+struct GltfAnimation {
+    std::string name;          // "anim N" se o glTF não tiver nome
+    std::vector<GltfAnimChannel> channels;
+    std::vector<GltfAnimSampler> samplers;
+};
+
 struct GltfModel {
     std::vector<MeshData> meshes;      // 1 MeshData por glTF mesh
     std::vector<GltfMaterial> materials;
     std::vector<GltfNode> nodes;
     std::vector<GltfImage> images;     // F5.1-B: texturas embutidas/externas
+    std::vector<GltfAnimation> animations;   // 0.8.1 (F7): channels/samplers
     // material de CADA mesh de saída (primeiro material usado pelas
     // primitivas; -1 = nenhum) — alinhado com meshes
     std::vector<i32> meshMaterial;

@@ -58,11 +58,14 @@ constexpr u64 kIdStop      = 7002;
 constexpr u64 kIdMode      = 7003;
 constexpr u64 kIdSpeed     = 7004;
 constexpr u64 kIdAddTrack  = 7005;
+constexpr u64 kIdClip      = 7006;   // 0.8.1: seletor de clips (importados)
 constexpr u64 kIdCurve     = 7100;   // +i
 constexpr u64 kIdAddKey    = 7110;   // +i
 constexpr u64 kIdDelKey    = 7120;   // +i
 constexpr u64 kIdDelTrack  = 7130;   // +i
 constexpr u64 kIdTrackMenu = 7300;   // +i (overlay de alvos)
+constexpr u64 kIdClipItem  = 7350;   // +i (overlay de clips; 0.8.1)
+constexpr u64 kIdClipNew   = 7360;   // "novo (edit)" no overlay de clips
 
 // estado ENTRE frames (como o GizmoModeState da Toolbar)
 struct State {
@@ -71,6 +74,7 @@ struct State {
     i32  selTrack = -1;        // row selecionada
     i32  selKey = -1;          // key selecionada na row selTrack
     bool addTrackMenu = false; // overlay de escolha do alvo aberto
+    bool clipMenu = false;     // 0.8.1: lista de clips aberta
     PlaySnapshot snap;         // sandbox do preview (capturada no Play)
     Handle previewTic{};       // TIC cujo preview está aberto (troca de
                                // seleção com preview a correr → stopPreview)

@@ -99,6 +99,7 @@ add_executable(test_core
         ${CORE_DIR}/assets/GltfImporter.cpp
         ${CORE_DIR}/assets/GltfTextures.cpp
         ${CORE_DIR}/assets/GltfInstantiate.cpp
+        ${CORE_DIR}/assets/GltfAnim.cpp
         ${CORE_DIR}/assets/PngLoader.cpp
         ${CORE_DIR}/assets/MipGen.cpp
         ${CORE_DIR}/assets/TextureCache.cpp
@@ -164,6 +165,8 @@ add_executable(test_core
         test_anim.cpp
         test_prims.cpp
         test_timeline.cpp
+        # 0.8.1: import de clips glTF
+        test_gltfanim.cpp
         ${CORE_DIR}/ui/Icons.cpp
         # 0.7.7: câmara de cena (componente/invariante + gizmo do frustum)
         ${CORE_DIR}/core/CameraUtil.cpp

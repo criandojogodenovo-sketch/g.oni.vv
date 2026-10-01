@@ -42,6 +42,12 @@ public:
     // `err` quando falha (ausente, parse inválido, formato, ref #i fora).
     const MeshData* mesh(const std::string& ref, std::string& err);
 
+    // 0.8.1 (F7): o MODELO gltf/glb INTEIRO de um ref (com ou sem "#i" —
+    // o sufixo ignora-se). Cache partilhado com mesh(): 1 parse por
+    // ficheiro. nullptr + `err` se não é gltf/glb ou falhou o parse.
+    std::shared_ptr<const GltfModel> model(const std::string& ref,
+                                           std::string& err);
+
     // registra MeshData já em memória sob um ref (substitui se existir)
     void adoptMesh(const std::string& ref, MeshData&& data);
 

@@ -18,6 +18,7 @@
 #include "components/Transform3D.h"
 #include "components/AnimationPlayer.h"   // 0.8.0 (F7): animação
 #include "components/UiCanvas.h"   // 0.8.0: tracks de UI
+#include "assets/GltfAnim.h"   // 0.8.1 (F7): clips de animação do glTF
 #include "core/AnimationSystem.h"   // 0.8.0: avanço em Play
 #include "core/AssetPersist.h"
 #include "core/FsStorage.h"
@@ -2517,6 +2518,25 @@ void frame() {
                     }
                     if (out.log[0] != '\0') {
                         LOGI("%s", out.log);
+                    }
+                    // 0.8.1 (F7): mesh gltf/glb aplicado → importa os CLIPS
+                    // de animação para o AnimationPlayer do TIC (o cache do
+                    // ResourceManager garante 1 parse; o nó alvo é o RAIZ —
+                    // o TIC inteiro; joints ficam para a 0.8.2)
+                    if (g_applyAsk.kind == 'm') {
+                        std::string merr;
+                        if (auto mdl = g_resources.model(g_applyAsk.rel, merr)) {
+                            if (!mdl->animations.empty()) {
+                                const u32 nClips = gltfAttachClips(
+                                    g_scene, g_editor.selected, *mdl);
+                                if (nClips > 0) {
+                                    showToast("clips importados (timeline)");
+                                    LOGI("editor: %u clip(s) de animacao "
+                                         "importados de %s",
+                                         nClips, g_applyAsk.rel.c_str());
+                                }
+                            }
+                        }
                     }
                     break;
                 }
