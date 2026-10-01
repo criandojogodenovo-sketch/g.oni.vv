@@ -138,6 +138,11 @@ struct EditorState {
     char   textBuf[40] = "";       // buffer em edição
     u32    textLen = 0;
     bool   kbLower = false;         // 0.7.5: teclado em minúsculas (abc/ABC)
+
+    // 0.7.6 — G5 da toolbar: o painel do Inspector está visível? (o botão
+    // de ícone alterna; escondido, a área do painel junta-se ao viewport
+    // central — ver safe::centerRect(sw,sh,in,rightPanel))
+    bool   showInspector = true;
 };
 
 // Rect do viewport central (entre os painéis) — usado para o gate da câmara.
@@ -145,6 +150,9 @@ struct EditorState {
 UiRect centerRect(f32 sw, f32 sh);
 // F4.2: com insets do sistema — gestos atrás da nav/status bar não orbitam.
 UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in);
+// 0.7.6: com o painel DIREITO opcional (G5 escondeu o Inspector — a área
+// dele junta-se ao viewport central; o esquerdo fica sempre).
+UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, bool rightPanel);
 
 // Painel esquerdo: lista de TICs COM SCROLL (todas as entradas, sem corte) +
 // botão "+" no cabeçalho. Tap numa linha seleciona (re-despacho do scroll).
@@ -206,10 +214,9 @@ void closeAllOverlays(EditorState& st);
 bool drawPlayBar(UiContext& ui, const InputState& in, f32 sw, f32 sh, int fps);
 
 // ---- 0.7.0: UI CRIÁVEL + GESTÃO DE TICs (ui/UiEditor.h tem o resto) ----------
-
-// separador "3D | UI" da toolbar (só em EDITOR): muda st.uiMode — o
-// viewport central passa a ser o editor 2D dedicado à UI criável.
-void drawModeToggle(UiContext& ui, EditorState& st);
+// (0.7.6: o separador "3D | UI" e o grupo Mover/Rodar/Escalar/Snap passaram
+// a GRUPOS G3/G4 da BARRA FINAL — ui/Toolbar.h; as funções antigas
+// drawModeToggle/drawGizmoToolbar foram removidas)
 
 // DESSELECCIONAR no viewport 3D: arm no press edge dentro do viewport,
 // limpa a seleção no release se o dedo não se mexeu (tap ≠ drag de orbit).
@@ -217,23 +224,19 @@ void drawModeToggle(UiContext& ui, EditorState& st);
 bool viewportTapClearsSelection(EditorState& st, const InputState& in,
                                  const UiRect& view, u32 claimedMask);
 
-// ---- 0.6.9: GIZMOS DE TRANSFORMAÇÃO (seletor na toolbar) ---------------------
-
-// Grupo à DIREITA da toolbar (os 3 botões Menu/Play/Settings ficam INTACTOS
-// à esquerda): [Mover][Rodar][Escalar] + [Snap] — só em EDITOR. O botão do
-// modo ATIVO fica invertido (fill ACCENT + frame) e o Snap mostra o estado
-// ("Snap" vs "Snap on"). Mutam st.gizmoMode/st.gizmoSnap conforme os cliques.
-struct GizmoModeState {
-    int  mode = 0;      // 0=Mover, 1=Rodar, 2=Escalar (gizmo::Mode)
-    bool snap = false;  // toggle de snapping
-};
-void drawGizmoToolbar(UiContext& ui, const InputState& in, GizmoModeState& st);
+// ---- 0.6.9 → 0.7.6: GIZMOS DE TRANSFORMAÇÃO ----------------------------------
+// (o seletor de modo/snap é o GRUPO G4 da barra final — struct GizmoModeState
+// e tudo o resto vive em ui/Toolbar.h; a antiga drawGizmoToolbar desapareceu)
 
 // Overlays. Devolvem a escolha do frame:
 //   drawPlusMenu → 0 nada, 1..4 = PresetKind (1=Player, 2=Character,
 //                  3=Static, 4=Rigid); 0.7.3: modo UI 1..7 = elementos
 //                  (Panel..Article), 8 = Joystick; 0.7.4: 9/10 = VBox/HBox
-//   drawFileMenu → 0 nada, 1 = save, 2 = load, 3 = export OBJ (F5-E)
+//   drawFileMenu → 0 nada; 0.7.6 (dropdown do Menu): 1 = Settings,
+//                  2 = Guardar, 3 = Carregar, 4 = Export OBJ, 5 = Importar…,
+//                  6 = Export Downloads, 7 = Sair p/ projetos
+//                  (o item "Cenas…" SAÍU — o [Cena ▾] da toolbar abre a
+//                  lista de cenas diretamente)
 //   drawAssetMenu → 0 nada; >0 = item 1-based do seletor ativo
 //                    (st.assetMenu: 1 = meshes → 1 = "cube", 2.. = ficheiros;
 //                     2 = texturas → 1 = "none", 2.. = ficheiros; 0.7.4:

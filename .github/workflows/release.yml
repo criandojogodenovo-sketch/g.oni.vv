@@ -54,6 +54,18 @@ jobs:
       - name: Paridade JNI (VvActivity ↔ RegisterNatives)
         run: python3 scripts/jni_parity.py
 
+      # 0.7.6 — TELA DE PROJETOS: formatação PURA na JVM do hospedeiro
+      # (folderLabel limpa o prefixo interno "primary:", dateLabel formata
+      # a última edição) + check estrutural do ecrã (uma criação, sem
+      # botão extra, lista nome+data, contorno #8AB4F8)
+      - name: Testes da tela de projetos (JVM host)
+        run: |
+          mkdir -p build-java
+          javac -d build-java             app/src/main/java/vv/goni/ProjectsFormat.java             tests-java/ProjectsFormatTest.java
+          java -cp build-java ProjectsFormatTest
+      - name: Estrutura da tela de projetos (check)
+        run: python3 scripts/projects_ui_check.py
+
   build-release:
     name: APK release arm64 (assinado via secrets)
     runs-on: ubuntu-latest
@@ -109,7 +121,7 @@ jobs:
       - name: Publicar artifact do APK
         uses: actions/upload-artifact@v4
         with:
-          name: goni-vv-0.7.5-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
+          name: goni-vv-0.7.6-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 

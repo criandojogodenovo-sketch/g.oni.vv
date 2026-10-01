@@ -32,6 +32,7 @@
 #include "render/Mesh.h"
 #include "render/Renderer.h"
 #include "ui/EditorLayout.h"
+#include "ui/Toolbar.h"   // 0.7.6: barra final (G3 segmented 3D|UI)
 #include "ui/EditorUi.h"
 #include "ui/FontAtlas.h"
 #include "ui/SafeArea.h"
@@ -57,6 +58,7 @@ struct Env {
     InputState input;
     Scene      scene;
     EditorState st;
+    toolbar::GizmoModeState gzMode;   // 0.7.6: G4 da barra final
     Handle     hud{};
     bool       ok = false;
 
@@ -91,9 +93,13 @@ struct Env {
             drawModalBackdrop(ui, kSW, kSH);
         }
         if (!modalOpen) {
-            bool clicks[3] = {false, false, false};
-            ui.toolbar(clicks);
-            drawModeToggle(ui, st);
+            // 0.7.6 — a BARRA FINAL de 5 grupos (o MESMO chamador do main;
+            // com seleção de TIC em 3D o G4 transformação aparece)
+            const toolbar::Actions ta =
+                toolbar::draw(ui, st, gzMode, scene.get(st.selected) != nullptr);
+            if (ta.menuDropdown) {
+                st.fileMenu = !st.fileMenu;
+            }
             if (st.uiMode) {
                 drawUiViewport(ui, scene, st, input, kSW, kSH);
             }
@@ -107,9 +113,6 @@ struct Env {
                 drawUiInspector(ui, scene, st, input);
             } else {
                 drawInspector(ui, scene, st, nullptr);
-            }
-            if (clicks[0]) {
-                st.fileMenu = !st.fileMenu;
             }
         }
         if (st.plusMenu) {
@@ -221,12 +224,14 @@ TEST(uieditor_toggle_abre_viewport_2d_dedicado) {
     Env e;
     EXPECT(e.ok);
     EXPECT(!e.st.uiMode);
-    const UiRect mr = toolbarModeRect(kSW, kSH, safe::Insets{});
-    // tap no botão "UI" (id 12 — o 2º do par)
-    e.tap(mr.x + 96.0f + 8.0f + 48.0f, mr.y + mr.h * 0.5f);
+    // 0.7.6 — o segmented 3D|UI é o G3 da barra final (toolbar::layout)
+    const toolbar::Layout L =
+        toolbar::layout(kSW, kSH, safe::Insets{}, false);
+    // tap no segmento "UI"
+    e.tap(L.modeUi.x + L.modeUi.w * 0.5f, L.modeUi.y + L.modeUi.h * 0.5f);
     EXPECT(e.st.uiMode);
     // e volta ao 3D
-    e.tap(mr.x + 48.0f, mr.y + mr.h * 0.5f);
+    e.tap(L.mode3d.x + L.mode3d.w * 0.5f, L.mode3d.y + L.mode3d.h * 0.5f);
     EXPECT(!e.st.uiMode);
 }
 
@@ -953,30 +958,8 @@ TEST(uieditor_plus_cria_canvas_a_primeira_vez) {
     EXPECT(c->elements[0].kind == UiElement::Kind::Panel);
 }
 
-// ---- 9. toolbar sem sobreposição (3 botões + 3D|UI + gizmos) -------------------------
-
-TEST(uieditor_toolbar_sem_sobreposicao_em_2_larguras) {
-    for (const f32 sw : {1600.0f, 1280.0f}) {
-        const safe::Insets ins{};
-        const Rect b3[3] = {
-            {16.0f, 16.0f, 256.0f, 72.0f},
-            {272.0f, 16.0f, 512.0f, 72.0f},
-            {528.0f, 16.0f, 768.0f, 72.0f},
-        };
-        const UiRect mr = toolbarModeRect(sw, kSH, ins);
-        const Rect mode{mr.x, mr.y, mr.x + 96.0f, mr.y + mr.h};
-        const Rect mode2{mr.x + 104.0f, mr.y, mr.x + 200.0f, mr.y + mr.h};
-        // modo NÃO sobrepõe os 3 botões
-        for (const Rect& b : b3) {
-            EXPECT(!rectsOverlap(mode, b));
-            EXPECT(!rectsOverlap(mode2, b));
-        }
-        // o grupo do gizmo começa DEPOIS do separador
-        EXPECT(toolbarModeEndX(sw, kSH, ins) > mode2.x1);
-        // e cabe no ecrã
-        EXPECT(mr.x + mr.w < sw);
-    }
-}
+// ---- 9. (0.7.6) a toolbar sem sobreposição passou ao test_toolbar.cpp
+// (barra final de 5 grupos com layout dinâmico — o caso 3 botões morreu)
 
 // ---- 10. 0.7.5 — overlays modais TAPAM o canvas (z-order) ---------------------------
 

@@ -5,9 +5,8 @@ namespace vv {
 
 namespace {
 constexpr u32 kMaxQuadsUi = 4096;
-constexpr f32 kBtnW   = 240.0f;
-constexpr f32 kBtnH   = 56.0f;
-constexpr f32 kBtnGap = 16.0f;
+// (kBtnW/kBtnGap eram da toolbar de 3 botões — a barra 0.7.6 vive em
+// ui/Toolbar.cpp; kPad continua usado pelo statusLine)
 constexpr f32 kPad    = 16.0f;
 } // namespace
 
@@ -134,7 +133,9 @@ void UiContext::labelFitted(f32 xBaseline, f32 yBaseline, const char* text,
     }
 }
 
-bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
+// 0.7.6 — a CAPTURA de gesto do botão, extraída (a toolbar desenha os
+// próprios widgets com ícones e precisa da MESMA semântica sem o desenho).
+bool UiContext::widgetHit(u64 id, f32 x, f32 y, f32 w, f32 h) {
     bool pressed = false;
 
     const bool down = input_ && input_->down(0);
@@ -155,7 +156,12 @@ bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
         }
         active_ = 0;
     }
+    return pressed;
+}
 
+bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
+    const bool pressed = widgetHit(id, x, y, w, h);
+    const bool down = input_ && input_->down(0);
     const bool held = (active_ == id && down);
     const f32* bg  = held ? theme::ACCENT : theme::PANEL;
     const f32* txt = held ? theme::BG     : theme::TEXT;
@@ -366,20 +372,6 @@ void UiContext::scrollSetOffset(u64 id, f32 offset) {
             scrollSlots_[i].st.offset = offset;
             return;
         }
-    }
-}
-
-void UiContext::toolbar(bool outClicks[3]) {
-    static const char* kNames[3] = { "Menu", "Play", "Settings" };
-
-    const UiRect r = toolbarRect();
-    panel(r.x, r.y, r.w, r.h, theme::PANEL);
-    panel(r.x, r.y + r.h - 1.0f, r.w, 1.0f, theme::LINE);   // separador inferior
-
-    for (u32 i = 0; i < 3; ++i) {
-        const f32 bx = r.x + kPad + static_cast<f32>(i) * (kBtnW + kBtnGap);
-        const f32 by = (kToolbarH - kBtnH) * 0.5f;
-        outClicks[i] = button(1 + i, bx, by, kBtnW, kBtnH, kNames[i]);
     }
 }
 

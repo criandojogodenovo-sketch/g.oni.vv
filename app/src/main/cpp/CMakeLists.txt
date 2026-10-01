@@ -135,6 +135,9 @@ add_library(goni_vv SHARED
         ui/UiContext.cpp
         ui/EditorUi.h
         ui/EditorUi.cpp
+        # 0.7.6: barra final de 5 grupos (G1..G5) + 8 ícones vetoriais
+        ui/Toolbar.cpp
+        ui/Icons.cpp
         # 0.7.0: UI criável — runtime (layout ancorado/draw/hit-test/ações)
         # e editor dedicado (viewport 2D WYSIWYG, teclado in-app, diálogos)
         ui/UiRuntime.h

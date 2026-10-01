@@ -272,10 +272,9 @@ constexpr u64 kGizmoSnapId        = 10;
 
 // ---- 0.7.0 — UI criável + gestão de TICs: ids e geometria (faixas EXCLUSIVAS) --
 
-// separador "3D | UI" da toolbar (depois dos 3 botões Menu/Play/Settings,
-// ANTES do grupo do gizmo — ver toolbarModeRect)
-constexpr u64 kMode3dId = 11;
-constexpr u64 kModeUiId = 12;
+// 0.7.6 — os ids do separador 3D|UI (11/12) passaram a viver em
+// ui/Toolbar.h (G3 da barra final); os botões de olho/⋮ da Hierarchy
+// mantêm as faixas ALTAS de sempre
 
 // botões de olho/⋮ da Hierarchy (faixas ALTAS: + handle.index — nunca
 // colidem com as linhas 1000+ nem com os sliders 2000+ do Inspector)
@@ -355,18 +354,8 @@ constexpr u64 kBrowserScrollId = 45;   // região de scroll da lista
 // "importar…" devolve este código (o main abre o navegador 0.7.2)
 constexpr int kAssetPickImport = 99;
 
-// rect do separador "3D | UI" na faixa da toolbar (esq.: após os 3 botões)
-inline UiRect toolbarModeRect(f32 sw, f32 sh, const safe::Insets& i) {
-    const UiRect bar = safe::toolbarRect(sw, sh, i);
-    const f32 x = bar.x + 16.0f + 3.0f * (240.0f + 16.0f) + 8.0f;
-    return {x, bar.y + (safe::kToolbarH - 56.0f) * 0.5f, 2.0f * 96.0f + 8.0f,
-            56.0f};
-}
-// fim X do separador — o grupo do gizmo alinha a partir daqui (nunca sobrepõe)
-inline f32 toolbarModeEndX(f32 sw, f32 sh, const safe::Insets& i) {
-    const UiRect m = toolbarModeRect(sw, sh, i);
-    return m.x + m.w + 8.0f;
-}
+// 0.7.6 — toolbarModeRect/toolbarModeEndX foram REMOVIDOS: a barra
+// final de 5 grupos vive em ui/Toolbar.h (toolbar::layout é a fonte única).
 
 } // namespace editor
 } // namespace vv

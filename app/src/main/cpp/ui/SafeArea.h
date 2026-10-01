@@ -107,6 +107,14 @@ inline UiRect centerRect(f32 sw, f32 sh, const Insets& i) {
     const f32 w = vp.w - 2.0f * kPanelW;
     return {vp.x + kPanelW, vp.y, w > 0.0f ? w : 0.0f, vp.h};
 }
+// 0.7.6 — sem o painel DIREITO (o G5 da toolbar escondeu o Inspector: a
+// área dele junta-se ao viewport central — os gestos passam a orbitar aí e
+// o mini-ecrã 2D cresce para a direita). O painel esquerdo fica SEMPRE.
+inline UiRect centerRect(f32 sw, f32 sh, const Insets& i, bool rightPanel) {
+    const UiRect vp = viewportRect(sw, sh, i);
+    const f32 w = vp.w - kPanelW - (rightPanel ? kPanelW : 0.0f);
+    return {vp.x + kPanelW, vp.y, w > 0.0f ? w : 0.0f, vp.h};
+}
 
 } // namespace safe
 } // namespace vv

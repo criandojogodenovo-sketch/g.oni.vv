@@ -11,6 +11,7 @@
 #include "TestFramework.h"
 #include "ui/UiContext.h"
 #include "ui/EditorUi.h"
+#include "ui/Toolbar.h"
 #include "ui/FontAtlas.h"
 #include "ui/SafeArea.h"
 #include "ui/EditorLayout.h"
@@ -80,6 +81,7 @@ struct Env {
     Scene       scene;
     Handle      selected{};
     EditorState st;
+    toolbar::GizmoModeState gzMode;   // 0.7.6
     AssetCatalog catalog;
     bool ok = false;
 
@@ -119,8 +121,8 @@ struct Env {
 
     void frame() {
         ui.beginFrame(nullptr, &input, kSW, kSH);
-        bool clicks[3] = {false, false, false};
-        ui.toolbar(clicks);
+        // 0.7.6 — barra final de 5 grupos (o main chama o MESMO)
+        toolbar::draw(ui, st, gzMode, scene.get(st.selected) != nullptr);
         drawHierarchy(ui, scene, st);
         drawInspector(ui, scene, st, withCatalog_());
         switch (overlay) {

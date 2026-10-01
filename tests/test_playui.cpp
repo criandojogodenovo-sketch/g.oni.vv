@@ -24,6 +24,7 @@
 #include "platform/InputState.h"
 #include "render/Camera.h"
 #include "ui/EditorUi.h"
+#include "ui/Toolbar.h"
 #include "ui/FontAtlas.h"
 #include "ui/SafeArea.h"
 
@@ -46,6 +47,7 @@ struct Env {
     Scene       scene;
     Handle      selected{};
     EditorState st;
+    toolbar::GizmoModeState gzMode;   // 0.7.6
     PlaySnapshot snap;
     bool ok = false;
 
@@ -100,9 +102,10 @@ struct Env {
                 leavePlay();
             }
         } else {
-            bool clicks[3] = {false, false, false};
-            ui.toolbar(clicks);
-            if (clicks[1] && !st.playMode) {
+            // 0.7.6 — barra final; o G2 play entra no modo play
+            const toolbar::Actions ta =
+                toolbar::draw(ui, st, gzMode, scene.get(st.selected) != nullptr);
+            if (ta.playPressed && !st.playMode) {
                 enterPlay();
             }
             drawHierarchy(ui, scene, st);
@@ -152,9 +155,10 @@ bool rectsOverlap(const Rect& a, const Rect& b, f32 eps = 0.01f) {
 TEST(play_toolbar_play_abre_janela_play) {
     Env e;
     EXPECT(e.ok);
-    // tap no botão Play (id 2 — toolbar): centro do 2º botão
-    const f32 bx = 16.0f + 1.0f * (240.0f + 16.0f) + 120.0f;
-    const f32 by = (88.0f - 56.0f) * 0.5f + 28.0f;
+    // 0.7.6 — tap no G2 play da BARRA FINAL (ícone; rect do layout)
+    const toolbar::Layout L = toolbar::layout(kSW, kSH, safe::Insets{}, false);
+    const f32 bx = L.play.x + L.play.w * 0.5f;
+    const f32 by = L.play.y + L.play.h * 0.5f;
     e.input.injectDown(0, bx, by);
     e.frame();
     e.input.injectUp(0);

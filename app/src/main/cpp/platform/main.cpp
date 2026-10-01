@@ -43,6 +43,7 @@
 #include "render/Mesh.h"
 #include "render/Renderer.h"
 #include "ui/EditorUi.h"
+#include "ui/Toolbar.h"   // 0.7.6: barra final de 5 grupos (G1..G5)
 #include "ui/Gizmo.h"
 #include "ui/FontAtlas.h"
 #include "ui/UiContext.h"
@@ -129,7 +130,7 @@ editor::OrbitState g_orbit;
 // Só no TIC selecionado, SÓ EM EDITOR (nunca em PLAY). O hit-test 3D corre
 // ANTES do orbit (o slot que apanha o gizmo NÃO orbita); o drag escreve no
 // Transform3D com âncoras (pose final = âncora + delta) e updateWorld().
-editor::GizmoModeState g_gizmoMode;
+editor::toolbar::GizmoModeState g_gizmoMode;   // 0.7.6: vive na Toolbar
 gizmo::GizmoState       g_gizmo;
 
 // direção do mundo de um eixo/plano do gizmo (main-side)
@@ -171,7 +172,8 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
         g_gizmo.hovered = gizmo::Axis::None;
     }
     // press edge → hit-test 3D (só se o gesto nasce no viewport central)
-    const UiRect view = editor::centerRect(sw, sh, g_ui.safeArea());
+    const UiRect view =
+        editor::centerRect(sw, sh, g_ui.safeArea(), g_editor.showInspector);
     for (u32 slot = 0; slot < kMaxPointerSlots; ++slot) {
         if (!g_input.pressed(slot)) {
             continue;
@@ -1475,17 +1477,19 @@ void frame() {
     // 0.6.9: claimed | gizmoClaimed — drag em gizmo NÃO orbita
     // 0.7.0: orbit também DESATIVADO em modo UI (o viewport central é o
     // editor 2D da UI — arrastar elementos não pode orbitar por baixo)
-    editor::updateCameraOrbit(g_camera, g_orbit, g_input,
-                               editor::centerRect(w, h, g_ui.safeArea()),
-                               claimed | gizmoClaimed | canvasClaimed,
-                               g_editor.playMode || g_editor.uiMode);
+    editor::updateCameraOrbit(
+        g_camera, g_orbit, g_input,
+        editor::centerRect(w, h, g_ui.safeArea(), g_editor.showInspector),
+        claimed | gizmoClaimed | canvasClaimed,
+        g_editor.playMode || g_editor.uiMode);
 
     // 0.7.0 — DESSELECCIONAR: tap parado no vazio do viewport 3D limpa a
     // seleção (só em editor 3D; o modo UI desseleciona o ELEMENTO no
     // drawUiViewport, e a Hierarchy trata do seu vazio)
     if (!g_editor.playMode && !g_editor.uiMode) {
         editor::viewportTapClearsSelection(
-            g_editor, g_input, editor::centerRect(w, h, g_ui.safeArea()),
+            g_editor, g_input,
+            editor::centerRect(w, h, g_ui.safeArea(), g_editor.showInspector),
             claimed | gizmoClaimed);
     }
 
@@ -1564,41 +1568,44 @@ void frame() {
                          gizmo::gizmoLength(g_camera.dist), g_gizmo.mode,
                          g_gizmo.hovered);
     }
-    bool clicks[3] = {false, false, false};
+    // ---- 0.7.6 — BARRA FINAL DE 5 GRUPOS ---------------------------------
+    // G1 [Menu ▾][Cena ▾] · G2 [pause][play] · G3 [3D|UI] · G4 transformação
+    // (SÓ com seleção) · G5 [inspector]. Ícones vetoriais no line batch,
+    // ativos com fundo de marca (ui/Toolbar.cpp).
     if (!modalOpen) {
-        g_ui.toolbar(clicks);   // exatamente 3 botões (Menu, Play, Settings)
-    }
-    // 0.7.0: separador "3D | UI" (a seguir aos 3 botões) + viewport 2D no
-    // modo UI (antes dos painéis — z-order de editor, como o gizmo)
-    if (!modalOpen) {
-        editor::drawModeToggle(g_ui, g_editor);
-        if (g_editor.uiMode) {
-            editor::drawUiViewport(g_ui, g_scene, g_editor, g_input, w, h);
+        Tic* selTic = g_scene.get(g_editor.selected);
+        const editor::toolbar::Actions ta = editor::toolbar::draw(
+            g_ui, g_editor, g_gizmoMode, selTic && selTic->active);
+        if (ta.menuDropdown) {
+            // G1 Menu → dropdown (Settings/Guardar/…/Sair)
+            g_editor.fileMenu = !g_editor.fileMenu;
+            g_editor.plusMenu = false;
+            g_editor.settingsMenu = false;
         }
-        if (!g_editor.uiMode) {
-            editor::drawGizmoToolbar(g_ui, g_input, g_gizmoMode);   // 0.6.9: M/R/E+Snap
+        if (ta.cenaDropdown) {
+            // G1 Cena → dropdown de cenas do projeto (overlay CENAS de
+            // sempre — lista + nova + trocar)
+            g_editor.scenesMenu = !g_editor.scenesMenu;
+            g_editor.plusMenu = false;
+            g_editor.settingsMenu = false;
+            g_editor.fileMenu = false;
         }
-    }
-    if (clicks[0]) {
-        g_editor.fileMenu = !g_editor.fileMenu;   // F3: Menu abre Save/Load
-        g_editor.plusMenu = false;
-        g_editor.settingsMenu = false;
-    }
-    if (clicks[1]) {
-        // F4/0.6.8: Play abre a JANELA PLAY (sem painéis de edição, orbit
-        // desativado); Stop (na play bar) volta ao EDITOR com a pose
-        // restaurada (PlaySnapshot) e os painéis repostos exatamente.
-        if (!g_editor.playMode) {
+        if (ta.playPressed && !g_editor.playMode) {
+            // G2 play: a JANELA PLAY (sem painéis, orbit off); o Stop da
+            // play bar (ou o pause) volta ao EDITOR com a pose restaurada.
             enterPlayMode();
             showToast("modo play");
         }
-    }
-    if (clicks[2]) {
-        // F5.1-hotfix/F5.2: Settings abre o menu (logs + armazenamento)
-        g_editor.settingsMenu = !g_editor.settingsMenu;
-        g_editor.fileMenu = false;
-        g_editor.plusMenu = false;
-        elog::info("ui: menu Settings %s", g_editor.settingsMenu ? "aberto" : "fechado");
+        if (ta.pausePressed && g_editor.playMode) {
+            // defensivo: em play a barra não se desenha (o Stop da play bar
+            // é o caminho normal) — se algum dia se desenhar, pausa = sair
+            leavePlayMode();
+            showToast("modo editor");
+        }
+        // viewport 2D no modo UI (antes dos painéis — z-order de editor)
+        if (g_editor.uiMode) {
+            editor::drawUiViewport(g_ui, g_scene, g_editor, g_input, w, h);
+        }
     }
 
     // F5.1-hotfix (1.4) + F5.2: overlay Settings — Exportar logs / Ver logs /
@@ -1683,7 +1690,8 @@ void frame() {
             g_editor.uiMode && (g_editor.selElement >= 0 || g_editor.selJoystick);
         if (uiInsp) {
             editor::drawUiInspector(g_ui, g_scene, g_editor, g_input);
-        } else {
+        } else if (g_editor.showInspector) {
+            // 0.7.6: o G5 da toolbar pode ter escondido o painel direito
             editor::drawInspector(g_ui, g_scene, g_editor, &g_catalog);   // sliders + seletores
         }
     }
@@ -1809,7 +1817,12 @@ void frame() {
     // Export Downloads (o "Pasta (SAF)" foi REMOVIDO com o fluxo SAF)
     if (g_editor.fileMenu) {
         const int choice = editor::drawFileMenu(g_ui, g_input, w, h, g_editor);
-        if (choice == 1 && g_projectReady) {
+        if (choice == 1) {
+            // 0.7.6: Settings (o item do dropdown do Menu — o botão próprio
+            // deixou de existir na barra)
+            g_editor.settingsMenu = true;
+            elog::info("ui: menu Settings aberto (dropdown do Menu)");
+        } else if (choice == 2 && g_projectReady) {
             const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
                             g_project.saveManifest(*g_storage);
             // F5.4-hotfix: Salvar materializa os assets que só existem em
@@ -1831,7 +1844,7 @@ void frame() {
                           g_scene.count());
             showToast(msg);
             LOGI("editor: %s → %s", msg, g_project.activeScenePath()->c_str());
-        } else if (choice == 2 && g_projectReady) {
+        } else if (choice == 3 && g_projectReady) {
             const SceneSerializer::LoadCtx ctx = makeLoadCtx();
             const bool ok = g_project.loadActiveScene(*g_storage, g_scene, ctx);
             char msg[64];
@@ -1840,9 +1853,6 @@ void frame() {
             showToast(msg);
             g_editor.selected = Handle::invalid();   // seleção antiga não sobrevive ao load
             LOGI("editor: %s ← %s", msg, g_project.activeScenePath()->c_str());
-        } else if (choice == 3) {
-            // 0.7.1: CENAS — lista/nova/trocar (o overlay desenha-se depois)
-            g_editor.scenesMenu = true;
         } else if (choice == 4 && g_projectReady) {
             // F5-E: Export OBJ — mesh do TIC selecionado → meshes/export_<nome>.obj
             Tic* tsel = g_scene.get(g_editor.selected);

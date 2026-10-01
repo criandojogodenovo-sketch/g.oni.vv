@@ -76,7 +76,10 @@ void drawModalBackdrop(UiContext& ui, f32 sw, f32 sh) {
 
 void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
                     const InputState& in, f32 sw, f32 sh) {
-    const UiRect view = safe::centerRect(sw, sh, ui.safeArea());
+    // 0.7.6: com o painel do Inspector escondido (G5 da toolbar) o mini-ecrã
+    // cresce para a direita — o MESMO centerRect da câmara 3D
+    const UiRect view =
+        safe::centerRect(sw, sh, ui.safeArea(), st.showInspector);
     // fundo dedicado (o modo UI NÃO desenha a cena 3D — viewport só da UI)
     ui.panel(view.x, view.y, view.w, view.h, theme::BG);
     ui.frame(view.x, view.y, view.w, view.h, 1.0f, theme::LINE);

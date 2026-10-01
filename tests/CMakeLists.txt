@@ -68,6 +68,9 @@ add_executable(test_core
         # 0.7.4: paridade editor<->Play + texturas de fundo + Label sem
         # fundo + Menu configurável + containers VBox/HBox + serialização
         test_uilayout.cpp
+        # 0.7.6: barra final de 5 grupos (layout dinâmico, segmented
+        # exclusivos, G4 condicional, ícones dentro do rect, Theme central)
+        test_toolbar.cpp
         ${CORE_DIR}/core/Scene.cpp
         ${CORE_DIR}/core/Time.cpp
         ${CORE_DIR}/core/ComponentRegistry.cpp
@@ -144,6 +147,9 @@ add_executable(test_core
         ${CORE_DIR}/ui/SceneFx.cpp
         # 0.6.9: gizmos (hit-test/drag/snapping GL-free + desenho em batch)
         ${CORE_DIR}/ui/Gizmo.cpp
+        # 0.7.6: toolbar final (5 grupos) + ícones vetoriais
+        ${CORE_DIR}/ui/Toolbar.cpp
+        ${CORE_DIR}/ui/Icons.cpp
         ${CORE_DIR}/ui/FontAtlas.cpp
         ${CORE_DIR}/platform/InputState.cpp
         ${CORE_DIR}/platform/EngineLog.cpp

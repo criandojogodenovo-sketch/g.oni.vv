@@ -2,8 +2,9 @@ package vv.goni;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.content.ContentResolver;
 import android.content.Intent;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
@@ -24,33 +25,46 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * F5.4 — ECRÃ INICIAL da app: Gestor de Projetos (estilo Godot).
+ * F5.4 → 0.7.6 — ECRÃ DE PROJETOS REESTRUTURADO.
  *
- * ANTES: a app abria direto no editor, com o projeto fixo no
- * getExternalFilesDir. AGORA: lista de projetos → toque abre no editor;
- * "+" escolhe a PASTA DESTE projeto via SAF (ACTION_OPEN_DOCUMENT_TREE).
+ * Estrutura final (spec 0.7.6):
+ *   ┌──────────────────────────────────────────────────────┐
+ *   │ G.One VV                                             │
+ *   │ [ Novo projeto ] [ Importar projeto ]   ← TOPO, contorno #8AB4F8
+ *   │ Meus projetos                          ← cabeçalho   │
+ *   │  nome do projeto                                      │
+ *   │  dd/MM/yyyy HH:mm (última edição)     ← UMA entrada  │
+ *   │  …                                                    │
+ *   └──────────────────────────────────────────────────────┘
  *
- * CADA projeto pode escolher uma pasta DIFERENTE — o SAF não limita a app
- * a uma única pasta: cada escolha gera um URI próprio, guardado com
- * takePersistableUriPermission para AQUELE projeto. Vários projetos nunca
- * se misturam na mesma pasta, MESMO SEM All Files Access.
+ * REGRAS 0.7.6 cumpridas aqui:
+ *   • UMA entrada de criação ([Novo projeto] — o botão duplicado de fundo
+ *     e o prefixo interno "primary:" da lista MORRERAM);
+ *   • a lista mostra SÓ nome + data da última edição (o URI nunca aparece;
+ *     ProjectsFormat.folderLabel limpa "primary:" quando a pasta precisa
+ *     de ser referida nos diálogos);
+ *   • botões de criação SEM gradiente cinza do tema do sistema: contorno
+ *     #8AB4F8 sobre o fundo escuro (a cor de marca do editor — a mesma
+ *     exceção documentada do Theme central);
+ *   • nenhum emoji.
  *
- * O All Files Access mantém-se como está (F5.2): serve só para
- * import/export de assets soltos DENTRO de um projeto já aberto
- * (Download/Documents). As duas coisas COEXISTEM.
- *
- * A lista (nome + URI) vive em projects.json no app-private (VvProjects)
- * — não depende do handshake nem de permissões. O flow SAF→native passa
- * pelo handshake: gestor → VvActivity(extras) → nativeOpenProject.
- *
- * UI programática (sem res/) — mono, escura, mesma linguagem visual do
- * editor. landscape travado pelo manifest (contrato da app).
+ * Fluxos: [Novo projeto] → nome (diálogo) → picker SAF da pasta DESTE
+ * projeto; [Importar projeto] → picker SAF direto (pasta que JÁ é um
+ * projeto .goni — o nome vem da própria pasta). Toque abre; long-press
+ * remove da lista / apaga de verdade (diálogos de sempre).
  */
 public class ProjectManagerActivity extends Activity {
     private static final String TAG = "GONI";
 
     // request code do picker SAF — NÃO colide com kReqAllFiles (4301)
     static final int REQ_PICK_TREE = 4302;
+    // 0.7.6: o picker do IMPORTAR (pasta que já existe) — code próprio para
+    // o onActivityResult saber qual foi
+    static final int REQ_PICK_TREE_IMPORT = 4303;
+
+    // cor de marca do editor 0.7.6 (#8AB4F8) + fundo escuro (#0B0E13)
+    private static final int BRAND = 0xFF8AB4F8;
+    private static final int BG = 0xFF0B0E13;
 
     private final List<VvProjects.Entry> projects = new ArrayList<>();
     private ArrayAdapter<String> adapter;
@@ -64,15 +78,53 @@ public class ProjectManagerActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(0xFF101418);
+        root.setBackgroundColor(BG);
         root.setPadding(dp(16), dp(14), dp(16), dp(12));
 
         TextView title = new TextView(this);
-        title.setText("G.One VV — Projetos");
+        title.setText("G.One VV");
         title.setTextColor(0xFFF2F2F2);
-        title.setTextSize(22);
-        title.setPadding(dp(4), dp(2), 0, dp(10));
+        title.setTextSize(20);
+        title.setPadding(dp(4), dp(2), 0, dp(8));
         root.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // ---- TOPO: as DUAS ações (uma entrada de CRIAÇÃO + importar) ------
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        Button novo = outlineButton("Novo projeto");
+        novo.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                askNewProject();
+            }
+        });
+        actions.addView(novo, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        Button importar = outlineButton("Importar projeto");
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        ip.leftMargin = dp(10);
+        importar.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                pickFolder(REQ_PICK_TREE_IMPORT);
+            }
+        });
+        actions.addView(importar, ip);
+        root.addView(actions, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // ---- cabeçalho da lista -------------------------------------------
+        TextView header = new TextView(this);
+        header.setText("Meus projetos");
+        header.setTextColor(0xFF8A939B);
+        header.setTextSize(13);
+        header.setPadding(dp(4), dp(14), dp(4), dp(6));
+        root.addView(header, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -82,14 +134,32 @@ public class ProjectManagerActivity extends Activity {
         list.setDivider(new android.graphics.drawable.ColorDrawable(0xFF232A31));
         list.setDividerHeight(dp(1));
         adapter = new ArrayAdapter<String>(this,
-                android.R.layout.simple_list_item_1) {
+                android.R.layout.simple_list_item_2) {
             @Override
             public View getView(int pos, View cv, ViewGroup parent) {
-                TextView tv = (TextView) super.getView(pos, cv, parent);
-                tv.setTextColor(0xFFE6E6E6);
-                tv.setTextSize(16);
-                tv.setPadding(dp(10), dp(12), dp(10), dp(12));
-                return tv;
+                // lista = SÓ nome + data da última edição (o URI sai —
+                // era ele que mostrava o prefixo interno "primary:")
+                android.widget.TwoLineListItem item =
+                        (cv instanceof android.widget.TwoLineListItem)
+                                ? (android.widget.TwoLineListItem) cv : null;
+                if (item == null) {
+                    item = (android.widget.TwoLineListItem) getLayoutInflater()
+                            .inflate(android.R.layout.simple_list_item_2,
+                                     parent, false);
+                }
+                VvProjects.Entry e = projects.get(pos);
+                TextView l1 = item.getText1();
+                l1.setText(e.name);
+                l1.setTextColor(0xFFE6E6E6);
+                l1.setTextSize(17);
+                TextView l2 = item.getText2();
+                String d = ProjectsFormat.dateLabel(
+                        e.editedAt > 0 ? e.editedAt : e.createdAt);
+                l2.setText(d.isEmpty() ? "—" : d);
+                l2.setTextColor(0xFF8A939B);
+                l2.setTextSize(13);
+                item.setPadding(dp(6), dp(8), dp(6), dp(8));
+                return item;
             }
         };
         list.setAdapter(adapter);
@@ -111,7 +181,7 @@ public class ProjectManagerActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
         empty = new TextView(this);
-        empty.setText("Nenhum projeto.\nToque em “+ Novo projeto” para escolher a pasta.");
+        empty.setText("Nenhum projeto.\nToque em “Novo projeto” para começar.");
         empty.setTextColor(0xFF8A939B);
         empty.setTextSize(15);
         empty.setGravity(Gravity.CENTER);
@@ -123,33 +193,27 @@ public class ProjectManagerActivity extends Activity {
         root.addView(body, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        Button add = new Button(this);
-        add.setText("+ Novo projeto");
-        add.setTextSize(16);
-        add.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                askNewProject();
-            }
-        });
-        root.addView(add, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        TextView hint = new TextView(this);
-        hint.setText("A pasta de cada projeto é escolhida no seletor do sistema "
-                + "(SAF) — pastas diferentes, projetos separados.");
-        hint.setTextColor(0xFF6E7780);
-        hint.setTextSize(12);
-        hint.setPadding(dp(4), dp(6), dp(4), 0);
-        root.addView(hint, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
-
         setContentView(root, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
         reload();
+    }
+
+    /** botão de CONTORNO da marca (#8AB4F8 sobre fundo escuro — sem
+     *  gradiente cinza do tema do sistema, spec 0.7.6) */
+    private Button outlineButton(String label) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setTextSize(15);
+        b.setTextColor(BRAND);
+        b.setAllCaps(false);
+        GradientDrawable outline = new GradientDrawable();
+        outline.setColor(Color.TRANSPARENT);          // nada de gradiente
+        outline.setStroke(dp(2), BRAND);              // contorno de marca
+        outline.setCornerRadius(dp(6));
+        b.setBackground(outline);
+        b.setPadding(dp(12), dp(10), dp(12), dp(10));
+        return b;
     }
 
     @Override
@@ -163,7 +227,8 @@ public class ProjectManagerActivity extends Activity {
         projects.addAll(VvProjects.load(this));
         adapter.clear();
         for (VvProjects.Entry e : projects) {
-            adapter.add(e.name + "\n" + shortUri(e.uri));
+            // (o texto da linha vem do getView — só o COUNT importa aqui)
+            adapter.add(e.name);
         }
         adapter.notifyDataSetChanged();
         empty.setVisibility(projects.isEmpty() ? View.VISIBLE : View.GONE);
@@ -171,24 +236,15 @@ public class ProjectManagerActivity extends Activity {
     }
 
     /**
-     * 0.6.7 — "+" → nome do projeto → picker SAF da pasta DESTE projeto.
-     *
-     * FIX DO BUG DO NOME INVISÍVEL: o tema da app é
-     * Theme.NoTitleBar.Fullscreen (claro — o manifest aplica-o à activity) e
-     * o AlertDialog herdava esse tema claro → painel BRANCO. O EditText já
-     * tinha texto quase-branco (0xFFE6E6E6) = texto branco sobre fundo
-     * branco: durante a digitação o utilizador NÃO VIA o que escrevia. O
-     * campo agora tem FUNDO ESCURO explícito (0xFF1E222A) + cor de texto
-     * clara + hint — legível em QUALQUER tema de diálogo do sistema.
+     * [Novo projeto]: nome do projeto → picker SAF da pasta DESTE projeto.
+     * É a ÚNICA entrada de criação (0.7.6).
      */
     private void askNewProject() {
         final EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setText(pendingName);
         input.setSelection(input.getText().length());
-        // 0.6.7: contraste garantido — fundo escuro + texto claro + hint
-        // (o diálogo herda o tema CLARO do manifest; sem fundo explícito o
-        // texto claro desaparecia no branco do painel)
+        // contraste garantido (o diálogo herda o tema CLARO do manifest)
         input.setBackgroundColor(0xFF1E222A);
         input.setTextColor(0xFFE6E6E6);
         input.setHintTextColor(0xFF8A939B);
@@ -201,21 +257,20 @@ public class ProjectManagerActivity extends Activity {
                 .setPositiveButton("Continuar", (d, w) -> {
                     String n = input.getText().toString().trim();
                     pendingName = n.isEmpty() ? "projeto" : n;
-                    pickFolder();
+                    pickFolder(REQ_PICK_TREE);
                 })
                 .setNegativeButton("Cancelar", null)
                 .show();
-        // foco + teclado já abertos: digitar logo
         input.requestFocus();
     }
 
-    private void pickFolder() {
+    private void pickFolder(int requestCode) {
         try {
             Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
             i.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
                     | Intent.FLAG_GRANT_READ_URI_PERMISSION
                     | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-            startActivityForResult(i, REQ_PICK_TREE);
+            startActivityForResult(i, requestCode);
         } catch (Exception e) {
             Log.e(TAG, "projetos: picker SAF indisponível", e);
             Toast.makeText(this, "seletor de pastas indisponível",
@@ -226,9 +281,10 @@ public class ProjectManagerActivity extends Activity {
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
-        if (req != REQ_PICK_TREE) {
+        if (req != REQ_PICK_TREE && req != REQ_PICK_TREE_IMPORT) {
             return;
         }
+        final boolean importing = (req == REQ_PICK_TREE_IMPORT);
         if (res != RESULT_OK || data == null || data.getData() == null) {
             Toast.makeText(this, "sem pasta — projeto não criado",
                     Toast.LENGTH_SHORT).show();
@@ -251,9 +307,16 @@ public class ProjectManagerActivity extends Activity {
                     Toast.LENGTH_LONG).show();
             return;
         }
-        // estrutura do core/Project na pasta escolhida (respeita existentes)
+        // nome: pedido no diálogo (criar) ou derivado da própria pasta
+        // (importar — a pasta JÁ é um projeto .goni)
+        String name = pendingName;
+        if (importing) {
+            name = VvProjects.folderDisplayName(this, tree);
+        }
+        // estrutura do core/Project na pasta escolhida (respeita existentes
+        // — importar uma pasta com .goni não cria duplicados)
         VvProjects.createStructure(this, tree);
-        VvProjects.Entry e = new VvProjects.Entry(pendingName, tree.toString(),
+        VvProjects.Entry e = new VvProjects.Entry(name, tree.toString(),
                 System.currentTimeMillis());
         ps.add(e);
         VvProjects.save(this, ps);
@@ -270,12 +333,11 @@ public class ProjectManagerActivity extends Activity {
 
     /**
      * long-press: DUAS ações distintas (0.6.7):
-     *   • "Remover da lista" — só tira da lista; a pasta fica intacta
-     *     (voltar a adicionar a mesma pasta reabre o projeto);
+     *   • "Remover da lista" — só tira da lista; a pasta fica intacta;
      *   • "Apagar projeto" — diálogo de confirmação SEPARADO e explícito
-     *     ("Apagar projeto X? Não pode ser desfeito") → remove a PASTA via
-     *     File API (DocumentsContract.deleteDocument) + sai da lista +
-     *     liberta a permissão persistente.
+     *     → remove a PASTA via File API + sai da lista + liberta a
+     *     permissão persistente. 0.7.6: o rodapé do diálogo mostra a pasta
+     *     SEM o prefixo interno (ProjectsFormat.folderLabel).
      */
     private void confirmRemove(int pos) {
         if (pos < 0 || pos >= projects.size()) {
@@ -284,7 +346,7 @@ public class ProjectManagerActivity extends Activity {
         final VvProjects.Entry e = projects.get(pos);
         new AlertDialog.Builder(this)
                 .setTitle(e.name)
-                .setMessage(shortUri(e.uri))
+                .setMessage(ProjectsFormat.folderLabel(e.uri))
                 .setNeutralButton("Remover da lista", (d, w) -> {
                     removeFromList(e);
                 })
@@ -329,22 +391,11 @@ public class ProjectManagerActivity extends Activity {
 
     private void releasePermission(String uri) {
         try {
-            // liberta a permissão persistente do URI removido
             getContentResolver().releasePersistableUriPermission(
                     Uri.parse(uri),
                     Intent.FLAG_GRANT_READ_URI_PERMISSION
                             | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
         } catch (Exception ignored) {
-        }
-    }
-
-    private static String shortUri(String uri) {
-        try {
-            Uri u = Uri.parse(uri);
-            List<String> seg = u.getPathSegments();
-            return seg.isEmpty() ? u.toString() : seg.get(seg.size() - 1);
-        } catch (Exception e) {
-            return uri;
         }
     }
 

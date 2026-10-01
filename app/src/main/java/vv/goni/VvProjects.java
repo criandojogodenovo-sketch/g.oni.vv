@@ -41,16 +41,23 @@ public final class VvProjects {
     public static final String EXTRA_PROJECT_URI = "goni.project.uri";
     public static final String EXTRA_PROJECT_NAME = "goni.project.name";
 
-    /** entrada da lista: nome + URI da pasta SAF + data de criação */
+    /**
+     * entrada da lista: nome + URI da pasta SAF + data de criação +
+     * data da ÚLTIMA EDIÇÃO (0.7.6 — a lista mostra nome + data da última
+     * edição; editedAt atualiza a cada abertura do projeto, ausente no
+     * projects.json antigo → cai no createdAt).
+     */
     public static final class Entry {
         public final String name;
         public final String uri;
         public final long createdAt;
+        public long editedAt;
 
         public Entry(String name, String uri, long createdAt) {
             this.name = name;
             this.uri = uri;
             this.createdAt = createdAt;
+            this.editedAt = createdAt;
         }
 
         JSONObject toJson() throws Exception {
@@ -58,13 +65,16 @@ public final class VvProjects {
             o.put("name", name);
             o.put("uri", uri);
             o.put("createdAt", createdAt);
+            o.put("editedAt", editedAt > 0L ? editedAt : createdAt);
             return o;
         }
 
         static Entry fromJson(JSONObject o) {
-            return new Entry(o.optString("name", "projeto"),
-                             o.optString("uri", ""),
-                             o.optLong("createdAt", 0L));
+            Entry e = new Entry(o.optString("name", "projeto"),
+                                o.optString("uri", ""),
+                                o.optLong("createdAt", 0L));
+            e.editedAt = o.optLong("editedAt", e.createdAt);
+            return e;
         }
     }
 
@@ -201,12 +211,22 @@ public final class VvProjects {
         return "projeto";
     }
 
-    /** abre o editor COM este projeto (extras → nativeOpenProject no boot) */
+    /**
+     * abre o editor COM este projeto (extras → nativeOpenProject no boot).
+     * 0.7.6: marca a data da ÚLTIMA EDIÇÃO (a lista mostra nome + data —
+     * editar/abrir refresca a linha sem tocar na pasta do projeto).
+     */
     public static void launchEditor(Activity a, Entry e) {
-        Intent i = new Intent(a, VvActivity.class);
-        i.putExtra(EXTRA_PROJECT_URI, e.uri);
-        i.putExtra(EXTRA_PROJECT_NAME, e.name);
-        a.startActivity(i);
+        List<Entry> ps = load(a);
+        int i = indexOfUri(ps, e.uri);
+        if (i >= 0) {
+            ps.get(i).editedAt = System.currentTimeMillis();
+            save(a, ps);
+        }
+        Intent it = new Intent(a, VvActivity.class);
+        it.putExtra(EXTRA_PROJECT_URI, e.uri);
+        it.putExtra(EXTRA_PROJECT_NAME, e.name);
+        a.startActivity(it);
     }
 
     /**

@@ -75,9 +75,17 @@ public:
                      const f32 color[4], f32 maxW);
     bool button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text);
 
+    // 0.7.6 — CAPTURA DE GESTO sem desenho (a toolbar desenha os próprios
+    // botões: ícones/segmented da ui/Toolbar). MESMA semântica do button():
+    // press edge dentro do rect captura active_; release dentro = clique.
+    // widgetActive diz se o widget tem o dedo (visual de "held").
+    bool widgetHit(u64 id, f32 x, f32 y, f32 w, f32 h);
+    bool widgetActive(u64 id) const { return active_ == id; }
+
     // F3: slider horizontal immediate-mode (Inspector do Transform3D).
-    // Escreve em `value` (clamp [minV,maxV]); devolve true se mudou este frame.
-    // Partilha o mesmo active_ dos botões — um widget interativo por gesto.
+    // Escreve em `value` (clamp [minV,maxV]); devolve true se mudou este
+    // frame. Partilha o mesmo active_ dos botões — um widget interativo por
+    // gesto.
     bool slider(u64 id, f32 x, f32 y, f32 w, f32 h, f32 minV, f32 maxV, f32& value);
 
     // F4.1: região de scroll reutilizável (immediate-mode; estado por id em
@@ -205,8 +213,8 @@ public:
     f32  screenWidth() const { return sw_; }
     f32  screenHeight() const { return sh_; }
 
-    // layout landscape F1
-    void toolbar(bool outClicks[3]);   // exatamente 3 botões: Menu, Play, Settings
+    // layout landscape F1 (0.7.6: a toolbar em si vive em ui/Toolbar.h —
+    // 5 grupos com ícones; aqui ficam só as primitivas e os rects)
     void statusLine(const char* text); // fps + contagem de TICs
 
     // F4.2: safe-area do sistema (nav/status bar). Insets default = 0 →

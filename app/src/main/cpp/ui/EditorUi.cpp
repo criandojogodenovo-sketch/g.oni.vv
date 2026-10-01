@@ -78,6 +78,11 @@ UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in) {
     return safe::centerRect(sw, sh, in);
 }
 
+// 0.7.6 — com o painel direito opcional (G5 escondeu o Inspector)
+UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, bool rightPanel) {
+    return safe::centerRect(sw, sh, in, rightPanel);
+}
+
 // ---------------------------------------------------------------------------
 // HIERARQUIA — lista COMPLETA de TICs com scroll (F4.1: fim do corte maxRows
 // da F3). Drag na lista = scroll; tap numa linha = seleciona (re-despacho).
@@ -530,29 +535,6 @@ void drawTouchControls(UiContext& ui, const TouchControls& tc, f32 sw, f32 sh) {
                         sh - ui.safeTop() - ui.safeBottom(), 1.0f);
 }
 
-// 0.7.0 — separador "3D | UI" na toolbar: MUDA o modo do viewport
-// central (3D = cena com orbit/gizmos; UI = viewport 2D dedicado à UI
-// criável). O botão do modo ATIVO fica com frame ACCENT (a linguagem do
-// seletor do gizmo). Não corre em PLAY (a toolbar não existe em play).
-void drawModeToggle(UiContext& ui, EditorState& st) {
-    const UiRect r = toolbarModeRect(ui.screenWidth(), ui.screenHeight(),
-                                     ui.safeArea());
-    if (ui.button(kMode3dId, r.x, r.y, 96.0f, r.h, "3D")) {
-        st.uiMode = false;
-        st.selElement = -1;
-        st.elDrag = false;
-    }
-    if (ui.button(kModeUiId, r.x + 96.0f + 8.0f, r.y, 96.0f, r.h, "UI")) {
-        st.uiMode = true;
-    }
-    // frame do modo ATIVO
-    if (!st.uiMode) {
-        ui.frame(r.x, r.y, 96.0f, r.h, 2.0f, theme::ACCENT);
-    } else {
-        ui.frame(r.x + 96.0f + 8.0f, r.y, 96.0f, r.h, 2.0f, theme::ACCENT);
-    }
-}
-
 // 0.7.0 — DESSELECCIONAR no viewport 3D: arm no press edge dentro do
 // viewport central (não reclamado); limpa no release se o dedo NÃO se
 // mexeu além do limiar (tap ≠ drag de orbit/gizmo). Puro e afervel.
@@ -653,10 +635,9 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 
 int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st) {
     const f32 w = kMenuW;
-    // F5-E: + Export OBJ; F5.2: + Importar…/Export Downloads (All Files
-    // Access). 0.7.1: + "Cenas…" (lista/nova/trocar — F6 cenas múltiplas).
-    // 0.6.7: + "Sair para projetos" (auto-save no main + volta ao gestor
-    // SEM matar a app — VvActivity.finish() pela ponte Java)
+    // 0.7.6 — o dropdown do botão [Menu ▾]: Settings entrou (deixou de ser
+    // botão próprio da barra), "Cenas…" SAÍU (o [Cena ▾] da toolbar abre a
+    // lista diretamente). O resto é o menu de FICHEIROS de sempre.
     constexpr int kItems = 7;
     const f32 h = kHeaderH + static_cast<f32>(kItems) * 64.0f + kPad;
     // F4.2: centrado no viewport ÚTIL (dentro do contentRect)
@@ -678,7 +659,7 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "MENU", theme::TEXT);
 
     int chosen = 0;
-    const char* labels[kItems] = {"Save cena", "Load cena", "Cenas…",
+    const char* labels[kItems] = {"Settings", "Guardar cena", "Carregar cena",
                                   "Export OBJ", "Importar…",
                                   "Export Downloads", "Sair para projetos"};
     for (int i = 0; i < kItems; ++i) {
@@ -1451,59 +1432,9 @@ bool drawPlayBar(UiContext& ui, const InputState& in, f32 sw, f32 sh, int fps) {
 }
 
 
-// ---------------------------------------------------------------------------
-// 0.6.9 — seletor de modo do gizmo na toolbar (grupo à direita)
-// ---------------------------------------------------------------------------
-
-void drawGizmoToolbar(UiContext& ui, const InputState& in, GizmoModeState& st) {
-    // o grupo vive na FAIXA DA TOOLBAR (mesma altura dos 3 botões), à
-    // direita; os 3 botões Menu/Play/Settings ficam intactos à esquerda.
-    // 0.7.0: o limite esquerdo passou a ser o FIM do separador "3D | UI"
-    // (toolbarModeEndX) — nunca por cima dele; em ecrãs estreitos os botões
-    // ENCOLHEM em vez de sobreporem (nada sobreposto, o critério da fase).
-    const UiRect bar = ui.toolbarRect();
-    f32 btnW = 150.0f;
-    const f32 btnH = 56.0f;
-    const f32 snapW = 120.0f;
-    const f32 gap = 10.0f;
-    const f32 by = bar.y + (safe::kToolbarH - btnH) * 0.5f;
-
-    const f32 leftBound =
-        toolbarModeEndX(ui.screenWidth(), ui.screenHeight(), ui.safeArea());
-    const f32 avail = bar.x + bar.w - kPad - leftBound;
-    // 4 controlos: [Mover][Rodar][Escalar][Snap] — encolhe os 3 de modo se
-    // não couber (min 80px; o Snap é fixo)
-    const f32 wanted = 3.0f * btnW + snapW + 3.0f * gap;
-    if (wanted > avail && avail > snapW + 3.0f * 80.0f + 3.0f * gap) {
-        btnW = (avail - snapW - 3.0f * gap) / 3.0f;
-    }
-    f32 x = bar.x + bar.w - kPad - (3.0f * btnW + snapW + 3.0f * gap);
-    if (x < leftBound) {
-        x = leftBound;   // defesa: nunca por cima do separador
-    }
-
-    static const char* kModeNames[3] = {"Mover", "Rodar", "Escalar"};
-    for (int i = 0; i < 3; ++i) {
-        const u64 id = kGizmoModeMoveId + static_cast<u64>(i);
-        if (ui.button(id, x, by, btnW, btnH, kModeNames[i])) {
-            st.mode = i;
-        }
-        if (st.mode == i) {
-            // modo ATIVO: frame ACCENT por cima do botão (inversível demais
-            // faria os rótulos ilegíveis a 28px — o frame salienta)
-            ui.frame(x, by, btnW, btnH, 2.0f, theme::ACCENT);
-        }
-        x += btnW + gap;
-    }
-    // Snap (toggle — o rótulo mostra o estado)
-    if (ui.button(kGizmoSnapId, x, by, snapW, btnH,
-                  st.snap ? "Snap on" : "Snap")) {
-        st.snap = !st.snap;
-    }
-    if (st.snap) {
-        ui.frame(x, by, snapW, btnH, 2.0f, theme::ACCENT);
-    }
-    (void)in;
-}
 } // namespace editor
 } // namespace vv
+
+// (0.6.9 → 0.7.6) drawGizmoToolbar/drawModeToggle foram REMOVIDAS: o
+// seletor de gizmos e o separador 3D|UI são os grupos G4/G3 da BARRA FINAL
+// (ui/Toolbar.h — ícones vetoriais + segmented controls).

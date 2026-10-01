@@ -1,4 +1,4 @@
-# G.One VV 0.7.5 — overlays modais com backdrop + TIC de UI próprio + teclado com minúsculas (fix das falhas de UX do C33)
+# G.One VV 0.7.6 — reestruturação UI/UX do editor: toolbar final de 5 grupos + ícones vetoriais + tela de projetos + Theme central
 
 Engine com editor, projeto `.goni` e maturação de assets (compressão ETC2/ASTC
 com cache, extração de texturas glTF/GLB, import OBJ/glTF/GLB/PNG, export
@@ -6,11 +6,54 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 (`sensorLandscape`). Devices de teste: Realme C33 (720x1600) e Realme
 RMX3624 (Android 13).
 
-Relatórios 1-16 das sub-fases: `docs/RELATORIO-0.7.4.md` e
-`docs/RELATORIO-0.7.5.md` (com os sha256 dos APKs assinados). (com o sha256 do
-APK assinado).
+Relatórios 1-16 das sub-fases: `docs/RELATORIO-0.7.{4,5,6}.md` (com os
+sha256 dos APKs assinados).
 
-## Escopo 0.7.5 (implementado — fix das falhas de UX do C33 0.7.4)
+## Escopo 0.7.6 (implementado — reestruturação UI/UX definitiva)
+
+**BARRA SUPERIOR FINAL DE 5 GRUPOS** (a toolbar cresceu orgânica — tudo
+texto, tudo ao mesmo nível — e já não escalava). Princípios: texto só
+para identidade/ações raras; uso frequente = ÍCONES; grupos com
+separador visual; estados exclusivos = segmented control; esconder o que
+não se aplica:
+- **G1 sistema** `[Menu ▾][Cena ▾]` — Menu abre o dropdown (Settings,
+  Guardar, Carregar, Export OBJ, Importar…, Export Downloads, Sair — o
+  Settings deixou de ser botão próprio); Cena abre a lista de cenas do
+  projeto (o item "Cenas…" saiu do menu de ficheiros);
+- **G2 playback** `[pause][play]` — ícones;
+- **G3 modo** `[3D][UI]` — segmented, ativo com fundo de marca;
+- **G4 transformação** `[mover][rodar][escalar][snap]` — segmented de
+  ícones SÓ com seleção ativa em 3D (some da barra, não fica cinzento);
+  mover/rodar/escalar exclusivos, snap é toggle;
+- **G5 painéis** `[inspector]` — mostra/esconde o painel direito (a área
+  junta-se ao viewport central).
+
+**8 ÍCONES VETORIAIS PRÓPRIOS** (Mover/Rodar/Escalar/Snap/Inspector/
+Cena/Play/Pause) como POLILINHAS (viewBox 0..24, stroke uniforme)
+desenhadas pelo line batch dos gizmos — sem parser de SVG, sem raster.
+Cor de marca `#8AB4F8` sobre o fundo da barra; ativo inverte (fundo de
+marca + ícone escuro). Nenhum emoji.
+
+**THEME CENTRAL** (`ui/Theme.h`): struct Theme lido pela toolbar/ícones —
+cor de marca `#8AB4F8` (exceção DOCUMENTADA ao tema mono dos painéis,
+que fica intacto), fundo da barra `#0B0E13`, stroke.
+
+**TELA DE PROJETOS** (lado Java): UMA entrada de criação ([Novo projeto]
+no topo — o botão de fundo morreu), + [Importar projeto] (pasta que já é
+um projeto .goni) e o cabeçalho "Meus projetos"; a lista mostra SÓ nome
++ data da última edição (o URI — com o prefixo interno "primary:" —
+nunca mais aparece; `ProjectsFormat.folderLabel` limpa o prefixo e é
+testado na JVM do CI); botões de CONTORNO `#8AB4F8` sobre fundo escuro
+(sem o gradiente cinza do tema do sistema).
+
+Layout dinâmico (larguras proporcionais quando não cabe — nada
+sobreposto em nenhuma largura). Suíte 401→407 (+7: 5 grupos sem
+sobreposição em 2 larguras ±G4, transformação condicional, segmented
+exclusivos + snap toggle, ícones dentro do rect/24/32px + espessura
+uniforme, Theme central com cores exatas, ações G1/G2/G5, dropdown do
+Menu 0.7.6) + testes Java host + check estrutural no CI.
+
+## Escopo 0.7.5 (histórico — fix das falhas de UX do C33 0.7.4)
 
 **Z-ORDER DOS OVERLAYS MODAIS** (o fix do "texto do canvas ATRAVÉS do
 MENU"): com um modal aberto (+, MENU, Settings, seletores, diálogo de
@@ -868,7 +911,39 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
 
-## Verificação no Realme C33 (dono) — 0.7.5 (overlays + TIC de UI + minúsculas; APK CUMULATIVO)
+## Verificação no Realme C33 (dono) — 0.7.6 (toolbar final + ícones + tela de projetos; APK CUMULATIVO)
+
+Instalar o APK 0.7.6 (artifact `goni-vv-0.7.6-release-signed` do run do
+job `build-release`). Esperado em cada passo:
+
+1. **Tela de projetos (a app abre nela)**: topo com [Novo projeto] e
+   [Importar projeto] (botões de CONTORNO azul #8AB4F8, sem gradiente
+   cinza) + cabeçalho "Meus projetos"; a lista mostra SÓ nome + data da
+   última edição — NENHUM "primary:" em lado nenhum; sem botão de criação
+   no fundo. [Novo projeto] pede o nome → seletor de pasta → entra no
+   editor (a linha da lista fica com a data de agora ao voltar).
+   [Importar projeto] abre o seletor direto (o nome vem da pasta).
+2. **Toolbar do editor**: 5 grupos separados por linhas finas —
+   [Menu ▾][Cena ▾] texto · [pause][play] ÍCONES azuis · [3D|UI]
+   segmented (o ativo com fundo azul) · [inspector] ícone à direita. SEM
+   botão "Settings" (está no dropdown do Menu) e SEM "Mover/Rodar/
+   Escalar" em texto.
+3. **G4 condicional**: sem TIC selecionado o grupo de transformação NÃO
+   existe na barra; selecionar um TIC (Hierarchy ou tap) → os 4 íCONES
+   (mover/rodar/escalar/snap) aparecem entre o 3D|UI e o inspector;
+   mover/rodar/escalar exclusivos (um ativo), snap liga/desliga sem
+   trocar o modo.
+4. **Dropdowns do G1**: Menu → Settings/Guardar/Carregar/Export OBJ/
+   Importar…/Export Downloads/Sair (Settings abre o menu de logs/
+   armazenamento de sempre); Cena → lista de cenas do projeto (a ativa
+   marcada) + "+ Nova cena".
+5. **G5 inspector**: tocar o ícone → o painel direito desaparece e o
+   viewport/gesto cresce para a direita; tocar de novo → volta.
+6. **Regressões**: separador 3D|UI continua a trocar o viewport;
+   gizmos/teclado/overlays (0.7.4/0.7.5) intactos; em Play a barra
+   desaparece (só a play bar com Stop).
+
+## Verificação no Realme C33 (dono) — 0.7.5 (histórico; overlays + TIC de UI + minúsculas)
 
 Instalar o APK 0.7.5 (artifact `goni-vv-0.7.5-release-signed` do run do
 fecho). Roteiro cumulativo — os anteriores continuam a aplicar-se:
