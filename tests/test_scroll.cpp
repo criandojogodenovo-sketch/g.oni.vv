@@ -180,10 +180,11 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     // (0.7.0) + input 34 + body 34 + velx 36 + add TouchControls 42 = 750
     const TextMetrics m{};
     const InspProfile prof = inspectorProfile(*tic);
-    InspRow plan[32];
+    InspRow plan[48];   // 0.8.0: +prim/anim
     const u32 n = inspectorPlan(prof, m, false, plan);
     const f32 contentH = inspectorContentHeight(prof, m, false);
-    EXPECT(nearEqF(contentH, 750.0f));
+    // 0.8.0: +36 (linha prim:) +42 (add Animacao — tem Transform3D) = 828
+    EXPECT(nearEqF(contentH, 828.0f));
 
     // cursor Y PARTILHADO: linhas sequenciais (y estritamente crescente, sem
     // reinício por secção), todas dentro do conteúdo, e o fundo do plano =
@@ -199,28 +200,31 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
         prevBottom = plan[i].y + plan[i].h;
         if (plan[i].kind == InspRow::Kind::AddTc) addTcIdx = i;
     }
-    EXPECT(addTcIdx + 1 == n);   // "add TouchControls" é a ÚLTIMA linha
-    EXPECT(nearEqF(plan[addTcIdx].y + plan[addTcIdx].h, contentH));
+    // 0.8.0: "add Animacao" (F7) é a ÚLTIMA linha — addTc fica em penúltimo
+    EXPECT(addTcIdx + 2 == n);
+    EXPECT(plan[n - 1].kind == InspRow::Kind::AddAnim);
+    EXPECT(nearEqF(plan[n - 1].y + plan[n - 1].h, contentH));
 
     // C33 (pior caso: superfície mais baixa que a teórica) — lista 500 px:
     // sem scroll o fundo do botão fica FORA da região (o bug reportado)
     const f32 listH = 500.0f;
     const f32 contentTop = 140.0f;   // y=88 + cabeçalho 48 + 4
-    const f32 btnBottom0 = contentTop + plan[addTcIdx].y + plan[addTcIdx].h;
+    const f32 btnBottom0 = contentTop + plan[n - 1].y + plan[n - 1].h;
     EXPECT(btnBottom0 > contentTop + listH);
 
     // com o offset no MÁXIMO o botão fica inteiro dentro da região —
-    // "add TouchControls" clicável mesmo após scroll
+    // "add Animacao" (última linha, 0.8.0) clicável mesmo após scroll
     const f32 off = clampOffset(999.0f, contentH, listH);
     EXPECT(nearEqF(off, contentH - listH));
-    const f32 btnTop = contentTop + plan[addTcIdx].y - off;
+    const f32 btnTop = contentTop + plan[n - 1].y - off;
     EXPECT(btnTop >= contentTop);
-    EXPECT(btnTop + plan[addTcIdx].h <= contentTop + listH + 0.01f);
+    EXPECT(btnTop + plan[n - 1].h <= contentTop + listH + 0.01f);
 
     // com TouchControls presente o botão dá lugar à label tc (42 → 34)
     EXPECT(tic->addComponent<TouchControls>() != nullptr);
+    // 0.8.0: 742 + 36 (prim:) + 42 (add Animacao) = 820
     EXPECT(nearEqF(inspectorContentHeight(inspectorProfile(*tic), m, false),
-                   742.0f));
+                   820.0f));
 }
 
 TEST(scroll_hierarquia_todos_os_tics_atingeis) {
@@ -276,20 +280,24 @@ TEST(scroll_linhas_mesh_tex_atingiveis_no_scroll) {
 
     const TextMetrics m{};
     const InspProfile prof = inspectorProfile(*tic);
-    InspRow plan[32];
+    InspRow plan[48];   // 0.8.0: +prim/anim
     const u32 n = inspectorPlan(prof, m, true, plan);   // seletores ativos
-    u32 meshIdx = n, texIdx = n;
+    u32 meshIdx = n, texIdx = n, primIdx = n;
     for (u32 i = 0; i < n; ++i) {
         if (plan[i].kind == InspRow::Kind::MeshButton) meshIdx = i;
         if (plan[i].kind == InspRow::Kind::TexButton) texIdx = i;
+        if (plan[i].kind == InspRow::Kind::PrimButton) primIdx = i;   // 0.8.0
     }
     EXPECT(meshIdx < n);
-    EXPECT(texIdx == meshIdx + 1);   // mesh e tex ADJACENTES
+    // 0.8.0: mesh → prim → tex (a linha "prim:" fica no meio — F7)
+    EXPECT(primIdx == meshIdx + 1);
+    EXPECT(texIdx == primIdx + 1);
 
     // topo da linha mesh (Player tem Transform3D): nome 34 + VISIVEL 36
     // (0.7.0) + secção 34 + 9×36
     EXPECT(nearEqF(plan[meshIdx].y, 34.0f + 36.0f + 34.0f + 9.0f * 36.0f));
-    EXPECT(nearEqF(plan[texIdx].y, plan[meshIdx].y + plan[meshIdx].h));
+    // 0.8.0: a linha "prim:" (36, botão) fica entre mesh e tex
+    EXPECT(nearEqF(plan[texIdx].y, plan[meshIdx].y + plan[meshIdx].h + 36.0f));
 
     // pior caso C33 (lista 500 px): conteúdo 754 — scroll ativa
     const f32 contentH = inspectorContentHeight(prof, m, true);

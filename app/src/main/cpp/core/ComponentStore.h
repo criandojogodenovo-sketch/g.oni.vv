@@ -24,6 +24,7 @@
 #include "components/Transform3D.h"
 #include "components/UiCanvas.h"   // 0.7.0: UI criável
 #include "components/CameraComp.h"  // 0.7.7: câmara de cena
+#include "components/AnimationPlayer.h"  // 0.8.0: animação (F7)
 
 namespace vv {
 
@@ -96,6 +97,7 @@ public:
     ComponentStorage<TouchControls>& touchControls()  { return touchControls_; }
     ComponentStorage<UiCanvas>&     uiCanvases()      { return uiCanvases_; }
     ComponentStorage<CameraComp>&   cameras()         { return cameras_; }   // 0.7.7
+    ComponentStorage<AnimationPlayer>& animators()     { return animators_; }  // 0.8.0
     const ComponentStorage<Transform3D>&  transforms() const      { return transforms_; }
     const ComponentStorage<MeshRenderer>& meshRenderers() const   { return meshRenderers_; }
     const ComponentStorage<InputMap>&     inputMaps() const       { return inputMaps_; }
@@ -103,6 +105,7 @@ public:
     const ComponentStorage<TouchControls>& touchControls() const  { return touchControls_; }
     const ComponentStorage<UiCanvas>&     uiCanvases() const      { return uiCanvases_; }
     const ComponentStorage<CameraComp>&   cameras() const         { return cameras_; }   // 0.7.7
+    const ComponentStorage<AnimationPlayer>& animators() const     { return animators_; }  // 0.8.0
 
     const ComponentRegistry& registry() const { return registry_; }
 
@@ -119,7 +122,8 @@ private:
     ComponentStorage<BodyComp>      bodies_;
     ComponentStorage<TouchControls> touchControls_;
     ComponentStorage<UiCanvas>      uiCanvases_;   // 0.7.0: UI criável
-    ComponentStorage<CameraComp>    cameras_;      // 0.7.7: câmara de cena
+    ComponentStorage<CameraComp>     cameras_;     // 0.7.7: câmara de cena
+    ComponentStorage<AnimationPlayer> animators_;  // 0.8.0: animação (F7)
     ComponentRegistry               registry_;
 };
 
@@ -177,8 +181,16 @@ inline ComponentStorage<CameraComp>& ComponentStore::storageOf<CameraComp>() {
     return cameras_;
 }
 template <>
+inline ComponentStorage<AnimationPlayer>& ComponentStore::storageOf<AnimationPlayer>() {
+    return animators_;
+}
+template <>
 inline const ComponentStorage<CameraComp>& ComponentStore::storageOf<CameraComp>() const {
     return cameras_;
+}
+template <>
+inline const ComponentStorage<AnimationPlayer>& ComponentStore::storageOf<AnimationPlayer>() const {
+    return animators_;
 }
 
 } // namespace vv

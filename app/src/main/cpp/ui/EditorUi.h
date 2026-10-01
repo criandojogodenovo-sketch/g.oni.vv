@@ -59,6 +59,7 @@
 #include "ui/EditorLayout.h"
 #include "platform/FileApi.h"
 #include "platform/StoragePerm.h"
+#include "render/Primitives.h"   // 0.8.0: PrimParams no AssetResolvers
 
 namespace vv {
 
@@ -271,12 +272,15 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorSta
 
 // Resolvers do device — o main liga-os ao GpuAssets/ResourceManager/cubo
 // procedural/material lit (injeção → os testes usam stubs).
+// 0.8.0 (F7): `prim` resolve PRIMITIVAS PROCEDURAIS pelo cache do main
+// (assinatura = tipo+parâmetros → Mesh* único partilhado).
 struct AssetResolvers {
     Mesh* (*mesh)(const std::string& ref) = nullptr;   // GpuAssets::mesh
     const Texture* (*texture)(const std::string& relPath, std::string* warn) = nullptr;
     std::string (*meshTextureFor)(const std::string& ref) = nullptr;  // glTF embutida
     Mesh*       cubeMesh = nullptr;      // cubo procedural do main
     LitMaterial* material = nullptr;    // lit do renderer
+    Mesh* (*prim)(const PrimParams& p) = nullptr;   // 0.8.0: cache de primitivas
 };
 
 // Resultado de uma escolha (feedbacks ficam pelo chamador: toast + engine.log)
@@ -288,12 +292,18 @@ struct AssetPickOutcome {
 
 // Aplica a escolha do seletor no MeshRenderer do TIC selecionado.
 //   menuKind: 1 = seletor de meshes, 2 = seletor de texturas (o valor de
-//             EditorState::assetMenu CAPTURADO ANTES do drawAssetMenu)
-//   pick:     1 = cube (mesh) / none (textura); 2.. = ficheiro do catálogo
+//             EditorState::assetMenu CAPTURADO ANTES do drawAssetMenu),
+//             4 = seletor de PRIMITIVAS (0.8.0)
+//   pick:     1 = cube (mesh) / none (textura) / none (primitiva); 2.. =
+//             ficheiro do catálogo (kinds 1/2) OU PrimKind 0..7 (kind 4)
 // Regras: escolher textura → texture + texPath + log "material: textura
 // aplicada <ref>"; remover (pick 1) → liberta a referência + log "material:
 // textura removida"; carga que falha → estado ANTERIOR intacto + toast de
 // falha; TIC morto/sem MeshRenderer/pick fora do catálogo → outcome vazio.
+// 0.8.0: escolher PRIMITIVA → primOn+params (defaults do tipo) + mesh do
+// resolver + log "editor: primitiva <nome> aplicada"; escolher cube/file
+// LIMPA o prim (uma fonte de mesh de cada vez); escolher none (kind 4)
+// desliga o prim (mesh null — "prim: -" no Inspector).
 AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int pick,
                                 const AssetCatalog& catalog, const AssetResolvers& res);
 

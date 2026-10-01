@@ -1,3 +1,7 @@
+# G.One VV 0.8.0 — animação: timeline + keyframes + AnimationPlayer + primitivas mesh procedurais
+
+<!-- (0.7.10 abaixo — histórico) -->
+
 # G.One VV 0.7.10 — frustum domado (cap visual + hit-test restrito + prioridade de objetos)
 
 <!-- (0.7.9 abaixo — histórico) -->
@@ -22,8 +26,56 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 (`sensorLandscape`). Devices de teste: Realme C33 (720x1600) e Realme
 RMX3624 (Android 13).
 
-Relatórios 1-16 das sub-fases: `docs/RELATORIO-0.7.{4,5,6,7,8,9,10}.md` (com
-os sha256 dos APKs assinados).
+Relatórios 1-16 das sub-fases: `docs/RELATORIO-0.7.{4,5,6,7,8,9,10}.md` e
+`docs/RELATORIO-0.8.0.md` (com os sha256 dos APKs assinados).
+
+## Escopo 0.8.0 (implementado — campanha F7: a cena ganha MOVIMENTO)
+
+**ANIMAÇÃO (AnimationPlayer)**: componente novo num TIC com tracks de
+keyframes que animam propriedades do TIC dono (pos/rot/escala do
+Transform3D — rot em graus Euler XYZ, a convenção do Inspector) e de
+elementos de UI do UiCanvas (pos/cor/alpha, por NOME). Curvas por track:
+LINEAR (default) ou BEZIER (cúbica por canal com tangentes in/out por
+key — handles a ZERO dão um ease suave entre keys; handles proporcionais
+ao segmento reproduzem a reta). Playback com modos once/loop/ping-pong e
+VELOCIDADE 0.1×–3×; em PLAY o AnimationSystem (grupo Update, ANTES do
+TransformSystem, gate `enabled` como a física) avança e aplica todos os
+players — ao parar, o PlaySnapshot (agora com elementos de UI) devolve a
+pose de editor.
+
+**EDITOR DE TIMELINE** (`ui/Timeline`): strip no FUNDO do viewport
+central, só quando o TIC selecionado tem player (o Inspector ganhou
+"add Animacao") — NADA sobrepõe os painéis existentes (Hierarchy/
+Inspector intactos; o orbit nasce só na área acima da strip). SCRUB
+(arrastar o cursor do tempo aplica a pose AO VIVO), keys (diamantes:
+tap seleciona, drag move o tempo com clamp entre vizinhas), +key por
+row (key NO CURSOR com o valor ATUAL da propriedade — posa-se o objeto,
+clica-se +), −key (a mais próxima do cursor), curva por track (lin↔bez),
++track (overlay com os 6 alvos), play/pause/stop com PREVIEW EM SANDBOX
+(captura/restaura a pose — o preview nunca suja o editor) e mode/speed.
+
+**PRIMITIVAS MESH PROCEDURAIS** (`render/Primitives`): 8 formas geradas
+em código com parâmetros e defaults sensatos — ESFERA, CILINDRO, CONE,
+BOX, PLANO (em y=0), TRIÂNGULO/WEDGE (rampa), TORUS, CÁPSULA (altura
+total). Novo preset de TIC **"Mesh"** ("+" → Mesh: só Transform+
+MeshRenderer com a esfera default, SEM física — prototipagem pura) e
+seletor "prim:" no Inspector (grelha mono com as 8 formas + none) com
+sliders de parâmetros (raio/tam, altura, segmentos, tubo). O mesh vive
+num CACHE por assinatura no main (1 assinatura = 1 objeto GL
+partilhado; lifecycle como o cubo — destruído no TERM, rebind lazy).
+Serialização: `"mesh":"prim" + "prim":{tipo+parâmetros}` no `.goni`
+(round-trip com re-resolução pelo cache).
+
+Suíte 437→481 (+44: animação [interp linear/bezier com handles lineares,
+playback pos/rot/scale/UI, once/loop/pingpong, speed, round-trip .goni,
+forward-compat, preset Mesh, PlaySnapshot com UI, addTrack idempotente],
+primitivas [geometria válida nas 8, winding CCW concordante com as
+normais, bbox coerente, params respeitados, clamps, nomes, serialização
+tipo+params+exclusividade com cube/file], timeline [visibilidade, rect
+sem sobreposição com painéis, scrub aplica pose, add/del key, curva,
+preview play/stop restaura, modo cicla, speed, overlay de track, troca
+de seleção para o preview]; contratos atualizados: registry 7→8,
+plano do Inspector com prim/add Animacao, alturas 750→828/742→820).
 
 ## Escopo 0.7.10 (implementado — frustum domado)
 
@@ -1091,6 +1143,43 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.8.0 (animação + primitivas; APK CUMULATIVO)
+
+Instalar o APK 0.8.0 (artifact `goni-vv-0.8.0-release-signed` do run do
+job `build-release`). Esperado em cada passo:
+
+1. **Primitivas**: "+" → **Mesh** → nasce uma ESFERA assente no grid;
+   Inspector → linha "prim:" → abrir o seletor → escolher
+   cilindro/cone/box/plano/triângulo/torus/cápsula → a forma TROCA no
+   viewport; os sliders (raio/tam, altura, segmentos, tubo no torus)
+   mudam a geometria AO VIVO;
+2. **Sem física no Mesh**: o TIC Mesh NÃO cai no Play (sem BodyComp);
+   os presets antigos (Player/Character/Static/Rigid) continuam iguais;
+3. **Timeline abre**: selecionar o TIC Mesh → Inspector → "add Animacao"
+   → a STRIP da timeline aparece no fundo do viewport (os painéis
+   laterais e a status line ficam INTACTOS — nada sobreposto);
+4. **Track + keys**: "+track" → posicao → posar o objeto noutro sítio
+   (gizmo/Inspector) → "+key" no t=0; puxar o cursor para 2 s → posar
+   noutro sítio → "+key" → diamantes na row;
+5. **Scrub**: arrastar o cursor do tempo → o objeto SEGUE a curva AO
+   VIVO; antes da 1ª key fica na 1ª pose, depois da última fica na última;
+6. **Preview**: Play na timeline → o objeto ANIMA (loop por default);
+   Stop → a pose de EDITOR volta exata (sandbox) e o tempo recolhe a 0;
+   pausa deixa o tempo onde está;
+7. **Modos e velocidade**: botão mode cicla once/loop/pingpong
+   (pingpong vai e vem); slider "vel" 2× anima ao dobro;
+8. **UI anima**: TIC com UiCanvas (botão) → add Animacao → "+track" →
+   "ui pos"/"ui cor"/"ui alpha" → keys com o elemento posicionado em
+   sítios diferentes → Play na timeline → o ELEMENTO mexe/muda de cor/
+   alpha no preview; em Play de jogo IDEM (por cima da cena);
+9. **Play de jogo**: Play da toolbar → TODOS os TICs com player animam
+   do zero; Stop → TUDO volta à pose de editor (objetos E elementos de
+   UI — o snapshot estendido);
+10. **Persistência**: gravar o projeto e reabrir → primitiva (tipo +
+    parâmetros), tracks/keys/curvas, modo e velocidade VOLTAM exatos;
+11. **Regressões**: 0.7.10 (frustum/seleção), 0.7.9 (grab-lock),
+    0.7.8 (UI de jogo), import/export de OBJ/glTF intactos.
 
 ## Verificação no Realme C33 (dono) — 0.7.10 (frustum domado; APK CUMULATIVO)
 

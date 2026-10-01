@@ -26,7 +26,10 @@ enum class PresetKind : u32 {
     CharacterBody3D = 1,
     StaticBody3D    = 2,
     RigidBody3D     = 3,
-    Count           = 4,
+    Mesh            = 4,   // 0.8.0 (F7): só Transform+MeshRenderer (a
+                           // primitiva vem pelo `mesh` — o main passa a
+                           // esfera default do cache; SEM física)
+    Count           = 5,
 };
 
 // Nome canônico do preset (usado no menu "+" e como nome base do TIC).

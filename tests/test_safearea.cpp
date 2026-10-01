@@ -114,9 +114,12 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     prof.bc = true;
     prof.tc = false;
     prof.cam = false;
+    prof.prim = false;        // 0.8.0: sem primitiva (só a linha "prim:")
+    prof.anim = false;
+    prof.canAnim = true;      // 0.8.0: tem Transform3D → linha add Animacao
     const TextMetrics m{};
     const f32 contentH = inspectorContentHeight(prof, m, false);
-    EXPECT(nearEqF(contentH, 750.0f));
+    EXPECT(nearEqF(contentH, 828.0f));   // 750 + 36 (prim:) + 42 (add Animacao)
 
     // DEPOIS: painel dentro do contentRect [0,24,·,628] (status 24 + nav 92)
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);
@@ -126,15 +129,15 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     EXPECT(nearEqF(listH, 424.0f));
     const f32 mo = scroll::maxOffset(contentH, listH);
     EXPECT(mo > 0.0f);                        // scroll ATIVA
-    EXPECT(nearEqF(mo, 326.0f));              // 750 − 424
+    EXPECT(nearEqF(mo, 404.0f));              // 828 − 424
 
     // com o offset no máximo, a ÚLTIMA linha do plano (add TouchControls)
     // fica INTEIRA dentro da lista
-    InspRow plan[32];
+    InspRow plan[48];   // 0.8.0: +prim/anim
     const u32 n = inspectorPlan(prof, m, false, plan);
     EXPECT(n > 0);
     const InspRow& last = plan[n - 1];
-    EXPECT(last.kind == InspRow::Kind::AddTc);
+    EXPECT(last.kind == InspRow::Kind::AddAnim);   // 0.8.0: add Animacao no fundo
     const f32 contentTop = panel.y + kHeaderH + 4.0f;
     const f32 off = scroll::clampOffset(999.0f, contentH, listH);
     const f32 btnTop = contentTop + last.y - off;

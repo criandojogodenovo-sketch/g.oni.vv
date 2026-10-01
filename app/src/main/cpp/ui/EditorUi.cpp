@@ -7,6 +7,8 @@
 #include "core/CameraUtil.h"          // 0.7.7: uma ativa por cena
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
+#include "components/AnimationPlayer.h"   // 0.8.0: add Animacao no Inspector
+#include "render/Primitives.h"            // 0.8.0: seletor de primitivas
 #include "core/Scene.h"
 #include <cstdio>
 
@@ -232,7 +234,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     const TextMetrics tm = ui.textMetrics();
     const InspProfile prof = inspectorProfile(*tic);
     const bool selectable = (catalog != nullptr);
-    InspRow plan[32];
+    InspRow plan[48];
     const u32 nRows = inspectorPlan(prof, tm, selectable, plan);
     const f32 contentH = inspectorContentHeight(prof, tm, selectable);
 
@@ -290,7 +292,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                       camEdit->showFrustum ? "sim" : "nao");
     }
     if (mr) {
-        if (!mr->meshPath.empty()) {
+        if (mr->primOn) {
+            std::snprintf(meshLabel, sizeof(meshLabel), "mesh: (primitiva)");
+        } else if (!mr->meshPath.empty()) {
             std::snprintf(meshLabel, sizeof(meshLabel), "mesh: %s",
                           assetBasename(mr->meshPath));
         } else {
@@ -341,6 +345,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
 
     bool edited = false;
     bool trEdited = false;
+    bool primEdited = false;   // 0.8.0: parâmetros de primitiva mudaram
     u32 sliderIdx = 0;
     u32 colorIdx = 0;   // 0.7.0: payload dos ColorSlider (0=R, 1=G, 2=B)
 
@@ -486,6 +491,74 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       camFrustumLabel);
             break;
+        // ---- 0.8.0 (F7) — PRIMITIVA + ANIMAÇÃO ------------------------------
+        case InspRow::Kind::PrimButton: {
+            char primLabel[48];
+            if (mr && mr->primOn) {
+                std::snprintf(primLabel, sizeof(primLabel), "prim: %s",
+                              primName(mr->prim.kind));
+            } else {
+                std::snprintf(primLabel, sizeof(primLabel), "prim: -");
+            }
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      primLabel);
+            break;
+        }
+        case InspRow::Kind::PrimSlider: {
+            if (mrEdit && mrEdit->primOn) {
+                // payload pelo ID (o plano empurra R → H → Seg → Tube na
+                // ordem do tipo; os ausentes não têm row)
+                if (r.id == kInspectorPrimR) {
+                    const bool isSize = mrEdit->prim.kind == PrimKind::Box ||
+                                        mrEdit->prim.kind == PrimKind::Plane ||
+                                        mrEdit->prim.kind == PrimKind::Wedge;
+                    if (sliderRow(ui, r.id, x, ry, r.h, tm,
+                                  isSize ? "raio/tam" : "raio", 0.05f, 4.0f,
+                                  mrEdit->prim.radius, "%.2f")) {
+                        primEdited = true;
+                    }
+                } else if (r.id == kInspectorPrimH) {
+                    if (sliderRow(ui, r.id, x, ry, r.h, tm, "altura", 0.1f,
+                                  6.0f, mrEdit->prim.height, "%.2f")) {
+                        primEdited = true;
+                    }
+                } else if (r.id == kInspectorPrimSeg) {
+                    f32 seg = static_cast<f32>(mrEdit->prim.segments);
+                    if (sliderRow(ui, r.id, x, ry, r.h, tm, "segmentos", 3.0f,
+                                  32.0f, seg, "%.0f")) {
+                        mrEdit->prim.segments = static_cast<i32>(seg + 0.5f);
+                        primEdited = true;
+                    }
+                } else if (r.id == kInspectorPrimTube) {
+                    if (sliderRow(ui, r.id, x, ry, r.h, tm, "tubo", 0.02f,
+                                  1.0f, mrEdit->prim.radius2, "%.2f")) {
+                        primEdited = true;
+                    }
+                }
+            }
+            break;
+        }
+        case InspRow::Kind::AddAnim:
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      "add Animacao");
+            break;
+        case InspRow::Kind::AnimLabel: {
+            char animLine[64];
+            u32 tracks = 0, keys = 0;
+            if (const AnimationPlayer* ap = tic->getComponent<AnimationPlayer>()) {
+                if (const AnimClip* c = ap->activeClipPtr()) {
+                    tracks = static_cast<u32>(c->tracks.size());
+                    for (const AnimTrack& t : c->tracks) {
+                        keys += static_cast<u32>(t.keys.size());
+                    }
+                }
+            }
+            std::snprintf(animLine, sizeof(animLine), "anim: %u track%s · %u keys",
+                          tracks, tracks == 1 ? "" : "s", keys);
+            ui.labelFitted(x + kPad, inspBaseline(ry, r.h, tm), animLine,
+                           theme::TEXT, w - 2.0f * kPad);
+            break;
+        }
         }
     }
 
@@ -495,6 +568,15 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         tr->rot = Quat::fromEuler(deg2rad(rotDeg[0]), deg2rad(rotDeg[1]), deg2rad(rotDeg[2]));
         tr->scale = Vec3{sclArr[0], sclArr[1], sclArr[2]};
         tr->updateWorld();   // feedback imediato (TransformSystem reconfirma)
+    }
+
+    // 0.8.0 (F7) — parâmetros de primitiva mudaram: assinatura nova → o
+    // mesh atual está STALE; liberta o ponteiro e o MAIN rebinda no próximo
+    // frame pelo cache (immediate-mode, o padrão do seletor de texturas)
+    if (primEdited && mrEdit && mrEdit->primOn) {
+        primClamp(mrEdit->prim);
+        mrEdit->mesh = nullptr;
+        mrEdit->material = nullptr;
     }
 
     ui.endScroll();
@@ -511,7 +593,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 r.kind != InspRow::Kind::VisToggle &&
                 r.kind != InspRow::Kind::CamProj &&     // 0.7.7
                 r.kind != InspRow::Kind::CamActive &&
-                r.kind != InspRow::Kind::CamFrustum) {  // 0.7.10
+                r.kind != InspRow::Kind::CamFrustum &&  // 0.7.10
+                r.kind != InspRow::Kind::PrimButton &&  // 0.8.0
+                r.kind != InspRow::Kind::AddAnim) {     // 0.8.0
                 continue;
             }
             const f32 ry = contentTop + r.y - off;
@@ -527,6 +611,12 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 st.assetMenu = 1;                     // F5-E: seletor de meshes
             } else if (r.kind == InspRow::Kind::TexButton) {
                 st.assetMenu = 2;                     // F5-E: seletor de texturas
+            } else if (r.kind == InspRow::Kind::PrimButton) {
+                st.assetMenu = 4;                     // 0.8.0: seletor de primitivas
+            } else if (r.kind == InspRow::Kind::AddAnim) {
+                // 0.8.0 (F7): cria o player — a TIMELINE abre sozinha (o
+                // main desenha-a quando o TIC selecionado tem player)
+                tic->addComponent<AnimationPlayer>();
             } else if (r.kind == InspRow::Kind::VisToggle) {
                 tic->visible = !tic->visible;         // 0.7.0: checkbox
             } else if (r.kind == InspRow::Kind::CamProj) {
@@ -687,8 +777,10 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     // 0.7.3: + os COMPOSTOS (Menu/Card/Article) e o JOYSTICK (widget de
     // TouchControls editável). 0.7.4: + os CONTAINERS VBox/HBox (filhos
     // automáticos). No 3D cria TICs de preset (como sempre).
+    // 0.8.0 (F7): o 6º preset do 3D é o TIC "Mesh" (Transform+MeshRenderer
+    // com PRIMITIVA esfera default — prototipagem sem física).
     const bool uiMode = st.uiMode;
-    const int kItems = uiMode ? 10 : 5;   // 0.7.7: 3D ganha o TIC "Camera"
+    const int kItems = uiMode ? 10 : 6;   // 0.7.7: Camera; 0.8.0: Mesh
     const f32 w = kMenuW;
     const f32 h = kHeaderH + static_cast<f32>(kItems) * 64.0f + kPad;
     // F4.2: centrado no viewport ÚTIL (dentro do contentRect)
@@ -713,8 +805,9 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     int chosen = 0;
     // 0.7.7: o 5º preset do 3D é o TIC de CÂMARA (Transform3D + CameraComp;
     // nasce A ativa — o main chama setOnlyActiveCamera)
-    const char* names[5] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
-                            "RigidBody3D", "Camera"};
+    // 0.8.0 (F7): o 6º é o TIC "Mesh" (esfera procedural, SEM física)
+    const char* names[6] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
+                            "RigidBody3D", "Camera", "Mesh"};
     // 0.7.4: + VBox/HBox (containers de layout — filhos automáticos)
     const char* elems[10] = {"Panel", "Label", "Button", "Image",
                              "Menu", "Card", "Article", "Joystick",
@@ -1163,13 +1256,58 @@ void drawLogViewer(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 // F5-E: SELETOR DE ASSETS — overlay mono com "cube/none" + ficheiros de
 // meshes/ ou textures/ (cap 5 ficheiros; sem scroll no overlay — F8).
 // Devolve 1-based (1 = cube/none, 2.. = ficheiros), 0 = nada este frame.
+//
+// 0.8.0 (F7): assetMenu == 4 é o SELETOR DE PRIMITIVAS PROCEDURAIS —
+// "none" + GRELHA 2×4 com as 8 formas (esfera/cilindro/cone/box/plano/
+// triângulo/torus/cápsula). Devolve: 0 nada; 1 = none (desliga o prim);
+// 2..9 = PrimKind 0..7 (esfera=2 … cápsula=9). Não usa o catálogo.
 // ---------------------------------------------------------------------------
 int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                   EditorState& st, const AssetCatalog& catalog,
                   bool withImport) {
     const bool pickMesh = (st.assetMenu == 1);
+    const bool pickPrim = (st.assetMenu == 4);   // 0.8.0: primitivas
     const std::vector<std::string>& files =
         pickMesh ? catalog.meshes : catalog.textures;
+
+    if (pickPrim) {
+        // ---- SELETOR DE PRIMITIVAS (grelha 2×4 + none) ---------------------
+        const f32 w = kMenuW;
+        const f32 h = kHeaderH + 44.0f + 4.0f * 44.0f + kPad;
+        const f32 ox = ui.safeLeft();
+        const f32 oy = ui.safeTop();
+        const f32 aw = sw - ox - ui.safeRight();
+        const f32 ah = sh - oy - ui.safeBottom();
+        const f32 x = ox + (aw - w) * 0.5f;
+        const f32 y = oy + (ah - h) * 0.5f;
+        if (pressedOutside(in, x, y, w, h)) {
+            st.assetMenu = 0;
+            return 0;
+        }
+        ui.panel(x, y, w, h, theme::PANEL);
+        ui.frame(x, y, w, h, 2.0f, theme::ACCENT);
+        const f32 th = ui.fontHeight();
+        ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f,
+                 "PRIMITIVA", theme::TEXT);
+        int chosen = 0;
+        if (ui.button(kIdAssetBase, x + kPad, y + kHeaderH,
+                      w - 2.0f * kPad, 36.0f, "none (desligar)")) {
+            chosen = 1;
+            st.assetMenu = 0;
+        }
+        // grelha 2 colunas × 4 linhas (labels curtos cabem em meia largura)
+        const f32 bw = (w - 2.0f * kPad - 8.0f) * 0.5f;
+        for (int i = 0; i < 8; ++i) {
+            const f32 bx = x + kPad + (i % 2) * (bw + 8.0f);
+            const f32 by = y + kHeaderH + 44.0f + (i / 2) * 44.0f;
+            if (ui.button(kIdAssetBase + 1 + static_cast<u64>(i), bx, by, bw,
+                          36.0f, primLabel(static_cast<PrimKind>(i)))) {
+                chosen = i + 2;   // 2..9 = PrimKind 0..7
+                st.assetMenu = 0;
+            }
+        }
+        return chosen;
+    }
 
     // cap de ficheiros no overlay (mono, sem scroll — F8 traz scroll)
     constexpr size_t kMaxFiles = 5;
@@ -1257,12 +1395,48 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
         return out;   // TIC morto ou sem MeshRenderer — sem crash, sem ação
     }
 
+    if (menuKind == 4) {
+        // ---- 0.8.0 (F7): seletor de PRIMITIVAS ----------------------------
+        if (pick == 1) {   // none → desliga o prim (mesh fica a null)
+            mr->primOn = false;
+            mr->mesh = nullptr;
+            mr->material = nullptr;
+            out.applied = true;
+            std::snprintf(out.toast, sizeof(out.toast), "prim: none");
+            std::snprintf(out.log, sizeof(out.log),
+                          "editor: primitiva desligada");
+        } else if (pick >= 2 && pick <= 9) {
+            const PrimKind kind = static_cast<PrimKind>(pick - 2);
+            const PrimParams p = primDefaults(kind);
+            if (Mesh* m = res.prim ? res.prim(p) : nullptr) {
+                mr->primOn = true;
+                mr->prim = p;
+                mr->mesh = m;
+                mr->material = res.material;
+                mr->meshPath.clear();   // uma fonte de mesh de cada vez
+                out.applied = true;
+                std::snprintf(out.toast, sizeof(out.toast), "prim: %s",
+                              primName(kind));
+                std::snprintf(out.log, sizeof(out.log),
+                              "editor: primitiva %s aplicada", primName(kind));
+            } else {
+                // sem resolver/falhou — o estado ANTERIOR fica intacto
+                std::snprintf(out.toast, sizeof(out.toast),
+                              "falha ao gerar primitiva");
+                std::snprintf(out.log, sizeof(out.log),
+                              "editor: primitiva %s FALHOU ao gerar", primName(kind));
+            }
+        }
+        return out;
+    }
+
     if (menuKind == 1) {
         // ---- seletor de MESHES -------------------------------------------
         if (pick == 1) {   // cube procedural
             mr->mesh = res.cubeMesh;
             mr->material = res.material;
             mr->meshPath.clear();
+            mr->primOn = false;   // 0.8.0: cube LIMPA o prim (fonte única)
             out.applied = true;
             std::snprintf(out.toast, sizeof(out.toast), "mesh: cube");
             std::snprintf(out.log, sizeof(out.log), "editor: mesh cube aplicado");
@@ -1276,6 +1450,7 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
                 mr->mesh = m;
                 mr->material = res.material;
                 mr->meshPath = rel;
+                mr->primOn = false;   // 0.8.0: asset LIMPA o prim (fonte única)
                 // F5.1-B: textura embutida do glTF/GLB aplica-se logo
                 // (import sem PC — o material fica referenciado)
                 bool withTex = false;

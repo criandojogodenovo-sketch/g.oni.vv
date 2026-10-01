@@ -58,3 +58,13 @@ struct Registrar {
     static void test_##name()
 
 #define EXPECT(expr) ::test::expect((expr), #expr, __FILE__, __LINE__)
+
+// ASSERT: EXPECT que ABORTA o caso (pré-condições de teste — desreferenciar
+// um ponteiro nulo a meio do caso é crash, não falha limpa)
+#define ASSERT(expr)                                                          \
+    do {                                                                      \
+        if (!(expr)) {                                                        \
+            ::test::expect((expr), #expr, __FILE__, __LINE__);               \
+            return;                                                           \
+        }                                                                     \
+    } while (0)

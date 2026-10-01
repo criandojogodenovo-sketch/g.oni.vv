@@ -4,6 +4,7 @@
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
 #include "core/Scene.h"
+#include "render/Primitives.h"
 #include <cstdio>
 
 namespace vv {
@@ -14,6 +15,7 @@ const char* presetName(PresetKind kind) {
         case PresetKind::CharacterBody3D: return "CharacterBody3D";
         case PresetKind::StaticBody3D:    return "StaticBody3D";
         case PresetKind::RigidBody3D:     return "RigidBody3D";
+        case PresetKind::Mesh:            return "Mesh";   // 0.8.0 (F7)
         default:                          return "Tic";
     }
 }
@@ -47,9 +49,11 @@ Handle createTicFromPreset(Scene& scene, PresetKind kind,
         return Handle::invalid();
     }
 
-    // corpos com cápsula assentam a base no y=0 (raio 0.3 + meia-altura 0.25)
+    // corpos com cápsula assentam a base no y=0 (raio 0.3 + meia-altura 0.25);
+    // 0.8.0: o TIC "Mesh" (esfera default r=0.5) assenta igual — r 0.5
     const f32 baseY = (kind == PresetKind::PlayerBody3D ||
-                       kind == PresetKind::CharacterBody3D) ? 0.55f : 0.5f;
+                       kind == PresetKind::CharacterBody3D ||
+                       kind == PresetKind::Mesh) ? 0.55f : 0.5f;
     Transform3D* tr = tic->addComponent<Transform3D>();
     if (tr) {
         tr->pos = Vec3{0.0f, baseY, 0.0f};
@@ -60,13 +64,23 @@ Handle createTicFromPreset(Scene& scene, PresetKind kind,
     if (mr) {
         mr->mesh = mesh;
         mr->material = material;
+        // 0.8.0 (F7): o preset Mesh NASCE com a PRIMITIVA esfera default
+        // (a assinatura serializa; o main pode rebindar outro tipo depois)
+        if (kind == PresetKind::Mesh) {
+            mr->primOn = true;
+            mr->prim = primDefaults(PrimKind::Sphere);
+        }
     }
 
     if (kind == PresetKind::PlayerBody3D) {
         tic->addComponent<InputMap>();   // SEM TouchControls — via Inspector (F4-D)
     }
 
-    // F4: corpo de física do preset
+    // F4: corpo de física do preset (0.8.0: o preset Mesh NÃO leva física —
+    // prototipagem pura de cena/animação)
+    if (kind == PresetKind::Mesh) {
+        return h;
+    }
     if (BodyComp* b = tic->addComponent<BodyComp>()) {
         switch (kind) {
             case PresetKind::PlayerBody3D:

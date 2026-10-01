@@ -79,6 +79,7 @@ add_executable(test_core
         test_passgl.cpp
         ${CORE_DIR}/core/Scene.cpp
         ${CORE_DIR}/core/Time.cpp
+        ${CORE_DIR}/core/AnimationSystem.cpp
         ${CORE_DIR}/core/ComponentRegistry.cpp
         ${CORE_DIR}/core/ComponentStore.cpp
         ${CORE_DIR}/core/Presets.cpp
@@ -134,6 +135,7 @@ add_executable(test_core
         ${CORE_DIR}/core/TransformSystem.cpp
         # GL-free (cubo e câmara são lógica pura — sem contexto OpenGL)
         ${CORE_DIR}/render/Cube.cpp
+        ${CORE_DIR}/render/Primitives.cpp
         ${CORE_DIR}/render/Camera.cpp
         # F4: física pura (sem GL)
         ${CORE_DIR}/physics/Shapes.cpp
@@ -147,6 +149,7 @@ add_executable(test_core
         ${CORE_DIR}/ui/EditorUi.cpp
         # 0.7.0: UI criável (componente + runtime + editor dedicado)
         ${CORE_DIR}/components/UiCanvas.cpp
+        ${CORE_DIR}/components/AnimationPlayer.cpp
         ${CORE_DIR}/ui/UiRuntime.cpp
         ${CORE_DIR}/ui/UiEditor.cpp
         # 0.7.1: transições de cena (fade/slide — puro + draw em batch)
@@ -155,6 +158,12 @@ add_executable(test_core
         ${CORE_DIR}/ui/Gizmo.cpp
         # 0.7.6: toolbar final (5 grupos) + ícones vetoriais
         ${CORE_DIR}/ui/Toolbar.cpp
+        # 0.8.0: animacao (player + timeline do editor)
+        ${CORE_DIR}/ui/Timeline.cpp
+        # 0.8.0: testes da campanha F7
+        test_anim.cpp
+        test_prims.cpp
+        test_timeline.cpp
         ${CORE_DIR}/ui/Icons.cpp
         # 0.7.7: câmara de cena (componente/invariante + gizmo do frustum)
         ${CORE_DIR}/core/CameraUtil.cpp

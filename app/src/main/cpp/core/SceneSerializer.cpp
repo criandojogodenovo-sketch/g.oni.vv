@@ -6,6 +6,7 @@
 #include "components/Transform3D.h"
 #include "components/UiCanvas.h"
 #include "components/CameraComp.h"   // 0.7.7: câmara de cena
+#include "components/AnimationPlayer.h"   // 0.8.0: animação (F7)
 #include "core/CameraUtil.h"          // 0.7.7: uma ativa por cena
 #include "core/ComponentStore.h"
 #include "core/Scene.h"
@@ -60,7 +61,21 @@ void appendComponentJson(Json& arr, const MeshRenderer* mr) {
     }
     Json c = Json::makeObject();
     c.addMember("type", Json::makeString("MeshRenderer"));
-    if (!mr->meshPath.empty()) {
+    // 0.8.0 (F7): PRIMITIVA PROCEDURAL — "mesh":"prim" + o bloco
+    // "prim" (tipo + parâmetros). Só gravado quando ATIVA (escolher
+    // cube/asset limpa o prim — uma fonte de mesh de cada vez).
+    if (mr->primOn) {
+        c.addMember("mesh", Json::makeString("prim"));
+        Json jp = Json::makeObject();
+        jp.addMember("type", Json::makeString(primName(mr->prim.kind)));
+        jp.addMember("r", Json::makeNumber(mr->prim.radius));
+        jp.addMember("h", Json::makeNumber(mr->prim.height));
+        jp.addMember("r2", Json::makeNumber(mr->prim.radius2));
+        jp.addMember("seg", Json::makeNumber(static_cast<f64>(mr->prim.segments)));
+        jp.addMember("rings", Json::makeNumber(static_cast<f64>(mr->prim.rings)));
+        jp.addMember("size", Json::makeNumber(mr->prim.size));
+        c.addMember("prim", std::move(jp));
+    } else if (!mr->meshPath.empty()) {
         // F5: asset importado — a REF relativa é a verdade; "mesh":"file" é
         // a tag de compat (v1 antiga tinha só "cube"/"none")
         c.addMember("mesh", Json::makeString("file"));
@@ -340,14 +355,55 @@ void fillMeshRenderer(MeshRenderer* mr, const Json& comp, const LoadCtx& ctx) {
     const Json* m = comp.find("mesh");
     const Json* mp = comp.find("meshPath");
     const bool hasPath = mp && mp->type == Json::Type::String && !mp->string.empty();
-    if (hasPath) {
+    const bool isPrim = m && m->type == Json::Type::String && m->string == "prim";
+    if (isPrim) {
+        // 0.8.0 (F7): primitiva procedural — tipo+parâmetros do bloco "prim"
+        // (ausentes = defaults DO TIPO); mesh = gerado do resolver (cache do
+        // main); sem resolver → primOn+params ficam e mesh null (rebind)
+        PrimKind kind = PrimKind::Sphere;
+        const Json* jp = comp.find("prim");
+        if (jp && jp->type == Json::Type::Object) {
+            if (const Json* j = jp->find("type");
+                j && j->type == Json::Type::String) {
+                kind = primFromName(j->string);
+            }
+        }
+        PrimParams p = primDefaults(kind);
+        if (jp && jp->type == Json::Type::Object) {
+            auto readF = [jp](const char* key, f32 def) -> f32 {
+                const Json* j = jp->find(key);
+                return (j && j->type == Json::Type::Number)
+                           ? static_cast<f32>(j->number) : def;
+            };
+            p.radius  = readF("r", p.radius);
+            p.height  = readF("h", p.height);
+            p.radius2 = readF("r2", p.radius2);
+            p.size    = readF("size", p.size);
+            if (const Json* j = jp->find("seg");
+                j && j->type == Json::Type::Number) {
+                p.segments = static_cast<i32>(j->number);
+            }
+            if (const Json* j = jp->find("rings");
+                j && j->type == Json::Type::Number) {
+                p.rings = static_cast<i32>(j->number);
+            }
+        }
+        primClamp(p);
+        mr->primOn = true;
+        mr->prim = p;
+        mr->mesh = ctx.resolvePrim ? ctx.resolvePrim(p) : nullptr;
+        mr->material = mr->mesh ? ctx.material : nullptr;
+        mr->meshPath.clear();
+    } else if (hasPath) {
         // F5-E: ref relativa → resolver do device (cache de GPU); sem
         // resolver, o TIC entra sem mesh mas mantém a ref p/ rebind
+        mr->primOn = false;
         mr->meshPath = mp->string;
         mr->mesh = ctx.resolveMesh ? ctx.resolveMesh(mr->meshPath) : nullptr;
         mr->material = mr->mesh ? ctx.material : nullptr;
     } else {
         const bool wantsCube = m && m->type == Json::Type::String && m->string == "cube";
+        mr->primOn = false;
         mr->mesh = wantsCube ? ctx.cubeMesh : nullptr;
         mr->material = wantsCube ? ctx.material : nullptr;
         mr->meshPath.clear();
@@ -531,6 +587,206 @@ void fillCameraComp(CameraComp* cam, const Json& comp) {
     }
 }
 
+// 0.8.0 (F7) — AnimationPlayer: reconstrói clips/tracks/keys + playback.
+// Alvos/tipos de curva desconhecidos são IGNORADOS (forward-compat, a
+// política do serializer); keys ficam ORDENADAS por t (sortKeys).
+void fillAnimationPlayer(AnimationPlayer* ap, const Json& comp) {
+    if (!ap) {
+        return;
+    }
+    ap->clips.clear();
+    ap->playing = false;   // runtime: nasce PARADO
+    ap->time = 0.0f;
+    ap->speed = 1.0f;
+    ap->activeClip = 0;
+    ap->mode = AnimationPlayer::Mode::Loop;
+    if (const Json* j = comp.find("mode");
+        j && j->type == Json::Type::String) {
+        if (j->string == "once")          ap->mode = AnimationPlayer::Mode::Once;
+        else if (j->string == "pingpong") ap->mode = AnimationPlayer::Mode::PingPong;
+        else                              ap->mode = AnimationPlayer::Mode::Loop;
+    }
+    if (const Json* j = comp.find("speed");
+        j && j->type == Json::Type::Number) {
+        ap->speed = static_cast<f32>(j->number);
+        if (ap->speed < 0.05f) {
+            ap->speed = 0.05f;   // defesa (speed 0 = congelado inútil)
+        }
+    }
+    if (const Json* j = comp.find("active");
+        j && j->type == Json::Type::Number) {
+        ap->activeClip = static_cast<i32>(j->number);
+    }
+    const Json* clips = comp.find("clips");
+    if (!clips || clips->type != Json::Type::Array) {
+        return;
+    }
+    for (const Json& jc : clips->items) {
+        AnimClip clip;
+        if (const Json* j = jc.find("name");
+            j && j->type == Json::Type::String) {
+            clip.name = j->string;
+        }
+        if (clip.name.empty()) {
+            clip.name = "edit";
+        }
+        const Json* tracks = jc.find("tracks");
+        if (tracks && tracks->type == Json::Type::Array) {
+            for (const Json& jt : tracks->items) {
+                AnimTrack tr;
+                const Json* jtarget = jt.find("target");
+                const std::string& tg =
+                    (jtarget && jtarget->type == Json::Type::String)
+                        ? jtarget->string : std::string();
+                if      (tg == "pos")   tr.target = AnimTarget::TicPos;
+                else if (tg == "rot")   tr.target = AnimTarget::TicRot;
+                else if (tg == "escala") tr.target = AnimTarget::TicScale;
+                else if (tg == "uipos")  tr.target = AnimTarget::UiPos;
+                else if (tg == "uicor")  tr.target = AnimTarget::UiColor;
+                else if (tg == "uialpha") tr.target = AnimTarget::UiAlpha;
+                else {
+                    continue;   // alvo desconhecido — ignora (forward-compat)
+                }
+                if (const Json* j = jt.find("element");
+                    j && j->type == Json::Type::String) {
+                    tr.element = j->string;
+                }
+                if (const Json* j = jt.find("curve");
+                    j && j->type == Json::Type::String && j->string == "bez") {
+                    tr.curve = AnimCurve::Bezier;
+                }
+                const Json* keys = jt.find("keys");
+                if (keys && keys->type == Json::Type::Array) {
+                    for (const Json& jk : keys->items) {
+                        AnimKey k;
+                        if (const Json* j = jk.find("t");
+                            j && j->type == Json::Type::Number) {
+                            k.t = static_cast<f32>(j->number);
+                            if (k.t < 0.0f) {
+                                k.t = 0.0f;   // defesa
+                            }
+                        }
+                        if (const Json* j = jk.find("v");
+                            j && j->type == Json::Type::Array) {
+                            const size_t n = j->items.size() < 4 ? j->items.size() : 4;
+                            for (size_t i = 0; i < n; ++i) {
+                                k.v[i] = static_cast<f32>(j->items[i].number);
+                            }
+                        }
+                        if (const Json* j = jk.find("in");
+                            j && j->type == Json::Type::Array) {
+                            const size_t n = j->items.size() < 4 ? j->items.size() : 4;
+                            for (size_t i = 0; i < n; ++i) {
+                                k.tanIn[i] = static_cast<f32>(j->items[i].number);
+                            }
+                        }
+                        if (const Json* j = jk.find("out");
+                            j && j->type == Json::Type::Array) {
+                            const size_t n = j->items.size() < 4 ? j->items.size() : 4;
+                            for (size_t i = 0; i < n; ++i) {
+                                k.tanOut[i] = static_cast<f32>(j->items[i].number);
+                            }
+                        }
+                        tr.keys.push_back(k);
+                    }
+                }
+                tr.sortKeys();
+                clip.tracks.push_back(std::move(tr));
+            }
+        }
+        ap->clips.push_back(std::move(clip));
+    }
+    if (ap->activeClip >= static_cast<i32>(ap->clips.size())) {
+        ap->activeClip = ap->clips.empty() ? 0 : 0;   // fora do intervalo → 0
+    }
+}
+
+} // namespace
+
+// ---- 0.8.0 (F7): AnimationPlayer — dump (clip → tracks → keys; estrutura
+// recursiva; o mesmo anon ns funde com o de cima) -------------------------
+namespace {
+
+void appendAnimKey(Json& arr, const AnimKey& k) {
+    Json jk = Json::makeObject();
+    jk.addMember("t", Json::makeNumber(k.t));
+    Json v = Json::makeArray();
+    for (int i = 0; i < 4; ++i) {
+        v.addItem(Json::makeNumber(k.v[i]));
+    }
+    jk.addMember("v", std::move(v));
+    // tangentes só quando NÃO-zero (zero = ease suave — o default de um
+    // track bez recém-criado; linear é outro enum e não as grava)
+    bool inZ = true, outZ = true;
+    for (int i = 0; i < 4; ++i) {
+        if (k.tanIn[i] != 0.0f)  inZ = false;
+        if (k.tanOut[i] != 0.0f) outZ = false;
+    }
+    if (!inZ) {
+        Json tin = Json::makeArray();
+        for (int i = 0; i < 4; ++i) {
+            tin.addItem(Json::makeNumber(k.tanIn[i]));
+        }
+        jk.addMember("in", std::move(tin));
+    }
+    if (!outZ) {
+        Json tout = Json::makeArray();
+        for (int i = 0; i < 4; ++i) {
+            tout.addItem(Json::makeNumber(k.tanOut[i]));
+        }
+        jk.addMember("out", std::move(tout));
+    }
+    arr.addItem(std::move(jk));
+}
+
+void appendComponentJson(Json& arr, const AnimationPlayer* ap) {
+    if (!ap) {
+        return;
+    }
+    Json c = Json::makeObject();
+    c.addMember("type", Json::makeString("AnimationPlayer"));
+    // playback: defaults omitidos (loop/1.0/clip 0)
+    if (ap->mode != AnimationPlayer::Mode::Loop) {
+        c.addMember("mode", Json::makeString(AnimationPlayer::modeName(ap->mode)));
+    }
+    if (ap->speed != 1.0f) {
+        c.addMember("speed", Json::makeNumber(ap->speed));
+    }
+    if (ap->activeClip != 0) {
+        c.addMember("active", Json::makeNumber(static_cast<f64>(ap->activeClip)));
+    }
+    // clips (com tracks/keys) — só quando existem; o runtime (playing/time)
+    // NÃO é serializado: cena carregada nasce PARADA no t=0
+    if (!ap->clips.empty()) {
+        Json clips = Json::makeArray();
+        for (const AnimClip& clip : ap->clips) {
+            Json jc = Json::makeObject();
+            jc.addMember("name", Json::makeString(clip.name.empty() ? "edit" : clip.name));
+            Json tracks = Json::makeArray();
+            for (const AnimTrack& tr : clip.tracks) {
+                Json jt = Json::makeObject();
+                jt.addMember("target", Json::makeString(animTargetName(tr.target)));
+                if (!tr.element.empty()) {
+                    jt.addMember("element", Json::makeString(tr.element));
+                }
+                if (tr.curve == AnimCurve::Bezier) {
+                    jt.addMember("curve", Json::makeString("bez"));
+                }
+                Json keys = Json::makeArray();
+                for (const AnimKey& k : tr.keys) {
+                    appendAnimKey(keys, k);
+                }
+                jt.addMember("keys", std::move(keys));
+                tracks.addItem(std::move(jt));
+            }
+            jc.addMember("tracks", std::move(tracks));
+            clips.addItem(std::move(jc));
+        }
+        c.addMember("clips", std::move(clips));
+    }
+    arr.addItem(std::move(c));
+}
+
 } // namespace
 
 Json migrate(Json doc) {
@@ -605,6 +861,7 @@ std::string dump(const Scene& scene) {
         appendComponentJson(comps, cs.touchControls().find(t.handle));
         appendComponentJson(comps, cs.uiCanvases().find(t.handle));   // 0.7.0
         appendComponentJson(comps, cs.cameras().find(t.handle));       // 0.7.7
+        appendComponentJson(comps, cs.animators().find(t.handle));     // 0.8.0
         jt.addMember("components", std::move(comps));
 
         tics.addItem(std::move(jt));
@@ -706,6 +963,8 @@ bool loadText(Scene& scene, const std::string& text, const LoadCtx& ctx) {
                 fillTouchControls(store.get<TouchControls>(h), jc);   // 0.7.3
             } else if (jt2->string == "Camera") {
                 fillCameraComp(store.get<CameraComp>(h), jc);   // 0.7.7
+            } else if (jt2->string == "AnimationPlayer") {
+                fillAnimationPlayer(store.get<AnimationPlayer>(h), jc);   // 0.8.0
             }
             // InputMap: sem dados — presença basta
         }

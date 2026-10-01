@@ -7,8 +7,17 @@
 // objeto GL, cache não duplica memória de GPU).
 // O serializer guarda a tag "cube" OU as refs relativas "meshes/x.obj[#i]"
 // e "textures/y.png" — o loader rebinda os ponteiros via LoadCtx (F5-E).
+//
+// 0.8.0 (F7) — PRIMITIVAS PROCEDURAIS: além do cubo e dos assets, o mesh
+// pode ser uma PRIMITIVA GERADA (esfera/cilindro/cone/box/plano/triângulo/
+// torus/cápsula) com parâmetros. `primOn` + `prim` formam a assinatura que
+// o main resolve por cache (1 primitiva = 1 objeto GL partilhado); o
+// serializer grava "mesh":"prim" + "prim":{tipo+parâmetros}. A linha
+// "prim:" do Inspector abre o seletor; escolher mesh/asset limpa o prim
+// (UMA fonte de mesh de cada vez — sem ambiguidade).
 #include "core/Component.h"
 #include "render/Material.h"
+#include "render/Primitives.h"
 #include <string>
 
 namespace vv {
@@ -33,6 +42,12 @@ public:
     // Vivem no componente para o serializer e para a UI mostrarem a origem.
     std::string meshPath;
     std::string texPath;
+
+    // 0.8.0 (F7) — primitiva procedural ativa? kind+parâmetros em `prim`;
+    // o ponteiro `mesh` acima aponta para o objeto do CACHE do main (a
+    // assinatura é estes dados — o round-trip .goni re-resolve).
+    bool       primOn = false;
+    PrimParams prim{};
 };
 
 } // namespace vv

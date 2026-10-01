@@ -30,6 +30,7 @@
 #include "core/Json.h"
 #include "core/Types.h"
 #include "render/Material.h"   // Material = alias de LitMaterial (não admite fwd-decl)
+#include "render/Primitives.h"  // 0.8.0: PrimParams no LoadCtx
 #include <functional>
 
 namespace vv {
@@ -52,6 +53,10 @@ struct LoadCtx {
     Material*  material = nullptr;   // material lit partilhado
     std::function<Mesh*(const std::string&)> resolveMesh;       // ref relativa
     std::function<const Texture*(const std::string&)> resolveTex; // textura
+    // 0.8.0 (F7): primitiva procedural ("mesh":"prim" + "prim":{…}) →
+    // mesh gerado do CACHE do main (assinatura = tipo+parâmetros); sem
+    // resolver, o TIC entra com primOn+params e mesh null (rebind possível)
+    std::function<Mesh*(const PrimParams&)> resolvePrim;
 };
 
 // F5: texto ↔ cena (storage-agnostic; Project usa estes).

@@ -16,6 +16,9 @@
 #include "components/MeshRenderer.h"
 #include "components/TouchControls.h"
 #include "components/Transform3D.h"
+#include "components/AnimationPlayer.h"   // 0.8.0 (F7): animação
+#include "components/UiCanvas.h"   // 0.8.0: tracks de UI
+#include "core/AnimationSystem.h"   // 0.8.0: avanço em Play
 #include "core/AssetPersist.h"
 #include "core/FsStorage.h"
 #include "core/PlaySnapshot.h"
@@ -43,11 +46,13 @@
 #include "render/Grid.h"
 #include "render/GpuAssets.h"
 #include "render/Mesh.h"
+#include "render/Primitives.h"   // 0.8.0 (F7): primitivas procedurais
 #include "render/Renderer.h"
 #include "ui/EditorUi.h"
 #include "ui/Toolbar.h"   // 0.7.6: barra final de 5 grupos (G1..G5)
 #include "ui/CamGizmo.h"   // 0.7.7: frustum/handles/câmara de jogo
 #include "ui/Gizmo.h"
+#include "ui/Timeline.h"   // 0.8.0 (F7): editor de timeline da animação
 #include "ui/FontAtlas.h"
 #include "ui/UiContext.h"
 #include "ui/UiEditor.h"   // 0.7.0: editor de UI dedicado (viewport 2D,
@@ -77,6 +82,24 @@ Grid   g_grid;                // grid de chão: quad 4 vértices + shader (F3.1;
 editor::EditorState g_editor;        // seleção + overlays
 TickGroups          g_systems;       // runner (não-dono)
 TransformSystem     g_transformSystem;
+
+// ---- 0.8.0 (F7): ANIMAÇÃO ---------------------------------------------------
+// Sistema no grupo Update (ANTES do TransformSystem: escreve pos/rot/scale
+// e chama updateWorld; o Transform reconfirma). Gate `enabled` como a
+// física — só avança em Play; o preview do editor vive na timeline.
+AnimationSystem     g_animSystem;
+timeline::State     g_timeline;      // scrub/keys/preview entre frames
+
+// cache de PRIMITIVAS PROCEDURAIS — a assinatura (tipo+parâmetros) é a
+// "ref" do mesh: 1 assinatura = 1 objeto GL partilhado por todos os TICs
+// que a usam. Lifecycle como o cubo: Mesh::destroy() zera ids no TERM
+// (primMeshDestroy) e o próximo uso RE-GERA+re-uploda com o contexto novo
+// (lazy — nunca se gera geometria sem GL corrente).
+struct PrimCacheEntry {
+    PrimParams            sig;
+    std::unique_ptr<Mesh> mesh;
+};
+std::vector<PrimCacheEntry> g_primCache;
 
 // ---- F4: física + modo Play ------------------------------------------------
 phys::PhysicsSystem g_physics;       // TickGroup::Physics (só avança em Play)
@@ -481,6 +504,7 @@ struct PlayUiPress {
 void loadSceneByName(const std::string& name, ui::SceneSwap style);
 SceneSerializer::LoadCtx makeLoadCtx();
 void refreshCatalog();
+Mesh* primMesh(const PrimParams& p);   // 0.8.0 (F7): cache de primitivas (fwd)
 ui::UiActionCtx makeUiActionCtx() {
     ui::UiActionCtx ctx;
     ctx.sceneExists = [](const std::string& name, void*) -> bool {
@@ -502,7 +526,13 @@ ui::UiActionCtx makeUiActionCtx() {
         loadSceneByName(name, style);
     };
     ctx.spawnPreset = [](PresetKind kind, void*) -> Handle {
-        return createTicFromPreset(g_scene, kind, &g_cubeMesh,
+        // 0.8.0 (F7): o preset Mesh nasce com a ESFERA default do cache
+        // (as restantes fontes continuam a ser o cubo procedural)
+        Mesh* mesh = &g_cubeMesh;
+        if (kind == PresetKind::Mesh) {
+            mesh = primMesh(primDefaults(PrimKind::Sphere));
+        }
+        return createTicFromPreset(g_scene, kind, mesh,
                                    g_renderer.litMaterial());
     };
     return ctx;
@@ -896,6 +926,71 @@ MeshData cubeToMeshData() {
     return m;
 }
 
+// ---- 0.8.0 (F7): PRIMITIVAS PROCEDURAIS — cache por assinatura ------------
+
+// resolve (ou gera+uploda na 1ª vez) o mesh de UMA primitiva. Chamado com
+// o contexto GL CORRENTE (load de cena, seletor, rebind por frame). O
+// clamp acontece DENTRO do gerador — a assinatura guardada é a clampada
+// (chaves de cache estáveis: raio 100 e raio 64 fazem o MESMO mesh).
+Mesh* primMesh(const PrimParams& pIn) {
+    PrimParams p = pIn;
+    primClamp(p);
+    for (const PrimCacheEntry& e : g_primCache) {
+        const PrimParams& s = e.sig;
+        if (s.kind == p.kind && s.radius == p.radius && s.height == p.height &&
+            s.radius2 == p.radius2 && s.segments == p.segments &&
+            s.rings == p.rings && s.size == p.size) {
+            return e.mesh.get();
+        }
+    }
+    PrimMeshData data;
+    makePrimMesh(p, data);
+    if (!data.ok()) {
+        return nullptr;   // defesa (nunca: geradores são totais)
+    }
+    PrimCacheEntry e;
+    e.sig = p;
+    e.mesh = std::make_unique<Mesh>();
+    if (!e.mesh->create(data.vertices.data(),
+                        static_cast<u32>(data.vertices.size()),
+                        data.indices.data(),
+                        static_cast<u32>(data.indices.size()))) {
+        elog::error("render: primitiva %s FALHOU no upload (%u verts)",
+                    primName(p.kind),
+                    static_cast<unsigned>(data.vertices.size()));
+        return nullptr;
+    }
+    g_primCache.push_back(std::move(e));
+    return g_primCache.back().mesh.get();
+}
+
+// TERM_WINDOW: glDelete* das primitivas em cache (MeshRenderers já foram
+// desligados pelo detachRenderersFromGpu — os ponteiros ≠ &g_cubeMesh são
+// anulados lá; o rebind é lazy no próximo frame com contexto novo)
+void primMeshDestroy() {
+    const u32 n = static_cast<u32>(g_primCache.size());
+    for (PrimCacheEntry& e : g_primCache) {
+        e.mesh->destroy();
+    }
+    g_primCache.clear();
+    if (n > 0) {
+        elog::info("lifecycle: %u primitiva(s) procedural(is) destruída(s)", n);
+    }
+}
+
+// rebind lazy: MeshRenderers com primOn e mesh null (params editados no
+// Inspector ou pós-TERM) voltam a apontar para o mesh do cache
+void rebindPrimMeshes() {
+    auto& mrs = g_scene.components().meshRenderers();
+    for (u32 i = 0; i < mrs.size(); ++i) {
+        MeshRenderer& mr = mrs.at(i);
+        if (mr.primOn && mr.mesh == nullptr) {
+            mr.mesh = primMesh(mr.prim);
+            mr.material = mr.mesh ? g_renderer.litMaterial() : nullptr;
+        }
+    }
+}
+
 // F5-E: LoadCtx canônico do device — resolvers ligam refs relativas aos
 // objetos de GPU em cache (1 ref = 1 upload; memória de GPU não duplica)
 SceneSerializer::LoadCtx makeLoadCtx() {
@@ -912,6 +1007,10 @@ SceneSerializer::LoadCtx makeLoadCtx() {
             showToast(warn.c_str());   // gate 2K — aviso 1× por carga
         }
         return t;
+    };
+    // 0.8.0 (F7): "mesh":"prim" → cache de primitivas (lazy: gera no load)
+    ctx.resolvePrim = [](const PrimParams& p) -> Mesh* {
+        return primMesh(p);
     };
     return ctx;
 }
@@ -932,6 +1031,9 @@ editor::AssetResolvers makeAssetResolvers() {
     };
     res.cubeMesh = &g_cubeMesh;
     res.material = g_renderer.litMaterial();
+    res.prim = [](const PrimParams& p) -> Mesh* {   // 0.8.0 (F7)
+        return primMesh(p);
+    };
     return res;
 }
 
@@ -1232,19 +1334,47 @@ void enterPlayMode() {
     g_editor.playMode = true;
     editor::closeAllOverlays(g_editor);
     g_playUi.armed = false;   // 0.7.0: nenhum on-click armado atravessa a transição
+    // 0.8.0 (F7): o preview da timeline MORRE na transição (restaura a pose
+    // de editor ANTES do snapshot — o play de jogo captura a pose limpa)
+    timeline::stopPreview(g_scene, g_timeline.previewTic, g_timeline);
     playSnapshotCapture(g_scene, g_playSnap);
-    LOGI("ui: modo play — snapshot de %u transforms / %u bodies",
+    // 0.8.0 (F7): TODOS os players arrancam do zero em Play (o critério de
+    // aceitação: "em Play objeto/UI anima")
+    auto& players = g_scene.components().animators();
+    for (u32 i = 0; i < players.size(); ++i) {
+        AnimationPlayer& pl = players.at(i);
+        const Tic* ownerTic = g_scene.get(players.owner(i));
+        pl.playing = ownerTic && ownerTic->active;
+        pl.time = 0.0f;
+        pl.resetDir();
+    }
+    g_animSystem.enabled = true;
+    LOGI("ui: modo play — snapshot de %u transforms / %u bodies / %u ui-elems; "
+         "%u animation player(s) a tocar",
          (unsigned)g_playSnap.transforms.size(),
-         (unsigned)g_playSnap.bodies.size());
+         (unsigned)g_playSnap.bodies.size(),
+         (unsigned)g_playSnap.uiElems.size(),
+         (unsigned)players.size());
 }
 
 // 0.6.8: SAI do play — repõe a pose de editor (PlaySnapshot intacto) e a UI
 // de EDITOR volta com os painéis nos seus sítios exatos
 void leavePlayMode() {
     g_editor.playMode = false;
+    g_animSystem.enabled = false;   // 0.8.0: animação só avança em Play
     playSnapshotRestore(g_scene, g_playSnap);
-    LOGI("ui: modo editor — pose restaurada (%u transforms)",
-         (unsigned)g_playSnap.transforms.size());
+    // 0.8.0 (F7): players PARADOS no zero (o Play é sandbox — o estado de
+    // edição nunca herda "a meio de um clip")
+    auto& players = g_scene.components().animators();
+    for (u32 i = 0; i < players.size(); ++i) {
+        AnimationPlayer& pl = players.at(i);
+        pl.playing = false;
+        pl.time = 0.0f;
+        pl.resetDir();
+    }
+    LOGI("ui: modo editor — pose restaurada (%u transforms, %u ui-elems)",
+         (unsigned)g_playSnap.transforms.size(),
+         (unsigned)g_playSnap.uiElems.size());
 }
 
 // F4: alimenta os TouchControls ativos (só em modo Play) e devolve a máscara
@@ -1480,6 +1610,7 @@ void onAppCmd(android_app* app, i32 cmd) {
                 g_gpu.releaseAll();          // unique_ptr → ~Mesh/~Texture → glDelete*
                 g_font.destroy();            // atlas: glDeleteTextures + reset das métricas
                 g_cubeMesh.destroy();
+                primMeshDestroy();           // 0.8.0: primitivas procedurais
                 g_grid.destroy();
                 g_renderer.shutdown();      // programa UI + VAO/VBO + whiteTex + lit
                 g_egl.shutdown();            // POR FIM: surface + contexto morrem
@@ -1632,6 +1763,17 @@ void frame() {
         g_gizmo.hovered = gizmo::Axis::None;
     }
 
+    // 0.8.0 (F7): o orbit e o tap-de-seleção nascem só na área do viewport
+    // ACIMA da timeline (quando visível) — a strip não interfere com gestos
+    // 3D nem com os painéis (centerRect intacto para hierarquia/inspector)
+    const bool tlVisible = timeline::visible(g_editor.playMode, g_editor.uiMode,
+                                              g_scene, g_editor.selected);
+    UiRect viewRect = editor::centerRect(w, h, g_ui.safeArea(),
+                                         g_editor.showInspector);
+    if (tlVisible) {
+        viewRect.h -= timeline::kTimelineH;
+    }
+
     // input do frame anterior → câmara (só gestos nascidos no viewport
     // central da SAFE-AREA — gestos atrás da nav bar não orbitam, F4.2)
     // 0.6.8: orbit DESATIVADO em play (guard playMode dentro — 1 dedo =
@@ -1640,8 +1782,7 @@ void frame() {
     // 0.7.0: orbit também DESATIVADO em modo UI (o viewport central é o
     // editor 2D da UI — arrastar elementos não pode orbitar por baixo)
     editor::updateCameraOrbit(
-        g_camera, g_orbit, g_input,
-        editor::centerRect(w, h, g_ui.safeArea(), g_editor.showInspector),
+        g_camera, g_orbit, g_input, viewRect,
         claimed | gizmoClaimed | canvasClaimed,
         g_editor.playMode || g_editor.uiMode);
 
@@ -1655,9 +1796,7 @@ void frame() {
     // — tocar no cone vazio não seleciona nem bloqueia o orbit).
     if (!g_editor.playMode && !g_editor.uiMode) {
         if (editor::viewportTapClearsSelection(
-                g_editor, g_input,
-                editor::centerRect(w, h, g_ui.safeArea(),
-                                   g_editor.showInspector),
+                g_editor, g_input, viewRect,
                 claimed | gizmoClaimed)) {
             const Mat4 tapVp = Mat4::mul(g_camera.proj(w / h), g_camera.view());
             f32 px = 0.0f, py = 0.0f;
@@ -1704,6 +1843,11 @@ void frame() {
         g_physics.frame.right = Vec3{cy, 0.0f, -sy};
     }
     g_physics.enabled = g_editor.playMode;   // física só avança em modo Play
+    g_animSystem.enabled = g_editor.playMode;  // 0.8.0: animação idem (F7)
+
+    // 0.8.0 (F7): rebind LAZY das primitivas (params editados no Inspector
+    // ou pós-TERM_WINDOW — o mesh null volta ao cache neste frame)
+    rebindPrimMeshes();
 
     // ---- pass 3D: clear color+depth, TICs com MeshRenderer + grid com fade
     // 0.7.7 — CÂMARA DE JOGO: em Play a cena renderiza pela câmara ATIVA
@@ -1928,6 +2072,14 @@ void frame() {
             // 0.7.6: o G5 da toolbar pode ter escondido o painel direito
             editor::drawInspector(g_ui, g_scene, g_editor, &g_catalog);   // sliders + seletores
         }
+        // 0.8.0 (F7): TIMELINE do AnimationPlayer do TIC selecionado — strip
+        // no FUNDO do viewport central (nada sobrepõe os painéis; o orbit já
+        // nasce só na área acima dela via viewRect). Com modal aberto fica
+        // tapada pelo backdrop (como os painéis — sem desenho não há gesto).
+        if (tlVisible) {
+            timeline::drawTimeline(g_ui, g_input, g_scene, g_editor, g_timeline,
+                                   g_frameDt);
+        }
     }
 
     // overlay "+" → presets de TIC (3D) OU elementos de UI (modo UI, 0.7.0)
@@ -1989,6 +2141,19 @@ void frame() {
                     g_editor.selected = hnew;
                     showToast("Camera criada (ativa)");
                     LOGI("editor: TIC de camera criado (ativo)");
+                }
+            } else if (choice == 6) {
+                // 0.8.0 (F7) — TIC "Mesh": Transform+MeshRenderer com a
+                // PRIMITIVA esfera default (SEM física — prototipagem pura;
+                // troca-se o tipo/params no Inspector, anima-se na timeline)
+                const PrimParams sph = primDefaults(PrimKind::Sphere);
+                const Handle hnew = createTicFromPreset(
+                    g_scene, PresetKind::Mesh, primMesh(sph),
+                    g_renderer.litMaterial());
+                if (hnew.valid()) {
+                    g_editor.selected = hnew;
+                    showToast("Mesh criado (esfera)");
+                    LOGI("editor: TIC Mesh criado (primitiva esfera default)");
                 }
             } else {
                 const PresetKind kind = static_cast<PresetKind>(choice - 1);
@@ -2424,6 +2589,8 @@ void android_main(android_app* app) {
     g_systems.clear();
     g_editor = editor::EditorState{};   // inclui playMode = false (0.6.8) e
                                         // uiMode/seleção de elemento (0.7.0)
+    g_timeline = timeline::State{};   // 0.8.0: scrub/keys/preview da sessão anterior não vingam
+    g_animSystem.enabled = false;    // 0.8.0: idem física (gate fechado)
     g_playSnap = PlaySnapshot{};
     g_playUi = PlayUiPress{};   // 0.7.0: nenhum on-click de UI armado
     g_sceneTrans = ui::SceneTransition{};   // 0.7.1: transição morta
@@ -2564,9 +2731,14 @@ void android_main(android_app* app) {
     }
 
     // F3/F4: systems do engine (ordem interna ao grupo = registo)
+    // 0.8.0 (F7): a ANIMAÇÃO registra ANTES do TransformSystem — escreve
+    // pos/rot/scale (updateWorld já no apply); o Transform reconfirma o
+    // cache no mesmo passo (nunca vê dados meio-escritos)
+    g_systems.add(TickGroup::Update, &g_animSystem);
     g_systems.add(TickGroup::Update, &g_transformSystem);
     g_systems.add(TickGroup::Physics, &g_physics);   // entre Update e PostUpdate
-    elog::info("[boot 5/6] physics OK (tickgroups Update+Physics registados)");
+    elog::info("[boot 5/6] physics OK (tickgroups Update+Physics registados; "
+               "animacao no Update antes do transform)");
 
     app->onAppCmd = onAppCmd;
     app->onInputEvent = onInputEvent;

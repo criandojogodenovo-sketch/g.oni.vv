@@ -32,6 +32,8 @@
 #include "components/BodyComp.h"
 #include "components/TouchControls.h"
 #include "components/CameraComp.h"   // 0.7.7: inspector da câmara
+#include "components/AnimationPlayer.h"   // 0.8.0: inspector da animação
+#include "components/UiCanvas.h"   // 0.8.0: canAnim (elementos animáveis)
 
 namespace vv {
 namespace editor {
@@ -64,6 +66,13 @@ constexpr u64 kInspectorCamOrtho   = 5403;
 constexpr u64 kInspectorCamProj    = 5410;
 constexpr u64 kInspectorCamActive  = 5411;
 constexpr u64 kInspectorCamFrustum = 5412;   // 0.7.10: toggle do gizmo
+// 0.8.0 (F7) — primitiva procedural do MeshRenderer + animação
+constexpr u64 kInspectorPrimSel   = 5003;   // "prim: esfera ▸" (seletor)
+constexpr u64 kInspectorPrimR     = 5600;   // slider raio/size
+constexpr u64 kInspectorPrimH     = 5601;   // slider altura (cil/cone/cáps)
+constexpr u64 kInspectorPrimSeg   = 5602;   // slider segmentos
+constexpr u64 kInspectorPrimTube  = 5603;   // slider tubo (torus)
+constexpr u64 kInspectorAddAnim   = 3060;   // botão "add Animacao"
 
 // ids das regiões de scroll (F4.1) — o tap re-despachado é POR ID (F5.0-fix:
 // a Hierarchy comia o tap do Inspector quando a consulta era global)
@@ -95,6 +104,11 @@ struct InspProfile {
     bool im = false;   // InputMap      (linha input + addTc/tc)
     bool bc = false;   // BodyComp      (linha body + slider velx)
     bool tc = false;   // TouchControls (muda addTc ↔ label tc)
+    // 0.8.0 (F7)
+    bool prim = false;      // MeshRenderer com PRIMITIVA ativa (primOn)
+    PrimKind primKind = PrimKind::Sphere;
+    bool anim = false;      // AnimationPlayer presente
+    bool canAnim = false;   // tem ALVO animável (Transform3D ou UI com elems)
 };
 
 inline InspProfile inspectorProfile(const Tic& tic) {
@@ -105,7 +119,28 @@ inline InspProfile inspectorProfile(const Tic& tic) {
     p.bc = tic.getComponent<BodyComp>() != nullptr;
     p.tc = tic.getComponent<TouchControls>() != nullptr;
     p.cam = tic.getComponent<CameraComp>() != nullptr;   // 0.7.7
+    p.anim = tic.getComponent<AnimationPlayer>() != nullptr;   // 0.8.0
+    if (const MeshRenderer* mr = tic.getComponent<MeshRenderer>()) {
+        p.prim = mr->primOn;   // 0.8.0
+        p.primKind = mr->prim.kind;
+    }
+    if (const UiCanvas* uic = tic.getComponent<UiCanvas>()) {
+        p.canAnim = !uic->elements.empty();
+    }
+    p.canAnim = p.canAnim || p.tr;
     return p;
+}
+
+// 0.8.0 — que sliders de PRIMITIVA o tipo usa (o plano reflete)
+inline bool primUsesHeight(PrimKind k) {
+    return k == PrimKind::Cylinder || k == PrimKind::Cone ||
+           k == PrimKind::Capsule;
+}
+inline bool primUsesSegments(PrimKind k) {
+    return k != PrimKind::Box && k != PrimKind::Plane && k != PrimKind::Wedge;
+}
+inline bool primUsesTube(PrimKind k) {
+    return k == PrimKind::Torus;
 }
 
 // ---- o PLANO do Inspector — FONTE ÚNICA do layout --------------------------
@@ -134,6 +169,11 @@ struct InspRow {
         CamOrtho,    // slider orthoSize (meia-altura)
         CamActive,   // botão "ativa: sim|nao" (UMA ativa por cena)
         CamFrustum,  // 0.7.10: botão "frustum: sim|nao" (toggle do gizmo)
+        // 0.8.0 (F7) — primitiva procedural + animação
+        PrimButton,  // "prim: esfera ▸" (abre o seletor de primitivas)
+        PrimSlider,  // slider de parâmetro (payload pelo id: R/H/Seg/Tube)
+        AddAnim,     // botão "add Animacao" (cria o AnimationPlayer)
+        AnimLabel,   // "anim: N tracks" (a edição vive na timeline)
     };
     Kind kind;
     f32  y;     // topo da linha em COORDS DE CONTEÚDO (cumulativo)
@@ -148,10 +188,21 @@ inline u32 inspectorRowCount(const InspProfile& p, bool selectable) {
     if (p.tr) n += 1 + 9;                               // secção + 9 sliders
     if (p.cam) n += 1 + 7;                              // 0.7.7: secção + 7
                                                          // (0.7.10: +frustum)
-    if (p.mr) n += 2 + 3;                               // mesh + tex + R/G/B
+    if (p.mr) {
+        n += 2 + 3;                                    // mesh + tex + R/G/B
+        n += 1;                                         // 0.8.0: linha "prim:"
+        if (p.prim) {
+            n += 1;                                     // raio/tam
+            if (primUsesHeight(p.primKind)) n += 1;     // altura
+            if (primUsesSegments(p.primKind)) n += 1;   // segmentos
+            if (primUsesTube(p.primKind)) n += 1;       // tubo
+        }
+    }
     if (p.im) n += 1;                                   // input
     if (p.bc) n += 2;                                   // body + velx
     if (p.im) n += 1;                                   // addTc OU tc
+    if (!p.anim && p.canAnim) n += 1;                   // 0.8.0: add Animacao
+    else if (p.anim) n += 1;                            // 0.8.0: anim: N tracks
     (void)selectable;
     return n;
 }
@@ -196,6 +247,21 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
     if (p.mr) {
         push(selectable ? InspRow::Kind::MeshButton : InspRow::Kind::MeshLabel,
              selectable ? btnH : textH, selectable ? kInspectorMeshSel : 0);
+        // 0.8.0 (F7) — primitiva procedural: linha "prim:" SEMPRE botão
+        // (as primitivas são built-in — não dependem do catálogo)
+        push(InspRow::Kind::PrimButton, btnH, kInspectorPrimSel);
+        if (p.prim) {
+            push(InspRow::Kind::PrimSlider, sldH, kInspectorPrimR);
+            if (primUsesHeight(p.primKind)) {
+                push(InspRow::Kind::PrimSlider, sldH, kInspectorPrimH);
+            }
+            if (primUsesSegments(p.primKind)) {
+                push(InspRow::Kind::PrimSlider, sldH, kInspectorPrimSeg);
+            }
+            if (primUsesTube(p.primKind)) {
+                push(InspRow::Kind::PrimSlider, sldH, kInspectorPrimTube);
+            }
+        }
         push(selectable ? InspRow::Kind::TexButton : InspRow::Kind::TexLabel,
              selectable ? btnH : textH, selectable ? kInspectorTexSel : 0);
         // 0.7.0 — cor por TIC (sliders R/G/B do tint)
@@ -217,6 +283,13 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
             push(InspRow::Kind::Label, textH, 0);       // tc: stick + jump
         }
     }
+    // 0.8.0 (F7) — animação: cria o player OU mostra o resumo (a edição
+    // vive na TIMELINE, que abre sozinha com o player presente)
+    if (!p.anim && p.canAnim) {
+        push(InspRow::Kind::AddAnim, addH, kInspectorAddAnim);
+    } else if (p.anim) {
+        push(InspRow::Kind::AnimLabel, textH, 0);
+    }
     return n;
 }
 
@@ -224,7 +297,7 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
 // cursor partilhado). Sem linhas → 0.
 inline f32 inspectorContentHeight(const InspProfile& p, const TextMetrics& m,
                                   bool selectable) {
-    InspRow rows[32];
+    InspRow rows[48];
     const u32 n = inspectorPlan(p, m, selectable, rows);
     if (n == 0) {
         return 0.0f;

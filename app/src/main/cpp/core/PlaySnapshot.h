@@ -22,6 +22,7 @@
 #include <vector>
 #include "components/BodyComp.h"
 #include "components/Transform3D.h"
+#include "components/UiCanvas.h"   // 0.8.0: elementos animáveis no Play
 #include "core/Scene.h"
 
 namespace vv {
@@ -38,9 +39,19 @@ struct PlaySnapshot {
         Vec3 velocity{};
         bool grounded = false;
     };
+    // 0.8.0 (F7): elementos de UI animáveis (pos/cor/alpha pelos tracks do
+    // AnimationPlayer) — guardados por ÍNDICE (estável dentro do Play; criar
+    // elementos durante o Play é caso de canto já aceite pela spec F4.2)
+    struct Ui {
+        Handle h{};
+        i32  index = -1;
+        f32  ox = 0.0f, oy = 0.0f;
+        f32  color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    };
 
     std::vector<Tf>   transforms;
     std::vector<Body> bodies;
+    std::vector<Ui>   uiElems;   // 0.8.0
     bool captured = false;   // true entre capture e restore (sandbox aberta)
 };
 
@@ -48,8 +59,10 @@ struct PlaySnapshot {
 inline void playSnapshotCapture(const Scene& scene, PlaySnapshot& out) {
     out.transforms.clear();
     out.bodies.clear();
+    out.uiElems.clear();   // 0.8.0
     using Tf   = PlaySnapshot::Tf;
     using Body = PlaySnapshot::Body;
+    using Ui   = PlaySnapshot::Ui;
     // storages independentes: um TIC pode ter Body sem Transform e vice-versa
     scene.forEachActive([&scene, &out](const Tic& t) {
         const Handle h = t.handle;
@@ -58,6 +71,21 @@ inline void playSnapshotCapture(const Scene& scene, PlaySnapshot& out) {
         }
         if (const BodyComp* b = scene.components().bodies().find(h)) {
             out.bodies.push_back(Body{h, b->velocity, b->grounded});
+        }
+        // 0.8.0: elementos de UI (animáveis pelo AnimationPlayer em Play)
+        if (const UiCanvas* ui = scene.components().uiCanvases().find(h)) {
+            for (size_t i = 0; i < ui->elements.size(); ++i) {
+                const UiElement& e = ui->elements[i];
+                Ui r{};
+                r.h = h;
+                r.index = static_cast<i32>(i);
+                r.ox = e.ox;
+                r.oy = e.oy;
+                for (int c = 0; c < 4; ++c) {
+                    r.color[c] = e.color[c];
+                }
+                out.uiElems.push_back(r);
+            }
         }
     });
     out.captured = true;
@@ -90,6 +118,25 @@ inline void playSnapshotRestore(Scene& scene, const PlaySnapshot& snap) {
         if (BodyComp* b = scene.components().bodies().find(rec.h)) {
             b->velocity = rec.velocity;
             b->grounded = rec.grounded;
+        }
+    }
+    // 0.8.0: elementos de UI de volta à pose de editor (índice fora do
+    // intervalo = canvas mudou durante o Play → saltado, nunca crasha)
+    for (const PlaySnapshot::Ui& rec : snap.uiElems) {
+        Tic* t = scene.get(rec.h);
+        if (!t || !t->active) {
+            continue;
+        }
+        if (UiCanvas* ui = scene.components().uiCanvases().find(rec.h)) {
+            if (rec.index >= 0 &&
+                static_cast<size_t>(rec.index) < ui->elements.size()) {
+                UiElement& e = ui->elements[static_cast<size_t>(rec.index)];
+                e.ox = rec.ox;
+                e.oy = rec.oy;
+                for (int c = 0; c < 4; ++c) {
+                    e.color[c] = rec.color[c];
+                }
+            }
         }
     }
 }

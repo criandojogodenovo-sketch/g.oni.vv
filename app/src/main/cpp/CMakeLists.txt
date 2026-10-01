@@ -95,6 +95,8 @@ add_library(goni_vv SHARED
         core/Tick.h
         core/TransformSystem.h
         core/TransformSystem.cpp
+        core/AnimationSystem.h
+        core/AnimationSystem.cpp
         core/Scene.h
         core/Scene.cpp
         core/Time.h
@@ -112,6 +114,8 @@ add_library(goni_vv SHARED
         # 0.7.0: UI criável (UiCanvas — elementos + ações declarativas)
         components/UiCanvas.h
         components/UiCanvas.cpp
+        components/AnimationPlayer.h
+        components/AnimationPlayer.cpp
         physics/Shapes.h
         physics/Shapes.cpp
         physics/InputSource.h
@@ -125,6 +129,8 @@ add_library(goni_vv SHARED
         render/Material.cpp
         render/Cube.h
         render/Cube.cpp
+        render/Primitives.h
+        render/Primitives.cpp
         render/Grid.h
         render/Grid.cpp
         render/Camera.h
@@ -141,6 +147,8 @@ add_library(goni_vv SHARED
         ui/EditorUi.cpp
         # 0.7.6: barra final de 5 grupos (G1..G5) + 8 ícones vetoriais
         ui/Toolbar.cpp
+        ui/Timeline.h
+        ui/Timeline.cpp
         ui/Icons.cpp
         # 0.7.7: gizmo da câmara (frustum wireframe + handles + game view)
         ui/CamGizmo.cpp
