@@ -105,6 +105,10 @@ add_library(goni_vv SHARED
         components/InputMap.h
         components/TouchControls.h
         components/TouchControls.cpp
+        # 0.7.7: câmara de cena (componente + invariante de ativa)
+        components/CameraComp.h
+        core/CameraUtil.h
+        core/CameraUtil.cpp
         # 0.7.0: UI criável (UiCanvas — elementos + ações declarativas)
         components/UiCanvas.h
         components/UiCanvas.cpp
@@ -138,6 +142,8 @@ add_library(goni_vv SHARED
         # 0.7.6: barra final de 5 grupos (G1..G5) + 8 ícones vetoriais
         ui/Toolbar.cpp
         ui/Icons.cpp
+        # 0.7.7: gizmo da câmara (frustum wireframe + handles + game view)
+        ui/CamGizmo.cpp
         # 0.7.0: UI criável — runtime (layout ancorado/draw/hit-test/ações)
         # e editor dedicado (viewport 2D WYSIWYG, teclado in-app, diálogos)
         ui/UiRuntime.h

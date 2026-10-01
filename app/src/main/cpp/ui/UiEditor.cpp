@@ -1056,9 +1056,12 @@ void uiDetachElement(UiCanvas& c, i32 element, f32 sw, f32 sh,
 // ---------------------------------------------------------------------------
 
 int drawContextMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
-                    EditorState& st, const char* ticName, bool ticVisible) {
+                    EditorState& st, const char* ticName, bool ticVisible,
+                    bool hasCamera) {
     const f32 w = kMenuW;
-    constexpr int kItems = 4;
+    // 0.7.7: câmaras ganham "Alinhar a vista" (copia a pose da orbit de
+    // edição para o transform da câmara)
+    const int kItems = hasCamera ? 5 : 4;
     const f32 h = kHeaderH + static_cast<f32>(kItems) * 64.0f + kPad;
     const f32 ox = ui.safeLeft();
     const f32 oy = ui.safeTop();
@@ -1089,8 +1092,8 @@ int drawContextMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     char visLabel[48];
     std::snprintf(visLabel, sizeof(visLabel), "Visibilidade: %s",
                   ticVisible ? "esconder" : "mostrar");
-    const char* labels[kItems] = {"Renomear", "Remover", "Duplicar",
-                                  visLabel};
+    const char* labels[5] = {"Renomear", "Remover", "Duplicar",
+                             visLabel, "Alinhar a vista"};
     int chosen = 0;
     for (int i = 0; i < kItems; ++i) {
         if (ui.button(kCtxRenameId + static_cast<u64>(i), x + kPad,

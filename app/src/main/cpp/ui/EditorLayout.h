@@ -31,6 +31,7 @@
 #include "components/InputMap.h"
 #include "components/BodyComp.h"
 #include "components/TouchControls.h"
+#include "components/CameraComp.h"   // 0.7.7: inspector da câmara
 
 namespace vv {
 namespace editor {
@@ -55,6 +56,13 @@ constexpr u64 kInspectorMeshSel    = 5001;   // F5-E: linha "mesh: …"
 constexpr u64 kInspectorTexSel     = 5002;   // F5-E: linha "tex: …"
 constexpr u64 kInspectorVis        = 5200;   // 0.7.0: "visivel: sim/nao"
 constexpr u64 kInspectorColBase    = 5300;   // 0.7.0: sliders R/G/B (+i)
+// 0.7.7 — inspector da CÂMARA (sliders + botões; faixa 5400..5419)
+constexpr u64 kInspectorCamFov     = 5400;
+constexpr u64 kInspectorCamNear    = 5401;
+constexpr u64 kInspectorCamFar     = 5402;
+constexpr u64 kInspectorCamOrtho   = 5403;
+constexpr u64 kInspectorCamProj    = 5410;
+constexpr u64 kInspectorCamActive  = 5411;
 
 // ids das regiões de scroll (F4.1) — o tap re-despachado é POR ID (F5.0-fix:
 // a Hierarchy comia o tap do Inspector quando a consulta era global)
@@ -81,6 +89,7 @@ inline f32 inspBaseline(f32 rowTop, f32 rowH, const TextMetrics& m) {
 // ---- perfil de componentes do TIC (a presença que o plano reflete) --------
 struct InspProfile {
     bool tr = false;   // Transform3D  (cabeçalho + 9 sliders)
+    bool cam = false;  // 0.7.7: Camera (cabeçalho + fov/near/far/proj/ortho/ativa)
     bool mr = false;   // MeshRenderer  (linhas mesh/tex)
     bool im = false;   // InputMap      (linha input + addTc/tc)
     bool bc = false;   // BodyComp      (linha body + slider velx)
@@ -94,6 +103,7 @@ inline InspProfile inspectorProfile(const Tic& tic) {
     p.im = tic.getComponent<InputMap>() != nullptr;
     p.bc = tic.getComponent<BodyComp>() != nullptr;
     p.tc = tic.getComponent<TouchControls>() != nullptr;
+    p.cam = tic.getComponent<CameraComp>() != nullptr;   // 0.7.7
     return p;
 }
 
@@ -114,6 +124,14 @@ struct InspRow {
         AddTc,       // botão "add TouchControls" no fundo
         VisToggle,   // 0.7.0: "visivel: sim/nao" (checkbox do TIC)
         ColorSlider, // 0.7.0: sliders R/G/B do tint do MeshRenderer
+        // 0.7.7 — câmara de cena
+        CamSection,  // cabeçalho "Camera" + separador
+        CamFov,      // slider fov (graus, 1..170)
+        CamNear,     // slider near
+        CamFar,      // slider far
+        CamProj,     // botão "projecao: perspetiva|ortografica" (cicla)
+        CamOrtho,    // slider orthoSize (meia-altura)
+        CamActive,   // botão "ativa: sim|nao" (UMA ativa por cena)
     };
     Kind kind;
     f32  y;     // topo da linha em COORDS DE CONTEÚDO (cumulativo)
@@ -126,6 +144,7 @@ struct InspRow {
 inline u32 inspectorRowCount(const InspProfile& p, bool selectable) {
     u32 n = 2;                                          // nome + visivel
     if (p.tr) n += 1 + 9;                               // secção + 9 sliders
+    if (p.cam) n += 1 + 6;                              // 0.7.7: secção + 6
     if (p.mr) n += 2 + 3;                               // mesh + tex + R/G/B
     if (p.im) n += 1;                                   // input
     if (p.bc) n += 2;                                   // body + velx
@@ -160,6 +179,15 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
         for (u32 i = 0; i < 9; ++i) {
             push(InspRow::Kind::Slider, sldH, kInspectorSliderBase + i);
         }
+    }
+    if (p.cam) {   // 0.7.7 — a perspetiva da cena logo a seguir à pose
+        push(InspRow::Kind::CamSection, textH, 0);
+        push(InspRow::Kind::CamFov, sldH, kInspectorCamFov);
+        push(InspRow::Kind::CamNear, sldH, kInspectorCamNear);
+        push(InspRow::Kind::CamFar, sldH, kInspectorCamFar);
+        push(InspRow::Kind::CamProj, btnH, kInspectorCamProj);
+        push(InspRow::Kind::CamOrtho, sldH, kInspectorCamOrtho);
+        push(InspRow::Kind::CamActive, btnH, kInspectorCamActive);
     }
     if (p.mr) {
         push(selectable ? InspRow::Kind::MeshButton : InspRow::Kind::MeshLabel,

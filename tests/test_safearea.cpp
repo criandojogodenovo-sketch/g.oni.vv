@@ -105,7 +105,15 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     // 0.7.0: o plano ganhou as linhas NOVAS da gestão de TICs — "visivel"
     // (btnH) + cor R/G/B (3× sldH) — Player completo sem TouchControls e sem
     // catálogo: 606 (F5.0) + 144 (novo) = 750
-    const InspProfile prof{true, true, true, true, false};
+    // 0.7.7: InspProfile ganhou `cam` (2º campo) — inicialização EXPLÍCITA
+    // (o agregado posicional antigo deslizaria um campo)
+    InspProfile prof{};
+    prof.tr = true;
+    prof.mr = true;
+    prof.im = true;
+    prof.bc = true;
+    prof.tc = false;
+    prof.cam = false;
     const TextMetrics m{};
     const f32 contentH = inspectorContentHeight(prof, m, false);
     EXPECT(nearEqF(contentH, 750.0f));

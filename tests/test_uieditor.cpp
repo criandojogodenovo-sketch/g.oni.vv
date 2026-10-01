@@ -33,6 +33,8 @@
 #include "render/Renderer.h"
 #include "ui/EditorLayout.h"
 #include "ui/Toolbar.h"   // 0.7.6: barra final (G3 segmented 3D|UI)
+#include "components/CameraComp.h"   // 0.7.7: TIC de câmara no "+"
+#include "core/CameraUtil.h"
 #include "ui/EditorUi.h"
 #include "ui/FontAtlas.h"
 #include "ui/SafeArea.h"
@@ -124,6 +126,17 @@ struct Env {
                     const int kind = uiPlusChoiceKind(choice);
                     if (kind >= 0) {
                         uiAddElement(scene, st, static_cast<u32>(kind), kSW, kSH);
+                    }
+                } else if (choice == 5) {
+                    // 0.7.7 — o MESMO dispatch do main: o 5º item do 3D é o
+                    // TIC de CÂMARA (Transform3D + CameraComp, nasce A ativa)
+                    const Handle hc = scene.create("Camera");
+                    if (Tic* ct = scene.get(hc)) {
+                        ct->addComponent<Transform3D>();
+                        if (ct->addComponent<CameraComp>()) {
+                            setOnlyActiveCamera(scene, hc);
+                        }
+                        st.selected = hc;
                     }
                 } else {
                     createTicFromPreset(scene,

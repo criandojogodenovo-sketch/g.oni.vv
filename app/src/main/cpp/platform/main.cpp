@@ -12,6 +12,7 @@
 #include "assets/ObjExporter.h"
 #include "assets/TextureCache.h"
 #include "assets/TexturePipeline.h"
+#include "components/CameraComp.h"   // 0.7.7: câmara de cena
 #include "components/MeshRenderer.h"
 #include "components/TouchControls.h"
 #include "components/Transform3D.h"
@@ -26,6 +27,7 @@
 #include "core/Tick.h"
 #include "core/Time.h"
 #include "core/TransformSystem.h"
+#include "core/CameraUtil.h"   // 0.7.7: uma câmara ativa por cena
 #include "physics/InputSource.h"
 #include "physics/PhysicsSystem.h"
 #include "platform/Log.h"
@@ -44,6 +46,7 @@
 #include "render/Renderer.h"
 #include "ui/EditorUi.h"
 #include "ui/Toolbar.h"   // 0.7.6: barra final de 5 grupos (G1..G5)
+#include "ui/CamGizmo.h"   // 0.7.7: frustum/handles/câmara de jogo
 #include "ui/Gizmo.h"
 #include "ui/FontAtlas.h"
 #include "ui/UiContext.h"
@@ -133,6 +136,23 @@ editor::OrbitState g_orbit;
 editor::toolbar::GizmoModeState g_gizmoMode;   // 0.7.6: vive na Toolbar
 gizmo::GizmoState       g_gizmo;
 
+// 0.7.7 — drag dos HANDLES do frustum da câmara (prioritários sobre o eixo
+// do gizmo quando a câmara está selecionada): 1..4 = canto do far (fovY),
+// 5 = centro do far (far). Âncoras: pose final = âncora + delta.
+struct CamHandleDrag {
+    bool active = false;
+    u32  slot = 0;
+    int  handle = 0;
+    f32  anchorFar = 0.0f;
+    f32  anchorFov = 0.0f;
+    f32  anchorDist = 0.0f;   // |dedo − olho projetado| no arranque (fov)
+    Vec3 anchorHit{};         // hit raio×plano no arranque (far)
+} g_camHandle;
+// âncoras do gizmo ESCALAR numa câmara (o fator escala fov/orthoSize —
+// nunca o transform, que não tem significado numa câmara)
+f32 g_camScaleFov = 0.0f;
+f32 g_camScaleOrtho = 0.0f;
+
 // direção do mundo de um eixo/plano do gizmo (main-side)
 Vec3 axisDirLocal(gizmo::Axis a) {
     switch (a) {
@@ -149,13 +169,61 @@ void applyGizmoDrag(const Mat4& vp, const Vec3& origin,
 
 // alimenta o gizmo (hit-test no press + drag) e devolve a máscara de slots
 // reclamados (a câmara ignora esses dedos — drag em gizmo NÃO orbita)
+// 0.7.7 — aplica o drag do handle do frustum (centro=far, canto=fovY)
+void applyCamHandleDrag(const Mat4& vp, const gizmo::ViewBasis& basis,
+                        f32 sw, f32 sh, f32 px, f32 py) {
+    Tic* t = g_scene.get(g_editor.selected);
+    if (!t) {
+        return;
+    }
+    CameraComp* cc = t->getComponent<CameraComp>();
+    Transform3D* tr = t->getComponent<Transform3D>();
+    if (!cc || !tr) {
+        return;
+    }
+    const camgizmo::Frustum f = camgizmo::computeFrustum(*tr, *cc, sw / sh);
+    const bool snap = g_gizmoMode.snap;
+    if (g_camHandle.handle == 5) {
+        // CENTRO do far: arrasto projetado no EIXO DE VISÃO da câmara
+        bool ok = false;
+        const Vec3 h1 = gizmo::planeHit(basis, f.fwd, tr->pos, px, py, sw,
+                                        sh, ok);
+        if (!ok) {
+            return;
+        }
+        cc->farZ = camgizmo::dragFar(g_camHandle.anchorFar,
+                                     g_camHandle.anchorHit, h1, f.fwd, snap);
+    } else {
+        // CANTO do far: fator radial do dedo em torno do olho projetado
+        f32 ox = 0.0f, oy = 0.0f;
+        if (!gizmo::projectPoint(vp, tr->pos, sw, sh, ox, oy)) {
+            return;
+        }
+        const f32 d = std::sqrt((px - ox) * (px - ox) + (py - oy) * (py - oy));
+        cc->fovY = camgizmo::dragFov(g_camHandle.anchorFov,
+                                     g_camHandle.anchorDist, d, snap);
+    }
+}
+
 u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
               const gizmo::ViewBasis& basis) {
     if (!gizmo::visible(g_editor.playMode, true)) {
         g_gizmo.active = gizmo::Axis::None;
         g_gizmo.hovered = gizmo::Axis::None;
         g_gizmo.dragSlot = -1;
+        g_camHandle.active = false;
         return 0;
+    }
+    // 0.7.7 — drag de HANDLE do frustum em curso: segue o MESMO slot
+    if (g_camHandle.active) {
+        const u32 slot = g_camHandle.slot;
+        if (g_input.down(slot)) {
+            f32 px, py;
+            g_input.pos(slot, px, py);
+            applyCamHandleDrag(vp, basis, sw, sh, px, py);
+            return 1u << slot;
+        }
+        g_camHandle.active = false;   // dedo levantado
     }
     // drag em curso: segue o MESMO slot
     if (g_gizmo.active != gizmo::Axis::None && g_gizmo.dragSlot >= 0) {
@@ -184,6 +252,38 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
             py >= view.y + view.h) {
             continue;   // nasceu fora do viewport (painéis/toolbar)
         }
+        // 0.7.7 — PRIORIDADE ao handle do frustum: com uma CÂMARA
+        // selecionada, um toque perto de um handle do far é DELE (sem
+        // conflitos de drag com o eixo do gizmo)
+        Tic* t = g_scene.get(g_editor.selected);
+        if (t) {
+            CameraComp* cc = t->getComponent<CameraComp>();
+            Transform3D* tr = t->getComponent<Transform3D>();
+            if (cc && tr) {
+                const camgizmo::Frustum f =
+                    camgizmo::computeFrustum(*tr, *cc, sw / sh);
+                const int h = camgizmo::pickHandle(vp, sw, sh, f, px, py);
+                if (h != 0) {
+                    g_camHandle.active = true;
+                    g_camHandle.slot = slot;
+                    g_camHandle.handle = h;
+                    g_camHandle.anchorFar = cc->farZ;
+                    g_camHandle.anchorFov = cc->fovY;
+                    f32 ox = 0.0f, oy = 0.0f;
+                    if (gizmo::projectPoint(vp, tr->pos, sw, sh, ox, oy)) {
+                        g_camHandle.anchorDist =
+                            std::sqrt((px - ox) * (px - ox) +
+                                      (py - oy) * (py - oy));
+                    }
+                    bool ok = false;
+                    g_camHandle.anchorHit =
+                        gizmo::planeHit(basis, f.fwd, tr->pos, px, py, sw,
+                                        sh, ok);
+                    applyCamHandleDrag(vp, basis, sw, sh, px, py);
+                    return 1u << slot;
+                }
+            }
+        }
         const gizmo::Axis hit = gizmo::pickAxis(g_gizmo.mode, vp, origin, len,
                                                 sw, sh, px, py);
         if (hit == gizmo::Axis::None) {
@@ -193,12 +293,19 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
         g_gizmo.active = hit;
         g_gizmo.hovered = hit;
         g_gizmo.dragSlot = static_cast<i32>(slot);
-        Tic* t = g_scene.get(g_editor.selected);
         if (t) {
             if (Transform3D* tr = t->getComponent<Transform3D>()) {
                 g_gizmo.anchorPos = tr->pos;
                 g_gizmo.anchorRot = tr->rot;
                 g_gizmo.anchorScale = tr->scale;
+                // 0.7.7 — o ESCALAR numa câmara escala o FRUSTUM (fov/
+                // orthoSize), não o transform: âncoras dos parâmetros
+                if (CameraComp* cc = t->getComponent<CameraComp>()) {
+                    if (g_gizmo.mode == gizmo::Mode::Scale) {
+                        g_camScaleFov = cc->fovY;
+                        g_camScaleOrtho = cc->orthoSize;
+                    }
+                }
             }
         }
         applyGizmoDrag(vp, origin, basis, sw, sh, px, py);
@@ -228,6 +335,32 @@ void applyGizmoDrag(const Mat4& vp, const Vec3& origin,
     Transform3D* tr = t->getComponent<Transform3D>();
     if (!tr) {
         return;
+    }
+    // 0.7.7 — CÂMARA: o ESCALAR ajusta fovY/orthoSize (o frustum escala;
+    // a escala do transform NÃO tem significado numa câmara — fica intacta).
+    // mover/rodar seguem o caminho normal do Transform3D (abaixo).
+    const bool snapCam = g_gizmoMode.snap;   // (antes do uso — o resto da
+                                             // função declara o seu depois)
+    if (g_gizmo.mode == gizmo::Mode::Scale) {
+        if (CameraComp* cc = t->getComponent<CameraComp>()) {
+            f32 ox = 0.0f, oy = 0.0f;
+            if (!gizmo::projectPoint(vp, origin, sw, sh, ox, oy)) {
+                return;
+            }
+            const f32 d = std::sqrt((px - ox) * (px - ox) +
+                                    (py - oy) * (py - oy));
+            const bool ortho =
+                cc->projection == CameraComp::Projection::Orthographic;
+            const f32 v = camgizmo::dragScaleToFov(
+                g_camScaleFov, g_camScaleOrtho, ortho, g_gizmo.anchorDist, d,
+                snapCam);
+            if (ortho) {
+                cc->orthoSize = v;
+            } else {
+                cc->fovY = v;
+            }
+            return;   // NUNCA escreve no transform da câmara
+        }
     }
     const gizmo::Axis a = g_gizmo.active;
     const bool snap = g_gizmoMode.snap;
@@ -1486,15 +1619,53 @@ void frame() {
     // 0.7.0 — DESSELECCIONAR: tap parado no vazio do viewport 3D limpa a
     // seleção (só em editor 3D; o modo UI desseleciona o ELEMENTO no
     // drawUiViewport, e a Hierarchy trata do seu vazio)
+    // 0.7.7 — o MESMO tap pode ter acertado no CORPO/FRUSTUM de uma câmara:
+    // nesse caso SELECIONA o TIC dela (hit-test 3D) em vez de limpar.
     if (!g_editor.playMode && !g_editor.uiMode) {
-        editor::viewportTapClearsSelection(
-            g_editor, g_input,
-            editor::centerRect(w, h, g_ui.safeArea(), g_editor.showInspector),
-            claimed | gizmoClaimed);
+        if (editor::viewportTapClearsSelection(
+                g_editor, g_input,
+                editor::centerRect(w, h, g_ui.safeArea(),
+                                   g_editor.showInspector),
+                claimed | gizmoClaimed)) {
+            const Mat4 tapVp = Mat4::mul(g_camera.proj(w / h), g_camera.view());
+            f32 px = 0.0f, py = 0.0f;
+            g_input.pos(0, px, py);
+            const Handle hc =
+                camgizmo::pickCameraTic(g_scene, tapVp, w, h, px, py);
+            if (hc.valid()) {
+                g_editor.selected = hc;
+                LOGI("editor: camera selecionada pelo frustum");
+            }
+        }
     }
 
-    // F4: base de movimento do input = câmara (stick-cima afasta da câmara)
-    {
+    // F4: base de movimento do input = câmara (stick-cima afasta da câmara).
+    // 0.7.7: em PLAY com câmara de jogo ATIVA, a base vem da POSE DELA (o
+    // jogador move-se em relação ao que VÊ); sem câmara ativa, a orbit.
+    Tic* gameCamTic =
+        g_editor.playMode ? findActiveCameraTic(g_scene) : nullptr;
+    Transform3D* gameCamTr =
+        gameCamTic ? gameCamTic->getComponent<Transform3D>() : nullptr;
+    CameraComp* gameCamComp =
+        gameCamTic ? gameCamTic->getComponent<CameraComp>() : nullptr;
+    if (gameCamTr && gameCamComp) {
+        Vec3 fwd = camgizmo::gameForward(*gameCamTr);
+        Vec3 right = gameCamTr->rot.rotate(Vec3{1.0f, 0.0f, 0.0f});
+        fwd.y = 0.0f;
+        right.y = 0.0f;
+        fwd = normalized(fwd);
+        right = normalized(right);
+        if (length(fwd) > 0.5f) {
+            g_physics.frame.fwd = fwd;
+            g_physics.frame.right = right;
+        } else {
+            // câmara a olhar para a vertical: fallback da orbit
+            const f32 sy = std::sin(g_camera.yaw);
+            const f32 cy = std::cos(g_camera.yaw);
+            g_physics.frame.fwd = Vec3{-sy, 0.0f, -cy};
+            g_physics.frame.right = Vec3{cy, 0.0f, -sy};
+        }
+    } else {
         const f32 sy = std::sin(g_camera.yaw);
         const f32 cy = std::cos(g_camera.yaw);
         g_physics.frame.fwd = Vec3{-sy, 0.0f, -cy};
@@ -1503,12 +1674,29 @@ void frame() {
     g_physics.enabled = g_editor.playMode;   // física só avança em modo Play
 
     // ---- pass 3D: clear color+depth, TICs com MeshRenderer + grid com fade
+    // 0.7.7 — CÂMARA DE JOGO: em Play a cena renderiza pela câmara ATIVA
+    // (pose do Transform3D + parâmetros do CameraComp); sem câmara ativa o
+    // fallback é a orbit de edição. O EDITOR mantém a orbit SEMPRE (o
+    // frustum é que é o gizmo — nunca o render).
+    Mat4 view;
+    Mat4 proj;
+    Vec3 camEye;
+    f32  camFocus;
+    if (gameCamTr && gameCamComp) {
+        view = camgizmo::gameView(*gameCamTr);
+        proj = camgizmo::gameProj(*gameCamComp, w / h);
+        camEye = gameCamTr->pos;
+        camFocus = length(gameCamTr->pos);   // fade do grid: dist. ao centro
+    } else {
+        view = g_camera.view();
+        proj = g_camera.proj(w / h);
+        camEye = g_camera.eye();
+        camFocus = g_camera.dist;
+    }
     g_renderer.beginFrame();
-    const Mat4 view = g_camera.view();
-    const Mat4 proj = g_camera.proj(w / h);
     const Mat4 vp = Mat4::mul(proj, view);
     const DrawStats st3d = drawTics(vp);
-    const DrawStats stGrid = g_grid.draw(vp, g_camera.eye(), g_camera.dist);
+    const DrawStats stGrid = g_grid.draw(vp, camEye, camFocus);
 
     // ---- pass UI: immediate-mode da F1 por cima (sem depth — nunca ocluída)
     g_ui.beginFrame(&g_renderer, &g_input, w, h);
@@ -1561,6 +1749,12 @@ void frame() {
     const bool modalOpen = editor::anyOverlayOpen(g_editor);
     if (modalOpen) {
         editor::drawModalBackdrop(g_ui, w, h);
+    }
+    // 0.7.7 — FRUSTUMS das câmaras da cena (wireframe na cor de marca; a
+    // selecionada ganha os handles do far). SÓ no editor 3D — nunca em
+    // Play (como os gizmos)
+    if (!modalOpen && camgizmo::visible(g_editor.playMode, g_editor.uiMode)) {
+        camgizmo::drawAll(g_ui, g_scene, vp, w, h, g_editor.selected);
     }
     if (!modalOpen && gizmo::visible(g_editor.playMode || g_editor.uiMode,
                                      gizmoTr != nullptr)) {
@@ -1741,6 +1935,20 @@ void frame() {
                     LOGI("editor: elemento UI criado (kind %d)", kind);
                 } else {
                     showToast("selecione um TIC na Hierarchy");
+                }
+            } else if (choice == 5) {
+                // 0.7.7 — TIC de CÂMARA: Transform3D (pose) + CameraComp
+                // (perspetiva). Nasce A ATIVA da cena (uma só — CameraUtil)
+                const Handle hnew = g_scene.create("Camera");
+                Tic* ct = g_scene.get(hnew);
+                if (ct) {
+                    ct->addComponent<Transform3D>();
+                    if (ct->addComponent<CameraComp>()) {
+                        setOnlyActiveCamera(g_scene, hnew);
+                    }
+                    g_editor.selected = hnew;
+                    showToast("Camera criada (ativa)");
+                    LOGI("editor: TIC de camera criado (ativo)");
                 }
             } else {
                 const PresetKind kind = static_cast<PresetKind>(choice - 1);
@@ -1960,9 +2168,9 @@ void frame() {
         if (!ct) {
             g_editor.contextMenu = false;   // o TIC morreu entretanto
         } else {
-            const int ch =
-                editor::drawContextMenu(g_ui, g_input, w, h, g_editor,
-                                        ct->name.c_str(), ct->visible);
+            const int ch = editor::drawContextMenu(
+                g_ui, g_input, w, h, g_editor, ct->name.c_str(), ct->visible,
+                ct->getComponent<CameraComp>() != nullptr);   // 0.7.7
             if (ch == 1) {
                 // RENOMEAR: teclado in-app (zero IME de sistema)
                 editor::openTextInput(g_editor, 0, g_editor.contextTic, -1,
@@ -1984,6 +2192,15 @@ void frame() {
             } else if (ch == 4) {
                 // VISIBILIDADE: toggle (o olho da Hierarchy atalha o mesmo)
                 ct->visible = !ct->visible;
+            } else if (ch == 5) {
+                // 0.7.7 — ALINHAR À VISTA: copia a pose da orbit de edição
+                // para o transform da câmara (posição + orientação)
+                if (Transform3D* tr = ct->getComponent<Transform3D>()) {
+                    camgizmo::alignToView(*tr, g_camera);
+                    showToast("camera alinhada a vista");
+                    LOGI("editor: camera '%s' alinhada a vista de edicao",
+                         ct->name.c_str());
+                }
             }
         }
     }

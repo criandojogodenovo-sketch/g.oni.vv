@@ -78,14 +78,15 @@ TEST(registry_registo_find_factory) {
     const Handle h = s.create("tic");
 
     // ordem de registo fixa (contrato do ctor)
-    // 0.7.0: +UiCanvas no FIM (ids antigos intactos)
-    EXPECT(store.registry().count() == 6u);
+    // 0.7.0: +UiCanvas; 0.7.7: +Camera — SEMPRE NO FIM (ids intactos)
+    EXPECT(store.registry().count() == 7u);
     EXPECT(store.registry().find("Transform3D") == 0);
     EXPECT(store.registry().find("MeshRenderer") == 1);
     EXPECT(store.registry().find("InputMap") == 2);
     EXPECT(store.registry().find("BodyComp") == 3);
     EXPECT(store.registry().find("TouchControls") == 4);
     EXPECT(store.registry().find("UiCanvas") == 5);
+    EXPECT(store.registry().find("Camera") == 6);   // 0.7.7
     EXPECT(store.registry().find("Desconhecido") == -1);
 
     // factory por id e por nome
@@ -142,7 +143,7 @@ TEST(store_sem_dono_recusa_add) {
     ComponentStore store(nullptr);   // situação só de teste — fora da Scene
     EXPECT(!store.hasAny(Handle::invalid()));
     // add sem Scene não pode crashar: devolve nullptr
-    EXPECT(store.registry().count() == 6u);   // registry vive mesmo sem dono
+    EXPECT(store.registry().count() == 7u);   // 0.7.7: +Camera   // registry vive mesmo sem dono
 }
 
 TEST(tic_api_add_get_remove_componente) {

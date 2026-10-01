@@ -174,9 +174,12 @@ void uiDetachElement(UiCanvas& c, i32 element, f32 sw, f32 sh,
 // ---- gestão de TICs (menu contextual + diálogos) ---------------------------------
 
 // menu contextual: devolve 0 nada / 1 Renomear / 2 Remover / 3 Duplicar /
-// 4 Visibilidade. Fecha com toque fora (muta st).
+// 4 Visibilidade / 5 Alinhar a vista (0.7.7 — só com hasCamera: copia a
+// pose da orbit de edição para o transform da câmara). Fecha com toque
+// fora (muta st).
 int drawContextMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
-                    EditorState& st, const char* ticName, bool ticVisible);
+                    EditorState& st, const char* ticName, bool ticVisible,
+                    bool hasCamera = false);
 
 // diálogo de confirmação de remoção: 0 nada / 1 confirmar / 2 cancelar.
 int drawRemoveDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,

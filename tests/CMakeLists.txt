@@ -71,6 +71,9 @@ add_executable(test_core
         # 0.7.6: barra final de 5 grupos (layout dinâmico, segmented
         # exclusivos, G4 condicional, ícones dentro do rect, Theme central)
         test_toolbar.cpp
+        # 0.7.7: TIC de câmara (frustum, seleção por toque, gizmos com
+        # escalar=fov, handles far/fov, serialização, play usa a ativa)
+        test_cameratic.cpp
         ${CORE_DIR}/core/Scene.cpp
         ${CORE_DIR}/core/Time.cpp
         ${CORE_DIR}/core/ComponentRegistry.cpp
@@ -150,6 +153,9 @@ add_executable(test_core
         # 0.7.6: toolbar final (5 grupos) + ícones vetoriais
         ${CORE_DIR}/ui/Toolbar.cpp
         ${CORE_DIR}/ui/Icons.cpp
+        # 0.7.7: câmara de cena (componente/invariante + gizmo do frustum)
+        ${CORE_DIR}/core/CameraUtil.cpp
+        ${CORE_DIR}/ui/CamGizmo.cpp
         ${CORE_DIR}/ui/FontAtlas.cpp
         ${CORE_DIR}/platform/InputState.cpp
         ${CORE_DIR}/platform/EngineLog.cpp

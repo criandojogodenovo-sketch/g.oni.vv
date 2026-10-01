@@ -5,6 +5,8 @@
 #include "components/TouchControls.h"
 #include "components/Transform3D.h"
 #include "components/UiCanvas.h"
+#include "components/CameraComp.h"   // 0.7.7: câmara de cena
+#include "core/CameraUtil.h"          // 0.7.7: uma ativa por cena
 #include "core/ComponentStore.h"
 #include "core/Scene.h"
 #include <cstdio>
@@ -189,6 +191,35 @@ void appendComponentJson(Json& arr, const UiCanvas* canvas) {
         elems.addItem(std::move(je));
     }
     c.addMember("elements", std::move(elems));
+    arr.addItem(std::move(c));
+}
+
+// 0.7.7 — Camera: perspetiva da cena. Defaults omitidos (ficheiros 0.7.6
+// abrem limpos); "active" gravado quando NÃO-default true? NÃO — grava-se
+// SEMPRE que é true para o invariante ser visível no .goni (o loader
+// enforce "uma ativa"; false/ausente = inativa).
+void appendComponentJson(Json& arr, const CameraComp* cam) {
+    if (!cam) {
+        return;
+    }
+    Json c = Json::makeObject();
+    c.addMember("type", Json::makeString("Camera"));
+    if (cam->fovY != CameraComp::kDefaultFov) {
+        c.addMember("fov", Json::makeNumber(cam->fovY));
+    }
+    if (cam->nearZ != CameraComp::kDefaultNear) {
+        c.addMember("near", Json::makeNumber(cam->nearZ));
+    }
+    if (cam->farZ != CameraComp::kDefaultFar) {
+        c.addMember("far", Json::makeNumber(cam->farZ));
+    }
+    if (cam->projection == CameraComp::Projection::Orthographic) {
+        c.addMember("proj", Json::makeString("ortho"));
+        if (cam->orthoSize != CameraComp::kDefaultOrthoSize) {
+            c.addMember("orthoSize", Json::makeNumber(cam->orthoSize));
+        }
+    }
+    c.addMember("active", Json::makeBool(cam->active));
     arr.addItem(std::move(c));
 }
 
@@ -464,6 +495,33 @@ void fillTouchControls(TouchControls* tc, const Json& comp) {
     }
 }
 
+// 0.7.7 — Camera: reconstrói os parâmetros (ausentes = defaults)
+void fillCameraComp(CameraComp* cam, const Json& comp) {
+    if (!cam) {
+        return;
+    }
+    if (const Json* j = comp.find("fov"); j && j->type == Json::Type::Number) {
+        cam->fovY = static_cast<f32>(j->number);
+    }
+    if (const Json* j = comp.find("near"); j && j->type == Json::Type::Number) {
+        cam->nearZ = static_cast<f32>(j->number);
+    }
+    if (const Json* j = comp.find("far"); j && j->type == Json::Type::Number) {
+        cam->farZ = static_cast<f32>(j->number);
+    }
+    if (const Json* j = comp.find("proj");
+        j && j->type == Json::Type::String && j->string == "ortho") {
+        cam->projection = CameraComp::Projection::Orthographic;
+    }
+    if (const Json* j = comp.find("orthoSize");
+        j && j->type == Json::Type::Number) {
+        cam->orthoSize = static_cast<f32>(j->number);
+    }
+    if (const Json* j = comp.find("active"); j && j->type == Json::Type::Bool) {
+        cam->active = j->boolean;
+    }
+}
+
 } // namespace
 
 Json migrate(Json doc) {
@@ -537,6 +595,7 @@ std::string dump(const Scene& scene) {
         appendComponentJson(comps, cs.bodies().find(t.handle));
         appendComponentJson(comps, cs.touchControls().find(t.handle));
         appendComponentJson(comps, cs.uiCanvases().find(t.handle));   // 0.7.0
+        appendComponentJson(comps, cs.cameras().find(t.handle));       // 0.7.7
         jt.addMember("components", std::move(comps));
 
         tics.addItem(std::move(jt));
@@ -636,10 +695,15 @@ bool loadText(Scene& scene, const std::string& text, const LoadCtx& ctx) {
                 fillUiCanvas(store.get<UiCanvas>(h), jc);   // 0.7.0
             } else if (jt2->string == "TouchControls") {
                 fillTouchControls(store.get<TouchControls>(h), jc);   // 0.7.3
+            } else if (jt2->string == "Camera") {
+                fillCameraComp(store.get<CameraComp>(h), jc);   // 0.7.7
             }
             // InputMap: sem dados — presença basta
         }
     }
+    // 0.7.7 — invariante UMA câmara ativa por cena: a primeira (ordem do
+    // manifesto) fica; as restantes saem (fallback orbit se nenhuma)
+    enforceSingleActiveCamera(scene);
     return true;
 }
 

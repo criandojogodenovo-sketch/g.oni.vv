@@ -1,3 +1,7 @@
+# G.One VV 0.7.7 — TIC de câmara: frustum wireframe no editor + gizmos + handles + câmara de jogo em Play
+
+<!-- (0.7.6 abaixo — histórico) -->
+
 # G.One VV 0.7.6 — reestruturação UI/UX do editor: toolbar final de 5 grupos + ícones vetoriais + tela de projetos + Theme central
 
 Engine com editor, projeto `.goni` e maturação de assets (compressão ETC2/ASTC
@@ -6,8 +10,57 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 (`sensorLandscape`). Devices de teste: Realme C33 (720x1600) e Realme
 RMX3624 (Android 13).
 
-Relatórios 1-16 das sub-fases: `docs/RELATORIO-0.7.{4,5,6}.md` (com os
+Relatórios 1-16 das sub-fases: `docs/RELATORIO-0.7.{4,5,6,7}.md` (com os
 sha256 dos APKs assinados).
+
+## Escopo 0.7.7 (implementado — TIC de câmara + frustum + gizmos)
+
+**COMPONENTE `Camera`** (`components/CameraComp.h`, registado no fim do
+ComponentStore — id 6; serializado no .goni como "Camera"): fovY (graus),
+near, far, projeção (perspetiva|ortográfica), orthoSize (meia-altura) e
+`active` — **UMA câmara ativa por cena** (`core/CameraUtil` assegura o
+invariante no load e nos toggles do Inspector). A POSE vem do Transform3D
+do mesmo TIC (−Z local = direção de visão, +Y = up).
+
+**FRUSTUM WIREFRAME no editor** (`ui/CamGizmo`): corpo (caixa + lente),
+cone de 4 arestas, retângulo do plano far, linha de visão central e
+handles nos 4 cantos + centro do far — na COR DE MARCA #8AB4F8, desenhado
+pelo line batch dos gizmos. **Só no editor, nunca em Play** (como os
+gizmos); a câmara selecionada ganha os handles.
+
+**SELEÇÃO POR TOQUE**: tocar no corpo/frustum de qualquer câmara no
+viewport seleciona o TIC dela (hit-test 3D por projeção — a mesma técnica
+dos gizmos), além da Hierarchy.
+
+**GIZMOS NA CÂMARA**: mover/rodar atuam no Transform3D (o caminho de
+sempre); **escalar ajusta fovY/orthoSize** (o frustum escala — a escala
+do transform fica intacta: não tem significado numa câmara). Snap ativo:
+o fator salta nos passos dos gizmos; fov arredonda a 5° nos handles.
+
+**HANDLES DO FAR**: arrastar o CENTRO muda `far` (delta projetado no eixo
+de visão; snap 1 u); arrastar um CANTO muda `fovY` (fator radial). Com a
+câmara selecionada, o hit-test dos handles tem PRIORIDADE sobre os eixos
+do gizmo — sem conflitos de drag.
+
+**CÂMARA DE JOGO**: em Play a cena renderiza pela câmara ATIVA (view da
+pose + proj dos parâmetros, persp ou orto); sem câmara ativa o fallback é
+a orbit de edição. O editor mantém a orbit SEMPRE. A base de movimento
+dos controlos segue a câmara de jogo em Play.
+
+**ALINHAR À VISTA**: item novo no menu contextual da câmara (⋮) copia a
+pose da orbit de edição para o transform dela.
+
+**INSPECTOR da câmara**: secção Camera com fov/near/far (sliders),
+projeção (cicla persp/orto), orthoSize e ativa (uma ativa por cena).
+Criação: o "+" do 3D ganha "Camera" (nasce A ativa).
+
+Suíte 407→418 (+11: geometria do frustum [far/near/orto/rodada +
+planeHalfExtents], seleção por toque no frustum [centro/cone/vazio/
+invisível], gizmo mover/rodar no transform, escalar=fov/ortho com clamps
+e snap, handles far/fov [ids, raio prioritário, âncoras, snap, clamps],
+serialização round-trip + uma ativa, CameraUtil, play usa a ativa
+[gameView/gameProj exatos] + frustum nunca em play + batch, alinhar-à-
+vista [pose idempotente], plano do Inspector, criação/menu contextual).
 
 ## Escopo 0.7.6 (implementado — reestruturação UI/UX definitiva)
 
@@ -911,7 +964,38 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
 
-## Verificação no Realme C33 (dono) — 0.7.6 (toolbar final + ícones + tela de projetos; APK CUMULATIVO)
+## Verificação no Realme C33 (dono) — 0.7.7 (TIC de câmara; APK CUMULATIVO)
+
+Instalar o APK 0.7.7 (artifact `goni-vv-0.7.7-release-signed` do run do
+job `build-release`). Esperado em cada passo:
+
+1. **Criar a câmara**: editor 3D → "+" → "Camera" → o TIC "Camera" entra
+   na Hierarchy e o FRUSTUM WIREFRAME azul aparece na cena (corpo +
+   lente + cone + retângulo do far + linha central). Numa cena com outra
+   câmara ativa, a nova toma o lugar (uma ativa).
+2. **Seleção por toque**: tocar no corpo/frustum no viewport seleciona o
+   TIC da câmara (Inspector mostra a secção Camera); tocar no vazio
+   desseleciona como sempre.
+3. **Gizmos**: com a câmara selecionada, mover/rodar atuam na pose (o
+   frustum segue); **escalar abre/estreita o frustum (fovY)** — a escala
+   do transform NÃO muda; snap salta nos passos.
+4. **Handles do far**: arrastar o QUADRADO DO CENTRO do far muda `far`
+   (o retângulo afasta-se); arrastar um CANTO muda `fovY` (o cone
+   abre/fecha). Perto de um handle o drag é DELE (não rouba o eixo do
+   gizmo).
+5. **Inspector**: secção Camera com fov/near/far/orthoSizo, "projecao"
+   cicla perspetiva↔ortográfica (o far vira retângulo fixo), "ativa"
+   sim/nao (uma ativa por cena).
+6. **Alinhar à vista**: ⋮ da câmara → "Alinhar a vista" → o frustum fica
+   EXATAMENTE na pose da orbit (o que se vê é o que a câmara vê).
+7. **Play**: com a câmara ativa, a cena renderiza PELA CÂMARA (o
+   joystick move o player em relação a ela) e NENHUM frustum se desenha;
+   Stop volta ao editor com a orbit intacta. Sem câmara ativa: o
+   fallback é a orbit de sempre.
+8. **Regressões**: toolbar 0.7.6 (5 grupos/ícones/G4 condicional),
+   paridade editor↔Play, overlays, teclado — intactos.
+
+## Verificação no Realme C33 (dono) — 0.7.6 (histórico; toolbar final + ícones + tela de projetos)
 
 Instalar o APK 0.7.6 (artifact `goni-vv-0.7.6-release-signed` do run do
 job `build-release`). Esperado em cada passo:

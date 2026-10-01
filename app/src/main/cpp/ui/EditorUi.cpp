@@ -3,6 +3,8 @@
 #include "render/Camera.h"
 #include "components/TouchControls.h"
 #include <cmath>
+#include "components/CameraComp.h"   // 0.7.7: inspector/menu da câmara
+#include "core/CameraUtil.h"          // 0.7.7: uma ativa por cena
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
 #include "core/Scene.h"
@@ -269,12 +271,21 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     const MeshRenderer* mr = tic->getComponent<MeshRenderer>();
     const InputMap* im = tic->getComponent<InputMap>();
     BodyComp* bc = tic->getComponent<BodyComp>();
+    CameraComp* camEdit = tic->getComponent<CameraComp>();   // 0.7.7
     // 0.7.0: o tint é EDITÁVEL (sliders R/G/B) — ponteiro mutável
     MeshRenderer* mrEdit = tic->getComponent<MeshRenderer>();
     char meshLabel[64] = "";
     char texLabel[64] = "";
     char inputLine[48] = "";
     char bodyLine[64] = "";
+    char camProjLabel[48] = "";   // 0.7.7
+    char camActiveLabel[48] = "";
+    if (camEdit) {
+        std::snprintf(camProjLabel, sizeof(camProjLabel), "projecao: %s",
+                      CameraComp::projectionName(camEdit->projection));
+        std::snprintf(camActiveLabel, sizeof(camActiveLabel), "ativa: %s",
+                      camEdit->active ? "sim" : "nao");
+    }
     if (mr) {
         if (!mr->meshPath.empty()) {
             std::snprintf(meshLabel, sizeof(meshLabel), "mesh: %s",
@@ -418,6 +429,54 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       "add TouchControls");
             break;
+        // ---- 0.7.7 — CÂMARA --------------------------------------------------
+        case InspRow::Kind::CamSection:
+            ui.label(x + kPad, inspBaseline(ry, r.h, tm), "Camera", theme::TEXT);
+            ui.panel(x + kPad, ry + r.h - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
+            break;
+        case InspRow::Kind::CamFov:
+            if (camEdit) {
+                if (sliderRow(ui, r.id, x, ry, r.h, tm, "fov",
+                              CameraComp::kMinFov, CameraComp::kMaxFov,
+                              camEdit->fovY, "%.0f")) {
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::CamNear:
+            if (camEdit) {
+                if (sliderRow(ui, r.id, x, ry, r.h, tm, "near",
+                              CameraComp::kMinNear, 10.0f, camEdit->nearZ,
+                              "%.2f")) {
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::CamFar:
+            if (camEdit) {
+                if (sliderRow(ui, r.id, x, ry, r.h, tm, "far",
+                              CameraComp::kMinFar, CameraComp::kMaxFar,
+                              camEdit->farZ, "%.0f")) {
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::CamOrtho:
+            if (camEdit) {
+                if (sliderRow(ui, r.id, x, ry, r.h, tm, "ortho", 0.5f, 50.0f,
+                              camEdit->orthoSize, "%.2f")) {
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::CamProj:
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      camProjLabel);
+            break;
+        case InspRow::Kind::CamActive:
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      camActiveLabel);
+            break;
         }
     }
 
@@ -440,7 +499,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             if (r.kind != InspRow::Kind::AddTc &&
                 r.kind != InspRow::Kind::MeshButton &&
                 r.kind != InspRow::Kind::TexButton &&
-                r.kind != InspRow::Kind::VisToggle) {
+                r.kind != InspRow::Kind::VisToggle &&
+                r.kind != InspRow::Kind::CamProj &&     // 0.7.7
+                r.kind != InspRow::Kind::CamActive) {
                 continue;
             }
             const f32 ry = contentTop + r.y - off;
@@ -458,6 +519,24 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 st.assetMenu = 2;                     // F5-E: seletor de texturas
             } else if (r.kind == InspRow::Kind::VisToggle) {
                 tic->visible = !tic->visible;         // 0.7.0: checkbox
+            } else if (r.kind == InspRow::Kind::CamProj) {
+                // 0.7.7: cicla perspetiva ↔ ortográfica
+                if (CameraComp* cc = tic->getComponent<CameraComp>()) {
+                    cc->projection = cc->projection ==
+                                     CameraComp::Projection::Perspective
+                                         ? CameraComp::Projection::Orthographic
+                                         : CameraComp::Projection::Perspective;
+                }
+            } else if (r.kind == InspRow::Kind::CamActive) {
+                // 0.7.7: UMA ativa por cena — ativar desativa as outras;
+                // desativar deixa a cena sem ativa (fallback da orbit)
+                if (CameraComp* cc = tic->getComponent<CameraComp>()) {
+                    if (cc->active) {
+                        clearActiveCamera(scene, tic->handle);
+                    } else {
+                        setOnlyActiveCamera(scene, tic->handle);
+                    }
+                }
             }
         }
     }
@@ -593,7 +672,7 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     // TouchControls editável). 0.7.4: + os CONTAINERS VBox/HBox (filhos
     // automáticos). No 3D cria TICs de preset (como sempre).
     const bool uiMode = st.uiMode;
-    const int kItems = uiMode ? 10 : 4;
+    const int kItems = uiMode ? 10 : 5;   // 0.7.7: 3D ganha o TIC "Camera"
     const f32 w = kMenuW;
     const f32 h = kHeaderH + static_cast<f32>(kItems) * 64.0f + kPad;
     // F4.2: centrado no viewport ÚTIL (dentro do contentRect)
@@ -616,8 +695,10 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
              uiMode ? "CRIAR ELEMENTO UI" : "CRIAR TIC", theme::TEXT);
 
     int chosen = 0;
-    const char* names[4] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
-                            "RigidBody3D"};
+    // 0.7.7: o 5º preset do 3D é o TIC de CÂMARA (Transform3D + CameraComp;
+    // nasce A ativa — o main chama setOnlyActiveCamera)
+    const char* names[5] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
+                            "RigidBody3D", "Camera"};
     // 0.7.4: + VBox/HBox (containers de layout — filhos automáticos)
     const char* elems[10] = {"Panel", "Label", "Button", "Image",
                              "Menu", "Card", "Article", "Joystick",

@@ -1,0 +1,133 @@
+#pragma once
+// ui/CamGizmo.h — GIZMO DA CÂMARA DE CENA (0.7.7): frustum wireframe visível
+// SÓ NO EDITOR, seleção por toque, handles do plano far e a câmara de jogo.
+//
+// O VISUAL (imagem de referência do dono): corpo wireframe (caixa + lente),
+// cone de 4 arestas até ao retângulo do plano far, retângulo do far, linha
+// de visão central e handles nos 4 cantos + centro do far. Cor de
+// gizmo/marca (#8AB4F8 — theme::kTheme.brand, a exceção documentada).
+// Como os gizmos de transformação: NUNCA em Play (camgizmo::visible).
+//
+// GEOMETRIA PURA: o frustum deriva de Transform3D (pose) + CameraComp
+// (fov/near/far/ortho) + aspeto — funções GL-free aferidas no CI (o retângulo
+// far sai de tan(fov/2)·far; no orto, orthoSize em ambos os planos).
+//
+// INTERAÇÃO:
+//   • tocar no corpo/frustum de uma câmara SELECIONA o TIC dela (hit-test
+//     3D por projeção — a mesma técnica dos gizmos);
+//   • com a câmara selecionada, os HANDLES do far arrastam: o CENTRO muda
+//     `far`, um CANTO muda `fovY`. O hit-test do handle tem PRIORIDADE
+//     sobre o eixo do gizmo de transformação (sem conflitos de drag);
+//   • o gizmo ESCALAR sobre uma câmara ajusta fovY/orthoSize (o frustum
+//     escala) — nunca a escala do transform (sem significado numa câmara);
+//   • "Alinhar à vista" (menu contextual) copia a pose da orbit de edição.
+//
+// CÂMARA DE JOGO: gameView/gameProj derivam view/proj da pose+parâmetros;
+// em Play o main renderiza pela câmara ATIVA (core/CameraUtil) com fallback
+// à orbit de edição.
+#include "components/Transform3D.h"   // pose (inline gameForward usa rot)
+#include "core/Handle.h"    // Handle (seleção por toque devolve o TIC)
+#include "core/Types.h"
+#include "math/Math.h"
+
+namespace vv {
+
+class CameraComp;
+class Transform3D;
+class Camera;         // a orbit (render/Camera.h)
+class Scene;
+class UiContext;
+struct Tic;
+
+namespace camgizmo {
+
+// o frustum desenha/aceita input? (EDITOR 3D — como os gizmos)
+bool visible(bool playMode, bool uiMode);
+
+// ---- geometria (PURO — testada no CI) ---------------------------------------
+
+// wireframe completo da câmara: caixa (corpo) + lente + near/far + eixo
+struct Frustum {
+    Vec3 pos{};                 // olho (mundo)
+    Vec3 fwd{}, right{}, up{};  // base local (mundo, normalizada)
+    Vec3 box[8]{};              // corpo: cantos da caixa (índices de quad:
+                                // 0..3 frente, 4..7 trás)
+    Vec3 lens[8]{};             // lente: caixa pequena à frente do corpo
+    Vec3 nearC[4]{};            // cantos do retângulo do near
+    Vec3 farC[4]{};             // cantos do retângulo do far (RT,LB.. ordem
+                                // consistente: [+r+u, -r+u, -r-u, +r-u])
+    Vec3 farCenter{};
+};
+
+// meia-altura/largura do retângulo a `dist` (persp: tan(fov/2)·dist;
+// orto: orthoSize fixo) — a matemática aferida pelo teste da spec
+void planeHalfExtents(const CameraComp& cam, f32 dist, f32 aspect,
+                      f32& halfW, f32& halfH);
+
+// o wireframe completo (aspect = w/h do render do jogo)
+Frustum computeFrustum(const Transform3D& tr, const CameraComp& cam,
+                       f32 aspect);
+
+// ---- desenho (emite no UiContext — line batch dos gizmos) --------------------
+
+// desenha o frustum UMA câmara (cor de marca; `selected` acrescenta os
+// HANDLES do far — 4 cantos + centro). Editor-only (o chamador faz o gate).
+void drawFrustum(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
+                 const Frustum& f, bool selected);
+
+// desenha TODAS as câmaras visíveis da cena (o loop do main; cada frustum
+// com o aspeto do ecrã; a selecionada ganha os handles)
+void drawAll(UiContext& ui, Scene& scene, const Mat4& vp, f32 sw, f32 sh,
+             Handle selected);
+
+// ---- hit-test ------------------------------------------------------------------
+
+// o handle sob o toque (câmara selecionada): 0 = nada, 1..4 = canto i-1,
+// 5 = centro do far. Distâncias em px de ecrã (kHandleHitPx).
+int pickHandle(const Mat4& vp, f32 sw, f32 sh, const Frustum& f,
+               f32 px, f32 py);
+
+// o TIC da câmara cujo corpo/frustum está sob o toque (segmentos projetados
+// a kHitPx; o MAIS PRÓXIMO ganha). Handle::invalid se nenhum.
+Handle pickCameraTic(Scene& scene, const Mat4& vp, f32 sw, f32 sh,
+                     f32 px, f32 py);
+
+// ---- drag dos handles (PURO — âncoras, nunca acumulado) ------------------------
+
+// handle do CENTRO do far: delta do arrasto projetado no eixo de visão
+// (hits = interseções raio×plano [normal = fwd da câMARA, por pos]).
+f32 dragFar(f32 anchorFar, const Vec3& hit0, const Vec3& hit1,
+            const Vec3& camFwd, bool snap);
+
+// handle de CANTO: fator radial do dedo em torno do CENTRO PROJETADO da
+// câmara (px) — fov = âncora × d1/d0 (snap: arredonda a 5°)
+f32 dragFov(f32 anchorFovDeg, f32 d0, f32 d1, bool snap);
+
+// gizmo ESCALAR sobre uma câmara: o fator do drag escala fov/orthoSize
+// (nunca o transform). ortho = projeção ortográfica.
+f32 dragScaleToFov(f32 anchorFovDeg, f32 anchorValue, bool ortho,
+                   f32 d0, f32 d1, bool snap);
+
+// ---- câmara de jogo ------------------------------------------------------------
+
+// view da pose do TIC (olho = pos; −Z local = visão; +Y local = up)
+Mat4 gameView(const Transform3D& tr);
+
+// proj dos parâmetros (persp: fovY° → rad; orto: ±orthoSize·aspect)
+Mat4 gameProj(const CameraComp& cam, f32 aspect);
+
+// direção de visão da pose (−Z local no mundo)
+inline Vec3 gameForward(const Transform3D& tr) {
+    return tr.rot.rotate(Vec3{0.0f, 0.0f, -1.0f});
+}
+
+// ---- alinhar à vista ------------------------------------------------------------
+
+// copia a pose da ORBIT de edição para o transform da câmara: pos = eye,
+// orientação = olhar de eye para target. (fromEuler(−pitch, yaw, 0) mapeia
+// o −Z local exatamente na direção eye→target — derivado da convenção da
+// orbit: dir(target→eye) = (cp·sy, sp, cp·cy).)
+void alignToView(Transform3D& tr, const Camera& orbit);
+
+} // namespace camgizmo
+} // namespace vv
