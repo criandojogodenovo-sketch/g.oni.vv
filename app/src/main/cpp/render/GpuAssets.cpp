@@ -5,8 +5,27 @@
 #include "platform/Log.h"
 #include "render/Mesh.h"
 #include "render/Texture.h"
+#include <cctype>
 
 namespace vv {
+
+namespace {
+
+// 0.8.5: extensão minúscula (a classificação local do fallback — o
+// ResourceManager tem a sua; aqui só interessa gltf/glb)
+std::string lowerExtOf(const std::string& path) {
+    const size_t dot = path.rfind('.');
+    if (dot == std::string::npos) {
+        return "";
+    }
+    std::string e = path.substr(dot + 1);
+    for (char& c : e) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return e;
+}
+
+} // namespace
 
 Mesh* GpuAssets::mesh(const std::string& ref) {
     if (!rm_) {
@@ -18,6 +37,22 @@ Mesh* GpuAssets::mesh(const std::string& ref) {
     }
     std::string err;
     const MeshData* data = rm_->mesh(ref, err);
+    if (!data) {
+        // 0.8.5 (fix do "import não aplica" no device): glTF/GLB SEM '#'
+        // com VÁRIOS meshes falhava no ResourceManager ("use path#<i>") —
+        // mas o browser/catálogo/aplicar nunca geram sub-refs. WIRING: o
+        // fallback do APPLY é mesh #0 (o contrato do ResourceManager fica
+        // intacto p/ refs explícitas; o apply do device deixa de morrer).
+        const size_t hash = ref.find('#');
+        const std::string ext = lowerExtOf(ref);
+        if (hash == std::string::npos && (ext == "gltf" || ext == "glb")) {
+            data = rm_->mesh(ref + "#0", err);
+            if (data) {
+                LOGI("GpuAssets: '%s' tem múltiplos meshes — a aplicar o #0 "
+                     "(use '#<i>' no .goni para outro)", ref.c_str());
+            }
+        }
+    }
     if (!data || !data->ok()) {
         return nullptr;
     }

@@ -1,6 +1,58 @@
-# G.One VV 0.8.4 — estabilização no C33: crashes e freezes domados (wiring)
+# G.One VV 0.8.5 — funcionalidade desbloqueada no device: animação e2e, primitivas, import
 
-<!-- (0.8.3 abaixo — histórico) -->
+## Escopo 0.8.5 (implementado — campanha F8: funcionalidade quebrada)
+
+**O DIAGNÓSTICO**: três funcionalidades implementadas na F7 morriam no
+wiring do device — os testes passavam porque replicavam o fluxo "peça a
+peça" (ou setavam à mão a flag que o main nunca punha a true). Seis fixes,
+todos com teste de integração:
+
+1. **IMPORT MORTO DESDE A 0.7.2 (a causa-mãe)**: o diálogo "aplicar ao
+   TIC?" é despachado por `g_editor.applyAsk && g_applyAsk.open` — o
+   `browserImportFile` setava SÓ `g_applyAsk.open`; o único lugar onde
+   `st.applyAsk` ficava true eram os TESTES. No C33: importar obj/gltf/glb
+   com um TIC selecionado = sem diálogo, sem toast, sem aplicar — e
+   `gltfAttachSkin/gltfAttachClips` (skins/clips glTF!) ficavam
+   INATINGÍVEIS. FIX: as DUAS flags nos DOIS caminhos de import (browser E
+   menu Importar — o 2.º nunca perguntava). O e2e de animação importada
+   (test 6 abaixo) corre agora o caminho que o device nunca alcançou.
+
+2. **ANIMAÇÃO "NÃO CRIA"**: `AnimationPlayer::addTrack` ia SEMPRE para
+   clips[0] (editClip) enquanto a timeline edita/mostra o clip ATIVO —
+   com um clip importado ativo, o "+track" caía no clip INVISÍVEL. FIX:
+   o track vai para o `activeClipPtr()` (fallback editClip). Teste: clip
+   importado ativo + addTrack → entra NELE, o "edit" fica intacto.
+
+3. **ERRO CLARO PARA FORMATOS NÃO SUPORTADOS** (nunca silêncio): o
+   navegador LISTA todos os ficheiros (kind 0 = fora de obj/gltf/glb/png,
+   marcados "?"); tocar num .fbx/.psd → toast "formato nao suportado
+   ainda: .fbx" + linha no engine.log, sem importar nem ler o ficheiro.
+
+4. **GLTF/GLB MULTI-MESH APLICA**: refs sem `#` com vários meshes
+   falhavam ("use path#<i>") mas o browser/catálogo nunca geram sub-refs
+   → todo .glb multi-mesh era impossível de aplicar. FIX no WIRING
+   (GpuAssets::mesh): fallback para `#0` com log honesto; o contrato do
+   ResourceManager fica intacto para refs explícitas (testado).
+
+5. **CATÁLOGO case-insensitive**: o filtro comparava literais
+   ("glTF"/"GLB"/"OBJ") e escondia casings mistos (.Glb/.OBJ) que o
+   browser aceitava e importava. FIX: classificação CENTRALIZADA no
+   `fileapi::kindOfExtension` (lowercase) — o MESMO predicado do browser
+   e do teste e2e que já o modelava.
+
+6. **PRIMITIVAS**: o wiring seletor→apply→cache→render estava íntegro —
+   os sintomas no device vinham da corrupção de memória da 0.8.4 (fix
+   anterior) e do mesmo input. A prova agora é de integração: 3 trocas
+   (esfera→cone→box→torus) com upload REAL no stub + drawMesh + round-trip
+   `.goni` (a ÚLTIMA troca persiste).
+
+Suíte 519→525 (+6; contrato do browser atualizado: não suportados
+VISÍVEIS com kind 0). versionCode 36. CLÁUSULA CALMA respeitada: só fixes
+e wiring — nenhuma feature nova, nenhuma física, nenhum scripting.
+
+<!-- (0.8.4 abaixo — histórico) -->
+
+# G.One VV 0.8.4 — estabilização no C33: crashes e freezes domados (wiring)
 
 ## Escopo 0.8.4 (implementado — campanha F8: estabilização, ZERO features novas)
 
@@ -45,6 +97,8 @@ resolver de 50 elementos × 600 frames < 50 ms.
 
 Suíte 508→519 (+11). versionCode 35. CLÁUSULA CALMA: só fixes e wiring —
 nenhuma feature, nenhuma física, nenhum scripting.
+
+<!-- (0.8.3 abaixo — histórico) -->
 
 # G.One VV 0.8.3 — animação: blending (peso + crossfade walk→run)
 
@@ -1290,6 +1344,38 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.8.5 (funcionalidade; APK CUMULATIVO)
+
+Instalar o APK 0.8.5 (artifact `goni-vv-0.8.5-release-signed` do run do
+job `build-release`). A alvo é a FUNCIONALIDADE que estava morta — cada
+passo tem um "antes" que falhava:
+
+1. **Import com aplicar (o morto da 0.7.2)**: selecionar um TIC Mesh →
+   Menu → Importar… → navegar até um .obj → tocar → o diálogo "APLICAR AO
+   TIC?" APARECE (antes: nada, silêncio total) → **Sim** → o mesh aplica
+   (toast + linha no log) e o viewport mostra o objeto;
+2. **Import .glb com animação**: importar um .glb animado → "Sim" → toast
+   "clips importados (timeline)" (antes: inatingível) → a timeline abre
+   com o clip IMPORTADO ativo;
+3. **"+track" com clip importado ativo**: com o clip importado na
+   timeline → "+" → posição → "+key" → o track APARECE na strip e o play
+   mexe o objeto (antes: caía no clip invisível — "animação não cria");
+4. **Opções da animação**: play/pausa/stop · botão once→loop→pingpong ·
+   slider "vel" — TODOS respondem na hora (o header deixou de ter botões
+   sobrepostos no ecrã estreito);
+5. **Trocar primitiva ×3**: TIC Mesh → Inspector → "prim:" → cone → box →
+   torus → a forma TROCA no viewport a cada escolha e sobrevive a
+   gravar/reabrir;
+6. **Multi-mesh**: importar um .glb com VÁRIOS meshes → "Sim" → aplica o
+   mesh #0 com log "a aplicar o #0" (antes: "falha ao carregar mesh");
+7. **Formato não suportado tem VOZ**: no navegador, um .fbx/.psd APARECE
+   marcado "?" → tocar → toast "formato nao suportado ainda: .fbx"
+   (antes: invisível, sem explicação);
+8. **Casings mistos**: importar um .Glb/.OBJ (maiúsculas no meio) → fica
+   NO seletor de meshes do Inspector (antes: importava e desaparecia);
+9. **Regressões**: 0.8.4 (storm/play-stop/texto/timeline), 0.8.3 (blend),
+   0.8.2 (skin), 0.8.0 (primitivas/params).
 
 ## Verificação no Realme C33 (dono) — 0.8.4 (estabilização; APK CUMULATIVO)
 

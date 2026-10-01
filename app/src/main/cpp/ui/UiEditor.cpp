@@ -1577,9 +1577,16 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         if (entries[i].isDir) {
             std::snprintf(label, sizeof(label), "/ %s",
                           entries[i].name.c_str());
+        } else if (entries[i].kind == 'm') {
+            std::snprintf(label, sizeof(label), "mesh: %s",
+                          entries[i].name.c_str());
+        } else if (entries[i].kind == 't') {
+            std::snprintf(label, sizeof(label), "tex: %s",
+                          entries[i].name.c_str());
         } else {
-            std::snprintf(label, sizeof(label), "%s %s",
-                          entries[i].kind == 'm' ? "mesh:" : "tex:",
+            // 0.8.5: formato fora de obj/gltf/glb/png — VISÍVEL (o tap dá
+            // o erro claro no main; o "?" marca o que a engine não lê)
+            std::snprintf(label, sizeof(label), "? %s",
                           entries[i].name.c_str());
         }
         ui.button(kBrowserRowBase + static_cast<u64>(i), x + kPad, ry + 2.0f,

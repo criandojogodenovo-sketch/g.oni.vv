@@ -176,6 +176,10 @@ add_executable(test_core
         # submissão, storm add/remove, play/stop ×20, steady-state GL,
         # header da timeline fluido)
         test_wiring084.cpp
+        # 0.8.5: wiring de funcionalidade (addTrack no clip ativo, anim e2e
+        # com opções e save/load, troca de primitiva ×3 no render, fallback
+        # multi-mesh #0 no GpuAssets, browser com não suportados)
+        test_wiring085.cpp
         ${CORE_DIR}/ui/Icons.cpp
         # 0.7.7: câmara de cena (componente/invariante + gizmo do frustum)
         ${CORE_DIR}/core/CameraUtil.cpp

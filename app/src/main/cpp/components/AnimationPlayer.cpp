@@ -122,7 +122,15 @@ const AnimClip* AnimationPlayer::activeClipPtr() const {
 }
 
 AnimTrack* AnimationPlayer::addTrack(AnimTarget target, const char* element) {
-    AnimClip* clip = editClip();
+    // 0.8.5 (fix do "animação não cria"): o track vai para o clip ATIVO —
+    // o que a timeline mostra e reproduz. Antes ia SEMPRE para clips[0]
+    // (editClip): com um clip importado/selecionado ativo (gltfAttach põe
+    // activeClip=1), o "+track" acrescentava no clip INVISÍVEL e a UI
+    // parecia morta — nenhum row aparecia.
+    AnimClip* clip = activeClipPtr();
+    if (!clip) {
+        clip = editClip();   // sem clips (ou activeClip fora do range)
+    }
     if (!clip) {
         return nullptr;   // defesa (nunca: editClip cria)
     }

@@ -771,6 +771,23 @@ void browserImportFile(const fileapi::DirEntry& e) {
     if (!g_storage || e.isDir) {
         return;
     }
+    // 0.8.5 — FORMATO NÃO SUPORTADO → ERRO CLARO (nunca silêncio): o
+    // navegador passou a listar TODOS os ficheiros (kind 0 = fora de
+    // obj/gltf/glb/png); tocar num .fbx/.psd/etc. diz EXATAMENTE o que
+    // falta, sem importar nada (nem ler o ficheiro).
+    if (e.kind == 0) {
+        const size_t dot = e.name.rfind('.');
+        const std::string ext = dot == std::string::npos
+                                    ? "(sem extensão)"
+                                    : e.name.substr(dot);
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "formato nao suportado ainda: %s",
+                      ext.c_str());
+        showToast(msg);
+        elog::warn("browser: '%s' — formato %s não suportado (aceites: "
+                   ".obj .gltf .glb .png)", e.path.c_str(), ext.c_str());
+        return;
+    }
     std::vector<u8> bytes;
     if (!fileapi::readAll(e.path, bytes) || bytes.empty()) {
         showToast("leitura falhou (causa no engine.log)");
@@ -794,13 +811,20 @@ void browserImportFile(const fileapi::DirEntry& e) {
     elog::info("browser: import %s (%zu bytes) de %s", rel.c_str(),
                bytes.size(), e.path.c_str());
 
-    // APLICAR-APÓS-IMPORT: só se há TIC selecionado COM MeshRenderer
+    // APLICAR-APÓS-IMPORT: só se há TIC selecionado COM MeshRenderer.
+    // 0.8.5 (fix do import morto no device desde a 0.7.2): o dispatch do
+    // diálogo é `g_editor.applyAsk && g_applyAsk.open` — setar SÓ o
+    // g_applyAsk deixava o diálogo NUNCA a abrir no C33 (o único lugar onde
+    // st.applyAsk ficava true eram os TESTES). O import parecia morto:
+    // sem toast, sem diálogo, sem aplicar — e os clips glTF (gltfAttach*)
+    // ficavam inatingíveis.
     Tic* tsel = g_scene.get(g_editor.selected);
     if (tsel && tsel->getComponent<MeshRenderer>()) {
         g_applyAsk.open = true;
         g_applyAsk.kind = e.kind;
         g_applyAsk.rel = rel;
         g_applyAsk.fileName = e.name;
+        g_editor.applyAsk = true;   // ← O FIX (a flag que faltava)
     } else {
         char msg[96];
         std::snprintf(msg, sizeof(msg), "importado: %s", rel.c_str());
@@ -893,10 +917,10 @@ void refreshCatalog() {
     std::vector<std::string> files;
     if (g_storage->listDir(Project::kDirMeshes, files)) {
         for (const std::string& f : files) {
-            const size_t dot = f.rfind('.');
-            const std::string ext = dot == std::string::npos ? "" : f.substr(dot + 1);
-            if (ext == "obj" || ext == "gltf" || ext == "glb" ||
-                ext == "OBJ" || ext == "glTF" || ext == "GLB") {
+            // 0.8.5: classificação CENTRALIZADA no fileapi (lowercase) —
+            // o filtro antigo comparava literais ("glTF", "GLB") e escondia
+            // casings mistos (.Glb/.OBJ) que o browser aceitava e importava
+            if (fileapi::kindOfExtension(f) == 'm') {
                 g_catalog.meshes.push_back(f);
             }
         }
@@ -904,9 +928,7 @@ void refreshCatalog() {
     files.clear();
     if (g_storage->listDir(Project::kDirTextures, files)) {
         for (const std::string& f : files) {
-            const size_t dot = f.rfind('.');
-            const std::string ext = dot == std::string::npos ? "" : f.substr(dot + 1);
-            if (ext == "png" || ext == "PNG") {
+            if (fileapi::kindOfExtension(f) == 't') {
                 g_catalog.textures.push_back(f);
             }
         }
@@ -1305,11 +1327,23 @@ void importCandidate(size_t idx) {
     const std::string rel = std::string(dir) + "/" + safe;
     if (g_storage->writeBytes(rel, bytes.data(), bytes.size())) {
         refreshCatalog();
-        char msg[96];
-        std::snprintf(msg, sizeof(msg), "importado: %s", rel.c_str());
-        showToast(msg);
         elog::info("fileapi: import %s (%zu bytes) de %s", rel.c_str(),
                    bytes.size(), c.path.c_str());
+        // 0.8.5: MESMO wiring do browserImportFile — aplicar-após-import
+        // com o diálogo (as DUAS flags: g_applyAsk E g_editor.applyAsk; era
+        // o 2.º caminho de import que também nunca perguntava)
+        Tic* tsel = g_scene.get(g_editor.selected);
+        if (tsel && tsel->getComponent<MeshRenderer>()) {
+            g_applyAsk.open = true;
+            g_applyAsk.kind = c.kind;
+            g_applyAsk.rel = rel;
+            g_applyAsk.fileName = c.name;
+            g_editor.applyAsk = true;
+        } else {
+            char msg[96];
+            std::snprintf(msg, sizeof(msg), "importado: %s", rel.c_str());
+            showToast(msg);
+        }
     } else {
         showToast("falha ao gravar no projeto");
         elog::error("fileapi: import %s — gravação no projeto falhou",

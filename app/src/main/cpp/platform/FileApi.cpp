@@ -175,11 +175,13 @@ bool listDirEntries(const std::string& dir, std::vector<DirEntry>& out) {
         de.isDir = isDir;
         if (isDir) {
             dirs.push_back(de);   // TODAS as diretorias (navegar = subir/descer)
-        } else if (kindOfExtension(name) != 0) {
+        } else {
+            // 0.8.5: TODOS os ficheiros entram (kind 0 = não suportado) —
+            // o dono vê o .fbx na lista e, ao tocar, recebe o erro CLARO
+            // "formato nao suportado ainda" (antes: invisíveis = silêncio)
             de.kind = kindOfExtension(name);
-            files.push_back(de);  // só ficheiros suportados
+            files.push_back(de);
         }
-        // ficheiro não suportado → fora da lista (o browser é de IMPORT)
     }
     ::closedir(d);
     std::sort(dirs.begin(), dirs.end(), entryNameLess);

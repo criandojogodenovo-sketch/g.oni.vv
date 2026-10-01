@@ -83,17 +83,19 @@ TEST(browser_listdir_entries_ordenado_e_filtrado) {
         EXPECT(!"opendir falhou na árvore de teste");
         return;
     }
-    // esperado: DIRETORIAS primeiro (adir, zdir — ordenadas), depois os
-    // ficheiros suportados (Foto.PNG, modelo.obj); notas.txt FORA
+    // esperado: DIRETORIAS primeiro (adir, zdir — ordenadas), depois TODOS
+    // os ficheiros (0.8.5: o não suportado entra com kind 0 — o dono vê o
+    // .txt/.fbx e, ao tocar, recebe o erro claro; antes: fora = silêncio)
     ASSERT_SIZE:;
-    EXPECT(out.size() == 4u);
-    if (out.size() < 4) {
+    EXPECT(out.size() == 5u);
+    if (out.size() < 5) {
         return;
     }
     EXPECT(out[0].isDir && out[0].name == "adir");
     EXPECT(out[1].isDir && out[1].name == "zdir");
     EXPECT(!out[2].isDir && out[2].kind == 't' && out[2].name == "Foto.PNG");
     EXPECT(!out[3].isDir && out[3].kind == 'm' && out[3].name == "modelo.obj");
+    EXPECT(!out[4].isDir && out[4].kind == 0 && out[4].name == "notas.txt");
     // paths absolutos montados
     EXPECT(out[0].path == t.root + "/adir");
     // SUBPASTA: o gltf aparece (o browser desce pastas dentro de pastas)
