@@ -99,6 +99,9 @@ struct UiInspRow {
         AnchorH,        // "ancora H: ..." (cicla esquerda/centro/direita)
         AnchorV,        // "ancora V: ..." (cicla topo/meio/fundo)
         TextBtn,        // "texto: ..." (abre o teclado)
+        HexBtn,         // 0.8.6: "hex: #RRGGBB" (abre o teclado hex)
+        FontScl,        // 0.8.6: slider "letra: Nx" (escala da fonte)
+        TStyleBtn,      // 0.8.6: "letra estilo: normal/negrito/italico"
         ActType,        // "acao: ..." (cicla none/show/hide/toggle/scene/spawn/trans)
         ActTarget,      // "alvo: ..." (abre o teclado)
         StyleBtn,       // 0.7.1: "estilo: fade|slide" (cicla) — acao trans
@@ -171,6 +174,19 @@ Handle ensureUiTic(Scene& scene, EditorState& st);
 void uiDetachElement(UiCanvas& c, i32 element, f32 sw, f32 sh,
                      const safe::Insets& ins);
 
+// ---- 0.8.6 — GIZMOS de UI: matemática PURA de escalar/rodar -----------------
+
+// ângulo do ponteiro em torno de (cx,cy), em GRAUS (atan2; -180..180)
+inline f32 uiGizmoAngleAt(f32 cx, f32 cy, f32 px, f32 py) {
+    return std::atan2(py - cy, px - cx) * 57.2957795131f;
+}
+
+// reancora o elemento para o RECT de design dado (w/h novos + ox/oy
+// derivados da âncora — o inverso de elementRect; o MESMO padrão do
+// uiDetachElement). Puro — os testes aferem as 6 combinações de âncoras.
+void uiGizmoScaleToRect(UiElement& e, const UiRect& newRect,
+                        f32 sw, f32 sh, const safe::Insets& ins);
+
 // ---- gestão de TICs (menu contextual + diálogos) ---------------------------------
 
 // menu contextual: devolve 0 nada / 1 Renomear / 2 Remover / 3 Duplicar /
@@ -218,7 +234,8 @@ void openTextInput(EditorState& st, int purpose, Handle tic, i32 element,
                    const char* initial);
 
 // aplica o buffer conforme o propósito (renomear TIC / texto de elemento /
-// alvo de ação). Devolve true se aplicou (o nome vazio NÃO se aplica).
+// alvo de ação / cor hex de elemento / cor hex de TIC). Devolve true se
+// aplicou (o nome vazio NÃO se aplica; hex inválido NÃO se aplica).
 // O propósito 1 (nome de cena) fica para o CHAMADOR (0.7.1 — precisa do
 // projeto, não da cena).
 bool commitTextInput(Scene& scene, EditorState& st);
@@ -227,6 +244,10 @@ bool commitTextInput(Scene& scene, EditorState& st);
 // da engine são PascalCase; o buffer fica uniforme), dígitos, '_', '-',
 // espaço. Filtro defensivo (o teclado só OFERECE estas teclas).
 bool uiTextCharAllowed(char c);
+
+// 0.8.6 — COR POR CÓDIGO: "#RRGGBB" ↔ RGB 0..1 (pure, afervel no CI)
+void uiHexFormat(const f32 rgb[3], char* out, u32 cap);
+bool uiHexParse(const char* s, f32 out[4]);
 
 // ---- 0.7.2: navegador de ficheiros + aplicar-após-import ------------------
 

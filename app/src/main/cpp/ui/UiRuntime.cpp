@@ -11,19 +11,37 @@
 #include <vector>
 #include "core/Scene.h"
 #include "ui/UiContext.h"
+#include <cmath>
 
 namespace vv {
 namespace ui {
+
+// 0.8.6: declarações antecipadas (definidas no fundo do ficheiro)
+bool uiRotatedRectHit(const UiRect& r, f32 rotDeg, f32 px, f32 py);
+UiRect uiGizmoCornerRect(const UiRect& r, u32 corner, f32 size);
+UiRect uiGizmoRotateHandleRect(const UiRect& r, f32 size);
+f32 uiGizmoSnapRot(f32 deg);
+
 namespace {
 
-// espelho mono dos tokens do tema (evita include de UiContext.h aqui —
-// drawElement recebe o UiContext por referência e usa os tokens de lá)
-constexpr f32 kLine = 0.1803922f;
-constexpr f32 kText = 0.9019608f;
+// (0.8.6: os tokens kLine/kText duplicados foram REMOVIDOS — o desenho usa
+// os tokens do tema de UiContext.h direto: UMA fonte de verdade)
 
 bool inRect(const UiRect& r, f32 x, f32 y) {
     return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
+
+// 0.8.6 — RAII da rotação por elemento (set/clear emparelhados; o clear
+// corre MESMO com break/early-return dentro do switch)
+struct ScopedQuadXform {
+    UiContext& ui;
+    ScopedQuadXform(UiContext& u, f32 cx, f32 cy, f32 radDeg) : ui(u) {
+        ui.setQuadXform(cx, cy, radDeg * 0.01745329252f);
+    }
+    ~ScopedQuadXform() { ui.clearQuadXform(); }
+    ScopedQuadXform(const ScopedQuadXform&) = delete;
+    ScopedQuadXform& operator=(const ScopedQuadXform&) = delete;
+};
 
 } // namespace
 
@@ -290,13 +308,49 @@ bool drawElement(UiContext& uictx, const UiElement& e, const UiRect& r,
     if (!e.visible || r.w <= 0.0f || r.h <= 0.0f) {
         return false;
     }
-    const f32 line[4] = {kLine, kLine, kLine, 1.0f};
-    const f32 text[4] = {kText, kText, kText, 1.0f};
+    const f32 line[4] = {theme::LINE[0], theme::LINE[1], theme::LINE[2], 1.0f};
+    const f32 text[4] = {theme::TEXT[0], theme::TEXT[1], theme::TEXT[2], 1.0f};
     // 0.7.4 — ESCALA DO CONTEXTO (paridade editor↔Play): no viewport 2D o
     // rect chega ESCALADO e TODOS os insetes/espessuras constantes deste
     // desenho escalam com ele (10*k, 20*k, molduras*k...) — o mini-canvas é
     // o Play REDUZIDO ao pixel; no Play k = 1 (comportamento 0.7.3 exato)
     const f32 k = uictx.textScale();
+
+    // 0.8.6 — ROTAÇÃO do elemento (não-containers): TODOS os quads emitidos
+    // abaixo (fundo/textura/texto) giram à volta do centro do rect. O clip
+    // dos filhos/scroll continua axis-aligned (documentado).
+    const bool rotated = e.rot != 0.0f && !uiElementIsContainer(e.kind);
+    const ScopedQuadXform xform(uictx, r.x + r.w * 0.5f, r.y + r.h * 0.5f,
+                                rotated ? e.rot : 0.0f);
+
+    // 0.8.6 — TEXTO COM TIPOGRAFIA do elemento (fitted + fonte/estilo):
+    // caminho comum de todos os textos DO elemento (o chrome do editor
+    // continua pelo labelFitted normal)
+    const bool styled = e.fontScale != 1.0f ||
+                        e.textStyle != UiElement::TextStyle::Normal;
+    auto fText = [&](f32 x, f32 baseY, const char* s, f32 maxW) {
+        if (!styled) {
+            uictx.labelFitted(x, baseY, s, text, maxW);
+            return;
+        }
+        const f32 fs = e.fontScale;
+        char buf[256];
+        textfit::ellipsize(s, maxW,
+                           [&](const char* t) {
+                               return uictx.fontWidth(t) * fs;
+                           },
+                           buf, sizeof(buf));
+        uictx.labelStyled(x, baseY, buf, text, fs,
+                          static_cast<u8>(e.textStyle));
+    };
+    // métricas ESCALADAS pela fonte do elemento (centragens verticais)
+    auto fMetrics = [&]() {
+        const TextMetrics tm = uictx.textMetrics();
+        if (!styled) {
+            return tm;
+        }
+        return TextMetrics{tm.ascent * e.fontScale, tm.descent * e.fontScale};
+    };
 
     switch (e.kind) {
         case UiElement::Kind::Panel:
@@ -320,11 +374,10 @@ bool drawElement(UiContext& uictx, const UiElement& e, const UiRect& r,
                 uictx.panel(r.x, r.y, r.w, r.h, e.color);
             }
             // texto centrado verticalmente, fitted à largura (nunca sai)
-            const TextMetrics tm = uictx.textMetrics();
+            const TextMetrics tmE = fMetrics();
             const f32 baseline =
-                r.y + (r.h - tm.block()) * 0.5f + tm.ascent;
-            uictx.labelFitted(r.x + 10.0f * k, baseline, e.text.c_str(), text,
-                              r.w - 20.0f * k);
+                r.y + (r.h - tmE.block()) * 0.5f + tmE.ascent;
+            fText(r.x + 10.0f * k, baseline, e.text.c_str(), r.w - 20.0f * k);
             break;
         }
 
@@ -338,11 +391,10 @@ bool drawElement(UiContext& uictx, const UiElement& e, const UiRect& r,
                 uictx.panel(r.x, r.y, r.w, r.h, e.color);
             }
             uictx.frame(r.x, r.y, r.w, r.h, 2.0f * k, text);
-            const TextMetrics tm = uictx.textMetrics();
+            const TextMetrics tmE = fMetrics();
             const f32 baseline =
-                r.y + (r.h - tm.block()) * 0.5f + tm.ascent;
-            uictx.labelFitted(r.x + 10.0f * k, baseline, e.text.c_str(), text,
-                              r.w - 20.0f * k);
+                r.y + (r.h - tmE.block()) * 0.5f + tmE.ascent;
+            fText(r.x + 10.0f * k, baseline, e.text.c_str(), r.w - 20.0f * k);
             break;
         }
 
@@ -391,7 +443,7 @@ bool drawElement(UiContext& uictx, const UiElement& e, const UiRect& r,
                 }
                 const f32 baseline =
                     row.y + (row.h - tm.block()) * 0.5f + tm.ascent;
-                const f32 tw = uictx.fontWidth(label.c_str());
+                const f32 tw = uictx.fontWidth(label.c_str()) * e.fontScale;
                 f32 tx = row.x + 10.0f * k;
                 if (e.align == UiElement::Align::Center) {
                     tx = row.x + (row.w - tw) * 0.5f;
@@ -399,10 +451,9 @@ bool drawElement(UiContext& uictx, const UiElement& e, const UiRect& r,
                     tx = row.x + row.w - 10.0f * k - tw;
                 }
                 if (e.align == UiElement::Align::Start) {
-                    uictx.labelFitted(tx, baseline, label.c_str(), text,
-                                      row.w - 20.0f * k);
+                    fText(tx, baseline, label.c_str(), row.w - 20.0f * k);
                 } else {
-                    uictx.label(tx, baseline, label.c_str(), text);
+                    fText(tx, baseline, label.c_str(), row.w);   // já centrado
                 }
             }
             break;
@@ -412,27 +463,26 @@ bool drawElement(UiContext& uictx, const UiElement& e, const UiRect& r,
             // panel + borda + label (título no topo)
             uictx.panel(r.x, r.y, r.w, r.h, e.color);
             uictx.frame(r.x, r.y, r.w, r.h, 2.0f * k, text);
-            const TextMetrics tm = uictx.textMetrics();
-            const f32 titleH = tm.block() + 12.0f * k;
+            const TextMetrics tmE = fMetrics();
+            const f32 titleH = tmE.block() + 12.0f * k;
             uictx.panel(r.x, r.y + titleH, r.w, 1.0f * k, line);
-            const f32 baseline = r.y + (titleH - tm.block()) * 0.5f + tm.ascent;
-            uictx.labelFitted(r.x + 10.0f * k, baseline, e.text.c_str(), text,
-                              r.w - 20.0f * k);
+            const f32 baseline = r.y + (titleH - tmE.block()) * 0.5f + tmE.ascent;
+            fText(r.x + 10.0f * k, baseline, e.text.c_str(), r.w - 20.0f * k);
             break;
         }
 
         case UiElement::Kind::Article: {
             // texto multilinha com wrap pela largura (greedy por palavras)
             uictx.panel(r.x, r.y, r.w, r.h, e.color);
-            const TextMetrics tm = uictx.textMetrics();
-            const f32 rowH = tm.block() + 4.0f * k;
+            const TextMetrics tmE = fMetrics();   // 0.8.6: métricas do elemento
+            const f32 rowH = tmE.block() + 4.0f * k;
             f32 cy = r.y + 8.0f * k;
             const char* p = e.text.c_str();
             char word[96];
             char lineBuf[256];
             lineBuf[0] = '\0';
             const f32 maxW = r.w - 20.0f * k;
-            while (*p && cy + tm.block() <= r.y + r.h) {
+            while (*p && cy + tmE.block() <= r.y + r.h) {
                 // palavra seguinte
                 int wl = 0;
                 while (*p && *p != ' ' && *p != '\n' && wl < 95) {
@@ -450,25 +500,23 @@ bool drawElement(UiContext& uictx, const UiElement& e, const UiRect& r,
                 } else {
                     std::snprintf(candidate, sizeof(candidate), "%s", word);
                 }
-                if (lineBuf[0] && uictx.fontWidth(candidate) > maxW) {
+                if (lineBuf[0] &&
+                    uictx.fontWidth(candidate) * e.fontScale > maxW) {
                     // linha cheia → emite e começa nova com a palavra
-                    uictx.labelFitted(r.x + 10.0f * k, cy + tm.ascent, lineBuf,
-                                      text, maxW);
+                    fText(r.x + 10.0f * k, cy + tmE.ascent, lineBuf, maxW);
                     cy += rowH;
                     std::snprintf(lineBuf, sizeof(lineBuf), "%s", word);
                 } else {
                     std::snprintf(lineBuf, sizeof(lineBuf), "%s", candidate);
                 }
                 if (hardBreak) {
-                    uictx.labelFitted(r.x + 10.0f * k, cy + tm.ascent, lineBuf,
-                                      text, maxW);
+                    fText(r.x + 10.0f * k, cy + tmE.ascent, lineBuf, maxW);
                     cy += rowH;
                     lineBuf[0] = '\0';
                 }
             }
-            if (lineBuf[0] && cy + tm.block() <= r.y + r.h) {
-                uictx.labelFitted(r.x + 10.0f * k, cy + tm.ascent, lineBuf,
-                                  text, maxW);
+            if (lineBuf[0] && cy + tmE.block() <= r.y + r.h) {
+                fText(r.x + 10.0f * k, cy + tmE.ascent, lineBuf, maxW);
             }
             break;
         }
@@ -549,7 +597,8 @@ CanvasHit hitTestCanvas(const Scene& scene, f32 x, f32 y, f32 sw, f32 sh,
                 continue;   // invisível (ou dentro de container escondido)
             }
             const UiRect r = L[i].rect;
-            if (!inRect(r, x, y)) {
+            // 0.8.6: elemento RODADO → hit no espaço do rect (inversa exata)
+            if (!uiRotatedRectHit(r, e.rot, x, y)) {
                 continue;
             }
             if (e.kind == UiElement::Kind::Button) {
@@ -726,6 +775,46 @@ UiActionResult applyUiAction(Scene& scene, const UiElement& e,
         }
     }
     return out;
+}
+
+
+// ---- 0.8.6 — GIZMOS de UI (escalar/rodar) + hit-test rodado -----------------
+
+// hit-test de um rect RODADO: o ponto é ANTI-rotacionado à volta do centro
+// e testado axis-aligned (a inversa exata do que o desenho faz)
+bool uiRotatedRectHit(const UiRect& r, f32 rotDeg, f32 px, f32 py) {
+    if (rotDeg == 0.0f) {
+        return inRect(r, px, py);
+    }
+    const f32 cx = r.x + r.w * 0.5f;
+    const f32 cy = r.y + r.h * 0.5f;
+    const f32 rad = rotDeg * -0.01745329252f;   // inversa = -ângulo
+    const f32 ca = std::cos(rad), sa = std::sin(rad);
+    const f32 dx = px - cx, dy = py - cy;
+    const f32 lx = cx + dx * ca - dy * sa;   // ponto no espaço do rect
+    const f32 ly = cy + dx * sa + dy * ca;
+    return inRect(r, lx, ly);
+}
+
+// handles nos CANTOS do rect (screen px): 0=TL 1=TR 2=BL 3=BR — centrados
+UiRect uiGizmoCornerRect(const UiRect& r, u32 corner, f32 size) {
+    static const f32 sx[4] = {0.0f, 1.0f, 0.0f, 1.0f};
+    static const f32 sy[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+    const f32 cx = r.x + r.w * sx[corner & 3];
+    const f32 cy = r.y + r.h * sy[corner & 3];
+    return {cx - size * 0.5f, cy - size * 0.5f, size, size};
+}
+
+// pega de ROTAÇÃO: acima do topo-centro, a 26 px do rect (handle "solto")
+UiRect uiGizmoRotateHandleRect(const UiRect& r, f32 size) {
+    const f32 cx = r.x + r.w * 0.5f;
+    const f32 cy = r.y - 26.0f;
+    return {cx - size * 0.5f, cy - size * 0.5f, size, size};
+}
+
+// snap 15° (o MESMO passo do snap de rotação dos gizmos 3D)
+f32 uiGizmoSnapRot(f32 deg) {
+    return std::round(deg / 15.0f) * 15.0f;
 }
 
 } // namespace ui

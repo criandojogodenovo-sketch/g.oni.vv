@@ -105,6 +105,20 @@ void resolveCanvasLayout(const UiCanvas& c, f32 sw, f32 sh,
 bool drawElement(UiContext& ui, const UiElement& e, const UiRect& r,
                  bool sel = false);
 
+// ---- 0.8.6 — GIZMOS de UI (escalar/rodar no modo UI, coerentes com os 3D) -----
+
+// hit-test de um rect RODADO (graus, horário, à volta do centro): o ponto
+// é ANTI-rotacionado para o espaço do rect e testado axis-aligned
+bool uiRotatedRectHit(const UiRect& r, f32 rotDeg, f32 px, f32 py);
+
+// handles do gizmo de UI (rects em px de ecrã, centrados nos CANTOS do
+// rect do elemento —já escalado no editor): corner 0=TL 1=TR 2=BL 3=BR
+UiRect uiGizmoCornerRect(const UiRect& r, u32 corner, f32 size);
+// pega de ROTAÇÃO: acima do topo-centro (dist fixa), quadradinho próprio
+UiRect uiGizmoRotateHandleRect(const UiRect& r, f32 size);
+// snap de rotação coerente com os gizmos 3D (15°)
+f32 uiGizmoSnapRot(f32 deg);
+
 // desenha o canvas inteiro no ecrã real (Play — UI por cima da cena; o
 // TIC tem de estar ativo E visível). Devolve o nº de elementos DESENHADOS
 // (invisíveis não contam).

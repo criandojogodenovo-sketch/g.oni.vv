@@ -19,6 +19,7 @@
 #include "ui/SafeArea.h"
 #include "ui/TextFit.h"
 #include "platform/InputState.h"
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -57,6 +58,21 @@ public:
 
     // widgets
     void panel(f32 x, f32 y, f32 w, f32 h, const f32 color[4]);
+    // 0.8.6 — TIPOGRAFIA por elemento: escala (×28 px base) + estilo
+    // (0 normal, 1 negrito, 2 itálico). O label() de sempre = styled a 1.0/0.
+    void labelStyled(f32 xBaseline, f32 yBaseline, const char* text,
+                     const f32 color[4], f32 fontScale, u8 style);
+    // 0.8.6 — ROTAÇÃO por elemento: os quads emitidos ENTRE set/clear giram
+    // à volta de (cx,cy) por rad radianos (o clip permanece axis-aligned;
+    // desligar SEMPRE no fim do elemento). Aninhamento: não — um nível só.
+    void setQuadXform(f32 cx, f32 cy, f32 rad) {
+        xformCx_ = cx;
+        xformCy_ = cy;
+        xformSin_ = std::sin(rad);
+        xformCos_ = std::cos(rad);
+        xformActive_ = true;
+    }
+    void clearQuadXform() { xformActive_ = false; }
     // 0.6.9 — segmento de ecrã com espessura (gizmos 3D projetados). Sem
     // clip (emitido FORA das regiões de scroll; o gizmo vive no viewport).
     void drawLine(f32 x0, f32 y0, f32 x1, f32 y1, f32 thickness,
@@ -248,6 +264,10 @@ private:
     // emite um quad recortado pelo clip_ (panel/label passam por aqui)
     bool emitTo(QuadBatch& b, f32 x, f32 y, f32 w, f32 h,
                 f32 u0, f32 v0, f32 u1, f32 v1, const f32 color[4]);
+    // 0.8.6: glifo com CANTOS EXPLÍCITOS (itálico) — o clip é aproximado
+    // pelo bounding rect do glifo e os cantos seguem a MESMA xform de rotação
+    void emitGlyphCorners(QuadBatch& b, const f32 px[6], const f32 py[6],
+                          f32 u0, f32 v0, f32 u1, f32 v1, const f32 color[4]);
     // 0.7.4: regista um RUN de submissão (ver runs_ abaixo). `tex` = 0 p/
     // sólidos (textura branca); `b` decide o batch (solids_ ou images_[i]).
     // Extende o run corrente quando é do MESMO batch+textura (batching
@@ -308,6 +328,11 @@ private:
     bool       tapValid_     = false;
     f32        tapX_ = 0.0f, tapY_ = 0.0f;
     i32        tapSlot_      = kNoScroll;   // F5.0-fix: slot dono do tap
+
+    // 0.8.6: transformação de quads por elemento (rotação à volta do centro)
+    bool xformActive_ = false;
+    f32  xformCx_ = 0.0f, xformCy_ = 0.0f;
+    f32  xformSin_ = 0.0f, xformCos_ = 1.0f;
 };
 
 } // namespace vv

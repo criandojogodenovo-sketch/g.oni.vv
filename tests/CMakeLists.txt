@@ -180,6 +180,9 @@ add_executable(test_core
         # com opções e save/load, troca de primitiva ×3 no render, fallback
         # multi-mesh #0 no GpuAssets, browser com não suportados)
         test_wiring085.cpp
+        # 0.8.6: wiring de UX (hex, tipografia no batch, gizmos de UI,
+        # round-trip de rot/fscale/tstyle, zero sobreposição em paisagem)
+        test_wiring086.cpp
         ${CORE_DIR}/ui/Icons.cpp
         # 0.7.7: câmara de cena (componente/invariante + gizmo do frustum)
         ${CORE_DIR}/core/CameraUtil.cpp

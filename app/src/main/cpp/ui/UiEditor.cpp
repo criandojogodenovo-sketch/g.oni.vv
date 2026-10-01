@@ -10,6 +10,8 @@
 //   • o teclado tem rects partilhados com os testes (keyboardLayout —
 //     FONTE ÚNICA) e vive DENTRO da safe-area.
 #include "ui/UiEditor.h"
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -200,6 +202,38 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
         }
     }
 
+    // ---- GIZMOS de UI (0.8.6): handles de ESCALAR (4 cantos) e RODAR
+    // (pega acima do topo-centro) do elemento selecionado — em px DE ECRÃ
+    // (tamanho de toque constante, coerentes com os gizmos 3D). Containers:
+    // só escala (rotação ignorada — dívida documentada).
+    UiRect selRs{};   // rect do selecionado em ECRÃ (para desenho + hit)
+    bool hasSel = false;
+    if (st.selElement >= 0 && st.selElement < static_cast<i32>(nLay) &&
+        lay[static_cast<size_t>(st.selElement)].shown) {
+        const UiRect& sr = lay[static_cast<size_t>(st.selElement)].rect;
+        selRs = UiRect{t.ox + sr.x * t.scale, t.oy + sr.y * t.scale,
+                       sr.w * t.scale, sr.h * t.scale};
+        hasSel = true;
+    }
+    if (hasSel) {
+        const UiElement& se =
+            canvas->elements[static_cast<size_t>(st.selElement)];
+        for (u32 cIdx = 0; cIdx < 4; ++cIdx) {
+            const UiRect h = ui::uiGizmoCornerRect(selRs, cIdx, 12.0f);
+            ui.panel(h.x, h.y, h.w, h.h, theme::ACCENT);
+            ui.frame(h.x, h.y, h.w, h.h, 1.0f, theme::BG);
+        }
+        if (!uiElementIsContainer(se.kind)) {
+            const UiRect rh = ui::uiGizmoRotateHandleRect(selRs, 12.0f);
+            // haste do handle ao topo-centro (visual de "ligado" ao elemento)
+            ui.drawLine(selRs.x + selRs.w * 0.5f, selRs.y,
+                        selRs.x + selRs.w * 0.5f, rh.y + rh.h, 1.0f,
+                        theme::ACCENT);
+            ui.panel(rh.x, rh.y, rh.w, rh.h, theme::ACCENT);
+            ui.frame(rh.x, rh.y, rh.w, rh.h, 1.0f, theme::BG);
+        }
+    }
+
     // ---- gesto WYSIWYG (slot 0; NÃO corre por baixo de overlays) ---------
     if (anyOverlayOpen(st)) {
         return;
@@ -218,6 +252,35 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
                 if (joy->relX > 1.0f) joy->relX = 1.0f;
                 if (joy->relY < 0.0f) joy->relY = 0.0f;
                 if (joy->relY > 1.0f) joy->relY = 1.0f;
+            } else if (st.elGizmoMode == 1 && st.selElement >= 0) {
+                // 0.8.6 — ESCALAR: o canto arrastado segue o dedo, o canto
+                // oposto fica FIXO (âncora capturada no press); w/h mín 8 px
+                UiElement& e =
+                    canvas->elements[static_cast<size_t>(st.selElement)];
+                const f32 dpx = uiViewportToDesignX(t, px);
+                const f32 dpy = uiViewportToDesignY(t, py);
+                const f32 nx = std::min(st.elGizAnchorX, dpx);
+                const f32 ny = std::min(st.elGizAnchorY, dpy);
+                const f32 nw =
+                    std::max(std::fabs(dpx - st.elGizAnchorX), 8.0f);
+                const f32 nh =
+                    std::max(std::fabs(dpy - st.elGizAnchorY), 8.0f);
+                uiGizmoScaleToRect(e, {nx, ny, nw, nh}, sw, sh, ins);
+            } else if (st.elGizmoMode == 2 && st.selElement >= 0 &&
+                       st.selElement < static_cast<i32>(nLay)) {
+                // 0.8.6 — RODAR: delta do ângulo do dedo à volta do centro
+                // + snap 15° (o MESMO passo do snap de rotação 3D)
+                UiElement& e =
+                    canvas->elements[static_cast<size_t>(st.selElement)];
+                const UiRect& sr =
+                    lay[static_cast<size_t>(st.selElement)].rect;
+                const f32 cx = sr.x + sr.w * 0.5f;
+                const f32 cy = sr.y + sr.h * 0.5f;
+                const f32 dpx = uiViewportToDesignX(t, px);
+                const f32 dpy = uiViewportToDesignY(t, py);
+                const f32 ang = uiGizmoAngleAt(cx, cy, dpx, dpy);
+                e.rot = ui::uiGizmoSnapRot(st.elGizStartRot +
+                                       (ang - st.elGizStartAng));
             } else if (st.selElement >= 0) {
                 UiElement& e =
                     canvas->elements[static_cast<size_t>(st.selElement)];
@@ -235,6 +298,7 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
             st.elDragY = py;
         } else {
             st.elDrag = false;
+            st.elGizmoMode = 0;   // 0.8.6: o gesto termina em mover
         }
         return;
     }
@@ -243,10 +307,54 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
         in.pos(0, px, py);
         if (px >= view.x && px < view.x + view.w && py >= view.y &&
             py < view.y + view.h) {
+            // 0.8.6 — os HANDLES do elemento selecionado têm PRIORIDADE
+            // (o press num canto/pega NÃO desseleciona nem seleciona outro)
+            if (hasSel) {
+                bool gizmoHit = false;
+                for (u32 cIdx = 0; cIdx < 4 && !gizmoHit; ++cIdx) {
+                    const UiRect cr = ui::uiGizmoCornerRect(selRs, cIdx, 18.0f);
+                    if (px >= cr.x && px < cr.x + cr.w && py >= cr.y &&
+                        py < cr.y + cr.h) {
+                        // canto OPOSTO = âncora fixa da escala (em DESIGN)
+                        static const u32 kOpp[4] = {3, 2, 1, 0};
+                        const UiRect opp =
+                            ui::uiGizmoCornerRect(selRs, kOpp[cIdx], 0.0f);
+                        st.elGizmoMode = 1;
+                        st.elGizAnchorX = uiViewportToDesignX(t, opp.x);
+                        st.elGizAnchorY = uiViewportToDesignY(t, opp.y);
+                        gizmoHit = true;
+                    }
+                }
+                const UiElement& se =
+                    canvas->elements[static_cast<size_t>(st.selElement)];
+                if (!gizmoHit && !uiElementIsContainer(se.kind)) {
+                    const UiRect rh = ui::uiGizmoRotateHandleRect(selRs, 18.0f);
+                    if (px >= rh.x && px < rh.x + rh.w && py >= rh.y &&
+                        py < rh.y + rh.h) {
+                        st.elGizmoMode = 2;
+                        const UiRect& sr =
+                            lay[static_cast<size_t>(st.selElement)].rect;
+                        const f32 cx = sr.x + sr.w * 0.5f;
+                        const f32 cy = sr.y + sr.h * 0.5f;
+                        st.elGizStartAng = uiGizmoAngleAt(
+                            cx, cy, uiViewportToDesignX(t, px),
+                            uiViewportToDesignY(t, py));
+                        st.elGizStartRot = se.rot;
+                        gizmoHit = true;
+                    }
+                }
+                if (gizmoHit) {
+                    st.elDrag = true;
+                    st.elDragX = px;
+                    st.elDragY = py;
+                    return;
+                }
+            }
             const f32 dx = uiViewportToDesignX(t, px);
             const f32 dy = uiViewportToDesignY(t, py);
             // o de CIMA ganha (hit-test reverso à ordem de desenho) — nos
-            // rects RESOLVIDOS (containers incluídos: filhos selecionáveis)
+            // rects RESOLVIDOS (containers incluídos: filhos selecionáveis);
+            // 0.8.6: elementos RODADOS hit-testam no espaço do rect
             i32 hit = -1;
             for (i32 i = static_cast<i32>(canvas->elements.size()) - 1;
                  i >= 0; --i) {
@@ -257,8 +365,7 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
                     continue;
                 }
                 const UiRect& r = lay[i].rect;
-                if (dx >= r.x && dx < r.x + r.w && dy >= r.y &&
-                    dy < r.y + r.h) {
+                if (ui::uiRotatedRectHit(r, canvas->elements[i].rot, dx, dy)) {
                     hit = i;
                     break;
                 }
@@ -389,6 +496,7 @@ u32 uiInspectorPlan(const UiElement& e, const TextMetrics& m, UiInspRow* rows,
     push(UiInspRow::Kind::ColG, sldH, kUiInspG);
     push(UiInspRow::Kind::ColB, sldH, kUiInspB);
     push(UiInspRow::Kind::ColA, sldH, kUiInspA);   // 0.7.4: alpha do fundo
+    push(UiInspRow::Kind::HexBtn, btnH, kUiInspHex);   // 0.8.6: cor por hex
     push(UiInspRow::Kind::VisToggle, btnH, kUiInspVis);
     if (!child) {
         push(UiInspRow::Kind::AnchorH, btnH, kUiInspAnchH);
@@ -396,6 +504,9 @@ u32 uiInspectorPlan(const UiElement& e, const TextMetrics& m, UiInspRow* rows,
     }
     if (uiElementHasText(e.kind)) {
         push(UiInspRow::Kind::TextBtn, btnH, kUiInspText);
+        // 0.8.6 — TIPOGRAFIA do texto do elemento
+        push(UiInspRow::Kind::FontScl, sldH, kUiInspFont);
+        push(UiInspRow::Kind::TStyleBtn, btnH, kUiInspTStyle);
     }
     if (uiElementHasAction(e.kind)) {
         push(UiInspRow::Kind::ActType, btnH, kUiInspAct);
@@ -424,8 +535,8 @@ u32 uiInspectorPlan(const UiElement& e, const TextMetrics& m, UiInspRow* rows,
 }
 
 f32 uiInspectorContentHeight(const UiElement& e, const TextMetrics& m) {
-    UiInspRow rows[24];
-    const u32 n = uiInspectorPlan(e, m, rows, 24);
+    UiInspRow rows[32];
+    const u32 n = uiInspectorPlan(e, m, rows, 32);
     if (n == 0) {
         return 0.0f;
     }
@@ -628,8 +739,8 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
 
     // ---- PLANO (fonte única — o mesmo contrato do Inspector de TICs)
     const u32 nRows = uiInspectorRowCount(e, tm);
-    UiInspRow plan[24];
-    const u32 n = uiInspectorPlan(e, tm, plan, 24);
+    UiInspRow plan[32];
+    const u32 n = uiInspectorPlan(e, tm, plan, 32);
     const f32 contentH = uiInspectorContentHeight(e, tm);
     const f32 contentTop = y + kHeaderH + 4.0f;
     ui.beginScroll(kUiInspScrollId, {x, contentTop, w, h - kHeaderH - 4.0f},
@@ -709,6 +820,33 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                             e.color[3], "%.2f")) {
                 edited = true;
             }
+            break;
+        }
+        case UiInspRow::Kind::HexBtn: {
+            // 0.8.6 — COR POR CÓDIGO: mostra o hex atual; tocar abre o
+            // teclado (em modo hex — ver drawTextInput) para editar
+            char hex[12];
+            uiHexFormat(e.color, hex, sizeof(hex));
+            char label[40];
+            std::snprintf(label, sizeof(label), "hex: %s", hex);
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      label);
+            break;
+        }
+        case UiInspRow::Kind::FontScl:
+            // 0.8.6 — TAMANHO DA LETRA do texto do elemento (×base 28 px)
+            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "letra", 0.5f, 3.0f,
+                            e.fontScale, "%.2fx")) {
+                edited = true;
+            }
+            break;
+        case UiInspRow::Kind::TStyleBtn: {
+            // 0.8.6 — ESTILO DA LETRA: normal → negrito → itálico → normal
+            char label[48];
+            std::snprintf(label, sizeof(label), "letra estilo: %s",
+                          uiTextStyleName(e.textStyle));
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      label);
             break;
         }
         case UiInspRow::Kind::VisToggle: {
@@ -839,6 +977,7 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                 r.kind == UiInspRow::Kind::SizeW || r.kind == UiInspRow::Kind::SizeH ||
                 r.kind == UiInspRow::Kind::ColR || r.kind == UiInspRow::Kind::ColG ||
                 r.kind == UiInspRow::Kind::ColB || r.kind == UiInspRow::Kind::ColA ||
+                r.kind == UiInspRow::Kind::FontScl ||
                 r.kind == UiInspRow::Kind::Spacing || r.kind == UiInspRow::Kind::Pad ||
                 r.kind == UiInspRow::Kind::Name) {
                 continue;   // sliders capturam o gesto diretamente
@@ -878,6 +1017,21 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                 case UiInspRow::Kind::TextBtn:
                     openTextInput(st, 2, st.selected, st.selElement,
                                   e.text.c_str());
+                    break;
+                case UiInspRow::Kind::HexBtn:
+                    // 0.8.6 — teclado em MODO HEX (propósito 4) com o hex
+                    // atual pré-carregado; inválido = estado fica como estava
+                    {
+                        char cur[12];
+                        uiHexFormat(e.color, cur, sizeof(cur));
+                        openTextInput(st, 4, st.selected, st.selElement, cur);
+                    }
+                    break;
+                case UiInspRow::Kind::TStyleBtn:
+                    // 0.8.6 — normal → negrito → itálico → normal
+                    e.textStyle = static_cast<UiElement::TextStyle>(
+                        (static_cast<u32>(e.textStyle) + 1u) % 3u);
+                    edited = true;
                     break;
                 case UiInspRow::Kind::ActType: {
                     // cicla none → show → hide → toggle → scene → spawn →
@@ -1049,6 +1203,37 @@ void uiDetachElement(UiCanvas& c, i32 element, f32 sw, f32 sh,
     e.anchorV = UiElement::AnchorV::Top;
     e.ox = r.x - ins.left;   // elementRect(Left/Top) = ins + ox → ox = r − ins
     e.oy = r.y - ins.top;
+}
+
+// 0.8.6 — reancora o elemento para o rect de design dado (o inverso de
+// elementRect, as 6 combinações de âncora; usado pelo gizmo de ESCALAR:
+// w/h novos + ox/oy derivados de modo que o rect FIQUE onde o gizmo pôs)
+void uiGizmoScaleToRect(UiElement& e, const UiRect& nr,
+                        f32 sw, f32 sh, const safe::Insets& ins) {
+    e.w = nr.w;
+    e.h = nr.h;
+    switch (e.anchorH) {
+        case UiElement::AnchorH::Left:
+            e.ox = nr.x - ins.left;              // x = ins.left + ox
+            break;
+        case UiElement::AnchorH::Center:
+            e.ox = nr.x - sw * 0.5f;             // x = sw*0.5 + ox
+            break;
+        case UiElement::AnchorH::Right:
+            e.ox = nr.x + nr.w - (sw - ins.right);   // x = sw−ins.right−w+ox
+            break;
+    }
+    switch (e.anchorV) {
+        case UiElement::AnchorV::Top:
+            e.oy = nr.y - ins.top;               // y = ins.top + oy
+            break;
+        case UiElement::AnchorV::Middle:
+            e.oy = nr.y - sh * 0.5f;             // y = sh*0.5 + oy
+            break;
+        case UiElement::AnchorV::Bottom:
+            e.oy = nr.y + nr.h - (sh - ins.bottom);  // y = sh−ins.bottom−h+oy
+            break;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1292,6 +1477,53 @@ bool uiTextCharAllowed(char c) {
            (c >= '0' && c <= '9') || c == '_' || c == '-' || c == ' ';
 }
 
+// ---- 0.8.6 — COR POR CÓDIGO HEX (#RRGGBB) ----------------------------------
+
+// formata a cor (RGB 0..1) como "#RRGGBB" (maiúsculas — o atlas é upper)
+void uiHexFormat(const f32 rgb[3], char* out, u32 cap) {
+    if (!out || cap == 0) {
+        return;
+    }
+    const int r = std::clamp(int(rgb[0] * 255.0f + 0.5f), 0, 255);
+    const int g = std::clamp(int(rgb[1] * 255.0f + 0.5f), 0, 255);
+    const int b = std::clamp(int(rgb[2] * 255.0f + 0.5f), 0, 255);
+    std::snprintf(out, cap, "#%02X%02X%02X", r, g, b);
+}
+
+// parse de "#RRGGBB" (ou "RRGGBB" sem cardinal; case-insensitive).
+// true = ok (out[0..2] = RGB 0..1, out[3] intocado); false = inválido.
+bool uiHexParse(const char* s, f32 out[4]) {
+    if (!s || !out) {
+        return false;
+    }
+    if (s[0] == '#') {
+        ++s;
+    }
+    size_t n = std::strlen(s);
+    if (n != 6) {
+        return false;
+    }
+    u32 v = 0;
+    for (size_t i = 0; i < n; ++i) {
+        const char c = s[i];
+        u32 d;
+        if (c >= '0' && c <= '9') {
+            d = static_cast<u32>(c - '0');
+        } else if (c >= 'A' && c <= 'F') {
+            d = static_cast<u32>(c - 'A' + 10);
+        } else if (c >= 'a' && c <= 'f') {
+            d = static_cast<u32>(c - 'a' + 10);
+        } else {
+            return false;
+        }
+        v = (v << 4) | d;
+    }
+    out[0] = static_cast<f32>((v >> 16) & 0xFF) / 255.0f;
+    out[1] = static_cast<f32>((v >> 8) & 0xFF) / 255.0f;
+    out[2] = static_cast<f32>(v & 0xFF) / 255.0f;
+    return true;
+}
+
 int drawTextInput(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                   EditorState& st, const char* title) {
     const KeyboardLayout k = keyboardLayout(sw, sh, ui.safeArea());
@@ -1352,13 +1584,23 @@ int drawTextInput(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         typeChar(' ');
     }
     // 0.7.5 — toggle de CASO abc/ABC: o rótulo mostra o ESTADO SEGUINTE
-    // (maiúsculas ativas → "abc" disponível); NÃO escreve no buffer
+    // (maiúsculas ativas → "abc" disponível); NÃO escreve no buffer.
+    // 0.8.6: em modo HEX (propósitos 4/5) a tecla vira "#" (o cardinal do
+    // código) — a geometria é a mesma, o CARÁTER é do modo.
+    const bool hexMode = st.textPurpose == 4 || st.textPurpose == 5;
     if (ui.button(kKbCaseId, k.caseKey.x, k.caseKey.y, k.caseKey.w,
-                  k.caseKey.h, st.kbLower ? "ABC" : "abc")) {
-        st.kbLower = !st.kbLower;
+                  k.caseKey.h,
+                  hexMode ? "#" : (st.kbLower ? "ABC" : "abc"))) {
+        if (hexMode) {
+            typeChar('#');
+        } else {
+            st.kbLower = !st.kbLower;
+        }
     }
-    if (ui.button(kKbDashId, k.dash.x, k.dash.y, k.dash.w, k.dash.h, "-")) {
-        typeChar('-');
+    if (ui.button(kKbDashId, k.dash.x, k.dash.y, k.dash.w, k.dash.h,
+                  hexMode ? "." : "-")) {
+        typeChar(hexMode ? '.' : '-');   // 0.8.6: hex não usa '-' — ponto é
+                                         // inofensivo (o parse rejeita)
     }
     if (ui.button(kKbBackId, k.back.x, k.back.y, k.back.w, k.back.h, "APAGA")) {
         if (st.textLen > 0) {
@@ -1439,6 +1681,38 @@ bool commitTextInput(Scene& scene, EditorState& st) {
             }
             canvas->elements[static_cast<size_t>(st.textElement)].target =
                 st.textBuf;
+            return true;
+        }
+        case 4: {   // 0.8.6: cor do ELEMENTO por hex (#RRGGBB)
+            Tic* tic = scene.get(st.textTic);
+            UiCanvas* canvas = tic ? tic->getComponent<UiCanvas>() : nullptr;
+            if (!canvas || st.textElement < 0 ||
+                st.textElement >= static_cast<i32>(canvas->elements.size())) {
+                return false;
+            }
+            f32 rgba[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+            if (!uiHexParse(st.textBuf, rgba)) {
+                return false;   // inválido: o estado fica como estava
+            }
+            UiElement& e = canvas->elements[static_cast<size_t>(st.textElement)];
+            e.color[0] = rgba[0];
+            e.color[1] = rgba[1];
+            e.color[2] = rgba[2];
+            return true;
+        }
+        case 5: {   // 0.8.6: cor do TIC (tint do MeshRenderer) por hex
+            Tic* tic = scene.get(st.textTic);
+            MeshRenderer* mr = tic ? tic->getComponent<MeshRenderer>() : nullptr;
+            if (!mr) {
+                return false;
+            }
+            f32 rgba[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+            if (!uiHexParse(st.textBuf, rgba)) {
+                return false;
+            }
+            mr->tint[0] = rgba[0];
+            mr->tint[1] = rgba[1];
+            mr->tint[2] = rgba[2];
             return true;
         }
         default:

@@ -13,6 +13,14 @@ o código que a suíte host não consegue instanciar):
   5. os botões do topo usam o CONTORNO de marca #8AB4F8 (setStroke) sobre
      fundo escuro — nada do gradiente cinza do tema do sistema;
   6. o rótulo da pasta nos diálogos passa por ProjectsFormat.folderLabel.
+
+0.8.6 — Theme uniforme + página inicial limpa:
+  7. os TOKENS do Theme vivem em constantes (BRAND/BG/TEXT/TEXT_DIM/
+     SURFACE/LINE) — nenhum outro hex inline no código (fora das constantes);
+  8. os AlertDialogs correm num ContextThemeWrapper ESCURO (o manifest é
+     claro — sem o wrapper a identidade quebra);
+  9. hierarquia visual: título + subtítulo + "Meus projetos" (a tela diz
+     o que é e organiza criar/importar/lista).
 """
 import re
 import sys
@@ -90,6 +98,37 @@ def main():
         bad += fail("ProjectsFormat.folderLabel não trata o prefixo interno")
     else:
         print("OK  folderLabel trata o prefixo interno de armazenamento")
+
+    # 7) 0.8.6 — TOKENS do Theme em constantes únicas (sem hex espalhado)
+    for tok in ("BRAND = 0xFF8AB4F8", "BG = 0xFF0B0E13", "TEXT = 0xFFE6E6E6",
+                "TEXT_DIM = 0xFF8A939B", "SURFACE = 0xFF1E222A",
+                "LINE = 0xFF232A31"):
+        if tok not in code:
+            bad += fail(f"token do Theme ausente: {tok.split(' = ')[0]}")
+    hexes = re.findall(r"0x[0-9A-Fa-f]{8}", code)
+    allowed = sum(1 for h in hexes if h.upper() in
+                  ("0XFF8AB4F8", "0XFF0B0E13", "0XFFE6E6E6", "0XFF8A939B",
+                   "0XFF1E222A", "0XFF232A31"))
+    if len(hexes) != allowed:
+        bad += fail(f"hex inline fora dos tokens do Theme: {len(hexes) - allowed}")
+    elif bad == 0:
+        print("OK  tokens do Theme centralizados (BRAND/BG/TEXT/TEXT_DIM/SURFACE/LINE)")
+
+    # 8) 0.8.6 — DIÁLOGOS ESCUROS (ContextThemeWrapper em TODOS os builders)
+    n_builders = len(re.findall(r"new AlertDialog\.Builder\(", code))
+    n_dark = len(re.findall(r"new AlertDialog\.Builder\(\s*new\s+android\.view\.ContextThemeWrapper", code))
+    if n_builders == 0 or n_builders != n_dark:
+        bad += fail(f"AlertDialogs fora do wrapper escuro: {n_dark}/{n_builders}")
+    else:
+        print("OK  todos os AlertDialogs no ContextThemeWrapper escuro")
+
+    # 9) 0.8.6 — hierarquia visual (título + subtítulo + cabeçalho da lista)
+    for frag in ('title.setText("G.One VV")', 'subtitle.setText(',
+                 'header.setText("Meus projetos")'):
+        if frag not in code:
+            bad += fail(f"hierarquia da página inicial: falta {frag}")
+    if bad == 0:
+        print("OK  página inicial: título + subtítulo + ações + lista")
 
     print("PROJECTS UI CHECK:", "OK" if bad == 0 else f"{bad} falha(s)")
     return 1 if bad else 0

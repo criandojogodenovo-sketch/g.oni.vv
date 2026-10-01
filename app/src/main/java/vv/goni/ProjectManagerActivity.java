@@ -48,6 +48,16 @@ import java.util.List;
  *     exceção documentada do Theme central);
  *   • nenhum emoji.
  *
+ * REGRAS 0.8.6 (Theme uniforme + página inicial limpa):
+ *   • os TOKENS da marca vivem em CONSTANTES únicas (BRAND/BG/TEXT/TEXT_DIM/
+ *     SURFACE/LINE) — os hex inline espalhados MORRERAM; são o espelho Java
+ *     do Theme.h da engine (mono + brand);
+ *   • os AlertDialogs herdam o tema CLARO do manifest → agora correm num
+ *     ContextThemeWrapper ESCURO (Theme_DeviceDefault_Dialog): título,
+ *     mensagem e botões coerentes com o resto da app;
+ *   • hierarquia visual: título de marca + subtítulo discreto, ações no
+ *     topo, lista com NOME (claro) + data (discreto) e empty-state com CTA.
+ *
  * Fluxos: [Novo projeto] → nome (diálogo) → picker SAF da pasta DESTE
  * projeto; [Importar projeto] → picker SAF direto (pasta que JÁ é um
  * projeto .goni — o nome vem da própria pasta). Toque abre; long-press
@@ -62,9 +72,18 @@ public class ProjectManagerActivity extends Activity {
     // o onActivityResult saber qual foi
     static final int REQ_PICK_TREE_IMPORT = 4303;
 
-    // cor de marca do editor 0.7.6 (#8AB4F8) + fundo escuro (#0B0E13)
+    // 0.8.6 — TOKENS do Theme (espelho Java do ui/Theme.h — UMA fonte de
+    // verdade por plataforma; nada de hex inline espalhado):
+    //   brand   #8AB4F8 (a exceção documentada ao mono — ações/contorno)
+    //   bg      #0B0E13 (fundo da app — o mesmo BG do Theme)
+    //   text    #E6E6E6 / textDim #8A939B (texto primário/discreto)
+    //   surface #1E222A (campos/inputs)  line #232A31 (divisores)
     private static final int BRAND = 0xFF8AB4F8;
     private static final int BG = 0xFF0B0E13;
+    private static final int TEXT = 0xFFE6E6E6;
+    private static final int TEXT_DIM = 0xFF8A939B;
+    private static final int SURFACE = 0xFF1E222A;
+    private static final int LINE = 0xFF232A31;
 
     private final List<VvProjects.Entry> projects = new ArrayList<>();
     private ArrayAdapter<String> adapter;
@@ -83,10 +102,20 @@ public class ProjectManagerActivity extends Activity {
 
         TextView title = new TextView(this);
         title.setText("G.One VV");
-        title.setTextColor(0xFFF2F2F2);
-        title.setTextSize(20);
-        title.setPadding(dp(4), dp(2), 0, dp(8));
+        title.setTextColor(TEXT);
+        title.setTextSize(22);
+        title.setPadding(dp(4), dp(2), 0, dp(2));
         root.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // 0.8.6 — subtítulo discreto (o launcher diz o que é, sem ruído)
+        TextView subtitle = new TextView(this);
+        subtitle.setText("editor de jogos no telemóvel");
+        subtitle.setTextColor(TEXT_DIM);
+        subtitle.setTextSize(13);
+        subtitle.setPadding(dp(4), 0, 0, dp(10));
+        root.addView(subtitle, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -121,7 +150,7 @@ public class ProjectManagerActivity extends Activity {
         // ---- cabeçalho da lista -------------------------------------------
         TextView header = new TextView(this);
         header.setText("Meus projetos");
-        header.setTextColor(0xFF8A939B);
+        header.setTextColor(TEXT_DIM);
         header.setTextSize(13);
         header.setPadding(dp(4), dp(14), dp(4), dp(6));
         root.addView(header, new LinearLayout.LayoutParams(
@@ -131,7 +160,7 @@ public class ProjectManagerActivity extends Activity {
         // corpo: lista + empty-state sobrepostos (FrameLayout)
         FrameLayout body = new FrameLayout(this);
         list = new ListView(this);
-        list.setDivider(new android.graphics.drawable.ColorDrawable(0xFF232A31));
+        list.setDivider(new android.graphics.drawable.ColorDrawable(LINE));
         list.setDividerHeight(dp(1));
         adapter = new ArrayAdapter<String>(this,
                 android.R.layout.simple_list_item_2) {
@@ -150,13 +179,13 @@ public class ProjectManagerActivity extends Activity {
                 VvProjects.Entry e = projects.get(pos);
                 TextView l1 = item.getText1();
                 l1.setText(e.name);
-                l1.setTextColor(0xFFE6E6E6);
+                l1.setTextColor(TEXT);
                 l1.setTextSize(17);
                 TextView l2 = item.getText2();
                 String d = ProjectsFormat.dateLabel(
                         e.editedAt > 0 ? e.editedAt : e.createdAt);
                 l2.setText(d.isEmpty() ? "—" : d);
-                l2.setTextColor(0xFF8A939B);
+                l2.setTextColor(TEXT_DIM);
                 l2.setTextSize(13);
                 item.setPadding(dp(6), dp(8), dp(6), dp(8));
                 return item;
@@ -181,8 +210,8 @@ public class ProjectManagerActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
         empty = new TextView(this);
-        empty.setText("Nenhum projeto.\nToque em “Novo projeto” para começar.");
-        empty.setTextColor(0xFF8A939B);
+        empty.setText("Nenhum projeto ainda.\nToque em “Novo projeto” para começar.");
+        empty.setTextColor(TEXT_DIM);
         empty.setTextSize(15);
         empty.setGravity(Gravity.CENTER);
         empty.setVisibility(View.GONE);
@@ -244,13 +273,18 @@ public class ProjectManagerActivity extends Activity {
         input.setSingleLine(true);
         input.setText(pendingName);
         input.setSelection(input.getText().length());
-        // contraste garantido (o diálogo herda o tema CLARO do manifest)
-        input.setBackgroundColor(0xFF1E222A);
-        input.setTextColor(0xFFE6E6E6);
-        input.setHintTextColor(0xFF8A939B);
+        // contraste garantido pelos TOKENS (o wrapper escuro + estilo próprio)
+        input.setBackgroundColor(SURFACE);
+        input.setTextColor(TEXT);
+        input.setHintTextColor(TEXT_DIM);
         input.setHint("nome do projeto");
         input.setPadding(dp(12), dp(10), dp(12), dp(10));
-        new AlertDialog.Builder(this)
+        // 0.8.6 — DIÁLOGOS ESCUROS: o builder corre num ContextThemeWrapper
+        // com o tema DeviceDefault ESCURO (o manifest é Fullscreen claro —
+        // sem o wrapper o título/mensagem/botões saíam claros e quebravam a
+        // identidade). O input mantém o estilo próprio (tokens do Theme).
+        new AlertDialog.Builder(new android.view.ContextThemeWrapper(this,
+                android.R.style.Theme_DeviceDefault_Dialog))
                 .setTitle("Nome do projeto")
                 .setMessage("No passo seguinte escolha a PASTA onde este projeto fica (só dele).")
                 .setView(input)
@@ -344,7 +378,9 @@ public class ProjectManagerActivity extends Activity {
             return;
         }
         final VvProjects.Entry e = projects.get(pos);
-        new AlertDialog.Builder(this)
+        // 0.8.6: MESMO wrapper escuro dos diálogos (identidade uniforme)
+        new AlertDialog.Builder(new android.view.ContextThemeWrapper(this,
+                android.R.style.Theme_DeviceDefault_Dialog))
                 .setTitle(e.name)
                 .setMessage(ProjectsFormat.folderLabel(e.uri))
                 .setNeutralButton("Remover da lista", (d, w) -> {
@@ -371,7 +407,9 @@ public class ProjectManagerActivity extends Activity {
 
     /** 0.6.7 — confirmação EXPLÍCITA antes de apagar a pasta de verdade */
     private void confirmDelete(VvProjects.Entry e) {
-        new AlertDialog.Builder(this)
+        // 0.8.6: MESMO wrapper escuro dos diálogos
+        new AlertDialog.Builder(new android.view.ContextThemeWrapper(this,
+                android.R.style.Theme_DeviceDefault_Dialog))
                 .setTitle("Apagar projeto")
                 .setMessage("Apagar projeto “" + e.name + "”?\n\n"
                         + "A PASTA e TODOS os ficheiros do projeto são "

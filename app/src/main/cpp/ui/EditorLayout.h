@@ -58,6 +58,7 @@ constexpr u64 kInspectorMeshSel    = 5001;   // F5-E: linha "mesh: …"
 constexpr u64 kInspectorTexSel     = 5002;   // F5-E: linha "tex: …"
 constexpr u64 kInspectorVis        = 5200;   // 0.7.0: "visivel: sim/nao"
 constexpr u64 kInspectorColBase    = 5300;   // 0.7.0: sliders R/G/B (+i)
+constexpr u64 kInspectorColHex     = 5303;   // 0.8.6: "hex: #RRGGBB" do tint
 // 0.7.7 — inspector da CÂMARA (sliders + botões; faixa 5400..5419)
 constexpr u64 kInspectorCamFov     = 5400;
 constexpr u64 kInspectorCamNear    = 5401;
@@ -160,6 +161,7 @@ struct InspRow {
         AddTc,       // botão "add TouchControls" no fundo
         VisToggle,   // 0.7.0: "visivel: sim/nao" (checkbox do TIC)
         ColorSlider, // 0.7.0: sliders R/G/B do tint do MeshRenderer
+        ColorHex,    // 0.8.6: "hex: #RRGGBB" do tint (abre o teclado hex)
         // 0.7.7 — câmara de cena
         CamSection,  // cabeçalho "Camera" + separador
         CamFov,      // slider fov (graus, 1..170)
@@ -191,6 +193,7 @@ inline u32 inspectorRowCount(const InspProfile& p, bool selectable) {
     if (p.mr) {
         n += 2 + 3;                                    // mesh + tex + R/G/B
         n += 1;                                         // 0.8.0: linha "prim:"
+        n += 1;                                         // 0.8.6: linha hex
         if (p.prim) {
             n += 1;                                     // raio/tam
             if (primUsesHeight(p.primKind)) n += 1;     // altura
@@ -268,6 +271,8 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
         for (u32 i = 0; i < 3; ++i) {
             push(InspRow::Kind::ColorSlider, sldH, kInspectorColBase + i);
         }
+        // 0.8.6 — cor por CÓDIGO (o teclado em modo hex aplica ao tint)
+        push(InspRow::Kind::ColorHex, btnH, kInspectorColHex);
     }
     if (p.im) {
         push(InspRow::Kind::Label, textH, 0);           // input:
@@ -426,6 +431,9 @@ constexpr u64 kUiInspPad    = 8019;   // 0.7.4: padding (containers)
 constexpr u64 kUiInspTex    = 8028;   // 0.7.4: "tex: …" (Panel/Button/Image)
 constexpr u64 kUiInspParent = 8029;   // 0.7.4: "colocar em: …" (filho de)
 constexpr u64 kUiInspAlign  = 8031;   // 0.7.4: "alinhamento: start/center/end"
+constexpr u64 kUiInspHex    = 8032;   // 0.8.6: "hex: #RRGGBB" (teclado hex)
+constexpr u64 kUiInspFont   = 8033;   // 0.8.6: "letra: Nx" (escala da fonte)
+constexpr u64 kUiInspTStyle = 8034;   // 0.8.6: "letra estilo" (cicla)
 // 0.7.3 — inspector do JOYSTICK (TouchControls editável)
 constexpr u64 kJoyX      = 8020;   // pos X (fração da área útil 0..1)
 constexpr u64 kJoyY      = 8021;

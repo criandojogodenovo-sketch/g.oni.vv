@@ -111,6 +111,15 @@ struct EditorState {
     bool   elDrag = false;         // drag WYSIWYG em curso (viewport 2D)
     f32    elDragX = 0.0f;         // pos do dedo no frame anterior (px ecrã)
     f32    elDragY = 0.0f;
+    // 0.8.6 — GIZMOS de UI (escalar/rodar, coerentes com os gizmos 3D):
+    u8     elGizmoMode = 0;        // 0 = mover (drag de sempre), 1 = escalar
+                                   // (handle de canto), 2 = rodar (handle ⊙)
+    f32    elGizAnchorX = 0.0f;    // escalar: canto OPOSTO fixo (design px)
+    f32    elGizAnchorY = 0.0f;
+    f32    elGizStartW = 0.0f;
+    f32    elGizStartH = 0.0f;
+    f32    elGizStartAng = 0.0f;   // rodar: ângulo do dedo no press (rad)
+    f32    elGizStartRot = 0.0f;   // rodar: rot do elemento no press (graus)
 
     // gestão de TICs — menu contextual (⋮ na Hierarchy) + diálogos
     bool   contextMenu = false;     // menu Renomear/Remover/Duplicar/Visibilidade

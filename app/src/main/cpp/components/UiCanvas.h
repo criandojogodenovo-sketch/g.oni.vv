@@ -64,6 +64,11 @@ struct UiElement {
     // estilo da transição (0.7.1): "fade" (default) ou "slide"
     enum class Transition : u8 { Fade = 0, Slide = 1 };
 
+    // 0.8.6 — estilo de TEXTO do elemento (Label/Button/Menu/Card/Article):
+    // normal | negrito (duplo-draw do glifo, embutido no atlas) | itálico
+    // (corte por cisalhamento dos vértices — sem segundo atlas)
+    enum class TextStyle : u8 { Normal = 0, Bold = 1, Italic = 2 };
+
     // alinhamento no eixo transversal (0.7.4 — Menu: alinhamento do TEXTO
     // nas linhas; VBox/HBox: alinhamento dos FILHOS no eixo transversal)
     enum class Align : u8 { Start = 0, Center = 1, End = 2 };
@@ -91,6 +96,14 @@ struct UiElement {
                           // entre filhos (px)
     f32 pad = 8.0f;       // 0.7.4: VBox/HBox = resguardo interno (px)
     f32 color[4] = {0.1176f, 0.1176f, 0.1176f, 1.0f};   // RGBA (default = PANEL do tema mono)
+
+    // 0.8.6 — tipografia por elemento e ROTAÇÃO
+    f32 fontScale = 1.0f;   // multiplicador da fonte base (28 px) para o
+                            // texto do elemento (0.5..3.0 no Inspector)
+    TextStyle textStyle = TextStyle::Normal;   // normal/negrito/itálico
+    f32 rot = 0.0f;         // rotação em GRAUS (sentido horário) à volta do
+                            // CENTRO do elemento — containers ignoram (dívida
+                            // documentada; filhos continuam axis-aligned)
 
     bool visible = true;
 };
@@ -144,6 +157,21 @@ inline const char* uiAlignName(UiElement::Align a) {
         case UiElement::Align::End:    return "end";
     }
     return "?";
+}
+
+// 0.8.6 — nome do estilo de texto (serializer + Inspector)
+inline const char* uiTextStyleName(UiElement::TextStyle s) {
+    switch (s) {
+        case UiElement::TextStyle::Normal: return "normal";
+        case UiElement::TextStyle::Bold:   return "negrito";
+        case UiElement::TextStyle::Italic: return "italico";
+    }
+    return "?";
+}
+inline UiElement::TextStyle uiTextStyleFromName(const std::string& n) {
+    if (n == "negrito") return UiElement::TextStyle::Bold;
+    if (n == "italico") return UiElement::TextStyle::Italic;
+    return UiElement::TextStyle::Normal;
 }
 
 class UiCanvas : public Component {

@@ -119,7 +119,7 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     prof.canAnim = true;      // 0.8.0: tem Transform3D → linha add Animacao
     const TextMetrics m{};
     const f32 contentH = inspectorContentHeight(prof, m, false);
-    EXPECT(nearEqF(contentH, 828.0f));   // 750 + 36 (prim:) + 42 (add Animacao)
+    EXPECT(nearEqF(contentH, 864.0f));   // 828 + 36 (0.8.6: linha hex)
 
     // DEPOIS: painel dentro do contentRect [0,24,·,628] (status 24 + nav 92)
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);
@@ -129,7 +129,7 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     EXPECT(nearEqF(listH, 424.0f));
     const f32 mo = scroll::maxOffset(contentH, listH);
     EXPECT(mo > 0.0f);                        // scroll ATIVA
-    EXPECT(nearEqF(mo, 404.0f));              // 828 − 424
+    EXPECT(nearEqF(mo, 440.0f));              // 864 − 424
 
     // com o offset no máximo, a ÚLTIMA linha do plano (add TouchControls)
     // fica INTEIRA dentro da lista

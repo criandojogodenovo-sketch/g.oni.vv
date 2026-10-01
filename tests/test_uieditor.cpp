@@ -384,11 +384,12 @@ TEST(uieditor_inspector_ui_sem_sobreposicao_e_dentro_do_painel) {
     e.frame();
 
     // o plano tem as linhas esperadas (nome, x, y, w, h, R, G, B, FUNDO A,
-    // visivel, ancoraH, ancoraV, texto, acao, alvo, TEX, COLOCAR EM, remover)
+    // HEX, visivel, ancoraH, ancoraV, texto, LETRA, ESTILO, acao, alvo,
+    // TEX, COLOCAR EM, remover)
     const TextMetrics tm = e.ui.textMetrics();
-    UiInspRow plan[24];
-    const u32 n = uiInspectorPlan(c->elements[0], tm, plan, 24);
-    EXPECT(n == 18u);   // 0.7.4: + fundo A + tex: + colocar em
+    UiInspRow plan[32];
+    const u32 n = uiInspectorPlan(c->elements[0], tm, plan, 32);
+    EXPECT(n == 21u);   // 0.8.6: + hex + letra + estilo (18 → 21)
     // y CUMULATIVO estrito: nenhuma linha invade a anterior
     for (u32 i = 1; i < n; ++i) {
         EXPECT(plan[i].y >= plan[i - 1].y + plan[i - 1].h - 0.01f);

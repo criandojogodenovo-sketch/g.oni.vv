@@ -37,6 +37,24 @@ public:
         verts_.insert(verts_.end(), v, v + 6);
     }
 
+    // 0.8.6 — quad com CANTOS EXPLÍCITOS (rotação de elementos de UI): os 6
+    // vértices chegam já transformados (px/py); uv/cor seguem a convenção
+    // (p0/p3 = topo-esq com uv (u0,v0); p1 = fundo-esq; p2/p4 = fundo-dir;
+    // p5 = topo-dir). Degenerado (área ~0) = não emite.
+    void quadCorners(const f32 px[6], const f32 py[6],
+                     f32 u0, f32 v0, f32 u1, f32 v1,
+                     f32 r, f32 g, f32 b, f32 a) {
+        const QuadVertex v[6] = {
+            {px[0], py[0], u0, v0, r, g, b, a},
+            {px[1], py[1], u0, v1, r, g, b, a},
+            {px[2], py[2], u1, v1, r, g, b, a},
+            {px[3], py[3], u0, v0, r, g, b, a},
+            {px[4], py[4], u1, v1, r, g, b, a},
+            {px[5], py[5], u1, v0, r, g, b, a},
+        };
+        verts_.insert(verts_.end(), v, v + 6);
+    }
+
     // 0.6.9 — segmento (x0,y0)→(x1,y1) com espessura em px: retângulo
     // ROTACIONADO alinhado à direção do segmento (normal = perpendicular
     // normalizada × meia-espessura). Degenerado (len < ε) = não emite.

@@ -34,6 +34,7 @@ void UiContext::beginFrame(Renderer* renderer, const InputState* input,
     }
     imageCount_ = 0;
     runs_.clear();   // 0.7.4: runs de submissão por frame (0.8.4: dinâmico)
+    xformActive_ = false;   // 0.8.6: nunca arrastar uma xform para o frame
 
     // F4.1: estado de scroll POR FRAME (os slots com offset persistem)
     scrollCur_    = kNoScroll;
@@ -52,9 +53,65 @@ bool UiContext::emitTo(QuadBatch& b, f32 x, f32 y, f32 w, f32 h,
     if (!scroll::clipQuad(x, y, w, h, u0, v0, u1, v1, clip_, cl)) {
         return false;
     }
+    if (xformActive_) {
+        // 0.8.6: rotação por elemento — os cantos do rect JÁ CLIPADO giram à
+        // volta do centro do ELEMENTO (o clip continua axis-aligned: nos
+        // cantos de um elemento rodado dentro de um scroll o recorte é
+        // aproximado — aceitável e documentado)
+        const f32 ca = xformCos_, sa = xformSin_;
+        const f32 dx0 = cl.x - xformCx_, dy0 = cl.y - xformCy_;
+        const f32 dx1 = cl.x + cl.w - xformCx_, dy1 = cl.y + cl.h - xformCy_;
+        const f32 x0 = xformCx_ + dx0 * ca - dy0 * sa;
+        const f32 y0 = xformCy_ + dx0 * sa + dy0 * ca;
+        const f32 x1 = xformCx_ + dx0 * ca - dy1 * sa;
+        const f32 y1 = xformCy_ + dx0 * sa + dy1 * ca;
+        const f32 x2 = xformCx_ + dx1 * ca - dy1 * sa;
+        const f32 y2 = xformCy_ + dx1 * sa + dy1 * ca;
+        const f32 x3 = xformCx_ + dx1 * ca - dy0 * sa;
+        const f32 y3 = xformCy_ + dx1 * sa + dy0 * ca;
+        const f32 px[6] = {x0, x1, x2, x0, x2, x3};
+        const f32 py[6] = {y0, y1, y2, y0, y2, y3};
+        b.quadCorners(px, py, cl.u0, cl.v0, cl.u1, cl.v1,
+                      color[0], color[1], color[2], color[3]);
+        return true;
+    }
     b.quad(cl.x, cl.y, cl.w, cl.h, cl.u0, cl.v0, cl.u1, cl.v1,
            color[0], color[1], color[2], color[3]);
     return true;
+}
+
+// 0.8.6 — glifo com CANTOS EXPLÍCITOS (itálico). O recorte é feito pelo
+// bounding rect (aproximação: glifos parcialmente fora do scroll podem
+// vazar meio-pixel na borda recortada); a xform de rotação aplica-se como
+// no emitTo.
+void UiContext::emitGlyphCorners(QuadBatch& b, const f32 px[6], const f32 py[6],
+                                 f32 u0, f32 v0, f32 u1, f32 v1,
+                                 const f32 color[4]) {
+    f32 mnX = px[0], mxX = px[0], mnY = py[0], mxY = py[0];
+    for (u32 i = 1; i < 6; ++i) {
+        mnX = px[i] < mnX ? px[i] : mnX;
+        mxX = px[i] > mxX ? px[i] : mxX;
+        mnY = py[i] < mnY ? py[i] : mnY;
+        mxY = py[i] > mxY ? py[i] : mxY;
+    }
+    if (mxX < clip_.x || mnX >= clip_.x + clip_.w ||
+        mxY < clip_.y || mnY >= clip_.y + clip_.h) {
+        return;   // totalmente fora — não emite
+    }
+    if (xformActive_) {
+        const f32 ca = xformCos_, sa = xformSin_;
+        f32 rx[6], ry[6];
+        for (u32 i = 0; i < 6; ++i) {
+            const f32 dx = px[i] - xformCx_, dy = py[i] - xformCy_;
+            rx[i] = xformCx_ + dx * ca - dy * sa;
+            ry[i] = xformCy_ + dx * sa + dy * ca;
+        }
+        b.quadCorners(rx, ry, u0, v0, u1, v1,
+                      color[0], color[1], color[2], color[3]);
+        return;
+    }
+    b.quadCorners(px, py, u0, v0, u1, v1,
+                  color[0], color[1], color[2], color[3]);
 }
 
 // 0.7.4 — run de submissão: extende o corrente quando é o MESMO batch+tex,
@@ -89,12 +146,23 @@ void UiContext::frame(f32 x, f32 y, f32 w, f32 h, f32 t, const f32 color[4]) {
 }
 
 void UiContext::label(f32 xBaseline, f32 yBaseline, const char* text, const f32 color[4]) {
+    labelStyled(xBaseline, yBaseline, text, color, 1.0f,
+                static_cast<u8>(0));   // normal (0.8.6: tudo passa pelo styled)
+}
+
+// 0.8.6 — label com TIPOGRAFIA por elemento: escala da fonte (multiplicador
+// da base 28 px), negrito (cada glifo desenha 2× com +1 px — embutido, sem
+// segundo atlas) e itálico (cisalhamento dos VÉRTICES TOP dos quads — a
+// haste inclina, o clip permanece axis-aligned). GL-free e afervel nos
+// batches como o label de sempre.
+void UiContext::labelStyled(f32 xBaseline, f32 yBaseline, const char* text,
+                            const f32 color[4], f32 fontScale, u8 style) {
     if (!font_ || !font_->ok() || !text) {
         return;
     }
-    // 0.7.4: glifos ESCALADOS por textScale_ (paridade do viewport 2D —
-    // o mini-canvas mostra o texto na MESMA proporção do Play)
-    const f32 k = textScale_;
+    const f32 k = textScale_ * (fontScale > 0.05f ? fontScale : 1.0f);
+    const bool bold = style == static_cast<u8>(1);
+    const bool italic = style == static_cast<u8>(2);
     f32 penX = xBaseline;
     for (const char* p = text; *p; ++p) {
         const char c = *p;
@@ -104,8 +172,26 @@ void UiContext::label(f32 xBaseline, f32 yBaseline, const char* text, const f32 
             continue;
         }
         const Glyph& g = font_->glyph(c);
-        emitTo(glyphs_, penX + g.xoff * k, yBaseline + g.yoff * k,
-               g.w * k, g.h * k, g.u0, g.v0, g.u1, g.v1, color);
+        const f32 gx = penX + g.xoff * k;
+        const f32 gy = yBaseline + g.yoff * k;
+        const f32 gw = g.w * k;
+        const f32 gh = g.h * k;
+        const u32 passes = bold ? 2u : 1u;
+        for (u32 pass = 0; pass < passes; ++pass) {
+            const f32 ox = bold ? static_cast<f32>(pass) * (k >= 1.0f ? 1.0f : 0.5f) : 0.0f;
+            if (italic && gh > 0.0f) {
+                // cisalhamento: os vértices TOP deslocam +0.21·gh (≈12°)
+                const f32 shear = 0.21f * gh;
+                const f32 px[6] = {gx + ox + shear, gx + ox, gx + ox + gw,
+                                   gx + ox + shear, gx + ox + gw, gx + ox + gw + shear};
+                const f32 py[6] = {gy, gy + gh, gy + gh,
+                                   gy, gy + gh, gy};
+                emitGlyphCorners(glyphs_, px, py, g.u0, g.v0, g.u1, g.v1, color);
+            } else {
+                emitTo(glyphs_, gx + ox, gy, gw, gh,
+                       g.u0, g.v0, g.u1, g.v1, color);
+            }
+        }
         penX += g.xadv * k;
     }
 }

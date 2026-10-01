@@ -1,3 +1,56 @@
+# G.One VV 0.8.6 — UX/layout/Inspector: hex, tipografia, gizmos de UI, Theme uniforme
+
+## Escopo 0.8.6 (implementado — campanha F8: UX/layout/Inspector)
+
+**O DIAGNÓSTICO**: a UI do editor estava funcional mas desorganizada no
+device — cores fora do Theme (launcher Java com 11 hex inline + diálogos
+claros), Inspector sem edição de cor por código nem tipografia, elementos
+de UI sem gizmos (só mover) e testes de sobreposição que não cobriam a
+paisagem completa. Tudo fixado com CLAUSULA CALMA (polimento, ZERO features
+novas — tipografia/gizmos são o polimento pedido pelo dono):
+
+1. **COR POR CÓDIGO HEX (TIC + elemento de UI)**: linha "hex: #RRGGBB" no
+   Inspector de TICs (aplica ao tint do MeshRenderer) e no Inspector de UI
+   (aplica ao color[] do elemento). Tocar abre o teclado in-app em MODO HEX
+   (a tecla de caso vira "#"); parse/format são funções PURAS testadas
+   (redondo exato, recusas honestas — hex inválido não altera o estado).
+
+2. **TAMANHO E ESTILO DE LETRA no Label (texto do elemento)**: os elementos
+   com texto (Label/Button/Menu/Card/Article) ganham "letra: Nx" (slider
+   0.5..3.0 sobre a base 28 px) e "letra estilo: normal/negrito/italico"
+   (cicla). O render passa pelo labelStyled: escala de glifos, negrito por
+   duplo-draw embutido (+1 px), itálico por cisalhamento dos VERTICES TOP
+   (sem segundo atlas — zero memória nova). Testes aferem o BATCH real.
+
+3. **GIZMOS de UI — escalar e rodar (além de mover)**: elemento selecionado
+   no modo UI ganha 4 handles de canto (12 px, toque constante) + pega de
+   rotação acima do topo-centro com haste. Arrastar canto = escala com o
+   canto OPOSTO fixo (reancoragem por elementRect nas 6 âncoras — inverso
+   exato testado); arrastar a pega = rotação com SNAP 15° (o MESMO passo do
+   snap 3D). Hit-test (editor e Play) respeita rotação (inversa exata).
+
+4. **ZERO SOBREPOSIÇÃO AFERVÉVEL EM PAISAGEM**: novo teste de composição
+   COMPLETA (toolbar/painéis/centro/timeline/status/header da timeline)
+   par-a-par e dentro do contentRect a 1600×720 (C33) e 1280×720.
+
+5. **THEME UNIFORME**: os espelhos de tokens do UiRuntime (kLine/kText
+   duplicados) MORRERAM — o desenho usa os tokens de UiContext.h. O
+   LAUNCHER Java centraliza os tokens (BRAND/BG/TEXT/TEXT_DIM/SURFACE/LINE
+   — espelho do Theme.h; o check estrutural REJEITA hex inline fora deles)
+   e os 3 AlertDialogs correm agora num ContextThemeWrapper ESCURO (o
+   manifest é claro — a identidade não quebra mais).
+
+6. **PÁGINA INICIAL LIMPA**: título de marca + subtítulo discreto ("editor
+   de jogos no telemóvel") + ações criar/importar no topo + "Meus projetos"
+   com nome/data + empty-state com CTA — hierarquia clara, mesmo idioma
+   visual do editor.
+
+Suíte 525→532 (+7; contratos de alturas dos Inspectores atualizados: 828→864,
+820→856, 18→21 linhas). versionCode 37. CLAUSULA CALMA: só fixes e polish
+listado — nenhuma feature fora do escopo, nenhuma física, nenhum scripting.
+
+<!-- (0.8.5 abaixo — histórico) -->
+
 # G.One VV 0.8.5 — funcionalidade desbloqueada no device: animação e2e, primitivas, import
 
 ## Escopo 0.8.5 (implementado — campanha F8: funcionalidade quebrada)
@@ -1344,6 +1397,35 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.8.6 (UX/layout/Inspector; APK CUMULATIVO)
+
+Instalar o APK 0.8.6 (artifact `goni-vv-0.8.6-release-signed` do run do
+job `build-release`). A alvo é o POLIMENTO — cada passo tem o "antes":
+
+1. **Cor por hex**: TIC Mesh selecionado → Inspector → linha "hex:" →
+   tocar → teclado (a tecla de caso é agora "#") → escrever "#FF8800" →
+   OK → o tint do mesh muda NA HORA (sliders R/G/B acompanham);
+2. **Hex no elemento de UI**: modo UI → elemento → Inspector → "hex:" →
+   "#33CC66" → OK → o fundo do elemento muda;
+3. **Tamanho e estilo da letra**: elemento Label → "letra: 2.00x" → o
+   texto dobra NO editor e no Play; "letra estilo" → negrito (traço mais
+   grosso) → itálico (inclinado);
+4. **Gizmos de UI**: selecionar um elemento → 4 quadradinhos nos CANTOS +
+   pega acima → arrastar um canto = ESCALA (o canto oposto fica fixo);
+   arrastar a pega de cima = RODA com passos de 15°; o Play respeita o
+   rodado (o toque acerta o elemento onde ele ESTÁ);
+5. **Página inicial**: o launcher abre com título + subtítulo, as duas
+   ações no topo e a lista limpa — sem lixo visual;
+6. **Diálogos escuros**: "Novo projeto" → o diálogo do nome é ESCURO
+   (antes: claro, do sistema); long-press num projeto → idem;
+7. **Theme uniforme**: toolbar/painéis/timeline/launcher numa única
+   identidade (nada de azul-claro do sistema em diálogos);
+8. **Zero sobreposição**: percorrer TODOS os ecrãs (editor 3D, modo UI
+   com timeline, Play, navegador, teclado, seletor de clips) — nenhum
+   texto/rect sobreposto;
+9. **Regressões**: 0.8.5 (import/clips/primitivas), 0.8.4 (storm/
+   play-stop/texto), 0.8.3 (blend), 0.8.0 (timeline).
 
 ## Verificação no Realme C33 (dono) — 0.8.5 (funcionalidade; APK CUMULATIVO)
 

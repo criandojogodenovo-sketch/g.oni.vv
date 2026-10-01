@@ -2480,6 +2480,8 @@ void frame() {
         const char* title = g_editor.textPurpose == 0 ? "RENOMEAR TIC"
                             : g_editor.textPurpose == 1 ? "NOME DA NOVA CENA"
                             : g_editor.textPurpose == 2 ? "TEXTO DO ELEMENTO"
+                            : g_editor.textPurpose == 4 ? "COR DO ELEMENTO"
+                            : g_editor.textPurpose == 5 ? "COR DO TIC"
                                                         : "ALVO DA ACAO";
         const int ch =
             editor::drawTextInput(g_ui, g_input, w, h, g_editor, title);

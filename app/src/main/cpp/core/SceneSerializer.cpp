@@ -211,6 +211,17 @@ void appendComponentJson(Json& arr, const UiCanvas* canvas) {
                 je.addMember("param", Json::makeString(e.param));
             }
         }
+        // 0.8.6 — tipografia + rotação: ausentes = defaults (ficheiros 0.8.x
+        // abrem limpos; política forward-compat de sempre)
+        if (e.fontScale != 1.0f) {
+            je.addMember("fscale", Json::makeNumber(e.fontScale));
+        }
+        if (e.textStyle != UiElement::TextStyle::Normal) {
+            je.addMember("tstyle", Json::makeString(uiTextStyleName(e.textStyle)));
+        }
+        if (e.rot != 0.0f) {
+            je.addMember("rot", Json::makeNumber(e.rot));
+        }
         elems.addItem(std::move(je));
     }
     c.addMember("elements", std::move(elems));
@@ -534,6 +545,17 @@ void fillUiCanvas(UiCanvas* canvas, const Json& comp) {
                 j && j->type == Json::Type::String) {
                 e.param = j->string;   // 0.7.1: fade|slide (ausente = fade)
             }
+        }
+        // 0.8.6 — tipografia + rotação (ausentes = defaults; mig. amigável)
+        if (const Json* j = je.find("fscale");
+            j && j->type == Json::Type::Number) {
+            e.fontScale = static_cast<f32>(j->number);
+        }
+        if (const char* ts = readStr("tstyle"); ts[0] != '\0') {
+            e.textStyle = uiTextStyleFromName(ts);
+        }
+        if (const Json* j = je.find("rot"); j && j->type == Json::Type::Number) {
+            e.rot = static_cast<f32>(j->number);
         }
         canvas->elements.push_back(std::move(e));
     }

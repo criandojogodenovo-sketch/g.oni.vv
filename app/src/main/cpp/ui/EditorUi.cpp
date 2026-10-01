@@ -10,6 +10,7 @@
 #include "components/AnimationPlayer.h"   // 0.8.0: add Animacao no Inspector
 #include "render/Primitives.h"            // 0.8.0: seletor de primitivas
 #include "core/Scene.h"
+#include "ui/UiEditor.h"                  // 0.8.6: uiHexFormat (linha hex)
 #include <cstdio>
 
 namespace vv {
@@ -380,6 +381,19 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             ++colorIdx;
             break;
         }
+        case InspRow::Kind::ColorHex: {
+            // 0.8.6 — cor por CÓDIGO: mostra o hex do tint; tocar abre o
+            // teclado em modo hex (propósito 5) — o commit aplica ao tint
+            if (mrEdit) {
+                char hex[12];
+                uiHexFormat(mrEdit->tint, hex, sizeof(hex));
+                char label[40];
+                std::snprintf(label, sizeof(label), "hex: %s", hex);
+                ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad,
+                          r.h - 4.0f, label);
+            }
+            break;
+        }
         case InspRow::Kind::Section:
             ui.label(x + kPad, inspBaseline(ry, r.h, tm), "Transform3D", theme::TEXT);
             ui.panel(x + kPad, ry + r.h - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
@@ -591,6 +605,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 r.kind != InspRow::Kind::MeshButton &&
                 r.kind != InspRow::Kind::TexButton &&
                 r.kind != InspRow::Kind::VisToggle &&
+                r.kind != InspRow::Kind::ColorHex &&    // 0.8.6
                 r.kind != InspRow::Kind::CamProj &&     // 0.7.7
                 r.kind != InspRow::Kind::CamActive &&
                 r.kind != InspRow::Kind::CamFrustum &&  // 0.7.10
@@ -617,6 +632,14 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 // 0.8.0 (F7): cria o player — a TIMELINE abre sozinha (o
                 // main desenha-a quando o TIC selecionado tem player)
                 tic->addComponent<AnimationPlayer>();
+            } else if (r.kind == InspRow::Kind::ColorHex) {
+                // 0.8.6 — teclado em MODO HEX (propósito 5) com o hex atual
+                // do tint; o commit aplica R/G/B (inválido = estado intacto)
+                if (mrEdit) {
+                    char cur[12];
+                    uiHexFormat(mrEdit->tint, cur, sizeof(cur));
+                    openTextInput(st, 5, st.selected, -1, cur);
+                }
             } else if (r.kind == InspRow::Kind::VisToggle) {
                 tic->visible = !tic->visible;         // 0.7.0: checkbox
             } else if (r.kind == InspRow::Kind::CamProj) {

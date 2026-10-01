@@ -183,8 +183,9 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     InspRow plan[48];   // 0.8.0: +prim/anim
     const u32 n = inspectorPlan(prof, m, false, plan);
     const f32 contentH = inspectorContentHeight(prof, m, false);
-    // 0.8.0: +36 (linha prim:) +42 (add Animacao — tem Transform3D) = 828
-    EXPECT(nearEqF(contentH, 828.0f));
+    // 0.8.0: +36 (linha prim:) +42 (add Animacao — tem Transform3D) = 828;
+    // 0.8.6: +36 (linha hex) = 864
+    EXPECT(nearEqF(contentH, 864.0f));
 
     // cursor Y PARTILHADO: linhas sequenciais (y estritamente crescente, sem
     // reinício por secção), todas dentro do conteúdo, e o fundo do plano =
@@ -222,9 +223,9 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
 
     // com TouchControls presente o botão dá lugar à label tc (42 → 34)
     EXPECT(tic->addComponent<TouchControls>() != nullptr);
-    // 0.8.0: 742 + 36 (prim:) + 42 (add Animacao) = 820
+    // 0.8.0: 742 + 36 (prim:) + 42 (add Animacao) = 820; 0.8.6: +36 hex = 856
     EXPECT(nearEqF(inspectorContentHeight(inspectorProfile(*tic), m, false),
-                   820.0f));
+                   856.0f));
 }
 
 TEST(scroll_hierarquia_todos_os_tics_atingeis) {
