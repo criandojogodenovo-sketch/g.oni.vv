@@ -1,3 +1,51 @@
+# G.One VV 0.8.4 — estabilização no C33: crashes e freezes domados (wiring)
+
+<!-- (0.8.3 abaixo — histórico) -->
+
+## Escopo 0.8.4 (implementado — campanha F8: estabilização, ZERO features novas)
+
+**O DIAGNÓSTICO**: os testes unitários passavam (508) e o device crashava —
+o gap era WIRING/INTEGRAÇÃO. Três causas raiz, cada uma com o seu teste de
+integração que FALHA antes do fix (o do resolver dá SEGV sem o fix — provado
+no CI local) e passa depois:
+
+1. **ECRÃ PRETO AO ADICIONAR UI/TIC (corrupção de memória)**: o
+   `resolveCanvasLayout` iterava TODOS os elementos do canvas mas escrevia
+   `out[i]` SEM respeitar o cap do chamador — o editor usa
+   `CanvasLayout lay[32]` NA STACK (`ui/UiEditor.cpp` ×2). Passar de 32
+   elementos = escrita fora dos limites = crash/freeze/ecrã preto. FIX: o
+   resolver opera SEMPRE dentro do cap (buffers do chamador são autoridade;
+   os vetores internos têm o tamanho do cap). Teste: SENTINELA após o
+   buffer (40 elementos num lay[32] → guard intacto) + VBox com 33 filhos
+   + storm 50 mesh + 50 UI + 10 câmaras ×10 frames.
+
+2. **TEXTO/QUADS QUE DESAPARECIAM ("funções que param")**: os caps FIXOS
+   de submissão (kMaxRuns=32 no UiContext, kMaxSubs=32 no Renderer)
+   descartavam runs em silêncio e, pior, os GLIFOS são sempre a ÚLTIMA
+   submissão — com 32 runs TODO o texto saía do ecrã (browser com muitas
+   thumbnails, timeline + painéis). FIX: armazenamento DINÂMICO
+   (reserve(64) — zero realloc em steady state), NADA se descarta mais; o
+   frame anómalo (>66 submissões) LOGA 1× por frame no engine.log. Testes:
+   128 runs submetidos na íntegra; 64 runs + glifos = 65 submissões OK.
+
+3. **HEADER DA TIMELINE SOBREPOSTO (botões a lutar pelo toque)**: offsets
+   fixos da direita vs "clip:" a x+376 — sobrepunham com strip < 988 px
+   (o C33 dá ~952-1000 úteis). FIX: `timeline::headerLayout(r)` — função
+   PURA com layout fluido (cluster direito fixo como sempre; "clip:"
+   encosta ao play com folga 8 e encolhe 176→120→96 se preciso; o título
+   usa o resto). Testes: sem sobreposição a 1600/1000/988/952/800/720/680
+   px; a 952 os dois botões que lutavam ficam separados com folga ≥ 8.
+
+**MAIS WIRING AFERVÉVEL (mesma suíte `test_wiring084`, +11 testes)**:
+play/stop ×20 com snapshot (pose e UI de editor INTACTAS, players param no
+zero); save/load round-trip de cena grande (50 mesh + 50 UI + anim);
+steady-state GL — 30 frames SEM um único objeto GL novo (realloc em loop,
+o gatilho de freeze, é agora impossível sem o teste falhar); frame-time do
+resolver de 50 elementos × 600 frames < 50 ms.
+
+Suíte 508→519 (+11). versionCode 35. CLÁUSULA CALMA: só fixes e wiring —
+nenhuma feature, nenhuma física, nenhum scripting.
+
 # G.One VV 0.8.3 — animação: blending (peso + crossfade walk→run)
 
 <!-- (0.8.2 abaixo — histórico) -->
@@ -1242,6 +1290,33 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.8.4 (estabilização; APK CUMULATIVO)
+
+Instalar o APK 0.8.4 (artifact `goni-vv-0.8.4-release-signed` do run do
+job `build-release`). A alvo desta release são os CRASHES e FREEZES — cada
+passo abaixo é um toque concreto que antes partia:
+
+1. **Storm de UI (o ecrã preto)**: "+" → modo UI → criar 35+ elementos
+   (Panel/Label/Botão, passando BEM os 32) → o editor NUNCA crasha, o
+   mini-ecrã continua a desenhar e a selecionar todos os elementos;
+2. **Storm 3D**: "+" → 10× Mesh + 2× Camera + presets (Player/Character/
+   Static/Rigid) em sequência → sem crash, sem ecrã preto, fps estável na
+   status line;
+3. **Add/remove repetido**: criar e apagar 20 elementos UI alternados com
+   20 TICs mesh (Hierarchy → remover) ×3 voltas → a app sobrevive toda a
+   volta (antes: corrupção a partir do 33.º elemento);
+4. **Play/stop repetido**: dar Play de jogo e Stop 20× seguidas (com anim
+   e física na cena) → a pose de editor volta SEMPRE ao sítio, fps
+   estável, sem leak visível (status line: `verts/dc` coerentes);
+5. **Texto nunca some**: abrir o navegador (Menu → Importar…) com uma
+   pasta com muitas imagens + timeline aberta → TODOS os labels continuam
+   visíveis (antes: com ~32 alternâncias de runs, o texto INTEIRO saía);
+6. **Timeline utilizável no C33**: selecionar um TIC com animação → no
+   header da strip, play/stop/mode/vel/clip ficam todos CLICÁVEIS (antes:
+   "clip:" e play sobrepunham no ecrã estreito);
+7. **Regressões**: 0.8.3 (blend/crossfade), 0.8.2 (skin), 0.8.1 (clips),
+   0.8.0 (timeline/primitivas), 0.7.x (gizmos/frustum/import).
 
 ## Verificação no Realme C33 (dono) — 0.8.3 (blending; APK CUMULATIVO)
 

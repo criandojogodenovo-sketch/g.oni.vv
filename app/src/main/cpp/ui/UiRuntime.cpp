@@ -96,6 +96,11 @@ struct Resolver {
     f32 sw, sh;
     safe::Insets ins;
     CanvasLayout* out;
+    // 0.8.4: limite do BUFFER do chamador — o resolver NUNCA escreve out[i]
+    // com i >= cap (os painéis do editor usam arrays fixos de 32; escrever
+    // além era CORRUPÇÃO DE MEMÓRIA — o "ecrã preto ao adicionar UI" do C33
+    // quando o canvas passa 32 elementos)
+    u32 count = 0;
     std::vector<f32> sizeW, sizeH;   // tamanho EFETIVO (eixo de conteúdo auto)
     std::vector<u8>  state;          // 0 = intocado, 1 = EM CURSO (ciclo), 2 = pronto
 };
@@ -110,6 +115,9 @@ inline bool isChildOf(const UiElement& child, const Resolver& r, i32 ci) {
 // tamanho EFETIVO do elemento i (containers: eixo de conteúdo AUTO —
 // recursivo nos filhos; ciclo/guard devolve o tamanho manual)
 void sizeOf(Resolver& r, i32 i) {
+    if (i < 0 || static_cast<u32>(i) >= r.count) {
+        return;   // 0.8.4: fora do buffer do chamador — nem medi-lo
+    }
     if (r.state[static_cast<size_t>(i)] != 0u) {
         return;   // pronto (2) ou em curso (1 = ciclo → tamanho manual)
     }
@@ -120,7 +128,8 @@ void sizeOf(Resolver& r, i32 i) {
         // filhos visíveis (invisíveis COLAPSAM — não ocupam lugar)
         f32 content = 0.0f;
         u32 n = 0;
-        for (size_t j = 0; j < r.c->elements.size(); ++j) {
+        // 0.8.4: só elementos dentro do cap do chamador (os vetores têm count)
+        for (u32 j = 0; j < r.count; ++j) {
             const UiElement& ch = r.c->elements[j];
             if (!isChildOf(ch, r, i) || !ch.visible) {
                 continue;
@@ -150,6 +159,9 @@ void sizeOf(Resolver& r, i32 i) {
 // mas TODOS ficam shown=false — escondidos em cascata.
 void placeAt(Resolver& r, i32 i, const UiRect& rect, bool parentShown,
              i32 parentIdx) {
+    if (i < 0 || static_cast<u32>(i) >= r.count) {
+        return;   // 0.8.4: fora do buffer do chamador — NUNCA escrever out[i]
+    }
     const UiElement& e = r.c->elements[static_cast<size_t>(i)];
     const bool shown = parentShown && e.visible;
     CanvasLayout& L = r.out[static_cast<size_t>(i)];
@@ -161,10 +173,11 @@ void placeAt(Resolver& r, i32 i, const UiRect& rect, bool parentShown,
         return;
     }
     // dispõe os filhos dentro do rect (ordem do array = ordem do layout)
+    // 0.8.4: só elementos dentro do cap do chamador (os vetores têm count)
     const f32 sp = e.spacing;
     if (e.kind == UiElement::Kind::VBox) {
         f32 y = rect.y + e.pad;
-        for (size_t j = 0; j < r.c->elements.size(); ++j) {
+        for (u32 j = 0; j < r.count; ++j) {
             const UiElement& ch = r.c->elements[j];
             if (!isChildOf(ch, r, i) || !ch.visible) {
                 continue;
@@ -183,7 +196,7 @@ void placeAt(Resolver& r, i32 i, const UiRect& rect, bool parentShown,
         }
     } else {   // HBox
         f32 x = rect.x + e.pad;
-        for (size_t j = 0; j < r.c->elements.size(); ++j) {
+        for (u32 j = 0; j < r.count; ++j) {
             const UiElement& ch = r.c->elements[j];
             if (!isChildOf(ch, r, i) || !ch.visible) {
                 continue;
@@ -208,24 +221,29 @@ void placeAt(Resolver& r, i32 i, const UiRect& rect, bool parentShown,
 void resolveCanvasLayout(const UiCanvas& c, f32 sw, f32 sh,
                          const safe::Insets& ins,
                          CanvasLayout* out, u32 cap) {
+    // 0.8.4 (fix do "ecrã preto ao adicionar UI" no C33): o resolver opera
+    // SEMPRE dentro de cap — o buffer do chamador é autoridade (os editores
+    // passam arrays fixos de 32; os runtimes passam vectors do tamanho da
+    // cena). Antes, os loops abaixo iteravam n e o placeAt escrevia out[i]
+    // além do fim do array = corrupção de stack/heap com 33+ elementos.
     const u32 n = static_cast<u32>(c.elements.size());
     const u32 count = n < cap ? n : cap;
     for (u32 i = 0; i < count; ++i) {
         out[i] = CanvasLayout{};   // zera (órfãos ficam com rect zerado até ao fallback)
     }
-    if (n == 0) {
+    if (n == 0 || count == 0) {
         return;
     }
-    Resolver r{&c, sw, sh, ins, out,
-                std::vector<f32>(n, 0.0f), std::vector<f32>(n, 0.0f),
-                std::vector<u8>(n, 0)};
-    // 1) tamanhos efetivos (memo + guard de ciclo) — TODOS os elementos
-    for (size_t i = 0; i < n; ++i) {
+    Resolver r{&c, sw, sh, ins, out, count,
+                std::vector<f32>(count, 0.0f), std::vector<f32>(count, 0.0f),
+                std::vector<u8>(count, 0)};
+    // 1) tamanhos efetivos (memo + guard de ciclo) — até ao cap do chamador
+    for (u32 i = 0; i < count; ++i) {
         sizeOf(r, static_cast<i32>(i));
     }
     // 2) posicionamento: TOPO primeiro (parent vazio OU pai inexistente),
     //    depois os filhos recursivamente via placeAt
-    for (size_t i = 0; i < n; ++i) {
+    for (u32 i = 0; i < count; ++i) {
         const UiElement& e = c.elements[i];
         if (!e.parent.empty()) {
             const i32 pi = c.findElement(e.parent);

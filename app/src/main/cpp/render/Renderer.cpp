@@ -3,6 +3,7 @@
 #include "math/Math.h"
 #include "platform/Log.h"
 #include <GLES3/gl3.h>
+#include <vector>
 
 namespace vv {
 
@@ -51,6 +52,11 @@ GLuint compileShader(GLenum type, const char* src) {
 } // namespace
 
 bool Renderer::init() {
+    // 0.8.4: armazenamento dinâmico das submissões (reserve = zero realloc
+    // em steady state; o frame anómalo cresce SEM cortar nada — só loga)
+    subs_.clear();
+    subs_.reserve(kSubWarn);
+
     // ---- pass UI (F1)
     const GLuint vs = compileShader(GL_VERTEX_SHADER, kVsSrc);
     const GLuint fs = compileShader(GL_FRAGMENT_SHADER, kFsSrc);
@@ -135,6 +141,7 @@ void Renderer::beginUiPass(i32 w, i32 h) {
 }
 
 void Renderer::beginFrame() {
+    droppedLogged_ = false;   // 0.8.4: o aviso de cap vale 1× por frame
     glClearColor(0.0784314f, 0.0784314f, 0.0784314f, 1.0f);   // BG #141414
     glDepthMask(GL_TRUE);                                     // restore pós-grid
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -174,22 +181,29 @@ void Renderer::submit(const QuadBatch& batch, u32 texture) {
 }
 
 // 0.7.4 — submissão por RANGE de vértices (z-order sólidos↔texturas:
-// o UiContext submete RUNS na ordem real de emissão)
+// o UiContext submete RUNS na ordem real de emissão). 0.8.4: acima do
+// limiar de aviso LOGA (o dono vê no log viewer) — nunca mais descarta.
 void Renderer::submit(const QuadBatch& batch, u32 texture, u32 firstVertex,
                       u32 vertexCount) {
-    if (subCount_ < kMaxSubs && vertexCount > 0 &&
-        firstVertex < batch.vertexCount()) {
-        subs_[subCount_].batch = &batch;
-        subs_[subCount_].tex = texture;
-        subs_[subCount_].firstVertex = firstVertex;
-        // clamp: o range nunca passa do fim do batch
-        u32 end = firstVertex + vertexCount;
-        if (end > batch.vertexCount()) {
-            end = batch.vertexCount();
-        }
-        subs_[subCount_].vertexCount = end - firstVertex;
-        ++subCount_;
+    if (vertexCount == 0 || firstVertex >= batch.vertexCount()) {
+        return;
     }
+    if (subs_.size() >= kSubWarn) {
+        // 0.8.4: frame anómalo — LOGA 1× por frame (o dono correlaciona no
+        // log viewer); a submissão ENTRA na mesma (nunca mais perda
+        // silenciosa de quads/texto)
+        if (!droppedLogged_) {
+            LOGE("Renderer: %u submissões num frame (>%u) — ecrã excessivo "
+                 "(overlay a desenhar demais?); NADA cortado, só aviso",
+                 (unsigned)subs_.size() + 1u, kSubWarn);
+            droppedLogged_ = true;
+        }
+    }
+    u32 end = firstVertex + vertexCount;
+    if (end > batch.vertexCount()) {
+        end = batch.vertexCount();   // clamp: o range nunca passa do fim
+    }
+    subs_.push_back(Submission{&batch, texture, firstVertex, end - firstVertex});
 }
 
 DrawStats Renderer::endFrame() {
@@ -201,7 +215,7 @@ DrawStats Renderer::endFrame() {
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
-    if (subCount_ == 0) {
+    if (subs_.empty()) {
         return {};
     }
     // pass UI por cima do 3D: sem depth test/write, sem cull (winding y-down)
@@ -218,22 +232,22 @@ DrawStats Renderer::endFrame() {
     glBindVertexArray(vao_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
     DrawStats st;
-    for (u32 i = 0; i < subCount_; ++i) {
-        const QuadBatch& b = *subs_[i].batch;
-        glBindTexture(GL_TEXTURE_2D, subs_[i].tex);
+    for (const Submission& s : subs_) {
+        const QuadBatch& b = *s.batch;
+        glBindTexture(GL_TEXTURE_2D, s.tex);
         // 0.7.4: range de vértices (runs) — o buffer sobe INTEIRO uma vez
         // por batch distinto seria o ideal; subir por submissão mantém a
         // simplicidade (os batches da UI são pequenos e poucos)
         glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(b.vertexBytes()),
                      b.vertices(), GL_DYNAMIC_DRAW);
-        glDrawArrays(GL_TRIANGLES, static_cast<GLsizei>(subs_[i].firstVertex),
-                     static_cast<GLsizei>(subs_[i].vertexCount));
-        st.vertices += subs_[i].vertexCount;
+        glDrawArrays(GL_TRIANGLES, static_cast<GLsizei>(s.firstVertex),
+                     static_cast<GLsizei>(s.vertexCount));
+        st.vertices += s.vertexCount;
         st.drawCalls += 1;
     }
     glBindVertexArray(0);
     glDisable(GL_BLEND);
-    subCount_ = 0;
+    subs_.clear();   // 0.8.4: clear mantém a capacidade (zero realloc/frame)
     return st;
 }
 

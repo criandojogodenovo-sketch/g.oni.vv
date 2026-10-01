@@ -51,6 +51,12 @@ public:
     DrawStats endFrame();   // upload + draw das submissões (proj ortho)
     void shutdown();
 
+    // hooks de TESTE (CI): nº de submissões aceites neste frame (o wiring
+    // 0.8.4 garante runs + glifos SEMPRE aceites — ver test_wiring084)
+    u32 submissionsForTest() const {
+        return static_cast<u32>(subs_.size());
+    }
+
     u32 whiteTexture() const { return whiteTex_; }
     i32 width() const { return w_; }
     i32 height() const { return h_; }
@@ -59,7 +65,7 @@ public:
     LitMaterial* litMaterial() { return &lit_; }
 
 private:
-    // UI (F1)
+    // pass UI (F1)
     u32 prog_ = 0;
     u32 vao_ = 0;
     u32 vbo_ = 0;
@@ -78,12 +84,15 @@ private:
         u32 firstVertex;   // 0.7.4: range do batch (submissão por runs)
         u32 vertexCount;
     };
-    // 0.7.4: até 32 submissões por frame — o UiContext submete RUNS na
-    // ordem real de emissão (z-order sólidos↔texturas intercalados; um run
-    // por alternância). 0.7.0 eram 6 (grupos fixos solids/imagens/glifos).
-    static constexpr u32 kMaxSubs = 32;
-    Submission subs_[kMaxSubs];
-    u32 subCount_ = 0;
+    // 0.8.4 (fix "funções que param" do C33): o cap FIXO de 32 descartava
+    // submissões em silêncio — e como os glifos são SEMPRE a última, com
+    // 32 runs o TEXTO INTEIRO saía do ecrã. Agora o armazenamento é
+    // dinâmico (reserve 64 = zero realloc em steady state) e NADA é
+    // descartado; kSubWarn é um LIMIAR DE AVISO (log 1× por frame quando o
+    // frame passa — sintoma de overlay a desenhar demasiado, nunca perda).
+    static constexpr u32 kSubWarn = 66;   // kMaxRuns(64) + glifos + folga
+    std::vector<Submission> subs_;
+    bool droppedLogged_ = false;   // aviso de threshold 1× por frame
 };
 
 } // namespace vv

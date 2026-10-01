@@ -100,6 +100,43 @@ UiRect timelineRect(f32 sw, f32 sh, const safe::Insets& in, bool rightPanel) {
     return UiRect{c.x, c.y + c.h - kTimelineH, c.w, kTimelineH};
 }
 
+// 0.8.4 — layout fluido do header (ver Timeline.h): cluster direito fixo,
+// "clip:" encostado ao play (encolhe 176→120 se preciso), título no resto.
+HeaderLayout headerLayout(const UiRect& r) {
+    const f32 by = r.y + 6.0f;
+    const f32 bh = kHeaderH - 12.0f;
+    HeaderLayout L;
+    // cluster da DIREITA — offsets fixos de sempre (nada muda nos ecrãs largos)
+    L.play   = {r.x + r.w - 436.0f, by, 84.0f, bh};
+    L.stop   = {r.x + r.w - 348.0f, by, 64.0f, bh};
+    L.mode   = {r.x + r.w - 280.0f, by, 108.0f, bh};
+    L.slider = {r.x + r.w - 164.0f, by, 96.0f, bh};
+    L.add    = {r.x + r.w - 60.0f, by, 48.0f, bh};
+    // "clip:": à ESQUERDA do play com folga 8 (nunca sobrepõe); encolhe
+    // 176→120 quando a strip é estreita e, em último caso, o TÍTULO cede
+    // (o botão fica com o que sobrar, mínimo clicável 96 — o botão nunca
+    // invade o play)
+    f32 cw = 176.0f;
+    f32 cx = L.play.x - 8.0f - cw;
+    if (cx < r.x + 160.0f) {
+        cw = 120.0f;
+        cx = L.play.x - 8.0f - cw;
+        if (cx < r.x + 140.0f) {
+            cw = L.play.x - 8.0f - (r.x + 140.0f);
+            if (cw < 96.0f) {
+                cw = 96.0f;
+            }
+            cx = L.play.x - 8.0f - cw;
+            if (cx < r.x + 12.0f) {
+                cx = r.x + 12.0f;   // extremo absoluto (não sai da strip)
+            }
+        }
+    }
+    L.clip = {cx, by, cw, bh};
+    L.title = {r.x + 12.0f, r.y, (cx - 8.0f) - (r.x + 12.0f), kHeaderH};
+    return L;
+}
+
 void stopPreview(Scene& scene, Handle ticH, State& st) {
     playSnapshotRestore(scene, st.snap);
     st.snap = PlaySnapshot{};
@@ -153,7 +190,7 @@ void drawTimeline(UiContext& ui, const InputState& in, Scene& scene,
         pl->apply(scene, st.selected);
     }
 
-    // ---- header --------------------------------------------------------------
+    // ---- header (0.8.4: layout fluido — sem sobreposição a qualquer largura)
     {
         char title[96];
         if (pl->blendClip >= 0 &&
@@ -168,13 +205,11 @@ void drawTimeline(UiContext& ui, const InputState& in, Scene& scene,
                           static_cast<u32>(clip->tracks.size()),
                           clip->tracks.size() == 1 ? "" : "s");
         }
-        ui.labelFitted(r.x + 12.0f, r.y + kHeaderH * 0.5f + th * 0.30f, title,
-                       theme::TEXT, 360.0f);
+        const HeaderLayout hl = headerLayout(r);
+        ui.labelFitted(hl.title.x, r.y + kHeaderH * 0.5f + th * 0.30f, title,
+                       theme::TEXT, hl.title.w);
 
-        const f32 by = r.y + 6.0f;
-        const f32 bh = kHeaderH - 12.0f;
-        // play/pause + stop + mode
-        if (ui.button(kIdPlay, r.x + r.w - 436.0f, by, 84.0f, bh,
+        if (ui.button(kIdPlay, hl.play.x, hl.play.y, hl.play.w, hl.play.h,
                       pl->playing ? "pausa" : "play")) {
             if (pl->playing) {
                 pl->playing = false;   // pausa: tempo fica onde está
@@ -186,13 +221,14 @@ void drawTimeline(UiContext& ui, const InputState& in, Scene& scene,
                 pl->playing = true;
             }
         }
-        if (ui.button(kIdStop, r.x + r.w - 348.0f, by, 64.0f, bh, "stop")) {
+        if (ui.button(kIdStop, hl.stop.x, hl.stop.y, hl.stop.w, hl.stop.h,
+                      "stop")) {
             stopPreview(scene, st.selected, tl);
         }
         const char* modeLabels[3] = {"once", "loop", "pingpong"};
         const int modeIdx = pl->mode == AnimationPlayer::Mode::Once ? 0
                             : pl->mode == AnimationPlayer::Mode::Loop ? 1 : 2;
-        if (ui.button(kIdMode, r.x + r.w - 280.0f, by, 108.0f, bh,
+        if (ui.button(kIdMode, hl.mode.x, hl.mode.y, hl.mode.w, hl.mode.h,
                       modeLabels[modeIdx])) {
             pl->mode = modeIdx == 0 ? AnimationPlayer::Mode::Loop
                      : modeIdx == 1 ? AnimationPlayer::Mode::PingPong
@@ -202,34 +238,37 @@ void drawTimeline(UiContext& ui, const InputState& in, Scene& scene,
         // curso — arrastar assume o peso MANUAL) ou VELOCIDADE (sempre)
         if (pl->blendClip >= 0) {
             f32 w = pl->blendWeight;
-            if (ui.slider(kIdBlend, r.x + r.w - 164.0f, by + 6.0f, 96.0f,
-                          bh - 12.0f, 0.0f, 1.0f, w)) {
+            if (ui.slider(kIdBlend, hl.slider.x, hl.slider.y + 6.0f,
+                          hl.slider.w, hl.slider.h - 12.0f, 0.0f, 1.0f, w)) {
                 pl->blendWeight = w;        // manual: o crossfade pára de
                 pl->blendDuration = 0.0f;   // animar; o peso é do utilizador
             }
             char bl[32];
             std::snprintf(bl, sizeof(bl), "blend %d%%",
                           static_cast<int>(pl->blendWeight * 100.0f + 0.5f));
-            ui.labelFitted(r.x + r.w - 164.0f, r.y + 4.0f, bl, theme::LINE, 96.0f);
+            ui.labelFitted(hl.slider.x, r.y + 4.0f, bl, theme::LINE, 96.0f);
         } else {
-            if (ui.slider(kIdSpeed, r.x + r.w - 164.0f, by + 6.0f, 96.0f,
-                          bh - 12.0f, 0.1f, 3.0f, pl->speed)) {
+            if (ui.slider(kIdSpeed, hl.slider.x, hl.slider.y + 6.0f,
+                          hl.slider.w, hl.slider.h - 12.0f, 0.1f, 3.0f,
+                          pl->speed)) {
                 // speed já escrito pelo slider
             }
             char spd[32];
             std::snprintf(spd, sizeof(spd), "vel %.1fx", pl->speed);
-            ui.labelFitted(r.x + r.w - 164.0f, r.y + 4.0f, spd, theme::LINE, 96.0f);
+            ui.labelFitted(hl.slider.x, r.y + 4.0f, spd, theme::LINE, 96.0f);
         }
         // 0.8.1 — seletor de CLIPS (importados de glTF + "edit"): abre a
         // lista; o clip escolhido passa a ser o ATIVO (playback e edição)
         char clipBtn[40];
         std::snprintf(clipBtn, sizeof(clipBtn), "clip: %s",
                       clip->name.c_str());
-        if (ui.button(kIdClip, r.x + 376.0f, by, 176.0f, bh, clipBtn)) {
+        if (ui.button(kIdClip, hl.clip.x, hl.clip.y, hl.clip.w, hl.clip.h,
+                      clipBtn)) {
             tl.clipMenu = !tl.clipMenu;
             tl.addTrackMenu = false;
         }
-        if (ui.button(kIdAddTrack, r.x + r.w - 60.0f, by, 48.0f, bh, "+")) {
+        if (ui.button(kIdAddTrack, hl.add.x, hl.add.y, hl.add.w, hl.add.h,
+                      "+")) {
             tl.addTrackMenu = !tl.addTrackMenu;
             tl.clipMenu = false;
         }

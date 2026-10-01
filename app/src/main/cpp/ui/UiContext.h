@@ -20,6 +20,7 @@
 #include "ui/TextFit.h"
 #include "platform/InputState.h"
 #include <string>
+#include <vector>
 
 namespace vv {
 
@@ -135,15 +136,15 @@ public:
     // o endFrame submete os runs SEQUENCIALMENTE. Os batches ACUMULAM como
     // sempre (solids_ íntegro p/ os testes); só a SUBMISSÃO é segmentada.
     // Glifos continuam por último (texto sempre legível — decisão do tema).
-    u32 runCountForTest() const { return runCount_; }
+    u32 runCountForTest() const { return static_cast<u32>(runs_.size()); }
     u32 runTexForTest(u32 i) const {   // 0 = sólidos (textura branca)
-        return i < runCount_ ? runs_[i].tex : 0xFFFFFFFFu;
+        return i < runs_.size() ? runs_[i].tex : 0xFFFFFFFFu;
     }
     u32 runFirstVertexForTest(u32 i) const {
-        return i < runCount_ ? runs_[i].firstVertex : 0;
+        return i < runs_.size() ? runs_[i].firstVertex : 0;
     }
     u32 runVertexCountForTest(u32 i) const {
-        return i < runCount_ ? runs_[i].vertexCount : 0;
+        return i < runs_.size() ? runs_[i].vertexCount : 0;
     }
 
     // 0.7.4 — RECORTES fora de regiões de scroll: o viewport 2D do editor
@@ -267,17 +268,19 @@ private:
     // 0.7.4 — runs de submissão em ORDEM (z-order sólidos↔texturas):
     // cada entrada aponta o batch + textura + range de vértices; o
     // endFrame submete-as SEQUENCIALMENTE (antes: grupos fixos → sólidos
-    // sempre por baixo das imagens). Cap 32 (um run por alternância de
-    // textura; o Renderer aceita 32 submissões).
+    // sempre por baixo das imagens). 0.8.4: armazenamento DINÂMICO — o cap
+    // fixo de 32 cortava runs em silêncio e empurrava os GLIFOS fora do cap
+    // do Renderer (texto inteiro a sumir no C33 com browser/timeline
+    // carregados). kMaxRuns passa a ser LIMIAR DE AVISO (o Renderer loga
+    // acima de kSubWarn); reserve(64) = zero realloc em steady state.
     struct Run {
         const QuadBatch* batch;
         u32              tex;          // 0 = sólidos (branca)
         u32              firstVertex;
         u32              vertexCount;
     };
-    static constexpr u32 kMaxRuns = 32;
-    Run                runs_[kMaxRuns]{};
-    u32                runCount_ = 0;
+    static constexpr u32 kMaxRuns = 64;   // limiar de aviso (não corta)
+    std::vector<Run>     runs_;           // dinâmico — NUNCA descarta
 
     // 0.7.0 — imagens da UI criável: até 4 batches (um por textura)
     static constexpr u32 kMaxImageBatches = 4;

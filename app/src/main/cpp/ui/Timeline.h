@@ -88,6 +88,25 @@ bool visible(bool playMode, bool uiMode, const Scene& scene, Handle selected);
 // rect da strip: fundo do VIEWPORT CENTRAL (entre painéis, acima da status)
 UiRect timelineRect(f32 sw, f32 sh, const safe::Insets& in, bool rightPanel);
 
+// 0.8.4 — LAYOUT FLUIDO DO HEADER (função pura, afervel no CI): rects dos
+// widgets do header para UMA largura de strip. No C33 (1600 px − 2 painéis
+// de 300 = 1000 úteis, menos insets) os offsets FIXOS da 0.8.0 sobrepunham
+// "clip:" (x+376..552) com o botão play (w−436) — w<988 = dois widgets a
+// lutar pelo mesmo toque ("funções que param"). Regra nova: o cluster da
+// DIREITA mantém-se fixo (play/stop/mode/vel/+, como sempre); o "clip:"
+// ENCOSTA-SE ao play (folga 8) e ENCOLHE 176→120 quando precisa; o título
+// usa o resto (labelFitted corta). Para toda a largura: sem par sobreposto.
+struct HeaderLayout {
+    UiRect title;    // área de texto do título (labelFitted)
+    UiRect clip;     // botão "clip: <nome>"
+    UiRect play;     // play/pause
+    UiRect stop;     // stop
+    UiRect mode;     // once/loop/pingpong
+    UiRect slider;   // vel (ou blend — 0.8.3)
+    UiRect add;      // "+" (novo track)
+};
+HeaderLayout headerLayout(const UiRect& r);
+
 // para o PREVIEW (chamado pelo main ao entrar em Play de jogo ou trocar de
 // seleção): restaura a pose capturada, para o player e recolhe o tempo
 void stopPreview(Scene& scene, Handle tic, State& st);

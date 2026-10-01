@@ -16,6 +16,7 @@ void UiContext::init() {
     for (u32 i = 0; i < kMaxImageBatches; ++i) {
         images_[i].reserve(64);   // 0.7.0: poucas imagens por frame
     }
+    runs_.reserve(kMaxRuns);   // 0.8.4: zero realloc de runs em steady state
 }
 
 void UiContext::beginFrame(Renderer* renderer, const InputState* input,
@@ -32,7 +33,7 @@ void UiContext::beginFrame(Renderer* renderer, const InputState* input,
         imageTex_[i] = 0;
     }
     imageCount_ = 0;
-    runCount_   = 0;   // 0.7.4: runs de submissão por frame
+    runs_.clear();   // 0.7.4: runs de submissão por frame (0.8.4: dinâmico)
 
     // F4.1: estado de scroll POR FRAME (os slots com offset persistem)
     scrollCur_    = kNoScroll;
@@ -57,24 +58,20 @@ bool UiContext::emitTo(QuadBatch& b, f32 x, f32 y, f32 w, f32 h,
 }
 
 // 0.7.4 — run de submissão: extende o corrente quando é o MESMO batch+tex,
-// senão abre um novo (cap kMaxRuns; acima do cap o quad acumula no batch
-// mas não ganha run próprio — casos reais ficam muito abaixo do cap).
+// senão abre um novo. 0.8.4: armazenamento DINÂMICO (reserve em init; zero
+// realloc em steady state) — o cap fixo de 32 cortava runs em silêncio e,
+// pior, empurrava o batch de GLIFOS para fora do cap do Renderer (o texto
+// INTEIRO saía do ecrã no C33). Agora nada se corta; o frame anómalo é
+// avisado pelo Renderer (limiar kSubWarn).
 // `tex` = 0 p/ sólidos (textura branca do renderer).
 void UiContext::recordRun(QuadBatch& b, u32 tex, u32 firstVertex,
                           u32 vertexCount) {
-    if (runCount_ > 0 && runs_[runCount_ - 1].batch == &b &&
-        runs_[runCount_ - 1].tex == tex) {
-        runs_[runCount_ - 1].vertexCount += vertexCount;
+    if (!runs_.empty() && runs_.back().batch == &b &&
+        runs_.back().tex == tex) {
+        runs_.back().vertexCount += vertexCount;
         return;
     }
-    if (runCount_ >= kMaxRuns) {
-        return;   // cap — o quad já está no batch (os testes continuam a vê-lo)
-    }
-    runs_[runCount_].batch = &b;
-    runs_[runCount_].tex = tex;
-    runs_[runCount_].firstVertex = firstVertex;
-    runs_[runCount_].vertexCount = vertexCount;
-    ++runCount_;
+    runs_.push_back(Run{&b, tex, firstVertex, vertexCount});
 }
 
 void UiContext::panel(f32 x, f32 y, f32 w, f32 h, const f32 color[4]) {
@@ -431,11 +428,11 @@ void UiContext::endFrame() {
     // 0.7.4 — submissão na ORDEM REAL de emissão (runs): sólidos e texturas
     // intercalam-se conforme foram desenhados; os GLIFOS ficam por último
     // (texto sempre legível — a regra do tema desde a 0.7.0).
-    for (u32 i = 0; i < runCount_; ++i) {
-        renderer_->submit(*runs_[i].batch,
-                           runs_[i].tex == 0u ? renderer_->whiteTexture()
-                                              : runs_[i].tex,
-                           runs_[i].firstVertex, runs_[i].vertexCount);
+    for (const Run& r : runs_) {
+        renderer_->submit(*r.batch,
+                           r.tex == 0u ? renderer_->whiteTexture()
+                                       : r.tex,
+                           r.firstVertex, r.vertexCount);
     }
     if (font_ && font_->ok()) {
         renderer_->submit(glyphs_, font_->texture());
