@@ -104,8 +104,12 @@ struct Env {
             const int choice = drawPlusMenu(ui, input, kSW, kSH, st);
             if (choice > 0) {
                 if (st.uiMode) {
-                    uiAddElement(scene, st, static_cast<u32>(choice - 1),
-                                 kSW, kSH);
+                    // 0.7.4 — o MESMO mapa do main (1..7 elementos, 8
+                    // joystick, 9/10 VBox/HBox)
+                    const int kind = uiPlusChoiceKind(choice);
+                    if (kind >= 0) {
+                        uiAddElement(scene, st, static_cast<u32>(kind), kSW, kSH);
+                    }
                 } else {
                     createTicFromPreset(scene,
                                         static_cast<PresetKind>(choice - 1),
@@ -346,12 +350,12 @@ TEST(uieditor_inspector_ui_sem_sobreposicao_e_dentro_do_painel) {
     e.st.selElement = 0;
     e.frame();
 
-    // o plano tem as linhas esperadas (nome, x, y, w, h, R, G, B, visivel,
-    // ancoraH, ancoraV, texto, acao, alvo, remover)
+    // o plano tem as linhas esperadas (nome, x, y, w, h, R, G, B, FUNDO A,
+    // visivel, ancoraH, ancoraV, texto, acao, alvo, TEX, COLOCAR EM, remover)
     const TextMetrics tm = e.ui.textMetrics();
     UiInspRow plan[24];
     const u32 n = uiInspectorPlan(c->elements[0], tm, plan, 24);
-    EXPECT(n == 15u);
+    EXPECT(n == 18u);   // 0.7.4: + fundo A + tex: + colocar em
     // y CUMULATIVO estrito: nenhuma linha invade a anterior
     for (u32 i = 1; i < n; ++i) {
         EXPECT(plan[i].y >= plan[i - 1].y + plan[i - 1].h - 0.01f);
@@ -429,15 +433,31 @@ TEST(uieditor_inspector_ui_botoes_visivel_ancoras_acao_remover) {
 
     const UiRect panel = safe::inspectorPanelRect(kSW, kSH, safe::Insets{});
     // tapRow recalcula o PLANO a cada chamada (linhas mudam quando a ação
-    // ganha/perde o ALVO — um plano obsoleto apontaria a linha errada)
+    // ganha/perde o ALVO — um plano obsoleto apontaria a linha errada) e
+    // FAZ SCROLL até à linha (0.7.4: o plano cresceu — fundo A/tex:/colocar
+    // em — e as últimas linhas podem estar abaixo da dobra)
     auto tapRow = [&](u64 id) {
         UiInspRow fresh[24];
         const u32 fn = uiInspectorPlan(c->elements[0], e.ui.textMetrics(),
                                        fresh, 24);
         for (u32 i = 0; i < fn; ++i) {
             if (fresh[i].id == id) {
+                // offset CLAMPADO (o beginScroll do próximo frame faz o
+                // mesmo clamp — sem isto a linha desenhada fica mais abaixo
+                // do que a matemática prevê)
+                const f32 contentH =
+                    uiInspectorContentHeight(c->elements[0], e.ui.textMetrics());
+                const f32 visibleH = panel.h - editor::kHeaderH - 4.0f;
+                f32 off = fresh[i].y;
+                if (off > contentH - visibleH) {
+                    off = contentH - visibleH;
+                }
+                if (off < 0.0f) {
+                    off = 0.0f;
+                }
+                e.ui.scrollSetOffset(kUiInspScrollId, off);
                 const f32 ry = panel.y + editor::kHeaderH + 4.0f +
-                               fresh[i].y + fresh[i].h * 0.5f;
+                               fresh[i].y + fresh[i].h * 0.5f - off;
                 e.tap(panel.x + panel.w * 0.5f, ry);
                 return;
             }
@@ -863,8 +883,9 @@ TEST(uieditor_plus_modo_ui_cria_elementos_no_canvas) {
     // "+" da Hierarchy abre o menu (no modo UI: CRIAR ELEMENTO UI)
     e.tap(300.0f - 12.0f - 28.0f, 88.0f + 24.0f);   // botão + do cabeçalho
     EXPECT(e.st.plusMenu);
-    // 0.7.3: 8 itens (Panel/Label/Button/Image/Menu/Card/Article/Joystick)
-    const f32 h = kHeaderH + 8.0f * 64.0f + kPad;
+    // 0.7.4: 10 itens (Panel/Label/Button/Image/Menu/Card/Article/Joystick/
+    // VBox/HBox)
+    const f32 h = kHeaderH + 10.0f * 64.0f + kPad;
     const f32 y = (kSH - h) * 0.5f + kHeaderH + 2.0f * 64.0f + 28.0f;   // Button
     e.tap(800.0f, y);
     EXPECT(!e.st.plusMenu);

@@ -59,6 +59,20 @@ inline bool inside(const UiRect& r, f32 x, f32 y) {
     return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
 
+// 0.7.4 — interseção de dois rects (clip composto). Rects que não se
+// intersetam devolvem um rect DEGENERADO (w/h ≤ 0) — o clipQuad recusa
+// quads dentro dele (nada desenha fora da região de clip).
+inline UiRect intersectRects(const UiRect& a, const UiRect& b) {
+    const f32 x0 = a.x > b.x ? a.x : b.x;
+    const f32 y0 = a.y > b.y ? a.y : b.y;
+    const f32 x1 = (a.x + a.w) < (b.x + b.w) ? (a.x + a.w) : (b.x + b.w);
+    const f32 y1 = (a.y + a.h) < (b.y + b.h) ? (a.y + a.h) : (b.y + b.h);
+    if (x0 >= x1 || y0 >= y1) {
+        return {0.0f, 0.0f, 0.0f, 0.0f};   // degenerado: recusa tudo
+    }
+    return {x0, y0, x1 - x0, y1 - y0};
+}
+
 // ---- protocolo de claim (codificado para os testes) -----------------------
 // O scroll reclama o press edge se nasceu dentro da região e NENHUM widget
 // reclamou antes (slider tem prioridade; botões dentro de região não reclamam).

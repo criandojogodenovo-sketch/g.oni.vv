@@ -30,6 +30,11 @@ public:
 
     // pass UI (F1 mantido): submissões desenhadas em endFrame, sem depth
     void submit(const QuadBatch& batch, u32 texture);
+    // 0.7.4 — submissão por RANGE de vértices (z-order sólidos↔texturas:
+    // o UiContext submete RUNS na ordem real de emissão; um mesmo batch
+    // pode aparecer em vários runs com ranges diferentes)
+    void submit(const QuadBatch& batch, u32 texture, u32 firstVertex,
+                u32 vertexCount);
     DrawStats endFrame();   // upload + draw das submissões (proj ortho)
     void shutdown();
 
@@ -57,10 +62,14 @@ private:
     struct Submission {
         const QuadBatch* batch;
         u32 tex;
+        u32 firstVertex;   // 0.7.4: range do batch (submissão por runs)
+        u32 vertexCount;
     };
-    // 0.7.0: até 6 submissões por frame — solids + até 4 batches de
-    // IMAGENS da UI criável (um por textura) + glifos (era 2)
-    Submission subs_[6];
+    // 0.7.4: até 32 submissões por frame — o UiContext submete RUNS na
+    // ordem real de emissão (z-order sólidos↔texturas intercalados; um run
+    // por alternância). 0.7.0 eram 6 (grupos fixos solids/imagens/glifos).
+    static constexpr u32 kMaxSubs = 32;
+    Submission subs_[kMaxSubs];
     u32 subCount_ = 0;
 };
 

@@ -78,9 +78,11 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
         st.selJoystick = false;
         st.elDrag = false;
         const TextMetrics tm = ui.textMetrics();
+        // 0.7.4: sem TIC selecionado o "+" CRIA o TIC de UI (ensureUiTic no
+        // dispatch) — a dica diz o caminho (não obriga a TIC 3D)
         ui.labelFitted(view.x + kPad, view.y + view.h * 0.5f + tm.ascent,
                        tic ? "(UI vazia — use + para criar o primeiro elemento)"
-                           : "(selecione um TIC na Hierarchy)",
+                           : "(use + para criar UI — nasce o TIC 'UI')",
                        theme::LINE, view.w - 2.0f * kPad);
         return;
     }
@@ -99,28 +101,46 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
     // moldura do espaço de design (o "ecrã" onde a UI vive em Play)
     ui.frame(t.ox, t.oy, sw * t.scale, sh * t.scale, 1.0f, theme::LINE);
 
-    // 0.7.3 — PROXY do joystick (TouchControls do TIC): a MESMA geometria
-    // do Play (layoutFor sobre o espaço de design), desenhada escalada;
-    // arrastável (pos) e selecionável para o Inspector de UI (o `joy` vem
-    // do topo da função — o canvas pode até não existir)
+    // 0.7.4 — RESOLVER (FONTE ÚNICA do layout; âncoras + safe-area REAL +
+    // containers). O editor desenha o MESMO layout do Play, escalado —
+    // paridade estrutural (o mesmo resolveCanvasLayout alimenta drawCanvas
+    // e hitTestCanvas).
+    const safe::Insets ins = ui.safeArea();
+    ui::CanvasLayout lay[32];
+    const u32 nLay =
+        canvas->elements.size() < 32
+            ? static_cast<u32>(canvas->elements.size())
+            : 32;
+    ui::resolveCanvasLayout(*canvas, sw, sh, ins, lay, nLay);
+
+    // 0.7.4 — joystick com a MESMA APARÊNCIA do Play: o núcleo partilhado
+    // (drawTouchControlsAt) desenha a base + knob + JUMP no mini-ecrã (com
+    // o transform) — o proxy simplificado da 0.7.3 era uma coisa no editor
+    // e outra no Play (sem botão JUMP, knob próprio).
     f32 joyX0 = 0.0f, joyY0 = 0.0f, joyX1 = 0.0f, joyY1 = 0.0f;
     if (joy) {
-        const TouchControls::Layout jl = joy->layoutFor(sw, sh);
-        const f32 jr = jl.joyR * t.scale;
-        joyX0 = t.ox + jl.joyCX * t.scale - jr;
-        joyY0 = t.oy + jl.joyCY * t.scale - jr;
-        joyX1 = t.ox + jl.joyCX * t.scale + jr;
-        joyY1 = t.oy + jl.joyCY * t.scale + jr;
-        const f32 joyCol[4] = {joy->colR, joy->colG, joy->colB, 1.0f};
+        const TouchControls::Layout jl =
+            joy->layoutFor(sw - ins.left - ins.right, sh - ins.top - ins.bottom);
+        joyX0 = t.ox + (ins.left + jl.joyCX - jl.joyR) * t.scale;
+        joyY0 = t.oy + (ins.top + jl.joyCY - jl.joyR) * t.scale;
+        joyX1 = t.ox + (ins.left + jl.joyCX + jl.joyR) * t.scale;
+        joyY1 = t.oy + (ins.top + jl.joyCY + jl.joyR) * t.scale;
+        {
+            // NADA do joystick sangra do mini-ecrã (paridade com o Play)
+            const UiContext::ScopedClip clipJ(
+                ui, {t.ox, t.oy, sw * t.scale, sh * t.scale});
+            const UiContext::ScopedTextScale scopedScale(ui, t.scale);
+            drawTouchControlsAt(ui, *joy,
+                                t.ox + ins.left * t.scale,
+                                t.oy + ins.top * t.scale,
+                                sw - ins.left - ins.right,
+                                sh - ins.top - ins.bottom, t.scale);
+        }
+        // overlay de EDIÇÃO (permitido divergir): moldura de seleção +
+        // rótulo — o Play não os desenha (só interação)
         ui.frame(joyX0, joyY0, joyX1 - joyX0, joyY1 - joyY0,
-                 st.selJoystick ? 3.0f : 2.0f,
-                 st.selJoystick ? theme::ACCENT : joyCol);
-        // knob no centro + rótulo
-        const f32 ks = 44.0f * t.scale;
-        const f32 kx = (joyX0 + joyX1) * 0.5f;
-        const f32 ky = (joyY0 + joyY1) * 0.5f;
-        ui.panel(kx - ks * 0.5f, ky - ks * 0.5f, ks, ks, theme::PANEL);
-        ui.frame(kx - ks * 0.5f, ky - ks * 0.5f, ks, ks, 1.0f, joyCol);
+                 st.selJoystick ? 3.0f : 1.0f,
+                 st.selJoystick ? theme::ACCENT : theme::LINE);
         if (ui.hasFont()) {
             const TextMetrics tm2 = ui.textMetrics();
             ui.labelFitted(joyX0, joyY1 + 4.0f + tm2.ascent, "joystick",
@@ -131,14 +151,37 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
         st.elDrag = false;
     }
 
-    // elementos (ordem do array = z-order; o último fica por cima)
-    for (size_t i = 0; i < canvas->elements.size(); ++i) {
-        const UiElement& e = canvas->elements[i];
-        const UiRect r = ui::elementRect(e, sw, sh, safe::Insets{});
-        const UiRect rs{t.ox + r.x * t.scale, t.oy + r.y * t.scale,
-                        r.w * t.scale, r.h * t.scale};
-        ui::drawElement(ui, e, rs,
-                        static_cast<i32>(i) == st.selElement);
+    // elementos (ordem do array = z-order; o último fica por cima).
+    // 0.7.4: clip ao MINI-ECRÃ (nada sangra para os painéis ao lado — o
+    // Play recorta na borda física; paridade) + texto ESCALADO (o
+    // mini-canvas é o Play reduzido, não texto a 28 px em cima de rects
+    // a 0.4× — a causa raiz do "Menu com caixas no editor e texto solto
+    // no Play" do C33).
+    {
+        const UiContext::ScopedClip clip(
+            ui, {t.ox, t.oy, sw * t.scale, sh * t.scale});
+        const UiContext::ScopedTextScale scopedScale(ui, t.scale);
+        for (size_t i = 0; i < canvas->elements.size() && i < 32; ++i) {
+            const UiElement& e = canvas->elements[i];
+            if (!lay[i].shown) {
+                continue;   // invisível (ou em container escondido)
+            }
+            const UiRect& r = lay[i].rect;
+            const UiRect rs{t.ox + r.x * t.scale, t.oy + r.y * t.scale,
+                            r.w * t.scale, r.h * t.scale};
+            if (lay[i].parentIdx >= 0) {
+                // FILHO: clip ao rect do PAI (como no Play)
+                const UiRect& pr = lay[static_cast<size_t>(lay[i].parentIdx)].rect;
+                const UiContext::ScopedClip clipP(
+                    ui, {t.ox + pr.x * t.scale, t.oy + pr.y * t.scale,
+                         pr.w * t.scale, pr.h * t.scale});
+                ui::drawElement(ui, e, rs,
+                                static_cast<i32>(i) == st.selElement);
+            } else {
+                ui::drawElement(ui, e, rs,
+                                static_cast<i32>(i) == st.selElement);
+            }
+        }
     }
 
     // ---- gesto WYSIWYG (slot 0; NÃO corre por baixo de overlays) ---------
@@ -162,6 +205,13 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
             } else if (st.selElement >= 0) {
                 UiElement& e =
                     canvas->elements[static_cast<size_t>(st.selElement)];
+                if (!e.parent.empty()) {
+                    // 0.7.4 — FILHO de container: o drag DESLIGA-o do pai
+                    // (vira elemento de topo NO SÍTIO onde está) e o gesto
+                    // passa a mover normalmente — arrastar para fora do
+                    // container é a forma natural de o tirar
+                    uiDetachElement(*canvas, st.selElement, sw, sh, ins);
+                }
                 e.ox += dx;
                 e.oy += dy;
             }
@@ -179,13 +229,20 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
             py < view.y + view.h) {
             const f32 dx = uiViewportToDesignX(t, px);
             const f32 dy = uiViewportToDesignY(t, py);
-            // o de CIMA ganha (hit-test reverso à ordem de desenho)
+            // o de CIMA ganha (hit-test reverso à ordem de desenho) — nos
+            // rects RESOLVIDOS (containers incluídos: filhos selecionáveis)
             i32 hit = -1;
-            for (i32 i = static_cast<i32>(canvas->elements.size()) - 1; i >= 0; --i) {
-                const UiElement& e =
-                    canvas->elements[static_cast<size_t>(i)];
-                const UiRect r = ui::elementRect(e, sw, sh, safe::Insets{});
-                if (dx >= r.x && dx < r.x + r.w && dy >= r.y && dy < r.y + r.h) {
+            for (i32 i = static_cast<i32>(canvas->elements.size()) - 1;
+                 i >= 0; --i) {
+                if (i >= static_cast<i32>(nLay)) {
+                    continue;
+                }
+                if (!lay[i].shown) {
+                    continue;
+                }
+                const UiRect& r = lay[i].rect;
+                if (dx >= r.x && dx < r.x + r.w && dy >= r.y &&
+                    dy < r.y + r.h) {
                     hit = i;
                     break;
                 }
@@ -222,11 +279,39 @@ bool uiElementHasAction(UiElement::Kind k) {
     return k == UiElement::Kind::Button || k == UiElement::Kind::Menu;
 }
 
+// 0.7.4 — textura selecionável (tex: do Inspector; ref vive em e.image)
+bool uiElementHasTexture(UiElement::Kind k) {
+    return k == UiElement::Kind::Panel || k == UiElement::Kind::Button ||
+           k == UiElement::Kind::Image;
+}
+
+// 0.7.4 — alinhamento transversal (Menu: texto; containers: filhos)
+bool uiElementHasAlign(UiElement::Kind k) {
+    return k == UiElement::Kind::Menu || uiElementIsContainer(k);
+}
+
+// 0.7.4 — mapa da escolha do "+" (modo UI) → Kind (−1 = joystick)
+int uiPlusChoiceKind(int choice) {
+    switch (choice) {
+        case 1: case 2: case 3: case 4: case 5: case 6: case 7:
+            return choice - 1;              // Panel..Article
+        case 8:  return -1;                 // joystick (TouchControls)
+        case 9:  return static_cast<int>(UiElement::Kind::VBox);
+        case 10: return static_cast<int>(UiElement::Kind::HBox);
+        default: return 0;
+    }
+}
+
 u32 uiInspectorRowCount(const UiElement& e, const TextMetrics& m) {
     (void)m;
-    u32 n = 6;   // nome + X + Y + W + H + visivel
-    n += 3;      // R + G + B
-    n += 2;      // ancora H + ancora V
+    const bool child = !e.parent.empty();   // filho: sem pos/âncoras (auto)
+    u32 n = 1;                             // nome
+    n += child ? 0 : 2;                    // X + Y (filho: posição é do container)
+    n += 2;                                // W + H
+    n += child ? 0 : 2;                    // ancora H + ancora V
+    n += 3;                                // R + G + B
+    ++n;                                   // 0.7.4: alpha do fundo
+    ++n;                                   // visivel
     if (uiElementHasText(e.kind)) {
         ++n;     // texto
     }
@@ -239,6 +324,19 @@ u32 uiInspectorRowCount(const UiElement& e, const TextMetrics& m) {
             ++n;   // 0.7.1: estilo fade|slide
         }
     }
+    if (uiElementHasTexture(e.kind)) {
+        ++n;     // 0.7.4: tex:
+    }
+    if (e.kind == UiElement::Kind::Menu || uiElementIsContainer(e.kind)) {
+        ++n;     // 0.7.4: espaçamento
+    }
+    if (uiElementIsContainer(e.kind)) {
+        ++n;     // 0.7.4: padding
+    }
+    if (uiElementHasAlign(e.kind)) {
+        ++n;     // 0.7.4: alinhamento
+    }
+    ++n;         // 0.7.4: colocar em (container)
     ++n;         // remover
     return n;
 }
@@ -248,6 +346,7 @@ u32 uiInspectorPlan(const UiElement& e, const TextMetrics& m, UiInspRow* rows,
     const f32 textH = inspTextRowH(m);
     const f32 btnH  = inspButtonRowH(m);
     const f32 sldH  = inspSliderRowH(m);
+    const bool child = !e.parent.empty();
 
     u32 n = 0;
     f32 y = 0.0f;
@@ -264,16 +363,21 @@ u32 uiInspectorPlan(const UiElement& e, const TextMetrics& m, UiInspRow* rows,
     };
 
     push(UiInspRow::Kind::Name, textH, 0);
-    push(UiInspRow::Kind::PosX, sldH, kUiInspX);
-    push(UiInspRow::Kind::PosY, sldH, kUiInspY);
+    if (!child) {
+        push(UiInspRow::Kind::PosX, sldH, kUiInspX);
+        push(UiInspRow::Kind::PosY, sldH, kUiInspY);
+    }
     push(UiInspRow::Kind::SizeW, sldH, kUiInspW);
     push(UiInspRow::Kind::SizeH, sldH, kUiInspH);
     push(UiInspRow::Kind::ColR, sldH, kUiInspR);
     push(UiInspRow::Kind::ColG, sldH, kUiInspG);
     push(UiInspRow::Kind::ColB, sldH, kUiInspB);
+    push(UiInspRow::Kind::ColA, sldH, kUiInspA);   // 0.7.4: alpha do fundo
     push(UiInspRow::Kind::VisToggle, btnH, kUiInspVis);
-    push(UiInspRow::Kind::AnchorH, btnH, kUiInspAnchH);
-    push(UiInspRow::Kind::AnchorV, btnH, kUiInspAnchV);
+    if (!child) {
+        push(UiInspRow::Kind::AnchorH, btnH, kUiInspAnchH);
+        push(UiInspRow::Kind::AnchorV, btnH, kUiInspAnchV);
+    }
     if (uiElementHasText(e.kind)) {
         push(UiInspRow::Kind::TextBtn, btnH, kUiInspText);
     }
@@ -286,6 +390,19 @@ u32 uiInspectorPlan(const UiElement& e, const TextMetrics& m, UiInspRow* rows,
             push(UiInspRow::Kind::StyleBtn, btnH, kUiInspStyle);   // 0.7.1
         }
     }
+    if (uiElementHasTexture(e.kind)) {
+        push(UiInspRow::Kind::TexBtn, btnH, kUiInspTex);   // 0.7.4
+    }
+    if (e.kind == UiElement::Kind::Menu || uiElementIsContainer(e.kind)) {
+        push(UiInspRow::Kind::Spacing, sldH, kUiInspSpacing);
+    }
+    if (uiElementIsContainer(e.kind)) {
+        push(UiInspRow::Kind::Pad, sldH, kUiInspPad);
+    }
+    if (uiElementHasAlign(e.kind)) {
+        push(UiInspRow::Kind::AlignBtn, btnH, kUiInspAlign);
+    }
+    push(UiInspRow::Kind::ParentBtn, btnH, kUiInspParent);   // 0.7.4
     push(UiInspRow::Kind::Remove, btnH, kUiInspRemove);
     return n;
 }
@@ -506,9 +623,25 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
     bool edited = false;
     u32 colorIdx = 0;   // payload dos ColorSlider (0=R, 1=G, 2=B)
 
-    char nameLine[64];
-    std::snprintf(nameLine, sizeof(nameLine), "%s  (%s)", e.name.c_str(),
-                  uiElementKindName(e.kind));
+    // 0.7.4 — nome + container (filho) no cabeçalho
+    char nameLine[96];
+    if (!e.parent.empty()) {
+        std::snprintf(nameLine, sizeof(nameLine), "%s  (%s em %s)",
+                      e.name.c_str(), uiElementKindName(e.kind),
+                      e.parent.c_str());
+    } else {
+        std::snprintf(nameLine, sizeof(nameLine), "%s  (%s)", e.name.c_str(),
+                      uiElementKindName(e.kind));
+    }
+
+    // 0.7.4 — lista de containers do canvas p/ o botão "colocar em"
+    // (ordem do array; inclui o próprio — o resolver guarda ciclos)
+    std::vector<std::string> containers;
+    for (const UiElement& o : canvas->elements) {
+        if (uiElementIsContainer(o.kind)) {
+            containers.push_back(o.name);
+        }
+    }
 
     for (u32 i = 0; i < n; ++i) {
         const UiInspRow& r = plan[i];
@@ -551,6 +684,15 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                 edited = true;
             }
             ++colorIdx;
+            break;
+        }
+        case UiInspRow::Kind::ColA: {
+            // 0.7.4 — ALPHA do fundo: 0 = sem fundo (Label default);
+            // Menu = caixas ON/OFF; Panel/Button translúcidos se < 1
+            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "fundo A", 0.0f, 1.0f,
+                            e.color[3], "%.2f")) {
+                edited = true;
+            }
             break;
         }
         case UiInspRow::Kind::VisToggle: {
@@ -616,6 +758,54 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                       label);
             break;
         }
+        case UiInspRow::Kind::TexBtn: {
+            // 0.7.4 — "tex: …" (Panel/Button/Image): abre o seletor de
+            // TEXTURAS DO ELEMENTO (menuKind 3; com "importar…")
+            char label[80];
+            std::snprintf(label, sizeof(label), "tex: %s",
+                          e.image.empty()
+                              ? "none"
+                              : e.image.substr(
+                                    e.image.find_last_of('/') == std::string::npos
+                                        ? 0
+                                        : e.image.find_last_of('/') + 1)
+                                    .c_str());
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      label);
+            break;
+        }
+        case UiInspRow::Kind::Spacing:
+            // 0.7.4 — espaçamento entre itens (Menu) / filhos (containers)
+            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "espaco", 0.0f, 40.0f,
+                            e.spacing, "%.0f")) {
+                edited = true;
+            }
+            break;
+        case UiInspRow::Kind::Pad:
+            // 0.7.4 — resguardo interno do container
+            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "pad", 0.0f, 40.0f,
+                            e.pad, "%.0f")) {
+                edited = true;
+            }
+            break;
+        case UiInspRow::Kind::AlignBtn: {
+            // 0.7.4 — alinhamento (Menu: texto; containers: filhos)
+            char label[48];
+            std::snprintf(label, sizeof(label), "alinhamento: %s",
+                          uiAlignName(e.align));
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      label);
+            break;
+        }
+        case UiInspRow::Kind::ParentBtn: {
+            // 0.7.4 — "colocar em": cicla (nenhum) → containers → (nenhum)
+            char label[80];
+            std::snprintf(label, sizeof(label), "colocar em: %s",
+                          e.parent.empty() ? "(nenhum)" : e.parent.c_str());
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      label);
+            break;
+        }
         case UiInspRow::Kind::Remove:
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       "remover elemento");
@@ -632,7 +822,9 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
             if (r.kind == UiInspRow::Kind::PosX || r.kind == UiInspRow::Kind::PosY ||
                 r.kind == UiInspRow::Kind::SizeW || r.kind == UiInspRow::Kind::SizeH ||
                 r.kind == UiInspRow::Kind::ColR || r.kind == UiInspRow::Kind::ColG ||
-                r.kind == UiInspRow::Kind::ColB || r.kind == UiInspRow::Kind::Name) {
+                r.kind == UiInspRow::Kind::ColB || r.kind == UiInspRow::Kind::ColA ||
+                r.kind == UiInspRow::Kind::Spacing || r.kind == UiInspRow::Kind::Pad ||
+                r.kind == UiInspRow::Kind::Name) {
                 continue;   // sliders capturam o gesto diretamente
             }
             const f32 ry = contentTop + r.y - off;
@@ -652,7 +844,9 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                         st.selElement,
                         static_cast<UiElement::AnchorH>(
                             (static_cast<u32>(e.anchorH) + 1u) % 3u),
-                        e.anchorV, ui.screenWidth(), ui.screenHeight());
+                        e.anchorV, ui.screenWidth(), ui.screenHeight(),
+                        ui.safeArea().left, ui.safeArea().top,
+                        ui.safeArea().right, ui.safeArea().bottom);
                     edited = true;
                     break;
                 case UiInspRow::Kind::AnchorV:
@@ -660,7 +854,9 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                         st.selElement, e.anchorH,
                         static_cast<UiElement::AnchorV>(
                             (static_cast<u32>(e.anchorV) + 1u) % 3u),
-                        ui.screenWidth(), ui.screenHeight());
+                        ui.screenWidth(), ui.screenHeight(),
+                        ui.safeArea().left, ui.safeArea().top,
+                        ui.safeArea().right, ui.safeArea().bottom);
                     edited = true;
                     break;
                 case UiInspRow::Kind::TextBtn:
@@ -687,11 +883,52 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                             : "slide";
                     edited = true;
                     break;
+                case UiInspRow::Kind::TexBtn:
+                    // 0.7.4 — abre o seletor de textura DO ELEMENTO
+                    // (menuKind 3: none + ficheiros + "importar…")
+                    st.assetMenu = 3;
+                    break;
+                case UiInspRow::Kind::AlignBtn:
+                    // 0.7.4 — start → center → end → start
+                    e.align = static_cast<UiElement::Align>(
+                        (static_cast<u32>(e.align) + 1u) % 3u);
+                    edited = true;
+                    break;
+                case UiInspRow::Kind::ParentBtn: {
+                    // 0.7.4 — cicla (nenhum) → containers → (nenhum). Ao
+                    // SAIR de um container, o elemento fica NO SÍTIO onde
+                    // estava (uiDetachElement conserva a posição visual)
+                    if (e.parent.empty()) {
+                        if (!containers.empty()) {
+                            e.parent = containers[0];
+                        }
+                    } else {
+                        size_t ci = 0;
+                        for (size_t k = 0; k < containers.size(); ++k) {
+                            if (containers[k] == e.parent) {
+                                ci = k;
+                                break;
+                            }
+                        }
+                        if (ci + 1 < containers.size()) {
+                            e.parent = containers[ci + 1];
+                        } else {
+                            // sai do último → (nenhum), posição conservada
+                            uiDetachElement(*canvas, st.selElement,
+                                            ui.screenWidth(),
+                                            ui.screenHeight(), ui.safeArea());
+                        }
+                    }
+                    edited = true;
+                    break;
+                }
                 case UiInspRow::Kind::Remove:
                     canvas->elements.erase(
                         canvas->elements.begin() + st.selElement);
                     st.selElement = -1;
                     edited = true;
+                    break;
+                default:
                     break;
             }
         }
@@ -716,14 +953,54 @@ bool uiAddElement(Scene& scene, EditorState& st, u32 kind, f32 sw, f32 sh) {
     if (!canvas) {
         return false;
     }
-    if (kind > 6) {
-        return false;   // 0..3 = base (0.7.0); 4..6 = compostos (0.7.3)
+    if (kind > 8) {
+        return false;   // 0..3 = base (0.7.0); 4..6 = compostos (0.7.3);
+                        // 7..8 = containers VBox/HBox (0.7.4)
     }
     const UiElement::Kind k = static_cast<UiElement::Kind>(kind);
     const i32 idx = canvas->addElement(k, sw, sh);
+    // 0.7.4 — com um CONTAINER selecionado (ou um FILHO dele), o elemento
+    // novo nasce FILHO do mesmo container (irmão do selecionado); o layout
+    // passa a dispo-lo automaticamente
+    if (st.selElement >= 0 &&
+        st.selElement < static_cast<i32>(canvas->elements.size()) &&
+        idx >= 0 && idx < static_cast<i32>(canvas->elements.size())) {
+        const UiElement& sel = canvas->elements[static_cast<size_t>(st.selElement)];
+        UiElement& fresh = canvas->elements[static_cast<size_t>(idx)];
+        if (!sel.parent.empty() || uiElementIsContainer(sel.kind)) {
+            fresh.parent = sel.parent.empty() ? sel.name : sel.parent;
+        }
+    }
     st.selElement = idx;
     st.selJoystick = false;   // a seleção passou para o elemento novo
     return true;
+}
+
+// 0.7.4 — desliga o elemento do container CONSERVANDO a posição visual:
+// âncoras → esquerda/topo e ox/oy derivados do rect RESOLVIDO atual (o
+// elemento fica exatamente onde estava, agora livre)
+void uiDetachElement(UiCanvas& c, i32 element, f32 sw, f32 sh,
+                     const safe::Insets& ins) {
+    if (element < 0 || element >= static_cast<i32>(c.elements.size())) {
+        return;
+    }
+    UiElement& e = c.elements[static_cast<size_t>(element)];
+    if (e.parent.empty()) {
+        return;   // já é topo — nada a fazer
+    }
+    ui::CanvasLayout lay[32];
+    const u32 cap = c.elements.size() < 32
+                        ? static_cast<u32>(c.elements.size())
+                        : 32;
+    ui::resolveCanvasLayout(c, sw, sh, ins, lay, cap);
+    const UiRect r =
+        element < static_cast<i32>(cap) ? lay[static_cast<size_t>(element)].rect
+                                        : UiRect{};
+    e.parent.clear();
+    e.anchorH = UiElement::AnchorH::Left;   // Left/Top = posição absoluta
+    e.anchorV = UiElement::AnchorV::Top;
+    e.ox = r.x - ins.left;   // elementRect(Left/Top) = ins + ox → ox = r − ins
+    e.oy = r.y - ins.top;
 }
 
 // ---------------------------------------------------------------------------

@@ -74,11 +74,198 @@ bool menuLineAt(const UiElement& e, u32 row, std::string& outLabel,
 
 UiRect menuItemRect(const UiElement& e, const UiRect& base, u32 row) {
     const u32 n = menuLineCount(e);
-    const f32 rowH = n > 0 ? base.h / static_cast<f32>(n) : base.h;
-    return {base.x, base.y + static_cast<f32>(row) * rowH, base.w, rowH};
+    if (n == 0) {
+        return base;
+    }
+    // 0.7.4: espaçamento entre itens — o rowH encolhe para os (n−1) vãos
+    // caberem dentro do h do menu (spacing 0 = 0.7.3 exato: h/n por linha)
+    const f32 gaps = static_cast<f32>(n - 1u) * (e.spacing > 0.0f ? e.spacing : 0.0f);
+    const f32 rowH = base.h > gaps ? (base.h - gaps) / static_cast<f32>(n)
+                                   : base.h / static_cast<f32>(n);
+    return {base.x, base.y + static_cast<f32>(row) * (rowH + e.spacing),
+            base.w, rowH};
+}
+
+// ---- 0.7.4: LAYOUT RESOLVER (containers + paridade — FONTE ÚNICA) -------------
+
+namespace {
+
+// estado do resolver (memo de tamanhos + guard de ciclos)
+struct Resolver {
+    const UiCanvas* c;
+    f32 sw, sh;
+    safe::Insets ins;
+    CanvasLayout* out;
+    std::vector<f32> sizeW, sizeH;   // tamanho EFETIVO (eixo de conteúdo auto)
+    std::vector<u8>  state;          // 0 = intocado, 1 = EM CURSO (ciclo), 2 = pronto
+};
+
+// filhos de `i` = elementos com parent == nome do container i (ordem do
+// array). O chamador itera o array todo (canvases pequenos; O(n²) ok).
+inline bool isChildOf(const UiElement& child, const Resolver& r, i32 ci) {
+    return !child.parent.empty() &&
+           child.parent == r.c->elements[static_cast<size_t>(ci)].name;
+}
+
+// tamanho EFETIVO do elemento i (containers: eixo de conteúdo AUTO —
+// recursivo nos filhos; ciclo/guard devolve o tamanho manual)
+void sizeOf(Resolver& r, i32 i) {
+    if (r.state[static_cast<size_t>(i)] != 0u) {
+        return;   // pronto (2) ou em curso (1 = ciclo → tamanho manual)
+    }
+    r.state[static_cast<size_t>(i)] = 1;
+    const UiElement& e = r.c->elements[static_cast<size_t>(i)];
+    f32 w = e.w, h = e.h;
+    if (uiElementIsContainer(e.kind)) {
+        // filhos visíveis (invisíveis COLAPSAM — não ocupam lugar)
+        f32 content = 0.0f;
+        u32 n = 0;
+        for (size_t j = 0; j < r.c->elements.size(); ++j) {
+            const UiElement& ch = r.c->elements[j];
+            if (!isChildOf(ch, r, i) || !ch.visible) {
+                continue;
+            }
+            sizeOf(r, static_cast<i32>(j));
+            content += (e.kind == UiElement::Kind::VBox) ? r.sizeH[j]
+                                                         : r.sizeW[j];
+            ++n;
+        }
+        const f32 total = 2.0f * e.pad + content +
+                          (n > 0 ? static_cast<f32>(n - 1) * e.spacing : 0.0f);
+        if (n > 0) {   // vazio mantém o tamanho manual (placeholder)
+            if (e.kind == UiElement::Kind::VBox) {
+                h = total;   // VBox: h AUTO, w manual
+            } else {
+                w = total;   // HBox: w AUTO, h manual
+            }
+        }
+    }
+    r.sizeW[static_cast<size_t>(i)] = w;
+    r.sizeH[static_cast<size_t>(i)] = h;
+    r.state[static_cast<size_t>(i)] = 2;
+}
+
+// dispõe o elemento i no rect dado (recursivo: containers dispõem filhos).
+// Container INVISÍVEL: os filhos continuam a ser dispostos (rects válidos)
+// mas TODOS ficam shown=false — escondidos em cascata.
+void placeAt(Resolver& r, i32 i, const UiRect& rect, bool parentShown,
+             i32 parentIdx) {
+    const UiElement& e = r.c->elements[static_cast<size_t>(i)];
+    const bool shown = parentShown && e.visible;
+    CanvasLayout& L = r.out[static_cast<size_t>(i)];
+    L.rect = rect;
+    L.parentIdx = parentIdx;
+    L.laid = parentIdx >= 0;
+    L.shown = shown;
+    if (!uiElementIsContainer(e.kind)) {
+        return;
+    }
+    // dispõe os filhos dentro do rect (ordem do array = ordem do layout)
+    const f32 sp = e.spacing;
+    if (e.kind == UiElement::Kind::VBox) {
+        f32 y = rect.y + e.pad;
+        for (size_t j = 0; j < r.c->elements.size(); ++j) {
+            const UiElement& ch = r.c->elements[j];
+            if (!isChildOf(ch, r, i) || !ch.visible) {
+                continue;
+            }
+            const f32 cw = r.sizeW[j];
+            const f32 chh = r.sizeH[j];
+            f32 x = rect.x + e.pad;
+            if (e.align == UiElement::Align::Center) {
+                x = rect.x + (rect.w - cw) * 0.5f;
+            } else if (e.align == UiElement::Align::End) {
+                x = rect.x + rect.w - e.pad - cw;
+            }
+            placeAt(r, static_cast<i32>(j), {x, y, cw, chh}, shown,
+                    static_cast<i32>(i));
+            y += chh + sp;
+        }
+    } else {   // HBox
+        f32 x = rect.x + e.pad;
+        for (size_t j = 0; j < r.c->elements.size(); ++j) {
+            const UiElement& ch = r.c->elements[j];
+            if (!isChildOf(ch, r, i) || !ch.visible) {
+                continue;
+            }
+            const f32 cw = r.sizeW[j];
+            const f32 chh = r.sizeH[j];
+            f32 y = rect.y + e.pad;
+            if (e.align == UiElement::Align::Center) {
+                y = rect.y + (rect.h - chh) * 0.5f;
+            } else if (e.align == UiElement::Align::End) {
+                y = rect.y + rect.h - e.pad - chh;
+            }
+            placeAt(r, static_cast<i32>(j), {x, y, cw, chh}, shown,
+                    static_cast<i32>(i));
+            x += cw + sp;
+        }
+    }
+}
+
+} // namespace
+
+void resolveCanvasLayout(const UiCanvas& c, f32 sw, f32 sh,
+                         const safe::Insets& ins,
+                         CanvasLayout* out, u32 cap) {
+    const u32 n = static_cast<u32>(c.elements.size());
+    const u32 count = n < cap ? n : cap;
+    for (u32 i = 0; i < count; ++i) {
+        out[i] = CanvasLayout{};   // zera (órfãos ficam com rect zerado até ao fallback)
+    }
+    if (n == 0) {
+        return;
+    }
+    Resolver r{&c, sw, sh, ins, out,
+                std::vector<f32>(n, 0.0f), std::vector<f32>(n, 0.0f),
+                std::vector<u8>(n, 0)};
+    // 1) tamanhos efetivos (memo + guard de ciclo) — TODOS os elementos
+    for (size_t i = 0; i < n; ++i) {
+        sizeOf(r, static_cast<i32>(i));
+    }
+    // 2) posicionamento: TOPO primeiro (parent vazio OU pai inexistente),
+    //    depois os filhos recursivamente via placeAt
+    for (size_t i = 0; i < n; ++i) {
+        const UiElement& e = c.elements[i];
+        if (!e.parent.empty()) {
+            const i32 pi = c.findElement(e.parent);
+            if (pi >= 0 &&
+                uiElementIsContainer(c.elements[static_cast<size_t>(pi)].kind)) {
+                continue;   // filho legítimo — disposto pelo placeAt do pai
+            }
+        }
+        // topo: âncoras próprias + tamanho efetivo no eixo de conteúdo
+        UiRect rect = elementRect(e, sw, sh, ins);
+        rect.w = r.sizeW[i];
+        rect.h = r.sizeH[i];
+        placeAt(r, static_cast<i32>(i), rect, true, -1);
+    }
+    // 3) órfãos/nao-dispostos (ciclos, pais invisíveis, pais mortos): ficam
+    //    como TOPO (âncoras próprias, tamanho efetivo) — determinístico
+    for (size_t i = 0; i < n; ++i) {
+        if (!c.elements[i].parent.empty() && !r.out[i].laid) {
+            const UiElement& e = c.elements[i];
+            UiRect rect = elementRect(e, sw, sh, ins);
+            rect.w = r.sizeW[i];
+            rect.h = r.sizeH[i];
+            placeAt(r, static_cast<i32>(i), rect, true, -1);
+            r.out[i].laid = false;   // órfão de facto (o Inspector mostra)
+        }
+    }
 }
 
 // ---- desenho -------------------------------------------------------------------
+
+// 0.7.4 — tint de textura de FUNDO: branco × alpha do elemento (a textura
+// mostra as cores PRÓPRIAS; o alpha do elemento permite translucidez —
+// antes o Image passava e.color ESCURO como tint e a imagem ficava quase
+// preta)
+static const f32* texTint(const UiElement& e) {
+    static f32 t[4];
+    t[0] = t[1] = t[2] = 1.0f;
+    t[3] = e.color[3] < 0.0f ? 0.0f : e.color[3];
+    return t;
+}
 
 bool drawElement(UiContext& uictx, const UiElement& e, const UiRect& r,
                  bool sel) {
@@ -87,63 +274,118 @@ bool drawElement(UiContext& uictx, const UiElement& e, const UiRect& r,
     }
     const f32 line[4] = {kLine, kLine, kLine, 1.0f};
     const f32 text[4] = {kText, kText, kText, 1.0f};
+    // 0.7.4 — ESCALA DO CONTEXTO (paridade editor↔Play): no viewport 2D o
+    // rect chega ESCALADO e TODOS os insetes/espessuras constantes deste
+    // desenho escalam com ele (10*k, 20*k, molduras*k...) — o mini-canvas é
+    // o Play REDUZIDO ao pixel; no Play k = 1 (comportamento 0.7.3 exato)
+    const f32 k = uictx.textScale();
 
     switch (e.kind) {
         case UiElement::Kind::Panel:
+            // 0.7.4: textura de fundo OPCIONAL (tex: no Inspector — ref em
+            // e.image). Com textura: quad texturizado + moldura; sem
+            // resolver/textura: fill sólido honesto (nunca finge)
+            if (!e.image.empty() &&
+                uictx.imageQuad(r.x, r.y, r.w, r.h, e.image, texTint(e))) {
+                uictx.frame(r.x, r.y, r.w, r.h, 1.0f * k, line);
+                break;
+            }
             uictx.panel(r.x, r.y, r.w, r.h, e.color);
-            uictx.frame(r.x, r.y, r.w, r.h, 1.0f, line);
+            uictx.frame(r.x, r.y, r.w, r.h, 1.0f * k, line);
             break;
 
         case UiElement::Kind::Label: {
-            uictx.panel(r.x, r.y, r.w, r.h, e.color);
+            // 0.7.4 — SÓ TEXTO por default: fundo TRANSPARENTE (alpha 0;
+            // o fix do C33 "Label com fundo claro fixo"). Fundo OPCIONAL:
+            // alpha > 0 desenha o painel com a cor COM ALPHA do elemento.
+            if (e.color[3] > 0.001f) {
+                uictx.panel(r.x, r.y, r.w, r.h, e.color);
+            }
             // texto centrado verticalmente, fitted à largura (nunca sai)
             const TextMetrics tm = uictx.textMetrics();
             const f32 baseline =
                 r.y + (r.h - tm.block()) * 0.5f + tm.ascent;
-            uictx.labelFitted(r.x + 10.0f, baseline, e.text.c_str(), text,
-                              r.w - 20.0f);
+            uictx.labelFitted(r.x + 10.0f * k, baseline, e.text.c_str(), text,
+                              r.w - 20.0f * k);
             break;
         }
 
         case UiElement::Kind::Button: {
-            uictx.panel(r.x, r.y, r.w, r.h, e.color);
-            uictx.frame(r.x, r.y, r.w, r.h, 2.0f, text);
+            // 0.7.4: textura de fundo OPCIONAL (tex: — como o Panel); sem
+            // textura mantém o fill ESCURO default do botão (C33)
+            const bool textured =
+                !e.image.empty() &&
+                uictx.imageQuad(r.x, r.y, r.w, r.h, e.image, texTint(e));
+            if (!textured) {
+                uictx.panel(r.x, r.y, r.w, r.h, e.color);
+            }
+            uictx.frame(r.x, r.y, r.w, r.h, 2.0f * k, text);
             const TextMetrics tm = uictx.textMetrics();
             const f32 baseline =
                 r.y + (r.h - tm.block()) * 0.5f + tm.ascent;
-            uictx.labelFitted(r.x + 10.0f, baseline, e.text.c_str(), text,
-                              r.w - 20.0f);
+            uictx.labelFitted(r.x + 10.0f * k, baseline, e.text.c_str(), text,
+                              r.w - 20.0f * k);
             break;
         }
 
         case UiElement::Kind::Image:
-            // 0.7.0: Image = quad de textura do projeto (ref "image"); sem
-            // resolver de textura (CI/editor sem asset) → PLACEHOLDER mono:
-            // moldura + diagonal (honesto: sabe-se que é uma imagem sem
-            // textura). O main liga o resolver ao GpuAssets.
-            if (uictx.imageQuad(r.x, r.y, r.w, r.h, e.image, e.color)) {
+            // quad de textura do projeto (ref "image"); o resolver é
+            // partilhado (o main liga ao GpuAssets). SEM imagem escolhida
+            // ou carga falhada → PLACEHOLDER claro: moldura + "(sem imagem)"
+            // centrado (0.7.4 — o fix do C33 do gap crítico do Image)
+            if (uictx.imageQuad(r.x, r.y, r.w, r.h, e.image, texTint(e))) {
                 break;   // textura emitida (batch de imagens do UiContext)
             }
             uictx.panel(r.x, r.y, r.w, r.h, e.color);
-            uictx.frame(r.x, r.y, r.w, r.h, 2.0f, line);
-            uictx.drawLine(r.x, r.y, r.x + r.w, r.y + r.h, 1.0f, line);
-            uictx.drawLine(r.x + r.w, r.y, r.x, r.y + r.h, 1.0f, line);
+            uictx.frame(r.x, r.y, r.w, r.h, 2.0f * k, line);
+            if (e.image.empty()) {
+                const TextMetrics tm = uictx.textMetrics();
+                const f32 tw = uictx.fontWidth("(sem imagem)");
+                uictx.labelFitted(
+                    r.x + (r.w - tw) * 0.5f,
+                    r.y + (r.h - tm.block()) * 0.5f + tm.ascent,
+                    "(sem imagem)", text, r.w - 8.0f * k);
+            } else {
+                // ref definida mas carga falhou — o placeholder HONESTO com
+                // o nome da ref (sabe-se O QUE faltou carregar)
+                const TextMetrics tm = uictx.textMetrics();
+                uictx.labelFitted(r.x + 8.0f * k,
+                                  r.y + (r.h - tm.block()) * 0.5f + tm.ascent,
+                                  e.image.c_str(), text, r.w - 16.0f * k);
+            }
             break;
 
         case UiElement::Kind::Menu: {
-            // lista vertical de botões (uma linha por item do texto)
+            // lista vertical de botões (uma linha por item do texto).
+            // 0.7.4: espaçamento entre itens (spacing), fundo das linhas
+            // ON/OFF (alpha do elemento: 0 = só texto) e alinhamento do
+            // texto nas linhas (start/center/end — default start = 0.7.3)
             const u32 n = menuLineCount(e);
+            const bool rowBg = e.color[3] > 0.001f;
+            const TextMetrics tm = uictx.textMetrics();
             for (u32 i = 0; i < n; ++i) {
                 std::string label, target;
                 menuLineAt(e, i, label, target);
                 const UiRect row = menuItemRect(e, r, i);
-                uictx.panel(row.x, row.y, row.w, row.h, e.color);
-                uictx.frame(row.x, row.y, row.w, row.h, 1.0f, line);
-                const TextMetrics tm = uictx.textMetrics();
+                if (rowBg) {
+                    uictx.panel(row.x, row.y, row.w, row.h, e.color);
+                    uictx.frame(row.x, row.y, row.w, row.h, 1.0f * k, line);
+                }
                 const f32 baseline =
                     row.y + (row.h - tm.block()) * 0.5f + tm.ascent;
-                uictx.labelFitted(row.x + 10.0f, baseline, label.c_str(),
-                                  text, row.w - 20.0f);
+                const f32 tw = uictx.fontWidth(label.c_str());
+                f32 tx = row.x + 10.0f * k;
+                if (e.align == UiElement::Align::Center) {
+                    tx = row.x + (row.w - tw) * 0.5f;
+                } else if (e.align == UiElement::Align::End) {
+                    tx = row.x + row.w - 10.0f * k - tw;
+                }
+                if (e.align == UiElement::Align::Start) {
+                    uictx.labelFitted(tx, baseline, label.c_str(), text,
+                                      row.w - 20.0f * k);
+                } else {
+                    uictx.label(tx, baseline, label.c_str(), text);
+                }
             }
             break;
         }
@@ -151,13 +393,13 @@ bool drawElement(UiContext& uictx, const UiElement& e, const UiRect& r,
         case UiElement::Kind::Card: {
             // panel + borda + label (título no topo)
             uictx.panel(r.x, r.y, r.w, r.h, e.color);
-            uictx.frame(r.x, r.y, r.w, r.h, 2.0f, text);
+            uictx.frame(r.x, r.y, r.w, r.h, 2.0f * k, text);
             const TextMetrics tm = uictx.textMetrics();
-            const f32 titleH = tm.block() + 12.0f;
-            uictx.panel(r.x, r.y + titleH, r.w, 1.0f, line);
+            const f32 titleH = tm.block() + 12.0f * k;
+            uictx.panel(r.x, r.y + titleH, r.w, 1.0f * k, line);
             const f32 baseline = r.y + (titleH - tm.block()) * 0.5f + tm.ascent;
-            uictx.labelFitted(r.x + 10.0f, baseline, e.text.c_str(), text,
-                              r.w - 20.0f);
+            uictx.labelFitted(r.x + 10.0f * k, baseline, e.text.c_str(), text,
+                              r.w - 20.0f * k);
             break;
         }
 
@@ -165,13 +407,13 @@ bool drawElement(UiContext& uictx, const UiElement& e, const UiRect& r,
             // texto multilinha com wrap pela largura (greedy por palavras)
             uictx.panel(r.x, r.y, r.w, r.h, e.color);
             const TextMetrics tm = uictx.textMetrics();
-            const f32 rowH = tm.block() + 4.0f;
-            f32 cy = r.y + 8.0f;
+            const f32 rowH = tm.block() + 4.0f * k;
+            f32 cy = r.y + 8.0f * k;
             const char* p = e.text.c_str();
             char word[96];
             char lineBuf[256];
             lineBuf[0] = '\0';
-            const f32 maxW = r.w - 20.0f;
+            const f32 maxW = r.w - 20.0f * k;
             while (*p && cy + tm.block() <= r.y + r.h) {
                 // palavra seguinte
                 int wl = 0;
@@ -192,7 +434,7 @@ bool drawElement(UiContext& uictx, const UiElement& e, const UiRect& r,
                 }
                 if (lineBuf[0] && uictx.fontWidth(candidate) > maxW) {
                     // linha cheia → emite e começa nova com a palavra
-                    uictx.labelFitted(r.x + 10.0f, cy + tm.ascent, lineBuf,
+                    uictx.labelFitted(r.x + 10.0f * k, cy + tm.ascent, lineBuf,
                                       text, maxW);
                     cy += rowH;
                     std::snprintf(lineBuf, sizeof(lineBuf), "%s", word);
@@ -200,36 +442,65 @@ bool drawElement(UiContext& uictx, const UiElement& e, const UiRect& r,
                     std::snprintf(lineBuf, sizeof(lineBuf), "%s", candidate);
                 }
                 if (hardBreak) {
-                    uictx.labelFitted(r.x + 10.0f, cy + tm.ascent, lineBuf,
+                    uictx.labelFitted(r.x + 10.0f * k, cy + tm.ascent, lineBuf,
                                       text, maxW);
                     cy += rowH;
                     lineBuf[0] = '\0';
                 }
             }
             if (lineBuf[0] && cy + tm.block() <= r.y + r.h) {
-                uictx.labelFitted(r.x + 10.0f, cy + tm.ascent, lineBuf, text,
-                                  maxW);
+                uictx.labelFitted(r.x + 10.0f * k, cy + tm.ascent, lineBuf,
+                                  text, maxW);
             }
             break;
         }
+
+        case UiElement::Kind::VBox:
+        case UiElement::Kind::HBox:
+            // 0.7.4 — CONTAINERS: fundo OPCIONAL (alpha > 0) + moldura fina;
+            // os FILHOS são desenhados pelo chamador (drawCanvas/viewport 2D)
+            // com os rects do resolver e o CLIP do rect do pai
+            if (e.color[3] > 0.001f) {
+                uictx.panel(r.x, r.y, r.w, r.h, e.color);
+                uictx.frame(r.x, r.y, r.w, r.h, 1.0f * k, line);
+            }
+            break;
     }
 
     if (sel) {
         // moldura de seleção do editor (mono: frame ACCENT tracejado — sem
         // tracejado no quad batch: frame contínuo fino)
         const f32 accent[4] = {0.9607843f, 0.9607843f, 0.9607843f, 1.0f};
-        uictx.frame(r.x, r.y, r.w, r.h, 2.0f, accent);
+        uictx.frame(r.x, r.y, r.w, r.h, 2.0f * k, accent);
     }
     return true;
 }
 
+// desenha o canvas inteiro (FONTE ÚNICA de layout: o resolver). Os FILHOS de
+// containers desenham com o CLIP do rect do pai (nada transborda — o Play
+// recorta na borda do ecrã, o editor recorta no mini-ecrã: paridade).
 u32 drawCanvas(UiContext& uictx, const UiCanvas& c, f32 sw, f32 sh,
                const safe::Insets& ins) {
+    std::vector<CanvasLayout> L(c.elements.size());
+    resolveCanvasLayout(c, sw, sh, ins, L.data(),
+                        static_cast<u32>(c.elements.size()));
     u32 drawn = 0;
-    for (const UiElement& e : c.elements) {
-        const UiRect r = elementRect(e, sw, sh, ins);
-        if (drawElement(uictx, e, r)) {
-            ++drawn;   // só os DESENHADOS contam (invisíveis não)
+    for (size_t i = 0; i < c.elements.size(); ++i) {
+        const UiElement& e = c.elements[i];
+        if (!L[i].shown || L[i].rect.w <= 0.0f || L[i].rect.h <= 0.0f) {
+            continue;
+        }
+        if (L[i].parentIdx >= 0) {
+            // FILHO: desenha dentro do clip do PAI (retângulo do container)
+            const UiRect& pr = L[static_cast<size_t>(L[i].parentIdx)].rect;
+            const UiContext::ScopedClip clip(uictx, pr);
+            if (drawElement(uictx, e, L[i].rect)) {
+                ++drawn;
+            }
+        } else {
+            if (drawElement(uictx, e, L[i].rect)) {
+                ++drawn;   // só os DESENHADOS contam (invisíveis não)
+            }
         }
     }
     return drawn;
@@ -249,12 +520,17 @@ CanvasHit hitTestCanvas(const Scene& scene, f32 x, f32 y, f32 sw, f32 sh,
         if (!c) {
             return;
         }
+        // 0.7.4: o hit-test usa o MESMO RESOLVER do desenho (containers
+        // incluídos — paridade estrutural editor↔Play)
+        std::vector<CanvasLayout> L(c->elements.size());
+        resolveCanvasLayout(*c, sw, sh, ins, L.data(),
+                            static_cast<u32>(c->elements.size()));
         for (size_t i = 0; i < c->elements.size(); ++i) {
             const UiElement& e = c->elements[i];
-            if (!e.visible) {
-                continue;
+            if (!L[i].shown) {
+                continue;   // invisível (ou dentro de container escondido)
             }
-            const UiRect r = elementRect(e, sw, sh, ins);
+            const UiRect r = L[i].rect;
             if (!inRect(r, x, y)) {
                 continue;
             }
@@ -264,14 +540,21 @@ CanvasHit hitTestCanvas(const Scene& scene, f32 x, f32 y, f32 sw, f32 sh,
                 hit.element = static_cast<i32>(i);
                 hit.menuItem = -1;
             } else if (e.kind == UiElement::Kind::Menu) {
-                const u32 n = menuLineCount(e);
-                const f32 rowH = n > 0 ? r.h / static_cast<f32>(n) : r.h;
-                const i32 row = static_cast<i32>((y - r.y) / (rowH > 0 ? rowH : 1));
-                if (row >= 0 && static_cast<u32>(row) < n) {
-                    hit.valid = true;
-                    hit.tic = t.handle;
-                    hit.element = static_cast<i32>(i);
-                    hit.menuItem = row;
+                const UiRect row = menuItemRect(e, r, 0);
+                const UiRect last = menuItemRect(e, r, menuLineCount(e) - 1u);
+                if (y >= row.y && y < last.y + last.h) {
+                    // linha = floor((y − topo) / (rowH + spacing)) — a MESMA
+                    // geometria do menuItemRect
+                    const f32 step = row.h + e.spacing;
+                    const i32 rowIdx = step > 0.0f
+                        ? static_cast<i32>((y - r.y) / step) : 0;
+                    if (rowIdx >= 0 &&
+                        static_cast<u32>(rowIdx) < menuLineCount(e)) {
+                        hit.valid = true;
+                        hit.tic = t.handle;
+                        hit.element = static_cast<i32>(i);
+                        hit.menuItem = rowIdx;
+                    }
                 }
             }
         }

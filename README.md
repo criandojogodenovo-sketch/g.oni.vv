@@ -1,4 +1,4 @@
-# G.One VV 0.7.3 — joystick editável + compostos Menu/Card/Article (fecho da campanha 0.7: UI criável)
+# G.One VV 0.7.4 — paridade editor↔Play da UI criável + texturas de fundo + containers VBox/HBox (fix dos gaps do C33 0.7.3)
 
 Engine com editor, projeto `.goni` e maturação de assets (compressão ETC2/ASTC
 com cache, extração de texturas glTF/GLB, import OBJ/glTF/GLB/PNG, export
@@ -6,7 +6,74 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 (`sensorLandscape`). Devices de teste: Realme C33 (720x1600) e Realme
 RMX3624 (Android 13).
 
-## Escopo 0.7.3 (implementado — F6: joystick editável + compostos)
+## Escopo 0.7.4 (implementado — fix dos gaps de qualidade do C33 0.7.3)
+
+**PARIDADE EDITOR↔PLAY (princípio transversal)** — o que o dono viu no C33
+("o Menu mostra caixas no editor e texto solto no Play") tinha causa raiz
+TRIPLA no viewport 2D: o texto era desenhado a 28 px CRUS sobre rects
+escalados a ~0.4x, os insets/molduras constantes não escalavam e o layout
+usava insets ZERO (o Play usa a safe-area real). Tudo corrigido:
+
+- **`textScale` no UiContext**: métricas + EMISSÃO de glifos escalam com o
+  viewport — o mini-canvas é o Play REDUZIDO ao pixel (texto, insets,
+  molduras, joias de desenho — tudo × escala; no Play k=1);
+- **Resolver de layout único** (`resolveCanvasLayout`): âncoras + safe-area
+  REAL + containers — o MESMO código alimenta drawCanvas (Play),
+  drawUiViewport (editor: draw/hit-test/drag) e hitTestCanvas. Paridade
+  ESTRUTURAL, afervida por tipo de elemento no CI (rect-a-rect, editor =
+  Play × escala + offset);
+- **Joystick com a aparência do Play** no viewport 2D: o núcleo
+  `drawTouchControlsAt` (parametrizável por origem/escala) desenha base +
+  knob + botão JUMP nos dois modos (o proxy 0.7.3 era outra coisa);
+- **Clip ao mini-ecrã**: nada do canvas sangra para os painéis ao lado (o
+  Play recorta na borda física do ecrã; o editor recorta igual).
+
+**LABEL = SÓ TEXTO por default** (o fix do "fundo branco fixo"): alpha 0;
+fundo OPCIONAL configurável no Inspector (cor com alpha — slider "fundo A"
+em todos os elementos). Button mantém o fundo escuro.
+
+**TEXTURAS DE FUNDO em Button/Panel + Image escolhe a imagem**:
+
+- Linha **`tex:`** no Inspector de UI (Panel/Button/Image) → seletor de
+  `textures/` + **"importar…"** (abre o NAVEGADOR 0.7.2 — galeria
+  incluída; o ficheiro cai em `textures/` e volta ao seletor);
+- A ref vive no elemento (`image`); a renderização resolve POR FRAME pelo
+  resolver do UiContext (o caminho do Image 0.7.0 — agora partilhado);
+  **tint branco×alpha** (antes o Image tingia a textura com o LINE escuro
+  e a imagem ficava quase preta);
+- Sem imagem: **placeholder claro "(sem imagem)"** centrado (Image sem
+  ref) ou com o NOME da ref quando a carga falha (honesto);
+- **z-order sólidos↔texturas**: submissão em RUNS na ordem real de
+  emissão (antes: grupos fixos — um botão sólido desenhado depois de um
+  painel texturizado ficava POR BAIXO dele na tela).
+
+**MENU configurável**: espaçamento entre itens (slider "espaco"), fundo
+das caixas ON/OFF (alpha 0 = só texto) e alinhamento do texto
+(start/center/end — default start = 0.7.3 exato).
+
+**CONTAINERS VBox/HBox** (o fix do "organizar é posicionar tudo à mão"):
+
+- Filhos (campo `parent` por nome) dispostos automaticamente em
+  coluna/linha com **espaçamento + padding + alinhamento transversal**
+  (start/center/end) — o filho não precisa de posição; aninháveis;
+- **Auto-fit no eixo do conteúdo** (VBox: h; HBox: w) — os filhos nunca
+  transbordam; filhos invisíveis COLAPSAM; container invisível esconde os
+  descendentes; guard de ciclos (órfãos de topo, sem crash);
+- Criação: "+" ganha **10 itens** (+ VBox/HBox); com um container
+  selecionado, o elemento novo nasce FILHO; Inspector: "colocar em:"
+  cicla os containers e ao SAIR o elemento fica NO SÍTIO onde estava
+  (detach conserva a posição); arrastar um filho tira-o do container;
+  filhos de container hit-testam no rect DISPOSTO (não no ox/oy);
+- **Serialização**: spacing/pad/align/parent (ausentes = defaults
+  0.7.3-compat; `.goni` antigos abrem); alpha já vinha no color[4].
+
+Suíte: 386→399 testes (+13 em `tests/test_uilayout.cpp`: label default,
+texturas + fallback + placeholder, paridade por tipo (rect-a-rect com
+transform exato), containers (layout/auto-fit/visibilidade/ciclos/hit-test
+/detach/add-filho), menu espaçamento/fundo/alinhamento, round-trip,
+z-order dos runs, applyUiTexPick). Gates verdes.
+
+## Escopo 0.7.3 (histórico — F6: joystick editável + compostos)
 
 **JOYSTICK/TOUCHCONTROLS EDITÁVEL** — o widget de input passa a ser uma
 instância EDITÁVEL ("a UI do Player passa a ser esta instância"):
@@ -765,6 +832,40 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.7.4 (paridade + texturas + containers; APK CUMULATIVO)
+
+Instalar o APK 0.7.4 (artifact `goni-vv-0.7.4-release-signed` do run do
+fecho). Roteiro cumulativo — os anteriores continuam a aplicar-se:
+
+1. **Paridade editor↔Play** (o caso do Menu): criar um Menu com 2-3 itens
+   no modo UI → **Play** → o Menu é EXATAMENTE o que o viewport 2D
+   mostrava (caixas, texto à mesma proporção, mesmos espaçamentos);
+   alternar editor↔Play em Panel/Label/Button/Image/Menu/Card/Article e
+   conferir que NADA muda de aparência (só a interação difere);
+2. **Label só texto**: criar um Label → SEM fundo (só o texto); Inspector
+   → "fundo A" a 1 → aparece o fundo (cor R/G/B editável); o Button
+   continua a nascer com o fundo escuro;
+3. **Texturas de fundo**: selecionar um Panel → "tex:" → escolher uma
+   textura de `textures/` (ou "importar..." → navegador → escolher um PNG
+   da galeria → volta ao seletor) → o painel fica com a IMAGEM de fundo;
+   o mesmo num Button (com o texto por cima) e num Image; "tex: none"
+   limpa;
+4. **Z-order**: painel COM textura + botão (sem textura) POR CIMA → o
+   botão continua VISÍVEL sobre a textura (o caso que desenhava mal);
+5. **Menu configurável**: selecionar um Menu → "espaco" → os itens afastam-
+   se; "fundo A" a 0 → as caixas somem (só texto); "alinhamento" cicla
+   start/center/end do texto das linhas;
+6. **Containers**: "+" → VBox → com ele selecionado, "+" → Button → nasce
+   DENTRO (empilhado; sem posição manual); + Label → em baixo; "espaco"/
+   "pad"/"alinhamento" do VBox mexem nos filhos; VBox cresce sozinho
+   (auto-fit); HBox põe lado a lado; VBox dentro de HBox aninha;
+   arrastar um filho PARA FORA tira-o do container (fica onde largou);
+   "colocar em:" no Inspector também move;
+7. **Persistência**: Save → Load preserva texturas/alpha/spacing/pad/
+   alinhamento/filhos; um `.goni` 0.7.x abre como sempre;
+8. **Regressões**: joystick editável/compostos/navegador/cenas/UI criável/
+   gestão de TICs/gizmos — tudo como antes.
 
 ## Verificação no Realme C33 (dono) — 0.7.3 (joystick editável + compostos; APK CUMULATIVO — FECHO DA CAMPANHA 0.7)
 

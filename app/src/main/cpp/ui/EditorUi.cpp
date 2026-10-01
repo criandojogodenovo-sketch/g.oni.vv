@@ -460,61 +460,74 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     return edited;
 }
 
+// 0.7.4 — NÚCLEO PARAMETRIZÁVEL do desenho dos TouchControls: o Play chama
+// com a safe-area real (escala 1); o viewport 2D do editor chama com o
+// transform do mini-ecrã (ox/oy = origem da ÁREA ÚTIL no espaço de desenho,
+// aw/ah = área útil em px de DESIGN, scale = design→desenho). O mesmo código
+// desenha os DOIS — PARIDADE de aparência (o C33 via um proxy simplificado
+// no editor: sem botão JUMP, knob/métricas próprias).
+void drawTouchControlsAt(UiContext& ui, const TouchControls& tc, f32 ox,
+                         f32 oy, f32 aw, f32 ah, f32 scale) {
+    const TouchControls::Layout l = tc.layoutFor(aw, ah);
+    const f32 k = scale;
+    const f32 jx = ox + l.joyCX * k;
+    const f32 jy = oy + l.joyCY * k;
+    const f32 joyR = l.joyR * k;
+    // cor EDITÁVEL do joystick (default = LINE do tema mono)
+    const f32 joyCol[4] = {tc.colR, tc.colG, tc.colB, 1.0f};
+
+    // joystick: base em quadro + ponto central (mono brutalist)
+    ui.frame(jx - joyR, jy - joyR, 2.0f * joyR, 2.0f * joyR, 2.0f * k,
+             joyCol);
+    ui.panel(jx - k, jy - k, 2.0f * k, 2.0f * k, joyCol);
+
+    // knob quadrado: em repouso fica NO CENTRO (baseX_/baseY_ só existem
+    // após o 1º toque — antes valiam 0 e o knob aparecia no canto);
+    // ativo segue o dedo com clamp ao raio
+    f32 kx = jx, ky = jy;
+    if (tc.joystickActive()) {
+        f32 dx = (tc.knobX() - tc.baseX()) * k;
+        f32 dy = (tc.knobY() - tc.baseY()) * k;
+        const f32 len = std::sqrt(dx * dx + dy * dy);
+        if (len > joyR) {
+            dx *= joyR / len;
+            dy *= joyR / len;
+        }
+        kx += dx;
+        ky += dy;
+    }
+    const f32 ks = 44.0f * k;
+    const bool active = tc.joystickActive();
+    ui.panel(kx - ks * 0.5f, ky - ks * 0.5f, ks, ks,
+             active ? theme::ACCENT : theme::PANEL);
+    ui.frame(kx - ks * 0.5f, ky - ks * 0.5f, ks, ks, 1.0f * k, joyCol);
+
+    // botão JUMP: premido = invertido (tema mono)
+    const bool held = tc.buttonHeld();
+    const f32 bx2 = ox + l.btnX * k;
+    const f32 by2 = oy + l.btnY * k;
+    const f32 bw = l.btnW * k, bh = l.btnH * k;
+    if (held) {
+        ui.panel(bx2, by2, bw, bh, theme::TEXT);
+    }
+    ui.frame(bx2, by2, bw, bh, 2.0f * k, held ? theme::PANEL : theme::ACCENT);
+    if (ui.hasFont()) {
+        const f32 tw = ui.fontWidth("JUMP");
+        const f32 thh = ui.fontHeight();
+        ui.label(bx2 + (bw - tw) * 0.5f, by2 + bh * 0.5f + thh * 0.30f,
+                 "JUMP", held ? theme::PANEL : theme::TEXT);
+    }
+}
+
 void drawTouchControls(UiContext& ui, const TouchControls& tc, f32 sw, f32 sh) {
     // F4.2: layout recalculado para a ÁREA ÚTIL (superfície menos insets)
     // e deslocado pela origem do contentRect — nada desenhado atrás da
     // nav/status bar. 0.7.3: o layout vem dos CAMPOS EDITÁVEIS do
     // componente (pos/tamanho/cor — o joystick do Player é esta instância).
-    const f32 ox = ui.safeLeft();
-    const f32 oy = ui.safeTop();
-    const f32 aw = sw - ui.safeLeft() - ui.safeRight();
-    const f32 ah = sh - ui.safeTop() - ui.safeBottom();
-    const TouchControls::Layout l = tc.layoutFor(aw, ah);
-    const f32 jx = ox + l.joyCX;
-    const f32 jy = oy + l.joyCY;
-    // cor EDITÁVEL do joystick (default = LINE do tema mono)
-    const f32 joyCol[4] = {tc.colR, tc.colG, tc.colB, 1.0f};
-
-    // joystick: base em quadro + knob quadrado (mono brutalist — só retângulos)
-    ui.frame(jx - l.joyR, jy - l.joyR, 2.0f * l.joyR, 2.0f * l.joyR,
-             2.0f, joyCol);
-    ui.panel(jx - 1.0f, jy - 1.0f, 2.0f, 2.0f, joyCol);
-    f32 kx = tc.baseX();
-    f32 ky = tc.baseY();
-    bool active = false;
-    if (tc.joystickActive()) {
-        active = true;
-        f32 dx = tc.knobX() - tc.baseX();
-        f32 dy = tc.knobY() - tc.baseY();
-        const f32 len = std::sqrt(dx * dx + dy * dy);
-        if (len > l.joyR) {
-            dx *= l.joyR / len;
-            dy *= l.joyR / len;
-        }
-        kx = tc.baseX() + dx;
-        ky = tc.baseY() + dy;
-    }
-    const f32 ks = 44.0f;
-    kx += ox;   // F4.2: base/knob vivem em coords locais da safe-area
-    ky += oy;
-    ui.panel(kx - ks * 0.5f, ky - ks * 0.5f, ks, ks,
-             active ? theme::ACCENT : theme::PANEL);
-    ui.frame(kx - ks * 0.5f, ky - ks * 0.5f, ks, ks, 1.0f, joyCol);
-
-    // botão JUMP: premido = invertido (tema mono)
-    const bool held = tc.buttonHeld();
-    const f32 bx2 = ox + l.btnX;
-    const f32 by2 = oy + l.btnY;
-    if (held) {
-        ui.panel(bx2, by2, l.btnW, l.btnH, theme::TEXT);
-    }
-    ui.frame(bx2, by2, l.btnW, l.btnH, 2.0f, held ? theme::PANEL : theme::ACCENT);
-    if (ui.hasFont()) {
-        const f32 tw = ui.fontWidth("JUMP");
-        const f32 thh = ui.fontHeight();
-        ui.label(bx2 + (l.btnW - tw) * 0.5f, by2 + l.btnH * 0.5f + thh * 0.30f,
-                 "JUMP", held ? theme::PANEL : theme::TEXT);
-    }
+    // 0.7.4: o corpo vive em drawTouchControlsAt (partilhado com o editor).
+    drawTouchControlsAt(ui, tc, ui.safeLeft(), ui.safeTop(),
+                        sw - ui.safeLeft() - ui.safeRight(),
+                        sh - ui.safeTop() - ui.safeBottom(), 1.0f);
 }
 
 // 0.7.0 — separador "3D | UI" na toolbar: MUDA o modo do viewport
@@ -595,9 +608,10 @@ bool viewportTapClearsSelection(EditorState& st, const InputState& in,
 int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st) {
     // 0.7.0: no modo UI o "+" cria ELEMENTOS (Panel/Label/Button/Image);
     // 0.7.3: + os COMPOSTOS (Menu/Card/Article) e o JOYSTICK (widget de
-    // TouchControls editável). No 3D cria TICs de preset (como sempre).
+    // TouchControls editável). 0.7.4: + os CONTAINERS VBox/HBox (filhos
+    // automáticos). No 3D cria TICs de preset (como sempre).
     const bool uiMode = st.uiMode;
-    const int kItems = uiMode ? 8 : 4;
+    const int kItems = uiMode ? 10 : 4;
     const f32 w = kMenuW;
     const f32 h = kHeaderH + static_cast<f32>(kItems) * 64.0f + kPad;
     // F4.2: centrado no viewport ÚTIL (dentro do contentRect)
@@ -622,9 +636,10 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     int chosen = 0;
     const char* names[4] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
                             "RigidBody3D"};
-    // 0.7.3: Menu/Card/Article (compostos) + Joystick (TouchControls)
-    const char* elems[8] = {"Panel", "Label", "Button", "Image",
-                            "Menu", "Card", "Article", "Joystick"};
+    // 0.7.4: + VBox/HBox (containers de layout — filhos automáticos)
+    const char* elems[10] = {"Panel", "Label", "Button", "Image",
+                             "Menu", "Card", "Article", "Joystick",
+                             "VBox", "HBox"};
     const char* const* labels = uiMode ? elems : names;
     for (int i = 0; i < kItems; ++i) {
         if (ui.button(static_cast<u64>(20 + i), x + kPad, y + kHeaderH + i * 64.0f,
@@ -1072,7 +1087,8 @@ void drawLogViewer(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 // Devolve 1-based (1 = cube/none, 2.. = ficheiros), 0 = nada este frame.
 // ---------------------------------------------------------------------------
 int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
-                  EditorState& st, const AssetCatalog& catalog) {
+                  EditorState& st, const AssetCatalog& catalog,
+                  bool withImport) {
     const bool pickMesh = (st.assetMenu == 1);
     const std::vector<std::string>& files =
         pickMesh ? catalog.meshes : catalog.textures;
@@ -1082,7 +1098,11 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     const size_t shown = files.size() < kMaxFiles ? files.size() : kMaxFiles;
 
     const f32 w = kMenuW;
-    const f32 h = kHeaderH + (1.0f + static_cast<f32>(shown)) * 48.0f + kPad;
+    // 0.7.4: withImport (seletor de textura de ELEMENTO de UI) acrescenta a
+    // linha "importar…" que abre o NAVEGADOR 0.7.2 (escolhe de onde for)
+    const f32 importH = withImport ? 48.0f : 0.0f;
+    const f32 h = kHeaderH + (1.0f + static_cast<f32>(shown)) * 48.0f +
+                  importH + kPad;
     const f32 ox = ui.safeLeft();
     const f32 oy = ui.safeTop();
     const f32 aw = sw - ox - ui.safeRight();
@@ -1117,13 +1137,25 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
             st.assetMenu = 0;
         }
     }
+    if (withImport) {
+        // 0.7.4 — "importar…": abre o NAVEGADOR de ficheiros (0.7.2) — o
+        // dono escolhe a textura de onde for (galeria incluída); o ficheiro
+        // importado cai em textures/ e fica disponível no seletor
+        if (ui.button(kIdAssetBase + 7, x + kPad,
+                      y + kHeaderH + static_cast<f32>(shown + 1) * 48.0f,
+                      w - 2.0f * kPad, 40.0f, "importar...")) {
+            chosen = kAssetPickImport;
+            st.assetMenu = 0;
+        }
+    }
     if (files.size() > kMaxFiles) {
         // aviso mono de cap (sem scroll no overlay)
         char more[48];
         std::snprintf(more, sizeof(more), "+%u ficheiros (cap do overlay)",
                       static_cast<unsigned>(files.size() - kMaxFiles));
         ui.labelFitted(x + kPad,
-                       y + kHeaderH + static_cast<f32>(shown + 1) * 48.0f + 12.0f,
+                       y + kHeaderH + static_cast<f32>(shown + 1) * 48.0f +
+                           importH + 12.0f,
                        more, theme::LINE, w - 2.0f * kPad);
     }
     return chosen;
@@ -1230,6 +1262,47 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
             }
         }
     }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// 0.7.4 — DISPATCH do seletor de TEXTURA DE ELEMENTO de UI (menuKind 3).
+// Escreve SÓ a ref (e.image); a renderização resolve por frame (imgResolve
+// do UiContext — o caminho do Image 0.7.0, agora partilhado). Sem GPU, puro.
+// ---------------------------------------------------------------------------
+UiTexPickOutcome applyUiTexPick(Scene& scene, Handle tic, i32 element, int pick,
+                                const AssetCatalog& catalog) {
+    UiTexPickOutcome out;
+    if (pick <= 0 || pick == kAssetPickImport) {
+        return out;   // nada/importar — o chamador trata o navegador
+    }
+    Tic* t = scene.get(tic);
+    UiCanvas* canvas = t ? t->getComponent<UiCanvas>() : nullptr;
+    if (!canvas || element < 0 ||
+        element >= static_cast<i32>(canvas->elements.size())) {
+        return out;   // TIC morto / sem canvas / elemento morto — sem crash
+    }
+    UiElement& e = canvas->elements[static_cast<size_t>(element)];
+    if (pick == 1) {   // none → limpa a ref (volta ao fill/placeholder)
+        e.image.clear();
+        out.applied = true;
+        std::snprintf(out.toast, sizeof(out.toast), "tex: none");
+        std::snprintf(out.log, sizeof(out.log),
+                      "ui: textura do elemento '%s' removida", e.name.c_str());
+        return out;
+    }
+    const size_t idx = static_cast<size_t>(pick - 2);
+    if (idx >= catalog.textures.size()) {
+        return out;   // fora do catálogo — sem crash
+    }
+    const std::string rel = std::string("textures/") + catalog.textures[idx];
+    e.image = rel;
+    out.applied = true;
+    std::snprintf(out.toast, sizeof(out.toast), "tex: %s",
+                  catalog.textures[idx].c_str());
+    std::snprintf(out.log, sizeof(out.log),
+                  "ui: textura do elemento '%s' = %s", e.name.c_str(),
+                  rel.c_str());
     return out;
 }
 

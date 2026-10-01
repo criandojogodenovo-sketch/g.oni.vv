@@ -344,25 +344,28 @@ TEST(compostos_menu_card_article_desenham_e_serializam) {
     EXPECT(back->elements[1].kind == UiElement::Kind::Card);
     EXPECT(back->elements[1].text == "Titulo");
     EXPECT(back->elements[2].kind == UiElement::Kind::Article);
-    // os compostos criáveis pelo + (uiAddElement aceita 4..6)
+    // os compostos criáveis pelo + (uiAddElement aceita 4..6) e os
+    // CONTAINERS 0.7.4 (7=VBox, 8=HBox; 9 já não existe)
     Scene s3;
     const Handle h3 = s3.create("X");
     EditorState st3;
     st3.selected = h3;
-    for (u32 k = 4; k <= 6; ++k) {
+    for (u32 k = 4; k <= 8; ++k) {
         EXPECT(uiAddElement(s3, st3, k, kSW, kSH));
     }
     const UiCanvas* c3 = s3.get(h3)->getComponent<UiCanvas>();
-    EXPECT(c3 != nullptr && c3->elements.size() == 3);
+    EXPECT(c3 != nullptr && c3->elements.size() == 5);
     EXPECT(c3->elements[0].kind == UiElement::Kind::Menu);
     EXPECT(c3->elements[1].kind == UiElement::Kind::Card);
     EXPECT(c3->elements[2].kind == UiElement::Kind::Article);
-    EXPECT(uiAddElement(s3, st3, 7, kSW, kSH) == false);   // kind 7 não existe
+    EXPECT(c3->elements[3].kind == UiElement::Kind::VBox);
+    EXPECT(c3->elements[4].kind == UiElement::Kind::HBox);
+    EXPECT(uiAddElement(s3, st3, 9, kSW, kSH) == false);   // kind 9 não existe
 }
 
-// ---- 6. o "+" do modo UI tem 8 itens (com Joystick) ---------------------------------
+// ---- 6. o "+" do modo UI tem 10 itens (com Joystick + VBox/HBox) --------------------
 
-TEST(joystick_plus_menu_oito_itens_e_addiciona) {
+TEST(joystick_plus_menu_dez_itens_e_addiciona) {
     FontAtlas font;
     const char* fontPath = FONT_FIXTURE;
     if (!font.loadFromPaths(&fontPath, 1, 28.0f)) {
@@ -384,9 +387,9 @@ TEST(joystick_plus_menu_oito_itens_e_addiciona) {
 
     auto frame = [&]() {
         ui.beginFrame(nullptr, &in, kSW, kSH);
-        // o MESMO dispatch do main: choice 8 = joystick
+        // o MESMO dispatch do main: uiPlusChoiceKind mapeia a escolha
         const int choice = drawPlusMenu(ui, in, kSW, kSH, st);
-        if (choice == 8) {
+        if (uiPlusChoiceKind(choice) < 0 && choice > 0) {
             Tic* tic = scene.get(st.selected);
             if (tic) {
                 if (!tic->getComponent<TouchControls>()) {
@@ -402,16 +405,17 @@ TEST(joystick_plus_menu_oito_itens_e_addiciona) {
     };
 
     st.plusMenu = true;
-    // geometria do menu (8 itens): centrado, itens de 64px
-    const f32 h8 = kHeaderH + 8.0f * 64.0f + kPad;
+    // geometria do menu (10 itens): centrado, itens de 64px
+    const f32 h10 = kHeaderH + 10.0f * 64.0f + kPad;
     const f32 mx = (kSW - kMenuW) * 0.5f;
-    const f32 my = (kSH - h8) * 0.5f;
+    const f32 my = (kSH - h10) * 0.5f;
     // item 8 (Joystick): id 27, oitava linha
     in.injectDown(0, mx + kMenuW * 0.5f, my + kHeaderH + 7.0f * 64.0f + 28.0f);
     frame();
     in.injectUp(0);
     const int choice = frame();
     EXPECT(choice == 8);
+    EXPECT(uiPlusChoiceKind(choice) < 0);   // 0.7.4: mapa escolha→Kind
     EXPECT(!st.plusMenu);
     // o componente existe e ficou SELECIONADO para edição
     Tic* tic = scene.get(h);

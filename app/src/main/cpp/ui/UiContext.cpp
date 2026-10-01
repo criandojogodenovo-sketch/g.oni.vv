@@ -25,6 +25,7 @@ void UiContext::beginFrame(Renderer* renderer, const InputState* input,
     input_ = input;
     sw_ = screenW;
     sh_ = screenH;
+    textScale_ = 1.0f;   // 0.7.4: reset por frame (só o viewport 2D escala)
     solids_.clear();
     glyphs_.clear();
     for (u32 i = 0; i < kMaxImageBatches; ++i) {   // 0.7.0
@@ -32,6 +33,7 @@ void UiContext::beginFrame(Renderer* renderer, const InputState* input,
         imageTex_[i] = 0;
     }
     imageCount_ = 0;
+    runCount_   = 0;   // 0.7.4: runs de submissão por frame
 
     // F4.1: estado de scroll POR FRAME (os slots com offset persistem)
     scrollCur_    = kNoScroll;
@@ -55,8 +57,32 @@ bool UiContext::emitTo(QuadBatch& b, f32 x, f32 y, f32 w, f32 h,
     return true;
 }
 
+// 0.7.4 — run de submissão: extende o corrente quando é o MESMO batch+tex,
+// senão abre um novo (cap kMaxRuns; acima do cap o quad acumula no batch
+// mas não ganha run próprio — casos reais ficam muito abaixo do cap).
+// `tex` = 0 p/ sólidos (textura branca do renderer).
+void UiContext::recordRun(QuadBatch& b, u32 tex, u32 firstVertex,
+                          u32 vertexCount) {
+    if (runCount_ > 0 && runs_[runCount_ - 1].batch == &b &&
+        runs_[runCount_ - 1].tex == tex) {
+        runs_[runCount_ - 1].vertexCount += vertexCount;
+        return;
+    }
+    if (runCount_ >= kMaxRuns) {
+        return;   // cap — o quad já está no batch (os testes continuam a vê-lo)
+    }
+    runs_[runCount_].batch = &b;
+    runs_[runCount_].tex = tex;
+    runs_[runCount_].firstVertex = firstVertex;
+    runs_[runCount_].vertexCount = vertexCount;
+    ++runCount_;
+}
+
 void UiContext::panel(f32 x, f32 y, f32 w, f32 h, const f32 color[4]) {
-    emitTo(solids_, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, color);
+    const u32 fv = solids_.vertexCount();
+    if (emitTo(solids_, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, color)) {
+        recordRun(solids_, 0u, fv, 6u);   // 0.7.4: z-order real
+    }
 }
 
 void UiContext::frame(f32 x, f32 y, f32 w, f32 h, f32 t, const f32 color[4]) {
@@ -70,18 +96,21 @@ void UiContext::label(f32 xBaseline, f32 yBaseline, const char* text, const f32 
     if (!font_ || !font_->ok() || !text) {
         return;
     }
+    // 0.7.4: glifos ESCALADOS por textScale_ (paridade do viewport 2D —
+    // o mini-canvas mostra o texto na MESMA proporção do Play)
+    const f32 k = textScale_;
     f32 penX = xBaseline;
     for (const char* p = text; *p; ++p) {
         const char c = *p;
         if (c < static_cast<char>(FontAtlas::kFirstChar) ||
             c >= static_cast<char>(FontAtlas::kFirstChar + FontAtlas::kNumChars)) {
-            penX += font_->height() * 0.30f;
+            penX += font_->height() * 0.30f * k;
             continue;
         }
         const Glyph& g = font_->glyph(c);
-        emitTo(glyphs_, penX + g.xoff, yBaseline + g.yoff, g.w, g.h,
-               g.u0, g.v0, g.u1, g.v1, color);
-        penX += g.xadv;
+        emitTo(glyphs_, penX + g.xoff * k, yBaseline + g.yoff * k,
+               g.w * k, g.h * k, g.u0, g.v0, g.u1, g.v1, color);
+        penX += g.xadv * k;
     }
 }
 
@@ -368,6 +397,9 @@ void UiContext::statusLine(const char* text) {
 
 // 0.7.0 — quad texturado da UI criável (elemento Image): resolve a ref,
 // aloca (ou cria) o batch da textura e emite o quad (uv 0..1, cor = tint).
+// 0.7.4:Button/Panel também passam por aqui (textura de fundo) e o quad é
+// registado num RUN com a textura — a submissão fica na ORDEM REAL
+// (z-order sólidos↔texturas correto).
 bool UiContext::imageQuad(f32 x, f32 y, f32 w, f32 h, const std::string& ref,
                           const f32 color[4]) {
     if (!imgResolve_ || ref.empty()) {
@@ -392,16 +424,26 @@ bool UiContext::imageQuad(f32 x, f32 y, f32 w, f32 h, const std::string& ref,
         imageTex_[slot] = id;
         ++imageCount_;
     }
-    return emitTo(images_[slot], x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, color);
+    const u32 fv = images_[slot].vertexCount();
+    if (emitTo(images_[slot], x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, color)) {
+        recordRun(images_[slot], id, fv, 6u);
+        return true;
+    }
+    return false;
 }
 
 void UiContext::endFrame() {
     if (!renderer_) {
         return;
     }
-    renderer_->submit(solids_, renderer_->whiteTexture());
-    for (u32 i = 0; i < imageCount_; ++i) {   // 0.7.0: imagens ENTRE os
-        renderer_->submit(images_[i], imageTex_[i]);   // solids e os glifos
+    // 0.7.4 — submissão na ORDEM REAL de emissão (runs): sólidos e texturas
+    // intercalam-se conforme foram desenhados; os GLIFOS ficam por último
+    // (texto sempre legível — a regra do tema desde a 0.7.0).
+    for (u32 i = 0; i < runCount_; ++i) {
+        renderer_->submit(*runs_[i].batch,
+                           runs_[i].tex == 0u ? renderer_->whiteTexture()
+                                              : runs_[i].tex,
+                           runs_[i].firstVertex, runs_[i].vertexCount);
     }
     if (font_ && font_->ok()) {
         renderer_->submit(glyphs_, font_->texture());

@@ -34,13 +34,16 @@ namespace vv {
 struct UiElement {
     enum class Kind : u8 {
         Panel  = 0,   // retângulo preenchido (fundo de HUD)
-        Label  = 1,   // texto (uma linha, fitted)
+        Label  = 1,   // texto (uma linha, fitted) — FUNDO OPCIONAL (alpha)
         Button = 2,   // retângulo + texto + on-click declarativo
         Image  = 3,   // retângulo com textura do projeto (ref relativa)
         // 0.7.3 — compostos:
         Menu    = 4,  // lista vertical de botões (texto = linhas "label>alvo")
         Card    = 5,  // panel + borda + label (título no topo)
         Article = 6,  // texto multilinha com wrap pela largura
+        // 0.7.4 — CONTAINERS de layout (filhos automáticos, aninháveis):
+        VBox = 7,     // coluna: filhos empilhados verticalmente
+        HBox = 8,     // linha: filhos lado a lado horizontalmente
     };
 
     // âncoras (0.7.0) — como o elemento se comporta quando a resolução muda
@@ -61,21 +64,32 @@ struct UiElement {
     // estilo da transição (0.7.1): "fade" (default) ou "slide"
     enum class Transition : u8 { Fade = 0, Slide = 1 };
 
+    // alinhamento no eixo transversal (0.7.4 — Menu: alinhamento do TEXTO
+    // nas linhas; VBox/HBox: alinhamento dos FILHOS no eixo transversal)
+    enum class Align : u8 { Start = 0, Center = 1, End = 2 };
+
     Kind kind = Kind::Panel;
     AnchorH anchorH = AnchorH::Left;
     AnchorV anchorV = AnchorV::Top;
     Action action = Action::None;
+    Align  align = Align::Start;   // 0.7.4: Menu/VBox/HBox
 
     std::string name;    // id do elemento (alvo de Show/Hide/Toggle)
     std::string text;    // Label/Button/Card/Article/Menu ("linhas")
-    std::string image;   // Image: ref relativa da textura ("textures/x.png")
+    std::string image;   // Image: ref relativa ("textures/x.png");
+                         // 0.7.4: Button/Panel = TEXTURA DE FUNDO (mesmo campo)
     std::string target;  // alvo da ação: nome do elemento/preset/cena (Menu:
                          // o alvo por LINHA sobrepõe-se — "label>alvo")
     std::string param;   // 0.7.1: parâmetro da ação (TransitionScene:
                          // "fade" default | "slide")
+    std::string parent;  // 0.7.4: nome do CONTAINER (VBox/HBox) que dispõe
+                         // este elemento (vazio = topo, âncoras próprias)
 
     f32 ox = 0.0f, oy = 0.0f;   // offset do ponto de âncora (px)
     f32 w = 200.0f, h = 80.0f;  // tamanho (px)
+    f32 spacing = 0.0f;   // 0.7.4: Menu = vão entre itens; VBox/HBox = vão
+                          // entre filhos (px)
+    f32 pad = 8.0f;       // 0.7.4: VBox/HBox = resguardo interno (px)
     f32 color[4] = {0.1176f, 0.1176f, 0.1176f, 1.0f};   // RGBA (default = PANEL do tema mono)
 
     bool visible = true;
@@ -91,6 +105,8 @@ inline const char* uiElementKindName(UiElement::Kind k) {
         case UiElement::Kind::Menu:    return "menu";
         case UiElement::Kind::Card:    return "card";
         case UiElement::Kind::Article: return "article";
+        case UiElement::Kind::VBox:    return "vbox";
+        case UiElement::Kind::HBox:    return "hbox";
     }
     return "?";
 }
@@ -115,6 +131,21 @@ inline UiElement::Transition uiElementTransition(const UiElement& e) {
                               : UiElement::Transition::Fade;
 }
 
+// container? (VBox/HBox — dispõe filhos automaticamente)
+inline bool uiElementIsContainer(UiElement::Kind k) {
+    return k == UiElement::Kind::VBox || k == UiElement::Kind::HBox;
+}
+
+// nome do alinhamento transversal (serializer + Inspector)
+inline const char* uiAlignName(UiElement::Align a) {
+    switch (a) {
+        case UiElement::Align::Start:  return "start";
+        case UiElement::Align::Center: return "center";
+        case UiElement::Align::End:    return "end";
+    }
+    return "?";
+}
+
 class UiCanvas : public Component {
 public:
     std::vector<UiElement> elements;
@@ -129,9 +160,14 @@ public:
 
     // normaliza o rect do elemento `i` para as âncoras dadas SEM o mover na
     // tela (recalcula ox/oy pelo novo ponto de âncora) — usado pelo editor
-    // quando o utilizador muda a âncora de um elemento já posicionado
+    // quando o utilizador muda a âncora de um elemento já posicionado.
+    // 0.7.4: overload com INSETS (o editor desenha em paridade com o Play —
+    // o elementRect conta as bordas da safe-area nas âncoras esq/top/dir/fundo)
     void setAnchor(i32 idx, UiElement::AnchorH h, UiElement::AnchorV v,
                    f32 designW, f32 designH);
+    void setAnchor(i32 idx, UiElement::AnchorH h, UiElement::AnchorV v,
+                   f32 designW, f32 designH,
+                   f32 insL, f32 insT, f32 insR, f32 insB);
 };
 
 } // namespace vv

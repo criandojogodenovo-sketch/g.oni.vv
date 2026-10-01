@@ -1674,7 +1674,10 @@ void frame() {
         const int choice = editor::drawPlusMenu(g_ui, g_input, w, h, g_editor);
         if (choice > 0) {
             if (g_editor.uiMode) {
-                if (choice == 8) {
+                // 0.7.4 — o mapa escolha→Kind vive em uiPlusChoiceKind
+                // (1..7 Panel..Article; 8 Joystick; 9/10 VBox/HBox)
+                const int kind = editor::uiPlusChoiceKind(choice);
+                if (kind < 0) {
                     // 0.7.3 — JOYSTICK: widget de TouchControls EDITÁVEL no
                     // TIC selecionado (a UI do Player passa a ser esta
                     // instância); seleciona-o no viewport 2D
@@ -1694,12 +1697,12 @@ void frame() {
                         }
                     }
                 } else if (editor::uiAddElement(g_scene, g_editor,
-                                               static_cast<u32>(choice - 1),
-                                               w, h)) {
+                                               static_cast<u32>(kind), w, h)) {
                     // 0.7.0: cria o elemento no canvas do TIC selecionado
-                    // (cria o canvas à primeira) e seleciona-o — WYSIWYG
+                    // (cria o canvas à primeira) e seleciona-o — WYSIWYG.
+                    // 0.7.4: com container selecionado nasce FILHO dele.
                     showToast("elemento UI criado");
-                    LOGI("editor: elemento UI criado (kind %d)", choice - 1);
+                    LOGI("editor: elemento UI criado (kind %d)", kind);
                 } else {
                     showToast("selecione um TIC na Hierarchy");
                 }
@@ -1726,18 +1729,43 @@ void frame() {
     // componente; o C33 via "tex: none" eterno, cubo cinzento e NENHUMA
     // linha no engine.log). A lógica vive agora em editor::applyAssetPick
     // (pura, afervel no CI) e o resultado traz o toast + a linha de log.
+    // 0.7.4: menuKind 3 = textura de ELEMENTO de UI (Inspector de UI, linha
+    // tex:) → applyUiTexPick (escreve a ref; a render resolve por frame) +
+    // "importar…" abre o NAVEGADOR 0.7.2 (o ficheiro cai em textures/).
     if (g_editor.assetMenu != 0) {
         const int menuKind = g_editor.assetMenu;   // ANTES do draw (o pick fecha)
-        const int pick = editor::drawAssetMenu(g_ui, g_input, w, h, g_editor, g_catalog);
+        const int pick = editor::drawAssetMenu(g_ui, g_input, w, h, g_editor,
+                                               g_catalog, menuKind == 3);
         if (pick > 0) {
-            const editor::AssetPickOutcome out =
-                editor::applyAssetPick(g_scene, g_editor.selected, menuKind, pick,
-                                       g_catalog, makeAssetResolvers());
-            if (out.toast[0] != '\0') {
-                showToast(out.toast);
-            }
-            if (out.log[0] != '\0') {
-                LOGI("%s", out.log);
+            if (menuKind == 3) {
+                if (pick == editor::kAssetPickImport) {
+                    // "importar…" → NAVEGADOR (0.7.2): o dono escolhe a
+                    // textura de onde for; o ficheiro importa para textures/
+                    // e fica no seletor (tex: de novo)
+                    browserOpen(fileapi::kBrowserRoots[0].path);
+                    g_editor.fileBrowser = true;
+                    LOGI("editor: importar textura — navegador aberto");
+                } else {
+                    const editor::UiTexPickOutcome out = editor::applyUiTexPick(
+                        g_scene, g_editor.selected, g_editor.selElement, pick,
+                        g_catalog);
+                    if (out.toast[0] != '\0') {
+                        showToast(out.toast);
+                    }
+                    if (out.log[0] != '\0') {
+                        LOGI("%s", out.log);
+                    }
+                }
+            } else {
+                const editor::AssetPickOutcome out =
+                    editor::applyAssetPick(g_scene, g_editor.selected, menuKind,
+                                           pick, g_catalog, makeAssetResolvers());
+                if (out.toast[0] != '\0') {
+                    showToast(out.toast);
+                }
+                if (out.log[0] != '\0') {
+                    LOGI("%s", out.log);
+                }
             }
         }
     }
@@ -2055,10 +2083,15 @@ void android_main(android_app* app) {
     // F5.1-hotfix: log DUPLO (logcat + ficheiro) desde a 1ª linha.
     // O boot ainda não tem os paths da activity? O elog usa o fallback
     // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu
-    elog::info("G.One VV 0.7.3 — joystick editável (a UI do Player é a "
-               "instância) + compostos Menu/Card/Article (0.7.2 navegador "
-               "com galeria; 0.7.1 cenas + transições; 0.7.0 UI criável + "
-               "gestão de TICs — fecho da campanha 0.7)");
+    elog::info("G.One VV 0.7.4 — paridade editor<->Play da UI criável (o "
+               "viewport 2D é o Play reduzido: texto/insets/molduras "
+               "escalados + resolver de layout único) + Label só texto "
+               "(fundo opcional com alpha) + texturas de fundo em "
+               "Button/Panel (tex:) + Image escolhe/importa a imagem "
+               "(placeholder '(sem imagem)') + z-order sólidos<->texturas "
+               "(runs) + Menu configurável (espaçamento/fundo/alinhamento) "
+               "+ containers VBox/HBox (filhos automáticos, aninháveis, "
+               "serializados) — fix dos gaps de qualidade do C33 0.7.3)");
     {
         const char* root0 = app->activity
             ? (app->activity->externalDataPath ? app->activity->externalDataPath

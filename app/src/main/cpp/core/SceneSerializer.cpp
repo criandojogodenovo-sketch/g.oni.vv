@@ -155,6 +155,21 @@ void appendComponentJson(Json& arr, const UiCanvas* canvas) {
         }
         je.addMember("color", std::move(col));
         je.addMember("visible", Json::makeBool(e.visible));
+        // 0.7.4 — layout de containers/compostos: espaçamento, resguardo,
+        // alinhamento transversal e o CONTAINER pai (filhos por nome).
+        // Ausentes = defaults (0.7.3-compat: spacing 0, pad 8, start, topo)
+        if (e.spacing != 0.0f) {
+            je.addMember("spacing", Json::makeNumber(e.spacing));
+        }
+        if (e.pad != 8.0f) {
+            je.addMember("pad", Json::makeNumber(e.pad));
+        }
+        if (e.align != UiElement::Align::Start) {
+            je.addMember("align", Json::makeString(uiAlignName(e.align)));
+        }
+        if (!e.parent.empty()) {
+            je.addMember("parent", Json::makeString(e.parent));
+        }
         // âncoras: "ah"/"av" = left|center|right / top|middle|bottom
         const char* ah = e.anchorH == UiElement::AnchorH::Left ? "left"
                        : e.anchorH == UiElement::AnchorH::Center ? "center" : "right";
@@ -334,17 +349,22 @@ void fillUiCanvas(UiCanvas* canvas, const Json& comp) {
     }
     for (const Json& je : elems->items) {
         UiElement e;
-        const Json* jk = je.find("kind");
-        const char* kind = (jk && jk->type == Json::Type::String) ? jk->string.c_str() : "";
-        if (std::strcmp(kind, "panel") == 0)        e.kind = UiElement::Kind::Panel;
-        else if (std::strcmp(kind, "label") == 0)   e.kind = UiElement::Kind::Label;
-        else if (std::strcmp(kind, "button") == 0)  e.kind = UiElement::Kind::Button;
-        else if (std::strcmp(kind, "image") == 0)   e.kind = UiElement::Kind::Image;
-        else if (std::strcmp(kind, "menu") == 0)    e.kind = UiElement::Kind::Menu;
-        else if (std::strcmp(kind, "card") == 0)    e.kind = UiElement::Kind::Card;
-        else if (std::strcmp(kind, "article") == 0) e.kind = UiElement::Kind::Article;
-        else {
-            continue;   // kind desconhecido — ignora (forward-compat)
+        if (const Json* j = je.find("kind"); j && j->type == Json::Type::String) {
+            const std::string& kind = j->string;
+            if      (kind == "panel")        e.kind = UiElement::Kind::Panel;
+            else if (kind == "label")       e.kind = UiElement::Kind::Label;
+            else if (kind == "button")      e.kind = UiElement::Kind::Button;
+            else if (kind == "image")       e.kind = UiElement::Kind::Image;
+            else if (kind == "menu")        e.kind = UiElement::Kind::Menu;
+            else if (kind == "card")        e.kind = UiElement::Kind::Card;
+            else if (kind == "article")     e.kind = UiElement::Kind::Article;
+            else if (kind == "vbox")        e.kind = UiElement::Kind::VBox;
+            else if (kind == "hbox")        e.kind = UiElement::Kind::HBox;
+            else {
+                continue;   // kind desconhecido — ignora (forward-compat)
+            }
+        } else {
+            continue;
         }
         if (const Json* j = je.find("name"); j && j->type == Json::Type::String) {
             e.name = j->string;
@@ -371,6 +391,22 @@ void fillUiCanvas(UiCanvas* canvas, const Json& comp) {
         }
         if (const Json* j = je.find("visible"); j && j->type == Json::Type::Bool) {
             e.visible = j->boolean;
+        }
+        // 0.7.4 — layout de containers/compostos (ausentes = defaults)
+        if (const Json* j = je.find("spacing");
+            j && j->type == Json::Type::Number) {
+            e.spacing = static_cast<f32>(j->number);
+        }
+        if (const Json* j = je.find("pad"); j && j->type == Json::Type::Number) {
+            e.pad = static_cast<f32>(j->number);
+        }
+        if (const Json* j = je.find("align"); j && j->type == Json::Type::String) {
+            if (j->string == "center")     e.align = UiElement::Align::Center;
+            else if (j->string == "end")   e.align = UiElement::Align::End;
+            else                            e.align = UiElement::Align::Start;
+        }
+        if (const Json* j = je.find("parent"); j && j->type == Json::Type::String) {
+            e.parent = j->string;
         }
         auto readStr = [&je](const char* key) -> const char* {
             const Json* j = je.find(key);

@@ -65,6 +65,9 @@ add_executable(test_core
         # 0.7.3: joystick editável (layout derivado dos campos + input) e
         # compostos Menu/Card/Article (desenho + serialização)
         test_joystick.cpp
+        # 0.7.4: paridade editor<->Play + texturas de fundo + Label sem
+        # fundo + Menu configurável + containers VBox/HBox + serialização
+        test_uilayout.cpp
         ${CORE_DIR}/core/Scene.cpp
         ${CORE_DIR}/core/Time.cpp
         ${CORE_DIR}/core/ComponentRegistry.cpp

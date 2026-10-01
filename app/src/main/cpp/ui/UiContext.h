@@ -42,14 +42,30 @@ public:
     void beginFrame(Renderer* renderer, const InputState* input, f32 screenW, f32 screenH);
     void endFrame();   // submete solids + glyphs ao renderer
 
+    // 0.7.4 — ESCALA DE TEXTO do contexto (paridade editor↔Play): o
+    // viewport 2D do editor desenha o canvas ESCALADO (scale-to-fit);
+    // sem isto os glifos ficavam a 28 px CRUS sobre rects a 0.4× — texto
+    // proporcionalmente maior no editor que no Play (truncagens e
+    // centralizações diferentes: o caso do Menu no C33). Com a escala
+    // ativa, fontWidth/fontHeight/textMetrics e a EMISSÃO de glifos são
+    // todos multiplicados — o mini-canvas fica EXATAMENTE o Play reduzido.
+    // Define-se SÓ à volta do desenho do canvas no viewport 2D (RAII
+    // abaixo); todo o resto do editor fica a 1.0.
+    void setTextScale(f32 s) { textScale_ = (s > 0.05f ? s : 1.0f); }
+    f32  textScale() const { return textScale_; }
+
     // widgets
     void panel(f32 x, f32 y, f32 w, f32 h, const f32 color[4]);
     // 0.6.9 — segmento de ecrã com espessura (gizmos 3D projetados). Sem
     // clip (emitido FORA das regiões de scroll; o gizmo vive no viewport).
     void drawLine(f32 x0, f32 y0, f32 x1, f32 y1, f32 thickness,
                   const f32 color[4]) {
+        const u32 fv = solids_.vertexCount();
         solids_.line(x0, y0, x1, y1, thickness,
-                    color[0], color[1], color[2], color[3]);
+                     color[0], color[1], color[2], color[3]);
+        if (solids_.vertexCount() > fv) {
+            recordRun(solids_, 0u, fv, solids_.vertexCount() - fv);
+        }
     }
     void frame(f32 x, f32 y, f32 w, f32 h, f32 thickness, const f32 color[4]);
     void label(f32 xBaseline, f32 yBaseline, const char* text, const f32 color[4]);
@@ -102,6 +118,60 @@ public:
     // cor = tint). false = sem resolver/textura (placeholder no chamador).
     bool imageQuad(f32 x, f32 y, f32 w, f32 h, const std::string& ref,
                    const f32 color[4]);
+
+    // 0.7.4 — SUBMISSÃO EM ORDEM (z correto sólidos↔texturas). Antes os
+    // batches eram submetidos em GRUPOS FIXOS (solids→imagens→glifos):
+    // um sólido desenhado DEPOIS de uma textura ficava POR BAIXO dela na
+    // tela (botão sobre painel texturizado desaparecia). Agora cada emissão
+    // regista um RUN (batch + textura + range de vértices) na ordem real;
+    // o endFrame submete os runs SEQUENCIALMENTE. Os batches ACUMULAM como
+    // sempre (solids_ íntegro p/ os testes); só a SUBMISSÃO é segmentada.
+    // Glifos continuam por último (texto sempre legível — decisão do tema).
+    u32 runCountForTest() const { return runCount_; }
+    u32 runTexForTest(u32 i) const {   // 0 = sólidos (textura branca)
+        return i < runCount_ ? runs_[i].tex : 0xFFFFFFFFu;
+    }
+    u32 runFirstVertexForTest(u32 i) const {
+        return i < runCount_ ? runs_[i].firstVertex : 0;
+    }
+    u32 runVertexCountForTest(u32 i) const {
+        return i < runCount_ ? runs_[i].vertexCount : 0;
+    }
+
+    // 0.7.4 — RECORTES fora de regiões de scroll: o viewport 2D do editor
+    // desenha o mini-ecrã e NADA pode sangrar para os painéis ao lado (o
+    // Play recorta na borda física do ecrã; o editor recorta aqui —
+    // paridade). Também usado pelos CONTAINERS (filhos nunca saem do pai).
+    // pushClip intersecta com o clip corrente; o destrutor repõe.
+    class ScopedClip {
+    public:
+        ScopedClip(UiContext& ui, const UiRect& r) : ui_(ui) {
+            saved_ = ui.clip_;
+            ui_.clip_ = scroll::intersectRects(ui_.clip_, r);
+        }
+        ~ScopedClip() { ui_.clip_ = saved_; }
+        ScopedClip(const ScopedClip&) = delete;
+        ScopedClip& operator=(const ScopedClip&) = delete;
+    private:
+        UiContext& ui_;
+        UiRect     saved_;
+    };
+
+    // 0.7.4 — RAII da escala de texto (o viewport 2D põe/tira à volta do
+    // desenho do canvas; exceção-safe)
+    class ScopedTextScale {
+    public:
+        ScopedTextScale(UiContext& ui, f32 scale) : ui_(ui) {
+            saved_ = ui_.textScale_;
+            ui_.textScale_ = scale > 0.05f ? scale : 1.0f;
+        }
+        ~ScopedTextScale() { ui_.textScale_ = saved_; }
+        ScopedTextScale(const ScopedTextScale&) = delete;
+        ScopedTextScale& operator=(const ScopedTextScale&) = delete;
+    private:
+        UiContext& ui_;
+        f32        saved_;
+    };
     // offset PERSISTENTE de uma região por id (fora do begin/end — o
     // scrollOffset() só vale com a região aberta; os testes leem depois)
     f32 scrollOffsetForTest(u64 id) const {
@@ -114,15 +184,23 @@ public:
     }
 
     // F3: accessors usados pelos painéis do editor (EditorUi).
+    // 0.7.4: TODOS escalam por textScale_ (a 1.0 = comportamento antigo).
     bool hasFont() const { return font_ && font_->ok(); }
-    f32  fontWidth(const char* text) const { return font_ ? font_->widthOf(text) : 0.0f; }
-    f32  fontHeight() const { return font_ ? font_->height() : 0.0f; }
+    f32  fontWidth(const char* text) const {
+        return font_ ? font_->widthOf(text) * textScale_ : 0.0f;
+    }
+    f32  fontHeight() const {
+        return font_ ? font_->height() * textScale_ : 0.0f;
+    }
     // F5.0-fix: métricas verticais REAIS da fonte assada (fallback 28 px sem
     // fonte — o caso dos testes de hospedeiro sem atlas). O layout deriva
     // destes números as alturas de linha — nunca mais de constantes cegas.
     TextMetrics textMetrics() const {
-        return hasFont() ? TextMetrics{font_->ascent(), font_->descent()}
-                         : TextMetrics{};
+        const TextMetrics m = hasFont()
+                                  ? TextMetrics{font_->ascent(),
+                                                font_->descent()}
+                                  : TextMetrics{};
+        return TextMetrics{m.ascent * textScale_, m.descent * textScale_};
     }
     f32  screenWidth() const { return sw_; }
     f32  screenHeight() const { return sh_; }
@@ -161,16 +239,37 @@ private:
     // emite um quad recortado pelo clip_ (panel/label passam por aqui)
     bool emitTo(QuadBatch& b, f32 x, f32 y, f32 w, f32 h,
                 f32 u0, f32 v0, f32 u1, f32 v1, const f32 color[4]);
+    // 0.7.4: regista um RUN de submissão (ver runs_ abaixo). `tex` = 0 p/
+    // sólidos (textura branca); `b` decide o batch (solids_ ou images_[i]).
+    // Extende o run corrente quando é do MESMO batch+textura (batching
+    // natural); caso contratório abre um run novo.
+    void recordRun(QuadBatch& b, u32 tex, u32 firstVertex, u32 vertexCount);
 
     Renderer*         renderer_ = nullptr;
     const InputState* input_ = nullptr;
     FontAtlas*        font_ = nullptr;
     f32               sw_ = 0.0f;
     f32               sh_ = 0.0f;
+    f32               textScale_ = 1.0f;   // 0.7.4: viewport 2D (paridade)
     safe::Insets      safe_{};       // F4.2: insetos do sistema (default 0)
     u64               active_ = 0;   // botão pressionado (immediate mode)
     QuadBatch         solids_;
     QuadBatch         glyphs_;
+
+    // 0.7.4 — runs de submissão em ORDEM (z-order sólidos↔texturas):
+    // cada entrada aponta o batch + textura + range de vértices; o
+    // endFrame submete-as SEQUENCIALMENTE (antes: grupos fixos → sólidos
+    // sempre por baixo das imagens). Cap 32 (um run por alternância de
+    // textura; o Renderer aceita 32 submissões).
+    struct Run {
+        const QuadBatch* batch;
+        u32              tex;          // 0 = sólidos (branca)
+        u32              firstVertex;
+        u32              vertexCount;
+    };
+    static constexpr u32 kMaxRuns = 32;
+    Run                runs_[kMaxRuns]{};
+    u32                runCount_ = 0;
 
     // 0.7.0 — imagens da UI criável: até 4 batches (um por textura)
     static constexpr u32 kMaxImageBatches = 4;

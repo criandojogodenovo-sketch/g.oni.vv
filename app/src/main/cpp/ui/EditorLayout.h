@@ -298,6 +298,7 @@ constexpr u64 kKbDashId   = 6651;
 constexpr u64 kKbBackId   = 6652;
 constexpr u64 kKbOkId     = 6653;
 constexpr u64 kKbCancelId = 6654;
+constexpr u64 kKbCaseId   = 6655;   // 0.7.5: toggle abc/ABC (minúsculas)
 
 // Inspector de ELEMENTO de UI (sliders 8000..8005; botões 8010+)
 constexpr u64 kUiInspX      = 8000;
@@ -307,6 +308,7 @@ constexpr u64 kUiInspH      = 8003;
 constexpr u64 kUiInspR      = 8004;
 constexpr u64 kUiInspG      = 8005;
 constexpr u64 kUiInspB      = 8006;
+constexpr u64 kUiInspA      = 8007;   // 0.7.4: ALPHA do fundo (Label = 0)
 constexpr u64 kUiInspVis    = 8010;
 constexpr u64 kUiInspAnchH  = 8011;
 constexpr u64 kUiInspAnchV  = 8012;
@@ -315,6 +317,11 @@ constexpr u64 kUiInspAct    = 8014;
 constexpr u64 kUiInspTarget = 8015;
 constexpr u64 kUiInspRemove = 8016;
 constexpr u64 kUiInspStyle  = 8017;   // 0.7.1: "estilo: fade|slide" (trans)
+constexpr u64 kUiInspSpacing= 8018;   // 0.7.4: espaçamento (Menu/containers)
+constexpr u64 kUiInspPad    = 8019;   // 0.7.4: padding (containers)
+constexpr u64 kUiInspTex    = 8028;   // 0.7.4: "tex: …" (Panel/Button/Image)
+constexpr u64 kUiInspParent = 8029;   // 0.7.4: "colocar em: …" (filho de)
+constexpr u64 kUiInspAlign  = 8031;   // 0.7.4: "alinhamento: start/center/end"
 // 0.7.3 — inspector do JOYSTICK (TouchControls editável)
 constexpr u64 kJoyX      = 8020;   // pos X (fração da área útil 0..1)
 constexpr u64 kJoyY      = 8021;
@@ -341,7 +348,12 @@ constexpr u64 kBrowserScrollId = 45;   // região de scroll da lista
 
 // presets de ELEMENTO no "+" do modo UI (mesma faixa 20+i do menu de TICs —
 // os menus são mutuamente exclusivos: o + abre um OU outro conforme o modo)
-// 0=Panel, 1=Label, 2=Button, 3=Image (0.7.3 acrescenta Menu/Card/Article)
+// 0=Panel, 1=Label, 2=Button, 3=Image (0.7.3 acrescenta Menu/Card/Article;
+// 0.7.4 acrescenta VBox/HBox — o mapa vive em uiPlusChoiceKind)
+
+// 0.7.4 — seletor de TEXTURA de elemento de UI (menuKind 3): a escolha
+// "importar…" devolve este código (o main abre o navegador 0.7.2)
+constexpr int kAssetPickImport = 99;
 
 // rect do separador "3D | UI" na faixa da toolbar (esq.: após os 3 botões)
 inline UiRect toolbarModeRect(f32 sw, f32 sh, const safe::Insets& i) {

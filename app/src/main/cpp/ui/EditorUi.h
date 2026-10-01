@@ -164,7 +164,13 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
 // F4.2: posicionados dentro da safe-area (o layout fixo do TouchControls é
 // recalculado para a área útil e deslocado pelos insets — nada atrás da
 // nav bar).
+// 0.7.4: o corpo vive em drawTouchControlsAt (PARAMETRIZÁVEL — o viewport
+// 2D do editor desenha o MESMO joystick com o transform do mini-ecrã;
+// paridade de aparência editor↔Play). ox/oy = origem da ÁREA ÚTIL no
+// espaço de desenho; aw/ah = área útil em px de DESIGN; scale = design→desenho.
 void drawTouchControls(UiContext& ui, const TouchControls& tc, f32 sw, f32 sh);
+void drawTouchControlsAt(UiContext& ui, const TouchControls& tc, f32 ox,
+                         f32 oy, f32 aw, f32 ah, f32 scale);
 
 // ---- 0.6.8: PLAY MODE com janela própria ------------------------------------
 
@@ -222,16 +228,20 @@ void drawGizmoToolbar(UiContext& ui, const InputState& in, GizmoModeState& st);
 
 // Overlays. Devolvem a escolha do frame:
 //   drawPlusMenu → 0 nada, 1..4 = PresetKind (1=Player, 2=Character,
-//                  3=Static, 4=Rigid)
+//                  3=Static, 4=Rigid); 0.7.3: modo UI 1..7 = elementos
+//                  (Panel..Article), 8 = Joystick; 0.7.4: 9/10 = VBox/HBox
 //   drawFileMenu → 0 nada, 1 = save, 2 = load, 3 = export OBJ (F5-E)
 //   drawAssetMenu → 0 nada; >0 = item 1-based do seletor ativo
 //                    (st.assetMenu: 1 = meshes → 1 = "cube", 2.. = ficheiros;
-//                     2 = texturas → 1 = "none", 2.. = ficheiros)
+//                     2 = texturas → 1 = "none", 2.. = ficheiros; 0.7.4:
+//                     3 = textura de ELEMENTO de UI → 1 = none, 2.. =
+//                     ficheiros, kAssetPickImport = "importar…" (navegador))
+//     withImport (0.7.4) — acrescenta a linha "importar…" (só menuKind 3)
 // Todos fecham com toque fora do painel (mutam st) e centrados na safe-area.
 int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st);
 int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st);
 int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st,
-                  const AssetCatalog& catalog);
+                  const AssetCatalog& catalog, bool withImport = false);
 
 // ---- F6: DISPATCH da escolha do seletor (wiring material/textura) ------------
 //
@@ -280,6 +290,24 @@ struct AssetPickOutcome {
 // falha; TIC morto/sem MeshRenderer/pick fora do catálogo → outcome vazio.
 AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int pick,
                                 const AssetCatalog& catalog, const AssetResolvers& res);
+
+// ---- 0.7.4: DISPATCH da escolha do seletor de TEXTURA DE ELEMENTO (menuKind 3)
+//
+// O C33: "o elemento Image não tem como escolher/importar a imagem" (e
+// Button/Panel também não tinham textura de fundo). O seletor abre no
+// Inspector de UI (linha tex:) e a escolha escreve na REF do elemento
+// (e.image = "textures/<ficheiro>"); a RENDERIZAÇÃO resolve a ref POR FRAME
+// pelo mesmo imgResolve do UiContext (o caminho do elemento Image 0.7.0 —
+// agora partilhado por Panel/Button/Image). Sem GPU aqui: é PURE DATA.
+//   pick 1 = none (limpa a ref); 2.. = ficheiro do catálogo textures/;
+//   kAssetPickImport = o chamador abre o NAVEGADOR (0.7.2) — não aplica nada
+struct UiTexPickOutcome {
+    bool applied = false;
+    char toast[64] = "";
+    char log[160] = "";
+};
+UiTexPickOutcome applyUiTexPick(Scene& scene, Handle tic, i32 element, int pick,
+                                const AssetCatalog& catalog);
 
 // F5.1-hotfix: menu do botão Settings → 0 nada, 1 = "Exportar logs"
 // (copia logs/ e crash dumps para Downloads/GOneVV/logs via MediaStore).

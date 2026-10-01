@@ -144,9 +144,25 @@ DrawStats Renderer::drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp
 }
 
 void Renderer::submit(const QuadBatch& batch, u32 texture) {
-    if (subCount_ < 6 && !batch.empty()) {   // 0.7.0: 6 submissões (imagens da UI)
+    // batch INTEIRO (comportamento 0.7.0 — atlas/legado)
+    submit(batch, texture, 0, batch.vertexCount());
+}
+
+// 0.7.4 — submissão por RANGE de vértices (z-order sólidos↔texturas:
+// o UiContext submete RUNS na ordem real de emissão)
+void Renderer::submit(const QuadBatch& batch, u32 texture, u32 firstVertex,
+                      u32 vertexCount) {
+    if (subCount_ < kMaxSubs && vertexCount > 0 &&
+        firstVertex < batch.vertexCount()) {
         subs_[subCount_].batch = &batch;
         subs_[subCount_].tex = texture;
+        subs_[subCount_].firstVertex = firstVertex;
+        // clamp: o range nunca passa do fim do batch
+        u32 end = firstVertex + vertexCount;
+        if (end > batch.vertexCount()) {
+            end = batch.vertexCount();
+        }
+        subs_[subCount_].vertexCount = end - firstVertex;
         ++subCount_;
     }
 }
@@ -174,10 +190,14 @@ DrawStats Renderer::endFrame() {
     for (u32 i = 0; i < subCount_; ++i) {
         const QuadBatch& b = *subs_[i].batch;
         glBindTexture(GL_TEXTURE_2D, subs_[i].tex);
+        // 0.7.4: range de vértices (runs) — o buffer sobe INTEIRO uma vez
+        // por batch distinto seria o ideal; subir por submissão mantém a
+        // simplicidade (os batches da UI são pequenos e poucos)
         glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(b.vertexBytes()),
                      b.vertices(), GL_DYNAMIC_DRAW);
-        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(b.vertexCount()));
-        st.vertices += b.vertexCount();
+        glDrawArrays(GL_TRIANGLES, static_cast<GLsizei>(subs_[i].firstVertex),
+                     static_cast<GLsizei>(subs_[i].vertexCount));
+        st.vertices += subs_[i].vertexCount;
         st.drawCalls += 1;
     }
     glBindVertexArray(0);

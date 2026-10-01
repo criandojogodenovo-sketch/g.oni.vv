@@ -61,8 +61,35 @@ inline UiRect elementRect(const UiElement& e, f32 sw, f32 sh,
 u32 menuLineCount(const UiElement& e);
 bool menuLineAt(const UiElement& e, u32 row, std::string& outLabel,
                 std::string& outTarget);
-// rect do item `row` do menu dentro do rect base do elemento
+// rect do item `row` do menu dentro do rect base do elemento.
+// 0.7.4: espaçamento CONFIGURÁVEL — rowH encolhe para os vãos caberem
+// dentro do h do menu (spacing 0 = comportamento 0.7.3 exato).
 UiRect menuItemRect(const UiElement& e, const UiRect& base, u32 row);
+
+// ---- 0.7.4: LAYOUT RESOLVER (FONTE ÚNICA de containers + paridade) ----------
+//
+// Resolve o rect EFETIVO de cada elemento do canvas no espaço de design
+// (âncoras + safe-area + CONTAINERS). É a fonte única usada por draw (Play),
+// viewport 2D do editor (draw/hit-test/drag) e hit-test do Play — a
+// paridade editor↔Play é ESTRUTURAL (o mesmo resolver alimenta os dois).
+//
+// CONTAINERS (VBox/HBox): filhos (campo `parent` = nome do container) são
+// dispostos em sequência dentro do rect do pai — a POSIÇÃO do filho é
+// derivada (ox/oy/âncoras ignorados); o TAMANHO continua do filho. O
+// eixo de CONTEÚDO do container é AUTO-AJUSTADO ao conteúdo (VBox: h;
+// HBox: w) — os filhos nunca transbordam. Aninháveis (guard de ciclo:
+// cadeias que re-visitem um container em curso são quebradas — o filho
+// vira órfão de topo). Filhos invisíveis NÃO ocupam lugar (colapsam);
+// container invisível esconde os descendentes (`shown` = false).
+struct CanvasLayout {
+    UiRect rect{};      // rect efetivo (espaço de design, insets incluídos)
+    i32    parentIdx;   // índice do container que dispõe o elemento (-1 topo)
+    bool   laid;        // true = rect disposto por um container (não-órfão)
+    bool   shown;       // visível E sem ancestral container invisível
+};
+void resolveCanvasLayout(const UiCanvas& c, f32 sw, f32 sh,
+                         const safe::Insets& ins,
+                         CanvasLayout* out, u32 cap);
 
 // ---- desenho -----------------------------------------------------------------
 
@@ -72,12 +99,17 @@ UiRect menuItemRect(const UiElement& e, const UiRect& base, u32 row);
 // `sel` desenha a moldura de seleção do editor (mono: frame ACCENT).
 // Devolve false quando NÃO desenhou (invisível/degenerado) — o chamador
 // decide o que contar.
+// 0.7.4: containers (VBox/HBox) desenham SÓ o fundo próprio — os FILHOS
+// são desenhados pelo chamador com os rects do resolver (drawCanvas/
+// viewport 2D percorrem o array uma vez; o clip do filho é o rect do pai).
 bool drawElement(UiContext& ui, const UiElement& e, const UiRect& r,
                  bool sel = false);
 
 // desenha o canvas inteiro no ecrã real (Play — UI por cima da cena; o
 // TIC tem de estar ativo E visível). Devolve o nº de elementos DESENHADOS
 // (invisíveis não contam).
+// 0.7.4: o layout vive no RESOLVER (containers + âncoras) — a MESMA fonte
+// do editor 2D (paridade estrutural).
 u32 drawCanvas(UiContext& ui, const UiCanvas& c, f32 sw, f32 sh,
                const safe::Insets& ins);
 

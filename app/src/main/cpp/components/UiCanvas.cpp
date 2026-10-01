@@ -19,21 +19,32 @@ void defaultSize(UiElement::Kind k, f32& w, f32& h) {
         case UiElement::Kind::Menu:    w = 280.0f; h = 200.0f; break;
         case UiElement::Kind::Card:    w = 300.0f; h = 160.0f; break;
         case UiElement::Kind::Article: w = 360.0f; h = 200.0f; break;
+        // 0.7.4 — containers (o tamanho do eixo de CONTEÚDO é auto-ajustado
+        // pelo resolver; o transversal é manual)
+        case UiElement::Kind::VBox:    w = 280.0f; h = 200.0f; break;
+        case UiElement::Kind::HBox:    w = 360.0f; h = 96.0f;  break;
     }
 }
 
 // cor default por tipo (tema mono — tokens do UiContext espelhados aqui para
 // manter este TU livre de ui/)
+// 0.7.4 — Label: SÓ TEXTO por default (fundo TRANSPARENTE, alpha 0 — o fix
+// do C33 "Label com fundo branco fixo"); o fundo é OPCIONAL via alpha no
+// Inspector (cor com alpha, como os outros). Button mantém fundo escuro.
 void defaultColor(UiElement::Kind k, f32 out[4]) {
     switch (k) {
         case UiElement::Kind::Panel:
         case UiElement::Kind::Card:
         case UiElement::Kind::Menu:
         case UiElement::Kind::Article:
+        case UiElement::Kind::VBox:
+        case UiElement::Kind::HBox:
             out[0] = 0.1176f; out[1] = 0.1176f; out[2] = 0.1176f; out[3] = 1.0f;  // PANEL
             break;
         case UiElement::Kind::Label:
-            out[0] = 0.9020f; out[1] = 0.9020f; out[2] = 0.9020f; out[3] = 1.0f;  // TEXT
+            // fundo TRANSPARENTE (só texto); RGB = PANEL para o caso de o
+            // utilizador LIGAR o fundo (alpha > 0) — nasce escuro mono
+            out[0] = 0.1176f; out[1] = 0.1176f; out[2] = 0.1176f; out[3] = 0.0f;
             break;
         case UiElement::Kind::Button:
         case UiElement::Kind::Image:
@@ -49,7 +60,6 @@ i32 UiCanvas::addElement(UiElement::Kind kind, f32 designW, f32 designH) {
     e.kind = kind;
     defaultSize(kind, e.w, e.h);
     defaultColor(kind, e.color);
-
     // nasce CENTRADO no espaço de design: âncora central (o offset conta
     // da ESQUERDA do elemento — ver elementRect) → ox = −w/2 põe o elemento
     // com o CENTRO em (designW/2, designH/2)
@@ -92,37 +102,47 @@ i32 UiCanvas::findElement(const std::string& elemName) const {
 
 void UiCanvas::setAnchor(i32 idx, UiElement::AnchorH h, UiElement::AnchorV v,
                          f32 designW, f32 designH) {
+    setAnchor(idx, h, v, designW, designH, 0.0f, 0.0f, 0.0f, 0.0f);
+}
+
+// 0.7.4 — com insets (paridade editor↔Play): a posição absoluta é calculada
+// pela MESMA fórmula do elementRect (as âncoras esquerda/topo contam o
+// inset; direita/fundo contam a borda ÚTIL) e os offsets são re-derivados
+// pela âncora nova — o elemento fica exatamente no mesmo sítio.
+void UiCanvas::setAnchor(i32 idx, UiElement::AnchorH h, UiElement::AnchorV v,
+                         f32 designW, f32 designH,
+                         f32 insL, f32 insT, f32 insR, f32 insB) {
     if (idx < 0 || static_cast<size_t>(idx) >= elements.size()) {
         return;
     }
     UiElement& e = elements[static_cast<size_t>(idx)];
 
-    // posição absoluta ATUAL no espaço de design (ver uiElementRect — aqui
-    // sem insets: o editor desenha em design space puro)
+    // posição absoluta ATUAL no espaço de design (fórmula do elementRect
+    // com insets — ver ui/UiRuntime.h; aqui inline para o TU ficar livre de ui/)
     f32 x = 0.0f, y = 0.0f;
     switch (e.anchorH) {
-        case UiElement::AnchorH::Left:   x = e.ox; break;
+        case UiElement::AnchorH::Left:   x = insL + e.ox; break;
         case UiElement::AnchorH::Center: x = designW * 0.5f + e.ox; break;
-        case UiElement::AnchorH::Right:  x = designW - e.w + e.ox; break;
+        case UiElement::AnchorH::Right:  x = designW - insR - e.w + e.ox; break;
     }
     switch (e.anchorV) {
-        case UiElement::AnchorV::Top:    y = e.oy; break;
+        case UiElement::AnchorV::Top:    y = insT + e.oy; break;
         case UiElement::AnchorV::Middle: y = designH * 0.5f + e.oy; break;
-        case UiElement::AnchorV::Bottom: y = designH - e.h + e.oy; break;
+        case UiElement::AnchorV::Bottom: y = designH - insB - e.h + e.oy; break;
     }
 
     // recalcula os offsets pela âncora NOVA (o elemento fica no mesmo sítio)
     e.anchorH = h;
     e.anchorV = v;
     switch (h) {
-        case UiElement::AnchorH::Left:   e.ox = x; break;
+        case UiElement::AnchorH::Left:   e.ox = x - insL; break;
         case UiElement::AnchorH::Center: e.ox = x - designW * 0.5f; break;
-        case UiElement::AnchorH::Right:  e.ox = x - (designW - e.w); break;
+        case UiElement::AnchorH::Right:  e.ox = x - (designW - insR - e.w); break;
     }
     switch (v) {
-        case UiElement::AnchorV::Top:    e.oy = y; break;
+        case UiElement::AnchorV::Top:    e.oy = y - insT; break;
         case UiElement::AnchorV::Middle: e.oy = y - designH * 0.5f; break;
-        case UiElement::AnchorV::Bottom: e.oy = y - (designH - e.h); break;
+        case UiElement::AnchorV::Bottom: e.oy = y - (designH - insB - e.h); break;
     }
 }
 

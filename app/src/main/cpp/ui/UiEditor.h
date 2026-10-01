@@ -81,9 +81,10 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
 struct UiInspRow {
     enum class Kind : u8 {
         Name,       // nome + tipo do elemento (accent)
-        PosX, PosY, // sliders ox/oy (design px)
+        PosX, PosY, // sliders ox/oy (design px) — ocultas em FILHOS de container
         SizeW, SizeH,   // sliders w/h
         ColR, ColG, ColB,   // sliders cor 0..1
+        ColA,       // 0.7.4: slider ALPHA do fundo (0..1; Label nasce 0)
         VisToggle,      // "visivel: sim/nao" (botão re-despachado)
         AnchorH,        // "ancora H: ..." (cicla esquerda/centro/direita)
         AnchorV,        // "ancora V: ..." (cicla topo/meio/fundo)
@@ -93,6 +94,11 @@ struct UiInspRow {
         StyleBtn,       // 0.7.1: "estilo: fade|slide" (cicla) — acao trans
         Sens,           // 0.7.3: slider de sensibilidade (joystick)
         Remove,         // "remover elemento"/"remover joystick"
+        TexBtn,         // 0.7.4: "tex: ..." (Panel/Button/Image → seletor)
+        ParentBtn,      // 0.7.4: "colocar em: ..." (cicla containers do canvas)
+        Spacing,        // 0.7.4: slider espaçamento (Menu/containers)
+        Pad,            // 0.7.4: slider padding (containers)
+        AlignBtn,       // 0.7.4: "alinhamento: start/center/end" (Menu/containers)
     };
     Kind kind;
     f32  y;
@@ -104,6 +110,16 @@ struct UiInspRow {
 bool uiElementHasText(UiElement::Kind k);
 // o elemento tem AÇÃO on-click? (Button/Menu)
 bool uiElementHasAction(UiElement::Kind k);
+// 0.7.4 — o elemento tem TEXTURA selecionável? (Panel/Button/Image — o
+// campo tex: do Inspector, ref em e.image)
+bool uiElementHasTexture(UiElement::Kind k);
+// 0.7.4 — o elemento tem ALINHAMENTO configurável? (Menu/VBox/HBox)
+bool uiElementHasAlign(UiElement::Kind k);
+
+// 0.7.4 — mapa da escolha do "+" (modo UI) → Kind do elemento.
+//   1..7 = Panel..Article (kinds 0..6); 8 = JOYSTICK (−1 — TouchControls);
+//   9/10 = VBox/HBox (kinds 7/8). 0 = nada/inválido.
+int uiPlusChoiceKind(int choice);
 
 u32 uiInspectorRowCount(const UiElement& e, const TextMetrics& m);
 u32 uiInspectorPlan(const UiElement& e, const TextMetrics& m, UiInspRow* rows,
@@ -125,7 +141,16 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
 // cria o elemento no canvas do TIC selecionado (cria o canvas se o TIC não
 // tiver um) e seleciona-o. kind como u32 p/ o dispatch do menu (+).
 // Devolve false se não há TIC selecionado (o chamador faz o toast).
+// 0.7.4: com um CONTAINER selecionado (ou um FILHO dele), o elemento novo
+// nasce FILHO do container (irmão do selecionado) — "colocar em" no
+// Inspector move depois.
 bool uiAddElement(Scene& scene, EditorState& st, u32 kind, f32 sw, f32 sh);
+
+// 0.7.4 — desliga um elemento do container (parent = "") CONSERVANDO a
+// posição visual: as âncoras passam a esquerda/topo e ox/oy derivam do rect
+// RESOLVIDO atual (o elemento fica exatamente onde estava). Puro/afervel.
+void uiDetachElement(UiCanvas& c, i32 element, f32 sw, f32 sh,
+                     const safe::Insets& ins);
 
 // ---- gestão de TICs (menu contextual + diálogos) ---------------------------------
 
