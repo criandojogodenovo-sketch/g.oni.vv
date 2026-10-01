@@ -19,6 +19,7 @@
 using namespace vv;
 using namespace vv::gizmo;
 using ::test::nearEqF;
+using ::test::vecNearF;
 
 namespace {
 
@@ -500,4 +501,203 @@ TEST(gizmo_apply_move_escreve_no_transform3d) {
         }
     }
     EXPECT(!tr->worldDirty);
+}
+
+// ---- 0.7.9 — GRAB-LOCK (fim da oscilação/"fuga" do C33) -----------------------
+//
+// O bug: o press edge NUNCA capturava as âncoras (anchorHit ficava (0,0,0) —
+// o objeto SALTAVA no primeiro frame para distâncias do hit contra a ORIGEM
+// DO MUNDO) e o hit de cada frame era medido contra um plano re-ancorado na
+// pos ATUAL do gizmo (que MEXE com o drag → realimentação → oscilação/fuga).
+// O grab-lock captura TUDO no touch down (alvo, raio, plano FIXO, âncoras) e
+// o move NÃO faz hit-test novo.
+
+TEST(gizmo_grab_captura_ancoras_no_arranque) {
+    Env e;
+    const Vec3 P0{1.5f, 0.0f, 0.0f};   // FORA da origem do mundo (expõe o
+                                       // bug do anchorHit a zero)
+    // dedo no eixo Y do gizmo (a 60% do len)
+    f32 fx = 0.0f, fy = 0.0f;
+    EXPECT(e.proj(P0 + Vec3{0.0f, 1.0f, 0.0f} * (e.len * 0.6f), fx, fy));
+
+    const Grab g = beginGrab(Mode::Move, e.vp, P0, e.len, kSW, kSH, fx, fy,
+                             0, e.basis);
+    EXPECT(g.valid());
+    EXPECT(g.target == Axis::Y);
+    EXPECT(g.slot == 0);
+    // o plano FIXO: passa pela pos do ARRANQUE, ⟂ à câmara do grab
+    EXPECT(vecNearF(g.planeOrigin, P0));
+    EXPECT(vecNearF(g.planeNormal, e.basis.fwd));
+    EXPECT(vecNearF(g.basis.eye, e.basis.eye));   // o raio é o do grab
+    // a âncora do plano ESTÁ no plano fixo (não é (0,0,0)!)
+    EXPECT(nearEqF(dot(g.anchorHit - g.planeOrigin, g.planeNormal), 0.0f,
+                   1e-3f));
+    EXPECT(length(g.anchorHit - P0) < e.len * 1.2f);   // perto do dedo
+    // âncoras de ecrã no CENTRO projetado do arranque
+    f32 ox = 0.0f, oy = 0.0f;
+    EXPECT(e.proj(P0, ox, oy));
+    EXPECT(nearEqF(g.anchorOx, ox, 0.5f));
+    EXPECT(nearEqF(g.anchorOy, oy, 0.5f));
+    EXPECT(nearEqF(g.anchorDist,
+                   std::sqrt((fx - ox) * (fx - ox) + (fy - oy) * (fy - oy)),
+                   0.5f));
+    // um Grab default é INVÁLIDO (touch up liberta o lock)
+    EXPECT(!Grab{}.valid());
+}
+
+TEST(gizmo_grab_raio_generoso_agarra_ligeiramente_fora) {
+    Env e;
+    const Vec3 P0{};
+    // dedo 40 px PARA LÁ DA PONTA do eixo X (ao longo do eixo — longe dos
+    // handles de plano): distância ao segmento = 40 px
+    f32 tipx = 0.0f, tipy = 0.0f, ox = 0.0f, oy = 0.0f;
+    EXPECT(e.proj(P0 + Vec3{1.0f, 0.0f, 0.0f} * e.len, tipx, tipy));
+    EXPECT(e.proj(P0, ox, oy));
+    const f32 dx = tipx - ox, dy = tipy - oy;
+    const f32 n = std::sqrt(dx * dx + dy * dy);
+    EXPECT(n > 1.0f);
+    const f32 off = 40.0f;   // > kHitAxisPx (22), < kGrabPx (44)
+    const f32 px = tipx + dx / n * off;
+    const f32 py = tipy + dy / n * off;
+    // hover (raio fino): NÃO destaca
+    EXPECT(pickAxis(Mode::Move, e.vp, P0, e.len, kSW, kSH, px, py)
+           == Axis::None);
+    // grab (raio generoso): AGARRA
+    const Grab g = beginGrab(Mode::Move, e.vp, P0, e.len, kSW, kSH, px, py,
+                             0, e.basis);
+    EXPECT(g.valid());
+    EXPECT(g.target == Axis::X);
+}
+
+TEST(gizmo_grab_primeiro_frame_nao_salta_e_trava_o_eixo) {
+    Env e;
+    const Vec3 P0{1.5f, 0.0f, 0.0f};
+    f32 fx = 0.0f, fy = 0.0f;
+    EXPECT(e.proj(P0 + Vec3{0.0f, 1.0f, 0.0f} * (e.len * 0.6f), fx, fy));
+    const Grab g = beginGrab(Mode::Move, e.vp, P0, e.len, kSW, kSH, fx, fy,
+                             0, e.basis);
+    EXPECT(g.valid());
+
+    // PRIMEIRO frame com o dedo PARADO: delta ZERO — o objeto NÃO salta.
+    // (o bug: anchorHit (0,0,0) + h1 no plano pela pos atual davam um salto
+    // de |dot(h1, Y)| ~ 0.6 u NO ARRANQUE do drag)
+    bool ok = false;
+    const Vec3 h1 = grabHit(g, fx, fy, kSW, kSH, ok);
+    EXPECT(ok);
+    const Vec3 pos0 = dragMoveAxis(P0, Vec3{0.0f, 1.0f, 0.0f}, g.anchorHit,
+                                   h1, false);
+    EXPECT(vecNearF(pos0, P0, 1e-4f));
+}
+
+TEST(gizmo_grab_drag_do_eixo_ySegue_o_dedo_sem_oscilacao) {
+    Env e;
+    const Vec3 P0{1.5f, 0.0f, 0.0f};
+    const Vec3 Y{0.0f, 1.0f, 0.0f};
+    f32 fx = 0.0f, fy = 0.0f;
+    EXPECT(e.proj(P0 + Y * (e.len * 0.6f), fx, fy));
+    const Grab g = beginGrab(Mode::Move, e.vp, P0, e.len, kSW, kSH, fx, fy,
+                             0, e.basis);
+    EXPECT(g.valid());
+    EXPECT(g.target == Axis::Y);
+
+    // o dedo SOBE 0.8 u AO LONGO DO EIXO (onde o gizmo ficaria) e DESVIA-SE
+    // lateralmente a meio (o caso do C33: dedo escorrega do eixo)
+    f32 gx = 0.0f, gy = 0.0f;
+    EXPECT(e.proj(P0 + Y * (e.len * 0.6f + 0.8f), gx, gy));
+    gx += 120.0f;   // desvio lateral grosseiro NO MEIO do drag
+    bool ok = false;
+    const Vec3 h1 = grabHit(g, gx, gy, kSW, kSH, ok);
+    EXPECT(ok);   // o lock NÃO larga: o dedo NÃO está sobre o gizmo
+    const Vec3 pos = dragMoveAxis(P0, Y, g.anchorHit, h1, false);
+    // segue o dedo para cima (± tolerância da perspetiva do desvio)…
+    EXPECT(pos.y > P0.y + 0.5f);
+    // …SEM fugir (o bug: a realimentação disparava o objeto)…
+    EXPECT(length(pos - P0) < 4.0f);
+    // …e TRAVADO no eixo: x/z EXATAMENTE os da âncora
+    EXPECT(nearEqF(pos.x, P0.x));
+    EXPECT(nearEqF(pos.z, P0.z));
+
+    // IDEMPOTENTE: o mesmo dedo no frame seguinte dá a MESMA pos (o delta é
+    // puro — funções das âncoras + dedo; nada acumula/re-ancora)
+    const Vec3 h2 = grabHit(g, gx, gy, kSW, kSH, ok);
+    const Vec3 pos2 = dragMoveAxis(P0, Y, g.anchorHit, h2, false);
+    EXPECT(vecNearF(pos2, pos, 1e-5f));
+}
+
+TEST(gizmo_grab_snap_no_valor_final_ancora_fora_do_grid) {
+    // 0.7.9 — o snap arredonda o VALOR FINAL, não o delta cru: âncora
+    // {1.3, 0.7, 0} + delta 0.3 em X → 1.6 → degrau ABSOLUTO 1.5 (antes:
+    // 1.3 + snap(0.3)=0.5 → 1.8, passos RELATIVOS à âncora)
+    const Vec3 anchor{1.3f, 0.7f, 0.0f};
+    const Vec3 h0{10.0f, 10.0f, 10.0f};
+    const Vec3 p = dragMoveAxis(anchor, Vec3{1, 0, 0}, h0,
+                                h0 + Vec3{0.3f, 0, 0}, true);
+    EXPECT(nearEqF(p.x, 1.5f));
+    EXPECT(nearEqF(p.y, 0.7f));
+    // plano: o mesmo princípio nas coordenadas u/v (âncora 1.3+0.35=1.65 →
+    // degrau ABSOLUTO 1.5; 0.7+0.1=0.8 → 1.0)
+    const Vec3 q = dragMovePlane(anchor, Vec3{0.0f, 0.0f, 1.0f}, h0,
+                                 h0 + Vec3{0.35f, 0.1f, 0.0f}, true);
+    EXPECT(nearEqF(q.x, 1.5f));
+    EXPECT(nearEqF(q.y, 1.0f));
+    // escala eixo: âncora 2.0 × fator 1.18 = 2.36 → degrau 2.25 (antes:
+    // 2.0 × snap(1.18)=1.25 → 2.5)
+    const Vec3 s = dragScaleAxis(Vec3{2.0f, 1.0f, 1.0f}, Axis::X,
+                                 Vec3{1, 0, 0}, h0, h0 + Vec3{0.18f, 0, 0},
+                                 true);
+    EXPECT(nearEqF(s.x, 2.25f));
+    // escala uniforme: componentes FINAIS em passos absolutos
+    const Vec3 u = dragScaleUniform(Vec3{2.0f, 1.0f, 1.0f}, 100.0f, 180.0f,
+                                    true);
+    EXPECT(nearEqF(u.x, 3.5f));    // 2·1.8=3.6 → 3.5
+    EXPECT(nearEqF(u.y, 1.75f));   // 1.8 → 1.75
+    EXPECT(nearEqF(u.z, 1.75f));
+}
+
+TEST(gizmo_grab_rotate_ancora_do_angulo_capturada) {
+    Env e;
+    // dedo no anel Z (θ=150° — longe das projeções dos anéis X/Y)
+    f32 fx = 0.0f, fy = 0.0f;
+    EXPECT(e.proj(Vec3{-0.8660254f, 0.5f, 0.0f} * (e.len * 0.85f), fx, fy));
+    EXPECT(pickAxis(Mode::Rotate, e.vp, Vec3{}, e.len, kSW, kSH, fx, fy,
+                    kGrabPx) == Axis::Z);   // (sanity do ângulo escolhido)
+    const Grab g = beginGrab(Mode::Rotate, e.vp, Vec3{}, e.len, kSW, kSH,
+                             fx, fy, 0, e.basis);
+    EXPECT(g.valid());
+    EXPECT(g.target == Axis::Z);
+    // primeiro frame com o dedo parado: rotação ZERO (o bug: a âncora do
+    // ângulo nunca era capturada — ficava 0 e o objeto RODAVA o ângulo
+    // absoluto do dedo logo no arranque)
+    const f32 ang = std::atan2(fy - g.anchorOy, fx - g.anchorOx);
+    const Quat q = dragRotate(Quat::identity(), Vec3{0, 0, 1}, e.basis.fwd,
+                              g.anchorAngle, ang, false);
+    const Quat expect = Quat::identity();
+    EXPECT(nearEqF(q.x, expect.x, 1e-4f));
+    EXPECT(nearEqF(q.y, expect.y, 1e-4f));
+    EXPECT(nearEqF(q.z, expect.z, 1e-4f));
+    EXPECT(nearEqF(q.w, expect.w, 1e-4f));
+}
+
+TEST(gizmo_grab_scale_centro_ancora_da_distancia_capturada) {
+    Env e;
+    // dedo no handle central (escalar uniforme): ~40 px do centro
+    // projetado (dentro do alvo generoso de 44 px, fora do eixo)
+    f32 ox = 0.0f, oy = 0.0f;
+    EXPECT(e.proj(Vec3{}, ox, oy));
+    const f32 cx = ox + 32.0f;
+    const f32 cy = oy - 24.0f;   // |(32,-24)| = 40 px
+    const Grab g = beginGrab(Mode::Scale, e.vp, Vec3{}, e.len, kSW, kSH,
+                             cx, cy, 0, e.basis);
+    EXPECT(g.valid());
+    EXPECT(g.target == Axis::Center);
+    EXPECT(g.anchorDist > 30.0f);   // capturada (o bug: ficava 0 → drag
+                                    // morto pelo guard degenerado)
+    // dedo parado: escala IDENTIDADE
+    const Vec3 same = dragScaleUniform(Vec3{1, 1, 1}, g.anchorDist,
+                                       g.anchorDist, false);
+    EXPECT(vecNearF(same, Vec3{1.0f, 1.0f, 1.0f}));
+    // dedo afastou 50%: 1.5× (o drag VIVE — antes estava morto)
+    const Vec3 up = dragScaleUniform(Vec3{1, 1, 1}, g.anchorDist,
+                                     g.anchorDist * 1.5f, false);
+    EXPECT(nearEqF(up.x, 1.5f));
 }

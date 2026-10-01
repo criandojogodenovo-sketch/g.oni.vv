@@ -69,9 +69,15 @@ inline constexpr f32 kRingSegs  = 48.0f;   // segmentos por anel
 inline constexpr f32 kHandlePx  = 26.0f;    // lado do handle de escala/centro
 
 // limiares de hit-test (px de ecrã)
-inline constexpr f32 kHitAxisPx   = 22.0f;   // eixos/setas/anéis/handles
+inline constexpr f32 kHitAxisPx   = 22.0f;   // eixos/setas/anéis/handles (hover)
 inline constexpr f32 kHitPlanePx  = 30.0f;   // quads de plano (pelo centro)
 inline constexpr f32 kHitCenterPx = 26.0f;   // handle central
+
+// 0.7.9 — GRAB-LOCK: alvo de toque GENEROSO no arranque do drag (o alvo
+// mínimo de toque do Android; o hover continua fino — 22 px — para o
+// destaque não "acender" meio viewport). "grab ligeiramente fora ainda
+// agarra" (C33: dedos gordos em ecrã de 720 px de altura).
+inline constexpr f32 kGrabPx = 44.0f;
 
 // snapping
 inline constexpr f32 kSnapMove   = 0.5f;    // unidades de mundo (grid)
@@ -123,6 +129,44 @@ Vec3 screenRayDir(const ViewBasis& b, f32 px, f32 py, f32 sw, f32 sh);
 Vec3 planeHit(const ViewBasis& b, const Vec3& n, const Vec3& planeOrigin,
               f32 px, f32 py, f32 sw, f32 sh, bool& anyHit);
 
+// ---- 0.7.9 — GRAB-LOCK --------------------------------------------------------
+//
+// REGRESSÃO DO C33 (gizmo oscila e foge do dedo): o press edge NUNCA
+// capturava as âncoras geométricas (anchorHit/anchorAngle/anchorDist
+// ficavam a ZERO — o objeto saltava para distâncias do hit contra o plano
+// de VISTA medido contra a pos ATUAL do gizmo, que MEXE com o drag →
+// realimentação → oscilação/fuga). O grab-lock captura TUDO no touch down:
+// o ALVO (eixo/anel/handle), o RAIO (base da câmara no grab) e o PLANO
+// FIXO (⟂ à câmara no grab, passa pela pos do TIC NO ARRANQUE — nunca
+// pela pos atual). Durante o move NÃO há hit-test: o delta do dedo é
+// projetado no plano FIXO; o drag não depende do dedo estar sobre o
+// gizmo (o gizmo move-se com o objeto). Touch up liberta o lock.
+struct Grab {
+    Axis      target = Axis::None;   // eixo/anel/plano/handle agarrado
+    i32       slot = -1;             // dedo dono do drag
+    ViewBasis basis;                 // base da câmara NO GRAB (raio fixo)
+    Vec3      planeOrigin{};         // pos do TIC no arranque (o plano fixo
+                                     // passa POR AQUI — nunca a pos atual)
+    Vec3      planeNormal{};         // normal do plano de drag NO GRAB
+    Vec3      anchorHit{};           // hit raio×plano FIXO no arranque
+    f32       anchorAngle = 0.0f;    // rotate: ângulo do dedo (ecrã) no grab
+    f32       anchorDist = 0.0f;     // scale: |dedo − centro| (ecrã) no grab
+    f32       anchorOx = 0.0f;       // CENTRO projetado da pos de arranque
+    f32       anchorOy = 0.0f;       // (rotate/scale medem contra ESTE)
+
+    bool valid() const { return target != Axis::None && slot >= 0; }
+};
+
+// captura o grab no press edge: hit-test com raio GENEROSO (kGrabPx) e
+// âncoras todas medidas NO ARRANQUE. Alvo None = não agarrou.
+Grab beginGrab(Mode mode, const Mat4& vp, const Vec3& origin, f32 len,
+               f32 sw, f32 sh, f32 px, f32 py, i32 slot,
+               const ViewBasis& basis);
+
+// hit do dedo AGORA no plano FIXO do grab (raio da base do GRAB — a
+// câmara poder orbitar com outro dedo que o delta não salta)
+Vec3 grabHit(const Grab& g, f32 px, f32 py, f32 sw, f32 sh, bool& anyHit);
+
 // ---- hit-test 3D (distâncias em px de ECRÃ — consistente com o desenho) -------
 
 // projeção de um ponto do mundo com a vp (proj*view); false se atrás da
@@ -135,17 +179,23 @@ f32 distToSegmentPx(f32 px, f32 py, f32 ax, f32 ay, f32 bx, f32 by);
 
 // escolhe o alvo sob o toque para o modo dado (o gizmo está em `origin`,
 // desenhado com comprimento `len` no mundo). Axis::None se nada a alcançável.
+// 0.7.9: `grabRadius` alarga o alvo dos EIXOS/ANÉIS no press edge (44 px
+// — kGrabPx); o hover continua a chamar com o default fino (22 px).
 Axis pickAxis(Mode mode, const Mat4& vp, const Vec3& origin, f32 len,
-              f32 sw, f32 sh, f32 px, f32 py);
+              f32 sw, f32 sh, f32 px, f32 py, f32 grabRadius = kHitAxisPx);
 
 // ---- drag (matemática pura; devolve a NOVA pose a partir das âncoras) --------
 
 // mover ao longo de um EIXO: hits = interseções raio×(plano de vista por
 // origin) no arranque e agora. Delta projetado no eixo.
+// 0.7.9: o snap arredonda a COORDENADA FINAL no eixo (âncora + delta),
+// não o delta cru — âncoras fora do grid ficam em passos ABSOLUTOS do
+// grid (o snap nunca "foge" do degrau em que o dedo está).
 Vec3 dragMoveAxis(const Vec3& anchorPos, const Vec3& axisDir,
                   const Vec3& hit0, const Vec3& hit1, bool snap);
 
 // mover num PLANO (XY/XZ/YZ): hits = interseções raio×plano do drag.
+// 0.7.9: snap nas coordenadas FINAIS u/v (o mesmo princípio do eixo).
 Vec3 dragMovePlane(const Vec3& anchorPos, const Vec3& planeNormal,
                    const Vec3& hit0, const Vec3& hit1, bool snap);
 
@@ -156,6 +206,8 @@ Quat dragRotate(const Quat& anchorRot, const Vec3& axisDir, const Vec3& fwd,
 
 // escalar num eixo: hits no plano de vista (como o move) → fator = 1 +
 // delta/kScaleRef; uniforme (Center): fator = dist1/dist0 (px ao centro).
+// 0.7.9: o snap arredonda a COMPONENTE FINAL da escala (âncora×fator),
+// não o fator cru — o valor final fica em passos absolutos de 0.25.
 Vec3 dragScaleAxis(const Vec3& anchorScale, Axis axis, const Vec3& axisDir,
                    const Vec3& hit0, const Vec3& hit1, bool snap);
 Vec3 dragScaleUniform(const Vec3& anchorScale, f32 dist0, f32 dist1,

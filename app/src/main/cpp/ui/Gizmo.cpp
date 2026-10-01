@@ -161,7 +161,7 @@ f32 snapTo(f32 v, f32 step) {
 // ---- hit-test ---------------------------------------------------------------------
 
 Axis pickAxis(Mode mode, const Mat4& vp, const Vec3& origin, f32 len,
-              f32 sw, f32 sh, f32 px, f32 py) {
+              f32 sw, f32 sh, f32 px, f32 py, f32 grabRadius) {
     f32 ox = 0.0f, oy = 0.0f;
     if (!projectPoint(vp, origin, sw, sh, ox, oy)) {
         return Axis::None;   // gizmo atrás da câmara
@@ -170,13 +170,20 @@ Axis pickAxis(Mode mode, const Mat4& vp, const Vec3& origin, f32 len,
     Axis best = Axis::None;
     f32 bestDist = 1e9f;
 
+    // 0.7.9 — o raio do grab pode ser GENEROSO (44 px no press edge);
+    // o hover chama com o default fino. Os quads de plano/handle central
+    // acompanham (nunca menores que o raio pedido).
+    const f32 hitAxis = grabRadius > 0.0f ? grabRadius : kHitAxisPx;
+    const f32 hitPlane = hitAxis > kHitPlanePx ? hitAxis : kHitPlanePx;
+    const f32 hitCenter = hitAxis > kHitCenterPx ? hitAxis : kHitCenterPx;
+
     auto tryAxis = [&](Axis a, const Vec3& dir) {
         f32 ax = 0.0f, ay = 0.0f;
         if (!projectPoint(vp, origin + dir * len, sw, sh, ax, ay)) {
             return;
         }
         const f32 d = distToSegmentPx(px, py, ox, oy, ax, ay);
-        if (d < kHitAxisPx && d < bestDist) {
+        if (d < hitAxis && d < bestDist) {
             bestDist = d;
             best = a;
         }
@@ -195,7 +202,7 @@ Axis pickAxis(Mode mode, const Mat4& vp, const Vec3& origin, f32 len,
                 return;
             }
             const f32 d = std::sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
-            if (d < kHitPlanePx && d < bestDist) {
+            if (d < hitPlane && d < bestDist) {
                 bestDist = d;
                 best = plane;
             }
@@ -220,7 +227,7 @@ Axis pickAxis(Mode mode, const Mat4& vp, const Vec3& origin, f32 len,
                     if (okPrev) {
                         const f32 d = distToSegmentPx(px, py, pxPrev, pyPrev,
                                                      sx, sy);
-                        if (d < kHitAxisPx && d < bestDist) {
+                        if (d < hitAxis && d < bestDist) {
                             bestDist = d;
                             best = axis;
                         }
@@ -242,7 +249,7 @@ Axis pickAxis(Mode mode, const Mat4& vp, const Vec3& origin, f32 len,
     // Scale: handles no fim dos eixos + handle central (prioridade ao centro)
     {
         const f32 dc = std::sqrt((px - ox) * (px - ox) + (py - oy) * (py - oy));
-        if (dc < kHitCenterPx) {
+        if (dc < hitCenter) {
             return Axis::Center;
         }
     }
@@ -252,6 +259,81 @@ Axis pickAxis(Mode mode, const Mat4& vp, const Vec3& origin, f32 len,
     return best;
 }
 
+// ---- 0.7.9 — GRAB-LOCK ------------------------------------------------------------
+
+Grab beginGrab(Mode mode, const Mat4& vp, const Vec3& origin, f32 len,
+               f32 sw, f32 sh, f32 px, f32 py, i32 slot,
+               const ViewBasis& basis) {
+    Grab g;
+    // hit-test com o alvo GENEROSO (kGrabPx) — "grab ligeiramente fora
+    // ainda agarra"; o hover mantém o raio fino
+    g.target = pickAxis(mode, vp, origin, len, sw, sh, px, py, kGrabPx);
+    if (g.target == Axis::None) {
+        return g;   // não agarrou — Grab inválido
+    }
+    g.slot = slot;
+    g.basis = basis;          // o RAIO é o do grab (câmara orbita com outro
+                              // dedo que o delta não salta)
+    g.planeOrigin = origin;   // o plano passa pela pos NO ARRANQUE — nunca
+                              // pela pos atual (a causa da oscilação/fuga)
+
+    // normal do plano de drag CONFORME o alvo:
+    //  · eixo (move/scale) → plano de VISTA (⟂ à câmara no grab — nunca
+    //    degenera: o raio nunca é paralelo a um plano que o encara)
+    //  · plano (XY/XZ/YZ)  → a normal de mundo do próprio plano
+    //  · Center/rotate     → sem plano (usa âncoras de ecrã)
+    switch (g.target) {
+        case Axis::X:
+        case Axis::Y:
+        case Axis::Z:
+            g.planeNormal = basis.fwd;
+            break;
+        case Axis::XY:
+        case Axis::XZ:
+        case Axis::YZ:
+            g.planeNormal = planeNormalOf(g.target);
+            break;
+        default:
+            g.planeNormal = basis.fwd;   // Center/rotate: não usado
+            break;
+    }
+
+    // âncora do PLANO: hit raio×plano FIXO no arranque (era ZERO no bug —
+    // o primeiro frame saltava o objeto para distâncias do hit contra a
+    // origem do MUNDO)
+    bool ok = false;
+    g.anchorHit = planeHit(basis, g.planeNormal, g.planeOrigin, px, py, sw,
+                           sh, ok);
+    if (!ok) {
+        g.anchorHit = g.planeOrigin;   // raio ~ paralelo: delta 0 (seguro)
+    }
+
+    // âncoras de ECRÃ (rotate/scale uniforme): medidas no CENTRO projetado
+    // da pos de ARRANQUE (o centro do drag é SEMPRE este — mesmo que a
+    // câmara orbite com outro dedo a meio)
+    f32 ox = 0.0f, oy = 0.0f;
+    if (projectPoint(vp, origin, sw, sh, ox, oy)) {
+        g.anchorOx = ox;
+        g.anchorOy = oy;
+        g.anchorAngle = std::atan2(py - oy, px - ox);
+        g.anchorDist = std::sqrt((px - ox) * (px - ox) + (py - oy) * (py - oy));
+    } else {
+        g.anchorOx = px;
+        g.anchorOy = py;
+        g.anchorAngle = 0.0f;
+        g.anchorDist = 0.0f;
+    }
+    return g;
+}
+
+Vec3 grabHit(const Grab& g, f32 px, f32 py, f32 sw, f32 sh, bool& anyHit) {
+    // o hit AGORA no plano FIXO do grab (raio da base do GRAB) — durante o
+    // move NÃO há hit-test novo: o delta é medido sempre contra o MESMO
+    // plano, esteja o gizmo onde estiver
+    return planeHit(g.basis, g.planeNormal, g.planeOrigin, px, py, sw, sh,
+                    anyHit);
+}
+
 // ---- drag -------------------------------------------------------------------------
 
 Vec3 dragMoveAxis(const Vec3& anchorPos, const Vec3& axisDir,
@@ -259,8 +341,16 @@ Vec3 dragMoveAxis(const Vec3& anchorPos, const Vec3& axisDir,
     // delta do ARRANQUE até AGORA, projetado no eixo (relativo às âncoras —
     // o jitter do dedo nunca se acumula)
     const f32 delta = dot(hit1 - hit0, axisDir);
-    const f32 d = snap ? snapTo(delta, kSnapMove) : delta;
-    return anchorPos + axisDir * d;
+    if (!snap) {
+        return anchorPos + axisDir * delta;
+    }
+    // 0.7.9 — snap na COORDENADA FINAL: o degrau do grid é ABSOLUTO (a
+    // âncora pode estar fora do grid — o valor final aterra nele de
+    // qualquer forma; antes, o delta era arredondado e o objeto "andava"
+    // em passos relativos à âncora)
+    const f32 coord0 = dot(anchorPos, axisDir);
+    const f32 final = snapTo(coord0 + delta, kSnapMove);
+    return anchorPos + axisDir * (final - coord0);
 }
 
 Vec3 dragMovePlane(const Vec3& anchorPos, const Vec3& planeNormal,
@@ -282,8 +372,12 @@ Vec3 dragMovePlane(const Vec3& anchorPos, const Vec3& planeNormal,
     f32 du = dot(d, u);
     f32 dv = dot(d, v);
     if (snap) {
-        du = snapTo(du, kSnapMove);
-        dv = snapTo(dv, kSnapMove);
+        // 0.7.9 — snap nas COORDENADAS FINAIS u/v (passos absolutos do
+        // grid, como o dragMoveAxis)
+        const f32 cu = dot(anchorPos, u);
+        const f32 cv = dot(anchorPos, v);
+        du = snapTo(cu + du, kSnapMove) - cu;
+        dv = snapTo(cv + dv, kSnapMove) - cv;
     }
     return anchorPos + u * du + v * dv;
 }
@@ -322,17 +416,29 @@ Vec3 dragScaleAxis(const Vec3& anchorScale, Axis axis, const Vec3& axisDir,
                    const Vec3& hit0, const Vec3& hit1, bool snap) {
     const f32 delta = dot(hit1 - hit0, axisDir);
     f32 f = 1.0f + delta / kScaleRef;
-    if (snap) {
-        f = snapTo(f, kSnapScale);
-    }
     if (f < 0.05f) {
         f = 0.05f;   // nunca zero/negativo (escala degenerada)
     }
     Vec3 s = anchorScale;
+    f32 v = 0.0f;
     switch (axis) {
-        case Axis::X: s.x *= f; break;
-        case Axis::Y: s.y *= f; break;
-        case Axis::Z: s.z *= f; break;
+        case Axis::X: v = s.x * f; break;
+        case Axis::Y: v = s.y * f; break;
+        case Axis::Z: v = s.z * f; break;
+        default: return s;
+    }
+    // 0.7.9 — snap na COMPONENTE FINAL (âncora×fator): passos ABSOLUTOS
+    // de 0.25 no valor que fica no transform
+    if (snap) {
+        v = snapTo(v, kSnapScale);
+    }
+    if (v < 0.05f) {
+        v = 0.05f;
+    }
+    switch (axis) {
+        case Axis::X: s.x = v; break;
+        case Axis::Y: s.y = v; break;
+        case Axis::Z: s.z = v; break;
         default: break;
     }
     return s;
@@ -344,13 +450,20 @@ Vec3 dragScaleUniform(const Vec3& anchorScale, f32 dist0, f32 dist1,
         return anchorScale;   // âncora degenerada (dedo em cima do centro)
     }
     f32 f = dist1 / dist0;
-    if (snap) {
-        f = snapTo(f, kSnapScale);
-    }
     if (f < 0.05f) {
         f = 0.05f;
     }
-    return anchorScale * f;
+    Vec3 s = anchorScale * f;
+    if (snap) {
+        // 0.7.9 — snap nas COMPONENTES FINAIS (passos absolutos de 0.25)
+        s.x = snapTo(s.x, kSnapScale);
+        s.y = snapTo(s.y, kSnapScale);
+        s.z = snapTo(s.z, kSnapScale);
+    }
+    if (s.x < 0.05f) s.x = 0.05f;
+    if (s.y < 0.05f) s.y = 0.05f;
+    if (s.z < 0.05f) s.z = 0.05f;
+    return s;
 }
 
 // ---- desenho -----------------------------------------------------------------------

@@ -341,19 +341,23 @@ f32 dragScaleToFov(f32 anchorFovDeg, f32 anchorValue, bool ortho, f32 d0,
         return anchorValue;
     }
     f32 f = d1 / d0;
-    if (snap) {
-        f = snapStep(f, gizmo::kSnapScale);
-    }
     if (f < 0.05f) {
         f = 0.05f;
     }
     const f32 v = (ortho ? anchorValue : anchorFovDeg) * f;
-    if (ortho) {
-        return v < 0.1f ? 0.1f : v;
+    // 0.7.9 — snap no VALOR FINAL (fov em passos de 5° como o handle do
+    // fov; orthoSize em passos de 0.25 como a escala dos gizmos), não no
+    // fator cru: o valor que fica na câmara aterra em degraus absolutos
+    f32 out = v;
+    if (snap) {
+        out = snapStep(v, ortho ? 0.25f : 5.0f);
     }
-    return v < CameraComp::kMinFov
+    if (ortho) {
+        return out < 0.1f ? 0.1f : out;
+    }
+    return out < CameraComp::kMinFov
                ? CameraComp::kMinFov
-               : (v > CameraComp::kMaxFov ? CameraComp::kMaxFov : v);
+               : (out > CameraComp::kMaxFov ? CameraComp::kMaxFov : out);
 }
 
 // ---- câmara de jogo -------------------------------------------------------------------

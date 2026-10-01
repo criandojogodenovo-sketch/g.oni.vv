@@ -1,3 +1,7 @@
+# G.One VV 0.7.9 — grab-lock dos gizmos (fim da oscilação/"fuga" do drag)
+
+<!-- (0.7.8 abaixo — histórico) -->
+
 # G.One VV 0.7.8 — separação render 3D↔UI no Play (fronteira GL explícita)
 
 <!-- (0.7.7 abaixo — histórico) -->
@@ -16,6 +20,45 @@ RMX3624 (Android 13).
 
 Relatórios 1-16 das sub-fases: `docs/RELATORIO-0.7.{4,5,6,7,8}.md` (com os
 sha256 dos APKs assinados).
+
+## Escopo 0.7.9 (implementado — grab-lock dos gizmos)
+
+**O PROBLEMA (C33)**: ao arrastar um eixo do gizmo, o gizmo OSCILAVA e
+FOGIA do dedo. Causa raiz tripla no wiring do main: o press edge NUNCA
+capturava as âncoras geométricas (`anchorHit` ficava (0,0,0) — o objeto
+saltava no primeiro frame para distâncias do hit contra a ORIGEM DO MUNDO;
+`anchorAngle`/`anchorDist` ficavam 0 — o rodar saltava o ângulo absoluto
+do dedo e o escalar-uniforme estava MORTO pelo guard degenerado) e o hit
+de cada frame era medido contra um plano RE-ANCORADO na posição ATUAL do
+gizmo (que mexe com o drag → realimentação → oscilação/fuga).
+
+**GRAB-LOCK** (`gizmo::Grab` + `beginGrab`/`grabHit`, em `ui/Gizmo`): no
+touch down captura TUDO — o ALVO (eixo/anel/plano/handle), o RAIO (base da
+câmara no grab), o PLANO FIXO (⟂ à câmara no grab, passa pela pos do TIC
+NO ARRANQUE — nunca pela pos atual), o hit no plano fixo, o ângulo e a
+distância do dedo ao centro projetado do arranque. Durante o move NÃO há
+hit-test: o delta do dedo é projetado no plano FIXO — o gizmo move-se com
+o objeto mas o drag NÃO depende do dedo estar sobre ele. Touch up liberta
+o lock. Os HANDLES do frustum da câmara (far/fov) ganham o mesmo lock
+(raio/plano/centro do grab — a orbit pode mexer com outro dedo que o
+delta não salta).
+
+**ALVO DE TOQUE GENEROSO NO GRAB** (`kGrabPx` = 44 px — o mínimo de
+toque do Android): o press edge agarra com 44 px; o HOVER continua fino
+(22 px) para o destaque não "acender" meio viewport.
+
+**SNAP NO VALOR FINAL** (não no delta cru): mover aterra em degraus
+ABSOLUTOS do grid (âncora fora do grid incluída); escalar aterra nas
+componentes FINAIS em passos de 0.25; o escalar-da-câmara (fov/ortho)
+aterra em passos de 5°/0.25 no VALOR (o fov do handle).
+
+Suíte 426→433 (+7 grab: âncoras capturadas no arranque [plano fixo,
+ângulo, distância, centro], raio generoso agarra a 40 px onde o hover não
+destaca, primeiro frame NÃO salta + trava o eixo, drag do eixo Y segue o
+dedo com desvio lateral a meio SEM oscilação + idempotente, snap no valor
+final com âncora fora do grid, âncora do ângulo (rodar sem salto),
+âncora da distância (escalar-uniforme VIVE — estava morto); ajuste do
+snap do dragScaleToFov 105→110 [valor final]).
 
 ## Escopo 0.7.8 (implementado — fronteira 3D↔UI explícita no render)
 
@@ -1006,6 +1049,32 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.7.9 (grab-lock dos gizmos; APK CUMULATIVO)
+
+Instalar o APK 0.7.9 (artifact `goni-vv-0.7.9-release-signed` do run do
+job `build-release`). Esperado em cada passo:
+
+1. **Agarrar e arrastar um eixo**: selecionar um TIC → modo Mover →
+   tocar a seta Y e arrastar PARA CIMA com o dedo a DESVIAR-SE
+   lateralmente a meio → o objeto move-se SUAVE só em Y, SEM oscilar e
+   SEM fugir do dedo (o drag continua mesmo com o dedo longe do gizmo);
+2. **Sem salto no arranque**: tocar um eixo e NÃO mexer → o objeto fica
+   EXATAMENTE onde estava (antes saltava no primeiro frame);
+3. **Rodar**: anel Z → rodar em volta do centro → rotação SUAVE desde o
+   primeiro frame (sem o salto do ângulo absoluto do dedo);
+4. **Escalar**: handle central → afastar o dedo → a escala MEXE (o drag
+   uniforme estava morto no 0.7.7); com Snap, passos de 0.25;
+5. **Snap estável**: com Snap ligado, arrastar devagar → o objeto salta
+   de DEGRAU EM DEGRAU do grid (0.5 u) sem tremer entre degraus — mesmo
+   com o objeto inicial FORA do grid;
+6. **Grab generoso**: tocar 3-4 mm AO LADO da ponta de um eixo → AINDA
+   agarra (alvo de 44 px); o highlight fino só acende em cima do eixo;
+7. **Câmara**: handles do far (centro=far, canto=fov) com o mesmo
+   comportamento suave; escalar numa câmara continua a ajustar fov/
+   orthoSize com snap nos VALORES (60→110, não 105);
+8. **Regressões**: 0.7.8 (UI de jogo no Play com câmara ativa), 0.7.7
+   (frustum/seleção/Inspector), orbit normal fora dos gizmos.
 
 ## Verificação no Realme C33 (dono) — 0.7.8 (render 3D↔UI; APK CUMULATIVO)
 

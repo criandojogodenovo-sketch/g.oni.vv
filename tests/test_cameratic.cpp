@@ -176,9 +176,11 @@ TEST(cameratic_gizmo_escalar_altera_fov_ortho) {
     // fator 1.5 (dedo afastou 50% do centro) → fov 90 (persp)
     f32 fov = dragScaleToFov(60.0f, 60.0f, false, 100.0f, 150.0f, false);
     EXPECT(nearEqF(fov, 90.0f));
-    // snap: fator arredondado ao passo dos gizmos (0.25)
+    // 0.7.9 — snap no VALOR FINAL (não no fator cru): 60·1.8=108 → 110
+    // (passos de 5° como o handle do fov; antes arredondava o fator a
+    // 1.75 e dava 105 — passos relativos à âncora)
     fov = dragScaleToFov(60.0f, 60.0f, false, 100.0f, 180.0f, true);
-    EXPECT(nearEqF(fov, 105.0f));   // fator 1.8 → snap 1.75 → 60·1.75
+    EXPECT(nearEqF(fov, 110.0f));
     // clamp superior
     fov = dragScaleToFov(60.0f, 60.0f, false, 10.0f, 400.0f, false);
     EXPECT(nearEqF(fov, CameraComp::kMaxFov));

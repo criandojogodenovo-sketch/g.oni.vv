@@ -133,12 +133,22 @@ editor::OrbitState g_orbit;
 // Só no TIC selecionado, SÓ EM EDITOR (nunca em PLAY). O hit-test 3D corre
 // ANTES do orbit (o slot que apanha o gizmo NÃO orbita); o drag escreve no
 // Transform3D com âncoras (pose final = âncora + delta) e updateWorld().
+// 0.7.9 — GRAB-LOCK: o press edge captura o ALVO + o RAIO (base da câmara
+// no grab) + o PLANO FIXO (⟂ à câmara no grab, pela pos do TIC NO ARRANQUE)
+// + as âncoras todas (hit no plano, ângulo, distância). Durante o move NÃO
+// há hit-test: o delta do dedo é projetado no plano FIXO — o gizmo move-se
+// com o objeto mas o drag nunca depende do dedo estar sobre ele (fim da
+// oscilação/"fuga" do C33). Touch up liberta o lock.
 editor::toolbar::GizmoModeState g_gizmoMode;   // 0.7.6: vive na Toolbar
 gizmo::GizmoState       g_gizmo;
+gizmo::Grab             g_grab;   // 0.7.9: o lock do drag em curso
 
 // 0.7.7 — drag dos HANDLES do frustum da câmara (prioritários sobre o eixo
 // do gizmo quando a câmara está selecionada): 1..4 = canto do far (fovY),
 // 5 = centro do far (far). Âncoras: pose final = âncora + delta.
+// 0.7.9 — GRAB-LOCK também aqui: o raio (base da câmara), a normal do
+// plano e o CENTRO projetado são capturados NO GRAB — a orbit pode mexer
+// com outro dedo que o delta do handle não salta.
 struct CamHandleDrag {
     bool active = false;
     u32  slot = 0;
@@ -147,6 +157,12 @@ struct CamHandleDrag {
     f32  anchorFov = 0.0f;
     f32  anchorDist = 0.0f;   // |dedo − olho projetado| no arranque (fov)
     Vec3 anchorHit{};         // hit raio×plano no arranque (far)
+    // 0.7.9 — o lock geométrico do grab:
+    gizmo::ViewBasis basis;   // base da câmara NO GRAB (o raio é fixo)
+    Vec3 planeN{};            // normal do plano do drag NO GRAB (fwd do frustum)
+    Vec3 planeOrigin{};       // pos da câmara NO ARRANQUE (o plano é fixo)
+    f32  anchorOx = 0.0f;     // centro projetado (olho) NO GRAB (fov)
+    f32  anchorOy = 0.0f;
 } g_camHandle;
 // âncoras do gizmo ESCALAR numa câmara (o fator escala fov/orthoSize —
 // nunca o transform, que não tem significado numa câmara)
@@ -163,15 +179,15 @@ Vec3 axisDirLocal(gizmo::Axis a) {
     }
 }
 
-void applyGizmoDrag(const Mat4& vp, const Vec3& origin,
-                    const gizmo::ViewBasis& basis, f32 sw, f32 sh,
-                    f32 px, f32 py);
+void applyGizmoDrag(const gizmo::Grab& grab, const gizmo::ViewBasis& basis,
+                    f32 sw, f32 sh, f32 px, f32 py);
 
-// alimenta o gizmo (hit-test no press + drag) e devolve a máscara de slots
-// reclamados (a câmara ignora esses dedos — drag em gizmo NÃO orbita)
-// 0.7.7 — aplica o drag do handle do frustum (centro=far, canto=fovY)
+// aplica o drag do handle do frustum (0.7.9: SEMPRE no plano/centro FIXOS
+// do grab — nunca re-ancora na geometria atual)
 void applyCamHandleDrag(const Mat4& vp, const gizmo::ViewBasis& basis,
                         f32 sw, f32 sh, f32 px, f32 py) {
+    (void)vp;
+    (void)basis;   // o drag usa o LOCK do grab, não a base atual
     Tic* t = g_scene.get(g_editor.selected);
     if (!t) {
         return;
@@ -181,25 +197,27 @@ void applyCamHandleDrag(const Mat4& vp, const gizmo::ViewBasis& basis,
     if (!cc || !tr) {
         return;
     }
-    const camgizmo::Frustum f = camgizmo::computeFrustum(*tr, *cc, sw / sh);
     const bool snap = g_gizmoMode.snap;
     if (g_camHandle.handle == 5) {
-        // CENTRO do far: arrasto projetado no EIXO DE VISÃO da câmara
+        // CENTRO do far: arrasto projetado no EIXO DE VISÃO da câmara — no
+        // plano FIXO do grab (normal e origem capturadas no arranque)
         bool ok = false;
-        const Vec3 h1 = gizmo::planeHit(basis, f.fwd, tr->pos, px, py, sw,
+        const Vec3 h1 = gizmo::planeHit(g_camHandle.basis, g_camHandle.planeN,
+                                        g_camHandle.planeOrigin, px, py, sw,
                                         sh, ok);
         if (!ok) {
             return;
         }
         cc->farZ = camgizmo::dragFar(g_camHandle.anchorFar,
-                                     g_camHandle.anchorHit, h1, f.fwd, snap);
+                                     g_camHandle.anchorHit, h1,
+                                     g_camHandle.planeN, snap);
     } else {
-        // CANTO do far: fator radial do dedo em torno do olho projetado
-        f32 ox = 0.0f, oy = 0.0f;
-        if (!gizmo::projectPoint(vp, tr->pos, sw, sh, ox, oy)) {
-            return;
-        }
-        const f32 d = std::sqrt((px - ox) * (px - ox) + (py - oy) * (py - oy));
+        // CANTO do far: fator radial do dedo em torno do olho projetado —
+        // o CENTRO é o do GRAB (nunca o projetado atual)
+        const f32 d = std::sqrt((px - g_camHandle.anchorOx) *
+                                    (px - g_camHandle.anchorOx) +
+                                (py - g_camHandle.anchorOy) *
+                                    (py - g_camHandle.anchorOy));
         cc->fovY = camgizmo::dragFov(g_camHandle.anchorFov,
                                      g_camHandle.anchorDist, d, snap);
     }
@@ -211,6 +229,7 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
         g_gizmo.active = gizmo::Axis::None;
         g_gizmo.hovered = gizmo::Axis::None;
         g_gizmo.dragSlot = -1;
+        g_grab = gizmo::Grab{};   // 0.7.9: sem gizmo não há lock
         g_camHandle.active = false;
         return 0;
     }
@@ -223,23 +242,27 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
             applyCamHandleDrag(vp, basis, sw, sh, px, py);
             return 1u << slot;
         }
-        g_camHandle.active = false;   // dedo levantado
+        g_camHandle.active = false;   // dedo levantado — lock libertado
     }
-    // drag em curso: segue o MESMO slot
-    if (g_gizmo.active != gizmo::Axis::None && g_gizmo.dragSlot >= 0) {
-        const u32 slot = static_cast<u32>(g_gizmo.dragSlot);
+    // 0.7.9 — drag em curso (GRAB-LOCK): segue o MESMO slot SEM hit-test;
+    // o delta do dedo é projetado no plano FIXO do grab (o gizmo move-se
+    // com o objeto — o drag não depende do dedo estar sobre ele)
+    if (g_grab.valid()) {
+        const u32 slot = static_cast<u32>(g_grab.slot);
         if (g_input.down(slot)) {
             f32 px, py;
             g_input.pos(slot, px, py);
-            applyGizmoDrag(vp, origin, basis, sw, sh, px, py);
+            applyGizmoDrag(g_grab, basis, sw, sh, px, py);
             return 1u << slot;
         }
-        // dedo levantado — drag termina
+        // touch up — o lock é LIBERTADO (o próximo press volta ao hit-test)
+        g_grab = gizmo::Grab{};
         g_gizmo.active = gizmo::Axis::None;
         g_gizmo.dragSlot = -1;
         g_gizmo.hovered = gizmo::Axis::None;
     }
-    // press edge → hit-test 3D (só se o gesto nasce no viewport central)
+    // press edge → GRAB (hit-test com alvo GENEROSO, âncoras capturadas;
+    // só se o gesto nasce no viewport central)
     const UiRect view =
         editor::centerRect(sw, sh, g_ui.safeArea(), g_editor.showInspector);
     for (u32 slot = 0; slot < kMaxPointerSlots; ++slot) {
@@ -269,29 +292,43 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
                     g_camHandle.handle = h;
                     g_camHandle.anchorFar = cc->farZ;
                     g_camHandle.anchorFov = cc->fovY;
+                    // 0.7.9 — o LOCK do handle: raio/plano/centro do GRAB
+                    g_camHandle.basis = basis;
+                    g_camHandle.planeN = f.fwd;
+                    g_camHandle.planeOrigin = tr->pos;
                     f32 ox = 0.0f, oy = 0.0f;
                     if (gizmo::projectPoint(vp, tr->pos, sw, sh, ox, oy)) {
+                        g_camHandle.anchorOx = ox;
+                        g_camHandle.anchorOy = oy;
                         g_camHandle.anchorDist =
                             std::sqrt((px - ox) * (px - ox) +
                                       (py - oy) * (py - oy));
+                    } else {
+                        g_camHandle.anchorOx = px;
+                        g_camHandle.anchorOy = py;
+                        g_camHandle.anchorDist = 0.0f;
                     }
                     bool ok = false;
                     g_camHandle.anchorHit =
-                        gizmo::planeHit(basis, f.fwd, tr->pos, px, py, sw,
+                        gizmo::planeHit(g_camHandle.basis, g_camHandle.planeN,
+                                        g_camHandle.planeOrigin, px, py, sw,
                                         sh, ok);
                     applyCamHandleDrag(vp, basis, sw, sh, px, py);
                     return 1u << slot;
                 }
             }
         }
-        const gizmo::Axis hit = gizmo::pickAxis(g_gizmo.mode, vp, origin, len,
-                                                sw, sh, px, py);
-        if (hit == gizmo::Axis::None) {
+        // 0.7.9 — GRAB-LOCK: captura alvo (raio generoso kGrabPx) + raio +
+        // plano FIXO + âncoras — tudo medido NO ARRANQUE
+        const gizmo::Grab grab =
+            gizmo::beginGrab(g_gizmo.mode, vp, origin, len, sw, sh, px, py,
+                             static_cast<i32>(slot), basis);
+        if (!grab.valid()) {
             continue;
         }
-        // apanhou o gizmo: âncoras + claimed
-        g_gizmo.active = hit;
-        g_gizmo.hovered = hit;
+        g_grab = grab;
+        g_gizmo.active = grab.target;
+        g_gizmo.hovered = grab.target;
         g_gizmo.dragSlot = static_cast<i32>(slot);
         if (t) {
             if (Transform3D* tr = t->getComponent<Transform3D>()) {
@@ -308,10 +345,11 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
                 }
             }
         }
-        applyGizmoDrag(vp, origin, basis, sw, sh, px, py);
+        applyGizmoDrag(g_grab, basis, sw, sh, px, py);
         return 1u << slot;
     }
-    // hover (sem press): destaque do alvo sob o dedo (feedback visual)
+    // hover (sem press): destaque do alvo sob o dedo (feedback visual —
+    // raio FINO, o alvo generoso é só do grab)
     for (u32 slot = 0; slot < kMaxPointerSlots; ++slot) {
         if (g_input.down(slot)) {
             f32 px, py;
@@ -324,12 +362,15 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
     return 0;
 }
 
-// aplica o drag do gizmo ao Transform3D do TIC selecionado (âncoras)
-void applyGizmoDrag(const Mat4& vp, const Vec3& origin,
-                    const gizmo::ViewBasis& basis, f32 sw, f32 sh,
-                    f32 px, f32 py) {
+// aplica o drag do gizmo ao Transform3D do TIC selecionado (âncoras).
+// 0.7.9 — GRAB-LOCK: os hits de move/escalar-eixo vêm do PLANO FIXO do
+// grab (grabHit — raio da base do GRAB contra o plano pela pos de ARRANQUE);
+// rotate/escalar-uniforme medem contra o CENTRO projetado do GRAB. Nada
+// aqui re-ancora na pos ATUAL do gizmo (a causa da oscilação/fuga).
+void applyGizmoDrag(const gizmo::Grab& grab, const gizmo::ViewBasis& basis,
+                    f32 sw, f32 sh, f32 px, f32 py) {
     Tic* t = g_scene.get(g_editor.selected);
-    if (!t || g_gizmo.active == gizmo::Axis::None) {
+    if (!t || !grab.valid()) {
         return;
     }
     Transform3D* tr = t->getComponent<Transform3D>();
@@ -339,20 +380,19 @@ void applyGizmoDrag(const Mat4& vp, const Vec3& origin,
     // 0.7.7 — CÂMARA: o ESCALAR ajusta fovY/orthoSize (o frustum escala;
     // a escala do transform NÃO tem significado numa câmara — fica intacta).
     // mover/rodar seguem o caminho normal do Transform3D (abaixo).
+    // 0.7.9: o fator é medido contra o CENTRO do GRAB (nunca o atual).
     const bool snapCam = g_gizmoMode.snap;   // (antes do uso — o resto da
                                              // função declara o seu depois)
     if (g_gizmo.mode == gizmo::Mode::Scale) {
         if (CameraComp* cc = t->getComponent<CameraComp>()) {
-            f32 ox = 0.0f, oy = 0.0f;
-            if (!gizmo::projectPoint(vp, origin, sw, sh, ox, oy)) {
-                return;
-            }
-            const f32 d = std::sqrt((px - ox) * (px - ox) +
-                                    (py - oy) * (py - oy));
+            const f32 d = std::sqrt((px - grab.anchorOx) *
+                                        (px - grab.anchorOx) +
+                                    (py - grab.anchorOy) *
+                                        (py - grab.anchorOy));
             const bool ortho =
                 cc->projection == CameraComp::Projection::Orthographic;
             const f32 v = camgizmo::dragScaleToFov(
-                g_camScaleFov, g_camScaleOrtho, ortho, g_gizmo.anchorDist, d,
+                g_camScaleFov, g_camScaleOrtho, ortho, grab.anchorDist, d,
                 snapCam);
             if (ortho) {
                 cc->orthoSize = v;
@@ -362,64 +402,44 @@ void applyGizmoDrag(const Mat4& vp, const Vec3& origin,
             return;   // NUNCA escreve no transform da câmara
         }
     }
-    const gizmo::Axis a = g_gizmo.active;
+    const gizmo::Axis a = grab.target;
     const bool snap = g_gizmoMode.snap;
-    const f32 cx = sw * 0.5f;
-    const f32 cy = sh * 0.5f;
 
     if (g_gizmo.mode == gizmo::Mode::Move) {
+        // 0.7.9 — hit AGORA no plano FIXO do grab (o raio é o do grab):
+        // o delta é estável mesmo com a câmara a orbitar noutro dedo
+        bool ok1 = false;
+        const Vec3 h0 = grab.anchorHit;
+        const Vec3 h1 = gizmo::grabHit(grab, px, py, sw, sh, ok1);
+        if (!ok1) {
+            return;
+        }
         if (a == gizmo::Axis::X || a == gizmo::Axis::Y || a == gizmo::Axis::Z) {
-            // hits no PLANO DE VISTA por origin (nunca degenera: o plano é
-            // ⟂ ao olhar e passa pelo gizmo)
-            const Vec3 n = basis.fwd;
-            bool ok0 = false, ok1 = false;
-            const Vec3 h0 = g_gizmo.anchorHit;
-            const Vec3 h1 = gizmo::planeHit(basis, n, origin, px, py, sw, sh,
-                                            ok1);
-            (void)ok0;
-            if (!ok1) {
-                return;
-            }
             tr->pos = gizmo::dragMoveAxis(g_gizmo.anchorPos,
                                           axisDirLocal(a), h0, h1, snap);
         } else {
-            // plano de drag (XY/XZ/YZ)
-            const Vec3 n = a == gizmo::Axis::XY ? Vec3{0, 0, 1}
-                          : a == gizmo::Axis::XZ ? Vec3{0, 1, 0}
-                                                : Vec3{1, 0, 0};
-            bool ok1 = false;
-            const Vec3 h0 = g_gizmo.anchorHit;
-            const Vec3 h1 = gizmo::planeHit(basis, n, origin, px, py, sw, sh,
-                                            ok1);
-            if (!ok1) {
-                return;
-            }
-            tr->pos = gizmo::dragMovePlane(g_gizmo.anchorPos, n, h0, h1, snap);
+            // plano de drag (XY/XZ/YZ) — normal FIXA do grab
+            tr->pos = gizmo::dragMovePlane(g_gizmo.anchorPos, grab.planeNormal,
+                                           h0, h1, snap);
         }
     } else if (g_gizmo.mode == gizmo::Mode::Rotate) {
         const Vec3 axis = axisDirLocal(a);
-        f32 ox = 0.0f, oy = 0.0f;
-        if (!gizmo::projectPoint(vp, origin, sw, sh, ox, oy)) {
-            return;
-        }
-        const f32 ang = std::atan2(py - oy, px - ox);
+        // ângulo do dedo em torno do CENTRO do GRAB (estável sob orbit)
+        const f32 ang = std::atan2(py - grab.anchorOy, px - grab.anchorOx);
         tr->rot = gizmo::dragRotate(g_gizmo.anchorRot, axis, basis.fwd,
-                                    g_gizmo.anchorAngle, ang, snap);
+                                    grab.anchorAngle, ang, snap);
     } else {
-        f32 ox = 0.0f, oy = 0.0f;
-        if (!gizmo::projectPoint(vp, origin, sw, sh, ox, oy)) {
-            return;
-        }
         if (a == gizmo::Axis::Center) {
-            const f32 d = std::sqrt((px - ox) * (px - ox) + (py - oy) * (py - oy));
+            const f32 d = std::sqrt((px - grab.anchorOx) *
+                                        (px - grab.anchorOx) +
+                                    (py - grab.anchorOy) *
+                                        (py - grab.anchorOy));
             tr->scale = gizmo::dragScaleUniform(g_gizmo.anchorScale,
-                                                g_gizmo.anchorDist, d, snap);
+                                                grab.anchorDist, d, snap);
         } else {
-            const Vec3 n = basis.fwd;
             bool ok1 = false;
-            const Vec3 h0 = g_gizmo.anchorHit;
-            const Vec3 h1 = gizmo::planeHit(basis, n, origin, px, py, sw, sh,
-                                            ok1);
+            const Vec3 h0 = grab.anchorHit;
+            const Vec3 h1 = gizmo::grabHit(grab, px, py, sw, sh, ok1);
             if (!ok1) {
                 return;
             }
@@ -431,7 +451,6 @@ void applyGizmoDrag(const Mat4& vp, const Vec3& origin,
     // frame (feedback imediato) e o TransformSystem reconfirma no passo
     tr->updateWorld();
     tr->worldDirty = false;   // cache coerente com a nova pose
-    (void)cx; (void)cy;
 }
 
 DrawStats g_lastUiStats;   // métricas do pass UI (disponíveis 1 frame depois)
