@@ -132,6 +132,21 @@ public:
     f32  speed = 1.0f;        // multiplicador (0.1..3 na UI)
     Mode mode = Mode::Loop;
 
+    // ---- 0.8.3 (F7): BLENDING -----------------------------------------------
+    // O clip ATIVO mistura-se com o `blendClip` ao peso `blendWeight`
+    // (0 = só o ativo, 1 = só o blend) por TRACK correspondente (mesmo
+    // alvo+elemento). Crossfade = peso ANIMADO 0→1 em `blendDuration`
+    // segundos; ao chegar a 1 o blend clip passa a ser o ATIVO com o tempo
+    // CONTÍNUO (sem salto — a pose já era dele). Tracks de JOINT sem
+    // correspondência fade para o BIND do joint; os restantes passam o
+    // valor do clip ativo (crossfade pressupõe os mesmos alvos — rigs
+    // iguais; documentado no relatório). RUNTIME: nunca serializado.
+    i32  blendClip = -1;        // -1 = sem blend
+    f32  blendWeight = 0.0f;    // 0..1
+    f32  blendTime = 0.0f;      // tempo DENTRO do clip de blend
+    f32  blendDuration = 0.0f;  // >0 = crossfade automático em curso
+    f32  blendElapsed = 0.0f;   // tempo decorrido do crossfade
+
     // ---- clip de edição (timeline) -----------------------------------------
     // garante clips[0] (cria "edit" se vazio) e devolve-lhe o ponteiro
     AnimClip* editClip();
@@ -145,12 +160,24 @@ public:
     // ---- playback ------------------------------------------------------------
     // avança `time` conforme mode/speed/dir (puro no estado do player);
     // Once para no fim (playing=false), Loop dá a volta, PingPong reflete
-    // o sentido (dir interno)
+    // o sentido (dir interno). 0.8.3: o clip de BLEND avança em paralelo
+    // (mesma velocidade) e o crossfade anima o peso até completar a troca.
     void advance(f32 dt);
     // duração do clip ativo (0 sem clip)
     f32 duration() const;
     // nome do modo (serializer + botão da timeline)
     static const char* modeName(Mode m);
+
+    // ---- 0.8.3 (F7): blending -------------------------------------------------
+    // blend MANUAL: mistura com o clip `clipIdx` ao peso fixo `w`
+    void setBlend(i32 clipIdx, f32 w);
+    // CROSSFADE: peso 0→1 em `dur` segundos; ao completar o clip passa a
+    // ser o ATIVO com o tempo contínuo (sem salto). Re-blend troca o alvo.
+    void crossfade(i32 clipIdx, f32 dur = 0.4f);
+    // cancela o blend (fica o clip ATIVO, tempo onde está)
+    void stopBlend();
+    // há blend em curso? (clip válido com peso > 0)
+    bool blending() const { return blendClip >= 0 && blendWeight > 0.0f; }
 
     // ---- aplicação (escreve nos componentes do TIC dono) -------------------
     // avalia TODOS os tracks do clip ativo em `time` e escreve:

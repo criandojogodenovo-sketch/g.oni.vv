@@ -30,9 +30,16 @@ public:
     struct Joint {
         std::string name;    // alvo dos tracks (JointPos/Rot/Scale)
         i32  parent = -1;    // índice dentro de joints (-1 = raiz)
-        Vec3 pos{};          // TRS LOCAL (animável)
+        Vec3 pos{};          // TRS LOCAL (animável — o apply escreve aqui)
         Quat rot = Quat::identity();
         Vec3 scale{1.0f, 1.0f, 1.0f};
+        // 0.8.3 (F7): TRS de BIND — o alvo do fade quando um blend não tem
+        // track para o joint (sem isto o "bind" era o valor ANIMADO e o
+        // fade congelava em vez de descansar). O attach copia o TRS do nó;
+        // o .goni grava ambos (bp/br/bs; ausentes = o TRS atual — 0.8.2).
+        Vec3 bindPos{};
+        Quat bindRot = Quat::identity();
+        Vec3 bindScale{1.0f, 1.0f, 1.0f};
         Mat4 inverseBind = Mat4::identity();   // do glTF
     };
 

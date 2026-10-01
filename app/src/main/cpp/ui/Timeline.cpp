@@ -156,10 +156,18 @@ void drawTimeline(UiContext& ui, const InputState& in, Scene& scene,
     // ---- header --------------------------------------------------------------
     {
         char title[96];
-        std::snprintf(title, sizeof(title), "ANIM · %s · %u track%s",
-                      clip->name.c_str(),
-                      static_cast<u32>(clip->tracks.size()),
-                      clip->tracks.size() == 1 ? "" : "s");
+        if (pl->blendClip >= 0 &&
+            static_cast<size_t>(pl->blendClip) < pl->clips.size()) {
+            // 0.8.3: crossfade em curso — o título mostra a TRANSIÇÃO
+            std::snprintf(title, sizeof(title), "ANIM · %s → %s",
+                          clip->name.c_str(),
+                          pl->clips[static_cast<size_t>(pl->blendClip)].name.c_str());
+        } else {
+            std::snprintf(title, sizeof(title), "ANIM · %s · %u track%s",
+                          clip->name.c_str(),
+                          static_cast<u32>(clip->tracks.size()),
+                          clip->tracks.size() == 1 ? "" : "s");
+        }
         ui.labelFitted(r.x + 12.0f, r.y + kHeaderH * 0.5f + th * 0.30f, title,
                        theme::TEXT, 360.0f);
 
@@ -190,14 +198,28 @@ void drawTimeline(UiContext& ui, const InputState& in, Scene& scene,
                      : modeIdx == 1 ? AnimationPlayer::Mode::PingPong
                                     : AnimationPlayer::Mode::Once;
         }
-        // speed 0.1..3 (slider inline do header)
-        if (ui.slider(kIdSpeed, r.x + r.w - 164.0f, by + 6.0f, 96.0f, bh - 12.0f,
-                      0.1f, 3.0f, pl->speed)) {
-            // speed já escrito pelo slider
+        // slider contextual do header: BLEND (0.8.3, quando há blend em
+        // curso — arrastar assume o peso MANUAL) ou VELOCIDADE (sempre)
+        if (pl->blendClip >= 0) {
+            f32 w = pl->blendWeight;
+            if (ui.slider(kIdBlend, r.x + r.w - 164.0f, by + 6.0f, 96.0f,
+                          bh - 12.0f, 0.0f, 1.0f, w)) {
+                pl->blendWeight = w;        // manual: o crossfade pára de
+                pl->blendDuration = 0.0f;   // animar; o peso é do utilizador
+            }
+            char bl[32];
+            std::snprintf(bl, sizeof(bl), "blend %d%%",
+                          static_cast<int>(pl->blendWeight * 100.0f + 0.5f));
+            ui.labelFitted(r.x + r.w - 164.0f, r.y + 4.0f, bl, theme::LINE, 96.0f);
+        } else {
+            if (ui.slider(kIdSpeed, r.x + r.w - 164.0f, by + 6.0f, 96.0f,
+                          bh - 12.0f, 0.1f, 3.0f, pl->speed)) {
+                // speed já escrito pelo slider
+            }
+            char spd[32];
+            std::snprintf(spd, sizeof(spd), "vel %.1fx", pl->speed);
+            ui.labelFitted(r.x + r.w - 164.0f, r.y + 4.0f, spd, theme::LINE, 96.0f);
         }
-        char spd[32];
-        std::snprintf(spd, sizeof(spd), "vel %.1fx", pl->speed);
-        ui.labelFitted(r.x + r.w - 164.0f, r.y + 4.0f, spd, theme::LINE, 96.0f);
         // 0.8.1 — seletor de CLIPS (importados de glTF + "edit"): abre a
         // lista; o clip escolhido passa a ser o ATIVO (playback e edição)
         char clipBtn[40];
@@ -455,12 +477,24 @@ void drawTimeline(UiContext& ui, const InputState& in, Scene& scene,
                               static_cast<i32>(i) == pl->activeClip ? " *" : "",
                               static_cast<u32>(pl->clips[i].tracks.size()),
                               pl->clips[i].tracks.size() == 1 ? "" : "s");
+                // 0.8.3: tap = troca INSTANTÂNEA; "fade" = CROSSFADE 0.4 s
+                // do clip ATIVO para este (walk→run suave)
                 if (ui.button(kIdClipItem + static_cast<u64>(i), x + 12.0f,
                               y + kHeaderH + static_cast<f32>(i) * 44.0f,
-                              w - 24.0f, 36.0f, lab)) {
+                              w - 112.0f, 36.0f, lab)) {
                     pl->activeClip = static_cast<i32>(i);
                     pl->time = 0.0f;   // trocou de clip → recomeça limpo
+                    pl->stopBlend();
                     pl->resetDir();
+                    tl.clipMenu = false;
+                    tl.selTrack = -1;
+                    tl.selKey = -1;
+                }
+                if (static_cast<i32>(i) != pl->activeClip &&
+                    ui.button(kIdFade + static_cast<u64>(i), x + w - 92.0f,
+                              y + kHeaderH + static_cast<f32>(i) * 44.0f,
+                              80.0f, 36.0f, "fade")) {
+                    pl->crossfade(static_cast<i32>(i), 0.4f);
                     tl.clipMenu = false;
                     tl.selTrack = -1;
                     tl.selKey = -1;

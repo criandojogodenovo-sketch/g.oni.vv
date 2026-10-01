@@ -21,6 +21,13 @@ namespace SceneSerializer {
 
 namespace {
 
+// comparação de Vec3 com tolerância (0.8.3: detecta bind ≠ TRS atual)
+inline bool serVecNearF(const Vec3& a, const Vec3& b, f32 eps = 1e-5f) {
+    const f32 dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+    return dx < eps && dx > -eps && dy < eps && dy > -eps &&
+           dz < eps && dz > -eps;
+}
+
 Json vec3ToJson(const Vec3& v) {
     Json a = Json::makeArray();
     a.addItem(Json::makeNumber(v.x));
@@ -733,6 +740,19 @@ void fillSkeleton(SkeletonComp* sk, const Json& comp) {
                          static_cast<f32>(q->items[3].number)};
         }
         readVec3(jj.find("scale"), j.scale);
+        // 0.8.3: bind — ausente = o TRS carregado (bind pose de 0.8.2)
+        j.bindPos = j.pos;
+        j.bindRot = j.rot;
+        j.bindScale = j.scale;
+        readVec3(jj.find("bpos"), j.bindPos);
+        if (const Json* q = jj.find("brot");
+            q && q->type == Json::Type::Array && q->items.size() == 4) {
+            j.bindRot = Quat{static_cast<f32>(q->items[0].number),
+                             static_cast<f32>(q->items[1].number),
+                             static_cast<f32>(q->items[2].number),
+                             static_cast<f32>(q->items[3].number)};
+        }
+        readVec3(jj.find("bscale"), j.bindScale);
         if (const Json* ibm = jj.find("ibm");
             ibm && ibm->type == Json::Type::Array && ibm->items.size() == 16) {
             for (int i = 0; i < 16; ++i) {
@@ -772,6 +792,22 @@ void appendComponentJson(Json& arr, const SkeletonComp* sk) {
         q.addItem(Json::makeNumber(j.rot.w));
         jj.addMember("rot", std::move(q));
         jj.addMember("scale", vec3ToJson(j.scale));
+        // 0.8.3: TRS de BIND (alvo do fade do blend); gravado quando
+        // DIFERE do TRS atual (bind pose = omitido — 0.8.2 abre limpo)
+        const bool bindDiff = !serVecNearF(j.bindPos, j.pos) ||
+                              j.bindRot.x != j.rot.x || j.bindRot.y != j.rot.y ||
+                              j.bindRot.z != j.rot.z || j.bindRot.w != j.rot.w ||
+                              !serVecNearF(j.bindScale, j.scale);
+        if (bindDiff) {
+            jj.addMember("bpos", vec3ToJson(j.bindPos));
+            Json bq = Json::makeArray();
+            bq.addItem(Json::makeNumber(j.bindRot.x));
+            bq.addItem(Json::makeNumber(j.bindRot.y));
+            bq.addItem(Json::makeNumber(j.bindRot.z));
+            bq.addItem(Json::makeNumber(j.bindRot.w));
+            jj.addMember("brot", std::move(bq));
+            jj.addMember("bscale", vec3ToJson(j.bindScale));
+        }
         // ibm ≠ identidade → gravada (a identidade é o default)
         const Mat4 id = Mat4::identity();
         bool ident = true;

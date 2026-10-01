@@ -170,6 +170,8 @@ add_executable(test_core
         test_gltfanim.cpp
         # 0.8.2: skinning (parse skins, esqueleto, pose altera vertices)
         test_skin.cpp
+        # 0.8.3: blending (peso + crossfade)
+        test_blend.cpp
         ${CORE_DIR}/ui/Icons.cpp
         # 0.7.7: câmara de cena (componente/invariante + gizmo do frustum)
         ${CORE_DIR}/core/CameraUtil.cpp

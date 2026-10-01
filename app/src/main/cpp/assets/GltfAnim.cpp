@@ -157,9 +157,12 @@ u32 gltfAttachSkin(Scene& scene, Handle ticH, const GltfModel& model,
         SkeletonComp::Joint jt;
         jt.name = j.name;
         jt.parent = j.parent;
-        jt.pos = j.pos;             // TRS de BIND (o rest pose do glTF)
+        jt.pos = j.pos;             // TRS LOCAL nasce no BIND (rest pose)
         jt.rot = j.rot;
         jt.scale = j.scale;
+        jt.bindPos = j.pos;          // 0.8.3: alvo do fade do blend
+        jt.bindRot = j.rot;
+        jt.bindScale = j.scale;
         jt.inverseBind = j.inverseBind;
         sk->joints.push_back(std::move(jt));
     }

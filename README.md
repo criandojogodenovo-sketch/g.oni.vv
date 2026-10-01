@@ -1,3 +1,7 @@
+# G.One VV 0.8.3 — animação: blending (peso + crossfade walk→run)
+
+<!-- (0.8.2 abaixo — histórico) -->
+
 # G.One VV 0.8.2 — animação: skinning esquelético (joints + shader com bones)
 
 <!-- (0.8.1 abaixo — histórico) -->
@@ -35,7 +39,33 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 RMX3624 (Android 13).
 
 Relatórios 1-16 das sub-fases: `docs/RELATORIO-0.7.{4,5,6,7,8,9,10}.md` e
-`docs/RELATORIO-0.8.{0,1,2}.md` (com os sha256 dos APKs assinados).
+`docs/RELATORIO-0.8.{0,1,2,3}.md` (com os sha256 dos APKs assinados).
+
+## Escopo 0.8.3 (implementado — campanha F7: blending)
+
+**BLENDING COM PESO**: o AnimationPlayer ganha `blendClip` + `blendWeight`
+(0 = só o ativo, 1 = só o blend) — o apply mistura os tracks
+CORRESPONDENTES (mesmo alvo+elemento) dos dois clips ao peso; TIC
+(pos/rot/escala), UI (pos/cor/alpha) e JOINTS misturam. Joints SEM
+correspondência no clip de blend fade para o TRS de BIND (agora guardado
+nos joints — sem isto o fade congelava no valor animado); o blend é
+RUNTIME, nunca serializado.
+
+**CROSSFADE SUAVE**: `crossfade(clip, duração)` anima o peso 0→1 com os
+DOIS clips a avançar em paralelo (cada um no seu tempo, mesmo speed); ao
+chegar a 1 o clip de destino passa a ser o ATIVO com o tempo CONTÍNUO — a
+pose NÃO salta (aferido passo a passo: monotónica em todo o crossfade e o
+frame seguinte à troca continua de onde estava). Na timeline: botão
+"fade" por clip no seletor (crossfade 0.4 s) e um slider contextual
+"blend N%" no header (arrastar assume o peso MANUAL e para o automático).
+
+Suíte 497→508 (+11: peso 0.5 = pose intermédia em pos/rot/scale/UI/joint;
+extremos 0/1 + clamps + clips inválidos; o clip de blend anda no SEU
+tempo (loop próprio); crossfade peso linear + pose contínua 4t+4t² +
+troca sem salto; duração mínima + re-blend; stopBlend fica no ativo;
+joint sem track fade ao BIND (re-setBlend mostra o bug do bind animado —
+TRS de BIND separados nos joints); blend não serializa; UI fade do
+seletor arranca crossfade e completa; slider manual assume o peso).
 
 ## Escopo 0.8.2 (implementado — campanha F7: skinning esquelético)
 
@@ -1212,6 +1242,29 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.8.3 (blending; APK CUMULATIVO)
+
+Instalar o APK 0.8.3 (artifact `goni-vv-0.8.3-release-signed` do run do
+job `build-release`). Esperado em cada passo (precisa de um .glb com DUAS
+animações, ex.: walk e run):
+
+1. **Crossfade**: com o clip walk ativo (a tocar em Play), abrir o
+   seletor de clips → tocar "fade" na linha do run → a transição é SUAVE
+   (o título mostra "walk → run"; o slider de blend aparece no header com
+   o peso a subir) e ao fim o run fica ATIVO sem NENHUM salto de pose;
+2. **Peso manual**: durante (ou depois de abrir) um blend, arrastar o
+   slider "blend N%" → a pose mistura ao peso escolhido (50% = pose
+   intermédia exata entre walk e run); soltar em 0 volta ao walk;
+3. **Joints**: num .glb riggado, o crossfade walk→run mistura a POSE DOS
+   JOINTS (o mesh deforma intermédio); joints que só UM clip anima
+   descansam no BIND em vez de congelar;
+4. **Sem salto na troca**: observar o fim do crossfade — o valor
+   (posição/rotação) CONTINUA de onde estava (nada de snap);
+5. **Persistência limpa**: gravar/reabrir com um blend a meio → a cena
+   carrega SEM blend (runtime), o clip ATIVO e a pose intactos;
+6. **Regressões**: 0.8.2 (skin/bind pose), 0.8.1 (clips/seletor), 0.8.0
+   (timeline/primitivas), 0.7.x.
 
 ## Verificação no Realme C33 (dono) — 0.8.2 (skinning; APK CUMULATIVO)
 
