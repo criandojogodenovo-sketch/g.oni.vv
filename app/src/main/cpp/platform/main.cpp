@@ -1548,21 +1548,36 @@ void frame() {
     // z-order correto de editor) e só com seleção em EDITOR
     // 0.7.0: gizmos só no modo 3D (o modo UI desenha o viewport 2D no
     // MESMO sítio — nunca os dois)
-    if (gizmo::visible(g_editor.playMode || g_editor.uiMode, gizmoTr != nullptr)) {
+    // 0.7.5 — OVERLAYS MODAIS: com um modal aberto o CHROME DO EDITOR não
+    // se desenha (nada de toolbar/painéis/canvas UI por trás/à mista com o
+    // overlay — o C33 via o texto do canvas ATRAVÉS do MENU) e no seu lugar
+    // desenha-se um BACKDROP OPACO que tapa o ecrã TODO. Os widgets são
+    // immediate-mode: não desenhados = não interativos (os toques só
+    // pertencem ao modal, que fecha com toque fora como sempre).
+    const bool modalOpen = editor::anyOverlayOpen(g_editor);
+    if (modalOpen) {
+        editor::drawModalBackdrop(g_ui, w, h);
+    }
+    if (!modalOpen && gizmo::visible(g_editor.playMode || g_editor.uiMode,
+                                     gizmoTr != nullptr)) {
         gizmo::drawGizmo(g_ui, vp, gizmoTr->pos,
                          gizmo::gizmoLength(g_camera.dist), g_gizmo.mode,
                          g_gizmo.hovered);
     }
     bool clicks[3] = {false, false, false};
-    g_ui.toolbar(clicks);   // exatamente 3 botões (Menu, Play, Settings)
+    if (!modalOpen) {
+        g_ui.toolbar(clicks);   // exatamente 3 botões (Menu, Play, Settings)
+    }
     // 0.7.0: separador "3D | UI" (a seguir aos 3 botões) + viewport 2D no
     // modo UI (antes dos painéis — z-order de editor, como o gizmo)
-    editor::drawModeToggle(g_ui, g_editor);
-    if (g_editor.uiMode) {
-        editor::drawUiViewport(g_ui, g_scene, g_editor, g_input, w, h);
-    }
-    if (!g_editor.uiMode) {
-        editor::drawGizmoToolbar(g_ui, g_input, g_gizmoMode);   // 0.6.9: M/R/E+Snap
+    if (!modalOpen) {
+        editor::drawModeToggle(g_ui, g_editor);
+        if (g_editor.uiMode) {
+            editor::drawUiViewport(g_ui, g_scene, g_editor, g_input, w, h);
+        }
+        if (!g_editor.uiMode) {
+            editor::drawGizmoToolbar(g_ui, g_input, g_gizmoMode);   // 0.6.9: M/R/E+Snap
+        }
     }
     if (clicks[0]) {
         g_editor.fileMenu = !g_editor.fileMenu;   // F3: Menu abre Save/Load
@@ -1657,16 +1672,20 @@ void frame() {
     // 0.7.0: no modo UI com ELEMENTO selecionado o painel direito mostra o
     // INSPECTOR DE UI (pos/size/cor/texto/visivel/âncoras/ação); sem elemento
     // (ou em 3D) o Inspector de TICs de sempre.
-    if (editor::drawHierarchy(g_ui, g_scene, g_editor)) {
-        g_editor.plusMenu = true;   // "+" no cabeçalho abre os presets
-        g_editor.fileMenu = false;
-    }
-    const bool uiInsp =
-        g_editor.uiMode && (g_editor.selElement >= 0 || g_editor.selJoystick);
-    if (uiInsp) {
-        editor::drawUiInspector(g_ui, g_scene, g_editor, g_input);
-    } else {
-        editor::drawInspector(g_ui, g_scene, g_editor, &g_catalog);   // sliders + seletores
+    // 0.7.5: com um MODAL aberto os painéis NÃO se desenham (o backdrop
+    // tapa o editor; nada de texto à mista — e sem desenho não há gesto)
+    if (!modalOpen) {
+        if (editor::drawHierarchy(g_ui, g_scene, g_editor)) {
+            g_editor.plusMenu = true;   // "+" no cabeçalho abre os presets
+            g_editor.fileMenu = false;
+        }
+        const bool uiInsp =
+            g_editor.uiMode && (g_editor.selElement >= 0 || g_editor.selJoystick);
+        if (uiInsp) {
+            editor::drawUiInspector(g_ui, g_scene, g_editor, g_input);
+        } else {
+            editor::drawInspector(g_ui, g_scene, g_editor, &g_catalog);   // sliders + seletores
+        }
     }
 
     // overlay "+" → presets de TIC (3D) OU elementos de UI (modo UI, 0.7.0)
@@ -1677,6 +1696,7 @@ void frame() {
                 // 0.7.4 — o mapa escolha→Kind vive em uiPlusChoiceKind
                 // (1..7 Panel..Article; 8 Joystick; 9/10 VBox/HBox)
                 const int kind = editor::uiPlusChoiceKind(choice);
+                const bool hadTic = g_scene.get(g_editor.selected) != nullptr;
                 if (kind < 0) {
                     // 0.7.3 — JOYSTICK: widget de TouchControls EDITÁVEL no
                     // TIC selecionado (a UI do Player passa a ser esta
@@ -1701,7 +1721,15 @@ void frame() {
                     // 0.7.0: cria o elemento no canvas do TIC selecionado
                     // (cria o canvas à primeira) e seleciona-o — WYSIWYG.
                     // 0.7.4: com container selecionado nasce FILHO dele.
-                    showToast("elemento UI criado");
+                    // 0.7.5: SEM TIC selecionado o uiAddElement assegura/
+                    // cria o TIC DE UI ("UI", só com UiCanvas) — criar UI
+                    // nunca obrigou a um TIC 3D.
+                    if (!hadTic) {
+                        showToast("TIC 'UI' criado + elemento");
+                        LOGI("editor: TIC de UI criado (canvas hospedeiro)");
+                    } else {
+                        showToast("elemento UI criado");
+                    }
                     LOGI("editor: elemento UI criado (kind %d)", kind);
                 } else {
                     showToast("selecione um TIC na Hierarchy");
@@ -2083,15 +2111,12 @@ void android_main(android_app* app) {
     // F5.1-hotfix: log DUPLO (logcat + ficheiro) desde a 1ª linha.
     // O boot ainda não tem os paths da activity? O elog usa o fallback
     // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu
-    elog::info("G.One VV 0.7.4 — paridade editor<->Play da UI criável (o "
-               "viewport 2D é o Play reduzido: texto/insets/molduras "
-               "escalados + resolver de layout único) + Label só texto "
-               "(fundo opcional com alpha) + texturas de fundo em "
-               "Button/Panel (tex:) + Image escolhe/importa a imagem "
-               "(placeholder '(sem imagem)') + z-order sólidos<->texturas "
-               "(runs) + Menu configurável (espaçamento/fundo/alinhamento) "
-               "+ containers VBox/HBox (filhos automáticos, aninháveis, "
-               "serializados) — fix dos gaps de qualidade do C33 0.7.3)");
+    elog::info("G.One VV 0.7.5 — overlays modais com backdrop opaco (o "
+               "canvas nunca se desenha à mista com o MENU/teclado/CENAS/"
+               "navegador) + TIC de UI próprio ('UI', só com UiCanvas — "
+               "criar UI sem TIC 3D selecionado) + teclado com MINÚSCULAS "
+               "(toggle abc/ABC; fix do 'Z' em falta na linha S..Z) — fix "
+               "das falhas de UX do C33 0.7.4)");
     {
         const char* root0 = app->activity
             ? (app->activity->externalDataPath ? app->activity->externalDataPath

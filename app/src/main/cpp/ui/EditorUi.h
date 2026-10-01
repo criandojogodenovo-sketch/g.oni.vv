@@ -128,6 +128,8 @@ struct EditorState {
     // TECLADO IN-APP + input de texto (renomear/texto de elemento/alvo de
     // ação; NOME DE CENA na 0.7.1). Zero IME de sistema (frágil em
     // NativeActivity) — overlay mono com A-Z, 0-9, '_', '-', espaço.
+    // 0.7.5: toggle de CASO abc/ABC (st.kbLower) — MINÚSCULAS disponíveis
+    // (o atlas tem ambos os casos; dígitos/'_' não mudam).
     bool   textInput = false;       // overlay do teclado visível
     int    textPurpose = 0;         // 0 = renomear TIC, 1 = nome de cena,
                                     // 2 = texto de elemento, 3 = alvo de ação
@@ -135,6 +137,7 @@ struct EditorState {
     i32    textElement = -1;        // alvo do texto/alvo (índice no canvas)
     char   textBuf[40] = "";       // buffer em edição
     u32    textLen = 0;
+    bool   kbLower = false;         // 0.7.5: teclado em minúsculas (abc/ABC)
 };
 
 // Rect do viewport central (entre os painéis) — usado para o gate da câmara.

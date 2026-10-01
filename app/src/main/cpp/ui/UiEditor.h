@@ -41,6 +41,16 @@ namespace editor {
 
 // ---- viewport 2D --------------------------------------------------------------
 
+// 0.7.5 — algum overlay MODAL aberto? (o main decide com isto se desenha o
+// chrome do editor OU o backdrop; inclui TODOS: +/MENU/Settings/seletores/
+// diálogo de armazenamento/import/logs/contextual/remoção/teclado/CENAS/
+// navegador/aplicar)
+bool anyOverlayOpen(const EditorState& st);
+
+// 0.7.5 — BACKDROP MODAL: fundo opaco que tapa o ecrã todo por baixo de um
+// overlay modal (nada do editor/canvas UI aparece por trás/à mista).
+void drawModalBackdrop(UiContext& ui, f32 sw, f32 sh);
+
 // transform do espaço de design (ecrã inteiro) → rect do viewport central:
 // escala uniforme que CABE (nunca corta) + centrado. Pure — os testes
 // aferem que o canvas inteiro fica DENTRO do viewport.
@@ -144,7 +154,16 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
 // 0.7.4: com um CONTAINER selecionado (ou um FILHO dele), o elemento novo
 // nasce FILHO do container (irmão do selecionado) — "colocar em" no
 // Inspector move depois.
+// 0.7.5: SEM TIC selecionado (em modo UI) assegura/cria o TIC DE UI próprio
+// (nome "UI", só com UiCanvas — sem mesh/body) e cria lá o elemento: criar
+// UI NUNCA obrigou a selecionar/criar um TIC 3D.
 bool uiAddElement(Scene& scene, EditorState& st, u32 kind, f32 sw, f32 sh);
+
+// 0.7.5 — assegura/cria o TIC DE UI próprio: procura o TIC "UI" (o cria se
+// não existir), garante o UiCanvas e seleciona-o. Devolve o handle
+// (invalid só se a cena recusar a criação). O TIC aparece na Hierarchy como
+// qualquer outro (renomeável/duplicável/removível).
+Handle ensureUiTic(Scene& scene, EditorState& st);
 
 // 0.7.4 — desliga um elemento do container (parent = "") CONSERVANDO a
 // posição visual: as âncoras passam a esquerda/topo e ox/oy derivam do rect
@@ -171,15 +190,17 @@ Handle duplicateTic(Scene& scene, Handle h);
 
 // geometria do teclado (FONTE ÚNICA — desenho e testes partilham os rects):
 // 4 linhas de teclas (A..I / J..R / S..Z + '_' / 0..9) + linha de baixo
-// (ESPACO, '-', APAGA, OK, CANCELAR) + linha do buffer. 10 colunas.
+// (ESPACO, abc/ABC, '-', APAGA, OK, CANCELAR) + linha do buffer. 10 colunas.
+// 0.7.5: tecla de CASO (abc/ABC) entre o espaço e o '-' — minúsculas.
 struct KeyboardLayout {
     UiRect dialog{};
     UiRect buffer{};
     UiRect key[4][10]{};
     u32    keyCount[4] = {9, 9, 9, 10};
-    UiRect space{}, dash{}, back{}, ok{}, cancel{};
-    // rótulos das teclas (estáticos: "A".."Z", '_', "0".."9")
-    static const char* keyLabel(u32 row, u32 col);
+    UiRect space{}, caseKey{}, dash{}, back{}, ok{}, cancel{};
+    // rótulos das teclas (estáticos: "A".."Z", '_', "0".."9");
+    // 0.7.5: `lower` devolve MINÚSCULAS (o toggle abc/ABC do teclado)
+    static const char* keyLabel(u32 row, u32 col, bool lower = false);
 };
 KeyboardLayout keyboardLayout(f32 sw, f32 sh, const safe::Insets& ins);
 

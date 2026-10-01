@@ -1,4 +1,4 @@
-# G.One VV 0.7.4 — paridade editor↔Play da UI criável + texturas de fundo + containers VBox/HBox (fix dos gaps do C33 0.7.3)
+# G.One VV 0.7.5 — overlays modais com backdrop + TIC de UI próprio + teclado com minúsculas (fix das falhas de UX do C33)
 
 Engine com editor, projeto `.goni` e maturação de assets (compressão ETC2/ASTC
 com cache, extração de texturas glTF/GLB, import OBJ/glTF/GLB/PNG, export
@@ -6,7 +6,38 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 (`sensorLandscape`). Devices de teste: Realme C33 (720x1600) e Realme
 RMX3624 (Android 13).
 
-## Escopo 0.7.4 (implementado — fix dos gaps de qualidade do C33 0.7.3)
+## Escopo 0.7.5 (implementado — fix das falhas de UX do C33 0.7.4)
+
+**Z-ORDER DOS OVERLAYS MODAIS** (o fix do "texto do canvas ATRAVÉS do
+MENU"): com um modal aberto (+, MENU, Settings, seletores, diálogo de
+armazenamento, import, logs, menu contextual, remoção, teclado, CENAS,
+navegador, aplicar) o CHROME DO EDITOR NÃO SE DESENHA — no lugar, um
+BACKDROP OPACO tapa o ecrã todo (nada do canvas UI/painéis/toolbar à
+mista com o overlay). Os widgets são immediate-mode: não desenhados =
+não interativos (os toques só pertencem ao modal, que fecha com toque
+fora como sempre). `anyOverlayOpen` ficou público e ganhou os 3 que
+faltavam (CENAS/navegador/aplicar não bloqueavam o gesto WYSIWYG).
+
+**TIC DE UI PRÓPRIO + criação direta** (o fix do "criar UI obriga a um
+TIC 3D"): no modo UI, criar um elemento SEM TIC selecionado assegura/cria
+o TIC **"UI"** (só com UiCanvas — sem mesh/body) que hospeda o canvas e
+aparece na Hierarchy como qualquer outro (renomeável/duplicável/
+removível). Segundo elemento reutiliza o mesmo TIC. O toast diz
+"TIC 'UI' criado + elemento".
+
+**TECLADO COM MINÚSCULAS**: toggle **abc/ABC** visível na linha de baixo
+(o espaço encolhe 3u→2u; o rótulo mostra o estado SEGUINTE), minúsculas
+para renomear/texto/alvo/nome de cena; dígitos/'_' sem caso; `_`, `-`,
+espaço, APAGA, OK, X mantêm-se. **Fix de um bug latente da 0.7.0 apanhado
+pelo teste novo**: a linha S..Z tinha o **'Z' em falta** (a 9ª tecla era
+um ponteiro NULL — tecla fantasma que crashava ao tocar).
+
+Suíte: 399→401 testes (+ backdrop modal tapa o canvas [com MENU e menu
+contextal; reabre o chrome ao fechar], TIC de UI sem seleção [só canvas,
+sem mesh/body, reutiliza], teclado minúsculas após toggle [geometria da
+linha de baixo com 6 teclas sem sobreposição]). Gates verdes.
+
+## Escopo 0.7.4 (histórico — fix dos gaps de qualidade do C33 0.7.3)
 
 **PARIDADE EDITOR↔PLAY (princípio transversal)** — o que o dono viu no C33
 ("o Menu mostra caixas no editor e texto solto no Play") tinha causa raiz
@@ -832,6 +863,28 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.7.5 (overlays + TIC de UI + minúsculas; APK CUMULATIVO)
+
+Instalar o APK 0.7.5 (artifact `goni-vv-0.7.5-release-signed` do run do
+fecho). Roteiro cumulativo — os anteriores continuam a aplicar-se:
+
+1. **Overlays modais**: no modo UI com elementos no canvas ("TESTE",
+   "Botao"), abrir o **MENU** → o ecrã fica TODO tapado pelo fundo
+   escuro e SÓ o menu aparece (nenhum texto do canvas à mista); o mesmo
+   com o menu contextual (⋮), o teclado, CENAS e o navegador; toque fora
+   fecha e o editor volta INTEIRO (toolbar/painéis/canvas);
+2. **TIC de UI próprio**: SEM nada selecionado, modo UI → "+" → Label →
+   nasce o TIC **"UI"** na Hierarchy (só com UiCanvas — sem mesh/body) e
+   o elemento dentro dele (toast "TIC 'UI' criado + elemento"); criar um
+   segundo elemento REUTILIZA o mesmo TIC; selecionar o Player e criar →
+   continua a anexar ao Player (o comportamento de sempre);
+3. **Minúsculas**: renomear (⋮ → Renomear) → teclado → tocar **abc** →
+   as letras escrevem em minúsculas ("cena2", "ola mundo"); **ABC** volta
+   às maiúsculas; a tecla **Z** existe e escreve (o fix da tecla fantasma);
+   dígitos/'-'/'_'/' '/APAGA/OK/X como sempre;
+4. **Regressões**: paridade editor↔Play (0.7.4), texturas, containers,
+   joystick, cenas, navegador, gestão de TICs — tudo como antes.
 
 ## Verificação no Realme C33 (dono) — 0.7.4 (paridade + texturas + containers; APK CUMULATIVO)
 

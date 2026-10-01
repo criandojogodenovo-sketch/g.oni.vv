@@ -30,14 +30,6 @@ namespace editor {
 namespace {
 // (kPad/kHeaderH/kRowH/kMenuW vêm de ui/EditorLayout.h — a fonte única)
 
-// algum overlay está aberto? (o gesto do viewport 2D NÃO corre por baixo de
-// overlays — o +/menu/teclado capturam os toques primeiro)
-bool anyOverlayOpen(const EditorState& st) {
-    return st.plusMenu || st.fileMenu || st.settingsMenu || st.contextMenu ||
-           st.removeDialog || st.textInput || st.assetMenu != 0 ||
-           st.importMenu || st.storageDialog || st.logViewer;
-}
-
 // linha de slider do Inspector de UI (o mesmo desenho do Inspector de TICs:
 // label à esquerda + trilho + valor à direita; baseline pelas métricas REAIS)
 bool uiSliderRow(UiContext& ui, u64 id, f32 x, f32 rowTop, f32 rowH,
@@ -56,6 +48,27 @@ bool uiSliderRow(UiContext& ui, u64 id, f32 x, f32 rowTop, f32 rowH,
     return changed;
 }
 } // namespace
+
+// 0.7.5 — algum overlay MODAL aberto? (agora público: o main usa-o para
+// decidir se desenha o chrome do editor OU o backdrop modal). 0.7.5
+// acrescentou os que faltavam: CENAS (scenesMenu), NAVEGADOR (fileBrowser)
+// e APLICAR (applyAsk) — antes não bloqueavam o gesto WYSIWYG por baixo.
+bool anyOverlayOpen(const EditorState& st) {
+    return st.plusMenu || st.fileMenu || st.settingsMenu || st.contextMenu ||
+           st.removeDialog || st.textInput || st.assetMenu != 0 ||
+           st.importMenu || st.storageDialog || st.logViewer ||
+           st.scenesMenu || st.fileBrowser || st.applyAsk;
+}
+
+// 0.7.5 — BACKDROP MODAL: fundo OPACO que tapa o ecrã TODO (o chrome do
+// editor não se desenha com um modal aberto; o backdrop garante que NADA
+// — canvas UI incluído — aparece por trás/à mista com o overlay. O fix do
+// C33: "os elementos do canvas desenham-se por cima/através do overlay,
+// misturando texto"). Só um desenho — nenhum gesto (o overlay dono do
+// toque continua a fechar com toque fora, como sempre).
+void drawModalBackdrop(UiContext& ui, f32 sw, f32 sh) {
+    ui.panel(0.0f, 0.0f, sw, sh, theme::BG);
+}
 
 // ---------------------------------------------------------------------------
 // VIEWPORT 2D — o modo UI do separador "3D | UI"
@@ -944,7 +957,17 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
 bool uiAddElement(Scene& scene, EditorState& st, u32 kind, f32 sw, f32 sh) {
     Tic* tic = scene.get(st.selected);
     if (!tic) {
-        return false;
+        // 0.7.5 — SEM TIC selecionado (modo UI): assegura/cria o TIC DE UI
+        // próprio ("UI", só com UiCanvas — sem mesh/body). Criar UI nunca
+        // obrigou a selecionar/criar um TIC 3D (o fix do C33).
+        if (!st.uiMode) {
+            return false;
+        }
+        const Handle h = ensureUiTic(scene, st);
+        tic = scene.get(h);
+        if (!tic) {
+            return false;
+        }
     }
     UiCanvas* canvas = tic->getComponent<UiCanvas>();
     if (!canvas) {
@@ -974,6 +997,28 @@ bool uiAddElement(Scene& scene, EditorState& st, u32 kind, f32 sw, f32 sh) {
     st.selElement = idx;
     st.selJoystick = false;   // a seleção passou para o elemento novo
     return true;
+}
+
+// 0.7.5 — TIC DE UI próprio: o "UI" que hospeda o canvas quando o dono cria
+// UI sem TIC 3D selecionado. Procura por NOME (o renomeado deixa de ser
+// achado — um novo nasce; comportamento previsível), cria se não existir,
+// garante o UiCanvas e seleciona-o. Sem mesh/body — é SÓ UI.
+Handle ensureUiTic(Scene& scene, EditorState& st) {
+    Handle h = scene.find("UI");
+    Tic* t = scene.get(h);
+    if (!t) {
+        h = scene.create("UI");
+        t = scene.get(h);
+    }
+    if (!t) {
+        return Handle::invalid();
+    }
+    if (!t->getComponent<UiCanvas>()) {
+        t->addComponent<UiCanvas>();
+    }
+    st.selected = h;
+    st.selElement = -1;
+    return h;
 }
 
 // 0.7.4 — desliga o elemento do container CONSERVANDO a posição visual:
@@ -1159,17 +1204,26 @@ Handle duplicateTic(Scene& scene, Handle h) {
 // TECLADO IN-APP + input de texto
 // ---------------------------------------------------------------------------
 
-const char* KeyboardLayout::keyLabel(u32 row, u32 col) {
+const char* KeyboardLayout::keyLabel(u32 row, u32 col, bool lower) {
+    // 0.7.5: `lower` devolve MINÚSCULAS (o toggle abc/ABC do teclado —
+    // o atlas tem ambos os casos; dígitos/'_' não mudam).
+    // BUG LATENTE 0.7.0 apanhado pelo teste novo: a linha 2 tinha SÓ 8
+    // inicializadores (faltava o 'Z') — a 9ª tecla era um ponteiro NULL
+    // (tecla fantasma que crashava o typeChar ao tocar). Alfabeto completo:
+    // A..R (2×9) + S..Z (8) + '_' = 9 na linha 2.
     static const char* kRow0[9] = {"A", "B", "C", "D", "E", "F", "G", "H", "I"};
     static const char* kRow1[9] = {"J", "K", "L", "M", "N", "O", "P", "Q", "R"};
-    static const char* kRow2[9] = {"S", "T", "U", "V", "W", "X", "Y", "_"};
+    static const char* kRow2[9] = {"S", "T", "U", "V", "W", "X", "Y", "Z", "_"};
     static const char* kRow3[10] = {"0", "1", "2", "3", "4",
                                     "5", "6", "7", "8", "9"};
+    static const char* kRow0l[9] = {"a", "b", "c", "d", "e", "f", "g", "h", "i"};
+    static const char* kRow1l[9] = {"j", "k", "l", "m", "n", "o", "p", "q", "r"};
+    static const char* kRow2l[9] = {"s", "t", "u", "v", "w", "x", "y", "z", "_"};
     switch (row) {
-        case 0:  return col < 9 ? kRow0[col] : "";
-        case 1:  return col < 9 ? kRow1[col] : "";
-        case 2:  return col < 9 ? kRow2[col] : "";   // 8 letras + '_'
-        default: return col < 10 ? kRow3[col] : "";
+        case 0:  return col < 9 ? (lower ? kRow0l[col] : kRow0[col]) : "";
+        case 1:  return col < 9 ? (lower ? kRow1l[col] : kRow1[col]) : "";
+        case 2:  return col < 9 ? (lower ? kRow2l[col] : kRow2[col]) : "";   // 8 letras + '_'
+        default: return col < 10 ? kRow3[col] : "";   // dígitos (sem caso)
     }
 }
 
@@ -1208,12 +1262,15 @@ KeyboardLayout keyboardLayout(f32 sw, f32 sh, const safe::Insets& ins) {
     }
 
     // linha de baixo (a ÚLTIMA linha de teclas — depois da 4ª, com o MESMO
-    // espaçamento): [ESPACO 3u][ '-' 1u ][APAGA 2u][OK 2u][CANCELAR 2u]
+    // espaçamento). 0.7.5: + a tecla de CASO abc/ABC (o espaço encolhe de
+    // 3u para 2u): [ESPACO 2u][abc 1u][ '-' 1u][APAGA 2u][OK 2u][CANCELAR 1u]
     const f32 yB = k.dialog.y + kHeaderH + kBufH + 4.0f * (kKeyH + kGap);
     const f32 unit = (innerW - 4.0f * kGap) / 10.0f;
     f32 x = k.dialog.x + kPad;
-    k.space = {x, yB, 3.0f * unit, kKeyH};
-    x += 3.0f * unit + kGap;
+    k.space = {x, yB, 2.0f * unit, kKeyH};
+    x += 2.0f * unit + kGap;
+    k.caseKey = {x, yB, unit, kKeyH};   // 0.7.5: toggle abc/ABC
+    x += unit + kGap;
     k.dash = {x, yB, unit, kKeyH};
     x += unit + kGap;
     k.back = {x, yB, 2.0f * unit, kKeyH};
@@ -1272,19 +1329,27 @@ int drawTextInput(UiContext& ui, const InputState& in, f32 sw, f32 sh,
             st.textBuf[st.textLen] = '\0';
         }
     };
+    // 0.7.5 — as teclas de LETRAS seguem o CASO ativo (st.kbLower)
     for (u32 row = 0; row < 4; ++row) {
         for (u32 col = 0; col < k.keyCount[row]; ++col) {
             const UiRect& r = k.key[row][col];
             if (ui.button(kKbBase + static_cast<u64>(row) * 10u +
                               static_cast<u64>(col),
-                          r.x, r.y, r.w, r.h, KeyboardLayout::keyLabel(row, col))) {
-                typeChar(KeyboardLayout::keyLabel(row, col)[0]);
+                          r.x, r.y, r.w, r.h,
+                          KeyboardLayout::keyLabel(row, col, st.kbLower))) {
+                typeChar(KeyboardLayout::keyLabel(row, col, st.kbLower)[0]);
             }
         }
     }
     if (ui.button(kKbSpaceId, k.space.x, k.space.y, k.space.w, k.space.h,
                   "ESPACO")) {
         typeChar(' ');
+    }
+    // 0.7.5 — toggle de CASO abc/ABC: o rótulo mostra o ESTADO SEGUINTE
+    // (maiúsculas ativas → "abc" disponível); NÃO escreve no buffer
+    if (ui.button(kKbCaseId, k.caseKey.x, k.caseKey.y, k.caseKey.w,
+                  k.caseKey.h, st.kbLower ? "ABC" : "abc")) {
+        st.kbLower = !st.kbLower;
     }
     if (ui.button(kKbDashId, k.dash.x, k.dash.y, k.dash.w, k.dash.h, "-")) {
         typeChar('-');

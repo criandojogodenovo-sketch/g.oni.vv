@@ -83,22 +83,34 @@ struct Env {
 
     void frame() {
         ui.beginFrame(nullptr, &input, kSW, kSH);
-        bool clicks[3] = {false, false, false};
-        ui.toolbar(clicks);
-        drawModeToggle(ui, st);
-        if (st.uiMode) {
-            drawUiViewport(ui, scene, st, input, kSW, kSH);
+        // 0.7.5 — o MESMO gate do main: com overlay MODAL aberto o chrome
+        // do editor não se desenha; no lugar, o BACKDROP opaco (nada do
+        // canvas/painéis à mista com o overlay)
+        const bool modalOpen = anyOverlayOpen(st);
+        if (modalOpen) {
+            drawModalBackdrop(ui, kSW, kSH);
         }
-        // o "+" do cabeçalho abre o menu (o MESMO dispatch do main — por
-        // modo: elemento de UI em modo UI, preset de TIC no 3D)
-        if (drawHierarchy(ui, scene, st)) {
-            st.plusMenu = true;
-            st.fileMenu = false;
-        }
-        if (st.uiMode && st.selElement >= 0) {
-            drawUiInspector(ui, scene, st, input);
-        } else {
-            drawInspector(ui, scene, st, nullptr);
+        if (!modalOpen) {
+            bool clicks[3] = {false, false, false};
+            ui.toolbar(clicks);
+            drawModeToggle(ui, st);
+            if (st.uiMode) {
+                drawUiViewport(ui, scene, st, input, kSW, kSH);
+            }
+            // o "+" do cabeçalho abre o menu (o MESMO dispatch do main — por
+            // modo: elemento de UI em modo UI, preset de TIC no 3D)
+            if (drawHierarchy(ui, scene, st)) {
+                st.plusMenu = true;
+                st.fileMenu = false;
+            }
+            if (st.uiMode && st.selElement >= 0) {
+                drawUiInspector(ui, scene, st, input);
+            } else {
+                drawInspector(ui, scene, st, nullptr);
+            }
+            if (clicks[0]) {
+                st.fileMenu = !st.fileMenu;
+            }
         }
         if (st.plusMenu) {
             const int choice = drawPlusMenu(ui, input, kSW, kSH, st);
@@ -116,6 +128,9 @@ struct Env {
                                         nullptr, nullptr);
                 }
             }
+        }
+        if (st.fileMenu) {
+            drawFileMenu(ui, input, kSW, kSH, st);   // 0.7.5: modal com backdrop
         }
         // 0.7.0 — o MESMO dispatch do main: menu contextual + remoção com
         // confirmação + teclado (a sequência real do frame do device)
@@ -511,9 +526,12 @@ TEST(uieditor_teclado_geometria_sem_sobreposicao_na_safe_area) {
                        kb.dialog.x + kb.dialog.w, kb.dialog.y + kb.dialog.h},
                       area));
 
-    // linha de baixo (declaração ANTES dos cruzamentos com as teclas)
-    const Rect bottom[5] = {
+    // linha de baixo (declaração ANTES dos cruzamentos com as teclas).
+    // 0.7.5: + a tecla de CASO abc/ABC (o espaço encolheu de 3u para 2u)
+    const Rect bottom[6] = {
         {kb.space.x, kb.space.y, kb.space.x + kb.space.w, kb.space.y + kb.space.h},
+        {kb.caseKey.x, kb.caseKey.y, kb.caseKey.x + kb.caseKey.w,
+         kb.caseKey.y + kb.caseKey.h},
         {kb.dash.x, kb.dash.y, kb.dash.x + kb.dash.w, kb.dash.y + kb.dash.h},
         {kb.back.x, kb.back.y, kb.back.x + kb.back.w, kb.back.y + kb.back.h},
         {kb.ok.x, kb.ok.y, kb.ok.x + kb.ok.w, kb.ok.y + kb.ok.h},
@@ -556,15 +574,20 @@ TEST(uieditor_teclado_geometria_sem_sobreposicao_na_safe_area) {
             }
         }
     }
-    // linha de baixo também exclusiva entre si
-    for (u32 a = 0; a < 5; ++a) {
-        for (u32 b = a + 1; b < 5; ++b) {
+    // linha de baixo também exclusiva entre si (6 teclas — 0.7.5: + abc/ABC)
+    for (u32 a = 0; a < 6; ++a) {
+        for (u32 b = a + 1; b < 6; ++b) {
             EXPECT(!rectsOverlap(bottom[a], bottom[b]));
         }
     }
-    // rótulos: A..I na linha 0, 0..9 na linha 3
+    // rótulos: A..I na linha 0, 0..9 na linha 3; 0.7.5: MINÚSCULAS com o
+    // toggle (abc/ABC) — dígitos/'_' não mudam de caso
     EXPECT(std::string(KeyboardLayout::keyLabel(0, 0)) == "A");
     EXPECT(std::string(KeyboardLayout::keyLabel(3, 9)) == "9");
+    EXPECT(std::string(KeyboardLayout::keyLabel(0, 0, true)) == "a");
+    EXPECT(std::string(KeyboardLayout::keyLabel(1, 4, true)) == "n");
+    EXPECT(std::string(KeyboardLayout::keyLabel(2, 8)) == "_");   // sem caso
+    EXPECT(std::string(KeyboardLayout::keyLabel(3, 0, true)) == "0");
     // filtro de caracteres válidos
     EXPECT(uiTextCharAllowed('A') && uiTextCharAllowed('z'));
     EXPECT(uiTextCharAllowed('5') && uiTextCharAllowed('_'));
@@ -894,9 +917,25 @@ TEST(uieditor_plus_modo_ui_cria_elementos_no_canvas) {
     EXPECT(c->elements[0].kind == UiElement::Kind::Button);
     EXPECT(e.st.selElement == 0);   // selecionado p/ WYSIWYG imediato
 
-    // sem TIC selecionado: o main faz o toast honesto (uiAddElement falha)
+    // 0.7.5 — SEM TIC selecionado (em modo UI): o uiAddElement ASSEGURA/
+    // CRIA o TIC DE UI próprio ("UI", só com UiCanvas) e cria o elemento
+    // — criar UI nunca obrigou a um TIC 3D (o contrato novo do C33)
     e.st.selected = Handle::invalid();
-    EXPECT(!uiAddElement(e.scene, e.st, 0, kSW, kSH));
+    e.st.selElement = -1;
+    e.st.uiMode = true;
+    EXPECT(uiAddElement(e.scene, e.st, 0, kSW, kSH));
+    const Handle hui = e.scene.find("UI");
+    EXPECT(hui.valid());
+    Tic* tu = e.scene.get(hui);
+    EXPECT(tu != nullptr);
+    EXPECT(tu->getComponent<UiCanvas>() != nullptr);   // SÓ com canvas
+    EXPECT(tu->getComponent<MeshRenderer>() == nullptr);   // sem mesh
+    EXPECT(tu->getComponent<BodyComp>() == nullptr);        // sem body
+    EXPECT(e.st.selected == hui);   // ficou selecionado (Hierarchy vê-o)
+    const u32 nTics = e.scene.count();
+    EXPECT(uiAddElement(e.scene, e.st, 2, kSW, kSH));   // reutiliza o mesmo
+    EXPECT(e.scene.count() == nTics);   // nenhum "UI.001"
+    EXPECT(e.scene.get(hui)->getComponent<UiCanvas>()->elements.size() == 2u);
 }
 
 TEST(uieditor_plus_cria_canvas_a_primeira_vez) {
@@ -937,4 +976,156 @@ TEST(uieditor_toolbar_sem_sobreposicao_em_2_larguras) {
         // e cabe no ecrã
         EXPECT(mr.x + mr.w < sw);
     }
+}
+
+// ---- 10. 0.7.5 — overlays modais TAPAM o canvas (z-order) ---------------------------
+
+TEST(uieditor_overlay_modal_tapa_o_canvas) {
+    Env e;
+    EXPECT(e.ok);
+    UiCanvas* c = e.canvas();
+    if (!c) {
+        EXPECT(!"canvas ausente");
+        return;
+    }
+    // um elemento BEM VISÍVEL no centro do ecrã de design (o caso do C33:
+    // "TESTE"/"Botao" desenhados ATRAVÉS do MENU)
+    UiElement lbl;
+    lbl.kind = UiElement::Kind::Label;
+    lbl.name = "lbl";
+    lbl.text = "TESTE";
+    lbl.color[3] = 1.0f;   // com fundo (quad sólido identificável)
+    lbl.ox = 600.0f; lbl.oy = 300.0f; lbl.w = 300.0f; lbl.h = 80.0f;
+    lbl.anchorH = UiElement::AnchorH::Left;
+    lbl.anchorV = UiElement::AnchorV::Top;
+    c->elements.push_back(lbl);
+    e.st.uiMode = true;
+    e.st.selElement = -1;
+
+    // sem modal: o quad do label ESTÁ lá (sanidade)
+    e.frame();
+    {
+        std::vector<Rect> rects;
+        collectRects(e.ui.solidsForTest(), rects);
+        const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{});
+        const ViewportTransform t = uiViewportTransform(view, kSW, kSH);
+        const Rect want{t.ox + 600.0f * t.scale, t.oy + 300.0f * t.scale,
+                        t.ox + 900.0f * t.scale, t.oy + 380.0f * t.scale};
+        bool found = false;
+        for (const Rect& r : rects) {
+            if (std::fabs(r.x0 - want.x0) < 1.0f &&
+                std::fabs(r.y0 - want.y0) < 1.0f &&
+                std::fabs(r.x1 - want.x1) < 1.0f &&
+                std::fabs(r.y1 - want.y1) < 1.0f) {
+                found = true;
+            }
+        }
+        EXPECT(found);
+    }
+
+    // com o MENU DE FICHEIROS aberto: o chrome NÃO se desenha (o canvas não
+    // desenha) e há um BACKDROP OPACO que tapa o ecrã TODO — nenhum quad
+    // do elemento é visível por cima do overlay
+    e.st.fileMenu = true;
+    e.frame();
+    {
+        std::vector<Rect> rects;
+        collectRects(e.ui.solidsForTest(), rects);
+        // o backdrop opaco cobre o ECRÃ INTEIRO (0,0,SW,SH)
+        bool backdrop = false;
+        for (const Rect& r : rects) {
+            if (r.x0 <= 0.5f && r.y0 <= 0.5f && r.x1 >= kSW - 0.5f &&
+                r.y1 >= kSH - 0.5f) {
+                backdrop = true;
+            }
+        }
+        EXPECT(backdrop);
+        // NENHUM quad do elemento do canvas (transformado) existe
+        const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{});
+        const ViewportTransform t = uiViewportTransform(view, kSW, kSH);
+        const Rect want{t.ox + 600.0f * t.scale, t.oy + 300.0f * t.scale,
+                        t.ox + 900.0f * t.scale, t.oy + 380.0f * t.scale};
+        for (const Rect& r : rects) {
+            EXPECT(!(std::fabs(r.x0 - want.x0) < 1.0f &&
+                     std::fabs(r.y0 - want.y0) < 1.0f));
+        }
+    }
+    // o mesmo com o MENU CONTEXTUAL aberto (o segundo caso do C33)
+    e.st.fileMenu = false;
+    e.st.contextMenu = true;
+    e.st.contextTic = e.hud;
+    e.frame();
+    {
+        std::vector<Rect> rects;
+        collectRects(e.ui.solidsForTest(), rects);
+        bool backdrop = false;
+        for (const Rect& r : rects) {
+            if (r.x0 <= 0.5f && r.y0 <= 0.5f && r.x1 >= kSW - 0.5f &&
+                r.y1 >= kSH - 0.5f) {
+                backdrop = true;
+            }
+        }
+        EXPECT(backdrop);
+    }
+    // fechar o menu devolve o editor inteiro (chrome + canvas de volta)
+    e.st.contextMenu = false;
+    e.frame();
+    EXPECT(!anyOverlayOpen(e.st));
+    {
+        std::vector<Rect> rects;
+        collectRects(e.ui.solidsForTest(), rects);
+        const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{});
+        const ViewportTransform t = uiViewportTransform(view, kSW, kSH);
+        const Rect want{t.ox + 600.0f * t.scale, t.oy + 300.0f * t.scale,
+                        t.ox + 900.0f * t.scale, t.oy + 380.0f * t.scale};
+        bool found = false;
+        for (const Rect& r : rects) {
+            if (std::fabs(r.x0 - want.x0) < 1.0f &&
+                std::fabs(r.y0 - want.y0) < 1.0f &&
+                std::fabs(r.x1 - want.x1) < 1.0f &&
+                std::fabs(r.y1 - want.y1) < 1.0f) {
+                found = true;
+            }
+        }
+        EXPECT(found);
+    }
+}
+
+// ---- 11. 0.7.5 — teclado escreve MINÚSCULAS após o toggle abc/ABC -------------------
+
+TEST(uieditor_teclado_minusculas_apos_toggle) {
+    Env e;
+    EXPECT(e.ok);
+    // abre o input de RENOMEAR (buffer vazio)
+    openTextInput(e.st, 0, e.hud, -1, "");
+    EXPECT(e.st.textInput);
+    EXPECT(!e.st.kbLower);   // nasce em MAIÚSCULAS (0.7.3-compat)
+
+    const KeyboardLayout kb = keyboardLayout(kSW, kSH, safe::Insets{});
+    auto keyTap = [&](const UiRect& r) {
+        e.tap(r.x + r.w * 0.5f, r.y + r.h * 0.5f);
+    };
+
+    // maiúsculas por default: 'A' (linha 0, col 0)
+    keyTap(kb.key[0][0]);
+    EXPECT(std::string(e.st.textBuf) == "A");
+
+    // toggle abc/ABC → minúsculas: 'k' (linha 1 = J..R, col 1)
+    keyTap(kb.caseKey);
+    EXPECT(e.st.kbLower);
+    keyTap(kb.key[1][1]);
+    EXPECT(std::string(e.st.textBuf) == "Ak");
+
+    // mantém minúsculas até voltar a alternar; dígitos não mudam de caso
+    keyTap(kb.key[3][5]);
+    EXPECT(std::string(e.st.textBuf) == "Ak5");
+
+    // volta a MAIÚSCULAS e continua a escrever ('B' = linha 0, col 1)
+    keyTap(kb.caseKey);
+    EXPECT(!e.st.kbLower);
+    keyTap(kb.key[0][1]);
+    EXPECT(std::string(e.st.textBuf) == "Ak5B");
+
+    // o commit aplica minúsculas sem filtro (uiTextCharAllowed já aceitava)
+    EXPECT(uiTextCharAllowed('a') && uiTextCharAllowed('Z'));
 }
