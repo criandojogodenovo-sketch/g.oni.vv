@@ -65,8 +65,8 @@ public final class ProjectsFormat {
         // ("primary:…", "home:…", "13A3-2C1D:…") — só quando o ':' vem
         // ANTES de qualquer '/' (caminho com ':' a meio fica intacto)
         int colon = label.indexOf(':');
-        int slash = label.indexOf('/');
-        if (colon >= 0 && (slash < 0 || colon < slash)) {
+        int slashInLabel = label.indexOf('/');
+        if (colon >= 0 && (slashInLabel < 0 || colon < slashInLabel)) {
             label = label.substring(colon + 1);
         }
         return label;
