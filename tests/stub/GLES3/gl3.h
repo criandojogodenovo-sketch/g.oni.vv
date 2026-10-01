@@ -16,8 +16,17 @@
 // 0.7.0 (cor por TIC): registo do glUniform3f (uTint do LitMaterial) — o
 // teste aferiu que o render aplica o tint do MeshRenderer (sliders R/G/B) e
 // que nullptr = branco (1,1,1). Mesmo padrão: grava, não interfere.
+//
+// 0.7.8 (separação render 3D↔UI): ESTADO REAL das capacidades que o pass
+// de UI afirma — viewport (x,y,w,h), scissor test, depth test, cull face
+// e a ÚLTIMA matriz 4x4 enviada (a ortográfica de ecrã do pass de UI). O
+// diagnóstico do C33: o pass de UI herda o estado GL do pass 3D da câmara
+// de jogo; os testes de pass (test_passgl.cpp) sujam o estado a propósito
+// e aferem que a fronteira 3D→UI o repõe (glViewport cheio, scissor off,
+// depth off, orto de ecrã).
 #pragma once
 #include <cstdint>
+#include <cstring>
 
 namespace glstub {
 struct Stats {
@@ -39,6 +48,16 @@ struct Stats {
     // 0.7.0: último uniform vec3 (uTint — cor por TIC)
     float lastUniform3f[3] = {-1.0f, -1.0f, -1.0f};
     int uniform3fCalls = 0;
+    // 0.7.8: ESTADO da fronteira 3D↔UI (o que o pass de UI herda/afirma)
+    int viewport[4] = {0, 0, 0, 0};
+    int viewportCalls = 0;
+    bool scissorEnabled = false;   // GL_SCISSOR_TEST (default GL: off)
+    bool depthEnabled = false;     // GL_DEPTH_TEST (default GL: off)
+    bool cullEnabled = false;      // GL_CULL_FACE (default GL: off)
+    bool blendEnabled = false;     // GL_BLEND (default GL: off)
+    float lastMatrix4fv[16] = {};  // ÚLTIMA glUniformMatrix4fv (orto do UI)
+    int matrix4fvCalls = 0;
+    int drawArraysCalls = 0;       // submissões reais do pass de UI
 };
 inline Stats stats;              // inline C++17: 1 instância por binário
 inline void reset() { stats = Stats{}; }
@@ -136,7 +155,14 @@ inline void glGetProgramiv(GLuint, GLenum, GLint* ok) { if (ok) *ok = GL_TRUE; }
 inline void glDeleteProgram(GLuint) { ++glstub::stats.deleteProgram; }
 inline void glUseProgram(GLuint) {}
 inline GLint glGetUniformLocation(GLuint, const GLchar*) { return 0; }
-inline void glUniformMatrix4fv(GLint, GLsizei, GLboolean, const GLfloat*) {}
+inline void glUniformMatrix4fv(GLint, GLsizei, GLboolean, const GLfloat* m) {
+    ++glstub::stats.matrix4fvCalls;
+    if (m) {
+        for (int i = 0; i < 16; ++i) {
+            glstub::stats.lastMatrix4fv[i] = m[i];
+        }
+    }
+}
 inline void glUniform1i(GLint, GLint) {}
 inline void glUniform1f(GLint, GLfloat v) { glstub::stats.lastUniform1f = v; }
 inline void glUniform3f(GLint, GLfloat x, GLfloat y, GLfloat z) {
@@ -156,14 +182,33 @@ inline void glDeleteVertexArrays(GLsizei n, const GLuint*) { glstub::stats.delet
 inline void glBindVertexArray(GLuint) {}
 inline void glEnableVertexAttribArray(GLuint) {}
 inline void glVertexAttribPointer(GLuint, GLint, GLenum, GLboolean, GLsizei, const void*) {}
-inline void glDrawArrays(GLenum, GLint, GLsizei) {}
+inline void glDrawArrays(GLenum, GLint, GLsizei) { ++glstub::stats.drawArraysCalls; }
 inline void glDrawElements(GLenum, GLsizei, GLenum, const void*) {}
 
-inline void glViewport(GLint, GLint, GLsizei, GLsizei) {}
+// 0.7.8: os no-ops passam a GRAVAR o estado (inócuo p/ os testes antigos —
+// apenas leituras novas; nada do que existia lia estas funções)
+#define GL_SCISSOR_TEST 0x0C11
+inline void glViewport(GLint x, GLint y, GLsizei w, GLsizei h) {
+    ++glstub::stats.viewportCalls;
+    glstub::stats.viewport[0] = x;
+    glstub::stats.viewport[1] = y;
+    glstub::stats.viewport[2] = w;
+    glstub::stats.viewport[3] = h;
+}
 inline void glClearColor(GLfloat, GLfloat, GLfloat, GLfloat) {}
 inline void glClear(GLenum) {}
-inline void glEnable(GLenum) {}
-inline void glDisable(GLenum) {}
+inline void glEnable(GLenum cap) {
+    if (cap == GL_SCISSOR_TEST) glstub::stats.scissorEnabled = true;
+    else if (cap == GL_DEPTH_TEST) glstub::stats.depthEnabled = true;
+    else if (cap == GL_CULL_FACE) glstub::stats.cullEnabled = true;
+    else if (cap == GL_BLEND) glstub::stats.blendEnabled = true;
+}
+inline void glDisable(GLenum cap) {
+    if (cap == GL_SCISSOR_TEST) glstub::stats.scissorEnabled = false;
+    else if (cap == GL_DEPTH_TEST) glstub::stats.depthEnabled = false;
+    else if (cap == GL_CULL_FACE) glstub::stats.cullEnabled = false;
+    else if (cap == GL_BLEND) glstub::stats.blendEnabled = false;
+}
 inline void glDepthMask(GLboolean) {}
 inline void glDepthFunc(GLenum) {}
 inline void glBlendFunc(GLenum, GLenum) {}

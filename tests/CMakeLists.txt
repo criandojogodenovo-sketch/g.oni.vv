@@ -74,6 +74,9 @@ add_executable(test_core
         # 0.7.7: TIC de câmara (frustum, seleção por toque, gizmos com
         # escalar=fov, handles far/fov, serialização, play usa a ativa)
         test_cameratic.cpp
+        # 0.7.8: fronteira 3D↔UI (estado GL do pass de UI afirmado no stub;
+        # Play com câmara ativa + UiCanvas → rects do resolver, textScale 1)
+        test_passgl.cpp
         ${CORE_DIR}/core/Scene.cpp
         ${CORE_DIR}/core/Time.cpp
         ${CORE_DIR}/core/ComponentRegistry.cpp

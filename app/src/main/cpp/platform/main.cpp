@@ -816,6 +816,16 @@ void applyContentRect(android_app* app) {
         static_cast<f32>(sw), static_cast<f32>(sh),
         cr.left, cr.top, cr.right, cr.bottom);
     g_ui.setSafeArea(ins);
+    // 0.7.8 (defensivo): o CONTENT_RECT_CHANGED pode chegar SEM um
+    // WINDOW_RESIZED (barras do sistema a esconder/mostrar mudam a
+    // superfície em alguns OEMs) — re-sincroniza o tamanho do EGL e o
+    // viewport do renderer quando a superfície mudou, senão o pass de UI
+    // desenharia com viewport/ortográfica STALE (a causa raiz da UI
+    // gigante/cortada no Play do C33 — ver RELATORIO-0.7.8, secção 3).
+    g_egl.refreshSize();
+    if (g_egl.width() != sw || g_egl.height() != sh) {
+        g_renderer.resize(g_egl.width(), g_egl.height());
+    }
     LOGI("safearea: surface %dx%d content [%d %d %d %d] "
          "insets L%.0f T%.0f R%.0f B%.0f",
          (int)sw, (int)sh, cr.left, cr.top, cr.right, cr.bottom,
@@ -1697,6 +1707,14 @@ void frame() {
     const Mat4 vp = Mat4::mul(proj, view);
     const DrawStats st3d = drawTics(vp);
     const DrawStats stGrid = g_grid.draw(vp, camEye, camFocus);
+
+    // 0.7.8 — FRONTEIRA EXPLÍCITA 3D→UI: repor o estado GL que o pass 3D
+    // deixou (LitMaterial liga depth/cull com a proj da câmara de jogo; o
+    // grid alterna blend/depthmask) ANTES de qualquer widget: viewport
+    // CHEIO com o tamanho ATUAL, scissor off, depth off p/ a UI. O pass de
+    // UI NUNCA herda o estado do pass 3D — a UI de jogo volta ao tamanho/
+    // posição do resolver (coords de ecrã + safe-area), por cima da cena.
+    g_renderer.beginUiPass(static_cast<i32>(w), static_cast<i32>(h));
 
     // ---- pass UI: immediate-mode da F1 por cima (sem depth — nunca ocluída)
     g_ui.beginFrame(&g_renderer, &g_input, w, h);

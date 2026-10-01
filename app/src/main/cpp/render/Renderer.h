@@ -20,6 +20,16 @@ class Renderer {
 public:
     bool init();        // UI (shader/VAO/VBO/whiteTex) + material lit
     void resize(i32 w, i32 h);
+
+    // 0.7.8 — FRONTEIRA EXPLÍCITA 3D→UI: o pass de UI deixou de HERDAR o
+    // estado GL do pass 3D (no Play com câmara ativa o C33 via a UI de jogo
+    // gigante/cortada — o viewport/scissor/depth vinham do que o LitMaterial
+    // e o grid deixaram cair). Chamar DEPOIS do render 3D, ANTES dos widgets:
+    // repõe o viewport CHEIO (com o tamanho ATUAL do ecrã, o mesmo que o
+    // layout usa), desliga scissor/depth/cull (a UI nunca é ocluída nem
+    // recortada) e refresca w_/h_ (a ortográfica de ecrã do endFrame fica
+    // COERENTE com o viewport e com o resolver de layout do mesmo frame).
+    void beginUiPass(i32 w, i32 h);
     void beginFrame();  // clear mono (BG #141414) + depth
 
     // pass 3D: desenha com depth test + backface cull; devolve métricas.

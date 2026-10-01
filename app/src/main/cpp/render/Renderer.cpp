@@ -118,6 +118,22 @@ void Renderer::resize(i32 w, i32 h) {
     }
 }
 
+// 0.7.8 — fronteira 3D→UI (ver Renderer.h). Idempotente e BARATA: quatro
+// chamadas de estado por frame; NENHUMA submissão. O tamanho vem do frame
+// ATUAL (o main lê do EGL fresco) — viewport, ortográfica e resolver de
+// layout ficam os três coerentes entre si, venha o estado de onde vier
+// (pass 3D da câmara de jogo, grid, re-criação de superfície, driver).
+void Renderer::beginUiPass(i32 w, i32 h) {
+    if (w > 0 && h > 0) {
+        w_ = w;
+        h_ = h;
+    }
+    glViewport(0, 0, w_, h_);       // viewport CHEIO (nunca o do pass 3D)
+    glDisable(GL_SCISSOR_TEST);     // UI nunca recortada por scissor velho
+    glDisable(GL_DEPTH_TEST);       // UI por cima — nunca ocluída pelo 3D
+    glDisable(GL_CULL_FACE);        // winding y-down do quad batch
+}
+
 void Renderer::beginFrame() {
     glClearColor(0.0784314f, 0.0784314f, 0.0784314f, 1.0f);   // BG #141414
     glDepthMask(GL_TRUE);                                     // restore pós-grid
@@ -168,12 +184,18 @@ void Renderer::submit(const QuadBatch& batch, u32 texture, u32 firstVertex,
 }
 
 DrawStats Renderer::endFrame() {
+    // 0.7.8: o estado do pass de UI é AFIRMADO SEMPRE — mesmo sem submissões.
+    // (O early-return antigo deixava o depth/cull do pass 3D ligados quando
+    // não havia quads; o frame seguinte herdava. A fronteira é beginUiPass,
+    // mas o ponto de submissão re-afirma — defesa em profundidade.)
+    glViewport(0, 0, w_, h_);       // full surface — coerente com a orto abaixo
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
     if (subCount_ == 0) {
         return {};
     }
     // pass UI por cima do 3D: sem depth test/write, sem cull (winding y-down)
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE);
     const Mat4 proj = Mat4::ortho(0.0f, static_cast<f32>(w_), static_cast<f32>(h_), 0.0f,
                                   -1.0f, 1.0f);   // y para baixo (origem topo-esquerda)
     glUseProgram(prog_);

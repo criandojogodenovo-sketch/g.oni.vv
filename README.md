@@ -1,3 +1,7 @@
+# G.One VV 0.7.8 — separação render 3D↔UI no Play (fronteira GL explícita)
+
+<!-- (0.7.7 abaixo — histórico) -->
+
 # G.One VV 0.7.7 — TIC de câmara: frustum wireframe no editor + gizmos + handles + câmara de jogo em Play
 
 <!-- (0.7.6 abaixo — histórico) -->
@@ -12,6 +16,45 @@ RMX3624 (Android 13).
 
 Relatórios 1-16 das sub-fases: `docs/RELATORIO-0.7.{4,5,6,7}.md` (com os
 sha256 dos APKs assinados).
+
+## Escopo 0.7.8 (implementado — fronteira 3D↔UI explícita no render)
+
+**O PROBLEMA (C33)**: no Play com câmara ATIVA e UiCanvas, a UI de jogo
+desenhava-se GIGANTE/CORTADA — o pass de UI HERDAVA o estado GL do pass 3D
+da câmara de jogo: o `glViewport` só era afirmado no resize (nunca entre
+passes), o scissor nunca era gerido, o depth/cull só eram desligados DENTRO
+do `endFrame` (e o early-return com 0 submissões nem isso), e a matriz
+ortográfica de ecrã usava `w_/h_` em cache — descolada do viewport real.
+
+**FRONTEIRA EXPLÍCITA** (`Renderer::beginUiPass(w,h)`, chamada no main
+DEPOIS do render 3D, ANTES de qualquer widget): repõe o viewport CHEIO com
+o tamanho ATUAL do frame (o mesmo que o layout lê do EGL), desliga
+scissor/depth/cull (a UI nunca é recortada nem ocluída) e refresca `w_/h_`
+(a ortográfica de ecrã fica COERENTE com o viewport e com o resolver).
+`endFrame` passa a AFIRMAR o estado sempre (mesmo sem submissões — o
+early-return antigo deixava o depth do 3D ligado para o frame seguinte).
+
+**RE-SYNC DEFENSIVO** no `CONTENT_RECT_CHANGED`: barras do sistema a
+esconder/mostrar podem mudar a superfície SEM `WINDOW_RESIZED` em alguns
+OEMs — o contentRect agora re-sincroniza o tamanho do EGL e o viewport do
+renderer quando a superfície mudou.
+
+**LAYOUT INTACTO POR CONSTRUÇÃO**: o resolver da UI
+(`resolveCanvasLayout`/`elementRect`) usa COORDENADAS DE ECRÃ + safe-area —
+não recebe câmara; a UI desenha DEPOIS do 3D, por cima. O `textScale` é
+reposto a 1.0 por frame (o Play nunca herda a escala do viewport 2D do
+editor).
+
+**REGRESSÕES**: TouchControls corretos no Play; editor/modo UI
+inalterados (a fronteira é invisível quando o estado já está certo —
+idempotente).
+
+Suíte 418→426 (+8 `test_passgl`: fronteira repõe viewport cheio/scissor/
+depth/cull do estado sujado do pass 3D, tamanho ATUAL da superfície,
+endFrame afirma estado sem submissões, ortográfica de ecrã coerente, Play
+inteiro com câmara ativa + UiCanvas → rects do resolver dentro do ecrã,
+resolver NÃO depende da câmara [guarda de contrato], textScale 1.0 no
+Play).
 
 ## Escopo 0.7.7 (implementado — TIC de câmara + frustum + gizmos)
 
@@ -963,6 +1006,27 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.7.8 (render 3D↔UI; APK CUMULATIVO)
+
+Instalar o APK 0.7.8 (artifact `goni-vv-0.7.8-release-signed` do run do
+job `build-release`). Esperado em cada passo:
+
+1. **Cenário do bug**: cena com uma CÂMARA ATIVA (0.7.7, "+ → Camera") e
+   um TIC com UiCanvas (ex.: botão ancorado ao fundo) → **Play**;
+2. **UI de jogo a tamanho/posição corretos**: o botão do canvas aparece
+   EXATAMENTE onde o viewport 2D do editor o mostrava (coords de ecrã +
+   safe-area), texto a 28 px NORMAL — nada gigante, nada cortado, por
+   cima da cena renderizada pela câmara ativa;
+3. **TouchControls normais**: joystick/jump responsivos no Play; botões
+   do canvas clicáveis (press→release dentro dispara a ação);
+4. **Editor/modo UI inalterados**: voltar ao editor (Stop) — toolbar,
+   painéis, gizmos, frustum e o viewport 2D exatamente como na 0.7.7;
+5. **Home → voltar** (lifecycle): com o Play ativo e câmara ativa, sair
+   para o fundo e voltar → a UI de jogo volta correta (a fronteira
+   afirma o estado em CADA frame — nada herda do re-arranque);
+6. **Regressões**: roteiro 0.7.7 completo (câmara/frustum/handles/Play)
+   + 0.7.6 (toolbar/projetos) intactos.
 
 ## Verificação no Realme C33 (dono) — 0.7.7 (TIC de câmara; APK CUMULATIVO)
 
