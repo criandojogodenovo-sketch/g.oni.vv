@@ -280,11 +280,14 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     char bodyLine[64] = "";
     char camProjLabel[48] = "";   // 0.7.7
     char camActiveLabel[48] = "";
+    char camFrustumLabel[48] = "";   // 0.7.10: toggle do gizmo
     if (camEdit) {
         std::snprintf(camProjLabel, sizeof(camProjLabel), "projecao: %s",
                       CameraComp::projectionName(camEdit->projection));
         std::snprintf(camActiveLabel, sizeof(camActiveLabel), "ativa: %s",
                       camEdit->active ? "sim" : "nao");
+        std::snprintf(camFrustumLabel, sizeof(camFrustumLabel), "frustum: %s",
+                      camEdit->showFrustum ? "sim" : "nao");
     }
     if (mr) {
         if (!mr->meshPath.empty()) {
@@ -477,6 +480,12 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       camActiveLabel);
             break;
+        case InspRow::Kind::CamFrustum:
+            // 0.7.10 — toggle de visibilidade do GIZMO (o render no Play
+            // NÃO muda; só o frustum do editor se esconde)
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      camFrustumLabel);
+            break;
         }
     }
 
@@ -501,7 +510,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 r.kind != InspRow::Kind::TexButton &&
                 r.kind != InspRow::Kind::VisToggle &&
                 r.kind != InspRow::Kind::CamProj &&     // 0.7.7
-                r.kind != InspRow::Kind::CamActive) {
+                r.kind != InspRow::Kind::CamActive &&
+                r.kind != InspRow::Kind::CamFrustum) {  // 0.7.10
                 continue;
             }
             const f32 ry = contentTop + r.y - off;
@@ -536,6 +546,12 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                     } else {
                         setOnlyActiveCamera(scene, tic->handle);
                     }
+                }
+            } else if (r.kind == InspRow::Kind::CamFrustum) {
+                // 0.7.10: esconder o frustum quando polui (só o GIZMO —
+                // a câmara continua a valer para o render no Play)
+                if (CameraComp* cc = tic->getComponent<CameraComp>()) {
+                    cc->showFrustum = !cc->showFrustum;
                 }
             }
         }

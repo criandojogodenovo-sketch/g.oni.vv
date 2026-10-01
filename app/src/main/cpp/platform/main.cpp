@@ -1648,8 +1648,11 @@ void frame() {
     // 0.7.0 — DESSELECCIONAR: tap parado no vazio do viewport 3D limpa a
     // seleção (só em editor 3D; o modo UI desseleciona o ELEMENTO no
     // drawUiViewport, e a Hierarchy trata do seu vazio)
-    // 0.7.7 — o MESMO tap pode ter acertado no CORPO/FRUSTUM de uma câmara:
-    // nesse caso SELECIONA o TIC dela (hit-test 3D) em vez de limpar.
+    // 0.7.7 — o MESMO tap pode ter acertado numa câmara: nesse caso
+    // SELECIONA o TIC dela. 0.7.10 — PRIORIDADE DE OBJETOS + hit-test
+    // RESTRITO: o picker testa primeiro os TICs SELECIONÁVEIS (meshes,
+    // centro projetado a 44 px) e SÓ DEPOIS a câmara (CORPO/LENTE apenas
+    // — tocar no cone vazio não seleciona nem bloqueia o orbit).
     if (!g_editor.playMode && !g_editor.uiMode) {
         if (editor::viewportTapClearsSelection(
                 g_editor, g_input,
@@ -1660,10 +1663,10 @@ void frame() {
             f32 px = 0.0f, py = 0.0f;
             g_input.pos(0, px, py);
             const Handle hc =
-                camgizmo::pickCameraTic(g_scene, tapVp, w, h, px, py);
+                camgizmo::pickSceneTic(g_scene, tapVp, w, h, px, py);
             if (hc.valid()) {
                 g_editor.selected = hc;
-                LOGI("editor: camera selecionada pelo frustum");
+                LOGI("editor: tic selecionado pelo toque no viewport");
             }
         }
     }

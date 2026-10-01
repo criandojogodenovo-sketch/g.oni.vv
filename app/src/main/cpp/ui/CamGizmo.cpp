@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include "components/CameraComp.h"
+#include "components/MeshRenderer.h"   // 0.7.10: pickSceneTic (prioridade)
 #include "components/Transform3D.h"
 #include "core/CameraUtil.h"
 #include "core/Scene.h"
@@ -105,12 +106,19 @@ void planeHalfExtents(const CameraComp& cam, f32 dist, f32 aspect,
 }
 
 Frustum computeFrustum(const Transform3D& tr, const CameraComp& cam,
-                       f32 aspect) {
+                       f32 aspect, f32 visualFarCap) {
     Frustum f;
     f.pos   = tr.pos;
     f.fwd   = tr.rot.rotate(Vec3{0.0f, 0.0f, -1.0f});
     f.right = tr.rot.rotate(Vec3{1.0f, 0.0f, 0.0f});
     f.up    = tr.rot.rotate(Vec3{0.0f, 1.0f, 0.0f});
+
+    // 0.7.10 — FRUSTUM DOMADO: o comprimento VISUAL é CLAMPADO. O far REAL
+    // (cam.farZ) continua a valer para o RENDER do Play (gameProj lê o
+    // CameraComp — nunca esta estrutura) e vive no Inspector; o cone fica
+    // confortável no ecrã mesmo com far 2000 (o C33 via um frustum do
+    // tamanho do viewport). far curto fica REAL (informativo).
+    f.drawFar = cam.farZ < visualFarCap ? cam.farZ : visualFarCap;
 
     // corpo: caixa atrás do olho (o olho fica NO PLANO frontal da caixa —
     // como uma máquina fotográfica: o corpo atrás, a lente à frente)
@@ -120,12 +128,13 @@ Frustum computeFrustum(const Transform3D& tr, const CameraComp& cam,
     boxFromBasis(f, f.pos + f.fwd * kLensDist, kLensHalfW, kLensHalfH,
                  kLensHalfD, f.lens);
 
-    // retângulos near/far (a MESMA matemática da projeção — aferida)
+    // retângulos near/far (a MESMA matemática da projeção — aferida;
+    // 0.7.10: o far desenha-se ao CAP VISUAL, o near fica real)
     f32 nw = 0.0f, nh = 0.0f, fw2 = 0.0f, fh2 = 0.0f;
     planeHalfExtents(cam, cam.nearZ, aspect, nw, nh);
-    planeHalfExtents(cam, cam.farZ, aspect, fw2, fh2);
+    planeHalfExtents(cam, f.drawFar, aspect, fw2, fh2);
     const Vec3 nc = f.pos + f.fwd * cam.nearZ;
-    const Vec3 fc = f.pos + f.fwd * cam.farZ;
+    const Vec3 fc = f.pos + f.fwd * f.drawFar;
     f.farCenter = fc;
     const Vec3 cornersOf[4] = {
         Vec3{1.0f, 1.0f, 0.0f}, Vec3{-1.0f, 1.0f, 0.0f},
@@ -195,6 +204,11 @@ void drawAll(UiContext& ui, Scene& scene, const Mat4& vp, f32 sw, f32 sh,
         const Transform3D* tr = t.getComponent<Transform3D>();
         const CameraComp* cam = t.getComponent<CameraComp>();
         if (!tr || !cam) {
+            return;
+        }
+        // 0.7.10 — toggle do Inspector: esconder o frustum quando polui
+        // (a câmara continua a valer para o render; só o GIZMO desaparece)
+        if (!cam->showFrustum) {
             return;
         }
         const Frustum f = computeFrustum(*tr, *cam, aspect);
@@ -274,30 +288,59 @@ Handle pickCameraTic(Scene& scene, const Mat4& vp, f32 sw, f32 sh, f32 px,
             return;
         }
         const Frustum f = computeFrustum(*tr, *cam, aspect);
+        // 0.7.10 — HIT-TEST RESTRITO: SÓ o CORPO + LENTE (a caixa pequena).
+        // O cone/far/linha de visão NÃO selecionam — o C33 tinha o cone a
+        // roubar toques (selecionava a câmara em vez do objeto/orbit). Os
+        // HANDLES continuam a ser apanhados pelo pickHandle (só com a
+        // câmara JÁ selecionada — regra do feedGizmo).
         f32 d = distToBox(vp, sw, sh, f.box, px, py);
         d = (std::min)(d, distToBox(vp, sw, sh, f.lens, px, py));
-        // TODOS os segmentos que o DESENHO emite: near, far, cone, linha de
-        // visão — o hit-test e o visual partilham a geometria
-        auto seg = [&](const Vec3& a3, const Vec3& b3) {
-            f32 a[2] = {0, 0}, b[2] = {0, 0};
-            if (gizmo::projectPoint(vp, a3, sw, sh, a[0], a[1]) &&
-                gizmo::projectPoint(vp, b3, sw, sh, b[0], b[1])) {
-                d = (std::min)(d, gizmo::distToSegmentPx(px, py, a[0], a[1],
-                                                         b[0], b[1]));
-            }
-        };
-        for (int i = 0; i < 4; ++i) {
-            seg(f.nearC[i], f.nearC[(i + 1) % 4]);   // retângulo near
-            seg(f.farC[i], f.farC[(i + 1) % 4]);     // retângulo far
-            seg(f.nearC[i], f.farC[i]);              // cone
-        }
-        seg(f.pos + f.fwd * (kLensDist + kLensHalfD), f.farCenter);  // visão
         if (d < bestD) {
             bestD = d;
             best = t.handle;
         }
     });
     return best;
+}
+
+Handle pickSceneTic(Scene& scene, const Mat4& vp, f32 sw, f32 sh, f32 px,
+                    f32 py) {
+    if (sw <= 1.0f || sh <= 1.0f) {
+        return Handle::invalid();
+    }
+    // 1) PRIORIDADE DOS OBJETOS: TICs visíveis com MeshRenderer, pelo
+    // CENTRO projetado (alvo generoso kTicPickPx — o mesmo 44 px do
+    // grab-lock; o mais próximo do toque ganha). Minimal de propósito:
+    // projeção do centro, sem ray-cast — o C33 queria é que tocar num
+    // objeto DENTRO do cone selecione o OBJETO (ver RELATORIO-0.7.10 §5.3).
+    Handle best = Handle::invalid();
+    f32 bestD = kTicPickPx;
+    scene.forEachActive([&](Tic& t) {
+        if (!t.visible) {
+            return;
+        }
+        if (!t.getComponent<MeshRenderer>()) {
+            return;   // sem mesh não há "objeto" visual a selecionar
+        }
+        const Transform3D* tr = t.getComponent<Transform3D>();
+        if (!tr) {
+            return;
+        }
+        f32 ox = 0.0f, oy = 0.0f;
+        if (!gizmo::projectPoint(vp, tr->pos, sw, sh, ox, oy)) {
+            return;
+        }
+        const f32 d = std::sqrt((px - ox) * (px - ox) + (py - oy) * (py - oy));
+        if (d < bestD) {
+            bestD = d;
+            best = t.handle;
+        }
+    });
+    if (best.valid()) {
+        return best;
+    }
+    // 2) SÓ DEPOIS a câmara — e só via CORPO/LENTE (pickCameraTic restrito)
+    return pickCameraTic(scene, vp, sw, sh, px, py);
 }
 
 // ---- drag ---------------------------------------------------------------------------

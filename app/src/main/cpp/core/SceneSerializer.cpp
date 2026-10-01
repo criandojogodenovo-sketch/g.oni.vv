@@ -220,6 +220,11 @@ void appendComponentJson(Json& arr, const CameraComp* cam) {
         }
     }
     c.addMember("active", Json::makeBool(cam->active));
+    // 0.7.10: toggle de visibilidade do GIZMO (default true omitido —
+    // ficheiros 0.7.9 abrem limpos com o frustum visível)
+    if (!cam->showFrustum) {
+        c.addMember("frustum", Json::makeBool(false));
+    }
     arr.addItem(std::move(c));
 }
 
@@ -519,6 +524,10 @@ void fillCameraComp(CameraComp* cam, const Json& comp) {
     }
     if (const Json* j = comp.find("active"); j && j->type == Json::Type::Bool) {
         cam->active = j->boolean;
+    }
+    if (const Json* j = comp.find("frustum");
+        j && j->type == Json::Type::Bool) {
+        cam->showFrustum = j->boolean;   // 0.7.10: toggle do gizmo
     }
 }
 

@@ -72,22 +72,36 @@ TEST(cameratic_geometria_do_frustum) {
     CamTic c;   // pos 0, rot identidade → olha para −Z
     c.cam->fovY = 90.0f;
     c.cam->nearZ = 0.5f;
-    c.cam->farZ = 100.0f;
+    c.cam->farZ = 8.0f;   // ABAIXO do cap visual → geometria REAL
     const Frustum f = computeFrustum(*c.tr, *c.cam, 2.0f);   // aspect 2
 
     // base local
     EXPECT(vecNearF(f.fwd, Vec3{0, 0, -1}));
     EXPECT(vecNearF(f.right, Vec3{1, 0, 0}));
     EXPECT(vecNearF(f.up, Vec3{0, 1, 0}));
-    // far: halfH = tan(45°)·100 = 100 · halfW = 200 (aspect 2)
-    EXPECT(nearEqF(f.farCenter.z, -100.0f));
-    EXPECT(nearEqF(f.farC[0].x, 200.0f) && nearEqF(f.farC[0].y, 100.0f));
-    EXPECT(nearEqF(f.farC[2].x, -200.0f) && nearEqF(f.farC[2].y, -100.0f));
+    // far REAL (far 8 < cap): halfH = tan(45°)·8 = 8 · halfW = 16 (aspect 2)
+    EXPECT(nearEqF(f.drawFar, 8.0f));
+    EXPECT(nearEqF(f.farCenter.z, -8.0f));
+    EXPECT(nearEqF(f.farC[0].x, 16.0f) && nearEqF(f.farC[0].y, 8.0f));
+    EXPECT(nearEqF(f.farC[2].x, -16.0f) && nearEqF(f.farC[2].y, -8.0f));
     // near: halfH = tan(45°)·0.5 = 0.5 · halfW = 1
     EXPECT(nearEqF(f.nearC[0].x, 1.0f) && nearEqF(f.nearC[0].y, 0.5f));
     EXPECT(nearEqF(f.nearC[0].z, -0.5f));
     // o cone liga near[i]→far[i] (sem torção)
-    EXPECT(nearEqF(f.farC[0].x / f.nearC[0].x, 200.0f));
+    EXPECT(nearEqF(f.farC[0].x / f.nearC[0].x, 16.0f));
+
+    // 0.7.10 — CAP VISUAL: far ACIMA do cap → o retângulo desenha-se AO
+    // CAP (o tamanho no ecrã não cresce com o far; o near fica REAL)
+    c.cam->farZ = 100.0f;
+    const Frustum g = computeFrustum(*c.tr, *c.cam, 2.0f);
+    EXPECT(nearEqF(g.drawFar, kVisualFarCap));            // 12
+    EXPECT(nearEqF(g.farCenter.z, -12.0f));
+    EXPECT(nearEqF(g.farC[0].x, 24.0f) && nearEqF(g.farC[0].y, 12.0f));
+    EXPECT(nearEqF(g.nearC[0].z, -0.5f));                 // near REAL
+    // cap explícito MAIOR → a geometria REAL (a fonte de sempre)
+    const Frustum h100 = computeFrustum(*c.tr, *c.cam, 2.0f, 200.0f);
+    EXPECT(nearEqF(h100.drawFar, 100.0f));
+    EXPECT(nearEqF(h100.farCenter.z, -100.0f));
 
     // ORTO: meia-altura FIXA (orthoSize) nos DOIS planos
     c.cam->projection = CameraComp::Projection::Orthographic;
@@ -102,7 +116,7 @@ TEST(cameratic_geometria_do_frustum) {
     c.tr->updateWorld();
     const Frustum r = computeFrustum(*c.tr, *c.cam, 1.0f);
     EXPECT(vecNearF(r.fwd, Vec3{-1, 0, 0}, 1e-3f));
-    EXPECT(nearEqF(r.farCenter.x, -100.0f));
+    EXPECT(nearEqF(r.farCenter.x, -kVisualFarCap));   // clampado (far 100)
 
     // planeHalfExtents é a fonte ÚNICA (a matemática aferida à parte)
     f32 hw = 0.0f, hh = 0.0f;
@@ -113,26 +127,38 @@ TEST(cameratic_geometria_do_frustum) {
 
 // ---- 2. seleção por toque no frustum ---------------------------------------------
 
-TEST(cameratic_selecao_por_toque_no_frustum) {
+TEST(cameratic_selecao_por_toque_so_corpo_lente) {
     CamTic c;
     c.tr->pos = Vec3{0.0f, 0.5f, 0.0f};
-    c.cam->farZ = 8.0f;    // frustum contido no ecrã (500 u sairia fora)
+    c.cam->farZ = 500.0f;   // GIGANTE — o caso do C33
     c.cam->fovY = 45.0f;
     c.tr->updateWorld();
     const Mat4 vp = editorVp(kSW / kSH);
     const Frustum f = computeFrustum(*c.tr, *c.cam, kSW / kSH);
 
-    // tap no CENTRO do far projetado (fim da linha de visão) → seleciona
-    f32 fx = 0.0f, fy = 0.0f;
-    EXPECT(gizmo::projectPoint(vp, f.farCenter, kSW, kSH, fx, fy));
-    const Handle hit = pickCameraTic(c.scene, vp, kSW, kSH, fx, fy);
+    // 0.7.10 — HIT-TEST RESTRITO: tap no CORPO (o olho está na face frontal
+    // da caixa) → seleciona
+    f32 bx = 0.0f, by = 0.0f;
+    EXPECT(gizmo::projectPoint(vp, f.pos, kSW, kSH, bx, by));
+    const Handle hit = pickCameraTic(c.scene, vp, kSW, kSH, bx, by);
     EXPECT(hit == c.h);
 
-    // tap na aresta do CONE (a meio do near→far) → seleciona
+    // tap na LENTE → seleciona
+    f32 lx = 0.0f, ly = 0.0f;
+    EXPECT(gizmo::projectPoint(vp, f.lens[0], kSW, kSH, lx, ly));
+    EXPECT(pickCameraTic(c.scene, vp, kSW, kSH, lx, ly) == c.h);
+
+    // tap no CENTRO do far projetado (fim da linha de visão) → NÃO seleciona
+    // (o cone vazio não rouba toques — o fix do C33)
+    f32 fx = 0.0f, fy = 0.0f;
+    EXPECT(gizmo::projectPoint(vp, f.farCenter, kSW, kSH, fx, fy));
+    EXPECT(!pickCameraTic(c.scene, vp, kSW, kSH, fx, fy).valid());
+
+    // tap na aresta do CONE (a meio do near→far) → NÃO seleciona
     const Vec3 mid = (f.nearC[0] + f.farC[0]) * 0.5f;
     f32 mx = 0.0f, my = 0.0f;
     EXPECT(gizmo::projectPoint(vp, mid, kSW, kSH, mx, my));
-    EXPECT(pickCameraTic(c.scene, vp, kSW, kSH, mx, my) == c.h);
+    EXPECT(!pickCameraTic(c.scene, vp, kSW, kSH, mx, my).valid());
 
     // tap LONGE (canto do ecrã) → nada
     EXPECT(!pickCameraTic(c.scene, vp, kSW, kSH, 60.0f, 660.0f).valid());
@@ -141,7 +167,7 @@ TEST(cameratic_selecao_por_toque_no_frustum) {
     if (Tic* t = c.scene.get(c.h)) {
         t->visible = false;
     }
-    EXPECT(!pickCameraTic(c.scene, vp, kSW, kSH, fx, fy).valid());
+    EXPECT(!pickCameraTic(c.scene, vp, kSW, kSH, bx, by).valid());
 }
 
 // ---- 3. gizmo mover/rodar altera o TRANSFORM da câmara ----------------------------
@@ -446,8 +472,9 @@ TEST(cameratic_inspector_plano) {
     InspRow rows[40];
     const u32 n = inspectorPlan(prof, m, false, rows);
     EXPECT(n == inspectorRowCount(prof, false));
-    // secção Camera + fov + near + far + projecao + ortho + ativa
+    // secção Camera + fov + near + far + projecao + ortho + ativa + frustum
     int sect = 0, fov = 0, near_ = 0, far = 0, proj = 0, ortho = 0, act = 0;
+    int frus = 0;   // 0.7.10: toggle do gizmo
     for (u32 i = 0; i < n; ++i) {
         switch (rows[i].kind) {
             case InspRow::Kind::CamSection: ++sect; break;
@@ -457,11 +484,12 @@ TEST(cameratic_inspector_plano) {
             case InspRow::Kind::CamProj:    ++proj; break;
             case InspRow::Kind::CamOrtho:   ++ortho; break;
             case InspRow::Kind::CamActive:  ++act; break;
+            case InspRow::Kind::CamFrustum: ++frus; break;   // 0.7.10
             default: break;
         }
     }
     EXPECT(sect == 1 && fov == 1 && near_ == 1 && far == 1);
-    EXPECT(proj == 1 && ortho == 1 && act == 1);
+    EXPECT(proj == 1 && ortho == 1 && act == 1 && frus == 1);
     // y cumulativo sem sobreposição (o contrato do plano de sempre)
     for (u32 i = 1; i < n; ++i) {
         EXPECT(rows[i].y >= rows[i - 1].y + rows[i - 1].h - 0.01f);
@@ -505,4 +533,129 @@ TEST(cameratic_criacao_e_menu_contextual) {
     ui.endFrame();
     const u32 nNoCam = ui.solidsForTest().vertexCount() / 6;
     EXPECT(nCam > nNoCam);   // com câmara há UMA linha a mais
+}
+
+// ---- 12. 0.7.10 — FRUSTUM DOMADO: cap visual + prioridade + toggle -------------
+
+TEST(cameratic_frustum_visual_clampado_mas_render_usa_far_real) {
+    CamTic c;
+    c.cam->farZ = 2000.0f;   // o caso extremo do C33
+    c.tr->updateWorld();
+    const Frustum f = computeFrustum(*c.tr, *c.cam, kSW / kSH);
+    // o GIZMO desenha ao cap — compacto e legível em qualquer far
+    EXPECT(nearEqF(f.drawFar, kVisualFarCap));
+    EXPECT(nearEqF(length(f.farCenter - f.pos), kVisualFarCap, 1e-3f));
+    // ...mas a PROJEÇÃO do jogo (gameProj) usa o far REAL — o clamp é
+    // APENAS visual (o render no Play NÃO muda)
+    const Mat4 pj = gameProj(*c.cam, 1.7777f);
+    const Mat4 want = Mat4::perspective(1.0471975f, 1.7777f, 0.5f, 2000.0f);
+    EXPECT(matNearF(pj, want));
+    // ...e o Inspector continua a ver o far REAL no componente
+    EXPECT(nearEqF(c.cam->farZ, 2000.0f));
+}
+
+TEST(cameratic_pick_prioridade_objetos_sobre_a_camara) {
+    CamTic c;   // câmara na origem a olhar para −Z (far 500 → cone gigante)
+    c.tr->updateWorld();
+    // um OBJETO (TIC com MeshRenderer) DENTRO do cone, à frente da câmara
+    const Handle hObj = c.scene.create("Cubo");
+    Tic* obj = c.scene.get(hObj);
+    Transform3D* otr = obj->addComponent<Transform3D>();
+    obj->addComponent<MeshRenderer>();
+    otr->pos = Vec3{0.0f, 0.0f, -6.0f};   // bem DENTRO do frustum
+    otr->updateWorld();
+    const Mat4 vp = editorVp(kSW / kSH);
+
+    // tocar no OBJETO → seleciona o OBJETO (a câmara NÃO rouba — o fix do
+    // C33: "seleciona a câmara em vez do objeto")
+    f32 ox = 0.0f, oy = 0.0f;
+    EXPECT(gizmo::projectPoint(vp, otr->pos, kSW, kSH, ox, oy));
+    EXPECT(pickSceneTic(c.scene, vp, kSW, kSH, ox, oy) == hObj);
+
+    // o objeto INVISÍVEL já não conta → o toque passa à câmara (corpo/lente)
+    obj->visible = false;
+    f32 bx = 0.0f, by = 0.0f;
+    const Frustum f = computeFrustum(*c.tr, *c.cam, kSW / kSH);
+    EXPECT(gizmo::projectPoint(vp, f.pos, kSW, kSH, bx, by));
+    EXPECT(pickSceneTic(c.scene, vp, kSW, kSH, bx, by) == c.h);
+
+    // sem objeto e longe do corpo → nada (o orbit fica LIVRE)
+    obj->visible = true;
+    EXPECT(!pickSceneTic(c.scene, vp, kSW, kSH, 60.0f, 660.0f).valid());
+
+    // dois objetos: o MAIS PRÓXIMO do toque ganha
+    const Handle h2 = c.scene.create("Cubo2");
+    if (Tic* t2 = c.scene.get(h2)) {
+        Transform3D* t2r = t2->addComponent<Transform3D>();
+        t2->addComponent<MeshRenderer>();
+        t2r->pos = Vec3{2.0f, 0.0f, -6.0f};
+        t2r->updateWorld();
+    }
+    Tic* o2 = c.scene.get(h2);
+    f32 tx = 0.0f, ty = 0.0f;
+    EXPECT(gizmo::projectPoint(vp, o2->getComponent<Transform3D>()->pos,
+                               kSW, kSH, tx, ty));
+    EXPECT(pickSceneTic(c.scene, vp, kSW, kSH, tx, ty) == h2);
+}
+
+TEST(cameratic_handles_sentam_no_far_visual) {
+    CamTic c;
+    c.cam->farZ = 2000.0f;   // o real (Inspector/gameProj)
+    c.tr->updateWorld();
+    const Mat4 vp = editorVp(kSW / kSH);
+    const Frustum f = computeFrustum(*c.tr, *c.cam, kSW / kSH);   // clampado
+
+    // os handles PARTILHAM a geometria do desenho: o CENTRO do handle do
+    // far está no retângulo AO CAP (12 u), não a 2000
+    f32 cx = 0.0f, cy = 0.0f;
+    EXPECT(gizmo::projectPoint(vp, f.farCenter, kSW, kSH, cx, cy));
+    EXPECT(pickHandle(vp, kSW, kSH, f, cx, cy) == 5);
+    // o far REAL projetado está longe/fora — NÃO há handle lá
+    const Frustum real = computeFrustum(*c.tr, *c.cam, kSW / kSH, 4000.0f);
+    f32 rx = 0.0f, ry = 0.0f;
+    if (gizmo::projectPoint(vp, real.farCenter, kSW, kSH, rx, ry)) {
+        EXPECT(pickHandle(vp, kSW, kSH, f, rx, ry) == 0);
+    }
+}
+
+TEST(cameratic_toggle_frustum_esconde_o_gizmo) {
+    CamTic c;
+    c.tr->updateWorld();
+    UiContext ui;
+    ui.init();
+    InputState in;
+    const Mat4 vp = editorVp(kSW / kSH);
+
+    // visível (default) → linhas no batch
+    ui.beginFrame(nullptr, &in, kSW, kSH);
+    drawAll(ui, c.scene, vp, kSW, kSH, c.h);
+    ui.endFrame();
+    const u32 comFrustum = ui.solidsForTest().vertexCount();
+    EXPECT(comFrustum > 0u);
+
+    // toggle OFF no Inspector → o gizmo SOME (a câmara continua na cena e
+    // a valer para o render — só o desenho editor desaparece)
+    c.cam->showFrustum = false;
+    ui.beginFrame(nullptr, &in, kSW, kSH);
+    drawAll(ui, c.scene, vp, kSW, kSH, c.h);
+    ui.endFrame();
+    EXPECT(ui.solidsForTest().vertexCount() == 0u);
+
+    // serialização do toggle: false grava "frustum":false e volta; o
+    // default (true) NÃO gravado (ficheiros 0.7.9 abrem limpos)
+    const SceneSerializer::LoadCtx ctx;
+    const std::string text = SceneSerializer::dump(c.scene);
+    EXPECT(text.find("\"frustum\"") != std::string::npos);
+    Scene b;
+    EXPECT(SceneSerializer::loadText(b, text, ctx));
+    Tic* lb = nullptr;
+    b.forEachActive([&](Tic& t) { lb = &t; });
+    if (const CameraComp* cc = lb ? lb->getComponent<CameraComp>() : nullptr) {
+        EXPECT(!cc->showFrustum);
+        EXPECT(nearEqF(cc->farZ, 500.0f));   // o resto intacto
+    }
+    // default: sem a chave
+    CamTic d;
+    const std::string dtext = SceneSerializer::dump(d.scene);
+    EXPECT(dtext.find("\"frustum\"") == std::string::npos);
 }

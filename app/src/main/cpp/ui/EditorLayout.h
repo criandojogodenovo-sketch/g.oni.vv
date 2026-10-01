@@ -63,6 +63,7 @@ constexpr u64 kInspectorCamFar     = 5402;
 constexpr u64 kInspectorCamOrtho   = 5403;
 constexpr u64 kInspectorCamProj    = 5410;
 constexpr u64 kInspectorCamActive  = 5411;
+constexpr u64 kInspectorCamFrustum = 5412;   // 0.7.10: toggle do gizmo
 
 // ids das regiões de scroll (F4.1) — o tap re-despachado é POR ID (F5.0-fix:
 // a Hierarchy comia o tap do Inspector quando a consulta era global)
@@ -132,6 +133,7 @@ struct InspRow {
         CamProj,     // botão "projecao: perspetiva|ortografica" (cicla)
         CamOrtho,    // slider orthoSize (meia-altura)
         CamActive,   // botão "ativa: sim|nao" (UMA ativa por cena)
+        CamFrustum,  // 0.7.10: botão "frustum: sim|nao" (toggle do gizmo)
     };
     Kind kind;
     f32  y;     // topo da linha em COORDS DE CONTEÚDO (cumulativo)
@@ -144,7 +146,8 @@ struct InspRow {
 inline u32 inspectorRowCount(const InspProfile& p, bool selectable) {
     u32 n = 2;                                          // nome + visivel
     if (p.tr) n += 1 + 9;                               // secção + 9 sliders
-    if (p.cam) n += 1 + 6;                              // 0.7.7: secção + 6
+    if (p.cam) n += 1 + 7;                              // 0.7.7: secção + 7
+                                                         // (0.7.10: +frustum)
     if (p.mr) n += 2 + 3;                               // mesh + tex + R/G/B
     if (p.im) n += 1;                                   // input
     if (p.bc) n += 2;                                   // body + velx
@@ -188,6 +191,7 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
         push(InspRow::Kind::CamProj, btnH, kInspectorCamProj);
         push(InspRow::Kind::CamOrtho, sldH, kInspectorCamOrtho);
         push(InspRow::Kind::CamActive, btnH, kInspectorCamActive);
+        push(InspRow::Kind::CamFrustum, btnH, kInspectorCamFrustum);   // 0.7.10
     }
     if (p.mr) {
         push(selectable ? InspRow::Kind::MeshButton : InspRow::Kind::MeshLabel,

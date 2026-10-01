@@ -16,7 +16,9 @@
 // Nomes: a classe chama-se CameraComp (o nome Camera já é a orbit de
 // render/Camera.h); no REGISTRO e no .goni o tipo é "Camera" (spec 0.7.7).
 // Serializado: "fov" (graus), "near", "far", "proj" ("persp"|"ortho"),
-// "orthoSize", "active" — defaults omitidos (ficheiros 0.7.6 abrem limpos).
+// "orthoSize", "active", "frustum" (0.7.10 — toggle de visibilidade do
+// gizmo; omitido quando true) — defaults omitidos (ficheiros 0.7.6 abrem
+// limpos).
 #include "core/Component.h"
 #include "core/Types.h"
 
@@ -47,6 +49,9 @@ public:
     Projection projection = Projection::Perspective;
     f32        orthoSize = kDefaultOrthoSize;
     bool       active = true;   // UMA ativa por cena (CameraUtil)
+    bool       showFrustum = true;   // 0.7.10: toggle do gizmo no Inspector
+                                     // (esconder o frustum quando polui; o
+                                     // render no Play NÃO mudar)
 
     static const char* projectionName(Projection p) {
         return p == Projection::Orthographic ? "ortografica" : "perspetiva";

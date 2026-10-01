@@ -2,10 +2,18 @@
 // ui/CamGizmo.h — GIZMO DA CÂMARA DE CENA (0.7.7): frustum wireframe visível
 // SÓ NO EDITOR, seleção por toque, handles do plano far e a câmara de jogo.
 //
+// 0.7.10 — FRUSTUM DOMADO (C33): o cone desenha-se com comprimento VISUAL
+// CLAMPADO (kVisualFarCap) — o tamanho no ecrã fica confortável e INDE-
+// PENDENTE do far real (que continua a valer para o render no Play e vive
+// no Inspector). O hit-test de seleção é RESTRITO ao CORPO+LENTE (tocar no
+// cone vazio não seleciona a câmara nem bloqueia o orbit); os toques em
+// meshes/TICs selecionáveis têm PRIORIDADE (pickSceneTic). O Inspector ganha
+// o toggle "frustum" (esconder quando polui).
+//
 // O VISUAL (imagem de referência do dono): corpo wireframe (caixa + lente),
-// cone de 4 arestas até ao retângulo do plano far, retângulo do far, linha
-// de visão central e handles nos 4 cantos + centro do far. Cor de
-// gizmo/marca (#8AB4F8 — theme::kTheme.brand, a exceção documentada).
+// cone de 4 arestas até ao retângulo do plano far (AO CAP VISUAL), retângulo
+// do far, linha de visão central e handles nos 4 cantos + centro do far.
+// Cor de gizmo/marca (#8AB4F8 — theme::kTheme.brand, a exceção documentada).
 // Como os gizmos de transformação: NUNCA em Play (camgizmo::visible).
 //
 // GEOMETRIA PURA: o frustum deriva de Transform3D (pose) + CameraComp
@@ -13,11 +21,16 @@
 // far sai de tan(fov/2)·far; no orto, orthoSize em ambos os planos).
 //
 // INTERAÇÃO:
-//   • tocar no corpo/frustum de uma câmara SELECIONA o TIC dela (hit-test
-//     3D por projeção — a mesma técnica dos gizmos);
+//   • tocar no CORPO/LENTE de uma câmara seleciona o TIC dela (hit-test
+//     3D por projeção — a mesma técnica dos gizmos; 0.7.10: SÓ o corpo+
+//     lente — o cone/far/linha de visão NÃO hit-testam);
+//   • toques que acertam meshes/TICs selecionáveis têm PRIORIDADE
+//     (pickSceneTic: a câmara só é apanhada se nada mais for acertado);
 //   • com a câmara selecionada, os HANDLES do far arrastam: o CENTRO muda
 //     `far`, um CANTO muda `fovY`. O hit-test do handle tem PRIORIDADE
-//     sobre o eixo do gizmo de transformação (sem conflitos de drag);
+//     sobre o eixo do gizmo de transformação (sem conflitos de drag) e SÓ
+//     existe com a câmara já selecionada; os handles sentam-se no
+//     retângulo do far AO CAP VISUAL (partilham a geometria do desenho);
 //   • o gizmo ESCALAR sobre uma câmara ajusta fovY/orthoSize (o frustum
 //     escala) — nunca a escala do transform (sem significado numa câmara);
 //   • "Alinhar à vista" (menu contextual) copia a pose da orbit de edição.
@@ -44,6 +57,16 @@ namespace camgizmo {
 // o frustum desenha/aceita input? (EDITOR 3D — como os gizmos)
 bool visible(bool playMode, bool uiMode);
 
+// 0.7.10 — comprimento VISUAL máximo do cone (unidades de mundo): o
+// retângulo do far desenha-se a min(far, kVisualFarCap) — confortável no
+// ecrã e INDEPENDENTE do far real (o render do Play usa o far REAL via
+// gameProj; o valor vive no Inspector, não no tamanho do cone)
+inline constexpr f32 kVisualFarCap = 12.0f;
+
+// alvo de toque dos TICs 3D no picker de prioridade (px — o MESMO
+// generoso do grab-lock: alvo mínimo de toque do Android)
+inline constexpr f32 kTicPickPx = 44.0f;
+
 // ---- geometria (PURO — testada no CI) ---------------------------------------
 
 // wireframe completo da câmara: caixa (corpo) + lente + near/far + eixo
@@ -57,6 +80,9 @@ struct Frustum {
     Vec3 farC[4]{};             // cantos do retângulo do far (RT,LB.. ordem
                                 // consistente: [+r+u, -r+u, -r-u, +r-u])
     Vec3 farCenter{};
+    f32  drawFar = 0.0f;        // 0.7.10: o far EFETIVAMENTE desenhado
+                                // (min(farZ, kVisualFarCap) — o real vive
+                                // no CameraComp/gameProj)
 };
 
 // meia-altura/largura do retângulo a `dist` (persp: tan(fov/2)·dist;
@@ -64,9 +90,12 @@ struct Frustum {
 void planeHalfExtents(const CameraComp& cam, f32 dist, f32 aspect,
                       f32& halfW, f32& halfH);
 
-// o wireframe completo (aspect = w/h do render do jogo)
+// o wireframe completo (aspect = w/h do render do jogo). 0.7.10:
+// `visualFarCap` clampa o COMPRIMENTO VISUAL (far desenhado =
+// min(farZ, visualFarCap); default kVisualFarCap — passar um valor
+// maior devolve a geometria real).
 Frustum computeFrustum(const Transform3D& tr, const CameraComp& cam,
-                       f32 aspect);
+                       f32 aspect, f32 visualFarCap = kVisualFarCap);
 
 // ---- desenho (emite no UiContext — line batch dos gizmos) --------------------
 
@@ -87,10 +116,19 @@ void drawAll(UiContext& ui, Scene& scene, const Mat4& vp, f32 sw, f32 sh,
 int pickHandle(const Mat4& vp, f32 sw, f32 sh, const Frustum& f,
                f32 px, f32 py);
 
-// o TIC da câmara cujo corpo/frustum está sob o toque (segmentos projetados
-// a kHitPx; o MAIS PRÓXIMO ganha). Handle::invalid se nenhum.
+// o TIC da câmara cujo CORPO/LENTE está sob o toque (0.7.10: hit-test
+// RESTRITO — o cone/far/linha de visão NÃO selecionam; segmentos
+// projetados a kHitPx; o MAIS PRÓXIMO ganha). Handle::invalid se nenhum.
 Handle pickCameraTic(Scene& scene, const Mat4& vp, f32 sw, f32 sh,
                      f32 px, f32 py);
+
+// 0.7.10 — PICKER DO VIEWPORT COM PRIORIDADE DE OBJETOS: primeiro os TICs
+// SELECIONÁVEIS (meshes — projeção do CENTRO a kTicPickPx, o mais próximo
+// do toque), SÓ DEPOIS a câmara (via corpo/lente). A câmara nunca rouba o
+// toque de um objeto (o C33: tocar num objeto DENTRO do cone selecionava
+// a câmara). Handle::invalid se nada.
+Handle pickSceneTic(Scene& scene, const Mat4& vp, f32 sw, f32 sh,
+                    f32 px, f32 py);
 
 // ---- drag dos handles (PURO — âncoras, nunca acumulado) ------------------------
 

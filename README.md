@@ -1,3 +1,7 @@
+# G.One VV 0.7.10 — frustum domado (cap visual + hit-test restrito + prioridade de objetos)
+
+<!-- (0.7.9 abaixo — histórico) -->
+
 # G.One VV 0.7.9 — grab-lock dos gizmos (fim da oscilação/"fuga" do drag)
 
 <!-- (0.7.8 abaixo — histórico) -->
@@ -18,8 +22,46 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 (`sensorLandscape`). Devices de teste: Realme C33 (720x1600) e Realme
 RMX3624 (Android 13).
 
-Relatórios 1-16 das sub-fases: `docs/RELATORIO-0.7.{4,5,6,7,8,9}.md` (com os
-sha256 dos APKs assinados).
+Relatórios 1-16 das sub-fases: `docs/RELATORIO-0.7.{4,5,6,7,8,9,10}.md` (com
+os sha256 dos APKs assinados).
+
+## Escopo 0.7.10 (implementado — frustum domado)
+
+**O PROBLEMA (C33)**: o frustum da câmara desenhava-se GRANDE DEMAIS (o
+cone escala com `far` — far 500 atravessava o viewport) e o cone ROUBAVA
+TOQUES: selecionava a câmara em vez do objeto/orbit, interferindo com o
+resto.
+
+**TAMANHO VISUAL CLAMPADO** (`kVisualFarCap` = 12 u): o cone/retângulo do
+far desenha-se a `min(far, 12)` — confortável no ecrã e INDEPENDENTE do
+far real. O far REAL continua a valer para o RENDER no Play (`gameProj`
+lê o CameraComp, nunca a estrutura do gizmo) e vive no Inspector. Far
+curto fica real (informativo). Os handles sentam-se no retângulo AO CAP
+(partilham a geometria do desenho — o hit-test e o visual nunca divergem).
+
+**HIT-TEST RESTRITO**: a seleção por toque na câmara é SÓ no CORPO+LENTE
+(a caixa pequena). Tocar no cone/frustum vazio NÃO seleciona a câmara nem
+bloqueia o orbit. Handles (cantos/centro do far) só hit-testáveis com a
+câmara JÁ selecionada (como na 0.7.7).
+
+**PRIORIDADE DE OBJETOS** (`pickSceneTic`): o tap do viewport testa
+PRIMEIRO os TICs selecionáveis (meshes — centro projetado a 44 px, o
+mesmo alvo generoso do grab-lock; o mais próximo ganha) e SÓ DEPOIS a
+câmara (corpo/lente). Tocar num objeto DENTRO do cone seleciona o OBJETO
+(o fix do C33); a câmara nunca rouba o toque de um objeto.
+
+**TOGGLE "frustum" no Inspector** da câmara (sim/não): esconde o GIZMO
+quando polui — a câmara continua na cena e a valer para o render; só o
+desenho do editor desaparece. Serializado como `"frustum": false`
+(default true omitido — ficheiros 0.7.9 abrem limpos).
+
+Suíte 433→437 (+4: cap visual com far 2000 [gizmo a 12, gameProj com o
+far REAL, Inspector vê o real], prioridade [objeto dentro do cone ganha,
+invisível passa à câmara, nada → orbit livre, dois objetos → o mais
+próximo], handles ao cap [pick no far real → nada], toggle [esconde o
+gizmo + serializa/volta]) + contratos atualizados (geometria: far 8 real
++ far 100 clampado + cap explícito; seleção: SÓ corpo/lente com far 500
+— cone/far NÃO selecionam; plano do Inspector com a linha frustum).
 
 ## Escopo 0.7.9 (implementado — grab-lock dos gizmos)
 
@@ -1049,6 +1091,34 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.7.10 (frustum domado; APK CUMULATIVO)
+
+Instalar o APK 0.7.10 (artifact `goni-vv-0.7.10-release-signed` do run do
+job `build-release`). Esperado em cada passo:
+
+1. **Frustum compacto**: criar a câmara ("+" → Camera) e puxar o `far`
+   no Inspector até 2000 → o cone CONTINUA compacto e legível (desenha a
+   12 u — não atravessa o ecrã como antes); com far curto (ex.: 8) o
+   cone fica real (encolhe);
+2. **Cone não rouba toques**: tocar NO MEIO do cone (vazio) → NADA é
+   selecionado e um ARRASTE ali ORBITA a câmara normalmente (antes
+   selecionava a câmara/roubava o gesto);
+3. **Corpo seleciona**: tocar na CAIXA da câmara (corpo/lente) → o TIC
+   dela é selecionado (Inspector com a secção Camera);
+4. **Objetos têm prioridade**: pôr um cubo DENTRO do cone e tocar nele →
+   seleciona o CUBO (não a câmara); tocar no vazio → desseleciona;
+5. **Handles**: com a câmara selecionada, os quadrados do far aparecem
+   no retângulo COMPACTO (não no far real): o centro arrasta `far` (o
+   valor no Inspector sobe — o desenho para no cap) e um canto muda
+   `fovY`; SEM a câmara selecionada os handles NÃO apanham toques;
+6. **Toggle**: Inspector da câmara → "frustum: nao" → o gizmo SOME (a
+   câmara continua a valer para o Play); "sim" volta; gravar/abrir o
+   projeto preserva a escolha;
+7. **Play intocado**: com a câmara ativa e far 2000, o Play renderiza
+   normal (o clamp é só visual — nada mudou na projeção);
+8. **Regressões**: 0.7.9 (grab-lock dos gizmos), 0.7.8 (UI de jogo no
+   Play), 0.7.7 (Inspector/alinhar-à-vista/uma ativa).
 
 ## Verificação no Realme C33 (dono) — 0.7.9 (grab-lock dos gizmos; APK CUMULATIVO)
 
