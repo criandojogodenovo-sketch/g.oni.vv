@@ -115,6 +115,7 @@ size_t componentsOf(const std::string& type) {
     if (type == "VEC2")   return 2;
     if (type == "VEC3")   return 3;
     if (type == "VEC4")   return 4;
+    if (type == "MAT4")   return 16;   // 0.8.2 (F7): inverseBindMatrices
     return 0;
 }
 
@@ -446,6 +447,36 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                 uv.resize(count);
                 std::memcpy(uv.data(), raw.data(), count * sizeof(Vec2));
             }
+            // 0.8.2 (F7): JOINTS_0 (VEC4 u8/u16) + WEIGHTS_0 (VEC4 f32) —
+            // só quando AMBOS existem (skin parcial não vale nada)
+            std::vector<u8> jnt;
+            std::vector<f32> wgt;
+            const Json* jj = jattrs->find("JOINTS_0");
+            const Json* jw = jattrs->find("WEIGHTS_0");
+            if (jj && jw && jj->type == Json::Type::Number &&
+                jw->type == Json::Type::Number) {
+                std::vector<u8> rawJ;
+                size_t cntJ = 0, ccJ = 0, csJ = 0;
+                if (readAccessor(static_cast<i32>(jj->number), rawJ, cntJ, ccJ, csJ) &&
+                    ccJ == 4 && (csJ == 1 || csJ == 2)) {
+                    jnt.resize(cntJ * 4);
+                    for (size_t e = 0; e < cntJ; ++e) {
+                        for (int c = 0; c < 4; ++c) {
+                            const u32 v = readU32(rawJ.data() + (e * 4 + c) * csJ,
+                                                  csJ == 1 ? 5121 : 5123);
+                            jnt[e * 4 + c] =
+                                v > 255u ? 255u : static_cast<u8>(v);
+                        }
+                    }
+                }
+                std::vector<u8> rawW;
+                size_t cntW = 0, ccW = 0, csW = 0;
+                if (readAccessor(static_cast<i32>(jw->number), rawW, cntW, ccW, csW) &&
+                    ccW == 4 && csW == 4) {
+                    wgt.resize(cntW * 4);
+                    std::memcpy(wgt.data(), rawW.data(), cntW * 4 * sizeof(f32));
+                }
+            }
 
             // funde a primitiva no MeshData do mesh (rebase de índices)
             const u16 base = static_cast<u16>(md.vertices.size());
@@ -471,6 +502,12 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                 vtx.normal = v < nor.size() ? nor[v] : Vec3{0.0f, 1.0f, 0.0f};
                 vtx.uv = v < uv.size() ? uv[v] : Vec2{0.0f, 0.0f};
                 md.vertices.push_back(vtx);
+                if (jnt.size() == pos.size() * 4 && wgt.size() == pos.size() * 4) {
+                    for (int c = 0; c < 4; ++c) {
+                        md.skinJoints.push_back(jnt[v * 4 + c]);
+                        md.skinWeights.push_back(wgt[v * 4 + c]);
+                    }
+                }
             }
 
             const Json* jidx = jp.find("indices");
@@ -704,6 +741,106 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
             }
             if (!anim.channels.empty() && !anim.samplers.empty()) {
                 out.animations.push_back(std::move(anim));
+            }
+        }
+    }
+
+    // ---- skins (0.8.2, F7): joints + inverseBindMatrices ------------------
+    // Os joints são REORDENADOS pais-primeiro (a composição hierárquica do
+    // computeSkinMatrices fica iterativa); nodeToJoint mapeia nó→índice.
+    // IBM ausente → identidade (skin em bind-space direto — tolerado).
+    if (const Json* jskins = doc.find("skins");
+        jskins && jskins->type == Json::Type::Array) {
+        for (const Json& jsk : jskins->items) {
+            GltfSkin skin;
+            if (const Json* n = jsk.find("name"); n && n->type == Json::Type::String) {
+                skin.name = n->string;
+            }
+            const Json* jjoints = jsk.find("joints");
+            if (!jjoints || jjoints->type != Json::Type::Array ||
+                jjoints->items.empty()) {
+                continue;
+            }
+            // nós-alvo (índices) na ordem do glTF
+            std::vector<i32> nodes;
+            nodes.reserve(jjoints->items.size());
+            for (const Json& jn : jjoints->items) {
+                if (jn.type == Json::Type::Number) {
+                    const i32 ni = static_cast<i32>(jn.number);
+                    if (ni >= 0 && ni < static_cast<i32>(out.nodes.size())) {
+                        nodes.push_back(ni);
+                    } else {
+                        nodes.push_back(-1);
+                    }
+                } else {
+                    nodes.push_back(-1);
+                }
+            }
+            // IBM (MAT4 f32, uma por joint) — acessor compartilhado com o
+            // resto do parser (bounds-checked)
+            std::vector<Mat4> ibm(nodes.size(), Mat4::identity());
+            bool ibmOk = false;
+            if (const Json* jibm = jsk.find("inverseBindMatrices");
+                jibm && jibm->type == Json::Type::Number) {
+                std::vector<u8> raw;
+                size_t count = 0, cc = 0, cs = 0;
+                if (readAccessor(static_cast<i32>(jibm->number), raw, count, cc, cs) &&
+                    cc == 16 && cs == 4) {
+                    ibmOk = true;
+                    const size_t n = count < nodes.size() ? count : nodes.size();
+                    for (size_t k = 0; k < n; ++k) {
+                        std::memcpy(ibm[k].m, raw.data() + k * 64, 64);
+                    }
+                }
+            }
+            (void)ibmOk;
+            // mapeia nó → índice NA LISTA ORIGINAL (para reordenar)
+            std::vector<i32> nodeToIdx(out.nodes.size(), -1);
+            for (size_t k = 0; k < nodes.size(); ++k) {
+                if (nodes[k] >= 0) {
+                    nodeToIdx[static_cast<size_t>(nodes[k])] = static_cast<i32>(k);
+                }
+            }
+            // reordena PAIS PRIMEIRO: adiciona joints cujo pai (de nó) já
+            // está adicionado (ou não é joint); ≤N voltas (cadeias de nós)
+            std::vector<bool> added(nodes.size(), false);
+            skin.nodeToJoint.assign(out.nodes.size(), -1);
+            for (size_t pass = 0; pass < nodes.size(); ++pass) {
+                bool progressed = false;
+                for (size_t k = 0; k < nodes.size(); ++k) {
+                    if (added[k] || nodes[k] < 0) {
+                        continue;
+                    }
+                    const GltfNode& gn = out.nodes[static_cast<size_t>(nodes[k])];
+                    const i32 parentIdx =
+                        (gn.parent >= 0 && gn.parent < static_cast<i32>(nodeToIdx.size()))
+                            ? nodeToIdx[static_cast<size_t>(gn.parent)]
+                            : -1;
+                    if (parentIdx < 0 || added[static_cast<size_t>(parentIdx)]) {
+                        GltfJoint j;
+                        j.name = gn.name.empty()
+                            ? ("joint " + std::to_string(k))
+                            : gn.name;
+                        j.parent = parentIdx >= 0
+                            ? skin.nodeToJoint[static_cast<size_t>(nodes[static_cast<size_t>(parentIdx)])]
+                            : -1;
+                        j.pos = gn.translation;
+                        j.rot = gn.rotation;
+                        j.scale = gn.scale;
+                        j.inverseBind = ibm[k];
+                        skin.nodeToJoint[static_cast<size_t>(nodes[k])] =
+                            static_cast<i32>(skin.joints.size());
+                        skin.joints.push_back(std::move(j));
+                        added[k] = true;
+                        progressed = true;
+                    }
+                }
+                if (!progressed) {
+                    break;   // ciclo/cadeia estranha — o que entrou, entrou
+                }
+            }
+            if (!skin.joints.empty()) {
+                out.skins.push_back(std::move(skin));
             }
         }
     }

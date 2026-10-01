@@ -46,6 +46,9 @@ enum class AnimTarget : u8 {
     UiPos    = 3,   // UiElement.ox/oy (v[0..1]; por nome em `element`)
     UiColor  = 4,   // UiElement.color RGB (v[0..2])
     UiAlpha  = 5,   // UiElement.color[3] (v[0])
+    JointPos = 6,   // SkeletonComp joint TRS LOCAL — pos (0.8.2, por nome)
+    JointRot = 7,   // idem rot (graus euler)
+    JointScale = 8, // idem scale
 };
 
 // nome canônico do alvo (serializer + labels da timeline)
@@ -57,6 +60,9 @@ inline const char* animTargetName(AnimTarget t) {
         case AnimTarget::UiPos:    return "uipos";
         case AnimTarget::UiColor:  return "uicor";
         case AnimTarget::UiAlpha:  return "uialpha";
+        case AnimTarget::JointPos:   return "jpos";     // 0.8.2
+        case AnimTarget::JointRot:   return "jrot";     // 0.8.2
+        case AnimTarget::JointScale: return "jescala";  // 0.8.2
     }
     return "pos";
 }
@@ -70,6 +76,9 @@ inline const char* animTargetLabel(AnimTarget t) {
         case AnimTarget::UiPos:    return "ui pos";
         case AnimTarget::UiColor:  return "ui cor";
         case AnimTarget::UiAlpha:  return "ui alpha";
+        case AnimTarget::JointPos:   return "joint pos";    // 0.8.2
+        case AnimTarget::JointRot:   return "joint rot";    // 0.8.2
+        case AnimTarget::JointScale: return "joint escala"; // 0.8.2
     }
     return "posicao";
 }

@@ -141,7 +141,8 @@ void Renderer::beginFrame() {
 }
 
 DrawStats Renderer::drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp,
-                             const Texture* tex, const f32* tint) {
+                             const Texture* tex, const f32* tint,
+                             const Mat4* bones, u32 boneCount) {
     if (!mesh.ok()) {
         return {};
     }
@@ -150,6 +151,14 @@ DrawStats Renderer::drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp
     lit_.setModel(model);
     lit_.setTexture(tex);   // F5-E: albedo opcional (unit 0 + uHasTex)
     lit_.setTint(tint);     // 0.7.0: cor por TIC (nullptr = branco, o de sempre)
+    // 0.8.2 (F7): skin — uSkin+uBones quando há matrizes; SEMPRE definido
+    // (uniforms nascem a 0 e 0 = estático, mas o default é EXPLÍCITO como
+    // o uTint — nunca deixar estado do draw anterior vingar)
+    const bool useSkin = mesh.skinned() && bones != nullptr && boneCount > 0;
+    lit_.setSkin(useSkin);
+    if (useSkin) {
+        lit_.setBones(bones, boneCount);
+    }
     // pass 3D: depth visível (faces frontais ocluem as traseiras) + cull
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);

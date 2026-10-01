@@ -19,6 +19,7 @@ const ComponentStore& storeOf(const Scene* scene) {
 // 0=Transform3D, 1=MeshRenderer, 2=InputMap, 3=BodyComp, 4=TouchControls,
 // 5=UiCanvas (0.7.0), 6=Camera (0.7.7 — sempre NO FIM: ids antigos intactos).
 // 0.8.0: 7=AnimationPlayer (depois da câmara, mesma regra: sempre no fim).
+// 0.8.2: 8=Skeleton (idem — ids antigos intactos).
 ComponentStore::ComponentStore(Scene* owner) : scene_(owner) {
     registry_.add("Transform3D", [](ComponentStore& s, Handle h) {
         return s.add<Transform3D>(h) != nullptr;
@@ -44,6 +45,9 @@ ComponentStore::ComponentStore(Scene* owner) : scene_(owner) {
     registry_.add("AnimationPlayer", [](ComponentStore& s, Handle h) {   // 0.8.0
         return s.add<AnimationPlayer>(h) != nullptr;
     });
+    registry_.add("Skeleton", [](ComponentStore& s, Handle h) {   // 0.8.2
+        return s.add<SkeletonComp>(h) != nullptr;
+    });
 }
 
 void ComponentStore::removeAll(Handle h) {
@@ -55,6 +59,7 @@ void ComponentStore::removeAll(Handle h) {
     uiCanvases_.remove(h);
     cameras_.remove(h);   // 0.7.7
     animators_.remove(h);   // 0.8.0
+    skeletons_.remove(h);   // 0.8.2
 }
 
 bool ComponentStore::hasAny(Handle h) const {
@@ -65,7 +70,8 @@ bool ComponentStore::hasAny(Handle h) const {
            touchControls_.find(h) != nullptr ||
            uiCanvases_.find(h) != nullptr ||
            cameras_.find(h) != nullptr ||   // 0.7.7
-           animators_.find(h) != nullptr;   // 0.8.0
+           animators_.find(h) != nullptr ||   // 0.8.0
+           skeletons_.find(h) != nullptr;   // 0.8.2
 }
 
 } // namespace vv

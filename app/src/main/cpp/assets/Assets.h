@@ -28,7 +28,17 @@ struct MeshData {
     std::vector<u16> indices;
     std::vector<Group> groups;
 
+    // 0.8.2 (F7): SKINNING — 4 influências por vértice (JOINTS_0/WEIGHTS_0
+    // do glTF); vazios = mesh estático (o pipeline de sempre). joints
+    // indexam a lista do SkeletonComp do TIC (≤64, u8 chega).
+    std::vector<u8>  skinJoints;    // 4 por vértice (índices de joint)
+    std::vector<f32> skinWeights;   // 4 por vértice (pesos, glTF order)
+
     bool ok() const { return !vertices.empty() && !indices.empty(); }
+    bool skinned() const {
+        return skinJoints.size() == vertices.size() * 4 &&
+               skinWeights.size() == vertices.size() * 4;
+    }
 };
 
 struct RawImage {

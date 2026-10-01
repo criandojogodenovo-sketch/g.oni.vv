@@ -80,12 +80,34 @@ struct GltfAnimation {
     std::vector<GltfAnimSampler> samplers;
 };
 
+// ---- 0.8.2 (F7): SKINS -------------------------------------------------------
+// Um glTF "skin" = lista de joints (NÓS com transform hierárquico) + UMA
+// inverseBindMatrix por joint. Os vértices carregam JOINTS_0/WEIGHTS_0
+// (4 influências) que indexam ESTA lista. Reordenamos os joints PAES
+// PRIMEIRO (a composição hierárquica fica iterativa); `nodeToJoint` mapeia
+// nó glTF → índice (para os channels de animação).
+struct GltfJoint {
+    std::string name;          // do nó ("joint N" se anónimo)
+    i32  parent = -1;          // pai DENTRO da lista (-1 = raiz da skin)
+    Vec3 pos{};
+    Quat rot = Quat::identity();
+    Vec3 scale{1.0f, 1.0f, 1.0f};
+    Mat4 inverseBind = Mat4::identity();
+};
+
+struct GltfSkin {
+    std::string name;
+    std::vector<GltfJoint> joints;       // pais antes de filhos
+    std::vector<i32> nodeToJoint;        // alinhado com GltfModel::nodes
+};
+
 struct GltfModel {
     std::vector<MeshData> meshes;      // 1 MeshData por glTF mesh
     std::vector<GltfMaterial> materials;
     std::vector<GltfNode> nodes;
     std::vector<GltfImage> images;     // F5.1-B: texturas embutidas/externas
     std::vector<GltfAnimation> animations;   // 0.8.1 (F7): channels/samplers
+    std::vector<GltfSkin> skins;             // 0.8.2 (F7): joints + ibm
     // material de CADA mesh de saída (primeiro material usado pelas
     // primitivas; -1 = nenhum) — alinhado com meshes
     std::vector<i32> meshMaterial;

@@ -118,6 +118,8 @@ add_library(goni_vv SHARED
         components/UiCanvas.cpp
         components/AnimationPlayer.h
         components/AnimationPlayer.cpp
+        components/SkeletonComp.h
+        components/SkeletonComp.cpp
         physics/Shapes.h
         physics/Shapes.cpp
         physics/InputSource.h

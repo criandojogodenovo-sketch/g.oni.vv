@@ -7,6 +7,7 @@
 #include "components/UiCanvas.h"
 #include "components/CameraComp.h"   // 0.7.7: câmara de cena
 #include "components/AnimationPlayer.h"   // 0.8.0: animação (F7)
+#include "components/SkeletonComp.h"  // 0.8.2: esqueleto (F7)
 #include "core/CameraUtil.h"          // 0.7.7: uma ativa por cena
 #include "core/ComponentStore.h"
 #include "core/Scene.h"
@@ -644,6 +645,9 @@ void fillAnimationPlayer(AnimationPlayer* ap, const Json& comp) {
                 else if (tg == "uipos")  tr.target = AnimTarget::UiPos;
                 else if (tg == "uicor")  tr.target = AnimTarget::UiColor;
                 else if (tg == "uialpha") tr.target = AnimTarget::UiAlpha;
+                else if (tg == "jpos")    tr.target = AnimTarget::JointPos;    // 0.8.2
+                else if (tg == "jrot")    tr.target = AnimTarget::JointRot;    // 0.8.2
+                else if (tg == "jescala") tr.target = AnimTarget::JointScale; // 0.8.2
                 else {
                     continue;   // alvo desconhecido — ignora (forward-compat)
                 }
@@ -701,11 +705,96 @@ void fillAnimationPlayer(AnimationPlayer* ap, const Json& comp) {
     }
 }
 
+// 0.8.2 (F7) — Skeleton: reconstrói os joints (ausentes = defaults)
+void fillSkeleton(SkeletonComp* sk, const Json& comp) {
+    if (!sk) {
+        return;
+    }
+    sk->joints.clear();
+    const Json* jjoints = comp.find("joints");
+    if (!jjoints || jjoints->type != Json::Type::Array) {
+        return;
+    }
+    for (const Json& jj : jjoints->items) {
+        SkeletonComp::Joint j;
+        if (const Json* n = jj.find("name"); n && n->type == Json::Type::String) {
+            j.name = n->string;
+        }
+        if (const Json* p = jj.find("parent");
+            p && p->type == Json::Type::Number) {
+            j.parent = static_cast<i32>(p->number);
+        }
+        readVec3(jj.find("pos"), j.pos);
+        if (const Json* q = jj.find("rot");
+            q && q->type == Json::Type::Array && q->items.size() == 4) {
+            j.rot = Quat{static_cast<f32>(q->items[0].number),
+                         static_cast<f32>(q->items[1].number),
+                         static_cast<f32>(q->items[2].number),
+                         static_cast<f32>(q->items[3].number)};
+        }
+        readVec3(jj.find("scale"), j.scale);
+        if (const Json* ibm = jj.find("ibm");
+            ibm && ibm->type == Json::Type::Array && ibm->items.size() == 16) {
+            for (int i = 0; i < 16; ++i) {
+                j.inverseBind.m[i] = static_cast<f32>(ibm->items[static_cast<size_t>(i)].number);
+            }
+        }
+        sk->joints.push_back(std::move(j));
+    }
+}
+
 } // namespace
 
 // ---- 0.8.0 (F7): AnimationPlayer — dump (clip → tracks → keys; estrutura
 // recursiva; o mesmo anon ns funde com o de cima) -------------------------
 namespace {
+
+// 0.8.2 (F7) — Skeleton: joints por valor (nome/pai/TRS/ibm). IBM identidade
+// omitida (skins de bind direto gravam limpas); TRS default omitido idem.
+void appendComponentJson(Json& arr, const SkeletonComp* sk) {
+    if (!sk) {
+        return;
+    }
+    Json c = Json::makeObject();
+    c.addMember("type", Json::makeString("Skeleton"));
+    Json joints = Json::makeArray();
+    for (const SkeletonComp::Joint& j : sk->joints) {
+        Json jj = Json::makeObject();
+        jj.addMember("name", Json::makeString(j.name));
+        if (j.parent >= 0) {
+            jj.addMember("parent", Json::makeNumber(static_cast<f64>(j.parent)));
+        }
+        jj.addMember("pos", vec3ToJson(j.pos));
+        Json q = Json::makeArray();
+        q.addItem(Json::makeNumber(j.rot.x));
+        q.addItem(Json::makeNumber(j.rot.y));
+        q.addItem(Json::makeNumber(j.rot.z));
+        q.addItem(Json::makeNumber(j.rot.w));
+        jj.addMember("rot", std::move(q));
+        jj.addMember("scale", vec3ToJson(j.scale));
+        // ibm ≠ identidade → gravada (a identidade é o default)
+        const Mat4 id = Mat4::identity();
+        bool ident = true;
+        for (int i = 0; i < 16; ++i) {
+            if (j.inverseBind.m[i] != id.m[i]) {
+                ident = false;
+            }
+        }
+        if (!ident) {
+            Json ibm = Json::makeArray();
+            for (int i = 0; i < 16; ++i) {
+                ibm.addItem(Json::makeNumber(j.inverseBind.m[i]));
+            }
+            jj.addMember("ibm", std::move(ibm));
+        }
+        joints.addItem(std::move(jj));
+    }
+    c.addMember("joints", std::move(joints));
+    arr.addItem(std::move(c));
+}
+
+// 0.8.0 (F7): AnimationPlayer — dump (clip → tracks → keys; estrutura
+// recursiva; o mesmo anon ns funde com o de cima)
 
 void appendAnimKey(Json& arr, const AnimKey& k) {
     Json jk = Json::makeObject();
@@ -862,6 +951,7 @@ std::string dump(const Scene& scene) {
         appendComponentJson(comps, cs.uiCanvases().find(t.handle));   // 0.7.0
         appendComponentJson(comps, cs.cameras().find(t.handle));       // 0.7.7
         appendComponentJson(comps, cs.animators().find(t.handle));     // 0.8.0
+        appendComponentJson(comps, cs.skeletons().find(t.handle));      // 0.8.2
         jt.addMember("components", std::move(comps));
 
         tics.addItem(std::move(jt));
@@ -965,6 +1055,8 @@ bool loadText(Scene& scene, const std::string& text, const LoadCtx& ctx) {
                 fillCameraComp(store.get<CameraComp>(h), jc);   // 0.7.7
             } else if (jt2->string == "AnimationPlayer") {
                 fillAnimationPlayer(store.get<AnimationPlayer>(h), jc);   // 0.8.0
+            } else if (jt2->string == "Skeleton") {
+                fillSkeleton(store.get<SkeletonComp>(h), jc);   // 0.8.2
             }
             // InputMap: sem dados — presença basta
         }

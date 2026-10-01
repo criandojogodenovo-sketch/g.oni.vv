@@ -27,6 +27,15 @@ public:
     // (uniforms GL nascem a 0 — nunca deixar o uTint por definir).
     void setTint(const f32 rgb[3]) const;
 
+    // 0.8.2 (F7) — SKINNING: liga o ramo de bones do vertex shader (uSkin)
+    // e faz upload das matrizes (uBones[64]); nullptr/0 desliga — o mesh
+    // estático segue o caminho de sempre (atributos 3/4 não ligados).
+    void setSkin(bool on) const;
+    void setBones(const Mat4* bones, u32 count) const;
+
+    // tem de casar com o SkeletonComp (limite do array no shader)
+    static constexpr u32 kMaxBones = 64;
+
     bool ok() const { return prog_ != 0; }
 
 private:
@@ -36,6 +45,8 @@ private:
     i32 locTex_ = -1;
     i32 locHasTex_ = -1;
     i32 locTint_ = -1;   // 0.7.0: uTint (cor por TIC)
+    i32 locSkin_ = -1;   // 0.8.2: uSkin (ramo de bones)
+    i32 locBones_ = -1;  // 0.8.2: uBones[64]
 };
 
 // F3: alias pedido pela spec — MeshRenderer guarda `Material*`. A F3 tem um

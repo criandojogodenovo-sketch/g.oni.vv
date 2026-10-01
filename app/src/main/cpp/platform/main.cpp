@@ -17,6 +17,7 @@
 #include "components/TouchControls.h"
 #include "components/Transform3D.h"
 #include "components/AnimationPlayer.h"   // 0.8.0 (F7): animação
+#include "components/SkeletonComp.h"   // 0.8.2 (F7): skinning
 #include "components/UiCanvas.h"   // 0.8.0: tracks de UI
 #include "assets/GltfAnim.h"   // 0.8.1 (F7): clips de animação do glTF
 #include "core/AnimationSystem.h"   // 0.8.0: avanço em Play
@@ -1658,7 +1659,17 @@ DrawStats drawTics(const Mat4& vp) {
         if (const Transform3D* tr = comps.transforms().find(mrs.owner(i))) {
             model = tr->world;   // mantido por TransformSystem (grupo Update)
         }
-        st = st + g_renderer.drawMesh(*mr.mesh, model, vp, mr.texture, mr.tint);
+        // 0.8.2 (F7): mesh SKINADO com esqueleto → matrizes de skin ao
+        // shader (a pose vive nos joints; o TRS do TIC continua a ser o
+        // model matrix — o esqueleto é RELATIVO ao TIC)
+        const SkeletonComp* sk = comps.skeletons().find(mrs.owner(i));
+        Mat4 bones[SkeletonComp::kMaxBones];
+        u32 nBones = 0;
+        if (sk && mr.mesh->skinned()) {
+            nBones = computeSkinMatrices(*sk, bones, SkeletonComp::kMaxBones);
+        }
+        st = st + g_renderer.drawMesh(*mr.mesh, model, vp, mr.texture, mr.tint,
+                                      nBones > 0 ? bones : nullptr, nBones);
     }
     return st;
 }
@@ -2526,6 +2537,14 @@ void frame() {
                     if (g_applyAsk.kind == 'm') {
                         std::string merr;
                         if (auto mdl = g_resources.model(g_applyAsk.rel, merr)) {
+                            // 0.8.2 (F7): SKIN primeiro (os clips de JOINT
+                            // só entram com o esqueleto presente)
+                            const u32 nJoints =
+                                gltfAttachSkin(g_scene, g_editor.selected, *mdl);
+                            if (nJoints > 0) {
+                                LOGI("editor: esqueleto importado (%u joints)",
+                                     nJoints);
+                            }
                             if (!mdl->animations.empty()) {
                                 const u32 nClips = gltfAttachClips(
                                     g_scene, g_editor.selected, *mdl);

@@ -58,6 +58,14 @@ struct Stats {
     float lastMatrix4fv[16] = {};  // ÚLTIMA glUniformMatrix4fv (orto do UI)
     int matrix4fvCalls = 0;
     int drawArraysCalls = 0;       // submissões reais do pass de UI
+    // 0.8.2 (F7): skin — último glUniform1i (uSkin do LitMaterial), nº de
+    // uploads de ARRAYS de matrizes (uBones) e contagem de drawElements
+    // ("mesh skinado desenha" — o teste lê o stub, como o lifecycle)
+    int lastUniform1i = -1;
+    int uniform1iCalls = 0;
+    int matrix4fvArrayCalls = 0;   // glUniformMatrix4fv com count > 1 (uBones)
+    int lastMatrix4fvCount = 1;
+    int drawElementsCalls = 0;
 };
 inline Stats stats;              // inline C++17: 1 instância por binário
 inline void reset() { stats = Stats{}; }
@@ -155,15 +163,24 @@ inline void glGetProgramiv(GLuint, GLenum, GLint* ok) { if (ok) *ok = GL_TRUE; }
 inline void glDeleteProgram(GLuint) { ++glstub::stats.deleteProgram; }
 inline void glUseProgram(GLuint) {}
 inline GLint glGetUniformLocation(GLuint, const GLchar*) { return 0; }
-inline void glUniformMatrix4fv(GLint, GLsizei, GLboolean, const GLfloat* m) {
+inline void glUniformMatrix4fv(GLint, GLsizei count, GLboolean, const GLfloat* m) {
     ++glstub::stats.matrix4fvCalls;
+    if (count > 1) {
+        // 0.8.2: upload de ARRAY de matrizes (uBones do skin)
+        ++glstub::stats.matrix4fvArrayCalls;
+        glstub::stats.lastMatrix4fvCount = (int)count;
+    }
     if (m) {
         for (int i = 0; i < 16; ++i) {
             glstub::stats.lastMatrix4fv[i] = m[i];
         }
     }
 }
-inline void glUniform1i(GLint, GLint) {}
+// 0.8.2: uSkin do LitMaterial (liga/desliga o ramo de bones)
+inline void glUniform1i(GLint, GLint v) {
+    glstub::stats.lastUniform1i = (int)v;
+    ++glstub::stats.uniform1iCalls;
+}
 inline void glUniform1f(GLint, GLfloat v) { glstub::stats.lastUniform1f = v; }
 inline void glUniform3f(GLint, GLfloat x, GLfloat y, GLfloat z) {
     glstub::stats.lastUniform3f[0] = x;
@@ -183,7 +200,7 @@ inline void glBindVertexArray(GLuint) {}
 inline void glEnableVertexAttribArray(GLuint) {}
 inline void glVertexAttribPointer(GLuint, GLint, GLenum, GLboolean, GLsizei, const void*) {}
 inline void glDrawArrays(GLenum, GLint, GLsizei) { ++glstub::stats.drawArraysCalls; }
-inline void glDrawElements(GLenum, GLsizei, GLenum, const void*) {}
+inline void glDrawElements(GLenum, GLsizei, GLenum, const void*) { ++glstub::stats.drawElementsCalls; }
 
 // 0.7.8: os no-ops passam a GRAVAR o estado (inócuo p/ os testes antigos —
 // apenas leituras novas; nada do que existia lia estas funções)

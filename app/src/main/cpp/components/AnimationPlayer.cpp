@@ -3,6 +3,7 @@
 // GL-free: interpolação/advance/apply são matemática pura sobre os storages
 // da Scene — os testes do CI aferem tudo sem GL.
 #include "components/AnimationPlayer.h"
+#include "components/SkeletonComp.h"   // 0.8.2: tracks de joint
 #include "components/Transform3D.h"
 #include "components/UiCanvas.h"
 #include "core/Scene.h"
@@ -208,6 +209,7 @@ void AnimationPlayer::apply(Scene& scene, const Tic& owner) const {
     }
     Transform3D* tr = tic->getComponent<Transform3D>();
     UiCanvas* ui = tic->getComponent<UiCanvas>();
+    SkeletonComp* sk = tic->getComponent<SkeletonComp>();   // 0.8.2
     f32 v[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     for (const AnimTrack& track : clip.tracks) {
         if (!evalTrack(track, time, v)) {
@@ -253,6 +255,28 @@ void AnimationPlayer::apply(Scene& scene, const Tic& owner) const {
                     e.color[2] = v[2];
                 } else {
                     e.color[3] = v[0];
+                }
+                break;
+            }
+            // 0.8.2 (F7) — TRS LOCAL de um joint do esqueleto (por nome)
+            case AnimTarget::JointPos:
+            case AnimTarget::JointRot:
+            case AnimTarget::JointScale: {
+                if (!sk || track.element.empty()) {
+                    break;
+                }
+                const i32 j = sk->findJoint(track.element);
+                if (j < 0) {
+                    break;   // joint sumiu — salta (nunca crasha)
+                }
+                SkeletonComp::Joint& jt = sk->joints[static_cast<size_t>(j)];
+                if (track.target == AnimTarget::JointPos) {
+                    jt.pos = Vec3{v[0], v[1], v[2]};
+                } else if (track.target == AnimTarget::JointRot) {
+                    jt.rot = Quat::fromEuler(deg2rad(v[0]), deg2rad(v[1]),
+                                             deg2rad(v[2]));
+                } else {
+                    jt.scale = Vec3{v[0], v[1], v[2]};
                 }
                 break;
             }

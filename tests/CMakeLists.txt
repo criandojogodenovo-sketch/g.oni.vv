@@ -151,6 +151,7 @@ add_executable(test_core
         # 0.7.0: UI criável (componente + runtime + editor dedicado)
         ${CORE_DIR}/components/UiCanvas.cpp
         ${CORE_DIR}/components/AnimationPlayer.cpp
+        ${CORE_DIR}/components/SkeletonComp.cpp
         ${CORE_DIR}/ui/UiRuntime.cpp
         ${CORE_DIR}/ui/UiEditor.cpp
         # 0.7.1: transições de cena (fade/slide — puro + draw em batch)
@@ -167,6 +168,8 @@ add_executable(test_core
         test_timeline.cpp
         # 0.8.1: import de clips glTF
         test_gltfanim.cpp
+        # 0.8.2: skinning (parse skins, esqueleto, pose altera vertices)
+        test_skin.cpp
         ${CORE_DIR}/ui/Icons.cpp
         # 0.7.7: câmara de cena (componente/invariante + gizmo do frustum)
         ${CORE_DIR}/core/CameraUtil.cpp

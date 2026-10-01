@@ -1,3 +1,7 @@
+# G.One VV 0.8.2 — animação: skinning esquelético (joints + shader com bones)
+
+<!-- (0.8.1 abaixo — histórico) -->
+
 # G.One VV 0.8.1 — animação: import de clips glTF (channels/samplers → clips nomeados)
 
 <!-- (0.8.0 abaixo — histórico) -->
@@ -31,7 +35,38 @@ OBJ). Mobile-first: arm64-v8a, minSdk 24, landscape travado
 RMX3624 (Android 13).
 
 Relatórios 1-16 das sub-fases: `docs/RELATORIO-0.7.{4,5,6,7,8,9,10}.md` e
-`docs/RELATORIO-0.8.{0,1}.md` (com os sha256 dos APKs assinados).
+`docs/RELATORIO-0.8.{0,1,2}.md` (com os sha256 dos APKs assinados).
+
+## Escopo 0.8.2 (implementado — campanha F7: skinning esquelético)
+
+**IMPORT DE SKINS glTF**: o parser lê `skins` (joints + inverseBind
+Matrices) e os atributos `JOINTS_0`/`WEIGHTS_0` (4 influências por
+vértice) dos primitivas. Os joints chegam REORDENADOS PAIS-PRIMEIRO (a
+composição fica iterativa); `assets/GltfAnim::gltfAttachSkin` cria o
+`SkeletonComp` do TIC (nome/pai/bind-TRS/IBM por joint — serializado no
+`.goni` como componente "Skeleton").
+
+**SHADER COM BONES**: `Mesh::createSkinned` acrescenta um VBO de skin
+(aJoints/aWeights, locations 3/4); o vertex shader do LitMaterial ganha
+`uSkin` + `uBones[64]` — a matriz efetiva é a soma ponderada das 4
+influências (a MESMA conta do `skinVertex` de CPU, aferida no teste). O
+Renderer recebe as matrizes por draw (`drawMesh(..., bones, count)`); o
+main compõe `computeSkinMatrices` por frame para TICs com mesh skinado +
+esqueleto (world hierárquico dos TRS locais × IBM).
+
+**TRACKS DE JOINT**: `AnimTarget` ganha JointPos/JointRot/JointScale
+(por NOME de joint) — os canais glTF que apontam a joints da skin entram
+nos clips importados (a 0.8.1 saltava-os); o apply escreve o TRS LOCAL
+do joint e o render deforma o mesh com a POSE (verificado no stub: bind
+pose = identidade; pose rodada move os vértices; mesh skinado DESENHA com
+uSkin=1 e uBones uplodeado).
+
+Suíte 489→497 (+8: parser [joints pais-primeiro, IBM, JOINTS_0/WEIGHTS_0],
+attach [esqueleto + clips com track de joint, sem duplicar, TIC morto],
+pose [bind=I, rodada move vértices — (2,0,0)→(1,0,−1) com 90°Y no filho],
+cap 64 bones, mesh skinado desenha no stub [uSkin/uBones/drawElements],
+round-trip .goni do Skeleton + joint tracks E a pose reproduz, sem skin
+não mexe; registry 8→9).
 
 ## Escopo 0.8.1 (implementado — campanha F7: clips glTF)
 
@@ -1177,6 +1212,30 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.8.2 (skinning; APK CUMULATIVO)
+
+Instalar o APK 0.8.2 (artifact `goni-vv-0.8.2-release-signed` do run do
+job `build-release`). Esperado em cada passo (precisa de um .glb
+RIGGADO, ex.: personagem do Sketchfab com skin):
+
+1. **Import com skin**: importar o .glb riggado → "aplicar ao TIC?" →
+   Sim → o mesh aplica E o esqueleto entra (log "esqueleto importado (N
+   joints)" no Ver logs); os clips importados agora têm os tracks de
+   JOINT (o Inspector mostra mais tracks no "anim:");
+2. **Bind pose**: sem dar Play, o mesh desenha IGUAL ao glTF (a bind
+   pose é identidade nas matrizes de skin);
+3. **A pose deforma**: Play na timeline com um clip importado → o mesh
+   DEFORMA com a animação (pernas/braços mexem — os vértices seguem os
+   joints); scrub também;
+4. **Play de jogo**: idem em Play (o AnimationSystem aplica os tracks de
+   joint; o render compõe as matrizes por frame);
+5. **Persistência**: gravar/reabrir → o esqueleto (joints + IBM) e os
+   tracks de joint voltam; o Play continua a deformar;
+6. **Meshes estáticos intactos**: cubos/primitivas/imports sem skin
+   desenham como sempre (uSkin=0 — o caminho estático byte a byte);
+7. **Regressões**: 0.8.1 (clips/seletor), 0.8.0 (timeline/primitivas),
+   0.7.x (frustum/gizmos/import de texturas).
 
 ## Verificação no Realme C33 (dono) — 0.8.1 (clips glTF; APK CUMULATIVO)
 

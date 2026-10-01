@@ -22,10 +22,21 @@ Mesh* GpuAssets::mesh(const std::string& ref) {
         return nullptr;
     }
     auto m = std::make_unique<Mesh>();
-    if (!m->create(data->vertices.data(),
-                   static_cast<u32>(data->vertices.size()),
-                   data->indices.data(),
-                   static_cast<u32>(data->indices.size()))) {
+    // 0.8.2 (F7): MeshData com skin → createSkinned (aJoints/aWeights nas
+    // locations 3/4); estático → create de sempre (comportamento idêntico)
+    if (data->skinned()) {
+        if (!m->createSkinned(data->vertices.data(),
+                              static_cast<u32>(data->vertices.size()),
+                              data->indices.data(),
+                              static_cast<u32>(data->indices.size()),
+                              data->skinJoints.data(),
+                              data->skinWeights.data())) {
+            return nullptr;
+        }
+    } else if (!m->create(data->vertices.data(),
+                          static_cast<u32>(data->vertices.size()),
+                          data->indices.data(),
+                          static_cast<u32>(data->indices.size()))) {
         return nullptr;   // upload falhou — sem cache de objeto quebrado
     }
     Mesh* raw = m.get();

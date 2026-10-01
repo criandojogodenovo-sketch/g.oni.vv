@@ -1,6 +1,7 @@
 // assets/GltfAnim.cpp — conversão GltfAnimation → AnimClip (0.8.1, F7).
 #include "assets/GltfAnim.h"
 #include "components/AnimationPlayer.h"
+#include "components/SkeletonComp.h"   // 0.8.2
 #include "components/Transform3D.h"
 #include "core/Scene.h"
 #include "core/ComponentStore.h"
@@ -38,16 +39,52 @@ u32 gltfAttachClips(Scene& scene, Handle ticH, const GltfModel& model,
         }
     }
 
+    // 0.8.2 (F7): esqueleto já anexado → os canais de JOINT entram como
+    // tracks Joint* (por nome); sem esqueleto, esses canais saltam
+    const SkeletonComp* skeleton = tic->getComponent<SkeletonComp>();
+    const std::vector<i32>* skinNodeToJoint = nullptr;
+    if (!model.skins.empty() && skeleton) {
+        skinNodeToJoint = &model.skins.front().nodeToJoint;
+    }
+
     u32 added = 0;
     for (const GltfAnimation& ga : model.animations) {
         AnimClip clip;
         clip.name = ga.name.empty() ? "anim" : ga.name;
         for (const GltfAnimChannel& ch : ga.channels) {
-            if (ch.node != rootNode) {
-                continue;   // 0.8.2 (skinning): joints; aqui só o nó raiz
-            }
             if (ch.sampler < 0 ||
                 static_cast<size_t>(ch.sampler) >= ga.samplers.size()) {
+                continue;
+            }
+            // 0.8.2 (F7): nó JOINT da 1ª skin → track de JOINT (por nome);
+            // nó raiz → track do TIC; resto → saltado
+            AnimTarget targetKind;
+            std::string jointName;
+            if (ch.node == rootNode) {
+                switch (ch.path) {
+                    case GltfAnimChannel::Path::Translation:
+                        targetKind = AnimTarget::TicPos; break;
+                    case GltfAnimChannel::Path::Rotation:
+                        targetKind = AnimTarget::TicRot; break;
+                    default:
+                        targetKind = AnimTarget::TicScale; break;
+                }
+            } else if (skinNodeToJoint && ch.node >= 0 &&
+                       ch.node < static_cast<i32>(skinNodeToJoint->size()) &&
+                       (*skinNodeToJoint)[static_cast<size_t>(ch.node)] >= 0 &&
+                       skeleton) {
+                const i32 jointIdx =
+                    (*skinNodeToJoint)[static_cast<size_t>(ch.node)];
+                jointName = skeleton->joints[static_cast<size_t>(jointIdx)].name;
+                switch (ch.path) {
+                    case GltfAnimChannel::Path::Translation:
+                        targetKind = AnimTarget::JointPos; break;
+                    case GltfAnimChannel::Path::Rotation:
+                        targetKind = AnimTarget::JointRot; break;
+                    default:
+                        targetKind = AnimTarget::JointScale; break;
+                }
+            } else {
                 continue;
             }
             const GltfAnimSampler& s = ga.samplers[static_cast<size_t>(ch.sampler)];
@@ -57,22 +94,14 @@ u32 gltfAttachClips(Scene& scene, Handle ticH, const GltfModel& model,
             }
             AnimTrack tr;
             tr.curve = AnimCurve::Linear;
-            switch (ch.path) {
-                case GltfAnimChannel::Path::Translation:
-                    tr.target = AnimTarget::TicPos;
-                    break;
-                case GltfAnimChannel::Path::Rotation:
-                    tr.target = AnimTarget::TicRot;
-                    break;
-                case GltfAnimChannel::Path::Scale:
-                    tr.target = AnimTarget::TicScale;
-                    break;
-            }
+            tr.target = targetKind;
+            tr.element = jointName;   // vazio nos tracks do TIC
             for (size_t k = 0; k < s.times.size(); ++k) {
                 AnimKey key;
                 key.t = s.times[k] < 0.0f ? 0.0f : s.times[k];
                 const f32* src = &s.values[k * s.components];
-                if (ch.path == GltfAnimChannel::Path::Rotation) {
+                if (targetKind == AnimTarget::TicRot ||
+                    targetKind == AnimTarget::JointRot) {
                     // quat (x,y,z,w) → euler GRAUS YXZ (a convenção do player)
                     Quat q{src[0], src[1], src[2],
                            s.components >= 4 ? src[3] : 1.0f};
@@ -104,6 +133,37 @@ u32 gltfAttachClips(Scene& scene, Handle ticH, const GltfModel& model,
         pl->activeClip = 1;
     }
     return added;
+}
+
+// ---- 0.8.2 (F7): SKIN → SkeletonComp ----------------------------------------
+u32 gltfAttachSkin(Scene& scene, Handle ticH, const GltfModel& model,
+                   u32 skinIdx) {
+    if (!ticH.valid() || skinIdx >= model.skins.size()) {
+        return 0;
+    }
+    Tic* tic = scene.get(ticH);
+    if (!tic || !tic->active) {
+        return 0;
+    }
+    if (tic->getComponent<SkeletonComp>()) {
+        return 0;   // já tem esqueleto (reimport não duplica)
+    }
+    const GltfSkin& src = model.skins[skinIdx];
+    SkeletonComp* sk = tic->addComponent<SkeletonComp>();
+    if (!sk) {
+        return 0;
+    }
+    for (const GltfJoint& j : src.joints) {
+        SkeletonComp::Joint jt;
+        jt.name = j.name;
+        jt.parent = j.parent;
+        jt.pos = j.pos;             // TRS de BIND (o rest pose do glTF)
+        jt.rot = j.rot;
+        jt.scale = j.scale;
+        jt.inverseBind = j.inverseBind;
+        sk->joints.push_back(std::move(jt));
+    }
+    return static_cast<u32>(sk->joints.size());
 }
 
 } // namespace vv

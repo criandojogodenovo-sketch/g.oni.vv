@@ -15,18 +15,37 @@ namespace {
 // FINAL; default (1,1,1) definido a CADA draw (setTint) = resultado 0.6.x
 // byte a byte. O tema mono fica INTACTO: a cor só muda quando o utilizador
 // mexe nos sliders R/G/B do Inspector.
+// 0.8.2 (F7): SKINNING no VERTEX SHADER — uSkin liga o ramo de bones;
+// aJoints/aWeights (locations 3/4) só existem no VAO de um mesh SKINADO
+// (mesh estático: atributos não ligados → valor constante, uSkin=0 ignora).
+// A matriz efetiva é a soma ponderada das 4 influências (a MESMA conta do
+// skinVertex de CPU — o teste de CI aferiu as duas contra o mesmo valor).
 constexpr char kVsSrc[] = R"(#version 300 es
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aUV;
+layout(location = 3) in vec4 aJoints;
+layout(location = 4) in vec4 aWeights;
 uniform mat4 uVP;
 uniform mat4 uModel;
+uniform int uSkin;
+uniform mat4 uBones[64];
 out vec3 vNormal;
 out vec2 vUV;
 void main() {
-    vNormal = mat3(uModel) * aNormal;
+    vec4 pos = vec4(aPos, 1.0);
+    vec3 nrm = aNormal;
+    if (uSkin != 0) {
+        mat4 b = uBones[int(aJoints.x)] * aWeights.x
+               + uBones[int(aJoints.y)] * aWeights.y
+               + uBones[int(aJoints.z)] * aWeights.z
+               + uBones[int(aJoints.w)] * aWeights.w;
+        pos = b * pos;
+        nrm = mat3(b) * nrm;
+    }
+    vNormal = mat3(uModel) * nrm;
     vUV = aUV;
-    gl_Position = uVP * uModel * vec4(aPos, 1.0);
+    gl_Position = uVP * uModel * pos;
 })";
 
 constexpr char kFsSrc[] = R"(#version 300 es
@@ -95,13 +114,17 @@ bool LitMaterial::init() {
     locTex_ = glGetUniformLocation(prog_, "uTex");
     locHasTex_ = glGetUniformLocation(prog_, "uHasTex");
     locTint_ = glGetUniformLocation(prog_, "uTint");
-    LOGI("LitMaterial: lit difusa fixa + ambient + textura opcional + uTint pronto");
+    locSkin_ = glGetUniformLocation(prog_, "uSkin");        // 0.8.2
+    locBones_ = glGetUniformLocation(prog_, "uBones[0]");   // 0.8.2
+    LOGI("LitMaterial: lit difusa fixa + ambient + textura opcional + uTint "
+         "+ skin (uBones[64]) pronto");
     return true;
 }
 
 void LitMaterial::destroy() {
     if (prog_) { glDeleteProgram(prog_); prog_ = 0; }
     locVP_ = locModel_ = locTex_ = locHasTex_ = locTint_ = -1;
+    locSkin_ = locBones_ = -1;   // 0.8.2
 }
 
 void LitMaterial::use() const {
@@ -144,6 +167,24 @@ void LitMaterial::setTint(const f32 rgb[3]) const {
     } else {
         glUniform3f(locTint_, 1.0f, 1.0f, 1.0f);
     }
+}
+
+// 0.8.2 (F7) — ramo de bones: uSkin liga/desliga (A CADA draw, como o
+// uTint — uniforms nascem a 0 e 0 = caminho estático, que é o default
+// correto); setBones faz upload do array (cap 64 = kMaxBones do shader).
+void LitMaterial::setSkin(bool on) const {
+    if (locSkin_ >= 0) {
+        glUniform1i(locSkin_, on ? 1 : 0);
+    }
+}
+
+void LitMaterial::setBones(const Mat4* bones, u32 count) const {
+    if (!bones || count == 0 || locBones_ < 0) {
+        return;
+    }
+    const u32 n = count < kMaxBones ? count : kMaxBones;
+    glUniformMatrix4fv(locBones_, static_cast<GLsizei>(n), GL_FALSE,
+                       bones->m);
 }
 
 } // namespace vv

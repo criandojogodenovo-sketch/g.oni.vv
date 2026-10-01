@@ -35,8 +35,11 @@ public:
     // pass 3D: desenha com depth test + backface cull; devolve métricas.
     // F5-E: tex opcional — albedo do material (nullptr = cinza F2)
     // 0.7.0: tint opcional — cor por TIC (nullptr = branco, o de sempre)
+    // 0.8.2 (F7): bones opcional — matrizes de skin (uBones+uSkin; nullptr
+    // = mesh estático, o caminho de sempre byte a byte)
     DrawStats drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp,
-                       const Texture* tex = nullptr, const f32* tint = nullptr);
+                       const Texture* tex = nullptr, const f32* tint = nullptr,
+                       const Mat4* bones = nullptr, u32 boneCount = 0);
 
     // pass UI (F1 mantido): submissões desenhadas em endFrame, sem depth
     void submit(const QuadBatch& batch, u32 texture);
