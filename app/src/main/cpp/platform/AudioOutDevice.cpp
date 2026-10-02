@@ -451,8 +451,8 @@ public:
             "(Landroid/media/AudioAttributes;Landroid/media/AudioFormat;III)V");
         if (trkCtor) {
             track_ = env->NewGlobalRef(env->NewObject(
-                trkCtor, attrs, fmt, bufBytes, 1 /*MODE_STREAM*/,
-                0 /*sessionId gerado*/));
+                trkCls, trkCtor, attrs, fmt, bufBytes,
+                1 /*MODE_STREAM*/, 0 /*sessionId gerado*/));
         } else {
             clearPendingException(env);
             trkCtor = env->GetMethodID(
@@ -463,8 +463,8 @@ public:
                 elog::error("audio: nenhum ctor AudioTrack utilizavel");
                 return false;
             }
-            track_ = env->NewGlobalRef(env->NewObject(trkCtor, attrs, fmt,
-                                                      bufBytes, 1 /*MODE_STREAM*/));
+            track_ = env->NewGlobalRef(env->NewObject(
+                trkCls, trkCtor, attrs, fmt, bufBytes, 1 /*MODE_STREAM*/));
         }
         if (clearPendingException(env) || !track_) {
             elog::error("audio: NewObject AudioTrack FALHOU");
@@ -542,8 +542,8 @@ private:
                     env->DeleteGlobalRef(arr_);
                     arr_ = nullptr;
                 }
-                arr_ = env->NewGlobalRef(
-                    env->NewFloatArray(static_cast<jsize>(buf.size())));
+                arr_ = static_cast<jfloatArray>(env->NewGlobalRef(
+                    env->NewFloatArray(static_cast<jsize>(buf.size()))));
                 arrSize_ = buf.size();
                 if (!arr_) {
                     clearPendingException(env);
