@@ -96,7 +96,7 @@ public class VvActivity extends NativeActivity {
                                                   String git, String soSha, long epoch);
 
     // lê UMA linha "chave=valor" do assets/build_info.txt (vazio se ausente)
-    private static String assetInfo(String key) {
+    private String assetInfo(String key) {
         try (java.io.BufferedReader r = new java.io.BufferedReader(
                 new java.io.InputStreamReader(getAssets().open("build_info.txt")))) {
             String line;
