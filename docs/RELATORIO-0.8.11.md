@@ -317,3 +317,35 @@ GRAVAR com permissão/medidor/rácio, TIC de Audio com preview/posicional
 (esfera wireframe + abafar), autoplay no Play + round-trip do projeto,
 volume geral + renomear/apagar com confirmação. Zero dumps novos
 continua a ser o critério global.
+
+---
+
+## FECHO CI (17)
+
+- Commits: `1447ef8` (0.8.11-a: áudio completo + 608 testes) → `743562d`
+  (0.8.11-b: fix assembleRelease — NewObject(jclass, jmethodID, …) e
+  NewGlobalRef→jfloatArray no TU Android-only; o compile-check do device
+  É o build do CI, como no StorageBridge) → `524313e` (0.8.11-c: artifact
+  renomeado goni-vv-0.8.11-release-signed).
+- Run **37071343815** (0.8.11-b): 100% VERDE — core-tests **608** OK +
+  build-release ASSINADO versionCode 41 + verify-entry-symbols COM OS GATES
+  DE ÁUDIO (o 1º run 37070840844 falhou SÓ no assembleRelease: os 3 erros
+  de tipo JNI do TU Android-only — o próprio CI a funcionar como
+  compile-check do device).
+- Run **37071734699** (0.8.11-c — o RELEASE): 100% VERDE — core-tests
+  **608** OK + JVM host + check estrutural + build-release **ASSINADO
+  versionCode 41** (2 passes com build_info.txt) + verify-entry-symbols.
+- **Artifact `goni-vv-0.8.11-release-signed`** (id 11254464456) —
+  `app-release.apk` sha256
+  `fbc88b5a86b9e500a869eb6fc7d353d5a2588d1bc28a9b7e9de656d670b65092`.
+- **Identidade verificada ponta-a-ponta** (extraída do artifact):
+  `assets/build_info.txt` diz `version=0.8.11 · versionCode=41 ·
+  git=524313e… · soSha256=738eb5b742a3d4ac140ed0178d91f926e481b741aed8
+  88d6ea7057b767c1c271` e a .so arm64 EXTRAÍDA do mesmo APK tem
+  EXATAMENTE esse sha256.
+- **Símbolos de áudio confirmados no .dynsym REAL do APK assinado** (nm -D
+  da .so extraída): writeGi/readGi/importAudioToGi/imaEncode/imaDecode/
+  decodeOgg/decodeMp3/runProbe/probeTable/drawAudioWorkspace — as 10
+  famílias dos gates novos; RECORD_AUDIO presente no manifest compilado.
+- Aguarda VERIFIED do dono no C33 (checklist 0.8.11 no README — 7 blocos;
+  zero crash dumps novos continua a ser o critério global).
