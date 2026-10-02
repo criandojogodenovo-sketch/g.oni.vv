@@ -1,0 +1,125 @@
+name: resolve-crash-087
+
+# 0.8.9 (Tarefa 1 do prompt: "Resolver no CI os offsets contra o build
+# assinado exato (casar versionCode/build id): addr2line -e libgoni_vv.so
+# 0xe2de8 0xe2f24 0xf2938 e nomear a função no relatório").
+#
+# O crash-1790830406.dump do C33 (SIGSEGV, si_addr ≈ sp = stack exhaustion)
+# veio do APK 0.8.7 ASSINADO (versionCode 38). O .so do APK é STRIPPED —
+# addr2line não resolve nada nele. MAS o build é REPRODUTÍVEL (os dois runs
+# da 0.8.7 produziram .so byte-idênticos, sha256 verificado). Este workflow
+# refaz o build do MESMO commit (3f0e838) com o MESMO NDK, retém o .so
+# NÃO-STRIPPADO dos intermediários do gradle, confere o BuildID contra o do
+# APK assinado (79363917aa0ce6580b9e0f93cf7493762cd27940) e resolve os três
+# offsets com llvm-addr2line do próprio NDK.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - forensics-087
+
+jobs:
+  resolve:
+    name: addr2line dos offsets do crash-1790830406 (build 0.8.7 exato)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do commit EXATO da 0.8.7 (3f0e838)
+        uses: actions/checkout@v4
+        with:
+          ref: 3f0e838
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Instalar componentes Android fixos (NDK r26d = 26.3.11579264)
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SDKMANAGER" ] || SDKMANAGER="$(command -v sdkmanager)"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" --install "ndk;26.3.11579264" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: assembleRelease (sem assinatura — só o .so interessa)
+        run: ./gradlew assembleRelease --stacktrace --no-daemon
+
+      - name: Localizar o .so NÃO-STRIPPADO dos intermediários
+        run: |
+          set -euo pipefail
+          UNSTRIPPED="$(find app/build/intermediates/cxx -type f -name 'libgoni_vv.so' -path '*arm64-v8a*' | head -n 1)"
+          test -n "${UNSTRIPPED}" || { echo "::error::.so não-stripado não encontrado nos intermediários"; exit 1; }
+          echo "UNSTRIPPED=${UNSTRIPPED}" >> "$GITHUB_ENV"
+          ls -la "${UNSTRIPPED}"
+
+      - name: Conferir BuildID contra o build assinado exato (0.8.7 / versionCode 38)
+        run: |
+          set -euo pipefail
+          # BuildID do APK assinado 0.8.7 (run 36992339344, artifact
+          # goni-vv-0.8.7-release-signed, .so sha256
+          # 5e4e024f03fbbee494b5447a9bec92088b9abd9f701520f7c9efeec5843b5b5d):
+          # 79363917aa0ce6580b9e0f93cf7493762cd27940
+          EXPECTED="79363917aa0ce6580b9e0f93cf7493762cd27940"
+          BID="$(readelf -n "${UNSTRIPPED}" | awk '/Build ID/ {print $3}')"
+          echo "BuildID (não-stripado): ${BID}"
+          echo "BuildID (assinado 0.8.7): ${EXPECTED}"
+          if [ "${BID}" != "${EXPECTED}" ]; then
+            echo "::warning::BuildID difere — o build não foi reproduzido byte-a-byte; os offsets abaixo podem estar deslocados. (Fallback: comparar .text por bytes.)"
+          fi
+
+      - name: addr2line dos offsets do dump
+        run: |
+          set -euo pipefail
+          NDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/26.3.11579264"
+          A2L="${NDK}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-addr2line"
+          test -x "${A2L}" || A2L="${NDK}/toolchains/llvm/prebuilt/linux-x86_64/bin/addr2line"
+          {
+            echo "=== crash-1790830406.dump (C33, APK 0.8.7 assinado, versionCode 38) ==="
+            echo "BuildID do .so resolvido: $(readelf -n "${UNSTRIPPED}" | awk '/Build ID/ {print $3}')"
+            echo ""
+            echo "--- addr2line -e libgoni_vv.so 0xe2de8 0xe2f24 0xf2938 ---"
+            "${A2L}" -e "${UNSTRIPPED}" -f -C -i 0xe2de8 0xe2f24 0xf2938
+            echo ""
+            echo "--- com números de linha ---"
+            "${A2L}" -e "${UNSTRIPPED}" -f -C -i -p 0xe2de8 0xe2f24 0xf2938
+            echo ""
+            echo "--- símbolos por NM (função que contém cada offset) ---"
+            NM="${NDK}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+            if [ -x "${NM}" ]; then
+              "${NM}" -C --defined-only -S --size-sort "${UNSTRIPPED}" > /tmp/nm.txt || true
+              for OFF in 0xe2de8 0xe2f24 0xf2938; do
+                echo "offset ${OFF}:"
+                python3 - "$OFF" <<'PYEOF'
+          import sys
+          off = int(sys.argv[1], 16)
+          best = None
+          for line in open('/tmp/nm.txt'):
+              parts = line.split(None, 3)
+              if len(parts) < 4: continue
+              try:
+                  addr = int(parts[0], 16)
+                  size = int(parts[1], 16)
+              except ValueError: continue
+              if addr <= off < addr + size:
+                  best = (addr, size, parts[3].strip())
+          print(f"  {best[2]}  [0x{best[0]:x}+0x{best[1]:x}]  +0x{off-best[0]:x}" if best else "  (estático sem símbolo — ver addr2line acima)")
+          PYEOF
+              done
+            fi
+          } | tee crash-resolution.txt
+
+      - name: Sumário no job
+        run: cat crash-resolution.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publicar artifact da resolução
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-1790830406-resolution
+          path: crash-resolution.txt
+          if-no-files-found: error
