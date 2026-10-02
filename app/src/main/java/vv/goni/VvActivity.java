@@ -89,9 +89,40 @@ public class VvActivity extends NativeActivity {
     // onCreate, após o handshake (a fila só faz sentido com a ponte viva).
     private static native void nativeOpenProject(String treeUri, String name);
 
+    // 0.8.10 — IDENTIDADE DA BUILD: entrega BuildConfig + build_info.txt
+    // (git/epoch/sha256 da .so, escrito pelo CI) ao native — vive nos crash
+    // dumps (nome+header), no banner do boot log e no badge ANTIGO do viewer.
+    private static native void nativeSetBuildInfo(String version, int versionCode,
+                                                  String git, String soSha, long epoch);
+
+    // lê UMA linha "chave=valor" do assets/build_info.txt (vazio se ausente)
+    private static String assetInfo(String key) {
+        try (java.io.BufferedReader r = new java.io.BufferedReader(
+                new java.io.InputStreamReader(getAssets().open("build_info.txt")))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                if (line.startsWith(key + "=")) {
+                    return line.substring(key.length() + 1);
+                }
+            }
+        } catch (Throwable ignored) {
+            // sem build_info.txt (dev/local) — a identidade fica "dev"
+        }
+        return "";
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // 0.8.10 — identidade ANTES de tudo (o crash handler precisa dela
+        // o mais cedo possível): BuildConfig + assets/build_info.txt do CI
+        try {
+            nativeSetBuildInfo(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE,
+                    assetInfo("git"), assetInfo("soSha256"),
+                    Long.parseLong(assetInfo("epoch").isEmpty() ? "0" : assetInfo("epoch")));
+        } catch (Throwable t) {
+            Log.e("GONI", "java: nativeSetBuildInfo FALHOU (identidade = dev)", t);
+        }
         Log.i("GONI", "java: onCreate → nativeRegisterActivity");
         try {
             nativeRegisterActivity(this, "onCreate");

@@ -13,6 +13,7 @@
 #define _GNU_SOURCE 1
 
 #include "platform/CrashHandler.h"
+#include "platform/BuildInfo.h"   // 0.8.10: identidade nos dumps
 
 #include <cstdint>
 
@@ -117,6 +118,18 @@ int writeDumpFromFrames(const char* path, const char* sigName, int sig,
         return -2;
     }
     dprint(fd, "G.One VV — crash dump (legível sem ndk-stack)\n");
+    ::dprintf(fd, "build: %s (versionCode %u)\n", vv::buildinfo::g_version,
+              vv::buildinfo::g_versionCode);
+    if (vv::buildinfo::g_git[0]) {
+        ::dprintf(fd, "git: %s\n", vv::buildinfo::g_git);
+    }
+    if (vv::buildinfo::g_soSha[0]) {
+        ::dprintf(fd, "so: %s\n", vv::buildinfo::g_soSha);
+    }
+    if (vv::buildinfo::g_epoch > 0) {
+        ::dprintf(fd, "epoch: %llu\n",
+                  static_cast<unsigned long long>(vv::buildinfo::g_epoch));
+    }
     if (sigName) {
         ::dprintf(fd, "signal: %s (%d)\n", sigName, sig);
     }
@@ -140,10 +153,13 @@ int writeDumpFromFrames(const char* path, const char* sigName, int sig,
 namespace {
 
 void crashHandler(int sig, siginfo_t* info, void* uctx) {
-    // 1. dump próprio: <dir>/crash-<unixtime>.dump
+    // 1. dump próprio: <dir>/crash-<unixtime>-vc<versionCode>.dump
+    //    (a identidade 0.8.10: o nome diz QUE build crashou mesmo sem abrir)
     char path[600];
-    ::snprintf(path, sizeof(path), "%s/crash-%ld.dump",
-               g_dir[0] ? g_dir : "/data/local/tmp", static_cast<long>(::time(nullptr)));
+    ::snprintf(path, sizeof(path), "%s/crash-%ld%s.dump",
+               g_dir[0] ? g_dir : "/data/local/tmp",
+               static_cast<long>(::time(nullptr)),
+               vv::buildinfo::dumpSuffix().c_str());
 
     void* pcs[kMaxFrames];
     FrameCtx fc{pcs, kMaxFrames, 0};
@@ -152,6 +168,20 @@ void crashHandler(int sig, siginfo_t* info, void* uctx) {
     const int fd = ::open(path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (fd >= 0) {
         dprint(fd, "G.One VV — crash dump (legível sem ndk-stack)\n");
+        // 0.8.10 — IDENTIDADE no header: build/versão/versionCode/git/sha/
+        // epoch (o dono com 5 APKs instalados sabe QUAL produziu isto)
+        ::dprintf(fd, "build: %s (versionCode %u)\n",
+                  vv::buildinfo::g_version, vv::buildinfo::g_versionCode);
+        if (vv::buildinfo::g_git[0]) {
+            ::dprintf(fd, "git: %s\n", vv::buildinfo::g_git);
+        }
+        if (vv::buildinfo::g_soSha[0]) {
+            ::dprintf(fd, "so: %s\n", vv::buildinfo::g_soSha);
+        }
+        if (vv::buildinfo::g_epoch > 0) {
+            ::dprintf(fd, "epoch: %llu\n",
+                      static_cast<unsigned long long>(vv::buildinfo::g_epoch));
+        }
         ::dprintf(fd, "signal: %s (%d)\n", signalName(sig), sig);
         if (info) {
             ::dprintf(fd, "si_addr: %p  si_code: %d\n", info->si_addr, info->si_code);

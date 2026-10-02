@@ -106,4 +106,9 @@ void ProjectStorage::closeWriteStream(int handle) {
     reg.erase(it);
 }
 
+bool ProjectStorage::remove(const std::string&) {
+    return false;   // default honesto: esta implementação não remove
+}
+
 } // namespace vv
+

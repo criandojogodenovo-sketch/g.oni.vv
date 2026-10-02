@@ -575,14 +575,14 @@ TEST(ui_settings_menu_modo_e_tres_itens) {
     f32 ox = 0.0f, oy = 0.0f;
     EXPECT(worstGlyphPenetration(e.ui, ox, oy) <= 2.0f);   // sem sobreposição
 
-    // rects dos 3 itens (formula do drawSettingsMenu)
+    // rects dos 5 itens (formula do drawSettingsMenu; 0.8.10: +fonte/+recon)
     const f32 modeH = 30.0f;
-    const f32 h = kHeaderH + modeH + 3.0f * 64.0f + kPad;
+    const f32 h = kHeaderH + modeH + 5.0f * 64.0f + kPad;
     const f32 x = (kSW - kMenuW) * 0.5f;
     const f32 y = (kSH - h) * 0.5f;
     const f32 itemsTop = y + kHeaderH + modeH;
 
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 5; ++i) {
         e.st.settingsMenu = true;
         e.frame();
         e.input.injectDown(0, x + kMenuW * 0.5f,
@@ -595,7 +595,7 @@ TEST(ui_settings_menu_modo_e_tres_itens) {
         e.ui.beginFrame(nullptr, &e.input, kSW, kSH);
         EditorState st2;
         st2.settingsMenu = true;
-        const int v = drawSettingsMenu(e.ui, e.input, kSW, kSH, st2, "all files");
+        const int v = drawSettingsMenu(e.ui, e.input, kSW, kSH, st2, "all files", true);
         e.ui.endFrame();
         e.input.clearEdges();
         e.input.injectUp(0);
@@ -604,8 +604,9 @@ TEST(ui_settings_menu_modo_e_tres_itens) {
             EXPECT(e.st.settingsMenu == false);   // o frame anterior fechou
         }
     }
-    // devoluções DIRETAS dos 3 itens (gestos limpos, um por vez)
-    for (int i = 0; i < 3; ++i) {
+    // devoluções DIRETAS dos 5 itens (gestos limpos, um por vez; 0.8.10
+    // acrescentou "fonte: manter/largar" e "reconverter assets")
+    for (int i = 0; i < 5; ++i) {
         e.ui.beginFrame(nullptr, &e.input, kSW, kSH);
         EditorState st2;
         st2.settingsMenu = true;
@@ -614,7 +615,7 @@ TEST(ui_settings_menu_modo_e_tres_itens) {
         // press processado na 1ª chamada; release na 2ª
         drawSettingsMenu(e.ui, e.input, kSW, kSH, st2, "all files");
         e.input.injectUp(0);
-        const int v = drawSettingsMenu(e.ui, e.input, kSW, kSH, st2, "all files");
+        const int v = drawSettingsMenu(e.ui, e.input, kSW, kSH, st2, "all files", true);
         e.ui.endFrame();
         e.input.clearEdges();
         EXPECT(v == i + 1);

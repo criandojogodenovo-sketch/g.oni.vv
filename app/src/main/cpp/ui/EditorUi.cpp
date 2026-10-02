@@ -1053,10 +1053,13 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 }
 
 int drawSettingsMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
-                     EditorState& st, const char* storageMode) {
+                     EditorState& st, const char* storageMode,
+                     bool keepSource) {
     // F5.1-hotfix: menu do botão Settings — mono, mesmo padrão dos overlays.
     // F5.2: 3 itens + linha do modo de armazenamento ativo.
-    constexpr int kItems = 3;
+    // 0.8.10: +2 — "fonte: manter/largar" (o setting que larga source/ do
+    // import) e "reconverter assets" (reconverte tudo de source/).
+    constexpr int kItems = 5;
     constexpr f32 kModeLineH = 30.0f;
     const bool showMode = storageMode && storageMode[0];
     const f32 h = kHeaderH + (showMode ? kModeLineH : 0.0f) +
@@ -1090,8 +1093,12 @@ int drawSettingsMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     }
 
     int chosen = 0;
+    char fonte[48];
+    std::snprintf(fonte, sizeof(fonte), "fonte apos import: %s",
+                  keepSource ? "manter" : "largar");
     const char* labels[kItems] = {"Exportar logs", "Ver logs",
-                                  "Acesso a ficheiros…"};
+                                  "Acesso a ficheiros…", fonte,
+                                  "reconverter assets"};
     for (int i = 0; i < kItems; ++i) {
         if (ui.button(static_cast<u64>(4400 + i), x + kPad,
                       itemsTop + static_cast<f32>(i) * 64.0f,

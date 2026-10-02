@@ -12,6 +12,7 @@
 #include <thread>   // 0.8.10: import job fora do frame loop
 
 #include "assets/AssetConverter.h"   // 0.8.10: import streaming + formatos próprios
+#include "assets/ZipExtract.h"       // 0.8.10: archives (extrair ≠ importar)
 #include "assets/GOwnFormats.h"       // 0.8.10: .gmesh/.gtext/.gm
 #include "assets/ObjExporter.h"
 #include "assets/TextureCache.h"
@@ -41,6 +42,7 @@
 #include "physics/PhysicsSystem.h"
 #include "platform/Log.h"
 #include "platform/EngineLog.h"
+#include "platform/BuildInfo.h"   // 0.8.10: identidade (banner/dumps)
 #include "platform/CrashHandler.h"
 #include "platform/EglContext.h"
 #include "platform/FileApi.h"
@@ -173,6 +175,29 @@ editor::AssetCatalog g_catalog;
 int                  g_prevAssetMenu = 0;
 
 char g_selectedName[40] = "";   // nome do TIC p/ o ficheiro de export
+
+// 0.8.10 — SETTING "largar a fonte": false = source/<nome> é REMOVIDO
+// depois do import converter com sucesso (o projeto fica só com assets/).
+// Persistido por projeto em settings.goni ("keepSource=0/1").
+bool g_keepSource = true;
+
+void loadProjectSettings() {
+    g_keepSource = true;
+    if (!g_storage) {
+        return;
+    }
+    std::string text;
+    if (g_storage->readText("settings.goni", text)) {
+        g_keepSource = text.find("keepSource=0") == std::string::npos;
+    }
+}
+void saveProjectSettings() {
+    if (!g_storage) {
+        return;
+    }
+    g_storage->writeText("settings.goni",
+                         g_keepSource ? "keepSource=1\n" : "keepSource=0\n");
+}
 
 // 0.6.8: estado do gesto de orbit ENTRE frames — extraído para editor::
 // (OrbitState puro, afervel no CI; a lógica vive em EditorUi.cpp)
@@ -820,6 +845,9 @@ struct ImportJob {
     // resultado — SÓ o worker escreve; o main lê APÓS done==true
     convert::Output out;
     convert::Stats stats;
+    zip::ExtractStats zipStats;        // modo extract
+    int  mode = 0;                     // 0=import; 1=EXTRACT (archive)
+    std::string destDir;               // "extracted/<nome>" (modo 1)
     std::string err;
     std::string fileName;   // p/ o overlay e o diálogo
 } g_importJob;
@@ -846,18 +874,19 @@ bool importJobStart(const fileapi::DirEntry& e) {
     for (char& ch : safe) {
         if (ch == '/' || ch == '\\' || ch == ':') ch = '_';
     }
-    ImportJob job;
-    job.active.store(true);
-    job.done.store(false);
-    job.cancel.store(false);
-    job.bytesDone.store(0);
-    job.bytesTotal.store(0);
-    job.fileName = e.name;
+    g_importJob.mode = 0;
+    g_importJob.fileName = e.name;   // NO GLOBAL (o local morria — o nome do
+                                     // overlay e o "largar fonte" liam vazio)
+    g_importJob.active.store(true);
+    g_importJob.done.store(false);
+    g_importJob.cancel.store(false);
+    g_importJob.bytesDone.store(0);
+    g_importJob.bytesTotal.store(0);
     ProjectStorage* st = g_storage.get();
     TexturePipeline* pipe = g_pipeline.get();
     const std::string srcPath = e.path;
     const std::string srcName = safe;
-    job.worker = std::thread([st, pipe, srcPath, srcName]() {
+    g_importJob.worker = std::thread([st, pipe, srcPath, srcName]() {
         // cópia do estado do job para o LOCAL (o g_importJob fica estável
         // para o progresso em atómicos; o resultado escreve-se no fim)
         convert::Output out;
@@ -870,14 +899,69 @@ bool importJobStart(const fileapi::DirEntry& e) {
         g_importJob.err = std::move(err);
         g_importJob.done.store(true);
     });
-    g_importJob.worker = std::move(job.worker);
-    g_importJob.active.store(true);
-    g_importJob.done.store(false);
-    g_importJob.cancel.store(false);
     g_importJob.err.clear();
     elog::info("import: job iniciado '%s' (thread própria — progresso no "
                "overlay)", e.path.c_str());
     return true;
+}
+
+// 0.8.10 — ARCHIVE: o toque num .zip/.rar lança a EXTRAÇÃO (passo 1 de 2).
+// RAR: sem unrar vendido (licença) → erro LEGÍVEL "usa .zip" (a tabela de
+// decisões vive no RELATÓRIO 0.8.10). ZIP: extrai STREAMING para
+// extracted/<nome>/ no projeto — nada é convertido neste passo.
+void browserExtractArchive(const fileapi::DirEntry& e) {
+    if (!g_storage || e.isDir) {
+        return;
+    }
+    const size_t dot = e.name.rfind('.');
+    std::string ext = dot == std::string::npos ? "" : e.name.substr(dot + 1);
+    for (char& c : ext) {
+        if (c >= 'A' && c <= 'Z') {
+            c = static_cast<char>(c - 'A' + 'a');
+        }
+    }
+    if (ext != "zip") {
+        char msg[96];
+        std::snprintf(msg, sizeof(msg),
+                      "rar: formato nao suportado ainda — usa .zip");
+        showToast(msg);
+        elog::warn("archive: '%s' — RAR sem decoder (licenca unrar); usa "
+                   ".zip (a decisao esta no relatorio)", e.path.c_str());
+        return;
+    }
+    if (g_importJob.active.load()) {
+        showToast("import ja em curso...");
+        return;
+    }
+    std::string safe = e.name;
+    for (char& ch : safe) {
+        if (ch == '/' || ch == '\\' || ch == ':') ch = '_';
+    }
+    const std::string stem = convert::stemOf(safe);
+    const std::string dest = std::string("extracted/") + stem;
+    ProjectStorage* st = g_storage.get();
+    const std::string srcPath = e.path;
+    g_importJob.mode = 1;
+    g_importJob.destDir = dest;
+    g_importJob.fileName = e.name;
+    g_importJob.active.store(true);
+    g_importJob.done.store(false);
+    g_importJob.cancel.store(false);
+    g_importJob.bytesDone.store(0);
+    g_importJob.bytesTotal.store(0);
+    g_importJob.err.clear();
+    g_importJob.worker = std::thread([st, srcPath, dest]() {
+        zip::ExtractStats zs;
+        std::string err;
+        zip::extractArchive(srcPath, *st, dest, zs, err,
+                            &importJobProgress, &g_importJob);
+        g_importJob.zipStats = zs;
+        g_importJob.err = std::move(err);
+        g_importJob.done.store(true);
+    });
+    elog::info("archive: job de extracao iniciado '%s' → %s (thread "
+               "propria; NADA converte neste passo)", e.path.c_str(),
+               dest.c_str());
 }
 
 // FINALIZE no frame(): join + catálogo + diálogo aplicar/toast honesto
@@ -893,6 +977,35 @@ void importJobFinish() {
         elog::info("import: cancelado pelo utilizador (sem estado parcial)");
         return;
     }
+    if (g_importJob.mode == 1) {
+        // ---- EXTRACT (passo 1 de 2): pasta com ficheiros CRUS, zero
+        // conversão; o browser ABRE a pasta (o passo 2 — importar — é
+        // manual, pelo fluxo de sempre)
+        const zip::ExtractStats& zs = g_importJob.zipStats;
+        g_importJob.mode = 0;
+        if (!err.empty()) {
+            showToast("extracao falhou (causa no engine.log)");
+            elog::error("archive: extracao FALHOU — %s", err.c_str());
+            return;
+        }
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "extraido: %u ficheiro(s) crus",
+                      zs.files);
+        showToast(msg);
+        elog::info("archive: extraido %u ficheiro(s) para %s (%u zip-slip "
+                   "rejeitado(s), %u aninhado(s) ignorado(s))",
+                   zs.files, g_importJob.destDir.c_str(), zs.rejected,
+                   zs.nested);
+        // o navegador abre a PASTA EXTRAÍDA (ficheiros crus visíveis)
+        const std::string abs =
+            joinRelPath(g_storage ? g_storage->root() : "",
+                        g_importJob.destDir);
+        if (!abs.empty()) {
+            browserOpen(abs);
+            g_editor.fileBrowser = true;
+        }
+        return;
+    }
     if (!err.empty()) {
         showToast("import falhou (causa no engine.log)");
         elog::error("import: FALHOU — %s", err.c_str());
@@ -900,6 +1013,16 @@ void importJobFinish() {
     }
     // sucesso: catálogo vê os convertidos; pergunta "aplicar ao TIC?"
     refreshCatalog();
+    // 0.8.10 — setting "largar a fonte": o convertido está garantido em
+    // assets/; a fonte sai (o botão "reconverter" reconverte quem ficar)
+    if (!g_keepSource && g_storage) {
+        const std::string srcRel =
+            std::string("source/") + g_importJob.fileName;
+        if (g_storage->remove(srcRel)) {
+            elog::info("import: fonte '%s' largada (setting) — convertido "
+                       "vive em assets/", srcRel.c_str());
+        }
+    }
     const convert::Output& out = g_importJob.out;
     char msg[96];
     std::snprintf(msg, sizeof(msg), "importado: %u mesh(es), %u tex (%llu B)",
@@ -930,6 +1053,12 @@ void browserImportFile(const fileapi::DirEntry& e) {
         return;
     }
     elog::info("import: ficheiro '%s' escolhido no navegador", e.path.c_str());
+    // 0.8.10 — ARCHIVE (.zip/.rar): EXTRAIR (passo 1 de 2) — utilitário
+    // SEM conversão; o import de dentro da pasta extraída é que converte
+    if (e.kind == 'a') {
+        browserExtractArchive(e);
+        return;
+    }
     // 0.8.5 — FORMATO NÃO SUPORTADO → ERRO CLARO (nunca silêncio)
     if (e.kind == 0) {
         const size_t dot = e.name.rfind('.');
@@ -2663,7 +2792,7 @@ void frame() {
                                    ? ""
                                    : storage::modeLabel(g_perm.mode());
         const int choice = editor::drawSettingsMenu(g_ui, g_input, w, h, g_editor,
-                                                    modeText);
+                                                    modeText, g_keepSource);
         if (choice == 1) {
             // export para Downloads/GOneVV/logs (MediaStore — sem permissões)
             int copied = 0;
@@ -2677,6 +2806,46 @@ void frame() {
             } else {
                 showToast("export falhou (sem ficheiros? API<29?)");
                 elog::warn("logs: export falhou (copied=%d)", copied);
+            }
+        } else if (choice == 4) {
+            // 0.8.10 — setting "largar a fonte": alterna + persiste
+            g_keepSource = !g_keepSource;
+            saveProjectSettings();
+            showToast(g_keepSource ? "fonte: manter (source/ fica)"
+                                    : "fonte: largar (source/ sai)");
+            elog::info("import: setting fonte = %s",
+                       g_keepSource ? "manter" : "largar");
+        } else if (choice == 5) {
+            // 0.8.10 — RECONVERTER: tudo o que vive em source/ volta pelo
+            // conversor (assets/ novos; os TICs re-resolvem no próximo load)
+            if (!g_storage) {
+                showToast("sem projeto");
+            } else {
+                std::vector<std::string> srcs;
+                u32 done = 0;
+                if (g_storage->listDir("source", srcs)) {
+                    for (const std::string& f : srcs) {
+                        convert::Output out;
+                        convert::Stats stats;
+                        std::string cerr;
+                        if (convert::reconvertFile(std::string("source/") + f,
+                                                    *g_storage,
+                                                    g_pipeline.get(), out,
+                                                    stats, cerr)) {
+                            ++done;
+                        } else {
+                            elog::warn("import: reconverter '%s' FALHOU — %s",
+                                       f.c_str(), cerr.c_str());
+                        }
+                    }
+                }
+                refreshCatalog();
+                char msg[96];
+                std::snprintf(msg, sizeof(msg), "reconvertido(s): %u",
+                              done);
+                showToast(msg);
+                elog::info("import: reconvertidos %u ficheiro(s) de source/",
+                           done);
             }
         } else if (choice == 2) {
             // F5.2: VER LOGS in-app — tail do engine.log + crash dumps
@@ -3301,6 +3470,10 @@ void android_main(android_app* app) {
     vv::crash::install(elog::dir());
     elog::info("logs: %s (ativo=%d)", elog::dir()[0] ? elog::dir() : "<só-logcat>",
                elog::active() ? 1 : 0);
+
+    // 0.8.10 — BANNER DE VERSÃO no boot log (a identidade da build —
+    // versionCode/git/sha — é a 1ª linha que o log viewer mostra)
+    elog::info("%s", vv::buildinfo::banner().c_str());
 
     // 0.6.7 — REENTRADA do android_main: a lib goni_vv fica CARREGADA no
     // processo (o static init NÃO volta a correr) e uma NOVA VvActivity

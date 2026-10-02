@@ -61,6 +61,8 @@ char kindOfExtension(const std::string& name) {
     const std::string e = lowerExt(name);
     if (e == "obj" || e == "gltf" || e == "glb") return 'm';
     if (e == "png") return 't';
+    // 0.8.10 — ARCHIVES: extraem (passo 1), NUNCA importam/convertem
+    if (e == "zip" || e == "rar") return 'a';
     return 0;
 }
 

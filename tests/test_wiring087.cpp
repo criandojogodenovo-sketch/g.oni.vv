@@ -1191,3 +1191,107 @@ TEST(wiring089_device_zoom_far_dinamico_e_grelha_adaptativa) {
 
     onAppCmd(&app, APP_CMD_TERM_WINDOW);
 }
+
+
+// ===========================================================================
+// 0.8.10 — CASOS DO DEVICE (este TU inclui o main.cpp): migração e2e +
+// setting "largar a fonte" + reconverter (os casos PUROS dos formatos/
+// 500 MB/archives vivem no test_wiring010.cpp)
+// ===========================================================================
+
+TEST(wiring010_migracao_projeto_antigo_e2e) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    ensureEngineReady();
+
+    auto st = std::make_unique<FakeStorage>();
+    FakeStorage* rawSt = st.get();
+    // projeto ANTIGO: meshes/casa.obj no storage + TIC com a ref LEGADA
+    rawSt->makeDirs("meshes");
+    rawSt->writeText("meshes/casa.obj", "o casa\nv 0 0 0\nv 3 0 0\nv 0 2 0\nf 1 2 3\n");
+    g_storage = std::move(st);
+    g_projectReady = true;
+    g_resources.setStorage(rawSt);
+    g_gpu.init(&g_resources);
+
+    const Handle h = g_scene.create("Casa");
+    Tic* t = g_scene.get(h);
+    ASSERT(t != nullptr);
+    t->addComponent<Transform3D>();
+    MeshRenderer* mr = t->addComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+    mr->meshPath = "meshes/casa.obj";
+
+    // o PÓS-LOAD do device: migra (silenciosa) + fixup da ref
+    postLoadMigrateAndFixup();
+
+    EXPECT(rawSt->exists("assets/casa.gmesh"));
+    EXPECT(mr->meshPath == "assets/casa.gmesh");
+    EXPECT(logHas("asset: migracao 'meshes/casa.obj'"));
+    EXPECT(logHas("asset: ref migrada 'meshes/casa.obj' -> 'assets/casa.gmesh'"));
+    refreshCatalog();
+    EXPECT(!g_catalog.meshes.empty());
+    EXPECT(g_catalog.meshes[0] == "assets/casa.gmesh");
+    Mesh* m = g_gpu.mesh("assets/casa.gmesh");
+    ASSERT(m != nullptr);
+    EXPECT(m->indexCount() == 3);
+    std::printf("  [migracao] meshes/casa.obj → assets/casa.gmesh (%u verts / "
+                "%u idx) — ref reescrita em silencio\n", m->vertexCount(),
+                m->indexCount());
+}
+
+TEST(wiring010_setting_fonte_e_reconverter) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    ensureEngineReady();
+    g_projectReady = true;
+
+    auto st = std::make_unique<FakeStorage>();
+    FakeStorage* rawSt = st.get();
+    g_storage = std::move(st);
+    g_resources.setStorage(rawSt);
+    g_gpu.init(&g_resources);
+
+    const std::string objPath = "goni_w010_fonte.obj";
+    FILE* f = std::fopen(objPath.c_str(), "wb");
+    ASSERT(f != nullptr);
+    const char* obj = "o fonte\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+    std::fwrite(obj, 1, std::strlen(obj), f);
+    std::fclose(f);
+
+    // IMPORT com keepSource=TRUE (default): fonte fica em source/
+    fileapi::DirEntry e;
+    e.name = "goni_w010_fonte.obj";
+    e.path = objPath;
+    e.isDir = false;
+    e.kind = 'm';
+    browserImportFile(e);
+    pumpImportJob();
+    EXPECT(rawSt->exists("source/goni_w010_fonte.obj"));
+    EXPECT(rawSt->exists("assets/goni_w010_fonte.gmesh"));
+
+    // RECONVERTER (o botão do Settings): o convertido sai e volta da fonte
+    EXPECT(rawSt->remove("assets/goni_w010_fonte.gmesh"));
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    ASSERT(convert::reconvertFile("source/goni_w010_fonte.obj", *rawSt,
+                                  nullptr, out, stats, err));
+    EXPECT(rawSt->exists("assets/goni_w010_fonte.gmesh"));
+    std::printf("  [reconverter] source/ → assets/ de volta (%u mesh(es), %llu "
+                "B)\n", out.meshes.size(),
+                static_cast<unsigned long long>(stats.outputBytes));
+
+    // SETTING "largar a fonte": o import REMOVE a fonte pós-conversão
+    g_keepSource = false;
+    browserImportFile(e);
+    pumpImportJob();
+    EXPECT(rawSt->exists("assets/goni_w010_fonte.gmesh"));   // convertido vivo
+    EXPECT(!rawSt->exists("source/goni_w010_fonte.obj"));    // fonte LARGADA
+    EXPECT(logHas("fonte 'source/goni_w010_fonte.obj' largada"));
+    std::printf("  [setting] fonte largada pós-import; assets/ fica\n");
+    g_keepSource = true;
+    std::remove(objPath.c_str());
+}

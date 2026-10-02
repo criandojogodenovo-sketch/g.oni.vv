@@ -25,6 +25,8 @@
 // Environment é classe de SISTEMA — FindClass direto funciona de qualquer
 // thread anexado.
 #include "platform/StorageBridge.h"
+#include "core/Types.h"
+#include "platform/BuildInfo.h"   // 0.8.10: identidade da build via JNI
 #include "platform/EngineLog.h"
 #include "platform/JniAttach.h"
 #include <jni.h>
@@ -40,6 +42,25 @@ extern "C" JNIEXPORT void JNICALL
 Java_vv_goni_VvActivity_nativeRegisterActivity(JNIEnv* env, jclass,
                                                jobject activity,
                                                jstring origin);
+// 0.8.10 — IDENTIDADE: a VvActivity entrega BuildConfig + build_info.txt
+// (version/versionCode/git/sha256 da .so/epoch) no ARRANQUE; vive nos crash
+// dumps (nome+header) e no banner do boot log.
+extern "C" JNIEXPORT void JNICALL
+Java_vv_goni_VvActivity_nativeSetBuildInfo(JNIEnv* env, jclass,
+                                           jstring version, jint versionCode,
+                                           jstring git, jstring soSha,
+                                           jlong epoch) {
+    const char* v = env->GetStringUTFChars(version, nullptr);
+    const char* g = git ? env->GetStringUTFChars(git, nullptr) : nullptr;
+    const char* so = soSha ? env->GetStringUTFChars(soSha, nullptr) : nullptr;
+    vv::buildinfo::set(v ? v : "dev", static_cast<vv::u32>(versionCode),
+                       g ? g : "", so ? so : "",
+                       static_cast<vv::u64>(epoch));
+    if (v) env->ReleaseStringUTFChars(version, v);
+    if (g) env->ReleaseStringUTFChars(git, g);
+    if (so) env->ReleaseStringUTFChars(soSha, so);
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_vv_goni_VvActivity_nativeOpenProject(JNIEnv* env, jclass,
                                           jstring treeUri, jstring name);
@@ -167,6 +188,10 @@ const JNINativeMethod kNativeMethods[] = {
       // no SAF (extras do Intent) → fila ProjectSlot → boot do android_main
       const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)V"),
       reinterpret_cast<void*>(&Java_vv_goni_VvActivity_nativeOpenProject) },
+    { const_cast<char*>("nativeSetBuildInfo"),
+      // 0.8.10 — identidade da build (crash dumps + banner + badge ANTIGO)
+      const_cast<char*>("(Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;J)V"),
+      reinterpret_cast<void*>(&Java_vv_goni_VvActivity_nativeSetBuildInfo) },
 };
 constexpr int kNativeMethodCount =
     static_cast<int>(sizeof(kNativeMethods) / sizeof(kNativeMethods[0]));

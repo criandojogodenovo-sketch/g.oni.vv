@@ -67,6 +67,11 @@ public:
     virtual bool writeStreamChunk(int handle, const void* data, size_t n);
     virtual void closeWriteStream(int handle);
 
+    // 0.8.10 — remove um ficheiro do projeto (setting "largar a fonte":
+    // source/<nome> depois de convertido com sucesso). Default: false
+    // ("não suportado"); Fs/Saf implementam de verdade.
+    virtual bool remove(const std::string& relPath);
+
     // Nomes de FICHEIROS (não diretórios) dentro de relDir, ordenados.
     // false se relDir não existe; lista vazia = diretório sem ficheiros.
     virtual bool listDir(const std::string& relDir,

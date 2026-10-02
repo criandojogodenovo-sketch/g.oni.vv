@@ -33,6 +33,8 @@ public:
     int  openWriteStream(const std::string& relPath) override;
     bool writeStreamChunk(int handle, const void* data, size_t n) override;
     void closeWriteStream(int handle) override;
+    // 0.8.10 — remove ficheiro (setting "largar a fonte")
+    bool remove(const std::string& relPath) override;
     bool listDir(const std::string& relDir,
                  std::vector<std::string>& outFiles) const override;
 

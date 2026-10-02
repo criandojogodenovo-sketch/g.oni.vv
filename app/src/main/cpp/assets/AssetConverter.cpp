@@ -101,12 +101,13 @@ bool copyToStorage(const std::string& srcAbs, ProjectStorage& st,
         err = "leitura curta da fonte: " + srcAbs;
         ok = false;
     }
-    if (!ok && stats.canceled) {
-        // sem estado parcial: remove o que chegou a entrar
-        // (o storage não tem delete na interface — o ficheiro parcial é
-        // sobrescrito na próxima tentativa; logado honestamente)
-        elog::warn("import: copia cancelada — '%s' fica parcial ate nova "
-                   "tentativa", rel.c_str());
+    if (!ok) {
+        // SEM ESTADO PARCIAL: o ficheiro meio-escrito sai do projeto
+        // (a próxima tentativa começa limpa — o requisito do prompt)
+        if (st.remove(rel)) {
+            elog::info("import: copia incompleta '%s' removida (sem estado "
+                       "parcial)", rel.c_str());
+        }
     }
     return ok;
 }

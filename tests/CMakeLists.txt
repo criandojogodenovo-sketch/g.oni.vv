@@ -97,6 +97,8 @@ add_executable(test_core
         # 0.8.10: formatos próprios (.gmesh/.gtext/.gm) + conversor streaming
         ${CORE_DIR}/assets/GOwnFormats.cpp
         ${CORE_DIR}/assets/AssetConverter.cpp
+        # 0.8.10: archives — parser ZIP próprio + inflate zlib
+        ${CORE_DIR}/assets/ZipExtract.cpp
         ${CORE_DIR}/assets/ObjExporter.cpp
         ${CORE_DIR}/assets/ResourceManager.cpp
         ${CORE_DIR}/assets/GltfImporter.cpp
@@ -199,6 +201,8 @@ add_executable(test_core
         # casos do CAMINHO DO DEVICE estão no TU do test_wiring087 (único
         # que inclui platform/main.cpp) — secção 0.8.9 lá.
         test_wiring089.cpp
+        # 0.8.10: formatos próprios + 500 MB + archives + migração + identidade
+        test_wiring010.cpp
         ${CORE_DIR}/ui/Icons.cpp
         # 0.7.7: câmara de cena (componente/invariante + gizmo do frustum)
         ${CORE_DIR}/core/CameraUtil.cpp
@@ -208,6 +212,7 @@ add_executable(test_core
         ${CORE_DIR}/platform/EngineLog.cpp
         ${CORE_DIR}/platform/FileApi.cpp
         ${CORE_DIR}/platform/CrashHandler.cpp
+        ${CORE_DIR}/platform/BuildInfo.cpp
         # F5.3: a PONTE JNI inteira compila na suíte com o fake JNI
         # (tests/stub/jni.h) — o handshake inverso é testado no hospedeiro
         # (o teste chama Java_vv_goni_VvActivity_nativeRegisterActivity
@@ -279,3 +284,6 @@ target_compile_definitions(test_core PRIVATE
 
 enable_testing()
 add_test(NAME core COMMAND test_core)
+
+# 0.8.10: zlib (inflate do ZIP)
+target_link_libraries(test_core z)

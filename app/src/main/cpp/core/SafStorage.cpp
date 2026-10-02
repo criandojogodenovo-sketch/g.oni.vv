@@ -367,4 +367,20 @@ void SafStorage::closeWriteStream(int handle) {
     reg.erase(it);
 }
 
+bool SafStorage::remove(const std::string& relPath) {
+    if (!io_ || !validRelPath(relPath)) {
+        return false;
+    }
+    std::string err, uri;
+    if (!resolveFile(relPath, false, uri, err)) {
+        elog::error("saf: remove %s — %s", relPath.c_str(), err.c_str());
+        return false;
+    }
+    if (!io_->remove(uri, err)) {
+        elog::error("saf: remove(fd) %s — %s", relPath.c_str(), err.c_str());
+        return false;
+    }
+    return true;
+}
+
 } // namespace vv

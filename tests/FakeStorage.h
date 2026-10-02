@@ -72,6 +72,10 @@ struct FakeStorage final : public vv::ProjectStorage {
         out.assign(it->second.begin(), it->second.end());
         return true;
     }
+    bool remove(const std::string& relPath) override {
+        if (!vv::validRelPath(relPath)) return false;
+        return files.erase(relPath) != 0;
+    }
     bool listDir(const std::string& relDir,
                  std::vector<std::string>& outFiles) const override {
         if (!vv::validRelPath(relDir) || dirs.count(relDir) == 0) return false;

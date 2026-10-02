@@ -1,4 +1,79 @@
-# G.One VV 0.8.9 — CRASH-PROOF: recursão + primitivas à prova de falha + fit uniforme + espaço sem tetos
+# G.One VV 0.8.10 — MESH DETERMINÍSTICA (só cubo e esfera) + import 500 MB STREAMING + formatos próprios (.gmesh/.gtext/.gm) + archives + diagnóstico com identidade
+
+## Escopo 0.8.10 (implementado — a decisão do dono, ZERO features de jogo)
+
+**O DIAGNÓSTICO**: no C33 "o cubo funciona quase sempre, a esfera e o
+cilindro só às vezes" — intermitência em VÁRIAS primitivas = o problema
+não estava nos geradores, estava no CAMINHO PARTILHADO: o cache de meshes
+GPU por assinatura (0.8.0), onde TODAS as trocas de TODOS os TICs se
+cruzavam (evicção/release/rebind podiam mexer no mesh de outro TIC).
+DECISÃO DO DONO: **ficar só com CUBO e ESFERA e MATAR o cache**.
+
+1. **SÓ 2 PRIMITIVAS + MIGRAÇÃO**: cilindro/cone/plano/triângulo/torus/
+   cápsula saem do gerador, seletor, serializer, Docs e testes. Um `.goni`
+   antigo com prim removida carrega como **cube** + log
+   `mesh: prim <x> removido -> cube` + toast 1× por load (nunca crash).
+   Pureza: mesmos parâmetros → BYTES IDÊNTICOS (hash FNV-1a no CI).
+
+2. **TROCA DETERMINÍSTICA (SEM CACHE, deferred free)**: cada MeshRenderer
+   com prim tem o SEU mesh; UM SÓ caminho no **ponto seguro do frame**
+   (início, antes de qualquer submissão GL): `passo=gerador →
+   passo=validacao (finitas+AABB) → passo=upload + SELF-CHECK de contagens
+   → passo=bind` com **deferred free** (o mesh antigo só morre no início do
+   frame SEGUINTE — buffers em voo nunca morrem; no frame da troca o
+   antigo AINDA desenha). Falha em qualquer passo: mesh anterior mantém +
+   seleção intacta + backoff (zero retry-storm) + log passo-a-passo
+   `mesh: troca <de>→<para> passo=<p> ok/ERRO(<razão>)` + toast no ecrã.
+   O pick ARMA o pedido (o antigo renderiza até ao bind) — upload NUNCA
+   a meio do frame.
+
+3. **IMPORT STREAMING 500 MB (nunca o ficheiro inteiro em RAM)**: o import
+   corre numa THREAD própria (o frame desenha o OVERLAY de progresso com
+   barra e CANCELAR); cópia por chunks de 6 MB pelo WRITE STREAM do storage
+   (ProjectStorage::openWriteStream — FsStorage FILE* real, SafStorage fd
+   real); conversão OBJ linha-a-linha; GLB com JSON ≤ 16 MB + BIN chunk
+   DEFERIDO (accessors/imagens materializam só os seus ranges); PNG com
+   guarda 64 MB. **PROVA no CI (output real)**: fixture de 500 MB importada
+   com **RSS de pico 11 MB em 1,7 s**; o caminho ANTIGO (readAll) medido
+   no mesmo ficheiro: **510 MB de RSS** (o crash do dono, morto).
+
+4. **FORMATOS PRÓPRIOS com header comum** (magic/versão/endianness/
+   alinhamento/checksum FNV-1a): `.gmesh` (indexado+dedup+QUANTIZAÇÃO
+   16-bit — 8 B/vértice), `.gtext` (mips ASTC/ETC2 persistidos — upload
+   direto), `.gm` (clips + esqueleto). Corrupção → **erro legível**
+   ("CHECKSUM CORROMPIDO…"), nunca crash. Storage: fonte em `source/` +
+   convertidos em `assets/`; o RUNTIME carrega SÓ formatos próprios
+   (`asset: load <nome>.gmesh verts=N em Xms`); migração de projetos
+   antigos EM SILÊNCIO no primeiro load; Settings: **fonte: manter/largar**
+   + botão **reconverter assets**.
+
+5. **ARCHIVES (2 passos separados — EXTRAIR ≠ IMPORTAR)**: o navegador
+   lista `.zip/.rar`; tocar num .zip extrai STREAMING para
+   `extracted/<nome>/` (ficheiros CRUS — ZERO conversão; o browser ABRE a
+   pasta extraída) com **zip-slip rejeitado** (../ ou absoluto → log,
+   nunca escreve fora), **bomb-guard** (teto por entrada/total → erro
+   legível), CRC por entrada, archives aninhados ignorados, cancelamento
+   sem estado parcial. RAR: sem decoder (licença unrar) → erro legível
+   "usa .zip" (tabela de decisão no RELATORIO). ZIP = parser próprio de
+   central-directory + inflate do zlib do NDK (sem vendoring).
+
+6. **DIAGNÓSTICO COM IDENTIDADE**: TODO crash dump nasce com
+   `build: <versão> (versionCode N)` + `git:` + `so: <sha256>` + `epoch:`
+   no header E no NOME (`crash-<unix>-vc<N>.dump` — o CI escreve
+   `assets/build_info.txt` com o sha256 REAL da .so em 2 passes; a
+   VvActivity entrega pela JNI no onCreate); **banner de versão** no boot
+   log; log viewer marca dumps de outra build com **[ANTIGO]**.
+
+**TESTES**: 568 → **581** (formatos round-trip+rácio, checksum/magic/
+versão/endian rejeitados, 500 MB com RSS REAL medido + prova RED do
+readAll, zip cru/zip-slip/bomb-guard/cancelamento, migração e2e com ref
+reescrita, identidade nos dumps + badge, setting fonte + reconverter,
+stress 600 trocas SEM cache 100% em 3 ms, deferred free aferido no stub,
+backoff sem retry-storm, pureza por hash). CLÁUSULA CALMA: só isto + testes.
+
+---
+
+# (histórico) G.One VV 0.8.9 — CRASH-PROOF: recursão + primitivas à prova de falha + fit uniforme + espaço sem tetos
 
 ## Escopo 0.8.9 (implementado — 4 fixes cirúrgicos, ZERO features)
 
@@ -1519,6 +1594,67 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.8.10 (MESH DETERMINÍSTICA + 500 MB + FORMATOS + ARCHIVES; APK CUMULATIVO)
+
+Instalar o APK 0.8.10 (artifact `goni-vv-0.8.10-release-signed` do run do
+job `build-release`; versionCode 40). A alvo são os CINCO blocos — cada
+passo diz onde confirmar (UI ou log viewer). **Zero crash dumps novos
+continua a ser o critério global** — e agora, se algum houver, o NOME e o
+header do dump dizem EXATAMENTE que build o produziu.
+
+1. **Trocar cubo↔esfera 10× em ordens variadas** (a intermitência): TIC
+   Mesh → Inspector → "prim:" → esfera→box→esfera… e box→esfera→box…,
+   várias voltas com params de slider no meio (raio/segmentos/aneis) —
+   **0 falhas, 0 desseleções, 0 dumps novos**. No log viewer, a cada
+   troca as QUATRO linhas do passo-a-passo:
+   `mesh: troca <de>→<para> passo=gerador ok verts=… idx=…` →
+   `passo=validacao ok` → `passo=upload ok (self-check ok)` →
+   `passo=bind ok (cova=… vivos=…)` — e no frame seguinte
+   `mesh: deferred free … mesh(es) de prim (inicio do frame)`.
+   (Se alguma vez falhar: `passo=<p> ERRO(<razão exata>)` + toast no ecrã
+   — e o mesh ANTERIOR fica a renderizar, a seleção intacta.)
+
+2. **Cena antiga com cilindro/cone/etc. carrega com aviso**: abrir um
+   projeto 0.8.x com TIC de prim removida → o TIC aparece como **CUBE** +
+   toast "prim cilindro foi removida -> cube" (1×) + no log
+   `mesh: prim cilindro removido -> cube`. Re-salvar grava "box" (a cena
+   fica limpa para a frente). NUNCA crash.
+
+3. **Importar o FICHEIRO MAIOR DISPONÍVEL no device** (o crash de 500 MB):
+   Import → navegador → escolher o .obj/.glb/.png mais GORDO do
+   armazenamento — o overlay "IMPORT…" aparece com barra de progresso e
+   botão **cancelar** (testar cancelar a meio uma vez: toast "import
+   cancelado", SEM ficheiro parcial); deixar correr — **sem crash, sem
+   freeze** (o frame continua vivo — a cópia corre noutra thread). No log:
+   `import: job iniciado` → `import: fonte copiada … em chunks de 6 MB` →
+   `asset: convert '…' -> N mesh(es) … (ratio X)` →
+   `asset: load … verts=… em Xms`. O convertido vive em `assets/` e o
+   projeto fica **MENOR** (o rácio está no log).
+
+4. **Projeto antigo converte em silêncio**: abrir um projeto 0.8.9 com
+   meshes/x.obj importado → no primeiro load o log mostra
+   `asset: migracao 'meshes/x.obj'` + `asset: ref migrada 'meshes/x.obj'
+   -> 'assets/x.gmesh'` e o TIC continua a desenhar (o loader próprio
+   `asset: load assets/x.gmesh verts=… em Xms`). Nada perguntado ao dono.
+
+5. **Extrair um .zip (2 passos separados)**: navegador → tocar num .zip
+   com modelo+textura+som → progresso → toast "extraido: N ficheiro(s)
+   crus" e o **browser ABRE a pasta `extracted/<nome>/`** com os ficheiros
+   crus (nada convertido). Importar DEPOIS um deles a partir da pasta
+   extraída → converte normalmente pelo pipeline (assets/). Um .rar dá
+   erro legível "usa .zip". Nada é extraído fora da pasta do projeto.
+
+6. **Settings novos**: Settings → "fonte apos import: manter/largar"
+   (largar = `source/` sai depois de converter; o log diz
+   `fonte 'source/…' largada`) e "reconverter assets" (reconverte tudo de
+   `source/`; toast com a contagem).
+
+7. **Identidade**: abrir Settings → Ver logs → a 1ª linha do arranque é o
+   banner `boot: goni-vv 0.8.10 (versionCode 40, git …, so ok)`; qualquer
+   dump antigo na lista aparece com **[ANTIGO]**. (O `app-release.apk`
+   assinado tem o sha256 no relatório; o dump de qualquer crash novo
+   carrega o mesmo versionCode no nome.)
 
 ## Verificação no Realme C33 (dono) — 0.8.9 (CRASH-PROOF; APK CUMULATIVO)
 

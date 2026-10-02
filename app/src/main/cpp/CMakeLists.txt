@@ -39,6 +39,8 @@ add_library(goni_vv SHARED
         # 0.8.10: formatos próprios (.gmesh/.gtext/.gm) + conversor streaming
         assets/GOwnFormats.cpp
         assets/AssetConverter.cpp
+        # 0.8.10: archives — parser ZIP próprio + inflate zlib
+        assets/ZipExtract.cpp
         assets/ObjExporter.h
         assets/ObjExporter.cpp
         assets/ResourceManager.h
@@ -178,6 +180,7 @@ add_library(goni_vv SHARED
         platform/EngineLog.cpp
         platform/CrashHandler.h
         platform/CrashHandler.cpp
+        platform/BuildInfo.cpp
         # F5.2: File API direta (POSIX; compilado também na suíte do core)
         platform/FileApi.h
         platform/FileApi.cpp
@@ -256,4 +259,5 @@ target_link_libraries(goni_vv
         android
         EGL
         GLESv3
-        log)
+        log
+        z)   # 0.8.10: inflate do ZIP (libz do NDK)

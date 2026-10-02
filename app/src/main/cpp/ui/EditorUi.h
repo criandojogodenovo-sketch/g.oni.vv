@@ -350,7 +350,8 @@ UiTexPickOutcome applyUiTexPick(Scene& scene, Handle tic, i32 element, int pick,
 // definições do sistema); storageMode (não-nulo) desenha a linha
 // "armazenamento: …" com o modo ativo.
 int drawSettingsMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
-                     EditorState& st, const char* storageMode = "");
+                     EditorState& st, const char* storageMode = "",
+                     bool keepSource = true);
 
 // F5.2: DIÁLOGO All Files Access — 0 nada, 1 = "Permitir" (o main lança o
 // intent das definições), 2 = "Cancelar". Fecha com toque fora.

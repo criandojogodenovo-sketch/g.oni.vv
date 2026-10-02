@@ -104,7 +104,41 @@ jobs:
             echo "::warning::Secret VV_KEYSTORE ausente — o APK sai UNSIGNED. Rode o job init-keystore, guarde a keystore offline e configure os secrets VV_*."
           fi
 
-      - name: assembleRelease
+      # 0.8.10 — IDENTIDADE DA BUILD (build_info.txt nos assets do APK):
+      # 1º assembleRelease → extrai a .so arm64 → sha256 REAL dela → escreve
+      # app/src/main/assets/build_info.txt (git/epoch/soSha256/version) →
+      # 2º assembleRelease embute o ficheiro (a .so não muda — o gradle
+      # re-usa o build; o sha continua válido). O CrashHandler põe esta
+      # identidade no NOME e header de TODO crash dump.
+      - name: assembleRelease (passo 1 — .so para o sha256)
+        env:
+          VV_STORE_PW: ${{ secrets.VV_STORE_PW }}
+          VV_KEY_ALIAS: ${{ secrets.VV_KEY_ALIAS }}
+          VV_KEY_PW: ${{ secrets.VV_KEY_PW }}
+        run: ./gradlew assembleRelease --stacktrace --no-daemon
+
+      - name: Escrever assets/build_info.txt (identidade)
+        run: |
+          set -euo pipefail
+          APK="$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)"
+          unzip -q "${APK}" 'lib/arm64-v8a/*' -d libinfo
+          SO="libinfo/lib/arm64-v8a/libgoni_vv.so"
+          test -f "${SO}"
+          SO_SHA="$(sha256sum "${SO}" | cut -d' ' -f1)"
+          VCODE="$(grep -oE 'versionCode [0-9]+' app/build.gradle | head -n1 | grep -oE '[0-9]+')"
+          VNAME="$(grep -oE "versionName '[0-9.]+'" app/build.gradle | head -n1 | grep -oE "[0-9.]+")"
+          mkdir -p app/src/main/assets
+          {
+            echo "version=${VNAME}"
+            echo "versionCode=${VCODE}"
+            echo "git=${GITHUB_SHA}"
+            echo "soSha256=${SO_SHA}"
+            echo "epoch=$(date +%s)"
+          } > app/src/main/assets/build_info.txt
+          echo "--- build_info.txt ---"
+          cat app/src/main/assets/build_info.txt
+
+      - name: assembleRelease (passo 2 — embute a identidade)
         env:
           VV_STORE_PW: ${{ secrets.VV_STORE_PW }}
           VV_KEY_ALIAS: ${{ secrets.VV_KEY_ALIAS }}
@@ -193,6 +227,20 @@ jobs:
           # identificador literal (_ZN2vv11makePrimMeshE…), o grep apanha.
           echo "--- .dynsym (gerador de primitivas + troca) ---"
           grep -E 'makePrimMesh|primDefaults|primName|primClamp|applyAssetPick' dynsyms.txt || true
+          # 0.8.10 — FORMATOS PRÓPRIOS + STREAMING + ARCHIVES: os leitores/
+          # escritores de .gmesh/.gtext/.gm, o conversor streaming e o
+          # extrator de ZIP têm de estar no BINÁRIO DA APP (o precedente
+          # FileApi: testes verdes + device sem a feature = gate obrigatório)
+          echo "--- .dynsym (formatos próprios + streaming + zip 0.8.10) ---"
+          grep -E 'writeGMesh|readGMesh|readGText|readGAnim|primMeshHash|importFile|extractArchive|attachGAnim|migrateLegacyAssets' dynsyms.txt || true
+          for SYM in writeGMesh readGMesh readGText readGAnim primMeshHash extractArchive attachGAnim; do
+            grep -q "${SYM}" dynsyms.txt \
+              || { echo "::error::SÍMBOLO AUSENTE: vv::${SYM} — os FORMATOS PRÓPRIOS/streaming/zip 0.8.10 não estão no APK (ficheiro fora da build da app?)."; exit 1; }
+          done
+          grep -q 'importFile' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: vv::convert::importFile — o CONVERSOR STREAMING não está no APK."; exit 1; }
+          grep -q 'migrateLegacyAssets' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: vv::convert::migrateLegacyAssets — a MIGRAÇÃO de projetos antigos não está no APK."; exit 1; }
           grep -q 'makePrimMesh' dynsyms.txt \
             || { echo "::error::SÍMBOLO AUSENTE: vv::makePrimMesh — o GERADOR DE PRIMITIVAS não está no APK (render/Primitives.cpp fora da build da app? O seletor listaria as formas mas nenhuma troca geraria geometria)."; exit 1; }
           grep -q 'primDefaults' dynsyms.txt \

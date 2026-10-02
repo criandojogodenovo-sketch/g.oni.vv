@@ -251,4 +251,16 @@ void FsStorage::closeWriteStream(int handle) {
     reg.erase(it);
 }
 
+bool FsStorage::remove(const std::string& relPath) {
+    if (!validRelPath(relPath)) {
+        return false;
+    }
+    const std::string abs = joinRelPath(root(), relPath);
+    if (abs.empty() || ::remove(abs.c_str()) != 0) {
+        elog::error("fs: remove '%s' FALHOU (errno=%d)", relPath.c_str(), errno);
+        return false;
+    }
+    return true;
+}
+
 } // namespace vv
