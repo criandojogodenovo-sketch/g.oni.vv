@@ -31,8 +31,6 @@ android {
 
         // 0.8.10: BuildConfig ON (a identidade da build — VERSION_NAME/
         // VERSION_CODE — chega à JNI do nativeSetBuildInfo)
-        buildConfigField 'String', 'BUILD_EPOCH', '"0"'
-
         ndk {
             abiFilters 'arm64-v8a'   // device de teste: Realme C33 (720x1600)
         }
