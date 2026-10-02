@@ -1,5 +1,6 @@
 // render/GpuAssets.cpp — 1 ref → 1 objeto GL (F5-E; texturas F5.1-A).
 #include "render/GpuAssets.h"
+#include "assets/GOwnFormats.h"
 #include "assets/TextureCompressor.h"
 #include "assets/TexturePipeline.h"
 #include "platform/Log.h"
@@ -89,6 +90,36 @@ const Texture* GpuAssets::texture(const std::string& relPath, std::string* warn)
             warn->clear();   // do cache não repete o aviso do gate
         }
         return it->second.get();
+    }
+
+    // 0.8.10 — FORMATO PRÓPRIO .gtext: o container já TEM os mips ASTC/ETC2
+    // (o import comprimiu UMA vez) — upload direto, zero re-processo.
+    if (rm_->storage()) {
+        const std::string ext = lowerExtOf(relPath);
+        if (ext == "gtext") {
+            std::vector<u8> bytes;
+            if (!rm_->storage()->readBytes(relPath, bytes) || bytes.empty()) {
+                LOGE("GpuAssets: textura não encontrada: %s", relPath.c_str());
+                return nullptr;
+            }
+            CompressedImage comp;
+            std::string gerr;
+            if (!readGText(bytes.data(), bytes.size(), comp, gerr)) {
+                LOGE("GpuAssets: .gtext inválido (%s): %s", relPath.c_str(),
+                     gerr.c_str());
+                return nullptr;
+            }
+            LOGI("GpuAssets: textura %s %ux%u %s (gtext direto)",
+                 relPath.c_str(), comp.width, comp.height,
+                 formatName(comp.format));
+            auto t = std::make_unique<Texture>();
+            if (!t->createFromCompressed(comp)) {
+                return nullptr;
+            }
+            Texture* raw = t.get();
+            gpuTextures_.emplace(relPath, std::move(t));
+            return raw;
+        }
     }
 
     // F5.1-A: caminho canônico — PNG bytes → pipeline (cache disco +

@@ -36,8 +36,12 @@ class Project {
 public:
     static constexpr const char* kManifestFile = "project.goni";
     static constexpr const char* kDirScenes    = "scenes";
-    static constexpr const char* kDirMeshes    = "meshes";
-    static constexpr const char* kDirTextures  = "textures";
+    static constexpr const char* kDirMeshes    = "meshes";     // legado (0.8.9-)
+    static constexpr const char* kDirTextures  = "textures";   // legado (0.8.9-)
+    // 0.8.10: FORMATOS PRÓPRIOS — a fonte entra em source/, o convertido
+    // vive em assets/ (.gmesh/.gtext/.gm — o QUE o runtime carrega)
+    static constexpr const char* kDirSource    = "source";
+    static constexpr const char* kDirAssets    = "assets";
     static constexpr u32 kVersion = 1;
 
     std::string name = "projeto";

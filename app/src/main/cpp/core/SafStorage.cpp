@@ -5,6 +5,7 @@
 // persiste no provider. Toda falha é logada COM A CAUSA (mensagens
 // honestas — nada de engolir erros de permissão como "ficheiro ausente").
 #include "core/SafStorage.h"
+#include <map>
 #include "platform/EngineLog.h"
 #include <algorithm>
 #include <cerrno>
@@ -313,6 +314,57 @@ bool SafStorage::listDir(const std::string& relDir,
     }
     std::sort(outFiles.begin(), outFiles.end());
     return true;
+}
+
+// ---- 0.8.10: escrita streaming REAL (fd SAF aberto até ao close) -------------
+namespace {
+std::map<int, int>& safStreams() {
+    static std::map<int, int> reg;
+    return reg;
+}
+int safNextHandle() {
+    static int next = 2000;
+    return next++;
+}
+} // namespace
+
+int SafStorage::openWriteStream(const std::string& relPath) {
+    if (!io_ || !validRelPath(relPath)) {
+        return -1;
+    }
+    std::string err, uri;
+    if (!resolveFile(relPath, true, uri, err)) {
+        elog::error("saf: writeStream %s — %s", relPath.c_str(), err.c_str());
+        return -1;
+    }
+    int fd = -1;
+    if (!io_->openFd(uri, "wt", &fd, err)) {
+        elog::error("saf: writeStream open(wt) %s — %s", relPath.c_str(),
+                    err.c_str());
+        return -1;
+    }
+    const int h = safNextHandle();
+    safStreams()[h] = fd;
+    return h;
+}
+
+bool SafStorage::writeStreamChunk(int handle, const void* data, size_t n) {
+    auto& reg = safStreams();
+    const auto it = reg.find(handle);
+    if (it == reg.end()) {
+        return false;
+    }
+    return writeAllFd(it->second, data, n);
+}
+
+void SafStorage::closeWriteStream(int handle) {
+    auto& reg = safStreams();
+    const auto it = reg.find(handle);
+    if (it == reg.end()) {
+        return;
+    }
+    ::close(it->second);   // o provider persiste no close do fd
+    reg.erase(it);
 }
 
 } // namespace vv

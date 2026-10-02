@@ -85,6 +85,36 @@ bool readAll(const std::string& path, std::vector<u8>& out);
 // existir). false = mkdirs/fopen/write falharam (errno logado).
 bool writeAll(const std::string& path, const void* data, size_t n);
 
+// ---- 0.8.10 — STREAMING (o import de 500 MB NUNCA carrega o ficheiro) ------
+// tamanho do ficheiro sem o abrir inteiro (stat). false = stat falhou.
+bool fileSize(const std::string& path, u64& out);
+
+// leitor de CHUNKS: uma FILE* aberta, `chunk` bytes de cada vez no buf
+// interno (a RAM de pico do import = chunk + destinos). next() devolve
+// false no fim (last=0) ou em erro de leitura (errno logado).
+struct ChunkReader {
+    void* file = nullptr;        // FILE* opaco (header sem <cstdio>)
+    u64   total = 0;             // tamanho do ficheiro
+    u64   done = 0;              // bytes já lidos
+    size_t last = 0;             // bytes válidos em buf neste chunk
+    std::vector<u8> buf;         // o chunk corrente
+    bool open(const std::string& path, size_t chunk);
+    bool next();
+    void close();
+    ~ChunkReader();
+    ChunkReader() = default;
+    ChunkReader(const ChunkReader&) = delete;
+    ChunkReader& operator=(const ChunkReader&) = delete;
+};
+
+// cópia STREAMING src→dst em chunks (cria pastas-mãe do dst; substitui).
+// `onProgress(user, done, total)` é chamado por chunk: devolve FALSE para
+// CANCELAR (devolve false com errno=ECANCELED no errnoText; o dst PARCIAL
+// fica no sítio — o chamador remove). Nunca o ficheiro inteiro em RAM.
+bool copyFileChunked(const std::string& src, const std::string& dst,
+                     size_t chunk,
+                     bool (*onProgress)(void*, u64, u64), void* user);
+
 // mkdir -p (recursivo). true = existe no fim.
 bool makeDirs(const std::string& dir);
 

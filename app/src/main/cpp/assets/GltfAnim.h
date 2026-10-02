@@ -20,6 +20,7 @@
 //
 // GL-free / host-testável (o CI constrói fixtures .glb em código).
 #include "assets/GltfImporter.h"
+#include "assets/GOwnFormats.h"
 #include "core/Handle.h"
 
 namespace vv {
@@ -34,5 +35,9 @@ u32 gltfAttachClips(Scene& scene, Handle tic, const GltfModel& model,
 // inverseBind). Devolve o número de joints (0 se sem skin/já tem esqueleto)
 u32 gltfAttachSkin(Scene& scene, Handle tic, const GltfModel& model,
                    u32 skinIdx = 0);
+
+// 0.8.10: .gm (formato próprio) → clips + SkeletonComp do TIC — o caminho
+// do load de cenas convertidas (assets/<x>.gm irmão do .gmesh referenciado)
+u32 attachGAnim(Scene& scene, Handle tic, const GAnimFile& anim);
 
 } // namespace vv

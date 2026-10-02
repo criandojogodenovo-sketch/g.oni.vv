@@ -136,7 +136,8 @@ std::string animatedGltf() {
     return j;
 }
 
-// upload REAL de uma primitiva no stub (o wiring que o main faz no cache)
+// upload REAL de uma primitiva no stub (simula o primUploadOne do main:
+// gera + uploda num "ponto seguro" — o teste chama quando o flush correria)
 Mesh* hostPrimMesh(const PrimParams& p) {
     PrimMeshData d;
     makePrimMesh(p, d);
@@ -282,9 +283,12 @@ TEST(wiring085_anim_e2e_criar_keys_scrub_play_opcoes_save_load) {
     EXPECT(nearEqF(tr2->pos.x, p0.x + 2.0f));
 }
 
-// ---- 3. trocar primitiva ×3: mesh TROCA no render e no .goni ---------------
+// ---- 3. trocar primitiva: pick ARMA o pedido; flush sobe; .goni grava -----
+// 0.8.10: o applyAssetPick é PURO — o pick deixa primOn+params com mesh
+// null (PEDIDO PENDENTE); o upload corre no PONTO SEGURO do frame pelo
+// caminho único do main (aqui simula-se com hostPrimMesh = gerar+subir).
 
-TEST(wiring085_prim_switch_x3_reflete_no_render_e_no_goni) {
+TEST(wiring085_prim_switch_pending_flush_e_goni) {
     glstub::reset();
     Renderer r;
     ASSERT(r.init());
@@ -296,14 +300,12 @@ TEST(wiring085_prim_switch_x3_reflete_no_render_e_no_goni) {
     MeshRenderer* mr = scene.get(h)->getComponent<MeshRenderer>();
     ASSERT(mr != nullptr);
 
-    // resolvers REAIS do device (o cache do main é isto: gerar + uploudar)
     editor::AssetResolvers res;
-    res.prim = [](const PrimParams& p) -> Mesh* { return hostPrimMesh(p); };
     res.material = r.litMaterial();
 
-    // esfera default → cone → box → torus (3 trocas do critério)
-    const PrimKind seq[4] = {PrimKind::Sphere, PrimKind::Cone, PrimKind::Box,
-                             PrimKind::Torus};
+    // esfera → box → esfera → box (ordens variadas do critério)
+    const PrimKind seq[4] = {PrimKind::Sphere, PrimKind::Box,
+                             PrimKind::Sphere, PrimKind::Box};
     u32 drawsBefore = glstub::stats.drawElementsCalls;
     for (u32 i = 0; i < 4; ++i) {
         const editor::AssetPickOutcome out = editor::applyAssetPick(
@@ -312,32 +314,37 @@ TEST(wiring085_prim_switch_x3_reflete_no_render_e_no_goni) {
         EXPECT(out.applied);
         EXPECT(mr->primOn);
         EXPECT(mr->prim.kind == seq[i]);
-        EXPECT(mr->mesh != nullptr);
+        EXPECT(mr->mesh == nullptr);   // PENDENTE — o upload é do main
         EXPECT(mr->meshPath.empty());
-        // RENDER: o mesh NOVO desenha de facto no stub (o mesh velho saiu)
+        // "flush" do teste (o que primFlushPending faria no main):
+        Mesh* m = hostPrimMesh(mr->prim);
+        ASSERT(m != nullptr);
+        mr->mesh = m;
+        mr->material = res.material;
+        // RENDER: o mesh NOVO desenha de facto no stub
         r.beginFrame();
         const Mat4 vp = Mat4::identity();
         (void)r.drawMesh(*mr->mesh, Mat4::identity(), vp);
         EXPECT(glstub::stats.drawElementsCalls == drawsBefore + 1);
         drawsBefore = glstub::stats.drawElementsCalls;
+        delete m;
+        mr->mesh = nullptr;   // próximo ciclo volta a pendente
     }
 
-    // .goni: "mesh":"prim" + bloco "prim" → round-trip com resolver real
+    // .goni: "mesh":"prim" + bloco "prim" → round-trip (sem resolver:
+    // entra PENDENTE — quem sobe é o main no frame seguinte)
     const std::string json = SceneSerializer::dump(scene);
     EXPECT(json.find("\"prim\"") != std::string::npos);
     Scene loaded;
     SceneSerializer::LoadCtx ctx;
-    ctx.resolvePrim = [](const PrimParams& p) -> Mesh* {
-        return hostPrimMesh(p);
-    };
     ASSERT(SceneSerializer::loadText(loaded, json, ctx));
     const Handle h2 = loaded.find("Mesh");
     ASSERT(h2.valid());
     MeshRenderer* mr2 = loaded.get(h2)->getComponent<MeshRenderer>();
     ASSERT(mr2 != nullptr);
     EXPECT(mr2->primOn);
-    EXPECT(mr2->prim.kind == PrimKind::Torus);   // a ÚLTIMA troca persiste
-    EXPECT(mr2->mesh != nullptr);
+    EXPECT(mr2->prim.kind == PrimKind::Box);   // a ÚLTIMA troca persiste
+    EXPECT(mr2->mesh == nullptr);              // pendente (política 0.8.10)
     r.shutdown();
 }
 

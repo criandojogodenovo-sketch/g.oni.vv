@@ -293,7 +293,8 @@ struct AssetResolvers {
     std::string (*meshTextureFor)(const std::string& ref) = nullptr;  // glTF embutida
     Mesh*       cubeMesh = nullptr;      // cubo procedural do main
     LitMaterial* material = nullptr;    // lit do renderer
-    Mesh* (*prim)(const PrimParams& p) = nullptr;   // 0.8.0: cache de primitivas
+    // 0.8.10: o resolver `prim` MORREU com o cache — o pick ARMA o pedido
+    // (primOn+params+mesh=null) e o main sobe no ponto seguro do frame.
     // 0.8.9: EXTENSÃO do AABB do mesh COMO DADOS (o applyAssetPick é PURO e
     // NUNCA desreferencia o Mesh — contrato dos testes com stubs-ponteiro;
     // o main liga-a ao boundsExtent do Mesh real). Null = sem normalização

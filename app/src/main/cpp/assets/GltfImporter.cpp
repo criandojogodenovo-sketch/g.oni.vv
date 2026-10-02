@@ -7,6 +7,7 @@
 #include "assets/GltfImporter.h"
 #include "core/Json.h"
 #include <cstring>
+#include <deque>
 
 namespace vv {
 
@@ -55,17 +56,85 @@ struct ViewSpan {
     size_t stride = 0;   // 0 = compacto
 };
 
-bool resolveView(const std::vector<std::vector<u8>>& buffers, const Json& bv,
+// 0.8.10 — STORE de buffers: residentes (base64/externo) OU DEFERIDOS (o
+// BIN chunk de um .glb EM FICHEIRO: ranges materializados POR DEMANDA com
+// ponteiros estáveis num pool — o import de 500 MB nunca carrega o BIN).
+constexpr u64 kMaxRangeBytes = 64ull * 1024 * 1024;   // teto por range (imagem enorme → erro legível)
+
+class GltfBufferStore {
+public:
+    void addOwned(std::vector<u8>&& b) {
+        Entry e;
+        e.owned = std::move(b);
+        e.deferredLen = e.owned.size();
+        entries_.push_back(std::move(e));
+    }
+    void addDeferred(u64 totalLen) {
+        Entry e;
+        e.deferredLen = totalLen;
+        e.deferred = true;
+        entries_.push_back(std::move(e));
+    }
+    void setRangeLoader(const GltfRangeLoader& l) { loader_ = l; }
+
+    size_t count() const { return entries_.size(); }
+    u64 size(size_t bi) const {
+        return bi < entries_.size() ? entries_[bi].deferredLen : 0;
+    }
+
+    // ponteiro ESTÁVEL para [off, off+len) — materializa se for deferred
+    const u8* span(size_t bi, size_t off, size_t len) {
+        if (bi >= entries_.size() || len == 0) {
+            return nullptr;
+        }
+        Entry& e = entries_[bi];
+        if (!e.deferred) {
+            if (off + len > e.owned.size()) {
+                return nullptr;
+            }
+            return e.owned.data() + off;
+        }
+        if (off + len > e.deferredLen) {
+            return nullptr;
+        }
+        if (len > kMaxRangeBytes) {
+            return nullptr;   // range absurdo (imagem de >64 MB) — recusa
+        }
+        if (!loader_.fn) {
+            return nullptr;
+        }
+        pool_.emplace_back();
+        std::vector<u8>& dst = pool_.back();
+        if (!loader_.fn(loader_.user, static_cast<u32>(bi),
+                        static_cast<u64>(off), static_cast<u64>(len), dst) ||
+            dst.size() != len) {
+            return nullptr;
+        }
+        return dst.data();
+    }
+
+private:
+    struct Entry {
+        std::vector<u8> owned;   // residente
+        u64 deferredLen = 0;
+        bool deferred = false;
+    };
+    std::vector<Entry> entries_;
+    GltfRangeLoader loader_{};
+    std::deque<std::vector<u8>> pool_;   // ranges materializados (ptr estáveis)
+};
+
+bool resolveView(GltfBufferStore& store, const Json& bv,
                  size_t accessorByteOffset, size_t elemSize, ViewSpan& out) {
     const Json* jbuf = bv.find("buffer");
     if (!jbuf || jbuf->type != Json::Type::Number) {
         return false;
     }
     const size_t bi = static_cast<size_t>(jbuf->number);
-    if (bi >= buffers.size()) {
+    if (bi >= store.count()) {
         return false;
     }
-    const std::vector<u8>& buf = buffers[bi];
+    const u64 bufSize = store.size(bi);
     size_t off = 0;
     if (const Json* o = bv.find("byteOffset"); o && o->type == Json::Type::Number) {
         off = static_cast<size_t>(o->number);
@@ -91,10 +160,14 @@ bool resolveView(const std::vector<std::vector<u8>>& buffers, const Json& bv,
         stride = elemSize;
     }
     const size_t total = off + accessorByteOffset + bLen;
-    if (total > buf.size()) {
+    if (static_cast<u64>(total) > bufSize) {
         return false;   // view fora do buffer — recusa, não lê fora
     }
-    out.data = buf.data() + off + accessorByteOffset;
+    // 0.8.10: materializa SÓ o range necessário (deferred = streaming)
+    out.data = store.span(bi, off + accessorByteOffset, bLen - accessorByteOffset);
+    if (!out.data) {
+        return false;
+    }
     out.byteLength = bLen - accessorByteOffset;
     out.stride = stride;
     return true;
@@ -142,7 +215,7 @@ bool decodeBase64(const char* src, size_t len, std::vector<u8>& out) {
 
 bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                const GltfBufferResolver& resolver, GltfModel& out,
-               std::string& err) {
+               std::string& err, const GltfRangeLoader* rangeLoader) {
     out = GltfModel{};
     if (!json || len == 0) {
         err = "glTF: json vazio";
@@ -160,17 +233,26 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
     }
 
     // ---- buffers ------------------------------------------------------------
-    std::vector<std::vector<u8>> buffers;
+    GltfBufferStore store;
+    if (rangeLoader && rangeLoader->fn) {
+        store.setRangeLoader(*rangeLoader);
+    }
     if (const Json* jb = doc.find("buffers"); jb && jb->type == Json::Type::Array) {
         for (const Json& b : jb->items) {
             const Json* uri = b.find("uri");
             if (!uri || uri->type != Json::Type::String || uri->string.empty()) {
-                // sem URI = buffer do GLB (BIN chunk)
+                // sem URI = buffer do GLB (BIN chunk). 0.8.10: com RANGE
+                // LOADER o buffer é DEFERIDO (streaming do ficheiro); sem
+                // loader, residente como sempre.
+                if (rangeLoader && rangeLoader->fn && rangeLoader->binLen > 0) {
+                    store.addDeferred(rangeLoader->binLen);
+                    continue;
+                }
                 if (bin.empty()) {
                     err = "glTF: buffer sem URI fora de .glb";
                     return false;
                 }
-                buffers.push_back(bin);
+                store.addOwned(std::vector<u8>(bin));
                 continue;
             }
             const std::string& u = uri->string;
@@ -182,14 +264,14 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                     err = "glTF: data: URI base64 inválida";
                     return false;
                 }
-                buffers.push_back(std::move(decoded));
+                store.addOwned(std::move(decoded));
             } else if (resolver.fn) {
                 std::vector<u8> ext;
                 if (!resolver.fn(resolver.user, u.c_str(), ext) || ext.empty()) {
                     err = "glTF: buffer externo não resolvido: " + u;
                     return false;
                 }
-                buffers.push_back(std::move(ext));
+                store.addOwned(std::move(ext));
             } else {
                 err = "glTF: buffer externo sem resolver: " + u;
                 return false;
@@ -238,7 +320,7 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                     return false;
                 }
                 ViewSpan span;
-                if (!resolveView(buffers, jviews->items[static_cast<size_t>(vi)],
+                if (!resolveView(store, jviews->items[static_cast<size_t>(vi)],
                                  0, 1, span)) {
                     err = "glTF: bufferView da imagem fora do buffer";
                     return false;
@@ -348,7 +430,7 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
         }
         const size_t elemSize = compSize * compCount;
         ViewSpan span;
-        if (!resolveView(buffers, jviews->items[static_cast<size_t>(viewIdx)],
+        if (!resolveView(store, jviews->items[static_cast<size_t>(viewIdx)],
                          byteOff, elemSize, span)) {
             err = "glTF: bufferView fora do buffer (ficheiro corrompido?)";
             return false;

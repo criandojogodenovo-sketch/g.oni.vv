@@ -55,11 +55,27 @@ public:
     virtual bool writeBytes(const std::string& relPath, const void* data, size_t n) = 0;
     virtual bool readBytes(const std::string& relPath, std::vector<u8>& out) const = 0;
 
+    // 0.8.10 — ESCRITA STREAMING (import de ficheiros grandes: a fonte entra
+    // por chunks — NUNCA o ficheiro inteiro em RAM). Contrato:
+    //   openWriteStream(rel): abre/cria/trunca → handle > 0 (ou -1 = falha);
+    //   writeStreamChunk(h, data, n): acrescenta (false = falha/cheio demais);
+    //   closeWriteStream(h): fecha e persiste (idempotente).
+    // Implementações REAIS (FsStorage FILE*, SafStorage fd SAF) escrevem em
+    // streaming de verdade; o DEFAULT acumula com teto (kStreamAccumMax) e
+    // faz writeBytes no close — FakeStorage e testes herdam isso.
+    virtual int  openWriteStream(const std::string& relPath);
+    virtual bool writeStreamChunk(int handle, const void* data, size_t n);
+    virtual void closeWriteStream(int handle);
+
     // Nomes de FICHEIROS (não diretórios) dentro de relDir, ordenados.
     // false se relDir não existe; lista vazia = diretório sem ficheiros.
     virtual bool listDir(const std::string& relDir,
                          std::vector<std::string>& outFiles) const = 0;
 };
+
+// teto do DEFAULT acumulador de escrita streaming (implementações reais
+// não passam por aqui — Fs/Saf escrevem direto ao fd)
+constexpr size_t kStreamAccumMax = 256ull * 1024 * 1024;
 
 // Guarda de caminho: true se é um rel-path seguro ("scenes/main.goni").
 // Recusa: vazio, absoluto ('/'), "..", segmento vazio ("a//b") e '\\'.

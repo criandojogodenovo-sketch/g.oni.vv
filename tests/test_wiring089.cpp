@@ -397,7 +397,7 @@ TEST(wiring089_import_normalizacao_uniforme_preserva_proporcoes) {
     EXPECT(nearEqF(giant.boundsMaxExtent(), 1000.0f, 1e-3f));
 
     editor::AssetCatalog catalog;
-    catalog.meshes.push_back("giant.obj");
+    catalog.meshes.push_back("meshes/giant.obj");
     editor::AssetResolvers res;
     res.mesh = [](const std::string& ref) -> Mesh* {
         return ref == "meshes/giant.obj" ? &giant : nullptr;
@@ -505,15 +505,14 @@ TEST(wiring089_campo_numerico_sem_teto_py_10000) {
 }
 
 // ---------------------------------------------------------------------------
-// 7. AUDITORIA DOS GERADORES — 8 primitivas × defaults E EXTREMOS
+// 7. AUDITORIA DOS GERADORES — as DUAS primitivas × defaults E EXTREMOS
+//    (+ PUREZA: hash estável por assinatura em cada variante)
 // ---------------------------------------------------------------------------
 TEST(wiring089_geradores_matrix_default_e_extremos) {
     struct Case { const char* name; PrimKind kind; };
-    const Case kinds[8] = {
-        {"esfera", PrimKind::Sphere},   {"cilindro", PrimKind::Cylinder},
-        {"cone", PrimKind::Cone},       {"box", PrimKind::Box},
-        {"plano", PrimKind::Plane},     {"triangulo", PrimKind::Wedge},
-        {"torus", PrimKind::Torus},     {"capsula", PrimKind::Capsule},
+    const Case kinds[2] = {
+        {"esfera", PrimKind::Sphere},
+        {"box", PrimKind::Box},
     };
     for (const Case& kc : kinds) {
         PrimParams variants[5];
@@ -542,6 +541,10 @@ TEST(wiring089_geradores_matrix_default_e_extremos) {
             const f32 maior = ex > ey ? (ex > ez ? ex : ez)
                                       : (ey > ez ? ey : ez);
             EXPECT(maior > 1e-6f);   // AABB não degenerado
+            // PUREZA: a MESMA variante gera o MESMO hash (função dos params)
+            PrimMeshData again;
+            makePrimMesh(pIn, again);
+            EXPECT(primMeshHash(data) == primMeshHash(again));
         }
     }
 }

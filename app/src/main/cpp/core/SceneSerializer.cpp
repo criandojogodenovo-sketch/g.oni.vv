@@ -377,15 +377,26 @@ void fillMeshRenderer(MeshRenderer* mr, const Json& comp, const LoadCtx& ctx) {
     const bool hasPath = mp && mp->type == Json::Type::String && !mp->string.empty();
     const bool isPrim = m && m->type == Json::Type::String && m->string == "prim";
     if (isPrim) {
-        // 0.8.0 (F7): primitiva procedural — tipo+parâmetros do bloco "prim"
-        // (ausentes = defaults DO TIPO); mesh = gerado do resolver (cache do
-        // main); sem resolver → primOn+params ficam e mesh null (rebind)
+        // 0.8.10 — SÓ CUBO E ESFERA + MIGRAÇÃO: um .goni antigo com
+        // "cilindro"/"cone"/"plano"/"triangulo"/"torus"/"capsula" carrega
+        // como BOX (cube) com o callback onPrimMigrated (o main faz log +
+        // toast 1× por load). NUNCA crash — a cena abre sempre.
+        // O mesh NÃO é resolvido aqui: primOn+params ficam e mesh null =
+        // PEDIDO PENDENTE — o main sobe no ponto seguro do frame (troca
+        // determinística sem cache, um só caminho).
         PrimKind kind = PrimKind::Sphere;
         const Json* jp = comp.find("prim");
         if (jp && jp->type == Json::Type::Object) {
             if (const Json* j = jp->find("type");
                 j && j->type == Json::Type::String) {
-                kind = primFromName(j->string);
+                if (primRemoved(j->string)) {
+                    kind = PrimKind::Box;   // migração: prim removida → cube
+                    if (ctx.onPrimMigrated) {
+                        ctx.onPrimMigrated(j->string.c_str());
+                    }
+                } else {
+                    kind = primFromName(j->string);
+                }
             }
         }
         PrimParams p = primDefaults(kind);
@@ -396,8 +407,6 @@ void fillMeshRenderer(MeshRenderer* mr, const Json& comp, const LoadCtx& ctx) {
                            ? static_cast<f32>(j->number) : def;
             };
             p.radius  = readF("r", p.radius);
-            p.height  = readF("h", p.height);
-            p.radius2 = readF("r2", p.radius2);
             p.size    = readF("size", p.size);
             if (const Json* j = jp->find("seg");
                 j && j->type == Json::Type::Number) {
@@ -407,23 +416,34 @@ void fillMeshRenderer(MeshRenderer* mr, const Json& comp, const LoadCtx& ctx) {
                 j && j->type == Json::Type::Number) {
                 p.rings = static_cast<i32>(j->number);
             }
+            // height/radius2: campos de prims REMOVIDAS — lidos e ignorados
+            // (compatibilidade; o clamp mantém-nos sanos sem efeito)
+            (void)readF("h", p.height);
+            (void)readF("r2", p.radius2);
         }
         primClamp(p);
         mr->primOn = true;
         mr->prim = p;
-        mr->mesh = ctx.resolvePrim ? ctx.resolvePrim(p) : nullptr;
-        mr->material = mr->mesh ? ctx.material : nullptr;
+        mr->primPending = true;   // PEDIDO — sobe no ponto seguro do frame
+        mr->primNeg = false;      // load = pedido NOVO (nova tentativa)
+        mr->mesh = nullptr;       // cena nova: nada para manter
+        mr->material = nullptr;
+        mr->primRetire = nullptr;
         mr->meshPath.clear();
     } else if (hasPath) {
         // F5-E: ref relativa → resolver do device (cache de GPU); sem
         // resolver, o TIC entra sem mesh mas mantém a ref p/ rebind
         mr->primOn = false;
+        mr->primPending = false;
+        mr->primRetire = nullptr;
         mr->meshPath = mp->string;
         mr->mesh = ctx.resolveMesh ? ctx.resolveMesh(mr->meshPath) : nullptr;
         mr->material = mr->mesh ? ctx.material : nullptr;
     } else {
         const bool wantsCube = m && m->type == Json::Type::String && m->string == "cube";
         mr->primOn = false;
+        mr->primPending = false;
+        mr->primRetire = nullptr;
         mr->mesh = wantsCube ? ctx.cubeMesh : nullptr;
         mr->material = wantsCube ? ctx.material : nullptr;
         mr->meshPath.clear();

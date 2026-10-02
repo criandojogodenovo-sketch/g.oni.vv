@@ -551,32 +551,29 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         }
         case InspRow::Kind::PrimSlider: {
             if (mrEdit && mrEdit->primOn) {
-                // payload pelo ID (o plano empurra R → H → Seg → Tube na
-                // ordem do tipo; os ausentes não têm row)
+                // payload pelo ID (o plano empurra R → Seg → Rings na ordem
+                // do tipo; o box só tem R=tamanho)
                 if (r.id == kInspectorPrimR) {
-                    const bool isSize = mrEdit->prim.kind == PrimKind::Box ||
-                                        mrEdit->prim.kind == PrimKind::Plane ||
-                                        mrEdit->prim.kind == PrimKind::Wedge;
+                    // 0.8.10: esfera → raio; box → tamanho (mesma row)
+                    const bool isSize = mrEdit->prim.kind == PrimKind::Box;
+                    f32* val = isSize ? &mrEdit->prim.size : &mrEdit->prim.radius;
                     if (sliderRow(ui, r.id, x, ry, r.h, tm,
-                                  isSize ? "raio/tam" : "raio", 0.05f, 4.0f,
-                                  mrEdit->prim.radius, "%.2f")) {
-                        primEdited = true;
-                    }
-                } else if (r.id == kInspectorPrimH) {
-                    if (sliderRow(ui, r.id, x, ry, r.h, tm, "altura", 0.1f,
-                                  6.0f, mrEdit->prim.height, "%.2f")) {
+                                  isSize ? "tamanho" : "raio", 0.05f, 4.0f,
+                                  *val, "%.2f")) {
                         primEdited = true;
                     }
                 } else if (r.id == kInspectorPrimSeg) {
                     f32 seg = static_cast<f32>(mrEdit->prim.segments);
                     if (sliderRow(ui, r.id, x, ry, r.h, tm, "segmentos", 3.0f,
-                                  32.0f, seg, "%.0f")) {
+                                  64.0f, seg, "%.0f")) {
                         mrEdit->prim.segments = static_cast<i32>(seg + 0.5f);
                         primEdited = true;
                     }
-                } else if (r.id == kInspectorPrimTube) {
-                    if (sliderRow(ui, r.id, x, ry, r.h, tm, "tubo", 0.02f,
-                                  1.0f, mrEdit->prim.radius2, "%.2f")) {
+                } else if (r.id == kInspectorPrimRings) {
+                    f32 rg = static_cast<f32>(mrEdit->prim.rings);
+                    if (sliderRow(ui, r.id, x, ry, r.h, tm, "aneis", 2.0f,
+                                  64.0f, rg, "%.0f")) {
+                        mrEdit->prim.rings = static_cast<i32>(rg + 0.5f);
                         primEdited = true;
                     }
                 }
@@ -615,13 +612,21 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         tr->updateWorld();   // feedback imediato (TransformSystem reconfirma)
     }
 
-    // 0.8.0 (F7) — parâmetros de primitiva mudaram: assinatura nova → o
-    // mesh atual está STALE; liberta o ponteiro e o MAIN rebinda no próximo
-    // frame pelo cache (immediate-mode, o padrão do seletor de texturas)
+    // 0.8.0 (F7) / 0.8.10 — parâmetros de primitiva mudaram: assinatura
+    // nova → o mesh atual está STALE; liberta o ponteiro (PEDIDO pendente)
+    // e o MAIN sobe o novo mesh no PONTO SEGURO do frame seguinte (início,
+    // antes da submissão — troca determinística sem cache; o antigo morre
+    // por deferred free)
     if (primEdited && mrEdit && mrEdit->primOn) {
         primClamp(mrEdit->prim);
-        mrEdit->mesh = nullptr;
-        mrEdit->material = nullptr;
+        // 0.8.10: PEDIDO pendente — o mesh ANTIGO continua a renderizar;
+        // o main sobe o novo no ponto seguro do frame seguinte e o bind
+        // retira o antigo p/ cova (deferred free). Falha = mantém o antigo.
+        if (!mrEdit->primPending) {
+            mrEdit->primPrev = mrEdit->prim;   // label "de" da 1ª edição
+        }
+        mrEdit->primPending = true;
+        mrEdit->primNeg = false;   // pedido NOVO = nova tentativa
     }
 
     ui.endScroll();
@@ -1347,10 +1352,10 @@ void drawLogViewer(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 // meshes/ ou textures/ (cap 5 ficheiros; sem scroll no overlay — F8).
 // Devolve 1-based (1 = cube/none, 2.. = ficheiros), 0 = nada este frame.
 //
-// 0.8.0 (F7): assetMenu == 4 é o SELETOR DE PRIMITIVAS PROCEDURAIS —
-// "none" + GRELHA 2×4 com as 8 formas (esfera/cilindro/cone/box/plano/
-// triângulo/torus/cápsula). Devolve: 0 nada; 1 = none (desliga o prim);
-// 2..9 = PrimKind 0..7 (esfera=2 … cápsula=9). Não usa o catálogo.
+// 0.8.10 — assetMenu == 4 é o SELETOR DE PRIMITIVAS (SÓ CUBO E ESFERA —
+// decisão do dono; cilindro e as outras seis saíram). "none" + 2 botões:
+// esfera, box. Devolve: 0 nada; 1 = none (desliga o prim); 2 = Sphere;
+// 3 = Box. Não usa o catálogo.
 // ---------------------------------------------------------------------------
 int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                   EditorState& st, const AssetCatalog& catalog,
@@ -1361,9 +1366,9 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         pickMesh ? catalog.meshes : catalog.textures;
 
     if (pickPrim) {
-        // ---- SELETOR DE PRIMITIVAS (grelha 2×4 + none) ---------------------
+        // ---- SELETOR DE PRIMITIVAS (2 formas + none) ----------------------
         const f32 w = kMenuW;
-        const f32 h = kHeaderH + 44.0f + 4.0f * 44.0f + kPad;
+        const f32 h = kHeaderH + 44.0f + 2.0f * 44.0f + kPad;
         const f32 ox = ui.safeLeft();
         const f32 oy = ui.safeTop();
         const f32 aw = sw - ox - ui.safeRight();
@@ -1385,14 +1390,13 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
             chosen = 1;
             st.assetMenu = 0;
         }
-        // grelha 2 colunas × 4 linhas (labels curtos cabem em meia largura)
-        const f32 bw = (w - 2.0f * kPad - 8.0f) * 0.5f;
-        for (int i = 0; i < 8; ++i) {
-            const f32 bx = x + kPad + (i % 2) * (bw + 8.0f);
-            const f32 by = y + kHeaderH + 44.0f + (i / 2) * 44.0f;
-            if (ui.button(kIdAssetBase + 1 + static_cast<u64>(i), bx, by, bw,
-                          36.0f, primLabel(static_cast<PrimKind>(i)))) {
-                chosen = i + 2;   // 2..9 = PrimKind 0..7
+        // 0.8.10: lista vertical com as DUAS formas que restam
+        for (int i = 0; i < 2; ++i) {
+            const f32 by = y + kHeaderH + 44.0f + static_cast<f32>(i) * 44.0f;
+            if (ui.button(kIdAssetBase + 1 + static_cast<u64>(i), x + kPad,
+                          by, w - 2.0f * kPad, 36.0f,
+                          primLabel(static_cast<PrimKind>(i)))) {
+                chosen = i + 2;   // 2=Sphere, 3=Box
                 st.assetMenu = 0;
             }
         }
@@ -1486,36 +1490,42 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
     }
 
     if (menuKind == 4) {
-        // ---- 0.8.0 (F7): seletor de PRIMITIVAS ----------------------------
-        if (pick == 1) {   // none → desliga o prim (mesh fica a null)
+        // ---- 0.8.10: seletor de PRIMITIVAS (SÓ cubo e esfera) --------------
+        // TROCA DETERMINÍSTICA: o pick ARMA o pedido (primOn + params +
+        // primPending) e NÃO mexe no mesh — o ANTIGO continua a renderizar
+        // até o bind no PONTO SEGURO do frame seguinte (início, antes da
+        // submissão), pelo caminho ÚNICO do main (gera→valida→upload→
+        // self-check→bind com deferred free). Isto é o applyAssetPick PURO:
+        // zero GL, zero cache — a falha (se houver) é reportada pelo main
+        // com passo+razão no log e toast no ecrã, mantendo o mesh anterior.
+        if (pick == 1) {   // none → desliga o prim (mesh sai no ponto seguro)
+            mr->primRetire = mr->mesh;   // posse p/ cova na flush (se nossa)
             mr->primOn = false;
             mr->mesh = nullptr;
             mr->material = nullptr;
+            mr->primPending = false;
+            mr->primNeg = false;
             out.applied = true;
             std::snprintf(out.toast, sizeof(out.toast), "prim: none");
             std::snprintf(out.log, sizeof(out.log),
                           "editor: primitiva desligada");
-        } else if (pick >= 2 && pick <= 9) {
+        } else if (pick >= 2 && pick <= 3) {
             const PrimKind kind = static_cast<PrimKind>(pick - 2);
             const PrimParams p = primDefaults(kind);
-            if (Mesh* m = res.prim ? res.prim(p) : nullptr) {
-                mr->primOn = true;
-                mr->prim = p;
-                mr->mesh = m;
-                mr->material = res.material;
-                mr->meshPath.clear();   // uma fonte de mesh de cada vez
-                out.applied = true;
-                std::snprintf(out.toast, sizeof(out.toast), "prim: %s",
-                              primName(kind));
-                std::snprintf(out.log, sizeof(out.log),
-                              "editor: primitiva %s aplicada", primName(kind));
-            } else {
-                // sem resolver/falhou — o estado ANTERIOR fica intacto
-                std::snprintf(out.toast, sizeof(out.toast),
-                              "falha ao gerar primitiva");
-                std::snprintf(out.log, sizeof(out.log),
-                              "editor: primitiva %s FALHOU ao gerar", primName(kind));
+            if (mr->primOn) {
+                mr->primPrev = mr->prim;   // 0.8.10: label "de" do log
             }
+            mr->primOn = true;
+            mr->prim = p;
+            mr->primPending = true;      // PEDIDO — sobe no ponto seguro
+            mr->primNeg = false;         // pedido novo = nova tentativa
+            mr->meshPath.clear();        // uma fonte de mesh de cada vez
+            out.applied = true;
+            std::snprintf(out.toast, sizeof(out.toast), "prim: %s",
+                          primName(kind));
+            std::snprintf(out.log, sizeof(out.log),
+                          "editor: primitiva %s pedida (upload no ponto seguro "
+                          "do frame)", primName(kind));
         }
         return out;
     }
@@ -1523,10 +1533,12 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
     if (menuKind == 1) {
         // ---- seletor de MESHES -------------------------------------------
         if (pick == 1) {   // cube procedural
+            mr->primRetire = mr->mesh;   // 0.8.10: posse antiga p/ cova
             mr->mesh = res.cubeMesh;
             mr->material = res.material;
             mr->meshPath.clear();
             mr->primOn = false;   // 0.8.0: cube LIMPA o prim (fonte única)
+            mr->primPending = false;
             out.applied = true;
             std::snprintf(out.toast, sizeof(out.toast), "mesh: cube");
             std::snprintf(out.log, sizeof(out.log), "editor: mesh cube aplicado");
@@ -1535,17 +1547,21 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
             if (idx >= catalog.meshes.size()) {
                 return out;   // fora do catálogo — sem crash
             }
-            const std::string rel = std::string("meshes/") + catalog.meshes[idx];
+            // 0.8.10: as entradas são CAMINHOS COMPLETOS (assets/x.gmesh
+            // ou meshes/x.obj legado) — usam-se DIRETAMENTE
+            const std::string rel = catalog.meshes[idx];
             // 0.8.9 — NORMALIZAÇÃO UNIFORME: só na 1ª aplicação DESTE ref a
             // ESTE TIC (re-escolher o mesmo mesh não mexe na escala que o
             // dono já afinou — muito menos re-escala um mesh que ele acabou
             // de posicionar).
             const bool firstApply = mr->meshPath != rel;
             if (Mesh* m = res.mesh ? res.mesh(rel) : nullptr) {
+                mr->primRetire = mr->mesh;   // 0.8.10: posse antiga p/ cova
                 mr->mesh = m;
                 mr->material = res.material;
                 mr->meshPath = rel;
                 mr->primOn = false;   // 0.8.0: asset LIMPA o prim (fonte única)
+                mr->primPending = false;
                 // 0.8.9 (fix 3 do prompt): FATOR ÚNICO s = alvo / maiorEixo,
                 // aplicado aos 3 EIXOS — PROPORÇÕES PRESERVADAS (nunca o
                 // escalamento eixo-a-eixo que espalmava o modelo). A escala
@@ -1627,7 +1643,7 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
             if (idx >= catalog.textures.size()) {
                 return out;   // fora do catálogo — sem crash
             }
-            const std::string rel = std::string("textures/") + catalog.textures[idx];
+            const std::string rel = catalog.textures[idx];   // caminho completo
             std::string warn;
             if (const Texture* tex = res.texture ? res.texture(rel, &warn) : nullptr) {
                 mr->texture = tex;
@@ -1678,7 +1694,7 @@ UiTexPickOutcome applyUiTexPick(Scene& scene, Handle tic, i32 element, int pick,
     if (idx >= catalog.textures.size()) {
         return out;   // fora do catálogo — sem crash
     }
-    const std::string rel = std::string("textures/") + catalog.textures[idx];
+    const std::string rel = catalog.textures[idx];   // caminho completo
     e.image = rel;
     out.applied = true;
     std::snprintf(out.toast, sizeof(out.toast), "tex: %s",

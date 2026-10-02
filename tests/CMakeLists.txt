@@ -94,6 +94,9 @@ add_executable(test_core
         ${CORE_DIR}/core/SafStorage.cpp
         # F5: assets (importadores GL-free)
         ${CORE_DIR}/assets/ObjImporter.cpp
+        # 0.8.10: formatos próprios (.gmesh/.gtext/.gm) + conversor streaming
+        ${CORE_DIR}/assets/GOwnFormats.cpp
+        ${CORE_DIR}/assets/AssetConverter.cpp
         ${CORE_DIR}/assets/ObjExporter.cpp
         ${CORE_DIR}/assets/ResourceManager.cpp
         ${CORE_DIR}/assets/GltfImporter.cpp

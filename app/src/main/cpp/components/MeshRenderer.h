@@ -2,19 +2,23 @@
 // components/MeshRenderer.h — desenha um mesh com material (F3).
 //
 // Ponteiros NÃO-DONOS: Mesh/Material/Texture são recursos de runtime
-// partilhados (o cubo procedural da F2 é o mesh dos presets; assets
-// importados chegam pela F5 via ResourceManager/GpuAssets — 1 ref = 1
-// objeto GL, cache não duplica memória de GPU).
-// O serializer guarda a tag "cube" OU as refs relativas "meshes/x.obj[#i]"
-// e "textures/y.png" — o loader rebinda os ponteiros via LoadCtx (F5-E).
+// partilhados. O serializer guarda a tag "cube" OU as refs relativas
+// "meshes/x.obj[#i]" e "textures/y.png" — o loader rebinda os ponteiros
+// via LoadCtx (F5-E).
 //
-// 0.8.0 (F7) — PRIMITIVAS PROCEDURAIS: além do cubo e dos assets, o mesh
-// pode ser uma PRIMITIVA GERADA (esfera/cilindro/cone/box/plano/triângulo/
-// torus/cápsula) com parâmetros. `primOn` + `prim` formam a assinatura que
-// o main resolve por cache (1 primitiva = 1 objeto GL partilhado); o
-// serializer grava "mesh":"prim" + "prim":{tipo+parâmetros}. A linha
-// "prim:" do Inspector abre o seletor; escolher mesh/asset limpa o prim
-// (UMA fonte de mesh de cada vez — sem ambiguidade).
+// 0.8.0 (F7) — PRIMITIVA PROCEDURAL: `primOn` + `prim` formam a assinatura
+// serializada no .goni como "prim". A linha "prim:" do Inspector abre o
+// seletor; escolher mesh/asset limpa o prim (UMA fonte de mesh de cada
+// vez — sem ambiguidade).
+//
+// 0.8.10 — TROCA DETERMINÍSTICA SEM CACHE: `mesh` == nullptr com primOn
+// significa PEDIDO PENDENTE — o main sobe a geometria no PONTO SEGURO do
+// frame (início, antes da submissão) pelo caminho ÚNICO
+// gera→valida→upload→self-check→bind, com DEFERRED FREE do mesh anterior
+// (começa no início do frame seguinte). `primNeg` = backoff: o upload
+// desta assinatura FALHOU (GL exausto/contexto morto) e o rebind por frame
+// NÃO insiste (anti retry-storm); um pedido NOVO (pick/params/load) ou um
+// INIT_WINDOW limpa a flag. Runtime-only — nunca serializado.
 #include "core/Component.h"
 #include "render/Material.h"
 #include "render/Primitives.h"
@@ -43,11 +47,26 @@ public:
     std::string meshPath;
     std::string texPath;
 
-    // 0.8.0 (F7) — primitiva procedural ativa? kind+parâmetros em `prim`;
-    // o ponteiro `mesh` acima aponta para o objeto do CACHE do main (a
-    // assinatura é estes dados — o round-trip .goni re-resolve).
+    // 0.8.10 — primitiva procedural ativa? kind+parâmetros em `prim`; o
+    // ponteiro `mesh` aponta para o mesh PRÓPRIO deste TIC (sem cache —
+    // posse no main; ver plataforma/main.cpp).
+    //
+    // TROCA DETERMINÍSTICA (runtime-only, nunca serializado):
+    //  • primPending: PEDIDO armado (pick/params/load) — o mesh ANTIGO
+    //    continua a renderizar; o main sobe o novo no PONTO SEGURO do frame
+    //    e faz o bind atómico (o antigo vai p/ cova = deferred free);
+    //  • primRetire: mesh cuja posse vai para a COVA no ponto seguro
+    //    (usado pelos picks none/cube/asset — a flush só retira o que é
+    //    dela; ponteiros não-nossos são ignorados);
+    //  • primNeg: backoff pós-falha de upload — o flush NÃO insiste por
+    //    frame (anti retry-storm); pedido NOVO ou INIT_WINDOW limpam.
+    //    Em falha o mesh ANTERIOR fica intacto e a renderizar.
     bool       primOn = false;
     PrimParams prim{};
+    PrimParams primPrev{};      // 0.8.10: assinatura ANTERIOR (label do log)
+    bool       primPending = false;
+    Mesh*      primRetire = nullptr;
+    bool       primNeg = false;
 };
 
 } // namespace vv

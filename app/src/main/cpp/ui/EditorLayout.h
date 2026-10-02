@@ -73,9 +73,8 @@ constexpr u64 kInspectorCamFrustum = 5412;   // 0.7.10: toggle do gizmo
 // 0.8.0 (F7) — primitiva procedural do MeshRenderer + animação
 constexpr u64 kInspectorPrimSel   = 5003;   // "prim: esfera ▸" (seletor)
 constexpr u64 kInspectorPrimR     = 5600;   // slider raio/size
-constexpr u64 kInspectorPrimH     = 5601;   // slider altura (cil/cone/cáps)
-constexpr u64 kInspectorPrimSeg   = 5602;   // slider segmentos
-constexpr u64 kInspectorPrimTube  = 5603;   // slider tubo (torus)
+constexpr u64 kInspectorPrimSeg   = 5602;   // slider segmentos (esfera)
+constexpr u64 kInspectorPrimRings = 5604;   // 0.8.10: slider anéis (esfera)
 constexpr u64 kInspectorAddAnim   = 3060;   // botão "add Animacao"
 
 // ids das regiões de scroll (F4.1) — o tap re-despachado é POR ID (F5.0-fix:
@@ -140,16 +139,14 @@ inline InspProfile inspectorProfile(const Tic& tic) {
     return p;
 }
 
-// 0.8.0 — que sliders de PRIMITIVA o tipo usa (o plano reflete)
-inline bool primUsesHeight(PrimKind k) {
-    return k == PrimKind::Cylinder || k == PrimKind::Cone ||
-           k == PrimKind::Capsule;
-}
+// 0.8.10 — que sliders de PRIMITIVA o tipo usa (SÓ esfera e box vivem):
+// esfera → raio + segmentos + anéis; box → tamanho. Os helpers antigos
+// (primUsesHeight/primUsesTube) MORRERAM com o cilindro/cone/torus/cápsula.
 inline bool primUsesSegments(PrimKind k) {
-    return k != PrimKind::Box && k != PrimKind::Plane && k != PrimKind::Wedge;
+    return k == PrimKind::Sphere;
 }
-inline bool primUsesTube(PrimKind k) {
-    return k == PrimKind::Torus;
+inline bool primUsesRings(PrimKind k) {
+    return k == PrimKind::Sphere;
 }
 
 // ---- o PLANO do Inspector — FONTE ÚNICA do layout --------------------------
@@ -181,7 +178,7 @@ struct InspRow {
         CamFrustum,  // 0.7.10: botão "frustum: sim|nao" (toggle do gizmo)
         // 0.8.0 (F7) — primitiva procedural + animação
         PrimButton,  // "prim: esfera ▸" (abre o seletor de primitivas)
-        PrimSlider,  // slider de parâmetro (payload pelo id: R/H/Seg/Tube)
+        PrimSlider,  // slider de parâmetro (payload pelo id: R/Seg/Rings)
         AddAnim,     // botão "add Animacao" (cria o AnimationPlayer)
         AnimLabel,   // "anim: N tracks" (a edição vive na timeline)
         // 0.8.9 — import: dimensões originais + repor a escala
@@ -207,9 +204,8 @@ inline u32 inspectorRowCount(const InspProfile& p, bool selectable) {
         n += 1;                                         // 0.8.6: linha hex
         if (p.prim) {
             n += 1;                                     // raio/tam
-            if (primUsesHeight(p.primKind)) n += 1;     // altura
             if (primUsesSegments(p.primKind)) n += 1;   // segmentos
-            if (primUsesTube(p.primKind)) n += 1;       // tubo
+            if (primUsesRings(p.primKind)) n += 1;      // anéis (esfera)
         }
         if (p.fileMesh) n += 2;                        // 0.8.9: dims + escala original
     }
@@ -267,14 +263,11 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
         push(InspRow::Kind::PrimButton, btnH, kInspectorPrimSel);
         if (p.prim) {
             push(InspRow::Kind::PrimSlider, sldH, kInspectorPrimR);
-            if (primUsesHeight(p.primKind)) {
-                push(InspRow::Kind::PrimSlider, sldH, kInspectorPrimH);
-            }
             if (primUsesSegments(p.primKind)) {
                 push(InspRow::Kind::PrimSlider, sldH, kInspectorPrimSeg);
             }
-            if (primUsesTube(p.primKind)) {
-                push(InspRow::Kind::PrimSlider, sldH, kInspectorPrimTube);
+            if (primUsesRings(p.primKind)) {
+                push(InspRow::Kind::PrimSlider, sldH, kInspectorPrimRings);
             }
         }
         push(selectable ? InspRow::Kind::TexButton : InspRow::Kind::TexLabel,

@@ -278,7 +278,7 @@ TEST(browser_apos_import_dialogo_sim_aplica_nao_nao_mexe) {
     // cena com o TIC do caso: preset Player (tem MeshRenderer)
     Scene scene;
     AssetCatalog catalog;
-    catalog.textures = {"foto.png"};
+    catalog.textures = {"textures/foto.png"};
     const Handle h = createTicFromPreset(scene, PresetKind::PlayerBody3D,
                                          nullptr, nullptr);
     st.selected = h;
@@ -370,11 +370,11 @@ TEST(browser_import_e2e_do_ficheiro_ao_tic) {
     EXPECT(storage.listDir(Project::kDirTextures, files));
     for (const std::string& f : files) {
         if (fileapi::kindOfExtension(f) == 't') {
-            catalog.textures.push_back(f);
+            catalog.textures.push_back(std::string("textures/") + f);
         }
     }
     EXPECT(catalog.textures.size() == 1u);
-    EXPECT(catalog.textures[0] == "textura.png");
+    EXPECT(catalog.textures[0] == "textures/textura.png");
 
     // 4) aplicar-após-import (Sim): o MESMO applyAssetPick do seletor
     Scene scene;

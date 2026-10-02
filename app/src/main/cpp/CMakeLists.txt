@@ -36,6 +36,9 @@ add_library(goni_vv SHARED
         assets/Assets.h
         assets/ObjImporter.h
         assets/ObjImporter.cpp
+        # 0.8.10: formatos próprios (.gmesh/.gtext/.gm) + conversor streaming
+        assets/GOwnFormats.cpp
+        assets/AssetConverter.cpp
         assets/ObjExporter.h
         assets/ObjExporter.cpp
         assets/ResourceManager.h

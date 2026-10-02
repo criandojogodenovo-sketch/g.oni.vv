@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cerrno>
 #include <cstdio>
+#include <map>
 #include <cstring>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -193,6 +194,61 @@ bool FsStorage::listDir(const std::string& relDir,
     ::closedir(d);
     std::sort(outFiles.begin(), outFiles.end());
     return true;
+}
+
+// ---- 0.8.10: escrita streaming REAL (FILE* aberto até ao close) -------------
+namespace {
+std::map<int, FILE*>& fsStreams() {
+    static std::map<int, FILE*> reg;
+    return reg;
+}
+int fsNextHandle() {
+    static int next = 1000;
+    return next++;
+}
+} // namespace
+
+int FsStorage::openWriteStream(const std::string& relPath) {
+    if (!validRelPath(relPath)) {
+        return -1;
+    }
+    const std::string abs = joinRelPath(root(), relPath);
+    if (abs.empty()) {
+        return -1;
+    }
+    // "wb" cria/trunca (o makeDirs do caller garantiu o pai; fopen falha
+    // com errno claro se faltar)
+    FILE* f = std::fopen(abs.c_str(), "wb");
+    if (!f) {
+        elog::error("fs: writeStream open '%s' FALHOU (errno=%d)", abs.c_str(), errno);
+        return -1;
+    }
+    const int h = fsNextHandle();
+    fsStreams()[h] = f;
+    return h;
+}
+
+bool FsStorage::writeStreamChunk(int handle, const void* data, size_t n) {
+    auto& reg = fsStreams();
+    const auto it = reg.find(handle);
+    if (it == reg.end()) {
+        return false;
+    }
+    if (n > 0 && std::fwrite(data, 1, n, it->second) != n) {
+        return false;
+    }
+    return true;
+}
+
+void FsStorage::closeWriteStream(int handle) {
+    auto& reg = fsStreams();
+    const auto it = reg.find(handle);
+    if (it == reg.end()) {
+        return;
+    }
+    std::fflush(it->second);
+    std::fclose(it->second);
+    reg.erase(it);
 }
 
 } // namespace vv

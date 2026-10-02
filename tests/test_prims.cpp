@@ -1,20 +1,23 @@
-// tests/test_prims.cpp — 0.8.0 (F7): PRIMITIVAS MESH PROCEDURAIS.
+// tests/test_prims.cpp — 0.8.10: PRIMITIVAS MESH PROCEDURAIS (SÓ CUBO E ESFERA).
 //
-// Aferição da spec 0.8.0:
-//   • CADA primitiva gera geometria VÁLIDA: vértices/índices não vazios,
+// Aferição da spec 0.8.10 (a redução decidida pelo dono — a intermitência
+// do C33 vivia no caminho partilhado de cache, não nos geradores):
+//   • AS DUAS formas geram geometria VÁLIDA: vértices/índices não vazios,
 //     índices múltiplos de 3 e dentro do intervalo, normais ~unitárias,
 //     uv dentro de [0,1], SEM vértices degenerados (NaN);
 //   • WINDING coerente: a normal de cada triângulo (cross product) CONCORDA
-//     com as normais dos seus vértices (dot > 0) — o winding CCW visto de
-//     fora que o GLES espera;
-//   • bounding box COERENTE com os parâmetros (esfera ±r, cilindro ±r/±h/2,
-//     box ±size/2, plano y=0 com ±size/2, torus, cápsula altura TOTAL,
-//     cone);
-//   • parâmetros respeitados (raio 2 → bounds ±2; segments conta vértices);
-//   • clamps defensivos (segmentos <3, cápsula h<2r, torus tubo>r);
-//   • nomes ↔ tipos round-trip; defaults sensatos;
-//   • SERIALIZAÇÃO: "mesh":"prim" + bloco "prim" grava o TIPO e os
-//     parâmetros; round-trip com resolver sentinela rebinda o mesh.
+//     com as normais dos seus vértices (dot > 0) — CCW visto de fora;
+//   • bounding box COERENTE (esfera ±r, box ±size/2 com 24/36 do makeCube);
+//   • parâmetros respeitados (raio 2 → bounds ±2; seg/rings contam vértices);
+//   • clamps defensivos (segmentos <3, raio 0, caps 64 → nunca estoura u16);
+//   • PUREZA (0.8.10): mesmos parâmetros → BYTES IDÊNTICOS (primMeshHash
+//     duas chamadas, dois tipos + params não-default); params diferentes →
+//     hashes DIFERENTES;
+//   • nomes ↔ tipos round-trip; MIGRAÇÃO: "cilindro"/"cone"/"plano"/
+//     "triangulo"/"torus"/"capsula" → primRemoved=true, primFromName=Box;
+//   • SERIALIZAÇÃO: "mesh":"prim" + bloco "prim" grava TIPO+parâmetros;
+//     round-trip SEM resolver (mesh null = pendente, primOn/params ficam);
+//     .goni ANTIGO com prim removida carrega como box + callback chamado.
 #include "TestFramework.h"
 #include <cmath>
 #include <cstdio>
@@ -26,7 +29,7 @@
 #include "core/Presets.h"
 #include "core/Scene.h"
 #include "core/SceneSerializer.h"
-#include "render/Mesh.h"   // sentinela do resolver de primitivas
+#include "render/Mesh.h"
 #include "render/Primitives.h"
 
 using namespace vv;
@@ -34,11 +37,12 @@ using namespace test;   // nearEqF/vecNearF
 
 namespace {
 
-// as 8 formas (esfera … cápsula)
-const PrimKind kAllKinds[8] = {
-    PrimKind::Sphere,   PrimKind::Cylinder, PrimKind::Cone,     PrimKind::Box,
-    PrimKind::Plane,    PrimKind::Wedge,    PrimKind::Torus,    PrimKind::Capsule,
-};
+// 0.8.10: as DUAS formas que restam
+const PrimKind kAllKinds[2] = {PrimKind::Sphere, PrimKind::Box};
+
+// os SEIS nomes removidos (cada um migra para cube no load)
+const char* kRemovedNames[6] = {"cilindro", "cone", "plano", "triangulo",
+                                "torus", "capsula"};
 
 // normal de um triângulo (cross product dos edges)
 Vec3 faceNormal(const Vertex& a, const Vertex& b, const Vertex& c) {
@@ -51,9 +55,9 @@ Vec3 faceNormal(const Vertex& a, const Vertex& b, const Vertex& c) {
 
 } // namespace
 
-// ---- 1. geometria válida (todas as formas) ----------------------------------
+// ---- 1. geometria válida (as duas formas) ----------------------------------
 
-TEST(prim_todas_geram_geometria_valida) {
+TEST(prim_geram_geometria_valida) {
     for (const PrimKind k : kAllKinds) {
         const PrimParams p = primDefaults(k);
         PrimMeshData m;
@@ -100,7 +104,6 @@ TEST(prim_winding_concorda_com_as_normais) {
         PrimMeshData m;
         makePrimMesh(p, m);
         u32 bad = 0;
-        u32 zero = 0;
         for (size_t i = 0; i + 2 < m.indices.size(); i += 3) {
             const Vertex& a = m.vertices[m.indices[i]];
             const Vertex& b = m.vertices[m.indices[i + 1]];
@@ -108,8 +111,7 @@ TEST(prim_winding_concorda_com_as_normais) {
             const Vec3 fn = faceNormal(a, b, c);
             const f32 len = std::sqrt(fn.x * fn.x + fn.y * fn.y + fn.z * fn.z);
             if (len < 1e-9f) {
-                ++zero;   // triângulo degenerado (ápice do cone) — inofensivo
-                continue;
+                continue;   // triângulo degenerado — inofensivo
             }
             const f32 dots[3] = {
                 fn.x * a.normal.x + fn.y * a.normal.y + fn.z * a.normal.z,
@@ -121,7 +123,6 @@ TEST(prim_winding_concorda_com_as_normais) {
             }
         }
         EXPECT(bad == 0);
-        (void)zero;
     }
 }
 
@@ -137,28 +138,7 @@ TEST(prim_bbox_coerente_com_parametros) {
         EXPECT(vecNearF(mn, Vec3{-0.5f, -0.5f, -0.5f}, 1e-3f));
         EXPECT(vecNearF(mx, Vec3{0.5f, 0.5f, 0.5f}, 1e-3f));
     }
-    // CILINDRO r=0.4 h=1 → x/z ±0.4, y ±0.5
-    {
-        PrimMeshData m;
-        makePrimMesh(primDefaults(PrimKind::Cylinder), m);
-        Vec3 mn, mx;
-        primBounds(m, mn, mx);
-        EXPECT(nearEqF(mn.x, -0.4f, 1e-3f));
-        EXPECT(nearEqF(mx.x, 0.4f, 1e-3f));
-        EXPECT(nearEqF(mn.y, -0.5f, 1e-3f));
-        EXPECT(nearEqF(mx.y, 0.5f, 1e-3f));
-    }
-    // CONE r=0.5 h=1 → base −0.5, ápice +0.5, x/z ±0.5
-    {
-        PrimMeshData m;
-        makePrimMesh(primDefaults(PrimKind::Cone), m);
-        Vec3 mn, mx;
-        primBounds(m, mn, mx);
-        EXPECT(nearEqF(mn.y, -0.5f, 1e-3f));
-        EXPECT(nearEqF(mx.y, 0.5f, 1e-3f));
-        EXPECT(nearEqF(mx.x, 0.5f, 1e-3f));
-    }
-    // BOX size=1 → cubo da F2 (±0.5)
+    // BOX size=1 → cubo da F2 (±0.5; 24 verts/36 índices)
     {
         PrimMeshData m;
         makePrimMesh(primDefaults(PrimKind::Box), m);
@@ -168,60 +148,6 @@ TEST(prim_bbox_coerente_com_parametros) {
         EXPECT(vecNearF(mx, Vec3{0.5f, 0.5f, 0.5f}, 1e-3f));
         EXPECT(m.vertices.size() == 24);   // 24/36 do makeCube
         EXPECT(m.indices.size() == 36);
-    }
-    // PLANO size=2 em y=0 (chão por omissão)
-    {
-        PrimMeshData m;
-        makePrimMesh(primDefaults(PrimKind::Plane), m);
-        Vec3 mn, mx;
-        primBounds(m, mn, mx);
-        EXPECT(nearEqF(mn.y, 0.0f));
-        EXPECT(nearEqF(mx.y, 0.0f));
-        EXPECT(nearEqF(mn.x, -1.0f, 1e-3f));
-        EXPECT(nearEqF(mx.z, 1.0f, 1e-3f));
-        EXPECT(m.vertices.size() == 4);
-    }
-    // TRIÂNGULO/WEDGE size=1 → perfil A(−h,−s) B(−h,+s) C(+h,−s), h=s=0.5
-    {
-        PrimMeshData m;
-        makePrimMesh(primDefaults(PrimKind::Wedge), m);
-        Vec3 mn, mx;
-        primBounds(m, mn, mx);
-        EXPECT(vecNearF(mn, Vec3{-0.5f, -0.5f, -0.5f}, 1e-3f));
-        EXPECT(vecNearF(mx, Vec3{0.5f, 0.5f, 0.5f}, 1e-3f));
-        // o topo só existe em z=−0.5 (a rampa sobe para −z)
-        bool topAtFront = false;
-        for (const Vertex& v : m.vertices) {
-            if (v.pos.y > 0.4f && v.pos.z < -0.4f) {
-                topAtFront = true;
-            }
-        }
-        EXPECT(topAtFront);
-    }
-    // TORUS R=0.5 tubo=0.15 → y ±0.15, x/z ±0.65 (rings=8: o anel amostra
-    // th=90° EXATO — com rings=10 o topo do tubo fica entre anéis)
-    {
-        PrimParams p = primDefaults(PrimKind::Torus);
-        p.rings = 8;
-        PrimMeshData m;
-        makePrimMesh(p, m);
-        Vec3 mn, mx;
-        primBounds(m, mn, mx);
-        EXPECT(nearEqF(mn.y, -0.15f, 1e-3f));
-        EXPECT(nearEqF(mx.y, 0.15f, 1e-3f));
-        EXPECT(nearEqF(mx.x, 0.65f, 1e-3f));
-        EXPECT(nearEqF(mn.x, -0.65f, 1e-3f));
-    }
-    // CÁPSULA r=0.3 h=1 → ALTURA TOTAL 1 (y ±0.5), x/z ±0.3
-    {
-        PrimMeshData m;
-        makePrimMesh(primDefaults(PrimKind::Capsule), m);
-        Vec3 mn, mx;
-        primBounds(m, mn, mx);
-        EXPECT(nearEqF(mn.y, -0.5f, 1e-3f));
-        EXPECT(nearEqF(mx.y, 0.5f, 1e-3f));
-        EXPECT(nearEqF(mx.x, 0.3f, 1e-3f));
-        EXPECT(nearEqF(mn.z, -0.3f, 1e-3f));
     }
 }
 
@@ -249,42 +175,16 @@ TEST(prim_parametros_respeitados) {
         EXPECT(m.vertices.size() == 63);
         EXPECT(m.indices.size() == 6 * 8 * 6);   // 6·8 quads × 6 índices
     }
-    // cilindro altura 3 → y ±1.5
+    // box tamanho 3 → ±1.5
     {
-        PrimParams p = primDefaults(PrimKind::Cylinder);
-        p.height = 3.0f;
+        PrimParams p = primDefaults(PrimKind::Box);
+        p.size = 3.0f;
         PrimMeshData m;
         makePrimMesh(p, m);
         Vec3 mn, mx;
         primBounds(m, mn, mx);
-        EXPECT(nearEqF(mx.y, 1.5f, 1e-3f));
-    }
-    // torus tubo 0.3, R 0.5 → y ±0.3 (rings=8 → amostra th=90°)
-    {
-        PrimParams p = primDefaults(PrimKind::Torus);
-        p.rings = 8;
-        p.radius2 = 0.3f;
-        PrimMeshData m;
-        makePrimMesh(p, m);
-        Vec3 mn, mx;
-        primBounds(m, mn, mx);
-        EXPECT(nearEqF(mx.y, 0.3f, 1e-3f));
-    }
-    // determinismo: mesma assinatura → MESMOS arrays
-    {
-        PrimParams p = primDefaults(PrimKind::Torus);
-        PrimMeshData a, b;
-        makePrimMesh(p, a);
-        makePrimMesh(p, b);
-        EXPECT(a.vertices.size() == b.vertices.size());
-        EXPECT(a.indices.size() == b.indices.size());
-        bool same = true;
-        for (size_t i = 0; i < a.vertices.size(); ++i) {
-            if (!vecNearF(a.vertices[i].pos, b.vertices[i].pos, 1e-6f)) {
-                same = false;
-            }
-        }
-        EXPECT(same);
+        EXPECT(nearEqF(mx.x, 1.5f, 1e-3f));
+        EXPECT(nearEqF(mn.z, -1.5f, 1e-3f));
     }
 }
 
@@ -296,33 +196,18 @@ TEST(prim_clamps_defensivos) {
         primClamp(p);
         EXPECT(p.segments >= 3);
     }
-    // cápsula h < 2r → h = 2r (nunca degenera)
-    {
-        PrimParams p = primDefaults(PrimKind::Capsule);
-        p.radius = 0.5f;
-        p.height = 0.5f;   // < 2·0.5
-        primClamp(p);
-        EXPECT(nearEqF(p.height, 1.0f));
-        PrimMeshData m;
-        makePrimMesh(p, m);
-        Vec3 mn, mx;
-        primBounds(m, mn, mx);
-        EXPECT(nearEqF(mx.y, 0.5f, 1e-3f));   // altura TOTAL = 2r
-    }
-    // torus tubo >= R → tubo = R/2
-    {
-        PrimParams p = primDefaults(PrimKind::Torus);
-        p.radius = 0.4f;
-        p.radius2 = 0.9f;   // engole
-        primClamp(p);
-        EXPECT(nearEqF(p.radius2, 0.2f));
-    }
     // dimensões negativas/zero → mínimo positivo
     {
         PrimParams p = primDefaults(PrimKind::Sphere);
         p.radius = -5.0f;
         primClamp(p);
         EXPECT(p.radius > 0.0f);
+    }
+    {
+        PrimParams p = primDefaults(PrimKind::Box);
+        p.size = 0.0f;
+        primClamp(p);
+        EXPECT(p.size > 0.0f);
     }
     // segmentos 100 → 64 (cap: nunca estoura u16)
     {
@@ -338,7 +223,49 @@ TEST(prim_clamps_defensivos) {
     }
 }
 
-// ---- 4. nomes ↔ tipos ----------------------------------------------------------
+// ---- 3b. PUREZA (0.8.10): mesmos params → bytes idênticos --------------------
+
+TEST(prim_pureza_mesmos_params_mesmo_hash) {
+    // os DOIS tipos, defaults e params não-default: duas gerações
+    // INDEPENDENTES → hash IGUAL (o gerador é função pura dos parâmetros)
+    const PrimParams cases[] = {
+        primDefaults(PrimKind::Sphere),
+        primDefaults(PrimKind::Box),
+    };
+    for (const PrimParams& p : cases) {
+        PrimMeshData a, b;
+        makePrimMesh(p, a);
+        makePrimMesh(p, b);
+        EXPECT(a.vertices.size() == b.vertices.size());
+        EXPECT(a.indices.size() == b.indices.size());
+        EXPECT(primMeshHash(a) == primMeshHash(b));
+    }
+    // params NÃO-default (o slider do dono mexeu no raio)
+    {
+        PrimParams p = primDefaults(PrimKind::Sphere);
+        p.radius = 0.83f;
+        p.segments = 24;
+        p.rings = 17;
+        PrimMeshData a, b;
+        makePrimMesh(p, a);
+        makePrimMesh(p, b);
+        EXPECT(primMeshHash(a) == primMeshHash(b));
+    }
+}
+
+TEST(prim_pureza_params_diferentes_hash_diferente) {
+    PrimMeshData a, b, c;
+    PrimParams sph = primDefaults(PrimKind::Sphere);
+    makePrimMesh(sph, a);
+    PrimParams box = primDefaults(PrimKind::Box);
+    makePrimMesh(box, b);
+    sph.radius = 0.9f;   // um pixel de slider
+    makePrimMesh(sph, c);
+    EXPECT(primMeshHash(a) != primMeshHash(b));
+    EXPECT(primMeshHash(a) != primMeshHash(c));
+}
+
+// ---- 4. nomes ↔ tipos + MIGRAÇÃO ----------------------------------------------
 
 TEST(prim_nomes_roundtrip) {
     for (const PrimKind k : kAllKinds) {
@@ -349,13 +276,21 @@ TEST(prim_nomes_roundtrip) {
     EXPECT(primFromName("hipercubo") == PrimKind::Sphere);
     // nomes PT (a UI é PT)
     EXPECT(std::strcmp(primName(PrimKind::Sphere), "esfera") == 0);
-    EXPECT(std::strcmp(primName(PrimKind::Cylinder), "cilindro") == 0);
-    EXPECT(std::strcmp(primName(PrimKind::Cone), "cone") == 0);
     EXPECT(std::strcmp(primName(PrimKind::Box), "box") == 0);
-    EXPECT(std::strcmp(primName(PrimKind::Plane), "plano") == 0);
-    EXPECT(std::strcmp(primName(PrimKind::Wedge), "triangulo") == 0);
-    EXPECT(std::strcmp(primName(PrimKind::Torus), "torus") == 0);
-    EXPECT(std::strcmp(primName(PrimKind::Capsule), "capsula") == 0);
+    // contador: PRIMKIND SÃO DUAS (enum encolheu de 8)
+    EXPECT(static_cast<int>(PrimKind::Count) == 2);
+}
+
+TEST(prim_migracao_nomes_removidos) {
+    // cada um dos SEIS nomes removidos: primRemoved=true, primFromName→Box
+    for (const char* name : kRemovedNames) {
+        EXPECT(primRemoved(name));
+        EXPECT(primFromName(name) == PrimKind::Box);   // defesa
+    }
+    // os vivos NÃO são "removidos"
+    EXPECT(!primRemoved("esfera"));
+    EXPECT(!primRemoved("box"));
+    EXPECT(!primRemoved("coisaestranha"));
 }
 
 TEST(prim_defaults_sensatos) {
@@ -363,9 +298,8 @@ TEST(prim_defaults_sensatos) {
         const PrimParams p = primDefaults(k);
         EXPECT(p.kind == k);
         EXPECT(p.radius > 0.0f && p.radius <= 2.0f);     // escala de cena 1-10 u
-        EXPECT(p.height > 0.0f && p.height <= 3.0f);
-        EXPECT(p.segments >= 3 && p.segments <= 32);     // suave mas leve
-        EXPECT(p.rings >= 2 && p.rings <= 32);
+        EXPECT(p.segments >= 3 && p.segments <= 64);     // suave mas leve
+        EXPECT(p.rings >= 2 && p.rings <= 64);
         EXPECT(p.size > 0.0f && p.size <= 4.0f);
     }
 }
@@ -388,67 +322,71 @@ TEST(prim_serializacao_tipo_e_params_no_goni) {
     EXPECT(std::strstr(text.c_str(), "0.75") != nullptr);
 }
 
-TEST(prim_serializacao_roundtrip_com_resolver) {
+TEST(prim_serializacao_roundtrip_sem_resolver_pendente) {
+    // 0.8.10: SEM resolver (o resolvePrim morreu) — primOn+params ficam,
+    // mesh null = PEDIDO PENDENTE (o main sobe no ponto seguro do frame)
     Scene s;
-    const Handle h = s.create("Donut");
+    const Handle h = s.create("Bola");
     Tic* tic = s.get(h);
     tic->addComponent<Transform3D>();
     MeshRenderer* mr = tic->addComponent<MeshRenderer>();
     mr->primOn = true;
-    mr->prim = primDefaults(PrimKind::Torus);
-    mr->prim.radius2 = 0.22f;
+    mr->prim = primDefaults(PrimKind::Sphere);
+    mr->prim.radius = 0.83f;
+    mr->prim.segments = 24;
 
     const std::string text = SceneSerializer::dump(s);
-
-    // resolver sentinela: devolve ponteiros únicos por assinatura
-    static Mesh meshA;   // stub GL: create() nunca chamado, ids a 0 — serve
     Scene s2;
     SceneSerializer::LoadCtx ctx;
-    ctx.resolvePrim = [](const PrimParams& p) -> Mesh* {
-        // o resolver VÊ os params do ficheiro (tipo+parâmetros)
-        EXPECT(p.kind == PrimKind::Torus);
-        EXPECT(nearEqF(p.radius2, 0.22f, 1e-4f));
-        return &meshA;
-    };
     ASSERT(SceneSerializer::loadText(s2, text, ctx));
-    Tic* back = s2.get(s2.find("Donut"));
+    Tic* back = s2.get(s2.find("Bola"));
     ASSERT(back != nullptr);
     MeshRenderer* mr2 = back->getComponent<MeshRenderer>();
     ASSERT(mr2 != nullptr);
     EXPECT(mr2->primOn);
-    EXPECT(mr2->prim.kind == PrimKind::Torus);
-    EXPECT(nearEqF(mr2->prim.radius2, 0.22f, 1e-4f));
-    EXPECT(mr2->mesh == &meshA);   // rebind pelo resolver
-    EXPECT(mr2->material != nullptr ? true : (ctx.material == nullptr));
+    EXPECT(mr2->prim.kind == PrimKind::Sphere);
+    EXPECT(nearEqF(mr2->prim.radius, 0.83f, 1e-4f));
+    EXPECT(mr2->prim.segments == 24);
+    EXPECT(mr2->mesh == nullptr);   // pendente — sobe no main
+    EXPECT(!mr2->primNeg);          // load = pedido novo
 }
 
-TEST(prim_serializacao_sem_resolver_entra_na_mesma) {
-    // sem resolver: primOn+params FICAM, mesh null (rebind possível) — a
-    // política forward-compat do serializer
+TEST(prim_serializacao_goni_antigo_prim_removida_migra) {
+    // .goni de um projeto 0.8.9 com "cilindro": carrega como BOX (cube) com
+    // o callback onPrimMigrated a disparar — NUNCA crash, nunca silêncio
+    const char* txt = R"({"version":1,"tics":[
+      {"id":0,"name":"T","active":true,"parent":-1,"components":[
+        {"type":"MeshRenderer","mesh":"prim","prim":{"type":"cilindro",
+         "r":0.4,"h":1.0,"seg":16}}]}]})";
     Scene s;
-    Tic* tic = s.get(s.create("X"));
-    tic->addComponent<Transform3D>();
-    MeshRenderer* mr = tic->addComponent<MeshRenderer>();
-    mr->primOn = true;
-    mr->prim = primDefaults(PrimKind::Cone);
-    const std::string text = SceneSerializer::dump(s);
-    Scene s2;
-    SceneSerializer::LoadCtx ctx;   // SEM resolvePrim
-    ASSERT(SceneSerializer::loadText(s2, text, ctx));
-    if (Tic* back = s2.get(s2.find("X"))) {
-        if (const MeshRenderer* mr2 = back->getComponent<MeshRenderer>()) {
-            EXPECT(mr2->primOn);
-            EXPECT(mr2->prim.kind == PrimKind::Cone);
-            EXPECT(mr2->mesh == nullptr);
-        }
-    }
+    SceneSerializer::LoadCtx ctx;
+    int calls = 0;
+    std::string lastName;
+    ctx.onPrimMigrated = [&](const char* removedName) {
+        ++calls;
+        lastName = removedName;
+    };
+    ASSERT(SceneSerializer::loadText(s, txt, ctx));
+    Tic* tic = s.get(s.find("T"));
+    ASSERT(tic != nullptr);
+    const MeshRenderer* mr = tic->getComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+    EXPECT(mr->primOn);
+    EXPECT(mr->prim.kind == PrimKind::Box);   // MIGRADO
+    EXPECT(mr->mesh == nullptr);              // pendente como qualquer prim
+    EXPECT(calls == 1);
+    EXPECT(lastName == "cilindro");
+    // re-save: grava "box" (a prim migrada persiste na forma nova)
+    const std::string text2 = SceneSerializer::dump(s);
+    EXPECT(std::strstr(text2.c_str(), "\"type\":\"box\"") != nullptr);
+    EXPECT(std::strstr(text2.c_str(), "cilindro") == nullptr);
 }
 
 TEST(prim_serializacao_params_parciais_default_do_tipo) {
-    // bloco "prim" SEM parâmetros → defaults DO TIPO (torus 0.5/0.15/20/10)
+    // bloco "prim" SEM parâmetros → defaults DO TIPO (esfera 0.5/16/12)
     const char* txt = R"({"version":1,"tics":[
       {"id":0,"name":"T","active":true,"parent":-1,"components":[
-        {"type":"MeshRenderer","mesh":"prim","prim":{"type":"torus"}}]}]})";
+        {"type":"MeshRenderer","mesh":"prim","prim":{"type":"esfera"}}]}]})";
     Scene s;
     SceneSerializer::LoadCtx ctx;
     ASSERT(SceneSerializer::loadText(s, txt, ctx));
@@ -457,11 +395,11 @@ TEST(prim_serializacao_params_parciais_default_do_tipo) {
     const MeshRenderer* mr = tic->getComponent<MeshRenderer>();
     ASSERT(mr != nullptr);
     EXPECT(mr->primOn);
-    EXPECT(mr->prim.kind == PrimKind::Torus);
-    const PrimParams def = primDefaults(PrimKind::Torus);
+    EXPECT(mr->prim.kind == PrimKind::Sphere);
+    const PrimParams def = primDefaults(PrimKind::Sphere);
     EXPECT(nearEqF(mr->prim.radius, def.radius));
-    EXPECT(nearEqF(mr->prim.radius2, def.radius2));
     EXPECT(mr->prim.segments == def.segments);
+    EXPECT(mr->prim.rings == def.rings);
 }
 
 TEST(prim_prim_e_cube_sao_exclusivos) {

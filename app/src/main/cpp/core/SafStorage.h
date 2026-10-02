@@ -41,6 +41,10 @@ public:
     bool readText(const std::string& relPath, std::string& out) const override;
     bool writeBytes(const std::string& relPath, const void* data, size_t n) override;
     bool readBytes(const std::string& relPath, std::vector<u8>& out) const override;
+    // 0.8.10 — escrita STREAMING real (fd SAF aberto até ao close)
+    int  openWriteStream(const std::string& relPath) override;
+    bool writeStreamChunk(int handle, const void* data, size_t n) override;
+    void closeWriteStream(int handle) override;
     bool listDir(const std::string& relDir,
                  std::vector<std::string>& outFiles) const override;
 

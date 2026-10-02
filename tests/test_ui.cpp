@@ -114,8 +114,8 @@ struct Env {
         }
         st.selected = selected;
         if (withCatalog) {
-            catalog.meshes   = {"quad.obj", "cube.obj"};
-            catalog.textures = {"wood.png"};
+            catalog.meshes   = {"meshes/quad.obj", "meshes/cube.obj"};
+            catalog.textures = {"textures/wood.png"};
         }
     }
 

@@ -88,7 +88,7 @@ struct PickEnv {
 
 TEST(assetpick_escolher_textura_aplica_estado_e_log) {
     PickEnv e;
-    e.cat.textures = {"wood.png"};
+    e.cat.textures = {"textures/wood.png"};
     e.res.texture = [](const std::string& ref, std::string* warn) -> const Texture* {
         if (warn) { warn->clear(); }
         return ref == "textures/wood.png" ? kTexA : nullptr;
@@ -108,7 +108,7 @@ TEST(assetpick_escolher_textura_aplica_estado_e_log) {
 // o nome REAL do C33 (screenshot-… importado) passa íntegro pela ref
 TEST(assetpick_textura_screenshot_do_c33) {
     PickEnv e;
-    e.cat.textures = {"screenshot-20260930-1010.png"};
+    e.cat.textures = {"textures/screenshot-20260930-1010.png"};
     e.res.texture = [](const std::string&, std::string* warn) -> const Texture* {
         if (warn) { warn->clear(); }
         return kTexA;
@@ -127,7 +127,7 @@ TEST(assetpick_textura_screenshot_do_c33) {
 
 TEST(assetpick_textura_com_aviso_do_gate_mostra_o_aviso) {
     PickEnv e;
-    e.cat.textures = {"big.png"};
+    e.cat.textures = {"textures/big.png"};
     e.res.texture = [](const std::string&, std::string* warn) -> const Texture* {
         if (warn) { *warn = "textura >2K: sem compressao"; }
         return kTexA;
@@ -146,7 +146,7 @@ TEST(assetpick_textura_com_aviso_do_gate_mostra_o_aviso) {
 
 TEST(assetpick_textura_que_falha_mantem_estado_anterior) {
     PickEnv e;
-    e.cat.textures = {"wood.png", "corrompida.png"};
+    e.cat.textures = {"textures/wood.png", "textures/corrompida.png"};
     // o TIC JÁ tinha uma textura aplicada
     e.mr()->texture = kTexB;
     e.mr()->texPath = "textures/old.png";
@@ -170,7 +170,7 @@ TEST(assetpick_textura_que_falha_mantem_estado_anterior) {
 
 TEST(assetpick_remover_textura_volta_a_none) {
     PickEnv e;
-    e.cat.textures = {"wood.png"};
+    e.cat.textures = {"textures/wood.png"};
     e.res.texture = [](const std::string&, std::string* warn) -> const Texture* {
         if (warn) { warn->clear(); }
         return kTexA;
@@ -213,7 +213,7 @@ TEST(assetpick_sequencia_do_main_menukind_antes_do_draw) {
     InputState input;
 
     PickEnv e;
-    e.cat.textures = {"wood.png"};
+    e.cat.textures = {"textures/wood.png"};
     e.res.texture = [](const std::string&, std::string* warn) -> const Texture* {
         if (warn) { warn->clear(); }
         return kTexA;
@@ -265,7 +265,7 @@ TEST(assetpick_sequencia_do_main_menukind_antes_do_draw) {
 // ---- 6. mesh pick: aplica mesh/material + textura embutida do glTF ----------
 TEST(assetpick_escolher_mesh_aplica_e_textura_embutida) {
     PickEnv e;
-    e.cat.meshes = {"quad.gltf"};
+    e.cat.meshes = {"meshes/quad.gltf"};
     e.res.mesh = [](const std::string& ref) -> Mesh* {
         return ref == "meshes/quad.gltf" ? kMeshStub : nullptr;
     };
@@ -312,7 +312,7 @@ TEST(assetpick_mesh_cube_procedural_limpa_a_ref) {
 
 TEST(assetpick_alvos_invalidos_sao_ignorados_sem_crash) {
     PickEnv e;
-    e.cat.textures = {"wood.png"};
+    e.cat.textures = {"textures/wood.png"};
     e.res.texture = [](const std::string&, std::string* warn) -> const Texture* {
         if (warn) { warn->clear(); }
         return kTexA;
@@ -349,7 +349,7 @@ TEST(assetpick_alvos_invalidos_sao_ignorados_sem_crash) {
 
 TEST(assetpick_roundtrip_goni_preserva_a_referencia) {
     PickEnv e;
-    e.cat.textures = {"wood.png"};
+    e.cat.textures = {"textures/wood.png"};
     e.res.texture = [](const std::string&, std::string* warn) -> const Texture* {
         if (warn) { warn->clear(); }
         return kTexA;

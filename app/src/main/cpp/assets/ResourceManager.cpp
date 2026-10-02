@@ -6,7 +6,10 @@
 // cache — o parse acontece UMA vez por ficheiro.
 #include "assets/ResourceManager.h"
 #include "assets/GltfTextures.h"
+#include "assets/GOwnFormats.h"
 #include "assets/ObjImporter.h"
+#include "platform/EngineLog.h"
+#include <chrono>
 #include <cstring>
 
 namespace vv {
@@ -157,6 +160,36 @@ const MeshData* ResourceManager::mesh(const std::string& ref, std::string& err) 
     i32 sub = -1;
     splitSubRef(ref, path, sub);
     const std::string ext = lowerExt(path);
+
+    // 0.8.10 — FORMATO PRÓPRIO .gmesh: o runtime carrega SÓ estes (a fonte
+    // obj/gltf/glb toca-se apenas no CONVERTER). Dequantização + checksum.
+    if (ext == "gmesh") {
+        if (!storage_) {
+            err = "sem storage ligado ao ResourceManager";
+            return nullptr;
+        }
+        const auto t0 = std::chrono::steady_clock::now();
+        std::vector<u8> bytes;
+        if (!storage_->readBytes(path, bytes) || bytes.empty()) {
+            err = "ficheiro não encontrado: " + path;
+            return nullptr;
+        }
+        auto data = std::make_shared<MeshData>();
+        if (!readGMesh(bytes.data(), bytes.size(), *data, err)) {
+            err = ".gmesh inválido (" + path + "): " + err;
+            return nullptr;
+        }
+        data->name = path;
+        ++meshLoads_;
+        const double ms = std::chrono::duration<double, std::milli>(
+                              std::chrono::steady_clock::now() - t0)
+                              .count();
+        // a linha exigida pelo prompt (log viewer do C33 mostra os tempos)
+        elog::info("asset: load %s verts=%u em %.1fms", path.c_str(),
+                   static_cast<unsigned>(data->vertices.size()), ms);
+        const auto res = meshes_.emplace(ref, std::move(data));
+        return res.first->second.get();
+    }
 
     if (ext == "obj") {
         if (!storage_) {

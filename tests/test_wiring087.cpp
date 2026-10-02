@@ -123,7 +123,8 @@ void resetEngineForTest() {
     g_editor = editor::EditorState{};
     g_browser = FileBrowserState{};
     g_applyAsk = ApplyAskState{};
-    g_primCache.clear();
+    g_primOwners.clear();
+    g_primGrave.clear();
     g_catalog.meshes.clear();
     g_catalog.textures.clear();
     g_prevAssetMenu = 0;
@@ -168,10 +169,14 @@ Handle addMeshTic(const char* name) {
     t->name = name;
     MeshRenderer* mr = t->getComponent<MeshRenderer>();
     if (mr) {
+        // 0.8.10: o caminho REAL — pedido PENDENTE + flush (ponto seguro)
         mr->primOn = true;
         mr->prim = primDefaults(PrimKind::Sphere);
-        mr->mesh = primMesh(mr->prim);   // o caminho REAL (cache)
-        mr->material = g_renderer.litMaterial();
+        mr->primPending = true;
+        primFlushPending();
+        if (mr->mesh) {
+            mr->material = g_renderer.litMaterial();
+        }
     }
     g_editor.selected = h;
     return h;
@@ -194,6 +199,22 @@ double msSince(std::chrono::steady_clock::time_point t0) {
     return std::chrono::duration<double, std::milli>(
                std::chrono::steady_clock::now() - t0)
         .count();
+}
+
+// 0.8.10 — espera o IMPORT JOB terminar e FINALIZA como o frame() faria
+// (join + catálogo + diálogo). Guarda de tempo: hang do worker = falha.
+void pumpImportJob(double maxMs = 15000.0) {
+    const auto t0 = std::chrono::steady_clock::now();
+    while (!g_importJob.done.load()) {
+        if (msSince(t0) > maxMs) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT(g_importJob.done.load());   // hang = falha explícita
+    if (g_importJob.active.load() && g_importJob.done.load()) {
+        importJobFinish();
+    }
 }
 
 } // namespace
@@ -295,33 +316,42 @@ TEST(wiring087_browser_importa_obj_e_aplica_ao_tic) {
     e.isDir = false;
     e.kind = 'm';
 
+    // 0.8.10: o toque lança o JOB (thread própria); o frame desenharia o
+    // overlay — aqui esperamos e finalizamos pelo MESMO caminho do frame
     browserImportFile(e);
-    // passo-a-passo no engine.log (o logging embutido do 0.8.7)
-    EXPECT(logHas("import: ficheiro '"));
-    EXPECT(logHas("import: lidos"));
-    EXPECT(logHas("import: gravado no projeto"));
-    // copiado para o projeto (meshes/) e o catálogo vê-o
-    EXPECT(rawSt->exists("meshes/goni_w087_import.obj"));
+    EXPECT(g_importJob.active.load());      // o overlay estaria visível
+    pumpImportJob();                        // frame() faria o finalize
+
+    // passo-a-passo no engine.log (o logging embutido da 0.8.10)
+    EXPECT(logHas("import: job iniciado"));
+    EXPECT(logHas("import: fonte copiada"));
+    EXPECT(logHas("asset: convert"));
+    // fonte copiada em chunks + CONVERTIDO no projeto (assets/)
+    EXPECT(rawSt->exists("source/goni_w087_import.obj"));
+    EXPECT(rawSt->exists("assets/goni_w087_import.gmesh"));
     refreshCatalog();
-    EXPECT(!g_catalog.meshes.empty());
-    // a pergunta "aplicar ao TIC?" abriu (as DUAS flags — o fix 0.8.5 vivo)
+    ASSERT(!g_catalog.meshes.empty());
+    EXPECT(g_catalog.meshes[0] == "assets/goni_w087_import.gmesh");
+    // a pergunta "aplicar ao TIC?" abriu (o finalize abre as DUAS flags)
     EXPECT(g_applyAsk.open);
     EXPECT(g_editor.applyAsk);
-    EXPECT(logHas("import: dialogo 'aplicar ao TIC?' aberto"));
+    EXPECT(g_applyAsk.rel == "assets/goni_w087_import.gmesh");
 
     // o "Sim": o MESMO código do frame() (extraído — afervel aqui)
     applyImportedAssetToSelectedTic();
     EXPECT(!g_applyAsk.open);
     EXPECT(!editor::anyOverlayOpen(g_editor));   // NENHUM modal preso
     EXPECT(logHas("import: aplicando"));
-    // o mesh IMPORTADO está no MeshRenderer (pelo GpuAssets real: parse +
-    // upload) e DIFERE da primitiva anterior
+    // o mesh CONVERTIDO está no MeshRenderer (GpuAssets: readGMesh + upload)
+    // e DIFERE da primitiva anterior
     ASSERT(mr->mesh != nullptr);
-    EXPECT(mr->meshPath == "meshes/goni_w087_import.obj");
+    EXPECT(mr->meshPath == "assets/goni_w087_import.gmesh");
     EXPECT(mr->mesh->indexCount() > 0);
     EXPECT(mr->mesh->indexCount() != idxBefore || !mr->primOn);
     EXPECT(!mr->primOn);   // asset limpa o prim (uma fonte de cada vez)
     EXPECT(logHas("import: aplicado verts="));
+    // o loader próprio loga os tempos (a linha exigida pelo prompt)
+    EXPECT(logHas("asset: load assets/goni_w087_import.gmesh verts="));
 
     // regressão: o TIC continua desenhável (draw no stub GL)
     const u32 draws = static_cast<u32>(glstub::stats.drawElementsCalls);
@@ -368,35 +398,43 @@ TEST(wiring087_troca_prim_por_tipo_geometria_nao_vazia_e_log_da_prova) {
     MeshRenderer* mr = g_scene.get(h)->getComponent<MeshRenderer>();
     ASSERT(mr != nullptr);
 
-    // as 8 formas PELO DISPATCH REAL (applyAssetPick + resolvers do device
-    // = primMesh = gerador + upload) — a linha de prova no engine.log de CADA
-    for (int k = 0; k < 8; ++k) {
+    // 0.8.10: as DUAS formas PELO DISPATCH REAL (pick = pedido pendente →
+    // primFlushPending = o ponto seguro do frame) — passo a passo no log
+    for (int k = 0; k < 2; ++k) {
         const PrimKind kind = static_cast<PrimKind>(k);
         const editor::AssetPickOutcome out = editor::applyAssetPick(
             g_scene, h, 4, k + 2, g_catalog, makeAssetResolvers());
         EXPECT(out.applied);
         EXPECT(mr->primOn);
         EXPECT(mr->prim.kind == kind);
+        EXPECT(mr->primPending);          // o pedido está ARMADO
+        primFlushPending();               // ← o ponto seguro do frame
+        EXPECT(!mr->primPending);         // consumido
         ASSERT(mr->mesh != nullptr);
         EXPECT(mr->mesh->vertexCount() > 0);   // geometria EXISTE
         EXPECT(mr->mesh->indexCount() >= 3);
-        // a PROVA no log (o que o log viewer do C33 mostra a cada troca)
-        char prova[96];
-        std::snprintf(prova, sizeof(prova), "mesh: prim %s verts=",
-                      primName(kind));
-        EXPECT(logHas(prova));
+        // a PROVA no log: o passo-a-passo que o log viewer do C33 mostra
+        // (de/para trazem os params — o needle afera o FORMATO exigido)
+        EXPECT(logHas("mesh: troca "));
+        EXPECT(logHas(" passo=gerador ok verts="));
+        EXPECT(logHas("passo=validacao ok"));
+        EXPECT(logHas("passo=upload ok"));
+        EXPECT(logHas("passo=bind ok"));
+        EXPECT(logHas("passo=validacao ok"));
+        EXPECT(logHas("passo=upload ok"));
+        EXPECT(logHas("passo=bind ok"));
     }
 
     // o seletor LISTA a partir dos dados do gerador (não uma lista à parte):
-    // 8 rótulos = 8 PrimKind — o catálogo do seletor é o próprio gerador
+    // 2 rótulos = 2 PrimKind — o catálogo do seletor é o próprio gerador
     u32 labels = 0;
-    for (int k = 0; k < 8; ++k) {
+    for (int k = 0; k < 2; ++k) {
         if (primLabel(static_cast<PrimKind>(k)) != nullptr &&
             primLabel(static_cast<PrimKind>(k))[0] != '\0') {
             ++labels;
         }
     }
-    EXPECT(labels == 8u);
+    EXPECT(labels == 2u);
 }
 
 // ---------------------------------------------------------------------------
@@ -412,13 +450,13 @@ TEST(wiring087_troca_stress_antifreeze_com_guarda_de_tempo) {
     MeshRenderer* mr = g_scene.get(h)->getComponent<MeshRenderer>();
     ASSERT(mr != nullptr);
 
-    // sequências que causavam os sintomas do C33: ciclos de todas as ordens,
-    // A→B→A (cache hit), primitiva↔cube, primitiva↔importado, params de
-    // slider (assinaturas novas), rebind por frame
+    // 0.8.10 SEM CACHE: cada troca é gerar+valida+upload+bind (nunca "hit")
+    // com deferred free do antigo. Sequências do critério: ciclos de ordens,
+    // A→B→A, primitiva↔cube, primitiva↔importado, params de slider.
     FakeStorage st;
-    st.makeDirs("meshes");   // o FsStorage real cria a pasta ao gravar
+    st.makeDirs("meshes");
     st.writeText("meshes/imp.obj", "o tri\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
-    g_storage.reset(new FakeStorage(st));   // cópia (o unique_ptr é dono)
+    g_storage.reset(new FakeStorage(st));
     g_resources.setStorage(g_storage.get());
     g_gpu.init(&g_resources);
     g_projectReady = true;
@@ -426,32 +464,32 @@ TEST(wiring087_troca_stress_antifreeze_com_guarda_de_tempo) {
 
     const auto t0 = std::chrono::steady_clock::now();
     const int N = 600;
+    u32 ok = 0, err = 0;
     for (int i = 0; i < N; ++i) {
         const auto ti = std::chrono::steady_clock::now();
+        // (1) a COVA do frame anterior abre ANTES do flush (a ordem do main)
+        primGraveDig();
         if (i % 6 == 5) {
-            // params de SLIDER: assinatura NOVA (raio muda a cada passo) —
-            // o caminho REAL do Inspector: edita params, mesh=null, o
-            // rebind do frame seguinte gera+uploda (era o crescimento
-            // sem fim do cache — o cap/evicção 0.8.7 segura)
+            // params de SLIDER: assinatura NOVA — o caminho REAL do Inspector
             PrimParams p = primDefaults(PrimKind::Sphere);
             p.radius = 0.1f + 0.01f * static_cast<f32>(i % 40);
             mr->primOn = true;
             mr->prim = p;
-            mr->mesh = nullptr;
-            rebindPrimMeshes();   // ← o gerador pelo caminho do rebind
-            ASSERT(mr->mesh != nullptr);
+            mr->primPending = true;
+            primFlushPending();   // ← o ponto seguro
+            if (mr->mesh != nullptr) { ++ok; } else { ++err; }
         } else {
             int pick;
             int menuKind = 4;
             switch (i % 6) {
-                case 0:  // ciclo sequencial pelas 8 formas
-                    pick = (i / 6) % 8 + 2;
+                case 0:  // ciclo sequencial pelas 2 formas
+                    pick = (i / 6) % 2 + 2;
                     break;
-                case 1:  // A→B→A (cache hit imediato)
-                    pick = 2 + (i % 8);
+                case 1:  // A→B→A
+                    pick = 2 + (i % 2);
                     break;
                 case 2:  // ordem REVERSA
-                    pick = 9 - (i % 8);
+                    pick = 3 - (i % 2);
                     break;
                 case 3:  // primitiva ↔ cube (menuKind 1, pick 1)
                     menuKind = 1;
@@ -465,8 +503,8 @@ TEST(wiring087_troca_stress_antifreeze_com_guarda_de_tempo) {
             const editor::AssetPickOutcome out = editor::applyAssetPick(
                 g_scene, h, menuKind, pick, g_catalog, makeAssetResolvers());
             EXPECT(out.applied);
-            // o rebind por frame (o caminho que o main corre TODOS os frames)
-            rebindPrimMeshes();
+            primFlushPending();   // o rebind por frame do main (ponto seguro)
+            if (mr->mesh != nullptr) { ++ok; } else { ++err; }
         }
         // GUARDA DE TEMPO: freeze = iteração que não volta em 250 ms
         const double ms = msSince(ti);
@@ -475,15 +513,23 @@ TEST(wiring087_troca_stress_antifreeze_com_guarda_de_tempo) {
         }
         EXPECT(ms < 250.0);
         ASSERT(mr->mesh != nullptr);
+        // a posse NUNCA cresce: 1 mesh vivo por TIC com prim (sem cache!)
+        EXPECT(g_primOwners.size() <= 2u);
     }
     const double totalMs = msSince(t0);
-    std::printf("  stress: %d trocas em %.0f ms (media %.2f ms)\n", N, totalMs,
-                totalMs / static_cast<double>(N));
+    const u32 okFinal = g_primSwapOk, errFinal = g_primSwapErr;
+    std::printf("  stress: %d trocas em %.0f ms (media %.2f ms) — trocas ok "
+                "%u, ERRO %u, vivos=%zu cova=%zu\n", N, totalMs,
+                totalMs / static_cast<double>(N), okFinal, errFinal,
+                g_primOwners.size(), g_primGrave.size());
     EXPECT(totalMs < 30000.0);   // guarda total (hang infinito = falha)
+    EXPECT(ok == static_cast<u32>(N));   // 100% de sucesso no stub feliz
+    EXPECT(err == 0u);
+    EXPECT(g_primSwapErr == 0u);
 
-    // estado final SAUDÁVEL: mesh válido, desenha, cache dentro do cap
+    // estado final SAUDÁVEL: mesh válido, desenha, posse contida
     EXPECT(mr->mesh->ok() || mr->mesh->indexCount() > 0);
-    EXPECT(g_primCache.size() <= kPrimCacheMax + 8);   // cap + folga de em-uso
+    EXPECT(g_primOwners.size() <= 2u);   // 1-2 TICs com prim (cap natural)
     g_renderer.beginFrame();
     const Mat4 vp = Mat4::identity();
     (void)g_renderer.drawMesh(*mr->mesh, Mat4::identity(), vp);
@@ -491,54 +537,64 @@ TEST(wiring087_troca_stress_antifreeze_com_guarda_de_tempo) {
 }
 
 // ---------------------------------------------------------------------------
-// 5. CAP + EVICÇÃO — o cache não cresce para sempre; o EM-USO nunca sai
+// 5. DEFERRED FREE — o mesh antigo NÃO é libertado no MESMO frame da troca;
+// morre no INÍCIO do frame seguinte (a cova) — os comandos em voo ficam
+// sempre com buffers válidos. (substitui o teste de cap/evicção do cache —
+// o cache MORREU na 0.8.10; a posse é 1 mesh por TIC, cap natural)
 // ---------------------------------------------------------------------------
-TEST(wiring087_cache_cap_e_eviccao_nao_toca_em_uso) {
+TEST(wiring087_deferred_free_antigo_nao_morre_no_mesmo_frame) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
     resetEngineForTest();
     ensureEngineReady();
-    const Handle h = addMeshTic("Cache");
+    const Handle h = addMeshTic("Cova");
     ASSERT(h.valid());
     MeshRenderer* mr = g_scene.get(h)->getComponent<MeshRenderer>();
     ASSERT(mr != nullptr);
+    ASSERT(mr->mesh != nullptr);            // esfera (do addMeshTic)
+    Mesh* const antigo = mr->mesh;
+    const u32 idxAntigo = antigo->indexCount();
 
-    // o mesh EM USO pelo TIC
-    Mesh* inUse = primMesh(primDefaults(PrimKind::Torus));
-    ASSERT(inUse != nullptr);
-    mr->mesh = inUse;
-    mr->prim = primDefaults(PrimKind::Torus);
-    mr->primOn = true;
-
-    // 200 assinaturas distintas NÃO-referenciadas (slider da vida real)
-    const int genBefore = glstub::stats.genVertexArrays;
-    const int delBefore = glstub::stats.deleteVertexArrays;
-    for (int i = 0; i < 200; ++i) {
-        PrimParams p = primDefaults(PrimKind::Sphere);
-        p.radius = 0.05f + 0.02f * static_cast<f32>(i);
-        primMesh(p);
-    }
-    // o cap segura o cache (evicção removeu os não-usados)
-    EXPECT(g_primCache.size() <= kPrimCacheMax + 8);
-    EXPECT(glstub::stats.genVertexArrays > genBefore);   // houve uploads
-    EXPECT(glstub::stats.deleteVertexArrays > delBefore);   // houve evicção
-
-    // o mesh EM USO sobreviveu à evicção: ponteiro VÁLIDO e desenha
-    EXPECT(mr->mesh == inUse);
+    // TROCA esfera→box no "frame N": pick (pendente) + flush
+    const int delVaoAntes = glstub::stats.deleteVertexArrays;
+    const editor::AssetPickOutcome out = editor::applyAssetPick(
+        g_scene, h, 4, 3, g_catalog, makeAssetResolvers());   // 3 = box
+    EXPECT(out.applied);
+    primFlushPending();
+    ASSERT(mr->mesh != nullptr);
+    EXPECT(mr->mesh != antigo);             // o NOVO está ligado
+    EXPECT(mr->mesh->indexCount() == 36);   // box 24/36
+    EXPECT(mr->prim.kind == PrimKind::Box);
+    // o ANTIGO ainda NÃO foi apagado (deferred free!): zero glDelete* novos
+    EXPECT(glstub::stats.deleteVertexArrays == delVaoAntes);
+    // ...e o antigo AINDA DESENHA neste frame (buffer vivo na cova)
     g_renderer.beginFrame();
-    const Mat4 vp = Mat4::identity();
     const u32 draws = static_cast<u32>(glstub::stats.drawElementsCalls);
-    (void)g_renderer.drawMesh(*inUse, Mat4::identity(), vp);
+    (void)g_renderer.drawMesh(*antigo, Mat4::identity(), Mat4::identity());
     EXPECT(static_cast<u32>(glstub::stats.drawElementsCalls) == draws + 1);
+    EXPECT(antigo->indexCount() == idxAntigo);
 
-    // troca de VOLTA para a assinatura em-uso: cache HIT (sem upload novo)
-    const int genAfter = glstub::stats.genVertexArrays;
-    EXPECT(primMesh(primDefaults(PrimKind::Torus)) == inUse);
-    EXPECT(glstub::stats.genVertexArrays == genAfter);
+    // "frame N+1" (início): a COVA abre — SÓ AGORA o antigo morre
+    EXPECT(!g_primGrave.empty());
+    primGraveDig();
+    EXPECT(g_primGrave.empty());
+    EXPECT(glstub::stats.deleteVertexArrays > delVaoAntes);   // glDelete* correu
+    // o NOVO continua perfeito depois da cova
+    EXPECT(mr->mesh->indexCount() == 36);
+    g_renderer.beginFrame();
+    (void)g_renderer.drawMesh(*mr->mesh, Mat4::identity(), Mat4::identity());
+    EXPECT(glstub::stats.drawElementsCalls > 0u);
+
+    // posse contida: 1 mesh vivo (o box), zero na cova
+    EXPECT(g_primOwners.size() == 1u);
 }
 
 // ---------------------------------------------------------------------------
-// 6. NEGATIVE-CACHE — upload GL falhou: resposta ESTÁVEL (zero retry-storm)
+// 6. BACKOFF pós-falha (primNeg) — o upload GL falhou: o mesh ANTERIOR
+// fica (render continua), ZERO retry por frame; pedido NOVO ou contexto
+// NOVO voltam a tentar. (o anti-storm da 0.8.7, agora SEM cache)
 // ---------------------------------------------------------------------------
-TEST(wiring087_upload_falhou_negative_cache_sem_retry_storm) {
+TEST(wiring087_upload_falhou_backoff_sem_retry_storm) {
     rmrf(kTestLogs);
     EXPECT(vv::elog::init(kTestLogs));
     resetEngineForTest();
@@ -547,42 +603,49 @@ TEST(wiring087_upload_falhou_negative_cache_sem_retry_storm) {
     ASSERT(h.valid());
     MeshRenderer* mr = g_scene.get(h)->getComponent<MeshRenderer>();
     ASSERT(mr != nullptr);
+    Mesh* const esfera = mr->mesh;          // o mesh ANTIGO (fica!)
+    ASSERT(esfera != nullptr);
 
-    // o device "fica sem memória": glGen* devolve 0 (como num contexto doente)
+    // o "device doente": glGen* devolve 0 → o upload da troca falha
     glstub::failNextGenObjects = true;
-    PrimParams bad = primDefaults(PrimKind::Cone);
-    Mesh* m = primMesh(bad);
-    EXPECT(m == nullptr);               // o upload FALHOU (o "dá erro" do C33)
-    EXPECT(!g_primCache.empty());       // a entrada NEGIVA ficou no cache
-    EXPECT(logHas("mesh: prim cone ERRO(upload GL"));   // a causa no log
+    const editor::AssetPickOutcome out = editor::applyAssetPick(
+        g_scene, h, 4, 3, g_catalog, makeAssetResolvers());   // box
+    EXPECT(out.applied);                    // o PEDIDO armou (é pendente)
+    primFlushPending();                     // ← a TROCA falha AQUI
+    glstub::failNextGenObjects = false;
+    EXPECT(mr->prim.kind == PrimKind::Box); // o pedido ficou registado
+    EXPECT(mr->primNeg);                    // backoff ARMADO
+    // FAIL-SAFE: o mesh ANTERIOR fica intacto e a renderizar
+    EXPECT(mr->mesh == esfera);
+    EXPECT(mr->mesh->indexCount() > 0);
+    // ERRO legível com PASSO e RAZÃO + toast no ecrã
+    EXPECT(logHas(" passo=upload ERRO("));   // de/para com params no meio
+    EXPECT(std::strstr(g_toast, "ERRO(upload)") != nullptr);
 
-    // o RETRY-STORM morreu: N frames de rebind NÃO regeneram nem uploda
+    // o RETRY-STORM morreu: 60 frames de flush NÃO regeneram nem uploda
     const int gen = glstub::stats.genVertexArrays;
     const int bufdata = glstub::stats.bufferData;
-    mr->primOn = true;
-    mr->prim = bad;
-    mr->mesh = nullptr;
-    for (int f = 0; f < 60; ++f) {   // 1 segundo de frames
-        rebindPrimMeshes();
-        EXPECT(mr->mesh == nullptr);   // estável — sem mil tentativas
+    for (int f = 0; f < 60; ++f) {
+        primGraveDig();
+        primFlushPending();
+        EXPECT(mr->mesh == esfera);   // estável — sem mil tentativas
     }
-    EXPECT(glstub::stats.genVertexArrays == gen);      // ZERO genVertexArrays
-    EXPECT(glstub::stats.bufferData == bufdata);       // ZERO uploads novos
+    EXPECT(glstub::stats.genVertexArrays == gen);
+    EXPECT(glstub::stats.bufferData == bufdata);
 
-    // ASSINATURA NOVA funciona logo (a falha não contagia as outras)
-    glstub::failNextGenObjects = false;
-    PrimParams ok = primDefaults(PrimKind::Box);
-    Mesh* m2 = primMesh(ok);
-    EXPECT(m2 != nullptr);
-    EXPECT(m2->vertexCount() > 0);
+    // pedido NOVO (assinala de novo o MESMO tipo — primNeg limpa): funciona
+    const editor::AssetPickOutcome out2 = editor::applyAssetPick(
+        g_scene, h, 4, 3, g_catalog, makeAssetResolvers());
+    EXPECT(out2.applied);
+    primFlushPending();
+    ASSERT(mr->mesh != nullptr);
+    EXPECT(mr->mesh->indexCount() == 36);   // box subiu
+    EXPECT(mr->mesh != esfera);
 
-    // contexto NOVO (TERM/INIT): a negativa limpa e a MESMA assinatura
-    // volta a tentar — e agora consegue
-    primMeshDestroy();
-    glstub::failNextGenObjects = false;
-    Mesh* m3 = primMesh(bad);
-    EXPECT(m3 != nullptr);
-    EXPECT(m3->indexCount() > 0);
+    // o esfera antigo: estava na posse (a falha não o retirou) — a TROCA
+    // bem-sucedida é que o pôs na cova; a cova abre sem pressa
+    primGraveDig();
+    EXPECT(g_primOwners.size() == 1u);      // só o box vivo
 }
 
 // ---------------------------------------------------------------------------
@@ -596,28 +659,32 @@ TEST(wiring087_lifecycle_destroy_recreate_deterministico) {
     MeshRenderer* mr = g_scene.get(h)->getComponent<MeshRenderer>();
     ASSERT(mr != nullptr);
 
-    const PrimKind seq[4] = {PrimKind::Sphere, PrimKind::Cylinder,
-                             PrimKind::Capsule, PrimKind::Torus};
+    const PrimKind seq[2] = {PrimKind::Sphere, PrimKind::Box};
     for (int cycle = 0; cycle < 5; ++cycle) {
-        // troca pelo caminho real
-        const PrimKind kind = seq[cycle % 4];
+        // troca pelo caminho real (pick + flush)
+        const PrimKind kind = seq[cycle % 2];
         const editor::AssetPickOutcome out = editor::applyAssetPick(
             g_scene, h, 4, static_cast<int>(kind) + 2, g_catalog,
             makeAssetResolvers());
         EXPECT(out.applied);
+        primFlushPending();
         ASSERT(mr->mesh != nullptr);
         const u32 idx = mr->mesh->indexCount();
+        const u32 vao = 0;   // (ids do stub não distinguem — o ESTADO afera)
 
         // TERM_WINDOW: buffers GL mortos + renderers desligados
         detachRenderersFromGpu();
-        primMeshDestroy();
+        primGraveDig();
+        primMeshesDestroyAll();
         EXPECT(mr->mesh == nullptr);
-        EXPECT(g_primCache.empty());
+        EXPECT(g_primOwners.empty());
+        EXPECT(g_primGrave.empty());
+        EXPECT(!mr->primNeg);   // novo contexto, nova sorte
 
-        // INIT_WINDOW: o rebind lazy RE-GERA com o contexto novo
-        rebindPrimMeshes();
+        // INIT_WINDOW: o flush do próximo frame RE-GERA (primPending ficou)
+        primFlushPending();
         ASSERT(mr->mesh != nullptr);
-        EXPECT(mr->mesh->indexCount() == idx);   // MESMA geometria (determinístico)
+        EXPECT(mr->mesh->indexCount() == idx);   // MESMA geometria
         EXPECT(mr->prim.kind == kind);           // o .goni/params é a verdade
 
         // desenha no contexto novo
@@ -626,6 +693,7 @@ TEST(wiring087_lifecycle_destroy_recreate_deterministico) {
         const u32 draws = static_cast<u32>(glstub::stats.drawElementsCalls);
         (void)g_renderer.drawMesh(*mr->mesh, Mat4::identity(), vp);
         EXPECT(static_cast<u32>(glstub::stats.drawElementsCalls) == draws + 1);
+        (void)vao;
     }
 }
 
@@ -719,11 +787,12 @@ TEST(wiring087_anim_intacta_sob_trocas_de_mesh) {
         pl->advance(1.0f / 60.0f);
         pl->apply(g_scene, h);
         if (s % 20 == 10) {   // troca a meio do clip, 6×
-            const PrimKind kind = static_cast<PrimKind>(swaps % 8);
+            const PrimKind kind = static_cast<PrimKind>(swaps % 2);
             const editor::AssetPickOutcome out = editor::applyAssetPick(
                 g_scene, h, 4, static_cast<int>(kind) + 2, g_catalog,
                 makeAssetResolvers());
             EXPECT(out.applied);
+            primFlushPending();   // o ponto seguro do frame
             ++swaps;
         }
     }
@@ -795,7 +864,8 @@ TEST(wiring087_boot_e_frame_smoke_com_browser_aberto) {
     // para o próximo INIT
     onAppCmd(&app, APP_CMD_TERM_WINDOW);
     EXPECT(!g_ready);
-    EXPECT(g_primCache.empty());
+    EXPECT(g_primOwners.empty());
+    EXPECT(g_primGrave.empty());
 }
 
 // ===========================================================================
@@ -831,36 +901,45 @@ TEST(wiring089_device_sequencia_do_dump_termina_sem_crash) {
     mr->material = g_renderer.litMaterial();
     g_editor.selected = h;
 
-    // a sequência do log do C33: "-" → prim esfera → prim box → prim capsula
+    // a sequência do log do C33 (0.8.10: cápsula não existe — o análogo é
+    // "-" → esfera → box → esfera com o flush de cada frame)
     const PrimKind seq[3] = {PrimKind::Sphere, PrimKind::Box,
-                             PrimKind::Capsule};
+                             PrimKind::Sphere};
     for (const PrimKind kind : seq) {
         const editor::AssetPickOutcome out = editor::applyAssetPick(
             g_scene, g_editor.selected, 4,
             static_cast<int>(kind) + 2, g_catalog, makeAssetResolvers());
         EXPECT(out.applied);                        // TODAS aplicam
         EXPECT(g_editor.selected == h);             // seleção NUNCA muda
+        primFlushPending();                         // o ponto seguro do frame
         ASSERT(mr->mesh != nullptr);
         EXPECT(mr->mesh->vertexCount() > 0);
         EXPECT(mr->mesh->indexCount() >= 3);
+        primGraveDig();                             // início do frame seguinte
     }
-    // o estado final é a CÁPSULA (o "continua cubo" do C33 era o reload
-    // pós-crash — agora o estado fica mesmo onde o dono pôs)
+    // o estado final é a ESFERA (o pedido do dono fica mesmo onde ele pôs)
     EXPECT(mr->primOn);
-    EXPECT(mr->prim.kind == PrimKind::Capsule);
-    EXPECT(logHas("mesh: prim capsula verts="));    // a prova no log
+    EXPECT(mr->prim.kind == PrimKind::Sphere);
+    EXPECT(logHas("mesh: troca"));                  // a prova no log
+    EXPECT(logHas("passo=bind ok"));
+
+    // PICK FORA DO RANGE (o antigo "9 = cápsula"): não aplica, não crasha
+    const editor::AssetPickOutcome outInv = editor::applyAssetPick(
+        g_scene, h, 4, 9, g_catalog, makeAssetResolvers());
+    EXPECT(!outInv.applied);                        // 9 já não existe
+    EXPECT(g_editor.selected == h);
 
     // E o caminho com SELEÇÃO PERDIDA (a origem "-" verdadeira do dump: TIC
-    // sem MeshRenderer): falha GRÁCEVEL, sem crash, sem tocar na seleção
+    // sem MeshRenderer): falha GRACIOSA, sem crash, sem tocar na seleção
     const Handle plain = g_scene.create("semMesh");
     g_editor.selected = plain;
     const editor::AssetPickOutcome out2 = editor::applyAssetPick(
-        g_scene, plain, 4, 9, g_catalog, makeAssetResolvers());
+        g_scene, plain, 4, 3, g_catalog, makeAssetResolvers());
     EXPECT(!out2.applied);                          // sem alvo: não aplica
     EXPECT(g_editor.selected == plain);             // seleção intacta
-    // o TIC de cubo CONTINUA cápsula (o estado anterior é sagrado)
+    // o TIC de cubo CONTINUA esfera (o estado anterior é sagrado)
     EXPECT(g_scene.get(h)->getComponent<MeshRenderer>()->prim.kind ==
-           PrimKind::Capsule);
+           PrimKind::Sphere);
 }
 
 // ---------------------------------------------------------------------------
@@ -880,38 +959,40 @@ TEST(wiring089_device_falha_gl_mantem_mesh_anterior_e_selecao) {
     Mesh* const esferaMesh = mr->mesh;
     ASSERT(esferaMesh != nullptr);
     const u32 idxBefore = esferaMesh->indexCount();
-    const u32 vaoBefore = 12345u;   // marcador (o mesh antigo NÃO é recriado)
 
-    // o "device doente": glGen* devolve 0 → o upload da TORA falha
+    // o "device doente": glGen* devolve 0 → o UPLOAD da troca falha
     glstub::failNextGenObjects = true;
     const editor::AssetPickOutcome out = editor::applyAssetPick(
-        g_scene, h, 4, static_cast<int>(PrimKind::Torus) + 2, g_catalog,
-        makeAssetResolvers());
+        g_scene, h, 4, 3, g_catalog, makeAssetResolvers());   // box
+    primFlushPending();   // ← a falha acontece NO ponto seguro
     glstub::failNextGenObjects = false;
-    EXPECT(!out.applied);                      // a torus NÃO aplicou
-    // o mesh ANTERIOR fica (À PROVA DE FALHA: nunca fica sem mesh)
+    // FAIL-SAFE: o mesh ANTERIOR fica intacto (nunca fica sem mesh)
     EXPECT(mr->mesh == esferaMesh);
     EXPECT(mr->mesh->indexCount() == idxBefore);
-    EXPECT(mr->primOn);                        // estado anterior intacto
-    EXPECT(mr->prim.kind == PrimKind::Sphere);
+    EXPECT(mr->primNeg);                       // backoff armado
     // seleção NUNCA muda (o "desseleciona e continua cubo" era o crash)
     EXPECT(g_editor.selected == h);
     // a RAZÃO no log (erro legível, não um crash dump)
-    EXPECT(logHas("mesh: prim torus ERRO(upload GL"));
-    (void)vaoBefore;
+    EXPECT(logHas(" passo=upload ERRO("));   // de/para com params no meio
+    // e o mesh antigo CONTINUA desenhando neste frame
+    const u32 draws = static_cast<u32>(glstub::stats.drawElementsCalls);
+    g_renderer.beginFrame();
+    (void)g_renderer.drawMesh(*esferaMesh, Mat4::identity(),
+                              Mat4::identity());
+    EXPECT(static_cast<u32>(glstub::stats.drawElementsCalls) == draws + 1);
 
-    // recuperado: o MESMO alvo aceita a troca no contexto novo (o cache
-    // negativo sai com o primMeshDestroy; NÃO comparamos ponteiros com o
-    // mesh destruído — o heap recicla endereços — aferimos o ESTADO)
-    primMeshDestroy();
-    const editor::AssetPickOutcome out2 = editor::applyAssetPick(
-        g_scene, h, 4, static_cast<int>(PrimKind::Torus) + 2, g_catalog,
-        makeAssetResolvers());
-    EXPECT(out2.applied);
+    // RECUPERAÇÃO: contexto NOVO (TERM/INIT limpa o backoff) e o MESMO
+    // pedido sobe com sucesso
+    primGraveDig();
+    primMeshesDestroyAll();      // TERM: posse morta, primNeg limpo
+    detachRenderersFromGpu();    // mesh null (vai re-subir)
+    EXPECT(mr->mesh == nullptr);
+    EXPECT(!mr->primNeg);
+    primFlushPending();          // INIT: re-sobe (o pedido persistiu)
     ASSERT(mr->mesh != nullptr);
     EXPECT(mr->mesh->vertexCount() > 0);
-    EXPECT(mr->prim.kind == PrimKind::Torus);
-    EXPECT(logHas("mesh: prim torus verts="));   // a PROVA no log
+    EXPECT(mr->prim.kind == PrimKind::Box);
+    EXPECT(logHas("passo=bind ok"));
 }
 
 // ---------------------------------------------------------------------------
@@ -919,7 +1000,7 @@ TEST(wiring089_device_falha_gl_mantem_mesh_anterior_e_selecao) {
 // seleção, TODAS desenham (stub GL grava draw calls; o material lit afirma
 // o cull — backface culling contra winding errado).
 // ---------------------------------------------------------------------------
-TEST(wiring089_device_oito_prims_tres_ordens_todas_renderizam) {
+TEST(wiring089_device_duas_prims_tres_ordens_todas_renderizam) {
     rmrf(kTestLogs);
     EXPECT(vv::elog::init(kTestLogs));
     resetEngineForTest();
@@ -930,19 +1011,22 @@ TEST(wiring089_device_oito_prims_tres_ordens_todas_renderizam) {
     MeshRenderer* mr = t->getComponent<MeshRenderer>();
     ASSERT(mr != nullptr);
 
-    // 3 ordens: direta, inversa, intercalada (extremos↔meio)
-    const int ordA[8] = {0, 1, 2, 3, 4, 5, 6, 7};
-    const int ordB[8] = {7, 6, 5, 4, 3, 2, 1, 0};
-    const int ordC[8] = {0, 7, 1, 6, 2, 5, 3, 4};
+    // 0.8.10: DUAS formas × 3 ordens (direta, inversa, intercalada) ×
+    // REPETIÇÃO (A→B→A) — cada troca com o FLUSH (fronteira de frame)
+    const int ordA[4] = {0, 1, 0, 1};
+    const int ordB[4] = {1, 0, 1, 0};
+    const int ordC[4] = {0, 0, 1, 1};
     const int* ords[3] = {ordA, ordB, ordC};
     for (int o = 0; o < 3; ++o) {
-        for (int i = 0; i < 8; ++i) {
+        for (int i = 0; i < 4; ++i) {
             const PrimKind kind = static_cast<PrimKind>(ords[o][i]);
             const editor::AssetPickOutcome out = editor::applyAssetPick(
                 g_scene, h, 4, static_cast<int>(kind) + 2, g_catalog,
                 makeAssetResolvers());
             EXPECT(out.applied);
             EXPECT(g_editor.selected == h);          // SEM perda de seleção
+            primGraveDig();                          // início do frame
+            primFlushPending();                      // ponto seguro
             ASSERT(mr->mesh != nullptr);
             EXPECT(mr->mesh->vertexCount() > 0);
             // TODAS renderizam: draw no stub GL (1 draw a mais por troca)
@@ -957,8 +1041,10 @@ TEST(wiring089_device_oito_prims_tres_ordens_todas_renderizam) {
             EXPECT(glstub::stats.cullEnabled);
         }
     }
-    // o cache ficou estável (cap 48; 8 assinaturas × reuso — sem crescer)
-    EXPECT(g_primCache.size() <= 48u);
+    // SEM CACHE: a posse é contida (1 mesh por TIC com prim), a cova limpa
+    primGraveDig();   // o último flush deixou 1 na cova — o frame seguinte
+    EXPECT(g_primOwners.size() == 1u);
+    EXPECT(g_primGrave.empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -1006,20 +1092,23 @@ TEST(wiring089_device_import_gigante_uniforme_sem_espalmar) {
     e.kind = 'm';
 
     browserImportFile(e);
+    pumpImportJob();   // 0.8.10: o job converte → assets/goni_w089_giant.gmesh
     applyImportedAssetToSelectedTic();
     ASSERT(mr->mesh != nullptr);
-    EXPECT(mr->meshPath == "meshes/goni_w089_giant.obj");
+    EXPECT(mr->meshPath == "assets/goni_w089_giant.gmesh");
 
     // AABB ORIGINAL do mesh (1000×500×250) — a geometria fica INTACTA
+    // (0.8.10: quantização 16-bit do .gmesh — erro ≤ 0.02 em 1000: tolerância)
     const Vec3 ext = mr->mesh->boundsExtent();
-    EXPECT(::test::nearEqF(ext.x, 1000.0f, 0.5f));
-    EXPECT(::test::nearEqF(ext.y, 500.0f, 0.5f));
-    EXPECT(::test::nearEqF(ext.z, 250.0f, 0.5f));
+    EXPECT(::test::nearEqF(ext.x, 1000.0f, 0.1f));
+    EXPECT(::test::nearEqF(ext.y, 500.0f, 0.1f));
+    EXPECT(::test::nearEqF(ext.z, 250.0f, 0.1f));
 
-    // FATOR ÚNICO: s = 2/1000 = 0.002 nos TRÊS eixos (nunca espalmado)
-    EXPECT(::test::nearEqF(tr->scale.x, 0.002f, 1e-6f));
-    EXPECT(::test::nearEqF(tr->scale.y, 0.002f, 1e-6f));
-    EXPECT(::test::nearEqF(tr->scale.z, 0.002f, 1e-6f));
+    // FATOR ÚNICO: s = 2/1000 ≈ 0.002 nos TRÊS eixos (nunca espalmado;
+    // a quantização mexe ~1e-5 no fator)
+    EXPECT(::test::nearEqF(tr->scale.x, 0.002f, 1e-4f));
+    EXPECT(::test::nearEqF(tr->scale.y, 0.002f, 1e-4f));
+    EXPECT(::test::nearEqF(tr->scale.z, 0.002f, 1e-4f));
     // AABB RENDER ≤ alvo com PROPORÇÕES IGUAIS (x:y:z antes == depois)
     const Vec3 scaled{ext.x * tr->scale.x, ext.y * tr->scale.y,
                       ext.z * tr->scale.z};

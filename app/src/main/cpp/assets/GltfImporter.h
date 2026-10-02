@@ -126,13 +126,26 @@ struct GltfBufferResolver {
     void* user = nullptr;
 };
 
+// 0.8.10 — STREAMING: carrega RANGES de um buffer por demanda (o BIN chunk
+// de um .glb EM FICHEIRO: o import nunca o carrega inteiro — accessors e
+// imagens materializam SÓ os seus ranges, cada um ≤ kMaxRangeBytes).
+// `binLen`: tamanho total do buffer 0 (validação de bounds).
+struct GltfRangeLoader {
+    bool (*fn)(void* user, u32 bufferIndex, u64 offset, u64 len,
+               std::vector<u8>& out) = nullptr;
+    void* user = nullptr;
+    u64  binLen = 0;   // tamanho do buffer 0 (GLB: o BIN chunk em ficheiro)
+};
+
 // parse de .gltf (JSON puro) ou do JSON chunk de um .glb.
 // `bin`: conteúdo do BIN chunk do GLB (vazio p/ .gltf) — buffer sem URI.
 // `resolver`: usado para buffers com URI não-"data:" (pode ser {nullptr,0}
 // se o ficheiro só tem buffers embutidos).
+// `rangeLoader` (0.8.10, opcional): com `bin` VAZIO, o buffer 0 é DEFERIDO
+// — ranges carregados por demanda (import de ficheiros enormes).
 bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                const GltfBufferResolver& resolver, GltfModel& out,
-               std::string& err);
+               std::string& err, const GltfRangeLoader* rangeLoader = nullptr);
 
 // container binário .glb (magic 'glTF', JSON chunk + BIN chunk) → parseGltf
 bool parseGlb(const u8* data, size_t len, const GltfBufferResolver& resolver,

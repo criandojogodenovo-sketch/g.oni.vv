@@ -169,4 +169,51 @@ u32 gltfAttachSkin(Scene& scene, Handle ticH, const GltfModel& model,
     return static_cast<u32>(sk->joints.size());
 }
 
+// ---- 0.8.10: .gm (formato próprio) → clips + SkeletonComp --------------------
+// O caminho do LOAD de cenas convertidas: o .goni aponta assets/x.gmesh e o
+// .gm irmão traz os clips baked + o esqueleto. MESMAS regras do glTF: clips
+// ACRESCENTAM ao "edit" (sem duplicar nome); esqueleto só se ainda não há.
+u32 attachGAnim(Scene& scene, Handle ticH, const GAnimFile& anim) {
+    if (!ticH.valid()) {
+        return 0;
+    }
+    Tic* tic = scene.get(ticH);
+    if (!tic || !tic->active) {
+        return 0;
+    }
+    u32 added = 0;
+    AnimationPlayer* pl = tic->getComponent<AnimationPlayer>();
+    if (!pl) {
+        pl = tic->addComponent<AnimationPlayer>();
+    }
+    if (pl) {
+        for (const AnimClip& src : anim.clips) {
+            if (src.tracks.empty()) {
+                continue;
+            }
+            bool dup = false;
+            for (const AnimClip& c : pl->clips) {
+                if (c.name == src.name) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (!dup) {
+                pl->clips.push_back(src);
+                ++added;
+            }
+        }
+        if (added > 0 && pl->activeClip < 0) {
+            pl->activeClip = 1;
+        }
+    }
+    if (!anim.joints.empty() && !tic->getComponent<SkeletonComp>()) {
+        SkeletonComp* sk = tic->addComponent<SkeletonComp>();
+        if (sk) {
+            sk->joints = anim.joints;
+        }
+    }
+    return added;
+}
+
 } // namespace vv

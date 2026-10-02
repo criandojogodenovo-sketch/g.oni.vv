@@ -794,7 +794,7 @@ TEST(uilayout_applyuitexpick_escreve_a_ref) {
     c->elements.push_back(img);
 
     AssetCatalog cat;
-    cat.textures = {"wood.png", "brick.png"};
+    cat.textures = {"textures/wood.png", "textures/brick.png"};
 
     // escolhe o 1º ficheiro (pick 2) → ref "textures/wood.png"
     UiTexPickOutcome out = applyUiTexPick(s, s.find("HUD"), 0, 2, cat);

@@ -53,10 +53,11 @@ struct LoadCtx {
     Material*  material = nullptr;   // material lit partilhado
     std::function<Mesh*(const std::string&)> resolveMesh;       // ref relativa
     std::function<const Texture*(const std::string&)> resolveTex; // textura
-    // 0.8.0 (F7): primitiva procedural ("mesh":"prim" + "prim":{…}) →
-    // mesh gerado do CACHE do main (assinatura = tipo+parâmetros); sem
-    // resolver, o TIC entra com primOn+params e mesh null (rebind possível)
-    std::function<Mesh*(const PrimParams&)> resolvePrim;
+    // 0.8.10 — MIGRAÇÃO de prim removida: chamado UMA vez por nome de
+    // primitiva removida ("cilindro"… ) encontrada no .goni — o main liga-o
+    // ao log `mesh: prim <x> removido -> cube` + toast (1× por load).
+    // Sem callback (host/testes): migra silenciosa, SEM crash.
+    std::function<void(const char* removedName)> onPrimMigrated;
 };
 
 // F5: texto ↔ cena (storage-agnostic; Project usa estes).

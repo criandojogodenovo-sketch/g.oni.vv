@@ -260,6 +260,164 @@ bool writeAll(const std::string& path, const void* data, size_t n) {
     return true;
 }
 
+
+// ---- 0.8.10 — STREAMING -----------------------------------------------------
+
+bool fileSize(const std::string& path, u64& out) {
+    errno = 0;
+    FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) {
+        captureErrno("fopen/size", path.c_str());
+        return false;
+    }
+    std::fseek(f, 0, SEEK_END);
+    const long size = std::ftell(f);
+    std::fclose(f);
+    if (size < 0) {
+        captureErrno("ftell", path.c_str());
+        return false;
+    }
+    out = static_cast<u64>(size);
+    return true;
+}
+
+bool ChunkReader::open(const std::string& path, size_t chunk) {
+    close();
+    if (chunk < 4096) {
+        chunk = 4096;   // piso sanidade (o import usa 4-8 MB)
+    }
+    errno = 0;
+    FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) {
+        captureErrno("fopen/chunk", path.c_str());
+        return false;
+    }
+    std::fseek(f, 0, SEEK_END);
+    const long size = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    if (size < 0) {
+        captureErrno("ftell", path.c_str());
+        std::fclose(f);
+        return false;
+    }
+    file = f;
+    total = static_cast<u64>(size);
+    done = 0;
+    last = 0;
+    buf.assign(chunk, 0);
+    return true;
+}
+
+bool ChunkReader::next() {
+    if (!file) {
+        return false;
+    }
+    if (done >= total) {
+        last = 0;
+        return false;   // fim limpo
+    }
+    const size_t want = static_cast<size_t>(
+        total - done < buf.size() ? total - done : buf.size());
+    const size_t got = std::fread(buf.data(), 1, want, static_cast<FILE*>(file));
+    if (got != want) {
+        captureErrno("fread/chunk", "");
+        last = got;
+        return false;   // leitura curta — erro
+    }
+    done += got;
+    last = got;
+    return true;
+}
+
+void ChunkReader::close() {
+    if (file) {
+        std::fclose(static_cast<FILE*>(file));
+        file = nullptr;
+    }
+    buf.clear();
+    buf.shrink_to_fit();
+    last = 0;
+    done = 0;
+    total = 0;
+}
+
+ChunkReader::~ChunkReader() {
+    close();
+}
+
+bool copyFileChunked(const std::string& src, const std::string& dst,
+                     size_t chunk,
+                     bool (*onProgress)(void*, u64, u64), void* user) {
+    errno = 0;
+    FILE* in = std::fopen(src.c_str(), "rb");
+    if (!in) {
+        captureErrno("fopen/copy-src", src.c_str());
+        return false;
+    }
+    // pastas-mãe do dst (mkdir -p — como o writeAll)
+    const size_t slash = dst.rfind('/');
+    if (slash != std::string::npos) {
+        if (!makeDirs(dst.substr(0, slash))) {
+            std::fclose(in);
+            return false;
+        }
+    }
+    FILE* out = std::fopen(dst.c_str(), "wb");
+    if (!out) {
+        captureErrno("fopen/copy-dst", dst.c_str());
+        std::fclose(in);
+        return false;
+    }
+    if (chunk < 4096) {
+        chunk = 4096;
+    }
+    std::vector<u8> buf(chunk);
+    u64 done = 0;
+    u64 total = 0;
+    {
+        std::fseek(in, 0, SEEK_END);
+        const long size = std::ftell(in);
+        std::fseek(in, 0, SEEK_SET);
+        if (size >= 0) {
+            total = static_cast<u64>(size);
+        }
+    }
+    bool ok = true;
+    while (true) {
+        const size_t want = buf.size();
+        const size_t got = std::fread(buf.data(), 1, want, in);
+        if (got > 0) {
+            if (std::fwrite(buf.data(), 1, got, out) != got) {
+                captureErrno("fwrite/copy", dst.c_str());
+                ok = false;
+                break;
+            }
+            done += got;
+        }
+        if (onProgress && !onProgress(user, done, total)) {
+            errno = ECANCELED;
+            std::snprintf(g_errBuf, sizeof(g_errBuf),
+                          "errno=%d (cancelado pelo utilizador)", ECANCELED);
+            ok = false;
+            break;
+        }
+        if (got < want) {
+            if (std::ferror(in)) {
+                captureErrno("fread/copy", src.c_str());
+                ok = false;
+            }
+            break;   // fim (ou erro — ok já diz)
+        }
+    }
+    if (ok && std::fflush(out) != 0) {
+        captureErrno("fflush/copy", dst.c_str());
+        ok = false;
+    }
+    std::fclose(in);
+    std::fclose(out);
+    return ok;
+}
+
 void logStorageSelfCheck(const char* root, bool isExternal) {
     // 1) o mapeamento do boot (o "null?" pedido no escopo)
     elog::info("self-check: getExternalFilesDir=%s (fonte=%s)",
