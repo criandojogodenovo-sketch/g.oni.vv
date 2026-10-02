@@ -1,3 +1,60 @@
+# G.One VV 0.8.7 — HOTFIX CIRÚRGICO: import abre o navegador + troca de mesh sem travar
+
+## Escopo 0.8.7 (implementado — hotfix: import + troca de mesh, ZERO resto)
+
+**O DIAGNÓSTICO**: no C33 o botão Import não abria NADA e a troca de mesh
+travava a engine intermitentemente ou dava "falha ao gerar primitiva". A
+AUDITORIA DE EXISTÊNCIA provou que o gerador de primitivas ESTÁ no APK
+(render/Primitives.cpp no CMake da app desde a 0.8.0 — não é o precedente
+FileApi) e que o handler chama o gerador no caminho real; os bugs eram de
+WIRING e de RECURSO, todos invisíveis à suíte porque o main.cpp (onde vivem
+primMesh/attemptImport/rebindPrimMeshes) era DEVICE-ONLY, fora dos testes:
+
+1. **IMPORT MORTO (wiring)**: `attemptImport()` chamava `browserOpen()`
+   (põe `g_browser.open`) mas NUNCA setava `g_editor.fileBrowser` — o gate
+   do overlay no frame() exige as DUAS flags. O navegador "abria"
+   INVISÍVEL: o toque chegava, o handler corria, nada aparecia ("o botão
+   Import não abre nada"). Fix: as duas juntas, sempre (toque e retoma
+   pós-concessão); `openImportScan` (scan Download/Documents) foi removido
+   — o import É o navegador 0.7.2.
+
+2. **TROCA INTERMITENTE (recurso)**: o cache de primitivas era SEM LIMITE
+   — cada posição de slider era uma assinatura nova = mesh GL vivo para
+   sempre → exaustão de memória de GPU → uploads começavam a FALHAR (o
+   "dá erro") e o driver engasgava (o "trava"). E quando um upload falhava,
+   o `rebindPrimMeshes` re-gerava+re-uplodava A CADA FRAME (retry-storm =
+   freeze). Fix: CAP (48) + EVICÇÃO de não-referenciados (o mesh em uso
+   NUNCA sai) + NEGATIVE-cache (a assinatura que falhou devolve a MESMA
+   resposta sem regerar — nova tentativa só em contexto novo).
+
+3. **GESTO ÓRFÃO (input)**: um widget que desaparece a meio do gesto
+   (overlay fechado antes do release) deixava o `active_` do UiContext
+   preso PARA SEMPRE — todo o botão/slider exige `active_ == 0` para
+   capturar, a UI inteira morria ("a engine trava": o 3D continua, nada
+   responde). Fix: no FIM do frame, sem dedo em cima, o active_ órfão morre
+   (depois de todos os widgets terem tido a sua frame de release).
+
+4. **LOGGING EMBUTIDO (o petitorio)**: `import: <passo>` em cada passo do
+   import; `mesh: troca <de>→<para> inicio` / `fim ok verts=N idx=M` /
+   `ERRO(<razão>)`; `mesh: prim <tipo> verts=N idx=M` a cada upload novo —
+   a PROVA no log viewer do C33 de que a geometria existe e é chamada.
+
+5. **GATE DE SÍMBOLOS no CI**: o verify-entry-symbols agora AFIRMA que
+   makePrimMesh/primDefaults/primName/primClamp (gerador) e applyAssetPick
+   (dispatch da troca) estão no .dynsym do APK — a auditoria de existência
+   institucionalizada (nunca mais "nos testes mas não no device").
+
+6. **O CAMINHO REAL DO DEVICE NA SUÍTE**: test_wiring087 `#include
+   platform/main.cpp` — primMesh, attemptImport, browserImportFile,
+   rebindPrimMeshes, o BOOT do INIT_WINDOW e o frame() inteiro correm no
+   hospedeiro contra os stubs GLES3/EGL/JNI (o stub EGL ganhou init feliz
+   + 1280×720; o stub GL ganhou injetor de falha). 13 casos novos, todos
+   VERMELHOS antes dos fixes (afirmado ao correr a suíte com os fixes
+   revertidos): 532→545. versionCode 38. CLAUSULA CALMA: import + troca +
+   auditoria + logging + testes — zero features, zero layout, zero física.
+
+<!-- (0.8.6 abaixo — histórico) -->
+
 # G.One VV 0.8.6 — UX/layout/Inspector: hex, tipografia, gizmos de UI, Theme uniforme
 
 ## Escopo 0.8.6 (implementado — campanha F8: UX/layout/Inspector)
@@ -1397,6 +1454,55 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.8.7 (HOTFIX: import + troca; APK CUMULATIVO)
+
+Instalar o APK 0.8.7 (artifact `goni-vv-0.8.7-release-signed` do run do
+job `build-release`). A alvo são os DOIS pontos do hotfix — cada passo diz
+onde confirmar (UI ou log viewer):
+
+1. **Import ABRE o navegador (o morto)**: com um projeto aberto → Menu →
+   "Importar…" → o NAVEGADOR DE FICHEIROS ABRE em cheio (raízes
+   [Raiz][Download][Docs][Camera][Pictures], caminho visível no topo,
+   "^ Subir", lista) — antes: NADA acontecia (o toque corria mas o overlay
+   nunca desenhava). No log viewer: `import: toque no botao` e
+   `import: navegador ABERTO (Download) — flag fileBrowser=1`;
+
+2. **Importar .obj/.gltf/.glb aplica ao TIC**: TIC Mesh selecionado →
+   navegador → tocar num .obj (ou .glb) → diálogo "APLICAR AO TIC?" →
+   **Sim** → o mesh aplica no viewport (toast + `import: aplicado verts=N
+   idx=N` no log). Um .fbx/.psd dá o erro claro "formato nao suportado
+   ainda: .fbx";
+
+3. **Trocar primitiva SEM travar (a intermitente)**: TIC Mesh →
+   Inspector → "prim:" → trocar entre as 8 formas em ORDENS DIFERENTES
+   (esfera→torus→cápsula→cone→box→…) várias vezes — nenhuma trava, nenhum
+   erro, a forma troca no viewport. No log viewer, a CADA troca:
+   `mesh: troca prim esfera → prim torus inicio` / `fim ok verts=… idx=…`
+   e a cada upload novo `mesh: prim torus verts=441 idx=2400` — a PROVA de
+   que o gerador existe no build e é chamado;
+
+4. **Arrastar sliders do prim (o esquecido)**: com "prim: esfera" →
+   arrastar raio/segmentos devagar — o mesh regenera suave, sem freeze
+   (o cache agora tem cap 48 + evicção; o log mostra os uploads novos);
+
+5. **A UI nunca "morre"**: abrir o seletor de primitivas → tocar num botão
+   e ARRASTAR PARA FORA antes de soltar → soltar fora → o seletor fecha e
+   TUDO continua respondendo (toolbar, painéis, timeline) — antes era
+   possível a UI inteira morrer com um gesto órfão;
+
+6. **Regressões**: animação (play/stop/loop com o TIC Mesh), 0.8.6 (hex/
+   tipografia/gizmos), 0.8.5 (clips do glb importado), 0.8.4 (storm/play
+   ×20).
+
+**SE ALGO FALHAR no C33**: abrir o log viewer (Settings → "Ver logs") e
+procurar a ÚLTIMA linha `import:` ou `mesh:` — com o logging embutido a
+correção seguinte é UMA LINHA, não uma campanha:
+- parado depois de `mesh: troca … inicio` sem `fim` → a falha está no
+  gerador/upload (a linha `mesh: prim … ERRO(…)` diz a razão);
+- `import: toque no botao` sem `navegador ABERTO` → o problema é a
+  permissão (ver `storage: all-files granted=`);
+- browser aberto mas vazinho → ver a linha `browser: … opendir FALHOU`.
 
 ## Verificação no Realme C33 (dono) — 0.8.6 (UX/layout/Inspector; APK CUMULATIVO)
 

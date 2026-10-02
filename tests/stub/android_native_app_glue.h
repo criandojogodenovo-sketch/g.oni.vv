@@ -6,9 +6,12 @@
 #include "android/native_window.h"
 #include "android/input.h"
 
+// 0.8.7: JNIEnv/JavaVM forward-declarados EXATAMENTE como o stub jni.h os
+// define (struct JNIEnv) — o TU de test_wiring087 inclui AMBOS (jni.h
+// controlável + main.cpp→glue); o typedef _JNIEnv antigo colidia com o
+// struct do jni.h dependendo da ordem dos includes.
 struct JavaVM;
-struct _JNIEnv;
-typedef _JNIEnv JNIEnv;
+struct JNIEnv;
 struct ANativeActivity;
 
 struct android_app {

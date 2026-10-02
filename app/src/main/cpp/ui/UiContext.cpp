@@ -511,6 +511,19 @@ void UiContext::endFrame() {
     if (!renderer_) {
         return;
     }
+    // 0.8.7 — GESTO ÓRFÃO NUNCA ATRAVESSA O FRAME: um widget que desaparece
+    // a meio do gesto (overlay fechado antes do release, painel escondido,
+    // mode switch) deixava o active_ PRESO para sempre — e como TODO o
+    // widget exige active_ == 0 para capturar um press novo, a UI inteira
+    // morria ("a engine trava" do C33: render continua, nada responde).
+    // No FIM do frame (todos os widgets já tiveram a sua hipótese de fired
+    // no release), sem dedo em cima, qualquer active_ sobrevivente é órfão
+    // por definição — morre AQUI. O reset no beginFrame NÃO serve: matava o
+    // active_ ANTES do widget o ver no frame do release (o clique nunca
+    // disparava). Com dedo em cima o active_ fica (gesto legítimo em curso).
+    if (input_ && !input_->down(0)) {
+        active_ = 0;
+    }
     // 0.7.4 — submissão na ORDEM REAL de emissão (runs): sólidos e texturas
     // intercalam-se conforme foram desenhados; os GLIFOS ficam por último
     // (texto sempre legível — a regra do tema desde a 0.7.0).

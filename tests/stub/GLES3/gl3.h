@@ -68,7 +68,12 @@ struct Stats {
     int drawElementsCalls = 0;
 };
 inline Stats stats;              // inline C++17: 1 instância por binário
-inline void reset() { stats = Stats{}; }
+// 0.8.7 — INJETOR DE FALHA: simula o device a ficar sem capacidade de gerar
+// objetos GL (GL_OUT_OF_MEMORY / contexto doente — a causa INTERMITENTE dos
+// "falha ao gerar primitiva" no C33). Liga-se e desliga-se por teste; o
+// reset() desliga.
+inline bool failNextGenObjects = false;
+inline void reset() { stats = Stats{}; failNextGenObjects = false; }
 } // namespace glstub
 
 typedef unsigned int  GLenum;
@@ -190,11 +195,11 @@ inline void glUniform3f(GLint, GLfloat x, GLfloat y, GLfloat z) {
 }
 inline void glUniform2f(GLint, GLfloat, GLfloat) {}
 
-inline void glGenBuffers(GLsizei n, GLuint* t) { glstub::stats.genBuffers += (int)n; if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 1u + i; }
+inline void glGenBuffers(GLsizei n, GLuint* t) { glstub::stats.genBuffers += (int)n; if (glstub::failNextGenObjects) { if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 0u; return; } if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 1u + i; }
 inline void glDeleteBuffers(GLsizei n, const GLuint*) { glstub::stats.deleteBuffers += (int)n; }
 inline void glBindBuffer(GLenum, GLuint) {}
 inline void glBufferData(GLenum, intptr_t, const void*, GLenum) { ++glstub::stats.bufferData; }
-inline void glGenVertexArrays(GLsizei n, GLuint* t) { glstub::stats.genVertexArrays += (int)n; if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 1u + i; }
+inline void glGenVertexArrays(GLsizei n, GLuint* t) { glstub::stats.genVertexArrays += (int)n; if (glstub::failNextGenObjects) { if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 0u; return; } if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 1u + i; }
 inline void glDeleteVertexArrays(GLsizei n, const GLuint*) { glstub::stats.deleteVertexArrays += (int)n; }
 inline void glBindVertexArray(GLuint) {}
 inline void glEnableVertexAttribArray(GLuint) {}

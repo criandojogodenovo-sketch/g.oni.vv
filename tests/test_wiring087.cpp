@@ -1,0 +1,799 @@
+// tests/test_wiring087.cpp — 0.8.7: HOTFIX CIRÚRGICO (IMPORT + TROCA DE MESH).
+//
+// O QUE ESTE TU TEM DE DIFERENTE: #include "platform/main.cpp". O caminho
+// REAL do device — primMesh (cache de primitivas), attemptImport,
+// browserImportFile, rebindPrimMeshes, applyImportedAssetToSelectedTic, o
+// BOOT do INIT_WINDOW e o frame() — vivia SÓ no main.cpp (device-only,
+// FORA da suíte: os testes 0.8.5 usavam resolvers PRÓPRIOS e stubs que
+// nunca viam o cache). Era exatamente aí que moravam os bugs do C33:
+//
+//   1. "o botão Import não abre nada" — attemptImport() chamava
+//      browserOpen() (g_browser.open=true) mas NUNCA setava
+//      g_editor.fileBrowser — o gate do overlay no frame() exige as DUAS;
+//      o navegador "abria" invisível. Este teste seria VERMELHO no código
+//      de antes (o fix 0.8.7 seta as duas juntas).
+//
+//   2. "a troca de mesh trava intermitentemente ou dá erro" — o cache de
+//      primitivas era SEM LIMITE (slider = assinatura nova = mesh GL novo
+//      para sempre → exaustão de GPU → falhas INTERMITENTES de upload =
+//      "falha ao gerar primitiva" + driver engasgado) e o rebind tentava
+//      RE-GERAR+re-uplodar A CADA FRAME quando um upload falhava (o
+//      retry-storm = freeze). O fix 0.8.7: CAP + EVICÇÃO de não-usados +
+//      NEGATIVE-cache (resposta estável por assinatura). O stress test
+//      troca 600× em ordens variadas COM GUARDA DE TEMPO — hang = falha.
+//
+//   3. "susppeita de que as primitivas nem existem no build" — a auditoria
+//      confirma no CMake da app (render/Primitives.cpp está lá desde a
+//      0.8.0) e o CI ganhou o gate de símbolos (makePrimMesh/primDefaults/
+//      primName/primClamp/applyAssetPick no .dynsym do APK); AQUI o teste
+//      apanha a outra ponta: cada primitiva gera geometria NÃO-VAZIA pelo
+//      caminho REAL e o engine.log ganha a linha "mesh: prim <tipo>
+//      verts=N idx=M" (a prova que o log viewer do C33 vai mostrar).
+//
+//   4. GESTO ÓRFÃO: um widget que desaparece a meio do gesto deixava o
+//      active_ do UiContext preso PARA SEMPRE — a UI inteira morria ("a
+//      engine trava": render corre, nada responde). O fix mata o active_
+//      órfão no FIM de cada frame sem dedo. O teste simula o cenário e
+//      afera que um botão NOVO volta a capturar (impossível antes).
+//
+// Estilo da casa: stub GLES3/EGL/JNI + FakeStorage; cada caso é o FLUXO
+// completo, não funções isoladas. CLÁUSULA CALMA: zero features.
+#include "TestFramework.h"
+
+#include <GLES3/gl3.h>   // stub do hospedeiro (glstub::stats + failNextGenObjects)
+#include <EGL/egl.h>    // stub (0.8.7: init feliz + 1280×720)
+#include <dirent.h>     // rmrf do diretório de logs do teste
+#include <sys/types.h>
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <vector>
+
+#include <jni.h>   // FAKE controlável (tests/stub é o primeiro include dir)
+
+#include "FakeStorage.h"
+
+// ---- O CAMINHO REAL DO DEVICE (namespace anónimo = mesmo TU) ---------------
+#include "platform/main.cpp"
+
+// ponte Java (papel do "stub Java" — como o test_handshake)
+extern "C" void Java_vv_goni_VvActivity_nativeRegisterActivity(
+        JNIEnv*, jclass, jobject activity, jstring origin);
+
+using namespace vv;
+using ::test::nearEqF;
+
+namespace {
+
+const char* kTestLogs = "test-wiring087-logs";
+
+void rmrf(const std::string& dir) {
+    DIR* d = ::opendir(dir.c_str());
+    if (d) {
+        while (dirent* e = ::readdir(d)) {
+            const std::string n = e->d_name;
+            if (n != "." && n != "..") {
+                ::remove((dir + "/" + n).c_str());
+            }
+        }
+        ::closedir(d);
+    }
+    ::remove(dir.c_str());
+}
+
+std::vector<std::string> logLines(int maxLines = 800) {
+    std::vector<std::string> lines;
+    vv::elog::readTail(lines, maxLines);
+    return lines;
+}
+
+bool logHas(const char* needle) {
+    const std::vector<std::string> lines = logLines();
+    for (const std::string& l : lines) {
+        if (l.find(needle) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+jobject kFakeActivity = reinterpret_cast<jobject>(static_cast<intptr_t>(0xB001));
+jclass  kFakeCls      = reinterpret_cast<jclass>(static_cast<intptr_t>(0xB002));
+
+void drainQueue() {
+    while (vv::storage::pollResult()) {
+    }
+}
+
+// registo simulado (o papel do VvActivity.onCreate) + permissão concedida
+void javaRegistersGranted() {
+    g_jni.reset();
+    drainQueue();
+    Java_vv_goni_VvActivity_nativeRegisterActivity(
+        g_jni.env, kFakeCls, kFakeActivity,
+        g_jni.newString("test-wiring087"));
+    g_jni.manager_result = true;   // isExternalStorageManager() == true
+}
+
+// reset do estado PARTILHADO do main.cpp entre casos (o namespace anónimo
+// é DESTE TU — os globais do device são acessíveis diretamente)
+void resetEngineForTest() {
+    g_scene.clear();
+    g_editor = editor::EditorState{};
+    g_browser = FileBrowserState{};
+    g_applyAsk = ApplyAskState{};
+    g_primCache.clear();
+    g_catalog.meshes.clear();
+    g_catalog.textures.clear();
+    g_prevAssetMenu = 0;
+    g_projectReady = false;
+    g_storage.reset();
+    g_gpu.releaseAll();
+    g_resources.setStorage(nullptr);
+    g_toast[0] = '\0';
+    g_toastT = 0.0f;
+    g_input.resetAll();
+    g_timeline = timeline::State{};
+    g_playSnap = PlaySnapshot{};
+    glstub::reset();
+}
+
+// renderer/cubo/cena mínimos p/ os resolvers do device (uma vez)
+bool g_engineReady = false;
+void ensureEngineReady() {
+    if (g_engineReady) {
+        return;
+    }
+    if (!g_renderer.init()) {
+        return;
+    }
+    const CubeMeshData cube = makeCube(1.0f);
+    g_cubeMesh.create(cube.vertices.data(),
+                      static_cast<u32>(cube.vertices.size()),
+                      cube.indices.data(),
+                      static_cast<u32>(cube.indices.size()));
+    g_engineReady = true;
+}
+
+// TIC "Mesh" (Transform+MeshRenderer) com primitiva — o alvo das trocas
+Handle addMeshTic(const char* name) {
+    ensureEngineReady();
+    const Handle h = createTicFromPreset(g_scene, PresetKind::Mesh, nullptr,
+                                         nullptr);
+    if (!h.valid()) {
+        return h;
+    }
+    Tic* t = g_scene.get(h);
+    t->name = name;
+    MeshRenderer* mr = t->getComponent<MeshRenderer>();
+    if (mr) {
+        mr->primOn = true;
+        mr->prim = primDefaults(PrimKind::Sphere);
+        mr->mesh = primMesh(mr->prim);   // o caminho REAL (cache)
+        mr->material = g_renderer.litMaterial();
+    }
+    g_editor.selected = h;
+    return h;
+}
+
+// escreve um .obj mínimo NO DISCO (o browserImportFile lê por File API)
+std::string writeTempObj(const char* path) {
+    const char* obj = "o tri\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+    FILE* f = std::fopen(path, "wb");
+    if (!f) {
+        return "";
+    }
+    std::fwrite(obj, 1, std::strlen(obj), f);
+    std::fclose(f);
+    return path;
+}
+
+// guarda de tempo do stress test (freeze = falha, não timeout do CI)
+double msSince(std::chrono::steady_clock::time_point t0) {
+    return std::chrono::duration<double, std::milli>(
+               std::chrono::steady_clock::now() - t0)
+        .count();
+}
+
+} // namespace
+
+// ---------------------------------------------------------------------------
+// 1. IMPORT — o botão ABRE o navegador (as DUAS flags; seria VERMELHO antes)
+// ---------------------------------------------------------------------------
+TEST(wiring087_import_toque_abre_o_navegador) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    javaRegistersGranted();
+    ensureEngineReady();
+    g_projectReady = true;   // projeto aberto
+
+    // o toque no botão Import (Menu → Importar…): o caminho concedido
+    attemptImport();
+
+    // O FIX: o overlay do navegador desenha com `g_editor.fileBrowser &&
+    // g_browser.open` — SEM a flag do EditorState o browser "abre" invisível
+    // (o bug do C33 "o botão Import não abre nada")
+    EXPECT(g_browser.open);
+    EXPECT(g_editor.fileBrowser);
+    // o navegador abriu no Download (raiz navegável, all-files)
+    EXPECT(g_browser.cwd.find("Download") != std::string::npos);
+    // LOGGING EMBUTIDO: a linha que o log viewer do C33 mostra
+    EXPECT(logHas("import: navegador ABERTO"));
+
+    // o overlay é MODAL: com ele aberto o anyOverlayOpen fecha o chrome
+    EXPECT(editor::anyOverlayOpen(g_editor));
+}
+
+TEST(wiring087_import_sem_projeto_toast_honesto) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    javaRegistersGranted();
+    g_projectReady = false;   // SEM projeto: o botão diz porquê
+
+    attemptImport();
+    EXPECT(!g_browser.open);
+    EXPECT(!g_editor.fileBrowser);
+    EXPECT(std::strcmp(g_toast, "sem projeto — import indisponível") == 0);
+    EXPECT(logHas("import: SEM projeto"));
+}
+
+TEST(wiring087_import_pos_concessao_retoma_pelo_navegador) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    javaRegistersGranted();
+    g_projectReady = true;
+
+    // o fluxo DIALOGO: toque no Import SEM permissão → pedido pendente
+    g_jni.manager_result = false;   // ainda não concedida
+    attemptImport();                 // abre o diálogo (ação Import pendente)
+    EXPECT(g_editor.storageDialog);
+    g_jni.manager_result = true;    // o dono concedeu nas definições
+
+    // o retorno concedido retoma a ação: o MESMO navegador
+    resumePendingAfterReturn(true);
+    EXPECT(g_browser.open);
+    EXPECT(g_editor.fileBrowser);
+    EXPECT(logHas("import: navegador ABERTO pos-concessao"));
+}
+
+// ---------------------------------------------------------------------------
+// 2. IMPORT — o navegador importa .obj e APLICA ao TIC ("Sim" do diálogo)
+// ---------------------------------------------------------------------------
+TEST(wiring087_browser_importa_obj_e_aplica_ao_tic) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    javaRegistersGranted();
+    ensureEngineReady();
+
+    // projeto com storage fake + GPU ligada ao ResourceManager REAL
+    auto st = std::make_unique<FakeStorage>();
+    FakeStorage* rawSt = st.get();
+    rawSt->makeDirs("meshes");   // o FsStorage real cria a pasta ao gravar
+    g_storage = std::move(st);
+    g_resources.setStorage(rawSt);
+    g_gpu.init(&g_resources);
+    g_projectReady = true;
+    refreshCatalog();
+
+    const Handle h = addMeshTic("Alvo");
+    ASSERT(h.valid());
+    MeshRenderer* mr = g_scene.get(h)->getComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+    const u32 idxBefore = mr->mesh ? mr->mesh->indexCount() : 0;
+
+    // ficheiro REAL no disco + entrada do navegador (o browser lista o FS)
+    const std::string tmp = writeTempObj("goni_w087_import.obj");
+    ASSERT(!tmp.empty());
+    fileapi::DirEntry e;
+    e.name = "goni_w087_import.obj";
+    e.path = tmp;
+    e.isDir = false;
+    e.kind = 'm';
+
+    browserImportFile(e);
+    // passo-a-passo no engine.log (o logging embutido do 0.8.7)
+    EXPECT(logHas("import: ficheiro '"));
+    EXPECT(logHas("import: lidos"));
+    EXPECT(logHas("import: gravado no projeto"));
+    // copiado para o projeto (meshes/) e o catálogo vê-o
+    EXPECT(rawSt->exists("meshes/goni_w087_import.obj"));
+    refreshCatalog();
+    EXPECT(!g_catalog.meshes.empty());
+    // a pergunta "aplicar ao TIC?" abriu (as DUAS flags — o fix 0.8.5 vivo)
+    EXPECT(g_applyAsk.open);
+    EXPECT(g_editor.applyAsk);
+    EXPECT(logHas("import: dialogo 'aplicar ao TIC?' aberto"));
+
+    // o "Sim": o MESMO código do frame() (extraído — afervel aqui)
+    applyImportedAssetToSelectedTic();
+    EXPECT(!g_applyAsk.open);
+    EXPECT(!editor::anyOverlayOpen(g_editor));   // NENHUM modal preso
+    EXPECT(logHas("import: aplicando"));
+    // o mesh IMPORTADO está no MeshRenderer (pelo GpuAssets real: parse +
+    // upload) e DIFERE da primitiva anterior
+    ASSERT(mr->mesh != nullptr);
+    EXPECT(mr->meshPath == "meshes/goni_w087_import.obj");
+    EXPECT(mr->mesh->indexCount() > 0);
+    EXPECT(mr->mesh->indexCount() != idxBefore || !mr->primOn);
+    EXPECT(!mr->primOn);   // asset limpa o prim (uma fonte de cada vez)
+    EXPECT(logHas("import: aplicado verts="));
+
+    // regressão: o TIC continua desenhável (draw no stub GL)
+    const u32 draws = static_cast<u32>(glstub::stats.drawElementsCalls);
+    g_renderer.beginFrame();
+    const Mat4 vp = Mat4::identity();
+    (void)g_renderer.drawMesh(*mr->mesh, Mat4::identity(), vp);
+    EXPECT(static_cast<u32>(glstub::stats.drawElementsCalls) == draws + 1);
+
+    std::remove(tmp.c_str());
+}
+
+TEST(wiring087_browser_formato_nao_suportado_erro_claro) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    javaRegistersGranted();
+    ensureEngineReady();
+    g_storage = std::make_unique<FakeStorage>();
+    g_projectReady = true;
+    addMeshTic("Alvo");
+
+    fileapi::DirEntry e;
+    e.name = "coisa.fbx";
+    e.path = "/fake/coisa.fbx";
+    e.isDir = false;
+    e.kind = 0;   // fora de obj/gltf/glb/png
+    browserImportFile(e);
+
+    EXPECT(std::strcmp(g_toast, "formato nao suportado ainda: .fbx") == 0);
+    EXPECT(logHas("import: '/fake/coisa.fbx' — formato .fbx nao suportado"));
+    EXPECT(!g_applyAsk.open);   // nada importado, nada perguntado
+}
+
+// ---------------------------------------------------------------------------
+// 3. AUDITORIA DE EXISTÊNCIA — cada primitiva gera geometria pelo caminho REAL
+// ---------------------------------------------------------------------------
+TEST(wiring087_troca_prim_por_tipo_geometria_nao_vazia_e_log_da_prova) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    ensureEngineReady();
+    const Handle h = addMeshTic("Troca");
+    ASSERT(h.valid());
+    MeshRenderer* mr = g_scene.get(h)->getComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+
+    // as 8 formas PELO DISPATCH REAL (applyAssetPick + resolvers do device
+    // = primMesh = gerador + upload) — a linha de prova no engine.log de CADA
+    for (int k = 0; k < 8; ++k) {
+        const PrimKind kind = static_cast<PrimKind>(k);
+        const editor::AssetPickOutcome out = editor::applyAssetPick(
+            g_scene, h, 4, k + 2, g_catalog, makeAssetResolvers());
+        EXPECT(out.applied);
+        EXPECT(mr->primOn);
+        EXPECT(mr->prim.kind == kind);
+        ASSERT(mr->mesh != nullptr);
+        EXPECT(mr->mesh->vertexCount() > 0);   // geometria EXISTE
+        EXPECT(mr->mesh->indexCount() >= 3);
+        // a PROVA no log (o que o log viewer do C33 mostra a cada troca)
+        char prova[96];
+        std::snprintf(prova, sizeof(prova), "mesh: prim %s verts=",
+                      primName(kind));
+        EXPECT(logHas(prova));
+    }
+
+    // o seletor LISTA a partir dos dados do gerador (não uma lista à parte):
+    // 8 rótulos = 8 PrimKind — o catálogo do seletor é o próprio gerador
+    u32 labels = 0;
+    for (int k = 0; k < 8; ++k) {
+        if (primLabel(static_cast<PrimKind>(k)) != nullptr &&
+            primLabel(static_cast<PrimKind>(k))[0] != '\0') {
+            ++labels;
+        }
+    }
+    EXPECT(labels == 8u);
+}
+
+// ---------------------------------------------------------------------------
+// 4. STRESS ANTI-FREEZE — 600 trocas variadas COM GUARDA DE TEMPO
+// ---------------------------------------------------------------------------
+TEST(wiring087_troca_stress_antifreeze_com_guarda_de_tempo) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    ensureEngineReady();
+    const Handle h = addMeshTic("Stress");
+    ASSERT(h.valid());
+    MeshRenderer* mr = g_scene.get(h)->getComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+
+    // sequências que causavam os sintomas do C33: ciclos de todas as ordens,
+    // A→B→A (cache hit), primitiva↔cube, primitiva↔importado, params de
+    // slider (assinaturas novas), rebind por frame
+    FakeStorage st;
+    st.makeDirs("meshes");   // o FsStorage real cria a pasta ao gravar
+    st.writeText("meshes/imp.obj", "o tri\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    g_storage.reset(new FakeStorage(st));   // cópia (o unique_ptr é dono)
+    g_resources.setStorage(g_storage.get());
+    g_gpu.init(&g_resources);
+    g_projectReady = true;
+    refreshCatalog();
+
+    const auto t0 = std::chrono::steady_clock::now();
+    const int N = 600;
+    for (int i = 0; i < N; ++i) {
+        const auto ti = std::chrono::steady_clock::now();
+        if (i % 6 == 5) {
+            // params de SLIDER: assinatura NOVA (raio muda a cada passo) —
+            // o caminho REAL do Inspector: edita params, mesh=null, o
+            // rebind do frame seguinte gera+uploda (era o crescimento
+            // sem fim do cache — o cap/evicção 0.8.7 segura)
+            PrimParams p = primDefaults(PrimKind::Sphere);
+            p.radius = 0.1f + 0.01f * static_cast<f32>(i % 40);
+            mr->primOn = true;
+            mr->prim = p;
+            mr->mesh = nullptr;
+            rebindPrimMeshes();   // ← o gerador pelo caminho do rebind
+            ASSERT(mr->mesh != nullptr);
+        } else {
+            int pick;
+            int menuKind = 4;
+            switch (i % 6) {
+                case 0:  // ciclo sequencial pelas 8 formas
+                    pick = (i / 6) % 8 + 2;
+                    break;
+                case 1:  // A→B→A (cache hit imediato)
+                    pick = 2 + (i % 8);
+                    break;
+                case 2:  // ordem REVERSA
+                    pick = 9 - (i % 8);
+                    break;
+                case 3:  // primitiva ↔ cube (menuKind 1, pick 1)
+                    menuKind = 1;
+                    pick = 1;
+                    break;
+                default:  // primitiva ↔ IMPORTADO (ficheiro do catálogo)
+                    menuKind = 1;
+                    pick = 2;
+                    break;
+            }
+            const editor::AssetPickOutcome out = editor::applyAssetPick(
+                g_scene, h, menuKind, pick, g_catalog, makeAssetResolvers());
+            EXPECT(out.applied);
+            // o rebind por frame (o caminho que o main corre TODOS os frames)
+            rebindPrimMeshes();
+        }
+        // GUARDA DE TEMPO: freeze = iteração que não volta em 250 ms
+        const double ms = msSince(ti);
+        if (ms > 250.0) {
+            std::printf("  iteracao %d demorou %.1f ms (freeze?)\n", i, ms);
+        }
+        EXPECT(ms < 250.0);
+        ASSERT(mr->mesh != nullptr);
+    }
+    const double totalMs = msSince(t0);
+    std::printf("  stress: %d trocas em %.0f ms (media %.2f ms)\n", N, totalMs,
+                totalMs / static_cast<double>(N));
+    EXPECT(totalMs < 30000.0);   // guarda total (hang infinito = falha)
+
+    // estado final SAUDÁVEL: mesh válido, desenha, cache dentro do cap
+    EXPECT(mr->mesh->ok() || mr->mesh->indexCount() > 0);
+    EXPECT(g_primCache.size() <= kPrimCacheMax + 8);   // cap + folga de em-uso
+    g_renderer.beginFrame();
+    const Mat4 vp = Mat4::identity();
+    (void)g_renderer.drawMesh(*mr->mesh, Mat4::identity(), vp);
+    EXPECT(glstub::stats.drawElementsCalls > 0);
+}
+
+// ---------------------------------------------------------------------------
+// 5. CAP + EVICÇÃO — o cache não cresce para sempre; o EM-USO nunca sai
+// ---------------------------------------------------------------------------
+TEST(wiring087_cache_cap_e_eviccao_nao_toca_em_uso) {
+    resetEngineForTest();
+    ensureEngineReady();
+    const Handle h = addMeshTic("Cache");
+    ASSERT(h.valid());
+    MeshRenderer* mr = g_scene.get(h)->getComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+
+    // o mesh EM USO pelo TIC
+    Mesh* inUse = primMesh(primDefaults(PrimKind::Torus));
+    ASSERT(inUse != nullptr);
+    mr->mesh = inUse;
+    mr->prim = primDefaults(PrimKind::Torus);
+    mr->primOn = true;
+
+    // 200 assinaturas distintas NÃO-referenciadas (slider da vida real)
+    const int genBefore = glstub::stats.genVertexArrays;
+    const int delBefore = glstub::stats.deleteVertexArrays;
+    for (int i = 0; i < 200; ++i) {
+        PrimParams p = primDefaults(PrimKind::Sphere);
+        p.radius = 0.05f + 0.02f * static_cast<f32>(i);
+        primMesh(p);
+    }
+    // o cap segura o cache (evicção removeu os não-usados)
+    EXPECT(g_primCache.size() <= kPrimCacheMax + 8);
+    EXPECT(glstub::stats.genVertexArrays > genBefore);   // houve uploads
+    EXPECT(glstub::stats.deleteVertexArrays > delBefore);   // houve evicção
+
+    // o mesh EM USO sobreviveu à evicção: ponteiro VÁLIDO e desenha
+    EXPECT(mr->mesh == inUse);
+    g_renderer.beginFrame();
+    const Mat4 vp = Mat4::identity();
+    const u32 draws = static_cast<u32>(glstub::stats.drawElementsCalls);
+    (void)g_renderer.drawMesh(*inUse, Mat4::identity(), vp);
+    EXPECT(static_cast<u32>(glstub::stats.drawElementsCalls) == draws + 1);
+
+    // troca de VOLTA para a assinatura em-uso: cache HIT (sem upload novo)
+    const int genAfter = glstub::stats.genVertexArrays;
+    EXPECT(primMesh(primDefaults(PrimKind::Torus)) == inUse);
+    EXPECT(glstub::stats.genVertexArrays == genAfter);
+}
+
+// ---------------------------------------------------------------------------
+// 6. NEGATIVE-CACHE — upload GL falhou: resposta ESTÁVEL (zero retry-storm)
+// ---------------------------------------------------------------------------
+TEST(wiring087_upload_falhou_negative_cache_sem_retry_storm) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    ensureEngineReady();
+    const Handle h = addMeshTic("Falha");
+    ASSERT(h.valid());
+    MeshRenderer* mr = g_scene.get(h)->getComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+
+    // o device "fica sem memória": glGen* devolve 0 (como num contexto doente)
+    glstub::failNextGenObjects = true;
+    PrimParams bad = primDefaults(PrimKind::Cone);
+    Mesh* m = primMesh(bad);
+    EXPECT(m == nullptr);               // o upload FALHOU (o "dá erro" do C33)
+    EXPECT(!g_primCache.empty());       // a entrada NEGIVA ficou no cache
+    EXPECT(logHas("mesh: prim cone ERRO(upload GL"));   // a causa no log
+
+    // o RETRY-STORM morreu: N frames de rebind NÃO regeneram nem uploda
+    const int gen = glstub::stats.genVertexArrays;
+    const int bufdata = glstub::stats.bufferData;
+    mr->primOn = true;
+    mr->prim = bad;
+    mr->mesh = nullptr;
+    for (int f = 0; f < 60; ++f) {   // 1 segundo de frames
+        rebindPrimMeshes();
+        EXPECT(mr->mesh == nullptr);   // estável — sem mil tentativas
+    }
+    EXPECT(glstub::stats.genVertexArrays == gen);      // ZERO genVertexArrays
+    EXPECT(glstub::stats.bufferData == bufdata);       // ZERO uploads novos
+
+    // ASSINATURA NOVA funciona logo (a falha não contagia as outras)
+    glstub::failNextGenObjects = false;
+    PrimParams ok = primDefaults(PrimKind::Box);
+    Mesh* m2 = primMesh(ok);
+    EXPECT(m2 != nullptr);
+    EXPECT(m2->vertexCount() > 0);
+
+    // contexto NOVO (TERM/INIT): a negativa limpa e a MESMA assinatura
+    // volta a tentar — e agora consegue
+    primMeshDestroy();
+    glstub::failNextGenObjects = false;
+    Mesh* m3 = primMesh(bad);
+    EXPECT(m3 != nullptr);
+    EXPECT(m3->indexCount() > 0);
+}
+
+// ---------------------------------------------------------------------------
+// 7. LIFECYCLE — destroy/recreate determinístico (TERM_WINDOW ↔ INIT_WINDOW)
+// ---------------------------------------------------------------------------
+TEST(wiring087_lifecycle_destroy_recreate_deterministico) {
+    resetEngineForTest();
+    ensureEngineReady();
+    const Handle h = addMeshTic("Vida");
+    ASSERT(h.valid());
+    MeshRenderer* mr = g_scene.get(h)->getComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+
+    const PrimKind seq[4] = {PrimKind::Sphere, PrimKind::Cylinder,
+                             PrimKind::Capsule, PrimKind::Torus};
+    for (int cycle = 0; cycle < 5; ++cycle) {
+        // troca pelo caminho real
+        const PrimKind kind = seq[cycle % 4];
+        const editor::AssetPickOutcome out = editor::applyAssetPick(
+            g_scene, h, 4, static_cast<int>(kind) + 2, g_catalog,
+            makeAssetResolvers());
+        EXPECT(out.applied);
+        ASSERT(mr->mesh != nullptr);
+        const u32 idx = mr->mesh->indexCount();
+
+        // TERM_WINDOW: buffers GL mortos + renderers desligados
+        detachRenderersFromGpu();
+        primMeshDestroy();
+        EXPECT(mr->mesh == nullptr);
+        EXPECT(g_primCache.empty());
+
+        // INIT_WINDOW: o rebind lazy RE-GERA com o contexto novo
+        rebindPrimMeshes();
+        ASSERT(mr->mesh != nullptr);
+        EXPECT(mr->mesh->indexCount() == idx);   // MESMA geometria (determinístico)
+        EXPECT(mr->prim.kind == kind);           // o .goni/params é a verdade
+
+        // desenha no contexto novo
+        g_renderer.beginFrame();
+        const Mat4 vp = Mat4::identity();
+        const u32 draws = static_cast<u32>(glstub::stats.drawElementsCalls);
+        (void)g_renderer.drawMesh(*mr->mesh, Mat4::identity(), vp);
+        EXPECT(static_cast<u32>(glstub::stats.drawElementsCalls) == draws + 1);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 8. GESTO ÓRFÃO — widget desapareceu a meio do gesto: a UI NÃO morre
+// ---------------------------------------------------------------------------
+TEST(wiring087_gesto_orfao_nao_trava_a_ui) {
+    resetEngineForTest();
+    Renderer r;
+    ASSERT(r.init());
+    UiContext ui;
+    ui.init();
+    InputState in;
+
+    const f32 sw = 1280.0f, sh = 720.0f;
+
+    // frame 1: o dedo AGARRA o botão A (overlay aberto)
+    ui.beginFrame(&r, &in, sw, sh);
+    in.injectDown(0, 500.0f, 300.0f);   // dentro do botão A
+    (void)ui.widgetHit(0x1001, 480.0f, 280.0f, 120.0f, 60.0f);
+    ui.endFrame();
+    in.clearEdges();
+
+    // frame 2: o OVERLAY FECHOU (o botão A desapareceu) ANTES do release —
+    // o active_ ficaria ÓRFÃO. Dedo levanta; ninguém o consome.
+    ui.beginFrame(&r, &in, sw, sh);
+    in.injectUp(0);
+    ui.endFrame();   // ← o fix 0.8.7 mata o active_ órfão AQUI
+    in.clearEdges();
+
+    // frame 3: um botão NOVO (B) tem de conseguir capturar + fired —
+    // com o active_ preso isto era IMPOSSÍVEL ("a engine trava")
+    ui.beginFrame(&r, &in, sw, sh);
+    in.injectDown(0, 700.0f, 300.0f);
+    (void)ui.widgetHit(0x2002, 680.0f, 280.0f, 120.0f, 60.0f);
+    in.injectUp(0);
+    const bool clicked = ui.widgetHit(0x2002, 680.0f, 280.0f, 120.0f, 60.0f);
+    EXPECT(clicked);   // ANTES do fix: false — a UI inteira estava morta
+    ui.endFrame();
+    in.clearEdges();
+
+    // regressão do gesto normal: press → drag fora → release fora = SEM
+    // clique (o active_ limpa no release de quem o desenhou, como sempre)
+    ui.beginFrame(&r, &in, sw, sh);
+    in.injectDown(0, 700.0f, 300.0f);
+    (void)ui.widgetHit(0x3003, 680.0f, 280.0f, 120.0f, 60.0f);
+    in.injectMove(0, 900.0f, 500.0f);   // sai do botão
+    (void)ui.widgetHit(0x3003, 680.0f, 280.0f, 120.0f, 60.0f);
+    in.injectUp(0);
+    const bool clickedOutside = ui.widgetHit(0x3003, 680.0f, 280.0f, 120.0f, 60.0f);
+    EXPECT(!clickedOutside);
+    ui.endFrame();
+    in.clearEdges();
+    r.shutdown();
+}
+
+// ---------------------------------------------------------------------------
+// 9. REGRESSÃO — a animação continua a funcionar com trocas a meio
+// ---------------------------------------------------------------------------
+TEST(wiring087_anim_intacta_sob_trocas_de_mesh) {
+    resetEngineForTest();
+    ensureEngineReady();
+    const Handle h = addMeshTic("Anim");
+    ASSERT(h.valid());
+    Tic* t = g_scene.get(h);
+    Transform3D* tr = t->getComponent<Transform3D>();
+    ASSERT(tr != nullptr);
+    const Vec3 p0 = tr->pos;
+
+    AnimationPlayer* pl = t->addComponent<AnimationPlayer>();
+    ASSERT(pl != nullptr);
+    AnimTrack* track = pl->addTrack(AnimTarget::TicPos, "");
+    ASSERT(track != nullptr);
+    AnimKey k0;
+    k0.t = 0.0f;
+    k0.v[0] = p0.x; k0.v[1] = p0.y; k0.v[2] = p0.z;
+    track->keys.push_back(k0);
+    AnimKey k1;
+    k1.t = 2.0f;
+    k1.v[0] = p0.x + 4.0f; k1.v[1] = p0.y; k1.v[2] = p0.z;
+    track->keys.push_back(k1);
+    track->sortKeys();
+
+    // play com TROCAS de mesh a meio (o cenário do C33: trocar com a
+    // timeline viva) — a pose é do Transform, o mesh é só a casca
+    pl->mode = AnimationPlayer::Mode::Once;
+    pl->time = 0.0f;
+    pl->playing = true;
+    int swaps = 0;
+    for (u32 s = 0; s < 130; ++s) {   // 2.17 s > 2 s (folga do épsilon fp)
+        pl->advance(1.0f / 60.0f);
+        pl->apply(g_scene, h);
+        if (s % 20 == 10) {   // troca a meio do clip, 6×
+            const PrimKind kind = static_cast<PrimKind>(swaps % 8);
+            const editor::AssetPickOutcome out = editor::applyAssetPick(
+                g_scene, h, 4, static_cast<int>(kind) + 2, g_catalog,
+                makeAssetResolvers());
+            EXPECT(out.applied);
+            ++swaps;
+        }
+    }
+    EXPECT(swaps == 6);
+    EXPECT(!pl->playing);   // Once: parou no fim
+    EXPECT(nearEqF(tr->pos.x, p0.x + 4.0f));
+    MeshRenderer* mr = t->getComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+    ASSERT(mr->mesh != nullptr);
+    EXPECT(mr->mesh->indexCount() > 0);   // o mesh final é válido e desenha
+}
+
+// ---------------------------------------------------------------------------
+// 10. BOOT + FRAME — o caminho do device inteiro no hospedeiro (stub EGL feliz)
+// ---------------------------------------------------------------------------
+TEST(wiring087_boot_e_frame_smoke_com_browser_aberto) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    javaRegistersGranted();
+
+    // o arranque REAL: INIT_WINDOW (EGL feliz no stub → 1280×720, renderer,
+    // cubo, grid, ready) — como o C33 faz
+    android_app app;
+    std::memset(&app, 0, sizeof(app));
+    onAppCmd(&app, APP_CMD_INIT_WINDOW);
+    EXPECT(g_ready);
+    EXPECT(g_egl.width() == 1280);
+    EXPECT(g_egl.height() == 720);
+
+    // sem fonte de sistema no hospedeiro: carrega a fixture (o device tem
+    // as fontes do Android — kSystemFontPaths)
+    if (!g_font.ok()) {
+        const char* paths[] = {FONT_FIXTURE};
+        EXPECT(g_font.loadFromPaths(paths, 1, 28.0f));
+    }
+    g_ui.setFont(&g_font);
+
+    // um TIC de mesh + o IMPORT (navegador aberto pelo caminho concedido)
+    g_projectReady = true;
+    const Handle h = addMeshTic("Smoke");
+    ASSERT(h.valid());
+    attemptImport();
+    EXPECT(g_browser.open);
+    EXPECT(g_editor.fileBrowser);
+
+    // FRAMES com o navegador aberto (modal) + com o seletor de primitivas
+    // aberto (modal) + um frame limpo: todos completam dentro do orçamento
+    const auto t0 = std::chrono::steady_clock::now();
+    frame();                                   // browser aberto (desenha)
+    EXPECT(msSince(t0) < 500.0);
+
+    const auto t1 = std::chrono::steady_clock::now();
+    g_editor.fileBrowser = false;
+    g_browser.open = false;
+    g_editor.assetMenu = 4;                    // seletor de primitivas (modal)
+    frame();
+    EXPECT(msSince(t1) < 500.0);
+
+    const auto t2 = std::chrono::steady_clock::now();
+    g_editor.assetMenu = 0;
+    frame();                                   // editor limpo
+    EXPECT(msSince(t2) < 500.0);
+
+    // o pass UI submeteu (o overlay desenha de verdade no stub)
+    EXPECT(glstub::stats.drawArraysCalls > 0);
+
+    // TERM_WINDOW: desliga TUDO (contexto morto) — sem crash, estado pronto
+    // para o próximo INIT
+    onAppCmd(&app, APP_CMD_TERM_WINDOW);
+    EXPECT(!g_ready);
+    EXPECT(g_primCache.empty());
+}

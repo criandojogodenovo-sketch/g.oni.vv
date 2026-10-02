@@ -18,6 +18,10 @@ local.properties
 # Builds locais (testes Linux + lib via toolchain NDK)
 build-tests/
 build-android/
+build-manual/
+
+# Tooling local do ambiente (suíte sem cmake — o CI usa cmake)
+scripts-local/
 
 # Logs locais
 *.log

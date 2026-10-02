@@ -33,17 +33,36 @@ typedef void* EGLNativeWindowType;
 #define EGL_WINDOW_BIT 0x0004
 #define EGL_CONTEXT_CLIENT_VERSION 0x3098
 
-inline EGLDisplay eglGetDisplay(EGLNativeDisplayType) { return nullptr; }
+// 0.8.7 (test_wiring087): o stub EGL deixa de ser só "declaração que
+// compila" — init() SEGUE o caminho feliz (display/config/context/surface
+// não-nulos, makeCurrent OK) e eglQuerySurface devolve 1280×720 (a
+// paisagem do C33). O teste do wiring inclui platform/main.cpp e corre o
+// BOOT REAL (onAppCmd INIT_WINDOW) + frame() no hospedeiro — com o
+// lifecycle de destroy/recreate a cargo do stub GLES3 (contadores).
+inline EGLDisplay eglGetDisplay(EGLNativeDisplayType) {
+    return reinterpret_cast<EGLDisplay>(0x1234);   // display fake não-nulo
+}
 inline int eglInitialize(EGLDisplay, EGLint*, EGLint*) { return 1; }
 inline int eglTerminate(EGLDisplay) { return 1; }
-inline int eglChooseConfig(EGLDisplay, const EGLint*, EGLConfig*, EGLint, EGLint*) { return 1; }
-inline EGLSurface eglCreateWindowSurface(EGLDisplay, EGLConfig, void*, const EGLint*) { return nullptr; }
+inline int eglChooseConfig(EGLDisplay, const EGLint*, EGLConfig* cfg, EGLint, EGLint* n) {
+    if (n) *n = 1;
+    if (cfg) *cfg = reinterpret_cast<EGLConfig>(0x5678);
+    return 1;
+}
+inline EGLSurface eglCreateWindowSurface(EGLDisplay, EGLConfig, void*, const EGLint*) {
+    return reinterpret_cast<EGLSurface>(0x9ABC);
+}
 inline int eglDestroySurface(EGLDisplay, EGLSurface) { return 1; }
-inline EGLContext eglCreateContext(EGLDisplay, EGLConfig, EGLContext, const EGLint*) { return nullptr; }
+inline EGLContext eglCreateContext(EGLDisplay, EGLConfig, EGLContext, const EGLint*) {
+    return reinterpret_cast<EGLContext>(0xDEF0);
+}
 inline int eglDestroyContext(EGLDisplay, EGLContext) { return 1; }
 inline int eglMakeCurrent(EGLDisplay, EGLSurface, EGLSurface, EGLContext) { return 1; }
 inline int eglSwapBuffers(EGLDisplay, EGLSurface) { return 1; }
-inline int eglQuerySurface(EGLDisplay, EGLSurface, EGLint, EGLint*) { return 1; }
+inline int eglQuerySurface(EGLDisplay, EGLSurface, EGLint attr, EGLint* v) {
+    if (v) { *v = (attr == EGL_WIDTH) ? 1280 : 720; }   // paisagem do C33
+    return 1;
+}
 inline int eglGetError() { return 0; }                        // F5.2 link parity
 inline int eglSwapInterval(EGLDisplay, EGLint) { return 1; }  // F5.2 link parity
 

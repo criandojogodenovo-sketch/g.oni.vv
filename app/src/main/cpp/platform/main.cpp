@@ -97,11 +97,69 @@ timeline::State     g_timeline;      // scrub/keys/preview entre frames
 // que a usam. Lifecycle como o cubo: Mesh::destroy() zera ids no TERM
 // (primMeshDestroy) e o próximo uso RE-GERA+re-uploda com o contexto novo
 // (lazy — nunca se gera geometria sem GL corrente).
+//
+// 0.8.7 (fix do freeze/erro INTERMITENTE da troca no C33): o cache era
+// SEM LIMITE — cada posição de slider era uma assinatura nova → dezenas de
+// meshes GL vivos para sempre → exaustão de memória de GPU → glGen*/
+// glBufferData começavam a FALHAR (toast "falha ao gerar primitiva") e o
+// driver engasgava (freeze). Agora: CAP (kPrimCacheMax) + EVICÇÃO de
+// entradas não-referenciadas por nenhum MeshRenderer + NEGATIVE-cache (uma
+// assinatura que falhou NÃO volta a ser gerada a cada frame pelo rebind —
+// o retry-por-frame era o "freeze" com geração+upload por frame).
 struct PrimCacheEntry {
     PrimParams            sig;
-    std::unique_ptr<Mesh> mesh;
+    std::unique_ptr<Mesh> mesh;    // null = tentativa FALHADA (negativo)
 };
 std::vector<PrimCacheEntry> g_primCache;
+// 0.8.7: cap do cache — 48 assinaturas cobrem as 8 primitivas default +
+// folga de edição; acima disso as NÃO-REFERENCIADAS mais antigas saem.
+constexpr size_t kPrimCacheMax = 48;
+
+// assinaturas iguais (floats comparados por bit — primClamp normaliza)
+bool primSigEq(const PrimParams& a, const PrimParams& b) {
+    return a.kind == b.kind && a.radius == b.radius && a.height == b.height &&
+           a.radius2 == b.radius2 && a.segments == b.segments &&
+           a.rings == b.rings && a.size == b.size;
+}
+
+// 0.8.7 — EVICÇÃO: mantém o cache dentro do cap. Sai primeiro o que está
+// FALHADO (mesh null), depois o MAIS ANTIGO cujo Mesh* não é referenciado
+// por NENHUM MeshRenderer da cena (o ~Mesh faz o glDelete* — chamado com o
+// contexto corrente, como sempre). Meshes em uso NUNCA saem.
+void primCacheEvict() {
+    if (g_primCache.size() < kPrimCacheMax) {
+        return;
+    }
+    // 1) falhados (mesh null — nenhum Renderer os aponta)
+    for (size_t i = 0; i < g_primCache.size();) {
+        if (g_primCache[i].mesh == nullptr) {
+            g_primCache.erase(g_primCache.begin() + static_cast<long>(i));
+            if (g_primCache.size() < kPrimCacheMax) {
+                return;
+            }
+        } else {
+            ++i;
+        }
+    }
+    // 2) não-referenciados, do mais antigo: o Mesh* não aparece em nenhum
+    //    MeshRenderer (o TIC em edição aponta o SEU mesh — fica)
+    auto& mrs = g_scene.components().meshRenderers();
+    for (size_t i = 0; i < g_primCache.size() && g_primCache.size() >= kPrimCacheMax;) {
+        Mesh* m = g_primCache[i].mesh.get();
+        bool inUse = false;
+        for (u32 r = 0; r < mrs.size(); ++r) {
+            if (mrs.at(r).mesh == m) {
+                inUse = true;
+                break;
+            }
+        }
+        if (!inUse) {
+            g_primCache.erase(g_primCache.begin() + static_cast<long>(i));
+        } else {
+            ++i;
+        }
+    }
+}
 
 // ---- F4: física + modo Play ------------------------------------------------
 phys::PhysicsSystem g_physics;       // TickGroup::Physics (só avança em Play)
@@ -771,6 +829,7 @@ void browserImportFile(const fileapi::DirEntry& e) {
     if (!g_storage || e.isDir) {
         return;
     }
+    elog::info("import: ficheiro '%s' escolhido no navegador", e.path.c_str());
     // 0.8.5 — FORMATO NÃO SUPORTADO → ERRO CLARO (nunca silêncio): o
     // navegador passou a listar TODOS os ficheiros (kind 0 = fora de
     // obj/gltf/glb/png); tocar num .fbx/.psd/etc. diz EXATAMENTE o que
@@ -784,17 +843,18 @@ void browserImportFile(const fileapi::DirEntry& e) {
         std::snprintf(msg, sizeof(msg), "formato nao suportado ainda: %s",
                       ext.c_str());
         showToast(msg);
-        elog::warn("browser: '%s' — formato %s não suportado (aceites: "
+        elog::warn("import: '%s' — formato %s nao suportado (aceites: "
                    ".obj .gltf .glb .png)", e.path.c_str(), ext.c_str());
         return;
     }
     std::vector<u8> bytes;
     if (!fileapi::readAll(e.path, bytes) || bytes.empty()) {
         showToast("leitura falhou (causa no engine.log)");
-        elog::error("browser: leitura de '%s' FALHOU — %s", e.path.c_str(),
+        elog::error("import: leitura de '%s' FALHOU — %s", e.path.c_str(),
                     fileapi::errnoText().c_str());
         return;
     }
+    elog::info("import: lidos %zu bytes de %s", bytes.size(), e.path.c_str());
     const char* dir = e.kind == 'm' ? Project::kDirMeshes : Project::kDirTextures;
     std::string safe = e.name;
     for (char& ch : safe) {
@@ -803,13 +863,11 @@ void browserImportFile(const fileapi::DirEntry& e) {
     const std::string rel = std::string(dir) + "/" + safe;
     if (!g_storage->writeBytes(rel, bytes.data(), bytes.size())) {
         showToast("falha ao gravar no projeto");
-        elog::error("browser: import %s — gravação no projeto falhou",
-                    rel.c_str());
+        elog::error("import: gravacao de %s no projeto FALHOU", rel.c_str());
         return;
     }
+    elog::info("import: gravado no projeto → %s", rel.c_str());
     refreshCatalog();
-    elog::info("browser: import %s (%zu bytes) de %s", rel.c_str(),
-               bytes.size(), e.path.c_str());
 
     // APLICAR-APÓS-IMPORT: só se há TIC selecionado COM MeshRenderer.
     // 0.8.5 (fix do import morto no device desde a 0.7.2): o dispatch do
@@ -825,10 +883,14 @@ void browserImportFile(const fileapi::DirEntry& e) {
         g_applyAsk.rel = rel;
         g_applyAsk.fileName = e.name;
         g_editor.applyAsk = true;   // ← O FIX (a flag que faltava)
+        elog::info("import: dialogo 'aplicar ao TIC?' aberto (%s → TIC '%s')",
+                   rel.c_str(), tsel->name.c_str());
     } else {
         char msg[96];
         std::snprintf(msg, sizeof(msg), "importado: %s", rel.c_str());
         showToast(msg);
+        elog::info("import: concluido SEM aplicar (nenhum TIC com mesh "
+                   "selecionado)");
     }
 }
 
@@ -956,21 +1018,33 @@ MeshData cubeToMeshData() {
 // o contexto GL CORRENTE (load de cena, seletor, rebind por frame). O
 // clamp acontece DENTRO do gerador — a assinatura guardada é a clampada
 // (chaves de cache estáveis: raio 100 e raio 64 fazem o MESMO mesh).
+//
+// 0.8.7: TROCA DETERMINÍSTICA —
+//   • cache HIT → o MESMO objeto (troca A→B→A não re-uploda nada);
+//   • geração/upload falhou → NEGATIVE-cache (mesh null na entrada): o
+//     rebindPrimMeshes pergunta TODOS os frames e a resposta é a MESMA
+//     sem regerar/re-uplodar — zero retry-por-frame (o freeze do C33);
+//     nova tentativa só no NOVO contexto (primMeshDestroy limpa tudo);
+//   • cada upload NOVO loga "mesh: prim <tipo> verts=N idx=M" — a PROVA
+//     no device (log viewer) de que o gerador existe e é chamado.
 Mesh* primMesh(const PrimParams& pIn) {
     PrimParams p = pIn;
     primClamp(p);
     for (const PrimCacheEntry& e : g_primCache) {
-        const PrimParams& s = e.sig;
-        if (s.kind == p.kind && s.radius == p.radius && s.height == p.height &&
-            s.radius2 == p.radius2 && s.segments == p.segments &&
-            s.rings == p.rings && s.size == p.size) {
-            return e.mesh.get();
+        if (primSigEq(e.sig, p)) {
+            return e.mesh.get();   // hit (ou falhado=null — resposta estável)
         }
     }
     PrimMeshData data;
     makePrimMesh(p, data);
     if (!data.ok()) {
-        return nullptr;   // defesa (nunca: geradores são totais)
+        elog::error("mesh: prim %s ERRO(geometria vazia — %u verts %u idx)",
+                    primName(p.kind),
+                    static_cast<unsigned>(data.vertices.size()),
+                    static_cast<unsigned>(data.indices.size()));
+        primCacheEvict();   // ANTES do push: a entrada nova nunca é evictada
+        g_primCache.push_back(PrimCacheEntry{p, nullptr});
+        return nullptr;
     }
     PrimCacheEntry e;
     e.sig = p;
@@ -979,11 +1053,23 @@ Mesh* primMesh(const PrimParams& pIn) {
                         static_cast<u32>(data.vertices.size()),
                         data.indices.data(),
                         static_cast<u32>(data.indices.size()))) {
-        elog::error("render: primitiva %s FALHOU no upload (%u verts)",
+        elog::error("mesh: prim %s ERRO(upload GL — %u verts %u idx)",
                     primName(p.kind),
-                    static_cast<unsigned>(data.vertices.size()));
+                    static_cast<unsigned>(data.vertices.size()),
+                    static_cast<unsigned>(data.indices.size()));
+        e.mesh.reset();
+        primCacheEvict();   // ANTES do push: a entrada nova nunca é evictada
+        g_primCache.push_back(std::move(e));
         return nullptr;
     }
+    // 0.8.7 — a linha exigida pelo C33: prova que a geometria EXISTE no
+    // build do device e é gerada/ligada no caminho real da troca.
+    elog::info("mesh: prim %s verts=%u idx=%u (upload novo; cache %zu/%zu)",
+               primName(p.kind),
+               static_cast<unsigned>(data.vertices.size()),
+               static_cast<unsigned>(data.indices.size()),
+               g_primCache.size() + 1, kPrimCacheMax);
+    primCacheEvict();
     g_primCache.push_back(std::move(e));
     return g_primCache.back().mesh.get();
 }
@@ -994,11 +1080,14 @@ Mesh* primMesh(const PrimParams& pIn) {
 void primMeshDestroy() {
     const u32 n = static_cast<u32>(g_primCache.size());
     for (PrimCacheEntry& e : g_primCache) {
-        e.mesh->destroy();
+        if (e.mesh) {   // 0.8.7: entradas NEGATIVAS (falhadas) têm mesh null
+            e.mesh->destroy();
+        }
     }
-    g_primCache.clear();
+    g_primCache.clear();   // negativas incluídas: novo contexto, nova sorte
     if (n > 0) {
-        elog::info("lifecycle: %u primitiva(s) procedural(is) destruída(s)", n);
+        elog::info("lifecycle: %u primitiva(s) procedural(is) destruída(s)",
+                   n);
     }
 }
 
@@ -1061,10 +1150,93 @@ editor::AssetResolvers makeAssetResolvers() {
     return res;
 }
 
+// 0.8.7 — o "Sim" do diálogo APLICAR-APÓS-IMPORT, EXTRAÍDO do corpo do
+// frame() para função com NOME: o MESMO código corre no device (frame) e
+// na suíte do hospedeiro (test_wiring087 — que inclui ESTE ficheiro). O
+// import aplica ao TIC selecionado: applyAssetPick (o caminho do seletor)
+// + clips/skin do glTF quando o mesh os traz.
+void applyImportedAssetToSelectedTic() {
+    const std::vector<std::string>& cat =
+        g_applyAsk.kind == 'm' ? g_catalog.meshes : g_catalog.textures;
+    const std::string base = g_applyAsk.kind == 'm'
+                                 ? std::string("meshes/")
+                                 : std::string("textures/");
+    bool applied = false;
+    for (size_t i = 0; i < cat.size(); ++i) {
+        if (base + cat[i] == g_applyAsk.rel) {
+            const int menuKind = g_applyAsk.kind == 'm' ? 1 : 2;
+            elog::info("import: aplicando %s ao TIC selecionado (pick %zu)",
+                       g_applyAsk.rel.c_str(), i);
+            const editor::AssetPickOutcome out = editor::applyAssetPick(
+                g_scene, g_editor.selected, menuKind,
+                static_cast<int>(i) + 2, g_catalog, makeAssetResolvers());
+            applied = out.applied;
+            if (out.toast[0] != '\0') {
+                showToast(out.toast);
+            }
+            if (out.log[0] != '\0') {
+                LOGI("%s", out.log);
+            }
+            // 0.8.7 — contagens do mesh APLICADO (o TIC tem meshes reais no
+            // caminho do import; o applyAssetPick é puro — não desreferencia)
+            if (out.applied) {
+                if (const Tic* tNew = g_scene.get(g_editor.selected)) {
+                    if (const MeshRenderer* mrNew =
+                            tNew->getComponent<MeshRenderer>()) {
+                        if (mrNew->mesh) {
+                            elog::info("import: aplicado verts=%u idx=%u",
+                                       mrNew->mesh->vertexCount(),
+                                       mrNew->mesh->indexCount());
+                        }
+                    }
+                }
+            }
+            // 0.8.1 (F7): mesh gltf/glb aplicado → importa os CLIPS
+            // de animação para o AnimationPlayer do TIC (o cache do
+            // ResourceManager garante 1 parse; o nó alvo é o RAIZ —
+            // o TIC inteiro; joints ficam para a 0.8.2)
+            if (g_applyAsk.kind == 'm') {
+                std::string merr;
+                if (auto mdl = g_resources.model(g_applyAsk.rel, merr)) {
+                    // 0.8.2 (F7): SKIN primeiro (os clips de JOINT
+                    // só entram com o esqueleto presente)
+                    const u32 nJoints =
+                        gltfAttachSkin(g_scene, g_editor.selected, *mdl);
+                    if (nJoints > 0) {
+                        LOGI("editor: esqueleto importado (%u joints)",
+                             nJoints);
+                    }
+                    if (!mdl->animations.empty()) {
+                        const u32 nClips = gltfAttachClips(
+                            g_scene, g_editor.selected, *mdl);
+                        if (nClips > 0) {
+                            showToast("clips importados (timeline)");
+                            LOGI("editor: %u clip(s) de animacao "
+                                 "importados de %s",
+                                 nClips, g_applyAsk.rel.c_str());
+                        }
+                    }
+                }
+            }
+            break;
+        }
+    }
+    if (!applied) {
+        // o catálogo não tem a ref (refresh falhou?): HONESTO no log — o
+        // ficheiro está no projeto e aplica-se depois pelo seletor
+        elog::warn("import: '%s' NAO aplicado — fora do catalogo (aplique "
+                   "pelo seletor do Inspector)",
+                   g_applyAsk.rel.c_str());
+    }
+    g_applyAsk.open = false;
+    g_editor.applyAsk = false;   // 0.8.7: as DUAS juntas — um stuck aqui é
+                                 // um modal INVISÍVEL para sempre (backdrop
+                                 // opaco sobre o editor = "engine travada")
+}
+
 // ---- F5.2: All Files Access — import/export por File API direta -------------
 
-// forward: usados pelo handler de retorno e pelas tentativas
-void openImportScan();
+// forward: usado pelo handler de retorno e pelas tentativas
 void beginExportToDownloads();
 
 // F5.5 — LOG DE TRANSIÇÃO do all-files ("storage: all-files granted=1/0" —
@@ -1116,7 +1288,13 @@ void resumePendingAfterReturn(bool granted) {
     // aberto pelo Settings "Acesso a ficheiros…" — nada a retomar)
     const storage::Action act = g_perm.takePendingAction();
     if (act == storage::Action::Import) {
-        openImportScan();
+        // 0.8.7: retoma COMO O TOQUE original — o NAVEGADOR abre (as duas
+        // flags; o mesmo caminho do attemptImport concedido, não o scan
+        // antigo — o dono escolhe de ONDE for, galeria incluída)
+        browserOpen(std::string(fileapi::kExternalRoot) + "/Download");
+        g_editor.fileBrowser = true;
+        elog::info("import: navegador ABERTO pos-concessao — retoma do "
+                   "dialogo (flag fileBrowser=1)");
     } else if (act == storage::Action::Export) {
         beginExportToDownloads();
     }
@@ -1151,28 +1329,11 @@ void onStorageResult(void* /*user*/, const saf::SafResult& r) {
                storage::modeLabel(g_perm.mode()));
 }
 
-// varre Download/ e Documents/ (File API direta) e abre o overlay IMPORT
-void openImportScan() {
-    g_importCands.clear();
-    for (int i = 0; i < fileapi::kImportDirCount; ++i) {
-        const std::string dir = std::string(fileapi::kExternalRoot) + "/" +
-                                fileapi::kImportDirs[i];
-        std::vector<fileapi::Candidate> part;
-        if (fileapi::listCandidates(dir, part)) {
-            elog::info("fileapi: %s → %u candidato(s)", dir.c_str(),
-                       (unsigned)part.size());
-            for (const fileapi::Candidate& c : part) {
-                g_importCands.push_back(c);
-            }
-        }
-        // pasta ausente/sem acesso: o errno já foi logado pela FileApi
-    }
-    if (g_importCands.empty()) {
-        showToast("nenhum obj/gltf/glb/png em Download/Documents");
-        return;
-    }
-    g_editor.importMenu = true;
-}
+// 0.8.7: openImportScan (varredura Download/Documents + overlay de
+// candidatos) foi REMOVIDO — o import é o NAVEGADOR 0.7.2 desde sempre no
+// caminho concedido; a retoma pós-diálogo abre o MESMO navegador (o
+// overlay de candidatos e o importCandidate ficam p/ o histórico dos
+// testes do browser).
 
 // EXPORT: mesh do TIC selecionado → /storage/emulated/0/Download/GOneVV/
 // export/export_<nome>.obj (File API direta, visível no gestor de ficheiros)
@@ -1223,13 +1384,27 @@ void beginExportToDownloads() {
 // + galeria, com o caminho visível); senão → DIÁLOGO (1ª vez do fluxo) com a
 // ação pendente; bloqueado → mensagem HONESTA com a causa real
 void attemptImport() {
+    elog::info("import: toque no botao (projeto=%d granted-? a verificar)",
+               g_projectReady ? 1 : 0);
     if (!g_projectReady) {
         showToast("sem projeto — import indisponível");
+        elog::warn("import: SEM projeto — botao nao faz nada (crie/abra um)");
         return;
     }
     bool supported = false;
     if (storageGrantedNow(&supported)) {
+        // 0.8.7 (fix do wiring MORTO do C33 — "o botão Import não abre
+        // nada"): o browserOpen põe g_browser.open mas o OVERLAY só desenha
+        // com g_editor.fileBrowser TAMBÉM a true (gate do frame:
+        // `g_editor.fileBrowser && g_browser.open`). Sem a segunda flag o
+        // navegador "abria" INVISÍVEL — o toque chegava ao handler, o
+        // estado abria, nada aparecia. As DUAS juntas, SEMPRE (o outro
+        // call-site do seletor de textura já fazia assim — era o único
+        // caminho que funcionava).
         browserOpen(std::string(fileapi::kExternalRoot) + "/Download");
+        g_editor.fileBrowser = true;
+        elog::info("import: navegador ABERTO (Download) — flag fileBrowser=1 "
+                   "(o overlay desenha neste frame)");
         return;
     }
     const storage::BlockReason why =
@@ -2252,9 +2427,76 @@ void frame() {
                     }
                 }
             } else {
+                // 0.8.7 — LOGGING EMBUTIDO da TROCA: "mesh: troca <de>→<para>
+                // inicio" antes e "fim ok verts=N idx=M"/"ERRO(<razão>)"
+                // depois — o log viewer do C33 mostra a linha exata se algo
+                // falhar (a intermitência deixa de ser um mistério).
+                const MeshRenderer* mrOld = nullptr;
+                if (const Tic* tOld = g_scene.get(g_editor.selected)) {
+                    mrOld = tOld->getComponent<MeshRenderer>();
+                }
+                char de[32] = "-";
+                if (mrOld) {
+                    if (mrOld->primOn) {
+                        std::snprintf(de, sizeof(de), "prim %s",
+                                      primName(mrOld->prim.kind));
+                    } else if (mrOld->mesh == &g_cubeMesh) {
+                        std::snprintf(de, sizeof(de), "cube");
+                    } else if (!mrOld->meshPath.empty()) {
+                        std::snprintf(de, sizeof(de), "%.24s",
+                                      mrOld->meshPath.c_str());
+                    } else if (mrOld->mesh) {
+                        std::snprintf(de, sizeof(de), "mesh");
+                    }
+                }
+                const char* para = "-";   // destino (menuKind 4 = PrimKind)
+                char paraBuf[32];
+                if (menuKind == 4) {
+                    if (pick == 1) {
+                        std::snprintf(paraBuf, sizeof(paraBuf), "none");
+                    } else if (pick >= 2 && pick <= 9) {
+                        std::snprintf(paraBuf, sizeof(paraBuf), "prim %s",
+                                      primName(static_cast<PrimKind>(pick - 2)));
+                    } else {
+                        std::snprintf(paraBuf, sizeof(paraBuf), "pick %d", pick);
+                    }
+                    para = paraBuf;
+                } else if (menuKind == 1) {
+                    std::snprintf(paraBuf, sizeof(paraBuf), "mesh pick %d",
+                                  pick);
+                    para = paraBuf;
+                } else if (menuKind == 2) {
+                    std::snprintf(paraBuf, sizeof(paraBuf), "tex pick %d",
+                                  pick);
+                    para = paraBuf;
+                }
+                elog::info("mesh: troca %s → %s inicio", de, para);
                 const editor::AssetPickOutcome out =
                     editor::applyAssetPick(g_scene, g_editor.selected, menuKind,
                                            pick, g_catalog, makeAssetResolvers());
+                // 0.8.7 — as CONTAGENS vêm do mesh APLICADO (o resolver do
+                // device devolve meshes REAIS; o applyAssetPick é puro e
+                // nunca desreferencia o Mesh — o contrato dos testes)
+                const MeshRenderer* mrNew = nullptr;
+                if (const Tic* tNew = g_scene.get(g_editor.selected)) {
+                    mrNew = tNew->getComponent<MeshRenderer>();
+                }
+                const Mesh* appliedMesh = mrNew ? mrNew->mesh : nullptr;
+                if (out.applied && appliedMesh) {
+                    elog::info("mesh: troca %s → %s fim ok verts=%u idx=%u",
+                               de, para, appliedMesh->vertexCount(),
+                               appliedMesh->indexCount());
+                } else if (out.applied) {
+                    elog::info("mesh: troca %s → %s fim ok (sem mesh — %s)",
+                               de, para,
+                               menuKind == 4 && pick == 1 ? "prim desligado"
+                                                          : "sem resolver");
+                } else {
+                    elog::error("mesh: troca %s → %s ERRO(%s)", de, para,
+                                menuKind == 4
+                                    ? "gerador/upload falhou — causa acima"
+                                    : "resolver falhou — causa acima");
+                }
                 if (out.toast[0] != '\0') {
                     showToast(out.toast);
                 }
@@ -2546,57 +2788,9 @@ void frame() {
                                                g_applyAsk.fileName.c_str(),
                                                ticName);
         if (ch == 1) {
-            // Sim: aplica via applyAssetPick (o MESMO caminho do seletor —
-            // ref do projeto + resolvers de GPU + toast/log honestos)
-            const std::vector<std::string>& cat =
-                g_applyAsk.kind == 'm' ? g_catalog.meshes : g_catalog.textures;
-            const std::string base = g_applyAsk.kind == 'm'
-                                         ? std::string("meshes/")
-                                         : std::string("textures/");
-            for (size_t i = 0; i < cat.size(); ++i) {
-                if (base + cat[i] == g_applyAsk.rel) {
-                    const int menuKind = g_applyAsk.kind == 'm' ? 1 : 2;
-                    const editor::AssetPickOutcome out = editor::applyAssetPick(
-                        g_scene, g_editor.selected, menuKind,
-                        static_cast<int>(i) + 2, g_catalog,
-                        makeAssetResolvers());
-                    if (out.toast[0] != '\0') {
-                        showToast(out.toast);
-                    }
-                    if (out.log[0] != '\0') {
-                        LOGI("%s", out.log);
-                    }
-                    // 0.8.1 (F7): mesh gltf/glb aplicado → importa os CLIPS
-                    // de animação para o AnimationPlayer do TIC (o cache do
-                    // ResourceManager garante 1 parse; o nó alvo é o RAIZ —
-                    // o TIC inteiro; joints ficam para a 0.8.2)
-                    if (g_applyAsk.kind == 'm') {
-                        std::string merr;
-                        if (auto mdl = g_resources.model(g_applyAsk.rel, merr)) {
-                            // 0.8.2 (F7): SKIN primeiro (os clips de JOINT
-                            // só entram com o esqueleto presente)
-                            const u32 nJoints =
-                                gltfAttachSkin(g_scene, g_editor.selected, *mdl);
-                            if (nJoints > 0) {
-                                LOGI("editor: esqueleto importado (%u joints)",
-                                     nJoints);
-                            }
-                            if (!mdl->animations.empty()) {
-                                const u32 nClips = gltfAttachClips(
-                                    g_scene, g_editor.selected, *mdl);
-                                if (nClips > 0) {
-                                    showToast("clips importados (timeline)");
-                                    LOGI("editor: %u clip(s) de animacao "
-                                         "importados de %s",
-                                         nClips, g_applyAsk.rel.c_str());
-                                }
-                            }
-                        }
-                    }
-                    break;
-                }
-            }
-            g_applyAsk.open = false;
+            // 0.8.7: o corpo do "Sim" vive em applyImportedAssetToSelectedTic
+            // (extraído — o MESMO código é afervel no hospedeiro)
+            applyImportedAssetToSelectedTic();
         }
     }
 

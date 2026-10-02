@@ -183,6 +183,12 @@ add_executable(test_core
         # 0.8.6: wiring de UX (hex, tipografia no batch, gizmos de UI,
         # round-trip de rot/fscale/tstyle, zero sobreposição em paisagem)
         test_wiring086.cpp
+        # 0.8.7: wiring do HOTFIX cirúrgico — IMPORT (botão abre o
+        # navegador: as DUAS flags) + TROCA DE MESH (cache com cap/evicção,
+        # negative-cache anti-retry-storm, stress anti-freeze com guarda de
+        # tempo, geometria por primitiva, lifecycle destroy/recreate,
+        # gesto órfão) — INCLUI platform/main.cpp: o caminho real do device
+        test_wiring087.cpp
         ${CORE_DIR}/ui/Icons.cpp
         # 0.7.7: câmara de cena (componente/invariante + gizmo do frustum)
         ${CORE_DIR}/core/CameraUtil.cpp
@@ -202,7 +208,13 @@ add_executable(test_core
         ${CORE_DIR}/render/Material.cpp
         ${CORE_DIR}/render/Texture.cpp
         # 0.6.7: GpuAssets na suíte — releaseAll/re-upload após TERM_WINDOW
-        ${CORE_DIR}/render/GpuAssets.cpp)
+        ${CORE_DIR}/render/GpuAssets.cpp
+        # 0.8.7: o CAMINHO REAL DO DEVICE na suíte — test_wiring087
+        # #include platform/main.cpp (primMesh/attemptImport/rebind/
+        # browserImportFile/applyImported/boot INIT_WINDOW/frame); estes
+        # TUs deixa de ser device-only e passam a ser cobertos no hospedeiro
+        ${CORE_DIR}/platform/EglContext.cpp
+        ${CORE_DIR}/render/Grid.cpp)
 
 
 target_include_directories(test_core PRIVATE

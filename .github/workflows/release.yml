@@ -121,7 +121,7 @@ jobs:
       - name: Publicar artifact do APK
         uses: actions/upload-artifact@v4
         with:
-          name: goni-vv-0.8.6-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
+          name: goni-vv-0.8.7-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
@@ -183,11 +183,31 @@ jobs:
             || { echo "::error::SÍMBOLO AUSENTE: Java_vv_goni_VvActivity_nativeRegisterActivity — handshake invertido (F5.3) sem o método de registo."; exit 1; }
           grep -q 'Java_vv_goni_VvActivity_nativeOpenProject' dynsyms.txt \
             || { echo "::error::SÍMBOLO AUSENTE: Java_vv_goni_VvActivity_nativeOpenProject — Gestor de Projetos (F5.4) sem o método de abertura do projeto."; exit 1; }
+          # 0.8.7 — AUDITORIA DE EXISTÊNCIA (precedente real: FileApi.cpp
+          # estava nos testes mas NÃO no CMake da app → testes verdes,
+          # device sem a feature). O GERADOR DE PRIMITIVAS (makePrimMesh/
+          # primDefaults/primName — render/Primitives.cpp), o gerador de
+          # geometria por ASSINATURA e o DISPATCH DA TROCA (applyAssetPick —
+          # ui/EditorUi.cpp, chamado pelo main no caminho real) têm de estar
+          # no BINÁRIO DA APP. Os nomes C++ ficam MANGLED mas CONTÊM o
+          # identificador literal (_ZN2vv11makePrimMeshE…), o grep apanha.
+          echo "--- .dynsym (gerador de primitivas + troca) ---"
+          grep -E 'makePrimMesh|primDefaults|primName|primClamp|applyAssetPick' dynsyms.txt || true
+          grep -q 'makePrimMesh' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: vv::makePrimMesh — o GERADOR DE PRIMITIVAS não está no APK (render/Primitives.cpp fora da build da app? O seletor listaria as formas mas nenhuma troca geraria geometria)."; exit 1; }
+          grep -q 'primDefaults' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: vv::primDefaults — defaults por tipo (a troca pede-os ao gerador) fora do binário."; exit 1; }
+          grep -q 'primName' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: vv::primName — nomes canónicos (serializer + seletor) fora do binário."; exit 1; }
+          grep -q 'primClamp' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: vv::primClamp — defesa de parâmetros do gerador fora do binário."; exit 1; }
+          grep -q 'applyAssetPick' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: vv::editor::applyAssetPick — o DISPATCH da troca (seletor→MeshRenderer) fora do binário."; exit 1; }
           # F5.4 (pedido do dono): PARIDADE COMPLETA Java↔.so — o gate afere
           # TODOS os natives da VvActivity.java contra o .dynsym real (não só
           # a lista fixa acima) + assinaturas contra a tabela RegisterNatives
           python3 scripts/jni_parity.py dynsyms.txt
-          echo "OK: ANativeActivity_onCreate, android_main, JNI_OnLoad e TODOS os natives da VvActivity (registo, resultado, openProject) exportados em libgoni_vv.so"
+          echo "OK: ANativeActivity_onCreate, android_main, JNI_OnLoad, TODOS os natives da VvActivity (registo, resultado, openProject) E o gerador de primitivas + dispatch da troca (makePrimMesh/primDefaults/primName/primClamp/applyAssetPick) exportados em libgoni_vv.so"
 
       # F5.3 (TAREFA 1 institucionalizada): gate do MANIFEST BINÁRIO do APK
       # real — aferições que provaram que 0.6.2 tinha o manifest correto mas
