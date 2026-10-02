@@ -72,6 +72,12 @@ bool jniStorageApiSupported(bool* outManager);
 //    volta por onActivityResult(kReqAllFiles) → fila → pollResult).
 bool jniOpenAllFilesSettings();
 
+// 0.8.11 — ÁUDIO: o MICROFONE da gravação. true = RECORD_AUDIO concedida
+// (a gravação arranca); false = diálogo do sistema aberto (o chamador mostra
+// o toast "toque Gravar de novo") ou ponte indisponível (gravação desligada
+// com log — o resto do áudio segue).
+bool jniEnsureMicPermission();
+
 // F5.1-hotfix (parte 1.4, mantida): export dos logs para Downloads/GOneVV/logs
 // (MediaStore, lado Java). true = chamada Java executada; *outCount =
 // ficheiros copiados (negativo = falha Java: -1 excepção, -2 API<29,

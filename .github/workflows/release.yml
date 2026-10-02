@@ -237,6 +237,16 @@ jobs:
             grep -q "${SYM}" dynsyms.txt \
               || { echo "::error::SÍMBOLO AUSENTE: vv::${SYM} — os FORMATOS PRÓPRIOS/streaming/zip 0.8.10 não estão no APK (ficheiro fora da build da app?)."; exit 1; }
           done
+          # 0.8.11 — ÁUDIO: o contentor .gi (write/read), o IMPORT, os codecs
+          # OGG/MP3 e o PROBE (a decisão de fallback) têm de estar no BINÁRIO
+          # DA APP — o mesmo precedente FileApi (testes verdes + APK sem
+          # áudio seria o bug invisível de sempre)
+          echo "--- .dynsym (áudio 0.8.11: .gi + import + codecs + probe) ---"
+          grep -E 'writeGi|readGi|importAudioToGi|imaEncode|imaDecode|decodeOgg|decodeMp3|runProbe|probeTable|drawAudioWorkspace' dynsyms.txt || true
+          for SYM in writeGi readGi importAudioToGi imaEncode imaDecode decodeOgg decodeMp3 runProbe probeTable drawAudioWorkspace; do
+            grep -q "${SYM}" dynsyms.txt \
+              || { echo "::error::SÍMBOLO AUSENTE: vv::${SYM} — o ÁUDIO 0.8.11 não está no APK (contentor .gi/import/codecs/probe — ficheiro fora da build da app?)."; exit 1; }
+          done
           grep -q 'importFile' dynsyms.txt \
             || { echo "::error::SÍMBOLO AUSENTE: vv::convert::importFile — o CONVERSOR STREAMING não está no APK."; exit 1; }
           grep -q 'migrateLegacyAssets' dynsyms.txt \

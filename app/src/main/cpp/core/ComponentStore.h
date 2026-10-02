@@ -25,6 +25,7 @@
 #include "components/UiCanvas.h"   // 0.7.0: UI criável
 #include "components/CameraComp.h"  // 0.7.7: câmara de cena
 #include "components/AnimationPlayer.h"  // 0.8.0: animação (F7)
+#include "components/AudioPlayer.h"     // 0.8.11: áudio
 #include "components/SkeletonComp.h"  // 0.8.2: skinning (F7)
 
 namespace vv {
@@ -99,6 +100,7 @@ public:
     ComponentStorage<UiCanvas>&     uiCanvases()      { return uiCanvases_; }
     ComponentStorage<CameraComp>&   cameras()         { return cameras_; }   // 0.7.7
     ComponentStorage<AnimationPlayer>& animators()     { return animators_; }  // 0.8.0
+    ComponentStorage<AudioPlayer>& audioPlayers()      { return audioPlayers_; }  // 0.8.11
     ComponentStorage<SkeletonComp>&  skeletons()       { return skeletons_; }   // 0.8.2
     const ComponentStorage<Transform3D>&  transforms() const      { return transforms_; }
     const ComponentStorage<MeshRenderer>& meshRenderers() const   { return meshRenderers_; }
@@ -108,6 +110,7 @@ public:
     const ComponentStorage<UiCanvas>&     uiCanvases() const      { return uiCanvases_; }
     const ComponentStorage<CameraComp>&   cameras() const         { return cameras_; }   // 0.7.7
     const ComponentStorage<AnimationPlayer>& animators() const     { return animators_; }  // 0.8.0
+    const ComponentStorage<AudioPlayer>& audioPlayers() const      { return audioPlayers_; }  // 0.8.11
     const ComponentStorage<SkeletonComp>& skeletons() const        { return skeletons_; }   // 0.8.2
 
     const ComponentRegistry& registry() const { return registry_; }
@@ -127,6 +130,7 @@ private:
     ComponentStorage<UiCanvas>      uiCanvases_;   // 0.7.0: UI criável
     ComponentStorage<CameraComp>     cameras_;     // 0.7.7: câmara de cena
     ComponentStorage<AnimationPlayer> animators_;  // 0.8.0: animação (F7)
+    ComponentStorage<AudioPlayer> audioPlayers_;  // 0.8.11: áudio
     ComponentStorage<SkeletonComp>  skeletons_;   // 0.8.2: skinning (F7)
     ComponentRegistry               registry_;
 };
@@ -189,6 +193,10 @@ inline ComponentStorage<AnimationPlayer>& ComponentStore::storageOf<AnimationPla
     return animators_;
 }
 template <>
+inline ComponentStorage<AudioPlayer>& ComponentStore::storageOf<AudioPlayer>() {
+    return audioPlayers_;   // 0.8.11
+}
+template <>
 inline ComponentStorage<SkeletonComp>& ComponentStore::storageOf<SkeletonComp>() {
     return skeletons_;
 }
@@ -199,6 +207,10 @@ inline const ComponentStorage<CameraComp>& ComponentStore::storageOf<CameraComp>
 template <>
 inline const ComponentStorage<AnimationPlayer>& ComponentStore::storageOf<AnimationPlayer>() const {
     return animators_;
+}
+template <>
+inline const ComponentStorage<AudioPlayer>& ComponentStore::storageOf<AudioPlayer>() const {
+    return audioPlayers_;   // 0.8.11
 }
 template <>
 inline const ComponentStorage<SkeletonComp>& ComponentStore::storageOf<SkeletonComp>() const {

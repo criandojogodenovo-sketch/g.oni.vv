@@ -33,6 +33,8 @@ add_library(goni_vv SHARED
         core/SafStorage.h
         core/SafStorage.cpp
         core/SceneBounds.h   # 0.8.9: AABB da cena → far dinâmico editor+Play
+        core/AudioEngine.h
+        core/AudioEngine.cpp   # 0.8.11: misturador de clipes .gi (puro)
         assets/Assets.h
         assets/ObjImporter.h
         assets/ObjImporter.cpp
@@ -41,6 +43,10 @@ add_library(goni_vv SHARED
         assets/AssetConverter.cpp
         # 0.8.10: archives — parser ZIP próprio + inflate zlib
         assets/ZipExtract.cpp
+        # 0.8.11: ÁUDIO — contentor .gi + IMA-ADPCM + WAV + decoders vendors
+        # (minimp3/stb_vorbis implementam-se AQUI num ÚNICO TU)
+        assets/GiFormat.cpp
+        assets/AudioCodecs.cpp
         assets/ObjExporter.h
         assets/ObjExporter.cpp
         assets/ResourceManager.h
@@ -151,6 +157,9 @@ add_library(goni_vv SHARED
         render/Renderer.cpp
         ui/FontAtlas.h
         ui/FontAtlas.cpp
+        # 0.8.11: o workspace modo ÁUDIO (clips/gravar/waveform/atribuir)
+        ui/AudioWorkspace.h
+        ui/AudioWorkspace.cpp
         ui/UiContext.h
         ui/UiContext.cpp
         ui/EditorUi.h
@@ -191,7 +200,18 @@ add_library(goni_vv SHARED
         # F5.2: ponte All Files Access (device-only — a suíte core compila
         # sem este TU; FileApi.h é compilado no core)
         platform/StorageBridge.cpp
+        # 0.8.11: ÁUDIO — backend de saída. AudioOut.cpp é COMUM (probe
+        # harness + fábricas stub no host); AudioOutDevice.cpp é ANDROID
+        # APENAS (AAudio via dlopen — o minSdk 24 não liga a API 26 — e o
+        # AudioTrack JNI; o CI assembleRelease compila-verifica este TU)
+        platform/AudioOut.cpp
         platform/main.cpp)
+
+if(ANDROID)
+        target_sources(goni_vv PRIVATE
+                platform/AudioOut.h
+                platform/AudioOutDevice.cpp)
+endif()
 
 target_include_directories(goni_vv PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -260,4 +280,5 @@ target_link_libraries(goni_vv
         EGL
         GLESv3
         log
-        z)   # 0.8.10: inflate do ZIP (libz do NDK)
+        z    # 0.8.10: inflate do ZIP (libz do NDK)
+        dl)  # 0.8.11: dlopen/dlsym do AAudio (minSdk 24 + API 26+ no mesmo binário)

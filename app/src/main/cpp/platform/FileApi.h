@@ -37,8 +37,9 @@ constexpr BrowserRoot kBrowserRoots[] = {
     {"Docs", "/storage/emulated/0/Documents"},
     {"Camera", "/storage/emulated/0/DCIM/Camera"},   // galeria: fotos
     {"Pictures", "/storage/emulated/0/Pictures"},    // galeria: imagens
+    {"Music", "/storage/emulated/0/Music"},          // 0.8.11: áudio do dono
 };
-constexpr int kBrowserRootCount = 5;
+constexpr int kBrowserRootCount = 6;
 
 // pasta de EXPORT no armazenamento público (relativa a kExternalRoot) —
 // o ficheiro fica em Download/GOneVV/export/export_<nome>.obj

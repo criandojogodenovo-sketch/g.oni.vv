@@ -63,6 +63,8 @@ char kindOfExtension(const std::string& name) {
     if (e == "png") return 't';
     // 0.8.10 — ARCHIVES: extraem (passo 1), NUNCA importam/convertem
     if (e == "zip" || e == "rar") return 'a';
+    // 0.8.11 — ÁUDIO: importa → .gi (ADPCM/OGG/MP3)
+    if (e == "wav" || e == "ogg" || e == "mp3") return 's';
     return 0;
 }
 

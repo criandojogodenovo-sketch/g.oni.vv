@@ -33,6 +33,7 @@
 #include "components/TouchControls.h"
 #include "components/CameraComp.h"   // 0.7.7: inspector da câmara
 #include "components/AnimationPlayer.h"   // 0.8.0: inspector da animação
+#include "components/AudioPlayer.h"   // 0.8.11: inspector de áudio
 #include "components/UiCanvas.h"   // 0.8.0: canAnim (elementos animáveis)
 
 namespace vv {
@@ -76,6 +77,18 @@ constexpr u64 kInspectorPrimR     = 5600;   // slider raio/size
 constexpr u64 kInspectorPrimSeg   = 5602;   // slider segmentos (esfera)
 constexpr u64 kInspectorPrimRings = 5604;   // 0.8.10: slider anéis (esfera)
 constexpr u64 kInspectorAddAnim   = 3060;   // botão "add Animacao"
+// 0.8.11 — inspector de ÁUDIO (faixa 5700..5719): clip (seletor 5),
+// ouvir (preview), autoplay/loop/posicional (toggles), volume/pitch e
+// raios (sliders)
+constexpr u64 kInspectorAuClip     = 5700;   // "clip: <nome> ▸" (assetMenu 5)
+constexpr u64 kInspectorAuPlay     = 5701;   // "ouvir/parar" (preview)
+constexpr u64 kInspectorAuAutoplay = 5702;   // "autoplay: sim/nao"
+constexpr u64 kInspectorAuLoop     = 5703;   // "loop: sim/nao"
+constexpr u64 kInspectorAuVolume   = 5704;   // slider 0..1
+constexpr u64 kInspectorAuPitch    = 5705;   // slider 0.5..2
+constexpr u64 kInspectorAuPos      = 5706;   // "posicional: sim/nao"
+constexpr u64 kInspectorAuRint     = 5707;   // slider raio interno
+constexpr u64 kInspectorAuRext     = 5708;   // slider raio externo
 
 // ids das regiões de scroll (F4.1) — o tap re-despachado é POR ID (F5.0-fix:
 // a Hierarchy comia o tap do Inspector quando a consulta era global)
@@ -112,6 +125,8 @@ struct InspProfile {
     PrimKind primKind = PrimKind::Sphere;
     bool anim = false;      // AnimationPlayer presente
     bool canAnim = false;   // tem ALVO animável (Transform3D ou UI com elems)
+    // 0.8.11 — áudio
+    bool au = false;        // AudioPlayer presente (secção + linhas)
     // 0.8.9 — IMPORT DE FICHEIRO: linhas dims + "escala: original" (o fit
     // uniforme normaliza o TAMANHO; estes mostram/devolvem o original)
     bool fileMesh = false;
@@ -126,6 +141,7 @@ inline InspProfile inspectorProfile(const Tic& tic) {
     p.tc = tic.getComponent<TouchControls>() != nullptr;
     p.cam = tic.getComponent<CameraComp>() != nullptr;   // 0.7.7
     p.anim = tic.getComponent<AnimationPlayer>() != nullptr;   // 0.8.0
+    p.au = tic.getComponent<AudioPlayer>() != nullptr;   // 0.8.11
     if (const MeshRenderer* mr = tic.getComponent<MeshRenderer>()) {
         p.prim = mr->primOn;   // 0.8.0
         p.primKind = mr->prim.kind;
@@ -184,6 +200,17 @@ struct InspRow {
         // 0.8.9 — import: dimensões originais + repor a escala
         DimsLabel,   // "dims: X×Y×Z" (AABB real do mesh carregado)
         ScaleOrig,   // "escala: original" (repõe Transform3D::scale a {1,1,1})
+        // 0.8.11 — ÁUDIO (secção do AudioPlayer)
+        AuSection,   // cabeçalho "Audio" + separador
+        AuClip,      // "clip: <nome> ▸" (abre o seletor de clips — menu 5)
+        AuPlay,      // "ouvir/parar" (preview — flag que o main mapeia)
+        AuAutoplay,  // "autoplay: sim/nao" (toca ao entrar em Play)
+        AuLoop,      // "loop: sim/nao"
+        AuVolume,    // slider volume 0..1
+        AuPitch,     // slider pitch 0.5..2 (resample linear)
+        AuPos,       // "posicional: sim/nao" (atenuação pela distância)
+        AuRint,      // slider raio interno (ouvido a 100%)
+        AuRext,      // slider raio externo (silêncio)
     };
     Kind kind;
     f32  y;     // topo da linha em COORDS DE CONTEÚDO (cumulativo)
@@ -214,6 +241,7 @@ inline u32 inspectorRowCount(const InspProfile& p, bool selectable) {
     if (p.im) n += 1;                                   // addTc OU tc
     if (!p.anim && p.canAnim) n += 1;                   // 0.8.0: add Animacao
     else if (p.anim) n += 1;                            // 0.8.0: anim: N tracks
+    if (p.au) n += 1 + 9;                               // 0.8.11: secção + 9
     (void)selectable;
     return n;
 }
@@ -305,6 +333,20 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
         push(InspRow::Kind::AddAnim, addH, kInspectorAddAnim);
     } else if (p.anim) {
         push(InspRow::Kind::AnimLabel, textH, 0);
+    }
+    // 0.8.11 — ÁUDIO: secção + clip + ouvir + toggles + sliders (a MESMA
+    // ordem do desenho — o payload lê do AudioPlayer do TIC)
+    if (p.au) {
+        push(InspRow::Kind::AuSection, textH, 0);
+        push(InspRow::Kind::AuClip, btnH, kInspectorAuClip);
+        push(InspRow::Kind::AuPlay, btnH, kInspectorAuPlay);
+        push(InspRow::Kind::AuAutoplay, btnH, kInspectorAuAutoplay);
+        push(InspRow::Kind::AuLoop, btnH, kInspectorAuLoop);
+        push(InspRow::Kind::AuVolume, sldH, kInspectorAuVolume);
+        push(InspRow::Kind::AuPitch, sldH, kInspectorAuPitch);
+        push(InspRow::Kind::AuPos, btnH, kInspectorAuPos);
+        push(InspRow::Kind::AuRint, sldH, kInspectorAuRint);
+        push(InspRow::Kind::AuRext, sldH, kInspectorAuRext);
     }
     return n;
 }

@@ -1,4 +1,85 @@
-# G.One VV 0.8.10 — MESH DETERMINÍSTICA (só cubo e esfera) + import 500 MB STREAMING + formatos próprios (.gmesh/.gtext/.gm) + archives + diagnóstico com identidade
+# G.One VV 0.8.11 — ÁUDIO: AAudio com probe + fallback AudioTrack + formato próprio .gi (ADPCM/OGG/MP3) + TIC AudioPlayer + workspace ÁUDIO + gravação de mic
+
+## Escopo 0.8.11 (implementado — o som da cena, ZERO features de jogo)
+
+**A ARQUITETURA (a decisão do prompt)**: o áudio da engine é UM
+MISTURADOR DE SOFTWARE PURO (`core/AudioEngine` — vozes com cursor/loop/
+volume/pitch/posicional somadas por frame) que NUNCA fala com o hardware.
+O BACKEND puxa o misturador no callback: **AAudio** no device (carregado
+por **dlopen** — o minSdk 24 não liga a API 26; o mesmo binário corre na
+24/25 caindo no fallback) e, se o **PROBE DE ESTABILIDADE** (Settings →
+"diagnostico audio": 50 ciclos start/stop + 10 pause/resume, tabela no
+engine.log) acusar QUALQUER falha/disconnect, o **fallback AudioTrack**
+(JNI) assume DEBAIXO DA MESMA INTERFACE — o misturador nem sabe qual dos
+dois corre. O lifecycle segue a activity (pause/resume; TERM fecha).
+
+1. **FORMATO PRÓPRIO `.gi`** (header comum de 32 B das 0.8.10: magic/
+   versão/endianness/checksum FNV-1a): `ADPCM IMA 4:1` para WAV (o codec
+   próprio, round-trip aferido: contagem EXATA, energia dentro de 0.5%),
+   **passthrough** para OGG/MP3 (já comprimidos; decode no load pelos
+   vendors minimp3/stb_vorbis — CC0/public domain, um TU só). Corrupção
+   → erro legível, nunca crash. Import `.wav/.ogg/.mp3` → `audio/<nome>.gi`
+   com a linha de rácio no log (`audio: import … ratio=X`); guarda de
+   256 MB (áudio gigante = lixo, não é geometria).
+
+2. **TIC AudioPlayer (estrutura primeiro)**: componente puro com
+   clipPath/autoplay/loop/volume/pitch/posicional+raios; o preset "+ Audio"
+   cria Transform+AudioPlayer SEM mesh; Inspector com a secção ÁUDIO
+   completa (clip pelo seletor novo, **ouvir** = preview no mesmo
+   misturador do Play, autoplay/loop/posicional, sliders volume/pitch/
+   raios); serializer round-trip com defaults omitidos; **glifo de
+   ALTIFALANTE + esfera wireframe dos raios** no editor (em Play nada
+   desenha — só soa); posicional atenua pela distância ao listener
+   (câmara ativa) com os raios a seguir a POS VIVA do TIC.
+
+3. **WORKSPACE ÁUDIO** (toolbar G3: **3D | UI | ÁUDIO** — exclusivos): a
+   aba ÁUDIO substitui o viewport (o MESMO rect do editor de UI — nada
+   sobrepõe painéis): lista de clips (nome/duração/codec), **Importar**
+   (navegador na raiz Music), **Gravar/Parar** (mic → `.gi` ADPCM com
+   medidor de nível e temporizador), preview play/stop, **waveform** de
+   picos PCM com linha de progresso, renomear (teclado in-app),
+   apagar com confirmação, atribuir a TIC. Trim = dívida documentada.
+
+4. **GRAVAÇÃO (mic → .gi)**: AudioRecord (JNI) numa thread própria —
+   PCM16 mono 44100 lido por chunks; STOP → `audio/rec-<unix>.gi` +
+   catálogo + rácio no log. A permissão RECORD_AUDIO é pedida NO 1º GRAVAR
+   (declarada no manifest; diálogo do sistema; o dono re-toca e segue —
+   o mesmo contrato humano do All Files, nada de loops). No CI o mic é
+   SINTÉTICO (senoide) pela MESMA máquina de estados — o wiring inteiro
+   aferido sem hardware.
+
+5. **MISTURADOR (o coração)**: vozes (slots reutilizáveis), resample
+   linear por pitch E pela taxa do device (clip 22050 no device 44100 =
+   tempo real), mono→stereo, clamp [-1,1], master volume (Settings →
+   "volume geral", persistido por projeto), fim exato detetado no fim do
+   bloco (o bug apanhado pelo CI: a voz ficava "playing" entre callbacks),
+   posicional com cursor a andar mesmo mudo (o loop conta o tempo).
+
+6. **NAGEVADOR +5ª raiz**: Music ao lado de Raiz/Download/Docs/Camera/
+   Pictures (o áudio do dono vive aí); ficheiros .wav/.ogg/.mp3 listados
+   como `audio: <nome>` e o toque IMPORTA → `.gi`. Os números de
+   raiz/subir/lista são PARAMÉTRICOS (o "Subir" fixo em 6 colidia com a
+   6ª raiz Music — apanhado na revisão). O catálogo de áudio alimenta o
+   Inspector E o workspace pelo mesmo refresh.
+
+**TESTES**: 581 → **608** (ADPCM contagem exata/energia/defesas, .gi
+round-trip + 6 corrupções legíveis, import WAV mono/stereo com rácio +
+erros de formato, misturador cursor/loop/fim/pitch/resample/slots/
+posicional/master, PROBE com fakes: falha→FALLBACK/disconnect→FALLBACK/
+ok→AAudio OK, workspace com fake host + confirmação de apagar + guards,
+serializer/preset/registro, FileApi kinds + raiz Music, seletor de clips
+(menu 5: none limpa/pick aplica/fora não crash), plano do Inspector,
+"+" com Audio; DEVICE: import wav e2e → diálogo "aplicar ao TIC?" → "Sim"
+atribui, sem AudioPlayer não pergunta, gravação sintética e2e com rácio +
+ponte do mic (fake JNI: concedida/negada), boot/probe/troca de backend +
+pause/resume do lifecycle, frame no modo ÁUDIO + preview do Inspector pelo
+caminho real). **RED→GREEN provado**: encoder da 1ª versão (amostras
+dobradas) e fim-de-bloco do misturador revertidos → **12 testes FALHAM**;
+restaurados → 608 OK. CLÁUSULA CALMA: só áudio + testes.
+
+---
+
+# (histórico) G.One VV 0.8.10 — MESH DETERMINÍSTICA (só cubo e esfera) + import 500 MB STREAMING + formatos próprios (.gmesh/.gtext/.gm) + archives + diagnóstico com identidade
 
 ## Escopo 0.8.10 (implementado — a decisão do dono, ZERO features de jogo)
 
@@ -1594,6 +1675,59 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.8.11 (ÁUDIO: AAudio + .gi + TIC AudioPlayer + workspace + gravação; APK CUMULATIVO)
+
+Instalar o APK 0.8.11 (artifact `goni-vv-0.8.11-release-signed` do run do
+job `build-release`; versionCode 41). A alvo são os SETE blocos — cada
+passo diz onde confirmar (ouvido, UI ou log viewer). **Zero crash dumps
+novos continua a ser o critério global.**
+
+1. **O SOM OUVE-SE (o backend)**: arranque → Settings → Ver logs → a
+   linha `audio: backend aaudio ATIVO (44100 Hz stereo…)` (se aparecer
+   `AAudio recusou — FALLBACK AudioTrack`, é o fallback DOCUMENTADO a
+   trabalhar — o som segue igual). Play de uma cena com som = áudio no
+   altifalante. Botão home → o som PAUSA (`audio: PAUSE`); voltar →
+   `audio: RESUME` e o som continua de onde estava.
+
+2. **PROBE (a exigência do prompt)**: Settings → "diagnostico audio
+   (probe)" → ~2 s → toast "audio: AAudio estavel (probe ok)" e no log a
+   TABELA completa (`audio: probe aaudio — ciclos 50/50 ok … DECISAO:
+   AAudio OK`). DESLIGUE um headset bluetooth a meio de um playback e
+   re-corra o probe: se a tabela acusar disconnects, a linha final diz
+   `DECISAO: FALLBACK AudioTrack` e o backend TROCA sozinho (log
+   `audio: TROCA de backend aaudio -> audiotrack`) — o som NÃO morre.
+
+3. **IMPORT de áudio**: toolbar → aba **ÁUDIO** → Importar → navegador
+   abre em **Music** → escolher um .wav/.ogg/.mp3 → toast "clip: <nome>
+   (Xs)" e o clip aparece na lista com codec+duração, a WAVEFORM desenha.
+   No log: `audio: import audio/<nome>.gi codec=<adpcm|ogg|mp3>
+   ratio=X`. Com um TIC de Audio selecionado, o diálogo "aplicar ao TIC?"
+   → **Sim** → o Inspector do TIC mostra `clip: <nome>`.
+
+4. **GRAVAR**: aba ÁUDIO → Gravar → (1ª vez: diálogo do sistema do
+   MICROFONE → Permitir) → tocar Gravar de novo → "A GRAVAR... Ns" com o
+   MEDIDOR a mexer → PARAR → toast "gravado: Ns" e o clip `rec-…` entra
+   na lista (no log `audio: gravado … ratio=4.0x`). Sem permissão = a
+   gravação não arranca mas NADA crasha (toast honesto).
+
+5. **TIC de ÁUDIO na cena**: "+" → **Audio** → o TIC nasce (glifo de
+   ALTIFALANTE no viewport; SEM mesh) → Inspector: "clip:" → seletor com
+   os clips do projeto (ou importar…) → **ouvir** = preview imediato
+   (botão vira "parar"; o fim do clip volta a "ouvir") → ligar
+   "posicional" → a ESFERA wireframe dos raios desenha no editor e
+   afastar a câmara ABAFA o som ao ouvir em Play (raios no Inspector).
+
+6. **Play com autoplay**: TIC de Audio com autoplay=1 (e loop) → Play →
+   o som começa sozinho e enrola; Stop → silêncio total (o Play é
+   sandbox: o leavePlay mata TODAS as vozes). Guardar/reabrir o projeto:
+   o clip/autoplay/loop/volume/pitch/posicional voltam exatos (Inspector).
+
+7. **Volume geral + renomear/apagar**: Settings → "volume geral: 100%" →
+   cicla 0/25/50/75/100 (0 = mudo total; persiste por projeto). Na aba
+   ÁUDIO: renomear (teclado in-app) move o clip E os TICs que o usavam
+   seguem a nova ref; apagar pede CONFIRMAÇÃO (2 toques) e o clip sai da
+   lista e do storage. Zero crash dumps novos = release saudável.
 
 ## Verificação no Realme C33 (dono) — 0.8.10 (MESH DETERMINÍSTICA + 500 MB + FORMATOS + ARCHIVES; APK CUMULATIVO)
 

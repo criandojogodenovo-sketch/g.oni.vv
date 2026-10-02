@@ -113,6 +113,7 @@ struct JniFake {
     std::vector<std::string> static_bool_calls;
     bool manager_result = false;     // valor de isExternalStorageManager()
     int  export_int_result = 3;      // resultado do exportLogsToDownloads
+    bool mic_granted = true;         // 0.8.11: ensureMicPermission() da VvActivity
     std::string last_new_string;     // última NewStringUTF
 
     // strings fabricadas (NewStringUTF → GetStringUTFChars)
@@ -321,6 +322,10 @@ struct JNIEnv {
             jstring jd = va_arg(ap, jstring);
             va_end(ap);
             return g_jni.bridge_delete(g_jni.strOf(jd)) ? JNI_TRUE : JNI_FALSE;
+        }
+        if (name == "ensureMicPermission") {   // 0.8.11: o mic da gravação
+            va_end(ap);
+            return g_jni.mic_granted ? JNI_TRUE : JNI_FALSE;
         }
         va_end(ap);
         return JNI_FALSE;

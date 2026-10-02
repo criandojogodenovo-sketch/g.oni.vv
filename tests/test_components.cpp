@@ -79,7 +79,7 @@ TEST(registry_registo_find_factory) {
 
     // ordem de registo fixa (contrato do ctor)
     // 0.7.0: +UiCanvas; 0.7.7: +Camera — SEMPRE NO FIM (ids intactos)
-    EXPECT(store.registry().count() == 9u);   // 0.8.0: +AnimationPlayer; 0.8.2: +Skeleton
+    EXPECT(store.registry().count() == 10u);   // 0.8.11: +AudioPlayer; 0.8.0: +AnimationPlayer; 0.8.2: +Skeleton
     EXPECT(store.registry().find("Transform3D") == 0);
     EXPECT(store.registry().find("MeshRenderer") == 1);
     EXPECT(store.registry().find("InputMap") == 2);
@@ -87,6 +87,7 @@ TEST(registry_registo_find_factory) {
     EXPECT(store.registry().find("TouchControls") == 4);
     EXPECT(store.registry().find("UiCanvas") == 5);
     EXPECT(store.registry().find("Camera") == 6);   // 0.7.7
+    EXPECT(store.registry().find("AudioPlayer") == 9);   // 0.8.11 (depois do Skeleton 8)
     EXPECT(store.registry().find("Desconhecido") == -1);
 
     // factory por id e por nome
@@ -143,7 +144,7 @@ TEST(store_sem_dono_recusa_add) {
     ComponentStore store(nullptr);   // situação só de teste — fora da Scene
     EXPECT(!store.hasAny(Handle::invalid()));
     // add sem Scene não pode crashar: devolve nullptr
-    EXPECT(store.registry().count() == 9u);   // 0.8.0: +AnimationPlayer; 0.8.2: +Skeleton   // 0.7.7: +Camera   // registry vive mesmo sem dono
+    EXPECT(store.registry().count() == 10u);   // 0.8.11: +AudioPlayer; 0.8.2: +Skeleton; 0.8.0: +AnimationPlayer
 }
 
 TEST(tic_api_add_get_remove_componente) {

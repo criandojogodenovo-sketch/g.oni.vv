@@ -73,6 +73,7 @@ Layout layout(f32 sw, f32 sh, const safe::Insets& in, bool g4Visible) {
             L.play.w     = kIconBtn * k;
             L.mode3d.w   = kSegW * k;
             L.modeUi.w   = kSegW * k;
+            L.modeAudio.w = (kSegW + 8.0f) * k;   // "ÁUDIO" é mais largo
             for (int i = 0; i < 4; ++i) {
                 L.giz[i].w = kIconBtn * k;
             }
@@ -88,6 +89,7 @@ Layout layout(f32 sw, f32 sh, const safe::Insets& in, bool g4Visible) {
         L.play.w = kIconBtn;
         L.mode3d.w = kSegW;
         L.modeUi.w = kSegW;
+        L.modeAudio.w = kSegW + 8.0f;
         for (int i = 0; i < 4; ++i) {
             L.giz[i].w = kIconBtn;
         }
@@ -121,6 +123,7 @@ Layout layout(f32 sw, f32 sh, const safe::Insets& in, bool g4Visible) {
 
     place(L.mode3d, x, by, kBtnH);  x += L.mode3d.w;   // segmented: colados
     place(L.modeUi, x, by, kBtnH);  x += L.modeUi.w;
+    place(L.modeAudio, x, by, kBtnH);  x += L.modeAudio.w;   // 0.8.11
     L.sep[2] = {x + (sepGap - 1.0f) * 0.5f, L.bar.y + (L.bar.h - kSepH) * 0.5f,
                 1.0f, kSepH};
     x += sepGap;
@@ -260,14 +263,25 @@ Actions draw(UiContext& ui, EditorState& st, GizmoModeState& gz,
         a.playPressed = true;
     }
 
-    // G3 — modo (segmented 3D|UI; o texto é aceite aqui: 2 estados curtos)
-    if (segmentText(ui, kMode3dId, L.mode3d, "3D", !st.uiMode)) {
-        st.uiMode = false;
-        st.selElement = -1;   // a seleção de elemento não atravessa o 3D
-        st.elDrag = false;
-    }
+    // G3 — modo (segmented 3D|UI|ÁUDIO; 0.8.11: o 3º estado)
     if (segmentText(ui, kModeUiId, L.modeUi, "UI", st.uiMode)) {
         st.uiMode = true;
+        st.audioMode = false;   // 0.8.11: modos exclusivos
+    }
+    // 0.8.11 — ÁUDIO: o workspace substitui o viewport (clips/gravar/
+    // waveform); os modos são exclusivos como 3D/UI
+    if (segmentText(ui, kModeAudioId, L.modeAudio, "ÁUDIO", st.audioMode)) {
+        st.audioMode = true;
+        st.uiMode = false;
+        st.selElement = -1;
+        st.elDrag = false;
+    }
+    // voltar a 3D também desliga o ÁUDIO
+    if (segmentText(ui, kMode3dId, L.mode3d, "3D", !st.uiMode && !st.audioMode)) {
+        st.uiMode = false;
+        st.audioMode = false;
+        st.selElement = -1;
+        st.elDrag = false;
     }
 
     // G4 — transformação (SÓ com seleção em 3D; segmented de ícones).

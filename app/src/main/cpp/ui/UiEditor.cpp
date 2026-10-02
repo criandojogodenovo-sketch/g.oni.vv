@@ -1877,9 +1877,12 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     ui.labelFitted(x + kPad + 8.0f, pathY + tm.ascent, pathText.c_str(),
                    theme::ACCENT, w - 2.0f * kPad - 16.0f);
 
-    // raízes: [Raiz][Download][Docs][Camera][Pictures] (a galeria incluída)
+    // raízes: [Raiz][Download][Docs][Camera][Pictures][Music] (galeria + a
+    // raiz de ÁUDIO do dono 0.8.11; a largura reparte por TODAS)
     const f32 rootsY = pathY + 34.0f - 18.0f + 12.0f;
-    const f32 rootW = (w - 2.0f * kPad - 4.0f * 6.0f) / 5.0f;
+    const f32 rootW = (w - 2.0f * kPad -
+                       static_cast<f32>(fileapi::kBrowserRootCount - 1) * 6.0f) /
+                      static_cast<f32>(fileapi::kBrowserRootCount);
     int chosen = 0;
     for (int i = 0; i < fileapi::kBrowserRootCount; ++i) {
         if (ui.button(kBrowserRootBase + static_cast<u64>(i),
@@ -1890,10 +1893,12 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     }
 
     // subir (o pai; na raiz não faz nada — o main trata)
+    // 0.8.11: o nº vem DEPOIS das raízes (count+1) — com a 6ª raiz (Music)
+    // o fixo "6" colidia: tocar Subir saltava para o Music
     const f32 upY = rootsY + 52.0f;
     if (ui.button(kBrowserUpId, x + kPad, upY, w - 2.0f * kPad, 44.0f,
                   "^ Subir")) {
-        chosen = 6;
+        chosen = fileapi::kBrowserRootCount + 1;
     }
 
     // lista: diretorias primeiro (ordem do listDirEntries); scroll id 45
@@ -1914,6 +1919,10 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         } else if (entries[i].kind == 't') {
             std::snprintf(label, sizeof(label), "tex: %s",
                           entries[i].name.c_str());
+        } else if (entries[i].kind == 's') {
+            // 0.8.11 — ÁUDIO (.wav/.ogg/.mp3 → importa p/ .gi)
+            std::snprintf(label, sizeof(label), "audio: %s",
+                          entries[i].name.c_str());
         } else {
             // 0.8.5: formato fora de obj/gltf/glb/png — VISÍVEL (o tap dá
             // o erro claro no main; o "?" marca o que a engine não lê)
@@ -1932,11 +1941,12 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     }
 
     // tap re-despachado → linha da lista (a MESMA geometria desenhada)
+    // 0.8.11: as linhas começam DEPOIS de raízes+subir (count+2)
     f32 tx = 0.0f, ty = 0.0f;
     if (chosen == 0 && ui.scrollTap(kBrowserScrollId, tx, ty)) {
         const i32 row = static_cast<i32>((ty - listTop + off) / rowH);
         if (row >= 0 && static_cast<u32>(row) < entries.size()) {
-            chosen = row + 7;
+            chosen = row + fileapi::kBrowserRootCount + 2;
         }
     }
     return chosen;

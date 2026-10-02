@@ -14,6 +14,15 @@
     <uses-permission
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
+    <!-- 0.8.11 — ÁUDIO: o GRAVAR do workspace usa o microfone (AudioRecord
+         PCM16). Declarada (sem isto o sistema não tem o que conceder) mas
+         NÃO pedida no arranque: o pedido runtime corre quando o dono toca
+         GRAVAR pela 1ª vez (VvActivity.ensureMicPermission → diálogo do
+         sistema); negada = gravação desligada com toast honesto, o resto
+         da app segue. -->
+    <uses-permission
+        android:name="android.permission.RECORD_AUDIO" />
+
     <!-- F5.1-C/F5.2: hasCode="true" — EXCEÇÃO documentada
          (docs/SAF_EXCEPTION.md). NativeActivity não lança a janela de
          permissões nem reencaminha onActivityResult sem uma subclasse: a

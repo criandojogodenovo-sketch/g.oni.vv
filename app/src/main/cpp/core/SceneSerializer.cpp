@@ -7,6 +7,7 @@
 #include "components/UiCanvas.h"
 #include "components/CameraComp.h"   // 0.7.7: câmara de cena
 #include "components/AnimationPlayer.h"   // 0.8.0: animação (F7)
+#include "components/AudioPlayer.h"      // 0.8.11: áudio
 #include "components/SkeletonComp.h"  // 0.8.2: esqueleto (F7)
 #include "core/CameraUtil.h"          // 0.7.7: uma ativa por cena
 #include "core/ComponentStore.h"
@@ -651,6 +652,38 @@ void fillCameraComp(CameraComp* cam, const Json& comp) {
     }
 }
 
+// 0.8.11 — AudioPlayer: reconstrói os campos (defaults ausentes =
+// valores do componente — forward-compat como o resto do serializer).
+void fillAudioPlayer(AudioPlayer* au, const Json& comp) {
+    if (!au) {
+        return;
+    }
+    if (const Json* j = comp.find("clip");
+        j && j->type == Json::Type::String) {
+        au->clipPath = j->string;
+    }
+    auto readFlag = [&comp](const char* key) -> bool {
+        const Json* j = comp.find(key);
+        return j && j->type == Json::Type::Number && j->number != 0.0;
+    };
+    au->autoplay = readFlag("autoplay");
+    au->loop = readFlag("loop");
+    auto readF = [&comp](const char* key, f32 def) -> f32 {
+        const Json* j = comp.find(key);
+        return (j && j->type == Json::Type::Number)
+                   ? static_cast<f32>(j->number) : def;
+    };
+    au->volume = readF("volume", 1.0f);
+    au->pitch = readF("pitch", 1.0f);
+    au->posicional = readFlag("posicional");
+    au->raioInterno = readF("rint", 1.0f);
+    au->raioExterno = readF("rext", 8.0f);
+    au->clampFields();
+    // runtime reset (cena carregada nasce calada)
+    au->voiceId = -1;
+    au->previewing = false;
+}
+
 // 0.8.0 (F7) — AnimationPlayer: reconstrói clips/tracks/keys + playback.
 // Alvos/tipos de curva desconhecidos são IGNORADOS (forward-compat, a
 // política do serializer); keys ficam ORDENADAS por t (sortKeys).
@@ -920,6 +953,37 @@ void appendAnimKey(Json& arr, const AnimKey& k) {
     arr.addItem(std::move(jk));
 }
 
+// 0.8.11 — AudioPlayer: clip/autoplay/loop/volume/pitch/posicional+raios.
+// Defaults omitidos (autoplay/loop false, volume 1, pitch 1, global).
+void appendComponentJson(Json& arr, const AudioPlayer* au) {
+    if (!au) {
+        return;
+    }
+    Json c = Json::makeObject();
+    c.addMember("type", Json::makeString("AudioPlayer"));
+    if (!au->clipPath.empty()) {
+        c.addMember("clip", Json::makeString(au->clipPath));
+    }
+    if (au->autoplay) {
+        c.addMember("autoplay", Json::makeNumber(1));
+    }
+    if (au->loop) {
+        c.addMember("loop", Json::makeNumber(1));
+    }
+    if (au->volume != 1.0f) {
+        c.addMember("volume", Json::makeNumber(au->volume));
+    }
+    if (au->pitch != 1.0f) {
+        c.addMember("pitch", Json::makeNumber(au->pitch));
+    }
+    if (au->posicional) {
+        c.addMember("posicional", Json::makeNumber(1));
+        c.addMember("rint", Json::makeNumber(au->raioInterno));
+        c.addMember("rext", Json::makeNumber(au->raioExterno));
+    }
+    arr.addItem(std::move(c));
+}
+
 void appendComponentJson(Json& arr, const AnimationPlayer* ap) {
     if (!ap) {
         return;
@@ -1044,6 +1108,7 @@ std::string dump(const Scene& scene) {
         appendComponentJson(comps, cs.cameras().find(t.handle));       // 0.7.7
         appendComponentJson(comps, cs.animators().find(t.handle));     // 0.8.0
         appendComponentJson(comps, cs.skeletons().find(t.handle));      // 0.8.2
+        appendComponentJson(comps, cs.audioPlayers().find(t.handle));   // 0.8.11
         jt.addMember("components", std::move(comps));
 
         tics.addItem(std::move(jt));
@@ -1149,6 +1214,8 @@ bool loadText(Scene& scene, const std::string& text, const LoadCtx& ctx) {
                 fillAnimationPlayer(store.get<AnimationPlayer>(h), jc);   // 0.8.0
             } else if (jt2->string == "Skeleton") {
                 fillSkeleton(store.get<SkeletonComp>(h), jc);   // 0.8.2
+            } else if (jt2->string == "AudioPlayer") {
+                fillAudioPlayer(store.get<AudioPlayer>(h), jc);   // 0.8.11
             }
             // InputMap: sem dados — presença basta
         }

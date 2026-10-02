@@ -185,6 +185,30 @@ public class VvActivity extends NativeActivity {
         }
     }
 
+    // 0.8.11 — ÁUDIO: o GRAVAR do workspace precisa do MICROFONE. Devolve
+    // true se JÁ concedida (a gravação arranca logo); false = o DIALOGO do
+    // sistema está aberto — o nativo mostra o toast "toque Gravar de novo"
+    // e o dono volta a tocar depois de conceder (o mesmo contrato humano
+    // do All Files: nada de loops, nada de arranques bloqueados). Chamado
+    // por JNI no thread da engine (checkSelfPermission/requestPermissions
+    // são de Context/Activity — thread-safe para perguntar; o diálogo é
+    // lançado da activity). API 23+ (minSdk 24 ✓).
+    boolean ensureMicPermission() {
+        try {
+            if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                return true;
+            }
+            requestPermissions(
+                    new String[]{android.Manifest.permission.RECORD_AUDIO},
+                    4301 /* kReqMic, resultado ignorado — o re-toque decide */);
+            return false;
+        } catch (Exception e) {
+            Log.e("GONI", "java: ensureMicPermission FALHOU", e);
+            return false;   // sem permissão = gravação desligada, resto segue
+        }
+    }
+
     // F5.1-hotfix (parte 1.4) — EXPORT DOS LOGS para o Downloads PÚBLICO.
     // Copia TODOS os ficheiros de getExternalFilesDir("logs") (engine.log,
     // rotações .1/.2 e crash-*.dump) para Downloads/<relPath>/ via MediaStore

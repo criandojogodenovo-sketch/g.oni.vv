@@ -29,7 +29,9 @@ enum class PresetKind : u32 {
     Mesh            = 4,   // 0.8.0 (F7): só Transform+MeshRenderer (a
                            // primitiva vem pelo `mesh` — o main passa a
                            // esfera default do cache; SEM física)
-    Count           = 5,
+    Audio           = 5,   // 0.8.11: só Transform+AudioPlayer (o clip vem
+                           // pelo Inspector; SEM mesh, SEM física)
+    Count           = 6,
 };
 
 // Nome canônico do preset (usado no menu "+" e como nome base do TIC).

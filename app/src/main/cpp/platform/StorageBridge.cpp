@@ -75,6 +75,9 @@ jclass g_activityCls = nullptr;
 
 jmethodID g_midOpenAllFiles = nullptr;   // VvActivity.openAllFilesSettings(I)V
 jmethodID g_midExportLogs = nullptr;     // VvActivity.exportLogsToDownloads(String)I
+// 0.8.11 — o microfone da GRAVAÇÃO: VvActivity.ensureMicPermission()Z
+// (true = concedida; false = dialogo aberto, o dono re-toca Gravar)
+jmethodID g_midMicPermission = nullptr;  // VvActivity.ensureMicPermission()Z
 // 0.6.7 — "Sair para projetos" (diagnóstico, como bridgeDelete: falhar
 // não bloqueia o fluxo principal — o editor mostra um toast honesto)
 jmethodID g_midFinish = nullptr;         // VvActivity.bridgeFinish()V
@@ -250,6 +253,18 @@ void cacheActivityMethods(JNIEnv* env) {
                     "projetos' indisponível (o resto do editor intacto)");
     } else {
         elog::info("jni: VvActivity.bridgeFinish OK (sair p/ o gestor)");
+    }
+
+    // 0.8.11 — o microfone da gravação (não crítico: sem ele o GRAVAR
+    // fica desligado com toast honesto, o resto do áudio segue)
+    g_midMicPermission = env->GetMethodID(
+        g_activityCls, "ensureMicPermission", "()Z");
+    if (!g_midMicPermission || clearPendingException(env)) {
+        g_midMicPermission = nullptr;
+        elog::error("jni: VvActivity.ensureMicPermission NÃO encontrada — "
+                    "gravacao indisponível (o resto do audio intacto)");
+    } else {
+        elog::info("jni: VvActivity.ensureMicPermission OK (mic da gravacao)");
     }
 
     // F5.4 — ponte SAF do Gestor de Projetos (todas na mesma classe: ou
@@ -486,6 +501,24 @@ bool jniOpenAllFilesSettings() {
     env->CallVoidMethod(g_activity, g_midOpenAllFiles,
                         static_cast<jint>(kReqAllFiles));
     return !clearPendingException(env);
+}
+
+// 0.8.11 — o MICROFONE da gravação: true = concedida, false = diálogo
+// aberto/ponte indisponível (o chamador decide o toast honesto)
+bool jniEnsureMicPermission() {
+    if (!handshakeOk() || !g_midMicPermission) {
+        elog::warn("jni: ensureMicPermission indisponível — gravacao "
+                   "desligada (ponte Java sem o método?)");
+        return false;
+    }
+    JNIEnv* env = attachedEnv();
+    if (!env) {
+        elog::warn("jni: ensureMicPermission sem env do thread chamador");
+        return false;
+    }
+    const jboolean granted =
+        env->CallBooleanMethod(g_activity, g_midMicPermission);
+    return !clearPendingException(env) && granted == JNI_TRUE;
 }
 
 // 4) export dos logs → Downloads público (MediaStore). Mantido do hotfix.

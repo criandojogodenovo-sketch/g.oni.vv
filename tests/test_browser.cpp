@@ -120,18 +120,22 @@ TEST(browser_parent_path) {
 
 TEST(browser_raizes_incluem_a_galeria) {
     // all-files + Download/Documents + A GALERIA (DCIM/Camera, Pictures)
-    EXPECT(fileapi::kBrowserRootCount == 5);
-    bool hasCamera = false, hasPictures = false, hasRoot = false;
+    // 0.8.11: + Music (a raiz de ÁUDIO do dono)
+    EXPECT(fileapi::kBrowserRootCount == 6);
+    bool hasCamera = false, hasPictures = false, hasRoot = false,
+         hasMusic = false;
     for (int i = 0; i < fileapi::kBrowserRootCount; ++i) {
         const std::string p = fileapi::kBrowserRoots[i].path;
         hasCamera = hasCamera || p == "/storage/emulated/0/DCIM/Camera";
         hasPictures = hasPictures || p == "/storage/emulated/0/Pictures";
+        hasMusic = hasMusic || p == "/storage/emulated/0/Music";
         hasRoot = hasRoot || p == fileapi::kExternalRoot;
         EXPECT(fileapi::kBrowserRoots[i].label != nullptr);
         EXPECT(!p.empty() && p[0] == '/');
     }
     EXPECT(hasCamera);
     EXPECT(hasPictures);
+    EXPECT(hasMusic);   // 0.8.11: o import de áudio abre AQUI por omissão
     EXPECT(hasRoot);
 }
 
@@ -224,23 +228,27 @@ TEST(browser_overlay_raizes_subir_e_entradas) {
     const f32 upY = rootsY + 52.0f;
     const f32 listTop = upY + 52.0f;
 
-    // raiz 3 (Docs) → pick 3; raiz Camera (4) → pick 4
-    const f32 rootW = (w - 2.0f * kPad - 4.0f * 6.0f) / 5.0f;
+    // raiz 3 (Docs) → pick 3; raiz Camera (4) → pick 4; Music (6) → 6
+    // 0.8.11: 6 raízes — a largura reparte-se por TODAS
+    const f32 rootW = (w - 2.0f * kPad - 5.0f * 6.0f) / 6.0f;
     EXPECT(tap(x + kPad + 2.0f * (rootW + 6.0f) + rootW * 0.5f,
                rootsY + 20.0f) == 3);
     st.fileBrowser = true;
     EXPECT(tap(x + kPad + 3.0f * (rootW + 6.0f) + rootW * 0.5f,
                rootsY + 20.0f) == 4);
+    st.fileBrowser = true;
+    EXPECT(tap(x + kPad + 5.0f * (rootW + 6.0f) + rootW * 0.5f,
+               rootsY + 20.0f) == 6);   // Music: a raiz do áudio
 
-    // subir → 6
+    // subir → 7 (DEPOIS das 6 raízes — o fixo 6 colidia com o Music)
     st.fileBrowser = true;
-    EXPECT(tap(x + w * 0.5f, upY + 22.0f) == 6);
+    EXPECT(tap(x + w * 0.5f, upY + 22.0f) == 7);
 
-    // entrada 0 (diretoria adir) → 7; entrada 2 (foto.png) → 9
+    // entrada 0 (diretoria adir) → 8; entrada 2 (foto.png) → 10
     st.fileBrowser = true;
-    EXPECT(tap(x + w * 0.5f, listTop + 0.0f * 48.0f + 24.0f) == 7);
+    EXPECT(tap(x + w * 0.5f, listTop + 0.0f * 48.0f + 24.0f) == 8);
     st.fileBrowser = true;
-    EXPECT(tap(x + w * 0.5f, listTop + 2.0f * 48.0f + 24.0f) == 9);
+    EXPECT(tap(x + w * 0.5f, listTop + 2.0f * 48.0f + 24.0f) == 10);
 
     // fora fecha SEM escolha
     st.fileBrowser = true;

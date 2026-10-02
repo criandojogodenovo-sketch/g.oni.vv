@@ -203,6 +203,14 @@ add_executable(test_core
         test_wiring089.cpp
         # 0.8.10: formatos próprios + 500 MB + archives + migração + identidade
         test_wiring010.cpp
+        # 0.8.11: ÁUDIO — .gi (ADPCM round-trip/WAV/OGG/MP3 erros),
+        # misturador (vozes/loop/pitch/posicional/master), PROBE harness
+        # (fake backends: falha→fallback, ok→AAudio), workspace (fake host:
+        # import/gravar/preview/apagar/atribuir), serializer/preset/store,
+        # FileApi kinds, toolbar exclusiva. Os casos do CAMINHO DO DEVICE
+        # (import e2e, gravação sintética, boot do backend) estão no TU do
+        # test_wiring087 (único que inclui platform/main.cpp) — secção lá.
+        test_wiring011.cpp
         ${CORE_DIR}/ui/Icons.cpp
         # 0.7.7: câmara de cena (componente/invariante + gizmo do frustum)
         ${CORE_DIR}/core/CameraUtil.cpp
@@ -229,7 +237,16 @@ add_executable(test_core
         # browserImportFile/applyImported/boot INIT_WINDOW/frame); estes
         # TUs deixa de ser device-only e passam a ser cobertos no hospedeiro
         ${CORE_DIR}/platform/EglContext.cpp
-        ${CORE_DIR}/render/Grid.cpp)
+        ${CORE_DIR}/render/Grid.cpp
+        # 0.8.11: ÁUDIO — o misturador/contentor .gi/codecs + o backend
+        # COMUM (AudioOut.cpp: probe harness + currentMixFn; as fábricas
+        # stub existem SÓ no host — o TU do device não compila aqui) + o
+        # workspace de desenho puro
+        ${CORE_DIR}/assets/GiFormat.cpp
+        ${CORE_DIR}/assets/AudioCodecs.cpp
+        ${CORE_DIR}/core/AudioEngine.cpp
+        ${CORE_DIR}/platform/AudioOut.cpp
+        ${CORE_DIR}/ui/AudioWorkspace.cpp)
 
 
 target_include_directories(test_core PRIVATE
@@ -237,6 +254,7 @@ target_include_directories(test_core PRIVATE
         # no-ops do hospedeiro (a build Android usa o NDK, sem estes caminhos)
         ${CMAKE_CURRENT_LIST_DIR}/stub
         ${CORE_DIR}
+        ${CORE_DIR}/vendor
         ${CORE_DIR}/vendor/etcpak
         ${CORE_DIR}/vendor/astc-encoder)
 
@@ -274,6 +292,10 @@ set_source_files_properties(
         ${CORE_DIR}/vendor/astc-encoder/astcenc_weight_align.cpp
         ${CORE_DIR}/vendor/astc-encoder/astcenc_weight_quant_xfer_tables.cpp
         PROPERTIES COMPILE_OPTIONS "-w;-fsigned-char")
+
+set_source_files_properties(
+        ${CORE_DIR}/assets/AudioCodecs.cpp
+        PROPERTIES COMPILE_OPTIONS "-w")   # 0.8.11: vendors (stb_vorbis/minimp3) sem warnings
 
 # fixtures PNG p/ test_assets (caminho absoluto injetado — ctest roda no
 # diretório de build, o caminho relativo não serviria) + fonte real p/ os

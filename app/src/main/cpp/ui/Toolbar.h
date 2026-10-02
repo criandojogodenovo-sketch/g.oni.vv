@@ -58,7 +58,9 @@ struct GizmoModeState {
 // Menu=1 / Play=2 / Pause=3 herdaram os números da toolbar antiga (Menu=1,
 // Play=2, Settings=3 — o Settings deixou de ser botão próprio e o 3 passou
 // ao Pause). 3D/UI = 11/12, gizmo = 7/8/9/10 (inalterados), inspector = 13,
-// cena = 14.
+// cena = 14. 0.8.11: ÁUDIO = 15 (a 1ª versão usava 13 — COLIDIA com o
+// inspector: tocar no G5 abria o modo ÁUDIO e vice-versa; apanhado na
+// revisão antes do push).
 constexpr u64 kTbMenuId      = 1;
 constexpr u64 kTbPlayId      = 2;
 constexpr u64 kTbPauseId     = 3;
@@ -68,13 +70,14 @@ constexpr u64 kMode3dId      = 11;
 constexpr u64 kModeUiId      = 12;
 constexpr u64 kTbInspectId   = 13;
 constexpr u64 kTbCenaId      = 14;
+constexpr u64 kModeAudioId   = 15;   // 0.8.11: segmented 3D|UI|ÁUDIO
 
 // ---- layout PURO (fonte única — desenho e testes) ----------------------------
 struct Layout {
     UiRect bar{};                 // a faixa toda (safe::toolbarRect)
     UiRect menu{}, cena{};        // G1 (texto + caret)
     UiRect pause{}, play{};       // G2 (ícones)
-    UiRect mode3d{}, modeUi{};    // G3 (segmented, texto)
+    UiRect mode3d{}, modeUi{}, modeAudio{};   // G3 (segmented, texto; 0.8.11: +ÁUDIO)
     UiRect giz[4]{};              // G4 (ícones; válido só com g4Visible)
     bool   g4Visible = false;     // o grupo existe neste layout?
     UiRect inspector{};           // G5 (ícone, ancorado à direita)

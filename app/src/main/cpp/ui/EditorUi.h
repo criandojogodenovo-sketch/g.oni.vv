@@ -79,6 +79,7 @@ constexpr f32 kPanelW = safe::kPanelW;
 struct AssetCatalog {
     std::vector<std::string> meshes;     // nomes de ficheiros ("quad.obj")
     std::vector<std::string> textures;   // nomes de ficheiros ("wood.png")
+    std::vector<std::string> audio;      // 0.8.11: clips .gi ("audio/x.gi")
 };
 
 struct EditorState {
@@ -103,6 +104,7 @@ struct EditorState {
 
     // ---- 0.7.0 — UI CRIÁVEL + GESTÃO DE TICs ---------------------------------
     bool   uiMode = false;          // separador "3D | UI": true = viewport 2D
+    bool   audioMode = false;      // 0.8.11: separador "3D | UI | ÁUDIO"
                                     // dedicado à UI (editor WYSIWYG)
     i32    selElement = -1;         // elemento selecionado no canvas do TIC
                                     // selecionado (−1 = nenhum)
@@ -349,9 +351,12 @@ UiTexPickOutcome applyUiTexPick(Scene& scene, Handle tic, i32 element, int pick,
 // F5.2: 2 = "Ver logs" (viewer in-app), 3 = "Acesso a ficheiros…" (abre as
 // definições do sistema); storageMode (não-nulo) desenha a linha
 // "armazenamento: …" com o modo ativo.
+// 0.8.10: 4 = fonte manter/largar, 5 = reconverter assets.
+// 0.8.11: 6 = "diagnostico audio (probe)" (50 ciclos + tabela no log),
+// 7 = "volume geral: NN%" (cicla 0→25→50→75→100; master do misturador).
 int drawSettingsMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                      EditorState& st, const char* storageMode = "",
-                     bool keepSource = true);
+                     bool keepSource = true, f32 audioMaster = 1.0f);
 
 // F5.2: DIÁLOGO All Files Access — 0 nada, 1 = "Permitir" (o main lança o
 // intent das definições), 2 = "Cancelar". Fecha com toque fora.

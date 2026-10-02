@@ -48,6 +48,9 @@ ComponentStore::ComponentStore(Scene* owner) : scene_(owner) {
     registry_.add("Skeleton", [](ComponentStore& s, Handle h) {   // 0.8.2
         return s.add<SkeletonComp>(h) != nullptr;
     });
+    registry_.add("AudioPlayer", [](ComponentStore& s, Handle h) {   // 0.8.11
+        return s.add<AudioPlayer>(h) != nullptr;
+    });
 }
 
 void ComponentStore::removeAll(Handle h) {
@@ -58,7 +61,8 @@ void ComponentStore::removeAll(Handle h) {
     touchControls_.remove(h);
     uiCanvases_.remove(h);
     cameras_.remove(h);   // 0.7.7
-    animators_.remove(h);   // 0.8.0
+    animators_.remove(h);
+    audioPlayers_.remove(h);   // 0.8.11   // 0.8.0
     skeletons_.remove(h);   // 0.8.2
 }
 

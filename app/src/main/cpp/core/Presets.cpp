@@ -1,4 +1,5 @@
 #include "core/Presets.h"
+#include "components/AudioPlayer.h"
 #include "components/BodyComp.h"
 #include "components/InputMap.h"
 #include "components/MeshRenderer.h"
@@ -16,6 +17,7 @@ const char* presetName(PresetKind kind) {
         case PresetKind::StaticBody3D:    return "StaticBody3D";
         case PresetKind::RigidBody3D:     return "RigidBody3D";
         case PresetKind::Mesh:            return "Mesh";   // 0.8.0 (F7)
+        case PresetKind::Audio:           return "Audio";  // 0.8.11
         default:                          return "Tic";
     }
 }
@@ -51,6 +53,8 @@ Handle createTicFromPreset(Scene& scene, PresetKind kind,
 
     // corpos com cápsula assentam a base no y=0 (raio 0.3 + meia-altura 0.25);
     // 0.8.0: o TIC "Mesh" (esfera default r=0.5) assenta igual — r 0.5
+    // 0.8.11: o TIC "Audio" assenta como os corpos (é UM objeto do mundo —
+    // só sem mesh visível; o glifo marca o sítio)
     const f32 baseY = (kind == PresetKind::PlayerBody3D ||
                        kind == PresetKind::CharacterBody3D ||
                        kind == PresetKind::Mesh) ? 0.55f : 0.5f;
@@ -58,6 +62,14 @@ Handle createTicFromPreset(Scene& scene, PresetKind kind,
     if (tr) {
         tr->pos = Vec3{0.0f, baseY, 0.0f};
         tr->updateWorld();
+    }
+
+    // 0.8.11: o preset ÁUDIO é ESTRUTURA — Transform + AudioPlayer, SEM
+    // MeshRenderer (o glifo de altifalante marca a posição no editor; o
+    // clip atribui-se no Inspector; autoplay/loop/volume/pitch idem)
+    if (kind == PresetKind::Audio) {
+        tic->addComponent<AudioPlayer>();
+        return h;
     }
 
     MeshRenderer* mr = tic->addComponent<MeshRenderer>();

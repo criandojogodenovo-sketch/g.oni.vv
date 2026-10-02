@@ -8,11 +8,21 @@
 #include <atomic>   // 0.8.10: progresso do import entre threads
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>   // 0.8.11: atof do settings.goni
+#include <cstring>   // 0.8.11: strcmp do probe
+#include <ctime>   // 0.8.11: nome do clip gravado (rec-<unix>.gi)
+#include <map>   // 0.8.11: cache de clipes .gi
 #include <memory>
+#include <mutex>   // 0.8.11: PCM da gravação entre worker e frame
 #include <thread>   // 0.8.10: import job fora do frame loop
 
 #include "assets/AssetConverter.h"   // 0.8.10: import streaming + formatos próprios
 #include "assets/ZipExtract.h"       // 0.8.10: archives (extrair ≠ importar)
+#include "assets/GiFormat.h"         // 0.8.11: clips .gi (ADPCM/OGG/MP3)
+#include "components/AudioPlayer.h"  // 0.8.11: o TIC de áudio
+#include "core/AudioEngine.h"        // 0.8.11: misturador
+#include "platform/AudioOut.h"       // 0.8.11: backend AAudio/AudioTrack
+#include "ui/AudioWorkspace.h"      // 0.8.11: o workspace modo ÁUDIO
 #include "assets/GOwnFormats.h"       // 0.8.10: .gmesh/.gtext/.gm
 #include "assets/ObjExporter.h"
 #include "assets/TextureCache.h"
@@ -179,25 +189,11 @@ char g_selectedName[40] = "";   // nome do TIC p/ o ficheiro de export
 // 0.8.10 — SETTING "largar a fonte": false = source/<nome> é REMOVIDO
 // depois do import converter com sucesso (o projeto fica só com assets/).
 // Persistido por projeto em settings.goni ("keepSource=0/1").
+// 0.8.11: + "audioMaster=<0..1>" (o volume geral — as DEFINIÇÕES vivem
+// junto do áudio, mais abaixo, porque lêem o misturador global)
 bool g_keepSource = true;
-
-void loadProjectSettings() {
-    g_keepSource = true;
-    if (!g_storage) {
-        return;
-    }
-    std::string text;
-    if (g_storage->readText("settings.goni", text)) {
-        g_keepSource = text.find("keepSource=0") == std::string::npos;
-    }
-}
-void saveProjectSettings() {
-    if (!g_storage) {
-        return;
-    }
-    g_storage->writeText("settings.goni",
-                         g_keepSource ? "keepSource=1\n" : "keepSource=0\n");
-}
+void loadProjectSettings();   // definido após o bloco de áudio (usa o mixer)
+void saveProjectSettings();
 
 // 0.6.8: estado do gesto de orbit ENTRE frames — extraído para editor::
 // (OrbitState puro, afervel no CI; a lógica vive em EditorUi.cpp)
@@ -828,6 +824,678 @@ void browserOpen(const std::string& path) {
                g_browser.failed ? ", opendir FALHOU" : "");
 }
 
+// ---- 0.8.11: ÁUDIO — misturador + backend + cache de clipes -----------------
+// O backend (AAudio no device; AudioTrack se o probe mandar; stub no CI)
+// puxa o MISTURADOR puro no callback — a engine nunca fala com o hardware.
+AudioEngine g_audioEngine;
+std::unique_ptr<audioout::Backend> g_audioOut;
+bool g_audioBackendReady = false;
+// cache de clipes decodificados (1 ref .gi → 1 GiClip)
+std::map<std::string, std::unique_ptr<GiClip>> g_audioClips;
+// catálogo de áudio p/ o Inspector/workspace (refresh ao abrir)
+std::vector<std::string> g_audioCatalog;
+// 0.8.11: o workspace ÁUDIO (estado + preview do clip selecionado)
+editor::AudioWorkspaceState g_audioWs;
+i32 g_audioPreviewVoice = -1;
+std::string g_audioPreviewClip;
+// MASTER VOLUME (Settings — persistido em settings.goni como audioMaster)
+f32 g_audioMaster = 1.0f;
+void audioRecTick();
+void audioPreviewTick();
+void audioRecordToggle();
+
+// ---- GRAVAÇÃO: o estado partilhado worker↔frame (a definição do worker
+// vive em baixo — DEVICE: AudioRecord JNI; HOST: mic sintético) ---------
+struct AudioRec {
+    std::thread th;
+    std::atomic<bool> on{false};
+    std::atomic<int> secs{0};
+    std::atomic<f32> level{0.0f};
+    std::mutex mx;
+    std::vector<i16> pcm;
+    u32 sampleRate = 44100;
+    std::chrono::steady_clock::time_point t0;
+};
+AudioRec g_audioRec;
+#ifdef __ANDROID__
+JavaVM* g_audioVm = nullptr;   // android_main registra (glue activity->vm)
+#endif
+
+const GiClip* audioClipFor(const std::string& rel) {
+    if (rel.empty() || !g_storage) {
+        return nullptr;
+    }
+    const auto it = g_audioClips.find(rel);
+    if (it != g_audioClips.end()) {
+        return it->second.get();   // hit (decodificado 1×)
+    }
+    std::vector<u8> bytes;
+    if (!g_storage->readBytes(rel, bytes) || bytes.empty()) {
+        return nullptr;
+    }
+    auto clip = std::make_unique<GiClip>();
+    std::string err;
+    if (!readGi(bytes.data(), bytes.size(), *clip, err)) {
+        elog::error("audio: %s invalido — %s", rel.c_str(), err.c_str());
+        return nullptr;
+    }
+    // captura os valores ANTES do move (a 1ª versão lia o unique_ptr já
+    // movido — o log saía com zeros)
+    const u16 ch = clip->channels;
+    const u32 sr = clip->sampleRate;
+    const f32 dur = clip->duration();
+    const GiCodec codec = clip->codec;
+    const GiClip* raw = clip.get();
+    g_audioClips.emplace(rel, std::move(clip));
+    elog::info("audio: load %s %uch %uHz %.2fs codec=%s", rel.c_str(), ch,
+               sr, dur, giCodecName(codec));
+    return raw;
+}
+
+void refreshAudioCatalog() {
+    g_audioCatalog.clear();
+    if (g_storage) {
+        std::vector<std::string> files;
+        if (g_storage->listDir("audio", files)) {
+            for (const std::string& f : files) {
+                if (f.size() > 3 && f.compare(f.size() - 3, 3, ".gi") == 0) {
+                    g_audioCatalog.push_back(std::string("audio/") + f);
+                }
+            }
+        }
+    }
+    // o catálogo do INSPECTOR (g_catalog.audio) segue o mesmo refresh — o
+    // seletor de clips (assetMenu 5) lê dali
+    g_catalog.audio = g_audioCatalog;
+}
+
+// settings.goni do projeto: fonte manter/largar + VOLUME GERAL (0.8.11).
+// Corre no post-load (a 0.8.10 definia isto mas NUNCA o LIA — o setting
+// só vivia na RAM; agora o boot do projeto aplica)
+void loadProjectSettings() {
+    g_keepSource = true;
+    g_audioMaster = 1.0f;
+    if (g_storage) {
+        std::string text;
+        if (g_storage->readText("settings.goni", text)) {
+            g_keepSource = text.find("keepSource=0") == std::string::npos;
+            const size_t p = text.find("audioMaster=");
+            if (p != std::string::npos) {
+                const f32 v = static_cast<f32>(std::atof(text.c_str() + p + 12));
+                if (v >= 0.0f && v <= 1.0f) {
+                    g_audioMaster = v;
+                }
+            }
+        }
+    }
+    g_audioEngine.master = g_audioMaster;
+}
+void saveProjectSettings() {
+    if (!g_storage) {
+        return;
+    }
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "keepSource=%s\naudioMaster=%.2f\n",
+                  g_keepSource ? "1" : "0", g_audioMaster);
+    g_storage->writeText("settings.goni", buf);
+}
+
+// ---- preview do workspace (o MESMO misturador; 1 voz, sem loop) --------
+void audioPreviewToggle() {
+    if (g_audioPreviewVoice >= 0) {
+        g_audioEngine.stop(g_audioPreviewVoice);
+        g_audioPreviewVoice = -1;
+        g_audioPreviewClip.clear();
+        return;
+    }
+    if (g_audioWs.selected >= g_audioCatalog.size()) {
+        showToast("selecione um clip na lista");
+        return;
+    }
+    const std::string& rel = g_audioCatalog[g_audioWs.selected];
+    const GiClip* clip = audioClipFor(rel);
+    if (!clip) {
+        showToast("clip nao carrega (engine.log)");
+        return;
+    }
+    g_audioPreviewVoice = g_audioEngine.play(clip, false, 1.0f, 1.0f);
+    g_audioPreviewClip = rel;
+    elog::info("audio: preview '%s' (%.2fs)", rel.c_str(), clip->duration());
+}
+void audioPreviewStop() {
+    if (g_audioPreviewVoice >= 0) {
+        g_audioEngine.stop(g_audioPreviewVoice);
+        g_audioPreviewVoice = -1;
+        g_audioPreviewClip.clear();
+    }
+}
+
+// o preview morreu sozinho (fim do clip)? limpa o estado p/ o botão voltar
+// a dizer "Play" — chamado no início do frame
+void audioPreviewTick() {
+    if (g_audioPreviewVoice >= 0 &&
+        !g_audioEngine.playing(g_audioPreviewVoice)) {
+        g_audioPreviewVoice = -1;
+        g_audioPreviewClip.clear();
+    }
+}
+
+// picos em cache por ref (a waveform não recalcula por frame)
+std::vector<f32> g_emptyPeaks;
+const std::vector<f32>& audioPeaksOf(const std::string& rel) {
+    static std::string lastRel;
+    static std::vector<f32> lastPeaks;
+    const GiClip* clip = audioClipFor(rel);
+    if (!clip) {
+        return g_emptyPeaks;
+    }
+    if (lastRel != rel || lastPeaks.empty()) {
+        clip->peaks(160, lastPeaks);
+        lastRel = rel;
+    }
+    return lastPeaks;
+}
+
+// o HOST do workspace (liga o desenho puro ao device)
+editor::AudioWorkspaceHost makeAudioWorkspaceHost() {
+    editor::AudioWorkspaceHost h;
+    h.onImport = []() {
+        // abre o navegador na raiz Music (o áudio do dono vive aí)
+        browserOpen("/storage/emulated/0/Music");
+        g_editor.fileBrowser = true;
+        g_editor.audioMode = true;   // volta ao workspace ao fechar
+    };
+    h.onRecord = []() { audioRecordToggle(); };
+    h.onPreviewToggle = []() { audioPreviewToggle(); };
+    h.onPreviewStop = []() { audioPreviewStop(); };
+    h.onDelete = [](const std::string& rel) {
+        if (!g_storage) {
+            return;
+        }
+        if (g_storage->remove(rel)) {
+            if (g_audioPreviewClip == rel) {
+                audioPreviewStop();
+            }
+            g_audioClips.erase(rel);
+            refreshAudioCatalog();
+            if (g_audioWs.selected >= g_audioCatalog.size() &&
+                !g_audioCatalog.empty()) {
+                g_audioWs.selected =
+                    static_cast<u32>(g_audioCatalog.size()) - 1;
+            }
+            elog::info("audio: clip '%s' apagado", rel.c_str());
+            showToast("clip apagado");
+        }
+    };
+    h.onAssign = []() {
+        Tic* tsel = g_scene.get(g_editor.selected);
+        AudioPlayer* au = tsel ? tsel->getComponent<AudioPlayer>() : nullptr;
+        if (!au) {
+            showToast("selecione um TIC de Audio (Hierarchy)");
+            return;
+        }
+        if (g_audioWs.selected >= g_audioCatalog.size()) {
+            showToast("selecione um clip na lista");
+            return;
+        }
+        au->clipPath = g_audioCatalog[g_audioWs.selected];
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "clip atribuido a '%s'",
+                      tsel->name.c_str());
+        showToast(msg);
+        elog::info("audio: clip '%s' atribuido ao TIC '%s'",
+                   au->clipPath.c_str(), tsel->name.c_str());
+    };
+    h.onRename = []() {
+        // teclado in-app (propósito 7 — o MESMO do renomear de TIC; o
+        // commit vive no frame(): precisa do storage, que é do main)
+        if (g_audioWs.selected < g_audioCatalog.size()) {
+            const std::string& rel = g_audioCatalog[g_audioWs.selected];
+            const size_t slash = rel.rfind('/');
+            const size_t dot = rel.rfind('.');
+            editor::openTextInput(
+                g_editor, 7, Handle{}, -1,
+                rel.substr(slash + 1, dot - slash - 1).c_str());
+        }
+    };
+    h.codecOf = [](const std::string& rel) -> const char* {
+        const GiClip* c = audioClipFor(rel);
+        return c ? giCodecName(c->codec) : "?";
+    };
+    h.durationOf = [](const std::string& rel) -> f32 {
+        const GiClip* c = audioClipFor(rel);
+        return c ? c->duration() : 0.0f;
+    };
+    h.peaksOf = &audioPeaksOf;
+    h.previewing = g_audioPreviewVoice >= 0;
+    h.previewPos = []() -> f32 {
+        return g_audioEngine.voiceProgress(g_audioPreviewVoice);
+    };
+    h.recording = g_audioRec.on.load();
+    h.recordSecs = g_audioRec.secs.load();
+    h.recordLevel = g_audioRec.level.load();
+    return h;
+}
+
+// arranca o backend (boot): AAudio; se recusar → AudioTrack (o fallback
+// DOCUMENTADO — a mesma interface, o misturador nem sabe)
+void audioBackendBoot() {
+    g_audioOut.reset(audioout::createAAudio());
+    g_audioBackendReady = false;
+    if (g_audioOut && g_audioOut->start(44100, 2)) {
+        g_audioBackendReady = true;
+        elog::info("audio: backend %s ATIVO (44100 Hz stereo, %llu frames "
+                   "out no 1º s de vida)",
+                   g_audioOut->name(), 0ull);
+        return;
+    }
+    elog::warn("audio: AAudio recusou — FALLBACK AudioTrack (documentado)");
+    g_audioOut.reset(audioout::createAudioTrack());
+    if (g_audioOut && g_audioOut->start(44100, 2)) {
+        g_audioBackendReady = true;
+        elog::info("audio: backend AudioTrack ATIVO (fallback)");
+        return;
+    }
+    elog::error("audio: NENHUM backend ligou (device sem áudio?)");
+    g_audioOut.reset();
+}
+
+// troca o backend vivo (probe mandou fallback): para o atual, cria o novo
+bool audioBackendSwitch(bool toAudioTrack) {
+    if (!g_audioOut) {
+        return false;
+    }
+    const char* from = g_audioOut->name();
+    g_audioOut->stop();
+    g_audioOut.reset(toAudioTrack ? audioout::createAudioTrack()
+                                  : audioout::createAAudio());
+    if (g_audioOut && g_audioOut->start(44100, 2)) {
+        g_audioBackendReady = true;
+        elog::warn("audio: TROCA de backend %s -> %s (probe)", from,
+                   g_audioOut->name());
+        return true;
+    }
+    elog::error("audio: troca p/ %s FALHOU — sem som (o misturador segue)",
+                toAudioTrack ? "AudioTrack" : "AAudio");
+    g_audioOut.reset();
+    g_audioBackendReady = false;
+    return false;
+}
+
+// ---- PROBE DE ESTABILIDADE (Settings → diagnóstico): 50× start/stop +
+// 10× pause/resume contra um backend FRESCO (nunca o vivo — o probe mata
+// o stream de propósito); a tabela vai ao engine.log e a DECISÃO
+// (shouldFallback) troca o backend vivo sozinha ---------------------------
+void audioProbeRun() {
+    elog::info("audio: probe a correr (50 ciclos + 10 pause/resume)...");
+    std::unique_ptr<audioout::Backend> probe(audioout::createAAudio());
+    const audioout::ProbeResult r =
+        audioout::runProbe(probe.get(), 50, 10, 0);
+    probe->stop();
+    const std::string table = audioout::probeTable(r, "aaudio");
+    elog::info("%s", table.c_str());
+    if (r.shouldFallback() && g_audioOut && g_audioOut->ready() &&
+        std::strcmp(g_audioOut->name(), "aaudio") == 0) {
+        audioBackendSwitch(true);
+        showToast("audio: AAudio instavel — AudioTrack ATIVO");
+    } else if (!r.shouldFallback()) {
+        showToast("audio: AAudio estavel (probe ok)");
+    } else {
+        showToast("audio: probe falhou — ver engine.log");
+    }
+}
+
+// play/stop de um AudioPlayer pelo MISTURADOR (o caminho ÚNICO: Play,
+// preview, tyker play())
+void audioPlayerStart(Tic& t) {
+    AudioPlayer* au = t.getComponent<AudioPlayer>();
+    if (!au || !au->hasClip()) {
+        return;
+    }
+    const GiClip* clip = audioClipFor(au->clipPath);
+    if (!clip) {
+        showToast("clip de audio nao encontrado");
+        return;
+    }
+    // posicional: a posição VIVA do TIC (o listener é a câmara)
+    Vec3 pos{0.0f, 0.0f, 0.0f};
+    if (const Transform3D* tr = t.getComponent<Transform3D>()) {
+        pos = tr->pos;
+    }
+    au->voiceId = g_audioEngine.play(clip, au->loop, au->volume, au->pitch);
+    if (au->voiceId >= 0 && au->posicional) {
+        g_audioEngine.setPosicional(au->voiceId, true, pos, au->raioInterno,
+                                    au->raioExterno);
+    }
+    elog::info("audio: play '%s' no TIC '%s' (vol %.2f pitch %.2f%s)",
+               au->clipPath.c_str(), t.name.c_str(), au->volume, au->pitch,
+               au->posicional ? " posicional" : "");
+}
+void audioPlayerStop(Tic& t) {
+    if (AudioPlayer* au = t.getComponent<AudioPlayer>()) {
+        if (au->voiceId >= 0) {
+            g_audioEngine.stop(au->voiceId);
+            au->voiceId = -1;
+        }
+    }
+}
+
+// o PREVIEW do INSPECTOR (o botão "ouvir" do AudioPlayer): o Inspector
+// (puro) só faz toggle do flag `previewing`; AQUI o main mapeia o flag ao
+// misturador — o mesmo caminho do Play
+void audioPreviewTick(Tic& t) {
+    AudioPlayer* au = t.getComponent<AudioPlayer>();
+    if (!au) {
+        return;
+    }
+    if (au->previewing && au->voiceId < 0) {
+        const GiClip* clip = audioClipFor(au->clipPath);
+        if (!clip) {
+            au->previewing = false;
+            showToast("clip de audio nao encontrado");
+            return;
+        }
+        au->voiceId = g_audioEngine.play(clip, au->loop, au->volume, au->pitch);
+        if (au->voiceId >= 0 && au->posicional) {
+            if (const Transform3D* tr = t.getComponent<Transform3D>()) {
+                g_audioEngine.setPosicional(au->voiceId, true, tr->pos,
+                                            au->raioInterno, au->raioExterno);
+            }
+        }
+        elog::info("audio: preview no TIC '%s' ('%s')", t.name.c_str(),
+                   au->clipPath.c_str());
+    } else if (!au->previewing && au->voiceId >= 0) {
+        g_audioEngine.stop(au->voiceId);
+        au->voiceId = -1;
+    } else if (au->previewing && au->voiceId >= 0 &&
+               !g_audioEngine.playing(au->voiceId)) {
+        // fim natural do clip (sem loop): o botão volta a "ouvir"
+        au->voiceId = -1;
+        au->previewing = false;
+    }
+}
+
+// ENTRAR em Play: autoplay liga (a regra do componente); SAIR: tudo para
+void audioEnterPlay() {
+    g_scene.forEachActive([&](Tic& t) {
+        AudioPlayer* au = t.getComponent<AudioPlayer>();
+        if (au && au->autoplay) {
+            au->previewing = false;   // o Play manda; preview não
+            audioPlayerStart(t);
+        }
+    });
+}
+void audioLeavePlay() {
+    g_audioEngine.stopAll();
+    g_scene.forEachActive([&](Tic& t) {
+        if (AudioPlayer* au = t.getComponent<AudioPlayer>()) {
+            au->voiceId = -1;
+        }
+    });
+}
+
+// listener = olho da câmara ATIVA (posicional atenua contra isto)
+void audioUpdateListener() {
+    Tic* camT = g_editor.playMode ? findActiveCameraTic(g_scene) : nullptr;
+    if (camT) {
+        if (const Transform3D* tr = camT->getComponent<Transform3D>()) {
+            g_audioEngine.setListener(tr->pos);
+        }
+    } else {
+        g_audioEngine.setListener(g_camera.eye());
+    }
+    // vozes posicionais seguem a POS VIVA dos TICs
+    g_scene.forEachActive([&](Tic& t) {
+        AudioPlayer* au = t.getComponent<AudioPlayer>();
+        if (au && au->voiceId >= 0 && au->posicional) {
+            if (const Transform3D* tr = t.getComponent<Transform3D>()) {
+                g_audioEngine.setPosicional(au->voiceId, true, tr->pos,
+                                            au->raioInterno, au->raioExterno);
+            }
+        }
+    });
+}
+
+// ---- 0.8.11: GRAVAÇÃO (mic → .gi ADPCM) -------------------------------------
+// DEVICE: AudioRecord (JNI) numa thread própria — PCM16 mono 44100 lido por
+// read(short[]) blocking; STOP → writeGi ADPCM → audio/rec-<unix>.gi.
+// HOST/CI: um "mic" SINTÉTICO (senoide 440 Hz) pela MESMA máquina de
+// estados (thread + mutex + t0 + level) — o teste afera o wiring inteiro
+// sem hardware (o caminho JNI compila só no build Android, que o CI
+// assembleRelease verifica; o padrão do StorageBridge). O guard `on` mata
+// o worker; o PCM viaja sob mutex.
+#ifdef __ANDROID__
+// worker do DEVICE: AudioRecord real (mic). A thread NASCE desanexada — o
+// attach usa a VM registada pelo audioout::setVm (android_main corre antes
+// de qualquer gravação ser possível). Falha de JNI = worker sai com log;
+// o toggle devolve o estado limpo ao utilizador.
+static void audioRecWorker(AudioRec& rec) {
+    JNIEnv* env = nullptr;
+    jint rc = 0;
+    if (!g_audioVm) {
+        elog::error("audio: gravacao sem VM registada");
+        return;
+    }
+    rc = g_audioVm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+    if (rc == JNI_EDETACHED) {
+        JavaVMAttachArgs args {};
+        args.version = JNI_VERSION_1_6;
+        args.name    = "goni-rec";
+        rc = g_audioVm->AttachCurrentThread(&env, &args);
+    }
+    if (rc != JNI_OK || !env) {
+        elog::error("audio: gravacao sem JNIEnv (rc=%d)", static_cast<int>(rc));
+        return;
+    }
+    // getMinBufferSize(44100, CHANNEL_IN_MONO=16, ENCODING_PCM_16BIT=2)
+    jclass arCls = env->FindClass("android/media/AudioRecord");
+    if (!arCls || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        elog::error("audio: AudioRecord nao resolvida (RECORD_AUDIO concedida?)");
+        return;
+    }
+    jmethodID getMin = env->GetStaticMethodID(
+        arCls, "getMinBufferSize", "(III)I");
+    jmethodID ctor = env->GetMethodID(
+        arCls, "<init>", "(IIIII)V");
+    jmethodID startRec = env->GetMethodID(arCls, "startRecording", "()V");
+    jmethodID readM = env->GetMethodID(arCls, "read", "([SII)I");
+    jmethodID stopM = env->GetMethodID(arCls, "stop", "()V");
+    jmethodID relM = env->GetMethodID(arCls, "release", "()V");
+    if (!getMin || !ctor || !startRec || !readM || !stopM || !relM) {
+        env->ExceptionClear();
+        elog::error("audio: metodos do AudioRecord nao achados");
+        return;
+    }
+    const jint minBuf = env->CallStaticIntMethod(
+        arCls, getMin, static_cast<jint>(rec.sampleRate),
+        16 /*CHANNEL_IN_MONO*/, 2 /*ENCODING_PCM_16BIT*/);
+    if (env->ExceptionCheck() || minBuf <= 0) {
+        env->ExceptionClear();
+        elog::error("audio: getMinBufferSize devolveu %d", static_cast<int>(minBuf));
+        return;
+    }
+    jobject rec_ = env->NewObject(arCls, ctor,
+                                  1 /*MIC*/, static_cast<jint>(rec.sampleRate),
+                                  16 /*MONO*/, 2 /*PCM16*/,
+                                  minBuf * 4);
+    if (env->ExceptionCheck() || !rec_) {
+        env->ExceptionClear();
+        elog::error("audio: NewObject AudioRecord FALHOU (permissao?)");
+        return;
+    }
+    env->CallVoidMethod(rec_, startRec);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        elog::error("audio: startRecording FALHOU");
+        env->CallVoidMethod(rec_, relM);
+        return;
+    }
+    const jint kChunk = 2048;
+    jshortArray arr = env->NewShortArray(kChunk);
+    while (rec.on.load()) {
+        const jint n = env->CallIntMethod(rec_, readM, arr, 0, kChunk);
+        if (env->ExceptionCheck() || n < 0) {
+            env->ExceptionClear();
+            elog::error("audio: AudioRecord.read FALHOU (%d)", static_cast<int>(n));
+            break;
+        }
+        if (n > 0) {
+            jshort tmp[2048];
+            env->GetShortArrayRegion(arr, 0, n, tmp);
+            i16 peak = 0;
+            {
+                const std::lock_guard<std::mutex> lk(rec.mx);
+                for (jint i = 0; i < n; ++i) {
+                    rec.pcm.push_back(tmp[i]);
+                    if (tmp[i] > peak) {
+                        peak = tmp[i];
+                    }
+                }
+            }
+            rec.level.store(static_cast<f32>(peak) / 32768.0f);
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    env->CallVoidMethod(rec_, stopM);
+    env->CallVoidMethod(rec_, relM);
+    env->ExceptionClear();
+    env->DeleteLocalRef(arr);
+    env->DeleteLocalRef(rec_);
+}
+#else
+// worker do HOST/CI: o mic SINTÉTICO — senoide 440 Hz mono; a MESMA
+// máquina de estados (append sob mutex + level do pico). Gera ~10× mais
+// rápido que o tempo real para os testes serem rápidos.
+static void audioRecWorker(AudioRec& rec) {
+    double t = 0.0;
+    const double dt = 1.0 / static_cast<double>(rec.sampleRate);
+    const i16 kAmp = 12000;
+    while (rec.on.load()) {
+        i16 peak = 0;
+        {
+            const std::lock_guard<std::mutex> lk(rec.mx);
+            for (int i = 0; i < 2205; ++i) {   // 50 ms de cada vez
+                const double s = std::sin(t * 2.0 * 3.14159265358979 * 440.0);
+                const i16 v = static_cast<i16>(s * kAmp);
+                rec.pcm.push_back(v);
+                if (v > peak) {
+                    peak = v;
+                }
+                t += dt;
+            }
+        }
+        rec.level.store(static_cast<f32>(peak) / 32768.0f);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+}
+#endif
+
+// o toggle do botão GRAVAR: arranca o worker; volta = STOP → o PCM vira
+// .gi ADPCM no projeto (audio/rec-<unix>.gi) + catálogo + log do rácio
+#ifdef __ANDROID__
+// DEVICE: o mic pede a RECORD_AUDIO runtime (VvActivity.ensureMicPermission
+// — o diálogo abre na 1ª vez; o dono re-toca GRAVAR e segue). Sem a ponte =
+// gravação desligada com log (o resto do áudio segue)
+static bool audioMicGranted() {
+    return storage::jniEnsureMicPermission();
+}
+#else
+// HOST/CI: o mic é SINTÉTICO — sem modelo de permissões (a PONTE real é
+// aferida à parte, contra o fake JNI)
+static bool audioMicGranted() {
+    return true;
+}
+#endif
+void audioRecordToggle() {
+    if (!g_audioRec.on.load()) {
+        if (!g_storage) {
+            showToast("sem projeto (gravacao guarda no projeto)");
+            return;
+        }
+        if (!audioMicGranted()) {
+            showToast("conceda o microfone e toque Gravar de novo");
+            elog::info("audio: gravacao a espera da permissao do mic");
+            return;
+        }
+        {
+            const std::lock_guard<std::mutex> lk(g_audioRec.mx);
+            g_audioRec.pcm.clear();
+        }
+        g_audioRec.on.store(true);
+        g_audioRec.secs.store(0);
+        g_audioRec.level.store(0.0f);
+        g_audioRec.t0 = std::chrono::steady_clock::now();
+        g_audioRec.th = std::thread(audioRecWorker, std::ref(g_audioRec));
+        elog::info("audio: gravacao ARRANCA (mic 44100 Hz mono → ADPCM)");
+        showToast("a gravar...");
+        return;
+    }
+    // ---- STOP: PCM → .gi ---------------------------------------------------
+    g_audioRec.on.store(false);
+    if (g_audioRec.th.joinable()) {
+        g_audioRec.th.join();
+    }
+    std::vector<i16> pcm;
+    {
+        const std::lock_guard<std::mutex> lk(g_audioRec.mx);
+        pcm.swap(g_audioRec.pcm);
+    }
+    const double secs = std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - g_audioRec.t0)
+                            .count();
+    g_audioRec.level.store(0.0f);
+    if (pcm.size() < 256) {
+        showToast("gravacao curta demais (ignorada)");
+        elog::warn("audio: gravacao com %zu amostras — ignorada", pcm.size());
+        return;
+    }
+    GiWriteIn wi;
+    wi.codec = GiCodec::Adpcm;
+    wi.sampleRate = g_audioRec.sampleRate;
+    wi.channels = 1;
+    wi.frames = pcm.size();
+    wi.pcm16 = pcm.data();
+    wi.name = "rec";
+    std::vector<u8> gi;
+    std::string err;
+    if (!writeGi(wi, gi, err)) {
+        showToast("gravacao falhou (engine.log)");
+        elog::error("audio: writeGi da gravacao FALHOU — %s", err.c_str());
+        return;
+    }
+    char rel[48];
+    std::snprintf(rel, sizeof(rel), "audio/rec-%lld.gi",
+                  static_cast<long long>(std::time(nullptr)));
+    g_storage->makeDirs("audio");
+    if (!g_storage->writeBytes(rel, gi.data(), gi.size())) {
+        showToast("falha ao gravar o clip no projeto");
+        elog::error("audio: gravacao de %s FALHOU", rel);
+        return;
+    }
+    refreshAudioCatalog();
+    // o rácio: PCM16 cru (o "custo" sem codec) vs o .gi final — 4:1 é o
+    // contrato do ADPCM (a linha exigida no log)
+    const double raw = static_cast<double>(pcm.size()) * 2.0;
+    const double ratio = gi.size() > 0 ? raw / static_cast<double>(gi.size())
+                                       : 0.0;
+    elog::info("audio: gravado %.1fs (%zu amostras) → %s (%zu B, ratio=%.1fx "
+               "ADPCM 4:1 vs PCM16)",
+               secs, pcm.size(), rel, gi.size(), ratio);
+    char msg[96];
+    std::snprintf(msg, sizeof(msg), "gravado: %.1fs", secs);
+    showToast(msg);
+}
+
+// o frame() alimenta o temporizador (o worker não mexe em atomics de UI)
+void audioRecTick() {
+    if (g_audioRec.on.load()) {
+        g_audioRec.secs.store(static_cast<int>(std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - g_audioRec.t0).count()));
+    }
+}
+
 // ---- 0.8.10: IMPORT JOB (cópia streaming + conversão em THREAD) -----------
 // O import de 500 MB NUNCA mais corre no frame loop: a cópia por chunks +
 // a conversão vivem numa THREAD própria; o frame() desenha o OVERLAY de
@@ -1047,6 +1715,76 @@ void importJobFinish() {
     }
 }
 
+// 0.8.11 — IMPORT DE ÁUDIO pelo navegador: fonte → .gi em audio/ + a
+// pergunta "aplicar ao TIC?" quando há AudioPlayer selecionado; o clip
+// entra no catálogo (Inspector + workspace ÁUDIO)
+void browserImportAudio(const fileapi::DirEntry& e) {
+    if (!g_storage || e.isDir) {
+        return;
+    }
+    // guarda de TAMANHO: o decode do áudio é em RAM (o streaming de 500 MB
+    // é para GEOMETRIA); um "áudio" de centenas de MB é lixo/corrompido
+    u64 srcBytes = 0;
+    if (fileapi::fileSize(e.path, srcBytes) && srcBytes > (256ull << 20)) {
+        showToast("audio demasiado grande (max 256 MB)");
+        elog::error("audio: import de '%s' recusado (%llu B > 256 MB)",
+                    e.path.c_str(), static_cast<unsigned long long>(srcBytes));
+        return;
+    }
+    std::vector<u8> bytes;
+    if (!fileapi::readAll(e.path.c_str(), bytes) || bytes.empty()) {
+        showToast("leitura falhou (causa no engine.log)");
+        elog::error("audio: leitura de '%s' FALHOU — %s", e.path.c_str(),
+                    fileapi::errnoText().c_str());
+        return;
+    }
+    GiImportOut out;
+    std::string err;
+    if (!importAudioToGi(bytes.data(), bytes.size(), e.name, out, err)) {
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "audio falhou (%s)", err.c_str());
+        showToast(msg);
+        elog::error("audio: import de '%s' FALHOU — %s", e.path.c_str(),
+                    err.c_str());
+        return;
+    }
+    g_storage->makeDirs("audio");
+    std::string safe = convert::sanitizeName(e.name);
+    const std::string rel =
+        std::string("audio/") + convert::stemOf(safe) + ".gi";
+    if (!g_storage->writeBytes(rel, out.gi.data(), out.gi.size())) {
+        showToast("falha ao gravar o clip no projeto");
+        elog::error("audio: gravacao de %s FALHOU", rel.c_str());
+        return;
+    }
+    // o RÁCIO no log (a linha exigida pelo prompt)
+    const double ratio = out.gi.size() > 0
+        ? static_cast<double>(out.sourceBytes) /
+          static_cast<double>(out.gi.size())
+        : 0.0;
+    elog::info("audio: import %s codec=%s ratio=%.2fx (%llu B -> %zu B, "
+               "%uch %uHz %.2fs)",
+               rel.c_str(), giCodecName(out.codec), ratio,
+               static_cast<unsigned long long>(out.sourceBytes),
+               out.gi.size(), out.channels, out.sampleRate, out.duration);
+    refreshAudioCatalog();
+    char msg[96];
+    std::snprintf(msg, sizeof(msg), "clip: %s (%.1fs)",
+                  convert::stemOf(safe).c_str(), out.duration);
+    showToast(msg);
+    // aplicar ao TIC selecionado (se tem AudioPlayer)
+    Tic* tsel = g_scene.get(g_editor.selected);
+    if (tsel && tsel->getComponent<AudioPlayer>()) {
+        g_applyAsk.open = true;
+        g_applyAsk.kind = 'a';   // áudio
+        g_applyAsk.rel = rel;
+        g_applyAsk.fileName = e.name;
+        g_editor.applyAsk = true;
+        elog::info("audio: dialogo 'aplicar ao TIC?' aberto (%s → '%s')",
+                   rel.c_str(), tsel->name.c_str());
+    }
+}
+
 // o toque no ficheiro escolhido: lança o JOB (streaming + conversão)
 void browserImportFile(const fileapi::DirEntry& e) {
     if (!g_storage || e.isDir) {
@@ -1057,6 +1795,13 @@ void browserImportFile(const fileapi::DirEntry& e) {
     // SEM conversão; o import de dentro da pasta extraída é que converte
     if (e.kind == 'a') {
         browserExtractArchive(e);
+        return;
+    }
+    // 0.8.11 — ÁUDIO (.wav/.ogg/.mp3): importa → audio/<nome>.gi (ADPCM
+    // 4:1 ou passthrough) — síncrono (o decode é rápido; o overlay de
+    // progresso é para os 500 MB de geometria) com log do rácio
+    if (e.kind == 's') {
+        browserImportAudio(e);
         return;
     }
     // 0.8.5 — FORMATO NÃO SUPORTADO → ERRO CLARO (nunca silêncio)
@@ -1214,6 +1959,80 @@ void refreshCatalog() {
             }
             if (!jaConvertido) {
                 g_catalog.textures.push_back(std::string("textures/") + f);
+            }
+        }
+    }
+}
+
+// 0.8.11 — VISUAL de editor do AudioPlayer (a técnica dos gizmos: pontos
+// 3D PROJETADOS para px de ecrã + polilinhas da UI): glifo de ALTIFALANTE
+// na posição do TIC + esfera WIREFRAME do raio externo (posicional). SÓ no
+// editor — em Play nada desenha (só soa). Corre no pass UI.
+void drawAudioGlyph(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
+                    const Tic& t) {
+    const AudioPlayer* au = t.getComponent<AudioPlayer>();
+    const Transform3D* tr = t.getComponent<Transform3D>();
+    if (!au || !tr || !t.active) {
+        return;
+    }
+    const Vec3 p = tr->pos;
+    const f32 col[4] = {au->voiceId >= 0 ? 0.28f : 0.90f,
+                        au->voiceId >= 0 ? 0.82f : 0.72f,
+                        au->voiceId >= 0 ? 0.36f : 0.30f, 1.0f};
+    auto seg = [&](const Vec3& a, const Vec3& b) {
+        f32 ax, ay, bx, by;
+        if (gizmo::projectPoint(vp, a, sw, sh, ax, ay) &&
+            gizmo::projectPoint(vp, b, sw, sh, bx, by)) {
+            ui.drawLine(ax, ay, bx, by, 2.0f, col);
+        }
+    };
+    // caixa + cone + ondas (plano local XY — glifo pequeno, leitura visual)
+    const Vec3 dx{0.11f, 0.0f, 0.0f};
+    const Vec3 dy{0.0f, 0.11f, 0.0f};
+    seg(p - dx - dy, p - dx + dy);
+    seg(p - dx + dy, p + Vec3{-0.02f, 0.08f, 0.0f});
+    seg(p + Vec3{-0.02f, 0.08f, 0.0f}, p + Vec3{-0.02f, -0.08f, 0.0f});
+    seg(p + Vec3{-0.02f, -0.08f, 0.0f}, p - dx - dy);
+    seg(p + Vec3{-0.02f, -0.08f, 0.0f}, p + dx - dy * 2.0f);
+    seg(p + dx - dy * 2.0f, p + dx + dy * 2.0f);
+    seg(p + dx + dy * 2.0f, p + Vec3{-0.02f, 0.08f, 0.0f});
+    seg(p + Vec3{0.14f, -0.06f, 0.0f}, p + Vec3{0.14f, 0.06f, 0.0f});
+    seg(p + Vec3{0.18f, -0.11f, 0.0f}, p + Vec3{0.18f, 0.11f, 0.0f});
+    // esfera wireframe do raio EXTERNO (posicional): 8 longitudes × 4 lat
+    if (au->posicional) {
+        const f32 R = au->raioExterno;
+        constexpr int kLon = 8;
+        constexpr int kLat = 4;
+        constexpr f32 kPi = 3.14159265f;
+        constexpr f32 kTau = 6.28318531f;
+        const f32 colR[4] = {0.47f, 0.59f, 1.0f, 0.9f};
+        for (int la = 0; la <= kLat; ++la) {
+            const f32 phi = static_cast<f32>(la) / kLat * kPi;
+            for (int lo = 0; lo < kLon; ++lo) {
+                const f32 th0 = static_cast<f32>(lo) / kLon * kTau;
+                const f32 th1 = static_cast<f32>(lo + 1) / kLon * kTau;
+                const Vec3 a{p.x + R * std::sin(phi) * std::cos(th0),
+                             p.y + R * std::cos(phi),
+                             p.z + R * std::sin(phi) * std::sin(th0)};
+                const Vec3 b{p.x + R * std::sin(phi) * std::cos(th1),
+                             p.y + R * std::cos(phi),
+                             p.z + R * std::sin(phi) * std::sin(th1)};
+                { f32 ax, ay, bx2, by2;
+                  if (gizmo::projectPoint(vp, a, sw, sh, ax, ay) &&
+                      gizmo::projectPoint(vp, b, sw, sh, bx2, by2)) {
+                      ui.drawLine(ax, ay, bx2, by2, 1.5f, colR);
+                  } }
+                if (la > 0) {
+                    const f32 phiP = static_cast<f32>(la - 1) / kLat * kPi;
+                    const Vec3 up{p.x + R * std::sin(phiP) * std::cos(th0),
+                                  p.y + R * std::cos(phiP),
+                                  p.z + R * std::sin(phiP) * std::sin(th0)};
+                    { f32 ux, uy, ax2, ay2;
+                      if (gizmo::projectPoint(vp, up, sw, sh, ux, uy) &&
+                          gizmo::projectPoint(vp, a, sw, sh, ax2, ay2)) {
+                          ui.drawLine(ux, uy, ax2, ay2, 1.5f, colR);
+                      } }
+                }
             }
         }
     }
@@ -1488,6 +2307,10 @@ void postLoadMigrateAndFixup() {
     if (!g_storage || !g_projectReady) {
         return;
     }
+    // 0.8.11 — settings do projeto (fonte/volume) + catálogo de áudio: o
+    // load aplica (0.8.10 escrevia o settings.goni mas nunca o LIA)
+    loadProjectSettings();
+    refreshAudioCatalog();
     // 1) migração (silenciosa — os assets convertem 1×)
     convert::migrateLegacyAssets(*g_storage, g_pipeline.get());
     // 2) fixup das refs da cena recém-carregada
@@ -1631,6 +2454,27 @@ editor::AssetResolvers makeAssetResolvers() {
 // import aplica ao TIC selecionado: applyAssetPick (o caminho do seletor)
 // + clips/skin do glTF quando o mesh os traz.
 void applyImportedAssetToSelectedTic() {
+    // 0.8.11 — ÁUDIO: o "Sim" atribui o clip ao AudioPlayer do TIC
+    // selecionado (e toca um PREVIEW de 1 s — o dono OUVE que importou)
+    if (g_applyAsk.kind == 'a') {
+        Tic* tsel = g_scene.get(g_editor.selected);
+        AudioPlayer* au = tsel ? tsel->getComponent<AudioPlayer>() : nullptr;
+        if (au) {
+            au->clipPath = g_applyAsk.rel;
+            char msg[96];
+            std::snprintf(msg, sizeof(msg), "clip atribuido: %s",
+                          g_applyAsk.rel.c_str());
+            showToast(msg);
+            elog::info("audio: clip '%s' atribuido ao TIC '%s'",
+                       g_applyAsk.rel.c_str(), tsel->name.c_str());
+        } else {
+            showToast("selecione um TIC de Audio");
+            elog::warn("audio: aplicar sem AudioPlayer no TIC selecionado");
+        }
+        g_applyAsk.open = false;
+        g_editor.applyAsk = false;
+        return;
+    }
     // 0.8.10: as entradas do catálogo são CAMINHOS COMPLETOS — o match é
     // direto (a ref veio do import: assets/<x>.gmesh / .gtext)
     const std::vector<std::string>& cat =
@@ -2050,6 +2894,7 @@ void enterPlayMode() {
         pl.resetDir();
     }
     g_animSystem.enabled = true;
+    audioEnterPlay();   // 0.8.11: autoplay dos AudioPlayers
     LOGI("ui: modo play — snapshot de %u transforms / %u bodies / %u ui-elems; "
          "%u animation player(s) a tocar",
          (unsigned)g_playSnap.transforms.size(),
@@ -2062,6 +2907,7 @@ void enterPlayMode() {
 // de EDITOR volta com os painéis nos seus sítios exatos
 void leavePlayMode() {
     g_editor.playMode = false;
+    audioLeavePlay();   // 0.8.11: o sandbox de áudio também morre
     g_animSystem.enabled = false;   // 0.8.0: animação só avança em Play
     playSnapshotRestore(g_scene, g_playSnap);
     // 0.8.0 (F7): players PARADOS no zero (o Play é sandbox — o estado de
@@ -2214,6 +3060,9 @@ void onAppCmd(android_app* app, i32 cmd) {
                 }
             }
             elog::info("[boot 4/6] renderer OK (shaders, materiais, geometria)");
+            // 0.8.11: backend de áudio (AAudio; fallback AudioTrack) — o
+            // misturador já vive no callback desde o arranque
+            audioBackendBoot();
             // F5-A/3: recarrega a CENA ATIVA do projeto (refs relativos
             // intactos; resolvers de mesh chegam na F5-E — por agora o
             // LoadCtx liga o cubo procedural, tag "cube" das cenas antigas)
@@ -2245,6 +3094,16 @@ void onAppCmd(android_app* app, i32 cmd) {
             // F4.2 (fix raiz do B1): o sistema avisou que a área desenhável
             // mudou (nav/status bar a aparecer/esconder) → reinsetar TUDO
             applyContentRect(app);
+            break;
+        case APP_CMD_PAUSE:
+            // 0.8.11 — o áudio segue o lifecycle da activity: fundo =
+            // PAUSA do stream (AAudio/AudioTrack pausam DEBAIXO da mesma
+            // interface; o misturador NÃO esquece vozes — o resume continua
+            // de onde estava)
+            if (g_audioOut && g_audioBackendReady) {
+                g_audioOut->pause();
+                elog::info("audio: PAUSE (activity em fundo)");
+            }
             break;
         case APP_CMD_RESUME: {
             // F5.5 — All Files Access: RE-VERIFICAÇÃO NO RETORNO (o
@@ -2285,6 +3144,12 @@ void onAppCmd(android_app* app, i32 cmd) {
                     resumePendingAfterReturn(granted);
                 }
             }
+            // 0.8.11 — o áudio ACORDA com a activity (o pause do fundo
+            // parou o stream; vozes/cursor ficaram intactos)
+            if (g_audioOut && g_audioBackendReady) {
+                g_audioOut->resume();
+                elog::info("audio: RESUME (activity de volta)");
+            }
             break;
         }
         case APP_CMD_TERM_WINDOW:
@@ -2316,6 +3181,10 @@ void onAppCmd(android_app* app, i32 cmd) {
                 primMeshesDestroyAll();      // 0.8.10: prims SEM cache (posse)
                 g_grid.destroy();
                 g_renderer.shutdown();      // programa UI + VAO/VBO + whiteTex + lit
+                if (g_audioOut) {           // 0.8.11: áudio sai com o contexto
+                    g_audioOut->stop();
+                    g_audioBackendReady = false;
+                }
                 g_egl.shutdown();            // POR FIM: surface + contexto morrem
                 ++g_windowTerms;
                 elog::info("lifecycle: TERM_WINDOW #%u — contexto EGL destruído; "
@@ -2513,7 +3382,7 @@ void frame() {
     editor::updateCameraOrbit(
         g_camera, g_orbit, g_input, viewRect,
         claimed | gizmoClaimed | canvasClaimed,
-        g_editor.playMode || g_editor.uiMode);
+        g_editor.playMode || g_editor.uiMode || g_editor.audioMode);
 
     // 0.7.0 — DESSELECCIONAR: tap parado no vazio do viewport 3D limpa a
     // seleção (só em editor 3D; o modo UI desseleciona o ELEMENTO no
@@ -2573,6 +3442,15 @@ void frame() {
     }
     g_physics.enabled = g_editor.playMode;   // física só avança em modo Play
     g_animSystem.enabled = g_editor.playMode;  // 0.8.0: animação idem (F7)
+    // 0.8.11 — o coração de áudio por frame: temporizador da gravação,
+    // preview do workspace (fim natural do clip), preview do INSPECTOR
+    // (o flag do AudioPlayer → misturador) e o listener posicional
+    audioRecTick();
+    audioPreviewTick();
+    if (Tic* selTic = g_scene.get(g_editor.selected)) {
+        audioPreviewTick(*selTic);
+    }
+    audioUpdateListener();   // posicional segue a câmara/TICs vivos
 
     // ---- pass 3D: clear color+depth, TICs com MeshRenderer + grid com fade
     // 0.7.7 — CÂMARA DE JOGO: em Play a cena renderiza pela câmara ATIVA
@@ -2783,6 +3661,25 @@ void frame() {
         if (g_editor.uiMode) {
             editor::drawUiViewport(g_ui, g_scene, g_editor, g_input, w, h);
         }
+        // 0.8.11 — WORKSPACE ÁUDIO no MESMO sítio do viewport 2D (o rect
+        // do editor de UI: entre toolbar e timeline, sem o painel direito
+        // quando visível — NUNCA a área toda; painéis/toolbar ficam nos
+        // seus sítios e o frame segue o fluxo normal)
+        if (g_editor.audioMode) {
+            UiRect audioView = editor::centerRect(w, h, g_ui.safeArea(),
+                                                  g_editor.showInspector);
+            if (timeline::visible(g_editor.playMode, true, g_scene,
+                                  g_editor.selected)) {
+                audioView.h -= timeline::kTimelineH;
+            }
+            editor::AudioWorkspaceHost host = makeAudioWorkspaceHost();
+            const int pickWs = editor::drawAudioWorkspace(
+                g_ui, g_input, audioView, g_audioWs, g_audioCatalog, host);
+            if (pickWs > 0) {
+                g_audioWs.selected = static_cast<u32>(pickWs - 1);
+                audioPreviewStop();   // trocar de clip mata o preview anterior
+            }
+        }
     }
 
     // F5.1-hotfix (1.4) + F5.2: overlay Settings — Exportar logs / Ver logs /
@@ -2792,7 +3689,8 @@ void frame() {
                                    ? ""
                                    : storage::modeLabel(g_perm.mode());
         const int choice = editor::drawSettingsMenu(g_ui, g_input, w, h, g_editor,
-                                                    modeText, g_keepSource);
+                                                    modeText, g_keepSource,
+                                                    g_audioMaster);
         if (choice == 1) {
             // export para Downloads/GOneVV/logs (MediaStore — sem permissões)
             int copied = 0;
@@ -2847,6 +3745,25 @@ void frame() {
                 elog::info("import: reconvertidos %u ficheiro(s) de source/",
                            done);
             }
+        } else if (choice == 6) {
+            // 0.8.11 — DIAGNÓSTICO DE ÁUDIO: o probe de estabilidade contra
+            // um backend FRESCO (50 ciclos start/stop + 10 pause/resume);
+            // a TABELA vai ao engine.log e a decisão troca o backend vivo
+            audioProbeRun();
+        } else if (choice == 7) {
+            // 0.8.11 — VOLUME GERAL: cicla 0→25→50→75→100% (o master do
+            // misturador; persistido no settings.goni do projeto)
+            g_audioMaster += 0.25f;
+            if (g_audioMaster > 1.0f) {
+                g_audioMaster = 0.0f;
+            }
+            g_audioEngine.master = g_audioMaster;
+            saveProjectSettings();
+            char msg[64];
+            std::snprintf(msg, sizeof(msg), "volume geral: %d%%",
+                          static_cast<int>(g_audioMaster * 100.0f + 0.5f));
+            showToast(msg);
+            elog::info("audio: master = %.2f", g_audioMaster);
         } else if (choice == 2) {
             // F5.2: VER LOGS in-app — tail do engine.log + crash dumps
             g_logLines.clear();
@@ -2887,8 +3804,10 @@ void frame() {
     // z-order) — ver o bloco imediatamente antes de drawToast()
 
     // F5-E: catálogo dos seletores — refresh quando um seletor ABRE
+    // 0.8.11: idem o catálogo de ÁUDIO (o seletor de clips é o assetMenu 5)
     if (g_editor.assetMenu != 0 && g_editor.assetMenu != g_prevAssetMenu) {
         refreshCatalog();
+        refreshAudioCatalog();
     }
     g_prevAssetMenu = g_editor.assetMenu;
 
@@ -3001,6 +3920,18 @@ void frame() {
                     showToast("Mesh criado (esfera)");
                     LOGI("editor: TIC Mesh criado (primitiva esfera default)");
                 }
+            } else if (choice == 7) {
+                // 0.8.11 — TIC "Audio": Transform + AudioPlayer (ESTRUTURA
+                // primeiro — o clip vem pelo Inspector/seletor de clips;
+                // glifo de altifalante no editor, som no Play)
+                const Handle hnew = createTicFromPreset(g_scene,
+                                                        PresetKind::Audio,
+                                                        nullptr, nullptr);
+                if (hnew.valid()) {
+                    g_editor.selected = hnew;
+                    showToast("Audio criado (atribua o clip no Inspector)");
+                    LOGI("editor: TIC Audio criado (Transform+AudioPlayer)");
+                }
             } else {
                 const PresetKind kind = static_cast<PresetKind>(choice - 1);
                 const Handle hnew = createTicFromPreset(g_scene, kind, &g_cubeMesh,
@@ -3049,6 +3980,31 @@ void frame() {
                     }
                     if (out.log[0] != '\0') {
                         LOGI("%s", out.log);
+                    }
+                }
+            } else if (menuKind == 5) {
+                // 0.8.11 — seletor de CLIPS: o "importar…" abre o navegador
+                // na raiz Music (o import de áudio volta ao workspace); o
+                // pick aplica clipPath ao AudioPlayer (dados puros)
+                if (pick == editor::kAssetPickImport) {
+                    browserOpen("/storage/emulated/0/Music");
+                    g_editor.fileBrowser = true;
+                    g_editor.audioMode = true;   // volta ao workspace
+                    LOGI("editor: importar audio — navegador aberto (Music)");
+                } else {
+                    const editor::AssetPickOutcome out =
+                        editor::applyAssetPick(g_scene, g_editor.selected, 5,
+                                               pick, g_catalog,
+                                               makeAssetResolvers());
+                    if (out.applied) {
+                        elog::info("%s", out.log);
+                    } else {
+                        elog::warn("audio: pick %d sem AudioPlayer no TIC "
+                                   "selecionado",
+                                   pick);
+                    }
+                    if (out.toast[0] != '\0') {
+                        showToast(out.toast);
                     }
                 }
             } else {
@@ -3359,6 +4315,7 @@ void frame() {
                             : g_editor.textPurpose == 2 ? "TEXTO DO ELEMENTO"
                             : g_editor.textPurpose == 4 ? "COR DO ELEMENTO"
                             : g_editor.textPurpose == 5 ? "COR DO TIC"
+                            : g_editor.textPurpose == 7 ? "RENOMEAR CLIP"
                                                         : "ALVO DA ACAO";
         const int ch =
             editor::drawTextInput(g_ui, g_input, w, h, g_editor, title);
@@ -3366,6 +4323,48 @@ void frame() {
             if (g_editor.textPurpose == 1) {
                 // 0.7.1: NOVA CENA (o nome vem do teclado in-app)
                 createSceneNamed(g_editor.textBuf);
+            } else if (g_editor.textPurpose == 7) {
+                // 0.8.11 — RENOMEAR CLIP: o commit precisa do STORAGE (o
+                // commitTextInput é puro cena+editor); copia bytes → remove
+                // o velho → catálogo (o TIC selecionado segue a NOVA ref se
+                // a tinha)
+                if (g_storage && g_editor.textLen > 0 &&
+                    g_audioWs.selected < g_audioCatalog.size()) {
+                    const std::string old =
+                        g_audioCatalog[g_audioWs.selected];
+                    const std::string dir =
+                        old.substr(0, old.rfind('/') + 1);
+                    const std::string nv = dir +
+                        convert::sanitizeName(g_editor.textBuf) + ".gi";
+                    if (nv != old && !g_storage->exists(nv)) {
+                        std::vector<u8> b;
+                        if (g_storage->readBytes(old, b) &&
+                            g_storage->writeBytes(nv, b.data(), b.size()) &&
+                            g_storage->remove(old)) {
+                            g_audioClips.erase(old);
+                            refreshAudioCatalog();
+                            // TICs com a ref velha passam à nova (o clip é o
+                            // MESMO — só o nome mudou)
+                            g_scene.forEachActive([&](Tic& t) {
+                                if (AudioPlayer* au =
+                                        t.getComponent<AudioPlayer>()) {
+                                    if (au->clipPath == old) {
+                                        au->clipPath = nv;
+                                    }
+                                }
+                            });
+                            elog::info("audio: clip renomeado '%s' -> '%s'",
+                                       old.c_str(), nv.c_str());
+                            showToast("clip renomeado");
+                        } else {
+                            showToast("renomear falhou (engine.log)");
+                            elog::error("audio: renomear %s FALHOU",
+                                        old.c_str());
+                        }
+                    } else {
+                        showToast("nome invalido/ocupado");
+                    }
+                }
             } else if (editor::commitTextInput(g_scene, g_editor)) {
                 showToast("aplicado");
             }
@@ -3398,10 +4397,11 @@ void frame() {
             g_browser.failed);
         if (pick >= 1 && pick <= fileapi::kBrowserRootCount) {
             browserOpen(fileapi::kBrowserRoots[pick - 1].path);
-        } else if (pick == 6) {
+        } else if (pick == fileapi::kBrowserRootCount + 1) {
             browserOpen(fileapi::parentPath(g_browser.cwd));
-        } else if (pick >= 7) {
-            const size_t i = static_cast<size_t>(pick - 7);
+        } else if (pick >= fileapi::kBrowserRootCount + 2) {
+            const size_t i = static_cast<size_t>(
+                pick - fileapi::kBrowserRootCount - 2);
             if (i < g_browser.entries.size()) {
                 if (g_browser.entries[i].isDir) {
                     browserOpen(g_browser.entries[i].path);
@@ -3427,6 +4427,16 @@ void frame() {
             // (extraído — o MESMO código é afervel no hospedeiro)
             applyImportedAssetToSelectedTic();
         }
+    }
+
+    // 0.8.11: glifos de ALTIFALANTE (+ esfera posicional) dos AudioPlayers
+    // — SÓ no editor (em Play nada desenha: só soa)
+    if (!g_editor.playMode && !g_editor.uiMode && !g_editor.audioMode) {
+        const Mat4 glyphVp =
+            Mat4::mul(g_camera.proj(w / h), g_camera.view());
+        g_scene.forEachActive([&](Tic& t) {
+            drawAudioGlyph(g_ui, glyphVp, w, h, t);
+        });
     }
 
     drawToast();
@@ -3470,6 +4480,18 @@ void android_main(android_app* app) {
     vv::crash::install(elog::dir());
     elog::info("logs: %s (ativo=%d)", elog::dir()[0] ? elog::dir() : "<só-logcat>",
                elog::active() ? 1 : 0);
+
+    // 0.8.11: o callback do backend puxa o MISTURADOR (instala 1× — o
+    // g_mix do AudioOut aponta para o AudioEngine global)
+    vv::audioout::setMixFn([](f32* out, u32 frames, u32 ch, u32 rate) {
+        g_audioEngine.mix(out, frames, ch, rate);
+    });
+#ifdef __ANDROID__
+    // a VM do glue alimenta o fallback AudioTrack (JNI) e a GRAVAÇÃO
+    // (AudioRecord) — as threads de áudio nascem desanexadas
+    vv::audioout::setVm(app->activity->vm);
+    g_audioVm = app->activity->vm;
+#endif
 
     // 0.8.10 — BANNER DE VERSÃO no boot log (a identidade da build —
     // versionCode/git/sha — é a 1ª linha que o log viewer mostra)

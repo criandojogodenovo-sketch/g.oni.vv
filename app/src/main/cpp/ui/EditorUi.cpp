@@ -1,5 +1,6 @@
 #include "ui/EditorUi.h"
 #include "components/InputMap.h"
+#include "components/AudioPlayer.h"   // 0.8.11: inspector/seletor de clips
 #include "render/Camera.h"
 #include "components/TouchControls.h"
 #include <cmath>
@@ -289,6 +290,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     CameraComp* camEdit = tic->getComponent<CameraComp>();   // 0.7.7
     // 0.7.0: o tint é EDITÁVEL (sliders R/G/B) — ponteiro mutável
     MeshRenderer* mrEdit = tic->getComponent<MeshRenderer>();
+    // 0.8.11 — o AudioPlayer do TIC (clip/preview/toggles/sliders)
+    AudioPlayer* auEdit = tic->getComponent<AudioPlayer>();
     char meshLabel[64] = "";
     char texLabel[64] = "";
     char inputLine[48] = "";
@@ -601,6 +604,86 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                            theme::TEXT, w - 2.0f * kPad);
             break;
         }
+        // ---- 0.8.11 — ÁUDIO --------------------------------------------------
+        case InspRow::Kind::AuSection:
+            ui.label(x + kPad, inspBaseline(ry, r.h, tm), "Audio", theme::TEXT);
+            ui.panel(x + kPad, ry + r.h - 1.0f, w - 2.0f * kPad, 1.0f,
+                     theme::LINE);
+            break;
+        case InspRow::Kind::AuClip: {
+            // "clip: <nome>" — o caminho completo fica no log/toast; aqui o
+            // NOME limpo (sem pasta/extensão) como o seletor
+            char clipLine[48];
+            if (auEdit && auEdit->hasClip()) {
+                const size_t slash = auEdit->clipPath.rfind('/');
+                const size_t dot = auEdit->clipPath.rfind('.');
+                std::snprintf(clipLine, sizeof(clipLine), "clip: %s",
+                              auEdit->clipPath.substr(
+                                  slash + 1,
+                                  dot == std::string::npos
+                                      ? std::string::npos
+                                      : dot - slash - 1).c_str());
+            } else {
+                std::snprintf(clipLine, sizeof(clipLine), "clip: -");
+            }
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      clipLine);
+            break;
+        }
+        case InspRow::Kind::AuPlay:
+            // o PREVIEW: o botão faz toggle do FLAG — o main (frame) mapeia
+            // o flag ao misturador (o mesmo caminho do Play; puro aqui)
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      auEdit && auEdit->previewing ? "parar" : "ouvir");
+            break;
+        case InspRow::Kind::AuAutoplay:
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      auEdit && auEdit->autoplay ? "autoplay: sim"
+                                                 : "autoplay: nao");
+            break;
+        case InspRow::Kind::AuLoop:
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      auEdit && auEdit->loop ? "loop: sim" : "loop: nao");
+            break;
+        case InspRow::Kind::AuVolume:
+            if (auEdit) {
+                if (sliderRow(ui, r.id, x, ry, r.h, tm, "volume", 0.0f, 1.0f,
+                              auEdit->volume, "%.2f")) {
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::AuPitch:
+            if (auEdit) {
+                if (sliderRow(ui, r.id, x, ry, r.h, tm, "pitch", 0.5f, 2.0f,
+                              auEdit->pitch, "%.2f")) {
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::AuPos:
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      auEdit && auEdit->posicional ? "posicional: sim"
+                                                   : "posicional: nao");
+            break;
+        case InspRow::Kind::AuRint:
+            if (auEdit) {
+                if (sliderRow(ui, r.id, x, ry, r.h, tm, "r. interno", 0.1f,
+                              20.0f, auEdit->raioInterno, "%.1f")) {
+                    auEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::AuRext:
+            if (auEdit) {
+                if (sliderRow(ui, r.id, x, ry, r.h, tm, "r. externo", 0.5f,
+                              50.0f, auEdit->raioExterno, "%.1f")) {
+                    auEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
         }
     }
 
@@ -649,6 +732,11 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 r.kind != InspRow::Kind::PrimButton &&  // 0.8.0
                 r.kind != InspRow::Kind::AddAnim &&     // 0.8.0
                 r.kind != InspRow::Kind::ScaleOrig &&   // 0.8.9
+                r.kind != InspRow::Kind::AuClip &&      // 0.8.11: clip ▸
+                r.kind != InspRow::Kind::AuPlay &&      // 0.8.11: ouvir/parar
+                r.kind != InspRow::Kind::AuAutoplay &&  // 0.8.11
+                r.kind != InspRow::Kind::AuLoop &&      // 0.8.11
+                r.kind != InspRow::Kind::AuPos &&       // 0.8.11
                 r.kind != InspRow::Kind::Slider) {      // 0.8.9: zona do VALOR
                 continue;
             }
@@ -677,6 +765,29 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 // 0.8.0 (F7): cria o player — a TIMELINE abre sozinha (o
                 // main desenha-a quando o TIC selecionado tem player)
                 tic->addComponent<AnimationPlayer>();
+            } else if (r.kind == InspRow::Kind::AuClip) {
+                // 0.8.11 — seletor de CLIPS (o catálogo audio/ do projeto;
+                // a "importar…" do seletor abre o navegador — o main decide)
+                st.assetMenu = 5;
+            } else if (r.kind == InspRow::Kind::AuPlay) {
+                // 0.8.11 — PREVIEW: toggle do FLAG; o frame do main mapeia
+                // ao misturador (audioPreviewTick — o MESMO caminho do Play)
+                if (AudioPlayer* au = tic->getComponent<AudioPlayer>()) {
+                    au->previewing = !au->previewing;
+                }
+            } else if (r.kind == InspRow::Kind::AuAutoplay) {
+                if (AudioPlayer* au = tic->getComponent<AudioPlayer>()) {
+                    au->autoplay = !au->autoplay;
+                }
+            } else if (r.kind == InspRow::Kind::AuLoop) {
+                if (AudioPlayer* au = tic->getComponent<AudioPlayer>()) {
+                    au->loop = !au->loop;
+                }
+            } else if (r.kind == InspRow::Kind::AuPos) {
+                if (AudioPlayer* au = tic->getComponent<AudioPlayer>()) {
+                    au->posicional = !au->posicional;
+                    au->clampFields();
+                }
             } else if (r.kind == InspRow::Kind::ColorHex) {
                 // 0.8.6 — teclado em MODO HEX (propósito 5) com o hex atual
                 // do tint; o commit aplica R/G/B (inválido = estado intacto)
@@ -874,8 +985,10 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     // automáticos). No 3D cria TICs de preset (como sempre).
     // 0.8.0 (F7): o 6º preset do 3D é o TIC "Mesh" (Transform+MeshRenderer
     // com PRIMITIVA esfera default — prototipagem sem física).
+    // 0.8.11: o 7º é o TIC "Audio" (Transform+AudioPlayer; o clip atribui-se
+    // no Inspector/seletor — a ESTRUTURA primeiro, o som depois).
     const bool uiMode = st.uiMode;
-    const int kItems = uiMode ? 10 : 6;   // 0.7.7: Camera; 0.8.0: Mesh
+    const int kItems = uiMode ? 10 : 7;   // 0.7.7: Camera; 0.8.0: Mesh; 0.8.11: Audio
     const f32 w = kMenuW;
     const f32 h = kHeaderH + static_cast<f32>(kItems) * 64.0f + kPad;
     // F4.2: centrado no viewport ÚTIL (dentro do contentRect)
@@ -901,8 +1014,9 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     // 0.7.7: o 5º preset do 3D é o TIC de CÂMARA (Transform3D + CameraComp;
     // nasce A ativa — o main chama setOnlyActiveCamera)
     // 0.8.0 (F7): o 6º é o TIC "Mesh" (esfera procedural, SEM física)
-    const char* names[6] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
-                            "RigidBody3D", "Camera", "Mesh"};
+    // 0.8.11: o 7º é o TIC "Audio" (Transform+AudioPlayer, SEM mesh)
+    const char* names[7] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
+                            "RigidBody3D", "Camera", "Mesh", "Audio"};
     // 0.7.4: + VBox/HBox (containers de layout — filhos automáticos)
     const char* elems[10] = {"Panel", "Label", "Button", "Image",
                              "Menu", "Card", "Article", "Joystick",
@@ -1054,12 +1168,13 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 
 int drawSettingsMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                      EditorState& st, const char* storageMode,
-                     bool keepSource) {
+                     bool keepSource, f32 audioMaster) {
     // F5.1-hotfix: menu do botão Settings — mono, mesmo padrão dos overlays.
     // F5.2: 3 itens + linha do modo de armazenamento ativo.
     // 0.8.10: +2 — "fonte: manter/largar" (o setting que larga source/ do
     // import) e "reconverter assets" (reconverte tudo de source/).
-    constexpr int kItems = 5;
+    // 0.8.11: +2 — "diagnostico audio (probe)" e "volume geral" (o master).
+    constexpr int kItems = 7;
     constexpr f32 kModeLineH = 30.0f;
     const bool showMode = storageMode && storageMode[0];
     const f32 h = kHeaderH + (showMode ? kModeLineH : 0.0f) +
@@ -1096,9 +1211,13 @@ int drawSettingsMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     char fonte[48];
     std::snprintf(fonte, sizeof(fonte), "fonte apos import: %s",
                   keepSource ? "manter" : "largar");
+    char vol[48];
+    std::snprintf(vol, sizeof(vol), "volume geral: %d%%",
+                  static_cast<int>(audioMaster * 100.0f + 0.5f));
     const char* labels[kItems] = {"Exportar logs", "Ver logs",
                                   "Acesso a ficheiros…", fonte,
-                                  "reconverter assets"};
+                                  "reconverter assets",
+                                  "diagnostico audio (probe)", vol};
     for (int i = 0; i < kItems; ++i) {
         if (ui.button(static_cast<u64>(4400 + i), x + kPad,
                       itemsTop + static_cast<f32>(i) * 64.0f,
@@ -1369,8 +1488,15 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                   bool withImport) {
     const bool pickMesh = (st.assetMenu == 1);
     const bool pickPrim = (st.assetMenu == 4);   // 0.8.0: primitivas
+    const bool pickAudio = (st.assetMenu == 5);  // 0.8.11: clips .gi
+    // 0.8.11 — o seletor de CLIPS sempre oferece "importar…" (importar
+    // áudio é o fluxo principal, não excecional)
+    if (pickAudio) {
+        withImport = true;
+    }
     const std::vector<std::string>& files =
-        pickMesh ? catalog.meshes : catalog.textures;
+        pickMesh ? catalog.meshes
+                 : (pickAudio ? catalog.audio : catalog.textures);
 
     if (pickPrim) {
         // ---- SELETOR DE PRIMITIVAS (2 formas + none) ----------------------
@@ -1436,10 +1562,11 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     ui.frame(x, y, w, h, 2.0f, theme::ACCENT);
     const f32 th = ui.fontHeight();
     ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f,
-             pickMesh ? "MESH" : "TEXTURA", theme::TEXT);
+             pickMesh ? "MESH" : (pickAudio ? "CLIP DE AUDIO" : "TEXTURA"),
+             theme::TEXT);
 
     int chosen = 0;
-    // item 0: cube (mesh) / none (textura)
+    // item 0: cube (mesh) / none (textura) / none (clip de áudio)
     const char* first = pickMesh ? "cube (procedural)" : "none";
     if (ui.button(kIdAssetBase, x + kPad, y + kHeaderH, w - 2.0f * kPad, 40.0f,
                   first)) {
@@ -1447,9 +1574,23 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         st.assetMenu = 0;
     }
     for (size_t i = 0; i < shown; ++i) {
+        // 0.8.11 — clip de áudio mostra o NOME limpo (sem pasta/extensão;
+        // o catálogo guarda caminhos completos "audio/x.gi")
+        char disp[96];
+        const char* label = files[i].c_str();
+        if (pickAudio) {
+            const size_t slash = files[i].rfind('/');
+            const size_t dot = files[i].rfind('.');
+            std::snprintf(disp, sizeof(disp), "%s",
+                          files[i].substr(slash + 1,
+                                          dot == std::string::npos
+                                              ? std::string::npos
+                                              : dot - slash - 1).c_str());
+            label = disp;
+        }
         if (ui.button(kIdAssetBase + 1 + static_cast<u64>(i), x + kPad,
                       y + kHeaderH + static_cast<f32>(i + 1) * 48.0f,
-                      w - 2.0f * kPad, 40.0f, files[i].c_str())) {
+                      w - 2.0f * kPad, 40.0f, label)) {
             chosen = static_cast<int>(i) + 2;
             st.assetMenu = 0;
         }
@@ -1491,9 +1632,48 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
         return out;   // nada escolhido neste frame
     }
     Tic* tic = scene.get(selected);
-    MeshRenderer* mr = tic ? tic->getComponent<MeshRenderer>() : nullptr;
+    if (!tic) {
+        return out;   // TIC morto — sem crash, sem ação
+    }
+
+    // ---- 0.8.11: seletor de CLIPS DE ÁUDIO (menuKind 5) ---------------------
+    // O AudioPlayer é DADOS puros: o pick escreve clipPath e SAI — o
+    // carregamento/decode acontece no primeiro play (audioClipFor do main,
+    // cache 1×); sem GL, sem engine, zero efeitos colaterais.
+    if (menuKind == 5) {
+        AudioPlayer* au = tic->getComponent<AudioPlayer>();
+        if (!au) {
+            return out;   // sem AudioPlayer no TIC — toast do chamador
+        }
+        if (pick == 1) {   // none → sem clip (a voz morre no próximo play)
+            au->clipPath.clear();
+            au->voiceId = -1;
+            au->previewing = false;
+            out.applied = true;
+            std::snprintf(out.toast, sizeof(out.toast), "clip: none");
+            std::snprintf(out.log, sizeof(out.log),
+                          "audio: clip removido do TIC '%s'", tic->name.c_str());
+            return out;
+        }
+        const size_t idx = static_cast<size_t>(pick - 2);
+        if (idx >= catalog.audio.size()) {
+            return out;   // fora do catálogo — sem crash
+        }
+        au->clipPath = catalog.audio[idx];
+        au->voiceId = -1;        // voz antiga NÃO aponta o clip novo
+        au->previewing = false;
+        out.applied = true;
+        std::snprintf(out.toast, sizeof(out.toast), "clip: %s",
+                      catalog.audio[idx].c_str());
+        std::snprintf(out.log, sizeof(out.log),
+                      "audio: clip '%s' aplicado ao TIC '%s'",
+                      catalog.audio[idx].c_str(), tic->name.c_str());
+        return out;
+    }
+
+    MeshRenderer* mr = tic->getComponent<MeshRenderer>();
     if (!mr) {
-        return out;   // TIC morto ou sem MeshRenderer — sem crash, sem ação
+        return out;   // TIC sem MeshRenderer — sem crash, sem ação
     }
 
     if (menuKind == 4) {

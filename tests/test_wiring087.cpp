@@ -127,6 +127,7 @@ void resetEngineForTest() {
     g_primGrave.clear();
     g_catalog.meshes.clear();
     g_catalog.textures.clear();
+    g_catalog.audio.clear();   // 0.8.11
     g_prevAssetMenu = 0;
     g_projectReady = false;
     g_storage.reset();
@@ -137,6 +138,24 @@ void resetEngineForTest() {
     g_input.resetAll();
     g_timeline = timeline::State{};
     g_playSnap = PlaySnapshot{};
+    // 0.8.11 — o estado de ÁUDIO também reseta (cache/catálogo/preview/
+    // gravação pendente/misturador; o backend é gerido pelos casos que o
+    // usam — o boot é por INIT_WINDOW)
+    g_audioClips.clear();
+    g_audioCatalog.clear();
+    g_audioWs = editor::AudioWorkspaceState{};
+    g_audioPreviewVoice = -1;
+    g_audioPreviewClip.clear();
+    g_audioEngine.reset();
+    g_audioEngine.master = 1.0f;
+    g_audioMaster = 1.0f;
+    g_keepSource = true;
+    if (g_audioRec.on.load()) {   // gravação abandonada a meio? mata o worker
+        g_audioRec.on.store(false);
+        if (g_audioRec.th.joinable()) {
+            g_audioRec.th.join();
+        }
+    }
     glstub::reset();
 }
 
@@ -1294,4 +1313,364 @@ TEST(wiring010_setting_fonte_e_reconverter) {
     std::printf("  [setting] fonte largada pós-import; assets/ fica\n");
     g_keepSource = true;
     std::remove(objPath.c_str());
+}
+
+// ===========================================================================
+// 0.8.11 — ÁUDIO: casos do CAMINHO DO DEVICE (este TU inclui o
+// platform/main.cpp — browserImportAudio/audioRecordToggle/audioBackendBoot/
+// applyImportedAssetToSelectedTic/globais). A parte PURA (contentor .gi,
+// misturador, probe com fakes, workspace com fake host, serializer) vive
+// em test_wiring011.cpp.
+// ===========================================================================
+
+// helper local: um WAV PCM16 REAL no disco (o browserImportAudio lê por
+// File API) — mono 22050, 0.3 s de senoide
+std::string writeTempWav(const char* path) {
+    const u32 rate = 22050;
+    std::vector<i16> pcm;
+    for (u32 i = 0; i < rate * 3 / 10; ++i) {
+        pcm.push_back(static_cast<i16>(std::sin(
+            static_cast<f64>(i) / rate * 6.283185307179586 * 440.0) * 12000));
+    }
+    std::vector<u8> wav;
+    const u32 dataBytes = static_cast<u32>(pcm.size()) * 2;
+    auto push = [&wav](const void* p, size_t n) {
+        const u8* b = static_cast<const u8*>(p);
+        wav.insert(wav.end(), b, b + n);
+    };
+    wav.insert(wav.end(), {'R', 'I', 'F', 'F'});
+    const u32 riff = 36 + dataBytes;
+    push(&riff, 4);
+    wav.insert(wav.end(), {'W', 'A', 'V', 'E'});
+    wav.insert(wav.end(), {'f', 'm', 't', ' '});
+    const u32 fmtSz = 16;
+    const u16 ch = 1, bits = 16, fmt = 1;
+    const u32 byteRate = rate * ch * bits / 8;
+    const u16 blockAlign = static_cast<u16>(ch * bits / 8);
+    push(&fmtSz, 4);
+    push(&fmt, 2);
+    push(&ch, 2);
+    push(&rate, 4);
+    push(&byteRate, 4);
+    push(&blockAlign, 2);
+    push(&bits, 2);
+    wav.insert(wav.end(), {'d', 'a', 't', 'a'});
+    push(&dataBytes, 4);
+    push(pcm.data(), dataBytes);
+    FILE* f = std::fopen(path, "wb");
+    if (!f) {
+        return "";
+    }
+    std::fwrite(wav.data(), 1, wav.size(), f);
+    std::fclose(f);
+    return path;
+}
+
+// ---------------------------------------------------------------------------
+// 0.8.11-1. IMPORT de áudio e2e pelo caminho do device: WAV real no disco →
+// browserImportFile(kind 's') → browserImportAudio → audio/<nome>.gi +
+// catálogo (workspace E Inspector) + rácio no engine.log + diálogo
+// "aplicar ao TIC?" quando há AudioPlayer selecionado; o "Sim" atribui.
+// ---------------------------------------------------------------------------
+TEST(wiring011_device_import_wav_e2e_aplica_ao_tic) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    ensureEngineReady();
+
+    auto st = std::make_unique<FakeStorage>();
+    FakeStorage* rawSt = st.get();
+    g_storage = std::move(st);
+    g_projectReady = true;
+
+    // TIC de ÁUDIO selecionado (o alvo do diálogo pós-import)
+    const Handle h = createTicFromPreset(g_scene, PresetKind::Audio, nullptr,
+                                         nullptr);
+    ASSERT(h.valid());
+    g_editor.selected = h;
+    ASSERT(g_scene.get(h)->getComponent<AudioPlayer>() != nullptr);
+
+    // WAV real no disco (mono 22050, 0.3 s) + entrada do navegador
+    const std::string tmp = writeTempWav("goni_w011_salto.wav");
+    ASSERT(!tmp.empty());
+    fileapi::DirEntry e;
+    e.name = "goni_w011_salto.wav";
+    e.path = tmp;
+    e.isDir = false;
+    e.kind = 's';   // 0.8.11: o FileApi classifica wav/ogg/mp3
+
+    browserImportFile(e);   // o dispatcher real do toque no navegador
+
+    // o clip vive no projeto (audio/goni_w011_salto.gi) e LÊ-SE de volta
+    EXPECT(rawSt->exists("audio/goni_w011_salto.gi"));
+    EXPECT(!g_audioCatalog.empty());
+    EXPECT(g_audioCatalog[0] == "audio/goni_w011_salto.gi");
+    EXPECT(g_catalog.audio == g_audioCatalog);   // o Inspector vê o MESMO
+    const GiClip* clip = audioClipFor("audio/goni_w011_salto.gi");
+    ASSERT(clip != nullptr);
+    EXPECT(clip->sampleRate == 22050);
+    EXPECT(clip->channels == 1);
+    EXPECT(clip->frames > 6000);
+    EXPECT(clip->codec == GiCodec::Adpcm);
+    std::printf("  [import] wav %.1fs → %s (%.2fs, codec=%s)\n",
+                clip->duration() + 0.0f, "audio/goni_w011_salto.gi",
+                clip->duration(), giCodecName(clip->codec));
+
+    // a linha do RÁCIO no engine.log (a exigência do prompt)
+    EXPECT(logHas("audio: import"));
+    EXPECT(logHas("ratio="));
+
+    // o diálogo "aplicar ao TIC?" abriu (kind 'a' — áudio)
+    EXPECT(g_applyAsk.open);
+    EXPECT(g_editor.applyAsk);
+    EXPECT(g_applyAsk.kind == 'a');
+    EXPECT(g_applyAsk.rel == "audio/goni_w011_salto.gi");
+
+    // o "Sim": atribui o clip ao AudioPlayer do TIC selecionado
+    applyImportedAssetToSelectedTic();
+    AudioPlayer* au = g_scene.get(h)->getComponent<AudioPlayer>();
+    EXPECT(au->clipPath == "audio/goni_w011_salto.gi");
+    EXPECT(logHas("clip 'audio/goni_w011_salto.gi' atribuido"));
+    EXPECT(!g_applyAsk.open);
+    std::remove(tmp.c_str());
+}
+
+// ---------------------------------------------------------------------------
+// 0.8.11-2. IMPORT sem alvo: TIC de Mesh selecionado → SEM diálogo (o
+// honesto é entrar no catálogo; atribui-se pelo seletor de clips depois).
+// ---------------------------------------------------------------------------
+TEST(wiring011_device_import_sem_audioplayer_sem_dialogo) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    ensureEngineReady();
+    auto st = std::make_unique<FakeStorage>();
+    FakeStorage* rawSt = st.get();
+    g_storage = std::move(st);
+    g_projectReady = true;
+    addMeshTic("Mesh");   // TIC SEM AudioPlayer
+
+    const std::string tmp = writeTempWav("goni_w011_sem.wav");
+    ASSERT(!tmp.empty());
+    fileapi::DirEntry e;
+    e.name = "goni_w011_sem.wav";
+    e.path = tmp;
+    e.isDir = false;
+    e.kind = 's';
+    browserImportFile(e);
+    EXPECT(rawSt->exists("audio/goni_w011_sem.gi"));
+    EXPECT(!g_applyAsk.open);   // sem AudioPlayer → SEM pergunta
+    std::remove(tmp.c_str());
+}
+
+// ---------------------------------------------------------------------------
+// 0.8.11-3. GRAVAÇÃO e2e no caminho do host (o mic SINTÉTICO — a mesma
+// máquina de estados da thread): toggle ON → worker corre → toggle OFF →
+// o PCM vira audio/rec-<unix>.gi + catálogo + rácio no log.
+// ---------------------------------------------------------------------------
+TEST(wiring011_device_gravacao_sintetica_e2e) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+
+    // SEM projeto: honesto, não grava (nada crasha)
+    audioRecordToggle();
+    EXPECT(!g_audioRec.on.load());
+
+    // A PONTE DO MIC (o fake JNI faz o papel da VvActivity): concedida →
+    // true; negada → false (o toggle mostra o toast e NÃO grava)
+    javaRegistersGranted();
+    g_jni.mic_granted = true;
+    EXPECT(storage::jniEnsureMicPermission());
+    g_jni.mic_granted = false;
+    EXPECT(!storage::jniEnsureMicPermission());
+    EXPECT(logHas("ensureMicPermission"));   // a ponte loga o estado
+    g_jni.mic_granted = true;
+
+    auto st = std::make_unique<FakeStorage>();
+    FakeStorage* raw = st.get();
+    g_storage = std::move(st);
+    g_projectReady = true;
+
+    audioRecordToggle();   // ON: o worker arranca
+    EXPECT(g_audioRec.on.load());
+    EXPECT(g_audioRec.th.joinable());
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    audioRecTick();   // o frame alimenta o temporizador
+    {
+        const std::lock_guard<std::mutex> lk(g_audioRec.mx);
+        EXPECT(g_audioRec.pcm.size() > 2000);   // a senoide acumulou
+    }
+    EXPECT(g_audioRec.level.load() > 0.2f);     // o medidor vê sinal
+
+    audioRecordToggle();   // OFF: o PCM vira .gi ADPCM
+    EXPECT(!g_audioRec.on.load());
+    bool hasRec = false;
+    for (const std::string& c : g_audioCatalog) {
+        if (c.find("audio/rec-") == 0) {
+            hasRec = true;
+        }
+    }
+    EXPECT(hasRec);
+    EXPECT(logHas("audio: gravado"));
+    EXPECT(logHas("ratio="));
+    // o clip gravado LÊ-SE de volta (mono 44100)
+    for (const std::string& c : g_audioCatalog) {
+        if (c.find("audio/rec-") == 0) {
+            const GiClip* clip = audioClipFor(c);
+            ASSERT(clip != nullptr);
+            EXPECT(clip->sampleRate == 44100);
+            EXPECT(clip->channels == 1);
+            std::printf("  [gravar] %s: %.2fs %u frames\n", c.c_str(),
+                        clip->duration(), static_cast<unsigned>(clip->frames));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 0.8.11-4. BOOT do backend (caminho do device, stub no host): o INIT
+// arranca AAudio→stub ATIVO; o PROBE (Settings → diagnóstico) escreve a
+// tabela no engine.log; a TROCA de backend mantém o misturador vivo.
+// ---------------------------------------------------------------------------
+TEST(wiring011_device_boot_probe_e_troca_de_backend) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+
+    audioBackendBoot();
+    EXPECT(g_audioBackendReady);
+    EXPECT(g_audioOut != nullptr);
+    EXPECT(logHas("audio: backend"));
+    // o callback do backend puxa o misturador: um mix direto funciona
+    {
+        std::vector<f32> buf(2048);
+        audioout::setMixFn([](f32* out, u32 frames, u32 ch, u32 rate) {
+            for (u32 i = 0; i < frames * ch; ++i) {
+                out[i] = static_cast<f32>(i % (rate / 100)) / 1000.0f;
+            }
+        });
+        // (o stub host não puxa o callback por si; o contrato setMixFn é
+        // aferido: o AudioOutDevice REAL o lê no dataCb)
+        audioout::MixFn fn = audioout::currentMixFn();
+        EXPECT(static_cast<bool>(fn));
+        fn(buf.data(), 1024, 2, 44100);
+        EXPECT(buf[0] == 0.0f);
+        EXPECT(buf[1] == 0.001f);
+    }
+
+    // o PROBE (Settings → "diagnostico audio"): tabela no log, decisão ok
+    audioProbeRun();
+    EXPECT(logHas("audio: probe"));
+    EXPECT(logHas("DECISAO"));
+
+    // a TROCA de backend: o misturador segue (a interface é a mesma)
+    EXPECT(audioBackendSwitch(true));
+    EXPECT(g_audioOut != nullptr);
+    EXPECT(g_audioBackendReady);
+    EXPECT(logHas("audio: TROCA de backend"));
+    audioBackendSwitch(false);   // volta (idempotente no stub)
+    EXPECT(g_audioBackendReady);
+
+    // lifecycle: pause/resume não crasham (APP_CMD_PAUSE/RESUME do main)
+    android_app app;
+    std::memset(&app, 0, sizeof(app));
+    onAppCmd(&app, APP_CMD_PAUSE);
+    onAppCmd(&app, APP_CMD_RESUME);
+    EXPECT(logHas("audio: PAUSE"));
+    EXPECT(logHas("audio: RESUME"));
+
+    if (g_audioOut) {
+        g_audioOut->stop();
+    }
+    g_audioOut.reset();
+    g_audioBackendReady = false;
+}
+
+// ---------------------------------------------------------------------------
+// 0.8.11-5. FRAME no modo ÁUDIO: o workspace substitui o viewport (rect do
+// editor de UI), o frame COMPLETA (sem early-return escondido), os glifos
+// de altifalante NÃO desenham no modo áudio (só no 3D) e o Inspector com
+// AudioPlayer selecionado desenha a secção Audio com o clip atribuído.
+// ---------------------------------------------------------------------------
+TEST(wiring011_device_frame_audio_mode_e_glyphs) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    javaRegistersGranted();
+    android_app app;
+    std::memset(&app, 0, sizeof(app));
+    onAppCmd(&app, APP_CMD_INIT_WINDOW);
+    EXPECT(g_ready);
+    if (!g_font.ok()) {
+        const char* paths[] = {FONT_FIXTURE};
+        EXPECT(g_font.loadFromPaths(paths, 1, 28.0f));
+    }
+    g_ui.setFont(&g_font);
+    g_projectReady = true;
+
+    // projeto com um clip + TIC de áudio com o clip atribuído
+    auto st = std::make_unique<FakeStorage>();
+    FakeStorage* rawSt = st.get();
+    g_storage = std::move(st);
+    const Handle h = createTicFromPreset(g_scene, PresetKind::Audio, nullptr,
+                                         nullptr);
+    g_editor.selected = h;
+    AudioPlayer* au = g_scene.get(h)->getComponent<AudioPlayer>();
+    ASSERT(au != nullptr);
+    au->clipPath = "audio/x.gi";
+    au->posicional = true;
+    au->raioExterno = 4.0f;
+    // um .gi mínimo no storage (o catálogo + o Inspector "clip: x")
+    {
+        const std::vector<i16> pcm(4410, 8000);
+        GiWriteIn wi;
+        wi.codec = GiCodec::Adpcm;
+        wi.sampleRate = 44100;
+        wi.channels = 1;
+        wi.frames = pcm.size();
+        wi.pcm16 = pcm.data();
+        wi.name = "x";
+        std::vector<u8> gi;
+        std::string err;
+        ASSERT(writeGi(wi, gi, err));
+        ASSERT(rawSt->writeBytes("audio/x.gi", gi.data(), gi.size()));
+    }
+    refreshAudioCatalog();
+
+    // (a) frame LIMPO em 3D: os GLIFOS do altifalante desenham (pass UI)
+    glstub::reset();
+    const auto t0 = std::chrono::steady_clock::now();
+    frame();
+    EXPECT(msSince(t0) < 500.0);
+    EXPECT(glstub::stats.drawArraysCalls > 0);
+
+    // (b) frame no modo ÁUDIO: o workspace É o viewport; o frame COMPLETA
+    // (sem crash, sem hang) — o toolbar continua a desenhar (o G3 com o
+    // ÁUDIO ativo é o CAMINHO DE VOLTA ao 3D)
+    g_editor.audioMode = true;
+    const auto t1 = std::chrono::steady_clock::now();
+    frame();
+    EXPECT(msSince(t1) < 500.0);
+
+    // (c) o PREVIEW do Inspector: o flag liga a voz no misturador (o frame
+    // chama audioPreviewTick(*selTic)); um clip de 0.1 s acaba sozinho
+    au->previewing = true;
+    {
+        const auto t2 = std::chrono::steady_clock::now();
+        frame();
+        EXPECT(msSince(t2) < 500.0);
+        EXPECT(au->voiceId >= 0);        // a voz NASCEU pelo caminho real
+        EXPECT(g_audioEngine.activeVoices() == 1);
+        EXPECT(logHas("audio: preview no TIC"));
+        // esgota o clip (0.1 s = 4410 frames @ 44100): o fim natural
+        // desliga o flag (o mix corre AQUI como o callback faria)
+        std::vector<f32> buf(8192 * 2);
+        g_audioEngine.mix(buf.data(), 8192, 2, 44100);
+        audioPreviewTick(*g_scene.get(h));
+        EXPECT(au->voiceId == -1);
+        EXPECT(!au->previewing);
+    }
+    g_editor.audioMode = false;
+
+    onAppCmd(&app, APP_CMD_TERM_WINDOW);
 }
