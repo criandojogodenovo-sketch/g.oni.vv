@@ -260,8 +260,22 @@ campos/grelha + bug latente do uExtent). Zero V.ONI, zero layout novo
 
 ## 11. Fecho do CI
 
-(commits 0.8.9-a/0.8.9-b — preencher com os IDs/sha256 do run no fecho)
-core-tests 568 OK · check_main/link_parity (85 TUs)/jni_parity OK ·
-build-release assinado (versionCode 39) · verify-entry-symbols COM OS GATES
-(makePrimMesh/primDefaults/primName/primClamp/applyAssetPick) ·
-resolve-crash-087 verde (BuildID casado, funções nomeadas no §3).
+Commit **0.8.9-a** (ad4c746) — run **37017728635** do workflow `release`,
+**100% VERDE**: core-tests **568 OK** · JVM host (ProjectsFormat) · check
+estrutural (check_main/link_parity 85 TUs/jni_parity) · build-release
+**ASSINADO** (versionCode 39) · verify-entry-symbols **COM OS GATES**
+(makePrimMesh/primDefaults/primName/primClamp/applyAssetPick confirmados no
+.dynsym do arm64 — conferidos também localmente no artifact). O workflow
+`resolve-crash-087` (run 37014729599) fechou a exigência do prompt: BuildID
+do build refeito CASADO byte-a-byte com o assinado 0.8.7
+(79363917aa0ce6580b9e0f93cf7493762cd27940) e as funções NOMADAS no §3
+(artifact `crash-1790830406-resolution`).
+
+**APK assinado 0.8.9** (artifact `goni-vv-0.8.9-release-signed`):
+app-release.apk sha256
+`a8d33a3ee752b6f7173d8e7310b1f3dab176a024cfd2ae7b9158c4e7522dc2f4`
+(libgoni_vv.so arm64 sha256
+`b929b396ac13c92669f75ec765de87e97f88974562483ca596f35f68737bcb42`,
+BuildID 0e2a3ee9e2f492ff4f0190099bd2983e6ef3ffe3). Aguarda VERIFIED do
+dono no C33 (checklist 0.8.9 no README — **zero crash dumps novos** é o
+critério global).
