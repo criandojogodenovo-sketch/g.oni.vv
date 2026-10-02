@@ -230,3 +230,23 @@ Só import + troca de mesh + auditoria de existência + logging + testes.
 Zero features novas, zero layout, zero animação, zero física, zero
 scripting. Nenhum mesh novo, nenhum material novo, nenhum sistema novo —
 os únicos valores novos são um CAP e duas flags postas a true.
+
+## 11. Fecho do CI (0.8.7-b)
+
+Run 36992339344 (push `4e8552d`) — CI da sub-fase 100% VERDE:
+core-tests (545 OK no cmake do CI) + build-release ASSINADO (artifact
+`goni-vv-0.8.7-release-signed`) + verify-entry-symbols com o GATE NOVO
+(as linhas do log do job provam os símbolos no .dynsym do APK arm64:
+`_ZN2vv12makePrimMeshE…`, `_ZN2vv12primDefaultsE…`, `_ZN2vv8primNameE…`,
+`_ZN2vv9primClampE…`, `_ZN2vv6editor14applyAssetPickE…` — o GERADOR DE
+PRIMITIVAS E O DISPATCH DA TROCA EXISTEM NO BINÁRIO DA APP, a resposta
+definitiva à suspeita da auditoria).
+
+sha256 do APK assinado:
+`be3278534c83a2ab63151338c51892aa6791ffd4453c75419a8a67eaf697875a`
+(artifact goni-vv-0.8.7-release-signed, 1512909 bytes, versionCode 38).
+
+Pendente: a VERIFICAÇÃO NO C33 pelo dono (checklist 0.8.7 no README —
+import abre o navegador; trocas variadas sem travar; `mesh: prim …
+verts=… idx=…` no log viewer a cada troca; se algo falhar, a ÚLTIMA linha
+`import:`/`mesh:` do engine.log diz o passo exato).
