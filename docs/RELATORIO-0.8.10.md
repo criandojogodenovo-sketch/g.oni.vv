@@ -308,3 +308,25 @@ com progresso+cancelamento sem crash, projeto antigo converte em
 silêncio, extração .zip com ficheiros crus + import posterior, settings
 fonte/reconverter, banner de identidade + badge ANTIGO. Zero dumps
 novos continua a ser o critério global — e agora cada dump se identifica.
+
+---
+
+## FECHO CI (17)
+
+- Commits: `6052595` (0.8.10-a: mesh determinística + streaming + formatos)
+  → `9d4317d`/`22c62b5` (fixes CI: buildConfig true + assetInfo de
+  instância — os 3 erros javac do 1º run) → `ad4ed3a` (artifact 0.8.10).
+- Run **37046257129**: 100% VERDE — core-tests **581** OK + JVM host +
+  check estrutural + build-release **ASSINADO versionCode 40** (2 passes
+  com build_info.txt) + verify-entry-symbols com os GATES NOVOS.
+- **Artifact `goni-vv-0.8.10-release-signed`** — `app-release.apk`
+  sha256 `a0781e661c29853f53c2158e6080e060eceaf2418731850f0e6e261dacbae807`.
+- **Identidade verificada ponta-a-ponta**: o build_info.txt DENTRO do APK
+  diz `soSha256=f9ba6bc647766ac37d5594252eee2105116c9573723c097e991ec215bc60449a`
+  e a .so arm64 EXTRAÍDA do mesmo APK tem EXATAMENTE esse sha256 (o
+  2-passes do CI funciona — qualquer crash dump desta build identifica-se).
+- Símbolos novos confirmados no .dynsym real do APK: writeGMesh/readGMesh/
+  readGText/readGAnim/primMeshHash/extractArchive/attachGAnim/importFile/
+  migrateLegacyAssets (9 famílias).
+- Aguarda VERIFIED do dono no C33 (checklist 0.8.10 no README — 7 blocos;
+  zero dumps novos continua a ser o critério global).
