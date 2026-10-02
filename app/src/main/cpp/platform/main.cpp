@@ -50,6 +50,7 @@
 #include "render/Mesh.h"
 #include "render/Primitives.h"   // 0.8.0 (F7): primitivas procedurais
 #include "render/Renderer.h"
+#include "core/SceneBounds.h"   // 0.8.9: AABB da cena → far dinâmico editor+Play
 #include "ui/EditorUi.h"
 #include "ui/Toolbar.h"   // 0.7.6: barra final de 5 grupos (G1..G5)
 #include "ui/CamGizmo.h"   // 0.7.7: frustum/handles/câmara de jogo
@@ -1037,6 +1038,11 @@ Mesh* primMesh(const PrimParams& pIn) {
     }
     PrimMeshData data;
     makePrimMesh(p, data);
+    // 0.8.9 (À PROVA DE FALHA): VALIDAÇÃO COMPLETA da geometria ANTES do
+    // upload — verts>0, idx>0 (ok()), coordenadas finitas, AABB não
+    // degenerado. Falha em QUALQUER passo → entrada NEGATIVA no cache (o
+    // mesh ANTERIOR do TIC fica intacto — nunca desseleciona, nunca
+    // crasha) com a RAZÃO exata no engine.log.
     if (!data.ok()) {
         elog::error("mesh: prim %s ERRO(geometria vazia — %u verts %u idx)",
                     primName(p.kind),
@@ -1045,6 +1051,31 @@ Mesh* primMesh(const PrimParams& pIn) {
         primCacheEvict();   // ANTES do push: a entrada nova nunca é evictada
         g_primCache.push_back(PrimCacheEntry{p, nullptr});
         return nullptr;
+    }
+    for (size_t v = 0; v < data.vertices.size(); ++v) {
+        const Vec3& pos = data.vertices[v].pos;
+        if (!std::isfinite(pos.x) || !std::isfinite(pos.y) ||
+            !std::isfinite(pos.z)) {
+            elog::error("mesh: prim %s ERRO(vert %zu nao finito — gerador)",
+                        primName(p.kind), v);
+            primCacheEvict();
+            g_primCache.push_back(PrimCacheEntry{p, nullptr});
+            return nullptr;
+        }
+    }
+    {
+        Vec3 mn, mx;
+        primBounds(data, mn, mx);
+        const Vec3 ext{mx.x - mn.x, mx.y - mn.y, mx.z - mn.z};
+        const f32 maior = ext.x > ext.y ? (ext.x > ext.z ? ext.x : ext.z)
+                                        : (ext.y > ext.z ? ext.y : ext.z);
+        if (!(maior > 1e-6f)) {
+            elog::error("mesh: prim %s ERRO(AABB degenerado — extensao %.3g)",
+                        primName(p.kind), maior);
+            primCacheEvict();
+            g_primCache.push_back(PrimCacheEntry{p, nullptr});
+            return nullptr;
+        }
     }
     PrimCacheEntry e;
     e.sig = p;
@@ -1147,6 +1178,12 @@ editor::AssetResolvers makeAssetResolvers() {
     res.prim = [](const PrimParams& p) -> Mesh* {   // 0.8.0 (F7)
         return primMesh(p);
     };
+    // 0.8.9: AABB do mesh COMO DADOS (o applyAssetPick é puro — nunca
+    // desreferencia o Mesh; aqui sim, no device, o Mesh é REAL)
+    res.meshExtent = [](const std::string& ref) -> Vec3 {
+        Mesh* m = g_gpu.mesh(ref);
+        return m ? m->boundsExtent() : Vec3{0.0f, 0.0f, 0.0f};
+    };
     return res;
 }
 
@@ -1175,7 +1212,7 @@ void applyImportedAssetToSelectedTic() {
                 showToast(out.toast);
             }
             if (out.log[0] != '\0') {
-                LOGI("%s", out.log);
+                elog::info("%s", out.log);   // 0.8.9: idem (o "Sim" do import prova o fit uniforme no log)
             }
             // 0.8.7 — contagens do mesh APLICADO (o TIC tem meshes reais no
             // caminho do import; o applyAssetPick é puro — não desreferencia)
@@ -2075,16 +2112,37 @@ void frame() {
     // (pose do Transform3D + parâmetros do CameraComp); sem câmara ativa o
     // fallback é a orbit de edição. O EDITOR mantém a orbit SEMPRE (o
     // frustum é que é o gizmo — nunca o render).
+    // 0.8.9 (ESPAÇO SEM TETOS): near/far DINÂMICOS por frame, derivados do
+    // ZOOM e do AABB da CENA (distância ao ponto mais longe + folga) — o far
+    // CONTÉM sempre a cena (objetos gigantes/longe nunca mais clipam) e o
+    // near segue o zoom (rácio saudável a qualquer escala). Recalculado por
+    // frame = cobre edição E load por construção.
     Mat4 view;
     Mat4 proj;
     Vec3 camEye;
     f32  camFocus;
+    Vec3 sceneMn, sceneMx;
+    f32  sceneRadius = 0.0f;
+    camerautil::sceneAABB(g_scene, sceneMn, sceneMx, sceneRadius);
     if (gameCamTr && gameCamComp) {
+        // Play: far efetivo = max(farZ do dono, olho→mais-longe+10) — o
+        // slider do dono é PISO, nunca teto; near com defesa de rácio
+        // (≤ 100 000:1 contra z-fighting a distâncias enormes)
+        CameraComp playCam = *gameCamComp;
+        playCam.farZ = camerautil::playFar(
+            *gameCamComp,
+            camerautil::aabbFarthestDist(gameCamTr->pos, sceneMn, sceneMx));
+        playCam.nearZ = camerautil::playNear(*gameCamComp, playCam.farZ);
         view = camgizmo::gameView(*gameCamTr);
-        proj = camgizmo::gameProj(*gameCamComp, w / h);
+        proj = camgizmo::gameProj(playCam, w / h);
         camEye = gameCamTr->pos;
         camFocus = length(gameCamTr->pos);   // fade do grid: dist. ao centro
     } else {
+        f32 clipNear = Camera::kDefaultNear, clipFar = Camera::kDefaultFar;
+        camerautil::editorClips(
+            g_camera.dist, camerautil::sceneFarthest(sceneMn, sceneMx),
+            clipNear, clipFar);
+        g_camera.setClips(clipNear, clipFar);
         view = g_camera.view();
         proj = g_camera.proj(w / h);
         camEye = g_camera.eye();
@@ -2492,16 +2550,22 @@ void frame() {
                                menuKind == 4 && pick == 1 ? "prim desligado"
                                                           : "sem resolver");
                 } else {
+                    // 0.8.9 — ERRO HONESTO: distinguir "sem alvo" (o TIC
+                    // selecionado não tem MeshRenderer — ex.: seleção perdida
+                    // pós-restart) de "gerador/upload falhou" (o resolver
+                    // devolveu null — a causa exata está nas linhas
+                    // "mesh: prim … ERRO(…)" ACIMA). O C33 0.8.7 lia
+                    // "gerador/upload falhou" num caso que era SÓ seleção
+                    // perdida — o gerador estava bem.
                     elog::error("mesh: troca %s → %s ERRO(%s)", de, para,
-                                menuKind == 4
-                                    ? "gerador/upload falhou — causa acima"
-                                    : "resolver falhou — causa acima");
+                                mrOld ? "gerador/upload falhou — causa acima"
+                                      : "sem TIC com mesh selecionado");
                 }
                 if (out.toast[0] != '\0') {
                     showToast(out.toast);
                 }
                 if (out.log[0] != '\0') {
-                    LOGI("%s", out.log);
+                    elog::info("%s", out.log);   // 0.8.9: vai ao engine.log (a prova no log viewer do C33)
                 }
             }
         }

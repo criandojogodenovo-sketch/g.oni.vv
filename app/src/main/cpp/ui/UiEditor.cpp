@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>   // 0.8.9: strtof (campo numérico do Inspector)
 #include <cstring>
 #include <string>
 #include "components/BodyComp.h"
@@ -23,6 +24,11 @@
 #include "core/Scene.h"
 #include "platform/InputState.h"
 #include "ui/EditorUi.h"
+
+namespace {
+// 0.8.9 — graus→radianos local (o commit do campo numérico converte rot)
+constexpr float deg2radLocal(float d) { return d * 0.01745329252f; }
+} // namespace
 #include "ui/UiContext.h"
 #include "ui/UiRuntime.h"
 
@@ -761,11 +767,16 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                       uiElementKindName(e.kind));
     }
 
-    // 0.7.4 — lista de containers do canvas p/ o botão "colocar em"
-    // (ordem do array; inclui o próprio — o resolver guarda ciclos)
+    // 0.7.4 — lista de containers do canvas p/ o botão "colocar em".
+    // 0.8.9 (CRASH-PROOF): EXCLUI O PRÓPRIO elemento. O comentário antigo
+    // dizia "inclui o próprio — o resolver guarda ciclos", mas só o sizeOf
+    // tinha guard: o placeAt recursivo NÃO (0.8.8→0.8.9, crash do C33 por
+    // stack exhaustion). Colocar um container DENTRO DE SI era um clique e
+    // recursava infinitamente; agora a opção nem aparece (e o resolver tem
+    // guard duplo por causa dos ficheiros já gravados com ciclo).
     std::vector<std::string> containers;
     for (const UiElement& o : canvas->elements) {
-        if (uiElementIsContainer(o.kind)) {
+        if (uiElementIsContainer(o.kind) && o.name != e.name) {
             containers.push_back(o.name);
         }
     }
@@ -1587,20 +1598,24 @@ int drawTextInput(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     // (maiúsculas ativas → "abc" disponível); NÃO escreve no buffer.
     // 0.8.6: em modo HEX (propósitos 4/5) a tecla vira "#" (o cardinal do
     // código) — a geometria é a mesma, o CARÁTER é do modo.
+    // 0.8.9: em modo NUMÉRICO (propósito 6) a tecla vira "-" (sinal) e a
+    // tecla do traço vira "." (decimal) — dígitos estão na linha de baixo.
     const bool hexMode = st.textPurpose == 4 || st.textPurpose == 5;
+    const bool numMode = st.textPurpose == 6;
     if (ui.button(kKbCaseId, k.caseKey.x, k.caseKey.y, k.caseKey.w,
                   k.caseKey.h,
-                  hexMode ? "#" : (st.kbLower ? "ABC" : "abc"))) {
-        if (hexMode) {
+                  numMode ? "-" : (hexMode ? "#" : (st.kbLower ? "ABC" : "abc")))) {
+        if (numMode) {
+            typeChar('-');
+        } else if (hexMode) {
             typeChar('#');
         } else {
             st.kbLower = !st.kbLower;
         }
     }
     if (ui.button(kKbDashId, k.dash.x, k.dash.y, k.dash.w, k.dash.h,
-                  hexMode ? "." : "-")) {
-        typeChar(hexMode ? '.' : '-');   // 0.8.6: hex não usa '-' — ponto é
-                                         // inofensivo (o parse rejeita)
+                  numMode ? "." : (hexMode ? "." : "-"))) {
+        typeChar(numMode ? '.' : (hexMode ? '.' : '-'));   // 0.8.9: num/hex têm PONTO; texto tem traço
     }
     if (ui.button(kKbBackId, k.back.x, k.back.y, k.back.w, k.back.h, "APAGA")) {
         if (st.textLen > 0) {
@@ -1713,6 +1728,48 @@ bool commitTextInput(Scene& scene, EditorState& st) {
             mr->tint[0] = rgba[0];
             mr->tint[1] = rgba[1];
             mr->tint[2] = rgba[2];
+            return true;
+        }
+        case 6: {   // 0.8.9 — CAMPO NUMÉRICO SEM TETO do Inspector (Transform3D)
+            // st.textElement = índice do campo: 0..2 pos, 3..5 rot (graus),
+            // 6..8 escala. strtof EXIGE consumo total; não-finito/inválido =
+            // estado intacto (o mesmo contrato do hex). Escala tem piso
+            // 0.001 (0/negativo degeneraria o mesh); pos/rot são livres.
+            Tic* tic = scene.get(st.textTic);
+            Transform3D* tr =
+                tic ? tic->getComponent<Transform3D>() : nullptr;
+            if (!tr || st.textElement < 0 || st.textElement > 8) {
+                return false;
+            }
+            char* end = nullptr;
+            const f32 v = std::strtof(st.textBuf, &end);
+            if (end == st.textBuf || *end != '\0' || !std::isfinite(v)) {
+                return false;   // inválido: fica como estava
+            }
+            switch (st.textElement) {
+                case 0: tr->pos.x = v; break;
+                case 1: tr->pos.y = v; break;
+                case 2: tr->pos.z = v; break;
+                case 3:   // rot: graus → quat (mesma conversão dos sliders)
+                case 4:
+                case 5: {
+                    f32 ex = 0.0f, ey = 0.0f, ez = 0.0f;
+                    Quat::toEuler(tr->rot, ex, ey, ez);
+                    if (st.textElement == 3) ex = deg2radLocal(v);
+                    else if (st.textElement == 4) ey = deg2radLocal(v);
+                    else ez = deg2radLocal(v);
+                    tr->rot = Quat::fromEuler(ex, ey, ez);
+                    break;
+                }
+                default: {   // 6..8: escala (piso 0.001)
+                    const f32 sv = v < 0.001f ? 0.001f : v;
+                    if (st.textElement == 6) tr->scale.x = sv;
+                    else if (st.textElement == 7) tr->scale.y = sv;
+                    else tr->scale.z = sv;
+                    break;
+                }
+            }
+            tr->updateWorld();
             return true;
         }
         default:

@@ -797,3 +797,308 @@ TEST(wiring087_boot_e_frame_smoke_com_browser_aberto) {
     EXPECT(!g_ready);
     EXPECT(g_primCache.empty());
 }
+
+// ===========================================================================
+// 0.8.9 — CRASH-PROOF: casos do CAMINHO DO DEVICE (este TU inclui o
+// platform/main.cpp — primMesh/applyImportedAssetToSelectedTic/globais).
+// A parte PURA (placeAt/Json/grid/far/normalização/campos numéricos/
+// geradores extremos) vive em test_wiring089.cpp.
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// 0.8.9-1. A SEQUÊNCIA EXATA DO DEVICE (esfera→box→cápsula, origem "-")
+// termina SEM crash — incluindo o estado de origem "-" (TIC cubo sem prim,
+// o que o C33 via após o restart) e a cápsula que "gerador/upload falhou"
+// (era seleção perdida + upload; nunca mais dessceleciona).
+// ---------------------------------------------------------------------------
+TEST(wiring089_device_sequencia_do_dump_termina_sem_crash) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    javaRegistersGranted();
+    ensureEngineReady();
+
+    // TIC CUBO (sem prim — a origem "-" do dump do C33)
+    const Handle h = createTicFromPreset(g_scene, PresetKind::Mesh, nullptr,
+                                         nullptr);
+    ASSERT(h.valid());
+    Tic* t = g_scene.get(h);
+    t->name = "Cubo";
+    MeshRenderer* mr = t->getComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+    mr->primOn = false;
+    mr->mesh = &g_cubeMesh;
+    mr->material = g_renderer.litMaterial();
+    g_editor.selected = h;
+
+    // a sequência do log do C33: "-" → prim esfera → prim box → prim capsula
+    const PrimKind seq[3] = {PrimKind::Sphere, PrimKind::Box,
+                             PrimKind::Capsule};
+    for (const PrimKind kind : seq) {
+        const editor::AssetPickOutcome out = editor::applyAssetPick(
+            g_scene, g_editor.selected, 4,
+            static_cast<int>(kind) + 2, g_catalog, makeAssetResolvers());
+        EXPECT(out.applied);                        // TODAS aplicam
+        EXPECT(g_editor.selected == h);             // seleção NUNCA muda
+        ASSERT(mr->mesh != nullptr);
+        EXPECT(mr->mesh->vertexCount() > 0);
+        EXPECT(mr->mesh->indexCount() >= 3);
+    }
+    // o estado final é a CÁPSULA (o "continua cubo" do C33 era o reload
+    // pós-crash — agora o estado fica mesmo onde o dono pôs)
+    EXPECT(mr->primOn);
+    EXPECT(mr->prim.kind == PrimKind::Capsule);
+    EXPECT(logHas("mesh: prim capsula verts="));    // a prova no log
+
+    // E o caminho com SELEÇÃO PERDIDA (a origem "-" verdadeira do dump: TIC
+    // sem MeshRenderer): falha GRÁCEVEL, sem crash, sem tocar na seleção
+    const Handle plain = g_scene.create("semMesh");
+    g_editor.selected = plain;
+    const editor::AssetPickOutcome out2 = editor::applyAssetPick(
+        g_scene, plain, 4, 9, g_catalog, makeAssetResolvers());
+    EXPECT(!out2.applied);                          // sem alvo: não aplica
+    EXPECT(g_editor.selected == plain);             // seleção intacta
+    // o TIC de cubo CONTINUA cápsula (o estado anterior é sagrado)
+    EXPECT(g_scene.get(h)->getComponent<MeshRenderer>()->prim.kind ==
+           PrimKind::Capsule);
+}
+
+// ---------------------------------------------------------------------------
+// 0.8.9-2. FALHA DE GERADOR/UPLOAD: mantém o mesh ANTERIOR e a seleção.
+// (o prompt: "falha simulada de gerador mantém mesh anterior E seleção")
+// ---------------------------------------------------------------------------
+TEST(wiring089_device_falha_gl_mantem_mesh_anterior_e_selecao) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    ensureEngineReady();
+    const Handle h = addMeshTic("Falha89");   // esfera no mesh
+    ASSERT(h.valid());
+    Tic* t = g_scene.get(h);
+    MeshRenderer* mr = t->getComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+    Mesh* const esferaMesh = mr->mesh;
+    ASSERT(esferaMesh != nullptr);
+    const u32 idxBefore = esferaMesh->indexCount();
+    const u32 vaoBefore = 12345u;   // marcador (o mesh antigo NÃO é recriado)
+
+    // o "device doente": glGen* devolve 0 → o upload da TORA falha
+    glstub::failNextGenObjects = true;
+    const editor::AssetPickOutcome out = editor::applyAssetPick(
+        g_scene, h, 4, static_cast<int>(PrimKind::Torus) + 2, g_catalog,
+        makeAssetResolvers());
+    glstub::failNextGenObjects = false;
+    EXPECT(!out.applied);                      // a torus NÃO aplicou
+    // o mesh ANTERIOR fica (À PROVA DE FALHA: nunca fica sem mesh)
+    EXPECT(mr->mesh == esferaMesh);
+    EXPECT(mr->mesh->indexCount() == idxBefore);
+    EXPECT(mr->primOn);                        // estado anterior intacto
+    EXPECT(mr->prim.kind == PrimKind::Sphere);
+    // seleção NUNCA muda (o "desseleciona e continua cubo" era o crash)
+    EXPECT(g_editor.selected == h);
+    // a RAZÃO no log (erro legível, não um crash dump)
+    EXPECT(logHas("mesh: prim torus ERRO(upload GL"));
+    (void)vaoBefore;
+
+    // recuperado: o MESMO alvo aceita a troca no contexto novo (o cache
+    // negativo sai com o primMeshDestroy; NÃO comparamos ponteiros com o
+    // mesh destruído — o heap recicla endereços — aferimos o ESTADO)
+    primMeshDestroy();
+    const editor::AssetPickOutcome out2 = editor::applyAssetPick(
+        g_scene, h, 4, static_cast<int>(PrimKind::Torus) + 2, g_catalog,
+        makeAssetResolvers());
+    EXPECT(out2.applied);
+    ASSERT(mr->mesh != nullptr);
+    EXPECT(mr->mesh->vertexCount() > 0);
+    EXPECT(mr->prim.kind == PrimKind::Torus);
+    EXPECT(logHas("mesh: prim torus verts="));   // a PROVA no log
+}
+
+// ---------------------------------------------------------------------------
+// 0.8.9-3. AS 8 PRIMITIVAS × 3 ORDENS variadas — sem crash, sem perda de
+// seleção, TODAS desenham (stub GL grava draw calls; o material lit afirma
+// o cull — backface culling contra winding errado).
+// ---------------------------------------------------------------------------
+TEST(wiring089_device_oito_prims_tres_ordens_todas_renderizam) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    ensureEngineReady();
+    const Handle h = addMeshTic("Ordens");
+    ASSERT(h.valid());
+    Tic* t = g_scene.get(h);
+    MeshRenderer* mr = t->getComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+
+    // 3 ordens: direta, inversa, intercalada (extremos↔meio)
+    const int ordA[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+    const int ordB[8] = {7, 6, 5, 4, 3, 2, 1, 0};
+    const int ordC[8] = {0, 7, 1, 6, 2, 5, 3, 4};
+    const int* ords[3] = {ordA, ordB, ordC};
+    for (int o = 0; o < 3; ++o) {
+        for (int i = 0; i < 8; ++i) {
+            const PrimKind kind = static_cast<PrimKind>(ords[o][i]);
+            const editor::AssetPickOutcome out = editor::applyAssetPick(
+                g_scene, h, 4, static_cast<int>(kind) + 2, g_catalog,
+                makeAssetResolvers());
+            EXPECT(out.applied);
+            EXPECT(g_editor.selected == h);          // SEM perda de seleção
+            ASSERT(mr->mesh != nullptr);
+            EXPECT(mr->mesh->vertexCount() > 0);
+            // TODAS renderizam: draw no stub GL (1 draw a mais por troca)
+            const u32 draws = static_cast<u32>(glstub::stats.drawElementsCalls);
+            g_renderer.beginFrame();
+            (void)g_renderer.drawMesh(*mr->mesh, Mat4::identity(),
+                                      Mat4::identity());
+            EXPECT(static_cast<u32>(glstub::stats.drawElementsCalls) ==
+                   draws + 1);
+            // culling: o lit material liga GL_CULL_FACE (winding CCW do
+            // gerador passa — a aferição por triângulo vive no test_prims)
+            EXPECT(glstub::stats.cullEnabled);
+        }
+    }
+    // o cache ficou estável (cap 48; 8 assinaturas × reuso — sem crescer)
+    EXPECT(g_primCache.size() <= 48u);
+}
+
+// ---------------------------------------------------------------------------
+// 0.8.9-4. IMPORT GIGANTE e2e (o caminho do device: browser → "Sim" →
+// applyImportedAssetToSelectedTic): fator ÚNICO, proporções preservadas,
+// linha "import: dims=… uniform scale=…", re-aplicar não mexe na escala.
+// ---------------------------------------------------------------------------
+TEST(wiring089_device_import_gigante_uniforme_sem_espalmar) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    javaRegistersGranted();
+    ensureEngineReady();
+
+    auto st = std::make_unique<FakeStorage>();
+    FakeStorage* rawSt = st.get();
+    rawSt->makeDirs("meshes");
+    g_storage = std::move(st);
+    g_resources.setStorage(rawSt);
+    g_gpu.init(&g_resources);
+    g_projectReady = true;
+    refreshCatalog();
+
+    const Handle h = addMeshTic("Gigante");
+    ASSERT(h.valid());
+    Tic* t = g_scene.get(h);
+    MeshRenderer* mr = t->getComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+    Transform3D* tr = t->getComponent<Transform3D>();
+    ASSERT(tr != nullptr);
+    tr->scale = Vec3{1.0f, 1.0f, 1.0f};
+
+    // OBJ GIGANTE 1000×500×250 (o "modelo do dono" que entrava inutilizável)
+    const char* giant =
+        "o gigante\nv 0 0 0\nv 1000 0 0\nv 0 500 250\nf 1 2 3\n";
+    const std::string tmp = "goni_w089_giant.obj";
+    FILE* f = std::fopen(tmp.c_str(), "wb");
+    ASSERT(f != nullptr);
+    std::fwrite(giant, 1, std::strlen(giant), f);
+    std::fclose(f);
+    fileapi::DirEntry e;
+    e.name = "goni_w089_giant.obj";
+    e.path = tmp;
+    e.isDir = false;
+    e.kind = 'm';
+
+    browserImportFile(e);
+    applyImportedAssetToSelectedTic();
+    ASSERT(mr->mesh != nullptr);
+    EXPECT(mr->meshPath == "meshes/goni_w089_giant.obj");
+
+    // AABB ORIGINAL do mesh (1000×500×250) — a geometria fica INTACTA
+    const Vec3 ext = mr->mesh->boundsExtent();
+    EXPECT(::test::nearEqF(ext.x, 1000.0f, 0.5f));
+    EXPECT(::test::nearEqF(ext.y, 500.0f, 0.5f));
+    EXPECT(::test::nearEqF(ext.z, 250.0f, 0.5f));
+
+    // FATOR ÚNICO: s = 2/1000 = 0.002 nos TRÊS eixos (nunca espalmado)
+    EXPECT(::test::nearEqF(tr->scale.x, 0.002f, 1e-6f));
+    EXPECT(::test::nearEqF(tr->scale.y, 0.002f, 1e-6f));
+    EXPECT(::test::nearEqF(tr->scale.z, 0.002f, 1e-6f));
+    // AABB RENDER ≤ alvo com PROPORÇÕES IGUAIS (x:y:z antes == depois)
+    const Vec3 scaled{ext.x * tr->scale.x, ext.y * tr->scale.y,
+                      ext.z * tr->scale.z};
+    EXPECT(scaled.x <= editor::kImportTargetSize * 1.001f);
+    EXPECT(::test::nearEqF(scaled.x / scaled.y, ext.x / ext.y, 1e-3f));
+    EXPECT(::test::nearEqF(scaled.y / scaled.z, ext.y / ext.z, 1e-3f));
+
+    // a linha exigida pelo prompt no engine.log
+    EXPECT(logHas("import: dims="));
+    EXPECT(logHas("uniform scale="));
+
+    // "escala original": repõe {1,1,1} — o mesh volta ao tamanho REAL
+    tr->scale = Vec3{1.0f, 1.0f, 1.0f};
+    EXPECT(::test::nearEqF(mr->mesh->boundsMaxExtent(), 1000.0f, 0.5f));
+
+    // re-aplicar o MESMO ref NÃO re-normaliza (a escala afinada é sagrada)
+    tr->scale = Vec3{3.0f, 3.0f, 3.0f};
+    const editor::AssetPickOutcome out = editor::applyAssetPick(
+        g_scene, h, 1, 2, g_catalog, makeAssetResolvers());
+    EXPECT(out.applied);
+    EXPECT(::test::nearEqF(tr->scale.x, 3.0f, 1e-5f));
+
+    std::remove(tmp.c_str());
+}
+
+// ---------------------------------------------------------------------------
+// 0.8.9-5. ESPAÇO SEM TETOS no device: zoom 0.01→100 000, far dinâmico por
+// frame (contém a cena) e grelha adaptativa (o passo vai ao shader).
+// ---------------------------------------------------------------------------
+TEST(wiring089_device_zoom_far_dinamico_e_grelha_adaptativa) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    javaRegistersGranted();
+
+    android_app app;
+    std::memset(&app, 0, sizeof(app));
+    onAppCmd(&app, APP_CMD_INIT_WINDOW);
+    EXPECT(g_ready);
+
+    // um TIC lá longe (py=10 000 via CAMPO — o propósito 6 é o mesmo do CI)
+    const Handle h = addMeshTic("Longe");
+    ASSERT(h.valid());
+    Transform3D* tr = g_scene.get(h)->getComponent<Transform3D>();
+    ASSERT(tr != nullptr);
+    tr->pos.y = 10000.0f;
+
+    // o AABB da cena contém o TIC; o far derivado CONTÉM o AABB (pela
+    // DISTÂNCIA ao ponto mais longe — a cena está longe, não só "grande")
+    Vec3 mn, mx;
+    f32 radius = 0.0f;
+    camerautil::sceneAABB(g_scene, mn, mx, radius);
+    EXPECT(mx.y >= 10000.0f);
+    const f32 farthest = camerautil::sceneFarthest(mn, mx);
+    EXPECT(farthest >= 10000.0f);
+    f32 clipNear = 0.0f, clipFar = 0.0f;
+    camerautil::editorClips(g_camera.dist, farthest, clipNear, clipFar);
+    EXPECT(clipFar > 10000.0f);            // a cena cabe no frustum
+
+    // ZOOM nos extremos + frames: SEM crash (o clamp novo deixa chegar lá)
+    const f32 dists[4] = {0.01f, 6.0f, 5000.0f, 100000.0f};
+    for (const f32 d : dists) {
+        g_camera.setDistance(d);
+        EXPECT(g_camera.dist == d);        // dentro do range novo
+        const auto t0 = std::chrono::steady_clock::now();
+        frame();
+        EXPECT(msSince(t0) < 500.0);      // hang/crash = falha
+    }
+    // o far do frame nunca ficou atrás da cena (membro dinâmico setado)
+    EXPECT(g_camera.farZ > farthest);
+
+    // GRELHA adaptativa: o passo por zoom vai AO SHADER (uniform1f do step)
+    const f32 steps[3] = {0.05f, 60.0f, 5000.0f};
+    for (const f32 d : steps) {
+        glstub::stats.lastUniform1f = -1.0f;
+        g_grid.draw(Mat4::identity(), g_camera.eye(), d);
+        EXPECT(::test::nearEqF(glstub::stats.lastUniform1f,
+                               Grid::gridStepForDist(d), 1e-3f));
+    }
+
+    onAppCmd(&app, APP_CMD_TERM_WINDOW);
+}

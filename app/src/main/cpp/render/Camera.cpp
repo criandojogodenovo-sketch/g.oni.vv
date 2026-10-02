@@ -15,7 +15,9 @@ Mat4 Camera::view() const {
 }
 
 Mat4 Camera::proj(f32 aspect) const {
-    return Mat4::perspective(fovY, aspect, zNear, zFar);
+    // 0.8.9: nearZ/farZ são MEMBROS dinâmicos (setClips) — o far contém
+    // sempre o AABB da cena (derivado pelo main), nunca um teto fixo.
+    return Mat4::perspective(fovY, aspect, nearZ, farZ);
 }
 
 f32 Camera::pitchClamped(f32 p) const {

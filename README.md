@@ -1,3 +1,68 @@
+# G.One VV 0.8.9 — CRASH-PROOF: recursão + primitivas à prova de falha + fit uniforme + espaço sem tetos
+
+## Escopo 0.8.9 (implementado — 4 fixes cirúrgicos, ZERO features)
+
+**O DIAGNÓSTICO (dump-driven)**: o crash-1790830406.dump do C33 (SIGSEGV,
+`si_addr ≈ sp` = stack exhaustion, 60 frames com o MESMO pc) foi resolvido
+NO CI contra o build assinado exato (BuildID `79363917…` casado byte-a-byte;
+workflow `resolve-crash.yml`): `addr2line` nomeia `0xe2de8`/`0xe2f24` =
+`vv::SceneSerializer::(anonymous namespace)::appendComponentJson(Json&,
+SkeletonComp const*)` com a cadeia INLINE `std::vector<vv::Json>::~vector`
+(vector:445) — **o stack exauriu na CADEIA DE DESTRUTORES recursiva do
+Json**; `0xf2938` = `stbtt_GetGlyphKernAdvance+0x110` (função que NADA chama
+no binário — frame de unwind andando stack corrompida). O "TIC desseleciona
+e continua cubo" = a activity a reiniciar após o crash e a recarregar a cena
+gravada. O `ERRO(gerador/upload falhou)` com origem `-` era SELEÇÃO PERDIDA
+(o applyAssetPick sem alvo), não gerador — o gerador estava (e está) são.
+
+1. **CRASH (dump-driven)**: destrutor do Json REESCRITO ITERATIVO (cova
+   deque + fila — QUALQUER profundidade destrói plana; folhas pagam zero);
+   `placeAt` do resolver de UI ganhou GUARD DE CICLO + PROFUNDIDADE (o
+   `sizeOf` já guardava ciclos — o `placeAt` NÃO: um container pai de si
+   próprio — o seletor "colocar em" INCLUÍA o próprio — recursava
+   infinitamente; RED→GREEN: sem os guards o teste SEGFAULTA); o seletor
+   deixa de se auto-listar; `Json::dumpTo` ganhou teto 64 (o parser já
+   tinha); o loader CURA self-parent ao carregar (ficheiros 0.7.4–0.8.8);
+   **qualquer traversal recursivo do core tem agora teto/iteração — erro
+   legível em vez de SIGSEGV**.
+
+2. **PRIMITIVAS À PROVA DE FALHA**: o primMesh VALIDA a geometria ANTES do
+   upload (verts/idx, coordenadas finitas — o Mesh::create REJEITA NaN —,
+   AABB não degenerado); falha em qualquer passo → mantém o mesh anterior,
+   ERRO com a razão exata, seleção intacta, sem crash. O ERRO da troca é
+   HONESTO: "sem TIC com mesh selecionado" (seleção perdida) em vez do
+   "gerador/upload falhou" enganador. Auditoria: as 8 primitivas com
+   defaults E EXTREMOS (seg=3/256, raio=0.001/1000) geram válido, finito,
+   não-degenerado (tabela no RELATORIO-0.8.9).
+
+3. **NORMALIZAÇÃO UNIFORME NO IMPORT**: fator ÚNICO `s = 2 / maiorEixo`
+   aplicado aos 3 EIXOS (proporções preservadas — NUNCA espalmado); a
+   escala vive no Transform3D (geometria intacta); Inspector ganhou
+   "dims: X×Y×Z" + botão **escala original** (repõe {1,1,1}); log
+   `import: dims=… uniform scale=…` no engine.log (log viewer).
+
+4. **ESPAÇO SEM TETOS**: zoom 0.01 → 100 000 (era 1..300); near/far
+   DINÂMICOS por frame (editor E Play) derivados do zoom + AABB da cena
+   (distância ao ponto mais longe + margem — o far SEMPRE contém a cena;
+   o slider far do dono é PISO no Play); campos NUMÉRICOS sem teto no
+   Inspector (tocar o VALOR à direita do trilho → teclado numérico —
+   py=10 000 escreve-se; sliders mantêm o range suave); grelha ADAPTATIVA
+   (passo 0.1/1/10/100/1000 pelo zoom) — e o BUG LATENTE da F3.1 corrigido:
+   o uniform uExtent NUNCA era enviado (o quad estava degenerado — o grid
+   invisível desde a 0.3.1). Nota: jitter de float32 > ~100 000 unidades é
+   limite conhecido; origin rebasing = FUTURO (não implementado).
+
+**TESTES**: 545 → **568** (+23: ciclos de layout com guard/RED→GREEN
+SEGFAULT provado, dtor Json iterativo 500k níveis/RED→GREEN SEGFAULT
+provado, dumpTo teto, grelha adaptativa, far dinâmico contém a cena,
+normalização uniforme proporções+re-aplicar, campo numérico py=10 000,
+geradores ×extremos, Mesh NaN/AABB, cura de self-parent, sequência exata do
+device com origem "-", falha GL mantém mesh+seleção, 8 prims ×3 ordens,
+import gigante e2e, zoom extremos+frames). CLÁUSULA CALMA: só os 4 fixes +
+testes.
+
+---
+
 # G.One VV 0.8.7 — HOTFIX CIRÚRGICO: import abre o navegador + troca de mesh sem travar
 
 ## Escopo 0.8.7 (implementado — hotfix: import + troca de mesh, ZERO resto)
@@ -1454,6 +1519,64 @@ Android SDK + NDK 26.3 + CMake 3.22.1 + JDK 17 → `./gradlew assembleRelease`.
    um .obj/.glb/.png → Export SAF. Reiniciar → pasta SAF reaberta.
 5. **Regressões**: F5.1 (status line `etc2/astc4`, cache `c1/1`, glb com
    textura), F5 (Save/Load), F4.2 (Play/scroll).
+
+## Verificação no Realme C33 (dono) — 0.8.9 (CRASH-PROOF; APK CUMULATIVO)
+
+Instalar o APK 0.8.9 (artifact `goni-vv-0.8.9-release-signed` do run do
+job `build-release`). A alvo são os QUATRO fixes — cada passo diz onde
+confirmar (UI ou log viewer). **Zero crash dumps novos é o critério
+global: a pasta de dumps (Settings → Ver logs) fica VAZIA depois da
+sessão.**
+
+1. **Ciclar as 8 primitivas em ordens variadas** (o crash): TIC Mesh →
+   Inspector → "prim:" → esfera→box→cápsula→cone→torus→cilindro→plano→
+   triângulo e depois noutra ordem (box→cápsula→esfera→cone→…) várias
+   voltas — **nenhuma desseleciona, nenhum crash, todas visíveis (cone e
+   cápsula incluídos)**. No log viewer, a cada troca:
+   `mesh: troca … fim ok verts=… idx=…`. (Se alguma vez falhar, a linha
+   `mesh: prim … ERRO(<razão exata>)` aparece — coords não finitas, AABB
+   degenerado, upload GL — e o mesh ANTERIOR fica no viewport.)
+
+2. **A cena com UI não crasha mais**: criar um container (VBox) → no
+   Inspector de UI, "colocar em:" NUNCA lista o próprio container (o
+   seletor excluiu a si mesmo). Se um PROJETO ANTIGO tinha um elemento
+   pai de si próprio (gravado pelas 0.7.4–0.8.8), ao CARREGAR o log
+   mostra `load: elemento '…' era pai de SI MESMO … parent removido` e
+   a app segue viva (antes: crash-loop no Play/edição de UI).
+
+3. **Importar modelo gigante — não espalmado**: navegador → um .obj/.glb
+   grande → "Sim" → o modelo entra UTILIZÁVEL (maior eixo ≈ 2 unidades,
+   proporções iguais às do ficheiro). No log viewer:
+   `import: dims=<x,y,z> uniform scale=<s>`. No Inspector: linha
+   "dims: X×Y×Z" + botão **escala original** → repõe o tamanho real
+   (e um Save grava o estado reposto). Re-escolher o MESMO mesh NÃO mexe
+   na escala que o dono afinou.
+
+4. **Espaço sem tetos**: pinçar para AFASTAR até ver o modelo inteiro —
+   o zoom agora vai até 100 000 (a grelha alarga: passo 0.1/1/10/100/
+   1000 conforme o zoom; no zoom de trabalho continua 1). Aproximar até
+   0.01 também funciona. Posicionar um TIC em **py=10 000**: tocar o
+   VALOR do slider py (à direita do trilho, aceso a azul com sublinhado)
+   → teclado numérico ("-"/"." + dígitos) → "10000" → OK → o TIC ESTÁ lá
+   (ver no zoom afastado — o far dinâmico contém a cena). Tudo o que
+   estava no viewport antes continua renderizando (far/near por frame).
+
+5. **Play também sem tetos**: dar Play numa cena com câmara — o far
+   acompanha a cena (o slider "far" do Inspector é PISO: valores
+   pequenos continuam a valer; a cena nunca clipa pelo far default).
+
+6. **Zero crash dumps**: depois de TODA a sessão de teste (trocas,
+   imports gigantes, zooms extremos, py=10 000, Play), a lista de dumps
+   no log viewer continua VAZIA — o critério de aceitação do prompt.
+
+**SE ALGO FALHAR no C33**: abrir o log viewer e procurar a ÚLTIMA linha
+`mesh:` / `import:` / `ui: layout` / `load:`:
+- `ui: layout — CICLO de parents no elemento '…'` → ciclo gravado no
+  .goni (abrir noutro editor de texto e tirar o "parent" do elemento
+  nomeado — a próxima versão cura sozinha ao carregar);
+- `mesh: prim … ERRO(…)` → a razão exata do gerador/upload;
+- `mesh: troca … ERRO(sem TIC com mesh selecionado)` → a seleção estava
+  perdida (selecionar um TIC de mesh primeiro — não é bug do gerador).
 
 ## Verificação no Realme C33 (dono) — 0.8.7 (HOTFIX: import + troca; APK CUMULATIVO)
 

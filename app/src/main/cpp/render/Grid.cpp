@@ -123,6 +123,7 @@ bool Grid::init(f32 extent, f32 step) {
     }
     locVP_     = glGetUniformLocation(prog_, "uVP");
     locCenter_ = glGetUniformLocation(prog_, "uCenter");
+    locExtent_ = glGetUniformLocation(prog_, "uExtent");   // 0.8.9: BUG LATENTE F3.1 — nunca era enviado (uniform a 0 → quad degenerado: o grid era INVISÍVEL desde a 0.3.1)
     locCam_    = glGetUniformLocation(prog_, "uCamPos");
     locFade_   = glGetUniformLocation(prog_, "uFade");
     locStep_   = glGetUniformLocation(prog_, "uStep");
@@ -149,7 +150,7 @@ void Grid::destroy() {
     if (vbo_)  { glDeleteBuffers(1, &vbo_); vbo_ = 0; }
     if (vao_)  { glDeleteVertexArrays(1, &vao_); vao_ = 0; }
     if (prog_) { glDeleteProgram(prog_); prog_ = 0; }
-    locVP_ = locCenter_ = locCam_ = locFade_ = locStep_ = -1;
+    locVP_ = locCenter_ = locExtent_ = locCam_ = locFade_ = locStep_ = -1;
     vertexCount_ = 0;
 }
 
@@ -161,19 +162,36 @@ DrawStats Grid::draw(const Mat4& vp, const Vec3& camPos, f32 focusDist) const {
     if (locVP_ >= 0) {
         glUniformMatrix4fv(locVP_, 1, GL_FALSE, vp.m);
     }
+    // 0.8.9 (ESPAÇO SEM TETOS): GRELHA ADAPTATIVA — o passo das linhas
+    // deriva do ZOOM (potências de 10: …0.1/1/10/100/1000…; ver
+    // Grid::gridStepForDist — fonte única, afervel no CI). O extent do quad
+    // também escala com o foco (o quad segue a câmara; sem isto o fade —
+    // que já era adaptativo — ultrapassava a borda do quad nos zooms
+    // longínquos e o grid desaparecia em vez de alargar).
+    const f32 focus = focusDist > 0.0f ? focusDist : 6.0f;
+    const f32 step = gridStepForDist(focus);
+    const f32 extentDyn = focus * 2.5f;
+    const f32 extent = extentDyn > kExtentDefault ? extentDyn : kExtentDefault;
     if (locCenter_ >= 0) {
+        // centro do quad = XZ da câmara; o canto leva o EXTENT DINÂMICO
         glUniform3f(locCenter_, camPos.x, 0.0f, camPos.z);   // plano y=0
+    }
+    if (locExtent_ >= 0) {
+        // 0.8.9: o extent efetivamente ENVIADO ao shader ( BUG LATENTE F3.1:
+        // este uniform nunca era setado — o quad estava DEGENERADO e o grid
+        // invisível). Escala com o foco (2.5×), piso 3000 (borda invisível).
+        glUniform1f(locExtent_, extent);
     }
     if (locCam_ >= 0) {
         glUniform3f(locCam_, camPos.x, camPos.y, camPos.z);
     }
     if (locStep_ >= 0) {
-        glUniform1f(locStep_, step_);
+        glUniform1f(locStep_, step);
     }
     // fade adaptativo ao zoom: no zoom de trabalho (6) recolhe-se para
-    // ~12..42 (o feel do grid de linhas da F2); no zoom máx (300) abre até
-    // ~330..780 — sempre muito antes da borda do quad (extent 3000)
-    const f32 focus = focusDist > 0.0f ? focusDist : 6.0f;
+    // ~12..42 (o feel do grid de linhas da F2); no zoom máx abre em função
+    // do foco — sempre muito antes da borda do quad (extent dinâmico ≥
+    // 2.5× o foco)
     const f32 s1 = focus * 1.1f;
     const f32 start = s1 > 12.0f ? s1 : 12.0f;
     const f32 e1 = focus * 1.5f;

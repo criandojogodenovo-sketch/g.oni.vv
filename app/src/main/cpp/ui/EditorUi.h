@@ -283,6 +283,10 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorSta
 // procedural/material lit (injeção → os testes usam stubs).
 // 0.8.0 (F7): `prim` resolve PRIMITIVAS PROCEDURAIS pelo cache do main
 // (assinatura = tipo+parâmetros → Mesh* único partilhado).
+// 0.8.9 — alvo da NORMALIZAÇÃO UNIFORME do import: o maior eixo do AABB do
+// mesh fica com ESTE tamanho (2 unidades ≈ cubo da engine); fator ÚNICO nos
+// 3 eixos — proporções preservadas, NUNCA espalmado.
+constexpr f32 kImportTargetSize = 2.0f;
 struct AssetResolvers {
     Mesh* (*mesh)(const std::string& ref) = nullptr;   // GpuAssets::mesh
     const Texture* (*texture)(const std::string& relPath, std::string* warn) = nullptr;
@@ -290,6 +294,11 @@ struct AssetResolvers {
     Mesh*       cubeMesh = nullptr;      // cubo procedural do main
     LitMaterial* material = nullptr;    // lit do renderer
     Mesh* (*prim)(const PrimParams& p) = nullptr;   // 0.8.0: cache de primitivas
+    // 0.8.9: EXTENSÃO do AABB do mesh COMO DADOS (o applyAssetPick é PURO e
+    // NUNCA desreferencia o Mesh — contrato dos testes com stubs-ponteiro;
+    // o main liga-a ao boundsExtent do Mesh real). Null = sem normalização
+    // (o chamador decide não normalizar).
+    Vec3 (*meshExtent)(const std::string& ref) = nullptr;
 };
 
 // Resultado de uma escolha (feedbacks ficam pelo chamador: toast + engine.log)

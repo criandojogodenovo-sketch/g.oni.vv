@@ -189,6 +189,13 @@ add_executable(test_core
         # tempo, geometria por primitiva, lifecycle destroy/recreate,
         # gesto órfão) — INCLUI platform/main.cpp: o caminho real do device
         test_wiring087.cpp
+        # 0.8.9: wiring CRASH-PROOF (parte PURA — placeAt guard de ciclos,
+        # Json::dumpTo teto, grelha adaptativa, far dinâmico, normalização
+        # uniforme, campo numérico sem teto, auditoria de geradores com
+        # extremos, Mesh AABB/NaN, cura de self-parent ao carregar). Os
+        # casos do CAMINHO DO DEVICE estão no TU do test_wiring087 (único
+        # que inclui platform/main.cpp) — secção 0.8.9 lá.
+        test_wiring089.cpp
         ${CORE_DIR}/ui/Icons.cpp
         # 0.7.7: câmara de cena (componente/invariante + gizmo do frustum)
         ${CORE_DIR}/core/CameraUtil.cpp

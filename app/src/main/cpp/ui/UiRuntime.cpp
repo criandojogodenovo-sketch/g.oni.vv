@@ -11,6 +11,7 @@
 #include <vector>
 #include "core/Scene.h"
 #include "ui/UiContext.h"
+#include "platform/EngineLog.h"   // 0.8.9: erros LEGÍVEIS nos guards do resolver
 #include <cmath>
 
 namespace vv {
@@ -121,7 +122,21 @@ struct Resolver {
     u32 count = 0;
     std::vector<f32> sizeW, sizeH;   // tamanho EFETIVO (eixo de conteúdo auto)
     std::vector<u8>  state;          // 0 = intocado, 1 = EM CURSO (ciclo), 2 = pronto
+    // 0.8.9 (CRASH-PROOF): guard de ciclo do PLACEAT. O sizeOf SEMPRE teve
+    // guard (state 1 = em curso devolve o tamanho manual), mas o placeAt
+    // recursivo NÃO tinha NENHUM — um parent cíclico (ex.: container com
+    // "colocar em" a SI PRÓPRIO, que o seletor permitia) recursava
+    // INFINITAMENTE: stack exhaustion → SIGSEGV (crash-1790830406.dump do
+    // C33). placing[i]=1 marca o CAMINHO atual; repetição = ciclo → ERRO
+    // LEGÍVEL no log e o elemento fica órfão (rect zerado), NUNCA crash.
+    std::vector<u8>  placing;
+    u32  cyclesAborted = 0;          // contagem (teste do CI + diagnóstico)
 };
+
+// limite de profundidade dos traversals recursivos do resolver (0.8.9,
+// CRASH-PROOF): uma cadeia legítima nunca excede `count` elementos; a
+// margem é defesa extra. Ao atingir, ERRO LEGÍVEL em vez de stack overflow.
+constexpr u32 kLayoutMaxDepth = 64;
 
 // filhos de `i` = elementos com parent == nome do container i (ordem do
 // array). O chamador itera o array todo (canvases pequenos; O(n²) ok).
@@ -132,9 +147,18 @@ inline bool isChildOf(const UiElement& child, const Resolver& r, i32 ci) {
 
 // tamanho EFETIVO do elemento i (containers: eixo de conteúdo AUTO —
 // recursivo nos filhos; ciclo/guard devolve o tamanho manual)
-void sizeOf(Resolver& r, i32 i) {
+// 0.8.9: depth guard explícito (o state já guarda ciclos; o cap guarda
+// cadeias absurdas — qualquer traversal recursivo do core tem teto).
+void sizeOf(Resolver& r, i32 i, u32 depth = 0) {
     if (i < 0 || static_cast<u32>(i) >= r.count) {
         return;   // 0.8.4: fora do buffer do chamador — nem medi-lo
+    }
+    if (depth > kLayoutMaxDepth) {
+        ++r.cyclesAborted;
+        elog::error("ui: layout — profundidade > %u no elemento %d (cadeia "
+                    "de parents demasiado longa); tamanho manual",
+                    kLayoutMaxDepth, static_cast<int>(i));
+        return;
     }
     if (r.state[static_cast<size_t>(i)] != 0u) {
         return;   // pronto (2) ou em curso (1 = ciclo → tamanho manual)
@@ -152,7 +176,7 @@ void sizeOf(Resolver& r, i32 i) {
             if (!isChildOf(ch, r, i) || !ch.visible) {
                 continue;
             }
-            sizeOf(r, static_cast<i32>(j));
+            sizeOf(r, static_cast<i32>(j), depth + 1);
             content += (e.kind == UiElement::Kind::VBox) ? r.sizeH[j]
                                                          : r.sizeW[j];
             ++n;
@@ -175,10 +199,34 @@ void sizeOf(Resolver& r, i32 i) {
 // dispõe o elemento i no rect dado (recursivo: containers dispõem filhos).
 // Container INVISÍVEL: os filhos continuam a ser dispostos (rects válidos)
 // mas TODOS ficam shown=false — escondidos em cascata.
+// 0.8.9 (CRASH-PROOF): GUARD DE CICLO + PROFUNDIDADE. O placeAt recursivo
+// não tinha NENHUM guard (o comentário antigo "o resolver guarda ciclos"
+// só era verdade para o sizeOf): um parent cíclico (container pai de si
+// próprio, ou A→B→A) recursava infinitamente até exaurir a stack — o
+// SIGSEGV do crash-1790830406.dump. Agora: elemento JÁ no caminho atual
+// (placing=1) = ciclo → ERRO LEGÍVEL no log, o ciclo fica por dispor
+// (rect zerado = órfão, como o passo 3 já tratava) e a app SEGUE VIVA.
 void placeAt(Resolver& r, i32 i, const UiRect& rect, bool parentShown,
-             i32 parentIdx) {
+             i32 parentIdx, u32 depth = 0) {
     if (i < 0 || static_cast<u32>(i) >= r.count) {
         return;   // 0.8.4: fora do buffer do chamador — NUNCA escrever out[i]
+    }
+    if (r.placing[static_cast<size_t>(i)] != 0u) {
+        ++r.cyclesAborted;
+        elog::error("ui: layout — CICLO de parents no elemento '%s' "
+                    "(parent='%s'); elemento deixado por dispor "
+                    "(sem crash — verifique 'colocar em')",
+                    r.c->elements[static_cast<size_t>(i)].name.c_str(),
+                    r.c->elements[static_cast<size_t>(i)].parent.c_str());
+        return;   // ciclo: ABORTA com erro legível, NÃO recursa
+    }
+    if (depth > kLayoutMaxDepth) {
+        ++r.cyclesAborted;
+        elog::error("ui: layout — profundidade > %u no elemento '%s'; "
+                    "elemento deixado por dispor",
+                    kLayoutMaxDepth,
+                    r.c->elements[static_cast<size_t>(i)].name.c_str());
+        return;
     }
     const UiElement& e = r.c->elements[static_cast<size_t>(i)];
     const bool shown = parentShown && e.visible;
@@ -190,6 +238,8 @@ void placeAt(Resolver& r, i32 i, const UiRect& rect, bool parentShown,
     if (!uiElementIsContainer(e.kind)) {
         return;
     }
+    r.placing[static_cast<size_t>(i)] = 1;   // 0.8.9: marca o CAMINHO atual
+    const u32 placedHere = r.cyclesAborted;  // (diagnóstico: abortos deste ramo)
     // dispõe os filhos dentro do rect (ordem do array = ordem do layout)
     // 0.8.4: só elementos dentro do cap do chamador (os vetores têm count)
     const f32 sp = e.spacing;
@@ -209,7 +259,7 @@ void placeAt(Resolver& r, i32 i, const UiRect& rect, bool parentShown,
                 x = rect.x + rect.w - e.pad - cw;
             }
             placeAt(r, static_cast<i32>(j), {x, y, cw, chh}, shown,
-                    static_cast<i32>(i));
+                    static_cast<i32>(i), depth + 1);
             y += chh + sp;
         }
     } else {   // HBox
@@ -228,10 +278,12 @@ void placeAt(Resolver& r, i32 i, const UiRect& rect, bool parentShown,
                 y = rect.y + rect.h - e.pad - chh;
             }
             placeAt(r, static_cast<i32>(j), {x, y, cw, chh}, shown,
-                    static_cast<i32>(i));
+                    static_cast<i32>(i), depth + 1);
             x += cw + sp;
         }
     }
+    r.placing[static_cast<size_t>(i)] = 0;   // 0.8.9: sai do caminho atual
+    (void)placedHere;
 }
 
 } // namespace
@@ -254,7 +306,7 @@ void resolveCanvasLayout(const UiCanvas& c, f32 sw, f32 sh,
     }
     Resolver r{&c, sw, sh, ins, out, count,
                 std::vector<f32>(count, 0.0f), std::vector<f32>(count, 0.0f),
-                std::vector<u8>(count, 0)};
+                std::vector<u8>(count, 0), std::vector<u8>(count, 0), 0};
     // 1) tamanhos efetivos (memo + guard de ciclo) — até ao cap do chamador
     for (u32 i = 0; i < count; ++i) {
         sizeOf(r, static_cast<i32>(i));

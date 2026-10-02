@@ -1,7 +1,8 @@
 // tests/test_camera.cpp — câmara de orbit: clamp de pitch, clamp de zoom,
 // eye derivado de yaw/pitch/dist, vista aponta para o target.
-// F3.1: clamps generosos (zoom 1..300, pitch ±89°), near/far 0.5/450 contra
-// z-fighting, e vista quase top-down sem inversão.
+// F3.1: clamps generosos, pitch ±89°, near/far contra z-fighting.
+// 0.8.9 (ESPAÇO SEM TETOS): zoom 0.01..100 000, near/far DINÂMICOS
+// (setClips — defaults F3.1 mantidos p/ compat), far contém a cena.
 #include "TestFramework.h"
 #include "render/Camera.h"
 #include <cmath>
@@ -17,10 +18,10 @@ bool nearEq(f32 a, f32 b, f32 eps = 1e-4f) {
 
 } // namespace
 
-TEST(limites_f31_zoom_1_a_300_e_pitch_89) {
-    // spec F3.1: zoom mín ~1.0, zoom máx 300, pitch até ~89°, yaw livre
-    EXPECT(Camera::kMinDist == 1.0f);
-    EXPECT(Camera::kMaxDist == 300.0f);
+TEST(limites_089_zoom_amplo_e_pitch_89) {
+    // spec 0.8.9: zoom 0.01 → 100 000 (era 1..300), pitch até ~89°, yaw livre
+    EXPECT(Camera::kMinDist == 0.01f);
+    EXPECT(Camera::kMaxDist == 100000.0f);
     EXPECT(nearEq(Camera::kMaxPitch, 89.0f * 3.14159265f / 180.0f, 1e-3f));
     EXPECT(nearEq(Camera::kMinPitch, -Camera::kMaxPitch));
     EXPECT(Camera::kMinPitch > -1.5707963f);   // nunca chega a −90°
@@ -43,20 +44,20 @@ TEST(clamp_de_pitch_nao_inverte) {
 
 TEST(clamp_de_zoom_mantem_distancia_no_intervalo) {
     Camera c;
-    c.zoomBy(1e-6f);   // "aproximar infinitamente"
+    c.zoomBy(1e-9f);   // "aproximar infinitamente"
     EXPECT(c.dist == Camera::kMinDist);
-    c.zoomBy(1e6f);    // "afastar infinitamente"
+    c.zoomBy(1e9f);    // "afastar infinitamente" (range novo 0.01→1e5 = 1e7)
     EXPECT(c.dist == Camera::kMaxDist);
 }
 
 TEST(near_far_sanity_contra_z_fighting) {
-    // spec F3.1: near 0.5, far = zoom máx × 1.5 (≈450); rácio ≤ ~900:1
-    // para preservar a precisão do depth de 24 bits
+    // 0.8.9: DEFAULTS F3.1 mantidos (0.5/450 — quem não chama setClips vê o
+    // comportamento de sempre); rácio ≤ ~900:1 preserva o depth de 24 bits
     Camera c;
-    EXPECT(nearEq(c.zNear, 0.5f));
-    EXPECT(nearEq(c.zFar, Camera::kMaxDist * 1.5f, 1e-3f));
-    EXPECT(c.zNear < c.zFar);
-    const f32 ratio = c.zFar / c.zNear;
+    EXPECT(nearEq(c.nearZ, 0.5f));
+    EXPECT(nearEq(c.farZ, 450.0f));
+    EXPECT(c.nearZ < c.farZ);
+    const f32 ratio = c.farZ / c.nearZ;
     EXPECT(ratio <= 900.0f);     // 450/0.5 = 900 exato
     EXPECT(ratio < 2000.0f);     // sanity da spec (folga)
     const Mat4 p = c.proj(16.0f / 9.0f);
@@ -65,6 +66,32 @@ TEST(near_far_sanity_contra_z_fighting) {
     }
     EXPECT(nearEq(p.m[11], -1.0f));
     EXPECT(p.m[10] < 0.0f);      // near<far → termo negativo
+}
+
+TEST(clips_dinamicicos_089_far_contem_a_cena) {
+    // 0.8.9 (ESPAÇO SEM TETOS): setClips com near/far derivados do zoom e do
+    // AABB da cena — o contrato do main por frame. A proj lê os MEMBROS.
+    Camera c;
+    // zoom de trabalho: near próximo do antigo, far ≥ 450
+    c.setDistance(6.0f);
+    c.setClips(6.0f * 0.05f, 450.0f);
+    EXPECT(nearEq(c.nearZ, 0.3f));
+    EXPECT(nearEq(c.farZ, 450.0f));
+    // zoom máximo + cena gigante (diagonal 150 000): far CONTÉM a cena
+    c.setDistance(Camera::kMaxDist);
+    c.setClips(Camera::kMaxDist * 0.05f, Camera::kMaxDist * 1.5f);
+    EXPECT(c.farZ > Camera::kMaxDist);         // o alvo continua visível
+    EXPECT(c.farZ / c.nearZ < 400.0f);         // rácio saudável p/ depth
+    // zoom mínimo (perto do detalhe): near baixo sem degenerar
+    c.setDistance(Camera::kMinDist);
+    c.setClips(Camera::kMinDist * 0.05f, 450.0f);
+    EXPECT(c.nearZ >= 0.0004f);                // > 0 e finito
+    EXPECT(std::isfinite(c.proj(16.0f / 9.0f).m[10]));
+    // defesa: near inválido mantém o default; far ≤ near sobe p/ 2×near
+    Camera d;
+    d.setClips(-1.0f, 0.1f);
+    EXPECT(nearEq(d.nearZ, Camera::kDefaultNear));
+    EXPECT(d.farZ > d.nearZ);
 }
 
 TEST(top_down_quase_total_sem_inversao) {
@@ -90,9 +117,11 @@ TEST(top_down_quase_total_sem_inversao) {
 }
 
 TEST(alvo_visivel_no_zoom_maximo) {
-    // a 300 de distância o target fica dentro do frustum (far = 450)
+    // a 100 000 de distância o target fica dentro do frustum (far dinâmico
+    // = 1.5×dist — 0.8.9: o far SEMPRE contém o que a câmara olha)
     Camera c;
     c.setDistance(Camera::kMaxDist);
+    c.setClips(Camera::kMaxDist * 0.05f, Camera::kMaxDist * 1.5f);
     const Mat4 v = c.view();
     const Mat4 p = c.proj(16.0f / 9.0f);
     const Mat4 vp = Mat4::mul(p, v);
@@ -100,8 +129,8 @@ TEST(alvo_visivel_no_zoom_maximo) {
     Mat4::transformPoint4(vp, c.target, out);
     const f32 ndcZ = out[2] / out[3];
     EXPECT(ndcZ > -1.0f && ndcZ < 1.0f);
-    // e o alvo continua à frente da near plane (near 0.5 < dist 300)
-    EXPECT(c.zNear < c.dist);
+    // e o alvo continua à frente da near plane (near = 5% dist)
+    EXPECT(c.nearZ < c.dist);
 }
 
 TEST(eye_dista_dist_do_target) {
@@ -141,7 +170,7 @@ TEST(orbit_nao_muda_distancia_nem_target) {
 
 TEST(perspective_da_camara_tem_sanity) {
     Camera c;
-    EXPECT(c.zNear < c.zFar);
+    EXPECT(c.nearZ < c.farZ);
     EXPECT(c.fovY > 0.0f);
     const Mat4 p = c.proj(16.0f / 9.0f);
     EXPECT(nearEq(p.m[11], -1.0f));

@@ -9,6 +9,7 @@
 #include "components/Transform3D.h"
 #include "components/AnimationPlayer.h"   // 0.8.0: add Animacao no Inspector
 #include "render/Primitives.h"            // 0.8.0: seletor de primitivas
+#include "render/Mesh.h"                 // 0.8.9: AABB do mesh (normalização uniforme)
 #include "core/Scene.h"
 #include "ui/UiEditor.h"                  // 0.8.6: uiHexFormat (linha hex)
 #include <cstdio>
@@ -50,9 +51,13 @@ const char* assetBasename(const std::string& ref) {
 // (rowTop, rowH, tm) vêm do PLANO — a baseline é centrada nas métricas REAIS
 // da fonte (F5.0-fix: o "+8" antigo deixava o bloco de 28 px invadir a linha
 // de cima).
+// 0.8.9: valueTappable — o VALOR (zona à direita do trilho) abre o teclado
+// NUMÉRICO (campos SEM TETO: py=10 000 escreve-se, o slider fica suave no
+// seu range). Desenha-se em ACCENT com sublinhado = affordance de toque.
 bool sliderRow(UiContext& ui, u64 id, f32 x, f32 rowTop, f32 rowH,
                const TextMetrics& tm, const char* labelText,
-               f32 minV, f32 maxV, f32& value, const char* fmt) {
+               f32 minV, f32 maxV, f32& value, const char* fmt,
+               bool valueTappable = false) {
     const f32 baseline = inspBaseline(rowTop, rowH, tm);
     ui.labelFitted(x + kPad, baseline, labelText,
                    theme::TEXT, 84.0f - kPad - 6.0f);   // B2: até ao trilho
@@ -64,7 +69,14 @@ bool sliderRow(UiContext& ui, u64 id, f32 x, f32 rowTop, f32 rowH,
     std::snprintf(val, sizeof(val), fmt, value);
     if (ui.hasFont()) {
         const f32 tw = ui.fontWidth(val);
-        ui.label(x + kPanelW - kPad - tw, baseline, val, theme::TEXT);
+        ui.label(x + kPanelW - kPad - tw, baseline, val,
+                 valueTappable ? theme::ACCENT : theme::TEXT);
+        if (valueTappable) {
+            // sublinhado discreto: "isto é tocável" (a zona de toque é o
+            // rect do valor — ver o re-despacho do tap abaixo)
+            ui.panel(x + kPanelW - kPad - tw - 6.0f, rowTop + rowH - 3.0f,
+                     tw + 8.0f, 1.5f, theme::ACCENT);
+        }
     }
     return changed;
 }
@@ -402,7 +414,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             if (tr && sliderIdx < 9) {
                 const SliderSpec& sp = rows9[sliderIdx];
                 if (sliderRow(ui, r.id, x, ry, r.h, tm, sp.label, sp.min, sp.max,
-                              *sp.value, sp.fmt)) {
+                              *sp.value, sp.fmt, true)) {   // 0.8.9: valor tocável (campo numérico)
                     trEdited = true;
                     edited = true;
                 }
@@ -436,6 +448,25 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         case InspRow::Kind::TexLabel:
             ui.labelFitted(x + kPad + 12.0f, inspBaseline(ry, r.h, tm), texLabel,
                            theme::TEXT, w - 2.0f * kPad - 12.0f);
+            break;
+        // ---- 0.8.9 — IMPORT: dims originais + escala original -----------------
+        case InspRow::Kind::DimsLabel: {
+            // AABB real do mesh carregado (dados do create — sem GL aqui)
+            char dimsLine[64] = "dims: -";
+            if (mr && mr->mesh) {
+                const Vec3 ext = mr->mesh->boundsExtent();
+                std::snprintf(dimsLine, sizeof(dimsLine),
+                              "dims: %.4g x %.4g x %.4g", ext.x, ext.y, ext.z);
+            }
+            ui.labelFitted(x + kPad, inspBaseline(ry, r.h, tm), dimsLine,
+                           theme::TEXT, w - 2.0f * kPad);
+            break;
+        }
+        case InspRow::Kind::ScaleOrig:
+            // repõe a escala {1,1,1} — o "tamanho original" do modelo (o fit
+            // uniforme vive no Transform3D, a geometria nunca foi tocada)
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      "escala: original");
             break;
         case InspRow::Kind::Label:
             // input: → body: → tc: — payload NA ORDEM do plano (labelIdx)
@@ -599,6 +630,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     // ecrã, igual ao que foi desenhado — nunca diverge)
     f32 tx, ty;
     if (ui.scrollTap(kInspectorScrollId, tx, ty)) {
+        u32 sliderTapIdx = 0;   // 0.8.9: índice do slider (mesma ordem do draw)
         for (u32 i = 0; i < nRows; ++i) {
             const InspRow& r = plan[i];
             if (r.kind != InspRow::Kind::AddTc &&
@@ -610,14 +642,22 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 r.kind != InspRow::Kind::CamActive &&
                 r.kind != InspRow::Kind::CamFrustum &&  // 0.7.10
                 r.kind != InspRow::Kind::PrimButton &&  // 0.8.0
-                r.kind != InspRow::Kind::AddAnim) {     // 0.8.0
+                r.kind != InspRow::Kind::AddAnim &&     // 0.8.0
+                r.kind != InspRow::Kind::ScaleOrig &&   // 0.8.9
+                r.kind != InspRow::Kind::Slider) {      // 0.8.9: zona do VALOR
                 continue;
             }
             const f32 ry = contentTop + r.y - off;
             if (tx < x + kPad || tx >= x + w - kPad) {
+                if (r.kind == InspRow::Kind::Slider) {
+                    ++sliderTapIdx;   // mantém a contagem alinhada com o draw
+                }
                 continue;
             }
             if (ty < ry + 2.0f || ty >= ry + r.h - 2.0f) {
+                if (r.kind == InspRow::Kind::Slider) {
+                    ++sliderTapIdx;
+                }
                 continue;   // mesmo rect do botão desenhado (+2/−2)
             }
             if (r.kind == InspRow::Kind::AddTc) {
@@ -666,6 +706,33 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 if (CameraComp* cc = tic->getComponent<CameraComp>()) {
                     cc->showFrustum = !cc->showFrustum;
                 }
+            } else if (r.kind == InspRow::Kind::ScaleOrig) {
+                // 0.8.9 — IMPORT: repõe a escala original {1,1,1} (a
+                // geometria nunca foi tocada — o fit vive no Transform3D)
+                Transform3D* trSo = tic->getComponent<Transform3D>();
+                if (trSo) {
+                    trSo->scale = Vec3{1.0f, 1.0f, 1.0f};
+                    trSo->updateWorld();
+                } else if (Transform3D* trNew =
+                               tic->addComponent<Transform3D>()) {
+                    trNew->scale = Vec3{1.0f, 1.0f, 1.0f};
+                }
+            } else if (r.kind == InspRow::Kind::Slider) {
+                // 0.8.9 — CAMPO NUMÉRICO SEM TETO: toque na zona do VALOR
+                // (à direita do trilho, [x+206 .. x+kPanelW-kPad]) abre o
+                // teclado numérico (propósito 6) com o valor atual; o
+                // trilho continua a ser do SLIDER (gesto suave no range).
+                if (tx >= x + 206.0f && tr && sliderTapIdx < 9) {
+                    char cur[24];
+                    const SliderSpec& sp = rows9[sliderTapIdx];
+                    std::snprintf(cur, sizeof(cur), sp.fmt, *sp.value);
+                    // st.textElement leva o ÍNDICE do campo (0..8)
+                    openTextInput(st, 6, st.selected,
+                                  static_cast<i32>(sliderTapIdx), cur);
+                }
+            }
+            if (r.kind == InspRow::Kind::Slider) {
+                ++sliderTapIdx;   // avança SEMPRE (alinhado com o draw)
             }
         }
     }
@@ -1469,11 +1536,41 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
                 return out;   // fora do catálogo — sem crash
             }
             const std::string rel = std::string("meshes/") + catalog.meshes[idx];
+            // 0.8.9 — NORMALIZAÇÃO UNIFORME: só na 1ª aplicação DESTE ref a
+            // ESTE TIC (re-escolher o mesmo mesh não mexe na escala que o
+            // dono já afinou — muito menos re-escala um mesh que ele acabou
+            // de posicionar).
+            const bool firstApply = mr->meshPath != rel;
             if (Mesh* m = res.mesh ? res.mesh(rel) : nullptr) {
                 mr->mesh = m;
                 mr->material = res.material;
                 mr->meshPath = rel;
                 mr->primOn = false;   // 0.8.0: asset LIMPA o prim (fonte única)
+                // 0.8.9 (fix 3 do prompt): FATOR ÚNICO s = alvo / maiorEixo,
+                // aplicado aos 3 EIXOS — PROPORÇÕES PRESERVADAS (nunca o
+                // escalamento eixo-a-eixo que espalmava o modelo). A escala
+                // vive no Transform3D (a geometria fica intacta: o botão
+                // "escala original" do Inspector repõe {1,1,1}). O AABB chega
+                // como DADOS pelo resolver meshExtent (o applyAssetPick é
+                // PURO — nunca desreferencia o Mesh, contrato dos stubs).
+                if (firstApply && res.meshExtent) {
+                    Transform3D* tr = tic->getComponent<Transform3D>();
+                    if (!tr) {
+                        tr = tic->addComponent<Transform3D>();
+                    }
+                    const Vec3 ext = res.meshExtent(rel);
+                    const f32 maior = ext.x > ext.y ? (ext.x > ext.z ? ext.x : ext.z)
+                                                   : (ext.y > ext.z ? ext.y : ext.z);
+                    f32 s = 1.0f;
+                    if (maior > 1e-6f && std::isfinite(maior)) {
+                        s = kImportTargetSize / maior;
+                        if (!std::isfinite(s) || s <= 0.0f) {
+                            s = 1.0f;   // defesa: geometria absurda = sem fit
+                        }
+                    }
+                    tr->scale = Vec3{s, s, s};   // UM fator, TRÊS eixos
+                    tr->updateWorld();
+                }
                 // F5.1-B: textura embutida do glTF/GLB aplica-se logo
                 // (import sem PC — o material fica referenciado)
                 bool withTex = false;
@@ -1492,7 +1589,17 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
                 out.applied = true;
                 std::snprintf(out.toast, sizeof(out.toast), "%s",
                               withTex ? "mesh aplicado (+textura)" : "mesh aplicado");
-                if (withTex) {
+                if (firstApply && res.meshExtent) {
+                    // 0.8.9 — a linha exigida: dims originais + fator único
+                    const Vec3 ext = res.meshExtent(rel);
+                    const f32 maior = ext.x > ext.y ? (ext.x > ext.z ? ext.x : ext.z)
+                                                   : (ext.y > ext.z ? ext.y : ext.z);
+                    const f32 s = maior > 1e-6f ? kImportTargetSize / maior : 1.0f;
+                    std::snprintf(out.log, sizeof(out.log),
+                                  "import: dims=%.3g,%.3g,%.3g uniform "
+                                  "scale=%.4g (%s)",
+                                  ext.x, ext.y, ext.z, s, rel.c_str());
+                } else if (withTex) {
                     std::snprintf(out.log, sizeof(out.log),
                                   "editor: mesh %s aplicado com textura %s",
                                   rel.c_str(), mr->texPath.c_str());

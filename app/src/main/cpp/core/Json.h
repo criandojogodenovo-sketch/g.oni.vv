@@ -13,10 +13,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdint>
+#include <deque>
 #include <string>
 #include <utility>
 #include <vector>
 #include "core/Types.h"
+#include "platform/EngineLog.h"   // 0.8.9: dump com teto de profundidade loga erro legível
 
 namespace vv {
 
@@ -31,6 +33,52 @@ public:
     std::string string;
     std::vector<Json>                        items;     // Array
     std::vector<std::pair<std::string, Json>> members;  // Object (ordem preservada)
+
+    // 0.8.9: dtor declarado SUPRIME o move implícito (std::move cairia em
+    // COPY — a destruição iterativa quebrava pelas cópias). Defaults
+    // explícitos: move/copy continuam EXATAMENTE como sempre foram.
+    Json() = default;
+    Json(const Json&) = default;
+    Json& operator=(const Json&) = default;
+    Json(Json&&) = default;
+    Json& operator=(Json&&) = default;
+
+    // 0.8.9 (CRASH-PROOF): DESTRUTOR ITERATIVO. O implícito recursava
+    // ~Json por nível de aninhamento (addr2line do crash-1790830406
+    // resolveu os pcs 0xe2de8/0xe2f24 para DENTRO do
+    // std::vector<vv::Json>::~vector INLINED no
+    // SceneSerializer::appendComponentJson(SkeletonComp) — o stack
+    // exauriu na CADEIA DE DESTRUTORES). A varredura iterativa (cova
+    // deque + fila de pendentes) não anda na stack por nível: QUALQUER
+    // profundidade destrói plana. Folhas (items+members vazios — os
+    // milhares de temporários do serializer) pagam ZERO.
+    ~Json() {
+        if (items.empty() && members.empty()) {
+            return;   // folha — o dtor implícito dos membros não recursa nada
+        }
+        std::deque<Json> grave;    // endereços ESTÁVEIS (o deque não move)
+        std::vector<Json*> pending;
+        auto drain = [&](Json& j) {
+            for (Json& c : j.items) {
+                grave.emplace_back(std::move(c));
+                pending.push_back(&grave.back());
+            }
+            for (std::pair<std::string, Json>& kv : j.members) {
+                grave.emplace_back(std::move(kv.second));
+                pending.push_back(&grave.back());
+            }
+            j.items.clear();
+            j.members.clear();
+        };
+        drain(*this);
+        while (!pending.empty()) {
+            Json* j = pending.back();
+            pending.pop_back();
+            drain(*j);
+        }
+        // a cova morre AQUI: cada casca está VAZIA (filhos movidos) — o dtor
+        // delas não vê um único filho para recursar
+    }
 
     static Json makeNumber(double v) {
         Json j;
@@ -108,9 +156,16 @@ public:
     // Números com %.9g (garante round-trip exato de f32 → double → texto).
     std::string dump() const {
         std::string s;
-        dumpTo(s);
+        dumpTo(s, 0);
         return s;
     }
+
+    // 0.8.9 (CRASH-PROOF): teto de profundidade do DUMP — o parser tem cap 64
+    // desde a F3, mas o dumpTo recursivo NÃO tinha NENHUM. Uma árvore Json
+    // profunda demais (construída por código, não por parse) recursava até
+    // exaurir a stack. Agora: além de kMaxDumpDepth o ramo é CORTADO com
+    // marcador legível + erro no log — nunca SIGSEGV.
+    static constexpr int kMaxDumpDepth = 64;
 
 private:
     struct Parser {
@@ -296,7 +351,13 @@ private:
         }
     };
 
-    void dumpTo(std::string& s) const {
+    void dumpTo(std::string& s, int depth = 0) const {
+        if (depth > kMaxDumpDepth) {
+            s += "<!max-depth>";   // corte visível no texto (nunca silêncio)
+            elog::error("json: dump cortado — profundidade > %d "
+                        "(árvore Json demasiado profunda)", kMaxDumpDepth);
+            return;
+        }
         switch (type) {
             case Type::Null:   s += "null"; break;
             case Type::Bool:   s += boolean ? "true" : "false"; break;
@@ -311,7 +372,7 @@ private:
                 s += '[';
                 for (size_t i = 0; i < items.size(); ++i) {
                     if (i) s += ',';
-                    items[i].dumpTo(s);
+                    items[i].dumpTo(s, depth + 1);
                 }
                 s += ']';
                 break;
@@ -322,7 +383,7 @@ private:
                     if (i) s += ',';
                     dumpString(members[i].first, s);
                     s += ':';
-                    members[i].second.dumpTo(s);
+                    members[i].second.dumpTo(s, depth + 1);
                 }
                 s += '}';
                 break;

@@ -32,6 +32,7 @@ add_library(goni_vv SHARED
         platform/ProjectSlot.h
         core/SafStorage.h
         core/SafStorage.cpp
+        core/SceneBounds.h   # 0.8.9: AABB da cena → far dinâmico editor+Play
         assets/Assets.h
         assets/ObjImporter.h
         assets/ObjImporter.cpp

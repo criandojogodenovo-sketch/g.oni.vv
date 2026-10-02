@@ -2,6 +2,7 @@
 #include "platform/Log.h"
 #include <GLES3/gl3.h>
 #include <cstddef>   // offsetof
+#include <cmath>     // 0.8.9: isfinite (validação de geometria)
 #include <vector>
 
 namespace vv {
@@ -30,6 +31,33 @@ bool Mesh::createSkinned(const Vertex* vertices, u32 vertexCount,
         return false;
     }
     destroy();
+
+    // 0.8.9: AABB da geometria ANTES do upload — dados puros (host-testável).
+    // Coordenadas NÃO finitas rejeitam o mesh na origem (o import nunca mais
+    // sobe geometria com NaN/Inf — "à prova de falha" do prompt 0.8.9).
+    // (depois do destroy(): um upload que falhe depois deixa bounds a zero —
+    // mesh falhado = sem AABB, contrato do chamador)
+    {
+        Vec3 mn{vertices[0].pos.x, vertices[0].pos.y, vertices[0].pos.z};
+        Vec3 mx = mn;
+        for (u32 v = 1; v < vertexCount; ++v) {
+            const Vec3& p = vertices[v].pos;
+            if (!std::isfinite(p.x) || !std::isfinite(p.y) ||
+                !std::isfinite(p.z)) {
+                LOGE("Mesh: vértice %u com coordenada NÃO finita — upload "
+                     "recusado", v);
+                return false;
+            }
+            if (p.x < mn.x) mn.x = p.x;
+            if (p.y < mn.y) mn.y = p.y;
+            if (p.z < mn.z) mn.z = p.z;
+            if (p.x > mx.x) mx.x = p.x;
+            if (p.y > mx.y) mx.y = p.y;
+            if (p.z > mx.z) mx.z = p.z;
+        }
+        boundsMin_ = mn;
+        boundsMax_ = mx;
+    }
 
     glGenVertexArrays(1, &vao_);
     glGenBuffers(1, &vbo_);
@@ -108,6 +136,8 @@ void Mesh::destroy() {
     if (vao_) { glDeleteVertexArrays(1, &vao_); vao_ = 0; }
     vertexCount_ = 0;
     indexCount_ = 0;
+    boundsMin_ = Vec3{};   // 0.8.9: sem geometria, sem AABB
+    boundsMax_ = Vec3{};
 }
 
 void Mesh::bind() const {

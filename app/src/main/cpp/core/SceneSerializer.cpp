@@ -11,6 +11,7 @@
 #include "core/CameraUtil.h"          // 0.7.7: uma ativa por cena
 #include "core/ComponentStore.h"
 #include "core/Scene.h"
+#include "platform/EngineLog.h"      // 0.8.9: cura de ciclos com erro legível
 #include <cstdio>
 #include <cstring>
 #include <variant>
@@ -518,6 +519,19 @@ void fillUiCanvas(UiCanvas* canvas, const Json& comp) {
         }
         if (const Json* j = je.find("parent"); j && j->type == Json::Type::String) {
             e.parent = j->string;
+            // 0.8.9 (CRASH-PROOF): CURA de auto-parent ao CARREGAR. Ficheiros
+            // gravados pelas versões 0.7.4–0.8.8 podem ter parent == o PRÓPRIO
+            // nome (o seletor "colocar em" incluía o próprio) — o ciclo
+            // crashava o placeAt com stack exhaustion. Ao carregar: o ciclo
+            // é removido com ERRO LEGÍVEL no log (o próximo save grava são).
+            // Ciclos MÚTUOS (A→B→A) não são curados aqui (custo); o guard do
+            // placeAt aborta-nos sem crash — ver UiRuntime.cpp 0.8.9.
+            if (!e.parent.empty() && e.parent == e.name) {
+                elog::error("load: elemento '%s' era pai de SI MESMO no .goni "
+                            "(ciclo da UI 0.7.4-0.8.8) — parent removido",
+                            e.name.c_str());
+                e.parent.clear();
+            }
         }
         auto readStr = [&je](const char* key) -> const char* {
             const Json* j = je.find(key);

@@ -42,6 +42,25 @@ public:
     bool ok() const { return vao_ != 0; }
     bool skinned() const { return skinVbo_ != 0; }   // 0.8.2
 
+    // 0.8.9: AABB da GEOMETRIA carregada (calculado no create a partir dos
+    // vértices — DADOS, sem GL). Alimenta (1) a NORMALIZAÇÃO UNIFORME do
+    // import (fator único = alvo/maiorEixo — proporções preservadas) e
+    // (2) o FAR DINÂMICO do editor/Play (AABB da cena). Degenerado/vazio →
+    // {0,0,0} (o chamador trata: escala 1, cena vazia).
+    const Vec3& boundsMin() const { return boundsMin_; }
+    const Vec3& boundsMax() const { return boundsMax_; }
+    Vec3 boundsExtent() const {
+        return Vec3{boundsMax_.x - boundsMin_.x, boundsMax_.y - boundsMin_.y,
+                    boundsMax_.z - boundsMin_.z};
+    }
+    f32 boundsMaxExtent() const {
+        const Vec3 e = boundsExtent();
+        f32 m = e.x;
+        if (e.y > m) m = e.y;
+        if (e.z > m) m = e.z;
+        return m;
+    }
+
 private:
     u32 vao_ = 0;
     u32 vbo_ = 0;
@@ -49,6 +68,8 @@ private:
     u32 skinVbo_ = 0;   // 0.8.2: aJoints/aWeights (locations 3/4)
     u32 vertexCount_ = 0;
     u32 indexCount_ = 0;
+    Vec3 boundsMin_{};   // 0.8.9: AABB (dados — ver acima)
+    Vec3 boundsMax_{};
 };
 
 } // namespace vv

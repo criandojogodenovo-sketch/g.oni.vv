@@ -18,6 +18,7 @@
 #include "core/Types.h"
 #include "math/Math.h"
 #include "render/DrawStats.h"
+#include <cmath>
 
 namespace vv {
 
@@ -28,6 +29,27 @@ public:
     static constexpr f32 kStepDefault   = 1.0f;
     static_assert(kExtentDefault >= 2000.0f,
                   "grid: extent efetivo >= 2000 para a borda nunca aparecer");
+
+    // 0.8.9 (ESPAÇO SEM TETOS) — GRELHA ADAPTATIVA: o passo das linhas
+    // escala com o zoom em POTÊNCIAS DE 10 (…0.1 / 1 / 10 / 100 / 1000…),
+    // derivado da distância da câmara. Pura/host-testável: é a FONTE ÚNICA
+    // (o draw usa-a; os testes aferem os degraus e os clamps).
+    //   dist ~6   → passo 1   (o feel de sempre no zoom de trabalho)
+    //   dist 0.05 → passo 0.1 (perto do detalhe)
+    //   dist 5000 → passo 1000 (a ver o modelo inteiro lá longe)
+    static constexpr f32 kStepMin = 0.1f;
+    static constexpr f32 kStepMax = 1000.0f;
+    static f32 gridStepForDist(f32 focusDist) {
+        if (!(focusDist > 0.0f) || !std::isfinite(focusDist)) {
+            return kStepDefault;   // sem foco (default 0) = zoom de trabalho
+        }
+        // potência de 10 mais próxima de dist/10: 6→0.6→1; 60→6→10; 600→100
+        const f32 d = focusDist * 0.1f;
+        f32 step = std::pow(10.0f, std::floor(std::log10(d) + 0.5f));
+        if (step < kStepMin) step = kStepMin;
+        if (step > kStepMax) step = kStepMax;
+        return step;
+    }
 
     bool init(f32 extent = kExtentDefault, f32 step = kStepDefault);
     void destroy();
@@ -46,11 +68,12 @@ private:
     u32 vbo_ = 0;
     i32 locVP_ = -1;
     i32 locCenter_ = -1;
+    i32 locExtent_ = -1;   // 0.8.9: uExtent (BUG LATENTE F3.1: nunca era enviado)
     i32 locCam_ = -1;
     i32 locFade_ = -1;
     i32 locStep_ = -1;
     u32 vertexCount_ = 0;
-    f32 step_ = kStepDefault;
+    f32 step_ = kStepDefault;   // 0.8.9: fixo só p/ log/compat — o draw usa o adaptativo
 };
 
 } // namespace vv

@@ -59,6 +59,9 @@ constexpr u64 kInspectorTexSel     = 5002;   // F5-E: linha "tex: …"
 constexpr u64 kInspectorVis        = 5200;   // 0.7.0: "visivel: sim/nao"
 constexpr u64 kInspectorColBase    = 5300;   // 0.7.0: sliders R/G/B (+i)
 constexpr u64 kInspectorColHex     = 5303;   // 0.8.6: "hex: #RRGGBB" do tint
+// 0.8.9 — NORMALIZAÇÃO DE IMPORT: dims originais + repõe a escala {1,1,1}
+// (o fit uniforme vive no Transform3D — este botão devolve o tamanho real)
+constexpr u64 kInspectorScaleOrig  = 5310;   // "escala: original"
 // 0.7.7 — inspector da CÂMARA (sliders + botões; faixa 5400..5419)
 constexpr u64 kInspectorCamFov     = 5400;
 constexpr u64 kInspectorCamNear    = 5401;
@@ -110,6 +113,9 @@ struct InspProfile {
     PrimKind primKind = PrimKind::Sphere;
     bool anim = false;      // AnimationPlayer presente
     bool canAnim = false;   // tem ALVO animável (Transform3D ou UI com elems)
+    // 0.8.9 — IMPORT DE FICHEIRO: linhas dims + "escala: original" (o fit
+    // uniforme normaliza o TAMANHO; estes mostram/devolvem o original)
+    bool fileMesh = false;
 };
 
 inline InspProfile inspectorProfile(const Tic& tic) {
@@ -124,6 +130,8 @@ inline InspProfile inspectorProfile(const Tic& tic) {
     if (const MeshRenderer* mr = tic.getComponent<MeshRenderer>()) {
         p.prim = mr->primOn;   // 0.8.0
         p.primKind = mr->prim.kind;
+        // 0.8.9: mesh DE FICHEIRO (não prim, ref por meshPath) → dims+escala
+        p.fileMesh = !mr->primOn && !mr->meshPath.empty();
     }
     if (const UiCanvas* uic = tic.getComponent<UiCanvas>()) {
         p.canAnim = !uic->elements.empty();
@@ -176,6 +184,9 @@ struct InspRow {
         PrimSlider,  // slider de parâmetro (payload pelo id: R/H/Seg/Tube)
         AddAnim,     // botão "add Animacao" (cria o AnimationPlayer)
         AnimLabel,   // "anim: N tracks" (a edição vive na timeline)
+        // 0.8.9 — import: dimensões originais + repor a escala
+        DimsLabel,   // "dims: X×Y×Z" (AABB real do mesh carregado)
+        ScaleOrig,   // "escala: original" (repõe Transform3D::scale a {1,1,1})
     };
     Kind kind;
     f32  y;     // topo da linha em COORDS DE CONTEÚDO (cumulativo)
@@ -200,6 +211,7 @@ inline u32 inspectorRowCount(const InspProfile& p, bool selectable) {
             if (primUsesSegments(p.primKind)) n += 1;   // segmentos
             if (primUsesTube(p.primKind)) n += 1;       // tubo
         }
+        if (p.fileMesh) n += 2;                        // 0.8.9: dims + escala original
     }
     if (p.im) n += 1;                                   // input
     if (p.bc) n += 2;                                   // body + velx
@@ -267,6 +279,12 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
         }
         push(selectable ? InspRow::Kind::TexButton : InspRow::Kind::TexLabel,
              selectable ? btnH : textH, selectable ? kInspectorTexSel : 0);
+        // 0.8.9 — IMPORT: dims originais + botão "escala original" (o fit
+        // uniforme aplicou fator único; estes mostram os números crus)
+        if (p.fileMesh) {
+            push(InspRow::Kind::DimsLabel, textH, 0);
+            push(InspRow::Kind::ScaleOrig, btnH, kInspectorScaleOrig);
+        }
         // 0.7.0 — cor por TIC (sliders R/G/B do tint)
         for (u32 i = 0; i < 3; ++i) {
             push(InspRow::Kind::ColorSlider, sldH, kInspectorColBase + i);
