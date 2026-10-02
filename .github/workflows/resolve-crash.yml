@@ -27,7 +27,7 @@ jobs:
       - name: Checkout do commit EXATO da 0.8.7 (3f0e838)
         uses: actions/checkout@v4
         with:
-          ref: 3f0e838
+          ref: 3f0e838c14acad4ec91472486426400d48e6067d
 
       - uses: actions/setup-java@v4
         with:
