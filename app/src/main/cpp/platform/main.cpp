@@ -36,6 +36,8 @@
 #include "components/UiCanvas.h"   // 0.8.0: tracks de UI
 #include "assets/GltfAnim.h"   // 0.8.1 (F7): clips de animação do glTF
 #include "core/AnimationSystem.h"   // 0.8.0: avanço em Play
+#include "core/VoniSystem.h"   // 0.9.2: a "central" da V.ONI (spec §3)
+#include "voni/Voni.h"
 #include "core/AssetPersist.h"
 #include "core/FsStorage.h"
 #include "core/PlaySnapshot.h"
@@ -147,6 +149,11 @@ u32  g_primSwapErr = 0;
 
 // ---- F4: física + modo Play ------------------------------------------------
 phys::PhysicsSystem g_physics;       // TickGroup::Physics (só avança em Play)
+
+// 0.9.2 — A CENTRAL V.ONI: dispatcher dos scripts (TickGroup::Update; os
+// runs automáticos só em Play, os do editor vivem até stop). O hook de
+// transição liga às cenas ABAIXO (só depois de g_scenes existir).
+VoniSystem g_voni;
 // F4.2/B3: sandbox do Play — pose de editor capturada ao ENTRAR, restaurada
 // ao SAIR (a simulação é descartada; a física continua a correr só no Play)
 // 0.6.8: o MODO (editor↔play) vive em g_editor.playMode (EditorState) — a
@@ -908,6 +915,45 @@ void loadSceneByName(const std::string& name, ui::SceneSwap style) {
     char msg[96];
     std::snprintf(msg, sizeof(msg), "cena '%s' nao existe", name.c_str());
     showToast(msg);
+}
+
+// nome da cena ATIVA (sem extensão/caminho) — o host da V.ONI usa para
+// validar o `nomedacena.transition.for` (origem == atual)
+static std::string currentSceneBaseName() {
+    if (const std::string* p = g_project.activeScenePath()) {
+        const size_t slash = p->rfind('/');
+        std::string base = slash == std::string::npos ? *p : p->substr(slash + 1);
+        const size_t dot = base.rfind('.');
+        if (dot != std::string::npos) {
+            base = base.substr(0, dot);
+        }
+        return base;
+    }
+    return std::string();
+}
+
+// 0.9.2 §9 — o hook transition.for da V.ONI: valida o destino no manifesto
+// e troca com FADE (em Play) — o estilo é do engine, a LINGUAGEM só pede.
+static bool voniTransitionHook(const std::string& from, const std::string& to,
+                               std::string& err) {
+    (void)from;   // o host JÁ validou origem==atual
+    if (!g_projectReady) {
+        err = "sem projeto aberto";
+        return false;
+    }
+    const std::string rel =
+        std::string(Project::kDirScenes) + "/" + to + ".goni";
+    for (u32 i = 0; i < g_project.scenes.size(); ++i) {
+        if (g_project.scenes[i] == rel) {
+            loadSceneByName(to, g_editor.playMode ? ui::SceneSwap::Fade
+                                                  : ui::SceneSwap::Instant);
+            elog::info("voni: transition.for('%s') -> '%s'", from.c_str(),
+                       to.c_str());
+            return true;
+        }
+    }
+    err = "cena '" + to + "' não existe";
+    return false;
 }
 
 // CRIA uma cena nova com nome (teclado in-app): guarda a atual, regista a
@@ -2022,6 +2068,74 @@ void closeTextWindow() {
     elog::info("texto: janela fechada — IME escondido, landscape reposto");
 }
 
+// ---- 0.9.2 — EDITOR DE SCRIPT + DOCS -----------------------------------------
+//
+// O par INSEPARÁVEL do textWin aplica-se ao editor de script (janela de
+// TEXTO PESADO — spec 0.9.1 §1): abrir = portrait + IME show; fechar =
+// landscape + IME hide. O buffer SALVA no ScriptComp ao fechar (§10).
+// instala os hooks UMA vez no arranque do android_main (ver chamada abaixo)
+static void voniInstallHooks() {
+    g_voni.setSceneNameFn([]() { return currentSceneBaseName(); });
+    g_voni.setTransitionHook(&voniTransitionHook);
+}
+
+void openScriptEditor(Handle tic) {
+    Tic* t = g_scene.get(tic);
+    if (!t) {
+        return;
+    }
+    editor::scriptwin::open(g_editor.scriptWin, g_scene, tic);
+    if (ime::setOrientation(ime::Orientation::Portrait,
+                            "editor de script aberto")) {
+        storage::jniSetOrientation(true);
+    }
+    storage::jniImeShow();
+    elog::info("voni: editor de script aberto — portrait + IME");
+}
+
+void closeScriptEditor() {
+    // salva o fonte no componente (persistir §10 — o back NÃO descarta)
+    if (Tic* t = g_scene.get(g_editor.scriptWin.tic)) {
+        if (ScriptComp* sc = t->getComponent<ScriptComp>()) {
+            sc->source = g_editor.scriptWin.buf;
+        }
+    }
+    editor::scriptwin::close(g_editor.scriptWin);
+    if (ime::setOrientation(ime::Orientation::Landscape,
+                            "editor de script fechado")) {
+        storage::jniSetOrientation(false);
+    }
+    storage::jniImeHide();
+    elog::info("voni: editor de script fechado — landscape reposto");
+}
+
+// Run do editor: (re)compila + arranca; o erro (com linha) volta para a
+// barra do editor + engine.log + toast
+void scriptEditorRun() {
+    voni::Error err;
+    if (!g_voni.editorRestart(g_scene, g_editor.scriptWin.tic,
+                              g_editor.scriptWin.buf.c_str(), err)) {
+        g_editor.scriptWin.errLine = err.line;
+        g_editor.scriptWin.errMsg = err.message;
+        g_editor.scriptWin.running = false;
+        elog::error("voni: script erro linha %u: %s", err.line,
+                    err.message.c_str());
+        std::snprintf(g_toast, sizeof(g_toast), "script: linha %u", err.line);
+        g_toastT = 1.8f;
+    } else {
+        g_editor.scriptWin.errLine = 0;
+        g_editor.scriptWin.errMsg.clear();
+        g_editor.scriptWin.running = true;
+        elog::info("voni: script a correr (editor Run)");
+    }
+}
+
+void scriptEditorStop() {
+    g_voni.editorStop(g_editor.scriptWin.tic);
+    g_editor.scriptWin.running = false;
+    elog::info("voni: script parado (editor Stop)");
+}
+
 // 0.6.7: desliga os MeshRenderers dos objetos de GPU que vão morrer.
 // O g_gpu.releaseAll() APAGA os Mesh*/Texture* (unique_ptr + glDelete*) — os
 // ponteiros não-donos dos componentes ficariam PENDENTES (use-after-free no
@@ -3089,6 +3203,7 @@ void enterPlayMode() {
         pl.resetDir();
     }
     g_animSystem.enabled = true;
+    g_voni.playEnabled = true;   // 0.9.2: scripts arrancam (autoPlay)
     audioEnterPlay();   // 0.8.11: autoplay dos AudioPlayers
     LOGI("ui: modo play — snapshot de %u transforms / %u bodies / %u ui-elems; "
          "%u animation player(s) a tocar",
@@ -3104,6 +3219,8 @@ void leavePlayMode() {
     g_editor.playMode = false;
     audioLeavePlay();   // 0.8.11: o sandbox de áudio também morre
     g_animSystem.enabled = false;   // 0.8.0: animação só avança em Play
+    g_voni.playEnabled = false;   // 0.9.2: runs de Play morrem (as do
+    g_voni.stopPlayRuns();        // editor Run continuam até o Stop)
     playSnapshotRestore(g_scene, g_playSnap);
     // 0.8.0 (F7): players PARADOS no zero (o Play é sandbox — o estado de
     // edição nunca herda "a meio de um clip")
@@ -4162,6 +4279,17 @@ void frame() {
                 openTextWindow();
                 break;
             }
+            case editor::settings::kOpenDocs: {
+                // 0.9.2 §11 — Settings fecha; o ecrã de Docs fica como
+                // modal único (o mesmo padrão do kOpenTextWindow)
+                g_editor.settingsMenu = false;
+                g_editor.docsScreen.open = true;
+                g_editor.docsScreen.queryLen = 0;
+                g_editor.docsScreen.query[0] = '\0';
+                g_editor.docsScreen.expanded = -1;
+                elog::info("voni: docs abertas");
+                break;
+            }
             case editor::settings::kReconvert: {
                 reconvertAllAssets();
                 break;
@@ -4199,7 +4327,8 @@ void frame() {
             editor::drawUiInspector(g_ui, g_scene, g_editor, g_input);
         } else if (g_editor.showInspector) {
             // 0.7.6: o G5 da toolbar pode ter escondido o painel direito
-            editor::drawInspector(g_ui, g_scene, g_editor, &g_catalog);   // sliders + seletores
+            editor::drawInspector(g_ui, g_scene, g_editor, &g_catalog,
+                                  &g_voni);   // 0.9.2: +vars @+ do script
         }
         // 0.9.0 (spec E/K): a TIMELINE vive no DRAWER do painel de baixo
         // (aba Animação) — a strip de fundo morreu. Com player presente e
@@ -4665,6 +4794,32 @@ void frame() {
     // desenho (o texto do frame entra no buffer deste frame) e fecha com
     // o par landscape+imeHide quando o back é tocado. Modal: qualquer
     // coisa do editor por baixo está gating pelo anyOverlayOpen.
+    // 0.9.2 — PEDIDO DO EDITOR DE SCRIPT (Inspector → "Editar script"):
+    // abre com o par inseparável portrait+IME (o mesmo do textWin)
+    if (g_editor.requestScriptEditor) {
+        g_editor.requestScriptEditor = false;
+        openScriptEditor(g_editor.scriptEditorTarget);
+    }
+
+    // 0.9.2 — ERROS DA V.ONI (a central drena 1×/frame): engine.log +
+    // toast + barra de erro do editor (se o script em edição é o dono)
+    {
+        Handle errTic{};
+        voni::Error verr;
+        if (g_voni.popError(errTic, verr)) {
+            elog::error("voni: script erro linha %u: %s", verr.line,
+                        verr.message.c_str());
+            std::snprintf(g_toast, sizeof(g_toast), "script: linha %u",
+                          verr.line);
+            g_toastT = 1.8f;
+            if (g_editor.scriptWin.open && g_editor.scriptWin.tic == errTic) {
+                g_editor.scriptWin.errLine = verr.line;
+                g_editor.scriptWin.errMsg = verr.message;
+                g_editor.scriptWin.running = false;
+            }
+        }
+    }
+
     if (g_editor.textWin.open) {
         ime::Event ev;
         while (ime::poll(ev)) {
@@ -4673,6 +4828,39 @@ void frame() {
         if (editor::textwin::draw(g_ui, g_input, g_editor.textWin,
                                   w, h, g_frameDt) == 1) {
             closeTextWindow();
+        }
+    }
+
+    // 0.9.2 — DOCS (Settings → Docs; landscape, com pesquisa in-app):
+    // back fecha; o campo de pesquisa abre o teclado (propósito 9)
+    if (g_editor.docsScreen.open) {
+        const int dr = editor::docswin::draw(g_ui, g_input,
+                                             g_editor.docsScreen, w, h);
+        if (dr == 1) {
+            g_editor.docsScreen.open = false;
+            elog::info("voni: docs fechadas");
+        } else if (dr == 4) {
+            editor::openTextInput(g_editor, 9, Handle{}, -1,
+                                  g_editor.docsScreen.query);
+        }
+    }
+
+    // 0.9.2 — EDITOR DE SCRIPT (portrait + IME — o par do textWin): a fila
+    // do IME alimenta o fonte; Run/Stop pelo VoniSystem; back SALVA no
+    // componente e fecha com landscape+imeHide
+    if (g_editor.scriptWin.open) {
+        ime::Event ev;
+        while (ime::poll(ev)) {
+            editor::scriptwin::applyEvent(g_editor.scriptWin, ev);
+        }
+        const int sr = editor::scriptwin::draw(
+            g_ui, g_input, g_editor.scriptWin, w, h, g_frameDt);
+        if (sr == 1) {
+            closeScriptEditor();   // salva o fonte + par landscape/IME
+        } else if (sr == 2) {
+            scriptEditorRun();
+        } else if (sr == 3) {
+            scriptEditorStop();
         }
     }
 
@@ -5185,6 +5373,9 @@ void android_main(android_app* app) {
     // pos/rot/scale (updateWorld já no apply); o Transform reconfirma o
     // cache no mesmo passo (nunca vê dados meio-escritos)
     g_systems.add(TickGroup::Update, &g_animSystem);
+    g_systems.add(TickGroup::Update, &g_voni);   // 0.9.2: scripts ANTES do
+    // transform cache (move() reflete no world do MESMO passo)
+    voniInstallHooks();   // 0.9.2: transition.for + nome da cena atual
     g_systems.add(TickGroup::Update, &g_transformSystem);
     g_systems.add(TickGroup::Physics, &g_physics);   // entre Update e PostUpdate
     elog::info("[boot 5/6] physics OK (tickgroups Update+Physics registados; "

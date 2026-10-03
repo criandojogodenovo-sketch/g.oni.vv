@@ -1,3 +1,24 @@
+## 0.9.2 — V.ONI v0 CORE (LINGUAGEM DE SCRIPTING FECHADA)
+
+**O que mudou (a linguagem da engine):**
+- LINGUAGEM V.ONI (spec fechada): `central main { on moment { } allmoments { } }` + top-level 1×; `v++nome=valor` / `v#nome:Tipo=valor` / `@+` exporta para o Inspector; loops `repeat(n)`, `last(cond)`, `last(cond) with n+=1`, `continue`, `resume` (nunca if/else/break); condicionais `exist`, `notexist{ }` com a cadeia `and( cond(ação) stopand )`, `option(sel){ and valor(ação) stopand notoption{ } }`; funções `fn nome(a:Num):Num { return }`; operadores `+ - * / == != < > <= >= and or not`.
+- COMANDOS DA ENGINE (lista fechada): `View P "texto"` (log com prefixo `voni:`), `move(x,y,z)`, `Import.Animation("nome")`, `cena.transition.for("destino")`, `Deltatime.Increment(var, valor)`, `Explode.TIC.et/.er`, `Search.alvo.propriedade` (RTTI: pos/rot/escala/name/visible/active + .x/.y/.z).
+- COMPONENTE SCRIPT num TIC (Inspector → secção Script → Adicionar/Editar + variáveis @+); o editor abre em PORTRAIT com o IME do sistema, NÚMEROS DE LINHA, COLORAÇÃO (paleta no Theme), RUN/STOP e barra de erro com LINHA; o back salva o fonte no TIC (viaja no .goni).
+- SANDBOX: budget de instruções por tick + profundidade 256 — loops infinitos e recursões abortam com erro legível, nunca crash; erros SEMPRE com linha (editor + engine.log).
+- SETTINGS → DOCS com pesquisa (lupa): entrada por comando/linker/tyker/componente (nome, 1 linha, sintaxe, exemplo) — 0.9.2 povoa comandos+linguagem.
+- Parser PEG (cpp-peglib v1.8.6 pinada) com a GRAMÁTICA em ficheiro único (mudar um literal muda a linguagem sem tocar em C++ — testado).
+- FIXES REAIS apanhados pelo loop: a PESQUISA DA HIERARQUIA estava MORTA desde a 0.9.0 (o teclado abria mas o texto nunca chegava ao filtro).
+
+**Checklist C33 (VERIFIED do dono):**
+1. TIC → Inspector → Script → "Adicionar script" → "Editar script": o editor abre em PORTRAIT com o TECLADO DO SISTEMA; escrever `central main { on moment { View P "ola" } allmoments { } }`; números de linha visíveis; keywords cor de roxo, `View` azul, texto verde.
+2. RUN → o toast/log mostra `voni: ola` (Settings → Diagnóstico → Ver logs procura "voni:"); STOP para; back salva (reabrir mostra o fonte).
+3. Erro com LINHA: escrever `v++to=1` (reservada) → Run → a barra vermelha mostra "linha N: 'to' é uma palavra reservada" e a linha N acende no gutter.
+4. `allmoments` corre por frame: `allmoments { move(0, 0, 1) }` + Run → o TIC desloca-se; Stop congela.
+5. Variável exportada: `v#@+vida:Num=100` no script + Run → o Inspector mostra `vida = 100`.
+6. Docs: Settings → Docs → "Ver docs da V.ONI" → pesquisar "move" → a entrada aparece com sintaxe e exemplo; back fecha.
+7. Fechar o editor → LANDSCAPE reposto, teclado fechado (o par inseparável).
+8. A pesquisa da HIERARQUIA agora filtra ao tocar OK no teclado in-app (o fix 0.9.0).
+
 ## 0.9.1 — ORIENTAÇÃO + IME DO SISTEMA
 
 **O que mudou (input de texto real):**

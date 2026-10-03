@@ -48,6 +48,20 @@ bool readVec3(const Json* j, Vec3& out) {
     return true;
 }
 
+// 0.9.2 — Script: o fonte .voni viaja como string JSON (escapes do Json)
+void appendComponentJson(Json& arr, const ScriptComp* sc) {
+    if (!sc || sc->source.empty()) {
+        return;
+    }
+    Json c = Json::makeObject();
+    c.addMember("type", Json::makeString("Script"));
+    c.addMember("source", Json::makeString(sc->source));
+    if (!sc->autoPlay) {
+        c.addMember("auto", Json::makeNumber(0));
+    }
+    arr.addItem(std::move(c));
+}
+
 void appendComponentJson(Json& arr, const Transform3D* tr) {
     if (!tr) {
         return;
@@ -654,6 +668,20 @@ void fillCameraComp(CameraComp* cam, const Json& comp) {
 
 // 0.8.11 — AudioPlayer: reconstrói os campos (defaults ausentes =
 // valores do componente — forward-compat como o resto do serializer).
+// 0.9.2 — Script: {"type":"Script","source":"…","auto":0|1(octal não: número)}
+void fillScriptComp(ScriptComp* sc, const Json& comp) {
+    if (!sc) {
+        return;
+    }
+    const Json* src = comp.find("source");
+    if (src && src->type == Json::Type::String) {
+        sc->source = src->string;   // escapes resolvidos pelo parser do Json
+    }
+    const Json* autoJ = comp.find("auto");
+    sc->autoPlay = !(autoJ && autoJ->type == Json::Type::Number &&
+                     autoJ->number == 0.0);
+}
+
 void fillAudioPlayer(AudioPlayer* au, const Json& comp) {
     if (!au) {
         return;
@@ -1109,6 +1137,7 @@ std::string dump(const Scene& scene) {
         appendComponentJson(comps, cs.animators().find(t.handle));     // 0.8.0
         appendComponentJson(comps, cs.skeletons().find(t.handle));      // 0.8.2
         appendComponentJson(comps, cs.audioPlayers().find(t.handle));   // 0.8.11
+        appendComponentJson(comps, cs.scripts().find(t.handle));       // 0.9.2
         jt.addMember("components", std::move(comps));
 
         tics.addItem(std::move(jt));
@@ -1216,6 +1245,8 @@ bool loadText(Scene& scene, const std::string& text, const LoadCtx& ctx) {
                 fillSkeleton(store.get<SkeletonComp>(h), jc);   // 0.8.2
             } else if (jt2->string == "AudioPlayer") {
                 fillAudioPlayer(store.get<AudioPlayer>(h), jc);   // 0.8.11
+            } else if (jt2->string == "Script") {
+                fillScriptComp(store.get<ScriptComp>(h), jc);   // 0.9.2
             }
             // InputMap: sem dados — presença basta
         }

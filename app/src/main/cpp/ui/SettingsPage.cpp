@@ -15,6 +15,9 @@ namespace vv {
 namespace editor {
 namespace settings {
 
+// 0.9.2 — id da linha Docs (faixa do Settings; imediato único)
+constexpr u64 kDocsRowId = 6409;
+
 namespace {
 
 f32 baseline(UiContext& ui, const UiRect& r) {
@@ -275,10 +278,18 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
     }
     y += kSectionH;
     if (!(collapsed & kBitDocs)) {
+        // 0.9.2 §11: A LINHA entrou — abre o ecrã de Docs (pesquisa lupa)
         if (ui.hasFont()) {
-            ui.labelFitted(ox + 16.0f, baseline(ui, {ox, y, aw, kRowH}),
-                           "documentacao dos comandos (0.9.2)",
-                           theme::kTheme.text2, aw - 32.0f);
+            const TextMetrics m = ui.textMetrics();
+            const f32 base = y + (kRowH - m.block()) * 0.5f + m.ascent;
+            ui.labelFitted(ox + 16.0f, base, "Ver docs da V.ONI",
+                           theme::kTheme.text1, aw - 64.0f);
+            icons::drawIcon(ui, icons::Icon::ChevronRight,
+                            ox + aw - 40.0f, y + (kRowH - 24.0f) * 0.5f,
+                            24.0f, theme::kTheme.text2);
+        }
+        if (ui.widgetHit(kDocsRowId, ox, y, aw, kRowH)) {
+            res = kOpenDocs;
         }
         y += kRowH;
     }

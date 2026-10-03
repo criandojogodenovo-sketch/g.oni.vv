@@ -58,11 +58,15 @@
 #include "ui/UiContext.h"
 #include "ui/EditorLayout.h"
 #include "ui/TextWindow.h"   // 0.9.1: janela de texto pesado (st.textWin)
+#include "ui/ScriptEditor.h"   // 0.9.2: editor de script V.ONI
+#include "ui/DocsScreen.h"     // 0.9.2: Settings → Docs
 #include "platform/FileApi.h"
 #include "platform/StoragePerm.h"
 #include "render/Primitives.h"   // 0.8.0: PrimParams no AssetResolvers
 
 namespace vv {
+
+class VoniSystem;   // 0.9.2: a central da V.ONI (fwd — o ponteiro chega ao drawInspector)
 
 class Scene;
 class InputState;
@@ -211,6 +215,24 @@ struct EditorState {
     // a semente do editor de script 0.9.2). O gate anyOverlayOpen cobre:
     // nada do editor desenha/interage atrás dela.
     textwin::State textWin;
+
+    // ---- 0.9.2 — V.ONI ----------------------------------------------------
+    // editor de script (modal portrait+IME — o par inseparável do textWin)
+    scriptwin::State scriptWin;
+    // ecrã de Docs (Settings → Docs; landscape, com pesquisa in-app)
+    docswin::State docsScreen;
+    // pedido do Inspector para abrir o editor (o main consome com o par
+    // portrait+IME e limpa o flag)
+    bool requestScriptEditor = false;
+    Handle scriptEditorTarget{};
+    // vars @+ do TIC selecionado (o drawInspector preenche por frame a
+    // partir do VoniSystem — exibição do Inspector §4)
+    u32 scriptVarCount = 0;
+    struct ScriptVarView {
+        char name[32] = "";
+        char value[48] = "";
+    };
+    ScriptVarView scriptVars[8];
 };
 
 // Rect do viewport central (entre os painéis) — usado para o gate da câmara.
@@ -240,7 +262,8 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st);
 // linhas de mesh/tex são só leitura (modo degradação, usado nos testes).
 // Devolve true se algum slider alterou valores neste frame.
 bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
-                   const AssetCatalog* catalog = nullptr);
+                   const AssetCatalog* catalog = nullptr,
+                   const VoniSystem* voni = nullptr);
 
 // F4: controlos de toque (só em modo Play, só se algum TIC ativo tem o
 // componente) — joystick quadrado + botão JUMP no quad batch, tema mono.

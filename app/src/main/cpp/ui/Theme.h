@@ -60,6 +60,14 @@ struct Theme {
     f32 warn[4];       // #FABB45
     f32 ok[4];         // #66BB6A
     f32 scrim[4];      // preto 60% (véu modal)
+    // 0.9.2 — PALETA V.ONI (spec §10 🔶 — coloração do editor de script;
+    // o parser classifica tokens, AS CORES VIVEM AQUI — flip de 1 token)
+    f32 voniReserved[4];   // #B39DDB reservadas (roxo)
+    f32 voniEngine[4];     // #8AB4F8 engine/maiúsculas (azul)
+    f32 voniUser[4];       // #F5F5F5 utilizador (branco)
+    f32 voniString[4];     // #81C784 strings (verde)
+    f32 voniNumber[4];     // #FFD54F números (amarelo)
+    f32 voniComment[4];    // #757575 comentários (cinzento)
 };
 
 // hex→f32 normalizado (compile-time-friendly por field)
@@ -85,6 +93,13 @@ inline constexpr Theme kTheme{
     VV_RGB(250, 187, 69),   // warn
     VV_RGB(102, 187, 106),  // ok
     {0.0f, 0.0f, 0.0f, 0.60f},  // scrim (60%)
+    // 0.9.2 V.ONI: B39DDB · 8AB4F8 · F5F5F5 · 81C784 · FFD54F · 757575
+    VV_RGB(179, 157, 219),  // voniReserved
+    VV_RGB(138, 180, 248),  // voniEngine
+    VV_RGB(245, 245, 245),  // voniUser
+    VV_RGB(129, 199, 132),  // voniString
+    VV_RGB(255, 213, 79),   // voniNumber
+    VV_RGB(117, 117, 117),  // voniComment
 };
 #undef VV_RGB
 
@@ -146,6 +161,13 @@ inline f32 contrastRatio(const f32 a[4], const f32 b[4]) {
 // razão de contraste de um token contra SURFACE (o caso comum da auditoria)
 inline f32 contrastOnSurface(const f32 color[4]) {
     return contrastRatio(color, kTheme.surface);
+}
+
+// 0.9.2 — contraste dos tokens V.ONI sobre o BG do editor (#0B0E13):
+// voniUser 18,3:1 · voniEngine 12,5:1 · voniReserved 8,0:1 ·
+// voniString 10,5:1 · voniNumber 12,3:1 · voniComment 4,7:1 (todos ≥4,5:1)
+inline f32 contrastOnBg(const f32 color[4]) {
+    return contrastRatio(color, kTheme.bg);
 }
 
 } // namespace theme

@@ -27,6 +27,7 @@
 #include "ui/FontAtlas.h"   // TextMetrics (GL-free)
 #include "core/Scene.h"
 #include "components/Transform3D.h"
+#include "components/ScriptComp.h"   // 0.9.2: perfil do Inspector
 #include "components/MeshRenderer.h"
 #include "components/InputMap.h"
 #include "components/BodyComp.h"
@@ -148,6 +149,10 @@ struct InspProfile {
     bool canAnim = false;   // tem ALVO animável (Transform3D ou UI com elems)
     // 0.8.11 — áudio
     bool au = false;        // AudioPlayer presente (secção + linhas)
+    // 0.9.2 — V.ONI: script presente + nº de vars @+ (o chamador injeta a
+    // contagem via VoniSystem — o profile sozinho não a sabe)
+    bool script = false;
+    u32 scriptExports = 0;
     // 0.8.9 — IMPORT DE FICHEIRO: linhas dims + "escala: original" (o fit
     // uniforme normaliza o TAMANHO; estes mostram/devolvem o original)
     bool fileMesh = false;
@@ -163,6 +168,7 @@ inline InspProfile inspectorProfile(const Tic& tic) {
     p.cam = tic.getComponent<CameraComp>() != nullptr;   // 0.7.7
     p.anim = tic.getComponent<AnimationPlayer>() != nullptr;   // 0.8.0
     p.au = tic.getComponent<AudioPlayer>() != nullptr;   // 0.8.11
+    p.script = tic.getComponent<ScriptComp>() != nullptr;   // 0.9.2
     if (const MeshRenderer* mr = tic.getComponent<MeshRenderer>()) {
         p.prim = mr->primOn;   // 0.8.0
         p.primKind = mr->prim.kind;
@@ -227,6 +233,9 @@ struct InspRow {
         ScaleOrig,   // "escala: original" (repõe Transform3D::scale a {1,1,1})
         // 0.8.11 — ÁUDIO (secção do AudioPlayer)
         AuSection,   // cabeçalho "Audio" + separador
+        ScriptEdit,  // 0.9.2: botão "Editar script" (abre o editor modal)
+        ScriptAdd,   // 0.9.2: botão "Adicionar script" (cria ScriptComp)
+        ScriptVar,   // 0.9.2: variável @+ exportada (payload = índice)
         AuClip,      // "clip: <nome> ▸" (abre o seletor de clips — menu 5)
         AuPlay,      // "ouvir/parar" (preview — flag que o main mapeia)
         AuAutoplay,  // "autoplay: sim/nao" (toca ao entrar em Play)
@@ -259,6 +268,7 @@ constexpr u32 kInspBitMaterial  = 1u << 3;
 constexpr u32 kInspBitFisica    = 1u << 4;
 constexpr u32 kInspBitAudio     = 1u << 5;
 constexpr u32 kInspBitAnim      = 1u << 6;
+constexpr u32 kInspBitScript    = 1u << 7;   // 0.9.2: V.ONI
 
 // altura de UMA linha de Transform (spec C: "3 campos numéricos editáveis
 // 48dp"): título 12sp em LINHA PRÓPRIA (24px) + caixas X/Y/Z 48dp + R 48.
@@ -337,6 +347,12 @@ inline u32 inspectorRowCount(const InspProfile& p, bool selectable,
         if (!(collapsed & kInspBitAudio)) {
             n += 9;
         }
+    }
+    // ---- SCRIPT V.ONI (bit7 — 0.9.2): secção SEMPRE presente ----------
+    n += 1;                                    // cabeçalho
+    if (!(collapsed & kInspBitScript)) {
+        n += 1;                                // Editar / Adicionar
+        n += p.scriptExports < 8 ? p.scriptExports : 8;   // vars @+
     }
     (void)selectable;
     return n;
@@ -467,6 +483,23 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
             push(InspRow::Kind::AuPos, btnH, kInspectorAuPos);
             push(InspRow::Kind::AuRint, sldH, kInspectorAuRint);
             push(InspRow::Kind::AuRext, sldH, kInspectorAuRext);
+        }
+    }
+    // ---- SCRIPT V.ONI (0.9.2 §10) — sempre disponível num TIC ----------
+    if (p.script) {
+        push(InspRow::Kind::Section, secH, kInspSectionBase + 7,
+             kInspBitScript);
+        if (!(collapsed & kInspBitScript)) {
+            push(InspRow::Kind::ScriptEdit, addH, 0);
+            for (u32 e = 0; e < p.scriptExports && e < 8; ++e) {
+                push(InspRow::Kind::ScriptVar, textH, e);
+            }
+        }
+    } else {
+        push(InspRow::Kind::Section, secH, kInspSectionBase + 7,
+             kInspBitScript);
+        if (!(collapsed & kInspBitScript)) {
+            push(InspRow::Kind::ScriptAdd, addH, 0);
         }
     }
     return n;

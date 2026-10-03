@@ -66,7 +66,9 @@ bool anyOverlayOpen(const EditorState& st) {
            st.removeDialog || st.textInput || st.assetMenu != 0 ||
            st.importMenu || st.storageDialog || st.logViewer ||
            st.scenesMenu || st.fileBrowser || st.applyAsk ||
-           st.textWin.open;   // 0.9.1: janela de texto pesado (portrait+IME)
+           st.textWin.open ||   // 0.9.1: janela de texto pesado (portrait+IME)
+           st.scriptWin.open ||   // 0.9.2: editor de script (portrait+IME)
+           st.docsScreen.open;    // 0.9.2: ecrã de Docs
 }
 
 // 0.7.5 — BACKDROP MODAL: fundo OPACO que tapa o ecrã TODO (o chrome do
@@ -1652,7 +1654,9 @@ void openTextInput(EditorState& st, int purpose, Handle tic, i32 element,
 }
 
 bool commitTextInput(Scene& scene, EditorState& st) {
-    if (st.textLen == 0) {
+    // 0.9.2: nas PESQUISAS (8 hierarquia, 9 Docs) o texto vazio é VÁLIDO —
+    // limpa o filtro (nos restantes propósitos o vazio não se aplica)
+    if (st.textLen == 0 && st.textPurpose != 8 && st.textPurpose != 9) {
         return false;   // nome/texto vazio NÃO se aplica (fica o anterior)
     }
     switch (st.textPurpose) {
@@ -1771,6 +1775,22 @@ bool commitTextInput(Scene& scene, EditorState& st) {
                 }
             }
             tr->updateWorld();
+            return true;
+        }
+        case 8: {   // 0.9.0 — pesquisa da hierarquia. BUG 0.9.2: o COMMIT
+            // FALTAVA (o campo abria o teclado mas hierSearch nunca recebia
+            // o texto — a pesquisa só funcionava por estado direto nos
+            // testes). O commit é AQUI: textBuf → hierSearch.
+            std::snprintf(st.hierSearch, sizeof(st.hierSearch), "%s",
+                          st.textBuf);
+            st.hierSearchLen = st.textLen;
+            return true;
+        }
+        case 9: {   // 0.9.2 — pesquisa das Docs V.ONI (§11)
+            std::snprintf(st.docsScreen.query, sizeof(st.docsScreen.query),
+                          "%s", st.textBuf);
+            st.docsScreen.queryLen = st.textLen;
+            st.docsScreen.expanded = -1;
             return true;
         }
         default:

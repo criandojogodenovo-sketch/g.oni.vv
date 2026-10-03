@@ -88,6 +88,7 @@ enum Result {
     kExportLogs,       // export para Downloads
     kProbeAudio,       // diagnóstico de áudio
     kOpenTextWindow,   // 0.9.1: abrir a janela de texto (portrait + IME)
+    kOpenDocs,         // 0.9.2: abrir o ecrã de Docs da V.ONI
     kToggleKeepSource, // fonte manter/largar
     kReconvert,        // reconverter assets
 };

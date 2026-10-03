@@ -51,6 +51,9 @@ ComponentStore::ComponentStore(Scene* owner) : scene_(owner) {
     registry_.add("AudioPlayer", [](ComponentStore& s, Handle h) {   // 0.8.11
         return s.add<AudioPlayer>(h) != nullptr;
     });
+    registry_.add("Script", [](ComponentStore& s, Handle h) {   // 0.9.2
+        return s.add<ScriptComp>(h) != nullptr;
+    });
 }
 
 void ComponentStore::removeAll(Handle h) {
@@ -64,6 +67,7 @@ void ComponentStore::removeAll(Handle h) {
     animators_.remove(h);
     audioPlayers_.remove(h);   // 0.8.11   // 0.8.0
     skeletons_.remove(h);   // 0.8.2
+    scripts_.remove(h);     // 0.9.2
 }
 
 bool ComponentStore::hasAny(Handle h) const {
@@ -75,7 +79,8 @@ bool ComponentStore::hasAny(Handle h) const {
            uiCanvases_.find(h) != nullptr ||
            cameras_.find(h) != nullptr ||   // 0.7.7
            animators_.find(h) != nullptr ||   // 0.8.0
-           skeletons_.find(h) != nullptr;   // 0.8.2
+           skeletons_.find(h) != nullptr ||   // 0.8.2
+           scripts_.find(h) != nullptr;   // 0.9.2
 }
 
 } // namespace vv

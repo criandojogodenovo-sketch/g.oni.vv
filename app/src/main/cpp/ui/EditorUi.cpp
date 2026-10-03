@@ -1,4 +1,8 @@
 #include "ui/EditorUi.h"
+#include "core/VoniSystem.h"   // 0.9.2: exported() das vars @+
+#include "platform/EngineLog.h"  // 0.9.2: log do ScriptAdd
+#include "components/ScriptComp.h"  // 0.9.2: ScriptAdd cria o componente
+#include "voni/Voni.h"
 #include "components/InputMap.h"
 #include "components/AudioPlayer.h"   // 0.8.11: inspector/seletor de clips
 #include "render/Camera.h"
@@ -418,7 +422,7 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
 // offset do scroll. contentHeight = fundo da última linha (soma REAL).
 // ---------------------------------------------------------------------------
 bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
-                   const AssetCatalog* catalog) {
+                   const AssetCatalog* catalog, const VoniSystem* voni) {
     // F4.2: painel inteiro dentro do contentRect — a altura REAL alimenta o
     // beginScroll → o overflow do Inspector é detetado e o scroll ativa (B1)
     const UiRect panel = safe::inspectorPanelRect(ui.screenWidth(),
@@ -457,7 +461,22 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     // ---- PLANO (fonte única): perfil → linhas sequenciais com y cumulativo
     // 0.9.0 (spec C): o plano SEGUE as secções colapsadas (só cabeçalho entra)
     const TextMetrics tm = ui.textMetrics();
-    const InspProfile prof = inspectorProfile(*tic);
+    InspProfile prof = inspectorProfile(*tic);
+    // 0.9.2 §4: as vars @+ vêm da run ATIVA (VoniSystem — a central)
+    st.scriptVarCount = 0;
+    if (prof.script && voni) {
+        auto vars = voni->exported(scene, tic->handle);
+        for (size_t i = 0; i < vars.size() && i < 8; ++i) {
+            std::snprintf(st.scriptVars[i].name,
+                          sizeof(st.scriptVars[i].name), "%s",
+                          vars[i].name.c_str());
+            std::snprintf(st.scriptVars[i].value,
+                          sizeof(st.scriptVars[i].value), "%s",
+                          voni::valueText(vars[i].value).c_str());
+        }
+        st.scriptVarCount = (u32)(vars.size() < 8 ? vars.size() : 8);
+        prof.scriptExports = st.scriptVarCount;
+    }
     const bool selectable = (catalog != nullptr);
     InspRow plan[64];
     const u32 nRows = inspectorPlan(prof, tm, selectable, st.inspCollapsed,
@@ -703,11 +722,11 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             // bit no EditorState::inspCollapsed (PERSISTE — spec G)
             const u32 bit = r.payload;
             const bool open = !(st.inspCollapsed & bit);
-            static const char* kTitles[7] = {"Transform", "Camera", "Malha",
+            static const char* kTitles[8] = {"Transform", "Camera", "Malha",
                                              "Material", "Fisica", "Audio",
-                                             "Animacao"};
+                                             "Animacao", "Script"};
             u32 titleIdx = 0;
-            for (u32 b = 0; b < 7; ++b) {
+            for (u32 b = 0; b < 8; ++b) {
                 if (bit == (1u << b)) {
                     titleIdx = b;
                 }
@@ -853,6 +872,61 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       "escala: original");
             break;
+        case InspRow::Kind::ScriptEdit: {
+            // 0.9.2 §10: abre o EDITOR DE SCRIPT (portrait + IME — o main
+            // faz o par inseparável ao ver o flag)
+            if (ui.widgetActive(r.id)) {
+                ui.panel(x + 4.0f, ry, w - 8.0f, r.h, theme::kTheme.surface2);
+            }
+            const TextMetrics m2 = ui.textMetrics();
+            const f32 base = ry + (r.h - m2.block()) * 0.5f + m2.ascent;
+            icons::drawIcon(ui, icons::Icon::Terminal, x + kPad,
+                            ry + (r.h - 24.0f) * 0.5f, 24.0f,
+                            theme::kTheme.accent);
+            ui.label(x + kPad + 32.0f, base, "Editar script",
+                     theme::kTheme.text1);
+            if (ui.widgetHit(r.id, x, ry, w, r.h)) {
+                st.requestScriptEditor = true;   // o main abre (com o par)
+                st.scriptEditorTarget = tic->handle;
+            }
+            break;
+        }
+        case InspRow::Kind::ScriptAdd: {
+            // 0.9.2 §10: cria o componente Script (vazio) no TIC
+            if (ui.widgetActive(r.id)) {
+                ui.panel(x + 4.0f, ry, w - 8.0f, r.h, theme::kTheme.surface2);
+            }
+            const TextMetrics m2 = ui.textMetrics();
+            const f32 base = ry + (r.h - m2.block()) * 0.5f + m2.ascent;
+            icons::drawIcon(ui, icons::Icon::Plus, x + kPad,
+                            ry + (r.h - 24.0f) * 0.5f, 24.0f,
+                            theme::kTheme.accent);
+            ui.label(x + kPad + 32.0f, base, "Adicionar script",
+                     theme::kTheme.text1);
+            if (ui.widgetHit(r.id, x, ry, w, r.h) &&
+                !tic->getComponent<ScriptComp>()) {
+                tic->addComponent<ScriptComp>();
+                elog::info("voni: componente Script criado no TIC '%s'",
+                           tic->name.c_str());
+            }
+            break;
+        }
+        case InspRow::Kind::ScriptVar: {
+            // 0.9.2 §4: variável @+ exportada — leitura (nome = valor ·Tipo)
+            const TextMetrics m2 = ui.textMetrics();
+            const f32 base = ry + (r.h - m2.block()) * 0.5f + m2.ascent;
+            char line[96];
+            const size_t idx = r.payload < st.scriptVarCount ? r.payload : 0;
+            if (idx < st.scriptVarCount) {
+                std::snprintf(line, sizeof(line), "%s = %s",
+                              st.scriptVars[idx].name,
+                              st.scriptVars[idx].value);
+            } else {
+                line[0] = '\0';
+            }
+            ui.label(x + kPad + 8.0f, base, line, theme::kTheme.text2);
+            break;
+        }
         case InspRow::Kind::Label:
             // input: → body: → tc: — payload NA ORDEM do plano (labelIdx)
             if (labelIdx < nLabels) {

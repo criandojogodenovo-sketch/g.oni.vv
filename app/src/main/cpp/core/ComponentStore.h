@@ -26,6 +26,7 @@
 #include "components/CameraComp.h"  // 0.7.7: câmara de cena
 #include "components/AnimationPlayer.h"  // 0.8.0: animação (F7)
 #include "components/AudioPlayer.h"     // 0.8.11: áudio
+#include "components/ScriptComp.h"    // 0.9.2: V.ONI (script .voni)
 #include "components/SkeletonComp.h"  // 0.8.2: skinning (F7)
 
 namespace vv {
@@ -102,6 +103,7 @@ public:
     ComponentStorage<AnimationPlayer>& animators()     { return animators_; }  // 0.8.0
     ComponentStorage<AudioPlayer>& audioPlayers()      { return audioPlayers_; }  // 0.8.11
     ComponentStorage<SkeletonComp>&  skeletons()       { return skeletons_; }   // 0.8.2
+    ComponentStorage<ScriptComp>&    scripts()         { return scripts_; }     // 0.9.2
     const ComponentStorage<Transform3D>&  transforms() const      { return transforms_; }
     const ComponentStorage<MeshRenderer>& meshRenderers() const   { return meshRenderers_; }
     const ComponentStorage<InputMap>&     inputMaps() const       { return inputMaps_; }
@@ -112,6 +114,7 @@ public:
     const ComponentStorage<AnimationPlayer>& animators() const     { return animators_; }  // 0.8.0
     const ComponentStorage<AudioPlayer>& audioPlayers() const      { return audioPlayers_; }  // 0.8.11
     const ComponentStorage<SkeletonComp>& skeletons() const        { return skeletons_; }   // 0.8.2
+    const ComponentStorage<ScriptComp>&   scripts() const          { return scripts_; }     // 0.9.2
 
     const ComponentRegistry& registry() const { return registry_; }
 
@@ -132,6 +135,7 @@ private:
     ComponentStorage<AnimationPlayer> animators_;  // 0.8.0: animação (F7)
     ComponentStorage<AudioPlayer> audioPlayers_;  // 0.8.11: áudio
     ComponentStorage<SkeletonComp>  skeletons_;   // 0.8.2: skinning (F7)
+    ComponentStorage<ScriptComp>    scripts_;     // 0.9.2: V.ONI (.voni)
     ComponentRegistry               registry_;
 };
 
@@ -215,6 +219,14 @@ inline const ComponentStorage<AudioPlayer>& ComponentStore::storageOf<AudioPlaye
 template <>
 inline const ComponentStorage<SkeletonComp>& ComponentStore::storageOf<SkeletonComp>() const {
     return skeletons_;
+}
+template <>
+inline ComponentStorage<ScriptComp>& ComponentStore::storageOf<ScriptComp>() {
+    return scripts_;
+}
+template <>
+inline const ComponentStorage<ScriptComp>& ComponentStore::storageOf<ScriptComp>() const {
+    return scripts_;
 }
 
 } // namespace vv

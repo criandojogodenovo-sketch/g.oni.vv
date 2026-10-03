@@ -125,7 +125,9 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     prof.canAnim = true;      // 0.8.0: tem Transform3D → linha add Animacao
     const TextMetrics m{};
     const f32 contentH = inspectorContentHeight(prof, m, false, 0u);
-    EXPECT(nearEqF(contentH, 1070.0f));  // 0.9.0: secções 48 + trf 80 (caixas 48dp) + thumbs 84
+    // 0.9.2: + secção Script (48) + Adicionar script (42) — o Inspector
+    // passou a oferecer script a QUALQUER TIC (§10)
+    EXPECT(nearEqF(contentH, 1160.0f));  // 0.9.0: 1070 + 90
 
     // DEPOIS: painel dentro do contentRect [0,24,·,628] (status 24 + nav 92)
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);
@@ -136,7 +138,7 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     EXPECT(nearEqF(listH, 376.0f));
     const f32 mo = scroll::maxOffset(contentH, listH);
     EXPECT(mo > 0.0f);                        // scroll ATIVA
-    EXPECT(nearEqF(mo, 694.0f));              // 1070 − 376
+    EXPECT(nearEqF(mo, 784.0f));              // 1160 − 376
 
     // com o offset no máximo, a ÚLTIMA linha do plano (add TouchControls)
     // fica INTEIRA dentro da lista
@@ -144,7 +146,7 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     const u32 n = inspectorPlan(prof, m, false, 0u, plan);
     EXPECT(n > 0);
     const InspRow& last = plan[n - 1];
-    EXPECT(last.kind == InspRow::Kind::AddAnim);   // 0.8.0: add Animacao no fundo
+    EXPECT(last.kind == InspRow::Kind::ScriptAdd);   // 0.9.2: add script no fundo
     const f32 contentTop = panel.y + kHeaderH + 4.0f;
     const f32 off = scroll::clampOffset(999.0f, contentH, listH);
     const f32 btnTop = contentTop + last.y - off;

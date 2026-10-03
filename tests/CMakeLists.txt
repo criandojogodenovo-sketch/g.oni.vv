@@ -9,6 +9,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CORE_DIR ${CMAKE_CURRENT_LIST_DIR}/../app/src/main/cpp)
 
 add_executable(test_core
+        ../app/src/main/cpp/ui/ScriptEditor.cpp   # 0.9.2: editor de script
+        ../app/src/main/cpp/ui/DocsScreen.cpp   # 0.9.2: Docs (Settings)
+        ../app/src/main/cpp/ui/ViewportChrome.cpp   # (o main precisa)
+        ../app/src/main/cpp/ui/BottomPanel.cpp
+        ../app/src/main/cpp/ui/SettingsPage.cpp
+        ../app/src/main/cpp/voni/VoniGrammar.cpp   # 0.9.2: V.ONI
+        ../app/src/main/cpp/voni/VoniCompile.cpp
+        ../app/src/main/cpp/voni/VoniVm.cpp
+        ../app/src/main/cpp/voni/VoniHighlight.cpp
+        ../app/src/main/cpp/voni/VoniDocs.cpp
+        ../app/src/main/cpp/voni/VoniEngineHost.cpp
+        ../app/src/main/cpp/core/VoniSystem.cpp
         test_main.cpp
         test_logs_crash.cpp
         test_storageperm.cpp
@@ -210,6 +222,8 @@ add_executable(test_core
         test_wiring089.cpp
         test_wiring090.cpp   # 0.9.0: design system + editor polish (spec A-M)
         test_wiring091.cpp   # 0.9.1: orientação (portrait) + IME do sistema
+        test_voni.cpp       # 0.9.2: linguagem V.ONI (spec §§2-12)
+        test_wiring092.cpp  # 0.9.2: central VoniSystem + EngineHost + UI
         # 0.8.10: formatos próprios + 500 MB + archives + migração + identidade
         test_wiring010.cpp
         # 0.8.11: ÁUDIO — .gi (ADPCM round-trip/WAV/OGG/MP3 erros),
@@ -332,6 +346,15 @@ add_executable(c33_virtual
         ${CORE_DIR}/ui/BottomPanel.cpp   # 0.9.0: painel de baixo
         ${CORE_DIR}/ui/SettingsPage.cpp   # 0.9.0: página de Settings
         ${CORE_DIR}/core/UndoStack.cpp   # 0.9.0: undo/redo por snapshot
+        ${CORE_DIR}/ui/ScriptEditor.cpp   # 0.9.2: editor de script V.ONI
+        ${CORE_DIR}/ui/DocsScreen.cpp   # 0.9.2: Settings → Docs
+        ${CORE_DIR}/voni/VoniGrammar.cpp   # 0.9.2: linguagem
+        ${CORE_DIR}/voni/VoniCompile.cpp
+        ${CORE_DIR}/voni/VoniVm.cpp
+        ${CORE_DIR}/voni/VoniHighlight.cpp
+        ${CORE_DIR}/voni/VoniDocs.cpp
+        ${CORE_DIR}/voni/VoniEngineHost.cpp
+        ${CORE_DIR}/core/VoniSystem.cpp   # a "central"
         ${CORE_DIR}/render/Camera.cpp
         ${CORE_DIR}/physics/Shapes.cpp
         ${CORE_DIR}/physics/PhysicsSystem.cpp
@@ -426,6 +449,11 @@ set_source_files_properties(
 set_source_files_properties(
         ${CORE_DIR}/assets/AudioCodecs.cpp
         PROPERTIES COMPILE_OPTIONS "-w")   # 0.8.11: vendors (stb_vorbis/minimp3) sem warnings
+
+# 0.9.2: o TU que inclui o peglib (vendor) compila sem warnings do header
+set_source_files_properties(
+        ${CORE_DIR}/voni/VoniCompile.cpp
+        PROPERTIES COMPILE_OPTIONS "-w")
 
 # fixtures PNG p/ test_assets (caminho absoluto injetado — ctest roda no
 # diretório de build, o caminho relativo não serviria) + fonte real p/ os

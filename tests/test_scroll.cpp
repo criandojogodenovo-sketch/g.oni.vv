@@ -184,8 +184,8 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     const u32 n = inspectorPlan(prof, m, false, 0u, plan);
     const f32 contentH = inspectorContentHeight(prof, m, false, 0u);
     // 0.9.0 (spec C): secções 48dp + 3 linhas de Transform (80dp: título
-    // + caixas X/Y/Z 48dp) + miniaturas 84dp → 1070
-    EXPECT(nearEqF(contentH, 1070.0f));
+    // + caixas X/Y/Z 48dp) + miniaturas 84dp → 1070; 0.9.2: +90 do Script
+    EXPECT(nearEqF(contentH, 1160.0f));
 
     // cursor Y PARTILHADO: linhas sequenciais (y estritamente crescente, sem
     // reinício por secção), todas dentro do conteúdo, e o fundo do plano =
@@ -201,9 +201,9 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
         prevBottom = plan[i].y + plan[i].h;
         if (plan[i].kind == InspRow::Kind::AddTc) addTcIdx = i;
     }
-    // 0.9.0: a secção ANIMAÇÃO (48dp) fica entre addTc e o AddAnim
-    EXPECT(addTcIdx + 3 == n);
-    EXPECT(plan[n - 1].kind == InspRow::Kind::AddAnim);
+    // 0.9.2: depois do addTc vêm Anim(48)+AddAnim(42)+Script(48)+AddScript(42)
+    EXPECT(addTcIdx + 5 == n);
+    EXPECT(plan[n - 1].kind == InspRow::Kind::ScriptAdd);
     EXPECT(nearEqF(plan[n - 1].y + plan[n - 1].h, contentH));
 
     // C33 (pior caso: superfície mais baixa que a teórica) — lista 500 px:
@@ -223,9 +223,9 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
 
     // com TouchControls presente o botão dá lugar à label tc (42 → 34)
     EXPECT(tic->addComponent<TouchControls>() != nullptr);
-    // 0.9.0: 1070 − 42 (addTc) + 34 (label tc) = 1062
+    // 0.9.0: 1070 − 42 (addTc) + 34 (label tc) = 1062; 0.9.2: +90 = 1152
     EXPECT(nearEqF(inspectorContentHeight(inspectorProfile(*tic), m, false, 0u),
-                   1062.0f));
+                   1152.0f));
 }
 
 TEST(scroll_hierarquia_todos_os_tics_atingeis) {
