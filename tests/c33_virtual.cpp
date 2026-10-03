@@ -351,9 +351,10 @@ int main() {
         check(rawSt->exists("assets/casa.gmesh"), "migracao: assets/casa.gmesh criado");
         check(logHas("asset: migracao 'meshes/casa.obj'"), "migracao: linha do log da fonte legada");
         check(logHas("asset: staging em '"), "migracao: staging no cache dir/projeto (nunca /tmp)");
-        check(logCount("staging falhou") == 0, "migracao: ZERO 'staging falhou' (o sintoma do C33)");
+        check(logCount("staging falhou") == 0,
+              "migracao: ZERO ocorrencias do sintoma R-002 (migracao morta)");
         check(logCount("mkdir falhou em '/tmp'") == 0,
-              "migracao: ZERO \"mkdir falhou em '/tmp'\" (o sintoma do C33)");
+              "migracao: ZERO ocorrencias do sintoma R-002 (mkdir no /tmp)");
         {
             Mesh* m = g_gpu.mesh("assets/casa.gmesh");
             check(m != nullptr && m->indexCount() == 3, "migracao: o .gmesh resolve (3 idx)");
@@ -416,7 +417,7 @@ int main() {
             check(mr && mr->mesh->indexCount() > 0, "esfera com geometria nao vazia");
         }
         check(logCount("ERRO(sem TIC com mesh selecionado)") == 0,
-              "ZERO 'ERRO(sem TIC com mesh selecionado)' no replay inteiro");
+              "ZERO ocorrencias do sintoma R-001 (ERRO sem alvo) no replay");
 
         // 2.3 — trocar pelo MESH picker: tocar o ficheiro migrado (o
         // "mesh pick 3" dos logs — o assets/casa.gmesh em 3º)
@@ -557,7 +558,7 @@ int main() {
         check(logCount("ui: pick bloqueado (sem seleção)") >= 2,
               "2ª linha de pick bloqueada logada (hint sem spam de ERRO)");
         check(logCount("ERRO(sem TIC com mesh selecionado)") == 0,
-              "ZERO 'ERRO(sem TIC com mesh selecionado)' mesmo sem selecao");
+              "ZERO ocorrencias do sintoma R-001 mesmo sem selecao");
 
         passo("2.9 adversario: outro overlay (log viewer) tambem guarda a selecao");
         g_editor.selected = g_scene.find("Casa");
@@ -697,9 +698,10 @@ int main() {
             std::printf("    [erro] %s\n", err.c_str());
         }
         check(g_storage->exists("assets/casa.gmesh"), "assets/casa.gmesh no provider");
-        check(logCount("staging falhou") == 0, "ZERO 'staging falhou' no caminho SAF");
+        check(logCount("staging falhou") == 0,
+              "ZERO ocorrencias do sintoma R-002 no caminho SAF");
         check(logCount("mkdir falhou em '/tmp'") == 0,
-              "ZERO \"mkdir falhou em '/tmp'\" no caminho SAF");
+              "ZERO ocorrencias do sintoma R-002 (mkdir no /tmp) — caminho SAF");
         check(logHas("asset: staging em '"), "staging no cache dir logado com o caminho");
         check(!logHas("staging em '/tmp"), "o staging JAMAIS em /tmp");
     }
