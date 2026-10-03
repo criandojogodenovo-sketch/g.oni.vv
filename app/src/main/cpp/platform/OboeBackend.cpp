@@ -181,14 +181,15 @@ public:
         if (!s) {
             return 0u;
         }
-        // ATENÇÃO API REAL: getXRunCount() devolve ResultWithValue<int32_t>
-        // (pode falhar em alguns devices — o oboe real difere do int32_t
-        // plano; apanhado pelo build NDK do CI na 1ª passada)
+        // ATENÇÃO API REAL (verificada nos headers 1.9.3): getXRunCount()
+        // devolve ResultWithValue<int32_t> com acessor .value() — não
+        // compila doutra forma (duas passadas do CI apanharam: o int32_t
+        // plano e o .result() inexistente)
         const oboe::ResultWithValue<int32_t> r = s->getXRunCount();
         if (r.error() != oboe::Result::OK) {
             return 0u;
         }
-        return r.result() > 0 ? static_cast<u32>(r.result()) : 0u;
+        return r.value() > 0 ? static_cast<u32>(r.value()) : 0u;
     }
 
     // ---- oboe::AudioStreamCallback ----------------------------------------

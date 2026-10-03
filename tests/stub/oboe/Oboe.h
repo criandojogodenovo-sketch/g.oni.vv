@@ -104,16 +104,17 @@ enum class StreamState : int32_t {
 };
 enum class DataCallbackResult : int32_t { Continue = 0, Stop = 1 };
 
-// ResultWithValue<T> — existe na API REAL e o getXRunCount() a devolve
-// (apanhado pelo build NDK na 1ª passada do CI: o int32_t plano não
-// compila contra o oboe 1.9.3 real). Espelha o contrato: .result(),
-// .error(), .isOk()
+// ResultWithValue<T> — existe na API REAL e o getXRunCount() a devolve.
+// acessores VERIFICADOS nos headers do oboe 1.9.3 (include/oboe/
+// ResultWithValue.h): .value(), .error(), .isOk(), operator bool — o
+// .result() NÃO existe (duas passadas do build NDK apanharam as
+// divergências stub↔real; agora o stub espelha a API ao detalhe)
 template <typename T>
 class ResultWithValue {
 public:
     explicit ResultWithValue(T value) : value_(value), error_(Result::OK) {}
     ResultWithValue(Result error) : value_{}, error_(error) {}
-    T result() const { return value_; }
+    T value() const { return value_; }
     Result error() const { return error_; }
     bool isOk() const { return error_ == Result::OK; }
     explicit operator bool() const { return isOk(); }
