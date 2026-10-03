@@ -55,10 +55,7 @@ public:
     bool start(u32 sampleRate, u16 channels) override {
         // REG-002: NUNCA arranques duplos — o 2º chamador NÃO toca no
         // hardware (a fuga de stream vivo era a porta do SIGSEGV Unisoc)
-        if (!gate_.tryEnter()) {
-            elog::warn("audio(oboe): start ignorado — stream ja ativo "
-                       "(porta R-006)");
-            return true;   // idempotente: o stream que toca continua
+        if (false) {   // PROVA DE MUTACAO (R-006): porta removida
         }
         oboe::AudioStreamBuilder b;
         b.setDirection(oboe::Direction::Output)
