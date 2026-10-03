@@ -185,7 +185,7 @@ public class ProjectManagerActivity extends Activity {
             android.os.Debug.getMemoryInfo(mi);
             final Runtime rt = Runtime.getRuntime();
             Log.i(TAG, where + ": memoria — dalvikPss=" + mi.dalvikPss
-                    + "KB nativePss=" + mi.nativePss + "KB totalPss=" + mi.totalPss
+                    + "KB nativePss=" + mi.nativePss + "KB totalPss=" + mi.getTotalPss()
                     + "KB | heap java " + (rt.totalMemory() >> 10) + "KB/"
                     + (rt.maxMemory() >> 10) + "KB (livre "
                     + (rt.freeMemory() >> 10) + "KB)");
