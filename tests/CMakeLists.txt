@@ -314,7 +314,7 @@ add_executable(c33_virtual
         ${CORE_DIR}/vendor/astc-encoder/astcenc_quantization.cpp
         ${CORE_DIR}/vendor/astc-encoder/astcenc_symbolic_physical.cpp
         ${CORE_DIR}/vendor/astc-encoder/astcenc_weight_align.cpp
-        ${CORE_DIR}/vendor/astc-encoder/astcenc_weight_quant_xfer.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_weight_quant_xfer_tables.cpp
         ${CORE_DIR}/core/TransformSystem.cpp
         ${CORE_DIR}/render/Cube.cpp
         ${CORE_DIR}/render/Primitives.cpp
