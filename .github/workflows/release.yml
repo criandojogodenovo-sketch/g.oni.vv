@@ -81,7 +81,7 @@ jobs:
 
       # 0.9.3 — CHECK ESTRUTURAL do fix na Activity REAL: confinamento da
       # lambda io (nunca all/shown/missingUris), publicação no main.post,
-      try/catch por entrada, portão, contadores, tetos. Apanha a REVERSÃO
+      # try/catch por entrada, portão, contadores, tetos. Apanha a REVERSÃO
       # do fix no fonte (que a suíte JVM não vê)
       - name: Check estrutural do reload (REG-001)
         run: python3 scripts/reload_concurrency_check.py
