@@ -1,18 +1,21 @@
-// platform/AudioOut.cpp — PROBE harness + fábrica STUB (0.8.11).
+// platform/AudioOut.cpp — PROBE harness + fábrica STUB (0.8.11; hotfix 0.9.3).
 //
 // O harness do probe é PURO: só fala com a INTERFACE Backend — os mesmos
-// counters correm no CI (fake) e no device (AAudio real). A DECISÃO de
-// fallback é shouldFallback(): QUALQUER falha/crash/disconnect ativa o
+// counters correm no CI (fake) e no device (Oboe/AAudio reais). A DECISÃO
+// de fallback é shouldFallback(): QUALQUER falha/crash/disconnect ativa o
 // AudioTrack (a regra do dono: "não apostamos a engine num backend não
 // provado" — e o fallback fica DOCUMENTADO).
 //
-// DEVICE: AAudioOut.cpp define createAAudio() REAL; AudioTrackOut.cpp o
-// fallback JNI. Este TU define os STUBS de host (nunca ligados no device
-// — as fábricas reais sobrepõem-se por linker... NÃO: um símbolo por
-// build. No host, os STUBS; no device, os reais vivem noutros TUs e ESTES
-// não compilam (ver CMake: AudioOut.cpp SEMPRE; AudioOutDevice.cpp só
-// Android — os createAAudio/createAudioTrack stub daqui ficam no host).
+// DEVICE: OboeBackend.cpp define createOboe() REAL (TU comum — no host
+// compila contra tests/stub/oboe/Oboe.h); AudioOutDevice.cpp define
+// createAAudio()/createAudioTrack() REAIS. Este TU define os STUBS de
+// host destas últimas (nunca ligados no device).
+//
+// 0.9.3 (REG-002): o STUB também usa o StartGate — o stub do host tem a
+// MESMA semântica de arranque dos backends reais (idempotência), e é isto
+// que o c33_virtual replica no replay do lifecycle.
 #include "platform/AudioOut.h"
+#include "platform/AudioStartGate.h"
 
 #include <chrono>
 #include <cstdio>
@@ -114,8 +117,17 @@ std::string probeTable(const ProbeResult& r, const char* backendName) {
 namespace {
 class StubBackend final : public Backend {
 public:
-    bool start(u32, u16) override { ++starts; running = true; return true; }
-    void stop() override { running = false; }
+    bool start(u32, u16) override {
+        // REG-002: idempotência REAL no stub (o host replica a semântica
+        // dos backends de device — o sentinela e o replay afervam isto)
+        if (!gate.tryEnter()) {
+            return true;   // já ativo: NÃO "abre" 2º stream
+        }
+        ++starts;
+        running = true;
+        return true;
+    }
+    void stop() override { running = false; gate.open(); }
     void pause() override { paused = true; }
     void resume() override { paused = false; }
     bool ready() const override { return running; }
@@ -123,6 +135,7 @@ public:
     u32 starts = 0;
     bool running = false;
     bool paused = false;
+    StartGate gate;   // REG-002 (R-006)
 };
 } // namespace
 

@@ -1281,26 +1281,59 @@ editor::AudioWorkspaceHost makeAudioWorkspaceHost() {
     return h;
 }
 
-// arranca o backend (boot): AAudio; se recusar → AudioTrack (o fallback
-// DOCUMENTADO — a mesma interface, o misturador nem sabe)
+// Problema 3 (hotfix 0.9.3) — memória no ARRANQUE da engine: lê o
+// /proc/self/status (RSS + pico) e loga. POSIX PURO (device + host do
+// c33_virtual); NUNCA falha o boot (leitura best-effort, sem exceções).
+static void logBootMemory(const char* where) {
+    long rssKb = -1, hwmKb = -1;
+    if (FILE* f = ::fopen("/proc/self/status", "r")) {
+        char line[256];
+        while (::fgets(line, sizeof(line), f)) {
+            if (::sscanf(line, "VmRSS: %ld kB", &rssKb) == 1) { continue; }
+            if (::sscanf(line, "VmHWM: %ld kB", &hwmKb) == 1) { break; }
+        }
+        ::fclose(f);
+    }
+    elog::info("boot: memoria (%s) — RSS=%ld kB pico=%ld kB", where, rssKb,
+               hwmKb);
+}
+
+// arranca o backend (boot). 0.9.3 (REG-002/R-006): a CADEIA é
+//   Oboe (primário — google/oboe 1.9.3: AAudio na API 27+ com fallback
+//         OpenSL ES automático nos devices problemáticos como o Unisoc)
+//   → AAudio direto (o fallback fixado: porta StartGate + close-no-errCb)
+//   → AudioTrack (JNI — o fallback final de sempre)
+//   → SEM SOM (o editor funciona; NUNCA crasha por causa do áudio).
+// O arranque corre no INIT_WINDOW (a superfície já existe) — NUNCA no
+// onResume (o padrão exato do tombstone da app antiga: onResume →
+// startAudio direto; o RESUME desta engine só faz resume() do stream
+// vivo, e o StartGate impede o arranque duplo em QUALQUER caso).
 void audioBackendBoot() {
-    g_audioOut.reset(audioout::createAAudio());
+    g_audioOut.reset(audioout::createOboe());
     g_audioBackendReady = false;
     if (g_audioOut && g_audioOut->start(44100, 2)) {
         g_audioBackendReady = true;
-        elog::info("audio: backend %s ATIVO (44100 Hz stereo, %llu frames "
-                   "out no 1º s de vida)",
-                   g_audioOut->name(), 0ull);
+        elog::info("audio: backend %s ATIVO (44100 Hz stereo pedidos — "
+                   "o stream real manda e o misturador adapta)",
+                   g_audioOut->name());
+        return;
+    }
+    elog::warn("audio: Oboe recusou — fallback AAudio direto (porta R-006)");
+    g_audioOut.reset(audioout::createAAudio());
+    if (g_audioOut && g_audioOut->start(44100, 2)) {
+        g_audioBackendReady = true;
+        elog::info("audio: backend AAudio ATIVO (fallback 1)");
         return;
     }
     elog::warn("audio: AAudio recusou — FALLBACK AudioTrack (documentado)");
     g_audioOut.reset(audioout::createAudioTrack());
     if (g_audioOut && g_audioOut->start(44100, 2)) {
         g_audioBackendReady = true;
-        elog::info("audio: backend AudioTrack ATIVO (fallback)");
+        elog::info("audio: backend AudioTrack ATIVO (fallback 2)");
         return;
     }
-    elog::error("audio: NENHUM backend ligou (device sem áudio?)");
+    elog::error("audio: NENHUM backend ligou (device sem áudio?) — o editor "
+                "continua SEM SOM");
     g_audioOut.reset();
 }
 
@@ -1312,7 +1345,7 @@ bool audioBackendSwitch(bool toAudioTrack) {
     const char* from = g_audioOut->name();
     g_audioOut->stop();
     g_audioOut.reset(toAudioTrack ? audioout::createAudioTrack()
-                                  : audioout::createAAudio());
+                                  : audioout::createOboe());
     if (g_audioOut && g_audioOut->start(44100, 2)) {
         g_audioBackendReady = true;
         elog::warn("audio: TROCA de backend %s -> %s (probe)", from,
@@ -1320,7 +1353,7 @@ bool audioBackendSwitch(bool toAudioTrack) {
         return true;
     }
     elog::error("audio: troca p/ %s FALHOU — sem som (o misturador segue)",
-                toAudioTrack ? "AudioTrack" : "AAudio");
+                toAudioTrack ? "AudioTrack" : "Oboe");
     g_audioOut.reset();
     g_audioBackendReady = false;
     return false;
@@ -1329,21 +1362,23 @@ bool audioBackendSwitch(bool toAudioTrack) {
 // ---- PROBE DE ESTABILIDADE (Settings → diagnóstico): 50× start/stop +
 // 10× pause/resume contra um backend FRESCO (nunca o vivo — o probe mata
 // o stream de propósito); a tabela vai ao engine.log e a DECISÃO
-// (shouldFallback) troca o backend vivo sozinha ---------------------------
+// (shouldFallback) troca o backend vivo sozinha. 0.9.3: o probe corre
+// contra o OBOE (o primário) — é a estabilidade DELE que decide a troca
+// para AudioTrack ----------------------------------------------------------------
 void audioProbeRun() {
     elog::info("audio: probe a correr (50 ciclos + 10 pause/resume)...");
-    std::unique_ptr<audioout::Backend> probe(audioout::createAAudio());
+    std::unique_ptr<audioout::Backend> probe(audioout::createOboe());
     const audioout::ProbeResult r =
         audioout::runProbe(probe.get(), 50, 10, 0);
     probe->stop();
-    const std::string table = audioout::probeTable(r, "aaudio");
+    const std::string table = audioout::probeTable(r, "oboe");
     elog::info("%s", table.c_str());
     if (r.shouldFallback() && g_audioOut && g_audioOut->ready() &&
-        std::strcmp(g_audioOut->name(), "aaudio") == 0) {
+        std::strcmp(g_audioOut->name(), "oboe") == 0) {
         audioBackendSwitch(true);
-        showToast("audio: AAudio instavel — AudioTrack ATIVO");
+        showToast("audio: backend instavel — AudioTrack ATIVO");
     } else if (!r.shouldFallback()) {
-        showToast("audio: AAudio estavel (probe ok)");
+        showToast("audio: estavel (probe ok)");
     } else {
         showToast("audio: probe falhou — ver engine.log");
     }
@@ -3425,6 +3460,7 @@ void onAppCmd(android_app* app, i32 cmd) {
                 elog::warn("[boot 6/6] scene SEM PROJETO — editor sem persistência");
             }
             g_ready = true;
+            logBootMemory("fim do boot");
             elog::info("boot: janela pronta %dx%d", (int)g_egl.width(), (int)g_egl.height());
             break;
         }

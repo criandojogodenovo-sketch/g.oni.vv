@@ -155,6 +155,23 @@ public class VvActivity extends NativeActivity {
         // foco (o NativeActivity não tem UI; sem isto nada o abre sozinho).
         initImeHost();
 
+        // 0.9.3 (Problema 3, hotfix): memória no ARRANQUE do editor — uma
+        // linha informativa (Debug.getMemoryInfo + heap Java); o dono compara
+        // com o FinalizerWatchdog dos tombstones antigos. NUNCA crasha.
+        try {
+            final android.os.Debug.MemoryInfo mi =
+                    new android.os.Debug.MemoryInfo();
+            android.os.Debug.getMemoryInfo(mi);
+            final Runtime rt = Runtime.getRuntime();
+            Log.i("GONI", "editor: onCreate memoria — dalvikPss=" + mi.dalvikPss
+                    + "KB nativePss=" + mi.nativePss + "KB totalPss="
+                    + mi.totalPss + "KB | heap java " + (rt.totalMemory() >> 10)
+                    + "KB/" + (rt.maxMemory() >> 10) + "KB (livre "
+                    + (rt.freeMemory() >> 10) + "KB)");
+        } catch (Throwable t) {
+            Log.w("GONI", "editor: Debug.getMemoryInfo indisponivel", t);
+        }
+
         // F5.4 — projeto escolhido no Gestor de Projetos (extras do Intent).
         // SÓ chega aqui quem veio do gestor: VvProjects.launchEditor põe os
         // extras; o android_main consome a fila e monta o SafStorage.

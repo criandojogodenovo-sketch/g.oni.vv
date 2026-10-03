@@ -1,3 +1,21 @@
+## 0.9.3 — HOTFIX: OS DOIS CRASHES DO DEVICE (REG-001/REG-002 = R-005/R-006)
+
+**O que mudou (só os 2 crashes + sentinelas — CLÁUSULA CALMA):**
+- REG-001/R-005 — O CRASH AO ABRIR (23×/dia no RMX3624, process vv.goni): `reload()` da tela de projetos fazia `all.clear()+addAll(...)` na MAIN thread (onCreate + onResume) enquanto a lambda do io percorria a MESMA lista em background → a exceção de modificação concorrente matava o processo (crash loop). FIX: portão `ReloadGate` (1 reload de cada vez + coalesce trailing), lista NOVA local na thread de fundo (nunca `all`/`shown`/`missingUris`), publicação única na main thread, try/catch POR ENTRADA (corrompido = saltado com contadores), load FORA da main thread.
+- REG-002/R-006 — O CRASH NATIVO DE ÁUDIO (tombstones AAudio/Unisoc da app antiga com.goni.runtime): migração para **OBOE** (google/oboe 1.9.3 PINADA, Apache-2.0, CMake FetchContent — AAudio na API 27+ com fallback OpenSL ES automático nos devices problemáticos); portão atómico `AudioStartGate` em TODOS os backends (start 2× NÃO abre 2º stream — a fuga de stream era a porta do SIGSEGV); AAudio fixado como fallback (mutex errCb×stop, close-no-error-callback, todos os `aaudio_result_t` verificados); AudioTrack também com portão; cadeia Oboe → AAudio → AudioTrack → SEM SOM (nunca crash por áudio); arranque no INIT_WINDOW, nunca no onResume.
+- Problema 3 (pressão de memória no arranque): load da lista + queries SAF fora da main thread; memória logada no arranque (Java `Debug.getMemoryInfo` + nativo RSS do `/proc/self/status`); tetos mantidos (THUMBS 24; prim sem cache por decisão 0.8.10).
+- SENTINELAS PERMANENTES (docs/REGRESSOES.md R-005/R-006): `regress_concurrent_reload` + `regress_corrupt_projects` (JVM do CI), `regress_audio_lifecycle` (core, com o OboeBackend de produção contra o stub do oboe), check estrutural `scripts/reload_concurrency_check.py`, FASE 8 do c33_virtual (replay do lifecycle agressivo do áudio + contadores de fugas de stream + projetos corrompidos) e o GATE `ci/forbidden_patterns.txt` (as assinaturas exatas dos 2 crashes + o watchdog — qualquer match = CI VERMELHO = sem APK).
+
+**Checklist C33/RMX3624 (VERIFIED do dono — hotfix 0.9.3):**
+1. App abre 10× seguidas sem crash (o crash loop do gestor morreu — REG-001).
+2. Criar/apagar 5 projetos em sequência rápida: lista atualiza sem exceção (ver logcat "projetos: reload ok — N projeto(s)").
+3. Editor abre e o áudio arranca (logcat "audio(oboe): stream ATIVO rate=…") OU falha graciosamente sem crash ("sem som, o editor segue").
+4. Sair do editor e voltar 5× (fundo/recentes): zero tombstones novos em `/data/tombstones/`; logcat mostra "audio: PAUSE"/"audio: RESUME".
+5. Logcat mostra LOGI informativos no arranque: "gestor: onCreate memoria", "boot: memoria (fim do boot) — RSS=…", "audio(oboe): stream ATIVO".
+6. Desligar/ligar headset a meio de uma sessão: o som pode cair ("stream MORREU" no log) mas o editor segue; voltar a entrar no editor recupera o som.
+7. Settings → Diagnóstico → probe de áudio: a tabela aparece com "DECISAO" (agora contra o Oboe).
+8. APK 0.9.3 (versionCode 46) no RMX3624 sem ANR; CI verde com os gates novos.
+
 ## 0.9.2 — V.ONI v0 CORE (LINGUAGEM DE SCRIPTING FECHADA)
 
 **O que mudou (a linguagem da engine):**

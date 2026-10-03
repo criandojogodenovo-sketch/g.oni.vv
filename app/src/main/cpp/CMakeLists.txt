@@ -7,6 +7,25 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# 0.9.3 (REG-002/R-006, hotfix) — OBOE, o backend PRIMÁRIO do áudio:
+# google/oboe (LICENÇA Apache-2.0 — ver docs/RELATORIO-0.9.3.md), versão
+# PINADA 1.9.3 (>=1.8.0 exigido; tag do upstream, GIT_SHALLOW p/ rapidez).
+# PORQUE FetchContent (e não prefab/Maven): a fonte de verdade fica NO
+# CMake (uma só pinagem), funciona com o NDK+CMake do SDK já usados pela
+# build, e a suíte do host testa o MESMO TU (OboeBackend.cpp) contra o
+# stub tests/stub/oboe/Oboe.h — o padrão StorageBridge/jni.h da casa.
+# SÓ na build Android: a suíte do host NÃO configura este ficheiro (os
+# alvos de teste compilam as fontes diretamente com o stub primeiro).
+if(ANDROID)
+    include(FetchContent)
+    FetchContent_Declare(
+        oboe
+        GIT_REPOSITORY https://github.com/google/oboe.git
+        GIT_TAG        1.9.3
+        GIT_SHALLOW    TRUE)
+    FetchContent_MakeAvailable(oboe)
+endif()
+
 # Fontes do goni_vv (F3: componentes + registry/store; presets/serializer/ui entram nos próximos passos).
 add_library(goni_vv SHARED
         voni/VoniGrammar.cpp   # 0.9.2: V.ONI (spec §§1-12)
@@ -224,12 +243,23 @@ add_library(goni_vv SHARED
         # APENAS (AAudio via dlopen — o minSdk 24 não liga a API 26 — e o
         # AudioTrack JNI; o CI assembleRelease compila-verifica este TU)
         platform/AudioOut.cpp
+        # 0.9.3 (REG-002): OboeBackend.cpp é TU COMUM — no APK compila contra
+        # o oboe REAL (FetchContent acima); no host da suíte/link_parity
+        # contra o stub tests/stub/oboe/Oboe.h (tests/stub vem primeiro no
+        # include path) — o MESMO código de produção vigiado pelo CI
+        platform/OboeBackend.cpp
         platform/main.cpp)
 
 if(ANDROID)
         target_sources(goni_vv PRIVATE
                 platform/AudioOut.h
+                platform/AudioStartGate.h
                 platform/AudioOutDevice.cpp)
+endif()
+
+# 0.9.3: o oboe REAL liga à lib (FetchContent) — SÓ na build Android
+if(ANDROID)
+        target_link_libraries(goni_vv oboe)
 endif()
 
 target_include_directories(goni_vv PRIVATE

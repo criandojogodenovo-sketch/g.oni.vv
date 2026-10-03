@@ -14,6 +14,12 @@
 //   regress_none_slot      — "none" sem caminho seguro/serializável no
 //                            picker de mesh
 //   regress_dump_identity  — dump velho no viewer sem badge ANTIGO
+//   regress_audio_lifecycle — 0.9.3 (REG-002/R-006): arranque duplo do
+//                            backend de áudio = fuga de stream = a porta do
+//                            SIGSEGV AAudio no Unisoc (tombstones 00-17/
+//                            21-31 do RMX3624); StartGate + Result
+//                            verificados + close-no-errCb + degradação sem
+//                            crash (o editor segue SEM SOM)
 //
 // Sentinela que nunca falha não é sentinela — é decoração: a prova de
 // mutação (fix revertido → VERMELHO; reposto → VERDE) está no
@@ -51,6 +57,11 @@
 #include "platform/CrashHandler.h"
 #include "platform/StorageBridge.h"
 #include "assets/AssetConverter.h"
+// 0.9.3 (REG-002): o backend Oboe de PRODUÇÃO (TU comum) contra o stub
+// tests/stub/oboe/Oboe.h — o MESMO código que corre no APK
+#include "platform/AudioOut.h"
+#include <oboe/Oboe.h>
+#include <thread>
 
 using namespace vv;
 using ::test::nearEqF;
@@ -485,4 +496,158 @@ TEST(regress_dump_identity) {
 
     // reset para não vazar
     vv::buildinfo::set("dev", 0, "", "", 0);
+}
+
+// ===========================================================================
+// SENTINELA 5 — regress_audio_lifecycle (0.9.3, hotfix REG-002/R-006)
+// A evidência do RMX3624 (Unisoc): SIGSEGV (SEGV_ACCERR) dentro de
+// AAudio_createStreamBuilder chamado por startAudio() no onResume da app
+// antiga (com.goni.runtime) — ~20 tombstones 19-20/09 + 3 em 25-26/09.
+// Causa raiz da CLASSE do bug: arranque repetido sem guarda (stream vivo
+// fugia), builder/stream usados depois de mortos, retornos não verificados.
+// Fix: cadeia Oboe (primário) → AAudio fixado → AudioTrack, TODOS com o
+// StartGate atómico (nunca arranques duplos), Result/aaudio_result_t
+// verificados em TODAS as chamadas, close no error-callback (o padrão do
+// oboe) e degradação graciosa (falha = editor SEM SOM, nunca crash).
+// O REPLAY do caminho REAL (INIT/PAUSE/RESUME/TERM com audioBackendBoot)
+// vive no c33_virtual (FASE 8); aqui vigia-se o BACKEND de produção.
+// ===========================================================================
+TEST(regress_audio_lifecycle) {
+    rmrf(kSentinelLogs);
+    EXPECT(vv::elog::init(kSentinelLogs));
+    oboe::testing::reset();
+
+    // ------------------------------------------------------------------
+    // (1) ARRANQUE DUPLO — o padrão exato do tombstone: start() chamado
+    // de novo (onResume repetido sem onPause) NÃO abre um 2º stream
+    // ------------------------------------------------------------------
+    {
+        std::unique_ptr<vv::audioout::Backend> be(vv::audioout::createOboe());
+        ASSERT(be != nullptr);
+        EXPECT(be->start(44100, 2));
+        const int abertosAteAgora = oboe::testing::hooks().openCount;
+        EXPECT(abertosAteAgora == 1);
+        EXPECT(be->ready());
+        // o 2º start: idempotente — NÃO toca no hardware
+        EXPECT(be->start(44100, 2));
+        EXPECT(be->start(44100, 2));
+        EXPECT(oboe::testing::hooks().openCount == abertosAteAgora);
+        EXPECT(be->ready());
+        EXPECT(logHas("audio(oboe): start ignorado — stream ja ativo"));
+        // o log informativo do stream (Tarefa 2.5: rate/ch/perf)
+        EXPECT(logHas("audio(oboe): stream ATIVO rate="));
+
+        // ADVERSÁRIO (Tarefa 7D): 50× onResume SEM onPause — continua 1
+        for (int i = 0; i < 50; ++i) {
+            EXPECT(be->start(44100, 2));
+        }
+        EXPECT(oboe::testing::hooks().openCount == abertosAteAgora);
+        EXPECT(be->ready());
+
+        // lifecycle: pause/resume em loop (o fundo/recentes do Android)
+        for (int i = 0; i < 10; ++i) {
+            be->pause();
+            be->resume();
+        }
+        EXPECT(be->ready());
+        EXPECT(oboe::testing::hooks().openCount == abertosAteAgora);
+
+        // a PARAGEM liberta o portão (um start futuro pode)
+        be->stop();
+        EXPECT(!be->ready());
+        EXPECT(be->start(44100, 2));
+        EXPECT(oboe::testing::hooks().openCount == abertosAteAgora + 1);
+        be->stop();
+    }
+
+    // ------------------------------------------------------------------
+    // (2) ERRO no stream (o disconnect do device): a sequência REAL do
+    // oboe (before → close → after) DEGRADA sem crash; o portão abre
+    // ------------------------------------------------------------------
+    {
+        oboe::testing::reset();
+        std::unique_ptr<vv::audioout::Backend> be(vv::audioout::createOboe());
+        ASSERT(be != nullptr);
+        EXPECT(be->start(44100, 2));
+        EXPECT(be->ready());
+        // o headset desligou (a thread de erro do device — aqui simulada
+        // NOUTRA thread p/ afervar a corrida errCb × stop do mutex)
+        std::thread erro([&be] {
+            oboe::testing::fireErrorOnAllStreams(
+                oboe::Result::ErrorDisconnected);
+        });
+        erro.join();
+        EXPECT(!be->ready());   // o probe/main VÊEM a morte
+        EXPECT(logHas("audio(oboe): stream MORREU"));
+        // o portão ABRIU no after-close: um start futuro pode tentar
+        EXPECT(be->start(44100, 2));
+        EXPECT(oboe::testing::hooks().openCount == 2);
+        EXPECT(be->ready());
+        be->stop();
+        // ZERO FUGAS: cada stream aberto foi fechado EXATAMENTE uma vez
+        EXPECT(oboe::testing::hooks().closeCount ==
+               oboe::testing::hooks().openCount);
+    }
+
+    // ------------------------------------------------------------------
+    // (3) FALHA de arranque = editor SEM SOM (nunca crash): o openStream
+    // recusa → false; o portão abre (a tentativa seguinte pode)
+    // ------------------------------------------------------------------
+    {
+        oboe::testing::reset();
+        std::unique_ptr<vv::audioout::Backend> be(vv::audioout::createOboe());
+        ASSERT(be != nullptr);
+        oboe::testing::hooks().nextOpenResult = oboe::Result::ErrorNoMemory;
+        EXPECT(!be->start(44100, 2));   // FALHOU — o main decide o fallback
+        EXPECT(logHas("audio(oboe): openStream FALHOU"));
+        // o portão não ficou preso: nova tentativa (agora OK)
+        EXPECT(be->start(44100, 2));
+        EXPECT(be->ready());
+        // o requestStart também pode recusar → close + false + portão
+        be->stop();
+        oboe::testing::hooks().nextStartResult = oboe::Result::ErrorIllegalState;
+        EXPECT(!be->start(44100, 2));
+        EXPECT(logHas("audio(oboe): requestStart FALHOU"));
+        // e o stream que abriu antes do requestStart falhado foi FECHADO
+        EXPECT(oboe::testing::hooks().closeCount ==
+               oboe::testing::hooks().openCount);
+        EXPECT(be->start(44100, 2));   // portão aberto de novo
+        be->stop();
+    }
+
+    // ------------------------------------------------------------------
+    // (4) o STUB do host (o backend que o c33_virtual usa) é idempotente
+    // com a MESMA semântica — e o PROBE corre contra o Oboe
+    // ------------------------------------------------------------------
+    {
+        oboe::testing::reset();
+        std::unique_ptr<vv::audioout::Backend> st(vv::audioout::createAAudio());
+        ASSERT(st != nullptr);
+        EXPECT(st->start(44100, 2));
+        EXPECT(st->start(44100, 2));
+        EXPECT(st->ready());
+        st->stop();
+        EXPECT(!st->ready());
+        EXPECT(st->start(44100, 2));   // portão reaberto
+        st->stop();
+
+        // o PROBE (Settings → diagnóstico) contra o Oboe FRESCO: ciclos
+        // start/stop + pause/resume (o mesmo harness que corre no device)
+        std::unique_ptr<vv::audioout::Backend> probe(
+            vv::audioout::createOboe());
+        const vv::audioout::ProbeResult r =
+            vv::audioout::runProbe(probe.get(), 5, 3, 0);
+        probe->stop();
+        EXPECT(r.cycles == 5);
+        EXPECT(r.failures == 0);
+        EXPECT(r.pauseCycles == 3);
+        EXPECT(r.pauseFailures == 0);
+        EXPECT(!r.shouldFallback());
+        // cada ciclo abriu E fechou (zero fugas no probe)
+        EXPECT(oboe::testing::hooks().closeCount ==
+               oboe::testing::hooks().openCount);
+    }
+
+    oboe::testing::reset();
+    rmrf(kSentinelCache);
 }

@@ -1,4 +1,4 @@
-// platform/AudioOutDevice.cpp — AAudio REAL + AudioTrack JNI (0.8.11).
+// platform/AudioOutDevice.cpp — AAudio REAL + AudioTrack JNI (0.8.11; hotfix 0.9.3).
 //
 // PORQUE dlopen (a decisão documentada): o minSdk é 24 e o AAudio só existe
 // a partir da API 26 — o header <aaudio/AAudio.h> do NDK fica VAZIO quando
@@ -12,19 +12,31 @@
 // openStream (canais/rate reais lidos do stream; desacordo = falha do
 // start = fallback, nunca crash).
 //
-// AAudio (C API): stream de saída com callback que MISTURA pelo AudioEngine
-// (o misturador puro do core — o AAudio só transporta). PERFORMANCE: o
-// callback corre na thread de áudio do sistema — sem locks, sem alocações
-// (o mix() é lock-free por desenho).
+// HOTFIX 0.9.3 (REG-002/R-006) — o que mudou neste TU (Tarefa 3, o fix
+// robusto do AAudio como FALLBACK do Oboe):
+//   1. StartGate atómico: start() chamado 2× NÃO abre um 2º stream (a
+//      fuga de stream vivo era a porta de entrada do SIGSEGV no Unisoc —
+//      tombstones 00-17/21-31 da app antiga);
+//   2. stream_ protegido por mtx_: o error callback pode correr AO MESMO
+//      TEMPO que o stop() da main — quem tira o stream do slot primeiro
+//      fecha; o outro vê vazio (nunca duplo close, nunca use-after-free);
+//   3. errCb FECHA o stream morto (o padrão que o Oboe segue internamente:
+//      error-callback → close; o AAudio documenta que o stream morto tem
+//      de ser fechado) e abre o portão (um start futuro pode tentar);
+//   4. TODOS os retornos verificados e logados (requestStop/close/
+//      requestPause/requestStart) — nunca assumidos;
+//   5. falha = return false → o main decide o fallback (o editor segue
+//      SEM SOM, nunca crasha por causa do áudio).
 //
-// FALLBACK AudioTrack (JNI): se o probe mandar (ou o AAudio recusar), o
-// MESMO misturador alimenta um AudioTrack em MODE_STREAM com uma thread de
-// escrita própria (AudioFormat.Builder + AudioAttributes.Builder — públicos
-// desde a API 21; write(float[]) desde a 23 < minSdk 24). A INTERFACE é a
-// MESMA — o main troca o ponteiro.
+// FALLBACK AudioTrack (JNI): se o probe mandar (ou o Oboe E o AAudio
+// recusarem), o MESMO misturador alimenta um AudioTrack em MODE_STREAM
+// com uma thread de escrita própria. 0.9.3: também ganhou o StartGate
+// (o arranque duplo criava uma 2ª thread de escrita + track vazado).
 //
-// Este TU só compila no ANDROID (CMake: if(ANDROID)).
+// Este TU só compila no ANDROID (CMake: if(ANDROID)) — o OboeBackend.cpp
+// (o primário) é TU COMUM e é compilado-verificado nos DOIS lados.
 #include "platform/AudioOut.h"
+#include "platform/AudioStartGate.h"
 
 #include <dlfcn.h>
 
@@ -33,6 +45,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -249,13 +262,22 @@ public:
     ~AAudioBackend() override { stop(); }
 
     bool start(u32 sampleRate, u16 channels) override {
+        // REG-002: NUNCA arranques duplos — o 2º chamador NÃO toca no
+        // hardware (idempotência: o stream que toca continua)
+        if (!gate_.tryEnter()) {
+            elog::warn("audio: start ignorado — stream AAudio ja ativo "
+                       "(porta R-006)");
+            return true;
+        }
         loader_ = aaudioLoader();
         if (!loader_) {
-            return false;   // API < 26 / dlopen falhou → AudioTrack (main decide)
+            gate_.release();   // API < 26 / dlopen falhou → quem chamou decide
+            return false;
         }
         AAudioStreamBuilder* b = nullptr;
         if (loader_->createStreamBuilder(&b) != kAaudioOk || !b) {
             elog::error("audio: AAudio_createStreamBuilder FALHOU");
+            gate_.release();
             return false;
         }
         loader_->builderSetFormat(b, kAaudioPcmFloat);
@@ -269,6 +291,7 @@ public:
         loader_->builderDelete(b);
         if (rc != kAaudioOk || !s) {
             elog::error("audio: AAudio openStream FALHOU (%s)", resultText(rc));
+            gate_.release();
             return false;
         }
         // SANIDADE pós-open (a ABI é opaca: desacordo = falha = fallback,
@@ -280,6 +303,7 @@ public:
                         "(pedidos %d/%u) — recusa", ch, sr,
                         static_cast<int>(channels), sampleRate);
             loader_->close(s);
+            gate_.release();
             return false;
         }
         const aaudio_result_t rs = loader_->requestStart(s);
@@ -287,46 +311,100 @@ public:
             elog::error("audio: AAudio requestStart FALHOU (%s)",
                         resultText(rs));
             loader_->close(s);
+            gate_.release();
             return false;
         }
-        errored_ = false;
-        stream_ = s;
-        rate_ = static_cast<u32>(sr);
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            stream_ = s;
+            errored_ = false;
+        }
+        elog::info("audio: stream AAudio ATIVO rate=%d ch=%d (perf=low-latency)",
+                   sr, ch);
         return true;
     }
 
     void stop() override {
-        if (stream_) {
-            loader_->requestStop(stream_);
-            loader_->close(stream_);
+        AAudioStream* s = nullptr;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            s = stream_;
             stream_ = nullptr;
         }
+        if (s && loader_) {
+            const aaudio_result_t rst = loader_->requestStop(s);
+            if (rst != kAaudioOk) {
+                elog::warn("audio: AAudio requestStop no fim (%s)",
+                            resultText(rst));
+            }
+            const aaudio_result_t rcl = loader_->close(s);
+            if (rcl != kAaudioOk) {
+                elog::warn("audio: AAudio close no fim (%s)",
+                            resultText(rcl));
+            }
+        }
+        gate_.open();
     }
     void pause() override {
-        if (stream_) {
-            loader_->requestPause(stream_);
+        AAudioStream* s = nullptr;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            s = stream_;
+        }
+        if (s && loader_) {
+            const aaudio_result_t r = loader_->requestPause(s);
+            if (r != kAaudioOk) {
+                elog::warn("audio: AAudio requestPause (%s)", resultText(r));
+            }
         }
     }
     void resume() override {
-        if (stream_) {
-            loader_->requestStart(stream_);
+        AAudioStream* s = nullptr;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            s = stream_;
+        }
+        if (s && loader_) {
+            const aaudio_result_t r = loader_->requestStart(s);
+            if (r != kAaudioOk) {
+                elog::warn("audio: AAudio resume requestStart (%s) — stream "
+                            "morto? (o probe decide a troca)", resultText(r));
+            }
         }
     }
     bool ready() const override {
-        if (!stream_ || errored_.load()) {
+        if (errored_.load()) {
             return false;
         }
-        const aaudio_stream_state_t st = loader_->getState(stream_);
+        AAudioStream* s = nullptr;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            s = stream_;
+        }
+        if (!s || !loader_) {
+            return false;
+        }
+        const aaudio_stream_state_t st = loader_->getState(s);
         return st == kAaudioStateStarted || st == kAaudioStateStarting;
     }
     const char* name() const override { return "aaudio"; }
     u64 framesOut() const override {
-        return stream_ && loader_->getFramesRead
-            ? static_cast<u64>(loader_->getFramesRead(stream_)) : 0ull;
+        AAudioStream* s = nullptr;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            s = stream_;
+        }
+        return s && loader_->getFramesRead
+            ? static_cast<u64>(loader_->getFramesRead(s)) : 0ull;
     }
     u32 xruns() const override {
-        return stream_ && loader_->getXRunCount
-            ? static_cast<u32>(loader_->getXRunCount(stream_)) : 0u;
+        AAudioStream* s = nullptr;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            s = stream_;
+        }
+        return s && loader_->getXRunCount
+            ? static_cast<u32>(loader_->getXRunCount(s)) : 0u;
     }
 
 private:
@@ -352,20 +430,43 @@ private:
     }
 
     static void errCb(AAudioStream* s, void* user, aaudio_result_t error) {
-        (void)s;
         AAudioBackend* self = static_cast<AAudioBackend*>(user);
         const AAudioLoader* l = aaudioLoader();
         elog::error("audio: stream AAudio ERRO %d (%s) — disconnect?",
                     static_cast<int>(error),
                     l && l->convertResultToText ? l->convertResultToText(error)
                                                 : "?");
-        if (self) {
-            self->errored_ = true;   // ready() passa a falso → probe vê
+        if (!self) {
+            return;
         }
+        self->errored_ = true;   // ready() passa a falso → probe vê
+        // 0.9.3 (REG-002): o stream MORREU — o contrato do AAudio manda
+        // FECHAR (o padrão que o Oboe segue internamente: error-callback
+        // → close). Retiramo-lo do slot SOB o mutex: o stop() da main pode
+        // correr AO MESMO TEMPO — quem tirar primeiro fecha, o outro vê
+        // vazio (nunca duplo close, nunca use-after-free).
+        AAudioStream* doomed = nullptr;
+        {
+            std::lock_guard<std::mutex> lk(self->mtx_);
+            if (self->stream_ == s) {
+                doomed = s;
+                self->stream_ = nullptr;
+            }
+        }
+        if (doomed && self->loader_) {
+            const aaudio_result_t rcl = self->loader_->close(doomed);
+            if (rcl != kAaudioOk) {
+                elog::warn("audio: close do stream morto (%s)",
+                            self->resultText(rcl));
+            }
+        }
+        self->gate_.open();   // um start futuro pode tentar de novo
     }
 
+    mutable std::mutex mtx_;               // guarda stream_ (errCb × stop)
     AAudioLoader* loader_ = nullptr;
-    AAudioStream* stream_ = nullptr;
+    AAudioStream* stream_ = nullptr;       // protegido por mtx_
+    StartGate gate_;                        // REG-002: nunca 2×
     std::atomic<bool> errored_{false};
     u32 rate_ = 44100;
 };
@@ -377,15 +478,24 @@ public:
     ~AudioTrackBackend() override { stop(); }
 
     bool start(u32 sampleRate, u16 channels) override {
+        // REG-002: o arranque duplo criava uma 2ª thread de escrita + track
+        // vazado — o portão impede (o AudioTrack segue a MESMA regra)
+        if (!gate_.tryEnter()) {
+            elog::warn("audio: start ignorado — AudioTrack ja ativo "
+                       "(porta R-006)");
+            return true;
+        }
         JNIEnv* env = attachedEnv();
         if (!env) {
             elog::error("audio: AudioTrack sem JNIEnv (VM não registada?)");
+            gate_.release();
             return false;
         }
         // ---- AudioFormat.Builder (encoding float + rate + máscara) -------
         jclass fmtB = env->FindClass("android/media/AudioFormat$Builder");
         if (!fmtB || clearPendingException(env)) {
             elog::error("audio: AudioFormat$Builder nao resolvida");
+            gate_.release();
             return false;
         }
         jmethodID fbCtor = env->GetMethodID(fmtB, "<init>", "()V");
@@ -400,6 +510,7 @@ public:
         if (!fbCtor || !fbEnc || !fbRate || !fbMask || !fbBuild) {
             clearPendingException(env);
             elog::error("audio: metodos do AudioFormat.Builder nao achados");
+            gate_.release();
             return false;
         }
         jobject fmtBuilder = env->NewObject(fmtB, fbCtor);
@@ -414,6 +525,7 @@ public:
         if (clearPendingException(env) || !fmt) {
             elog::error("audio: AudioFormat.Builder falhou (rate %u ch %u)",
                         sampleRate, channels);
+            gate_.release();
             return false;
         }
         // ---- AudioAttributes.Builder (USAGE_MEDIA) ------------------------
@@ -426,6 +538,7 @@ public:
         if (!attrB || !abCtor || !abUsage || !abBuild ||
             clearPendingException(env)) {
             elog::error("audio: AudioAttributes$Builder nao resolvida");
+            gate_.release();
             return false;
         }
         jobject attrBuilder = env->NewObject(attrB, abCtor);
@@ -434,12 +547,14 @@ public:
         jobject attrs = env->CallObjectMethod(attrBuilder, abBuild);
         if (clearPendingException(env) || !attrs) {
             elog::error("audio: AudioAttributes.Builder falhou");
+            gate_.release();
             return false;
         }
         // ---- AudioTrack: ctor 5-arg (API 21) e, se não houver, o 4-arg ----
         jclass trkCls = env->FindClass("android/media/AudioTrack");
         if (!trkCls || clearPendingException(env)) {
             elog::error("audio: AudioTrack nao resolvida");
+            gate_.release();
             return false;
         }
         // 200 ms de buffer (10 ms por escrita × 20)
@@ -461,6 +576,7 @@ public:
             if (!trkCtor) {
                 clearPendingException(env);
                 elog::error("audio: nenhum ctor AudioTrack utilizavel");
+                gate_.release();
                 return false;
             }
             track_ = env->NewGlobalRef(env->NewObject(
@@ -468,6 +584,7 @@ public:
         }
         if (clearPendingException(env) || !track_) {
             elog::error("audio: NewObject AudioTrack FALHOU");
+            gate_.release();
             return false;
         }
         jmethodID play = env->GetMethodID(trkCls, "play", "()V");
@@ -483,12 +600,15 @@ public:
             elog::error("audio: metodos write/stop/release nao achados");
             env->DeleteGlobalRef(track_);
             track_ = nullptr;
+            gate_.release();
             return false;
         }
         running_ = true;
         writer_ = std::thread([this, sampleRate, channels] {
             writerLoop(sampleRate, channels);
         });
+        elog::info("audio: AudioTrack ATIVO (fallback JNI, rate %u ch %u)",
+                   sampleRate, channels);
         return true;
     }
 
@@ -512,6 +632,7 @@ public:
             arr_ = nullptr;
             arrSize_ = 0;
         }
+        gate_.open();   // REG-002: a paragem liberta o portão
     }
     void pause() override { paused_ = true; }
     void resume() override { paused_ = false; }
@@ -564,6 +685,7 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> paused_{false};
     std::atomic<u64> framesOut_{0};
+    StartGate gate_;   // REG-002 (R-006): nunca 2×
     jfloatArray arr_ = nullptr;   // buffer reutilizado (global ref da thread)
     size_t arrSize_ = 0;
     jmethodID writeF_ = nullptr;

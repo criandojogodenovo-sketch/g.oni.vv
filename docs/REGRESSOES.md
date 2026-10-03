@@ -1,4 +1,4 @@
-# docs/REGRESSOES.md — REGISTO DE REGRESSÕES DE DEVICE (0.8.12)
+# docs/REGRESSOES.md — REGISTO DE REGRESSÕES DE DEVICE (0.8.12; hotfix 0.9.3)
 
 O contrato desta casa: **CI verde não é prova** — entregas verdes que
 falham no telefone repetidamente são inaceitáveis (0.8.5/0.8.7/0.8.9/
@@ -84,3 +84,33 @@ replay usa o TIC AFASTADO do centro (o cenário em que o sintoma aparecia).
 | Teste sentinela | `regress_dump_identity` (tests/test_sentinels.cpp) |
 | Linha do replay | FASE 5 do c33_virtual (dump da build 39 com badge; novo sem badge) |
 | Padrão proibido | `ERRO(gerador/upload falhou)` (o erro desonesto da 0.8.7 — relacionado: com os guards, o caminho nunca é atingido pelos pickers) |
+
+## R-005 · ConcurrentModification no reload da tela de projetos (= REG-001 do hotfix 0.9.3)
+
+| campo | valor |
+|---|---|
+| ID | R-005 (no relatório do hotfix: REG-001) |
+| Reportado | device 0.9.2, realme RMX3624 — 23 ocorrências NUM dia (15:53–15:55 e 12:10), process vv.goni; crash loop: abria, morria, reabria, morria |
+| Sintoma exato | `FATAL EXCEPTION: pool-2-thread-1 … java.util.ConcurrentModificationException at java.util.ArrayList$Itr.checkForComodification … at vv.goni.ProjectManagerActivity.lambda$reload$4(ProjectManagerActivity.java:355)` |
+| Causa raiz | `ProjectManagerActivity.reload()` fazia `all.clear()+all.addAll(VvProjects.load())` na MAIN thread (chamado do onCreate E do onResume, mais os pós-criar/apagar/renomear/duplicar) ENQUANTO a lambda do `io.execute` percorria a MESMA `ArrayList` partilhada na thread de background (`pool-2-thread-1` = o single-thread executor) — o for-each lançava a exceção de modificação concorrente e o processo morria; a exceção numa thread de executor NÃO tem handler — mata o processo |
+| Fix | (1) `ReloadGate` (Java puro, `app/src/main/java/vv/goni/ReloadGate.java`): portão single-flight com coalesce trailing — 1 reload de cada vez, o ÚLTIMO pedido é sempre publicado, o portão nunca fica preso (abandon/safeRun); (2) `doReload()` — a thread de fundo constrói lista NOVA local (`fresh`) e NUNCA toca em `all`/`shown`/`missingUris`; a publicação acontece na main thread (`main.post`) e substitui a lista de uma vez; (3) cada entrada lida dentro de try/catch (projeto corrompido/inacessível = saltado com log + contadores); (4) `VvProjects.load` (já defensivo: corrompido → lista vazia) corre na thread io, fora da main (Problema 3) |
+| Teste sentinela | `regress_concurrent_reload` + `regress_corrupt_projects` (tests-java/ReloadGateTest.java, JVM do CI) + check estrutural `scripts/reload_concurrency_check.py` (o fonte REAL da Activity: confinamento, try/catch por entrada, portão — apanha a reversão do fix no fonte, que a JVM não vê) |
+| Linha do replay | As SENTINELAS JVM correm no job c33-virtual do CI (o replay C++ não instancia Java); o mecanismo do crash é reproduzido e apanhado DENTRO do próprio `regress_concurrent_reload` (o padrão antigo lança; o novo publica sem exceções) |
+| Padrão proibido | `ConcurrentModificationException` (ci/forbidden_patterns.txt — grep -E no output combinado JVM+harness) |
+
+Nota técnica: o `pool-2-thread-1` do stack trace é o `Executors.newSingleThreadExecutor()` da Activity — a thread de fundo ÚNICA confirma que a modificação concorrente vinha da MAIN thread (o `all.clear()` do reload seguinte), não de dois executors.
+
+## R-006 · SIGSEGV em AAudio_createStreamBuilder no Unisoc (= REG-002 do hotfix 0.9.3)
+
+| campo | valor |
+|---|---|
+| ID | R-006 (no relatório do hotfix: REG-002) |
+| Reportado | device, realme RMX3624 (Unisoc/Spreadtrum, Android 13/API 33) — ~20 tombstones 19-20/09 + 3 em 25-26/09, app ANTIGA com.goni.runtime (histórico) |
+| Sintoma exato | `signal 11 (SIGSEGV), code 2 (SEGV_ACCERR) … #00 /system/lib64/libaaudio.so (AAudio_createStreamBuilder+160) … libgoni.so eng::editor::EditorHost::startAudio()+192 … com.goni.runtime.EditorActivity.onResume+30` |
+| Causa raiz | Classe do bug (a app antiga morreu com ela; a 0.9.2 tinha as PORTAS ABERTAS para a mesma classe): `startAudio()` chamado direto do `onResume()` (repetível sem `onPause` parar o stream) abria um SEGUNDO stream sem fechar o primeiro — stream vivo FUGIA; builder/stream usados depois de mortos; retornos de `AAudio_*` sem verificação; o driver AAudio do Unisoc crasha dentro da própria `AAudio_createStreamBuilder` com este padrão (SEGV_ACCERR = escrita/leitura em página sem permissão dentro da lib do vendor) |
+| Fix | (1) MIGRAÇÃO PARA OBOE (o caminho primário exigido): `platform/OboeBackend.cpp` — google/oboe PINADO 1.9.3 via CMake FetchContent (Apache-2.0), AAudio na API 27+ com fallback OpenSL ES automático nos devices problemáticos, callback completo (`onAudioReady` sem locks, `onErrorBeforeClose` loga, `onErrorAfterClose` larga a referência e abre o portão); (2) `platform/AudioStartGate.h` — portão atómico `std::atomic<bool>`: `start()` é IDEMPOTENTE em TODOS os backends (oboe, aaudio, audiotrack, stub): chamado 2× NÃO abre 2º stream (a fuga era a porta do crash); (3) AAudio fixado como fallback: `stream_` protegido por mutex (errCb × stop), errCb FECHA o stream morto (o padrão interno do oboe), TODOS os `aaudio_result_t` verificados; (4) AudioTrack também com portão (o arranque duplo criava 2ª thread de escrita + track vazado); (5) cadeia de boot: Oboe → AAudio → AudioTrack → SEM SOM (o editor NUNCA crasha por causa do áudio); o arranque corre no INIT_WINDOW, NUNCA no onResume; (6) probe de estabilidade contra o Oboe |
+| Teste sentinela | `regress_audio_lifecycle` (tests/test_sentinels.cpp — o OboeBackend de PRODUÇÃO contra o stub tests/stub/oboe/Oboe.h: arranque duplo, 50× onResume, erro→degradação, zero fugas closeCount==openCount, falha de arranque = sem som) |
+| Linha do replay | FASE 8 do c33_virtual (147 checks): boot real INIT→oboe ATIVO; sequência do tombstone (startAudio 3× sem guarda → 1 stream); adversário 50 onResume + 10 startAudio; TERM→INIT ×3 com contadores de fugas (abertos/fechados/vivos); disconnect → frame SEM som; cena corrompida no disco → boot completa; memória do arranque no log |
+| Padrão proibido | `SIGSEGV.*AAudio` e `AAudio_createStreamBuilder\+160` (ci/forbidden_patterns.txt — a assinatura exata do tombstone) |
+
+Nota técnica: o TU `platform/AudioOutDevice.cpp` (AAudio/AudioTrack, Android-only) continua compilado-verificado pelo job NDK do build-release (o jni.h fake do host não o tipa — documentado desde 0.8.11-b); o `OboeBackend.cpp` é TU COMUM — compila contra o oboe REAL no APK e contra o stub na suíte (o padrão StorageBridge/jni.h), logo o primário é vigiado nos DOIS lados.

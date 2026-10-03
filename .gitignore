@@ -19,12 +19,19 @@ local.properties
 build-tests/
 build-android/
 build-manual/
+# 0.9.3: outputs das suítes Java na JVM (javac -d build-java*)
+build-java/
+build-java-gate/
+build-java-mut/
 
 # Tooling local do ambiente (suíte sem cmake — o CI usa cmake)
 scripts-local/
 
 # Logs locais
 *.log
+# 0.9.3: outputs de execução local dos gates (o CI publica os seus)
+c33-replay.txt
+java-sentinels.txt
 # 0.8.12 — outputs de execução local dos testes/harness (o CI publica os
 # seus como artifacts; nada disto é fonte)
 c33-virtual-logs/

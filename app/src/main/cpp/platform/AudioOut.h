@@ -1,12 +1,17 @@
 #pragma once
-// platform/AudioOut.h — o BACKEND de saída de áudio (0.8.11).
+// platform/AudioOut.h — o BACKEND de saída de áudio (0.8.11; hotfix 0.9.3).
 //
 // PROVA ANTES DE COMPROMISSO (a regra do prompt): a engine NÃO casa com o
-// AAudio — casa com ESTA interface. O device tenta AAudio; se o PROBE de
-// estabilidade (Settings → Diagnóstico) acusa falha OU o AAudio recusa o
-// stream em runtime, o FALLBACK DOCUMENTADO (AudioTrack via JNI) entra
-// DEBAIXO DA MESMA INTERFACE — o misturador (core/AudioEngine) não sabe
-// qual dos dois está a correr.
+// AAudio — casa com ESTA interface. 0.9.3 (REG-002/R-006): a CADEIA é
+//   Oboe (primário — google/oboe 1.9.3, Apache-2.0; AAudio na API 27+
+//         com fallback OpenSL ES automático nos devices problemáticos)
+//   → AAudio direto (fallback fixado: dlopen + porta StartGate +
+//         close-no-error-callback — AudioOutDevice.cpp)
+//   → AudioTrack JNI (fallback final de sempre)
+//   → SEM SOM (o editor funciona; nunca crasha por causa do áudio).
+// O PROBE (Settings → Diagnóstico) corre contra um backend FRESCO e a
+// decisão (shouldFallback) troca para AudioTrack debaixo da MESMA
+// interface — o misturador (core/AudioEngine) não sabe qual corre.
 //
 // Contrato (o callback puxa do misturador):
 //   start(rate, channels) → abre o stream e começa o callback;
@@ -14,9 +19,15 @@
 //   pause()/resume() → o lifecycle da activity (fundo/recente);
 //   ready() → stream vivo (o auto-fallback pergunta).
 //
+// REG-002 (a regra de ouro do hotfix): start() é IDEMPOTENTE — chamado
+// 2× NÃO abre um 2º stream (a fuga de stream vivo era a porta de entrada
+// do SIGSEGV AAudio no Unisoc). Todos os backends cumprem via
+// platform/AudioStartGate.h.
+//
 // HOST/CI: a implementação é o AudioOutStub (tests/stub) — os testes do
-// misturador/probe correm SEM hardware. DEVICE: AAudioOut.cpp (AAudio C
-// API, __ANDROID__) e AudioTrackOut.cpp (JNI).
+// misturador/probe correm SEM hardware. DEVICE: OboeBackend.cpp (oboe
+// REAL via FetchContent) e AudioOutDevice.cpp (AAudio dlopen +
+// AudioTrack JNI; só compilam no Android).
 #include <functional>
 #include <string>
 
@@ -59,7 +70,11 @@ MixFn currentMixFn();
 void setVm(void* vm);
 
 // ---- fábrica (definida por plataforma; device em AudioOutDevice.cpp) ------
-// cria o backend PEDIDO; o auto-fallback troca se o start falhar
+// cria o backend PEDIDO; o auto-fallback troca se o start falhar.
+// 0.9.3 (REG-002): createOboe é o PRIMÁRIO — definido em OboeBackend.cpp
+// (TU COMUM: oboe REAL no APK via FetchContent; stub tests/stub/oboe no
+// host da suíte — o mesmo código vigiado pelo CI)
+Backend* createOboe();
 Backend* createAAudio();
 Backend* createAudioTrack();
 

@@ -85,9 +85,9 @@ public class ProjectManagerActivity extends Activity {
     static final int DANGER = 0xFFEF5350;
     static final int WARN = 0xFFFABB45;
 
-    private final List<VvProjects.Entry> all = new ArrayList<>();   // fonte
-    private final List<VvProjects.Entry> shown = new ArrayList<>(); // filtro+ordem
-    private final List<String> missingUris = new ArrayList<>();     // estado F
+    private final List<VvProjects.Entry> all = new ArrayList<>();   // fonte (só a MAIN thread mexe — REG-001)
+    private final List<VvProjects.Entry> shown = new ArrayList<>(); // filtro+ordem (idem)
+    private final List<String> missingUris = new ArrayList<>();     // estado F (idem)
 
     private GridView grid;
     private TextView emptyTitle, emptySub;
@@ -105,6 +105,9 @@ public class ProjectManagerActivity extends Activity {
     private final List<String> loadingThumbs = new ArrayList<>();
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
+    // REG-001/R-005 (hotfix 0.9.3): o PORTÃO do reload — 1 de cada vez +
+    // coalesce trailing; a thread de fundo NUNCA toca em all/shown/missingUris
+    private final ReloadGate reloadGate = new ReloadGate(this::doReload);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -166,7 +169,29 @@ public class ProjectManagerActivity extends Activity {
         setContentView(root, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
+        // Problema 3 (hotfix 0.9.3): memória no ARRANQUE logada (evidência
+        // p/ o dono comparar com o FinalizerWatchdog dos tombstones antigos)
+        logStartupMemory("gestor: onCreate");
         reload();
+    }
+
+    /**
+     * Problema 3 — uso de memória no arranque (Debug.getMemoryInfo + heap
+     * Java): uma linha informativa; NUNCA bloqueia nem crasha o arranque.
+     */
+    private void logStartupMemory(String where) {
+        try {
+            final android.os.Debug.MemoryInfo mi = new android.os.Debug.MemoryInfo();
+            android.os.Debug.getMemoryInfo(mi);
+            final Runtime rt = Runtime.getRuntime();
+            Log.i(TAG, where + ": memoria — dalvikPss=" + mi.dalvikPss
+                    + "KB nativePss=" + mi.nativePss + "KB totalPss=" + mi.totalPss
+                    + "KB | heap java " + (rt.totalMemory() >> 10) + "KB/"
+                    + (rt.maxMemory() >> 10) + "KB (livre "
+                    + (rt.freeMemory() >> 10) + "KB)");
+        } catch (Throwable t) {
+            Log.w(TAG, where + ": Debug.getMemoryInfo indisponivel", t);
+        }
     }
 
     // ---- cabeçalho 72dp: logo 48 + G.One VV 20sp + tagline 12sp -----------
@@ -345,29 +370,94 @@ public class ProjectManagerActivity extends Activity {
         adapter.notifyDataSetChanged();
     }
 
+    // =========================================================================
+    // RELOAD — REG-001/R-005 (hotfix 0.9.3)
+    //
+    // O BUG (23 crashes num dia, vv.goni@RMX3624): a versão antiga fazia
+    // all.clear()+all.addAll(VvProjects.load()) na MAIN thread (onCreate +
+    // onResume + pós-operações) enquanto a lambda do io.execute iterava `all`
+    // na thread de background (pool-2-thread-1) → a iteração do ArrayList
+    // lançava a exceção de modificação concorrente (stack trace exato:
+    // lambda$reload$4, ProjectManagerActivity.java:355) e o processo morria;
+    // reabrir morria outra vez (loop).
+    //
+    // O PADRÃO SEGURO (as 4 regras, afervadas pelos sentinelas da JVM):
+    //   1. reload() só pede; o PORTÃO ReloadGate deixa passar 1 de cada
+    //      vez (coalesce trailing — a Tempestade onCreate+onResume+… nunca
+    //      põe 2 loads a correr em paralelo sobre os mesmos dados);
+    //   2. a thread de fundo constrói lista NOVA LOCAL e NUNCA toca em
+    //      all/shown/missingUris (o snapshot `fresh` é dela);
+    //   3. a publicação acontece na MAIN thread e substitui `all` DE UMA
+    //      VEZ (clear+addAll) — mutação confinada a uma thread;
+    //   4. cada entrada é lida dentro de try/catch: projeto corrompido/
+    //      inacessível = saltado com Log.w + contadores, NUNCA crash.
+    // =========================================================================
     private void reload() {
-        all.clear();
-        all.addAll(VvProjects.load(this));
-        // estado EM FALTA (spec F): pasta apagada fora da app → afere em
-        // background (queries SAF) e volta à main thread
-        final List<String> gone = new ArrayList<>();
-        io.execute(() -> {
-            for (VvProjects.Entry e : all) {
-                if (!VvProjects.projectFolderExists(this, Uri.parse(e.uri))) {
-                    gone.add(e.uri);
+        Log.i(TAG, "projetos: reload pedido");
+        reloadGate.request();
+    }
+
+    /** chamado 1× de cada vez pelo portão; todo o trabalho pesado na io */
+    private void doReload() {
+        try {
+            io.execute(() -> {
+                // (1) CARREGAR — lista NOVA local; projects.json corrompido
+                //     ou ilegível vira lista vazia COM log (VvProjects.load é
+                //     defensivo por dentro); uma falha aqui NUNCA mata o app
+                final List<VvProjects.Entry> fresh = new ArrayList<>();
+                try {
+                    final List<VvProjects.Entry> loaded = VvProjects.load(this);
+                    if (loaded != null) {
+                        fresh.addAll(loaded);
+                    }
+                } catch (Throwable t) {
+                    Log.e(TAG, "projetos: leitura da lista FALHOU — lista "
+                            + "vazia (a tela segue)", t);
                 }
-            }
-            main.post(() -> {
-                missingUris.clear();
-                missingUris.addAll(gone);
-                refresh();
-                // pede as miniaturas dos cards visíveis
-                for (VvProjects.Entry e : shown) {
-                    requestThumb(e);
+                // (2) 1ª PUBLICAÇÃO (main thread): a lista aparece LOGO
+                //     (mesmo timing da versão antiga — o estado EM FALTA é
+                //     que é assíncrono, como sempre foi)
+                main.post(() -> {
+                    all.clear();
+                    all.addAll(fresh);   // cópia de referências: `fresh` não volta a ser escrito
+                    refresh();
+                });
+                // (3) ESTADO EM FALTA (spec F): a pasta ainda existe? —
+                //     iteramos o SNAPSHOT LOCAL (nunca `all`); falha de
+                //     query = projeto em falta (card de recuperação)
+                final List<String> gone = new ArrayList<>();
+                for (VvProjects.Entry e : fresh) {
+                    try {
+                        if (!VvProjects.projectFolderExists(this,
+                                Uri.parse(e.uri))) {
+                            gone.add(e.uri);
+                        }
+                    } catch (Throwable t) {
+                        Log.w(TAG, "projetos: pasta de '" + e.name
+                                + "' inacessivel — marcada em falta", t);
+                        gone.add(e.uri);
+                    }
                 }
+                // (4) 2ª PUBLICAÇÃO (main thread): em-falta + miniaturas +
+                //     contadores + o portão liberta (ou acorda o trailing)
+                main.post(() -> {
+                    missingUris.clear();
+                    missingUris.addAll(gone);
+                    refresh();
+                    // pede as miniaturas dos cards visíveis
+                    for (VvProjects.Entry e : shown) {
+                        requestThumb(e);
+                    }
+                    Log.i(TAG, "projetos: reload ok — " + fresh.size()
+                            + " projeto(s), " + gone.size() + " em falta");
+                    reloadGate.finished();
+                });
             });
-        });
-        refresh();
+        } catch (Throwable t) {
+            // a fila recusou (activity a morrer) — o portão abre SEM crash
+            Log.e(TAG, "projetos: reload nao agendado (fila encerrada?)", t);
+            reloadGate.abandon();
+        }
     }
 
     @Override

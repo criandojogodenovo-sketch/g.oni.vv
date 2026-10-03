@@ -55,6 +55,9 @@
 
 #include "FakeStorage.h"
 #include "FakeSafIo.h"   // 0.8.12: o provider content:// do C33 virtual
+// 0.9.3 (REG-002): o stub do oboe — o OboeBackend de PRODUÇÃO que o
+// main.cpp arranca compila contra ESTE header no host (o padrão jni.h)
+#include <oboe/Oboe.h>
 
 // ---- O CAMINHO REAL DO DEVICE (namespace anónimo = mesmo TU) ---------------
 #include "platform/main.cpp"
@@ -271,10 +274,13 @@ void resetEngineForHarness() {
 // main — o REPLAY inteiro; sai non-zero em qualquer falha
 // ===========================================================================
 int main() {
-    std::printf("== C33 VIRTUAL — dispositivo headless em CI (0.9.0) ==\n");
+    std::printf("== C33 VIRTUAL — dispositivo headless em CI (0.9.3) ==\n");
     std::printf("   reproduz: /tmp read-only (errno=30), cache dir da app,\n");
     std::printf("   content:// SAF, lifecycle EGL TERM/INIT, 1536x720 + insets,\n");
     std::printf("   ASTC ativo, taps replayaveis pelo frame() real\n");
+    std::printf("   0.9.3: + lifecycle agressivo do AUDIO (REG-002/R-006), backend\n");
+    std::printf("   Oboe de producao contra o stub, projetos corrompidos, memoria\n");
+    std::printf("   do arranque (Problema 3) e as sentinelas JVM (REG-001) no CI\n");
     rmrf(kHarnessLogs);
     rmrf(kCacheDir);
     if (!vv::elog::init(kHarnessLogs)) {
@@ -882,10 +888,199 @@ int main() {
         onAppCmd(&app, APP_CMD_TERM_WINDOW);
     }
 
+    // ======================================================================
+    // FASE 8 — 0.9.3 (hotfix): REPLAY DO CRASH DE ÁUDIO (REG-002/R-006)
+    // + sequência dos projetos corrompidos (Sequência 3) + memória do
+    // arranque (Problema 3). O backend é o OboeBackend DE PRODUÇÃO (TU
+    // comum) contra o stub tests/stub/oboe/Oboe.h — o MESMO código que o
+    // APK corre contra o oboe real do Google (FetchContent 1.9.3).
+    // ======================================================================
+    fase("FASE 8 — replay REG-002: lifecycle agressivo do audio + corruptos");
+    {
+        resetEngineForHarness();
+        javaRegistersWithCacheDir();
+        oboe::testing::reset();
+
+        android_app app;
+        std::memset(&app, 0, sizeof(app));
+
+        // 8.1 o BOOT pelo caminho REAL: INIT_WINDOW → audioBackendBoot →
+        //     o PRIMÁRIO é o Oboe (o stub no host — o MESMO TU do APK)
+        passo("8.1 boot real: INIT_WINDOW arranca o backend OBOE (o primario)");
+        onAppCmd(&app, APP_CMD_INIT_WINDOW);
+        check(g_ready, "boot completo (g_ready)");
+        check(g_audioOut != nullptr && g_audioBackendReady,
+              "backend de audio ATIVO no boot");
+        check(std::strcmp(g_audioOut->name(), "oboe") == 0,
+              "o primario e o OBOE (cadeia 0.9.3: oboe→aaudio→audiotrack)");
+        check(logHas("audio(oboe): stream ATIVO rate="),
+              "a linha informativa do stream (rate/ch/perf — Tarefa 2.5)");
+        check(oboe::testing::hooks().openCount == 1,
+              "EXATAMENTE 1 stream aberto no boot");
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+
+        // 8.2 A SEQUÊNCIA DO TOMBSTONE (Sequência 2 do prompt): o onResume
+        //     da app antiga (com.goni.runtime) chamava startAudio()
+        //     DIRETO, sem guarda — reproduzimos o MESMO padrão contra o
+        //     backend vivo; o portão R-006 tem de aguentar SEM fugas
+        passo("8.2 a sequencia do tombstone: startAudio repetido sem guarda");
+        for (int i = 0; i < 3; ++i) {
+            check(g_audioOut->start(44100, 2),
+                  "startAudio() devolve true (idempotente)");
+        }
+        check(oboe::testing::hooks().openCount == 1,
+              "o 2º/3º start NAO abrem streams (porta R-006 — a fuga de "
+              "stream era a porta do crash Unisoc)");
+        check(g_audioOut->ready(), "o stream original segue VIVO");
+        check(logHas("audio(oboe): start ignorado — stream ja ativo"),
+              "a porta R-006 deixa a linha no log");
+
+        // o RESUME/PAUSE do lifecycle REAL (o fundo/recentes do Android)
+        for (int i = 0; i < 5; ++i) {
+            onAppCmd(&app, APP_CMD_RESUME);
+            onAppCmd(&app, APP_CMD_PAUSE);
+        }
+        onAppCmd(&app, APP_CMD_RESUME);
+        check(logCount("audio: RESUME") >= 1 && logCount("audio: PAUSE") >= 1,
+              "o lifecycle do audio logado (pause/resume)");
+        check(oboe::testing::hooks().openCount == 1,
+              "pause/resume NAO reabrem streams");
+
+        // 8.3 ADVERSÁRIO (Tarefa 7D): 50× onResume SEM onPause + 10×
+        //     startAudio direto — a engine tem de seguir viva
+        passo("8.3 adversario: 50 onResume sem onPause + 10 startAudio");
+        for (int i = 0; i < 50; ++i) {
+            onAppCmd(&app, APP_CMD_RESUME);
+        }
+        for (int i = 0; i < 10; ++i) {
+            g_audioOut->start(44100, 2);
+        }
+        check(g_ready, "a engine SEGUE VIVA (zero crashes nativos)");
+        check(oboe::testing::hooks().openCount == 1,
+              "ainda EXATAMENTE 1 stream (zero fugas no adversario)");
+        check(g_audioOut->ready(), "o audio segue pronto apos a tempestade");
+
+        // 8.4 o CICLO DURO: TERM → INIT ×3 (o Android a destruir/recriar a
+        //     surface — o ciclo que multiplicava os tombstones)
+        passo("8.4 ciclo duro TERM->INIT x3 (o Android mata/recria a surface)");
+        const int opensAntes = oboe::testing::hooks().openCount;
+        for (int i = 0; i < 3; ++i) {
+            onAppCmd(&app, APP_CMD_TERM_WINDOW);
+            onAppCmd(&app, APP_CMD_INIT_WINDOW);
+        }
+        check(g_ready, "3 ciclos TERM->INIT completos (g_ready)");
+        check(oboe::testing::hooks().openCount == opensAntes + 3,
+              "cada boot abriu EXATAMENTE 1 stream novo");
+        // o invariante R-006 (zero fugas): tudo o que abriu foi fechado,
+        // EXCETO o stream VIVO do último boot — os contadores vão no
+        // output (a evidência que o relatório cola)
+        std::printf("    [streams] abertos=%d fechados=%d vivos=%d\n",
+                    oboe::testing::hooks().openCount,
+                    oboe::testing::hooks().closeCount,
+                    oboe::testing::hooks().openCount -
+                        oboe::testing::hooks().closeCount);
+        check(oboe::testing::hooks().closeCount ==
+                      oboe::testing::hooks().openCount - 1,
+              "ZERO fugas: cada stream aberto foi fechado (so o VIVO do "
+              "ultimo boot segue aberto — o stream fugido era o crash)");
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+
+        // 8.5 o DISCONNECT no meio da sessão (headset fora): o stream
+        //     morre, o editor CONTINUA sem som; o próximo INIT re-arranca
+        passo("8.5 disconnect no meio da sessao (o headset desligou)");
+        oboe::testing::fireErrorOnAllStreams(
+            oboe::Result::ErrorDisconnected);
+        check(!g_audioOut->ready(), "o stream morto reporta NOT ready");
+        check(logHas("audio(oboe): stream MORREU"),
+              "a morte logada com a razao (onErrorBefore/AfterClose)");
+        frame();   // o editor CONTINUA (o frame corre sem som)
+        check(true, "o frame corre SEM som (degradacao graciosa — nunca "
+                    "crash por causa do audio)");
+        onAppCmd(&app, APP_CMD_TERM_WINDOW);
+        onAppCmd(&app, APP_CMD_INIT_WINDOW);
+        check(g_ready && g_audioBackendReady,
+              "o INIT re-arranca o audio depois do disconnect (porta "
+              "reaberta pelo onErrorAfterClose)");
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+
+        // 8.6 SEQUÊNCIA 3 do prompt: PROJETOS CORROMPIDOS NO DISCO → o
+        //     boot COMPLETA sem crash (a cena corrompida vira cena vazia
+        //     com log; o lado Java da lista tem o sentinela JVM próprio)
+        passo("8.6 cena corrompida no disco: boot completa sem crash");
+        {
+            auto st = std::make_unique<FakeStorage>();
+            FakeStorage* rawSt = st.get();
+            check(Project::createNew(*rawSt, "corrompido", g_project),
+                  "projeto criado no storage");
+            check(rawSt->writeText(*g_project.activeScenePath(),
+                                   "{{{ lixo nao-json \x01\x02 !!!"),
+                  "cena CORROMPIDA escrita no disco");
+            g_scene.clear();
+            g_storage = std::move(st);
+            g_projectReady = true;
+            g_resources.setStorage(rawSt);
+            g_gpu.init(&g_resources);
+            g_texCache = std::make_unique<TextureCache>(*rawSt);
+            g_pipeline = std::make_unique<TexturePipeline>(g_hwCompressor,
+                                                           *g_texCache);
+            onAppCmd(&app, APP_CMD_TERM_WINDOW);
+            onAppCmd(&app, APP_CMD_INIT_WINDOW);
+            check(g_ready,
+                  "boot com projeto CORROMPIDO no disco completa (g_ready)");
+            check(logHas("[boot 6/6] scene FALHOU"),
+                  "a cena corrompida logada como FALHOU (legivel)");
+            check(logHas("editor arranca com cena vazia"),
+                  "o editor arranca com cena vazia (zero crash)");
+            if (!g_font.ok()) {
+                const char* paths[] = {FONT_FIXTURE};
+                g_font.loadFromPaths(paths, 1, 28.0f);
+            }
+            g_ui.setFont(&g_font);
+        }
+
+        // 8.7 PROBLEMA 3: a memória do arranque no log (a evidência p/ o
+        //     dono comparar com o FinalizerWatchdog dos tombstones antigos)
+        check(logHas("boot: memoria"),
+              "a linha de memoria do arranque (Problema 3)");
+
+        // 8.8 GATE interno R-006: zero assinaturas de crash nativo em TODO
+        //     o engine.log do replay (a mensagem do check NUNCA cita o
+        //     padrão — a lição 0.8.12-c: o gate grepa o PRÓPRIO output)
+        check(logCount("SIGSEGV") == 0,
+              "zero assinaturas de crash nativo no engine.log (R-006)");
+        check(logCount("SEGV_ACCERR") == 0,
+              "zero falhas de acesso nativas no engine.log (R-006)");
+
+        onAppCmd(&app, APP_CMD_TERM_WINDOW);
+        // o fecho TOTAL no fim da fase: com o TERM, NENHUM stream vivo resta
+        std::printf("    [streams] fim da fase: abertos=%d fechados=%d vivos=%d\n",
+                    oboe::testing::hooks().openCount,
+                    oboe::testing::hooks().closeCount,
+                    oboe::testing::hooks().openCount -
+                        oboe::testing::hooks().closeCount);
+        check(oboe::testing::hooks().closeCount ==
+                      oboe::testing::hooks().openCount,
+              "fim da fase: NENHUM stream vivo resta (o TERM fechou tudo)");
+        oboe::testing::reset();
+    }
+
     // ---- sumário -----------------------------------------------------------
     std::printf("\n== C33 VIRTUAL: %d check(s), %d falha(s) ==\n", g_checks, g_failed);
     if (g_failed == 0) {
-        std::printf("HARNESS VERDE — o dispositivo virtual confirma os 5 fixes\n");
+        std::printf("HARNESS VERDE — o dispositivo virtual confirma os fixes "
+                    "vigiados (R-001..R-006; REG-001/REG-002 do hotfix 0.9.3)\n");
     } else {
         std::printf("HARNESS VERMELHO — release BLOQUEADA (ver [FAIL] acima)\n");
     }

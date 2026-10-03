@@ -269,6 +269,11 @@ add_executable(test_core
         ${CORE_DIR}/assets/AudioCodecs.cpp
         ${CORE_DIR}/core/AudioEngine.cpp
         ${CORE_DIR}/platform/AudioOut.cpp
+        # 0.9.3 (REG-002): o OboeBackend de PRODUÇÃO compila na suíte contra
+        # o stub tests/stub/oboe/Oboe.h (tests/stub vem primeiro no include
+        # path) — os sentinelas regress_audio_lifecycle afervam o portão,
+        # os Result verificados e a degradação sem crash
+        ${CORE_DIR}/platform/OboeBackend.cpp
         ${CORE_DIR}/ui/AudioWorkspace.cpp
         # 0.8.12 — SENTINELAS PERMANENTES DE REGRESSÃO (docs/REGRESSOES.md):
         # correm em TODAS as runs de CI, em todas as releases futuras. Os
@@ -391,6 +396,10 @@ add_executable(c33_virtual
         ${CORE_DIR}/assets/AudioCodecs.cpp
         ${CORE_DIR}/core/AudioEngine.cpp
         ${CORE_DIR}/platform/AudioOut.cpp
+        # 0.9.3 (REG-002): o OboeBackend REAL no dispositivo virtual (o
+        # replay do lifecycle FASE 8 usa o caminho de produção contra o
+        # stub do oboe)
+        ${CORE_DIR}/platform/OboeBackend.cpp
         ${CORE_DIR}/ui/AudioWorkspace.cpp
         ${CORE_DIR}/ui/TextWindow.cpp   # 0.9.1: janela de texto (replay da rotação)
         ${CORE_DIR}/platform/ImeQueue.cpp   # 0.9.1: fila do IME + orientação
