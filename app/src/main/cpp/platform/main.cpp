@@ -4980,8 +4980,12 @@ void android_main(android_app* app) {
                    g_windowInits, g_windowTerms);
     }
     g_systems.clear();
-    g_editor = editor::EditorState{};   // inclui playMode = false (0.6.8) e
-                                        // uiMode/seleção de elemento (0.7.0)
+    // GCC 13.3 do runner (ubuntu-24.04) tem um ICE em gimple_add_tmp_var
+    // com o temporário prvalue braced — a variável nomeada aplica os
+    // mesmos NSDMIs e copia; inclui playMode = false (0.6.8) e
+    // uiMode/seleção de elemento (0.7.0)
+    editor::EditorState editorFresh;
+    g_editor = editorFresh;
     g_timeline = timeline::State{};   // 0.8.0: scrub/keys/preview da sessão anterior não vingam
     g_animSystem.enabled = false;    // 0.8.0: idem física (gate fechado)
     g_playSnap = PlaySnapshot{};

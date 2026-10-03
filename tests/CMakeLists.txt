@@ -324,6 +324,11 @@ add_executable(c33_virtual
         ${CORE_DIR}/core/TransformSystem.cpp
         ${CORE_DIR}/render/Cube.cpp
         ${CORE_DIR}/render/Primitives.cpp
+        ${CORE_DIR}/render/ThumbPng.cpp   # 0.9.0: miniatura do projeto (paridade com o test_core — o harness captura a thumb)
+        ${CORE_DIR}/ui/ViewportChrome.cpp   # 0.9.0: chrome do viewport
+        ${CORE_DIR}/ui/BottomPanel.cpp   # 0.9.0: painel de baixo
+        ${CORE_DIR}/ui/SettingsPage.cpp   # 0.9.0: página de Settings
+        ${CORE_DIR}/core/UndoStack.cpp   # 0.9.0: undo/redo por snapshot
         ${CORE_DIR}/render/Camera.cpp
         ${CORE_DIR}/physics/Shapes.cpp
         ${CORE_DIR}/physics/PhysicsSystem.cpp

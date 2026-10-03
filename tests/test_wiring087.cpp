@@ -142,7 +142,11 @@ void rmrfCacheDir() {
 // é DESTE TU — os globais do device são acessíveis diretamente)
 void resetEngineForTest() {
     g_scene.clear();
-    g_editor = editor::EditorState{};
+    // GCC 13.3 do runner (ubuntu-24.04) tem um ICE em gimple_add_tmp_var
+    // com o temporário prvalue braced `g_editor = editor::EditorState{}`;
+    // a variável nomeada aplica os mesmos NSDMIs e copia — sem temporário.
+    editor::EditorState editorFresh;
+    g_editor = editorFresh;
     g_browser = FileBrowserState{};
     g_applyAsk = ApplyAskState{};
     g_primOwners.clear();
