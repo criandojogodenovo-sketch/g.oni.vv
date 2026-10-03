@@ -468,7 +468,8 @@ TEST(regress_dump_identity) {
         FILE* f = std::fopen(dumpPath.c_str(), "r");
         ASSERT(f != nullptr);
         char buf[1024] = {0};
-        std::fread(buf, 1, sizeof(buf) - 1, f);
+        const size_t got = std::fread(buf, 1, sizeof(buf) - 1, f);
+        (void)got;   // lê o que houver (o header tem de chegar inteiro)
         std::fclose(f);
         EXPECT(std::strstr(buf, "build: 0.8.12-sentinela (versionCode 42)") != nullptr);
         EXPECT(std::strstr(buf, "so: cafe001122334455") != nullptr);

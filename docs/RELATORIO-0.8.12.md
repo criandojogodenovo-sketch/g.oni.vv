@@ -660,9 +660,37 @@ omitido.
 
 ## FECHO CI (18)
 
-A fechar após o push: run do workflow `release` com os jobs
-core-tests (614 testes + paridades), c33-virtual (replay 101 checks +
-gates), build-release (APK assinado versionCode 42, build_info.txt com o
-sha256 REAL da .so em 2 passes, needs das sentinelas) e
-verify-entry-symbols (gates de manifest/símbolos). Os números do run e o
-sha256 do APK assinado ficam registados aqui e no worklog após a execução.
+**FECHADO — run 37096946912 (commit ae434ff) 100% VERDE**:
+
+- **core-tests**: 614 testes (sentinelas `regress_*` incluídas) +
+  check_main + link_parity + jni_parity + JVM → success.
+- **c33-virtual**: `100% tests passed, 0 tests failed out of 2` (core +
+  replay) · replay `== C33 VIRTUAL: 101 check(s), 0 falha(s) ==` ·
+  `GATE VERDE: zero padrões proibidos no replay do C33 virtual` ·
+  `GATE VERDE: nenhum literal /tmp em FileApi/assets/migração` · o output
+  oficial do CI está no artifact `c33-virtual-replay-log` (c33-replay.txt
+  + engine.log — a 1ª linha do banner nele:
+  `I/GONI: boot: G.One VV 0.8.12-virtual versionCode 42 sha256 aabbccdd00112233 git c33c0ffe`).
+- **build-release** (APK assinado, versionCode 42, `needs:
+  [core-tests, c33-virtual]`): artifact **goni-vv-0.8.12-release-signed**;
+  app-release.apk sha256
+  `a1610df9253b32193d97b2cf6c84d32938b9063a5e07d2fb32c060fac377d4ea`.
+  **IDENTIDADE VERIFICADA PONTA-A-PONTA**: o build_info.txt DENTRO do APK
+  diz `soSha256=ee84f8a02836b1d2dc16366e2b1188fd03db608128a1c8a4c7ea9e1a114d0594`
+  e a .so arm64 extraída do MESMO APK tem EXATAMENTE esse sha256
+  (version=0.8.12, versionCode=42, git=ae434ff…, epoch=1791002252).
+- **verify-entry-symbols**: manifest + símbolos + paridade JNI → success.
+
+**A DEPENDÊNCIA AO VIVO**: o run intermédio 37096395233 ficou VERMELHO no
+job c33-virtual (gate de padrões com falsos positivos das próprias
+mensagens de verificação — corrigido no commit ae434ff) e o
+**build-release ficou SKIPPED — NÃO SAIU APK**. A cadeia
+sentinela/harness vermelha → release bloqueada funcionou ao vivo no CI
+antes de ficar verde (a prova de que o `needs:` não é decorativo).
+
+Commits: f34c9b1 (0.8.12-a — a campanha inteira), ce5a490 (0.8.12-b — fix
+CMake do c33_virtual: `astcenc_weight_quant_xfer_tables.cpp` com _tables;
+o build manual filtrava o ficheiro inexistente e passava — o CMake real
+apanhou), ae434ff (0.8.12-c — gate limpa os falsos positivos), 0.8.12-d
+(este fecho do relatório). Aguarda **VERIFIED do dono no C33** (checklist
+§16 — 10 itens).
