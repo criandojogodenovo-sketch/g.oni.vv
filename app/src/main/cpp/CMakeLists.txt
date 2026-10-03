@@ -101,6 +101,7 @@ add_library(goni_vv SHARED
         render/Texture.h
         render/Texture.cpp
         render/ThumbPng.cpp   # 0.9.0: miniatura do projeto (thumb.png)
+        core/UndoStack.cpp   # 0.9.0: undo/redo por snapshot + snapTic/pasteAsNew (faltou no APK: ld.lld undefined symbol no CI)
         render/GpuAssets.h
         render/GpuAssets.cpp
         core/Project.h
