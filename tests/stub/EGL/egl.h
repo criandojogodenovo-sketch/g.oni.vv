@@ -35,10 +35,18 @@ typedef void* EGLNativeWindowType;
 
 // 0.8.7 (test_wiring087): o stub EGL deixa de ser só "declaração que
 // compila" — init() SEGUE o caminho feliz (display/config/context/surface
-// não-nulos, makeCurrent OK) e eglQuerySurface devolve 1280×720 (a
-// paisagem do C33). O teste do wiring inclui platform/main.cpp e corre o
-// BOOT REAL (onAppCmd INIT_WINDOW) + frame() no hospedeiro — com o
-// lifecycle de destroy/recreate a cargo do stub GLES3 (contadores).
+// não-nulos, makeCurrent OK) e eglQuerySurface devolve o tamanho da
+// superfície (default 1280×720; 0.8.12: o harness do C33 virtual configura
+// 1536×720 — a resolução EXATA do device do dono). O teste do wiring inclui
+// platform/main.cpp e corre o BOOT REAL (onAppCmd INIT_WINDOW) + frame()
+// no hospedeiro — com o lifecycle de destroy/recreate a cargo do stub
+// GLES3 (contadores).
+namespace eglstub {
+// tamanho da superfície fake (inline = 1 instância por binário; o harness
+// ajusta ANTES do INIT_WINDOW para reproduzir o ecrã do C33)
+inline int g_surfaceW = 1280;
+inline int g_surfaceH = 720;
+}  // namespace eglstub
 inline EGLDisplay eglGetDisplay(EGLNativeDisplayType) {
     return reinterpret_cast<EGLDisplay>(0x1234);   // display fake não-nulo
 }
@@ -60,7 +68,10 @@ inline int eglDestroyContext(EGLDisplay, EGLContext) { return 1; }
 inline int eglMakeCurrent(EGLDisplay, EGLSurface, EGLSurface, EGLContext) { return 1; }
 inline int eglSwapBuffers(EGLDisplay, EGLSurface) { return 1; }
 inline int eglQuerySurface(EGLDisplay, EGLSurface, EGLint attr, EGLint* v) {
-    if (v) { *v = (attr == EGL_WIDTH) ? 1280 : 720; }   // paisagem do C33
+    // 0.8.12: o tamanho vem do eglstub (o harness do C33 virtual põe
+    // 1536×720; o default mantém 1280×720 dos testes existentes)
+    if (v) { *v = (attr == EGL_WIDTH) ? eglstub::g_surfaceW
+                                       : eglstub::g_surfaceH; }
     return 1;
 }
 inline int eglGetError() { return 0; }                        // F5.2 link parity

@@ -44,6 +44,7 @@
 #include <EGL/egl.h>    // stub (0.8.7: init feliz + 1280×720)
 #include <dirent.h>     // rmrf do diretório de logs do teste
 #include <sys/types.h>
+#include <unistd.h>   // 0.8.12: getpid do cache dir de teste
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -114,6 +115,27 @@ void javaRegistersGranted() {
         g_jni.env, kFakeCls, kFakeActivity,
         g_jni.newString("test-wiring087"));
     g_jni.manager_result = true;   // isExternalStorageManager() == true
+}
+
+// 0.8.12 — o CACHE DIR da app pela ponte JNI fake (o papel do
+// VvActivity.cacheDirPath → getCacheDir): o STAGING da reconversão NÃO
+// usa /tmp (read-only no Android — a causa da migração morta no C33) e o
+// FakeStorage tem raiz /fake (não escrevível): o fallback em cascata cai
+// no cache dir, EXATAMENTE como o device no caminho SAF.
+void enableDeviceCacheDir() {
+    javaRegistersGranted();
+    char cdir[64];
+    std::snprintf(cdir, sizeof(cdir), "test-wiring087-cache-%d",
+                  static_cast<int>(::getpid()));
+    fileapi::makeDirs(cdir);
+    g_jni.cache_dir = cdir;
+}
+
+void rmrfCacheDir() {
+    char cdir[64];
+    std::snprintf(cdir, sizeof(cdir), "test-wiring087-cache-%d",
+                  static_cast<int>(::getpid()));
+    rmrf(cdir);
 }
 
 // reset do estado PARTILHADO do main.cpp entre casos (o namespace anónimo
@@ -510,13 +532,14 @@ TEST(wiring087_troca_stress_antifreeze_com_guarda_de_tempo) {
                 case 2:  // ordem REVERSA
                     pick = 3 - (i % 2);
                     break;
-                case 3:  // primitiva ↔ cube (menuKind 1, pick 1)
-                    menuKind = 1;
-                    pick = 1;
-                    break;
-                default:  // primitiva ↔ IMPORTADO (ficheiro do catálogo)
+                case 3:  // primitiva ↔ cube (menuKind 1, pick 2 — 0.8.12:
+                         // none ocupa o 1º lugar, cube é o 2º)
                     menuKind = 1;
                     pick = 2;
+                    break;
+                default:  // primitiva ↔ IMPORTADO (ficheiro do catálogo em 3)
+                    menuKind = 1;
+                    pick = 3;
                     break;
             }
             const editor::AssetPickOutcome out = editor::applyAssetPick(
@@ -1223,6 +1246,12 @@ TEST(wiring010_migracao_projeto_antigo_e2e) {
     EXPECT(vv::elog::init(kTestLogs));
     resetEngineForTest();
     ensureEngineReady();
+    // 0.8.12: cache dir da app via JNI fake (o staging ja NAO e /tmp -
+    // a migracao tem de sobreviver num ambiente SEM /tmp escrevivel)
+    enableDeviceCacheDir();
+    // 0.8.12: cache dir da app via JNI fake (o staging já NÃO é /tmp —
+    // a migração tem de sobreviver num ambiente SEM /tmp escrevível)
+    enableDeviceCacheDir();
 
     auto st = std::make_unique<FakeStorage>();
     FakeStorage* rawSt = st.get();
@@ -1258,6 +1287,8 @@ TEST(wiring010_migracao_projeto_antigo_e2e) {
     std::printf("  [migracao] meshes/casa.obj → assets/casa.gmesh (%u verts / "
                 "%u idx) — ref reescrita em silencio\n", m->vertexCount(),
                 m->indexCount());
+    EXPECT(logHas("asset: staging em '"));   // 0.8.12: staging cache/projeto
+    rmrfCacheDir();
 }
 
 TEST(wiring010_setting_fonte_e_reconverter) {
@@ -1266,6 +1297,8 @@ TEST(wiring010_setting_fonte_e_reconverter) {
     resetEngineForTest();
     ensureEngineReady();
     g_projectReady = true;
+    // 0.8.12: cache dir da app via JNI fake (staging sem /tmp)
+    enableDeviceCacheDir();
 
     auto st = std::make_unique<FakeStorage>();
     FakeStorage* rawSt = st.get();
@@ -1313,6 +1346,7 @@ TEST(wiring010_setting_fonte_e_reconverter) {
     std::printf("  [setting] fonte largada pós-import; assets/ fica\n");
     g_keepSource = true;
     std::remove(objPath.c_str());
+    rmrfCacheDir();
 }
 
 // ===========================================================================

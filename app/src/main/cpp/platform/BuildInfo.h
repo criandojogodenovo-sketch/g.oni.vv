@@ -27,14 +27,19 @@ extern u64  g_epoch;          // epoch da build (0 = dev)
 void set(const char* version, u32 code, const char* git, const char* soSha,
          u64 epoch);
 
-// a linha de BANNER do boot log: "boot: goni-vv 0.8.10 (versionCode 40,
-// git abc1234, so <sha8>, build 2026-10-02)" — a prova de identidade que
-// o log viewer mostra no arranque
+// a linha de BANNER do boot log (0.8.12): "boot: G.One VV <versão>
+// versionCode <N> sha256 <sha256-da-.so> git <short>" — a prova de
+// identidade que o log viewer mostra no arranque
 std::string banner();
 
 // badge do log viewer: true se o dump veio de OUTRA build (nome
 // crash-<unix>-vc<N>.dump com N != g_versionCode, ou sem -vc = pré-0.8.10)
 bool dumpIsFromOtherBuild(const std::string& dumpName);
+
+// 0.8.12 — badge de TEXTO do viewer p/ UM dump: "" (mesma build),
+// "  [ANTIGO (build N)]" (vc do nome != instalado) ou
+// "  [ANTIGO (pre-0.8.10)]" (dump sem identidade no nome)
+std::string dumpBadge(const std::string& dumpName);
 
 // sufixo do nome do dump com a identidade: "-vc40" ("" se code==0)
 std::string dumpSuffix();

@@ -78,6 +78,12 @@ bool jniOpenAllFilesSettings();
 // com log — o resto do áudio segue).
 bool jniEnsureMicPermission();
 
+// 0.8.12 — o CACHE DIR da app (getCacheDir da Activity via JNI): o STAGING
+// da reconversão por SAF escreve aqui (caminho absoluto REAL, escrevível
+// no Android sem permissões — JAMAIS /tmp, read-only no device com
+// errno=30). Vazio = ponte indisponível; o chamador dá erro LEGÍVEL.
+std::string jniCacheDir();
+
 // F5.1-hotfix (parte 1.4, mantida): export dos logs para Downloads/GOneVV/logs
 // (MediaStore, lado Java). true = chamada Java executada; *outCount =
 // ficheiros copiados (negativo = falha Java: -1 excepção, -2 API<29,

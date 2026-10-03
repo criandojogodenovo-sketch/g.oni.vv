@@ -411,7 +411,7 @@ TEST(wiring089_import_normalizacao_uniforme_preserva_proporcoes) {
     };
 
     const editor::AssetPickOutcome out =
-        editor::applyAssetPick(scene, h, 1, 2, catalog, res);
+        editor::applyAssetPick(scene, h, 1, 3, catalog, res);
     EXPECT(out.applied);
     Transform3D* tr = t->getComponent<Transform3D>();
     ASSERT(tr != nullptr);
@@ -437,7 +437,7 @@ TEST(wiring089_import_normalizacao_uniforme_preserva_proporcoes) {
     // RE-APLICAR o mesmo ref NÃO re-normaliza (a escala afinada é sagrada)
     tr->scale = Vec3{3.0f, 3.0f, 3.0f};
     const editor::AssetPickOutcome out2 =
-        editor::applyAssetPick(scene, h, 1, 2, catalog, res);
+        editor::applyAssetPick(scene, h, 1, 3, catalog, res);
     EXPECT(out2.applied);
     EXPECT(nearEqF(tr->scale.x, 3.0f, 1e-5f));   // intocada
 
@@ -445,7 +445,7 @@ TEST(wiring089_import_normalizacao_uniforme_preserva_proporcoes) {
     const Handle h2 = scene.create("semTR");
     scene.get(h2)->addComponent<MeshRenderer>();
     const editor::AssetPickOutcome out3 =
-        editor::applyAssetPick(scene, h2, 1, 2, catalog, res);
+        editor::applyAssetPick(scene, h2, 1, 3, catalog, res);
     EXPECT(out3.applied);
     EXPECT(scene.get(h2)->getComponent<Transform3D>() != nullptr);
 }

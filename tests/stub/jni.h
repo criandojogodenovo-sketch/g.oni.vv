@@ -115,6 +115,8 @@ struct JniFake {
     int  export_int_result = 3;      // resultado do exportLogsToDownloads
     bool mic_granted = true;         // 0.8.11: ensureMicPermission() da VvActivity
     std::string last_new_string;     // última NewStringUTF
+    std::string cache_dir;           // 0.8.12: cacheDirPath() da VvActivity
+                                     // (vazio = método devolve null/"")
 
     // strings fabricadas (NewStringUTF → GetStringUTFChars)
     std::map<void*, std::string> strings;
@@ -250,6 +252,11 @@ struct JNIEnv {
         const std::string name = g_jni.midName(m);
         if (name == "toString") {
             return nullptr;   // comportamento antigo (uri→string fica "")
+        }
+        if (name == "cacheDirPath") {   // 0.8.12: o cache dir da app
+            return g_jni.cache_dir.empty()
+                       ? nullptr
+                       : g_jni.newString(g_jni.cache_dir.c_str());
         }
         va_list ap;
         va_start(ap, m);

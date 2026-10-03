@@ -25,3 +25,10 @@ scripts-local/
 
 # Logs locais
 *.log
+# 0.8.12 — outputs de execução local dos testes/harness (o CI publica os
+# seus como artifacts; nada disto é fonte)
+c33-virtual-logs/
+c33-virtual-cache/
+test-sentinels-logs/
+test-sentinels-cache/
+*.dump

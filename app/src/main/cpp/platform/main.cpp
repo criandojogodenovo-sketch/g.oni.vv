@@ -2483,11 +2483,16 @@ void applyImportedAssetToSelectedTic() {
     for (size_t i = 0; i < cat.size(); ++i) {
         if (cat[i] == g_applyAsk.rel) {
             const int menuKind = g_applyAsk.kind == 'm' ? 1 : 2;
-            elog::info("import: aplicando %s ao TIC selecionado (pick %zu)",
-                       g_applyAsk.rel.c_str(), i);
+            // 0.8.12 — o pick do ficheiro i: picker de MESH tem none(1) +
+            // cube(2) antes dos ficheiros (i+3); o de TEXTURA só none(1)
+            // antes (i+2)
+            const int pickOf = static_cast<int>(i) +
+                               (g_applyAsk.kind == 'm' ? 3 : 2);
+            elog::info("import: aplicando %s ao TIC selecionado (pick %d)",
+                       g_applyAsk.rel.c_str(), pickOf);
             const editor::AssetPickOutcome out = editor::applyAssetPick(
-                g_scene, g_editor.selected, menuKind,
-                static_cast<int>(i) + 2, g_catalog, makeAssetResolvers());
+                g_scene, g_editor.selected, menuKind, pickOf, g_catalog,
+                makeAssetResolvers());
             applied = out.applied;
             if (out.toast[0] != '\0') {
                 showToast(out.toast);
@@ -3067,10 +3072,42 @@ void onAppCmd(android_app* app, i32 cmd) {
             // intactos; resolvers de mesh chegam na F5-E — por agora o
             // LoadCtx liga o cubo procedural, tag "cube" das cenas antigas)
             if (g_projectReady) {
+                // 0.8.12 — A SELEÇÃO SOBREVIVE ao ciclo de lifecycle: o
+                // reload re-cria os TICs com handles NOVOS (o handle antigo
+                // morre); guardamos o NOME do TIC selecionado ANTES do load
+                // e RE-VALIDAMOS/RE-MAPEAMOS depois (o Inspector deixava a
+                // seleção morrer silenciosamente — o dono re-selecionava a
+                // cada fundo/recents do Android).
+                char selName[64] = {0};
+                if (const Tic* selTic = g_scene.get(g_editor.selected)) {
+                    std::snprintf(selName, sizeof(selName), "%.60s",
+                                  selTic->name.c_str());
+                }
                 primMeshesToGrave();   // 0.8.10: posse antiga p/ cova (boot)
                 const SceneSerializer::LoadCtx ctx = makeLoadCtx();
                 if (g_project.loadActiveScene(*g_storage, g_scene, ctx)) {
                     postLoadMigrateAndFixup();   // 0.8.10: migração silenciosa
+                    // 0.8.12 — RE-VALIDA o handle (re-mapeia por nome se o
+                    // reload re-criou os TICs; mantém se o handle vivo).
+                    // O ELEMENTO de UI selecionado não sobrevive (o índice
+                    // pós-reload pode apontar outro elemento — reset honesto;
+                    // o TIC continua selecionado).
+                    const Handle revalidated = editor::revalidateSelection(
+                        g_scene, g_editor.selected, selName);
+                    if (revalidated.valid() &&
+                        revalidated != g_editor.selected) {
+                        g_editor.selected = revalidated;
+                        elog::info("lifecycle: selecao re-validada pós-INIT "
+                                   "WINDOW (re-mapeada por nome '%s')",
+                                   selName);
+                    } else if (!revalidated.valid() &&
+                               g_editor.selected.valid()) {
+                        elog::info("lifecycle: selecao pós-INIT WINDOW "
+                                   "dispensada (TIC '%s' nao existe na cena "
+                                   "recarregada)", selName);
+                        g_editor.selected = Handle::invalid();
+                    }
+                    g_editor.selElement = -1;
                     elog::info("[boot 6/6] scene OK → editor ('%s', %u tics)",
                                g_project.activeScenePath()->c_str(), g_scene.count());
                 } else {
@@ -3392,7 +3429,16 @@ void frame() {
     // RESTRITO: o picker testa primeiro os TICs SELECIONÁVEIS (meshes,
     // centro projetado a 44 px) e SÓ DEPOIS a câmara (CORPO/LENTE apenas
     // — tocar no cone vazio não seleciona nem bloqueia o orbit).
-    if (!g_editor.playMode && !g_editor.uiMode) {
+    // 0.8.12 — FIX DA PERDA DE SELEÇÃO DO C33: o deselect NÃO corre com
+    // overlays abertos nem no workspace de ÁUDIO. O overlay dos pickers é
+    // CENTRADO no viewport — o tap na LINHA do picker ou no backdrop caía
+    // DENTRO do viewRect, o deselect armava no press e LIMPAVA a seleção no
+    // release DO MESMO FRAME do pick (antes do dispatch, que via seleção
+    // morta e logava "ERRO(sem TIC com mesh selecionado)" com de="-" — a
+    // evidência exata dos logs 0.8.5/0.8.7/0.8.9/0.8.10). Os botões da UI
+    // não reclamam o slot de input externo — o guard é AQUI, no chamador.
+    if (!g_editor.playMode && !g_editor.uiMode && !g_editor.audioMode &&
+        !editor::anyOverlayOpen(g_editor)) {
         if (editor::viewportTapClearsSelection(
                 g_editor, g_input, viewRect,
                 claimed | gizmoClaimed)) {
@@ -3958,6 +4004,15 @@ void frame() {
     // 0.7.4: menuKind 3 = textura de ELEMENTO de UI (Inspector de UI, linha
     // tex:) → applyUiTexPick (escreve a ref; a render resolve por frame) +
     // "importar…" abre o NAVEGADOR 0.7.2 (o ficheiro cai em textures/).
+    // 0.8.12 — HINT de pick bloqueado: o Inspector seta o flag quando o
+    // toque em linha de picker não tinha alvo válido; o main converte-o em
+    // toast + linha de log AQUI (o toast vive no main — o Inspector é puro)
+    if (g_editor.pickBlockedHint) {
+        g_editor.pickBlockedHint = false;
+        showToast("seleciona um TIC com mesh");
+        elog::info("ui: pick bloqueado (sem seleção)");
+    }
+
     if (g_editor.assetMenu != 0) {
         const int menuKind = g_editor.assetMenu;   // ANTES do draw (o pick fecha)
         const int pick = editor::drawAssetMenu(g_ui, g_input, w, h, g_editor,
@@ -4008,6 +4063,19 @@ void frame() {
                     }
                 }
             } else {
+                // 0.8.12 — GUARDA DE UI no DISPATCH: os pickers de
+                // mesh/prim/tex (menuKind 1/2/4) só aplicam com um TIC
+                // VIVO selecionado que tenha MeshRenderer. Sem alvo (o
+                // picker ficou aberto e a seleção morreu, ou o TIC é
+                // câmara/áudio): HINT + log bloqueado — NUNCA o caminho
+                // "ERRO(sem TIC com mesh selecionado)" que o C33 viu
+                // (a linha de erro não diz ao dono o que fazer a seguir).
+                if (editor::pickerGuardBlocked(g_scene, g_editor.selected)) {
+                    showToast("seleciona um TIC com mesh");
+                    elog::info("ui: pick bloqueado (sem seleção) — pick %d "
+                               "no menu %d ignorado",
+                               pick, menuKind);
+                } else {
                 // 0.8.7 — LOGGING EMBUTIDO da TROCA: "mesh: troca <de>→<para>
                 // inicio" antes e "fim ok verts=N idx=M"/"ERRO(<razão>)"
                 // depois — o log viewer do C33 mostra a linha exata se algo
@@ -4043,8 +4111,16 @@ void frame() {
                     }
                     para = paraBuf;
                 } else if (menuKind == 1) {
-                    std::snprintf(paraBuf, sizeof(paraBuf), "mesh pick %d",
-                                  pick);
+                    // 0.8.12: none=1, cube=2, ficheiros 3+ (labels legíveis
+                    // no log — o "mesh pick N" fica p/ os ficheiros)
+                    if (pick == 1) {
+                        std::snprintf(paraBuf, sizeof(paraBuf), "none");
+                    } else if (pick == 2) {
+                        std::snprintf(paraBuf, sizeof(paraBuf), "cube");
+                    } else {
+                        std::snprintf(paraBuf, sizeof(paraBuf), "mesh pick %d",
+                                      pick);
+                    }
                     para = paraBuf;
                 } else if (menuKind == 2) {
                     std::snprintf(paraBuf, sizeof(paraBuf), "tex pick %d",
@@ -4070,8 +4146,10 @@ void frame() {
                 } else if (out.applied) {
                     elog::info("mesh: troca %s → %s fim ok (sem mesh — %s)",
                                de, para,
-                               menuKind == 4 && pick == 1 ? "prim desligado"
-                                                          : "sem resolver");
+                               (menuKind == 4 && pick == 1) ? "prim desligado"
+                               : (menuKind == 1 && pick == 1)
+                                   ? "slot limpo (none)"
+                                   : "sem resolver");
                 } else {
                     // 0.8.9 — ERRO HONESTO: distinguir "sem alvo" (o TIC
                     // selecionado não tem MeshRenderer — ex.: seleção perdida
@@ -4090,6 +4168,7 @@ void frame() {
                 if (out.log[0] != '\0') {
                     elog::info("%s", out.log);   // 0.8.9: vai ao engine.log (a prova no log viewer do C33)
                 }
+                }   // 0.8.12: fim do else do GUARDA (pick aplicado com alvo válido)
             }
         }
     }
@@ -4457,12 +4536,16 @@ void android_main(android_app* app) {
     // F5.1-hotfix: log DUPLO (logcat + ficheiro) desde a 1ª linha.
     // O boot ainda não tem os paths da activity? O elog usa o fallback
     // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu
-    elog::info("G.One VV 0.7.5 — overlays modais com backdrop opaco (o "
-               "canvas nunca se desenha à mista com o MENU/teclado/CENAS/"
-               "navegador) + TIC de UI próprio ('UI', só com UiCanvas — "
-               "criar UI sem TIC 3D selecionado) + teclado com MINÚSCULAS "
-               "(toggle abc/ABC; fix do 'Z' em falta na linha S..Z) — fix "
-               "das falhas de UX do C33 0.7.4)");
+    // 0.8.12 — a linha de VERSÃO do arranque é o BANNER da identidade
+    // (boot: G.One VV <versão> versionCode <N> sha256 <…> git <…>) — vem
+    // da JNI (build_info.txt que o CI escreve em 2 passes); o banner
+    // com a changelog da campanha segue-se para o dono ler no log viewer.
+    elog::info("G.One VV 0.8.12 — 5 fixes cirúrgicos do C33 (seleção que "
+               "não se perde com guarda em todos os pickers; none de 1ª "
+               "classe com deferred free e round-trip; staging sem /tmp "
+               "(cache dir da app); crash dumps com badge ANTIGO; "
+               "dispositivo virtual em CI + sentinelas permanentes de "
+               "regressão — docs/REGRESSOES.md)");
     {
         const char* root0 = app->activity
             ? (app->activity->externalDataPath ? app->activity->externalDataPath

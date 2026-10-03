@@ -66,8 +66,89 @@ jobs:
       - name: Estrutura da tela de projetos (check)
         run: python3 scripts/projects_ui_check.py
 
+  # 0.8.12 — O DISPOSITIVO VIRTUAL + SENTINELAS + GATES: o "PC virtual"
+  # obrigatório do dono. Reproduz o C33 (1536x720 + insets, /tmp read-only
+  # errno=30, cache dir da app via JNI, content:// SAF, lifecycle EGL
+  # TERM/INIT, ASTC, taps replayáveis pelo frame() real) e corre o REPLAY
+  # da sessão real do dono. O output é colado no relatório; harness
+  # vermelho = release bloqueada. Os jobs de release DEPENDEM disto.
+  c33-virtual:
+    name: C33 virtual (dispositivo + sentinelas + gates)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar build dos testes
+        run: cmake -S tests -B build-tests -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compilar (suíte + harness do dispositivo virtual)
+        run: cmake --build build-tests --parallel
+
+      # as SENTINELAS (regress_*) correm dentro do test_core — TODAS as
+      # runs, TODAS as releases futuras, para sempre (docs/REGRESSOES.md)
+      - name: Suíte do core com sentinelas (regress_*)
+        run: ctest --test-dir build-tests --output-on-failure
+
+      - name: Replay da sessão real no C33 virtual
+        run: |
+          set -euo pipefail
+          ./build-tests/c33_virtual 2>&1 | tee c33-replay.txt
+          # o executável já sai non-zero em qualquer [FAIL]; o tee deixa o
+          # output passo-a-passo no log do job (o que o relatório cola)
+
+      # TAREFA 7.3 — GATE DE PADRÕES PROIBIDOS: o output do replay + o
+      # engine.log do dispositivo virtual contra ci/forbidden_log_patterns.txt.
+      # QUALQUER match = CI VERMELHO = release bloqueada. A lista vive em
+      # FICHEIRO (bugs futuros acrescentam sem tocar em código).
+      - name: Gate de padrões proibidos (forbidden_log_patterns.txt)
+        run: |
+          set -euo pipefail
+          PATTERNS="ci/forbidden_log_patterns.txt"
+          test -f "$PATTERNS" || { echo "::error::ci/forbidden_log_patterns.txt ausente"; exit 1; }
+          # padrões relevantes para o output do replay (padrões com acento/
+          # específicos de outras superfícies não colidem aqui por construção)
+          FOUND=0
+          while IFS= read -r pat; do
+            case "$pat" in ''|\#*) continue;; esac
+            if grep -F -q -- "$pat" c33-replay.txt c33-virtual-logs/engine.log 2>/dev/null; then
+              echo "::error::PADRÃO PROIBIDO no output do dispositivo virtual: $pat"
+              grep -F -n -- "$pat" c33-replay.txt c33-virtual-logs/engine.log || true
+              FOUND=1
+            fi
+          done < "$PATTERNS"
+          if [ "$FOUND" -ne 0 ]; then
+            echo "GATE VERMELHO: padrões proibidos presentes — release BLOQUEADA"
+            exit 1
+          fi
+          echo "GATE VERDE: zero padrões proibidos no replay do C33 virtual"
+
+      # TAREFA 4 — GATE DO LITERAL /tmp: nenhum literal de caminho /tmp em
+      # FileApi/código de assets/migração (o bug R-002 vivia num literal).
+      # O grep mira APENAS aspas+barra+tmp (literais de string C); os
+      # comentários sem aspas não contam.
+      - name: Gate do literal /tmp (FileApi + assets/migração)
+        run: |
+          set -euo pipefail
+          if grep -rn -E "['\"]/tmp"               app/src/main/cpp/platform/FileApi.cpp               app/src/main/cpp/platform/FileApi.h               app/src/main/cpp/assets/ ; then
+            echo "::error::LITERAL /tmp em FileApi/assets — o Android tem /tmp READ-ONLY (errno=30, R-002). Use .staging/ do projeto ou o cache dir da app (getCacheDir)."
+            exit 1
+          fi
+          echo "GATE VERDE: nenhum literal /tmp em FileApi/assets/migração"
+
+      - name: Publicar o output do replay (evidência para o relatório)
+        uses: actions/upload-artifact@v4
+        with:
+          name: c33-virtual-replay-log
+          path: |
+            c33-replay.txt
+            c33-virtual-logs/engine.log
+          if-no-files-found: error
+
   build-release:
     name: APK release arm64 (assinado via secrets)
+    # 0.8.12 — a release DEPENDE das sentinelas + gate de padrões + harness
+    # do dispositivo virtual (sentinela vermelha = NÃO HÁ APK)
+    needs: [core-tests, c33-virtual]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -155,7 +236,7 @@ jobs:
       - name: Publicar artifact do APK
         uses: actions/upload-artifact@v4
         with:
-          name: goni-vv-0.8.11-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
+          name: goni-vv-0.8.12-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 

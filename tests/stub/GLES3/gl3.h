@@ -73,6 +73,13 @@ inline Stats stats;              // inline C++17: 1 instância por binário
 // "falha ao gerar primitiva" no C33). Liga-se e desliga-se por teste; o
 // reset() desliga.
 inline bool failNextGenObjects = false;
+// 0.8.12 — C33 VIRTUAL: a extensão ASTC LDR como o Mali do device do dono
+// (default false = comportamento antigo dos testes; o harness liga antes
+// do INIT_WINDOW e o boot loga "ASTC SIM" — o caminho do C33)
+inline bool astcLdr = false;
+// 0.8.12: o reset zera as ESTATÍSTICAS e o injetor de falha; o astcLdr é
+// CONFIGURAÇÃO DO AMBIENTE (o C33 virtual liga-o antes do boot e os resets
+// entre fases não podem desligar a "GPU" do device simulado)
 inline void reset() { stats = Stats{}; failNextGenObjects = false; }
 } // namespace glstub
 
@@ -149,9 +156,21 @@ inline void glActiveTexture(GLenum) {}
 #define GL_COMPRESSED_RGBA8_ETC2_EAC 0x9278
 #define GL_COMPRESSED_RGBA_ASTC_4x4_KHR 0x93B0
 #define GL_COMPRESSED_RGBA_ASTC_6x6_KHR 0x93B4
-inline const GLubyte* glGetString(GLenum) { return reinterpret_cast<const GLubyte*>(""); }
-inline void glGetIntegerv(GLenum p, GLint* v) { if (v) *v = (p == GL_NUM_EXTENSIONS) ? 0 : 0; }
-inline const GLubyte* glGetStringi(GLenum, GLuint) { return reinterpret_cast<const GLubyte*>(""); }
+inline const GLubyte* glGetString(GLenum name) {
+    if (name == GL_EXTENSIONS && glstub::astcLdr) {
+        return reinterpret_cast<const GLubyte*>(
+            "GL_OES_vertex_array_object GL_KHR_texture_compression_astc_ldr");
+    }
+    return reinterpret_cast<const GLubyte*>("");
+}
+inline void glGetIntegerv(GLenum p, GLint* v) { if (v) *v = 0; }
+inline const GLubyte* glGetStringi(GLenum, GLuint index) {
+    if (glstub::astcLdr && index == 0) {
+        return reinterpret_cast<const GLubyte*>(
+            "GL_KHR_texture_compression_astc_ldr");
+    }
+    return reinterpret_cast<const GLubyte*>("");
+}
 inline GLenum glGetError() { return 0; }
 
 inline GLuint glCreateShader(GLenum) { return 1; }

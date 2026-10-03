@@ -26,6 +26,7 @@
 #include "core/Scene.h"
 #include "platform/EngineLog.h"
 #include "platform/FileApi.h"
+#include "platform/StorageBridge.h"   // 0.8.12: jniCacheDir (staging SAF sem /tmp)
 
 namespace vv {
 namespace convert {
@@ -606,6 +607,58 @@ bool importFile(const std::string& srcAbs, const std::string& srcNameIn,
     return true;
 }
 
+// 0.8.12 — STAGING SEM /tmp (o fix da migração morta no C33: o log do
+// device dizia fileapi: mkdir falhou em /tmp errno=30 (Read-only file
+// system) e a seguir staging falhou — o HOST de testes tem /tmp
+// escrevível, o Android NÃO). O caminho por esta ordem (FALLBACK em
+// cascata — cada tentativa falhada LOGA a causa):
+//   1) .staging/ DENTRO do projeto — quando a raiz do storage é um
+//      CAMINHO de ficheiros REAL e escrevível (FsStorage do device com
+//      all-files): caminho absoluto real p/ o importFile (streaming por
+//      chunks), criado RECURSIVAMENTE pelo makeDirs do writeAll, removido
+//      no fim;
+//   2) CACHE DIR DA APP via JNI (VvActivity.cacheDirPath → getCacheDir)
+//      — quando a raiz é um URI content:// do SAF (sem fopen) ou a
+//      escrita em .staging/ falhou: o cache dir é o único sítio
+//      GUARANTIDO escrevível no Android sem permissões;
+//   3) erro LEGÍVEL com os caminhos reais tentados — JAMAIS /tmp.
+// Nunca existe literal de caminho /tmp em código de staging/assets/
+// migração — o gate do CI (grep) vigia isso para sempre.
+bool stagingWrite(ProjectStorage& st, const void* data, size_t n,
+                  std::string& tmpPath, std::string& err) {
+    char nm[64];
+    std::snprintf(nm, sizeof(nm), "/goni_reconvert_%d.tmp",
+                  static_cast<int>(::getpid()));
+    const std::string& root = st.root();
+    const bool isContentUri = root.rfind("content://", 0) == 0;
+    // 1) .staging/ do projeto (caminho de ficheiros real)
+    if (!root.empty() && !isContentUri) {
+        const std::string p = joinRelPath(root, ".staging") + nm;
+        if (fileapi::writeAll(p.c_str(), data, n)) {
+            tmpPath = p;
+            return true;
+        }
+        elog::warn("asset: staging em '%s' FALHOU (%s) — a tentar o cache "
+                   "dir da app",
+                   p.c_str(), fileapi::errnoText().c_str());
+    }
+    // 2) cache dir da app via JNI (getCacheDir — escrevível SEM permissões)
+    const std::string cache = storage::jniCacheDir();
+    if (!cache.empty()) {
+        const std::string p = cache + "/.staging" + nm;
+        if (fileapi::writeAll(p.c_str(), data, n)) {
+            tmpPath = p;
+            return true;
+        }
+        elog::warn("asset: staging no cache dir '%s' FALHOU (%s)",
+                   p.c_str(), fileapi::errnoText().c_str());
+    }
+    err = "staging falhou: nem .staging/ do projeto (raiz '" + root +
+          "') nem o cache dir da app aceitaram a escrita — /tmp nunca "
+          "(read-only no Android, errno=30)";
+    return false;
+}
+
 bool reconvertFile(const std::string& sourceRel, ProjectStorage& st,
                    TexturePipeline* pipeline, Output& out, Stats& stats,
                    std::string& err,
@@ -633,17 +686,22 @@ bool reconvertFile(const std::string& sourceRel, ProjectStorage& st,
         return false;
     }
     stats.sourceBytes = bytes.size();
-    // escreve num ficheiro temporario REAL e reusa o importFile (streaming)
-    char tmp[128];
-    std::snprintf(tmp, sizeof(tmp), "/tmp/goni_reconvert_%d.tmp",
-                  static_cast<int>(getpid()));
-    if (!fileapi::writeAll(tmp, bytes.data(), bytes.size())) {
-        err = "staging falhou: " + std::string(tmp);
+    // 0.8.12 — escreve num ficheiro temporário REAL (.staging/ do projeto
+    // ou cache dir da app — NUNCA /tmp) e reusa o importFile (streaming);
+    // falha = erro LEGÍVEL com os caminhos REAIS tentados
+    std::string tmp;
+    if (!stagingWrite(st, bytes.data(), bytes.size(), tmp, err)) {
+        elog::error("asset: staging de reconversao FALHOU — %s", err.c_str());
         return false;
     }
+    elog::info("asset: staging em '%s' (%zu B — projeto/cache, sem /tmp)",
+               tmp.c_str(), bytes.size());
     const bool ok = importFile(tmp, name, st, pipeline, out, stats, err,
                                onProgress, user);
-    ::remove(tmp);
+    ::remove(tmp.c_str());
+    // a pasta .staging/ fica (tamanho ~0; o próximo reconvert reusa) —
+    // remover a pasta seria competir com reconverts concorrentes do
+    // migrateLegacyAssets no MESMO load
     return ok;
 }
 

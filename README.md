@@ -1,4 +1,112 @@
-# G.One VV 0.8.11 — ÁUDIO: AAudio com probe + fallback AudioTrack + formato próprio .gi (ADPCM/OGG/MP3) + TIC AudioPlayer + workspace ÁUDIO + gravação de mic
+# G.One VV 0.8.12 — 5 FIXES CIRÚRGICOS DO C33: seleção que não se perde + none de 1ª classe + staging sem /tmp + dumps com badge ANTIGO + dispositivo virtual em CI com sentinelas permanentes
+
+## Escopo 0.8.12 (implementado — estabilização pura, ZERO features de jogo)
+
+**A CAUSA DE FUNDO** (a evidência dos logs do dono, 0.8.5→0.8.10):
+`mesh: troca - → prim esfera ERRO(sem TIC com mesh selecionado)` — a
+seleção perdia-se ENTRE selecionar o TIC e tocar no picker; a migração
+morria com `fileapi: mkdir falhou em '/tmp' errno=30 (Read-only file
+system)` → `staging falhou` (o HOST de testes tem /tmp escrevível, o
+Android NÃO); o log viewer mostrava o dump VELHO sem o rotular. CI verde
++ device a falhar = inaceitável — esta release põe o TELEFONE dentro do
+CI (o "C33 virtual") e SENTINELAS PERMANENTES que ficam vermelhas para
+sempre se qualquer um destes bugs voltar (docs/REGRESSOES.md).
+
+1. **SELEÇÃO QUE NÃO SE PERDE** (T1/T2): o `viewportTapClearsSelection`
+   corria SEM guard de overlay — o tap na linha/backdrop do picker caía
+   DENTRO do viewRect e limpava a seleção NO MESMO FRAME do dispatch
+   (antes do `applyAssetPick` — o "-" e o ERRO dos logs). Agora: guard
+   `!anyOverlayOpen` no chamador; `INIT_WINDOW` RE-VALIDA/re-mapeia a
+   seleção por NOME após o reload (os handles morrem, o TIC não);
+   `pickerGuardBlocked` no Inspector (open) E no dispatch — sem alvo
+   válido (câmara/áudio/handle morto): hint **"seleciona um TIC com
+   mesh"** + log **"ui: pick bloqueado (sem seleção)"**, NUNCA o caminho
+   `ERRO(sem TIC com mesh selecionado)`.
+
+2. **NONE DE PRIMEIRA CLASSE** (T3): o picker de MESH ganhou **none em
+   1º lugar** (cube passa a 2º, ficheiros 3+; tex e prim já tinham).
+   `mesh: none` LIMPA o slot (o TIC deixa de renderizar mesh) pelo MESMO
+   caminho seguro das trocas: posse `primRetire` → **deferred free no
+   início do frame seguinte** (a cova; sem perder pendente em
+   none→none); `tex: none` limpa a textura (material volta à cor plana).
+   Serialização round-trip afervada: o .goni grava `"mesh":"none"` e o
+   load recarrega VAZIO; `none→X→none` ×N sem crash, sem leak.
+
+3. **STAGING SEM /tmp** (T4): o `reconvertFile` usava o LITERAL
+   `/tmp/goni_reconvert_<pid>.tmp` (read-only no Android, errno=30 — a
+   migração morta). Agora `stagingWrite` com FALLBACK em cascata:
+   `.staging/` DENTRO do projeto (raiz de ficheiros) → **cache dir da
+   app via JNI (`getCacheDir`** — o único sítio garantido escrevível sem
+   permissões) → erro LEGÍVEL com os caminhos reais. GATE de CI: grep
+   garante que nenhum literal de /tmp resta em FileApi/assets/migração.
+
+4. **DUMPS ROTULADOS** (T5): o `dumpIsFromOtherBuild` existia desde a
+   0.8.10 e NUNCA era chamado pelo viewer (wiring morto — o sintoma).
+   Agora o log viewer põe **`[ANTIGO (build N)]`** (cor de aviso) em
+   dumps de outra build e `[ANTIGO (pre-0.8.10)]` nos anónimos; dumps
+   novos ficam limpos. O banner de boot ganhou o formato exigido:
+   **`boot: G.One VV <versão> versionCode <N> sha256 <…> git <…>`** (o
+   sha256 REAL da .so vem do build_info.txt do CI em 2 passes).
+
+5. **O C33 VIRTUAL EM CI + SENTINELAS** (T6/T7): o executável
+   **`c33_virtual`** reproduz o telefone no CI — superfície **1536×720 +
+   insets**, **/tmp READ-ONLY (errno=30)**, **cache dir da app via JNI**,
+   **content:// SAF**, **lifecycle EGL TERM/INIT com re-upload**, **ASTC
+   ativo**, **taps replayáveis pelo frame() REAL** — e corre o **REPLAY
+   da sessão real do dono** (a sequência que produzia os sintomas), com
+   o output passo-a-passo colado no relatório. As **SENTINELAS**
+   (`regress_selection_loss`, `regress_tmp_staging`, `regress_none_slot`,
+   `regress_dump_identity` em tests/test_sentinels.cpp) correm em TODAS
+   as runs de CI para sempre; o **gate de padrões proibidos**
+   (ci/forbidden_log_patterns.txt) grepa o output do replay — qualquer
+   match = CI VERMELHO = release bloqueada; o job do APK assinado
+   **depende** das sentinelas + gates + harness (sentinela vermelha =
+   NÃO HÁ APK). **PROVA DE MUTAÇÃO**: cada fix revertido temporariamente
+   → sentinela/harness VERMELHO (o sintoma exato volta ao log);
+   reposto → VERDE (docs/RELATORIO-0.8.12.md).
+
+**TESTES**: 608 → **613** (sentinelas ×4; assetpick none/none→X→none;
+banner/badge novos; picks 3+ do mesh picker; migração/reconverter com
+cache dir + /tmp RO + SAF content://) + **c33_virtual: 97 checks** no
+replay do dispositivo (migração no boot, prim/mesh/tex picks, backdrop,
+none×N, sem seleção→hint, 2× TERM/INIT com revalidação, SAF content://,
+dump ANTIGO, gate de proibidos). **RED→GREEN PROVADO ×4 (mutação)**:
+guard de seleção revertido → 20 FALHAS + `mesh: troca - → prim esfera
+ERRO(sem TIC com mesh selecionado)` ×6 no replay; /tmp de volta → 11
+FALHAS + `staging falhou` ×7; none→cube → 7 FALHAS; badge morto → 1
+FALHA. CLÁUSULA CALMA: só os 5 fixes + harness + sentinelas + testes.
+
+## Checklist C33 (o dono preenche pass/fail por item — 0.8.12)
+
+1. **Seleção**: com um TIC de mesh selecionado, abrir pickers
+   prim/mesh/tex e trocar 3× cada — a seleção CONTINUA (o Inspector não
+   fica "(nada selecionado)"); tap no backdrop do picker fecha SEM
+   desselecionar; **fundo/recents do Android e voltar** → o TIC continua
+   selecionado (log: `lifecycle: selecao re-validada pos-INIT WINDOW`);
+   no motor 3D|UI|ÁUDIO a seleção segue.
+2. **Hint em vez de ERRO**: desselecionar (tap no vazio do viewport) e
+   tocar em QUALQUER linha de picker incl. none → toast
+   "seleciona um TIC com mesh" + engine.log `ui: pick bloqueado (sem
+   seleção)` — ZERO linhas `ERRO(sem TIC com mesh selecionado)` no log
+   viewer (as trocas todas dão `fim ok`).
+3. **none**: picker de mesh → **none** (1º lugar) → o TIC deixa de
+   renderizar; tex → none → material volta à cor plana; none→cube→none
+   repetido ×5 sem crash; **save/load** → o TIC sem mesh continua sem
+   mesh (`"mesh":"none"` no .goni).
+4. **Migração sem /tmp**: abrir um projeto ANTIGO (com meshes/*.obj) →
+   converte em silêncio (log `asset: staging em '…/.staging/…'` ou cache
+   dir — JAMAIS /tmp); ZERO `mkdir falhou em '/tmp'` /
+   `staging falhou` no engine.log.
+5. **Dumps**: viewer de logs → dump de build antiga com
+   `[ANTIGO (build N)]`; nenhum dump novo aparece por uso normal; a 1ª
+   linha do boot log é `boot: G.One VV 0.8.12 versionCode 42 sha256 …`.
+6. **Sentinelas no CI**: o job "C33 virtual (dispositivo + sentinelas +
+   gates)" VERDE com o output do replay; o APK só sai se ele estiver
+   verde (needs).
+
+---
+
+# (histórico) G.One VV 0.8.11 — ÁUDIO: AAudio com probe + fallback AudioTrack + formato próprio .gi (ADPCM/OGG/MP3) + TIC AudioPlayer + workspace ÁUDIO + gravação de mic
 
 ## Escopo 0.8.11 (implementado — o som da cena, ZERO features de jogo)
 

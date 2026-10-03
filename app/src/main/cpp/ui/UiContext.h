@@ -26,12 +26,16 @@
 namespace vv {
 
 // Tokens do tema mono — ÚNICA paleta permitida na F1 (cinza/branco/preto).
+// 0.8.12 — WARN (âmbar): EXCEÇÃO DOCUMENTADA (como a brand #8AB4F8 da
+// toolbar) para o badge ANTIGO dos crash dumps no log viewer — um aviso de
+// identidade tem de ler-se DISTINTO do texto normal, não é decoração.
 namespace theme {
 constexpr f32 BG[4]     = {0.0784314f, 0.0784314f, 0.0784314f, 1.0f}; // #141414
 constexpr f32 PANEL[4]  = {0.1176471f, 0.1176471f, 0.1176471f, 1.0f}; // #1E1E1E
 constexpr f32 LINE[4]   = {0.1803922f, 0.1803922f, 0.1803922f, 1.0f}; // #2E2E2E
 constexpr f32 TEXT[4]   = {0.9019608f, 0.9019608f, 0.9019608f, 1.0f}; // #E6E6E6
 constexpr f32 ACCENT[4] = {0.9607843f, 0.9607843f, 0.9607843f, 1.0f}; // #F5F5F5
+constexpr f32 WARN[4]   = {0.9803922f, 0.7333333f, 0.2705882f, 1.0f}; // #FABB45
 }
 
 // UiRect vive em ui/ScrollMath.h (matemática GL-free partilhada)

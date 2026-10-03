@@ -13,6 +13,7 @@
 #include "render/Mesh.h"                 // 0.8.9: AABB do mesh (normalização uniforme)
 #include "core/Scene.h"
 #include "ui/UiEditor.h"                  // 0.8.6: uiHexFormat (linha hex)
+#include "platform/BuildInfo.h"          // 0.8.12: badge ANTIGO dos dumps no viewer
 #include <cstdio>
 
 namespace vv {
@@ -755,12 +756,23 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             }
             if (r.kind == InspRow::Kind::AddTc) {
                 tic->addComponent<TouchControls>();   // F4: cria no TIC
-            } else if (r.kind == InspRow::Kind::MeshButton) {
-                st.assetMenu = 1;                     // F5-E: seletor de meshes
-            } else if (r.kind == InspRow::Kind::TexButton) {
-                st.assetMenu = 2;                     // F5-E: seletor de texturas
-            } else if (r.kind == InspRow::Kind::PrimButton) {
-                st.assetMenu = 4;                     // 0.8.0: seletor de primitivas
+            } else if (r.kind == InspRow::Kind::MeshButton ||
+                       r.kind == InspRow::Kind::TexButton ||
+                       r.kind == InspRow::Kind::PrimButton) {
+                // 0.8.12 — GUARDA DE UI: as linhas de picker (mesh/tex/prim)
+                // só abrem o seletor com um TIC VIVO selecionado que tenha
+                // MeshRenderer. Sem alvo: hint (o main converte o flag em
+                // toast + log "ui: pick bloqueado (sem seleção)") — nunca
+                // o caminho "ERRO(sem TIC com mesh selecionado)" do C33.
+                if (pickerGuardBlocked(scene, st.selected)) {
+                    st.pickBlockedHint = true;
+                } else if (r.kind == InspRow::Kind::MeshButton) {
+                    st.assetMenu = 1;                 // F5-E: seletor de meshes
+                } else if (r.kind == InspRow::Kind::TexButton) {
+                    st.assetMenu = 2;                 // F5-E: seletor de texturas
+                } else {
+                    st.assetMenu = 4;                 // 0.8.0: seletor de primitivas
+                }
             } else if (r.kind == InspRow::Kind::AddAnim) {
                 // 0.8.0 (F7): cria o player — a TIMELINE abre sozinha (o
                 // main desenha-a quando o TIC selecionado tem player)
@@ -976,6 +988,32 @@ bool viewportTapClearsSelection(EditorState& st, const InputState& in,
     st.selected = Handle::invalid();
     st.selElement = -1;
     return true;
+}
+
+// ---- 0.8.12 — GUARDA DOS PICKERS + SOBREVIVÊNCIA DA SELEÇÃO ------------------
+
+bool pickerGuardBlocked(const Scene& scene, Handle selected) {
+    // alvo válido = TIC VIVO com MeshRenderer (preset Mesh, objetos
+    // importados, bodies com mesh). Sem MeshRenderer (câmara/áudio/ui) ou
+    // handle morto → bloqueado: o toque em linha de picker dá HINT, nunca
+    // o caminho "ERRO(sem TIC com mesh selecionado)".
+    const Tic* t = scene.get(selected);
+    return t == nullptr || t->getComponent<MeshRenderer>() == nullptr;
+}
+
+Handle revalidateSelection(const Scene& scene, Handle selected,
+                           const char* name) {
+    // 1) handle vivo (load in-place / TIC intacto) → mantém-se
+    if (scene.get(selected)) {
+        return selected;
+    }
+    // 2) handle morto (o reload do INIT_WINDOW re-criou os TICs com
+    // identidades novas) → RE-MAPEIA por NOME (o TIC continua a existir;
+    // a seleção não se perde por um ciclo de lifecycle)
+    if (name && name[0]) {
+        return scene.find(name);
+    }
+    return Handle::invalid();
 }
 
 int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st) {
@@ -1459,7 +1497,16 @@ void drawLogViewer(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                        theme::ACCENT, w - 2.0f * kPad);
         cy += 34.0f;
         for (const std::string& d : dumps) {
-            ui.labelFitted(x + kPad, baselineOf(cy), d.c_str(), theme::TEXT,
+            // 0.8.12 — badge ANTIGO: dump de OUTRA build (vc do nome !=
+            // instalado) ou pré-0.8.10 → "  [ANTIGO (build N)]". O wiring
+            // existia desde a 0.8.10 (buildinfo::dumpIsFromOtherBuild) mas
+            // NUNCA era chamado aqui — o dono via o dump VELHO sem rótulo
+            // (crash-1790830406.dump, offsets idênticos) e não sabia.
+            const std::string badge = vv::buildinfo::dumpBadge(d);
+            ui.labelFitted(x + kPad, baselineOf(cy),
+                           badge.empty() ? d.c_str()
+                                         : (d + badge).c_str(),
+                           badge.empty() ? theme::TEXT : theme::WARN,
                            w - 2.0f * kPad);
             cy += rowH;
         }
@@ -1474,9 +1521,13 @@ void drawLogViewer(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 }
 
 // ---------------------------------------------------------------------------
-// F5-E: SELETOR DE ASSETS — overlay mono com "cube/none" + ficheiros de
+// F5-E: SELETOR DE ASSETS — overlay mono com "none/cube" + ficheiros de
 // meshes/ ou textures/ (cap 5 ficheiros; sem scroll no overlay — F8).
-// Devolve 1-based (1 = cube/none, 2.. = ficheiros), 0 = nada este frame.
+// Devolve 1-based (1 = none/cube, 2.. = ficheiros), 0 = nada este frame.
+//
+// 0.8.12 — none DE PRIMEIRA CLASSE no picker de MESH: 1 = none (limpa o
+// slot — o TIC deixa de renderizar mesh), 2 = cube (procedural), 3.. =
+// ficheiros. O de TEXTURA já tinha none em 1º; o de PRIMITIVAS idem.
 //
 // 0.8.10 — assetMenu == 4 é o SELETOR DE PRIMITIVAS (SÓ CUBO E ESFERA —
 // decisão do dono; cilindro e as outras seis saíram). "none" + 2 botões:
@@ -1544,7 +1595,10 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     // 0.7.4: withImport (seletor de textura de ELEMENTO de UI) acrescenta a
     // linha "importar…" que abre o NAVEGADOR 0.7.2 (escolhe de onde for)
     const f32 importH = withImport ? 48.0f : 0.0f;
-    const f32 h = kHeaderH + (1.0f + static_cast<f32>(shown)) * 48.0f +
+    // 0.8.12 — picker de MESH: +1 linha (none + cube + ficheiros)
+    const f32 h = kHeaderH +
+                  (static_cast<f32>(shown) +
+                   static_cast<f32>(pickMesh ? 2 : 1)) * 48.0f +
                   importH + kPad;
     const f32 ox = ui.safeLeft();
     const f32 oy = ui.safeTop();
@@ -1566,12 +1620,28 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
              theme::TEXT);
 
     int chosen = 0;
-    // item 0: cube (mesh) / none (textura) / none (clip de áudio)
-    const char* first = pickMesh ? "cube (procedural)" : "none";
-    if (ui.button(kIdAssetBase, x + kPad, y + kHeaderH, w - 2.0f * kPad, 40.0f,
-                  first)) {
-        chosen = 1;
-        st.assetMenu = 0;
+    // 0.8.12 — picker de MESH: "none" EM PRIMEIRO LUGAR (limpa o slot — o
+    // TIC deixa de renderizar mesh; o caminho seguro de deferred free é o
+    // MESMO das trocas). Cube passa a 2º; ficheiros 3+.
+    if (pickMesh) {
+        if (ui.button(kIdAssetBase, x + kPad, y + kHeaderH,
+                      w - 2.0f * kPad, 40.0f, "none")) {
+            chosen = 1;
+            st.assetMenu = 0;
+        }
+        if (ui.button(kIdAssetBase + 8, x + kPad,
+                      y + kHeaderH + 48.0f, w - 2.0f * kPad, 40.0f,
+                      "cube (procedural)")) {
+            chosen = 2;
+            st.assetMenu = 0;
+        }
+    } else {
+        // item 0: none (textura) / none (clip de áudio)
+        if (ui.button(kIdAssetBase, x + kPad, y + kHeaderH, w - 2.0f * kPad,
+                      40.0f, "none")) {
+            chosen = 1;
+            st.assetMenu = 0;
+        }
     }
     for (size_t i = 0; i < shown; ++i) {
         // 0.8.11 — clip de áudio mostra o NOME limpo (sem pasta/extensão;
@@ -1588,10 +1658,16 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                                               : dot - slash - 1).c_str());
             label = disp;
         }
-        if (ui.button(kIdAssetBase + 1 + static_cast<u64>(i), x + kPad,
-                      y + kHeaderH + static_cast<f32>(i + 1) * 48.0f,
+        // 0.8.12 — picker de MESH: os ficheiros começam em 3 (none=1, cube=2);
+        // tex/áudio mantêm 2 (só têm o "none" em 1º)
+        const int filePick = static_cast<int>(i) + (pickMesh ? 3 : 2);
+        const u64 rowId =
+            kIdAssetBase + 1 + static_cast<u64>(i) + (pickMesh ? 1 : 0);
+        if (ui.button(rowId, x + kPad,
+                      y + kHeaderH +
+                          static_cast<f32>(i + (pickMesh ? 2 : 1)) * 48.0f,
                       w - 2.0f * kPad, 40.0f, label)) {
-            chosen = static_cast<int>(i) + 2;
+            chosen = filePick;
             st.assetMenu = 0;
         }
     }
@@ -1600,7 +1676,8 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         // dono escolhe a textura de onde for (galeria incluída); o ficheiro
         // importado cai em textures/ e fica disponível no seletor
         if (ui.button(kIdAssetBase + 7, x + kPad,
-                      y + kHeaderH + static_cast<f32>(shown + 1) * 48.0f,
+                      y + kHeaderH +
+                          static_cast<f32>(shown + (pickMesh ? 2 : 1)) * 48.0f,
                       w - 2.0f * kPad, 40.0f, "importar...")) {
             chosen = kAssetPickImport;
             st.assetMenu = 0;
@@ -1612,7 +1689,8 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         std::snprintf(more, sizeof(more), "+%u ficheiros (cap do overlay)",
                       static_cast<unsigned>(files.size() - kMaxFiles));
         ui.labelFitted(x + kPad,
-                       y + kHeaderH + static_cast<f32>(shown + 1) * 48.0f +
+                       y + kHeaderH +
+                           static_cast<f32>(shown + (pickMesh ? 2 : 1)) * 48.0f +
                            importH + 12.0f,
                        more, theme::LINE, w - 2.0f * kPad);
     }
@@ -1686,7 +1764,10 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
         // zero GL, zero cache — a falha (se houver) é reportada pelo main
         // com passo+razão no log e toast no ecrã, mantendo o mesh anterior.
         if (pick == 1) {   // none → desliga o prim (mesh sai no ponto seguro)
-            mr->primRetire = mr->mesh;   // posse p/ cova na flush (se nossa)
+            // 0.8.12: posse p/ cova na flush (se nossa) — NUNCA perde um
+            // pendente anterior (none seguido de none no MESMO frame: o
+            // mesh já saiu; o pendente de antes é a posse QUE CONTINUA válida)
+            mr->primRetire = mr->mesh ? mr->mesh : mr->primRetire;
             mr->primOn = false;
             mr->mesh = nullptr;
             mr->material = nullptr;
@@ -1718,9 +1799,30 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
     }
 
     if (menuKind == 1) {
-        // ---- seletor de MESHES -------------------------------------------
-        if (pick == 1) {   // cube procedural
-            mr->primRetire = mr->mesh;   // 0.8.10: posse antiga p/ cova
+        // ---- seletor de MESHES (0.8.12: none=1, cube=2, ficheiros 3+) -------
+        if (pick == 1) {
+            // 0.8.12 — none DE PRIMEIRA CLASSE: limpa o SLOT de mesh (o TIC
+            // deixa de renderizar mesh) pelo MESMO caminho seguro das trocas
+            // — a posse antiga vai para primRetire (deferred free: a cova
+            // abre no início do frame SEGUINTE, no ponto seguro do main;
+            // meshes de PRIM são enterrados, cube/assets de outrem ficam
+            // intocados — primRetire só enterra o que é NOSSO). Fail-safe:
+            // nada de GL aqui (applyAssetPick é puro), sem crash.
+            mr->primRetire = mr->mesh ? mr->mesh : mr->primRetire;
+            mr->mesh = nullptr;
+            mr->material = nullptr;
+            mr->meshPath.clear();
+            mr->primOn = false;
+            mr->primPending = false;
+            mr->primNeg = false;
+            out.applied = true;
+            std::snprintf(out.toast, sizeof(out.toast), "mesh: none");
+            std::snprintf(out.log, sizeof(out.log),
+                          "editor: mesh none — slot limpo (TIC sem mesh; "
+                          "deferred free no proximo frame)");
+        } else if (pick == 2) {   // cube procedural
+            // 0.8.12: posse antiga p/ cova (sem perder pendente anterior)
+            mr->primRetire = mr->mesh ? mr->mesh : mr->primRetire;
             mr->mesh = res.cubeMesh;
             mr->material = res.material;
             mr->meshPath.clear();
@@ -1730,7 +1832,7 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
             std::snprintf(out.toast, sizeof(out.toast), "mesh: cube");
             std::snprintf(out.log, sizeof(out.log), "editor: mesh cube aplicado");
         } else {
-            const size_t idx = static_cast<size_t>(pick - 2);
+            const size_t idx = static_cast<size_t>(pick - 3);
             if (idx >= catalog.meshes.size()) {
                 return out;   // fora do catálogo — sem crash
             }
@@ -1743,7 +1845,8 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
             // de posicionar).
             const bool firstApply = mr->meshPath != rel;
             if (Mesh* m = res.mesh ? res.mesh(rel) : nullptr) {
-                mr->primRetire = mr->mesh;   // 0.8.10: posse antiga p/ cova
+                // 0.8.12: posse antiga p/ cova (sem perder pendente anterior)
+                mr->primRetire = mr->mesh ? mr->mesh : mr->primRetire;
                 mr->mesh = m;
                 mr->material = res.material;
                 mr->meshPath = rel;

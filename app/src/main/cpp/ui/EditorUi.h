@@ -95,6 +95,13 @@ struct EditorState {
     bool   logViewer = false;              // viewer de logs visível
     bool   logViewerJustOpened = false;    // 1 frame: auto-scroll p/ o fundo
 
+    // 0.8.12 — GUARDA DOS PICKERS: o Inspector seta quando um toque em
+    // linha de picker foi BLOQUEADO por falta de alvo válido (sem TIC com
+    // MeshRenderer); o main converte o flag em toast de hint + linha de
+    // log "ui: pick bloqueado (sem seleção)" NO MESMO frame. Vive no
+    // estado (não numa global do main) para ser afervável na suíte.
+    bool   pickBlockedHint = false;
+
     // 0.6.8 — MODO DE UI (EDITOR ↔ PLAY). Em PLAY: viewport fullscreen +
     // TouchControls + BARRA PLAY MÍNIMA (Stop/fps/aviso); SEM toolbar,
     // SEM painéis de edição, SEM menus, orbit DESATIVADO (1 dedo =
@@ -235,6 +242,24 @@ bool drawPlayBar(UiContext& ui, const InputState& in, f32 sw, f32 sh, int fps);
 // Puro e afervel no CI (o main chama por frame com a máscara de claims).
 bool viewportTapClearsSelection(EditorState& st, const InputState& in,
                                  const UiRect& view, u32 claimedMask);
+
+// ---- 0.8.12 — GUARDA DOS PICKERS + SOBREVIVÊNCIA DA SELEÇÃO ------------------
+// GUARDA: true quando o TIC selecionado NÃO é alvo válido para os pickers
+// de mesh/prim/tex do MeshRenderer (handle morto, TIC sem MeshRenderer —
+// câmara/áudio/ui ficam de fora). O Inspector NÃO abre o picker e o
+// dispatch NÃO aplica sem alvo: em vez do caminho "ERRO(sem TIC com mesh
+// selecionado)" (que não diz ao dono o que fazer), o toque dá HINT
+// "seleciona um TIC com mesh" + a linha "ui: pick bloqueado (sem seleção)".
+// Puro e afervel no CI.
+bool pickerGuardBlocked(const Scene& scene, Handle selected);
+
+// RE-VALIDAÇÃO pós-lifecycle: o INIT_WINDOW recarrega a cena e os handles
+// dos TICs MORREM (identidades novas); a seleção RE-MAPEIA por NOME (o TIC
+// continua a existir — só o handle é novo). Se o handle ainda está vivo
+// (load in-place), mantém-se. Handle inválido só se o TIC desapareceu.
+// Puro e afervel no CI (o main chama após o load do INIT_WINDOW).
+Handle revalidateSelection(const Scene& scene, Handle selected,
+                           const char* name);
 
 // ---- 0.6.9 → 0.7.6: GIZMOS DE TRANSFORMAÇÃO ----------------------------------
 // (o seletor de modo/snap é o GRUPO G4 da barra final — struct GizmoModeState

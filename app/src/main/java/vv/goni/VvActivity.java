@@ -209,6 +209,21 @@ public class VvActivity extends NativeActivity {
         }
     }
 
+    // 0.8.12 — STAGING SEM /tmp: o cache dir da app (getCacheDir) — o único
+    // sítio GUARANTIDO escrevível no Android sem permissões (o /tmp é
+    // READ-ONLY no device, errno=30 — a causa exata da migração morta no
+    // C33: "fileapi: mkdir falhou em '/tmp'" → "staging falhou"). Chamado
+    // por JNI (stagingAbsPath do AssetConverter) no thread da engine.
+    String cacheDirPath() {
+        try {
+            final java.io.File dir = getCacheDir();
+            return dir != null ? dir.getAbsolutePath() : "";
+        } catch (Exception e) {
+            Log.e("GONI", "java: cacheDirPath FALHOU", e);
+            return "";   // o nativo dá o erro LEGÍVEL (nunca /tmp)
+        }
+    }
+
     // F5.1-hotfix (parte 1.4) — EXPORT DOS LOGS para o Downloads PÚBLICO.
     // Copia TODOS os ficheiros de getExternalFilesDir("logs") (engine.log,
     // rotações .1/.2 e crash-*.dump) para Downloads/<relPath>/ via MediaStore

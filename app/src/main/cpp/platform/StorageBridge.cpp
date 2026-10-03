@@ -78,6 +78,10 @@ jmethodID g_midExportLogs = nullptr;     // VvActivity.exportLogsToDownloads(Str
 // 0.8.11 — o microfone da GRAVAÇÃO: VvActivity.ensureMicPermission()Z
 // (true = concedida; false = dialogo aberto, o dono re-toca Gravar)
 jmethodID g_midMicPermission = nullptr;  // VvActivity.ensureMicPermission()Z
+// 0.8.12 — o CACHE DIR da app: VvActivity.cacheDirPath()String — o STAGING
+// da reconversão SAF escreve AQUI (nunca /tmp: read-only no Android,
+// errno=30 — a causa exata da migração morta no C33)
+jmethodID g_midCacheDir = nullptr;       // VvActivity.cacheDirPath()String
 // 0.6.7 — "Sair para projetos" (diagnóstico, como bridgeDelete: falhar
 // não bloqueia o fluxo principal — o editor mostra um toast honesto)
 jmethodID g_midFinish = nullptr;         // VvActivity.bridgeFinish()V
@@ -265,6 +269,19 @@ void cacheActivityMethods(JNIEnv* env) {
                     "gravacao indisponível (o resto do audio intacto)");
     } else {
         elog::info("jni: VvActivity.ensureMicPermission OK (mic da gravacao)");
+    }
+
+    // 0.8.12 — o CACHE DIR da app (não crítico: sem ele o STAGING da
+    // reconversão SAF falha com erro LEGÍVEL e usa o caminho do projeto
+    // quando existe; o resto do editor segue intacto)
+    g_midCacheDir = env->GetMethodID(
+        g_activityCls, "cacheDirPath", "()Ljava/lang/String;");
+    if (!g_midCacheDir || clearPendingException(env)) {
+        g_midCacheDir = nullptr;
+        elog::error("jni: VvActivity.cacheDirPath NÃO encontrada — staging "
+                    "do cache dir indisponível (reconversao SAF limitada)");
+    } else {
+        elog::info("jni: VvActivity.cacheDirPath OK (staging sem /tmp)");
     }
 
     // F5.4 — ponte SAF do Gestor de Projetos (todas na mesma classe: ou
@@ -501,6 +518,34 @@ bool jniOpenAllFilesSettings() {
     env->CallVoidMethod(g_activity, g_midOpenAllFiles,
                         static_cast<jint>(kReqAllFiles));
     return !clearPendingException(env);
+}
+
+// 0.8.12 — o CACHE DIR da app (getCacheDir via VvActivity.cacheDirPath):
+// o STAGING da reconversão por SAF escreve AQUI — caminho absoluto
+// REAL (escrevível sem permissões; o importFile faz streaming dele).
+// Vazio = ponte indisponível (host sem handshake / método ausente) — o
+// chamador dá o erro LEGÍVEL, JAMAIS cai em /tmp.
+std::string jniCacheDir() {
+    if (!handshakeOk() || !g_midCacheDir) {
+        elog::warn("jni: cacheDirPath indisponível — staging do cache dir "
+                   "desligado (ponte Java sem o método?)");
+        return "";
+    }
+    JNIEnv* env = attachedEnv();
+    if (!env) {
+        elog::warn("jni: cacheDirPath sem env do thread chamador");
+        return "";
+    }
+    const jstring jpath = static_cast<jstring>(
+        env->CallObjectMethod(g_activity, g_midCacheDir));
+    if (clearPendingException(env) || !jpath) {
+        return "";
+    }
+    const char* utf = env->GetStringUTFChars(jpath, nullptr);
+    std::string out = utf ? utf : "";
+    env->ReleaseStringUTFChars(jpath, utf);
+    env->DeleteLocalRef(jpath);
+    return out;
 }
 
 // 0.8.11 — o MICROFONE da gravação: true = concedida, false = diálogo

@@ -246,12 +246,126 @@ add_executable(test_core
         ${CORE_DIR}/assets/AudioCodecs.cpp
         ${CORE_DIR}/core/AudioEngine.cpp
         ${CORE_DIR}/platform/AudioOut.cpp
-        ${CORE_DIR}/ui/AudioWorkspace.cpp)
+        ${CORE_DIR}/ui/AudioWorkspace.cpp
+        # 0.8.12 — SENTINELAS PERMANENTES DE REGRESSÃO (docs/REGRESSOES.md):
+        # correm em TODAS as runs de CI, em todas as releases futuras. Os
+        # nomes regress_* são o CONTRATO (remover/saltar exige aprovação
+        # escrita do autor — ver docs/REGRESSOES.md).
+        test_sentinels.cpp)
 
+
+# 0.8.12 — o DISPOSITIVO VIRTUAL EM CI ("C33 virtual"): o executável que
+# reproduz o telefone (1536x720 + insets, /tmp read-only, cache dir via
+# JNI fake, content:// SAF, lifecycle EGL, taps replayáveis) e corre o
+# REPLAY da sessão real do dono pelo frame() REAL do platform/main.cpp.
+# O CI corre-o e grepa o output contra ci/forbidden_log_patterns.txt —
+# qualquer padrão proibido = CI VERMELHO = release bloqueada.
+add_executable(c33_virtual
+        ${CORE_DIR}/core/Scene.cpp
+        ${CORE_DIR}/core/Time.cpp
+        ${CORE_DIR}/core/AnimationSystem.cpp
+        ${CORE_DIR}/core/ComponentRegistry.cpp
+        ${CORE_DIR}/core/ComponentStore.cpp
+        ${CORE_DIR}/core/Presets.cpp
+        ${CORE_DIR}/core/SceneSerializer.cpp
+        ${CORE_DIR}/core/Project.cpp
+        ${CORE_DIR}/core/ProjectStorage.cpp
+        ${CORE_DIR}/core/AssetPersist.cpp
+        ${CORE_DIR}/core/FsStorage.cpp
+        ${CORE_DIR}/core/SafStorage.cpp
+        ${CORE_DIR}/assets/ObjImporter.cpp
+        ${CORE_DIR}/assets/GOwnFormats.cpp
+        ${CORE_DIR}/assets/AssetConverter.cpp
+        ${CORE_DIR}/assets/ZipExtract.cpp
+        ${CORE_DIR}/assets/ObjExporter.cpp
+        ${CORE_DIR}/assets/ResourceManager.cpp
+        ${CORE_DIR}/assets/GltfImporter.cpp
+        ${CORE_DIR}/assets/GltfTextures.cpp
+        ${CORE_DIR}/assets/GltfInstantiate.cpp
+        ${CORE_DIR}/assets/GltfAnim.cpp
+        ${CORE_DIR}/assets/PngLoader.cpp
+        ${CORE_DIR}/assets/MipGen.cpp
+        ${CORE_DIR}/assets/TextureCache.cpp
+        ${CORE_DIR}/assets/TexturePipeline.cpp
+        ${CORE_DIR}/assets/TextureCompressor.cpp
+        ${CORE_DIR}/assets/Etc2Compressor.cpp
+        ${CORE_DIR}/assets/AstcCompressor.cpp
+        ${CORE_DIR}/vendor/etcpak/ProcessRGB.cpp
+        ${CORE_DIR}/vendor/etcpak/Tables.cpp
+        ${CORE_DIR}/vendor/etcpak/Dither.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_averages_and_directions.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_block_sizes.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_color_quantize.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_color_unquantize.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_compress_symbolic.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_compute_variance.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_decompress_symbolic.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_diagnostic_trace.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_entry.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_find_best_partitioning.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_ideal_endpoints_and_weights.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_image.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_integer_sequence.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_mathlib.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_mathlib_softfloat.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_partition_tables.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_percentile_tables.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_pick_best_endpoint_format.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_quantization.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_symbolic_physical.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_weight_align.cpp
+        ${CORE_DIR}/vendor/astc-encoder/astcenc_weight_quant_xfer.cpp
+        ${CORE_DIR}/core/TransformSystem.cpp
+        ${CORE_DIR}/render/Cube.cpp
+        ${CORE_DIR}/render/Primitives.cpp
+        ${CORE_DIR}/render/Camera.cpp
+        ${CORE_DIR}/physics/Shapes.cpp
+        ${CORE_DIR}/physics/PhysicsSystem.cpp
+        ${CORE_DIR}/components/TouchControls.cpp
+        ${CORE_DIR}/ui/UiContext.cpp
+        ${CORE_DIR}/ui/EditorUi.cpp
+        ${CORE_DIR}/components/UiCanvas.cpp
+        ${CORE_DIR}/components/AnimationPlayer.cpp
+        ${CORE_DIR}/components/SkeletonComp.cpp
+        ${CORE_DIR}/ui/UiRuntime.cpp
+        ${CORE_DIR}/ui/UiEditor.cpp
+        ${CORE_DIR}/ui/SceneFx.cpp
+        ${CORE_DIR}/ui/Gizmo.cpp
+        ${CORE_DIR}/ui/Toolbar.cpp
+        ${CORE_DIR}/ui/Timeline.cpp
+        ${CORE_DIR}/ui/Icons.cpp
+        ${CORE_DIR}/core/CameraUtil.cpp
+        ${CORE_DIR}/ui/CamGizmo.cpp
+        ${CORE_DIR}/ui/FontAtlas.cpp
+        ${CORE_DIR}/platform/InputState.cpp
+        ${CORE_DIR}/platform/EngineLog.cpp
+        ${CORE_DIR}/platform/FileApi.cpp
+        ${CORE_DIR}/platform/CrashHandler.cpp
+        ${CORE_DIR}/platform/BuildInfo.cpp
+        ${CORE_DIR}/platform/StorageBridge.cpp
+        ${CORE_DIR}/render/Renderer.cpp
+        ${CORE_DIR}/render/Mesh.cpp
+        ${CORE_DIR}/render/Material.cpp
+        ${CORE_DIR}/render/Texture.cpp
+        ${CORE_DIR}/render/GpuAssets.cpp
+        ${CORE_DIR}/platform/EglContext.cpp
+        ${CORE_DIR}/render/Grid.cpp
+        ${CORE_DIR}/assets/GiFormat.cpp
+        ${CORE_DIR}/assets/AudioCodecs.cpp
+        ${CORE_DIR}/core/AudioEngine.cpp
+        ${CORE_DIR}/platform/AudioOut.cpp
+        ${CORE_DIR}/ui/AudioWorkspace.cpp
+        c33_virtual.cpp)
 
 target_include_directories(test_core PRIVATE
         # stubs PRIMEIRO: <GLES3/gl3.h> e <android/input.h> resolvem para os
         # no-ops do hospedeiro (a build Android usa o NDK, sem estes caminhos)
+        ${CMAKE_CURRENT_LIST_DIR}/stub
+        ${CORE_DIR}
+        ${CORE_DIR}/vendor
+        ${CORE_DIR}/vendor/etcpak
+        ${CORE_DIR}/vendor/astc-encoder)
+target_include_directories(c33_virtual PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/stub
         ${CORE_DIR}
         ${CORE_DIR}/vendor
@@ -306,6 +420,16 @@ target_compile_definitions(test_core PRIVATE
 
 enable_testing()
 add_test(NAME core COMMAND test_core)
+# 0.8.12: o C33 virtual como TESTE (o CI corre-o em TODAS as runs; o output
+# passo-a-passo vai para o log do ctest — o gate de padrões grepa o engine.log)
+add_test(NAME c33_virtual_replay COMMAND c33_virtual)
 
 # 0.8.10: zlib (inflate do ZIP)
 target_link_libraries(test_core z)
+target_link_libraries(c33_virtual z)
+
+# fixtures (o harness carrega a fonte da fixture quando não há fonte de sistema)
+target_compile_definitions(c33_virtual PRIVATE
+        FIXTURE_DIR="${CMAKE_CURRENT_LIST_DIR}/fixtures"
+        FONT_FIXTURE="${CMAKE_CURRENT_LIST_DIR}/fixtures/fonts/LiberationSans-Regular.ttf")
+target_link_libraries(c33_virtual pthread)

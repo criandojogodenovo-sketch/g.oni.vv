@@ -648,11 +648,23 @@ TEST(wiring010_crash_dump_identidade_e_badge) {
     EXPECT(vv::buildinfo::dumpIsFromOtherBuild("crash-1780000000.dump"));
     EXPECT(!vv::buildinfo::dumpIsFromOtherBuild("crash-1790000000-vc40.dump"));
 
-    // banner de boot (a 1ª linha do log viewer)
+    // banner de boot (a 1ª linha do log viewer) — 0.8.12: formato exigido
+    // "boot: G.One VV <versão> versionCode <N> sha256 <…>" (o sha256 REAL
+    // da .so; git quando existe)
     const std::string banner = vv::buildinfo::banner();
-    EXPECT(banner.find("goni-vv 0.8.10-teste") != std::string::npos);
+    EXPECT(banner.find("G.One VV 0.8.10-teste") != std::string::npos);
     EXPECT(banner.find("versionCode 40") != std::string::npos);
+    EXPECT(banner.find("sha256 deadbeef...") != std::string::npos);
+    EXPECT(banner.find("git abcd1234") != std::string::npos);
     std::printf("  [banner] %s\n", banner.c_str());
+
+    // 0.8.12 — BADGE do viewer: dump de OUTRA build → "[ANTIGO (build N)]";
+    // dump PRÉ-0.8.10 (sem -vc) → "[ANTIGO (pre-0.8.10)]"; da MESMA → ""
+    EXPECT(vv::buildinfo::dumpBadge("crash-1780000000-vc39.dump") ==
+           "  [ANTIGO (build 39)]");
+    EXPECT(vv::buildinfo::dumpBadge("crash-1780000000.dump") ==
+           "  [ANTIGO (pre-0.8.10)]");
+    EXPECT(vv::buildinfo::dumpBadge("crash-1790000000-vc40.dump").empty());
 
     // reset para não vazar para os outros casos
     vv::buildinfo::set("dev", 0, "", "", 0);

@@ -279,7 +279,7 @@ TEST(assetpick_escolher_mesh_aplica_e_textura_embutida) {
     };
     e.res.material = kMatStub;
 
-    const AssetPickOutcome out = applyAssetPick(e.scene, e.sel, 1, 2, e.cat, e.res);
+    const AssetPickOutcome out = applyAssetPick(e.scene, e.sel, 1, 3, e.cat, e.res);
 
     EXPECT(out.applied);
     EXPECT(e.mr()->mesh == kMeshStub);
@@ -299,13 +299,64 @@ TEST(assetpick_mesh_cube_procedural_limpa_a_ref) {
     e.res.cubeMesh = kCubeStub;
     e.res.material = kMatStub;
 
-    const AssetPickOutcome out = applyAssetPick(e.scene, e.sel, 1, 1, e.cat, e.res);
+    // 0.8.12: cube é o pick 2 (none ocupa o 1º lugar do picker)
+    const AssetPickOutcome out = applyAssetPick(e.scene, e.sel, 1, 2, e.cat, e.res);
 
     EXPECT(out.applied);
     EXPECT(e.mr()->mesh == kCubeStub);      // cubo procedural
     EXPECT(e.mr()->meshPath.empty());      // ref libertada
     EXPECT(e.mr()->material == kMatStub);
     EXPECT(std::strcmp(out.toast, "mesh: cube") == 0);
+}
+
+// ---- 0.8.12 — none DE PRIMEIRA CLASSE no picker de MESH ---------------------
+TEST(assetpick_mesh_none_limpa_o_slot_com_deferred_free) {
+    PickEnv e;
+    e.mr()->mesh = kMeshStub;
+    e.mr()->meshPath = "meshes/quad.obj";
+    e.mr()->primRetire = nullptr;
+
+    // pick 1 = none: o slot LIMPA (TIC deixa de renderizar mesh) e a
+    // posse antiga vai para primRetire (deferred free no ponto seguro do
+    // frame seguinte — o MESMO caminho seguro das trocas)
+    const AssetPickOutcome out = applyAssetPick(e.scene, e.sel, 1, 1, e.cat, e.res);
+
+    EXPECT(out.applied);
+    EXPECT(e.mr()->mesh == nullptr);           // slot limpo
+    EXPECT(e.mr()->material == nullptr);       // sem material
+    EXPECT(e.mr()->meshPath.empty());          // ref libertada
+    EXPECT(e.mr()->primOn == false);
+    EXPECT(e.mr()->primPending == false);
+    EXPECT(e.mr()->primRetire == kMeshStub);   // posse p/ cova (deferred free)
+    EXPECT(std::strcmp(out.toast, "mesh: none") == 0);
+    EXPECT(std::strstr(out.log, "mesh none") != nullptr);
+    EXPECT(std::strstr(out.log, "deferred free") != nullptr);
+}
+
+TEST(assetpick_mesh_none_x_none_repetido_sem_crash) {
+    PickEnv e;
+    e.res.cubeMesh = kCubeStub;
+    e.res.material = kMatStub;
+    e.mr()->mesh = kCubeStub;   // estado inicial: cube
+
+    // none→X→none ×5 (o ciclo do prompt: sem crash, sem leak, estado vazio
+    // consistente no fim de cada none)
+    for (int i = 0; i < 5; ++i) {
+        AssetPickOutcome o1 = applyAssetPick(e.scene, e.sel, 1, 1, e.cat, e.res);   // none
+        EXPECT(o1.applied);
+        EXPECT(e.mr()->mesh == nullptr);
+        EXPECT(e.mr()->primRetire == kCubeStub);   // posse p/ cova (enterra só o que é nosso)
+        AssetPickOutcome o2 = applyAssetPick(e.scene, e.sel, 1, 2, e.cat, e.res);   // cube
+        EXPECT(o2.applied);
+        EXPECT(e.mr()->mesh == kCubeStub);
+        AssetPickOutcome o3 = applyAssetPick(e.scene, e.sel, 1, 1, e.cat, e.res);   // none
+        EXPECT(o3.applied);
+        EXPECT(e.mr()->mesh == nullptr);
+        EXPECT(e.mr()->meshPath.empty());
+    }
+    // estágio final: vazio (o ciclo termina em none; a posse pendente é o
+    // ponteiro anterior — a COVA decide o que é nosso no ponto seguro)
+    EXPECT(e.mr()->primRetire == kCubeStub);
 }
 
 // ---- 7. alvos inválidos: sem crash, sem ação ---------------------------------

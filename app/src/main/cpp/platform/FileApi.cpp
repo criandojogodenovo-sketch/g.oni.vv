@@ -22,6 +22,33 @@ namespace {
 // última mensagem de errno (thread-local para não correr entre threads)
 thread_local char g_errBuf[96] = "";
 
+// 0.8.12 — SEAM DE TESTE do dispositivo virtual (C33 virtual): prefixo
+// READ-ONLY simulado (o /tmp do Android é read-only, errno=30/EROFS; o
+// runner do CI tem /tmp escrevível — sem isto o harness NÃO reproduz o
+// device e o bug do staging era invisível no CI, exatamente como foi em
+// 0.8.5–0.8.10). SÓ os testes/harness chamam setReadonlyPrefix(); o
+// código de produção NUNCA toca aqui (o gate do CI grepa o literal e as
+// sentinelas vigiam o comportamento). Thread-local: cada caso limpa com
+// clearReadonlyPrefix() no fim.
+thread_local char g_roPrefix[160] = "";
+
+inline bool roBlocked(const char* path) {
+    if (g_roPrefix[0] == '\0' || !path || !path[0]) {
+        return false;
+    }
+    const size_t n = std::strlen(g_roPrefix);
+    return std::strncmp(path, g_roPrefix, n) == 0;
+}
+
+inline void captureRofs(const char* what, const char* path) {
+    // EXATAMENTE a linha do device: errno=30 (Read-only file system)
+    errno = EROFS;
+    std::snprintf(g_errBuf, sizeof(g_errBuf), "errno=%d (%s)", EROFS,
+                  std::strerror(EROFS));
+    elog::warn("fileapi: %s falhou em '%s' — errno=%d (%s)",
+               what, path ? path : "(null)", EROFS, std::strerror(EROFS));
+}
+
 void captureErrno(const char* what, const char* path) {
     const int e = errno;
     std::snprintf(g_errBuf, sizeof(g_errBuf), "errno=%d (%s)", e,
@@ -74,6 +101,11 @@ std::string errnoText() {
 
 bool makeDirs(const std::string& dir) {
     if (dir.empty()) {
+        return false;
+    }
+    // 0.8.12 — seam do C33 virtual: /tmp read-only no harness (errno=30)
+    if (roBlocked(dir.c_str())) {
+        captureRofs("mkdir", dir.c_str());
         return false;
     }
     std::string path = dir;
@@ -236,6 +268,11 @@ bool readAll(const std::string& path, std::vector<u8>& out) {
 }
 
 bool writeAll(const std::string& path, const void* data, size_t n) {
+    // 0.8.12 — seam do C33 virtual: /tmp read-only no harness (errno=30)
+    if (roBlocked(path.c_str())) {
+        captureRofs("fopen/write", path.c_str());
+        return false;
+    }
     // pastas-mãe em falta (mkdir -p) — errno logado dentro
     const size_t slash = path.rfind('/');
     if (slash != std::string::npos) {
@@ -456,5 +493,20 @@ void logStorageSelfCheck(const char* root, bool isExternal) {
                     probe.c_str(), e, std::strerror(e));
     }
 }
+
+// ---- 0.8.12 — SEAM DO DISPOSITIVO VIRTUAL (implementação) -------------------
+
+namespace testing {
+
+void setReadonlyPrefix(const char* prefix) {
+    std::snprintf(g_roPrefix, sizeof(g_roPrefix), "%s",
+                  prefix ? prefix : "");
+}
+
+void clearReadonlyPrefix() {
+    g_roPrefix[0] = '\0';
+}
+
+}  // namespace testing
 
 } // namespace vv::fileapi

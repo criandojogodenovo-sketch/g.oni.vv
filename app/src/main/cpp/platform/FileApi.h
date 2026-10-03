@@ -128,4 +128,19 @@ std::string errnoText();
 // linha de erro explícita. Corre no boot ANTES de qualquer I/O pesado.
 void logStorageSelfCheck(const char* root, bool isExternal);
 
+// ---- 0.8.12 — SEAM DO DISPOSITIVO VIRTUAL (C33 virtual) ---------------------
+// O harness do CI reproduz as condições do Android que morderam a engine:
+// o /tmp do device é READ-ONLY (errno=30/EROFS) e o runner do CI tem /tmp
+// ESCREVÍVEL — sem esta seam, o bug do staging era INVISÍVEL no CI
+// (0.8.5–0.8.10: releases verdes + migração morta no telefone). O harness
+// chama setReadonlyPrefix com o prefixo /tmp e TODA a escrita nesse prefixo
+// falha com
+// a MESMA linha de log do device. SÓ testes/harness chamam; o código de
+// produção nunca toca (o gate de literal do CI + sentinelas vigiam).
+// Thread-local: cada caso limpa com clearReadonlyPrefix().
+namespace testing {
+void setReadonlyPrefix(const char* prefix);
+void clearReadonlyPrefix();
+}  // namespace testing
+
 } // namespace vv::fileapi
