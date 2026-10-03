@@ -178,7 +178,17 @@ public:
     }
     u32 xruns() const override {
         const std::shared_ptr<oboe::AudioStream> s = streamSnapshot();
-        return s ? static_cast<u32>(s->getXRunCount()) : 0u;
+        if (!s) {
+            return 0u;
+        }
+        // ATENÇÃO API REAL: getXRunCount() devolve ResultWithValue<int32_t>
+        // (pode falhar em alguns devices — o oboe real difere do int32_t
+        // plano; apanhado pelo build NDK do CI na 1ª passada)
+        const oboe::ResultWithValue<int32_t> r = s->getXRunCount();
+        if (r.error() != oboe::Result::OK) {
+            return 0u;
+        }
+        return r.result() > 0 ? static_cast<u32>(r.result()) : 0u;
     }
 
     // ---- oboe::AudioStreamCallback ----------------------------------------
