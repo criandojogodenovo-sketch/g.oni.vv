@@ -12,6 +12,7 @@ import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.util.Log;
+import android.view.View;   // 0.9.0 (spec I): setImmersive usa View.SYSTEM_UI_FLAG_*
 
 /**
  * F5.2 — ponte Java mínima do ARMAZENAMENTO (sucessora da exceção SAF).
