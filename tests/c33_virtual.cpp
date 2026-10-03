@@ -62,6 +62,12 @@
 // ponte Java (o papel do "stub Java" — como o test_wiring087/test_handshake)
 extern "C" void Java_vv_goni_VvActivity_nativeRegisterActivity(
         JNIEnv*, jclass, jobject activity, jstring origin);
+// 0.9.1 — os natives do IME (definidos no StorageBridge.cpp; o harness
+// chama-os DIRETO como o "Java fake" — o mesmo caminho do device)
+extern "C" void Java_vv_goni_VvActivity_nativeOnImeText(
+        JNIEnv*, jclass, jstring text);
+extern "C" void Java_vv_goni_VvActivity_nativeOnImeKey(
+        JNIEnv*, jclass, jint keyCode, jint action);
 
 using namespace vv;
 
@@ -787,6 +793,93 @@ int main() {
         check(logCount("fim ok") >= 1, "troca com 'fim ok' no log");
         check(logCount("ui: pick bloqueado (sem seleção)") >= 2,
               "hints de pick bloqueado no log");
+    }
+
+    // ======================================================================
+    // FASE 7 — 0.9.1: ORIENTAÇÃO PORTRAIT + IME DO SISTEMA (janela de texto)
+    // ======================================================================
+    fase("FASE 7 — 0.9.1: portrait + IME (janela de texto)");
+    {
+        resetEngineForHarness();
+        javaRegistersWithCacheDir();
+        ime::clearForTest();
+        g_jni.void_calls.clear();
+
+        android_app app;
+        std::memset(&app, 0, sizeof(app));
+        onAppCmd(&app, APP_CMD_INIT_WINDOW);
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+
+        // 7.1 — ABRIR: o par portrait + imeShow (o Java executa o pedido)
+        passo("7.1 abrir a janela de texto (portrait + IME show)");
+        openTextWindow();
+        check(g_editor.textWin.open, "a janela de texto abre");
+        check(ime::orientation() == ime::Orientation::Portrait,
+              "orientação PEDIDA = portrait (estado na engine)");
+        bool sawPortrait = false, sawShow = false;
+        for (const auto& c : g_jni.void_calls) {
+            if (c.first == "setOrientation" && c.second == 1) sawPortrait = true;
+            if (c.first == "imeShow") sawShow = true;
+        }
+        check(sawPortrait, "JNI: setRequestedOrientation(PORTRAIT) executado");
+        check(sawShow, "JNI: InputMethodManager.showSoftInput executado");
+        check(logHas("orientacao: portrait pedida (janela de texto aberta)"),
+              "a mudança de orientação fica LOGADA");
+
+        // 7.2 — o IME ESCREVE (nativeOnImeText/Key → fila → frame consome)
+        passo("7.2 o IME do sistema escreve no buffer");
+        Java_vv_goni_VvActivity_nativeOnImeText(
+            g_jni.env, nullptr, g_jni.newString("Ola"));
+        Java_vv_goni_VvActivity_nativeOnImeKey(g_jni.env, nullptr, 66, 0);
+        Java_vv_goni_VvActivity_nativeOnImeText(
+            g_jni.env, nullptr, g_jni.newString("C33"));
+        frame();
+        check(g_editor.textWin.buf == "Ola\nC33",
+              "o texto commitado + ENTER chegam pela fila ime::");
+
+        // 7.3 — a ROTAÇÃO (o frame do device roda): TERM + INIT em PORTRAIT
+        passo("7.3 rotação 1536x720 → 720x1536 com a janela aberta");
+        eglstub::g_surfaceW = 720;
+        eglstub::g_surfaceH = 1536;
+        onAppCmd(&app, APP_CMD_TERM_WINDOW);
+        onAppCmd(&app, APP_CMD_INIT_WINDOW);
+        check(g_egl.width() == 720 && g_egl.height() == 1536,
+              "a superfície renasce EM PORTRAIT");
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+        check(g_editor.textWin.open, "a janela SOBREVIVE à rotação");
+        check(g_editor.textWin.buf == "Ola\nC33",
+              "o buffer sobrevive (estado da engine, não da GPU)");
+        frame();
+        check(g_windowInits >= 2 && g_windowTerms >= 1,
+              "o lifecycle TERM/INIT correu (re-upload — sem glifos brancos)");
+
+        // 7.4 — FECHAR: landscape + imeHide (o par espelhado do abrir)
+        passo("7.4 fechar (landscape + IME hide)");
+        g_jni.void_calls.clear();
+        closeTextWindow();
+        check(!g_editor.textWin.open, "a janela fecha");
+        check(ime::orientation() == ime::Orientation::Landscape,
+              "orientação REPOSTA = landscape");
+        bool sawLandscape = false, sawHide = false;
+        for (const auto& c : g_jni.void_calls) {
+            if (c.first == "setOrientation" && c.second == 0) sawLandscape = true;
+            if (c.first == "imeHide") sawHide = true;
+        }
+        check(sawLandscape, "JNI: setRequestedOrientation(LANDSCAPE) executado");
+        check(sawHide, "JNI: hideSoftInput executado");
+
+        // o device volta ao landscape para as fases seguintes
+        eglstub::g_surfaceW = 1536;
+        eglstub::g_surfaceH = 720;
+        onAppCmd(&app, APP_CMD_TERM_WINDOW);
     }
 
     // ---- sumário -----------------------------------------------------------

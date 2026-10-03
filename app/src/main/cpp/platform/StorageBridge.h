@@ -81,6 +81,17 @@ bool jniEnsureMicPermission();
 // sistema. false = ponte indisponível (logado; o editor segue)
 bool jniSetImmersive(bool on);
 
+// 0.9.1 — ORIENTAÇÃO + IME DO SISTEMA (janelas de texto pesado):
+//   jniSetOrientation — setRequestedOrientation(portrait/landscape) na
+//                       Activity (o ESTADO vive no ime:: — aqui é o executor)
+//   jniImeShow/Hide   — InputMethodManager sobre o EditText invisível
+//                       (o IME só abre/fecha quando a ENGINE pede)
+// false = ponte indisponível (logado; a janela segue sem IME — o device
+// continua a rotacionar pela chamada Java, honesta no log)
+bool jniSetOrientation(bool portrait);
+bool jniImeShow();
+bool jniImeHide();
+
 // 0.8.12 — o CACHE DIR da app (getCacheDir da Activity via JNI): o STAGING
 // da reconversão por SAF escreve aqui (caminho absoluto REAL, escrevível
 // no Android sem permissões — JAMAIS /tmp, read-only no device com

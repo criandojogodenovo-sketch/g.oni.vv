@@ -28,6 +28,7 @@
 #include "core/Types.h"
 #include "platform/BuildInfo.h"   // 0.8.10: identidade da build via JNI
 #include "platform/EngineLog.h"
+#include "platform/ImeQueue.h"
 #include "platform/JniAttach.h"
 #include <jni.h>
 #include <cstring>
@@ -42,6 +43,14 @@ extern "C" JNIEXPORT void JNICALL
 Java_vv_goni_VvActivity_nativeRegisterActivity(JNIEnv* env, jclass,
                                                jobject activity,
                                                jstring origin);
+// 0.9.1 — IME DO SISTEMA: o InputConnection do EditText da VvActivity
+// entrega o texto/teclas AQUI (thread da UI) — a fila ime:: (ImeQueue) é o
+// caminho para o thread da engine (consumida por frame pela janela de texto)
+extern "C" JNIEXPORT void JNICALL
+Java_vv_goni_VvActivity_nativeOnImeText(JNIEnv* env, jclass, jstring text);
+extern "C" JNIEXPORT void JNICALL
+Java_vv_goni_VvActivity_nativeOnImeKey(JNIEnv* env, jclass, jint keyCode,
+                                       jint action);
 // 0.8.10 — IDENTIDADE: a VvActivity entrega BuildConfig + build_info.txt
 // (version/versionCode/git/sha256 da .so/epoch) no ARRANQUE; vive nos crash
 // dumps (nome+header) e no banner do boot log.
@@ -79,6 +88,10 @@ jmethodID g_midExportLogs = nullptr;     // VvActivity.exportLogsToDownloads(Str
 // (true = concedida; false = dialogo aberto, o dono re-toca Gravar)
 jmethodID g_midMicPermission = nullptr;  // VvActivity.ensureMicPermission()Z
 jmethodID g_midSetImmersive = nullptr;   // 0.9.0: VvActivity.setImmersive(Z)V
+// 0.9.1 — orientação + IME do sistema (janelas de texto pesado)
+jmethodID g_midSetOrientation = nullptr; // VvActivity.setOrientation(Z)V
+jmethodID g_midImeShow = nullptr;        // VvActivity.imeShow()V
+jmethodID g_midImeHide = nullptr;        // VvActivity.imeHide()V
 // 0.8.12 — o CACHE DIR da app: VvActivity.cacheDirPath()String — o STAGING
 // da reconversão SAF escreve AQUI (nunca /tmp: read-only no Android,
 // errno=30 — a causa exata da migração morta no C33)
@@ -200,6 +213,15 @@ const JNINativeMethod kNativeMethods[] = {
       // 0.8.10 — identidade da build (crash dumps + banner + badge ANTIGO)
       const_cast<char*>("(Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;J)V"),
       reinterpret_cast<void*>(&Java_vv_goni_VvActivity_nativeSetBuildInfo) },
+    { const_cast<char*>("nativeOnImeText"),
+      // 0.9.1 — IME do sistema: texto commitado pelo InputConnection do
+      // EditText (o InputConnectionWrapper encaminha SEM acumular no host)
+      const_cast<char*>("(Ljava/lang/String;)V"),
+      reinterpret_cast<void*>(&Java_vv_goni_VvActivity_nativeOnImeText) },
+    { const_cast<char*>("nativeOnImeKey"),
+      // 0.9.1 — IME do sistema: tecla (DEL 67/ENTER 66/DPAD; só DOWN)
+      const_cast<char*>("(II)V"),
+      reinterpret_cast<void*>(&Java_vv_goni_VvActivity_nativeOnImeKey) },
 };
 constexpr int kNativeMethodCount =
     static_cast<int>(sizeof(kNativeMethods) / sizeof(kNativeMethods[0]));
@@ -273,14 +295,45 @@ void cacheActivityMethods(JNIEnv* env) {
     }
 
     // 0.9.0 — o MODO IMERSIVO (não crítico: sem ele o toggle fica no-op
-    // logado, o resto do editor segue intacto)
-    g_midSetImmersive = env->GetMethodID(g_activityCls, "setImmersive", "(Z)V");
+    // logado, o resto do editor segue intacto). NOME setImmersiveMode:
+    // Activity.setImmersive é FINAL na plataforma (javac do CI morria com
+    // o nome antigo)
+    g_midSetImmersive = env->GetMethodID(g_activityCls, "setImmersiveMode",
+                                         "(Z)V");
     if (!g_midSetImmersive || clearPendingException(env)) {
         g_midSetImmersive = nullptr;
         elog::error("jni: VvActivity.setImmersive NAO encontrada — modo "
                     "imersivo indisponivel (o resto intacto)");
     } else {
         elog::info("jni: VvActivity.setImmersive OK (modo imersivo)");
+    }
+
+    // 0.9.1 — ORIENTAÇÃO + IME (não crítico: sem a ponte a janela de texto
+    // segue sem rotação/IME com log honesto — o teclado in-app é o plano B)
+    g_midSetOrientation = env->GetMethodID(g_activityCls, "setOrientation",
+                                           "(Z)V");
+    if (!g_midSetOrientation || clearPendingException(env)) {
+        g_midSetOrientation = nullptr;
+        elog::error("jni: VvActivity.setOrientation NAO encontrada — "
+                    "portrait das janelas de texto indisponivel");
+    } else {
+        elog::info("jni: VvActivity.setOrientation OK (portrait de texto)");
+    }
+    g_midImeShow = env->GetMethodID(g_activityCls, "imeShow", "()V");
+    if (!g_midImeShow || clearPendingException(env)) {
+        g_midImeShow = nullptr;
+        elog::error("jni: VvActivity.imeShow NAO encontrada — IME do "
+                    "sistema indisponivel");
+    } else {
+        elog::info("jni: VvActivity.imeShow OK (IME do sistema)");
+    }
+    g_midImeHide = env->GetMethodID(g_activityCls, "imeHide", "()V");
+    if (!g_midImeHide || clearPendingException(env)) {
+        g_midImeHide = nullptr;
+        elog::error("jni: VvActivity.imeHide NAO encontrada — IME pode "
+                    "ficar aberto ao fechar a janela (re-tenta no fecho)");
+    } else {
+        elog::info("jni: VvActivity.imeHide OK (IME do sistema)");
     }
 
     // 0.8.12 — o CACHE DIR da app (não crítico: sem ele o STAGING da
@@ -574,6 +627,53 @@ bool jniSetImmersive(bool on) {
     }
     env->CallVoidMethod(g_activity, g_midSetImmersive,
                         static_cast<jboolean>(on ? JNI_TRUE : JNI_FALSE));
+    return !clearPendingException(env);
+}
+
+// 0.9.1 — orientação + IME do sistema (o MESMO contrato do setImmersive:
+// o estado vive na engine — ime::setOrientation —, AQUI é só o executor)
+bool jniSetOrientation(bool portrait) {
+    if (!handshakeOk() || !g_midSetOrientation) {
+        elog::warn("jni: setOrientation indisponível — ponte Java sem o "
+                   "método (a rotação do device não acontece)");
+        return false;
+    }
+    JNIEnv* env = attachedEnv();
+    if (!env) {
+        elog::warn("jni: setOrientation sem env do thread chamador");
+        return false;
+    }
+    env->CallVoidMethod(g_activity, g_midSetOrientation,
+                        static_cast<jboolean>(portrait ? JNI_TRUE
+                                                       : JNI_FALSE));
+    return !clearPendingException(env);
+}
+
+bool jniImeShow() {
+    if (!handshakeOk() || !g_midImeShow) {
+        elog::warn("jni: imeShow indisponível — ponte Java sem o método");
+        return false;
+    }
+    JNIEnv* env = attachedEnv();
+    if (!env) {
+        elog::warn("jni: imeShow sem env do thread chamador");
+        return false;
+    }
+    env->CallVoidMethod(g_activity, g_midImeShow);
+    return !clearPendingException(env);
+}
+
+bool jniImeHide() {
+    if (!handshakeOk() || !g_midImeHide) {
+        elog::warn("jni: imeHide indisponível — ponte Java sem o método");
+        return false;
+    }
+    JNIEnv* env = attachedEnv();
+    if (!env) {
+        elog::warn("jni: imeHide sem env do thread chamador");
+        return false;
+    }
+    env->CallVoidMethod(g_activity, g_midImeHide);
     return !clearPendingException(env);
 }
 
@@ -1004,4 +1104,40 @@ Java_vv_goni_VvActivity_nativeOpenProject(JNIEnv* env, jclass,
         return;
     }
     vv::storage::g_projectSlot.push(r);
+}
+
+// ---- 0.9.1: IME DO SISTEMA — entrada do InputConnection ---------------------
+//
+// Corre NO THREAD DA UI (o InputConnection é chamado pela app de teclado):
+// apenas converte e enfileira (ime::pushText/pushKey). A engine consome por
+// frame no thread dela (janela de texto) — o MESMO contrato da
+// PendingResult/ProjectSlot. action: 0 = ACTION_DOWN, 1 = sintetizada
+// (deleteSurroundingText/performEditorAction); a engine só age em ambas —
+// o wrapper NUNCA encaminha ACTION_UP (evitaria o dobro do efeito).
+extern "C" JNIEXPORT void JNICALL
+Java_vv_goni_VvActivity_nativeOnImeText(JNIEnv* env, jclass, jstring text) {
+    if (!text) {
+        return;   // commit vazio (composição limpa) — nada a escrever
+    }
+    const char* t = env->GetStringUTFChars(text, nullptr);
+    if (t) {
+        vv::ime::pushText(t);
+        env->ReleaseStringUTFChars(text, t);
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_vv_goni_VvActivity_nativeOnImeKey(JNIEnv* env, jclass, jint keyCode,
+                                       jint action) {
+    (void)action;   // v0: só DOWN chega do Java (o wrapper filtra)
+    const vv::ime::Key k = vv::ime::fromAndroidKeycode(keyCode);
+    if (k != vv::ime::Key::None) {
+        vv::ime::pushKey(k);
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
 }

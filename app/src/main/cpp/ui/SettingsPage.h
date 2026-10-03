@@ -50,6 +50,9 @@ constexpr u64 kViewLogsId   = 5825;  // [Ver logs]
 constexpr u64 kExportLogsId = 5826;  // [Export logs]
 constexpr u64 kProbeId      = 5827;  // [Probe áudio]
 constexpr u64 kDumpsId      = 5828;  // dumps com badge ANTIGO
+constexpr u64 kTextWindowId = 5830;  // 0.9.1: abrir a janela de texto (IME)
+                                     // (5829 é o literal da linha "reconverter"
+                                     // — IDs únicos por frame, immediate-mode)
 constexpr u64 kScrollId     = 49;    // região de scroll da página
 
 // ---- bits das secções (colapsáveis — PERSISTE via layout.json) --------------
@@ -84,6 +87,7 @@ enum Result {
     kViewLogs,         // abrir o viewer de logs
     kExportLogs,       // export para Downloads
     kProbeAudio,       // diagnóstico de áudio
+    kOpenTextWindow,   // 0.9.1: abrir a janela de texto (portrait + IME)
     kToggleKeepSource, // fonte manter/largar
     kReconvert,        // reconverter assets
 };

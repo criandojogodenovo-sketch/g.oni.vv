@@ -48,10 +48,13 @@ public final class VvProjects {
      * projects.json antigo → cai no createdAt).
      */
     public static final class Entry {
-        // 0.9.0: name deixa de ser final (o RENOMEAR escreve-o; o URI da
-        // pasta e a data de criação continuam imutáveis — identidade)
+        // 0.9.0: name deixa de ser final (o RENOMEAR escreve-o; a data de
+        // criação continua imutável). 0.9.0-fix CI: o URI também deixa de
+        // ser final — a RECUPERAÇÃO do projeto em falta RE-APONTA a entrada
+        // para a pasta re-escolhida (é exatamente isso que "recuperar"
+        // significa; a identidade do projeto é a LINHA na lista, não o uri).
         public String name;
-        public final String uri;
+        public String uri;
         public final long createdAt;
         public long editedAt;
 

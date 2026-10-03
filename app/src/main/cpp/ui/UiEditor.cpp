@@ -65,7 +65,8 @@ bool anyOverlayOpen(const EditorState& st) {
     return st.plusMenu || st.fileMenu || st.settingsMenu || st.contextMenu ||
            st.removeDialog || st.textInput || st.assetMenu != 0 ||
            st.importMenu || st.storageDialog || st.logViewer ||
-           st.scenesMenu || st.fileBrowser || st.applyAsk;
+           st.scenesMenu || st.fileBrowser || st.applyAsk ||
+           st.textWin.open;   // 0.9.1: janela de texto pesado (portrait+IME)
 }
 
 // 0.7.5 — BACKDROP MODAL: fundo OPACO que tapa o ecrã TODO (o chrome do

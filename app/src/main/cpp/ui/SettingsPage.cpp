@@ -37,6 +37,15 @@ void infoRow(UiContext& ui, f32 x, f32 y, f32 w, const char* label,
     }
 }
 
+// rect do BOTÃO de uma actionRow (FONTE ÚNICA — o draw e o re-despacho do
+// scrollTap partilham a MESMA matemática; o scroll reclama o gesto dentro
+// da região e o tap volta por scrollTap, por isso o rect tem de ser
+// recalculável fora do draw)
+UiRect actionBtnRect(f32 x, f32 y, f32 w) {
+    const f32 bw = 152.0f;
+    return UiRect{x + w - 16.0f - bw, y + 4.0f, bw, kRowH - 8.0f};
+}
+
 // linha com rótulo + BOTÃO (ação) à direita
 bool actionRow(UiContext& ui, u64 id, f32 x, f32 y, f32 w, const char* label,
                const char* btn) {
@@ -44,8 +53,7 @@ bool actionRow(UiContext& ui, u64 id, f32 x, f32 y, f32 w, const char* label,
         ui.labelFitted(x + 16.0f, baseline(ui, {x, y, w, kRowH}), label,
                        theme::kTheme.text1, w * 0.55f);
     }
-    const f32 bw = 152.0f;
-    const UiRect b = {x + w - 16.0f - bw, y + 4.0f, bw, kRowH - 8.0f};
+    const UiRect b = actionBtnRect(x, y, w);
     const bool held = ui.widgetActive(id);
     ui.panelRounded(b.x, b.y, b.w, b.h, theme::kRadiusCard,
                     held ? theme::kTheme.accentPress : theme::kTheme.accent);
@@ -139,7 +147,7 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
         {kBitGeral, "Geral", 3},       // versão/build · repor layout · imersivo
         {kBitAudio, "Audio", 3},       // volume · fonte · reconverter
         {kBitPerm, "Permissoes", 2},   // all files · mic
-        {kBitDiag, "Diagnostico", 5},  // ver logs · export · probe · dumps · modo
+        {kBitDiag, "Diagnostico", 6},  // ver logs · export · probe · dumps · modo · texto
         {kBitDocs, "Docs", 1},         // (0.9.2 — spec I: existe SEM linha)
         {kBitSobre, "Sobre", 2},       // sha256 · licencças
     };
@@ -242,6 +250,14 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
             res = kProbeAudio;
         }
         y += kRowH;
+        // 0.9.1 — JANELA DE TEXTO: portrait + IME do sistema (a semente do
+        // editor de script 0.9.2; vive em Diagnóstico enquanto não há
+        // componente Script num TIC — decisão documentada no relatório)
+        if (actionRow(ui, kTextWindowId, ox, y, aw,
+                      "editor de texto (IME)", "abrir")) {
+            res = kOpenTextWindow;
+        }
+        y += kRowH;
         char dumps[32];
         std::snprintf(dumps, sizeof(dumps), "%u (badge ANTIGO no viewer)",
                       ctx.dumpCount);
@@ -288,24 +304,107 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
     // da casa: widgetHit só desenha, o scroll devolve o tap DEPOIS do fim)
     f32 tpx = 0.0f, tpy = 0.0f;
     if (res == kNone && ui.scrollTap(kScrollId, tpx, tpy)) {
-        // recalcula as posições dos headers (a MESMA matemática do draw)
+        // 0.9.1 — FIX da mecânica de toque: os alvos DENTRO da região de
+        // scroll (headers, botões de ação, toggles) não capturam pelo
+        // widgetHit (scroll::buttonCaptures=false — o scroll reclama o
+        // gesto); o tap volta AQUI e é re-despachado por COORDENADAS com a
+        // MESMA matemática do draw (o walk abaixo avança y na mesma ordem).
+        // O walk antigo só via os HEADERS — os botões de ação/toggles da
+        // página estavam MORTOS (Ver logs/Export/Probe/reconverter/All
+        // Files/Mic/Repor layout/Imersivo) — apanhado pelo teste do tap na
+        // nova linha "editor de texto (IME)".
         f32 hy = oy + 56.0f + 8.0f - off;
-        const struct {
-            u32 bit;
-            u32 rowsIfOpen;
-        } sec2[6] = {
-            {kBitGeral, 3}, {kBitAudio, 3}, {kBitPerm, 2},
-            {kBitDiag, 5},  {kBitDocs, 1},  {kBitSobre, 2},
+        // a linha B de uma actionRow / a linha inteira do toggle:
+        const auto hit = [](f32 px, f32 py, const UiRect& r) {
+            return px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h;
         };
-        for (int i = 0; i < 6; ++i) {
-            if (tpy >= hy && tpy < hy + kSectionH && tpx >= ox &&
-                tpx < ox + aw) {
-                st.settingsCollapsed ^= sec2[i].bit;
+        // walk: cada secção = header + (linhas SE aberta, na ordem do draw)
+        const struct { u32 bit; bool open; } secs3[6] = {
+            {kBitGeral, !(collapsed & kBitGeral)},
+            {kBitAudio, !(collapsed & kBitAudio)},
+            {kBitPerm,  !(collapsed & kBitPerm)},
+            {kBitDiag,  !(collapsed & kBitDiag)},
+            {kBitDocs,  !(collapsed & kBitDocs)},
+            {kBitSobre, !(collapsed & kBitSobre)},
+        };
+        for (const auto& s3 : secs3) {
+            // HEADER (colapsar/expandir)
+            if (hit(tpx, tpy, UiRect{ox, hy, aw, kSectionH})) {
+                st.settingsCollapsed ^= s3.bit;
                 break;
             }
             hy += kSectionH;
-            if (!(collapsed & sec2[i].bit)) {
-                hy += static_cast<f32>(sec2[i].rowsIfOpen) * kRowH;
+            if (!s3.open) {
+                continue;
+            }
+            // as linhas da secção (a MESMA ordem do draw) — só as que têm
+            // alvo: action (botão à direita) e toggle (linha inteira);
+            // infoRows não têm alvo e avançam cursor.
+            switch (s3.bit) {
+                case kBitGeral:
+                    hy += kRowH;   // info versão
+                    if (hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        res = kResetLayout;   // Repor layout
+                    }
+                    hy += kRowH;
+                    if (res == kNone &&
+                        hit(tpx, tpy, UiRect{ox, hy, aw, kRowH})) {
+                        res = kToggleImmersive;
+                    }
+                    hy += kRowH;
+                    break;
+                case kBitAudio:
+                    hy += kRowH;   // info volume
+                    hy += kRowH;   // info fonte
+                    if (hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        res = kReconvert;
+                    }
+                    hy += kRowH;
+                    break;
+                case kBitPerm:
+                    if (hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        res = kAllFilesPressed;
+                    }
+                    hy += kRowH;
+                    if (res == kNone &&
+                        hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        res = kMicPressed;
+                    }
+                    hy += kRowH;
+                    break;
+                case kBitDiag:
+                    if (hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        res = kViewLogs;
+                    }
+                    hy += kRowH;
+                    if (res == kNone &&
+                        hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        res = kExportLogs;
+                    }
+                    hy += kRowH;
+                    if (res == kNone &&
+                        hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        res = kProbeAudio;
+                    }
+                    hy += kRowH;
+                    if (res == kNone &&
+                        hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        res = kOpenTextWindow;   // 0.9.1
+                    }
+                    hy += kRowH;
+                    hy += kRowH;   // info dumps
+                    hy += kRowH;   // info armazenamento
+                    break;
+                case kBitDocs:
+                    hy += kRowH;   // label (0.9.2)
+                    break;
+                case kBitSobre:
+                    hy += kRowH;   // info sha256
+                    hy += kRowH;   // info licenças
+                    break;
+            }
+            if (res != kNone) {
+                break;
             }
         }
     }

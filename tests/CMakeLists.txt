@@ -146,7 +146,9 @@ add_executable(test_core
         ${CORE_DIR}/ui/ViewportChrome.cpp   # 0.9.0: chrome do viewport
         ${CORE_DIR}/ui/BottomPanel.cpp   # 0.9.0: painel de baixo
         ${CORE_DIR}/ui/SettingsPage.cpp   # 0.9.0: página de Settings
+        ${CORE_DIR}/ui/TextWindow.cpp   # 0.9.1: janela de texto pesado (IME)
         ${CORE_DIR}/core/UndoStack.cpp   # 0.9.0: undo/redo por snapshot
+        ${CORE_DIR}/platform/ImeQueue.cpp   # 0.9.1: fila do IME + orientação
         ${CORE_DIR}/render/Camera.cpp
         # F4: física pura (sem GL)
         ${CORE_DIR}/physics/Shapes.cpp
@@ -207,6 +209,7 @@ add_executable(test_core
         # que inclui platform/main.cpp) — secção 0.8.9 lá.
         test_wiring089.cpp
         test_wiring090.cpp   # 0.9.0: design system + editor polish (spec A-M)
+        test_wiring091.cpp   # 0.9.1: orientação (portrait) + IME do sistema
         # 0.8.10: formatos próprios + 500 MB + archives + migração + identidade
         test_wiring010.cpp
         # 0.8.11: ÁUDIO — .gi (ADPCM round-trip/WAV/OGG/MP3 erros),
@@ -366,6 +369,8 @@ add_executable(c33_virtual
         ${CORE_DIR}/core/AudioEngine.cpp
         ${CORE_DIR}/platform/AudioOut.cpp
         ${CORE_DIR}/ui/AudioWorkspace.cpp
+        ${CORE_DIR}/ui/TextWindow.cpp   # 0.9.1: janela de texto (replay da rotação)
+        ${CORE_DIR}/platform/ImeQueue.cpp   # 0.9.1: fila do IME + orientação
         c33_virtual.cpp)
 
 target_include_directories(test_core PRIVATE

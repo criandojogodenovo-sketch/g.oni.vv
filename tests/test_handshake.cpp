@@ -384,8 +384,8 @@ TEST(jni_onload_registers_two_natives) {
 
     EXPECT(rc == JNI_VERSION_1_6);
     EXPECT(g_jni.register_natives_calls == 1);
-    EXPECT(g_jni.register_natives_names.size() == 4);   // 0.8.10: +nativeSetBuildInfo
-    EXPECT(g_jni.register_natives_sigs.size() == 4);
+    EXPECT(g_jni.register_natives_names.size() == 6);   // 0.9.1: +buildInfo +IME (text/key)
+    EXPECT(g_jni.register_natives_sigs.size() == 6);
     bool hasRegister = false, hasResult = false, hasOpenProject = false;
     for (const std::string& n : g_jni.register_natives_names) {
         if (n == "nativeRegisterActivity") hasRegister = true;
@@ -455,7 +455,7 @@ TEST(jni_onload_findclass_failure_soft_recovery) {
 
     EXPECT(vv::storage::handshakeOk());
     EXPECT(g_jni.register_natives_calls == 1);   // registo recuperado AQUI
-    EXPECT(g_jni.register_natives_names.size() == 4);   // 0.8.10: +buildInfo
+    EXPECT(g_jni.register_natives_names.size() == 6);   // 0.9.1: +buildInfo +IME (text/key)
     bool hasRegister = false, hasResult = false, hasOpenProject = false;
     bool hasBuildInfo = false;
     for (const std::string& n : g_jni.register_natives_names) {

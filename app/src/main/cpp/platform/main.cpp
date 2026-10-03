@@ -59,6 +59,7 @@
 #include "platform/InputState.h"
 #include "platform/StorageBridge.h"
 #include "platform/StoragePerm.h"
+#include "platform/ImeQueue.h"   // 0.9.1: fila do IME do sistema + orientação
 #include "render/Camera.h"
 #include "render/Cube.h"
 #include "render/Grid.h"
@@ -1993,6 +1994,32 @@ u32 g_windowTerms = 0;   // APP_CMD_TERM_WINDOW vistos (contexto morto)
 void showToast(const char* msg) {
     std::snprintf(g_toast, sizeof(g_toast), "%s", msg);
     g_toastT = 1.8f;
+}
+
+// ---- 0.9.1 — JANELA DE TEXTO PESADO (abrir/fechar COM o par obrigatório) ----
+//
+// ABRIR  = portrait (JNI) + IME show + log da orientação (ime::setOrientation
+//          grava o estado e loga; o par de chamadas Java é o executor).
+// FECHAR = landscape + IME hide + log. O par é INSEPARÁVEL — os testes do
+//          device (wiring087) aferem os DOIS lados em cada transição.
+void openTextWindow() {
+    editor::textwin::open(g_editor.textWin);
+    if (ime::setOrientation(ime::Orientation::Portrait,
+                            "janela de texto aberta")) {
+        storage::jniSetOrientation(true);
+    }
+    storage::jniImeShow();
+    elog::info("texto: janela aberta — IME do sistema pedido (show)");
+}
+
+void closeTextWindow() {
+    editor::textwin::close(g_editor.textWin);
+    if (ime::setOrientation(ime::Orientation::Landscape,
+                            "janela de texto fechada")) {
+        storage::jniSetOrientation(false);
+    }
+    storage::jniImeHide();
+    elog::info("texto: janela fechada — IME escondido, landscape reposto");
 }
 
 // 0.6.7: desliga os MeshRenderers dos objetos de GPU que vão morrer.
@@ -4126,6 +4153,15 @@ void frame() {
                 runAudioProbe();
                 break;
             }
+            case editor::settings::kOpenTextWindow: {
+                // 0.9.1 — o Settings fecha e a janela de texto fica COMO
+                // modal único (sem duplo-dispatch do mesmo toque nos dois
+                // botões back — o back da janela e o do settings são ambos
+                // 56dp no canto superior esquerdo)
+                g_editor.settingsMenu = false;
+                openTextWindow();
+                break;
+            }
             case editor::settings::kReconvert: {
                 reconvertAllAssets();
                 break;
@@ -4623,6 +4659,21 @@ void frame() {
     if (g_editor.logViewer) {
         editor::drawLogViewer(g_ui, g_input, w, h, g_editor,
                               g_logLines, g_logDumps);
+    }
+
+    // 0.9.1 — JANELA DE TEXTO (topmost): consome a fila do IME ANTES do
+    // desenho (o texto do frame entra no buffer deste frame) e fecha com
+    // o par landscape+imeHide quando o back é tocado. Modal: qualquer
+    // coisa do editor por baixo está gating pelo anyOverlayOpen.
+    if (g_editor.textWin.open) {
+        ime::Event ev;
+        while (ime::poll(ev)) {
+            editor::textwin::applyEvent(g_editor.textWin, ev);
+        }
+        if (editor::textwin::draw(g_ui, g_input, g_editor.textWin,
+                                  w, h, g_frameDt) == 1) {
+            closeTextWindow();
+        }
     }
 
     // 0.7.0 — GESTÃO DE TICs: menu contextual (⋮) → Renomear/Remover/

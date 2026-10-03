@@ -171,6 +171,8 @@ add_library(goni_vv SHARED
         ui/ViewportChrome.cpp   # 0.9.0: chrome do viewport (stack/toolbar/triad)
         ui/BottomPanel.cpp   # 0.9.0: painel de baixo (spec E/K)
         ui/SettingsPage.cpp   # 0.9.0: página de Settings (spec I)
+        ui/TextWindow.h   # 0.9.1: janela de texto pesado (portrait + IME)
+        ui/TextWindow.cpp
         ui/Timeline.h
         ui/Timeline.cpp
         ui/Icons.cpp
@@ -205,6 +207,9 @@ add_library(goni_vv SHARED
         # F5.2: ponte All Files Access (device-only — a suíte core compila
         # sem este TU; FileApi.h é compilado no core)
         platform/StorageBridge.cpp
+        # 0.9.1: IME do sistema — fila Java→engine + política de orientação
+        platform/ImeQueue.h
+        platform/ImeQueue.cpp
         # 0.8.11: ÁUDIO — backend de saída. AudioOut.cpp é COMUM (probe
         # harness + fábricas stub no host); AudioOutDevice.cpp é ANDROID
         # APENAS (AAudio via dlopen — o minSdk 24 não liga a API 26 — e o

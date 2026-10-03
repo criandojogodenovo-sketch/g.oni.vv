@@ -57,6 +57,7 @@
 #include "core/Handle.h"
 #include "ui/UiContext.h"
 #include "ui/EditorLayout.h"
+#include "ui/TextWindow.h"   // 0.9.1: janela de texto pesado (st.textWin)
 #include "platform/FileApi.h"
 #include "platform/StoragePerm.h"
 #include "render/Primitives.h"   // 0.8.0: PrimParams no AssetResolvers
@@ -205,6 +206,11 @@ struct EditorState {
     // 0.9.0 (spec I/G) — secções colapsáveis da PÁGINA de Settings (bitmask;
     // PERSISTE no layout.json junto com o resto do layout)
     u32    settingsCollapsed = 0;
+
+    // 0.9.1 — JANELA DE TEXTO PESADO (modal — portrait + IME do sistema;
+    // a semente do editor de script 0.9.2). O gate anyOverlayOpen cobre:
+    // nada do editor desenha/interage atrás dela.
+    textwin::State textWin;
 };
 
 // Rect do viewport central (entre os painéis) — usado para o gate da câmara.

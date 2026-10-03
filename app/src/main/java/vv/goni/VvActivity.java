@@ -13,6 +13,16 @@ import android.provider.MediaStore;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.View;   // 0.9.0 (spec I): setImmersive usa View.SYSTEM_UI_FLAG_*
+import android.content.pm.ActivityInfo;   // 0.9.1: setRequestedOrientation
+import android.graphics.Color;            // 0.9.1: EditText do IME transparente
+import android.text.InputType;            // 0.9.1: inputType multi-linha
+import android.view.KeyEvent;             // 0.9.1: teclas do IME
+import android.view.inputmethod.EditorInfo;             // 0.9.1
+import android.view.inputmethod.InputConnection;        // 0.9.1
+import android.view.inputmethod.InputConnectionWrapper; // 0.9.1
+import android.view.inputmethod.InputMethodManager;     // 0.9.1
+import android.widget.EditText;           // 0.9.1: o host do IME
+import android.widget.FrameLayout;        // 0.9.1: layout 1x1 do host
 
 /**
  * F5.2 — ponte Java mínima do ARMAZENAMENTO (sucessora da exceção SAF).
@@ -96,6 +106,13 @@ public class VvActivity extends NativeActivity {
     private static native void nativeSetBuildInfo(String version, int versionCode,
                                                   String git, String soSha, long epoch);
 
+    // 0.9.1 — IME DO SISTEMA: o InputConnection do EditText encaminha para
+    // AQUI (fila ime:: no nativo; a engine consome por frame). text = texto
+    // commitado (UTF-8); keyCode/action = tecla (DEL 67, ENTER 66, DPAD) —
+    // só ACTION_DOWN é encaminhado (a engine não repete edges).
+    private static native void nativeOnImeText(String text);
+    private static native void nativeOnImeKey(int keyCode, int action);
+
     // lê UMA linha "chave=valor" do assets/build_info.txt (vazio se ausente)
     private String assetInfo(String key) {
         try (java.io.BufferedReader r = new java.io.BufferedReader(
@@ -132,6 +149,11 @@ public class VvActivity extends NativeActivity {
             // e o nativo reporta o handshake pendente no boot do engine.log
             Log.e("GONI", "java: nativeRegisterActivity FALHOU (onCreate)", t);
         }
+
+        // 0.9.1 — host do IME (1x1px, transparente, canto): criado UMA vez;
+        // o IME só abre quando a ENGINE pede (imeShow) — nunca por conta do
+        // foco (o NativeActivity não tem UI; sem isto nada o abre sozinho).
+        initImeHost();
 
         // F5.4 — projeto escolhido no Gestor de Projetos (extras do Intent).
         // SÓ chega aqui quem veio do gestor: VvProjects.launchEditor põe os
@@ -215,14 +237,14 @@ public class VvActivity extends NativeActivity {
     // READ-ONLY no device, errno=30 — a causa exata da migração morta no
     // C33: "fileapi: mkdir falhou em '/tmp'" → "staging falhou"). Chamado
     // por JNI (stagingAbsPath do AssetConverter) no thread da engine.
-    /**
-     * 0.9.0 (spec I) — MODO IMERSIVO: esconde as barras do sistema (status +
-     * nav) com immersive sticky; false = volta ao normal. Chamado por JNI a
-     * partir do toggle de Settings (Geral → Imersivo). API 24+: os flags
-     * SYSTEM_UI_FLAG_* (deprecados na 30 mas FUNCIONAIS até lá; a app mira
-     * o C33 com Android 12/13 — sem WindowInsetsController necessário).
-     */
-    void setImmersive(boolean on) {
+    // 0.9.0 (spec I) — MODO IMERSIVO: esconde as barras do sistema (status +
+    // nav) com immersive sticky; false = volta ao normal. Chamado por JNI a
+    // partir do toggle de Settings (Geral → Imersivo). API 24+: os flags
+    // SYSTEM_UI_FLAG_* (deprecados na 30 mas FUNCIONAIS até lá; a app mira
+    // o C33 com Android 12/13 — sem WindowInsetsController necessário).
+    // NOME: setImmersiveMode (0.9.0-fix CI) — Activity.setImmersive(boolean)
+    // é FINAL na plataforma e não pode ser override (javac morria).
+    public void setImmersiveMode(boolean on) {
         try {
             final View decor = getWindow().getDecorView();
             runOnUiThread(() -> {
@@ -253,6 +275,131 @@ public class VvActivity extends NativeActivity {
             Log.e("GONI", "java: cacheDirPath FALHOU", e);
             return "";   // o nativo dá o erro LEGÍVEL (nunca /tmp)
         }
+    }
+
+    // ================= 0.9.1 — ORIENTAÇÃO + IME DO SISTEMA ==================
+    //
+    // POLÍTICA (0.9.1 §1): janelas de TEXTO PESADO (editor de script e
+    // futuros editores de código) pedem PORTRAIT; ao fechar, LANDSCAPE.
+    // O ESTADO vive no nativo (platform/ImeQueue) — aqui é só o executor
+    // (setRequestedOrientation precisa da Activity). O frame do device
+    // rotaciona → surfaceChanged → INIT_WINDOW (o lifecycle 0.6.7 re-upa
+    // tudo — a regressão "sem glifos brancos" é testada na suíte).
+    public void setOrientation(boolean portrait) {
+        runOnUiThread(() -> {
+            try {
+                setRequestedOrientation(portrait
+                        ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                        : ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                Log.i("GONI", "java: orientação pedida = "
+                        + (portrait ? "portrait" : "landscape"));
+            } catch (Throwable t) {
+                Log.e("GONI", "java: setOrientation FALHOU", t);
+            }
+        });
+    }
+
+    // o HOST do IME: EditText 1x1 TRANSPARENTE. O InputConnection é
+    // encaminhado ao NATIVO e o EditText NUNCA acumula texto (cada commit
+    // devolve true SEM chamar super) — o buffer da janela é da engine, não
+    // da Java (uma única fonte de verdade, zero duplicação). Isolado AQUI
+    // (🔶: mudar o contrato do IME mexe SÓ nesta classe + ImeQueue.h).
+    private EditText imeHost;
+
+    private void initImeHost() {
+        if (imeHost != null) return;
+        imeHost = new EditText(this) {
+            @Override
+            public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
+                final InputConnection base = super.onCreateInputConnection(outAttrs);
+                outAttrs.inputType = InputType.TYPE_CLASS_TEXT
+                        | InputType.TYPE_TEXT_FLAG_MULTI_LINE;
+                outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
+                        | EditorInfo.IME_ACTION_NONE;
+                return new InputConnectionWrapper(base, true) {
+                    @Override
+                    public boolean commitText(CharSequence text, int newCursorPosition) {
+                        try {
+                            nativeOnImeText(text != null ? text.toString() : "");
+                        } catch (Throwable t) {
+                            Log.e("GONI", "ime: nativeOnImeText FALHOU", t);
+                        }
+                        return true;   // SEM super: o host fica VAZIO
+                    }
+
+                    @Override
+                    public boolean deleteSurroundingText(int beforeLength,
+                                                         int afterLength) {
+                        // teclados suaves mandam DEL por AQUI (composição)
+                        for (int i = 0; i < beforeLength; i++) {
+                            nativeOnImeKey(KeyEvent.KEYCODE_DEL, 1);
+                        }
+                        return true;
+                    }
+
+                    @Override
+                    public boolean sendKeyEvent(KeyEvent event) {
+                        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                            nativeOnImeKey(event.getKeyCode(), 0);
+                        }
+                        return true;   // SEM super: o host não re-age
+                    }
+
+                    @Override
+                    public boolean performEditorAction(int actionCode) {
+                        // GBoard/teclados suaves: ENTER do IME vem por aqui
+                        nativeOnImeKey(KeyEvent.KEYCODE_ENTER, 1);
+                        return true;
+                    }
+                };
+            }
+        };
+        imeHost.setAlpha(0f);
+        imeHost.setBackgroundColor(Color.TRANSPARENT);
+        imeHost.setCursorVisible(false);
+        final FrameLayout.LayoutParams lp =
+                new FrameLayout.LayoutParams(1, 1);
+        addContentView(imeHost, lp);
+        Log.i("GONI", "java: host do IME criado (1x1 transparente)");
+    }
+
+    // SHOW/HIDE POR CONTA DA ENGINE (0.9.1 §2): o chamador nativo é o
+    // frame da engine (janela de texto aberta/fechada) — o IME nunca abre
+    // sozinho nem fica preso quando a janela fecha.
+    public void imeShow() {
+        runOnUiThread(() -> {
+            try {
+                initImeHost();
+                imeHost.requestFocus();
+                final InputMethodManager imm = (InputMethodManager) getSystemService(
+                        android.content.Context.INPUT_METHOD_SERVICE);
+                final boolean ok = imm != null && imm.showSoftInput(
+                        imeHost, InputMethodManager.SHOW_IMPLICIT);
+                Log.i("GONI", "java: imeShow pedido ("
+                        + (ok ? "aceite" : "rejeitado") + ")");
+            } catch (Throwable t) {
+                Log.e("GONI", "java: imeShow FALHOU", t);
+            }
+        });
+    }
+
+    public void imeHide() {
+        runOnUiThread(() -> {
+            try {
+                if (imeHost != null) {
+                    final InputMethodManager imm = (InputMethodManager) getSystemService(
+                            android.content.Context.INPUT_METHOD_SERVICE);
+                    if (imm != null) {
+                        imm.hideSoftInputFromWindow(
+                                imeHost.getWindowToken(), 0);
+                    }
+                    imeHost.clearFocus();
+                }
+                Log.i("GONI", "java: imeHide pedido");
+            } catch (Throwable t) {
+                Log.e("GONI", "java: imeHide FALHOU", t);
+            }
+        });
     }
 
     // F5.1-hotfix (parte 1.4) — EXPORT DOS LOGS para o Downloads PÚBLICO.

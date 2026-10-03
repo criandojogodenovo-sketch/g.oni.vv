@@ -61,6 +61,12 @@
 // ponte Java (papel do "stub Java" — como o test_handshake)
 extern "C" void Java_vv_goni_VvActivity_nativeRegisterActivity(
         JNIEnv*, jclass, jobject activity, jstring origin);
+// 0.9.1 — os natives do IME (definidos no StorageBridge.cpp; os testes
+// chamam-nos DIRETO — o mesmo caminho que o InputConnection do device)
+extern "C" void Java_vv_goni_VvActivity_nativeOnImeText(
+        JNIEnv*, jclass, jstring text);
+extern "C" void Java_vv_goni_VvActivity_nativeOnImeKey(
+        JNIEnv*, jclass, jint keyCode, jint action);
 
 using namespace vv;
 using ::test::nearEqF;
@@ -1710,5 +1716,174 @@ TEST(wiring011_device_frame_audio_mode_e_glyphs) {
     }
     g_editor.audioMode = false;
 
+    onAppCmd(&app, APP_CMD_TERM_WINDOW);
+}
+
+// ===========================================================================
+// 0.9.1 — ORIENTAÇÃO + IME DO SISTEMA (campanha 0.9): casos do CAMINHO DO
+// DEVICE (o TU inclui platform/main.cpp — openTextWindow/closeTextWindow,
+// o bridge JNI com o fake activity e o INIT_WINDOW real). A parte PURA
+// (fila ime::, política de orientação, textwin draw) vive em
+// test_wiring091.cpp.
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// 0.9.1-1. ABRIR → portrait + imeShow (o par INSEPARÁVEL); o IME escreve
+// no buffer (nativeOnImeText/Key → fila → frame); DEL apaga 1 code point.
+// ---------------------------------------------------------------------------
+TEST(wiring091_device_textwin_abre_portrait_ime_escreve) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    javaRegistersGranted();
+
+    android_app app;
+    std::memset(&app, 0, sizeof(app));
+    onAppCmd(&app, APP_CMD_INIT_WINDOW);
+    EXPECT(g_ready);
+    if (!g_font.ok()) {
+        const char* paths[] = {FONT_FIXTURE};
+        EXPECT(g_font.loadFromPaths(paths, 1, 28.0f));
+    }
+    g_ui.setFont(&g_font);
+
+    // ABRIR: o par portrait+IME (o estado vive no ime::; o Java executa)
+    ime::clearForTest();
+    g_jni.void_calls.clear();
+    openTextWindow();
+    EXPECT(g_editor.textWin.open);
+    EXPECT(ime::orientation() == ime::Orientation::Portrait);
+    bool sawPortrait = false, sawImeShow = false;
+    for (const auto& c : g_jni.void_calls) {
+        if (c.first == "setOrientation" && c.second == 1) sawPortrait = true;
+        if (c.first == "imeShow") sawImeShow = true;
+    }
+    EXPECT(sawPortrait);   // setRequestedOrientation(PORTRAIT) pedido
+    EXPECT(sawImeShow);    // InputMethodManager.showSoftInput pedido
+    EXPECT(logHas("orientacao: portrait pedida (janela de texto aberta)"));
+
+    // IME escreve: commit "Ola" → ENTER (66) → "mundo"; o frame consome a
+    // fila (o MESMO código que corre no device — os natives reais do bridge)
+    jclass cls = g_jni.env ? nullptr : nullptr;   // o fake aceita nullptr
+    auto push = [&](const char* s) {
+        const jstring js = g_jni.newString(s);
+        Java_vv_goni_VvActivity_nativeOnImeText(g_jni.env, cls, js);
+    };
+    auto key = [&](int kc) {
+        Java_vv_goni_VvActivity_nativeOnImeKey(g_jni.env, cls,
+                                               static_cast<jint>(kc), 0);
+    };
+    push("Ola");
+    key(66);       // KEYCODE_ENTER
+    push("mundo");
+    key(67);       // KEYCODE_DEL (apaga o 'o' — 1 code point)
+    push("!");
+    frame();
+    EXPECT(g_editor.textWin.buf == "Ola\nmund!");
+
+    // frame com a janela aberta: desenha de verdade (modal) e completa
+    const auto t0 = std::chrono::steady_clock::now();
+    frame();
+    EXPECT(msSince(t0) < 500.0);
+    EXPECT(glstub::stats.drawArraysCalls > 0);
+
+    // FECHAR: o par landscape+imeHide (o espelho EXATO do abrir)
+    g_jni.void_calls.clear();
+    closeTextWindow();
+    EXPECT(!g_editor.textWin.open);
+    EXPECT(ime::orientation() == ime::Orientation::Landscape);
+    bool sawLandscape = false, sawImeHide = false;
+    for (const auto& c : g_jni.void_calls) {
+        if (c.first == "setOrientation" && c.second == 0) sawLandscape = true;
+        if (c.first == "imeHide") sawImeHide = true;
+    }
+    EXPECT(sawLandscape);
+    EXPECT(sawImeHide);
+    EXPECT(logHas("orientacao: landscape pedida (janela de texto fechada)"));
+
+    // IME com a janela fechada: não vinga (não contamina o teclado in-app)
+    push("invasao");
+    frame();
+    EXPECT(g_editor.textWin.buf.empty());
+
+    onAppCmd(&app, APP_CMD_TERM_WINDOW);
+}
+
+// ---------------------------------------------------------------------------
+// 0.9.1-2. ROTAÇÃO com a janela aberta: TERM_WINDOW + INIT_WINDOW com a
+// superfície em PORTRAIT (720×1536) — o lifecycle re-upa TUDO (a regressão
+// "glifos brancos" — o atlas re-bake é o caminho 0.6.7) e a JANELA SOBREVIVE
+// com o buffer INTACTO (estado da engine, não da GPU).
+// ---------------------------------------------------------------------------
+TEST(wiring091_device_rotacao_nao_corrompe_render_nem_perde_buffer) {
+    rmrf(kTestLogs);
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    javaRegistersGranted();
+
+    android_app app;
+    std::memset(&app, 0, sizeof(app));
+    onAppCmd(&app, APP_CMD_INIT_WINDOW);
+    if (!g_font.ok()) {
+        const char* paths[] = {FONT_FIXTURE};
+        EXPECT(g_font.loadFromPaths(paths, 1, 28.0f));
+    }
+    g_ui.setFont(&g_font);
+
+    ime::clearForTest();
+    openTextWindow();
+    // escreve pelo IME (o caminho real do bridge)
+    {
+        const jstring js = g_jni.newString("texto antes de rodar");
+        Java_vv_goni_VvActivity_nativeOnImeText(g_jni.env, nullptr, js);
+        frame();
+    }
+    EXPECT(g_editor.textWin.buf == "texto antes de rodar");
+    const std::string bufAntes = g_editor.textWin.buf;
+
+    // ---- a ROTAÇÃO: o surface morre e renasce em PORTRAIT (720×1536) ----
+    eglstub::g_surfaceW = 720;
+    eglstub::g_surfaceH = 1536;
+    onAppCmd(&app, APP_CMD_TERM_WINDOW);
+    EXPECT(!g_ready);
+    onAppCmd(&app, APP_CMD_INIT_WINDOW);
+    EXPECT(g_ready);
+    EXPECT(g_egl.width() == 720);     // a superfície rodou
+    EXPECT(g_egl.height() == 1536);
+    // o lifecycle fix re-upa TUDO no contexto NOVO (sem glifos brancos — a
+    // regressão 0.6.7; no device a linha "RE-UPLOAD no contexto novo" aparece
+    // nas fontes do sistema, no hospedeiro a fixture recarrega no mesmo
+    // caminho — o que se aferva é o CONTEXTO NOVO + a fonte OK)
+    if (!g_font.ok()) {
+        const char* paths[] = {FONT_FIXTURE};
+        EXPECT(g_font.loadFromPaths(paths, 1, 28.0f));
+    }
+    g_ui.setFont(&g_font);
+    EXPECT(g_font.ok());
+    EXPECT(logHas("lifecycle: INIT_WINDOW #"));
+
+    // a janela SOBREVIVE (estado da engine) e o frame corre em portrait
+    EXPECT(g_editor.textWin.open);
+    EXPECT(g_editor.textWin.buf == bufAntes);
+    const auto t0 = std::chrono::steady_clock::now();
+    frame();
+    EXPECT(msSince(t0) < 500.0);
+    EXPECT(glstub::stats.drawArraysCalls > 0);
+
+    // e o IME continua a escrever após a rotação
+    {
+        const jstring js = g_jni.newString(" e depois");
+        Java_vv_goni_VvActivity_nativeOnImeText(g_jni.env, nullptr, js);
+        frame();
+    }
+    EXPECT(g_editor.textWin.buf == "texto antes de rodar e depois");
+
+    // fechar em portrait: landscape reposto (o par vale SEMPRE)
+    closeTextWindow();
+    EXPECT(ime::orientation() == ime::Orientation::Landscape);
+
+    // o DEVICE VOLTA a landscape (o próximo INIT é a app inteira)
+    eglstub::g_surfaceW = 1280;
+    eglstub::g_surfaceH = 720;
     onAppCmd(&app, APP_CMD_TERM_WINDOW);
 }
