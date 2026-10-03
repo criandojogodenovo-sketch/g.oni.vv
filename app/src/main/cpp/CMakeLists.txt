@@ -100,6 +100,7 @@ add_library(goni_vv SHARED
         vendor/astc-encoder/astcenc_weight_quant_xfer_tables.cpp
         render/Texture.h
         render/Texture.cpp
+        render/ThumbPng.cpp   # 0.9.0: miniatura do projeto (thumb.png)
         render/GpuAssets.h
         render/GpuAssets.cpp
         core/Project.h
@@ -166,6 +167,9 @@ add_library(goni_vv SHARED
         ui/EditorUi.cpp
         # 0.7.6: barra final de 5 grupos (G1..G5) + 8 ícones vetoriais
         ui/Toolbar.cpp
+        ui/ViewportChrome.cpp   # 0.9.0: chrome do viewport (stack/toolbar/triad)
+        ui/BottomPanel.cpp   # 0.9.0: painel de baixo (spec E/K)
+        ui/SettingsPage.cpp   # 0.9.0: página de Settings (spec I)
         ui/Timeline.h
         ui/Timeline.cpp
         ui/Icons.cpp

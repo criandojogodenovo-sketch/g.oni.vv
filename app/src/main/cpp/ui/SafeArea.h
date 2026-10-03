@@ -1,33 +1,39 @@
 #pragma once
 // ui/SafeArea.h — matemática PURA da safe-area (F4.2), sem GL — host-testável.
 //
-// O bug do C33 (B1): a UI assumia que a superfície EGL inteira era
-// desenhável, mas as barras do sistema (status/nav) TAPAM parte dela. O
-// Inspector media contentHeight 536 contra um visibleHeight INFLADO que
-// incluía a faixa da nav bar → maxOffset 0 → o scroll nunca ativava e o
-// fundo do painel (BodyComp / velx / add TouchControls) ficava atrás da
-// nav bar, inatingível.
+// 0.9.0 — LAYOUT DO EDITOR (spec D/E, mockups do autor):
+//   ┌──────────────────────────────────────────────────────────────┬─────┐
+//   │ TOP BAR 56dp  [Menu ≡][Cena ▾]      [pause][play][sliders] [gear]│ bg │
+//   │ TAB BAR 48dp  [3D][UI][ÁUDIO] (ícone+palavra, underline 2dp) │     │
+//   ├─────────┬──────────────────────────────────────┬─────────────┤     │
+//   │ HIERARQ │            VIEWPORT 3D               │  INSPECTOR  │surface
+//   │ (panel) │  [undo/redo/save/dup/paste] vertical │   (panel)   │     │
+//   │         │  triad 64dp sup-dir                  │             │     │
+//   │         │  [Sel][Mov][Rod][Esc] [snap] [+]     │             │     │
+//   ├─────────┴──────────────────────────────────────┴─────────────┤     │
+//   │ TAB BAR 48dp [Ficheiros][Consola][Animação] + DRAWER (0..400)│     │
+//   ├──────────────────────────────────────────────────────────────┤     │
+//   │ STATUS 24dp  FPS 60 · TICs 4                                  │ bg │
+//   └──────────────────────────────────────────────────────────────┴─────┘
 //
-// Fix raiz: ler android_app->contentRect (APP_CMD_CONTENT_RECT_CHANGED) e
-// INSETIR TODO o layout da UI (toolbar, painéis, viewport, status line,
-// toast, controlos de toque, overlays) por essa área. Com a altura REAL do
-// painel, o overflow do Inspector é detetado e o scroll ativa. Nada de UI é
-// desenhado fora do contentRect (o pass 3D continua fullscreen — é fundo,
-// não UI; zero render 3D nesta fase).
-//
-// Este header é a FONTE ÚNICA das constantes de layout F1 (UiContext e
-// EditorUi re-exportam os nomes antigos para compat com o código existente).
+// CONSTANTES (spec A/E/G): top bar 56 · tab bars 48 · status 24 · drawer
+// default 240 (pega 160–400, passos de 8) · painéis 300 · alvos ≥48.
 #include "core/Types.h"
 #include "ui/ScrollMath.h"   // UiRect (GL-free)
 
 namespace vv {
 namespace safe {
 
-// Alturas fixas da F1 (eram do UiContext) e largura dos painéis (era do
-// EditorUi) — agora num só sítio, partilhadas por desenho e testes.
-constexpr f32 kToolbarH = 88.0f;
-constexpr f32 kStatusH  = 40.0f;
-constexpr f32 kPanelW   = 300.0f;
+// ---- alturas/larguras do chrome 0.9.0 (FONTES ÚNICAS) ----------------------
+constexpr f32 kTopBarH   = 56.0f;   // spec D: barra de cima
+constexpr f32 kModeTabH  = 48.0f;   // spec D: tab bar de modo (3D|UI|ÁUDIO)
+constexpr f32 kToolbarH  = kTopBarH + kModeTabH;   // 104 (compat: nome de sempre)
+constexpr f32 kStatusH   = 24.0f;   // spec E: FPS 60 · TICs 4 (12sp text-2)
+constexpr f32 kPanelW    = 300.0f;  // painéis esquerdo/direito
+constexpr f32 kBottomTabH = 48.0f;  // spec E: tab bar do painel de baixo
+constexpr f32 kDrawerDef  = 240.0f; // spec E: drawer default
+constexpr f32 kDrawerMin  = 160.0f; // pega: 160..400 em passos de 8
+constexpr f32 kDrawerMax  = 400.0f;
 
 // Distância de cada borda da superfície EGL até à área desenhável
 // (contentRect do NativeActivity), em px.
@@ -39,11 +45,6 @@ struct Insets {
 };
 
 // Converte o contentRect (ARect do android_native_app_glue) em Insets.
-//   surfaceW/H   — tamanho da superfície EGL (g_egl.width/height)
-//   cL/cT/cR/cB  — contentRect.left/top/right/bottom
-// Regras: rect vazio/degenerado (o glue começa a zero e nem toda a ROM o
-// envia) → sem insets = comportamento antigo; valores negativos ou além da
-// superfície → clamp a 0 (nada de inset negativo).
 inline Insets insetsFromContentRect(f32 surfaceW, f32 surfaceH,
                                     i32 cL, i32 cT, i32 cR, i32 cB) {
     Insets in;
@@ -79,41 +80,83 @@ inline bool rectInside(const UiRect& inner, const UiRect& outer,
            inner.y + inner.h <= outer.y + outer.h + eps;
 }
 
-// ---- rects do layout F1 (todos DENTRO do contentRect) ----------------------
+// ---- rects do layout 0.9.0 (todos DENTRO do contentRect) --------------------
+
+// barra de cima (56) — [Menu][Cena] · [pause][play][sliders] · [gear]
 inline UiRect toolbarRect(f32 sw, f32 sh, const Insets& i) {
+    return {i.left, i.top, sw - i.left - i.right, kTopBarH};
+}
+// tab bar de modo (48, logo por baixo da barra de cima)
+inline UiRect modeTabRect(f32 sw, f32 sh, const Insets& i) {
+    return {i.left, i.top + kTopBarH, sw - i.left - i.right, kModeTabH};
+}
+// faixa do chrome de cima (56+48) — os painéis começam DEBAIXO dela
+inline UiRect topChromeRect(f32 sw, f32 sh, const Insets& i) {
     return {i.left, i.top, sw - i.left - i.right, kToolbarH};
 }
+// tab bar do painel de baixo (48, sempre visível — abre/fecha o drawer)
+inline UiRect bottomTabRect(f32 sw, f32 sh, const Insets& i) {
+    const f32 y = sh - i.bottom - kStatusH - kBottomTabH;
+    return {i.left, y, sw - i.left - i.right, kBottomTabH};
+}
+// status line (24 — a última faixa do contentRect)
 inline UiRect statusRect(f32 sw, f32 sh, const Insets& i) {
     return {i.left, sh - i.bottom - kStatusH, sw - i.left - i.right, kStatusH};
 }
-// viewport lógico (entre toolbar e status) — pai dos painéis e dos overlays
+// viewport lógico (entre o chrome de cima e a tab bar de baixo) — pai dos
+// painéis e do viewport central; o DRAWER come DENTRO dele (por baixo)
 inline UiRect viewportRect(f32 sw, f32 sh, const Insets& i) {
-    return {i.left, i.top + kToolbarH, sw - i.left - i.right,
-            sh - i.top - i.bottom - kToolbarH - kStatusH};
+    const f32 y = i.top + kToolbarH;
+    const f32 h = sh - i.top - i.bottom - kToolbarH - kStatusH - kBottomTabH;
+    return {i.left, y, sw - i.left - i.right, h > 0.0f ? h : 0.0f};
 }
 
-// ---- painéis do editor (F3) -------------------------------------------------
-inline UiRect hierarchyPanelRect(f32 sw, f32 sh, const Insets& i) {
+// ---- painéis do editor -----------------------------------------------------
+// drawerH = altura do drawer ABERTO (0 = fechado); os painéis laterais e o
+// viewport central ENCOLHEM pelo drawer (o drawer é full-width, spec E)
+inline UiRect panelsRect(f32 sw, f32 sh, const Insets& i, f32 drawerH) {
     const UiRect vp = viewportRect(sw, sh, i);
-    return {vp.x, vp.y, kPanelW, vp.h};
+    const f32 h = vp.h - drawerH;
+    return {vp.x, vp.y, vp.w, h > 0.0f ? h : 0.0f};
 }
-inline UiRect inspectorPanelRect(f32 sw, f32 sh, const Insets& i) {
-    const UiRect vp = viewportRect(sw, sh, i);
-    return {vp.x + vp.w - kPanelW, vp.y, kPanelW, vp.h};
+inline UiRect hierarchyPanelRect(f32 sw, f32 sh, const Insets& i, f32 drawerH) {
+    const UiRect p = panelsRect(sw, sh, i, drawerH);
+    return {p.x, p.y, kPanelW, p.h};
+}
+inline UiRect inspectorPanelRect(f32 sw, f32 sh, const Insets& i, f32 drawerH) {
+    const UiRect p = panelsRect(sw, sh, i, drawerH);
+    return {p.x + p.w - kPanelW, p.y, kPanelW, p.h};
 }
 // viewport central — gate da câmara: gestos atrás das barras NÃO orbitam
-inline UiRect centerRect(f32 sw, f32 sh, const Insets& i) {
-    const UiRect vp = viewportRect(sw, sh, i);
-    const f32 w = vp.w - 2.0f * kPanelW;
-    return {vp.x + kPanelW, vp.y, w > 0.0f ? w : 0.0f, vp.h};
+inline UiRect centerRect(f32 sw, f32 sh, const Insets& i, f32 drawerH) {
+    const UiRect p = panelsRect(sw, sh, i, drawerH);
+    const f32 w = p.w - 2.0f * kPanelW;
+    return {p.x + kPanelW, p.y, w > 0.0f ? w : 0.0f, p.h};
 }
-// 0.7.6 — sem o painel DIREITO (o G5 da toolbar escondeu o Inspector: a
-// área dele junta-se ao viewport central — os gestos passam a orbitar aí e
-// o mini-ecrã 2D cresce para a direita). O painel esquerdo fica SEMPRE.
+// 0.7.6: sem o painel DIREITO (o Inspector escondeu: a área dele junta-se ao
+// viewport central — os gestos passam a orbitar aí e o mini-ecrã 2D cresce)
+inline UiRect centerRect(f32 sw, f32 sh, const Insets& i, f32 drawerH,
+                          bool rightPanel) {
+    const UiRect p = panelsRect(sw, sh, i, drawerH);
+    const f32 w = p.w - kPanelW - (rightPanel ? kPanelW : 0.0f);
+    return {p.x + kPanelW, p.y, w > 0.0f ? w : 0.0f, p.h};
+}
+// compat 0.8.x: as assinaturas de sempre (drawer fechado) — os callers antigos
+// e os testes herdaram-nas; wrappers explícitos para não os partir
+inline UiRect centerRect(f32 sw, f32 sh, const Insets& i) {
+    return centerRect(sw, sh, i, 0.0f, true);
+}
 inline UiRect centerRect(f32 sw, f32 sh, const Insets& i, bool rightPanel) {
-    const UiRect vp = viewportRect(sw, sh, i);
-    const f32 w = vp.w - kPanelW - (rightPanel ? kPanelW : 0.0f);
-    return {vp.x + kPanelW, vp.y, w > 0.0f ? w : 0.0f, vp.h};
+    return centerRect(sw, sh, i, 0.0f, rightPanel);
+}
+inline UiRect hierarchyPanelRect(f32 sw, f32 sh, const Insets& i) {
+    return hierarchyPanelRect(sw, sh, i, 0.0f);
+}
+inline UiRect inspectorPanelRect(f32 sw, f32 sh, const Insets& i) {
+    return inspectorPanelRect(sw, sh, i, 0.0f);
+}
+inline UiRect viewportRect(f32 sw, f32 sh, const Insets& i, f32 /*drawerH*/) {
+    return viewportRect(sw, sh, i);
 }
 
 } // namespace safe

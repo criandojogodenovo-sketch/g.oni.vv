@@ -97,8 +97,7 @@ struct Env {
         if (!modalOpen) {
             // 0.7.6 — a BARRA FINAL de 5 grupos (o MESMO chamador do main;
             // com seleção de TIC em 3D o G4 transformação aparece)
-            const toolbar::Actions ta =
-                toolbar::draw(ui, st, gzMode, scene.get(st.selected) != nullptr);
+            const toolbar::Actions ta = toolbar::draw(ui, st);
             if (ta.menuDropdown) {
                 st.fileMenu = !st.fileMenu;
             }
@@ -237,14 +236,14 @@ TEST(uieditor_toggle_abre_viewport_2d_dedicado) {
     Env e;
     EXPECT(e.ok);
     EXPECT(!e.st.uiMode);
-    // 0.7.6 — o segmented 3D|UI é o G3 da barra final (toolbar::layout)
-    const toolbar::Layout L =
-        toolbar::layout(kSW, kSH, safe::Insets{}, false);
-    // tap no segmento "UI"
-    e.tap(L.modeUi.x + L.modeUi.w * 0.5f, L.modeUi.y + L.modeUi.h * 0.5f);
+    // 0.9.0 — o separador de modo é a TAB BAR 48dp (modetabsLayout)
+    const toolbar::ModeTabsLayout L =
+        toolbar::modetabsLayout(kSW, kSH, safe::Insets{}, false, false);
+    // tap no tab "UI"
+    e.tap(L.tabUi.x + L.tabUi.w * 0.5f, L.tabUi.y + L.tabUi.h * 0.5f);
     EXPECT(e.st.uiMode);
     // e volta ao 3D
-    e.tap(L.mode3d.x + L.mode3d.w * 0.5f, L.mode3d.y + L.mode3d.h * 0.5f);
+    e.tap(L.tab3d.x + L.tab3d.w * 0.5f, L.tab3d.y + L.tab3d.h * 0.5f);
     EXPECT(!e.st.uiMode);
 }
 
@@ -683,19 +682,22 @@ TEST(uieditor_hierarquia_olho_e_dots_e_vazio) {
     EXPECT(e.ok);
     e.frame();
 
-    // geometria da linha 0 (1 TIC): [nome 12..196][olho 202..242][... 248..288]
-    const f32 rowCY = 88.0f + 48.0f + 26.0f;   // listTop + meia linha
+    // geometria 0.9.0 (spec B): linha 48dp [ícone tipo 48zona][nome flex]
+    // [olho 48zona x=196..244][⋮ 48zona x=248..296]; listTop = chrome 104 +
+    // cabeçalho 48 + pesquisa 48 = 200
+    const f32 listTop = 104.0f + 48.0f + 48.0f;
+    const f32 rowCY = listTop + 24.0f;   // meia linha de 48
 
     // OLHO: toggle de visibilidade imediato
     EXPECT(e.scene.get(e.hud)->visible);
-    e.tap(202.0f + 20.0f, rowCY);
+    e.tap(196.0f + 24.0f, rowCY);
     EXPECT(!e.scene.get(e.hud)->visible);
-    e.tap(202.0f + 20.0f, rowCY);
+    e.tap(196.0f + 24.0f, rowCY);
     EXPECT(e.scene.get(e.hud)->visible);
 
-    // "..." abre o menu contextual
+    // "⋮" abre o menu contextual
     EXPECT(!e.st.contextMenu);
-    e.tap(248.0f + 20.0f, rowCY);
+    e.tap(248.0f + 24.0f, rowCY);
     EXPECT(e.st.contextMenu);
     EXPECT(e.st.contextTic == e.hud);
 
@@ -896,7 +898,7 @@ TEST(uieditor_inspector_tic_mostra_visivel_e_cor) {
     const InspProfile prof = inspectorProfile(*t);
     EXPECT(prof.mr);   // preset Player tem MeshRenderer → linhas de cor
     InspRow plan[32];
-    const u32 n = inspectorPlan(prof, tm, false, plan);
+    const u32 n = inspectorPlan(prof, tm, false, 0u, plan);
     u32 visRows = 0, colorRows = 0;
     for (u32 i = 0; i < n; ++i) {
         if (plan[i].kind == InspRow::Kind::VisToggle) {

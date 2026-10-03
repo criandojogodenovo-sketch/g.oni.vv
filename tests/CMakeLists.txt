@@ -142,6 +142,11 @@ add_executable(test_core
         # GL-free (cubo e câmara são lógica pura — sem contexto OpenGL)
         ${CORE_DIR}/render/Cube.cpp
         ${CORE_DIR}/render/Primitives.cpp
+        ${CORE_DIR}/render/ThumbPng.cpp   # 0.9.0: miniatura do projeto
+        ${CORE_DIR}/ui/ViewportChrome.cpp   # 0.9.0: chrome do viewport
+        ${CORE_DIR}/ui/BottomPanel.cpp   # 0.9.0: painel de baixo
+        ${CORE_DIR}/ui/SettingsPage.cpp   # 0.9.0: página de Settings
+        ${CORE_DIR}/core/UndoStack.cpp   # 0.9.0: undo/redo por snapshot
         ${CORE_DIR}/render/Camera.cpp
         # F4: física pura (sem GL)
         ${CORE_DIR}/physics/Shapes.cpp
@@ -201,6 +206,7 @@ add_executable(test_core
         # casos do CAMINHO DO DEVICE estão no TU do test_wiring087 (único
         # que inclui platform/main.cpp) — secção 0.8.9 lá.
         test_wiring089.cpp
+        test_wiring090.cpp   # 0.9.0: design system + editor polish (spec A-M)
         # 0.8.10: formatos próprios + 500 MB + archives + migração + identidade
         test_wiring010.cpp
         # 0.8.11: ÁUDIO — .gi (ADPCM round-trip/WAV/OGG/MP3 erros),

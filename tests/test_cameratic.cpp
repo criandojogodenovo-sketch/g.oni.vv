@@ -470,8 +470,8 @@ TEST(cameratic_inspector_plano) {
     EXPECT(prof.tr && prof.cam);
     const TextMetrics m{22.0f, 6.0f};   // fallback de métricas (28px)
     InspRow rows[40];
-    const u32 n = inspectorPlan(prof, m, false, rows);
-    EXPECT(n == inspectorRowCount(prof, false));
+    const u32 n = inspectorPlan(prof, m, false, 0u, rows);
+    EXPECT(n == inspectorRowCount(prof, false, 0u));
     // secção Camera + fov + near + far + projecao + ortho + ativa + frustum
     int sect = 0, fov = 0, near_ = 0, far = 0, proj = 0, ortho = 0, act = 0;
     int frus = 0;   // 0.7.10: toggle do gizmo
@@ -502,7 +502,7 @@ TEST(cameratic_inspector_plano) {
     }
     const InspProfile p2 = inspectorProfile(*s2.get(h2));
     EXPECT(!p2.cam);
-    EXPECT(inspectorRowCount(p2, false) < inspectorRowCount(prof, false));
+    EXPECT(inspectorRowCount(p2, false, 0u) < inspectorRowCount(prof, false, 0u));
 }
 
 // ---- 11. criação pelo "+" do 3D (5º item) + contexto "Alinhar a vista" -------------------

@@ -181,11 +181,11 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     const TextMetrics m{};
     const InspProfile prof = inspectorProfile(*tic);
     InspRow plan[48];   // 0.8.0: +prim/anim
-    const u32 n = inspectorPlan(prof, m, false, plan);
-    const f32 contentH = inspectorContentHeight(prof, m, false);
-    // 0.8.0: +36 (linha prim:) +42 (add Animacao — tem Transform3D) = 828;
-    // 0.8.6: +36 (linha hex) = 864
-    EXPECT(nearEqF(contentH, 864.0f));
+    const u32 n = inspectorPlan(prof, m, false, 0u, plan);
+    const f32 contentH = inspectorContentHeight(prof, m, false, 0u);
+    // 0.9.0 (spec C): secções 48dp + 3 linhas de Transform (80dp: título
+    // + caixas X/Y/Z 48dp) + miniaturas 84dp → 1070
+    EXPECT(nearEqF(contentH, 1070.0f));
 
     // cursor Y PARTILHADO: linhas sequenciais (y estritamente crescente, sem
     // reinício por secção), todas dentro do conteúdo, e o fundo do plano =
@@ -201,8 +201,8 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
         prevBottom = plan[i].y + plan[i].h;
         if (plan[i].kind == InspRow::Kind::AddTc) addTcIdx = i;
     }
-    // 0.8.0: "add Animacao" (F7) é a ÚLTIMA linha — addTc fica em penúltimo
-    EXPECT(addTcIdx + 2 == n);
+    // 0.9.0: a secção ANIMAÇÃO (48dp) fica entre addTc e o AddAnim
+    EXPECT(addTcIdx + 3 == n);
     EXPECT(plan[n - 1].kind == InspRow::Kind::AddAnim);
     EXPECT(nearEqF(plan[n - 1].y + plan[n - 1].h, contentH));
 
@@ -223,9 +223,9 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
 
     // com TouchControls presente o botão dá lugar à label tc (42 → 34)
     EXPECT(tic->addComponent<TouchControls>() != nullptr);
-    // 0.8.0: 742 + 36 (prim:) + 42 (add Animacao) = 820; 0.8.6: +36 hex = 856
-    EXPECT(nearEqF(inspectorContentHeight(inspectorProfile(*tic), m, false),
-                   856.0f));
+    // 0.9.0: 1070 − 42 (addTc) + 34 (label tc) = 1062
+    EXPECT(nearEqF(inspectorContentHeight(inspectorProfile(*tic), m, false, 0u),
+                   1062.0f));
 }
 
 TEST(scroll_hierarquia_todos_os_tics_atingeis) {
@@ -236,10 +236,10 @@ TEST(scroll_hierarquia_todos_os_tics_atingeis) {
     EXPECT(s.count() == 14u);
 
     const f32 contentH = hierarchyContentHeight(14);
-    EXPECT(nearEqF(contentH, 728.0f));   // 14 × 52
+    EXPECT(nearEqF(contentH, 672.0f));   // 0.9.0: 14 × 48 (spec B)
 
-    const f32 listTop = 136.0f;   // y=88 + cabeçalho 48
-    const f32 listH = 540.0f;     // painel 592 − cabeçalho (C33 teórico)
+    const f32 listTop = 200.0f;   // 0.9.0: y=104 + cabeçalho 48 + pesquisa 48
+    const f32 listH = 540.0f;     // teórico (scroll math pura)
 
     // sem scroll a linha 13 (a 14.ª) fica cortada — o comportamento antigo
     const f32 row13_0 = listTop + 13.0f * kRowH;
@@ -247,15 +247,15 @@ TEST(scroll_hierarquia_todos_os_tics_atingeis) {
 
     // com o scroll no máximo TODAS as linhas cabem na região, incluindo a 13
     const f32 off = clampOffset(999.0f, contentH, listH);
-    EXPECT(nearEqF(off, 188.0f));
+    EXPECT(nearEqF(off, 132.0f));   // 672 − 540
     const f32 row13 = listTop + 13.0f * kRowH - off;
     EXPECT(row13 >= listTop);
     EXPECT(row13 + kRowH <= listTop + listH);
 }
 
 TEST(scroll_hierarquia_row_sob_tap) {
-    const f32 listTop = 136.0f;
-    const f32 off = 188.0f;   // máximo do teste anterior (14 TICs)
+    const f32 listTop = 200.0f;   // 0.9.0: +48 da linha de pesquisa
+    const f32 off = 132.0f;   // máximo do teste anterior (14 TICs)
 
     // tap no meio da linha 13 com o offset no máximo → índice 13
     EXPECT(hierarchyRowAtTap(listTop + 13.0f * kRowH - off + 10.0f,
@@ -282,7 +282,7 @@ TEST(scroll_linhas_mesh_tex_atingiveis_no_scroll) {
     const TextMetrics m{};
     const InspProfile prof = inspectorProfile(*tic);
     InspRow plan[48];   // 0.8.0: +prim/anim
-    const u32 n = inspectorPlan(prof, m, true, plan);   // seletores ativos
+    const u32 n = inspectorPlan(prof, m, true, 0u, plan);   // seletores ativos
     u32 meshIdx = n, texIdx = n, primIdx = n;
     for (u32 i = 0; i < n; ++i) {
         if (plan[i].kind == InspRow::Kind::MeshButton) meshIdx = i;
@@ -294,22 +294,24 @@ TEST(scroll_linhas_mesh_tex_atingiveis_no_scroll) {
     EXPECT(primIdx == meshIdx + 1);
     EXPECT(texIdx == primIdx + 1);
 
-    // topo da linha mesh (Player tem Transform3D): nome 34 + VISIVEL 36
-    // (0.7.0) + secção 34 + 9×36
-    EXPECT(nearEqF(plan[meshIdx].y, 34.0f + 36.0f + 34.0f + 9.0f * 36.0f));
+    // topo da linha mesh — 0.9.0 (spec C): 34+36+48+3×80+48 = 406
+    EXPECT(nearEqF(plan[meshIdx].y, 406.0f));
     // 0.8.0: a linha "prim:" (36, botão) fica entre mesh e tex
     EXPECT(nearEqF(plan[texIdx].y, plan[meshIdx].y + plan[meshIdx].h + 36.0f));
 
     // pior caso C33 (lista 500 px): conteúdo 754 — scroll ativa
-    const f32 contentH = inspectorContentHeight(prof, m, true);
+    const f32 contentH = inspectorContentHeight(prof, m, true, 0u);
     const f32 listH = 500.0f;
     EXPECT(contentH > listH);
     const f32 off = clampOffset(999.0f, contentH, listH);
     EXPECT(nearEqF(off, contentH - listH));
 
-    // com o offset no máximo, o topo da linha mesh continua dentro da lista
+    // 0.9.0: o plano é mais ALTO (secções) — com o offset no MÁXIMO o mesh
+    // (perto do topo) rola para FORA (comportamento correto); com o offset
+    // ALINHADO nele, a linha fica inteira na região (atingível)
     const f32 contentTop = 140.0f;
-    const f32 meshScr = contentTop + plan[meshIdx].y - off;
+    const f32 offMesh = clampOffset(plan[meshIdx].y, contentH, listH);
+    const f32 meshScr = contentTop + plan[meshIdx].y - offMesh;
     EXPECT(meshScr >= contentTop);
     EXPECT(meshScr + plan[meshIdx].h <= contentTop + listH + 0.01f);
 }

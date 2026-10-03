@@ -1,35 +1,21 @@
 #pragma once
-// ui/Toolbar.h — BARRA SUPERIOR FINAL do editor (0.7.6): 5 grupos por função.
+// ui/Toolbar.h — CHROME DE CIMA 0.9.0 (spec D, mockups do autor):
 //
-// PRINCÍPIOS (spec 0.7.6):
-//   • texto só para identidade/ações raras → [Menu ▾][Cena ▾] são TEXTO;
-//   • uso frequente = ÍCONES, nunca texto → playback/transformação/painéis
-//     são os 8 ícones vetoriais (ui/Icons.h — polilinhas no line batch);
-//   • agrupar por função com SEPARADOR VISUAL (linha fina vertical);
-//   • estados mutuamente exclusivos = SEGMENTED CONTROL (3D|UI e
-//     mover/rodar/escalar — fundo de marca no ativo);
-//   • esconder o que não se aplica: o G4 (transformação) SÓ existe com
-//     seleção ativa em 3D — some da barra, não fica cinzento;
-//   • zero emoji.
+//   TOP BAR 56dp:  [Menu ≡][Cena ▾]   ·   [pause][play][sliders]   ·   [gear]
+//   TAB BAR 48dp:  [3D][UI][ÁUDIO] — ícone+palavra, ativo com UNDERLINE
+//                  accent 2dp (corrige o "UDIO" da 0.8.11: agora é a palavra
+//                  inteira + ícone, nunca abreviado)
 //
-// GRUPOS:
-//   G1 sistema   [Menu ▾][Cena ▾]   — Menu→dropdown(Settings, Guardar, …,
-//                                     Sair); Cena→dropdown(cenas do projeto)
-//   G2 playback  [pause][play]      — ícones
-//   G3 modo      [3D][UI]           — segmented (texto ok: 2 estados curtos)
-//   G4 transf.   [mover][rodar][escalar][snap] — segmented, SÓ com seleção
-//                                     (mover/rodar/escalar exclusivos; snap
-//                                     é um TOGGLE do grupo — liga/desliga o
-//                                     snapping do modo ativo)
-//   G5 painéis   [inspector]        — mostra/esconde o painel direito
+// O que SAI da barra (0.7.6→0.9.0): o grupo G4 de transformação desce para
+// a TOOLBAR DO VIEWPORT (bottom: [Selecionar][Mover][Rodar][Escalar] 56dp
+// rotulados — ui/ViewportChrome.h); o toggle do Inspector vira PEGA de
+// recolher no próprio painel (spec G). O "sliders" abre o POPOVER de
+// snap/grelha 🔶 (id novo); o gear abre a PÁGINA de Settings (0.9.0 — spec I,
+// já não é dropdown).
 //
-// LAYOUT DINÂMICO (stacks auto-size): a largura disponível reparte-se pelos
-// grupos presentes; com/sem G4 nada sobrepõe nunca (o G5 fica ancorado à
-// direita). O solver é PURO (layout()) — desenho e testes partilham-no.
-//
-// TEMA: a barra lê TUDO de theme::kTheme (ui/Theme.h) — fundo bg #0B0E13,
-// ícones brand #8AB4F8, ativo = fundo brand + ícone/texto brandInk. Os
-// PAINÉIS do editor continuam no tema mono de sempre (exceção documentada).
+// TEMA: tudo lido de theme::kTheme (ui/Theme.h — tabela spec A): fundo bg,
+// ícones text1, ativo = underline accent 2dp + texto accent (tab bar) ou
+// fill accent + accentInk (botões premidos da top bar). Zero emoji.
 #include "ui/EditorLayout.h"   // ids partilhados + kPad
 #include "ui/Icons.h"
 #include "ui/SafeArea.h"
@@ -47,69 +33,86 @@ struct EditorState;   // ui/EditorUi.h (dependência só de declaração)
 
 namespace toolbar {
 
-// ---- estado do gizmo (movido de EditorUi.h — a toolbar é o dono agora) ------
-// mode: 0=Mover, 1=Rodar, 2=Escalar (gizmo::Mode); snap = toggle de snapping
+// ---- estado do gizmo (o modo vive aqui; o SNAP desceu p/ a toolbar do ------
+// viewport — spec D: [snap: <valor>] é um controlo LÁ, não um botão da barra)
 struct GizmoModeState {
-    int  mode = 0;
+    int  mode = 0;    // 0=Mover, 1=Rodar, 2=Escalar (gizmo::Mode)
     bool snap = false;
 };
 
-// ---- ids dos widgets da barra (faixas exclusivas — UiContext é im-mode) -----
-// Menu=1 / Play=2 / Pause=3 herdaram os números da toolbar antiga (Menu=1,
-// Play=2, Settings=3 — o Settings deixou de ser botão próprio e o 3 passou
-// ao Pause). 3D/UI = 11/12, gizmo = 7/8/9/10 (inalterados), inspector = 13,
-// cena = 14. 0.8.11: ÁUDIO = 15 (a 1ª versão usava 13 — COLIDIA com o
-// inspector: tocar no G5 abria o modo ÁUDIO e vice-versa; apanhado na
-// revisão antes do push).
+// ---- ids dos widgets (faixas exclusivas — UiContext é im-mode) -------------
+// Herdados: Menu=1, Play=2, Pause=3, 3D/UI=11/12, cena=14, ÁUDIO=15.
+// Novos 0.9.0: sliders (popover snap/grelha 🔶) = 16, gear (Settings) = 17.
 constexpr u64 kTbMenuId      = 1;
 constexpr u64 kTbPlayId      = 2;
 constexpr u64 kTbPauseId     = 3;
-constexpr u64 kGizmoIds[3]   = {7, 8, 9};    // mover/rodar/escalar
-constexpr u64 kTbSnapId      = 10;
+constexpr u64 kGizmoIds[3]   = {7, 8, 9};    // mover/rodar/escalar (toolbar do viewport 0.9.0)
+constexpr u64 kTbSnapId      = 10;            // (legacy: o snap vive agora no chip do viewport)
 constexpr u64 kMode3dId      = 11;
 constexpr u64 kModeUiId      = 12;
-constexpr u64 kTbInspectId   = 13;
+constexpr u64 kTbInspectId   = 13;            // (legacy: pega do painel — spec G)
 constexpr u64 kTbCenaId      = 14;
-constexpr u64 kModeAudioId   = 15;   // 0.8.11: segmented 3D|UI|ÁUDIO
+constexpr u64 kModeAudioId   = 15;
+constexpr u64 kTbSlidersId   = 16;   // 0.9.0: popover snap/grelha 🔶
+constexpr u64 kTbGearId      = 17;   // 0.9.0: PÁGINA de Settings (spec I)
 
-// ---- layout PURO (fonte única — desenho e testes) ----------------------------
-struct Layout {
-    UiRect bar{};                 // a faixa toda (safe::toolbarRect)
-    UiRect menu{}, cena{};        // G1 (texto + caret)
-    UiRect pause{}, play{};       // G2 (ícones)
-    UiRect mode3d{}, modeUi{}, modeAudio{};   // G3 (segmented, texto; 0.8.11: +ÁUDIO)
-    UiRect giz[4]{};              // G4 (ícones; válido só com g4Visible)
-    bool   g4Visible = false;     // o grupo existe neste layout?
-    UiRect inspector{};           // G5 (ícone, ancorado à direita)
-    UiRect sep[4]{};              // separadores finos (1px) entre grupos
-    u32    sepCount = 0;          // 4 com G4, 3 sem
-    f32    iconSize = 32.0f;      // lado do ícone dentro do botão
-    f32    sepGap   = 28.0f;      // vão entre grupos (inclui o separador)
+// ---- TOP BAR (56dp) ----------------------------------------------------------
+struct TopBarLayout {
+    UiRect bar{};                 // a faixa toda (safe::toolbarRect — 56dp)
+    UiRect menu{}, cena{};        // esquerda (ícone hamburger/chevron + texto)
+    UiRect pause{}, play{};       // centro (ícones)
+    UiRect sliders{};             // centro (popover snap/grelha 🔶)
+    UiRect gear{};                // direita (ancorado)
+    f32    iconSize = 24.0f;      // 24dp dentro dos alvos 48dp (spec A)
 };
 
-// resolve o layout da barra. g4Visible = há grupo de transformação (seleção
-// ativa em modo 3D). Larguras naturais; se não couberem, encolhem
-// proporcionalmente (nada sobrepõe, nenhum grupo sai do ecrã).
-Layout layout(f32 sw, f32 sh, const safe::Insets& in, bool g4Visible);
+// resolve o layout da top bar (larguras naturais, encolhe proporcionalmente
+// se não couberem; o gear fica SEMPRE ancorado à direita)
+TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in);
 
-// ---- desenho + input -----------------------------------------------------------
+// resultado do frame da top bar
+struct TopBarActions {
+    bool menuDropdown = false;
+    bool cenaDropdown = false;
+    bool playPressed  = false;
+    bool pausePressed = false;
+    bool slidersPressed = false;   // abre o popover de snap/grelha 🔶
+    bool gearPressed  = false;     // abre a página de Settings (spec I)
+};
 
-// resultado do frame (o chamador decide o que fazer; nada de mutação de
-// overlays aqui dentro — a toolbar só reporta)
+// desenha a top bar COMPLETA e processa os toques (nada de mutação de
+// overlays aqui — só reporta; o main decide)
+TopBarActions drawTopBar(UiContext& ui, const EditorState& st);
+
+// ---- TAB BAR DE MODO (48dp, largura total) ------------------------------------
+struct ModeTabsLayout {
+    UiRect bar{};                  // faixa 48dp por baixo da top bar
+    UiRect tab3d{}, tabUi{}, tabAudio{};
+    UiRect underline{};            // do tab ATIVO (2dp accent — spec D)
+    u32    active = 0;             // 0=3D, 1=UI, 2=ÁUDIO
+};
+
+ModeTabsLayout modetabsLayout(f32 sw, f32 sh, const safe::Insets& in,
+                              bool uiMode, bool audioMode);
+
+// desenha a tab bar e MUDA os modos (st.uiMode/st.audioMode exclusivos).
+// Devolve true se o modo mudou neste frame.
+bool drawModeTabs(UiContext& ui, EditorState& st);
+
+// ---- compat 0.8.x: a API antiga de UM draw() — agora compõe top bar + tabs --
+// (mantida para o main não migrar tudo de uma vez; O G4 morreu — a toolbar
+// de transformação vive no viewport, ui/ViewportChrome.h)
 struct Actions {
-    bool menuDropdown = false;     // G1 Menu clicado
-    bool cenaDropdown = false;     // G1 Cena clicado
-    bool playPressed  = false;     // G2 play
-    bool pausePressed = false;     // G2 pause
+    bool menuDropdown = false;
+    bool cenaDropdown = false;
+    bool playPressed  = false;
+    bool pausePressed = false;
+    bool slidersPressed = false;
+    bool gearPressed  = false;
+    bool modeChanged  = false;
 };
 
-// desenha a barra COMPLETA e processa os toques. Muta:
-//   st.uiMode (G3 — ao sair do UI limpa a seleção de elemento, como o
-//              separador antigo fazia), st.showInspector (G5),
-//              gz.mode/gz.snap (G4).
-// hasSelection = há TIC selecionado (o G4 só aparece com seleção E modo 3D).
-Actions draw(UiContext& ui, EditorState& st, GizmoModeState& gz,
-             bool hasSelection);
+Actions draw(UiContext& ui, EditorState& st);
 
 } // namespace toolbar
 } // namespace editor

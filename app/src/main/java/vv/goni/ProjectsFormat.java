@@ -80,4 +80,85 @@ public final class ProjectsFormat {
         return new SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US)
                 .format(new Date(millis));
     }
+
+    // ---- 0.9.0 (spec F): tempo RELATIVO no card ("há 2 h") + chaves de
+    // ORDENAÇÃO do dropdown [Ordenar: ▾] — PURAS, host-testáveis no CI.
+
+    /**
+     * Tempo relativo da última edição (spec F: "há 2 h" 12sp text-2).
+     *   agora-separação → "agora" (<60s) · "há N min" (<60min) · "há N h"
+     *   (<24h) · "há N d" (<7d) · "há N sem" (<5sem) · dateLabel (mais velho).
+     * millis ≤ 0 → "" (o card mostra "—").
+     */
+    public static String relativeTime(long millis, long now) {
+        if (millis <= 0L) {
+            return "";
+        }
+        long diff = now - millis;
+        if (diff < 0L) {
+            diff = 0L;
+        }
+        final long MIN = 60_000L, H = 3_600_000L, D = 86_400_000L;
+        if (diff < MIN) {
+            return "agora";
+        }
+        if (diff < H) {
+            return "há " + (diff / MIN) + " min";
+        }
+        if (diff < D) {
+            return "há " + (diff / H) + " h";
+        }
+        if (diff < 7L * D) {
+            return "há " + (diff / D) + " d";
+        }
+        if (diff < 35L * D) {
+            return "há " + (diff / (7L * D)) + " sem";
+        }
+        return dateLabel(millis);
+    }
+
+    /** atalho: relativo ao AGORA do sistema */
+    public static String relativeTime(long millis) {
+        return relativeTime(millis, System.currentTimeMillis());
+    }
+
+    /**
+     * chave de ordenação do dropdown (spec F: [Ordenar: Última Edição ▾]):
+     *   0 = Última Edição (editedAt DESC — padrão)
+     *   1 = Nome A-Z
+     *   2 = Nome Z-A
+     *   3 = Criado Mais Recente (createdAt DESC)
+     * Devolve <0/0/>0 (java.util.Comparator semantics) — PURA p/ o CI.
+     */
+    public static int compareEntries(String nameA, long editedA, long createdA,
+                                     String nameB, long editedB, long createdB,
+                                     int sortMode) {
+        switch (sortMode) {
+            case 1:
+                return nameA.compareToIgnoreCase(nameB);
+            case 2:
+                return nameB.compareToIgnoreCase(nameA);
+            case 3: {
+                long d = createdB - createdA;
+                return d < 0 ? -1 : (d > 0 ? 1 : 0);
+            }
+            default: {   // 0 = Última Edição (DESC)
+                long d = editedB - editedA;
+                if (d != 0) {
+                    return d < 0 ? -1 : 1;
+                }
+                return nameA.compareToIgnoreCase(nameB);   // desempate estável
+            }
+        }
+    }
+
+    /** rótulo do modo de ordenação (o texto do dropdown) */
+    public static String sortLabel(int sortMode) {
+        switch (sortMode) {
+            case 1: return "Nome (A-Z)";
+            case 2: return "Nome (Z-A)";
+            case 3: return "Criado (recente)";
+            default: return "Última Edição";
+        }
+    }
 }

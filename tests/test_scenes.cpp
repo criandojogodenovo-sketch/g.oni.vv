@@ -292,21 +292,25 @@ TEST(cenas_menu_lista_marca_ativa_troca_e_nova) {
     st.scenesMenu = true;
     EXPECT(frame() == 0);   // aberto, sem toque
 
-    // geometria do overlay (recalculada como o draw): painel centrado
+    // geometria 0.9.0 (spec H): sheet 280dp CENTRADO na BANDA DO VIEWPORT
+    // (fallback sem âncora; +Nova cena 48dp + separador + lista 48dp)
     const u32 shown = 3u;   // < 6 → sem scroll
     const f32 rowH = 48.0f;
-    const f32 h = kHeaderH + 56.0f + 8.0f + static_cast<f32>(shown) * rowH + kPad;
-    const f32 x = (kSW - kMenuW) * 0.5f;
-    const f32 y = (kSH - h) * 0.5f;
-    const f32 listTop = y + kHeaderH + 56.0f + 8.0f;
+    const f32 sheetW = 280.0f;
+    const f32 h = 48.0f + 56.0f + 8.0f + static_cast<f32>(shown) * rowH + 8.0f;
+    f32 ox, oy, aw, ah;
+    overlayArea(kSW, kSH, safe::Insets{}, ox, oy, aw, ah);
+    const f32 x = ox + (aw - sheetW) * 0.5f;
+    const f32 y = oy + (ah - h) * 0.5f;
+    const f32 listTop = y + 4.0f + 56.0f + 8.0f;
 
     // tap na cena 2 (boss — índice 2): pick = 2+2 = 4
-    EXPECT(tap(x + kMenuW * 0.5f, listTop + 2.0f * rowH + rowH * 0.5f) == 4);
+    EXPECT(tap(x + sheetW * 0.5f, listTop + 2.0f * rowH + rowH * 0.5f) == 4);
     EXPECT(!st.scenesMenu);   // a escolha fecha o menu
 
-    // "+ Nova cena" (fixo no topo): pick = 1
+    // "＋ Nova cena" (fill accent, fixo no topo): pick = 1
     st.scenesMenu = true;
-    EXPECT(tap(x + kMenuW * 0.5f, y + kHeaderH + 28.0f) == 1);
+    EXPECT(tap(x + sheetW * 0.5f, y + 4.0f + 24.0f) == 1);
     EXPECT(!st.scenesMenu);
 
     // toque FORA fecha sem escolha

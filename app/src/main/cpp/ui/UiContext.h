@@ -18,6 +18,7 @@
 #include "ui/ScrollMath.h"
 #include "ui/SafeArea.h"
 #include "ui/TextFit.h"
+#include "ui/Theme.h"     // 0.9.0: design system (tabela obrigatória spec A)
 #include "platform/InputState.h"
 #include <cmath>
 #include <string>
@@ -25,17 +26,32 @@
 
 namespace vv {
 
-// Tokens do tema mono — ÚNICA paleta permitida na F1 (cinza/branco/preto).
-// 0.8.12 — WARN (âmbar): EXCEÇÃO DOCUMENTADA (como a brand #8AB4F8 da
-// toolbar) para o badge ANTIGO dos crash dumps no log viewer — um aviso de
-// identidade tem de ler-se DISTINTO do texto normal, não é decoração.
+// Tokens do tema mono — 0.9.0: ALIASES da tabela única (ui/Theme.h, spec A).
+// A pele inteira da app muda num só sítio: BG=bg #0B0E13, PANEL=surface
+// #151A23, LINE=border #2A3442, TEXT=text1 #F5F5F5, ACCENT=text1 (era
+// #F5F5F5 — mesmo valor), WARN=warn. O struct completo com text2/accent/
+// danger/ok/scrim/accentPress + escala 8dp/tipografia/raios vive em Theme.h.
 namespace theme {
-constexpr f32 BG[4]     = {0.0784314f, 0.0784314f, 0.0784314f, 1.0f}; // #141414
-constexpr f32 PANEL[4]  = {0.1176471f, 0.1176471f, 0.1176471f, 1.0f}; // #1E1E1E
-constexpr f32 LINE[4]   = {0.1803922f, 0.1803922f, 0.1803922f, 1.0f}; // #2E2E2E
-constexpr f32 TEXT[4]   = {0.9019608f, 0.9019608f, 0.9019608f, 1.0f}; // #E6E6E6
-constexpr f32 ACCENT[4] = {0.9607843f, 0.9607843f, 0.9607843f, 1.0f}; // #F5F5F5
-constexpr f32 WARN[4]   = {0.9803922f, 0.7333333f, 0.2705882f, 1.0f}; // #FABB45
+// (arrays C++ não se copiam em constexpr — MESMAS expressões do Theme.h para
+// igualdade bit-a-bit, LIGADAS por static_assert: mudar Theme.h sem aqui =
+// build MORRE — a fonte única continua sendo Theme.h)
+constexpr f32 BG[4]     = {11.0f / 255.0f, 14.0f / 255.0f, 19.0f / 255.0f, 1.0f};   // bg #0B0E13
+constexpr f32 PANEL[4]  = {21.0f / 255.0f, 26.0f / 255.0f, 35.0f / 255.0f, 1.0f};   // surface #151A23
+constexpr f32 LINE[4]   = {42.0f / 255.0f, 52.0f / 255.0f, 66.0f / 255.0f, 1.0f};   // border #2A3442
+constexpr f32 TEXT[4]   = {245.0f / 255.0f, 245.0f / 255.0f, 245.0f / 255.0f, 1.0f};// text1 #F5F5F5
+constexpr f32 ACCENT[4] = {245.0f / 255.0f, 245.0f / 255.0f, 245.0f / 255.0f, 1.0f};// = text1
+constexpr f32 WARN[4]   = {250.0f / 255.0f, 187.0f / 255.0f, 69.0f / 255.0f, 1.0f}; // warn #FABB45
+static_assert(BG[0] == theme::kTheme.bg[0] && BG[2] == theme::kTheme.bg[2],
+              "BG desincronizado de Theme.h — fonte única violada");
+static_assert(PANEL[1] == theme::kTheme.surface[1] &&
+                  PANEL[2] == theme::kTheme.surface[2],
+              "PANEL desincronizado de Theme.h — fonte única violada");
+static_assert(LINE[0] == theme::kTheme.border[0] && LINE[1] == theme::kTheme.border[1],
+              "LINE desincronizado de Theme.h — fonte única violada");
+static_assert(TEXT[0] == theme::kTheme.text1[0] && TEXT[2] == theme::kTheme.text1[2],
+              "TEXT desincronizado de Theme.h — fonte única violada");
+static_assert(WARN[1] == theme::kTheme.warn[1] && WARN[2] == theme::kTheme.warn[2],
+              "WARN desincronizado de Theme.h — fonte única violada");
 }
 
 // UiRect vive em ui/ScrollMath.h (matemática GL-free partilhada)
@@ -62,6 +78,22 @@ public:
 
     // widgets
     void panel(f32 x, f32 y, f32 w, f32 h, const f32 color[4]);
+    // 0.9.0 — CANTOS CURVOS (spec A: raios 8dp cards/botões, 4dp campos/
+    // chips): painel com cantos arredondados por ESCADARIA de quads (4 degraus
+    // por canto — zero shaders, zero blur, zero custo exponencial; afervável
+    // nos batches como o panel de sempre). radius é CLAMPADO a min(w,h)/2.
+    // Os degraus cobrem o círculo por DENTRO (nunca sangram para fora do rect
+    // — a auditoria de rects 0.9.0 conta o bounding box, que fica EXATO).
+    void panelRounded(f32 x, f32 y, f32 w, f32 h, f32 radius,
+                      const f32 color[4]);
+    // 0.9.0 — moldura com cantos curvos: 4 arestas retas (panel) + 4 arcos
+    // (polilinhas no LINE batch com a MESMA espessura do traço). Para cards
+    // e botões outline do design system.
+    void frameRounded(f32 x, f32 y, f32 w, f32 h, f32 t, f32 radius,
+                      const f32 color[4]);
+    // 0.9.0 — chip pill (raio = h/2): o campo/chip de 4dp quando h≤16,
+    // cápsula completa quando pedido explicitamente.
+    void panelPill(f32 x, f32 y, f32 w, f32 h, const f32 color[4]);
     // 0.8.6 — TIPOGRAFIA por elemento: escala (×28 px base) + estilo
     // (0 normal, 1 negrito, 2 itálico). O label() de sempre = styled a 1.0/0.
     void labelStyled(f32 xBaseline, f32 yBaseline, const char* text,

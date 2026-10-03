@@ -13,8 +13,10 @@
 #include "render/Mesh.h"                 // 0.8.9: AABB do mesh (normalização uniforme)
 #include "core/Scene.h"
 #include "ui/UiEditor.h"                  // 0.8.6: uiHexFormat (linha hex)
+#include "ui/Icons.h"                    // 0.9.0: conjunto outline (spec A)
 #include "platform/BuildInfo.h"          // 0.8.12: badge ANTIGO dos dumps no viewer
 #include <cstdio>
+#include <cstring>
 
 namespace vv {
 namespace editor {
@@ -102,114 +104,311 @@ UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, bool rightPanel) {
     return safe::centerRect(sw, sh, in, rightPanel);
 }
 
+// 0.9.0 — com o drawer do painel de baixo aberto (spec E)
+UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, f32 drawerH,
+                  bool rightPanel) {
+    return safe::centerRect(sw, sh, in, drawerH, rightPanel);
+}
+
 // ---------------------------------------------------------------------------
-// HIERARQUIA — lista COMPLETA de TICs com scroll (F4.1: fim do corte maxRows
-// da F3). Drag na lista = scroll; tap numa linha = seleciona (re-despacho).
-// 0.7.0 (gestão de TICs): cada linha tem o OLHO (visibilidade — toggle
-// imediato) e o "..." (menu contextual Renomear/Remover/Duplicar/
-// Visibilidade); tap no VAZIO da lista DESSELECIONA.
+// HIERARQUIA 0.9.0 (spec B + scope funcional):
+//   cabeçalho 48dp: "HIERARQUIA" 12sp text-2 + [+] 48dp
+//   pesquisa 48dp:  [lupa][campo — filtra por nome] (teclado in-app propósito 8)
+//   linha 48dp:     [ícone de tipo 24][nome 14sp flex][olho 24][⋮ 24] — as
+//                   zonas de olho/⋮ são ALVOS de 48dp (spec A) com ícone 24
+//   filhos:         recuo 24dp + conector vertical (parenting VISUAL)
+//   estados:        normal · selecionado (fill accent) · escondido (olho-off
+//                   + nome text-2) · premido (surface-2) · multi (frame accent)
+//   multi-seleção:  toque na linha JÁ selecionada arranca o conjunto; toques
+//                   seguintes alternam (decisão documentada — ver EditorUi.h)
+//   vazio:          ícone + convite (spec M)
 // ---------------------------------------------------------------------------
 bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
-    // F4.2: painel inteiro dentro do contentRect (insets do sistema)
-    const UiRect panel = safe::hierarchyPanelRect(ui.screenWidth(), ui.screenHeight(),
-                                                  ui.safeArea());
+    const UiRect panel = safe::hierarchyPanelRect(ui.screenWidth(),
+                                                  ui.screenHeight(),
+                                                  ui.safeArea(), st.drawerH);
     const f32 x = panel.x;
     const f32 y = panel.y;
     const f32 w = panel.w;
     const f32 h = panel.h;
 
-    ui.panel(x, y, w, h, theme::PANEL);
-    ui.panel(x + w - 1.0f, y, 1.0f, h, theme::LINE);   // separador direito
+    ui.panel(x, y, w, h, theme::kTheme.surface);
+    ui.panel(x + w - 1.0f, y, 1.0f, h, theme::kTheme.border);
 
-    // cabeçalho: título + botão "+" (FORA da região de scroll — captura normal)
-    const f32 th = ui.fontHeight();
-    ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "HIERARQUIA", theme::TEXT);
-    const f32 plusW = 56.0f, plusH = 40.0f;
-    const bool plus = ui.button(kIdPlus, x + w - kPad - plusW, y + (kHeaderH - plusH) * 0.5f,
-                                plusW, plusH, "+");
-
-    // lista: região de scroll abaixo do cabeçalho, uma linha por TIC ativo
-    const f32 listTop = y + kHeaderH;
-    const UiRect listRegion = {x, listTop, w, h - kHeaderH};
-    u32 nTics = 0;
-    scene.forEachActive([&nTics](const Tic&) { ++nTics; });
-    const f32 contentH = hierarchyContentHeight(nTics);
-
-    ui.beginScroll(kIdScrollHier, listRegion, contentH);
-    const f32 off = ui.scrollOffset();
-
-    // 0.7.0: geometria da linha — [nome][olho 40][... 40] (com gaps de 6)
-    const f32 kEyeW = 40.0f;
-    const f32 nameW = w - 2.0f * kPad - 2.0f * kEyeW - 12.0f;
-
-    u32 row = 0;
+    // ---- árvore visível: raízes primeiro, filhos recursivamente ------------
+    // (o filtro de pesquisa esconde linhas que não casam; os filhos de uma
+    // linha escondida também saem — a árvore continua coerente)
+    struct Row {
+        Handle h;
+        u32    depth;
+    };
+    Row rows[64];
+    u32 nRows = 0;
+    const char* needle = st.hierSearchLen ? st.hierSearch : nullptr;
+    // slots ativos recolhidos POR ÍNDICE (Scene não expõe at(i); o parent é
+    // o ÍNDICE DO SLOT do pai — mesmos números que o create() grava)
+    struct Slot {
+        i32  idx;
+        const Tic* t;
+    };
+    Slot slots[64];
+    u32 nSlots = 0;
     scene.forEachActive([&](const Tic& t) {
-        const f32 ry = listTop + static_cast<f32>(row) * kRowH - off;
-        ++row;
-        // o clip da região recusa quads fora do ecrã (rows escondidas custam 0)
-        char clipped[40];
-        std::snprintf(clipped, sizeof(clipped), "%.30s", t.name.c_str());
-        ui.button(kIdRowBase + t.handle.index, x + kPad, ry + 4.0f,
-                  nameW, kRowH - 8.0f, clipped);   // só desenha (F4.1)
-        if (st.selected == t.handle) {
-            ui.frame(x + kPad, ry + 4.0f, nameW, kRowH - 8.0f, 2.0f, theme::ACCENT);
+        if (nSlots < 64) {
+            // o índice do slot: procuramos na tabela de handles — o handle
+            // CODIFICA o índice (Handle.index é o slot de sempre)
+            slots[nSlots++] = {static_cast<i32>(t.handle.index), &t};
         }
-        // 0.7.0 — olho (visibilidade): "O" visível / "X" escondido (o atlas
-        // é ASCII — mono brutalist; o estado também está no Inspector)
-        char eye[2] = {t.visible ? 'O' : 'X', '\0'};
-        ui.button(kHierEyeBase + t.handle.index, x + kPad + nameW + 6.0f,
-                  ry + 4.0f, kEyeW, kRowH - 8.0f, eye);
-        // 0.7.0 — "..." abre o menu contextual (Renomear/Remover/Duplicar/
-        // Visibilidade); o long-press da spec é o atalho alternativo — o
-        // botão é determinístico e aferível no CI
-        ui.button(kHierDotsBase + t.handle.index, x + kPad + nameW + 6.0f + kEyeW + 6.0f,
-                  ry + 4.0f, kEyeW, kRowH - 8.0f, "...");
     });
-    ui.endScroll();
+    // visita depth-first: filhos de cur (parent == cur) por ordem de slot
+    struct Walk {
+        const Slot* slots;
+        u32 nSlots;
+        Row* rows;
+        u32* n;
+        const char* needle;
+        void visit(i32 cur, u32 depth) {
+            if (*n >= 64) {
+                return;
+            }
+            for (u32 i = 0; i < nSlots && *n < 64; ++i) {
+                const Tic& t = *slots[i].t;
+                if (slots[i].idx != t.handle.index ||
+                    t.parent != cur) {
+                    continue;
+                }
+                if (needle && *needle &&
+                    std::strstr(t.name.c_str(), needle) == nullptr) {
+                    visit(slots[i].idx, depth);   // filho pode casar
+                    continue;
+                }
+                rows[(*n)++] = {t.handle, depth};
+                visit(slots[i].idx, depth + 1);
+            }
+        }
+    };
+    Walk wk{slots, nSlots, rows, &nRows, needle};
+    wk.visit(-1, 0);
 
-    if (nTics == 0) {
-        ui.labelFitted(x + kPad, listTop + kRowH, "(vazio - use +)", theme::TEXT,
-                       w - 2.0f * kPad);
-    }
+    // ---- cabeçalho 48dp: título 12sp text-2 + [+] 48dp ----------------------
+    {
+        const TextMetrics m = ui.textMetrics();
+        const f32 base = y + (kHeaderH - m.block()) * 0.5f + m.ascent;
+        ui.label(x + kPad, base, "HIERARQUIA", theme::kTheme.text2);
+        // chip da MULTI-SELEÇÃO (aparece com ≥1 no conjunto): "N ×" limpa
+        if (st.multiSelectCount > 0) {
+            char chip[24];
+            std::snprintf(chip, sizeof(chip), "%u x", st.multiSelectCount);
+            const f32 cw = 56.0f;
+            const UiRect cr = {x + w - kPad - 56.0f - 8.0f - cw,
+                               y + (kHeaderH - 40.0f) * 0.5f, cw, 40.0f};
+            if (ui.button(kHierMultiClearId, cr.x, cr.y, cr.w, cr.h, chip)) {
+                st.multiSelectCount = 0;   // volta à seleção simples
+            }
+        }
+        const UiRect pr = {x + w - kPad - 56.0f, y + (kHeaderH - 40.0f) * 0.5f,
+                           56.0f, 40.0f};
+        bool plus = false;
+        if (ui.widgetHit(kIdPlus, pr.x, pr.y, pr.w, pr.h)) {
+            plus = true;
+        }
+        ui.panelRounded(pr.x, pr.y, pr.w, pr.h, theme::kRadiusCard,
+                        ui.widgetActive(kIdPlus) ? theme::kTheme.accentPress
+                                                 : theme::kTheme.accent);
+        icons::drawIcon(ui, icons::Icon::Plus,
+                        pr.x + (pr.w - 24.0f) * 0.5f,
+                        pr.y + (pr.h - 24.0f) * 0.5f, 24.0f,
+                        theme::kTheme.accentInk);
+        // ---- pesquisa 48dp (scope: por nome no header da hierarquia) ----
+        const f32 sy = y + kHeaderH;
+        ui.panel(x, sy, w, 1.0f, theme::kTheme.border);
+        const UiRect sfield = {x + kPad, sy + 4.0f, w - 2.0f * kPad, 40.0f};
+        ui.panelRounded(sfield.x, sfield.y, sfield.w, sfield.h,
+                        theme::kRadiusField, theme::kTheme.bg);
+        ui.frameRounded(sfield.x, sfield.y, sfield.w, sfield.h, 1.0f,
+                        theme::kRadiusField, theme::kTheme.border);
+        icons::drawIcon(ui, icons::Icon::Search, sfield.x + 10.0f,
+                        sfield.y + (sfield.h - 20.0f) * 0.5f, 20.0f,
+                        theme::kTheme.text2);
+        if (ui.hasFont()) {
+            const TextMetrics mm = ui.textMetrics();
+            const f32 bb = sfield.y + (sfield.h - mm.block()) * 0.5f + mm.ascent;
+            if (st.hierSearchLen) {
+                ui.labelFitted(sfield.x + 40.0f, bb, st.hierSearch,
+                               theme::kTheme.text1, sfield.w - 76.0f);
+            } else {
+                ui.labelFitted(sfield.x + 40.0f, bb, "pesquisar TIC",
+                               theme::kTheme.text2, sfield.w - 76.0f);
+            }
+        }
+        // o CAMPO abre o teclado (propósito 8) — captura normal FORA do scroll
+        if (ui.widgetHit(kHierSearchId, sfield.x, sfield.y, sfield.w,
+                         sfield.h)) {
+            st.textInput = true;
+            st.textPurpose = 8;   // pesquisa da hierarquia
+            st.textTic = Handle::invalid();
+            std::snprintf(st.textBuf, sizeof(st.textBuf), "%s", st.hierSearch);
+            st.textLen = st.hierSearchLen;
+        }
 
-    // tap re-despachado → seleção/olho/... da linha sob o dedo (mesmo após
-    // scroll); F5.0-fix: POR ID — a Hierarchy só consome taps nascidos nela.
-    // 0.7.0: tap no VAZIO da lista (abaixo da última linha) DESSELECIONA.
-    f32 tx, ty;
-    if (ui.scrollTap(kHierarchyScrollId, tx, ty) && scroll::inside(listRegion, tx, ty)) {
-        const i32 sel = hierarchyRowAtTap(ty, listTop, off, nTics);
-        if (sel < 0) {
-            st.selected = Handle::invalid();   // 0.7.0: desselecionar no vazio
-        } else {
-            u32 i = 0;
-            scene.forEachActive([&](const Tic& t) {
-                if (i == static_cast<u32>(sel)) {
-                    // 0.7.0: hit-test da linha em três zonas (nome/olho/...)
-                    const f32 ry = listTop + static_cast<f32>(i) * kRowH - off;
-                    const f32 eyeX = x + kPad + nameW + 6.0f;
-                    const f32 dotsX = eyeX + kEyeW + 6.0f;
-                    if (ty >= ry + 4.0f && ty < ry + kRowH - 4.0f &&
-                        tx >= eyeX && tx < eyeX + kEyeW) {
-                        // OLHO: toggle de visibilidade IMEDIATO
-                        if (Tic* tt = scene.get(t.handle)) {
-                            tt->visible = !tt->visible;
+        // ---- lista (scroll) ----
+        const f32 listTop = y + kHeaderH + kSearchRowH;
+        const UiRect listRegion = {x, listTop, w, h - kHeaderH - kSearchRowH};
+        const f32 contentH = hierarchyContentHeight(nRows);
+        ui.beginScroll(kIdScrollHier, listRegion, contentH);
+        const f32 off = ui.scrollOffset();
+
+        // geometria da linha (spec B): [ícone tipo 48zona][nome flex]
+        // [olho 48zona][⋮ 48zona] — ícones 24 dentro de alvos 48
+        const f32 eyeX = x + w - 48.0f - 8.0f - 48.0f;   // zona olho
+        const f32 dotsX = x + w - 48.0f - 4.0f;          // zona ⋮ (até à borda)
+
+        for (u32 r = 0; r < nRows; ++r) {
+            const Tic* t = scene.get(rows[r].h);
+            if (!t) {
+                continue;
+            }
+            const f32 ry = listTop + static_cast<f32>(r) * kRowH - off;
+            const f32 indent = static_cast<f32>(rows[r].depth) * 24.0f;
+            const bool selected = st.selected == t->handle;
+            bool multi = false;
+            for (u32 m = 0; m < st.multiSelectCount; ++m) {
+                if (st.multiSelect[m] == t->handle) {
+                    multi = true;
+                }
+            }
+
+            // ---- fundo do estado (spec B) ----
+            if (selected && st.multiSelectCount == 0) {
+                ui.panel(x + 4.0f, ry, w - 8.0f, kRowH, theme::kTheme.accent);
+            } else if (multi) {
+                ui.panel(x + 4.0f, ry, w - 8.0f, kRowH, theme::kTheme.surface2);
+                ui.panel(x + 4.0f, ry, 3.0f, kRowH, theme::kTheme.accent);
+            } else if (ui.widgetActive(kIdRowBase + t->handle.index)) {
+                ui.panel(x + 4.0f, ry, w - 8.0f, kRowH, theme::kTheme.surface2);
+            }
+
+            // ---- conector de filhos + recuo (parenting VISUAL) ----
+            if (rows[r].depth > 0) {
+                ui.panel(x + 16.0f + indent - 12.0f, ry, 1.5f, kRowH,
+                         theme::kTheme.border);
+            }
+
+            // ---- ícone de TIPO (24dp na zona de 48) ----
+            icons::Icon ic = icons::Icon::Box;
+            if (t->getComponent<CameraComp>()) {
+                ic = icons::Icon::Camera;
+            } else if (t->getComponent<AudioPlayer>()) {
+                ic = icons::Icon::Speaker;
+            } else if (t->getComponent<UiCanvas>()) {
+                ic = icons::Icon::Monitor;
+            } else if (const MeshRenderer* mr = t->getComponent<MeshRenderer>()) {
+                ic = mr->primOn ? icons::Icon::Cube : icons::Icon::Box;
+            } else if (t->getComponent<InputMap>() ||
+                       t->getComponent<TouchControls>()) {
+                ic = icons::Icon::Person;
+            }
+            const f32 iconX = x + 16.0f + indent;
+            const bool inkOn = selected && st.multiSelectCount == 0;
+            icons::drawIcon(ui, ic, iconX, ry + (kRowH - 24.0f) * 0.5f, 24.0f,
+                            inkOn ? theme::kTheme.accentInk
+                                  : theme::kTheme.text2);
+
+            // ---- nome 14sp (flex, truncado) ----
+            if (ui.hasFont()) {
+                const TextMetrics m2 = ui.textMetrics();
+                const f32 base = ry + (kRowH - m2.block()) * 0.5f + m2.ascent;
+                const f32 nameX = iconX + 24.0f + 8.0f;
+                const f32 nameW = eyeX - nameX - 8.0f;
+                ui.labelFitted(nameX, base, t->name.c_str(),
+                               inkOn ? theme::kTheme.accentInk
+                                     : (t->visible ? theme::kTheme.text1
+                                                   : theme::kTheme.text2),
+                               nameW);
+            }
+
+            // ---- olho / ⋮ (ícones 24 em alvos 48; só desenham — o tap é
+            // re-despachado pelo scroll) ----
+            icons::drawIcon(ui, t->visible ? icons::Icon::Eye
+                                           : icons::Icon::EyeOff,
+                            eyeX + (48.0f - 24.0f) * 0.5f,
+                            ry + (kRowH - 24.0f) * 0.5f, 24.0f,
+                            inkOn ? theme::kTheme.accentInk
+                                  : theme::kTheme.text2);
+            icons::drawIcon(ui, icons::Icon::Dots,
+                            dotsX + (48.0f - 24.0f) * 0.5f,
+                            ry + (kRowH - 24.0f) * 0.5f, 24.0f,
+                            inkOn ? theme::kTheme.accentInk
+                                  : theme::kTheme.text2);
+        }
+        ui.endScroll();
+
+        // ---- VAZIO (spec M): ícone + convite --------------------------------
+        if (nRows == 0) {
+            icons::drawIcon(ui, icons::Icon::Scene, x + w * 0.5f - 20.0f,
+                            listTop + 40.0f, 40.0f, theme::kTheme.text2);
+            if (ui.hasFont()) {
+                ui.labelFitted(x + kPad, listTop + 112.0f,
+                               needle && *needle
+                                   ? "nenhum TIC com esse nome"
+                                   : "sem TICs - toca em + para criar",
+                               theme::kTheme.text2, w - 2.0f * kPad);
+            }
+        }
+
+        // ---- tap re-despachado (POR ID — F5.0-fix) --------------------------
+        f32 tx, ty;
+        if (ui.scrollTap(kIdScrollHier, tx, ty) &&
+            scroll::inside(listRegion, tx, ty)) {
+            const i32 sel = hierarchyRowAtTap(ty, listTop, off, nRows);
+            if (sel < 0) {
+                st.selected = Handle::invalid();   // vazio = desseleciona
+                st.multiSelectCount = 0;
+            } else {
+                const Tic* t = scene.get(rows[sel].h);
+                if (t) {
+                    const f32 ry = listTop + static_cast<f32>(sel) * kRowH - off;
+                    const f32 indent = static_cast<f32>(rows[sel].depth) * 24.0f;
+                    const f32 iconX = x + 16.0f + indent;
+                    const f32 eyeHit = eyeX;             // zona de 48dp
+                    const f32 dotsHit = dotsX;
+                    if (ty >= ry && ty < ry + kRowH && tx >= eyeHit &&
+                        tx < eyeHit + 48.0f) {
+                        if (Tic* tt = scene.get(t->handle)) {
+                            tt->visible = !tt->visible;   // OLHO: toggle
                         }
-                    } else if (ty >= ry + 4.0f && ty < ry + kRowH - 4.0f &&
-                               tx >= dotsX && tx < dotsX + kEyeW) {
-                        // "...": menu contextual
-                        st.contextMenu = true;
-                        st.contextTic = t.handle;
+                    } else if (ty >= ry && ty < ry + kRowH && tx >= dotsHit &&
+                               tx < dotsHit + 48.0f) {
+                        st.contextMenu = true;           // ⋮: menu (spec L)
+                        st.contextTic = t->handle;
+                    } else if (ty >= ry && ty < ry + kRowH && tx >= iconX &&
+                               tx < iconX + 48.0f) {
+                        // MULTI: o toque no ÍCONE DE TIPO alterna no conjunto
+                        bool inSet = false;
+                        u32 at = 0;
+                        for (u32 m = 0; m < st.multiSelectCount; ++m) {
+                            if (st.multiSelect[m] == t->handle) {
+                                inSet = true;
+                                at = m;
+                            }
+                        }
+                        if (inSet) {
+                            for (u32 m = at; m + 1 < st.multiSelectCount; ++m) {
+                                st.multiSelect[m] = st.multiSelect[m + 1];
+                            }
+                            --st.multiSelectCount;
+                        } else if (st.multiSelectCount < 16) {
+                            st.multiSelect[st.multiSelectCount++] = t->handle;
+                        }
                     } else {
-                        st.selected = t.handle;   // nome: seleciona
-                        st.selElement = -1;   // elemento de UI: nova seleção
+                        st.selected = t->handle;   // corpo: seleciona
+                        st.selElement = -1;
                     }
                 }
-                ++i;
-            });
+            }
         }
+        return plus;
     }
-
-    return plus;
 }
 
 // ---------------------------------------------------------------------------
@@ -222,8 +421,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                    const AssetCatalog* catalog) {
     // F4.2: painel inteiro dentro do contentRect — a altura REAL alimenta o
     // beginScroll → o overflow do Inspector é detetado e o scroll ativa (B1)
-    const UiRect panel = safe::inspectorPanelRect(ui.screenWidth(), ui.screenHeight(),
-                                                  ui.safeArea());
+    const UiRect panel = safe::inspectorPanelRect(ui.screenWidth(),
+                                                   ui.screenHeight(),
+                                                   ui.safeArea(), st.drawerH);
     const f32 x = panel.x;
     const f32 y = panel.y;
     const f32 w = panel.w;
@@ -240,18 +440,30 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     Tic* tic = scene.get(st.selected);
     if (!tic) {
         st.selected = Handle::invalid();
-        ui.labelFitted(x + kPad, y + kHeaderH + kRowH, "(nada selecionado)",
-                       theme::LINE, w - 2.0f * kPad);
+        // 0.9.0 (spec C/M): "Nada selecionado" 14sp text-2 CENTRADO —
+        // text2 #98A2B3 sobre surface #151A23 = 6,7:1 (≥4,5:1 da auditoria);
+        // o ANTIGO "(nada selecionado)" era theme::LINE (1,7:1 — INVISÍVEL,
+        // o problema documentado "quase invisível")
+        const TextMetrics tm0 = ui.textMetrics();
+        const f32 base = y + (h - tm0.block()) * 0.5f + tm0.ascent;
+        ui.labelFitted(x + kPad, base, "Nada selecionado",
+                       theme::kTheme.text2, w - 2.0f * kPad);
+        icons::drawIcon(ui, icons::Icon::Cursor, x + w * 0.5f - 16.0f,
+                        base - tm0.block() - 40.0f, 32.0f,
+                        theme::kTheme.text2);
         return false;
     }
 
     // ---- PLANO (fonte única): perfil → linhas sequenciais com y cumulativo
+    // 0.9.0 (spec C): o plano SEGUE as secções colapsadas (só cabeçalho entra)
     const TextMetrics tm = ui.textMetrics();
     const InspProfile prof = inspectorProfile(*tic);
     const bool selectable = (catalog != nullptr);
-    InspRow plan[48];
-    const u32 nRows = inspectorPlan(prof, tm, selectable, plan);
-    const f32 contentH = inspectorContentHeight(prof, tm, selectable);
+    InspRow plan[64];
+    const u32 nRows = inspectorPlan(prof, tm, selectable, st.inspCollapsed,
+                                    plan);
+    const f32 contentH = inspectorContentHeight(prof, tm, selectable,
+                                                st.inspCollapsed);
 
     // região de scroll: abaixo do cabeçalho
     const f32 contentTop = y + kHeaderH + 4.0f;
@@ -397,23 +609,192 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             ++colorIdx;
             break;
         }
+        case InspRow::Kind::MaterialThumbs: {
+            // 0.9.0 (spec C): 3 MINIATURAS 64dp — [textura][albedo+lápis]
+            // [preview live = textura × tint]. A textura resolve pelo MESMO
+            // imgResolve do canvas (o main liga); sem textura: placeholder
+            // mono (moldura + diagonais — o padrão do elemento Image).
+            if (mr) {
+                const f32 thumbS = 64.0f;
+                const f32 gap = 12.0f;
+                const f32 rowW = 3.0f * thumbS + 2.0f * gap;
+                const f32 tx0 = x + (w - rowW) * 0.5f;
+                const f32 ty0 = ry + 4.0f;
+                // 1) TEXTURA
+                if (!ui.imageQuad(tx0, ty0, thumbS, thumbS, mr->texPath,
+                                  mr->tint)) {
+                    ui.frame(tx0, ty0, thumbS, thumbS, 1.0f,
+                             theme::kTheme.border);
+                    ui.drawLine(tx0, ty0, tx0 + thumbS, ty0 + thumbS, 1.0f,
+                                theme::kTheme.border);
+                    ui.drawLine(tx0 + thumbS, ty0, tx0, ty0 + thumbS, 1.0f,
+                                theme::kTheme.border);
+                }
+                // 2) ALBEDO (tint) + LÁPIS (editar = tocar no hex abaixo)
+                {
+                    const f32 ax = tx0 + thumbS + gap;
+                    ui.panelRounded(ax, ty0, thumbS, thumbS,
+                                    theme::kRadiusCard, theme::kTheme.bg);
+                    ui.panelRounded(ax + 4.0f, ty0 + 4.0f, thumbS - 8.0f,
+                                    thumbS - 8.0f, theme::kRadiusCard,
+                                    mr->tint);
+                    ui.frameRounded(ax, ty0, thumbS, thumbS, 1.0f,
+                                    theme::kRadiusCard, theme::kTheme.border);
+                    icons::drawIcon(ui, icons::Icon::Rename,
+                                    ax + thumbS - 24.0f, ty0, 20.0f,
+                                    theme::kTheme.text1);
+                }
+                // 3) PREVIEW LIVE (textura × tint — como o TIC renderiza)
+                {
+                    const f32 px = tx0 + 2.0f * (thumbS + gap);
+                    if (!ui.imageQuad(px, ty0, thumbS, thumbS, mr->texPath,
+                                      mr->tint)) {
+                        ui.panelRounded(px, ty0, thumbS, thumbS,
+                                        theme::kRadiusCard, mr->tint);
+                    }
+                    ui.frameRounded(px, ty0, thumbS, thumbS, 1.0f,
+                                    theme::kRadiusCard, theme::kTheme.border);
+                }
+                if (ui.hasFont()) {
+                    const TextMetrics m3 = ui.textMetrics();
+                    const f32 base = ty0 + thumbS + m3.block() + 4.0f;
+                    const char* kCaps[3] = {"textura", "albedo", "preview"};
+                    for (u32 t = 0; t < 3; ++t) {
+                        // CENTRADA mas NUNCA mais larga que o thumb (a
+                        // vizinha está a thumbS+gap — sem invasão)
+                        const f32 cx = tx0 + static_cast<f32>(t) *
+                                               (thumbS + gap) +
+                                       thumbS * 0.5f;
+                        ui.labelFitted(cx - thumbS * 0.5f, base, kCaps[t],
+                                       theme::kTheme.text2, thumbS);
+                    }
+                }
+            }
+            break;
+        }
         case InspRow::Kind::ColorHex: {
-            // 0.8.6 — cor por CÓDIGO: mostra o hex do tint; tocar abre o
-            // teclado em modo hex (propósito 5) — o commit aplica ao tint
+            // 0.8.6 — cor por CÓDIGO + 0.9.0: SWATCH 48dp (spec C — a linha
+            // de cor de Malha/Material: chips R/G/B + campo hex + swatch);
+            // tocar abre o teclado em modo hex (propósito 5)
             if (mrEdit) {
                 char hex[12];
                 uiHexFormat(mrEdit->tint, hex, sizeof(hex));
+                // swatch 48 (à direita; a cor VIVA do tint)
+                const f32 swS = 48.0f;
+                const f32 swX = x + w - kPad - swS;
+                const f32 swY = ry + (r.h - swS) * 0.5f;
+                ui.panelRounded(swX, swY, swS, swS, theme::kRadiusField,
+                                mrEdit->tint);
+                ui.frameRounded(swX, swY, swS, swS, 1.0f, theme::kRadiusField,
+                                theme::kTheme.border);
+                // o BOTÃO ocupa o resto da linha (hex legível à esquerda)
                 char label[40];
                 std::snprintf(label, sizeof(label), "hex: %s", hex);
-                ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad,
-                          r.h - 4.0f, label);
+                const f32 btnW = (swX - 8.0f) - (x + kPad);
+                ui.button(r.id, x + kPad, ry + 2.0f, btnW, r.h - 4.0f, label);
             }
             break;
         }
         case InspRow::Kind::Section:
-            ui.label(x + kPad, inspBaseline(ry, r.h, tm), "Transform3D", theme::TEXT);
-            ui.panel(x + kPad, ry + r.h - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
+        case InspRow::Kind::CamSection:
+        case InspRow::Kind::AuSection: {
+            // 0.9.0 (spec C): cabeçalho 48dp COLAPSÁVEL — título 14sp +
+            // chevron (baixo = aberto; direita = fechado); o toque alterna o
+            // bit no EditorState::inspCollapsed (PERSISTE — spec G)
+            const u32 bit = r.payload;
+            const bool open = !(st.inspCollapsed & bit);
+            static const char* kTitles[7] = {"Transform", "Camera", "Malha",
+                                             "Material", "Fisica", "Audio",
+                                             "Animacao"};
+            u32 titleIdx = 0;
+            for (u32 b = 0; b < 7; ++b) {
+                if (bit == (1u << b)) {
+                    titleIdx = b;
+                }
+            }
+            if (ui.widgetActive(r.id)) {
+                ui.panel(x + 4.0f, ry, w - 8.0f, r.h, theme::kTheme.surface2);
+            }
+            const TextMetrics m2 = ui.textMetrics();
+            const f32 base = ry + (r.h - m2.block()) * 0.5f + m2.ascent;
+            ui.label(x + kPad, base, kTitles[titleIdx], theme::kTheme.text1);
+            icons::drawIcon(ui,
+                            open ? icons::Icon::ChevronDown
+                                 : icons::Icon::ChevronRight,
+                            x + w - kPad - 24.0f,
+                            ry + (r.h - 24.0f) * 0.5f, 24.0f,
+                            theme::kTheme.text2);
+            ui.panel(x + kPad, ry + r.h - 1.0f, w - 2.0f * kPad, 1.0f,
+                     theme::kTheme.border);
             break;
+        }
+        case InspRow::Kind::TransformRow: {
+            // 0.9.0 (spec C): "linhas Pos/Rotação/Escala com 3 campos
+            // numéricos editáveis 48dp, raio 4dp, bordo, rótulos X/Y/Z +
+            // botão R que repõe a linha". Título em LINHA PRÓPRIA (a
+            // largura do painel não comporta tudo na mesma linha — o
+            // orçamento era o bug da caixa Z sob o R); caixas 48dp com o
+            // rótulo do eixo à esquerda e o valor à direita (labelFitted —
+            // nunca invade); o toque abre o teclado numérico (propósito 6).
+            static const char* kRowTitles[3] = {"Pos", "Rotacao", "Escala"};
+            const u32 rowIdx = r.payload;
+            const TextMetrics m2 = ui.textMetrics();
+            const f32 titleBase = ry + 2.0f + m2.ascent;
+            ui.label(x + kPad, titleBase, kRowTitles[rowIdx],
+                     theme::kTheme.text2);
+            // caixas 48dp: 3×64 + 2×8 = 208; R 48dp à direita (vão 8)
+            const f32 boxW = 64.0f;
+            const f32 boxH = 48.0f;            // spec C: campo numérico 48dp
+            const f32 boxY = ry + 24.0f;
+            const f32 boxBase = boxY + (boxH - m2.block()) * 0.5f + m2.ascent;
+            f32 bx = x + kPad;
+            for (u32 axis = 0; axis < 3; ++axis) {
+                const u32 field = rowIdx * 3 + axis;
+                char val[20];
+                std::snprintf(val, sizeof(val), "%.2g",
+                              rowIdx == 0 ? (&posArr[0])[axis]
+                              : rowIdx == 1 ? (&rotDeg[0])[axis]
+                                            : (&sclArr[0])[axis]);
+                const bool held = ui.widgetActive(kInspFieldBase + field);
+                ui.panelRounded(bx, boxY, boxW, boxH, theme::kRadiusField,
+                                held ? theme::kTheme.surface2
+                                     : theme::kTheme.bg);
+                ui.frameRounded(bx, boxY, boxW, boxH, 1.0f,
+                                theme::kRadiusField, theme::kTheme.border);
+                static const char* kAxis[3] = {"X", "Y", "Z"};
+                if (ui.hasFont()) {
+                    ui.label(bx + 6.0f, boxBase, kAxis[axis],
+                             theme::kTheme.text2);
+                    // valor ENTRE o rótulo do eixo e a borda direita —
+                    // labelFitted TRUNCA (a auditoria de glifos vigia)
+                    const f32 maxVw = boxW - 6.0f - 14.0f - 8.0f;
+                    char fitted[16];
+                    const char* shown = val;
+                    if (ui.fontWidth(val) > maxVw) {
+                        textfit::ellipsize(
+                            val, maxVw,
+                            [&](const char* str) { return ui.fontWidth(str); },
+                            fitted, sizeof(fitted));
+                        shown = fitted;
+                    }
+                    const f32 vw = ui.fontWidth(shown);
+                    ui.label(bx + boxW - 6.0f - vw, boxBase, shown,
+                             theme::kTheme.text1);
+                }
+                bx += boxW + 8.0f;
+            }
+            // botão R (48dp — repõe a linha)
+            const UiRect rr2 = {x + w - kPad - 48.0f, boxY, 48.0f, boxH};
+            const bool rHeld = ui.widgetActive(r.id);
+            ui.panelRounded(rr2.x, rr2.y, rr2.w, rr2.h, theme::kRadiusField,
+                            rHeld ? theme::kTheme.accentPress
+                                  : theme::kTheme.surface);
+            if (ui.hasFont()) {
+                ui.label(rr2.x + (rr2.w - ui.fontWidth("R")) * 0.5f, boxBase,
+                         "R", theme::kTheme.text1);
+            }
+            break;
+        }
         case InspRow::Kind::Slider:
             if (tr && sliderIdx < 9) {
                 const SliderSpec& sp = rows9[sliderIdx];
@@ -487,10 +868,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                       "add TouchControls");
             break;
         // ---- 0.7.7 — CÂMARA --------------------------------------------------
-        case InspRow::Kind::CamSection:
-            ui.label(x + kPad, inspBaseline(ry, r.h, tm), "Camera", theme::TEXT);
-            ui.panel(x + kPad, ry + r.h - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
-            break;
+
         case InspRow::Kind::CamFov:
             if (camEdit) {
                 if (sliderRow(ui, r.id, x, ry, r.h, tm, "fov",
@@ -606,11 +984,6 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             break;
         }
         // ---- 0.8.11 — ÁUDIO --------------------------------------------------
-        case InspRow::Kind::AuSection:
-            ui.label(x + kPad, inspBaseline(ry, r.h, tm), "Audio", theme::TEXT);
-            ui.panel(x + kPad, ry + r.h - 1.0f, w - 2.0f * kPad, 1.0f,
-                     theme::LINE);
-            break;
         case InspRow::Kind::AuClip: {
             // "clip: <nome>" — o caminho completo fica no log/toast; aqui o
             // NOME limpo (sem pasta/extensão) como o seletor
@@ -722,6 +1095,10 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         u32 sliderTapIdx = 0;   // 0.8.9: índice do slider (mesma ordem do draw)
         for (u32 i = 0; i < nRows; ++i) {
             const InspRow& r = plan[i];
+            const bool isSection =
+                r.kind == InspRow::Kind::Section ||
+                r.kind == InspRow::Kind::CamSection ||
+                r.kind == InspRow::Kind::AuSection;
             if (r.kind != InspRow::Kind::AddTc &&
                 r.kind != InspRow::Kind::MeshButton &&
                 r.kind != InspRow::Kind::TexButton &&
@@ -738,6 +1115,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 r.kind != InspRow::Kind::AuAutoplay &&  // 0.8.11
                 r.kind != InspRow::Kind::AuLoop &&      // 0.8.11
                 r.kind != InspRow::Kind::AuPos &&       // 0.8.11
+                !isSection &&                           // 0.9.0: colapsar
+                r.kind != InspRow::Kind::TransformRow &&// 0.9.0: caixas X/Y/Z + R
                 r.kind != InspRow::Kind::Slider) {      // 0.8.9: zona do VALOR
                 continue;
             }
@@ -754,7 +1133,47 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 }
                 continue;   // mesmo rect do botão desenhado (+2/−2)
             }
-            if (r.kind == InspRow::Kind::AddTc) {
+            if (isSection) {
+                // 0.9.0 (spec C): COLAPSAR/ABRIR a secção (bitmask persistente)
+                st.inspCollapsed ^= r.payload;
+            } else if (r.kind == InspRow::Kind::TransformRow) {
+                // 0.9.0 (spec C): caixa X/Y/Z → teclado numérico (purpose 6,
+                // campo = rowIdx*3+axis) · R → repõe a linha. As caixas vivem
+                // na faixa Y [ry+24, ry+72) — o MESMO rect desenhado
+                if (ty >= ry + 24.0f && ty < ry + 72.0f) {
+                const f32 boxW = 64.0f;
+                f32 bx = x + kPad;
+                const f32 rResetX = x + w - kPad - 48.0f;
+                bool handled = false;
+                for (u32 axis = 0; axis < 3 && !handled; ++axis) {
+                    if (tx >= bx && tx < bx + boxW) {
+                        const u32 field = r.payload * 3 + axis;
+                        char cur[20];
+                        std::snprintf(cur, sizeof(cur), "%.4g",
+                                      r.payload == 0 ? (&posArr[0])[axis]
+                                      : r.payload == 1 ? (&rotDeg[0])[axis]
+                                                       : (&sclArr[0])[axis]);
+                        openTextInput(st, 6, st.selected,
+                                      static_cast<i32>(field), cur);
+                        handled = true;
+                    }
+                    bx += boxW + 8.0f;
+                }
+                if (!handled && tx >= rResetX) {
+                    // R: repõe a linha ao default (0/0/0 ou 1/1/1)
+                    if (tr) {
+                        if (r.payload == 0) {
+                            tr->pos = Vec3{0.0f, 0.0f, 0.0f};
+                        } else if (r.payload == 1) {
+                            tr->rot = Quat::identity();
+                        } else {
+                            tr->scale = Vec3{1.0f, 1.0f, 1.0f};
+                        }
+                        tr->updateWorld();
+                    }
+                }
+                }
+            } else if (r.kind == InspRow::Kind::AddTc) {
                 tic->addComponent<TouchControls>();   // F4: cria no TIC
             } else if (r.kind == InspRow::Kind::MeshButton ||
                        r.kind == InspRow::Kind::TexButton ||
@@ -1030,10 +1449,10 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     const f32 w = kMenuW;
     const f32 h = kHeaderH + static_cast<f32>(kItems) * 64.0f + kPad;
     // F4.2: centrado no viewport ÚTIL (dentro do contentRect)
-    const f32 ox = ui.safeLeft();
-    const f32 oy = ui.safeTop();
-    const f32 aw = sw - ox - ui.safeRight();
-    const f32 ah = sh - oy - ui.safeBottom();
+    // 0.9.0: os overlays centram na FAIXA DO VIEWPORT (não por baixo do
+    // chrome — ver overlayArea no EditorLayout.h)
+    f32 ox, oy, aw, ah;
+    overlayArea(sw, sh, ui.safeArea(), ox, oy, aw, ah);
     const f32 x = ox + (aw - w) * 0.5f;
     const f32 y = oy + (ah - h) * 0.5f;
 
@@ -1070,41 +1489,96 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     return chosen;
 }
 
-int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st) {
-    const f32 w = kMenuW;
-    // 0.7.6 — o dropdown do botão [Menu ▾]: Settings entrou (deixou de ser
-    // botão próprio da barra), "Cenas…" SAÍU (o [Cena ▾] da toolbar abre a
-    // lista diretamente). O resto é o menu de FICHEIROS de sempre.
+int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st,
+                 f32 ax, f32 ay) {
+    // 0.9.0 (spec H) — SHEET MENU ANCORADO: 8dp por baixo do botão [Menu ≡],
+    // largura 280dp, SCRIM 60% por trás, linhas 48dp ÍCONE+rótulo 14sp,
+    // separadores FINOS entre grupos. Toque fora fecha SEM ação; toque na
+    // linha executa e fecha. (ax/ay = rect do botão-âncora da top bar;
+    // −1/−1 = fallback centrado p/ compatibilidade dos testes.)
     constexpr int kItems = 7;
-    const f32 h = kHeaderH + static_cast<f32>(kItems) * 64.0f + kPad;
-    // F4.2: centrado no viewport ÚTIL (dentro do contentRect)
-    const f32 ox = ui.safeLeft();
-    const f32 oy = ui.safeTop();
-    const f32 aw = sw - ox - ui.safeRight();
-    const f32 ah = sh - oy - ui.safeBottom();
-    const f32 x = ox + (aw - w) * 0.5f;
-    const f32 y = oy + (ah - h) * 0.5f;
+    constexpr f32 kSheetW = 280.0f;   // spec H
+    constexpr f32 kRowH = 48.0f;      // spec H/A
+    const f32 h = static_cast<f32>(kItems) * kRowH + 3.0f * 9.0f + 8.0f;
+    f32 x, y;
+    if (ax >= 0.0f && ay >= 0.0f) {
+        x = ax;
+        y = ay + 8.0f;   // 8dp sob o botão (spec H)
+        // clamp ao contentRect (nada sai do ecrã — a invariante F4.2)
+        const f32 maxX = ui.safeLeft() + sw - ui.safeRight() - kSheetW - 4.0f;
+        if (x > maxX) {
+            x = maxX > ui.safeLeft() ? maxX : ui.safeLeft();
+        }
+        const f32 maxY = sh - ui.safeBottom() - h - 28.0f;
+        if (y > maxY) {
+            y = maxY > static_cast<f32>(ui.safeTop()) + safe::kToolbarH
+                    ? maxY
+                    : static_cast<f32>(ui.safeTop()) + safe::kToolbarH;
+        }
+    } else {
+        f32 ox, oy, aw, ah;
+        overlayArea(sw, sh, ui.safeArea(), ox, oy, aw, ah);
+        x = ox + (aw - kSheetW) * 0.5f;
+        y = oy + (ah - h) * 0.5f;
+    }
 
-    if (pressedOutside(in, x, y, w, h)) {
+    // SCRIM 60% (spec H): toque fora fecha SEM ação
+    ui.panel(ui.safeLeft(), static_cast<f32>(ui.safeTop()),
+             sw - ui.safeLeft() - ui.safeRight(),
+             sh - ui.safeTop() - ui.safeBottom(), theme::kTheme.scrim);
+    if (pressedOutside(in, x, y, kSheetW, h)) {
         st.fileMenu = false;
         return 0;
     }
 
-    ui.panel(x, y, w, h, theme::PANEL);
-    ui.frame(x, y, w, h, 2.0f, theme::ACCENT);
-    const f32 th = ui.fontHeight();
-    ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "MENU", theme::TEXT);
+    ui.panelRounded(x, y, kSheetW, h, theme::kRadiusCard, theme::kTheme.surface);
+    ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::kRadiusCard,
+                    theme::kTheme.border);
 
+    // linhas: ícone + rótulo; separadores finos ENTRE grupos (spec H):
+    // (Settings) | (Guardar/Carregar) | (Export OBJ/Importar/Export
+    // Downloads) | (Sair p/ projetos)
+    static const struct {
+        const char*  label;
+        icons::Icon  ic;
+    } kMenu[kItems] = {
+        {"Settings",          icons::Icon::Gear},
+        {"Guardar cena",      icons::Icon::Save},
+        {"Carregar cena",     icons::Icon::Folder},
+        {"Export OBJ",        icons::Icon::Download},
+        {"Importar…",         icons::Icon::Upload},
+        {"Export Downloads",  icons::Icon::Download},
+        {"Sair para projetos", icons::Icon::Back},
+    };
+    static const bool kGroupEnd[kItems] = {true, true, false, false, true,
+                                           true, false};
+    const TextMetrics tm = ui.textMetrics();
     int chosen = 0;
-    const char* labels[kItems] = {"Settings", "Guardar cena", "Carregar cena",
-                                  "Export OBJ", "Importar…",
-                                  "Export Downloads", "Sair para projetos"};
+    f32 ry = y + 4.0f;
     for (int i = 0; i < kItems; ++i) {
-        if (ui.button(static_cast<u64>(30 + i), x + kPad,
-                      y + kHeaderH + static_cast<f32>(i) * 64.0f,
-                      w - 2.0f * kPad, 56.0f, labels[i])) {
+        const bool held = ui.widgetActive(static_cast<u64>(30 + i));
+        if (held) {
+            ui.panel(x + 4.0f, ry, kSheetW - 8.0f, kRowH,
+                     theme::kTheme.surface2);
+        }
+        icons::drawIcon(ui, kMenu[i].ic, x + 16.0f, ry + (kRowH - 24.0f) * 0.5f,
+                        24.0f, theme::kTheme.text2);
+        if (ui.hasFont()) {
+            ui.labelFitted(x + 16.0f + 24.0f + 12.0f,
+                           ry + (kRowH - tm.block()) * 0.5f + tm.ascent,
+                           kMenu[i].label, theme::kTheme.text1,
+                           kSheetW - 24.0f - 36.0f - 12.0f);
+        }
+        if (ui.widgetHit(static_cast<u64>(30 + i), x + 4.0f, ry, kSheetW - 8.0f,
+                         kRowH)) {
             chosen = i + 1;
             st.fileMenu = false;
+        }
+        ry += kRowH;
+        if (kGroupEnd[i] && i + 1 < kItems) {
+            ui.panel(x + 16.0f, ry - 0.5f, kSheetW - 32.0f, 1.0f,
+                     theme::kTheme.border);   // separador fino
+            ry += 9.0f;
         }
     }
     return chosen;
@@ -1131,60 +1605,111 @@ const char* sceneDisplayName(const std::string& sceneRelPath, char* out,
 
 int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                    EditorState& st, const std::vector<std::string>& scenes,
-                   u32 activeScene) {
-    const f32 w = kMenuW;
+                   u32 activeScene, f32 ax, f32 ay) {
+    // 0.9.0 (spec H) — SHEET CENAS ANCORADO 8dp sob o botão [Cena ▾]:
+    // 280dp de largura, scrim 60%, [＋ Nova cena] com FILL ACCENT no topo,
+    // linhas de cena 48dp com ÍCONE + nome + CHECK na ativa, separador fino.
+    // Toque fora fecha SEM ação; toque na linha troca e fecha.
+    constexpr f32 kSheetW = 280.0f;   // spec H
     const f32 rowH = 48.0f;
-    // cabeçalho + botão nova cena + lista (cap de 6 linhas visíveis — o
-    // scroll id 44 revela o resto; contentH REAL alimenta o beginScroll)
     const u32 shown = scenes.size() < 6u ? static_cast<u32>(scenes.size()) : 6u;
     const f32 listH = static_cast<f32>(shown) * rowH;
-    const f32 h = kHeaderH + 56.0f + 8.0f + listH + kPad;
-    const f32 ox = ui.safeLeft();
-    const f32 oy = ui.safeTop();
-    const f32 aw = sw - ox - ui.safeRight();
-    const f32 ah = sh - oy - ui.safeBottom();
-    const f32 x = ox + (aw - w) * 0.5f;
-    const f32 y = oy + (ah - h) * 0.5f;
+    const f32 h = 48.0f + 56.0f + 8.0f + listH + 8.0f;
+    f32 x, y;
+    if (ax >= 0.0f && ay >= 0.0f) {
+        x = ax;
+        y = ay + 8.0f;   // 8dp sob o botão (spec H)
+        const f32 maxX = ui.safeLeft() + sw - ui.safeRight() - kSheetW - 4.0f;
+        if (x > maxX) {
+            x = maxX > ui.safeLeft() ? maxX : ui.safeLeft();
+        }
+        const f32 maxY = sh - ui.safeBottom() - h - 28.0f;
+        if (y > maxY) {
+            y = maxY > static_cast<f32>(ui.safeTop()) + safe::kToolbarH
+                    ? maxY
+                    : static_cast<f32>(ui.safeTop()) + safe::kToolbarH;
+        }
+    } else {
+        f32 ox, oy, aw, ah;
+        overlayArea(sw, sh, ui.safeArea(), ox, oy, aw, ah);
+        x = ox + (aw - kSheetW) * 0.5f;
+        y = oy + (ah - h) * 0.5f;
+    }
 
-    if (pressedOutside(in, x, y, w, h)) {
+    // scrim + toque fora fecha SEM ação
+    ui.panel(ui.safeLeft(), static_cast<f32>(ui.safeTop()),
+             sw - ui.safeLeft() - ui.safeRight(),
+             sh - ui.safeTop() - ui.safeBottom(), theme::kTheme.scrim);
+    if (pressedOutside(in, x, y, kSheetW, h)) {
         st.scenesMenu = false;
         return 0;
     }
 
-    ui.panel(x, y, w, h, theme::PANEL);
-    ui.frame(x, y, w, h, 2.0f, theme::ACCENT);
-    const f32 th = ui.fontHeight();
-    ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "CENAS", theme::TEXT);
+    ui.panelRounded(x, y, kSheetW, h, theme::kRadiusCard, theme::kTheme.surface);
+    ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::kRadiusCard,
+                    theme::kTheme.border);
 
-    // + Nova cena (fica FIXO no topo da lista — sempre alcançável)
-    const f32 newBtnY = y + kHeaderH;
-    const bool newScene = ui.button(6700, x + kPad, newBtnY,
-                                    w - 2.0f * kPad, 56.0f, "+ Nova cena");
+    // ＋ Nova cena — FILL ACCENT (spec H), fixo no topo
+    const f32 newBtnY = y + 4.0f;
+    const UiRect newBtn = {x + 8.0f, newBtnY, kSheetW - 16.0f, 48.0f};
+    const bool newHeld = ui.widgetActive(6700);
+    ui.panelRounded(newBtn.x, newBtn.y, newBtn.w, newBtn.h,
+                    theme::kRadiusCard,
+                    newHeld ? theme::kTheme.accentPress : theme::kTheme.accent);
+    icons::drawIcon(ui, icons::Icon::Plus, newBtn.x + 16.0f,
+                    newBtn.y + (newBtn.h - 24.0f) * 0.5f, 24.0f,
+                    theme::kTheme.accentInk);
+    if (ui.hasFont()) {
+        const TextMetrics tm0 = ui.textMetrics();
+        ui.label(newBtn.x + 16.0f + 24.0f + 12.0f,
+                 newBtn.y + (newBtn.h - tm0.block()) * 0.5f + tm0.ascent,
+                 "Nova cena", theme::kTheme.accentInk);
+    }
+    const bool newScene = ui.widgetHit(6700, newBtn.x, newBtn.y, newBtn.w,
+                                       newBtn.h);
 
-    // lista: região de scroll (id 44) com a altura REAL do conteúdo
+    // separador fino + lista (scroll id 44)
+    ui.panel(x + 16.0f, newBtnY + 48.0f + 4.0f, kSheetW - 32.0f, 1.0f,
+             theme::kTheme.border);
     const f32 listTop = newBtnY + 56.0f + 8.0f;
-    const UiRect region{x, listTop, w, listH};
+    const UiRect region{x, listTop, kSheetW, listH};
     const f32 contentH = static_cast<f32>(scenes.size()) * rowH;
     ui.beginScroll(44, region, contentH);
     const f32 off = ui.scrollOffset();
+    const TextMetrics tm = ui.textMetrics();
     for (size_t i = 0; i < scenes.size(); ++i) {
         char name[48];
         sceneDisplayName(scenes[i], name, sizeof(name));
-        char label[56];
-        std::snprintf(label, sizeof(label), "%s%s",
-                      i == activeScene ? "> " : "  ", name);
         const f32 ry = listTop + static_cast<f32>(i) * rowH - off;
-        ui.button(6710 + static_cast<u64>(i), x + kPad, ry + 2.0f,
-                  w - 2.0f * kPad, rowH - 4.0f, label);   // só desenha (scroll)
-        if (i == activeScene) {
-            ui.frame(x + kPad, ry + 2.0f, w - 2.0f * kPad, rowH - 4.0f,
-                     2.0f, theme::ACCENT);
+        const bool active = i == activeScene;
+        if (active) {
+            ui.panel(x + 4.0f, ry, kSheetW - 8.0f, rowH, theme::kTheme.surface2);
         }
+        // ícone de cena (clapper) + nome + CHECK na ativa (spec H)
+        icons::drawIcon(ui, icons::Icon::Clapper, x + 16.0f,
+                        ry + (rowH - 24.0f) * 0.5f, 24.0f,
+                        active ? theme::kTheme.accent : theme::kTheme.text2);
+        if (ui.hasFont()) {
+            ui.labelFitted(x + 16.0f + 24.0f + 12.0f,
+                           ry + (rowH - tm.block()) * 0.5f + tm.ascent, name,
+                           active ? theme::kTheme.accent : theme::kTheme.text1,
+                           kSheetW - 24.0f - 36.0f - 12.0f - 32.0f);
+        }
+        if (active) {
+            icons::drawIcon(ui, icons::Icon::Check,
+                            x + kSheetW - 16.0f - 24.0f,
+                            ry + (rowH - 24.0f) * 0.5f, 24.0f,
+                            theme::kTheme.accent);
+        }
+        ui.widgetHit(6710 + static_cast<u64>(i), x + 4.0f, ry, kSheetW - 8.0f,
+                     rowH);   // só desenha (scroll re-despacha)
     }
     ui.endScroll();
-    if (scenes.empty()) {
-        ui.labelFitted(x + kPad, listTop + rowH * 0.5f, "(sem cenas)",
-                       theme::LINE, w - 2.0f * kPad);
+    if (scenes.empty() && ui.hasFont()) {
+        icons::drawIcon(ui, icons::Icon::Clapper, x + kSheetW * 0.5f - 16.0f,
+                        listTop + 20.0f, 32.0f, theme::kTheme.text2);
+        ui.labelFitted(x + 16.0f, listTop + 76.0f, "(sem cenas)",
+                       theme::kTheme.text2, kSheetW - 32.0f);
     }
 
     // tap re-despachado → escolha da linha (a MESMA geometria desenhada)
@@ -1217,10 +1742,10 @@ int drawSettingsMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     const bool showMode = storageMode && storageMode[0];
     const f32 h = kHeaderH + (showMode ? kModeLineH : 0.0f) +
                   static_cast<f32>(kItems) * 64.0f + kPad;
-    const f32 ox = ui.safeLeft();
-    const f32 oy = ui.safeTop();
-    const f32 aw = sw - ox - ui.safeRight();
-    const f32 ah = sh - oy - ui.safeBottom();
+    // 0.9.0: os overlays centram na FAIXA DO VIEWPORT (não por baixo do
+    // chrome — ver overlayArea no EditorLayout.h)
+    f32 ox, oy, aw, ah;
+    overlayArea(sw, sh, ui.safeArea(), ox, oy, aw, ah);
     const f32 x = ox + (aw - kMenuW) * 0.5f;
     const f32 y = oy + (ah - h) * 0.5f;
 
@@ -1324,10 +1849,10 @@ int wrapText3(UiContext& ui, const char* text, f32 maxW, int maxLines,
 int drawStorageDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                       EditorState& st) {
     const f32 h = storageDialogHeight();
-    const f32 ox = ui.safeLeft();
-    const f32 oy = ui.safeTop();
-    const f32 aw = sw - ox - ui.safeRight();
-    const f32 ah = sh - oy - ui.safeBottom();
+    // 0.9.0: os overlays centram na FAIXA DO VIEWPORT (não por baixo do
+    // chrome — ver overlayArea no EditorLayout.h)
+    f32 ox, oy, aw, ah;
+    overlayArea(sw, sh, ui.safeArea(), ox, oy, aw, ah);
     const UiRect dlg = centeredMenuRect(ox, oy, aw, ah, h);
 
     if (pressedOutside(in, dlg.x, dlg.y, dlg.w, dlg.h)) {
@@ -1383,10 +1908,10 @@ int drawImportMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     const size_t shown = cands.size() < kMaxRows ? cands.size() : kMaxRows;
 
     const f32 h = importMenuHeight(static_cast<u32>(shown) + 1u);
-    const f32 ox = ui.safeLeft();
-    const f32 oy = ui.safeTop();
-    const f32 aw = sw - ox - ui.safeRight();
-    const f32 ah = sh - oy - ui.safeBottom();
+    // 0.9.0: os overlays centram na FAIXA DO VIEWPORT (não por baixo do
+    // chrome — ver overlayArea no EditorLayout.h)
+    f32 ox, oy, aw, ah;
+    overlayArea(sw, sh, ui.safeArea(), ox, oy, aw, ah);
     const f32 x = ox + (aw - kMenuW) * 0.5f;
     const f32 y = oy + (ah - h) * 0.5f;
 
@@ -1440,10 +1965,10 @@ int drawImportMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 void drawLogViewer(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                    EditorState& st, const std::vector<std::string>& lines,
                    const std::vector<std::string>& dumps) {
-    const f32 ox = ui.safeLeft();
-    const f32 oy = ui.safeTop();
-    const f32 aw = sw - ox - ui.safeRight();
-    const f32 ah = sh - oy - ui.safeBottom();
+    // 0.9.0: os overlays centram na FAIXA DO VIEWPORT (não por baixo do
+    // chrome — ver overlayArea no EditorLayout.h)
+    f32 ox, oy, aw, ah;
+    overlayArea(sw, sh, ui.safeArea(), ox, oy, aw, ah);
     // painel GRANDE central (86% × 80% da área útil — o log precisa de espaço)
     const f32 w = aw * 0.86f;
     const f32 h = ah * 0.80f;
@@ -1600,10 +2125,10 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                   (static_cast<f32>(shown) +
                    static_cast<f32>(pickMesh ? 2 : 1)) * 48.0f +
                   importH + kPad;
-    const f32 ox = ui.safeLeft();
-    const f32 oy = ui.safeTop();
-    const f32 aw = sw - ox - ui.safeRight();
-    const f32 ah = sh - oy - ui.safeBottom();
+    // 0.9.0: os overlays centram na FAIXA DO VIEWPORT (não por baixo do
+    // chrome — ver overlayArea no EditorLayout.h)
+    f32 ox, oy, aw, ah;
+    overlayArea(sw, sh, ui.safeArea(), ox, oy, aw, ah);
     const f32 x = ox + (aw - w) * 0.5f;
     const f32 y = oy + (ah - h) * 0.5f;
 

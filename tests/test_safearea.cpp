@@ -63,10 +63,16 @@ TEST(safearea_layout_todo_dentro_do_content_rect) {
     EXPECT(rectInside(inspectorPanelRect(1600.0f, 720.0f, in), content));
     EXPECT(rectInside(centerRect(1600.0f, 720.0f, in), content));
 
-    // âncoras: toolbar colada ao topo ÚTIL; status colada ao fundo ÚTIL
+    // âncoras 0.9.0: TOP BAR 56 colada ao topo ÚTIL; a tab bar de modo
+    // (48) fica LOGO abaixo; status colada ao fundo ÚTIL
     const UiRect tb = toolbarRect(1600.0f, 720.0f, in);
     EXPECT(nearEqF(tb.y, 24.0f));
-    EXPECT(nearEqF(tb.h, kToolbarH));
+    EXPECT(nearEqF(tb.h, kTopBarH));
+    const UiRect mt = modeTabRect(1600.0f, 720.0f, in);
+    EXPECT(nearEqF(mt.y, 24.0f + kTopBarH));
+    EXPECT(nearEqF(mt.h, kModeTabH));
+    const UiRect bt = bottomTabRect(1600.0f, 720.0f, in);
+    EXPECT(nearEqF(bt.y + bt.h + kStatusH, 628.0f));
     const UiRect st = statusRect(1600.0f, 720.0f, in);
     EXPECT(nearEqF(st.y + st.h, 628.0f));   // 720 − 92
 
@@ -85,7 +91,9 @@ TEST(safearea_layout_todo_dentro_do_content_rect) {
     const UiRect tb0 = toolbarRect(1600.0f, 720.0f, zero);
     EXPECT(nearEqF(tb0.x, 0.0f) && nearEqF(tb0.y, 0.0f));
     const UiRect vp0 = viewportRect(1600.0f, 720.0f, zero);
-    EXPECT(nearEqF(vp0.h, 720.0f - kToolbarH - kStatusH));
+    // 0.9.0: o viewport perde top bar 56 + tab bar 48 + tab bar de baixo 48
+    // + status 24 (spec D/E)
+    EXPECT(nearEqF(vp0.h, 720.0f - kToolbarH - kStatusH - kBottomTabH));
 }
 
 // REGRESSÃO B1 (o bug do dono no C33): Inspector com receita completa do
@@ -101,12 +109,10 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     EXPECT(nearEqF(listOld, 540.0f));
     EXPECT(nearEqF(scroll::maxOffset(contentOld, listOld), 0.0f));   // bug antigo
 
-    // F5.0-fix: a receita vem do PLANO (métricas fallback 28 px = device).
-    // 0.7.0: o plano ganhou as linhas NOVAS da gestão de TICs — "visivel"
-    // (btnH) + cor R/G/B (3× sldH) — Player completo sem TouchControls e sem
-    // catálogo: 606 (F5.0) + 144 (novo) = 750
-    // 0.7.7: InspProfile ganhou `cam` (2º campo) — inicialização EXPLÍCITA
-    // (o agregado posicional antigo deslizaria um campo)
+    // F5.0-fix → 0.9.0: o plano tem SECÇÕES COLAPSÁVEIS de 48dp (spec C) e
+    // as 3 linhas de Transform (X/Y/Z + R) — a receita do Player completo
+    // sem TouchControls e sem catálogo sobe para 998 (o desenho segue o
+    // MESMO plano — fonte única)
     InspProfile prof{};
     prof.tr = true;
     prof.mr = true;
@@ -118,23 +124,24 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     prof.anim = false;
     prof.canAnim = true;      // 0.8.0: tem Transform3D → linha add Animacao
     const TextMetrics m{};
-    const f32 contentH = inspectorContentHeight(prof, m, false);
-    EXPECT(nearEqF(contentH, 864.0f));   // 828 + 36 (0.8.6: linha hex)
+    const f32 contentH = inspectorContentHeight(prof, m, false, 0u);
+    EXPECT(nearEqF(contentH, 1070.0f));  // 0.9.0: secções 48 + trf 80 (caixas 48dp) + thumbs 84
 
     // DEPOIS: painel dentro do contentRect [0,24,·,628] (status 24 + nav 92)
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);
     const UiRect panel = inspectorPanelRect(1600.0f, 720.0f, in);
-    EXPECT(nearEqF(panel.h, 476.0f));   // 604 − 88 − 40
+    // 0.9.0: 604 − topChrome 104 − status 24 − bottomTab 48 = 428
+    EXPECT(nearEqF(panel.h, 428.0f));
     const f32 listH = panel.h - kHeaderH - 4.0f;
-    EXPECT(nearEqF(listH, 424.0f));
+    EXPECT(nearEqF(listH, 376.0f));
     const f32 mo = scroll::maxOffset(contentH, listH);
     EXPECT(mo > 0.0f);                        // scroll ATIVA
-    EXPECT(nearEqF(mo, 440.0f));              // 864 − 424
+    EXPECT(nearEqF(mo, 694.0f));              // 1070 − 376
 
     // com o offset no máximo, a ÚLTIMA linha do plano (add TouchControls)
     // fica INTEIRA dentro da lista
-    InspRow plan[48];   // 0.8.0: +prim/anim
-    const u32 n = inspectorPlan(prof, m, false, plan);
+    InspRow plan[64];   // 0.9.0: plano com secções colapsáveis
+    const u32 n = inspectorPlan(prof, m, false, 0u, plan);
     EXPECT(n > 0);
     const InspRow& last = plan[n - 1];
     EXPECT(last.kind == InspRow::Kind::AddAnim);   // 0.8.0: add Animacao no fundo
@@ -153,16 +160,17 @@ TEST(safearea_hierarchy_com_insets_todos_os_tics) {
         s.create("t");
     }
     const f32 contentH = hierarchyContentHeight(14);
-    EXPECT(nearEqF(contentH, 728.0f));
+    EXPECT(nearEqF(contentH, 672.0f));   // 0.9.0: 14 × 48 (spec B)
 
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);
     const UiRect panel = hierarchyPanelRect(1600.0f, 720.0f, in);
-    const f32 listTop = panel.y + kHeaderH;
-    const f32 listH = panel.h - kHeaderH;
-    EXPECT(nearEqF(listH, 428.0f));
+    // 0.9.0: cabeçalho 48 + LINHA DE PESQUISA 48 (spec B/scope)
+    const f32 listTop = panel.y + kHeaderH + kSearchRowH;
+    const f32 listH = panel.h - kHeaderH - kSearchRowH;
+    EXPECT(nearEqF(listH, 332.0f));
 
     const f32 off = scroll::clampOffset(999.0f, contentH, listH);
-    EXPECT(nearEqF(off, 300.0f));
+    EXPECT(nearEqF(off, 340.0f));
     // última linha inteira dentro da região com o offset no máximo
     const f32 row13 = listTop + 13.0f * kRowH - off;
     EXPECT(row13 >= listTop);

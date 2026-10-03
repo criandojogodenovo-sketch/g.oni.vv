@@ -3,222 +3,163 @@ package vv.goni;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
+import android.util.LruCache;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
-import android.widget.Button;
+import android.widget.BaseAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.GridView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ListView;
+import android.widget.PopupMenu;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
- * F5.4 → 0.7.6 — ECRÃ DE PROJETOS REESTRUTURADO.
+ * 0.9.0 — TELA DE PROJETOS (spec F dos mockups do autor):
  *
- * Estrutura final (spec 0.7.6):
- *   ┌──────────────────────────────────────────────────────┐
- *   │ G.One VV                                             │
- *   │ [ Novo projeto ] [ Importar projeto ]   ← TOPO, contorno #8AB4F8
- *   │ Meus projetos                          ← cabeçalho   │
- *   │  nome do projeto                                      │
- *   │  dd/MM/yyyy HH:mm (última edição)     ← UMA entrada  │
- *   │  …                                                    │
- *   └──────────────────────────────────────────────────────┘
+ *   ┌───────────────────────────────────────────────────────────────┐
+ *   │ [logo G+lâmpada 48] G.One VV            (20sp)                │ 72dp
+ *   │                      editor de jogos no telemóvel (12sp text2)│
+ *   │ [🔍 pesquisar projetos______________] [Ordenar: Última Ed. ▾] │ 48dp
+ *   │ [  ＋ Novo projeto  ] [  ⬆ Importar projeto  ]  ← fill accent │ 56dp
+ *   │ Meus projetos                                       (12sp)   │
+ *   │ ┌───────────────┐  ┌───────────────┐                          │
+ *   │ │  16:9 thumb   │  │  16:9 thumb   │  cards r=8dp, bordo      │
+ *   │ │ nome    (⋮48) │  │ nome    (⋮48) │                          │
+ *   │ │ há 2 h        │  │ há 3 d        │  tempo relativo 12sp     │
+ *   │ └───────────────┘  └───────────────┘                          │
+ *   └───────────────────────────────────────────────────────────────┘
  *
- * REGRAS 0.7.6 cumpridas aqui:
- *   • UMA entrada de criação ([Novo projeto] — o botão duplicado de fundo
- *     e o prefixo interno "primary:" da lista MORRERAM);
- *   • a lista mostra SÓ nome + data da última edição (o URI nunca aparece;
- *     ProjectsFormat.folderLabel limpa "primary:" quando a pasta precisa
- *     de ser referida nos diálogos);
- *   • botões de criação SEM gradiente cinza do tema do sistema: contorno
- *     #8AB4F8 sobre o fundo escuro (a cor de marca do editor — a mesma
- *     exceção documentada do Theme central);
- *   • nenhum emoji.
- *
- * REGRAS 0.8.6 (Theme uniforme + página inicial limpa):
- *   • os TOKENS da marca vivem em CONSTANTES únicas (BRAND/BG/TEXT/TEXT_DIM/
- *     SURFACE/LINE) — os hex inline espalhados MORRERAM; são o espelho Java
- *     do Theme.h da engine (mono + brand);
- *   • os AlertDialogs herdam o tema CLARO do manifest → agora correm num
- *     ContextThemeWrapper ESCURO (Theme_DeviceDefault_Dialog): título,
- *     mensagem e botões coerentes com o resto da app;
- *   • hierarquia visual: título de marca + subtítulo discreto, ações no
- *     topo, lista com NOME (claro) + data (discreto) e empty-state com CTA.
- *
- * Fluxos: [Novo projeto] → nome (diálogo) → picker SAF da pasta DESTE
- * projeto; [Importar projeto] → picker SAF direto (pasta que JÁ é um
- * projeto .goni — o nome vem da própria pasta). Toque abre; long-press
- * remove da lista / apaga de verdade (diálogos de sempre).
+ * REGRAS (spec F):
+ *   • miniatura 16:9 — default = logo G.One; após guardar = captura da
+ *     viewport (thumb.png escrito pelo ENGINE a cada save; Java lê + cache);
+ *   • estados do card: normal / premido (surface2) / a carregar miniatura
+ *     (spinner) / projeto em falta (fundo rachado + ? + erro legível +
+ *     recuperação) / vazio com convite;
+ *   • gestos: toque abre; toque longo OU ⋮ abre menu (abrir/renomear/
+ *     duplicar/apagar COM confirmação); SEM swipe-to-delete;
+ *   • pesquisa filtra por nome; dropdown Ordenar (Última Edição padrão);
+ *   • tokens = espelho Java do ui/Theme.h 0.9.0 (tabela spec A).
  */
 public class ProjectManagerActivity extends Activity {
     private static final String TAG = "GONI";
 
-    // request code do picker SAF — NÃO colide com kReqAllFiles (4301)
-    static final int REQ_PICK_TREE = 4302;
-    // 0.7.6: o picker do IMPORTAR (pasta que já existe) — code próprio para
-    // o onActivityResult saber qual foi
-    static final int REQ_PICK_TREE_IMPORT = 4303;
+    static final int REQ_PICK_TREE = 4302;         // criar: pasta DO projeto
+    static final int REQ_PICK_TREE_IMPORT = 4303;  // importar pasta .goni
+    static final int REQ_PICK_TREE_DUP = 4304;     // 0.9.0: duplicar → destino
+    static final int REQ_PICK_TREE_RECOVER = 4305; // 0.9.0: re-apontar pasta
 
-    // 0.8.6 — TOKENS do Theme (espelho Java do ui/Theme.h — UMA fonte de
-    // verdade por plataforma; nada de hex inline espalhado):
-    //   brand   #8AB4F8 (a exceção documentada ao mono — ações/contorno)
-    //   bg      #0B0E13 (fundo da app — o mesmo BG do Theme)
-    //   text    #E6E6E6 / textDim #8A939B (texto primário/discreto)
-    //   surface #1E222A (campos/inputs)  line #232A31 (divisores)
-    private static final int BRAND = 0xFF8AB4F8;
-    private static final int BG = 0xFF0B0E13;
-    private static final int TEXT = 0xFFE6E6E6;
-    private static final int TEXT_DIM = 0xFF8A939B;
-    private static final int SURFACE = 0xFF1E222A;
-    private static final int LINE = 0xFF232A31;
+    // ---- TOKENS 0.9.0 (espelho Java do ui/Theme.h — tabela spec A) --------
+    static final int BG = 0xFF0B0E13;        // bg
+    static final int SURFACE = 0xFF151A23;   // surface (cards)
+    static final int SURFACE2 = 0xFF1F2733;  // surface-2 (premido)
+    static final int BORDER = 0xFF2A3442;    // border
+    static final int TEXT1 = 0xFFF5F5F5;     // text-1
+    static final int TEXT2 = 0xFF98A2B3;     // text-2 (6,7:1 sobre surface)
+    static final int ACCENT = 0xFF2196F3;    // accent 🔶 (flip 1 token)
+    static final int ACCENT_PRESS = 0xFF1B7FD4;
+    static final int DANGER = 0xFFEF5350;
+    static final int WARN = 0xFFFABB45;
 
-    private final List<VvProjects.Entry> projects = new ArrayList<>();
-    private ArrayAdapter<String> adapter;
-    private ListView list;
-    private TextView empty;
+    private final List<VvProjects.Entry> all = new ArrayList<>();   // fonte
+    private final List<VvProjects.Entry> shown = new ArrayList<>(); // filtro+ordem
+    private final List<String> missingUris = new ArrayList<>();     // estado F
+
+    private GridView grid;
+    private TextView emptyTitle, emptySub;
+    private EditText search;
+    private TextView sortBtn;
+    private CardsAdapter adapter;
     private String pendingName = "projeto";
+    private VvProjects.Entry pendingDup;          // duplicar em curso
+    private int sortMode = 0;                     // ProjectsFormat.sortLabel
+
+    // cache de miniaturas (spec F: PNG no dir + cache) — chave = uri do projeto
+    private static final LruCache<String, Bitmap> THUMBS =
+            new LruCache<>(24);   // ~24 bitmaps 480×270
+    // estado "a carregar" por uri (spinner até a thread postar)
+    private final List<String> loadingThumbs = new ArrayList<>();
+    private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private final Handler main = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        sortMode = getPreferences(MODE_PRIVATE).getInt("sortMode", 0);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
-        root.setPadding(dp(16), dp(14), dp(16), dp(12));
+        root.setPadding(dp(16), dp(8), dp(16), dp(8));
 
-        TextView title = new TextView(this);
-        title.setText("G.One VV");
-        title.setTextColor(TEXT);
-        title.setTextSize(22);
-        title.setPadding(dp(4), dp(2), 0, dp(2));
-        root.addView(title, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(buildHeader());
+        root.addView(buildSearchRow());
+        root.addView(buildActions());
+        root.addView(buildSectionLabel());
 
-        // 0.8.6 — subtítulo discreto (o launcher diz o que é, sem ruído)
-        TextView subtitle = new TextView(this);
-        subtitle.setText("editor de jogos no telemóvel");
-        subtitle.setTextColor(TEXT_DIM);
-        subtitle.setTextSize(13);
-        subtitle.setPadding(dp(4), 0, 0, dp(10));
-        root.addView(subtitle, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        // ---- TOPO: as DUAS ações (uma entrada de CRIAÇÃO + importar) ------
-        LinearLayout actions = new LinearLayout(this);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
-        Button novo = outlineButton("Novo projeto");
-        novo.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                askNewProject();
-            }
-        });
-        actions.addView(novo, new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        Button importar = outlineButton("Importar projeto");
-        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        ip.leftMargin = dp(10);
-        importar.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                pickFolder(REQ_PICK_TREE_IMPORT);
-            }
-        });
-        actions.addView(importar, ip);
-        root.addView(actions, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        // ---- cabeçalho da lista -------------------------------------------
-        TextView header = new TextView(this);
-        header.setText("Meus projetos");
-        header.setTextColor(TEXT_DIM);
-        header.setTextSize(13);
-        header.setPadding(dp(4), dp(14), dp(4), dp(6));
-        root.addView(header, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        // corpo: lista + empty-state sobrepostos (FrameLayout)
+        // corpo: grelha + empty-state sobrepostos
         FrameLayout body = new FrameLayout(this);
-        list = new ListView(this);
-        list.setDivider(new android.graphics.drawable.ColorDrawable(LINE));
-        list.setDividerHeight(dp(1));
-        adapter = new ArrayAdapter<String>(this,
-                android.R.layout.simple_list_item_2) {
-            @Override
-            public View getView(int pos, View cv, ViewGroup parent) {
-                // lista = SÓ nome + data da última edição (o URI sai —
-                // era ele que mostrava o prefixo interno "primary:")
-                android.widget.TwoLineListItem item =
-                        (cv instanceof android.widget.TwoLineListItem)
-                                ? (android.widget.TwoLineListItem) cv : null;
-                if (item == null) {
-                    item = (android.widget.TwoLineListItem) getLayoutInflater()
-                            .inflate(android.R.layout.simple_list_item_2,
-                                     parent, false);
-                }
-                VvProjects.Entry e = projects.get(pos);
-                TextView l1 = item.getText1();
-                l1.setText(e.name);
-                l1.setTextColor(TEXT);
-                l1.setTextSize(17);
-                TextView l2 = item.getText2();
-                String d = ProjectsFormat.dateLabel(
-                        e.editedAt > 0 ? e.editedAt : e.createdAt);
-                l2.setText(d.isEmpty() ? "—" : d);
-                l2.setTextColor(TEXT_DIM);
-                l2.setTextSize(13);
-                item.setPadding(dp(6), dp(8), dp(6), dp(8));
-                return item;
-            }
-        };
-        list.setAdapter(adapter);
-        list.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            @Override
-            public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                openProject(pos);
-            }
-        });
-        list.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
-            @Override
-            public boolean onItemLongClick(AdapterView<?> p, View v, int pos, long id) {
-                confirmRemove(pos);
-                return true;
-            }
-        });
-        body.addView(list, new FrameLayout.LayoutParams(
+        grid = new GridView(this);
+        grid.setNumColumns(2);
+        grid.setHorizontalSpacing(dp(16));
+        grid.setVerticalSpacing(dp(16));
+        grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
+        grid.setSelector(new ColorDrawable(Color.TRANSPARENT)); // sem halo
+        adapter = new CardsAdapter();
+        grid.setAdapter(adapter);
+        body.addView(grid, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
-        empty = new TextView(this);
-        empty.setText("Nenhum projeto ainda.\nToque em “Novo projeto” para começar.");
-        empty.setTextColor(TEXT_DIM);
-        empty.setTextSize(15);
-        empty.setGravity(Gravity.CENTER);
-        empty.setVisibility(View.GONE);
-        body.addView(empty, new FrameLayout.LayoutParams(
+        // EMPTY STATE (spec F/M): ícone + convite a criar o 1º projeto
+        LinearLayout emptyBox = new LinearLayout(this);
+        emptyBox.setOrientation(LinearLayout.VERTICAL);
+        emptyBox.setGravity(Gravity.CENTER);
+        ImageView bigLogo = new ImageView(this);
+        bigLogo.setImageResource(R.drawable.gone_logo);
+        bigLogo.setColorFilter(TEXT2);
+        emptyBox.addView(bigLogo, new LinearLayout.LayoutParams(dp(96), dp(96)));
+        emptyTitle = new TextView(this);
+        emptyTitle.setText("Nenhum projeto ainda");
+        emptyTitle.setTextColor(TEXT1);
+        emptyTitle.setTextSize(16);
+        emptyTitle.setGravity(Gravity.CENTER);
+        emptyTitle.setPadding(0, dp(16), 0, dp(4));
+        emptyBox.addView(emptyTitle);
+        emptySub = new TextView(this);
+        emptySub.setText("Toque em “Novo projeto” para criar o primeiro");
+        emptySub.setTextColor(TEXT2);
+        emptySub.setTextSize(14);
+        emptySub.setGravity(Gravity.CENTER);
+        emptyBox.addView(emptySub);
+        body.addView(emptyBox, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.CENTER));
+                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+
         root.addView(body, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
@@ -228,65 +169,468 @@ public class ProjectManagerActivity extends Activity {
         reload();
     }
 
-    /** botão de CONTORNO da marca (#8AB4F8 sobre fundo escuro — sem
-     *  gradiente cinza do tema do sistema, spec 0.7.6) */
-    private Button outlineButton(String label) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setTextSize(15);
-        b.setTextColor(BRAND);
-        b.setAllCaps(false);
-        GradientDrawable outline = new GradientDrawable();
-        outline.setColor(Color.TRANSPARENT);          // nada de gradiente
-        outline.setStroke(dp(2), BRAND);              // contorno de marca
-        outline.setCornerRadius(dp(6));
-        b.setBackground(outline);
-        b.setPadding(dp(12), dp(10), dp(12), dp(10));
-        return b;
+    // ---- cabeçalho 72dp: logo 48 + G.One VV 20sp + tagline 12sp -----------
+    private View buildHeader() {
+        LinearLayout h = new LinearLayout(this);
+        h.setOrientation(LinearLayout.HORIZONTAL);
+        h.setGravity(Gravity.CENTER_VERTICAL);
+        h.setPadding(dp(4), dp(8), dp(4), dp(8));
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.drawable.gone_logo);
+        h.addView(logo, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        texts.setPadding(dp(12), 0, 0, 0);
+        TextView title = new TextView(this);
+        title.setText("G.One VV");
+        title.setTextColor(TEXT1);
+        title.setTextSize(20);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        texts.addView(title);
+        TextView tag = new TextView(this);
+        tag.setText("editor de jogos no telemóvel");
+        tag.setTextColor(TEXT2);
+        tag.setTextSize(12);
+        texts.addView(tag);
+        h.addView(texts, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        return h;
+    }
+
+    // ---- pesquisa 48dp (lupa) + dropdown Ordenar 48dp ---------------------
+    private View buildSearchRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(0, dp(8), 0, 0);
+
+        search = new EditText(this);
+        search.setSingleLine(true);
+        search.setTextSize(14);
+        search.setTextColor(TEXT1);
+        search.setHintTextColor(TEXT2);
+        search.setHint("pesquisar projetos");
+        search.setPadding(dp(12), 0, dp(12), 0);
+        GradientDrawable sf = new GradientDrawable();
+        sf.setColor(SURFACE);
+        sf.setStroke(dp(1), BORDER);
+        sf.setCornerRadius(dp(4));       // campo = raio 4dp (spec A)
+        search.setBackground(sf);
+        search.setCompoundDrawablesWithIntrinsicBounds(
+                UiIcons.drawable(UiIcons.LUPA, TEXT2, 24, density()), null,
+                null, null);
+        search.setCompoundDrawablePadding(dp(8));
+        search.addTextChangedListener(new android.text.TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) {
+            }
+            @Override
+            public void onTextChanged(CharSequence s, int a, int b, int c) {
+            }
+            @Override
+            public void afterTextChanged(android.text.Editable s) {
+                refresh();
+            }
+        });
+        row.addView(search, new LinearLayout.LayoutParams(0, dp(48), 1f));
+
+        sortBtn = new TextView(this, null, 0);
+        sortBtn.setTextSize(12);
+        sortBtn.setTextColor(TEXT2);
+        sortBtn.setGravity(Gravity.CENTER_VERTICAL);
+        sortBtn.setPadding(dp(12), 0, dp(8), 0);
+        sortBtn.setCompoundDrawablesWithIntrinsicBounds(
+                UiIcons.drawable(UiIcons.SORT, TEXT2, 24, density()), null,
+                UiIcons.drawable(UiIcons.DOTS, TEXT2, 24, density()), null);
+        sortBtn.setCompoundDrawablePadding(dp(6));
+        sortBtn.setOnClickListener(v -> showSortMenu());
+        row.addView(sortBtn, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(48)));
+        return row;
+    }
+
+    // ---- ações primárias 56dp fill accent (raio 8dp — spec A/F) -----------
+    private View buildActions() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(0, dp(12), 0, dp(4));
+
+        Button24 novo = new Button24(this, "Novo projeto",
+                UiIcons.PLUS, ACCENT, ACCENT_PRESS);
+        novo.setOnClickListener(v -> askNewProject());
+        row.addView(novo.view(), new LinearLayout.LayoutParams(0, dp(56), 1f));
+
+        Button24 imp = new Button24(this, "Importar projeto",
+                UiIcons.UPLOAD, ACCENT, ACCENT_PRESS);
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(0, dp(56), 1f);
+        ip.leftMargin = dp(12);
+        imp.setOnClickListener(v -> pickFolder(REQ_PICK_TREE_IMPORT));
+        row.addView(imp.view(), ip);
+        return row;
+    }
+
+    private View buildSectionLabel() {
+        TextView t = new TextView(this);
+        t.setText("Meus projetos");
+        t.setTextColor(TEXT2);
+        t.setTextSize(12);
+        t.setPadding(dp(4), dp(12), 0, dp(8));
+        return t;
+    }
+
+    // ---- botão primário 56dp (fill accent, ícone + palavra, raio 8) -------
+    private static final class Button24 {
+        private final android.widget.Button b;
+
+        Button24(Activity a, String label, int icon, int fill, int fillPress) {
+            b = new android.widget.Button(a);
+            b.setText(label);
+            b.setAllCaps(false);
+            b.setTextSize(15);
+            b.setTextColor(TEXT1);
+            b.setPadding(dp2(a, 16), 0, dp2(a, 16), 0);
+            GradientDrawable n = new GradientDrawable();
+            n.setColor(fill);
+            n.setCornerRadius(dp2(a, 8));
+            GradientDrawable p = new GradientDrawable();
+            p.setColor(fillPress);
+            p.setCornerRadius(dp2(a, 8));
+            StateListDrawable st = new StateListDrawable();
+            st.addState(new int[]{android.R.attr.state_pressed}, p);
+            st.addState(new int[]{}, n);
+            b.setBackground(st);
+            b.setCompoundDrawablesWithIntrinsicBounds(
+                    UiIcons.drawable(icon, TEXT1, 24, a.getResources()
+                            .getDisplayMetrics().density), null, null, null);
+            b.setCompoundDrawablePadding(dp2(a, 8));
+            b.setStateListAnimator(null);   // sem elevação do Material
+        }
+
+        View view() {
+            return b;
+        }
+
+        void setOnClickListener(View.OnClickListener l) {
+            b.setOnClickListener(l);
+        }
+
+        static int dp2(Activity a, int v) {
+            return Math.round(v * a.getResources().getDisplayMetrics().density);
+        }
+    }
+
+    // ---- refresh: filtra (pesquisa) + ordena (dropdown) + estado em falta --
+    private void refresh() {
+        shown.clear();
+        String q = search != null ? search.getText().toString().trim().toLowerCase()
+                                  : "";
+        for (VvProjects.Entry e : all) {
+            if (!q.isEmpty() && !e.name.toLowerCase().contains(q)) {
+                continue;
+            }
+            shown.add(e);
+        }
+        Collections.sort(shown, new Comparator<VvProjects.Entry>() {
+            @Override
+            public int compare(VvProjects.Entry a, VvProjects.Entry b) {
+                return ProjectsFormat.compareEntries(
+                        a.name, a.editedAt, a.createdAt,
+                        b.name, b.editedAt, b.createdAt, sortMode);
+            }
+        });
+        boolean empty = shown.isEmpty();
+        emptyTitle.setVisibility(empty ? View.VISIBLE : View.GONE);
+        emptySub.setVisibility(empty ? View.VISIBLE : View.GONE);
+        grid.setVisibility(empty ? View.GONE : View.VISIBLE);
+        sortBtn.setText("Ordenar: " + ProjectsFormat.sortLabel(sortMode));
+        adapter.notifyDataSetChanged();
+    }
+
+    private void reload() {
+        all.clear();
+        all.addAll(VvProjects.load(this));
+        // estado EM FALTA (spec F): pasta apagada fora da app → afere em
+        // background (queries SAF) e volta à main thread
+        final List<String> gone = new ArrayList<>();
+        io.execute(() -> {
+            for (VvProjects.Entry e : all) {
+                if (!VvProjects.projectFolderExists(this, Uri.parse(e.uri))) {
+                    gone.add(e.uri);
+                }
+            }
+            main.post(() -> {
+                missingUris.clear();
+                missingUris.addAll(gone);
+                refresh();
+                // pede as miniaturas dos cards visíveis
+                for (VvProjects.Entry e : shown) {
+                    requestThumb(e);
+                }
+            });
+        });
+        refresh();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        reload();   // a lista pode ter mudado (remoções no editor / volta)
+        reload();   // a lista/miniaturas mudaram (edição guardada no editor)
     }
 
-    private void reload() {
-        projects.clear();
-        projects.addAll(VvProjects.load(this));
-        adapter.clear();
-        for (VvProjects.Entry e : projects) {
-            // (o texto da linha vem do getView — só o COUNT importa aqui)
-            adapter.add(e.name);
+    // ---- MINIATURAS (spec F): thumb.png do projeto → cache em memória ------
+    private void requestThumb(VvProjects.Entry e) {
+        if (THUMBS.get(e.uri) != null || missingUris.contains(e.uri)) {
+            return;
         }
-        adapter.notifyDataSetChanged();
-        empty.setVisibility(projects.isEmpty() ? View.VISIBLE : View.GONE);
-        list.setVisibility(projects.isEmpty() ? View.GONE : View.VISIBLE);
+        synchronized (loadingThumbs) {
+            if (loadingThumbs.contains(e.uri)) {
+                return;
+            }
+            loadingThumbs.add(e.uri);
+        }
+        io.execute(() -> {
+            Bitmap bmp = null;
+            try {
+                Uri tu = VvProjects.thumbUri(this, Uri.parse(e.uri));
+                InputStream in = getContentResolver().openInputStream(tu);
+                if (in != null) {
+                    bmp = BitmapFactory.decodeStream(in);
+                    in.close();
+                }
+            } catch (Exception ex) {
+                bmp = null;   // sem thumb → default G (não é erro)
+            }
+            final Bitmap fb = bmp;
+            main.post(() -> {
+                synchronized (loadingThumbs) {
+                    loadingThumbs.remove(e.uri);
+                }
+                if (fb != null) {
+                    THUMBS.put(e.uri, fb);
+                }
+                adapter.notifyDataSetChanged();
+            });
+        });
     }
 
-    /**
-     * [Novo projeto]: nome do projeto → picker SAF da pasta DESTE projeto.
-     * É a ÚNICA entrada de criação (0.7.6).
-     */
+    // =========================================================================
+    // ADAPTER DOS CARDS (grelha 2 colunas)
+    // =========================================================================
+    private final class CardsAdapter extends BaseAdapter {
+        @Override
+        public int getCount() {
+            return shown.size();
+        }
+
+        @Override
+        public Object getItem(int pos) {
+            return shown.get(pos);
+        }
+
+        @Override
+        public long getItemId(int pos) {
+            return pos;
+        }
+
+        @Override
+        public View getView(int pos, View cv, ViewGroup parent) {
+            final VvProjects.Entry e = shown.get(pos);
+            final boolean missing = missingUris.contains(e.uri);
+
+            LinearLayout card = new LinearLayout(ProjectManagerActivity.this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            // card: surface + raio 8dp + bordo 1dp (spec A/F); premido=surface2
+            GradientDrawable nrm = new GradientDrawable();
+            nrm.setColor(SURFACE);
+            nrm.setCornerRadius(dp(8));
+            nrm.setStroke(dp(1), BORDER);
+            GradientDrawable prs = new GradientDrawable();
+            prs.setColor(SURFACE2);
+            prs.setCornerRadius(dp(8));
+            prs.setStroke(dp(1), BORDER);
+            StateListDrawable bg = new StateListDrawable();
+            bg.addState(new int[]{android.R.attr.state_pressed}, prs);
+            bg.addState(new int[]{}, nrm);
+            card.setBackground(bg);
+            card.setPadding(dp(8), dp(8), dp(8), dp(8));
+
+            // ---- MINIATURA 16:9 (largura = coluna − paddings) ----
+            int colW = (grid.getWidth() > 0 ? grid.getWidth()
+                      : parent.getWidth()) / 2 - dp(16) - dp(16);
+            int thumbH = Math.round(colW * 9f / 16f);
+            FrameLayout thumb = new FrameLayout(ProjectManagerActivity.this);
+            if (missing) {
+                // ESTADO EM FALTA (spec F): fundo "rachado" (linhas diagonais
+                // border) + ? grande + erro legível + recuperação
+                thumb.addView(new MissingThumbView(ProjectManagerActivity.this));
+            } else {
+                Bitmap bmp = THUMBS.get(e.uri);
+                if (bmp != null) {
+                    ImageView iv = new ImageView(ProjectManagerActivity.this);
+                    iv.setImageBitmap(bmp);
+                    iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                    thumb.addView(iv, new FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT));
+                } else if (loadingThumbs.contains(e.uri)) {
+                    // ESTADO A CARREGAR: spinner centrado
+                    ProgressBar spin = new ProgressBar(ProjectManagerActivity.this);
+                    thumb.addView(spin, new FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            Gravity.CENTER));
+                } else {
+                    // DEFAULT: o logo G.One (spec F: default = ícone G.One)
+                    ImageView iv = new ImageView(ProjectManagerActivity.this);
+                    iv.setImageResource(R.drawable.gone_logo);
+                    iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                    iv.setPadding(dp(16), dp(8), dp(16), dp(8));
+                    thumb.addView(iv, new FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT));
+                }
+            }
+            card.addView(thumb, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    Math.max(dp(80), thumbH)));
+
+            // ---- nome 14sp bold + ⋮ 48dp ----
+            LinearLayout row = new LinearLayout(ProjectManagerActivity.this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            TextView name = new TextView(ProjectManagerActivity.this);
+            name.setText(e.name);
+            name.setTextColor(missing ? TEXT2 : TEXT1);
+            name.setTextSize(14);
+            name.setTypeface(null, android.graphics.Typeface.BOLD);
+            name.setSingleLine(true);
+            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            row.addView(name, new LinearLayout.LayoutParams(0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            View dots = new View(ProjectManagerActivity.this) {
+                @Override
+                protected void onDraw(Canvas c) {
+                    UiIcons.draw(c, UiIcons.DOTS, getWidth() / 2f,
+                            getHeight() / 2f, dp(24), TEXT2);
+                }
+            };
+            dots.setOnClickListener(v -> showCardMenu(e, dots));
+            row.addView(dots, new LinearLayout.LayoutParams(dp(48), dp(48)));
+            card.addView(row);
+
+            // ---- tempo relativo 12sp text-2 ("há 2 h") ----
+            TextView time = new TextView(ProjectManagerActivity.this);
+            String rt = ProjectsFormat.relativeTime(
+                    e.editedAt > 0 ? e.editedAt : e.createdAt);
+            time.setText(missing ? "projeto em falta" : (rt.isEmpty() ? "—" : rt));
+            time.setTextColor(missing ? WARN : TEXT2);
+            time.setTextSize(12);
+            time.setSingleLine(true);
+            card.addView(time);
+
+            // gestos (spec F): toque abre · toque longo → menu
+            card.setOnClickListener(v -> {
+                if (missing) {
+                    offerRecoverMissing(e);
+                } else {
+                    openProject(e);
+                }
+            });
+            card.setOnLongClickListener(v -> {
+                showCardMenu(e, card);
+                return true;
+            });
+            return card;
+        }
+    }
+
+    /** miniatura do estado EM FALTA: linhas "rachadas" + ? + erro + recuperação */
+    private final class MissingThumbView extends View {
+        MissingThumbView(Activity a) {
+            super(a);
+            setBackgroundColor(SURFACE2);
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            super.onDraw(c);
+            final android.graphics.Paint p = new android.graphics.Paint(
+                    android.graphics.Paint.ANTI_ALIAS_FLAG);
+            p.setStyle(android.graphics.Paint.Style.STROKE);
+            p.setStrokeWidth(dp(1));
+            p.setColor(BORDER);
+            // "fundo rachado": diagonais irregulares
+            for (int i = -1; i < 6; i++) {
+                float x = i * getWidth() / 5f;
+                c.drawLine(x, 0, x + getWidth() / 7f, getHeight(), p);
+            }
+            // ? grande + erro legível + recuperação (spec F)
+            UiIcons.draw(c, UiIcons.QUESTION, getWidth() / 2f,
+                    getHeight() * 0.40f, dp(40), WARN);
+            p.setStyle(android.graphics.Paint.Style.FILL);
+            p.setTextSize(dp(11));
+            p.setColor(TEXT2);
+            String msg = "pasta não encontrada";
+            float w = p.measureText(msg);
+            c.drawText(msg, (getWidth() - w) / 2f, getHeight() * 0.72f, p);
+            String rec = "toque para recuperar";
+            w = p.measureText(rec);
+            p.setColor(ACCENT);
+            c.drawText(rec, (getWidth() - w) / 2f, getHeight() * 0.86f, p);
+        }
+    }
+
+    // ---- menus / diálogos (spec F + L) --------------------------------------
+
+    private void showSortMenu() {
+        PopupMenu pm = new PopupMenu(new android.view.ContextThemeWrapper(this,
+                android.R.style.Theme_DeviceDefault_Dialog), sortBtn);
+        pm.getMenu().add("Última Edição");
+        pm.getMenu().add("Nome (A-Z)");
+        pm.getMenu().add("Nome (Z-A)");
+        pm.getMenu().add("Criado (recente)");
+        pm.setOnMenuItemClickListener(mi -> {
+            String t = mi.getTitle().toString();
+            sortMode = 0;
+            if (t.startsWith("Nome (A")) sortMode = 1;
+            else if (t.startsWith("Nome (Z")) sortMode = 2;
+            else if (t.startsWith("Criado")) sortMode = 3;
+            getPreferences(MODE_PRIVATE).edit().putInt("sortMode", sortMode)
+                    .apply();
+            refresh();
+            return true;
+        });
+        pm.show();
+    }
+
+    /** menu ⋮ / long-press do card (spec L): abrir/renomear/duplicar/apagar */
+    private void showCardMenu(final VvProjects.Entry e, View anchor) {
+        final boolean missing = missingUris.contains(e.uri);
+        PopupMenu pm = new PopupMenu(new android.view.ContextThemeWrapper(this,
+                android.R.style.Theme_DeviceDefault_Dialog), anchor);
+        pm.getMenu().add(missing ? "Recuperar (re-escolher pasta)" : "Abrir");
+        pm.getMenu().add("Renomear");
+        pm.getMenu().add("Duplicar");
+        pm.getMenu().add("Apagar");
+        pm.setOnMenuItemClickListener(mi -> {
+            String t = mi.getTitle().toString();
+            if (t.startsWith("Abrir")) openProject(e);
+            else if (t.startsWith("Recuperar")) recoverMissing(e);
+            else if (t.equals("Renomear")) askRename(e);
+            else if (t.equals("Duplicar")) askDuplicate(e);
+            else if (t.equals("Apagar")) confirmDelete(e);
+            return true;
+        });
+        pm.show();
+    }
+
+    /** [Novo projeto]: nome → picker SAF da pasta DESTE projeto */
     private void askNewProject() {
-        final EditText input = new EditText(this);
-        input.setSingleLine(true);
-        input.setText(pendingName);
-        input.setSelection(input.getText().length());
-        // contraste garantido pelos TOKENS (o wrapper escuro + estilo próprio)
-        input.setBackgroundColor(SURFACE);
-        input.setTextColor(TEXT);
-        input.setHintTextColor(TEXT_DIM);
-        input.setHint("nome do projeto");
-        input.setPadding(dp(12), dp(10), dp(12), dp(10));
-        // 0.8.6 — DIÁLOGOS ESCUROS: o builder corre num ContextThemeWrapper
-        // com o tema DeviceDefault ESCURO (o manifest é Fullscreen claro —
-        // sem o wrapper o título/mensagem/botões saíam claros e quebravam a
-        // identidade). O input mantém o estilo próprio (tokens do Theme).
-        new AlertDialog.Builder(new android.view.ContextThemeWrapper(this,
-                android.R.style.Theme_DeviceDefault_Dialog))
+        final EditText input = themedInput(pendingName, "nome do projeto");
+        new AlertDialog.Builder(dark())
                 .setTitle("Nome do projeto")
-                .setMessage("No passo seguinte escolha a PASTA onde este projeto fica (só dele).")
+                .setMessage("No passo seguinte escolha a PASTA onde este "
+                        + "projeto fica (só dele).")
                 .setView(input)
                 .setPositiveButton("Continuar", (d, w) -> {
                     String n = input.getText().toString().trim();
@@ -297,6 +641,148 @@ public class ProjectManagerActivity extends Activity {
                 .show();
         input.requestFocus();
     }
+
+    private void askRename(final VvProjects.Entry e) {
+        final EditText input = themedInput(e.name, "novo nome");
+        new AlertDialog.Builder(dark())
+                .setTitle("Renomear projeto")
+                .setView(input)
+                .setPositiveButton("OK", (d, w) -> {
+                    String n = input.getText().toString().trim();
+                    if (!n.isEmpty() && !n.equals(e.name)) {
+                        VvProjects.renameProject(this, e, n);
+                        reload();
+                        Toast.makeText(this, "renomeado para “" + n + "”",
+                                Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("Cancelar", null)
+                .show();
+        input.requestFocus();
+    }
+
+    private void askDuplicate(final VvProjects.Entry e) {
+        new AlertDialog.Builder(dark())
+                .setTitle("Duplicar projeto")
+                .setMessage("Escolha a PASTA PAI que vai receber a cópia “"
+                        + e.name + " copia”.\nTodo o conteúdo do projeto é "
+                        + "copiado (cenas, meshes, texturas, áudio).")
+                .setPositiveButton("Escolher pasta", (d, w) -> {
+                    pendingDup = e;
+                    pickFolder(REQ_PICK_TREE_DUP);
+                })
+                .setNegativeButton("Cancelar", null)
+                .show();
+    }
+
+    /** APAGAR: card centrado (título 16sp · corpo 14sp text-2 · Cancelar/
+     *  Apagar danger — spec L). SEM swipe-to-delete (spec F). */
+    private void confirmDelete(final VvProjects.Entry e) {
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(20), dp(8), dp(20), dp(8));
+        TextView t = new TextView(this);
+        t.setText("Apagar projeto");
+        t.setTextColor(TEXT1);
+        t.setTextSize(16);
+        t.setTypeface(null, android.graphics.Typeface.BOLD);
+        body.addView(t);
+        TextView m = new TextView(this);
+        m.setText("Apagar “" + e.name + "”?\n\nA pasta e TODOS os ficheiros "
+                + "do projeto são apagados do armazenamento.\n"
+                + "Não pode ser desfeito.");
+        m.setTextColor(TEXT2);
+        m.setTextSize(14);
+        m.setPadding(0, dp(8), 0, dp(8));
+        body.addView(m);
+        LinearLayout btns = new LinearLayout(this);
+        btns.setOrientation(LinearLayout.HORIZONTAL);
+        android.widget.Button cancel = flatButton("Cancelar", SURFACE2, TEXT1);
+        android.widget.Button del = flatButton("Apagar", DANGER, TEXT1);
+        btns.addView(cancel, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        lp.leftMargin = dp(8);
+        btns.addView(del, lp);
+        body.addView(btns);
+        final AlertDialog dlg = new AlertDialog.Builder(dark()).setView(body)
+                .setCancelable(true).create();
+        cancel.setOnClickListener(v -> dlg.dismiss());
+        del.setOnClickListener(v -> {
+            dlg.dismiss();
+            boolean gone = VvProjects.deleteProject(this, e);
+            releasePermission(e.uri);
+            reload();
+            Toast.makeText(this,
+                    gone ? "projeto apagado (" + e.name + ")"
+                         : "pasta não apagada — entrada removida da lista",
+                    Toast.LENGTH_LONG).show();
+        });
+        dlg.show();
+    }
+
+    /** projeto em falta: recuperação = re-escolher a pasta OU remover da lista */
+    private void offerRecoverMissing(final VvProjects.Entry e) {
+        new AlertDialog.Builder(dark())
+                .setTitle("Projeto em falta")
+                .setMessage("A pasta de “" + e.name + "” não foi encontrada.\n\n"
+                        + "Re-escolha a pasta para recuperar o projeto, ou "
+                        + "remova a entrada da lista.")
+                .setPositiveButton("Re-escolher pasta", (d, w) ->
+                        recoverMissing(e))
+                .setNeutralButton("Remover da lista", (d, w) -> {
+                    removeFromList(e);
+                    Toast.makeText(this, "entrada removida da lista",
+                            Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancelar", null)
+                .show();
+    }
+
+    private void recoverMissing(final VvProjects.Entry e) {
+        recoverTarget = e;
+        pickFolder(REQ_PICK_TREE_RECOVER);
+    }
+
+    // alvo do fluxo RECUPERAR (re-apontar a pasta de um projeto em falta)
+    private VvProjects.Entry recoverTarget;
+
+    private android.widget.Button flatButton(String label, int fill, int ink) {
+        android.widget.Button b = new android.widget.Button(this);
+        b.setText(label);
+        b.setAllCaps(false);
+        b.setTextSize(15);
+        b.setTextColor(ink);
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(fill);
+        g.setCornerRadius(dp(8));
+        b.setBackground(g);
+        b.setStateListAnimator(null);
+        return b;
+    }
+
+    private EditText themedInput(String text, String hint) {
+        final EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setText(text);
+        input.setSelection(input.getText().length());
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(SURFACE);
+        g.setStroke(dp(1), BORDER);
+        g.setCornerRadius(dp(4));
+        input.setBackground(g);
+        input.setTextColor(TEXT1);
+        input.setHintTextColor(TEXT2);
+        input.setHint(hint);
+        input.setPadding(dp(12), dp(10), dp(12), dp(10));
+        return input;
+    }
+
+    private android.view.ContextThemeWrapper dark() {
+        return new android.view.ContextThemeWrapper(this,
+                android.R.style.Theme_DeviceDefault_Dialog);
+    }
+
+    // ---- pickers / resultados ----------------------------------------------
 
     private void pickFolder(int requestCode) {
         try {
@@ -315,24 +801,82 @@ public class ProjectManagerActivity extends Activity {
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
-        if (req != REQ_PICK_TREE && req != REQ_PICK_TREE_IMPORT) {
+        if (req != REQ_PICK_TREE && req != REQ_PICK_TREE_IMPORT
+                && req != REQ_PICK_TREE_DUP && req != REQ_PICK_TREE_RECOVER) {
             return;
         }
-        final boolean importing = (req == REQ_PICK_TREE_IMPORT);
         if (res != RESULT_OK || data == null || data.getData() == null) {
-            Toast.makeText(this, "sem pasta — projeto não criado",
-                    Toast.LENGTH_SHORT).show();
+            if (req != REQ_PICK_TREE_DUP) {
+                Toast.makeText(this, "sem pasta — projeto não criado",
+                        Toast.LENGTH_SHORT).show();
+            }
+            pendingDup = null;
             return;
         }
         Uri tree = data.getData();
         try {
-            // permissão PERSISTENTE para ESTE projeto (sobrevive a arranques)
             getContentResolver().takePersistableUriPermission(tree,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION
                             | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
         } catch (Exception e) {
             Log.e(TAG, "projetos: takePersistableUriPermission falhou", e);
         }
+
+        // RECUPERAR (projeto em falta): re-aponta a entrada para a pasta
+        // escolhida — sem copiar nada (a pasta JÁ é o projeto)
+        if (req == REQ_PICK_TREE_RECOVER && recoverTarget != null) {
+            final VvProjects.Entry tgt = recoverTarget;
+            recoverTarget = null;
+            List<VvProjects.Entry> ps = VvProjects.load(this);
+            int i = VvProjects.indexOfUri(ps, tgt.uri);
+            if (i >= 0) {
+                // nome da pasta escolhida (se difere, o nome da lista segue
+                // a pasta — o projeto é a pasta)
+                ps.get(i).uri = tree.toString();
+                ps.get(i).name = VvProjects.folderDisplayName(this, tree);
+                VvProjects.save(this, ps);
+                Toast.makeText(this, "projeto recuperado ("
+                        + ps.get(i).name + ")", Toast.LENGTH_SHORT).show();
+            }
+            reload();
+            return;
+        }
+
+        if (req == REQ_PICK_TREE_DUP && pendingDup != null) {
+            // DUPLICAR: copia a pasta origem p/ DENTRO da escolhida (subpasta
+            // "<nome> copia") — a nova entrada aponta para a SUBÁRVORE
+            final VvProjects.Entry src = pendingDup;
+            pendingDup = null;
+            final String folderName = src.name.endsWith(" copia")
+                    ? src.name : src.name + " copia";
+            final android.app.ProgressDialog pd =
+                    new android.app.ProgressDialog(dark());
+            pd.setMessage("a duplicar “" + src.name + "”…");
+            pd.setCancelable(false);
+            pd.show();
+            io.execute(() -> {
+                boolean ok = VvProjects.copyTreeInto(this,
+                        Uri.parse(src.uri), tree, folderName, null);
+                final Uri newTree = ok
+                        ? VvProjects.subfolderTreeUri(tree, folderName) : null;
+                main.post(() -> {
+                    pd.dismiss();
+                    if (ok && newTree != null) {
+                        VvProjects.Entry ne = VvProjects.addEntry(this,
+                                folderName, newTree);
+                        Toast.makeText(this, "duplicado: " + ne.name,
+                                Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(this, "duplicar falhou (ver log)",
+                                Toast.LENGTH_LONG).show();
+                    }
+                    reload();
+                });
+            });
+            return;
+        }
+
+        // criar/importar (fluxo de sempre)
         List<VvProjects.Entry> ps = VvProjects.load(this);
         int dup = VvProjects.indexOfUri(ps, tree.toString());
         if (dup >= 0) {
@@ -341,59 +885,23 @@ public class ProjectManagerActivity extends Activity {
                     Toast.LENGTH_LONG).show();
             return;
         }
-        // nome: pedido no diálogo (criar) ou derivado da própria pasta
-        // (importar — a pasta JÁ é um projeto .goni)
         String name = pendingName;
-        if (importing) {
+        if (req == REQ_PICK_TREE_IMPORT) {
             name = VvProjects.folderDisplayName(this, tree);
         }
-        // estrutura do core/Project na pasta escolhida (respeita existentes
-        // — importar uma pasta com .goni não cria duplicados)
         VvProjects.createStructure(this, tree);
         VvProjects.Entry e = new VvProjects.Entry(name, tree.toString(),
                 System.currentTimeMillis());
         ps.add(e);
         VvProjects.save(this, ps);
         reload();
-        VvProjects.launchEditor(this, e);   // entra no editor; volta → lista
+        VvProjects.launchEditor(this, e);
     }
 
-    private void openProject(int pos) {
-        if (pos < 0 || pos >= projects.size()) {
-            return;
-        }
-        VvProjects.launchEditor(this, projects.get(pos));
+    private void openProject(VvProjects.Entry e) {
+        VvProjects.launchEditor(this, e);
     }
 
-    /**
-     * long-press: DUAS ações distintas (0.6.7):
-     *   • "Remover da lista" — só tira da lista; a pasta fica intacta;
-     *   • "Apagar projeto" — diálogo de confirmação SEPARADO e explícito
-     *     → remove a PASTA via File API + sai da lista + liberta a
-     *     permissão persistente. 0.7.6: o rodapé do diálogo mostra a pasta
-     *     SEM o prefixo interno (ProjectsFormat.folderLabel).
-     */
-    private void confirmRemove(int pos) {
-        if (pos < 0 || pos >= projects.size()) {
-            return;
-        }
-        final VvProjects.Entry e = projects.get(pos);
-        // 0.8.6: MESMO wrapper escuro dos diálogos (identidade uniforme)
-        new AlertDialog.Builder(new android.view.ContextThemeWrapper(this,
-                android.R.style.Theme_DeviceDefault_Dialog))
-                .setTitle(e.name)
-                .setMessage(ProjectsFormat.folderLabel(e.uri))
-                .setNeutralButton("Remover da lista", (d, w) -> {
-                    removeFromList(e);
-                })
-                .setPositiveButton("Apagar projeto", (d, w) -> {
-                    confirmDelete(e);
-                })
-                .setNegativeButton("Cancelar", null)
-                .show();
-    }
-
-    /** remove da LISTA (a pasta escolhida NÃO é apagada) */
     private void removeFromList(VvProjects.Entry e) {
         List<VvProjects.Entry> ps = VvProjects.load(this);
         int i = VvProjects.indexOfUri(ps, e.uri);
@@ -403,28 +911,6 @@ public class ProjectManagerActivity extends Activity {
             releasePermission(e.uri);
         }
         reload();
-    }
-
-    /** 0.6.7 — confirmação EXPLÍCITA antes de apagar a pasta de verdade */
-    private void confirmDelete(VvProjects.Entry e) {
-        // 0.8.6: MESMO wrapper escuro dos diálogos
-        new AlertDialog.Builder(new android.view.ContextThemeWrapper(this,
-                android.R.style.Theme_DeviceDefault_Dialog))
-                .setTitle("Apagar projeto")
-                .setMessage("Apagar projeto “" + e.name + "”?\n\n"
-                        + "A PASTA e TODOS os ficheiros do projeto são "
-                        + "apagados do armazenamento.\nNão pode ser desfeito.")
-                .setPositiveButton("Apagar", (d, w) -> {
-                    boolean gone = VvProjects.deleteProject(this, e);
-                    releasePermission(e.uri);
-                    reload();
-                    Toast.makeText(this,
-                            gone ? "projeto apagado (" + e.name + ")"
-                                 : "pasta não apagada — entrada removida da lista",
-                            Toast.LENGTH_LONG).show();
-                })
-                .setNegativeButton("Cancelar", null)
-                .show();
     }
 
     private void releasePermission(String uri) {
@@ -437,7 +923,11 @@ public class ProjectManagerActivity extends Activity {
         }
     }
 
+    private float density() {
+        return getResources().getDisplayMetrics().density;
+    }
+
     private int dp(int v) {
-        return Math.round(v * getResources().getDisplayMetrics().density);
+        return Math.round(v * density());
     }
 }

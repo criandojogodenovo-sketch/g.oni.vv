@@ -66,9 +66,14 @@
 #include "render/Mesh.h"
 #include "render/Primitives.h"   // 0.8.0 (F7): primitivas procedurais
 #include "render/Renderer.h"
+#include "render/ThumbPng.h"    // 0.9.0: miniatura do projeto (thumb.png)
 #include "core/SceneBounds.h"   // 0.8.9: AABB da cena → far dinâmico editor+Play
+#include "core/UndoStack.h"    // 0.9.0: undo/redo por snapshot
 #include "ui/EditorUi.h"
-#include "ui/Toolbar.h"   // 0.7.6: barra final de 5 grupos (G1..G5)
+#include "ui/Toolbar.h"   // 0.9.0: top bar 56 + tab bar de modo 48 (spec D)
+#include "ui/ViewportChrome.h"   // 0.9.0: stack/toolbar inferior/triad (spec D)
+#include "ui/BottomPanel.h"     // 0.9.0: painel de baixo + status 24dp (spec E/K)
+#include "ui/SettingsPage.h"   // 0.9.0: página de Settings (spec I)
 #include "ui/CamGizmo.h"   // 0.7.7: frustum/handles/câmara de jogo
 #include "ui/Gizmo.h"
 #include "ui/Timeline.h"   // 0.8.0 (F7): editor de timeline da animação
@@ -210,6 +215,138 @@ editor::OrbitState g_orbit;
 // com o objeto mas o drag nunca depende do dedo estar sobre ele (fim da
 // oscilação/"fuga" do C33). Touch up liberta o lock.
 editor::toolbar::GizmoModeState g_gizmoMode;   // 0.7.6: vive na Toolbar
+
+// 0.9.0 — UNDO/REDO (scope funcional: "stack de operações ligada à stack
+// da viewport"): snapshot por operação; o drag do gizmo empurra no FIM
+// (press captura before, release empurra with after); picks/criar/apagar/
+// renomear idem. ÁREA DE TRANSFERÊNCIA (copy/paste): snapshot do TIC.
+editor::UndoStack g_undo;
+editor::TicSnap   g_clipSnap;
+bool              g_clipValid = false;
+editor::TicSnap   g_gizmoBefore;   // captura no ARM do grab
+bool              g_gizmoBeforeValid = false;
+f32               g_snapValue = 0.5f;   // 0.9.0: o valor do chip [snap: N]
+
+// 0.9.0 (spec E/G) — PAINEL DE BAIXO: tabs Ficheiros/Consola/Animação +
+// drawer (240 default, pega 160..400) + estado PERSISTENTE (layout.json)
+editor::bottom::BottomState g_bottom;
+
+// 0.9.0 (spec I) — modo IMERSIVO (JNI: window flags) + mic concedido;
+// PERSISTEM (layout.json / runtime check)
+bool g_immersive = false;
+bool g_micGranted = false;
+std::string g_lastLayoutSaved;   // o layout.json da última escrita
+// altura do drawer ABERTO neste frame (0 = fechado) — todos os rects do
+// viewport central/painéis passam por AQUI (safe::centerRect com drawerH)
+static f32 currentDrawerH() {
+    return g_bottom.bottomTab > 0 ? g_bottom.drawerH : 0.0f;
+}
+
+void showToast(const char* msg);   // fwd (definido abaixo)
+// 0.9.0 (spec G) — LAYOUT PERSISTENTE: layout.json na raiz do projeto
+// (bottom/drawer/inspector/secções colapsadas). Escrita por diferença (só
+// quando MUDA — o compare é barato; o write raramente corre)
+static void saveLayoutNow() {
+    if (!g_storage) {
+        return;
+    }
+    const std::string data = editor::bottom::serializeLayout(
+        g_bottom, g_editor.showInspector,
+        g_editor.inspCollapsed | (g_editor.settingsCollapsed << 8));
+    if (data == g_lastLayoutSaved) {
+        return;   // nada mudou
+    }
+    g_lastLayoutSaved = data;
+    g_storage->writeText("layout.json", data);
+    LOGI("layout: guardado (%d bytes)", static_cast<int>(data.size()));
+}
+
+// 0.9.0 (spec I/G) — carregar o layout no OPEN (defaults se ilegível)
+static void loadLayoutNow() {
+    g_lastLayoutSaved.clear();
+    if (g_storage) {
+        std::string text;
+        if (g_storage->readText("layout.json", text)) {
+            bool insp = true;
+            u32 collapsed = 0;
+            if (editor::bottom::parseLayout(text, g_bottom, insp, collapsed)) {
+                g_editor.showInspector = insp;
+                g_editor.inspCollapsed = collapsed & 0xFFu;
+                g_editor.settingsCollapsed = (collapsed >> 8) & 0x3Fu;
+                g_lastLayoutSaved = text;
+                LOGI("layout: carregado (tab=%d drawer=%d insp=%d)",
+                     g_bottom.bottomTab, static_cast<int>(g_bottom.drawerH),
+                     g_editor.showInspector ? 1 : 0);
+            } else {
+                LOGI("layout: ilegivel — defaults");
+            }
+        }
+    }
+}
+
+// 0.9.0 (spec I) — IMERSIVO: esconde as barras do sistema (JNI pela
+// VvActivity; sem ponte = no-op logado — o editor segue)
+static void applyImmersiveMode() {
+    if (storage::jniSetImmersive(g_immersive)) {
+        elog::info("ui: imersivo aplicado (%s)", g_immersive ? "on" : "off");
+    } else {
+        elog::warn("ui: imersivo sem ponte JNI — ignorado");
+    }
+}
+
+// o viewer de logs de sempre usa g_logDumps — refresh da lista
+static void refreshLogDumps() {
+    g_logDumps.clear();
+    elog::listDumps(g_logDumps);
+}
+
+// encaminhamentos das ações de Settings (os corpos existem)
+void audioProbeRun();   // definido abaixo (o probe de áudio da 0.8.11)
+static void runAudioProbe() { audioProbeRun(); }
+static void reconvertAllAssets() {
+    // o MESMO caminho do "reconverter assets" de sempre: cada ficheiro de
+    // source/ volta pelo reconvertFile (0.8.10 — a fonte é a cópia própria)
+    int converted = 0, failed = 0;
+    std::vector<std::string> sources;
+    g_storage->listDir("source", sources);
+    for (const std::string& rel : sources) {
+        convert::Output out;
+        convert::Stats stats;
+        std::string err;
+        if (convert::reconvertFile("source/" + rel, *g_storage, nullptr, out,
+                                   stats, err)) {
+            ++converted;
+        } else {
+            ++failed;
+            elog::error("import: reconverter %s FALHOU — %s", rel.c_str(),
+                        err.c_str());
+        }
+    }
+    char msg[80];
+    std::snprintf(msg, sizeof(msg), "reconvertido: %d (%d falhas)", converted,
+                  failed);
+    showToast(msg);
+}
+
+// empurra UMA operação (antes/depois) — helper de 1 linha por call-site
+static void pushUndo(editor::TicSnap before, const Tic* tic) {
+    if (!tic) {
+        return;
+    }
+    g_undo.push(before, editor::snapTic(g_scene, tic->handle), tic->handle);
+}
+
+// 0.9.0 — CRIAÇÃO com undo (a op CREATE: before vazio + after = o TIC novo;
+// o undo re-cria pelo snapshot — mesmo após o delete da cena)
+static Handle createTicUndoable(PresetKind kind) {
+    editor::TicSnap empty;
+    const Handle h = createTicFromPreset(g_scene, kind, &g_cubeMesh,
+                                         g_renderer.litMaterial());
+    if (h.valid()) {
+        g_undo.push(empty, editor::snapTic(g_scene, h), h);
+    }
+    return h;
+}
 gizmo::GizmoState       g_gizmo;
 gizmo::Grab             g_grab;   // 0.7.9: o lock do drag em curso
 
@@ -326,6 +463,14 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
             return 1u << slot;
         }
         // touch up — o lock é LIBERTADO (o próximo press volta ao hit-test)
+        // 0.9.0 — UNDO: o drag ACABOU → empurra a operação (no-op não entra)
+        if (g_gizmoBeforeValid) {
+            if (const Tic* t = g_scene.get(g_editor.selected)) {
+                g_undo.push(g_gizmoBefore, editor::snapTic(g_scene, t->handle),
+                            t->handle);
+            }
+            g_gizmoBeforeValid = false;
+        }
         g_grab = gizmo::Grab{};
         g_gizmo.active = gizmo::Axis::None;
         g_gizmo.dragSlot = -1;
@@ -333,8 +478,9 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
     }
     // press edge → GRAB (hit-test com alvo GENEROSO, âncoras capturadas;
     // só se o gesto nasce no viewport central)
-    const UiRect view =
-        editor::centerRect(sw, sh, g_ui.safeArea(), g_editor.showInspector);
+    const UiRect view = editor::centerRect(sw, sh, g_ui.safeArea(),
+                                           currentDrawerH(),
+                                           g_editor.showInspector);
     for (u32 slot = 0; slot < kMaxPointerSlots; ++slot) {
         if (!g_input.pressed(slot)) {
             continue;
@@ -400,6 +546,9 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
         g_gizmo.active = grab.target;
         g_gizmo.hovered = grab.target;
         g_gizmo.dragSlot = static_cast<i32>(slot);
+        // 0.9.0 — UNDO: captura o BEFORE no ARM (o release empurra a op)
+        g_gizmoBefore = editor::snapTic(g_scene, g_editor.selected);
+        g_gizmoBeforeValid = g_scene.get(g_editor.selected) != nullptr;
         if (t) {
             if (Transform3D* tr = t->getComponent<Transform3D>()) {
                 g_gizmo.anchorPos = tr->pos;
@@ -529,6 +678,12 @@ DrawStats g_lastUiStats;   // métricas do pass UI (disponíveis 1 frame depois)
 char g_toast[96] = "";
 f32  g_toastT = 0.0f;
 void showToast(const char* msg);   // fwd: usada pelo feedCanvasPlay (abaixo)
+
+// 0.9.0 (spec F) — MINIATURA DO PROJETO: todo o SAVE arma a captura; o FIM
+// do frame DEPOIS de desenhar (antes do swap) lê a viewport central do
+// backbuffer, faz crop 16:9 + downsample e escreve thumb.png na raiz do
+// projeto. A tela de projetos (Java) lê-o para o card (default = logo G).
+bool g_thumbPending = false;
 
 // ---- 0.7.0: UI criável em PLAY (hit-test + ações declarativas) -------------
 // estado do on-click: press ARMA (o slot fica reclamado — não vai à câmara
@@ -693,6 +848,7 @@ void doSwitchScene(u32 idx) {
     // 2) muda a ativa + persiste o manifesto
     g_project.activeScene = idx;
     g_project.saveManifest(*g_storage);
+    g_thumbPending = true;   // 0.9.0: captura da viewport no próximo fim de frame
     // 0.8.10: a posse dos meshes de prim da cena ANTIGA vai para a cova
     // (deferred free no próximo frame — os draws deste frame ainda contam)
     primMeshesToGrave();
@@ -787,6 +943,7 @@ void createSceneNamed(const std::string& name) {
     g_editor.selElement = -1;
     const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
                     g_project.saveManifest(*g_storage);
+    g_thumbPending = true;   // 0.9.0: captura da viewport no próximo fim de frame
     char msg[64];
     std::snprintf(msg, sizeof(msg), ok ? "cena criada: %s"
                                         : "cena criada (manifesto falhou)",
@@ -2310,6 +2467,7 @@ void postLoadMigrateAndFixup() {
     // 0.8.11 — settings do projeto (fonte/volume) + catálogo de áudio: o
     // load aplica (0.8.10 escrevia o settings.goni mas nunca o LIA)
     loadProjectSettings();
+    loadLayoutNow();   // 0.9.0 (spec G): layout.json (bottom/drawer/inspector/secções)
     refreshAudioCatalog();
     // 1) migração (silenciosa — os assets convertem 1×)
     convert::migrateLegacyAssets(*g_storage, g_pipeline.get());
@@ -2490,10 +2648,15 @@ void applyImportedAssetToSelectedTic() {
                                (g_applyAsk.kind == 'm' ? 3 : 2);
             elog::info("import: aplicando %s ao TIC selecionado (pick %d)",
                        g_applyAsk.rel.c_str(), pickOf);
+            const editor::TicSnap uBefore =
+                editor::snapTic(g_scene, g_editor.selected);
             const editor::AssetPickOutcome out = editor::applyAssetPick(
                 g_scene, g_editor.selected, menuKind, pickOf, g_catalog,
                 makeAssetResolvers());
             applied = out.applied;
+            if (out.applied) {
+                pushUndo(uBefore, g_scene.get(g_editor.selected));
+            }
             if (out.toast[0] != '\0') {
                 showToast(out.toast);
             }
@@ -3298,15 +3461,23 @@ void drawToast() {
     textfit::ellipsize(g_toast, aw - 64.0f,
                        [](const char* s) { return g_ui.fontWidth(s); },
                        toastFit, sizeof(toastFit));
+    // 0.9.0 (spec M): BOTTOM-CENTER, ≥48dp de altura, SURFACE-2 com raio
+    // 8dp, auto-3s (g_toastT já é o relógio de 3 s de sempre), text-1.
     const f32 tw = g_ui.fontWidth(toastFit);
-    const f32 bw = tw + 32.0f;
+    const f32 bw = tw + 48.0f;
+    const f32 bh2 = bh < 48.0f ? 48.0f : bh;
     const f32 bx = ox + (aw - bw) * 0.5f;
-    const f32 by = oy + ah - UiContext::kStatusH - bh - 18.0f;
-    const f32 bg[4] = {theme::PANEL[0], theme::PANEL[1], theme::PANEL[2], 0.95f * alpha};
-    const f32 tx[4] = {theme::TEXT[0], theme::TEXT[1], theme::TEXT[2], alpha};
-    g_ui.panel(bx, by, bw, bh, bg);
-    g_ui.frame(bx, by, bw, bh, 1.0f, tx);
-    g_ui.label(bx + 16.0f, by + bh * 0.5f + g_ui.fontHeight() * 0.30f, toastFit, tx);
+    // por CIMA da tab bar do painel de baixo (spec E) — 16dp de folga
+    const f32 by = oy + ah - bh2 - safe::kBottomTabH - safe::kStatusH - 16.0f;
+    const f32 bg[4] = {theme::kTheme.surface2[0], theme::kTheme.surface2[1],
+                       theme::kTheme.surface2[2], 0.95f * alpha};
+    const f32 tx[4] = {theme::kTheme.text1[0], theme::kTheme.text1[1],
+                       theme::kTheme.text1[2], alpha};
+    g_ui.panelRounded(bx, by, bw, bh2, theme::kRadiusCard, bg);
+    g_ui.label(bx + 24.0f, by + (bh2 - g_ui.textMetrics().block()) * 0.5f +
+                                g_ui.textMetrics().ascent,
+               toastFit, tx);
+    (void)bh;
 }
 
 // 0.6.8: status line inferior partilhada pelos DOIS modos (fps/tics/verts/
@@ -3325,9 +3496,79 @@ void statusLine(const DrawStats& st3d, const DrawStats& stGrid) {
     g_ui.statusLine(status);
 }
 
+// 0.9.0 (spec F) — captura da MINIATURA no fim do frame de um save.
+// Ponto SEGURO: depois do endFrame (frame completo no backbuffer, nada em
+// vias de desenho) e antes do swap (o conteúdo ainda está no buffer traseiro
+// — depois do swap o conteúdo é indefinido por definição EGL). Lê SÓ a
+// viewport central (a área 3D entre os painéis — SEM chrome; em Play, o
+// contentRect inteiro), crop 16:9 centrado, downsample box ≤480 e PNG para
+// thumb.png na raiz do projeto (ProjectStorage stream — SAF no device).
+static void captureThumbIfPending(f32 w, f32 h) {
+    if (!g_thumbPending) {
+        return;
+    }
+    g_thumbPending = false;
+    if (!g_projectReady || !g_storage) {
+        return;
+    }
+    const UiRect r = g_editor.playMode
+        ? safe::contentRect(w, h, g_ui.safeArea())
+        : safe::centerRect(w, h, g_ui.safeArea(), currentDrawerH(),
+                           g_editor.showInspector);
+    const u32 rw = static_cast<u32>(r.w);
+    const u32 rh = static_cast<u32>(r.h);
+    if (rw < 16 || rh < 16) {
+        return;   // viewport degenerado (transição/lifecycle) — sem thumb
+    }
+    std::vector<u8> rgba(static_cast<size_t>(rw) * rh * 4u);
+#ifndef GL_PACK_ALIGNMENT
+#define GL_PACK_ALIGNMENT 0x0D05   // stub do CI não define (GLES3 real define)
+#endif
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(static_cast<GLint>(r.x),
+                 static_cast<GLint>(h - r.y - r.h),
+                 static_cast<GLsizei>(rw), static_cast<GLsizei>(rh),
+                 GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    thumb::flipVerticalRgba(rgba.data(), rw, rh);   // bottom-up → top-down
+    const thumb::CropRect c = thumb::crop169(rw, rh);
+    const u32 tw = thumb::targetWidth(c.w);
+    if (tw == 0 || c.w == 0) {
+        return;
+    }
+    const u32 th = static_cast<u32>((u64)c.h * tw / c.w);
+    if (th == 0) {
+        return;
+    }
+    std::vector<u8> rgb(static_cast<size_t>(tw) * th * 3u);
+    thumb::downsampleRgb(rgba.data() + ((size_t)c.y * rw + c.x) * 4u,
+                         c.w, c.h, tw, th, rgb.data());
+    const std::vector<u8> png = thumb::encodePngRgb(rgb.data(), tw, th);
+    if (png.empty()) {
+        elog::error("thumb: encode PNG falhou (%ux%u)", tw, th);
+        return;
+    }
+    const int hs = g_storage->openWriteStream("thumb.png");
+    if (hs <= 0) {
+        elog::error("thumb: openWriteStream thumb.png falhou");
+        return;
+    }
+    if (!g_storage->writeStreamChunk(hs, png.data(), png.size())) {
+        elog::error("thumb: escrita falhou (%zu B)", png.size());
+        g_storage->closeWriteStream(hs);
+        return;
+    }
+    g_storage->closeWriteStream(hs);
+    elog::info("thumb: %ux%u PNG (%zu B) — captura da viewport no save",
+               tw, th, png.size());
+}
+
 void frame() {
     const f32 w = static_cast<f32>(g_egl.width());
     const f32 h = static_cast<f32>(g_egl.height());
+
+    // 0.9.0 (spec E): o estado do drawer alimenta os rects dos painéis/
+    // viewport neste frame (a fonte é o BottomState — persistente)
+    g_editor.drawerH = currentDrawerH();
 
     // 0.8.10 — O PONTO SEGURO DO FRAME (antes de QUALQUER submissão GL):
     //   (1) COVA: liberta os meshes de prim reformados no frame ANTERIOR
@@ -3403,11 +3644,12 @@ void frame() {
     // 3D nem com os painéis (centerRect intacto para hierarquia/inspector)
     const bool tlVisible = timeline::visible(g_editor.playMode, g_editor.uiMode,
                                               g_scene, g_editor.selected);
+    // 0.9.0: a timeline vive no DRAWER (aba Animação) — o viewport central
+    // encolhe pelo drawer (currentDrawerH), não pela strip antiga
     UiRect viewRect = editor::centerRect(w, h, g_ui.safeArea(),
+                                         currentDrawerH(),
                                          g_editor.showInspector);
-    if (tlVisible) {
-        viewRect.h -= timeline::kTimelineH;
-    }
+    (void)tlVisible;
 
     // input do frame anterior → câmara (só gestos nascidos no viewport
     // central da SAFE-AREA — gestos atrás da nav bar não orbitam, F4.2)
@@ -3669,27 +3911,103 @@ void frame() {
                          gizmo::gizmoLength(g_camera.dist), g_gizmo.mode,
                          g_gizmo.hovered);
     }
-    // ---- 0.7.6 — BARRA FINAL DE 5 GRUPOS ---------------------------------
-    // G1 [Menu ▾][Cena ▾] · G2 [pause][play] · G3 [3D|UI] · G4 transformação
-    // (SÓ com seleção) · G5 [inspector]. Ícones vetoriais no line batch,
-    // ativos com fundo de marca (ui/Toolbar.cpp).
+    // ---- 0.9.0 — CHROME DE CIMA (spec D) ---------------------------------
+    // TOP BAR 56dp [Menu ≡][Cena ▾]·[pause][play][sliders]·[gear] + TAB BAR
+    // 48dp [3D][UI|ÁUDIO] com underline accent. O G4 (transformação)
+    // desceu para a TOOLBAR DO VIEWPORT (vpchrome — desenhada abaixo).
     if (!modalOpen) {
-        Tic* selTic = g_scene.get(g_editor.selected);
-        const editor::toolbar::Actions ta = editor::toolbar::draw(
-            g_ui, g_editor, g_gizmoMode, selTic && selTic->active);
+        const editor::toolbar::Actions ta = editor::toolbar::draw(g_ui,
+                                                                  g_editor);
         if (ta.menuDropdown) {
-            // G1 Menu → dropdown (Settings/Guardar/…/Sair)
+            // Menu → dropdown (Settings/Guardar/…/Sair)
             g_editor.fileMenu = !g_editor.fileMenu;
             g_editor.plusMenu = false;
             g_editor.settingsMenu = false;
         }
         if (ta.cenaDropdown) {
-            // G1 Cena → dropdown de cenas do projeto (overlay CENAS de
-            // sempre — lista + nova + trocar)
+            // Cena → dropdown de cenas do projeto (overlay CENAS)
             g_editor.scenesMenu = !g_editor.scenesMenu;
             g_editor.plusMenu = false;
             g_editor.settingsMenu = false;
             g_editor.fileMenu = false;
+        }
+        if (ta.gearPressed) {
+            // 0.9.0 (spec I): o gear abre a PÁGINA de Settings
+            g_editor.settingsMenu = true;
+            elog::info("ui: pagina de settings aberta (gear)");
+        }
+
+        // ---- 0.9.0 — CHROME DO VIEWPORT (spec D): stack + toolbar inf. +
+        // triad. SÓ em modo 3D (UI/ÁUDIO substituem o viewport).
+        if (!g_editor.uiMode && !g_editor.audioMode) {
+            editor::vpchrome::ChromeState cs;
+            cs.canUndo = g_undo.canUndo();
+            cs.canRedo = g_undo.canRedo();
+            cs.canPaste = g_clipValid;
+            cs.snapValue = g_snapValue;
+            const editor::vpchrome::Actions va = editor::vpchrome::draw(
+                g_ui, g_editor, g_gizmoMode, cs, g_camera);
+            if (va.undoPressed) {
+                const Handle uh = g_undo.undo(g_scene);
+                if (uh.valid()) {
+                    g_editor.selected = uh;
+                    showToast("desfeito");
+                } else {
+                    showToast("nada a desfazer");
+                }
+            }
+            if (va.redoPressed) {
+                const Handle rh = g_undo.redo(g_scene);
+                if (rh.valid()) {
+                    g_editor.selected = rh;
+                    showToast("refeito");
+                } else {
+                    showToast("nada a refazer");
+                }
+            }
+            if (va.savePressed && g_projectReady) {
+                // o MESMO caminho do "Guardar cena" do menu (assets+manifesto)
+                const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
+                                g_project.saveManifest(*g_storage);
+                g_thumbPending = true;
+                showToast(ok ? "cena salva" : "falha ao salvar");
+            }
+            if (va.dupPressed) {
+                // DUPLICAR o selecionado (e ARMA a área de transferência —
+                // o paste cola o MESMO snapshot depois)
+                if (const Tic* sel = g_scene.get(g_editor.selected)) {
+                    g_clipSnap = editor::snapTic(g_scene, sel->handle);
+                    g_clipValid = true;
+                    const Handle dup =
+                        editor::duplicateTic(g_scene, g_editor.selected);
+                    if (dup.valid()) {
+                        g_editor.selected = dup;
+                        showToast("TIC duplicado");
+                    }
+                } else {
+                    showToast("seleciona um TIC para duplicar");
+                }
+            }
+            if (va.pastePressed) {
+                if (g_clipValid) {
+                    const editor::TicSnap before;   // vazio = criação
+                    const Handle h = editor::pasteAsNew(g_scene, g_clipSnap);
+                    if (h.valid()) {
+                        g_undo.push(before, editor::snapTic(g_scene, h), h);
+                        g_editor.selected = h;
+                        showToast("colado");
+                    }
+                } else {
+                    showToast("nada na area de transferencia");
+                }
+            }
+            if (va.addTicPressed) {
+                g_editor.plusMenu = !g_editor.plusMenu;
+            }
+            if (va.settingsPressed) {
+                // o MESMO popover do "sliders" da top bar (snap/grelha 🔶)
+                g_editor.vpSettingsMenu = true;
+            }
         }
         if (ta.playPressed && !g_editor.playMode) {
             // G2 play: a JANELA PLAY (sem painéis, orbit off); o Stop da
@@ -3712,12 +4030,11 @@ void frame() {
         // quando visível — NUNCA a área toda; painéis/toolbar ficam nos
         // seus sítios e o frame segue o fluxo normal)
         if (g_editor.audioMode) {
+            // 0.9.0: o workspace encolhe pelo DRAWER aberto (a timeline na
+            // aba Animação já não rouba altura ao viewport)
             UiRect audioView = editor::centerRect(w, h, g_ui.safeArea(),
+                                                  currentDrawerH(),
                                                   g_editor.showInspector);
-            if (timeline::visible(g_editor.playMode, true, g_scene,
-                                  g_editor.selected)) {
-                audioView.h -= timeline::kTimelineH;
-            }
             editor::AudioWorkspaceHost host = makeAudioWorkspaceHost();
             const int pickWs = editor::drawAudioWorkspace(
                 g_ui, g_input, audioView, g_audioWs, g_audioCatalog, host);
@@ -3729,120 +4046,92 @@ void frame() {
     }
 
     // F5.1-hotfix (1.4) + F5.2: overlay Settings — Exportar logs / Ver logs /
-    // Acesso a ficheiros… + linha do modo de armazenamento ativo
+    // 0.9.0 (spec I) — PÁGINA DE SETTINGS (full-screen, secções
+    // colapsáveis, back 56dp; a seleção do editor fica INTACTA)
     if (g_editor.settingsMenu) {
         const char* modeText = g_perm.mode() == storage::Mode::Unknown
                                    ? ""
                                    : storage::modeLabel(g_perm.mode());
-        const int choice = editor::drawSettingsMenu(g_ui, g_input, w, h, g_editor,
-                                                    modeText, g_keepSource,
-                                                    g_audioMaster);
-        if (choice == 1) {
-            // export para Downloads/GOneVV/logs (MediaStore — sem permissões)
-            int copied = 0;
-            if (storage::jniExportLogsToDownloads(&copied) && copied >= 0) {
-                char msg[96];
-                std::snprintf(msg, sizeof(msg), "logs exportados: %d → %s",
-                              copied, elog::kDownloadsRelPath);
-                showToast(msg);
-                elog::info("logs: exportados %d ficheiro(s) para %s",
-                           copied, elog::kDownloadsRelPath);
-            } else {
-                showToast("export falhou (sem ficheiros? API<29?)");
-                elog::warn("logs: export falhou (copied=%d)", copied);
+        char verLine[48];
+        std::snprintf(verLine, sizeof(verLine), "%s (vc %u)",
+                      buildinfo::g_version, buildinfo::g_versionCode);
+        editor::settings::Ctx sctx;
+        sctx.version = verLine;
+        sctx.soSha = buildinfo::g_soSha;
+        sctx.storageMode = modeText;
+        sctx.keepSource = g_keepSource;
+        sctx.audioMaster = g_audioMaster;
+        sctx.immersive = g_immersive;
+        sctx.allFilesGranted = g_perm.mode() == storage::Mode::AllFiles;
+        sctx.micGranted = g_micGranted;
+        sctx.dumpCount = static_cast<u32>(g_logDumps.size());
+        switch (editor::settings::draw(g_ui, g_input, g_editor, sctx)) {
+            case editor::settings::kResetLayout: {
+                // Repor layout (spec G): defaults + PERSISTE já
+                g_bottom.bottomTab = 0;
+                g_bottom.drawerH = safe::kDrawerDef;
+                g_editor.showInspector = true;
+                g_editor.inspCollapsed = 0;
+                g_editor.settingsCollapsed = 0;
+                saveLayoutNow();
+                showToast("layout reposto");
+                break;
             }
-        } else if (choice == 4) {
-            // 0.8.10 — setting "largar a fonte": alterna + persiste
-            g_keepSource = !g_keepSource;
-            saveProjectSettings();
-            showToast(g_keepSource ? "fonte: manter (source/ fica)"
-                                    : "fonte: largar (source/ sai)");
-            elog::info("import: setting fonte = %s",
-                       g_keepSource ? "manter" : "largar");
-        } else if (choice == 5) {
-            // 0.8.10 — RECONVERTER: tudo o que vive em source/ volta pelo
-            // conversor (assets/ novos; os TICs re-resolvem no próximo load)
-            if (!g_storage) {
-                showToast("sem projeto");
-            } else {
-                std::vector<std::string> srcs;
-                u32 done = 0;
-                if (g_storage->listDir("source", srcs)) {
-                    for (const std::string& f : srcs) {
-                        convert::Output out;
-                        convert::Stats stats;
-                        std::string cerr;
-                        if (convert::reconvertFile(std::string("source/") + f,
-                                                    *g_storage,
-                                                    g_pipeline.get(), out,
-                                                    stats, cerr)) {
-                            ++done;
-                        } else {
-                            elog::warn("import: reconverter '%s' FALHOU — %s",
-                                       f.c_str(), cerr.c_str());
-                        }
-                    }
-                }
-                refreshCatalog();
-                char msg[96];
-                std::snprintf(msg, sizeof(msg), "reconvertido(s): %u",
-                              done);
-                showToast(msg);
-                elog::info("import: reconvertidos %u ficheiro(s) de source/",
-                           done);
+            case editor::settings::kToggleImmersive: {
+                g_immersive = !g_immersive;
+                applyImmersiveMode();
+                saveLayoutNow();
+                showToast(g_immersive ? "imersivo: sim" : "imersivo: nao");
+                elog::info("ui: modo imersivo = %s",
+                           g_immersive ? "on" : "off");
+                break;
             }
-        } else if (choice == 6) {
-            // 0.8.11 — DIAGNÓSTICO DE ÁUDIO: o probe de estabilidade contra
-            // um backend FRESCO (50 ciclos start/stop + 10 pause/resume);
-            // a TABELA vai ao engine.log e a decisão troca o backend vivo
-            audioProbeRun();
-        } else if (choice == 7) {
-            // 0.8.11 — VOLUME GERAL: cicla 0→25→50→75→100% (o master do
-            // misturador; persistido no settings.goni do projeto)
-            g_audioMaster += 0.25f;
-            if (g_audioMaster > 1.0f) {
-                g_audioMaster = 0.0f;
-            }
-            g_audioEngine.master = g_audioMaster;
-            saveProjectSettings();
-            char msg[64];
-            std::snprintf(msg, sizeof(msg), "volume geral: %d%%",
-                          static_cast<int>(g_audioMaster * 100.0f + 0.5f));
-            showToast(msg);
-            elog::info("audio: master = %.2f", g_audioMaster);
-        } else if (choice == 2) {
-            // F5.2: VER LOGS in-app — tail do engine.log + crash dumps
-            g_logLines.clear();
-            g_logDumps.clear();
-            elog::readTail(g_logLines, 300);
-            elog::listDumps(g_logDumps);
-            g_editor.logViewer = true;
-            g_editor.logViewerJustOpened = true;
-            elog::info("logs: viewer aberto (%u linhas, %u dump(s))",
-                       (unsigned)g_logLines.size(), (unsigned)g_logDumps.size());
-        } else if (choice == 3) {
-            // F5.2: "Acesso a ficheiros…" — mesmo fluxo do diálogo (sem ação
-            // pendente: se conceder, o próximo import/export funciona direto)
-            // F5.3: mensagens honestas (handshake ≠ sistema sem suporte)
-            bool supported = false;
-            if (storageGrantedNow(&supported)) {
-                showToast("acesso já concedido (all files)");
-            } else {
-                const storage::BlockReason why =
-                    storage::blockReason(storage::handshakeOk(), supported);
-                if (why == storage::BlockReason::None) {
-                    if (g_perm.requestAction(storage::Action::None, true)) {
-                        g_editor.storageDialog = true;
-                    }
+            case editor::settings::kAllFilesPressed: {
+                g_perm.dialogAccept();
+                if (storage::jniOpenAllFilesSettings()) {
+                    elog::info("storage: definicoes All Files lancadas");
                 } else {
-                    showToast(storage::blockMessage(why));
-                    elog::error("storage: acesso a ficheiros bloqueado — %s",
-                                storage::blockMessage(why));
-                    if (why == storage::BlockReason::Unsupported) {
-                        g_perm.requestAction(storage::Action::None, false);
-                    }
+                    g_perm.dialogCancel();
+                    showToast("ponte Java indisponivel (handshake)");
                 }
+                break;
             }
+            case editor::settings::kMicPressed: {
+                if (storage::jniEnsureMicPermission()) {
+                    showToast("permissao de microfone pedida");
+                } else {
+                    showToast("ponte Java indisponivel (handshake)");
+                }
+                break;
+            }
+            case editor::settings::kViewLogs: {
+                g_editor.logViewer = true;
+                g_editor.logViewerJustOpened = true;
+                g_logLines.clear();
+                elog::readTail(g_logLines, 300);
+                refreshLogDumps();
+                break;
+            }
+            case editor::settings::kExportLogs: {
+                int copied = 0;
+                if (storage::jniExportLogsToDownloads(&copied) && copied >= 0) {
+                    showToast("logs exportados");
+                    elog::info("logs: exportados %d ficheiro(s)", copied);
+                } else {
+                    showToast("export falhou (sem ficheiros? API<29?)");
+                }
+                break;
+            }
+            case editor::settings::kProbeAudio: {
+                runAudioProbe();
+                break;
+            }
+            case editor::settings::kReconvert: {
+                reconvertAllAssets();
+                break;
+            }
+            default:
+                break;
         }
     }
 
@@ -3876,13 +4165,19 @@ void frame() {
             // 0.7.6: o G5 da toolbar pode ter escondido o painel direito
             editor::drawInspector(g_ui, g_scene, g_editor, &g_catalog);   // sliders + seletores
         }
-        // 0.8.0 (F7): TIMELINE do AnimationPlayer do TIC selecionado — strip
-        // no FUNDO do viewport central (nada sobrepõe os painéis; o orbit já
-        // nasce só na área acima dela via viewRect). Com modal aberto fica
-        // tapada pelo backdrop (como os painéis — sem desenho não há gesto).
-        if (tlVisible) {
-            timeline::drawTimeline(g_ui, g_input, g_scene, g_editor, g_timeline,
-                                   g_frameDt);
+        // 0.9.0 (spec E/K): a TIMELINE vive no DRAWER do painel de baixo
+        // (aba Animação) — a strip de fundo morreu. Com player presente e
+        // drawer fechado, a aba AUTO-ABRE (o comportamento "abre sozinha"
+        // da 0.8.0 manteve-se — agora abre o drawer certo)
+        if (tlVisible && g_bottom.bottomTab == 0) {
+            g_bottom.bottomTab = 3;
+        }
+        if (g_bottom.bottomTab == 3 && tlVisible) {
+            const UiRect d = editor::bottom::layout(
+                w, h, g_ui.safeArea(), g_bottom).drawer;
+            timeline::drawTimelineInRect(
+                g_ui, g_input, g_scene, g_editor, g_timeline, g_frameDt,
+                {d.x, d.y + 12.0f, d.w, d.h - 12.0f});
         }
     }
 
@@ -3952,9 +4247,7 @@ void frame() {
                 // troca-se o tipo/params no Inspector, anima-se na timeline)
                 // 0.8.10: esfera default PENDENTE — o preset arma primOn+
                 // params + primPending; o mesh sobe no ponto seguro
-                const Handle hnew = createTicFromPreset(
-                    g_scene, PresetKind::Mesh, nullptr,
-                    g_renderer.litMaterial());
+                const Handle hnew = createTicUndoable(PresetKind::Mesh);
                 if (hnew.valid()) {
                     if (MeshRenderer* mr =
                             g_scene.get(hnew)->getComponent<MeshRenderer>()) {
@@ -3970,9 +4263,7 @@ void frame() {
                 // 0.8.11 — TIC "Audio": Transform + AudioPlayer (ESTRUTURA
                 // primeiro — o clip vem pelo Inspector/seletor de clips;
                 // glifo de altifalante no editor, som no Play)
-                const Handle hnew = createTicFromPreset(g_scene,
-                                                        PresetKind::Audio,
-                                                        nullptr, nullptr);
+                const Handle hnew = createTicUndoable(PresetKind::Audio);
                 if (hnew.valid()) {
                     g_editor.selected = hnew;
                     showToast("Audio criado (atribua o clip no Inspector)");
@@ -3980,8 +4271,7 @@ void frame() {
                 }
             } else {
                 const PresetKind kind = static_cast<PresetKind>(choice - 1);
-                const Handle hnew = createTicFromPreset(g_scene, kind, &g_cubeMesh,
-                                                        g_renderer.litMaterial());
+                const Handle hnew = createTicUndoable(kind);
                 if (hnew.valid()) {
                     g_editor.selected = hnew;
                     char msg[64];
@@ -4047,11 +4337,14 @@ void frame() {
                     g_editor.audioMode = true;   // volta ao workspace
                     LOGI("editor: importar audio — navegador aberto (Music)");
                 } else {
+                    const editor::TicSnap uBefore =
+                        editor::snapTic(g_scene, g_editor.selected);
                     const editor::AssetPickOutcome out =
                         editor::applyAssetPick(g_scene, g_editor.selected, 5,
                                                pick, g_catalog,
                                                makeAssetResolvers());
                     if (out.applied) {
+                        pushUndo(uBefore, g_scene.get(g_editor.selected));
                         elog::info("%s", out.log);
                     } else {
                         elog::warn("audio: pick %d sem AudioPlayer no TIC "
@@ -4128,9 +4421,14 @@ void frame() {
                     para = paraBuf;
                 }
                 elog::info("mesh: troca %s → %s inicio", de, para);
+                const editor::TicSnap uBefore =
+                    editor::snapTic(g_scene, g_editor.selected);
                 const editor::AssetPickOutcome out =
                     editor::applyAssetPick(g_scene, g_editor.selected, menuKind,
                                            pick, g_catalog, makeAssetResolvers());
+                if (out.applied) {
+                    pushUndo(uBefore, g_scene.get(g_editor.selected));
+                }
                 // 0.8.7 — as CONTAGENS vêm do mesh APLICADO (o resolver do
                 // device devolve meshes REAIS; o applyAssetPick é puro e
                 // nunca desreferencia o Mesh — o contrato dos testes)
@@ -4183,7 +4481,10 @@ void frame() {
     // F5.2: menu de ficheiro com 5 itens — Save/Load/Export OBJ/Importar…/
     // Export Downloads (o "Pasta (SAF)" foi REMOVIDO com o fluxo SAF)
     if (g_editor.fileMenu) {
-        const int choice = editor::drawFileMenu(g_ui, g_input, w, h, g_editor);
+        const editor::toolbar::TopBarLayout tbl =
+            editor::toolbar::topbarLayout(w, h, g_ui.safeArea());
+        const int choice = editor::drawFileMenu(g_ui, g_input, w, h, g_editor,
+                                                tbl.menu.x, tbl.menu.y + tbl.menu.h);
         if (choice == 1) {
             // 0.7.6: Settings (o item do dropdown do Menu — o botão próprio
             // deixou de existir na barra)
@@ -4192,6 +4493,7 @@ void frame() {
         } else if (choice == 2 && g_projectReady) {
             const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
                             g_project.saveManifest(*g_storage);
+            g_thumbPending = true;   // 0.9.0: captura no próximo fim de frame
             // F5.4-hotfix: Salvar materializa os assets que só existem em
             // runtime (cubo procedural → meshes/cube.obj, formato OBJ já
             // definido). Cada tipo de asset fica na SUBPASTA certa — a
@@ -4277,6 +4579,7 @@ void frame() {
             if (g_projectReady && g_storage) {
                 const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
                                 g_project.saveManifest(*g_storage);
+                g_thumbPending = true;   // 0.9.0: captura antes de sair
                 std::vector<std::string> matWritten;
                 std::string matErr;
                 persistSceneAssets(*g_storage, g_scene, matWritten, matErr);
@@ -4376,15 +4679,19 @@ void frame() {
                 editor::drawRemoveDialog(g_ui, g_input, w, h, g_editor,
                                          ct->name.c_str());
             if (ch == 1) {
-                char gone[48];
-                std::snprintf(gone, sizeof(gone), "%.40s", ct->name.c_str());
+                // 0.9.0 — UNDO do delete: before = o TIC, after = vazio
+                const editor::TicSnap gone = editor::snapTic(g_scene, ct->handle);
+                editor::TicSnap empty;
+                g_undo.push(gone, empty, ct->handle);
+                char goneName[48];
+                std::snprintf(goneName, sizeof(goneName), "%.40s", ct->name.c_str());
                 g_scene.destroy(g_editor.contextTic);
                 if (g_editor.selected == g_editor.contextTic) {
                     g_editor.selected = Handle::invalid();
                     g_editor.selElement = -1;
                 }
                 showToast("TIC removido");
-                LOGI("editor: TIC '%s' removido", gone);
+                LOGI("editor: TIC '%s' removido", goneName);
             }
         }
     }
@@ -4444,6 +4751,14 @@ void frame() {
                         showToast("nome invalido/ocupado");
                     }
                 }
+            } else if (g_editor.textPurpose == 0) {
+                // 0.9.0 — RENAME com undo (before do TIC alvo; after = pós-commit)
+                const editor::TicSnap uBefore =
+                    editor::snapTic(g_scene, g_editor.textTic);
+                if (editor::commitTextInput(g_scene, g_editor)) {
+                    pushUndo(uBefore, g_scene.get(g_editor.textTic));
+                    showToast("aplicado");
+                }
             } else if (editor::commitTextInput(g_scene, g_editor)) {
                 showToast("aplicado");
             }
@@ -4454,9 +4769,11 @@ void frame() {
     // (menu de EDITOR — em Play a troca vem pela ação declarativa com
     // transição; aqui a troca é direta)
     if (g_editor.scenesMenu && g_projectReady) {
+        const editor::toolbar::TopBarLayout tbl2 =
+            editor::toolbar::topbarLayout(w, h, g_ui.safeArea());
         const int pick = editor::drawScenesMenu(
             g_ui, g_input, w, h, g_editor, g_project.scenes,
-            g_project.activeScene);
+            g_project.activeScene, tbl2.cena.x, tbl2.cena.y + tbl2.cena.h);
         if (pick == 1) {
             // nova cena: o TECLADO in-app pede o nome (propósito 1)
             editor::openTextInput(g_editor, 1, Handle{}, -1, "");
@@ -4519,13 +4836,71 @@ void frame() {
     }
 
     drawToast();
-    statusLine(st3d, stGrid);
+
+    // 0.9.0 (spec E/K) — PAINEL DE BAIXO: tabs + drawer (Ficheiros/Consola/
+    // Animação) + STATUS BAR 24dp ("FPS N · TICs N" — as abreviaturas
+    // morreram). Desenhado DEPOIS do viewport/painéis (o drawer cobre o
+    // fundo) e ANTES dos overlays (modais por cima de tudo).
+    {
+        // o log da consola = o MESMO tail do engine.log do viewer (120
+        // linhas chegam — a consola filra por chips)
+        std::vector<std::string> logTail;
+        elog::readTail(logTail, 120);
+        const editor::bottom::Actions ba = editor::bottom::draw(
+            g_ui, g_input, g_editor, g_bottom, g_catalog, logTail,
+            static_cast<int>(g_fps + 0.5f), g_scene.count());
+        if (ba.filePick > 0) {
+            // card de Ficheiros → aplica ao TIC selecionado (o MESMO
+            // dispatch do seletor: menuKind por tipo, pick = i+1 doss files)
+            const int pick = ba.filePick;
+            if (editor::pickerGuardBlocked(g_scene, g_editor.selected)) {
+                g_editor.pickBlockedHint = true;
+            } else {
+                const editor::TicSnap uBefore =
+                    editor::snapTic(g_scene, g_editor.selected);
+                const editor::AssetPickOutcome out = editor::applyAssetPick(
+                    g_scene, g_editor.selected, ba.filePickKind, pick,
+                    g_catalog, makeAssetResolvers());
+                if (out.applied) {
+                    pushUndo(uBefore, g_scene.get(g_editor.selected));
+                }
+                if (out.toast[0] != '\0') {
+                    showToast(out.toast);
+                }
+                if (out.log[0] != '\0') {
+                    elog::info("%s", out.log);
+                }
+            }
+        }
+        if (ba.exportPressed) {
+            // o MESMO Export do Settings: Downloads/GOneVV/logs (MediaStore)
+            int copied = 0;
+            if (storage::jniExportLogsToDownloads(&copied) && copied >= 0) {
+                showToast("logs exportados");
+                elog::info("logs: exportados %d ficheiro(s) para %s", copied,
+                           elog::kDownloadsRelPath);
+            } else {
+                showToast("export falhou (sem ficheiros? API<29?)");
+            }
+        }
+    }
+
+    // 0.9.0 (spec G) — o layout PERSISTE por diferença: escreve SÓ quando
+    // o estado serializado mudou (tab/drawer/inspector/secções colapsadas)
+    saveLayoutNow();
 
     // 0.7.1: o overlay da transição por cima de TUDO no editor também
     ui::transitionDraw(g_ui, g_sceneTrans, w, h);
 
     g_ui.endFrame();                       // submete solids + glyphs
     g_lastUiStats = g_renderer.endFrame(); // desenha a UI por cima do 3D
+
+    // 0.9.0 (spec F) — a captura vem AQUI: o frame JÁ está completo no
+    // backbuffer (3D + UI + overlays) e AINDA não passou ao ecrã; lê a
+    // VIEWPORT CENTRAL (sem o chrome dos painéis; em Play, o contentRect),
+    // crop 16:9 + downsample ≤480 e escreve thumb.png na raiz do projeto.
+    captureThumbIfPending(w, h);
+
     g_egl.swap();
     g_input.clearEdges();   // edges já consumidas pela UI/câmara neste frame
 }
@@ -4540,12 +4915,17 @@ void android_main(android_app* app) {
     // (boot: G.One VV <versão> versionCode <N> sha256 <…> git <…>) — vem
     // da JNI (build_info.txt que o CI escreve em 2 passes); o banner
     // com a changelog da campanha segue-se para o dono ler no log viewer.
-    elog::info("G.One VV 0.8.12 — 5 fixes cirúrgicos do C33 (seleção que "
-               "não se perde com guarda em todos os pickers; none de 1ª "
-               "classe com deferred free e round-trip; staging sem /tmp "
-               "(cache dir da app); crash dumps com badge ANTIGO; "
-               "dispositivo virtual em CI + sentinelas permanentes de "
-               "regressão — docs/REGRESSOES.md)");
+    elog::info("G.One VV 0.9.0 — EDITOR POLISH + DESIGN SYSTEM (spec A-M): "
+               "tabela de tokens + 49 ícones outline + hierarquia com "
+               "ícones de tipo/pesquisa/multi-seleção + inspector com "
+               "secções colapsáveis e caixas X/Y/Z 48dp + top bar 56/tab "
+               "bar 48 com underline accent + viewport com stack "
+               "undo/redo/save/dup/paste e toolbar rotulada + painel de "
+               "baixo com Ficheiros/Consola/Animação e drawer 240 + status "
+               "24dp + MENU/CENAS ancorados com scrim + página de Settings "
+               "com secções e imersivo + toasts bottom-center + undo/redo "
+               "por snapshot + miniaturas de projeto PNG no save + layout "
+               "persistente (layout.json)");
     {
         const char* root0 = app->activity
             ? (app->activity->externalDataPath ? app->activity->externalDataPath

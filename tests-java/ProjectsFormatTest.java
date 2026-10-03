@@ -66,6 +66,51 @@ public final class ProjectsFormatTest {
         // determinística: mesmo millis → mesmo rótulo
         check(ProjectsFormat.dateLabel(1748736000000L).equals(d), "deterministica");
 
+        // ---- 0.9.0 — relativeTime (spec F: "há 2 h" no card) ----------------
+        final long NOW = 1_800_000_000_000L;   // fixo: testes determinísticos
+        checkEq(ProjectsFormat.relativeTime(NOW - 30_000L, NOW), "agora",
+                "relativo: <60s = agora");
+        checkEq(ProjectsFormat.relativeTime(NOW - 5 * 60_000L, NOW), "há 5 min",
+                "relativo: minutos");
+        checkEq(ProjectsFormat.relativeTime(NOW - 2 * 3_600_000L, NOW), "há 2 h",
+                "relativo: horas (o exemplo da spec)");
+        checkEq(ProjectsFormat.relativeTime(NOW - 3 * 86_400_000L, NOW), "há 3 d",
+                "relativo: dias");
+        checkEq(ProjectsFormat.relativeTime(NOW - 2 * 7 * 86_400_000L, NOW),
+                "há 2 sem", "relativo: semanas");
+        check(!ProjectsFormat.relativeTime(NOW - 40 * 7 * 86_400_000L, NOW)
+                .startsWith("há "), "relativo: velho → data absoluta");
+        checkEq(ProjectsFormat.relativeTime(NOW, NOW), "agora",
+                "relativo: exatamente agora");
+        checkEq(ProjectsFormat.relativeTime(NOW + 60_000L, NOW), "agora",
+                "relativo: futuro clampado (nunca negativo)");
+        checkEq(ProjectsFormat.relativeTime(0L, NOW), "", "relativo: epoch-0 vazia");
+        checkEq(ProjectsFormat.relativeTime(-1L, NOW), "", "relativo: negativa vazia");
+
+        // ---- 0.9.0 — compareEntries (dropdown Ordenar) -----------------------
+        // 0 = Última Edição DESC (o padrão da spec)
+        check(ProjectsFormat.compareEntries("a", 200L, 0L, "b", 100L, 0L, 0) < 0,
+                "sort 0: editado mais recentemente PRIMEIRO");
+        check(ProjectsFormat.compareEntries("a", 100L, 0L, "b", 100L, 0L, 0) < 0,
+                "sort 0: desempate por nome (a < b)");
+        // 1 = Nome A-Z
+        check(ProjectsFormat.compareEntries("alpha", 0L, 0L, "Beta", 0L, 0L, 1) < 0,
+                "sort 1: A-Z case-insensitive");
+        // 2 = Nome Z-A
+        check(ProjectsFormat.compareEntries("alpha", 0L, 0L, "Beta", 0L, 0L, 2) > 0,
+                "sort 2: Z-A invertido");
+        // 3 = Criado DESC
+        check(ProjectsFormat.compareEntries("a", 0L, 50L, "b", 0L, 900L, 3) > 0,
+                "sort 3: criado mais recente primeiro");
+
+        // ---- 0.9.0 — sortLabel (o texto do dropdown) --------------------------
+        checkEq(ProjectsFormat.sortLabel(0), "Última Edição", "label padrão");
+        checkEq(ProjectsFormat.sortLabel(1), "Nome (A-Z)", "label A-Z");
+        checkEq(ProjectsFormat.sortLabel(2), "Nome (Z-A)", "label Z-A");
+        checkEq(ProjectsFormat.sortLabel(3), "Criado (recente)", "label criado");
+        checkEq(ProjectsFormat.sortLabel(99), "Última Edição",
+                "label desconhecido → padrão");
+
         System.out.println(failures == 0
                 ? "ProjectsFormatTest: OK"
                 : "ProjectsFormatTest: " + failures + " falha(s)");

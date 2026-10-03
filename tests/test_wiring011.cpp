@@ -940,12 +940,12 @@ TEST(wiring011_inspector_plano_com_seccao_audio) {
     EXPECT(!withoutAu.au);
 
     const TextMetrics tm;   // fallback (sem atlas): o plano é o mesmo
-    const u32 nWith = editor::inspectorRowCount(withAu, true);
-    const u32 nWithout = editor::inspectorRowCount(withoutAu, true);
+    const u32 nWith = editor::inspectorRowCount(withAu, true, 0u);
+    const u32 nWithout = editor::inspectorRowCount(withoutAu, true, 0u);
     EXPECT(nWith == nWithout + 10);
 
     editor::InspRow rows[48];
-    const u32 n = editor::inspectorPlan(withAu, tm, true, rows);
+    const u32 n = editor::inspectorPlan(withAu, tm, true, 0u, rows);
     EXPECT(n == nWith);
     int auRows = 0;
     bool hasClip = false, hasPlay = false, hasVol = false;
@@ -975,8 +975,8 @@ TEST(wiring011_inspector_plano_com_seccao_audio) {
            editor::toolbar::kTbInspectId);
 
     // a altura de conteúdo CRESCE com a secção (o scroll ativa)
-    EXPECT(editor::inspectorContentHeight(withAu, tm, true) >
-           editor::inspectorContentHeight(withoutAu, tm, true));
+    EXPECT(editor::inspectorContentHeight(withAu, tm, true, 0u) >
+           editor::inspectorContentHeight(withoutAu, tm, true, 0u));
 }
 
 TEST(wiring011_plus_menu_3d_tem_audio) {

@@ -154,6 +154,14 @@ void stopPreview(Scene& scene, Handle ticH, State& st) {
 
 void drawTimeline(UiContext& ui, const InputState& in, Scene& scene,
                   editor::EditorState& st, State& tl, f32 dt) {
+    const UiRect r = timelineRect(ui.screenWidth(), ui.screenHeight(),
+                                  ui.safeArea(), st.showInspector);
+    drawTimelineInRect(ui, in, scene, st, tl, dt, r);
+}
+
+void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
+                        editor::EditorState& st, State& tl, f32 dt,
+                        const UiRect& rectIn) {
     // troca de seleção (ou TIC morreu) com preview a correr → restaura a
     // pose ANTES de seguir (nunca fica um TIC a meio de um clip no editor)
     if (tl.snap.captured && tl.previewTic != st.selected) {
@@ -176,7 +184,7 @@ void drawTimeline(UiContext& ui, const InputState& in, Scene& scene,
 
     const f32 sw = ui.screenWidth();
     const f32 sh = ui.screenHeight();
-    const UiRect r = timelineRect(sw, sh, ui.safeArea(), st.showInspector);
+    const UiRect r = rectIn;   // 0.9.0: o rect vem do chamador (strip OU drawer)
 
     // ---- painel (strip) ------------------------------------------------------
     ui.panel(r.x, r.y, r.w, kTimelineH, theme::PANEL);

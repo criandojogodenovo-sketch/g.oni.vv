@@ -261,7 +261,7 @@ void resetEngineForHarness() {
 // main — o REPLAY inteiro; sai non-zero em qualquer falha
 // ===========================================================================
 int main() {
-    std::printf("== C33 VIRTUAL — dispositivo headless em CI (0.8.12) ==\n");
+    std::printf("== C33 VIRTUAL — dispositivo headless em CI (0.9.0) ==\n");
     std::printf("   reproduz: /tmp read-only (errno=30), cache dir da app,\n");
     std::printf("   content:// SAF, lifecycle EGL TERM/INIT, 1536x720 + insets,\n");
     std::printf("   ASTC ativo, taps replayaveis pelo frame() real\n");
@@ -273,7 +273,7 @@ int main() {
     }
 
     // ---- a "build instalada" (o papel do build_info.txt + VvActivity) -----
-    vv::buildinfo::set("0.8.12-virtual", 42, "c33c0ffe", "aabbccdd00112233", 1790000000ull);
+    vv::buildinfo::set("0.9.0-virtual", 43, "c33c0ffe", "aabbccdd00112233", 1790000000ull);
     elog::info("%s", vv::buildinfo::banner().c_str());
 
     // ---- [fs] /tmp READ-ONLY (a condição do device que o CI não tinha) ----
@@ -711,7 +711,7 @@ int main() {
     // ======================================================================
     fase("FASE 5 — dump velho com badge ANTIGO (identidade)");
     {
-        // a "build instalada" é 0.8.12-virtual/42; um dump da build 39
+        // a "build instalada" é 0.9.0-virtual/43; um dump da build 39
         // (a 0.8.9 do dono) tem de aparecer com o badge
         {
             const std::string dumpPath = std::string(kHarnessLogs) +
@@ -745,7 +745,7 @@ int main() {
                 vv::buildinfo::dumpSuffix() + ".dump";
             FILE* f = std::fopen(dumpPath.c_str(), "wb");
             if (f) {
-                std::fputs("build: 0.8.12-virtual (versionCode 42)\n", f);
+                std::fputs("build: 0.9.0-virtual (versionCode 43)\n", f);
                 std::fclose(f);
             }
         }
@@ -753,12 +753,12 @@ int main() {
         vv::elog::listDumps(dumps);
         bool novoLimpo = false;
         for (const std::string& d : dumps) {
-            if (d.find("-vc42") != std::string::npos &&
+            if (d.find("-vc43") != std::string::npos &&
                 vv::buildinfo::dumpBadge(d).empty()) {
                 novoLimpo = true;
             }
         }
-        check(novoLimpo, "dump NOVO (vc42) sem badge (e da build instalada)");
+        check(novoLimpo, "dump NOVO (vc43) sem badge (e da build instalada)");
     }
 
     // ======================================================================

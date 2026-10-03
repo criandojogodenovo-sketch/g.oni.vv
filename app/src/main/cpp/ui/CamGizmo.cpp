@@ -152,7 +152,7 @@ Frustum computeFrustum(const Transform3D& tr, const CameraComp& cam,
 
 void drawFrustum(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
                  const Frustum& f, bool selected) {
-    const f32* col = theme::kTheme.brand;   // cor de gizmo/marca
+    const f32* col = theme::kTheme.accent;   // cor de gizmo/marca
     const f32 w = selected ? kLineWSel : kLineW;
 
     drawBox(ui, vp, sw, sh, f.box, w, col);    // corpo
@@ -171,8 +171,8 @@ void drawFrustum(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
     if (!selected) {
         return;
     }
-    const f32 ink[4] = {theme::kTheme.brandInk[0], theme::kTheme.brandInk[1],
-                        theme::kTheme.brandInk[2], theme::kTheme.brandInk[3]};
+    const f32 ink[4] = {theme::kTheme.accentInk[0], theme::kTheme.accentInk[1],
+                        theme::kTheme.accentInk[2], theme::kTheme.accentInk[3]};
     for (int i = 0; i < 4; ++i) {
         f32 hx = 0.0f, hy = 0.0f;
         if (gizmo::projectPoint(vp, f.farC[i], sw, sh, hx, hy)) {

@@ -145,6 +145,101 @@ void UiContext::frame(f32 x, f32 y, f32 w, f32 h, f32 t, const f32 color[4]) {
     panel(x + w - t, y + t, t, h - 2.0f * t, color);
 }
 
+// ---- 0.9.0 — CANTOS CURVOS (escadaria de quads; sem shaders/blur) -----------
+// O canto é o quarto de círculo de raio r centrado em (x+r, y+r) etc. A
+// escadaria de kCornerSteps degraus por canto COBRE o círculo por dentro:
+// o degrau i (faixa [dy0, dy1) do topo) começa em dx = r − √(r²−(r−dy1)²)
+// (a largura no FUNDO da faixa — a mais larga — logo o degrau cobre toda a
+// faixa e nunca sai do círculo). Custo: 4 passos/canto = 21 quads no total.
+namespace {
+constexpr int kCornerSteps = 4;
+inline f32 cornerInset(f32 r, f32 dy) {
+    // dx mínimo do quarto de círculo à profundidade dy (0..r): pontos com
+    // dx < inset estão FORA do círculo.
+    const f32 s = r * r - (r - dy) * (r - dy);
+    return r - ((s > 0.0f) ? std::sqrt(s) : 0.0f);
+}
+} // namespace
+
+void UiContext::panelRounded(f32 x, f32 y, f32 w, f32 h, f32 radius,
+                             const f32 color[4]) {
+    if (w <= 0.0f || h <= 0.0f) {
+        return;
+    }
+    const f32 half = (w < h ? w : h) * 0.5f;
+    const f32 r = radius < half ? (radius > 0.0f ? radius : 0.0f) : half;
+    if (r < 1.0f) {   // raio degenerado = rect cru
+        panel(x, y, w, h, color);
+        return;
+    }
+    // corpo (cruz central): coluna central inteira + 2 faixas laterais
+    panel(x + r, y, w - 2.0f * r, h, color);
+    panel(x, y + r, r, h - 2.0f * r, color);
+    panel(x + w - r, y + r, r, h - 2.0f * r, color);
+    // 4 cantos: escadaria cobrindo o quarto de círculo por DENTRO
+    const f32 stepH = r / static_cast<f32>(kCornerSteps);
+    for (int i = 0; i < kCornerSteps; ++i) {
+        // faixa [dy0, dy1) medida do TOPO do canto; largura pela dy do FUNDO
+        const f32 dy0 = static_cast<f32>(i) * stepH;
+        const f32 dy1 = static_cast<f32>(i + 1) * stepH;
+        const f32 in0 = cornerInset(r, dy0);   // largura no topo (menor)
+        const f32 in1 = cornerInset(r, dy1);   // largura no fundo (maior)
+        const f32 sh_ = dy1 - dy0;
+        const f32 sx = in1;                    // começa na largura MÁXIMA
+        const f32 sw = r - in1;                // até ao fim do canto
+        if (sw > 0.05f) {
+            // top-left
+            panel(x + sx, y + dy0, sw, sh_, color);
+            // top-right
+            panel(x + w - r, y + dy0, r - sx, sh_, color);
+            // bottom-left
+            panel(x + sx, y + h - dy1, sw, sh_, color);
+            // bottom-right
+            panel(x + w - r, y + h - dy1, r - sx, sh_, color);
+        }
+        (void)in0;
+    }
+}
+
+void UiContext::frameRounded(f32 x, f32 y, f32 w, f32 h, f32 t, f32 radius,
+                             const f32 color[4]) {
+    if (w <= 0.0f || h <= 0.0f || t <= 0.0f) {
+        return;
+    }
+    const f32 half = (w < h ? w : h) * 0.5f;
+    const f32 r = radius < half ? (radius > 0.0f ? radius : 0.0f) : half;
+    if (r < 1.0f) {
+        frame(x, y, w, h, t, color);
+        return;
+    }
+    // arestas retas (entre os cantos)
+    panel(x + r, y, w - 2.0f * r, t, color);                     // topo
+    panel(x + r, y + h - t, w - 2.0f * r, t, color);             // fundo
+    panel(x, y + r, t, h - 2.0f * r, color);                     // esq
+    panel(x + w - t, y + r, t, h - 2.0f * r, color);             // dir
+    // arcos dos cantos: polilinhas no line batch (mesma espessura do traço)
+    const f32 cx[4] = {x + r, x + w - r, x + w - r, x + r};
+    const f32 cy[4] = {y + r, y + r, y + h - r, y + h - r};
+    const f32 a0[4] = {180.0f, 270.0f, 0.0f, 90.0f};
+    const int kArcSeg = 5;
+    f32 px[kArcSeg + 1], py[kArcSeg + 1];
+    for (int c = 0; c < 4; ++c) {
+        for (int i = 0; i <= kArcSeg; ++i) {
+            const f32 a = (a0[c] + 90.0f * (static_cast<f32>(i) / kArcSeg)) *
+                          0.01745329252f;
+            px[i] = cx[c] + (r - t * 0.5f) * std::cos(a);
+            py[i] = cy[c] + (r - t * 0.5f) * std::sin(a);
+        }
+        for (int i = 1; i <= kArcSeg; ++i) {
+            drawLine(px[i - 1], py[i - 1], px[i], py[i], t, color);
+        }
+    }
+}
+
+void UiContext::panelPill(f32 x, f32 y, f32 w, f32 h, const f32 color[4]) {
+    panelRounded(x, y, w, h, h * 0.5f, color);
+}
+
 void UiContext::label(f32 xBaseline, f32 yBaseline, const char* text, const f32 color[4]) {
     labelStyled(xBaseline, yBaseline, text, color, 1.0f,
                 static_cast<u8>(0));   // normal (0.8.6: tudo passa pelo styled)

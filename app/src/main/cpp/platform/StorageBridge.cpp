@@ -78,6 +78,7 @@ jmethodID g_midExportLogs = nullptr;     // VvActivity.exportLogsToDownloads(Str
 // 0.8.11 — o microfone da GRAVAÇÃO: VvActivity.ensureMicPermission()Z
 // (true = concedida; false = dialogo aberto, o dono re-toca Gravar)
 jmethodID g_midMicPermission = nullptr;  // VvActivity.ensureMicPermission()Z
+jmethodID g_midSetImmersive = nullptr;   // 0.9.0: VvActivity.setImmersive(Z)V
 // 0.8.12 — o CACHE DIR da app: VvActivity.cacheDirPath()String — o STAGING
 // da reconversão SAF escreve AQUI (nunca /tmp: read-only no Android,
 // errno=30 — a causa exata da migração morta no C33)
@@ -269,6 +270,17 @@ void cacheActivityMethods(JNIEnv* env) {
                     "gravacao indisponível (o resto do audio intacto)");
     } else {
         elog::info("jni: VvActivity.ensureMicPermission OK (mic da gravacao)");
+    }
+
+    // 0.9.0 — o MODO IMERSIVO (não crítico: sem ele o toggle fica no-op
+    // logado, o resto do editor segue intacto)
+    g_midSetImmersive = env->GetMethodID(g_activityCls, "setImmersive", "(Z)V");
+    if (!g_midSetImmersive || clearPendingException(env)) {
+        g_midSetImmersive = nullptr;
+        elog::error("jni: VvActivity.setImmersive NAO encontrada — modo "
+                    "imersivo indisponivel (o resto intacto)");
+    } else {
+        elog::info("jni: VvActivity.setImmersive OK (modo imersivo)");
     }
 
     // 0.8.12 — o CACHE DIR da app (não crítico: sem ele o STAGING da
@@ -546,6 +558,23 @@ std::string jniCacheDir() {
     env->ReleaseStringUTFChars(jpath, utf);
     env->DeleteLocalRef(jpath);
     return out;
+}
+
+// 0.9.0 — o MODO IMERSIVO (Settings→Geral): true = aplicado; false =
+// ponte indisponível (o chamador loga e segue)
+bool jniSetImmersive(bool on) {
+    if (!handshakeOk() || !g_midSetImmersive) {
+        elog::warn("jni: setImmersive indisponível — ponte Java sem o método");
+        return false;
+    }
+    JNIEnv* env = attachedEnv();
+    if (!env) {
+        elog::warn("jni: setImmersive sem env do thread chamador");
+        return false;
+    }
+    env->CallVoidMethod(g_activity, g_midSetImmersive,
+                        static_cast<jboolean>(on ? JNI_TRUE : JNI_FALSE));
+    return !clearPendingException(env);
 }
 
 // 0.8.11 — o MICROFONE da gravação: true = concedida, false = diálogo

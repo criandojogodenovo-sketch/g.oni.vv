@@ -40,15 +40,36 @@ namespace vv {
 namespace editor {
 
 // constantes partilhadas pelo desenho e pela medição (antes no anon ns do .cpp)
-constexpr f32 kPad       = 12.0f;
+// 0.9.0 (spec A/B): kPad 12→16 (8-múltiplo), linha 52→48 (alvo mínimo), e a
+// hierarquia ganha a LINHA DE PESQUISA (48dp) por baixo do cabeçalho.
+constexpr f32 kPad       = 16.0f;
 constexpr f32 kHeaderH   = 48.0f;
-constexpr f32 kRowH      = 52.0f;
+constexpr f32 kRowH      = 48.0f;
+constexpr f32 kSearchRowH = 48.0f;   // 0.9.0: pesquisa de TIC no header da hierarquia
 constexpr f32 kMenuW     = 340.0f;
 
-// altura do conteúdo da Hierarchy: uma linha por TIC ativo
+// altura do conteúdo da Hierarchy: uma linha de 48dp por TIC VISÍVEL na
+// árvore (0.9.0: o filtro de pesquisa encolhe o conteúdo — o scroll segue)
 inline f32 hierarchyContentHeight(u32 ticCount) {
     return static_cast<f32>(ticCount) * kRowH;
 }
+
+// 0.9.0 — ids novos da hierarquia (faixa 5500..5599, livre entre a câmara
+// 54xx e o áudio 57xx): campo de pesquisa, chip da multi-seleção
+constexpr u64 kHierSearchId    = 5500;   // linha de pesquisa (abre teclado 8)
+constexpr u64 kHierMultiClearId = 5501;  // chip "N ×" — limpa a multi-seleção
+constexpr u64 kHierMultiDistId = 5502;   // "distribuir" (≥3 selecionados)
+
+// 0.9.0 (spec C) — SECÇÕES COLAPSÁVEIS do Inspector: cabeçalho 48dp com
+// título 14sp + chevron; o estado (bitmask por secção) vive no EditorState e
+// PERSISTE (spec G). Bits: 0=Transform 1=Camera 2=Malha 3=Material 4=Fisica
+// 5=Audio 6=Anim. Os botões R (repõe a LINHA pos/rot/scale) partilham a
+// faixa 5510+.
+constexpr u64 kInspSectionBase = 5510;   // +bit da secção
+constexpr u64 kInspResetBase   = 5520;   // +0/1/2 = repõe Pos/Rot/Escala
+// caixas X/Y/Z das linhas de Transform (9 caixas: 3 linhas × 3 eixos) — o
+// índice É o campo do teclado numérico (purpose 6, textElement 0..8)
+constexpr u64 kInspFieldBase   = 5530;   // +0..8
 
 // ---- ids dos widgets do Inspector (antes no anon ns do EditorUi.cpp —
 // o plano e o hit-test do tap re-despachado partilham-nos)
@@ -171,7 +192,11 @@ inline bool primUsesRings(PrimKind k) {
 struct InspRow {
     enum class Kind : u8 {
         Name,        // nome do TIC (accent)
-        Section,     // cabeçalho "Transform3D" + separador no fundo da linha
+        Section,     // cabeçalho COLAPSÁVEL 48dp (payload = bit da secção)
+        TransformRow,// 0.9.0 (spec C): linha Pos/Rotação/Escala com caixas
+                     // X/Y/Z 48dp + botão R (payload = 0/1/2)
+        MaterialThumbs, // 0.9.0 (spec C): 3 miniaturas 64dp (textura,
+                     // albedo+lápis, preview live = textura × tint)
         Slider,      // slider do Transform3D (9× — payload por índice)
         MeshButton,  // F5-E: "mesh: …" (selecionável se houver catálogo)
         MeshLabel,   // F5-E: "mesh: …" só leitura (sem catálogo)
@@ -216,109 +241,199 @@ struct InspRow {
     f32  y;     // topo da linha em COORDS DE CONTEÚDO (cumulativo)
     f32  h;     // altura da linha (derivada das métricas da fonte)
     u64  id;    // id do widget interativo (0 = só desenho)
+    u32  payload = 0;   // 0.9.0: bit da secção (Section*) ou campo 0..8
+                        // (TransformRow) — o desenho/hit-test lê daqui
 };
 
 // payload do ColorSlider por índice (0=R, 1=G, 2=B) — o desenho e o
 // hit-test partilham esta ordem
-inline u32 inspectorRowCount(const InspProfile& p, bool selectable) {
+//
+// 0.9.0 (spec C) — BITS das secções colapsáveis do Inspector (o bitmask
+// vive no EditorState::inspCollapsed e PERSISTE — spec G):
+//   bit0 Transform · bit1 Camera · bit2 Malha · bit3 Material · bit4 Fisica
+//   bit5 Audio · bit6 Animacao
+constexpr u32 kInspBitTransform = 1u << 0;
+constexpr u32 kInspBitCamera    = 1u << 1;
+constexpr u32 kInspBitMalha     = 1u << 2;
+constexpr u32 kInspBitMaterial  = 1u << 3;
+constexpr u32 kInspBitFisica    = 1u << 4;
+constexpr u32 kInspBitAudio     = 1u << 5;
+constexpr u32 kInspBitAnim      = 1u << 6;
+
+// altura de UMA linha de Transform (spec C: "3 campos numéricos editáveis
+// 48dp"): título 12sp em LINHA PRÓPRIA (24px) + caixas X/Y/Z 48dp + R 48.
+// A largura do painel (268 úteis) não comporta título+3 caixas+R na MESMA
+// linha — o título sobe (o layout do mockup mantém-se: rótulos X/Y/Z dentro
+// das caixas, R à direita, alvo 48dp).
+inline f32 inspTransformRowH(const TextMetrics& m) {
+    return 24.0f + 4.0f + 48.0f + 4.0f;   // título + caixas 48dp + folga
+}
+// altura do CABEÇALHO de secção (48dp — spec C)
+inline f32 inspSectionH() { return 48.0f; }
+// altura da linha de MINIATURAS de Material (64dp + legendas; spec C)
+inline f32 inspThumbsH() { return 64.0f + 20.0f; }
+
+inline u32 inspectorRowCount(const InspProfile& p, bool selectable,
+                             u32 collapsed) {
     u32 n = 2;                                          // nome + visivel
-    if (p.tr) n += 1 + 9;                               // secção + 9 sliders
-    if (p.cam) n += 1 + 7;                              // 0.7.7: secção + 7
-                                                         // (0.7.10: +frustum)
-    if (p.mr) {
-        n += 2 + 3;                                    // mesh + tex + R/G/B
-        n += 1;                                         // 0.8.0: linha "prim:"
-        n += 1;                                         // 0.8.6: linha hex
-        if (p.prim) {
-            n += 1;                                     // raio/tam
-            if (primUsesSegments(p.primKind)) n += 1;   // segmentos
-            if (primUsesRings(p.primKind)) n += 1;      // anéis (esfera)
-        }
-        if (p.fileMesh) n += 2;                        // 0.8.9: dims + escala original
+    // ---- TRANSFORM (bit0): cabeçalho + 3 linhas Pos/Rot/Escala ----------
+    n += 1;
+    if (!(collapsed & kInspBitTransform)) {
+        n += 3;
     }
-    if (p.im) n += 1;                                   // input
-    if (p.bc) n += 2;                                   // body + velx
-    if (p.im) n += 1;                                   // addTc OU tc
-    if (!p.anim && p.canAnim) n += 1;                   // 0.8.0: add Animacao
-    else if (p.anim) n += 1;                            // 0.8.0: anim: N tracks
-    if (p.au) n += 1 + 9;                               // 0.8.11: secção + 9
+    // ---- CAMERA (bit1) ----
+    if (p.cam) {
+        n += 1;
+        if (!(collapsed & kInspBitCamera)) {
+            n += 7;
+        }
+    }
+    // ---- MALHA (bit2): mesh/prim/params/tex/dims ------------------------
+    if (p.mr) {
+        n += 1;
+        if (!(collapsed & kInspBitMalha)) {
+            n += 2 + 1;                                  // mesh + prim + tex
+            if (p.prim) {
+                n += 1;
+                if (primUsesSegments(p.primKind)) n += 1;
+                if (primUsesRings(p.primKind)) n += 1;
+            }
+            if (p.fileMesh) n += 2;                      // dims + escala orig
+        }
+    }
+    // ---- MATERIAL (bit3): miniaturas + R/G/B + hex (+swatch na linha hex)
+    if (p.mr) {
+        n += 1;
+        if (!(collapsed & kInspBitMaterial)) {
+            n += 1;            // 0.9.0: 3 miniaturas 64dp (spec C)
+            n += 3 + 1;
+        }
+    }
+    // ---- FÍSICA (bit4): body + velx (massa/gravidade NÃO existem — zero
+    // física nova; a secção fica pronta para eles) ------------------------
+    if (p.bc) {
+        n += 1;
+        if (!(collapsed & kInspBitFisica)) {
+            n += 2;
+        }
+    }
+    if (p.im) n += 1;                                    // input (avulso)
+    if (p.im) n += 1;                                    // addTc OU tc
+    // ---- ANIMAÇÃO (bit6) ----
+    if (!p.anim && p.canAnim) {
+        n += 1;
+        if (!(collapsed & kInspBitAnim)) {
+            n += 1;
+        }
+    } else if (p.anim) {
+        n += 1;
+        if (!(collapsed & kInspBitAnim)) {
+            n += 1;
+        }
+    }
+    // ---- ÁUDIO (bit5) ----
+    if (p.au) {
+        n += 1;
+        if (!(collapsed & kInspBitAudio)) {
+            n += 9;
+        }
+    }
     (void)selectable;
     return n;
 }
 
 // constrói o plano (rows deve ter capacidade inspectorRowCount; devolve count)
+// 0.9.0: `collapsed` = bitmask das secções FECHADAS (só o cabeçalho entra)
 inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
-                         bool selectable, InspRow* rows) {
+                         bool selectable, u32 collapsed, InspRow* rows) {
     const f32 textH = inspTextRowH(m);
     const f32 btnH  = inspButtonRowH(m);
     const f32 sldH  = inspSliderRowH(m);
     const f32 addH  = inspAddTcH(m);
+    const f32 secH  = inspSectionH();
+    const f32 trfH  = inspTransformRowH(m);
 
     u32 n = 0;
     f32 y = 0.0f;
-    auto push = [&](InspRow::Kind kind, f32 h, u64 id) {
+    auto push = [&](InspRow::Kind kind, f32 h, u64 id, u32 payload = 0) {
         rows[n].kind = kind;
         rows[n].y    = y;
         rows[n].h    = h;
         rows[n].id   = id;
+        rows[n].payload = payload;
         ++n;
         y += h;   // ← o ÚNICO avanço de cursor: y += altura_linha
     };
 
     push(InspRow::Kind::Name, textH, 0);
-    push(InspRow::Kind::VisToggle, btnH, kInspectorVis);   // 0.7.0
-    if (p.tr) {
-        push(InspRow::Kind::Section, textH, 0);
-        for (u32 i = 0; i < 9; ++i) {
-            push(InspRow::Kind::Slider, sldH, kInspectorSliderBase + i);
-        }
-    }
-    if (p.cam) {   // 0.7.7 — a perspetiva da cena logo a seguir à pose
-        push(InspRow::Kind::CamSection, textH, 0);
-        push(InspRow::Kind::CamFov, sldH, kInspectorCamFov);
-        push(InspRow::Kind::CamNear, sldH, kInspectorCamNear);
-        push(InspRow::Kind::CamFar, sldH, kInspectorCamFar);
-        push(InspRow::Kind::CamProj, btnH, kInspectorCamProj);
-        push(InspRow::Kind::CamOrtho, sldH, kInspectorCamOrtho);
-        push(InspRow::Kind::CamActive, btnH, kInspectorCamActive);
-        push(InspRow::Kind::CamFrustum, btnH, kInspectorCamFrustum);   // 0.7.10
-    }
-    if (p.mr) {
-        push(selectable ? InspRow::Kind::MeshButton : InspRow::Kind::MeshLabel,
-             selectable ? btnH : textH, selectable ? kInspectorMeshSel : 0);
-        // 0.8.0 (F7) — primitiva procedural: linha "prim:" SEMPRE botão
-        // (as primitivas são built-in — não dependem do catálogo)
-        push(InspRow::Kind::PrimButton, btnH, kInspectorPrimSel);
-        if (p.prim) {
-            push(InspRow::Kind::PrimSlider, sldH, kInspectorPrimR);
-            if (primUsesSegments(p.primKind)) {
-                push(InspRow::Kind::PrimSlider, sldH, kInspectorPrimSeg);
-            }
-            if (primUsesRings(p.primKind)) {
-                push(InspRow::Kind::PrimSlider, sldH, kInspectorPrimRings);
-            }
-        }
-        push(selectable ? InspRow::Kind::TexButton : InspRow::Kind::TexLabel,
-             selectable ? btnH : textH, selectable ? kInspectorTexSel : 0);
-        // 0.8.9 — IMPORT: dims originais + botão "escala original" (o fit
-        // uniforme aplicou fator único; estes mostram os números crus)
-        if (p.fileMesh) {
-            push(InspRow::Kind::DimsLabel, textH, 0);
-            push(InspRow::Kind::ScaleOrig, btnH, kInspectorScaleOrig);
-        }
-        // 0.7.0 — cor por TIC (sliders R/G/B do tint)
+    push(InspRow::Kind::VisToggle, btnH, kInspectorVis);
+    // ---- TRANSFORM (spec C): cabeçalho + 3 linhas X/Y/Z + R -------------
+    push(InspRow::Kind::Section, secH, kInspSectionBase + 0, kInspBitTransform);
+    if (!(collapsed & kInspBitTransform)) {
         for (u32 i = 0; i < 3; ++i) {
-            push(InspRow::Kind::ColorSlider, sldH, kInspectorColBase + i);
+            push(InspRow::Kind::TransformRow, trfH, kInspResetBase + i, i);
         }
-        // 0.8.6 — cor por CÓDIGO (o teclado em modo hex aplica ao tint)
-        push(InspRow::Kind::ColorHex, btnH, kInspectorColHex);
+    }
+    // ---- CAMERA ----
+    if (p.cam) {
+        push(InspRow::Kind::CamSection, secH, kInspSectionBase + 1,
+             kInspBitCamera);
+        if (!(collapsed & kInspBitCamera)) {
+            push(InspRow::Kind::CamFov, sldH, kInspectorCamFov);
+            push(InspRow::Kind::CamNear, sldH, kInspectorCamNear);
+            push(InspRow::Kind::CamFar, sldH, kInspectorCamFar);
+            push(InspRow::Kind::CamProj, btnH, kInspectorCamProj);
+            push(InspRow::Kind::CamOrtho, sldH, kInspectorCamOrtho);
+            push(InspRow::Kind::CamActive, btnH, kInspectorCamActive);
+            push(InspRow::Kind::CamFrustum, btnH, kInspectorCamFrustum);
+        }
+    }
+    // ---- MALHA (spec C) ----
+    if (p.mr) {
+        push(InspRow::Kind::Section, secH, kInspSectionBase + 2, kInspBitMalha);
+        if (!(collapsed & kInspBitMalha)) {
+            push(selectable ? InspRow::Kind::MeshButton : InspRow::Kind::MeshLabel,
+                 selectable ? btnH : textH, selectable ? kInspectorMeshSel : 0);
+            push(InspRow::Kind::PrimButton, btnH, kInspectorPrimSel);
+            if (p.prim) {
+                push(InspRow::Kind::PrimSlider, sldH, kInspectorPrimR);
+                if (primUsesSegments(p.primKind)) {
+                    push(InspRow::Kind::PrimSlider, sldH, kInspectorPrimSeg);
+                }
+                if (primUsesRings(p.primKind)) {
+                    push(InspRow::Kind::PrimSlider, sldH, kInspectorPrimRings);
+                }
+            }
+            push(selectable ? InspRow::Kind::TexButton : InspRow::Kind::TexLabel,
+                 selectable ? btnH : textH, selectable ? kInspectorTexSel : 0);
+            if (p.fileMesh) {
+                push(InspRow::Kind::DimsLabel, textH, 0);
+                push(InspRow::Kind::ScaleOrig, btnH, kInspectorScaleOrig);
+            }
+        }
+    }
+    // ---- MATERIAL (spec C): R/G/B + hex + swatch ----
+    if (p.mr) {
+        push(InspRow::Kind::Section, secH, kInspSectionBase + 3,
+             kInspBitMaterial);
+        if (!(collapsed & kInspBitMaterial)) {
+            push(InspRow::Kind::MaterialThumbs, inspThumbsH(), 0);
+            for (u32 i = 0; i < 3; ++i) {
+                push(InspRow::Kind::ColorSlider, sldH, kInspectorColBase + i);
+            }
+            push(InspRow::Kind::ColorHex, btnH, kInspectorColHex);
+        }
+    }
+    // ---- FÍSICA (spec C: o que o BodyComp TEM — zero física nova) -------
+    if (p.bc) {
+        push(InspRow::Kind::Section, secH, kInspSectionBase + 4, kInspBitFisica);
+        if (!(collapsed & kInspBitFisica)) {
+            push(InspRow::Kind::Label, textH, 0);       // body:
+            push(InspRow::Kind::Velx, sldH, kInspectorVelX);
+        }
     }
     if (p.im) {
         push(InspRow::Kind::Label, textH, 0);           // input:
-    }
-    if (p.bc) {
-        push(InspRow::Kind::Label, textH, 0);           // body:
-        push(InspRow::Kind::Velx, sldH, kInspectorVelX);
     }
     if (p.im) {
         if (!p.tc) {
@@ -327,26 +442,32 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
             push(InspRow::Kind::Label, textH, 0);       // tc: stick + jump
         }
     }
-    // 0.8.0 (F7) — animação: cria o player OU mostra o resumo (a edição
-    // vive na TIMELINE, que abre sozinha com o player presente)
+    // ---- ANIMAÇÃO ----
     if (!p.anim && p.canAnim) {
-        push(InspRow::Kind::AddAnim, addH, kInspectorAddAnim);
+        push(InspRow::Kind::Section, secH, kInspSectionBase + 6, kInspBitAnim);
+        if (!(collapsed & kInspBitAnim)) {
+            push(InspRow::Kind::AddAnim, addH, kInspectorAddAnim);
+        }
     } else if (p.anim) {
-        push(InspRow::Kind::AnimLabel, textH, 0);
+        push(InspRow::Kind::Section, secH, kInspSectionBase + 6, kInspBitAnim);
+        if (!(collapsed & kInspBitAnim)) {
+            push(InspRow::Kind::AnimLabel, textH, 0);
+        }
     }
-    // 0.8.11 — ÁUDIO: secção + clip + ouvir + toggles + sliders (a MESMA
-    // ordem do desenho — o payload lê do AudioPlayer do TIC)
+    // ---- ÁUDIO ----
     if (p.au) {
-        push(InspRow::Kind::AuSection, textH, 0);
-        push(InspRow::Kind::AuClip, btnH, kInspectorAuClip);
-        push(InspRow::Kind::AuPlay, btnH, kInspectorAuPlay);
-        push(InspRow::Kind::AuAutoplay, btnH, kInspectorAuAutoplay);
-        push(InspRow::Kind::AuLoop, btnH, kInspectorAuLoop);
-        push(InspRow::Kind::AuVolume, sldH, kInspectorAuVolume);
-        push(InspRow::Kind::AuPitch, sldH, kInspectorAuPitch);
-        push(InspRow::Kind::AuPos, btnH, kInspectorAuPos);
-        push(InspRow::Kind::AuRint, sldH, kInspectorAuRint);
-        push(InspRow::Kind::AuRext, sldH, kInspectorAuRext);
+        push(InspRow::Kind::AuSection, secH, kInspSectionBase + 5, kInspBitAudio);
+        if (!(collapsed & kInspBitAudio)) {
+            push(InspRow::Kind::AuClip, btnH, kInspectorAuClip);
+            push(InspRow::Kind::AuPlay, btnH, kInspectorAuPlay);
+            push(InspRow::Kind::AuAutoplay, btnH, kInspectorAuAutoplay);
+            push(InspRow::Kind::AuLoop, btnH, kInspectorAuLoop);
+            push(InspRow::Kind::AuVolume, sldH, kInspectorAuVolume);
+            push(InspRow::Kind::AuPitch, sldH, kInspectorAuPitch);
+            push(InspRow::Kind::AuPos, btnH, kInspectorAuPos);
+            push(InspRow::Kind::AuRint, sldH, kInspectorAuRint);
+            push(InspRow::Kind::AuRext, sldH, kInspectorAuRext);
+        }
     }
     return n;
 }
@@ -354,9 +475,9 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
 // altura REAL do conteúdo = fundo da última linha do plano (o Y final do
 // cursor partilhado). Sem linhas → 0.
 inline f32 inspectorContentHeight(const InspProfile& p, const TextMetrics& m,
-                                  bool selectable) {
-    InspRow rows[48];
-    const u32 n = inspectorPlan(p, m, selectable, rows);
+                                  bool selectable, u32 collapsed) {
+    InspRow rows[64];
+    const u32 n = inspectorPlan(p, m, selectable, collapsed, rows);
     if (n == 0) {
         return 0.0f;
     }
@@ -384,6 +505,23 @@ inline i32 hierarchyRowAtTap(f32 tapY, f32 listTop, f32 offset, u32 ticCount) {
 // área útil). h é por overlay.
 inline UiRect centeredMenuRect(f32 ox, f32 oy, f32 aw, f32 ah, f32 h) {
     return {ox + (aw - kMenuW) * 0.5f, oy + (ah - h) * 0.5f, kMenuW, h};
+}
+
+// 0.9.0 — ÁREA DOS OVERLAYS: a faixa do VIEWPORT (por baixo do chrome de
+// cima 104, por cima da tab bar de baixo + status 72). Centrar overlays na
+// área útil INTEIRA punha-os por BAIXO da tab bar de modo (o botão "fechar"
+// do log viewer ficava tapado — o toque comia-o a tab ÁUDIO). Os overlays
+// continuam DENTRO do contentRect (a invariante da F4.2).
+inline void overlayArea(f32 sw, f32 sh, const safe::Insets& i, f32& ox,
+                        f32& oy, f32& aw, f32& ah) {
+    ox = i.left;
+    oy = i.top + safe::kToolbarH;   // chrome de cima (56+48)
+    aw = sw - i.left - i.right;
+    ah = sh - i.top - i.bottom - safe::kToolbarH - safe::kStatusH -
+         safe::kBottomTabH;
+    if (ah < 100.0f) {
+        ah = 100.0f;   // defesa: telas baixas — o overlay continua centrado
+    }
 }
 
 // DIÁLOGO "Precisa de acesso a todos os ficheiros?": título (kHeaderH) +

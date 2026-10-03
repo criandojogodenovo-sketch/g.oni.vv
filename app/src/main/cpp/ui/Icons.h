@@ -1,32 +1,29 @@
 #pragma once
-// ui/Icons.h — 8 ÍCONES VETORIAIS PRÓPRIOS da toolbar (0.7.6).
+// ui/Icons.h — CONJUNTO ÚNICO DE ÍCONES OUTLINE (0.9.0, spec A).
 //
 // Cada ícone é um conjunto de POLILINHAS em viewBox 0..24 (unidades de
-// design), desenhadas pelo LINE BATCH existente (UiContext::drawLine — o
-// MESMO dos gizmos 3D projetados). SEM parser de SVG, SEM raster, SEM
-// atlas novo: geometria pura → segmentos de ecrã com espessura uniforme.
-// (SVGs fonte em assets/ serviriam só como referência de design — a
-// geometria vive AQUI, em código, aferível no CI.)
+// design), desenhadas pelo LINE BATCH existente (UiContext::drawLine). SEM
+// parser de SVG, SEM raster, SEM atlas novo: geometria pura → segmentos de
+// ecrã com espessura uniforme (thickness = size/12 — traço uniforme do
+// conjunto outline, 24dp dentro de alvos de 48dp).
 //
-// O CONJUNTO (esp. 0.7.6):
-//   Mover     — duas setas cruzadas perpendiculares (↑→)
-//   Rodar     — seta circular parcial em volta de eixo central
-//   Escalar   — seta diagonal dupla de/para um canto
-//   Snap      — ímã geométrico (só segmentos retos, zero curvas orgânicas)
-//   Inspector — retângulo com 3 linhas horizontais internas
-//   Cena      — camadas/pilha (2 losangos sobrepostos)
-//   Play      — triângulo
-//   Pause     — duas barras verticais
+// A LISTA (spec A — por função; 8 herdados da 0.7.6 + 41 novos):
+//   hamburger · chevron (baixo/direita) · pause · play · sliders · gear ·
+//   cubo · monitor · speaker · plus · olho · olho-off · ⋮ vertical ·
+//   pessoa · câmara · box (variante aberta) · undo · redo · save · copy ·
+//   paste · cursor · mover · rodar · escalar · grelha · terminal · clapper ·
+//   pasta · lupa · ordenar · upload · download · mic · stop · record ·
+//   check · warn · interrogação · spinner · lixo · renomear · duplicar ·
+//   atribuir · back · snap (ímã) · inspector (lista) · cena (camadas)
 //
-// REGRAS (aferidas no CI):
-//   • mesmo peso visual entre os 8 (contagem/comprimento de traços
-//     comparáveis; o triângulo do Play compensa com massa);
-//   • geometria simples, legível a 24/32 px;
-//   • stroke-width UNIFORME dentro de cada ícone (thickness = size/12);
-//   • TODOS os pontos dentro do viewBox 0..24 → o ícone desenhado num rect
-//     nunca lhe sai (testado em 24 e 32 px);
-//   • cor de marca (theme::kTheme.brand) sobre a barra; estado ativo
-//     inverte (fundo brand + ícone brandInk) — isso é da TOOLBAR, não daqui.
+// REGRAS (afervadas no CI — test_wiring090):
+//   • traço UNIFORME (thickness = size/12) — conjunto outline;
+//   • TODOS os pontos dentro do viewBox 0..24 (nunca sai do alvo);
+//   • UNICIDADE: nenhum ícone partilha a sequência de segmentos com outro
+//     (a auditoria hashes os segmentos normalizados);
+//   • legível a 24dp; zero emoji, zero preenchimentos orgânicos;
+//   • Gear/Spinner são GERADOS no arranque do TU (cos/sin não-constexpr),
+//     como o arco do Rodar desde a 0.7.6.
 #include "core/Types.h"
 
 namespace vv {
@@ -36,14 +33,57 @@ class UiContext;
 namespace icons {
 
 enum class Icon : u8 {
-    Move = 0,
-    Rotate,
-    Scale,
-    Snap,
-    Inspector,
-    Scene,
-    Play,
-    Pause,
+    // ---- 0.7.6 (herdados — MESMOS índices de sempre) ----
+    Move = 0,       // mover (setas cruzadas)
+    Rotate,         // rodar (arco + seta)
+    Scale,          // escalar (diagonal dupla)
+    Snap,           // ímã (toggle de snapping)
+    Inspector,      // painel com 3 linhas
+    Scene,          // camadas (2 losangos)
+    Play,           // triângulo
+    Pause,          // 2 barras
+    // ---- 0.9.0 (spec A — o conjunto completo) ----
+    Hamburger,      // ☰ menu
+    ChevronDown,    // v (expande/colapsa)
+    ChevronRight,   // > (fechado/avança)
+    Sliders,        // 3 linhas com knobs (viewport settings)
+    Gear,           // definições
+    Cube,           // modo 3D / TIC de mesh
+    Monitor,        // modo UI
+    Speaker,        // modo ÁUDIO / clip de áudio
+    Plus,           // adicionar
+    Eye,            // visível
+    EyeOff,         // escondido
+    Dots,           // ⋮ vertical (menu contextual)
+    Person,         // TIC player/personagem
+    Camera,         // TIC câmara
+    Box,            // TIC importado (caixa aberta)
+    Undo,           // ↶ desfazer
+    Redo,           // ↷ refazer
+    Save,           // disquete
+    Copy,           // 2 rects (L atrás)
+    Paste,          // prancheta
+    Cursor,         // selecionar (seta)
+    Grid,           // grelha (4 quadrantes)
+    Terminal,       // consola (>_)
+    Clapper,        // animação (claquete)
+    Folder,         // ficheiros
+    Search,         // lupa
+    Sort,           // ordenar (linhas + seta)
+    Upload,         // importar (bandeja + seta ↑)
+    Download,       // exportar (bandeja + seta ↓)
+    Mic,            // microfone
+    Stop,           // ■ quadrado
+    Record,         // ● círculo
+    Check,          // ✓
+    Warn,           // ⚠ triângulo !
+    Question,       // ? em círculo
+    Spinner,        // arco parcial (a carregar)
+    Trash,          // lixeira
+    Rename,         // lápis
+    Duplicate,      // rect + plus (duplicar ≠ copy)
+    Assign,         // seta para dentro da caixa (atribuir)
+    Back,           // ← voltar
     Count
 };
 
@@ -79,6 +119,10 @@ void drawIcon(UiContext& ui, Icon icon, f32 x, f32 y, f32 size,
 // transformação de um ponto do viewBox para o rect (partilhado com testes)
 inline f32 mapX(f32 dx, f32 x, f32 size) { return x + dx * (size / 24.0f); }
 inline f32 mapY(f32 dy, f32 y, f32 size) { return y + dy * (size / 24.0f); }
+
+// 0.9.0 — ícone pelo NOME funcional (spec A lista por função; o valor
+// devolve <0 se o nome não existe). Partilhado com os testes de unicidade.
+i32 iconByName(const char* name);
 
 } // namespace icons
 } // namespace vv

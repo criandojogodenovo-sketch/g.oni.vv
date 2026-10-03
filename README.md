@@ -1,3 +1,24 @@
+## 0.9.0 — EDITOR POLISH + DESIGN SYSTEM (spec A–M)
+
+**O que mudou (pele + scope):**
+- Theme central (tabela spec A: bg/surface/surface2/border/text1/text2/accent #2196F3/danger/warn/ok/scrim) + 49 ícones outline + CANTOS CURVOS (raios 8/4) + ícone da APP = G com a lâmpada.
+- Top bar 56dp + TAB BAR [3D][UI|ÁUDIO] com underline accent (o "UDIO" morreu); viewport com stack undo/redo/save/dup/paste + toolbar rotulada [Selecionar|Mover|Rodar|Escalar] + chip [snap] + [Adicionar TIC] + triad.
+- HIERARQUIA com ícones de tipo, PESQUISA de TIC, multi-seleção (toque no ícone de tipo), filhos indentados com conector.
+- INSPECTOR com secções COLAPSÁVEIS, Transform em caixas X/Y/Z 48dp + botão R, Material com 3 miniaturas + hex com swatch, "Nada selecionado" LEGÍVEL.
+- PAINEL DE BAIXO: [Ficheiros][Consola][Animação] + DRAWER arrastável (160–400) + STATUS 24dp "FPS · TICs".
+- MENU/CENAS como sheets ANCORADOS com scrim; PÁGINA de Settings (Geral/Áudio/Permissões/Diagnóstico/Docs/Sobre) com Imersivo e Repor layout; LAYOUT PERSISTENTE (layout.json).
+- UNDO/REDO (stack + botões), toasts bottom-center, tela de PROJETOS redesenhada (cards com MINIATURA capturada ao guardar, pesquisa, ordenar, duplicar/renomear/recuperação de projetos em falta).
+
+**Checklist C33 (VERIFIED do dono):**
+1. Editor abre com a pele nova (top bar/tabs/drawer/status) e nada sobrepõe; tocar nas 3 tabs (3D/UI/ÁUDIO) não perde seleção.
+2. Hierarquia: pesquisar um nome filtra; tocar no ícone de tipo de 2 TICs cria multi-seleção (chip "N ×" no header limpa).
+3. Inspector: colapsar/abrir secções (persiste após sair); tocar caixa Y da Pos → teclado numérico → escrever −2.5 → aplica; R repõe a linha.
+4. Viewport: undo/redo (mover TIC com gizmo → undo volta); [Adicionar TIC] abre o plus-menu.
+5. Drawer: arrastar a pega redimensiona (160..400); Consola filtra [erros]; Animação abre a timeline.
+6. MENU sheet ancorado sob o botão (Settings/Guardar/…); Settings: Repor layout funciona; Imersivo esconde as barras.
+7. Tela de projetos: card com MINIATURA após guardar a cena (default = logo G); pesquisa/ordenar filtram; ⋮ → duplicar/renomear/apagar com confirmação; SEM swipe.
+8. Ícone da app = G com lâmpada no launcher.
+
 # G.One VV 0.8.12 — 5 FIXES CIRÚRGICOS DO C33: seleção que não se perde + none de 1ª classe + staging sem /tmp + dumps com badge ANTIGO + dispositivo virtual em CI com sentinelas permanentes
 
 ## Escopo 0.8.12 (implementado — estabilização pura, ZERO features de jogo)

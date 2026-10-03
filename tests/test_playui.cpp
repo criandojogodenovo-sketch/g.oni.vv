@@ -103,8 +103,7 @@ struct Env {
             }
         } else {
             // 0.7.6 — barra final; o G2 play entra no modo play
-            const toolbar::Actions ta =
-                toolbar::draw(ui, st, gzMode, scene.get(st.selected) != nullptr);
+            const toolbar::Actions ta = toolbar::draw(ui, st);
             if (ta.playPressed && !st.playMode) {
                 enterPlay();
             }
@@ -155,8 +154,9 @@ bool rectsOverlap(const Rect& a, const Rect& b, f32 eps = 0.01f) {
 TEST(play_toolbar_play_abre_janela_play) {
     Env e;
     EXPECT(e.ok);
-    // 0.7.6 — tap no G2 play da BARRA FINAL (ícone; rect do layout)
-    const toolbar::Layout L = toolbar::layout(kSW, kSH, safe::Insets{}, false);
+    // 0.9.0 — tap no play da TOP BAR (rect do topbarLayout)
+    const toolbar::TopBarLayout L =
+        toolbar::topbarLayout(kSW, kSH, safe::Insets{});
     const f32 bx = L.play.x + L.play.w * 0.5f;
     const f32 by = L.play.y + L.play.h * 0.5f;
     e.input.injectDown(0, bx, by);

@@ -214,6 +214,36 @@ public class VvActivity extends NativeActivity {
     // READ-ONLY no device, errno=30 — a causa exata da migração morta no
     // C33: "fileapi: mkdir falhou em '/tmp'" → "staging falhou"). Chamado
     // por JNI (stagingAbsPath do AssetConverter) no thread da engine.
+    /**
+     * 0.9.0 (spec I) — MODO IMERSIVO: esconde as barras do sistema (status +
+     * nav) com immersive sticky; false = volta ao normal. Chamado por JNI a
+     * partir do toggle de Settings (Geral → Imersivo). API 24+: os flags
+     * SYSTEM_UI_FLAG_* (deprecados na 30 mas FUNCIONAIS até lá; a app mira
+     * o C33 com Android 12/13 — sem WindowInsetsController necessário).
+     */
+    void setImmersive(boolean on) {
+        try {
+            final View decor = getWindow().getDecorView();
+            runOnUiThread(() -> {
+                if (on) {
+                    decor.setSystemUiVisibility(
+                            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                            | View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+                    Log.i("GONI", "java: imersivo ON (immersive sticky)");
+                } else {
+                    decor.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+                    Log.i("GONI", "java: imersivo OFF");
+                }
+            });
+        } catch (Exception e) {
+            Log.e("GONI", "java: setImmersive FALHOU", e);
+        }
+    }
+
     String cacheDirPath() {
         try {
             final java.io.File dir = getCacheDir();

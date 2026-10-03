@@ -115,6 +115,11 @@ void stopPreview(Scene& scene, Handle tic, State& st);
 // do frame para o avanço do preview
 void drawTimeline(UiContext& ui, const InputState& in, Scene& scene,
                   editor::EditorState& st, State& tl, f32 dt);
+// 0.9.0 (spec E/K): overload com RECT EXPLÍCITO — o drawer do painel de
+// baixo (aba Animação) passa o rect do conteúdo do drawer
+void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
+                        editor::EditorState& st, State& tl, f32 dt,
+                        const UiRect& rect);
 
 } // namespace timeline
 } // namespace vv

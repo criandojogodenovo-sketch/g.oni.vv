@@ -77,6 +77,9 @@ bool jniOpenAllFilesSettings();
 // o toast "toque Gravar de novo") ou ponte indisponível (gravação desligada
 // com log — o resto do áudio segue).
 bool jniEnsureMicPermission();
+// 0.9.0 (spec I) — modo imersivo (Settings→Geral): esconder as barras do
+// sistema. false = ponte indisponível (logado; o editor segue)
+bool jniSetImmersive(bool on);
 
 // 0.8.12 — o CACHE DIR da app (getCacheDir da Activity via JNI): o STAGING
 // da reconversão por SAF escreve aqui (caminho absoluto REAL, escrevível

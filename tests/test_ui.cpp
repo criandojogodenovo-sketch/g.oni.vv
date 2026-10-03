@@ -66,6 +66,12 @@ f32 worstGlyphPenetration(const UiContext& ui, f32& ox, f32& oy) {
                     worst = pen;
                     ox = dx;
                     oy = dy;
+                    if (std::getenv("VV_DBG_GLYPH")) {
+                        std::printf("GLYPH-OVERLAP: A=(%.1f,%.1f)-(%.1f,%.1f) "
+                                    "B=(%.1f,%.1f)-(%.1f,%.1f) pen=%.1f\n",
+                                    g[i].x0, g[i].y0, g[i].x1, g[i].y1,
+                                    g[j].x0, g[j].y0, g[j].x1, g[j].y1, pen);
+                    }
                 }
             }
         }
@@ -121,10 +127,15 @@ struct Env {
 
     void frame() {
         ui.beginFrame(nullptr, &input, kSW, kSH);
-        // 0.7.6 — barra final de 5 grupos (o main chama o MESMO)
-        toolbar::draw(ui, st, gzMode, scene.get(st.selected) != nullptr);
-        drawHierarchy(ui, scene, st);
-        drawInspector(ui, scene, st, withCatalog_());
+        // 0.9.0 — o MESMO gate do main: com overlay ABERTO os painéis NÃO
+        // desenham (não reclamam gestos — o overlay é modal; ver o main:
+        // if (!modalOpen) { drawHierarchy… drawInspector… })
+        const bool modalOpen = overlay != 0;
+        toolbar::draw(ui, st);
+        if (!modalOpen) {
+            drawHierarchy(ui, scene, st);
+            drawInspector(ui, scene, st, withCatalog_());
+        }
         switch (overlay) {
             case 1: drawStorageDialog(ui, input, kSW, kSH, st); break;
             case 2: drawImportMenu(ui, input, kSW, kSH, st, importCands); break;
@@ -186,7 +197,7 @@ TEST(ui_inspector_sem_sobreposicao_glifos_c33) {
     const TextMetrics tm = e.ui.textMetrics();
     const InspProfile prof = inspectorProfile(*tic);
     InspRow plan[32];
-    const u32 n = inspectorPlan(prof, tm, true, plan);
+    const u32 n = inspectorPlan(prof, tm, true, 0u, plan);
     for (u32 i = 1; i < n; ++i) {
         EXPECT(plan[i].y > plan[i - 1].y);   // sequencial, sem reinício
     }
@@ -220,7 +231,7 @@ TEST(ui_scroll_revela_ultimo_campo) {
     Tic* tic = e.scene.get(e.selected);
     const TextMetrics tm = e.ui.textMetrics();
     const InspProfile prof = inspectorProfile(*tic);
-    const f32 contentH = inspectorContentHeight(prof, tm, true);
+    const f32 contentH = inspectorContentHeight(prof, tm, true, 0u);
 
     const UiRect panel = safe::inspectorPanelRect(kSW, kSH, safe::Insets{});
     const f32 contentTop = panel.y + kHeaderH + 4.0f;
@@ -244,7 +255,7 @@ TEST(ui_scroll_revela_ultimo_campo) {
 
     // a ÚLTIMA linha do plano fica INTEIRA dentro da região com o offset
     InspRow plan[32];
-    const u32 n = inspectorPlan(prof, tm, true, plan);
+    const u32 n = inspectorPlan(prof, tm, true, 0u, plan);
     const InspRow& last = plan[n - 1];
     const f32 lastTop = contentTop + last.y - off;
     EXPECT(lastTop >= contentTop);
@@ -263,43 +274,61 @@ TEST(ui_scroll_revela_ultimo_campo) {
 }
 
 // sliders DENTRO da região: drag horizontal num slider muda o valor e NÃO
-// faz scroll (o slider mantém a prioridade de captura — regra da spec)
+// faz scroll (o slider mantém a prioridade de captura — regra da spec).
+// 0.9.0: os 9 sliders do Transform MORRERAM (caixas X/Y/Z — spec C); o
+// slider vivo mais alto do painel é o "cor R" do Material.
 TEST(ui_slider_captura_dentro_do_scroll) {
     Env e(true, true);
     EXPECT(e.ok);
 
     Tic* tic = e.scene.get(e.selected);
-    Transform3D* tr = tic->getComponent<Transform3D>();
-    const f32 px0 = tr->pos.x;
+    MeshRenderer* mr = tic->getComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+    const f32 r0 = mr->tint[0];
 
     const UiRect panel = safe::inspectorPanelRect(kSW, kSH, safe::Insets{});
     const f32 contentTop = panel.y + kHeaderH + 4.0f;
-    // linha "px" (primeiro slider): y = nome 34 + secção 34 (métricas reais
-    // da Liberation ~ iguais ao fallback) — derivado do PLANO com as métricas
-    // reais para não divergir do desenho
+    // linha "cor R" — derivada do PLANO com as métricas reais (não diverge
+    // do desenho)
     const TextMetrics tm = e.ui.textMetrics();
     InspRow plan[32];
-    const u32 n = inspectorPlan(inspectorProfile(*tic), tm, true, plan);
-    f32 pxY = -1.0f;
+    const u32 n = inspectorPlan(inspectorProfile(*tic), tm, true, 0u, plan);
+    f32 colY = -1.0f;
     for (u32 i = 0; i < n; ++i) {
-        if (plan[i].kind == InspRow::Kind::Slider && plan[i].id == kInspectorSliderBase) {
-            pxY = plan[i].y;
+        if (plan[i].kind == InspRow::Kind::ColorSlider &&
+            plan[i].id == kInspectorColBase) {
+            colY = plan[i].y;
+            break;
         }
     }
-    EXPECT(pxY > 0.0f);
-    const f32 rowScr = contentTop + pxY;
+    EXPECT(colY > 0.0f);
+    // 0.9.0: o plano é MAIS ALTO (secções/trf) — a linha "cor R" está FORA
+    // do primeiro ecrã: ROLA o painel até ela primeiro
+    const f32 targetOff = colY - 40.0f;
+    e.input.injectDown(0, panel.x + panel.w * 0.5f, contentTop + 200.0f);
+    e.frame();
+    e.input.injectMove(0, panel.x + panel.w * 0.5f,
+                       contentTop + 200.0f - targetOff);
+    e.frame();
+    e.input.injectUp(0);
+    e.frame();
+    const f32 off1 = e.ui.scrollOffsetForTest(kInspectorScrollId);
+    EXPECT(off1 > targetOff - 60.0f);   // rolou até perto da linha
+    const f32 rowScr = contentTop + colY - off1;
 
-    // press NO TRILHO do slider px (track x = painel + 84, w = 118)
+    // press NO TRILHO do slider cor R (track x = painel + 84, w = 118). O
+    // tint default é BRANCO (1.0) — o arrasto vai para a ESQUERDA (desce)
     e.input.injectDown(0, panel.x + 84.0f + 59.0f, rowScr + 18.0f);
     e.frame();
-    // arrasto horizontal para a DIREITA (valor sobe; vertical quase nulo)
-    e.input.injectMove(0, panel.x + 84.0f + 59.0f + 80.0f, rowScr + 18.0f);
+    // arrasto horizontal para a ESQUERDA (valor desce; vertical quase nulo)
+    e.input.injectMove(0, panel.x + 84.0f + 59.0f - 80.0f, rowScr + 18.0f);
     e.frame();
     e.input.injectUp(0);
     e.frame();
 
-    EXPECT(tr->pos.x > px0 + 10.0f);   // o slider seguiu o dedo
-    EXPECT(nearEqF(e.ui.scrollOffsetForTest(kInspectorScrollId), 0.0f));   // o scroll NÃO reclamou
+    EXPECT(mr->tint[0] < r0 - 0.2f);   // o slider seguiu o dedo
+    EXPECT(nearEqF(e.ui.scrollOffsetForTest(kInspectorScrollId), off1,
+                   0.5f));   // o scroll NÃO reclamou (offset intacto)
 }
 
 // tap re-despachado: tap nos botões do PLANO aciona a ação certa (seletores
@@ -312,7 +341,7 @@ TEST(ui_tap_redespachado_botoes_do_plano) {
     const TextMetrics tm = e.ui.textMetrics();
     const InspProfile prof = inspectorProfile(*tic);
     InspRow plan[32];
-    const u32 n = inspectorPlan(prof, tm, true, plan);
+    const u32 n = inspectorPlan(prof, tm, true, 0u, plan);
     const UiRect panel = safe::inspectorPanelRect(kSW, kSH, safe::Insets{});
     const f32 contentTop = panel.y + kHeaderH + 4.0f;
 
@@ -344,7 +373,7 @@ TEST(ui_tap_redespachado_botoes_do_plano) {
     // ficou ALÉM da 1ª página → ROLA até ao fundo e usa a posição COM o
     // offset (o MESMO cálculo do re-despacho: contentTop + y − off)
     e.frame();   // cria o slot de scroll do Inspector
-    const f32 contentH = inspectorContentHeight(prof, tm, true);
+    const f32 contentH = inspectorContentHeight(prof, tm, true, 0u);
     const f32 listH = panel.h - kHeaderH - 4.0f;
     const f32 off = scroll::clampOffset(9999.0f, contentH, listH);
     e.ui.scrollSetOffset(kInspectorScrollId, off);
@@ -523,9 +552,12 @@ TEST(ui_log_viewer_scroll_e_autoscroll_fundo) {
     e.logLines = lines;
     e.logDumps = {"crash-300.dump - signal: SIGSEGV (11)"};
 
-    // geometria do painel (86% × 80% da área útil) + conteúdo real
-    const f32 w = kSW * 0.86f, h = kSH * 0.80f;
-    const f32 x = (kSW - w) * 0.5f, y = (kSH - h) * 0.5f;
+    // geometria do painel (86% × 80% da BANDA DO VIEWPORT 0.9.0: o overlay
+    // nunca fica por baixo do chrome — o "fechar" sempre clicável)
+    f32 ox, oy, aw, ah;
+    overlayArea(kSW, kSH, safe::Insets{}, ox, oy, aw, ah);
+    const f32 w = aw * 0.86f, h = ah * 0.80f;
+    const f32 x = ox + (aw - w) * 0.5f, y = oy + (ah - h) * 0.5f;
     const f32 listTop = y + kHeaderH;
     const f32 regionH = h - kHeaderH;
     const TextMetrics tm = e.ui.textMetrics();

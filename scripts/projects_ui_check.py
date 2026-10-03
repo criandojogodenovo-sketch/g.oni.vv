@@ -1,26 +1,22 @@
 #!/usr/bin/env python3
-"""0.7.6 — CHECK ESTRUTURAL da tela de projetos (lado Java).
+"""0.9.0 — CHECK ESTRUTURAL da tela de projetos (lado Java, spec F).
 
 O CI não tem instrumentação Android; aferimos a ESTRUTURA do ecrã pelo
-fonte (a mesma cultura do jni_parity.py — asserts determinísticos sobre
-o código que a suíte host não consegue instanciar):
+fonte (a mesma cultura do jni_parity.py — asserts determinísticos sobre o
+código que a suíte host não consegue instanciar):
 
-  1. UMA entrada de criação: exatamente UM call-site de askNewProject();
-  2. sem botão extra no fundo (o "root.addView(add" antigo morreu);
-  3. a lista mostra nome + data da última edição (ProjectsFormat.dateLabel)
-     e NÃO o URI cru (shortUri não constrói linhas da lista);
-  4. o texto visível nunca contém o prefixo interno "primary:";
-  5. os botões do topo usam o CONTORNO de marca #8AB4F8 (setStroke) sobre
-     fundo escuro — nada do gradiente cinza do tema do sistema;
-  6. o rótulo da pasta nos diálogos passa por ProjectsFormat.folderLabel.
-
-0.8.6 — Theme uniforme + página inicial limpa:
-  7. os TOKENS do Theme vivem em constantes (BRAND/BG/TEXT/TEXT_DIM/
-     SURFACE/LINE) — nenhum outro hex inline no código (fora das constantes);
-  8. os AlertDialogs correm num ContextThemeWrapper ESCURO (o manifest é
-     claro — sem o wrapper a identidade quebra);
-  9. hierarquia visual: título + subtítulo + "Meus projetos" (a tela diz
-     o que é e organiza criar/importar/lista).
+  1. cabeçalho 72dp com LOGO 48dp + título 20sp + tagline 12sp;
+  2. pesquisa 48dp (lupa) + dropdown Ordenar (ProjectsFormat.sortLabel);
+  3. botões primários 56dp FILL ACCENT (0xFF2196F3, raio 8dp — spec A/F);
+  4. grelha de cards com miniatura 16:9 (thumbH = colW*9/16);
+  5. estados do card: a carregar (ProgressBar) / em falta (MissingThumbView
+     + interrogação + recuperação) / default (gone_logo);
+  6. menu ⋮/long-press com as 4 ações (abrir/renomear/duplicar/apagar);
+  7. apagar COM confirmação (DANGER + botões 48dp) e SEM swipe-to-delete;
+  8. tempo relativo no card (ProjectsFormat.relativeTime);
+  9. TOKENS 0.9.0 em constantes (espelho Java do ui/Theme.h) — zero hex
+     inline fora delas;
+ 10. AlertDialogs no ContextThemeWrapper ESCURO.
 """
 import re
 import sys
@@ -29,11 +25,15 @@ import pathlib
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ACT = ROOT / "app/src/main/java/vv/goni/ProjectManagerActivity.java"
 FMT = ROOT / "app/src/main/java/vv/goni/ProjectsFormat.java"
+VVP = ROOT / "app/src/main/java/vv/goni/VvProjects.java"
+ICN = ROOT / "app/src/main/java/vv/goni/UiIcons.java"
+
+TOKENS_090 = ("0xFF0B0E13", "0xFF151A23", "0xFF1F2733", "0xFF2A3442",
+              "0xFFF5F5F5", "0xFF98A2B3", "0xFF2196F3", "0xFF1B7FD4",
+              "0xFFEF5350", "0xFFFABB45")
 
 
 def strip_comments(src: str) -> str:
-    """código SEM comentários (/*…*/ e //…) — os checks de LITERAIS só
-    devem olhar para código; a documentação pode citar 'primary:'."""
     src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
     src = re.sub(r"//[^\n]*", "", src)
     return src
@@ -48,91 +48,122 @@ def main():
     bad = 0
     src = ACT.read_text(encoding="utf-8")
     fmt = FMT.read_text(encoding="utf-8")
+    vvp = strip_comments(VVP.read_text(encoding="utf-8"))
+    icn = strip_comments(ICN.read_text(encoding="utf-8"))
     code = strip_comments(src)
 
-    # 1) UMA entrada de criação (call-sites — a definição não conta)
-    n = len(re.findall(r"(?<!void )askNewProject\(\)", code))
-    if n != 1:
-        bad += fail(f"call-sites de askNewProject(): {n} (quer 1 — criação única)")
-    else:
-        print("OK  criação: uma única entrada ([Novo projeto])")
+    # 1) cabeçalho: logo 48 + título 20 + tagline 12
+    for frag, what in [("dp(48)", "logo 48dp no cabeçalho"),
+                       ("title.setTextSize(20)", "título 20sp"),
+                       ("tag.setTextSize(12)", "tagline 12sp"),
+                       ("R.drawable.gone_logo", "logo G+lâmpada")]:
+        if frag not in code:
+            bad += fail(f"cabeçalho: falta {what}")
+    if bad == 0:
+        print("OK  cabeçalho 72dp: logo 48 + G.One VV 20sp + tagline 12sp")
 
-    # 2) sem botão extra no fundo
-    if re.search(r"root\.addView\(add\b", code) or 'add.setText("+ Novo projeto")' in code:
-        bad += fail("botão de criação duplicado no fundo (o antigo '+ Novo projeto')")
+    # 2) pesquisa 48dp + dropdown Ordenar
+    if "dp(48), 1f" not in code or "pesquisar projetos" not in code:
+        bad += fail("campo de pesquisa 48dp com hint em falta")
+    elif "showSortMenu" not in code or "sortLabel" not in code:
+        bad += fail("dropdown Ordenar ausente (showSortMenu/sortLabel)")
     else:
-        print("OK  sem botão extra no fundo da tela")
+        print("OK  pesquisa 48dp (lupa) + dropdown [Ordenar: … ▾]")
 
-    # 3) lista = nome + data (sem URI cru)
-    if "shortUri" in code:
-        bad += fail("shortUri ainda existe — a lista mostrava o URI com 'primary:'")
+    # 3) botões primários 56dp FILL ACCENT raio 8
+    if "dp(56)" not in code:
+        bad += fail("botões primários 56dp ausentes")
+    elif "0xFF2196F3" not in code or "setCornerRadius(dp(8))" not in code:
+        bad += fail("fill accent #2196F3 com raio 8dp ausente (spec A/F)")
     else:
-        print("OK  sem shortUri (o URI cru não constrói linhas)")
-    if "ProjectsFormat.dateLabel" not in code:
-        bad += fail("a linha da lista não usa ProjectsFormat.dateLabel (nome + data)")
-    else:
-        print("OK  lista usa nome + data da última edição (ProjectsFormat.dateLabel)")
+        print("OK  botões primários 56dp fill accent #2196F3 r=8dp")
 
-    # 4) nenhum literal de UI com o prefixo interno (SÓ código — docs citam)
-    if re.search(r"['\"]primary:", code):
-        bad += fail("literal 'primary:' no texto visível")
+    # 4) grelha de cards com miniatura 16:9
+    if "setNumColumns(2)" not in code:
+        bad += fail("grelha de cards 2 colunas ausente")
+    elif "* 9f / 16f" not in code:
+        bad += fail("miniatura 16:9 ausente (thumbH = colW*9/16)")
     else:
-        print("OK  nenhum literal 'primary:' no texto visível")
+        print("OK  grelha 2 colunas · cards com miniatura 16:9")
 
-    # 5) botões de contorno de marca
-    if "0xFF8AB4F8" not in code or "setStroke" not in code:
-        bad += fail("botões sem contorno de marca #8AB4F8 (setStroke ausente)")
-    elif re.search(r"\.setBackground\(null\)", code):
-        bad += fail("botão com background do sistema (gradiente cinza)")
+    # 5) estados do card
+    for frag, what in [("new ProgressBar", "spinner (a carregar)"),
+                       ("MissingThumbView", "estado em falta"),
+                       ("UiIcons.QUESTION", "interrogação do em falta"),
+                       ("projeto em falta", "erro legível do em falta"),
+                       ("recuperar", "recuperação do em falta"),
+                       ("Nenhum projeto ainda", "empty state")]:
+        if frag not in code:
+            bad += fail(f"estados do card: falta {what}")
+    if bad == 0:
+        print("OK  estados: a carregar / em falta (?+erro+recuperação) / vazio")
+
+    # 6) menu ⋮ com 4 ações
+    for frag in ('"Abrir"', '"Renomear"', '"Duplicar"', '"Apagar"'):
+        if frag not in code:
+            bad += fail(f"menu do card: ação {frag} ausente")
+    if "setOnLongClickListener" not in code:
+        bad += fail("toque longo não abre o menu (spec F)")
+    if bad == 0:
+        print("OK  ⋮/long-press: abrir/renomear/duplicar/apagar")
+
+    # 7) apagar COM confirmação + SEM swipe
+    if "confirmDelete" not in code or "0xFFEF5350" not in code:
+        bad += fail("apagar sem confirmação com botão danger")
+    if re.search(r"setOnSwipe|SwipeRefresh|swipe", code, re.I):
+        bad += fail("swipe-to-delete presente (PROIBIDO — spec F)")
+    elif bad == 0:
+        print("OK  apagar: card de confirmação danger · SEM swipe-to-delete")
+
+    # 8) tempo relativo
+    if "relativeTime" not in code:
+        bad += fail("tempo relativo do card ausente (há 2 h)")
     else:
-        print("OK  botões com contorno #8AB4F8 (setStroke) sobre fundo escuro")
+        print("OK  tempo relativo no card (ProjectsFormat.relativeTime)")
 
-    # 6) diálogos referem a pasta por folderLabel (o limpador do prefixo)
-    if "ProjectsFormat.folderLabel" not in code:
-        bad += fail("o rodapé do diálogo não passa por folderLabel")
-    else:
-        print("OK  pasta nos diálogos via ProjectsFormat.folderLabel")
-
-    # fonte do folderLabel: as regras do prefixo existem e são testadas
-    if "indexOf(':')" not in strip_comments(fmt):
-        bad += fail("ProjectsFormat.folderLabel não trata o prefixo interno")
-    else:
-        print("OK  folderLabel trata o prefixo interno de armazenamento")
-
-    # 7) 0.8.6 — TOKENS do Theme em constantes únicas (sem hex espalhado)
-    for tok in ("BRAND = 0xFF8AB4F8", "BG = 0xFF0B0E13", "TEXT = 0xFFE6E6E6",
-                "TEXT_DIM = 0xFF8A939B", "SURFACE = 0xFF1E222A",
-                "LINE = 0xFF232A31"):
+    # 9) TOKENS 0.9.0 — zero hex fora das constantes
+    for tok in TOKENS_090:
         if tok not in code:
-            bad += fail(f"token do Theme ausente: {tok.split(' = ')[0]}")
+            bad += fail(f"token 0.9.0 ausente: {tok}")
     hexes = re.findall(r"0x[0-9A-Fa-f]{8}", code)
     allowed = sum(1 for h in hexes if h.upper() in
-                  ("0XFF8AB4F8", "0XFF0B0E13", "0XFFE6E6E6", "0XFF8A939B",
-                   "0XFF1E222A", "0XFF232A31"))
+                  tuple(t.upper() for t in TOKENS_090))
     if len(hexes) != allowed:
-        bad += fail(f"hex inline fora dos tokens do Theme: {len(hexes) - allowed}")
+        bad += fail(f"hex inline fora dos tokens 0.9.0: {len(hexes) - allowed}")
     elif bad == 0:
-        print("OK  tokens do Theme centralizados (BRAND/BG/TEXT/TEXT_DIM/SURFACE/LINE)")
+        print("OK  tokens 0.9.0 (espelho Java do ui/Theme.h) centralizados")
 
-    # 8) 0.8.6 — DIÁLOGOS ESCUROS (ContextThemeWrapper em TODOS os builders)
+    # 10) diálogos escuros
     n_builders = len(re.findall(r"new AlertDialog\.Builder\(", code))
-    n_dark = len(re.findall(r"new AlertDialog\.Builder\(\s*new\s+android\.view\.ContextThemeWrapper", code))
+    n_dark = len(re.findall(r"new AlertDialog\.Builder\(\s*dark\(\)", code))
     if n_builders == 0 or n_builders != n_dark:
         bad += fail(f"AlertDialogs fora do wrapper escuro: {n_dark}/{n_builders}")
     else:
-        print("OK  todos os AlertDialogs no ContextThemeWrapper escuro")
+        print("OK  todos os AlertDialogs no wrapper escuro")
 
-    # 9) 0.8.6 — hierarquia visual (título + subtítulo + cabeçalho da lista)
-    for frag in ('title.setText("G.One VV")', 'subtitle.setText(',
-                 'header.setText("Meus projetos")'):
-        if frag not in code:
-            bad += fail(f"hierarquia da página inicial: falta {frag}")
+    # ---- infraestrutura F (VvProjects + ProjectsFormat + UiIcons) ----------
+    if "THUMB_FILE" not in vvp or "thumbUri" not in vvp:
+        bad += fail("VvProjects sem thumb.png (URI de miniatura)")
+    if "projectFolderExists" not in vvp:
+        bad += fail("VvProjects sem deteção de projeto em falta")
+    if "renameProject" not in vvp or "copyTreeInto" not in vvp:
+        bad += fail("VvProjects sem renomear/duplicar (spec L)")
+    if "relativeTime" not in fmt or "compareEntries" not in fmt:
+        bad += fail("ProjectsFormat sem relativeTime/compareEntries")
     if bad == 0:
-        print("OK  página inicial: título + subtítulo + ações + lista")
+        print("OK  infra: thumb.png · em falta · renomear · duplicar · ordenar")
+    for icon in ("LUPA", "SORT", "DOTS", "PLUS", "UPLOAD", "QUESTION"):
+        if icon not in icn:
+            bad += fail(f"UiIcons sem o ícone {icon}")
+    if bad == 0:
+        print("OK  UiIcons (lupa/ordenar/dots/plus/upload/interrogação)")
 
-    print("PROJECTS UI CHECK:", "OK" if bad == 0 else f"{bad} falha(s)")
-    return 1 if bad else 0
+    print()
+    if bad:
+        print(f"PROJECTS-UI CHECK: {bad} falha(s)")
+        sys.exit(1)
+    print("PROJECTS-UI CHECK: OK (0.9.0 spec F)")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

@@ -13,7 +13,7 @@
 // O VISUAL (imagem de referência do dono): corpo wireframe (caixa + lente),
 // cone de 4 arestas até ao retângulo do plano far (AO CAP VISUAL), retângulo
 // do far, linha de visão central e handles nos 4 cantos + centro do far.
-// Cor de gizmo/marca (#8AB4F8 — theme::kTheme.brand, a exceção documentada).
+// Cor de gizmo/marca (#8AB4F8 — theme::kTheme.accent, a exceção documentada).
 // Como os gizmos de transformação: NUNCA em Play (camgizmo::visible).
 //
 // GEOMETRIA PURA: o frustum deriva de Transform3D (pose) + CameraComp

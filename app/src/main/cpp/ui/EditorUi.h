@@ -162,6 +162,49 @@ struct EditorState {
     // de ícone alterna; escondido, a área do painel junta-se ao viewport
     // central — ver safe::centerRect(sw,sh,in,rightPanel))
     bool   showInspector = true;
+
+    // 0.9.0 (spec D) — modo SELECIONAR da toolbar do viewport (cursor): sem
+    // gizmo; o toque no viewport seleciona TICs. Vive no estado para ser
+    // afervel no CI.
+    bool   selectMode = false;
+
+    // ---- 0.9.0 (spec B + scope funcional) ----------------------------------
+    // PESQUISA de TIC por nome no header da hierarquia (o buffer vive AQUI —
+    // o teclado in-app propósito 8 escreve nele; vazio = sem filtro)
+    char   hierSearch[32] = "";
+    u32    hierSearchLen = 0;
+
+    // MULTI-SELEÇÃO: conjunto de handles (o gizmo aplica a TODOS). Gestão:
+    // toque na linha JÁ selecionada ARRANCA a multi-seleção; toques seguintes
+    // alternam linhas no conjunto; conjunto vazio = seleção simples de novo.
+    // (Decisão documentada: sem cronometragem de long-press — o immediate-
+    // mode da lista partilha o gesto com o scroll; o toque duplo é
+    // determinístico e afervável no CI.)
+    Handle multiSelect[16] = {};
+    u32    multiSelectCount = 0;
+    // DRAG de reparenting (parenting visual): arrastar do ÍCONE DE TIPO de
+    // uma linha para outra linha reparenta (drop no vazio = raiz)
+    bool   hierDrag = false;
+    Handle hierDragSrc{};
+    Handle hierDragDst{};
+
+    // 0.9.0 (spec C/G) — SECÇÕES COLAPSÁVEIS do Inspector (bitmask por
+    // secção — ver kInspBit* no EditorLayout.h). PERSISTE no layout.json
+    // (spec G) e o "Repor layout" devolve TUDO aberto.
+    u32    inspCollapsed = 0;
+
+    // 0.9.0 (spec D 🔶) — POPOVER de snap/grelha (o "sliders" da top bar e o
+    // [viewport settings] da toolbar do viewport abrem o MESMO popover)
+    bool   vpSettingsMenu = false;
+
+    // 0.9.0 (spec E) — altura do DRAWER aberto neste frame (0 = fechado).
+    // O main injeta do BottomState; os PAINÉIS (hierarquia/inspector) e o
+    // viewport central encolhem por ela (safe::panelsRect).
+    f32    drawerH = 0.0f;
+
+    // 0.9.0 (spec I/G) — secções colapsáveis da PÁGINA de Settings (bitmask;
+    // PERSISTE no layout.json junto com o resto do layout)
+    u32    settingsCollapsed = 0;
 };
 
 // Rect do viewport central (entre os painéis) — usado para o gate da câmara.
@@ -172,6 +215,10 @@ UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in);
 // 0.7.6: com o painel DIREITO opcional (G5 escondeu o Inspector — a área
 // dele junta-se ao viewport central; o esquerdo fica sempre).
 UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, bool rightPanel);
+// 0.9.0: com o DRAWER do painel de baixo (spec E — o viewport central
+// encolhe pela altura do drawer aberto)
+UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, f32 drawerH,
+                  bool rightPanel);
 
 // Painel esquerdo: lista de TICs COM SCROLL (todas as entradas, sem corte) +
 // botão "+" no cabeçalho. Tap numa linha seleciona (re-despacho do scroll).
@@ -269,11 +316,10 @@ Handle revalidateSelection(const Scene& scene, Handle selected,
 //   drawPlusMenu → 0 nada, 1..4 = PresetKind (1=Player, 2=Character,
 //                  3=Static, 4=Rigid); 0.7.3: modo UI 1..7 = elementos
 //                  (Panel..Article), 8 = Joystick; 0.7.4: 9/10 = VBox/HBox
-//   drawFileMenu → 0 nada; 0.7.6 (dropdown do Menu): 1 = Settings,
-//                  2 = Guardar, 3 = Carregar, 4 = Export OBJ, 5 = Importar…,
-//                  6 = Export Downloads, 7 = Sair p/ projetos
-//                  (o item "Cenas…" SAÍU — o [Cena ▾] da toolbar abre a
-//                  lista de cenas diretamente)
+//   drawFileMenu → 0 nada; 1..7 (Settings/Guardar/Carregar/Export OBJ/
+//                  Importar…/Export Downloads/Sair p/ projetos). 0.9.0
+//                  (spec H): SHEET ANCORADO 8dp sob o botão (ax/ay do botão;
+//                  −1 = centrado, compat com os testes)
 //   drawAssetMenu → 0 nada; >0 = item 1-based do seletor ativo
 //                    (st.assetMenu: 1 = meshes → 1 = "cube", 2.. = ficheiros;
 //                     2 = texturas → 1 = "none", 2.. = ficheiros; 0.7.4:
@@ -282,7 +328,8 @@ Handle revalidateSelection(const Scene& scene, Handle selected,
 //     withImport (0.7.4) — acrescenta a linha "importar…" (só menuKind 3)
 // Todos fecham com toque fora do painel (mutam st) e centrados na safe-area.
 int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st);
-int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st);
+int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                 EditorState& st, f32 ax = -1.0f, f32 ay = -1.0f);
 int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st,
                   const AssetCatalog& catalog, bool withImport = false);
 
@@ -396,7 +443,7 @@ int drawStorageDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 // o nome mostrado é o basename sem extensão.
 int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                    EditorState& st, const std::vector<std::string>& scenes,
-                   u32 activeScene);
+                   u32 activeScene, f32 ax = -1.0f, f32 ay = -1.0f);
 
 // nome de exibição da cena ("scenes/main.goni" → "main") — partilhado
 // com os testes (FONTE ÚNICA do rótulo).
