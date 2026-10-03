@@ -1,3 +1,18 @@
+## 0.9.1 — ORIENTAÇÃO + IME DO SISTEMA
+
+**O que mudou (input de texto real):**
+- Janelas de TEXTO PESADO pedem PORTRAIT via JNI (`setRequestedOrientation`) e LANDSCAPE ao fechar — o estado vive na engine (`platform/ImeQueue`) e cada mudança fica LOGADA ("orientacao: portrait pedida (janela de texto aberta)").
+- IME DO SISTEMA: EditText invisível (1x1) na VvActivity + `InputMethodManager`; o texto/teclas chegam pela fila JNI (natives `nativeOnImeText`/`nativeOnImeKey`) consumida por frame; show/hide POR CONTA DA ENGINE. O teclado in-app de sempre fica para renomear rápido (landscape).
+- JANELA DE TEXTO (semente do editor de script 0.9.2): Settings → Diagnóstico → "editor de texto (IME)" — full-screen portrait, back 56dp, caret piscante, DEL apaga 1 code point UTF-8, ENTER quebra linha.
+- FIXES REAIS apanhados pelos testes: os botões de ação/toggles da página de Settings estavam MORTOS desde a 0.9.0 (o scroll comia o toque — Ver logs/Export/Probe/reconverter/All Files/Mic/Repor layout/Imersivo não acionavam); colisão de IDs 5829; `Activity.setImmersive` é final (javac morria); `Entry.uri` final impedia a recuperação de projetos.
+
+**Checklist C33 (VERIFIED do dono):**
+1. Settings → Diagnóstico → "editor de texto (IME)" → o ecrã roda para PORTRAIT e o TECLADO DO SISTEMA abre; escrever texto com acentos; ENTER quebra a linha; apagar apaga um acento INTEIRO.
+2. Fechar (←) → volta a LANDSCAPE e o teclado fecha; reabrir repete o par.
+3. Rodar o aparelho com a janela aberta: sem glifos brancos, o texto permanece, é possível continuar a escrever.
+4. Renomear TIC (landscape) continua a usar o teclado in-app; o IME não interfere.
+5. Os botões da página de Settings acionam (Ver logs, Export, Probe, reconverter, All Files, Mic, Repor layout, Imersivo) — o fix do scroll.
+
 ## 0.9.0 — EDITOR POLISH + DESIGN SYSTEM (spec A–M)
 
 **O que mudou (pele + scope):**
