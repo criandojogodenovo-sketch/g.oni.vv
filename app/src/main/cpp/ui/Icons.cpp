@@ -685,6 +685,40 @@ constexpr Polyline kBackLines[] = {
 };
 
 // tabela final (índice = Icon)
+
+// ---- Static (FASE 9 G2-7 — tic_static: bloco ASSENTE no chão) -------------
+constexpr f32 kStaticPts[] = {
+    6.0f, 7.0f,   18.0f, 7.0f,    // bloco fechado
+    18.0f, 7.0f,  18.0f, 19.0f,
+    18.0f, 19.0f, 6.0f, 19.0f,
+    6.0f, 19.0f,  6.0f, 7.0f,
+    9.0f, 10.0f,  15.0f, 16.0f,   // travessa diagonal (sólido)
+    15.0f, 10.0f, 9.0f, 16.0f,
+    2.5f, 21.5f,  21.5f, 21.5f,   // o CHÃO (não se move)
+};
+constexpr Polyline kStaticLines[] = {
+    {0, 2}, {2, 2}, {4, 2}, {6, 2}, {8, 2}, {10, 2}, {12, 2},
+};
+
+// ---- Rigid (FASE 9 G2-7 — tic_rigid: bola + rasto de queda) ---------------
+constexpr f32 kRigidPts[] = {
+    12.5f, 5.5f,  17.0f, 8.0f,    // bola (octógono fechado)
+    17.0f, 8.0f,  18.5f, 11.0f,
+    18.5f, 11.0f, 17.0f, 14.0f,
+    17.0f, 14.0f, 12.5f, 16.5f,
+    12.5f, 16.5f, 8.0f, 14.0f,
+    8.0f, 14.0f,  6.5f, 11.0f,
+    6.5f, 11.0f,  8.0f, 8.0f,
+    8.0f, 8.0f,   12.5f, 5.5f,
+    2.0f, 7.5f,   5.5f, 7.5f,    // rasto de queda (2 traços)
+    2.0f, 11.5f,  5.5f, 11.5f,
+    3.5f, 21.5f,  20.5f, 21.5f,  // o chão onde vai bater
+};
+constexpr Polyline kRigidLines[] = {
+    {0, 2}, {2, 2}, {4, 2}, {6, 2}, {8, 2}, {10, 2}, {12, 2}, {14, 2},
+    {16, 2}, {18, 2},
+};
+
 const IconDef kDefs[] = {
     {kMovePts,          12, kMoveLines,          6},
     {kRotatePts,        18, kRotateLines,        4},
@@ -735,6 +769,8 @@ const IconDef kDefs[] = {
     {kDuplicatePts,     12, kDuplicateLines,     6},
     {kAssignPts,        14, kAssignLines,        7},
     {kBackPts,           6, kBackLines,          3},
+    {kStaticPts,        14, kStaticLines,        7},
+    {kRigidPts,         20, kRigidLines,        10},
 };
 static_assert(sizeof(kDefs) / sizeof(kDefs[0]) ==
               static_cast<size_t>(Icon::Count), "tabela de ícones incompleta");
@@ -877,6 +913,7 @@ i32 iconByName(const char* name) {
         {Icon::Trash, "lixo"}, {Icon::Rename, "renomear"},
         {Icon::Duplicate, "duplicar"}, {Icon::Assign, "atribuir"},
         {Icon::Back, "back"},
+        {Icon::Static, "tic_static"}, {Icon::Rigid, "tic_rigid"},
     };
     for (const auto& e : kNames) {
         if (std::strcmp(e.nm, name) == 0) {

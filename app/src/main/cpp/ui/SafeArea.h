@@ -24,10 +24,13 @@
 namespace vv {
 namespace safe {
 
-// ---- alturas/larguras do chrome 0.9.0 (FONTES ÚNICAS) ----------------------
+// ---- alturas/larguras do chrome (FONTES ÚNICAS) ----------------------------
 constexpr f32 kTopBarH   = 56.0f;   // spec D: barra de cima
-constexpr f32 kModeTabH  = 48.0f;   // spec D: tab bar de modo (3D|UI|ÁUDIO)
-constexpr f32 kToolbarH  = kTopBarH + kModeTabH;   // 104 (compat: nome de sempre)
+// FASE 9 (G2-10 — A FUSÃO): a tab bar de modo (48dp) FUNDEU-SE à top bar
+// (as tabs [3D|UI|ÁUDIO] vivem AO CENTRO da barra de 56dp — ui/Toolbar.cpp);
+// kToolbarH passa a 56 — os ~48px poupados vão TODOS ao viewport
+constexpr f32 kToolbarH  = kTopBarH;           // 56 (era 56+48=104)
+constexpr f32 kModeTabH  = 48.0f;   // LEGACY: só p/ modeTabRect (compat de testes)
 constexpr f32 kStatusH   = 24.0f;   // spec E: FPS 60 · TICs 4 (12sp text-2)
 constexpr f32 kPanelW    = 300.0f;  // painéis esquerdo/direito
 constexpr f32 kBottomTabH = 48.0f;  // spec E: tab bar do painel de baixo

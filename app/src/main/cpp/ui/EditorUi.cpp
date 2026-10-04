@@ -9,6 +9,7 @@
 #include "components/TouchControls.h"
 #include <cmath>
 #include "components/CameraComp.h"   // 0.7.7: inspector/menu da câmara
+#include "components/BodyComp.h"     // FASE 9 (G2-7): ícone da hierarquia por corpo
 #include "core/CameraUtil.h"          // 0.7.7: uma ativa por cena
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
@@ -27,8 +28,6 @@ namespace editor {
 
 namespace {
 constexpr u64 kIdPlus      = 40;
-constexpr u64 kIdScrollHier = 41;   // F4.1: região de scroll da Hierarchy
-constexpr u64 kIdScrollInsp = 42;   // F4.1: região de scroll do Inspector
 // F5.2: viewer de logs usa kLogsScrollId (43, EditorLayout.h — compartilhado
 // com os testes)
 constexpr u64 kIdRowBase   = 1000;
@@ -127,6 +126,36 @@ UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, f32 drawerH,
 //                   seguintes alternam (decisão documentada — ver EditorUi.h)
 //   vazio:          ícone + convite (spec M)
 // ---------------------------------------------------------------------------
+// FASE 9 (G2-7): o ícone de tipo da HIERARQUIA — o BodyComp é consultado
+// PRIMEIRO (corpos têm ícone PRÓPRIO: tic_static/tic_player/tic_rigid),
+// depois câmara/áudio/UI/mesh/entrada. Função PURA (afervável no CI).
+icons::Icon hierIconFor(const Tic& t) {
+    if (t.getComponent<CameraComp>()) {
+        return icons::Icon::Camera;
+    }
+    if (const BodyComp* bcT = t.getComponent<BodyComp>()) {
+        switch (bcT->type) {
+            case BodyType::Static:    return icons::Icon::Static;
+            case BodyType::Character: return icons::Icon::Person;
+            case BodyType::Rigid:     return icons::Icon::Rigid;
+        }
+        return icons::Icon::Static;
+    }
+    if (t.getComponent<AudioPlayer>()) {
+        return icons::Icon::Speaker;
+    }
+    if (t.getComponent<UiCanvas>()) {
+        return icons::Icon::Monitor;
+    }
+    if (const MeshRenderer* mr = t.getComponent<MeshRenderer>()) {
+        return mr->primOn ? icons::Icon::Cube : icons::Icon::Box;
+    }
+    if (t.getComponent<InputMap>() || t.getComponent<TouchControls>()) {
+        return icons::Icon::Person;
+    }
+    return icons::Icon::Box;
+}
+
 bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
     const UiRect panel = safe::hierarchyPanelRect(ui.screenWidth(),
                                                   ui.screenHeight(),
@@ -267,6 +296,8 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
         const f32 eyeX = x + w - 48.0f - 8.0f - 48.0f;   // zona olho
         const f32 dotsX = x + w - 48.0f - 4.0f;          // zona ⋮ (até à borda)
 
+        // FASE 9 (G2-7): houve dedo parado em algum nome neste frame?
+        bool holdVivo = false;
         for (u32 r = 0; r < nRows; ++r) {
             const Tic* t = scene.get(rows[r].h);
             if (!t) {
@@ -299,19 +330,7 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
             }
 
             // ---- ícone de TIPO (24dp na zona de 48) ----
-            icons::Icon ic = icons::Icon::Box;
-            if (t->getComponent<CameraComp>()) {
-                ic = icons::Icon::Camera;
-            } else if (t->getComponent<AudioPlayer>()) {
-                ic = icons::Icon::Speaker;
-            } else if (t->getComponent<UiCanvas>()) {
-                ic = icons::Icon::Monitor;
-            } else if (const MeshRenderer* mr = t->getComponent<MeshRenderer>()) {
-                ic = mr->primOn ? icons::Icon::Cube : icons::Icon::Box;
-            } else if (t->getComponent<InputMap>() ||
-                       t->getComponent<TouchControls>()) {
-                ic = icons::Icon::Person;
-            }
+            const icons::Icon ic = hierIconFor(*t);
             const f32 iconX = x + 16.0f + indent;
             const bool inkOn = selected && st.multiSelectCount == 0;
             icons::drawIcon(ui, ic, iconX, ry + (kRowH - 24.0f) * 0.5f, 24.0f,
@@ -329,6 +348,27 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                                      : (t->visible ? theme::kTheme.text1
                                                    : theme::kTheme.text2),
                                nameW);
+                // FASE 9 (G2-7): LONG-PRESS no nome TRUNCADO → o nome
+                // completo (tip em toast; o main converte). ~30 frames
+                // (0,5s @60fps) com o dedo parado na zona do nome
+                const bool truncado =
+                    ui.fontWidth(t->name.c_str()) > nameW;
+                if (truncado &&
+                    ui.pointerDownAt(nameX, ry, nameW, kRowH)) {
+                    if (st.hierHoldRow == static_cast<i32>(r)) {
+                        ++st.hierHoldFrames;
+                    } else {
+                        st.hierHoldRow = static_cast<i32>(r);
+                        st.hierHoldFrames = 1;
+                        st.hierHoldShown = false;
+                    }
+                    if (st.hierHoldFrames >= 30u && !st.hierHoldShown) {
+                        std::snprintf(st.nameTip, sizeof(st.nameTip), "%s",
+                                      t->name.c_str());
+                        st.hierHoldShown = true;
+                    }
+                    holdVivo = true;
+                }
             }
 
             // ---- olho / ⋮ (ícones 24 em alvos 48; só desenham — o tap é
@@ -346,6 +386,13 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                                   : theme::kTheme.text2);
         }
         ui.endScroll();
+        // o long-press MENTE quando o dedo sai da zona do nome — o
+        // contador regressa a zero (o próximo conta de novo)
+        if (!holdVivo) {
+            st.hierHoldRow = -1;
+            st.hierHoldFrames = 0;
+            st.hierHoldShown = false;
+        }
 
         // ---- VAZIO (spec M): ícone + convite --------------------------------
         if (nRows == 0) {
@@ -435,6 +482,14 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
 
     ui.panel(x, y, w, h, theme::PANEL);
     ui.panel(x, y, 1.0f, h, theme::LINE);   // separador esquerdo
+
+    // FASE 9 (G2-8): o TIC selecionado MUDOU → o Inspector volta ao TOPO
+    // (o scroll do TIC anterior não se arrasta para o novo — era por isso
+    // que o "Transform não aparecia": ficava rolado para lá do fundo)
+    if (st.inspPrevSelected != st.selected) {
+        ui.scrollSetOffset(kIdScrollInsp, 0.0f);
+        st.inspPrevSelected = st.selected;
+    }
 
     const f32 th = ui.fontHeight();
     ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "INSPECTOR", theme::TEXT);
@@ -527,7 +582,6 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     char meshLabel[64] = "";
     char texLabel[64] = "";
     char inputLine[48] = "";
-    char bodyLine[64] = "";
     char camProjLabel[48] = "";   // 0.7.7
     char camActiveLabel[48] = "";
     char camFrustumLabel[48] = "";   // 0.7.10: toggle do gizmo
@@ -540,31 +594,34 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                       camEdit->showFrustum ? "sim" : "não");
     }
     if (mr) {
+        // FASE 9 (G2-8): labels de APRESENTAÇÃO (o "mesh: cube" de debug
+        // morreu) — nomes legíveis, o glifo — para o vazio
         if (mr->primOn) {
-            std::snprintf(meshLabel, sizeof(meshLabel), "mesh: (primitiva)");
+            std::snprintf(meshLabel, sizeof(meshLabel), "malha: (primitiva)");
         } else if (!mr->meshPath.empty()) {
-            std::snprintf(meshLabel, sizeof(meshLabel), "mesh: %s",
+            std::snprintf(meshLabel, sizeof(meshLabel), "malha: %s",
                           assetBasename(mr->meshPath));
         } else {
-            std::snprintf(meshLabel, sizeof(meshLabel), "mesh: %s",
-                          mr->mesh ? "cube" : "-");
+            std::snprintf(meshLabel, sizeof(meshLabel), "malha: %s",
+                          mr->mesh ? "cubo" : "—");
         }
         if (!mr->texPath.empty()) {
-            std::snprintf(texLabel, sizeof(texLabel), "tex: %s",
+            std::snprintf(texLabel, sizeof(texLabel), "textura: %s",
                           assetBasename(mr->texPath));
         } else {
-            std::snprintf(texLabel, sizeof(texLabel), "tex: %s",
-                          mr->texture ? "ligada" : "none");
+            std::snprintf(texLabel, sizeof(texLabel), "textura: %s",
+                          mr->texture ? "ligada" : "—");
         }
     }
     if (im) {
-        std::snprintf(inputLine, sizeof(inputLine), "input: %s",
+        std::snprintf(inputLine, sizeof(inputLine), "entrada: %s",
                       im->source ? "fonte ligada" : "sem fonte");
     }
     if (bc) {
-        std::snprintf(bodyLine, sizeof(bodyLine), "body: %s - %s - chão: %s",
-                      BodyComp::typeName(bc->type), BodyComp::shapeName(bc->shape),
-                      bc->grounded ? "sim" : "não");
+        // FASE 9 (G2-8): a FÍSICA em DUAS COLUNAS (tipo/forma/chão — o
+        // "body: static - obb - cha…" truncado morreu); os valores vivem
+        // no TwoCol desenhado com o BodyComp VIVO
+        (void)bc;
     }
     // linhas de texto (Label) NA MESMA ORDEM do plano: input → body → tc
     const char* labelTexts[3];
@@ -577,12 +634,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         labelInsets[nLabels] = 12.0f;
         ++nLabels;
     }
-    if (bc) {
-        labelTexts[nLabels] = bodyLine;
-        labelColors[nLabels] = &theme::ACCENT;
-        labelInsets[nLabels] = 0.0f;
-        ++nLabels;
-    }
+    // (FASE 9 G2-8: o bodyLine morreu — a FÍSICA desenha-se em DUAS
+    // COLUNAS pelas Kind::TwoCol do plano, com o BodyComp VIVO)
     if (im && prof.tc) {
         labelTexts[nLabels] = "tc: stick + jump";
         labelColors[nLabels] = &theme::TEXT;
@@ -782,7 +835,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             // orçamento era o bug da caixa Z sob o R); caixas 48dp com o
             // rótulo do eixo à esquerda e o valor à direita (labelFitted —
             // nunca invade); o toque abre o teclado numérico (propósito 6).
-            static const char* kRowTitles[3] = {"Pos", "Rotação", "Escala"};
+            static const char* kRowTitles[3] = {"Posição", "Rotação", "Escala"};
             const u32 rowIdx = r.payload;
             const TextMetrics m2 = ui.textMetrics();
             const f32 titleBase = ry + 2.0f + m2.ascent;
@@ -955,7 +1008,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             break;
         }
         case InspRow::Kind::Label:
-            // input: → body: → tc: — payload NA ORDEM do plano (labelIdx)
+            // input: → tc: — payload NA ORDEM do plano (labelIdx)
             if (labelIdx < nLabels) {
                 const f32 inset = labelInsets[labelIdx];
                 ui.labelFitted(x + kPad + inset, inspBaseline(ry, r.h, tm),
@@ -964,6 +1017,30 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 ++labelIdx;
             }
             break;
+        case InspRow::Kind::TwoCol: {
+            // FASE 9 (G2-8): FÍSICA em duas colunas — NOME à esquerda
+            // (text2), VALOR à direita (text1); SEM truncagem (cada
+            // campo curto por natureza — static/obb/sim cabem inteiros)
+            if (bc) {
+                const char* nome = "tipo";
+                const char* valor = BodyComp::typeName(bc->type);
+                if (r.payload == 1) {
+                    nome = "forma";
+                    valor = BodyComp::shapeName(bc->shape);
+                } else if (r.payload == 2) {
+                    nome = "no chão";
+                    valor = bc->grounded ? "sim" : "não";
+                }
+                const f32 base = inspBaseline(ry, r.h, tm);
+                ui.label(x + kPad, base, nome, theme::kTheme.text2);
+                if (ui.hasFont()) {
+                    const f32 vw = ui.fontWidth(valor);
+                    ui.label(x + w - kPad - vw, base, valor,
+                             theme::kTheme.text1);
+                }
+            }
+            break;
+        }
         case InspRow::Kind::AddTc:
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       "add TouchControls");

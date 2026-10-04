@@ -2,7 +2,6 @@
 // ui/ViewportChrome.h — CHROME DO VIEWPORT (0.9.0 spec D; FASE 9 G1-1):
 //
 //   ┌─────────────────────────────────────────────────────────────┐
-//   │ [undo]                                          triad 64dp  │
 //   │ [redo]                                                       │
 //   │ [save]              VIEWPORT 3D                              │
 //   │ [dup ]                                                       │
@@ -27,8 +26,7 @@
 //
 //   • stack de toque vertical à ESQUERDA: [undo][redo][save][duplicate]
 //     [paste] 48dp com ESTADOS DISABLED (icon text2 40% — sem alvo);
-//   • triad de orientação 64dp no canto superior direito (REMOVIDO no
-//     G2-10 — os "pontinhos fantasma"; mantido até lá);
+//   • TRIAD REMOVIDO na FASE 9 (G2-10) — os "pontinhos fantasma" do dono;
 //   • os gizmos 3D existentes com grab-lock ficam INTACTOS (ui/Gizmo.h).
 #include "ui/EditorLayout.h"
 #include "ui/Icons.h"
@@ -76,14 +74,12 @@ constexpr f32 kStackGap  = 8.0f;    // ≥8dp entre alvos (spec A)
 constexpr f32 kBottomH   = 48.0f;   // toolbar inferior (FASE 9: 48dp — só ícones)
 constexpr f32 kToolBtn   = 48.0f;   // botão de ferramenta (ícone)
 constexpr f32 kToolActiveW = 132.0f; // botão ATIVO (ícone + palavra)
-constexpr f32 kTriad     = 64.0f;   // triad de orientação (spec D)
 
 struct Layout {
     UiRect stack[5]{};        // undo redo save dup paste
     u32    nStack = 5;
     UiRect selectBtn{}, moveBtn{}, rotateBtn{}, scaleBtn{};
     UiRect snapBtn{}, addTicBtn{};
-    UiRect triad{};           // quadrado 64dp do triad (canto sup-dir)
     UiRect view{};            // o viewport central (para referência)
 };
 

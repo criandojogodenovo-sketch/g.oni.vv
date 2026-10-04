@@ -1,9 +1,16 @@
-// ui/Toolbar.cpp — TOP BAR 56dp + TAB BAR DE MODO 48dp (0.9.0, spec D).
+// ui/Toolbar.cpp — A BARRA ÚNICA DE CIMA 56dp (FASE 9 G2-9/G2-10).
+//
+// [≡ Menu][Cena ▾]    [3D][UI][ÁUDIO]    [pause][play][gear]
+//
+// FASE 9 (G2-10): a menu bar (56) + tab bar (48) fundiram-se NESTA barra
+// de 56dp — os ~48px poupados vão ao viewport (safe::kToolbarH = 56).
+// FASE 9 (G2-9): o botão [sliders] REMOVIDO (morto desde 0.9.0 — o
+// inventário G0-4; slidersPressed nunca era consumido).
 //
 // Desenho: fundo bg #0B0E13 (chrome separado da área de trabalho — painéis
-// surface #151A23); botões-alvo 48dp centrados na altura de 56; separadores
-// finos border entre grupos; tab bar com ícone+palavra e UNDERLINE accent
-// 2dp no ativo (spec D — nunca mais "UDIO": a palavra inteira desenha).
+// surface #151A23); botões-alvo 48dp centrados na altura de 56; tabs de
+// modo ao CENTRO com ícone+palavra e UNDERLINE accent 2dp no fundo da
+// barra (spec D — "ÁUDIO" desenha a palavra inteira).
 #include "ui/Toolbar.h"
 #include "ui/EditorUi.h"   // EditorState completo (declared-only no header)
 #include "ui/UiContext.h"
@@ -19,11 +26,11 @@ namespace {
 // ---- métricas naturais (px de design — spec A: alvos ≥48, ícone 24) ---------
 constexpr f32 kPadOuter  = 12.0f;   // margem da barra aos extremos
 constexpr f32 kBtnH      = 48.0f;   // ALVO de toque (spec A) dentro dos 56
-constexpr f32 kMenuW     = 140.0f;  // [≡ Menu]  (ícone + palavra)
-constexpr f32 kCenaW     = 124.0f;  // [Cena ▾]
-constexpr f32 kIconBtn   = 48.0f;   // [pause][play][sliders][gear]
-constexpr f32 kGroupGap  = 24.0f;   // vão entre grupos (8-múltiplo + sep fino)
-constexpr f32 kSepH      = 28.0f;   // altura da linha fina do separador
+constexpr f32 kMenuW     = 112.0f;  // [≡ Menu]  (ícone + palavra)
+constexpr f32 kCenaW     = 100.0f;  // [Cena ▾]
+constexpr f32 kTabW      = 96.0f;   // cada tab [3D]/[UI]/[ÁUDIO]
+constexpr f32 kIconBtn   = 48.0f;   // [pause][play][gear]
+constexpr f32 kGroupGap  = 20.0f;   // vão entre grupos
 
 // baseline do texto centrada no botão (métricas REAIS da fonte)
 f32 textBaseline(UiContext& ui, const UiRect& r) {
@@ -62,7 +69,7 @@ bool textIconButton(UiContext& ui, u64 id, const UiRect& r,
         ui.label(iconX + iconS + 8.0f, textBaseline(ui, r), shown,
                  held ? theme::kTheme.text1 : theme::kTheme.text1);
     }
-    if (withChevron) {   // caret ▾ (2 traços — o atlas é ASCII)
+    if (withChevron) {   // caret ▾ (2 traços)
         const f32 cy = r.y + r.h * 0.5f;
         const f32 cx = r.x + r.w - 12.0f;
         const f32 col[4] = {theme::kTheme.text2[0], theme::kTheme.text2[1],
@@ -73,7 +80,7 @@ bool textIconButton(UiContext& ui, u64 id, const UiRect& r,
     return pressed;
 }
 
-// botão de ÍCONE puro (pause/play/sliders/gear): held = fill surface2,
+// botão de ÍCONE puro (pause/play/gear): held = fill surface2,
 // ícone text1 (o accent fica para ESTADOS, não para repouso — spec A)
 bool iconButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon) {
     const bool pressed = ui.widgetHit(id, r.x, r.y, r.w, r.h);
@@ -93,36 +100,36 @@ bool iconButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon) {
 } // namespace
 
 // ---------------------------------------------------------------------------
-// TOP BAR — layout puro
+// A BARRA ÚNICA — layout puro (FASE 9 G2-10)
 // ---------------------------------------------------------------------------
-TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in) {
+TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
+                          bool uiMode, bool audioMode) {
     TopBarLayout L;
     L.bar = safe::toolbarRect(sw, sh, in);
+    L.active = uiMode ? 1u : (audioMode ? 2u : 0u);
     const f32 avail = L.bar.w - 2.0f * kPadOuter;
     if (avail <= 120.0f) {
         return L;   // degenerado — só o fundo
     }
-    const f32 g1 = kMenuW + kCenaW;              // esquerda
-    const f32 g2 = 3.0f * kIconBtn + 2.0f * 8.0f; // centro (pause play sliders)
-    const f32 g5 = kIconBtn;                      // direita (gear)
-    f32 gap = kGroupGap;
-    f32 total = g1 + g2 + g5 + 3.0f * gap;
+    // escala graciosa: as larguras naturais encolhem PROPORCIONALMENTE se
+    // o ecrã for estreito (o gear NUNCA sai da direita)
+    const f32 natW = kMenuW + 4.0f + kCenaW + 3.0f * kTabW +
+                     3.0f * kIconBtn + 2.0f * 8.0f;
     f32 k = 1.0f;
-    if (total > avail) {
-        gap = 12.0f;
-        total = g1 + g2 + g5 + 3.0f * gap;
-        k = (avail - 3.0f * gap) / (total - 3.0f * gap);
+    if (natW + 4.0f * kGroupGap > avail) {
+        k = (avail - 4.0f * kGroupGap) / natW;
         if (k > 1.0f) {
             k = 1.0f;
         }
+        if (k < 0.55f) {
+            k = 0.55f;   // piso: os alvos ficam ≥26dp… o C33 (1536) nunca chega
+        }
     }
-    L.menu.w     = kMenuW * k;
-    L.cena.w     = kCenaW * k;
-    L.pause.w    = kIconBtn * k;
-    L.play.w     = kIconBtn * k;
-    L.sliders.w  = kIconBtn * k;
-    L.gear.w     = kIconBtn * k;
-    L.iconSize   = 24.0f;
+    L.menu.w  = kMenuW * k;
+    L.cena.w  = kCenaW * k;
+    L.tab3d.w = L.tabUi.w = L.tabAudio.w = kTabW * k;
+    L.pause.w = L.play.w = L.gear.w = kIconBtn * k;
+    L.iconSize = 24.0f;
 
     const f32 by = L.bar.y + (L.bar.h - kBtnH) * 0.5f;
     const auto place = [&by](UiRect& r, f32 x) {
@@ -130,29 +137,61 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in) {
         r.y = by;
         r.h = kBtnH;
     };
+
+    // ---- esquerda: [≡ Menu][Cena ▾] ----
     f32 x = L.bar.x + kPadOuter;
-    place(L.menu, x);  x += L.menu.w;
-    place(L.cena, x + 4.0f);  x += 4.0f + L.cena.w;
-    x += gap;
-    // centro do grupo central = centro da barra (spec D: [pause][play][sliders])
-    const f32 g2w = L.pause.w + 8.0f + L.play.w + 8.0f + L.sliders.w;
-    f32 cx = L.bar.x + (L.bar.w - g2w) * 0.5f;
-    if (cx < x + gap) {
-        cx = x + gap;   // defesa: telas estreitas — o centro cede à esquerda
+    place(L.menu, x);            x += L.menu.w;
+    place(L.cena, x + 4.0f);     x += 4.0f + L.cena.w;
+
+    // ---- direita: [pause][play][gear] (ancorados — os grupos do centro
+    // cedem primeiro em ecrãs estreitos) ----
+    f32 rgx = L.bar.x + L.bar.w - kPadOuter - L.gear.w;
+    place(L.gear, rgx);          rgx -= 8.0f + L.play.w;
+    place(L.play, rgx);          rgx -= 8.0f + L.pause.w;
+    place(L.pause, rgx);
+
+    // ---- centro: as tabs [3D][UI][ÁUDIO] — centradas na BARRA; se não
+    // couberem entre a esquerda e a direita, comprimem-se ao espaço útil ----
+    const f32 tabsW = 3.0f * L.tab3d.w;
+    f32 cx = L.bar.x + (L.bar.w - tabsW) * 0.5f;
+    const f32 minCx = x + kGroupGap;
+    const f32 maxCx = rgx - kGroupGap - tabsW;
+    if (cx < minCx) {
+        cx = minCx;
     }
-    place(L.pause, cx);      cx += L.pause.w + 8.0f;
-    place(L.play, cx);       cx += L.play.w + 8.0f;
-    place(L.sliders, cx);
-    // gear: BORDA DIREITA (nunca mexe)
-    place(L.gear, L.bar.x + L.bar.w - kPadOuter - L.gear.w);
+    if (cx > maxCx) {
+        cx = maxCx;
+    }
+    // ainda sem espaço? as tabs encolhem ao que sobrar (alvo ≥48 quando
+    // possível — o touch continua na linha inteira da barra)
+    f32 tabW = L.tab3d.w;
+    if (cx + tabsW > rgx - kGroupGap) {
+        const f32 room = (rgx - kGroupGap) - cx;
+        if (room > 3.0f * 48.0f) {
+            tabW = room / 3.0f;
+        } else {
+            tabW = 48.0f;   // piso 48dp — o grupo da direita cede (raro)
+            cx = (x + kGroupGap + rgx - kGroupGap - 3.0f * tabW) * 0.5f;
+        }
+    }
+    L.tab3d.w = L.tabUi.w = L.tabAudio.w = tabW;
+    place(L.tab3d, cx);          cx += tabW;
+    place(L.tabUi, cx);          cx += tabW;
+    place(L.tabAudio, cx);
+
+    // underline do ATIVO: 2dp accent NO FUNDO da barra (spec D)
+    const UiRect* tabs[3] = {&L.tab3d, &L.tabUi, &L.tabAudio};
+    L.underline = *tabs[L.active];
+    L.underline.y = L.bar.y + L.bar.h - 2.0f;
+    L.underline.h = 2.0f;
     return L;
 }
 
-TopBarActions drawTopBar(UiContext& ui, const EditorState& st) {
-    (void)st;
+TopBarActions drawTopBar(UiContext& ui, EditorState& st) {
     TopBarActions a;
     const TopBarLayout L =
-        topbarLayout(ui.screenWidth(), ui.screenHeight(), ui.safeArea());
+        topbarLayout(ui.screenWidth(), ui.screenHeight(), ui.safeArea(),
+                     st.uiMode, st.audioMode);
 
     // fundo do chrome + risca inferior (border — spec A)
     ui.panel(L.bar.x, L.bar.y, L.bar.w, L.bar.h, theme::kTheme.bg);
@@ -167,60 +206,19 @@ TopBarActions drawTopBar(UiContext& ui, const EditorState& st) {
                        true)) {
         a.cenaDropdown = true;
     }
-    if (iconButton(ui, kTbPauseId, L.pause, icons::Icon::Pause)) {
-        a.pausePressed = true;
-    }
-    if (iconButton(ui, kTbPlayId, L.play, icons::Icon::Play)) {
-        a.playPressed = true;
-    }
-    if (iconButton(ui, kTbSlidersId, L.sliders, icons::Icon::Sliders)) {
-        a.slidersPressed = true;
-    }
-    if (iconButton(ui, kTbGearId, L.gear, icons::Icon::Gear)) {
-        a.gearPressed = true;
-    }
-    return a;
-}
 
-// ---------------------------------------------------------------------------
-// TAB BAR DE MODO — layout puro
-// ---------------------------------------------------------------------------
-ModeTabsLayout modetabsLayout(f32 sw, f32 sh, const safe::Insets& in,
-                              bool uiMode, bool audioMode) {
-    ModeTabsLayout L;
-    L.bar = safe::modeTabRect(sw, sh, in);
-    L.active = uiMode ? 1u : (audioMode ? 2u : 0u);
-    const f32 third = L.bar.w / 3.0f;
-    L.tab3d   = {L.bar.x, L.bar.y, third, L.bar.h};
-    L.tabUi   = {L.bar.x + third, L.bar.y, third, L.bar.h};
-    L.tabAudio = {L.bar.x + 2.0f * third, L.bar.y, third, L.bar.h};
-    const UiRect* tabs[3] = {&L.tab3d, &L.tabUi, &L.tabAudio};
-    L.underline = *tabs[L.active];
-    L.underline.y = L.bar.y + L.bar.h - 2.0f;   // underline 2dp (spec D)
-    L.underline.h = 2.0f;
-    return L;
-}
-
-bool drawModeTabs(UiContext& ui, EditorState& st) {
-    bool changed = false;
-    const ModeTabsLayout L =
-        modetabsLayout(ui.screenWidth(), ui.screenHeight(), ui.safeArea(),
-                       st.uiMode, st.audioMode);
-
-    ui.panel(L.bar.x, L.bar.y, L.bar.w, L.bar.h, theme::kTheme.bg);
-    ui.panel(L.bar.x, L.bar.y + L.bar.h - 1.0f, L.bar.w, 1.0f,
-             theme::kTheme.border);
-
+    // ---- tabs de modo AO CENTRO (G2-10): ícone+palavra, underline no ativo --
     const struct {
         const UiRect* r;
-        u64       id;
-        icons::Icon icon;
-        const char* word;
-        bool      active;
+        u64          id;
+        icons::Icon  icon;
+        const char*  word;
+        bool         active;
     } tabs[3] = {
-        {&L.tab3d,    kMode3dId,   icons::Icon::Cube,     "3D",     !st.uiMode && !st.audioMode},
-        {&L.tabUi,    kModeUiId,   icons::Icon::Monitor,  "UI",     st.uiMode},
-        {&L.tabAudio, kModeAudioId, icons::Icon::Speaker, "ÁUDIO",  st.audioMode},
+        {&L.tab3d,    kMode3dId,    icons::Icon::Cube,     "3D",
+         !st.uiMode && !st.audioMode},
+        {&L.tabUi,    kModeUiId,    icons::Icon::Monitor,  "UI",    st.uiMode},
+        {&L.tabAudio, kModeAudioId, icons::Icon::Speaker,  "ÁUDIO", st.audioMode},
     };
     for (int i = 0; i < 3; ++i) {
         const UiRect& r = *tabs[i].r;
@@ -245,7 +243,7 @@ bool drawModeTabs(UiContext& ui, EditorState& st) {
                                     : theme::kTheme.text2);
         }
         if (pressed) {
-            changed = true;
+            a.modeChanged = true;
             if (i == 0) {
                 st.uiMode = false;
                 st.audioMode = false;
@@ -262,25 +260,34 @@ bool drawModeTabs(UiContext& ui, EditorState& st) {
             }
         }
     }
-    // underline accent 2dp no tab ATIVO (spec D)
+    // underline accent 2dp no tab ATIVO (fundo da barra — spec D)
     ui.panel(L.underline.x, L.underline.y, L.underline.w, L.underline.h,
              theme::kTheme.accent);
-    return changed;
+
+    if (iconButton(ui, kTbPauseId, L.pause, icons::Icon::Pause)) {
+        a.pausePressed = true;
+    }
+    if (iconButton(ui, kTbPlayId, L.play, icons::Icon::Play)) {
+        a.playPressed = true;
+    }
+    if (iconButton(ui, kTbGearId, L.gear, icons::Icon::Gear)) {
+        a.gearPressed = true;
+    }
+    return a;
 }
 
 // ---------------------------------------------------------------------------
-// compat 0.8.x — draw() único (top bar + tab bar; o G4 morreu)
+// compat — draw() único (a barra única; G2-9: sliders REMOVIDO)
 // ---------------------------------------------------------------------------
 Actions draw(UiContext& ui, EditorState& st) {
     Actions a;
     const TopBarActions t = drawTopBar(ui, st);
-    a.menuDropdown  = t.menuDropdown;
-    a.cenaDropdown  = t.cenaDropdown;
-    a.playPressed   = t.playPressed;
-    a.pausePressed  = t.pausePressed;
-    a.slidersPressed = t.slidersPressed;
-    a.gearPressed   = t.gearPressed;
-    a.modeChanged   = drawModeTabs(ui, st);
+    a.menuDropdown = t.menuDropdown;
+    a.cenaDropdown = t.cenaDropdown;
+    a.playPressed  = t.playPressed;
+    a.pausePressed = t.pausePressed;
+    a.gearPressed  = t.gearPressed;
+    a.modeChanged  = t.modeChanged;
     return a;
 }
 

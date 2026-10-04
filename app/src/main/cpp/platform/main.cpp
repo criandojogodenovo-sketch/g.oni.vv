@@ -4634,6 +4634,13 @@ void frame() {
         elog::info("ui: pick bloqueado (sem seleção)");
     }
 
+    // FASE 9 (G2-7): o LONG-PRESS no nome truncado da hierarquia pediu o
+    // nome completo — o main converte em toast (o Inspector é puro)
+    if (g_editor.nameTip[0]) {
+        showToast(g_editor.nameTip);
+        g_editor.nameTip[0] = '\0';
+    }
+
     if (g_editor.assetMenu != 0) {
         const int menuKind = g_editor.assetMenu;   // ANTES do draw (o pick fecha)
         const int pick = editor::drawAssetMenu(g_ui, g_input, w, h, g_editor,
@@ -4812,8 +4819,8 @@ void frame() {
     // F5.2: menu de ficheiro com 5 itens — Save/Load/Export OBJ/Importar…/
     // Export Downloads (o "Pasta (SAF)" foi REMOVIDO com o fluxo SAF)
     if (g_editor.fileMenu) {
-        const editor::toolbar::TopBarLayout tbl =
-            editor::toolbar::topbarLayout(w, h, g_ui.safeArea());
+        const editor::toolbar::TopBarLayout tbl = editor::toolbar::topbarLayout(
+            w, h, g_ui.safeArea(), g_editor.uiMode, g_editor.audioMode);
         const int choice = editor::drawFileMenu(g_ui, g_input, w, h, g_editor,
                                                 tbl.menu.x, tbl.menu.y + tbl.menu.h);
         if (choice == 1) {
@@ -5191,8 +5198,8 @@ void frame() {
     // (menu de EDITOR — em Play a troca vem pela ação declarativa com
     // transição; aqui a troca é direta)
     if (g_editor.scenesMenu && g_projectReady) {
-        const editor::toolbar::TopBarLayout tbl2 =
-            editor::toolbar::topbarLayout(w, h, g_ui.safeArea());
+        const editor::toolbar::TopBarLayout tbl2 = editor::toolbar::topbarLayout(
+            w, h, g_ui.safeArea(), g_editor.uiMode, g_editor.audioMode);
         const int pick = editor::drawScenesMenu(
             g_ui, g_input, w, h, g_editor, g_project.scenes,
             g_project.activeScene, tbl2.cena.x, tbl2.cena.y + tbl2.cena.h);

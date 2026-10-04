@@ -156,7 +156,7 @@ TEST(play_toolbar_play_abre_janela_play) {
     EXPECT(e.ok);
     // 0.9.0 — tap no play da TOP BAR (rect do topbarLayout)
     const toolbar::TopBarLayout L =
-        toolbar::topbarLayout(kSW, kSH, safe::Insets{});
+        toolbar::topbarLayout(kSW, kSH, safe::Insets{}, false, false);
     const f32 bx = L.play.x + L.play.w * 0.5f;
     const f32 by = L.play.y + L.play.h * 0.5f;
     e.input.injectDown(0, bx, by);

@@ -6,7 +6,7 @@
 //   • TAB BAR 48dp: 3 terços iguais, underline accent 2dp NO ATIVO;
 //   • modos exclusivos (3D|UI|ÁUDIO) pela tab bar; "ÁUDIO" é a palavra
 //     inteira (o "UDIO" da 0.8.11 morreu);
-//   • CONJUNTO DE ÍCONES (49): todos DENTRO do viewBox 0..24, unicidade por
+//   • CONJUNTO DE ÍCONES (51): todos DENTRO do viewBox 0..24, unicidade por
 //     hash de segmentos, peso visual comparável, ícone pelo nome funcional;
 //   • THEME spec A: accent #2196F3 EXATO, tabela completa, CONTRASTES:
 //     text1/text2/accent/danger/ok/warn sobre surface (≥4,5:1 texto,
@@ -120,20 +120,27 @@ u64 iconSegHash(icons::Icon ic) {
 
 // ---- 1. TOP BAR: layout 56dp sem sobreposição, alvos ≥48, gear à direita -----
 
+// ---- FASE 9 (G2-9/G2-10): A BARRA ÚNICA — menu+tabs+ações numa faixa de 56 --
+// (a tab bar de 48dp FUNDEU-SE; o botão sliders MORREU — inventário G0-4)
+
 TEST(topbar_layout_56dp_alvos48_sem_sobreposicao) {
     const safe::Insets in{0.0f, 24.0f, 0.0f, 24.0f};   // C33
-    const toolbar::TopBarLayout L = toolbar::topbarLayout(kSW, kSH, in);
+    const toolbar::TopBarLayout L =
+        toolbar::topbarLayout(kSW, kSH, in, false, false);
     EXPECT(nearEqF(L.bar.h, 56.0f));
     EXPECT(nearEqF(L.bar.y, 24.0f));
     const UiRect content = safe::contentRect(kSW, kSH, in);
     EXPECT(safe::rectInside(L.bar, content));
-    const UiRect rects[6] = {L.menu, L.cena, L.pause, L.play, L.sliders, L.gear};
-    const char* names[6] = {"menu", "cena", "pause", "play", "sliders", "gear"};
-    for (int i = 0; i < 6; ++i) {
+    // FASE 9: 8 widgets (menu, cena, 3 tabs, pause, play, gear) — SEM sliders
+    const UiRect rects[8] = {L.menu,   L.cena,   L.tab3d,  L.tabUi,
+                             L.tabAudio, L.pause, L.play,  L.gear};
+    const char* names[8] = {"menu", "cena", "tab3d", "tabUi",
+                            "tabAudio", "pause", "play", "gear"};
+    for (int i = 0; i < 8; ++i) {
         EXPECT(rects[i].h >= 48.0f - 0.01f);
         EXPECT(rects[i].w > 0.0f);
         EXPECT(safe::rectInside(rects[i], content));
-        for (int j = i + 1; j < 6; ++j) {
+        for (int j = i + 1; j < 8; ++j) {
             const f32 ox = std::min(rects[i].x + rects[i].w, rects[j].x + rects[j].w) -
                             std::max(rects[i].x, rects[j].x);
             const f32 oy = std::min(rects[i].y + rects[i].h, rects[j].y + rects[j].h) -
@@ -143,19 +150,34 @@ TEST(topbar_layout_56dp_alvos48_sem_sobreposicao) {
     }
     // gear ancorado à direita
     EXPECT(nearEqF(L.gear.x + L.gear.w, L.bar.x + L.bar.w - 12.0f, 0.5f));
+    // as 3 tabs IGUAIS e ao CENTRO da barra (spec D no merge G2-10)
+    EXPECT(nearEqF(L.tab3d.w, L.tabUi.w));
+    EXPECT(nearEqF(L.tabUi.w, L.tabAudio.w));
+    const f32 tabsMid = L.tab3d.x + (L.tabAudio.x + L.tabAudio.w - L.tab3d.x) * 0.5f;
+    EXPECT(nearEqF(tabsMid, L.bar.x + L.bar.w * 0.5f, 1.0f));
+    // underline 2dp NO FUNDO da barra única (o indicador do modo ativo)
+    EXPECT(nearEqF(L.underline.h, 2.0f));
+    EXPECT(nearEqF(L.underline.y, L.bar.y + L.bar.h - 2.0f));
+    EXPECT(L.active == 0u);
+    // com ÁUDIO ativo o underline MUDA de tab
+    const toolbar::TopBarLayout La =
+        toolbar::topbarLayout(kSW, kSH, safe::Insets{}, false, true);
+    EXPECT(La.active == 2u);
+    EXPECT(nearEqF(La.underline.x, La.tabAudio.x));
 }
 
 TEST(topbar_layout_ecra_estreito_encolhe_gracioso) {
     // 1000px de largura: os grupos ENCOLHEM mas nada sobrepõe/sai
     const toolbar::TopBarLayout L =
-        toolbar::topbarLayout(1000.0f, kSH, safe::Insets{});
+        toolbar::topbarLayout(1000.0f, kSH, safe::Insets{}, false, false);
     const UiRect content = safe::contentRect(1000.0f, kSH, safe::Insets{});
     EXPECT(safe::rectInside(L.bar, content));
-    const UiRect rects[6] = {L.menu, L.cena, L.pause, L.play, L.sliders, L.gear};
-    for (int i = 0; i < 6; ++i) {
+    const UiRect rects[8] = {L.menu,   L.cena,   L.tab3d,  L.tabUi,
+                             L.tabAudio, L.pause, L.play,  L.gear};
+    for (int i = 0; i < 8; ++i) {
         EXPECT(rects[i].w > 0.0f);
         EXPECT(rects[i].h > 0.0f);
-        for (int j = i + 1; j < 6; ++j) {
+        for (int j = i + 1; j < 8; ++j) {
             const f32 ox = std::min(rects[i].x + rects[i].w, rects[j].x + rects[j].w) -
                             std::max(rects[i].x, rects[j].x);
             const f32 oy = std::min(rects[i].y + rects[i].h, rects[j].y + rects[j].h) -
@@ -165,32 +187,14 @@ TEST(topbar_layout_ecra_estreito_encolhe_gracioso) {
     }
 }
 
-// ---- 2. TAB BAR de modo: 3 terços + underline 2dp no ativo --------------------
-
-TEST(modetabs_layout_3_tercos_underline_2dp) {
-    const safe::Insets in{0.0f, 24.0f, 0.0f, 24.0f};   // C33
-    const toolbar::ModeTabsLayout L =
-        toolbar::modetabsLayout(kSW, kSH, in, false, false);
-    EXPECT(nearEqF(L.bar.h, 48.0f));
-    EXPECT(nearEqF(L.bar.y, 24.0f + 56.0f));   // por baixo da top bar
-    EXPECT(nearEqF(L.tab3d.w, L.tabUi.w));
-    EXPECT(nearEqF(L.tabUi.w, L.tabAudio.w));
-    EXPECT(L.active == 0u);
-    EXPECT(nearEqF(L.underline.h, 2.0f));
-    EXPECT(nearEqF(L.underline.y, L.bar.y + L.bar.h - 2.0f));
-    // com ÁUDIO ativo o underline MUDA de tab
-    const toolbar::ModeTabsLayout La =
-        toolbar::modetabsLayout(kSW, kSH, safe::Insets{}, false, true);
-    EXPECT(La.active == 2u);
-    EXPECT(nearEqF(La.underline.x, La.tabAudio.x));
-}
+// ---- 2. as TABS de modo (agora DENTRO da barra única — G2-10) ---------------
 
 TEST(modetabs_troca_modos_exclusivos_e_audio_inteiro) {
     Env e;
     EXPECT(e.font.ok());
     e.frame();
-    const toolbar::ModeTabsLayout L =
-        toolbar::modetabsLayout(kSW, kSH, safe::Insets{}, false, false);
+    const toolbar::TopBarLayout L =
+        toolbar::topbarLayout(kSW, kSH, safe::Insets{}, false, false);
     // UI
     e.tap(L.tabUi.x + L.tabUi.w * 0.5f, L.tabUi.y + L.tabUi.h * 0.5f);
     EXPECT(e.st.uiMode && !e.st.audioMode);
@@ -202,7 +206,7 @@ TEST(modetabs_troca_modos_exclusivos_e_audio_inteiro) {
     EXPECT(!e.st.uiMode && !e.st.audioMode);
 }
 
-// ---- 3. CONJUNTO DE ÍCONES (49): viewBox, unicidade, peso ---------------------
+// ---- 3. CONJUNTO DE ÍCONES (51): viewBox, unicidade, peso ---------------------
 
 TEST(icones_conjunto_completo_dentro_do_viewbox) {
     for (int ic = 0; ic < static_cast<int>(icons::Icon::Count); ++ic) {
@@ -341,7 +345,7 @@ TEST(topbar_desenha_botoes_e_reporta) {
     // o fundo da barra = bg (o chrome separa-se da área de trabalho)
     e.ui.beginFrame(nullptr, &e.input, kSW, kSH);
     const toolbar::TopBarLayout L =
-        toolbar::topbarLayout(kSW, kSH, safe::Insets{});
+        toolbar::topbarLayout(kSW, kSH, safe::Insets{}, false, false);
     toolbar::drawTopBar(e.ui, e.st);
     e.ui.endFrame();
     EXPECT(coveredVertex(e.ui.solidsForTest(), L.bar.x + L.bar.w * 0.5f,

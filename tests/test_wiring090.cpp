@@ -24,6 +24,7 @@
 #include "TestFramework.h"
 
 #include "components/AudioPlayer.h"
+#include "components/BodyComp.h"   // FASE 9 G2: hierIconFor/física TwoCol
 #include "components/CameraComp.h"
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
@@ -98,7 +99,7 @@ struct Env {
         bottom::draw(ui, input, st, bs, catalog, logLines, 60, 4);
         if (st.fileMenu) {
             const toolbar::TopBarLayout tb =
-                toolbar::topbarLayout(kSW, kSH, safe::Insets{});
+                toolbar::topbarLayout(kSW, kSH, safe::Insets{}, false, false);
             drawFileMenu(ui, input, kSW, kSH, st, tb.menu.x,
                          tb.menu.y + tb.menu.h);
         }
@@ -237,9 +238,7 @@ TEST(inspector_seccoes_colapsaveis_bitmask) {
     EXPECT(!sawTrf);
     // e TOCAR no cabeçalho alterna o bit (o desenho real muta o estado)
     e.frame();
-    const toolbar::ModeTabsLayout mt =
-        toolbar::modetabsLayout(kSW, kSH, safe::Insets{}, false, false);
-    (void)mt;
+    // (FASE 9 G2-10: a tab bar fundiu-se à barra única — nada a medir aqui)
     EXPECT(e.st.inspCollapsed == 0u);
 }
 
@@ -336,11 +335,10 @@ TEST(vpchrome_stack_sem_sobreposicao_alvos_48) {
             EXPECT(ox <= 0.01f || oy <= 0.01f);
         }
     }
-    // triad 64dp no canto superior DIREITO (spec D)
-    EXPECT(nearEqF(L.triad.w, 64.0f));
-    EXPECT(nearEqF(L.triad.x + L.triad.w + 8.0f, view.x + view.w, 0.01f));
-    // a toolbar não colide com o triad
-    EXPECT(L.addTicBtn.y > L.triad.y + L.triad.h);
+    // FASE 9 (G2-10): o TRIAD foi REMOVIDO — os "pontinhos fantasma" do
+    // dono (canto sup-dir do viewport) não existem mais; o canto sup-dir
+    // do rect fica LIVRE (nada do chrome o ocupa)
+    EXPECT(L.addTicBtn.y > view.y);   // (sanity: o + continua no fundo)
 }
 
 // ---- D2 (FASE 9 G1-1): a toolbar ANCORADA À VIEWPORT — acompanha o painel
@@ -500,7 +498,7 @@ TEST(menu_sheet_ancorado_8dp_sob_o_botao) {
     // o sheet começa 8dp ABAIXO da âncora do botão Menu: tocar LÁ escolhe
     // "Settings" (1) e FECHA
     const toolbar::TopBarLayout tb =
-        toolbar::topbarLayout(kSW, kSH, safe::Insets{});
+        toolbar::topbarLayout(kSW, kSH, safe::Insets{}, false, false);
     const f32 ax = tb.menu.x;
     const f32 ay = tb.menu.y + tb.menu.h + 8.0f;   // +8dp (spec H)
     e.tap(ax + 140.0f, ay + 24.0f);   // linha 0 = Settings
@@ -643,4 +641,154 @@ TEST(material_legendas_inteiras_e_tint_rgba_g13) {
     char hex[12];
     editor::uiHexFormat(mr->tint, hex, sizeof(hex));
     EXPECT(std::strcmp(hex, "#FFFFFF") == 0);
+}
+
+// ---- FASE 9 G2 — ALINHAMENTO AO MOCK (pontos 7-11) ---------------------------
+
+// (G2-7) o ícone da hierarquia consulta o BodyComp PRIMEIRO: tic_static /
+// tic_player / tic_rigid; a câmara tem tic_camera; o corpo NÃO cai no Box
+TEST(hierarquia_icone_por_tipo_de_corpo_g27) {
+    Scene s;
+    // corpo ESTÁTICO (o chão do dono)
+    Handle hStatic = s.create("Chao");
+    s.get(hStatic)->addComponent<Transform3D>();
+    BodyComp* bcS = s.get(hStatic)->addComponent<BodyComp>();
+    bcS->type = BodyType::Static;
+    EXPECT(hierIconFor(*s.get(hStatic)) == icons::Icon::Static);
+    // personagem
+    Handle hChar = s.create("Jogador");
+    BodyComp* bcC = s.get(hChar)->addComponent<BodyComp>();
+    bcC->type = BodyType::Character;
+    EXPECT(hierIconFor(*s.get(hChar)) == icons::Icon::Person);
+    // rígido
+    Handle hRig = s.create("Caixa");
+    BodyComp* bcR = s.get(hRig)->addComponent<BodyComp>();
+    bcR->type = BodyType::Rigid;
+    EXPECT(hierIconFor(*s.get(hRig)) == icons::Icon::Rigid);
+    // câmara (tic_camera) tem PRIORIDADE sobre o corpo
+    Handle hCam = s.create("Cam");
+    s.get(hCam)->addComponent<CameraComp>();
+    s.get(hCam)->addComponent<BodyComp>();
+    EXPECT(hierIconFor(*s.get(hCam)) == icons::Icon::Camera);
+    // mesh sem corpo continua Cube/Box de sempre
+    Handle hMesh = s.create("Mesh");
+    s.get(hMesh)->addComponent<Transform3D>();
+    s.get(hMesh)->addComponent<MeshRenderer>();
+    EXPECT(hierIconFor(*s.get(hMesh)) == icons::Icon::Box);
+    // os ícones NOVOS existem pelo nome funcional do mock
+    EXPECT(icons::iconByName("tic_static") ==
+            static_cast<i32>(icons::Icon::Static));
+    EXPECT(icons::iconByName("tic_rigid") ==
+            static_cast<i32>(icons::Icon::Rigid));
+    EXPECT(icons::iconByName("camara") ==
+            static_cast<i32>(icons::Icon::Camera));
+}
+
+// (G2-8) a FÍSICA em duas colunas: 3 linhas TwoCol (tipo/forma/no chão) —
+// o "body: static - obb - cha…" truncado de UMA linha morreu
+TEST(inspector_fisica_duas_colunas_g28) {
+    Env e;
+    Handle h = e.scene.create("Corpo");
+    Tic* t = e.scene.get(h);
+    t->addComponent<Transform3D>();
+    BodyComp* bc = t->addComponent<BodyComp>();
+    bc->type = BodyType::Rigid;
+    e.st.selected = h;
+    const TextMetrics m = e.ui.textMetrics();
+    const InspProfile prof = inspectorProfile(*t);
+    InspRow plan[64];
+    const u32 n = inspectorPlan(prof, m, false, 0u, plan);
+    u32 twoCol = 0;
+    for (u32 i = 0; i < n; ++i) {
+        if (plan[i].kind == InspRow::Kind::TwoCol) {
+            ++twoCol;
+        }
+    }
+    EXPECT(twoCol == 3u);   // tipo · forma · no chão
+    // o desenho não crasha e os valores curtos cabem SEM truncar
+    e.frame();
+    EXPECT(e.ui.solidsForTest().vertexCount() > 0);
+    const f32 panelW = 300.0f;
+    EXPECT(e.font.widthOf("character") < panelW - 2.0f * 12.0f);
+    EXPECT(e.font.widthOf("capsule") < panelW - 2.0f * 12.0f);
+}
+
+// (G2-8) o Inspector VOLTA AO TOPO quando o TIC selecionado MUDA (o scroll
+// do TIC anterior não se arrasta — era por isso que o Transform "não aparecia")
+TEST(inspector_volta_ao_topo_na_troca_de_tic_g28) {
+    Env e;
+    // os DOIS TICs com conteúdo ALTO (o offset só vive com overflow — um
+    // TIC só com Transform3D cabe inteiro e o clamp devolve 0)
+    const auto fazRico = [](Scene& sc, const char* nome) {
+        const Handle h = sc.create(nome);
+        Tic* t = sc.get(h);
+        t->addComponent<Transform3D>();
+        t->addComponent<MeshRenderer>();
+        BodyComp* bc = t->addComponent<BodyComp>();
+        bc->type = BodyType::Character;
+        return h;
+    };
+    const Handle a = fazRico(e.scene, "A");
+    const Handle b = fazRico(e.scene, "B");
+    e.st.selected = a;
+    e.frame();
+    // rola o Inspector 300px (o conteúdo é alto o bastante para o offset viver)
+    e.ui.scrollSetOffset(editor::kIdScrollInsp, 300.0f);
+    // troca o TIC → o draw repõe o offset a ZERO
+    e.st.selected = b;
+    e.frame();
+    EXPECT(nearEqF(e.ui.scrollOffsetForTest(editor::kIdScrollInsp), 0.0f));
+    // SEM troca o offset MANTÉM-se
+    e.ui.scrollSetOffset(editor::kIdScrollInsp, 120.0f);
+    e.frame();
+    EXPECT(nearEqF(e.ui.scrollOffsetForTest(editor::kIdScrollInsp), 120.0f));
+}
+
+// (G2-7) o LONG-PRESS no nome TRUNCADO da hierarquia pede o nome completo
+// (o contador de frames vive no EditorState; o main converte em toast)
+TEST(hierarquia_long_press_nome_truncado_g27) {
+    Env e;
+    Handle h = e.scene.create("NomeMuitoCompridoQueNaoCabeNaLinhaDaHierarquia");
+    e.scene.get(h)->addComponent<UiCanvas>();
+    e.st.selected = h;
+    e.frame();
+    // a zona do nome da 1ª linha (painel 300: ícone 16+24+8 … olho a 196)
+    const f32 nameX = 16.0f + 24.0f + 8.0f + 8.0f;
+    const f32 rowY = 56.0f + 48.0f + 48.0f + 24.0f;   // chrome+header+pesq/2
+    // dedo PARADO 29 frames: ainda NADA (o limiar é 30 = ~0,5s)
+    e.input.injectDown(0, nameX + 40.0f, rowY);
+    for (int i = 0; i < 29; ++i) {
+        e.frame();
+    }
+    EXPECT(e.st.nameTip[0] == '\0');
+    // o 30.º frame pede o nome COMPLETO (uma vez só)
+    e.frame();
+    EXPECT(std::string(e.st.nameTip) ==
+           "NomeMuitoCompridoQueNaoCabeNaLinhaDaHierarquia");
+    // e NÃO volta a pedir enquanto o dedo continua
+    e.frame();
+    e.frame();
+    EXPECT(std::string(e.st.nameTip) ==
+           "NomeMuitoCompridoQueNaoCabeNaLinhaDaHierarquia");
+    // o dedo saiu → o contador regressa a zero
+    e.input.injectUp(0);
+    e.frame();
+    EXPECT(e.st.hierHoldRow == -1 && e.st.hierHoldFrames == 0);
+}
+
+// (G2-9/G2-10) a BARRA ÚNICA: kToolbarH = 56 (a tab bar fundiu-se — os
+// ~48px vão ao viewport) e o botão sliders NÃO EXISTE mais (inventário G0-4)
+TEST(topbar_unica_56dp_e_viewport_ganha_48_g29) {
+    // a fonte única do chrome diz 56
+    EXPECT(nearEqF(safe::kToolbarH, 56.0f));
+    EXPECT(nearEqF(safe::kToolbarH, safe::kTopBarH));
+    // o viewport central GANHOU os 48px: em 1600×720 sem insets/drawer
+    const UiRect view = safe::centerRect(1600.0f, 720.0f, safe::Insets{});
+    const f32 hAntiga = 720.0f - 104.0f - 24.0f - 48.0f;   // chrome antigo
+    EXPECT(nearEqF(view.h, hAntiga + 48.0f));
+    // o TRIAD morreu (os "pontinhos fantasma"): o layout NÃO tem triad —
+    // compila = o campo não existe; a barra não desenha nada no canto
+    // sup-dir (afirmado pelo desenho: o + do fundo é o ÚNICO no canto dir)
+    const vpchrome::Layout L = vpchrome::layout(view);
+    EXPECT(nearEqF(L.addTicBtn.x + L.addTicBtn.w + 8.0f, view.x + view.w));
 }

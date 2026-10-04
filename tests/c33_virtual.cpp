@@ -218,6 +218,12 @@ PickerGeom primPickerGeom() {
 // de edges que o glue produz no device — o botão captura no press e
 // dispara no release; o deselect antigo armava no press e LIMPAVA no
 // release do MESMO tap, ANTES do dispatch do pick: o bug exato do C33)
+// FASE 9 (9.11): comparação com tolerância (as demais checks do harness
+// são booleanas diretas; as de LAYOUT precisam de tolerância de flutuante)
+static bool nearEqF(f32 a, f32 b, f32 tol = 0.05f) {
+    return (a - b < tol) && (b - a < tol);
+}
+
 void tap(f32 x, f32 y) {
     g_input.injectDown(0, x, y);
     frame();
@@ -1498,6 +1504,79 @@ int main() {
                   "a limpeza também LOGA (cada mudança com motivo)");
             // a cena volta ao estado (o TIC extra sai)
             g_scene.destroy(hCubo);
+        }
+
+        // 9.11 — G2: ALINHAMENTO AO MOCK — barra única 56dp (a tab bar
+        // fundiu-se), ícones da hierarquia por tipo de corpo (tic_static/
+        // tic_player/tic_rigid/tic_camera), Física em duas colunas e o
+        // Inspector que volta ao TOPO na troca de TIC
+        passo("9.11 G2: barra única + ícones de corpo + inspector ao topo");
+        {
+            // a BARRA ÚNICA: kToolbarH = 56 — o viewport GANHOU 48px
+            check(nearEqF(safe::kToolbarH, 56.0f),
+                  "kToolbarH = 56 (menu+tabs numa barra — G2-10)");
+            const UiRect viewG2 = safe::centerRect(
+                static_cast<f32>(g_egl.width()),
+                static_cast<f32>(g_egl.height()), g_ui.safeArea(), 0.0f,
+                false);
+            const f32 hAntiga = static_cast<f32>(g_egl.height()) - 104.0f -
+                                safe::kStatusH - safe::kBottomTabH;
+            check(nearEqF(viewG2.h, hAntiga + 48.0f),
+                  "o viewport central GANHOU os 48px da tab bar fundida");
+            // o TRIAD morreu (os pontinhos fantasma) — o layout do chrome
+            // não tem triad (compila) e o canto sup-dir fica LIVRE
+            const editor::vpchrome::Layout lg2 =
+                editor::vpchrome::layout(viewG2);
+            check(nearEqF(lg2.addTicBtn.x + lg2.addTicBtn.w + 8.0f,
+                          viewG2.x + viewG2.w),
+                  "o '+' continua o ÚNICO elemento do canto inferior direito");
+            // ícones da hierarquia por TIPO DE CORPO (G2-7)
+            {
+                const Handle hC = g_scene.create("CorpoG2");
+                Tic* tc2 = g_scene.get(hC);
+                Transform3D* tr2 = tc2->addComponent<Transform3D>();
+                tr2->pos = Vec3{40.0f, 0.0f, -20.0f};   // fora do caminho
+                tr2->updateWorld();
+                BodyComp* bc2 = tc2->addComponent<BodyComp>();
+                bc2->type = BodyType::Static;
+                check(editor::hierIconFor(*tc2) == icons::Icon::Static,
+                      "corpo ESTÁTICO → tic_static (G2-7)");
+                bc2->type = BodyType::Character;
+                check(editor::hierIconFor(*tc2) == icons::Icon::Person,
+                      "corpo PERSONAGEM → tic_player (G2-7)");
+                bc2->type = BodyType::Rigid;
+                check(editor::hierIconFor(*tc2) == icons::Icon::Rigid,
+                      "corpo RÍGIDO → tic_rigid (G2-7)");
+                check(icons::iconByName("tic_static") >= 0 &&
+                          icons::iconByName("tic_rigid") >= 0,
+                      "os ícones novos existem pelos nomes do mock");
+                // Física em DUAS COLUNAS: o plano tem 3 TwoCol
+                const TextMetrics m2 = g_ui.textMetrics();
+                const editor::InspProfile prof2 = editor::inspectorProfile(*tc2);
+                editor::InspRow plan2[64];
+                const u32 n2 = inspectorPlan(prof2, m2, false, 0u, plan2);
+                u32 twoCol = 0;
+                for (u32 i2 = 0; i2 < n2; ++i2) {
+                    if (plan2[i2].kind == editor::InspRow::Kind::TwoCol) {
+                        ++twoCol;
+                    }
+                }
+                check(twoCol == 3u,
+                      "Física: 3 linhas em duas colunas (tipo/forma/no chão)");
+                // o Inspector VOLTA AO TOPO na troca de TIC (G2-8)
+                // (o Inspector tem de estar ABERTO — o 9.10 fechou-o)
+                g_editor.showInspector = true;
+                g_editor.selected = hC;   // estado de partida: o CorpoG2
+                frame();
+                g_ui.scrollSetOffset(editor::kIdScrollInsp, 200.0f);
+                const Handle hAtor2 = g_scene.find("Ator");
+                g_editor.selected = hAtor2;
+                frame();
+                check(nearEqF(g_ui.scrollOffsetForTest(
+                          editor::kIdScrollInsp), 0.0f),
+                      "troca de TIC: o Inspector volta ao TOPO (G2-8)");
+                g_scene.destroy(hC);
+            }
         }
 
         onAppCmd(&app, APP_CMD_TERM_WINDOW);

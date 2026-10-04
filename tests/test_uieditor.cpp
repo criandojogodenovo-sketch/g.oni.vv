@@ -236,9 +236,9 @@ TEST(uieditor_toggle_abre_viewport_2d_dedicado) {
     Env e;
     EXPECT(e.ok);
     EXPECT(!e.st.uiMode);
-    // 0.9.0 — o separador de modo é a TAB BAR 48dp (modetabsLayout)
-    const toolbar::ModeTabsLayout L =
-        toolbar::modetabsLayout(kSW, kSH, safe::Insets{}, false, false);
+    // FASE 9 (G2-10) — o separador de modo são as TABS da BARRA ÚNICA
+    const toolbar::TopBarLayout L =
+        toolbar::topbarLayout(kSW, kSH, safe::Insets{}, false, false);
     // tap no tab "UI"
     e.tap(L.tabUi.x + L.tabUi.w * 0.5f, L.tabUi.y + L.tabUi.h * 0.5f);
     EXPECT(e.st.uiMode);
@@ -682,10 +682,10 @@ TEST(uieditor_hierarquia_olho_e_dots_e_vazio) {
     EXPECT(e.ok);
     e.frame();
 
-    // geometria 0.9.0 (spec B): linha 48dp [ícone tipo 48zona][nome flex]
-    // [olho 48zona x=196..244][⋮ 48zona x=248..296]; listTop = chrome 104 +
-    // cabeçalho 48 + pesquisa 48 = 200
-    const f32 listTop = 104.0f + 48.0f + 48.0f;
+    // geometria (spec B): linha 48dp [ícone tipo 48zona][nome flex]
+    // [olho 48zona x=196..244][⋮ 48zona x=248..296]; FASE 9 (G2-10):
+    // listTop = chrome 56 (barra única) + cabeçalho 48 + pesquisa 48 = 152
+    const f32 listTop = 56.0f + 48.0f + 48.0f;
     const f32 rowCY = listTop + 24.0f;   // meia linha de 48
 
     // OLHO: toggle de visibilidade imediato
@@ -708,7 +708,7 @@ TEST(uieditor_hierarquia_olho_e_dots_e_vazio) {
 
     // VAZIO da lista (abaixo da última linha, dentro do painel) DESSELECIONA
     EXPECT(e.st.selected.valid());
-    e.tap(150.0f, 88.0f + 48.0f + 3.0f * 52.0f);   // sob a linha do único TIC
+    e.tap(150.0f, 56.0f + 48.0f + 3.0f * 52.0f);   // sob a linha do único TIC (G2-10: 88→56)
     EXPECT(!e.st.selected.valid());
 }
 
@@ -925,7 +925,7 @@ TEST(uieditor_plus_modo_ui_cria_elementos_no_canvas) {
     e.st.uiMode = true;
     e.frame();
     // "+" da Hierarchy abre o menu (no modo UI: CRIAR ELEMENTO UI)
-    e.tap(300.0f - 12.0f - 28.0f, 88.0f + 24.0f);   // botão + do cabeçalho
+    e.tap(300.0f - 12.0f - 28.0f, 56.0f + 24.0f);   // botão + do cabeçalho (G2-10: 88→56)
     EXPECT(e.st.plusMenu);
     // 0.7.4: 10 itens (Panel/Label/Button/Image/Menu/Card/Article/Joystick/
     // VBox/HBox)

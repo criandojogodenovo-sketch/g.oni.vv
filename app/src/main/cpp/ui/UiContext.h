@@ -135,6 +135,18 @@ public:
     bool widgetHit(u64 id, f32 x, f32 y, f32 w, f32 h);
     bool widgetActive(u64 id) const { return active_ == id; }
 
+    // FASE 9 (G2-7): o dedo (slot 0) está EM CIMA deste rect AGORA?
+    // Leitura PURA do input (sem claim, sem gesto) — para o long-press do
+    // nome da hierarquia (o contador de frames vive no EditorState).
+    bool pointerDownAt(f32 x, f32 y, f32 w, f32 h) const {
+        if (!input_ || !input_->down(0)) {
+            return false;
+        }
+        f32 px = -1.0f, py = -1.0f;
+        input_->pos(0, px, py);
+        return px >= x && px < x + w && py >= y && py < y + h;
+    }
+
     // F3: slider horizontal immediate-mode (Inspector do Transform3D).
     // Escreve em `value` (clamp [minV,maxV]); devolve true se mudou este
     // frame. Partilha o mesmo active_ dos botões — um widget interativo por

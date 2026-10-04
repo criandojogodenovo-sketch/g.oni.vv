@@ -84,6 +84,9 @@ enum class Icon : u8 {
     Duplicate,      // rect + plus (duplicar ≠ copy)
     Assign,         // seta para dentro da caixa (atribuir)
     Back,           // ← voltar
+    // ---- FASE 9 (G2-7 — hierarquia consulta o BodyComp) ----
+    Static,         // corpo ESTÁTICO (bloco assente no chão — tic_static)
+    Rigid,          // corpo RÍGIDO (bola com rasto de queda — tic_rigid)
     Count
 };
 

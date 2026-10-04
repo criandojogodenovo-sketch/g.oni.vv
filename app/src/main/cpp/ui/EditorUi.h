@@ -63,10 +63,12 @@
 #include "platform/FileApi.h"
 #include "platform/StoragePerm.h"
 #include "render/Primitives.h"   // 0.8.0: PrimParams no AssetResolvers
+#include "ui/Icons.h"            // FASE 9 (G2-7): hierIconFor devolve icons::Icon
 
 namespace vv {
 
 class VoniSystem;   // 0.9.2: a central da V.ONI (fwd — o ponteiro chega ao drawInspector)
+struct Tic;         // FASE 9 (G2-7): hierIconFor (core/Scene.h)
 
 class Scene;
 class InputState;
@@ -74,6 +76,11 @@ class TouchControls;
 class Camera;
 
 namespace editor {
+
+// FASE 9 (G2-8): ids das regiões de scroll (o reset-por-troca-de-TIC e os
+// testes precisam de os REFERENCIAR — antes eram internos do .cpp)
+constexpr u64 kIdScrollHier = 41;   // F4.1: região de scroll da Hierarchy
+constexpr u64 kIdScrollInsp = 42;   // F4.1: região de scroll do Inspector
 
 // re-export: a largura dos painéis agora vive em ui/SafeArea.h (fonte única)
 constexpr f32 kPanelW = safe::kPanelW;
@@ -106,6 +113,18 @@ struct EditorState {
     // log "ui: pick bloqueado (sem seleção)" NO MESMO frame. Vive no
     // estado (não numa global do main) para ser afervável na suíte.
     bool   pickBlockedHint = false;
+
+    // FASE 9 (G2-7 — long-press no nome truncado da hierarquia): o contador
+    // de frames do dedo PARADO na linha + o tip pendente (o main converte
+    // em toast). ~30 frames = 0.5s @60fps.
+    char   nameTip[64] = "";        // não-vazio = mostrar o nome completo
+    i32    hierHoldRow  = -1;        // linha com o dedo em cima do nome
+    u32    hierHoldFrames = 0;
+    bool   hierHoldShown  = false;
+
+    // FASE 9 (G2-8 — o Inspector volta ao TOPO quando o TIC selecionado
+    // MUDA): o handle visto no frame anterior (scroll reset por troca)
+    Handle inspPrevSelected{};
 
     // 0.6.8 — MODO DE UI (EDITOR ↔ PLAY). Em PLAY: viewport fullscreen +
     // TouchControls + BARRA PLAY MÍNIMA (Stop/fps/aviso); SEM toolbar,
@@ -251,6 +270,10 @@ UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, f32 drawerH,
 // Painel esquerdo: lista de TICs COM SCROLL (todas as entradas, sem corte) +
 // botão "+" no cabeçalho. Tap numa linha seleciona (re-despacho do scroll).
 // Devolve true apenas no frame em que "+" é clicado (main abre o menu).
+// FASE 9 (G2-7): o ícone de tipo da linha da HIERARQUIA (BodyComp
+// primeiro — tic_static/tic_player/tic_rigid; depois câmara/áudio/UI/
+// mesh/entrada). Pura e afervável.
+icons::Icon hierIconFor(const Tic& t);
 bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st);
 
 // Painel direito: componentes do TIC selecionado COM SCROLL — Transform3D

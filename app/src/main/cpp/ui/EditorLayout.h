@@ -208,7 +208,9 @@ struct InspRow {
         MeshLabel,   // F5-E: "mesh: …" só leitura (sem catálogo)
         TexButton,   // F5-E: "tex: …" (selecionável)
         TexLabel,    // F5-E: "tex: …" só leitura
-        Label,       // linha de texto (input/body/tc)
+        Label,       // linha de texto (input/tc)
+        TwoCol,      // FASE 9 (G2-8): duas colunas nome/valor (Física) —
+                     // payload 0=tipo, 1=forma, 2=no chão (BodyComp VIVO)
         Velx,        // slider velx do BodyComp
         AddTc,       // botão "add TouchControls" no fundo
         VisToggle,   // 0.7.0: "visivel: sim/nao" (checkbox do TIC)
@@ -446,7 +448,11 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
     if (p.bc) {
         push(InspRow::Kind::Section, secH, kInspSectionBase + 4, kInspBitFisica);
         if (!(collapsed & kInspBitFisica)) {
-            push(InspRow::Kind::Label, textH, 0);       // body:
+            // FASE 9 (G2-8): FÍSICA em DUAS COLUNAS nome/valor — SEM
+            // truncagem (o "body: static - obb - cha…" de uma linha morreu)
+            push(InspRow::Kind::TwoCol, textH, 0);      // tipo
+            push(InspRow::Kind::TwoCol, textH, 1);      // forma
+            push(InspRow::Kind::TwoCol, textH, 2);      // no chão
             push(InspRow::Kind::Velx, sldH, kInspectorVelX);
         }
     }

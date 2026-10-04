@@ -1,4 +1,4 @@
-// ui/ViewportChrome.cpp — stack vertical + toolbar inferior + triad.
+// ui/ViewportChrome.cpp — stack vertical + toolbar inferior (FASE 9).
 //
 // FASE 9 (G1-1): toolbar ancorada ao RETÂNGULO DA VIEWPORT (drawerH real),
 // só ícones (nome só no ativo), snap = íman, "+" no canto inferior
@@ -109,8 +109,9 @@ Layout layout(const UiRect& view) {
         L.stack[i] = {x, y, kStackBtn, kStackBtn};
         y += kStackBtn + kStackGap;
     }
-    // ---- triad 64dp canto superior direito (removido no G2-10) ----
-    L.triad = {view.x + view.w - kTriad - 8.0f, view.y + 8.0f, kTriad, kTriad};
+    // FASE 9 (G2-10): o TRIAD foi REMOVIDO — os "pontinhos fantasma" do
+    // dono (canto sup-dir do viewport, fora do mock); a orientação vive
+    // no gizmo 3D e na câmara.
     // ---- toolbar inferior: SÓ ÍCONES, âncora = canto inferior ESQUERDO
     // do rect da viewport (G1-1); o ATIVO ganha o nome (mais largo).
     // Total: ativo 132 + 3×48 + íman 48 + 4 gaps 8 = 368 ≤ viewport útil.
@@ -148,7 +149,10 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
     if (stackButton(ui, kVpSaveId, L.stack[2], icons::Icon::Save, true)) {
         a.savePressed = true;
     }
-    if (stackButton(ui, kVpDupId, L.stack[3], icons::Icon::Duplicate, true)) {
+    // FASE 9 (G2-11): o 4.º ícone era DUPLICATE (rect+plus — o "quadrado
+    // com ponto" do dono) → agora é o COPY padrão (2 quadrados sobrepostos;
+    // a AÇÃO continua duplicar — só o GLIFO muda, o Paste já é prancheta)
+    if (stackButton(ui, kVpDupId, L.stack[3], icons::Icon::Copy, true)) {
         a.dupPressed = true;
     }
     if (stackButton(ui, kVpPasteId, L.stack[4], icons::Icon::Paste,
@@ -233,48 +237,9 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
         }
     }
 
-    // ---- TRIAD de orientação (canto sup-dir; REMOVIDO no G2-10 — os
-    // "pontinhos fantasma" do dono; mantido até o grupo G2) ----
-    {
-        const Mat4 v = camera.view();
-        // direções dos eixos NO ESPAÇO DA CÂMARA: linhas da view (rotação)
-        const f32 cx = L.triad.x + L.triad.w * 0.5f;
-        const f32 cy = L.triad.y + L.triad.h * 0.5f;
-        const f32 len = L.triad.w * 0.42f;
-        const struct {
-            f32 ax, ay, az;      // eixo no mundo
-            f32 col[4];
-            const char* letter;
-        } axes[3] = {
-            {1.0f, 0.0f, 0.0f, {0.90f, 0.32f, 0.30f, 1.0f}, "X"},
-            {0.0f, 1.0f, 0.0f, {0.42f, 0.76f, 0.42f, 1.0f}, "Y"},
-            {0.0f, 0.0f, 1.0f, {0.35f, 0.52f, 0.90f, 1.0f}, "Z"},
-        };
-        for (int i = 0; i < 3; ++i) {
-            // view: rotação transposta aplicada ao eixo (a view transforma
-            // mundo→câmara; os eixos seguem a MESMA orientação)
-            const f32 dx = v.m[0] * axes[i].ax + v.m[4] * axes[i].ay +
-                           v.m[8] * axes[i].az;
-            const f32 dy = v.m[1] * axes[i].ax + v.m[5] * axes[i].ay +
-                           v.m[9] * axes[i].az;
-            const f32 dz = v.m[2] * axes[i].ax + v.m[6] * axes[i].ay +
-                           v.m[10] * axes[i].az;
-            (void)dz;
-            // projeção ortográfica simples no plano do triad (dy INVERTIDO:
-            // o ecrã cresce para baixo)
-            const f32 px = cx + dx * len;
-            const f32 py = cy - dy * len;
-            ui.drawLine(cx, cy, px, py, 3.0f, axes[i].col);
-            if (ui.hasFont()) {
-                const f32 lx = px + (dx >= 0 ? 4.0f : -18.0f);
-                ui.label(lx, py + 5.0f, axes[i].letter, axes[i].col);
-            }
-        }
-        // marco central (a origem do triad)
-        const f32 dot[4] = {theme::kTheme.text2[0], theme::kTheme.text2[1],
-                            theme::kTheme.text2[2], 1.0f};
-        ui.panel(cx - 2.0f, cy - 2.0f, 4.0f, 4.0f, dot);
-    }
+    // FASE 9 (G2-10): o TRIAD de orientação foi REMOVIDO (os
+    // "pontinhos fantasma" do dono — fora do mock).
+
     return a;
 }
 
