@@ -30,10 +30,12 @@ jobs:
         run: cmake -S tests -B build-tests -DCMAKE_BUILD_TYPE=Release
 
       - name: Compilar
-        run: cmake --build build-tests --parallel
+        # 0.9.5: só o alvo que ESTE job afere (o c33_virtual compila no
+        # próprio job) — metade do tempo de build por job
+        run: cmake --build build-tests --target test_core --parallel
 
       - name: Executar suíte do core
-        run: ctest --test-dir build-tests --output-on-failure
+        run: ctest --test-dir build-tests --output-on-failure -R "^core$"
 
       # F5.1: paridade de compilação do main.cpp no hospedeiro (stubs) —
       # erros de símbolo no main.cpp apareciam só no job do NDK
@@ -109,7 +111,9 @@ jobs:
         run: cmake -S tests -B build-tests -DCMAKE_BUILD_TYPE=Release
 
       - name: Compilar (suíte + harness do dispositivo virtual)
-        run: cmake --build build-tests --parallel
+        # 0.9.5: só o alvo que ESTE job afere (o replay; o test_core compila
+        # no próprio job) — metade do tempo de build por job
+        run: cmake --build build-tests --target c33_virtual --parallel
 
       # as SENTINELAS (regress_*) correm dentro do test_core — TODAS as
       # runs, TODAS as releases futuras, para sempre (docs/REGRESSOES.md)
