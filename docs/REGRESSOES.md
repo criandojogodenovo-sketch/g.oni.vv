@@ -202,3 +202,18 @@ Prova de mutação (colada em /home/z/my-project/mutacao-R012-*.txt e no RELATOR
 | Padrão proibido | (nenhum — a vigília é a sentinela; o teste de sincronia corre no CI pelo ctest) |
 
 Prova indireta (a mutação aqui é a PRÓPRIA edição do ficheiro/dado): editar o VONI_referencia.md à mão (ou acrescentar uma entrada ao registo sem regenerar) → o item (6) da sentinela fica VERMELHO no CI (ficheiro != registo). O R-011/R-012 têm as suas provas coladas nas respetivas secções.
+
+## R-015 · artefacto de release com identidade errada (0.9.6 · G0)
+
+| campo | valor |
+|---|---|
+| ID | R-015 |
+| Reportado | task 0.9.6 (G0): o run verde do fecho 0.9.5 (commit 522ed36) publicou o APK como `goni-vv-0.9.4-release-signed` — identidade ERRADA |
+| Sintoma exato | o artifact do CI chama-se `goni-vv-0.9.4-release-signed` enquanto o build.gradle já declara versionName 0.9.5/versionCode 48 (bump do commit a0ce025): o dono baixa um ficheiro que diz 0.9.4 mas INSTALA 0.9.5; a rastreabilidade dos crash-dumps fica turva (o dump traz a versão da build — o nome do ficheiro dizia outra); o checklist VERIFIED do README não casa com a versão instalada |
+| Causa raiz | `.github/workflows/release.yml` passo "Publicar artifact do APK": o `name:` era um LITERAL (`goni-vv-0.9.4-release…`) que ninguém mexia no fecho das fases — o bump do build.gradle não chegava ao nome do artifact por construção |
+| Fix | (1) o nome do artifact passa a DINÂMICO: `goni-vv-${{ env.VNAME }}-release…` com VNAME exportado do build.gradle no passo build_info (GITHUB_ENV); (2) GATE `release-identity` (scripts/release_identity_check.py) no job build-release ANTES do upload: versionName/versionCode do build.gradle ↔ template do artifact no workflow (nenhum literal divergente; o env é exportado) ↔ docs/RELATORIO-<versionName>.md existe, declara o versionCode e é o MAIS RECENTE (reverter o bump fica vermelho); (3) fim-a-fim no job verify-entry-symbols: o artifact baixa no PRÓPRIO diretório (merge-multiple: false) e o gate afere o NOME REAL publicado com `--artifact-name` |
+| Teste sentinela | GATE `release-identity` (CI, dois pontos: build-release pré-upload + verify-entry-symbols no artifact baixado); a script corre igual no local (`python3 scripts/release_identity_check.py`) |
+| Linha do replay | (nenhuma — é gate de identidade do CI, não comportamento do device; o replay consome a identidade via build_info.txt, que já era derivada do build.gradle) |
+| Padrão proibido | (nenhum — a vigília é o gate; um literal `goni-vv-X.Y.Z-release` divergente no workflow é vermelho pela regra 2a da script) |
+
+Prova de mutação (colada em /home/z/my-project/mutacao-R015-vermelho-verde.txt e no RELATORIO-0.9.6): (A) o literal 0.9.4 volta ao `name:` do upload → gate VERMELHO ("nome de artifact LITERAL… != versionName 0.9.5"); (B) reverter o bump (versionName 0.9.4/versionCode 47) → VERMELHO ("a versão a fechar não é a mais recente documentada"); (C) bump sem RELATORIO (0.9.9) → VERMELHO ("não pode fechar sem o relatório da própria versão"); reposto → VERDE nos três casos. As mutações correram com a MESMA script que o CI corre (a lógica do gate é idêntica nos dois sítios — prova local transfere; nenhum commit vermelho foi empurrado ao repo, conforme o precedente das provas R-011/R-012).

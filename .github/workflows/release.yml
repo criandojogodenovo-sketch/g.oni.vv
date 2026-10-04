@@ -24,7 +24,25 @@ jobs:
     name: Testes do core (Linux)
     runs-on: ubuntu-latest
     steps:
+      # 0.9.6 (P-01): fetch-depth 0 — o gate scope-check precisa do diff
+      # before..after do push (o checkout raso de 1 commit não tem o before)
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 0.9.6 (CLÁUSULA P-01) — GATE SCOPE-CHECK: o diff deste push contra
+      # ci/scope.txt; UM ficheiro fora do scope aprovado = VERMELHO = a
+      # campanha tocou onde não devia (PARAR e perguntar ao dono). O
+      # fallback (before inexistente/zero — 1º push de um ramo novo)
+      # afera o commit corrente HEAD^..HEAD
+      - name: Gate scope-check (Clausula P-01 — ci/scope.txt)
+        run: |
+          set -euo pipefail
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            BEFORE="HEAD^"
+          fi
+          python3 scripts/scope_check.py "$BEFORE" "${{ github.sha }}"
 
       - name: Configurar build dos testes
         run: cmake -S tests -B build-tests -DCMAKE_BUILD_TYPE=Release
@@ -278,6 +296,10 @@ jobs:
           SO_SHA="$(sha256sum "${SO}" | cut -d' ' -f1)"
           VCODE="$(grep -oE 'versionCode [0-9]+' app/build.gradle | head -n1 | grep -oE '[0-9]+')"
           VNAME="$(grep -oE "versionName '[0-9.]+'" app/build.gradle | head -n1 | grep -oE "[0-9.]+")"
+          # 0.9.6 (R-015): o par de identidade SOBE para o env do job — o
+          # nome do artifact (abaixo) e o gate de identidade leem DAQUI
+          echo "VNAME=${VNAME}" >> "$GITHUB_ENV"
+          echo "VCODE=${VCODE}" >> "$GITHUB_ENV"
           mkdir -p app/src/main/assets
           {
             echo "version=${VNAME}"
@@ -303,10 +325,21 @@ jobs:
       - name: "Conteúdo do APK (verificação — lib arm64, sem dex próprio)"
         run: unzip -l app/build/outputs/apk/release/*.apk
 
+      # 0.9.6 (G0 · R-015) — GATE RELEASE-IDENTITY: nome do artifact ==
+      # versionName no build config == versão do RELATORIO a fechar.
+      # VERMELHO se divergir — a causa raiz real: o run verde do fecho
+      # 0.9.5 publicou 'goni-vv-0.9.4-release-signed' (nome LITERAL no
+      # workflow) com o build.gradle já em 0.9.5/48
+      - name: Gate release-identity (R-015 — artifact == build == relatorio)
+        run: python3 scripts/release_identity_check.py
+
       - name: Publicar artifact do APK
         uses: actions/upload-artifact@v4
         with:
-          name: goni-vv-0.9.4-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
+          # 0.9.6 (R-015): o nome NÃO é literal — vem do versionName do
+          # build.gradle (exportado no passo build_info acima). O gate
+          # release-identity aferiu a bijeção ANTES do upload
+          name: goni-vv-${{ env.VNAME }}-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
@@ -328,8 +361,24 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: '*-release*'
-          merge-multiple: true
+          # 0.9.6 (R-015): merge-multiple DESLIGADO — o artifact baixa no
+          # SEU diretório (apk/goni-vv-<versão>-release-signed/…) e o gate
+          # de identidade abaixo afere o NOME REAL publicado. O find do
+          # APK continua a funcionar (procura recursiva); continua UM
+          # artifact a casar com o pattern em pushes normais
+          merge-multiple: false
           path: apk
+
+      # 0.9.6 (G0 · R-015) — a ponta SOLTA da identidade: o nome do
+      # artifact que foi MESMO publicado (o diretório baixado) casa com
+      # o versionName do build. É o fim-a-fim do gate (o passo do
+      # build-release aferiu o modelo; este afere a realidade)
+      - name: Gate release-identity do artifact real (R-015)
+        run: |
+          set -euo pipefail
+          ARTDIR="$(find apk -mindepth 1 -maxdepth 1 -type d -name 'goni-vv-*' | head -n 1)"
+          test -n "$ARTDIR" || { echo "::error::artifact do APK não encontrado em apk/"; exit 1; }
+          python3 scripts/release_identity_check.py --artifact-name "$(basename "$ARTDIR")"
 
       - name: Extrair libgoni_vv.so do APK (arm64-v8a)
         run: |
