@@ -32,6 +32,29 @@ parte das decisões de engenharia — não é vergonha a esconder:
 O mapa dos módulos está em `ARCHITECTURE.md`. A referência da linguagem
 V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 
+## 0.9.6 — IDENTIDADE + SOBREPOSIÇÕES + ECRÃS + TECLADO + MESHES + COMUNICAÇÃO + BENCHMARKS
+
+**Os sete grupos (um commit cada, CI verde em todos):**
+- **G0 IDENTIDADE (R-015)**: o artefacto publicado chamava-se 0.9.4 numa release 0.9.5 (o `name:` era um LITERAL no workflow). Nome DINÂMICO + o gate release-identity no CI (build == artefacto == relatório — reverter o bump ou fechar versão sem relatório = vermelho).
+- **G1 INSETS/CAMADAS**: os ecrãs cheios (Docs/Settings/Script/Texto) vivem no contentRect (a faixa preta do C33 deixou de cortar títulos); o glifo do áudio/orbit/gizmo MORREM com um modal aberto (a cena já não se mexe por trás do Settings); a barra de baixo esconde-se em ecrãs cheios e com teclado.
+- **G2 ECRÃS (R-010)**: Docs com altura VARIÁVEL e quebra por palavras (nada de "…"); Settings com headers sticky; o editor de script NÃO MENTE no render (os espaços/`{` voltaram a desenhar — `centralmain` morreu) e os ERROS ENSINAM com botão SUBSTITUIR (`if` → `exist` na linha do erro; `break` sabe se está num ciclo→resume ou option→stopand).
+- **G3 TECLADO PRÓPRIO**: política de ALTERNATIVAS com o GBoard (o botão Keyboard do cabeçalho abre o próprio e esconde o IME); setas/espaço/tab/apagar/enter na linha de baixo; o SHIFT Aa (o teclado só digitava MAIÚSCULAS).
+- **G4 IMPORT DE MALHA (R-014)**: a causa do "import não aparece no seletor" era o CAP DE 5 FICHEIROS sem scroll — a lista agora lista TODOS com scroll (o padrão Hierarchy); a FASE 12.8 prova fim-a-fim com um .glb REAL pelo conversor de produção.
+- **G5 COMUNICAÇÃO + DOCS-LINT (R-016)**: este capítulo "Como isto é construído" + `ARCHITECTURE.md` (o diagrama de camadas) + dois rascunhos Reddit (docs/reddit/); o gate docs-lint proíbe placeholders/hedging em TODA a documentação do repo (docs/ recursivo + README + llms — 47 ficheiros).
+- **G6 BENCHMARKS (R-017)**: Settings→Diagnóstico ganhou **Correr bench** e **Copiar relatório** — um bloco de 9 LINHAS com MEDIÇÕES REAIS (fps média/mín/1% low das duas cenas, verts/draw calls da MESMA fonte da barra de estado, import glTF com cronómetro, compressão ASTC/ETC2, probe de áudio, pico RSS, APK sha256, projeto em MB); o que não pôde ser medido diz **"não medido"** (a honestidade é a sentinela — um valor hardcodado = CI vermelho, provado por mutação).
+
+**Checklist C33/RMX3624 (VERIFICAR no device — 0.9.6):**
+1. Instalar o `goni-vv-0.9.6-release-signed` do CI — o NOME do artefacto bate com a versão (o R-015 fecha o ciclo).
+2. Abrir Docs/Settings/Editor: NENHUM título cortado pela faixa preta; com o Settings aberto, arrastar no ecrã NÃO orbita a cena e o glifo amarelo do áudio não aparece por cima.
+3. Docs: as descrições desenham INTEIRAS (com quebras por palavras, sem "…").
+4. Editor: escrever `central main {` — os espaços e a chave DESENHAM; guardar → fechar → abrir: o texto é o MESMO.
+5. Escrever `if` num script → a barra de erro ensina "exist" com o botão SUBSTITUIR; um toque substitui a palavra inteira.
+6. O botão Keyboard no cabeçalho do editor abre o teclado próprio; a tecla Aa alterna maiúsculas; as setas movem o cursor; a barra de baixo esconde-se.
+7. Importar um .glb com 5+ meshes no projeto → abrir o seletor de malha → arrastar a lista → o import NOVO está lá (<1s).
+8. **Correr bench** (Settings→Diagnóstico, ~20s+) → **Copiar relatório** → COLAR num bloco de notas: o bloco de 9 linhas com os números REAIS do C33 (colar também no GitHub do relatório).
+9. O bloco diz "não medido" APENAS nos sítios sem medição possível (se o aparelho nunca saiu do foreground, o warm start diz "não medido" — sair e voltar à app e re-correr o bench dá o warm).
+10. Verificar os 60 fps com a cena bench (64 TICs + mesh importado) — é a pergunta que o bloco responde com o 1% low.
+
 ## 0.9.5 — P-01: LINKERS & TYKERS COMPLETOS + O EDITOR QUE ENSINA
 
 **O que mudou (duas metades, um commit cada):**

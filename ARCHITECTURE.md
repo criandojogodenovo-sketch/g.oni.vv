@@ -133,7 +133,8 @@ EglContext swap
 
 ## 5. Os números que importam (no momento em que se escreveu)
 
-810 casos no test_core (com as sentinelas R-001..R-016) · 295 checks no
-c33_virtual (FASE 12) · 6 gates locais + os do CI · ~104 TUs no alvo da
+817 casos no test_core (com as sentinelas R-001..R-017) · 316 checks no
+c33_virtual (FASE 12) · 6 gates locais + os do CI (scope-check ·
+release-identity · docs-lint) · ~105 TUs no alvo da
 app (link_parity). Estes números movem-se a cada versão — o valor exato
 de cada época está no RELATÓRIO dessa versão.
