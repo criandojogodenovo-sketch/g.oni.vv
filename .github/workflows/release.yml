@@ -116,16 +116,19 @@ jobs:
         run: cmake --build build-tests --target c33_virtual --parallel
 
       # as SENTINELAS (regress_*) correm dentro do test_core — TODAS as
-      # runs, TODAS as releases futuras, para sempre (docs/REGRESSOES.md)
-      - name: Suíte do core com sentinelas (regress_*)
-        run: ctest --test-dir build-tests --output-on-failure
+      # runs, TODAS as releases futuras, para sempre (docs/REGRESSOES.md).
+      # 0.9.5 (builds com target): ESTE job afere o REPLAY; o test_core
+      # (com as sentinelas) corre no job dele — a cobertura total é a mesma,
+      # cada suíte exatamente UMA vez por run
+      - name: Replay da sessão real no C33 virtual (com sentinelas do ctest)
+        run: ctest --test-dir build-tests --output-on-failure -R "^c33_virtual_replay$"
 
-      - name: Replay da sessão real no C33 virtual
+      # o output do replay p/ o gate de padrões (o binário é rápido; o tee
+      # deixa o passo-a-passo no log do job — o que o relatório cola)
+      - name: Saida do replay p/ o gate (c33-replay.txt)
         run: |
           set -euo pipefail
-          ./build-tests/c33_virtual 2>&1 | tee c33-replay.txt
-          # o executável já sai non-zero em qualquer [FAIL]; o tee deixa o
-          # output passo-a-passo no log do job (o que o relatório cola)
+          ./build-tests/c33_virtual > c33-replay.txt
 
       # 0.9.3 (hotfix REG-001) — as SENTINELAS JVM também correm AQUI (o
       # gate delas precisa do output neste job; o core-tests corre-as como
