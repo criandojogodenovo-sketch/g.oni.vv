@@ -1582,6 +1582,184 @@ int main() {
         onAppCmd(&app, APP_CMD_TERM_WINDOW);
     }
 
+    // ======================================================================
+    // FASE 11 — 0.9.5 · LINKERS & TYKERS (METADE 1): o replay no caminho
+    // REAL do app — o editor carrega um script com linker/tyker, o Run
+    // arranca a run, o follow MOVE o Transform3D, o colorpars TINGE o
+    // MeshRenderer, o RF em falta LOGA o erro exato sem matar o script, e
+    // o CICLO aparece na BARRA DE ERRO do editor com linha. (11.B — os
+    // lookups de ajuda do Editor que Ensina — entra com a METADE 2.)
+    // ======================================================================
+    fase("FASE 11 — replay linkers/tykers (0.9.5 METADE 1)");
+    {
+        resetEngineForHarness();
+        javaRegistersWithCacheDir();
+        ime::clearForTest();
+        g_jni.void_calls.clear();
+
+        auto st11 = std::make_unique<FakeStorage>();
+        FakeStorage* rawSt11 = st11.get();
+        check(Project::createNew(*rawSt11, "fase11", g_project),
+              "projeto criado");
+        {
+            const Handle hA = g_scene.create("Ator");
+            Tic* tA = g_scene.get(hA);
+            Transform3D* trA = tA->addComponent<Transform3D>();
+            trA->pos = Vec3{15.0f, 0.0f, 0.0f};
+            trA->updateWorld();
+            tA->addComponent<MeshRenderer>();
+            // o script viaja NO .goni (o serializer salta ScriptComp VAZIO —
+            // a fonte entra ANTES do save, o cenário real de um script que
+            // já existia no projeto)
+            ScriptComp& sc11 = *tA->addComponent<ScriptComp>();
+            sc11.source =
+                "linker(Ator)to(Alvo)=RF(principal)\n"
+                "tyker(seguelo){ find(principal) follow(2) }\n"
+                "tyker(pinta){ find(principal) colorpars(cor)(#FF8800) }\n"
+                "central main { on moment { } allmoments { } }\n";
+            const Handle hB = g_scene.create("Alvo");
+            Tic* tB = g_scene.get(hB);
+            Transform3D* trB = tB->addComponent<Transform3D>();
+            trB->pos = Vec3{5.0f, 0.0f, 0.0f};
+            trB->updateWorld();
+            check(g_project.saveActiveScene(*rawSt11, g_scene),
+                  "cena gravada (Ator em 15, Alvo em 5, script no .goni)");
+        }
+        g_storage = std::move(st11);
+        g_projectReady = true;
+
+        android_app app11;
+        std::memset(&app11, 0, sizeof(app11));
+        onAppCmd(&app11, APP_CMD_INIT_WINDOW);
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+
+        // 11.1 — o script COM LINKER/TYKER corre pelo caminho REAL: o
+        // editor abre a fonte guardada, o Run arranca, o follow move o TIC
+        passo("11.1 linker+tyker: Run real → follow move o Transform3D");
+        {
+            const Handle ator = g_scene.find("Ator");
+            check(ator.valid(), "o TIC Ator volta do boot");
+            const ScriptComp* sc11 =
+                g_scene.get(ator)->getComponent<ScriptComp>();
+            check(sc11 != nullptr && !sc11->source.empty(),
+                  "o script veio NO .goni (round-trip das fontes)");
+            openScriptEditor(ator);
+            check(g_editor.scriptWin.open, "o editor abre com a fonte");
+            check(g_editor.scriptWin.buf.find("linker(Ator)to(Alvo)") !=
+                      std::string::npos,
+                  "a fonte guardada abre INTACTA (com linkers)");
+            scriptEditorRun();
+            check(g_editor.scriptWin.running, "a run do editor está ATIVA");
+            // o tick do VoniSystem (o harness não passa pelo android_main,
+            // onde o g_systems se registra — o tick DIRETO é o mesmo passo
+            // que o loop real dá: VoniSystem.tick → runFrame → tykers)
+            g_voni.tick(g_scene, 1.0f / 60.0f);
+            frame();   // o frame de desenho
+            const Tic* tA = g_scene.get(g_scene.find("Ator"));
+            const Transform3D* tr =
+                tA ? tA->getComponent<Transform3D>() : nullptr;
+            check(tr != nullptr && nearEqF(tr->pos.x, 7.0f),
+                  "follow(2): o Ator FICA a 2 do Alvo (15→7, alvo em 5)");
+            check(tr != nullptr && nearEqF(tr->pos.y, 0.0f) &&
+                      nearEqF(tr->pos.z, 0.0f),
+                  "follow: eixos y/z intocados");
+        }
+
+        // 11.2 — o colorpars TINGIU o MeshRenderer (o mesmo frame de 11.1)
+        passo("11.2 colorpars tinge o material do TIC de origem");
+        {
+            const Tic* tA = g_scene.get(g_scene.find("Ator"));
+            const MeshRenderer* mr =
+                tA ? tA->getComponent<MeshRenderer>() : nullptr;
+            check(mr != nullptr && nearEqF(mr->tint[0], 1.0f) &&
+                      nearEqF(mr->tint[1], 0.5333f, 1e-2f) &&
+                      nearEqF(mr->tint[2], 0.0f),
+                  "colorpars(cor)(#FF8800): tint = (1, 0.53, 0)");
+        }
+
+        // 11.3 — RF EM FALTA (R-012): o erro exato no engine.log, o tyker
+        // não corre, o script CONTINUA (o follow do outro tyker mexeu)
+        passo("11.3 RF em falta: log exato + tyker não corre (R-012)");
+        {
+            const Handle ator = g_scene.find("Ator");
+            // repõe a posição de partida + EDITA o buffer (o que o Run usa)
+            if (Tic* t = g_scene.get(ator)) {
+                if (Transform3D* tr = t->getComponent<Transform3D>()) {
+                    tr->pos = Vec3{15.0f, 0.0f, 0.0f};
+                    tr->updateWorld();
+                }
+            }
+            g_editor.scriptWin.buf =
+                "linker(Ator)to(Alvo)=RF(principal)\n"
+                "tyker(bom){ find(principal) follow(2) }\n"
+                "tyker(mau){ find(fantasma) follow() }\n"
+                "central main { allmoments { View P \"segue\" } }\n";
+            g_editor.scriptWin.caret =
+                static_cast<u32>(g_editor.scriptWin.buf.size());
+            scriptEditorRun();
+            g_voni.tick(g_scene, 1.0f / 60.0f);
+            frame();
+            check(logHas("RF 'fantasma' não encontrada"),
+                  "o log traz o ERRO EXATO da spec (R-012)");
+            check(logHas("tyker 'mau' não corre"),
+                  "o log diz QUAL tyker não correu");
+            const Tic* tA = g_scene.get(g_scene.find("Ator"));
+            const Transform3D* tr =
+                tA ? tA->getComponent<Transform3D>() : nullptr;
+            check(tr != nullptr && nearEqF(tr->pos.x, 7.0f),
+                  "o tyker BOM correu (o script não morreu)");
+            check(logHas("voni: segue"), "o allmoments segue a correr");
+        }
+
+        // 11.4 — CICLO (R-011): a run MORRE com o erro legível E a barra
+        // de erro do editor ACENDE com a linha
+        passo("11.4 ciclo a→b + b→a: erro legível na barra (R-011)");
+        {
+            // EDITA o buffer para o script com o CICLO (o que o Run compila)
+            g_editor.scriptWin.buf =
+                "linker(Ator)to(Alvo)=RF(p)\n"
+                "linker(Alvo)to(Ator)=RF(p)\n"
+                "central main { }\n";
+            g_editor.scriptWin.caret =
+                static_cast<u32>(g_editor.scriptWin.buf.size());
+            scriptEditorRun();
+            check(!g_editor.scriptWin.running, "a run NÃO arranca (rejeitada)");
+            check(g_editor.scriptWin.errLine >= 1,
+                  "a barra de erro tem LINHA");
+            check(g_editor.scriptWin.errMsg.find("ciclo") !=
+                      std::string::npos,
+                  "a barra de erro diz CICLO (legível)");
+            check(g_editor.scriptWin.errMsg.find("'Ator'") !=
+                      std::string::npos,
+                  "o erro nomeia os lados do ciclo");
+        }
+
+        // 11.5 — as Docs têm os LINKERS/TYKERS/COMPONENTES (a mesma fonte
+        // do registo — a lupa do editor pesquisa por elas)
+        passo("11.5 Docs: as categorias novas povoadas (o registo alimenta)");
+        {
+            const auto& all = voni::docs::all();
+            bool hasLinker = false, hasTyker = false, hasComp = false;
+            for (const auto& e : all) {
+                hasLinker = hasLinker || e.cat == voni::docs::Cat::Linker;
+                hasTyker = hasTyker || e.cat == voni::docs::Cat::Tyker;
+                hasComp = hasComp || e.cat == voni::docs::Cat::Componente;
+            }
+            check(hasLinker && hasTyker && hasComp,
+                  "Docs: categorias Linker/Tyker/Componente povoadas");
+            check(!voni::docs::search("follow").empty(),
+                  "Docs: a pesquisa apanha 'follow'");
+            check(!voni::docs::search("colorpars").empty(),
+                  "Docs: a pesquisa apanha 'colorpars'");
+        }
+
+        onAppCmd(&app11, APP_CMD_TERM_WINDOW);
+    }
+
     // ---- sumário -----------------------------------------------------------
     std::printf("\n== C33 VIRTUAL: %d check(s), %d falha(s) ==\n", g_checks, g_failed);
     if (g_failed == 0) {

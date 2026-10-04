@@ -50,6 +50,13 @@
 //             cena.transition.for("dest") · Deltatime.Increment(v,x)
 //             Explode.TIC.et/.er · Search.alvo.prop (§9)
 //   NÃO EXISTE if/else/switch/case/break (spec §6 — NUNCA).
+//
+// 0.9.5 (METADE 1 — LINKERS & TYKERS, spec fechada desta entrega):
+//   linker(A)to(B)=RF(nome)            declaração de TOPO
+//   tyker(nome){ find(RF) comps… }     declaração de TOPO
+//   O CORPO do tyker é GENÉRICO (nome + caudas de args): o REGISTO central
+//   (VoniRegistry) valida nomes/argc — ADICIONAR COMPONENTE NOVO NÃO MUDA
+//   ESTA GRAMÁTICA (o teste parser_independente do registo prova-o).
 #include "voni/Voni.h"
 
 #include <string>
@@ -62,7 +69,32 @@ const char* kVoniGrammar = R"VONIPEG(
 # --------------------------- V.ONI v0 (0.9.2) -------------------------------
 
 Script      <- Item*
-Item        <- CentralMain / FnDef / Statement
+Item        <- CentralMain / LinkerDecl / TykerDef / FnDef / Statement
+
+# --- 0.9.5: LINKERS & TYKERS (declarações de TOPO — como as fn) ----------
+# LinkSide = Path (reuso): objeto/TIC/propriedade/animação, com pontos.
+# A forma do Change é fixa (Change+to); os RESTANTES componentes são
+# GENÉRICOS (CompCall) e o REGISTO é que decide o que existe.
+LinkerDecl  <- 'linker' '(' Path ')' 'to' '(' Path ')' '=' 'RF' '(' IdentAny ')'
+# tyker(nome){ … } — o nome ENTRE PARÊNTESES como na forma da spec (o mesmo
+# estilo do linker(A)to(B)=RF(nome)); o corpo é TykerItem*
+TykerDef    <- 'tyker' '(' IdentAny ')' '{' TykerItem* '}'
+# TykerFind ANTES de tudo (mas o corpo aceita find em qualquer posição —
+# o VALIDADOR é que exige o 1º lugar, com erro que ensina, em vez de
+# syntax error seco — o mesmo princípio dos nomes IdentAny+validação)
+TykerItem   <- TykerFind / ChangeComp / CompCall / Statement
+TykerFind   <- 'find' '(' IdentAny ')'
+ChangeComp  <- 'Change' '(' ChangeSide ')' 'to' '(' Path ')'
+ChangeSide  <- < 'origem' / 'destino' >
+# CompCall: nome + 1ª cauda OBRIGATÓRIA (follow() tem parênteses sempre) +
+# 2ª cauda opcional (colorpars(cor)(cor2)) + !'{' (para `repeat(3){ }`
+# falhar AQUI e cair no Statement → o validador rejeita com erro que
+# ensina "o tyker só aceita componentes", com LINHA)
+CompCall    <- IdentAny CompTail CompTail? !'{'
+CompTail    <- '(' (CompArg (',' CompArg)*)? ')'
+CompArg     <- ColorLit / Expr
+ColorLit    <- < '#' HexD HexD HexD HexD HexD HexD >
+HexD        <- [0-9A-Fa-f]
 
 CentralMain <- 'central' 'main' CMBody
 CMBody      <- '{' CMItem* '}'
@@ -174,8 +206,9 @@ IdentAny    <- < [a-zA-Z] [a-zA-Z0-9_]* >
 //
 // Nomes de componentes de tyker (follow/look/orbit/copy/map/point/colorpars/
 // play/limit/delay/shading/Change/find) são reservados SÓ DENTRO de bloco
-// tyker (0.9.3) — em 0.9.2 NÃO estão nesta lista (fora de tyker podem ser
-// nomes de variáveis, spec §5).
+// tyker (0.9.5) — fora de tyker podem ser nomes de variáveis (spec §5);
+// 'linker'/'to'/'tyker' são reservados SEMPRE (estão na lista abaixo) e
+// 'RF' é forma da engine (maiúscula — nomes de utilizador são minúsculos).
 // ---------------------------------------------------------------------------
 static const char* const kReserved[] = {
     "exist", "notexist", "option", "and", "stopand", "notoption",

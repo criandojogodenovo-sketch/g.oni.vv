@@ -865,3 +865,236 @@ TEST(regress_glyph_coverage) {
     ui.endFrame();
     EXPECT(depois > antes);   // glifos EMITIDOS (o acento desenha)
 }
+
+// ===========================================================================
+// 0.9.5 · SENTINELAS R-011 / R-012 — LINKERS & TYKERS (METADE 1)
+//
+//   R-011 regress_linker_ciclo_rejeitado — ciclos a→b + b→a (e os longos)
+//                            rejeitados com erro LEGÍVEL na ativação; nunca
+//                            crash, nunca script ambíguo a correr
+//   R-012 regress_rf_em_falta — RF inexistente no find → o ERRO exato da
+//                            spec ("RF 'x' não encontrada") + O TYKER NÃO
+//                            CORRE + o RESTO do script segue (nunca fatal)
+//
+// A prova de mutação (fix revertido → VERMELHO; reposto → VERDE) é
+// obrigatória para os DOIS (colada no RELATORIO-0.9.5): desligar o check
+// de ciclo → R-011 falha; desligar o log/flag de RF em falta → R-012
+// falha. O REPLAY do caminho REAL (editor → Run → frame) vive no
+// c33_virtual FASE 11.
+// ===========================================================================
+#include "voni/Voni.h"
+#include "voni/VoniInternal.h"
+#include "voni/VoniRegistry.h"
+#include "voni/VoniTykers.h"
+
+namespace {
+
+// Host mínimo das sentinelas: TICs com pos em memória + log capturado
+struct SenTic {
+    std::string name;
+    f32 pos[3] = {0, 0, 0};
+};
+
+struct SenHost : voni::Host {
+    std::vector<SenTic> tics;
+    std::vector<std::string> logs;
+
+    SenTic* tic(const std::string& n) {
+        for (auto& t : tics) {
+            if (t.name == n) {
+                return &t;
+            }
+        }
+        return nullptr;
+    }
+    void log(const char* line) override { logs.push_back(line); }
+    bool getProp(const std::string& n,
+                 const std::vector<std::string>& chain, voni::Value& out,
+                 std::string& err) override {
+        SenTic* t = tic(n);
+        if (!t) {
+            err = "TIC '" + n + "' não existe";
+            return false;
+        }
+        if (chain.empty()) {
+            out = voni::Value::ofTic(t->name);
+            return true;
+        }
+        if (chain[0] == "pos") {
+            out = voni::Value::ofVec3(t->pos[0], t->pos[1], t->pos[2]);
+            return true;
+        }
+        err = "propriedade '" + chain[0] + "' não existe";
+        return false;
+    }
+    bool setProp(const std::string& n,
+                 const std::vector<std::string>& chain, const voni::Value& v,
+                 std::string& err) override {
+        SenTic* t = tic(n);
+        if (!t) {
+            err = "TIC '" + n + "' não existe";
+            return false;
+        }
+        if (chain.size() == 1 && chain[0] == "pos" && v.t == voni::Type::Vec3) {
+            t->pos[0] = v.v3[0];
+            t->pos[1] = v.v3[1];
+            t->pos[2] = v.v3[2];
+            return true;
+        }
+        err = "escrita não suportada";
+        return false;
+    }
+    bool ticExists(const std::string& n) override { return tic(n) != nullptr; }
+    void moveTic(vv::f32, vv::f32, vv::f32) override {}
+    void explodeTic(bool) override {}
+    bool importAnim(const std::string&, std::string& err) override {
+        err = "sem anims";
+        return false;
+    }
+    bool transitionTo(const std::string&, const std::string&,
+                      std::string& err) override {
+        err = "sem cenas";
+        return false;
+    }
+    std::string currentSceneName() override { return "cena"; }
+    bool search(const std::string&, const std::vector<std::string>&,
+                voni::Value&, std::string& err) override {
+        err = "sem search";
+        return false;
+    }
+    vv::f64 frameDt() override { return 1.0 / 60.0; }
+};
+
+bool senLogHas(const SenHost& h, const std::string& sub) {
+    for (const std::string& l : h.logs) {
+        if (l.find(sub) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+TEST(regress_linker_ciclo_rejeitado) {
+    using namespace voni;
+    // ---- (1) o ciclo DIRETO a→b + b→a no mesmo RF ------------------------
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(a)to(b)=RF(p)\n"
+            "linker(b)to(a)=RF(p)\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        SenHost h;
+        const bool started = s.runStart(h, err);
+        EXPECT(!started);                     // REJEITADO — o script não corre
+        EXPECT(!err.ok);                      // com ERRO…
+        EXPECT(err.line > 0);                 // …com LINHA…
+        EXPECT(err.message.find("ciclo") != std::string::npos);
+        EXPECT(err.message.find("'a'") != std::string::npos);
+        EXPECT(err.message.find("'b'") != std::string::npos);
+        EXPECT(err.message.find("RF 'p'") != std::string::npos);
+    }
+    // ---- (2) o ciclo LONGO a→b→c→a (o DFS apanha) ------------------------
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(a)to(b)=RF(p)\n"
+            "linker(b)to(c)=RF(p)\n"
+            "linker(c)to(a)=RF(p)\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        SenHost h;
+        EXPECT(!s.runStart(h, err));
+        EXPECT(err.message.find("ciclo") != std::string::npos);
+    }
+    // ---- (3) sem ciclo: corre limpo (o guard não caça linkers válidos) ---
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(a)to(b)=RF(p)\n"
+            "linker(c)to(b)=RF(p)\n"
+            "linker(b)to(d)=RF(p)\n"
+            "central main { on moment { View P \"ok\" } }\n", err);
+        EXPECT(err.ok);
+        SenHost h;
+        h.tics = {{"a"}, {"b"}, {"c"}, {"d"}};
+        EXPECT(s.runStart(h, err));
+        Error ferr;
+        EXPECT(s.runFrame(h, 1.0 / 60.0, ferr));
+        EXPECT(senLogHas(h, "voni: ok"));
+    }
+    // ---- (4) cadeia de 300: o teto 256 aborta LEGÍVEL (nunca stack
+    //      overflow, nunca hang) -------------------------------------------
+    {
+        std::string src;
+        for (int i = 0; i < 299; ++i) {
+            src += "linker(n" + std::to_string(i) + ")to(n" +
+                   std::to_string(i + 1) + ")=RF(c)\n";
+        }
+        src += "central main { }\n";
+        Error err;
+        Script s = Script::compile(src.c_str(), err);
+        EXPECT(err.ok);
+        SenHost h;
+        EXPECT(!s.runStart(h, err));
+        EXPECT(err.message.find("profundidade") != std::string::npos);
+        EXPECT(err.message.find("256") != std::string::npos);
+    }
+}
+
+TEST(regress_rf_em_falta) {
+    using namespace voni;
+    // ---- (1) o ERRO EXATO da spec + o tyker NÃO CORRE --------------------
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(a)to(b)=RF(principal)\n"
+            "tyker(bom){ find(principal) follow() }\n"
+            "tyker(mau){ find(fantasma) follow() }\n"
+            "central main { allmoments { View P \"anda\" } }\n", err);
+        EXPECT(err.ok);
+        SenHost h;
+        h.tics = {{"a", {9, 0, 0}}, {"b"}};
+        EXPECT(s.runStart(h, err));           // NÃO é fatal…
+        EXPECT(senLogHas(h, "RF 'fantasma' não encontrada"));   // o erro exato
+        EXPECT(senLogHas(h, "tyker 'mau' não corre"));
+        Error ferr;
+        EXPECT(s.runFrame(h, 1.0 / 60.0, ferr));   // …o script segue
+        EXPECT(senLogHas(h, "voni: anda"));
+        SenTic* a = h.tic("a");
+        EXPECT(a != nullptr);
+        EXPECT(a->pos[0] == 0.0f);            // o tyker BOM correu (colou)
+        // o log do erro acontece 1× (não spam por frame)
+        int n = 0;
+        for (const std::string& l : h.logs) {
+            if (l.find("RF 'fantasma'") != std::string::npos) {
+                ++n;
+            }
+        }
+        EXPECT(n == 1);
+        Error ferr2;
+        EXPECT(s.runFrame(h, 1.0 / 60.0, ferr2));
+        n = 0;
+        for (const std::string& l : h.logs) {
+            if (l.find("RF 'fantasma'") != std::string::npos) {
+                ++n;
+            }
+        }
+        EXPECT(n == 1);                       // continua 1× (o runStart é 1×)
+    }
+    // ---- (2) SEM linkers NENHUNS (o RF vazio total): o mesmo erro ---------
+    {
+        Error err;
+        Script s = Script::compile(
+            "tyker(t){ find(sozinho) follow() }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        SenHost h;
+        EXPECT(s.runStart(h, err));
+        EXPECT(senLogHas(h, "RF 'sozinho' não encontrada"));
+        EXPECT(s.impl().tykerRuns.size() == 1);
+        EXPECT(s.impl().tykerRuns[0].missing);   // o estado desliga o tyker
+    }
+}

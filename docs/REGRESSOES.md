@@ -157,3 +157,33 @@ Prova de mutação (colada em /home/z/my-project/mutacao-G0-1-*.txt e no RELATÓ
 | Padrão proibido | (nenhum — o sintoma é interação, não log; a vigília é o sentinela + o replay 9.10) |
 
 Prova de mutação (colada em /home/z/my-project/mutacao-G1-6-*.txt e no RELATÓRIO-0.9.4): `insideRect = false` (corpo desligado — o comportamento 0.9.3) → 2 FALHOU no core (test_cameratic.cpp:718/751) + 4 [FAIL] no harness 9.10; reposto → 755/0 + 200/200 verde.
+
+## R-011 · Ciclo de linkers não rejeitado (FASE 11 · METADE 1)
+
+| campo | valor |
+|---|---|
+| ID | R-011 |
+| Reportado | spec fechada da entrega 0.9.5 (METADE 1): "ciclos a→b + b→a rejeitados com erro legível; profundidade 256 abort legível; nunca crash" |
+| Sintoma vigiado | dois linkers que se fecham em ciclo (a→b + b→a, ou a→b→c→a) no MESMO RF deixariam o grafo de links ambíguo (comportamento indefinido por frame); uma cadeia sem teto poderia crescer sem fim |
+| Causa (classe vigiada) | a ausência de guarda no registo de RFs — o `Registry::addLinker` aceitaria qualquer link sem olhar ao grafo |
+| Fix | `voni/VoniTykers.cpp` `Registry::addLinker`: (1) auto-link a→a rejeitado; (2) ciclo DIRETO b→a no mesmo RF rejeitado com "ciclo: 'a'→'b' e 'b'→'a' no RF 'x'"; (3) ciclos LONGOS por DFS (back-edge) rejeitados; (4) o DFS tem teto `kMaxDepth=256` → "o RF 'x' excede a profundidade 256" (abort legível, nunca stack overflow). O linker que fecha o ciclo é REMOVIDO e o runStart falha com a linha (o script não corre ambíguo) |
+| Teste sentinela | `regress_linker_ciclo_rejeitado` (tests/test_sentinels.cpp — ciclo direto com linha + nomes · ciclo longo · 3 linkers VÁLIDOS correm limpo (o guard não caça inocentes) · cadeia de 300 com abort de profundidade) |
+| Linha do replay | FASE 11 passo 11.4 do c33_virtual: o editor Run com o script do ciclo → a run NÃO arranca + a BARRA DE ERRO acende com linha + a palavra "ciclo" + os lados nomeados |
+| Padrão proibido | (nenhum — a vigília é a sentinela + o replay 11.4) |
+
+Prova de mutação (colada em /home/z/my-project/mutacao-R011-*.txt e no RELATORIO-0.9.5): checks de ciclo desligados (`if (false && …)` nos dois ramos de addLinker) → 27 FALHOU no core (ciclo_direto/ciclo_longo/profundidade_256/exemplo_8_5/R-011/motor) + 4 [FAIL] no harness 11.4; repostos → 796/0 + 230/230 verde.
+
+## R-012 · RF em falta não desligava o tyker (FASE 11 · METADE 1)
+
+| campo | valor |
+|---|---|
+| ID | R-012 |
+| Reportado | spec fechada da entrega 0.9.5 (METADE 1): "RF inexistente → erro legível `RF 'x' não encontrada`, tyker não corre; vários tykers partilham RF" |
+| Sintoma vigiado | um tyker com `find(rf)` de um RF que nenhum linker declarou tentaria correr sobre links inexistentes — sem guarda era comportamento indefinido; com guarda FATAL mataria o script inteiro (a spec manda só o tyker parar) |
+| Causa (classe vigiada) | a resolução do find sem verificação + sem canal de erro NÃO fatal |
+| Fix | `voni/VoniVm.cpp` `initTykers`: o `find` resolve contra o registo de RFs do script; RF ausente → `ts.missing = true` + UMA linha no engine.log pelo canal voni: ("voni: RF 'x' não encontrada — o tyker 'nome' não corre (linha N)") — o tyker fica desligado, o RESTO do script (outros tykers + allmoments) SEGUE; nunca fatal, nunca crash |
+| Teste sentinela | `regress_rf_em_falta` (tests/test_sentinels.cpp — o erro EXATO da spec com o nome do RF e do tyker · o tyker BOM corre (o script não morre) · o allmoments segue · o log acontece 1× (não spam por frame) · RF totalmente vazio idem · o estado `missing` desliga o tyker) |
+| Linha do replay | FASE 11 passo 11.3 do c33_virtual: o editor Run com um tyker bom + um tyker de RF fantasma → o log exato + o Ator MOVIDO pelo tyker bom (o script vivo) |
+| Padrão proibido | (nenhum — a vigília é a sentinela + o replay 11.3) |
+
+Prova de mutação (colada em /home/z/my-project/mutacao-R012-*.txt e no RELATORIO-0.9.5): a deteção desligada (`if (false && …)` no initTykers) → 9 FALHOU no core (rf_em_falta/R-012/exemplo_8_5) + 2 [FAIL] no harness 11.3; reposta → 796/0 + 230/230 verde.

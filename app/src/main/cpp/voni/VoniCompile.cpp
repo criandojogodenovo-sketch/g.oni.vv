@@ -25,6 +25,7 @@
 #include "voni/Voni.h"
 #include "voni/VoniAst.h"
 #include "voni/VoniInternal.h"
+#include "voni/VoniRegistry.h"
 
 #include "vendor/peglib/peglib.h"
 
@@ -111,10 +112,38 @@ struct CounterV {      // with n+=1
     u32 line = 1;
 };
 
+// ---- 0.9.5: LINKERS & TYKERS ---------------------------------------------
+struct LinkerDeclV {   // linker(A)to(B)=RF(nome)
+    LinkerDecl decl;
+};
+
+struct CompArgV {       // um argumento de componente: Expr OU cor #RRGGBB
+    ExprP       expr = nullptr;
+    std::string color;
+    bool        isColor = false;
+};
+
+using CompTailV = std::vector<CompArgV>;
+
+struct TykerCompV {     // componente (inclui a forma Change…to…)
+    TykerComp comp;
+};
+
+struct TykerFindV {     // find(rf)
+    std::string rf;
+    u32 line = 1;
+};
+
+struct TykerDefV {      // tyker(nome){ … } cru
+    TykerDef def;
+};
+
 struct RawProgram {    // script cru (antes da validação)
     Block top;
     std::vector<FnDef> fns;
     std::vector<CentralV> centrals;
+    std::vector<LinkerDecl> linkers;   // 0.9.5
+    std::vector<TykerDef> tykers;      // 0.9.5
 };
 
 u32 lineOf(const peg::SemanticValues& sv) {
@@ -127,6 +156,42 @@ ExprP mkBin(ExprP a, Expr::Bin op, ExprP b, u32 line) {
     e->a = std::move(a);
     e->b = std::move(b);
     return e;
+}
+
+// o NOME de um statement "perdido" dentro de um tyker (para o erro que
+// ensina dizer O QUE foi rejeitado — "'View P' é código de script")
+std::string strayNameOf(const Stmt& s) {
+    switch (s.kind) {
+        case Stmt::Kind::VarDecl: return "v++/v#";
+        case Stmt::Kind::Assign: {
+            std::string p;
+            for (size_t i = 0; i < s.path.size(); ++i) {
+                if (i) {
+                    p += '.';
+                }
+                p += s.path[i];
+            }
+            return p.empty() ? "atribuição" : p;
+        }
+        case Stmt::Kind::IfChain:  return "exist";
+        case Stmt::Kind::Option:   return "option";
+        case Stmt::Kind::Repeat:   return "repeat";
+        case Stmt::Kind::Last:     return "last";
+        case Stmt::Kind::Continue: return "continue";
+        case Stmt::Kind::Resume:   return "resume";
+        case Stmt::Kind::Return:   return "return";
+        case Stmt::Kind::PathCall: {
+            std::string p;
+            for (size_t i = 0; i < s.path.size(); ++i) {
+                if (i) {
+                    p += '.';
+                }
+                p += s.path[i];
+            }
+            return p.empty() ? "comando" : p;
+        }
+    }
+    return "código de script";
 }
 
 } // namespace
@@ -148,6 +213,7 @@ struct Compiler {
             registerTerminals();
             registerExpressions();
             registerStatements();
+            registerTykers();
             registerStructure();
         }
     }
@@ -660,6 +726,160 @@ struct Compiler {
         };
     }
 
+    // ---- 0.9.5: LINKERS & TYKERS -------------------------------------------
+    void registerTykers() {
+        // linker(A)to(B)=RF(nome) → [PathToks(A), PathToks(B), Tok(rf)]
+        parser["LinkerDecl"] = [](const peg::SemanticValues& sv) -> LinkerDeclV {
+            LinkerDeclV v;
+            v.decl.line = lineOf(sv);
+            if (const PathToks* a = std::any_cast<PathToks>(&sv[0])) {
+                for (const Tok& t : *a) {
+                    v.decl.origem.push_back(t.text);
+                }
+            }
+            if (const PathToks* b = std::any_cast<PathToks>(&sv[1])) {
+                for (const Tok& t : *b) {
+                    v.decl.destino.push_back(t.text);
+                }
+            }
+            if (const Tok* rf = std::any_cast<Tok>(&sv[2])) {
+                v.decl.rf = rf->text;
+                v.decl.line = rf->line;
+            }
+            return v;
+        };
+
+        // find(rf) → Tok
+        parser["TykerFind"] = [](const peg::SemanticValues& sv) -> TykerFindV {
+            TykerFindV f;
+            const Tok* rf = std::any_cast<Tok>(&sv[0]);
+            f.rf = rf ? rf->text : "?";
+            f.line = rf ? rf->line : lineOf(sv);
+            return f;
+        };
+
+        // Change(origem|destino)to(alvo) → [Tok(lado), PathToks(alvo)]
+        parser["ChangeComp"] = [](const peg::SemanticValues& sv) -> TykerCompV {
+            TykerCompV v;
+            v.comp.name = "Change";
+            v.comp.isChange = true;
+            const Tok* side = std::any_cast<Tok>(&sv[0]);
+            v.comp.changeDestino = side && side->text == "destino";
+            v.comp.line = side ? side->line : lineOf(sv);
+            if (const PathToks* p = std::any_cast<PathToks>(&sv[1])) {
+                for (const Tok& t : *p) {
+                    v.comp.changePath.push_back(t.text);
+                }
+            }
+            return v;
+        };
+        parser["ChangeSide"] = [](const peg::SemanticValues& sv) -> Tok {
+            return Tok{std::string(sv.token()), lineOf(sv)};
+        };
+
+        // caudas de argumentos: Expr OU cor #RRGGBB
+        parser["ColorLit"] = [](const peg::SemanticValues& sv) -> CompArgV {
+            CompArgV a;
+            a.isColor = true;
+            a.color = std::string(sv.token());
+            return a;
+        };
+        parser["CompArg"] = [](const peg::SemanticValues& sv) -> CompArgV {
+            if (const CompArgV* c = std::any_cast<CompArgV>(&sv[0])) {
+                return *c;   // ColorLit
+            }
+            CompArgV a;
+            a.expr = *std::any_cast<ExprP>(&sv[0]);
+            return a;
+        };
+        parser["CompTail"] = [](const peg::SemanticValues& sv) -> CompTailV {
+            CompTailV out;
+            out.reserve(sv.size());
+            for (const std::any& v : sv) {
+                if (const CompArgV* a = std::any_cast<CompArgV>(&v)) {
+                    out.push_back(*a);
+                }
+            }
+            return out;
+        };
+
+        // componente genérico: [Tok(nome), CompTailV, (CompTailV)?]
+        // (o REGISTO decide o que existe — aqui não há nomes hardcoded)
+        parser["CompCall"] = [](const peg::SemanticValues& sv) -> TykerCompV {
+            TykerCompV v;
+            const Tok* n = std::any_cast<Tok>(&sv[0]);
+            v.comp.name = n ? n->text : "?";
+            v.comp.line = n ? n->line : lineOf(sv);
+            if (const CompTailV* t1 = std::any_cast<CompTailV>(&sv[1])) {
+                for (const CompArgV& a : *t1) {
+                    if (a.isColor) {
+                        // cor na 1ª cauda: vira literal Txt "#RRGGBB"
+                        ExprP lit = Expr::make(Expr::Kind::Lit, v.comp.line);
+                        lit->lit = Value::ofTxt(a.color);
+                        v.comp.args.push_back(std::move(lit));
+                    } else {
+                        v.comp.args.push_back(a.expr);
+                    }
+                }
+            }
+            if (sv.size() > 2) {
+                if (const CompTailV* t2 = std::any_cast<CompTailV>(&sv[2])) {
+                    v.comp.hasTail2 = true;
+                    if (!t2->empty()) {
+                        const CompArgV& a = (*t2)[0];
+                        if (a.isColor) {
+                            v.comp.isColor2 = true;
+                            v.comp.color2 = a.color;
+                        } else {
+                            v.comp.arg2 = a.expr;
+                        }
+                    }
+                }
+            }
+            return v;
+        };
+
+        // um item do corpo: find / Change / componente / statement (o
+        // statement é aceito AQUI para o VALIDADOR o rejeitar com erro
+        // que ENSINA — linha + o que fazer — em vez de syntax error seco)
+        parser["TykerItem"] = [](const peg::SemanticValues& sv) -> std::any {
+            return sv[0];
+        };
+
+        // tyker(nome){ … } → [Tok(nome), items…]
+        parser["TykerDef"] = [](const peg::SemanticValues& sv) -> TykerDefV {
+            TykerDefV v;
+            const Tok* n = std::any_cast<Tok>(&sv[0]);
+            v.def.name = n ? n->text : "?";
+            v.def.line = n ? n->line : lineOf(sv);
+            bool sawComp = false;   // find já não pode vir depois de 1º item
+            for (size_t i = 1; i < sv.size(); ++i) {
+                if (const TykerFindV* f = std::any_cast<TykerFindV>(&sv[i])) {
+                    if (!sawComp && !v.def.hasFind) {
+                        v.def.hasFind = true;   // o 1º lugar
+                        v.def.findRf = f->rf;
+                        v.def.findLine = f->line;
+                    } else {
+                        v.def.sawLateFind = true;
+                        v.def.lateFindLine = f->line;
+                    }
+                } else if (const TykerCompV* c =
+                               std::any_cast<TykerCompV>(&sv[i])) {
+                    sawComp = true;
+                    v.def.comps.push_back(c->comp);
+                } else if (const StmtP* s = std::any_cast<StmtP>(&sv[i])) {
+                    sawComp = true;
+                    if (!v.def.hasStray) {
+                        v.def.hasStray = true;
+                        v.def.strayLine = (*s)->line;
+                        v.def.strayName = strayNameOf(**s);
+                    }
+                }
+            }
+            return v;
+        };
+    }
+
     // ---- estrutura --------------------------------------------------------
     void registerStructure() {
         parser["Item"] = [](const peg::SemanticValues& sv) -> std::any {
@@ -675,6 +895,12 @@ struct Compiler {
                 } else if (const CentralV* c =
                                std::any_cast<CentralV>(&v)) {
                     p.centrals.push_back(*c);
+                } else if (const LinkerDeclV* l =
+                               std::any_cast<LinkerDeclV>(&v)) {
+                    p.linkers.push_back(l->decl);
+                } else if (const TykerDefV* t =
+                               std::any_cast<TykerDefV>(&v)) {
+                    p.tykers.push_back(t->def);
                 }
             }
             return p;
@@ -824,6 +1050,108 @@ struct Validator {
         declared.push_back(s.varName);
     }
 
+    // ---- 0.9.5: LINKERS & TYKERS (validação com erros que ENSINAM) --------
+    void validateLinkers(const std::vector<LinkerDecl>& ls) {
+        for (const LinkerDecl& l : ls) {
+            if (!err.ok) {
+                return;
+            }
+            // o nome do RF é um nome de utilizador (minúscula, não reservada)
+            checkName(l.rf, l.line);
+        }
+    }
+
+    void validateTykers(const std::vector<TykerDef>& ts) {
+        for (size_t i = 0; i < ts.size(); ++i) {
+            const TykerDef& t = ts[i];
+            if (!err.ok) {
+                return;
+            }
+            if (!checkName(t.name, t.line)) {
+                return;
+            }
+            for (size_t j = 0; j < i; ++j) {
+                if (ts[j].name == t.name) {
+                    fail(t.line, "tyker '" + t.name + "' já foi definido");
+                    return;
+                }
+            }
+            if (!t.hasFind) {
+                fail(t.line, "o tyker '" + t.name +
+                            "' precisa de find(RF) como 1º componente — ex.: "
+                            "tyker(" + t.name + "){ find(nome) … }");
+                return;
+            }
+            if (!checkName(t.findRf, t.findLine)) {
+                return;
+            }
+            if (t.sawLateFind) {
+                fail(t.lateFindLine,
+                     "'find' só pode ser o 1º componente do tyker");
+                return;
+            }
+            if (t.hasStray) {
+                fail(t.strayLine,
+                     "o corpo do tyker '" + t.name +
+                         "' só aceita componentes — '" + t.strayName +
+                         "' é código de script (pertence ao central main)");
+                return;
+            }
+            for (const TykerComp& c : t.comps) {
+                if (!err.ok) {
+                    return;
+                }
+                checkComp(c);
+            }
+        }
+    }
+
+    // um componente contra o REGISTO CENTRAL (o parser é genérico — é AQUI
+    // que se decide o que existe; a mensagem ENSINA com a sintaxe do registo)
+    void checkComp(const TykerComp& c) {
+        if (c.isChange) {
+            if (c.changePath.empty()) {
+                fail(c.line, "Change: falta o alvo — Change(origem)to(alvo)");
+            }
+            return;
+        }
+        if (c.name == "find") {
+            fail(c.line, "'find' só pode ser o 1º componente do tyker");
+            return;
+        }
+        const reg::Entry* e = reg::findComponent(c.name);
+        if (!e) {
+            if (c.name == "to") {
+                fail(c.line,
+                     "'to' vem sempre colado a um Change — "
+                     "Change(origem)to(alvo)");
+            } else if (c.name == "linker" || c.name == "tyker") {
+                fail(c.line,
+                     "'" + c.name + "' declara-se no TOPO do script "
+                     "(fora do tyker)");
+            } else {
+                fail(c.line, "componente '" + c.name +
+                                 "' não existe (a lista fechada está nas "
+                                 "Docs)");
+            }
+            return;
+        }
+        if (c.args.size() < e->minArgs || c.args.size() > e->maxArgs) {
+            fail(c.line, std::string(c.name) + ": escreve assim — " +
+                             e->syntax);
+            return;
+        }
+        if (c.hasTail2 && c.name != "colorpars") {
+            fail(c.line, "só o colorpars tem 2ª cauda — '" + c.name +
+                         "'(…)(…) não existe");
+            return;
+        }
+        if (c.name == "colorpars" && !c.hasTail2) {
+            fail(c.line, std::string("colorpars: escreve assim — ") +
+                             e->syntax);
+        }
+    }
+
     void walkBlock(const Block& b) {
         for (const StmtP& s : b) {
             if (!err.ok) {
@@ -932,6 +1260,14 @@ Script Script::compile(const char* source, Error& err) {
     if (out.centrals.size() > 1) {
         v.fail(out.centrals[1].line, "central main já foi definido");
     }
+    // 0.9.5: linkers e tykers (nomes, find-primeiro, componentes contra o
+    // REGISTO — erros com linha que ENSINAM)
+    if (v.err.ok) {
+        v.validateLinkers(out.linkers);
+    }
+    if (v.err.ok) {
+        v.validateTykers(out.tykers);
+    }
     if (v.err.ok && !out.centrals.empty()) {
         const CentralV& c = out.centrals[0];
         bool sawOn = false, sawAll = false;
@@ -976,6 +1312,8 @@ Script Script::compile(const char* source, Error& err) {
     Program& p = *sc.impl().program;
     p.top = std::move(out.top);
     p.fns = std::move(out.fns);
+    p.linkers = std::move(out.linkers);   // 0.9.5
+    p.tykers = std::move(out.tykers);     // 0.9.5
     if (!out.centrals.empty()) {
         p.hasCentral = true;
         p.centralLine = out.centrals[0].line;

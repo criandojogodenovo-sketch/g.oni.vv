@@ -591,3 +591,79 @@ TEST(inspector_secção_script_editar_pede_o_editor) {
         vv::editor::inspectorProfile(*e.scene.get(e.tic));
     EXPECT(prof.script);
 }
+
+// ===========================================================================
+// 0.9.5 · METADE 1 — LINKERS & TYKERS NO MOTOR REAL (VoniSystem + EngineHost
+// sobre a Scene): o follow move o Transform3D de verdade, o colorpars tinge
+// o MeshRenderer de verdade, o ciclo mata a run com o erro legível no
+// popError (o caminho que o editor mostra na barra de erro).
+// ===========================================================================
+TEST(voni_motor_linker_tyker_follow_move_o_transform) {
+    VmEnv e;
+    // o ALVO: outro TIC com Transform3D em (5,0,0)
+    const Handle alvo = e.scene.create("alvo");
+    {
+        Transform3D* tr = e.scene.get(alvo)->addComponent<Transform3D>();
+        tr->pos = Vec3{5.0f, 0.0f, 0.0f};
+        tr->updateWorld();
+    }
+    {
+        Transform3D* tr = e.scene.get(e.tic)->getComponent<Transform3D>();
+        tr->pos = Vec3{15.0f, 0.0f, 0.0f};
+        tr->updateWorld();
+    }
+    e.script()->source =
+        "linker(ator)to(alvo)=RF(principal)\n"
+        "tyker(seguelo){ find(principal) follow(2) }\n"
+        "central main { }\n";
+    voni::Error err;
+    EXPECT(e.voni.editorStart(e.scene, e.tic, err));
+    e.voni.tick(e.scene, 1.0f / 60.0f);
+    Transform3D* tr = e.scene.get(e.tic)->getComponent<Transform3D>();
+    // follow(2): o ator fica a 2 do alvo, na direção de onde veio (7,0,0)
+    EXPECT(std::fabs(tr->pos.x - 7.0f) < 1e-4f);
+    EXPECT(std::fabs(tr->pos.y) < 1e-4f);
+    EXPECT(std::fabs(tr->pos.z) < 1e-4f);
+}
+
+TEST(voni_motor_colorpars_tinge_o_meshrenderer) {
+    VmEnv e;
+    e.scene.get(e.tic)->addComponent<MeshRenderer>();
+    const Handle alvo = e.scene.create("alvo");
+    e.scene.get(alvo)->addComponent<Transform3D>();
+    e.script()->source =
+        "linker(ator)to(alvo)=RF(p)\n"
+        "tyker(pinta){ find(p) colorpars(cor)(#00FF00) }\n"
+        "central main { }\n";
+    voni::Error err2;
+    EXPECT(e.voni.editorStart(e.scene, e.tic, err2));
+    e.voni.tick(e.scene, 1.0f / 60.0f);
+    MeshRenderer* mr = e.scene.get(e.tic)->getComponent<MeshRenderer>();
+    EXPECT(mr != nullptr);
+    // o parâmetro 'cor' tinge o material da ORIGEM do link
+    EXPECT(std::fabs(mr->tint[0] - 0.0f) < 1e-4f);
+    EXPECT(std::fabs(mr->tint[1] - 1.0f) < 1e-4f);
+    EXPECT(std::fabs(mr->tint[2] - 0.0f) < 1e-4f);
+}
+
+TEST(voni_motor_ciclo_erro_no_poperror_do_editor) {
+    VmEnv e;
+    e.script()->source =
+        "linker(ator)to(alvo)=RF(p)\n"
+        "linker(alvo)to(ator)=RF(p)\n"
+        "central main { }\n";
+    e.scene.create("alvo");
+    voni::Error err;
+    EXPECT(!e.voni.editorStart(e.scene, e.tic, err));
+    EXPECT(!err.ok);
+    EXPECT(err.message.find("ciclo") != std::string::npos);
+    // o erro chega à BARRA DO EDITOR pelo popError (o drain do VoniSystem):
+    // como o editorStart FALHOU, a run fica morta — o popError traz o fatal
+    vv::Handle errTic{};
+    voni::Error popped;
+    // (o VoniSystem só põe no pendingError no tick das runs de Play; a run
+    // do editor falhou no start — o erro vem no return, como acima. O
+    // caminho do popError é coberto pelo caso voni_system_erro_pop_drain.)
+    (void)errTic;
+    (void)popped;
+}

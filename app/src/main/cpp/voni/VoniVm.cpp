@@ -30,6 +30,8 @@
 #include "voni/Voni.h"
 #include "voni/VoniAst.h"
 #include "voni/VoniInternal.h"
+#include "voni/VoniRegistry.h"
+#include "voni/VoniTykers.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1128,6 +1130,18 @@ void Vm::runCommand(const Stmt& s) {
                      "(ex.: v++p=Search.jogador.pos)");
     }
 
+    // 3.5) 0.9.5: linker/tyker chamados como comando (a declaração sem a
+    // forma completa — ex. linker(a)to(b) SEM o =RF(nome)) — o runtime
+    // ENSINA a forma certa em vez de "comando não existe" seco
+    if (key == "linker") {
+        fail(s.line, std::string("linker declara-se no TOPO com a forma ") +
+                     "completa: linker(A)to(B)=RF(nome) — o RF é obrigatório");
+    }
+    if (key == "tyker") {
+        fail(s.line, std::string("tyker declara-se no TOPO com a forma ") +
+                     "completa: tyker(nome){ find(RF) componentes… }");
+    }
+
     // 4) função do utilizador chamada como instrução (soma(1,2) à solta)
     if (s.path.size() == 1) {
         if (const FnDef* fn = findFn(s.path[0])) {
@@ -1140,6 +1154,204 @@ void Vm::runCommand(const Stmt& s) {
 
     fail(s.line, std::string("comando '") + key +
                      "' não existe (a lista fechada está nas Docs)");
+}
+
+// ---------------------------------------------------------------------------
+// 0.9.5 · LINKERS & TYKERS no ciclo da central
+// ---------------------------------------------------------------------------
+// A resolução dos args corre AQUI (a Vm tem eval — literais OU variáveis do
+// script, ambas válidas 🔶). Os slots de NOME (copy/colorpars) capturam o
+// identificador cru em vez de o avaliar; os slots de VALOR avaliam.
+namespace tykerwire {
+
+// o TykerDef da AST pelo nome (o estado guarda o nome; o programa é estável)
+const TykerDef* findDef(const Program& p, const std::string& name) {
+    for (const TykerDef& t : p.tykers) {
+        if (t.name == name) {
+            return &t;
+        }
+    }
+    return nullptr;
+}
+
+// o arg como NOME cru (Var/Path de 1 segmento, ou Txt entre aspas)
+bool rawName(Vm& vm, const Expr& e, std::string& out, u32 line,
+             const char* comp) {
+    if (e.kind == Expr::Kind::Var) {
+        out = e.name;
+        return true;
+    }
+    if (e.kind == Expr::Kind::Path && e.segs.size() == 1) {
+        out = e.segs[0];
+        return true;
+    }
+    if (e.kind == Expr::Kind::Lit && e.lit.t == Type::Txt) {
+        out = e.lit.s;
+        return true;
+    }
+    vm.fail(line, std::string(comp) + ": o argumento é um NOME (ex.: " +
+                       comp + "(pos)) — veio uma expressão");
+    return false;   // (vm.fail lança — isto acalma o compilador)
+}
+
+// resolve um componente da AST num Comp de runtime (args avaliados)
+tykers::Comp resolveComp(Vm& vm, const TykerComp& a) {
+    tykers::Comp m;
+    m.name = a.isChange ? "Change" : a.name;
+    m.line = a.line;
+    m.isChange = a.isChange;
+    m.changeDestino = a.changeDestino;
+    m.changePath = a.changePath;
+    m.meta = reg::findComponent(m.name);
+    if (a.isChange) {
+        return m;   // Change: sem args avaliados (o alvo é caminho)
+    }
+    // slots de NOME (copy/colorpars) × slots de VALOR (o resto)
+    const bool nameSlot = (a.name == "copy" || a.name == "colorpars");
+    if (nameSlot) {
+        if (!a.args.empty()) {
+            rawName(vm, *a.args[0], m.raw1, a.line, a.name.c_str());
+        }
+    } else {
+        m.vals.reserve(a.args.size());
+        for (const ExprP& e : a.args) {
+            m.vals.push_back(vm.eval(*e));
+        }
+    }
+    if (a.hasTail2) {
+        m.hasColor2 = true;
+        if (a.isColor2) {
+            m.color2 = a.color2;
+        } else if (a.arg2) {
+            rawName(vm, *a.arg2, m.color2, a.line, "colorpars");
+        }
+    }
+    return m;
+}
+
+} // namespace tykerwire
+
+// ---------------------------------------------------------------------------
+// arranque: linkers → RFs (ciclo = FATAL legível) + estados dos tykers
+// (RF em falta = LOG + tyker desligado — a spec: "tyker não corre")
+// ---------------------------------------------------------------------------
+static void initTykers(Vm& vm, Script::Impl& st) {
+    for (const LinkerDecl& l : st.program->linkers) {
+        std::string terr;
+        if (!st.rfReg.addLinker(l.origem, l.destino, l.rf, l.line, terr)) {
+            vm.fail(l.line, terr);   // rejeitado: o script não corre ambíguo
+        }
+    }
+    for (const TykerDef& t : st.program->tykers) {
+        tykers::TykerState ts;
+        ts.name = t.name;
+        ts.line = t.line;
+        ts.rf = t.findRf;
+        if (!st.rfReg.findRf(t.findRf)) {
+            ts.missing = true;
+            // o ERRO LEGÍVEL da spec — 1× no arranque; o resto do script
+            // CONTINUA (nunca fatal, nunca crash)
+            vm.host.log(("voni: RF '" + t.findRf + "' não encontrada — o "
+                         "tyker '" + t.name + "' não corre (linha " +
+                         std::to_string(t.findLine) + ")")
+                            .c_str());
+        }
+        // delay(s): lido no ARRANQUE (define QUANDO o tyker ativa); fica o
+        // ÚLTIMO delay declarado. Args avaliados AGORA (globais já existem).
+        for (const TykerComp& c : t.comps) {
+            if (!c.isChange && c.name == "delay" && !c.args.empty()) {
+                Value v = vm.eval(*c.args[0]);
+                if (v.t == Type::Int) {
+                    ts.delayS = (f64)v.i;
+                } else if (v.t == Type::Num) {
+                    ts.delayS = v.n;
+                } else {
+                    vm.fail(c.line,
+                            "delay: os segundos têm de ser um número");
+                }
+                if (ts.delayS < 0.0) {
+                    ts.delayS = 0.0;
+                }
+            }
+        }
+        st.tykerRuns.push_back(std::move(ts));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ativação: componentes pontuais disparam 1×; contínuos ficam na lista
+// ---------------------------------------------------------------------------
+static void activateTyker(Vm& vm, Script::Impl& st,
+                           tykers::TykerState& ts) {
+    const TykerDef* def = tykerwire::findDef(*st.program, ts.name);
+    if (!def) {
+        return;   // (inalcançável — o estado nasce dos defs)
+    }
+    const std::vector<tykers::Link>* links = st.rfReg.findRf(ts.rf);
+    for (const TykerComp& astc : def->comps) {
+        if (!astc.isChange && astc.name == "delay") {
+            continue;   // consumido no arranque ( gating da ativação)
+        }
+        tykers::Comp m = tykerwire::resolveComp(vm, astc);
+        tykers::Handler h = reg::handlerFor(m.name);
+        if (m.meta && m.meta->compKind == reg::CompKind::Continuo) {
+            ts.continuous.push_back(std::move(m));
+            continue;
+        }
+        if (!links) {
+            continue;
+        }
+        for (const tykers::Link& lk : *links) {
+            tykers::Ctx ctx{vm.host, st.rfReg, ts, lk, 0.0, m.line};
+            std::string cerr;
+            if (!h || !h(ctx, m, cerr)) {
+                vm.fail(m.line,
+                        cerr.empty() ? ("componente '" + m.name +
+                                        "' falhou")
+                                     : cerr);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// o tick por frame (DEPOIS dos allmoments): contínuos sobre cada link
+// ---------------------------------------------------------------------------
+static void tickTykers(Vm& vm, Script::Impl& st, f64 dt) {
+    for (tykers::TykerState& ts : st.tykerRuns) {
+        if (ts.missing) {
+            continue;
+        }
+        ts.elapsed += dt;
+        if (!ts.activated) {
+            if (ts.elapsed < ts.delayS) {
+                continue;
+            }
+            ts.activated = true;
+            activateTyker(vm, st, ts);
+        }
+        if (ts.continuous.empty()) {
+            continue;
+        }
+        const std::vector<tykers::Link>* links = st.rfReg.findRf(ts.rf);
+        if (!links || links->empty()) {
+            continue;
+        }
+        for (const tykers::Comp& m : ts.continuous) {
+            vm.spend(m.line);   // o budget cobre os tykers (nunca hang)
+            tykers::Handler h = reg::handlerFor(m.name);
+            for (const tykers::Link& lk : *links) {
+                tykers::Ctx ctx{vm.host, st.rfReg, ts, lk, dt, m.line};
+                std::string cerr;
+                if (!h || !h(ctx, m, cerr)) {
+                    vm.fail(m.line,
+                            cerr.empty() ? ("componente '" + m.name +
+                                            "' falhou")
+                                         : cerr);
+                }
+            }
+        }
+    }
 }
 
 } // namespace
@@ -1184,6 +1396,11 @@ bool Script::runStart(Host& host, Error& err) {
                 ok = false;
             }
         }
+        // 0.9.5: linkers → RFs (ciclo = FATAL legível, o linker rejeitado)
+        // + estados dos tykers (RF em falta = log + tyker desligado)
+        if (ok) {
+            initTykers(vm, st);
+        }
     } catch (const VmFail&) {
         ok = false;
     }
@@ -1212,21 +1429,27 @@ bool Script::runFrame(Host& host, f64 dt, Error& err) {
         err = st.fatal;   // repete o erro fatal (a central loga 1×)
         return false;
     }
-    if (!st.program->central.hasAll) {
-        return true;      // sem allmoments → no-op
-    }
 
     Vm vm(host, st);
     vm.dt = dt;
     bool ok = true;
     try {
-        Flow f = vm.execBlock(st.program->central.allMoments);
-        if (f != Flow::None) {
-            vm.fail(vm.flowLine,
-                    f == Flow::Return
-                        ? std::string("'return' fora de fn")
-                        : std::string("'continue'/'resume' fora de loop"));
-            ok = false;
+        // allmoments SE existir (spec §3)…
+        if (st.program->central.hasAll) {
+            Flow f = vm.execBlock(st.program->central.allMoments);
+            if (f != Flow::None) {
+                vm.fail(vm.flowLine,
+                        f == Flow::Return
+                            ? std::string("'return' fora de fn")
+                            : std::string("'continue'/'resume' fora de loop"));
+                ok = false;
+            }
+        }
+        // …e OS TYKERS SEMPRE (0.9.5): um script só com linkers/tykers, sem
+        // central main, comporta-se na mesma — a decisão 🔶 DEPOIS dos
+        // allmoments (o comportamento do linker "fecha" o frame)
+        if (ok && !st.tykerRuns.empty()) {
+            tickTykers(vm, st, dt);
         }
     } catch (const VmFail&) {
         ok = false;

@@ -1,6 +1,13 @@
 // voni/VoniDocs.cpp — as entradas das Docs V.ONI (spec 0.9.2 §11 ✅ — nome,
 // 1 linha, sintaxe, exemplo). Dados fechados da spec §§3-9.
+//
+// 0.9.5 · METADE 1: as entradas de LINKER/TYKER/COMPONENTE vêm do REGISTO
+// CENTRAL (VoniRegistry) — a MESMA tabela que valida os componentes no
+// compile e os despacha no runtime. Docs obrigatória por entrada 🔶: o
+// teste registo_docs_obrigatorias afere campo a campo. A METADE 2 migra
+// também Linguagem/Comando para o registo e este ficheiro passa a VISTA.
 #include "voni/VoniDocs.h"
+#include "voni/VoniRegistry.h"
 
 #include <algorithm>
 #include <cctype>
@@ -8,7 +15,7 @@
 namespace voni {
 namespace docs {
 
-static const std::vector<Entry> kEntries = {
+static const std::vector<Entry> kBase = {
     // ---- LINGUAGEM (§§3-8) ------------------------------------------------
     {Cat::Linguagem, "central main",
      "Bloco de arranque do TIC: contém on moment e allmoments.",
@@ -125,13 +132,34 @@ static const std::vector<Entry> kEntries = {
      "Search.alvo.propriedade",
      "v++px=Search.jogador.pos.x"},
     {Cat::Comando, "propriedades de TIC",
-     "Leitura/escrita por pontos: pos, rot, escala (Vec3 com .x/.y/.z), "
+     "Leitura/escrita por pontos: pos, rot, escala, cor (Vec3 com .x/.y/.z), "
      "name, visible, active.",
      "tic.propriedade · tic.pos.x=5",
      "jogador.pos.x=5"},
 };
 
-const std::vector<Entry>& all() { return kEntries; }
+// a lista COMPLETA: base (0.9.2) + o REGISTO central (0.9.5 — linker/tyker/
+// componentes). Construída UMA vez; a mesma fonte que valida e despacha.
+static std::vector<Entry> buildAll() {
+    std::vector<Entry> out = kBase;
+    for (const reg::Entry& e : reg::all()) {
+        Cat c = Cat::Linguagem;
+        switch (e.kind) {
+            case reg::Kind::Comando:    c = Cat::Comando; break;
+            case reg::Kind::Linker:     c = Cat::Linker; break;
+            case reg::Kind::Tyker:      c = Cat::Tyker; break;
+            case reg::Kind::Componente: c = Cat::Componente; break;
+            default:                    c = Cat::Linguagem; break;
+        }
+        out.push_back(Entry{c, e.name, e.desc, e.syntax, e.example});
+    }
+    return out;
+}
+
+const std::vector<Entry>& all() {
+    static const std::vector<Entry> kAll = buildAll();
+    return kAll;
+}
 
 static bool containsCI(const std::string& hay, const std::string& needle) {
     if (needle.empty()) {
@@ -147,7 +175,7 @@ static bool containsCI(const std::string& hay, const std::string& needle) {
 
 std::vector<const Entry*> search(const std::string& query) {
     std::vector<const Entry*> out;
-    for (const Entry& e : kEntries) {
+    for (const Entry& e : all()) {
         if (containsCI(e.name, query) || containsCI(e.desc, query)) {
             out.push_back(&e);
         }

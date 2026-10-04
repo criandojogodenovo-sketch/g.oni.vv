@@ -34,6 +34,8 @@ add_library(goni_vv SHARED
         voni/VoniHighlight.cpp
         voni/VoniDocs.cpp
         voni/VoniEngineHost.cpp
+        voni/VoniRegistry.cpp
+        voni/VoniTykers.cpp
         core/VoniSystem.cpp
         ui/ScriptEditor.cpp   # 0.9.2: editor de script (portrait+IME)
         ui/DocsScreen.cpp     # 0.9.2: Settings → Docs

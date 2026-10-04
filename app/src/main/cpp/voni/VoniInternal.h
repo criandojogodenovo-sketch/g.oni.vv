@@ -6,8 +6,12 @@
 // Pimpl via header interno: o Voni.h promete `struct Impl;` e os dois TUs
 // que precisam de mexer no estado (compilar e correr) vêem a definição
 // completa. Nada disto vaza para a engine.
+//
+// 0.9.5: o Impl ganha o RUNTIME dos linkers/tykers (o registo de RFs +
+// o estado por tyker — sobrevive entre frames; o reset() limpa tudo).
 #include "voni/Voni.h"
 #include "voni/VoniAst.h"
+#include "voni/VoniTykers.h"
 
 #include <unordered_map>
 
@@ -32,6 +36,12 @@ struct Script::Impl {
 
     u64 lastInstr = 0;       // instruções do último tick (budget/telemetria)
 
+    // 0.9.5 · LINKERS & TYKERS: os RFs declarados pelos linkers (partilhados
+    // por todos os tykers do script) + o estado por tyker (ativação, delay,
+    // params, componentes contínuos resolvidos)
+    tykers::Registry            rfReg;
+    std::vector<tykers::TykerState> tykerRuns;
+
     void reset() {
         started = false;
         running = false;
@@ -39,6 +49,8 @@ struct Script::Impl {
         globals.clear();
         exportOrder.clear();
         lastInstr = 0;
+        rfReg.clear();
+        tykerRuns.clear();
     }
 };
 

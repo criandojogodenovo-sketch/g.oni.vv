@@ -20,6 +20,8 @@ add_executable(test_core
         ../app/src/main/cpp/voni/VoniHighlight.cpp
         ../app/src/main/cpp/voni/VoniDocs.cpp
         ../app/src/main/cpp/voni/VoniEngineHost.cpp
+        ../app/src/main/cpp/voni/VoniRegistry.cpp   # 0.9.5: registo central
+        ../app/src/main/cpp/voni/VoniTykers.cpp   # 0.9.5: runtime linkers/tykers
         ../app/src/main/cpp/core/VoniSystem.cpp
         test_main.cpp
         test_logs_crash.cpp
@@ -359,6 +361,8 @@ add_executable(c33_virtual
         ${CORE_DIR}/voni/VoniHighlight.cpp
         ${CORE_DIR}/voni/VoniDocs.cpp
         ${CORE_DIR}/voni/VoniEngineHost.cpp
+        ${CORE_DIR}/voni/VoniRegistry.cpp   # 0.9.5: registo central
+        ${CORE_DIR}/voni/VoniTykers.cpp   # 0.9.5: runtime linkers/tykers
         ${CORE_DIR}/core/VoniSystem.cpp   # a "central"
         ${CORE_DIR}/render/Camera.cpp
         ${CORE_DIR}/physics/Shapes.cpp

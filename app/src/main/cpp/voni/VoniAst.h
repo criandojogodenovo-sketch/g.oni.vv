@@ -172,10 +172,58 @@ struct CentralMain {
     Block allMoments;
 };
 
-// script inteiro: top-level 1× (§3) + fns + central main
+// ---------------------------------------------------------------------------
+// LINKERS & TYKERS (0.9.5 · METADE 1 — declarações de TOPO como as fn)
+// ---------------------------------------------------------------------------
+
+// linker(A)to(B)=RF(nome) — A e B são caminhos (objeto/TIC/propriedade/
+// animação); o link é registado no RF(nome) no arranque do script.
+struct LinkerDecl {
+    std::vector<std::string> origem;
+    std::vector<std::string> destino;
+    std::string rf;
+    u32 line = 1;
+};
+
+// um componente dentro do corpo de um tyker (ainda NÃO avaliado — a
+// resolução dos args corre na ATIVAÇÃO, onde as variáveis já existem)
+struct TykerComp {
+    std::string name;              // "follow" / "Change" / …
+    u32 line = 1;
+    std::vector<ExprP> args;       // 1ª cauda (Exprs — números, vars, nomes)
+    bool hasTail2 = false;         // 2ª cauda (só colorpars)
+    ExprP arg2 = nullptr;          // 2ª cauda como Expr (nome de cor)
+    std::string color2;            // 2ª cauda como #RRGGBB (ColorLit)
+    bool isColor2 = false;
+    // Change(origem|destino)to(alvo)
+    bool isChange = false;
+    bool changeDestino = false;
+    std::vector<std::string> changePath;
+};
+
+// tyker(nome){ find(RF) comps… } — o corpo SÓ aceita componentes; a
+// gramática aceita statements genéricos para o VALIDADOR os rejeitar com
+// erro QUE ENSINA (linha + o que fazer em vez de syntax error seco).
+struct TykerDef {
+    std::string name;
+    u32 line = 1;
+    bool hasFind = false;          // find(RF) presente como 1º componente
+    std::string findRf;
+    u32 findLine = 1;
+    bool sawLateFind = false;      // find fora do 1º lugar (erro legível)
+    u32 lateFindLine = 0;
+    bool hasStray = false;         // statement que não é componente (erro)
+    u32 strayLine = 0;
+    std::string strayName;         // o nome do statement rejeitado
+    std::vector<TykerComp> comps;
+};
+
+// script inteiro: top-level 1× (§3) + fns + central main + linkers/tykers
 struct Program {
     Block top;
     std::vector<FnDef> fns;
+    std::vector<LinkerDecl> linkers;   // 0.9.5: declarações de topo
+    std::vector<TykerDef> tykers;      // 0.9.5: blocos de comportamento
     bool hasCentral = false;
     u32  centralLine = 1;
     CentralMain central;

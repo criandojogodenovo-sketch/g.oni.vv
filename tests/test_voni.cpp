@@ -25,6 +25,9 @@ namespace {
 struct FakeTic {
     std::string name;
     f32 pos[3] = {0, 0, 0};
+    f32 rot[3] = {0, 0, 0};        // GRAUS (convenção do engine) — 0.9.5
+    f32 escala[3] = {1, 1, 1};     // 0.9.5: copy(prop)
+    f32 cor[3] = {1, 1, 1};        // 0.9.5: colorpars (tint do material)
     bool visible = true;
     std::vector<std::string> anims;
     int activeAnim = -1;
@@ -33,6 +36,7 @@ struct FakeTic {
 struct FakeHost : Host {
     std::vector<FakeTic> tics;
     std::vector<std::string> logs;
+    std::string hostTic;           // 0.9.5: o TIC dono do script (play())
     f32 moved[3] = {0, 0, 0};
     int explodeCalls = 0;
     int lastExplodeHide = 0;
@@ -66,6 +70,12 @@ struct FakeHost : Host {
         }
         if (chain[0] == "pos") {
             out = Value::ofVec3(t->pos[0], t->pos[1], t->pos[2]);
+        } else if (chain[0] == "rot") {          // 0.9.5 (graus)
+            out = Value::ofVec3(t->rot[0], t->rot[1], t->rot[2]);
+        } else if (chain[0] == "escala") {       // 0.9.5: copy
+            out = Value::ofVec3(t->escala[0], t->escala[1], t->escala[2]);
+        } else if (chain[0] == "cor") {          // 0.9.5: colorpars
+            out = Value::ofVec3(t->cor[0], t->cor[1], t->cor[2]);
         } else if (chain[0] == "visible") {
             out = Value::ofBool(t->visible);
         } else if (chain[0] == "name") {
@@ -117,6 +127,27 @@ struct FakeHost : Host {
             t->visible = v.b;
             return true;
         }
+        // 0.9.5: rot/escala/cor como Vec3 (o caminho dos tykers)
+        if (chain.size() == 1 && v.t == Type::Vec3) {
+            if (chain[0] == "rot") {
+                t->rot[0] = v.v3[0];
+                t->rot[1] = v.v3[1];
+                t->rot[2] = v.v3[2];
+                return true;
+            }
+            if (chain[0] == "escala") {
+                t->escala[0] = v.v3[0];
+                t->escala[1] = v.v3[1];
+                t->escala[2] = v.v3[2];
+                return true;
+            }
+            if (chain[0] == "cor") {
+                t->cor[0] = v.v3[0];
+                t->cor[1] = v.v3[1];
+                t->cor[2] = v.v3[2];
+                return true;
+            }
+        }
         err = "escrita não suportada no fake";
         return false;
     }
@@ -134,6 +165,16 @@ struct FakeHost : Host {
     }
     bool importAnim(const std::string& name, std::string& err) override {
         importedAnim = name;
+        // 0.9.5: o play() do tyker — a animação vive no TIC DONO do script
+        FakeTic* t = tic(hostTic);
+        if (t) {
+            for (size_t i = 0; i < t->anims.size(); ++i) {
+                if (t->anims[i] == name) {
+                    t->activeAnim = (int)i;
+                    return true;
+                }
+            }
+        }
         err = "Import.Animation: animação '" + name + "' não encontrada";
         return false;
     }
@@ -1200,4 +1241,755 @@ TEST(docs_lista_reservadas_completa) {
     EXPECT(!isReservedWord("stop"));      // não existe na V.ONI
     EXPECT(!isReservedWord("follow"));    // só dentro de tyker (0.9.3)
     EXPECT(!isReservedWord("fn"));        // estrutural, não reservada §5
+}
+
+// ===========================================================================
+// 0.9.5 · METADE 1 — LINKERS & TYKERS (spec fechada da entrega)
+// ===========================================================================
+// O REGISTO central (VoniRegistry) valida nomes/argc no compile, despacha
+// os handlers no runtime e alimenta as Docs — o teste parser_independente
+// PROVA que adicionar componente novo não muda a gramática.
+// ===========================================================================
+#include "voni/VoniRegistry.h"
+#include "voni/VoniTykers.h"
+
+namespace {
+
+// corre N frames contra o FakeHost (falha ruidosa se algo morrer a meio)
+bool runFrames(Script& s, FakeHost& h, int n) {
+    Error err;
+    for (int i = 0; i < n; ++i) {
+        if (!s.runFrame(h, h.dt, err)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool hasLog(const FakeHost& h, const std::string& sub) {
+    for (const std::string& l : h.logs) {
+        if (l.find(sub) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+TEST(linker_declara_e_regista_no_rf) {
+    const char* src =
+        "linker(seguidor)to(alvo)=RF(principal)\n"
+        "linker(cubo)to(esfera)=RF(outro)\n"
+        "tyker(t){ find(principal) follow() }\n"
+        "central main { on moment { } allmoments { } }\n";
+    Error err;
+    Script s = Script::compile(src, err);
+    EXPECT(err.ok);
+    FakeHost h;
+    EXPECT(s.runStart(h, err));
+    // o RF regista os links (METADE 1: o registo é apropriável nos testes)
+    const auto* rf = s.impl().rfReg.findRf("principal");
+    EXPECT(rf != nullptr && rf->size() == 1);
+    EXPECT((*rf)[0].origem[0] == "seguidor");
+    EXPECT((*rf)[0].destino[0] == "alvo");
+    const auto* rf2 = s.impl().rfReg.findRf("outro");
+    EXPECT(rf2 != nullptr && rf2->size() == 1);
+    // RF inexistente no registo → null
+    EXPECT(s.impl().rfReg.findRf("naoexiste") == nullptr);
+}
+
+TEST(linker_sem_rf_erro_que_ensina) {
+    // "RF obrigatória" da spec: sem o =RF(nome) a declaração deixa de ser
+    // um linker — vira comando desconhecido e o runtime ENSINA a forma
+    Error err;
+    Script s = Script::compile("linker(a)to(b)\ncentral main { }", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    EXPECT(!s.runStart(h, err));
+    EXPECT(err.message.find("linker") != std::string::npos);
+    EXPECT(err.message.find("RF") != std::string::npos);
+}
+
+TEST(tyker_find_obrigatorio_de_primeiro) {
+    Error err;
+    Script a = Script::compile(
+        "linker(x)to(y)=RF(p)\n"
+        "tyker(t){ follow() }\n"
+        "central main { }", err);
+    EXPECT(!err.ok);
+    EXPECT(err.message.find("find(RF)") != std::string::npos);
+
+    Error err2;
+    Script b = Script::compile(
+        "linker(x)to(y)=RF(p)\n"
+        "tyker(t){ look() find(p) }\n"
+        "central main { }", err2);
+    EXPECT(!err2.ok);
+    EXPECT(err2.message.find("1º") != std::string::npos);
+}
+
+TEST(tyker_corpo_so_componentes_ensina) {
+    Error err;
+    Script s = Script::compile(
+        "linker(x)to(y)=RF(p)\n"
+        "tyker(t){ find(p) View P \"ola\" }\n"
+        "central main { }", err);
+    EXPECT(!err.ok);
+    EXPECT(err.message.find("só aceita componentes") != std::string::npos);
+    EXPECT(err.message.find("View") != std::string::npos);
+}
+
+TEST(tyker_componente_desconhecido) {
+    Error err;
+    Script s = Script::compile(
+        "linker(x)to(y)=RF(p)\n"
+        "tyker(t){ find(p) frobnicate() }\n"
+        "central main { }", err);
+    EXPECT(!err.ok);
+    EXPECT(err.message.find("não existe") != std::string::npos);
+}
+
+TEST(tyker_argc_ensina_com_a_sintaxe_do_registo) {
+    Error err;
+    Script s = Script::compile(
+        "linker(x)to(y)=RF(p)\n"
+        "tyker(t){ find(p) follow(1, 2, 3) }\n"
+        "central main { }", err);
+    EXPECT(!err.ok);
+    EXPECT(err.message.find("escreve assim") != std::string::npos);
+    EXPECT(err.message.find("follow") != std::string::npos);
+}
+
+TEST(rf_em_falta_o_tyker_nao_corre) {
+    // R-012: o erro LEGÍVEL da spec; o tyker não corre; o script CONTINUA
+    const char* src =
+        "linker(a)to(b)=RF(principal)\n"
+        "tyker(bom){ find(principal) follow() }\n"
+        "tyker(mau){ find(fantasma) follow() }\n"
+        "central main { allmoments { View P \"anda\" } }\n";
+    Error err;
+    Script s = Script::compile(src, err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"a", {10, 0, 0}});
+    h.tics.push_back({"b", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    // o erro exato da spec
+    EXPECT(hasLog(h, "RF 'fantasma' não encontrada"));
+    EXPECT(hasLog(h, "tyker 'mau' não corre"));
+    // o OUTRO tyker corre (follow) e o allmoments continua
+    EXPECT(runFrames(s, h, 1));
+    EXPECT(hasLog(h, "anda"));
+    FakeTic* a = h.tic("a");
+    EXPECT(a != nullptr);
+    EXPECT(a->pos[0] == 0.0f);   // follow() colou no destino
+}
+
+TEST(ciclo_direto_rejeitado) {
+    // R-011: a→b + b→a no MESMO RF → erro legível, nunca crash
+    const char* src =
+        "linker(a)to(b)=RF(p)\n"
+        "linker(b)to(a)=RF(p)\n"
+        "central main { }\n";
+    Error err;
+    Script s = Script::compile(src, err);
+    EXPECT(err.ok);
+    FakeHost h;
+    EXPECT(!s.runStart(h, err));
+    EXPECT(!err.ok);
+    EXPECT(err.message.find("ciclo") != std::string::npos);
+    EXPECT(err.message.find("'a'") != std::string::npos);
+    EXPECT(err.message.find("'b'") != std::string::npos);
+}
+
+TEST(ciclo_longo_rejeitado) {
+    // a→b→c→a: o DFS apanha também os ciclos compridos
+    Error err;
+    Script s = Script::compile(
+        "linker(a)to(b)=RF(p)\n"
+        "linker(b)to(c)=RF(p)\n"
+        "linker(c)to(a)=RF(p)\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    EXPECT(!s.runStart(h, err));
+    EXPECT(err.message.find("ciclo") != std::string::npos);
+}
+
+TEST(profundidade_256_aborta_legivel) {
+    // cadeia de 300 linkers no MESMO RF: o DFS tem teto 256 → abort legível
+    std::string src;
+    for (int i = 0; i < 299; ++i) {
+        src += "linker(n" + std::to_string(i) + ")to(n" +
+               std::to_string(i + 1) + ")=RF(c)\n";
+    }
+    src += "central main { }\n";
+    Error err;
+    Script s = Script::compile(src.c_str(), err);
+    EXPECT(err.ok);
+    FakeHost h;
+    EXPECT(!s.runStart(h, err));
+    EXPECT(err.message.find("profundidade") != std::string::npos);
+    EXPECT(err.message.find("256") != std::string::npos);
+}
+
+TEST(follow_cola_e_guarda_distancia) {
+    const char* src =
+        "linker(seguidor)to(alvo)=RF(p)\n"
+        "tyker(s){ find(p) follow() }\n"
+        "central main { }\n";
+    Error err;
+    Script s = Script::compile(src, err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"seguidor", {10, 0, 0}});
+    h.tics.push_back({"alvo", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 1));
+    FakeTic* seg = h.tic("seguidor");
+    EXPECT(seg != nullptr);
+    // follow() SEM args: cola no destino
+    EXPECT(seg->pos[0] == 0.0f && seg->pos[1] == 0.0f && seg->pos[2] == 0.0f);
+}
+
+TEST(follow_distancia) {
+    Error err;
+    Script s = Script::compile(
+        "linker(seguidor)to(alvo)=RF(p)\n"
+        "tyker(s){ find(p) follow(2) }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"seguidor", {10, 0, 0}});
+    h.tics.push_back({"alvo", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 1));
+    FakeTic* seg = h.tic("seguidor");
+    EXPECT(seg != nullptr);
+    EXPECT(test::nearEqF(seg->pos[0], 2.0f));
+    EXPECT(test::nearEqF(seg->pos[1], 0.0f));
+    EXPECT(test::nearEqF(seg->pos[2], 0.0f));
+}
+
+TEST(follow_suaviza_e_converge) {
+    Error err;
+    Script s = Script::compile(
+        "linker(seguidor)to(alvo)=RF(p)\n"
+        "tyker(s){ find(p) follow(0, 5) }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"seguidor", {10, 0, 0}});
+    h.tics.push_back({"alvo", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 1));
+    FakeTic* seg = h.tic("seguidor");
+    EXPECT(seg != nullptr);
+    const f32 after1 = seg->pos[0];
+    EXPECT(after1 > 1.0f && after1 < 10.0f);   // mexeu MAS não colou
+    EXPECT(runFrames(s, h, 600));
+    EXPECT(test::nearEqF(seg->pos[0], 0.0f, 1e-2f));   // converge
+}
+
+TEST(look_aponta_ao_destino) {
+    Error err;
+    Script s = Script::compile(
+        "linker(vigia)to(alvo)=RF(p)\n"
+        "tyker(s){ find(p) look() }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"vigia", {0, 0, 0}});
+    h.tics.push_back({"alvo", {5, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 1));
+    FakeTic* v = h.tic("vigia");
+    EXPECT(v != nullptr);
+    EXPECT(test::nearEqF(v->rot[1], 90.0f, 1e-2f));   // yaw para +X
+    EXPECT(test::nearEqF(v->rot[0], 0.0f, 1e-2f));    // sem pitch (mesma altura)
+}
+
+TEST(orbit_circula_o_destino) {
+    Error err;
+    Script s = Script::compile(
+        "linker(lua)to(planeta)=RF(p)\n"
+        "tyker(s){ find(p) orbit(2, 90) }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"lua", {2, 0, 0}});
+    h.tics.push_back({"planeta", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 60));   // 1 s a 60 fps = 90°
+    FakeTic* lua = h.tic("lua");
+    EXPECT(lua != nullptr);
+    EXPECT(test::nearEqF(lua->pos[0], 0.0f, 1e-2f));
+    EXPECT(test::nearEqF(lua->pos[2], 2.0f, 1e-2f));
+    EXPECT(test::nearEqF(lua->pos[1], 0.0f));
+}
+
+TEST(copy_copia_propriedade_por_frame) {
+    Error err;
+    Script s = Script::compile(
+        "linker(espelho)to(modelo)=RF(p)\n"
+        "tyker(s){ find(p) copy(escala) }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"espelho", {0, 0, 0}});
+    FakeTic modelo;
+    modelo.name = "modelo";
+    modelo.escala[0] = 3;
+    modelo.escala[1] = 4;
+    modelo.escala[2] = 5;
+    h.tics.push_back(modelo);
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 1));
+    FakeTic* esp = h.tic("espelho");
+    EXPECT(esp != nullptr);
+    EXPECT(test::nearEqF(esp->escala[0], 3.0f));
+    EXPECT(test::nearEqF(esp->escala[1], 4.0f));
+    EXPECT(test::nearEqF(esp->escala[2], 5.0f));
+}
+
+TEST(map_e_shading_sao_noop_validos) {
+    Error err;
+    Script s = Script::compile(
+        "linker(a)to(b)=RF(p)\n"
+        "tyker(s){ find(p) map() shading() }\n"
+        "central main { allmoments { View P \"vivo\" } }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"a", {7, 0, 0}});
+    h.tics.push_back({"b", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 5));
+    // no-op: nada mexeu, o script vive
+    FakeTic* a = h.tic("a");
+    EXPECT(a != nullptr && a->pos[0] == 7.0f);
+    EXPECT(hasLog(h, "vivo"));
+}
+
+TEST(change_reescreve_o_rf_partilhado) {
+    // Change(destino)to(novo): o follow passa a seguir o NOVO alvo
+    Error err;
+    Script s = Script::compile(
+        "linker(seguidor)to(alvo1)=RF(p)\n"
+        "tyker(s){ find(p) Change(destino)to(alvo2) follow() }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"seguidor", {10, 0, 0}});
+    h.tics.push_back({"alvo1", {0, 0, 0}});
+    h.tics.push_back({"alvo2", {0, 5, 0}});
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 1));
+    FakeTic* seg = h.tic("seguidor");
+    EXPECT(seg != nullptr);
+    // foi atrás do alvo2 (0,5,0) — não do alvo1
+    EXPECT(test::nearEqF(seg->pos[0], 0.0f, 1e-3f));
+    EXPECT(test::nearEqF(seg->pos[1], 5.0f, 1e-3f));
+    // o RF foi REESCRITO (partilhado)
+    const auto* rf = s.impl().rfReg.findRf("p");
+    EXPECT(rf != nullptr && !rf->empty());
+    EXPECT((*rf)[0].destino[0] == "alvo2");
+}
+
+TEST(point_fixa_e_limpa_o_alvo) {
+    Error err;
+    Script s = Script::compile(
+        "linker(seguidor)to(alvo)=RF(p)\n"
+        "tyker(s){ find(p) point(0, 5, 0) follow() }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"seguidor", {10, 0, 0}});
+    h.tics.push_back({"alvo", {3, 3, 3}});
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 1));
+    FakeTic* seg = h.tic("seguidor");
+    EXPECT(seg != nullptr);
+    // seguiu o PONTO (0,5,0), não o destino vivo (3,3,3)
+    EXPECT(seg->pos[0] == 0.0f && seg->pos[1] == 5.0f && seg->pos[2] == 0.0f);
+
+    // point() limpa: outro tyker no mesmo script volta ao destino vivo
+    Error err2;
+    Script s2 = Script::compile(
+        "linker(seguidor)to(alvo)=RF(p)\n"
+        "tyker(s){ find(p) point() follow() }\n"
+        "central main { }\n", err2);
+    EXPECT(err2.ok);
+    FakeHost h2;
+    h2.tics.push_back({"seguidor", {10, 0, 0}});
+    h2.tics.push_back({"alvo", {3, 3, 3}});
+    EXPECT(s2.runStart(h2, err2));
+    EXPECT(runFrames(s2, h2, 1));
+    FakeTic* seg2 = h2.tic("seguidor");
+    EXPECT(seg2 != nullptr);
+    EXPECT(seg2->pos[0] == 3.0f && seg2->pos[1] == 3.0f && seg2->pos[2] == 3.0f);
+}
+
+TEST(colorpars_hex_nome_e_outro_parametro) {
+    Error err;
+    Script s = Script::compile(
+        "linker(seguidor)to(alvo)=RF(p)\n"
+        "tyker(s){ find(p) colorpars(cor)(#FF0000) }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"seguidor", {0, 0, 0}});
+    h.tics.push_back({"alvo", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 1));
+    FakeTic* seg = h.tic("seguidor");
+    EXPECT(seg != nullptr);
+    EXPECT(test::nearEqF(seg->cor[0], 1.0f));
+    EXPECT(test::nearEqF(seg->cor[1], 0.0f));
+    EXPECT(test::nearEqF(seg->cor[2], 0.0f));
+
+    // nome da paleta
+    Error err2;
+    Script s2 = Script::compile(
+        "linker(a)to(b)=RF(p)\n"
+        "tyker(s){ find(p) colorpars(cor)(azul) }\n"
+        "central main { }\n", err2);
+    EXPECT(err2.ok);
+    FakeHost h2;
+    h2.tics.push_back({"a", {0, 0, 0}});
+    h2.tics.push_back({"b", {0, 0, 0}});
+    EXPECT(s2.runStart(h2, err2));
+    EXPECT(runFrames(s2, h2, 1));
+    FakeTic* a2 = h2.tic("a");
+    EXPECT(a2 != nullptr);
+    EXPECT(test::nearEqF(a2->cor[2], 1.0f));
+    EXPECT(test::nearEqF(a2->cor[0], 0.0f));
+
+    // outro parâmetro: guardado, NÃO tinge (o shading() futuro consome)
+    Error err3;
+    Script s3 = Script::compile(
+        "linker(a)to(b)=RF(p)\n"
+        "tyker(s){ find(p) colorpars(brilho)(vermelho) }\n"
+        "central main { }\n", err3);
+    EXPECT(err3.ok);
+    FakeHost h3;
+    h3.tics.push_back({"a", {0, 0, 0}});
+    h3.tics.push_back({"b", {0, 0, 0}});
+    EXPECT(s3.runStart(h3, err3));
+    EXPECT(runFrames(s3, h3, 1));
+    FakeTic* a3 = h3.tic("a");
+    EXPECT(a3 != nullptr);
+    EXPECT(test::nearEqF(a3->cor[0], 1.0f));   // intocado (branco)
+}
+
+TEST(colorpars_cor_desconhecida_erro_legivel) {
+    Error err;
+    Script s = Script::compile(
+        "linker(a)to(b)=RF(p)\n"
+        "tyker(s){ find(p) colorpars(cor)(chartreuse) }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"a", {0, 0, 0}});
+    h.tics.push_back({"b", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    Error ferr;
+    EXPECT(!s.runFrame(h, 1.0 / 60.0, ferr));   // falha legível (fatal)
+    EXPECT(ferr.message.find("não existe") != std::string::npos);
+}
+
+TEST(play_toca_a_animacao_do_linker) {
+    Error err;
+    Script s = Script::compile(
+        "linker(ator)to(correr)=RF(p)\n"
+        "tyker(t){ find(p) play() }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.hostTic = "ator";   // o dono do script
+    h.tics.push_back({"ator", {0, 0, 0}});
+    h.tics.push_back({"cubo", {0, 0, 0}});
+    h.tic("ator")->anims = {"andar", "correr"};
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 1));
+    EXPECT(h.tic("ator") != nullptr);
+    EXPECT(h.tic("ator")->activeAnim == 1);   // "correr" (o lado animação)
+}
+
+TEST(play_sem_animacao_erro_legivel) {
+    Error err;
+    Script s = Script::compile(
+        "linker(a)to(b)=RF(p)\n"
+        "tyker(t){ find(p) play() }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"a", {0, 0, 0}});
+    h.tics.push_back({"b", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    Error ferr;
+    EXPECT(!s.runFrame(h, 1.0 / 60.0, ferr));
+    EXPECT(ferr.message.find("animação") != std::string::npos);
+}
+
+TEST(limit_corta_a_distancia) {
+    Error err;
+    Script s = Script::compile(
+        "linker(seguidor)to(alvo)=RF(p)\n"
+        "tyker(s){ find(p) follow() limit(5, 10) }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"seguidor", {100, 0, 0}});
+    h.tics.push_back({"alvo", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 1));
+    FakeTic* seg = h.tic("seguidor");
+    EXPECT(seg != nullptr);
+    // follow() queria COLAR (dist 0); o limit(5,10) segura a 5 (o mínimo)
+    EXPECT(test::nearEqF(seg->pos[0], 5.0f, 1e-3f));
+}
+
+TEST(delay_adiia_a_ativacao) {
+    Error err;
+    Script s = Script::compile(
+        "linker(a)to(b)=RF(p)\n"
+        "tyker(s){ find(p) delay(0.5) colorpars(cor)(#FF0000) }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"a", {0, 0, 0}});
+    h.tics.push_back({"b", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    FakeTic* a = h.tic("a");
+    EXPECT(a != nullptr);
+    EXPECT(runFrames(s, h, 15));   // 0.25 s: AINDA não ativou
+    EXPECT(test::nearEqF(a->cor[0], 1.0f));   // branco intocado
+    EXPECT(test::nearEqF(a->cor[1], 1.0f));
+    EXPECT(runFrames(s, h, 20));   // +0.33 s: passa 0.5 s → ativa
+    EXPECT(test::nearEqF(a->cor[0], 1.0f));
+    EXPECT(test::nearEqF(a->cor[1], 0.0f));   // vermelho
+}
+
+TEST(args_dos_componentes_podem_ser_variaveis) {
+    // decisão 🔶: resolvem 1× na ativação — literais OU variáveis do script
+    Error err;
+    Script s = Script::compile(
+        "v++distancia=2\n"
+        "linker(seguidor)to(alvo)=RF(p)\n"
+        "tyker(s){ find(p) follow(distancia) }\n"
+        "central main { on moment { } allmoments { } }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"seguidor", {10, 0, 0}});
+    h.tics.push_back({"alvo", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 1));
+    FakeTic* seg = h.tic("seguidor");
+    EXPECT(seg != nullptr);
+    EXPECT(test::nearEqF(seg->pos[0], 2.0f));
+}
+
+TEST(varios_tykers_partilham_o_mesmo_rf) {
+    Error err;
+    Script s = Script::compile(
+        "linker(seguidor)to(alvo)=RF(p)\n"
+        "tyker(um){ find(p) follow(3) }\n"
+        "tyker(dois){ find(p) look() }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"seguidor", {10, 0, 0}});
+    h.tics.push_back({"alvo", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 1));
+    FakeTic* seg = h.tic("seguidor");
+    EXPECT(seg != nullptr);
+    EXPECT(test::nearEqF(seg->pos[0], 3.0f));   // follow do tyker "um"
+    // look do tyker "dois": DE (3,0,0) para (0,0,0) → yaw -90°
+    EXPECT(test::nearEqF(seg->rot[1], -90.0f, 0.5f));
+}
+
+TEST(tyker_sem_central_main_comporta_se) {
+    // só linkers + tykers: o tick corre na mesma (decisão 🔶 documentada)
+    Error err;
+    Script s = Script::compile(
+        "linker(a)to(b)=RF(p)\n"
+        "tyker(s){ find(p) follow() }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"a", {4, 0, 0}});
+    h.tics.push_back({"b", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 1));
+    FakeTic* a = h.tic("a");
+    EXPECT(a != nullptr);
+    EXPECT(a->pos[0] == 0.0f);
+}
+
+TEST(parser_independente_do_registo) {
+    // A PROVA 🔶: componente NOVO instalado no REGISTO (sem tocar na
+    // gramática) — o tyker parseia, valida e corre na mesma
+    static bool rodou = false;
+    rodou = false;
+    auto handler = [](tykers::Ctx& c, const tykers::Comp& m,
+                      std::string& err) -> bool {
+        (void)c;
+        (void)err;
+        if (m.vals.size() != 1) {
+            err = "ecoteste: 1 argumento";
+            return false;
+        }
+        if (m.vals[0].t == Type::Int && m.vals[0].i == 7) {
+            rodou = true;
+        }
+        return true;
+    };
+    EXPECT(reg::installForTest(
+        "ecoteste", handler, "ecoteste(n)", "componente de teste do registo",
+        "tyker(t){ find(p) ecoteste(7) }"));
+    // a entrada tem Docs (obrigatória) e o find funciona
+    const reg::Entry* e = reg::find("ecoteste");
+    EXPECT(e != nullptr && e->kind == reg::Kind::Componente);
+    EXPECT(e->syntax && e->desc && e->example);
+    EXPECT(reg::findComponent("ecoteste") == e);
+    EXPECT(reg::prefixMatch("ecot") == e);
+    EXPECT(reg::handlerFor("ecoteste") != nullptr);
+
+    Error err;
+    Script s = Script::compile(
+        "linker(a)to(b)=RF(p)\n"
+        "tyker(t){ find(p) ecoteste(7) }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);   // validou contra o REGISTO — a gramática nem sabe
+    FakeHost h;
+    h.tics.push_back({"a", {0, 0, 0}});
+    h.tics.push_back({"b", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 1));
+    EXPECT(rodou);   // o handler correu pelo dispatch do registo
+
+    // argc contra o registo: ecoteste aceita 0..9 → 10 args é demais? 9 é o
+    // teto do installForTest — 1 arg válido (testado acima); limpeza:
+    reg::resetForTest();
+    EXPECT(reg::find("ecoteste") == nullptr);
+    EXPECT(reg::handlerFor("ecoteste") == nullptr);
+}
+
+TEST(registo_docs_obrigatorias_por_entrada) {
+    // "Docs obrigatória por entrada": TODA a entrada do registo tem
+    // sintaxe + descrição + exemplo preenchidos
+    for (const reg::Entry& e : reg::all()) {
+        EXPECT(e.name && *e.name);
+        EXPECT(e.syntax && *e.syntax);
+        EXPECT(e.desc && *e.desc);
+        EXPECT(e.example && *e.example);
+    }
+    // BIJEÇÃO componente↔handler: toda a entrada Componente tem handler;
+    // (o contrário — handler sem entrada — não pode acontecer porque a
+    // tabela vive no próprio registo; o findComponent falharia no compile)
+    for (const reg::Entry& e : reg::all()) {
+        if (e.kind == reg::Kind::Componente) {
+            EXPECT(reg::handlerFor(e.name) != nullptr);
+        }
+    }
+    // os 13 componentes da spec fechada, TODOS no registo
+    const char* kSpec[] = {"follow", "look", "orbit", "copy", "map",
+                           "Change", "point", "colorpars", "play",
+                           "limit", "delay", "shading"};
+    for (const char* n : kSpec) {
+        const reg::Entry* e = reg::findComponent(n);
+        EXPECT(e != nullptr);
+    }
+    EXPECT(reg::findComponent("find") == nullptr);   // find é forma do tyker
+}
+
+TEST(docs_incluem_o_registo_linker_tyker_componente) {
+    auto& all = voni::docs::all();
+    bool hasLinker = false, hasTyker = false, hasComp = false;
+    for (const auto& e : all) {
+        hasLinker = hasLinker || e.cat == voni::docs::Cat::Linker;
+        hasTyker = hasTyker || e.cat == voni::docs::Cat::Tyker;
+        hasComp = hasComp || e.cat == voni::docs::Cat::Componente;
+    }
+    EXPECT(hasLinker && hasTyker && hasComp);
+    // a pesquisa apanha os novos (a lupa do editor)
+    EXPECT(!voni::docs::search("follow").empty());
+    EXPECT(!voni::docs::search("linker").empty());
+    EXPECT(!voni::docs::search("tyker").empty());
+}
+
+TEST(exemplo_8_5_no_c33) {
+    // O TESTE da spec: "follow/Change/point+colorpars/RF em falta/ciclo"
+    // (versão scriptada; a humana corre no device — checklist do relatório)
+
+    // (1) follow
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(heroi)to(bau)=RF(p)\n"
+            "tyker(seguelo){ find(p) follow(2) }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        FakeHost h;
+        h.tics.push_back({"heroi", {9, 0, 0}});
+        h.tics.push_back({"bau", {0, 0, 0}});
+        EXPECT(s.runStart(h, err));
+        EXPECT(runFrames(s, h, 1));
+        FakeTic* heroi = h.tic("heroi");
+        EXPECT(heroi != nullptr);
+        EXPECT(test::nearEqF(heroi->pos[0], 2.0f));
+    }
+    // (2) Change + point + colorpars num tyker só
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(heroi)to(bau1)=RF(p)\n"
+            "tyker(t){ find(p) Change(destino)to(bau2) point(0, 1, 0) "
+            "colorpars(cor)(#00FF00) follow(1) }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        FakeHost h;
+        h.tics.push_back({"heroi", {9, 9, 9}});
+        h.tics.push_back({"bau1", {5, 5, 5}});
+        h.tics.push_back({"bau2", {7, 7, 7}});
+        EXPECT(s.runStart(h, err));
+        EXPECT(runFrames(s, h, 1));
+        FakeTic* heroi = h.tic("heroi");
+        EXPECT(heroi != nullptr);
+        // Change→bau2 foi anulado pelo point(0,1,0): segue o PONTO a 1 de
+        // distância (o follow mantém a distância na direção de onde vem)
+        EXPECT(heroi->pos[0] != 9.0f);   // mexeu
+        EXPECT(test::nearEqF(heroi->cor[1], 1.0f));   // verde #00FF00
+    }
+    // (3) RF em falta
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(a)to(b)=RF(p)\n"
+            "tyker(t){ find(naoexiste) follow() }\n"
+            "central main { allmoments { View P \"ok\" } }\n", err);
+        EXPECT(err.ok);
+        FakeHost h;
+        h.tics.push_back({"a", {1, 0, 0}});
+        h.tics.push_back({"b", {0, 0, 0}});
+        EXPECT(s.runStart(h, err));
+        EXPECT(hasLog(h, "RF 'naoexiste' não encontrada"));
+        EXPECT(runFrames(s, h, 1));
+        EXPECT(hasLog(h, "ok"));   // o script segue
+        FakeTic* a = h.tic("a");
+        EXPECT(a != nullptr && a->pos[0] == 1.0f);   // o tyker NÃO correu
+    }
+    // (4) ciclo
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(a)to(b)=RF(p)\n"
+            "linker(b)to(a)=RF(p)\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        FakeHost h;
+        EXPECT(!s.runStart(h, err));
+        EXPECT(err.message.find("ciclo") != std::string::npos);
+    }
 }

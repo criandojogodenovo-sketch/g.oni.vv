@@ -7,6 +7,7 @@
 #include "core/Scene.h"
 #include "core/Tic.h"
 #include "components/AnimationPlayer.h"
+#include "components/MeshRenderer.h"   // 0.9.5: cor (tint) p/ o colorpars
 #include "components/ScriptComp.h"
 #include "components/Transform3D.h"
 #include "math/Math.h"
@@ -21,6 +22,7 @@ using vv::Quat;
 using vv::Vec3;
 using vv::Transform3D;
 using vv::AnimationPlayer;
+using vv::MeshRenderer;
 using vv::i32;
 
 // (graus↔radianos — helpers locais como no AnimationPlayer/GltfAnim)
@@ -51,7 +53,7 @@ Tic* EngineHost::ticByName(const std::string& name, std::string& err) {
 bool EngineHost::isTicProp(const std::string& prop) {
     return prop == "pos" || prop == "rot" || prop == "escala" ||
            prop == "scale" || prop == "name" || prop == "visible" ||
-           prop == "active";
+           prop == "active" || prop == "cor";   // 0.9.5: tint do material
 }
 
 bool EngineHost::propGet(Tic& tic, const std::string& prop, Value& out,
@@ -89,8 +91,20 @@ bool EngineHost::propGet(Tic& tic, const std::string& prop, Value& out,
         out = Value::ofBool(tic.active);
         return true;
     }
+    // 0.9.5 · LINKERS & TYKERS: cor do material (Vec3 0..1) — o colorpars
+    // escreve aqui (o 'cor' do tyker tinge o TIC de origem)
+    if (prop == "cor") {
+        MeshRenderer* mr = tic.getComponent<MeshRenderer>();
+        if (!mr) {
+            err = "TIC '" + tic.name + "' não tem material (cor)";
+            return false;
+        }
+        out = Value::ofVec3(mr->tint[0], mr->tint[1], mr->tint[2]);
+        return true;
+    }
     err = "propriedade '" + prop +
-          "' não existe (propriedades: pos rot escala name visible active)";
+          "' não existe (propriedades: pos rot escala cor name visible "
+          "active)";
     return false;
 }
 
@@ -142,6 +156,22 @@ bool EngineHost::propSet(Tic& tic, const std::string& prop, const Value& v,
             return false;
         }
         tic.active = v.b;
+        return true;
+    }
+    // 0.9.5 · LINKERS & TYKERS: escrita da cor (o colorpars do tyker)
+    if (prop == "cor") {
+        if (v.t != Type::Vec3) {
+            err = "'cor' é Vec3 (veio " + typeName(v.t) + ")";
+            return false;
+        }
+        MeshRenderer* mr = tic.getComponent<MeshRenderer>();
+        if (!mr) {
+            err = "TIC '" + tic.name + "' não tem material (cor)";
+            return false;
+        }
+        mr->tint[0] = v.v3[0];
+        mr->tint[1] = v.v3[1];
+        mr->tint[2] = v.v3[2];
         return true;
     }
     err = "propriedade '" + prop + "' não existe ou é só de leitura";
