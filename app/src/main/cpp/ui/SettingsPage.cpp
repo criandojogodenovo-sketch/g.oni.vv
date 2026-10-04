@@ -113,13 +113,22 @@ bool sectionHeader(UiContext& ui, u64 id, u32 bit, u32& collapsed, f32 x, f32 y,
 
 Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx) {
     (void)in;
-    // página INTEIRA na banda do viewport (spec I: página scrollável)
-    f32 ox, oy, aw, ah;
-    overlayArea(ui.screenWidth(), ui.screenHeight(), ui.safeArea(), ox, oy, aw,
-                ah);
-    ui.panel(ox, oy, aw, ah, theme::kTheme.surface);
+    // 0.9.6 (G1) — ECRÃ CHEIO MODAL (a regra das camadas): o Settings deixa
+    // de ser a BANDA do overlayArea (que deixava o glifo amarelo do áudio e
+    // o orbit da câmara por trás) e passa a ocupar o contentRect TODO com o
+    // CABEÇALHO PADRÃO: fundo na superfície inteira (a faixa do sistema
+    // fica por trás), cabeçalho = inset do topo + 56dp (o título nunca
+    // corta sob a faixa preta), conteúdo até ao inset de baixo/laterais.
+    // Em desktop/tests insets=0 — a banda e o ecrã cheio coincidem.
+    const safe::Insets ins = ui.safeArea();
+    const f32 ox = ins.left;
+    const f32 oy = ins.top;
+    const f32 aw = ui.screenWidth() - ins.left - ins.right;
+    const f32 ah = ui.screenHeight() - ins.top - ins.bottom;
+    ui.panel(0.0f, 0.0f, ui.screenWidth(), ui.screenHeight(),
+             theme::kTheme.surface);
 
-    // ---- BACK 56dp + título 20sp ------------------------------------------
+    // ---- BACK 48dp + título 20sp no CABEÇALHO PADRÃO (56dp) ---------------
     const UiRect back = {ox + 8.0f, oy + 4.0f, 48.0f, 48.0f};
     const bool backHeld = ui.widgetActive(kBackId);
     if (backHeld) {
@@ -130,9 +139,12 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
                     back.y + (back.h - 24.0f) * 0.5f, 24.0f,
                     theme::kTheme.text1);
     if (ui.hasFont()) {
-        ui.label(back.x + back.w + 12.0f,
-                 baseline(ui, {ox, oy + 4.0f, aw, 48.0f}), "Settings",
-                 theme::kTheme.text1);
+        // 0.9.6 (G1-2): a baseline do CABEÇALHO PADRÃO (a MESMA das outras
+        // telas — Theme é a fonte única; o título 20sp centrado sem corte)
+        ui.labelStyled(back.x + back.w + 12.0f,
+                       oy + theme::kHeaderTitleBase, "Settings",
+                       theme::kTheme.text1,
+                       theme::fontScale(theme::kFontScreen), 0);
     }
     ui.panel(ox, oy + 56.0f, aw, 1.0f, theme::kTheme.border);
     const bool backPressed =

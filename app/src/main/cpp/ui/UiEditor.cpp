@@ -71,6 +71,15 @@ bool anyOverlayOpen(const EditorState& st) {
            st.docsScreen.open;    // 0.9.2: ecrã de Docs
 }
 
+// 0.9.6 (G1) — os ECRÃS CHEIOS (a lista fechada da camada modal-maior):
+// Settings (página full-screen desde 0.9.0), Docs, editor de script e
+// janela de texto. Os DIÁLOGOS (menus/seletores/viewer) NÃO estão aqui —
+// continuam a conviver com a barra de baixo (comportamento de sempre).
+bool fullscreenOverlayOpen(const EditorState& st) {
+    return st.settingsMenu || st.docsScreen.open || st.scriptWin.open ||
+           st.textWin.open;
+}
+
 // 0.7.5 — BACKDROP MODAL: fundo OPACO que tapa o ecrã TODO (o chrome do
 // editor não se desenha com um modal aberto; o backdrop garante que NADA
 // — canvas UI incluído — aparece por trás/à mista com o overlay. O fix do

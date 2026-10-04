@@ -3916,12 +3916,18 @@ void frame() {
     // âncoras (feedGizmo) e o slot reclamado NÃO orbita.
     // 0.7.0: também NÃO em modo UI (o viewport central é o editor 2D — os
     // gizmos são 3D; o orbit também fica desligado no modo UI)
+    // 0.9.6 (G1-3): e NÃO com overlay aberto — o DRAW já era gated pelo
+    // modalOpen desde 0.7.5 mas o INPUT não: com o Settings/Docs/editor
+    // abertos, tocar onde o gizmo ESTARIA arrastava o TIC por trás (a
+    // "cena mexe-se por trás" do relatório do dono). Input alinhado com
+    // o draw — a regra da casa: não desenhado = não interativo.
     u32 gizmoClaimed = 0;
     Tic* gizmoTic = g_scene.get(g_editor.selected);
     Transform3D* gizmoTr =
         (gizmoTic && gizmoTic->active) ? gizmoTic->getComponent<Transform3D>()
                                         : nullptr;
-    if (gizmo::visible(g_editor.playMode || g_editor.uiMode, gizmoTr != nullptr)) {
+    if (gizmo::visible(g_editor.playMode || g_editor.uiMode, gizmoTr != nullptr) &&
+        !editor::anyOverlayOpen(g_editor)) {
         const Mat4 gview = g_camera.view();
         const Mat4 gproj = g_camera.proj(w / h);
         const Mat4 gvp = Mat4::mul(gproj, gview);
@@ -3958,7 +3964,12 @@ void frame() {
     editor::updateCameraOrbit(
         g_camera, g_orbit, g_input, viewRect,
         claimed | gizmoClaimed | canvasClaimed,
-        g_editor.playMode || g_editor.uiMode || g_editor.audioMode);
+        g_editor.playMode || g_editor.uiMode || g_editor.audioMode ||
+            // 0.9.6 (G1-3): overlay aberto = o toque pertence AO overlay —
+            // o orbit da câmara por trás morria AQUI (a cena mexia-se por
+            // trás do Settings/Docs/editor; o draw do chrome já era gated
+            // pelo anyOverlayOpen, o input não)
+            editor::anyOverlayOpen(g_editor));
 
     // 0.7.0 — DESSELECCIONAR: tap parado no vazio do viewport 3D limpa a
     // seleção (só em editor 3D; o modo UI desseleciona o ELEMENTO no
@@ -5275,7 +5286,12 @@ void frame() {
 
     // 0.8.11: glifos de ALTIFALANTE (+ esfera posicional) dos AudioPlayers
     // — SÓ no editor (em Play nada desenha: só soa)
-    if (!g_editor.playMode && !g_editor.uiMode && !g_editor.audioMode) {
+    // 0.9.6 (G1-3): e NUNCA com overlay aberto — o ícone amarelo do áudio
+    // desenhava POR CIMA do Settings (o glifo corre no pass UI, DEPOIS do
+    // backdrop modal); com um ecrã cheio aberto, TUDO o que desenha sobre
+    // a cena sai do ecrã (a regra das camadas: cena < painéis < modais)
+    if (!g_editor.playMode && !g_editor.uiMode && !g_editor.audioMode &&
+        !modalOpen) {
         const Mat4 glyphVp =
             Mat4::mul(g_camera.proj(w / h), g_camera.view());
         g_scene.forEachActive([&](Tic& t) {
@@ -5289,7 +5305,13 @@ void frame() {
     // Animação) + STATUS BAR 24dp ("FPS N · TICs N" — as abreviaturas
     // morreram). Desenhado DEPOIS do viewport/painéis (o drawer cobre o
     // fundo) e ANTES dos overlays (modais por cima de tudo).
-    {
+    // 0.9.6 (G1-4): ESCONDIDO em ecrãs cheios e com teclado aberto —
+    // este bloco corria DEPOIS dos overlays e a barra (drawer + status)
+    // desenhava POR CIMA do Settings/Docs/editor e do teclado do renomear
+    // (o bug "a barra de baixo aparece com o teclado aberto"). A camada
+    // fica: cena < painéis < modais < teclado — a barra pertence aos
+    // painéis; com um ecrã cheio ou teclado, ela sai do ecrã.
+    if (!editor::fullscreenOverlayOpen(g_editor) && !g_editor.textInput) {
         // o log da consola = o MESMO tail do engine.log do viewer (120
         // linhas chegam — a consola filra por chips)
         std::vector<std::string> logTail;

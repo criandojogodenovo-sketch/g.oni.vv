@@ -133,6 +133,14 @@ constexpr f32 kFontSection = 16.0f;
 constexpr f32 kFontScreen  = 20.0f;
 inline constexpr f32 fontScale(f32 sp) { return sp / 14.0f; }
 
+// 0.9.6 (G1-2) — BASelines do CABEÇALHO PADRÃO (a parte útil de 56dp):
+// o par título(20sp)+subtítulo(12sp) CENTRADO e SEM CORTE — o bloco real
+// do título a 20sp é ~35px (topo a 1,3dp do cabeçalho, fundo 35,6) e o
+// subtítulo ocupa 36..55. As 4 telas (Docs/Settings/Script/Texto) usam
+// ESTAS constantes — mesma fonte de verdade do resto do layout.
+constexpr f32 kHeaderTitleBase = 29.0f;   // baseline do título no cabeçalho
+constexpr f32 kHeaderSubBase   = 51.0f;   // baseline do subtítulo
+
 // ---- RAIOS (cantos curvos por escadaria de quads) ---------------------------
 constexpr f32 kRadiusCard  = 8.0f;   // cards/botões primários
 constexpr f32 kRadiusField = 4.0f;   // campos/chips

@@ -1285,7 +1285,8 @@ int main() {
                                      editor::settings::kBitDiag;
         frame();   // layout estabiliza (slot de scroll)
         // y da linha Docs: 8 + 4 headers colapsados*48 + header Docs 48 + 24
-        tap(800.0f, safe::kToolbarH + 56.0f + 8.0f + 4.0f * 48.0f + 48.0f + 24.0f);
+        // 0.9.6 (G1): Settings ECRÃ CHEIO — sem a banda kToolbarH do overlayArea
+        tap(800.0f, 56.0f + 8.0f + 4.0f * 48.0f + 48.0f + 24.0f);
         check(g_editor.docsScreen.open,
               "o toque na linha Docs do Settings ABRE as Docs (era morta)");
         check(logHas("voni: docs abertas"), "a abertura fica LOGADA");
@@ -1975,6 +1976,192 @@ int main() {
         }
 
         onAppCmd(&app11, APP_CMD_TERM_WINDOW);
+    }
+
+    // =====================================================================
+    // FASE 12 — 0.9.6 G1: INSETS + CAMADAS (os ecrãs cheios respeitam a
+    // safe-area e capturam TODO o toque; nada desenha por cima deles)
+    // =====================================================================
+    fase("FASE 12 — 0.9.6 G1: insets reais + camadas (ecrãs cheios)");
+    {
+        resetEngineForHarness();
+        javaRegistersWithCacheDir();
+        ime::clearForTest();
+        g_jni.void_calls.clear();
+
+        auto st12 = std::make_unique<FakeStorage>();
+        check(Project::createNew(*st12, "fase12", g_project),
+              "projeto fase12 criado");
+        {
+            const Handle h = g_scene.create("Ator");
+            Tic* t = g_scene.get(h);
+            t->addComponent<Transform3D>();
+            t->addComponent<MeshRenderer>();
+            t->addComponent<ScriptComp>();
+            check(g_project.saveActiveScene(*st12, g_scene), "cena gravada");
+        }
+        g_storage = std::move(st12);
+        g_projectReady = true;
+
+        // O C33 com a faixa preta de verdade: topo 96 (status+recorte) e
+        // barra de navegação 48 em baixo — o contentRect que o device manda
+        // (landscape 1536x720, como o boot da FASE 1)
+        eglstub::g_surfaceW = 1536;
+        eglstub::g_surfaceH = 720;
+        android_app app12;
+        std::memset(&app12, 0, sizeof(app12));
+        app12.contentRect = {0, 96, 1536, 672};   // insets T96 B48
+        onAppCmd(&app12, APP_CMD_INIT_WINDOW);
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+        check(nearEqF(g_ui.safeArea().top, 96.0f) &&
+                  nearEqF(g_ui.safeArea().bottom, 48.0f),
+              "12.0 os insets do contentRect chegam à UI (T96 B48)");
+
+        // helper: NENHUM glifo sob a faixa do topo/acima da barra de baixo
+        auto glyphsDentroDosInsets = [&]() {
+            const QuadBatch& g = g_ui.glyphsForTest();
+            const QuadVertex* v = g.vertices();
+            const u32 n = g.vertexCount();
+            const f32 topLimit = g_ui.safeArea().top;
+            const f32 botLimit =
+                static_cast<f32>(g_egl.height()) - g_ui.safeArea().bottom;
+            u32 fora = 0;
+            for (u32 i = 0; i + 5 < n; i += 6) {
+                if (v[i].y < topLimit - 0.5f ||
+                    v[i + 2].y > botLimit + 0.5f) {
+                    ++fora;
+                    if (std::getenv("VV_DBG_INSETS")) {
+                        std::printf("FORA: y0=%.1f y1=%.1f x0=%.1f x1=%.1f "
+                                    "(limites T%.0f B%.0f)\n",
+                                    v[i].y, v[i + 2].y, v[i].x, v[i + 2].x,
+                                    topLimit, botLimit);
+                    }
+                }
+            }
+            return fora;
+        };
+
+        // ---- 12.1 DOCS: o título nunca sob a faixa preta -------------------
+        passo("12.1 Docs com insets T96/B48: nada desenha sob o sistema");
+        {
+            g_editor.docsScreen.open = true;
+            g_editor.docsScreen.queryLen = 0;
+            g_editor.docsScreen.expanded = -1;
+            frame();
+            check(glyphsDentroDosInsets() == 0,
+                  "Docs: NENHUM glifo sob a faixa do topo/barra de baixo");
+            // o BACK mora no inset+0..inset+56 — o toque FUNCIONA lá
+            tap(32.0f, 96.0f + 28.0f);
+            check(!g_editor.docsScreen.open,
+                  "Docs: o back (dentro da parte útil) fecha");
+            g_editor.docsScreen.open = false;
+        }
+
+        // ---- 12.2 SETTINGS: ecrã cheio + captura TODO o toque -------------
+        passo("12.2 Settings: ecrã cheio, orbit morto, glifo do áudio fora");
+        {
+            g_editor.settingsMenu = true;
+            frame();   // o settings desenha (sem o TIC Som ainda)
+            check(glyphsDentroDosInsets() == 0,
+                  "Settings: NENHUM glifo sob a faixa do topo/barra de baixo");
+            // (a) baseline dos sólidos COM o modal aberto; o TIC de áudio
+            // entra DEPOIS — se o glifo amarelo desenhasse por cima do
+            // settings, o contador de sólidos SUBIA
+            const u32 solidsBaseline = g_ui.solidsForTest().vertexCount();
+            const Handle ha = g_scene.create("Som");
+            if (Tic* ta = g_scene.get(ha)) {
+                ta->addComponent<Transform3D>();
+                ta->addComponent<AudioPlayer>();
+            }
+            frame();
+            check(g_ui.solidsForTest().vertexCount() == solidsBaseline,
+                  "o glifo amarelo do áudio NÃO desenha sobre o Settings "
+                  "(sólidos idênticos com o TIC Som criado)");
+            // (b) o DRAG no viewport NÃO orbita (a cena não mexe por trás)
+            const f32 yaw0 = g_camera.yaw;
+            const f32 pitch0 = g_camera.pitch;
+            g_input.injectDown(0, 900.0f, 400.0f);
+            frame();
+            g_input.injectMove(0, 1100.0f, 300.0f);
+            frame();
+            g_input.injectUp(0);
+            frame();
+            check(nearEqF(g_camera.yaw, yaw0) &&
+                      nearEqF(g_camera.pitch, pitch0),
+                  "Settings aberto: o drag NÃO orbita a câmara (toque "
+                  "capturado pelo ecrã cheio)");
+            // (c) a barra de baixo escondida: o toque na tab Ficheiros não
+            // abre o drawer (não desenhado = não interativo — a regra da
+            // casa). A tab mora em y = 720-48(inset)-24(status)-48/2 = 624
+            const f32 drawerH0 = g_editor.drawerH;
+            const int tab0 = g_bottom.bottomTab;
+            tap(200.0f, 624.0f);
+            check(g_bottom.bottomTab == tab0 && g_editor.drawerH == drawerH0,
+                  "Settings aberto: a barra de baixo NÃO responde (escondida)");
+            g_editor.settingsMenu = false;
+            frame();
+            check(g_ui.solidsForTest().vertexCount() != solidsBaseline,
+                  "settings fechado: o chrome volta a desenhar (o modal "
+                  "não deixou estado)");
+        }
+
+        // ---- 12.3 EDITOR DE SCRIPT (PORTRAIT): corpo no contentRect ------
+        passo("12.3 editor de script com insets: corpo no contentRect");
+        {
+            // o par inseparável portrait+IME: a superfície MUDA antes dos
+            // toques (o mesmo ciclo do 11.B) com contentRect T96/B48
+            eglstub::g_surfaceW = 720;
+            eglstub::g_surfaceH = 1536;
+            app12.contentRect = {0, 96, 720, 1488};
+            onAppCmd(&app12, APP_CMD_TERM_WINDOW);
+            onAppCmd(&app12, APP_CMD_INIT_WINDOW);
+            if (!g_font.ok()) {
+                const char* paths[] = {FONT_FIXTURE};
+                g_font.loadFromPaths(paths, 1, 28.0f);
+            }
+            g_ui.setFont(&g_font);
+            const Handle ator = g_scene.find("Ator");
+            openScriptEditor(ator);
+            check(g_editor.scriptWin.open, "o editor abre (portrait)");
+            check(g_editor.scriptWin.buf ==
+                      std::string(editor::scriptwin::kSkeleton),
+                  "o esqueleto volta INTACTO do reload (revalidação R-007)");
+            frame();
+            check(glyphsDentroDosInsets() == 0,
+                  "editor: NENHUM glifo sob a faixa do topo (1ª linha "
+                  "visível) nem sob a barra de baixo");
+            // o teclado ancora ACIMA da barra de navegação: a tecla
+            // ESPAÇO funciona no lugar ancorado (inset B=48). A linha de
+            // baixo do teclado: y = kbBottom - 32 (centro da tecla)
+            // Silencioso: a strip de ajuda apaga (o teclado docka no
+            // inset de baixo SEM a strip — matemática determinística)
+            g_editor.scriptWin.helpLevel = 2;
+            g_editor.scriptWin.kbOpen = true;
+            frame();
+            const f32 kbBottom = 1536.0f - g_ui.safeArea().bottom;
+            const f32 spaceY = kbBottom - 32.0f;
+            const u32 len0 = (u32)g_editor.scriptWin.buf.size();
+            const u32 caret0 = g_editor.scriptWin.caret;
+            tap(80.0f, spaceY);
+            check(g_editor.scriptWin.buf.size() == len0 + 1 &&
+                      g_editor.scriptWin.caret == caret0 + 1 &&
+                      g_editor.scriptWin.buf[caret0] == ' ',
+                  "teclado ancorado: o ESPAÇO tecla no lugar certo "
+                  "(acima da barra de navegação — insere NO cursor)");
+            closeScriptEditor();
+            // volta ao landscape p/ as próximas fases
+            eglstub::g_surfaceW = 1536;
+            eglstub::g_surfaceH = 720;
+            app12.contentRect = {0, 96, 1536, 672};
+            onAppCmd(&app12, APP_CMD_TERM_WINDOW);
+            onAppCmd(&app12, APP_CMD_INIT_WINDOW);
+        }
+
+        onAppCmd(&app12, APP_CMD_TERM_WINDOW);
     }
 
     // ---- sumário -----------------------------------------------------------

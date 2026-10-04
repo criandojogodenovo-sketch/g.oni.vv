@@ -534,7 +534,8 @@ TEST(settings_linha_docs_devolve_kOpenDocs) {
 
     // y da linha: 8 (pad) + 4 headers colapsados ×48 + header Docs ×48 +
     // meia linha; a linha INTEIRA é o alvo (o mesmo hit-test do draw)
-    const f32 yRow = vv::safe::kToolbarH + 56.0f + 8.0f + 4.0f * 48.0f +
+    // 0.9.6 (G1): Settings ECRÃ CHEIO — sem a banda kToolbarH do overlayArea
+    const f32 yRow = 56.0f + 8.0f + 4.0f * 48.0f +
                      48.0f + 24.0f;
     vv::editor::settings::Ctx ctx;
     ctx.version = "0.9.4 (vc 47)";

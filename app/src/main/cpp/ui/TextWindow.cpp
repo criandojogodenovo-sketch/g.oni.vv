@@ -101,30 +101,42 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         return 0;
     }
 
+    // 0.9.6 (G1-1/G1-2 — SAFE AREA): fundo na superfície toda, cabeçalho
+    // no inset do topo + 56dp, corpo até ao inset de baixo (insets=0 em
+    // desktop/tests — layout de sempre)
+    const safe::Insets ins = ui.safeArea();
+    const f32 topY = ins.top;
+    const f32 hdrH = kTopH;
+    const f32 contentW = w - ins.left - ins.right;
+
     // fundo opaco FULL-SCREEN (bg do tema — nada do editor atrás)
     ui.panel(0.0f, 0.0f, w, h, theme::kTheme.bg);
 
-    // ---- barra de topo 56dp (surface, como as barras da spec D) ----------
-    ui.panel(0.0f, 0.0f, w, kTopH, theme::kTheme.surface);
-    ui.panel(0.0f, kTopH - 1.0f, w, 1.0f, theme::kTheme.border);
+    // ---- barra de topo: inset + 56dp (surface, como as barras da spec D) --
+    ui.panel(ins.left, topY, contentW, hdrH, theme::kTheme.surface);
+    ui.panel(ins.left, topY + hdrH - 1.0f, contentW, 1.0f,
+             theme::kTheme.border);
 
     // BACK 56dp (alvo ≥48 — a célula inteira é o alvo)
-    icons::drawIcon(ui, icons::Icon::Back, 16.0f, kTopH / 2.0f - 12.0f,
-                    24.0f, theme::kTheme.text1);
+    icons::drawIcon(ui, icons::Icon::Back, ins.left + 16.0f,
+                    topY + hdrH / 2.0f - 12.0f, 24.0f, theme::kTheme.text1);
     int result = 0;
-    if (ui.widgetHit(kBackId, 0.0f, 0.0f, kTopH, kTopH)) {
+    if (ui.widgetHit(kBackId, ins.left, topY, hdrH, hdrH)) {
         result = 1;   // o main fecha (landscape + imeHide + log)
     }
 
-    // título 20sp + hint 12sp (tipografia da spec A)
-    ui.labelStyled(kTopH + 8.0f, 18.0f, "Texto", theme::kTheme.text1,
+    // título 20sp + hint 12sp (tipografia da spec A; na parte útil)
+    ui.labelStyled(ins.left + hdrH + 8.0f, topY + theme::kHeaderTitleBase,
+                   "Texto", theme::kTheme.text1,
                    theme::fontScale(theme::kFontScreen), 0);
-    ui.labelStyled(kTopH + 8.0f, 40.0f, "portrait · IME do sistema",
+    ui.labelStyled(ins.left + hdrH + 8.0f, topY + theme::kHeaderSubBase,
+                   "portrait · IME do sistema",
                    theme::kTheme.text2,
                    theme::fontScale(theme::kFontCaption), 0);
 
     // ---- corpo: linhas do buffer em região de scroll ----------------------
-    const UiRect body{0.0f, kTopH, w, h - kTopH};
+    const UiRect body{ins.left, topY + hdrH, contentW,
+                      h - ins.bottom - (topY + hdrH)};
     const f32 lh = lineHeight(ui);
     const u32 nLines = countLines(st.buf);
     const f32 contentH = static_cast<f32>(nLines) * lh + 16.0f;

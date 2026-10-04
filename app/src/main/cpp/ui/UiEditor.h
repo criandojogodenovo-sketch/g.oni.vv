@@ -47,6 +47,15 @@ namespace editor {
 // navegador/aplicar)
 bool anyOverlayOpen(const EditorState& st);
 
+// 0.9.6 (G1) — ECRÃS CHEIOS: os overlays que ocupam o ecrã TODO (Settings/
+// Docs/Editor de script/janela de texto). Estão DENTRO do anyOverlayOpen;
+// este predicado separa-os dos DIÁLOGOS flutuantes porque as regras de
+// CAMADA são mais fortes: capturam TODO o toque (nada chega à cena/painéis
+// por trás), escondem tudo o que desenha sobre a cena (glifos de TIC de
+// áudio/câmara/luz, gizmos, marcadores) E a barra de baixo + status saem
+// do ecrã (a camada fica: cena < painéis < modais < teclado).
+bool fullscreenOverlayOpen(const EditorState& st);
+
 // 0.7.5 — BACKDROP MODAL: fundo opaco que tapa o ecrã todo por baixo de um
 // overlay modal (nada do editor/canvas UI aparece por trás/à mista).
 void drawModalBackdrop(UiContext& ui, f32 sw, f32 sh);

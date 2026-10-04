@@ -161,15 +161,20 @@ const char* keyLabel(const State& st, u32 row, u32 col) {
     return s;
 }
 
-// desenha o teclado DOKADO no fundo (acima da barra de erro); devolve
-// true se alguma tecla EMITIU texto (para o log/diagnóstico)
+// desenha o teclado DOKADO no fundo (acima da barra de erro; acima do
+// INSET DE BAIXO desde 0.9.6 — a última tecla nunca fica sob a barra de
+// navegação); devolve true se alguma tecla EMITIU texto (para o log)
 bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop) {
-    const f32 innerW = w - 2.0f * kKbPad;
+    // 0.9.6 (G1/G3): o teclado vive DENTRO do contentRect (laterais)
+    const safe::Insets ins = ui.safeArea();
+    const f32 kbX = ins.left;
+    const f32 kbW = w - ins.left - ins.right;
+    const f32 innerW = kbW - 2.0f * kKbPad;
     const f32 keyW = (innerW - 9.0f * kKbGap) / 10.0f;
 
     // painel do teclado (surface com risca superior)
-    ui.panel(0.0f, kbTop, w, keyboardHeight(), theme::kTheme.surface);
-    ui.panel(0.0f, kbTop, w, 1.0f, theme::kTheme.border);
+    ui.panel(kbX, kbTop, kbW, keyboardHeight(), theme::kTheme.surface);
+    ui.panel(kbX, kbTop, kbW, 1.0f, theme::kTheme.border);
 
     bool typed = false;
     f32 y = kbTop + kKbPad;
@@ -177,7 +182,7 @@ bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop) {
         const u32 n = row == 3 ? 10 : 9;   // linhas 0..2 têm 9 teclas
         const f32 rowW = static_cast<f32>(n) * keyW +
                          static_cast<f32>(n - 1) * kKbGap;
-        f32 x = (w - rowW) * 0.5f;
+        f32 x = kbX + (kbW - rowW) * 0.5f;
         for (u32 col = 0; col < n; ++col) {
             const char* lbl = keyLabel(st, row, col);
             const u64 id = kKbBase + static_cast<u64>(row) * 10u +
@@ -197,7 +202,7 @@ bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop) {
     // linha de baixo (0.9.5: +TAB dos esqueletos):
     // [ESPACO 2u][TAB 1u][PAG 1u][APAGA 2u][ENTER 2u][FECHAR 1u] = 9u+5g
     const f32 unit = (innerW - 5.0f * kKbGap) / 9.0f;
-    f32 x = kKbPad;
+    f32 x = kbX + kKbPad;
     if (ui.button(kKbBase + 40, x, y, 2.0f * unit, kKbKeyH, "ESPACO")) {
         ime::Event ev;
         ev.isText = true;
@@ -547,32 +552,46 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         return 0;
     }
 
+    // 0.9.6 (G1-1/G1-2 — SAFE AREA): insets REAIS de g_ui.safeArea() (o
+    // único sítio onde vivem): fundo na superfície toda, CABEÇALHO no
+    // inset do topo + 56dp (a 1ª linha do código nunca sob o cabeçalho e
+    // o título nunca sob a faixa preta) e o CORPO/barra de erro/strip/
+    // teclado param no inset de baixo (nada sob a barra de navegação —
+    // as teclas deixam de ficar tapadas). Em desktop/tests insets=0.
+    const safe::Insets ins = ui.safeArea();
+    const f32 topY = ins.top;
+    const f32 hdrH = kTopH;               // 56dp (a parte ÚTIL)
+    const f32 contentW = w - ins.left - ins.right;
+
     // fundo opaco FULL-SCREEN (bg — o mesmo do editor de código)
     ui.panel(0.0f, 0.0f, w, h, theme::kTheme.bg);
 
-    // ---- barra de topo 56dp ------------------------------------------------
-    ui.panel(0.0f, 0.0f, w, kTopH, theme::kTheme.surface);
-    ui.panel(0.0f, kTopH - 1.0f, w, 1.0f, theme::kTheme.border);
+    // ---- barra de topo: inset + 56dp ----------------------------------------
+    ui.panel(ins.left, topY, contentW, hdrH, theme::kTheme.surface);
+    ui.panel(ins.left, topY + hdrH - 1.0f, contentW, 1.0f,
+             theme::kTheme.border);
 
-    icons::drawIcon(ui, icons::Icon::Back, 16.0f, kTopH / 2.0f - 12.0f, 24.0f,
-                    theme::kTheme.text1);
+    icons::drawIcon(ui, icons::Icon::Back, ins.left + 16.0f,
+                    topY + hdrH / 2.0f - 12.0f, 24.0f, theme::kTheme.text1);
     int result = 0;
-    if (ui.widgetHit(kBackId, 0.0f, 0.0f, kTopH, kTopH)) {
+    if (ui.widgetHit(kBackId, ins.left, topY, hdrH, hdrH)) {
         result = 1;
     }
 
-    // título 20sp + hint 12sp
-    ui.labelStyled(kTopH + 8.0f, 14.0f, "Script", theme::kTheme.text1,
+    // título 20sp + hint 12sp (na parte útil — sem corte)
+    ui.labelStyled(ins.left + hdrH + 8.0f, topY + theme::kHeaderTitleBase,
+                   "Script", theme::kTheme.text1,
                    theme::fontScale(theme::kFontScreen), 0);
-    ui.labelStyled(kTopH + 8.0f, 40.0f, "V.ONI · .voni",
-                   theme::kTheme.text2,
+    ui.labelStyled(ins.left + hdrH + 8.0f, topY + theme::kHeaderSubBase,
+                   "V.ONI · .voni", theme::kTheme.text2,
                    theme::fontScale(theme::kFontCaption), 0);
 
     // LUPA (G0-3): abre as Docs POR CIMA (a pesquisa filtra as entradas
     // estruturadas e mostra o exemplo). Alvo 48dp.
     {
-        const f32 docsX = w - 72.0f * 2.0f - 16.0f - 8.0f - 48.0f;
-        const UiRect r{docsX, (kTopH - 48.0f) * 0.5f, 48.0f, 48.0f};
+        const f32 docsX = ins.left + contentW - 72.0f * 2.0f - 16.0f - 8.0f
+                          - 48.0f;
+        const UiRect r{docsX, topY + (hdrH - 48.0f) * 0.5f, 48.0f, 48.0f};
         const bool held = ui.widgetActive(kDocsId);
         ui.panelRounded(r.x, r.y, r.w, r.h, theme::kRadiusCard,
                         held ? theme::kTheme.surface2
@@ -589,7 +608,8 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
 
         // 0.9.5 · COPIAR REFERÊNCIA (📋): a referência V.ONI COMPLETA como
         // texto colável p/ IAs — o main põe no clipboard via JNI (result 6)
-        const UiRect rc{docsX - 56.0f, (kTopH - 48.0f) * 0.5f, 48.0f, 48.0f};
+        const UiRect rc{docsX - 56.0f, topY + (hdrH - 48.0f) * 0.5f, 48.0f,
+                        48.0f};
         const bool heldC = ui.widgetActive(kCopyRefId);
         ui.panelRounded(rc.x, rc.y, rc.w, rc.h, theme::kRadiusCard,
                         heldC ? theme::kTheme.surface2
@@ -606,7 +626,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
 
         // 0.9.5 · O NÍVEL DA AJUDA (I/N/S): Iniciante (desc+exemplo) ·
         // Normal (desc) · Silencioso (nada) — um toque cicla
-        const UiRect rl{docsX - 104.0f, (kTopH - 48.0f) * 0.5f, 48.0f,
+        const UiRect rl{docsX - 104.0f, topY + (hdrH - 48.0f) * 0.5f, 48.0f,
                         48.0f};
         const bool heldL = ui.widgetActive(kHelpLevelId);
         ui.panelRounded(rl.x, rl.y, rl.w, rl.h, theme::kRadiusCard,
@@ -627,9 +647,9 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
 
     // RUN / STOP 48dp à direita (alvos ≥48; estado: running aceso = Stop)
     const f32 btnW = 72.0f;
-    const f32 runX = w - btnW * 2.0f - 16.0f;
-    const f32 stopX = w - btnW - 8.0f;
-    const f32 btnY = (kTopH - 48.0f) / 2.0f;
+    const f32 runX = ins.left + contentW - btnW * 2.0f - 16.0f;
+    const f32 stopX = ins.left + contentW - btnW - 8.0f;
+    const f32 btnY = topY + (hdrH - 48.0f) / 2.0f;
     const bool running = st.running;
     // Run: accent quando disponível; esbatido enquanto corre
     ui.panelRounded(runX, btnY, btnW, 48.0f, theme::kRadiusCard,
@@ -662,8 +682,8 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     const f32 stripH = strip1.empty()
                            ? 0.0f
                            : (strip2.empty() ? kHelpStripH : kHelpStrip2H);
-    const UiRect body{0.0f, kTopH, w,
-                      h - kTopH - errBarH - kbH - stripH};
+    const UiRect body{ins.left, topY + hdrH, contentW,
+                      h - ins.bottom - (topY + hdrH) - errBarH - kbH - stripH};
     const f32 lh = lineHeight(ui);
     const u32 nLines = lineCount(st);
     const f32 contentH = static_cast<f32>(nLines) * lh + 16.0f;
@@ -701,9 +721,9 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     const f32 off = ui.scrollOffset();
 
     // gutter de nºs de linha (48dp — fundo surface, texto text2 12sp)
-    ui.panel(0.0f, body.y, 48.0f, body.h, theme::kTheme.surface);
-    ui.panel(48.0f, body.y, 1.0f, body.h, theme::kTheme.border);
-    const f32 xCode = 64.0f;
+    ui.panel(ins.left, body.y, 48.0f, body.h, theme::kTheme.surface);
+    ui.panel(ins.left + 48.0f, body.y, 1.0f, body.h, theme::kTheme.border);
+    const f32 xCode = ins.left + 64.0f;
 
     // split em linhas + coloração por classes (o parser classifica; as
     // CORES vêm do Theme — spec §10)
@@ -729,7 +749,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
 
         // nº da linha (12sp text2; a linha do ERRO acende em danger)
         std::snprintf(num, sizeof(num), "%u", i + 1);
-        ui.labelStyled(8.0f, y + 4.0f, num,
+        ui.labelStyled(ins.left + 8.0f, y + 4.0f, num,
                        st.errLine == i + 1 ? theme::kTheme.danger
                                            : theme::kTheme.text2,
                        theme::fontScale(theme::kFontCaption), 0);
@@ -778,40 +798,46 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     }
     ui.endScroll();
 
-    // ---- teclado in-app (G0-1): dokado no fundo, acima da strip de ajuda --
+    // ---- teclado in-app (G0-1): dokado no fundo (ACIMA do inset de baixo
+    // desde 0.9.6 — nunca sob a barra de navegação), acima da strip de ajuda
     if (st.kbOpen) {
-        drawKeyboard(ui, st, w, h - errBarH - stripH - keyboardHeight());
+        drawKeyboard(ui, st, w,
+                    h - ins.bottom - errBarH - stripH - keyboardHeight());
     }
 
     // ---- a STRIP DE AJUDA (0.9.5): entre o teclado e a barra de erro -----
     if (stripH > 0.0f) {
-        const f32 stripY = h - errBarH - kbH - stripH;
-        ui.panel(0.0f, stripY, w, stripH, theme::kTheme.surface);
-        ui.panel(0.0f, stripY, w, 1.0f, theme::kTheme.border);
-        ui.panel(0.0f, stripY + 1.0f, 3.0f, stripH - 1.0f,
+        const f32 stripY = h - ins.bottom - errBarH - kbH - stripH;
+        ui.panel(ins.left, stripY, contentW, stripH, theme::kTheme.surface);
+        ui.panel(ins.left, stripY, contentW, 1.0f, theme::kTheme.border);
+        ui.panel(ins.left, stripY + 1.0f, 3.0f, stripH - 1.0f,
                  theme::kTheme.accent);   // risca accent à esquerda
         // linha 1 (truncada à largura útil — labelStyled corta com "…")
         char l1[200];
         std::snprintf(l1, sizeof(l1), "%s", strip1.c_str());
-        ui.labelStyled(12.0f, stripY + 8.0f, l1, theme::kTheme.text1,
+        ui.labelStyled(ins.left + 12.0f, stripY + 8.0f, l1,
+                       theme::kTheme.text1,
                        theme::fontScale(theme::kFontCaption),
-                       static_cast<u32>(w) - 24u);
+                       static_cast<u32>(contentW) - 24u);
         if (!strip2.empty()) {
             char l2[200];
             std::snprintf(l2, sizeof(l2), "%s", strip2.c_str());
-            ui.labelStyled(12.0f, stripY + 30.0f, l2, theme::kTheme.text2,
+            ui.labelStyled(ins.left + 12.0f, stripY + 30.0f, l2,
+                           theme::kTheme.text2,
                            theme::fontScale(theme::kFontCaption),
-                           static_cast<u32>(w) - 24u);
+                           static_cast<u32>(contentW) - 24u);
         }
     }
 
     // ---- barra de ERRO com linha + mensagem (§12) ---------------------------
     if (st.errLine) {
-        ui.panel(0.0f, h - kErrH, w, kErrH, theme::kTheme.danger);
+        ui.panel(ins.left, h - ins.bottom - kErrH, contentW, kErrH,
+                 theme::kTheme.danger);
         char msg[160];
         std::snprintf(msg, sizeof(msg), "linha %u: %s", st.errLine,
                       st.errMsg.empty() ? "erro" : st.errMsg.c_str());
-        ui.labelStyled(12.0f, h - kErrH + 12.0f, msg, theme::kTheme.bg,
+        ui.labelStyled(ins.left + 12.0f, h - ins.bottom - kErrH + 12.0f, msg,
+                       theme::kTheme.bg,
                        theme::fontScale(theme::kFontCaption), 0);
     }
 
@@ -852,7 +878,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
                     }
                 }
                 // coluna: acumula a largura até passar o x do toque
-                const f32 xCode = 64.0f;
+                const f32 xCode = ins.left + 64.0f;
                 u32 bo = ls2;
                 f32 acc = 0.0f;
                 while (bo < st.buf.size() && st.buf[bo] != '\n') {

@@ -40,27 +40,44 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h) {
         return 0;
     }
 
+    // 0.9.6 (G1-1/G1-2 — SAFE AREA): os insets REAIS (contentRect →
+    // g_ui.safeArea() — o ÚNICO sítio onde vivem) afetam o ecrã TODO:
+    // o fundo cobre a superfície inteira (a faixa do sistema fica por
+    // trás), mas o CABEÇALHO começa NO inset do topo (altura = inset +
+    // 56dp — a faixa preta de ~96px já não CORTA o título) e o conteúdo
+    // pára no inset de baixo/laterais (nada desenha sob a barra de
+    // navegação). Em desktop/tests insets=0 — layout idêntico ao de sempre.
+    const safe::Insets ins = ui.safeArea();
+    const f32 topY = ins.top;
+    const f32 hdrH = safe::kTopBarH;   // 56dp (a PARTE ÚTIL do cabeçalho)
+    const f32 contentW = w - ins.left - ins.right;
+
     ui.panel(0.0f, 0.0f, w, h, theme::kTheme.bg);
 
-    // ---- topo 56dp ---------------------------------------------------------
-    ui.panel(0.0f, 0.0f, w, kTopH, theme::kTheme.surface);
-    ui.panel(0.0f, kTopH - 1.0f, w, 1.0f, theme::kTheme.border);
-    icons::drawIcon(ui, icons::Icon::Back, 16.0f, kTopH / 2.0f - 12.0f, 24.0f,
-                    theme::kTheme.text1);
+    // ---- topo: inset + 56dp ------------------------------------------------
+    ui.panel(ins.left, topY, contentW, hdrH, theme::kTheme.surface);
+    ui.panel(ins.left, topY + hdrH - 1.0f, contentW, 1.0f,
+             theme::kTheme.border);
+    icons::drawIcon(ui, icons::Icon::Back, ins.left + 16.0f,
+                    topY + hdrH / 2.0f - 12.0f, 24.0f, theme::kTheme.text1);
     int result = 0;
-    if (ui.widgetHit(kBackId, 0.0f, 0.0f, kTopH, kTopH)) {
+    if (ui.widgetHit(kBackId, ins.left, topY, hdrH, hdrH)) {
         result = 1;
     }
-    ui.labelStyled(kTopH + 8.0f, 16.0f, "Docs", theme::kTheme.text1,
+    // título/subtítulo DENTRO da parte útil (nunca sob a faixa do sistema)
+    ui.labelStyled(ins.left + hdrH + 8.0f, topY + theme::kHeaderTitleBase,
+                   "Docs", theme::kTheme.text1,
                    theme::fontScale(theme::kFontScreen), 0);
-    ui.labelStyled(kTopH + 8.0f, 42.0f, "V.ONI — linguagem, comandos, linkers e tykers",
+    ui.labelStyled(ins.left + hdrH + 8.0f, topY + theme::kHeaderSubBase,
+                   "V.ONI — linguagem, comandos, linkers e tykers",
                    theme::kTheme.text2,
                    theme::fontScale(theme::kFontCaption), 0);
 
     // ---- campo de pesquisa 48dp COM LUPA (spec §11) -------------------------
     // FASE 9 (G0-3): o segundo panelRounded era um FILL da cor da borda por
     // CIMA do surface (o campo ficava um bloco sólido) — é um FRAME.
-    const UiRect field{16.0f, kTopH + 8.0f, w - 32.0f, 48.0f};
+    const UiRect field{ins.left + 16.0f, topY + hdrH + 8.0f,
+                       contentW - 32.0f, 48.0f};
     ui.panelRounded(field.x, field.y, field.w, field.h,
                     theme::kRadiusField, theme::kTheme.surface);
     ui.frameRounded(field.x, field.y, field.w, field.h, 1.0f,
@@ -81,8 +98,8 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h) {
     }
 
     // ---- lista com scroll ---------------------------------------------------
-    const UiRect listRegion{0.0f, field.y + field.h + 8.0f, w,
-                            h - (field.y + field.h + 8.0f)};
+    const UiRect listRegion{ins.left, field.y + field.h + 8.0f, contentW,
+                            h - ins.bottom - (field.y + field.h + 8.0f)};
     const std::string query(st.query, st.queryLen);
     auto entries = voni::docs::search(query);
 
@@ -101,21 +118,21 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h) {
         const f32 eh = entryHeight(ui, expanded);
 
         // linha: NOME 14sp bold-ish + categoria à direita 12sp text2
-        ui.labelStyled(16.0f, y + 6.0f, e.name, theme::kTheme.text1,
+        ui.labelStyled(ins.left + 16.0f, y + 6.0f, e.name, theme::kTheme.text1,
                        theme::fontScale(theme::kFontBody), 0);
-        const f32 catX = w - 16.0f - 96.0f;
+        const f32 catX = ins.left + contentW - 16.0f - 96.0f;
         ui.labelStyled(catX, y + 8.0f, voni::docs::catName(e.cat),
                        theme::kTheme.text2,
                        theme::fontScale(theme::kFontCaption), 0);
         // 1 linha de descrição (12sp text2)
-        ui.labelFitted(16.0f, y + lh - 8.0f, e.desc, theme::kTheme.text2,
-                       w - 32.0f);
+        ui.labelFitted(ins.left + 16.0f, y + lh - 8.0f, e.desc,
+                       theme::kTheme.text2, contentW - 32.0f);
         if (expanded) {
             // sintaxe (accent) + exemplo (user/mono)
-            ui.labelFitted(16.0f, y + lh + 4.0f, e.syntax,
-                           theme::kTheme.accent, w - 32.0f);
-            ui.labelFitted(16.0f, y + 2.0f * lh + 8.0f, e.example,
-                           theme::kTheme.voniUser, w - 32.0f);
+            ui.labelFitted(ins.left + 16.0f, y + lh + 4.0f, e.syntax,
+                           theme::kTheme.accent, contentW - 32.0f);
+            ui.labelFitted(ins.left + 16.0f, y + 2.0f * lh + 8.0f, e.example,
+                           theme::kTheme.voniUser, contentW - 32.0f);
             // 0.9.5 · A EQUIVALÊNCIA Python/JS (do registo — a tabela que
             // o editor que ensina usa nos erros e na strip)
             if (const voni::reg::Entry* re = voni::reg::find(e.name)) {
@@ -123,18 +140,18 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h) {
                     char eq[160];
                     std::snprintf(eq, sizeof(eq), "Python/JS: %s",
                                   re->equiv);
-                    ui.labelFitted(16.0f, y + 3.0f * lh + 12.0f, eq,
-                                   theme::kTheme.text2, w - 32.0f);
+                    ui.labelFitted(ins.left + 16.0f, y + 3.0f * lh + 12.0f, eq,
+                                   theme::kTheme.text2, contentW - 32.0f);
                 }
             }
         }
         // separador fino
-        ui.panel(16.0f, y + eh - 1.0f, w - 32.0f, 1.0f,
+        ui.panel(ins.left + 16.0f, y + eh - 1.0f, contentW - 32.0f, 1.0f,
                  theme::kTheme.border);
 
         // tap na entrada = expandir/colapsar (a linha INTEIRA é alvo)
-        if (ui.widgetHit(kEntryBase + (u64)i, 0.0f, listRegion.y + y - off, w,
-                         eh)) {
+        if (ui.widgetHit(kEntryBase + (u64)i, ins.left,
+                         listRegion.y + y - off, contentW, eh)) {
             st.expanded = expanded ? -1 : (int)i;
         }
         y += eh;

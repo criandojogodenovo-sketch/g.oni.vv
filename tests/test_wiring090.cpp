@@ -516,13 +516,14 @@ TEST(settings_page_back_seccoes_e_repor) {
     e.st.settingsMenu = true;
     e.frame();   // a página desenha (o Env liga-a como o main)
     EXPECT(e.st.settingsMenu);
-    // BACK (56dp, canto sup-esq): fecha a página — a devolução vive no draw
-    e.tap(8.0f + 24.0f, safe::kToolbarH + 4.0f + 24.0f);
+    // 0.9.6 (G1): o Settings é ECRÃ CHEIO (começa no inset do topo, não
+    // na banda kToolbarH do overlayArea) — o BACK desceu 56px
+    e.tap(8.0f + 24.0f, 4.0f + 24.0f);
     EXPECT(!e.st.settingsMenu);
     // secções: colapsar GERAL (header 48dp no topo do scroll)
     e.st.settingsMenu = true;
     e.frame();
-    e.tap(800.0f, safe::kToolbarH + 56.0f + 8.0f + 24.0f);   // header Geral
+    e.tap(800.0f, 56.0f + 8.0f + 24.0f);   // header Geral (ecrã cheio)
     EXPECT(e.st.settingsCollapsed & settings::kBitGeral);
 }
 

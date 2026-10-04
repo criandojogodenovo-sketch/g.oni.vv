@@ -11,6 +11,7 @@
 #include "TestFramework.h"
 #include "ui/UiContext.h"
 #include "ui/EditorUi.h"
+#include "ui/UiEditor.h"   // 0.9.6: anyOverlayOpen/fullscreenOverlayOpen
 #include "ui/Toolbar.h"
 #include "ui/FontAtlas.h"
 #include "ui/SafeArea.h"
@@ -596,6 +597,48 @@ TEST(ui_log_viewer_scroll_e_autoscroll_fundo) {
 
 // SETTINGS: modo visível, 3 itens com devolução 1/2/3 — faixa de ids 4400+
 // (sem colisão com o "+" da Hierarchy id 40 no MESMO frame)
+// 0.9.6 (G1) — OS ECRÃS CHEIOS: a lista fechada da camada modal-maior
+// (capturam TODO o toque, escondem glifos/gizmos e a barra de baixo). Os
+// DIÁLOGOS flutuantes NÃO contam — continuam a conviver com o chrome.
+TEST(ui_fullscreen_overlay_e_a_lista_fechada) {
+    {
+        EditorState st;
+        st.settingsMenu = true;
+        EXPECT(fullscreenOverlayOpen(st));
+        EXPECT(anyOverlayOpen(st));
+    }
+    {
+        EditorState st;
+        st.docsScreen.open = true;
+        EXPECT(fullscreenOverlayOpen(st));
+    }
+    {
+        EditorState st;
+        st.scriptWin.open = true;
+        EXPECT(fullscreenOverlayOpen(st));
+    }
+    {
+        EditorState st;
+        st.textWin.open = true;
+        EXPECT(fullscreenOverlayOpen(st));
+    }
+    {   // os DIÁLOGOS: modais mas NÃO ecrãs cheios
+        EditorState st;
+        st.fileMenu = true;
+        st.assetMenu = 1;
+        st.logViewer = true;
+        st.contextMenu = true;
+        st.textInput = true;
+        EXPECT(anyOverlayOpen(st));
+        EXPECT(!fullscreenOverlayOpen(st));
+    }
+    {   // nada aberto
+        EditorState st;
+        EXPECT(!anyOverlayOpen(st));
+        EXPECT(!fullscreenOverlayOpen(st));
+    }
+}
+
 TEST(ui_settings_menu_modo_e_tres_itens) {
     Env e(false, false);
     EXPECT(e.ok);
