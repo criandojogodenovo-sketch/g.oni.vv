@@ -76,13 +76,13 @@ bool findEocd(FILE* f, u64 fileSize, u64& cdOffset, u32& cdCount,
             cdCount = rd16(e + 10);
             cdOffset = rd32(e + 16);
             if (cdCount == 0xFFFF || cdOffset == 0xFFFFFFFFu) {
-                err = "archive ZIP64 (>4 GB) nao suportado ainda";
+                err = "archive ZIP64 (>4 GB) não suportado ainda";
                 return false;
             }
             return true;
         }
     }
-    err = "nao e um .zip valido (EOCD ausente)";
+    err = "não é um .zip válido (EOCD ausente)";
     return false;
 }
 
@@ -339,7 +339,7 @@ bool extractArchive(const std::string& srcAbs, ProjectStorage& st,
             cdOffset += 46 + nameLen + extraLen + commentLen;
             // encriptado → recusa legível
             if (e.flags & 0x0007) {
-                err = "entrada encriptada nao suportada: " + e.name;
+                err = "entrada encriptada não suportada: " + e.name;
                 ok = false;
                 break;
             }

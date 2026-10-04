@@ -259,18 +259,22 @@ void UiContext::labelStyled(f32 xBaseline, f32 yBaseline, const char* text,
     const bool bold = style == static_cast<u8>(1);
     const bool italic = style == static_cast<u8>(2);
     f32 penX = xBaseline;
-    for (const char* p = text; *p; ++p) {
-        const char c = *p;
-        if (c < static_cast<char>(FontAtlas::kFirstChar) ||
-            c >= static_cast<char>(FontAtlas::kFirstChar + FontAtlas::kNumChars)) {
+    // FASE 9 (G1-2 — ACENTOS): iteração UTF-8 por CODE POINT — o atlas
+    // cobre Latin-1 + Latin Ext-A + …; glifo ausente avança 0.30·altura
+    // (o espaço de sempre — nunca crash, nunca byte a byte)
+    for (const char* p = text; *p;) {
+        u32 bytes = 1;
+        const u32 cp = utf8Decode(p, &bytes);
+        const Glyph* g = font_->glyphFor(cp);
+        if (!g) {
             penX += font_->height() * 0.30f * k;
+            p += bytes;
             continue;
         }
-        const Glyph& g = font_->glyph(c);
-        const f32 gx = penX + g.xoff * k;
-        const f32 gy = yBaseline + g.yoff * k;
-        const f32 gw = g.w * k;
-        const f32 gh = g.h * k;
+        const f32 gx = penX + g->xoff * k;
+        const f32 gy = yBaseline + g->yoff * k;
+        const f32 gw = g->w * k;
+        const f32 gh = g->h * k;
         const u32 passes = bold ? 2u : 1u;
         for (u32 pass = 0; pass < passes; ++pass) {
             const f32 ox = bold ? static_cast<f32>(pass) * (k >= 1.0f ? 1.0f : 0.5f) : 0.0f;
@@ -281,18 +285,20 @@ void UiContext::labelStyled(f32 xBaseline, f32 yBaseline, const char* text,
                                    gx + ox + shear, gx + ox + gw, gx + ox + gw + shear};
                 const f32 py[6] = {gy, gy + gh, gy + gh,
                                    gy, gy + gh, gy};
-                emitGlyphCorners(glyphs_, px, py, g.u0, g.v0, g.u1, g.v1, color);
+                emitGlyphCorners(glyphs_, px, py, g->u0, g->v0, g->u1, g->v1, color);
             } else {
                 emitTo(glyphs_, gx + ox, gy, gw, gh,
-                       g.u0, g.v0, g.u1, g.v1, color);
+                       g->u0, g->v0, g->u1, g->v1, color);
             }
         }
-        penX += g.xadv * k;
+        penX += g->xadv * k;
+        p += bytes;
     }
 }
 
-// F4.2/B2: mede; se exceder maxW trunca com "..." (ASCII — o atlas da F1 não
-// tem U+2026) pelo maior prefixo que caiba. Sem fonte → no-op (igual label).
+// F4.2/B2: mede; se exceder maxW trunca com "…" (U+2026 — no atlas desde
+// a FASE 9/G1-2; o textfit usa o glifo se existir) pelo maior prefixo que
+// caiba. Sem fonte → no-op (igual label).
 void UiContext::labelFitted(f32 xBaseline, f32 yBaseline, const char* text,
                             const f32 color[4], f32 maxW) {
     if (!hasFont() || !text) {

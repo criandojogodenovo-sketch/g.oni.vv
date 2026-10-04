@@ -98,7 +98,7 @@ constexpr u64 kInspectorPrimSel   = 5003;   // "prim: esfera ▸" (seletor)
 constexpr u64 kInspectorPrimR     = 5600;   // slider raio/size
 constexpr u64 kInspectorPrimSeg   = 5602;   // slider segmentos (esfera)
 constexpr u64 kInspectorPrimRings = 5604;   // 0.8.10: slider anéis (esfera)
-constexpr u64 kInspectorAddAnim   = 3060;   // botão "add Animacao"
+constexpr u64 kInspectorAddAnim   = 3060;   // botão "adicionar Animação"
 // 0.8.11 — inspector de ÁUDIO (faixa 5700..5719): clip (seletor 5),
 // ouvir (preview), autoplay/loop/posicional (toggles), volume/pitch e
 // raios (sliders)
@@ -226,7 +226,7 @@ struct InspRow {
         // 0.8.0 (F7) — primitiva procedural + animação
         PrimButton,  // "prim: esfera ▸" (abre o seletor de primitivas)
         PrimSlider,  // slider de parâmetro (payload pelo id: R/Seg/Rings)
-        AddAnim,     // botão "add Animacao" (cria o AnimationPlayer)
+        AddAnim,     // botão "adicionar Animação" (cria o AnimationPlayer)
         AnimLabel,   // "anim: N tracks" (a edição vive na timeline)
         // 0.8.9 — import: dimensões originais + repor a escala
         DimsLabel,   // "dims: X×Y×Z" (AABB real do mesh carregado)
@@ -280,8 +280,10 @@ inline f32 inspTransformRowH(const TextMetrics& m) {
 }
 // altura do CABEÇALHO de secção (48dp — spec C)
 inline f32 inspSectionH() { return 48.0f; }
-// altura da linha de MINIATURAS de Material (64dp + legendas; spec C)
-inline f32 inspThumbsH() { return 64.0f + 20.0f; }
+// altura da linha de MINIATURAS de Material (64dp + legendas; spec C).
+// FASE 9 (G1-3): legendas INTEIRAS em LINHA RESERVADA (célula = útil/3) —
+// 64 + bloco de texto 12sp (~24px @28px de fonte) + folga
+inline f32 inspThumbsH() { return 64.0f + 28.0f; }
 
 inline u32 inspectorRowCount(const InspProfile& p, bool selectable,
                              u32 collapsed) {

@@ -378,7 +378,7 @@ TEST(cenas_acoes_load_instant_e_transition_fade_slide) {
     out = ui::applyUiAction(s, c->elements[0], ctx);
     EXPECT(!out.acted);
     EXPECT(cb.style == -1);
-    EXPECT(std::string(out.toast).find("nao existe") != std::string::npos);
+    EXPECT(std::string(out.toast).find("não existe") != std::string::npos);
 
     // round-trip .goni preserva act "trans" + param "slide"
     c->elements[0].param = "slide";

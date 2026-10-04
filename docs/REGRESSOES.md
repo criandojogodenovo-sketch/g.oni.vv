@@ -129,3 +129,31 @@ Nota técnica: o TU `platform/AudioOutDevice.cpp` (AAudio/AudioTrack, Android-on
 | Padrão proibido | (nenhum — o sintoma é UI, não log; a vigília é o sentinela + FASE 9) |
 
 Prova de mutação (colada em /home/z/my-project/mutacao-G0-1-*.txt e no RELATÓRIO-0.9.4): re-validação DESLIGADA nas duas camadas → 4 [FAIL] no harness; reposta → 177/177 verde.
+
+## R-008 · Acentos não renderizavam (atlas ASCII) (FASE 9 · G1-2)
+
+| campo | valor |
+|---|---|
+| ID | R-008 |
+| Reportado | device 0.9.0→0.9.3 (screenshots do dono): "ÁUDIO"→"UDIO", "Física"→"Fisica", "Animação"→"Animacao", consola "sem sele  o" |
+| Sintoma exato | glifos acentuados NÃO desenhavam; cada byte UTF-8 fora do range ASCII avançava a pena 0.30·altura SEM emitir quad (daí os "gaps" em "sele  o") |
+| Causa raiz | `ui/FontAtlas` assava APENAS o range ASCII 32..126 (kFirstChar/kNumChars) e a iteração de texto (`UiContext::labelStyled`, `FontAtlas::widthOf`) era byte-a-byte — nenhum code point >126 tinha glifo |
+| Fix | atlas 1024×512 com QUATRO ranges via `stbtt_PackFontRanges` (ASCII + Latin-1 Supplement 0xA0..0xFF + Latin Extended-A 0x100..0x17F + U+2026 …); iteração UTF-8 por CODE POINT (`utf8Decode` inline — malformado avança 1 byte, U+FFFD, nunca loop); COBERTURA EXIGIDA no load (ç ã Ã õ é í Á ó Ç Ú ü — fonte OEM sem eles é rejeitada, a próxima da lista entra); truncagem `textfit` com "…" e FRONTEIRAS de code point (nunca corta um acento ao meio); TODAS as strings de UI sem acento corrigidas (Física/Animação/Rotação/projeção/visível/chão/Permissões/Diagnóstico/licenças/versão/após/área/não…) |
+| Teste sentinela | `regress_glyph_coverage` (tests/test_sentinels.cpp — cobertura ç ã Ã õ é í Á ó Ç Ú ü + …, larguras positivas, UTF-8 decode 1/2/3/4 bytes + malformado, a string de teste do dono INTEIRA sem gaps, emissão de glifos acentuados) + `textfit_fase9_truncagem_respeita_code_points` |
+| Linha do replay | FASE 9 do c33_virtual (passo dos acentos: atlas do boot com cobertura + frame com "ÁUDIO" emitindo glifos) |
+| Padrão proibido | GATE DE FONTE `scripts/glyph_source_check.py` (ci: job core-tests — literais de UI sem acento no C++/Java = vermelho; "Audio" fora da lista: é NOME de TIC serializado no .goni) |
+
+## R-009 · Tocar o corpo de um TIC não selecionava (FASE 9 · G1-6)
+
+| campo | valor |
+|---|---|
+| ID | R-009 |
+| Reportado | device 0.9.3 (dono): "tocar num cubo na viewport seleciona-o" — tocar o CORPO de um objeto grande NÃO fazia nada (e o tap limpava a seleção se houvesse) |
+| Sintoma exato | `pickSceneTic` media a distância do toque ao CENTRO projetado com teto de 44 px — objetos grandes tinham o corpo inteiro "morto"; o tap no corpo caía no deselect e LIMPAVA a seleção |
+| Causa raiz | ui/CamGizmo.cpp `pickSceneTic`: hit-test só pelo centro projetado (a regra mínima de propósito da 0.7.10, sem ray-cast) |
+| Fix | o AABB do mesh é projetado (8 cantos locais pela matriz world → rect de ecrã); o toque dentro do rect + margem 8 px de dedo SELECIONA; 44 px do centro fica como PISO (objetos pequenos/longe); entre acertados ganha o MAIS PRÓXIMO DA CÂMERA (clip.w — antes era "o mais próximo do toque", que trocava na sobreposição); TIC sem mesh carregado mantém a regra do centro. BÔNUS apanhado pela mutação: o log "seleção limpa" não disparava (viewportTapClearsSelection limpa DENTRO antes do main ver) — o handle é fotografado antes (selAntesTap) |
+| Teste sentinela | `cameratic_pick_pelo_corpo_g16` (tests/test_cameratic.cpp — corpo seleciona fora dos 44 px · fora do corpo = nada · dois cubos sobrepostos: o mais próximo da câmara vence dos DOIS lados · sem mesh: centro 44 px) |
+| Linha do replay | FASE 9 do c33_virtual passo 9.10: canto do corpo >60 px do centro · pickSceneTic direto · o TAP pelo caminho REAL da UI seleciona · cada mudança de seleção LOGA com motivo ("seleção: TIC 'X' (toque no viewport)" / "seleção limpa: toque no vazio (era 'X')") |
+| Padrão proibido | (nenhum — o sintoma é interação, não log; a vigília é o sentinela + o replay 9.10) |
+
+Prova de mutação (colada em /home/z/my-project/mutacao-G1-6-*.txt e no RELATÓRIO-0.9.4): `insideRect = false` (corpo desligado — o comportamento 0.9.3) → 2 FALHOU no core (test_cameratic.cpp:718/751) + 4 [FAIL] no harness 9.10; reposto → 755/0 + 200/200 verde.

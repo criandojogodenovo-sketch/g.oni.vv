@@ -78,7 +78,7 @@ i32 UiCanvas::addElement(UiElement::Kind kind, f32 designW, f32 designH) {
     }
 
     if (kind == UiElement::Kind::Button) {
-        e.text = "Botao";   // texto default editável (teclado in-app)
+        e.text = "Botão";   // texto default editável (teclado in-app)
     } else if (kind == UiElement::Kind::Label || kind == UiElement::Kind::Card) {
         e.text = "Texto";
     } else if (kind == UiElement::Kind::Article) {

@@ -70,8 +70,8 @@ inline const char* animTargetName(AnimTarget t) {
 // rótulo do alvo na UI (PT, como o resto do editor)
 inline const char* animTargetLabel(AnimTarget t) {
     switch (t) {
-        case AnimTarget::TicPos:   return "posicao";
-        case AnimTarget::TicRot:   return "rotacao";
+        case AnimTarget::TicPos:   return "posição";
+        case AnimTarget::TicRot:   return "rotação";
         case AnimTarget::TicScale: return "escala";
         case AnimTarget::UiPos:    return "ui pos";
         case AnimTarget::UiColor:  return "ui cor";
@@ -80,7 +80,7 @@ inline const char* animTargetLabel(AnimTarget t) {
         case AnimTarget::JointRot:   return "joint rot";    // 0.8.2
         case AnimTarget::JointScale: return "joint escala"; // 0.8.2
     }
-    return "posicao";
+    return "posição";
 }
 
 // um keyframe: tempo + valor (4 canais) + tangentes bezier (OFFSETS de

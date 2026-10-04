@@ -431,8 +431,8 @@ TEST(wiring087_browser_formato_nao_suportado_erro_claro) {
     e.kind = 0;   // fora de obj/gltf/glb/png
     browserImportFile(e);
 
-    EXPECT(std::strcmp(g_toast, "formato nao suportado ainda: .fbx") == 0);
-    EXPECT(logHas("import: '/fake/coisa.fbx' — formato .fbx nao suportado"));
+    EXPECT(std::strcmp(g_toast, "formato não suportado ainda: .fbx") == 0);
+    EXPECT(logHas("import: '/fake/coisa.fbx' — formato .fbx não suportado"));
     EXPECT(!g_applyAsk.open);   // nada importado, nada perguntado
 }
 
@@ -468,10 +468,10 @@ TEST(wiring087_troca_prim_por_tipo_geometria_nao_vazia_e_log_da_prova) {
         // (de/para trazem os params — o needle afera o FORMATO exigido)
         EXPECT(logHas("mesh: troca "));
         EXPECT(logHas(" passo=gerador ok verts="));
-        EXPECT(logHas("passo=validacao ok"));
+        EXPECT(logHas("passo=validação ok"));
         EXPECT(logHas("passo=upload ok"));
         EXPECT(logHas("passo=bind ok"));
-        EXPECT(logHas("passo=validacao ok"));
+        EXPECT(logHas("passo=validação ok"));
         EXPECT(logHas("passo=upload ok"));
         EXPECT(logHas("passo=bind ok"));
     }

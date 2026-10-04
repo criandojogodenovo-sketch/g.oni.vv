@@ -302,7 +302,7 @@ void cacheActivityMethods(JNIEnv* env) {
                                          "(Z)V");
     if (!g_midSetImmersive || clearPendingException(env)) {
         g_midSetImmersive = nullptr;
-        elog::error("jni: VvActivity.setImmersive NAO encontrada — modo "
+        elog::error("jni: VvActivity.setImmersive NÃO encontrada — modo "
                     "imersivo indisponivel (o resto intacto)");
     } else {
         elog::info("jni: VvActivity.setImmersive OK (modo imersivo)");
@@ -314,7 +314,7 @@ void cacheActivityMethods(JNIEnv* env) {
                                            "(Z)V");
     if (!g_midSetOrientation || clearPendingException(env)) {
         g_midSetOrientation = nullptr;
-        elog::error("jni: VvActivity.setOrientation NAO encontrada — "
+        elog::error("jni: VvActivity.setOrientation NÃO encontrada — "
                     "portrait das janelas de texto indisponivel");
     } else {
         elog::info("jni: VvActivity.setOrientation OK (portrait de texto)");
@@ -322,7 +322,7 @@ void cacheActivityMethods(JNIEnv* env) {
     g_midImeShow = env->GetMethodID(g_activityCls, "imeShow", "()V");
     if (!g_midImeShow || clearPendingException(env)) {
         g_midImeShow = nullptr;
-        elog::error("jni: VvActivity.imeShow NAO encontrada — IME do "
+        elog::error("jni: VvActivity.imeShow NÃO encontrada — IME do "
                     "sistema indisponivel");
     } else {
         elog::info("jni: VvActivity.imeShow OK (IME do sistema)");
@@ -330,7 +330,7 @@ void cacheActivityMethods(JNIEnv* env) {
     g_midImeHide = env->GetMethodID(g_activityCls, "imeHide", "()V");
     if (!g_midImeHide || clearPendingException(env)) {
         g_midImeHide = nullptr;
-        elog::error("jni: VvActivity.imeHide NAO encontrada — IME pode "
+        elog::error("jni: VvActivity.imeHide NÃO encontrada — IME pode "
                     "ficar aberto ao fechar a janela (re-tenta no fecho)");
     } else {
         elog::info("jni: VvActivity.imeHide OK (IME do sistema)");

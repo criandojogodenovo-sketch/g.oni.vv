@@ -5,10 +5,13 @@ O CI não tem instrumentação Android; aferimos a ESTRUTURA do ecrã pelo
 fonte (a mesma cultura do jni_parity.py — asserts determinísticos sobre o
 código que a suíte host não consegue instanciar):
 
-  1. cabeçalho 72dp com LOGO 48dp + título 20sp + tagline 12sp;
-  2. pesquisa 48dp (lupa) + dropdown Ordenar (ProjectsFormat.sortLabel);
-  3. botões primários 56dp FILL ACCENT (0xFF2196F3, raio 8dp — spec A/F);
-  4. grelha de cards com miniatura 16:9 (thumbH = colW*9/16);
+  1. FASE 9 (G1-4b): cabeçalho NUMA LINHA (buildTopBar) — logo+título,
+     pesquisa flex, ordenar SÓ ÍCONE (texto no menu), Novo FILL +
+     Importar CONTORNO, tudo 56/48dp;
+  2. FASE 9 (G1-4a): o CAIXA do empty-state inteiro desliga com projetos
+     (emptyBox.setVisibility — o bigLogo era o quadrado fantasma);
+  3. FASE 9 (G1-4c): grelha ADAPTÁVEL (AUTO_FIT + columnWidth 180dp,
+     mínimo 2) e miniatura 16:9 pela coluna REAL;
   5. estados do card: a carregar (ProgressBar) / em falta (MissingThumbView
      + interrogação + recuperação) / default (gone_logo);
   6. menu ⋮/long-press com as 4 ações (abrir/renomear/duplicar/apagar);
@@ -52,39 +55,68 @@ def main():
     icn = strip_comments(ICN.read_text(encoding="utf-8"))
     code = strip_comments(src)
 
-    # 1) cabeçalho: logo 48 + título 20 + tagline 12
-    for frag, what in [("dp(48)", "logo 48dp no cabeçalho"),
-                       ("title.setTextSize(20)", "título 20sp"),
-                       ("tag.setTextSize(12)", "tagline 12sp"),
-                       ("R.drawable.gone_logo", "logo G+lâmpada")]:
+    # 1) FASE 9 (G1-4b): cabeçalho NUMA LINHA
+    for frag, what in [("buildTopBar", "cabeçalho numa linha (buildTopBar)"),
+                       ("R.drawable.gone_logo", "logo G+lâmpada"),
+                       ("dp(32), dp(32)", "logo 32dp compacto"),
+                       ("title.setTextSize(16)", "título 16sp"),
+                       ("pesquisar projetos", "hint da pesquisa"),
+                       ("setContentDescription(\"ordenar\")",
+                        "ordenar como ícone (descrição de acesso)")]:
         if frag not in code:
             bad += fail(f"cabeçalho: falta {what}")
+    if "buildHeader" in code or "buildSearchRow" in code or \
+       "buildActions" in code:
+        bad += fail("cabeçalho antigo em várias linhas ainda presente")
     if bad == 0:
-        print("OK  cabeçalho 72dp: logo 48 + G.One VV 20sp + tagline 12sp")
+        print("OK  cabeçalho NUMA LINHA: logo+título · pesquisa · "
+              "ordenar-ícone · Novo/Importar")
 
-    # 2) pesquisa 48dp + dropdown Ordenar
-    if "dp(48), 1f" not in code or "pesquisar projetos" not in code:
-        bad += fail("campo de pesquisa 48dp com hint em falta")
-    elif "showSortMenu" not in code or "sortLabel" not in code:
-        bad += fail("dropdown Ordenar ausente (showSortMenu/sortLabel)")
+    # 1b) o ⋮ decorativo do Ordenar REMOVIDO (só o SORT à esquerda)
+    if re.search(r"sortBtn\.setCompoundDrawablesWithIntrinsicBounds\("
+                 r"\s*UiIcons\.drawable\(UiIcons\.SORT[^)]*\), null,\s*"
+                 r"\n?\s*UiIcons\.drawable\(UiIcons\.DOTS", code):
+        bad += fail("⋮ decorativo ainda ao lado do Ordenar (removido na FASE 9)")
     else:
-        print("OK  pesquisa 48dp (lupa) + dropdown [Ordenar: … ▾]")
+        print("OK  Ordenar: SÓ o ícone (o ⋮ decorativo foi removido)")
 
-    # 3) botões primários 56dp FILL ACCENT raio 8
+    # 2) FASE 9 (G1-4a): o quadrado fantasma — o CAIXA inteiro desliga
+    if "emptyBox.setVisibility" not in code:
+        bad += fail("emptyBox.setVisibility ausente (o logo fantasma ficava)")
+    elif "private LinearLayout emptyBox" not in code:
+        bad += fail("campo emptyBox ausente")
+    else:
+        print("OK  quadrado fantasma: o emptyBox INTEIRO (logo incluído) "
+              "desliga com projetos")
+
+    # 2b) botões: Novo FILL + Importar CONTORNO, 56dp
     if "dp(56)" not in code:
-        bad += fail("botões primários 56dp ausentes")
-    elif "0xFF2196F3" not in code or "setCornerRadius(dp(8))" not in code:
-        bad += fail("fill accent #2196F3 com raio 8dp ausente (spec A/F)")
+        bad += fail("botões 56dp ausentes")
+    elif "ACCENT_PRESS, false" not in code or "0, 0, true" not in code:
+        bad += fail("Novo FILL / Importar CONTORNO ausentes (G1-4b)")
+    elif "outline ? ACCENT : TEXT1" not in code:
+        bad += fail("variante contorno do botão ausente")
     else:
-        print("OK  botões primários 56dp fill accent #2196F3 r=8dp")
+        print("OK  Novo projeto FILL azul · Importar projeto SÓ CONTORNO")
 
-    # 4) grelha de cards com miniatura 16:9
-    if "setNumColumns(2)" not in code:
-        bad += fail("grelha de cards 2 colunas ausente")
+    # 3) FASE 9 (G1-4c): grelha adaptável
+    if "GridView.AUTO_FIT" not in code or "setColumnWidth(dp(180))" not in code:
+        bad += fail("grelha adaptável ausente (AUTO_FIT ÷ 180dp)")
+    elif "getNumColumns() < 2" not in code:
+        bad += fail("mínimo de 2 colunas ausente")
     elif "* 9f / 16f" not in code:
         bad += fail("miniatura 16:9 ausente (thumbH = colW*9/16)")
+    elif "/ cols - dp(16)" not in code:
+        bad += fail("largura do card pela coluna REAL ausente")
     else:
-        print("OK  grelha 2 colunas · cards com miniatura 16:9")
+        print("OK  grelha ADAPTÁVEL (útil÷180dp, mín 2) · miniatura 16:9 "
+              "pela coluna real")
+
+    # 3b) rótulo do menu em minúscula
+    if '"Última edição"' not in code:
+        bad += fail('menu sem "Última edição" (minúscula — G1-4b)')
+    else:
+        print("OK  ordenar: \"Última edição\" em minúscula no menu")
 
     # 5) estados do card
     for frag, what in [("new ProgressBar", "spinner (a carregar)"),

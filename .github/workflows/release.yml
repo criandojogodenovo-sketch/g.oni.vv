@@ -86,6 +86,13 @@ jobs:
       - name: Check estrutural do reload (REG-001)
         run: python3 scripts/reload_concurrency_check.py
 
+      # FASE 9 (R-008) — GATE DE ACENTOS do fonte: nenhum literal de UI sem
+      # acento volta ao código (o atlas cobre Latin-1 + Ext-A desde a G1-2;
+      # a sentinela regress_glyph_coverage afere o atlas, isto afere as
+      # strings). UM match = vermelho = release bloqueada
+      - name: Gate de acentos do fonte (R-008)
+        run: python3 scripts/glyph_source_check.py
+
   # 0.8.12 — O DISPOSITIVO VIRTUAL + SENTINELAS + GATES: o "PC virtual"
   # obrigatório do dono. Reproduz o C33 (1536x720 + insets, /tmp read-only
   # errno=30, cache dir da app via JNI, content:// SAF, lifecycle EGL

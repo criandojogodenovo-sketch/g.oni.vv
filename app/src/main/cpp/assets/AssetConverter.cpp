@@ -240,7 +240,7 @@ bool convertPng(const std::string& srcAbs, ProjectStorage& st,
         err = "textura de " + std::to_string(bytes.size() / (1024 * 1024)) +
               " MB excede o orçamento de " +
               std::to_string(kMaxImageBytes / (1024 * 1024)) +
-              " MB (usa uma versao menor)";
+              " MB (usa uma versão menor)";
         return false;
     }
     stats.sourceBytes = bytes.size();
@@ -443,7 +443,7 @@ bool convertGlbFile(const std::string& srcAbs, ProjectStorage& st,
         std::memcpy(&ver, hdr + 4, 4);
         std::memcpy(&total, hdr + 8, 4);
         if (magic != 0x46546C67u) {
-            err = "magic GLB errado (nao e um .glb)";
+            err = "magic GLB errado (não é um .glb)";
             break;
         }
         (void)ver;
@@ -457,7 +457,7 @@ bool convertGlbFile(const std::string& srcAbs, ProjectStorage& st,
         std::memcpy(&chLen, ch, 4);
         std::memcpy(&chType, ch + 4, 4);
         if (chType != 0x4E4F534Au) {
-            err = "primeiro chunk do GLB nao e JSON";
+            err = "primeiro chunk do GLB não é JSON";
             break;
         }
         if (chLen > kMaxJsonBytes) {
@@ -587,7 +587,7 @@ bool importFile(const std::string& srcAbs, const std::string& srcNameIn,
     } else if (ext == "png") {
         ok = convertPng(srcAbs, st, stem, pipeline, out, stats, err);
     } else {
-        err = "formato nao suportado ainda: ." + ext +
+        err = "formato não suportado ainda: ." + ext +
               " (aceites: .obj .gltf .glb .png)";
         ok = false;
     }
@@ -676,7 +676,7 @@ bool reconvertFile(const std::string& sourceRel, ProjectStorage& st,
     }
     std::vector<u8> bytes;
     if (!st.readBytes(sourceRel, bytes) || bytes.empty()) {
-        err = "fonte nao encontrada: " + sourceRel;
+        err = "fonte não encontrada: " + sourceRel;
         return false;
     }
     if (bytes.size() > kStreamAccumMax) {

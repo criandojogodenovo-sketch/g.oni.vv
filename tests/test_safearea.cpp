@@ -127,7 +127,7 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     const f32 contentH = inspectorContentHeight(prof, m, false, 0u);
     // 0.9.2: + secção Script (48) + Adicionar script (42) — o Inspector
     // passou a oferecer script a QUALQUER TIC (§10)
-    EXPECT(nearEqF(contentH, 1160.0f));  // 0.9.0: 1070 + 90
+    EXPECT(nearEqF(contentH, 1168.0f));  // FASE 9 G1-3: 1160 + 8 (legendas inteiras)
 
     // DEPOIS: painel dentro do contentRect [0,24,·,628] (status 24 + nav 92)
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);
@@ -138,7 +138,7 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     EXPECT(nearEqF(listH, 376.0f));
     const f32 mo = scroll::maxOffset(contentH, listH);
     EXPECT(mo > 0.0f);                        // scroll ATIVA
-    EXPECT(nearEqF(mo, 784.0f));              // 1160 − 376
+    EXPECT(nearEqF(mo, 792.0f));              // 1168 − 376
 
     // com o offset no máximo, a ÚLTIMA linha do plano (add TouchControls)
     // fica INTEIRA dentro da lista

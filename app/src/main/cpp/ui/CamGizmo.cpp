@@ -9,6 +9,7 @@
 
 #include "components/CameraComp.h"
 #include "components/MeshRenderer.h"   // 0.7.10: pickSceneTic (prioridade)
+#include "render/Mesh.h"   // FASE 9 (G1-6): bounds do mesh no pick por corpo
 #include "components/Transform3D.h"
 #include "core/CameraUtil.h"
 #include "core/Scene.h"
@@ -308,31 +309,101 @@ Handle pickSceneTic(Scene& scene, const Mat4& vp, f32 sw, f32 sh, f32 px,
     if (sw <= 1.0f || sh <= 1.0f) {
         return Handle::invalid();
     }
-    // 1) PRIORIDADE DOS OBJETOS: TICs visíveis com MeshRenderer, pelo
-    // CENTRO projetado (alvo generoso kTicPickPx — o mesmo 44 px do
-    // grab-lock; o mais próximo do toque ganha). Minimal de propósito:
-    // projeção do centro, sem ray-cast — o C33 queria é que tocar num
-    // objeto DENTRO do cone selecione o OBJETO (ver RELATORIO-0.7.10 §5.3).
+    // FASE 9 (G1-6 — "tocar num cubo na viewport seleciona-o"): o hit-test
+    // antigo media a distância ao CENTRO projetado com um teto de 44 px —
+    // tocar o CORPO de um objeto grande NÃO selecionava (e o deselect da
+    // 0.7.0 LIMPAVA a seleção nesse mesmo tap). AGORA: o AABB do mesh é
+    // projetado (8 cantos locais pela matriz world) e o toque dentro do
+    // rect de ecrã resultante SELECIONA — o 44 px do centro fica como
+    // piso para objetos pequenos/longe. Prioridade: o mais PRÓXIMO DA
+    // CÂMERA entre os acertados (antes era o mais próximo do toque).
     Handle best = Handle::invalid();
-    f32 bestD = kTicPickPx;
+    f32 bestDepth = 1e30f;
     scene.forEachActive([&](Tic& t) {
         if (!t.visible) {
             return;
         }
-        if (!t.getComponent<MeshRenderer>()) {
+        const MeshRenderer* mr = t.getComponent<MeshRenderer>();
+        if (!mr) {
             return;   // sem mesh não há "objeto" visual a selecionar
         }
         const Transform3D* tr = t.getComponent<Transform3D>();
         if (!tr) {
             return;
         }
+        // o AABB local (bounds do mesh) → 8 cantos no MUNDO → ecrã. Sem
+        // mesh carregado (componente apenas — o caso dos testes/presets
+        // antes do bind) o hit é pelo CENTRO (a regra antiga, 44 px)
+        f32 minX = 1e30f, minY = 1e30f, maxX = -1e30f, maxY = -1e30f;
+        f32 depth = 0.0f;
+        u32 projected = 0;
+        if (mr->mesh) {
+            const Vec3 mn = mr->mesh->boundsMin();
+            const Vec3 mx = mr->mesh->boundsMax();
+            for (int c = 0; c < 8; ++c) {
+                const Vec3 local{(c & 1) ? mx.x : mn.x,
+                                 (c & 2) ? mx.y : mn.y,
+                                 (c & 4) ? mx.z : mn.z};
+                // world = tr->world * local (column-major: m[12..14]+bases)
+                const Vec3 world{
+                    tr->world.m[0] * local.x + tr->world.m[4] * local.y +
+                        tr->world.m[8] * local.z + tr->world.m[12],
+                    tr->world.m[1] * local.x + tr->world.m[5] * local.y +
+                        tr->world.m[9] * local.z + tr->world.m[13],
+                    tr->world.m[2] * local.x + tr->world.m[6] * local.y +
+                        tr->world.m[10] * local.z + tr->world.m[14]};
+                // projeção COM profundidade (clip.w = distância ao plano
+                // da câmara — a métrica de "mais perto ganha")
+                f32 clip[4];
+                Mat4::transformPoint4(vp, world, clip);
+                if (clip[3] <= 1e-5f) {
+                    continue;   // atrás da câmara — este canto não conta
+                }
+                const f32 invW = 1.0f / clip[3];
+                const f32 ox = (clip[0] * invW * 0.5f + 0.5f) * sw;
+                const f32 oy = (1.0f - (clip[1] * invW * 0.5f + 0.5f)) * sh;
+                ++projected;
+                if (ox < minX) minX = ox;
+                if (ox > maxX) maxX = ox;
+                if (oy < minY) minY = oy;
+                if (oy > maxY) maxY = oy;
+                if (projected == 1 || clip[3] < depth) {
+                    depth = clip[3];   // o canto MAIS PRÓXIMO vence
+                }
+            }
+        }
+        if (projected == 0 && mr->mesh) {
+            return;   // com mesh mas NADA projetou (atrás da câmara)
+        }
+        // centro projetado: piso de 44 px (objetos pequenos/longe) e a
+        // profundidade para os TICs SEM mesh (a regra antiga)
         f32 ox = 0.0f, oy = 0.0f;
-        if (!gizmo::projectPoint(vp, tr->pos, sw, sh, ox, oy)) {
+        bool nearCenter = false;
+        f32 centerDepth = 1e30f;
+        if (gizmo::projectPoint(vp, tr->pos, sw, sh, ox, oy)) {
+            const f32 d = std::sqrt((px - ox) * (px - ox) +
+                                    (py - oy) * (py - oy));
+            nearCenter = d < kTicPickPx;
+            f32 clip[4];
+            Mat4::transformPoint4(vp, tr->pos, clip);
+            if (clip[3] > 1e-5f) {
+                centerDepth = clip[3];
+            }
+        }
+        if (!mr->mesh) {
+            // SEM mesh carregado: a regra de sempre — SÓ o centro (44 px)
+            if (nearCenter && centerDepth < bestDepth) {
+                bestDepth = centerDepth;
+                best = t.handle;
+            }
             return;
         }
-        const f32 d = std::sqrt((px - ox) * (px - ox) + (py - oy) * (py - oy));
-        if (d < bestD) {
-            bestD = d;
+        // dentro do rect projetado (com a margem de 8 px de dedo)?
+        const bool insideRect = px >= minX - 8.0f && px <= maxX + 8.0f &&
+                                py >= minY - 8.0f && py <= maxY + 8.0f;
+        const f32 winDepth = depth < centerDepth ? depth : centerDepth;
+        if ((insideRect || nearCenter) && winDepth < bestDepth) {
+            bestDepth = winDepth;
             best = t.handle;
         }
     });

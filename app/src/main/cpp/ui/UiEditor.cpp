@@ -865,8 +865,8 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
         }
         case UiInspRow::Kind::VisToggle: {
             char label[32];
-            std::snprintf(label, sizeof(label), "visivel: %s",
-                          e.visible ? "sim" : "nao");
+            std::snprintf(label, sizeof(label), "visível: %s",
+                          e.visible ? "sim" : "não");
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       label);
             break;
@@ -901,7 +901,7 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
         }
         case UiInspRow::Kind::ActType: {
             char label[48];
-            std::snprintf(label, sizeof(label), "acao: %s",
+            std::snprintf(label, sizeof(label), "ação: %s",
                           uiActionName(e.action));
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       label);
@@ -1337,7 +1337,7 @@ int drawRemoveDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     ui.labelFitted(dlg.x + kPad, dlg.y + kHeaderH + 20.0f, line, theme::TEXT,
                    dlg.w - 2.0f * kPad);
     ui.labelFitted(dlg.x + kPad, dlg.y + kHeaderH + 54.0f,
-                   "Os componentes sao apagados (nao ha desfazer).",
+                   "Os componentes são apagados (não há desfazer).",
                    theme::LINE, dlg.w - 2.0f * kPad);
 
     UiRect del{}, cancel{};
@@ -2016,7 +2016,7 @@ int drawApplyDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         chosen = 1;
         st.applyAsk = false;
     }
-    if (ui.button(kApplyNoId, no.x, no.y, no.w, no.h, "Nao")) {
+    if (ui.button(kApplyNoId, no.x, no.y, no.w, no.h, "Não")) {
         chosen = 2;
         st.applyAsk = false;
     }

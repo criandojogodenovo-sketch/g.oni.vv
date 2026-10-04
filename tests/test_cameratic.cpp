@@ -23,6 +23,8 @@
 #include "core/SceneSerializer.h"
 #include "platform/InputState.h"
 #include "render/Camera.h"
+#include "render/Mesh.h"       // FASE 9 (G1-6): mesh real no pick pelo corpo
+#include "render/Cube.h"        // FASE 9: makeCube (mesh real no pick)
 #include "render/Renderer.h"
 #include "ui/CamGizmo.h"
 #include "ui/EditorLayout.h"
@@ -658,4 +660,109 @@ TEST(cameratic_toggle_frustum_esconde_o_gizmo) {
     CamTic d;
     const std::string dtext = SceneSerializer::dump(d.scene);
     EXPECT(dtext.find("\"frustum\"") == std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// FASE 9 (G1-6 — a ÚNICA mudança de lógica da fase): tocar o CORPO de um
+// TIC grande SELECIONA-o. O hit-test antigo media a distância ao CENTRO
+// projetado (teto 44 px) — um cubo escalado a 10 tinha corpo inteiro "morto"
+// e o tap LIMPAVA a seleção (viewportTapClearsSelection). AGORA: o AABB do
+// mesh projetado (8 cantos pela matriz world) é o alvo; 44 px fica como
+// piso; entre dois acertados ganha o MAIS PRÓXIMO DA CÂMARA.
+// ---------------------------------------------------------------------------
+TEST(cameratic_pick_pelo_corpo_g16) {
+    CamTic c;
+    c.tr->updateWorld();
+
+    // um cubo GRANDE (mesh real, escala 10) à frente da câmara
+    Mesh big;
+    const CubeMeshData cube = makeCube(1.0f);
+    ASSERT(big.create(cube.vertices.data(),
+                      static_cast<u32>(cube.vertices.size()),
+                      cube.indices.data(),
+                      static_cast<u32>(cube.indices.size())));
+    const Handle hBig = c.scene.create("Grande");
+    Tic* bigTic = c.scene.get(hBig);
+    Transform3D* btr = bigTic->addComponent<Transform3D>();
+    MeshRenderer* bmr = bigTic->addComponent<MeshRenderer>();
+    bmr->mesh = &big;
+    btr->pos = Vec3{0.0f, 0.0f, -6.0f};
+    btr->scale = Vec3{10.0f, 10.0f, 10.0f};
+    btr->updateWorld();
+    const Mat4 vp = editorVp(kSW / kSH);
+    // o OLHO da orbit (para o teste de profundidade ser determinístico:
+    // cubos ao longo do raio eye→alvo projetam NO MESMO ponto)
+    const gizmo::ViewBasis vb = gizmo::viewBasis(
+        [] { Camera cc; return cc; }(), kSW / kSH);
+
+    // o CENTRO projeta longe do canto do corpo — o toque no CANTO do corpo
+    // (fora dos 44 px do centro) tem de SELECIONAR (o bug do dono)
+    f32 cx = 0.0f, cy = 0.0f;
+    EXPECT(gizmo::projectPoint(vp, btr->pos, kSW, kSH, cx, cy));
+    // um canto do AABB em ecrã (makeCube(1) tem bounds ±0,5 — a ESCALA 10
+    // do transform leva-o a ±5 no mundo)
+    const Vec3 corner{0.5f, -0.5f, 0.5f};   // canto inferior direito frontal
+    const Vec3 worldCorner{
+        btr->world.m[0] * corner.x + btr->world.m[4] * corner.y +
+            btr->world.m[8] * corner.z + btr->world.m[12],
+        btr->world.m[1] * corner.x + btr->world.m[5] * corner.y +
+            btr->world.m[9] * corner.z + btr->world.m[13],
+        btr->world.m[2] * corner.x + btr->world.m[6] * corner.y +
+            btr->world.m[10] * corner.z + btr->world.m[14]};
+    f32 bx = 0.0f, by = 0.0f;
+    EXPECT(gizmo::projectPoint(vp, worldCorner, kSW, kSH, bx, by));
+    // o canto está LONGE do centro (> 60 px — fora do raio antigo de 44)
+    const f32 dist = std::sqrt((bx - cx) * (bx - cx) + (by - cy) * (by - cy));
+    EXPECT(dist > 60.0f);
+    // ...e o toque NELE seleciona o TIC (o corpo é alvo — G1-6)
+    EXPECT(pickSceneTic(c.scene, vp, kSW, kSH, bx, by) == hBig);
+
+    // fora do corpo (e do raio do centro): NADA (o orbit fica livre)
+    EXPECT(!pickSceneTic(c.scene, vp, kSW, kSH, 60.0f, 660.0f).valid());
+
+    // DOIS cubos SOBREPOSTOS no ecrã: ganha o MAIS PRÓXIMO DA CÂMARA (a
+    // regra antiga era "o mais próximo do TOQUE" — trocava na sobreposição).
+    // O alvo da orbit é a ORIGEM: um pequeno no raio eye→origem (75% do
+    // caminho) projeta NO MESMO PONTO que a origem e está MAIS PERTO.
+    Mesh small;
+    const CubeMeshData cube2 = makeCube(1.0f);
+    ASSERT(small.create(cube2.vertices.data(),
+                        static_cast<u32>(cube2.vertices.size()),
+                        cube2.indices.data(),
+                        static_cast<u32>(cube2.indices.size())));
+    const Handle hNear = c.scene.create("Perto");
+    Tic* nearTic = c.scene.get(hNear);
+    Transform3D* ntr = nearTic->addComponent<Transform3D>();
+    MeshRenderer* nmr = nearTic->addComponent<MeshRenderer>();
+    nmr->mesh = &small;
+    // 75% do caminho eye→origem (a 25% da distância da câmara)
+    const Vec3 ray = Vec3{0.0f, 0.0f, 0.0f} - vb.eye;
+    ntr->pos = vb.eye + ray * 0.25f;
+    ntr->updateWorld();
+    f32 ncx = 0.0f, ncy = 0.0f;
+    EXPECT(gizmo::projectPoint(vp, ntr->pos, kSW, kSH, ncx, ncy));
+    // o toque no centro COMUM (o pequeno projeta no raio; o grande cobre):
+    // os DOIS acertam; o PERTO (menor depth) vence
+    EXPECT(pickSceneTic(c.scene, vp, kSW, kSH, ncx, ncy) == hNear);
+    // e ATRÁS (125% do caminho — dentro do volume do grande, lado de lá):
+    // o GRANDE vence (a face dele está mais perto da câmara)
+    ntr->pos = vb.eye + ray * 1.25f;
+    ntr->updateWorld();
+    EXPECT(pickSceneTic(c.scene, vp, kSW, kSH, ncx, ncy) == hBig);
+
+    // TIC com MeshRenderer SEM mesh (o caso dos presets pré-bind): a regra
+    // de sempre — centro 44 px — continua a funcionar (cena LIMPA: o cubo
+    // gigante cobriria o ecrã inteiro e esconderia o teste)
+    {
+        Scene bare;
+        const Handle hBare = bare.create("SemMesh");
+        Tic* bareTic = bare.get(hBare);
+        Transform3D* bareTr = bareTic->addComponent<Transform3D>();
+        bareTic->addComponent<MeshRenderer>();
+        bareTr->pos = Vec3{0.0f, 0.0f, -4.0f};
+        bareTr->updateWorld();
+        f32 sx = 0.0f, sy = 0.0f;
+        EXPECT(gizmo::projectPoint(vp, bareTr->pos, kSW, kSH, sx, sy));
+        EXPECT(pickSceneTic(bare, vp, kSW, kSH, sx, sy) == hBare);
+    }
 }

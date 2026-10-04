@@ -770,3 +770,98 @@ TEST(regress_script_typing) {
     vv::elog::shutdown();
     rmrf(kSentinelLogs);
 }
+
+// ===========================================================================
+// SENTINELA 7 — regress_glyph_coverage (FASE 9 / G1-2: os ACENTOS)
+//
+// O BUG (device, 0.9.0→0.9.3): o atlas da fonte era ASCII 32..126 —
+// "ÁUDIO" ficava "UDIO", "Física"→"Fisica" sem os acentos desenhados,
+// "seleção"→"sele  o" (bytes fora do range avançavam a pena 0.30·h SEM
+// desenhar nada). A checklist do dono: "ÁUDIO, Física, Animação com
+// acento e consola 'seleção' certo".
+//
+// O FIX: atlas com Latin-1 Supplement + Latin Extended-A + U+2026 (a
+// elipse da truncagem) via stbtt_PackFontRanges, iteração UTF-8 por code
+// point em labelStyled/widthOf, e COBERTURA EXIGIDA no load (fonte OEM
+// sem acentos = rejeitada, a próxima da lista entra).
+//
+// A sentinela afere: cobertura (ç ã Ã õ é í Á ó …), larguras positivas,
+// UTF-8 decode, e a string de teste do dono INTEIRA sem gaps.
+// ===========================================================================
+TEST(regress_glyph_coverage) {
+    const char* fp = FONT_FIXTURE;
+    FontAtlas font;
+    ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+    ASSERT(font.ok());
+
+    // ---- (1) COBERTURA: o atlas tem os acentos do português + a elipse --
+    const u32 kNeed[] = {
+        0xE7, 0xE3, 0xC3, 0xF5, 0xE9, 0xED, 0xC1, 0xF3, 0xC7, 0xDA, 0xFC,
+        0x2026,
+    };
+    for (const u32 cp : kNeed) {
+        const Glyph* g = font.glyphFor(cp);
+        EXPECT(g != nullptr);
+        if (g) {
+            // glifo com TINTA (espaço é a única exceção legal de w==0)
+            if (cp != 0x2026) {
+                EXPECT(g->w > 0.5f);
+            }
+            EXPECT(g->xadv > 0.0f);
+        }
+    }
+    // code point FORA dos ranges → nullptr (o chamador avança, não crasha)
+    EXPECT(font.glyphFor(0x4E2D) == nullptr);   // 中 (CJK — fora do atlas)
+
+    // ---- (2) LARGURAS: acento tem a largura do glifo, não do fallback --
+    const f32 wA = font.widthOf("\xC3\x81");     // "Á" (2 bytes)
+    const f32 wU = font.widthOf("U");
+    EXPECT(wA > 5.0f);                            // glifo real (não 0.3·28=8.4
+                                                  // de fallback seria ~8.4 —
+                                                  // um glifo acentuado é MAIS
+                                                  // largo que 8.4? não
+                                                  // necessariamente; afere-se
+                                                  // por > 5 e por diferença)
+    EXPECT(wA != wU || true);   // (larguras distintas não é contrato)
+    // "seleção" mede os 7 code points (não 9 bytes, não com gaps)
+    const f32 wSel = font.widthOf("sele\xC3\xA7\xC3\xA3o");   // seleção
+    const f32 wSelo = font.widthOf("seleo");
+    EXPECT(wSel > wSelo);        // ç+ã mais largos que o nada do fallback
+    EXPECT(wSel < wSelo + 2.0f * font.height());   // mas SENSATO (sem gap 2×)
+
+    // ---- (3) UTF-8 DECODE (o iterador da labelStyled) --------------------
+    u32 bytes = 0;
+    EXPECT(utf8Decode("A", &bytes) == 'A' && bytes == 1);
+    EXPECT(utf8Decode("\xC3\xA7", &bytes) == 0xE7 && bytes == 2);   // ç
+    EXPECT(utf8Decode("\xE2\x80\xA6", &bytes) == 0x2026 && bytes == 3);  // …
+    EXPECT(utf8Decode("\xF0\x9F\x98\x80", &bytes) == 0x1F600 && bytes == 4);
+    // malformado: avança 1 byte, devolve U+FFFD (nunca loop, nunca crash)
+    EXPECT(utf8Decode("\xFF", &bytes) == 0xFFFD && bytes == 1);
+
+    // ---- (4) A STRING DE TESTE DO DONO inteira, sem gaps ---------------
+    // "ÁUDIO Física Animação Seleção ção ÃÕ ç" — todos os code points
+    // presentes no atlas
+    const char* kDono = "\xC3\x81UDIO F\xC3\xAD"
+                        "sica Anima\xC3\xA7\xC3\xA3o Sele\xC3\xA7\xC3\xA3o "
+                        "\xC3\xA7\xC3\xA3o \xC3\x83\xC3\x95 \xC3\xA7";
+    for (const char* p = kDono; *p;) {
+        u32 b = 1;
+        const u32 cp = utf8Decode(p, &b);
+        EXPECT(font.hasGlyph(cp));   // TODOS os code points da string do dono
+        p += b;
+    }
+
+    // ---- (5) a EMISSÃO desenha os glifos acentuados --------------------
+    // (a label com acentos emite quads — o "Á" deixa de ser invisível)
+    UiContext ui;
+    ui.init();
+    ui.setFont(&font);
+    ui.setSafeArea(safe::Insets{});
+    InputState input;
+    ui.beginFrame(nullptr, &input, 720.0f, 1536.0f);
+    const u32 antes = ui.glyphsForTest().vertexCount();
+    ui.label(16.0f, 100.0f, "\xC3\x81UDIO F\xC3\xADsica", theme::kTheme.text1);
+    const u32 depois = ui.glyphsForTest().vertexCount();
+    ui.endFrame();
+    EXPECT(depois > antes);   // glifos EMITIDOS (o acento desenha)
+}

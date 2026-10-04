@@ -494,7 +494,7 @@ public:
         // ---- AudioFormat.Builder (encoding float + rate + máscara) -------
         jclass fmtB = env->FindClass("android/media/AudioFormat$Builder");
         if (!fmtB || clearPendingException(env)) {
-            elog::error("audio: AudioFormat$Builder nao resolvida");
+            elog::error("audio: AudioFormat$Builder não resolvida");
             gate_.release();
             return false;
         }
@@ -509,7 +509,7 @@ public:
             env->GetMethodID(fmtB, "build", "()Landroid/media/AudioFormat;");
         if (!fbCtor || !fbEnc || !fbRate || !fbMask || !fbBuild) {
             clearPendingException(env);
-            elog::error("audio: metodos do AudioFormat.Builder nao achados");
+            elog::error("audio: métodos do AudioFormat.Builder não achados");
             gate_.release();
             return false;
         }
@@ -537,7 +537,7 @@ public:
             env->GetMethodID(attrB, "build", "()Landroid/media/AudioAttributes;");
         if (!attrB || !abCtor || !abUsage || !abBuild ||
             clearPendingException(env)) {
-            elog::error("audio: AudioAttributes$Builder nao resolvida");
+            elog::error("audio: AudioAttributes$Builder não resolvida");
             gate_.release();
             return false;
         }
@@ -553,7 +553,7 @@ public:
         // ---- AudioTrack: ctor 5-arg (API 21) e, se não houver, o 4-arg ----
         jclass trkCls = env->FindClass("android/media/AudioTrack");
         if (!trkCls || clearPendingException(env)) {
-            elog::error("audio: AudioTrack nao resolvida");
+            elog::error("audio: AudioTrack não resolvida");
             gate_.release();
             return false;
         }
@@ -597,7 +597,7 @@ public:
         releaseM_ = env->GetMethodID(trkCls, "release", "()V");
         if (!writeF_ || !stopM_ || !releaseM_) {
             clearPendingException(env);
-            elog::error("audio: metodos write/stop/release nao achados");
+            elog::error("audio: métodos write/stop/release não achados");
             env->DeleteGlobalRef(track_);
             track_ = nullptr;
             gate_.release();

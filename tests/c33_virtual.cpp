@@ -645,8 +645,8 @@ int main() {
             check(t != nullptr && t->name == "Casa",
                   "o handle re-mapeado aponta o TIC 'Casa' (nao outro)");
         }
-        check(logHas("lifecycle: selecao re-validada"),
-              "log 'lifecycle: selecao re-validada pos-INIT WINDOW'");
+        check(logHas("lifecycle: seleção re-validada"),
+              "log 'lifecycle: seleção re-validada pos-INIT WINDOW'");
 
         passo("3.4 trocar mesh DEPOIS do ciclo (o fluxo do dono continua)");
         idle(2);
@@ -1286,6 +1286,220 @@ int main() {
         g_editor.docsScreen.open = false;
         g_editor.settingsMenu = false;
 
+        // 9.7 — ACENTOS (G1-2/R-008): o atlas do boot tem a cobertura
+        // latina e o frame EMITE os glifos acentuados (o "ÁUDIO" desenha)
+        passo("9.7 acentos: cobertura do atlas + emissao (R-008)");
+        check(g_font.hasGlyph(0xE7) && g_font.hasGlyph(0xE3) &&
+                  g_font.hasGlyph(0xC3) && g_font.hasGlyph(0xF5) &&
+                  g_font.hasGlyph(0xE9) && g_font.hasGlyph(0xED),
+              "o atlas do boot tem c/ae, a-tilde, A-tilde, o-tilde, e-agudo, "
+              "i-agudo (R-008)");
+        check(g_font.hasGlyph(0x2026),
+              "a elipse U+2026 esta no atlas (truncagem com '…')");
+        {
+            g_ui.beginFrame(nullptr, &g_input,
+                             static_cast<f32>(g_egl.width()),
+                             static_cast<f32>(g_egl.height()));
+            const u32 antes = g_ui.glyphsForTest().vertexCount();
+            g_ui.label(16.0f, 60.0f,
+                       "\xC3\x81UDIO F\xC3\xADsica Anima\xC3\xA7\xC3\xA3o "
+                       "Sele\xC3\xA7\xC3\xA3o \xC3\xA7\xC3\xA3o "
+                       "\xC3\x83\xC3\x95 \xC3\xA7",
+                       theme::kTheme.text1);
+            const u32 depois = g_ui.glyphsForTest().vertexCount();
+            g_ui.endFrame();
+            check(depois > antes,
+                  "a string de teste do dono EMITE glifos (acentos desenham)");
+        }
+
+        // 9.8 — LAYOUT.JSON em DEBOUNCE (G1-5): o log do dono mostrava 4
+        // writes em ~40 s (cada passo de 8dp do drag do drawer gravava);
+        // agora grava 1,5 s após a ÚLTIMA alteração, UMA linha
+        // "layout guardado (motivo)" e NÃO grava sem mudança
+        passo("9.8 layout.json: debounce 1,5 s — uma linha (G1-5)");
+        {
+            g_lastLayoutSaved.clear();   // baseline determinístico
+            const int n0 = logCount("layout guardado");
+            // o "drag" inteiro: 3 passos de 8dp SEGUIDOS (cada tick 0,4 s —
+            // o debounce RECOMEÇA a cada mudança: nada é gravado no meio)
+            g_bottom.bottomTab = 1;
+            g_bottom.drawerH = 240.0f;
+            for (int i = 0; i < 3; ++i) {
+                g_bottom.drawerH = 240.0f + 8.0f * static_cast<f32>(i);
+                layoutSaveTick(0.4f);
+            }
+            check(logCount("layout guardado") == n0,
+                  "durante o drag (3 passos): ZERO writes (coalesce)");
+            // o debounce VENCE (1,6 s após a última alteração): 1 write
+            for (int i = 0; i < 4; ++i) {
+                layoutSaveTick(0.4f);
+            }
+            check(logCount("layout guardado") == n0 + 1,
+                  "1,5 s após a última alteração: EXATAMENTE 1 write");
+            check(logHas("layout guardado (painel de baixo)"),
+                  "a linha única traz o MOTIVO (painel de baixo)");
+            // sem mudança: NÃO volta a gravar
+            for (int i = 0; i < 6; ++i) {
+                layoutSaveTick(0.4f);
+            }
+            check(logCount("layout guardado") == n0 + 1,
+                  "sem mudança de conteúdo: NÃO grava");
+            // a SAÍDA para segundo plano faz o FLUSH imediato do pendente
+            g_editor.showInspector = !g_editor.showInspector;
+            layoutSaveTick(0.2f);   // acabou de agendar (1,5 s pendentes)
+            onAppCmd(&app, APP_CMD_PAUSE);
+            check(logCount("layout guardado") == n0 + 2,
+                  "APP_CMD_PAUSE: o write pendente faz FLUSH imediato");
+            check(logHas("layout guardado (saída para segundo plano)"),
+                  "o flush loga o motivo de segundo plano");
+            // o áudio pausado pelo cmd não pode deixar stream vivo
+            onAppCmd(&app, APP_CMD_RESUME);
+        }
+
+        // 9.9 — TOOLBAR ANCORADA AO RECT DA VIEWPORT (G1-1): nunca cobre
+        // outro painel — com o painel de baixo FECHADO e ABERTO
+        passo("9.9 toolbar ancorada ao viewport (G1-1)");
+        {
+            const f32 sw = static_cast<f32>(g_egl.width());
+            const f32 sh = static_cast<f32>(g_egl.height());
+            const safe::Insets ins = g_ui.safeArea();
+            // estado A: painel de baixo FECHADO, Inspector ABERTO
+            g_bottom.bottomTab = 0;
+            g_bottom.drawerH = 0.0f;
+            g_editor.showInspector = true;
+            frame();
+            const UiRect vA =
+                safe::centerRect(sw, sh, ins, 0.0f, g_editor.showInspector);
+            const editor::vpchrome::Layout lA = editor::vpchrome::layout(vA);
+            const editor::vpchrome::Layout* a = &lA;
+            const UiRect toolsA[6] = {a->selectBtn, a->moveBtn, a->rotateBtn,
+                                      a->scaleBtn,  a->snapBtn, a->addTicBtn};
+            bool dentroA = true;
+            for (int i = 0; i < 6; ++i) {
+                dentroA = dentroA && safe::rectInside(toolsA[i], vA);
+            }
+            check(dentroA, "painel FECHADO: os 6 botões DENTRO do rect da "
+                           "viewport (nunca cobrem Inspector/hierarquia)");
+            // o stack vertical também (o undo/redo/save/dup/paste)
+            bool stackOk = true;
+            for (u32 i = 0; i < a->nStack; ++i) {
+                stackOk = stackOk && safe::rectInside(a->stack[i], vA);
+            }
+            check(stackOk, "o stack vertical (undo/redo/save/dup/paste) "
+                           "dentro do rect");
+            // "+" no canto inferior DIREITO da viewport (G1-1)
+            check(a->addTicBtn.x + a->addTicBtn.w > vA.x + vA.w - 72.0f,
+                  "o '+' vive no canto inferior DIREITO da viewport");
+            // estado B: painel de baixo ABERTO (drawer 240) — a toolbar SOBE
+            g_bottom.bottomTab = 1;
+            g_bottom.drawerH = 240.0f;
+            frame();
+            const UiRect vB = safe::centerRect(sw, sh, ins, 240.0f,
+                                               g_editor.showInspector);
+            const editor::vpchrome::Layout lB = editor::vpchrome::layout(vB);
+            const editor::vpchrome::Layout* b = &lB;
+            const UiRect toolsB[6] = {b->selectBtn, b->moveBtn, b->rotateBtn,
+                                      b->scaleBtn,  b->snapBtn, b->addTicBtn};
+            bool dentroB = true;
+            for (int i = 0; i < 6; ++i) {
+                dentroB = dentroB && safe::rectInside(toolsB[i], vB);
+            }
+            check(dentroB, "painel ABERTO (240px): os 6 botões SOBEM com o "
+                           "rect — nunca cobrem o painel de baixo");
+            check(b->selectBtn.y < a->selectBtn.y - 100.0f,
+                  "a toolbar ACOMPANHA o painel (sobe ~240px com ele aberto)");
+            // conflto DIRETO contra o painel: nenhum botão invade a faixa
+            // do drawer (y >= topo do painel)
+            const f32 drawerTop = sh - 240.0f;
+            bool foraDoDrawer = true;
+            for (int i = 0; i < 6; ++i) {
+                foraDoDrawer =
+                    foraDoDrawer && toolsB[i].y + toolsB[i].h <= drawerTop + 0.5f;
+            }
+            check(foraDoDrawer, "nenhum botão pisa a faixa do painel de baixo");
+            // largura mínima: a toolbar cabe na viewport mais estreita
+            // (1600×720 com Inspector + drawer = o pior caso do dono)
+            check(vB.w >= 480.0f, "a viewport útil no pior caso tem folga");
+            // o SÓ-ÍCONE: o botão inativo tem 48dp; o ATIVO (com nome) é o
+            // mais largo — o total fecha < viewport útil
+            const f32 totalW = 6.0f * 8.0f + b->selectBtn.w + b->moveBtn.w +
+                               b->rotateBtn.w + b->scaleBtn.w + b->snapBtn.w;
+            check(totalW < vB.w, "o total da toolbar cabe na viewport útil");
+            g_bottom.bottomTab = 0;
+            g_bottom.drawerH = 0.0f;
+        }
+
+        // 9.10 — TOCAR SELECIONA O TIC (G1-6): o toque no CORPO de um cubo
+        // grande seleciona-o (o bug: só o centro a 44px contava) — e cada
+        // mudança de seleção LOGA com o motivo
+        passo("9.10 tocar no corpo seleciona o TIC (G1-6)");
+        {
+            // Inspector FECHADO (viewport inteiro — o tap tem de nascer
+            // DENTRO do viewRect para o pick armar)
+            g_editor.showInspector = false;
+            // um TIC Cubo GRANDE na cena (mesh procedural do boot, escala 8)
+            const Handle hCubo = g_scene.create("Cubo");
+            Tic* cubo = g_scene.get(hCubo);
+            Transform3D* ctr = cubo->addComponent<Transform3D>();
+            MeshRenderer* cmr = cubo->addComponent<MeshRenderer>();
+            cmr->mesh = &g_cubeMesh;
+            ctr->pos = Vec3{0.0f, 0.0f, -6.0f};
+            ctr->scale = Vec3{8.0f, 8.0f, 8.0f};
+            ctr->updateWorld();
+            // limpa a seleção (estado de partida conhecido)
+            g_editor.selected = Handle::invalid();
+            g_editor.selElement = -1;
+            // o CANTO do corpo projetado (fora dos 44px do centro)
+            const Mat4 vp = Mat4::mul(g_camera.proj(g_egl.width() /
+                                                    static_cast<f32>(
+                                                        g_egl.height())),
+                                      g_camera.view());
+            const Vec3 canto{-0.5f, -0.5f, -0.5f};
+            const Vec3 w = Vec3{
+                ctr->world.m[0] * canto.x + ctr->world.m[4] * canto.y +
+                    ctr->world.m[8] * canto.z + ctr->world.m[12],
+                ctr->world.m[1] * canto.x + ctr->world.m[5] * canto.y +
+                    ctr->world.m[9] * canto.z + ctr->world.m[13],
+                ctr->world.m[2] * canto.x + ctr->world.m[6] * canto.y +
+                    ctr->world.m[10] * canto.z + ctr->world.m[14]};
+            f32 cx = 0.0f, cy = 0.0f, ccx = 0.0f, ccy = 0.0f;
+            gizmo::projectPoint(vp, w, static_cast<f32>(g_egl.width()),
+                                static_cast<f32>(g_egl.height()), cx, cy);
+            gizmo::projectPoint(vp, ctr->pos,
+                                static_cast<f32>(g_egl.width()),
+                                static_cast<f32>(g_egl.height()), ccx, ccy);
+            const f32 dc = std::sqrt((cx - ccx) * (cx - ccx) +
+                                     (cy - ccy) * (cy - ccy));
+            check(dc > 60.0f,
+                  "o canto do corpo está LONGE do centro (>60px — fora do "
+                  "raio antigo de 44)");
+            // o pick DIRETO acerta (o contrato do G1-6)
+            check(camgizmo::pickSceneTic(
+                      g_scene, vp, static_cast<f32>(g_egl.width()),
+                      static_cast<f32>(g_egl.height()), cx, cy) == hCubo,
+                  "pickSceneTic: o toque no CORPO seleciona o TIC (G1-6)");
+            // e pelo caminho REAL da UI: o tap no viewport
+            const int nSel = logCount("seleção: TIC 'Cubo' (toque no viewport)");
+            tap(cx, cy);
+            idle(1);
+            check(g_editor.selected == hCubo,
+                  "o TAP no corpo do cubo SELECIONA-o (o caminho da UI)");
+            check(logCount("seleção: TIC 'Cubo' (toque no viewport)") ==
+                      nSel + 1,
+                  "a mudança de seleção LOGA com o motivo (toque no viewport)");
+            // o tap no VAZIO limpa E loga (x=500: FORA do AABB projetado
+            // do cubo — minX≈580 — e fora do círculo de 44px do centro)
+            const int nClr = logCount("seleção limpa: toque no vazio");
+            tap(500.0f, 300.0f);
+            idle(1);
+            check(!g_editor.selected.valid(),
+                  "o tap no vazio LIMPA a seleção");
+            check(logCount("seleção limpa: toque no vazio") == nClr + 1,
+                  "a limpeza também LOGA (cada mudança com motivo)");
+            // a cena volta ao estado (o TIC extra sai)
+            g_scene.destroy(hCubo);
+        }
+
         onAppCmd(&app, APP_CMD_TERM_WINDOW);
     }
 
@@ -1293,7 +1507,7 @@ int main() {
     std::printf("\n== C33 VIRTUAL: %d check(s), %d falha(s) ==\n", g_checks, g_failed);
     if (g_failed == 0) {
         std::printf("HARNESS VERDE — o dispositivo virtual confirma os fixes "
-                    "vigiados (R-001..R-007; FASE 9 = UI replay do 0.9.4)\n");
+                    "vigiados (R-001..R-008; FASE 9 = UI replay do 0.9.4)\n");
     } else {
         std::printf("HARNESS VERMELHO — release BLOQUEADA (ver [FAIL] acima)\n");
     }

@@ -1,11 +1,8 @@
-// ui/ViewportChrome.cpp — stack vertical + toolbar inferior + triad (0.9.0).
+// ui/ViewportChrome.cpp — stack vertical + toolbar inferior + triad.
 //
-// Tudo lido de theme::kTheme (tabela spec A): botões alvo 48dp (stack) e
-// 56dp (toolbar inferior rotulada), ícones 24dp, ativo = fill accent +
-// accentInk, disabled = text2 a 40% (o alvo continua ≥48dp — desativado NÃO
-// encolhe), chip [snap: <valor>] com raio 4dp. O triad projeta os eixos
-// unitários pela VIEW da câmara (X vermelho, Y verde, Z azul — as cores de
-// eixo documentadas dos gizmos 3D).
+// FASE 9 (G1-1): toolbar ancorada ao RETÂNGULO DA VIEWPORT (drawerH real),
+// só ícones (nome só no ativo), snap = íman, "+" no canto inferior
+// direito, botão de settings REMOVIDO (morto — inventário G0-4).
 #include "ui/ViewportChrome.h"
 #include "ui/EditorUi.h"
 #include "ui/UiContext.h"
@@ -60,9 +57,9 @@ bool stackButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
     return pressed && enabled;
 }
 
-// botão da TOOLBAR INFERIOR: 56dp rotulado (ícone + palavra), ativo = fill
-// accent + accentInk (spec D)
-bool modeButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
+// botão da TOOLBAR INFERIOR (G1-1): SÓ ÍCONE quando inativo (48dp); o
+// ATIVO ganha o NOME (fill accent + palavra — o único rótulo da barra)
+bool toolButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
                 const char* word, bool active) {
     const bool pressed = ui.widgetHit(id, r.x, r.y, r.w, r.h);
     const bool held = ui.widgetActive(id);
@@ -77,19 +74,25 @@ bool modeButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
                         theme::kTheme.border);
     }
     const f32 s = 24.0f;
-    const f32 wordW = ui.hasFont() ? ui.fontWidth(word) : 0.0f;
-    const f32 gap = 8.0f;
-    const f32 total = s + gap + wordW;
-    const f32 x0 = r.x + (r.w - total) * 0.5f;
     const f32 col[4] = {on ? theme::kTheme.accentInk[0] : theme::kTheme.text1[0],
                         on ? theme::kTheme.accentInk[1] : theme::kTheme.text1[1],
                         on ? theme::kTheme.accentInk[2] : theme::kTheme.text1[2],
                         1.0f};
-    icons::drawIcon(ui, icon, x0, r.y + (r.h - s) * 0.5f, s, col);
-    if (ui.hasFont()) {
-        const TextMetrics m = ui.textMetrics();
-        ui.label(x0 + s + gap, r.y + (r.h - m.block()) * 0.5f + m.ascent, word,
-                 col);
+    if (active && word && word[0]) {
+        // ATIVO: ícone + palavra (o único rótulo da barra — G1-1)
+        const f32 wordW = ui.hasFont() ? ui.fontWidth(word) : 0.0f;
+        const f32 gap = 8.0f;
+        const f32 total = s + gap + wordW;
+        const f32 x0 = r.x + (r.w - total) * 0.5f;
+        icons::drawIcon(ui, icon, x0, r.y + (r.h - s) * 0.5f, s, col);
+        if (ui.hasFont()) {
+            const TextMetrics m = ui.textMetrics();
+            ui.label(x0 + s + gap, r.y + (r.h - m.block()) * 0.5f + m.ascent,
+                     word, col);
+        }
+    } else {
+        icons::drawIcon(ui, icon, r.x + (r.w - s) * 0.5f, r.y + (r.h - s) * 0.5f,
+                        s, col);
     }
     return pressed;
 }
@@ -106,26 +109,33 @@ Layout layout(const UiRect& view) {
         L.stack[i] = {x, y, kStackBtn, kStackBtn};
         y += kStackBtn + kStackGap;
     }
-    // ---- triad 64dp canto superior direito ----
+    // ---- triad 64dp canto superior direito (removido no G2-10) ----
     L.triad = {view.x + view.w - kTriad - 8.0f, view.y + 8.0f, kTriad, kTriad};
-    // ---- toolbar inferior (56dp, 8dp acima do fundo) ----
+    // ---- toolbar inferior: SÓ ÍCONES, âncora = canto inferior ESQUERDO
+    // do rect da viewport (G1-1); o ATIVO ganha o nome (mais largo).
+    // Total: ativo 132 + 3×48 + íman 48 + 4 gaps 8 = 368 ≤ viewport útil.
     const f32 by = view.y + view.h - kBottomH - 8.0f;
     f32 bx = view.x + 8.0f;
-    L.selectBtn = {bx, by, 128.0f, kBottomH};  bx += 128.0f + 8.0f;
-    L.moveBtn   = {bx, by, 112.0f, kBottomH};  bx += 112.0f + 8.0f;
-    L.rotateBtn = {bx, by, 112.0f, kBottomH};  bx += 112.0f + 8.0f;
-    L.scaleBtn  = {bx, by, 120.0f, kBottomH};  bx += 120.0f + 8.0f;
-    L.snapChip  = {bx, by, 116.0f, kBottomH};  bx += 116.0f + 8.0f;
-    L.settingsBtn = {bx, by, kBottomH, kBottomH};  bx += kBottomH + 8.0f;
-    L.addTicBtn = {bx, by, 152.0f, kBottomH};
+    // as larguras dependem de QUEM está ativo — o draw resolve o estado;
+    // o layout usa a pior caso (um ativo por vez, sempre o MESMO total)
+    const f32 w[5] = {kToolActiveW, kToolBtn, kToolBtn, kToolBtn, kToolBtn};
+    L.selectBtn = {bx, by, w[0], kBottomH};  bx += w[0] + 8.0f;
+    L.moveBtn   = {bx, by, w[1], kBottomH};  bx += w[1] + 8.0f;
+    L.rotateBtn = {bx, by, w[2], kBottomH};  bx += w[2] + 8.0f;
+    L.scaleBtn  = {bx, by, w[3], kBottomH};  bx += w[3] + 8.0f;
+    L.snapBtn   = {bx, by, kToolBtn, kBottomH};
+    // "+" no canto inferior DIREITO da viewport (G1-1)
+    L.addTicBtn = {view.x + view.w - 56.0f - 8.0f, by, 56.0f, kBottomH};
     return L;
 }
 
 Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
-             const ChromeState& cs, const Camera& camera) {
+             const ChromeState& cs, const Camera& camera, f32 drawerH) {
     Actions a;
+    // G1-1: o rect da viewport com o drawerH REAL — a toolbar acompanha o
+    // painel de baixo (aberto = sobe; fechado = desce ao fundo da viewport)
     const Layout L = layout(safe::centerRect(
-        ui.screenWidth(), ui.screenHeight(), ui.safeArea(), 0.0f,
+        ui.screenWidth(), ui.screenHeight(), ui.safeArea(), drawerH,
         st.showInspector));
 
     // ---- stack vertical ----
@@ -148,66 +158,83 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
 
     // ---- toolbar inferior: modos (Selecionar = SEM gizmo; gz.mode para o
     // gizmo da 0.6.9; o st.selectMode é o cursor de seleção por toque) ----
-    if (modeButton(ui, kVpSelectId, L.selectBtn, icons::Icon::Cursor,
+    if (toolButton(ui, kVpSelectId, L.selectBtn, icons::Icon::Cursor,
                    "Selecionar", st.selectMode)) {
         st.selectMode = true;
         gz.mode = 0;
     }
-    if (modeButton(ui, toolbar::kGizmoIds[0], L.moveBtn, icons::Icon::Move,
+    if (toolButton(ui, toolbar::kGizmoIds[0], L.moveBtn, icons::Icon::Move,
                    "Mover", !st.selectMode && gz.mode == 0)) {
         st.selectMode = false;
         gz.mode = 0;
     }
-    if (modeButton(ui, toolbar::kGizmoIds[1], L.rotateBtn, icons::Icon::Rotate,
+    if (toolButton(ui, toolbar::kGizmoIds[1], L.rotateBtn, icons::Icon::Rotate,
                    "Rodar", !st.selectMode && gz.mode == 1)) {
         st.selectMode = false;
         gz.mode = 1;
     }
-    if (modeButton(ui, toolbar::kGizmoIds[2], L.scaleBtn, icons::Icon::Scale,
+    if (toolButton(ui, toolbar::kGizmoIds[2], L.scaleBtn, icons::Icon::Scale,
                    "Escalar", !st.selectMode && gz.mode == 2)) {
         st.selectMode = false;
         gz.mode = 2;
     }
 
-    // chip [snap: <valor>] — toque cicla o valor (0.1/0.25/0.5/1/off)
+    // snap: BOTÃO DE ÍMAN (G2-9 no mock, aplicado com a toolbar nova) —
+    // estado ativo/inativo, SEM texto (o valor segue no tooltip do gizmo)
     {
-        const bool pressed = ui.widgetHit(kVpSnapValId, L.snapChip.x,
-                                          L.snapChip.y, L.snapChip.w,
-                                          L.snapChip.h);
-        ui.panelRounded(L.snapChip.x, L.snapChip.y, L.snapChip.w, L.snapChip.h,
-                        theme::kRadiusField, theme::kTheme.surface);
-        ui.frameRounded(L.snapChip.x, L.snapChip.y, L.snapChip.w, L.snapChip.h,
-                        1.0f, theme::kRadiusField,
-                        gz.snap ? theme::kTheme.accent : theme::kTheme.border);
-        if (ui.hasFont()) {
-            char label[32];
-            std::snprintf(label, sizeof(label), gz.snap ? "snap: %.2g"
-                                                        : "snap: off",
-                          cs.snapValue);
-            const f32 tw = ui.fontWidth(label);
-            ui.label(L.snapChip.x + (L.snapChip.w - tw) * 0.5f,
-                     textBaseline(ui, L.snapChip), label,
-                     gz.snap ? theme::kTheme.accent : theme::kTheme.text2);
+        const bool pressed =
+            ui.widgetHit(kVpSnapValId, L.snapBtn.x, L.snapBtn.y, L.snapBtn.w,
+                         L.snapBtn.h);
+        const bool held = ui.widgetActive(kVpSnapValId);
+        const bool on = gz.snap || held;
+        ui.panelRounded(L.snapBtn.x, L.snapBtn.y, L.snapBtn.w, L.snapBtn.h,
+                        theme::kRadiusCard,
+                        on ? theme::kTheme.accent : theme::kTheme.surface);
+        if (!on) {
+            ui.frameRounded(L.snapBtn.x, L.snapBtn.y, L.snapBtn.w, L.snapBtn.h,
+                            1.0f, theme::kRadiusCard, theme::kTheme.border);
         }
+        const f32 col[4] = {on ? theme::kTheme.accentInk[0]
+                               : theme::kTheme.text1[0],
+                            on ? theme::kTheme.accentInk[1]
+                               : theme::kTheme.text1[1],
+                            on ? theme::kTheme.accentInk[2]
+                               : theme::kTheme.text1[2],
+                            1.0f};
+        icons::drawIcon(ui, icons::Icon::Snap,
+                        L.snapBtn.x + (L.snapBtn.w - 24.0f) * 0.5f,
+                        L.snapBtn.y + (L.snapBtn.h - 24.0f) * 0.5f, 24.0f,
+                        col);
         if (pressed) {
             gz.snap = !gz.snap;
         }
     }
 
-    // [viewport settings] 🔶 — abre o MESMO popover do "sliders" da top bar
-    if (modeButton(ui, kVpSettingsId, L.settingsBtn, icons::Icon::Sliders, "",
-                   false)) {
-        a.settingsPressed = true;
+    // [+] Adicionar TIC — o plus-menu de sempre, no canto inferior DIREITO
+    // da viewport (G1-1)
+    {
+        const bool pressed =
+            ui.widgetHit(kVpAddTicId, L.addTicBtn.x, L.addTicBtn.y,
+                         L.addTicBtn.w, L.addTicBtn.h);
+        const bool held = ui.widgetActive(kVpAddTicId);
+        ui.panelRounded(L.addTicBtn.x, L.addTicBtn.y, L.addTicBtn.w,
+                        L.addTicBtn.h, theme::kRadiusCard,
+                        held ? theme::kTheme.accentPress
+                             : theme::kTheme.accent);
+        const f32 col[4] = {theme::kTheme.accentInk[0],
+                            theme::kTheme.accentInk[1],
+                            theme::kTheme.accentInk[2], 1.0f};
+        icons::drawIcon(ui, icons::Icon::Plus,
+                        L.addTicBtn.x + (L.addTicBtn.w - 24.0f) * 0.5f,
+                        L.addTicBtn.y + (L.addTicBtn.h - 24.0f) * 0.5f, 24.0f,
+                        col);
+        if (pressed) {
+            a.addTicPressed = true;
+        }
     }
 
-    // [Adicionar TIC] — o plus-menu de sempre
-    if (modeButton(ui, kVpAddTicId, L.addTicBtn, icons::Icon::Plus,
-                   "Adicionar TIC", false)) {
-        a.addTicPressed = true;
-    }
-
-    // ---- TRIAD de orientação (canto sup-dir): eixos unitários projetados
-    // pela VIEW da câmara — X vermelho, Y verde, Z azul (documentado) ----
+    // ---- TRIAD de orientação (canto sup-dir; REMOVIDO no G2-10 — os
+    // "pontinhos fantasma" do dono; mantido até o grupo G2) ----
     {
         const Mat4 v = camera.view();
         // direções dos eixos NO ESPAÇO DA CÂMARA: linhas da view (rotação)

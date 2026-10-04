@@ -328,7 +328,7 @@ TEST(uicanvas_acao_spawn_e_cena_honesta) {
     ctx.sceneExists = [](const std::string&, void*) -> bool { return false; };
     out = applyUiAction(s, e, ctx);
     EXPECT(!out.acted);
-    EXPECT(std::string(out.toast).find("nao existe") != std::string::npos);
+    EXPECT(std::string(out.toast).find("não existe") != std::string::npos);
 
     // COM o callback (o contrato da 0.7.1): acted + alvo/estilo passados
     std::string loaded;

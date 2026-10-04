@@ -214,7 +214,7 @@ bool listDirEntries(const std::string& dir, std::vector<DirEntry>& out) {
         } else {
             // 0.8.5: TODOS os ficheiros entram (kind 0 = não suportado) —
             // o dono vê o .fbx na lista e, ao tocar, recebe o erro CLARO
-            // "formato nao suportado ainda" (antes: invisíveis = silêncio)
+            // "formato não suportado ainda" (antes: invisíveis = silêncio)
             de.kind = kindOfExtension(name);
             files.push_back(de);
         }

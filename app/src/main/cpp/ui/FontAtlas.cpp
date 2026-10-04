@@ -1,6 +1,7 @@
 #include "ui/FontAtlas.h"
 #include <GLES3/gl3.h>
 #include <cstdio>
+#include <cstring>
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "ui/stb/stb_truetype.h"
@@ -18,6 +19,21 @@ const char* const kSystemFontPaths[] = {
 
 const u32 kSystemFontPathCount =
     static_cast<u32>(sizeof(kSystemFontPaths) / sizeof(kSystemFontPaths[0]));
+
+// FASE 9 (G1-2): os code points que o PORTUGUÊS EXIGE — a cobertura é
+// verificada NO BAKE (uma fonte OEM sem eles é rejeitada; a próxima da
+// lista entra). A sentinela R-008 afere por hasGlyph().
+static const u32 kRequiredCp[] = {
+    0xE7,   // ç
+    0xE3,   // ã
+    0xC3,   // Ã
+    0xF5,   // õ
+    0xE9,   // é
+    0xED,   // í
+    0xC1,   // Á
+    0xF3,   // ó
+    0xE7, 0x2026,
+};
 
 namespace {
 
@@ -52,6 +68,14 @@ u32 makeTexture(const u8* bitmap, i32 w, i32 h) {
     return tex;
 }
 
+// o offset do code point no BANCO interno (a soma dos ranges anteriores);
+// kGlyphTotal = tamanho total do banco
+constexpr u32 kRangeSize(u32 r) {
+    return FontAtlas::kRanges[r][1] - FontAtlas::kRanges[r][0] + 1;
+}
+constexpr u32 kGlyphTotal = kRangeSize(0) + kRangeSize(1) + kRangeSize(2) +
+                            kRangeSize(3);
+
 } // namespace
 
 void FontAtlas::destroy() {
@@ -74,7 +98,9 @@ bool FontAtlas::loadFromPaths(const char* const* paths, u32 count, f32 heightPx)
         return true;   // já carregado NESTE contexto (upload duplicado = desperdício)
     }
 
-    constexpr i32 kW = 512;
+    // FASE 9 (G1-2): 1024×512 — o atlas ASCII 512×512 não caberia os 3
+    // ranges + elipse (320 glifos a 28 px). R8 = 512 KB (o C33 tem folga).
+    constexpr i32 kW = 1024;
     constexpr i32 kH = 512;
     std::vector<u8> fileData;
     for (u32 i = 0; i < count; ++i) {
@@ -82,12 +108,50 @@ bool FontAtlas::loadFromPaths(const char* const* paths, u32 count, f32 heightPx)
             continue;
         }
 
+        // stbtt font info + a COBERTURA exigida (os acentos do português)
+        stbtt_fontinfo info;
+        if (!stbtt_InitFont(&info, fileData.data(), 0)) {
+            continue;
+        }
+        bool coverage = true;
+        for (const u32 cp : kRequiredCp) {
+            const int gi = stbtt_FindGlyphIndex(&info, static_cast<int>(cp));
+            if (gi <= 0) {
+                coverage = false;
+                break;
+            }
+        }
+        if (!coverage) {
+            // a fonte NÃO tem os acentos — a UI perderia o "Á" em silêncio.
+            // LOGA e tenta a próxima (o sistema tem sempre o Roboto/Noto)
+            std::printf("font: '%s' sem cobertura latina exigida — a "
+                        "próxima da lista é tentada\n",
+                        paths[i]);
+            continue;
+        }
+
         std::vector<u8> bitmap(static_cast<size_t>(kW) * static_cast<size_t>(kH));
-        stbtt_bakedchar baked[kNumChars];
-        const int res = stbtt_BakeFontBitmap(fileData.data(), 0, heightPx,
-                                             bitmap.data(), kW, kH,
-                                             static_cast<int>(kFirstChar),
-                                             static_cast<int>(kNumChars), baked);
+        stbtt_pack_context pc;
+        if (!stbtt_PackBegin(&pc, bitmap.data(), kW, kH, kW, 1, nullptr)) {
+            continue;
+        }
+        // os 4 ranges (ASCII + Latin-1 + Latin Ext-A + …) num ÚNICO passe
+        stbtt_pack_range ranges[kRangeCount];
+        stbtt_packedchar packed[95 + 96 + 128 + 1];
+        u32 cursor = 0;
+        for (u32 r = 0; r < kRangeCount; ++r) {
+            ranges[r].first_unicode_codepoint_in_range =
+                static_cast<int>(kRanges[r][0]);
+            ranges[r].array_of_unicode_codepoints = nullptr;
+            ranges[r].num_chars =
+                static_cast<int>(kRanges[r][1] - kRanges[r][0] + 1);
+            ranges[r].chardata_for_range = packed + cursor;
+            ranges[r].font_size = heightPx;
+            cursor += kRanges[r][1] - kRanges[r][0] + 1;
+        }
+        const int res = stbtt_PackFontRanges(&pc, fileData.data(), 0, ranges,
+                                             static_cast<int>(kRangeCount));
+        stbtt_PackEnd(&pc);
         if (res <= 0) {
             continue;   // não coube no atlas / fonte inválida — tenta a próxima
         }
@@ -97,26 +161,33 @@ bool FontAtlas::loadFromPaths(const char* const* paths, u32 count, f32 heightPx)
             return false;
         }
 
-        for (u32 c = 0; c < kNumChars; ++c) {
-            const stbtt_bakedchar& b = baked[c];
-            Glyph& g = glyphs_[c];
-            g.u0 = static_cast<f32>(b.x0) / static_cast<f32>(kW);
-            g.v0 = static_cast<f32>(b.y0) / static_cast<f32>(kH);
-            g.u1 = static_cast<f32>(b.x1) / static_cast<f32>(kW);
-            g.v1 = static_cast<f32>(b.y1) / static_cast<f32>(kH);
-            g.xoff = b.xoff;
-            g.yoff = b.yoff;
-            g.xadv = b.xadvance;
-            g.w = static_cast<f32>(b.x1 - b.x0);
-            g.h = static_cast<f32>(b.y1 - b.y0);
-            // F5.0-fix: métricas verticais REAIS — o maior bloco entre todos
-            // os glifos assados (topo mais alto acima do baseline + fundo dos
-            // descendentes abaixo). O layout do Inspector deriva as alturas
-            // das linhas destes números (fonte 28 px no device).
-            const f32 top    = -b.yoff;                       // baseline → topo
-            const f32 bottom = b.yoff + g.h;                  // baseline → fundo
-            if (top > ascent_)  ascent_  = top;
-            if (bottom > descent_) descent_ = bottom;
+        // o banco: os ranges consecutivos no MESMO layout do array packed
+        ascent_ = 0.0f;
+        descent_ = 0.0f;
+        cursor = 0;
+        for (u32 r = 0; r < kRangeCount; ++r) {
+            const u32 n = kRanges[r][1] - kRanges[r][0] + 1;
+            for (u32 k = 0; k < n; ++k) {
+                const stbtt_packedchar& b = packed[cursor + k];
+                Glyph& g = glyphs_[cursor + k];
+                g.u0 = static_cast<f32>(b.x0) / static_cast<f32>(kW);
+                g.v0 = static_cast<f32>(b.y0) / static_cast<f32>(kH);
+                g.u1 = static_cast<f32>(b.x1) / static_cast<f32>(kW);
+                g.v1 = static_cast<f32>(b.y1) / static_cast<f32>(kH);
+                g.xoff = b.xoff;
+                g.yoff = b.yoff;
+                g.xadv = b.xadvance;
+                g.w = static_cast<f32>(b.x1 - b.x0);
+                g.h = static_cast<f32>(b.y1 - b.y0);
+                // F5.0-fix: métricas verticais REAIS — o maior bloco entre
+                // todos os glifos assados (topo mais alto acima do baseline
+                // + fundo dos descendentes abaixo)
+                const f32 top    = -b.yoff;                       // baseline → topo
+                const f32 bottom = b.yoff + g.h;                  // baseline → fundo
+                if (top > ascent_)  ascent_  = top;
+                if (bottom > descent_) descent_ = bottom;
+            }
+            cursor += n;
         }
         height_ = heightPx;
         return true;
@@ -124,16 +195,31 @@ bool FontAtlas::loadFromPaths(const char* const* paths, u32 count, f32 heightPx)
     return false;
 }
 
-f32 FontAtlas::widthOf(const char* text) const {
-    f32 w = 0.0f;
-    for (const char* p = text; *p; ++p) {
-        const char c = *p;
-        if (c < static_cast<char>(kFirstChar) ||
-            c >= static_cast<char>(kFirstChar + kNumChars)) {
-            w += height_ * 0.30f;
-            continue;
+const Glyph* FontAtlas::glyphFor(u32 cp) const {
+    u32 cursor = 0;
+    for (u32 r = 0; r < kRangeCount; ++r) {
+        if (cp >= kRanges[r][0] && cp <= kRanges[r][1]) {
+            return &glyphs_[cursor + (cp - kRanges[r][0])];
         }
-        w += glyph(c).xadv;
+        cursor += kRanges[r][1] - kRanges[r][0] + 1;
+    }
+    return nullptr;
+}
+
+f32 FontAtlas::widthOf(const char* text) const {
+    // FASE 9 (G1-2): UTF-8 — cada CODE POINT avança o seu glifo (acento
+    // morre inteiro, nunca byte-a-byte)
+    f32 w = 0.0f;
+    for (const char* p = text; *p;) {
+        u32 bytes = 1;
+        const u32 cp = utf8Decode(p, &bytes);
+        const Glyph* g = glyphFor(cp);
+        if (g) {
+            w += g->xadv;
+        } else {
+            w += height_ * 0.30f;   // fora do atlas — o espaço de sempre
+        }
+        p += bytes;
     }
     return w;
 }

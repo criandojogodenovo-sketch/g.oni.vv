@@ -185,7 +185,7 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     const f32 contentH = inspectorContentHeight(prof, m, false, 0u);
     // 0.9.0 (spec C): secções 48dp + 3 linhas de Transform (80dp: título
     // + caixas X/Y/Z 48dp) + miniaturas 84dp → 1070; 0.9.2: +90 do Script
-    EXPECT(nearEqF(contentH, 1160.0f));
+    EXPECT(nearEqF(contentH, 1168.0f));   // FASE 9 G1-3: +8 (legendas)
 
     // cursor Y PARTILHADO: linhas sequenciais (y estritamente crescente, sem
     // reinício por secção), todas dentro do conteúdo, e o fundo do plano =
@@ -225,7 +225,7 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     EXPECT(tic->addComponent<TouchControls>() != nullptr);
     // 0.9.0: 1070 − 42 (addTc) + 34 (label tc) = 1062; 0.9.2: +90 = 1152
     EXPECT(nearEqF(inspectorContentHeight(inspectorProfile(*tic), m, false, 0u),
-                   1152.0f));
+                   1160.0f));   // FASE 9 G1-3: +8 (legendas inteiras)
 }
 
 TEST(scroll_hierarquia_todos_os_tics_atingeis) {

@@ -98,7 +98,7 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
     } tabs[3] = {
         {kTabFilesId,   icons::Icon::Folder,   "Ficheiros"},
         {kTabConsoleId, icons::Icon::Terminal, "Consola"},
-        {kTabAnimId,    icons::Icon::Clapper,  "Animacao"},
+        {kTabAnimId,    icons::Icon::Clapper,  "Animação"},
     };
     for (int i = 0; i < 3; ++i) {
         const UiRect& r = L.tab[i];
@@ -294,7 +294,7 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
         }
         if (ui.hasFont()) {
             ui.label(content.x + 248.0f, textBaseline(ui, {0, chipY, 0, chipH}),
-                     bs.consoleAutoScroll ? "auto: sim" : "auto: nao",
+                     bs.consoleAutoScroll ? "auto: sim" : "auto: não",
                      theme::kTheme.text2);
         }
         if (ui.widgetHit(kExportId, content.x + content.w - 112.0f, chipY, 96.0f,

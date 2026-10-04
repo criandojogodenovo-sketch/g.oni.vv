@@ -729,9 +729,9 @@ UiActionResult applyUiAction(Scene& scene, const UiElement& e,
             UiElement* tgt = findElementAnywhere(scene, target, owner);
             if (!tgt) {
                 std::snprintf(out.toast, sizeof(out.toast),
-                              "elemento '%s' nao existe", target.c_str());
+                              "elemento '%s' não existe", target.c_str());
                 std::snprintf(out.log, sizeof(out.log),
-                              "ui: acao %s — alvo '%s' nao encontrado",
+                              "ui: ação %s — alvo '%s' não encontrado",
                               uiActionName(e.action), target.c_str());
                 out.wantToast = true;
                 break;
@@ -748,7 +748,7 @@ UiActionResult applyUiAction(Scene& scene, const UiElement& e,
                           uiActionName(e.action));
             std::snprintf(out.log, sizeof(out.log),
                           "ui: %s %s (%s)", uiActionName(e.action),
-                          target.c_str(), tgt->visible ? "visivel" : "escondido");
+                          target.c_str(), tgt->visible ? "visível" : "escondido");
             break;
         }
 
@@ -761,15 +761,15 @@ UiActionResult applyUiAction(Scene& scene, const UiElement& e,
             // fade/slide conforme o param do elemento.
             const bool trans = e.action == UiElement::Action::TransitionScene;
             if (target.empty()) {
-                std::snprintf(out.toast, sizeof(out.toast), "acao sem alvo");
+                std::snprintf(out.toast, sizeof(out.toast), "ação sem alvo");
                 out.wantToast = true;
                 break;
             }
             if (ctx.sceneExists && !ctx.sceneExists(target, ctx.user)) {
                 std::snprintf(out.toast, sizeof(out.toast),
-                              "cena '%s' nao existe", target.c_str());
+                              "cena '%s' não existe", target.c_str());
                 std::snprintf(out.log, sizeof(out.log),
-                              "ui: cena '%s' FALHOU — nao existe no projeto",
+                              "ui: cena '%s' FALHOU — não existe no projeto",
                               target.c_str());
                 out.wantToast = true;
                 break;
@@ -778,7 +778,7 @@ UiActionResult applyUiAction(Scene& scene, const UiElement& e,
                 std::snprintf(out.toast, sizeof(out.toast),
                               "cena '%s': sem carregador", target.c_str());
                 std::snprintf(out.log, sizeof(out.log),
-                              "ui: cena '%s' existe — loadScene nao ligado",
+                              "ui: cena '%s' existe — loadScene não ligado",
                               target.c_str());
                 out.wantToast = true;
                 break;

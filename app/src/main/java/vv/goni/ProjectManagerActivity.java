@@ -90,6 +90,7 @@ public class ProjectManagerActivity extends Activity {
     private final List<String> missingUris = new ArrayList<>();     // estado F (idem)
 
     private GridView grid;
+    private LinearLayout emptyBox;   // FASE 9 (G1-4a): o CAIXA inteiro desliga
     private TextView emptyTitle, emptySub;
     private EditText search;
     private TextView sortBtn;
@@ -119,27 +120,42 @@ public class ProjectManagerActivity extends Activity {
         root.setBackgroundColor(BG);
         root.setPadding(dp(16), dp(8), dp(16), dp(8));
 
-        root.addView(buildHeader());
-        root.addView(buildSearchRow());
-        root.addView(buildActions());
-        root.addView(buildSectionLabel());
+        // FASE 9 (G1-4b): cabeçalho NUMA LINHA — ícone+título à esquerda;
+        // pesquisa ao centro (flex); ordenar SÓ ÍCONE (texto no menu);
+        // "Novo projeto" preenchido azul; "Importar projeto" só contorno
+        root.addView(buildTopBar());
 
         // corpo: grelha + empty-state sobrepostos
         FrameLayout body = new FrameLayout(this);
         grid = new GridView(this);
-        grid.setNumColumns(2);
+        // FASE 9 (G1-4c): GRELHA ADAPTÁVEL — colunas = largura útil ÷ 180dp
+        // (AUTO_FIT + columnWidth faz EXATAMENTE essa divisão na largura
+        // REAL do ecrã — nada de 2 fixo, nada específico de telemóvel)
+        grid.setNumColumns(GridView.AUTO_FIT);
+        grid.setColumnWidth(dp(180));
         grid.setHorizontalSpacing(dp(16));
         grid.setVerticalSpacing(dp(16));
         grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
         grid.setSelector(new ColorDrawable(Color.TRANSPARENT)); // sem halo
+        // mínimo 2 colunas (ecrãs estreitos — a regra do mock)
+        grid.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+            if (grid.getNumColumns() > 0 && grid.getNumColumns() < 2) {
+                grid.setNumColumns(2);
+            }
+        });
         adapter = new CardsAdapter();
         grid.setAdapter(adapter);
         body.addView(grid, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
-        // EMPTY STATE (spec F/M): ícone + convite a criar o 1º projeto
-        LinearLayout emptyBox = new LinearLayout(this);
+        // EMPTY STATE (spec F/M): ícone + convite a criar o 1º projeto.
+        // FASE 9 (G1-4a): o CAIXA INTEIRO vive no FrameLayout DEPOIS do
+        // grid (z-order ACIMA); a versão antiga só escondia emptyTitle /
+        // emptySub — o bigLogo 96dp cinzento (~190px @2x) ficava VISÍVEL
+        // com projetos, FIXO em coords de ecrã (não rolava com o grid) e
+        // TAPAVA os cards — o "quadrado cinzento fantasma" do dono.
+        emptyBox = new LinearLayout(this);
         emptyBox.setOrientation(LinearLayout.VERTICAL);
         emptyBox.setGravity(Gravity.CENTER);
         ImageView bigLogo = new ImageView(this);
@@ -194,40 +210,30 @@ public class ProjectManagerActivity extends Activity {
         }
     }
 
-    // ---- cabeçalho 72dp: logo 48 + G.One VV 20sp + tagline 12sp -----------
-    private View buildHeader() {
-        LinearLayout h = new LinearLayout(this);
-        h.setOrientation(LinearLayout.HORIZONTAL);
-        h.setGravity(Gravity.CENTER_VERTICAL);
-        h.setPadding(dp(4), dp(8), dp(4), dp(8));
+    // ---- FASE 9 (G1-4b): O CABEÇALHO NUMA LINHA -----------------------------
+    // [logo 32][G.One VV] [pesquisa flex] [ordenar 48] [Novo projeto FILL]
+    // [Importar projeto CONTORNO] — tudo em dp; em paisagem 20:9 (806dp
+    // úteis) cabe sem rolar e sobra altura para uma fila de cards inteira
+    private View buildTopBar() {
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(0, dp(4), 0, dp(4));
+
         ImageView logo = new ImageView(this);
         logo.setImageResource(R.drawable.gone_logo);
-        h.addView(logo, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        LinearLayout texts = new LinearLayout(this);
-        texts.setOrientation(LinearLayout.VERTICAL);
-        texts.setPadding(dp(12), 0, 0, 0);
+        bar.addView(logo, new LinearLayout.LayoutParams(dp(32), dp(32)));
         TextView title = new TextView(this);
         title.setText("G.One VV");
         title.setTextColor(TEXT1);
-        title.setTextSize(20);
+        title.setTextSize(16);
         title.setTypeface(null, android.graphics.Typeface.BOLD);
-        texts.addView(title);
-        TextView tag = new TextView(this);
-        tag.setText("editor de jogos no telemóvel");
-        tag.setTextColor(TEXT2);
-        tag.setTextSize(12);
-        texts.addView(tag);
-        h.addView(texts, new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        return h;
-    }
+        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(48));
+        tp.leftMargin = dp(8);
+        bar.addView(title, tp);
 
-    // ---- pesquisa 48dp (lupa) + dropdown Ordenar 48dp ---------------------
-    private View buildSearchRow() {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setPadding(0, dp(8), 0, 0);
-
+        // pesquisa ao CENTRO (flex — o que sobrar da linha é dela)
         search = new EditText(this);
         search.setSingleLine(true);
         search.setTextSize(14);
@@ -256,76 +262,85 @@ public class ProjectManagerActivity extends Activity {
                 refresh();
             }
         });
-        row.addView(search, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(
+                0, dp(48), 1f);
+        sp.leftMargin = dp(12);
+        sp.rightMargin = dp(8);
+        bar.addView(search, sp);
 
+        // ORDENAR: SÓ ÍCONE (48dp) — o texto vive no MENU; o ⋮ decorativo
+        // ao lado foi REMOVIDO (não fazia nada: o clique era no botão todo)
         sortBtn = new TextView(this, null, 0);
-        sortBtn.setTextSize(12);
-        sortBtn.setTextColor(TEXT2);
-        sortBtn.setGravity(Gravity.CENTER_VERTICAL);
-        sortBtn.setPadding(dp(12), 0, dp(8), 0);
+        sortBtn.setGravity(Gravity.CENTER);
         sortBtn.setCompoundDrawablesWithIntrinsicBounds(
                 UiIcons.drawable(UiIcons.SORT, TEXT2, 24, density()), null,
-                UiIcons.drawable(UiIcons.DOTS, TEXT2, 24, density()), null);
-        sortBtn.setCompoundDrawablePadding(dp(6));
+                null, null);
+        sortBtn.setContentDescription("ordenar");
         sortBtn.setOnClickListener(v -> showSortMenu());
-        row.addView(sortBtn, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(48)));
-        return row;
-    }
+        bar.addView(sortBtn, new LinearLayout.LayoutParams(
+                dp(48), dp(48)));
 
-    // ---- ações primárias 56dp fill accent (raio 8dp — spec A/F) -----------
-    private View buildActions() {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setPadding(0, dp(12), 0, dp(4));
-
+        // [Novo projeto] — preenchido azul (fill accent, raio 8dp)
         Button24 novo = new Button24(this, "Novo projeto",
-                UiIcons.PLUS, ACCENT, ACCENT_PRESS);
+                UiIcons.PLUS, ACCENT, ACCENT_PRESS, false);
         novo.setOnClickListener(v -> askNewProject());
-        row.addView(novo.view(), new LinearLayout.LayoutParams(0, dp(56), 1f));
+        LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(
+                0, dp(56), 1f);
+        np.leftMargin = dp(12);
+        bar.addView(novo.view(), np);
 
+        // [Importar projeto] — SÓ CONTORNO (bordo accent 1dp, fundo
+        // transparente, texto/ícone accent — o par do preenchido)
         Button24 imp = new Button24(this, "Importar projeto",
-                UiIcons.UPLOAD, ACCENT, ACCENT_PRESS);
-        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(0, dp(56), 1f);
-        ip.leftMargin = dp(12);
+                UiIcons.UPLOAD, 0, 0, true);
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(
+                0, dp(56), 1.15f);
+        ip.leftMargin = dp(8);
         imp.setOnClickListener(v -> pickFolder(REQ_PICK_TREE_IMPORT));
-        row.addView(imp.view(), ip);
-        return row;
+        bar.addView(imp.view(), ip);
+        return bar;
     }
 
-    private View buildSectionLabel() {
-        TextView t = new TextView(this);
-        t.setText("Meus projetos");
-        t.setTextColor(TEXT2);
-        t.setTextSize(12);
-        t.setPadding(dp(4), dp(12), 0, dp(8));
-        return t;
-    }
-
-    // ---- botão primário 56dp (fill accent, ícone + palavra, raio 8) -------
+    // ---- botão primário 56dp (fill accent ou CONTORNO, raio 8) ------------
     private static final class Button24 {
         private final android.widget.Button b;
 
-        Button24(Activity a, String label, int icon, int fill, int fillPress) {
+        Button24(Activity a, String label, int icon, int fill, int fillPress,
+                 boolean outline) {
             b = new android.widget.Button(a);
             b.setText(label);
             b.setAllCaps(false);
             b.setTextSize(15);
-            b.setTextColor(TEXT1);
-            b.setPadding(dp2(a, 16), 0, dp2(a, 16), 0);
+            b.setTextColor(outline ? ACCENT : TEXT1);
+            b.setPadding(dp2(a, outline ? 10 : 16), 0,
+                         dp2(a, outline ? 10 : 16), 0);
             GradientDrawable n = new GradientDrawable();
-            n.setColor(fill);
+            if (outline) {
+                // FASE 9 (G1-4b): SÓ CONTORNO — fundo transparente + bordo
+                // accent 1dp (o par do preenchido azul)
+                n.setColor(Color.TRANSPARENT);
+                n.setStroke(dp2(a, 1), ACCENT);
+            } else {
+                n.setColor(fill);
+            }
             n.setCornerRadius(dp2(a, 8));
             GradientDrawable p = new GradientDrawable();
-            p.setColor(fillPress);
+            if (outline) {
+                p.setColor(SURFACE2);
+                p.setStroke(dp2(a, 1), ACCENT);
+            } else {
+                p.setColor(fillPress);
+            }
             p.setCornerRadius(dp2(a, 8));
             StateListDrawable st = new StateListDrawable();
             st.addState(new int[]{android.R.attr.state_pressed}, p);
             st.addState(new int[]{}, n);
             b.setBackground(st);
             b.setCompoundDrawablesWithIntrinsicBounds(
-                    UiIcons.drawable(icon, TEXT1, 24, a.getResources()
-                            .getDisplayMetrics().density), null, null, null);
+                    UiIcons.drawable(icon, outline ? ACCENT : TEXT1, 24,
+                                     a.getResources()
+                                             .getDisplayMetrics().density),
+                    null, null, null);
             b.setCompoundDrawablePadding(dp2(a, 8));
             b.setStateListAnimator(null);   // sem elevação do Material
         }
@@ -363,10 +378,10 @@ public class ProjectManagerActivity extends Activity {
             }
         });
         boolean empty = shown.isEmpty();
-        emptyTitle.setVisibility(empty ? View.VISIBLE : View.GONE);
-        emptySub.setVisibility(empty ? View.VISIBLE : View.GONE);
+        // FASE 9 (G1-4a): o CAIXA do empty-state inteiro (logo INCLUÍDO)
+        // desliga com projetos — o bigLogo era o quadrado fantasma
+        emptyBox.setVisibility(empty ? View.VISIBLE : View.GONE);
         grid.setVisibility(empty ? View.GONE : View.VISIBLE);
-        sortBtn.setText("Ordenar: " + ProjectsFormat.sortLabel(sortMode));
         adapter.notifyDataSetChanged();
     }
 
@@ -455,7 +470,7 @@ public class ProjectManagerActivity extends Activity {
             });
         } catch (Throwable t) {
             // a fila recusou (activity a morrer) — o portão abre SEM crash
-            Log.e(TAG, "projetos: reload nao agendado (fila encerrada?)", t);
+            Log.e(TAG, "projetos: reload não agendado (fila encerrada?)", t);
             reloadGate.abandon();
         }
     }
@@ -543,9 +558,15 @@ public class ProjectManagerActivity extends Activity {
             card.setBackground(bg);
             card.setPadding(dp(8), dp(8), dp(8), dp(8));
 
-            // ---- MINIATURA 16:9 (largura = coluna − paddings) ----
+            // ---- MINIATURA 16:9 (largura = coluna REAL da grelha) ----
+            // FASE 9 (G1-4c): colunas ADAPTÁVEIS (AUTO_FIT ÷ 180dp) — a
+            // largura vem do nº de colunas REAL, não de um /2 fixo
+            int cols = grid.getNumColumns();
+            if (cols < 2) {
+                cols = 2;
+            }
             int colW = (grid.getWidth() > 0 ? grid.getWidth()
-                      : parent.getWidth()) / 2 - dp(16) - dp(16);
+                      : parent.getWidth()) / cols - dp(16);
             int thumbH = Math.round(colW * 9f / 16f);
             FrameLayout thumb = new FrameLayout(ProjectManagerActivity.this);
             if (missing) {
@@ -675,7 +696,9 @@ public class ProjectManagerActivity extends Activity {
     private void showSortMenu() {
         PopupMenu pm = new PopupMenu(new android.view.ContextThemeWrapper(this,
                 android.R.style.Theme_DeviceDefault_Dialog), sortBtn);
-        pm.getMenu().add("Última Edição");
+        // FASE 9 (G1-4b): "Última edição" em minúscula (depois do nome
+        // próprio); o TEXTO vive só aqui — o botão é ícone
+        pm.getMenu().add("Última edição");
         pm.getMenu().add("Nome (A-Z)");
         pm.getMenu().add("Nome (Z-A)");
         pm.getMenu().add("Criado (recente)");

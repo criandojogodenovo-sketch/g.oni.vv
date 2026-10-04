@@ -252,9 +252,23 @@ static f32 currentDrawerH() {
 
 void showToast(const char* msg);   // fwd (definido abaixo)
 // 0.9.0 (spec G) — LAYOUT PERSISTENTE: layout.json na raiz do projeto
-// (bottom/drawer/inspector/secções colapsadas). Escrita por diferença (só
-// quando MUDA — o compare é barato; o write raramente corre)
-static void saveLayoutNow() {
+// (bottom/drawer/inspector/secções colapsadas).
+//
+// FASE 9 (G1-5 — o log mostrava 4 writes em ~40 s): a versão antiga chamava
+// saveLayoutNow() a CADA FRAME — cada passo de 8dp do drag do painel de
+// baixo gravava UM ficheiro. AGORA: DEBOUNCE — grava 1,5 s após a ÚLTIMA
+// alteração (o timer RECOMEÇA a cada mudança — o drag inteiro = 1 write),
+// e na saída para segundo plano (flush imediato). NÃO grava se o conteúdo
+// não mudou. UMA linha de log: "layout guardado (motivo)".
+static f32 g_layoutSaveTimer = 0.0f;         // >0 = pendente (contagem 1,5 s)
+static char g_layoutSaveReason[48] = {0};
+// sombra do estado (para o MOTIVO da linha de log — qual campo mudou)
+static int g_layoutShadowTab = -1;
+static int g_layoutShadowDrawer = -1;
+static int g_layoutShadowInsp = -1;
+static u32 g_layoutShadowCollapsed = 0xFFFFFFFFu;
+
+static void saveLayoutNow(const char* reason) {
     if (!g_storage) {
         return;
     }
@@ -262,11 +276,61 @@ static void saveLayoutNow() {
         g_bottom, g_editor.showInspector,
         g_editor.inspCollapsed | (g_editor.settingsCollapsed << 8));
     if (data == g_lastLayoutSaved) {
-        return;   // nada mudou
+        return;   // nada mudou — NÃO grava (a regra de sempre)
     }
     g_lastLayoutSaved = data;
     g_storage->writeText("layout.json", data);
-    LOGI("layout: guardado (%d bytes)", static_cast<int>(data.size()));
+    elog::info("layout guardado (%s)",
+               (reason && *reason) ? reason : "alteração");
+}
+
+// (re)agenda o save — cada alteração RECOMEÇA os 1,5 s (coalesce)
+static void scheduleLayoutSave(const char* reason) {
+    std::snprintf(g_layoutSaveReason, sizeof(g_layoutSaveReason), "%s",
+                  reason ? reason : "");
+    g_layoutSaveTimer = 1.5f;
+}
+
+// o TICK por frame: deteta a mudança (contra a SOMBRA — o último estado
+// VISTO, não o último escrito: com uma mudança pendente o timer conta SEM
+// parar), agenda com o MOTIVO do campo que mexeu e dispara o write quando
+// o debounce vence (o write em si só corre se o conteúdo diferir do disco)
+static void layoutSaveTick(f32 dt) {
+    if (!g_storage) {
+        return;
+    }
+    const int tab = g_bottom.bottomTab;
+    const int drawer = static_cast<int>(g_bottom.drawerH);
+    const int insp = g_editor.showInspector ? 1 : 0;
+    const u32 collapsed = g_editor.inspCollapsed |
+                          (g_editor.settingsCollapsed << 8);
+    const bool seen = tab == g_layoutShadowTab &&
+                      drawer == g_layoutShadowDrawer &&
+                      insp == g_layoutShadowInsp &&
+                      collapsed == g_layoutShadowCollapsed;
+    if (!seen) {
+        // o MOTIVO: qual campo mudou desde o último VISTO
+        const char* why = "alteração";
+        if (tab != g_layoutShadowTab || drawer != g_layoutShadowDrawer) {
+            why = "painel de baixo";
+        } else if (insp != g_layoutShadowInsp) {
+            why = "inspector";
+        } else {
+            why = "secções recolhidas";
+        }
+        scheduleLayoutSave(why);
+        g_layoutShadowTab = tab;
+        g_layoutShadowDrawer = drawer;
+        g_layoutShadowInsp = insp;
+        g_layoutShadowCollapsed = collapsed;
+    }
+    if (g_layoutSaveTimer > 0.0f) {
+        g_layoutSaveTimer -= dt;
+        if (g_layoutSaveTimer <= 0.0f) {
+            g_layoutSaveTimer = 0.0f;
+            saveLayoutNow(g_layoutSaveReason);
+        }
+    }
 }
 
 // 0.9.0 (spec I/G) — carregar o layout no OPEN (defaults se ilegível)
@@ -282,6 +346,14 @@ static void loadLayoutNow() {
                 g_editor.inspCollapsed = collapsed & 0xFFu;
                 g_editor.settingsCollapsed = (collapsed >> 8) & 0x3Fu;
                 g_lastLayoutSaved = text;
+                // FASE 9 (G1-5): a SOMBRA acompanha o estado carregado —
+                // sem isto o arranque agendava um write espúrio (a sombra
+                // nascia vazia e o 1º tick "via" mudança)
+                g_layoutShadowTab = g_bottom.bottomTab;
+                g_layoutShadowDrawer = static_cast<int>(g_bottom.drawerH);
+                g_layoutShadowInsp = g_editor.showInspector ? 1 : 0;
+                g_layoutShadowCollapsed = g_editor.inspCollapsed |
+                                          (g_editor.settingsCollapsed << 8);
                 LOGI("layout: carregado (tab=%d drawer=%d insp=%d)",
                      g_bottom.bottomTab, static_cast<int>(g_bottom.drawerH),
                      g_editor.showInspector ? 1 : 0);
@@ -913,7 +985,7 @@ void loadSceneByName(const std::string& name, ui::SceneSwap style) {
         }
     }
     char msg[96];
-    std::snprintf(msg, sizeof(msg), "cena '%s' nao existe", name.c_str());
+    std::snprintf(msg, sizeof(msg), "cena '%s' não existe", name.c_str());
     showToast(msg);
 }
 
@@ -968,8 +1040,8 @@ void createSceneNamed(const std::string& name) {
         std::string(Project::kDirScenes) + "/" + name + ".goni";
     for (const std::string& s : g_project.scenes) {
         if (s == rel) {
-            showToast("cena ja existe");
-            elog::warn("cena: '%s' ja existe no projeto", name.c_str());
+            showToast("cena já existe");
+            elog::warn("cena: '%s' já existe no projeto", name.c_str());
             return;
         }
     }
@@ -1159,7 +1231,7 @@ void audioPreviewToggle() {
     const std::string& rel = g_audioCatalog[g_audioWs.selected];
     const GiClip* clip = audioClipFor(rel);
     if (!clip) {
-        showToast("clip nao carrega (engine.log)");
+        showToast("clip não carrega (engine.log)");
         return;
     }
     g_audioPreviewVoice = g_audioEngine.play(clip, false, 1.0f, 1.0f);
@@ -1393,7 +1465,7 @@ void audioPlayerStart(Tic& t) {
     }
     const GiClip* clip = audioClipFor(au->clipPath);
     if (!clip) {
-        showToast("clip de audio nao encontrado");
+        showToast("clip de áudio não encontrado");
         return;
     }
     // posicional: a posição VIVA do TIC (o listener é a câmara)
@@ -1431,7 +1503,7 @@ void audioPreviewTick(Tic& t) {
         const GiClip* clip = audioClipFor(au->clipPath);
         if (!clip) {
             au->previewing = false;
-            showToast("clip de audio nao encontrado");
+            showToast("clip de áudio não encontrado");
             return;
         }
         au->voiceId = g_audioEngine.play(clip, au->loop, au->volume, au->pitch);
@@ -1530,7 +1602,7 @@ static void audioRecWorker(AudioRec& rec) {
     jclass arCls = env->FindClass("android/media/AudioRecord");
     if (!arCls || env->ExceptionCheck()) {
         env->ExceptionClear();
-        elog::error("audio: AudioRecord nao resolvida (RECORD_AUDIO concedida?)");
+        elog::error("audio: AudioRecord não resolvida (RECORD_AUDIO concedida?)");
         return;
     }
     jmethodID getMin = env->GetStaticMethodID(
@@ -1543,7 +1615,7 @@ static void audioRecWorker(AudioRec& rec) {
     jmethodID relM = env->GetMethodID(arCls, "release", "()V");
     if (!getMin || !ctor || !startRec || !readM || !stopM || !relM) {
         env->ExceptionClear();
-        elog::error("audio: metodos do AudioRecord nao achados");
+        elog::error("audio: métodos do AudioRecord não achados");
         return;
     }
     const jint minBuf = env->CallStaticIntMethod(
@@ -1830,7 +1902,7 @@ void browserExtractArchive(const fileapi::DirEntry& e) {
     if (ext != "zip") {
         char msg[96];
         std::snprintf(msg, sizeof(msg),
-                      "rar: formato nao suportado ainda — usa .zip");
+                      "rar: formato não suportado ainda — usa .zip");
         showToast(msg);
         elog::warn("archive: '%s' — RAR sem decoder (licenca unrar); usa "
                    ".zip (a decisao esta no relatorio)", e.path.c_str());
@@ -2050,10 +2122,10 @@ void browserImportFile(const fileapi::DirEntry& e) {
                                     ? "(sem extensão)"
                                     : e.name.substr(dot);
         char msg[96];
-        std::snprintf(msg, sizeof(msg), "formato nao suportado ainda: %s",
+        std::snprintf(msg, sizeof(msg), "formato não suportado ainda: %s",
                       ext.c_str());
         showToast(msg);
-        elog::warn("import: '%s' — formato %s nao suportado (aceites: "
+        elog::warn("import: '%s' — formato %s não suportado (aceites: "
                    ".obj .gltf .glb .png .zip .rar)", e.path.c_str(),
                    ext.c_str());
         return;
@@ -2146,7 +2218,7 @@ void closeScriptEditor() {
             sc2.source = g_editor.scriptWin.buf;
         }
     } else {
-        elog::warn("voni: fonte do editor PERDIDA no fecho (TIC '%s' nao "
+        elog::warn("voni: fonte do editor PERDIDA no fecho (TIC '%s' não "
                    "existe na cena)",
                    g_editor.scriptWin.ticName);
     }
@@ -2510,9 +2582,9 @@ bool primUploadOne(MeshRenderer& mr) {
             !std::isfinite(pos.z)) {
             ++g_primSwapErr;
             mr.primNeg = true;
-            elog::error("mesh: troca %s→%s passo=validacao ERRO(vert %zu "
-                        "nao finito)", de, para, v);
-            showToast("mesh: troca ERRO(validacao) — mantida a anterior");
+            elog::error("mesh: troca %s→%s passo=validação ERRO(vert %zu "
+                        "não finito)", de, para, v);
+            showToast("mesh: troca ERRO(validação) — mantida a anterior");
             return false;
         }
     }
@@ -2525,13 +2597,13 @@ bool primUploadOne(MeshRenderer& mr) {
         if (!(maior > 1e-6f)) {
             ++g_primSwapErr;
             mr.primNeg = true;
-            elog::error("mesh: troca %s→%s passo=validacao ERRO(AABB "
+            elog::error("mesh: troca %s→%s passo=validação ERRO(AABB "
                         "degenerado — extensao %.3g)", de, para, maior);
-            showToast("mesh: troca ERRO(validacao) — mantida a anterior");
+            showToast("mesh: troca ERRO(validação) — mantida a anterior");
             return false;
         }
     }
-    elog::info("mesh: troca %s→%s passo=validacao ok", de, para);
+    elog::info("mesh: troca %s→%s passo=validação ok", de, para);
 
     // ---- passo=upload + SELF-CHECK ----------------------------------------
     std::unique_ptr<Mesh> nm = std::make_unique<Mesh>();
@@ -2906,7 +2978,7 @@ void applyImportedAssetToSelectedTic() {
                                 g_scene, g_editor.selected, *mdl);
                             if (nClips > 0) {
                                 showToast("clips importados (timeline)");
-                                LOGI("editor: %u clip(s) de animacao "
+                                LOGI("editor: %u clip(s) de animação "
                                      "importados de %s",
                                      nClips, g_applyAsk.rel.c_str());
                             }
@@ -2920,7 +2992,7 @@ void applyImportedAssetToSelectedTic() {
     if (!applied) {
         // o catálogo não tem a ref (refresh falhou?): HONESTO no log — o
         // ficheiro está no projeto e aplica-se depois pelo seletor
-        elog::warn("import: '%s' NAO aplicado — fora do catalogo (aplique "
+        elog::warn("import: '%s' NÃO aplicado — fora do catálogo (aplique "
                    "pelo seletor do Inspector)",
                    g_applyAsk.rel.c_str());
     }
@@ -3080,11 +3152,11 @@ void beginExportToDownloads() {
 // + galeria, com o caminho visível); senão → DIÁLOGO (1ª vez do fluxo) com a
 // ação pendente; bloqueado → mensagem HONESTA com a causa real
 void attemptImport() {
-    elog::info("import: toque no botao (projeto=%d granted-? a verificar)",
+    elog::info("import: toque no botão (projeto=%d granted-? a verificar)",
                g_projectReady ? 1 : 0);
     if (!g_projectReady) {
         showToast("sem projeto — import indisponível");
-        elog::warn("import: SEM projeto — botao nao faz nada (crie/abra um)");
+        elog::warn("import: SEM projeto — botão não faz nada (crie/abra um)");
         return;
     }
     bool supported = false;
@@ -3457,13 +3529,13 @@ void onAppCmd(android_app* app, i32 cmd) {
                     if (revalidated.valid() &&
                         revalidated != g_editor.selected) {
                         g_editor.selected = revalidated;
-                        elog::info("lifecycle: selecao re-validada pós-INIT "
+                        elog::info("lifecycle: seleção re-validada pós-INIT "
                                    "WINDOW (re-mapeada por nome '%s')",
                                    selName);
                     } else if (!revalidated.valid() &&
                                g_editor.selected.valid()) {
-                        elog::info("lifecycle: selecao pós-INIT WINDOW "
-                                   "dispensada (TIC '%s' nao existe na cena "
+                        elog::info("lifecycle: seleção pós-INIT WINDOW "
+                                   "dispensada (TIC '%s' não existe na cena "
                                    "recarregada)", selName);
                         g_editor.selected = Handle::invalid();
                     }
@@ -3514,6 +3586,12 @@ void onAppCmd(android_app* app, i32 cmd) {
             applyContentRect(app);
             break;
         case APP_CMD_PAUSE:
+            // FASE 9 (G1-5): flush do debounce ao sair para segundo plano
+            // (o write pendente NÃO se perde)
+            if (g_layoutSaveTimer > 0.0f) {
+                g_layoutSaveTimer = 0.0f;
+                saveLayoutNow("saída para segundo plano");
+            }
             // 0.8.11 — o áudio segue o lifecycle da activity: fundo =
             // PAUSA do stream (AAudio/AudioTrack pausam DEBAIXO da mesma
             // interface; o misturador NÃO esquece vozes — o resume continua
@@ -3897,6 +3975,9 @@ void frame() {
     // morta e logava "ERRO(sem TIC com mesh selecionado)" com de="-" — a
     // evidência exata dos logs 0.8.5/0.8.7/0.8.9/0.8.10). Os botões da UI
     // não reclamam o slot de input externo — o guard é AQUI, no chamador.
+    // FASE 9 (G1-6): a seleção ANTES do tap (viewportTapClearsSelection
+    // limpa DENTRO — o log do motivo precisa do valor de antes)
+    const Handle selAntesTap = g_editor.selected;
     if (!g_editor.playMode && !g_editor.uiMode && !g_editor.audioMode &&
         !editor::anyOverlayOpen(g_editor)) {
         if (editor::viewportTapClearsSelection(
@@ -3908,8 +3989,23 @@ void frame() {
             const Handle hc =
                 camgizmo::pickSceneTic(g_scene, tapVp, w, h, px, py);
             if (hc.valid()) {
+                if (hc != selAntesTap) {
+                    const Tic* nt = g_scene.get(hc);
+                    elog::info("seleção: TIC '%s' (toque no viewport)",
+                               nt ? nt->name.c_str() : "?");
+                }
                 g_editor.selected = hc;
-                LOGI("editor: tic selecionado pelo toque no viewport");
+            } else {
+                // FASE 9 (G1-6): CADA mudança de seleção LOGA o motivo
+                // (selAntesTap: o handle JÁ foi limpo lá dentro)
+                if (selAntesTap.valid()) {
+                    const Tic* velho = g_scene.get(selAntesTap);
+                    elog::info("seleção limpa: toque no vazio do viewport "
+                               "(era '%s')",
+                               velho ? velho->name.c_str() : "ID órfão");
+                }
+                g_editor.selected = Handle::invalid();
+                g_editor.selElement = -1;
             }
         }
     }
@@ -4164,7 +4260,7 @@ void frame() {
             cs.canPaste = g_clipValid;
             cs.snapValue = g_snapValue;
             const editor::vpchrome::Actions va = editor::vpchrome::draw(
-                g_ui, g_editor, g_gizmoMode, cs, g_camera);
+                g_ui, g_editor, g_gizmoMode, cs, g_camera, currentDrawerH());
             if (va.undoPressed) {
                 const Handle uh = g_undo.undo(g_scene);
                 if (uh.valid()) {
@@ -4216,15 +4312,11 @@ void frame() {
                         showToast("colado");
                     }
                 } else {
-                    showToast("nada na area de transferencia");
+                    showToast("nada na área de transferência");
                 }
             }
             if (va.addTicPressed) {
                 g_editor.plusMenu = !g_editor.plusMenu;
-            }
-            if (va.settingsPressed) {
-                // o MESMO popover do "sliders" da top bar (snap/grelha 🔶)
-                g_editor.vpSettingsMenu = true;
             }
         }
         if (ta.playPressed && !g_editor.playMode) {
@@ -4291,15 +4383,15 @@ void frame() {
                 g_editor.showInspector = true;
                 g_editor.inspCollapsed = 0;
                 g_editor.settingsCollapsed = 0;
-                saveLayoutNow();
+                saveLayoutNow("repor layout");
                 showToast("layout reposto");
                 break;
             }
             case editor::settings::kToggleImmersive: {
                 g_immersive = !g_immersive;
                 applyImmersiveMode();
-                saveLayoutNow();
-                showToast(g_immersive ? "imersivo: sim" : "imersivo: nao");
+                saveLayoutNow("imersivo");
+                showToast(g_immersive ? "imersivo: sim" : "imersivo: não");
                 elog::info("ui: modo imersivo = %s",
                            g_immersive ? "on" : "off");
                 break;
@@ -4477,8 +4569,8 @@ void frame() {
                         setOnlyActiveCamera(g_scene, hnew);
                     }
                     g_editor.selected = hnew;
-                    showToast("Camera criada (ativa)");
-                    LOGI("editor: TIC de camera criado (ativo)");
+                    showToast("Câmara criada (ativa)");
+                    LOGI("editor: TIC de câmara criada (ativa)");
                 }
             } else if (choice == 6) {
                 // 0.8.0 (F7) — TIC "Mesh": Transform+MeshRenderer com a
@@ -4993,8 +5085,8 @@ void frame() {
                 // para o transform da câmara (posição + orientação)
                 if (Transform3D* tr = ct->getComponent<Transform3D>()) {
                     camgizmo::alignToView(*tr, g_camera);
-                    showToast("camera alinhada a vista");
-                    LOGI("editor: camera '%s' alinhada a vista de edicao",
+                    showToast("câmara alinhada à vista");
+                    LOGI("editor: câmara '%s' alinhada à vista de edição",
                          ct->name.c_str());
                 }
             }
@@ -5032,7 +5124,7 @@ void frame() {
                             : g_editor.textPurpose == 4 ? "COR DO ELEMENTO"
                             : g_editor.textPurpose == 5 ? "COR DO TIC"
                             : g_editor.textPurpose == 7 ? "RENOMEAR CLIP"
-                                                        : "ALVO DA ACAO";
+                                                        : "ALVO DA AÇÃO";
         const int ch =
             editor::drawTextInput(g_ui, g_input, w, h, g_editor, title);
         if (ch == 1) {
@@ -5215,9 +5307,11 @@ void frame() {
         }
     }
 
-    // 0.9.0 (spec G) — o layout PERSISTE por diferença: escreve SÓ quando
-    // o estado serializado mudou (tab/drawer/inspector/secções colapsadas)
-    saveLayoutNow();
+    // 0.9.0 (spec G) + FASE 9 (G1-5): o layout PERSISTE por diferença com
+    // DEBOUNCE de 1,5 s — o tick deteta a mudança, agenda e grava UMA vez
+    // 1,5 s após a ÚLTIMA alteração (o drag inteiro do drawer = 1 write;
+    // o log antigo mostrava 4 writes em ~40 s)
+    layoutSaveTick(g_frameDt);
 
     // 0.7.1: o overlay da transição por cima de TUDO no editor também
     ui::transitionDraw(g_ui, g_sceneTrans, w, h);
@@ -5470,7 +5564,7 @@ void android_main(android_app* app) {
     g_systems.add(TickGroup::Update, &g_transformSystem);
     g_systems.add(TickGroup::Physics, &g_physics);   // entre Update e PostUpdate
     elog::info("[boot 5/6] physics OK (tickgroups Update+Physics registados; "
-               "animacao no Update antes do transform)");
+               "animação no Update antes do transform)");
 
     app->onAppCmd = onAppCmd;
     app->onInputEvent = onInputEvent;

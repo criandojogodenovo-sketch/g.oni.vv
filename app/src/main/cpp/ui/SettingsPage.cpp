@@ -148,9 +148,9 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
     };
     const Sec secs[6] = {
         {kBitGeral, "Geral", 3},       // versão/build · repor layout · imersivo
-        {kBitAudio, "Audio", 3},       // volume · fonte · reconverter
-        {kBitPerm, "Permissoes", 2},   // all files · mic
-        {kBitDiag, "Diagnostico", 6},  // ver logs · export · probe · dumps · modo · texto
+        {kBitAudio, "Áudio", 3},       // volume · fonte · reconverter
+        {kBitPerm, "Permissões", 2},   // all files · mic
+        {kBitDiag, "Diagnóstico", 6},  // ver logs · export · probe · dumps · modo · texto
         {kBitDocs, "Docs", 1},         // (0.9.2 — spec I: existe SEM linha)
         {kBitSobre, "Sobre", 2},       // sha256 · licencças
     };
@@ -176,7 +176,7 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
     if (!(collapsed & kBitGeral)) {
         char ver[64];
         std::snprintf(ver, sizeof(ver), "%s", ctx.version);
-        infoRow(ui, ox, y, aw, "versao / build", ver);
+        infoRow(ui, ox, y, aw, "versão / build", ver);
         y += kRowH;
         if (actionRow(ui, kResetLayoutId, ox, y, aw, "layout",
                       "Repor layout")) {
@@ -192,7 +192,7 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
 
     // ---- ÁUDIO ---------------------------------------------------------------
     if (sectionHeader(ui, kSectionBase + 1, kBitAudio, st.settingsCollapsed, ox,
-                      y, aw, "Audio")) {
+                      y, aw, "Áudio")) {
         st.settingsCollapsed ^= kBitAudio;
     }
     y += kSectionH;
@@ -202,7 +202,7 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
                       static_cast<int>(ctx.audioMaster * 100.0f + 0.5f));
         infoRow(ui, ox, y, aw, "volume geral", vol);
         y += kRowH;
-        infoRow(ui, ox, y, aw, "fonte apos import",
+        infoRow(ui, ox, y, aw, "fonte após import",
                 ctx.keepSource ? "manter" : "largar");
         y += kRowH;
         if (actionRow(ui, 5829, ox, y, aw, "assets de source/",
@@ -214,7 +214,7 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
 
     // ---- PERMISSÕES ----------------------------------------------------------
     if (sectionHeader(ui, kSectionBase + 2, kBitPerm, st.settingsCollapsed, ox,
-                      y, aw, "Permissoes")) {
+                      y, aw, "Permissões")) {
         st.settingsCollapsed ^= kBitPerm;
     }
     y += kSectionH;
@@ -233,7 +233,7 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
 
     // ---- DIAGNÓSTICO ---------------------------------------------------------
     if (sectionHeader(ui, kSectionBase + 3, kBitDiag, st.settingsCollapsed, ox,
-                      y, aw, "Diagnostico")) {
+                      y, aw, "Diagnóstico")) {
         st.settingsCollapsed ^= kBitDiag;
     }
     y += kSectionH;
@@ -305,7 +305,7 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
         std::snprintf(sha, sizeof(sha), "%.20s…", ctx.soSha);
         infoRow(ui, ox, y, aw, "so sha256", sha);
         y += kRowH;
-        infoRow(ui, ox, y, aw, "licencas", "motor proprio + zlib/minimp3/stb_vorbis");
+        infoRow(ui, ox, y, aw, "licenças", "motor próprio + zlib/minimp3/stb_vorbis");
         y += kRowH;
     }
 

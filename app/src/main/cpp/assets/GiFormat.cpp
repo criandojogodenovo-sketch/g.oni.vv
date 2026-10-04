@@ -225,7 +225,7 @@ bool parseWavPcm16(const u8* bytes, size_t len, u32& sampleRate,
     }
     if (std::memcmp(bytes, "RIFF", 4) != 0 ||
         std::memcmp(bytes + 8, "WAVE", 4) != 0) {
-        err = "nao e um RIFF/WAVE";
+        err = "não é um RIFF/WAVE";
         return false;
     }
     size_t off = 12;
@@ -263,7 +263,7 @@ bool parseWavPcm16(const u8* bytes, size_t len, u32& sampleRate,
                 return false;
             }
             if (audioFormat != 1) {
-                err = "wav nao-PCM (format " + std::to_string(audioFormat) +
+                err = "wav não-PCM (format " + std::to_string(audioFormat) +
                       ") — usa PCM 16-bit";
                 return false;
             }
@@ -374,7 +374,7 @@ bool readGi(const u8* bytes, size_t len, GiClip& out, std::string& err) {
         return false;
     }
     if (std::memcmp(bytes, "GICL", 4) != 0) {
-        err = "magic errado — nao e um .gi";
+        err = "magic errado — não é um .gi";
         return false;
     }
     Rd rd{bytes, len};
@@ -454,7 +454,7 @@ bool readGi(const u8* bytes, size_t len, GiClip& out, std::string& err) {
         }
     }
     if (out.pcm.size() != static_cast<size_t>(out.frames) * out.channels) {
-        err = ".gi frames nao batem com o PCM";
+        err = ".gi frames não batem com o PCM";
         return false;
     }
     return true;
@@ -537,7 +537,7 @@ bool importAudioToGi(const u8* bytes, size_t len, const std::string& name,
         }
         out.codec = GiCodec::Mp3;
     } else {
-        err = "audio ." + ext + " nao suportado (aceites: .wav .ogg .mp3)";
+        err = "audio ." + ext + " não suportado (aceites: .wav .ogg .mp3)";
         return false;
     }
     out.sampleRate = wi.sampleRate;

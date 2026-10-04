@@ -532,12 +532,12 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     char camActiveLabel[48] = "";
     char camFrustumLabel[48] = "";   // 0.7.10: toggle do gizmo
     if (camEdit) {
-        std::snprintf(camProjLabel, sizeof(camProjLabel), "projecao: %s",
+        std::snprintf(camProjLabel, sizeof(camProjLabel), "projeção: %s",
                       CameraComp::projectionName(camEdit->projection));
         std::snprintf(camActiveLabel, sizeof(camActiveLabel), "ativa: %s",
-                      camEdit->active ? "sim" : "nao");
+                      camEdit->active ? "sim" : "não");
         std::snprintf(camFrustumLabel, sizeof(camFrustumLabel), "frustum: %s",
-                      camEdit->showFrustum ? "sim" : "nao");
+                      camEdit->showFrustum ? "sim" : "não");
     }
     if (mr) {
         if (mr->primOn) {
@@ -562,9 +562,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                       im->source ? "fonte ligada" : "sem fonte");
     }
     if (bc) {
-        std::snprintf(bodyLine, sizeof(bodyLine), "body: %s - %s - chao: %s",
+        std::snprintf(bodyLine, sizeof(bodyLine), "body: %s - %s - chão: %s",
                       BodyComp::typeName(bc->type), BodyComp::shapeName(bc->shape),
-                      bc->grounded ? "sim" : "nao");
+                      bc->grounded ? "sim" : "não");
     }
     // linhas de texto (Label) NA MESMA ORDEM do plano: input → body → tc
     const char* labelTexts[3];
@@ -610,8 +610,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             // 0.7.0 — checkbox de visibilidade do TIC (mesmo estado do olho
             // da Hierarchy; TIC invisível não desenha em editor nem Play)
             char vis[32];
-            std::snprintf(vis, sizeof(vis), "visivel: %s",
-                          tic->visible ? "sim" : "nao");
+            std::snprintf(vis, sizeof(vis), "visível: %s",
+                          tic->visible ? "sim" : "não");
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       vis);
             break;
@@ -633,15 +633,25 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             // [preview live = textura × tint]. A textura resolve pelo MESMO
             // imgResolve do canvas (o main liga); sem textura: placeholder
             // mono (moldura + diagonais — o padrão do elemento Image).
+            //
+            // FASE 9 (G1-3): (a) o tint é f32[3] — as APIs de cor são
+            // f32[4]; passar tint direto lia 4 bytes FORA do array (o
+            // ALFA era lixo → o quadrado escuro com hex #FFFFFF); agora
+            // col[4] explícito com alfa 1. (b) legendas INTEIRAS em linha
+            // RESERVADA (a célula = largura útil ÷ 3): "Textura",
+            // "Cor base", "Prévia" — nunca mais "text… albe… pre…".
             if (mr) {
                 const f32 thumbS = 64.0f;
                 const f32 gap = 12.0f;
                 const f32 rowW = 3.0f * thumbS + 2.0f * gap;
                 const f32 tx0 = x + (w - rowW) * 0.5f;
                 const f32 ty0 = ry + 4.0f;
+                // o tint COMO COR RGBA (alfa 1 — o fix do quadrado escuro)
+                const f32 tint4[4] = {mr->tint[0], mr->tint[1], mr->tint[2],
+                                      1.0f};
                 // 1) TEXTURA
                 if (!ui.imageQuad(tx0, ty0, thumbS, thumbS, mr->texPath,
-                                  mr->tint)) {
+                                  tint4)) {
                     ui.frame(tx0, ty0, thumbS, thumbS, 1.0f,
                              theme::kTheme.border);
                     ui.drawLine(tx0, ty0, tx0 + thumbS, ty0 + thumbS, 1.0f,
@@ -655,8 +665,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                     ui.panelRounded(ax, ty0, thumbS, thumbS,
                                     theme::kRadiusCard, theme::kTheme.bg);
                     ui.panelRounded(ax + 4.0f, ty0 + 4.0f, thumbS - 8.0f,
-                                    thumbS - 8.0f, theme::kRadiusCard,
-                                    mr->tint);
+                                    thumbS - 8.0f, theme::kRadiusCard, tint4);
                     ui.frameRounded(ax, ty0, thumbS, thumbS, 1.0f,
                                     theme::kRadiusCard, theme::kTheme.border);
                     icons::drawIcon(ui, icons::Icon::Rename,
@@ -667,25 +676,39 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 {
                     const f32 px = tx0 + 2.0f * (thumbS + gap);
                     if (!ui.imageQuad(px, ty0, thumbS, thumbS, mr->texPath,
-                                      mr->tint)) {
+                                      tint4)) {
                         ui.panelRounded(px, ty0, thumbS, thumbS,
-                                        theme::kRadiusCard, mr->tint);
+                                        theme::kRadiusCard, tint4);
                     }
                     ui.frameRounded(px, ty0, thumbS, thumbS, 1.0f,
                                     theme::kRadiusCard, theme::kTheme.border);
                 }
+                // legendas INTEIRAS: linha reservada por baixo, cada uma na
+                // SUA célula (largura útil ÷ 3), a 12sp — "Textura",
+                // "Cor base" e "Prévia" cabem INTEIROS (medido: Cor base
+                // ≈ 87px @12sp ≤ 92px de célula)
                 if (ui.hasFont()) {
                     const TextMetrics m3 = ui.textMetrics();
-                    const f32 base = ty0 + thumbS + m3.block() + 4.0f;
-                    const char* kCaps[3] = {"textura", "albedo", "preview"};
+                    const f32 capScale = theme::fontScale(theme::kFontCaption);
+                    const f32 capBlock = m3.block() * capScale;
+                    const f32 base = ty0 + thumbS + capBlock + 4.0f;
+                    static const char* kCaps[3] = {"Textura", "Cor base",
+                                                   "Prévia"};
+                    const f32 cellW = w / 3.0f;
                     for (u32 t = 0; t < 3; ++t) {
-                        // CENTRADA mas NUNCA mais larga que o thumb (a
-                        // vizinha está a thumbS+gap — sem invasão)
-                        const f32 cx = tx0 + static_cast<f32>(t) *
-                                               (thumbS + gap) +
-                                       thumbS * 0.5f;
-                        ui.labelFitted(cx - thumbS * 0.5f, base, kCaps[t],
-                                       theme::kTheme.text2, thumbS);
+                        // centrada na CÉLULA (não no thumb — a legenda pode
+                        // ser mais larga que 64px sem invadir a vizinha)
+                        const f32 cx = x + cellW * (0.5f + static_cast<f32>(t));
+                        const f32 tw = ui.fontWidth(kCaps[t]) * capScale;
+                        if (tw <= cellW - 8.0f) {
+                            ui.labelStyled(cx - tw * 0.5f, base, kCaps[t],
+                                           theme::kTheme.text2, capScale, 0);
+                        } else {
+                            // defesa (fonte gigante): ajusta SEM cortar o nome
+                            ui.labelStyled(cx - cellW * 0.5f + 4.0f, base,
+                                           kCaps[t], theme::kTheme.text2,
+                                           capScale * (cellW - 8.0f) / tw, 0);
+                        }
                     }
                 }
             }
@@ -698,12 +721,16 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             if (mrEdit) {
                 char hex[12];
                 uiHexFormat(mrEdit->tint, hex, sizeof(hex));
-                // swatch 48 (à direita; a cor VIVA do tint)
+                // swatch 48 (à direita; a cor VIVA do tint — RGBA com alfa
+                // 1: o tint é f32[3], as APIs de cor são f32[4]; passar o
+                // array direto lia FORA — o quadrado ESCURO com #FFFFFF)
                 const f32 swS = 48.0f;
                 const f32 swX = x + w - kPad - swS;
                 const f32 swY = ry + (r.h - swS) * 0.5f;
+                const f32 tint4[4] = {mrEdit->tint[0], mrEdit->tint[1],
+                                      mrEdit->tint[2], 1.0f};
                 ui.panelRounded(swX, swY, swS, swS, theme::kRadiusField,
-                                mrEdit->tint);
+                                tint4);
                 ui.frameRounded(swX, swY, swS, swS, 1.0f, theme::kRadiusField,
                                 theme::kTheme.border);
                 // o BOTÃO ocupa o resto da linha (hex legível à esquerda)
@@ -723,8 +750,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             const u32 bit = r.payload;
             const bool open = !(st.inspCollapsed & bit);
             static const char* kTitles[8] = {"Transform", "Camera", "Malha",
-                                             "Material", "Fisica", "Audio",
-                                             "Animacao", "Script"};
+                                             "Material", "Física", "Áudio",
+                                             "Animação", "Script"};
             u32 titleIdx = 0;
             for (u32 b = 0; b < 8; ++b) {
                 if (bit == (1u << b)) {
@@ -755,7 +782,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             // orçamento era o bug da caixa Z sob o R); caixas 48dp com o
             // rótulo do eixo à esquerda e o valor à direita (labelFitted —
             // nunca invade); o toque abre o teclado numérico (propósito 6).
-            static const char* kRowTitles[3] = {"Pos", "Rotacao", "Escala"};
+            static const char* kRowTitles[3] = {"Pos", "Rotação", "Escala"};
             const u32 rowIdx = r.payload;
             const TextMetrics m2 = ui.textMetrics();
             const f32 titleBase = ry + 2.0f + m2.ascent;
@@ -1038,7 +1065,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         }
         case InspRow::Kind::AddAnim:
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
-                      "add Animacao");
+                      "adicionar Animação");
             break;
         case InspRow::Kind::AnimLabel: {
             char animLine[64];
@@ -1087,11 +1114,11 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         case InspRow::Kind::AuAutoplay:
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       auEdit && auEdit->autoplay ? "autoplay: sim"
-                                                 : "autoplay: nao");
+                                                 : "autoplay: não");
             break;
         case InspRow::Kind::AuLoop:
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
-                      auEdit && auEdit->loop ? "loop: sim" : "loop: nao");
+                      auEdit && auEdit->loop ? "loop: sim" : "loop: não");
             break;
         case InspRow::Kind::AuVolume:
             if (auEdit) {
@@ -1112,7 +1139,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         case InspRow::Kind::AuPos:
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       auEdit && auEdit->posicional ? "posicional: sim"
-                                                   : "posicional: nao");
+                                                   : "posicional: não");
             break;
         case InspRow::Kind::AuRint:
             if (auEdit) {
@@ -1846,7 +1873,7 @@ int drawSettingsMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 
     int chosen = 0;
     char fonte[48];
-    std::snprintf(fonte, sizeof(fonte), "fonte apos import: %s",
+    std::snprintf(fonte, sizeof(fonte), "fonte após import: %s",
                   keepSource ? "manter" : "largar");
     char vol[48];
     std::snprintf(vol, sizeof(vol), "volume geral: %d%%",
@@ -2418,7 +2445,7 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
             std::snprintf(out.toast, sizeof(out.toast), "mesh: none");
             std::snprintf(out.log, sizeof(out.log),
                           "editor: mesh none — slot limpo (TIC sem mesh; "
-                          "deferred free no proximo frame)");
+                          "deferred free no próximo frame)");
         } else if (pick == 2) {   // cube procedural
             // 0.8.12: posse antiga p/ cova (sem perder pendente anterior)
             mr->primRetire = mr->mesh ? mr->mesh : mr->primRetire;

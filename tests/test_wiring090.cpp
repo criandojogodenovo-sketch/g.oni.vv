@@ -90,7 +90,8 @@ struct Env {
         if (!modalOpen) {
             toolbar::draw(ui, st);
             vpchrome::ChromeState cs;
-            vpchrome::draw(ui, st, g_gz, cs, cam);
+            vpchrome::draw(ui, st, g_gz, cs, cam,
+                           bs.bottomTab > 0 ? bs.drawerH : 0.0f);
             drawHierarchy(ui, scene, st);
             drawInspector(ui, scene, st, &catalog);
         }
@@ -318,13 +319,14 @@ TEST(vpchrome_stack_sem_sobreposicao_alvos_48) {
             EXPECT(ox <= 0.01f || oy <= 0.01f);
         }
     }
-    // toolbar inferior 56dp rotulada: nada sobrepõe
-    const UiRect tools[7] = {L.selectBtn, L.moveBtn, L.rotateBtn, L.scaleBtn,
-                             L.snapChip, L.settingsBtn, L.addTicBtn};
-    for (int i = 0; i < 7; ++i) {
+    // toolbar inferior FASE 9 (G1-1): SÓ ÍCONES + íman + "+" à direita —
+    // nada sobrepõe, todos os alvos ≥48
+    const UiRect tools[6] = {L.selectBtn, L.moveBtn, L.rotateBtn, L.scaleBtn,
+                             L.snapBtn, L.addTicBtn};
+    for (int i = 0; i < 6; ++i) {
         EXPECT(tools[i].h >= 48.0f - 0.01f);
-        EXPECT(tools[i].w > 0.0f);
-        for (int j = i + 1; j < 7; ++j) {
+        EXPECT(tools[i].w >= 48.0f - 0.01f);
+        for (int j = i + 1; j < 6; ++j) {
             const f32 ox = std::min(tools[i].x + tools[i].w,
                                     tools[j].x + tools[j].w) -
                            std::max(tools[i].x, tools[j].x);
@@ -339,6 +341,51 @@ TEST(vpchrome_stack_sem_sobreposicao_alvos_48) {
     EXPECT(nearEqF(L.triad.x + L.triad.w + 8.0f, view.x + view.w, 0.01f));
     // a toolbar não colide com o triad
     EXPECT(L.addTicBtn.y > L.triad.y + L.triad.h);
+}
+
+// ---- D2 (FASE 9 G1-1): a toolbar ANCORADA À VIEWPORT — acompanha o painel
+// de baixo (drawerH), nunca cobre o drawer/Inspector e fica DENTRO do rect
+TEST(vpchrome_toolbar_ancorada_a_viewport_g11) {
+    // 1600×720, drawer FECHADO: a toolbar assenta no fundo da viewport
+    {
+        const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{}, 0.0f,
+                                             true);
+        const vpchrome::Layout L = vpchrome::layout(view);
+        EXPECT(nearEqF(L.selectBtn.y + L.selectBtn.h + 8.0f,
+                       view.y + view.h));
+        EXPECT(safe::rectInside(L.selectBtn, view));
+        EXPECT(safe::rectInside(L.snapBtn, view));
+        EXPECT(safe::rectInside(L.addTicBtn, view));
+        // "+" no canto inferior DIREITO da viewport
+        EXPECT(nearEqF(L.addTicBtn.x + L.addTicBtn.w + 8.0f, view.x + view.w));
+    }
+    // drawer ABERTO (240): a toolbar SOBE com o rect — nunca cobre o drawer
+    {
+        const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{}, 240.0f,
+                                             true);
+        const vpchrome::Layout L = vpchrome::layout(view);
+        EXPECT(safe::rectInside(L.selectBtn, view));
+        EXPECT(safe::rectInside(L.addTicBtn, view));
+        // o fundo da toolbar está ACIMA do topo do drawer
+        const UiRect drawerTop{0.0f, kSH - safe::kStatusH - safe::kBottomTabH -
+                                         240.0f, kSW, 240.0f};
+        EXPECT(L.selectBtn.y + L.selectBtn.h <= drawerTop.y + 0.01f);
+        EXPECT(L.addTicBtn.y + L.addTicBtn.h <= drawerTop.y + 0.01f);
+        // e NUNCA por cima do Inspector (o rect da viewport já exclui)
+        const UiRect insp = safe::inspectorPanelRect(kSW, kSH, safe::Insets{},
+                                                     240.0f);
+        const f32 ox = std::min(L.addTicBtn.x + L.addTicBtn.w, insp.x + insp.w) -
+                       std::max(L.addTicBtn.x, insp.x);
+        EXPECT(ox <= 0.01f);
+    }
+    // largura ESTREITA (viewport 420): a toolbar cabe (368 ≤ 420)
+    {
+        const UiRect view{300.0f, 104.0f, 420.0f, 400.0f};
+        const vpchrome::Layout L = vpchrome::layout(view);
+        EXPECT(safe::rectInside(L.snapBtn, view));
+        EXPECT(safe::rectInside(L.addTicBtn, view));
+        EXPECT(safe::rectInside(L.selectBtn, view));
+    }
 }
 
 // ---- E: drawer clamp 160..400 + passos de 8 --------------------------------------
@@ -560,4 +607,40 @@ TEST(toast_tokens_e_estados_vazios_existem) {
     EXPECT(icons::iconByName("interrogacao") >= 0);
     EXPECT(icons::iconByName("check") >= 0);
     EXPECT(icons::iconByName("warn") >= 0);
+}
+
+// ---- FASE 9 (G1-3): Material — legendas INTEIRAS + o tint como RGBA ------
+TEST(material_legendas_inteiras_e_tint_rgba_g13) {
+    Env e;
+    const Handle h = e.scene.create("Cubo");
+    Tic* t = e.scene.get(h);
+    t->addComponent<Transform3D>();
+    MeshRenderer* mr = t->addComponent<MeshRenderer>();
+    mr->tint[0] = 1.0f;
+    mr->tint[1] = 1.0f;
+    mr->tint[2] = 1.0f;   // #FFFFFF (o caso do dono: quadrado ESCURO)
+    e.st.selected = h;
+
+    // as legendas 12sp cabem INTEIRAS na própria célula (útil/3 = 100px):
+    // "Cor base" ≈ 87px, "Textura" ≈ 73px, "Prévia" ≈ 61px (medido na
+    // Liberation Sans 28px × 12/14)
+    const f32 capScale = theme::fontScale(theme::kFontCaption);
+    const f32 cellW = 300.0f / 3.0f;
+    EXPECT(e.font.widthOf("Textura") * capScale <= cellW - 8.0f);
+    EXPECT(e.font.widthOf("Cor base") * capScale <= cellW - 8.0f);
+    EXPECT(e.font.widthOf("Prévia") * capScale <= cellW - 8.0f);
+
+    // a linha de miniaturas GANHOU a linha reservada das legendas (92dp)
+    EXPECT(nearEqF(editor::inspThumbsH(), 64.0f + 28.0f));
+
+    // o desenho com tint BRANCO não crasha e emite OS QUADS DO ALBEDO com
+    // alfa 1 (o bug: tint f32[3] passado a API f32[4] lia o alfa FORA do
+    // array — o quadrado ficava escuro com hex #FFFFFF)
+    e.frame();
+    EXPECT(e.ui.solidsForTest().vertexCount() > 0);
+
+    // o hex mostra o valor REAL do tint (#FFFFFF)
+    char hex[12];
+    editor::uiHexFormat(mr->tint, hex, sizeof(hex));
+    EXPECT(std::strcmp(hex, "#FFFFFF") == 0);
 }
