@@ -232,3 +232,18 @@ Prova de mutação (colada em /home/z/my-project/mutacao-R015-vermelho-verde.txt
 | Padrão proibido | (nenhum — a vigília é a sentinela + a FASE 12) |
 
 Prova de mutação (colada em /home/z/my-project/mutacao-R010-{vermelho,verde}.txt e no RELATORIO-0.9.6): o gap-fill DESLIGADO (`if (false)` no ramo das peças — o render de 0.9.5) → `regress_r010_editor_roundtrip` FALHOU em 4 frentes (p.begin != pos; pos != strlen; as peças deixam de cobrir a linha); reposto → OK. A mutação do editorRestart (recusar sem ScriptComp) é apanhada pela 12.4 do harness (Run no esqueleto = erro "o TIC não tem componente Script").
+
+## R-014 · o import não aparecia no seletor de malha (FASE 0.9.6 · G4)
+
+| campo | valor |
+|---|---|
+| ID | R-014 |
+| Reportado | task 0.9.6 (G4): "glb/gltf importados não aparecem na 'seleção de malha' dos TICs (StaticBody/CharacterBody/PlayerBody/RigidBody/Mesh) após o import" |
+| Sintoma exato | o import do glb/gltf corria (toast "importado: N mesh(es)", ficheiro escrito), mas ao abrir o seletor de malha do TIC o asset novo NÃO constava da lista |
+| Causa raiz | forense (as 5 hipóteses da task confirmadas/eliminadas por leitura de código): (1) pasta ERRADA — NÃO: o importFile escreve `assets/<stem>.gmesh` e o refreshCatalog lista `Project::kDirAssets` = assets/ (PARTILHAM diretório); (2) índice stale — NÃO: o catálogo refresca NO fim do import (importJobFinish → refreshCatalog) E AO ABRIR o seletor (transição do assetMenu); (3) filtro de extensão — NÃO: ambos usam `.gmesh` (6 bytes exatos); (4) manifesto — N/A (o catálogo lê o diretório, não manifesto); (5) content:// — NÃO: a fonte SAF é lida por streaming (fileapi), o convertido escreve pelo storage do projeto. **A CAUSA REAL: o CAP de 5 ficheiros SEM scroll no drawAssetMenu** ("cap de ficheiros no overlay (mono, sem scroll — F8 traz scroll)" — o TODO da F8 nunca chegou): com 5+ .gmesh no projeto, o import novo ficava FORA da lista visível para sempre |
+| Fix | a lista de ficheiros do seletor passou a listar TODOS com SCROLL (o padrão da Hierarchy/Inspector: janela encaixada na faixa do overlay — máx. o que a altura permite —, drag = scroll, tap parado = escolha pelo scrollTap, culling fora da janela); as linhas fixas (none/cube/importar) ficam fora do scroll |
+| Teste sentinela | `assetpick_r014_todos_os_ficheiros_aparecem_no_seletor` + `assetpick_r014_o_scroll_alcanca_os_ficheiros_que_nao_cabem` (tests/test_assetpick.cpp — 7 meshes: a 7ª linha DESENHA (glifos no rect) e o tap APLICA meshPath; 9 meshes: o drag alcança o 9º e aplica) |
+| Linha do replay | FASE 12.8 do c33_virtual: um .glb REAL (container GLB montado no harness) importado pelo convert::importFile DE PRODUÇÃO → convertido em assets/robo.gmesh → catálogo lista (com 6 meshes pré-existentes) → <1s → seletor aberto em TIC com MeshRenderer → drag até ao fim → tap → meshPath == "assets/robo.gmesh" no componente (fim-a-fim) |
+| Padrão proibido | (nenhum — a vigília é a sentinela + a FASE 12.8) |
+
+Prova de mutação (colada em /home/z/my-project/mutacao-R014-vermelho{,2}.txt e no RELATORIO-0.9.6): o cap de 5 volta ao loop de desenho (`i < 5`) → `assetpick_r014_todos_os_ficheiros_aparecem_no_seletor` FALHOU (a 7ª linha não desenhava — o check de GLIFOS no rect da linha é o que apanha; um tap às cegas passaria porque o mapeamento do scrollTap cobre a lista toda); reposto → verde. NOTA honesta: a 1ª rodada da prova usou um teste com o check de glifos ANTES do frame desenhado (falhava por razão errada) — a prova foi REFEITA com o teste corrigido (mutacao-R014-vermelho2.txt).

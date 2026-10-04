@@ -481,3 +481,168 @@ TEST(assetpick_render_binda_a_textura_aplicada) {
     EXPECT(glstub::stats.boundTextures == 0);             // nada bindado
     EXPECT(nearEqF(glstub::stats.lastUniform1f, 0.0f)); // cubo cinzento
 }
+
+// ---------------------------------------------------------------------------
+// R-014 (0.9.6 G4) — O IMPORT APARECE NO SELETOR: a causa raiz era o CAP de
+// 5 ficheiros SEM scroll ("F8 traz scroll" — nunca chegou): com 5+ .gmesh no
+// projeto, o glb/gltf recém-importado (catálogo refrescado NO fim do import
+// E ao abrir o seletor — o wiring estava certo) NUNCA aparecia no seletor.
+// Agora TODOS os ficheiros listam (janela com scroll quando não cabem).
+// ---------------------------------------------------------------------------
+TEST(assetpick_r014_todos_os_ficheiros_aparecem_no_seletor) {
+    FontAtlas font;
+    const char* fp = FONT_FIXTURE;
+    if (!font.loadFromPaths(&fp, 1, kFontPx)) {
+        EXPECT(!"fonte fixture ausente");
+        return;
+    }
+    UiContext ui;
+    ui.init();
+    ui.setFont(&font);
+    ui.setSafeArea(safe::Insets{});
+    InputState input;
+
+    PickEnv e;
+    // 7 meshes — ACIMA do cap antigo de 5 (o 6º e o 7º eram INVISÍVEIS)
+    e.cat.meshes = {"assets/m1.gmesh", "assets/m2.gmesh", "assets/m3.gmesh",
+                    "assets/m4.gmesh", "assets/m5.gmesh", "assets/m6.gmesh",
+                    "assets/robo_importado.gmesh"};
+    e.res.mesh = [](const std::string& rel) -> Mesh* {
+        return rel == "assets/robo_importado.gmesh" ? kMeshStub : nullptr;
+    };
+    e.res.material = kMatStub;
+
+    EditorState st;
+    st.selected = e.sel;
+    st.assetMenu = 1;                        // seletor de MESH aberto
+    const int menuKind = st.assetMenu;
+
+    // a geometria NOVA (overlayArea + lista scrollável): landscape
+    // 1600x720, insets 0, withImport=FALSE → fixedH=48+2*48+16=160;
+    // maxListH=424 → as 7 linhas CABEM todas (sem scroll)
+    f32 ox, oy, aw, ah;
+    overlayArea(kSW, kSH, safe::Insets{}, ox, oy, aw, ah);
+    const f32 w = kMenuW;
+    const f32 fixedH = kHeaderH + 2.0f * 48.0f + kPad;
+    const f32 listH = 7.0f * 48.0f;
+    const f32 h = fixedH + listH;
+    const f32 x = ox + (aw - w) * 0.5f;
+    const f32 y = oy + (ah - h) * 0.5f;
+    const f32 listTop = y + kHeaderH + 2.0f * 48.0f;
+
+    // o 7º ficheiro (idx 6 — o importado, INVISÍVEL no cap antigo):
+    // primeiro AFERMOS QUE A LINHA DESSENHOU (glifos do label no rect da
+    // linha — o cap antigo não a desenhava e o tap às cegas passaria)
+    {
+        ui.beginFrame(nullptr, &input, kSW, kSH);
+        drawAssetMenu(ui, input, kSW, kSH, st, e.cat);
+        ui.endFrame();
+        input.clearEdges();
+        const QuadBatch& g = ui.glyphsForTest();
+        const QuadVertex* v = g.vertices();
+        const u32 n = g.vertexCount();
+        u32 naLinha = 0;
+        const f32 r0 = listTop + 6.0f * 48.0f;
+        for (u32 i = 0; i + 5 < n; i += 6) {
+            if (v[i].y >= r0 - 2.0f && v[i + 2].y <= r0 + 48.0f &&
+                v[i].x >= x && v[i].x <= x + w) {
+                ++naLinha;
+            }
+        }
+        EXPECT(naLinha >= 5);   // o label "assets/robo_importado.gmesh"
+                                // desenhou INTEIRO na 7ª linha
+    }
+    const f32 bx = x + kPad + (w - 2.0f * kPad) * 0.5f;
+    const f32 by = listTop + 6.0f * 48.0f + 20.0f;
+    input.injectDown(0, bx, by);
+    ui.beginFrame(nullptr, &input, kSW, kSH);
+    drawAssetMenu(ui, input, kSW, kSH, st, e.cat);
+    ui.endFrame();
+    input.clearEdges();
+    input.injectUp(0);
+    ui.beginFrame(nullptr, &input, kSW, kSH);
+    const int pick = drawAssetMenu(ui, input, kSW, kSH, st, e.cat);
+    ui.endFrame();
+    input.clearEdges();
+    EXPECT(pick == 9);                       // idx 6 + 3 (none=1, cube=2)
+    EXPECT(st.assetMenu == 0);
+    const AssetPickOutcome out =
+        applyAssetPick(e.scene, e.sel, menuKind, pick, e.cat, e.res);
+    EXPECT(out.applied);
+    EXPECT(e.mr()->meshPath == "assets/robo_importado.gmesh");
+}
+
+TEST(assetpick_r014_o_scroll_alcanca_os_ficheiros_que_nao_cabem) {
+    FontAtlas font;
+    const char* fp = FONT_FIXTURE;
+    if (!font.loadFromPaths(&fp, 1, kFontPx)) {
+        EXPECT(!"fonte fixture ausente");
+        return;
+    }
+    UiContext ui;
+    ui.init();
+    ui.setFont(&font);
+    ui.setSafeArea(safe::Insets{});
+    InputState input;
+
+    PickEnv e;
+    // 9 meshes: em landscape só ~7.8 linhas cabem → o 9º exige SCROLL
+    for (int i = 1; i <= 9; ++i) {
+        char rel[48];
+        std::snprintf(rel, sizeof(rel), "assets/m%d.gmesh", i);
+        e.cat.meshes.push_back(rel);
+    }
+    e.res.mesh = [](const std::string&) -> Mesh* { return kMeshStub; };
+    e.res.material = kMatStub;
+
+    EditorState st;
+    st.selected = e.sel;
+    st.assetMenu = 1;
+    const int menuKind = st.assetMenu;
+
+    f32 ox, oy, aw, ah;
+    overlayArea(kSW, kSH, safe::Insets{}, ox, oy, aw, ah);
+    const f32 w = kMenuW;
+    const f32 fixedH = kHeaderH + 2.0f * 48.0f + kPad;   // withImport=false
+    const f32 maxListH = ah - fixedH - 8.0f;
+    const f32 listH = 9.0f * 48.0f < maxListH ? 9.0f * 48.0f : maxListH;
+    const f32 h = fixedH + listH;
+    const f32 x = ox + (aw - w) * 0.5f;
+    const f32 y = oy + (ah - h) * 0.5f;
+    const f32 listTop = y + kHeaderH + 2.0f * 48.0f;
+
+    // DRAG para o fim da lista (o scroll do UiContext — press, move, up).
+    // O dedo FICA DENTRO do menu (sair dele = pressedOutside = fechar)
+    input.injectDown(0, x + w * 0.5f, listTop + 200.0f);
+    ui.beginFrame(nullptr, &input, kSW, kSH);
+    drawAssetMenu(ui, input, kSW, kSH, st, e.cat);
+    ui.endFrame();
+    input.injectMove(0, x + w * 0.5f, listTop + 20.0f);   // arrasta p/ cima
+    ui.beginFrame(nullptr, &input, kSW, kSH);
+    drawAssetMenu(ui, input, kSW, kSH, st, e.cat);
+    ui.endFrame();
+    input.injectUp(0);
+    ui.beginFrame(nullptr, &input, kSW, kSH);
+    drawAssetMenu(ui, input, kSW, kSH, st, e.cat);
+    ui.endFrame();
+    input.clearEdges();
+
+    // com o scroll no fim, o 9º ficheiro está VISÍVEL: tap na última linha
+    const f32 bx = x + kPad + (w - 2.0f * kPad) * 0.5f;
+    const f32 by = listTop + listH - 24.0f;
+    input.injectDown(0, bx, by);
+    ui.beginFrame(nullptr, &input, kSW, kSH);
+    drawAssetMenu(ui, input, kSW, kSH, st, e.cat);
+    ui.endFrame();
+    input.clearEdges();
+    input.injectUp(0);
+    ui.beginFrame(nullptr, &input, kSW, kSH);
+    const int pick = drawAssetMenu(ui, input, kSW, kSH, st, e.cat);
+    ui.endFrame();
+    input.clearEdges();
+    EXPECT(pick == 11);                      // idx 8 + 3 — o 9º alcançável
+    const AssetPickOutcome out =
+        applyAssetPick(e.scene, e.sel, menuKind, pick, e.cat, e.res);
+    EXPECT(out.applied);
+    EXPECT(e.mr()->meshPath == "assets/m9.gmesh");
+}

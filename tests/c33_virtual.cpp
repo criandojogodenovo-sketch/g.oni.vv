@@ -2377,6 +2377,165 @@ int main() {
             onAppCmd(&app12, APP_CMD_INIT_WINDOW);
         }
 
+        // ---- 12.8 (G4 · R-014): IMPORT glb REAL → o seletor MOSTRA --------
+        passo("12.8 import de glb: o asset aparece no seletor (<1s)");
+        {
+            if (!g_font.ok()) {
+                const char* paths[] = {FONT_FIXTURE};
+                g_font.loadFromPaths(paths, 1, 28.0f);
+            }
+            g_ui.setFont(&g_font);
+            // 6 .gmesh JÁ no projeto (acima do cap antigo de 5 — o cenário
+            // exato do bug: o import novo nunca aparecia)
+            for (int i = 1; i <= 6; ++i) {
+                char rel[48];
+                std::snprintf(rel, sizeof(rel), "assets/m%d.gmesh", i);
+                const char dummy[8] = "GMESH";
+                g_storage->writeBytes(rel, dummy, 5);
+            }
+            // um .glb REAL (triângulo: pos+norm+uv+idx — o container GLB
+            // com JSON chunk + BIN chunk, como o test_import_gltf)
+            const auto t0 = std::chrono::steady_clock::now();
+            {
+                const f32 pos[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+                const f32 nrm[9] = {0, 0, 1, 0, 0, 1, 0, 0, 1};
+                const f32 uv[6] = {0, 0, 1, 0, 0, 1};
+                const u16 idx[3] = {0, 1, 2};
+                std::vector<u8> bin;
+                auto pushF = [&bin](const f32* v, int n) {
+                    for (int i = 0; i < n; ++i) {
+                        const u32 b = *reinterpret_cast<const u32*>(&v[i]);
+                        bin.push_back((u8)(b & 0xFF));
+                        bin.push_back((u8)((b >> 8) & 0xFF));
+                        bin.push_back((u8)((b >> 16) & 0xFF));
+                        bin.push_back((u8)((b >> 24) & 0xFF));
+                    }
+                };
+                const u32 po = 0, pl = 36;
+                const u32 no = 36, nl = 36;
+                const u32 uo = 72, ul = 24;
+                const u32 io = 96, il = 6;
+                pushF(pos, 9);
+                pushF(nrm, 9);
+                pushF(uv, 6);
+                for (int i = 0; i < 3; ++i) {
+                    bin.push_back((u8)(idx[i] & 0xFF));
+                    bin.push_back((u8)(idx[i] >> 8));
+                }
+                char j[900];
+                std::snprintf(j, sizeof(j),
+                    "{\"asset\":{\"version\":\"2.0\"},"
+                    "\"buffers\":[{\"byteLength\":%u}],"
+                    "\"bufferViews\":["
+                    "{\"buffer\":0,\"byteOffset\":%u,\"byteLength\":%u},"
+                    "{\"buffer\":0,\"byteOffset\":%u,\"byteLength\":%u},"
+                    "{\"buffer\":0,\"byteOffset\":%u,\"byteLength\":%u},"
+                    "{\"buffer\":0,\"byteOffset\":%u,\"byteLength\":%u}],"
+                    "\"accessors\":["
+                    "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},"
+                    "{\"bufferView\":1,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},"
+                    "{\"bufferView\":2,\"componentType\":5126,\"count\":3,\"type\":\"VEC2\"},"
+                    "{\"bufferView\":3,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"}],"
+                    "\"meshes\":[{\"primitives\":[{\"attributes\":"
+                    "{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":2},"
+                    "\"indices\":3}]}]}",
+                    (u32)bin.size(), po, pl, no, nl, uo, ul, io, il);
+                std::string json = j;
+                while (json.size() % 4 != 0) json += ' ';
+                std::vector<u8> binPad = bin;
+                while (binPad.size() % 4 != 0) binPad.push_back(0);
+                std::vector<u8> glb;
+                auto u32push = [&glb](u32 v) {
+                    glb.push_back((u8)(v & 0xFF));
+                    glb.push_back((u8)((v >> 8) & 0xFF));
+                    glb.push_back((u8)((v >> 16) & 0xFF));
+                    glb.push_back((u8)((v >> 24) & 0xFF));
+                };
+                u32push(0x46546C67u);   // 'glTF'
+                u32push(2);
+                u32push(12 + 8 + (u32)json.size() + 8 + (u32)binPad.size());
+                u32push((u32)json.size());
+                u32push(0x4E4F534Au);   // 'JSON'
+                glb.insert(glb.end(), json.begin(), json.end());
+                u32push((u32)binPad.size());
+                u32push(0x004E4942u);   // 'BIN'
+                glb.insert(glb.end(), binPad.begin(), binPad.end());
+                // o ficheiro FONTE (host /tmp — o mesmo padrão do wiring010)
+                char src[128];
+                std::snprintf(src, sizeof(src), "/tmp/goni_fase12_robo.glb");
+                FILE* f = std::fopen(src, "wb");
+                std::fwrite(glb.data(), 1, glb.size(), f);
+                std::fclose(f);
+                // O IMPORT REAL (o MESMO convert::importFile do worker)
+                convert::Output out;
+                convert::Stats stats;
+                std::string err;
+                const bool ok = convert::importFile(
+                    src, "robo.glb", *g_storage, g_pipeline.get(), out, stats,
+                    err, nullptr, nullptr);
+                check(ok && err.empty(),
+                      "12.8 o import do glb REAL funciona (o conversor de "
+                      "produção)");
+                check(out.meshes.size() == 1 &&
+                          out.meshes[0].find("robo") != std::string::npos,
+                      "12.8 o convertido vive em assets/robo.gmesh");
+                std::remove(src);
+            }
+            // o catálogo VÊ o novo asset (o refresh do fim do import)
+            refreshCatalog();
+            bool achou = false;
+            for (const auto& m : g_catalog.meshes) {
+                if (m == "assets/robo.gmesh") {
+                    achou = true;
+                }
+            }
+            check(achou, "12.8 o catálogo lista o import NOVO (com 6+ "
+                         "meshes já no projeto)");
+            const double ms = msSince(t0);
+            check(ms < 1000.0,
+                  "12.8 import + catálogo em <1s (o fluxo é síncrono no fim "
+                  "do job)");
+            // O SELETOR MOSTRA E APLICA: TIC com MeshRenderer selecionado,
+            // picker aberto, tap na linha do robo (idx 6 — INVISÍVEL no cap
+            // antigo de 5) — o dispatch REAL do main aplica no componente
+            {
+                const Handle ator = g_scene.find("Ator");
+                g_editor.selected = ator;
+                g_editor.assetMenu = 1;
+                frame();   // o refresh-on-open + o desenho do seletor
+                // geometria do seletor (landscape 1536x720, insets T96/B48):
+                // overlayArea: oy=96+56=152, ah=720-96-48-56-24-48=448;
+                // fixedH=48+2*48+16=160; maxListH=448-160-8=280 → 5.8 linhas
+                // visíveis; 7 ficheiros → lista com scroll (336>280)
+                const f32 w = 340.0f;
+                const f32 fixedH = 48.0f + 2.0f * 48.0f + 16.0f;
+                const f32 maxListH = 448.0f - fixedH - 8.0f;
+                const f32 listH = 7.0f * 48.0f < maxListH ? 7.0f * 48.0f
+                                                          : maxListH;
+                const f32 h = fixedH + listH;
+                const f32 x = (1536.0f - w) * 0.5f;
+                const f32 y = 152.0f + (448.0f - h) * 0.5f;
+                const f32 listTop = y + 48.0f + 2.0f * 48.0f;
+                // drag p/ o FIM da lista (o robo é o 7º) — o dedo DENTRO
+                g_input.injectDown(0, x + w * 0.5f, listTop + 200.0f);
+                frame();
+                g_input.injectMove(0, x + w * 0.5f, listTop + 40.0f);
+                frame();
+                g_input.injectUp(0);
+                frame();
+                // a ÚLTIMA linha visível é o robo: tap
+                tap(x + w * 0.5f, listTop + listH - 24.0f);
+                const Tic* tA = g_scene.get(ator);
+                const MeshRenderer* mr =
+                    tA ? tA->getComponent<MeshRenderer>() : nullptr;
+                check(mr != nullptr && mr->meshPath == "assets/robo.gmesh",
+                      "12.8 O SELETOR APLICA O IMPORT NOVO (meshPath no "
+                      "MeshRenderer — o fim-a-fim do R-014)");
+            }
+            g_editor.assetMenu = 0;
+            g_editor.selected = Handle::invalid();
+        }
+
         onAppCmd(&app12, APP_CMD_TERM_WINDOW);
     }
 

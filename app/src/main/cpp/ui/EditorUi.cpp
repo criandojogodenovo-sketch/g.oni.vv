@@ -2290,23 +2290,29 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         return chosen;
     }
 
-    // cap de ficheiros no overlay (mono, sem scroll — F8 traz scroll)
-    constexpr size_t kMaxFiles = 5;
-    const size_t shown = files.size() < kMaxFiles ? files.size() : kMaxFiles;
-
+    // 0.9.6 (G4 · R-014) — A LISTA DE FICHEIROS TEM SCROLL (o cap de 5
+    // sem scroll escondia os imports novos: com 5+ .gmesh no projeto, o
+    // glb/gltf recém-importado NUNCA aparecia no seletor — o TODO "F8
+    // traz scroll" nunca chegou). TODOS os ficheiros listam; a janela
+    // visível encaixa na faixa do overlay (máx. 8 linhas) e o resto
+    // faz scroll — o MESMO padrão da Hierarchy/Inspector (o tap volta
+    // pelo scrollTap e as linhas continuam alvos de 48dp).
+    constexpr f32 kAssetRowH = 48.0f;
+    constexpr u64  kAssetScrollId = 50;   // slot de scroll próprio (≠ hier/insp/settings)
     const f32 w = kMenuW;
     // 0.7.4: withImport (seletor de textura de ELEMENTO de UI) acrescenta a
     // linha "importar…" que abre o NAVEGADOR 0.7.2 (escolhe de onde for)
     const f32 importH = withImport ? 48.0f : 0.0f;
     // 0.8.12 — picker de MESH: +1 linha (none + cube + ficheiros)
-    const f32 h = kHeaderH +
-                  (static_cast<f32>(shown) +
-                   static_cast<f32>(pickMesh ? 2 : 1)) * 48.0f +
-                  importH + kPad;
-    // 0.9.0: os overlays centram na FAIXA DO VIEWPORT (não por baixo do
-    // chrome — ver overlayArea no EditorLayout.h)
     f32 ox, oy, aw, ah;
     overlayArea(sw, sh, ui.safeArea(), ox, oy, aw, ah);
+    const f32 fixedH = kHeaderH +
+                       static_cast<f32>(pickMesh ? 2 : 1) * kAssetRowH +
+                       importH + kPad;
+    const f32 maxListH = ah - fixedH - 8.0f;
+    const f32 fullListH = static_cast<f32>(files.size()) * kAssetRowH;
+    const f32 listH = fullListH < maxListH ? fullListH : maxListH;
+    const f32 h = fixedH + listH;
     const f32 x = ox + (aw - w) * 0.5f;
     const f32 y = oy + (ah - h) * 0.5f;
 
@@ -2346,7 +2352,17 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
             st.assetMenu = 0;
         }
     }
-    for (size_t i = 0; i < shown; ++i) {
+    // ---- a LISTA DE FICHEIROS em scroll (R-014: TODOS visíveis) -----------
+    const f32 listTop = y + kHeaderH +
+                        static_cast<f32>(pickMesh ? 2 : 1) * kAssetRowH;
+    ui.beginScroll(kAssetScrollId, UiRect{x, listTop, w, listH}, fullListH);
+    const f32 off = ui.scrollOffset();
+    for (size_t i = 0; i < files.size(); ++i) {
+        const f32 ry = listTop + static_cast<f32>(i) * kAssetRowH - off;
+        // culling: fora da janela visível não desenha
+        if (ry + kAssetRowH < listTop - 1.0f || ry > listTop + listH + 1.0f) {
+            continue;
+        }
         // 0.8.11 — clip de áudio mostra o NOME limpo (sem pasta/extensão;
         // o catálogo guarda caminhos completos "audio/x.gi")
         char disp[96];
@@ -2361,41 +2377,40 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                                               : dot - slash - 1).c_str());
             label = disp;
         }
-        // 0.8.12 — picker de MESH: os ficheiros começam em 3 (none=1, cube=2);
-        // tex/áudio mantêm 2 (só têm o "none" em 1º)
-        const int filePick = static_cast<int>(i) + (pickMesh ? 3 : 2);
         const u64 rowId =
             kIdAssetBase + 1 + static_cast<u64>(i) + (pickMesh ? 1 : 0);
-        if (ui.button(rowId, x + kPad,
-                      y + kHeaderH +
-                          static_cast<f32>(i + (pickMesh ? 2 : 1)) * 48.0f,
-                      w - 2.0f * kPad, 40.0f, label)) {
-            chosen = filePick;
-            st.assetMenu = 0;
+        // dentro do scroll o botão é SÓ VISUAL (o tap volta pelo scrollTap
+        // — o padrão da Hierarchy/Inspector: drag em qualquer sítio =
+        // scroll, tap parado = escolha)
+        ui.button(rowId, x + kPad, ry, w - 2.0f * kPad, 40.0f, label);
+    }
+    ui.endScroll();
+    // o TAP parado na lista (o scroll devolve a posição — o mesmo padrão
+    // do Inspector): mapeia y → linha → escolha
+    {
+        f32 tx = 0.0f, ty = 0.0f;
+        if (ui.scrollTap(kAssetScrollId, tx, ty)) {
+            const f32 rel = ty - listTop + off;
+            if (rel >= 0.0f) {
+                const size_t idx = static_cast<size_t>(rel / kAssetRowH);
+                if (idx < files.size()) {
+                    // 0.8.12 — picker de MESH: ficheiros começam em 3
+                    // (none=1, cube=2); tex/áudio em 2
+                    chosen = static_cast<int>(idx) + (pickMesh ? 3 : 2);
+                    st.assetMenu = 0;
+                }
+            }
         }
     }
     if (withImport) {
         // 0.7.4 — "importar…": abre o NAVEGADOR de ficheiros (0.7.2) — o
         // dono escolhe a textura de onde for (galeria incluída); o ficheiro
         // importado cai em textures/ e fica disponível no seletor
-        if (ui.button(kIdAssetBase + 7, x + kPad,
-                      y + kHeaderH +
-                          static_cast<f32>(shown + (pickMesh ? 2 : 1)) * 48.0f,
+        if (ui.button(kIdAssetBase + 7, x + kPad, listTop + listH,
                       w - 2.0f * kPad, 40.0f, "importar...")) {
             chosen = kAssetPickImport;
             st.assetMenu = 0;
         }
-    }
-    if (files.size() > kMaxFiles) {
-        // aviso mono de cap (sem scroll no overlay)
-        char more[48];
-        std::snprintf(more, sizeof(more), "+%u ficheiros (cap do overlay)",
-                      static_cast<unsigned>(files.size() - kMaxFiles));
-        ui.labelFitted(x + kPad,
-                       y + kHeaderH +
-                           static_cast<f32>(shown + (pickMesh ? 2 : 1)) * 48.0f +
-                           importH + 12.0f,
-                       more, theme::LINE, w - 2.0f * kPad);
     }
     return chosen;
 }
