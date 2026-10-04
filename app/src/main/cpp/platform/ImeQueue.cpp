@@ -19,6 +19,7 @@ constexpr int kKcDpadLeft  = 21;
 constexpr int kKcDpadRight = 22;
 constexpr int kKcEnter     = 66;
 constexpr int kKcDel       = 67;
+constexpr int kKcTab       = 61;   // 0.9.5: os esqueletos (editor que ensina)
 
 struct Queue {
     std::mutex mu;
@@ -41,6 +42,7 @@ Key fromAndroidKeycode(int kc) {
         case kKcDpadDown:   return Key::Down;
         case kKcDpadLeft:   return Key::Left;
         case kKcDpadRight:  return Key::Right;
+        case kKcTab:        return Key::Tab;
         default:            return Key::None;
     }
 }

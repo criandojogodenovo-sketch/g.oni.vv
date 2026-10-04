@@ -400,6 +400,26 @@ public class VvActivity extends NativeActivity {
         });
     }
 
+    // 0.9.5 - o CLIPBOARD (o botao copiar-referencia do editor que ensina):
+    // poe a referencia V.ONI completa como texto COLAVEL (para colar em IAs)
+    public void clipboardCopy(String text) {
+        runOnUiThread(() -> {
+            try {
+                final android.content.ClipboardManager cm =
+                        (android.content.ClipboardManager) getSystemService(
+                                android.content.Context.CLIPBOARD_SERVICE);
+                if (cm != null && text != null) {
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText(
+                            "V.ONI", text));
+                    Log.i("GONI", "java: clipboardCopy " + text.length()
+                            + " chars");
+                }
+            } catch (Throwable t) {
+                Log.e("GONI", "java: clipboardCopy FALHOU", t);
+            }
+        });
+    }
+
     public void imeHide() {
         runOnUiThread(() -> {
             try {

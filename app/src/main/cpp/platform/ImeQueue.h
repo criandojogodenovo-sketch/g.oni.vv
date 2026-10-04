@@ -41,6 +41,7 @@ enum class Key : std::uint8_t {
     Enter,    // KEYCODE_ENTER 66 / performEditorAction
     Up, Down, Left, Right,   // DPAD 19..22 (v0: ignorados pela janela de
                              // texto — reservados para o cursor 0.9.2)
+    Tab,      // KEYCODE_TAB 61 — 0.9.5: os ESQUELETOS do editor que ensina
 };
 
 // evento da fila: texto commitado OU tecla

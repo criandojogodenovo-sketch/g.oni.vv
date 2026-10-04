@@ -1098,3 +1098,143 @@ TEST(regress_rf_em_falta) {
         EXPECT(s.impl().tykerRuns[0].missing);   // o estado desliga o tyker
     }
 }
+
+// ===========================================================================
+// 0.9.5 · SENTINELA R-013 — A BIJEÇÃO DA AJUDA (METADE 2)
+//
+// "Uma só fonte alimenta tudo": o REGISTO CENTRAL alimenta a lista de
+// comandos, a tabela de equivalências, os erros-que-ensinam, os tooltips,
+// as Docs, o completamento e o copiar-referência. Esta sentinela afere a
+// BIJEÇÃO nas duas direções:
+//   • registo ↔ Docs: cada entrada aparece nas Docs com os MESMOS campos;
+//     nada nas Docs vem de fora do registo;
+//   • erros-que-ensinam: cada palavra estrangeira aponta a uma entrada
+//     REAL do registo;
+//   • registo ↔ referência pública: o VONI_referencia.md e o llms-full.txt
+//     da raiz correspondem BYTE A BYTE à saída do registo (o ficheiro
+//     desatualizado = CI vermelho — a referência NUNCA mente);
+//   • completamento: prefixMatch encontra toda a entrada pelo seu prefixo;
+//     os 4 esqueletos obrigatórios da spec produzem os textos exatos.
+// ===========================================================================
+#include "voni/VoniDocs.h"
+#include "voni/VoniRegistry.h"
+
+#include <cstdio>
+
+#if defined(REPO_ROOT)
+static bool readFileText(const char* path, std::string& out) {
+    std::FILE* f = std::fopen(path, "rb");
+    if (!f) {
+        return false;
+    }
+    char buf[4096];
+    size_t n = 0;
+    while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+        out.append(buf, n);
+    }
+    std::fclose(f);
+    return true;
+}
+#endif
+
+TEST(regress_bijeção_da_ajuda) {
+    using namespace voni;
+
+    // ---- (1) registo ↔ Docs: MESMOS campos, MESMO número ----------------
+    {
+        const auto& reg = reg::all();
+        const auto& docs = docs::all();
+        EXPECT(reg.size() == docs.size());
+        EXPECT(reg.size() >= 40);   // linguagem + comandos + linker/tyker +
+                                    // componentes (cresce com a linguagem)
+        size_t matched = 0;
+        for (const reg::Entry& e : reg) {
+            for (const docs::Entry& d : docs) {
+                if (std::strcmp(d.name, e.name) == 0) {
+                    EXPECT(std::strcmp(d.desc, e.desc) == 0);
+                    EXPECT(std::strcmp(d.syntax, e.syntax) == 0);
+                    EXPECT(std::strcmp(d.example, e.example) == 0);
+                    ++matched;
+                    break;
+                }
+            }
+        }
+        EXPECT(matched == reg.size());   // TODA a entrada tem Docs (bij eção)
+    }
+
+    // ---- (2) Docs obrigatória + EQUIV preenchido em TODA a entrada -------
+    for (const reg::Entry& e : reg::all()) {
+        EXPECT(e.syntax && *e.syntax);
+        EXPECT(e.desc && *e.desc);
+        EXPECT(e.example && *e.example);
+        EXPECT(e.equiv && *e.equiv);   // a tabela de equivalências completa
+        if (e.skeleton && *e.skeleton) {
+            EXPECT(e.skeletonCaret <= std::strlen(e.skeleton));
+        }
+    }
+
+    // ---- (3) erros-que-ensinam → entradas REAIS do registo ---------------
+    {
+        const char* kWords[] = {"if", "else", "elif", "while", "for",
+                                "break", "switch", "case", "def", "function",
+                                "print", "echo", "True", "False", "None",
+                                "null"};
+        for (const char* w : kWords) {
+            const char* entryName = nullptr;
+            const char* teach = reg::foreignTeach(w, &entryName);
+            EXPECT(teach != nullptr);          // a palavra estrangeira ensina
+            EXPECT(entryName != nullptr);
+            const reg::Entry* e = reg::find(entryName);
+            EXPECT(e != nullptr);              // e aponta a uma entrada REAL
+        }
+        EXPECT(reg::foreignTeach("zzz", nullptr) == nullptr);   // só as listadas
+    }
+
+    // ---- (4) completamento: toda a entrada acha-se pelo prefixo ----------
+    for (const reg::Entry& e : reg::all()) {
+        const std::string n(e.name);
+        const reg::Entry* m = reg::prefixMatch(n);   // o nome TODO casa
+        EXPECT(m != nullptr && std::strcmp(m->name, e.name) == 0);
+    }
+
+    // ---- (5) OS 4 ESQUELETOS obrigatórios da spec (texto EXATO) ----------
+    {
+        const reg::Entry* ex = reg::find("exist");
+        EXPECT(ex != nullptr && ex->skeleton &&
+               std::strcmp(ex->skeleton, "exist(){ } notexist{ }") == 0);
+        const reg::Entry* op = reg::find("option");
+        EXPECT(op != nullptr && op->skeleton &&
+               std::strcmp(op->skeleton,
+                           "option(){ and valor(ação) stopand "
+                           "notoption{ } }") == 0);
+        const reg::Entry* rp = reg::find("repeat");
+        EXPECT(rp != nullptr && rp->skeleton &&
+               std::strcmp(rp->skeleton, "repeat(n){ }") == 0);
+        const reg::Entry* tk = reg::find("tyker");
+        EXPECT(tk != nullptr && tk->skeleton &&
+               std::strcmp(tk->skeleton, "tyker(nome){ find(RF) }") == 0);
+    }
+
+    // ---- (6) registo ↔ referência pública (byte a byte) ------------------
+    {
+        const std::string ref = reg::fullReferenceMarkdown();
+        EXPECT(ref.size() > 4000);   // a referência COMPLETA
+        // TODA a entrada aparece na referência (nome + sintaxe)
+        for (const reg::Entry& e : reg::all()) {
+            EXPECT(ref.find(e.name) != std::string::npos);
+            EXPECT(ref.find(e.syntax) != std::string::npos);
+            EXPECT(ref.find(e.equiv) != std::string::npos);
+        }
+#if defined(REPO_ROOT)
+        std::string disk;
+        EXPECT(readFileText(REPO_ROOT "/VONI_referencia.md", disk));
+        EXPECT(disk == ref);   // SINCRONIZADO byte a byte (o ficheiro não mente)
+        std::string diskFull;
+        EXPECT(readFileText(REPO_ROOT "/llms-full.txt", diskFull));
+        EXPECT(diskFull == ref);   // o llms-full é a MESMA referência
+        std::string llms;
+        EXPECT(readFileText(REPO_ROOT "/llms.txt", llms));
+        EXPECT(llms.find("VONI_referencia.md") != std::string::npos);  // aponta
+#endif
+    }
+}

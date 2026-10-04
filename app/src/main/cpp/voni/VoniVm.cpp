@@ -1142,6 +1142,15 @@ void Vm::runCommand(const Stmt& s) {
                      "completa: tyker(nome){ find(RF) componentes… }");
     }
 
+    // 3.6) 0.9.5 · ERROS-QUE-ENSINAM no runtime: 'break'/'print' parseiam
+    // como chamadas de comando e morrem AQUI — a tabela estrangeira do
+    // REGISTO ensina o equivalente V.ONI (o mesmo mecanismo do compile)
+    for (const std::string& seg : s.path) {
+        if (const char* teach = reg::foreignTeach(seg, nullptr)) {
+            fail(s.line, teach);
+        }
+    }
+
     // 4) função do utilizador chamada como instrução (soma(1,2) à solta)
     if (s.path.size() == 1) {
         if (const FnDef* fn = findFn(s.path[0])) {

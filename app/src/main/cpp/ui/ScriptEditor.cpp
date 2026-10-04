@@ -194,8 +194,9 @@ bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop) {
         y += kKbKeyH + kKbGap;
     }
 
-    // linha de baixo: [ESPACO 2u][PAG 1u][APAGA 2u][ENTER 2u][FECHAR 1u]
-    const f32 unit = (innerW - 4.0f * kKbGap) / 10.0f;
+    // linha de baixo (0.9.5: +TAB dos esqueletos):
+    // [ESPACO 2u][TAB 1u][PAG 1u][APAGA 2u][ENTER 2u][FECHAR 1u] = 9u+5g
+    const f32 unit = (innerW - 5.0f * kKbGap) / 9.0f;
     f32 x = kKbPad;
     if (ui.button(kKbBase + 40, x, y, 2.0f * unit, kKbKeyH, "ESPACO")) {
         ime::Event ev;
@@ -205,6 +206,29 @@ bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop) {
         typed = true;
     }
     x += 2.0f * unit + kKbGap;
+    // 0.9.5 · TAB: os ESQUELETOS do editor que ensina (o mesmo applyEvent
+    // do IME — a tecla Tab do GBoard chega aqui pela fila)
+    {
+        const UiRect rt{x, y, unit, kKbKeyH};
+        const bool pressed = ui.widgetHit(kKbBase + 45, rt.x, rt.y, rt.w, rt.h);
+        const bool held = ui.widgetActive(kKbBase + 45);
+        ui.panelRounded(rt.x, rt.y, rt.w, rt.h, theme::kRadiusCard,
+                        held ? theme::kTheme.surface2
+                             : theme::kTheme.surface);
+        ui.frameRounded(rt.x, rt.y, rt.w, rt.h, 1.0f, theme::kRadiusCard,
+                        theme::kTheme.border);
+        ui.labelStyled(rt.x, rt.y + 14.0f, "TAB",
+                       theme::kTheme.accent,
+                       theme::fontScale(theme::kFontCaption), 0);
+        if (pressed) {
+            ime::Event ev;
+            ev.isText = false;
+            ev.key = ime::Key::Tab;
+            applyEvent(st, ev);
+            typed = true;
+        }
+    }
+    x += unit + kKbGap;
     {
         char pg[8];
         std::snprintf(pg, sizeof(pg), "%s", st.kbSym ? "ABC" : "123");
@@ -324,6 +348,12 @@ bool applyEvent(State& st, const ime::Event& ev) {
     if (st.caret > st.buf.size()) {
         st.caret = static_cast<u32>(st.buf.size());
     }
+    // 0.9.5: qualquer EDIÇÃO limpa a explicação do toque (a strip volta à
+    // mini-descrição em tempo real da palavra que está a ser digitada)
+    if (ev.isText || ev.key == ime::Key::Del || ev.key == ime::Key::Enter) {
+        st.helpTapped = false;
+        st.helpWord.clear();
+    }
     if (ev.isText) {
         insertAtCaret(st, ev.text.c_str());
         return true;
@@ -335,6 +365,33 @@ bool applyEvent(State& st, const ime::Event& ev) {
         case ime::Key::Enter:
             insertAtCaret(st, "\n");
             return true;
+        case ime::Key::Tab: {
+            // 0.9.5 · OS ESQUELETOS POR TAB: a palavra antes do caret é
+            // substituída pelo esqueleto da entrada do REGISTO (o texto do
+            // resultado INCLUI a palavra: 'exist' → 'exist(){ } notexist{ }'
+            // com o caret NO INTERIOR); casando por EXATO e depois por
+            // PREFIXO; sem esqueleto → indenta 2 espaços (o clássico)
+            const std::string w = wordBeforeCaret(st);
+            const voni::reg::Entry* e = nullptr;
+            if (!w.empty()) {
+                e = voni::reg::find(w);
+                if (!e || !e->skeleton || !*e->skeleton) {
+                    e = voni::reg::prefixMatch(w);
+                }
+            }
+            if (e && e->skeleton && *e->skeleton &&
+                e->skeletonCaret <= std::strlen(e->skeleton)) {
+                const u32 ws = st.caret -
+                               static_cast<u32>(w.size());
+                st.buf.erase(ws, w.size());
+                st.caret = ws;
+                insertAtCaret(st, e->skeleton);
+                st.caret = ws + e->skeletonCaret;
+            } else {
+                insertAtCaret(st, "  ");
+            }
+            return true;
+        }
         case ime::Key::Left:
             st.caret = prevCodePoint(st.buf, st.caret);
             return true;
@@ -398,6 +455,91 @@ u32 lineCount(const State& st) {
     return n;
 }
 
+// ---------------------------------------------------------------------------
+// 0.9.5 · O EDITOR QUE ENSINA — as funções PURAS (o registo alimenta tudo:
+// a mini-descrição em tempo real, o toque numa palavra, os níveis)
+// ---------------------------------------------------------------------------
+std::string wordBeforeCaret(const State& st) {
+    u32 i = st.caret < st.buf.size() ? st.caret
+                                     : static_cast<u32>(st.buf.size());
+    u32 s = i;
+    while (s > 0) {
+        const unsigned char c =
+            static_cast<unsigned char>(st.buf[s - 1]);
+        if (std::isalnum(c) || c == '_') {
+            --s;
+        } else {
+            break;
+        }
+    }
+    // também acentos já digitados: code points >127 contam para a palavra
+    // (o byte líder UTF-8 é >=0xC0 — inclui os acentos da G1-2)
+    return st.buf.substr(s, i - s);
+}
+
+std::string wordAtOffset(const State& st, u32 byteOffset) {
+    const u32 n = static_cast<u32>(st.buf.size());
+    if (byteOffset > n) {
+        byteOffset = n;
+    }
+    // recua ao início do identificador
+    u32 s = byteOffset;
+    while (s > 0) {
+        const unsigned char c =
+            static_cast<unsigned char>(st.buf[s - 1]);
+        if (std::isalnum(c) || c == '_' || c >= 0x80) {
+            --s;
+        } else {
+            break;
+        }
+    }
+    u32 e = byteOffset;
+    while (e < n) {
+        const unsigned char c = static_cast<unsigned char>(st.buf[e]);
+        if (std::isalnum(c) || c == '_' || c >= 0x80) {
+            ++e;
+        } else {
+            break;
+        }
+    }
+    return st.buf.substr(s, e - s);
+}
+
+const voni::reg::Entry* helpEntryFor(const State& st) {
+    if (st.helpLevel >= 2) {
+        return nullptr;   // Silencioso: nada
+    }
+    if (st.helpTapped && !st.helpWord.empty()) {
+        return voni::reg::find(st.helpWord);   // o toque: casamento EXATO
+    }
+    const std::string w = wordBeforeCaret(st);
+    if (w.empty()) {
+        return nullptr;
+    }
+    return voni::reg::prefixMatch(w);         // digitando: prefixo (1ª letra+)
+}
+
+std::string helpStripLine1(const State& st) {
+    const voni::reg::Entry* e = helpEntryFor(st);
+    if (!e) {
+        return "";
+    }
+    return std::string(e->name) + ": " + e->desc;
+}
+
+std::string helpStripLine2(const State& st) {
+    const voni::reg::Entry* e = helpEntryFor(st);
+    if (!e) {
+        return "";
+    }
+    // linha 2 (exemplo): no Iniciante SEMPRE; no Normal só no TOQUE (a
+    // explicação pedida vem com exemplo); no Silencioso nunca
+    if (st.helpLevel == 0 || (st.helpTapped && st.helpLevel == 1)) {
+        return std::string("ex.: ") + e->example;
+    }
+    return "";
+}
+
 int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
          f32 dt) {
     (void)in;
@@ -444,6 +586,43 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         if (ui.widgetHit(kDocsId, r.x, r.y, r.w, r.h)) {
             result = 4;
         }
+
+        // 0.9.5 · COPIAR REFERÊNCIA (📋): a referência V.ONI COMPLETA como
+        // texto colável p/ IAs — o main põe no clipboard via JNI (result 6)
+        const UiRect rc{docsX - 56.0f, (kTopH - 48.0f) * 0.5f, 48.0f, 48.0f};
+        const bool heldC = ui.widgetActive(kCopyRefId);
+        ui.panelRounded(rc.x, rc.y, rc.w, rc.h, theme::kRadiusCard,
+                        heldC ? theme::kTheme.surface2
+                              : theme::kTheme.surface);
+        ui.frameRounded(rc.x, rc.y, rc.w, rc.h, 1.0f, theme::kRadiusCard,
+                        theme::kTheme.border);
+        icons::drawIcon(ui, icons::Icon::Copy,
+                        rc.x + (rc.w - 24.0f) * 0.5f,
+                        rc.y + (rc.h - 24.0f) * 0.5f, 24.0f,
+                        theme::kTheme.text1);
+        if (ui.widgetHit(kCopyRefId, rc.x, rc.y, rc.w, rc.h)) {
+            result = 6;
+        }
+
+        // 0.9.5 · O NÍVEL DA AJUDA (I/N/S): Iniciante (desc+exemplo) ·
+        // Normal (desc) · Silencioso (nada) — um toque cicla
+        const UiRect rl{docsX - 104.0f, (kTopH - 48.0f) * 0.5f, 48.0f,
+                        48.0f};
+        const bool heldL = ui.widgetActive(kHelpLevelId);
+        ui.panelRounded(rl.x, rl.y, rl.w, rl.h, theme::kRadiusCard,
+                        heldL ? theme::kTheme.surface2
+                              : theme::kTheme.surface);
+        ui.frameRounded(rl.x, rl.y, rl.w, rl.h, 1.0f, theme::kRadiusCard,
+                        theme::kTheme.border);
+        const char* lvl = st.helpLevel == 0 ? "I"
+                          : st.helpLevel == 1 ? "N" : "S";
+        ui.labelStyled(rl.x, rl.y + 14.0f, lvl,
+                       st.helpLevel == 2 ? theme::kTheme.text2
+                                         : theme::kTheme.accent,
+                       theme::fontScale(theme::kFontBody), 0);
+        if (ui.widgetHit(kHelpLevelId, rl.x, rl.y, rl.w, rl.h)) {
+            st.helpLevel = static_cast<u8>((st.helpLevel + 1) % 3);
+        }
     }
 
     // RUN / STOP 48dp à direita (alvos ≥48; estado: running aceso = Stop)
@@ -474,8 +653,17 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     // ---- corpo: nºs de linha + código colorido em scroll -------------------
     const f32 errBarH = st.errLine ? kErrH : 0.0f;
     const f32 kbH = st.kbOpen ? keyboardHeight() : 0.0f;
+    // 0.9.5: a STRIP FINA DE AJUDA junto à barra de erro — a mini-descrição
+    // em tempo real (DESDE A 1ª LETRA da palavra a meio da digitação) ou a
+    // explicação do toque (com exemplo); SEM ENCHER O ECRÃ (some quando
+    // não há nada a mostrar / nível Silencioso)
+    const std::string strip1 = helpStripLine1(st);
+    const std::string strip2 = helpStripLine2(st);
+    const f32 stripH = strip1.empty()
+                           ? 0.0f
+                           : (strip2.empty() ? kHelpStripH : kHelpStrip2H);
     const UiRect body{0.0f, kTopH, w,
-                      h - kTopH - errBarH - kbH};
+                      h - kTopH - errBarH - kbH - stripH};
     const f32 lh = lineHeight(ui);
     const u32 nLines = lineCount(st);
     const f32 contentH = static_cast<f32>(nLines) * lh + 16.0f;
@@ -590,9 +778,31 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     }
     ui.endScroll();
 
-    // ---- teclado in-app (G0-1): dokado no fundo, acima da barra de erro ---
+    // ---- teclado in-app (G0-1): dokado no fundo, acima da strip de ajuda --
     if (st.kbOpen) {
-        drawKeyboard(ui, st, w, h - errBarH - keyboardHeight());
+        drawKeyboard(ui, st, w, h - errBarH - stripH - keyboardHeight());
+    }
+
+    // ---- a STRIP DE AJUDA (0.9.5): entre o teclado e a barra de erro -----
+    if (stripH > 0.0f) {
+        const f32 stripY = h - errBarH - kbH - stripH;
+        ui.panel(0.0f, stripY, w, stripH, theme::kTheme.surface);
+        ui.panel(0.0f, stripY, w, 1.0f, theme::kTheme.border);
+        ui.panel(0.0f, stripY + 1.0f, 3.0f, stripH - 1.0f,
+                 theme::kTheme.accent);   // risca accent à esquerda
+        // linha 1 (truncada à largura útil — labelStyled corta com "…")
+        char l1[200];
+        std::snprintf(l1, sizeof(l1), "%s", strip1.c_str());
+        ui.labelStyled(12.0f, stripY + 8.0f, l1, theme::kTheme.text1,
+                       theme::fontScale(theme::kFontCaption),
+                       static_cast<u32>(w) - 24u);
+        if (!strip2.empty()) {
+            char l2[200];
+            std::snprintf(l2, sizeof(l2), "%s", strip2.c_str());
+            ui.labelStyled(12.0f, stripY + 30.0f, l2, theme::kTheme.text2,
+                           theme::fontScale(theme::kFontCaption),
+                           static_cast<u32>(w) - 24u);
+        }
     }
 
     // ---- barra de ERRO com linha + mensagem (§12) ---------------------------
@@ -609,11 +819,59 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     // Hierarchy/Settings): o main RE-PETE o IME do sistema (G0-1 — sem
     // perder foco) e o teclado in-app abre se não estava aberto. Digitar
     // NUNCA fecha (só o back fecha — por construção).
+    // 0.9.5: a PALAVRA sob o dedo alimenta a strip (a explicação com
+    // exemplo vem das Docs = o registo) — "toque numa palavra → linha de
+    // explicação com exemplo"
     if (result == 0) {
         f32 tx = 0.0f, ty = 0.0f;
         if (ui.scrollTap(kScrollId, tx, ty)) {
             if (!st.kbOpen) {
                 st.kbOpen = true;
+            }
+            // a linha/coluna do toque → o offset em bytes → a palavra
+            {
+                const f32 lh2 = lineHeight(ui);
+                const f32 off2 = ui.scrollOffset();
+                f32 rel = ty - body.y + off2 - 8.0f;
+                if (rel < 0.0f) {
+                    rel = 0.0f;
+                }
+                u32 li = static_cast<u32>(rel / lh2);
+                const u32 nL = lineCount(st);
+                if (li >= nL) {
+                    li = nL - 1;
+                }
+                // início em bytes da linha li
+                u32 ls2 = 0;
+                for (u32 k = 0; k < li && ls2 < st.buf.size(); ++k) {
+                    while (ls2 < st.buf.size() && st.buf[ls2] != '\n') {
+                        ++ls2;
+                    }
+                    if (ls2 < st.buf.size()) {
+                        ++ls2;
+                    }
+                }
+                // coluna: acumula a largura até passar o x do toque
+                const f32 xCode = 64.0f;
+                u32 bo = ls2;
+                f32 acc = 0.0f;
+                while (bo < st.buf.size() && st.buf[bo] != '\n') {
+                    char one[2] = {st.buf[bo], 0};
+                    const f32 cw = ui.fontWidth(one);
+                    if (acc + cw * 0.5f >= tx - xCode) {
+                        break;
+                    }
+                    acc += cw;
+                    ++bo;
+                }
+                const std::string word = wordAtOffset(st, bo);
+                if (!word.empty() && voni::reg::find(word)) {
+                    st.helpTapped = true;
+                    st.helpWord = word;
+                } else {
+                    st.helpTapped = false;
+                    st.helpWord.clear();
+                }
             }
             result = 5;
         }

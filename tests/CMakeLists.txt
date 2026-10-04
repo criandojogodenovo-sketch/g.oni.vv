@@ -473,13 +473,31 @@ set_source_files_properties(
 # testes de UI (Liberation Sans, OFL — só CI, não vai no APK)
 target_compile_definitions(test_core PRIVATE
         FIXTURE_DIR="${CMAKE_CURRENT_LIST_DIR}/fixtures"
-        FONT_FIXTURE="${CMAKE_CURRENT_LIST_DIR}/fixtures/fonts/LiberationSans-Regular.ttf")
+        FONT_FIXTURE="${CMAKE_CURRENT_LIST_DIR}/fixtures/fonts/LiberationSans-Regular.ttf"
+        # 0.9.5 (R-013): a raiz do repo — o teste afere que os ficheiros da
+        # referência pública commitados estão SINCRONIZADOS com o registo
+        REPO_ROOT="${CMAKE_CURRENT_LIST_DIR}/..")
 
 enable_testing()
 add_test(NAME core COMMAND test_core)
 # 0.8.12: o C33 virtual como TESTE (o CI corre-o em TODAS as runs; o output
 # passo-a-passo vai para o log do ctest — o gate de padrões grepa o engine.log)
 add_test(NAME c33_virtual_replay COMMAND c33_virtual)
+
+# 0.9.5 · METADE 2 — O GERADOR DA REFERÊNCIA PÚBLICA: escreve no stdout
+# a referência V.ONI COMPLETA gerada do REGISTO CENTRAL. Os ficheiros da
+# raiz (VONI_referencia.md / llms-full.txt) são a SAÍDA dele; o teste R-013
+# afere a sincronia byte a byte (ficheiro desatualizado = CI vermelho).
+add_executable(voni_refgen
+        ${CORE_DIR}/voni/VoniGrammar.cpp
+        ${CORE_DIR}/voni/VoniCompile.cpp
+        ${CORE_DIR}/voni/VoniVm.cpp
+        ${CORE_DIR}/voni/VoniRegistry.cpp
+        ${CORE_DIR}/voni/VoniTykers.cpp
+        voni_refgen.cpp)
+target_include_directories(voni_refgen PRIVATE
+        ${CORE_DIR}
+        ${CORE_DIR}/vendor)
 
 # 0.8.10: zlib (inflate do ZIP)
 target_link_libraries(test_core z)

@@ -5,6 +5,8 @@
 #include "ui/Icons.h"
 #include "ui/Theme.h"
 #include "voni/VoniDocs.h"
+#include "voni/VoniRegistry.h"   // 0.9.5: a equivalência Python/JS (a
+                                  // MESMA fonte — o registo central)
 
 #include <cstring>
 
@@ -22,10 +24,12 @@ f32 lineHeight(UiContext& ui) {
     return h > 28.0f ? h : 28.0f;
 }
 
-// altura de uma entrada: colapsada = 1 linha; expandida = +sintaxe+exemplo
+// altura de uma entrada: colapsada = 1 linha; expandida =
+// +sintaxe+exemplo+EQUIVALÊNCIA (0.9.5: a tabela de equivalências Python/JS
+// vive no registo e aparece aqui — quem sabe Python/JS reconhece à 1ª)
 f32 entryHeight(UiContext& ui, bool expanded) {
     const f32 lh = lineHeight(ui);
-    return expanded ? lh * 4.0f + 12.0f : lh;
+    return expanded ? lh * 5.0f + 12.0f : lh;
 }
 
 } // namespace
@@ -49,7 +53,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h) {
     }
     ui.labelStyled(kTopH + 8.0f, 16.0f, "Docs", theme::kTheme.text1,
                    theme::fontScale(theme::kFontScreen), 0);
-    ui.labelStyled(kTopH + 8.0f, 42.0f, "V.ONI — comandos e linguagem",
+    ui.labelStyled(kTopH + 8.0f, 42.0f, "V.ONI — linguagem, comandos, linkers e tykers",
                    theme::kTheme.text2,
                    theme::fontScale(theme::kFontCaption), 0);
 
@@ -112,6 +116,17 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h) {
                            theme::kTheme.accent, w - 32.0f);
             ui.labelFitted(16.0f, y + 2.0f * lh + 8.0f, e.example,
                            theme::kTheme.voniUser, w - 32.0f);
+            // 0.9.5 · A EQUIVALÊNCIA Python/JS (do registo — a tabela que
+            // o editor que ensina usa nos erros e na strip)
+            if (const voni::reg::Entry* re = voni::reg::find(e.name)) {
+                if (re->equiv && *re->equiv) {
+                    char eq[160];
+                    std::snprintf(eq, sizeof(eq), "Python/JS: %s",
+                                  re->equiv);
+                    ui.labelFitted(16.0f, y + 3.0f * lh + 12.0f, eq,
+                                   theme::kTheme.text2, w - 32.0f);
+                }
+            }
         }
         // separador fino
         ui.panel(16.0f, y + eh - 1.0f, w - 32.0f, 1.0f,

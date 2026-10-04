@@ -187,3 +187,18 @@ Prova de mutação (colada em /home/z/my-project/mutacao-R011-*.txt e no RELATOR
 | Padrão proibido | (nenhum — a vigília é a sentinela + o replay 11.3) |
 
 Prova de mutação (colada em /home/z/my-project/mutacao-R012-*.txt e no RELATORIO-0.9.5): a deteção desligada (`if (false && …)` no initTykers) → 9 FALHOU no core (rf_em_falta/R-012/exemplo_8_5) + 2 [FAIL] no harness 11.3; reposta → 796/0 + 230/230 verde.
+
+## R-013 · A bijeção da ajuda quebrada (FASE 11 · METADE 2)
+
+| campo | valor |
+|---|---|
+| ID | R-013 |
+| Reportado | spec fechada da entrega 0.9.5 (METADE 2): "Uma só fonte alimenta tudo: o registo da metade 1 alimenta a lista de comandos, a tabela de equivalências, os erros-que-ensinam, os tooltips, as Docs, o completamento e o copiar-referência. Teste de bijeção registo↔Docs↔erros↔tooltips" |
+| Sintoma vigiado | uma entrada NOVA no registo sem Docs (ou Docs alterada à mão sem o registo mudar); um erro-que-ensina apontando a uma entrada inexistente; a referência pública (VONI_referencia.md/llms-full.txt) desatualizada vs o registo — qualquer destes QUEBRA a promessa "uma só fonte" |
+| Causa (classe vigiada) | fontes de dados DUPLICADAS — a deriva entre o registo e as suas vistas (Docs/erros/referência) |
+| Fix | TUDO é vista do registo: `docs::all()` é o registo mapeado 1:1 (o VoniDocs deixou de ter tabela própria); os erros-que-ensinam vêm do `kForeign` do registo; `fullReferenceMarkdown()` gera a referência; os esqueletos/strip/completamento consultam `reg::find/prefixMatch` |
+| Teste sentinela | `regress_bijeção_da_ajuda` (tests/test_sentinels.cpp — (1) registo↔Docs com MESMOS campos e MESMO número; (2) Docs obrigatória + EQUIV em TODA a entrada + skeletons bem-formados; (3) toda a palavra estrangeira aponta a uma entrada REAL; (4) prefixMatch acha toda a entrada; (5) os 4 esqueletos da spec com texto EXATO; (6) a referência commitada == à gerada BYTE A BYTE + o llms.txt aponta para ela) |
+| Linha do replay | FASE 11.B do c33_virtual: o erro do 'if' ENSINA exist · a strip acende desde 'exi' · o Tab expande o esqueleto exato · o toque explica com exemplo · Silencioso apaga a strip · o clipboard recebe a referência COMPLETA (a mesma string do teste de sincronia) |
+| Padrão proibido | (nenhum — a vigília é a sentinela; o teste de sincronia corre no CI pelo ctest) |
+
+Prova indireta (a mutação aqui é a PRÓPRIA edição do ficheiro/dado): editar o VONI_referencia.md à mão (ou acrescentar uma entrada ao registo sem regenerar) → o item (6) da sentinela fica VERMELHO no CI (ficheiro != registo). O R-011/R-012 têm as suas provas coladas nas respetivas secções.

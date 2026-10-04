@@ -29,6 +29,7 @@
 
 #include "vendor/peglib/peglib.h"
 
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -1227,7 +1228,52 @@ Script Script::compile(const char* source, Error& err) {
                 }
             }
         }
-        err = Error::fail(line, "erro de sintaxe — expressão inesperada");
+        // 0.9.5 · ERROS-QUE-ENSINAM (METADE 2): quem sabe Python/JS escreve
+        // 'if'/'while'/'break' — varre-se a LINHA DO ERRO por palavras
+        // estrangeiras (a tabela vive no REGISTO — kForeign) e a mensagem
+        // ENSINA o equivalente V.ONI em vez de "expressão inesperada" seco.
+        // (A palavra no error_pos pode ter ficado ATRÁS do ponto fatal — o
+        // 'if (x) { }' morre no '{' — por isso a LINHA inteira.)
+        std::string teach;
+        {
+            u32 li = 1;
+            const char* ls = source;
+            const char* le = source;
+            while (li < line && le < source + n) {
+                if (*le == '\n') {
+                    ++li;
+                    ls = le + 1;
+                }
+                ++le;
+            }
+            while (le < source + n && *le != '\n') {
+                ++le;
+            }
+            const char* p = ls;
+            while (p < le && teach.empty()) {
+                if (std::isalpha(static_cast<unsigned char>(*p)) ||
+                    *p == '_') {
+                    const char* e2 = p + 1;
+                    while (e2 < le &&
+                           (std::isalnum(static_cast<unsigned char>(*e2)) ||
+                            *e2 == '_')) {
+                        ++e2;
+                    }
+                    const std::string word(p, static_cast<size_t>(e2 - p));
+                    if (const char* t = reg::foreignTeach(word, nullptr)) {
+                        teach = t;
+                    }
+                    p = e2;
+                } else {
+                    ++p;
+                }
+            }
+        }
+        if (!teach.empty()) {
+            err = Error::fail(line, teach);
+        } else {
+            err = Error::fail(line, "erro de sintaxe — expressão inesperada");
+        }
         return sc;
     }
 

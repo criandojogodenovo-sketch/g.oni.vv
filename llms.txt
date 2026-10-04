@@ -1,0 +1,20 @@
+# V.ONI
+
+> A linguagem de scripting fechada da G.One VV (motor de jogos 3D para
+> Android). Uma só fonte (o registo central do motor) alimenta a referência,
+> as Docs do editor, os erros-que-ensinam e o completamento.
+
+A referência COMPLETA da linguagem está em `VONI_referencia.md` (este
+ficheiro, `llms-full.txt`, contém a mesma referência inline — para IAs que
+preferem um fetch só).
+
+- [VONI_referencia.md](VONI_referencia.md): TODA a linguagem — Linguagem,
+  Comandos, Linkers, Tykers, Componentes — com sintaxe, descrição,
+  equivalência Python/JS e exemplo por entrada.
+- [docs/RELATORIO-0.9.5.md](docs/RELATORIO-0.9.5.md): o relatório da
+  entrega que criou o registo (rastreabilidade e decisões).
+
+Regras de ouro da V.ONI: NÃO EXISTE if/else/switch/break (exist/notexist/
+option/resume) · nomes de utilizador em minúsculas (maiúsculas são da
+engine) · booleanos true/false · sandbox sem ficheiros/rede · erros sempre
+com linha, nunca crash.

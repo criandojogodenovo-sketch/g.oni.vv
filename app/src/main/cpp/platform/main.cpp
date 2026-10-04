@@ -38,6 +38,7 @@
 #include "core/AnimationSystem.h"   // 0.8.0: avanço em Play
 #include "core/VoniSystem.h"   // 0.9.2: a "central" da V.ONI (spec §3)
 #include "voni/Voni.h"
+#include "voni/VoniRegistry.h"   // 0.9.5: a referência p/ o clipboard
 #include "core/AssetPersist.h"
 #include "core/FsStorage.h"
 #include "core/PlaySnapshot.h"
@@ -5051,6 +5052,24 @@ void frame() {
             // toque no corpo: o IME do sistema é re-pedido (foco)
             storage::jniImeShow();
             elog::info("voni: IME re-pedido (toque no corpo do editor)");
+        } else if (sr == 6) {
+            // 0.9.5 · COPIAR REFERÊNCIA PARA IA: a referência V.ONI
+            // COMPLETA (gerada do REGISTO — a mesma fonte das Docs) vai
+            // para o clipboard como texto colável
+            const std::string ref = voni::reg::fullReferenceMarkdown();
+            if (storage::jniClipboardCopy(ref.c_str())) {
+                std::snprintf(g_toast, sizeof(g_toast),
+                              "Referência V.ONI copiada (%zu entradas)",
+                              voni::reg::all().size());
+                g_toastT = 1.8f;
+                elog::info("voni: referência V.ONI copiada p/ o clipboard "
+                           "(%zu entradas, %zu chars)",
+                           voni::reg::all().size(), ref.size());
+            } else {
+                std::snprintf(g_toast, sizeof(g_toast),
+                              "clipboard indisponível");
+                g_toastT = 1.8f;
+            }
         }
     }
 

@@ -91,6 +91,7 @@ jmethodID g_midSetImmersive = nullptr;   // 0.9.0: VvActivity.setImmersive(Z)V
 // 0.9.1 — orientação + IME do sistema (janelas de texto pesado)
 jmethodID g_midSetOrientation = nullptr; // VvActivity.setOrientation(Z)V
 jmethodID g_midImeShow = nullptr;        // VvActivity.imeShow()V
+jmethodID g_midClipboardCopy = nullptr;  // 0.9.5: VvActivity.clipboardCopy(String)V
 jmethodID g_midImeHide = nullptr;        // VvActivity.imeHide()V
 // 0.8.12 — o CACHE DIR da app: VvActivity.cacheDirPath()String — o STAGING
 // da reconversão SAF escreve AQUI (nunca /tmp: read-only no Android,
@@ -334,6 +335,17 @@ void cacheActivityMethods(JNIEnv* env) {
                     "ficar aberto ao fechar a janela (re-tenta no fecho)");
     } else {
         elog::info("jni: VvActivity.imeHide OK (IME do sistema)");
+    }
+    // 0.9.5 — o CLIPBOARD (o botão copiar-referência do editor que ensina:
+    // a referência V.ONI completa como texto colável p/ IAs)
+    g_midClipboardCopy = env->GetMethodID(
+        g_activityCls, "clipboardCopy", "(Ljava/lang/String;)V");
+    if (!g_midClipboardCopy || clearPendingException(env)) {
+        g_midClipboardCopy = nullptr;
+        elog::error("jni: VvActivity.clipboardCopy NÃO encontrada — o botão "
+                    "copiar-referência avisa (sem crash)");
+    } else {
+        elog::info("jni: VvActivity.clipboardCopy OK (clipboard)");
     }
 
     // 0.8.12 — o CACHE DIR da app (não crítico: sem ele o STAGING da
@@ -674,6 +686,32 @@ bool jniImeHide() {
         return false;
     }
     env->CallVoidMethod(g_activity, g_midImeHide);
+    return !clearPendingException(env);
+}
+
+// 0.9.5 — o CLIPBOARD (o botão copiar-referência do editor que ensina):
+// põe o texto no ClipboardManager da Android. false = ponte indisponível
+// (o chamador avisa com toast legível — nunca crash)
+bool jniClipboardCopy(const char* utf8) {
+    if (!utf8 || !*utf8) {
+        return false;
+    }
+    if (!handshakeOk() || !g_midClipboardCopy) {
+        elog::warn("jni: clipboardCopy indisponível — ponte Java sem o "
+                   "método (o copiar-referência fica sem efeito)");
+        return false;
+    }
+    JNIEnv* env = attachedEnv();
+    if (!env) {
+        elog::warn("jni: clipboardCopy sem env do thread chamador");
+        return false;
+    }
+    const jstring jtext = env->NewStringUTF(utf8);
+    if (!jtext || clearPendingException(env)) {
+        return false;
+    }
+    env->CallVoidMethod(g_activity, g_midClipboardCopy, jtext);
+    env->DeleteLocalRef(jtext);
     return !clearPendingException(env);
 }
 

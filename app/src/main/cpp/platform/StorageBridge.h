@@ -92,6 +92,11 @@ bool jniSetOrientation(bool portrait);
 bool jniImeShow();
 bool jniImeHide();
 
+// 0.9.5 — o CLIPBOARD (copiar-referência do editor que ensina): põe o
+// texto UTF-8 no ClipboardManager. false = ponte indisponível (logado; o
+// chamador avisa com toast — nunca crash)
+bool jniClipboardCopy(const char* utf8);
+
 // 0.8.12 — o CACHE DIR da app (getCacheDir da Activity via JNI): o STAGING
 // da reconversão por SAF escreve aqui (caminho absoluto REAL, escrevível
 // no Android sem permissões — JAMAIS /tmp, read-only no device com

@@ -1757,6 +1757,223 @@ int main() {
                   "Docs: a pesquisa apanha 'colorpars'");
         }
 
+        // ================================================================
+        // 11.B — O EDITOR QUE ENSINA (METADE 2): os lookups de ajuda no
+        // caminho REAL do app — o erro que ENSINA, a mini-descrição desde
+        // a 1ª letra, os esqueletos por Tab, o toque numa palavra, os
+        // níveis I/N/S, o copiar-referência — e o WALKTHROUGH scriptado:
+        // um script FUNCIONAL montado só com a ajuda do editor.
+        // (O editor é PORTRAIT 720×1536 — o par inseparável 0.9.1; a
+        // superfície muda ANTES dos toques, o mesmo ciclo do 9.3, e o
+        // editor SOBREVIVE ao reload — o fix G0-1 do handle por nome.)
+        // ================================================================
+        passo("11.6 erros-que-ensinam: o 'if' do Python aprende o exist");
+        {
+            eglstub::g_surfaceW = 720;
+            eglstub::g_surfaceH = 1536;
+            onAppCmd(&app11, APP_CMD_TERM_WINDOW);
+            onAppCmd(&app11, APP_CMD_INIT_WINDOW);
+            if (!g_font.ok()) {
+                const char* paths[] = {FONT_FIXTURE};
+                g_font.loadFromPaths(paths, 1, 28.0f);
+            }
+            g_ui.setFont(&g_font);
+            check(g_editor.scriptWin.open,
+                  "o editor SOBREVIVE ao ciclo portrait (G0-1)");
+            g_editor.scriptWin.buf = "if (vida == 0) { }";
+            g_editor.scriptWin.caret = 19;
+            scriptEditorRun();
+            check(!g_editor.scriptWin.running, "o script com 'if' não corre");
+            check(g_editor.scriptWin.errLine >= 1,
+                  "a barra de erro tem LINHA");
+            check(g_editor.scriptWin.errMsg.find("exist") !=
+                      std::string::npos,
+                  "a barra de erro ENSINA: 'if' → exist (registo kForeign)");
+        }
+
+        passo("11.7 mini-descrição em tempo real DESDE A 1ª LETRA");
+        {
+            g_editor.scriptWin.errLine = 0;
+            g_editor.scriptWin.errMsg.clear();
+            g_editor.scriptWin.buf = "exi";
+            g_editor.scriptWin.caret = 3;
+            frame();   // o draw recalcula a strip do estado
+            const std::string l1 =
+                editor::scriptwin::helpStripLine1(g_editor.scriptWin);
+            check(!l1.empty(), "a strip acende com 'exi' (3 letras)");
+            check(l1.find("exist") != std::string::npos,
+                  "a strip mostra o NOME do casamento por prefixo");
+            check(editor::scriptwin::helpStripLine2(g_editor.scriptWin)
+                      .empty(),
+                  "nível Normal: 1 linha (sem encher o ecrã)");
+        }
+
+        passo("11.8 TAB → o esqueleto (o texto exato da spec)");
+        {
+            // a tecla Tab do GBoard chega pela fila do IME (keycode 61)
+            Java_vv_goni_VvActivity_nativeOnImeKey(g_jni.env, nullptr, 61, 0);
+            frame();
+            check(g_editor.scriptWin.buf == "exist(){ } notexist{ }",
+                  "'exi' + Tab → o esqueleto 'exist(){ } notexist{ }'");
+            check(g_editor.scriptWin.caret == 8,
+                  "o caret fica NO INTERIOR do exist(){ … }");
+        }
+
+        passo("11.9 toque numa palavra → explicação com exemplo (Docs)");
+        {
+            // a palavra 'notexist' na linha 0 do buffer atual — o toque na
+            // posição dela acende a strip com a explicação + exemplo
+            g_editor.scriptWin.helpLevel = 1;   // Normal
+            const f32 lh11 = 28.0f + 10.0f;     // (linha do corpo ~38px)
+            tap(90.0f, 56.0f + 8.0f + lh11 * 0.5f);
+            check(g_editor.scriptWin.helpTapped,
+                  "o toque numa palavra marca o estado de explicação");
+            const std::string l1 =
+                editor::scriptwin::helpStripLine1(g_editor.scriptWin);
+            check(!l1.empty(), "a strip mostra a explicação da palavra");
+            const std::string l2 =
+                editor::scriptwin::helpStripLine2(g_editor.scriptWin);
+            check(l2.find("ex.:") == 0,
+                  "no toque a 2ª linha acende com o EXEMPLO (das Docs)");
+        }
+
+        passo("11.10 os níveis I/N/S: Silencioso apaga a strip");
+        {
+            // o botão do nível em docsX-104 (docsX=504) a y=28
+            tap(504.0f - 104.0f + 24.0f, 28.0f);
+            check(g_editor.scriptWin.helpLevel == 2, "N → S (Silencioso)");
+            check(editor::scriptwin::helpStripLine1(g_editor.scriptWin)
+                      .empty(),
+                  "Silencioso: a strip APAGA (sem encher o ecrã)");
+            tap(504.0f - 104.0f + 24.0f, 28.0f);
+            check(g_editor.scriptWin.helpLevel == 0, "S → I (Iniciante)");
+            check(!editor::scriptwin::helpStripLine1(g_editor.scriptWin)
+                      .empty(),
+                  "Iniciante: a strip acende");
+            check(!editor::scriptwin::helpStripLine2(g_editor.scriptWin)
+                      .empty(),
+                  "Iniciante: SEMPRE com o exemplo (2 linhas)");
+            tap(504.0f - 104.0f + 24.0f, 28.0f);
+            check(g_editor.scriptWin.helpLevel == 1, "I → N (volta ao Normal)");
+        }
+
+        passo("11.11 copiar-referência: o clipboard recebe a referência");
+        {
+            g_jni.void_calls.clear();
+            g_jni.last_new_string.clear();
+            tap(448.0f + 24.0f, 28.0f);   // o botão 📋 (docsX-56)
+            frame();
+            bool sawClip = false;
+            for (const auto& c : g_jni.void_calls) {
+                if (c.first == "clipboardCopy") {
+                    sawClip = true;
+                }
+            }
+            check(sawClip, "JNI: clipboardCopy chamada com a referência");
+            check(g_jni.last_new_string.find(
+                      "V.ONI — Referência da linguagem") !=
+                      std::string::npos,
+                  "o texto colável é a referência COMPLETA (do registo)");
+            check(g_jni.last_new_string.find("tyker") != std::string::npos,
+                  "a referência traz os tykers");
+            check(logHas("referência V.ONI copiada"),
+                  "o log regista a cópia (com o nº de entradas)");
+        }
+
+        passo("11.12 WALKTHROUGH: script funcional SÓ com a ajuda do editor");
+        {
+            // A pessoa que sabe Python/JS monta um script V.ONI que CORRE:
+            // limpa o esqueleto com o backspace do teclado, digita o linker,
+            // o 'tyker' expande pelo Tab, corrige o placeholder RF→principal
+            // e acrescenta o follow — TUDO pelo caminho REAL do IME.
+            g_editor.scriptWin.helpLevel = 1;
+            g_editor.scriptWin.errLine = 0;
+            g_editor.scriptWin.errMsg.clear();
+            // (1) limpa: o caret vai ao FIM (seta →) e o backspace come
+            // tudo (o backspace só apaga ANTES do caret — do fim limpa o
+            // buffer inteiro)
+            for (int i = 0; i < 30; ++i) {
+                Java_vv_goni_VvActivity_nativeOnImeKey(g_jni.env, nullptr,
+                                                       22, 0);   // RIGHT
+            }
+            for (int i = 0; i < 80; ++i) {
+                Java_vv_goni_VvActivity_nativeOnImeKey(g_jni.env, nullptr,
+                                                       67, 0);   // DEL
+            }
+            frame();
+            check(g_editor.scriptWin.buf.empty(), "o esqueleto é limpo");
+            // (2) digita o linker (o IME commita char a char)
+            for (const char c :
+                 std::string("linker(Ator)to(Alvo)=RF(principal)\n")) {
+                char one[2] = {c, 0};
+                Java_vv_goni_VvActivity_nativeOnImeText(
+                    g_jni.env, nullptr, g_jni.newString(one));
+            }
+            frame();
+            check(g_editor.scriptWin.buf.find("linker(Ator)to(Alvo)") !=
+                      std::string::npos,
+                  "o linker está no buffer (digitado)");
+            // (3) 'tyker' + TAB → o esqueleto do registo
+            for (const char c : std::string("tyker")) {
+                char one[2] = {c, 0};
+                Java_vv_goni_VvActivity_nativeOnImeText(
+                    g_jni.env, nullptr, g_jni.newString(one));
+            }
+            Java_vv_goni_VvActivity_nativeOnImeKey(g_jni.env, nullptr, 61, 0);
+            frame();
+            check(g_editor.scriptWin.buf.find("tyker(nome){ find(RF) }") !=
+                      std::string::npos,
+                  "o Tab expande o tyker (esqueleto do registo)");
+            // (4) a pessoa corrige o placeholder RF→principal: o caret
+            // está antes do '}' (22 no esqueleto); ←×2 põe-no DEPOIS do
+            // 'RF', DEL×2 apaga as duas letras, e 'principal' entra no sítio
+            for (int i = 0; i < 2; ++i) {
+                Java_vv_goni_VvActivity_nativeOnImeKey(g_jni.env, nullptr,
+                                                       21, 0);   // LEFT
+            }
+            for (int i = 0; i < 2; ++i) {
+                Java_vv_goni_VvActivity_nativeOnImeKey(g_jni.env, nullptr,
+                                                       67, 0);   // DEL
+            }
+            for (const char c : std::string("principal")) {
+                char one[2] = {c, 0};
+                Java_vv_goni_VvActivity_nativeOnImeText(
+                    g_jni.env, nullptr, g_jni.newString(one));
+            }
+            frame();
+            check(g_editor.scriptWin.buf.find("find(principal)") !=
+                      std::string::npos,
+                  "o placeholder RF→principal corrigido pelo IME");
+            // (5) o caret salta o ')' (fica depois do find(...)) e
+            // acrescenta o follow DENTRO do tyker
+            Java_vv_goni_VvActivity_nativeOnImeKey(g_jni.env, nullptr,
+                                                   22, 0);   // RIGHT
+            for (const char c : std::string(" follow(2)")) {
+                char one[2] = {c, 0};
+                Java_vv_goni_VvActivity_nativeOnImeText(
+                    g_jni.env, nullptr, g_jni.newString(one));
+            }
+            frame();
+            // (6) RUN: o script FUNCIONA — o Ator segue o Alvo
+            if (Tic* t = g_scene.get(g_scene.find("Ator"))) {
+                if (Transform3D* tr = t->getComponent<Transform3D>()) {
+                    tr->pos = Vec3{15.0f, 0.0f, 0.0f};
+                    tr->updateWorld();
+                }
+            }
+            scriptEditorRun();
+            check(g_editor.scriptWin.running,
+                  "o script do walkthrough ARRANCA");
+            check(g_editor.scriptWin.errLine == 0, "sem erros na barra");
+            g_voni.tick(g_scene, 1.0f / 60.0f);
+            frame();
+            const Tic* tA = g_scene.get(g_scene.find("Ator"));
+            const Transform3D* tr =
+                tA ? tA->getComponent<Transform3D>() : nullptr;
+            check(tr != nullptr && nearEqF(tr->pos.x, 7.0f),
+                  "o follow FUNCIONA: o Ator fica a 2 do Alvo (15→7)");
+        }
+
         onAppCmd(&app11, APP_CMD_TERM_WINDOW);
     }
 

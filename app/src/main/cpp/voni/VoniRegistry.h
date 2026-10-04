@@ -95,6 +95,20 @@ const Entry* prefixMatch(const std::string& prefix);
 // Comp já resolvido (args avaliados na ativação pelo Vm).
 tykers::Handler handlerFor(const std::string& name);
 
+// ---- ERROS-QUE-ENSINAM (METADE 2) ----------------------------------------
+// A palavra estrangeira ('if', 'while', 'break'… de quem sabe Python/JS)
+// no ponto do erro de sintaxe → a dica que ENSINA o equivalente V.ONI.
+// Devolve a linha de ensino (ou null se a palavra não é estrangeira) e
+// preenche entryName com a ENTRADA do registo que resolve (bijeção R-013).
+const char* foreignTeach(const std::string& word, const char** entryName);
+
+// ---- A REFERÊNCIA PÚBLICA (METADE 2) --------------------------------------
+// O texto COMPLETO da referência V.ONI, GERADO do registo — alimenta o
+// VONI_referencia.md da raiz, o llms-full.txt e o botão copiar-referência
+// do editor. O teste de sincronia do CI afere que os ficheiros commitados
+// correspondem EXATAMENTE a esta saída.
+std::string fullReferenceMarkdown();
+
 // ---- PROVA de independência do parser (uso exclusivo de TESTES) ----------
 // Instala um componente de teste no registo (Docs incluída) — a gramática
 // NÃO conhece o nome e o tyker corre na mesma. Devolve true se instalado;

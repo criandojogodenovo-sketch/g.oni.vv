@@ -50,6 +50,7 @@
 #include "platform/ImeQueue.h"
 #include "ui/UiContext.h"
 #include "voni/Voni.h"
+#include "voni/VoniRegistry.h"   // 0.9.5: o editor que ensina (registo)
 
 #include <string>
 
@@ -67,10 +68,14 @@ constexpr u64 kRunId  = 6551;   // ▶ Run  (48dp)
 constexpr u64 kStopId = 6552;   // ■ Stop (48dp)
 constexpr u64 kScrollId = 6553; // região de scroll do código
 constexpr u64 kDocsId = 6554;   // 🔍 lupa — abre as Docs (G0-3)
+constexpr u64 kHelpLevelId = 6555; // I/N/S — nível da ajuda (0.9.5)
+constexpr u64 kCopyRefId = 6556;   // 📋 copiar referência V.ONI (0.9.5)
 constexpr u64 kKbBase = 6560;   // teclas do teclado in-app (40 + 6 da base)
 
 constexpr f32 kTopH = 56.0f;    // barra de topo (padrão D)
 constexpr f32 kErrH = 40.0f;    // barra de erro (1 linha 12sp + ícone)
+constexpr f32 kHelpStripH = 32.0f;   // a strip fina de ajuda (1 linha)
+constexpr f32 kHelpStrip2H = 56.0f;  // 2 linhas (Iniciante/toque)
 
 // o ESQUELETO base (G0-2 — entry point da spec §3): script NOVO abre com
 // isto e o cursor NO INTERIOR (posição do caret após "allmoments { ").
@@ -94,6 +99,12 @@ struct State {
     bool kbOpen = false;
     bool kbSym = false;
     bool kbLower = false;       // abc/ABC
+    // 0.9.5 · EDITOR QUE ENSINA: o nível da ajuda (0=Iniciante com
+    // exemplos, 1=Normal 1 linha, 2=Silencioso nada) + a palavra tocada
+    // (o toque numa palavra mostra a explicação com exemplo — das Docs)
+    u8 helpLevel = 1;
+    bool helpTapped = false;    // a strip mostra a explicação do toque
+    std::string helpWord;       // a palavra sob o dedo (ou vazia)
 };
 
 // guarda o NOME do TIC dono (G0-1: o handle morre no TERM→INIT da rotação
@@ -114,12 +125,28 @@ bool applyEvent(State& st, const ime::Event& ev);
 
 u32 lineCount(const State& st);
 
+// ---- 0.9.5 · O EDITOR QUE ENSINA (puro/afervável — o registo alimenta) ---
+// a palavra que TERMINA no caret (a meio da digitação — a mini-descrição
+// em tempo real funciona DESDE A 1ª LETRA)
+std::string wordBeforeCaret(const State& st);
+// a palavra sob um offset em bytes (o toque numa palavra)
+std::string wordAtOffset(const State& st, u32 byteOffset);
+// a entrada do registo p/ a strip: a palavra TOCADA (exata) ou a palavra a
+// meio da digitação (prefixo); null = nada a mostrar
+const voni::reg::Entry* helpEntryFor(const State& st);
+// as linhas da strip (1: "nome: 1-linha"; 2: exemplo — "" quando 1 linha)
+// conforme o nível (Iniciante=2 linhas, Normal=1, Silencioso="")
+std::string helpStripLine1(const State& st);
+std::string helpStripLine2(const State& st);
+
 // desenha a janela FULL-SCREEN e processa toques. Devolve:
 //   1 = BACK tocado (main fecha com landscape+imeHide)
 //   2 = RUN tocado  (main chama voni.editorRestart + atualiza running/erro)
 //   3 = STOP tocado (main chama voni.editorStop)
 //   4 = LUPA tocada (main abre o ecrã de Docs POR CIMA — G0-3)
 //   5 = toque no CORPO (main re-pede o IME — sem perder foco, G0-1)
+//   6 = COPIAR REFERÊNCIA tocada (main põe a referência V.ONI completa no
+//       clipboard via JNI — texto colável p/ IAs, 0.9.5)
 int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
          f32 dt);
 

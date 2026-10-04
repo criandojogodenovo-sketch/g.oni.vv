@@ -667,3 +667,232 @@ TEST(voni_motor_ciclo_erro_no_poperror_do_editor) {
     (void)errTic;
     (void)popped;
 }
+
+// ===========================================================================
+// 0.9.5 · METADE 2 — O EDITOR QUE ENSINA: os esqueletos por Tab, a strip
+// fina de ajuda (mini-descrição em tempo real + toque numa palavra), os
+// níveis I/N/S e o botão copiar-referência. TUDO alimentado pelo REGISTO
+// (a bijeção é a sentinela R-013; aqui afervamos o COMPORTAMENTO do editor).
+// ===========================================================================
+namespace m2 {
+
+// um evento IME de tecla
+vv::ime::Event keyEvent(vv::ime::Key k) {
+    vv::ime::Event ev;
+    ev.isText = false;
+    ev.key = k;
+    return ev;
+}
+vv::ime::Event textEvent(const char* t) {
+    vv::ime::Event ev;
+    ev.isText = true;
+    ev.text = t;
+    return ev;
+}
+
+} // namespace
+
+TEST(scriptwin_tab_os_esqueletos_da_spec) {
+    UiEnv e;
+    namespace sw = vv::editor::scriptwin;
+
+    // exist + Tab → "exist(){ } notexist{ }" com o caret NO INTERIOR
+    sw::open(e.st.scriptWin, e.scene, e.tic);
+    e.st.scriptWin.buf.clear();
+    e.st.scriptWin.caret = 0;
+    sw::applyEvent(e.st.scriptWin, m2::textEvent("exist"));
+    sw::applyEvent(e.st.scriptWin, m2::keyEvent(vv::ime::Key::Tab));
+    EXPECT(e.st.scriptWin.buf == "exist(){ } notexist{ }");
+    EXPECT(e.st.scriptWin.caret == 8);   // DENTRO do exist(){ … }
+
+    // option + Tab
+    e.st.scriptWin.buf.clear();
+    e.st.scriptWin.caret = 0;
+    sw::applyEvent(e.st.scriptWin, m2::textEvent("option"));
+    sw::applyEvent(e.st.scriptWin, m2::keyEvent(vv::ime::Key::Tab));
+    EXPECT(e.st.scriptWin.buf ==
+          "option(){ and valor(ação) stopand notoption{ } }");
+
+    // repeat + Tab
+    e.st.scriptWin.buf.clear();
+    e.st.scriptWin.caret = 0;
+    sw::applyEvent(e.st.scriptWin, m2::textEvent("repeat"));
+    sw::applyEvent(e.st.scriptWin, m2::keyEvent(vv::ime::Key::Tab));
+    EXPECT(e.st.scriptWin.buf == "repeat(n){ }");
+
+    // tyker + Tab (o find(RF) vem NO esqueleto — é obrigatório de 1º)
+    e.st.scriptWin.buf.clear();
+    e.st.scriptWin.caret = 0;
+    sw::applyEvent(e.st.scriptWin, m2::textEvent("tyker"));
+    sw::applyEvent(e.st.scriptWin, m2::keyEvent(vv::ime::Key::Tab));
+    EXPECT(e.st.scriptWin.buf == "tyker(nome){ find(RF) }");
+
+    // palavra SEM esqueleto + Tab → indenta 2 espaços (o clássico)
+    e.st.scriptWin.buf.clear();
+    e.st.scriptWin.caret = 0;
+    sw::applyEvent(e.st.scriptWin, m2::textEvent("zzz"));
+    sw::applyEvent(e.st.scriptWin, m2::keyEvent(vv::ime::Key::Tab));
+    EXPECT(e.st.scriptWin.buf == "zzz  ");
+
+    // PREFIXO também casa: "exi" + Tab → o esqueleto do exist
+    e.st.scriptWin.buf.clear();
+    e.st.scriptWin.caret = 0;
+    sw::applyEvent(e.st.scriptWin, m2::textEvent("exi"));
+    sw::applyEvent(e.st.scriptWin, m2::keyEvent(vv::ime::Key::Tab));
+    EXPECT(e.st.scriptWin.buf == "exist(){ } notexist{ }");
+}
+
+TEST(scriptwin_strip_mini_descricao_desde_a_1_letra) {
+    UiEnv e;
+    namespace sw = vv::editor::scriptwin;
+
+    sw::open(e.st.scriptWin, e.scene, e.tic);
+    e.st.scriptWin.buf = "repeat(3){ }";
+    e.st.scriptWin.caret = 13;   // no fim
+
+    // nível NORMAL (default): 1 linha só, SEM exemplo
+    EXPECT(e.st.scriptWin.helpLevel == 1);
+    // digitando "ex" (o caret depois de "ex") → a strip acende DESDE A 1ª
+    // letra com nome+1-linha do PRIMEIRO casamento por prefixo
+    e.st.scriptWin.buf = "ex";
+    e.st.scriptWin.caret = 2;
+    const std::string l1 = sw::helpStripLine1(e.st.scriptWin);
+    EXPECT(!l1.empty());
+    EXPECT(l1.find("exist") != std::string::npos);
+    EXPECT(sw::helpStripLine2(e.st.scriptWin).empty());   // Normal: 1 linha
+
+    // INICIANTE (0): SEMPRE com o exemplo (2 linhas)
+    e.st.scriptWin.helpLevel = 0;
+    EXPECT(!sw::helpStripLine1(e.st.scriptWin).empty());
+    const std::string l2 = sw::helpStripLine2(e.st.scriptWin);
+    EXPECT(l2.find("ex.:") == 0);
+
+    // SILENCIOSO (2): NADA (sem encher o ecrã)
+    e.st.scriptWin.helpLevel = 2;
+    EXPECT(sw::helpStripLine1(e.st.scriptWin).empty());
+    EXPECT(sw::helpStripLine2(e.st.scriptWin).empty());
+
+    // palavra que não casa com nada → a strip APAGA
+    e.st.scriptWin.helpLevel = 1;
+    e.st.scriptWin.buf = "zzqq";
+    e.st.scriptWin.caret = 4;
+    EXPECT(sw::helpStripLine1(e.st.scriptWin).empty());
+}
+
+TEST(scriptwin_toque_na_palavra_explica_com_exemplo) {
+    UiEnv e;
+    namespace sw = vv::editor::scriptwin;
+
+    sw::open(e.st.scriptWin, e.scene, e.tic);
+    e.st.scriptWin.buf = "repeat(3){ }\n";
+    e.st.scriptWin.caret = 13;
+
+    // a palavra sob o offset 2 é "repeat"
+    EXPECT(sw::wordAtOffset(e.st.scriptWin, 2) == "repeat");
+    EXPECT(sw::wordAtOffset(e.st.scriptWin, 0) == "repeat");
+    EXPECT(sw::wordAtOffset(e.st.scriptWin, 5) == "repeat");
+    EXPECT(sw::wordAtOffset(e.st.scriptWin, 6) == "repeat");  // fronteira '('
+    EXPECT(sw::wordAtOffset(e.st.scriptWin, 7) == "3");       // dígito é palavra
+    EXPECT(sw::wordAtOffset(e.st.scriptWin, 10) == "");       // espaço → nada
+
+    // o TOQUE (estado helpTapped+helpWord): a explicação com EXEMPLO (a
+    // spec: "linha de explicação com exemplo, vinda da Docs")
+    e.st.scriptWin.helpTapped = true;
+    e.st.scriptWin.helpWord = "repeat";
+    const std::string l1 = sw::helpStripLine1(e.st.scriptWin);
+    EXPECT(l1.find("repeat") != std::string::npos);
+    EXPECT(l1.find("Repete o bloco") != std::string::npos);
+    // no Normal, o TOQUE traz o exemplo (a 2ª linha acende)
+    EXPECT(e.st.scriptWin.helpLevel == 1);
+    EXPECT(sw::helpStripLine2(e.st.scriptWin).find("ex.:") == 0);
+
+    // DIGITAR limpa o estado de toque (volta à mini-descrição)
+    sw::applyEvent(e.st.scriptWin, m2::textEvent("x"));
+    EXPECT(!e.st.scriptWin.helpTapped);
+    EXPECT(e.st.scriptWin.helpWord.empty());
+}
+
+TEST(scriptwin_botao_nivel_cicla_e_o_tab_do_teclado_existe) {
+    UiEnv e;
+    namespace sw = vv::editor::scriptwin;
+    sw::open(e.st.scriptWin, e.scene, e.tic);
+    e.st.scriptWin.kbOpen = true;
+
+    // o botão do NÍVEL cicla N→S→I→N (o draw processa o toque)
+    EXPECT(e.st.scriptWin.helpLevel == 1);
+    // 720×1536 portrait: o botão está a docsX-104 com docsX=720-216=504
+    e.tap(504.0f - 104.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
+    EXPECT(e.st.scriptWin.helpLevel == 2);
+    e.tap(504.0f - 104.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
+    EXPECT(e.st.scriptWin.helpLevel == 0);
+    e.tap(504.0f - 104.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
+    EXPECT(e.st.scriptWin.helpLevel == 1);
+
+    // o TAB do teclado in-app: a tecla existe na linha de baixo —
+    // [ESPACO 2u][TAB 1u][PAG 1u][APAGA 2u][ENTER 2u][FECHAR 1u]
+    // unit = (720-16-5*6)/9 = 74.9; TAB em x = 8+2*74.9+6 .. +74.9
+    {
+        const f32 unit = (720.0f - 16.0f - 5.0f * 6.0f) / 9.0f;
+        const f32 tabX = 8.0f + 2.0f * unit + 6.0f + unit * 0.5f;
+        const f32 kbTop = 1536.0f - 40.0f - 0.0f -
+                          (5.0f * 48.0f + 4.0f * 6.0f + 2.0f * 8.0f);
+        const f32 tabY = kbTop + 8.0f + 4.0f * (48.0f + 6.0f) + 24.0f;
+        e.st.scriptWin.buf = "exist";
+        e.st.scriptWin.caret = 5;
+        e.tap(tabX, tabY, 720.0f, 1536.0f);
+        EXPECT(e.st.scriptWin.buf == "exist(){ } notexist{ }");   // o TAB
+    }
+}
+
+TEST(scriptwin_botao_copiar_referencia_devolve_6) {
+    UiEnv e;
+    namespace sw = vv::editor::scriptwin;
+    sw::open(e.st.scriptWin, e.scene, e.tic);
+
+    // o botão 📋 devolve 6 (o main põe no clipboard via JNI) — 720 portrait:
+    // docsX=504, copy em docsX-56=448
+    int r = 0;
+    e.input.injectDown(0, 448.0f + 24.0f, 28.0f);
+    e.ui.beginFrame(nullptr, &e.input, 720.0f, 1536.0f);
+    r = sw::draw(e.ui, e.input, e.st.scriptWin, 720.0f, 1536.0f, 0.0f);
+    e.ui.endFrame();
+    e.input.injectUp(0);
+    e.ui.beginFrame(nullptr, &e.input, 720.0f, 1536.0f);
+    r = sw::draw(e.ui, e.input, e.st.scriptWin, 720.0f, 1536.0f, 0.0f);
+    e.ui.endFrame();
+    e.input.clearEdges();
+    EXPECT(r == 6);
+}
+
+TEST(voni_erros_que_ensinam_as_palavras_estrangeiras) {
+    // quem sabe Python/JS escreve 'if' — o erro ENSINA o equivalente V.ONI
+    // (a lista vive no REGISTO — kForeign — a sentinela R-013 afere a bijeção)
+    // Uns morrem no COMPILE (if/while/def com blocos); outros parseiam como
+    // comandos (break/print à solta) e morrem no RUNTIME — os DOIS ensinam.
+    struct Caso { const char* src; const char* pedaco; };
+    const Caso casos[] = {
+        {"if (vida == 0) { }", "exist"},
+        {"while (vida > 0) { }", "last"},
+        {"def soma() { }", "fn"},
+        {"switch (n) { }", "option"},
+        {"for x { }", "repeat"},
+        {"else { }", "notexist"},
+        {"break", "resume"},
+        {"print(\"ola\")", "View P"},
+    };
+    for (const Caso& c : casos) {
+        voni::Error err;
+        voni::Script s = voni::Script::compile(c.src, err);
+        if (err.ok) {
+            // parseou como comando → o RUNTIME ensina (o mesmo registo)
+            VmEnv e;
+            e.script()->source = c.src;
+            voni::Error rerr;
+            EXPECT(!e.voni.editorStart(e.scene, e.tic, rerr));
+            EXPECT(rerr.message.find(c.pedaco) != std::string::npos);
+        } else {
+            EXPECT(err.message.find(c.pedaco) != std::string::npos);
+            EXPECT(err.line >= 1);   // com linha (o editor acende a gutter)
+        }
+    }
+}

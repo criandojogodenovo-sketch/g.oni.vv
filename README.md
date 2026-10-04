@@ -1,3 +1,24 @@
+## 0.9.5 — P-01: LINKERS & TYKERS COMPLETOS + O EDITOR QUE ENSINA
+
+**O que mudou (duas metades, um commit cada):**
+- METADE 1 · LINKERS & TYKERS (spec fechada): `linker(A)to(B)=RF(nome)` liga duas coisas (objeto/TIC/propriedade/animação) e regista o link num RF; `tyker(nome){ find(RF) componentes… }` é o bloco de comportamento que corre sobre os links do RF (find obrigatório de 1º; vários tykers partilham RF). Os 13 componentes: contínuos `follow()/follow(d)/follow(d,suav)`, `look()`, `orbit(d,vel)`, `copy(prop)`, `map()` (no-op sem mapa); pontuais `Change(origem|destino)to(x)`, `point()/point(x,y,z)`, `colorpars(cor)(nome|#RRGGBB)` (o parâmetro 'cor' TINGE o material), `play()`, `limit(min,max)`, `delay(s)`; reservado `shading()`. SEGURANÇA: ciclos a→b+b→a (e longos) rejeitados com erro legível; profundidade 256 abort legível; RF em falta → "RF 'x' não encontrada" + o tyker não corre (o script segue); nunca crash.
+- O REGISTO CENTRAL (voni/VoniRegistry): cada entrada declarada com Docs OBRIGATÓRIA; ADICIONAR COMPONENTE NOVO = 1 handler + 1 linha — o parser NÃO muda (provado pelo teste parser_independente: um componente de teste instala-se e corre sem tocar na gramática).
+- METADE 2 · O EDITOR QUE ENSINA (uma só fonte): o registo alimenta as Docs (agora com a equivalência Python/JS por entrada), os erros-que-ensinam (escrever 'if'/'while'/'break'/'print' ENSINA o equivalente V.ONI com linha), a strip fina de ajuda junto à barra de erro (mini-descrição em tempo real DESDE A 1ª LETRA; níveis Iniciante/Normal/Silencioso), o toque numa palavra → explicação com exemplo, os ESQUELETOS por Tab (`exist`+Tab → `exist(){ } notexist{ }`; idem option/repeat/tyker — com o TAB no teclado in-app e no GBoard), e o botão COPIAR REFERÊNCIA (a referência V.ONI completa como texto colável para IAs).
+- REFERÊNCIA PÚBLICA: `VONI_referencia.md` + `llms.txt` + `llms-full.txt` na raiz do repo — GERADOS do registo; o CI afere a sincronia byte a byte (R-013).
+- SENTINELAS R-011 (ciclo rejeitado) · R-012 (RF em falta) · R-013 (bijeção da ajuda) em docs/REGRESSOES.md; FASE 11 do dispositivo virtual (259 checks).
+
+**Checklist C33/RMX3624 (VERIFICAR no device — 0.9.5):**
+1. Escrever `if` num script novo → a barra de erro ENSINA "exist" (com linha).
+2. Digitar `exi` → a strip fina junto à barra de erro mostra "exist: …" desde a 1ª letra; o botão I/N/S na toolbar do editor cicla o nível (S apaga a strip).
+3. `exist` + TAB (tecla do teclado in-app) → `exist(){ } notexist{ }` com cursor dentro; idem `tyker` (o find(RF) vem no esqueleto).
+4. Tocar numa palavra do código → a strip explica com exemplo ("ex.: …").
+5. O botão 📋 da toolbar do editor → "Referência V.ONI copiada" → COLAR num bloco de notas (texto completo com tykers e componentes).
+6. Um script com `linker…/tyker…/follow(2)` + Run → o TIC SEGUE o alvo (a distância certa por frame); `colorpars(cor)(#FF0000)` → o material fica VERMELHO.
+7. Um tyker com `find(fantasma)` → o logcat traz "RF 'fantasma' não encontrada — o tyker … não corre" E o resto do script continua.
+8. Dois linkers em ciclo (a→b + b→a) → o Run NÃO arranca e a barra de erro diz "ciclo" com os nomes.
+9. Docs (lupa): as categorias Linker/Tyker/Componente povoadas; expandir uma entrada mostra "Python/JS: …".
+10. <10 MINUTOS: alguém que sabe Python/JS escreve um script V.ONI funcional só com a ajuda do editor (esqueletos + strip + toque) — cronometrar.
+
 ## 0.9.4 — FASE 9: G0 BLOQUEADORES + G1 PONTOS QUEBRADOS + G2 MOCKS
 
 **O que mudou (só apresentação, exceto G1-6 e a lógica mínima dos fixes G0):**
