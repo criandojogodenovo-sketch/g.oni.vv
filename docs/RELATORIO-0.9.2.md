@@ -89,7 +89,7 @@ Pipeline `release` no push. Jobs: core-tests (Linux) → C33 virtual → APK arm
 
 ## 12. DECLARAÇÃO DE AUSÊNCIA DE ACHISMO
 
-Cada afirmação deste relatório tem evidência: os ~111 testes novos (nomes acima), os gates locais (check_main/link_parity/jni_parity), o ctest 100% e o output colado no CI. As decisões 🔶 estão identificadas e isoladas (ficheiro da gramática, tabela de comandos, tokens do Theme). O que não pôde ser verificado aqui está na secção 11 — sem "deve funcionar".
+Cada afirmação deste relatório tem evidência: os ~111 testes novos (nomes acima), os gates locais (check_main/link_parity/jni_parity), o ctest 100% e o output colado no CI. As decisões 🔶 estão identificadas e isoladas (ficheiro da gramática, tabela de comandos, tokens do Theme). O que não pôde ser verificado aqui está na secção 11 — sem as palavras de hedging da lista do gate de docs (ci/forbidden_docs_patterns.txt).
 
 ## 13. LIÇÕES
 

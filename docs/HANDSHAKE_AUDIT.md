@@ -98,7 +98,7 @@ VvActivity.onResume()   → nativeRegisterActivity(this, "onResume")   ─┤ re
 
 - `verify-entry-symbols` ganha o gate **do manifest binário** (aapt2):
   `hasCode=true`, launchable-activity `vv.goni.VvActivity`,
-  `lib_name=goni_vv` — a aferição da TAREFA 1 passa a correr em TODO build.
+  `lib_name=goni_vv` — a aferição da TAREFA 1 passa a correr em todo build.
 - Suíte do core ganha `test_handshake.cpp`: handshake simulado (o "stub
   Java" chama o export JNI diretamente contra um JNIEnv falso controlável),
   attach de threads, fluxo de permissão completo e regressão das mensagens
@@ -118,7 +118,7 @@ VvActivity.onResume()   → nativeRegisterActivity(this, "onResume")   ─┤ re
   254→264 testes.
 - **CI**: `check_main.sh` (sintaxe) + `link_parity.sh` (ligação dos 68 TUs
   da app) verdes; gate NOVO `aapt2 dump xmltree` afere
-  hasCode/VvActivity/lib_name em TODO build; `verify-entry-symbols` exige
+  hasCode/VvActivity/lib_name em todo build; `verify-entry-symbols` exige
   também `Java_vv_goni_VvActivity_nativeRegisterActivity` no `.dynsym`.
 - **Aceitação no C33** (log viewer mostra a sequência):
   `java: onCreate → nativeRegisterActivity` →
@@ -175,8 +175,8 @@ e o `JNI_OnLoad` nunca chegou a correr no device. Cadeia causal:
   `FindClass`/`RegisterNatives` a falhar NÃO devolvem `JNI_ERR` (isso
   mataria o loadLibrary = app morta no arranque) — logam e adiam para a 2ª
   camada.
-- **Gate (CI, pedido do dono)**: `scripts/jni_parity.py` afere em TODO
-  build que (a) TODO `native` da VvActivity.java está na tabela
+- **Gate (CI, pedido do dono)**: `scripts/jni_parity.py` afere em todo
+  build que (a) todo `native` da VvActivity.java está na tabela
   RegisterNatives com a MESMA assinatura, (b) o static
   `System.loadLibrary` existe, e (c) no job de release, os símbolos
   `Java_vv_goni_VvActivity_*` estão exportados no `.dynsym` do .so real.

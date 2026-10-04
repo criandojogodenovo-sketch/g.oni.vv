@@ -1,3 +1,37 @@
+# Como isto é construído (How this is built)
+
+Este projeto tem um fluxo de trabalho incomum, dito por extenso porque é
+parte das decisões de engenharia — não é vergonha a esconder:
+
+- **O código é editado num telemóvel.** Todo o C++/Java/GLSL deste repo é
+  escrito e revisto num ecrã de 6,5" (editor de texto Android + acesso ao
+  repo por HTTPS). É a restrição de partida do projeto — ela explica o
+  estilo: ficheiros pequenos, nomes completos, comentários que documentam
+  porquê, e uma suíte de testes que substitui a vigilância que um IDE
+  daria de graça.
+- **O CI é o único compilador.** Nada é compilado localmente: cada push
+  corre o workflow `release.yml` no GitHub Actions (5 jobs: testes do
+  core no Linux, o dispositivo virtual C33 com o replay do harness, a
+  keystore, o APK arm64 assinado e o gate de símbolos). Um commit só
+  conta como fechado quando o CI está verde — e o APK que o dono instala
+  no device é SEMPRE o artefacto assinado do CI, nunca um build local.
+- **O device real é a vara de medir.** O alvo primário é um Realme C33
+  (RMX3624, Android 13, GPU PowerVR GE8320, 60 fps como meta). O que o
+  dono vê no device manda; o que os testes afirmam tem de bater certo
+  com o device ou é bug. As verificação por versão estão nas checklists
+  abaixo (secções "Verificação no Realme C33").
+- **As regressões são contratos.** Cada bug de peso ganha uma sentinela
+  `R-NNN` em `docs/REGRESSOES.md` com prova de mutação colada (quebrar o
+  fix → vermelho → repor → verde). O `c33_virtual` (tests/c33_virtual.cpp)
+  repete no Linux o caminho de UI/events do device (FASEs numeradas).
+- **O que não está verificado está dito.** Os relatórios por versão
+  (`docs/RELATORIO-*.md`) têm uma secção de NÃO VERIFICADO explícita, e
+  o gate docs-lint (R-016) proíbe placeholders e linguagem de achismo na
+  documentação — a lista vive em `ci/forbidden_docs_patterns.txt`.
+
+O mapa dos módulos está em `ARCHITECTURE.md`. A referência da linguagem
+V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
+
 ## 0.9.5 — P-01: LINKERS & TYKERS COMPLETOS + O EDITOR QUE ENSINA
 
 **O que mudou (duas metades, um commit cada):**
@@ -362,7 +396,7 @@ DECISÃO DO DONO: **ficar só com CUBO e ESFERA e MATAR o cache**.
    "usa .zip" (tabela de decisão no RELATORIO). ZIP = parser próprio de
    central-directory + inflate do zlib do NDK (sem vendoring).
 
-6. **DIAGNÓSTICO COM IDENTIDADE**: TODO crash dump nasce com
+6. **DIAGNÓSTICO COM IDENTIDADE**: todo crash dump nasce com
    `build: <versão> (versionCode N)` + `git:` + `so: <sha256>` + `epoch:`
    no header E no NOME (`crash-<unix>-vc<N>.dump` — o CI escreve
    `assets/build_info.txt` com o sha256 REAL da .so em 2 passes; a
@@ -629,7 +663,7 @@ no CI local) e passa depois:
 2. **TEXTO/QUADS QUE DESAPARECIAM ("funções que param")**: os caps FIXOS
    de submissão (kMaxRuns=32 no UiContext, kMaxSubs=32 no Renderer)
    descartavam runs em silêncio e, pior, os GLIFOS são sempre a ÚLTIMA
-   submissão — com 32 runs TODO o texto saía do ecrã (browser com muitas
+   submissão — com 32 runs todo o texto saía do ecrã (browser com muitas
    thumbnails, timeline + painéis). FIX: armazenamento DINÂMICO
    (reserve(64) — zero realloc em steady state), NADA se descarta mais; o
    frame anómalo (>66 submissões) LOGA 1× por frame no engine.log. Testes:
@@ -1391,7 +1425,7 @@ app não concedia nada (`isExternalStorageManager()` sempre `false`):
 cada transição (boot / retorno / resume / variação por tentativa) — visível
 no log viewer;
 - **Gate CI**: o manifest BINÁRIO do APK passou a ser aferido (aapt2) — a
-  permissão tem de estar presente em TODO build.
+  permissão tem de estar presente em todo build.
 
 ## Escopo 0.6.9 (histórico)
 
@@ -1451,7 +1485,7 @@ a transição completa editor→play→editor é testável na suíte.
 ## Escopo 0.6.7 (histórico)
 
 **1 — LIFECYCLE GL (fix dos "cubinhos" do C33).** Sair do editor
-(home/recents) e reentrar SEM matar a app deixava TODO o texto em quads
+(home/recents) e reentrar SEM matar a app deixava todo o texto em quads
 brancos: o `APP_CMD_TERM_WINDOW` destrói o contexto EGL (o
 `EglContext::shutdown` mata surface E contexto — todos os ids GL ficam
 órfãos), mas o `FontAtlas` guardava `tex_ != 0` (guard "já carregado") e o
@@ -1509,7 +1543,7 @@ corre de verdade, o RegisterNatives executa e a lib entra no mapa do JVM;
 (2) `ensureNativesRegistered()` idempotente no 1º nativeRegisterActivity
 via GetObjectClass + `JNI_OnLoad` TOLERANTE (FindClass/RegisterNatives a
 falhar NUNCA devolvem JNI_ERR — logam e adiam para a 2ª camada). GATE NOVO
-pedido pelo dono: `scripts/jni_parity.py` no CI afere TODO native da
+pedido pelo dono: `scripts/jni_parity.py` no CI afere todo native da
 VvActivity.java contra a tabela RegisterNatives (nome+assinatura), o static
 loadLibrary obrigatório e, no release, os símbolos `Java_vv_goni_VvActivity_*`
 no `.dynsym` do .so real — na 1ª execução apanhou um bug latente real
@@ -1549,7 +1583,7 @@ estavam corretas — o bug era o handshake runtime
    `hasCode=true`, launcher=`vv.goni.VvActivity`, `lib_name=goni_vv` —
    o sistema instancia a VvActivity; o dex não tinha onCreate/onResume
    (nunca se registrava). Gate NOVO no CI (`aapt2 dump xmltree`) afere o
-   manifest binário em TODO build.
+   manifest binário em todo build.
 2. **Handshake invertido (item 2)** — `VvActivity.onCreate()` chama
    `nativeRegisterActivity(this,"onCreate")` (após `super.onCreate`, quando
    o loadLibrary/JNI_OnLoad já correu); `onResume()` reforça (idempotente —
@@ -1808,7 +1842,7 @@ Sem física (BodyComp é F4), sem luzes, sem assets, sem animação, sem linguag
 (CLÁUSULA CALMA).
 
 ## Histórico
-- **F5.4-hotfix (0.6.5)**: SAF SEM duplicação ("main.goni (1).json", "project.goni (2)" em TODO boot): (1) causa raiz = mime `application/json` para `.goni` → o provider renomeia no createDocument (FileUtils.buildUniqueFile acrescenta extensão canónica) e o nome no disco divergia do nome procurado → verificação falhava → createDocument de novo; (2) `bridgeFindFile` NOVA — pesquisa EXATA por displayName com query fresca ao provider ANTES de qualquer createDocument (método CRÍTICO do handshake; repetição em falha de query); (3) contrato TRI-ESTADO — "não sei" (provider em falha) NUNCA decide criação: `Presence::probe` em FsStorage/SafStorage + createNew só cria com ausência CONFIRMADA; (4) mime octet-stream para tudo menos .json (nome verbatim); (5) abertura "wt" (truncate) no doc EXISTENTE — nunca create por cima; (6) CURA dos projetos 0.6.4: ficheiros já renomeados ("x.goni.json") reabrem e continuam a ser usados — as cópias " (1)"/" (2)" são lixo a apagar manualmente; Salvar materializa assets em-runtime: cubo procedural → meshes/cube.obj (formato OBJ já definido, idempotente) e todo write loga `saf: write <rel> — N bytes` (visível no Ver logs); fake do SAF agora MODELA rename+colisão do provider — 279 testes.
+- **F5.4-hotfix (0.6.5)**: SAF SEM duplicação ("main.goni (1).json", "project.goni (2)" em todo boot): (1) causa raiz = mime `application/json` para `.goni` → o provider renomeia no createDocument (FileUtils.buildUniqueFile acrescenta extensão canónica) e o nome no disco divergia do nome procurado → verificação falhava → createDocument de novo; (2) `bridgeFindFile` NOVA — pesquisa EXATA por displayName com query fresca ao provider ANTES de qualquer createDocument (método CRÍTICO do handshake; repetição em falha de query); (3) contrato TRI-ESTADO — "não sei" (provider em falha) NUNCA decide criação: `Presence::probe` em FsStorage/SafStorage + createNew só cria com ausência CONFIRMADA; (4) mime octet-stream para tudo menos .json (nome verbatim); (5) abertura "wt" (truncate) no doc EXISTENTE — nunca create por cima; (6) CURA dos projetos 0.6.4: ficheiros já renomeados ("x.goni.json") reabrem e continuam a ser usados — as cópias " (1)"/" (2)" são lixo a apagar manualmente; Salvar materializa assets em-runtime: cubo procedural → meshes/cube.obj (formato OBJ já definido, idempotente) e todo write loga `saf: write <rel> — N bytes` (visível no Ver logs); fake do SAF agora MODELA rename+colisão do provider — 279 testes.
 - **F5.4 (0.6.4)**: Gestor de Projetos (SAF multi-pasta, takePersistableUriPermission por projeto, SafStorage = ProjectStorage sobre SAF, fallback app-private intacto) + fix do UnsatisfiedLinkError (JNI_OnLoad nunca corria no device — dlopen do NativeActivity não chama; static loadLibrary na VvActivity + registo idempotente pós-handshake + gate jni_parity.py que apanhou um bug latente de assinatura) — 272 testes (docs/HANDSHAKE_AUDIT.md §6).
 - **F5.2 (0.6.2)**: All Files Access (diálogo → settings → File API direta) + remoção do SAF tree picker + log viewer in-app + boot self-check com errno — 254 testes.
 - **F5.3 (0.6.3)**: handshake Java↔native INVERTIDO (VvActivity regista-se no native — onCreate + onResume; causa única das pontes mortas 0.6.0→0.6.2: GetEnv EDETACHED no thread do glue) + attach de threads nomeado + mensagens honestas ("ponte Java indisponível (handshake)") + gate do manifest binário no CI — 264 testes (docs/HANDSHAKE_AUDIT.md).
@@ -2462,7 +2496,7 @@ Instalar o APK 0.7.5 (artifact `goni-vv-0.7.5-release-signed` do run do
 fecho). Roteiro cumulativo — os anteriores continuam a aplicar-se:
 
 1. **Overlays modais**: no modo UI com elementos no canvas ("TESTE",
-   "Botao"), abrir o **MENU** → o ecrã fica TODO tapado pelo fundo
+   "Botao"), abrir o **MENU** → o ecrã fica todo tapado pelo fundo
    escuro e SÓ o menu aparece (nenhum texto do canvas à mista); o mesmo
    com o menu contextual (⋮), o teclado, CENAS e o navegador; toque fora
    fecha e o editor volta INTEIRO (toolbar/painéis/canvas);

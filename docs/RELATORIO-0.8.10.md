@@ -146,7 +146,7 @@ arrays; corrupção = erro legível (output real):
   soSha256) → 2º assembleRelease embute (a .so não muda — o sha vale).
 - VvActivity.onCreate lê o asset + BuildConfig → `nativeSetBuildInfo`
   (JNI; gate jni_parity com a assinatura) → `vv::buildinfo`.
-- TODO crash dump: `crash-<unix>-vc<versionCode>.dump` + header
+- (pendente na altura) crash dump: `crash-<unix>-vc<versionCode>.dump` + header
   `build:`/`git:`/`so:`/`epoch:` (output real do teste):
 ```
   [identidade] dump 'test-wiring010-logs/crash-1790000000-vc40.dump' com build/versionCode/git/epoch no header

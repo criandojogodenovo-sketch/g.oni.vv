@@ -44,6 +44,16 @@ jobs:
           fi
           python3 scripts/scope_check.py "$BEFORE" "${{ github.sha }}"
 
+      # 0.9.6 (G5/R-016) — GATE DOCS-LINT: a documentação vista de fora
+      # (docs/ inteiro — RELATÓRIOS incluídos — + README + ESTUDOS +
+      # ARCHITECTURE + VONI_referencia + llms) sem placeholders, sem
+      # marcadores de pendência (palavra inteira: "TODOS"/"todo" do
+      # português não casam), sem texto de enchimento e sem linguagem de
+      # achismo. A lista vive em ci/forbidden_docs_patterns.txt (a fonte);
+      # este passo é só o motor. UM match = vermelho = release bloqueada
+      - name: Gate docs-lint (R-016)
+        run: python3 scripts/docs_lint_check.py
+
       - name: Configurar build dos testes
         run: cmake -S tests -B build-tests -DCMAKE_BUILD_TYPE=Release
 

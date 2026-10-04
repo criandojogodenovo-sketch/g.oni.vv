@@ -100,7 +100,7 @@ versionCode 43 / 0.9.0; artifact `goni-vv-0.9.0-release-signed`. O run do CI é 
 
 ## 13. DECLARAÇÃO DE AUSÊNCIA DE ACHISMO
 
-Cada afirmação deste relatório tem evidência: código nomeado (ficheiro/função), teste que a cobre (nome do caso), contagens (667 testes, 101 checks, 22+7 casos novos), e as iterações do loop com os bugs que apanharam. O que não foi verificado está na secção 12 — sem "deve funcionar", sem "provavelmente".
+Cada afirmação deste relatório tem evidência: código nomeado (ficheiro/função), teste que a cobre (nome do caso), contagens (667 testes, 101 checks, 22+7 casos novos), e as iterações do loop com os bugs que apanharam. O que não foi verificado está na secção 12 — sem as palavras de hedging da lista do gate de docs (ci/forbidden_docs_patterns.txt).
 
 ## 14. LIÇÕES
 

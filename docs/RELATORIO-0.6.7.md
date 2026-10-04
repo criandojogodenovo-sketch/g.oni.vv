@@ -99,7 +99,7 @@ painel branco. O EditText só definia `setTextColor` quase-branco.
    genTextures 2×, deleteTextures 1, métricas re-medidas;
 2. `lifecycle_atlas_guard_impede_upload_duplicado_no_mesmo_contexto` —
    2ª carga SEM term = 1 upload só (guard intacto);
-3. `lifecycle_atlas_glifos_uvs_validos_apos_re_upload` — TODO o range
+3. `lifecycle_atlas_glifos_uvs_validos_apos_re_upload` — todo o range
    ASCII com UV coerentes (o espaço sem tinta é `>=`);
 4. `lifecycle_mesh_destroy_recreate_no_novo_contexto`;
 5. `lifecycle_gpu_release_all_e_re_upload_dos_assets` — meshCount

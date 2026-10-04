@@ -1,0 +1,47 @@
+# ci/forbidden_docs_patterns.txt — a lista do gate docs-lint (R-016).
+# Cada linha = um padrão PROIBIDO na documentação vista de fora
+# (docs/**/*.md, README.md, ESTUDOS.md, ARCHITECTURE.md, VONI_referencia.md,
+#  llms.txt, llms-full.txt — os RELATÓRIOS em docs/ incluídos).
+#
+# Sintaxe (uma entrada por linha):
+#   re:<regex>   → expressão regular Python (re.search, case-sensitive
+#                  a menos que o próprio regex traga (?i:...))
+#   <texto>      → literal (substring exata)
+# '#' inicia comentário; linha vazia ignora.
+#
+# O PRINCÍPIO: a documentação do G.One VV não tem placeholders, não tem
+# texto de enchimento e não fala por achismo — cada frase afirma o que foi
+# medido/testado, ou aponta a secção de NÃO VERIFICADO. As palavras abaixo
+# são as marcas desses três pecados (R-016, docs/REGRESSOES.md).
+#
+# NOTA de projeto: "TODO"/"FIXME" caçados como PALAVRA INTEIRA
+# case-sensitive — "TODOS"/"todo" (português: todos/os) NÃO casam
+# (o regex exige fronteira de palavra logo após o O). As citações a
+# pendências de código escrevem-se por extenso ("trabalho pendente da
+# F8"), nunca com o marcador.
+
+# — placeholders de template não preenchido
+re:<repository-URL>
+re:<repository[_ -]?url>
+re:\bXXX\b
+re:\bTBD\b
+
+# — marcadores de trabalho pendente (palavra inteira, case-sensitive;
+#    "TODOS" e "todo" do português não casam)
+re:\bTODO\b
+re:\bFIXME\b
+
+# — texto de enchimento
+re:(?i:\blorem\b)
+re:(?i:\bipsum\b)
+
+# — linguagem de achismo (hedging) em português (palavra inteira:
+#    "despacho"/"macho"/"colorem" NÃO casam)
+re:(?i:\bacho\b)
+re:(?i:\btalvez\b)
+re:(?i:\bprovavelmente\b)
+
+# — linguagem de achismo em inglês
+re:(?i:\bshould work\b)
+re:(?i:\bI think\b)
+re:(?i:\bdeve funcionar\b)

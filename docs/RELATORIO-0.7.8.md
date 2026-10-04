@@ -117,7 +117,7 @@ afirma o estado MESMO sem submissões (regressão do early-return —
 drawCalls 0 e estado UI); `endFrame` envia a ortográfica de ecrã exata
 (`Mat4::ortho(0,w,h,0,-1,1)`) com blend off no fim; o frame de Play
 INTEIRO (beginFrame 3D → estado sujado → fronteira → widgets → endFrame)
-termina com o estado TODO do pass de UI; Play com câmara ativa + UiCanvas
+termina com o estado todo do pass de UI; Play com câmara ativa + UiCanvas
 → os quads emitidos começam nos rects do resolver (âncora Bottom com
 insets), dentro do ecrã, com o estado GL final correto; o resolver NÃO
 depende da câmara (guarda de contrato: cenas com fov 100 vs fov 20/far

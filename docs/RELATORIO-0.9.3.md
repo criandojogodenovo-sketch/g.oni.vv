@@ -246,9 +246,9 @@ estaticamente — compilado do FetchContent `_deps/oboe-src`).
 
 ## 12. DECLARAÇÃO DE AUSÊNCIA DE ACHISMO (j)
 
-Nenhuma frase de hedging ("acho", "talvez", "provavelmente", "deve
-funcionar", "should work", "maybe", "I think") aparece neste relatório,
-nos commits ou nos comentários do código. Cada afirmação cita: nome do
+Nenhuma frase de hedging (as palavras portuguesas e inglesas da lista
+do gate de docs, R-016/ci/forbidden_docs_patterns.txt) aparece neste
+relatório, nos commits ou nos comentários do código. Cada afirmação cita: nome do
 teste + linha de output, gate, run de CI, ou contadores do harness. As
 afirmações não verificáveis estão na secção 11 com o passo de verificação
 no device.

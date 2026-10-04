@@ -42,7 +42,7 @@ O UiContext registra RUNS de submissão (z-order real sólidos↔texturas) e
 o Renderer aceita submissões por frame — ambos com caps FIXOS de 32 e
 descarte SILENCIOSO. Como os GLIFOS são sempre a ÚLTIMA submissão (a
 regra do tema "texto por cima"), com 32 runs o submit dos glifos caía
-fora do cap → **TODO o texto saía do ecrã** (browser com muitas
+fora do cap → **todo o texto saía do ecrã** (browser com muitas
 thumbnails = 2 runs/linha; timeline + painéis + overlay chegam lá). O
 resto dos runs cortados = widgets que "não existem" = funções que param
 sem uma única linha de log.

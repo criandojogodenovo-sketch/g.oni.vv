@@ -24,8 +24,8 @@ assinado cumulativo (versionCode 24).
 inverteu-se a responsabilidade — **com um modal aberto, o chrome do
 editor NÃO se desenha** (toolbar, separador 3D|UI, viewport 2D — logo o
 canvas UI —, gizmos, Hierarchy, Inspector) e no lugar desenha-se um
-**backdrop opaco** (`drawModalBackdrop`: um painel BG #141414 no ecrã
-TODO) por baixo do overlay. Como os widgets são **immediate-mode**, não
+**backdrop opaco** (`drawModalBackdrop`: um painel BG #141414 no ecrã de
+pendências) por baixo do overlay. Como os widgets são **immediate-mode**, não
 desenhados = não interativos: os toques pertencem SÓ ao modal (que fecha
 com toque fora como sempre) — sem gestos "às escuras" na toolbar/painéis
 tapados. Ao fechar, o editor volta INTEIRO. Em Play nada muda (a entrada
@@ -103,7 +103,7 @@ novos (ver §6).
 
 - `uieditor_overlay_modal_tapa_o_canvas` — com o MENU DE FICHEIROS aberto
   (e de novo com o MENU CONTEXTUAL): existe um quad OPACO que cobre o
-  ecrã TODO, **nenhum quad do elemento do canvas** é emitido (o teste
+  ecrã de pendências, **nenhum quad do elemento do canvas** é emitido (o teste
   desenha um Label com fundo no centro e afera a ausência do rect
   transformado), e ao FECHAR o menu o chrome + canvas voltam inteiros
   (sanidade antes/depois incluída);

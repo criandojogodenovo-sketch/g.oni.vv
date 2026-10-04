@@ -650,8 +650,8 @@ $ while read pat; do grep -F -q -- "$pat" /tmp/c33-final-output.txt \
 (sem output — zero padrões proibidos no replay) → GATE VERDE
 ```
 
-(i) **Declaração de linguagem**: nenhuma frase de achismo ("acho",
-"talvez", "provavelmente", "deve funcionar", "should work", "I think")
+(i) **Declaração de linguagem**: nenhuma frase de achismo (as palavras
+de hedging da lista do gate de docs, R-016/ci/forbidden_docs_patterns.txt)
 aparece neste relatório, nos commits ou nos comentários do diff — cada
 afirmação cita teste/linha de output/gate/log/harness (as tabelas §10-b,
 §10-c e os outputs colados §17-d/e). O que não pôde ser verificado está

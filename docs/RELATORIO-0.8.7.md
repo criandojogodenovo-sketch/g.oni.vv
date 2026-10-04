@@ -71,7 +71,7 @@ quando o upload falha, nada muda no ecrã — parece que o seletor morreu.)
 **CAUSA 3 — GESTO ÓRFÃO: `active_` do UiContext nunca morre sozinho.** O
 `active_` só é limpo quando o widget DONO é desenhado com o dedo levantado.
 Um widget que desaparece a meio do gesto (overlay fechado antes do release,
-por exemplo) deixa o active_ preso PARA SEMPRE — e como TODO widget exige
+por exemplo) deixa o active_ preso PARA SEMPRE — e como todo widget exige
 `active_ == 0` para capturar um press novo, a UI inteira morre: o render 3D
 continua, nada responde ("a engine trava"). O beginFrame não o resetava (e
 não PODE resetar aí: o clique dispara no frame do release, o active_ tem de

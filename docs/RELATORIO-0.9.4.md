@@ -225,7 +225,7 @@ funcionar".
 | G1-2 | FontAtlas ASCII 32..126 | 4 ranges + UTF-8 + cobertura exigida + strings | R-008 + textfit code points + gate | 9.7 |
 | G1-3 | tint f32[3]→APIs f32[4] + clamp 64px | tint4 alfa 1 + linha reservada por célula | material_legendas_inteiras_g13 | (desenho no 9.7) |
 | G1-4 | onCreate emptyBox z-order + refresh parcial + header 4 linhas + 2 colunas fixas | emptyBox inteiro + buildTopBar + AUTO_FIT ÷180dp | projects_ui_check REESCRITO | (Java — structural gate) |
-| G1-5 | saveLayoutNow TODO frame | debounce 1,5s + PAUSE flush + sombra | (9.8 afira o fluxo real) | 9.8 |
+| G1-5 | saveLayoutNow todo frame | debounce 1,5s + PAUSE flush + sombra | (9.8 afira o fluxo real) | 9.8 |
 | G1-6 | CamGizmo.cpp pickSceneTic (centro 44px) | AABB projetado + mais próximo da câmara | R-009 cameratic_pick_pelo_corpo_g16 | 9.10 |
 | G2-7 | EditorUi.cpp ícone sem BodyComp | hierIconFor (BodyComp primeiro) + Static/Rigid | hierarquia_icone_por_tipo_g27 | 9.11 |
 | G2-8 | labels debug + body 1 linha + scroll persistente | TwoCol ×3 + Posição + inspPrevSelected | física-2-col + ao-topo (g28) | 9.11 |
