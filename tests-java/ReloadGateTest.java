@@ -280,7 +280,15 @@ public final class ReloadGateTest {
             if (apanhada.get() != null) {
                 mecanismoDetetado = true;
                 final String cls = apanhada.get().getClass().getSimpleName();
-                check(cls.startsWith("ConcurrentModification"),
+                // 0.9.6 (CI-fix): o MECANISMO é a iteração concorrente da
+                // ArrayList — a exceção que ela lança depende do TIMING da
+                // corrida: ConcurrentModificationException (checkForComod)
+                // OU NoSuchElementException (o cursor passa o fim quando o
+                // clear() ganha a corrida). AS DUAS provam o mecanismo do
+                // REG-001 (o flake do run 37219675961 — a classe detetada
+                // foi NoSuchElementException, mesmo mecanismo)
+                check(cls.startsWith("ConcurrentModification")
+                        || cls.equals("NoSuchElementException"),
                         "R-005: o mecanismo do crash original lanca a excecao "
                         + "esperada (classe detetada: " + cls + ")");
             }
