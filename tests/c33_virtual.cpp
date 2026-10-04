@@ -1183,9 +1183,16 @@ int main() {
         check(g_scene.get(g_editor.scriptWin.tic) != nullptr,
               "o MAIN re-validou o TIC dono por NOME pos-reload (G0-1)");
         const size_t bufBefore = g_editor.scriptWin.buf.size();
-        // toque no CORPO (meio do ecra portrait) → teclado in-app + IME
+        // 0.9.6 (G3): o toque no CORPO pede o IME DO SISTEMA e o teclado
+        // próprio CEDA (a política de coexistência — nunca os dois)
+        g_editor.scriptWin.kbOpen = true;
         tap(360.0f, 400.0f);
-        check(g_editor.scriptWin.kbOpen, "toque no corpo ABRE o teclado in-app");
+        check(!g_editor.scriptWin.kbOpen,
+              "toque no corpo: o teclado próprio CEDA ao IME (G3)");
+        // o teclado próprio ABRE pelo BOTÃO do cabeçalho (docsX-152+24)
+        tap(504.0f - 152.0f + 24.0f, 28.0f);
+        check(g_editor.scriptWin.kbOpen,
+              "o BOTÃO do cabeçalho abre o teclado próprio (G3)");
         // tecla A (linha 0, col 0) do teclado desenhado
         {
             const f32 keyW = (720.0f - 16.0f - 9.0f * 6.0f) / 10.0f;
@@ -1840,13 +1847,14 @@ int main() {
 
         passo("11.10 os níveis I/N/S: Silencioso apaga a strip");
         {
-            // o botão do nível em docsX-104 (docsX=504) a y=28
-            tap(504.0f - 104.0f + 24.0f, 28.0f);
+            // 0.9.6 (G3): o botão do nível está em docsX-200 (o do teclado
+            // próprio entrou em docsX-152) — docsX=504, y=28
+            tap(504.0f - 200.0f + 24.0f, 28.0f);
             check(g_editor.scriptWin.helpLevel == 2, "N → S (Silencioso)");
             check(editor::scriptwin::helpStripLine1(g_editor.scriptWin)
                       .empty(),
                   "Silencioso: a strip APAGA (sem encher o ecrã)");
-            tap(504.0f - 104.0f + 24.0f, 28.0f);
+            tap(504.0f - 200.0f + 24.0f, 28.0f);
             check(g_editor.scriptWin.helpLevel == 0, "S → I (Iniciante)");
             check(!editor::scriptwin::helpStripLine1(g_editor.scriptWin)
                       .empty(),
@@ -1854,7 +1862,7 @@ int main() {
             check(!editor::scriptwin::helpStripLine2(g_editor.scriptWin)
                       .empty(),
                   "Iniciante: SEMPRE com o exemplo (2 linhas)");
-            tap(504.0f - 104.0f + 24.0f, 28.0f);
+            tap(504.0f - 200.0f + 24.0f, 28.0f);
             check(g_editor.scriptWin.helpLevel == 1, "I → N (volta ao Normal)");
         }
 
@@ -2144,9 +2152,14 @@ int main() {
             frame();
             const f32 kbBottom = 1536.0f - g_ui.safeArea().bottom;
             const f32 spaceY = kbBottom - 32.0f;
+            // 0.9.6 (G3): a linha de baixo tem 4 SETAS antes do espaço —
+            // [<][^][v][>][ESPACO 2u]… unit=(704-9*6)/12=54.2
+            const f32 unit3 = (720.0f - 16.0f - 9.0f * 6.0f) / 12.0f;
+            const f32 spaceX =
+                8.0f + 4.0f * (unit3 + 6.0f) + unit3;
             const u32 len0 = (u32)g_editor.scriptWin.buf.size();
             const u32 caret0 = g_editor.scriptWin.caret;
-            tap(80.0f, spaceY);
+            tap(spaceX, spaceY);
             check(g_editor.scriptWin.buf.size() == len0 + 1 &&
                       g_editor.scriptWin.caret == caret0 + 1 &&
                       g_editor.scriptWin.buf[caret0] == ' ',
@@ -2282,6 +2295,86 @@ int main() {
                       ">= code points em glifos)");
             }
             g_editor.docsScreen.open = false;
+        }
+
+        // ---- 12.7 (G3): O TECLADO PRÓPRIO — setas, shift, coexistência --
+        passo("12.7 teclado próprio: setas movem o cursor, shift, política");
+        {
+            // portrait + insets T96/B48 (o par do editor)
+            eglstub::g_surfaceW = 720;
+            eglstub::g_surfaceH = 1536;
+            app12.contentRect = {0, 96, 720, 1488};
+            onAppCmd(&app12, APP_CMD_TERM_WINDOW);
+            onAppCmd(&app12, APP_CMD_INIT_WINDOW);
+            if (!g_font.ok()) {
+                const char* paths[] = {FONT_FIXTURE};
+                g_font.loadFromPaths(paths, 1, 28.0f);
+            }
+            g_ui.setFont(&g_font);
+            openScriptEditor(g_scene.find("Ator"));
+            g_editor.scriptWin.helpLevel = 2;   // strip fora (matemática)
+            g_editor.scriptWin.kbOpen = true;
+            frame();
+            const f32 unit = (720.0f - 16.0f - 9.0f * 6.0f) / 12.0f;
+            const f32 kbTop = 1536.0f - 48.0f -
+                              (5.0f * 48.0f + 4.0f * 6.0f + 2.0f * 8.0f);
+            const f32 botY = kbTop + 8.0f + 4.0f * (48.0f + 6.0f) + 24.0f;
+            // (a) AS SETAS: [ < ][ ^ ][ v ][ > ] — o cursor mexe-se
+            {
+                g_editor.scriptWin.buf = "abc";
+                g_editor.scriptWin.caret = 3;
+                tap(8.0f + unit * 0.5f, botY);          // <
+                check(g_editor.scriptWin.caret == 2,
+                      "12.7 a seta < recua o cursor");
+                tap(8.0f + 3.0f * (unit + 6.0f) + unit * 0.5f, botY);  // >
+                check(g_editor.scriptWin.caret == 3,
+                      "12.7 a seta > avança o cursor");
+            }
+            // (b) O SHIFT: a tecla Aa alterna maiúsculas/minúsculas
+            {
+                // a tecla Aa: 10ª coluna da 3ª fila de letras (row 2)
+                const f32 keyW = (720.0f - 16.0f - 9.0f * 6.0f) / 10.0f;
+                const f32 rowW = 9.0f * keyW + 8.0f * 6.0f;
+                const f32 x0 = (720.0f - rowW) * 0.5f;
+                const f32 shX = x0 + 9.0f * (keyW + 6.0f) + keyW * 0.5f;
+                const f32 shY = kbTop + 8.0f + 2.0f * (48.0f + 6.0f) + 24.0f;
+                const bool lower0 = g_editor.scriptWin.kbLower;
+                tap(shX, shY);
+                check(g_editor.scriptWin.kbLower == !lower0,
+                      "12.7 a tecla Aa alterna maiúsculas/minúsculas");
+                // e o caso ATIVO escreve: tecla A da 1ª fila
+                const u32 len0 = (u32)g_editor.scriptWin.buf.size();
+                g_editor.scriptWin.caret = len0;
+                tap(x0 + keyW * 0.5f,
+                    kbTop + 8.0f + 24.0f);
+                check(g_editor.scriptWin.buf.size() == len0 + 1 &&
+                          (g_editor.scriptWin.buf[len0] == 'A' ||
+                           g_editor.scriptWin.buf[len0] == 'a'),
+                      "12.7 a tecla escreve NO CASO selecionado");
+            }
+            // (c) A COEXISTÊNCIA: o botão do cabeçalho ABRE o próprio e
+            // o main ESCONDE o IME (result 7 → jniImeHide no registo JNI)
+            {
+                g_editor.scriptWin.kbOpen = false;
+                frame();
+                tap(504.0f - 152.0f + 24.0f, 96.0f + 28.0f);
+                check(g_editor.scriptWin.kbOpen,
+                      "12.7 o BOTÃO abre o teclado próprio");
+                check(logHas("teclado próprio aberto"),
+                      "12.7 o main ESCONDEU o IME do sistema (política)");
+                // o toque no corpo CEDA (o IME do sistema é pedido)
+                tap(360.0f, 400.0f);
+                check(!g_editor.scriptWin.kbOpen,
+                      "12.7 o toque no corpo fecha o próprio (política: "
+                      "nunca os dois)");
+            }
+            closeScriptEditor();
+            // volta ao landscape
+            eglstub::g_surfaceW = 1536;
+            eglstub::g_surfaceH = 720;
+            app12.contentRect = {0, 96, 1536, 672};
+            onAppCmd(&app12, APP_CMD_TERM_WINDOW);
+            onAppCmd(&app12, APP_CMD_INIT_WINDOW);
         }
 
         onAppCmd(&app12, APP_CMD_TERM_WINDOW);

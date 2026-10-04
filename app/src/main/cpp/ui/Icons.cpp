@@ -719,6 +719,28 @@ constexpr Polyline kRigidLines[] = {
     {16, 2}, {18, 2},
 };
 
+// ---- Keyboard (0.9.6 G3 — o botão do teclado próprio do editor) -------
+constexpr f32 kKeyboardPts[] = {
+    3.0f, 6.0f,   21.0f, 6.0f,    // corpo do teclado (rect aberto)
+    21.0f, 6.0f,  21.0f, 18.0f,
+    21.0f, 18.0f, 3.0f, 18.0f,
+    3.0f, 18.0f,  3.0f, 6.0f,
+    5.5f, 10.0f,  5.5f, 10.0f,    // fila de cima (6 teclas = pontos)
+    8.5f, 10.0f,  8.5f, 10.0f,
+    11.5f, 10.0f, 11.5f, 10.0f,
+    14.5f, 10.0f, 14.5f, 10.0f,
+    17.5f, 10.0f, 17.5f, 10.0f,
+    6.5f, 14.0f,  6.5f, 14.0f,    // fila de baixo (barra + 2 teclas)
+    17.5f, 14.0f, 17.5f, 14.0f,
+    9.5f, 14.0f,  14.5f, 14.0f,   // a BARRA de espaço
+};
+constexpr Polyline kKeyboardLines[] = {
+    {0, 2}, {2, 2}, {4, 2}, {6, 2},   // o rect
+    {8, 1}, {9, 1}, {10, 1}, {11, 1}, {12, 1},   // teclas (pontos)
+    {13, 1}, {14, 1},                   // 2 teclas
+    {15, 2},                             // a barra
+};
+
 const IconDef kDefs[] = {
     {kMovePts,          12, kMoveLines,          6},
     {kRotatePts,        18, kRotateLines,        4},
@@ -771,6 +793,7 @@ const IconDef kDefs[] = {
     {kBackPts,           6, kBackLines,          3},
     {kStaticPts,        14, kStaticLines,        7},
     {kRigidPts,         20, kRigidLines,        10},
+    {kKeyboardPts,      32, kKeyboardLines,      12},
 };
 static_assert(sizeof(kDefs) / sizeof(kDefs[0]) ==
               static_cast<size_t>(Icon::Count), "tabela de ícones incompleta");

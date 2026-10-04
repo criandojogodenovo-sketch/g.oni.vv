@@ -5070,9 +5070,17 @@ void frame() {
             g_editor.docsScreen.expanded = -1;
             elog::info("voni: docs abertas (lupa do editor de script)");
         } else if (sr == 5) {
-            // toque no corpo: o IME do sistema é re-pedido (foco)
+            // toque no corpo: o IME do sistema é re-pedido (foco) — o
+            // teclado próprio já CEDOU lá dentro (a política G3: os dois
+            // são ALTERNATIVAS, nunca um por cima do outro)
             storage::jniImeShow();
             elog::info("voni: IME re-pedido (toque no corpo do editor)");
+        } else if (sr == 7) {
+            // 0.9.6 (G3): o botão do TECLADO PRÓPRIO abriu-o — o IME do
+            // sistema sai do ecrã (a política de coexistência)
+            storage::jniImeHide();
+            elog::info("voni: teclado próprio aberto — IME do sistema "
+                       "escondido");
         } else if (sr == 6) {
             // 0.9.5 · COPIAR REFERÊNCIA PARA IA: a referência V.ONI
             // COMPLETA (gerada do REGISTO — a mesma fonte das Docs) vai

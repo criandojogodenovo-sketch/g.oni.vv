@@ -443,7 +443,9 @@ TEST(scriptwin_toque_no_corpo_abre_teclado_e_pede_ime) {
         e.input.clearEdges();
     }
     EXPECT(r == 5);                 // o main re-pede o IME
-    EXPECT(e.st.scriptWin.kbOpen);  // e o teclado in-app abriu
+    // 0.9.6 (G3): a POLÍTICA DE COEXISTÊNCIA — o teclado próprio CEDA ao
+    // IME do sistema (nunca os dois); abre pelo BOTÃO do cabeçalho
+    EXPECT(!e.st.scriptWin.kbOpen);
     EXPECT(e.st.scriptWin.open);    // digitar/toque NÃO fecha
     vv::editor::scriptwin::close(e.st.scriptWin);
 }
@@ -821,20 +823,22 @@ TEST(scriptwin_botao_nivel_cicla_e_o_tab_do_teclado_existe) {
 
     // o botão do NÍVEL cicla N→S→I→N (o draw processa o toque)
     EXPECT(e.st.scriptWin.helpLevel == 1);
-    // 720×1536 portrait: o botão está a docsX-104 com docsX=720-216=504
-    e.tap(504.0f - 104.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
+    // 0.9.6 (G3): 720×1536 portrait — o botão do nível está a docsX-200
+    // (docsX=504; o do teclado próprio entrou em docsX-152)
+    e.tap(504.0f - 200.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
     EXPECT(e.st.scriptWin.helpLevel == 2);
-    e.tap(504.0f - 104.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
+    e.tap(504.0f - 200.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
     EXPECT(e.st.scriptWin.helpLevel == 0);
-    e.tap(504.0f - 104.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
+    e.tap(504.0f - 200.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
     EXPECT(e.st.scriptWin.helpLevel == 1);
 
-    // o TAB do teclado in-app: a tecla existe na linha de baixo —
-    // [ESPACO 2u][TAB 1u][PAG 1u][APAGA 2u][ENTER 2u][FECHAR 1u]
-    // unit = (720-16-5*6)/9 = 74.9; TAB em x = 8+2*74.9+6 .. +74.9
+    // 0.9.6 (G3): a linha de baixo do teclado — [<][^][v][>][ESPACO 2u]
+    // [TAB 1u][PAG 1u][APAGA 1.5u][ENTER 1.5u][FECHAR 1u] = 12u+9g
+    // unit = (720-16-9*6)/12 = 54.2; TAB após 4 setas + espaço 2u
     {
-        const f32 unit = (720.0f - 16.0f - 5.0f * 6.0f) / 9.0f;
-        const f32 tabX = 8.0f + 2.0f * unit + 6.0f + unit * 0.5f;
+        const f32 unit = (720.0f - 16.0f - 9.0f * 6.0f) / 12.0f;
+        const f32 tabX = 8.0f + 4.0f * (unit + 6.0f) + 2.0f * unit + 6.0f +
+                         unit * 0.5f;
         const f32 kbTop = 1536.0f - 40.0f - 0.0f -
                           (5.0f * 48.0f + 4.0f * 6.0f + 2.0f * 8.0f);
         const f32 tabY = kbTop + 8.0f + 4.0f * (48.0f + 6.0f) + 24.0f;

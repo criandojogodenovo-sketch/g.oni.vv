@@ -87,6 +87,8 @@ enum class Icon : u8 {
     // ---- FASE 9 (G2-7 — hierarquia consulta o BodyComp) ----
     Static,         // corpo ESTÁTICO (bloco assente no chão — tic_static)
     Rigid,          // corpo RÍGIDO (bola com rasto de queda — tic_rigid)
+    // ---- 0.9.6 (G3 — o teclado próprio do editor de script) ----
+    Keyboard,       // teclado (rect + 2 filas de teclas)
     Count
 };
 

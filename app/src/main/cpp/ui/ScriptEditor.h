@@ -73,7 +73,8 @@ constexpr u64 kDocsId = 6554;   // 🔍 lupa — abre as Docs (G0-3)
 constexpr u64 kHelpLevelId = 6555; // I/N/S — nível da ajuda (0.9.5)
 constexpr u64 kCopyRefId = 6556;   // 📋 copiar referência V.ONI (0.9.5)
 constexpr u64 kFixId = 6557;   // 0.9.6 (G2-7e): botão SUBSTITUIR da barra de erro
-constexpr u64 kKbBase = 6560;   // teclas do teclado in-app (40 + 6 da base)
+constexpr u64 kKbToggleId = 6558; // 0.9.6 (G3): botão do TECLADO PRÓPRIO (cabeçalho)
+constexpr u64 kKbBase = 6560;   // teclas do teclado in-app (40 + 8 da base)
 
 constexpr f32 kTopH = 56.0f;    // barra de topo (padrão D)
 constexpr f32 kErrH = 40.0f;    // barra de erro (1 linha 12sp + ícone)

@@ -223,13 +223,60 @@ bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop) {
             }
             x += keyW + kKbGap;
         }
+        // 0.9.6 (G3) · O SHIFT na casa LIVRE da 3ª fila (row 2): alterna
+        // maiúsculas/minúsculas — NÃO escreve; aceso quando MAIÚSCULAS
+        if (row == 2) {
+            const UiRect rs{x, y, keyW, kKbKeyH};
+            const bool caps = !st.kbLower;
+            const bool held = ui.widgetActive(kKbBase + 46);
+            ui.panelRounded(rs.x, rs.y, rs.w, rs.h, theme::kRadiusCard,
+                            held ? theme::kTheme.surface2
+                                 : (caps ? theme::kTheme.accent
+                                         : theme::kTheme.surface));
+            ui.frameRounded(rs.x, rs.y, rs.w, rs.h, 1.0f, theme::kRadiusCard,
+                            caps ? theme::kTheme.accent
+                                 : theme::kTheme.border);
+            if (ui.hasFont()) {
+                const f32 tw = ui.fontWidth("Aa");
+                ui.label(rs.x + (rs.w - tw) * 0.5f, rs.y + 14.0f, "Aa",
+                         caps ? theme::kTheme.bg : theme::kTheme.text1);
+            }
+            if (ui.widgetHit(kKbBase + 46, rs.x, rs.y, rs.w, rs.h)) {
+                st.kbLower = !st.kbLower;   // troca de caso — NÃO escreve
+            }
+        }
         y += kKbKeyH + kKbGap;
     }
 
-    // linha de baixo (0.9.5: +TAB dos esqueletos):
-    // [ESPACO 2u][TAB 1u][PAG 1u][APAGA 2u][ENTER 2u][FECHAR 1u] = 9u+5g
-    const f32 unit = (innerW - 5.0f * kKbGap) / 9.0f;
+    // 0.9.6 (G3) — a linha de baixo COM SETAS (a spec: setas, apagar,
+    // enter, espaço): [<][^][v][>][ESPACO 2u][TAB][PAG][APAGA 1.5u][ENTER
+    // 1.5u][FECHAR] = 12u + 9g — as teclas continuam >=48dp (1u ~= 54px no
+    // retrato 720). As setas EMITEM as Key do IME (o MESMO applyEvent — o
+    // caret move-se pelo caminho de sempre; o ^/v sobem/descem linha)
+    const f32 unit = (innerW - 9.0f * kKbGap) / 12.0f;
     f32 x = kbX + kKbPad;
+    // as SETAS (labels ASCII — o atlas é o da casa; "<" "^" "v" ">")
+    {
+        struct ArrowKey {
+            const char* lbl;
+            ime::Key key;
+        };
+        const ArrowKey arrows[4] = {
+            {"<", ime::Key::Left},  {"^", ime::Key::Up},
+            {"v", ime::Key::Down},  {">", ime::Key::Right},
+        };
+        for (int a = 0; a < 4; ++a) {
+            if (ui.button(kKbBase + 50 + static_cast<u64>(a), x, y, unit,
+                          kKbKeyH, arrows[a].lbl)) {
+                ime::Event ev;
+                ev.isText = false;
+                ev.key = arrows[a].key;
+                applyEvent(st, ev);
+                typed = true;
+            }
+            x += unit + kKbGap;
+        }
+    }
     if (ui.button(kKbBase + 40, x, y, 2.0f * unit, kKbKeyH, "ESPACO")) {
         ime::Event ev;
         ev.isText = true;
@@ -269,22 +316,22 @@ bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop) {
         }
     }
     x += unit + kKbGap;
-    if (ui.button(kKbBase + 42, x, y, 2.0f * unit, kKbKeyH, "APAGA")) {
+    if (ui.button(kKbBase + 42, x, y, 1.5f * unit, kKbKeyH, "APAGA")) {
         ime::Event ev;
         ev.isText = false;
         ev.key = ime::Key::Del;
         applyEvent(st, ev);
         typed = true;
     }
-    x += 2.0f * unit + kKbGap;
-    if (ui.button(kKbBase + 43, x, y, 2.0f * unit, kKbKeyH, "ENTER")) {
+    x += 1.5f * unit + kKbGap;
+    if (ui.button(kKbBase + 43, x, y, 1.5f * unit, kKbKeyH, "ENTER")) {
         ime::Event ev;
         ev.isText = false;
         ev.key = ime::Key::Enter;
         applyEvent(st, ev);
         typed = true;
     }
-    x += 2.0f * unit + kKbGap;
+    x += 1.5f * unit + kKbGap;
     {
         // FECHAR o teclado (o ChevronDown ocupa a última unidade)
         const UiRect r{x, y, unit, kKbKeyH};
@@ -713,9 +760,40 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
             result = 6;
         }
 
+        // 0.9.6 (G3) · O BOTÃO DO TECLADO PRÓPRIO: acende quando o teclado
+        // está aberto; tocar ABRE o teclado in-app e ESCONDE o IME do
+        // sistema (a POLÍTICA: os dois são ALTERNATIVAS — nunca um por
+        // cima do outro; o toque no corpo pede o IME do sistema e fecha o
+        // teclado próprio)
+        {
+            const UiRect rk{docsX - 152.0f, topY + (hdrH - 48.0f) * 0.5f,
+                            48.0f, 48.0f};
+            const bool heldK = ui.widgetActive(kKbToggleId);
+            ui.panelRounded(rk.x, rk.y, rk.w, rk.h, theme::kRadiusCard,
+                            st.kbOpen ? theme::kTheme.accent
+                                      : (heldK ? theme::kTheme.surface2
+                                               : theme::kTheme.surface));
+            ui.frameRounded(rk.x, rk.y, rk.w, rk.h, 1.0f, theme::kRadiusCard,
+                            st.kbOpen ? theme::kTheme.accent
+                                      : theme::kTheme.border);
+            icons::drawIcon(ui, icons::Icon::Keyboard,
+                            rk.x + (rk.w - 24.0f) * 0.5f,
+                            rk.y + (rk.h - 24.0f) * 0.5f, 24.0f,
+                            st.kbOpen ? theme::kTheme.bg
+                                      : theme::kTheme.text1);
+            if (ui.widgetHit(kKbToggleId, rk.x, rk.y, rk.w, rk.h)) {
+                if (!st.kbOpen) {
+                    st.kbOpen = true;
+                    result = 7;   // o main esconde o IME do sistema
+                } else {
+                    st.kbOpen = false;
+                }
+            }
+        }
+
         // 0.9.5 · O NÍVEL DA AJUDA (I/N/S): Iniciante (desc+exemplo) ·
         // Normal (desc) · Silencioso (nada) — um toque cicla
-        const UiRect rl{docsX - 104.0f, topY + (hdrH - 48.0f) * 0.5f, 48.0f,
+        const UiRect rl{docsX - 200.0f, topY + (hdrH - 48.0f) * 0.5f, 48.0f,
                         48.0f};
         const bool heldL = ui.widgetActive(kHelpLevelId);
         ui.panelRounded(rl.x, rl.y, rl.w, rl.h, theme::kRadiusCard,
@@ -966,9 +1044,14 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     if (result == 0) {
         f32 tx = 0.0f, ty = 0.0f;
         if (ui.scrollTap(kScrollId, tx, ty)) {
-            if (!st.kbOpen) {
-                st.kbOpen = true;
-            }
+            // 0.9.6 (G3) · A POLÍTICA DE COEXISTÊNCIA (a decisão primeiro,
+            // como a spec pede): o teclado PRÓPRIO e o IME do SISTEMA são
+            // ALTERNATIVAS — ambos ancoram no fundo e sobrepõam-se. O
+            // toque no corpo pede o IME DO SISTEMA (GBoard: acentos,
+            // gestos) e o teclado próprio FECHA; o botao do teclado no
+            // cabeçalho faz o INVERSO (abre o próprio + esconde o IME,
+            // result 7). NUNCA os dois ao mesmo tempo.
+            st.kbOpen = false;
             // a linha/coluna do toque → o offset em bytes → a palavra
             {
                 const f32 lh2 = lineHeight(ui);
