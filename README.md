@@ -1,3 +1,23 @@
+## 0.9.4 — FASE 9: G0 BLOQUEADORES + G1 PONTOS QUEBRADOS + G2 MOCKS
+
+**O que mudou (só apresentação, exceto G1-6 e a lógica mínima dos fixes G0):**
+- G0 (BLOQUEADORES): o editor de script ACEITA digitar sem fechar (caret livre + teclado in-app de 2 páginas + IME re-pedido pós-rotação + re-validação do TIC dono por nome); script NOVO abre com o esqueleto `central main { on moment { } allmoments { } }` e cursor no interior; LUPA na toolbar do editor + a linha "Ver docs da V.ONI" do Settings (morta desde a 0.9.2) volta a abrir as Docs com pesquisa viva.
+- G1 (QUEBRADOS): toolbar inferior ANCORADA ao rect da viewport (sobe com o painel de baixo, nunca cobre outro painel; só ícones, nome só no ativo; snap = íman; "+" no canto inf-dir); ACENTOS (atlas Latin-1 + Latin Ext-A + "…"; iteração UTF-8 por code point; TODAS as strings da UI acentuadas — "ÁUDIO" desenha inteiro); MATERIAL com legendas inteiras por célula ("Textura/Cor base/Prévia") e o quadrado #FFFFFF ESCURO morto (tint f32[3] lido como f32[4] — alfa lixo); ECRÃ DE PROJETOS sem o quadrado fantasma (emptyBox inteiro desliga), cabeçalho NUMA LINHA (logo+título · pesquisa · ordenar-ícone · Novo FILL + Importar CONTORNO), grelha ADAPTÁVEL (÷180dp, mín. 2, 16:9); layout.json em DEBOUNCE 1,5s (1 write por drag, flush no pause, UMA linha "layout guardado (motivo)"); TOCAR O CORPO de um TIC seleciona-o (AABB projetado; o mais próximo da câmara vence; cada mudança LOGA o motivo) — a única mudança de Lógica.
+- G2 (MOCKS): hierarquia com ícone POR TIPO DE CORPO (tic_static/tic_player/tic_rigid/tic_camera) e long-press no nome truncado → nome completo; Inspector SEM labels de debug ("malha: cubo"/"textura: —"/"entrada: …"), FÍSICA em duas colunas (tipo/forma/no chão), "Posição", e VOLTA AO TOPO quando o TIC muda; BARRA ÚNICA de 56dp (menu+tabs+play/pause+gear — o viewport GANHOU 48px; sliders morto e triad "pontinhos fantasma" REMOVIDOS); 4.º ícone da barra vertical = COPY padrão.
+- SENTINELAS R-007..R-009 (docs/REGRESSOES.md) + GATE de acentos no CI (`glyph_source_check.py`); harness do dispositivo virtual na FASE 9 (209 checks).
+
+**Checklist C33/RMX3624 (VERIFICAR no device — 0.9.4):**
+1. Editor de script: abrir um script NOVO → esqueleto base com cursor dentro; digitar com o GBoard (incl. acentos) SEM fechar; back salva; reabrir → fonte intacta.
+2. "ÁUDIO", "Física", "Animação", "seleção" desenham COM acentos em toda a UI (Inspector, Settings, Consola).
+3. Toolbar: com o painel de baixo ABERTO a toolbar SOBE e não o cobre; o "+" vive no canto inferior direito da viewport.
+4. Ecrã de projetos: SEM quadrado cinzento com projetos; cabeçalho numa linha; rodar o device → grelha adapta as colunas (16:9).
+5. Tocar no CORPO de um cubo grande seleciona-o (não só o centro); logcat "seleção: TIC '…' (toque no viewport)".
+6. Arrastar o drawer devagar → UMA linha "layout guardado (painel de baixo)" ~1,5s depois (antes: 4 writes em 40s).
+7. Barra de cima ÚNICA (menu+3D/UI/ÁUDIO+play+gear) — viewport maior; SEM pontinhos no canto sup-dir.
+8. Hierarquia: corpo estático/rígido/personagem com ícones próprios; segurar o dedo num nome cortado → nome completo.
+9. Inspector: Física em duas colunas sem truncar; trocar de TIC → volta ao topo (Transform visível).
+10. 60fps mantidos (barra de status) com painéis abertos; APK 0.9.4 (versionCode 47) no RMX3624.
+
 ## 0.9.3 — HOTFIX: OS DOIS CRASHES DO DEVICE (REG-001/REG-002 = R-005/R-006)
 
 **O que mudou (só os 2 crashes + sentinelas — CLÁUSULA CALMA):**
