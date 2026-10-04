@@ -50,9 +50,11 @@
 #include "platform/ImeQueue.h"
 #include "ui/UiContext.h"
 #include "voni/Voni.h"
+#include "voni/VoniHighlight.h"   // 0.9.6: renderPieces (Cls/BlockCommentState)
 #include "voni/VoniRegistry.h"   // 0.9.5: o editor que ensina (registo)
 
 #include <string>
+#include <vector>
 
 namespace vv {
 class InputState;
@@ -70,6 +72,7 @@ constexpr u64 kScrollId = 6553; // região de scroll do código
 constexpr u64 kDocsId = 6554;   // 🔍 lupa — abre as Docs (G0-3)
 constexpr u64 kHelpLevelId = 6555; // I/N/S — nível da ajuda (0.9.5)
 constexpr u64 kCopyRefId = 6556;   // 📋 copiar referência V.ONI (0.9.5)
+constexpr u64 kFixId = 6557;   // 0.9.6 (G2-7e): botão SUBSTITUIR da barra de erro
 constexpr u64 kKbBase = 6560;   // teclas do teclado in-app (40 + 6 da base)
 
 constexpr f32 kTopH = 56.0f;    // barra de topo (padrão D)
@@ -81,6 +84,20 @@ constexpr f32 kHelpStrip2H = 56.0f;  // 2 linhas (Iniciante/toque)
 // isto e o cursor NO INTERIOR (posição do caret após "allmoments { ").
 extern const char* const kSkeleton;
 extern const u32 kSkeletonCaret;
+
+// 0.9.6 (G2-7b · R-010) — O PLANO DE RENDER de uma linha: as PEÇAS que o
+// editor desenha, cobrindo TODOS os bytes (os GAPS entre tokens — espaços,
+// `{ } ( ) = +` — eram SALTADOS pelo classificador e o texto aparecia SEM
+// espaços e sem `{` enquanto o cursor deixava o espaço: guardado !=
+// renderizado). A sentinela R-010 afere que a concatenação das peças é a
+// LINHA INTEIRA — o render nunca mente.
+struct RenderPiece {
+    u32 begin;                  // offset em bytes na linha
+    u32 len;
+    voni::hl::Cls cls;          // Cls::User nos gaps (cor neutra)
+};
+std::vector<RenderPiece> renderPieces(const std::string& line,
+                                      voni::hl::BlockCommentState& bc);
 
 struct State {
     bool open = false;          // janela visível (gate modal)
@@ -105,7 +122,18 @@ struct State {
     u8 helpLevel = 1;
     bool helpTapped = false;    // a strip mostra a explicação do toque
     std::string helpWord;       // a palavra sob o dedo (ou vazia)
+    // 0.9.6 (G2-7e) · O BOTÃO SUBSTITUIR: quando o erro-que-ensina tem
+    // equivalente de 1 token (if→exist…), a barra de erro acende o botão;
+    // o toque troca a palavra estrangeira pela V.ONI no buffer (o caret
+    // segue a edição). Vazio = sem botão (ensina mas não substitui:
+    // case/default/elif não têm troca direta válida)
+    std::string fixFrom;        // a palavra estrangeira (ex.: "if")
+    std::string fixTo;          // o equivalente V.ONI (ex.: "exist")
 };
+
+// 0.9.6 (G2-7e): aplica o SUBSTITUIR (troca fixFrom→fixTo na linha do
+// erro; o caret segue; o erro limpa)
+void applyFix(State& st);
 
 // guarda o NOME do TIC dono (G0-1: o handle morre no TERM→INIT da rotação
 // portrait — o reload do INIT_WINDOW re-cria os TICs; o main re-valida por

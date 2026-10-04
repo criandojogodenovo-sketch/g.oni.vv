@@ -2152,6 +2152,61 @@ int main() {
                       g_editor.scriptWin.buf[caret0] == ' ',
                   "teclado ancorado: o ESPAÇO tecla no lugar certo "
                   "(acima da barra de navegação — insere NO cursor)");
+            // ---- 12.4 (G2-7c/R-010): o esqueleto fresco CORRE LIMPO ----
+            {
+                openScriptEditor(g_scene.find("Ator"));
+                check(g_editor.scriptWin.buf ==
+                          std::string(editor::scriptwin::kSkeleton),
+                      "12.4 o modelo inicial é o esqueleto da spec");
+                scriptEditorRun();
+                if (std::getenv("VV_DBG_124")) {
+                    std::printf("124: running=%d errLine=%u msg=%s\n",
+                                (int)g_editor.scriptWin.running,
+                                g_editor.scriptWin.errLine,
+                                g_editor.scriptWin.errMsg.c_str());
+                }
+                check(g_editor.scriptWin.running &&
+                          g_editor.scriptWin.errLine == 0,
+                      "12.4 Run no esqueleto fresco = ZERO erros (R-010)");
+                scriptEditorStop();
+                closeScriptEditor();
+            }
+
+            // ---- 12.5 (G2-7e): o ERRO QUE ENSINA + SUBSTITUIR -----------
+            {
+                openScriptEditor(g_scene.find("Ator"));
+                // o dono Python/JS escreve 'if'
+                g_editor.scriptWin.buf = "central main {\n  on moment { }\n}\n";
+                g_editor.scriptWin.buf = "if (x) { }\n";
+                g_editor.scriptWin.caret =
+                    (u32)g_editor.scriptWin.buf.size();
+                scriptEditorRun();
+                check(g_editor.scriptWin.errLine == 1,
+                      "12.5 o 'if' dá erro na linha 1");
+                check(g_editor.scriptWin.errMsg.find("exist") !=
+                          std::string::npos,
+                      "12.5 a mensagem ENSINA o exist");
+                check(g_editor.scriptWin.fixFrom == "if" &&
+                          g_editor.scriptWin.fixTo == "exist",
+                      "12.5 o par do SUBSTITUIR viaja com o erro (if→exist)");
+                frame();   // a barra de erro desenha (com o botão)
+                // o botão (retrato 720): x = 720-128+60 = 652 ·
+                // y = errY(1536-48-40)+4+16 = 1468
+                if (std::getenv("VV_DBG_125")) {
+                    std::printf("125: errLine=%u msg=%s fix=%s->%s\n",
+                                g_editor.scriptWin.errLine,
+                                g_editor.scriptWin.errMsg.c_str(),
+                                g_editor.scriptWin.fixFrom.c_str(),
+                                g_editor.scriptWin.fixTo.c_str());
+                }
+                tap(652.0f, 1468.0f);
+                check(g_editor.scriptWin.buf == "exist (x) { }\n",
+                      "12.5 SUBSTITUIR: o 'if' virou 'exist' no buffer");
+                check(g_editor.scriptWin.errLine == 0,
+                      "12.5 o erro LIMPA após a substituição");
+                closeScriptEditor();
+            }
+
             closeScriptEditor();
             // volta ao landscape p/ as próximas fases
             eglstub::g_surfaceW = 1536;
@@ -2159,6 +2214,74 @@ int main() {
             app12.contentRect = {0, 96, 1536, 672};
             onAppCmd(&app12, APP_CMD_TERM_WINDOW);
             onAppCmd(&app12, APP_CMD_INIT_WINDOW);
+        }
+
+        // ---- 12.6 (G2-5): Docs com QUEBRA DE LINHA (sem "...") -----------
+        passo("12.6 Docs: descrição inteira com wrap (altura variável)");
+        {
+            if (!g_font.ok()) {
+                const char* paths[] = {FONT_FIXTURE};
+                g_font.loadFromPaths(paths, 1, 28.0f);
+            }
+            g_ui.setFont(&g_font);
+            g_editor.docsScreen.open = true;
+            std::snprintf(g_editor.docsScreen.query,
+                          sizeof(g_editor.docsScreen.query), "%s",
+                          "colorpars");
+            g_editor.docsScreen.queryLen = 9;
+            g_editor.docsScreen.expanded = -1;
+            frame();
+            // a descrição do colorpars tem ~40+ code points; com o wrap a
+            // PARTIR da largura ela faz >= 2 linhas -> os glifos da 2ª
+            // linha existem ABAIXO da linha do nome (e o texto NÃO sai com
+            // "..."). Conta code points da desc REAL:
+            const voni::docs::Entry* eCP = nullptr;
+            for (const auto* ee : voni::docs::search("colorpars")) {
+                eCP = ee;
+                break;
+            }
+            check(eCP != nullptr, "12.6 a entrada colorpars existe");
+            if (eCP) {
+                u32 cps = 0;
+                for (const char* q = eCP->desc; *q;) {
+                    const unsigned char c = *q;
+                    cps += (c & 0xC0) != 0x80 ? 1 : 0;   // code points
+                    ++q;
+                }
+                // glifos na zona da lista (abaixo do campo de pesquisa)
+                const QuadBatch& g = g_ui.glyphsForTest();
+                const QuadVertex* v = g.vertices();
+                const u32 n = g.vertexCount();
+                u32 inList = 0;
+                const f32 listTop = g_ui.safeArea().top + 56.0f + 8.0f +
+                                    48.0f + 8.0f;
+                if (std::getenv("VV_DBG_126")) {
+                    std::printf("126: cps=%u listTop=%.0f safeT=%.0f\n",
+                                cps, listTop, g_ui.safeArea().top);
+                }
+                for (u32 i = 0; i + 5 < n; i += 6) {
+                    if (v[i].y > listTop) {
+                        ++inList;
+                    }
+                }
+                if (std::getenv("VV_DBG_126b")) {
+                    std::printf("126b: inList=%u cps=%u desc=[%.80s]\n",
+                                inList, cps, eCP->desc);
+                    u32 shown = 0;
+                    for (u32 i = 0; i + 5 < n && shown < 30; i += 6) {
+                        if (v[i].y > 216.0f) {
+                            std::printf("  LIST gy=%.0f gx=%.0f\n", v[i].y,
+                                        v[i].x);
+                            ++shown;
+                        }
+                    }
+                    std::printf("  totalGlyphs=%u\n", n / 6);
+                }
+                check(inList >= cps,
+                      "12.6 a descrição desenha INTEIRA (sem reticências: "
+                      ">= code points em glifos)");
+            }
+            g_editor.docsScreen.open = false;
         }
 
         onAppCmd(&app12, APP_CMD_TERM_WINDOW);

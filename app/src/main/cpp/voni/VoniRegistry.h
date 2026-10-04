@@ -101,6 +101,9 @@ tykers::Handler handlerFor(const std::string& name);
 // Devolve a linha de ensino (ou null se a palavra não é estrangeira) e
 // preenche entryName com a ENTRADA do registo que resolve (bijeção R-013).
 const char* foreignTeach(const std::string& word, const char** entryName);
+// 0.9.6 (G2-7e): a TROCA de 1 token p/ o botão Substituir do editor (a
+// tabela vive no registo — a MESMA fonte; nullptr = a palavra só ensina)
+const char* foreignReplace(const std::string& word);
 
 // ---- A REFERÊNCIA PÚBLICA (METADE 2) --------------------------------------
 // O texto COMPLETO da referência V.ONI, GERADO do registo — alimenta o

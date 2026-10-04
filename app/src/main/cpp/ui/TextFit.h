@@ -19,6 +19,7 @@
 // Compat dos testes: se o medidor NÃO conhece "…" (fake mono conta BYTES),
 // a reticência continua a funcionar — o algoritmo mede o que lhe dão.
 #include <cstdio>
+#include <vector>
 #include <cstring>
 #include "core/Types.h"
 
@@ -74,4 +75,96 @@ inline const char* ellipsize(const char* text, f32 maxW, WidthFn&& width,
 }
 
 } // namespace textfit
+
+// ---- 0.9.6 (G2-5): QUEBRA DE LINHA por palavras ( Docs sem "…") -------------
+// O contrato da spec: nas Docs a descrição faz QUEBRA DE LINHA em vez de
+// "…". O wrap é por PALAVRAS (nunca corta uma palavra a meio nem um code
+// point a meio); palavras maiores que a largura ficam SOZINHAS na linha
+// (partidas por largura em fronteiras de code point — o último recurso,
+// nomes longos de comandos continuam legíveis). GL-free: medidor injetado.
+namespace textwrap {
+
+struct Line {
+    u32 begin = 0;   // offset em bytes no texto original
+    u32 len   = 0;   // bytes desta linha (SEM o espaço separador)
+};
+
+template <typename WidthFn>
+inline void wrap(const char* text, f32 maxW, WidthFn&& width,
+                 std::vector<Line>& out) {
+    out.clear();
+    if (!text || !text[0] || maxW <= 0.0f) {
+        return;
+    }
+    const u32 len = std::strlen(text);
+    u32 lineStart = 0;
+    u32 cursor = 0;        // fim do último texto ACEITE na linha corrente
+    u32 i = 0;
+    while (i <= len) {
+        // começa uma palavra no cursor atual (saltando espaços à frente)
+        u32 wordStart = i;
+        while (wordStart < len && text[wordStart] == ' ') {
+            ++wordStart;
+        }
+        // fim da palavra (próximo espaço ou fim do texto)
+        u32 wordEnd = wordStart;
+        while (wordEnd < len && text[wordEnd] != ' ') {
+            ++wordEnd;
+        }
+        if (wordStart >= len) {
+            break;   // só espaços no fim — a linha termina em cursor
+        }
+        // a linha candidata vai de lineStart..wordEnd (com os espaços que
+        // lá estiverem — medem algo, mas contam para o limite)
+        char buf[512];
+        const u32 candLen = wordEnd - lineStart;
+        const u32 capped = candLen < sizeof(buf) - 1
+                               ? candLen
+                               : (u32)sizeof(buf) - 1;
+        std::snprintf(buf, sizeof(buf), "%.*s", (int)capped,
+                      text + lineStart);
+        if (cursor > lineStart && width(buf) > maxW) {
+            // NÃO CABE com esta palavra: fecha a linha em cursor e a palavra
+            // abre a PRÓXIMA (word-reject: nunca parte no meio)
+            out.push_back(Line{lineStart, cursor - lineStart});
+            lineStart = wordStart;
+            cursor = wordEnd;
+        } else if (width(buf) > maxW && cursor == lineStart) {
+            // a palavra SOZINHA não cabe: parte-a por LARGURA (fronteiras de
+            // code point) — cada pedaço é uma linha
+            u32 cut = wordEnd;
+            while (cut > wordStart) {
+                const u32 partLen = cut - wordStart;
+                const u32 cp = partLen < sizeof(buf) - 1
+                                   ? partLen
+                                   : (u32)sizeof(buf) - 1;
+                std::snprintf(buf, sizeof(buf), "%.*s", (int)cp,
+                              text + wordStart);
+                if (width(buf) <= maxW || cut == wordStart + 1) {
+                    break;
+                }
+                // recua em fronteiras de code point
+                --cut;
+                while (cut > wordStart + 1 &&
+                       (static_cast<unsigned char>(text[cut]) & 0xC0u) ==
+                           0x80u) {
+                    --cut;
+                }
+            }
+            out.push_back(Line{wordStart, cut - wordStart});
+            lineStart = cut;
+            cursor = cut;
+            i = cut;
+            continue;
+        } else {
+            cursor = wordEnd;
+        }
+        i = wordEnd;
+    }
+    if (cursor > lineStart) {
+        out.push_back(Line{lineStart, cursor - lineStart});
+    }
+}
+
+} // namespace textwrap
 } // namespace vv

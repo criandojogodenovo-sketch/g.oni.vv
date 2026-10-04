@@ -89,10 +89,24 @@ struct Error {
     bool   ok = true;
     u32    line = 0;      // 1-based; 0 = sem linha (não deveria acontecer)
     std::string message;  // PT, legível, sem jargão
+    // 0.9.6 (G2-7e) · O BOTÃO SUBSTITUIR: quando o erro-que-ensina tem
+    // equivalente de 1 token (if→exist…), o par viaja COM o erro — o
+    // editor acende o botão e troca a palavra no buffer. Vazios = ensina
+    // sem substituir (case/default/elif…). O 'break' traz o equivalente
+    // do CONTEXTO real da run (ciclo→resume, option→stopand).
+    std::string fixFrom;  // a palavra estrangeira (ex.: "if")
+    std::string fixTo;    // o equivalente V.ONI (ex.: "exist")
 
     static Error fine() { return Error{}; }
     static Error fail(u32 line_, const std::string& msg) {
         Error e; e.ok = false; e.line = line_; e.message = msg; return e;
+    }
+    static Error teach(u32 line_, const std::string& msg,
+                       const std::string& from, const std::string& to) {
+        Error e = fail(line_, msg);
+        e.fixFrom = from;
+        e.fixTo = to;
+        return e;
     }
 };
 

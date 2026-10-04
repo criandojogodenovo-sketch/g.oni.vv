@@ -95,9 +95,18 @@ bool VoniSystem::editorRestart(Scene& scene, Handle tic, const char* source,
         err = voni::Error::fail(0, "TIC inválido");
         return false;
     }
+    // 0.9.6 (G2-7c · R-010): o editor ARRANCA scripts NOVOS — um TIC sem
+    // ScriptComp (script nunca fechado/guardado) recebe o componente AQUI,
+    // o MESMO precedente do closeScriptEditor ("o fonte não se perde por
+    // um ciclo"). Antes: escrever + Run sem fechar = "o TIC não tem
+    // componente Script" — o beco sem saída que a spec proíbe (Run no
+    // modelo fresco = 0 erros).
     ScriptComp* sc = t->getComponent<ScriptComp>();
     if (!sc) {
-        err = voni::Error::fail(0, "o TIC não tem componente Script");
+        sc = t->addComponent<ScriptComp>();
+    }
+    if (!sc) {
+        err = voni::Error::fail(0, "o TIC não aceita componente Script");
         return false;
     }
     sc->source = source ? source : "";

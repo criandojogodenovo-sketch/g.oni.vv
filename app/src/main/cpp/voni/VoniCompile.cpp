@@ -1235,6 +1235,7 @@ Script Script::compile(const char* source, Error& err) {
         // (A palavra no error_pos pode ter ficado ATRÁS do ponto fatal — o
         // 'if (x) { }' morre no '{' — por isso a LINHA inteira.)
         std::string teach;
+        std::string fixFrom, fixTo;   // 0.9.6: o par do botão Substituir
         {
             u32 li = 1;
             const char* ls = source;
@@ -1262,6 +1263,12 @@ Script Script::compile(const char* source, Error& err) {
                     const std::string word(p, static_cast<size_t>(e2 - p));
                     if (const char* t = reg::foreignTeach(word, nullptr)) {
                         teach = t;
+                        // 0.9.6 (G2-7e): a TROCA de 1 token viaja com o
+                        // erro — o botão Substituir do editor acende
+                        if (const char* rep = reg::foreignReplace(word)) {
+                            fixFrom = word;
+                            fixTo = rep;
+                        }
                     }
                     p = e2;
                 } else {
@@ -1270,7 +1277,8 @@ Script Script::compile(const char* source, Error& err) {
             }
         }
         if (!teach.empty()) {
-            err = Error::fail(line, teach);
+            err = fixFrom.empty() ? Error::fail(line, teach)
+                                  : Error::teach(line, teach, fixFrom, fixTo);
         } else {
             err = Error::fail(line, "erro de sintaxe — expressão inesperada");
         }

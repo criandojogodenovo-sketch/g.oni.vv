@@ -1238,3 +1238,103 @@ TEST(regress_bijeção_da_ajuda) {
 #endif
     }
 }
+
+// ===========================================================================
+// R-010 · O EDITOR NÃO MENTE: guardado == renderizado == esqueleto válido
+// (FASE 0.9.6, G2-7b/c) — o render antigo saltava os GAPS entre tokens
+// (espaços e pontuação `{ }` ficavam SEM glifo enquanto o cursor media a
+// linha inteira); o modelo inicial tem de compilar LIMPO; o SUBSTITUIR
+// troca a palavra estrangeira no buffer.
+// ===========================================================================
+#include "ui/ScriptEditor.h"      // renderPieces/applyFix/kSkeleton
+#include "voni/VoniHighlight.h"   // BlockCommentState
+#include <cctype>
+TEST(regress_r010_editor_roundtrip) {
+    // ---- (1) AS PEÇAS COBREM A LINHA INTEIRA (guardado == renderizado) ----
+    {
+        const char* lines[] = {
+            "central main {",
+            "  on moment { }",
+            "  allmoments { }",
+            "}",
+            "v++x = 1",
+            "   ",                       // só espaços
+            "{ } ( ) [ ] = + - * / < > ! , . ; : \" _ # @",
+            "View P \"txt com espacos { }\"",
+            "// comentario com { chaves }",
+            "v++Velocidade=2.5",
+            "ação é ünico çom acentos",  // UTF-8 multibyte nos gaps
+        };
+        for (const char* ln : lines) {
+            voni::hl::BlockCommentState bc;
+            const auto pieces =
+                editor::scriptwin::renderPieces(std::string(ln), bc);
+            EXPECT(!pieces.empty());
+            // as peças são CONTÍGUAS e SOBREPOSTAS-NUNCA
+            u32 pos = 0;
+            for (const auto& p : pieces) {
+                EXPECT(p.begin == pos);
+                EXPECT(p.len > 0);
+                pos = p.begin + p.len;
+            }
+            EXPECT(pos == std::strlen(ln));   // a linha INTEIRA desenhada
+        }
+    }
+    // ---- (2) O ESQUELETO É SINTATICAMENTE VÁLIDO (Run = 0 erros) ----------
+    {
+        voni::Error err;
+        voni::Script s = voni::Script::compile(editor::scriptwin::kSkeleton,
+                                               err);
+        EXPECT(err.ok);   // o modelo inicial compila LIMPO
+        SenHost host;     // o MESMO host das outras sentinelas V.ONI
+        EXPECT(s.runStart(host, err));
+        EXPECT(err.ok);   // Run no esqueleto fresco: ZERO erros
+    }
+    // ---- (3) O SUBSTITUIR troca a PALAVRA INTEIRA e o caret segue --------
+    {
+        editor::scriptwin::State st;
+        st.buf = "central main {\n  on moment { }\n}\n";
+        st.caret = (u32)st.buf.size();
+        st.errLine = 1;              // (falso erro p/ o botão acender)
+        st.errMsg = "'if' não existe";
+        st.fixFrom = "if";
+        st.fixTo = "exist";
+        st.buf = "if (x) { }\n";
+        st.errLine = 1;
+        editor::scriptwin::applyFix(st);
+        EXPECT(st.buf == "exist (x) { }\n");     // a palavra TROCADA
+        EXPECT(st.caret == 5);                    // caret após o texto novo (exist = 5)
+        EXPECT(st.errLine == 0);                  // o erro limpa
+        // palavra PARCIAL não conta: 'iffy' NÃO é 'if'
+        editor::scriptwin::State st2;
+        st2.buf = "v++iffy=1\n";
+        st2.errLine = 1;
+        st2.fixFrom = "if";
+        st2.fixTo = "exist";
+        editor::scriptwin::applyFix(st2);
+        EXPECT(st2.buf == "v++iffy=1\n");         // intocada (palavra inteira)
+        EXPECT(st2.errLine == 1);                 // o erro fica (não trocou)
+    }
+    // ---- (4) AS PEÇAS DO ESQUELETO: cada linha coberta ---------------------
+    {
+        std::string src(editor::scriptwin::kSkeleton);
+        voni::hl::BlockCommentState bc;
+        u32 start = 0;
+        while (start < src.size()) {
+            u32 end = start;
+            while (end < src.size() && src[end] != '\n') {
+                ++end;
+            }
+            const std::string line = src.substr(start, end - start);
+            const auto pieces =
+                editor::scriptwin::renderPieces(line, bc);
+            u32 pos = 0;
+            for (const auto& p : pieces) {
+                EXPECT(p.begin == pos);
+                pos = p.begin + p.len;
+            }
+            EXPECT(pos == line.size());
+            start = (end < src.size()) ? end + 1 : end;
+        }
+    }
+}

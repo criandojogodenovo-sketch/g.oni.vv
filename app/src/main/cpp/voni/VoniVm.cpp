@@ -168,6 +168,9 @@ struct Vm {
     Flow            flow = Flow::None;
     Value           retVal;
     u32             flowLine = 0;      // linha do continue/resume/return
+    // 0.9.6 (G2-7e): a PILHA DE CONTEXTO dos construtos (0=ciclo repeat/
+    // last, 1=option) — o 'break' ensina o equivalente do contexto INTERNO
+    std::vector<u8> ctx_;
     std::vector<Frame> frames;         // params de fn
     // `with n+=1`: se existir uma GLOBAL Int com o nome, o contador é
     // ALIAS dela (o loop incrementa a variável — o valor fica depois do
@@ -184,6 +187,15 @@ struct Vm {
     [[noreturn]] void fail(u32 line, const std::string& msg) {
         if (err.ok) {
             err = Error::fail(line, msg);
+        }
+        throw VmFail{};
+    }
+    // 0.9.6 (G2-7e): fail com o PAR do botão Substituir (if→exist…; o
+    // 'break' traz o equivalente do CONTEXTO real da run)
+    [[noreturn]] void failFix(u32 line, const std::string& msg,
+                              const std::string& from, const std::string& to) {
+        if (err.ok) {
+            err = Error::teach(line, msg, from, to);
         }
         throw VmFail{};
     }
@@ -658,15 +670,21 @@ struct Vm {
 
             case Stmt::Kind::Option: {
                 Value sel = eval(*s.sel);
+                ctx_.push_back(1);   // 0.9.6: option (break→stopand)
                 for (const OptCase& oc : s.optCases) {
                     Value v = eval(*oc.value);
                     if (valuesEqual(sel, v)) {
-                        return execBlock(oc.action);
+                        const Flow f = execBlock(oc.action);
+                        ctx_.pop_back();
+                        return f;
                     }
                 }
                 if (s.hasDefault) {
-                    return execBlock(s.defaultBlock);
+                    const Flow f = execBlock(s.defaultBlock);
+                    ctx_.pop_back();
+                    return f;
                 }
+                ctx_.pop_back();
                 return Flow::None;
             }
 
@@ -684,6 +702,7 @@ struct Vm {
                 if (count < 0) {
                     fail(s.line, "repeat() com número negativo");
                 }
+                ctx_.push_back(0);   // 0.9.6: ciclo (break→resume)
                 for (i64 i = 0; i < count; ++i) {
                     spend(s.line);
                     Flow f = execBlock(s.body);
@@ -691,9 +710,11 @@ struct Vm {
                         break;
                     }
                     if (f == Flow::Return) {
+                        ctx_.pop_back();
                         return f;
                     }
                 }
+                ctx_.pop_back();
                 return Flow::None;
             }
 
@@ -713,6 +734,7 @@ struct Vm {
                 counters.push_back(
                     Counter{s.hasCounter ? s.counter : std::string(), 0,
                             counterAlias});
+                ctx_.push_back(0);   // 0.9.6: ciclo last (break→resume)
                 bool exited = false;
                 while (true) {
                     spend(s.line);
@@ -720,6 +742,7 @@ struct Vm {
                     if (c.t != Type::Bool) {
                         const u32 line = s.line;
                         counters.pop_back();
+                        ctx_.pop_back();
                         fail(line, "last() precisa de true/false na condição");
                     }
                     if (!c.b) {
@@ -732,6 +755,7 @@ struct Vm {
                     }
                     if (f == Flow::Return) {
                         counters.pop_back();
+                        ctx_.pop_back();
                         return f;
                     }
                     // passo do contador (continue INCLUIDO — a iteração
@@ -746,6 +770,7 @@ struct Vm {
                 }
                 (void)exited;
                 counters.pop_back();
+                ctx_.pop_back();
                 return Flow::None;
             }
 
@@ -1145,9 +1170,27 @@ void Vm::runCommand(const Stmt& s) {
     // 3.6) 0.9.5 · ERROS-QUE-ENSINAM no runtime: 'break'/'print' parseiam
     // como chamadas de comando e morrem AQUI — a tabela estrangeira do
     // REGISTO ensina o equivalente V.ONI (o mesmo mecanismo do compile)
+    // 0.9.6 (G2-7e): o par do BOTÃO SUBSTITUIR viaja com o erro; o 'break'
+    // traz o equivalente do CONTEXTO real (a run sabe se está num ciclo
+    // ou dentro de um option — a spec: ciclo→resume, option→stopand)
     for (const std::string& seg : s.path) {
         if (const char* teach = reg::foreignTeach(seg, nullptr)) {
-            fail(s.line, teach);
+            std::string from, to;
+            if (seg == "break") {
+                // o CONTEXTO real decide (spec: ciclo→resume, option→
+                // stopand) — a pilha ctx_ sabe o construto INTERNO
+                from = seg;
+                to = (!ctx_.empty() && ctx_.back() == 1) ? "stopand"
+                                                          : "resume";
+            } else if (const char* rep = reg::foreignReplace(seg)) {
+                from = seg;
+                to = rep;
+            }
+            if (from.empty()) {
+                fail(s.line, teach);
+            } else {
+                failFix(s.line, teach, from, to);
+            }
         }
     }
 

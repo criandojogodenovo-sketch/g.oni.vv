@@ -33,6 +33,33 @@ const char* const kSkeleton =
     "}\n";
 const u32 kSkeletonCaret = 46;   // índice do '}' de "allmoments { }"
 
+// 0.9.6 (G2-7b · R-010) — O PLANO DE RENDER: as peças da linha com os GAPS
+// PREENCHIDOS (Cls::User). O classificador devolve só os tokens COLORIDOS
+// (espaços e pontuação ficam de fora) — o render antigo avançava x apenas
+// pelas peças desenhadas e o texto aparecia SEM espaços e sem `{` enquanto
+// o cursor (que media a linha INTEIRA) deixava o espaço: guardado !=
+// renderizado. AGORA: cada gap entre tokens é uma peça User; a
+// concatenação das peças == a linha inteira (a sentinela R-010 afere).
+std::vector<RenderPiece> renderPieces(const std::string& line,
+                                      voni::hl::BlockCommentState& bc) {
+    std::vector<RenderPiece> out;
+    const auto tokens = voni::hl::classifyLine(line, bc);
+    u32 pos = 0;
+    for (const voni::hl::Token& t : tokens) {
+        if (t.begin > pos) {
+            out.push_back(RenderPiece{pos, t.begin - pos,
+                                      voni::hl::Cls::User});
+        }
+        out.push_back(RenderPiece{t.begin, t.len, t.cls});
+        pos = t.begin + t.len;
+    }
+    if (pos < line.size()) {
+        out.push_back(
+            RenderPiece{pos, (u32)(line.size() - pos), voni::hl::Cls::User});
+    }
+    return out;
+}
+
 namespace {
 
 f32 lineHeight(UiContext& ui) {
@@ -545,6 +572,68 @@ std::string helpStripLine2(const State& st) {
     return "";
 }
 
+// 0.9.6 (G2-7e) · A TROCA: substitui a PALAVRA INTEIRA fixFrom pela
+// fixTo na LINHA do erro (a 1ª ocorrência como palavra solta); o caret
+// segue a edição (fica logo após o texto inserido) e o erro limpa — o
+// buffer é a verdade, o render segue-o (R-010)
+void applyFix(State& st) {
+    if (st.fixFrom.empty() || st.fixTo.empty() || st.errLine == 0) {
+        return;
+    }
+    // início em bytes da linha errLine (1-based)
+    u32 ls = 0;
+    for (u32 k = 1; k < st.errLine && ls < st.buf.size(); ++k) {
+        while (ls < st.buf.size() && st.buf[ls] != '\n') {
+            ++ls;
+        }
+        if (ls < st.buf.size()) {
+            ++ls;
+        }
+    }
+    const u32 le = [&]() {
+        u32 e = ls;
+        while (e < st.buf.size() && st.buf[e] != '\n') {
+            ++e;
+        }
+        return e;
+    }();
+    // a palavra INTEIRA (delimitada por não-identificadores)
+    const std::string from = st.fixFrom;
+    u32 at = ls;
+    while (at + from.size() <= le) {
+        bool match = true;
+        for (u32 k = 0; k < from.size(); ++k) {
+            if (st.buf[at + k] != from[k]) {
+                match = false;
+                break;
+            }
+        }
+        const bool leftOk =
+            at == ls || !std::isalnum(static_cast<unsigned char>(
+                                         st.buf[at - 1])) &&
+                            st.buf[at - 1] != '_';
+        const u32 after = at + (u32)from.size();
+        const bool rightOk =
+            after >= le ||
+            (!std::isalnum(static_cast<unsigned char>(st.buf[after])) &&
+             st.buf[after] != '_');
+        if (match && leftOk && rightOk) {
+            st.buf.replace(at, from.size(), st.fixTo);
+            st.caret = at + (u32)st.fixTo.size();
+            st.errLine = 0;
+            st.errMsg.clear();
+            st.fixFrom.clear();
+            st.fixTo.clear();
+            st.blink = 0.0f;
+            return;
+        }
+        ++at;
+    }
+    // a palavra não está na linha (fonte mudada?) — limpa o botão só
+    st.fixFrom.clear();
+    st.fixTo.clear();
+}
+
 int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
          f32 dt) {
     (void)in;
@@ -754,25 +843,25 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
                                            : theme::kTheme.text2,
                        theme::fontScale(theme::kFontCaption), 0);
 
-        // tokens da linha (classes → cores do Theme)
+        // tokens da linha (classes → cores do Theme) — 0.9.6 (G2-7b): o
+        // render usa as PEÇAS COM GAPS (renderPieces): a concatenação é a
+        // LINHA INTEIRA — espaços e `{ }` desenham, o x avança pela linha
+        // real e o CARET (que mede a linha toda) fica EXATAMENTE onde se vê
         const std::string lineStr(line);
-        auto tokens = voni::hl::classifyLine(lineStr, bcState);
-        if (tokens.empty()) {
-            // linha fora de bloco sem tokens: desenha como user (cru)
-            ui.label(xCode, y, line, theme::kTheme.voniUser);
-        } else {
+        const auto pieces = renderPieces(lineStr, bcState);
+        {
             f32 x = xCode;
-            for (const auto& t : tokens) {
-                if (t.len == 0 || t.begin >= lineStr.size()) {
+            char piece[256];
+            for (const RenderPiece& rp : pieces) {
+                if (rp.len == 0 || rp.begin >= lineStr.size()) {
                     continue;
                 }
-                char piece[128];
-                const u32 pl = t.len < sizeof(piece) - 1
-                                   ? t.len
+                const u32 pl = rp.len < sizeof(piece) - 1
+                                   ? rp.len
                                    : (u32)sizeof(piece) - 1;
-                std::memcpy(piece, lineStr.data() + t.begin, pl);
+                std::memcpy(piece, lineStr.data() + rp.begin, pl);
                 piece[pl] = '\0';
-                ui.label(x, y, piece, clsColor(t.cls));
+                ui.label(x, y, piece, clsColor(rp.cls));
                 x += ui.fontWidth(piece);
             }
         }
@@ -829,16 +918,42 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         }
     }
 
-    // ---- barra de ERRO com linha + mensagem (§12) ---------------------------
+    // ---- barra de ERRO com linha + mensagem (§12) + SUBSTITUIR (G2-7e) ----
     if (st.errLine) {
-        ui.panel(ins.left, h - ins.bottom - kErrH, contentW, kErrH,
-                 theme::kTheme.danger);
+        const f32 errY = h - ins.bottom - kErrH;
+        ui.panel(ins.left, errY, contentW, kErrH, theme::kTheme.danger);
         char msg[160];
         std::snprintf(msg, sizeof(msg), "linha %u: %s", st.errLine,
                       st.errMsg.empty() ? "erro" : st.errMsg.c_str());
-        ui.labelStyled(ins.left + 12.0f, h - ins.bottom - kErrH + 12.0f, msg,
+        // a mensagem abre espaço para o botão quando há substituição
+        const bool hasFix = !st.fixFrom.empty() && !st.fixTo.empty();
+        ui.labelFitted(ins.left + 12.0f, errY + 12.0f, msg,
                        theme::kTheme.bg,
-                       theme::fontScale(theme::kFontCaption), 0);
+                       hasFix ? contentW - 148.0f : contentW - 24.0f);
+        // 0.9.6 (G2-7e) · O BOTÃO SUBSTITUIR: troca a palavra estrangeira
+        // pelo equivalente V.ONI NO BUFFER (a linha do erro, palavra
+        // inteira); o caret segue a edição e o erro limpa — o dono vê o
+        // código ficar certo com UM toque
+        if (hasFix) {
+            const UiRect fb{ins.left + contentW - 128.0f, errY + 4.0f,
+                            120.0f, kErrH - 8.0f};
+            const bool held = ui.widgetActive(kFixId);
+            ui.panelRounded(fb.x, fb.y, fb.w, fb.h, theme::kRadiusCard,
+                            held ? theme::kTheme.bg : theme::kTheme.danger);
+            ui.frameRounded(fb.x, fb.y, fb.w, fb.h, 1.0f,
+                            theme::kRadiusCard, theme::kTheme.bg);
+            char lbl[96];
+            std::snprintf(lbl, sizeof(lbl), "Substituir %s",
+                          st.fixTo.c_str());
+            if (ui.hasFont()) {
+                const f32 tw = ui.fontWidth(lbl);
+                ui.label(fb.x + (fb.w - tw) * 0.5f, fb.y + 14.0f, lbl,
+                         theme::kTheme.bg);
+            }
+            if (ui.widgetHit(kFixId, fb.x, fb.y, fb.w, fb.h)) {
+                applyFix(st);
+            }
+        }
     }
 
     // toque PARADO no corpo (o scroll devolve o tap — o mesmo padrão da

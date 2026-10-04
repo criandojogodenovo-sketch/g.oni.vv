@@ -2243,6 +2243,10 @@ void scriptEditorRun() {
                               g_editor.scriptWin.buf.c_str(), err)) {
         g_editor.scriptWin.errLine = err.line;
         g_editor.scriptWin.errMsg = err.message;
+        // 0.9.6 (G2-7e): o PAR do botão Substituir (o erro de COMPILE
+        // também ensina — o gancho do VoniCompile preencheu o par)
+        g_editor.scriptWin.fixFrom = err.fixFrom;
+        g_editor.scriptWin.fixTo = err.fixTo;
         g_editor.scriptWin.running = false;
         elog::error("voni: script erro linha %u: %s", err.line,
                     err.message.c_str());
@@ -2251,6 +2255,8 @@ void scriptEditorRun() {
     } else {
         g_editor.scriptWin.errLine = 0;
         g_editor.scriptWin.errMsg.clear();
+        g_editor.scriptWin.fixFrom.clear();
+        g_editor.scriptWin.fixTo.clear();
         g_editor.scriptWin.running = true;
         elog::info("voni: script a correr (editor Run)");
     }
@@ -5001,6 +5007,10 @@ void frame() {
                 g_editor.scriptWin.errLine = verr.line;
                 g_editor.scriptWin.errMsg = verr.message;
                 g_editor.scriptWin.running = false;
+                // 0.9.6 (G2-7e): o PAR do botão Substituir viaja com o
+                // erro (if→exist…; o 'break' traz o do contexto da run)
+                g_editor.scriptWin.fixFrom = verr.fixFrom;
+                g_editor.scriptWin.fixTo = verr.fixTo;
             }
         }
     }

@@ -335,13 +335,22 @@ struct Foreign {
 static const Foreign kForeign[] = {
     {"if",        "exist",   "'if' não existe na V.ONI — chama-se exist: exist(condição){ }"},
     {"else",      "notexist","'else' não existe — é o notexist: exist(c){ } notexist{ }"},
-    {"elif",      "and(…) stopand",
-                           "'elif' não existe — a cadeia é notexist{ } and( cond(ação) stopand )"},
+    // 0.9.6 (G2-7e): a cadeia else-if com a forma da spec (aponta ao
+    // notexist — a entrada REAL onde a cadeia começa; o and/stopand vêm
+    // na sintaxe dele e do option)
+    {"elif",      "notexist",
+                           "'elif'/'else if' não existe — a cadeia é notexist{ } and( cond(ação) stopand )"},
     {"while",     "last",    "'while' não existe — chama-se last: last(condição){ }"},
     {"for",       "repeat",  "'for' não existe — chama-se repeat: repeat(n){ }"},
-    {"break",     "resume",  "'break' não existe — chama-se resume"},
+    // 0.9.6 (G2-7e): break DEPENDE DO CONTEXTO (a spec: ciclo→resume,
+    // option→stopand) — a mensagem ensina os DOIS; o botão Substituir
+    // usa o contexto REAL da run (o Vm sabe se está num ciclo ou num option)
+    {"break",     "resume",  "'break' não existe — num ciclo é resume; dentro de um option é stopand"},
     {"switch",    "option",  "'switch' não existe — chama-se option(valor){ }"},
     {"case",      "option",  "'case' não existe — os casos do option: and valor(ação) stopand"},
+    // 0.9.6 (G2-7e): o default do switch — o notoption{ } (o bloco
+    // contrário do option; aponta à entrada option, que o documenta)
+    {"default",   "option", "'default' não existe — o caso contrário do option é o notoption{ }"},
     {"def",       "fn",      "'def' não existe — chama-se fn: fn nome(a:Num):Num { }"},
     {"function",  "fn",      "'function' não existe — chama-se fn: fn nome(a:Num):Num { }"},
     {"print",     "View P",  "'print' não existe — o log é o View P: View P \"texto\""},
@@ -350,6 +359,21 @@ static const Foreign kForeign[] = {
     {"False",     "tipos",   "'False' com maiúscula não existe — é false (minúsculas)"},
     {"None",      "tipos",   "'None' não existe — usa um valor dos 7 tipos (Int Num Txt Bool Vec2 Vec3 TIC)"},
     {"null",      "tipos",   "'null' não existe — usa um valor dos 7 tipos (Int Num Txt Bool Vec2 Vec3 TIC)"},
+};
+
+// 0.9.6 (G2-7e) — A TROCA DE 1 TOKEN p/ o botão SUBSTITUIR: só palavras
+// cuja substituição palavra-a-palavra deixa código VÁLIDO (if (x) { } →
+// exist (x) { } ✓). case/default/elif/None/null ENSINAM mas não substituem
+// (a troca direta deixaria sintaxe inválida — 'default:' → 'notoption:').
+// O 'break' é decidido pelo CONTEXTO na run (o Vm passa o equivalente
+// certo: ciclo→resume, option→stopand).
+static const char* const kForeignReplace[][2] = {
+    {"if", "exist"},        {"else", "notexist"},
+    {"while", "last"},      {"for", "repeat"},
+    {"switch", "option"},   {"def", "fn"},
+    {"function", "fn"},     {"True", "true"},
+    {"False", "false"},     {"print", "View P"},
+    {"echo", "View P"},
 };
 
 // ---------------------------------------------------------------------------
@@ -474,6 +498,16 @@ const char* foreignTeach(const std::string& word, const char** entryName) {
         *entryName = f->entry;
     }
     return f->teach;
+}
+
+// 0.9.6 (G2-7e) — a troca de 1 token (ou nullptr se a palavra só ENSINA)
+const char* foreignReplace(const std::string& word) {
+    for (const auto& fr : kForeignReplace) {
+        if (word == fr[0]) {
+            return fr[1];
+        }
+    }
+    return nullptr;
 }
 
 // ---------------------------------------------------------------------------

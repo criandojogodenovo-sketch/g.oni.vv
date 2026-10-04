@@ -178,10 +178,21 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
     const f32 off = ui.scrollOffset();
     f32 y = oy + 56.0f + 8.0f - off;
     Result res = kNone;
+    // 0.9.6 (G2-6): o cabeçalho de secção NUNCA fica cortado sob o título
+    // — o header que atravessa o topo da região faz PIN (sticky): desenha
+    // inteiro colado ao topo enquanto a sua secção ainda está visível; os
+    // que já subiram TODO não desenham (o clip comeria metade deles)
+    const f32 regionTop = region.y;
+    auto stickyY = [regionTop](f32 yy) {
+        if (yy + kSectionH <= regionTop) {
+            return yy;   // já subiu todo — o clip do scroll esconde
+        }
+        return yy < regionTop ? regionTop : yy;
+    };
 
     // ---- GERAL ---------------------------------------------------------------
     if (sectionHeader(ui, kSectionBase + 0, kBitGeral, st.settingsCollapsed, ox,
-                      y, aw, "Geral")) {
+                      stickyY(y), aw, "Geral")) {
         st.settingsCollapsed ^= kBitGeral;
     }
     y += kSectionH;
@@ -204,7 +215,7 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
 
     // ---- ÁUDIO ---------------------------------------------------------------
     if (sectionHeader(ui, kSectionBase + 1, kBitAudio, st.settingsCollapsed, ox,
-                      y, aw, "Áudio")) {
+                      stickyY(y), aw, "Áudio")) {
         st.settingsCollapsed ^= kBitAudio;
     }
     y += kSectionH;
@@ -226,7 +237,7 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
 
     // ---- PERMISSÕES ----------------------------------------------------------
     if (sectionHeader(ui, kSectionBase + 2, kBitPerm, st.settingsCollapsed, ox,
-                      y, aw, "Permissões")) {
+                      stickyY(y), aw, "Permissões")) {
         st.settingsCollapsed ^= kBitPerm;
     }
     y += kSectionH;
@@ -245,7 +256,7 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
 
     // ---- DIAGNÓSTICO ---------------------------------------------------------
     if (sectionHeader(ui, kSectionBase + 3, kBitDiag, st.settingsCollapsed, ox,
-                      y, aw, "Diagnóstico")) {
+                      stickyY(y), aw, "Diagnóstico")) {
         st.settingsCollapsed ^= kBitDiag;
     }
     y += kSectionH;
@@ -273,9 +284,11 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
             res = kOpenTextWindow;
         }
         y += kRowH;
+        // 0.9.6 (G2-6): a nota "badge ANTIGO" é DEBUG do viewer — aqui
+        // mostra-se SÓ o número (o badge vive no log viewer, onde o dono
+        // compara dumps; R-004 continua vigiado lá)
         char dumps[32];
-        std::snprintf(dumps, sizeof(dumps), "%u (badge ANTIGO no viewer)",
-                      ctx.dumpCount);
+        std::snprintf(dumps, sizeof(dumps), "%u", ctx.dumpCount);
         infoRow(ui, ox, y, aw, "crash dumps", dumps);
         y += kRowH;
         infoRow(ui, ox, y, aw, "armazenamento",
@@ -285,7 +298,7 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
 
     // ---- DOCS (0.9.0: a secção EXISTE sem a linha — entra na 0.9.2) ----------
     if (sectionHeader(ui, kSectionBase + 4, kBitDocs, st.settingsCollapsed, ox,
-                      y, aw, "Docs")) {
+                      stickyY(y), aw, "Docs")) {
         st.settingsCollapsed ^= kBitDocs;
     }
     y += kSectionH;
@@ -308,7 +321,7 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
 
     // ---- SOBRE ---------------------------------------------------------------
     if (sectionHeader(ui, kSectionBase + 5, kBitSobre, st.settingsCollapsed, ox,
-                      y, aw, "Sobre")) {
+                      stickyY(y), aw, "Sobre")) {
         st.settingsCollapsed ^= kBitSobre;
     }
     y += kSectionH;

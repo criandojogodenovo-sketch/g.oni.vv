@@ -699,3 +699,60 @@ TEST(ui_settings_menu_modo_e_tres_itens) {
         EXPECT(st2.settingsMenu == false);
     }
 }
+
+// 0.9.6 (G2-5) — A QUEBRA DE LINHA das Docs: por PALAVRAS (nunca corta a
+// meio), cobre o texto TODO (a descrição inteira desenha — nada de "…"),
+// fronteiras de code point respeitadas (acentos nunca partidos).
+TEST(textwrap_quebra_por_palavras_e_cobre_tudo) {
+    // medidor fake mono (10px/char) — o algoritmo é GL-free
+    auto mono10 = [](const char* s) { return (f32)(10.0f * std::strlen(s)); };
+    std::vector<textwrap::Line> ls;
+    {
+        textwrap::wrap("aaa bb ccc ddd", 70.0f, mono10, ls);
+        EXPECT(ls.size() == 2);                       // "aaa bb" + "ccc ddd"
+        EXPECT(std::string("aaa bb ccc ddd", ls[0].begin, ls[0].len) ==
+               "aaa bb");
+        EXPECT(std::string("aaa bb ccc ddd", ls[1].begin, ls[1].len) ==
+               "ccc ddd");
+    }
+    {
+        // cobertura: as linhas JUNTAS contêm TODAS as palavras
+        textwrap::wrap("Define um parâmetro de cor: o parâmetro tinge o "
+                       "material do TIC de origem", 120.0f, mono10, ls);
+        std::string all;
+        for (const auto& l : ls) {
+            EXPECT(l.len > 0);
+            all.append(std::string(
+                "Define um parâmetro de cor: o parâmetro tinge o material "
+                "do TIC de origem", l.begin, l.len));
+            all += ' ';
+        }
+        EXPECT(all.find("Define") != std::string::npos);
+        EXPECT(all.find("parâmetro") != std::string::npos);
+        EXPECT(all.find("origem") != std::string::npos);
+        EXPECT(ls.size() >= 2);                       // realmente quebrou
+    }
+    {
+        // palavra MAIOR que a largura: parte por LARGURA (cada pedaço cabe)
+        textwrap::wrap("abcdefghijklmnop", 50.0f, mono10, ls);
+        EXPECT(ls.size() >= 2);
+        for (const auto& l : ls) {
+            EXPECT(static_cast<f32>(l.len) * 10.0f <= 50.0f + 0.01f);
+        }
+    }
+    {
+        // acentos: o corte NUNCA parte um code point (o 'ç' é 2 bytes)
+        textwrap::wrap("ação é show mostrar", 50.0f, mono10, ls);
+        // se partir, os bytes de continuação não iniciam linha
+        for (const auto& l : ls) {
+            const char* base = "ação é show mostrar";
+            const unsigned char c = (unsigned char)base[l.begin];
+            EXPECT((c & 0xC0) != 0x80);
+        }
+    }
+    {
+        // texto curto: 1 linha inteira
+        textwrap::wrap("curto", 500.0f, mono10, ls);
+        EXPECT(ls.size() == 1 && ls[0].len == 5);
+    }
+}
