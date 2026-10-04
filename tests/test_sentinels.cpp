@@ -651,3 +651,122 @@ TEST(regress_audio_lifecycle) {
     oboe::testing::reset();
     rmrf(kSentinelCache);
 }
+
+// ===========================================================================
+// SENTINELA 6 — regress_script_typing (FASE 9 / G0-1: "script fecha ao
+// digitar" — a checklist da 0.9.3 falhou neste ponto no C33)
+//
+// O BUG (device, 0.9.3 instalada): o editor de script fechava ao digitar.
+// Causas raiz (ver docs/REGRESSOES.md R-007):
+//   1. o pedido portrait + o showSoftInput corriam no MESMO frame — a
+//      rotação (TERM→INIT) matava o IME pedido contra a janela antiga e o
+//      editor ficava SEM caminho de texto (nenhum teclado in-app);
+//   2. o handle do TIC dono morria no reload do INIT_WINDOW e NINGUÉM
+//      re-validava → closeScriptEditor() não gravava a fonte;
+//   3. o modelo append-only só escrevia no FIM (sem caret) e o único
+//      comando vivo era o back 56dp — as tentativas de digitar fechavam.
+//
+// O FIX: caret livre + teclado in-app (o MESMO applyEvent do IME) + toque
+// no corpo re-pede o IME + re-validação por nome pós-lifecycle + esqueleto
+// base (G0-2). O sentinela AFERA o contrato: N teclas → editor ABERTO +
+// texto PRESENTE + zero crash, IME e teclado in-app pelo MESMO caminho.
+// ===========================================================================
+TEST(regress_script_typing) {
+    rmrf(kSentinelLogs);
+    ASSERT(vv::elog::init(kSentinelLogs));
+
+    // ---- o ambiente do editor de script (o mesmo do wiring092) ----------
+    const char* fp = FONT_FIXTURE;
+    FontAtlas font;
+    ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+    UiContext ui;
+    ui.init();
+    ui.setFont(&font);
+    ui.setSafeArea(safe::Insets{});
+    InputState input;
+    editor::EditorState st;
+    Scene scene;
+    const Handle tic = scene.create("ator");
+    scene.get(tic)->addComponent<Transform3D>();
+    scene.get(tic)->addComponent<ScriptComp>();
+
+    // ---- (1) script NOVO: esqueleto + cursor no interior (G0-2) ---------
+    editor::scriptwin::open(st.scriptWin, scene, tic);
+    EXPECT(st.scriptWin.open);
+    EXPECT(std::string(editor::scriptwin::kSkeleton) == st.scriptWin.buf);
+    EXPECT(st.scriptWin.caret == editor::scriptwin::kSkeletonCaret);
+    EXPECT(st.scriptWin.buf[st.scriptWin.caret] == '}');   // interior
+
+    // ---- (2) 20 teclas do IME (o caminho do GBoard): NUNCA fecha --------
+    for (int i = 0; i < 20; ++i) {
+        ime::Event ev;
+        ev.isText = true;
+        ev.text = std::string(1, static_cast<char>('a' + (i % 26)));
+        EXPECT(editor::scriptwin::applyEvent(st.scriptWin, ev));
+        EXPECT(st.scriptWin.open);   // <- o contrato do G0-1, tecla a tecla
+    }
+    EXPECT(st.scriptWin.buf.size() ==
+           std::string(editor::scriptwin::kSkeleton).size() + 20);
+
+    // ---- (3) 20 teclas do TECLADO IN-APP (o MESMO applyEvent) ----------
+    // (letras + símbolos + DEL + ENTER — o repertório do drawKeyboard)
+    const char* kKb[20] = {"x", "y", "{", "}", "(", ")", "=", "+", "-", "*",
+                           "/", "\"", ".", ",", ":", " ", "0", "9", "\x01",
+                           "\x02"};
+    for (int i = 0; i < 20; ++i) {
+        ime::Event ev;
+        if (kKb[i][0] == '\x01') {
+            ev.isText = false;
+            ev.key = ime::Key::Del;      // APAGA
+        } else if (kKb[i][0] == '\x02') {
+            ev.isText = false;
+            ev.key = ime::Key::Enter;    // ENTER
+        } else {
+            ev.isText = true;
+            ev.text = kKb[i];
+        }
+        editor::scriptwin::applyEvent(st.scriptWin, ev);
+        EXPECT(st.scriptWin.open);
+    }
+    EXPECT(st.scriptWin.buf.size() > 20);
+
+    // ---- (4) o DRAW com o teclado aberto (portrait) não crasha ----------
+    st.scriptWin.kbOpen = true;
+    for (int f = 0; f < 3; ++f) {
+        ui.beginFrame(nullptr, &input, 720.0f, 1536.0f);
+        const int r = editor::scriptwin::draw(ui, input, st.scriptWin,
+                                              720.0f, 1536.0f, 1.0f / 60.0f);
+        ui.endFrame();
+        input.clearEdges();
+        EXPECT(r == 0);            // nenhum back/run/stop/lupa tocado
+        EXPECT(st.scriptWin.open); // o editor SIGE aberto
+    }
+
+    // ---- (5) re-validação por nome (o lifecycle matou o handle) ---------
+    // o reload do INIT_WINDOW re-cria os TICs: o handle morre, o TIC vive
+    {
+        Scene reloaded;   // "cena recarregada" — TIC NOVO com o MESMO nome
+        const Handle h2 = reloaded.create("ator");
+        reloaded.get(h2)->addComponent<ScriptComp>();
+        EXPECT(editor::scriptwin::revalidateTic(st.scriptWin, reloaded));
+        EXPECT(st.scriptWin.tic == h2);   // re-mapeado por NOME
+    }
+    // TIC removido da cena → re-validação falha (honesto, sem crash)
+    {
+        Scene empty;
+        EXPECT(!editor::scriptwin::revalidateTic(st.scriptWin, empty));
+        EXPECT(st.scriptWin.open);   // o editor em si não morre por isso
+    }
+
+    // ---- (6) fonte existente abre INTACTA (G0-2) ------------------------
+    editor::scriptwin::close(st.scriptWin);
+    scene.get(tic)->getComponent<ScriptComp>()->source = "v++x=1\n";
+    editor::scriptwin::open(st.scriptWin, scene, tic);
+    EXPECT(st.scriptWin.buf == "v++x=1\n");
+    EXPECT(st.scriptWin.caret == 7);
+    editor::scriptwin::close(st.scriptWin);
+    EXPECT(!st.scriptWin.open);
+
+    vv::elog::shutdown();
+    rmrf(kSentinelLogs);
+}

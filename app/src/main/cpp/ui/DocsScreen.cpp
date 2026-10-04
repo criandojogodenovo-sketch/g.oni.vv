@@ -54,10 +54,12 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h) {
                    theme::fontScale(theme::kFontCaption), 0);
 
     // ---- campo de pesquisa 48dp COM LUPA (spec §11) -------------------------
+    // FASE 9 (G0-3): o segundo panelRounded era um FILL da cor da borda por
+    // CIMA do surface (o campo ficava um bloco sólido) — é um FRAME.
     const UiRect field{16.0f, kTopH + 8.0f, w - 32.0f, 48.0f};
     ui.panelRounded(field.x, field.y, field.w, field.h,
                     theme::kRadiusField, theme::kTheme.surface);
-    ui.panelRounded(field.x, field.y, field.w, field.h,
+    ui.frameRounded(field.x, field.y, field.w, field.h, 1.0f,
                     theme::kRadiusField, theme::kTheme.border);
     icons::drawIcon(ui, icons::Icon::Search, field.x + 16.0f,
                     field.y + 12.0f, 24.0f, theme::kTheme.text2);

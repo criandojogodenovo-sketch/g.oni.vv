@@ -407,7 +407,15 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
                     hy += kRowH;   // info armazenamento
                     break;
                 case kBitDocs:
-                    hy += kRowH;   // label (0.9.2)
+                    // FASE 9 (G0-3): a linha "Ver docs da V.ONI" existia
+                    // desde a 0.9.2 mas o walk NUNCA a re-despachava (só
+                    // avançava o cursor) — o toque morria no scroll e o
+                    // ecrã de Docs ficava INALCANÇÁVEL. Linha INTEIRA é o
+                    // alvo (o mesmo hit-test do draw).
+                    if (hit(tpx, tpy, UiRect{ox, hy, aw, kRowH})) {
+                        res = kOpenDocs;
+                    }
+                    hy += kRowH;
                     break;
                 case kBitSobre:
                     hy += kRowH;   // info sha256

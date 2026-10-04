@@ -39,3 +39,5 @@ c33-virtual-cache/
 test-sentinels-logs/
 test-sentinels-cache/
 *.dump
+build-asan/
+build-dbg/

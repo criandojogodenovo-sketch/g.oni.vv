@@ -2129,11 +2129,26 @@ void openScriptEditor(Handle tic) {
 }
 
 void closeScriptEditor() {
-    // salva o fonte no componente (persistir §10 — o back NÃO descarta)
+    // salva o fonte no componente (persistir §10 — o back NÃO descarta).
+    // FASE 9 (G0-1): o handle pode ter MORRIDO no ciclo TERM→INIT da
+    // rotação portrait (o reload do INIT_WINDOW re-cria os TICs) —
+    // re-valida por NOME antes de salvar (o padrão da seleção 0.8.12);
+    // sem isto a fonte NUNCA era gravada (get()==null) e o Run dava
+    // "TIC inválido".
+    editor::scriptwin::revalidateTic(g_editor.scriptWin, g_scene);
     if (Tic* t = g_scene.get(g_editor.scriptWin.tic)) {
         if (ScriptComp* sc = t->getComponent<ScriptComp>()) {
             sc->source = g_editor.scriptWin.buf;
+        } else {
+            // o TIC existe mas perdeu o componente (cena trocada?) — cria
+            // um novo e salva (o fonte não se perde por um ciclo)
+            ScriptComp& sc2 = *t->addComponent<ScriptComp>();
+            sc2.source = g_editor.scriptWin.buf;
         }
+    } else {
+        elog::warn("voni: fonte do editor PERDIDA no fecho (TIC '%s' nao "
+                   "existe na cena)",
+                   g_editor.scriptWin.ticName);
     }
     editor::scriptwin::close(g_editor.scriptWin);
     if (ime::setOrientation(ime::Orientation::Landscape,
@@ -2147,6 +2162,9 @@ void closeScriptEditor() {
 // Run do editor: (re)compila + arranca; o erro (com linha) volta para a
 // barra do editor + engine.log + toast
 void scriptEditorRun() {
+    // FASE 9 (G0-1): o handle pode ter morrido no ciclo da rotação —
+    // re-valida por NOME antes de compilar (senão "TIC inválido")
+    editor::scriptwin::revalidateTic(g_editor.scriptWin, g_scene);
     voni::Error err;
     if (!g_voni.editorRestart(g_scene, g_editor.scriptWin.tic,
                               g_editor.scriptWin.buf.c_str(), err)) {
@@ -3455,6 +3473,26 @@ void onAppCmd(android_app* app, i32 cmd) {
                 } else {
                     elog::error("[boot 6/6] scene FALHOU ('%s') — editor arranca com cena vazia",
                                 g_project.activeScenePath()->c_str());
+                }
+                // FASE 9 (G0-1): o EDITOR DE SCRIPT/janela de texto abertos
+                // sobrevivem ao ciclo — o HANDLE do TIC dono é re-validado
+                // por NOME (o reload re-criou os TICs) e o IME é RE-PEDIDO
+                // (o showSoftInput do arranque foi contra a janela
+                // PRÉ-rotação — a rotação é o próprio TERM→INIT; sem isto o
+                // teclado não voltava e o editor parecia morto)
+                if (g_editor.scriptWin.open) {
+                    if (editor::scriptwin::revalidateTic(g_editor.scriptWin,
+                                                         g_scene)) {
+                        elog::info("lifecycle: editor de script re-validado "
+                                   "pós-INIT WINDOW (TIC '%s' por nome)",
+                                   g_editor.scriptWin.ticName);
+                    }
+                    storage::jniImeShow();
+                    elog::info("lifecycle: IME re-pedido pós-INIT (editor de "
+                               "script aberto)");
+                }
+                if (g_editor.textWin.open) {
+                    storage::jniImeShow();
                 }
             } else {
                 elog::warn("[boot 6/6] scene SEM PROJETO — editor sem persistência");
@@ -4868,7 +4906,9 @@ void frame() {
     }
 
     // 0.9.2 — DOCS (Settings → Docs; landscape, com pesquisa in-app):
-    // back fecha; o campo de pesquisa abre o teclado (propósito 9)
+    // back fecha; o campo de pesquisa abre o teclado (propósito 9).
+    // FASE 9 (G0-3): também abre PELA LUPA do editor de script (result 4) —
+    // as Docs desenham POR CIMA (o bloco do scriptWin abaixo fica gated).
     if (g_editor.docsScreen.open) {
         const int dr = editor::docswin::draw(g_ui, g_input,
                                              g_editor.docsScreen, w, h);
@@ -4883,8 +4923,12 @@ void frame() {
 
     // 0.9.2 — EDITOR DE SCRIPT (portrait + IME — o par do textWin): a fila
     // do IME alimenta o fonte; Run/Stop pelo VoniSystem; back SALVA no
-    // componente e fecha com landscape+imeHide
-    if (g_editor.scriptWin.open) {
+    // componente e fecha com landscape+imeHide.
+    // FASE 9 (G0-1): resultados 4 (lupa → Docs POR CIMA) e 5 (toque no
+    // corpo → RE-PETE o IME — sem perder foco); teclado in-app desenhado
+    // pelo próprio editor (o MESMO applyEvent do IME). Com as Docs abertas
+    // por cima o editor NÃO desenha (Docs é o modal corrente).
+    if (g_editor.scriptWin.open && !g_editor.docsScreen.open) {
         ime::Event ev;
         while (ime::poll(ev)) {
             editor::scriptwin::applyEvent(g_editor.scriptWin, ev);
@@ -4897,6 +4941,17 @@ void frame() {
             scriptEditorRun();
         } else if (sr == 3) {
             scriptEditorStop();
+        } else if (sr == 4) {
+            // lupa: Docs por cima (pesquisa filtra + exemplo)
+            g_editor.docsScreen.open = true;
+            g_editor.docsScreen.queryLen = 0;
+            g_editor.docsScreen.query[0] = '\0';
+            g_editor.docsScreen.expanded = -1;
+            elog::info("voni: docs abertas (lupa do editor de script)");
+        } else if (sr == 5) {
+            // toque no corpo: o IME do sistema é re-pedido (foco)
+            storage::jniImeShow();
+            elog::info("voni: IME re-pedido (toque no corpo do editor)");
         }
     }
 

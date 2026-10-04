@@ -679,7 +679,9 @@ constexpr f32 kBackPts[] = {
     5.0f, 12.0f,  8.8f, 15.8f,
 };
 constexpr Polyline kBackLines[] = {
-    {0, 2}, {2, 2}, {4, 3},
+    {0, 2}, {2, 2}, {4, 2},   // FASE 9: era {4,3} — o ponto 6 NÃO existe em
+                               // kBackPts (leitura 8 B FORA do array desde a
+                               // 0.9.0; apanhada pelo ASan no loop FASE 9)
 };
 
 // tabela final (índice = Icon)

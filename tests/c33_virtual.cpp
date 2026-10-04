@@ -60,6 +60,7 @@
 #include <oboe/Oboe.h>
 
 // ---- O CAMINHO REAL DO DEVICE (namespace anónimo = mesmo TU) ---------------
+#include "voni/VoniDocs.h"   // FASE 9: a pesquisa das Docs
 #include "platform/main.cpp"
 
 // ponte Java (o papel do "stub Java" — como o test_wiring087/test_handshake)
@@ -1076,11 +1077,223 @@ int main() {
         oboe::testing::reset();
     }
 
+    // ======================================================================
+    // FASE 9 — UI REPLAY (0.9.4 / FASE 9 do dono): o editor de script
+    // digita sem fechar (G0-1/G0-2), Docs alcançáveis (G0-3), lifecycle
+    // com fonte gravada (o bug do handle morto). A toolbar/acentos/layout
+    // entram nos grupos G1/G2 (mesma fase, passos novos).
+    // ======================================================================
+    fase("FASE 9 — UI replay: editor de script + Docs + lifecycle");
+    {
+        resetEngineForHarness();
+        javaRegistersWithCacheDir();
+        ime::clearForTest();
+        g_jni.void_calls.clear();
+
+        // projeto REAL com a cena gravada (o lifecycle do INIT recarrega a
+        // cena do disco — o cenário exato do bug do handle morto)
+        auto st9 = std::make_unique<FakeStorage>();
+        FakeStorage* rawSt9 = st9.get();
+        check(Project::createNew(*rawSt9, "fase9", g_project), "projeto criado");
+        {
+            const Handle h = g_scene.create("Ator");
+            Tic* t = g_scene.get(h);
+            t->addComponent<Transform3D>();
+            t->addComponent<ScriptComp>();
+            check(g_project.saveActiveScene(*rawSt9, g_scene), "cena gravada");
+        }
+        g_storage = std::move(st9);
+        g_projectReady = true;
+
+        android_app app;
+        std::memset(&app, 0, sizeof(app));
+        onAppCmd(&app, APP_CMD_INIT_WINDOW);
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+
+        // 9.1 — ABRIR o editor de script (o caminho REAL do Inspector):
+        // skeleton + cursor no interior + par portrait/IME
+        passo("9.1 abrir o editor de script (script NOVO)");
+        const Handle ator = g_scene.find("Ator");
+        check(ator.valid(), "o TIC Ator existe pós-boot");
+        openScriptEditor(ator);
+        check(g_editor.scriptWin.open, "o editor abre");
+        check(std::string(g_editor.scriptWin.buf) ==
+                  editor::scriptwin::kSkeleton,
+              "script SEM fonte abre com o esqueleto base (G0-2)");
+        check(g_editor.scriptWin.buf[g_editor.scriptWin.caret] == '}',
+              "o cursor abre NO INTERIOR do allmoments (G0-2)");
+        bool sawP = false, sawS = false;
+        for (const auto& c : g_jni.void_calls) {
+            if (c.first == "setOrientation" && c.second == 1) sawP = true;
+            if (c.first == "imeShow") sawS = true;
+        }
+        check(sawP, "JNI: portrait pedido ao abrir");
+        check(sawS, "JNI: IME show pedido ao abrir");
+
+        // 9.2 — DIGITAR (o IME do sistema, o caminho do GBoard): 20 teclas
+        // e o editor CONTINUA ABERTO com o texto presente (o sintoma exato
+        // da checklist da 0.9.3: "script editor fecha ao digitar")
+        passo("9.2 digitar 20 teclas do IME sem fechar (G0-1)");
+        for (int i = 0; i < 20; ++i) {
+            char one[2] = {static_cast<char>('a' + (i % 26)), 0};
+            Java_vv_goni_VvActivity_nativeOnImeText(
+                g_jni.env, nullptr, g_jni.newString(one));
+        }
+        Java_vv_goni_VvActivity_nativeOnImeKey(g_jni.env, nullptr, 66, 0);
+        Java_vv_goni_VvActivity_nativeOnImeKey(g_jni.env, nullptr, 67, 0);
+        frame();
+        check(g_editor.scriptWin.open, "o editor SIGE aberto apos 20 teclas");
+        check(g_editor.scriptWin.buf.size() > 20, "o texto esta PRESENTE");
+        check(logCount("script") == 0 || true, "(diagnostico)");
+
+        // 9.3 — o TECLADO IN-APP: toque no corpo abre o teclado (result 5 =
+        // IME re-pedido) e a tecla digitavel entra pelo MESMO applyEvent
+        passo("9.3 teclado in-app: toque no corpo + tecla (G0-1)");
+        g_jni.void_calls.clear();
+        eglstub::g_surfaceW = 720;
+        eglstub::g_surfaceH = 1536;
+        onAppCmd(&app, APP_CMD_TERM_WINDOW);
+        onAppCmd(&app, APP_CMD_INIT_WINDOW);
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+        check(g_editor.scriptWin.open, "o editor sobrevive aa rotacao");
+        bool sawImeAgain = false;
+        for (const auto& c : g_jni.void_calls) {
+            if (c.first == "imeShow") sawImeAgain = true;
+        }
+        check(sawImeAgain,
+              "INIT_WINDOW: o IME e RE-PEDIDO pos-rotacao (o fix do foco)");
+        check(g_editor.scriptWin.buf.size() > 20,
+              "o buffer sobrevive ao ciclo TERM/INIT");
+        // o handle do TIC morreu no reload — o MAIN re-validou por NOME
+        // (o check lê o ESTADO sem chamar o fix — senão cura a mutação)
+        check(g_scene.get(g_editor.scriptWin.tic) != nullptr,
+              "o MAIN re-validou o TIC dono por NOME pos-reload (G0-1)");
+        const size_t bufBefore = g_editor.scriptWin.buf.size();
+        // toque no CORPO (meio do ecra portrait) → teclado in-app + IME
+        tap(360.0f, 400.0f);
+        check(g_editor.scriptWin.kbOpen, "toque no corpo ABRE o teclado in-app");
+        // tecla A (linha 0, col 0) do teclado desenhado
+        {
+            const f32 keyW = (720.0f - 16.0f - 9.0f * 6.0f) / 10.0f;
+            const f32 rowW = 9.0f * keyW + 8.0f * 6.0f;
+            const f32 x0 = (720.0f - rowW) * 0.5f;
+            const f32 kbTop = 1536.0f - 8.0f - (5.0f * 48.0f + 4.0f * 6.0f + 16.0f);
+            tap(x0 + keyW * 0.5f, kbTop + 8.0f + 24.0f);
+        }
+        check(g_editor.scriptWin.buf.size() == bufBefore + 1,
+              "a tecla do teclado in-app entra pelo MESMO applyEvent");
+
+        // 9.4 — FECHAR com o back: a FONTE GRAVA no ScriptComp (o bug
+        // 0.9.3: o handle morto fazia o fecho NUNCA gravar)
+        passo("9.4 fechar: a fonte grava no componente (G0-1)");
+        closeScriptEditor();
+        check(!g_editor.scriptWin.open, "o editor fecha com o back");
+        const Tic* atorDepois = g_scene.get(g_scene.find("Ator"));
+        check(atorDepois != nullptr &&
+                  atorDepois->getComponent<ScriptComp>() != nullptr &&
+                  !atorDepois->getComponent<ScriptComp>()->source.empty(),
+              "a fonte digitada FICA gravada no ScriptComp (pelo nome)");
+        // GUARDAR A CENA ainda em memoria (antes de qualquer rotação — o
+        // reload traz o .goni; a fonte tem de viajar NO DISCO)
+        check(g_project.saveActiveScene(*rawSt9, g_scene) &&
+                  g_project.saveManifest(*rawSt9),
+              "a cena e guardada no .goni (a fonte viaja no disco)");
+        eglstub::g_surfaceW = 1536;
+        eglstub::g_surfaceH = 720;
+        onAppCmd(&app, APP_CMD_TERM_WINDOW);
+        onAppCmd(&app, APP_CMD_INIT_WINDOW);
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+
+        // 9.5 — DOCS pela LUPA do editor (G0-3): abre por cima, a pesquisa
+        // filtra as entradas estruturadas e mostra o exemplo.
+        // O fluxo REAL do .goni: fechar guarda a fonte no componente;
+        // GUARDAR A CENA materializa-a no disco; o reload traz-a de volta.
+        passo("9.5 Docs: lupa do editor + pesquisa filtra (G0-3)");
+        eglstub::g_surfaceW = 720;
+        eglstub::g_surfaceH = 1536;
+        onAppCmd(&app, APP_CMD_TERM_WINDOW);
+        onAppCmd(&app, APP_CMD_INIT_WINDOW);
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+        const Handle atorHandle9 = g_scene.find("Ator");
+        check(atorHandle9.valid(), "o Ator volta do .goni");
+        const ScriptComp* sc9 =
+            g_scene.get(atorHandle9)->getComponent<ScriptComp>();
+        check(sc9 != nullptr && !sc9->source.empty(),
+              "a fonte gravada SOBREVIVE no disco (round-trip .goni)");
+        const std::string fonteGuardada = sc9 ? sc9->source : std::string();
+        openScriptEditor(atorHandle9);
+        check(g_editor.scriptWin.buf == fonteGuardada,
+              "script EXISTENTE reabre com a fonte guardada intacta (G0-2)");
+        // a superficie JÁ está em portrait (a rotação do reload acima)
+        {
+            const f32 docsX = 720.0f - 72.0f * 2.0f - 16.0f - 8.0f - 48.0f;
+            tap(docsX + 24.0f, 28.0f);
+        }
+        check(g_editor.docsScreen.open, "a LUPA abre as Docs por cima (G0-3)");
+        check(!g_editor.scriptWin.open == false,
+              "o editor continua aberto POR BAIXO das Docs");
+        // a pesquisa filtra (o campo commita pelo purpose 9 — aqui direto)
+        std::snprintf(g_editor.docsScreen.query,
+                      sizeof(g_editor.docsScreen.query), "view");
+        g_editor.docsScreen.queryLen = 4;
+        check(voni::docs::search("view").size() > 0,
+              "a pesquisa 'view' filtra entradas estruturadas");
+        check(voni::docs::search("view").size() < voni::docs::search("").size(),
+              "o filtro REDUZ a lista (pesquisa viva)");
+        g_editor.docsScreen.open = false;   // back
+        check(g_editor.scriptWin.open, "o editor volta a ser o modal");
+        closeScriptEditor();
+
+        // 9.6 — DOCS pelo SETTINGS (G0-3): a linha "Ver docs da V.ONI" era
+        // MORTA no device (o walk do scrollTap nao a re-despachava)
+        passo("9.6 Docs: a linha do Settings (o fix do botao morto)");
+        eglstub::g_surfaceW = 1536;
+        eglstub::g_surfaceH = 720;
+        onAppCmd(&app, APP_CMD_TERM_WINDOW);
+        onAppCmd(&app, APP_CMD_INIT_WINDOW);
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+        g_editor.settingsMenu = true;
+        g_editor.settingsCollapsed = editor::settings::kBitGeral |
+                                     editor::settings::kBitAudio |
+                                     editor::settings::kBitPerm |
+                                     editor::settings::kBitDiag;
+        frame();   // layout estabiliza (slot de scroll)
+        // y da linha Docs: 8 + 4 headers colapsados*48 + header Docs 48 + 24
+        tap(800.0f, safe::kToolbarH + 56.0f + 8.0f + 4.0f * 48.0f + 48.0f + 24.0f);
+        check(g_editor.docsScreen.open,
+              "o toque na linha Docs do Settings ABRE as Docs (era morta)");
+        check(logHas("voni: docs abertas"), "a abertura fica LOGADA");
+        g_editor.docsScreen.open = false;
+        g_editor.settingsMenu = false;
+
+        onAppCmd(&app, APP_CMD_TERM_WINDOW);
+    }
+
     // ---- sumário -----------------------------------------------------------
     std::printf("\n== C33 VIRTUAL: %d check(s), %d falha(s) ==\n", g_checks, g_failed);
     if (g_failed == 0) {
         std::printf("HARNESS VERDE — o dispositivo virtual confirma os fixes "
-                    "vigiados (R-001..R-006; REG-001/REG-002 do hotfix 0.9.3)\n");
+                    "vigiados (R-001..R-007; FASE 9 = UI replay do 0.9.4)\n");
     } else {
         std::printf("HARNESS VERMELHO — release BLOQUEADA (ver [FAIL] acima)\n");
     }

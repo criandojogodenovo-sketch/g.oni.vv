@@ -114,3 +114,18 @@ Nota técnica: o `pool-2-thread-1` do stack trace é o `Executors.newSingleThrea
 | Padrão proibido | `SIGSEGV.*AAudio` e `AAudio_createStreamBuilder\+160` (ci/forbidden_patterns.txt — a assinatura exata do tombstone) |
 
 Nota técnica: o TU `platform/AudioOutDevice.cpp` (AAudio/AudioTrack, Android-only) continua compilado-verificado pelo job NDK do build-release (o jni.h fake do host não o tipa — documentado desde 0.8.11-b); o `OboeBackend.cpp` é TU COMUM — compila contra o oboe REAL no APK e contra o stub na suíte (o padrão StorageBridge/jni.h), logo o primário é vigiado nos DOIS lados.
+
+## R-007 · Editor de script fecha ao digitar / fonte perdida no lifecycle (FASE 9 · G0-1/G0-2)
+
+| campo | valor |
+|---|---|
+| ID | R-007 |
+| Reportado | device 0.9.3 (checklist do dono, FASE 9): "script editor fecha ao digitar" + "script novo não abre com função base" |
+| Sintoma exato | o editor de script fechava ao tentar digitar; a fonte editada não voltava ao reabrir; script novo abria vazio |
+| Causa raiz | TRÊS camadas (main.cpp `openScriptEditor`/`closeScriptEditor` + ScriptEditor.cpp): (1) o pedido portrait (`jniSetOrientation`) e o `jniImeShow()` corriam no MESMO frame — a rotação (TERM→INIT, o ciclo testado no wiring087) matava o IME pedido contra a janela pré-rotação e o editor ficava SEM caminho de texto (nenhum teclado in-app existia); (2) o handle do TIC dono morria no reload de cena do INIT_WINDOW e NINGUÉM re-validava (só `g_editor.selected` tinha re-validação 0.8.12) — `closeScriptEditor` fazia `get(stale)==null` e a fonte NUNCA gravava; `scriptEditorRun` dava "TIC inválido"; (3) o modelo append-only sem caret + o back 56×56 como único comando fazia as tentativas de digitar fecharem a janela |
+| Fix | (1) caret livre (offset em bytes; Left/Right/Up/Down do IME; inserção/DEL no caret); (2) TECLADO IN-APP desenhado pelo editor (2 páginas ABC/123; teclas emitem pelo MESMO `applyEvent` do IME — fonte única de edição); (3) toque no corpo → result 5 → o main RE-PETE o IME (sem perder foco); (4) INIT_WINDOW re-valida `scriptWin.tic` por NOME + RE-PETE o IME após a rotação; (5) `closeScriptEditor`/`scriptEditorRun` re-validam por nome antes de usar; (6) script SEM fonte abre com o esqueleto `central main { on moment { } allmoments { } }` e cursor NO INTERIOR (G0-2); fonte guardada abre intacta com cursor no fim |
+| Teste sentinela | `regress_script_typing` (tests/test_sentinels.cpp — 20 teclas IME + 20 teclas do teclado in-app + draw portrait + re-validação por nome + fonte intacta) |
+| Linha do replay | FASE 9 do c33_virtual (9.1 esqueleto+par portrait/IME · 9.2 20 teclas do IME sem fechar · 9.3 rotação → IME re-pedido + handle re-validado + teclado in-app digitável · 9.4 fonte grava no componente + .goni · 9.5 lupa→Docs+pesquisa+fonte intacta · 9.6 linha Docs do Settings) |
+| Padrão proibido | (nenhum — o sintoma é UI, não log; a vigília é o sentinela + FASE 9) |
+
+Prova de mutação (colada em /home/z/my-project/mutacao-G0-1-*.txt e no RELATÓRIO-0.9.4): re-validação DESLIGADA nas duas camadas → 4 [FAIL] no harness; reposta → 177/177 verde.

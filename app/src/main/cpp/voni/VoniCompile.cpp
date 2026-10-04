@@ -345,7 +345,12 @@ struct Compiler {
         };
 
         // v++ / v# (§4) — 4 formas em regras próprias (a ação sabe qual é)
-        auto varDeclAction = [&](const peg::SemanticValues& sv, bool typed,
+        // FASE 9 (loop ASan): std::function POR VALOR — as ações do parser
+        // VIVEM além do retorno de registerStatements(); capturar a lambda
+        // `auto` por referência (&) deixava um ponteiro para a STACK MORTA
+        // da função (use-after-return desde a 0.9.2).
+        std::function<StmtP(const peg::SemanticValues&, bool, bool)>
+            varDeclAction = [this](const peg::SemanticValues& sv, bool typed,
                                  bool exported) -> StmtP {
             // v++: [name, init] · v#: [name, tipoTok, init]
             StmtP s = Stmt::make(Stmt::Kind::VarDecl, lineOf(sv));
@@ -372,16 +377,20 @@ struct Compiler {
             s->init = *std::any_cast<ExprP>(&sv[initIdx]);
             return s;
         };
-        parser["VarInfExp"] = [&](const peg::SemanticValues& sv) -> StmtP {
+        parser["VarInfExp"] = [varDeclAction](
+                const peg::SemanticValues& sv) -> StmtP {
             return varDeclAction(sv, false, true);
         };
-        parser["VarInf"] = [&](const peg::SemanticValues& sv) -> StmtP {
+        parser["VarInf"] = [varDeclAction](
+                const peg::SemanticValues& sv) -> StmtP {
             return varDeclAction(sv, false, false);
         };
-        parser["VarTypExp"] = [&](const peg::SemanticValues& sv) -> StmtP {
+        parser["VarTypExp"] = [varDeclAction](
+                const peg::SemanticValues& sv) -> StmtP {
             return varDeclAction(sv, true, true);
         };
-        parser["VarTyp"] = [&](const peg::SemanticValues& sv) -> StmtP {
+        parser["VarTyp"] = [varDeclAction](
+                const peg::SemanticValues& sv) -> StmtP {
             return varDeclAction(sv, true, false);
         };
         parser["VarDecl"] = [](const peg::SemanticValues& sv) -> std::any {

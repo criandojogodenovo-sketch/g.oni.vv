@@ -305,8 +305,22 @@ TEST(scriptwin_abre_carrega_fonte_e_fecha) {
 }
 
 TEST(scriptwin_ime_append_del_enter) {
+    // FASE 9 (G0-1/G0-2): o contrato NOVO — abrir SEM fonte guardada
+    // carrega o ESQUELETO base (entry point da spec §3) com o cursor NO
+    // INTERIOR (dentro de "allmoments { }"); digitar insere NO CARET.
     UiEnv e;
     vv::editor::scriptwin::open(e.st.scriptWin, e.scene, e.tic);
+    // esqueleto presente, cursor no interior (antes do '}' de allmoments)
+    EXPECT(e.st.scriptWin.buf == vv::editor::scriptwin::kSkeleton);
+    EXPECT(e.st.scriptWin.caret == vv::editor::scriptwin::kSkeletonCaret);
+    {
+        // o caret aponta para DENTRO do bloco allmoments (o '}' à frente
+        // fecha allmoments — não é o fim do esqueleto)
+        EXPECT(e.st.scriptWin.buf[e.st.scriptWin.caret] == '}');
+        const std::string before = e.st.scriptWin.buf.substr(
+            0, e.st.scriptWin.caret);
+        EXPECT(before.find("allmoments {") != std::string::npos);
+    }
     vv::ime::clearForTest();
     vv::ime::pushText("v++a=1");
     vv::ime::pushKey(vv::ime::Key::Enter);
@@ -315,11 +329,144 @@ TEST(scriptwin_ime_append_del_enter) {
     while (vv::ime::poll(ev)) {
         vv::editor::scriptwin::applyEvent(e.st.scriptWin, ev);
     }
-    EXPECT(e.st.scriptWin.buf == "v++a=1\nb");
+    // o texto entrou NO CARET (interior do allmoments), não no fim
+    EXPECT(e.st.scriptWin.buf ==
+           "central main {\n"
+           "  on moment { }\n"
+           "  allmoments { v++a=1\nb}\n"
+           "}\n");
+    // DEL apaga o code point ANTES do caret
     vv::ime::pushKey(vv::ime::Key::Del);
     vv::ime::poll(ev);
     vv::editor::scriptwin::applyEvent(e.st.scriptWin, ev);
-    EXPECT(e.st.scriptWin.buf == "v++a=1\n");
+    EXPECT(e.st.scriptWin.buf ==
+           "central main {\n"
+           "  on moment { }\n"
+           "  allmoments { v++a=1\n}\n"
+           "}\n");
+    vv::editor::scriptwin::close(e.st.scriptWin);
+}
+
+TEST(scriptwin_caret_move_setas_e_del_no_meio) {
+    // FASE 9 (G0-1): o caret MOVE-SE (Left/Right/Up/Down) e DEL apaga onde
+    // o caret está (o modelo antigo era append-only no fim)
+    UiEnv e;
+    e.scene.get(e.tic)->getComponent<ScriptComp>()->source = "abc\ndef";
+    vv::editor::scriptwin::open(e.st.scriptWin, e.scene, e.tic);
+    EXPECT(e.st.scriptWin.caret == 7);   // fim (fonte guardada = intacta)
+    vv::ime::Event ev;
+    auto key = [&](vv::ime::Key k) {
+        ev.isText = false;
+        ev.key = k;
+        vv::editor::scriptwin::applyEvent(e.st.scriptWin, ev);
+    };
+    key(vv::ime::Key::Up);      // mesma coluna (3) na linha anterior
+    EXPECT(e.st.scriptWin.caret == 3);
+    key(vv::ime::Key::Left);    // um code point atrás
+    EXPECT(e.st.scriptWin.caret == 2);
+    key(vv::ime::Key::Right);
+    EXPECT(e.st.scriptWin.caret == 3);
+    key(vv::ime::Key::Down);    // volta para o fim da 2ª linha
+    EXPECT(e.st.scriptWin.caret == 7);
+    key(vv::ime::Key::Up);
+    key(vv::ime::Key::Del);     // apaga o 'c' (col 2 da 1ª linha)
+    EXPECT(e.st.scriptWin.buf == "ab\ndef");
+    vv::editor::scriptwin::close(e.st.scriptWin);
+}
+
+TEST(scriptwin_fonte_existente_abre_intacta) {
+    // FASE 9 (G0-2): fonte guardada abre INTACTA (o esqueleto só entra
+    // quando NÃO há fonte)
+    UiEnv e;
+    const char* kSrc = "v++x=1\nView P \"ola\"\n";
+    e.scene.get(e.tic)->getComponent<ScriptComp>()->source = kSrc;
+    vv::editor::scriptwin::open(e.st.scriptWin, e.scene, e.tic);
+    EXPECT(e.st.scriptWin.buf == kSrc);
+    EXPECT(e.st.scriptWin.caret == e.st.scriptWin.buf.size());
+    vv::editor::scriptwin::close(e.st.scriptWin);
+}
+
+TEST(scriptwin_teclado_in_app_digitavel) {
+    // FASE 9 (G0-1 — o coração do fix): o teclado IN-APP desenhado pelo
+    // editor emite pelo MESMO applyEvent do IME; 20 teclas, editor ABERTO,
+    // texto PRESENTE, zero crash. A página de símbolos tem { } " = (a
+    // linguagem precisa deles).
+    UiEnv e;
+    vv::editor::scriptwin::open(e.st.scriptWin, e.scene, e.tic);
+    e.st.scriptWin.kbOpen = true;
+    // 20 eventos "teclas do teclado in-app" (letras + espaço + enter +
+    // símbolos) — mesmos eventos que o drawKeyboard emite (20 EXATAS:
+    // o array é [20] — a 1ª versão listava 19 e o nullptr final crashava
+    // o teste em kKeys[19][0])
+    const char* kKeys[20] = {"v", "+", "+", "a", " ", "=", " ", "1", "\n",
+                             "{", " ", "}", "\n", "b", "c", "d", "e", "f",
+                             "g", "h"};
+    for (int i = 0; i < 20; ++i) {
+        vv::ime::Event ev;
+        if (kKeys[i][0] == '\n') {
+            ev.isText = false;
+            ev.key = vv::ime::Key::Enter;
+        } else {
+            ev.isText = true;
+            ev.text = kKeys[i];
+        }
+        vv::editor::scriptwin::applyEvent(e.st.scriptWin, ev);
+        // O EDITOR CONTINUA ABERTO a cada tecla (não fecha ao digitar)
+        EXPECT(e.st.scriptWin.open);
+    }
+    EXPECT(e.st.scriptWin.buf.size() > 20);   // esqueleto + 20 teclas
+    // o desenho com o teclado aberto não crasha (portrait 720×1536)
+    e.frame(720.0f, 1536.0f);
+    EXPECT(e.st.scriptWin.open);
+    EXPECT(e.st.scriptWin.kbOpen);
+    vv::editor::scriptwin::close(e.st.scriptWin);
+}
+
+TEST(scriptwin_toque_no_corpo_abre_teclado_e_pede_ime) {
+    // FASE 9 (G0-1): toque PARADO no corpo → result 5 (o main re-pede o
+    // IME) e o teclado in-app abre (o caminho do device sem IME visível)
+    UiEnv e;
+    vv::editor::scriptwin::open(e.st.scriptWin, e.scene, e.tic);
+    // tap no MEIO do corpo (não em back/run/stop/lupa)
+    int r = 0;
+    {
+        e.input.injectDown(0, 360.0f, 400.0f);
+        e.ui.beginFrame(nullptr, &e.input, 720.0f, 1536.0f);
+        r = vv::editor::scriptwin::draw(e.ui, e.input, e.st.scriptWin,
+                                        720.0f, 1536.0f, 0.0f);
+        e.ui.endFrame();
+        e.input.injectUp(0);
+        e.ui.beginFrame(nullptr, &e.input, 720.0f, 1536.0f);
+        r = vv::editor::scriptwin::draw(e.ui, e.input, e.st.scriptWin,
+                                        720.0f, 1536.0f, 0.0f);
+        e.ui.endFrame();
+        e.input.clearEdges();
+    }
+    EXPECT(r == 5);                 // o main re-pede o IME
+    EXPECT(e.st.scriptWin.kbOpen);  // e o teclado in-app abriu
+    EXPECT(e.st.scriptWin.open);    // digitar/toque NÃO fecha
+    vv::editor::scriptwin::close(e.st.scriptWin);
+}
+
+TEST(scriptwin_lupa_abre_docs_por_cima) {
+    // FASE 9 (G0-3): a lupa na toolbar do editor devolve 4 (o main abre
+    // as Docs por cima — pesquisa filtra + mostra o exemplo)
+    UiEnv e;
+    vv::editor::scriptwin::open(e.st.scriptWin, e.scene, e.tic);
+    const f32 docsX = 720.0f - 72.0f * 2.0f - 16.0f - 8.0f - 48.0f;
+    int r = 0;
+    e.input.injectDown(0, docsX + 24.0f, 28.0f);
+    e.ui.beginFrame(nullptr, &e.input, 720.0f, 1536.0f);
+    r = vv::editor::scriptwin::draw(e.ui, e.input, e.st.scriptWin, 720.0f,
+                                    1536.0f, 0.0f);
+    e.ui.endFrame();
+    e.input.injectUp(0);
+    e.ui.beginFrame(nullptr, &e.input, 720.0f, 1536.0f);
+    r = vv::editor::scriptwin::draw(e.ui, e.input, e.st.scriptWin, 720.0f,
+                                    1536.0f, 0.0f);
+    e.ui.endFrame();
+    e.input.clearEdges();
+    EXPECT(r == 4);
     vv::editor::scriptwin::close(e.st.scriptWin);
 }
 
@@ -369,22 +516,39 @@ TEST(docswin_abre_pesquisa_e_expande) {
 }
 
 TEST(settings_linha_docs_devolve_kOpenDocs) {
+    // FASE 9 (G0-3 — o fix): a linha "Ver docs da V.ONI" era MORTA no
+    // device (o walk do scrollTap só avançava o cursor — o toque nunca
+    // voltava re-despachado). O tap na linha tem de devolver kOpenDocs.
     UiEnv e;
     e.st.settingsMenu = true;
-    // colapsa TUDO menos Docs (a linha só se desenha na secção aberta)
-    e.st.settingsCollapsed = 0xFFFFFFFFu & ~(1u << 4);
+    // colapsa Geral/Audio/Permissoes/Diagnóstico para a linha Docs subir
+    // para dentro do viewport 1600×720 (o mesmo atalho do teste do
+    // kOpenTextWindow do wiring091)
+    e.st.settingsCollapsed =
+        vv::editor::settings::kBitGeral | vv::editor::settings::kBitAudio |
+        vv::editor::settings::kBitPerm | vv::editor::settings::kBitDiag;
+    // um frame para o layout estabilizar (slots de scroll do UiContext)
+    e.ui.beginFrame(nullptr, &e.input, 1600.0f, 720.0f);
+    e.ui.endFrame();
+    e.input.clearEdges();
+
+    // y da linha: 8 (pad) + 4 headers colapsados ×48 + header Docs ×48 +
+    // meia linha; a linha INTEIRA é o alvo (o mesmo hit-test do draw)
+    const f32 yRow = vv::safe::kToolbarH + 56.0f + 8.0f + 4.0f * 48.0f +
+                     48.0f + 24.0f;
     vv::editor::settings::Ctx ctx;
-    ctx.version = "0.9.2 (vc 45)";
-    vv::f32 w = 1600.0f, h = 720.0f;
-    e.ui.beginFrame(nullptr, &e.input, w, h);
+    ctx.version = "0.9.4 (vc 47)";
+    e.input.injectDown(0, 800.0f, yRow);
+    e.ui.beginFrame(nullptr, &e.input, 1600.0f, 720.0f);
+    vv::editor::settings::draw(e.ui, e.input, e.st, ctx);
+    e.ui.endFrame();
+    e.input.injectUp(0);
+    e.ui.beginFrame(nullptr, &e.input, 1600.0f, 720.0f);
     const vv::editor::settings::Result r =
         vv::editor::settings::draw(e.ui, e.input, e.st, ctx);
     e.ui.endFrame();
-    (void)r;
-    // o tap na linha Docs (y = header 72 + secções colapsadas…) — em vez de
-    // caçar o y, afervamos o CAMINHO: linha existe + o resultado vem do hit
-    // (o teste de UI completo com coordenadas exatas vive no device)
-    EXPECT(true);   // desenho sem crash + compila = o gate desta parte
+    e.input.clearEdges();
+    EXPECT(r == vv::editor::settings::kOpenDocs);
 }
 
 TEST(commit_purpose8_agora_escreve_hiersearch_bug_090_fix) {

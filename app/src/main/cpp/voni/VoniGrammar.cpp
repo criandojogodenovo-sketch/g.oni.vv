@@ -182,6 +182,8 @@ static const char* const kReserved[] = {
     "repeat", "last", "with", "continue", "resume", "move",
     "linker", "to", "tyker",
     "central", "main", "on", "moment", "allmoments",
+    nullptr,   // FASE 9 (loop ASan): o SENTINELA faltava — o loop `*p` lia
+               // 8 B FORA do array em CADA chamada (desde a 0.9.2)
 };
 
 bool isReservedWord(const std::string& lower) {

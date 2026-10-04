@@ -330,7 +330,11 @@ void resolveCanvasLayout(const UiCanvas& c, f32 sw, f32 sh,
     }
     // 3) órfãos/nao-dispostos (ciclos, pais invisíveis, pais mortos): ficam
     //    como TOPO (âncoras próprias, tamanho efetivo) — determinístico
-    for (size_t i = 0; i < n; ++i) {
+    //    FASE 9 (loop ASan): o loop era `i < n` (TODOS os elementos) mas
+    //    r.sizeW/r.sizeH/r.out têm tamanho `count` (o cap do chamador é a
+    //    autoridade — 0.8.4) — com 33+ elementos e cap 32 o passo 3 lia/
+    //    escrevia FORA dos buffers (stack no editor). O loop é o CAP.
+    for (u32 i = 0; i < count; ++i) {
         if (!c.elements[i].parent.empty() && !r.out[i].laid) {
             const UiElement& e = c.elements[i];
             UiRect rect = elementRect(e, sw, sh, ins);
