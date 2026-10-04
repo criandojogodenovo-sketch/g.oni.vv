@@ -35,6 +35,9 @@
 #include "components/SkeletonComp.h"   // 0.8.2 (F7): skinning
 #include "components/UiCanvas.h"   // 0.8.0: tracks de UI
 #include "assets/GltfAnim.h"   // 0.8.1 (F7): clips de animação do glTF
+#include "assets/GltfImporter.h"     // 0.9.6 (G6): parse do GLB do bench
+#include "assets/GltfInstantiate.h"  // 0.9.6 (G6): TIC do mesh importado
+#include "core/Bench.h"              // 0.9.6 (G6 · R-017): benchmarks reais
 #include "core/AnimationSystem.h"   // 0.8.0: avanço em Play
 #include "core/VoniSystem.h"   // 0.9.2: a "central" da V.ONI (spec §3)
 #include "voni/Voni.h"
@@ -1438,6 +1441,396 @@ bool audioBackendSwitch(bool toAudioTrack) {
 // (shouldFallback) troca o backend vivo sozinha. 0.9.3: o probe corre
 // contra o OBOE (o primário) — é a estabilidade DELE que decide a troca
 // para AudioTrack ----------------------------------------------------------------
+// ============================================================================
+// 0.9.6 (G6 · R-017) — BENCHMARKS REAIS ======================================
+//
+// A máquina de fases corre DENTRO do frame (um passo por frame; os passos
+// "instantâneos" constroem/medem e avançam no frame seguinte). A parte
+// PURA (amostras/agregação/o bloco de 9 linhas/RSS/GLB de referência)
+// vive em core/Bench — afervada pelo test_core; AQUI fica a orquestração
+// que toca cena/import/probe — o caminho que o FASE 12.9 do c33_virtual
+// repete no CI.
+//
+// P-02: fora do bench o custo é UM if por frame (phase==Idle retorna no
+// topo do tick) — zero alocações, zero consultas, zero medições.
+// ============================================================================
+struct BenchRunner {
+    enum class Phase : u8 {
+        Idle = 0,   // nada em curso (o repo inteiro do frame é UM if)
+        DefRun,     // ~10s a medir a cena default (a que estava aberta)
+        BuildScene, // 1 frame: a cena bench (TICs fixos + mesh EMPACOTADO)
+        Import,     // 1 frame: GLB de referência → importFile (TEMPO) + TIC
+        BenchRun,   // ~10s a medir a cena bench (mesh importado)
+        Texture,    // 1 frame: 512×512 pela MESMA compressão do pipeline
+        Audio,      // 1 frame: o probe de sempre (device; host não mede)
+        Finish,     // 1 frame: RSS/JNI/projeto + relatório no log + limpeza
+        Done        // relatório pronto (Copiar no Diagnóstico)
+    };
+    Phase   phase = Phase::Idle;
+    double  phaseT = 0.0;
+    double  secs = 10.0;             // duração de CADA cena (harness encurta)
+    std::vector<double> samples;     // fps (1/dt) da cena corrente
+    bench::Report report{};
+    std::vector<Handle> benchTics;   // os TICs da cena bench (p/ remover)
+    DrawStats lastTotal{};           // mesma soma da statusLine do frame
+};
+BenchRunner g_bench;
+
+// hooks do harness (FASE 12.9 — o c33_virtual encurta as cenas para o CI
+// não dormir 20s; o PERCURSO é o mesmo, só a duração muda)
+void benchTestHookSetSecs(double s) { g_bench.secs = s; }
+bool benchTestHookDone() { return g_bench.phase == BenchRunner::Phase::Done; }
+const bench::Report& benchTestHookReport() { return g_bench.report; }
+
+static void benchStart() {
+    if (g_bench.phase != BenchRunner::Phase::Idle &&
+        g_bench.phase != BenchRunner::Phase::Done) {
+        showToast("bench: já em curso");
+        return;
+    }
+    bench::Report r{};
+    std::snprintf(r.version, sizeof(r.version), "%s",
+                  buildinfo::g_version);
+    r.versionCode = buildinfo::g_versionCode;
+    // arranques: as marcas do lifecycle deste processo (quem nunca saiu do
+    // foreground não tem warm — o relatório DIZ "não medido")
+    r.warmStartMs = bench::latestWarmMs();
+    r.coldStartMs = bench::latestColdMs();
+    g_bench.report = r;
+    g_bench.samples.clear();
+    g_bench.benchTics.clear();
+    g_bench.phaseT = 0.0;
+    g_bench.phase = BenchRunner::Phase::DefRun;
+    elog::info("bench: início (cena default %.1fs · cena bench %.1fs · "
+               "import+texturas+áudio no meio)", g_bench.secs, g_bench.secs);
+    showToast("bench: a correr — não fechar a app");
+}
+
+// a cena bench (BuildScene): 8×8 TICs em grelha fixa (cubo PRIMITIVO = o
+// mesh EMPACOTADO do engine — determinístico, zero I/O), já com o mesh
+// importado a chegar na fase seguinte. Zero aleatoriedade.
+static void benchBuildScene() {
+    int made = 0;
+    for (int iz = 0; iz < 8; ++iz) {
+        for (int ix = 0; ix < 8; ++ix) {
+            const Handle h = createTicFromPreset(
+                g_scene, PresetKind::Mesh, &g_cubeMesh,
+                g_renderer.litMaterial());
+            if (!h.valid()) {
+                continue;
+            }
+            Tic* t = g_scene.get(h);
+            if (!t) {
+                continue;
+            }
+            char nome[24];
+            std::snprintf(nome, sizeof(nome), "bench%02d", iz * 8 + ix);
+            t->name = nome;
+            if (Transform3D* tr = t->getComponent<Transform3D>()) {
+                tr->pos = Vec3{ (ix - 3.5f) * 2.5f, 0.0f,
+                                (iz - 3.5f) * 2.5f };
+            }
+            g_bench.benchTics.push_back(h);
+            ++made;
+        }
+    }
+    elog::info("bench: cena bench construída (%d TICs, grelha 8×8, cubo "
+               "empacotado)", made);
+}
+
+// o IMPORT de referência (Import): GLB determinístico (core/Bench) →
+// cache dir → convert::importFile DE PRODUÇÃO (o mesmo do worker) com
+// cronómetro → parse + gltfInstantiate: o TIC do mesh IMPORTADO entra na
+// cena bench (é o "mesh importado" da linha 4 do relatório) e a escala
+// do nó é lida do Transform3D REAL (round-trip 2.5 → report).
+static void benchImportRef() {
+    const std::string dir = storage::jniCacheDir();
+    if (dir.empty()) {
+        elog::warn("bench: import não medido — sem cache dir (ponte "
+                   "indisponível)");
+        return;   // importMs fica "não medido" (R-017: nunca inventa)
+    }
+    const std::string path = dir + "/benchref.glb";
+    std::vector<u8> glb;
+    bench::makeReferenceGlb(glb);
+    if (!fileapi::writeAll(path, glb.data(), glb.size())) {
+        elog::warn("bench: import não medido — falha ao escrever '%s' (%s)",
+                   path.c_str(), fileapi::errnoText().c_str());
+        return;
+    }
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    const auto t0 = std::chrono::steady_clock::now();
+    if (!convert::importFile(path, "benchref.glb", *g_storage,
+                             g_pipeline.get(), out, stats, err)) {
+        elog::warn("bench: import FALHOU — %s", err.c_str());
+        return;
+    }
+    const auto t1 = std::chrono::steady_clock::now();
+    g_bench.report.importMs = bench::Measured{
+        true, std::chrono::duration<double, std::milli>(t1 - t0).count() };
+    // o TIC do mesh importado (o parse do MESMO container em memória; o
+    // bindMesh é o GpuAssets REAL — o rebind de produção)
+    GltfModel model;
+    if (parseGlb(glb.data(), glb.size(), GltfBufferResolver{nullptr, 0},
+                 model, err)) {
+        GltfInstantiateCtx ctx;
+        ctx.bindMesh = [](void*, const std::string& ref) -> Mesh* {
+            return g_gpu.mesh(ref);
+        };
+        ctx.material = g_renderer.litMaterial();
+        const Handle h = gltfInstantiate(g_scene, model, "assets/benchref",
+                                         ctx);
+        if (h.valid()) {
+            g_bench.benchTics.push_back(h);
+            if (const Tic* t = g_scene.get(h)) {
+                if (const Transform3D* tr = t->getComponent<Transform3D>()) {
+                    g_bench.report.importScale = bench::Measured{
+                        true, static_cast<double>(tr->scale.x) };
+                }
+            }
+            elog::info("bench: import %.0f ms · TIC instanciado "
+                       "(escala lida do Transform3D: %.1f)",
+                       g_bench.report.importMs.value,
+                       g_bench.report.importScale.value);
+        }
+    } else {
+        elog::warn("bench: parse do GLB de referência falhou — %s",
+                   err.c_str());
+    }
+}
+
+// o tamanho do projeto (Finish): stat REAL ficheiro a ficheiro (a
+// interface statBytes — FsStorage = stat do SO, FakeStorage = bytes em
+// memória p/ o harness); no SAF não há stat — o relatório diz "não medido"
+static u64 benchProjectBytes() {
+    if (!g_storage) {
+        return 0;
+    }
+    u64 total = 0;
+    const char* dirs[] = { Project::kDirScenes, Project::kDirMeshes,
+                           Project::kDirTextures, Project::kDirSource,
+                           Project::kDirAssets };
+    for (const char* d : dirs) {
+        std::vector<std::string> files;
+        if (!g_storage->listDir(d, files)) {
+            continue;
+        }
+        for (const std::string& f : files) {
+            u64 sz = 0;
+            if (g_storage->statBytes(std::string(d) + "/" + f, sz)) {
+                total += sz;
+            }
+        }
+    }
+    std::vector<std::string> rootFiles;
+    if (g_storage->listDir(".", rootFiles)) {
+        for (const std::string& f : rootFiles) {
+            u64 sz = 0;
+            if (g_storage->statBytes(f, sz)) {
+                total += sz;
+            }
+        }
+    }
+    return total;
+}
+
+static void benchCopyReport() {
+    if (g_bench.phase != BenchRunner::Phase::Done) {
+        showToast("bench: sem relatório — Correr bench primeiro");
+        return;
+    }
+    const std::string text = bench::format(g_bench.report);
+    if (storage::jniClipboardCopy(text.c_str())) {
+        showToast("bench: relatório copiado");
+        elog::info("bench: relatório copiado (%zu bytes)", text.size());
+    } else {
+        showToast("bench: clipboard indisponível");
+    }
+}
+
+// o tick (chamado UMA vez por frame, logo após as contagens da cena — a
+// MESMA soma da statusLine: st3d + stGrid + UI do frame anterior)
+static void benchTick(f32 dt, const DrawStats& total) {
+    if (g_bench.phase == BenchRunner::Phase::Idle) {
+        return;   // P-02: o custo de não estar em bench é este if
+    }
+    g_bench.lastTotal = total;
+    const double d = static_cast<double>(dt);
+    switch (g_bench.phase) {
+    case BenchRunner::Phase::DefRun:
+        if (d > 0.0) {
+            g_bench.samples.push_back(1.0 / d);
+        }
+        g_bench.phaseT += d;
+        if (g_bench.phaseT >= g_bench.secs) {
+            g_bench.report.def = bench::aggregate(g_bench.samples);
+            g_bench.report.defVerts = bench::Measured{
+                true, static_cast<double>(total.vertices) };
+            g_bench.report.defDc = bench::Measured{
+                true, static_cast<double>(total.drawCalls) };
+            g_bench.phase = BenchRunner::Phase::BuildScene;
+        }
+        break;
+    case BenchRunner::Phase::BuildScene:
+        benchBuildScene();
+        g_bench.phase = BenchRunner::Phase::Import;
+        break;
+    case BenchRunner::Phase::Import:
+        benchImportRef();
+        g_bench.samples.clear();
+        g_bench.phaseT = 0.0;
+        g_bench.phase = BenchRunner::Phase::BenchRun;
+        break;
+    case BenchRunner::Phase::BenchRun:
+        if (d > 0.0) {
+            g_bench.samples.push_back(1.0 / d);
+        }
+        g_bench.phaseT += d;
+        if (g_bench.phaseT >= g_bench.secs) {
+            g_bench.report.scene = bench::aggregate(g_bench.samples);
+            g_bench.report.sceneVerts = bench::Measured{
+                true, static_cast<double>(total.vertices) };
+            g_bench.report.sceneDc = bench::Measured{
+                true, static_cast<double>(total.drawCalls) };
+            g_bench.phase = BenchRunner::Phase::Texture;
+        }
+        break;
+    case BenchRunner::Phase::Texture: {
+        // 512×512 determinístico (gradiente — zero aleatoriedade) pela
+        // MESMA máquina do pipeline (HardwareCompressor global: ASTC se a
+        // extensão existe, senão ETC2 — a escolha que o device faz)
+        RawImage img;
+        img.width = 512;
+        img.height = 512;
+        img.rgba.resize(512 * 512 * 4);
+        for (u32 y = 0; y < 512; ++y) {
+            for (u32 x = 0; x < 512; ++x) {
+                const size_t i = (static_cast<size_t>(y) * 512 + x) * 4;
+                img.rgba[i + 0] = static_cast<u8>(x >> 1);
+                img.rgba[i + 1] = static_cast<u8>(y >> 1);
+                img.rgba[i + 2] = static_cast<u8>((x ^ y) >> 1);
+                img.rgba[i + 3] = 255;
+            }
+        }
+        CompressedImage ci;
+        std::string cerr;
+        const auto t0 = std::chrono::steady_clock::now();
+        if (g_hwCompressor.compress(img, ci, cerr)) {
+            const auto t1 = std::chrono::steady_clock::now();
+            g_bench.report.texMs = bench::Measured{
+                true, std::chrono::duration<double, std::milli>(t1 - t0)
+                          .count() };
+            std::snprintf(g_bench.report.texFormat,
+                          sizeof(g_bench.report.texFormat), "%s",
+                          formatName(ci.format));
+            elog::info("bench: textura %s em %.0f ms",
+                       g_bench.report.texFormat,
+                       g_bench.report.texMs.value);
+        } else {
+            elog::warn("bench: compressão falhou — %s", cerr.c_str());
+        }
+        g_bench.phase = BenchRunner::Phase::Audio;
+        break;
+    }
+    case BenchRunner::Phase::Audio: {
+#if defined(__ANDROID__)
+        // device REAL (o APK): o MESMO probe do Settings (50+10 ciclos) —
+        // a linha do relatório é a mesma medição, não uma repetição. A
+        // guarda é de COMPILAÇÃO: o host/CI não tem device de áudio — o
+        // probe aqui seria uma medição do stub, e o R-017 manda DIZER
+        // "não medido" em vez de medir mentira
+        {
+            std::unique_ptr<audioout::Backend> probe(audioout::createOboe());
+            const audioout::ProbeResult r =
+                audioout::runProbe(probe.get(), 50, 10, 0);
+            probe->stop();
+            const u32 totalC = r.cycles + r.pauseCycles;
+            const u32 okC = totalC - r.failures - r.pauseFailures;
+            g_bench.report.audioOk = okC > totalC ? 0 : okC;
+            g_bench.report.audioTotal = totalC;
+            std::snprintf(g_bench.report.audioBackend,
+                          sizeof(g_bench.report.audioBackend), "%s",
+                          g_audioOut ? g_audioOut->name() : "?");
+            elog::info("bench: áudio %u/%u ok (backend %s)",
+                       g_bench.report.audioOk, g_bench.report.audioTotal,
+                       g_bench.report.audioBackend);
+        }
+#else
+        elog::info("bench: áudio não medido (host sem device de "
+                   "áudio — o probe corre no aparelho)");
+#endif
+        g_bench.phase = BenchRunner::Phase::Finish;
+        break;
+    }
+    case BenchRunner::Phase::Finish: {
+        bench::Report& r = g_bench.report;
+        const u64 rssKb = bench::readPeakRssKb();
+        if (rssKb > 0) {
+            r.rssPeakMb = bench::Measured{
+                true, static_cast<double>(rssKb) / 1024.0 };
+        }
+        // device/Android/APK (JNI — uma chamada por bench; no host devolve
+        // "" e a linha 1 diz "não medido" em vez de inventar um modelo)
+        const std::string info = storage::jniBenchDeviceInfo();
+        if (!info.empty()) {
+            const auto field = [&info](const char* key) -> std::string {
+                const std::string k = std::string(key) + "=";
+                const size_t p = info.find(k);
+                if (p == std::string::npos) {
+                    return "";
+                }
+                const size_t s = p + k.size();
+                const size_t e = info.find(';', s);
+                return info.substr(s, e == std::string::npos
+                                          ? std::string::npos
+                                          : e - s);
+            };
+            const std::string dev = field("device");
+            std::snprintf(r.device, sizeof(r.device), "%s", dev.c_str());
+            r.sdk = std::atoi(field("sdk").c_str());
+            const u64 apkBytes = std::strtoull(field("apkBytes").c_str(),
+                                               nullptr, 10);
+            if (apkBytes > 0) {
+                r.apkMb = bench::Measured{
+                    true, static_cast<double>(apkBytes) / (1024.0 * 1024.0) };
+            }
+            const std::string sha = field("apkSha");
+            if (sha.size() >= 12) {
+                std::snprintf(r.apkSha, sizeof(r.apkSha), "%.12s…",
+                              sha.c_str());
+                r.apkShaOk = bench::Measured{ true, 1.0 };
+            }
+        }
+        const u64 projBytes = benchProjectBytes();
+        if (projBytes > 0) {
+            r.projMb = bench::Measured{
+                true, static_cast<double>(projBytes) / (1024.0 * 1024.0) };
+        }
+        // o relatório no LOG (o dono cola do logcat se o clipboard falhar)
+        const std::string block = bench::format(r);
+        elog::info("bench: RELATÓRIO\n%s", block.c_str());
+        // a cena bench SAI (o editor volta exatamente ao que era — a cena
+        // default do dono nunca foi tocada; o .gmesh importado fica em
+        // assets/ e é listado pelo seletor como qualquer import)
+        for (Handle h : g_bench.benchTics) {
+            g_scene.destroy(h);
+        }
+        g_bench.benchTics.clear();
+        if (g_editor.selected.valid() && !g_scene.get(g_editor.selected)) {
+            g_editor.selected = Handle{};
+        }
+        g_bench.phase = BenchRunner::Phase::Done;
+        showToast("bench: pronto — Copiar relatório no Diagnóstico");
+        break;
+    }
+    case BenchRunner::Phase::Idle:
+    case BenchRunner::Phase::Done:
+        break;   // sem trabalho (o Copiar Relatório é puxado, não empurrado)
+    }
+}
+
 void audioProbeRun() {
     elog::info("audio: probe a correr (50 ciclos + 10 pause/resume)...");
     std::unique_ptr<audioout::Backend> probe(audioout::createOboe());
@@ -4117,6 +4510,10 @@ void frame() {
     const Mat4 vp = Mat4::mul(proj, view);
     const DrawStats st3d = drawTics(vp);
     const DrawStats stGrid = g_grid.draw(vp, camEye, camFocus);
+    // 0.9.6 (G6 · R-017): o bench amostra AQUI — a MESMA soma da statusLine
+    // (st3d + grid + UI do frame anterior): os verts/draw calls do relatório
+    // são os da barra de estado DO MESMO frame (fonte única, R-017)
+    benchTick(g_frameDt, st3d + stGrid + g_lastUiStats);
 
     // 0.7.8 — FRONTEIRA EXPLÍCITA 3D→UI: repor o estado GL que o pass 3D
     // deixou (LitMaterial liga depth/cull com a proj da câmara de jogo; o
@@ -4452,6 +4849,18 @@ void frame() {
             }
             case editor::settings::kProbeAudio: {
                 runAudioProbe();
+                break;
+            }
+            case editor::settings::kRunBench: {
+                // 0.9.6 (G6 · R-017): a máquina de fases do bench arranca NO
+                // frame seguinte (o Settings fecha — o bench é um modal de
+                // facto: 20s+ de medições com toasts de progresso)
+                g_editor.settingsMenu = false;
+                benchStart();
+                break;
+            }
+            case editor::settings::kCopyBench: {
+                benchCopyReport();
                 break;
             }
             case editor::settings::kOpenTextWindow: {
@@ -5678,6 +6087,10 @@ void android_main(android_app* app) {
         }
 
         frame();
+        // 0.9.6 (G6): a marca da APRESENTAÇÃO — a cada frame (barato e
+        // idempotente: guarda a 1ª do processo para o cold e a 1ª após
+        // cada onResume para o warm — ver core/Bench)
+        bench::markFirstFrame();
 
         if (g_toastT > 0.0f) {
             g_toastT -= static_cast<f32>(realDt);

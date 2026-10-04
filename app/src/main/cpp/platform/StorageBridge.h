@@ -103,6 +103,11 @@ bool jniClipboardCopy(const char* utf8);
 // errno=30). Vazio = ponte indisponível; o chamador dá erro LEGÍVEL.
 std::string jniCacheDir();
 
+// 0.9.6 (G6 · R-017) — a identidade do relatório de bench (UMA chamada por
+// bench): "device=<MODEL>;sdk=<SDK_INT>;apkBytes=<n>;apkSha=<hex64>".
+// Vazio = ponte indisponível (host) — o relatório diz "não medido".
+std::string jniBenchDeviceInfo();
+
 // F5.1-hotfix (parte 1.4, mantida): export dos logs para Downloads/GOneVV/logs
 // (MediaStore, lado Java). true = chamada Java executada; *outCount =
 // ficheiros copiados (negativo = falha Java: -1 excepção, -2 API<29,

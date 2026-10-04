@@ -38,6 +38,9 @@ public:
     bool listDir(const std::string& relDir,
                  std::vector<std::string>& outFiles) const override;
 
+    // 0.9.6 (G6 · R-017): stat real por ficheiro (o bench do relatório)
+    bool statBytes(const std::string& relPath, u64& outBytes) const override;
+
 private:
     std::string root_;
 };

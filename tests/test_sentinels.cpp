@@ -38,6 +38,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <sstream>   // 0.9.6 (R-017): parse das 9 linhas do bench
 #include <string>
 #include <vector>
 
@@ -57,6 +58,8 @@
 #include "platform/CrashHandler.h"
 #include "platform/StorageBridge.h"
 #include "assets/AssetConverter.h"
+#include "assets/GltfImporter.h"   // 0.9.6 (R-017): o GLB do bench
+#include "core/Bench.h"            // 0.9.6 (R-017): o relatório não mente
 // 0.9.3 (REG-002): o backend Oboe de PRODUÇÃO (TU comum) contra o stub
 // tests/stub/oboe/Oboe.h — o MESMO código que corre no APK
 #include "platform/AudioOut.h"
@@ -1337,4 +1340,133 @@ TEST(regress_r010_editor_roundtrip) {
             start = (end < src.size()) ? end + 1 : end;
         }
     }
+}
+
+// ============================================================================
+// R-017 · o bench NÃO MENTE (FASE 0.9.6 · G6) — regress_bench_nao_mente
+//
+// O CONTRATO da spec: "todo métrico é real (medido no device) e nenhum
+// hardcoded". A sentinela afirma AS DUAS PONTAS:
+//   (a) o format() escreve EXATAMENTE os valores que estão no Report (se
+//       o formato hardcodasse QUALQUER número — p.ex. fps 60 — os dois
+//       relatórios com valores diferentes seriam iguais nesse sítio);
+//   (b) a honestidade: campo não medido imprime "não medido" (nunca 0
+//       disfarçado de medição), e o bloco tem 9 LINHAS FIXAS.
+// A TERCEIRA ponta (os números CHEGAM de medições reais) é o FASE 12.9 do
+// c33_virtual: o replay corre o bench inteiro pelo caminho do device e
+// afirma fps/verts/import medidos no PRÓPRIO processo de replay.
+// ============================================================================
+TEST(regress_bench_nao_mente) {
+    // ---- (a) dois Reports com TODOS os campos diferentes → 9 linhas ----
+    // diferentes (nenhuma posição do bloco é constante)
+    bench::Report a, b;
+    std::snprintf(a.version, sizeof(a.version), "0.9.6");
+    a.versionCode = 49;
+    std::snprintf(a.device, sizeof(a.device), "RMX3624");
+    a.sdk = 33;
+    a.warmStartMs  = bench::Measured{ true, 412.0 };
+    a.coldStartMs  = bench::Measured{ true, 1830.0 };
+    a.def   = bench::FpsAgg{ true, 58.0, 51.0, 47.0 };
+    a.scene = bench::FpsAgg{ true, 55.0, 48.0, 44.0 };
+    a.defVerts = bench::Measured{ true, 12543.0 };
+    a.defDc    = bench::Measured{ true, 89.0 };
+    a.sceneVerts = bench::Measured{ true, 40120.0 };
+    a.sceneDc    = bench::Measured{ true, 156.0 };
+    a.importMs    = bench::Measured{ true, 96.0 };
+    a.importScale = bench::Measured{ true, 2.5 };
+    a.texMs = bench::Measured{ true, 41.0 };
+    std::snprintf(a.texFormat, sizeof(a.texFormat), "ASTC 4x4");
+    a.audioOk = 60; a.audioTotal = 60;
+    std::snprintf(a.audioBackend, sizeof(a.audioBackend), "oboe");
+    a.rssPeakMb = bench::Measured{ true, 214.0 };
+    a.apkMb = bench::Measured{ true, 18.4 };
+    a.apkShaOk = bench::Measured{ true, 1.0 };
+    std::snprintf(a.apkSha, sizeof(a.apkSha), "44f39beda1b2…");
+    a.projMb = bench::Measured{ true, 3.2 };
+
+    std::snprintf(b.version, sizeof(b.version), "9.9.9");
+    b.versionCode = 99;
+    std::snprintf(b.device, sizeof(b.device), "OUTRO");
+    b.sdk = 34;
+    b.warmStartMs  = bench::Measured{ true, 1.0 };
+    b.coldStartMs  = bench::Measured{ true, 2.0 };
+    b.def   = bench::FpsAgg{ true, 3.0, 4.0, 5.0 };
+    b.scene = bench::FpsAgg{ true, 6.0, 7.0, 8.0 };
+    b.defVerts = bench::Measured{ true, 9.0 };
+    b.defDc    = bench::Measured{ true, 10.0 };
+    b.sceneVerts = bench::Measured{ true, 11.0 };
+    b.sceneDc    = bench::Measured{ true, 12.0 };
+    b.importMs    = bench::Measured{ true, 13.0 };
+    b.importScale = bench::Measured{ true, 14.0 };
+    b.texMs = bench::Measured{ true, 15.0 };
+    std::snprintf(b.texFormat, sizeof(b.texFormat), "ETC2 RGB");
+    b.audioOk = 16; b.audioTotal = 17;
+    std::snprintf(b.audioBackend, sizeof(b.audioBackend), "AudioTrack");
+    b.rssPeakMb = bench::Measured{ true, 18.0 };
+    b.apkMb = bench::Measured{ true, 19.0 };
+    b.apkShaOk = bench::Measured{ true, 1.0 };
+    std::snprintf(b.apkSha, sizeof(b.apkSha), "ffffffffffff…");
+    b.projMb = bench::Measured{ true, 20.0 };
+
+    const std::string ta = bench::format(a);
+    const std::string tb = bench::format(b);
+    // as 9 linhas pelos prefixos de identidade
+    std::istringstream ia(ta), ib(tb);
+    std::string la, lb;
+    int lines = 0, diffs = 0;
+    while (std::getline(ia, la) && std::getline(ib, lb)) {
+        ++lines;
+        if (la != lb) {
+            ++diffs;
+        }
+    }
+    EXPECT(lines == 9);      // o bloco é SEMPRE 9 linhas (parseável)
+    EXPECT(diffs == 9);      // nenhuma posição hardcodada
+    // os valores MEDIDOS aparecem literalmente (amostragem direta)
+    EXPECT(ta.find("warm start: 412 ms") != std::string::npos);
+    EXPECT(ta.find("(escala 2.5)") != std::string::npos);
+    EXPECT(tb.find("16/17 ok · AudioTrack") != std::string::npos);
+
+    // ---- (b) a HONESTIDADE: não medido é DITO, nunca 0 -----------------
+    bench::Report v;   // nada medido
+    const std::string tv = bench::format(v);
+    EXPECT(tv.find("não medido") != std::string::npos);
+    EXPECT(tv.find("cena default: não medido") == 0 ? false
+          : tv.find("cena default: não medido") != std::string::npos);
+    // um valor medido NUM campo de resto vazio: o número aparece, o resto
+    // não (a honestidade é POR CAMPO)
+    bench::Report m;
+    m.rssPeakMb = bench::Measured{ true, 123.0 };
+    const std::string tm = bench::format(m);
+    EXPECT(tm.find("pico RSS 123 MB") != std::string::npos);
+    EXPECT(tm.find("warm start: não medido") != std::string::npos);
+
+    // ---- (c) a agregação é MATEMÁTICA (o 1% low não é o min nem média) --
+    std::vector<double> w(600, 60.0);
+    for (int i = 0; i < 30; ++i) {
+        w[i] = 20.0;   // 5% das amostras em queda
+    }
+    const bench::FpsAgg agg = bench::aggregate(w);
+    EXPECT(agg.ok);
+    EXPECT(agg.min < 21.0);            // o mínimo caiu com a queda
+    EXPECT(agg.p1 < 21.0);            // o 1% low cai (5% > 1%)
+    EXPECT(agg.avg > 55.0);            // a média resiste (95% a 60)
+    // 1 amostra em 600 (0.17%): o 1% low NÃO cai (fora do pior 1%)
+    std::vector<double> u(600, 60.0);
+    u[100] = 30.0;
+    const bench::FpsAgg agg2 = bench::aggregate(u);
+    EXPECT(agg2.ok && agg2.p1 > 55.0);
+
+    // ---- (d) o GLB de referência é DETERMINÍSTICO (a escala idem) -------
+    std::vector<u8> g1, g2;
+    bench::makeReferenceGlb(g1);
+    bench::makeReferenceGlb(g2);
+    EXPECT(g1.size() == g2.size() &&
+           std::memcmp(g1.data(), g2.data(), g1.size()) == 0);
+    GltfModel model;
+    std::string err;
+    EXPECT(parseGlb(g1.data(), g1.size(), GltfBufferResolver{nullptr, 0},
+                    model, err));
+    EXPECT(!model.nodes.empty() &&
+           nearEqF(model.nodes[0].scale.x, 2.5f, 0.001f));
 }

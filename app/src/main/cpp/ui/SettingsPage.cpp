@@ -276,6 +276,19 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
             res = kProbeAudio;
         }
         y += kRowH;
+        // 0.9.6 (G6 · R-017) — BENCHMARKS REAIS: duas linhas (correr +
+        // copiar). Todo o número do bloco de 9 linhas é MEDIDO; o que não
+        // pôde ser medido diz "não medido" (a honestidade é a sentinela)
+        if (actionRow(ui, kRunBenchId, ox, y, aw,
+                      "fps/import/memória (~20s)", "Correr bench")) {
+            res = kRunBench;
+        }
+        y += kRowH;
+        if (actionRow(ui, kCopyBenchId, ox, y, aw,
+                      "bloco de 9 linhas", "Copiar relatório")) {
+            res = kCopyBench;
+        }
+        y += kRowH;
         // 0.9.1 — JANELA DE TEXTO: portrait + IME do sistema (a semente do
         // editor de script 0.9.2; vive em Diagnóstico enquanto não há
         // componente Script num TIC — decisão documentada no relatório)
@@ -421,6 +434,20 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
                     if (res == kNone &&
                         hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
                         res = kProbeAudio;
+                    }
+                    hy += kRowH;
+                    // 0.9.6 (G6 · R-017): os DOIS botões do bench — sem
+                    // ESTAS linhas o walk não re-despacha e o botão nasce
+                    // MORTO (a mesma classe do bug 0.9.1: desenhar ≠ tocar;
+                    // apanhado pela FASE 12.9 no primeiro run do harness)
+                    if (res == kNone &&
+                        hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        res = kRunBench;
+                    }
+                    hy += kRowH;
+                    if (res == kNone &&
+                        hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        res = kCopyBench;
                     }
                     hy += kRowH;
                     if (res == kNone &&

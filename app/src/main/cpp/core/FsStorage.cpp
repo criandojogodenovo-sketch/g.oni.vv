@@ -169,6 +169,21 @@ bool FsStorage::readBytes(const std::string& relPath, std::vector<u8>& out) cons
     return true;
 }
 
+// 0.9.6 (G6 · R-017): stat REAL (o tamanho do projeto no relatório do
+// bench — sem ler os ficheiros; o SAF não implementa e diz "não medido")
+bool FsStorage::statBytes(const std::string& relPath, u64& outBytes) const {
+    const std::string real = joinRelPath(root_, relPath);
+    if (real.empty()) {
+        return false;
+    }
+    struct stat st{};
+    if (::stat(real.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
+        return false;
+    }
+    outBytes = static_cast<u64>(st.st_size);
+    return true;
+}
+
 bool FsStorage::listDir(const std::string& relDir,
                         std::vector<std::string>& outFiles) const {
     const std::string real = joinRelPath(root_, relDir);

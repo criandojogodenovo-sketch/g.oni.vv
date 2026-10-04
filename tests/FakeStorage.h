@@ -89,4 +89,16 @@ struct FakeStorage final : public vv::ProjectStorage {
         }
         return true;
     }
+
+    // 0.9.6 (G6 · R-017): bytes em MEMÓRIA (o harness MEDE o projeto dele
+    // — o bench do relatório precisa de um tamanho real, mesmo fake)
+    bool statBytes(const std::string& relPath,
+                   vv::u64& outBytes) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) {
+            return false;
+        }
+        outBytes = static_cast<vv::u64>(it->second.size());
+        return true;
+    }
 };

@@ -26,6 +26,7 @@
 // thread anexado.
 #include "platform/StorageBridge.h"
 #include "core/Types.h"
+#include "core/Bench.h"     // 0.9.6 (G6): marcas de arranque (bench R-017)
 #include "platform/BuildInfo.h"   // 0.8.10: identidade da build via JNI
 #include "platform/EngineLog.h"
 #include "platform/ImeQueue.h"
@@ -92,6 +93,7 @@ jmethodID g_midSetImmersive = nullptr;   // 0.9.0: VvActivity.setImmersive(Z)V
 jmethodID g_midSetOrientation = nullptr; // VvActivity.setOrientation(Z)V
 jmethodID g_midImeShow = nullptr;        // VvActivity.imeShow()V
 jmethodID g_midClipboardCopy = nullptr;  // 0.9.5: VvActivity.clipboardCopy(String)V
+jmethodID g_midBenchInfo = nullptr;     // 0.9.6 (G6): VvActivity.benchDeviceInfo()String
 jmethodID g_midImeHide = nullptr;        // VvActivity.imeHide()V
 // 0.8.12 — o CACHE DIR da app: VvActivity.cacheDirPath()String — o STAGING
 // da reconversão SAF escreve AQUI (nunca /tmp: read-only no Android,
@@ -361,6 +363,20 @@ void cacheActivityMethods(JNIEnv* env) {
         elog::info("jni: VvActivity.cacheDirPath OK (staging sem /tmp)");
     }
 
+    // 0.9.6 (G6 · R-017) — o BENCH: device/Android/APK (sha256+bytes) para
+    // a linha 1 e a linha 9 do relatório colável. Não crítico: sem o método
+    // o relatório diz "não medido" nos sítios (nunca inventa um modelo)
+    g_midBenchInfo = env->GetMethodID(
+        g_activityCls, "benchDeviceInfo", "()Ljava/lang/String;");
+    if (!g_midBenchInfo || clearPendingException(env)) {
+        g_midBenchInfo = nullptr;
+        elog::error("jni: VvActivity.benchDeviceInfo NÃO encontrada — o "
+                    "bench reporta device/APK como não medido");
+    } else {
+        elog::info("jni: VvActivity.benchDeviceInfo OK (identidade do "
+                   "relatório de bench)");
+    }
+
     // F5.4 — ponte SAF do Gestor de Projetos (todas na mesma classe: ou
     // existem todas ou o dex divergiu — o veredito exige as críticas)
     struct BridgeMid {
@@ -449,6 +465,16 @@ Java_vv_goni_VvActivity_nativeRegisterActivity(JNIEnv* env, jclass,
     //    sequência completa: "java: onCreate → nativeRegisterActivity"
     const char* o = origin ? env->GetStringUTFChars(origin, nullptr) : nullptr;
     elog::info("java: %s → nativeRegisterActivity", o ? o : "?");
+    // 0.9.6 (G6 · R-017): as MARCAS DE ARRANQUE do bench — onCreate/onResume
+    // contra a 1ª apresentação (markFirstFrame no loop). É a medição real do
+    // processo (o bench LÊ as marcas; nunca as calcula sozinho)
+    if (o) {
+        if (std::strcmp(o, "onCreate") == 0) {
+            bench::markCreate();
+        } else if (std::strcmp(o, "onResume") == 0) {
+            bench::markResume();
+        }
+    }
     if (o) {
         env->ReleaseStringUTFChars(origin, o);
     }
@@ -622,6 +648,34 @@ std::string jniCacheDir() {
     std::string out = utf ? utf : "";
     env->ReleaseStringUTFChars(jpath, utf);
     env->DeleteLocalRef(jpath);
+    return out;
+}
+
+// 0.9.6 (G6 · R-017) — a IDENTIDADE DO BENCH (uma chamada por bench, nunca
+// no caminho de frames): VvActivity.benchDeviceInfo() devolve a string
+// "device=<MODEL>;sdk=<SDK_INT>;apkBytes=<n>;apkSha=<hex64>". Vazio = ponte
+// indisponível (host dos testes) — o relatório diz "não medido" (R-017:
+// nunca inventa um modelo de telemóvel)
+std::string jniBenchDeviceInfo() {
+    if (!handshakeOk() || !g_midBenchInfo) {
+        elog::warn("jni: benchDeviceInfo indisponível — device/APK ficam "
+                   "como não medido no relatório do bench");
+        return "";
+    }
+    JNIEnv* env = attachedEnv();
+    if (!env) {
+        elog::warn("jni: benchDeviceInfo sem env do thread chamador");
+        return "";
+    }
+    const jstring jinfo = static_cast<jstring>(
+        env->CallObjectMethod(g_activity, g_midBenchInfo));
+    if (clearPendingException(env) || !jinfo) {
+        return "";
+    }
+    const char* utf = env->GetStringUTFChars(jinfo, nullptr);
+    std::string out = utf ? utf : "";
+    env->ReleaseStringUTFChars(jinfo, utf);
+    env->DeleteLocalRef(jinfo);
     return out;
 }
 

@@ -420,6 +420,44 @@ public class VvActivity extends NativeActivity {
         });
     }
 
+    // 0.9.6 (G6/R-017) - o BENCH: device/Android/APK (sha256+bytes) para a
+    // linha 1 e a linha 9 do relatorio colavel. Chamado PELO NATIVO uma vez
+    // por bench (nunca no caminho de frames). Formato da resposta:
+    // "device=<MODEL>;sdk=<SDK_INT>;apkBytes=<n>;apkSha=<hex64>"
+    // Vazio = falha (o relatório diz "não medido" — nunca inventa).
+    public String benchDeviceInfo() {
+        try {
+            final StringBuilder sb = new StringBuilder(128);
+            sb.append("device=").append(android.os.Build.MODEL)
+              .append(";sdk=").append(android.os.Build.VERSION.SDK_INT);
+            final java.io.File apk =
+                    new java.io.File(getApplicationInfo().sourceDir);
+            sb.append(";apkBytes=").append(apk.length());
+            try (java.io.FileInputStream in =
+                         new java.io.FileInputStream(apk)) {
+                final java.security.MessageDigest md =
+                        java.security.MessageDigest.getInstance("SHA-256");
+                final byte[] buf = new byte[65536];
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    md.update(buf, 0, n);
+                }
+                final byte[] d = md.digest();
+                final StringBuilder hex = new StringBuilder(64);
+                for (byte b : d) {
+                    hex.append(String.format("%02x", b));
+                }
+                sb.append(";apkSha=").append(hex);
+            }
+            Log.i("GONI", "java: benchDeviceInfo ok (" + apk.length()
+                    + " bytes)");
+            return sb.toString();
+        } catch (Throwable t) {
+            Log.e("GONI", "java: benchDeviceInfo FALHOU", t);
+            return "";
+        }
+    }
+
     public void imeHide() {
         runOnUiThread(() -> {
             try {

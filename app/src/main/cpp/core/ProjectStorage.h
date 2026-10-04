@@ -76,6 +76,16 @@ public:
     // false se relDir não existe; lista vazia = diretório sem ficheiros.
     virtual bool listDir(const std::string& relDir,
                          std::vector<std::string>& outFiles) const = 0;
+
+    // 0.9.6 (G6 · R-017) — tamanho de UM ficheiro do projeto (o bench do
+    // relatório precisa do TOTAL em bytes sem LER os ficheiros).
+    // default: false (não suportado — o SAF não tem stat barato; o bench
+    // reporta "não medido" — nunca inventa). FsStorage = stat real;
+    // FakeStorage = bytes em memória (o harness MEDE o projeto dele).
+    virtual bool statBytes(const std::string& relPath, u64& outBytes) const {
+        (void)relPath; (void)outBytes;
+        return false;
+    }
 };
 
 // teto do DEFAULT acumulador de escrita streaming (implementações reais

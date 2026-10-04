@@ -29,6 +29,7 @@ add_executable(test_core
         test_handshake.cpp
         test_saf_project.cpp
         test_assetpersist.cpp
+        test_bench.cpp   # 0.9.6 (G6 · R-017): benchmarks reais (puras)
         test_ui.cpp
         test_project.cpp
         test_import_obj.cpp
@@ -106,6 +107,7 @@ add_executable(test_core
         # F5.4: SafStorage — ProjectStorage sobre a pasta SAF escolhida no
         # Gestor (testado contra o FakeSafIo deste TU)
         ${CORE_DIR}/core/SafStorage.cpp
+        ${CORE_DIR}/core/Bench.cpp
         # F5: assets (importadores GL-free)
         ${CORE_DIR}/assets/ObjImporter.cpp
         # 0.8.10: formatos próprios (.gmesh/.gtext/.gm) + conversor streaming
@@ -293,6 +295,7 @@ add_executable(test_core
 add_executable(c33_virtual
         ${CORE_DIR}/core/Scene.cpp
         ${CORE_DIR}/core/Time.cpp
+        ${CORE_DIR}/core/Bench.cpp
         ${CORE_DIR}/core/AnimationSystem.cpp
         ${CORE_DIR}/core/ComponentRegistry.cpp
         ${CORE_DIR}/core/ComponentStore.cpp

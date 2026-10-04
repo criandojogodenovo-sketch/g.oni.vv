@@ -231,6 +231,17 @@ void tap(f32 x, f32 y) {
     frame();
 }
 
+// 0.9.6 (G6/12.9): o nº de linhas de um bloco (o relatório de bench tem 9)
+int countLines(const std::string& s) {
+    int n = 0;
+    for (char c : s) {
+        if (c == '\n') {
+            ++n;
+        }
+    }
+    return n;
+}
+
 // um frame "morto" (sem dedo) — o que corre entre gestos no device
 void idle(int n = 1) {
     for (int i = 0; i < n; ++i) {
@@ -2534,6 +2545,137 @@ int main() {
             }
             g_editor.assetMenu = 0;
             g_editor.selected = Handle::invalid();
+        }
+
+        // ---- 12.9 (G6 · R-017): O BENCH — medições reais + honestidade --
+        // A máquina de fases INTEIRA pelo caminho do device (o main.cpp
+        // REAL que este TU inclui): Settings → Diagnóstico → Correr bench
+        // → as fases DefRun/BuildScene/Import/BenchRun/Texture/Audio/
+        // Finish → Done. O CI não tem GPU: o dt é INJETADO a 60fps e o
+        // relatório MEDE O RELÓGIO INJETADO (se o format() hardcodasse um
+        // número, os checks abaixo caem — a escala injetada vs reportada é
+        // a prova). O que NO HOST não existe (áudio/APK/device) tem de
+        // dizer "não medido" — a honestidade é PARTE da sentinela.
+        {
+            passo("12.9 bench: o bloco de 9 linhas com MEDIÇÕES (R-017)");
+            const u32 ticsAntes = g_scene.count();
+            // CI: cenas de 0.3s (o PERCURSO é o mesmo do device — lá são
+            // 10s por cena; aqui o harness não pode dormir 20s)
+            benchTestHookSetSecs(0.3);
+            // pelo caminho da UI: o Settings com o Diagnóstico ABERTO (os
+            // outros 5 secções fechadas) — o botão Correr bench é a 4ª
+            // linha da secção (depois de logs/Export/Probe)
+            g_editor.settingsMenu = true;
+            g_editor.settingsCollapsed = editor::settings::kBitGeral |
+                                         editor::settings::kBitAudio |
+                                         editor::settings::kBitPerm |
+                                         editor::settings::kBitDocs |
+                                         editor::settings::kBitSobre;
+            frame();   // o layout estabiliza (o scroll abre no topo)
+            g_ui.scrollSetOffset(editor::settings::kScrollId, 0.0f);
+            frame();
+            const safe::Insets si = g_ui.safeArea();
+            const f32 aw = g_ui.screenWidth() - si.left - si.right;
+            const f32 btnCx = si.left + aw - 16.0f - 76.0f;   // botão 152
+            // y do botão Correr bench: 3 headers fechados ANTES do
+            // Diagnóstico (Geral/Áudio/Permissões — Docs e Sobre vêm
+            // DEPOIS na página) + header Diag + logs/Export/Probe + centro
+            const f32 yRun = si.top + 56.0f + 8.0f + 3.0f * 48.0f +
+                             48.0f + 3.0f * 48.0f + 24.0f;
+            tap(btnCx, yRun);
+            check(!g_editor.settingsMenu,
+                  "12.9 o botão Correr bench FECHA o Settings (o bench é "
+                  "modal de facto)");
+            check(logHas("bench: início"),
+                  "12.9 o arranque do bench fica LOGADO");
+            // a máquina de fases: dt INJETADO a 60fps (o relatório mede o
+            // relógio que lhe deram — no device é o dt REAL do loop)
+            const double dtInj = 1.0 / 60.0;
+            int guard = 0;
+            while (!benchTestHookDone() && guard++ < 900) {
+                g_frameDt = static_cast<f32>(dtInj);
+                frame();
+            }
+            check(benchTestHookDone(),
+                  "12.9 a máquina de fases TERMINA (DefRun→BuildScene→"
+                  "Import→BenchRun→Texture→Audio→Finish→Done)");
+            const bench::Report& r = benchTestHookReport();
+            // AS MEDIÇÕES deste processo (R-017: nada hardcodado — o
+            // relógio injetado a 60 ⇒ avg≈60; verts do stub GL REAIS; o
+            // import é o convert::importFile DE PRODUÇÃO com cronómetro)
+            check(r.def.ok && r.def.avg > 55.0 && r.def.avg < 65.0,
+                  "12.9 cena default: média ≈60fps (o relógio injetado — "
+                  "se fosse hardcode não casava com o inject)");
+            check(r.scene.ok && r.scene.avg > 55.0 && r.scene.avg < 65.0,
+                  "12.9 cena bench: idem (64 TICs + mesh importado)");
+            check(r.defVerts.ok && r.defVerts.value > 0.0,
+                  "12.9 verts da cena default MEDIDOS (a MESMA soma da "
+                  "barra de estado)");
+            check(r.sceneVerts.ok && r.sceneVerts.value > r.defVerts.value,
+                  "12.9 a cena bench tem MAIS verts que a default (64 TICs "
+                  "+ o mesh importado)");
+            check(r.importMs.ok && r.importMs.value >= 0.0 &&
+                      r.importMs.value < 10000.0,
+                  "12.9 import glTF ref MEDIDO (o cronómetro real)");
+            check(nearEqF(static_cast<f32>(r.importScale.value), 2.5f,
+                          0.001f),
+                  "12.9 a escala do nó (2.5) fez o round-trip GLB→importer"
+                  "→Transform3D");
+            check(r.texMs.ok && r.texFormat[0] != '\0',
+                  "12.9 textura comprimida COM FORMATO REAL (a mesma "
+                  "máquina do pipeline)");
+            check(r.rssPeakMb.ok && r.rssPeakMb.value > 1.0,
+                  "12.9 pico RSS MEDIDO no host (VmHWM do /proc — real)");
+            check(r.projMb.ok && r.projMb.value > 0.0,
+                  "12.9 o tamanho do projeto MEDIDO (stat por ficheiro)");
+            check(g_scene.count() == ticsAntes,
+                  "12.9 a cena bench SAIU no fim (o editor volta exatamente "
+                  "ao que era)");
+            // A HONESTIDADE do host (o que não há, é DITO — nunca 0):
+            check(r.audioTotal == 0,
+                  "12.9 áudio: não medido no host (o probe corre no "
+                  "aparelho — R-017)");
+            check(!r.apkMb.ok && r.device[0] == '\0' && r.sdk == 0,
+                  "12.9 device/APK/Android: não medidos no host (a JNI do "
+                  "bench é do aparelho)");
+            // o BLOCO de 9 linhas com os valores E os "não medido"
+            const std::string bloco = bench::format(r);
+            check(countLines(bloco) == 9,
+                  "12.9 o bloco colável tem EXATAMENTE 9 linhas");
+            check(bloco.find("não medido") != std::string::npos,
+                  "12.9 o bloco DIZ o que não foi medido");
+            check(bloco.find("cena bench (mesh importado)") !=
+                      std::string::npos,
+                  "12.9 a linha da cena bench está no bloco");
+            check(bloco.find("(escala 2.5)") != std::string::npos,
+                  "12.9 a escala medida está no bloco");
+            // COPIAR: o botão põe o MESMO bloco no clipboard (o dono cola
+            // no relatório — a fonte é ÚNICA). O padrão da FASE 11.11:
+            // void_calls + last_new_string do stub
+            g_jni.void_calls.clear();
+            g_jni.last_new_string.clear();
+            g_editor.settingsMenu = true;
+            g_editor.settingsCollapsed = editor::settings::kBitGeral |
+                                         editor::settings::kBitAudio |
+                                         editor::settings::kBitPerm |
+                                         editor::settings::kBitDocs |
+                                         editor::settings::kBitSobre;
+            frame();
+            const f32 yCopy = yRun + 48.0f;   // a linha SEGUINTE
+            tap(btnCx, yCopy);
+            bool sawClip = false;
+            for (const auto& c : g_jni.void_calls) {
+                if (c.first == "clipboardCopy") {
+                    sawClip = true;
+                }
+            }
+            check(sawClip, "12.9 o Copiar relatório chama a ponte do "
+                           "clipboard (a MESMA do copiar-referência)");
+            check(g_jni.last_new_string == bloco,
+                  "12.9 o clipboard recebe o bloco EXATO do format (fonte "
+                  "única — byte a byte)");
+            g_editor.settingsMenu = false;
+            frame();
         }
 
         onAppCmd(&app12, APP_CMD_TERM_WINDOW);
