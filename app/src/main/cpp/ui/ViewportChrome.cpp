@@ -57,10 +57,14 @@ bool stackButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
     return pressed && enabled;
 }
 
-// botão da TOOLBAR INFERIOR (G1-1): SÓ ÍCONE quando inativo (48dp); o
-// ATIVO ganha o NOME (fill accent + palavra — o único rótulo da barra)
+// botão da TOOLBAR INFERIOR (0.9.6.1 · G1-2): SÓ ÍCONE — os 4 botões são
+// IGUAIS de 48dp (a spec do dono: "4 botões iguais de 48dp, só ícone"). O
+// NOME da ferramenta ativa passou para a LEGENDA ACIMA da barra (o "Escalar"
+// de 48px estendia-se POR CIMA dos botões vizinhos — o layout só dava
+// largura larga ao Selecionar e o draw pintava a palavra em QUALQUER ativo)
 bool toolButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
                 const char* word, bool active) {
+    (void)word;   // o nome vive na legenda acima da barra (draw abaixo)
     const bool pressed = ui.widgetHit(id, r.x, r.y, r.w, r.h);
     const bool held = ui.widgetActive(id);
     const bool on = active || held;
@@ -78,22 +82,8 @@ bool toolButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
                         on ? theme::kTheme.accentInk[1] : theme::kTheme.text1[1],
                         on ? theme::kTheme.accentInk[2] : theme::kTheme.text1[2],
                         1.0f};
-    if (active && word && word[0]) {
-        // ATIVO: ícone + palavra (o único rótulo da barra — G1-1)
-        const f32 wordW = ui.hasFont() ? ui.fontWidth(word) : 0.0f;
-        const f32 gap = theme::dp(8.0f);
-        const f32 total = s + gap + wordW;
-        const f32 x0 = r.x + (r.w - total) * 0.5f;
-        icons::drawIcon(ui, icon, x0, r.y + (r.h - s) * 0.5f, s, col);
-        if (ui.hasFont()) {
-            const TextMetrics m = ui.textMetrics();
-            ui.label(x0 + s + gap, r.y + (r.h - m.block()) * 0.5f + m.ascent,
-                     word, col);
-        }
-    } else {
-        icons::drawIcon(ui, icon, r.x + (r.w - s) * 0.5f, r.y + (r.h - s) * 0.5f,
-                        s, col);
-    }
+    icons::drawIcon(ui, icon, r.x + (r.w - s) * 0.5f,
+                    r.y + (r.h - s) * 0.5f, s, col);
     return pressed;
 }
 
@@ -188,6 +178,21 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
                    "Escalar", !st.selectMode && gz.mode == 2)) {
         st.selectMode = false;
         gz.mode = 2;
+    }
+    // 0.9.6.1 (G1-2) · A LEGENDA: o nome da ferramenta ATIVA numa strip
+    // pequena ACIMA da barra — nunca dentro do botão (nada se sobrepõe)
+    {
+        const char* name = st.selectMode ? "Selecionar"
+                           : gz.mode == 0 ? "Mover"
+                           : gz.mode == 1 ? "Rodar"
+                                          : "Escalar";
+        const f32 legendY = L.selectBtn.y - theme::dp(6.0f) -
+                            theme::dp(12.0f);   // 12sp acima do topo da barra
+        if (ui.hasFont()) {
+            ui.labelStyled(L.selectBtn.x + theme::dp(2.0f), legendY, name,
+                           theme::kTheme.text2,
+                           theme::fontScale(theme::kFontCaption), 0);
+        }
     }
 
     // snap: BOTÃO DE ÍMAN (G2-9 no mock, aplicado com a toolbar nova) —

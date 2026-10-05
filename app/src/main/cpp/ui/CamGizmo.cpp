@@ -33,14 +33,15 @@ constexpr f32 kLensHalfW = 0.17f;
 constexpr f32 kLensHalfH = 0.12f;
 constexpr f32 kLensHalfD = 0.10f;
 
-// px de ecrã
-constexpr f32 kLineW     = 3.0f;     // traço do wireframe
-constexpr f32 kLineWSel  = 4.0f;     // câmara selecionada
-constexpr f32 kHandlePx  = 26.0f;    // quadrado do handle (lado)
-constexpr f32 kHitPx     = 22.0f;    // hit-test de segmentos (como eixos)
-constexpr f32 kHandleHitPx = 30.0f;  // hit-test de handles (prioritário)
+// px de ecrã — 0.9.6.1 (PASSO 0): em dp REAL (R-018; no device a 2× os
+// traços/handles eram metade do tamanho visual)
+f32 kLineW()       { return theme::dp(3.0f); }    // traço do wireframe
+f32 kLineWSel()    { return theme::dp(4.0f); }    // câmara selecionada
+f32 kHandlePx()    { return theme::dp(26.0f); }   // quadrado do handle (lado)
+f32 kHandleHitPx() { return theme::dp(30.0f); }   // hit de handles (prioritário)
 
 f32 deg2rad(f32 d) { return d * 0.01745329252f; }
+constexpr f32 kHitPx = 22.0f;   // hit-test de segmentos (em dp no uso)
 f32 rad2deg(f32 r) { return r * 57.29577951f; }
 
 f32 snapStep(f32 v, f32 step) {
@@ -95,6 +96,31 @@ bool visible(bool playMode, bool uiMode) {
 }
 
 // ---- geometria -----------------------------------------------------------------
+
+// 0.9.6.1 (G1-4): o cap que dá ~80dp de ALTURA PROJETADA ao far — mede os
+// px-por-unidade-de-mundo no OLHO (projeta eye e eye+X pelo MESMO vp) e
+// resolve a distância: alturaFar_px ≈ 2·tan(fov/2)·dist·ppu
+f32 visualCapForScreen(const Mat4& vp, f32 sw, f32 sh, const Vec3& eye,
+                       f32 fovYDeg) {
+    f32 x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
+    if (!gizmo::projectPoint(vp, eye, sw, sh, x0, y0) ||
+        !gizmo::projectPoint(vp, eye + Vec3{1.0f, 0.0f, 0.0f}, sw, sh, x1,
+                             y1)) {
+        return kVisualFarCap;
+    }
+    const f32 ppu =
+        std::sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
+    if (ppu < 1e-4f) {
+        return kVisualFarCap;   // projeção degenerada — o cap antigo
+    }
+    const f32 targetPx = theme::dp(80.0f);
+    const f32 tanF = std::tan(deg2rad(fovYDeg) * 0.5f);
+    if (tanF <= 1e-5f) {
+        return kVisualFarCap;
+    }
+    const f32 dist = targetPx / (2.0f * tanF * ppu);
+    return dist < 1.5f ? 1.5f : (dist < kVisualFarCap ? dist : kVisualFarCap);
+}
 
 void planeHalfExtents(const CameraComp& cam, f32 dist, f32 aspect,
                       f32& halfW, f32& halfH) {
@@ -154,7 +180,7 @@ Frustum computeFrustum(const Transform3D& tr, const CameraComp& cam,
 void drawFrustum(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
                  const Frustum& f, bool selected) {
     const f32* col = theme::kTheme.accent;   // cor de gizmo/marca
-    const f32 w = selected ? kLineWSel : kLineW;
+    const f32 w = selected ? kLineWSel() : kLineW();
 
     drawBox(ui, vp, sw, sh, f.box, w, col);    // corpo
     drawBox(ui, vp, sw, sh, f.lens, w, col);   // lente
@@ -174,21 +200,18 @@ void drawFrustum(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
     }
     const f32 ink[4] = {theme::kTheme.accentInk[0], theme::kTheme.accentInk[1],
                         theme::kTheme.accentInk[2], theme::kTheme.accentInk[3]};
+    const f32 hp = kHandlePx();
     for (int i = 0; i < 4; ++i) {
         f32 hx = 0.0f, hy = 0.0f;
         if (gizmo::projectPoint(vp, f.farC[i], sw, sh, hx, hy)) {
-            ui.panel(hx - kHandlePx * 0.5f, hy - kHandlePx * 0.5f, kHandlePx,
-                     kHandlePx, col);
-            ui.frame(hx - kHandlePx * 0.5f, hy - kHandlePx * 0.5f, kHandlePx,
-                     kHandlePx, 2.0f, ink);
+            ui.panel(hx - hp * 0.5f, hy - hp * 0.5f, hp, hp, col);
+            ui.frame(hx - hp * 0.5f, hy - hp * 0.5f, hp, hp, 2.0f, ink);
         }
     }
     f32 cx = 0.0f, cy = 0.0f;
     if (gizmo::projectPoint(vp, f.farCenter, sw, sh, cx, cy)) {
-        ui.panel(cx - kHandlePx * 0.5f, cy - kHandlePx * 0.5f, kHandlePx,
-                 kHandlePx, ink);
-        ui.frame(cx - kHandlePx * 0.5f, cy - kHandlePx * 0.5f, kHandlePx,
-                 kHandlePx, 2.0f, col);
+        ui.panel(cx - hp * 0.5f, cy - hp * 0.5f, hp, hp, ink);
+        ui.frame(cx - hp * 0.5f, cy - hp * 0.5f, hp, hp, 2.0f, col);
     }
 }
 
@@ -212,7 +235,11 @@ void drawAll(UiContext& ui, Scene& scene, const Mat4& vp, f32 sw, f32 sh,
         if (!cam->showFrustum) {
             return;
         }
-        const Frustum f = computeFrustum(*tr, *cam, aspect);
+        // 0.9.6.1 (G1-4): o cap dá ~80dp no ecrã (antes: 12 unidades FIXAS —
+        // a pirâmide dominava a viewport quando a câmara estava perto)
+        const Frustum f = computeFrustum(
+            *tr, *cam, aspect,
+            visualCapForScreen(vp, sw, sh, tr->pos, cam->fovY));
         drawFrustum(ui, vp, sw, sh, f, t.handle == selected);
     });
 }
@@ -222,7 +249,7 @@ void drawAll(UiContext& ui, Scene& scene, const Mat4& vp, f32 sw, f32 sh,
 int pickHandle(const Mat4& vp, f32 sw, f32 sh, const Frustum& f, f32 px,
                f32 py) {
     int best = 0;
-    f32 bestD = kHandleHitPx;
+    f32 bestD = kHandleHitPx();
     auto tryHandle = [&](int id, const Vec3& world) {
         f32 hx = 0.0f, hy = 0.0f;
         if (!gizmo::projectPoint(vp, world, sw, sh, hx, hy)) {
@@ -278,7 +305,7 @@ Handle pickCameraTic(Scene& scene, const Mat4& vp, f32 sw, f32 sh, f32 px,
     }
     const f32 aspect = sw / sh;
     Handle best = Handle::invalid();
-    f32 bestD = kHitPx;
+    f32 bestD = theme::dp(kHitPx);   // hit em dp real (o desenho idem)
     scene.forEachActive([&](Tic& t) {
         if (!t.visible) {
             return;

@@ -895,16 +895,17 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
                               : theme::kTheme.surface);
         ui.frameRounded(rl.x, rl.y, rl.w, rl.h, 1.0f,
                         theme::dp(theme::kRadiusCard), theme::kTheme.border);
-        const char* lvl = st.helpLevel == 0 ? "I"
-                          : st.helpLevel == 1 ? "N" : "S";
-        ui.labelStyled(rl.x + (rl.w - ui.fontWidth(lvl)) * 0.5f,
-                       theme::centeredBaseline(ui.textMetrics().ascent,
-                                               ui.textMetrics().descent,
-                                               rl.y, rl.h, 14.0f),
-                       lvl,
-                       st.helpLevel == 2 ? theme::kTheme.text2
-                                         : theme::kTheme.accent,
-                       theme::fontScale(theme::kFontBody), 0);
+        // 0.9.6.1 (G1-1): o botão do NÍVEL DA AJUDA (I/N/S) tinha SÓ a
+        // letra — o dono não sabia o que fazia (pediu: "diz-me o que faz e
+        // dá-lhe um ícone"). O que faz: cicla o nível da ajuda — Iniciante
+        // (descrição + exemplo), Normal (1 linha), Silencioso (nada). O
+        // ícone Question = "ajuda"; aceso (accent) quando ela aparece.
+        const f32 iq = theme::dp(24.0f);
+        icons::drawIcon(ui, icons::Icon::Question,
+                        rl.x + (rl.w - iq) * 0.5f,
+                        rl.y + (rl.h - iq) * 0.5f, iq,
+                        st.helpLevel == 2 ? theme::kTheme.text2
+                                          : theme::kTheme.accent);
         if (ui.widgetHit(kHelpLevelId, rl.x, rl.y, rl.w, rl.h)) {
             st.helpLevel = static_cast<u8>((st.helpLevel + 1) % 3);
         }

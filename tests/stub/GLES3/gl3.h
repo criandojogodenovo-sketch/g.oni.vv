@@ -254,3 +254,5 @@ inline void glDepthMask(GLboolean) {}
 inline void glDepthFunc(GLenum) {}
 inline void glBlendFunc(GLenum, GLenum) {}
 inline void glReadPixels(GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void*) {}
+
+inline void glScissor(int, int, int, int) {}

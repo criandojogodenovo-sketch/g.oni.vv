@@ -91,6 +91,13 @@ void planeHalfExtents(const CameraComp& cam, f32 dist, f32 aspect,
                       f32& halfW, f32& halfH);
 
 // o wireframe completo (aspect = w/h do render do jogo). 0.7.10:
+// 0.9.6.1 (G1-4): o cap VISUAL por TAMANHO NO ECRÃ — a pirâmide da câmara
+// deixava de dominar a viewport: o comprimento do cone é o que projetar o
+// far a ~80dp de altura, a partir de px-por-unidade MEDIDO no olho pelo
+// próprio vp (a distância editor↔câmara deixa de importar). Devolve SEMPRE
+// um cap saneado (piso 1.5, teto kVisualFarCap).
+f32 visualCapForScreen(const Mat4& vp, f32 sw, f32 sh, const Vec3& eye,
+                       f32 fovYDeg);
 // `visualFarCap` clampa o COMPRIMENTO VISUAL (far desenhado =
 // min(farZ, visualFarCap); default kVisualFarCap — passar um valor
 // maior devolve a geometria real).

@@ -30,7 +30,9 @@ namespace {
 f32 kPadOuter()  { return theme::dp(12.0f); }   // margem da barra aos extremos
 f32 kBtnH()      { return theme::dp(48.0f); }   // ALVO de toque dentro dos 56dp
 f32 kMenuW()     { return theme::dp(112.0f); }  // [≡ Menu]  (ícone + palavra)
-f32 kCenaW()     { return theme::dp(100.0f); }  // [Cena ▾]
+f32 kCenaW()     { return theme::dp(120.0f); }  // [Cena ▾] — largura para
+                                                 // o rótulo inteiro (o
+                                                 // 100 truncava a "C…")
 f32 kTabW()      { return theme::dp(96.0f); }   // cada tab [3D]/[UI]/[ÁUDIO]
 f32 kIconBtn()   { return theme::dp(48.0f); }   // [pause][play][gear]
 f32 kGroupGap()  { return theme::dp(20.0f); }   // vão entre grupos

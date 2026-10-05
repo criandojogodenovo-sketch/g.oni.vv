@@ -584,8 +584,10 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
             CameraComp* cc = t->getComponent<CameraComp>();
             Transform3D* tr = t->getComponent<Transform3D>();
             if (cc && tr) {
-                const camgizmo::Frustum f =
-                    camgizmo::computeFrustum(*tr, *cc, sw / sh);
+                const camgizmo::Frustum f = camgizmo::computeFrustum(
+                    *tr, *cc, sw / sh,
+                    camgizmo::visualCapForScreen(vp, sw, sh, tr->pos,
+                                                 cc->fovY));
                 const int h = camgizmo::pickHandle(vp, sw, sh, f, px, py);
                 if (h != 0) {
                     g_camHandle.active = true;
@@ -4524,8 +4526,31 @@ void frame() {
     }
     g_renderer.beginFrame();
     const Mat4 vp = Mat4::mul(proj, view);
+    // 0.9.6.1 (G1-3) — O RENDER 3D NÃO SANGRA: no EDITOR o pass 3D (malhas
+    // + grid) fica confinado ao retângulo da viewport por SCISSOR — o dono
+    // via as linhas azuis do grid POR BAIXO da barra de FPS e na faixa dos
+    // botões do sistema (o grid desenhava na superfície TODA). Em Play o
+    // render continua FULL-SCREEN (o jogo é dele — com a safe-area da UI).
+    bool scissor3d = false;
+    if (!g_editor.playMode) {
+        const UiRect vp3d =
+            safe::centerRect(static_cast<f32>(w), static_cast<f32>(h),
+                             g_ui.safeArea(), currentDrawerH(),
+                             g_editor.showInspector);
+        if (vp3d.w > 1.0f && vp3d.h > 1.0f) {
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(static_cast<i32>(vp3d.x),
+                      static_cast<i32>(h - vp3d.y - vp3d.h),
+                      static_cast<i32>(vp3d.w), static_cast<i32>(vp3d.h));
+            scissor3d = true;
+        }
+    }
     const DrawStats st3d = drawTics(vp);
     const DrawStats stGrid = g_grid.draw(vp, camEye, camFocus);
+    if (scissor3d) {
+        glDisable(GL_SCISSOR_TEST);   // a UI nunca é recortada (beginUiPass
+                                      // também repõe — defesa em camadas)
+    }
     // 0.9.6 (G6 · R-017): o bench amostra AQUI — a MESMA soma da statusLine
     // (st3d + grid + UI do frame anterior): os verts/draw calls do relatório
     // são os da barra de estado DO MESMO frame (fonte única, R-017)
@@ -5755,6 +5780,13 @@ void frame() {
     // fica: cena < painéis < modais < teclado — a barra pertence aos
     // painéis; com um ecrã cheio ou teclado, ela sai do ecrã.
     if (!editor::fullscreenOverlayOpen(g_editor) && !g_editor.textInput) {
+        // 0.9.6.1 (G1-3): FUNDO OPACO na faixa do INSET DE BAIXO (a barra
+        // de navegação do sistema) — com o scissor a conter o 3D, esta
+        // faixa fica com a cor de fundo da casa (o dono via o grid lá)
+        if (g_ui.safeBottom() > 0.0f) {
+            g_ui.panel(0.0f, h - g_ui.safeBottom(), w, g_ui.safeBottom(),
+                       theme::kTheme.bg);
+        }
         // o log da consola = o MESMO tail do engine.log do viewer (120
         // linhas chegam — a consola filra por chips)
         std::vector<std::string> logTail;
