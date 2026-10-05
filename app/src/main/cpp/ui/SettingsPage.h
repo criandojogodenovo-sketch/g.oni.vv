@@ -38,6 +38,10 @@ struct EditorState;
 
 namespace settings {
 
+// 0.9.6.6 (GRUPO C): o rect do BOTÃO de uma actionRow — FONTE ÚNICA exportada
+// (o draw, o re-despacho do scrollTap E os testes partilham-no; 48dp REAL)
+UiRect actionBtnRect(f32 x, f32 y, f32 w);
+
 // ---- ids (faixa 5800..5899 — nova, sem colisões) ---------------------------
 constexpr u64 kBackId     = 5800;   // ← voltar (56dp)
 constexpr u64 kSectionBase = 5810;  // +bit da secção (colapsar)

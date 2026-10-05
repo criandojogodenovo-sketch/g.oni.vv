@@ -2973,14 +2973,22 @@ int main() {
         g_editor.scriptWin.kbOpen = false;
         frame();
         // a linha 3 do esqueleto: "  allmoments { }" — o centro dela no
-        // corpo (body.y = 96+56; conteúdo a dp(8) + i*lh; lh = 34 com a
-        // fonte da casa: 21+7+6)
-        const f32 lh = 34.0f;
-        const f32 bodyY = 96.0f + 56.0f;
-        const f32 yLine3 = bodyY + 8.0f + 2.0f * lh + lh * 0.5f;
-        // x do INTERIOR das chavetas: 64 (xCode) + largura REAL de
-        // "  allmoments { " (métricas da MESMA fonte que o draw usa) + 1px
-        const f32 xBraces = 64.0f + g_font.widthOf("  allmoments { ") + 1.0f;
+        // corpo. 0.9.6.6 (GRUPO C · C2): TODOS os números vêm da GEOMETRIA
+        // ÚNICA exportada (lineHeight/codeX/lineTopOnScreen — as MESMAS
+        // funções que o draw usa; antes «lh=34» e «64» hardcoded DRIFTAVAM
+        // quando a tipografia ganhou o sp()/textK — a lição R-019 aplicada
+        // ao próprio teste)
+        const f32 lh = vv::editor::scriptwin::lineHeight(g_ui);
+        const safe::Insets ins11 = g_ui.safeArea();
+        const f32 bodyY = 96.0f + vv::theme::dp(56.0f);
+        const f32 yLine3 = vv::editor::scriptwin::lineTopOnScreen(
+                               bodyY, 2u, lh, g_ui.scrollOffset()) +
+                           lh * 0.5f;
+        // x do INTERIOR das chavetas: codeX + largura REAL (pelo CONTEXTO —
+        // textK incluído, a MESMA escala do draw) + 1px
+        const f32 xBraces =
+            vv::editor::scriptwin::codeX(ins11) +
+            g_ui.fontWidth("  allmoments { ") + 1.0f;
         const u32 caret0 = g_editor.scriptWin.caret;
         tap(xBraces, yLine3);
         check(g_editor.scriptWin.caret == caret0 &&
@@ -3006,8 +3014,12 @@ int main() {
               "12.11 escrever \"x\" insere ENTRE as chavetas (o dono vê o "
               "código nascer onde tocou)");
         // (c) o toque no MEIO da linha 2 ("on moment") move para lá
-        const f32 yLine2 = bodyY + 8.0f + 1.0f * lh + lh * 0.5f;
-        tap(64.0f + g_font.widthOf("  on ") + 2.0f, yLine2);
+        // (a geometria única de novo — zero fórmulas à mão)
+        const f32 yLine2 = vv::editor::scriptwin::lineTopOnScreen(
+                               bodyY, 1u, lh, g_ui.scrollOffset()) +
+                           lh * 0.5f;
+        tap(vv::editor::scriptwin::codeX(ins11) +
+                g_ui.fontWidth("  on ") + 2.0f, yLine2);
         check(g_editor.scriptWin.caret > 15 && g_editor.scriptWin.caret < 31,
               "12.11 tocar no meio da linha 2 põe o cursor NA linha 2 "
               "(coluna pelas métricas reais)");
@@ -3072,6 +3084,11 @@ int main() {
         g_ui.setFont(&g_font);
         check(g_ready, "13 boot com o framebuffer REAL ligado (fb rasteriza)");
         check(glstub::fb::enabled, "13 o modo fb persiste ao boot (ambiente)");
+
+        // 0.9.6.6 (GRUPO C · 13.6): a cópia das entradas do editor a 1.0 —
+        // a dupla densidade compara entrada a entrada (o ecrã a 2.0 é o
+        // ecrã a 1.0 visto a 2×; a INvariância da escala dp+sp)
+        std::vector<vv::layout::Entry> editor1x;
 
         // helper: exporta o ecrã ATUAL e devolve os bytes do PNG+JSON
         auto exportScreen = [&](const char* nome) {
@@ -3164,6 +3181,8 @@ int main() {
             // a cópia para o CI colecionar como artefacto do run
             fileapi::writeAll("layout-harness-editor.png", png.data(), png.size());
             fileapi::writeAll("layout-harness-editor.json", js.data(), js.size());
+            // (13.6) a cópia viva do registo a densidade 1.0
+            editor1x = rec.entries;
         }
 
         // ---- (b) A AUDITORIA pelo CAMINHO DO DEVICE (botão do Diagnóstico) --
@@ -3218,6 +3237,13 @@ int main() {
             check(audS.find("AUDITORIA do ecr") != std::string::npos &&
                       audS.find("problemas:") != std::string::npos,
                   "13.2 o relatorio traz o cabecalho e as contagens");
+            // 0.9.6.6 (GRUPO C): a linha de base medida pelo Grupo B está
+            // CURADA — a auditoria do editor diz VERDE (o ERRO da label que
+            // sangrava 3px o fundo e os avisos <48dp morreram com o sp()/dp)
+            check(audS.find("problemas: 0 ERRO") != std::string::npos &&
+                      audS.find("VERDE") != std::string::npos,
+                  "13.2 o editor esta VERDE (o ERRO da status bar + os avisos "
+                  "da linha de base do Grupo B curados pelo sp()/dp)");
             fileapi::writeAll("layout-harness-auditoria.txt", aud.data(), aud.size());
             std::printf("    [aud]  %s",
                         audS.find("VERDE") != std::string::npos
@@ -3267,6 +3293,46 @@ int main() {
                   "13.3 as teclas do teclado da engine estao registadas");
             fileapi::writeAll("layout-harness-script.png", png.data(), png.size());
             fileapi::writeAll("layout-harness-script.json", js.data(), js.size());
+
+            // ---- (c) 0.9.6.6 (GRUPO C · C3): O CULLING — o custo por frame
+            // deixa de ser O(buffer): 800 linhas com o caret no FIM (o
+            // scroll segue) → o draw TOKENIZA as visíveis+folga, não 800
+            {
+                std::string big;
+                for (int i = 0; i < 800; ++i) {
+                    big += "  linha ";
+                    big += std::to_string(i);
+                    big += " momento { }\n";
+                }
+                g_editor.scriptWin.buf = big;
+                ++g_editor.scriptWin.bufVersion;   // o contrato do índice
+                g_editor.scriptWin.caret = (u32)big.size();
+                frame();   // o scroll segue o caret → a janela no FIM
+                const u32 tok = vv::editor::scriptwin::dbgLinesTokenized;
+                check(tok > 0 && tok < 100,
+                      "13.3 o CULLING: 800 linhas, o frame tokeniza as "
+                      "visiveis (~50), nao as 800 (a prova do perf)");
+                check(vv::editor::scriptwin::lineCount(g_editor.scriptWin) ==
+                          801u,
+                      "13.3 o indice de linhas conta as 800+1 (O(1))");
+                // o roundtrip da GEOMETRIA UNICA (C2): y→linha→y fecha
+                const f32 lhR = vv::editor::scriptwin::lineHeight(g_ui);
+                const safe::Insets insR = g_ui.safeArea();
+                const f32 bodyYR = insR.top + vv::theme::dp(56.0f);
+                bool rtOk = true;
+                for (u32 i : {0u, 5u, 400u, 800u}) {
+                    const f32 y = vv::editor::scriptwin::lineTopOnScreen(
+                        bodyYR, i, lhR, 0.0f);
+                    if (vv::editor::scriptwin::lineAtScreenY(
+                            y + lhR * 0.5f, bodyYR, lhR, 0.0f) !=
+                        static_cast<i32>(i)) {
+                        rtOk = false;
+                    }
+                }
+                check(rtOk,
+                      "13.3 a geometria unica: lineTopOnScreen/lineAtScreenY "
+                      "sao UM o inverso do outro (draw<->toque nunca drifta)");
+            }
             closeScriptEditor();
 
             // ---- (d) O DOCS + (e) O BROWSER de volta ao landscape -------
@@ -3313,6 +3379,101 @@ int main() {
                 fileapi::writeAll("layout-harness-browser.png", png.data(), png.size());
                 fileapi::writeAll("layout-harness-browser.json", js.data(), js.size());
                 g_editor.fileBrowser = false;
+            }
+
+            // ---- (f) 13.6 · A DUPLA DENSIDADE (o NÃO VERIFICADO #4 do
+            // relatório B fechado): o export a 2.0 é o ecrã a 1.0 VISTO A
+            // 2× — a INvariância da escala: dp para o layout, sp para o
+            // texto, NADA fica para trás (o texto era o atlas cru em
+            // qualquer densidade — a causa do ERRO da status bar)
+            passo("13.6 dupla densidade: o ecrã a 2.0 == o ecrã a 1.0 × 2");
+            {
+                onAppCmd(&app13l, APP_CMD_TERM_WINDOW);
+                eglstub::g_surfaceW = 3072;
+                eglstub::g_surfaceH = 1440;
+                vvstub::g_stubDensityDpi = 320;   // o caminho REAL: 320→2.0
+                theme::setDensity(2.0f);
+                editor::applyDensity();
+                android_app app13d;
+                std::memset(&app13d, 0, sizeof(app13d));
+                app13d.contentRect = {0, 48, 3024, 1440};   // insets ×2 (24→48)
+                onAppCmd(&app13d, APP_CMD_INIT_WINDOW);
+                if (!g_font.ok()) {
+                    const char* paths[] = {FONT_FIXTURE};
+                    g_font.loadFromPaths(paths, 1, 28.0f);
+                }
+                g_ui.setFont(&g_font);
+                // o mesmo estado da 13.1 (a cena vazia — o Ator da 13.3 sai)
+                if (const Handle hAtor = g_scene.find("Ator"); hAtor.valid()) {
+                    g_scene.destroy(hAtor);
+                }
+                // o TOAST da auditoria da 13.2 ainda está vivo (1,8s de vida
+                // e os frames do harness correm em milissegundos) — a 13.1
+                // exportou SEM ele; mata-se para o estado ser o MESMO
+                g_toastT = 0.0f;
+                g_toast[0] = '\0';
+                frame();
+                auto [png2, js2] = exportScreen("editor");
+                fileapi::writeAll("layout-harness-editor-2x.png", png2.data(),
+                                  png2.size());
+                fileapi::writeAll("layout-harness-editor-2x.json", js2.data(),
+                                  js2.size());
+                vv::RawImage img2;
+                std::string err2;
+                check(vv::loadPng(png2.data(), png2.size(), img2, err2) &&
+                          img2.width == 3072 && img2.height == 1440,
+                      "13.6 o PNG a 2.0 e 3072x1440 (a superficie duplicada)");
+                const layout::Record& r2 = g_ui.auditRecord();
+                check(r2.density == 2.0f && r2.entries.size() > 8,
+                      "13.6 o registo a densidade 2.0 existe");
+                // (a) o VALIDADOR na dupla densidade: VERDE (a regra 48dp
+                // multiplica pela densidade — os alvos 48dp sao 96px la)
+                const auto probs2 = layout::validate(r2);
+                check(probs2.empty(),
+                      "13.6 o editor a 2.0 passa o validador INTEIRO "
+                      "(0 erros, 0 avisos — nada fica pela densidade)");
+                // (b) a INvariância: entrada a entrada, o rect a 2.0 é o
+                // rect a 1.0 × 2 (a mesma ORDEM/kind — o ecrã e o MESMO)
+                check(r2.entries.size() == editor1x.size(),
+                      "13.6 o MESMO numero de entradas (o estado e o mesmo)");
+                u32 cmp = 0, mism = 0;
+                for (u32 i = 0; i < r2.entries.size() &&
+                                 i < editor1x.size(); ++i) {
+                    const auto& e2 = r2.entries[i];
+                    const auto& e1 = editor1x[i];
+                    if (e2.kind != e1.kind) { ++mism; continue; }
+                    if (std::fabs(e2.x - e1.x * 2.0f) > 1.0f ||
+                        std::fabs(e2.y - e1.y * 2.0f) > 1.0f ||
+                        std::fabs(e2.w - e1.w * 2.0f) > 1.0f ||
+                        std::fabs(e2.h - e1.h * 2.0f) > 1.0f) {
+                        ++mism;
+                        continue;
+                    }
+                    ++cmp;
+                }
+                check(mism == 0 && cmp == editor1x.size(),
+                      "13.6 a INvariância: TODAS as entradas a 2.0 sao as de "
+                      "1.0 × 2 (dp E sp — o texto tambem dobra)");
+                // (c) a prova sp(): a largura do TEXTO dobra (o atlas nao
+                // era escala nenhuma antes — media igual nas duas)
+                bool txt2x = false;
+                for (u32 i = 0; i < r2.entries.size() &&
+                                 i < editor1x.size(); ++i) {
+                    if (r2.entries[i].kind == layout::Entry::Label &&
+                        editor1x[i].w > 5.0f &&
+                        std::fabs(r2.entries[i].w - editor1x[i].w * 2.0f) <=
+                            1.0f) {
+                        txt2x = true;
+                    }
+                }
+                check(txt2x,
+                      "13.6 o sp(): a largura do TEXTO dobra com a densidade "
+                      "(o atlas cru media SEMPRE igual — o bug do Grupo B)");
+                // REPOSIÇÃO: o resto da suíte corre a 1.0 (o layout de sempre)
+                onAppCmd(&app13d, APP_CMD_TERM_WINDOW);
+                vvstub::g_stubDensityDpi = 160;
+                theme::setDensity(1.0f);
+                editor::applyDensity();
             }
             onAppCmd(&app13l, APP_CMD_TERM_WINDOW);
         }

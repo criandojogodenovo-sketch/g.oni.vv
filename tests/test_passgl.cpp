@@ -320,11 +320,14 @@ TEST(passgl_textscale_reset_por_frame_o_play_fica_a_1) {
     r.endFrame();
 
     // frame de PLAY no MESMO UiContext (o que o main faz): o beginFrame
-    // repõe textScale a 1.0 — o texto da UI de jogo fica a 28 px CRUS
+    // repõe textScale a 1.0 — o texto da UI de jogo fica na escala CORPO
+    // (0.9.6.6 · GRUPO C: o atlas de 28px × textK — a 1.0 o corpo são 14px,
+    // a densidade de sempre dos testes; o «28px CRUS» morreu com o sp():
+    // medir pelo atlas cru DIVERGE do que desenha — a lição do choke point)
     r.beginUiPass(1600, 720);
     ui.beginFrame(&r, nullptr, kSW, kSH);
     EXPECT(nearEqF(ui.textScale(), 1.0f));
-    EXPECT(nearEqF(ui.fontHeight(), 28.0f));
+    EXPECT(nearEqF(ui.fontHeight(), 28.0f * vv::theme::textK()));
     ui.endFrame();
     r.endFrame();
 }

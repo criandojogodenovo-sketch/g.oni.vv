@@ -186,7 +186,9 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     // 0.9.0 (spec C): secções 48dp + 3 linhas de Transform (80dp: título
     // + caixas X/Y/Z 48dp) + miniaturas 84dp → 1070; 0.9.2: +90 do Script
     // FASE 9 G2-8: Física 1 Label → 3 TwoCol (+2·textRowH)
-    EXPECT(nearEqF(contentH, 1168.0f + 2.0f * inspTextRowH(m)));
+    // 0.9.6.6 (GRUPO C): o PISO 48dp em TODAS as linhas (a regra da casa —
+    // eram bloco+px crus) — a receita do Player completo sobe para 1420
+    EXPECT(nearEqF(contentH, 1420.0f));
 
     // cursor Y PARTILHADO: linhas sequenciais (y estritamente crescente, sem
     // reinício por secção), todas dentro do conteúdo, e o fundo do plano =
@@ -225,8 +227,11 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     // com TouchControls presente o botão dá lugar à label tc (42 → 34)
     EXPECT(tic->addComponent<TouchControls>() != nullptr);
     // 0.9.0: 1070 − 42 (addTc) + 34 (label tc) = 1062; 0.9.2: +90 = 1152
+    // 0.9.0: 1070 − 42 (addTc) + 34 (label tc); 0.9.2: +90; 0.9.6.6 (GRUPO C):
+    // o PISO 48dp iguala addTc e label tc (eram 42/34 px) — o plano com
+    // TouchControls fica IGUAL ao sem (1420): a troca já não encolhe nada
     EXPECT(nearEqF(inspectorContentHeight(inspectorProfile(*tic), m, false, 0u),
-                   1160.0f + 2.0f * inspTextRowH(m)));   // FASE 9 G2-8: +2 TwoCol
+                   1420.0f));
 }
 
 TEST(scroll_hierarquia_todos_os_tics_atingeis) {
@@ -296,9 +301,13 @@ TEST(scroll_linhas_mesh_tex_atingiveis_no_scroll) {
     EXPECT(texIdx == primIdx + 1);
 
     // topo da linha mesh — 0.9.0 (spec C): 34+36+48+3×80+48 = 406
-    EXPECT(nearEqF(plan[meshIdx].y, 406.0f));
-    // 0.8.0: a linha "prim:" (36, botão) fica entre mesh e tex
-    EXPECT(nearEqF(plan[texIdx].y, plan[meshIdx].y + plan[meshIdx].h + 36.0f));
+    // 0.9.6.6 (GRUPO C): 48+48+48+3×80+48 = 432 (as duas primeiras linhas
+    // ganharam o piso 48dp — eram 34/36 px crus)
+    EXPECT(nearEqF(plan[meshIdx].y, 432.0f));
+    // 0.8.0: a linha "prim:" fica entre mesh e tex (a ALTURA dela —
+    // simbólico desde 0.9.6.6: zero números que driftam com o piso 48dp)
+    EXPECT(nearEqF(plan[texIdx].y, plan[meshIdx].y + plan[meshIdx].h +
+                                    plan[primIdx].h));
 
     // pior caso C33 (lista 500 px): conteúdo 754 — scroll ativa
     const f32 contentH = inspectorContentHeight(prof, m, true, 0u);

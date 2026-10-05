@@ -122,6 +122,25 @@ TEST(wiring086_tipografia_escala_negrito_italico_no_batch) {
     EXPECT(ui.glyphsForTest().vertexCount() / 6 == baseQuads * 2u);
 
     // fontScale 2×: os glifos medem o DOBRO (o texto do elemento CRESCE)
+    // (0.9.6.6 · GRUPO C: a comparação é RELATIVA — a escala absoluta
+    // inclui o textK da densidade (14px de corpo a 1.0); o claim do teste
+    // é o CRESCIMENTO 2×, não um número mágico de px)
+    ui.beginFrame(nullptr, nullptr, 1600.0f, 720.0f);
+    ui.labelStyled(0.0f, 40.0f, "MM", white, 1.0f, 0);
+    ui.endFrame();
+    f32 bw1 = 0.0f;
+    {
+        f32 x0 = 1e9f, x1 = -1e9f;
+        for (u32 v = 0; v < ui.glyphsForTest().vertexCount(); ++v) {
+            x0 = ui.glyphsForTest().vertices()[v].x < x0
+                     ? ui.glyphsForTest().vertices()[v].x
+                     : x0;
+            x1 = ui.glyphsForTest().vertices()[v].x > x1
+                     ? ui.glyphsForTest().vertices()[v].x
+                     : x1;
+        }
+        bw1 = x1 - x0;   // a largura a 1× (na escala corrente)
+    }
     ui.beginFrame(nullptr, nullptr, 1600.0f, 720.0f);
     ui.labelStyled(0.0f, 40.0f, "MM", white, 2.0f, 0);
     ui.endFrame();
@@ -136,7 +155,8 @@ TEST(wiring086_tipografia_escala_negrito_italico_no_batch) {
                  ? ui.glyphsForTest().vertices()[v].x
                  : x1;
     }
-    EXPECT((x1 - x0) > 40.0f);   // "MM" a 2× passa largamente os ~40 px de 1×
+    EXPECT((x1 - x0) > bw1 * 1.7f);   // "MM" a 2× mede ~o DOBRO do 1× (o
+                                      // texto do elemento CRESCE com o scale)
 
     // itálico: os VÉRTICES TOP deslocam +0.21·h (a haste inclina p/ a direita)
     ui.beginFrame(nullptr, nullptr, 1600.0f, 720.0f);

@@ -1289,8 +1289,12 @@ int drawContextMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         return 0;
     }
 
-    ui.panel(x, y, w, h, theme::PANEL);
-    ui.frame(x, y, w, h, 2.0f, theme::ACCENT);
+    // 0.9.6.6 (GRUPO C · CANTOS SUAVIZADOS): o CARD modal com raios 8dp
+    // (spec A) — moldura idem (os full-bleed hierarchy/drawer ficam retos:
+    // são superfícies de ecrã, não cards)
+    ui.panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard), theme::PANEL);
+    ui.frameRounded(x, y, w, h, 2.0f, theme::dp(theme::kRadiusCard),
+                    theme::ACCENT);
     const f32 th = ui.fontHeight();
     char title[64];
     std::snprintf(title, sizeof(title), "%.40s", ticName ? ticName : "?");
@@ -1856,19 +1860,24 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                     const std::vector<fileapi::DirEntry>& entries,
                     bool opendirFailed) {
     // painel GRANDE (o browser precisa de espaço): 92% da área útil
+    // 0.9.6.6 (GRUPO C): dp REAL em TUDO (eram px crus — no device 2.0 o
+    // browser saía a metade; a auditoria do Grupo B media fechar 96×36,
+    // as 6 raízes 139,7×40 e o subir 868×44 — TODOS <48dp, avisos)
     const f32 ox = ui.safeLeft();
     const f32 oy = ui.safeTop();
     const f32 aw = sw - ox - ui.safeRight();
     const f32 ah = sh - oy - ui.safeBottom();
-    const f32 w = aw * 0.92f > 900.0f ? 900.0f : aw * 0.92f;
-    const f32 rowH = 48.0f;
+    const f32 w = aw * 0.92f > theme::dp(900.0f) ? theme::dp(900.0f)
+                                                 : aw * 0.92f;
+    const f32 rowH = theme::dp(48.0f);
     constexpr u32 kMaxRows = 8;   // linhas visíveis (o scroll revela o resto)
     const u32 shown = entries.size() < kMaxRows
                            ? static_cast<u32>(entries.size())
                            : kMaxRows;
     const f32 listH = static_cast<f32>(shown) * rowH;
-    const f32 h = kHeaderH + 34.0f /*caminho*/ + 52.0f /*raízes*/ + 8.0f +
-                  52.0f /*subir*/ + 8.0f + listH + kPad;
+    const f32 h = kHeaderH + theme::dp(34.0f) /*caminho*/ +
+                  theme::dp(52.0f) /*raízes*/ + theme::dp(8.0f) +
+                  theme::dp(52.0f) /*subir*/ + theme::dp(8.0f) + listH + kPad;
     const f32 x = ox + (aw - w) * 0.5f;
     const f32 y = oy + (ah - h) * 0.5f;
 
@@ -1883,56 +1892,68 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         return 0;
     }
 
-    ui.panel(x, y, w, h, theme::PANEL);
-    ui.frame(x, y, w, h, 2.0f, theme::ACCENT);
+    // 0.9.6.6 (GRUPO C · CANTOS SUAVIZADOS): o CARD modal com raios 8dp
+    // (spec A) — moldura idem (os full-bleed hierarchy/drawer ficam retos:
+    // são superfícies de ecrã, não cards)
+    ui.panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard), theme::PANEL);
+    ui.frameRounded(x, y, w, h, 2.0f, theme::dp(theme::kRadiusCard),
+                    theme::ACCENT);
     const f32 th = ui.fontHeight();
     ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "NAVEGADOR",
              theme::TEXT);
-    if (ui.button(kBrowserCloseId, x + w - kPad - 96.0f, y + 4.0f, 96.0f,
-                  36.0f, "fechar")) {
+    // o FECHAR: alvo 48dp REAL (era 96×36 px crus — aviso <48dp do Grupo B)
+    if (ui.button(kBrowserCloseId, x + w - kPad - theme::dp(96.0f),
+                  y + (kHeaderH - theme::dp(48.0f)) * 0.5f, theme::dp(96.0f),
+                  theme::dp(48.0f), "fechar")) {
         st.fileBrowser = false;
         return 0;
     }
 
     // CAMINHO NO TOPO — mostra ONDE procura (corta o início quando longo)
-    const f32 pathY = y + kHeaderH + 6.0f;
-    ui.panel(x + kPad, pathY - 18.0f, w - 2.0f * kPad, 30.0f, theme::BG);
+    const f32 pathY = y + kHeaderH + theme::dp(6.0f);
+    ui.panel(x + kPad, pathY - theme::dp(18.0f), w - 2.0f * kPad,
+             theme::dp(30.0f), theme::BG);
     const TextMetrics tm = ui.textMetrics();
     const std::string pathText = browserPathLabel(
-        cwd, w - 2.0f * kPad - 16.0f,
+        cwd, w - 2.0f * kPad - theme::dp(16.0f),
         [](const std::string& s, void* user) -> f32 {
             return static_cast<UiContext*>(user)->fontWidth(s.c_str());
         },
         &ui);
-    ui.labelFitted(x + kPad + 8.0f, pathY + tm.ascent, pathText.c_str(),
-                   theme::ACCENT, w - 2.0f * kPad - 16.0f);
+    ui.labelFitted(x + kPad + theme::dp(8.0f), pathY + tm.ascent,
+                   pathText.c_str(), theme::ACCENT,
+                   w - 2.0f * kPad - theme::dp(16.0f));
 
     // raízes: [Raiz][Download][Docs][Camera][Pictures][Music] (galeria + a
-    // raiz de ÁUDIO do dono 0.8.11; a largura reparte por TODAS)
-    const f32 rootsY = pathY + 34.0f - 18.0f + 12.0f;
+    // raiz de ÁUDIO do dono 0.8.11; a largura reparte por TODAS) — alvo
+    // 48dp REAL (eram 40px crus; a largura reparte-se na mesma)
+    const f32 rootsY = pathY + theme::dp(34.0f) - theme::dp(18.0f) +
+                       theme::dp(12.0f);
     const f32 rootW = (w - 2.0f * kPad -
-                       static_cast<f32>(fileapi::kBrowserRootCount - 1) * 6.0f) /
+                       static_cast<f32>(fileapi::kBrowserRootCount - 1) *
+                           theme::dp(6.0f)) /
                       static_cast<f32>(fileapi::kBrowserRootCount);
     int chosen = 0;
     for (int i = 0; i < fileapi::kBrowserRootCount; ++i) {
         if (ui.button(kBrowserRootBase + static_cast<u64>(i),
-                      x + kPad + static_cast<f32>(i) * (rootW + 6.0f), rootsY,
-                      rootW, 40.0f, fileapi::kBrowserRoots[i].label)) {
+                      x + kPad + static_cast<f32>(i) * (rootW + theme::dp(6.0f)),
+                      rootsY, rootW, theme::dp(48.0f),
+                      fileapi::kBrowserRoots[i].label)) {
             chosen = i + 1;
         }
     }
 
-    // subir (o pai; na raiz não faz nada — o main trata)
+    // subir (o pai; na raiz não faz nada — o main trata) — alvo 48dp REAL
     // 0.8.11: o nº vem DEPOIS das raízes (count+1) — com a 6ª raiz (Music)
     // o fixo "6" colidia: tocar Subir saltava para o Music
-    const f32 upY = rootsY + 52.0f;
-    if (ui.button(kBrowserUpId, x + kPad, upY, w - 2.0f * kPad, 44.0f,
-                  "^ Subir")) {
+    const f32 upY = rootsY + theme::dp(52.0f);
+    if (ui.button(kBrowserUpId, x + kPad, upY, w - 2.0f * kPad,
+                  theme::dp(48.0f), "^ Subir")) {
         chosen = fileapi::kBrowserRootCount + 1;
     }
 
     // lista: diretorias primeiro (ordem do listDirEntries); scroll id 45
-    const f32 listTop = upY + 52.0f;
+    const f32 listTop = upY + theme::dp(52.0f);
     const UiRect region{x, listTop, w, listH};
     const f32 contentH = static_cast<f32>(entries.size()) * rowH;
     ui.beginScroll(kBrowserScrollId, region, contentH);
@@ -1959,8 +1980,9 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
             std::snprintf(label, sizeof(label), "? %s",
                           entries[i].name.c_str());
         }
-        ui.button(kBrowserRowBase + static_cast<u64>(i), x + kPad, ry + 2.0f,
-                  w - 2.0f * kPad, rowH - 4.0f, label);   // só desenha (scroll)
+        ui.button(kBrowserRowBase + static_cast<u64>(i), x + kPad,
+                  ry + theme::dp(2.0f), w - 2.0f * kPad, rowH - theme::dp(4.0f),
+                  label);   // só desenha (scroll)
     }
     ui.endScroll();
     if (entries.empty()) {

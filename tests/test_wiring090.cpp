@@ -127,6 +127,26 @@ struct Env {
         "06-29 10:00:02.000 E/GONI: erro de teste"};
 };
 
+// 0.9.6.6 (GRUPO C): o y da linha TransformRow idx — LIDO DO PLANO (a
+// FONTE ÚNICA; os números «112»/«278» hardcoded driftavam quando a
+// tipografia/larguras mudam — a lição «zero fórmulas que driftam» da 13.2)
+f32 trfRowY(UiContext& ui, Scene& sc, Handle h, u32 idx) {
+    const TextMetrics tm = ui.textMetrics();
+    const InspProfile prof = inspectorProfile(*sc.get(h));
+    InspRow plan[64];
+    const u32 n = inspectorPlan(prof, tm, true, 0u, plan);
+    u32 seen = 0;
+    for (u32 i = 0; i < n; ++i) {
+        if (plan[i].kind == InspRow::Kind::TransformRow) {
+            if (seen == idx) {
+                return plan[i].y;
+            }
+            ++seen;
+        }
+    }
+    return -1.0f;
+}
+
 } // namespace
 
 // ---- A: escala/raios da spec (múltiplos de 8; 4 só p/ ícones) -----------------
@@ -226,7 +246,10 @@ TEST(inspector_seccoes_colapsaveis_bitmask) {
     const f32 allCollapsed = inspectorContentHeight(
         prof, tm, true, 0x7Fu);
     EXPECT(allCollapsed < noTrfH);
-    EXPECT(allCollapsed < 500.0f);
+    // 0.9.6.6 (GRUPO C): os cabeçalhos de secção são 48dp REAL (eram 48px
+    // crus = 24dp no device) — TODAS colapsadas: 528 (11 cabeçalhos+nome/
+    // visível); o limite acompanha (era 500)
+    EXPECT(allCollapsed < 600.0f);
     // o plano com Transform colapsado NÃO tem TransformRow
     n = inspectorPlan(prof, tm, true, kInspBitTransform, plan);
     bool sawTrf = false;
@@ -249,15 +272,19 @@ TEST(inspector_caixas_xyz_abrem_teclado_campo_certo) {
                                          nullptr, nullptr);
     e.st.selected = h;
     e.frame();
-    // linha Pos (TransformRow 0): caixas em y = contentTop + 118 + 24..
-    // contentTop = painel.y + kHeaderH + 4
+    // linha Pos (TransformRow 0): o y LIDO DO PLANO (0.9.6.6 — zero números
+    // mágicos; o contentTop = painel.y + kHeaderH + 4 de sempre)
     const UiRect panel =
         safe::inspectorPanelRect(kSW, kSH, safe::Insets{}, 0.0f);
-    const f32 contentTop = panel.y + kHeaderH + 4.0f;   // 104+48+4
-    const f32 boxY0 = contentTop + 112.0f + 24.0f;   // trf0 y=112 (métricas reais)
+    const f32 contentTop = panel.y + kHeaderH + 4.0f;
+    const f32 trf0 = trfRowY(e.ui, e.scene, h, 0);
+    EXPECT(trf0 > 0.0f);
+    // a caixa: título 24dp e a caixa ALINHADA ao fundo do bloco de 80dp
+    const f32 boxY0 = contentTop + trf0 + theme::dp(24.0f);
     // caixa Y da Pos: bx = panel.x + kPad + 64 + 8 → campo = 0*3+1 = 1
-    const f32 boxX = panel.x + kPad + 64.0f + 8.0f + 20.0f;
-    e.tap(boxX, boxY0 + 24.0f);
+    const f32 boxX = panel.x + kPad + theme::dp(64.0f) + theme::dp(8.0f) +
+                     theme::dp(20.0f);
+    e.tap(boxX, boxY0 + theme::dp(24.0f));
     EXPECT(e.st.textInput);
     EXPECT(e.st.textPurpose == 6);
     EXPECT(e.st.textElement == 1);   // pos.y
@@ -280,12 +307,16 @@ TEST(inspector_botao_r_restat_a_linha) {
     Transform3D* tr = e.scene.get(h)->getComponent<Transform3D>();
     tr->scale = Vec3{3.0f, 4.0f, 5.0f};
     e.frame();
-    // linha Escala (trf2 y = 118+160 = 278): R em x = panel.x + w - kPad - 48
+    // linha Escala (TransformRow 2): o y LIDO DO PLANO (0.9.6.6 — era
+    // «278» hardcoded); R em x = panel.x + w - kPad - 24 (o centro do 48dp)
     const UiRect panel =
         safe::inspectorPanelRect(kSW, kSH, safe::Insets{}, 0.0f);
     const f32 contentTop = panel.y + kHeaderH + 4.0f;
-    const f32 boxY2 = contentTop + 278.0f + 24.0f;
-    e.tap(panel.x + panel.w - kPad - 24.0f, boxY2 + 24.0f);
+    const f32 trf2 = trfRowY(e.ui, e.scene, h, 2);
+    EXPECT(trf2 > 0.0f);
+    const f32 boxY2 = contentTop + trf2 + theme::dp(24.0f);
+    e.tap(panel.x + panel.w - kPad - theme::dp(24.0f),
+          boxY2 + theme::dp(24.0f));
     EXPECT(nearEqF(tr->scale.x, 1.0f, 0.01f));
     EXPECT(nearEqF(tr->scale.y, 1.0f, 0.01f));
     EXPECT(nearEqF(tr->scale.z, 1.0f, 0.01f));
@@ -629,8 +660,10 @@ TEST(material_legendas_inteiras_e_tint_rgba_g13) {
     EXPECT(e.font.widthOf("Cor base") * capScale <= cellW - 8.0f);
     EXPECT(e.font.widthOf("Prévia") * capScale <= cellW - 8.0f);
 
-    // a linha de miniaturas GANHOU a linha reservada das legendas (92dp)
-    EXPECT(nearEqF(editor::inspThumbsH(), 64.0f + 28.0f));
+    // a linha de miniaturas GANHOU a linha reservada das legendas —
+    // 0.9.6.6 (GRUPO C): 64dp + sp(12) REAL (era «64+28px» do atlas cru)
+    EXPECT(nearEqF(editor::inspThumbsH(),
+                   theme::dp(64.0f) + theme::sp(theme::kFontCaption)));
 
     // o desenho com tint BRANCO não crasha e emite OS QUADS DO ALBEDO com
     // alfa 1 (o bug: tint f32[3] passado a API f32[4] lia o alfa FORA do

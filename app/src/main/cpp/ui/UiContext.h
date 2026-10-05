@@ -127,6 +127,14 @@ public:
     // precisar (ui/TextFit.h). Todo texto dentro de painéis usa isto.
     void labelFitted(f32 xBaseline, f32 yBaseline, const char* text,
                      const f32 color[4], f32 maxW);
+    // 0.9.6.6 (GRUPO C): o FIT com TIPOGRAFIA — o MESMO contrato (nunca
+    // excede maxW; trunca com «…») para textos que não são CORPO: a
+    // legenda 12sp da status bar. A medida e o draw partilham a MESMA
+    // escala (fontScale × textK — o choke point); o labelFitted de
+    // sempre é o caso corpo (delega AQUI com k relativo 1.0).
+    void labelFittedStyled(f32 xBaseline, f32 yBaseline, const char* text,
+                           const f32 color[4], f32 maxW, f32 fontScale,
+                           u8 style);
     bool button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text);
 
     // 0.7.6 — CAPTURA DE GESTO sem desenho (a toolbar desenha os próprios
@@ -277,22 +285,31 @@ public:
 
     // F3: accessors usados pelos painéis do editor (EditorUi).
     // 0.7.4: TODOS escalam por textScale_ (a 1.0 = comportamento antigo).
+    // 0.9.6.6 (GRUPO C): e por theme::textK() — a DENSIDADE do texto entra
+    // AQUI (o choke point), nunca por casa do chamador: a 2.0 o atlas é o
+    // corpo (k=1, o device de sempre); a 1.0 o corpo é 14px (k=0,5 — o
+    // ecrã deixa de ter texto 2× desproporcional; a invariância da
+    // escala, ver Theme.h). Quem mede com o ATLAS CRU (font_->widthOf)
+    // DIVERGE do que desenha — o bug do button() corrigido neste grupo.
     bool hasFont() const { return font_ && font_->ok(); }
     f32  fontWidth(const char* text) const {
-        return font_ ? font_->widthOf(text) * textScale_ : 0.0f;
+        return font_ ? font_->widthOf(text) * textScale_ * theme::textK()
+                    : 0.0f;
     }
     f32  fontHeight() const {
-        return font_ ? font_->height() * textScale_ : 0.0f;
+        return font_ ? font_->height() * textScale_ * theme::textK() : 0.0f;
     }
     // F5.0-fix: métricas verticais REAIS da fonte assada (fallback 28 px sem
     // fonte — o caso dos testes de hospedeiro sem atlas). O layout deriva
     // destes números as alturas de linha — nunca mais de constantes cegas.
+    // (as métricas voltam JÁ na escala do texto corrente — textK incluído)
     TextMetrics textMetrics() const {
         const TextMetrics m = hasFont()
                                   ? TextMetrics{font_->ascent(),
                                                 font_->descent()}
                                   : TextMetrics{};
-        return TextMetrics{m.ascent * textScale_, m.descent * textScale_};
+        const f32 k = textScale_ * theme::textK();
+        return TextMetrics{m.ascent * k, m.descent * k};
     }
     f32  screenWidth() const { return sw_; }
     f32  screenHeight() const { return sh_; }

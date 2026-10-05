@@ -125,9 +125,11 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     prof.canAnim = true;      // 0.8.0: tem Transform3D → linha add Animacao
     const TextMetrics m{};
     const f32 contentH = inspectorContentHeight(prof, m, false, 0u);
-    // 0.9.2: + secção Script (48) + Adicionar script (42); FASE 9 G2-8:
-    // Física em 3 linhas TwoCol (era 1 Label) → +2·textH
-    EXPECT(nearEqF(contentH, 1168.0f + 2.0f * inspTextRowH(m)));
+    // 0.9.2: + secção Script; FASE 9 G2-8: Física em 3 linhas TwoCol.
+    // 0.9.6.6 (GRUPO C): as linhas ganharam o PISO 48dp (a regra da casa
+    // «alvos ≥48dp» — eram bloco+px crus: 34/36/42px no harness e ~18dp
+    // REAIS no device) — o plano do Player completo sobe para 1420
+    EXPECT(nearEqF(contentH, 1420.0f));
 
     // DEPOIS: painel dentro do contentRect [0,24,·,628] (status 24 + nav 92)
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);

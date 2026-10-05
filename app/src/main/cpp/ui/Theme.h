@@ -158,6 +158,25 @@ inline f32 g_density = 1.0f;                       // DisplayMetrics.density
 inline void setDensity(f32 d) { g_density = d > 0.05f ? d : 1.0f; }
 inline f32  dp(f32 v) { return v * g_density; }    // A função dp→px da casa
 
+// 0.9.6.6 (GRUPO C) · A ESCALA ÚNICA DO TEXTO — sp(). O CONTRATO da
+// invariância: a densidade multiplica TUDO — dp para o layout E sp para o
+// texto; o ecrã a densidade 2.0 é o ecrã a 1.0 visto a 2× (a FASE 13.6
+// afere entrada a entrada do registo). ANTES o texto era o ATLAS CRU
+// (28px) em qualquer densidade: no C33 (2.0) ficava certo POR ACASO
+// (28px == 14sp @2.0), mas no harness (1.0) saía 2× desproporcional — o
+// bloco de 29px numa banda de 24dp SANGRAVA o fundo (o ERRO medido do
+// Grupo B) e os títulos 20sp (bloco de 41px) não cabiam no cabeçalho de
+// 56dp (o fallback de baselines fixas empurrava-os PARA FORA do
+// contentRect — o título do Docs/Script, a errata do relatório B).
+inline f32 sp(f32 v) { return v * g_density; }   // px de um texto de v sp
+// o fator do ATLAS da casa: a base assada (kAtlasPx) é 14sp @ densidade
+// 2.0 — desenhar texto CORPO (14sp) é escalar o atlas por densidade/2.
+// O UiContext aplica ESTE fator no CHOKE POINT (fontWidth/fontHeight/
+// textMetrics/labelStyled/labelFitted) — a escala do texto tem UM só
+// dono; os chamadores continuam a passar fontScale(sp) RELATIVO (sp/14).
+constexpr f32 kAtlasPx = 28.0f;                  // o bake da casa
+inline f32 textK() { return g_density / 2.0f; }  // atlas→px do texto corpo
+
 // baselines do CABEÇALHO PADRÃO a partir das MÉTRICAS REAIS da fonte: o
 // bloco título(20sp)+subtítulo(12sp) CENTRADO na parte útil (nada cortado
 // no topo, o subtítulo por baixo sem tocar o limite) — a causa do corte

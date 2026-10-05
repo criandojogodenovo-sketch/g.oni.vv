@@ -64,10 +64,11 @@ std::vector<RenderPiece> renderPieces(const std::string& line,
 
 namespace {
 
-f32 lineHeight(UiContext& ui) {
-    const TextMetrics m = ui.textMetrics();
+// (0.9.6.6 · GRUPO C: a fórmula interna pura — a EXPORTADA está fora do
+// anon ns e é a que o draw/o toque/os testes partilham)
+f32 lineHeightImpl(const TextMetrics& m) {
     const f32 h = m.ascent + m.descent + 6.0f;
-    return h > theme::dp(28.0f) ? h : theme::dp(28.0f);   // piso 28dp (regra F5.0)
+    return h > theme::dp(28.0f) ? h : theme::dp(28.0f);   // piso 28dp (F5.0)
 }
 
 // ---- caret (G0-1): navegação por CODE POINT (acento morre inteiro) --------
@@ -147,6 +148,55 @@ std::string indentationOfLine(const std::string& line) {
     return line.substr(0, i);
 }
 
+// ---- 0.9.6.6 (GRUPO C · C2/C3) · A GEOMETRIA/ÍNDICE ÚNICOS -----------------
+
+f32 lineHeight(UiContext& ui) {
+    return lineHeightImpl(ui.textMetrics());
+}
+
+// O CONTADOR de trabalho do draw (reset em cada draw; a FASE afere que o
+// culling deixa de ser O(buffer): 800 linhas scrolled → ~20 tokenizadas)
+u32 dbgLinesTokenized = 0;
+
+const std::vector<u32>& ensureLineIndex(State& st) {
+    const bool stale = st.indexVersion != st.bufVersion ||
+                       st.lineStarts.empty() ||
+                       st.lineStarts.back() > st.buf.size();
+    if (!stale) {
+        return st.lineStarts;
+    }
+    // rebuild O(linhas) POR EDIÇÃO (o utilizador digita devagar; o draw e o
+    // toque passam a O(1)/O(log n) e o tokenizador só vê as visíveis)
+    st.lineStarts.clear();
+    st.lineBc.clear();
+    st.lineStarts.push_back(0);
+    voni::hl::BlockCommentState bc;
+    st.lineBc.push_back(bc);   // estado ANTES da linha 0 (o default)
+    for (u32 i = 0; i < st.buf.size(); ++i) {
+        if (st.buf[i] == '\n') {
+            const u32 ls = st.lineStarts.back();
+            // o estado bc AO FIM desta linha (tokeniza-a UMA VEZ por edição;
+            // o 1.º visível do draw começa JÁ certo — nunca varre desde 0)
+            char line[256];
+            const u32 len = (i - ls) < sizeof(line) - 1
+                                ? (i - ls)
+                                : (u32)sizeof(line) - 1;
+            std::memcpy(line, st.buf.data() + ls, len);
+            line[len] = '\0';
+            renderPieces(std::string(line), bc);
+            st.lineBc.push_back(bc);
+            st.lineStarts.push_back(i + 1);
+        }
+    }
+    st.indexVersion = st.bufVersion;
+    return st.lineStarts;
+}
+
+u32 lineCount(State& st) {
+    ensureLineIndex(st);
+    return static_cast<u32>(st.lineStarts.size());
+}
+
 namespace {
 
 void insertAtCaret(State& st, const char* utf8) {
@@ -155,6 +205,7 @@ void insertAtCaret(State& st, const char* utf8) {
     }
     st.buf.insert(st.caret, utf8);
     st.caret += static_cast<u32>(std::strlen(utf8));
+    ++st.bufVersion;   // 0.9.6.6: o índice de linhas rebuilda na próxima uso
 }
 
 void chopBeforeCaret(State& st) {
@@ -164,6 +215,7 @@ void chopBeforeCaret(State& st) {
     const u32 p = prevCodePoint(st.buf, st.caret);
     st.buf.erase(p, st.caret - p);
     st.caret = p;
+    ++st.bufVersion;   // 0.9.6.6
 }
 
 const f32* clsColor(voni::hl::Cls c) {
@@ -411,12 +463,34 @@ bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop, f32 dt) {
             x += unit + gap;
         }
     }
-    if (ui.button(kKbBase + 40, x, y, 2.0f * unit, keyH, "ESPACO")) {
-        ime::Event ev;
-        ev.isText = true;
-        ev.text = " ";
-        applyEvent(st, ev);
-        typed = true;
+    // 0.9.6.6 (GRUPO C): o ESPACO desenha-se à mão como o TAB — o rótulo a
+    // 12sp CAPTION (o ui.button() de CORPO truncava "ESPACO…" na tecla de
+    // 2 unidades: largura inteira 104px > 92 úteis; a 12sp cabe com folga
+    // em QUALQUER densidade — o aviso de truncagem medido pelo Grupo B)
+    {
+        const UiRect rs{x, y, 2.0f * unit, keyH};
+        const bool pressed = ui.widgetHit(kKbBase + 40, rs.x, rs.y, rs.w,
+                                          rs.h);
+        const bool held = ui.widgetActive(kKbBase + 40);
+        ui.panelRounded(rs.x, rs.y, rs.w, rs.h,
+                        theme::dp(theme::kRadiusCard),
+                        held ? theme::kTheme.surface2 : theme::kTheme.surface);
+        ui.frameRounded(rs.x, rs.y, rs.w, rs.h, 1.0f,
+                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
+        ui.labelStyled(rs.x + (rs.w - ui.fontWidth("ESPACO") *
+                                          (theme::kFontCaption / 14.0f)) * 0.5f,
+                       theme::centeredBaseline(ui.textMetrics().ascent,
+                                               ui.textMetrics().descent,
+                                               rs.y, rs.h, 12.0f),
+                       "ESPACO", theme::kTheme.text1,
+                       theme::fontScale(theme::kFontCaption), 0);
+        if (pressed) {
+            ime::Event ev;
+            ev.isText = true;
+            ev.text = " ";
+            applyEvent(st, ev);
+            typed = true;
+        }
     }
     x += 2.0f * unit + gap;
     // 0.9.5 · TAB: os ESQUELETOS do editor que ensina (o mesmo applyEvent
@@ -430,7 +504,8 @@ bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop, f32 dt) {
                              : theme::kTheme.surface);
         ui.frameRounded(rt.x, rt.y, rt.w, rt.h, 1.0f,
                         theme::dp(theme::kRadiusCard), theme::kTheme.border);
-        ui.labelStyled(rt.x + (rt.w - ui.fontWidth("TAB")) * 0.5f,
+        ui.labelStyled(rt.x + (rt.w - ui.fontWidth("TAB") *
+                                          (theme::kFontCaption / 14.0f)) * 0.5f,
                        theme::centeredBaseline(ui.textMetrics().ascent,
                                                ui.textMetrics().descent,
                                                rt.y, rt.h, 12.0f),
@@ -480,12 +555,34 @@ bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop, f32 dt) {
         }
     }
     x += 1.5f * unit + gap;
-    if (ui.button(kKbBase + 43, x, y, 1.5f * unit, keyH, "ENTER")) {
-        ime::Event ev;
-        ev.isText = false;
-        ev.key = ime::Key::Enter;
-        applyEvent(st, ev);
-        typed = true;
+    // 0.9.6.6 (GRUPO C): o ENTER à mão como o TAB/ESPACO — o rótulo a 12sp
+    // CAPTION (o ui.button() de CORPO truncava "ENTE…" na tecla de 1,5
+    // unidades: largura inteira 85px > 60 úteis; a 12sp cabe)
+    {
+        const UiRect re2{x, y, 1.5f * unit, keyH};
+        const bool pressed = ui.widgetHit(kKbBase + 43, re2.x, re2.y,
+                                          re2.w, re2.h);
+        const bool held = ui.widgetActive(kKbBase + 43);
+        ui.panelRounded(re2.x, re2.y, re2.w, re2.h,
+                        theme::dp(theme::kRadiusCard),
+                        held ? theme::kTheme.surface2 : theme::kTheme.surface);
+        ui.frameRounded(re2.x, re2.y, re2.w, re2.h, 1.0f,
+                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
+        ui.labelStyled(re2.x + (re2.w - ui.fontWidth("ENTER") *
+                                           (theme::kFontCaption / 14.0f)) *
+                              0.5f,
+                       theme::centeredBaseline(ui.textMetrics().ascent,
+                                               ui.textMetrics().descent,
+                                               re2.y, re2.h, 12.0f),
+                       "ENTER", theme::kTheme.text1,
+                       theme::fontScale(theme::kFontCaption), 0);
+        if (pressed) {
+            ime::Event ev;
+            ev.isText = false;
+            ev.key = ime::Key::Enter;
+            applyEvent(st, ev);
+            typed = true;
+        }
     }
     x += 1.5f * unit + gap;
     {
@@ -572,6 +669,7 @@ void open(State& st, Scene& scene, Handle tic) {
         st.buf = kSkeleton;
         st.caret = kSkeletonCaret;
     }
+    ++st.bufVersion;   // 0.9.6.6: o open() trocou o buffer inteiro
     rememberTicName(st, scene);
 }
 
@@ -649,6 +747,7 @@ bool applyEvent(State& st, const ime::Event& ev) {
                                static_cast<u32>(w.size());
                 st.buf.erase(ws, w.size());
                 st.caret = ws;
+                ++st.bufVersion;   // 0.9.6.6: o Tab trocou a palavra
                 insertAtCaret(st, e->skeleton);
                 st.caret = ws + e->skeletonCaret;
             } else {
@@ -851,6 +950,7 @@ void applyFix(State& st) {
              st.buf[after] != '_');
         if (match && leftOk && rightOk) {
             st.buf.replace(at, from.size(), st.fixTo);
+            ++st.bufVersion;   // 0.9.6.6: o SUBSTITUIR mexeu no buffer
             st.caret = at + (u32)st.fixTo.size();
             st.errLine = 0;
             st.errMsg.clear();
@@ -1058,31 +1158,42 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     // em tempo real (DESDE A 1ª LETRA da palavra a meio da digitação) ou a
     // explicação do toque (com exemplo); SEM ENCHER O ECRÃ (some quando
     // não há nada a mostrar / nível Silencioso)
+    // 0.9.6.6 (GRUPO C): kHelpStrip* em dp REAL (eram px crus)
     const std::string strip1 = helpStripLine1(st);
     const std::string strip2 = helpStripLine2(st);
-    const f32 stripH = strip1.empty()
-                           ? 0.0f
-                           : (strip2.empty() ? kHelpStripH : kHelpStrip2H);
+    const f32 stripH =
+        strip1.empty()
+            ? 0.0f
+            : (strip2.empty() ? theme::dp(kHelpStripH) : theme::dp(kHelpStrip2H));
     const UiRect body{ins.left, topY + hdrH, contentW,
                       h - ins.bottom - (topY + hdrH) - errBarH - kbH - stripH};
     const f32 lh = lineHeight(ui);
-    const u32 nLines = lineCount(st);
+    const std::vector<u32>& lineIdx = ensureLineIndex(st);
+    const u32 nLines = static_cast<u32>(lineIdx.size());
     const f32 contentH = static_cast<f32>(nLines) * lh + theme::dp(16.0f);
 
     ui.beginScroll(kScrollId, body, contentH);
 
     // o scroll SEGUE O CARET (não o fim — o caret agora move-se livre):
-    // linha do caret visível (baixo se desce, topo se sobe)
+    // linha do caret visível (baixo se desce, topo se sobe).
+    // 0.9.6.6 (GRUPO C · C2): a linha do caret pelo ÍNDICE O(log n) — a
+    // MESMA fonte do draw/toque (antes: varria o buffer TODO por frame)
     u32 caretLine = 0;
     {
-        u32 i = 0;
-        while (i < st.caret && i < st.buf.size()) {
-            if (st.buf[i] == '\n') {
-                ++caretLine;
+        // upper_bound: o 1.º início de linha > caret − 1 é a linha do caret
+        u32 lo = 0, hi = nLines;
+        while (lo < hi) {
+            const u32 mid = (lo + hi) / 2;
+            if (lineIdx[mid] <= st.caret) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
             }
-            ++i;
         }
+        caretLine = lo > 0 ? lo - 1 : 0;
     }
+    // (a fórmula do topo da linha em CONTENT coordenadas — a MESMA do draw
+    // e do toque: dp(8) + linha*lh; lineTopOnScreen soma body.y e o scroll)
     const f32 caretTop = theme::dp(8.0f) + static_cast<f32>(caretLine) * lh;
     const f32 caretBot = caretTop + lh;
     f32 want = 0.0f;
@@ -1105,14 +1216,40 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     ui.panel(ins.left, body.y, theme::dp(48.0f), body.h, theme::kTheme.surface);
     ui.panel(ins.left + theme::dp(48.0f), body.y, 1.0f, body.h,
              theme::kTheme.border);
-    const f32 xCode = ins.left + theme::dp(64.0f);
+    // 0.9.6.6 (GRUPO C · C2): xCode/codeX/caretInset — a GEOMETRIA ÚNICA
+    // (draw, toque e testes partilham as MESMAS funções do header)
+    const f32 xCode = codeX(ins);
 
-    // split em linhas + coloração por classes (o parser classifica; as
-    // CORES vêm do Theme — spec §10)
-    voni::hl::BlockCommentState bcState;
-    u32 start = 0;
+    // 0.9.6.6 (GRUPO C · C3) · O CULLING: só as linhas VISÍVEIS tokenizam.
+    // ANTES o draw percorria o buffer INTEIRO por frame (n linhas ×
+    // renderPieces × 60fps — o custo crescia com o script); agora a janela
+    // [firstVis..lastVis] (+1 de folga por lado para o meio-desenhado) e o
+    // estado do comentário de bloco do 1.º visível vem do ÍNDICE (lineBc —
+    // pago por EDIÇÃO, não por frame). O contador dbgLinesTokenized é a
+    // prova afervável no CI (a FASE 13.6/C3 planta 800 linhas scrolled e
+    // espera ~20, não 800).
+    dbgLinesTokenized = 0;
+    u32 firstVis = 0;
+    if (off > theme::dp(8.0f)) {
+        firstVis = static_cast<u32>((off - theme::dp(8.0f)) / lh);
+    }
+    u32 lastVis = nLines - 1;
+    {
+        const f32 yEnd = off + body.h - theme::dp(8.0f);
+        if (yEnd > 0.0f) {
+            const u32 lv = static_cast<u32>(yEnd / lh) + 1;
+            if (lv < nLines) {
+                lastVis = lv;
+            }
+        }
+    }
+    // o estado bc ANTES da 1.ª visível (do cache; a linha 0 é o default)
+    voni::hl::BlockCommentState bcState =
+        firstVis < st.lineBc.size() ? st.lineBc[firstVis]
+                                    : voni::hl::BlockCommentState{};
     char num[16];
-    for (u32 i = 0; i < nLines; ++i) {
+    for (u32 i = firstVis; i <= lastVis; ++i) {
+        const u32 start = lineIdx[i];
         u32 end = start;
         while (end < st.buf.size() && st.buf[end] != '\n') {
             ++end;
@@ -1126,8 +1263,8 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
             std::memcpy(line, st.buf.data() + start, sizeof(line) - 1);
             line[sizeof(line) - 1] = '\0';
         }
-        const f32 yContent = theme::dp(8.0f) + static_cast<f32>(i) * lh;
-        const f32 y = body.y + yContent - off;
+        // 0.9.6.6 (C2): o y pela FÓRMULA ÚNICA (o toque usa o INVERSO dela)
+        const f32 y = lineTopOnScreen(body.y, i, lh, off);
 
         // nº da linha (12sp text2; a linha do ERRO acende em danger)
         std::snprintf(num, sizeof(num), "%u", i + 1);
@@ -1142,6 +1279,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         // real e o CARET (que mede a linha toda) fica EXATAMENTE onde se vê
         const std::string lineStr(line);
         const auto pieces = renderPieces(lineStr, bcState);
+        ++dbgLinesTokenized;
         {
             f32 x = xCode;
             char piece[256];
@@ -1159,7 +1297,9 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
             }
         }
 
-        // CARET piscante NA POSIÇÃO do caret (linha/coluna — G0-1)
+        // CARET piscante NA POSIÇÃO do caret (linha/coluna — G0-1).
+        // (0.9.6.6 · C2: o caret também pode estar numa linha FORA da
+        // janela — o scroll-follow acima já a trouxe para dentro)
         if (i == caretLine) {
             st.blink += dt;
             if (std::fmod(st.blink, 1.2f) < 0.6f) {
@@ -1173,12 +1313,11 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
                 std::memcpy(before, line, bl);
                 before[bl] = '\0';
                 const f32 xCaret = xCode + ui.fontWidth(before) +
-                                   theme::dp(2.0f);
-                ui.panel(xCaret, y, theme::dp(2.0f), lh - theme::dp(8.0f),
+                                   caretInset();
+                ui.panel(xCaret, y, caretInset(), lh - theme::dp(8.0f),
                          theme::kTheme.accent);
             }
         }
-        start = (end < st.buf.size()) ? end + 1 : end;
     }
     ui.endScroll();
 
@@ -1250,6 +1389,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
                 if (w0.size() <= st.caret) {
                     st.buf.erase(ws, w0.size());
                     st.caret = ws;
+                    ++st.bufVersion;   // 0.9.6.6: a dica inseriu o esqueleto
                     insertAtCaret(st, e->skeleton);
                     st.caret = ws + e->skeletonCaret;
                     st.helpTapped = false;
@@ -1264,7 +1404,10 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     // ---- barra de ERRO com linha + mensagem (§12) + SUBSTITUIR (G2-7e) ----
     if (st.errLine) {
         const f32 errY = h - ins.bottom - theme::dp(kErrH);
-        ui.panel(ins.left, errY, contentW, kErrH, theme::kTheme.danger);
+        // 0.9.6.6 (GRUPO C): a ALTURA também é dp (era px cru — a barra
+        // posicionava-se por dp(40) mas MEDIA 40px em qualquer densidade)
+        ui.panel(ins.left, errY, contentW, theme::dp(kErrH),
+                 theme::kTheme.danger);
         char msg[160];
         std::snprintf(msg, sizeof(msg), "linha %u: %s", st.errLine,
                       st.errMsg.empty() ? "erro" : st.errMsg.c_str());
@@ -1327,40 +1470,34 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
             st.kbOpen = false;
             // 0.9.6.2 (R-019) · O TOQUE MOVE O CARET — a linha vem do y+scroll
             // e a coluna da largura REAL de cada code point, descontando a
-            // coluna dos números de linha (a linha e a coluna do draw usam a
-            // MESMA matemática: dp(8) + i*lh a partir de body.y). A CAUSA do
-            // bug: o offset era CALCULADO e nunca aplicado — o cursor ficava
-            // para sempre onde estava. Agora: caret = o carácter mais
-            // próximo; a dica de palavra continua a ler o MESMO offset.
+            // coluna dos números de linha. A CAUSA do bug: o offset era
+            // CALCULADO e nunca aplicado — o cursor ficava para sempre onde
+            // estava. Agora: caret = o carácter mais próximo; a dica de
+            // palavra continua a ler o MESMO offset.
+            // 0.9.6.6 (GRUPO C · C2): a linha/coluna pela GEOMETRIA ÚNICA —
+            // lineAtScreenY é o INVERSO EXATO do lineTopOnScreen do draw e
+            // o início da linha sai do ÍNDICE O(1) (antes: a fórmula e o
+            // arranque de linha viviam NESTE bloco, uma 2.ª cópia à mão que
+            // driftava da do draw — a classe exata do R-019)
             {
                 const f32 lh2 = lineHeight(ui);
                 const f32 off2 = ui.scrollOffset();
-                f32 rel = ty - body.y + off2 - theme::dp(8.0f);
-                if (rel < 0.0f) {
-                    rel = 0.0f;
-                }
-                u32 li = static_cast<u32>(rel / lh2);
-                const u32 nL = lineCount(st);
+                i32 li2 = lineAtScreenY(ty, body.y, lh2, off2);
+                const std::vector<u32>& idx = ensureLineIndex(st);
+                const u32 nL = static_cast<u32>(idx.size());
+                u32 li = li2 < 0 ? 0u : static_cast<u32>(li2);
                 if (li >= nL) {
                     li = nL - 1;
                 }
-                // início em bytes da linha li (lineStartOfOffset — a MESMA
-                // função que os testes aférram)
-                u32 ls2 = 0;
-                for (u32 k = 0; k < li && ls2 < st.buf.size(); ++k) {
-                    ls2 = lineEndOf(st.buf, ls2);
-                    if (ls2 < st.buf.size()) {
-                        ++ls2;
-                    }
-                }
+                const u32 ls2 = idx[li];   // O(1) — o início da linha do ÍNDICE
                 // coluna: o carácter mais próximo pelas métricas REAIS, por
                 // CODE POINT (um acento não conta 2 — o old media por BYTE)
-                const f32 xCode = ins.left + theme::dp(64.0f);
+                const f32 xCode2 = codeX(ins);
                 const u32 le2 = lineEndOf(st.buf, ls2);
                 const std::string line =
                     st.buf.substr(ls2, le2 - ls2);
                 const u32 col = caretInLineForX(
-                    line, tx - xCode,
+                    line, tx - xCode2 - caretInset(),
                     [&](const char* one) { return ui.fontWidth(one); });
                 const u32 bo = ls2 + col;
                 // ★ O FIX: o offset sob o dedo PASSA A SER o cursor ★

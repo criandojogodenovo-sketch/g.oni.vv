@@ -131,10 +131,29 @@ constexpr u64 kLogsScrollId      = 43;   // F5.2: viewer de logs in-app
 // Bloco de texto = ascent + descent (reais do atlas). Cada linha acrescenta
 // a folga mínima para o bloco caber INTEIRO dentro da linha — nunca mais
 // glifos a invadir a linha vizinha.
-inline f32 inspTextRowH(const TextMetrics& m)   { return m.block() + 6.0f; }  // labels
-inline f32 inspButtonRowH(const TextMetrics& m) { return m.block() + 8.0f; }  // botões
-inline f32 inspSliderRowH(const TextMetrics& m) { return m.block() + 8.0f; }  // sliders
-inline f32 inspAddTcH(const TextMetrics& m)     { return m.block() + 14.0f; } // botão do fundo
+// 0.9.6.6 (GRUPO C): as alturas das linhas do Inspector derivam das
+// MÉTRICAS DO CONTEXTO (sp — textK incluído) com paddings em dp e PISO
+// kRowH (48dp REAL — a regra da casa «alvos de toque ≥48dp», Theme.h).
+// ANTES: bloco do atlas CRU + paddings px — no device (2.0) as linhas
+// saíam a ~18dp (a exata classe R-018 que o dono mediu nas teclas); a
+// 1.0 com o textK novo teriam ~22px. O piso garante o alvo em QUALQUER
+// densidade; quando o texto manda (densidades altas com fontes grandes)
+// a linha CRESCE — nunca espreme o texto.
+inline f32 inspRowHFloor(f32 contentH) {
+    return contentH < kRowH ? kRowH : contentH;
+}
+inline f32 inspTextRowH(const TextMetrics& m) {
+    return inspRowHFloor(m.block() + theme::dp(6.0f));   // labels
+}
+inline f32 inspButtonRowH(const TextMetrics& m) {
+    return inspRowHFloor(m.block() + theme::dp(8.0f));   // botões
+}
+inline f32 inspSliderRowH(const TextMetrics& m) {
+    return inspRowHFloor(m.block() + theme::dp(8.0f));   // sliders
+}
+inline f32 inspAddTcH(const TextMetrics& m) {
+    return inspRowHFloor(m.block() + theme::dp(14.0f));  // botão do fundo
+}
 
 // baseline CENTRADA do bloco de texto dentro da linha (topo = baseline −
 // ascent, fundo = baseline + descent) — substitui a convenção "+8" que
@@ -287,14 +306,17 @@ constexpr u32 kInspBitScript    = 1u << 7;   // 0.9.2: V.ONI
 // linha — o título sobe (o layout do mockup mantém-se: rótulos X/Y/Z dentro
 // das caixas, R à direita, alvo 48dp).
 inline f32 inspTransformRowH(const TextMetrics& m) {
-    return 24.0f + 4.0f + 48.0f + 4.0f;   // título + caixas 48dp + folga
+    // 0.9.6.6: título (12sp REAL — métricas do contexto) + caixas 48dp + folga
+    (void)m;
+    return theme::dp(24.0f) + theme::dp(4.0f) + theme::dp(48.0f) +
+           theme::dp(4.0f);   // título + caixas 48dp + folga
 }
 // altura do CABEÇALHO de secção (48dp — spec C)
-inline f32 inspSectionH() { return 48.0f; }
+inline f32 inspSectionH() { return theme::dp(48.0f); }
 // altura da linha de MINIATURAS de Material (64dp + legendas; spec C).
 // FASE 9 (G1-3): legendas INTEIRAS em LINHA RESERVADA (célula = útil/3) —
-// 64 + bloco de texto 12sp (~24px @28px de fonte) + folga
-inline f32 inspThumbsH() { return 64.0f + 28.0f; }
+// 64 + bloco de texto 12sp + folga (0.9.6.6: dp/sp de verdade)
+inline f32 inspThumbsH() { return theme::dp(64.0f) + theme::sp(theme::kFontCaption); }
 
 inline u32 inspectorRowCount(const InspProfile& p, bool selectable,
                              u32 collapsed) {

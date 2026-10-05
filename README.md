@@ -34,6 +34,63 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.9.6.6 — GRUPO C: ESCALA E TIPOGRAFIA (FASE 0.9.6-MASTER · R-025)
+
+**O que existe agora (a linha de base do Grupo B CURADA — 0 erros/0 avisos
+nos 4 ecrãs medidos):**
+- **A ESCALA ÚNICA dp()+sp()**: a densidade multiplica TUDO — o layout pelo
+  `dp()` (R-018) e o TEXTO pelo novo `sp()` (`sp(v) = v × densidade`) com o
+  fator do atlas aplicado no CHOKE POINT do UiContext (fontWidth/
+  textMetrics/labelStyled). A 2.0 o atlas de 28px É o corpo (o device de
+  sempre — ZERO mudança onde o dono olha); a 1.0 o corpo são 14px. ANTES o
+  texto era o atlas CRU: a legenda «FPS · TICs» (bloco de 29px) SANGRAVA
+  3px o fundo do ecrã numa banda de 24dp (o ERRO medido do Grupo B) e os
+  títulos 20sp não cabiam no cabeçalho de 56dp (o fallback empurrava-os
+  PARA FORA do contentRect — o Docs/Script, incluído na ERRATA do
+  relatório B).
+- **O ECRÃ A 2.0 É O ECRÃ A 1.0 VISTO A 2×** (a invariância, provada pela
+  FASE 13.6 entrada a entrada): o export a densidade 2.0 passa o validador
+  INTEIRO e cada rect/texto é exatamente 2× o de 1.0. É a prova de que
+  nada fica para trás quando a densidade muda (o «NÃO VERIFICADO #4» do
+  relatório B fechado).
+- **OS ALVOS 48dp REAIS** (os avisos <48dp medidos): o [+] e a pesquisa da
+  hierarquia, o fechar/raízes/subir do browser, as actionRows do Settings,
+  o cancelar do import — e as LINHAS DO INSPECTOR com piso 48dp (no device
+  saíam a ~18dp: a exata classe «teclas 48×65px» que o dono mediu).
+- **A GEOMETRIA ÚNICA do editor de script** (linha→y/col→x): as fórmulas
+  vivem no header e o draw, o toque e o scroll-segue-caret partilham-NAS
+  (antes: três cópias à mão que driftavam — a classe do R-019).
+- **O PERF do editor**: o índice de linhas O(1)/O(log) (reconstruído só
+  quando o buffer muda) + o CULLING (só as linhas VISÍVEIS tokenizam por
+  frame — 800 linhas scrolled → ~50 tokenizadas; o contador
+  `dbgLinesTokenized` afervável no CI).
+- **OS CANTOS SUAVIZADOS**: o `button()` no choke point com panelRounded/
+  frameRounded 8dp (spec A) — TODOS os botões da app num só sítio — e os 4
+  cards modais (browser/contexto/plus/logs) com raios 8dp.
+
+**Checklist C33/RMX3624 (VERIFICAR no device — Grupo C):**
+1. Abrir o editor: a barra de estado em baixo mostra «FPS 60 · TICs N»
+   INTEIRA e DENTRO da banda (nada cortado no fundo do ecrã — o ERRO
+   medido; a auditoria do Diagnóstico diz VERDE).
+2. Diagnóstico → «Auditoria do ecrã» em CADA ecrã (editor, script, docs,
+   browser): o toast traz «0 ERRO, 0 aviso» (a linha de base do Grupo B
+   curada; se o device apontar algo, COLAR no relatório — os números do
+   harness são a 1.0, o device é 2.0 e a invariância diz que É O MESMO
+   ecrã).
+3. O cabeçalho do Docs e do editor de script: o título 20sp INTEIRO
+   (nada a sangrar o topo por cima da faixa preta — a errata do relatório
+   B).
+4. O Inspector: as linhas MAIORES (48dp reais — ~96px no device) — as
+   caixas X/Y/Z, o R e os sliders tocáveis sem erro de dedo; conferir que
+   o painel faz scroll até ao fundo.
+5. A hierarquia: o [+] e o campo de pesquisa tocáveis em toda a altura
+   (48dp); o browser: fechar/subir/raízes idem.
+6. O teclado da engine: «ESPACO» e «ENTER» INTEIROS nas teclas (sem «…»).
+7. Escrever um script LONGO (100+ linhas) e fazer scroll: o editor mantém
+   os 60fps mesmo no fim do ficheiro (o culling; o bench do Diagnóstico
+   confirma).
+8. Todos os BOTÕES com cantos arredondados 8dp (o button() da casa).
+
 ## 0.9.6.5 — GRUPO B: FERRAMENTAS DE VERIFICAÇÃO (FASE 0.9.6-MASTER · R-024)
 
 **O que existe agora (a vara de medir dos Grupos C-I):**

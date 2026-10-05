@@ -4839,8 +4839,10 @@ void frame() {
             g_ui.panel(bx, y + 112.0f, bw * (frac > 1.0f ? 1.0f : frac),
                        12.0f, theme::ACCENT);
         }
-        if (g_ui.button(0x81010, x + 14.0f, y + ph - 52.0f, pw - 28.0f, 40.0f,
-                        "cancelar")) {
+        // 0.9.6.6 (GRUPO C): o CANCELAR é alvo 48dp REAL com dp (era px cru)
+        if (g_ui.button(0x81010, x + theme::dp(14.0f),
+                        y + ph - theme::dp(52.0f), pw - theme::dp(28.0f),
+                        theme::dp(48.0f), "cancelar")) {
             g_importJob.cancel.store(true);
             elog::info("import: cancelamento pedido (o job para no próximo "
                        "chunk)");

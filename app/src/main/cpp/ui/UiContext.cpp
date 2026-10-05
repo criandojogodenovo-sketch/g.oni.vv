@@ -352,7 +352,11 @@ void UiContext::labelStyled(f32 xBaseline, f32 yBaseline, const char* text,
     if (!font_ || !font_->ok() || !text) {
         return;
     }
-    const f32 k = textScale_ * (fontScale > 0.05f ? fontScale : 1.0f);
+    // 0.9.6.6 (GRUPO C): o k TOTAL = textScale_ (viewport 2D) × textK()
+    // (a densidade do texto — o choke point) × fontScale (o sp RELATIVO
+    // do chamador, sp/14). A 2.0 o k de sempre; a 1.0 o corpo a 14px.
+    const f32 k = textScale_ * theme::textK() *
+                  (fontScale > 0.05f ? fontScale : 1.0f);
     // GRUPO B: o label DESENHADO (bounding box pelas métricas reais — o
     // MESMO ascent/descent do centrado do button desde a F5.0-fix)
     auditLabel_(xBaseline, yBaseline, text, 0.0f, false, k);
@@ -399,30 +403,42 @@ void UiContext::labelStyled(f32 xBaseline, f32 yBaseline, const char* text,
 // F4.2/B2: mede; se exceder maxW trunca com "…" (U+2026 — no atlas desde
 // a FASE 9/G1-2; o textfit usa o glifo se existir) pelo maior prefixo que
 // caiba. Sem fonte → no-op (igual label).
-void UiContext::labelFitted(f32 xBaseline, f32 yBaseline, const char* text,
-                            const f32 color[4], f32 maxW) {
+// 0.9.6.6 (GRUPO C): labelFittedStyled — o MESMO contrato do fit para
+// textos que não são CORPO (a legenda 12sp da status bar, títulos): a
+// medida e o draw usam a MESMA escala (fontScale relativo × textK do
+// choke point) — o labelFitted de sempre é o caso corpo (k=1 relativo).
+void UiContext::labelFittedStyled(f32 xBaseline, f32 yBaseline,
+                                   const char* text, const f32 color[4],
+                                   f32 maxW, f32 fontScale, u8 style) {
     if (!hasFont() || !text) {
         return;
     }
-    const f32 fullW = fontWidth(text);
+    const f32 k = textScale_ * theme::textK() *
+                  (fontScale > 0.05f ? fontScale : 1.0f);
+    const f32 fullW = font_ ? font_->widthOf(text) * k : 0.0f;
     if (fullW <= maxW) {
-        // GRUPO B: coube INTEIRO — a entrada diz a largura REAL (nunca
-        // trunca); o label() de dentro regista POR ELE (não há duplo)
-        label(xBaseline, yBaseline, text, color);
+        // coube INTEIRO — a entrada diz a largura REAL (nunca trunca);
+        // o labelStyled() de dentro regista POR ELE (não há duplo)
+        labelStyled(xBaseline, yBaseline, text, color, fontScale, style);
         return;
     }
     char buf[256];
-    textfit::ellipsize(text, maxW,
-                       [this](const char* s) { return fontWidth(s); },
-                       buf, sizeof(buf));
+    textfit::ellipsize(
+        text, maxW, [&](const char* s) { return font_->widthOf(s) * k; },
+        buf, sizeof(buf));
     if (buf[0]) {
-        // GRUPO B: TRUNCOU — a entrada carrega a largura INTEIRA do texto
-        // original e o flag (o validador conta a informação perdida)
-        auditLabel_(xBaseline, yBaseline, buf, fullW, true, textScale_);
-        ++auditComposite_;   // o label() de dentro já não regista (a
-        label(xBaseline, yBaseline, buf, color);   // entrada é ESTA)
+        // TRUNCOU — a entrada carrega a largura INTEIRA do texto original
+        // e o flag (o validador conta a informação perdida)
+        auditLabel_(xBaseline, yBaseline, buf, fullW, true, k);
+        ++auditComposite_;   // o labelStyled() de dentro já não regista
+        labelStyled(xBaseline, yBaseline, buf, color, fontScale, style);
         --auditComposite_;
     }
+}
+
+void UiContext::labelFitted(f32 xBaseline, f32 yBaseline, const char* text,
+                            const f32 color[4], f32 maxW) {
+    labelFittedStyled(xBaseline, yBaseline, text, color, maxW, 1.0f, 0);
 }
 
 // 0.7.6 — a CAPTURA de gesto do botão, extraída (a toolbar desenha os
@@ -459,9 +475,12 @@ bool UiContext::widgetHit(u64 id, f32 x, f32 y, f32 w, f32 h) {
 }
 
 bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
-    // GRUPO B: o button regista UMA entrada Button (o rect interativo) e
-    // UMA entrada Label (o texto dele — conteúdo que pode truncar); o
-    // guard cala o widgetHit, os painéis visuais E o label de dentro
+    // 0.9.6.6 (GRUPO C): o texto do botão mede-se pelo CONTEXTO (fontWidth/
+    // textMetrics — textK incluído). ANTES media-se pelo ATLAS CRU
+    // (font_->widthOf): dentro do viewport 2D (textScale_) e a densidade
+    // ≠2 o texto media uma largura e DESENHAVA outra — truncava/centrava
+    // errado (a classe do bug que o Grupo C fecha: medir ≠ desenhar).
+    const f32 fitPad = theme::dp(8.0f);   // respiro do texto no rect (dp)
     if (auditing_ && auditComposite_ == 0) {
         auditAdd_(layout::Entry::Button, id, x, y, w, h);
         ++auditComposite_;
@@ -470,27 +489,33 @@ bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
         const bool heldInner = (active_ == id && downInner);
         const f32* bg = heldInner ? theme::ACCENT : theme::PANEL;
         const f32* txt = heldInner ? theme::BG : theme::TEXT;
-        panel(x, y, w, h, bg);
-        frame(x, y, w, h, 1.0f, theme::LINE);
+        // 0.9.6.6 (GRUPO C · CANTOS SUAVIZADOS): o button() é o CHOKE POINT
+        // de TODOS os botões da app — cantos 8dp (spec A: «raios 8dp
+        // cards/botões») por AQUI, um só sítio. (o raio é clampado a
+        // min(w,h)/2 pelo panelRounded — teclas finas ficam pill sem medo)
+        panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard), bg);
+        frameRounded(x, y, w, h, 1.0f, theme::dp(theme::kRadiusCard),
+                     theme::LINE);
         if (font_ && font_->ok() && text) {
             char fit[256];
             const char* shown = text;
-            if (font_->widthOf(text) > w - 8.0f) {
-                textfit::ellipsize(text, w - 8.0f,
-                                   [this](const char* s) { return font_->widthOf(s); },
+            if (fontWidth(text) > w - fitPad) {
+                textfit::ellipsize(text, w - fitPad,
+                                   [this](const char* s) { return fontWidth(s); },
                                    fit, sizeof(fit));
                 shown = fit;
             }
-            const f32 tw = font_->widthOf(shown);
-            const f32 asc = font_->ascent();
-            const f32 desc = font_->descent();
-            const f32 baseline = y + (h - asc - desc) * 0.5f + asc;
+            const f32 tw = fontWidth(shown);
+            const TextMetrics tm = textMetrics();
+            const f32 baseline = y + (h - tm.ascent - tm.descent) * 0.5f +
+                                 tm.ascent;
             // a entrada do TEXTO do botão (com a truncagem do nome — os
             // nomes longos de TIC da Hierarchy contam-se AQUI); o guard
             // abre SÓ para o registo (o label() de dentro segue calado)
             --auditComposite_;
             auditLabel_(x + (w - tw) * 0.5f, baseline, shown,
-                        fontWidth(text), shown != text, textScale_);
+                        fontWidth(text), shown != text,
+                        textScale_ * theme::textK());
             ++auditComposite_;
             label(x + (w - tw) * 0.5f, baseline, shown, txt);
         }
@@ -502,28 +527,31 @@ bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
     const bool held = (active_ == id && down);
     const f32* bg  = held ? theme::ACCENT : theme::PANEL;
     const f32* txt = held ? theme::BG     : theme::TEXT;
-    panel(x, y, w, h, bg);
-    frame(x, y, w, h, 1.0f, theme::LINE);
+    // 0.9.6.6 (GRUPO C · CANTOS SUAVIZADOS): idem — 8dp no choke point
+    panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard), bg);
+    frameRounded(x, y, w, h, 1.0f, theme::dp(theme::kRadiusCard),
+                 theme::LINE);
 
     if (font_ && font_->ok() && text) {
         // F4.2/B2: o texto do botão nunca sai do rect — nomes longos de TIC
         // na Hierarchy eram cortados pela borda do botão
         char fit[256];
         const char* shown = text;
-        if (font_->widthOf(text) > w - 8.0f) {
-            textfit::ellipsize(text, w - 8.0f,
-                               [this](const char* s) { return font_->widthOf(s); },
+        if (fontWidth(text) > w - fitPad) {
+            textfit::ellipsize(text, w - fitPad,
+                               [this](const char* s) { return fontWidth(s); },
                                fit, sizeof(fit));
             shown = fit;
         }
-        const f32 tw = font_->widthOf(shown);
+        const f32 tw = fontWidth(shown);
         // F5.0-fix: baseline centrada com as métricas REAIS do bloco de
         // texto (topo = baseline − ascent, fundo = baseline + descent) —
         // antes era a aproximação 0.30*altura, que com a fonte a 28 px
         // deixava os glifos descerem para a linha de baixo.
-        const f32 asc = font_->ascent();
-        const f32 desc = font_->descent();
-        const f32 baseline = y + (h - asc - desc) * 0.5f + asc;
+        // (0.9.6.6: as métricas são as do CONTEXTO — a MESMA escala do draw)
+        const TextMetrics tm = textMetrics();
+        const f32 baseline = y + (h - tm.ascent - tm.descent) * 0.5f +
+                             tm.ascent;
         label(x + (w - tw) * 0.5f, baseline, shown, txt);
     }
     return pressed;
@@ -769,9 +797,20 @@ void UiContext::statusLine(const char* text) {
     panel(r.x, r.y, r.w, 1.0f, theme::LINE);   // separador superior
 
     if (font_ && font_->ok() && text) {
-        const f32 th = font_->height();
-        labelFitted(r.x + 12.0f, r.y + kStatusH * 0.5f + th * 0.30f, text,
-                    theme::TEXT, r.w - 24.0f);
+        // 0.9.6.6 (GRUPO C): 12sp CAPTION (spec E — a linha de estado é
+        // legenda) com baseline CENTRADA pelas métricas do contexto e o
+        // FIT de sempre (nunca sai do rect). ANTES: label de CORPO no
+        // ATLAS CRU (bloco 29px) numa banda de 24dp com o offset
+        // «+0.30·altura» — SANGRAVA o fundo do ecrã (o ERRO medido do
+        // Grupo B). Com o textK a 1.0 o bloco é 14px (cabe na banda de
+        // 24px); a 2.0 é 28px (cabe na banda de 48px).
+        labelFittedStyled(
+            r.x + theme::dp(12.0f),
+            theme::centeredBaseline(textMetrics().ascent,
+                                    textMetrics().descent, r.y, r.h,
+                                    theme::kFontCaption),
+            text, theme::TEXT, r.w - theme::dp(24.0f),
+            theme::fontScale(theme::kFontCaption), 0);
     }
 }
 

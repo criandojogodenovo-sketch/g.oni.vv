@@ -2252,11 +2252,13 @@ TEST(regress_layout_dump_nao_mente) {
         }
     }
     EXPECT(truncFlag);
-    // (c) a que CABE: nunca truncada
+    // (c) a que CABE: nunca truncada — a largura MEDIDA é a do CONTEXTO
+    // (atlas × textK da densidade; 0.9.6.6 · GRUPO C: medir pelo atlas
+    // cru diverge do que desenha — o choke point do sp())
     bool fittedOk = false;
     for (const auto& e : r.entries) {
         if (e.kind == layout::Entry::Label && e.clipped && !e.truncated &&
-            nearEqF(e.w, font.widthOf("cabe"), 0.5f)) {
+            nearEqF(e.w, font.widthOf("cabe") * vv::theme::textK(), 0.5f)) {
             fittedOk = true;
         }
     }
@@ -2522,4 +2524,226 @@ TEST(regress_png_layout_ida_e_volta) {
         }
         EXPECT(igual);   // o píxel que sai é o que entrou — byte a byte
     }
+}
+
+// ============================================================================
+// R-025 (FASE 0.9.6-MASTER · GRUPO C — ESCALA E TIPOGRAFIA)
+//
+// A linha de base medida pelo Grupo B (RELATORIO-0.9.6.5 secção 8) morreu
+// toda na MESMA classe: o texto era o ATLAS CRU (28px) em qualquer
+// densidade e meia dúzia de alvos eram px crus. O Grupo C fecha o círculo
+// da R-018: dp() para o layout E sp() para o texto — a densidade multiplica
+// TUDO (o ecrã a 2.0 é o ecrã a 1.0 visto a 2×, a invariância afervada
+// pela FASE 13.6). Quatro sentinelas:
+//   1. regress_sp_escala_unica      — o sp()/textK no CHOKE POINT (UiContext)
+//   2. regress_toque_48dp_validador — os alvos medidos ≥48dp (a vara do B)
+//   3. regress_script_geom_unica    — linha→y/col→x ÚNICA + o índice O(1)
+//   4. regress_cantos_suavizados    — o button() com os raios 8dp da spec A
+// ============================================================================
+#include "ui/BottomPanel.h"          // R-025: drawStatusBar (o ERRO medido)
+#include "ui/ScriptEditor.h"         // R-025: a geometria única + o índice
+#include "ui/SettingsPage.h"         // R-025: actionBtnRect (48dp)
+#include "ui/UiEditor.h"             // R-025: o browser (fechar/raízes/subir)
+
+TEST(regress_sp_escala_unica) {
+    using namespace vv;
+    // ---- (a) o CONTRATO das funções: sp(v) = v×densidade; textK liga o
+    // atlas (28px = 14sp@2.0) à densidade corrente
+    theme::setDensity(1.0f);
+    EXPECT(theme::sp(14.0f) == 14.0f);
+    EXPECT(theme::textK() == 0.5f);   // o atlas é o corpo a 2.0
+    theme::setDensity(2.0f);
+    EXPECT(theme::sp(14.0f) == 28.0f);
+    EXPECT(theme::textK() == 1.0f);   // a 2.0 o atlas É o corpo (o device)
+    theme::setDensity(3.0f);
+    EXPECT(theme::sp(14.0f) == 42.0f && theme::textK() == 1.5f);
+    theme::setDensity(1.0f);
+
+    // ---- (b) o CHOKE POINT: o UiContext mede o texto na escala corrente —
+    // o button() ANTIGO media pelo ATLAS CRU (font_->widthOf) e desenhava
+    // pela do contexto: truncava/centrava errado fora da densidade 2.0
+    FontAtlas font;
+    const char* fp = FONT_FIXTURE;
+    ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+    UiContext ui;
+    ui.init();
+    ui.setFont(&font);
+    ui.beginFrame(nullptr, nullptr, 1600.0f, 720.0f);
+    const f32 w1 = ui.fontWidth("escala");
+    theme::setDensity(2.0f);
+    const f32 w2 = ui.fontWidth("escala");
+    theme::setDensity(1.0f);
+    EXPECT(w1 > 0.0f && nearEqF(w2, w1 * 2.0f, 0.05f));
+    // o mesmo para as MÉTRICAS (as baselines derivam disto)
+    ui.beginFrame(nullptr, nullptr, 1600.0f, 720.0f);
+    const f32 b1 = ui.textMetrics().block();
+    theme::setDensity(2.0f);
+    const f32 b2 = ui.textMetrics().block();
+    theme::setDensity(1.0f);
+    EXPECT(nearEqF(b2, b1 * 2.0f, 0.05f));
+    ui.endFrame();
+
+    // ---- (c) o ERRO medido do Grupo B NÃO VOLTA: a legenda 12sp da status
+    // bar CABE na banda de 24dp em QUALQUER densidade (o bloco era 29px
+    // crús e sangrava 3px o fundo do contentRect a insets b=0)
+    for (f32 d = 1.0f; d < 3.1f; d += 1.0f) {
+        theme::setDensity(d);
+        editor::applyDensity();
+        ui.beginFrame(nullptr, nullptr, 1600.0f, 720.0f);
+        const UiRect st = safe::statusRect(1600.0f, 720.0f, safe::Insets{});
+        const TextMetrics m = ui.textMetrics();
+        // o bloco da LEGENDA (12sp): métricas do corpo × 12/14
+        const f32 capBlock = (m.ascent + m.descent) *
+                             (theme::kFontCaption / 14.0f);
+        EXPECT(capBlock <= st.h + 0.01f);
+        ui.endFrame();
+    }
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+}
+
+TEST(regress_toque_48dp_validador) {
+    using namespace vv;
+    // OS ALVOS medidos pelo Grupo B (<48dp): [+] 56×40 e pesquisa 268×40 da
+    // hierarquia; fechar 96×36, 6 raízes 139,7×40 e subir 868×44 do browser;
+    // o botão 152×40 das actionRows do Settings. Todos ≥48dp agora — em
+    // QUALQUER densidade (a regra da casa; a vara é o próprio REGISTO).
+    FontAtlas font;
+    const char* fp = FONT_FIXTURE;
+    ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+    UiContext ui;
+    ui.init();
+    ui.setFont(&font);
+    Scene scene;
+    InputState in;
+
+    for (f32 d = 1.0f; d < 2.1f; d += 1.0f) {
+        theme::setDensity(d);
+        editor::applyDensity();
+        ui.beginFrame(nullptr, &in, 1600.0f, 720.0f);
+        ui.auditBegin("sentinela48", 1600.0f, 720.0f, 0.0f, 0.0f, 0.0f,
+                      0.0f, d);
+        editor::EditorState st;
+        editor::drawHierarchy(ui, scene, st);
+        const int pick = editor::drawFileBrowser(
+            ui, in, 1600.0f, 720.0f, st, "/Download",
+            std::vector<fileapi::DirEntry>{}, true);
+        (void)pick;
+        ui.endFrame();
+        const layout::Record& r = ui.auditRecord();
+        ui.auditEnd();
+        // TODOS os interativos deste frame ≥48dp (o validador inteiro)
+        const auto probs = layout::validate(r);
+        bool pequeno = false;
+        for (const auto& p : probs) {
+            if (p.rule == layout::Problem::ToquePequeno) {
+                pequeno = true;
+            }
+        }
+        EXPECT(!pequeno);
+        // e o [+] (kIdPlus=40=0x28) e a pesquisa (0x157C) existem ≥48
+        bool plusOk = false, searchOk = false;
+        for (const auto& e : r.entries) {
+            if (e.kind == layout::Entry::Button && e.id == 40u) {
+                plusOk = e.w >= 47.9f && e.h >= 47.9f;
+            }
+            if (e.kind == layout::Entry::Button && e.id == 5500u) {
+                searchOk = e.h >= 47.9f;
+            }
+        }
+        EXPECT(plusOk);
+        EXPECT(searchOk);
+    }
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+
+    // o botão das actionRows do Settings: kRowH INTEIRO (48dp) — era
+    // y+4/kRowH-8 (40px crus). A FONTE ÚNICA exportada (o walk partilha-a)
+    const UiRect ab = editor::settings::actionBtnRect(0.0f, 0.0f, 400.0f);
+    EXPECT(ab.h >= 47.9f);
+    theme::setDensity(2.0f);
+    editor::applyDensity();
+    const UiRect ab2 = editor::settings::actionBtnRect(0.0f, 0.0f, 400.0f);
+    EXPECT(ab2.h >= 95.9f);   // 48dp a 2.0 = 96px
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+}
+
+TEST(regress_script_geom_unica) {
+    using namespace vv;
+    // ---- (a) a GEOMETRIA ÚNICA: lineTopOnScreen/lineAtScreenY são UM o
+    // inverso do outro (o draw e o toque partilham a MESMA fórmula — a
+    // causa do R-019 eram duas cópias que driftavam)
+    const f32 bodyY = 152.0f, lh = 28.0f;
+    for (u32 i : {0u, 1u, 7u, 123u}) {
+        const f32 y = editor::scriptwin::lineTopOnScreen(bodyY, i, lh, 0.0f);
+        EXPECT(editor::scriptwin::lineAtScreenY(y + lh * 0.5f, bodyY, lh,
+                                                0.0f) ==
+              static_cast<i32>(i));
+        // com scroll: o offset entra e sai (a linha volta a ser a mesma)
+        const f32 off = 96.0f;
+        const f32 ys = editor::scriptwin::lineTopOnScreen(bodyY, i, lh, off);
+        EXPECT(editor::scriptwin::lineAtScreenY(ys + lh * 0.5f, bodyY, lh,
+                                                off) ==
+              static_cast<i32>(i));
+    }
+    // o xCode/caretInset partilhados (draw, toque e testes)
+    const safe::Insets ins{0.0f, 96.0f, 0.0f, 48.0f};
+    EXPECT(editor::scriptwin::codeX(ins) == ins.left + theme::dp(64.0f));
+    EXPECT(editor::scriptwin::caretInset() == theme::dp(2.0f));
+
+    // ---- (b) O ÍNDICE de linhas (O(1)): os inícios batem com a varredura
+    // manual (a fonte da verdade antiga), o lineCount conta certo e a
+    // EDIÇÃO invalida (bufVersion — o contrato de cada mutação)
+    editor::scriptwin::State st;
+    st.open = true;
+    st.buf = "central main {\n  on moment { }\n  allmoments { }\n}\n";
+    // (sem bump: o índice está stale — o ensure reconstrói sozinho)
+    const std::vector<u32>& idx = editor::scriptwin::ensureLineIndex(st);
+    EXPECT(idx.size() == 5);
+    EXPECT(idx[0] == 0u);
+    EXPECT(idx[1] == st.buf.find('\n') + 1);
+    EXPECT(idx[4] == st.buf.size());
+    EXPECT(editor::scriptwin::lineCount(st) == 5u);
+    // o início de CADA linha == o caminho manual (lineStartOfOffset)
+    for (u32 li = 0; li < 5; ++li) {
+        EXPECT(idx[li] == editor::scriptwin::lineStartOfOffset(
+                              st.buf, li < 4 ? idx[li + 1] - 1
+                                             : (u32)st.buf.size()));
+    }
+    // a edição INVALIDA: uma mutação direta + bump → o índice segue
+    st.buf += "nova linha\n";
+    ++st.bufVersion;
+    EXPECT(editor::scriptwin::lineCount(st) == 6u);
+    // e SEM o bump o guard de sanidade também apanha (o back() > size)
+    st.buf = "x";   // encolheu SEM bump (uso errado da API)
+    EXPECT(editor::scriptwin::lineCount(st) == 1u);   // reconstruiu
+}
+
+TEST(regress_cantos_suavizados) {
+    using namespace vv;
+    // o button() é o CHOKE POINT dos botões da app: cantos 8dp (spec A) —
+    // a ESCADARIA do panelRounded emite MAIS quads que o panel reto e a
+    // moldura segue o arco (frameRounded). Mede-se nos batches (GL-free).
+    FontAtlas font;
+    const char* fp = FONT_FIXTURE;
+    ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+    UiContext ui;
+    ui.init();
+    ui.setFont(&font);
+
+    // o panel RETO de referência
+    ui.beginFrame(nullptr, nullptr, 1600.0f, 720.0f);
+    ui.panel(10.0f, 10.0f, 200.0f, 96.0f, theme::PANEL);
+    ui.endFrame();
+    const u32 quadsReto = ui.solidsForTest().vertexCount() / 6;
+
+    // o button() AGORA: a escadaria + a moldura em arco
+    ui.beginFrame(nullptr, nullptr, 1600.0f, 720.0f);
+    ui.button(0x99901, 10.0f, 10.0f, 200.0f, 96.0f, "Botao");
+    ui.endFrame();
+    const u32 quadsBotao = ui.solidsForTest().vertexCount() / 6;
+    // a escadaria (4 degraus × 4 cantos + o miolo) + a moldura em arco
+    // (polilinhas) — SEMPRE mais geometria que o recto
+    EXPECT(quadsBotao > quadsReto + 8u);
 }

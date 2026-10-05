@@ -48,6 +48,7 @@
 // GL-free / Android-free: desenha no quad batch, consome ime::Event.
 #include "core/Handle.h"
 #include "platform/ImeQueue.h"
+#include "ui/SafeArea.h"   // 0.9.6.6: codeX(linha→y/col→x única)
 #include "ui/UiContext.h"
 #include "voni/Voni.h"
 #include "voni/VoniHighlight.h"   // 0.9.6: renderPieces (Cls/BlockCommentState)
@@ -108,6 +109,19 @@ struct State {
     u32 caret = 0;              // offset em BYTES do cursor (G0-1)
     f32 blink = 0.0f;           // caret
     f32 scrollOff = 0.0f;
+    // 0.9.6.6 (GRUPO C · PERF+GEOMETRIA): O ÍNDICE DE LINHAS — reconstruído
+    // quando o buffer muda (bufVersion bumped em CADA mutação: insert/
+    // apagar/tab/fix/dica/open). lineCount, a linha do caret e o início de
+    // CADA linha passam a O(1)/O(log n) — ANTES cada um VARRIA o buffer
+    // inteiro (o draw fazia 3 varrimentos/frame; o toque mais 2). O draw
+    // só TOKENIZA as linhas VISÍVEIS (o custo por frame deixa de ser
+    // O(buffer) — a prova é o contador dbgLinesTokenized, afervável no CI).
+    u32 bufVersion = 0;                      // muda a cada edição
+    std::vector<u32> lineStarts;              // offset do início de cada linha
+    u32 indexVersion = 0xFFFFFFFFu;           // a versão que o cache serve
+    // estado do comentário de bloco AO FIM de cada linha (para o 1.º
+    // visível tokenizar JÁ certo sem varrer desde a linha 0)
+    std::vector<voni::hl::BlockCommentState> lineBc;
     // erro corrente (linha 0 = sem erro) — compile ou runtime
     u32 errLine = 0;
     std::string errMsg;
@@ -162,7 +176,38 @@ void close(State& st);
 // aplica UM evento IME (inserção no caret/DEL/ENTER/setas — G0-1)
 bool applyEvent(State& st, const ime::Event& ev);
 
-u32 lineCount(const State& st);
+// 0.9.6.6 (GRUPO C · C2/C3) — O ÍNDICE DE LINHAS: garante o cache (rebuild
+// só quando o buffer mudou) e devolve-o. lineCount/lados ficam O(1) e o
+// draw/tokenizador só percorre o que VÊ. A linha i começa em (*idx)[i].
+const std::vector<u32>& ensureLineIndex(State& st);
+u32 lineCount(State& st);   // (era const com varredura — agora O(1) pelo índice)
+
+// 0.9.6.6 (GRUPO C · C2) — A GEOMETRIA ÚNICA linha↔y / coluna↔x: a MESMA
+// fórmula para o DRAW (onde cada linha desenha), o TOQUE (que linha/coluna
+// estava sob o dedo) e o SCROLL-SEGUE-CARET. ANTES a fórmula «dp(8)+i·lh a
+// partir de body.y» vivia em TRÊS sítios à mão que podiam driftar (a classe
+// exata do R-019: o toque calculava por uma cópia e o draw por outra).
+// altura de linha pelas MÉTRICAS DO CONTEXTO (piso 28dp — a regra F5.0)
+f32 lineHeight(UiContext& ui);
+// y de ecrã do TOPO da linha i (draw e scroll-follow)
+inline f32 lineTopOnScreen(f32 bodyY, u32 i, f32 lh, f32 scrollOff) {
+    return bodyY + theme::dp(8.0f) + static_cast<f32>(i) * lh - scrollOff;
+}
+// o INVERSO (o toque): a linha que contém este y de ecrã (>= 0; o chamador
+// faz o clamp ao nº de linhas)
+inline i32 lineAtScreenY(f32 y, f32 bodyY, f32 lh, f32 scrollOff) {
+    const f32 rel = y - bodyY + scrollOff - theme::dp(8.0f);
+    return rel <= 0.0f ? 0 : static_cast<i32>(rel / lh);
+}
+// x da 1ª coluna do código (draw, toque e caret partilham)
+inline f32 codeX(const safe::Insets& ins) { return ins.left + theme::dp(64.0f); }
+// o inset visual do caret (a sua esquerda da posição)
+inline f32 caretInset() { return theme::dp(2.0f); }
+
+// 0.9.6.6 (GRUPO C · C3) — o contador de trabalho do draw (afervável no
+// CI: com N linhas e o scroll no meio, o frame TOKENIZA as visíveis+
+// folga, não N; reset no início de CADA draw)
+extern u32 dbgLinesTokenized;
 
 // ---- 0.9.6.2 (R-019) · A GEOMETRIA DO CURSOR — funções PURAS/aferváveis ---
 // O BUG que o dono apanhou no device: o toque no corpo CALCULAVA o offset

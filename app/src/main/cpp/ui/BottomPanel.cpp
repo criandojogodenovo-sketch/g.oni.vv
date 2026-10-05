@@ -108,9 +108,11 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
         if (ui.widgetActive(tabs[i].id)) {
             ui.panel(r.x, r.y, r.w, r.h, theme::kTheme.surface2);
         }
-        const f32 s = 24.0f;
+        // 0.9.6.6 (GRUPO C): ícone/gap em dp REAL (eram 24/8 px crus — a
+        // invariância da 13.6 apanhou: o rótulo da tab deslocava 16px a 2.0)
+        const f32 s = theme::dp(24.0f);
         const f32 wordW = ui.hasFont() ? ui.fontWidth(tabs[i].word) : 0.0f;
-        const f32 gap = 8.0f;
+        const f32 gap = theme::dp(8.0f);
         const f32 x0 = r.x + (r.w - (s + gap + wordW)) * 0.5f;
         icons::drawIcon(ui, tabs[i].ic, x0, r.y + (r.h - s) * 0.5f, s,
                         active ? theme::kTheme.accent : theme::kTheme.text2);
@@ -373,10 +375,21 @@ void drawStatusBar(UiContext& ui, f32 sw, f32 sh, const safe::Insets& in,
     }
     char text[48];
     std::snprintf(text, sizeof(text), "FPS %d · TICs %u", fps, ticCount);
-    // 12sp (fontScale 12/14) text-2 — a ÚNICA linha (spec E)
-    ui.label(r.x + theme::kSpace1, r.y + (r.h - ui.textMetrics().block()) * 0.5f +
-                                  ui.textMetrics().ascent,
-             text, theme::kTheme.text2);
+    // 0.9.6.6 (GRUPO C): 12sp REAL (o comentário antigo DIZIA «12sp
+    // (fontScale 12/14)» mas o código chamava o label() de CORPO — o
+    // bloco de 29px do atlas cru numa banda de 24dp SANGRAVA o fundo do
+    // ecrã: o ERRO medido do Grupo B). AGORA: labelFittedStyled a 12sp
+    // com a baseline CENTRADA pelas métricas do CONTEXTO (textK incluído
+    // — a 1.0 o bloco é 14px na banda de 24px; a 2.0 é 28px na de 48px) e
+    // o fit de sempre (o texto nunca sai do rect).
+    const f32 pad = theme::dp(8.0f);   // kSpace1 em dp (era px cru)
+    ui.labelFittedStyled(
+        r.x + pad,
+        theme::centeredBaseline(ui.textMetrics().ascent,
+                                ui.textMetrics().descent, r.y, r.h,
+                                theme::kFontCaption),
+        text, theme::kTheme.text2, r.w - 2.0f * pad,
+        theme::fontScale(theme::kFontCaption), 0);
 }
 
 // ---- persistência (spec G) ----------------------------------------------------
