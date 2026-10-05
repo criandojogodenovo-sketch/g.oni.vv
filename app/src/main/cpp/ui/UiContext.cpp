@@ -167,6 +167,14 @@ void UiContext::auditAdd_(layout::Entry::Kind kind, u64 id, f32 x, f32 y,
     e.w = w;
     e.h = h;
     e.clipped = inScroll_;
+    // 0.9.6.8 (GRUPO E): a tecla COMPACTA (a barra de símbolos de 40dp da
+    // spec E) — a flag vive SÓ durante a chamada de buttonCompact(); a
+    // 1ª entrada Button apanha-a (o label do texto de dentro não é
+    // compacto — a exceção do validador é para a TECLA, não para o texto)
+    if (kind == layout::Entry::Button && auditCompactNext_) {
+        e.compact = true;
+        auditCompactNext_ = false;
+    }
     audit_.add(e);
 }
 
@@ -575,6 +583,19 @@ bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
                              tm.ascent;
         label(x + (w - tw) * 0.5f, baseline, shown, txt);
     }
+    return pressed;
+}
+
+// 0.9.6.8 (GRUPO E) — A TECLA COMPACTA: o MESMO button() (desenho, gesto,
+// texto — TUDO igual) com a entrada de audit marcada compacta. É a tecla
+// da BARRA DE SÍMBOLOS (40dp da spec do autor); o validador aplica o piso
+// compacto (40dp) em vez do 48dp da casa — exceção ESTREITA vigiada pela
+// sentinela R-027 (a flag só vive durante ESTA chamada)
+bool UiContext::buttonCompact(u64 id, f32 x, f32 y, f32 w, f32 h,
+                              const char* text) {
+    auditCompactNext_ = true;
+    const bool pressed = button(id, x, y, w, h, text);
+    auditCompactNext_ = false;   // a flag NUNCA escapa da chamada
     return pressed;
 }
 

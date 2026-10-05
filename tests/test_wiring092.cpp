@@ -388,17 +388,15 @@ TEST(scriptwin_fonte_existente_abre_intacta) {
 }
 
 TEST(scriptwin_teclado_in_app_digitavel) {
-    // FASE 9 (G0-1 — o coração do fix): o teclado IN-APP desenhado pelo
-    // editor emite pelo MESMO applyEvent do IME; 20 teclas, editor ABERTO,
-    // texto PRESENTE, zero crash. A página de símbolos tem { } " = (a
-    // linguagem precisa deles).
+    // FASE 9 (G0-1 — o coração do fix; RECALIBRADO no GRUPO E): o IME do
+    // sistema é o teclado ÚNICO e a BARRA DE SÍMBOLOS emite pelo MESMO
+    // applyEvent; 20 teclas, editor ABERTO, texto PRESENTE, zero crash
+    // (os símbolos { } " = são a linguagem — a barra cobre-os).
     UiEnv e;
     vv::editor::scriptwin::open(e.st.scriptWin, e.scene, e.tic);
-    e.st.scriptWin.kbOpen = true;
-    // 20 eventos "teclas do teclado in-app" (letras + espaço + enter +
-    // símbolos) — mesmos eventos que o drawKeyboard emite (20 EXATAS:
-    // o array é [20] — a 1ª versão listava 19 e o nullptr final crashava
-    // o teste em kKeys[19][0])
+    // 20 eventos (letras + espaço + enter + símbolos da barra) — os MESMOS
+    // eventos que o IME e a BARRA emitem (20 EXATAS: o array é [20] — a 1ª
+    // versão listava 19 e o nullptr final crashava o teste em kKeys[19][0])
     const char* kKeys[20] = {"v", "+", "+", "a", " ", "=", " ", "1", "\n",
                              "{", " ", "}", "\n", "b", "c", "d", "e", "f",
                              "g", "h"};
@@ -416,10 +414,12 @@ TEST(scriptwin_teclado_in_app_digitavel) {
         EXPECT(e.st.scriptWin.open);
     }
     EXPECT(e.st.scriptWin.buf.size() > 20);   // esqueleto + 20 teclas
-    // o desenho com o teclado aberto não crasha (portrait 720×1536)
+    // o desenho com o IME ABERTO (inset injetado — a barra sobre ele)
+    // não crasha (portrait 720×1536)
+    vv::ime::setBottomInset(280.0f);
     e.frame(720.0f, 1536.0f);
     EXPECT(e.st.scriptWin.open);
-    EXPECT(e.st.scriptWin.kbOpen);
+    vv::ime::setBottomInset(0.0f);
     vv::editor::scriptwin::close(e.st.scriptWin);
 }
 
@@ -444,9 +444,8 @@ TEST(scriptwin_toque_no_corpo_abre_teclado_e_pede_ime) {
         e.input.clearEdges();
     }
     EXPECT(r == 5);                 // o main re-pede o IME
-    // 0.9.6 (G3): a POLÍTICA DE COEXISTÊNCIA — o teclado próprio CEDA ao
-    // IME do sistema (nunca os dois); abre pelo BOTÃO do cabeçalho
-    EXPECT(!e.st.scriptWin.kbOpen);
+    // 0.9.6.8 (GRUPO E): o teclado da engine SAIU — não há estado kbOpen;
+    // o IME do sistema é o ÚNICO teclado (a barra de símbolos dokada nele)
     EXPECT(e.st.scriptWin.open);    // digitar/toque NÃO fecha
     vv::editor::scriptwin::close(e.st.scriptWin);
 }
@@ -456,7 +455,9 @@ TEST(scriptwin_lupa_abre_docs_por_cima) {
     // as Docs por cima — pesquisa filtra + mostra o exemplo)
     UiEnv e;
     vv::editor::scriptwin::open(e.st.scriptWin, e.scene, e.tic);
-    const f32 docsX = 720.0f - 72.0f * 2.0f - 16.0f - 8.0f - 48.0f;
+    // 0.9.6.8 (GRUPO E · header flexível): a lupa ancorou à direita — a
+    // 720dp: stop 640, run 560, lupa 500 (era 504 na fórmula antiga)
+    const f32 docsX = 720.0f - 8.0f - 72.0f - 8.0f - 72.0f - 12.0f - 48.0f;
     int r = 0;
     e.input.injectDown(0, docsX + 24.0f, 28.0f);
     e.ui.beginFrame(nullptr, &e.input, 720.0f, 1536.0f);
@@ -817,36 +818,46 @@ TEST(scriptwin_toque_na_palavra_explica_com_exemplo) {
 }
 
 TEST(scriptwin_botao_nivel_cicla_e_o_tab_do_teclado_existe) {
+    // (RECALIBRADO no GRUPO E: o teclado da engine SAIU — o teste do
+    // nível fica, o do TAB vira o da BARRA DE SÍMBOLOS no fim)
     UiEnv e;
     namespace sw = vv::editor::scriptwin;
     sw::open(e.st.scriptWin, e.scene, e.tic);
-    e.st.scriptWin.kbOpen = true;
 
     // o botão do NÍVEL cicla N→S→I→N (o draw processa o toque)
     EXPECT(e.st.scriptWin.helpLevel == 1);
-    // 0.9.6 (G3): 720×1536 portrait — o botão do nível está a docsX-200
-    // (docsX=504; o do teclado próprio entrou em docsX-152)
-    e.tap(504.0f - 200.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
+    // 0.9.6.8 (GRUPO E · header flexível): 720×1536 portrait — o botão do
+    // nível ancorou à direita (helpX=388: copy 444, lupa 500, run 560,
+    // stop 640 — as fórmulas do draw; o antigo docsX-200=304 MORREU com o
+    // header que media a partir da lupa)
+    e.tap(388.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
     EXPECT(e.st.scriptWin.helpLevel == 2);
-    e.tap(504.0f - 200.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
+    e.tap(388.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
     EXPECT(e.st.scriptWin.helpLevel == 0);
-    e.tap(504.0f - 200.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
+    e.tap(388.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
     EXPECT(e.st.scriptWin.helpLevel == 1);
 
-    // 0.9.6 (G3): a linha de baixo do teclado — [<][^][v][>][ESPACO 2u]
-    // [TAB 1u][PAG 1u][APAGA 1.5u][ENTER 1.5u][FECHAR 1u] = 12u+9g
-    // unit = (720-16-9*6)/12 = 54.2; TAB após 4 setas + espaço 2u
+    // 0.9.6.8 (GRUPO E): A BARRA DE SÍMBOLOS substituiu a linha de baixo do
+    // teclado — dokada SOBRE o IME (inset injetado como o device manda) e
+    // insere os símbolos da spec NO cursor (o MESMO applyEvent do IME).
+    // A 720dp: 14 teclas (keyW = 720/14); a 1ª é o seletor «1/2», a 2ª é '{'
     {
-        const f32 unit = (720.0f - 16.0f - 9.0f * 6.0f) / 12.0f;
-        const f32 tabX = 8.0f + 4.0f * (unit + 6.0f) + 2.0f * unit + 6.0f +
-                         unit * 0.5f;
-        const f32 kbTop = 1536.0f - 40.0f - 0.0f -
-                          (5.0f * 48.0f + 4.0f * 6.0f + 2.0f * 8.0f);
-        const f32 tabY = kbTop + 8.0f + 4.0f * (48.0f + 6.0f) + 24.0f;
+        vv::ime::setBottomInset(280.0f);   // o GBoard aberto (a medida real)
+        const f32 keyW = 720.0f / 14.0f;
+        const f32 barY = 1536.0f - 280.0f - 40.0f;
+        EXPECT(vv::editor::scriptwin::symPageCount(720.0f) == 2u);
         e.st.scriptWin.buf = "exist";
+        ++e.st.scriptWin.bufVersion;
         e.st.scriptWin.caret = 5;
-        e.tap(tabX, tabY, 720.0f, 1536.0f);
-        EXPECT(e.st.scriptWin.buf == "exist(){ } notexist{ }");   // o TAB
+        // a 2ª tecla é '{' (a 1ª é o seletor de página)
+        e.tap(keyW * 1.5f, barY + 20.0f, 720.0f, 1536.0f);
+        EXPECT(e.st.scriptWin.buf == "exist{");
+        // o seletor cicla 1/2 -> 2/2 (a página 2 começa em '!')
+        e.tap(keyW * 0.5f, barY + 20.0f, 720.0f, 1536.0f);
+        EXPECT(e.st.scriptWin.symPage == 1);
+        e.tap(keyW * 1.5f, barY + 20.0f, 720.0f, 1536.0f);
+        EXPECT(e.st.scriptWin.buf == "exist{!");
+        vv::ime::setBottomInset(0.0f);   // o IME fecha com a janela
     }
 }
 
@@ -856,9 +867,9 @@ TEST(scriptwin_botao_copiar_referencia_devolve_6) {
     sw::open(e.st.scriptWin, e.scene, e.tic);
 
     // o botão 📋 devolve 6 (o main põe no clipboard via JNI) — 720 portrait:
-    // docsX=504, copy em docsX-56=448
+    // 0.9.6.8 (E · header flexível): copyX=444 (lupa 500, run 560, stop 640)
     int r = 0;
-    e.input.injectDown(0, 448.0f + 24.0f, 28.0f);
+    e.input.injectDown(0, 444.0f + 24.0f, 28.0f);
     e.ui.beginFrame(nullptr, &e.input, 720.0f, 1536.0f);
     r = sw::draw(e.ui, e.input, e.st.scriptWin, 720.0f, 1536.0f, 0.0f);
     e.ui.endFrame();

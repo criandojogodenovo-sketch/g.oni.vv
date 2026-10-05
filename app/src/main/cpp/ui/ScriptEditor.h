@@ -1,35 +1,46 @@
 #pragma once
-// ui/ScriptEditor.h — EDITOR DE SCRIPT V.ONI (0.9.2 §10; FASE 9 G0-1/G0-2).
+// ui/ScriptEditor.h — EDITOR DE SCRIPT V.ONI (0.9.2 §10; FASE 9 G0-1/G0-2;
+// GRUPO E 0.9.6.8: o teclado da engine SAIU — a BARRA DE SÍMBOLOS de 40dp
+// desenha SOBRE o IME do sistema).
 //
 //   ┌──────────────────────────────────────┐
-//   │ [← 56]  Script  [🔍]    [▶ Run][■ Stop]│  ← portrait (720×1536 no C33)
-//   │ "ator · .voni" 12sp                  │
-//   ├──────┬───────────────────────────────┤
+//   │ [← 56]  Script  [?][📋][🔍] [Run][■]│  ← header FLEXÍVEL (E): os
+//   │ "ator · .voni" 12sp (some se estreito)│     botões ancoram à direita,
+//   ├──────┬───────────────────────────────┤     o título flexiona/esconde
 //   │  1   │ v#@+velocidade:Num=5.5        │  ← nºs de linha + COLORAÇÃO
 //   │  2   │ central main {                │     (classes do VoniHighlight;
 //   │  3 _ │   on moment { }               │      cores no Theme 🔶)
 //   │  …   │   allmoments { }              │
 //   ├──────┴───────────────────────────────┤
-//   │ A B C D E F G H I        │  ← TECLADO IN-APP (G0-1: o editor aceita
-//   │ J K L M N O P Q R        │     texto do teclado in-app E do IME —
-//   │ S T U V W X Y Z _        │     o mesmo applyEvent para os dois)
-//   │ 0 1 2 3 4 5 6 7 8 9      │
-//   │ [ESPACO][ABC][APAGA][ENTER][▼]       │
-//   ├──────────────────────────────────────┤
 //   │ ⚠ linha 3: 'x' é uma palavra reservada │  ← erro com LINHA (§12)
-//   └──────────────────────────────────────┘
+//   ├──────────────────────────────────────┤
+//   │ [1/3]{ } ( ) [ ] = + - *  │  ← BARRA DE SÍMBOLOS 40dp (spec E):
+//   ├──────────────────────────────────────┤     SOBRE o IME do sistema
+//   │  (o IME do Android — Gboard etc.)     │     (ime::bottomInset REAL
+//   └──────────────────────────────────────┘     medido pela VvActivity)
 //
 // O par INSEPARÁVEL 0.9.1 (portrait + IME do sistema) abre/fecha com a
 // janela — o main chama os mesmos jniSetOrientation/jniImeShow/Hide do
 // textWin.
 //
+// GRUPO E (0.9.6.8 — «header flexível; IME; barra de símbolos 40dp sobre
+// o IME (teclado da engine REMOVIDO)»): o QWERTY in-app de 280dp/54 teclas
+// SAIU (o dono digita pelo IME do sistema — acentos, gestos, dicionário);
+// no lugar dele uma BARRA FINA de 40dp com os 24 símbolos da spec V.ONI
+// (a página 123 do teclado antigo) em páginas adaptativas, dokada SOBRE o
+// IME com a medida REAL (ime::bottomInset — a VvActivity mede a faixa do
+// teclado e empurra por JNI; o caret nunca fica por baixo do teclado). As
+// teclas emitem pelo MESMO applyEvent do IME — uma única fonte de verdade.
+// A exceção do validador: teclas COMPACTAS (piso 40dp da spec E em vez do
+// 48dp da casa) — vigiada pela sentinela R-027.
+//
 // FASE 9 (G0-1 — "script fecha ao digitar"): o editor ganhou (a) CARET
 // livre (offset em bytes; Left/Right/Up/Down do IME movem; inserção/DEL no
-// caret — o modelo append-only ia ao fim e nada mais); (b) TECLADO IN-APP
-// (2 páginas ABC/123; as teclas emitem pelo MESMO applyEvent do IME —
-// uma única fonte de verdade); (c) toque no corpo = devolve 5 (o main
-// RE-PETE o IME — sem perder foco); (d) LUPA (devolve 4 — abre as Docs
-// por cima; a pesquisa filtra nome/1 linha/sintaxe/exemplo).
+// caret — o modelo append-only ia ao fim e nada mais); (b) IME DO SISTEMA
+// como teclado ÚNICO (GRUPO E: o teclado in-app de 2 páginas SAIU — a
+// barra de símbolos cobre o que o GBoard não tem); (c) toque no corpo =
+// devolve 5 (o main RE-PETE o IME — sem perder foco); (d) LUPA (devolve 4
+// — abre as Docs por cima; a pesquisa filtra nome/1 linha/sintaxe/exemplo).
 //
 // FASE 9 (G0-2 — esqueleto base): abrir um Script SEM fonte guardada
 // carrega o entry point da spec:
@@ -73,9 +84,10 @@ constexpr u64 kDocsId = 6554;   // 🔍 lupa — abre as Docs (G0-3)
 constexpr u64 kHelpLevelId = 6555; // I/N/S — nível da ajuda (0.9.5)
 constexpr u64 kCopyRefId = 6556;   // 📋 copiar referência V.ONI (0.9.5)
 constexpr u64 kFixId = 6557;   // 0.9.6 (G2-7e): botão SUBSTITUIR da barra de erro
-constexpr u64 kKbToggleId = 6558; // 0.9.6 (G3): botão do TECLADO PRÓPRIO (cabeçalho)
+constexpr u64 kSymBarPageId = 6558; // 0.9.6.8 (E): a PÁGINA da barra de símbolos
 constexpr u64 kHintStripId = 6559; // 0.9.6.1 (G2-8): a dica insere o esqueleto
-constexpr u64 kKbBase = 6560;   // teclas do teclado in-app (40 + 8 da base)
+constexpr u64 kSymKeyBase = 6560;   // 0.9.6.8 (E): as teclas da barra (≤13/página)
+// (o antigo kKbBase — as 54 teclas do teclado da engine — SAIU no Grupo E)
 
 constexpr f32 kTopH = 56.0f;    // barra de topo (padrão D)
 constexpr f32 kErrH = 40.0f;    // barra de erro (1 linha 12sp + ícone)
@@ -127,16 +139,11 @@ struct State {
     std::string errMsg;
     // true = a run do EDITOR está ativa (o botão Stop aceso)
     bool running = false;
-    // teclado in-app (G0-1): visível + página (false=letras, true=símbolos)
-    bool kbOpen = false;
-    bool kbSym = false;
-    bool kbLower = false;       // abc/ABC
-    // 0.9.6.1 (G2-6f): o LONG-PRESS nas vogais (e no c) — a tecla premida,
-    // o tempo acumulado e se a variante acentuada já saiu (o release então
-    // NÃO escreve a letra base)
-    u64 kbLongId = 0;
-    f32 kbLongT = 0.0f;
-    bool kbLongFired = false;
+    // 0.9.6.8 (GRUPO E) · A BARRA DE SÍMBOLOS: a página corrente (0-based;
+    // o nº de páginas adapta à largura — 3 no device 360dp, 2 no harness
+    // 720dp). O teclado da engine (kbOpen/kbSym/kbLower/kbLong*) SAIU — o
+    // IME do sistema é o teclado ÚNICO e a barra cobre os símbolos da spec
+    u8 symPage = 0;
     // 0.9.5 · EDITOR QUE ENSINA: o nível da ajuda (0=Iniciante com
     // exemplos, 1=Normal 1 linha, 2=Silencioso nada) + a palavra tocada
     // (o toque numa palavra mostra a explicação com exemplo — das Docs)
@@ -156,9 +163,21 @@ struct State {
 // erro; o caret segue; o erro limpa)
 void applyFix(State& st);
 
-// altura total do teclado in-app (4 linhas + linha de baixo) em dp REAL —
-// exposta para os testes/harness aférem o alvo 48dp (R-018)
-f32 keyboardHeight();
+// ---- 0.9.6.8 (GRUPO E) · A BARRA DE SÍMBOLOS (a spec: 40dp sobre o IME) ---
+// Os 22 símbolos da spec V.ONI (a página «123» do teclado antigo — TODOS
+// os que o GBoard não tem à mão: { } ( ) [ ] = + - * / < > ! , . ; : " _
+// # @); as teclas emitem pelo MESMO applyEvent do IME. A GEOMETRIA é
+// exportada (a sentinela R-027 e a FASE 13.8 aférem a barra pelo MESMO
+// caminho do draw — a lição do R-019: nunca 2 cópias).
+extern const char* const kSymbols[22];
+// a altura da barra em px REAL (40dp — a spec E; densidade aplicada)
+f32 symbolBarHeight();
+// nº de teclas visíveis (a página ADAPTA à largura: 9 no device 360dp,
+// 14 no harness 720dp — as teclas ficam sempre ≥40dp de largura)
+u32 symKeysVisible(f32 contentW);
+// nº de páginas para a largura dada (ceil(24 / (n-1)) — a 1ª tecla é a
+// própria página, o padrão «?123» do GBoard)
+u32 symPageCount(f32 contentW);
 
 // guarda o NOME do TIC dono (G0-1: o handle morre no TERM→INIT da rotação
 // portrait — o reload do INIT_WINDOW re-cria os TICs; o main re-valida por

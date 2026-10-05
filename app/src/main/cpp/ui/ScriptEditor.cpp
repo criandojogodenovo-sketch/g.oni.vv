@@ -232,387 +232,115 @@ const f32* clsColor(voni::hl::Cls c) {
     }
 }
 
-// ---- teclado in-app (G0-1) ------------------------------------------------
-//
-// 2 páginas: LETRAS (A..Z_, 0..9 — o layout clássico do teclado da casa)
-// e SÍMBOLOS (a linguagem precisa de { } ( ) " = + . etc.). As teclas
-// EMITEM ime::Event pelo MESMO applyEvent do IME — uma única fonte de
-// verdade para a edição.
-
-constexpr u32 kKbRows = 4;          // 4 linhas de teclas + a linha de baixo
-constexpr f32 kKbKeyH = 48.0f;      // alvo ≥48dp (× densidade ao desenhar — R-018)
-constexpr f32 kKbGap  = 6.0f;
-constexpr f32 kKbPad  = 8.0f;
-
-// 0.9.6.1 (G2-6e) · QWERTY — o PORQUÊ do alfabético: o teclado nasceu na
-// FASE 9 (G0-1) como uma grelha de 9 colunas preenchida A..Z por ordem (a
-// "lista de letras"), não como um teclado — nunca foi layout de digitação.
-// AGORA é QWERTY com TODAS as filas alinhadas na mesma margem (pad) e
-// teclas da MESMA largura (o dono media margens 43px vs 8px); o shift Aa
-// mora NA GRELHA (1.ª tecla da fila 1 — saía do ecrã à direita).
-// 0.9.6.1 (G2-6f): o ç/acentos entram por LONG-PRESS nas vogais e no c.
-const char* const kKbLetters[kKbRows][10] = {
-    {"Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"},
-    {nullptr, "A", "S", "D", "F", "G", "H", "J", "K", "L"},  // 0 = Aa (shift)
-    {"Z", "X", "C", "V", "B", "N", "M", "_", nullptr, nullptr},
-    {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"},
-};
-// a página 123 (G2-6f): { } ( ) [ ] = + - * / < > ! , . ; : " _ # @ TODOS
-// presentes (a spec exige) + os extras que a linguagem usa
-const char* const kKbSymbols[kKbRows][10] = {
-    {"{", "}", "(", ")", "[", "]", "=", "+", "-", "*"},
-    {"/", "<", ">", "!", ",", ".", ";", ":", "\"", "_"},
-    {"#", "@", "$", "%", "&", "|", "~", "^", "\\", "'"},
-    {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"},
-};
-// as VARIANTES do long-press (a 1ª premida longa dá a 1ª; repetindo o
-// tempo, cicla) — a casa livre (nullptr) fica com a letra base
-struct LongPressVariants {
-    const char* key;        // a letra base (minúscula)
-    const char* variants;   // acentos, um por tecla (cicla)
-};
-const LongPressVariants kKbLong[6] = {
-    {"a", "\xC3\x81\xC3\x83\xC3\x80\xC3\x82"},   // Á Ã À Â
-    {"e", "\xC3\x89\xC3\x8A"},                        // É Ê
-    {"i", "\xC3\x8D"},                                  // Í
-    {"o", "\xC3\x93\xC3\x95\xC3\x94"},              // Ó Õ Ô
-    {"u", "\xC3\x9A"},                                  // Ú
-    {"c", "\xC3\x87"},                                  // Ç
-};
-
-// 0.9.6.1 (G2-6f) — a VARIANTE do long-press (vogais + c): a tabela por
-// letra base, MAIÚSCULA e minúscula (o acento acompanha o caso da tecla);
-// idx cicla enquanto o dedo fica premido
-const char* longVariant(char baseLower, u32 idx, bool lower) {
-    static const char* const kUpper[] = {"Á", "Ã", "À", "Â", "É", "Ê",
-                                         "Í", "Ó", "Õ", "Ô", "Ú", "Ç"};
-    static const char* const kLower[] = {"á", "ã", "à", "â", "é", "ê",
-                                         "í", "ó", "õ", "ô", "ú", "ç"};
-    struct Map {
-        char key;      // a letra base
-        u8  first;     // índice da 1.ª variante (minúscula / maiúscula)
-        u8  count;
-    };
-    static const Map kMap[6] = {
-        {'a', 0, 4}, {'e', 4, 2}, {'i', 6, 1},
-        {'o', 7, 3}, {'u', 10, 1}, {'c', 11, 1},
-    };
-    for (const Map& m : kMap) {
-        if (m.key == baseLower) {
-            const u32 k = idx % m.count;
-            return lower ? kLower[m.first + k] : kUpper[m.first + k];
-        }
-    }
-    return nullptr;
-}
-
-// o label da tecla (página corrente; lower aplica-se só às letras)
-const char* keyLabel(const State& st, u32 row, u32 col) {
-    const char* s = st.kbSym ? kKbSymbols[row][col] : kKbLetters[row][col];
-    if (!s) {
-        return "";
-    }
-    if (!st.kbSym && st.kbLower && s[0] >= 'A' && s[0] <= 'Z' &&
-        s[1] == '\0') {
-        static const char* kLower[26] = {"a", "b", "c", "d", "e", "f", "g",
-                                         "h", "i", "j", "k", "l", "m", "n",
-                                         "o", "p", "q", "r", "s", "t", "u",
-                                         "v", "w", "x", "y", "z"};
-        return kLower[s[0] - 'A'];
-    }
-    return s;
-}
-
-// desenha o teclado DOKADO no fundo (acima da barra de erro; acima do
-// INSET DE BAIXO desde 0.9.6 — a última tecla nunca fica sob a barra de
-// navegação); devolve true se alguma tecla EMITIU texto (para o log)
-bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop, f32 dt) {
-    // 0.9.6 (G1/G3): o teclado vive DENTRO do contentRect (laterais)
-    // 0.9.6.1 (PASSO 0): keyH/gap/pad em dp REAL (o dono media teclas
-    // 48×65 px no device — metade do pedido)
-    const safe::Insets ins = ui.safeArea();
-    const f32 kbX = ins.left;
-    const f32 kbW = w - ins.left - ins.right;
-    const f32 keyH = theme::dp(kKbKeyH);
-    const f32 gap = theme::dp(kKbGap);
-    const f32 pad = theme::dp(kKbPad);
-    const f32 innerW = kbW - 2.0f * pad;
-    const f32 keyW = (innerW - 9.0f * gap) / 10.0f;
-
-    // painel do teclado (surface com risca superior)
-    ui.panel(kbX, kbTop, kbW, keyboardHeight(), theme::kTheme.surface);
-    ui.panel(kbX, kbTop, kbW, 1.0f, theme::kTheme.border);
-
-    bool typed = false;
-    f32 y = kbTop + pad;
-    for (u32 row = 0; row < kKbRows; ++row) {
-        // 0.9.6.1 (G2-6a): TODAS as filas começam na MESMA margem (pad) e
-        // usam a MESMA largura de tecla — o dono media margens 43px vs 8px
-        f32 x = kbX + pad;
-        for (u32 col = 0; col < 10; ++col) {
-            const u64 id = kKbBase + static_cast<u64>(row) * 10u +
-                           static_cast<u64>(col);
-            // 0.9.6.1 (G2-6b) · O SHIFT Aa NA GRELHA (fila 1, 1.ª casa):
-            // cabia inteiro à força (na casa livre da fila de 9 saía do
-            // ecrã à direita); alterna maiúsculas/minúsculas — não escreve
-            if (row == 1 && col == 0) {
-                const bool caps = !st.kbLower;
-                const bool held = ui.widgetActive(id);
-                ui.panelRounded(x, y, keyW, keyH,
-                                theme::dp(theme::kRadiusCard),
-                                held ? theme::kTheme.surface2
-                                     : (caps ? theme::kTheme.accent
-                                             : theme::kTheme.surface));
-                ui.frameRounded(x, y, keyW, keyH, 1.0f,
-                                theme::dp(theme::kRadiusCard),
-                                caps ? theme::kTheme.accent
-                                     : theme::kTheme.border);
-                if (ui.hasFont()) {
-                    const f32 tw = ui.fontWidth("Aa");
-                    ui.label(x + (keyW - tw) * 0.5f,
-                             theme::centeredBaseline(
-                                 ui.textMetrics().ascent,
-                                 ui.textMetrics().descent, y, keyH, 12.0f),
-                             "Aa", caps ? theme::kTheme.bg
-                                        : theme::kTheme.text1);
-                }
-                if (ui.widgetHit(id, x, y, keyW, keyH)) {
-                    st.kbLower = !st.kbLower;   // troca de caso — NÃO escreve
-                }
-                x += keyW + gap;
-                continue;
-            }
-            const char* lbl = keyLabel(st, row, col);
-            if (!lbl || !lbl[0]) {
-                x += keyW + gap;   // casa livre (fila curta) — mantém a grelha
-                continue;
-            }
-            // 0.9.6.1 (G2-6f) · O LONG-PRESS (vogais + c): a variante
-            // acentuada sai a 0,5s e cicla enquanto o dedo fica premido;
-            // o release então NÃO escreve a letra base
-            const bool held = ui.widgetActive(id);
-            if (held && !st.kbSym && row != 3) {
-                if (st.kbLongId != id) {
-                    st.kbLongId = id;
-                    st.kbLongT = 0.0f;
-                    st.kbLongFired = false;
-                } else {
-                    st.kbLongT += dt;
-                    if (st.kbLongT >= 0.5f) {
-                        static u32 s_longIdx[40] = {};
-                        const u32 slot = row * 10u + col;
-                        if (const char* v = longVariant(
-                                lbl[0] >= 'A' && lbl[0] <= 'Z'
-                                    ? static_cast<char>(lbl[0] - 'A' + 'a')
-                                    : lbl[0],
-                                s_longIdx[slot]++, st.kbLower)) {
-                            ime::Event ev;
-                            ev.isText = true;
-                            ev.text = v;
-                            applyEvent(st, ev);
-                            typed = true;
-                        }
-                        st.kbLongFired = true;
-                        st.kbLongT = 0.0f;
-                    }
-                }
-            }
-            if (ui.button(id, x, y, keyW, keyH, lbl)) {
-                if (st.kbLongFired && st.kbLongId == id) {
-                    st.kbLongFired = false;   // a variante já saiu — o
-                                              // release não repete
-                } else {
-                    ime::Event ev;
-                    ev.isText = true;
-                    ev.text = lbl;
-                    applyEvent(st, ev);
-                    typed = true;
-                }
-            }
-            x += keyW + gap;
-        }
-        y += keyH + gap;
-    }
-
-    // 0.9.6 (G3) — a linha de baixo COM SETAS (a spec: setas, apagar,
-    // enter, espaço): [<][^][v][>][ESPACO 2u][TAB][PAG][APAGA 1.5u][ENTER
-    // 1.5u][FECHAR] = 12u + 9g — as teclas continuam >=48dp (1u ~= 54px no
-    // retrato 720). As setas EMITEM as Key do IME (o MESMO applyEvent — o
-    // caret move-se pelo caminho de sempre; o ^/v sobem/descem linha)
-    const f32 unit = (innerW - 9.0f * gap) / 12.0f;
-    f32 x = kbX + pad;
-    // as SETAS (labels ASCII — o atlas é o da casa; "<" "^" "v" ">")
-    {
-        struct ArrowKey {
-            const char* lbl;
-            ime::Key key;
-        };
-        const ArrowKey arrows[4] = {
-            {"<", ime::Key::Left},  {"^", ime::Key::Up},
-            {"v", ime::Key::Down},  {">", ime::Key::Right},
-        };
-        for (int a = 0; a < 4; ++a) {
-            if (ui.button(kKbBase + 50 + static_cast<u64>(a), x, y, unit,
-                          keyH, arrows[a].lbl)) {
-                ime::Event ev;
-                ev.isText = false;
-                ev.key = arrows[a].key;
-                applyEvent(st, ev);
-                typed = true;
-            }
-            x += unit + gap;
-        }
-    }
-    // 0.9.6.6 (GRUPO C): o ESPACO desenha-se à mão como o TAB — o rótulo a
-    // 12sp CAPTION (o ui.button() de CORPO truncava "ESPACO…" na tecla de
-    // 2 unidades: largura inteira 104px > 92 úteis; a 12sp cabe com folga
-    // em QUALQUER densidade — o aviso de truncagem medido pelo Grupo B)
-    {
-        const UiRect rs{x, y, 2.0f * unit, keyH};
-        const bool pressed = ui.widgetHit(kKbBase + 40, rs.x, rs.y, rs.w,
-                                          rs.h);
-        const bool held = ui.widgetActive(kKbBase + 40);
-        ui.panelRounded(rs.x, rs.y, rs.w, rs.h,
-                        theme::dp(theme::kRadiusCard),
-                        held ? theme::kTheme.surface2 : theme::kTheme.surface);
-        ui.frameRounded(rs.x, rs.y, rs.w, rs.h, 1.0f,
-                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
-        ui.labelStyled(rs.x + (rs.w - ui.fontWidth("ESPACO") *
-                                          (theme::kFontCaption / 14.0f)) * 0.5f,
-                       theme::centeredBaseline(ui.textMetrics().ascent,
-                                               ui.textMetrics().descent,
-                                               rs.y, rs.h, 12.0f),
-                       "ESPACO", theme::kTheme.text1,
-                       theme::fontScale(theme::kFontCaption), 0);
-        if (pressed) {
-            ime::Event ev;
-            ev.isText = true;
-            ev.text = " ";
-            applyEvent(st, ev);
-            typed = true;
-        }
-    }
-    x += 2.0f * unit + gap;
-    // 0.9.5 · TAB: os ESQUELETOS do editor que ensina (o mesmo applyEvent
-    // do IME — a tecla Tab do GBoard chega aqui pela fila)
-    {
-        const UiRect rt{x, y, unit, keyH};
-        const bool pressed = ui.widgetHit(kKbBase + 45, rt.x, rt.y, rt.w, rt.h);
-        const bool held = ui.widgetActive(kKbBase + 45);
-        ui.panelRounded(rt.x, rt.y, rt.w, rt.h, theme::dp(theme::kRadiusCard),
-                        held ? theme::kTheme.surface2
-                             : theme::kTheme.surface);
-        ui.frameRounded(rt.x, rt.y, rt.w, rt.h, 1.0f,
-                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
-        ui.labelStyled(rt.x + (rt.w - ui.fontWidth("TAB") *
-                                          (theme::kFontCaption / 14.0f)) * 0.5f,
-                       theme::centeredBaseline(ui.textMetrics().ascent,
-                                               ui.textMetrics().descent,
-                                               rt.y, rt.h, 12.0f),
-                       "TAB",
-                       theme::kTheme.accent,
-                       theme::fontScale(theme::kFontCaption), 0);
-        if (pressed) {
-            ime::Event ev;
-            ev.isText = false;
-            ev.key = ime::Key::Tab;
-            applyEvent(st, ev);
-            typed = true;
-        }
-    }
-    x += unit + gap;
-    {
-        char pg[8];
-        std::snprintf(pg, sizeof(pg), "%s", st.kbSym ? "ABC" : "123");
-        if (ui.button(kKbBase + 41, x, y, unit, keyH, pg)) {
-            st.kbSym = !st.kbSym;   // troca de página — NÃO escreve
-        }
-    }
-    x += unit + gap;
-    {
-        // 0.9.6.1 (G2-6c): a tecla APAGA é o ÍCONE Erase (o rótulo
-        // "APAGA" truncava a "APA…" na tecla de 1,5 unidades)
-        const UiRect re{x, y, 1.5f * unit, keyH};
-        const bool pressed = ui.widgetHit(kKbBase + 42, re.x, re.y, re.w,
-                                          re.h);
-        const bool held = ui.widgetActive(kKbBase + 42);
-        ui.panelRounded(re.x, re.y, re.w, re.h,
-                        theme::dp(theme::kRadiusCard),
-                        held ? theme::kTheme.surface2
-                             : theme::kTheme.surface);
-        ui.frameRounded(re.x, re.y, re.w, re.h, 1.0f,
-                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
-        icons::drawIcon(ui, icons::Icon::Erase,
-                        re.x + (re.w - theme::dp(24.0f)) * 0.5f,
-                        re.y + (re.h - theme::dp(24.0f)) * 0.5f,
-                        theme::dp(24.0f), theme::kTheme.text1);
-        if (pressed) {
-            ime::Event ev;
-            ev.isText = false;
-            ev.key = ime::Key::Del;
-            applyEvent(st, ev);
-            typed = true;
-        }
-    }
-    x += 1.5f * unit + gap;
-    // 0.9.6.6 (GRUPO C): o ENTER à mão como o TAB/ESPACO — o rótulo a 12sp
-    // CAPTION (o ui.button() de CORPO truncava "ENTE…" na tecla de 1,5
-    // unidades: largura inteira 85px > 60 úteis; a 12sp cabe)
-    {
-        const UiRect re2{x, y, 1.5f * unit, keyH};
-        const bool pressed = ui.widgetHit(kKbBase + 43, re2.x, re2.y,
-                                          re2.w, re2.h);
-        const bool held = ui.widgetActive(kKbBase + 43);
-        ui.panelRounded(re2.x, re2.y, re2.w, re2.h,
-                        theme::dp(theme::kRadiusCard),
-                        held ? theme::kTheme.surface2 : theme::kTheme.surface);
-        ui.frameRounded(re2.x, re2.y, re2.w, re2.h, 1.0f,
-                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
-        ui.labelStyled(re2.x + (re2.w - ui.fontWidth("ENTER") *
-                                           (theme::kFontCaption / 14.0f)) *
-                              0.5f,
-                       theme::centeredBaseline(ui.textMetrics().ascent,
-                                               ui.textMetrics().descent,
-                                               re2.y, re2.h, 12.0f),
-                       "ENTER", theme::kTheme.text1,
-                       theme::fontScale(theme::kFontCaption), 0);
-        if (pressed) {
-            ime::Event ev;
-            ev.isText = false;
-            ev.key = ime::Key::Enter;
-            applyEvent(st, ev);
-            typed = true;
-        }
-    }
-    x += 1.5f * unit + gap;
-    {
-        // FECHAR o teclado (o ChevronDown ocupa a última unidade)
-        const UiRect r{x, y, unit, keyH};
-        const bool pressed = ui.widgetHit(kKbBase + 44, r.x, r.y, r.w, r.h);
-        const bool held = ui.widgetActive(kKbBase + 44);
-        ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusCard),
-                        held ? theme::kTheme.surface2
-                             : theme::kTheme.surface);
-        ui.frameRounded(r.x, r.y, r.w, r.h, 1.0f,
-                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
-        icons::drawIcon(ui, icons::Icon::ChevronDown,
-                        r.x + (r.w - theme::dp(24.0f)) * 0.5f,
-                        r.y + (r.h - theme::dp(24.0f)) * 0.5f,
-                        theme::dp(24.0f), theme::kTheme.text1);
-        if (pressed) {
-            st.kbOpen = false;
-        }
-    }
-    return typed;
-}
-
 } // namespace
 
-// altura total do teclado (4 linhas + linha de baixo) — medidas em dp REAL
-// (0.9.6.1 · PASSO 0: o dono media teclas 48px de altura no device)
-f32 keyboardHeight() {
-    return 5.0f * theme::dp(kKbKeyH) + 4.0f * theme::dp(kKbGap) +
-           2.0f * theme::dp(kKbPad);
+// ----------------------------------------------------------------------------
+// 0.9.6.8 (GRUPO E) · A BARRA DE SÍMBOLOS — o substituto do teclado da engine
+// ----------------------------------------------------------------------------
+// O rastreador E manda: «barra de símbolos 40dp sobre o IME (teclado da
+// engine REMOVIDO)». O QWERTY in-app de 280dp/54 teclas (0.9.6.1 G2-6,
+// FASE 9 G0-1) SAIU — o dono digita pelo IME DO SISTEMA (GBoard: acentos,
+// gestos, dicionário, deslizante) e a BARRA cobre o que o GBoard NÃO tem
+// à mão: os 22 símbolos da spec V.ONI (a página «123» do teclado antigo —
+// { } ( ) [ ] = + - * / < > ! , . ; : " _ # @ TODOS, como a spec exigia).
+//
+// A barra desenha SOBRE o IME (dokada na faixa que a VvActivity MEDE —
+// ime::bottomInset, o rootHeight−visibleFrame.bottom da janela) e as
+// teclas emitem pelo MESMO applyEvent do IME: uma única fonte de verdade
+// para a edição (o contrato do teclado antigo, mantido).
+//
+// A PÁGINA adaptativa: a 1ª tecla é o SELETOR (o padrão «?123» do GBoard,
+// à esquerda) mostrando «1/3»; as restantes são símbolos. O nº de teclas
+// visíveis adapta à largura (9 no device 360dp, 14 no harness 720dp) — as
+// teclas ficam SEMPRE ≥40dp de largura e a barra é EXATAMENTE 40dp (a
+// spec E; a exceção compacta do validador, vigiada pela sentinela R-027).
+// ----------------------------------------------------------------------------
+
+// os 22 símbolos da spec (a página 123 do teclado antigo, SEM os extras
+// $ % & | ~ ^ \ ' — o GBoard já os tem na própria página de símbolos):
+// { } ( ) [ ] = + - * / < > ! , . ; : " _ # @ — TODOS, como a spec exigia
+const char* const kSymbols[22] = {
+    "{", "}", "(", ")", "[", "]", "=", "+", "-", "*",
+    "/", "<", ">", "!", ",", ".", ";", ":", "\"", "_",
+    "#", "@",
+};
+
+f32 symbolBarHeight() {
+    return theme::dp(40.0f);   // a spec E (a R-027 recalibra a R-018: o
+                               // teclado de 48dp/tecla morreu com o teclado)
+}
+
+u32 symKeysVisible(f32 contentW) {
+    // teclas de >=40dp de largura: quantas cabem (piso 9, teto 14 — no
+    // device 360dp dá 9 exato; no harness 720dp o teto evita «baías»)
+    const f32 minKey = theme::dp(40.0f);
+    u32 n = static_cast<u32>(contentW / minKey);
+    if (n < 9) {
+        n = 9;
+    }
+    if (n > 14) {
+        n = 14;
+    }
+    return n;
+}
+
+u32 symPageCount(f32 contentW) {
+    const u32 perPage = symKeysVisible(contentW) - 1;   // a 1ª é o seletor
+    return (22u + perPage - 1u) / perPage;              // ceil(22/perPage)
+}
+
+// desenha a barra dokada SOBRE o IME (y = o TOPO da barra); devolve true
+// se alguma tecla EMITIU texto (o log de cada símbolo sai AQUI)
+bool drawSymbolBar(UiContext& ui, State& st, f32 w, f32 y) {
+    const safe::Insets ins = ui.safeArea();
+    const f32 contentW = w - ins.left - ins.right;
+    const f32 barH = symbolBarHeight();
+    const u32 nVis = symKeysVisible(contentW);
+    const f32 keyW = contentW / static_cast<f32>(nVis);
+    const u32 perPage = nVis - 1;
+    const u32 nPages = symPageCount(contentW);
+    if (st.symPage >= nPages) {
+        st.symPage = 0;   // a largura mudou (rotação/drag) — recomeça
+    }
+
+    // a faixa da barra (surface com risca no topo — a linguagem visual
+    // do teclado antigo, agora a 40dp)
+    ui.panel(ins.left, y, contentW, barH, theme::kTheme.surface);
+    ui.panel(ins.left, y, contentW, 1.0f, theme::kTheme.border);
+
+    f32 x = ins.left;
+    // A TECLA DO SELETOR (a 1ª — o padrão «?123» do GBoard): «1/3»
+    {
+        char pg[8];
+        std::snprintf(pg, sizeof(pg), "%u/%u", st.symPage + 1, nPages);
+        if (ui.buttonCompact(kSymBarPageId, x, y, keyW, barH, pg)) {
+            st.symPage = static_cast<u8>((st.symPage + 1) % nPages);
+            elog::info("editor: barra de simbolos -> pagina %u/%u",
+                       st.symPage + 1, nPages);
+        }
+        x += keyW;
+    }
+    // as TECLAS dos símbolos da página corrente
+    bool typed = false;
+    const u32 first = st.symPage * perPage;
+    for (u32 k = 0; k < perPage; ++k) {
+        const u32 idx = first + k;
+        if (idx >= 22) {
+            break;   // a última página pode ser curta
+        }
+        if (ui.buttonCompact(kSymKeyBase + static_cast<u64>(k), x, y, keyW,
+                             barH, kSymbols[idx])) {
+            ime::Event ev;
+            ev.isText = true;
+            ev.text = kSymbols[idx];
+            applyEvent(st, ev);   // o MESMO caminho do IME — fonte única
+            typed = true;
+            elog::info("editor: simbolo '%s' pela barra (pagina %u)",
+                       kSymbols[idx], st.symPage + 1);
+        }
+        x += keyW;
+    }
+    return typed;
 }
 
 void rememberTicName(State& st, const Scene& scene) {
@@ -648,9 +376,7 @@ void open(State& st, Scene& scene, Handle tic) {
     st.errLine = 0;
     st.errMsg.clear();
     st.running = false;
-    st.kbOpen = false;
-    st.kbSym = false;
-    st.kbLower = false;
+    st.symPage = 0;   // 0.9.6.8 (E): a barra de símbolos recomeça na 1ª página
     // carrega o fonte do componente (se existir); SEM fonte guardada abre
     // com o ESQUELETO base e o cursor NO INTERIOR (G0-2)
     bool loaded = false;
@@ -1000,29 +726,53 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         result = 1;
     }
 
-    // título 20sp + hint 12sp (na parte útil — sem corte)
-    // 0.9.6.1: título+subtítulo CENTRADOS no cabeçalho pelas métricas reais
-    // (o corte do topo eram as baselines fixas 29/51 px)
+    // ---- 0.9.6.8 (GRUPO E) · O HEADER FLEXÍVEL -------------------------------
+    // O header ANTIGO media os botões a partir da LUPA (docsX−200/−152/−56):
+    // no device portrait (360dp de conteúdo) o botão do nível ficava a
+    // −56dp e o do teclado a −8dp — DOIS botões FORA DO ECRÃ (invisíveis e
+    // intocáveis; a medição do Grupo E). O layout novo ancora OS BOTÕES À
+    // DIREITA (Stop, Run, lupa, copiar, nível — nesta ordem, da direita)
+    // e o TÍTULO FLEXIONA com o que sobra: o subtítulo some primeiro
+    // (zona < 120dp), o título por último (zona < 48dp — no device 360dp
+    // o header é Back + 5 botões, ZERO sobreposição). Os alvos NUNCA
+    // encolhem: 48dp de altura sempre; Run/Stop 72dp nos largos e 48dp
+    // (o rótulo cabe) nos estreitos (< 420dp) — o padrão da top bar do
+    // Grupo D: os ícones inteiros, o k divide só o texto.
+    const f32 hdrBtnY = topY + (hdrH - theme::dp(48.0f)) * 0.5f;
+    const f32 hdrBtnH = theme::dp(48.0f);
+    const bool narrow = contentW < theme::dp(420.0f);
+    const f32 actionW = narrow ? theme::dp(48.0f) : theme::dp(72.0f);
+    const f32 stopX = ins.left + contentW - theme::dp(8.0f) - actionW;
+    const f32 runX = stopX - theme::dp(8.0f) - actionW;
+    const f32 lupaX = runX - theme::dp(12.0f) - theme::dp(48.0f);
+    const f32 copyX = lupaX - theme::dp(8.0f) - theme::dp(48.0f);
+    const f32 helpX = copyX - theme::dp(8.0f) - theme::dp(48.0f);
+    const f32 titleX = ins.left + hdrH + theme::dp(8.0f);
+    const f32 titleW = helpX - theme::dp(8.0f) - titleX;
+
+    // título 20sp + hint 12sp — SÓ se a zona aguenta (o header flexível:
+    // 120dp para os dois, 48dp só para o título; menos = só botões)
     {
         const TextMetrics m = ui.textMetrics();
         const theme::HeaderBaselines hb =
             theme::headerBaselines(m.ascent, m.descent, hdrH);
-        ui.labelStyled(ins.left + hdrH + theme::dp(8.0f), topY + hb.title,
-                       "Script", theme::kTheme.text1,
-                       theme::fontScale(theme::kFontScreen), 0);
-        ui.labelStyled(ins.left + hdrH + theme::dp(8.0f), topY + hb.sub,
-                       "V.ONI · .voni", theme::kTheme.text2,
-                       theme::fontScale(theme::kFontCaption), 0);
+        if (titleW >= theme::dp(48.0f)) {
+            ui.labelFittedStyled(titleX, topY + hb.title, "Script",
+                                 theme::kTheme.text1,
+                                 titleW > 0.0f ? titleW : 1.0f,
+                                 theme::fontScale(theme::kFontScreen), 0);
+        }
+        if (titleW >= theme::dp(120.0f)) {
+            ui.labelStyled(titleX, topY + hb.sub, "V.ONI · .voni",
+                           theme::kTheme.text2,
+                           theme::fontScale(theme::kFontCaption), 0);
+        }
     }
 
     // LUPA (G0-3): abre as Docs POR CIMA (a pesquisa filtra as entradas
     // estruturadas e mostra o exemplo). Alvo 48dp.
     {
-        const f32 docsX = ins.left + contentW - theme::dp(72.0f) * 2.0f -
-                          theme::dp(16.0f) - theme::dp(8.0f) -
-                          theme::dp(48.0f);
-        const UiRect r{docsX, topY + (hdrH - theme::dp(48.0f)) * 0.5f,
-                       theme::dp(48.0f), theme::dp(48.0f)};
+        const UiRect r{lupaX, hdrBtnY, theme::dp(48.0f), theme::dp(48.0f)};
         const bool held = ui.widgetActive(kDocsId);
         ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusCard),
                         held ? theme::kTheme.surface2
@@ -1039,9 +789,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
 
         // 0.9.5 · COPIAR REFERÊNCIA (📋): a referência V.ONI COMPLETA como
         // texto colável p/ IAs — o main põe no clipboard via JNI (result 6)
-        const UiRect rc{docsX - theme::dp(56.0f),
-                        topY + (hdrH - theme::dp(48.0f)) * 0.5f,
-                        theme::dp(48.0f), theme::dp(48.0f)};
+        const UiRect rc{copyX, hdrBtnY, theme::dp(48.0f), theme::dp(48.0f)};
         const bool heldC = ui.widgetActive(kCopyRefId);
         ui.panelRounded(rc.x, rc.y, rc.w, rc.h, theme::dp(theme::kRadiusCard),
                         heldC ? theme::kTheme.surface2
@@ -1056,57 +804,21 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
             result = 6;
         }
 
-        // 0.9.6 (G3) · O BOTÃO DO TECLADO PRÓPRIO: acende quando o teclado
-        // está aberto; tocar ABRE o teclado in-app e ESCONDE o IME do
-        // sistema (a POLÍTICA: os dois são ALTERNATIVAS — nunca um por
-        // cima do outro; o toque no corpo pede o IME do sistema e fecha o
-        // teclado próprio)
-        {
-            const UiRect rk{docsX - theme::dp(152.0f),
-                            topY + (hdrH - theme::dp(48.0f)) * 0.5f,
-                            theme::dp(48.0f), theme::dp(48.0f)};
-            const bool heldK = ui.widgetActive(kKbToggleId);
-            ui.panelRounded(rk.x, rk.y, rk.w, rk.h,
-                            theme::dp(theme::kRadiusCard),
-                            st.kbOpen ? theme::kTheme.accent
-                                      : (heldK ? theme::kTheme.surface2
-                                               : theme::kTheme.surface));
-            ui.frameRounded(rk.x, rk.y, rk.w, rk.h, 1.0f,
-                            theme::dp(theme::kRadiusCard),
-                            st.kbOpen ? theme::kTheme.accent
-                                      : theme::kTheme.border);
-            icons::drawIcon(ui, icons::Icon::Keyboard,
-                            rk.x + (rk.w - theme::dp(24.0f)) * 0.5f,
-                            rk.y + (rk.h - theme::dp(24.0f)) * 0.5f,
-                            theme::dp(24.0f),
-                            st.kbOpen ? theme::kTheme.bg
-                                      : theme::kTheme.text1);
-            if (ui.widgetHit(kKbToggleId, rk.x, rk.y, rk.w, rk.h)) {
-                if (!st.kbOpen) {
-                    st.kbOpen = true;
-                    result = 7;   // o main esconde o IME do sistema
-                } else {
-                    st.kbOpen = false;
-                }
-            }
-        }
+        // (0.9.6 G3 · O BOTÃO DO TECLADO PRÓPRIO SAIU no Grupo E — o
+        // teclado da engine morreu com ele; o IME do sistema é o ÚNICO
+        // teclado e a BARRA DE SÍMBOLOS cobre a página 123)
 
         // 0.9.5 · O NÍVEL DA AJUDA (I/N/S): Iniciante (desc+exemplo) ·
         // Normal (desc) · Silencioso (nada) — um toque cicla
-        const UiRect rl{docsX - theme::dp(200.0f),
-                        topY + (hdrH - theme::dp(48.0f)) * 0.5f,
-                        theme::dp(48.0f), theme::dp(48.0f)};
+        const UiRect rl{helpX, hdrBtnY, theme::dp(48.0f), theme::dp(48.0f)};
         const bool heldL = ui.widgetActive(kHelpLevelId);
         ui.panelRounded(rl.x, rl.y, rl.w, rl.h, theme::dp(theme::kRadiusCard),
                         heldL ? theme::kTheme.surface2
                               : theme::kTheme.surface);
         ui.frameRounded(rl.x, rl.y, rl.w, rl.h, 1.0f,
                         theme::dp(theme::kRadiusCard), theme::kTheme.border);
-        // 0.9.6.1 (G1-1): o botão do NÍVEL DA AJUDA (I/N/S) tinha SÓ a
-        // letra — o dono não sabia o que fazia (pediu: "diz-me o que faz e
-        // dá-lhe um ícone"). O que faz: cicla o nível da ajuda — Iniciante
-        // (descrição + exemplo), Normal (1 linha), Silencioso (nada). O
-        // ícone Question = "ajuda"; aceso (accent) quando ela aparece.
+        // 0.9.6.1 (G1-1): o ícone Question = "ajuda"; aceso (accent)
+        // quando ela aparece
         const f32 iq = theme::dp(24.0f);
         icons::drawIcon(ui, icons::Icon::Question,
                         rl.x + (rl.w - iq) * 0.5f,
@@ -1118,12 +830,11 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         }
     }
 
-    // RUN / STOP 48dp à direita (alvos ≥48; estado: running aceso = Stop)
-    const f32 btnW = theme::dp(72.0f);
-    const f32 runX = ins.left + contentW - btnW * 2.0f - theme::dp(16.0f);
-    const f32 stopX = ins.left + contentW - btnW - theme::dp(8.0f);
-    const f32 btnY = topY + (hdrH - theme::dp(48.0f)) / 2.0f;
-    const f32 btnH = theme::dp(48.0f);
+    // RUN / STOP à direita (alvos ≥48 SEMPRE; 72dp nos largos, 48dp nos
+    // estreitos — o rótulo cabe; estado: running aceso = Stop)
+    const f32 btnW = actionW;
+    const f32 btnY = hdrBtnY;
+    const f32 btnH = hdrBtnH;
     const bool running = st.running;
     // Run: accent quando disponível; esbatido enquanto corre
     ui.panelRounded(runX, btnY, btnW, btnH, theme::dp(theme::kRadiusCard),
@@ -1153,7 +864,17 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
 
     // ---- corpo: nºs de linha + código colorido em scroll -------------------
     const f32 errBarH = st.errLine ? theme::dp(kErrH) : 0.0f;
-    const f32 kbH = st.kbOpen ? keyboardHeight() : 0.0f;
+    // 0.9.6.8 (GRUPO E) · O LIMITE DE BAIXO É O IME REAL: o inset medido
+    // pela VvActivity (ime::bottomInset — rootHeight−visibleFrame.bottom)
+    // diz ONDE o teclado do Android está; o corpo, a strip, a barra de
+    // erro e a BARRA DE SÍMBOLOS param TODOS acima dele (o caret nunca
+    // fica por baixo do teclado — o defeito do textWin 0.9.1 corrigido
+    // na raiz). O inset JÁ inclui a nav bar quando o IME está aberto —
+    // não se soma ins.bottom (senão desconta 2×); fechado, o limite é o
+    // de sempre (h − ins.bottom: layout PIXEL-IGUAL ao Grupo D).
+    const f32 imeIns = ime::bottomInset();
+    const f32 bottomLim = imeIns > 0.0f ? (h - imeIns) : (h - ins.bottom);
+    const f32 symH = imeIns > 0.0f ? symbolBarHeight() : 0.0f;
     // 0.9.5: a STRIP FINA DE AJUDA junto à barra de erro — a mini-descrição
     // em tempo real (DESDE A 1ª LETRA da palavra a meio da digitação) ou a
     // explicação do toque (com exemplo); SEM ENCHER O ECRÃ (some quando
@@ -1166,7 +887,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
             ? 0.0f
             : (strip2.empty() ? theme::dp(kHelpStripH) : theme::dp(kHelpStrip2H));
     const UiRect body{ins.left, topY + hdrH, contentW,
-                      h - ins.bottom - (topY + hdrH) - errBarH - kbH - stripH};
+                      bottomLim - (topY + hdrH) - errBarH - symH - stripH};
     const f32 lh = lineHeight(ui);
     const std::vector<u32>& lineIdx = ensureLineIndex(st);
     const u32 nLines = static_cast<u32>(lineIdx.size());
@@ -1321,12 +1042,12 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     }
     ui.endScroll();
 
-    // ---- teclado in-app (G0-1): dokado no fundo (ACIMA do inset de baixo
-    // desde 0.9.6 — nunca sob a barra de navegação), acima da strip de ajuda
-    if (st.kbOpen) {
-        drawKeyboard(ui, st, w,
-                     h - ins.bottom - errBarH - stripH - keyboardHeight(),
-                     dt);
+    // ---- 0.9.6.8 (GRUPO E) · A BARRA DE SÍMBOLOS SOBRE O IME -----------------
+    // Dokada no limite REAL do teclado do sistema (a faixa de 40dp da
+    // spec E, com os 24 símbolos da linguagem em páginas adaptativas). O
+    // teclado da engine (280dp/54 teclas) SAIU — o rastreador E manda.
+    if (symH > 0.0f) {
+        drawSymbolBar(ui, st, w, bottomLim - symH);
     }
 
     // ---- a STRIP DE AJUDA (0.9.5): entre o teclado e a barra de erro ----
@@ -1336,7 +1057,9 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     // palavra (o mesmo Tab do editor que ensina). A faixa fica ACIMA do
     // teclado e FORA da área do código (o corpo já lhe dá a altura).
     if (stripH > 0.0f) {
-        const f32 stripY = h - ins.bottom - errBarH - kbH - stripH;
+        // 0.9.6.8 (GRUPO E): a strip sobe com o IME (acima da barra de
+        // erro, que por sua vez está acima da barra de símbolos)
+        const f32 stripY = bottomLim - symH - errBarH - stripH;
         ui.panel(ins.left, stripY, contentW, stripH, theme::kTheme.surface);
         ui.panel(ins.left, stripY, contentW, 1.0f, theme::kTheme.border);
         ui.panel(ins.left, stripY + 1.0f, theme::dp(3.0f), stripH - 1.0f,
@@ -1403,7 +1126,9 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
 
     // ---- barra de ERRO com linha + mensagem (§12) + SUBSTITUIR (G2-7e) ----
     if (st.errLine) {
-        const f32 errY = h - ins.bottom - theme::dp(kErrH);
+        // 0.9.6.8 (GRUPO E): a barra de erro sobe com o IME (acima da
+        // barra de símbolos — nunca por baixo do teclado do sistema)
+        const f32 errY = bottomLim - symH - theme::dp(kErrH);
         // 0.9.6.6 (GRUPO C): a ALTURA também é dp (era px cru — a barra
         // posicionava-se por dp(40) mas MEDIA 40px em qualquer densidade)
         ui.panel(ins.left, errY, contentW, theme::dp(kErrH),
@@ -1460,14 +1185,10 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     if (result == 0) {
         f32 tx = 0.0f, ty = 0.0f;
         if (ui.scrollTap(kScrollId, tx, ty)) {
-            // 0.9.6 (G3) · A POLÍTICA DE COEXISTÊNCIA (a decisão primeiro,
-            // como a spec pede): o teclado PRÓPRIO e o IME do SISTEMA são
-            // ALTERNATIVAS — ambos ancoram no fundo e sobrepõam-se. O
-            // toque no corpo pede o IME DO SISTEMA (GBoard: acentos,
-            // gestos) e o teclado próprio FECHA; o botao do teclado no
-            // cabeçalho faz o INVERSO (abre o próprio + esconde o IME,
-            // result 7). NUNCA os dois ao mesmo tempo.
-            st.kbOpen = false;
+            // 0.9.6.8 (GRUPO E): o IME DO SISTEMA é o teclado ÚNICO (a
+            // política de coexistência 0.9.6 G3 MORREU com o teclado da
+            // engine) — o toque no corpo pede o IME e a BARRA DE SÍMBOLOS
+            // dokada sobre ele aparece com o inset real (ime::bottomInset)
             // 0.9.6.2 (R-019) · O TOQUE MOVE O CARET — a linha vem do y+scroll
             // e a coluna da largura REAL de cada code point, descontando a
             // coluna dos números de linha. A CAUSA do bug: o offset era

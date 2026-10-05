@@ -5876,11 +5876,13 @@ void frame() {
             storage::jniImeShow();
             elog::info("voni: IME re-pedido (toque no corpo do editor)");
         } else if (sr == 7) {
-            // 0.9.6 (G3): o botão do TECLADO PRÓPRIO abriu-o — o IME do
-            // sistema sai do ecrã (a política de coexistência)
-            storage::jniImeHide();
-            elog::info("voni: teclado próprio aberto — IME do sistema "
-                       "escondido");
+            // 0.9.6.8 (GRUPO E): o resultado 7 MORREU com o teclado da
+            // engine (o rastreador E manda SUBSTITUÍ-lo pela barra de
+            // símbolos sobre o IME). O ramo fica DOCUMENTADO (o contrato
+            // de resultados do scriptwin é afervável na suíte) e NUNCA
+            // mais é emitido — o draw não o devolve.
+            elog::info("voni: resultado 7 obsoleto (o teclado da engine "
+                       "saiu na 0.9.6.8)");
         } else if (sr == 6) {
             // 0.9.5 · COPIAR REFERÊNCIA PARA IA: a referência V.ONI
             // COMPLETA (gerada do REGISTO — a mesma fonte das Docs) vai

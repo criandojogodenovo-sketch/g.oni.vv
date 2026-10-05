@@ -384,8 +384,8 @@ TEST(jni_onload_registers_two_natives) {
 
     EXPECT(rc == JNI_VERSION_1_6);
     EXPECT(g_jni.register_natives_calls == 1);
-    EXPECT(g_jni.register_natives_names.size() == 6);   // 0.9.1: +buildInfo +IME (text/key)
-    EXPECT(g_jni.register_natives_sigs.size() == 6);
+    EXPECT(g_jni.register_natives_names.size() == 7);   // 0.9.6.8 (E): +IME inset (7 = 5 da 0.8.10 + text/key + inset)
+    EXPECT(g_jni.register_natives_sigs.size() == 7);
     bool hasRegister = false, hasResult = false, hasOpenProject = false;
     for (const std::string& n : g_jni.register_natives_names) {
         if (n == "nativeRegisterActivity") hasRegister = true;
@@ -455,19 +455,21 @@ TEST(jni_onload_findclass_failure_soft_recovery) {
 
     EXPECT(vv::storage::handshakeOk());
     EXPECT(g_jni.register_natives_calls == 1);   // registo recuperado AQUI
-    EXPECT(g_jni.register_natives_names.size() == 6);   // 0.9.1: +buildInfo +IME (text/key)
+    EXPECT(g_jni.register_natives_names.size() == 7);   // 0.9.6.8 (E): +IME inset
     bool hasRegister = false, hasResult = false, hasOpenProject = false;
-    bool hasBuildInfo = false;
+    bool hasBuildInfo = false, hasImeInset = false;
     for (const std::string& n : g_jni.register_natives_names) {
         if (n == "nativeRegisterActivity") hasRegister = true;
         if (n == "nativeOnActivityResult") hasResult = true;
         if (n == "nativeOpenProject") hasOpenProject = true;
         if (n == "nativeSetBuildInfo") hasBuildInfo = true;
+        if (n == "nativeOnImeInset") hasImeInset = true;   // 0.9.6.8 (E)
     }
     EXPECT(hasRegister);
     EXPECT(hasResult);
     EXPECT(hasBuildInfo);   // 0.8.10: a identidade da build está na tabela
     EXPECT(hasOpenProject);
+    EXPECT(hasImeInset);    // 0.9.6.8 (GRUPO E): o INSET do IME está na tabela
     // a classe veio do GetObjectClass (a FindClass falhada ficou gravada 1×)
     EXPECT(countContaining(g_jni.find_class_calls, "vv/goni/VvActivity") == 1);
     const auto lines = logLines();

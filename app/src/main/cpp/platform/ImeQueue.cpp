@@ -25,6 +25,7 @@ struct Queue {
     std::mutex mu;
     std::deque<Event> events;
     Orientation orientation = Orientation::Landscape;   // a app nasce landscape
+    f32 imeInsetPx = 0.0f;   // 0.9.6.8 (GRUPO E): a faixa do IME em px (0=fechado)
 };
 
 Queue& q() {
@@ -102,6 +103,7 @@ void clearForTest() {
     std::lock_guard<std::mutex> lk(qq.mu);
     qq.events.clear();
     qq.orientation = Orientation::Landscape;
+    qq.imeInsetPx = 0.0f;   // 0.9.6.8 (GRUPO E): o reset cobre o inset
 }
 
 Orientation orientation() {
@@ -121,6 +123,39 @@ bool setOrientation(Orientation o, const char* reason) {
                o == Orientation::Portrait ? "portrait" : "landscape",
                (reason && *reason) ? reason : "sem motivo");
     return true;
+}
+
+// ---- 0.9.6.8 (GRUPO E) · o inset do IME ------------------------------------
+// A VvActivity mede a faixa do IME (rootHeight − visibleFrame.bottom) e
+// SÓ empurra MUDANÇAS (o listener dispara a cada layout — o valor é o
+// mesmo enquanto o teclado está parado). O LOG é uma linha por mudança:
+// o dono segue o IME abrir/fechar no engine.log com os px E os dp.
+void setBottomInset(f32 px) {
+    Queue& qq = q();
+    std::lock_guard<std::mutex> lk(qq.mu);
+    const f32 v = px > 0.0f ? px : 0.0f;
+    if (qq.imeInsetPx == v) {
+        return;   // sem mudança — silêncio (o listener dispara MUITO)
+    }
+    const bool wasClosed = qq.imeInsetPx <= 0.0f;
+    const bool nowClosed = v <= 0.0f;
+    qq.imeInsetPx = v;
+    if (wasClosed != nowClosed) {
+        elog::info("ime: %s (inset %.0f px)", nowClosed ? "fechado" : "aberto",
+                   (double)v);
+    } else {
+        elog::info("ime: inset %.0f px (o teclado mudou de tamanho)", (double)v);
+    }
+}
+
+f32 bottomInset() {
+    Queue& qq = q();
+    std::lock_guard<std::mutex> lk(qq.mu);
+    return qq.imeInsetPx;
+}
+
+bool insetVisible() {
+    return bottomInset() > 0.0f;
 }
 
 } // namespace vv::ime

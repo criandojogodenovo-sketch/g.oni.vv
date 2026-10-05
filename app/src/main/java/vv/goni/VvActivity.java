@@ -13,6 +13,8 @@ import android.provider.MediaStore;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.View;   // 0.9.0 (spec I): setImmersive usa View.SYSTEM_UI_FLAG_*
+import android.graphics.Rect;             // 0.9.6.8: a medida da faixa do IME
+import android.view.ViewTreeObserver;     // 0.9.6.8: o listener que mede o IME
 import android.content.pm.ActivityInfo;   // 0.9.1: setRequestedOrientation
 import android.graphics.Color;            // 0.9.1: EditText do IME transparente
 import android.text.InputType;            // 0.9.1: inputType multi-linha
@@ -112,6 +114,9 @@ public class VvActivity extends NativeActivity {
     // só ACTION_DOWN é encaminhado (a engine não repete edges).
     private static native void nativeOnImeText(String text);
     private static native void nativeOnImeKey(int keyCode, int action);
+    // 0.9.6.8 (GRUPO E): a faixa do IME em px (0 = fechado) — a barra de
+    // símbolos desenha SOBRE o teclado com a medida REAL (nunca um chute)
+    private static native void nativeOnImeInset(int bottomPx);
 
     // lê UMA linha "chave=valor" do assets/build_info.txt (vazio se ausente)
     private String assetInfo(String key) {
@@ -425,6 +430,48 @@ public class VvActivity extends NativeActivity {
                 new FrameLayout.LayoutParams(1, 1);
         addContentView(imeHost, lp);
         Log.i("GONI", "java: host do IME criado (1x1 transparente)");
+        initImeInsetBridge();
+    }
+
+    // 0.9.6.8 (GRUPO E) · A PONTE DO INSET DO IME: a engine desenha a
+    // BARRA DE SÍMBOLOS SOBRE o teclado do sistema — precisa de saber onde
+    // o IME acaba. O manifest não usa adjustResize (o teclado SOBREPÕE a
+    // superfície), então a MEDIDA é a técnica clássica que funciona do
+    // API 24 ao 34: rootHeight − visibleDisplayFrame.bottom = a faixa
+    // ocupada pelo IME. O listener dispara a cada layout do teclado
+    // (abrir/fechar/mudar de tamanho) e SÓ empurra MUDANÇAS para o
+    // nativo (nativeOnImeInset) — o mesmo padrão da fila de texto: a
+    // Java empurra, a engine consome no frame.
+    private int imeInsetSent = -1;   // o último valor empurrado (-1 = nunca)
+    private void initImeInsetBridge() {
+        if (imeHost == null) return;
+        final View root = imeHost.getRootView();
+        if (root == null) return;
+        root.getViewTreeObserver().addOnGlobalLayoutListener(
+                () -> {
+                    try {
+                        final Rect r = new Rect();
+                        root.getWindowVisibleDisplayFrame(r);
+                        // a faixa invisível do fundo: o IME (ou a nav bar
+                        // em ecrãs sem gesture nav — o piso separa-as: um
+                        // IME real come acima de ~15% da altura)
+                        int inset = root.getHeight() - r.bottom;
+                        if (inset < 0) inset = 0;
+                        final int floor = root.getHeight() / 7;   // ~14%
+                        if (inset > 0 && inset < floor) {
+                            inset = 0;   // a nav bar/gesture bar não é IME
+                        }
+                        if (inset != imeInsetSent) {
+                            imeInsetSent = inset;
+                            nativeOnImeInset(inset);
+                            Log.i("GONI", "java: inset do IME = " + inset
+                                    + "px (root " + root.getHeight()
+                                    + ", visível até " + r.bottom + ")");
+                        }
+                    } catch (Throwable t) {
+                        Log.e("GONI", "java: medida do IME FALHOU", t);
+                    }
+                });
     }
 
     // SHOW/HIDE POR CONTA DA ENGINE (0.9.1 §2): o chamador nativo é o

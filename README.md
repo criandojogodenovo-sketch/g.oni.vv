@@ -34,6 +34,71 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.9.6.8 — GRUPO E: EDITOR DE SCRIPT + SÍMBOLOS (FASE 0.9.6-MASTER · R-027)
+
+**O que existe agora (o teclado da engine SAIU; a barra de 40dp desenha
+SOBRE o IME do sistema com a medida REAL):**
+- **A PONTE DO INSET DO IME**: a VvActivity MEDE a faixa que o teclado do
+  Android ocupa (rootHeight − visibleFrame.bottom — funciona do API 24 ao
+  34, sem ajustes de manifesto) e empurra o valor por JNI
+  (`nativeOnImeInset` → `ime::bottomInset`, o mesmo módulo da fila de
+  texto). A engine passa a SABER onde o teclado está — o caret nunca mais
+  fica por baixo dele (o corpo, a strip de ajuda, a barra de erro e a
+  barra de símbolos param TODOS acima do IME; o scroll segue o caret).
+- **A BARRA DE SÍMBOLOS de 40dp** (a spec E): os 22 símbolos da linguagem
+  V.ONI — { } ( ) [ ] = + - * / < > ! , . ; : " _ # @ (a página «123» do
+  teclado antigo) — em teclas compactas que emitem pelo MESMO caminho do
+  IME (o applyEvent: uma fonte de verdade), dokadas SOBRE o teclado real
+  em `h − inset − 40dp`. Páginas ADAPTATIVAS (a 1ª tecla é o seletor
+  «1/2», o padrão ?123 do GBoard): 9 teclas no device (3 páginas), 14 no
+  harness (2 páginas) — sempre ≥40dp de largura. Cada símbolo LOGA
+  («editor: símbolo '{' pela barra»).
+- **O TECLADO DA ENGINE REMOVIDO** (280dp/54 teclas: QWERTY, shift,
+  long-press de acentos, setas, página 123): o IME do sistema é o teclado
+  ÚNICO — o GBoard dá acentos, gestos e dicionário; a barra cobre o que
+  ele não tem à mão. A «política de coexistência» (dois teclados) morreu.
+- **O HEADER FLEXÍVEL**: os botões ancoram À DIREITA (Stop, Run, lupa,
+  copiar-referência, nível de ajuda) e o título FLEXIONA — o subtítulo
+  some em ecrãs <120dp de zona, o título em <48dp. No device portrait
+  (360dp) o header é Back + 5 botões, ZERO sobreposição — ANTES o botão
+  do nível media **−56dp** e o do teclado **−8dp**: DOIS botões fora do
+  ecrã desde a 0.9.6. Run/Stop estreitam para 48dp nos ecrãs <420dp (os
+  alvos ≥48dp mantêm-se).
+- **A EXCEÇÃO COMPACTA do validador** (a spec do autor manda 40dp na
+  barra; a casa manda 48dp): as teclas da barra registam-se `compactas` —
+  o piso do toque é 40dp para ELAS e 48dp para todo o resto. A exceção é
+  ESTREITA e vigiada: uma tecla compacta de 39dp FALHA na auditoria, um
+  botão regular de 40dp também (a sentinela R-027 prova os dois lados) —
+  a POLÍTICA #5 das REGRESSOES cumprida à letra.
+- **A FASE 13.8** (a vara nova): o editor de script exportado ao TAMANHO
+  do RMX3624 em portrait (720×1600@2.0 = 360×800dp) com o IME aberto
+  (880px) — o validador 0/0, o header com tudo ≥48dp DENTRO, a barra de
+  9 teclas dokada sobre o teclado, o título flexionado.
+
+**Checklist C33/RMX3624 (VERIFICAR no device — Grupo E):**
+1. Abrir um script (Inspector → secção Script → Editar): o editor roda para
+   portrait e o TECLADO DO SISTEMA abre (o da engine não existe mais — o
+   botão do teclado no cabeçalho SAIU).
+2. Com o teclado aberto: a BARRA DE SÍMBOLOS (40dp, faixa com { } ( ) …)
+   dokada POR CIMA do teclado — tocar «{» insere o símbolo NO cursor (o
+   log «editor: símbolo '{' pela barra» no Diagnóstico → engine.log).
+3. O cursor NUNCA fica escondido atrás do teclado: o código e a barra de
+   erro sobem com o IME (o scroll segue o cursor enquanto digita).
+4. O seletor de página (a 1ª tecla da barra, «1/3»): cicla as páginas —
+   as 3 páginas do device cobrem os 22 símbolos ({ } ( ) [ ] = + - * /
+   < > ! , . ; : " _ # @ TODOS presentes).
+5. Fechar o teclado (o back do GBoard): a barra de símbolos SOME com ele
+   e o código volta à altura cheia (o layout de sempre).
+6. O cabeçalho no portrait do device: os 5 botões (nível ?, copiar 📋,
+   lupa, Run, Stop) TODOS visíveis e tocáveis com o dedo inteiro — ANTES
+   o do nível e o do teclado estavam FORA do ecrã. O título «Script» não
+   aparece no device (o header é só botões — é o flexível; no C33/harness
+   largo o título continua lá).
+7. A «Auditoria do ecrã» no editor de script (Diagnóstico): «0 ERRO,
+   0 aviso» — com o teclado aberto e a barra visível.
+8. Digitar código com o GBoard (acentos por long-press, gestos): tudo
+   entra pelo caminho do IME; a barra nunca interfere (símbolo = 1 toque).
+
 ## 0.9.6.7 — GRUPO D: ORÇAMENTO DO EDITOR 3D (FASE 0.9.6-MASTER · R-026)
 
 **O que existe agora (o editor ao TAMANHO do device — RMX3624 — passa o

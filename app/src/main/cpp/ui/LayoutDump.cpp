@@ -87,6 +87,11 @@ Json toJson(const Record& r) {
         if (e.clipped) {
             o.members.emplace_back("recortado", Json::makeBool(true));
         }
+        if (e.compact) {
+            // 0.9.6.8 (GRUPO E): a tecla compacta da barra de símbolos — o
+            // JSON mostra o QUE ela é (o auditor do device vê a exceção)
+            o.members.emplace_back("compacto", Json::makeBool(true));
+        }
         arr.items.push_back(std::move(o));
     }
     root.members.emplace_back("entradas", std::move(arr));
@@ -97,6 +102,11 @@ std::vector<Problem> validate(const Record& r) {
     std::vector<Problem> ps;
     const f32 kTol = 0.5f;
     const f32 minTouch = 48.0f * (r.density > 0.05f ? r.density : 1.0f);
+    // 0.9.6.8 (GRUPO E): o piso da BARRA DE SÍMBOLOS (spec do autor: 40dp).
+    // A exceção é ESTREITA e vigiada: só teclas compactas; 39dp compacto
+    // FALHA, botão REGULAR a 40dp FALHA (a sentinela R-027 prova os dois —
+    // a POLÍTICA #5: a mudança legítima está explicada no relatório)
+    const f32 minCompact = 40.0f * (r.density > 0.05f ? r.density : 1.0f);
     const f32 cx = r.contentX(), cy = r.contentY();
     const f32 cw = r.contentW(), ch = r.contentH();
 
@@ -128,13 +138,19 @@ std::vector<Problem> validate(const Record& r) {
                 ps.push_back(p);
             }
             // ToquePequeno — 48dp da casa (commit 0.9.6.1-a: teclas ≥48dp;
-            // toolbar 48dp; a vara de medir do RMX3624 é a mesma)
-            if (e.w < minTouch - kTol || e.h < minTouch - kTol) {
-                Problem p;
-                p.rule = Problem::ToquePequeno;
-                p.sev = Problem::Aviso;
-                p.ia = i;
-                ps.push_back(p);
+            // toolbar 48dp; a vara de medir do RMX3624 é a mesma).
+            // 0.9.6.8 (GRUPO E): tecla COMPACTA (a barra de símbolos) tem o
+            // piso da spec: 40dp — a exceção registada no relatório E e
+            // vigiada pela sentinela R-027 (a 39dp continua a falhar)
+            {
+                const f32 floor = e.compact ? minCompact : minTouch;
+                if (e.w < floor - kTol || e.h < floor - kTol) {
+                    Problem p;
+                    p.rule = Problem::ToquePequeno;
+                    p.sev = Problem::Aviso;
+                    p.ia = i;
+                    ps.push_back(p);
+                }
             }
         }
 
@@ -211,10 +227,14 @@ std::string describe(const Record& r, const Problem& p) {
             break;
         }
         case Problem::ToquePequeno:
+            // 0.9.6.8 (GRUPO E): a mensagem diz o PISO que falhou — 48dp da
+            // casa ou 40dp compacto (a barra de símbolos da spec E)
             std::snprintf(buf, sizeof(buf),
-                          "aviso %s(id %llx) %.0fx%.0f < 48dp (%.0fpx) de toque",
+                          "aviso %s(id %llx) %.0fx%.0f < %s (%.0fpx) de toque",
                           a.kindName(), (unsigned long long)a.id, a.w, a.h,
-                          48.0f * (r.density > 0.05f ? r.density : 1.0f));
+                          a.compact ? "40dp compacto" : "48dp",
+                          (a.compact ? 40.0f : 48.0f) *
+                              (r.density > 0.05f ? r.density : 1.0f));
             break;
         case Problem::TextoTruncado:
             std::snprintf(buf, sizeof(buf),

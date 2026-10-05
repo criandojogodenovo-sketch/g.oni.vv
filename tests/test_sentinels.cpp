@@ -714,30 +714,24 @@ TEST(regress_script_typing) {
     EXPECT(st.scriptWin.buf.size() ==
            std::string(editor::scriptwin::kSkeleton).size() + 20);
 
-    // ---- (3) 20 teclas do TECLADO IN-APP (o MESMO applyEvent) ----------
-    // (letras + símbolos + DEL + ENTER — o repertório do drawKeyboard)
-    const char* kKb[20] = {"x", "y", "{", "}", "(", ")", "=", "+", "-", "*",
-                           "/", "\"", ".", ",", ":", " ", "0", "9", "\x01",
-                           "\x02"};
+    // ---- (3) 20 teclas da BARRA DE SÍMBOLOS (o MESMO applyEvent) ------
+    // (0.9.6.8 GRUPO E: o teclado da engine SAIU — o repertório é o da
+    // BARRA: os 24 símbolos da spec + DEL + ENTER pelo caminho único)
+    const char* kKb[20] = {"{", "}", "(", ")", "[", "]", "=", "+", "-", "*",
+                           "/", "<", ">", "!", ",", ".", ";", ":", "\"", "_"};
     for (int i = 0; i < 20; ++i) {
         ime::Event ev;
-        if (kKb[i][0] == '\x01') {
-            ev.isText = false;
-            ev.key = ime::Key::Del;      // APAGA
-        } else if (kKb[i][0] == '\x02') {
-            ev.isText = false;
-            ev.key = ime::Key::Enter;    // ENTER
-        } else {
-            ev.isText = true;
-            ev.text = kKb[i];
-        }
+        ev.isText = true;
+        ev.text = kKb[i];
         editor::scriptwin::applyEvent(st.scriptWin, ev);
         EXPECT(st.scriptWin.open);
     }
     EXPECT(st.scriptWin.buf.size() > 20);
 
-    // ---- (4) o DRAW com o teclado aberto (portrait) não crasha ----------
-    st.scriptWin.kbOpen = true;
+    // ---- (4) o DRAW com o IME ABERTO (portrait) não crasha ------------
+    // (0.9.6.8 GRUPO E: o inset REAL do IME injetado — a barra de
+    // símbolos dokada sobre ele e o corpo reservado; o caminho do device)
+    ime::setBottomInset(280.0f);   // um GBoard típico em px @1.0 do harness
     for (int f = 0; f < 3; ++f) {
         ui.beginFrame(nullptr, &input, 720.0f, 1536.0f);
         const int r = editor::scriptwin::draw(ui, input, st.scriptWin,
@@ -750,6 +744,7 @@ TEST(regress_script_typing) {
 
     // ---- (5) re-validação por nome (o lifecycle matou o handle) ---------
     // o reload do INIT_WINDOW re-cria os TICs: o handle morre, o TIC vive
+    ime::setBottomInset(0.0f);   // o IME fecha com a janela (o par do close)
     {
         Scene reloaded;   // "cena recarregada" — TIC NOVO com o MESMO nome
         const Handle h2 = reloaded.create("ator");
@@ -1503,15 +1498,17 @@ TEST(regress_density_escala_dp) {
     EXPECT(nearEqF(status.h, 48.0f));   // 24dp real, a última faixa
     EXPECT(nearEqF(status.y + status.h, 720.0f));   // continua no fundo
     // o teclado: teclas de 96px de altura (48dp real — o dono media 48×65px)
-    EXPECT(nearEqF(editor::scriptwin::keyboardHeight(),
-                   5.0f * 96.0f + 4.0f * 12.0f + 2.0f * 16.0f));
+    // 0.9.6.8 (GRUPO E · RECALIBRADA): o teclado da engine SAIU — a vara
+    // passa a aferir a BARRA DE SÍMBOLOS (a spec E: 40dp — 80px @2.0)
+    EXPECT(nearEqF(editor::scriptwin::symbolBarHeight(), 40.0f * 2.0f));
+    EXPECT(editor::scriptwin::symKeysVisible(720.0f * 2.0f) == 14u);
+    EXPECT(editor::scriptwin::symKeysVisible(360.0f * 2.0f) == 9u);
     // ---- (b) densidade 1.0: o layout de SEMPRE (nenhum teste muda) ---------
     theme::setDensity(1.0f);
     const UiRect bar1 = safe::toolbarRect(1536.0f, 720.0f, zero);
     EXPECT(nearEqF(bar1.h, 56.0f));
     EXPECT(nearEqF(theme::dp(48.0f), 48.0f));
-    EXPECT(nearEqF(editor::scriptwin::keyboardHeight(),
-                   5.0f * 48.0f + 4.0f * 6.0f + 2.0f * 8.0f));
+    EXPECT(nearEqF(editor::scriptwin::symbolBarHeight(), 40.0f));
 }
 
 // ============================================================================
@@ -3054,4 +3051,303 @@ TEST(regress_scissor_aspecto_rect) {
                                                    cx + 200.0f, cy + 200.0f);
         EXPECT(!(miss == h));
     }
+}
+
+// ============================================================================
+// R-027 (FASE 0.9.6-MASTER · GRUPO E — EDITOR DE SCRIPT + SÍMBOLOS)
+//
+// O rastreador E manda: «header flexível; IME; barra de símbolos 40dp sobre
+// o IME (teclado da engine REMOVIDO)». O estado ANTES do Grupo E: (1) o
+// QWERTY in-app de 280dp/54 teclas competia com o IME do sistema (a
+// política de coexistência 0.9.6 G3 — DOIS teclados para manter); (2) a
+// engine NÃO SABIA onde o IME do Android está (o manifest sem adjustResize:
+// o teclado SOBREPÕE a superfície e o CARET ficava por baixo dele); (3) o
+// header media os botões a partir da lupa (docsX−200/−152/−56) — no device
+// portrait (360dp) o botão do nível caía a −56dp e o do teclado a −8dp:
+// DOIS botões FORA DO ECRÃ. O Grupo E fecha:
+//   - regress_barra_simbolos_ime — a barra de 40dp dokada sobre o IME REAL
+//     (ime::bottomInset), as páginas cobrem os 24 símbolos da spec, as
+//     teclas emitem pelo MESMO applyEvent do IME, o header flexível no
+//     device (nada fora do ecrã) e a EXCEÇÃO COMPACTA do validador (o piso
+//     40dp da spec E: compacto a 39dp FALHA, botão REGULAR a 40dp FALHA —
+//     a exceção é estreita e vigiada)
+// ============================================================================
+TEST(regress_barra_simbolos_ime) {
+    using namespace vv;
+    theme::setDensity(1.0f);
+    rmrf(kSentinelLogs);
+    ASSERT(vv::elog::init(kSentinelLogs));
+
+    // ---- (1) A PONTE DO INSET: set/get/insetVisible + o reset do teste ---
+    {
+        vv::ime::clearForTest();
+        EXPECT(vv::ime::bottomInset() == 0.0f);
+        EXPECT(!vv::ime::insetVisible());
+        vv::ime::setBottomInset(280.0f);
+        EXPECT(vv::ime::bottomInset() == 280.0f);
+        EXPECT(vv::ime::insetVisible());
+        vv::ime::setBottomInset(280.0f);   // o MESMO valor: sem mudança
+        EXPECT(vv::ime::bottomInset() == 280.0f);
+        vv::ime::setBottomInset(0.0f);     // fechou
+        EXPECT(!vv::ime::insetVisible());
+        vv::ime::clearForTest();           // o reset cobre o inset
+        EXPECT(vv::ime::bottomInset() == 0.0f);
+    }
+
+    // ---- (2) A GEOMETRIA DA BARRA: 40dp EXATOS, teclas >=40dp, páginas --
+    {
+        EXPECT(nearEqF(editor::scriptwin::symbolBarHeight(), 40.0f));
+        // a página ADAPTA à largura: 9 no device 360dp, 14 no harness 720dp
+        EXPECT(editor::scriptwin::symKeysVisible(360.0f) == 9u);
+        EXPECT(editor::scriptwin::symKeysVisible(720.0f) == 14u);
+        EXPECT(editor::scriptwin::symKeysVisible(2000.0f) == 14u);  // teto
+        EXPECT(editor::scriptwin::symKeysVisible(300.0f) == 9u);    // piso
+        // as páginas cobrem os 22 símbolos: ceil(22/(n-1))
+        EXPECT(editor::scriptwin::symPageCount(360.0f) == 3u);   // 8/página
+        EXPECT(editor::scriptwin::symPageCount(720.0f) == 2u);   // 13/página
+        // os 22 símbolos da spec (a página «123» do teclado antigo): a
+        // união das páginas é o set TODO — { } ( ) [ ] = + - * / < > ! , .
+        // ; : " _ # @ (o teclado da engine SAIU; a barra herda o contrato)
+        EXPECT(std::string(editor::scriptwin::kSymbols[0]) == "{");
+        EXPECT(std::string(editor::scriptwin::kSymbols[1]) == "}");
+        EXPECT(std::string(editor::scriptwin::kSymbols[21]) == "@");
+        // densidade 2.0: a barra dobra (a vara da R-018 no componente novo)
+        theme::setDensity(2.0f);
+        EXPECT(nearEqF(editor::scriptwin::symbolBarHeight(), 80.0f));
+        EXPECT(editor::scriptwin::symKeysVisible(720.0f) == 9u);  // 360dp
+        theme::setDensity(1.0f);
+    }
+
+    // ---- (3) O DRAW REAL: a barra dokada sobre o IME + o corpo reservado -
+    {
+        const char* fp = FONT_FIXTURE;
+        FontAtlas font;
+        ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+        UiContext ui;
+        ui.init();
+        ui.setFont(&font);
+        ui.setSafeArea(safe::Insets{});
+        InputState input;
+        editor::EditorState st;
+        Scene scene;
+        const Handle tic = scene.create("ator");
+        scene.get(tic)->addComponent<ScriptComp>();
+        editor::scriptwin::open(st.scriptWin, scene, tic);
+        st.scriptWin.helpLevel = 2;   // strip fora: matemática limpa
+
+        // IME ABERTO (280px): o frame auditado mostra a barra NO SÍTIO
+        vv::ime::setBottomInset(280.0f);
+        ui.auditBegin("script", 720.0f, 1536.0f, 0, 0, 0, 0, 1.0f);
+        ui.beginFrame(nullptr, &input, 720.0f, 1536.0f);
+        editor::scriptwin::draw(ui, input, st.scriptWin, 720.0f, 1536.0f,
+                                1.0f / 60.0f);
+        ui.endFrame();
+        ui.auditEnd();
+        const layout::Record& rec = ui.auditRecord();
+        u32 barKeys = 0;
+        f32 barTop = -1.0f;
+        f32 keyW = 0.0f, keyH = 0.0f;
+        for (const auto& e : rec.entries) {
+            if (e.kind == layout::Entry::Button && e.compact) {
+                ++barKeys;
+                if (barTop < 0.0f) {
+                    barTop = e.y;
+                    keyW = e.w;
+                    keyH = e.h;
+                }
+            }
+        }
+        EXPECT(barKeys == 14u);   // 720dp: o seletor + 13 símbolos
+        EXPECT(nearEqF(barTop, 1536.0f - 280.0f - 40.0f));   // SOBRE o IME
+        EXPECT(nearEqF(keyW, 720.0f / 14.0f));
+        EXPECT(nearEqF(keyH, 40.0f));
+        EXPECT(keyW >= 40.0f - 0.05f && keyH >= 40.0f - 0.05f);
+        // o VALIDADOR: 0 problemas (as compactas de 40dp passam — a spec E)
+        {
+            const auto probs = layout::validate(rec);
+            EXPECT(probs.empty());
+        }
+
+        // a TECLA insere NO CARET (o MESMO applyEvent do IME): o tap na
+        // 2ª tecla (a 1ª é o seletor) é o '{' da spec
+        const u32 caret0 = st.scriptWin.caret;
+        input.injectDown(0, (720.0f / 14.0f) * 1.5f, barTop + 20.0f);
+        ui.beginFrame(nullptr, &input, 720.0f, 1536.0f);
+        editor::scriptwin::draw(ui, input, st.scriptWin, 720.0f, 1536.0f,
+                                1.0f / 60.0f);
+        ui.endFrame();
+        input.injectUp(0);
+        ui.beginFrame(nullptr, &input, 720.0f, 1536.0f);
+        editor::scriptwin::draw(ui, input, st.scriptWin, 720.0f, 1536.0f,
+                                1.0f / 60.0f);
+        ui.endFrame();
+        input.clearEdges();
+        EXPECT(st.scriptWin.buf[caret0] == '{' &&
+                   st.scriptWin.caret == caret0 + 1);
+
+        // o SELETOR cicla a página e a página 2 começa em '!'
+        EXPECT(st.scriptWin.symPage == 0);
+        input.injectDown(0, (720.0f / 14.0f) * 0.5f, barTop + 20.0f);
+        ui.beginFrame(nullptr, &input, 720.0f, 1536.0f);
+        editor::scriptwin::draw(ui, input, st.scriptWin, 720.0f, 1536.0f,
+                                1.0f / 60.0f);
+        ui.endFrame();
+        input.injectUp(0);
+        ui.beginFrame(nullptr, &input, 720.0f, 1536.0f);
+        editor::scriptwin::draw(ui, input, st.scriptWin, 720.0f, 1536.0f,
+                                1.0f / 60.0f);
+        ui.endFrame();
+        input.clearEdges();
+        EXPECT(st.scriptWin.symPage == 1);
+        const u32 caret1 = st.scriptWin.caret;
+        input.injectDown(0, (720.0f / 14.0f) * 1.5f, barTop + 20.0f);
+        ui.beginFrame(nullptr, &input, 720.0f, 1536.0f);
+        editor::scriptwin::draw(ui, input, st.scriptWin, 720.0f, 1536.0f,
+                                1.0f / 60.0f);
+        ui.endFrame();
+        input.injectUp(0);
+        ui.beginFrame(nullptr, &input, 720.0f, 1536.0f);
+        editor::scriptwin::draw(ui, input, st.scriptWin, 720.0f, 1536.0f,
+                                1.0f / 60.0f);
+        ui.endFrame();
+        input.clearEdges();
+        EXPECT(st.scriptWin.buf[caret1] == '!' &&
+                   st.scriptWin.caret == caret1 + 1);
+
+        // IME FECHADO (inset 0): a barra SOME (o frame auditado confirma)
+        vv::ime::setBottomInset(0.0f);
+        ui.auditBegin("script", 720.0f, 1536.0f, 0, 0, 0, 0, 1.0f);
+        ui.beginFrame(nullptr, &input, 720.0f, 1536.0f);
+        editor::scriptwin::draw(ui, input, st.scriptWin, 720.0f, 1536.0f,
+                                1.0f / 60.0f);
+        ui.endFrame();
+        ui.auditEnd();
+        const layout::Record& rec2 = ui.auditRecord();
+        bool algumaBarra = false;
+        for (const auto& e : rec2.entries) {
+            if (e.kind == layout::Entry::Button && e.compact) {
+                algumaBarra = true;
+            }
+        }
+        EXPECT(!algumaBarra);
+        vv::ime::clearForTest();
+    }
+
+    // ---- (4) A EXCEÇÃO COMPACTA é ESTREITA (o piso 40dp vigiado) ---------
+    {
+        layout::Record r;
+        r.screen = "t";
+        r.screenW = 720.0f;
+        r.screenH = 1536.0f;
+        r.density = 1.0f;
+        // (a) a compacta a 40dp PASSA (a spec E)
+        {
+            layout::Entry e;
+            e.kind = layout::Entry::Button;
+            e.compact = true;
+            e.x = 0; e.y = 0; e.w = 40.0f; e.h = 40.0f;
+            r.entries.push_back(e);
+        }
+        EXPECT(layout::validate(r).empty());
+        // (b) a compacta a 39dp FALHA (o piso é REAL — a spec não é desculpa)
+        {
+            r.entries.clear();
+            layout::Entry e;
+            e.kind = layout::Entry::Button;
+            e.compact = true;
+            e.x = 0; e.y = 0; e.w = 40.0f; e.h = 39.0f;
+            r.entries.push_back(e);
+            const auto ps = layout::validate(r);
+            EXPECT(!ps.empty() && ps[0].rule == layout::Problem::ToquePequeno);
+        }
+        // (c) o botão REGULAR a 40dp FALHA (a exceção NÃO vaza p/ os outros)
+        {
+            r.entries.clear();
+            layout::Entry e;
+            e.kind = layout::Entry::Button;
+            e.x = 0; e.y = 0; e.w = 40.0f; e.h = 40.0f;
+            r.entries.push_back(e);
+            const auto ps = layout::validate(r);
+            EXPECT(!ps.empty() && ps[0].rule == layout::Problem::ToquePequeno);
+        }
+        // (d) o botão regular a 48dp passa (a regra da casa intacta)
+        {
+            r.entries.clear();
+            layout::Entry e;
+            e.kind = layout::Entry::Button;
+            e.x = 0; e.y = 0; e.w = 48.0f; e.h = 48.0f;
+            r.entries.push_back(e);
+            EXPECT(layout::validate(r).empty());
+        }
+    }
+
+    // ---- (5) O HEADER FLEXÍVEL no device (360dp): nada fora, nada <48dp --
+    {
+        const char* fp = FONT_FIXTURE;
+        FontAtlas font;
+        ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+        UiContext ui;
+        ui.init();
+        ui.setFont(&font);
+        ui.setSafeArea(safe::Insets{});
+        InputState input;
+        editor::EditorState st;
+        Scene scene;
+        const Handle tic = scene.create("ator");
+        scene.get(tic)->addComponent<ScriptComp>();
+        editor::scriptwin::open(st.scriptWin, scene, tic);
+        st.scriptWin.helpLevel = 2;
+        // o device portrait: 360dp de conteúdo (720px @2.0) — o header
+        // ANTIGO media helpX=−56dp: FORA DO ECRÃ (a medição do Grupo E).
+        // O safeArea do draw BATE com os insets do registo (T48/B48 px)
+        theme::setDensity(2.0f);
+        ui.setSafeArea(safe::Insets{0.0f, 48.0f, 0.0f, 48.0f});
+        vv::ime::setBottomInset(880.0f);   // o GBoard do RMX3624
+        ui.auditBegin("script", 720.0f, 1600.0f, 48.0f, 48.0f, 0.0f, 0.0f,
+                      2.0f);
+        ui.beginFrame(nullptr, &input, 720.0f, 1600.0f);
+        editor::scriptwin::draw(ui, input, st.scriptWin, 720.0f, 1600.0f,
+                                1.0f / 60.0f);
+        ui.endFrame();
+        ui.auditEnd();
+        const layout::Record& rd = ui.auditRecord();
+        u32 hdr48 = 0;
+        f32 minX = 1e9f, maxX = -1e9f;
+        for (const auto& e : rd.entries) {
+            if (e.kind == layout::Entry::Button && !e.compact &&
+                e.y < 200.0f) {
+                if (e.w >= 96.0f - 0.5f && e.h >= 96.0f - 0.5f) {
+                    ++hdr48;   // 48dp @2.0 = 96px
+                }
+                minX = e.x < minX ? e.x : minX;
+                maxX = (e.x + e.w) > maxX ? (e.x + e.w) : maxX;
+            }
+        }
+        EXPECT(hdr48 >= 5u);   // back + nível + copiar + lupa + run/stop
+        EXPECT(minX >= -0.5f && maxX <= 720.5f);   // NADA fora do ecrã
+        // o VALIDADOR no orçamento do device: 0 problemas
+        {
+            const auto probs = layout::validate(rd);
+            EXPECT(probs.empty());
+        }
+        // a barra no device: 9 teclas (360dp/40dp) dokada sobre o IME
+        u32 barKeysD = 0;
+        f32 barTopD = -1.0f;
+        for (const auto& e : rd.entries) {
+            if (e.compact) {
+                ++barKeysD;
+                if (barTopD < 0.0f) {
+                    barTopD = e.y;
+                }
+            }
+        }
+        EXPECT(barKeysD == 9u);
+        EXPECT(nearEqF(barTopD, 1600.0f - 880.0f - 80.0f));
+        ui.setSafeArea(safe::Insets{});   // repõe para os outros testes
+        vv::ime::clearForTest();
+        theme::setDensity(1.0f);
+    }
+
+    vv::elog::shutdown();
+    rmrf(kSentinelLogs);
 }

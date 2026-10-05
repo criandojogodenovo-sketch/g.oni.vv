@@ -52,6 +52,12 @@ Java_vv_goni_VvActivity_nativeOnImeText(JNIEnv* env, jclass, jstring text);
 extern "C" JNIEXPORT void JNICALL
 Java_vv_goni_VvActivity_nativeOnImeKey(JNIEnv* env, jclass, jint keyCode,
                                        jint action);
+// 0.9.6.8 (GRUPO E) — o INSET do IME: a VvActivity mediu a faixa do
+// teclado (rootHeight − visibleFrame.bottom) e entrega-a AQUI (thread da
+// UI, SÓ em mudanças) — o estado ime::setBottomInset alimenta a barra de
+// símbolos e a reserva do corpo do editor (o caret nunca sob o teclado)
+extern "C" JNIEXPORT void JNICALL
+Java_vv_goni_VvActivity_nativeOnImeInset(JNIEnv* env, jclass, jint bottomPx);
 // 0.8.10 — IDENTIDADE: a VvActivity entrega BuildConfig + build_info.txt
 // (version/versionCode/git/sha256 da .so/epoch) no ARRANQUE; vive nos crash
 // dumps (nome+header) e no banner do boot log.
@@ -225,6 +231,11 @@ const JNINativeMethod kNativeMethods[] = {
       // 0.9.1 — IME do sistema: tecla (DEL 67/ENTER 66/DPAD; só DOWN)
       const_cast<char*>("(II)V"),
       reinterpret_cast<void*>(&Java_vv_goni_VvActivity_nativeOnImeKey) },
+    { const_cast<char*>("nativeOnImeInset"),
+      // 0.9.6.8 (GRUPO E) — a faixa do IME em px (0 = fechado): a barra de
+      // símbolos desenha SOBRE o teclado com a medida REAL do device
+      const_cast<char*>("(I)V"),
+      reinterpret_cast<void*>(&Java_vv_goni_VvActivity_nativeOnImeInset) },
 };
 constexpr int kNativeMethodCount =
     static_cast<int>(sizeof(kNativeMethods) / sizeof(kNativeMethods[0]));
@@ -1229,6 +1240,17 @@ Java_vv_goni_VvActivity_nativeOnImeKey(JNIEnv* env, jclass, jint keyCode,
     if (k != vv::ime::Key::None) {
         vv::ime::pushKey(k);
     }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
+}
+
+// 0.9.6.8 (GRUPO E): a faixa REAL do IME em px — o listener de layout da
+// VvActivity SÓ manda mudanças (abrir/fechar/mudar de tamanho); a engine
+// lê ime::bottomInset() no frame e desenha a barra de símbolos NO SÍTIO
+extern "C" JNIEXPORT void JNICALL
+Java_vv_goni_VvActivity_nativeOnImeInset(JNIEnv* env, jclass, jint bottomPx) {
+    vv::ime::setBottomInset(static_cast<float>(bottomPx));
     if (env->ExceptionCheck()) {
         env->ExceptionClear();
     }

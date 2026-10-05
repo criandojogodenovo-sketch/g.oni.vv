@@ -70,4 +70,18 @@ Orientation orientation();
 // AQUI — uma linha por mudança, com o motivo (janela de texto aberta/fechada)
 bool setOrientation(Orientation o, const char* reason);
 
+// ---- 0.9.6.8 (GRUPO E) · O INSET DO IME (a altura REAL do teclado) ---------
+// A BARRA DE SÍMBOLOS desenha SOBRE o IME do sistema — mas a engine não
+// sabe onde o IME acaba (o manifest não usa adjustResize: o teclado
+// SOBREPÕE a superfície). A VvActivity MEDE a faixa ocupada pelo IME
+// (rootHeight − visibleDisplayFrame.bottom — a técnica clássica que
+// funciona do API 24 ao 34, sem WindowInsets.Type) e empurra o valor em
+// PX por JNI (nativeOnImeInset). O editor de script reserva
+// imeInset + barra e o caret nunca fica por baixo do teclado.
+// Thread: set no thread da UI (o listener), leitura no frame — o MESMO
+// mutex da fila (uma única fonte de verdade por módulo).
+void  setBottomInset(f32 px);   // 0 = IME fechado (o listener só manda MUDANÇAS)
+f32   bottomInset();            // px no ecrã (0 = fechado)
+bool  insetVisible();           // true = o IME está NO ECRÃ (inset > 0)
+
 } // namespace vv::ime

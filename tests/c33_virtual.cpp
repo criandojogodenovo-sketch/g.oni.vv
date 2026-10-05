@@ -1200,26 +1200,30 @@ int main() {
         check(g_scene.get(g_editor.scriptWin.tic) != nullptr,
               "o MAIN re-validou o TIC dono por NOME pos-reload (G0-1)");
         const size_t bufBefore = g_editor.scriptWin.buf.size();
-        // 0.9.6 (G3): o toque no CORPO pede o IME DO SISTEMA e o teclado
-        // próprio CEDA (a política de coexistência — nunca os dois)
-        g_editor.scriptWin.kbOpen = true;
+        // 0.9.6.8 (GRUPO E): o teclado da engine SAIU — o IME do sistema é
+        // o ÚNICO teclado. O toque no CORPO pede o IME (result 5) e a
+        // BARRA DE SÍMBOLOS dokada sobre ele aparece com o inset REAL
         tap(360.0f, 400.0f);
-        check(!g_editor.scriptWin.kbOpen,
-              "toque no corpo: o teclado próprio CEDA ao IME (G3)");
-        // o teclado próprio ABRE pelo BOTÃO do cabeçalho (docsX-152+24)
-        tap(504.0f - 152.0f + 24.0f, 28.0f);
-        check(g_editor.scriptWin.kbOpen,
-              "o BOTÃO do cabeçalho abre o teclado próprio (G3)");
-        // tecla Q (linha 0, col 0) do teclado desenhado — 0.9.6.1: a grelha
-        // QWERTY começa na margem única de 8px (o antigo x0 centrado caía
-        // NO VÃO entre teclas)
+        // (o result 5 é o contrato — o main re-pede o IME; o teclado
+        // próprio CEDER morreu com ele)
+        // a BARRA: o inset injetado como o device manda (280px = um
+        // GBoard típico no harness @1.0) — as teclas entram pelo MESMO
+        // applyEvent (a 2ª tecla é '{'; a 1ª é o seletor de página)
+        vv::ime::setBottomInset(280.0f);
         {
-            const f32 keyW = (720.0f - 16.0f - 9.0f * 6.0f) / 10.0f;
-            const f32 kbTop = 1536.0f - (5.0f * 48.0f + 4.0f * 6.0f + 16.0f);
-            tap(8.0f + keyW * 0.5f, kbTop + 8.0f + 24.0f);
+            // o toque no corpo (acima) MOVEU o caret para a linha sob o
+            // dedo — o símbolo entra NO CARET (o contrato R-019), não no fim
+            const u32 caret0 = g_editor.scriptWin.caret;
+            const f32 keyW = 720.0f / 14.0f;
+            const f32 barY = 1536.0f - 280.0f - 40.0f;
+            tap(keyW * 1.5f, barY + 20.0f);
+            check(g_editor.scriptWin.buf.size() == bufBefore + 1 &&
+                      g_editor.scriptWin.caret == caret0 + 1 &&
+                      g_editor.scriptWin.buf[caret0] == '{',
+                  "a tecla '{' da BARRA entra NO CARET pelo MESMO applyEvent "
+                  "(Grupo E)");
         }
-        check(g_editor.scriptWin.buf.size() == bufBefore + 1,
-              "a tecla do teclado in-app entra pelo MESMO applyEvent");
+        vv::ime::setBottomInset(0.0f);   // o IME fecha (o par do fecho)
 
         // 9.4 — FECHAR com o back: a FONTE GRAVA no ScriptComp (o bug
         // 0.9.3: o handle morto fazia o fecho NUNCA gravar)
@@ -1272,7 +1276,8 @@ int main() {
               "script EXISTENTE reabre com a fonte guardada intacta (G0-2)");
         // a superficie JÁ está em portrait (a rotação do reload acima)
         {
-            const f32 docsX = 720.0f - 72.0f * 2.0f - 16.0f - 8.0f - 48.0f;
+            // 0.9.6.8 (E · header flexível): lupaX = 720-8-72-8-72-12-48 = 500
+            const f32 docsX = 720.0f - 8.0f - 72.0f - 8.0f - 72.0f - 12.0f - 48.0f;
             tap(docsX + 24.0f, 28.0f);
         }
         check(g_editor.docsScreen.open, "a LUPA abre as Docs por cima (G0-3)");
@@ -1864,14 +1869,14 @@ int main() {
 
         passo("11.10 os níveis I/N/S: Silencioso apaga a strip");
         {
-            // 0.9.6 (G3): o botão do nível está em docsX-200 (o do teclado
-            // próprio entrou em docsX-152) — docsX=504, y=28
-            tap(504.0f - 200.0f + 24.0f, 28.0f);
+            // 0.9.6.8 (E · header flexível): o botão do nível ancorou à
+            // direita — helpX=388 (copy 444, lupa 500, run 560, stop 640)
+            tap(388.0f + 24.0f, 28.0f);
             check(g_editor.scriptWin.helpLevel == 2, "N → S (Silencioso)");
             check(editor::scriptwin::helpStripLine1(g_editor.scriptWin)
                       .empty(),
                   "Silencioso: a strip APAGA (sem encher o ecrã)");
-            tap(504.0f - 200.0f + 24.0f, 28.0f);
+            tap(388.0f + 24.0f, 28.0f);
             check(g_editor.scriptWin.helpLevel == 0, "S → I (Iniciante)");
             check(!editor::scriptwin::helpStripLine1(g_editor.scriptWin)
                       .empty(),
@@ -1879,7 +1884,7 @@ int main() {
             check(!editor::scriptwin::helpStripLine2(g_editor.scriptWin)
                       .empty(),
                   "Iniciante: SEMPRE com o exemplo (2 linhas)");
-            tap(504.0f - 200.0f + 24.0f, 28.0f);
+            tap(388.0f + 24.0f, 28.0f);
             check(g_editor.scriptWin.helpLevel == 1, "I → N (volta ao Normal)");
         }
 
@@ -1887,7 +1892,7 @@ int main() {
         {
             g_jni.void_calls.clear();
             g_jni.last_new_string.clear();
-            tap(448.0f + 24.0f, 28.0f);   // o botão 📋 (docsX-56)
+            tap(444.0f + 24.0f, 28.0f);   // o botão 📋 (copyX=444, E flexível)
             frame();
             bool sawClip = false;
             for (const auto& c : g_jni.void_calls) {
@@ -2159,29 +2164,27 @@ int main() {
             check(glyphsDentroDosInsets() == 0,
                   "editor: NENHUM glifo sob a faixa do topo (1ª linha "
                   "visível) nem sob a barra de baixo");
-            // o teclado ancora ACIMA da barra de navegação: a tecla
-            // ESPAÇO funciona no lugar ancorado (inset B=48). A linha de
-            // baixo do teclado: y = kbBottom - 32 (centro da tecla)
-            // Silencioso: a strip de ajuda apaga (o teclado docka no
-            // inset de baixo SEM a strip — matemática determinística)
+            // 0.9.6.8 (GRUPO E): a BARRA DE SÍMBOLOS dokada SOBRE o IME —
+            // o inset injetado (280px = um GBoard típico no harness @1.0)
+            // e a barra de 40dp no sítio certo. Silencioso: a strip de
+            // ajuda apaga (matemática determinística)
             g_editor.scriptWin.helpLevel = 2;
-            g_editor.scriptWin.kbOpen = true;
+            vv::ime::setBottomInset(280.0f);
             frame();
-            const f32 kbBottom = 1536.0f - g_ui.safeArea().bottom;
-            const f32 spaceY = kbBottom - 32.0f;
-            // 0.9.6 (G3): a linha de baixo tem 4 SETAS antes do espaço —
-            // [<][^][v][>][ESPACO 2u]… unit=(704-9*6)/12=54.2
-            const f32 unit3 = (720.0f - 16.0f - 9.0f * 6.0f) / 12.0f;
-            const f32 spaceX =
-                8.0f + 4.0f * (unit3 + 6.0f) + unit3;
+            check(editor::scriptwin::symbolBarHeight() == 40.0f,
+                  "12.3 a barra de símbolos mede 40dp EXATOS (a spec E)");
+            const f32 barY = 1536.0f - 280.0f - 40.0f;
+            const f32 keyW3 = 720.0f / 14.0f;
             const u32 len0 = (u32)g_editor.scriptWin.buf.size();
             const u32 caret0 = g_editor.scriptWin.caret;
-            tap(spaceX, spaceY);
+            tap(keyW3 * 1.5f, barY + 20.0f);   // a tecla '{' (a 2ª)
             check(g_editor.scriptWin.buf.size() == len0 + 1 &&
                       g_editor.scriptWin.caret == caret0 + 1 &&
-                      g_editor.scriptWin.buf[caret0] == ' ',
-                  "teclado ancorado: o ESPAÇO tecla no lugar certo "
-                  "(acima da barra de navegação — insere NO cursor)");
+                      g_editor.scriptWin.buf[caret0] == '{',
+                  "12.3 a barra dokada: o '{' tecla NO SÍTIO CERTO (sobre "
+                  "o IME injetado — insere NO cursor)");
+            vv::ime::setBottomInset(0.0f);   // o IME fecha
+            frame();
             // ---- 12.4 (G2-7c/R-010): o esqueleto fresco CORRE LIMPO ----
             {
                 openScriptEditor(g_scene.find("Ator"));
@@ -2314,8 +2317,8 @@ int main() {
             g_editor.docsScreen.open = false;
         }
 
-        // ---- 12.7 (G3): O TECLADO PRÓPRIO — setas, shift, coexistência --
-        passo("12.7 teclado próprio: setas movem o cursor, shift, política");
+        // ---- 12.7 (GRUPO E): A BARRA DE SÍMBOLOS — páginas, símbolos, IME --
+        passo("12.7 barra de simbolos: paginas, insercao no cursor, IME");
         {
             // portrait + insets T96/B48 (o par do editor)
             eglstub::g_surfaceW = 720;
@@ -2330,86 +2333,96 @@ int main() {
             g_ui.setFont(&g_font);
             openScriptEditor(g_scene.find("Ator"));
             g_editor.scriptWin.helpLevel = 2;   // strip fora (matemática)
-            g_editor.scriptWin.kbOpen = true;
+            // (a) a barra SÓ existe com o IME aberto (o inset REAL): com o
+            // inset a 0 o corpo é o de sempre; com o inset a barra dokada
+            // em h − inset − 40dp
+            vv::ime::setBottomInset(280.0f);
             frame();
-            const f32 unit = (720.0f - 16.0f - 9.0f * 6.0f) / 12.0f;
-            const f32 kbTop = 1536.0f - 48.0f -
-                              (5.0f * 48.0f + 4.0f * 6.0f + 2.0f * 8.0f);
-            const f32 botY = kbTop + 8.0f + 4.0f * (48.0f + 6.0f) + 24.0f;
-            // (a) AS SETAS: [ < ][ ^ ][ v ][ > ] — o cursor mexe-se
+            const f32 keyW = 720.0f / 14.0f;   // 14 teclas @720dp
+            const f32 barY = 1536.0f - 280.0f - 40.0f;
+            check(editor::scriptwin::symKeysVisible(720.0f) == 14u &&
+                      editor::scriptwin::symPageCount(720.0f) == 2u,
+                  "12.7 a 720dp: 14 teclas visíveis, 2 páginas (a adaptação)");
+            // as PÁGINAS cobrem os 24 símbolos da spec (união = o set TODO)
             {
+                bool seen[22] = {};
+                for (u32 pg = 0; pg < 2; ++pg) {
+                    g_editor.scriptWin.symPage = (u8)pg;
+                    // o padrao da 13.2: o pedido armado popula o registo
+                    g_layoutExportPending = true;
+                    frame();
+                    const auto& rec = g_ui.auditRecord();
+                    u32 keys = 0;
+                    for (const auto& en : rec.entries) {
+                        if (en.kind == vv::layout::Entry::Button &&
+                            en.id >= editor::scriptwin::kSymKeyBase &&
+                            en.id < editor::scriptwin::kSymKeyBase + 14 &&
+                            en.h >= 40.0f - 0.5f && en.w >= 40.0f - 0.5f) {
+                            ++keys;
+                        }
+                    }
+                    check(keys >= 8, "12.7 cada página da barra desenha as "
+                          "teclas (>=40dp cada, compactas da spec E)");
+                    // os símbolos da página: a tecla k da página pg é o
+                    // símbolo (pg*13 + k-1); a página 2 é CURTA (9)
+                    const u32 n = pg == 0 ? 13u : 9u;
+                    for (u32 k = 1; k <= n; ++k) {
+                        seen[pg * 13u + (k - 1u)] = true;
+                    }
+                }
+                u32 total = 0;
+                for (bool s : seen) {
+                    total += s ? 1u : 0u;
+                }
+                check(total == 22,
+                      "12.7 as 2 páginas cobrem os 22 símbolos da spec "
+                      "(a união é o set TODO)");
+            }
+            // (b) o SELETOR cicla 1/2 -> 2/2 -> 1/2 e os símbolos entram
+            // NO CURSOR (o MESMO applyEvent do IME)
+            {
+                g_editor.scriptWin.symPage = 0;
                 g_editor.scriptWin.buf = "abc";
+                ++g_editor.scriptWin.bufVersion;
                 g_editor.scriptWin.caret = 3;
-                tap(8.0f + unit * 0.5f, botY);          // <
-                check(g_editor.scriptWin.caret == 2,
-                      "12.7 a seta < recua o cursor");
-                tap(8.0f + 3.0f * (unit + 6.0f) + unit * 0.5f, botY);  // >
-                check(g_editor.scriptWin.caret == 3,
-                      "12.7 a seta > avança o cursor");
+                tap(keyW * 1.5f, barY + 20.0f);   // '{' (a 2ª tecla)
+                check(g_editor.scriptWin.buf == "abc{",
+                      "12.7 o '{' entra NO CURSOR (a 2ª tecla da página 1)");
+                tap(keyW * 0.5f, barY + 20.0f);   // o seletor
+                check(g_editor.scriptWin.symPage == 1,
+                      "12.7 o seletor cicla 1/2 -> 2/2");
+                tap(keyW * 1.5f, barY + 20.0f);   // '!' (1.º da página 2)
+                check(g_editor.scriptWin.buf == "abc{!",
+                      "12.7 o '!' entra NO CURSOR (a página 2 começa em '!')");
+                tap(keyW * 0.5f, barY + 20.0f);   // o seletor de volta
+                check(g_editor.scriptWin.symPage == 0,
+                      "12.7 o seletor cicla 2/2 -> 1/2 (o ciclo fecha)");
+                check(logHas("barra de simbolos -> pagina"),
+                      "12.7 o LOG da página existe (o dono segue no engine.log)");
+                check(logHas("simbolo '{' pela barra"),
+                      "12.7 o LOG do símbolo existe (um por tecla)");
             }
-            // (b) O SHIFT: a tecla Aa alterna maiúsculas/minúsculas
-            // 0.9.6.1 (G2-6b): o Aa mora NA GRELHA — fila 1 (2.ª de cima),
-            // 1.ª casa (antes saía do ecrã à direita na casa livre da fila
-            // de 9); TODAS as filas começam na margem de 8px (pad)
+            // (c) o IME FECHA (inset a 0): a barra SOME e o corpo volta
+            // ao tamanho de sempre (o par abrir/fechar do teclado)
             {
-                const f32 keyW = (720.0f - 16.0f - 9.0f * 6.0f) / 10.0f;
-                const f32 x0 = 8.0f;   // a margem da grelha (a MESMA em todas)
-                const f32 shX = x0 + keyW * 0.5f;
-                const f32 shY = kbTop + 8.0f + 1.0f * (48.0f + 6.0f) + 24.0f;
-                const bool lower0 = g_editor.scriptWin.kbLower;
-                tap(shX, shY);
-                check(g_editor.scriptWin.kbLower == !lower0,
-                      "12.7 a tecla Aa (na grelha) alterna maiúsculas/"
-                      "minúsculas");
-                // e o caso ATIVO escreve: a 1.ª tecla da fila 0 (o Q do
-                // QWERTY — o teclado deixou de ser alfabético)
-                const u32 len0 = (u32)g_editor.scriptWin.buf.size();
-                g_editor.scriptWin.caret = len0;
-                tap(x0 + keyW * 0.5f, kbTop + 8.0f + 24.0f);
-                check(g_editor.scriptWin.buf.size() == len0 + 1 &&
-                          (g_editor.scriptWin.buf[len0] == 'Q' ||
-                           g_editor.scriptWin.buf[len0] == 'q'),
-                      "12.7 o QWERTY escreve (a 1.ª tecla é o Q — a ordem "
-                      "alfabética morreu)");
-                // 0.9.6.1 (G2-6f): o LONG-PRESS no a dá o acento (0,5s)
-                g_editor.scriptWin.kbLower = true;
-                g_editor.scriptWin.kbLongId = 0;
-                g_editor.scriptWin.kbLongT = 0.0f;
-                g_editor.scriptWin.kbLongFired = false;
-                const u32 len1 = (u32)g_editor.scriptWin.buf.size();
-                g_editor.scriptWin.caret = len1;
-                // a 2.ª tecla da fila 1 é o a (depois do Aa na grelha)
-                const f32 aX = 8.0f + keyW + 6.0f + keyW * 0.5f;
-                const f32 aY = kbTop + 8.0f + 1.0f * (48.0f + 6.0f) + 24.0f;
-                g_input.injectDown(0, aX, aY);
-                frame(); frame(); frame();   // o press captura active_
-                g_editor.scriptWin.kbLongT = 0.6f;   // o relógio injetado
-                frame();   // o long-press dispara (a variante sai)
-                g_input.injectUp(0);
-                frame();   // o release NÃO repete (a variante já saiu)
-                // o acento mede 2 BYTES em UTF-8 (o code point inteiro —
-                // nunca parte bytes)
-                check(g_editor.scriptWin.buf.size() == len1 + 2 &&
-                          g_editor.scriptWin.buf.find("á") !=
-                              std::string::npos,
-                      "12.7 o long-press no a insere o acento (o ç/ã/á/é "
-                      "das vogais — 1 code point, 2 bytes UTF-8)");
-            }
-            // (c) A COEXISTÊNCIA: o botão do cabeçalho ABRE o próprio e
-            // o main ESCONDE o IME (result 7 → jniImeHide no registo JNI)
-            {
-                g_editor.scriptWin.kbOpen = false;
+                vv::ime::setBottomInset(0.0f);
+                g_layoutExportPending = true;   // o registo FRESCO (13.2)
                 frame();
-                tap(504.0f - 152.0f + 24.0f, 96.0f + 28.0f);
-                check(g_editor.scriptWin.kbOpen,
-                      "12.7 o BOTÃO abre o teclado próprio");
-                check(logHas("teclado próprio aberto"),
-                      "12.7 o main ESCONDEU o IME do sistema (política)");
-                // o toque no corpo CEDA (o IME do sistema é pedido)
-                tap(360.0f, 400.0f);
-                check(!g_editor.scriptWin.kbOpen,
-                      "12.7 o toque no corpo fecha o próprio (política: "
-                      "nunca os dois)");
+                const auto& rec = g_ui.auditRecord();
+                bool barKeys = false;
+                for (const auto& en : rec.entries) {
+                    if (en.kind == vv::layout::Entry::Button &&
+                        en.id >= editor::scriptwin::kSymKeyBase &&
+                        en.id < editor::scriptwin::kSymKeyBase + 14) {
+                        barKeys = true;
+                    }
+                }
+                check(!barKeys,
+                      "12.7 IME fechado (inset 0): a barra SOME (a barra "
+                      "pertence ao IME aberto)");
+                check(logHas("ime: fechado"),
+                      "12.7 o LOG do fecho do IME existe (uma linha por "
+                      "mudança do inset)");
             }
             closeScriptEditor();
             // volta ao landscape
@@ -2926,11 +2939,15 @@ int main() {
               "reais — applyDensity)");
         check(safe::kTopBarH == 56.0f && theme::dp(safe::kTopBarH) == 112.0f,
               "12.10 o dp() da casa multiplica pela densidade corrente");
-        // (b) o teclado do editor: teclas de 96px de altura (48dp real — o
-        // dono media 48×65px)
-        check(editor::scriptwin::keyboardHeight() ==
-                  5.0f * 96.0f + 4.0f * 12.0f + 2.0f * 16.0f,
-              "12.10 o teclado mede as teclas a 96px de altura (48dp real)");
+        // (b) 0.9.6.8 (GRUPO E · RECALIBRADO): o teclado da engine SAIU —
+        // a vara passa a aferir a BARRA DE SÍMBOLOS (a spec E: 40dp = 80px
+        // @2.0; as teclas ≥40dp de largura — 9 no device 360dp, 14 @720dp)
+        check(editor::scriptwin::symbolBarHeight() == 80.0f,
+              "12.10 a barra de simbolos mede 80px (40dp real — a spec E)");
+        check(editor::scriptwin::symKeysVisible(720.0f) == 9u &&
+                  editor::scriptwin::symKeysVisible(1440.0f) == 14u,
+              "12.10 as teclas da barra: >=40dp de largura (9 no portrait "
+              "do device 720px@2.0=360dp; 14 @720dp)");
         // (c) a densidade do ARRANQUE vem do AConfiguration (o main lê
         // 320→2.0; o log de identidade do ecrã existe no arranque)
         check(vv::theme::g_density == 2.0f,
@@ -2970,7 +2987,8 @@ int main() {
         g_ui.setFont(&g_font);
         openScriptEditor(g_scene.find("Ator"));
         g_editor.scriptWin.helpLevel = 2;   // strip fora (matemática limpa)
-        g_editor.scriptWin.kbOpen = false;
+        // (0.9.6.8 GRUPO E: o kbOpen MORREU com o teclado da engine — o
+        // IME fechado é o estado default do inset; nada a desligar aqui)
         frame();
         // a linha 3 do esqueleto: "  allmoments { }" — o centro dela no
         // corpo. 0.9.6.6 (GRUPO C · C2): TODOS os números vêm da GEOMETRIA
@@ -3271,9 +3289,11 @@ int main() {
             g_ui.setFont(&g_font);
             const Handle ator13 = g_scene.create("Ator");
             openScriptEditor(ator13);
-            // o TECLADO da engine aberto — o layout dele é o INSUMO do
-            // Grupo E (a barra de símbolos que o substitui)
-            g_editor.scriptWin.kbOpen = true;
+            // 0.9.6.8 (GRUPO E): o IME DO SISTEMA aberto (o inset injetado
+            // como a VvActivity manda) — a BARRA DE SÍMBOLOS de 40dp dokada
+            // sobre ele é o layout exportado (o teclado da engine MORREU)
+            g_editor.scriptWin.helpLevel = 2;   // strip fora (matemática)
+            vv::ime::setBottomInset(280.0f);
             frame();
             auto [png, js] = exportScreen("script");
             vv::RawImage img;
@@ -3284,13 +3304,60 @@ int main() {
             const layout::Record& rec = g_ui.auditRecord();
             check(std::string(rec.screen) == "script" &&
                       rec.entries.size() > 8,
-                  "13.3 o registo do script tem as entradas (header/teclado)");
-            u32 kb = 0;
-            for (auto& e : rec.entries) {
-                if (e.kind == layout::Entry::Button) ++kb;
+                  "13.3 o registo do script tem as entradas (header/barra)");
+            // (a) o VALIDADOR INTEIRO: 0 erros/0 avisos (a linha de base
+            // do Grupo C com a barra compacta — a exceção da spec E)
+            {
+                const auto probs = vv::layout::validate(rec);
+                u32 erros = 0, avisos = 0;
+                for (const auto& p : probs) {
+                    if (p.sev == vv::layout::Problem::Erro) ++erros;
+                    else ++avisos;
+                }
+                check(erros == 0 && avisos == 0,
+                      "13.3 o script com IME+barra passa o validador 0/0 "
+                      "(as teclas compactas de 40dp da spec E)");
             }
-            check(kb >= 10,
-                  "13.3 as teclas do teclado da engine estao registadas");
+            // (b) a BARRA: as teclas no sítio (>=40dp, compactas no JSON,
+            // dokadas em h-inset-40) e o SELETOR de página
+            u32 barKeys = 0, compactas = 0;
+            f32 barTop = -1.0f;
+            for (auto& e : rec.entries) {
+                if (e.kind == layout::Entry::Button &&
+                    (e.id == editor::scriptwin::kSymBarPageId ||
+                     (e.id >= editor::scriptwin::kSymKeyBase &&
+                      e.id < editor::scriptwin::kSymKeyBase + 14))) {
+                    ++barKeys;
+                    if (e.compact) ++compactas;
+                    if (e.h >= 39.5f &&
+                        (barTop < 0.0f || e.y < barTop)) {
+                        barTop = e.y;
+                    }
+                }
+            }
+            check(barKeys == 14,
+                  "13.3 a barra desenha as 14 teclas (o seletor + 13 "
+                  "simbolos da pagina 1 @720dp)");
+            check(compactas == barKeys,
+                  "13.3 TODAS as teclas da barra estao marcadas compactas "
+                  "no JSON (a excecao da spec E visivel)");
+            check(barTop > 0.0f && nearEqF(barTop, 1536.0f - 280.0f - 40.0f),
+                  "13.3 a barra dokada SOBRE o IME (y = h - inset - 40dp)");
+            // (c) o TECLADO DA ENGINE MORREU: nenhuma tecla do range
+            // antigo (kKbBase+40..60 do space/arrows/enter) — o Grupo E
+            {
+                bool fantasmas = false;
+                for (auto& e : rec.entries) {
+                    if (e.kind == layout::Entry::Button &&
+                        e.id >= editor::scriptwin::kSymKeyBase + 14 &&
+                        e.id <= editor::scriptwin::kSymKeyBase + 60) {
+                        fantasmas = true;   // as teclas antigas 6560+40..60
+                    }
+                }
+                check(!fantasmas,
+                      "13.3 o teclado da engine SAIU (nenhuma tecla antiga "
+                      "no registo — a REMOCAO do Grupo E)");
+            }
             fileapi::writeAll("layout-harness-script.png", png.data(), png.size());
             fileapi::writeAll("layout-harness-script.json", js.data(), js.size());
 
@@ -3334,6 +3401,151 @@ int main() {
                       "sao UM o inverso do outro (draw<->toque nunca drifta)");
             }
             closeScriptEditor();
+
+            // ---- (c2) 0.9.6.8 (GRUPO E) · FASE 13.8: O SCRIPT AO TAMANHO
+            // DO DEVICE (RMX3624 portrait: 720x1600@2.0 = 360x800dp) —
+            // o header flexível e a barra de símbolos no orçamento REAL
+            passo("13.8 script ao tamanho do device (360x800dp + IME)");
+            {
+                // o ciclo REAL da janela ao tamanho e densidade do device
+                onAppCmd(&app13p, APP_CMD_TERM_WINDOW);
+                eglstub::g_surfaceW = 720;
+                eglstub::g_surfaceH = 1600;
+                android_app app13d;
+                std::memset(&app13d, 0, sizeof(app13d));
+                vvstub::g_stubDensityDpi = 320;   // 2.0 — o device real
+                theme::setDensity(2.0f);
+                editor::applyDensity();
+                app13d.contentRect = {0, 48, 720, 1552};   // insets reais: 24dp top/bottom @2.0
+                onAppCmd(&app13d, APP_CMD_INIT_WINDOW);
+                if (!g_font.ok()) {
+                    const char* paths[] = {FONT_FIXTURE};
+                    g_font.loadFromPaths(paths, 1, 28.0f);
+                }
+                g_ui.setFont(&g_font);
+                // o TIC nasce DEPOIS do INIT (o reload do lifecycle re-cria
+                // a cena do último save — o "Ator" do 13.3 vivia em memória;
+                // o padrão do 13.3: create + open no ecrã já re-carregado)
+                const Handle ator13d = g_scene.create("Ator");
+                openScriptEditor(ator13d);
+                g_editor.scriptWin.helpLevel = 2;   // strip fora
+                // o IME do device: ~55% da altura em portrait (o GBoard
+                // no RMX3624 ~ 880px @2.0 = 440dp)
+                vv::ime::setBottomInset(880.0f);
+                frame();
+                // como a 13.7: o export escreve por currentScreenName()
+                // ("script") — a copia do device vai para artefactos proprios
+                auto [pngD, jsD] = exportScreen("script");
+                vv::RawImage imgD;
+                std::string errD;
+                check(vv::loadPng(pngD.data(), pngD.size(), imgD, errD) &&
+                          imgD.width == 720 && imgD.height == 1600,
+                      "13.8 o PNG do script-device e 720x1600 (o device)");
+                const layout::Record& rd = g_ui.auditRecord();
+                check(std::string(rd.screen) == "script" &&
+                          rd.density == 2.0f,
+                      "13.8 o registo diz o ecra CERTO na densidade 2.0");
+                // (1) O VALIDADOR INTEIRO no orçamento do device: o header
+                // flexível (tudo >=48dp, nada fora, nada sobreposto) e a
+                // barra compacta (>=40dp) — 0 erros/0 avisos
+                {
+                    const auto probs = vv::layout::validate(rd);
+                    u32 erros = 0, avisos = 0;
+                    for (const auto& p : probs) {
+                        if (p.sev == vv::layout::Problem::Erro) ++erros;
+                        else ++avisos;
+                    }
+                    check(erros == 0 && avisos == 0,
+                          "13.8 o script ao TAMANHO do device passa o "
+                          "validador 0/0 (o header flexível no aperto)");
+                }
+                // (2) O HEADER no aperto: os 6 alvos (back/run/stop/lupa/
+                // copy/help) TODOS dentro do ecrã 360dp, >=48dp, sem
+                // sobreposição (o antigo media helpX=-56dp: FORA!)
+                {
+                    u32 hdr48 = 0;
+                    f32 minX = 1e9f, maxX = -1e9f;
+                    for (const auto& e : rd.entries) {
+                        if (e.kind == vv::layout::Entry::Button &&
+                            e.y < 200.0f && !e.compact) {
+                            // os botões do header (y no topo, não-compactos)
+                            if (e.w >= 96.0f - 0.5f &&
+                                e.h >= 96.0f - 0.5f) {
+                                ++hdr48;   // 48dp @2.0 = 96px
+                            }
+                            minX = e.x < minX ? e.x : minX;
+                            maxX = (e.x + e.w) > maxX ? (e.x + e.w) : maxX;
+                        }
+                    }
+                    check(hdr48 >= 5,
+                          "13.8 o header do device: >=5 alvos de 48dp "
+                          "inteiros (96px @2.0)");
+                    check(minX >= -0.5f && maxX <= 720.0f + 0.5f,
+                          "13.8 o header do device: NADA fora do ecrã "
+                          "(o antigo helpX media -56dp!)");
+                }
+                // (3) A BARRA no device: 9 teclas (360dp/40dp), dokada
+                // sobre o IME (y = h - inset - 80px), TODAS compactas
+                {
+                    u32 barKeys = 0;
+                    f32 barTop = -1.0f;
+                    f32 keyW = 0.0f;
+                    for (const auto& e : rd.entries) {
+                        if (e.kind == vv::layout::Entry::Button && e.compact) {
+                            ++barKeys;
+                            if (barTop < 0.0f) {
+                                barTop = e.y;
+                                keyW = e.w;
+                            }
+                        }
+                    }
+                    check(barKeys == 9,
+                          "13.8 a barra no device: 9 teclas (360dp/40dp)");
+                    check(nearEqF(barTop, 1600.0f - 880.0f - 80.0f),
+                          "13.8 a barra dokada sobre o IME do device "
+                          "(h - 880px - 80px)");
+                    check(nearEqF(keyW, 720.0f / 9.0f) && keyW >= 80.0f - 0.5f,
+                          "13.8 as teclas do device >=40dp de largura (80px @2.0)");
+                    check(editor::scriptwin::symPageCount(720.0f) == 3u,
+                          "13.8 o device tem 3 paginas (22 simbolos / 8 por pagina)");
+                }
+                // (4) o título FLEXIONA no aperto: a 360dp o header é
+                // back+botões (a zona do título <48dp — o label SOME em
+                // vez de sangrar/sobrepor)
+                {
+                    // a zona do HEADER: y em [48..160] px (inset 48 + 56dp
+                    // = 112px @2.0) — SÓ o título/subtítulo vivem aí; o
+                    // código começa DEBAIXO (os labels do corpo não contam)
+                    // a zona do TÍTULO: o header tem Run/Stop à direita
+                    // (x=521/630) e a 1ª linha de código no topo do corpo
+                    // (y~153) — o título vive em x<titleX+folga e y ACIMA
+                    // do corpo (o topo do label < 150px)
+                    bool tituloSangra = false;
+                    bool algumTitulo = false;
+                    for (const auto& e : rd.entries) {
+                        if (e.kind == vv::layout::Entry::Label &&
+                            e.y < 150.0f && e.x < 152.0f) {
+                            algumTitulo = true;   // sobrou título?
+                            if (e.x + e.w > 152.0f) {   // helpX@2.0=76dp*2
+                                tituloSangra = true;
+                            }
+                        }
+                    }
+                    check(!tituloSangra && !algumTitulo,
+                          "13.8 o título flexiona: no device estreito o "
+                          "label SOME (nada sangra a zona dos botões)");
+                }
+                fileapi::writeAll("layout-harness-script-device.png",
+                                  pngD.data(), pngD.size());
+                fileapi::writeAll("layout-harness-script-device.json",
+                                  jsD.data(), jsD.size());
+                vv::ime::setBottomInset(0.0f);
+                closeScriptEditor();
+                // repõe o harness (1536x720 @1.0) para o 13.4+
+                onAppCmd(&app13d, APP_CMD_TERM_WINDOW);
+                vvstub::g_stubDensityDpi = 160;
+                theme::setDensity(1.0f);
+            }
 
             // ---- (d) O DOCS + (e) O BROWSER de volta ao landscape -------
             passo("13.4 docs + 13.5 browser: os ecras restantes (landscape)");

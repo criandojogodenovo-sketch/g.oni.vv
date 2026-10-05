@@ -38,6 +38,11 @@ struct Entry {
     f32  fullW = 0;       // Label: largura do texto INTEIRO (antes do fit)
     bool truncated = false;   // labelFitted que cortou com "…"
     bool clipped = false;     // desenhado dentro de um clip de scroll
+    // 0.9.6.8 (GRUPO E): a tecla da BARRA DE SÍMBOLOS (spec do autor: 40dp
+    // — o precedente da pega do drawer, também da spec E). O piso compacto
+    // continua VIGIADO (40dp): a sentinela R-027 prova que compacto a 39dp
+    // FALHA e que um botão REGULAR a 40dp também falha (a exceção é estreita)
+    bool compact = false;
 
     bool interactive() const {
         return kind == Button || kind == Scroll || kind == Slider;

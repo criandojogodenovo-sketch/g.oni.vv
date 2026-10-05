@@ -137,6 +137,13 @@ public:
                            u8 style);
     bool button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text);
 
+    // 0.9.6.8 (GRUPO E) — A TECLA COMPACTA da barra de símbolos: o MESMO
+    // button() com a entrada de audit marcada `compact` (o piso do toque é
+    // o 40dp da spec E em vez do 48dp da casa — o validador e a sentinela
+    // R-027 vigiam o piso compacto: 39dp continua a FALHAR)
+    bool buttonCompact(u64 id, f32 x, f32 y, f32 w, f32 h,
+                       const char* text);
+
     // 0.7.6 — CAPTURA DE GESTO sem desenho (a toolbar desenha os próprios
     // botões: ícones/segmented da ui/Toolbar). MESMA semântica do button():
     // press edge dentro do rect captura active_; release dentro = clique.
@@ -446,6 +453,9 @@ private:
     layout::Record audit_;
     bool           auditing_ = false;
     u32            auditComposite_ = 0;
+    // 0.9.6.8 (GRUPO E): viva SÓ durante buttonCompact() — a 1ª entrada
+    // Button apanha-a (auditAdd_); nunca escapa da chamada
+    bool           auditCompactNext_ = false;
 };
 
 } // namespace vv
