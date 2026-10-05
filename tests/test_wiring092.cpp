@@ -330,10 +330,11 @@ TEST(scriptwin_ime_append_del_enter) {
         vv::editor::scriptwin::applyEvent(e.st.scriptWin, ev);
     }
     // o texto entrou NO CARET (interior do allmoments), não no fim
+    // 0.9.6.2 (R-019): o ENTER herda a indentação da linha (2 espaços)
     EXPECT(e.st.scriptWin.buf ==
            "central main {\n"
            "  on moment { }\n"
-           "  allmoments { v++a=1\nb}\n"
+           "  allmoments { v++a=1\n  b}\n"
            "}\n");
     // DEL apaga o code point ANTES do caret
     vv::ime::pushKey(vv::ime::Key::Del);
@@ -342,7 +343,7 @@ TEST(scriptwin_ime_append_del_enter) {
     EXPECT(e.st.scriptWin.buf ==
            "central main {\n"
            "  on moment { }\n"
-           "  allmoments { v++a=1\n}\n"
+           "  allmoments { v++a=1\n  }\n"
            "}\n");
     vv::editor::scriptwin::close(e.st.scriptWin);
 }

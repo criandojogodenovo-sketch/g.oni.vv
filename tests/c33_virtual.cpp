@@ -2728,6 +2728,94 @@ int main() {
               "(os testes não mudam)");
     }
 
+    // ---- 12.11 (0.9.6.2 · R-019): O TOQUE MOVE O CURSOR ---------------------
+    // O dono: "no editor de script o cursor nunca fica dentro de
+    // 'on moment { }' nem de 'allmoments { }'; fica sempre fora... torna o
+    // editor inutilizável". A CAUSA: o tap CALCULAVA o offset e nunca o
+    // aplicava ao caret. AQUI o teste EXATO do dono, pelo caminho REAL da
+    // UI: tocar ENTRE as chavetas de "allmoments { }" → o caret fica aí;
+    // escrever "x" insere aí.
+    passo("12.11 toque entre as chavetas move o cursor e escreve aí (R-019)");
+    {
+        // app PRÓPRIO (o app12 saiu de escopo no fim do 12.9) — o MESMO
+        // padrão: superfície portrait + insets T96/B48, INIT_WINDOW
+        eglstub::g_surfaceW = 720;
+        eglstub::g_surfaceH = 1536;
+        android_app app11;
+        std::memset(&app11, 0, sizeof(app11));
+        app11.contentRect = {0, 96, 720, 1488};
+        onAppCmd(&app11, APP_CMD_INIT_WINDOW);
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+        openScriptEditor(g_scene.find("Ator"));
+        g_editor.scriptWin.helpLevel = 2;   // strip fora (matemática limpa)
+        g_editor.scriptWin.kbOpen = false;
+        frame();
+        // a linha 3 do esqueleto: "  allmoments { }" — o centro dela no
+        // corpo (body.y = 96+56; conteúdo a dp(8) + i*lh; lh = 34 com a
+        // fonte da casa: 21+7+6)
+        const f32 lh = 34.0f;
+        const f32 bodyY = 96.0f + 56.0f;
+        const f32 yLine3 = bodyY + 8.0f + 2.0f * lh + lh * 0.5f;
+        // x do INTERIOR das chavetas: 64 (xCode) + largura REAL de
+        // "  allmoments { " (métricas da MESMA fonte que o draw usa) + 1px
+        const f32 xBraces = 64.0f + g_font.widthOf("  allmoments { ") + 1.0f;
+        const u32 caret0 = g_editor.scriptWin.caret;
+        tap(xBraces, yLine3);
+        check(g_editor.scriptWin.caret == caret0 &&
+                  g_editor.scriptWin.buf.find("allmoments {") !=
+                      std::string::npos,
+              "12.11 preparar: o esqueleto com o caret no interior");
+        // (a) o TOQUE põe o cursor ENTRE as chavetas (antes era ignorado)
+        check(g_editor.scriptWin.caret ==
+                  (u32)g_editor.scriptWin.buf.find("allmoments { ") + 13,
+              "12.11 tocar entre as chavetas põe o caret AÍ (offset sob o "
+              "dedo aplicado — o bug: calculava e não aplicava)");
+        // (b) escrever "x" insere NO CARET (não no fim)
+        const u32 at = g_editor.scriptWin.caret;
+        vv::ime::clearForTest();
+        vv::ime::pushText("x");
+        vv::ime::Event ev;
+        while (vv::ime::poll(ev)) {
+            vv::editor::scriptwin::applyEvent(g_editor.scriptWin, ev);
+        }
+        check(g_editor.scriptWin.buf.find("allmoments { x}") !=
+                      std::string::npos &&
+                  g_editor.scriptWin.caret == at + 1,
+              "12.11 escrever \"x\" insere ENTRE as chavetas (o dono vê o "
+              "código nascer onde tocou)");
+        // (c) o toque no MEIO da linha 2 ("on moment") move para lá
+        const f32 yLine2 = bodyY + 8.0f + 1.0f * lh + lh * 0.5f;
+        tap(64.0f + g_font.widthOf("  on ") + 2.0f, yLine2);
+        check(g_editor.scriptWin.caret > 15 && g_editor.scriptWin.caret < 31,
+              "12.11 tocar no meio da linha 2 põe o cursor NA linha 2 "
+              "(coluna pelas métricas reais)");
+        // (d) ENTER aí cria linha nova INDENTADA (o herda-indentação)
+        vv::ime::clearForTest();
+        vv::ime::pushKey(vv::ime::Key::Enter);
+        while (vv::ime::poll(ev)) {
+            vv::editor::scriptwin::applyEvent(g_editor.scriptWin, ev);
+        }
+        {
+            const u32 c = g_editor.scriptWin.caret;
+            const u32 ls =
+                editor::scriptwin::lineStartOfOffset(g_editor.scriptWin.buf,
+                                                     c);
+            check(g_editor.scriptWin.buf.compare(ls, 2, "  ") == 0,
+                  "12.11 o ENTER herda a indentação da linha (o código "
+                  "nasce alinhado)");
+        }
+        // o log do toque existe (o dono segue o cursor no engine.log)
+        check(logHas("editor: toque x="),
+              "12.11 o toque LOGA px/dp/linha/coluna/caret (R-019)");
+        closeScriptEditor();
+        // TERM (o par do lifecycle — o estado fica limpo p/ o sumário)
+        onAppCmd(&app11, APP_CMD_TERM_WINDOW);
+    }
+
     // ---- sumário -----------------------------------------------------------
     std::printf("\n== C33 VIRTUAL: %d check(s), %d falha(s) ==\n", g_checks, g_failed);
     if (g_failed == 0) {

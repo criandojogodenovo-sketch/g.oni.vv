@@ -55,7 +55,6 @@
 
 #include <string>
 #include <vector>
-
 namespace vv {
 class InputState;
 class Scene;
@@ -157,6 +156,54 @@ void close(State& st);
 bool applyEvent(State& st, const ime::Event& ev);
 
 u32 lineCount(const State& st);
+
+// ---- 0.9.6.2 (R-019) · A GEOMETRIA DO CURSOR — funções PURAS/aferváveis ---
+// O BUG que o dono apanhou no device: o toque no corpo CALCULAVA o offset
+// sob o dedo mas NUNCA O APLICAVA ao caret (só alimentava a palavra da
+// dica) — o cursor ficava para sempre onde estava (fim do buffer nos
+// scripts guardados) e "não dava para escrever onde se quer". Estas funções
+// são a fonte única da conversão toque↔offset (o draw usa-as; os testes
+// aférram-nas com métricas simuladas):
+//
+// início (em bytes) da linha que contém o offset / coluna (bytes desde o
+// início da linha)
+u32 lineStartOfOffset(const std::string& s, u32 off);
+u32 columnOfOffset(const std::string& s, u32 off);
+// linha (0-based) e fim (offset do \n ou do fim) da linha que contém off
+u32 lineIndexOf(const std::string& s, u32 off);
+u32 lineEndOf(const std::string& s, u32 lineStart);
+// o caret mais próximo de x DENTRO da linha dada, com a largura REAL de
+// cada code point (WidthFn: const char* → largura px) — desconta meia
+// largura (o toque no meio do carácter escolhe-o); nunca passa do fim da
+// linha. UTF-8: mede o CODE POINT inteiro (um acento não conta 2)
+template <typename WidthFn>
+u32 caretInLineForX(const std::string& line, f32 x, WidthFn&& widthOf) {
+    u32 off = 0;
+    f32 acc = 0.0f;
+    const u32 n = static_cast<u32>(line.size());
+    while (off < n) {
+        // o code point inteiro (o byte seguinte nunca é continuação)
+        u32 nxt = off + 1;
+        while (nxt < n &&
+               (static_cast<unsigned char>(line[nxt]) & 0xC0u) == 0x80u) {
+            ++nxt;
+        }
+        char one[8];
+        const u32 len = nxt - off < sizeof(one) - 1 ? nxt - off
+                                                    : (u32)sizeof(one) - 1;
+        std::memcpy(one, line.data() + off, len);
+        one[len] = '\0';
+        const f32 cw = widthOf(one);
+        if (acc + cw * 0.5f >= x) {
+            return off;   // o toque caiu antes/aqui deste carácter
+        }
+        acc += cw;
+        off = nxt;
+    }
+    return off;   // além do fim da linha — caret no fim
+}
+// a indentação da linha dada (espaços iniciais — o ENTER copia-a)
+std::string indentationOfLine(const std::string& line);
 
 // ---- 0.9.5 · O EDITOR QUE ENSINA (puro/afervável — o registo alimenta) ---
 // a palavra que TERMINA no caret (a meio da digitação — a mini-descrição

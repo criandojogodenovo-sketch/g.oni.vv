@@ -30,6 +30,7 @@ add_executable(test_core
         test_saf_project.cpp
         test_assetpersist.cpp
         test_bench.cpp   # 0.9.6 (G6 · R-017): benchmarks reais (puras)
+        test_editor_buffer.cpp   # 0.9.6.2 (R-019): o buffer e o cursor do editor
         test_ui.cpp
         test_project.cpp
         test_import_obj.cpp

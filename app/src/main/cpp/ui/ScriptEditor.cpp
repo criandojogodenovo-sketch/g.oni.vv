@@ -17,6 +17,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "platform/EngineLog.h"   // 0.9.6.2 (R-019): o log do cursor/toque
+
 namespace vv {
 struct InputState;
 
@@ -108,6 +110,44 @@ u32 lineStartOf(const std::string& s, u32 off) {
 u32 columnOf(const std::string& s, u32 off) {
     return off - lineStartOf(s, off);
 }
+
+} // namespace
+
+// ---- 0.9.6.2 (R-019) · A GEOMETRIA DO CURSOR — as versões EXPORTADAS ----
+// (o toque no corpo e os testes partilham ESTAS funções — a fonte única da
+// conversão y/x de ecrã → offset no buffer)
+u32 lineStartOfOffset(const std::string& s, u32 off) {
+    return lineStartOf(s, off);
+}
+u32 columnOfOffset(const std::string& s, u32 off) {
+    return columnOf(s, off);
+}
+u32 lineIndexOf(const std::string& s, u32 off) {
+    u32 line = 0;
+    u32 i = off < s.size() ? off : static_cast<u32>(s.size());
+    for (u32 k = 0; k < i; ++k) {
+        if (s[k] == '\n') {
+            ++line;
+        }
+    }
+    return line;
+}
+u32 lineEndOf(const std::string& s, u32 lineStart) {
+    u32 e = lineStart < s.size() ? lineStart : static_cast<u32>(s.size());
+    while (e < s.size() && s[e] != '\n') {
+        ++e;
+    }
+    return e;
+}
+std::string indentationOfLine(const std::string& line) {
+    u32 i = 0;
+    while (i < line.size() && line[i] == ' ') {
+        ++i;
+    }
+    return line.substr(0, i);
+}
+
+namespace {
 
 void insertAtCaret(State& st, const char* utf8) {
     if (!utf8 || !*utf8) {
@@ -443,6 +483,8 @@ bool applyEvent(State& st, const ime::Event& ev) {
     if (st.caret > st.buf.size()) {
         st.caret = static_cast<u32>(st.buf.size());
     }
+    const u32 caretBefore = st.caret;
+    const bool wasEnd = st.caret == st.buf.size();
     // 0.9.5: qualquer EDIÇÃO limpa a explicação do toque (a strip volta à
     // mini-descrição em tempo real da palavra que está a ser digitada)
     if (ev.isText || ev.key == ime::Key::Del || ev.key == ime::Key::Enter) {
@@ -451,15 +493,35 @@ bool applyEvent(State& st, const ime::Event& ev) {
     }
     if (ev.isText) {
         insertAtCaret(st, ev.text.c_str());
+        // 0.9.6.2 (R-019): o LOG do cursor (o evento com o índice ANTES e
+        // DEPOIS — o dono segue a edição linha a linha no engine.log)
+        elog::info("editor: texto '%s' caret %u -> %u %s",
+                   ev.text.c_str(), caretBefore, st.caret,
+                   wasEnd ? "(fim)" : "");
         return true;
     }
     switch (ev.key) {
         case ime::Key::Del:
             chopBeforeCaret(st);
+            elog::info("editor: apagar caret %u -> %u", caretBefore,
+                       st.caret);
             return true;
-        case ime::Key::Enter:
-            insertAtCaret(st, "\n");
+        case ime::Key::Enter: {
+            // 0.9.6.2 (R-019): o ENTER herda a INDENTAÇÃO da linha corrente
+            // (o novo código nasce alinhado — nos dois teclados, o mesmo
+            // applyEvent). O teclado do sistema nunca trata Enter como
+            // "concluir": a ponte manda KEYCODE_ENTER (VvActivity) e o
+            // IME_FLAG_NO_ENTER_ACTION está posto (0.9.6.1-d)
+            const u32 ls = lineStartOf(st.buf, st.caret);
+            const std::string indent = indentationOfLine(
+                st.buf.substr(ls, lineEndOf(st.buf, ls) - ls));
+            std::string nl = "\n";
+            nl += indent;
+            insertAtCaret(st, nl.c_str());
+            elog::info("editor: enter caret %u -> %u (indent %u)",
+                       caretBefore, st.caret, (u32)indent.size());
             return true;
+        }
         case ime::Key::Tab: {
             // 0.9.5 · OS ESQUELETOS POR TAB: a palavra antes do caret é
             // substituída pelo esqueleto da entrada do REGISTO (o texto do
@@ -1109,7 +1171,13 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
             // cabeçalho faz o INVERSO (abre o próprio + esconde o IME,
             // result 7). NUNCA os dois ao mesmo tempo.
             st.kbOpen = false;
-            // a linha/coluna do toque → o offset em bytes → a palavra
+            // 0.9.6.2 (R-019) · O TOQUE MOVE O CARET — a linha vem do y+scroll
+            // e a coluna da largura REAL de cada code point, descontando a
+            // coluna dos números de linha (a linha e a coluna do draw usam a
+            // MESMA matemática: dp(8) + i*lh a partir de body.y). A CAUSA do
+            // bug: o offset era CALCULADO e nunca aplicado — o cursor ficava
+            // para sempre onde estava. Agora: caret = o carácter mais
+            // próximo; a dica de palavra continua a ler o MESMO offset.
             {
                 const f32 lh2 = lineHeight(ui);
                 const f32 off2 = ui.scrollOffset();
@@ -1122,29 +1190,35 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
                 if (li >= nL) {
                     li = nL - 1;
                 }
-                // início em bytes da linha li
+                // início em bytes da linha li (lineStartOfOffset — a MESMA
+                // função que os testes aférram)
                 u32 ls2 = 0;
                 for (u32 k = 0; k < li && ls2 < st.buf.size(); ++k) {
-                    while (ls2 < st.buf.size() && st.buf[ls2] != '\n') {
-                        ++ls2;
-                    }
+                    ls2 = lineEndOf(st.buf, ls2);
                     if (ls2 < st.buf.size()) {
                         ++ls2;
                     }
                 }
-                // coluna: acumula a largura até passar o x do toque
+                // coluna: o carácter mais próximo pelas métricas REAIS, por
+                // CODE POINT (um acento não conta 2 — o old media por BYTE)
                 const f32 xCode = ins.left + theme::dp(64.0f);
-                u32 bo = ls2;
-                f32 acc = 0.0f;
-                while (bo < st.buf.size() && st.buf[bo] != '\n') {
-                    char one[2] = {st.buf[bo], 0};
-                    const f32 cw = ui.fontWidth(one);
-                    if (acc + cw * 0.5f >= tx - xCode) {
-                        break;
-                    }
-                    acc += cw;
-                    ++bo;
-                }
+                const u32 le2 = lineEndOf(st.buf, ls2);
+                const std::string line =
+                    st.buf.substr(ls2, le2 - ls2);
+                const u32 col = caretInLineForX(
+                    line, tx - xCode,
+                    [&](const char* one) { return ui.fontWidth(one); });
+                const u32 bo = ls2 + col;
+                // ★ O FIX: o offset sob o dedo PASSA A SER o cursor ★
+                st.caret = bo;
+                st.blink = 0.0f;   // o caret acende logo (o dono vê o salto)
+                // o LOG do toque (px E dp, scroll, linha/coluna, índice)
+                const f32 d = theme::g_density;
+                elog::info("editor: toque x=%.0fpx y=%.0fpx (%.0f %.0f dp) "
+                           "scroll=%.0f -> linha %u col %u caret %u",
+                           (double)tx, (double)ty, (double)(tx / d),
+                           (double)(ty / d), (double)off2, li + 1,
+                           col + 1, st.caret);
                 const std::string word = wordAtOffset(st, bo);
                 if (!word.empty() && voni::reg::find(word)) {
                     st.helpTapped = true;

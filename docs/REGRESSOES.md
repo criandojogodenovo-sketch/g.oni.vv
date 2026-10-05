@@ -293,3 +293,18 @@ Prova de mutação (colada em /home/z/my-project/mutacao-R017-vermelho-verde.txt
 | Padrão proibido | (nenhum — a vigília é a sentinela + a FASE 12.10) |
 
 Prova de mutação (executada localmente antes do push): `dp()` revertido a identidade (`return v;`) → `regress_density_escala_dp` FALHOU em 4 asserções exatas (bar.h==112 FALHOU · dp(48)==96 FALHOU · status.h==48 FALHOU · keyboardHeight teclas 96px FALHOU); reposto → 818/0. A verificação no DEVICE (as medidas do dono: cabeçalho 112px, botões 96px, teclas ≥96px de altura) fica na checklist do APK desta fase — o que o CI prova é o mecanismo (o device é a vara de medir).
+
+## R-019 · o toque nunca movia o cursor do editor de script (FASE 0.9.6.2)
+
+| campo | valor |
+|---|---|
+| ID | R-019 |
+| Reportado | task 0.9.6.2 (URGENTE): "no editor de script o cursor nunca fica dentro de 'on moment { }' nem de 'allmoments { }'; fica sempre fora. Não dá para mudar de linha nem para escrever onde se quer. Isto torna o editor inutilizável" |
+| Sintoma exato | tocar no corpo do código não fazia NADA ao cursor; tudo o que se digitava caía no MESMO sítio (o fim do buffer — os scripts guardados abrem com caret = buf.size()); o Enter inseria no fim, nunca entre as chavetas |
+| Causa raiz | (leitura do código, scriptwin::draw) o toque no corpo CALCULAVA o offset sob o dedo (`bo` — linha pelo y+scroll, coluna acumulando larguras) e NUNCA O APLICAVA ao caret: `bo` só alimentava a palavra da dica (`wordAtOffset(st, bo)`); faltava `st.caret = bo`. A aritmética da coluna media BYTE a byte (um acento contava 2) |
+| Fix | (1) o tap aplica o offset: `st.caret = bo` + blink a zero (o dono vê o salto); (2) a coluna passou a code point inteiro (`caretInLineForX` — função pura no header com métricas injetadas: o toque no meio do carácter escolhe-o pela meia largura; UTF-8 nunca parte bytes); (3) o ENTER herda a indentação da linha (`indentationOfLine`); (4) o LOG do cursor: cada toque loga x/y em px E dp + scroll + linha/coluna/caret; cada evento IME loga o índice ANTES→DEPOIS — o dono segue o cursor no engine.log; (5) a sincronização com o IME do sistema é inerente ao desenho da casa (o EditText NUNCA acumula texto — cada commit devolve true sem super; o buffer é SÓ da engine e o sistema é um espelho que nunca repõe o cursor) |
+| Teste sentinela | tests/test_editor_buffer.cpp (6 casos, pelo caminho PÚBLICO applyEvent): inserir no MEIO (não no fim) · apagar e juntar linhas · Enter herda indentação · índice↔linha/coluna · toque com métricas simuladas (fixa, proporcional e UTF-8) · o caret nunca salta para o fim + FASE 12.11 do c33_virtual (o teste EXATO do dono pela UI REAL: tocar entre as chavetas de "allmoments { }" → o caret fica aí; escrever "x" insere aí; tocar no meio da linha 2 move para lá; Enter indenta; o log do toque existe) |
+| Linha do replay | FASE 12.11 do c33_virtual (323→329 checks) |
+| Padrão proibido | (nenhum — a vigília é a sentinela + a FASE 12.11) |
+
+Prova de mutação (executada localmente antes do push): o `st.caret = bo` removido (o offset volta a ser ignorado) → a FASE 12.11 FALHOU no check "(c) tocar no meio da linha 2 põe o cursor NA linha 2" (o tap deixou de mover o cursor — a razão certa; o check (a) passou por acaso: o caret inicial do esqueleto JÁ está entre as chavetas); reposto → 329/0 + 824/0 (818 + 6 novos casos do buffer).
