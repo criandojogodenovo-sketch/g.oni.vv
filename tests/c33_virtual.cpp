@@ -1204,13 +1204,13 @@ int main() {
         tap(504.0f - 152.0f + 24.0f, 28.0f);
         check(g_editor.scriptWin.kbOpen,
               "o BOTÃO do cabeçalho abre o teclado próprio (G3)");
-        // tecla A (linha 0, col 0) do teclado desenhado
+        // tecla Q (linha 0, col 0) do teclado desenhado — 0.9.6.1: a grelha
+        // QWERTY começa na margem única de 8px (o antigo x0 centrado caía
+        // NO VÃO entre teclas)
         {
             const f32 keyW = (720.0f - 16.0f - 9.0f * 6.0f) / 10.0f;
-            const f32 rowW = 9.0f * keyW + 8.0f * 6.0f;
-            const f32 x0 = (720.0f - rowW) * 0.5f;
-            const f32 kbTop = 1536.0f - 8.0f - (5.0f * 48.0f + 4.0f * 6.0f + 16.0f);
-            tap(x0 + keyW * 0.5f, kbTop + 8.0f + 24.0f);
+            const f32 kbTop = 1536.0f - (5.0f * 48.0f + 4.0f * 6.0f + 16.0f);
+            tap(8.0f + keyW * 0.5f, kbTop + 8.0f + 24.0f);
         }
         check(g_editor.scriptWin.buf.size() == bufBefore + 1,
               "a tecla do teclado in-app entra pelo MESMO applyEvent");
@@ -2342,26 +2342,52 @@ int main() {
                       "12.7 a seta > avança o cursor");
             }
             // (b) O SHIFT: a tecla Aa alterna maiúsculas/minúsculas
+            // 0.9.6.1 (G2-6b): o Aa mora NA GRELHA — fila 1 (2.ª de cima),
+            // 1.ª casa (antes saía do ecrã à direita na casa livre da fila
+            // de 9); TODAS as filas começam na margem de 8px (pad)
             {
-                // a tecla Aa: 10ª coluna da 3ª fila de letras (row 2)
                 const f32 keyW = (720.0f - 16.0f - 9.0f * 6.0f) / 10.0f;
-                const f32 rowW = 9.0f * keyW + 8.0f * 6.0f;
-                const f32 x0 = (720.0f - rowW) * 0.5f;
-                const f32 shX = x0 + 9.0f * (keyW + 6.0f) + keyW * 0.5f;
-                const f32 shY = kbTop + 8.0f + 2.0f * (48.0f + 6.0f) + 24.0f;
+                const f32 x0 = 8.0f;   // a margem da grelha (a MESMA em todas)
+                const f32 shX = x0 + keyW * 0.5f;
+                const f32 shY = kbTop + 8.0f + 1.0f * (48.0f + 6.0f) + 24.0f;
                 const bool lower0 = g_editor.scriptWin.kbLower;
                 tap(shX, shY);
                 check(g_editor.scriptWin.kbLower == !lower0,
-                      "12.7 a tecla Aa alterna maiúsculas/minúsculas");
-                // e o caso ATIVO escreve: tecla A da 1ª fila
+                      "12.7 a tecla Aa (na grelha) alterna maiúsculas/"
+                      "minúsculas");
+                // e o caso ATIVO escreve: a 1.ª tecla da fila 0 (o Q do
+                // QWERTY — o teclado deixou de ser alfabético)
                 const u32 len0 = (u32)g_editor.scriptWin.buf.size();
                 g_editor.scriptWin.caret = len0;
-                tap(x0 + keyW * 0.5f,
-                    kbTop + 8.0f + 24.0f);
+                tap(x0 + keyW * 0.5f, kbTop + 8.0f + 24.0f);
                 check(g_editor.scriptWin.buf.size() == len0 + 1 &&
-                          (g_editor.scriptWin.buf[len0] == 'A' ||
-                           g_editor.scriptWin.buf[len0] == 'a'),
-                      "12.7 a tecla escreve NO CASO selecionado");
+                          (g_editor.scriptWin.buf[len0] == 'Q' ||
+                           g_editor.scriptWin.buf[len0] == 'q'),
+                      "12.7 o QWERTY escreve (a 1.ª tecla é o Q — a ordem "
+                      "alfabética morreu)");
+                // 0.9.6.1 (G2-6f): o LONG-PRESS no a dá o acento (0,5s)
+                g_editor.scriptWin.kbLower = true;
+                g_editor.scriptWin.kbLongId = 0;
+                g_editor.scriptWin.kbLongT = 0.0f;
+                g_editor.scriptWin.kbLongFired = false;
+                const u32 len1 = (u32)g_editor.scriptWin.buf.size();
+                g_editor.scriptWin.caret = len1;
+                // a 2.ª tecla da fila 1 é o a (depois do Aa na grelha)
+                const f32 aX = 8.0f + keyW + 6.0f + keyW * 0.5f;
+                const f32 aY = kbTop + 8.0f + 1.0f * (48.0f + 6.0f) + 24.0f;
+                g_input.injectDown(0, aX, aY);
+                frame(); frame(); frame();   // o press captura active_
+                g_editor.scriptWin.kbLongT = 0.6f;   // o relógio injetado
+                frame();   // o long-press dispara (a variante sai)
+                g_input.injectUp(0);
+                frame();   // o release NÃO repete (a variante já saiu)
+                // o acento mede 2 BYTES em UTF-8 (o code point inteiro —
+                // nunca parte bytes)
+                check(g_editor.scriptWin.buf.size() == len1 + 2 &&
+                          g_editor.scriptWin.buf.find("á") !=
+                              std::string::npos,
+                      "12.7 o long-press no a insere o acento (o ç/ã/á/é "
+                      "das vogais — 1 code point, 2 bytes UTF-8)");
             }
             // (c) A COEXISTÊNCIA: o botão do cabeçalho ABRE o próprio e
             // o main ESCONDE o IME (result 7 → jniImeHide no registo JNI)

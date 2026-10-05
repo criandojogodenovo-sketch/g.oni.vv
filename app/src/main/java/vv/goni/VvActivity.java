@@ -345,10 +345,24 @@ public class VvActivity extends NativeActivity {
             @Override
             public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
                 final InputConnection base = super.onCreateInputConnection(outAttrs);
+                // 0.9.6.1 (G2-7) — FLAGS DE CÓDIGO: o editor escreve V.ONI —
+                // a barra "ty / Ty / tu" do teclado pode ALTERAR o código
+                // (autocorreção). Pede-se: sem sugestões, sem maiúscula
+                // automática (o CAP_SENTENCES NÃO é posto), multi-linha e o
+                // Enter nunca tratado como "concluir" (IME_ACTION_NONE +
+                // NO_ENTER_ACTION). Teclados que ignorarem as flags ficam
+                // visíveis no log (o compositor aparece — ver abaixo).
                 outAttrs.inputType = InputType.TYPE_CLASS_TEXT
-                        | InputType.TYPE_TEXT_FLAG_MULTI_LINE;
+                        | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                        | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
                 outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
+                        | EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
                         | EditorInfo.IME_ACTION_NONE;
+                Log.i("GONI", "ime: flags de código pedidas (inputType="
+                        + Integer.toHexString(outAttrs.inputType)
+                        + " imeOptions="
+                        + Integer.toHexString(outAttrs.imeOptions)
+                        + ") — sem sugestões/autocorreção/enter-action");
                 return new InputConnectionWrapper(base, true) {
                     @Override
                     public boolean commitText(CharSequence text, int newCursorPosition) {
@@ -358,6 +372,23 @@ public class VvActivity extends NativeActivity {
                             Log.e("GONI", "ime: nativeOnImeText FALHOU", t);
                         }
                         return true;   // SEM super: o host fica VAZIO
+                    }
+
+                    @Override
+                    public boolean setComposingText(CharSequence text,
+                                                    int newCursorPosition) {
+                        // 0.9.6.1 (G2-7): a COMPOSIÇÃO é o sinal do teclado
+                        // a sugerir — com NO_SUGGESTIONS posto, um teclado
+                        // que compose texto está a IGNORAR as flags; o log
+                        // regista (o texto NÃO vai para a engine — o buffer
+                        // só recebe commits, uma única fonte de verdade)
+                        if (text != null && text.length() > 0) {
+                            Log.i("GONI", "ime: o teclado está a COMPOR '"
+                                    + text + "' — se as flags de código "
+                                    + "forem ignoradas, a barra de "
+                                    + "sugestões aparece aqui");
+                        }
+                        return super.setComposingText(text, newCursorPosition);
                     }
 
                     @Override

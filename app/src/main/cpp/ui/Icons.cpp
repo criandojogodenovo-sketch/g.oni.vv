@@ -741,6 +741,22 @@ constexpr Polyline kKeyboardLines[] = {
     {15, 2},                             // a barra
 };
 
+// ---- Erase (0.9.6.1 G2-6c — a tecla APAGA do teclado próprio: o rótulo
+// "APAGA" truncava a "APA…" — ícone backspace: pentagono + ×) ---------------
+constexpr f32 kErasePts[] = {
+    8.0f, 6.0f,   22.0f, 6.0f,    // o corpo (pentagono fechado à esquerda)
+    22.0f, 6.0f,  22.0f, 18.0f,
+    22.0f, 18.0f, 8.0f, 18.0f,
+    8.0f, 18.0f,  3.0f, 12.0f,
+    3.0f, 12.0f,  8.0f, 6.0f,
+    12.0f, 10.0f, 16.0f, 14.0f,   // o ×
+    16.0f, 10.0f, 12.0f, 14.0f,
+};
+constexpr Polyline kEraseLines[] = {
+    {0, 2}, {2, 2}, {4, 2}, {6, 2}, {8, 2},   // o pentagono
+    {10, 2}, {12, 2},                          // o ×
+};
+
 const IconDef kDefs[] = {
     {kMovePts,          12, kMoveLines,          6},
     {kRotatePts,        18, kRotateLines,        4},
@@ -794,6 +810,7 @@ const IconDef kDefs[] = {
     {kStaticPts,        14, kStaticLines,        7},
     {kRigidPts,         20, kRigidLines,        10},
     {kKeyboardPts,      32, kKeyboardLines,      12},
+    {kErasePts,         14, kEraseLines,         7},
 };
 static_assert(sizeof(kDefs) / sizeof(kDefs[0]) ==
               static_cast<size_t>(Icon::Count), "tabela de ícones incompleta");

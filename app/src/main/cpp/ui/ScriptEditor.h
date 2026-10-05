@@ -73,6 +73,7 @@ constexpr u64 kHelpLevelId = 6555; // I/N/S — nível da ajuda (0.9.5)
 constexpr u64 kCopyRefId = 6556;   // 📋 copiar referência V.ONI (0.9.5)
 constexpr u64 kFixId = 6557;   // 0.9.6 (G2-7e): botão SUBSTITUIR da barra de erro
 constexpr u64 kKbToggleId = 6558; // 0.9.6 (G3): botão do TECLADO PRÓPRIO (cabeçalho)
+constexpr u64 kHintStripId = 6559; // 0.9.6.1 (G2-8): a dica insere o esqueleto
 constexpr u64 kKbBase = 6560;   // teclas do teclado in-app (40 + 8 da base)
 
 constexpr f32 kTopH = 56.0f;    // barra de topo (padrão D)
@@ -116,6 +117,12 @@ struct State {
     bool kbOpen = false;
     bool kbSym = false;
     bool kbLower = false;       // abc/ABC
+    // 0.9.6.1 (G2-6f): o LONG-PRESS nas vogais (e no c) — a tecla premida,
+    // o tempo acumulado e se a variante acentuada já saiu (o release então
+    // NÃO escreve a letra base)
+    u64 kbLongId = 0;
+    f32 kbLongT = 0.0f;
+    bool kbLongFired = false;
     // 0.9.5 · EDITOR QUE ENSINA: o nível da ajuda (0=Iniciante com
     // exemplos, 1=Normal 1 linha, 2=Silencioso nada) + a palavra tocada
     // (o toque numa palavra mostra a explicação com exemplo — das Docs)

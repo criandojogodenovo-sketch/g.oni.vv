@@ -89,6 +89,8 @@ enum class Icon : u8 {
     Rigid,          // corpo RÍGIDO (bola com rasto de queda — tic_rigid)
     // ---- 0.9.6 (G3 — o teclado próprio do editor de script) ----
     Keyboard,       // teclado (rect + 2 filas de teclas)
+    // ---- 0.9.6.1 (G2-6c — a tecla APAGA do teclado próprio) ----
+    Erase,          // backspace (pentagono + × — o rótulo APA… truncava)
     Count
 };
 

@@ -192,19 +192,67 @@ constexpr f32 kKbKeyH = 48.0f;      // alvo ≥48dp (× densidade ao desenhar �
 constexpr f32 kKbGap  = 6.0f;
 constexpr f32 kKbPad  = 8.0f;
 
-// rótulos das páginas (NULL = fim da linha)
+// 0.9.6.1 (G2-6e) · QWERTY — o PORQUÊ do alfabético: o teclado nasceu na
+// FASE 9 (G0-1) como uma grelha de 9 colunas preenchida A..Z por ordem (a
+// "lista de letras"), não como um teclado — nunca foi layout de digitação.
+// AGORA é QWERTY com TODAS as filas alinhadas na mesma margem (pad) e
+// teclas da MESMA largura (o dono media margens 43px vs 8px); o shift Aa
+// mora NA GRELHA (1.ª tecla da fila 1 — saía do ecrã à direita).
+// 0.9.6.1 (G2-6f): o ç/acentos entram por LONG-PRESS nas vogais e no c.
 const char* const kKbLetters[kKbRows][10] = {
-    {"A", "B", "C", "D", "E", "F", "G", "H", "I", nullptr},
-    {"J", "K", "L", "M", "N", "O", "P", "Q", "R", nullptr},
-    {"S", "T", "U", "V", "W", "X", "Y", "Z", "_", nullptr},
+    {"Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"},
+    {nullptr, "A", "S", "D", "F", "G", "H", "J", "K", "L"},  // 0 = Aa (shift)
+    {"Z", "X", "C", "V", "B", "N", "M", "_", nullptr, nullptr},
     {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"},
 };
+// a página 123 (G2-6f): { } ( ) [ ] = + - * / < > ! , . ; : " _ # @ TODOS
+// presentes (a spec exige) + os extras que a linguagem usa
 const char* const kKbSymbols[kKbRows][10] = {
-    {"{", "}", "(", ")", "[", "]", "<", ">", "=", nullptr},
-    {"+", "-", "*", "/", "\\", "!", "?", ":", ";", nullptr},
-    {"\"", "'", "@", "#", "$", "%", "&", "|", "~", "^"},
-    {".", ",", "0", "1", "2", "3", "4", "5", "6", "7"},
+    {"{", "}", "(", ")", "[", "]", "=", "+", "-", "*"},
+    {"/", "<", ">", "!", ",", ".", ";", ":", "\"", "_"},
+    {"#", "@", "$", "%", "&", "|", "~", "^", "\\", "'"},
+    {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"},
 };
+// as VARIANTES do long-press (a 1ª premida longa dá a 1ª; repetindo o
+// tempo, cicla) — a casa livre (nullptr) fica com a letra base
+struct LongPressVariants {
+    const char* key;        // a letra base (minúscula)
+    const char* variants;   // acentos, um por tecla (cicla)
+};
+const LongPressVariants kKbLong[6] = {
+    {"a", "\xC3\x81\xC3\x83\xC3\x80\xC3\x82"},   // Á Ã À Â
+    {"e", "\xC3\x89\xC3\x8A"},                        // É Ê
+    {"i", "\xC3\x8D"},                                  // Í
+    {"o", "\xC3\x93\xC3\x95\xC3\x94"},              // Ó Õ Ô
+    {"u", "\xC3\x9A"},                                  // Ú
+    {"c", "\xC3\x87"},                                  // Ç
+};
+
+// 0.9.6.1 (G2-6f) — a VARIANTE do long-press (vogais + c): a tabela por
+// letra base, MAIÚSCULA e minúscula (o acento acompanha o caso da tecla);
+// idx cicla enquanto o dedo fica premido
+const char* longVariant(char baseLower, u32 idx, bool lower) {
+    static const char* const kUpper[] = {"Á", "Ã", "À", "Â", "É", "Ê",
+                                         "Í", "Ó", "Õ", "Ô", "Ú", "Ç"};
+    static const char* const kLower[] = {"á", "ã", "à", "â", "é", "ê",
+                                         "í", "ó", "õ", "ô", "ú", "ç"};
+    struct Map {
+        char key;      // a letra base
+        u8  first;     // índice da 1.ª variante (minúscula / maiúscula)
+        u8  count;
+    };
+    static const Map kMap[6] = {
+        {'a', 0, 4}, {'e', 4, 2}, {'i', 6, 1},
+        {'o', 7, 3}, {'u', 10, 1}, {'c', 11, 1},
+    };
+    for (const Map& m : kMap) {
+        if (m.key == baseLower) {
+            const u32 k = idx % m.count;
+            return lower ? kLower[m.first + k] : kUpper[m.first + k];
+        }
+    }
+    return nullptr;
+}
 
 // o label da tecla (página corrente; lower aplica-se só às letras)
 const char* keyLabel(const State& st, u32 row, u32 col) {
@@ -226,7 +274,7 @@ const char* keyLabel(const State& st, u32 row, u32 col) {
 // desenha o teclado DOKADO no fundo (acima da barra de erro; acima do
 // INSET DE BAIXO desde 0.9.6 — a última tecla nunca fica sob a barra de
 // navegação); devolve true se alguma tecla EMITIU texto (para o log)
-bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop) {
+bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop, f32 dt) {
     // 0.9.6 (G1/G3): o teclado vive DENTRO do contentRect (laterais)
     // 0.9.6.1 (PASSO 0): keyH/gap/pad em dp REAL (o dono media teclas
     // 48×65 px no device — metade do pedido)
@@ -246,49 +294,90 @@ bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop) {
     bool typed = false;
     f32 y = kbTop + pad;
     for (u32 row = 0; row < kKbRows; ++row) {
-        const u32 n = row == 3 ? 10 : 9;   // linhas 0..2 têm 9 teclas
-        const f32 rowW = static_cast<f32>(n) * keyW +
-                         static_cast<f32>(n - 1) * gap;
-        f32 x = kbX + (kbW - rowW) * 0.5f;
-        for (u32 col = 0; col < n; ++col) {
-            const char* lbl = keyLabel(st, row, col);
+        // 0.9.6.1 (G2-6a): TODAS as filas começam na MESMA margem (pad) e
+        // usam a MESMA largura de tecla — o dono media margens 43px vs 8px
+        f32 x = kbX + pad;
+        for (u32 col = 0; col < 10; ++col) {
             const u64 id = kKbBase + static_cast<u64>(row) * 10u +
                            static_cast<u64>(col);
+            // 0.9.6.1 (G2-6b) · O SHIFT Aa NA GRELHA (fila 1, 1.ª casa):
+            // cabia inteiro à força (na casa livre da fila de 9 saía do
+            // ecrã à direita); alterna maiúsculas/minúsculas — não escreve
+            if (row == 1 && col == 0) {
+                const bool caps = !st.kbLower;
+                const bool held = ui.widgetActive(id);
+                ui.panelRounded(x, y, keyW, keyH,
+                                theme::dp(theme::kRadiusCard),
+                                held ? theme::kTheme.surface2
+                                     : (caps ? theme::kTheme.accent
+                                             : theme::kTheme.surface));
+                ui.frameRounded(x, y, keyW, keyH, 1.0f,
+                                theme::dp(theme::kRadiusCard),
+                                caps ? theme::kTheme.accent
+                                     : theme::kTheme.border);
+                if (ui.hasFont()) {
+                    const f32 tw = ui.fontWidth("Aa");
+                    ui.label(x + (keyW - tw) * 0.5f,
+                             theme::centeredBaseline(
+                                 ui.textMetrics().ascent,
+                                 ui.textMetrics().descent, y, keyH, 12.0f),
+                             "Aa", caps ? theme::kTheme.bg
+                                        : theme::kTheme.text1);
+                }
+                if (ui.widgetHit(id, x, y, keyW, keyH)) {
+                    st.kbLower = !st.kbLower;   // troca de caso — NÃO escreve
+                }
+                x += keyW + gap;
+                continue;
+            }
+            const char* lbl = keyLabel(st, row, col);
+            if (!lbl || !lbl[0]) {
+                x += keyW + gap;   // casa livre (fila curta) — mantém a grelha
+                continue;
+            }
+            // 0.9.6.1 (G2-6f) · O LONG-PRESS (vogais + c): a variante
+            // acentuada sai a 0,5s e cicla enquanto o dedo fica premido;
+            // o release então NÃO escreve a letra base
+            const bool held = ui.widgetActive(id);
+            if (held && !st.kbSym && row != 3) {
+                if (st.kbLongId != id) {
+                    st.kbLongId = id;
+                    st.kbLongT = 0.0f;
+                    st.kbLongFired = false;
+                } else {
+                    st.kbLongT += dt;
+                    if (st.kbLongT >= 0.5f) {
+                        static u32 s_longIdx[40] = {};
+                        const u32 slot = row * 10u + col;
+                        if (const char* v = longVariant(
+                                lbl[0] >= 'A' && lbl[0] <= 'Z'
+                                    ? static_cast<char>(lbl[0] - 'A' + 'a')
+                                    : lbl[0],
+                                s_longIdx[slot]++, st.kbLower)) {
+                            ime::Event ev;
+                            ev.isText = true;
+                            ev.text = v;
+                            applyEvent(st, ev);
+                            typed = true;
+                        }
+                        st.kbLongFired = true;
+                        st.kbLongT = 0.0f;
+                    }
+                }
+            }
             if (ui.button(id, x, y, keyW, keyH, lbl)) {
-                ime::Event ev;
-                ev.isText = true;
-                ev.text = lbl;
-                applyEvent(st, ev);
-                typed = true;
+                if (st.kbLongFired && st.kbLongId == id) {
+                    st.kbLongFired = false;   // a variante já saiu — o
+                                              // release não repete
+                } else {
+                    ime::Event ev;
+                    ev.isText = true;
+                    ev.text = lbl;
+                    applyEvent(st, ev);
+                    typed = true;
+                }
             }
             x += keyW + gap;
-        }
-        // 0.9.6 (G3) · O SHIFT na casa LIVRE da 3ª fila (row 2): alterna
-        // maiúsculas/minúsculas — NÃO escreve; aceso quando MAIÚSCULAS
-        if (row == 2) {
-            const UiRect rs{x, y, keyW, keyH};
-            const bool caps = !st.kbLower;
-            const bool held = ui.widgetActive(kKbBase + 46);
-            ui.panelRounded(rs.x, rs.y, rs.w, rs.h, theme::dp(theme::kRadiusCard),
-                            held ? theme::kTheme.surface2
-                                 : (caps ? theme::kTheme.accent
-                                         : theme::kTheme.surface));
-            ui.frameRounded(rs.x, rs.y, rs.w, rs.h, 1.0f,
-                            theme::dp(theme::kRadiusCard),
-                            caps ? theme::kTheme.accent
-                                 : theme::kTheme.border);
-            if (ui.hasFont()) {
-                const f32 tw = ui.fontWidth("Aa");
-                ui.label(rs.x + (rs.w - tw) * 0.5f,
-                         theme::centeredBaseline(ui.textMetrics().ascent,
-                                                 ui.textMetrics().descent,
-                                                 rs.y, rs.h, 14.0f),
-                         "Aa",
-                         caps ? theme::kTheme.bg : theme::kTheme.text1);
-            }
-            if (ui.widgetHit(kKbBase + 46, rs.x, rs.y, rs.w, rs.h)) {
-                st.kbLower = !st.kbLower;   // troca de caso — NÃO escreve
-            }
         }
         y += keyH + gap;
     }
@@ -365,12 +454,30 @@ bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop) {
         }
     }
     x += unit + gap;
-    if (ui.button(kKbBase + 42, x, y, 1.5f * unit, keyH, "APAGA")) {
-        ime::Event ev;
-        ev.isText = false;
-        ev.key = ime::Key::Del;
-        applyEvent(st, ev);
-        typed = true;
+    {
+        // 0.9.6.1 (G2-6c): a tecla APAGA é o ÍCONE Erase (o rótulo
+        // "APAGA" truncava a "APA…" na tecla de 1,5 unidades)
+        const UiRect re{x, y, 1.5f * unit, keyH};
+        const bool pressed = ui.widgetHit(kKbBase + 42, re.x, re.y, re.w,
+                                          re.h);
+        const bool held = ui.widgetActive(kKbBase + 42);
+        ui.panelRounded(re.x, re.y, re.w, re.h,
+                        theme::dp(theme::kRadiusCard),
+                        held ? theme::kTheme.surface2
+                             : theme::kTheme.surface);
+        ui.frameRounded(re.x, re.y, re.w, re.h, 1.0f,
+                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
+        icons::drawIcon(ui, icons::Icon::Erase,
+                        re.x + (re.w - theme::dp(24.0f)) * 0.5f,
+                        re.y + (re.h - theme::dp(24.0f)) * 0.5f,
+                        theme::dp(24.0f), theme::kTheme.text1);
+        if (pressed) {
+            ime::Event ev;
+            ev.isText = false;
+            ev.key = ime::Key::Del;
+            applyEvent(st, ev);
+            typed = true;
+        }
     }
     x += 1.5f * unit + gap;
     if (ui.button(kKbBase + 43, x, y, 1.5f * unit, keyH, "ENTER")) {
@@ -1079,32 +1186,78 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     // desde 0.9.6 — nunca sob a barra de navegação), acima da strip de ajuda
     if (st.kbOpen) {
         drawKeyboard(ui, st, w,
-                     h - ins.bottom - errBarH - stripH - keyboardHeight());
+                     h - ins.bottom - errBarH - stripH - keyboardHeight(),
+                     dt);
     }
 
-    // ---- a STRIP DE AJUDA (0.9.5): entre o teclado e a barra de erro -----
+    // ---- a STRIP DE AJUDA (0.9.5): entre o teclado e a barra de erro ----
+    // 0.9.6.1 (G2-8): a dica QUEBRA POR PALAVRAS (textwrap::wrap — a
+    // métrica real da fonte) com ALTURA MÁXIMA DE 2 LINHAS (o texto cortava
+    // no limite direito do ecrã) e um TOQUE NA DICA insere o esqueleto da
+    // palavra (o mesmo Tab do editor que ensina). A faixa fica ACIMA do
+    // teclado e FORA da área do código (o corpo já lhe dá a altura).
     if (stripH > 0.0f) {
         const f32 stripY = h - ins.bottom - errBarH - kbH - stripH;
         ui.panel(ins.left, stripY, contentW, stripH, theme::kTheme.surface);
         ui.panel(ins.left, stripY, contentW, 1.0f, theme::kTheme.border);
         ui.panel(ins.left, stripY + 1.0f, theme::dp(3.0f), stripH - 1.0f,
                  theme::kTheme.accent);   // risca accent à esquerda
-        // linha 1 (truncada à largura útil — labelStyled corta com "…")
+        // a linha 1 (nome: descrição) QUEBRADA por palavras — o caso de 2
+        // linhas só acontece quando NÃO há exemplo (a linha do exemplo
+        // ocupa o 2.º slot); o máximo é SEMPRE 2 linhas
         char l1[200];
         std::snprintf(l1, sizeof(l1), "%s", strip1.c_str());
-        ui.labelStyled(ins.left + theme::dp(12.0f),
-                       stripY + theme::dp(8.0f), l1,
-                       theme::kTheme.text1,
-                       theme::fontScale(theme::kFontCaption),
-                       static_cast<u32>(contentW - theme::dp(24.0f)));
-        if (!strip2.empty()) {
+        const f32 maxW = contentW - theme::dp(24.0f);
+        std::vector<textwrap::Line> lines;
+        textwrap::wrap(l1, strip2.empty() ? maxW : maxW,
+                       [&](const char* s) { return ui.fontWidth(s); },
+                       lines);
+        if (lines.size() > 2) {
+            lines.resize(2);   // a altura máxima da strip
+        }
+        const f32 lhStrip = theme::dp(20.0f);
+        f32 ly = stripY + theme::dp(10.0f);
+        for (const textwrap::Line& ln : lines) {
+            char seg[200];
+            const u32 n = ln.len < sizeof(seg) - 1 ? ln.len
+                                                   : (u32)sizeof(seg) - 1;
+            std::memcpy(seg, l1 + ln.begin, n);
+            seg[n] = '\0';
+            ui.labelStyled(ins.left + theme::dp(12.0f), ly, seg,
+                           theme::kTheme.text1,
+                           theme::fontScale(theme::kFontCaption),
+                           static_cast<u32>(maxW));
+            ly += lhStrip;
+        }
+        if (!strip2.empty() && lines.size() < 2) {
             char l2[200];
             std::snprintf(l2, sizeof(l2), "%s", strip2.c_str());
             ui.labelStyled(ins.left + theme::dp(12.0f),
                            stripY + theme::dp(30.0f), l2,
                            theme::kTheme.text2,
                            theme::fontScale(theme::kFontCaption),
-                           static_cast<u32>(contentW - theme::dp(24.0f)));
+                           static_cast<u32>(maxW));
+        }
+        // O TOQUE NA DICA insere o ESQUELETO da palavra (a palavra antes do
+        // caret trocada pelo esqueleto do registo — o MESMO caminho do Tab)
+        if (ui.widgetHit(kHintStripId, ins.left, stripY, contentW, stripH)) {
+            const voni::reg::Entry* e = helpEntryFor(st);
+            if (e && e->skeleton && *e->skeleton &&
+                e->skeletonCaret <= std::strlen(e->skeleton)) {
+                const std::string w0 = wordBeforeCaret(st);
+                const u32 ws =
+                    st.caret - static_cast<u32>(w0.size());
+                if (w0.size() <= st.caret) {
+                    st.buf.erase(ws, w0.size());
+                    st.caret = ws;
+                    insertAtCaret(st, e->skeleton);
+                    st.caret = ws + e->skeletonCaret;
+                    st.helpTapped = false;
+                    st.helpWord.clear();
+                    elog::info("editor: a dica inseriu o esqueleto de '%s' "
+                               "(toque na strip)", e->name);
+                }
+            }
         }
     }
 
