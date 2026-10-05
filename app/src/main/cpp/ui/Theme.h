@@ -134,12 +134,63 @@ constexpr f32 kFontScreen  = 20.0f;
 inline constexpr f32 fontScale(f32 sp) { return sp / 14.0f; }
 
 // 0.9.6 (G1-2) — BASelines do CABEÇALHO PADRÃO (a parte útil de 56dp):
-// o par título(20sp)+subtítulo(12sp) CENTRADO e SEM CORTE — o bloco real
-// do título a 20sp é ~35px (topo a 1,3dp do cabeçalho, fundo 35,6) e o
-// subtítulo ocupa 36..55. As 4 telas (Docs/Settings/Script/Texto) usam
-// ESTAS constantes — mesma fonte de verdade do resto do layout.
+// fallback para quando AINDA não há métricas de fonte (o par título(20sp)+
+// subtítulo(12sp) CENTRADO e SEM CORTE). 0.9.6.1: as 4 telas (Docs/
+// Settings/Script/Texto) derivam as baselines DAS MÉTRICAS REAIS da fonte
+// (headerBaselines abaixo — o bloco inteiro centrado na parte útil, em
+// qualquer densidade); estas constantes ficam como fallback px.
 constexpr f32 kHeaderTitleBase = 29.0f;   // baseline do título no cabeçalho
 constexpr f32 kHeaderSubBase   = 51.0f;   // baseline do subtítulo
+
+// ---- DENSIDADE (0.9.6.1 · PASSO 0 — R-018: dp usado como px) ---------------
+// A CAUSA RAIZ que o dono mediu no device: as constantes do design system
+// (barra 56dp, alvos 48dp, teclas 48dp) eram constexpr EM DP mas consumidas
+// COMO PX CRUS — no C33 (densidade 2.0) o cabeçalho media 56px (~29dp
+// reais), os botões 48px e as teclas 48×65px: metade do pedido. A CORREÇÃO
+// NA ORIGEM: UMA função dp() multiplica pela densidade do device e TODAS as
+// fontes únicas de layout (SafeArea/EditorLayout + os componentes) passam
+// por ela ao desenhar. A densidade chega do AConfiguration_getDensity
+// (== DisplayMetrics.density×160) no arranque (platform/main.cpp) e é
+// LOGADA em px e dp (o log de identidade do ecrã). Em testes/harness a
+// densidade é 1.0 → dp(v)==v → layout de SEMPRE (o c33_virtual prova o
+// mecanismo com 2.0 injetados — FASE 12.10 + a sentinela R-018).
+inline f32 g_density = 1.0f;                       // DisplayMetrics.density
+inline void setDensity(f32 d) { g_density = d > 0.05f ? d : 1.0f; }
+inline f32  dp(f32 v) { return v * g_density; }    // A função dp→px da casa
+
+// baselines do CABEÇALHO PADRÃO a partir das MÉTRICAS REAIS da fonte: o
+// bloco título(20sp)+subtítulo(12sp) CENTRADO na parte útil (nada cortado
+// no topo, o subtítulo por baixo sem tocar o limite) — a causa do corte
+// eram baselines FIXAS px (29/51) com o cabeçalho a meia altura. As
+// métricas chegam em px de base (atlas 28px) e escalam por sp aqui.
+struct HeaderBaselines {
+    f32 title;    // baseline do título (20sp)
+    f32 sub;      // baseline do subtítulo (12sp)
+};
+inline HeaderBaselines headerBaselines(f32 ascentBase, f32 descentBase,
+                                       f32 hdrH) {
+    const f32 aT = ascentBase * (kFontScreen / 14.0f);
+    const f32 dT = descentBase * (kFontScreen / 14.0f);
+    const f32 aS = ascentBase * (kFontCaption / 14.0f);
+    const f32 dS = descentBase * (kFontCaption / 14.0f);
+    const f32 gap = dp(4.0f);
+    const f32 block = aT + dT + gap + aS + dS;
+    const f32 top = (hdrH - block) * 0.5f;
+    if (top < 0.0f || aT <= 0.0f) {
+        return {kHeaderTitleBase, kHeaderSubBase};   // fallback do constante
+    }
+    return {top + aT, top + aT + dT + gap + aS};
+}
+
+// baseline de UM texto centrado na vertical de um rect (métricas reais) —
+// o mesmo padrão do textBaseline dos componentes, agora FONTES ÚNICA
+// (Run/Stop/N cortados no topo = offset fixo +14 px; agora centrado)
+inline f32 centeredBaseline(f32 ascentBase, f32 descentBase, f32 rectY,
+                            f32 rectH, f32 sp) {
+    const f32 a = ascentBase * (sp / 14.0f);
+    const f32 d = descentBase * (sp / 14.0f);
+    return rectY + (rectH - (a + d)) * 0.5f + a;
+}
 
 // ---- RAIOS (cantos curvos por escadaria de quads) ---------------------------
 constexpr f32 kRadiusCard  = 8.0f;   // cards/botões primários

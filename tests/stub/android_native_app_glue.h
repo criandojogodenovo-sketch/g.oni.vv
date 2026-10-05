@@ -13,11 +13,13 @@
 struct JavaVM;
 struct JNIEnv;
 struct ANativeActivity;
+struct AConfiguration;   // 0.9.6.1 (PASSO 0): densidade (stub android/configuration.h)
 
 struct android_app {
     ANativeActivity* activity;
     ANativeWindow* window;
     ARect contentRect;
+    AConfiguration* config;   // 0.9.6.1: o main lê a densidade daqui (stub)
     int destroyRequested;
     void (*onAppCmd)(android_app*, int32_t);
     int32_t (*onInputEvent)(android_app*, AInputEvent*);

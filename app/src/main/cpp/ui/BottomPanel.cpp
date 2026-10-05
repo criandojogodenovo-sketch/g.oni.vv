@@ -52,17 +52,18 @@ Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st) {
     Layout L;
     L.tabBar = safe::bottomTabRect(sw, sh, in);
     L.status = safe::statusRect(sw, sh, in);
-    // drawerH: clamp 160..400, passos de 8 (spec E)
+    // drawerH: clamp 160..400dp, passos de 8dp (spec E) — 0.9.6.1: em dp
+    // REAL (R-018: os limites eram px crus)
     f32 d = st.drawerH;
-    if (d < safe::kDrawerMin) {
-        d = safe::kDrawerMin;
+    if (d < theme::dp(safe::kDrawerMin)) {
+        d = theme::dp(safe::kDrawerMin);
     }
-    if (d > safe::kDrawerMax) {
-        d = safe::kDrawerMax;
+    if (d > theme::dp(safe::kDrawerMax)) {
+        d = theme::dp(safe::kDrawerMax);
     }
-    d = std::floor(d / 8.0f) * 8.0f;
+    d = std::floor(d / theme::dp(8.0f)) * theme::dp(8.0f);
     L.drawer = {in.left, L.tabBar.y - d, sw - in.left - in.right, d};
-    L.handle = {in.left, L.drawer.y, sw - in.left - in.right, 12.0f};
+    L.handle = {in.left, L.drawer.y, sw - in.left - in.right, theme::dp(12.0f)};
     L.drawerTop = L.drawer.y;
     const f32 third = L.tabBar.w / 3.0f;
     L.tab[0] = {L.tabBar.x, L.tabBar.y, third, L.tabBar.h};

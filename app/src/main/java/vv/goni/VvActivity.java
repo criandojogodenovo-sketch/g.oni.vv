@@ -132,6 +132,22 @@ public class VvActivity extends NativeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // 0.9.6.1 (PASSO 0 · R-018) — a IDENTIDADE DO ECRÃ no log do
+        // arranque, do lado Java: a densidade EXATA do DisplayMetrics (a
+        // mesma que o nativo deriva do AConfiguration) + a superfície em px
+        // e em dp. O dono mediu o cabeçalho a 56px num ecrã de densidade 2.0
+        // — com este log as duas pontas (Java/nativo) provam a escala.
+        try {
+            final android.util.DisplayMetrics dm = getResources()
+                    .getDisplayMetrics();
+            Log.i("GONI", "display: densidade " + dm.density
+                    + " (dpi " + dm.densityDpi + ") · superficie "
+                    + dm.widthPixels + "x" + dm.heightPixels + " px ("
+                    + dm.widthPixels / dm.density + "x"
+                    + dm.heightPixels / dm.density + " dp)");
+        } catch (Throwable t) {
+            Log.e("GONI", "display: log de densidade falhou", t);
+        }
         // 0.8.10 — identidade ANTES de tudo (o crash handler precisa dela
         // o mais cedo possível): BuildConfig + assets/build_info.txt do CI
         try {

@@ -136,6 +136,10 @@ struct State {
 // erro; o caret segue; o erro limpa)
 void applyFix(State& st);
 
+// altura total do teclado in-app (4 linhas + linha de baixo) em dp REAL —
+// exposta para os testes/harness aférem o alvo 48dp (R-018)
+f32 keyboardHeight();
+
 // guarda o NOME do TIC dono (G0-1: o handle morre no TERM→INIT da rotação
 // portrait — o reload do INIT_WINDOW re-cria os TICs; o main re-valida por
 // NOME, o mesmo padrão da seleção 0.8.12)

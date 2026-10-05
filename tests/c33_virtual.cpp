@@ -2681,6 +2681,53 @@ int main() {
         onAppCmd(&app12, APP_CMD_TERM_WINDOW);
     }
 
+    // ---- 12.10 (0.9.6.1 · PASSO 0 · R-018): A DENSIDADE — dp a dp -----------
+    // O DONO mediu no device: cabeçalho 56px (devia ser 112), teclas 48×65px
+    // (metade de 48dp). A CAUSA: constantes dp consumidas como px. O FIX: a
+    // função theme::dp() na FONTE (SafeArea/EditorLayout/componentes). AQUI
+    // a prova do mecanismo: com densidade 2.0 INJETADA (o par do C33) os
+    // rects do layout duplicam; com 1.0 ficam IGUAIS ao de sempre (o resto
+    // do harness inteiro corre a 1.0 — os checks acima são a prova).
+    passo("12.10 densidade: dp×2 injetado → barra 112, alvos 96 (R-018)");
+    {
+        // (a) a densidade chega do AConfiguration (o caminho REAL do device:
+        // 320 dpi ÷ 160 = 2.0) e o layout da barra escala
+        vvstub::g_stubDensityDpi = 320;
+        theme::setDensity(2.0f);
+        editor::applyDensity();
+        const safe::Insets zero{};
+        const UiRect bar = safe::toolbarRect(1536.0f, 720.0f, zero);
+        check(bar.h == 112.0f,
+              "12.10 com densidade 2.0 a barra de cima mede 112px (56dp "
+              "REAL — o bug era 56px)");
+        const UiRect status = safe::statusRect(1536.0f, 720.0f, zero);
+        check(status.h == 48.0f && status.y + status.h == 720.0f,
+              "12.10 a status line mede 48px (24dp real) e continua no fundo");
+        check(editor::kRowH == 96.0f && editor::kPad == 32.0f,
+              "12.10 as linhas/paddings dos painéis duplicam (48dp/16dp "
+              "reais — applyDensity)");
+        check(safe::kTopBarH == 56.0f && theme::dp(safe::kTopBarH) == 112.0f,
+              "12.10 o dp() da casa multiplica pela densidade corrente");
+        // (b) o teclado do editor: teclas de 96px de altura (48dp real — o
+        // dono media 48×65px)
+        check(editor::scriptwin::keyboardHeight() ==
+                  5.0f * 96.0f + 4.0f * 12.0f + 2.0f * 16.0f,
+              "12.10 o teclado mede as teclas a 96px de altura (48dp real)");
+        // (c) a densidade do ARRANQUE vem do AConfiguration (o main lê
+        // 320→2.0; o log de identidade do ecrã existe no arranque)
+        check(vv::theme::g_density == 2.0f,
+              "12.10 a densidade injetada fica no theme (o layout consome)");
+        // (d) REPOSIÇÃO: densidade 1.0 — o harness inteiro continua a correr
+        // o layout de sempre (os checks 12.11+ e o sumário abaixo dependem)
+        vvstub::g_stubDensityDpi = 160;
+        theme::setDensity(1.0f);
+        editor::applyDensity();
+        const UiRect bar1 = safe::toolbarRect(1536.0f, 720.0f, zero);
+        check(bar1.h == 56.0f && editor::kRowH == 48.0f,
+              "12.10 com densidade 1.0 o layout é EXATAMENTE o de sempre "
+              "(os testes não mudam)");
+    }
+
     // ---- sumário -----------------------------------------------------------
     std::printf("\n== C33 VIRTUAL: %d check(s), %d falha(s) ==\n", g_checks, g_failed);
     if (g_failed == 0) {

@@ -30,17 +30,17 @@ bool stackButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
     const bool pressed = ui.widgetHit(id, r.x, r.y, r.w, r.h);
     const bool held = ui.widgetActive(id);
     if (held && enabled) {
-        ui.panelRounded(r.x, r.y, r.w, r.h, theme::kRadiusCard,
+        ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusCard),
                         theme::kTheme.surface2);
     } else if (enabled) {
         // repouso: chip surface com bordo (o alvo é visível — nunca "quase
         // invisível", o problema documentado da 0.8.x)
-        ui.panelRounded(r.x, r.y, r.w, r.h, theme::kRadiusCard,
+        ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusCard),
                         theme::kTheme.surface);
-        ui.frameRounded(r.x, r.y, r.w, r.h, 1.0f, theme::kRadiusCard,
+        ui.frameRounded(r.x, r.y, r.w, r.h, 1.0f, theme::dp(theme::kRadiusCard),
                         theme::kTheme.border);
     } else {
-        ui.panelRounded(r.x, r.y, r.w, r.h, theme::kRadiusCard,
+        ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusCard),
                         theme::kTheme.bg);
     }
     f32 col[4] = {theme::kTheme.text1[0], theme::kTheme.text1[1],
@@ -51,7 +51,7 @@ bool stackButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
         col[2] = theme::kTheme.text2[2];
         col[3] = 0.4f;
     }
-    const f32 s = 24.0f;
+    const f32 s = theme::dp(24.0f);
     icons::drawIcon(ui, icon, r.x + (r.w - s) * 0.5f, r.y + (r.h - s) * 0.5f,
                     s, col);
     return pressed && enabled;
@@ -65,15 +65,15 @@ bool toolButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
     const bool held = ui.widgetActive(id);
     const bool on = active || held;
     if (on) {
-        ui.panelRounded(r.x, r.y, r.w, r.h, theme::kRadiusCard,
+        ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusCard),
                         theme::kTheme.accent);
     } else {
-        ui.panelRounded(r.x, r.y, r.w, r.h, theme::kRadiusCard,
+        ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusCard),
                         theme::kTheme.surface);
-        ui.frameRounded(r.x, r.y, r.w, r.h, 1.0f, theme::kRadiusCard,
+        ui.frameRounded(r.x, r.y, r.w, r.h, 1.0f, theme::dp(theme::kRadiusCard),
                         theme::kTheme.border);
     }
-    const f32 s = 24.0f;
+    const f32 s = theme::dp(24.0f);
     const f32 col[4] = {on ? theme::kTheme.accentInk[0] : theme::kTheme.text1[0],
                         on ? theme::kTheme.accentInk[1] : theme::kTheme.text1[1],
                         on ? theme::kTheme.accentInk[2] : theme::kTheme.text1[2],
@@ -81,7 +81,7 @@ bool toolButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
     if (active && word && word[0]) {
         // ATIVO: ícone + palavra (o único rótulo da barra — G1-1)
         const f32 wordW = ui.hasFont() ? ui.fontWidth(word) : 0.0f;
-        const f32 gap = 8.0f;
+        const f32 gap = theme::dp(8.0f);
         const f32 total = s + gap + wordW;
         const f32 x0 = r.x + (r.w - total) * 0.5f;
         icons::drawIcon(ui, icon, x0, r.y + (r.h - s) * 0.5f, s, col);
@@ -102,12 +102,16 @@ bool toolButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
 Layout layout(const UiRect& view) {
     Layout L;
     L.view = view;
+    // 0.9.6.1 (PASSO 0 · R-018): todos os alvos daqui são dp REAL — eram px
+    // crus (o dono media botões de ferramentas com 48px de altura no device)
+    const f32 stackBtn = theme::dp(kStackBtn);
+    const f32 stackGap = theme::dp(kStackGap);
     // ---- stack vertical à esquerda (undo/redo/save/dup/paste) ----
-    f32 y = view.y + 8.0f;
-    const f32 x = view.x + 8.0f;
+    f32 y = view.y + theme::dp(8.0f);
+    const f32 x = view.x + theme::dp(8.0f);
     for (int i = 0; i < 5; ++i) {
-        L.stack[i] = {x, y, kStackBtn, kStackBtn};
-        y += kStackBtn + kStackGap;
+        L.stack[i] = {x, y, stackBtn, stackBtn};
+        y += stackBtn + stackGap;
     }
     // FASE 9 (G2-10): o TRIAD foi REMOVIDO — os "pontinhos fantasma" do
     // dono (canto sup-dir do viewport, fora do mock); a orientação vive
@@ -115,18 +119,21 @@ Layout layout(const UiRect& view) {
     // ---- toolbar inferior: SÓ ÍCONES, âncora = canto inferior ESQUERDO
     // do rect da viewport (G1-1); o ATIVO ganha o nome (mais largo).
     // Total: ativo 132 + 3×48 + íman 48 + 4 gaps 8 = 368 ≤ viewport útil.
-    const f32 by = view.y + view.h - kBottomH - 8.0f;
-    f32 bx = view.x + 8.0f;
+    const f32 botH = theme::dp(kBottomH);
+    const f32 toolW = theme::dp(kToolBtn);
+    const f32 by = view.y + view.h - botH - theme::dp(8.0f);
+    f32 bx = view.x + theme::dp(8.0f);
     // as larguras dependem de QUEM está ativo — o draw resolve o estado;
     // o layout usa a pior caso (um ativo por vez, sempre o MESMO total)
-    const f32 w[5] = {kToolActiveW, kToolBtn, kToolBtn, kToolBtn, kToolBtn};
-    L.selectBtn = {bx, by, w[0], kBottomH};  bx += w[0] + 8.0f;
-    L.moveBtn   = {bx, by, w[1], kBottomH};  bx += w[1] + 8.0f;
-    L.rotateBtn = {bx, by, w[2], kBottomH};  bx += w[2] + 8.0f;
-    L.scaleBtn  = {bx, by, w[3], kBottomH};  bx += w[3] + 8.0f;
-    L.snapBtn   = {bx, by, kToolBtn, kBottomH};
+    const f32 w[5] = {toolW, toolW, toolW, toolW, toolW};
+    L.selectBtn = {bx, by, w[0], botH};  bx += w[0] + theme::dp(8.0f);
+    L.moveBtn   = {bx, by, w[1], botH};  bx += w[1] + theme::dp(8.0f);
+    L.rotateBtn = {bx, by, w[2], botH};  bx += w[2] + theme::dp(8.0f);
+    L.scaleBtn  = {bx, by, w[3], botH};  bx += w[3] + theme::dp(8.0f);
+    L.snapBtn   = {bx, by, toolW, botH};
     // "+" no canto inferior DIREITO da viewport (G1-1)
-    L.addTicBtn = {view.x + view.w - 56.0f - 8.0f, by, 56.0f, kBottomH};
+    L.addTicBtn = {view.x + view.w - theme::dp(56.0f) - theme::dp(8.0f), by,
+                   theme::dp(56.0f), botH};
     return L;
 }
 
@@ -192,11 +199,12 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
         const bool held = ui.widgetActive(kVpSnapValId);
         const bool on = gz.snap || held;
         ui.panelRounded(L.snapBtn.x, L.snapBtn.y, L.snapBtn.w, L.snapBtn.h,
-                        theme::kRadiusCard,
+                        theme::dp(theme::kRadiusCard),
                         on ? theme::kTheme.accent : theme::kTheme.surface);
         if (!on) {
             ui.frameRounded(L.snapBtn.x, L.snapBtn.y, L.snapBtn.w, L.snapBtn.h,
-                            1.0f, theme::kRadiusCard, theme::kTheme.border);
+                            1.0f, theme::dp(theme::kRadiusCard),
+                            theme::kTheme.border);
         }
         const f32 col[4] = {on ? theme::kTheme.accentInk[0]
                                : theme::kTheme.text1[0],
@@ -206,9 +214,9 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
                                : theme::kTheme.text1[2],
                             1.0f};
         icons::drawIcon(ui, icons::Icon::Snap,
-                        L.snapBtn.x + (L.snapBtn.w - 24.0f) * 0.5f,
-                        L.snapBtn.y + (L.snapBtn.h - 24.0f) * 0.5f, 24.0f,
-                        col);
+                        L.snapBtn.x + (L.snapBtn.w - theme::dp(24.0f)) * 0.5f,
+                        L.snapBtn.y + (L.snapBtn.h - theme::dp(24.0f)) * 0.5f,
+                        theme::dp(24.0f), col);
         if (pressed) {
             gz.snap = !gz.snap;
         }
@@ -222,16 +230,16 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
                          L.addTicBtn.w, L.addTicBtn.h);
         const bool held = ui.widgetActive(kVpAddTicId);
         ui.panelRounded(L.addTicBtn.x, L.addTicBtn.y, L.addTicBtn.w,
-                        L.addTicBtn.h, theme::kRadiusCard,
+                        L.addTicBtn.h, theme::dp(theme::kRadiusCard),
                         held ? theme::kTheme.accentPress
                              : theme::kTheme.accent);
         const f32 col[4] = {theme::kTheme.accentInk[0],
                             theme::kTheme.accentInk[1],
                             theme::kTheme.accentInk[2], 1.0f};
         icons::drawIcon(ui, icons::Icon::Plus,
-                        L.addTicBtn.x + (L.addTicBtn.w - 24.0f) * 0.5f,
-                        L.addTicBtn.y + (L.addTicBtn.h - 24.0f) * 0.5f, 24.0f,
-                        col);
+                        L.addTicBtn.x + (L.addTicBtn.w - theme::dp(24.0f)) * 0.5f,
+                        L.addTicBtn.y + (L.addTicBtn.h - theme::dp(24.0f)) * 0.5f,
+                        theme::dp(24.0f), col);
         if (pressed) {
             a.addTicPressed = true;
         }

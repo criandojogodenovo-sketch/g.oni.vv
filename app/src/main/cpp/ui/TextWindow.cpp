@@ -106,7 +106,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     // desktop/tests — layout de sempre)
     const safe::Insets ins = ui.safeArea();
     const f32 topY = ins.top;
-    const f32 hdrH = kTopH;
+    const f32 hdrH = theme::dp(kTopH);   // 56dp REAL (R-018)
     const f32 contentW = w - ins.left - ins.right;
 
     // fundo opaco FULL-SCREEN (bg do tema — nada do editor atrás)
@@ -118,28 +118,34 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
              theme::kTheme.border);
 
     // BACK 56dp (alvo ≥48 — a célula inteira é o alvo)
-    icons::drawIcon(ui, icons::Icon::Back, ins.left + 16.0f,
-                    topY + hdrH / 2.0f - 12.0f, 24.0f, theme::kTheme.text1);
+    icons::drawIcon(ui, icons::Icon::Back, ins.left + theme::dp(16.0f),
+                    topY + hdrH / 2.0f - theme::dp(12.0f), theme::dp(24.0f),
+                    theme::kTheme.text1);
     int result = 0;
     if (ui.widgetHit(kBackId, ins.left, topY, hdrH, hdrH)) {
         result = 1;   // o main fecha (landscape + imeHide + log)
     }
 
     // título 20sp + hint 12sp (tipografia da spec A; na parte útil)
-    ui.labelStyled(ins.left + hdrH + 8.0f, topY + theme::kHeaderTitleBase,
-                   "Texto", theme::kTheme.text1,
-                   theme::fontScale(theme::kFontScreen), 0);
-    ui.labelStyled(ins.left + hdrH + 8.0f, topY + theme::kHeaderSubBase,
-                   "portrait · IME do sistema",
-                   theme::kTheme.text2,
-                   theme::fontScale(theme::kFontCaption), 0);
+    {
+        const TextMetrics m = ui.textMetrics();
+        const theme::HeaderBaselines hb =
+            theme::headerBaselines(m.ascent, m.descent, hdrH);
+        ui.labelStyled(ins.left + hdrH + theme::dp(8.0f), topY + hb.title,
+                       "Texto", theme::kTheme.text1,
+                       theme::fontScale(theme::kFontScreen), 0);
+        ui.labelStyled(ins.left + hdrH + theme::dp(8.0f), topY + hb.sub,
+                       "portrait · IME do sistema",
+                       theme::kTheme.text2,
+                       theme::fontScale(theme::kFontCaption), 0);
+    }
 
     // ---- corpo: linhas do buffer em região de scroll ----------------------
     const UiRect body{ins.left, topY + hdrH, contentW,
                       h - ins.bottom - (topY + hdrH)};
     const f32 lh = lineHeight(ui);
     const u32 nLines = countLines(st.buf);
-    const f32 contentH = static_cast<f32>(nLines) * lh + 16.0f;
+    const f32 contentH = static_cast<f32>(nLines) * lh + theme::dp(16.0f);
 
     // o scroll SEGUE O FIM (v0 append-only — o caret vive no fim; o cursor
     // editável + scroll livre entram com o editor de script 0.9.2).

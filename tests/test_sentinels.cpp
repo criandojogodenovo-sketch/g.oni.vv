@@ -1470,3 +1470,43 @@ TEST(regress_bench_nao_mente) {
     EXPECT(!model.nodes.empty() &&
            nearEqF(model.nodes[0].scale.x, 2.5f, 0.001f));
 }
+
+// ============================================================================
+// R-018 · as medidas dp eram desenhadas como px (FASE 0.9.6.1 · PASSO 0) —
+//         regress_density_escala_dp
+//
+// O DONO mediu no device: cabeçalho do editor ~56px num ecrã de 720px de
+// largura (devia ter ~112px), botões de ferramentas ~48px de altura e
+// teclas do teclado próprio 48×65px — metade do pedido (48dp). A CAUSA RAIZ
+// (leitura do código): NÃO existia função dp→px — as constantes do design
+// system eram constexpr EM DP consumidas COMO PX CRUS (Theme.h/SafeArea.h/
+// EditorLayout.h e os componentes). O FIX na origem: theme::dp() (densidade
+// do AConfiguration no arranque) aplicado nas FONTES ÚNICAS de layout.
+// A sentinela afirma: com densidade 2.0 injetada os rects duplicam (56dp →
+// 112px, alvos 48dp → 96px, teclas ≥48dp de altura); com densidade 1.0 o
+// layout é EXATAMENTE o de sempre (a suíte inteira corre a 1.0). A prova
+// do caminho REAL do device (AConfiguration 320dpi → 2.0) é a FASE 12.10
+// do c33_virtual; esta unidade aferra a matemática pura.
+// ============================================================================
+TEST(regress_density_escala_dp) {
+    using namespace vv;
+    const safe::Insets zero{};
+    // ---- (a) densidade 2.0 (o par do C33): os dp duplicam ------------------
+    theme::setDensity(2.0f);
+    const UiRect bar = safe::toolbarRect(1536.0f, 720.0f, zero);
+    EXPECT(nearEqF(bar.h, 112.0f));   // 56dp REAL (o bug: 56px)
+    EXPECT(nearEqF(theme::dp(48.0f), 96.0f));   // o alvo mínimo é dp REAL
+    const UiRect status = safe::statusRect(1536.0f, 720.0f, zero);
+    EXPECT(nearEqF(status.h, 48.0f));   // 24dp real, a última faixa
+    EXPECT(nearEqF(status.y + status.h, 720.0f));   // continua no fundo
+    // o teclado: teclas de 96px de altura (48dp real — o dono media 48×65px)
+    EXPECT(nearEqF(editor::scriptwin::keyboardHeight(),
+                   5.0f * 96.0f + 4.0f * 12.0f + 2.0f * 16.0f));
+    // ---- (b) densidade 1.0: o layout de SEMPRE (nenhum teste muda) ---------
+    theme::setDensity(1.0f);
+    const UiRect bar1 = safe::toolbarRect(1536.0f, 720.0f, zero);
+    EXPECT(nearEqF(bar1.h, 56.0f));
+    EXPECT(nearEqF(theme::dp(48.0f), 48.0f));
+    EXPECT(nearEqF(editor::scriptwin::keyboardHeight(),
+                   5.0f * 48.0f + 4.0f * 6.0f + 2.0f * 8.0f));
+}

@@ -73,7 +73,10 @@ constexpr f32 kStackBtn  = 48.0f;   // alvo do stack vertical (spec A)
 constexpr f32 kStackGap  = 8.0f;    // ≥8dp entre alvos (spec A)
 constexpr f32 kBottomH   = 48.0f;   // toolbar inferior (FASE 9: 48dp — só ícones)
 constexpr f32 kToolBtn   = 48.0f;   // botão de ferramenta (ícone)
-constexpr f32 kToolActiveW = 132.0f; // botão ATIVO (ícone + palavra)
+// kToolActiveW REMOVIDO na 0.9.6.1 (G1-2): os 4 botões são IGUAIS de 48dp
+// só-ícone; o nome da ferramenta ativa vive numa legenda ACIMA da barra
+// (o "Escalar" de 48px estendia-se por cima dos vizinhos)
+constexpr f32 kToolActiveW = 48.0f;   // LEGACY (igual a kToolBtn; sem uso novo)
 
 struct Layout {
     UiRect stack[5]{};        // undo redo save dup paste

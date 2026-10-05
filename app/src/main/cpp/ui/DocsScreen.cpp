@@ -76,7 +76,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h) {
     // navegação). Em desktop/tests insets=0 — layout idêntico ao de sempre.
     const safe::Insets ins = ui.safeArea();
     const f32 topY = ins.top;
-    const f32 hdrH = safe::kTopBarH;   // 56dp (a PARTE ÚTIL do cabeçalho)
+    const f32 hdrH = theme::dp(safe::kTopBarH);  // 56dp REAL (R-018)
     const f32 contentW = w - ins.left - ins.right;
 
     ui.panel(0.0f, 0.0f, w, h, theme::kTheme.bg);
@@ -85,32 +85,39 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h) {
     ui.panel(ins.left, topY, contentW, hdrH, theme::kTheme.surface);
     ui.panel(ins.left, topY + hdrH - 1.0f, contentW, 1.0f,
              theme::kTheme.border);
-    icons::drawIcon(ui, icons::Icon::Back, ins.left + 16.0f,
-                    topY + hdrH / 2.0f - 12.0f, 24.0f, theme::kTheme.text1);
+    icons::drawIcon(ui, icons::Icon::Back, ins.left + theme::dp(16.0f),
+                    topY + hdrH / 2.0f - theme::dp(12.0f), theme::dp(24.0f),
+                    theme::kTheme.text1);
     int result = 0;
     if (ui.widgetHit(kBackId, ins.left, topY, hdrH, hdrH)) {
         result = 1;
     }
     // título/subtítulo DENTRO da parte útil (nunca sob a faixa do sistema)
-    ui.labelStyled(ins.left + hdrH + 8.0f, topY + theme::kHeaderTitleBase,
-                   "Docs", theme::kTheme.text1,
-                   theme::fontScale(theme::kFontScreen), 0);
-    ui.labelStyled(ins.left + hdrH + 8.0f, topY + theme::kHeaderSubBase,
-                   "V.ONI — linguagem, comandos, linkers e tykers",
-                   theme::kTheme.text2,
-                   theme::fontScale(theme::kFontCaption), 0);
+    {
+        const TextMetrics m = ui.textMetrics();
+        const theme::HeaderBaselines hb =
+            theme::headerBaselines(m.ascent, m.descent, hdrH);
+        ui.labelStyled(ins.left + hdrH + theme::dp(8.0f), topY + hb.title,
+                       "Docs", theme::kTheme.text1,
+                       theme::fontScale(theme::kFontScreen), 0);
+        ui.labelStyled(ins.left + hdrH + theme::dp(8.0f), topY + hb.sub,
+                       "V.ONI — linguagem, comandos, linkers e tykers",
+                       theme::kTheme.text2,
+                       theme::fontScale(theme::kFontCaption), 0);
+    }
 
     // ---- campo de pesquisa 48dp COM LUPA (spec §11) -------------------------
     // FASE 9 (G0-3): o segundo panelRounded era um FILL da cor da borda por
     // CIMA do surface (o campo ficava um bloco sólido) — é um FRAME.
-    const UiRect field{ins.left + 16.0f, topY + hdrH + 8.0f,
-                       contentW - 32.0f, 48.0f};
+    const UiRect field{ins.left + theme::dp(16.0f), topY + hdrH + theme::dp(8.0f),
+                       contentW - theme::dp(32.0f), theme::dp(48.0f)};
     ui.panelRounded(field.x, field.y, field.w, field.h,
                     theme::kRadiusField, theme::kTheme.surface);
     ui.frameRounded(field.x, field.y, field.w, field.h, 1.0f,
                     theme::kRadiusField, theme::kTheme.border);
-    icons::drawIcon(ui, icons::Icon::Search, field.x + 16.0f,
-                    field.y + 12.0f, 24.0f, theme::kTheme.text2);
+    icons::drawIcon(ui, icons::Icon::Search, field.x + theme::dp(16.0f),
+                    field.y + theme::dp(12.0f), theme::dp(24.0f),
+                    theme::kTheme.text2);
     // 0.9.6 (G2-5): o texto da pesquisa CENTRADO VERTICALMENTE no campo
     // (a altura real do bloco, não um offset fixo)
     {

@@ -24,6 +24,7 @@
 // CI aferem o MESMO plano + a geometria REAL dos glifos.
 #include "core/Types.h"
 #include <cmath>
+#include "ui/Theme.h"      // 0.9.6.1 (PASSO 0): applyDensity() — R-018
 #include "ui/FontAtlas.h"   // TextMetrics (GL-free)
 #include "core/Scene.h"
 #include "components/Transform3D.h"
@@ -43,11 +44,19 @@ namespace editor {
 // constantes partilhadas pelo desenho e pela medição (antes no anon ns do .cpp)
 // 0.9.0 (spec A/B): kPad 12→16 (8-múltiplo), linha 52→48 (alvo mínimo), e a
 // hierarquia ganha a LINHA DE PESQUISA (48dp) por baixo do cabeçalho.
-constexpr f32 kPad       = 16.0f;
-constexpr f32 kHeaderH   = 48.0f;
-constexpr f32 kRowH      = 48.0f;
-constexpr f32 kSearchRowH = 48.0f;   // 0.9.0: pesquisa de TIC no header da hierarquia
-constexpr f32 kMenuW     = 340.0f;
+// 0.9.6.1 (PASSO 0 · R-018): eram constexpr em DP consumidas como PX — no
+// C33 (densidade 2.0) painéis/linhas/cabeçalhos saíam a METADE do dp. São
+// agora VARIÁVEIS de runtime em dp REAIS: applyDensity() (abaixo) atualiza
+// TODAS num só sítio quando a densidade é conhecida (arranque / mudança de
+// AConfiguration); nos testes (densidade 1.0) os valores são os de sempre.
+extern f32 kPad;        // 16dp — padding de painéis/linhas
+extern f32 kHeaderH;   // 48dp — cabeçalho dos painéis
+extern f32 kRowH;      // 48dp — linha de TIC/inspetor (alvo mínimo)
+extern f32 kSearchRowH; // 48dp — pesquisa de TIC no header da hierarquia
+extern f32 kMenuW;     // 340dp — largura dos menus/overlays
+// atualiza as variáveis acima (e as do teclado do editor de script) a partir
+// da densidade corrente — chamada no arranque e em mudanças de config
+void applyDensity();
 
 // altura do conteúdo da Hierarchy: uma linha de 48dp por TIC VISÍVEL na
 // árvore (0.9.0: o filtro de pesquisa encolhe o conteúdo — o scroll segue)

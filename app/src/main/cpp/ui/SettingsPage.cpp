@@ -129,24 +129,29 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
              theme::kTheme.surface);
 
     // ---- BACK 48dp + título 20sp no CABEÇALHO PADRÃO (56dp) ---------------
-    const UiRect back = {ox + 8.0f, oy + 4.0f, 48.0f, 48.0f};
+    const f32 hdrH = theme::dp(safe::kTopBarH);   // 56dp REAL (R-018)
+    const UiRect back = {ox + theme::dp(8.0f), oy + (hdrH - theme::dp(48.0f)) * 0.5f,
+                         theme::dp(48.0f), theme::dp(48.0f)};
     const bool backHeld = ui.widgetActive(kBackId);
     if (backHeld) {
         ui.panelRounded(back.x, back.y, back.w, back.h, theme::kRadiusCard,
                         theme::kTheme.surface2);
     }
-    icons::drawIcon(ui, icons::Icon::Back, back.x + (back.w - 24.0f) * 0.5f,
-                    back.y + (back.h - 24.0f) * 0.5f, 24.0f,
-                    theme::kTheme.text1);
+    icons::drawIcon(ui, icons::Icon::Back,
+                    back.x + (back.w - theme::dp(24.0f)) * 0.5f,
+                    back.y + (back.h - theme::dp(24.0f)) * 0.5f,
+                    theme::dp(24.0f), theme::kTheme.text1);
     if (ui.hasFont()) {
         // 0.9.6 (G1-2): a baseline do CABEÇALHO PADRÃO (a MESMA das outras
         // telas — Theme é a fonte única; o título 20sp centrado sem corte)
-        ui.labelStyled(back.x + back.w + 12.0f,
-                       oy + theme::kHeaderTitleBase, "Settings",
-                       theme::kTheme.text1,
+        const TextMetrics m = ui.textMetrics();
+        ui.labelStyled(back.x + back.w + theme::dp(12.0f),
+                       oy + theme::headerBaselines(m.ascent, m.descent,
+                                                   hdrH).title,
+                       "Settings", theme::kTheme.text1,
                        theme::fontScale(theme::kFontScreen), 0);
     }
-    ui.panel(ox, oy + 56.0f, aw, 1.0f, theme::kTheme.border);
+    ui.panel(ox, oy + hdrH, aw, 1.0f, theme::kTheme.border);
     const bool backPressed =
         ui.widgetHit(kBackId, back.x, back.y, back.w, back.h);
 

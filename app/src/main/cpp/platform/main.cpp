@@ -4,6 +4,7 @@
 //        → pass 3D (todos os TICs com MeshRenderer + grid, depth test)
 //        → pass UI (toolbar F1 + Hierarchy/Inspector/menus F3, sem depth).
 #include <android_native_app_glue.h>
+#include <android/configuration.h>   // 0.9.6.1 (PASSO 0): AConfiguration_getDensity
 #include <GLES3/gl3.h>
 #include <atomic>   // 0.8.10: progresso do import entre threads
 #include <cmath>
@@ -2706,6 +2707,21 @@ void applyContentRect(android_app* app) {
         static_cast<f32>(sw), static_cast<f32>(sh),
         cr.left, cr.top, cr.right, cr.bottom);
     g_ui.setSafeArea(ins);
+    // 0.9.6.1 (PASSO 0 · R-018): a IDENTIDADE DO ECRÃ no log do arranque —
+    // a densidade (DisplayMetrics.density), a superfície e os insets EM PX E
+    // EM DP (o dono mediu o cabeçalho a 56px num ecrã de densidade 2.0: as
+    // medidas dp eram usadas como px; este log é a prova de qual é qual)
+    {
+        const f32 d = theme::g_density;
+        elog::info(
+            "display: densidade %.3f · superficie %dx%d px (%.0fx%.0f dp) · "
+            "insets L%.0f T%.0f R%.0f B%.0f px (%.0f %.0f %.0f %.0f dp)",
+            (double)d, (int)sw, (int)sh, (double)((f32)sw / d),
+            (double)((f32)sh / d), (double)ins.left, (double)ins.top,
+            (double)ins.right, (double)ins.bottom, (double)(ins.left / d),
+            (double)(ins.top / d), (double)(ins.right / d),
+            (double)(ins.bottom / d));
+    }
     // 0.7.8 (defensivo): o CONTENT_RECT_CHANGED pode chegar SEM um
     // WINDOW_RESIZED (barras do sistema a esconder/mostrar mudam a
     // superfície em alguns OEMs) — re-sincroniza o tamanho do EGL e o
@@ -5842,6 +5858,24 @@ void android_main(android_app* app) {
     vv::crash::install(elog::dir());
     elog::info("logs: %s (ativo=%d)", elog::dir()[0] ? elog::dir() : "<só-logcat>",
                elog::active() ? 1 : 0);
+
+    // 0.9.6.1 (PASSO 0 · R-018): a DENSIDADE do device (DisplayMetrics.
+    // density == AConfiguration_getDensity/160) entra ANTES de qualquer
+    // layout — era a origem do bug das medidas dp desenhadas como px. O
+    // harness/testes ficam a 1.0 (o stub devolve 160) e o c33_virtual prova
+    // o mecanismo com 2.0 injetados (FASE 12.10).
+    {
+        const i32 dpi = app->config ? AConfiguration_getDensity(app->config)
+                                    : ACONFIGURATION_DENSITY_DEFAULT;
+        const f32 dens =
+            static_cast<f32>(dpi > 0 ? dpi : ACONFIGURATION_DENSITY_DEFAULT) /
+            160.0f;
+        theme::setDensity(dens);
+        editor::applyDensity();
+        elog::info("display: densidade %.3f (dpi %d/160) aplicada ao "
+                   "layout (dp real — R-018)",
+                   (double)theme::g_density, (int)dpi);
+    }
 
     // 0.8.11: o callback do backend puxa o MISTURADOR (instala 1× — o
     // g_mix do AudioOut aponta para o AudioEngine global)

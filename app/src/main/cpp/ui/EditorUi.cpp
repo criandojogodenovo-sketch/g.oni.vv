@@ -26,6 +26,26 @@
 namespace vv {
 namespace editor {
 
+// 0.9.6.1 (PASSO 0 · R-018) — as DEFINIÇÕES das variáveis de layout do
+// EditorLayout.h (eram constexpr em dp consumidas como px: no C33, painéis/
+// linhas/cabeçalhos a metade do pedido). applyDensity() atualiza TODAS de
+// uma vez quando a densidade do device fica conhecida (main.cpp no arranque
+// e em mudanças de AConfiguration) — os centenas de pontos de uso ficam
+// intocados; nos testes (densidade 1.0) os valores são os de sempre.
+f32 kPad       = 16.0f;
+f32 kHeaderH   = 48.0f;
+f32 kRowH      = 48.0f;
+f32 kSearchRowH = 48.0f;
+f32 kMenuW     = 340.0f;
+
+void applyDensity() {
+    kPad        = theme::dp(16.0f);
+    kHeaderH    = theme::dp(48.0f);
+    kRowH       = theme::dp(48.0f);
+    kSearchRowH = theme::dp(48.0f);
+    kMenuW      = theme::dp(340.0f);
+}
+
 namespace {
 constexpr u64 kIdPlus      = 40;
 // F5.2: viewer de logs usa kLogsScrollId (43, EditorLayout.h — compartilhado
@@ -2255,7 +2275,7 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     if (pickPrim) {
         // ---- SELETOR DE PRIMITIVAS (2 formas + none) ----------------------
         const f32 w = kMenuW;
-        const f32 h = kHeaderH + 44.0f + 2.0f * 44.0f + kPad;
+        const f32 h = kHeaderH + theme::dp(44.0f) + 2.0f * theme::dp(44.0f) + kPad;
         const f32 ox = ui.safeLeft();
         const f32 oy = ui.safeTop();
         const f32 aw = sw - ox - ui.safeRight();
@@ -2273,15 +2293,16 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                  "PRIMITIVA", theme::TEXT);
         int chosen = 0;
         if (ui.button(kIdAssetBase, x + kPad, y + kHeaderH,
-                      w - 2.0f * kPad, 36.0f, "none (desligar)")) {
+                      w - 2.0f * kPad, theme::dp(36.0f), "none (desligar)")) {
             chosen = 1;
             st.assetMenu = 0;
         }
         // 0.8.10: lista vertical com as DUAS formas que restam
         for (int i = 0; i < 2; ++i) {
-            const f32 by = y + kHeaderH + 44.0f + static_cast<f32>(i) * 44.0f;
+            const f32 by = y + kHeaderH + theme::dp(44.0f) +
+                           static_cast<f32>(i) * theme::dp(44.0f);
             if (ui.button(kIdAssetBase + 1 + static_cast<u64>(i), x + kPad,
-                          by, w - 2.0f * kPad, 36.0f,
+                          by, w - 2.0f * kPad, theme::dp(36.0f),
                           primLabel(static_cast<PrimKind>(i)))) {
                 chosen = i + 2;   // 2=Sphere, 3=Box
                 st.assetMenu = 0;
@@ -2297,19 +2318,20 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     // visível encaixa na faixa do overlay (máx. 8 linhas) e o resto
     // faz scroll — o MESMO padrão da Hierarchy/Inspector (o tap volta
     // pelo scrollTap e as linhas continuam alvos de 48dp).
-    constexpr f32 kAssetRowH = 48.0f;
+    // 0.9.6.1 (PASSO 0): linha do seletor em dp REAL (R-018)
+    const f32 kAssetRowH = theme::dp(48.0f);
     constexpr u64  kAssetScrollId = 50;   // slot de scroll próprio (≠ hier/insp/settings)
     const f32 w = kMenuW;
     // 0.7.4: withImport (seletor de textura de ELEMENTO de UI) acrescenta a
     // linha "importar…" que abre o NAVEGADOR 0.7.2 (escolhe de onde for)
-    const f32 importH = withImport ? 48.0f : 0.0f;
+    const f32 importH = withImport ? theme::dp(48.0f) : 0.0f;
     // 0.8.12 — picker de MESH: +1 linha (none + cube + ficheiros)
     f32 ox, oy, aw, ah;
     overlayArea(sw, sh, ui.safeArea(), ox, oy, aw, ah);
     const f32 fixedH = kHeaderH +
                        static_cast<f32>(pickMesh ? 2 : 1) * kAssetRowH +
                        importH + kPad;
-    const f32 maxListH = ah - fixedH - 8.0f;
+    const f32 maxListH = ah - fixedH - theme::dp(8.0f);
     const f32 fullListH = static_cast<f32>(files.size()) * kAssetRowH;
     const f32 listH = fullListH < maxListH ? fullListH : maxListH;
     const f32 h = fixedH + listH;
@@ -2334,20 +2356,20 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     // MESMO das trocas). Cube passa a 2º; ficheiros 3+.
     if (pickMesh) {
         if (ui.button(kIdAssetBase, x + kPad, y + kHeaderH,
-                      w - 2.0f * kPad, 40.0f, "none")) {
+                      w - 2.0f * kPad, theme::dp(40.0f), "none")) {
             chosen = 1;
             st.assetMenu = 0;
         }
         if (ui.button(kIdAssetBase + 8, x + kPad,
-                      y + kHeaderH + 48.0f, w - 2.0f * kPad, 40.0f,
-                      "cube (procedural)")) {
+                      y + kHeaderH + kAssetRowH, w - 2.0f * kPad,
+                      theme::dp(40.0f), "cube (procedural)")) {
             chosen = 2;
             st.assetMenu = 0;
         }
     } else {
         // item 0: none (textura) / none (clip de áudio)
         if (ui.button(kIdAssetBase, x + kPad, y + kHeaderH, w - 2.0f * kPad,
-                      40.0f, "none")) {
+                      theme::dp(40.0f), "none")) {
             chosen = 1;
             st.assetMenu = 0;
         }
@@ -2382,7 +2404,8 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         // dentro do scroll o botão é SÓ VISUAL (o tap volta pelo scrollTap
         // — o padrão da Hierarchy/Inspector: drag em qualquer sítio =
         // scroll, tap parado = escolha)
-        ui.button(rowId, x + kPad, ry, w - 2.0f * kPad, 40.0f, label);
+        ui.button(rowId, x + kPad, ry, w - 2.0f * kPad, theme::dp(40.0f),
+                  label);
     }
     ui.endScroll();
     // o TAP parado na lista (o scroll devolve a posição — o mesmo padrão
@@ -2407,7 +2430,7 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         // dono escolhe a textura de onde for (galeria incluída); o ficheiro
         // importado cai em textures/ e fica disponível no seletor
         if (ui.button(kIdAssetBase + 7, x + kPad, listTop + listH,
-                      w - 2.0f * kPad, 40.0f, "importar...")) {
+                      w - 2.0f * kPad, theme::dp(40.0f), "importar...")) {
             chosen = kAssetPickImport;
             st.assetMenu = 0;
         }

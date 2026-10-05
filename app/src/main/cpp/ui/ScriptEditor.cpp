@@ -65,7 +65,7 @@ namespace {
 f32 lineHeight(UiContext& ui) {
     const TextMetrics m = ui.textMetrics();
     const f32 h = m.ascent + m.descent + 6.0f;
-    return h > 28.0f ? h : 28.0f;   // piso 28px (regra F5.0)
+    return h > theme::dp(28.0f) ? h : theme::dp(28.0f);   // piso 28dp (regra F5.0)
 }
 
 // ---- caret (G0-1): navegação por CODE POINT (acento morre inteiro) --------
@@ -148,7 +148,7 @@ const f32* clsColor(voni::hl::Cls c) {
 // verdade para a edição.
 
 constexpr u32 kKbRows = 4;          // 4 linhas de teclas + a linha de baixo
-constexpr f32 kKbKeyH = 48.0f;      // alvo ≥48dp
+constexpr f32 kKbKeyH = 48.0f;      // alvo ≥48dp (× densidade ao desenhar — R-018)
 constexpr f32 kKbGap  = 6.0f;
 constexpr f32 kKbPad  = 8.0f;
 
@@ -165,11 +165,6 @@ const char* const kKbSymbols[kKbRows][10] = {
     {"\"", "'", "@", "#", "$", "%", "&", "|", "~", "^"},
     {".", ",", "0", "1", "2", "3", "4", "5", "6", "7"},
 };
-
-// altura total do teclado (4 linhas + linha de baixo)
-f32 keyboardHeight() {
-    return 5.0f * kKbKeyH + 4.0f * kKbGap + 2.0f * kKbPad;
-}
 
 // o label da tecla (página corrente; lower aplica-se só às letras)
 const char* keyLabel(const State& st, u32 row, u32 col) {
@@ -193,59 +188,69 @@ const char* keyLabel(const State& st, u32 row, u32 col) {
 // navegação); devolve true se alguma tecla EMITIU texto (para o log)
 bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop) {
     // 0.9.6 (G1/G3): o teclado vive DENTRO do contentRect (laterais)
+    // 0.9.6.1 (PASSO 0): keyH/gap/pad em dp REAL (o dono media teclas
+    // 48×65 px no device — metade do pedido)
     const safe::Insets ins = ui.safeArea();
     const f32 kbX = ins.left;
     const f32 kbW = w - ins.left - ins.right;
-    const f32 innerW = kbW - 2.0f * kKbPad;
-    const f32 keyW = (innerW - 9.0f * kKbGap) / 10.0f;
+    const f32 keyH = theme::dp(kKbKeyH);
+    const f32 gap = theme::dp(kKbGap);
+    const f32 pad = theme::dp(kKbPad);
+    const f32 innerW = kbW - 2.0f * pad;
+    const f32 keyW = (innerW - 9.0f * gap) / 10.0f;
 
     // painel do teclado (surface com risca superior)
     ui.panel(kbX, kbTop, kbW, keyboardHeight(), theme::kTheme.surface);
     ui.panel(kbX, kbTop, kbW, 1.0f, theme::kTheme.border);
 
     bool typed = false;
-    f32 y = kbTop + kKbPad;
+    f32 y = kbTop + pad;
     for (u32 row = 0; row < kKbRows; ++row) {
         const u32 n = row == 3 ? 10 : 9;   // linhas 0..2 têm 9 teclas
         const f32 rowW = static_cast<f32>(n) * keyW +
-                         static_cast<f32>(n - 1) * kKbGap;
+                         static_cast<f32>(n - 1) * gap;
         f32 x = kbX + (kbW - rowW) * 0.5f;
         for (u32 col = 0; col < n; ++col) {
             const char* lbl = keyLabel(st, row, col);
             const u64 id = kKbBase + static_cast<u64>(row) * 10u +
                            static_cast<u64>(col);
-            if (ui.button(id, x, y, keyW, kKbKeyH, lbl)) {
+            if (ui.button(id, x, y, keyW, keyH, lbl)) {
                 ime::Event ev;
                 ev.isText = true;
                 ev.text = lbl;
                 applyEvent(st, ev);
                 typed = true;
             }
-            x += keyW + kKbGap;
+            x += keyW + gap;
         }
         // 0.9.6 (G3) · O SHIFT na casa LIVRE da 3ª fila (row 2): alterna
         // maiúsculas/minúsculas — NÃO escreve; aceso quando MAIÚSCULAS
         if (row == 2) {
-            const UiRect rs{x, y, keyW, kKbKeyH};
+            const UiRect rs{x, y, keyW, keyH};
             const bool caps = !st.kbLower;
             const bool held = ui.widgetActive(kKbBase + 46);
-            ui.panelRounded(rs.x, rs.y, rs.w, rs.h, theme::kRadiusCard,
+            ui.panelRounded(rs.x, rs.y, rs.w, rs.h, theme::dp(theme::kRadiusCard),
                             held ? theme::kTheme.surface2
                                  : (caps ? theme::kTheme.accent
                                          : theme::kTheme.surface));
-            ui.frameRounded(rs.x, rs.y, rs.w, rs.h, 1.0f, theme::kRadiusCard,
+            ui.frameRounded(rs.x, rs.y, rs.w, rs.h, 1.0f,
+                            theme::dp(theme::kRadiusCard),
                             caps ? theme::kTheme.accent
                                  : theme::kTheme.border);
             if (ui.hasFont()) {
                 const f32 tw = ui.fontWidth("Aa");
-                ui.label(rs.x + (rs.w - tw) * 0.5f, rs.y + 14.0f, "Aa",
+                ui.label(rs.x + (rs.w - tw) * 0.5f,
+                         theme::centeredBaseline(ui.textMetrics().ascent,
+                                                 ui.textMetrics().descent,
+                                                 rs.y, rs.h, 14.0f),
+                         "Aa",
                          caps ? theme::kTheme.bg : theme::kTheme.text1);
             }
             if (ui.widgetHit(kKbBase + 46, rs.x, rs.y, rs.w, rs.h)) {
                 st.kbLower = !st.kbLower;   // troca de caso — NÃO escreve
             }
         }
-        y += kKbKeyH + kKbGap;
+        y += keyH + gap;
     }
 
     // 0.9.6 (G3) — a linha de baixo COM SETAS (a spec: setas, apagar,
@@ -253,8 +258,8 @@ bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop) {
     // 1.5u][FECHAR] = 12u + 9g — as teclas continuam >=48dp (1u ~= 54px no
     // retrato 720). As setas EMITEM as Key do IME (o MESMO applyEvent — o
     // caret move-se pelo caminho de sempre; o ^/v sobem/descem linha)
-    const f32 unit = (innerW - 9.0f * kKbGap) / 12.0f;
-    f32 x = kbX + kKbPad;
+    const f32 unit = (innerW - 9.0f * gap) / 12.0f;
+    f32 x = kbX + pad;
     // as SETAS (labels ASCII — o atlas é o da casa; "<" "^" "v" ">")
     {
         struct ArrowKey {
@@ -267,36 +272,40 @@ bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop) {
         };
         for (int a = 0; a < 4; ++a) {
             if (ui.button(kKbBase + 50 + static_cast<u64>(a), x, y, unit,
-                          kKbKeyH, arrows[a].lbl)) {
+                          keyH, arrows[a].lbl)) {
                 ime::Event ev;
                 ev.isText = false;
                 ev.key = arrows[a].key;
                 applyEvent(st, ev);
                 typed = true;
             }
-            x += unit + kKbGap;
+            x += unit + gap;
         }
     }
-    if (ui.button(kKbBase + 40, x, y, 2.0f * unit, kKbKeyH, "ESPACO")) {
+    if (ui.button(kKbBase + 40, x, y, 2.0f * unit, keyH, "ESPACO")) {
         ime::Event ev;
         ev.isText = true;
         ev.text = " ";
         applyEvent(st, ev);
         typed = true;
     }
-    x += 2.0f * unit + kKbGap;
+    x += 2.0f * unit + gap;
     // 0.9.5 · TAB: os ESQUELETOS do editor que ensina (o mesmo applyEvent
     // do IME — a tecla Tab do GBoard chega aqui pela fila)
     {
-        const UiRect rt{x, y, unit, kKbKeyH};
+        const UiRect rt{x, y, unit, keyH};
         const bool pressed = ui.widgetHit(kKbBase + 45, rt.x, rt.y, rt.w, rt.h);
         const bool held = ui.widgetActive(kKbBase + 45);
-        ui.panelRounded(rt.x, rt.y, rt.w, rt.h, theme::kRadiusCard,
+        ui.panelRounded(rt.x, rt.y, rt.w, rt.h, theme::dp(theme::kRadiusCard),
                         held ? theme::kTheme.surface2
                              : theme::kTheme.surface);
-        ui.frameRounded(rt.x, rt.y, rt.w, rt.h, 1.0f, theme::kRadiusCard,
-                        theme::kTheme.border);
-        ui.labelStyled(rt.x, rt.y + 14.0f, "TAB",
+        ui.frameRounded(rt.x, rt.y, rt.w, rt.h, 1.0f,
+                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
+        ui.labelStyled(rt.x + (rt.w - ui.fontWidth("TAB")) * 0.5f,
+                       theme::centeredBaseline(ui.textMetrics().ascent,
+                                               ui.textMetrics().descent,
+                                               rt.y, rt.h, 12.0f),
+                       "TAB",
                        theme::kTheme.accent,
                        theme::fontScale(theme::kFontCaption), 0);
         if (pressed) {
@@ -307,45 +316,45 @@ bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop) {
             typed = true;
         }
     }
-    x += unit + kKbGap;
+    x += unit + gap;
     {
         char pg[8];
         std::snprintf(pg, sizeof(pg), "%s", st.kbSym ? "ABC" : "123");
-        if (ui.button(kKbBase + 41, x, y, unit, kKbKeyH, pg)) {
+        if (ui.button(kKbBase + 41, x, y, unit, keyH, pg)) {
             st.kbSym = !st.kbSym;   // troca de página — NÃO escreve
         }
     }
-    x += unit + kKbGap;
-    if (ui.button(kKbBase + 42, x, y, 1.5f * unit, kKbKeyH, "APAGA")) {
+    x += unit + gap;
+    if (ui.button(kKbBase + 42, x, y, 1.5f * unit, keyH, "APAGA")) {
         ime::Event ev;
         ev.isText = false;
         ev.key = ime::Key::Del;
         applyEvent(st, ev);
         typed = true;
     }
-    x += 1.5f * unit + kKbGap;
-    if (ui.button(kKbBase + 43, x, y, 1.5f * unit, kKbKeyH, "ENTER")) {
+    x += 1.5f * unit + gap;
+    if (ui.button(kKbBase + 43, x, y, 1.5f * unit, keyH, "ENTER")) {
         ime::Event ev;
         ev.isText = false;
         ev.key = ime::Key::Enter;
         applyEvent(st, ev);
         typed = true;
     }
-    x += 1.5f * unit + kKbGap;
+    x += 1.5f * unit + gap;
     {
         // FECHAR o teclado (o ChevronDown ocupa a última unidade)
-        const UiRect r{x, y, unit, kKbKeyH};
+        const UiRect r{x, y, unit, keyH};
         const bool pressed = ui.widgetHit(kKbBase + 44, r.x, r.y, r.w, r.h);
         const bool held = ui.widgetActive(kKbBase + 44);
-        ui.panelRounded(r.x, r.y, r.w, r.h, theme::kRadiusCard,
+        ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusCard),
                         held ? theme::kTheme.surface2
                              : theme::kTheme.surface);
-        ui.frameRounded(r.x, r.y, r.w, r.h, 1.0f, theme::kRadiusCard,
-                        theme::kTheme.border);
+        ui.frameRounded(r.x, r.y, r.w, r.h, 1.0f,
+                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
         icons::drawIcon(ui, icons::Icon::ChevronDown,
-                        r.x + (r.w - 24.0f) * 0.5f,
-                        r.y + (r.h - 24.0f) * 0.5f, 24.0f,
-                        theme::kTheme.text1);
+                        r.x + (r.w - theme::dp(24.0f)) * 0.5f,
+                        r.y + (r.h - theme::dp(24.0f)) * 0.5f,
+                        theme::dp(24.0f), theme::kTheme.text1);
         if (pressed) {
             st.kbOpen = false;
         }
@@ -354,6 +363,13 @@ bool drawKeyboard(UiContext& ui, State& st, f32 w, f32 kbTop) {
 }
 
 } // namespace
+
+// altura total do teclado (4 linhas + linha de baixo) — medidas em dp REAL
+// (0.9.6.1 · PASSO 0: o dono media teclas 48px de altura no device)
+f32 keyboardHeight() {
+    return 5.0f * theme::dp(kKbKeyH) + 4.0f * theme::dp(kKbGap) +
+           2.0f * theme::dp(kKbPad);
+}
 
 void rememberTicName(State& st, const Scene& scene) {
     st.ticName[0] = '\0';
@@ -696,7 +712,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     // as teclas deixam de ficar tapadas). Em desktop/tests insets=0.
     const safe::Insets ins = ui.safeArea();
     const f32 topY = ins.top;
-    const f32 hdrH = kTopH;               // 56dp (a parte ÚTIL)
+    const f32 hdrH = theme::dp(kTopH);    // 56dp REAL (R-018: era 56px)
     const f32 contentW = w - ins.left - ins.right;
 
     // fundo opaco FULL-SCREEN (bg — o mesmo do editor de código)
@@ -707,55 +723,66 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     ui.panel(ins.left, topY + hdrH - 1.0f, contentW, 1.0f,
              theme::kTheme.border);
 
-    icons::drawIcon(ui, icons::Icon::Back, ins.left + 16.0f,
-                    topY + hdrH / 2.0f - 12.0f, 24.0f, theme::kTheme.text1);
+    icons::drawIcon(ui, icons::Icon::Back, ins.left + theme::dp(16.0f),
+                    topY + hdrH / 2.0f - theme::dp(12.0f), theme::dp(24.0f),
+                    theme::kTheme.text1);
     int result = 0;
     if (ui.widgetHit(kBackId, ins.left, topY, hdrH, hdrH)) {
         result = 1;
     }
 
     // título 20sp + hint 12sp (na parte útil — sem corte)
-    ui.labelStyled(ins.left + hdrH + 8.0f, topY + theme::kHeaderTitleBase,
-                   "Script", theme::kTheme.text1,
-                   theme::fontScale(theme::kFontScreen), 0);
-    ui.labelStyled(ins.left + hdrH + 8.0f, topY + theme::kHeaderSubBase,
-                   "V.ONI · .voni", theme::kTheme.text2,
-                   theme::fontScale(theme::kFontCaption), 0);
+    // 0.9.6.1: título+subtítulo CENTRADOS no cabeçalho pelas métricas reais
+    // (o corte do topo eram as baselines fixas 29/51 px)
+    {
+        const TextMetrics m = ui.textMetrics();
+        const theme::HeaderBaselines hb =
+            theme::headerBaselines(m.ascent, m.descent, hdrH);
+        ui.labelStyled(ins.left + hdrH + theme::dp(8.0f), topY + hb.title,
+                       "Script", theme::kTheme.text1,
+                       theme::fontScale(theme::kFontScreen), 0);
+        ui.labelStyled(ins.left + hdrH + theme::dp(8.0f), topY + hb.sub,
+                       "V.ONI · .voni", theme::kTheme.text2,
+                       theme::fontScale(theme::kFontCaption), 0);
+    }
 
     // LUPA (G0-3): abre as Docs POR CIMA (a pesquisa filtra as entradas
     // estruturadas e mostra o exemplo). Alvo 48dp.
     {
-        const f32 docsX = ins.left + contentW - 72.0f * 2.0f - 16.0f - 8.0f
-                          - 48.0f;
-        const UiRect r{docsX, topY + (hdrH - 48.0f) * 0.5f, 48.0f, 48.0f};
+        const f32 docsX = ins.left + contentW - theme::dp(72.0f) * 2.0f -
+                          theme::dp(16.0f) - theme::dp(8.0f) -
+                          theme::dp(48.0f);
+        const UiRect r{docsX, topY + (hdrH - theme::dp(48.0f)) * 0.5f,
+                       theme::dp(48.0f), theme::dp(48.0f)};
         const bool held = ui.widgetActive(kDocsId);
-        ui.panelRounded(r.x, r.y, r.w, r.h, theme::kRadiusCard,
+        ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusCard),
                         held ? theme::kTheme.surface2
                              : theme::kTheme.surface);
-        ui.frameRounded(r.x, r.y, r.w, r.h, 1.0f, theme::kRadiusCard,
+        ui.frameRounded(r.x, r.y, r.w, r.h, 1.0f, theme::dp(theme::kRadiusCard),
                         theme::kTheme.border);
         icons::drawIcon(ui, icons::Icon::Search,
-                        r.x + (r.w - 24.0f) * 0.5f,
-                        r.y + (r.h - 24.0f) * 0.5f, 24.0f,
-                        theme::kTheme.text1);
+                        r.x + (r.w - theme::dp(24.0f)) * 0.5f,
+                        r.y + (r.h - theme::dp(24.0f)) * 0.5f,
+                        theme::dp(24.0f), theme::kTheme.text1);
         if (ui.widgetHit(kDocsId, r.x, r.y, r.w, r.h)) {
             result = 4;
         }
 
         // 0.9.5 · COPIAR REFERÊNCIA (📋): a referência V.ONI COMPLETA como
         // texto colável p/ IAs — o main põe no clipboard via JNI (result 6)
-        const UiRect rc{docsX - 56.0f, topY + (hdrH - 48.0f) * 0.5f, 48.0f,
-                        48.0f};
+        const UiRect rc{docsX - theme::dp(56.0f),
+                        topY + (hdrH - theme::dp(48.0f)) * 0.5f,
+                        theme::dp(48.0f), theme::dp(48.0f)};
         const bool heldC = ui.widgetActive(kCopyRefId);
-        ui.panelRounded(rc.x, rc.y, rc.w, rc.h, theme::kRadiusCard,
+        ui.panelRounded(rc.x, rc.y, rc.w, rc.h, theme::dp(theme::kRadiusCard),
                         heldC ? theme::kTheme.surface2
                               : theme::kTheme.surface);
-        ui.frameRounded(rc.x, rc.y, rc.w, rc.h, 1.0f, theme::kRadiusCard,
-                        theme::kTheme.border);
+        ui.frameRounded(rc.x, rc.y, rc.w, rc.h, 1.0f,
+                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
         icons::drawIcon(ui, icons::Icon::Copy,
-                        rc.x + (rc.w - 24.0f) * 0.5f,
-                        rc.y + (rc.h - 24.0f) * 0.5f, 24.0f,
-                        theme::kTheme.text1);
+                        rc.x + (rc.w - theme::dp(24.0f)) * 0.5f,
+                        rc.y + (rc.h - theme::dp(24.0f)) * 0.5f,
+                        theme::dp(24.0f), theme::kTheme.text1);
         if (ui.widgetHit(kCopyRefId, rc.x, rc.y, rc.w, rc.h)) {
             result = 6;
         }
@@ -766,19 +793,23 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         // cima do outro; o toque no corpo pede o IME do sistema e fecha o
         // teclado próprio)
         {
-            const UiRect rk{docsX - 152.0f, topY + (hdrH - 48.0f) * 0.5f,
-                            48.0f, 48.0f};
+            const UiRect rk{docsX - theme::dp(152.0f),
+                            topY + (hdrH - theme::dp(48.0f)) * 0.5f,
+                            theme::dp(48.0f), theme::dp(48.0f)};
             const bool heldK = ui.widgetActive(kKbToggleId);
-            ui.panelRounded(rk.x, rk.y, rk.w, rk.h, theme::kRadiusCard,
+            ui.panelRounded(rk.x, rk.y, rk.w, rk.h,
+                            theme::dp(theme::kRadiusCard),
                             st.kbOpen ? theme::kTheme.accent
                                       : (heldK ? theme::kTheme.surface2
                                                : theme::kTheme.surface));
-            ui.frameRounded(rk.x, rk.y, rk.w, rk.h, 1.0f, theme::kRadiusCard,
+            ui.frameRounded(rk.x, rk.y, rk.w, rk.h, 1.0f,
+                            theme::dp(theme::kRadiusCard),
                             st.kbOpen ? theme::kTheme.accent
                                       : theme::kTheme.border);
             icons::drawIcon(ui, icons::Icon::Keyboard,
-                            rk.x + (rk.w - 24.0f) * 0.5f,
-                            rk.y + (rk.h - 24.0f) * 0.5f, 24.0f,
+                            rk.x + (rk.w - theme::dp(24.0f)) * 0.5f,
+                            rk.y + (rk.h - theme::dp(24.0f)) * 0.5f,
+                            theme::dp(24.0f),
                             st.kbOpen ? theme::kTheme.bg
                                       : theme::kTheme.text1);
             if (ui.widgetHit(kKbToggleId, rk.x, rk.y, rk.w, rk.h)) {
@@ -793,17 +824,22 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
 
         // 0.9.5 · O NÍVEL DA AJUDA (I/N/S): Iniciante (desc+exemplo) ·
         // Normal (desc) · Silencioso (nada) — um toque cicla
-        const UiRect rl{docsX - 200.0f, topY + (hdrH - 48.0f) * 0.5f, 48.0f,
-                        48.0f};
+        const UiRect rl{docsX - theme::dp(200.0f),
+                        topY + (hdrH - theme::dp(48.0f)) * 0.5f,
+                        theme::dp(48.0f), theme::dp(48.0f)};
         const bool heldL = ui.widgetActive(kHelpLevelId);
-        ui.panelRounded(rl.x, rl.y, rl.w, rl.h, theme::kRadiusCard,
+        ui.panelRounded(rl.x, rl.y, rl.w, rl.h, theme::dp(theme::kRadiusCard),
                         heldL ? theme::kTheme.surface2
                               : theme::kTheme.surface);
-        ui.frameRounded(rl.x, rl.y, rl.w, rl.h, 1.0f, theme::kRadiusCard,
-                        theme::kTheme.border);
+        ui.frameRounded(rl.x, rl.y, rl.w, rl.h, 1.0f,
+                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
         const char* lvl = st.helpLevel == 0 ? "I"
                           : st.helpLevel == 1 ? "N" : "S";
-        ui.labelStyled(rl.x, rl.y + 14.0f, lvl,
+        ui.labelStyled(rl.x + (rl.w - ui.fontWidth(lvl)) * 0.5f,
+                       theme::centeredBaseline(ui.textMetrics().ascent,
+                                               ui.textMetrics().descent,
+                                               rl.y, rl.h, 14.0f),
+                       lvl,
                        st.helpLevel == 2 ? theme::kTheme.text2
                                          : theme::kTheme.accent,
                        theme::fontScale(theme::kFontBody), 0);
@@ -813,32 +849,40 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     }
 
     // RUN / STOP 48dp à direita (alvos ≥48; estado: running aceso = Stop)
-    const f32 btnW = 72.0f;
-    const f32 runX = ins.left + contentW - btnW * 2.0f - 16.0f;
-    const f32 stopX = ins.left + contentW - btnW - 8.0f;
-    const f32 btnY = topY + (hdrH - 48.0f) / 2.0f;
+    const f32 btnW = theme::dp(72.0f);
+    const f32 runX = ins.left + contentW - btnW * 2.0f - theme::dp(16.0f);
+    const f32 stopX = ins.left + contentW - btnW - theme::dp(8.0f);
+    const f32 btnY = topY + (hdrH - theme::dp(48.0f)) / 2.0f;
+    const f32 btnH = theme::dp(48.0f);
     const bool running = st.running;
     // Run: accent quando disponível; esbatido enquanto corre
-    ui.panelRounded(runX, btnY, btnW, 48.0f, theme::kRadiusCard,
+    ui.panelRounded(runX, btnY, btnW, btnH, theme::dp(theme::kRadiusCard),
                     running ? theme::kTheme.surface2 : theme::kTheme.accent);
-    ui.labelStyled(runX, btnY + 14.0f, "Run", running ? theme::kTheme.text2
-                                                      : theme::kTheme.bg,
+    ui.labelStyled(runX + (btnW - ui.fontWidth("Run")) * 0.5f,
+                   theme::centeredBaseline(ui.textMetrics().ascent,
+                                           ui.textMetrics().descent,
+                                           btnY, btnH, 14.0f),
+                   "Run", running ? theme::kTheme.text2 : theme::kTheme.bg,
                    theme::fontScale(theme::kFontBody), 0);
-    if (!running && ui.widgetHit(kRunId, runX, btnY, btnW, 48.0f)) {
+    if (!running && ui.widgetHit(kRunId, runX, btnY, btnW, btnH)) {
         result = 2;
     }
     // Stop: danger quando a correr
-    ui.panelRounded(stopX, btnY, btnW, 48.0f, theme::kRadiusCard,
+    ui.panelRounded(stopX, btnY, btnW, btnH, theme::dp(theme::kRadiusCard),
                     running ? theme::kTheme.danger : theme::kTheme.surface2);
-    ui.labelStyled(stopX, btnY + 14.0f, "Stop",
+    ui.labelStyled(stopX + (btnW - ui.fontWidth("Stop")) * 0.5f,
+                   theme::centeredBaseline(ui.textMetrics().ascent,
+                                           ui.textMetrics().descent,
+                                           btnY, btnH, 14.0f),
+                   "Stop",
                    running ? theme::kTheme.bg : theme::kTheme.text2,
                    theme::fontScale(theme::kFontBody), 0);
-    if (running && ui.widgetHit(kStopId, stopX, btnY, btnW, 48.0f)) {
+    if (running && ui.widgetHit(kStopId, stopX, btnY, btnW, btnH)) {
         result = 3;
     }
 
     // ---- corpo: nºs de linha + código colorido em scroll -------------------
-    const f32 errBarH = st.errLine ? kErrH : 0.0f;
+    const f32 errBarH = st.errLine ? theme::dp(kErrH) : 0.0f;
     const f32 kbH = st.kbOpen ? keyboardHeight() : 0.0f;
     // 0.9.5: a STRIP FINA DE AJUDA junto à barra de erro — a mini-descrição
     // em tempo real (DESDE A 1ª LETRA da palavra a meio da digitação) ou a
@@ -853,7 +897,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
                       h - ins.bottom - (topY + hdrH) - errBarH - kbH - stripH};
     const f32 lh = lineHeight(ui);
     const u32 nLines = lineCount(st);
-    const f32 contentH = static_cast<f32>(nLines) * lh + 16.0f;
+    const f32 contentH = static_cast<f32>(nLines) * lh + theme::dp(16.0f);
 
     ui.beginScroll(kScrollId, body, contentH);
 
@@ -869,7 +913,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
             ++i;
         }
     }
-    const f32 caretTop = 8.0f + static_cast<f32>(caretLine) * lh;
+    const f32 caretTop = theme::dp(8.0f) + static_cast<f32>(caretLine) * lh;
     const f32 caretBot = caretTop + lh;
     f32 want = 0.0f;
     if (contentH > body.h) {
@@ -888,9 +932,10 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     const f32 off = ui.scrollOffset();
 
     // gutter de nºs de linha (48dp — fundo surface, texto text2 12sp)
-    ui.panel(ins.left, body.y, 48.0f, body.h, theme::kTheme.surface);
-    ui.panel(ins.left + 48.0f, body.y, 1.0f, body.h, theme::kTheme.border);
-    const f32 xCode = ins.left + 64.0f;
+    ui.panel(ins.left, body.y, theme::dp(48.0f), body.h, theme::kTheme.surface);
+    ui.panel(ins.left + theme::dp(48.0f), body.y, 1.0f, body.h,
+             theme::kTheme.border);
+    const f32 xCode = ins.left + theme::dp(64.0f);
 
     // split em linhas + coloração por classes (o parser classifica; as
     // CORES vêm do Theme — spec §10)
@@ -911,12 +956,12 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
             std::memcpy(line, st.buf.data() + start, sizeof(line) - 1);
             line[sizeof(line) - 1] = '\0';
         }
-        const f32 yContent = 8.0f + static_cast<f32>(i) * lh;
+        const f32 yContent = theme::dp(8.0f) + static_cast<f32>(i) * lh;
         const f32 y = body.y + yContent - off;
 
         // nº da linha (12sp text2; a linha do ERRO acende em danger)
         std::snprintf(num, sizeof(num), "%u", i + 1);
-        ui.labelStyled(ins.left + 8.0f, y + 4.0f, num,
+        ui.labelStyled(ins.left + theme::dp(8.0f), y + theme::dp(4.0f), num,
                        st.errLine == i + 1 ? theme::kTheme.danger
                                            : theme::kTheme.text2,
                        theme::fontScale(theme::kFontCaption), 0);
@@ -957,8 +1002,10 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
                                    : (u32)sizeof(before) - 1;
                 std::memcpy(before, line, bl);
                 before[bl] = '\0';
-                const f32 xCaret = xCode + ui.fontWidth(before) + 2.0f;
-                ui.panel(xCaret, y, 2.0f, lh - 8.0f, theme::kTheme.accent);
+                const f32 xCaret = xCode + ui.fontWidth(before) +
+                                   theme::dp(2.0f);
+                ui.panel(xCaret, y, theme::dp(2.0f), lh - theme::dp(8.0f),
+                         theme::kTheme.accent);
             }
         }
         start = (end < st.buf.size()) ? end + 1 : end;
@@ -969,7 +1016,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     // desde 0.9.6 — nunca sob a barra de navegação), acima da strip de ajuda
     if (st.kbOpen) {
         drawKeyboard(ui, st, w,
-                    h - ins.bottom - errBarH - stripH - keyboardHeight());
+                     h - ins.bottom - errBarH - stripH - keyboardHeight());
     }
 
     // ---- a STRIP DE AJUDA (0.9.5): entre o teclado e a barra de erro -----
@@ -977,56 +1024,66 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         const f32 stripY = h - ins.bottom - errBarH - kbH - stripH;
         ui.panel(ins.left, stripY, contentW, stripH, theme::kTheme.surface);
         ui.panel(ins.left, stripY, contentW, 1.0f, theme::kTheme.border);
-        ui.panel(ins.left, stripY + 1.0f, 3.0f, stripH - 1.0f,
+        ui.panel(ins.left, stripY + 1.0f, theme::dp(3.0f), stripH - 1.0f,
                  theme::kTheme.accent);   // risca accent à esquerda
         // linha 1 (truncada à largura útil — labelStyled corta com "…")
         char l1[200];
         std::snprintf(l1, sizeof(l1), "%s", strip1.c_str());
-        ui.labelStyled(ins.left + 12.0f, stripY + 8.0f, l1,
+        ui.labelStyled(ins.left + theme::dp(12.0f),
+                       stripY + theme::dp(8.0f), l1,
                        theme::kTheme.text1,
                        theme::fontScale(theme::kFontCaption),
-                       static_cast<u32>(contentW) - 24u);
+                       static_cast<u32>(contentW - theme::dp(24.0f)));
         if (!strip2.empty()) {
             char l2[200];
             std::snprintf(l2, sizeof(l2), "%s", strip2.c_str());
-            ui.labelStyled(ins.left + 12.0f, stripY + 30.0f, l2,
+            ui.labelStyled(ins.left + theme::dp(12.0f),
+                           stripY + theme::dp(30.0f), l2,
                            theme::kTheme.text2,
                            theme::fontScale(theme::kFontCaption),
-                           static_cast<u32>(contentW) - 24u);
+                           static_cast<u32>(contentW - theme::dp(24.0f)));
         }
     }
 
     // ---- barra de ERRO com linha + mensagem (§12) + SUBSTITUIR (G2-7e) ----
     if (st.errLine) {
-        const f32 errY = h - ins.bottom - kErrH;
+        const f32 errY = h - ins.bottom - theme::dp(kErrH);
         ui.panel(ins.left, errY, contentW, kErrH, theme::kTheme.danger);
         char msg[160];
         std::snprintf(msg, sizeof(msg), "linha %u: %s", st.errLine,
                       st.errMsg.empty() ? "erro" : st.errMsg.c_str());
         // a mensagem abre espaço para o botão quando há substituição
         const bool hasFix = !st.fixFrom.empty() && !st.fixTo.empty();
-        ui.labelFitted(ins.left + 12.0f, errY + 12.0f, msg,
+        ui.labelFitted(ins.left + theme::dp(12.0f),
+                       errY + theme::dp(12.0f), msg,
                        theme::kTheme.bg,
-                       hasFix ? contentW - 148.0f : contentW - 24.0f);
+                       hasFix ? contentW - theme::dp(148.0f)
+                              : contentW - theme::dp(24.0f));
         // 0.9.6 (G2-7e) · O BOTÃO SUBSTITUIR: troca a palavra estrangeira
         // pelo equivalente V.ONI NO BUFFER (a linha do erro, palavra
         // inteira); o caret segue a edição e o erro limpa — o dono vê o
         // código ficar certo com UM toque
         if (hasFix) {
-            const UiRect fb{ins.left + contentW - 128.0f, errY + 4.0f,
-                            120.0f, kErrH - 8.0f};
+            const UiRect fb{ins.left + contentW - theme::dp(128.0f),
+                            errY + theme::dp(4.0f), theme::dp(120.0f),
+                            theme::dp(kErrH) - theme::dp(8.0f)};
             const bool held = ui.widgetActive(kFixId);
-            ui.panelRounded(fb.x, fb.y, fb.w, fb.h, theme::kRadiusCard,
+            ui.panelRounded(fb.x, fb.y, fb.w, fb.h,
+                            theme::dp(theme::kRadiusCard),
                             held ? theme::kTheme.bg : theme::kTheme.danger);
             ui.frameRounded(fb.x, fb.y, fb.w, fb.h, 1.0f,
-                            theme::kRadiusCard, theme::kTheme.bg);
+                            theme::dp(theme::kRadiusCard),
+                            theme::kTheme.bg);
             char lbl[96];
             std::snprintf(lbl, sizeof(lbl), "Substituir %s",
                           st.fixTo.c_str());
             if (ui.hasFont()) {
                 const f32 tw = ui.fontWidth(lbl);
-                ui.label(fb.x + (fb.w - tw) * 0.5f, fb.y + 14.0f, lbl,
-                         theme::kTheme.bg);
+                ui.label(fb.x + (fb.w - tw) * 0.5f,
+                         theme::centeredBaseline(ui.textMetrics().ascent,
+                                                 ui.textMetrics().descent,
+                                                 fb.y, fb.h, 14.0f),
+                         lbl, theme::kTheme.bg);
             }
             if (ui.widgetHit(kFixId, fb.x, fb.y, fb.w, fb.h)) {
                 applyFix(st);
@@ -1056,7 +1113,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
             {
                 const f32 lh2 = lineHeight(ui);
                 const f32 off2 = ui.scrollOffset();
-                f32 rel = ty - body.y + off2 - 8.0f;
+                f32 rel = ty - body.y + off2 - theme::dp(8.0f);
                 if (rel < 0.0f) {
                     rel = 0.0f;
                 }
@@ -1076,7 +1133,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
                     }
                 }
                 // coluna: acumula a largura até passar o x do toque
-                const f32 xCode = ins.left + 64.0f;
+                const f32 xCode = ins.left + theme::dp(64.0f);
                 u32 bo = ls2;
                 f32 acc = 0.0f;
                 while (bo < st.buf.size() && st.buf[bo] != '\n') {

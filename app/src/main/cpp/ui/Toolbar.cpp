@@ -24,13 +24,16 @@ namespace toolbar {
 namespace {
 
 // ---- métricas naturais (px de design — spec A: alvos ≥48, ícone 24) ---------
-constexpr f32 kPadOuter  = 12.0f;   // margem da barra aos extremos
-constexpr f32 kBtnH      = 48.0f;   // ALVO de toque (spec A) dentro dos 56
-constexpr f32 kMenuW     = 112.0f;  // [≡ Menu]  (ícone + palavra)
-constexpr f32 kCenaW     = 100.0f;  // [Cena ▾]
-constexpr f32 kTabW      = 96.0f;   // cada tab [3D]/[UI]/[ÁUDIO]
-constexpr f32 kIconBtn   = 48.0f;   // [pause][play][gear]
-constexpr f32 kGroupGap  = 20.0f;   // vão entre grupos
+// 0.9.6.1 (PASSO 0 · R-018): os valores são DP e multiplicam pela densidade
+// AQUI (na fonte do layout da barra) — antes eram px crus: no C33 os alvos
+// media ~24dp reais e o "Cena" truncava a "C…"
+f32 kPadOuter()  { return theme::dp(12.0f); }   // margem da barra aos extremos
+f32 kBtnH()      { return theme::dp(48.0f); }   // ALVO de toque dentro dos 56dp
+f32 kMenuW()     { return theme::dp(112.0f); }  // [≡ Menu]  (ícone + palavra)
+f32 kCenaW()     { return theme::dp(100.0f); }  // [Cena ▾]
+f32 kTabW()      { return theme::dp(96.0f); }   // cada tab [3D]/[UI]/[ÁUDIO]
+f32 kIconBtn()   { return theme::dp(48.0f); }   // [pause][play][gear]
+f32 kGroupGap()  { return theme::dp(20.0f); }   // vão entre grupos
 
 // baseline do texto centrada no botão (métricas REAIS da fonte)
 f32 textBaseline(UiContext& ui, const UiRect& r) {
@@ -51,13 +54,14 @@ bool textIconButton(UiContext& ui, u64 id, const UiRect& r,
         ui.panelRounded(r.x, r.y, r.w, r.h, theme::kRadiusCard,
                         theme::kTheme.surface2);
     }
-    const f32 iconS = 24.0f;
-    const f32 iconX = r.x + 10.0f;
+    const f32 iconS = theme::dp(24.0f);
+    const f32 iconX = r.x + theme::dp(10.0f);
     icons::drawIcon(ui, icon, iconX, r.y + (r.h - iconS) * 0.5f, iconS,
                     held ? theme::kTheme.text1 : theme::kTheme.text2);
     if (ui.hasFont()) {
         const f32 tw = ui.fontWidth(text);
-        const f32 maxW = r.w - iconS - 18.0f - (withChevron ? 14.0f : 0.0f);
+        const f32 maxW = r.w - iconS - theme::dp(18.0f) -
+                         (withChevron ? theme::dp(14.0f) : 0.0f);
         char fit[48];
         const char* shown = text;
         if (tw > maxW) {
@@ -66,16 +70,18 @@ bool textIconButton(UiContext& ui, u64 id, const UiRect& r,
                                fit, sizeof(fit));
             shown = fit;
         }
-        ui.label(iconX + iconS + 8.0f, textBaseline(ui, r), shown,
+        ui.label(iconX + iconS + theme::dp(8.0f), textBaseline(ui, r), shown,
                  held ? theme::kTheme.text1 : theme::kTheme.text1);
     }
     if (withChevron) {   // caret ▾ (2 traços)
         const f32 cy = r.y + r.h * 0.5f;
-        const f32 cx = r.x + r.w - 12.0f;
+        const f32 cx = r.x + r.w - theme::dp(12.0f);
         const f32 col[4] = {theme::kTheme.text2[0], theme::kTheme.text2[1],
                             theme::kTheme.text2[2], theme::kTheme.text2[3]};
-        ui.drawLine(cx - 4.0f, cy - 2.0f, cx, cy + 2.5f, 2.0f, col);
-        ui.drawLine(cx, cy + 2.5f, cx + 4.0f, cy - 2.0f, 2.0f, col);
+        ui.drawLine(cx - theme::dp(4.0f), cy - theme::dp(2.0f), cx,
+                    cy + theme::dp(2.5f), theme::dp(2.0f), col);
+        ui.drawLine(cx, cy + theme::dp(2.5f), cx + theme::dp(4.0f),
+                    cy - theme::dp(2.0f), theme::dp(2.0f), col);
     }
     return pressed;
 }
@@ -89,8 +95,8 @@ bool iconButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon) {
         ui.panelRounded(r.x, r.y, r.w, r.h, theme::kRadiusCard,
                         theme::kTheme.surface2);
     }
-    const f32 s = r.h - 12.0f;
-    if (s >= 12.0f) {
+    const f32 s = r.h - theme::dp(12.0f);
+    if (s >= theme::dp(12.0f)) {
         icons::drawIcon(ui, icon, r.x + (r.w - s) * 0.5f,
                         r.y + (r.h - s) * 0.5f, s, theme::kTheme.text1);
     }
@@ -107,17 +113,17 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
     TopBarLayout L;
     L.bar = safe::toolbarRect(sw, sh, in);
     L.active = uiMode ? 1u : (audioMode ? 2u : 0u);
-    const f32 avail = L.bar.w - 2.0f * kPadOuter;
+    const f32 avail = L.bar.w - 2.0f * kPadOuter();
     if (avail <= 120.0f) {
         return L;   // degenerado — só o fundo
     }
     // escala graciosa: as larguras naturais encolhem PROPORCIONALMENTE se
     // o ecrã for estreito (o gear NUNCA sai da direita)
-    const f32 natW = kMenuW + 4.0f + kCenaW + 3.0f * kTabW +
-                     3.0f * kIconBtn + 2.0f * 8.0f;
+    const f32 natW = kMenuW() + theme::dp(4.0f) + kCenaW() +
+                     3.0f * kTabW() + 3.0f * kIconBtn() + 2.0f * theme::dp(8.0f);
     f32 k = 1.0f;
-    if (natW + 4.0f * kGroupGap > avail) {
-        k = (avail - 4.0f * kGroupGap) / natW;
+    if (natW + 4.0f * kGroupGap() > avail) {
+        k = (avail - 4.0f * kGroupGap()) / natW;
         if (k > 1.0f) {
             k = 1.0f;
         }
@@ -125,37 +131,37 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
             k = 0.55f;   // piso: os alvos ficam ≥26dp… o C33 (1536) nunca chega
         }
     }
-    L.menu.w  = kMenuW * k;
-    L.cena.w  = kCenaW * k;
-    L.tab3d.w = L.tabUi.w = L.tabAudio.w = kTabW * k;
-    L.pause.w = L.play.w = L.gear.w = kIconBtn * k;
-    L.iconSize = 24.0f;
+    L.menu.w  = kMenuW() * k;
+    L.cena.w  = kCenaW() * k;
+    L.tab3d.w = L.tabUi.w = L.tabAudio.w = kTabW() * k;
+    L.pause.w = L.play.w = L.gear.w = kIconBtn() * k;
+    L.iconSize = theme::dp(24.0f);
 
-    const f32 by = L.bar.y + (L.bar.h - kBtnH) * 0.5f;
+    const f32 by = L.bar.y + (L.bar.h - kBtnH()) * 0.5f;
     const auto place = [&by](UiRect& r, f32 x) {
         r.x = x;
         r.y = by;
-        r.h = kBtnH;
+        r.h = kBtnH();
     };
 
     // ---- esquerda: [≡ Menu][Cena ▾] ----
-    f32 x = L.bar.x + kPadOuter;
+    f32 x = L.bar.x + kPadOuter();
     place(L.menu, x);            x += L.menu.w;
-    place(L.cena, x + 4.0f);     x += 4.0f + L.cena.w;
+    place(L.cena, x + theme::dp(4.0f));     x += theme::dp(4.0f) + L.cena.w;
 
     // ---- direita: [pause][play][gear] (ancorados — os grupos do centro
     // cedem primeiro em ecrãs estreitos) ----
-    f32 rgx = L.bar.x + L.bar.w - kPadOuter - L.gear.w;
-    place(L.gear, rgx);          rgx -= 8.0f + L.play.w;
-    place(L.play, rgx);          rgx -= 8.0f + L.pause.w;
+    f32 rgx = L.bar.x + L.bar.w - kPadOuter() - L.gear.w;
+    place(L.gear, rgx);          rgx -= theme::dp(8.0f) + L.play.w;
+    place(L.play, rgx);          rgx -= theme::dp(8.0f) + L.pause.w;
     place(L.pause, rgx);
 
     // ---- centro: as tabs [3D][UI][ÁUDIO] — centradas na BARRA; se não
     // couberem entre a esquerda e a direita, comprimem-se ao espaço útil ----
     const f32 tabsW = 3.0f * L.tab3d.w;
     f32 cx = L.bar.x + (L.bar.w - tabsW) * 0.5f;
-    const f32 minCx = x + kGroupGap;
-    const f32 maxCx = rgx - kGroupGap - tabsW;
+    const f32 minCx = x + kGroupGap();
+    const f32 maxCx = rgx - kGroupGap() - tabsW;
     if (cx < minCx) {
         cx = minCx;
     }
@@ -165,13 +171,13 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
     // ainda sem espaço? as tabs encolhem ao que sobrar (alvo ≥48 quando
     // possível — o touch continua na linha inteira da barra)
     f32 tabW = L.tab3d.w;
-    if (cx + tabsW > rgx - kGroupGap) {
-        const f32 room = (rgx - kGroupGap) - cx;
-        if (room > 3.0f * 48.0f) {
+    if (cx + tabsW > rgx - kGroupGap()) {
+        const f32 room = (rgx - kGroupGap()) - cx;
+        if (room > 3.0f * theme::dp(48.0f)) {
             tabW = room / 3.0f;
         } else {
-            tabW = 48.0f;   // piso 48dp — o grupo da direita cede (raro)
-            cx = (x + kGroupGap + rgx - kGroupGap - 3.0f * tabW) * 0.5f;
+            tabW = theme::dp(48.0f);   // piso 48dp — o grupo da direita cede
+            cx = (x + kGroupGap() + rgx - kGroupGap() - 3.0f * tabW) * 0.5f;
         }
     }
     L.tab3d.w = L.tabUi.w = L.tabAudio.w = tabW;
@@ -182,8 +188,8 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
     // underline do ATIVO: 2dp accent NO FUNDO da barra (spec D)
     const UiRect* tabs[3] = {&L.tab3d, &L.tabUi, &L.tabAudio};
     L.underline = *tabs[L.active];
-    L.underline.y = L.bar.y + L.bar.h - 2.0f;
-    L.underline.h = 2.0f;
+    L.underline.y = L.bar.y + L.bar.h - theme::dp(2.0f);
+    L.underline.h = theme::dp(2.0f);
     return L;
 }
 
@@ -227,9 +233,9 @@ TopBarActions drawTopBar(UiContext& ui, EditorState& st) {
         if (held) {
             ui.panel(r.x, r.y, r.w, r.h, theme::kTheme.surface2);
         }
-        const f32 s = 24.0f;
+        const f32 s = theme::dp(24.0f);
         const f32 wordW = ui.hasFont() ? ui.fontWidth(tabs[i].word) : 0.0f;
-        const f32 gap = 8.0f;
+        const f32 gap = theme::dp(8.0f);
         const f32 total = s + gap + wordW;
         const f32 x0 = r.x + (r.w - total) * 0.5f;
         icons::drawIcon(ui, tabs[i].icon, x0, r.y + (r.h - s) * 0.5f, s,

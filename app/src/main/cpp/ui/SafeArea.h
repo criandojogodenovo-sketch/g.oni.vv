@@ -20,6 +20,10 @@
 // default 240 (pega 160–400, passos de 8) · painéis 300 · alvos ≥48.
 #include "core/Types.h"
 #include "ui/ScrollMath.h"   // UiRect (GL-free)
+#include "ui/Theme.h"       // 0.9.6.1 (PASSO 0): dp() — as medidas dp daqui
+                            // multiplicam pela densidade AO CALCULAR o rect
+                            // (R-018: eram px crus — barra a meia altura no
+                            // C33). Testes/harness: densidade 1.0 = igual
 
 namespace vv {
 namespace safe {
@@ -85,32 +89,34 @@ inline bool rectInside(const UiRect& inner, const UiRect& outer,
 
 // ---- rects do layout 0.9.0 (todos DENTRO do contentRect) --------------------
 
-// barra de cima (56) — [Menu][Cena] · [pause][play][sliders] · [gear]
+// barra de cima (56dp) — [Menu][Cena] · [pause][play][sliders] · [gear]
 inline UiRect toolbarRect(f32 sw, f32 sh, const Insets& i) {
-    return {i.left, i.top, sw - i.left - i.right, kTopBarH};
+    return {i.left, i.top, sw - i.left - i.right, theme::dp(kTopBarH)};
 }
 // tab bar de modo (48, logo por baixo da barra de cima)
 inline UiRect modeTabRect(f32 sw, f32 sh, const Insets& i) {
-    return {i.left, i.top + kTopBarH, sw - i.left - i.right, kModeTabH};
+    return {i.left, i.top + theme::dp(kTopBarH), sw - i.left - i.right, theme::dp(kModeTabH)};
 }
 // faixa do chrome de cima (56+48) — os painéis começam DEBAIXO dela
 inline UiRect topChromeRect(f32 sw, f32 sh, const Insets& i) {
-    return {i.left, i.top, sw - i.left - i.right, kToolbarH};
+    return {i.left, i.top, sw - i.left - i.right, theme::dp(kToolbarH)};
 }
 // tab bar do painel de baixo (48, sempre visível — abre/fecha o drawer)
 inline UiRect bottomTabRect(f32 sw, f32 sh, const Insets& i) {
-    const f32 y = sh - i.bottom - kStatusH - kBottomTabH;
-    return {i.left, y, sw - i.left - i.right, kBottomTabH};
+    const f32 y = sh - i.bottom - theme::dp(kStatusH) - theme::dp(kBottomTabH);
+    return {i.left, y, sw - i.left - i.right, theme::dp(kBottomTabH)};
 }
 // status line (24 — a última faixa do contentRect)
 inline UiRect statusRect(f32 sw, f32 sh, const Insets& i) {
-    return {i.left, sh - i.bottom - kStatusH, sw - i.left - i.right, kStatusH};
+    return {i.left, sh - i.bottom - theme::dp(kStatusH), sw - i.left - i.right,
+            theme::dp(kStatusH)};
 }
 // viewport lógico (entre o chrome de cima e a tab bar de baixo) — pai dos
 // painéis e do viewport central; o DRAWER come DENTRO dele (por baixo)
 inline UiRect viewportRect(f32 sw, f32 sh, const Insets& i) {
-    const f32 y = i.top + kToolbarH;
-    const f32 h = sh - i.top - i.bottom - kToolbarH - kStatusH - kBottomTabH;
+    const f32 y = i.top + theme::dp(kToolbarH);
+    const f32 h = sh - i.top - i.bottom - theme::dp(kToolbarH) - theme::dp(kStatusH) -
+                  theme::dp(kBottomTabH);
     return {i.left, y, sw - i.left - i.right, h > 0.0f ? h : 0.0f};
 }
 
@@ -124,25 +130,25 @@ inline UiRect panelsRect(f32 sw, f32 sh, const Insets& i, f32 drawerH) {
 }
 inline UiRect hierarchyPanelRect(f32 sw, f32 sh, const Insets& i, f32 drawerH) {
     const UiRect p = panelsRect(sw, sh, i, drawerH);
-    return {p.x, p.y, kPanelW, p.h};
+    return {p.x, p.y, theme::dp(kPanelW), p.h};
 }
 inline UiRect inspectorPanelRect(f32 sw, f32 sh, const Insets& i, f32 drawerH) {
     const UiRect p = panelsRect(sw, sh, i, drawerH);
-    return {p.x + p.w - kPanelW, p.y, kPanelW, p.h};
+    return {p.x + p.w - theme::dp(kPanelW), p.y, theme::dp(kPanelW), p.h};
 }
 // viewport central — gate da câmara: gestos atrás das barras NÃO orbitam
 inline UiRect centerRect(f32 sw, f32 sh, const Insets& i, f32 drawerH) {
     const UiRect p = panelsRect(sw, sh, i, drawerH);
-    const f32 w = p.w - 2.0f * kPanelW;
-    return {p.x + kPanelW, p.y, w > 0.0f ? w : 0.0f, p.h};
+    const f32 w = p.w - 2.0f * theme::dp(kPanelW);
+    return {p.x + theme::dp(kPanelW), p.y, w > 0.0f ? w : 0.0f, p.h};
 }
 // 0.7.6: sem o painel DIREITO (o Inspector escondeu: a área dele junta-se ao
 // viewport central — os gestos passam a orbitar aí e o mini-ecrã 2D cresce)
 inline UiRect centerRect(f32 sw, f32 sh, const Insets& i, f32 drawerH,
                           bool rightPanel) {
     const UiRect p = panelsRect(sw, sh, i, drawerH);
-    const f32 w = p.w - kPanelW - (rightPanel ? kPanelW : 0.0f);
-    return {p.x + kPanelW, p.y, w > 0.0f ? w : 0.0f, p.h};
+    const f32 w = p.w - theme::dp(kPanelW) - (rightPanel ? theme::dp(kPanelW) : 0.0f);
+    return {p.x + theme::dp(kPanelW), p.y, w > 0.0f ? w : 0.0f, p.h};
 }
 // compat 0.8.x: as assinaturas de sempre (drawer fechado) — os callers antigos
 // e os testes herdaram-nas; wrappers explícitos para não os partir
