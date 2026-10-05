@@ -96,34 +96,95 @@ Layout layout(const UiRect& view) {
     // crus (o dono media botões de ferramentas com 48px de altura no device)
     const f32 stackBtn = theme::dp(kStackBtn);
     const f32 stackGap = theme::dp(kStackGap);
-    // ---- stack vertical à esquerda (undo/redo/save/dup/paste) ----
-    f32 y = view.y + theme::dp(8.0f);
-    const f32 x = view.x + theme::dp(8.0f);
-    for (int i = 0; i < 5; ++i) {
-        L.stack[i] = {x, y, stackBtn, stackBtn};
-        y += stackBtn + stackGap;
+    const f32 margin = theme::dp(8.0f);
+    // GRUPO D (0.9.6.7 — A BARRA DE TOQUE CABE NO ORÇAMENTO): o chrome
+    // ADAPTa-se ao rect da viewport (o device de 800dp deixava o viewport a
+    // ~200dp: o stack de 5×48+4×8+8 = 280dp TRANBORDAVA o fundo por cima
+    // da toolbar e o [+] caía POR CIMA dos botões de ferramenta — o
+    // kViewportMinW dos divisores garante ≥320dp de largura; a ALTURA
+    // adapta-se AQUI, em colunas, SEMPRE com alvos de 48dp inteiros).
+    //
+    // (1) o [+] : canto inferior direito SE cabe ao lado da toolbar
+    // (toolbar = 5×48 + 4×8 = 272 + margens); senão sobe para o canto
+    // superior direito (onde o triad esteve até à FASE 9).
+    const f32 toolbarW = 5.0f * theme::dp(kToolBtn) + 4.0f * stackGap;
+    const bool plusBottom = view.w >= toolbarW + margin + theme::dp(56.0f) +
+                                       margin + margin;
+    L.plusTopRight = !plusBottom;
+    // (2) o stack: COLUNAS suficientes para a altura útil (a faixa da
+    // toolbar em baixo come 56dp + 8 de folga; o topo tem 8 de margem).
+    // O menor nº de colunas que caiba — 1 coluna nos ecrãs largos (o
+    // layout de sempre, ZERO mudança onde cabe), 2/3 nos curtos.
+    const f32 availH = view.h - margin - theme::dp(kBottomH) - margin;
+    const f32 availW = view.w - 2.0f * margin -
+                       (L.plusTopRight ? theme::dp(56.0f) + margin : 0.0f);
+    u32 cols = 1;
+    bool fits = false;
+    for (; cols < 5; ++cols) {
+        const u32 rowsPerCol = (5u + cols - 1u) / cols;   // ceil(5/cols)
+        const f32 needH = static_cast<f32>(rowsPerCol) * stackBtn +
+                          static_cast<f32>(rowsPerCol - 1u) * stackGap;
+        const f32 needW = static_cast<f32>(cols) * stackBtn +
+                          static_cast<f32>(cols - 1u) * stackGap;
+        if (needH <= availH && needW <= availW) {
+            fits = true;
+            break;
+        }
+    }
+    if (!fits) {
+        // nem 4 colunas couberam — a ÚLTIMA tentativa: 5 colunas de 1 linha
+        // SEM a reserva do [+] (com ele no canto, a reserva pode ter sobrado)
+        const f32 needW = 5.0f * stackBtn + 4.0f * stackGap;
+        if (stackBtn <= availH && needW <= view.w - 2.0f * margin) {
+            cols = 5;
+            fits = true;
+        }
+    }
+    // DEGRADAÇÃO HONESTA: nem o mínimo coube (viewport sub-toolbar — ex. o
+    // drawer comido ao device) → o stack ESCONDE (toolbar+viewport mandam;
+    // os rects ficam degenerados e o draw salta)
+    L.stackVisible = fits;
+    L.stackCols = fits ? cols : 1;
+    // ---- stack (coluna-major: undo/redo/save/dup/paste, preenchendo
+    // coluna a coluna — a ordem de leitura de sempre; degenerado quando
+    // ESCONDIDO — o draw salta) ----
+    const u32 rowsPerCol = (5u + L.stackCols - 1u) / L.stackCols;
+    for (u32 i = 0; i < 5; ++i) {
+        if (!L.stackVisible) {
+            L.stack[i] = {0.0f, 0.0f, 0.0f, 0.0f};
+            continue;
+        }
+        const u32 col = i / rowsPerCol;
+        const u32 row = i % rowsPerCol;
+        L.stack[i] = {view.x + margin +
+                          static_cast<f32>(col) * (stackBtn + stackGap),
+                      view.y + margin +
+                          static_cast<f32>(row) * (stackBtn + stackGap),
+                      stackBtn, stackBtn};
     }
     // FASE 9 (G2-10): o TRIAD foi REMOVIDO — os "pontinhos fantasma" do
     // dono (canto sup-dir do viewport, fora do mock); a orientação vive
     // no gizmo 3D e na câmara.
     // ---- toolbar inferior: SÓ ÍCONES, âncora = canto inferior ESQUERDO
-    // do rect da viewport (G1-1); o ATIVO ganha o nome (mais largo).
-    // Total: ativo 132 + 3×48 + íman 48 + 4 gaps 8 = 368 ≤ viewport útil.
+    // do rect da viewport (G1-1). Uma fileira (garantida pelo
+    // kViewportMinW = 320dp ≥ 272+16 da toolbar).
     const f32 botH = theme::dp(kBottomH);
     const f32 toolW = theme::dp(kToolBtn);
     const f32 by = view.y + view.h - botH - theme::dp(8.0f);
     f32 bx = view.x + theme::dp(8.0f);
-    // as larguras dependem de QUEM está ativo — o draw resolve o estado;
-    // o layout usa a pior caso (um ativo por vez, sempre o MESMO total)
-    const f32 w[5] = {toolW, toolW, toolW, toolW, toolW};
-    L.selectBtn = {bx, by, w[0], botH};  bx += w[0] + theme::dp(8.0f);
-    L.moveBtn   = {bx, by, w[1], botH};  bx += w[1] + theme::dp(8.0f);
-    L.rotateBtn = {bx, by, w[2], botH};  bx += w[2] + theme::dp(8.0f);
-    L.scaleBtn  = {bx, by, w[3], botH};  bx += w[3] + theme::dp(8.0f);
+    L.selectBtn = {bx, by, toolW, botH};  bx += toolW + theme::dp(8.0f);
+    L.moveBtn   = {bx, by, toolW, botH};  bx += toolW + theme::dp(8.0f);
+    L.rotateBtn = {bx, by, toolW, botH};  bx += toolW + theme::dp(8.0f);
+    L.scaleBtn  = {bx, by, toolW, botH};  bx += toolW + theme::dp(8.0f);
     L.snapBtn   = {bx, by, toolW, botH};
-    // "+" no canto inferior DIREITO da viewport (G1-1)
-    L.addTicBtn = {view.x + view.w - theme::dp(56.0f) - theme::dp(8.0f), by,
-                   theme::dp(56.0f), botH};
+    // "+" — inferior direito se cabe; senão o canto SUPERIOR direito
+    if (plusBottom) {
+        L.addTicBtn = {view.x + view.w - theme::dp(56.0f) - margin, by,
+                       theme::dp(56.0f), botH};
+    } else {
+        L.addTicBtn = {view.x + view.w - theme::dp(56.0f) - margin,
+                       view.y + margin, theme::dp(56.0f), botH};
+    }
     return L;
 }
 
@@ -132,29 +193,34 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
     Actions a;
     // G1-1: o rect da viewport com o drawerH REAL — a toolbar acompanha o
     // painel de baixo (aberto = sobe; fechado = desce ao fundo da viewport)
+    // GRUPO D: larguras de ESTADO (divisores) — o chrome acompanha os painéis
     const Layout L = layout(safe::centerRect(
         ui.screenWidth(), ui.screenHeight(), ui.safeArea(), drawerH,
-        st.showInspector));
+        st.showInspector, st.hierW, st.inspW));
 
-    // ---- stack vertical ----
-    if (stackButton(ui, kVpUndoId, L.stack[0], icons::Icon::Undo, cs.canUndo)) {
-        a.undoPressed = true;
-    }
-    if (stackButton(ui, kVpRedoId, L.stack[1], icons::Icon::Redo, cs.canRedo)) {
-        a.redoPressed = true;
-    }
-    if (stackButton(ui, kVpSaveId, L.stack[2], icons::Icon::Save, true)) {
-        a.savePressed = true;
-    }
-    // FASE 9 (G2-11): o 4.º ícone era DUPLICATE (rect+plus — o "quadrado
-    // com ponto" do dono) → agora é o COPY padrão (2 quadrados sobrepostos;
-    // a AÇÃO continua duplicar — só o GLIFO muda, o Paste já é prancheta)
-    if (stackButton(ui, kVpDupId, L.stack[3], icons::Icon::Copy, true)) {
-        a.dupPressed = true;
-    }
-    if (stackButton(ui, kVpPasteId, L.stack[4], icons::Icon::Paste,
-                    cs.canPaste)) {
-        a.pastePressed = true;
+    // ---- stack vertical (pulado quando o layout ESCONDE — degradação) ----
+    if (L.stackVisible) {
+        if (stackButton(ui, kVpUndoId, L.stack[0], icons::Icon::Undo,
+                        cs.canUndo)) {
+            a.undoPressed = true;
+        }
+        if (stackButton(ui, kVpRedoId, L.stack[1], icons::Icon::Redo,
+                        cs.canRedo)) {
+            a.redoPressed = true;
+        }
+        if (stackButton(ui, kVpSaveId, L.stack[2], icons::Icon::Save, true)) {
+            a.savePressed = true;
+        }
+        // FASE 9 (G2-11): o 4.º ícone era DUPLICATE (rect+plus — o
+        // "quadrado com ponto" do dono) → agora é o COPY padrão (2
+        // quadrados sobrepostos; a AÇÃO continua duplicar — só o GLIFO)
+        if (stackButton(ui, kVpDupId, L.stack[3], icons::Icon::Copy, true)) {
+            a.dupPressed = true;
+        }
+        if (stackButton(ui, kVpPasteId, L.stack[4], icons::Icon::Paste,
+                        cs.canPaste)) {
+            a.pastePressed = true;
+        }
     }
 
     // ---- toolbar inferior: modos (Selecionar = SEM gizmo; gz.mode para o

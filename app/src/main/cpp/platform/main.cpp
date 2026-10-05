@@ -272,6 +272,9 @@ static int g_layoutShadowTab = -1;
 static int g_layoutShadowDrawer = -1;
 static int g_layoutShadowInsp = -1;
 static u32 g_layoutShadowCollapsed = 0xFFFFFFFFu;
+// GRUPO D: sombra das larguras dos divisores (hierW/inspW — px)
+static int g_layoutShadowHierW = -1;
+static int g_layoutShadowInspW = -1;
 
 static void saveLayoutNow(const char* reason) {
     if (!g_storage) {
@@ -279,7 +282,8 @@ static void saveLayoutNow(const char* reason) {
     }
     const std::string data = editor::bottom::serializeLayout(
         g_bottom, g_editor.showInspector,
-        g_editor.inspCollapsed | (g_editor.settingsCollapsed << 8));
+        g_editor.inspCollapsed | (g_editor.settingsCollapsed << 8),
+        g_editor.hierW, g_editor.inspW);
     if (data == g_lastLayoutSaved) {
         return;   // nada mudou — NÃO grava (a regra de sempre)
     }
@@ -309,10 +313,18 @@ static void layoutSaveTick(f32 dt) {
     const int insp = g_editor.showInspector ? 1 : 0;
     const u32 collapsed = g_editor.inspCollapsed |
                           (g_editor.settingsCollapsed << 8);
+    // GRUPO D: as larguras EFETIVAS (a gangorra pode arredondar — a sombra
+    // acompanha o que o dono VÊ, não o que o estado cru diz)
+    const safe::PanelBudget pb = editor::resolveEditorPanels(
+        g_editor, g_ui.contentWidthPx());
+    const int hierW = static_cast<int>(pb.hier);
+    const int inspW = static_cast<int>(pb.insp);
     const bool seen = tab == g_layoutShadowTab &&
                       drawer == g_layoutShadowDrawer &&
                       insp == g_layoutShadowInsp &&
-                      collapsed == g_layoutShadowCollapsed;
+                      collapsed == g_layoutShadowCollapsed &&
+                      hierW == g_layoutShadowHierW &&
+                      inspW == g_layoutShadowInspW;
     if (!seen) {
         // o MOTIVO: qual campo mudou desde o último VISTO
         const char* why = "alteração";
@@ -320,6 +332,9 @@ static void layoutSaveTick(f32 dt) {
             why = "painel de baixo";
         } else if (insp != g_layoutShadowInsp) {
             why = "inspector";
+        } else if (hierW != g_layoutShadowHierW ||
+                   inspW != g_layoutShadowInspW) {
+            why = "divisores dos painéis";
         } else {
             why = "secções recolhidas";
         }
@@ -328,6 +343,8 @@ static void layoutSaveTick(f32 dt) {
         g_layoutShadowDrawer = drawer;
         g_layoutShadowInsp = insp;
         g_layoutShadowCollapsed = collapsed;
+        g_layoutShadowHierW = hierW;
+        g_layoutShadowInspW = inspW;
     }
     if (g_layoutSaveTimer > 0.0f) {
         g_layoutSaveTimer -= dt;
@@ -346,7 +363,9 @@ static void loadLayoutNow() {
         if (g_storage->readText("layout.json", text)) {
             bool insp = true;
             u32 collapsed = 0;
-            if (editor::bottom::parseLayout(text, g_bottom, insp, collapsed)) {
+            if (editor::bottom::parseLayout(text, g_bottom, insp, collapsed,
+                                             &g_editor.hierW,
+                                             &g_editor.inspW)) {
                 g_editor.showInspector = insp;
                 g_editor.inspCollapsed = collapsed & 0xFFu;
                 g_editor.settingsCollapsed = (collapsed >> 8) & 0x3Fu;
@@ -359,9 +378,18 @@ static void loadLayoutNow() {
                 g_layoutShadowInsp = g_editor.showInspector ? 1 : 0;
                 g_layoutShadowCollapsed = g_editor.inspCollapsed |
                                           (g_editor.settingsCollapsed << 8);
-                LOGI("layout: carregado (tab=%d drawer=%d insp=%d)",
+                // GRUPO D: a sombra das larguras (a RESOLUÇÃO efetiva — o
+                // clamp da gangorra conta; se o ecrã mudou desde o save, o
+                // re-clamp silencioso não agenda write espúrio)
+                const safe::PanelBudget pb = editor::resolveEditorPanels(
+                    g_editor, g_ui.contentWidthPx());
+                g_layoutShadowHierW = static_cast<int>(pb.hier);
+                g_layoutShadowInspW = static_cast<int>(pb.insp);
+                LOGI("layout: carregado (tab=%d drawer=%d insp=%d hierW=%d "
+                     "inspW=%d)",
                      g_bottom.bottomTab, static_cast<int>(g_bottom.drawerH),
-                     g_editor.showInspector ? 1 : 0);
+                     g_editor.showInspector ? 1 : 0, g_layoutShadowHierW,
+                     g_layoutShadowInspW);
             } else {
                 LOGI("layout: ilegivel — defaults");
             }
@@ -515,8 +543,16 @@ void applyCamHandleDrag(const Mat4& vp, const gizmo::ViewBasis& basis,
     }
 }
 
-u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
-              const gizmo::ViewBasis& basis) {
+// GRUPO D: o feed do gizmo recebe o RECT da viewport (hierarquia|
+// viewport|inspector — larguras dos divisores): TODA a matemática do
+// gizmo/handles corre RETO-LOCAL (px−view.x, py−view.y; NDC→view.w×view.h)
+// — coerente com a projeção de aspect DO RECT e com o draw (que soma a
+// origem de volta). O gate do press usa as coords de ECRÃ (o dedo é do
+// mundo; o rect é que é o mapa).
+u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len,
+              const UiRect& view, const gizmo::ViewBasis& basis) {
+    const f32 mw = view.w;
+    const f32 mh = view.h;
     if (!gizmo::visible(g_editor.playMode, true)) {
         g_gizmo.active = gizmo::Axis::None;
         g_gizmo.hovered = gizmo::Axis::None;
@@ -531,7 +567,7 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
         if (g_input.down(slot)) {
             f32 px, py;
             g_input.pos(slot, px, py);
-            applyCamHandleDrag(vp, basis, sw, sh, px, py);
+            applyCamHandleDrag(vp, basis, mw, mh, px - view.x, py - view.y);
             return 1u << slot;
         }
         g_camHandle.active = false;   // dedo levantado — lock libertado
@@ -544,7 +580,7 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
         if (g_input.down(slot)) {
             f32 px, py;
             g_input.pos(slot, px, py);
-            applyGizmoDrag(g_grab, basis, sw, sh, px, py);
+            applyGizmoDrag(g_grab, basis, mw, mh, px - view.x, py - view.y);
             return 1u << slot;
         }
         // touch up — o lock é LIBERTADO (o próximo press volta ao hit-test)
@@ -562,10 +598,7 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
         g_gizmo.hovered = gizmo::Axis::None;
     }
     // press edge → GRAB (hit-test com alvo GENEROSO, âncoras capturadas;
-    // só se o gesto nasce no viewport central)
-    const UiRect view = editor::centerRect(sw, sh, g_ui.safeArea(),
-                                           currentDrawerH(),
-                                           g_editor.showInspector);
+    // só se o gesto nasce no viewport central — em coords de ECRÃ)
     for (u32 slot = 0; slot < kMaxPointerSlots; ++slot) {
         if (!g_input.pressed(slot)) {
             continue;
@@ -576,6 +609,9 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
             py >= view.y + view.h) {
             continue;   // nasceu fora do viewport (painéis/toolbar)
         }
+        // GRUPO D: daqui para dentro é RETO-LOCAL
+        const f32 lx = px - view.x;
+        const f32 ly = py - view.y;
         // 0.7.7 — PRIORIDADE ao handle do frustum: com uma CÂMARA
         // selecionada, um toque perto de um handle do far é DELE (sem
         // conflitos de drag com o eixo do gizmo)
@@ -584,11 +620,13 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
             CameraComp* cc = t->getComponent<CameraComp>();
             Transform3D* tr = t->getComponent<Transform3D>();
             if (cc && tr) {
+                // o ASPECTO do frustum é o do JOGO (o ecrã todo — em Play
+                // a câmara renderiza a superfície); o cap mede no rect
                 const camgizmo::Frustum f = camgizmo::computeFrustum(
-                    *tr, *cc, sw / sh,
-                    camgizmo::visualCapForScreen(vp, sw, sh, tr->pos,
+                    *tr, *cc, g_ui.screenWidth() / g_ui.screenHeight(),
+                    camgizmo::visualCapForScreen(vp, mw, mh, tr->pos,
                                                  cc->fovY));
-                const int h = camgizmo::pickHandle(vp, sw, sh, f, px, py);
+                const int h = camgizmo::pickHandle(vp, mw, mh, f, lx, ly);
                 if (h != 0) {
                     g_camHandle.active = true;
                     g_camHandle.slot = slot;
@@ -600,23 +638,23 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
                     g_camHandle.planeN = f.fwd;
                     g_camHandle.planeOrigin = tr->pos;
                     f32 ox = 0.0f, oy = 0.0f;
-                    if (gizmo::projectPoint(vp, tr->pos, sw, sh, ox, oy)) {
+                    if (gizmo::projectPoint(vp, tr->pos, mw, mh, ox, oy)) {
                         g_camHandle.anchorOx = ox;
                         g_camHandle.anchorOy = oy;
                         g_camHandle.anchorDist =
-                            std::sqrt((px - ox) * (px - ox) +
-                                      (py - oy) * (py - oy));
+                            std::sqrt((lx - ox) * (lx - ox) +
+                                      (ly - oy) * (ly - oy));
                     } else {
-                        g_camHandle.anchorOx = px;
-                        g_camHandle.anchorOy = py;
+                        g_camHandle.anchorOx = lx;
+                        g_camHandle.anchorOy = ly;
                         g_camHandle.anchorDist = 0.0f;
                     }
                     bool ok = false;
                     g_camHandle.anchorHit =
                         gizmo::planeHit(g_camHandle.basis, g_camHandle.planeN,
-                                        g_camHandle.planeOrigin, px, py, sw,
-                                        sh, ok);
-                    applyCamHandleDrag(vp, basis, sw, sh, px, py);
+                                        g_camHandle.planeOrigin, lx, ly, mw,
+                                        mh, ok);
+                    applyCamHandleDrag(vp, basis, mw, mh, lx, ly);
                     return 1u << slot;
                 }
             }
@@ -624,7 +662,7 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
         // 0.7.9 — GRAB-LOCK: captura alvo (raio generoso kGrabPx) + raio +
         // plano FIXO + âncoras — tudo medido NO ARRANQUE
         const gizmo::Grab grab =
-            gizmo::beginGrab(g_gizmo.mode, vp, origin, len, sw, sh, px, py,
+            gizmo::beginGrab(g_gizmo.mode, vp, origin, len, mw, mh, lx, ly,
                              static_cast<i32>(slot), basis);
         if (!grab.valid()) {
             continue;
@@ -651,7 +689,7 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
                 }
             }
         }
-        applyGizmoDrag(g_grab, basis, sw, sh, px, py);
+        applyGizmoDrag(g_grab, basis, mw, mh, lx, ly);
         return 1u << slot;
     }
     // hover (sem press): destaque do alvo sob o dedo (feedback visual —
@@ -661,7 +699,8 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len, f32 sw, f32 sh,
             f32 px, py;
             g_input.pos(slot, px, py);
             g_gizmo.hovered = gizmo::pickAxis(g_gizmo.mode, vp, origin, len,
-                                               sw, sh, px, py);
+                                               mw, mh, px - view.x,
+                                               py - view.y);
             break;
         }
     }
@@ -2877,21 +2916,26 @@ void refreshCatalog() {
 // 3D PROJETADOS para px de ecrã + polilinhas da UI): glifo de ALTIFALANTE
 // na posição do TIC + esfera WIREFRAME do raio externo (posicional). SÓ no
 // editor — em Play nada desenha (só soa). Corre no pass UI.
-void drawAudioGlyph(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
-                    const Tic& t) {
+// GRUPO D: (vw,vh,ox,oy) = o mapeamento da viewport 3D (defaults 0 = o
+// ecrã todo — o de sempre)
+void drawAudioGlyph(UiContext& ui, const Mat4& vp, f32 sw, f32 sh, const Tic& t,
+                    f32 vw = 0.0f, f32 vh = 0.0f, f32 ox = 0.0f,
+                    f32 oy = 0.0f) {
     const AudioPlayer* au = t.getComponent<AudioPlayer>();
     const Transform3D* tr = t.getComponent<Transform3D>();
     if (!au || !tr || !t.active) {
         return;
     }
+    const f32 mw = (vw > 1.0f && vh > 1.0f) ? vw : sw;
+    const f32 mh = (vw > 1.0f && vh > 1.0f) ? vh : sh;
     const Vec3 p = tr->pos;
     const f32 col[4] = {au->voiceId >= 0 ? 0.28f : 0.90f,
                         au->voiceId >= 0 ? 0.82f : 0.72f,
                         au->voiceId >= 0 ? 0.36f : 0.30f, 1.0f};
     auto seg = [&](const Vec3& a, const Vec3& b) {
         f32 ax, ay, bx, by;
-        if (gizmo::projectPoint(vp, a, sw, sh, ax, ay) &&
-            gizmo::projectPoint(vp, b, sw, sh, bx, by)) {
+        if (gizmo::projectPoint(vp, a, mw, mh, ax, ay, ox, oy) &&
+            gizmo::projectPoint(vp, b, mw, mh, bx, by, ox, oy)) {
             ui.drawLine(ax, ay, bx, by, 2.0f, col);
         }
     };
@@ -4296,7 +4340,8 @@ static void captureThumbIfPending(f32 w, f32 h) {
     const UiRect r = g_editor.playMode
         ? safe::contentRect(w, h, g_ui.safeArea())
         : safe::centerRect(w, h, g_ui.safeArea(), currentDrawerH(),
-                           g_editor.showInspector);
+                           g_editor.showInspector, g_editor.hierW,
+                           g_editor.inspW);
     const u32 rw = static_cast<u32>(r.w);
     const u32 rh = static_cast<u32>(r.h);
     if (rw < 16 || rh < 16) {
@@ -4561,6 +4606,22 @@ void frame() {
     // abertos, tocar onde o gizmo ESTARIA arrastava o TIC por trás (a
     // "cena mexe-se por trás" do relatório do dono). Input alinhado com
     // o draw — a regra da casa: não desenhado = não interativo.
+    // GRUPO D (0.9.6.7): o viewRect (hierarquia|viewport|inspector com as
+    // larguras dos DIVISORES) vive AQUI — o gizmo, o orbit, o tap-de-
+    // seleção, o scissor e o draw TODOS consomem o MESMO rect; a câmara
+    // do editor projeta com o ASPECTO DO RECT (não o ecrã todo — antes o
+    // scissor CORTAVA uma faixa central de um ecrã largo: o dono via só
+    // ~22% do FOV horizontal no device)
+    const bool tlVisible = timeline::visible(g_editor.playMode, g_editor.uiMode,
+                                              g_scene, g_editor.selected);
+    // 0.9.0: a timeline vive no DRAWER (aba Animação) — o viewport central
+    // encolhe pelo drawer (currentDrawerH), não pela strip antiga
+    // GRUPO D: larguras de ESTADO (divisores) — o orbit acompanha os painéis
+    const UiRect viewRect = editor::centerRect(w, h, g_ui.safeArea(),
+                                               currentDrawerH(),
+                                               g_editor.showInspector,
+                                               g_editor.hierW, g_editor.inspW);
+    (void)tlVisible;
     u32 gizmoClaimed = 0;
     Tic* gizmoTic = g_scene.get(g_editor.selected);
     Transform3D* gizmoTr =
@@ -4568,31 +4629,21 @@ void frame() {
                                         : nullptr;
     if (gizmo::visible(g_editor.playMode || g_editor.uiMode, gizmoTr != nullptr) &&
         !editor::anyOverlayOpen(g_editor)) {
+        // GRUPO D: o aspect DO RECT (a janela é o ecrã da câmara)
         const Mat4 gview = g_camera.view();
-        const Mat4 gproj = g_camera.proj(w / h);
+        const Mat4 gproj = g_camera.proj(viewRect.w / viewRect.h);
         const Mat4 gvp = Mat4::mul(gproj, gview);
-        const gizmo::ViewBasis gbasis = gizmo::viewBasis(g_camera, w / h);
+        const gizmo::ViewBasis gbasis =
+            gizmo::viewBasis(g_camera, viewRect.w / viewRect.h);
         const f32 glen = gizmo::gizmoLength(g_camera.dist);
         // sincroniza o modo/snap da toolbar com o estado do gizmo
         g_gizmo.mode = static_cast<gizmo::Mode>(g_gizmoMode.mode);
         g_gizmo.snap = g_gizmoMode.snap;
-        gizmoClaimed = feedGizmo(gvp, gizmoTr->pos, glen, w, h, gbasis);
+        gizmoClaimed = feedGizmo(gvp, gizmoTr->pos, glen, viewRect, gbasis);
     } else {
         g_gizmo.active = gizmo::Axis::None;
         g_gizmo.hovered = gizmo::Axis::None;
     }
-
-    // 0.8.0 (F7): o orbit e o tap-de-seleção nascem só na área do viewport
-    // ACIMA da timeline (quando visível) — a strip não interfere com gestos
-    // 3D nem com os painéis (centerRect intacto para hierarquia/inspector)
-    const bool tlVisible = timeline::visible(g_editor.playMode, g_editor.uiMode,
-                                              g_scene, g_editor.selected);
-    // 0.9.0: a timeline vive no DRAWER (aba Animação) — o viewport central
-    // encolhe pelo drawer (currentDrawerH), não pela strip antiga
-    UiRect viewRect = editor::centerRect(w, h, g_ui.safeArea(),
-                                         currentDrawerH(),
-                                         g_editor.showInspector);
-    (void)tlVisible;
 
     // input do frame anterior → câmara (só gestos nascidos no viewport
     // central da SAFE-AREA — gestos atrás da nav bar não orbitam, F4.2)
@@ -4635,11 +4686,16 @@ void frame() {
         if (editor::viewportTapClearsSelection(
                 g_editor, g_input, viewRect,
                 claimed | gizmoClaimed)) {
-            const Mat4 tapVp = Mat4::mul(g_camera.proj(w / h), g_camera.view());
+            // GRUPO D: o tap-de-seleção projeta com o ASPECTO DO RECT e o
+            // pick corre RETO-LOCAL (consistente com o render/draw do 3D)
+            const Mat4 tapVp =
+                Mat4::mul(g_camera.proj(viewRect.w / viewRect.h),
+                          g_camera.view());
             f32 px = 0.0f, py = 0.0f;
             g_input.pos(0, px, py);
-            const Handle hc =
-                camgizmo::pickSceneTic(g_scene, tapVp, w, h, px, py);
+            const Handle hc = camgizmo::pickSceneTic(
+                g_scene, tapVp, viewRect.w, viewRect.h, px - viewRect.x,
+                py - viewRect.y);
             if (hc.valid()) {
                 if (hc != selAntesTap) {
                     const Tic* nt = g_scene.get(hc);
@@ -4743,7 +4799,11 @@ void frame() {
             clipNear, clipFar);
         g_camera.setClips(clipNear, clipFar);
         view = g_camera.view();
-        proj = g_camera.proj(w / h);
+        // GRUPO D: o EDITOR projeta com o ASPECTO DO RECT da viewport (a
+        // janela é o ecrã da câmara — antes era o aspect do ECRÃ TODO e o
+        // scissor CORTAVA a faixa central: o dono via ~22% do FOV
+        // horizontal no device de 800dp; o harness largo disfarçava)
+        proj = g_camera.proj(viewRect.w / viewRect.h);
         camEye = g_camera.eye();
         camFocus = g_camera.dist;
     }
@@ -4754,13 +4814,17 @@ void frame() {
     // via as linhas azuis do grid POR BAIXO da barra de FPS e na faixa dos
     // botões do sistema (o grid desenhava na superfície TODA). Em Play o
     // render continua FULL-SCREEN (o jogo é dele — com a safe-area da UI).
+    // GRUPO D: além do scissor, o VIEWPORT GL passa a ser o RECT — o NDC
+    // do 3D mapeia DENTRO da janela (com o aspect do rect, nada fica
+    // cortado: a câmara vê a janela INTEIRA com o FOV dela); o beginUiPass
+    // repõe o viewport CHEIO para a UI (a fronteira 0.7.8)
     bool scissor3d = false;
     if (!g_editor.playMode) {
-        const UiRect vp3d =
-            safe::centerRect(static_cast<f32>(w), static_cast<f32>(h),
-                             g_ui.safeArea(), currentDrawerH(),
-                             g_editor.showInspector);
+        const UiRect& vp3d = viewRect;   // a fonte ÚNICA (gizmo/orbit/tap idem)
         if (vp3d.w > 1.0f && vp3d.h > 1.0f) {
+            glViewport(static_cast<i32>(vp3d.x),
+                       static_cast<i32>(h - vp3d.y - vp3d.h),
+                       static_cast<i32>(vp3d.w), static_cast<i32>(vp3d.h));
             glEnable(GL_SCISSOR_TEST);
             glScissor(static_cast<i32>(vp3d.x),
                       static_cast<i32>(h - vp3d.y - vp3d.h),
@@ -4912,13 +4976,19 @@ void frame() {
     // selecionada ganha os handles do far). SÓ no editor 3D — nunca em
     // Play (como os gizmos)
     if (!modalOpen && camgizmo::visible(g_editor.playMode, g_editor.uiMode)) {
-        camgizmo::drawAll(g_ui, g_scene, vp, w, h, g_editor.selected);
+        // GRUPO D: o desenho dos frustus mapeia pelo RECT da viewport (o
+        // aspect do frustum continua o do JOGO — dentro da drawAll)
+        camgizmo::drawAll(g_ui, g_scene, vp, w, h, g_editor.selected,
+                          viewRect.w, viewRect.h, viewRect.x, viewRect.y);
     }
     if (!modalOpen && gizmo::visible(g_editor.playMode || g_editor.uiMode,
                                      gizmoTr != nullptr)) {
+        // GRUPO D: o gizmo desenha RETO-LOCAL + origem (consistente com o
+        // feedGizmo e o aspect do rect)
         gizmo::drawGizmo(g_ui, vp, gizmoTr->pos,
                          gizmo::gizmoLength(g_camera.dist), g_gizmo.mode,
-                         g_gizmo.hovered);
+                         g_gizmo.hovered, viewRect.w, viewRect.h, viewRect.x,
+                         viewRect.y);
     }
     // ---- 0.9.0 — CHROME DE CIMA (spec D) ---------------------------------
     // TOP BAR 56dp [Menu ≡][Cena ▾]·[pause][play][sliders]·[gear] + TAB BAR
@@ -5039,7 +5109,9 @@ void frame() {
             // aba Animação já não rouba altura ao viewport)
             UiRect audioView = editor::centerRect(w, h, g_ui.safeArea(),
                                                   currentDrawerH(),
-                                                  g_editor.showInspector);
+                                                  g_editor.showInspector,
+                                                  g_editor.hierW,
+                                                  g_editor.inspW);
             editor::AudioWorkspaceHost host = makeAudioWorkspaceHost();
             const int pickWs = editor::drawAudioWorkspace(
                 g_ui, g_input, audioView, g_audioWs, g_audioCatalog, host);
@@ -5221,6 +5293,10 @@ void frame() {
     // 0.7.5: com um MODAL aberto os painéis NÃO se desenham (o backdrop
     // tapa o editor; nada de texto à mista — e sem desenho não há gesto)
     if (!modalOpen) {
+        // GRUPO D (0.9.6.7): o INPUT dos divisores corre ANTES dos painéis —
+        // a pega RECLAMA o gesto primeiro (o toque na pega nunca vira scroll)
+        editor::dividerInput(g_ui, g_input, g_editor,
+                             g_editor.showInspector && !g_editor.uiMode);
         if (editor::drawHierarchy(g_ui, g_scene, g_editor)) {
             g_editor.plusMenu = true;   // "+" no cabeçalho abre os presets
             g_editor.fileMenu = false;
@@ -5234,6 +5310,10 @@ void frame() {
             editor::drawInspector(g_ui, g_scene, g_editor, &g_catalog,
                                   &g_voni);   // 0.9.2: +vars @+ do script
         }
+        // GRUPO D: os strips VISÍVEIS por cima da borda dos painéis (o input
+        // já correu acima; o draw é a última camada do chrome dos painéis)
+        editor::drawPanelDividers(g_ui, g_editor,
+                                  g_editor.showInspector && !g_editor.uiMode);
         // 0.9.0 (spec E/K): a TIMELINE vive no DRAWER do painel de baixo
         // (aba Animação) — a strip de fundo morreu. Com player presente e
         // drawer fechado, a aba AUTO-ABRE (o comportamento "abre sozinha"
@@ -6034,9 +6114,10 @@ void frame() {
     if (!g_editor.playMode && !g_editor.uiMode && !g_editor.audioMode &&
         !modalOpen) {
         const Mat4 glyphVp =
-            Mat4::mul(g_camera.proj(w / h), g_camera.view());
+            Mat4::mul(g_camera.proj(viewRect.w / viewRect.h), g_camera.view());
         g_scene.forEachActive([&](Tic& t) {
-            drawAudioGlyph(g_ui, glyphVp, w, h, t);
+            drawAudioGlyph(g_ui, glyphVp, w, h, t, viewRect.w, viewRect.h,
+                           viewRect.x, viewRect.y);
         });
     }
 

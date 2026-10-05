@@ -125,7 +125,14 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
                      3.0f * kTabW() + 3.0f * kIconBtn() + 2.0f * theme::dp(8.0f);
     f32 k = 1.0f;
     if (natW + 4.0f * kGroupGap() > avail) {
-        k = (avail - 4.0f * kGroupGap()) / natW;
+        // GRUPO D (0.9.6.7 — achado ao vivo da 13.7): os botões de ÍCONE
+        // (pause/play/gear) NÃO ENCOLHEM — o alvo 48dp da casa é o PISO
+        // (no device de 776dp a escala antiga media-os a 47dp e a
+        // auditoria apontava <48dp). O k divide só o RESTO (Menu/Cena/
+        // tabs) pelo espaço que sobra DEPOIS dos ícones — a conta fecha
+        // EXATA (nada transborda a barra).
+        const f32 flexW = natW - 3.0f * kIconBtn();
+        k = (avail - 3.0f * kIconBtn() - 4.0f * kGroupGap()) / flexW;
         if (k > 1.0f) {
             k = 1.0f;
         }
@@ -136,7 +143,12 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
     L.menu.w  = kMenuW() * k;
     L.cena.w  = kCenaW() * k;
     L.tab3d.w = L.tabUi.w = L.tabAudio.w = kTabW() * k;
-    L.pause.w = L.play.w = L.gear.w = kIconBtn() * k;
+    // GRUPO D (0.9.6.7 — achado ao vivo da 13.7): os botões de ÍCONE
+    // (pause/play/gear) NUNCA encolhem — o alvo 48dp da casa é o PISO (a
+    // escala graciosa comprime Menu/Cena/tabs; no device de 776dp os três
+    // mediam 47dp e a auditoria apontava <48dp). O k continua a decidir
+    // O QUE os outros cedem.
+    L.pause.w = L.play.w = L.gear.w = kIconBtn();
     L.iconSize = theme::dp(24.0f);
 
     const f32 by = L.bar.y + (L.bar.h - kBtnH()) * 0.5f;

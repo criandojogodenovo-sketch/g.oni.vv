@@ -2747,3 +2747,311 @@ TEST(regress_cantos_suavizados) {
     // (polilinhas) — SEMPRE mais geometria que o recto
     EXPECT(quadsBotao > quadsReto + 8u);
 }
+
+// ============================================================================
+// R-026 (FASE 0.9.6-MASTER · GRUPO D — ORÇAMENTO DO EDITOR 3D)
+//
+// A linha de base do Grupo C era 0/0 no HARNESS (1536dp de largura) — mas o
+// DEVICE (RMX3624: 1600×720@2.0 = 776×336dp de conteúdo) estava PARTIDO:
+// os painéis FIXOS de 300dp deixavam o viewport 3D a 176dp (22% do ecrã),
+// o stack vertical (5×48+4×8+8 = 280dp) TRANBORDAVA a altura (~208dp) por
+// cima da toolbar, o [+] caía sobre os botões de ferramenta e o drawer
+// default (240dp) comia o editor INTEIRO. E em QUALQUER ecrã o pass 3D
+// projetava com o ASPECTO DO ECRÃ TODO e o scissor CORTAVA a faixa central
+// (o dono via ~22% do FOV horizontal no device). O Grupo D fecha:
+//   1. regress_orcamento_gangorra    — resolvePanels (a gangorra dos 3
+//                                      pisos) + o clamp do drawer
+//   2. regress_divisores_arrastaveis — as pegas (press/move/release com
+//                                      snap 8dp + clamp) e a persistência
+//   3. regress_scissor_aspecto_rect  — a câmara do RECT (o NDC mapeia
+//                                      dentro da janela; o pick coerente)
+// ============================================================================
+#include "ui/ViewportChrome.h"     // R-026: o chrome adaptativo do viewport
+#include "ui/Gizmo.h"              // R-026: projectPoint com o rect
+#include "render/Camera.h"         // R-026: a proj com o aspect do rect
+#include "ui/CamGizmo.h"           // R-026: pickSceneTic (o pick coerente)
+#include "render/Mesh.h"           // R-026: o AABB do pick
+#include "render/Cube.h"           // R-026: makeCube (o mesh real do pick)
+
+TEST(regress_orcamento_gangorra) {
+    using namespace vv;
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+
+    // ---- (a) o HARNESS LARGO fica IGUAL (1512dp: 300 | 912 | 300) — o
+    // default assimétrico só aperta quando o orçamento NÃO dá
+    {
+        const safe::PanelBudget b = safe::resolvePanels(1512.0f, -1.0f, -1.0f);
+        EXPECT(nearEqF(b.hier, 300.0f) && nearEqF(b.insp, 300.0f));
+        EXPECT(nearEqF(1512.0f - b.hier - b.insp, 912.0f));
+    }
+    // ---- (b) o DEVICE (776dp): a gangorra ASSIMÉTRICA — o inspector
+    // mantém a linha X/Y/Z (288dp), a hierarquia ABSORVE (200dp) e o
+    // viewport NUNCA fecha abaixo da toolbar (288dp) — eram 176dp
+    {
+        const safe::PanelBudget b = safe::resolvePanels(776.0f, -1.0f, -1.0f);
+        EXPECT(nearEqF(b.hier, theme::dp(safe::kHierMinW)));   // 200
+        EXPECT(b.insp >= theme::dp(safe::kInspMinW) - 0.01f &&
+               b.insp <= theme::dp(300.0f));
+        EXPECT(776.0f - b.hier - b.insp >=
+               theme::dp(safe::kViewportMinW) - 0.01f);        // >= 288
+    }
+    // ---- (c) a GANGORRA ao arrastar: nenhum painel fecha o viewport
+    // abaixo do piso (o outro painel CONTA — o par nunca soma demais)
+    for (f32 hw = 100.0f; hw <= 900.0f; hw += 32.0f) {
+        for (f32 iw = 100.0f; iw <= 900.0f; iw += 32.0f) {
+            const safe::PanelBudget b = safe::resolvePanels(776.0f, hw, iw);
+            // os pisos dos painéis
+            EXPECT(b.hier >= theme::dp(safe::kHierMinW) - 0.01f);
+            EXPECT(b.insp >= theme::dp(safe::kInspMinW) - 0.01f);
+            // o piso do VIEWPORT (a gangorra nunca o fecha — OU os painéis
+            // cedem, OU o par está no impossível onde os pisos mandam)
+            const f32 vp = 776.0f - b.hier - b.insp;
+            const bool impossivel = theme::dp(safe::kHierMinW) +
+                                        theme::dp(safe::kInspMinW) +
+                                        theme::dp(safe::kViewportMinW) >
+                                    776.0f;
+            if (!impossivel) {
+                EXPECT(vp >= theme::dp(safe::kViewportMinW) - 0.01f);
+            } else {
+                EXPECT(vp > 200.0f);   // nem no impossível colapsa
+            }
+        }
+    }
+    // ---- (d) o estado NEGATIVO é default (−1); o drag além do piso
+    // escreve 0 (nunca negativo — o achado ao vivo da 13.7: o snap
+    // negativo VIRAVA default na resolvePanels)
+    {
+        const safe::PanelBudget b = safe::resolvePanels(776.0f, -1600.0f,
+                                                        -1600.0f);
+        EXPECT(nearEqF(b.hier, theme::dp(safe::kHierMinW)));   // clamp, n default 300
+        // hmm: raw -1600 é «negativo» → default... o CONTRATO é: só −1
+        // (ou qualquer <0) é default; o DRAG nunca escreve <0 (o snap
+        // guarda 0) — a hierarquia default do par é 200 no device:
+        EXPECT(nearEqF(b.hier, 200.0f));
+    }
+    // ---- (e) o DRAWER nunca come o editor: o clamp deixa a faixa da
+    // toolbar do viewport VIVA (BottomPanel::layout) — no device o
+    // default 240 comia os 208dp TODOS
+    {
+        // harness (568dp de viewport): o clamp histórico (400) manda
+        editor::bottom::BottomState bs;
+        bs.drawerH = 240.0f;
+        const editor::bottom::Layout lh =
+            editor::bottom::layout(1536.0f, 720.0f, safe::Insets{}, bs);
+        EXPECT(lh.drawer.h <= 400.0f + 0.01f);
+        EXPECT(nearEqF(lh.drawer.h, 240.0f));   // intacto onde cabe
+        // device (776×336dp de conteúdo, insets 24/24dp): 240 NÃO PASSA —
+        // o viewport do device tem ~184dp e o default comia TUDO
+        const safe::Insets di{0.0f, 24.0f, 24.0f, 0.0f};
+        const editor::bottom::Layout ld =
+            editor::bottom::layout(776.0f, 336.0f, di, bs);
+        const f32 vpH = safe::viewportRect(776.0f, 336.0f, di).h;
+        EXPECT(ld.drawer.h < 240.0f);           // cedeu
+        EXPECT(ld.drawer.h <= vpH - theme::dp(48.0f) - theme::dp(16.0f) + 8.0f);
+        EXPECT(vpH - ld.drawer.h >= theme::dp(48.0f));   // a toolbar viva
+    }
+}
+
+TEST(regress_divisores_arrastaveis) {
+    using namespace vv;
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+    FontAtlas font;
+    const char* fp = FONT_FIXTURE;
+    ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+    UiContext ui;
+    ui.init();
+    ui.setFont(&font);
+    const safe::Insets insets{0.0f, 24.0f, 24.0f, 0.0f};
+    ui.setSafeArea(insets);   // o dividerRects lê o safeArea do CONTEXTO
+    InputState in;
+    editor::EditorState st;
+    st.hierW = -1.0f;
+    st.inspW = -1.0f;
+    st.drawerH = 0.0f;
+    st.showInspector = true;
+
+    // ---- (a) a PEGA existe e ARMA: press no strip da hierarquia (o
+    // hit de 20dp na borda do painel) — o toque é da pega, não do scroll
+    const f32 sw = 1536.0f, sh = 720.0f;
+    const safe::PanelBudget b0 =
+        safe::resolvePanels(sw - insets.left - insets.right, -1.0f, -1.0f);
+    const f32 stripX = insets.left + b0.hier - theme::dp(10.0f);
+    // (o pressed() é um EDGE: vale UM frame no device — o clearEdges é
+    // a fronteira de frame; sem ele o press re-arma a cada chamada)
+    ui.beginFrame(nullptr, &in, sw, sh);
+    in.injectDown(0, stripX, 300.0f);
+    editor::dividerInput(ui, in, st, true);
+    EXPECT(st.divDragActive && !st.divDragRight);
+    in.clearEdges();
+    // o drag VIVO: +100px → a hierarquia cresce (snap de 8dp)
+    in.injectMove(0, stripX + 100.0f, 300.0f);
+    editor::dividerInput(ui, in, st, true);
+    EXPECT(st.hierW > b0.hier + 80.0f && st.hierW <= b0.hier + 100.0f + 8.0f);
+    in.clearEdges();
+    // o release FIXA
+    in.injectUp(0);
+    editor::dividerInput(ui, in, st, true);
+    EXPECT(!st.divDragActive);
+    const f32 fixedW = st.hierW;
+    ui.endFrame();
+
+    // ---- (b) a pega DIREITA (inspector): press na borda ESQUERDA dele
+    ui.beginFrame(nullptr, &in, sw, sh);
+    const f32 inspX = sw - insets.right - b0.insp;
+    in.injectDown(0, inspX + theme::dp(10.0f), 300.0f);
+    editor::dividerInput(ui, in, st, true);
+    EXPECT(st.divDragActive && st.divDragRight);
+    in.clearEdges();
+    // encolhe 40px (o piso do inspector é 272dp: o drag vivo afere-se ao
+    // PASSO, o piso fica provado na gangorra do outro teste)
+    in.injectMove(0, inspX + theme::dp(10.0f) + 40.0f, 300.0f);
+    editor::dividerInput(ui, in, st, true);
+    EXPECT(st.inspW > 0.0f && st.inspW < b0.insp - 20.0f);
+    in.clearEdges();
+    in.injectUp(0);
+    editor::dividerInput(ui, in, st, true);
+    EXPECT(!st.divDragActive);
+    ui.endFrame();
+
+    // ---- (c) o clamp pelo OUTRO painel: com a hierarquia FIXADA em
+    // fixedW, o inspector tem o teto (content − hier − 288) — a gangorra
+    const safe::PanelBudget b1 =
+        safe::resolvePanels(sw - insets.left - insets.right, fixedW, -1.0f);
+    EXPECT(b1.hier >= fixedW - 0.01f);   // o estado sobreviveu à resolução
+    EXPECT(sw - insets.left - insets.right - b1.hier - b1.insp >=
+           theme::dp(safe::kViewportMinW) - 0.01f);
+
+    // ---- (d) a PERSISTÊNCIA (spec G): o round-trip e o formato antigo
+    const std::string data = editor::bottom::serializeLayout(
+        editor::bottom::BottomState{}, true, 0u, st.hierW, st.inspW);
+    EXPECT(std::strstr(data.c_str(), "hierW=") != nullptr);
+    EXPECT(std::strstr(data.c_str(), "inspW=") != nullptr);
+    editor::bottom::BottomState bs2;
+    bool insp = false;
+    u32 col = 0;
+    f32 hw = -9.0f, iw = -9.0f;
+    EXPECT(editor::bottom::parseLayout(data, bs2, insp, col, &hw, &iw));
+    EXPECT(nearEqF(hw, st.hierW, 1.0f) && nearEqF(iw, st.inspW, 1.0f));
+    // o layout ANTIGO (sem as larguras) → defaults (retrocompatível)
+    EXPECT(editor::bottom::parseLayout("bottomTab=1\ndrawerH=240\n", bs2,
+                                       insp, col, &hw, &iw) &&
+           hw < 0.0f && iw < 0.0f);
+    // o lixo fora da gama → default (o clamp VIVO é a última defesa)
+    EXPECT(editor::bottom::parseLayout(
+               "bottomTab=1\ndrawerH=240\nhierW=99999\n", bs2, insp, col,
+               &hw, &iw) &&
+           hw < 0.0f);
+
+    // ---- (e) o CHROME ADAPTATIVO (a barra de toque CABE): no rect do
+    // device o stack vai a COLUNAS e o [+] sobe; no largo fica o de sempre
+    {
+        const editor::vpchrome::Layout lwide =
+            editor::vpchrome::layout(UiRect{300.0f, 80.0f, 912.0f, 568.0f});
+        EXPECT(lwide.stackVisible && lwide.stackCols == 1u);
+        EXPECT(!lwide.plusTopRight);   // o [+] ao lado da toolbar (o de sempre)
+        // o rect do DEVICE em dp a 1.0 (hier 200 | vp 288×208)
+        const editor::vpchrome::Layout ldev =
+            editor::vpchrome::layout(UiRect{200.0f, 56.0f, 288.0f, 208.0f});
+        EXPECT(ldev.stackVisible && ldev.stackCols >= 2u);   // colunas
+        EXPECT(ldev.plusTopRight);                            // [+] no topo
+        // TODOS os alvos ≥48dp e DENTRO do rect (o stack TRANBORDAVA antes)
+        const UiRect all[] = {ldev.stack[0],  ldev.stack[1], ldev.stack[2],
+                              ldev.stack[3],  ldev.stack[4], ldev.selectBtn,
+                              ldev.moveBtn,   ldev.rotateBtn, ldev.scaleBtn,
+                              ldev.snapBtn,   ldev.addTicBtn};
+        for (const UiRect& r : all) {
+            EXPECT(r.w >= 48.0f - 0.01f && r.h >= 48.0f - 0.01f);
+            EXPECT(r.x >= 200.0f - 0.01f && r.y >= 56.0f - 0.01f);
+            EXPECT(r.x + r.w <= 200.0f + 288.0f + 0.01f);
+            EXPECT(r.y + r.h <= 56.0f + 208.0f + 0.01f);
+        }
+        // a degradação HONESTA: um rect SUB-toolbar ESCONDE o stack (nada
+        // transborda por cima da toolbar — o bug medido do device)
+        const editor::vpchrome::Layout ltiny =
+            editor::vpchrome::layout(UiRect{200.0f, 56.0f, 200.0f, 60.0f});
+        EXPECT(!ltiny.stackVisible);
+    }
+}
+
+TEST(regress_scissor_aspecto_rect) {
+    using namespace vv;
+    theme::setDensity(1.0f);
+
+    // ---- (a) o CONTRATO do projectPoint com o rect: o NDC mapeia para
+    // (vw×vh) LOCAL e SOMA a origem — o mundo no centro da vista cai no
+    // CENTRO DO RECT (não no centro do ecrã; o 3D deixou de ser o ecrã)
+    Camera cam;   // a órbita default olha para a origem
+    const f32 vw = 912.0f, vh = 568.0f, ox = 300.0f, oy = 80.0f;
+    const Mat4 vp = Mat4::mul(cam.proj(vw / vh), cam.view());
+    f32 sx = 0.0f, sy = 0.0f;
+    EXPECT(gizmo::projectPoint(vp, Vec3{0.0f, 0.0f, 0.0f}, vw, vh, sx, sy));
+    EXPECT(nearEqF(sx, vw * 0.5f, 1.5f));
+    EXPECT(nearEqF(sy, vh * 0.5f, 1.5f));
+    // com a ORIGEM: o mesmo ponto cai no centro do RECT NO ECRÃ
+    f32 px = 0.0f, py = 0.0f;
+    EXPECT(gizmo::projectPoint(vp, Vec3{0.0f, 0.0f, 0.0f}, vw, vh, px, py,
+                               ox, oy));
+    EXPECT(nearEqF(px, ox + vw * 0.5f, 1.5f));
+    EXPECT(nearEqF(py, oy + vh * 0.5f, 1.5f));
+    // o DEFAULT (0,0) é o ecrã todo — os testes e o Play ficam IGUAIS
+    f32 qx = 0.0f, qy = 0.0f;
+    EXPECT(gizmo::projectPoint(vp, Vec3{0.0f, 0.0f, 0.0f}, 1536.0f, 720.0f,
+                               qx, qy));
+    EXPECT(nearEqF(qx, 768.0f, 1.5f));
+
+    // ---- (b) O ASPECTO DO RECT ≠ o do ecrã — A PROVA DO CORTE: um ponto
+    // na borda DIREITA do frustum DA JANELA (NDC.x ≈ +1 do aspect do rect)
+    // projeta DENTRO da janela com o aspect CERTO e FORA dela com o aspect
+    // do ECRÃ (o bug: o scissor cortava a faixa — o dono via ~22% do FOV
+    // horizontal no device)
+    {
+        const gizmo::ViewBasis vb = gizmo::viewBasis(cam, vw / vh);
+        // o ponto a 98% do caminho até a borda direita do frustum da
+        // janela, à distância do target ao longo da vista
+        const Vec3 edge = vb.eye + vb.fwd * cam.dist +
+                          vb.right * (vb.tanHalfFov * (vw / vh) * cam.dist *
+                                      0.98f);
+        f32 bx = 0.0f, by = 0.0f;
+        EXPECT(gizmo::projectPoint(vp, edge, vw, vh, bx, by));
+        EXPECT(bx <= vw + 0.5f);   // DENTRO da janela (o FOV inteiro cabe)
+        EXPECT(bx > vw * 0.9f);    // ...e perto da borda (é UM ponto de borda)
+        // com o ASPECTO DO ECRÃ (o bug): o MESMO ponto cai FORA do rect
+        // (a janela só mostrava a faixa central do frustum largo)
+        const Mat4 vpBug = Mat4::mul(cam.proj(1536.0f / 720.0f), cam.view());
+        f32 bxBug = 0.0f, byBug = 0.0f;
+        EXPECT(gizmo::projectPoint(vpBug, edge, 1536.0f, 720.0f, bxBug,
+                                   byBug));
+        EXPECT(bxBug > vw + 8.0f);   // provado: o aspect do ecrã CORTA o FOV
+    }
+
+    // ---- (c) o PICK coerente com o draw: o tap RETO-LOCAL apanha o que
+    // o draw põe no sítio (pickSceneTic com o aspect e o mapping do rect)
+    {
+        Scene scene;
+        Mesh m;
+        const CubeMeshData cube = makeCube(2.0f);
+        ASSERT(m.create(cube.vertices.data(),
+                        static_cast<u32>(cube.vertices.size()),
+                        cube.indices.data(),
+                        static_cast<u32>(cube.indices.size())));
+        const Handle h = scene.create("Alvo");
+        Tic* t = scene.get(h);
+        Transform3D* tr = t->addComponent<Transform3D>();
+        MeshRenderer* mr = t->addComponent<MeshRenderer>();
+        mr->mesh = &m;   // o AABB do cubo centrado na origem
+        tr->updateWorld();
+        // o vp do RECT: o cubo na origem PROJETA no centro do rect
+        f32 cx = 0.0f, cy = 0.0f;
+        EXPECT(gizmo::projectPoint(vp, Vec3{0.0f, 0.0f, 0.0f}, vw, vh, cx,
+                                   cy));
+        const Handle picked = camgizmo::pickSceneTic(scene, vp, vw, vh, cx,
+                                                    cy);
+        EXPECT(picked == h);
+        // um toque LONGE do centro (fora do AABB projetado) falha
+        const Handle miss = camgizmo::pickSceneTic(scene, vp, vw, vh,
+                                                   cx + 200.0f, cy + 200.0f);
+        EXPECT(!(miss == h));
+    }
+}

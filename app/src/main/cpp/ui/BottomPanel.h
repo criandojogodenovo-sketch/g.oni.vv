@@ -103,11 +103,16 @@ void drawStatusBar(UiContext& ui, f32 sw, f32 sh, const safe::Insets& in,
 // serializa/parse PURO do estado do layout (bottom + inspector + painéis) —
 // afervel no CI. Formato (uma linha por campo, chave=valor):
 //   bottomTab=N drawerH=N inspector=0/1 inspCollapsed=0x..
+// GRUPO D: hierW=N inspW=N (larguras dp dos divisores; AUSENTE nos
+// ficheiros antigos = default −1 — o formato é retrocompatível)
 std::string serializeLayout(const BottomState& bs, bool showInspector,
-                            u32 inspCollapsed);
-// devolve false se ilegível (o chamador usa DEFAULTS — "Repor layout")
+                            u32 inspCollapsed, f32 hierW = -1.0f,
+                            f32 inspW = -1.0f);
+// devolve false se ilegível (o chamador usa DEFAULTS — "Repor layout").
+// hierW/inspW opcionais (nullptr = não ler; compat dos testes antigos)
 bool parseLayout(const std::string& data, BottomState& bs, bool& showInspector,
-                 u32& inspCollapsed);
+                 u32& inspCollapsed, f32* hierW = nullptr,
+                 f32* inspW = nullptr);
 
 } // namespace bottom
 } // namespace editor

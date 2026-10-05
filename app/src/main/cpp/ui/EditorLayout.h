@@ -70,6 +70,19 @@ constexpr u64 kHierSearchId    = 5500;   // linha de pesquisa (abre teclado 8)
 constexpr u64 kHierMultiClearId = 5501;  // chip "N ×" — limpa a multi-seleção
 constexpr u64 kHierMultiDistId = 5502;   // "distribuir" (≥3 selecionados)
 
+// GRUPO D (0.9.6.7) — DIVISORES arrastáveis hierarquia|viewport|inspector.
+// Pegas de arrasto (o padrão da pega do drawer): strip VISUAL de 12dp na
+// borda do painel + zona de toque de 20dp (12 do strip + 8 de folga PARA
+// DENTRO do painel — nunca para o lado do viewport: um toque na pega nunca
+// orbita a câmara nem agarra o gizmo). As regiões de scroll dos painéis
+// INSETAM os mesmos 20dp: o toque na pega nunca vira scroll. NÃO são
+// alvos de tap (não se registam no audit — o alvo 48dp da casa é para
+// TAP; a pega do drawer de 12dp é o precedente spec E).
+constexpr u64 kIdDividerL = 5503;   // pega do divisor da HIERARQUIA
+constexpr u64 kIdDividerR = 5504;   // pega do divisor do INSPECTOR
+constexpr f32 kDividerStripW = 12.0f;   // dp — o strip visível
+constexpr f32 kDividerHitW   = 20.0f;   // dp — a zona de toque (strip+folga)
+
 // 0.9.0 (spec C) — SECÇÕES COLAPSÁVEIS do Inspector: cabeçalho 48dp com
 // título 14sp + chevron; o estado (bitmask por secção) vive no EditorState e
 // PERSISTE (spec G). Bits: 0=Transform 1=Camera 2=Malha 3=Material 4=Fisica

@@ -79,10 +79,17 @@ constexpr f32 kToolBtn   = 48.0f;   // botão de ferramenta (ícone)
 constexpr f32 kToolActiveW = 48.0f;   // LEGACY (igual a kToolBtn; sem uso novo)
 
 struct Layout {
-    UiRect stack[5]{};        // undo redo save dup paste
+    UiRect stack[5]{};        // undo redo save dup paste (coluna-major)
     u32    nStack = 5;
+    u32    stackCols = 1;     // GRUPO D: 1 nos ecrãs largos; 2/3 nos curtos
+    bool   stackVisible = true;  // GRUPO D: false = viewport TÃO curto/estreito
+                                 // que nem 1 linha de 5 colunas cabe (a
+                                 // degradação honesta: toolbar+viewport mandam)
     UiRect selectBtn{}, moveBtn{}, rotateBtn{}, scaleBtn{};
     UiRect snapBtn{}, addTicBtn{};
+    bool   plusTopRight = false;  // GRUPO D: [+] no canto SUP-dir quando a
+                                  // viewport não comporta [+] ao lado da
+                                  // toolbar (device: viewport de ~288dp)
     UiRect view{};            // o viewport central (para referência)
 };
 

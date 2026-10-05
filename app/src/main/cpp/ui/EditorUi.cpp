@@ -137,6 +137,163 @@ UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, f32 drawerH,
     return safe::centerRect(sw, sh, in, drawerH, rightPanel);
 }
 
+// GRUPO D — com as LARGURAS DE ESTADO (divisores arrastáveis): o rect que
+// o editor 3D usa; −1/−1 = defaults adaptativos (ecrãs largos = kPanelW)
+UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, f32 drawerH,
+                  bool rightPanel, f32 hierWdp, f32 inspWdp) {
+    return safe::centerRect(sw, sh, in, drawerH, rightPanel, hierWdp, inspWdp);
+}
+
+// a resolução do par de larguras para um EditorState (a fonte ÚNICA é a
+// safe::resolvePanels — o draw dos painéis, o drag dos divisores, a
+// sombra do save do layout e os testes partilham ESTA)
+safe::PanelBudget resolveEditorPanels(const EditorState& st,
+                                      f32 contentWdp) {
+    return safe::resolvePanels(contentWdp, st.hierW, st.inspW);
+}
+
+// ---------------------------------------------------------------------------
+// GRUPO D (0.9.6.7) — DIVISORES ARRASTÁVEIS hierarquia|viewport|inspector
+// ---------------------------------------------------------------------------
+// O padrão da pega do drawer (BottomPanel): strip VISUAL de 12dp encostado
+// à borda do painel, zona de toque de 20dp (12 do strip + 8 de folga PARA
+// DENTRO do painel — nunca para o lado do viewport: um toque na pega está
+// SEMPRE fora do centerRect, não orbita a câmara nem agarra o gizmo). O
+// press arma o drag (âncoras startX/baseW), o movimento horizontal
+// redimensiona AO VIVO com clamp (kPanelMinW .. (content−kViewportMinW)/2,
+// passos de 8dp — o granular do drawer), o release fixa. PERSISTE no
+// layout.json (hierW/inspW) com debounce no main (a sombra acompanha).
+//
+// ORDEM (o coração do plano B): dividerInput corre ANTES dos painéis no UI
+// pass — a pega chama dragHandle e RECLAMA active_ primeiro; o beginScroll
+// do painel vê active_ != 0 e NÃO reclama (o toque na pega nunca vira
+// scroll, mesmo com a região por baixo). drawPanelDividers corre DEPOIS
+// dos painéis: o strip visível por cima da borda (o conteúdo do painel
+// NÃO perde largura — a linha X/Y/Z do Inspector continua a caber).
+namespace {
+
+// os rects das pegas (strip + hit) — a fonte ÚNICA do input e do draw
+struct DividerRects {
+    UiRect stripL{}, hitL{};     // borda DIREITA da hierarquia
+    UiRect stripR{}, hitR{};     // borda ESQUERDA do inspector
+    bool  rightOn = false;       // o painel direito existe neste frame?
+    f32   contentW = 0.0f;       // p/ o clamp (px)
+    safe::PanelBudget budget{};  // as larguras EFETIVAS do frame
+};
+
+DividerRects dividerRects(UiContext& ui, const EditorState& st,
+                          bool rightPanel) {
+    DividerRects d;
+    const f32 sw = ui.screenWidth();
+    const f32 sh = ui.screenHeight();
+    d.contentW = ui.contentWidthPx();
+    const f32 stripW = theme::dp(kDividerStripW);
+    const f32 hitW = theme::dp(kDividerHitW);
+    const safe::PanelBudget b =
+        safe::resolvePanels(d.contentW, st.hierW, st.inspW);
+    const UiRect panels = safe::panelsRect(sw, sh, ui.safeArea(), st.drawerH);
+    const UiRect hier{panels.x, panels.y, b.hier, panels.h};
+    d.hitL = {hier.x + hier.w - hitW, hier.y, hitW, hier.h};
+    d.stripL = {hier.x + hier.w - stripW, hier.y, stripW, hier.h};
+    d.budget = b;
+    if (rightPanel) {
+        const UiRect insp{panels.x + panels.w - b.insp, panels.y, b.insp,
+                          panels.h};
+        // painel direito válido (o G5 pode escondê-lo — sem divisor então)
+        d.rightOn = insp.w > hitW + theme::dp(48.0f) && insp.h > 1.0f;
+        d.hitR = {insp.x, insp.y, hitW, insp.h};
+        d.stripR = {insp.x, insp.y, stripW, insp.h};
+    }
+    return d;
+}
+
+} // namespace
+
+void dividerInput(UiContext& ui, const InputState& in, EditorState& st,
+                  bool rightPanel) {
+    const DividerRects d = dividerRects(ui, st, rightPanel);
+    // as pegas reclamam o gesto (active_) — ANTES dos painéis (o main chama
+    // na ordem certa; o dragHandle NÃO regista no audit: não é alvo de tap)
+    const bool heldL = ui.dragHandle(kIdDividerL, d.hitL.x, d.hitL.y,
+                                     d.hitL.w, d.hitL.h);
+    const bool heldR = d.rightOn && ui.dragHandle(kIdDividerR, d.hitR.x,
+                                                  d.hitR.y, d.hitR.w, d.hitR.h);
+    f32 px = -1.0f, py = -1.0f;
+    if (in.down(0)) {
+        in.pos(0, px, py);
+    }
+    // press edge na pega → arma (âncoras capturadas — o padrão do drawer)
+    if (in.pressed(0) && heldL) {
+        st.divDragActive = true;
+        st.divDragRight = false;
+        st.divDragStartX = px;
+        st.divDragBaseW = d.budget.hier;
+    } else if (d.rightOn && in.pressed(0) && heldR) {
+        st.divDragActive = true;
+        st.divDragRight = true;
+        st.divDragStartX = px;
+        st.divDragBaseW = d.budget.insp;
+    }
+    // o drag: redimensiona AO VIVO com clamp + passos de 8dp (o granular
+    // do drawer; o estado escreve o VALOR SNAPPED — o que o dono vê é o
+    // que fica). O clamp é a GANGorra da resolvePanels (o piso do viewport
+    // e o OUTRO painel contam — re-resolvido com o RAW novo a cada frame)
+    if (st.divDragActive && in.down(0)) {
+        const f32 dx = px - st.divDragStartX;
+        // hierarquia: arrastar p/ a DIREITA alarga; inspector: p/ a ESQUERDA
+        const f32 want = st.divDragRight ? (st.divDragBaseW - dx)
+                                         : (st.divDragBaseW + dx);
+        const f32 step = theme::dp(8.0f);
+        // GRUPO D (achado ao vivo da 13.7): o snap NUNCA desce abaixo de 0
+        // — um valor negativo na resolvePanels é a SEMÂNTICA de default
+        // (−1), e o drag além do piso saltava o painel para o DEFAULT
+        f32 snapped = std::floor(want / step) * step;
+        if (snapped < 0.0f) {
+            snapped = 0.0f;
+        }
+        const safe::PanelBudget rb = safe::resolvePanels(
+            d.contentW, st.divDragRight ? st.hierW : snapped,
+            st.divDragRight ? snapped : st.inspW);
+        if (st.divDragRight) {
+            st.inspW = rb.insp;
+        } else {
+            st.hierW = rb.hier;
+        }
+    }
+    if (!in.down(0)) {
+        st.divDragActive = false;
+    }
+}
+
+void drawPanelDividers(UiContext& ui, const EditorState& st, bool rightPanel) {
+    const DividerRects d = dividerRects(ui, st, rightPanel);
+    const f32 col[4] = {theme::kTheme.text2[0], theme::kTheme.text2[1],
+                        theme::kTheme.text2[2], 1.0f};
+    // o strip: fundo (aceso durante o drag) + traços horizontais (o grip
+    // vertical — o espelho da pega do drawer, que tem traços verticais)
+    const UiRect strips[2] = {d.stripL, d.stripR};
+    const bool on[2] = {true, d.rightOn};
+    const bool dragging[2] = {st.divDragActive && !st.divDragRight,
+                              st.divDragActive && st.divDragRight};
+    for (int i = 0; i < 2; ++i) {
+        if (!on[i] || strips[i].w <= 0.0f || strips[i].h <= 1.0f) {
+            continue;
+        }
+        ui.panel(strips[i].x, strips[i].y, strips[i].w, strips[i].h,
+                 dragging[i] ? theme::kTheme.accent : theme::kTheme.bg);
+        ui.panel(strips[i].x, strips[i].y, 1.0f, strips[i].h,
+                 theme::kTheme.border);
+        // grip: 5 traços horizontais de 2dp×8dp no centro vertical do strip
+        const f32 gy = strips[i].y + strips[i].h * 0.5f - theme::dp(20.0f);
+        const f32 gx = strips[i].x + (strips[i].w - theme::dp(2.0f)) * 0.5f;
+        for (int g = 0; g < 5; ++g) {
+            ui.panel(gx, gy + static_cast<f32>(g) * theme::dp(8.0f),
+                     theme::dp(2.0f), theme::dp(4.0f),
+                     dragging[i] ? theme::kTheme.accentInk : col);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // HIERARQUIA 0.9.0 (spec B + scope funcional):
 //   cabeçalho 48dp: "HIERARQUIA" 12sp text-2 + [+] 48dp
@@ -181,9 +338,12 @@ icons::Icon hierIconFor(const Tic& t) {
 }
 
 bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
+    // GRUPO D: a largura é ESTADO (divisores) — default adaptativo se −1
+    // (a resolução é a fonte ÚNICA: resolvePanels — gangorra dos 3 pisos)
     const UiRect panel = safe::hierarchyPanelRect(ui.screenWidth(),
                                                   ui.screenHeight(),
-                                                  ui.safeArea(), st.drawerH);
+                                                  ui.safeArea(), st.drawerH,
+                                                  st.hierW, st.inspW);
     const f32 x = panel.x;
     const f32 y = panel.y;
     const f32 w = panel.w;
@@ -319,6 +479,9 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
         }
 
         // ---- lista (scroll) ----
+        // GRUPO D (plano B): SEM inset — o divisor sobrepõe a borda e
+        // RECLAMA o gesto ANTES do painel (dividerInput corre primeiro no
+        // main); a região mantém a largura de sempre
         const f32 listTop = y + kHeaderH + kSearchRowH;
         const UiRect listRegion = {x, listTop, w, h - kHeaderH - kSearchRowH};
         const f32 contentH = hierarchyContentHeight(nRows);
@@ -441,12 +604,17 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                             theme::kTheme.text2);
             if (ui.hasFont()) {
                 const TextMetrics mv = ui.textMetrics();
+                // GRUPO D: em painel ESTREITO (divisores/device) o convite
+                // CURTO — o comprido trunca a meio (a 13.7 media 353px num
+                // painel de 400px@2.0 — aviso de texto truncado)
+                const bool narrow = w < theme::dp(240.0f);
                 ui.labelFitted(x + kPad,
                                listTop + theme::dp(112.0f) - mv.block() +
                                    mv.ascent,
                                needle && *needle
                                    ? "nenhum TIC com esse nome"
-                                   : "sem TICs - toca em + para criar",
+                                   : (narrow ? "toca em + para criar"
+                                             : "sem TICs - toca em + para criar"),
                                theme::kTheme.text2, w - 2.0f * kPad);
             }
         }
@@ -516,9 +684,11 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                    const AssetCatalog* catalog, const VoniSystem* voni) {
     // F4.2: painel inteiro dentro do contentRect — a altura REAL alimenta o
     // beginScroll → o overflow do Inspector é detetado e o scroll ativa (B1)
+    // GRUPO D: a largura é ESTADO (divisores) — default adaptativo se −1
     const UiRect panel = safe::inspectorPanelRect(ui.screenWidth(),
                                                    ui.screenHeight(),
-                                                   ui.safeArea(), st.drawerH);
+                                                   ui.safeArea(), st.drawerH,
+                                                   st.inspW, st.hierW);
     const f32 x = panel.x;
     const f32 y = panel.y;
     const f32 w = panel.w;
@@ -584,6 +754,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                                                 st.inspCollapsed);
 
     // região de scroll: abaixo do cabeçalho
+    // GRUPO D (plano B): SEM inset — o divisor sobrepõe a borda ESQUERDA e
+    // RECLAMA o gesto ANTES do painel (dividerInput corre primeiro no main)
     const f32 contentTop = y + kHeaderH + 4.0f;
     const f32 listH = h - kHeaderH - 4.0f;
 
@@ -885,11 +1057,19 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             const f32 titleBase = ry + theme::dp(2.0f) + m2.ascent;
             ui.label(x + kPad, titleBase, kRowTitles[rowIdx],
                      theme::kTheme.text2);
-            // caixas 48dp: 3×64 + 2×8 = 208; R 48dp à direita (vão 8)
-            // (0.9.6.6 · GRUPO C: dp REAL — eram px crus; o título 24dp)
-            const f32 boxW = theme::dp(64.0f);
-            const f32 boxH = theme::dp(48.0f);   // spec C: campo numérico 48dp
-            const f32 boxY = ry + theme::dp(24.0f);
+            // caixas 48dp de ALTURA (spec C: campo numérico 48dp), largura
+            // ADAPTATIVA (GRUPO D): 64dp quando a linha cabe inteira
+            // (3×64+2×8+8+48 = 272dp úteis); 56dp em painel estreito
+            // (divisores/device: 184+8+48 = 240dp — o alvo 48dp mantém-se
+            // pela ALTURA, o valor trunca com …). O R ao lado do TÍTULO é a
+            // defesa final (painel sub-mínimo — nunca sobre a caixa Z).
+            const f32 usableW = w - 2.0f * kPad;
+            const bool narrowRow = usableW < theme::dp(272.0f);
+            const f32 boxW = narrowRow ? theme::dp(56.0f) : theme::dp(64.0f);
+            const f32 boxH = theme::dp(48.0f);
+            const bool rOnTitle = usableW < theme::dp(240.0f);
+            const f32 boxY = rOnTitle ? ry + theme::dp(28.0f)
+                                      : ry + theme::dp(24.0f);
             const f32 boxBase = boxY + (boxH - m2.block()) * 0.5f + m2.ascent;
             f32 bx = x + kPad;
             for (u32 axis = 0; axis < 3; ++axis) {
@@ -930,8 +1110,10 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 }
                 bx += boxW + theme::dp(8.0f);
             }
-            // botão R (48dp — repõe a linha)
-            const UiRect rr2 = {x + w - kPad - theme::dp(48.0f), boxY,
+            // botão R (48dp — repõe a linha): na linha das CAIXAS quando
+            // cabe; no ESTREITO, ao lado do TÍTULO (nunca sobre a caixa Z)
+            const UiRect rr2 = {x + w - kPad - theme::dp(48.0f),
+                                rOnTitle ? ry + theme::dp(2.0f) : boxY,
                                 theme::dp(48.0f), boxH};
             const bool rHeld = ui.widgetActive(r.id);
             ui.panelRounded(rr2.x, rr2.y, rr2.w, rr2.h,
@@ -939,7 +1121,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                             rHeld ? theme::kTheme.accentPress
                                   : theme::kTheme.surface);
             if (ui.hasFont()) {
-                ui.label(rr2.x + (rr2.w - ui.fontWidth("R")) * 0.5f, boxBase,
+                const f32 rBase = rr2.y + (rr2.h - m2.block()) * 0.5f +
+                                  m2.ascent;
+                ui.label(rr2.x + (rr2.w - ui.fontWidth("R")) * 0.5f, rBase,
                          "R", theme::kTheme.text1);
             }
             break;

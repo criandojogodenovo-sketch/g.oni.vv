@@ -49,25 +49,26 @@ f32 snapStep(f32 v, f32 step) {
 }
 
 // emite uma aresta do mundo (projeta; atrás da câmara → não desenha)
-void edge(UiContext& ui, const Mat4& vp, f32 sw, f32 sh, const Vec3& a,
-          const Vec3& b, f32 w, const f32 col[4]) {
+// GRUPO D: (mw,mh,ox,oy) = o mapeamento da viewport (NDC→(mw×mh)+origem)
+void edge(UiContext& ui, const Mat4& vp, f32 mw, f32 mh, f32 ox, f32 oy,
+          const Vec3& a, const Vec3& b, f32 w, const f32 col[4]) {
     f32 ax = 0.0f, ay = 0.0f, bx = 0.0f, by = 0.0f;
-    if (!gizmo::projectPoint(vp, a, sw, sh, ax, ay)) {
+    if (!gizmo::projectPoint(vp, a, mw, mh, ax, ay, ox, oy)) {
         return;
     }
-    if (!gizmo::projectPoint(vp, b, sw, sh, bx, by)) {
+    if (!gizmo::projectPoint(vp, b, mw, mh, bx, by, ox, oy)) {
         return;
     }
     ui.drawLine(ax, ay, bx, by, w, col);
 }
 
 // caixa (8 cantos: 0..3 frente [+z local], 4..7 trás) → 12 arestas
-void drawBox(UiContext& ui, const Mat4& vp, f32 sw, f32 sh, const Vec3 c[8],
-             f32 w, const f32 col[4]) {
+void drawBox(UiContext& ui, const Mat4& vp, f32 mw, f32 mh, f32 ox, f32 oy,
+             const Vec3 c[8], f32 w, const f32 col[4]) {
     for (int i = 0; i < 4; ++i) {
-        edge(ui, vp, sw, sh, c[i], c[(i + 1) % 4], w, col);          // frente
-        edge(ui, vp, sw, sh, c[4 + i], c[4 + (i + 1) % 4], w, col);  // trás
-        edge(ui, vp, sw, sh, c[i], c[4 + i], w, col);                // ligação
+        edge(ui, vp, mw, mh, ox, oy, c[i], c[(i + 1) % 4], w, col);          // frente
+        edge(ui, vp, mw, mh, ox, oy, c[4 + i], c[4 + (i + 1) % 4], w, col);  // trás
+        edge(ui, vp, mw, mh, ox, oy, c[i], c[4 + i], w, col);                // ligação
     }
 }
 
@@ -178,20 +179,24 @@ Frustum computeFrustum(const Transform3D& tr, const CameraComp& cam,
 // ---- desenho ---------------------------------------------------------------------
 
 void drawFrustum(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
-                 const Frustum& f, bool selected) {
+                 const Frustum& f, bool selected, f32 vw, f32 vh, f32 ox,
+                 f32 oy) {
     const f32* col = theme::kTheme.accent;   // cor de gizmo/marca
     const f32 w = selected ? kLineWSel() : kLineW();
+    // GRUPO D: o mapeamento da viewport 3D (0,0 = o ecrã todo — o de sempre)
+    const f32 mw = (vw > 1.0f && vh > 1.0f) ? vw : sw;
+    const f32 mh = (vw > 1.0f && vh > 1.0f) ? vh : sh;
 
-    drawBox(ui, vp, sw, sh, f.box, w, col);    // corpo
-    drawBox(ui, vp, sw, sh, f.lens, w, col);   // lente
+    drawBox(ui, vp, mw, mh, ox, oy, f.box, w, col);    // corpo
+    drawBox(ui, vp, mw, mh, ox, oy, f.lens, w, col);   // lente
     for (int i = 0; i < 4; ++i) {
         // near + cone near→far + far
-        edge(ui, vp, sw, sh, f.nearC[i], f.nearC[(i + 1) % 4], w, col);
-        edge(ui, vp, sw, sh, f.farC[i], f.farC[(i + 1) % 4], w, col);
-        edge(ui, vp, sw, sh, f.nearC[i], f.farC[i], w, col);
+        edge(ui, vp, mw, mh, ox, oy, f.nearC[i], f.nearC[(i + 1) % 4], w, col);
+        edge(ui, vp, mw, mh, ox, oy, f.farC[i], f.farC[(i + 1) % 4], w, col);
+        edge(ui, vp, mw, mh, ox, oy, f.nearC[i], f.farC[i], w, col);
     }
     // linha de visão central (do corpo ao centro do far)
-    edge(ui, vp, sw, sh, f.pos + f.fwd * (kLensDist + kLensHalfD),
+    edge(ui, vp, mw, mh, ox, oy, f.pos + f.fwd * (kLensDist + kLensHalfD),
          f.farCenter, w, col);
 
     // handles: SÓ na câmara selecionada (4 cantos + centro do far)
@@ -203,24 +208,29 @@ void drawFrustum(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
     const f32 hp = kHandlePx();
     for (int i = 0; i < 4; ++i) {
         f32 hx = 0.0f, hy = 0.0f;
-        if (gizmo::projectPoint(vp, f.farC[i], sw, sh, hx, hy)) {
+        if (gizmo::projectPoint(vp, f.farC[i], mw, mh, hx, hy, ox, oy)) {
             ui.panel(hx - hp * 0.5f, hy - hp * 0.5f, hp, hp, col);
             ui.frame(hx - hp * 0.5f, hy - hp * 0.5f, hp, hp, 2.0f, ink);
         }
     }
     f32 cx = 0.0f, cy = 0.0f;
-    if (gizmo::projectPoint(vp, f.farCenter, sw, sh, cx, cy)) {
+    if (gizmo::projectPoint(vp, f.farCenter, mw, mh, cx, cy, ox, oy)) {
         ui.panel(cx - hp * 0.5f, cy - hp * 0.5f, hp, hp, ink);
         ui.frame(cx - hp * 0.5f, cy - hp * 0.5f, hp, hp, 2.0f, col);
     }
 }
 
 void drawAll(UiContext& ui, Scene& scene, const Mat4& vp, f32 sw, f32 sh,
-             Handle selected) {
+             Handle selected, f32 vw, f32 vh, f32 ox, f32 oy) {
     if (sw <= 1.0f || sh <= 1.0f) {
         return;
     }
+    // GRUPO D: o ASPECTO do frustum continua o do JOGO (sw/sh da SUPERFÍCIE
+    // — em Play a câmara renderiza o ecrã todo); o MAPEAMENTO do desenho é
+    // o rect da viewport (vw,vh,ox,oy; 0,0,0,0 = o ecrã todo — o de sempre)
     const f32 aspect = sw / sh;
+    const f32 mw = (vw > 1.0f && vh > 1.0f) ? vw : sw;
+    const f32 mh = (vw > 1.0f && vh > 1.0f) ? vh : sh;
     scene.forEachActive([&](Tic& t) {
         if (!t.visible) {
             return;
@@ -236,11 +246,13 @@ void drawAll(UiContext& ui, Scene& scene, const Mat4& vp, f32 sw, f32 sh,
             return;
         }
         // 0.9.6.1 (G1-4): o cap dá ~80dp no ecrã (antes: 12 unidades FIXAS —
-        // a pirâmide dominava a viewport quando a câmara estava perto)
+        // a pirâmide dominava a viewport quando a câmara estava perto).
+        // GRUPO D: o ppu mede-se pelo MAPEAMENTO do rect (consistente com
+        // o draw que o consume)
         const Frustum f = computeFrustum(
             *tr, *cam, aspect,
-            visualCapForScreen(vp, sw, sh, tr->pos, cam->fovY));
-        drawFrustum(ui, vp, sw, sh, f, t.handle == selected);
+            visualCapForScreen(vp, mw, mh, tr->pos, cam->fovY));
+        drawFrustum(ui, vp, sw, sh, f, t.handle == selected, mw, mh, ox, oy);
     });
 }
 

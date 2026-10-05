@@ -105,16 +105,22 @@ Frustum computeFrustum(const Transform3D& tr, const CameraComp& cam,
                        f32 aspect, f32 visualFarCap = kVisualFarCap);
 
 // ---- desenho (emite no UiContext — line batch dos gizmos) --------------------
+// GRUPO D: (vw,vh,ox,oy) = o MAPEAMENTO da viewport 3D (NDC→(vw×vh) local
+// + (ox,oy) de origem). Defaults 0,0,0,0 = o ECRÃ TODO (o de sempre — os
+// testes e o Play ficam IGUAIS). O ASPECTO do frustum continua sw/sh da
+// SUPERFÍCIE (o jogo renderiza o ecrã todo em Play — o shape não muda).
 
 // desenha o frustum UMA câmara (cor de marca; `selected` acrescenta os
 // HANDLES do far — 4 cantos + centro). Editor-only (o chamador faz o gate).
 void drawFrustum(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
-                 const Frustum& f, bool selected);
+                 const Frustum& f, bool selected, f32 vw = 0.0f,
+                 f32 vh = 0.0f, f32 ox = 0.0f, f32 oy = 0.0f);
 
 // desenha TODAS as câmaras visíveis da cena (o loop do main; cada frustum
 // com o aspeto do ecrã; a selecionada ganha os handles)
 void drawAll(UiContext& ui, Scene& scene, const Mat4& vp, f32 sw, f32 sh,
-             Handle selected);
+             Handle selected, f32 vw = 0.0f, f32 vh = 0.0f, f32 ox = 0.0f,
+             f32 oy = 0.0f);
 
 // ---- hit-test ------------------------------------------------------------------
 

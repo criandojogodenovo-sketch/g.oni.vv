@@ -91,15 +91,17 @@ Vec3 planeHit(const ViewBasis& b, const Vec3& n, const Vec3& planeOrigin,
 // ---- projeção --------------------------------------------------------------------
 
 bool projectPoint(const Mat4& vp, const Vec3& p, f32 sw, f32 sh,
-                  f32& sx, f32& sy) {
+                  f32& sx, f32& sy, f32 ox, f32 oy) {
     f32 clip[4];
     Mat4::transformPoint4(vp, p, clip);
     if (clip[3] <= 1e-5f) {
         return false;   // atrás da câmara / degenerado
     }
     const f32 invW = 1.0f / clip[3];
-    sx = (clip[0] * invW * 0.5f + 0.5f) * sw;
-    sy = (1.0f - (clip[1] * invW * 0.5f + 0.5f)) * sh;   // y para baixo
+    // GRUPO D: o NDC mapeia para (sw×sh) LOCAL + (ox,oy) — a origem do
+    // rect da viewport (o 3D deixa de ser o ecrã todo; 0,0 = o de sempre)
+    sx = (clip[0] * invW * 0.5f + 0.5f) * sw + ox;
+    sy = (1.0f - (clip[1] * invW * 0.5f + 0.5f)) * sh + oy;   // y para baixo
     return true;
 }
 
@@ -470,15 +472,18 @@ Vec3 dragScaleUniform(const Vec3& anchorScale, f32 dist0, f32 dist1,
 
 namespace {
 
-void drawArrow(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
+// GRUPO D: os helpers de draw ganham (ox,oy) — a origem do rect da
+// viewport (projectPoint mapeia NDC→(sw×sh) local; o draw soma a origem)
+
+void drawArrow(UiContext& ui, const Mat4& vp, f32 sw, f32 sh, f32 ox, f32 oy,
                const Vec3& origin, const Vec3& dir, f32 len, Axis axis,
                Axis hovered) {
     f32 ax = 0.0f, ay = 0.0f, bx = 0.0f, by = 0.0f;
-    if (!projectPoint(vp, origin, sw, sh, ax, ay)) {
+    if (!projectPoint(vp, origin, sw, sh, ax, ay, ox, oy)) {
         return;
     }
     const Vec3 tip = origin + dir * len;
-    if (!projectPoint(vp, tip, sw, sh, bx, by)) {
+    if (!projectPoint(vp, tip, sw, sh, bx, by, ox, oy)) {
         return;
     }
     const bool hot = (hovered == axis);
@@ -503,8 +508,8 @@ void drawArrow(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
     }
 }
 
-void drawPlaneHandle(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
-                     const Vec3& origin, f32 len, Axis plane,
+void drawPlaneHandle(UiContext& ui, const Mat4& vp, f32 sw, f32 sh, f32 ox,
+                     f32 oy, const Vec3& origin, f32 len, Axis plane,
                      Axis hovered) {
     // quad de plano: contorno (4 segmentos) nos 2 eixos do plano, a 45%..75%
     // do len — pequeno e afastado do centro (não colide com as setas)
@@ -517,10 +522,10 @@ void drawPlaneHandle(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
     const Vec3 c2 = origin + u * b + v * b;
     const Vec3 c3 = origin + u * a + v * b;
     f32 p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y;
-    if (!projectPoint(vp, c0, sw, sh, p0x, p0y) ||
-        !projectPoint(vp, c1, sw, sh, p1x, p1y) ||
-        !projectPoint(vp, c2, sw, sh, p2x, p2y) ||
-        !projectPoint(vp, c3, sw, sh, p3x, p3y)) {
+    if (!projectPoint(vp, c0, sw, sh, p0x, p0y, ox, oy) ||
+        !projectPoint(vp, c1, sw, sh, p1x, p1y, ox, oy) ||
+        !projectPoint(vp, c2, sw, sh, p2x, p2y, ox, oy) ||
+        !projectPoint(vp, c3, sw, sh, p3x, p3y, ox, oy)) {
         return;
     }
     const bool hot = (hovered == plane);
@@ -532,7 +537,7 @@ void drawPlaneHandle(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
     ui.drawLine(p3x, p3y, p0x, p0y, w, col);
 }
 
-void drawRing(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
+void drawRing(UiContext& ui, const Mat4& vp, f32 sw, f32 sh, f32 ox, f32 oy,
               const Vec3& origin, f32 len, Axis axis, const Vec3& u,
               const Vec3& v, Axis hovered) {
     const bool hot = (hovered == axis);
@@ -544,7 +549,7 @@ void drawRing(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
         const f32 ang = (2.0f * 3.14159265f * i) / kRingSegs;
         const Vec3 p = origin + (u * std::cos(ang) + v * std::sin(ang)) * len;
         f32 sx = 0.0f, sy = 0.0f;
-        if (projectPoint(vp, p, sw, sh, sx, sy)) {
+        if (projectPoint(vp, p, sw, sh, sx, sy, ox, oy)) {
             if (okPrev) {
                 ui.drawLine(pxPrev, pyPrev, sx, sy, w, col);
             }
@@ -557,15 +562,15 @@ void drawRing(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
     }
 }
 
-void drawScaleHandle(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
-                     const Vec3& origin, const Vec3& dir, f32 len, Axis axis,
-                     Axis hovered) {
+void drawScaleHandle(UiContext& ui, const Mat4& vp, f32 sw, f32 sh, f32 ox,
+                     f32 oy, const Vec3& origin, const Vec3& dir, f32 len,
+                     Axis axis, Axis hovered) {
     f32 ax = 0.0f, ay = 0.0f, bx = 0.0f, by = 0.0f;
-    if (!projectPoint(vp, origin, sw, sh, ax, ay)) {
+    if (!projectPoint(vp, origin, sw, sh, ax, ay, ox, oy)) {
         return;
     }
     const Vec3 tip = origin + dir * len;
-    if (!projectPoint(vp, tip, sw, sh, bx, by)) {
+    if (!projectPoint(vp, tip, sw, sh, bx, by, ox, oy)) {
         return;
     }
     const bool hot = (hovered == axis);
@@ -579,37 +584,44 @@ void drawScaleHandle(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
 } // namespace
 
 void drawGizmo(UiContext& ui, const Mat4& vp, const Vec3& origin, f32 len,
-               Mode mode, Axis hovered) {
-    const f32 sw = ui.screenWidth();
-    const f32 sh = ui.screenHeight();
+               Mode mode, Axis hovered, f32 vw, f32 vh, f32 ox, f32 oy) {
+    // GRUPO D: o mapeamento da viewport — (vw,vh) são o TAMANHO do rect
+    // (0,0 = o ecrã todo, o de sempre); a projeção mapeia NDC→(vw×vh)
+    // LOCAL e o draw soma (ox,oy) — o ecrã-real é rect+origem
+    f32 sw = ui.screenWidth();
+    f32 sh = ui.screenHeight();
+    if (vw > 1.0f && vh > 1.0f) {
+        sw = vw;
+        sh = vh;
+    }
     if (sw <= 1.0f || sh <= 1.0f || len <= 0.0f) {
         return;
     }
 
     switch (mode) {
         case Mode::Move:
-            drawArrow(ui, vp, sw, sh, origin, Vec3{1, 0, 0}, len, Axis::X, hovered);
-            drawArrow(ui, vp, sw, sh, origin, Vec3{0, 1, 0}, len, Axis::Y, hovered);
-            drawArrow(ui, vp, sw, sh, origin, Vec3{0, 0, 1}, len, Axis::Z, hovered);
-            drawPlaneHandle(ui, vp, sw, sh, origin, len, Axis::XY, hovered);
-            drawPlaneHandle(ui, vp, sw, sh, origin, len, Axis::XZ, hovered);
-            drawPlaneHandle(ui, vp, sw, sh, origin, len, Axis::YZ, hovered);
+            drawArrow(ui, vp, sw, sh, ox, oy, origin, Vec3{1, 0, 0}, len, Axis::X, hovered);
+            drawArrow(ui, vp, sw, sh, ox, oy, origin, Vec3{0, 1, 0}, len, Axis::Y, hovered);
+            drawArrow(ui, vp, sw, sh, ox, oy, origin, Vec3{0, 0, 1}, len, Axis::Z, hovered);
+            drawPlaneHandle(ui, vp, sw, sh, ox, oy, origin, len, Axis::XY, hovered);
+            drawPlaneHandle(ui, vp, sw, sh, ox, oy, origin, len, Axis::XZ, hovered);
+            drawPlaneHandle(ui, vp, sw, sh, ox, oy, origin, len, Axis::YZ, hovered);
             break;
         case Mode::Rotate:
-            drawRing(ui, vp, sw, sh, origin, len, Axis::X,
+            drawRing(ui, vp, sw, sh, ox, oy, origin, len, Axis::X,
                      Vec3{0, 1, 0}, Vec3{0, 0, 1}, hovered);
-            drawRing(ui, vp, sw, sh, origin, len, Axis::Y,
+            drawRing(ui, vp, sw, sh, ox, oy, origin, len, Axis::Y,
                      Vec3{1, 0, 0}, Vec3{0, 0, 1}, hovered);
-            drawRing(ui, vp, sw, sh, origin, len, Axis::Z,
+            drawRing(ui, vp, sw, sh, ox, oy, origin, len, Axis::Z,
                      Vec3{1, 0, 0}, Vec3{0, 1, 0}, hovered);
             break;
         case Mode::Scale: {
-            drawScaleHandle(ui, vp, sw, sh, origin, Vec3{1, 0, 0}, len, Axis::X, hovered);
-            drawScaleHandle(ui, vp, sw, sh, origin, Vec3{0, 1, 0}, len, Axis::Y, hovered);
-            drawScaleHandle(ui, vp, sw, sh, origin, Vec3{0, 0, 1}, len, Axis::Z, hovered);
+            drawScaleHandle(ui, vp, sw, sh, ox, oy, origin, Vec3{1, 0, 0}, len, Axis::X, hovered);
+            drawScaleHandle(ui, vp, sw, sh, ox, oy, origin, Vec3{0, 1, 0}, len, Axis::Y, hovered);
+            drawScaleHandle(ui, vp, sw, sh, ox, oy, origin, Vec3{0, 0, 1}, len, Axis::Z, hovered);
             // handle central (uniforme): quad no centro projetado
             f32 cx = 0.0f, cy = 0.0f;
-            if (projectPoint(vp, origin, sw, sh, cx, cy)) {
+            if (projectPoint(vp, origin, sw, sh, cx, cy, ox, oy)) {
                 const bool hot = (hovered == Axis::Center);
                 const f32* col = axisColor(Axis::Center, hot);
                 const f32 s = hot ? kHandlePx + 8.0f : kHandlePx;

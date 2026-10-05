@@ -230,6 +230,21 @@ struct EditorState {
     // PERSISTE no layout.json junto com o resto do layout)
     u32    settingsCollapsed = 0;
 
+    // GRUPO D (0.9.6.7) — LARGURAS DOS PAINÉIS (divisores arrastáveis
+    // hierarquia|viewport|inspector, o padrão da pega do drawer). Em dp;
+    // −1 = default adaptativo (kPanelW em ecrãs largos, encolhe nos
+    // estreitos — safe::defaultPanelW). PERSISTE no layout.json junto ao
+    // resto do layout (spec G); o clamp vivo é o da safe::clampPanelW.
+    f32    hierW = -1.0f;
+    f32    inspW = -1.0f;
+    // drag dos divisores (press arma; o movimento horizontal redimensiona
+    // AO VIVO com clamp; release fixa — o padrão do drawer)
+    bool   divDragActive = false;
+    i32    divDragSlot = -1;
+    f32    divDragStartX = 0.0f;
+    f32    divDragBaseW = 0.0f;
+    bool   divDragRight = false;   // true = divisor do INSPECTOR
+
     // 0.9.1 — JANELA DE TEXTO PESADO (modal — portrait + IME do sistema;
     // a semente do editor de script 0.9.2). O gate anyOverlayOpen cobre:
     // nada do editor desenha/interage atrás dela.
@@ -266,6 +281,24 @@ UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, bool rightPanel);
 // encolhe pela altura do drawer aberto)
 UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, f32 drawerH,
                   bool rightPanel);
+// GRUPO D: COM AS LARGURAS DE ESTADO dos painéis (divisores arrastáveis)
+// — o rect que o EDITOR 3D usa (scissor/orbit/chrome acompanham)
+UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, f32 drawerH,
+                  bool rightPanel, f32 hierWdp, f32 inspWdp);
+// resolve o PAR de larguras efetivas de um EditorState (a fonte ÚNICA é a
+// safe::resolvePanels — gangorra dos três pisos; o draw dos painéis, o drag
+// dos divisores, a sombra do save e os testes partilham ESTA)
+safe::PanelBudget resolveEditorPanels(const EditorState& st, f32 contentWdp);
+
+// GRUPO D (0.9.6.7) — DIVISORES ARRASTÁVEIS hierarquia|viewport|inspector
+// (o padrão da pega do drawer: strip 12dp + hit 20dp, press arma, o move
+// redimensiona AO VIVO com clamp, release fixa; persiste no layout.json).
+// dividerInput corre ANTES dos painéis no UI pass (a pega RECLAMA o gesto
+// primeiro — o toque na pega nunca vira scroll/orbit/gizmo);
+// drawPanelDividers corre DEPOIS (o strip visível por cima da borda).
+void dividerInput(UiContext& ui, const InputState& in, EditorState& st,
+                  bool rightPanel);
+void drawPanelDividers(UiContext& ui, const EditorState& st, bool rightPanel);
 
 // Painel esquerdo: lista de TICs COM SCROLL (todas as entradas, sem corte) +
 // botão "+" no cabeçalho. Tap numa linha seleciona (re-despacho do scroll).

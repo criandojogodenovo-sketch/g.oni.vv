@@ -54,12 +54,23 @@ Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st) {
     L.status = safe::statusRect(sw, sh, in);
     // drawerH: clamp 160..400dp, passos de 8dp (spec E) — 0.9.6.1: em dp
     // REAL (R-018: os limites eram px crus)
+    // GRUPO D (0.9.6.7 — o orçamento vertical): o drawer NUNCA come o
+    // editor INTEIRO — deixa sempre a faixa da toolbar do viewport viva
+    // (kBottomH + margens). No harness (568dp de viewport) o clamp
+    // histórico (400) continua a mandar; no DEVICE (208dp de viewport) o
+    // drawer default de 240dp comia TUDO (painéis a zero) — agora cede.
     f32 d = st.drawerH;
     if (d < theme::dp(safe::kDrawerMin)) {
         d = theme::dp(safe::kDrawerMin);
     }
     if (d > theme::dp(safe::kDrawerMax)) {
         d = theme::dp(safe::kDrawerMax);
+    }
+    const f32 vpH = safe::viewportRect(sw, sh, in).h;
+    const f32 chromeFloor = theme::dp(safe::kBottomTabH) + theme::dp(16.0f);
+    const f32 cap = vpH - chromeFloor;
+    if (d > cap && cap > 0.0f) {
+        d = cap;   // o piso da toolbar do viewport manda sobre o drawer
     }
     d = std::floor(d / theme::dp(8.0f)) * theme::dp(8.0f);
     L.drawer = {in.left, L.tabBar.y - d, sw - in.left - in.right, d};
@@ -394,21 +405,23 @@ void drawStatusBar(UiContext& ui, f32 sw, f32 sh, const safe::Insets& in,
 
 // ---- persistência (spec G) ----------------------------------------------------
 std::string serializeLayout(const BottomState& bs, bool showInspector,
-                            u32 inspCollapsed) {
-    char buf[96];
+                            u32 inspCollapsed, f32 hierW, f32 inspW) {
+    char buf[128];
     std::snprintf(buf, sizeof(buf),
-                  "bottomTab=%d\ndrawerH=%d\ninspector=%d\ninspCollapsed=%u\n",
+                  "bottomTab=%d\ndrawerH=%d\ninspector=%d\ninspCollapsed=%u\n"
+                  "hierW=%d\ninspW=%d\n",
                   bs.bottomTab, static_cast<int>(bs.drawerH),
-                  showInspector ? 1 : 0, inspCollapsed);
+                  showInspector ? 1 : 0, inspCollapsed,
+                  static_cast<int>(hierW), static_cast<int>(inspW));
     return std::string(buf);
 }
 
 bool parseLayout(const std::string& data, BottomState& bs, bool& showInspector,
-                 u32& inspCollapsed) {
+                 u32& inspCollapsed, f32* hierW, f32* inspW) {
     if (data.empty()) {
         return false;
     }
-    int tab = -1, dh = -1, insp = -1;
+    int tab = -1, dh = -1, insp = -1, hw = -9999, iw = -9999;
     unsigned collapsed = 0xFFFFFFFFu;
     const char* p = data.c_str();
     while (*p) {
@@ -420,6 +433,10 @@ bool parseLayout(const std::string& data, BottomState& bs, bool& showInspector,
             insp = std::atoi(p + 10);
         } else if (std::strncmp(p, "inspCollapsed=", 14) == 0) {
             collapsed = static_cast<unsigned>(std::strtoul(p + 14, nullptr, 10));
+        } else if (std::strncmp(p, "hierW=", 6) == 0) {
+            hw = std::atoi(p + 6);
+        } else if (std::strncmp(p, "inspW=", 6) == 0) {
+            iw = std::atoi(p + 6);
         }
         p = std::strchr(p, '\n');
         if (!p) {
@@ -440,6 +457,16 @@ bool parseLayout(const std::string& data, BottomState& bs, bool& showInspector,
     }
     if (collapsed != 0xFFFFFFFFu) {
         inspCollapsed = collapsed;
+    }
+    // GRUPO D: larguras dos divisores (AUSENTES nos ficheiros antigos →
+    // −1 = default adaptativo; valores fora do teto da casa são postos a
+    // −1 também — o clamp VIVO por frame é a última defesa). Em PX como o
+    // drawerH (re-clampado se a densidade/o ecrã mudarem)
+    if (hierW) {
+        *hierW = (hw > 0 && hw < 4096) ? static_cast<f32>(hw) : -1.0f;
+    }
+    if (inspW) {
+        *inspW = (iw > 0 && iw < 4096) ? static_cast<f32>(iw) : -1.0f;
     }
     return true;
 }

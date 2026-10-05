@@ -34,6 +34,69 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.9.6.7 — GRUPO D: ORÇAMENTO DO EDITOR 3D (FASE 0.9.6-MASTER · R-026)
+
+**O que existe agora (o editor ao TAMANHO do device — RMX3624 — passa o
+validador 0/0; o ecrã largo ficou PIXEL-IGUAL):**
+- **A GANGORRA hierarquia|viewport|inspector** (`safe::resolvePanels` — a
+  fonte única): os painéis deixaram de ser 300dp FIXOS. Três pisos —
+  hierarquia ≥200dp, inspector ≥272dp (a linha X/Y/Z), viewport ≥288dp (a
+  toolbar 272+margens) — e defaults ASSIMÉTRICOS no aperto: o inspector
+  mantém os 300dp (a linha X/Y/Z é o conteúdo mais rígido) e a hierarquia
+  ABSORVE. No device (776dp de conteúdo): hier 200 | viewport 288 |
+  insp 288 — ANTES o viewport era 176dp (22% do ecrã).
+- **OS DIVISORES ARRASTÁVEIS** (o padrão da pega do drawer): strip 12dp +
+  hit 20dp na borda de cada painel; o press arma, o move redimensiona AO
+  VIVO (passos de 8dp, clamp da gangorra contra o OUTRO painel — o
+  viewport nunca fecha), o release fixa. O toque na pega é da pega: nunca
+  vira scroll, nunca orbita, nunca agarra o gizmo (o input reclama o
+  gesto ANTES dos painéis). PERSISTE no layout.json (hierW/inspW; o
+  ficheiro antigo continua a ler → defaults).
+- **A BARRA DE TOQUE CABE em qualquer orçamento**: o stack
+  undo/redo/save/dup/paste vai a COLUNAS (1 coluna nos ecrãs largos —
+  zero mudança; 2/3 nos curtos; esconde só no sub-mínimo — degradação
+  honesta), o [+] sobe ao canto superior direito quando a toolbar enche a
+  largura, a linha X/Y/Z do Inspector adapta (caixas 64→56dp; o R ao lado
+  do título em painel estreito), os botões de ÍCONE da top bar NUNCA
+  encolhem (mediam 47dp no device), e o DRAWER nunca mais come o editor
+  inteiro (deixa a faixa da toolbar viva).
+- **O SCISSOR/ASPECT DO RECT**: a câmara do editor projeta com o ASPECTO
+  DA JANELA (hierarquia|viewport|inspector), não o do ecrã — ANTES o
+  scissor CORTAVA a faixa central de um frustum largo (o dono via ~22% do
+  FOV horizontal no device). O viewport GL + o scissor seguem o rect; o
+  gizmo, os frustums das câmaras, os glifos de áudio e TODOS os picks
+  mapeiam reto-local (coerentes com o draw); em Play nada muda (o jogo
+  renderiza o ecrã todo, como sempre).
+- **A FASE 13.7** (a vara nova do c33_virtual): o editor exportado ao
+  TAMANHO do RMX3624 (1600×720@2.0) — o validador inteiro verde com os
+  problemas NA MENSAGEM, a gangorra medida, os divisores arrastados pelo
+  caminho real do input e a persistência conferida.
+
+**Checklist C33/RMX3624 (VERIFICAR no device — Grupo D):**
+1. Abrir o editor: o viewport 3D VISIVELMENTE maior (288dp — 36% do ecrã
+   em vez dos 22% de antes); os painéis laterais mais estreitos
+   (hierarquia ~200dp, inspector ~288dp).
+2. Arrastar a pega (a risca na borda de cada painel): o painel cresce e
+   encolhe AO VIVO em passos de 8dp; soltar fixa; fechar e abrir a app —
+   a largura persiste (layout.json).
+3. Arrastar uma pega até ao limite: o viewport NUNCA fecha abaixo da
+   toolbar inferior; a hierarquia nunca fecha abaixo de ~200dp.
+4. O stack à esquerda do viewport (undo/redo/save/dup/paste) em 2/3
+   COLUNAS (não transborda por cima da toolbar); o [+] no canto SUPERIOR
+   direito do viewport.
+5. A câmara do editor: o FOV horizontal PARECE MAIS LARGO (o aspect é o
+   da janela — antes era um recorte do meio de um ecrã largo); orbitar e
+   tocar num objeto seleciona-o NO SÍTIO onde ele desenha (o pick segue
+   o rect).
+6. O Inspector com o painel estreito: as caixas X/Y/Z mais estreitas
+   (56dp) e o botão R ao lado do título «Posição» — nada sobreposto.
+7. A top bar: os 3 botões da direita (pause/play/gear) com o dedo inteiro
+   (48dp — mediam 47dp no device).
+8. Abrir o painel de baixo (Ficheiros/Consola/Animação) e arrastar a
+   pega do drawer até ao máximo: o editor NÃO desaparece (a toolbar do
+   viewport continua viva por baixo).
+9. Diagnóstico → «Auditoria do ecrã» no editor: «0 ERRO, 0 aviso».
+
 ## 0.9.6.6 — GRUPO C: ESCALA E TIPOGRAFIA (FASE 0.9.6-MASTER · R-025)
 
 **O que existe agora (a linha de base do Grupo B CURADA — 0 erros/0 avisos

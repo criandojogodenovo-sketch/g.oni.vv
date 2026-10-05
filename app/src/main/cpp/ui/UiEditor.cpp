@@ -98,8 +98,10 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
                     const InputState& in, f32 sw, f32 sh) {
     // 0.7.6: com o painel do Inspector escondido (G5 da toolbar) o mini-ecrã
     // cresce para a direita — o MESMO centerRect da câmara 3D
+    // GRUPO D: larguras de ESTADO (divisores) — o viewport UI acompanha
     const UiRect view =
-        safe::centerRect(sw, sh, ui.safeArea(), st.showInspector);
+        safe::centerRect(sw, sh, ui.safeArea(), 0.0f, st.showInspector,
+                         st.hierW, st.inspW);
     // fundo dedicado (o modo UI NÃO desenha a cena 3D — viewport só da UI)
     ui.panel(view.x, view.y, view.w, view.h, theme::BG);
     ui.frame(view.x, view.y, view.w, view.h, 1.0f, theme::LINE);
@@ -718,9 +720,10 @@ bool drawJoystickInspector(UiContext& ui, EditorState& st, Tic* tic,
 bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                      const InputState& in) {
     (void)in;
+    // GRUPO D: largura de ESTADO (divisores) — o painel UI acompanha
     const UiRect panel =
         safe::inspectorPanelRect(ui.screenWidth(), ui.screenHeight(),
-                                 ui.safeArea());
+                                 ui.safeArea(), 0.0f, st.inspW, st.hierW);
     const f32 x = panel.x;
     const f32 y = panel.y;
     const f32 w = panel.w;

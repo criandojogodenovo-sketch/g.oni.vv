@@ -3475,6 +3475,223 @@ int main() {
                 theme::setDensity(1.0f);
                 editor::applyDensity();
             }
+
+            // ---- (g) 13.7 · O ORÇAMENTO DO DEVICE (GRUPO D): o editor ao
+            // TAMANHO REAL do RMX3624 (1600×720 @2.0 = 776×336dp de
+            // conteúdo) — a vara que o harness largo (1512dp) NÃO tinha:
+            // ANTES do Grupo D os painéis FIXOS de 300dp deixavam o
+            // viewport 3D a 176dp (22% do ecrã), o stack vertical
+            // transbordava o fundo POR CIMA da toolbar e o [+] caía sobre
+            // os botões de ferramenta. AGORA: a gangorra dos divisores
+            // (hier 200 | vp 288 | insp 288), o chrome adaptativo e o
+            // scissor/aspect do rect — MEDIDOS, não afirmados
+            passo("13.7 orcamento do device: 1600x720@2.0 (a vara do RMX3624)");
+            {
+                eglstub::g_surfaceW = 1600;
+                eglstub::g_surfaceH = 720;
+                vvstub::g_stubDensityDpi = 320;   // 2.0 — o device real
+                theme::setDensity(2.0f);
+                editor::applyDensity();
+                android_app app13e;
+                std::memset(&app13e, 0, sizeof(app13e));
+                app13e.contentRect = {0, 48, 1552, 720};   // insets ×2 — 776×336dp
+                onAppCmd(&app13e, APP_CMD_INIT_WINDOW);
+                if (!g_font.ok()) {
+                    const char* paths[] = {FONT_FIXTURE};
+                    g_font.loadFromPaths(paths, 1, 28.0f);
+                }
+                g_ui.setFont(&g_font);
+                // o estado da 13.1 (defaults dos divisores; sem toast)
+                g_editor.hierW = -1.0f;
+                g_editor.inspW = -1.0f;
+                g_editor.divDragActive = false;
+                g_toastT = 0.0f;
+                g_toast[0] = '\0';
+                frame();
+                // como a 13.6: o export escreve por currentScreenName()
+                // ("editor") — as cópias do device vão para artefactos próprios
+                auto [pngD, jsD] = exportScreen("editor");
+                fileapi::writeAll("layout-harness-editor-device.png",
+                                  pngD.data(), pngD.size());
+                fileapi::writeAll("layout-harness-editor-device.json",
+                                  jsD.data(), jsD.size());
+                // (a) o PNG na resolução EXATA do device
+                vv::RawImage imgD;
+                std::string errD;
+                check(vv::loadPng(pngD.data(), pngD.size(), imgD, errD) &&
+                          imgD.width == 1600 && imgD.height == 720,
+                      "13.7 o PNG e 1600x720 (a superficie do RMX3624)");
+                // (b) o VALIDADOR ao tamanho do device: VERDE (antes do
+                // Grupo D o stack transbordava e o [+] sobrepunha — os
+                // avisos 'sobreposto' eram a evidência). Os problemas vão
+                // NA MENSAGEM (o dono vê O QUE apontou, não só que apontou)
+                const layout::Record& rD = g_ui.auditRecord();
+                const auto probsD = layout::validate(rD);
+                if (probsD.empty()) {
+                    check(true,
+                          "13.7 o editor ao TAMANHO do device passa o validador "
+                          "INTEIRO (0 erros, 0 avisos)");
+                } else {
+                    std::string why = "13.7 o editor ao device no validador "
+                                      "(";
+                    for (u32 pi = 0; pi < probsD.size(); ++pi) {
+                        if (pi) {
+                            why += "; ";
+                        }
+                        why += layout::describe(rD, probsD[pi]);
+                    }
+                    why += ")";
+                    check(false, why.c_str());
+                }
+                // (c) A GANGORRA: hier 200dp | vp 288dp | insp 288dp (os
+                // defaults assimétricos: o inspector mantém a linha X/Y/Z,
+                // a hierarquia absorve, o viewport nunca < a toolbar)
+                const safe::PanelBudget bd = editor::resolveEditorPanels(
+                    g_editor, g_ui.contentWidthPx());
+                check(std::fabs(bd.hier - theme::dp(safe::kHierMinW)) < 1.0f,
+                      "13.7 a hierarquia default ABSORVE (200dp no device)");
+                check(bd.insp >= theme::dp(safe::kInspMinW) - 1.0f &&
+                          std::fabs(bd.insp - theme::dp(288.0f)) < 9.0f,
+                      "13.7 o inspector default ~288dp (a linha X/Y/Z manda)");
+                const f32 vpW = g_ui.contentWidthPx() - bd.hier - bd.insp;
+                check(vpW >= theme::dp(safe::kViewportMinW) - 1.0f,
+                      "13.7 o viewport 3D >= 288dp (o piso da toolbar) — eram "
+                      "176dp");
+                // (d) A BARRA DE TOQUE CABE: o layout do chrome com o rect
+                // REAL — todos os alvos dentro, 48dp inteiros, o stack em
+                // colunas, o [+] no canto sup-dir
+                {
+                    const UiRect vr = editor::centerRect(
+                        1600.0f, 720.0f, g_ui.safeArea(), currentDrawerH(),
+                        g_editor.showInspector, g_editor.hierW, g_editor.inspW);
+                    const editor::vpchrome::Layout L = editor::vpchrome::layout(vr);
+                    check(L.stackVisible && L.stackCols >= 2,
+                          "13.7 o stack do viewport em COLUNAS (2/3) — a "
+                          "altura do device nao comporta 5 em coluna");
+                    check(L.plusTopRight,
+                          "13.7 o [+] sobe ao canto SUP-dir (a toolbar "
+                          "preenche a largura)");
+                    const f32 minTouch = theme::dp(48.0f);
+                    bool allIn = true, all48 = true;
+                    const UiRect all[11] = {
+                        L.stack[0], L.stack[1], L.stack[2], L.stack[3],
+                        L.stack[4], L.selectBtn, L.moveBtn, L.rotateBtn,
+                        L.scaleBtn, L.snapBtn, L.addTicBtn};
+                    for (const UiRect& r : all) {
+                        if (r.x < vr.x - 0.5f || r.y < vr.y - 0.5f ||
+                            r.x + r.w > vr.x + vr.w + 0.5f ||
+                            r.y + r.h > vr.y + vr.h + 0.5f) {
+                            allIn = false;
+                        }
+                        if (r.w < minTouch - 0.5f || r.h < minTouch - 0.5f) {
+                            all48 = false;
+                        }
+                    }
+                    check(allIn,
+                          "13.7 TODOS os alvos do chrome DENTRO do viewport "
+                          "(o stack transbordava o fundo antes do Grupo D)");
+                    check(all48,
+                          "13.7 TODOS os alvos >= 48dp REAIS no device (a "
+                          "regra da casa intacta na adaptação)");
+                }
+                // (e) OS DIVISORES AO VIVO: press na pega → drag → clamps —
+                // o caminho REAL do input (o mesmo do dedo no telefone).
+                // No DEVICE a hierarquia default está PRESA no PISO (a
+                // gangorra: insp 288 + vp 288 já gastam o orçamento) — o
+                // drag com INTERVALO é o do INSPECTOR; o da hierarquia
+                // AFEREMOS pelo PIN (arrasta e não mexe — a gangorra
+                // honesta: o viewport nunca fecha)
+                {
+                    // (e.1) a pega da HIERARQUIA arma e fica PRESA (piso)
+                    const f32 stripX =
+                        bd.hier - theme::dp(10.0f);   // dentro do hit 20dp
+                    const f32 stripY = 300.0f;
+                    g_input.injectDown(0, stripX, stripY);
+                    frame();
+                    check(g_editor.divDragActive,
+                          "13.7 o press na PEGA arma o drag (o toque na pega "
+                          "e da pega — nao scroll, nao orbit)");
+                    g_input.injectMove(0, stripX - 2000.0f, stripY);
+                    frame();
+                    const safe::PanelBudget bs = editor::resolveEditorPanels(
+                        g_editor, g_ui.contentWidthPx());
+                    check(std::fabs(bs.hier - theme::dp(safe::kHierMinW)) <
+                              1.0f,
+                          "13.7 o PISO da hierarquia (200dp) segura o drag");
+                    g_input.injectUp(0);
+                    frame();
+                    check(!g_editor.divDragActive,
+                          "13.7 o release FIXA a largura");
+                    // (e.2) a pega do INSPECTOR (a que tem INTERVALO no
+                    // device): encolhe → viewport CRESCE; alarga → teto
+                    const f32 inspX = g_ui.contentWidthPx() - bd.insp;
+                    const f32 stripR = inspX + theme::dp(10.0f);
+                    g_input.injectDown(0, stripR, stripY);
+                    frame();
+                    check(g_editor.divDragActive && g_editor.divDragRight,
+                          "13.7 o press na pega DIREITA arma o drag do "
+                          "inspector");
+                    g_input.injectMove(0, stripR + 60.0f, stripY);
+                    frame();
+                    const safe::PanelBudget bw = editor::resolveEditorPanels(
+                        g_editor, g_ui.contentWidthPx());
+                    check(bw.insp < bd.insp - 24.0f,
+                          "13.7 o drag ENCOLHE o inspector ao vivo");
+                    check(g_ui.contentWidthPx() - bw.hier - bw.insp >
+                              g_ui.contentWidthPx() - bd.hier - bd.insp,
+                          "13.7 ao ENCOLHER o painel o viewport CRESCE (a "
+                          "gangorra a favor do 3D)");
+                    g_input.injectMove(0, stripR + 2000.0f, stripY);
+                    frame();
+                    const safe::PanelBudget bf = editor::resolveEditorPanels(
+                        g_editor, g_ui.contentWidthPx());
+                    check(std::fabs(bf.insp - theme::dp(safe::kInspMinW)) <
+                              1.0f,
+                          "13.7 o PISO do inspector (272dp) segura o drag");
+                    g_input.injectMove(0, stripR - 2000.0f, stripY);
+                    frame();
+                    const safe::PanelBudget bt = editor::resolveEditorPanels(
+                        g_editor, g_ui.contentWidthPx());
+                    check(std::fabs(bt.insp - bd.insp) < 1.0f,
+                          "13.7 o TETO da gangorra (o inspector volta ao "
+                          "maximo sem fechar o viewport)");
+                    g_input.injectUp(0);
+                    frame();
+                    // (f) a PERSISTENCIA: o layout.json leva as larguras
+                    const std::string data = editor::bottom::serializeLayout(
+                        g_bottom, g_editor.showInspector,
+                        g_editor.inspCollapsed | (g_editor.settingsCollapsed
+                                                 << 8),
+                        g_editor.hierW, g_editor.inspW);
+                    check(data.find("hierW=") != std::string::npos &&
+                              data.find("inspW=") != std::string::npos,
+                          "13.7 o layout.json leva hierW/inspW (spec G)");
+                    editor::bottom::BottomState bs2{};
+                    bool insp2 = true;
+                    u32 col2 = 0;
+                    f32 hw2 = -9.0f, iw2 = -9.0f;
+                    check(editor::bottom::parseLayout(data, bs2, insp2, col2,
+                                                      &hw2, &iw2) &&
+                              std::fabs(hw2 - g_editor.hierW) < 1.0f,
+                          "13.7 o round-trip hierW (o que se guarda e o que "
+                          "volta)");
+                    // o formato ANTIGO (sem hierW) → default adaptativo
+                    check(editor::bottom::parseLayout(
+                              "bottomTab=0\ndrawerH=240\ninspector=1\n",
+                              bs2, insp2, col2, &hw2, &iw2) &&
+                              hw2 < 0.0f && iw2 < 0.0f,
+                          "13.7 o layout.json ANTIGO (sem larguras) → "
+                          "defaults (retrocompativel)");
+                    // REPOEM o estado p/ o resto da suite
+                    g_editor.hierW = -1.0f;
+                    g_editor.inspW = -1.0f;
+                }
+                // REPOSIÇÃO: o resto da suíte corre a 1.0
+                onAppCmd(&app13e, APP_CMD_TERM_WINDOW);
+                vvstub::g_stubDensityDpi = 160;
+                theme::setDensity(1.0f);
+                editor::applyDensity();
+            }
             onAppCmd(&app13l, APP_CMD_TERM_WINDOW);
         }
 

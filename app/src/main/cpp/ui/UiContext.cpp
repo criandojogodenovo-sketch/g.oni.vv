@@ -474,6 +474,27 @@ bool UiContext::widgetHit(u64 id, f32 x, f32 y, f32 w, f32 h) {
     return pressed;
 }
 
+// GRUPO D (0.9.6.7) — pega de arrasto: a MESMA captura do widgetHit, sem
+// o registo no audit (não é alvo de tap) e sem a semântica de clique (o
+// drag é consumido pelo chamador com o input cru — o padrão da pega do
+// drawer). Devolve true enquanto o dedo está na pega.
+bool UiContext::dragHandle(u64 id, f32 x, f32 y, f32 w, f32 h) {
+    const bool down = input_ && input_->down(0);
+    f32 px = -1.0f, py = -1.0f;
+    if (input_) {
+        input_->pos(0, px, py);
+    }
+    const bool inside = (px >= x && px < x + w && py >= y && py < y + h);
+    if (down && inside && active_ == 0 && scroll::buttonCaptures(inScroll_)) {
+        active_ = id;
+    }
+    if (active_ == id && !down) {
+        active_ = 0;
+        return false;
+    }
+    return active_ == id;
+}
+
 bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
     // 0.9.6.6 (GRUPO C): o texto do botão mede-se pelo CONTEXTO (fontWidth/
     // textMetrics — textK incluído). ANTES media-se pelo ATLAS CRU

@@ -170,9 +170,12 @@ Vec3 grabHit(const Grab& g, f32 px, f32 py, f32 sw, f32 sh, bool& anyHit);
 // ---- hit-test 3D (distâncias em px de ECRÃ — consistente com o desenho) -------
 
 // projeção de um ponto do mundo com a vp (proj*view); false se atrás da
-// câmara (w <= 0)
+// câmara (w <= 0). GRUPO D: (ox,oy) = a ORIGEM do rect da viewport — o
+// NDC mapeia para (sw×sh) e SOMA a origem (o viewport 3D deixou de ser o
+// ecrã todo: a câmara tem o aspect DO RECT e o ecrã-real é rect+origem;
+// default 0,0 = o ecrã todo — os testes e o Play ficam IGUAIS)
 bool projectPoint(const Mat4& vp, const Vec3& p, f32 sw, f32 sh,
-                  f32& sx, f32& sy);
+                  f32& sx, f32& sy, f32 ox = 0.0f, f32 oy = 0.0f);
 
 // distância (px) do ponto ao SEGMENTO projetado (a,b em ecrã)
 f32 distToSegmentPx(f32 px, f32 py, f32 ax, f32 ay, f32 bx, f32 by);
@@ -217,8 +220,13 @@ Vec3 dragScaleUniform(const Vec3& anchorScale, f32 dist0, f32 dist1,
 
 // desenha o gizmo do modo dado na origem (pose do TIC), comprimento `len`,
 // com o alvo `hovered` destacado. Emite no UiContext (solids_).
+// GRUPO D: o MAPEAMENTO da viewport 3D — (vw,vh) = o TAMANHO do rect e
+// (ox,oy) = a sua ORIGEM no ecrã (o NDC mapeia para (vw×vh) local e soma
+// a origem). Defaults (0,0,0,0) = o ECRÃ TODO (os testes e o Play ficam
+// IGUAIS ao de sempre — a fonte única é a assinatura)
 void drawGizmo(UiContext& ui, const Mat4& vp, const Vec3& origin, f32 len,
-               Mode mode, Axis hovered);
+               Mode mode, Axis hovered, f32 vw = 0.0f, f32 vh = 0.0f,
+               f32 ox = 0.0f, f32 oy = 0.0f);
 
 // comprimento no mundo para tamanho de ecrã constante
 inline f32 gizmoLength(f32 camDist) { return camDist * kScreenLen; }

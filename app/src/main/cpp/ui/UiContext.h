@@ -144,6 +144,13 @@ public:
     bool widgetHit(u64 id, f32 x, f32 y, f32 w, f32 h);
     bool widgetActive(u64 id) const { return active_ == id; }
 
+    // GRUPO D (0.9.6.7) — PEGA DE ARRASTO (divisores dos painéis): captura
+    // o gesto como widgetHit (active_), MAS sem registo no audit de layout
+    // — não é um alvo de TAP (a pega do drawer de 12dp é o precedente da
+    // spec E; o alvo 48dp da casa é para tap). Devolve true enquanto o
+    // dedo segura a pega.
+    bool dragHandle(u64 id, f32 x, f32 y, f32 w, f32 h);
+
     // FASE 9 (G2-7): o dedo (slot 0) está EM CIMA deste rect AGORA?
     // Leitura PURA do input (sem claim, sem gesto) — para o long-press do
     // nome da hierarquia (o contador de frames vive no EditorState).
@@ -328,6 +335,10 @@ public:
     f32 safeTop()    const { return safe_.top; }
     f32 safeRight()  const { return safe_.right; }
     f32 safeBottom() const { return safe_.bottom; }
+    // GRUPO D: a largura do CONTENT RECT (o «content width» que o clamp dos
+    // divisores usa — a garantia do orçamento do viewport 3D)
+    f32 contentWidthPx()  const { return sw_ - safe_.left - safe_.right; }
+    f32 contentHeightPx() const { return sh_ - safe_.top - safe_.bottom; }
 
     // rects do layout — delegam em safe::* (fonte única, testada no CI)
     UiRect toolbarRect() const {
