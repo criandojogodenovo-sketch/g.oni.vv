@@ -76,6 +76,17 @@ bool listCandidates(const std::string& dir, std::vector<Candidate>& out);
 // vazio — o chamador mostra a mensagem COM O CAMINHO, nunca um toast cego).
 bool listDirEntries(const std::string& dir, std::vector<DirEntry>& out);
 
+// 0.9.6.4 (GRUPO A · A4) — é um FICHEIRO regular? (stat + S_ISREG). O
+// browser usa ANTES de importar (a lista pode estar desatualizada — o
+// ficheiro pode ter sido apagado/renomeado desde o listDir) e o import
+// usa para confirmar os irmãos do .gltf.
+bool isFile(const std::string& path);
+
+// 0.9.6.4 (GRUPO A) — caminho CANÓNICO (realpath) ou "" se não resolve;
+// usado para detetar a cópia auto-referencial do reconvert (a fonte que
+// JÁ vive em source/ não volta a ser copiada sobre si mesma).
+std::string realPath(const std::string& path);
+
 // 0.7.2 — pai de um caminho absoluto ("/a/b/c" → "/a/b"; "/" → "/").
 std::string parentPath(const std::string& dir);
 

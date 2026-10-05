@@ -50,6 +50,14 @@ struct Stats {
     u64 outputBytes = 0;    // soma dos convertidos escritos
     u32 meshes = 0;
     u32 textures = 0;
+    // 0.9.6.4 (GRUPO A/R-022 · A3): texturas que FALHARAM ou foram
+    // ignoradas (imagem podre, bufferView fora do buffer, mime não-PNG,
+    // orçamento) — o import SEGUE sem elas; o toast diz «SEM N textura(s)»
+    // e a causa de cada uma vive no engine.log. NUNCA silencioso.
+    u32 texWarn = 0;
+    // 0.9.6.4 (GRUPO A/R-021): irmãos copiados do diretório original
+    // (.bin/texturas de um .gltf separado) — o log lista um por um.
+    u32 siblings = 0;
     u32 clips = 0;
     u32 joints = 0;
     u32 verts = 0;
@@ -100,6 +108,32 @@ std::string stemOf(const std::string& name);
 // irmão .gm de uma ref convertida ("assets/x.gmesh" → "assets/x.ggm" não:
 // → "assets/x.gm"; sem '#' e só p/ refs .gmesh; senão "")
 std::string ganimSiblingOf(const std::string& meshRel);
+
+// ---- 0.9.6.4 (GRUPO A/R-021) — OS IRMÃOS DO .gltf SEPARADO ------------------
+// Coleta os URIs externos (buffers[].uri + images[].uri, sem data:) do JSON
+// de um .gltf; copyGltfSiblings copia-os DO DIRETÓRIO ORIGINAL para
+// source/<subcaminho> (URI-decode %20 incluído; streaming pelo storage — FS
+// e SAF; um log por irmão; irmão AUSENTE no original = ERRO QUE NOMEIA O
+// FICHEIRO). Expostos p/ as sentinelas R-021.
+bool collectGltfSiblingUris(const char* json, size_t jsonLen,
+                            std::vector<std::string>& uris, std::string& err);
+bool copyGltfSiblings(const char* json, size_t jsonLen,
+                      const std::string& srcDir, ProjectStorage& st,
+                      Stats& stats, std::string& err,
+                      bool (*onProgress)(void*, u64, u64) = nullptr,
+                      void* user = nullptr);
+
+// ---- 0.9.6.4 (GRUPO A/R-022) — INTEGRIDADE DA CÓPIA -------------------------
+// Verifica que a cópia em `rel` é BYTE A BYTE igual à fonte `srcAbs`, em
+// chunks (nunca o ficheiro inteiro em RAM quando há caminho real):
+//   • FsStorage/raiz real  → ChunkReader nos DOIS lados + memcmp por chunk;
+//   • SAF (content://)     → readBytes com guarda de orçamento (256 MB);
+//     além do orçamento LOGA HONESTO e devolve true (a conversão lê a
+//     FONTE — a verificação protege o reconvert posterior).
+// false + err «cópia truncada: ...» (o chamador REMOVE a cópia — sem
+// estado parcial). Exposto p/ a sentinela regress_glb_copia_verificada.
+bool verifyCopyChunked(const std::string& srcAbs, ProjectStorage& st,
+                       const std::string& rel, std::string& err);
 
 } // namespace convert
 } // namespace vv

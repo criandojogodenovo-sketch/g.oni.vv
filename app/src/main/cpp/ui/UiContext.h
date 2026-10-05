@@ -361,6 +361,7 @@ private:
     struct ScrollSlot {
         u64          id = 0;
         bool         used = false;
+        u32          lastFrame = 0;   // 0.9.6.4: o último beginScroll dele
         scroll::State st;
         UiRect       region{};
         f32          contentH = 0.0f;
@@ -368,6 +369,12 @@ private:
     static constexpr u32 kMaxScrollSlots = 8;
     static constexpr i32 kNoScroll = -1;
     ScrollSlot scrollSlots_[kMaxScrollSlots];
+    // 0.9.6.4 (GRUPO A · A4): contador de frames p/ RECOLHER slots de
+    // regiões que não desenharam (overlay fechado). Os 8 slots eram
+    // DEFINITIVOS: Settings+Docs+Script+Texto+Áudio+Logs+Consola+Ficheiros
+    // numa sessão e o 9.º scroll (o BROWSER, o seletor...) nascia MORTO ao
+    // toque — a FASE 12.8b apanhou-o ao vivo (612 frames com região morta)
+    u32        frameStamp_   = 0;
     i32        scrollCur_    = kNoScroll;   // região aberta neste frame
     bool       inScroll_     = false;       // entre begin/endScroll
     bool       scrollPending_= false;       // press edge à espera de claim

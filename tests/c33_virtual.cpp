@@ -43,6 +43,8 @@
 #include <EGL/egl.h>    // stub (eglstub::g_surfaceW/H — o harness põe 1536×720)
 #include <dirent.h>
 #include <sys/types.h>
+#include <sys/stat.h>   // 0.9.6.4 (12.8b): mkdir cru p/ a fixture do par
+#include <cerrno>
 #include <unistd.h>
 
 #include <chrono>
@@ -2571,6 +2573,192 @@ int main() {
             }
             g_editor.assetMenu = 0;
             g_editor.selected = Handle::invalid();
+        }
+
+        // ---- 12.8b (GRUPO A · R-021/R-022): O PAR .gltf+.bin PELO BROWSER
+        // REAL — 1 toque importa (irmãos copiados, textura externa lida) e
+        // o seletor APLICA o convertido. O cenário EXATO do device: a pasta
+        // com o par (o browser dá caminhos POSIX); o CWD do processo NÃO é
+        // essa pasta (o bug histórico «buffer externo não resolvido:
+        // scene.bin» resolvia o URI contra o CWD).
+        {
+            passo("12.8b browser 1-toque: o par .gltf+.bin importa e "
+                  "aplica (R-021)");
+            // o DIRETÓRIO ORIGINAL com o PAR + a textura %20 — criado com
+            // syscalls CRUS (mkdir/fopen, o precedente da 12.8): a seam
+            // /tmp READ-ONLY do ambiente C33 bloqueia o fileapi DE
+            // PRODUÇÃO — a fixture do harness não é produção (o IMPORT em
+            // si lê por fileapi::readAll, que a seam não bloqueia)
+            char dir[96];
+            std::snprintf(dir, sizeof(dir), "/tmp/goni_fase128b_%d",
+                          (int)::getpid());
+            check(::mkdir(dir, 0775) == 0 || errno == EEXIST,
+                  "12.8b a pasta do par existe (fixture)");
+            {
+                std::vector<u8> bin;
+                auto pushF = [&bin](const f32* v, int n) {
+                    for (int i = 0; i < n; ++i) {
+                        const u32 b =
+                            *reinterpret_cast<const u32*>(&v[i]);
+                        bin.push_back((u8)(b & 0xFF));
+                        bin.push_back((u8)((b >> 8) & 0xFF));
+                        bin.push_back((u8)((b >> 16) & 0xFF));
+                        bin.push_back((u8)((b >> 24) & 0xFF));
+                    }
+                };
+                const f32 pos[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+                pushF(pos, 9);
+                const u16 idx[3] = {0, 1, 2};   // u16 LITTLE-ENDIAN no bin
+                for (int i = 0; i < 3; ++i) {
+                    bin.push_back((u8)(idx[i] & 0xFF));
+                    bin.push_back((u8)(idx[i] >> 8));
+                }
+                FILE* f = std::fopen((std::string(dir) + "/scene.bin").c_str(),
+                                     "wb");
+                std::fwrite(bin.data(), 1, bin.size(), f);
+                std::fclose(f);
+                // a textura com ESPAÇO no nome (URI «tex%20albedo.png»)
+                std::vector<u8> png;
+                {
+                    const std::string p =
+                        std::string(FIXTURE_DIR) + "/yellow4.png";
+                    FILE* pf = std::fopen(p.c_str(), "rb");
+                    u8 buf[4096];
+                    size_t n;
+                    while (pf && (n = std::fread(buf, 1, sizeof(buf), pf)) > 0) {
+                        png.insert(png.end(), buf, buf + n);
+                    }
+                    if (pf) {
+                        std::fclose(pf);
+                    }
+                }
+                f = std::fopen((std::string(dir) + "/tex albedo.png").c_str(),
+                               "wb");
+                std::fwrite(png.data(), 1, png.size(), f);
+                std::fclose(f);
+                char j[880];
+                std::snprintf(j, sizeof(j),
+                    "{\"asset\":{\"version\":\"2.0\"},"
+                    "\"buffers\":[{\"uri\":\"scene.bin\",\"byteLength\":%zu}],"
+                    "\"bufferViews\":["
+                    "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+                    "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":6}],"
+                    "\"accessors\":["
+                    "{\"bufferView\":0,\"componentType\":5126,\"count\":3,"
+                    "\"type\":\"VEC3\"},"
+                    "{\"bufferView\":1,\"componentType\":5123,\"count\":3,"
+                    "\"type\":\"SCALAR\"}],"
+                    "\"materials\":[{\"pbrMetallicRoughness\":"
+                    "{\"baseColorTexture\":{\"index\":0}}}],"
+                    "\"textures\":[{\"source\":0}],"
+                    "\"images\":[{\"uri\":\"tex%%20albedo.png\"}],"
+                    "\"meshes\":[{\"primitives\":[{\"attributes\":"
+                    "{\"POSITION\":0},\"indices\":1,\"material\":0}]}],"
+                    "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],"
+                    "\"scene\":0}",
+                    bin.size());
+                f = std::fopen((std::string(dir) + "/par.gltf").c_str(), "wb");
+                std::fwrite(j, 1, std::strlen(j), f);
+                std::fclose(f);
+            }
+            // O BROWSER ABERTO NA PASTA (o caminho REAL do device)
+            g_editor.fileBrowser = true;
+            browserOpen(dir);
+            frame();
+            check(g_browser.open && !g_browser.failed &&
+                      !g_browser.entries.empty(),
+                  "12.8b o browser lista a pasta do par");
+            // a linha do par.gltf: ficheiros ordenados («par.gltf» é o
+            // 1.º dos 3) — a MESMA geometria do drawFileBrowser
+            // (landscape 1536x720, insets T96/B48):
+            //   oy=96 ah=576 w=900 x=318 h=362 y=203 listTop=389
+            {
+                const f32 ox = 0.0f, oy = 96.0f;
+                const f32 aw = 1536.0f, ah = 576.0f;
+                const f32 w = 900.0f;
+                const f32 h = 48.0f + 34.0f + 52.0f + 8.0f + 52.0f + 8.0f +
+                              3.0f * 48.0f + 16.0f;
+                const f32 x = ox + (aw - w) * 0.5f;
+                const f32 y = oy + (ah - h) * 0.5f;
+                const f32 listTop = y + 48.0f + 6.0f + 34.0f - 18.0f + 12.0f +
+                                    52.0f + 52.0f;
+                const auto t0 = std::chrono::steady_clock::now();
+                // 1 TOQUE na linha (o A4: 1 toque = seleciona/importa)
+                tap(x + w * 0.5f, listTop + 24.0f);
+                // 0.9.6.4 — espera o CICLO COMPLETO do job: o finalize do
+                // frame() faz o JOIN e publica os resultados; SÓ DEPOIS o
+                // estado do job é legível. (Esperar só pelo `done` tinha
+                // uma JANELA: um done STALADO de um job anterior saía do
+                // loop antes do worker terminar — os checks liam os campos
+                // A MEIO da escrita do worker (corrida/UB) e o cleanup lá
+                // embaixo apagava a fixture SOB o worker — o errno=2 que
+                // se viu na 1ª rodada. active=false SÓ acontece DEPOIS do
+                // importJobFinish — é a testemunha certa.)
+                int guard = 0;
+                while (g_importJob.active.load() && guard++ < 3000) {
+                    frame();
+                }
+                frame();   // garante o importJobFinish (o finalize põe active=false)
+                check(g_importJob.err.empty(),
+                      "12.8b o import do par pelo browser funciona (err no "
+                      "engine.log se falhar)");
+                check(g_importJob.out.meshes.size() == 1 &&
+                          g_importJob.out.meshes[0] == "assets/par.gmesh",
+                      "12.8b o convertido vive em assets/par.gmesh");
+                check(g_importJob.stats.siblings == 2,
+                      "12.8b os 2 irmaos (scene.bin + tex albedo.png) foram "
+                      "copiados para source/");
+                check(g_storage->exists("source/scene.bin") &&
+                          g_storage->exists("source/tex albedo.png"),
+                      "12.8b source/ tem os irmaos (o projeto fica "
+                      "autossuficiente)");
+                // o catálogo lista o novo asset; o SELETOR aplica (troca)
+                refreshCatalog();
+                bool achouPar = false;
+                for (const auto& m : g_catalog.meshes) {
+                    if (m == "assets/par.gmesh") {
+                        achouPar = true;
+                    }
+                }
+                check(achouPar, "12.8b o catalogo lista o par convertido");
+                const double ms = msSince(t0);
+                check(ms < 1000.0,
+                      "12.8b toque->catalogo em <1s (o fluxo do browser)");
+                {
+                    const Handle ator = g_scene.find("Ator");
+                    g_editor.selected = ator;
+                    // o índice do par no catálogo ORDENADO (m1..m6, par,
+                    // robo) — procurado, não assumido; pick = idx + 3
+                    // (none=1, cube=2, ficheiros a partir de 3)
+                    i32 parIdx = -1;
+                    for (size_t i = 0; i < g_catalog.meshes.size(); ++i) {
+                        if (g_catalog.meshes[i] == "assets/par.gmesh") {
+                            parIdx = static_cast<i32>(i);
+                            break;
+                        }
+                    }
+                    check(parIdx >= 0, "12.8b o par tem indice no catalogo");
+                    if (parIdx >= 0) {
+                        const editor::AssetPickOutcome out =
+                            editor::applyAssetPick(g_scene, ator, 1,
+                                                   parIdx + 3, g_catalog,
+                                                   makeAssetResolvers());
+                        const Tic* tA = g_scene.get(ator);
+                        const MeshRenderer* mr =
+                            tA ? tA->getComponent<MeshRenderer>() : nullptr;
+                        check(out.applied && mr != nullptr &&
+                                  mr->meshPath == "assets/par.gmesh",
+                              "12.8b O SELETOR APLICA O PAR (meshPath no "
+                              "MeshRenderer)");
+                    }
+                }
+                g_editor.selected = Handle::invalid();
+            }
+            // a fixture sai (a lição da FASE 9: /tmp não acumula)
+            ::remove((std::string(dir) + "/par.gltf").c_str());
+            ::remove((std::string(dir) + "/scene.bin").c_str());
+            ::remove((std::string(dir) + "/tex albedo.png").c_str());
+            ::remove(dir);
         }
 
         // ---- 12.9 (G6 · R-017): O BENCH — medições reais + honestidade --

@@ -1,8 +1,11 @@
-# ci/scope.txt — CLÁUSULA P-01 (campanha 0.9.6): os ÚNICOS caminhos onde esta
-# campanha pode tocar. O gate scope-check (scripts/scope_check.py, job
-# core-tests do CI) compara o diff de CADA push contra esta lista; ficheiro
-# alterado/criado FORA dela = CI VERMELHO = PARAR e perguntar ao dono.
-# Alargar o scope exige aprovação do dono (editar este ficheiro É o pedido).
+# ci/scope.txt — CLÁUSULA P-01 (campanha 0.9.6 + FASE 0.9.6-MASTER): os
+# ÚNICOS caminhos onde a campanha pode tocar. O gate scope-check
+# (scripts/scope_check.py, job core-tests do CI) compara o diff de CADA
+# push contra esta lista; ficheiro alterado/criado FORA dela = CI VERMELHO
+# = PARAR e perguntar ao dono. Alargar o scope exige aprovação do dono
+# (editar este ficheiro É o pedido).
+# 0.9.6.4 (GRUPO A): BACKLOG.md entra — o prompt mestre da campanha
+# (P-01/P-03) exige o rastreador de grupos na raiz; criá-lo É o pedido.
 #
 # Sintaxe: um caminho por linha; prefixo de diretório (barra final) cobre
 # TODO o conteúdo recursivamente; '#' inicia comentário; linha vazia ignora.
@@ -16,6 +19,7 @@ app/src/main/res/
 app/src/main/assets/
 docs/
 README.md
+BACKLOG.md
 ARCHITECTURE.md
 tests/
 tests-java/

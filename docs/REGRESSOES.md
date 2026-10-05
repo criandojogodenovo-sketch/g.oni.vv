@@ -233,7 +233,7 @@ Prova de mutação (colada em /home/z/my-project/mutacao-R015-vermelho-verde.txt
 
 Prova de mutação (colada em /home/z/my-project/mutacao-R010-{vermelho,verde}.txt e no RELATORIO-0.9.6): o gap-fill DESLIGADO (`if (false)` no ramo das peças — o render de 0.9.5) → `regress_r010_editor_roundtrip` FALHOU em 4 frentes (p.begin != pos; pos != strlen; as peças deixam de cobrir a linha); reposto → OK. A mutação do editorRestart (recusar sem ScriptComp) é apanhada pela 12.4 do harness (Run no esqueleto = erro "o TIC não tem componente Script").
 
-## R-014 · o import não aparecia no seletor de malha (FASE 0.9.6 · G4)
+## R-014 · o import não aparecia no seletor de malha (FASE 0.9.6 · G4; REESCRITO na FASE 0.9.6-MASTER · GRUPO A)
 
 | campo | valor |
 |---|---|
@@ -243,8 +243,8 @@ Prova de mutação (colada em /home/z/my-project/mutacao-R010-{vermelho,verde}.t
 | Causa raiz | forense (as 5 hipóteses da task confirmadas/eliminadas por leitura de código): (1) pasta ERRADA — NÃO: o importFile escreve `assets/<stem>.gmesh` e o refreshCatalog lista `Project::kDirAssets` = assets/ (PARTILHAM diretório); (2) índice stale — NÃO: o catálogo refresca NO fim do import (importJobFinish → refreshCatalog) E AO ABRIR o seletor (transição do assetMenu); (3) filtro de extensão — NÃO: ambos usam `.gmesh` (6 bytes exatos); (4) manifesto — N/A (o catálogo lê o diretório, não manifesto); (5) content:// — NÃO: a fonte SAF é lida por streaming (fileapi), o convertido escreve pelo storage do projeto. **A CAUSA REAL: o CAP de 5 ficheiros SEM scroll no drawAssetMenu** ("cap de ficheiros no overlay (mono, sem scroll — F8 traz scroll)" — a pendência da F8 nunca chegou): com 5+ .gmesh no projeto, o import novo ficava FORA da lista visível para sempre |
 | Fix | a lista de ficheiros do seletor passou a listar TODOS com SCROLL (o padrão da Hierarchy/Inspector: janela encaixada na faixa do overlay — máx. o que a altura permite —, drag = scroll, tap parado = escolha pelo scrollTap, culling fora da janela); as linhas fixas (none/cube/importar) ficam fora do scroll |
 | Teste sentinela | `assetpick_r014_todos_os_ficheiros_aparecem_no_seletor` + `assetpick_r014_o_scroll_alcanca_os_ficheiros_que_nao_cabem` (tests/test_assetpick.cpp — 7 meshes: a 7ª linha DESENHA (glifos no rect) e o tap APLICA meshPath; 9 meshes: o drag alcança o 9º e aplica) |
-| Linha do replay | FASE 12.8 do c33_virtual: um .glb REAL (container GLB montado no harness) importado pelo convert::importFile DE PRODUÇÃO → convertido em assets/robo.gmesh → catálogo lista (com 6 meshes pré-existentes) → <1s → seletor aberto em TIC com MeshRenderer → drag até ao fim → tap → meshPath == "assets/robo.gmesh" no componente (fim-a-fim) |
-| Padrão proibido | (nenhum — a vigília é a sentinela + a FASE 12.8) |
+| Linha do replay | FASE 12.8 do c33_virtual: um .glb REAL (container GLB montado no harness) importado pelo convert::importFile DE PRODUÇÃO → convertido em assets/robo.gmesh → catálogo lista (com 6 meshes pré-existentes) → <1s → seletor aberto em TIC com MeshRenderer → drag até ao fim → tap → meshPath == "assets/robo.gmesh" no componente (fim-a-fim). **FASE 0.9.6-MASTER (GRUPO A/0.9.6.4): a FASE 12.8b ESTENDE o fim-a-fim ao PAR .gltf+.bin PELO BROWSER REAL (1 toque na linha → job → irmãos copiados → catálogo <1s → applyAssetPick aplica assets/par.gmesh) — o mesmo contrato, agora pelo caminho do navegador** |
+| Padrão proibido | (nenhum — a vigília é a sentinela + a FASE 12.8/12.8b) |
 
 Prova de mutação (colada em /home/z/my-project/mutacao-R014-vermelho{,2}.txt e no RELATORIO-0.9.6): o cap de 5 volta ao loop de desenho (`i < 5`) → `assetpick_r014_todos_os_ficheiros_aparecem_no_seletor` FALHOU (a 7ª linha não desenhava — o check de GLIFOS no rect da linha é o que apanha; um tap às cegas passaria porque o mapeamento do scrollTap cobre a lista toda); reposto → verde. NOTA honesta: a 1ª rodada da prova usou um teste com o check de glifos ANTES do frame desenhado (falhava por razão errada) — a prova foi REFEITA com o teste corrigido (mutacao-R014-vermelho2.txt).
 
@@ -323,3 +323,48 @@ Prova de mutação (executada localmente antes do push): o `st.caret = bo` remov
 | Padrão proibido | (nenhum — a vigília é a sentinela) |
 
 Prova de mutação (executada localmente antes do push): a lista kUnsupported esvaziada (deteção off) → `regress_gltf_draco_mensagem_clara` FALHOU (o erro voltou ao obscuro, sem nomear a compressão — a razão certa); reposto → 826/0 + 330/330.
+
+## R-021 · o .gltf separado não encontrava os irmãos (FASE 0.9.6-MASTER · GRUPO A)
+
+| campo | valor |
+|---|---|
+| ID | R-021 |
+| Reportado | task FASE 0.9.6-MASTER (GRUPO A1): "glTF separado falha: `buffer externo não resolvido: scene.bin` (só o .gltf é copiado; o .bin fica no original)" |
+| Sintoma exato | importar um .gltf com .bin/texturas EXTERNOS falhava com «buffer externo não resolvido: scene.bin»; o R-020 (0.9.6.3) limitou-se a trocar a mensagem para «o seletor do Android não dá acesso aos vizinhos; exporta como GLB» — os irmãos continuavam sem ser lidos |
+| Causa raiz | (leitura do código) o resolver do convertGltfFile fazia `fileapi::readAll(uri)` com o URI RELATIVO («scene.bin») — resolvia contra o CWD DO PROCESSO (no Android «/»). Os testes antigos passavam porque escreviam o .bin NO CWD do CI (a sentinela R-020 original codificava EXATAMENTE o bug; foi RECALIBRADA para diretório real + caminhos absolutos, como o browser do device) |
+| Fix | (1) `collectGltfSiblingUris` + `copyGltfSiblings`: após a cópia do .gltf para source/, o JSON é lido e TODOS os URIs externos (buffers[].uri + images[].uri) são copiados DO DIRETÓRIO ORIGINAL para `source/<subcaminho>` (URI-decode %20; subpastas mantidas; «..» e esquemas absolutos recusados com erro que os nomeia; um LOG por irmão; irmão AUSENTE = ERRO QUE NOMEIA O FICHEIRO) — o projeto fica autossuficiente; (2) o resolver e o leitor de texturas externas resolvem contra o DIRETÓRIO DO FICHEIRO em conversão (import: a pasta original; reconvert: source/) — texturas externas de .gltf passam a ENTRAR no passe de texturas; (3) reconvert em SAF stageia os irmãos ao lado da fonte (sem a pasta original o reconvert diz qual irmão falta); (4) o reconvert de uma fonte que JÁ vive em source/ salta a cópia auto-referencial (a cópia sobre si mesma corrompia em cascata — o guard realpath nos ficheiros E nos irmãos) |
+| Teste sentinela | `regress_gltf_irmaos_do_diretorio_original` (tests/test_sentinels.cpp): diretório REAL com o par + «tex albedo.png» (URI «tex%20albedo.png») → import ok; stats.siblings==2; source/ com .gltf+.bin+textura decodificada; a textura vira .gtext; o RECONVERT funciona SEM a pasta original; o irmão ausente = erro que o nomeia. + `regress_gltf_transforms_dos_nos_no_gmesh` RECALIBRADA (diretório real; irmãos copiados; vértices em mundo) |
+| Linha do replay | FASE 12.8b do c33_virtual: o browser ABERTO na pasta do par; 1 TOQUE na linha do .gltf → job → 2 irmãos copiados → source/ autossuficiente → catálogo <1s → applyAssetPick aplica assets/par.gmesh |
+| Padrão proibido | (nenhum — a vigília é a sentinela + a FASE 12.8b) |
+
+Prova de mutação (colada em mutacao-R021-vermelho.txt): a cópia de irmãos DESLIGADA (copyGltfSiblings sai sem copiar) → 8 testes FALHARAM — `regress_gltf_irmaos_do_diretorio_original` (siblings==2, source/scene.bin ausente, «tex albedo.png» ausente, reconvert morto, «NÃO EXISTE» sem nome) + `regress_gltf_transforms_dos_nos_no_gmesh` (siblings==1, source/scene.bin ausente) — a razão certa (o contrato dos irmãos é o que falha, não um efeito colateral); reposta → 0 falhas.
+
+## R-022 · a imagem que matava o import do GLB + o layout sem evidência (FASE 0.9.6-MASTER · GRUPO A)
+
+| campo | valor |
+|---|---|
+| ID | R-022 |
+| Reportado | task FASE 0.9.6-MASTER (GRUPO A2/A3): "GLB com texturas falha: `bufferView da imagem fora do buffer` (chunk BIN/validação de imagens)" e "Textura falha + geometria OK → importa sem texturas com W + toast; geometria falha → erro. Nunca silencioso" |
+| Sintoma exato | um GLB com UMA imagem má (bufferView fora do buffer, leitura falhada, bytes podres) matava o import INTEIRO com a geometria boa — «glTF: bufferView da imagem fora do buffer» return false no meio do parse |
+| Causa raiz | (leitura do código) o parse tratava a falha do bufferView de IMAGEM como FATAL; e o resolveView devolvia bool — «fora do buffer» cobria TAMBÉM as falhas de leitura (I/O) com a mesma mensagem enganosa; o parseGlb (em memória) caminhava os chunks SEM o alinhamento de 4 bytes (inconsistente com o convertGlbFile — ficheiros com JSON chunk não múltiplo de 4 divergiam entre os dois parsers); não havia log do layout dos chunks nem verificação da cópia (a cópia truncada disfarçava-se do mesmo erro) |
+| Fix | (1) UMA SÓ rotina de validação (`resolveView` devolve `ViewFail` com a CAUSA: NoBuffer/BadLength/OutOfBounds/TooBig/ReadFail/BadStride) usada por MESHES (fatal — geometria falha = import falha, com a causa exata) e IMAGENS (warn + skip — o import SEGUE sem texturas); (2) `GltfImage.broken` marca a imagem falhada; o passe de texturas CONTA as falhas (`stats.texWarn`) e o toast do import diz «SEM N textura(s) (avisos no engine.log)» — nunca silencioso; (3) o LOG DO LAYOUT do GLB (header ver/total · JSON len/start · BIN len/binStart/alinhado 4 · ficheiro) + um log por imagem (bufferView off/len/mime ou uri externa); (4) `verifyCopyChunked`: a cópia do GLB em source/ é conferida byte a byte contra a fonte (chunks com caminho real; readBytes com guarda em SAF/FakeStorage; além do orçamento DIZ que não verificou) — «cópia truncada» com a POSIÇÃO exata do byte que difere; a cópia má sai do projeto; (5) o parseGlb alinha os chunks a 4 bytes como o caminho de ficheiro — os dois parsers, uma regra |
+| Teste sentinela | `regress_glb_imagem_no_fim_com_padding` (tests/test_sentinels.cpp): (a) GLB com JSON NÃO múltiplo de 4 + imagem VÁLIDA no FIM do BIN com padding → parse em memória E import de produção → mesh + .gtext, texWarn 0; (b) imagem PODRE (bytes não-PNG dentro do buffer) → import SEGUE sem texturas, texWarn ≥ 1; (c) bufferView da imagem FORA do buffer (o defeito exato do device) → import SEGUE (mesh entra), texWarn == 1, sem textura. + `regress_glb_copia_verificada`: cópia íntegra → true; truncada → false + «cópia truncada»; 1 byte trocado → false COM A POSIÇÃO; ausente → false |
+| Linha do replay | FASE 12.8/12.8b do c33_virtual (o import de produção com o log do layout no engine.log; o texto do toast «SEM N textura(s)» sai no importJobFinish) |
+| Padrão proibido | (nenhum — a vigília é a sentinela) |
+
+Prova de mutação (colada em mutacao-R022-vermelho.txt): o binStart SEM o alinhamento de 4 (`padded = jsonEnd` em vez de `(jsonEnd+3) & ~3`) → `regress_glb_imagem_no_fim_com_padding` FALHOU no import da variante (a) — o header do BIN era lido dos zeros de padding, binLen=0, «buffer sem URI fora de .glb» (a razão certa: o fixture tem JSON não múltiplo de 4 DE PROPÓSITO); reposto → 0 falhas + harness 340/0.
+
+## R-023 · a exaustão dos slots de scroll matava o browser ao toque (FASE 0.9.6-MASTER · GRUPO A)
+
+| campo | valor |
+|---|---|
+| ID | R-023 |
+| Reportado | ACHADO AO VIVO pela FASE 12.8b do c33_virtual (o loop da campanha a apanhar bug que ninguém tinha reportado): o toque na linha do browser não despachava — 612 frames com regiões de scroll MORTAS na sessão do harness |
+| Sintoma exato | após 8 regiões de scroll DIFERENTES usadas numa sessão (hierarquia, inspector, logs, scenes, uiInsp, ficheiros, consola, seletor, browser, settings, docs, script, texto, áudio — a casa tem 14), a 9.ª região nascia MORTA ao toque: sem slot = sem região = sem claim do gesto = sem scrollTap — no device, abrir Settings+Docs+Script+Texto+Áudio+Logs+Consola+Ficheiros e depois o BROWSER deixava o browser surdo (o «1 toque importa» morria em silêncio) |
+| Causa raiz | (leitura do código) os 8 slots de scroll do UiContext eram DEFINITIVOS (`used = true` para sempre, desde a F4.1) — o comentário original dizia «não devia acontecer: 2 usos» e a casa cresceu para 14 |
+| Fix | RECICLAGEM por frame-stamp: cada slot regista o último frame em que a sua região desenhou (`lastFrame`); um beginScroll sem slot livre rouba o slot STALE MAIS ANTIGO (região que não desenhou neste frame = overlay fechado). O preço documentado: o offset de uma região reciclada recomeça a zero quando ela volta — nunca a região fica morta (um scroll perdido < um botão morto) |
+| Teste sentinela | `regress_scroll_slots_reciclados` (tests/test_sentinels.cpp): 10 regiões sequenciais (mais que os 8 slots) — a 10.ª TEM slot (o offset gravado volta); uma região antiga reciclada VOLTA A FUNCIONAR ao regressar |
+| Linha do replay | FASE 12.8b do c33_virtual (a sessão inteira do harness usa 14 regiões; o browser toca e IMPORTA no fim — morto antes do fix) |
+| Padrão proibido | (nenhum — a vigília é a sentinela + a FASE 12.8b) |
+
+Prova de mutação (colada em mutacao-R023-vermelho.txt): a reciclagem DESLIGADA → `regress_scroll_slots_reciclados` FALHOU (a 10.ª região sem slot: o offset gravado era um no-OP — a razão certa); reposta → 0 falhas. NOTA honesta: a 1ª rodada da mutação correu SEM a env var da mutação ativada (verde por acidente) — REFEITA com a mutação ATIVA (a lição R-014/R-017 aplicada: a prova tem de falhar pela razão certa).

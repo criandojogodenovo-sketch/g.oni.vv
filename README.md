@@ -31,6 +31,59 @@ parte das decisões de engenharia — não é vergonha a esconder:
 
 O mapa dos módulos está em `ARCHITECTURE.md`. A referência da linguagem
 V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
+O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
+`BACKLOG.md`.
+
+## 0.9.6.4 — GRUPO A: IMPORT glTF/GLB REAL (FASE 0.9.6-MASTER · R-021/R-022/R-023)
+
+**Os três defeitos do device e o que os causava (forense por leitura de
+código, antes de mexer):**
+- **R-021 · o .gltf separado** («buffer externo não resolvido: scene.bin»):
+  o resolver lia o URI RELATIVO contra o CWD do processo (no Android «/»)
+  — os testes antigos passavam porque escreviam o .bin NO CWD do CI. AGORA
+  os irmãos (`buffers[].uri` + `images[].uri`, URI-decode %20 incluído) são
+  COPIADOS do diretório original para `source/<subcaminho>` (um log por
+  irmão; irmão ausente = erro QUE NOMEIA O FICHEIRO); o projeto fica
+  autossuficiente e o RECONVERT funciona sem a pasta original (os irmãos
+  são stageados em SAF; a cópia auto-referencial de uma fonte que já vive
+  em source/ deixou de se corromper a si mesma).
+- **R-022 · o GLB com texturas** («bufferView da imagem fora do buffer»):
+  uma imagem má MATAVA o import inteiro com a geometria boa. AGORA uma SÓ
+  rotina de validação devolve a CAUSA (limites ≠ I/O ≠ range grande) para
+  meshes (fatal) e imagens (warn + skip); o import SEGUE sem as texturas
+  falhadas e o TOAST diz «SEM N textura(s)» (nunca silencioso); o LAYOUT
+  dos chunks é LOGADO (json/bin/binStart alinhado 4 + bufferView de cada
+  imagem) e a CÓPIA em source/ é verificada byte a byte («cópia truncada»
+  com a posição exata — a cópia má sai do projeto). O parse em memória
+  alinha os chunks a 4 como o de ficheiro (os dois parsers, uma regra).
+- **R-023 · o browser morto ao toque** (ACHADO ao vivo pela FASE nova):
+  os 8 slots de scroll do UiContext eram definitivos — com 8 regiões
+  usadas numa sessão (a casa tem 14), o browser nascia SURDO. AGORA os
+  slots são reciclados por frame-stamp (overlay fechado = slot livre).
+
+**A4 · browser**: `isFile` antes do job (o ficheiro que desapareceu desde
+a listagem diz O QUÊ aconteceu e a lista re-carrega com o browser ABERTO);
+o d_type mentiroso do FUSE é confirmado por stat; 1 toque na linha
+importa (provado pela FASE 12.8b pelo caminho REAL: browser aberto → tap
+→ job → irmãos → catálogo <1s → seletor aplica).
+
+**Checklist C33/RMX3624 (VERIFICAR no device — Grupo A):**
+1. Importar um PAR .gltf+.bin (+ textura com espaço no nome, se tiver) →
+   o toast diz «importado: 1 mesh(es), 1 tex»; o seletor de malha lista o
+   novo (<1s) e a troca aplica; o engine.log tem «import: irmao 'scene.bin'
+   copiado (N B)» por irmão.
+2. Importar o mesmo .gltf SEM o .bin ao lado → erro que NOMEIA o ficheiro
+   em falta (nunca o genérico antigo).
+3. Importar um GLB com texturas → o log traz «glb: layout — … binStart N,
+   alinhado 4: sim» e a textura entra; um GLB com imagem PODRE → o mesh
+   entra SEM textura e o toast diz «SEM 1 textura(s)».
+4. Sessão longa: abrir Settings, Docs, editor de script, Áudio, Consola,
+   Ficheiros… e DEPOIS o navegador → o navegador AINDA responde ao toque
+   (o bug R-023: 8 overlays e o browser ficava surdo).
+5. No navegador, apagar (noutro sítio) um ficheiro já listado e tocá-lo →
+   «ficheiro não encontrado: X (a lista atualizou)» e a lista refresca.
+6. «Reconverter» uma fonte .gltf guardada → funciona sem a pasta original
+   (os irmãos vivem em source/).
 
 ## 0.9.6 — IDENTIDADE + SOBREPOSIÇÕES + ECRÃS + TECLADO + MESHES + COMUNICAÇÃO + BENCHMARKS
 

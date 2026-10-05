@@ -36,6 +36,11 @@ void UiContext::beginFrame(Renderer* renderer, const InputState* input,
     runs_.clear();   // 0.7.4: runs de submissão por frame (0.8.4: dinâmico)
     xformActive_ = false;   // 0.8.6: nunca arrastar uma xform para o frame
 
+    // 0.9.6.4 (GRUPO A · A4): o contador de frames avança AQUI — os slots
+    // de scroll que não desenharem neste frame ficam STALE e podem ser
+    // recolhidos pelo beginScroll de outra região (o fix dos 8 slots)
+    ++frameStamp_;
+
     // F4.1: estado de scroll POR FRAME (os slots com offset persistem)
     scrollCur_    = kNoScroll;
     inScroll_     = false;
@@ -440,9 +445,38 @@ void UiContext::beginScroll(u64 id, const UiRect& region, f32 contentHeight) {
             }
         }
     }
+    // 0.9.6.4 (GRUPO A · A4) — A EXAUSTÃO QUE MATAVA O BROWSER: os 8 slots
+    // eram DEFINITIVOS e as regiões de scroll da casa passam de 8 numa
+    // sessão (hierarquia/inspector/logs/scenes/uiInsp/ficheiros/consola/
+    // seletor/browser/settings/docs/script/texto/áudio) — quem chegasse
+    // ao 9.º nascia MORTO ao toque (sem região = sem claim = sem tap; a
+    // FASE 12.8b apanhou: 612 frames com o browser surdo). AGORA: um slot
+    // cujo dono NÃO desenhou neste frame (lastFrame != frameStamp_) está
+    // STALE — o overlay fechou — e é RECICLADO (o mais antigo primeiro;
+    // o preço é o offset dele recomeçar a zero, nunca a região ficar
+    // morta: um scroll perdido < um botão morto)
     if (slot == kNoScroll) {
-        return;   // sem slots — ignora a região (não devia acontecer: 2 usos)
+        i32 stale = kNoScroll;
+        u32 oldest = 0xFFFFFFFFu;
+        for (u32 i = 0; i < kMaxScrollSlots; ++i) {
+            if (scrollSlots_[i].used &&
+                scrollSlots_[i].lastFrame != frameStamp_ &&
+                scrollSlots_[i].lastFrame < oldest) {
+                oldest = scrollSlots_[i].lastFrame;
+                stale = static_cast<i32>(i);
+            }
+        }
+        if (stale != kNoScroll) {
+            scrollSlots_[stale] = ScrollSlot{};
+            scrollSlots_[stale].used = true;
+            scrollSlots_[stale].id = id;
+            slot = stale;
+        }
     }
+    if (slot == kNoScroll) {
+        return;   // sem slots E sem stale (todas as regiões vivas) — ignora
+    }
+    scrollSlots_[slot].lastFrame = frameStamp_;
 
     ScrollSlot& s = scrollSlots_[slot];
     scrollCur_ = slot;

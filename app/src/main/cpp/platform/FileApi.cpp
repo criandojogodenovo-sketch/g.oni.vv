@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>   // 0.9.6.4: realpath (isFile/realPath do GRUPO A)
 #include <cstring>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -201,11 +202,18 @@ bool listDirEntries(const std::string& dir, std::vector<DirEntry>& out) {
         de.path = dir + sep + name;
         de.kind = 0;
         // diretoria? (d_type best-effort; DT_UNKNOWN → stat)
+        // 0.9.6.4 (GRUPO A · A4 — «isFile antes de listDir»): o d_type pode
+        // MENTIR nos mounts FUSE do Android (DT_DIR num ficheiro) — quem o
+        // d_type diz DIR é CONFIRMADO por stat; a confirmação falhada
+        // reclassifica como FICHEIRO (o toque diz o erro certo em vez de um
+        // «opendir falhou» sem sentido)
         bool isDir = e->d_type == DT_DIR;
-        if (e->d_type == DT_UNKNOWN) {
+        if (e->d_type == DT_UNKNOWN || isDir) {
             struct stat st;
             if (::stat(de.path.c_str(), &st) == 0) {
                 isDir = S_ISDIR(st.st_mode);
+            } else if (isDir) {
+                isDir = false;   // DT_DIR mas o stat nega — FUSE mentiu
             }
         }
         de.isDir = isDir;
@@ -225,6 +233,22 @@ bool listDirEntries(const std::string& dir, std::vector<DirEntry>& out) {
     out.insert(out.end(), dirs.begin(), dirs.end());     // diretorias primeiro
     out.insert(out.end(), files.begin(), files.end());
     return true;
+}
+
+bool isFile(const std::string& path) {
+    struct stat st;
+    if (::stat(path.c_str(), &st) != 0) {
+        return false;   // errno silencioso aqui — os chamadores logam com contexto
+    }
+    return S_ISREG(st.st_mode);
+}
+
+std::string realPath(const std::string& path) {
+    char buf[4096];
+    if (::realpath(path.c_str(), buf) == nullptr) {
+        return "";
+    }
+    return std::string(buf);
 }
 
 std::string parentPath(const std::string& dir) {

@@ -2253,8 +2253,15 @@ bool importJobStart(const fileapi::DirEntry& e) {
     g_importJob.mode = 0;
     g_importJob.fileName = e.name;   // NO GLOBAL (o local morria — o nome do
                                      // overlay e o "largar fonte" liam vazio)
-    g_importJob.active.store(true);
+    // 0.9.6.4 (GRUPO A) — A ORDEM IMPORTA: done=false ANTES de active=true.
+    // A ordem antiga (active primeiro) deixava uma janela em que o frame
+    // via active=true com done STALADO (true de um job antigo) e corria o
+    // importJobFinish — o JOIN de um worker RECÉM-NASCIDO: a UI BLOQUEAVA
+    // à espera do import inteiro (500 MB!) e finalizava com resultados
+    // AINDA NÃO ESCRITOS. Com done primeiro, um frame na janela vê
+    // active=false e segue — o finalize só acontece com o done NOVO.
     g_importJob.done.store(false);
+    g_importJob.active.store(true);
     g_importJob.cancel.store(false);
     g_importJob.bytesDone.store(0);
     g_importJob.bytesTotal.store(0);
@@ -2400,15 +2407,39 @@ void importJobFinish() {
         }
     }
     const convert::Output& out = g_importJob.out;
-    char msg[96];
-    std::snprintf(msg, sizeof(msg), "importado: %u mesh(es), %u tex (%llu B)",
-                  out.meshes.size() + out.textures.size() > 0
-                      ? static_cast<unsigned>(out.meshes.size())
-                      : 0u,
-                  static_cast<unsigned>(out.textures.size()),
-                  static_cast<unsigned long long>(
-                      g_importJob.stats.outputBytes));
+    char msg[128];
+    // 0.9.6.4 (GRUPO A · A3 — NUNCA SILENCIOSO): texturas que falharam
+    // (imagem podre, bufferView fora do buffer, mime não-PNG) DIZEM-SE no
+    // toast — o import SEGUE sem elas e o dono SABE (as causas estão no
+    // engine.log, uma linha por falha)
+    if (g_importJob.stats.texWarn > 0) {
+        std::snprintf(msg, sizeof(msg),
+                      "importado: %u mesh(es) — SEM %u textura(s) (avisos no "
+                      "engine.log)",
+                      out.meshes.empty() ? 0u
+                                         : static_cast<unsigned>(
+                                               out.meshes.size()),
+                      g_importJob.stats.texWarn);
+    } else {
+        std::snprintf(msg, sizeof(msg), "importado: %u mesh(es), %u tex (%llu B)",
+                      out.meshes.size() + out.textures.size() > 0
+                          ? static_cast<unsigned>(out.meshes.size())
+                          : 0u,
+                      static_cast<unsigned>(out.textures.size()),
+                      static_cast<unsigned long long>(
+                          g_importJob.stats.outputBytes));
+    }
     showToast(msg);
+    if (g_importJob.stats.texWarn > 0) {
+        elog::warn("import: %u textura(s) ficaram FORA (causas acima — o "
+                   "modelo entrou com material por defeito)",
+                   g_importJob.stats.texWarn);
+    }
+    if (g_importJob.stats.siblings > 0) {
+        elog::info("import: %u irmao(s) do .gltf copiado(s) para source/ "
+                   "(o reconvert funciona sem a pasta original)",
+                   g_importJob.stats.siblings);
+    }
     Tic* tsel = g_scene.get(g_editor.selected);
     if (tsel && tsel->getComponent<MeshRenderer>() &&
         (!out.meshes.empty() || !out.textures.empty())) {
@@ -2493,24 +2524,47 @@ void browserImportAudio(const fileapi::DirEntry& e) {
     }
 }
 
-// o toque no ficheiro escolhido: lança o JOB (streaming + conversão)
-void browserImportFile(const fileapi::DirEntry& e) {
+// o toque no ficheiro escolhido: lança o JOB (streaming + conversão).
+// 0.9.6.4 (GRUPO A · A4): devolve FALSE quando o toque foi tratado SEM
+// importar e o browser deve CONTINUAR ABERTO (o ficheiro desapareceu — a
+// lista re-lista no sítio); true = caminho encaminhado (job/extract/audio/
+// erro de formato) e o dispatch fecha o browser como sempre.
+bool browserImportFile(const fileapi::DirEntry& e) {
     if (!g_storage || e.isDir) {
-        return;
+        return true;
     }
-    elog::info("import: ficheiro '%s' escolhido no navegador", e.path.c_str());
+    // 0.9.6.4 (GRUPO A · A4) — ISFILE ANTES DO JOB: a lista do browser foi
+    // feita quando abriu; o ficheiro pode ter sido apagado/renomeado
+    // desde então. O toque num fantasma diz O QUE aconteceu e RE-LISTA a
+    // pasta no sítio (antes: o job arrancava e morria num «fonte ilegivel»
+    // seco).
+    if (!fileapi::isFile(e.path)) {
+        char msg[128];
+        std::snprintf(msg, sizeof(msg),
+                      "ficheiro não encontrado: %s (a lista atualizou)",
+                      e.name.c_str());
+        showToast(msg);
+        elog::warn("import: '%s' desapareceu de '%s' (lista desatualizada) "
+                   "— browser re-listado", e.name.c_str(), e.path.c_str());
+        // re-lista SEM fechar: o utilizador vê a pasta COMO ESTÁ
+        g_browser.failed =
+            !fileapi::listDirEntries(g_browser.cwd, g_browser.entries);
+        return false;
+    }
+    elog::info("import: ficheiro '%s' escolhido no navegador (1 toque = "
+               "seleciona/importa)", e.path.c_str());
     // 0.8.10 — ARCHIVE (.zip/.rar): EXTRAIR (passo 1 de 2) — utilitário
     // SEM conversão; o import de dentro da pasta extraída é que converte
     if (e.kind == 'a') {
         browserExtractArchive(e);
-        return;
+        return true;
     }
     // 0.8.11 — ÁUDIO (.wav/.ogg/.mp3): importa → audio/<nome>.gi (ADPCM
     // 4:1 ou passthrough) — síncrono (o decode é rápido; o overlay de
     // progresso é para os 500 MB de geometria) com log do rácio
     if (e.kind == 's') {
         browserImportAudio(e);
-        return;
+        return true;
     }
     // 0.8.5 — FORMATO NÃO SUPORTADO → ERRO CLARO (nunca silêncio)
     if (e.kind == 0) {
@@ -2525,11 +2579,12 @@ void browserImportFile(const fileapi::DirEntry& e) {
         elog::warn("import: '%s' — formato %s não suportado (aceites: "
                    ".obj .gltf .glb .png .zip .rar)", e.path.c_str(),
                    ext.c_str());
-        return;
+        return true;
     }
     if (!importJobStart(e)) {
         showToast("import ja em curso...");
     }
+    return true;
 }
 
 // ---- 0.6.7: lifecycle GL -----------------------------------------------------
@@ -5736,8 +5791,11 @@ void frame() {
             if (i < g_browser.entries.size()) {
                 if (g_browser.entries[i].isDir) {
                     browserOpen(g_browser.entries[i].path);
-                } else {
-                    browserImportFile(g_browser.entries[i]);
+                } else if (browserImportFile(g_browser.entries[i])) {
+                    // 0.9.6.4 (A4): o browser só fecha quando o toque foi
+                    // ENCAMINHADO (job/extract/audio/erro de formato); o
+                    // ficheiro que DESAPARECEU deixa o browser ABERTO com a
+                    // lista re-feita (o utilizador vê a pasta como está)
                     g_browser.open = false;   // fecha ao importar
                     g_editor.fileBrowser = false;
                 }

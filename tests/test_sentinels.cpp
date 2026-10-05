@@ -1566,6 +1566,12 @@ TEST(regress_gltf_transforms_dos_nos_no_gmesh) {
     // triângulo unitário + nó com scale 2.5: o .gmesh de saída tem de ter
     // os VÉRTICES EM MUNDO (2.5) — antes saía cru (o modelo importava e
     // ficava fora do sítio) — e um ÚNICO ficheiro de saída
+    // 0.9.6.4 (GRUPO A/R-021) — RECALIBRADA AO CONTRATO DOS IRMÃOS: o .bin
+    // referenciado pelo URI resolve contra o DIRETÓRIO DO .gltf (como no
+    // device, onde o browser dá caminhos POSIX absolutos) — a versão
+    // antiga escrevia o .bin no CWD e o URI resolvia contra o CWD: era
+    // EXATAMENTE o mecanismo do bug «buffer externo não resolvido» (passava
+    // no CI, falhava no Android, onde o CWD é «/»).
     std::vector<u8> bin;
     auto pushF = [&bin](f32 v) {
         u8 t[4];
@@ -1580,17 +1586,22 @@ TEST(regress_gltf_transforms_dos_nos_no_gmesh) {
     pushF(0.0f); pushF(1.0f); pushF(0.0f);
     pushF(0.0f); pushF(0.0f); pushF(1.0f);
     pushS(0); pushS(1); pushS(2);
-    const std::string binName = "goni_r020_scaled.bin";
+    // um DIRETÓRIO REAL (como a pasta do device) com o PAR .gltf + .bin
+    char dir[96];
+    std::snprintf(dir, sizeof(dir), "/tmp/goni_r021_scaled_%d",
+                  (int)::getpid());
+    ASSERT(fileapi::makeDirs(dir));
+    const std::string binAbs = std::string(dir) + "/scene.bin";
     {
-        FILE* f = std::fopen(binName.c_str(), "wb");
+        FILE* f = std::fopen(binAbs.c_str(), "wb");
         ASSERT(f != nullptr);
         std::fwrite(bin.data(), 1, bin.size(), f);
         std::fclose(f);
     }
-    char js[768];
+    char js[832];
     std::snprintf(js, sizeof(js),
         "{\"asset\":{\"version\":\"2.0\"},"
-        "\"buffers\":[{\"uri\":\"%s\",\"byteLength\":%zu}],"
+        "\"buffers\":[{\"uri\":\"scene.bin\",\"byteLength\":%zu}],"
         "\"bufferViews\":["
         "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36,\"target\":34962},"
         "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":6,\"target\":34963}],"
@@ -1604,8 +1615,8 @@ TEST(regress_gltf_transforms_dos_nos_no_gmesh) {
         "\"nodes\":[{\"mesh\":0,\"scale\":[2.5,2.5,2.5],"
         "\"translation\":[1,0,0]}],"
         "\"scenes\":[{\"nodes\":[0]}],\"scene\":0}",
-        binName.c_str(), bin.size());
-    const std::string fixture = "goni_r020_scaled.gltf";
+        bin.size());
+    const std::string fixture = std::string(dir) + "/scaled.gltf";
     {
         FILE* f = std::fopen(fixture.c_str(), "wb");
         ASSERT(f != nullptr);
@@ -1613,26 +1624,530 @@ TEST(regress_gltf_transforms_dos_nos_no_gmesh) {
         std::fclose(f);
     }
     char root[64];
-    std::snprintf(root, sizeof(root), "/tmp/goni_r020b_%d", (int)::getpid());
+    std::snprintf(root, sizeof(root), "/tmp/goni_r021b_%d", (int)::getpid());
     FsStorage st(root);
     convert::Output out;
     convert::Stats stats;
     std::string err;
-    const bool ok = convert::importFile(fixture, fixture, st, nullptr, out,
-                                        stats, err);
+    const bool ok = convert::importFile(fixture, "scaled.gltf", st, nullptr,
+                                        out, stats, err);
     ASSERT(ok);   // o erro, se houver, está em err
     // UM modelo só (o merge — antes: <stem>.gmesh por mesh crua)
     EXPECT(out.meshes.size() == 1u);
-    EXPECT(out.meshes[0] == "assets/goni_r020_scaled.gmesh");
+    EXPECT(out.meshes[0] == "assets/scaled.gmesh");
+    // 0.9.6.4 (R-021): o IRMÃO .bin foi COPIADO para source/ (o projeto
+    // fica autossuficiente — o reconvert já não precisa da pasta original)
+    EXPECT(stats.siblings == 1u);
+    EXPECT(st.exists("source/scaled.gltf"));
+    EXPECT(st.exists("source/scene.bin"));
     // e os VÉRTICES saem EM MUNDO: o scale 2.5 + translation 1 do nó
     MeshData md;
     std::vector<u8> bytes;
-    ASSERT(st.readBytes("assets/goni_r020_scaled.gmesh", bytes));
+    ASSERT(st.readBytes("assets/scaled.gmesh", bytes));
     ASSERT(readGMesh(bytes.data(), bytes.size(), md, err));
     EXPECT(md.vertices.size() == 3u);
     EXPECT(nearEqF(md.vertices[0].pos.x, 2.5f + 1.0f));   // scale×x + tx
     EXPECT(nearEqF(md.vertices[1].pos.y, 2.5f));
     EXPECT(nearEqF(md.vertices[2].pos.z, 2.5f));
     ::remove(fixture.c_str());
-    ::remove(binName.c_str());
+    ::remove(binAbs.c_str());
+    ::remove(dir);
+}
+
+// ============================================================================
+// R-021 (FASE 0.9.6-MASTER · GRUPO A) — OS IRMÃOS DO .gltf SEPARADO —
+//         regress_gltf_irmaos_do_diretorio_original
+//
+// O DONO (evidência no device): «glTF separado falha: buffer externo não
+// resolvido: scene.bin» — só o .gltf era copiado para source/, o .bin
+// ficava na pasta original. A CAUSA RAIZ (leitura do código): o resolver
+// do convertGltfFile lia fileapi::readAll(uri) com o URI RELATIVO contra o
+// CWD do processo (no Android «/») — os testes antigos passavam porque
+// escreviam o .bin NO CWD do CI (a sentinela R-020 acima foi RECALIBRADA
+// por essa razão: agora usa um diretório REAL com caminhos absolutos,
+// como o browser do device). O FIX: (1) os irmãos (buffers[].uri +
+// images[].uri externos, URI-decode %20 incluído) são COPIADOS do
+// DIRETÓRIO ORIGINAL para source/<subcaminho> — o projeto fica
+// autossuficiente p/ o reconvert; (2) o resolver e o leitor de texturas
+// externas resolvem contra o DIRETÓRIO DO FICHEIRO; (3) irmão AUSENTE =
+// ERRO QUE NOMEIA O FICHEIRO (nunca o genérico de antes).
+// ============================================================================
+TEST(regress_gltf_irmaos_do_diretorio_original) {
+    using namespace vv;
+    // lê um PNG REAL da fixture (a textura externa do .gltf)
+    std::vector<u8> png;
+    {
+        const std::string p =
+            std::string(FIXTURE_DIR) + "/yellow4.png";
+        FILE* f = std::fopen(p.c_str(), "rb");
+        ASSERT(f != nullptr);
+        u8 buf[4096];
+        size_t n;
+        while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+            png.insert(png.end(), buf, buf + n);
+        }
+        std::fclose(f);
+    }
+    ASSERT(!png.empty());
+
+    // o DIRETÓRIO ORIGINAL (como a pasta Download do device): o PAR
+    // .gltf + .bin + a textura com ESPAÇO no nome (URI com %20)
+    char dir[96];
+    std::snprintf(dir, sizeof(dir), "/tmp/goni_r021_dir_%d", (int)::getpid());
+    ASSERT(fileapi::makeDirs(dir));
+    std::vector<u8> bin;
+    auto pushF = [&bin](f32 v) {
+        u8 t[4];
+        std::memcpy(t, &v, 4);
+        bin.insert(bin.end(), t, t + 4);
+    };
+    pushF(0); pushF(0); pushF(0);
+    pushF(1); pushF(0); pushF(0);
+    pushF(0); pushF(1); pushF(0);
+    bin.push_back(0); bin.push_back(0);   // idx u16 LE: 0
+    bin.push_back(1); bin.push_back(0);   // 1 (lo, hi — little-endian!)
+    bin.push_back(2); bin.push_back(0);   // 2
+    {
+        const std::string p = std::string(dir) + "/scene.bin";
+        FILE* f = std::fopen(p.c_str(), "wb");
+        ASSERT(f != nullptr);
+        std::fwrite(bin.data(), 1, bin.size(), f);
+        std::fclose(f);
+    }
+    {
+        // O NOME COM ESPAÇO: o URI no .gltf diz «tex%20albedo.png»
+        const std::string p = std::string(dir) + "/tex albedo.png";
+        FILE* f = std::fopen(p.c_str(), "wb");
+        ASSERT(f != nullptr);
+        std::fwrite(png.data(), 1, png.size(), f);
+        std::fclose(f);
+    }
+    char js[960];
+    std::snprintf(js, sizeof(js),
+        "{\"asset\":{\"version\":\"2.0\"},"
+        "\"buffers\":[{\"uri\":\"scene.bin\",\"byteLength\":%zu}],"
+        "\"bufferViews\":["
+        "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+        "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":6}],"
+        "\"accessors\":["
+        "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},"
+        "{\"bufferView\":1,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"}],"
+        "\"materials\":[{\"name\":\"mat\",\"pbrMetallicRoughness\":"
+        "{\"baseColorTexture\":{\"index\":0}}}],"
+        "\"textures\":[{\"source\":0}],"
+        "\"images\":[{\"uri\":\"tex%%20albedo.png\"}],"
+        "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},"
+        "\"indices\":1,\"material\":0}]}],"
+        "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}",
+        bin.size());
+    const std::string gltfAbs = std::string(dir) + "/modelo.gltf";
+    {
+        FILE* f = std::fopen(gltfAbs.c_str(), "wb");
+        ASSERT(f != nullptr);
+        std::fwrite(js, 1, std::strlen(js), f);
+        std::fclose(f);
+    }
+    char root[64];
+    std::snprintf(root, sizeof(root), "/tmp/goni_r021_root_%d",
+                  (int)::getpid());
+    FsStorage st(root);
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    const bool ok = convert::importFile(gltfAbs, "modelo.gltf", st, nullptr,
+                                        out, stats, err);
+    ASSERT(ok);   // err tem a causa se falhar
+    // (1) o .gmesh na lista de assets
+    EXPECT(out.meshes.size() == 1u);
+    EXPECT(out.meshes[0] == "assets/modelo.gmesh");
+    // (2) OS IRMÃOS COPIADOS para source/ (log um a um no engine.log)
+    EXPECT(stats.siblings == 2u);   // scene.bin + tex albedo.png
+    EXPECT(st.exists("source/modelo.gltf"));
+    EXPECT(st.exists("source/scene.bin"));
+    EXPECT(st.exists("source/tex albedo.png"));   // %20 decodificado
+    // (3) a TEXTURA EXTERNA entrou (lida do diretório dos irmãos e
+    // convertida para .gtext — SEM avisos)
+    EXPECT(out.textures.size() == 1u);
+    EXPECT(stats.texWarn == 0u);
+    // (4) o RECONVERT funciona SEM a pasta original (o projeto é
+    // autossuficiente): a fonte vive em source/ com os irmãos ao lado
+    convert::Output out2;
+    convert::Stats stats2;
+    std::string err2;
+    const bool ok2 = convert::reconvertFile("source/modelo.gltf", st,
+                                            nullptr, out2, stats2, err2);
+    EXPECT(ok2);
+    EXPECT(out2.meshes.size() == 1u);
+    // e NÃO houve cópia auto-referencial (o .gltf já vivia em source/ —
+    // o guard salta a cópia; os bytes continuam ÍNTEGROS)
+    std::vector<u8> srcBack;
+    ASSERT(st.readBytes("source/modelo.gltf", srcBack));
+    EXPECT(srcBack.size() == std::strlen(js));
+
+    // ---- o IRMÃO AUSENTE: o ERRO NOMEIA O FICHEIRO ----------------------
+    {
+        char dir2[96];
+        std::snprintf(dir2, sizeof(dir2), "/tmp/goni_r021_falta_%d",
+                      (int)::getpid());
+        ASSERT(fileapi::makeDirs(dir2));
+        char js2[512];
+        std::snprintf(js2, sizeof(js2),
+            "{\"asset\":{\"version\":\"2.0\"},"
+            "\"buffers\":[{\"uri\":\"fantasma.bin\",\"byteLength\":42}],"
+            "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36}],"
+            "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,"
+            "\"count\":3,\"type\":\"VEC3\"}],"
+            "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}]}");
+        const std::string p = std::string(dir2) + "/quebrado.gltf";
+        FILE* f = std::fopen(p.c_str(), "wb");
+        ASSERT(f != nullptr);
+        std::fwrite(js2, 1, std::strlen(js2), f);
+        std::fclose(f);
+        convert::Output out3;
+        convert::Stats stats3;
+        std::string err3;
+        const bool ok3 =
+            convert::importFile(p, "quebrado.gltf", st, nullptr, out3,
+                                stats3, err3);
+        EXPECT(!ok3);
+        EXPECT(err3.find("fantasma.bin") != std::string::npos);
+        EXPECT(err3.find("NÃO EXISTE") != std::string::npos);
+        ::remove(p.c_str());
+        ::remove(dir2);
+    }
+    ::remove(gltfAbs.c_str());
+    ::remove((std::string(dir) + "/scene.bin").c_str());
+    ::remove((std::string(dir) + "/tex albedo.png").c_str());
+    ::remove(dir);
+}
+
+// ============================================================================
+// R-022 (FASE 0.9.6-MASTER · GRUPO A) — A IMAGEM QUE MATAVA O IMPORT DO
+//         GLB + O LAYOUT/INTEGRIDADE — regress_glb_imagem_no_fim_com_padding
+//
+// O DONO (evidência no device): «GLB com texturas falha: bufferView da
+// imagem fora do buffer». A CAUSA RAIZ (leitura do código): o parse
+// tratava a falha do bufferView de uma IMAGEM como FATAL (return false) —
+// um GLB com uma imagem má/inacessível morria INTEIRO com a geometria
+// boa; e o resolveView não distinguia «limites do buffer» de «leitura
+// falhou (I/O)». O FIX: uma SÓ rotina de validação (ViewFail com a causa)
+// para meshes (fatal) e imagens (warn + skip — o import SEGUE sem
+// texturas, o toast diz «SEM N textura(s)»); o layout dos chunks é LOGADO
+// (json/bin/binStart alinhado 4 + bufferView de cada imagem); a cópia em
+// source/ é VERIFICADA byte a byte (a sentinela seguinte).
+// ============================================================================
+TEST(regress_glb_imagem_no_fim_com_padding) {
+    using namespace vv;
+    // um PNG REAL (a imagem embutida no fim do chunk BIN)
+    std::vector<u8> png;
+    {
+        const std::string p = std::string(FIXTURE_DIR) + "/yellow4.png";
+        FILE* f = std::fopen(p.c_str(), "rb");
+        ASSERT(f != nullptr);
+        u8 buf[4096];
+        size_t n;
+        while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+            png.insert(png.end(), buf, buf + n);
+        }
+        std::fclose(f);
+    }
+    ASSERT(!png.empty());
+
+    // monta o GLB: [header][JSON chunk NÃO múltiplo de 4 + ZEROS até alinhar
+    // 4][BIN chunk = geometria + IMAGEM NO FIM + padding zeros a 4].
+    // Variante pelos argumentos:
+    //   imgBytes != nullptr → a imagem vive no chunk em [imgOff, imgOff+imgLen)
+    //   imgBytes == nullptr → o view APONTA para fora (o caso do device)
+    auto makeGlb = [&](size_t imgOff, size_t imgLen,
+                       const std::vector<u8>* imgBytes,
+                       std::vector<u8>& glbOut) {
+        std::vector<u8> geo;
+        auto pushF = [&geo](f32 v) {
+            u8 t[4];
+            std::memcpy(t, &v, 4);
+            geo.insert(geo.end(), t, t + 4);
+        };
+        pushF(0); pushF(0); pushF(0);
+        pushF(1); pushF(0); pushF(0);
+        pushF(0); pushF(1); pushF(0);                 // 36 B de POSITION
+        geo.push_back(0); geo.push_back(0);          // idx u16 LE: 0
+        geo.push_back(1); geo.push_back(0);          // 1 (lo, hi!)
+        geo.push_back(2); geo.push_back(0);          // 2
+        std::vector<u8> binChunk = geo;               // 42 B de geometria
+        if (imgBytes != nullptr) {
+            // espaço para a imagem (gap de zeros até imgOff se preciso)
+            binChunk.resize(imgOff + imgLen, 0);
+            std::memcpy(binChunk.data() + imgOff, imgBytes->data(), imgLen);
+        }
+        while (binChunk.size() % 4 != 0) {
+            binChunk.push_back(0);   // padding DE DENTRO do chunk (o spec)
+        }
+        char jv[128];
+        std::snprintf(jv, sizeof(jv),
+            "{\"buffer\":0,\"byteOffset\":%zu,\"byteLength\":%zu}",
+            imgOff, imgLen);
+        char js[1024];
+        std::snprintf(js, sizeof(js),
+            "{\"asset\":{\"version\":\"2.0\"},"
+            "\"buffers\":[{\"byteLength\":%zu}],"
+            "\"bufferViews\":["
+            "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+            "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":6},"
+            "%s],"
+            "\"accessors\":["
+            "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},"
+            "{\"bufferView\":1,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"}],"
+            "\"materials\":[{\"pbrMetallicRoughness\":"
+            "{\"baseColorTexture\":{\"index\":0}}}],"
+            "\"textures\":[{\"source\":0}],"
+            "\"images\":[{\"bufferView\":2,\"mimeType\":\"image/png\"}],"
+            "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},"
+            "\"indices\":1,\"material\":0}]}],"
+            "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}",
+            binChunk.size(), jv);
+        const std::string json = js;
+        // o JSON chunk fica SEM padding de espaços: o comprimento NÃO é
+        // múltiplo de 4 DE PROPÓSITO — o header do BIN vive no próximo
+        // alinhamento de 4 (o caso do mundo real que o parser TEM de
+        // aguentar; é a mutação «binStart sem alinhamento» da R-022)
+        std::vector<u8>& g = glbOut;
+        auto u32push = [&g](u32 v) {
+            u8 t[4];
+            std::memcpy(t, &v, 4);
+            g.insert(g.end(), t, t + 4);
+        };
+        const u32 jsonPad = (4 - (static_cast<u32>(json.size()) % 4)) % 4;
+        u32push(0x46546C67u);   // 'glTF'
+        u32push(2);
+        u32push(12 + 8 + static_cast<u32>(json.size()) + jsonPad + 8 +
+               static_cast<u32>(binChunk.size()));
+        u32push(static_cast<u32>(json.size()));   // NÃO múltiplo de 4
+        u32push(0x4E4F534Au);                     // 'JSON'
+        g.insert(g.end(), json.begin(), json.end());
+        for (u32 i = 0; i < jsonPad; ++i) {
+            g.push_back(0);      // ZEROS até alinhar (não espaços!)
+        }
+        u32push(static_cast<u32>(binChunk.size()));
+        u32push(0x004E4942u);    // 'BIN'
+        g.insert(g.end(), binChunk.begin(), binChunk.end());
+    };
+
+    // ---- (a) a IMAGEM VÁLIDA no FIM do BIN (com padding) importA TUDO --
+    {
+        std::vector<u8> glb;
+        makeGlb(42, png.size(), &png, glb);   // a imagem COLA na geometria
+        // o PRIMEIRO assert é o PARSE EM MEMÓRIA (parseGlb): o alinhamento
+        // de chunks (0.9.6.4) acha o BIN mesmo com JSON não múltiplo de 4
+        GltfModel model;
+        std::string perr;
+        EXPECT(parseGlb(glb.data(), glb.size(), GltfBufferResolver{nullptr, 0},
+                        model, perr));
+        EXPECT(model.meshes.size() == 1u);
+        EXPECT(model.images.size() == 1u);
+        EXPECT(model.images[0].bytes.size() == png.size());
+        EXPECT(!model.images[0].broken);
+        // o IMPORT REAL pelo caminho de produção (ficheiro + range loader)
+        char src[96];
+        std::snprintf(src, sizeof(src), "/tmp/goni_r022_pad_%d.glb",
+                      (int)::getpid());
+        FILE* f = std::fopen(src, "wb");
+        ASSERT(f != nullptr);
+        std::fwrite(glb.data(), 1, glb.size(), f);
+        std::fclose(f);
+        char root[64];
+        std::snprintf(root, sizeof(root), "/tmp/goni_r022_root_%d",
+                      (int)::getpid());
+        FsStorage st(root);
+        convert::Output out;
+        convert::Stats stats;
+        std::string err;
+        const bool ok = convert::importFile(src, "pad.glb", st, nullptr, out,
+                                            stats, err);
+        ASSERT(ok);
+        EXPECT(out.meshes.size() == 1u);
+        EXPECT(out.meshes[0] == "assets/pad.gmesh");
+        EXPECT(out.textures.size() == 1u);   // a imagem DO FIM entrou
+        EXPECT(stats.texWarn == 0u);
+        EXPECT(st.exists("source/pad.glb"));
+        ::remove(src);
+    }
+    // ---- (b) a IMAGEM PODRE (bytes que não são PNG): import SEM
+    // texturas + AVISO contado — NUNCA mais o import inteiro morto -----
+    {
+        const std::vector<u8> podre = {'P', 'O', 'D', 'R', 'E', '!'};
+        std::vector<u8> glb;
+        makeGlb(42, podre.size(), &podre, glb);   // no fim, bytes lixo
+        GltfModel model;
+        std::string perr;
+        EXPECT(parseGlb(glb.data(), glb.size(), GltfBufferResolver{nullptr, 0},
+                        model, perr));
+        EXPECT(model.images.size() == 1u);
+        // o view RESOLVE (6 B dentro do chunk) — os bytes são que lixo é
+        // o PASSE DE TEXTURAS que diz (warn + texWarn), não o parse
+        EXPECT(!model.images[0].broken);
+        EXPECT(model.images[0].bytes.size() == 6u);
+        char src[96];
+        std::snprintf(src, sizeof(src), "/tmp/goni_r022_podre_%d.glb",
+                      (int)::getpid());
+        FILE* f = std::fopen(src, "wb");
+        ASSERT(f != nullptr);
+        std::fwrite(glb.data(), 1, glb.size(), f);
+        std::fclose(f);
+        char root[64];
+        std::snprintf(root, sizeof(root), "/tmp/goni_r022_podre_%d",
+                      (int)::getpid());
+        FsStorage st(root);
+        convert::Output out;
+        convert::Stats stats;
+        std::string err;
+        const bool ok = convert::importFile(src, "podre.glb", st, nullptr,
+                                            out, stats, err);
+        // O CORAÇÃO DA R-022: o import SEGUE (a geometria é boa) SEM a
+        // textura — e a falha é CONTADA (toast «SEM N textura(s)»)
+        EXPECT(ok);
+        EXPECT(out.meshes.size() == 1u);
+        EXPECT(out.textures.empty());
+        EXPECT(stats.texWarn >= 1u);
+        ::remove(src);
+    }
+    // ---- (c) o bufferView da imagem FORA DO BUFFER: o defeito EXATO do
+    // device («GLB com texturas falha») — AGORA é warn, não import morto
+    {
+        std::vector<u8> glb;
+        makeGlb(20, 100000, nullptr, glb);   // len absurdo > chunk BIN
+        char src[96];
+        std::snprintf(src, sizeof(src), "/tmp/goni_r022_fora_%d.glb",
+                      (int)::getpid());
+        FILE* f = std::fopen(src, "wb");
+        ASSERT(f != nullptr);
+        std::fwrite(glb.data(), 1, glb.size(), f);
+        std::fclose(f);
+        char root[64];
+        std::snprintf(root, sizeof(root), "/tmp/goni_r022_fora_%d",
+                      (int)::getpid());
+        FsStorage st(root);
+        convert::Output out;
+        convert::Stats stats;
+        std::string err;
+        const bool ok = convert::importFile(src, "fora.glb", st, nullptr,
+                                            out, stats, err);
+        EXPECT(ok);                       // o import SEGUE (geometria boa)
+        EXPECT(out.meshes.size() == 1u);  // o mesh ENTROU
+        EXPECT(out.textures.empty());     // a textura NÃO
+        EXPECT(stats.texWarn == 1u);      // e o aviso foi CONTADO
+        ::remove(src);
+    }
+}
+
+// ============================================================================
+// R-022 (frente 2) — A CÓPIA VERIFICADA — regress_glb_copia_verificada
+//
+// A defesa da integridade: a cópia do GLB para source/ é conferida contra
+// a fonte byte a byte (em chunks — nunca o ficheiro inteiro em RAM quando
+// há caminho real). Uma cópia truncada/corrompida NÃO fica no projeto com
+// um «bufferView fora do buffer» disfarçado — diz «cópia truncada» COM A
+// POSIÇÃO. (importFile chama isto após cada import .glb; aqui a sentinela
+// aferra as DUAS direções da função EXPosta.)
+// ============================================================================
+TEST(regress_glb_copia_verificada) {
+    using namespace vv;
+    // uma fonte qualquer no disco (os bytes não importam — a COMPARAÇÃO sim)
+    std::vector<u8> src;
+    for (u32 i = 0; i < 1000; ++i) {
+        src.push_back(static_cast<u8>(i & 0xFF));
+    }
+    char srcPath[96];
+    std::snprintf(srcPath, sizeof(srcPath), "/tmp/goni_r022c_src_%d.bin",
+                  (int)::getpid());
+    {
+        FILE* f = std::fopen(srcPath, "wb");
+        ASSERT(f != nullptr);
+        std::fwrite(src.data(), 1, src.size(), f);
+        std::fclose(f);
+    }
+    char root[64];
+    std::snprintf(root, sizeof(root), "/tmp/goni_r022c_%d", (int)::getpid());
+    FsStorage st(root);
+    std::string err;
+
+    // (a) cópia ÍNTEGRA → true (o caminho feliz de cada import)
+    ASSERT(st.writeBytes("source/x.bin", src.data(), src.size()));
+    EXPECT(convert::verifyCopyChunked(srcPath, st, "source/x.bin", err));
+    EXPECT(err.empty());
+
+    // (b) cópia TRUNCADA (metade) → false + «cópia truncada»
+    ASSERT(st.writeBytes("source/x.bin", src.data(), src.size() / 2));
+    EXPECT(!convert::verifyCopyChunked(srcPath, st, "source/x.bin", err));
+    EXPECT(err.find("cópia truncada") != std::string::npos);
+
+    // (c) cópia do MESMO TAMANHO com UM byte trocado → false (a posição)
+    std::vector<u8> flip = src;
+    flip[777] = static_cast<u8>(flip[777] ^ 0xFF);
+    ASSERT(st.writeBytes("source/x.bin", flip.data(), flip.size()));
+    EXPECT(!convert::verifyCopyChunked(srcPath, st, "source/x.bin", err));
+    EXPECT(err.find("cópia truncada") != std::string::npos);
+    EXPECT(err.find("777") != std::string::npos);   // a posição exata
+
+    // (d) cópia AUSENTE → false (não existe = truncada a zero)
+    EXPECT(st.remove("source/x.bin"));
+    EXPECT(!convert::verifyCopyChunked(srcPath, st, "source/x.bin", err));
+    EXPECT(err.find("cópia truncada") != std::string::npos);
+    ::remove(srcPath);
+}
+
+// ============================================================================
+// R-023 (FASE 0.9.6-MASTER · GRUPO A) — A EXAUSTÃO DOS SLOTS DE SCROLL —
+//         regress_scroll_slots_reciclados
+//
+// ACHADO AO VIVO pela FASE 12.8b (o loop apanhando bug que ninguém
+// reportou): os 8 slots de scroll do UiContext eram DEFINITIVOS — cada
+// região (hierarquia, inspector, logs, scenes, uiInsp, ficheiros, consola,
+// seletor, browser, settings, docs, script, texto, áudio) ocupava um para
+// sempre. NUMA SESSÃO com 8+ regiões usadas, a 9.ª nascia MORTA ao toque
+// (sem slot = sem região = sem claim = sem scrollTap): no device, abrir
+// Settings+Docs+Script+Texto+Áudio+Logs+Consola+Ficheiros e depois o
+// BROWSER = o browser não responde (e o «1 toque importa» morria). O FIX:
+// slots são RECOLHIDOS por frame-stamp (região que não desenhou neste
+// frame = overlay fechado = slot reciclável). A sentinela: 10 regiões
+// SEQUENCIAIS (mais que os 8 slots) e a 10.ª TEM de continuar viva.
+// ============================================================================
+TEST(regress_scroll_slots_reciclados) {
+    using namespace vv;
+    UiContext ui;
+    ui.init();
+    InputState input;
+    ui.beginFrame(nullptr, &input, 1536.0f, 720.0f);
+    // 10 regiões DISTINTAS (mais que os 8 slots) — cada uma desenha UMA
+    // vez e «fecha» (como overlays abertos e fechados numa sessão real)
+    for (u64 i = 0; i < 10; ++i) {
+        ui.beginFrame(nullptr, &input, 1536.0f, 720.0f);   // novo frame
+        const UiRect r{100.0f, 100.0f, 400.0f, 300.0f};
+        ui.beginScroll(2000 + i, r, 2000.0f);
+        ui.endScroll();
+    }
+    // a 10.ª região (id 2009) TEM slot: o offset que se GRAVA volta
+    ui.scrollSetOffset(2009, 120.0f);
+    ui.beginFrame(nullptr, &input, 1536.0f, 720.0f);
+    {
+        const UiRect r{100.0f, 100.0f, 400.0f, 300.0f};
+        ui.beginScroll(2009, r, 2000.0f);
+        const f32 off = ui.scrollOffset();
+        ui.endScroll();
+        // sem a reciclagem: a 10.ª região NUNCA teve slot (8 definitivos)
+        // — o scrollSetOffset era um NO-OP e o offset ficava 0
+        EXPECT(nearEqF(off, 120.0f, 0.5f));
+    }
+    // e uma região ANTIGA (id 2000 — o slot dela foi reciclado entretanto)
+    // VOLTA A FUNCIONAR quando volta a desenhar: ganha slot de novo e o
+    // offset GRAVA (o preço documentado do reciclo: o offset ANTIGO
+    // recomeça a zero — o que NÃO pode é a região ficar MORTA ao toque)
+    ui.beginFrame(nullptr, &input, 1536.0f, 720.0f);
+    {
+        const UiRect r{100.0f, 100.0f, 400.0f, 300.0f};
+        ui.beginScroll(2000, r, 2000.0f);   // re-registrou (slot novo)
+        ui.scrollSetOffset(2000, 60.0f);    // com slot: o offset GRAVA
+        const f32 off = ui.scrollOffset();
+        ui.endScroll();
+        EXPECT(nearEqF(off, 60.0f, 0.5f));  // viva — não morta
+    }
 }

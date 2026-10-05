@@ -42,10 +42,15 @@ struct GltfNode {
 // imagem embutida do glTF (F5.1-B): bytes decodificados + mime. Textura
 // EXTERNA (uri não-data) fica com bytes vazios e o uri em `uriPath` — o
 // índice continua alinhado com o array `images` do ficheiro.
+// 0.9.6.4 (GRUPO A/R-022): `broken` marca a imagem cujo bufferView FALHOU
+// no parse (limites/leitura) — o parse NÃO morre por causa dela (a
+// geometria segue; a textura entra como falha no passe de texturas com
+// warn + toast — nunca silencioso, nunca fatal).
 struct GltfImage {
     std::vector<u8> bytes;    // vazio = externa/não suportada
     std::string mime;         // "image/png" (o engine só consome PNG)
     std::string uriPath;      // uri externa (pass-through p/ refs relativas)
+    bool broken = false;      // bufferView falhou no parse (warn, não fatal)
 };
 
 // material básico (PBR mínimo; interp. p/ lit acontece no device)

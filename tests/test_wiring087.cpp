@@ -424,16 +424,52 @@ TEST(wiring087_browser_formato_nao_suportado_erro_claro) {
     g_projectReady = true;
     addMeshTic("Alvo");
 
+    // 0.9.6.4 (GRUPO A · A4): o ficheiro tem de EXISTIR no disco — o toque
+    // agora passa pelo guard isFile (a lista do browser pode estar
+    // desatualizada; um ficheiro fantasma tem a SUA mensagem). O .fbx REAL
+    // (bytes whatever) chega ao erro de formato como sempre.
+    char fbx[96];
+    std::snprintf(fbx, sizeof(fbx), "/tmp/goni_w087_fbx_%d.fbx", (int)::getpid());
+    {
+        FILE* f = std::fopen(fbx, "wb");
+        ASSERT(f != nullptr);
+        const char bytes[] = "FBX fake (o formato e que nao e suportado)";
+        std::fwrite(bytes, 1, std::strlen(bytes), f);
+        std::fclose(f);
+    }
     fileapi::DirEntry e;
     e.name = "coisa.fbx";
-    e.path = "/fake/coisa.fbx";
+    e.path = fbx;
     e.isDir = false;
     e.kind = 0;   // fora de obj/gltf/glb/png
-    browserImportFile(e);
 
+    EXPECT(browserImportFile(e));   // encaminhado (erro de formato) — browser fecharia
     EXPECT(std::strcmp(g_toast, "formato não suportado ainda: .fbx") == 0);
-    EXPECT(logHas("import: '/fake/coisa.fbx' — formato .fbx não suportado"));
+    EXPECT(logHas("formato .fbx não suportado"));
+    {
+        // o caminho REAL do ficheiro no log (o dono segue no engine.log)
+        const std::string caminho = std::string("import: '") + fbx + "'";
+        EXPECT(logHas(caminho.c_str()));
+    }
     EXPECT(!g_applyAsk.open);   // nada importado, nada perguntado
+    std::remove(fbx);
+
+    // ---- 0.9.6.4 (A4): o FICHEIRO FANTASMA (lista desatualizada) ----
+    // o toque num ficheiro que JÁ NÃO EXISTE: o toast diz O QUÊ aconteceu
+    // e o browser FICA ABERTO com a lista re-feita (return false)
+    fileapi::DirEntry ghost;
+    ghost.name = "sumido.obj";
+    ghost.path = "/tmp/goni_w087_fantasma_nao_existe.obj";
+    ghost.isDir = false;
+    ghost.kind = 'm';
+    g_browser.cwd = "/tmp";   // o re-list usa a pasta corrente
+    g_browser.open = true;
+    const bool encaminhado = browserImportFile(ghost);
+    EXPECT(!encaminhado);   // NÃO importado — o browser continua aberto
+    EXPECT(std::strstr(g_toast, "não encontrado") != nullptr);
+    EXPECT(logHas("desapareceu"));
+    EXPECT(g_browser.open);   // AINDA aberto (o dispatch não fecha)
+    EXPECT(!g_applyAsk.open);
 }
 
 // ---------------------------------------------------------------------------

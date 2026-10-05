@@ -58,6 +58,21 @@ struct ViewSpan {
     size_t stride = 0;   // 0 = compacto
 };
 
+// 0.9.6.4 (GRUPO A/R-022) — A CAUSA da falha, distinguível: «view fora dos
+// limites do buffer» (ficheiro malformado) NÃO é a mesma coisa que «a
+// leitura do range falhou» (I/O) — antes o mesmo «fora do buffer» enganava
+// as duas. UMA SÓ rotina (resolveView) serve meshes (fatal) e imagens
+// (warn + skip — a geometria não morre por uma textura).
+enum class ViewFail {
+    None = 0,
+    NoBuffer,      // buffer do view inexistente/inválido
+    BadLength,     // sem byteLength
+    OutOfBounds,   // offset+len > tamanho REAL do buffer
+    TooBig,        // range acima do teto kMaxRangeBytes
+    ReadFail,      // a leitura do range falhou (I/O)
+    BadStride,     // stride menor que o elemento
+};
+
 // 0.8.10 — STORE de buffers: residentes (base64/externo) OU DEFERIDOS (o
 // BIN chunk de um .glb EM FICHEIRO: ranges materializados POR DEMANDA com
 // ponteiros estáveis num pool — o import de 500 MB nunca carrega o BIN).
@@ -126,15 +141,19 @@ private:
     std::deque<std::vector<u8>> pool_;   // ranges materializados (ptr estáveis)
 };
 
-bool resolveView(GltfBufferStore& store, const Json& bv,
-                 size_t accessorByteOffset, size_t elemSize, ViewSpan& out) {
+// 0.9.6.4 (R-022): devolve a CAUSA (ViewFail) em vez de bool — o chamador
+// decide o texto e a gravidade. A validação usa o TAMANHO REAL do buffer
+// (GLB: o comprimento REAL do chunk BIN do header; externo/data: os bytes
+// que existem) — buffers[].byteLength declarado NÃO é a autoridade.
+ViewFail resolveView(GltfBufferStore& store, const Json& bv,
+                     size_t accessorByteOffset, size_t elemSize, ViewSpan& out) {
     const Json* jbuf = bv.find("buffer");
     if (!jbuf || jbuf->type != Json::Type::Number) {
-        return false;
+        return ViewFail::NoBuffer;
     }
     const size_t bi = static_cast<size_t>(jbuf->number);
     if (bi >= store.count()) {
-        return false;
+        return ViewFail::NoBuffer;
     }
     const u64 bufSize = store.size(bi);
     size_t off = 0;
@@ -145,10 +164,10 @@ bool resolveView(GltfBufferStore& store, const Json& bv,
     if (const Json* l = bv.find("byteLength"); l && l->type == Json::Type::Number) {
         bLen = static_cast<size_t>(l->number);
     } else {
-        return false;
+        return ViewFail::BadLength;
     }
     if (accessorByteOffset > bLen) {
-        return false;
+        return ViewFail::OutOfBounds;
     }
     // stride do VIEW (atributos de vértice podem estar interleaved)
     size_t stride = 0;
@@ -156,23 +175,40 @@ bool resolveView(GltfBufferStore& store, const Json& bv,
         stride = static_cast<size_t>(s->number);
     }
     if (stride != 0 && stride < elemSize) {
-        return false;   // stride menor que o elemento é ilegal
+        return ViewFail::BadStride;   // stride menor que o elemento é ilegal
     }
     if (stride == 0) {
         stride = elemSize;
     }
     const size_t total = off + accessorByteOffset + bLen;
     if (static_cast<u64>(total) > bufSize) {
-        return false;   // view fora do buffer — recusa, não lê fora
-    }
-    // 0.8.10: materializa SÓ o range necessário (deferred = streaming)
-    out.data = store.span(bi, off + accessorByteOffset, bLen - accessorByteOffset);
-    if (!out.data) {
-        return false;
+        return ViewFail::OutOfBounds;   // view fora do buffer — recusa
     }
     out.byteLength = bLen - accessorByteOffset;
     out.stride = stride;
-    return true;
+    // 0.8.10: materializa SÓ o range necessário (deferred = streaming);
+    // 0.9.6.4: a falha da LEITURA é ReadFail — nunca «fora do buffer»
+    if (out.byteLength > kMaxRangeBytes) {
+        return ViewFail::TooBig;
+    }
+    out.data = store.span(bi, off + accessorByteOffset, out.byteLength);
+    if (!out.data) {
+        return ViewFail::ReadFail;
+    }
+    return ViewFail::None;
+}
+
+const char* viewFailText(ViewFail f) {
+    switch (f) {
+        case ViewFail::None:       return "";
+        case ViewFail::NoBuffer:   return "buffer do bufferView inexistente";
+        case ViewFail::BadLength:  return "bufferView sem byteLength";
+        case ViewFail::OutOfBounds:return "bufferView fora do buffer (offset+len > tamanho real)";
+        case ViewFail::TooBig:     return "range do bufferView acima do teto de 64 MB";
+        case ViewFail::ReadFail:   return "leitura do range falhou (I/O)";
+        case ViewFail::BadStride:  return "byteStride menor que o elemento";
+    }
+    return "?";
 }
 
 size_t componentSize(i32 ct) {
@@ -330,7 +366,14 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
     }
 
     // ---- images (F5.1-B: texturas embutidas base64 ou bufferView) ----------
+    // 0.9.6.4 (GRUPO A/R-022 · A3): uma imagem que FALHA NÃO MATA O IMPORT —
+    // antes, um bufferView de imagem fora do buffer (ou uma leitura falhada)
+    // derrubava o glTF INTEIRO com a geometria boa («GLB com texturas
+    // falha»). Agora: WARN com a CAUSA (a rotina ÚNICA resolveView devolve
+    // ViewFail distinguindo limites de I/O) + imagem marcada broken — o
+    // passe de texturas conta a falha (stats.texWarn) e o dono vê o toast.
     if (const Json* ji = doc.find("images"); ji && ji->type == Json::Type::Array) {
+        u32 imgIdx = 0;
         for (const Json& im : ji->items) {
             GltfImage gi;
             const Json* uri = im.find("uri");
@@ -341,40 +384,90 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                     if (!base64Decode(u.c_str() + (sizeof(kPngDataPfx) - 1),
                                       u.size() - (sizeof(kPngDataPfx) - 1),
                                       gi.bytes)) {
-                        err = "glTF: data: URI de imagem base64 inválida";
-                        return false;
+                        // data: URI podre = imagem falhada, não import morto
+                        gi.broken = true;
+                        elog::warn("asset: glTF imagem %u: data: URI base64 "
+                                   "inválida — textura ignorada (o mesh "
+                                   "segue com material por defeito)", imgIdx);
+                    } else {
+                        gi.mime = "image/png";
+                        elog::info("asset: glTF imagem %u: uri data: (%llu B)",
+                                   imgIdx,
+                                   static_cast<unsigned long long>(
+                                       gi.bytes.size()));
                     }
-                    gi.mime = "image/png";
                 } else if (u.compare(0, 5, "data:") == 0) {
                     gi.mime = "desconhecido";   // mime não-PNG — ignora (sem falha)
+                    elog::info("asset: glTF imagem %u: uri data: mime não-PNG "
+                               "(%s) — fora do escopo", imgIdx, u.c_str());
                 } else {
                     gi.uriPath = u;             // textura EXTERNA
+                    elog::info("asset: glTF imagem %u: uri externa '%s' (o "
+                               "irmão é copiado para source/ no import)",
+                               imgIdx, u.c_str());
                 }
             } else if (const Json* bv = im.find("bufferView");
                        bv && bv->type == Json::Type::Number) {
                 // textura EMBUTIDA no binário (GLB): bytes do bufferView
                 if (!jviews) {
-                    err = "glTF: imagem sem bufferViews";
-                    return false;
-                }
-                const i32 vi = static_cast<i32>(bv->number);
-                if (vi < 0 || vi >= static_cast<i32>(jviews->items.size())) {
-                    err = "glTF: bufferView da imagem fora do range";
-                    return false;
-                }
-                ViewSpan span;
-                if (!resolveView(store, jviews->items[static_cast<size_t>(vi)],
-                                 0, 1, span)) {
-                    err = "glTF: bufferView da imagem fora do buffer";
-                    return false;
-                }
-                gi.bytes.assign(span.data, span.data + span.byteLength);
-                if (const Json* mt = im.find("mimeType");
-                    mt && mt->type == Json::Type::String) {
-                    gi.mime = mt->string;
+                    // sem bufferViews declarados a imagem é ilegível — mas o
+                    // glTF pode ser só geometria: NÃO é fatal (R-022)
+                    gi.broken = true;
+                    elog::warn("asset: glTF imagem %u: sem bufferViews no "
+                               "ficheiro — textura ignorada", imgIdx);
+                } else {
+                    const i32 vi = static_cast<i32>(bv->number);
+                    if (vi < 0 || vi >= static_cast<i32>(jviews->items.size())) {
+                        gi.broken = true;
+                        elog::warn("asset: glTF imagem %u: bufferView %d fora "
+                                   "do range (%zu views) — textura ignorada "
+                                   "(o mesh segue)", imgIdx, vi,
+                                   jviews->items.size());
+                    } else {
+                        const Json& jv = jviews->items[static_cast<size_t>(vi)];
+                        u64 vOff = 0, vLen = 0;
+                        if (const Json* o = jv.find("byteOffset");
+                            o && o->type == Json::Type::Number) {
+                            vOff = static_cast<u64>(o->number);
+                        }
+                        if (const Json* l = jv.find("byteLength");
+                            l && l->type == Json::Type::Number) {
+                            vLen = static_cast<u64>(l->number);
+                        }
+                        ViewSpan span;
+                        const ViewFail vf =
+                            resolveView(store, jv, 0, 1, span);
+                        if (vf != ViewFail::None) {
+                            // A CAUSA DISTINTA: limites do buffer ≠ I/O —
+                            // antes era sempre «fora do buffer» (enganador)
+                            gi.broken = true;
+                            elog::warn("asset: glTF imagem %u: bufferView %d "
+                                       "(off %llu, len %llu) FALHOU: %s — "
+                                       "textura ignorada (o mesh segue com "
+                                       "material por defeito)",
+                                       imgIdx, vi,
+                                       static_cast<unsigned long long>(vOff),
+                                       static_cast<unsigned long long>(vLen),
+                                       viewFailText(vf));
+                        } else {
+                            gi.bytes.assign(span.data,
+                                            span.data + span.byteLength);
+                            if (const Json* mt = im.find("mimeType");
+                                mt && mt->type == Json::Type::String) {
+                                gi.mime = mt->string;
+                            }
+                            elog::info("asset: glTF imagem %u: bufferView %d "
+                                       "(off %llu, len %llu, mime %s)",
+                                       imgIdx, vi,
+                                       static_cast<unsigned long long>(vOff),
+                                       static_cast<unsigned long long>(vLen),
+                                       gi.mime.c_str());
+                        }
+                    }
                 }
             }
             out.images.push_back(std::move(gi));
+            ++imgIdx;
         }
     }
 
@@ -473,9 +566,16 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
         }
         const size_t elemSize = compSize * compCount;
         ViewSpan span;
-        if (!resolveView(store, jviews->items[static_cast<size_t>(viewIdx)],
-                         byteOff, elemSize, span)) {
-            err = "glTF: bufferView fora do buffer (ficheiro corrompido?)";
+        const ViewFail vf =
+            resolveView(store, jviews->items[static_cast<size_t>(viewIdx)],
+                        byteOff, elemSize, span);
+        if (vf != ViewFail::None) {
+            // GEOMETRIA falhou = import falha (a spec A3: textura falha
+            // tolera-se, geometria NÃO) — mas com a CAUSA exata (R-022:
+            // «fora do buffer» deixou de cobrir também as falhas de I/O)
+            err = std::string("glTF: accessor (view ") +
+                  std::to_string(viewIdx) + ") falhou: " + viewFailText(vf) +
+                  " (ficheiro corrompido?)";
             return false;
         }
         rawElems.resize(elemCount * elemSize);
@@ -1018,7 +1118,14 @@ bool parseGlb(const u8* data, size_t len, const GltfBufferResolver& resolver,
             bin.assign(data + off, data + off + chunkLen);
             binFromChunk = true;
         }
+        // 0.9.6.4 (GRUPO A/R-022): chunks são ALINHADOS a 4 bytes (o spec
+        // pede o padding DENTRO do chunk; exportadores do mundo real às
+        // vezes escrevem o comprimento sem padding e zeros até ao próximo
+        // header). O caminho de FICHEIRO (convertGlbFile) já alinhava —
+        // este, em memória, andava off += chunkLen SEM alinhar: os dois
+        // parsers divergiam no MESMO ficheiro. UMA regra só: alinhar 4.
         off += chunkLen;
+        off = (off + 3) & ~static_cast<size_t>(3);
     }
 
     if (!jsonPtr) {
