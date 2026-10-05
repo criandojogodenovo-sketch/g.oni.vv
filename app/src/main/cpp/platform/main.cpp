@@ -4941,6 +4941,14 @@ void frame() {
     if (g_editor.assetMenu != 0 && g_editor.assetMenu != g_prevAssetMenu) {
         refreshCatalog();
         refreshAudioCatalog();
+        // 0.9.6.3 (R-020 · spec PASSO 1): o CONTEÚDO da lista de
+        // "Adicionar mesh" fica no log quando o seletor abre — o dono vê
+        // exatamente o que o seletor oferecia no momento
+        elog::info("catalog: seletor de mesh aberto com %zu item(ns)",
+                   g_catalog.meshes.size());
+        for (const std::string& m : g_catalog.meshes) {
+            elog::info("catalog: mesh na lista: %s", m.c_str());
+        }
     }
     g_prevAssetMenu = g_editor.assetMenu;
 

@@ -310,46 +310,229 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
         err = "glTF sem meshes";
         return false;
     }
-    // ---- passe de GEOMETRIA: meshes → .gmesh (escreve e liberta) ---------
-    for (size_t i = 0; i < model.meshes.size(); ++i) {
-        MeshData mesh = model.meshes[i];   // cópia consciente (o modelo
-                                           // liberta-se todo no fim)
-        stats.verts = static_cast<u32>(mesh.vertices.size());
-        stats.indices = static_cast<u32>(mesh.indices.size());
+    // ---- 0.9.6.3 (R-020) · O LOG DO PARSE (a spec PASSO 1 pede: formato,
+    // nós, malhas, primitivas, vértices, índices, materiais, texturas) ----
+    {
+        u32 nPrims = 0;
+        for (const MeshData& md : model.meshes) {
+            nPrims += static_cast<u32>(md.groups.size());
+        }
+        u32 nTexOk = 0;
+        for (const GltfImage& im : model.images) {
+            if (!im.bytes.empty()) {
+                ++nTexOk;
+            }
+        }
+        elog::info("asset: glTF '%s' (%llu B) — parse ok: %u nó(s), "
+                   "%u mesh(es), %u primitiva(s), %u material(is), "
+                   "%u/%u textura(s) embutida(s), %u animação(ões), "
+                   "%u skin(s)",
+                   stem.c_str(),
+                   static_cast<unsigned long long>(stats.sourceBytes),
+                   static_cast<u32>(model.nodes.size()),
+                   static_cast<u32>(model.meshes.size()), nPrims,
+                   static_cast<u32>(model.materials.size()), nTexOk,
+                   static_cast<u32>(model.images.size()),
+                   static_cast<u32>(model.animations.size()),
+                   static_cast<u32>(model.skins.size()));
+    }
+    // ---- 0.9.6.3 (R-020) · MERGE COM AS TRANSFORMS DOS NÓS ---------------
+    // A spec: "Importa TODAS as malhas e primitivas, aplicando as
+    // transformações dos nós, e junta num só modelo." ANTES: cada mesh saía
+    // CRU (o TRS dos nós era ignorado — o modelo ficava fora do sítio /
+    // invisível no device) e multi-mesh partia-se em <stem>_N.gmesh (o TIC
+    // só recebia UMA parte). AGORA: um passe pela hierarquia compõe a
+    // matriz-mundo de cada nó e TODAS as primitivas entram num ÚNICO
+    // .gmesh (os grupos preservam o material por primitiva).
+    MeshData merged;
+    u32 nPrimMerged = 0;
+    {
+        const size_t nNodes = model.nodes.size();
+        std::vector<Mat4> world(nNodes, Mat4::identity());
+        std::vector<Mat4> worldRot(nNodes, Mat4::identity());
+        std::vector<bool> done(nNodes, false);
+        // a matriz-mundo por nó (cadeia de pais composta da raiz para baixo)
+        for (size_t i = 0; i < nNodes; ++i) {
+            if (done[i]) {
+                continue;
+            }
+            // sobe a cadeia até uma raiz (pai -1 ou já computado)
+            std::vector<u32> chain;
+            i32 k = static_cast<i32>(i);
+            while (k >= 0 && !done[static_cast<size_t>(k)]) {
+                chain.push_back(static_cast<u32>(k));
+                k = model.nodes[static_cast<size_t>(k)].parent;
+            }
+            Mat4 pw = k >= 0 ? world[static_cast<size_t>(k)]
+                             : Mat4::identity();
+            Mat4 rw = k >= 0 ? worldRot[static_cast<size_t>(k)]
+                             : Mat4::identity();
+            for (size_t c = chain.size(); c-- > 0;) {
+                const GltfNode& nd =
+                    model.nodes[chain[c]];
+                const Mat4 local =
+                    Mat4::mul(Mat4::translation(nd.translation.x,
+                                                nd.translation.y,
+                                                nd.translation.z),
+                              Mat4::mul(nd.rotation.toMat4(),
+                                        Mat4::scale(nd.scale.x, nd.scale.y,
+                                                    nd.scale.z)));
+                pw = Mat4::mul(pw, local);
+                rw = Mat4::mul(rw, nd.rotation.toMat4());
+                world[chain[c]] = pw;
+                worldRot[chain[c]] = rw;
+                done[chain[c]] = true;
+            }
+        }
+        // funde cada (nó com mesh) → grupo por primitiva, vértices em MUNDO
+        for (size_t n = 0; n < nNodes; ++n) {
+            const GltfNode& nd = model.nodes[n];
+            if (nd.mesh < 0 ||
+                nd.mesh >= static_cast<i32>(model.meshes.size())) {
+                continue;
+            }
+            const MeshData& src = model.meshes[static_cast<size_t>(nd.mesh)];
+            const u16 base = static_cast<u16>(merged.vertices.size());
+            if (merged.vertices.size() + src.vertices.size() > 65535) {
+                err = "glTF: o modelo fundido excede 65535 vértices "
+                      "(limite u16 do .gmesh)";
+                return false;
+            }
+            for (const Vertex& pv : src.vertices) {
+                Vertex v = pv;  // pos/normal/uv copiados
+                const f32 px = pv.pos.x, py = pv.pos.y, pz = pv.pos.z;
+                const Mat4& M = world[n];
+                v.pos = Vec3{
+                    M.m[0] * px + M.m[4] * py + M.m[8] * pz + M.m[12],
+                    M.m[1] * px + M.m[5] * py + M.m[9] * pz + M.m[13],
+                    M.m[2] * px + M.m[6] * py + M.m[10] * pz + M.m[14]};
+                const Mat4& R = worldRot[n];
+                const f32 nx = pv.normal.x, ny = pv.normal.y,
+                          nz = pv.normal.z;
+                v.normal = Vec3{R.m[0] * nx + R.m[4] * ny + R.m[8] * nz,
+                                R.m[1] * nx + R.m[5] * ny + R.m[9] * nz,
+                                R.m[2] * nx + R.m[6] * ny + R.m[10] * nz};
+                merged.vertices.push_back(v);
+            }
+            for (const u16 idx : src.indices) {
+                merged.indices.push_back(static_cast<u16>(base + idx));
+            }
+            for (const MeshData::Group& g : src.groups) {
+                MeshData::Group grp = g;
+                grp.firstIndex += base;
+                grp.name = nd.name.empty() ? g.name
+                                           : nd.name + " · " + g.name;
+                merged.groups.push_back(grp);
+                ++nPrimMerged;
+            }
+            // skin do mesh de origem (se houver) viaja com o merge
+            merged.skinJoints.insert(merged.skinJoints.end(),
+                                     src.skinJoints.begin(),
+                                     src.skinJoints.end());
+            merged.skinWeights.insert(merged.skinWeights.end(),
+                                      src.skinWeights.begin(),
+                                      src.skinWeights.end());
+        }
+    }
+    // ---- passe de SAÍDA: um .gmesh único (ou o cru, se não há nós) -------
+    if (!merged.vertices.empty()) {
+        stats.verts = static_cast<u32>(merged.vertices.size());
+        stats.indices = static_cast<u32>(merged.indices.size());
+        // os LIMITES FINAIS no log (a spec PASSO 2f: sem auto-escala — o
+        // aviso diz se está grande/pequeno, o dono decide)
+        Vec3 mn{1e9f, 1e9f, 1e9f};
+        Vec3 mx{-1e9f, -1e9f, -1e9f};
+        for (const Vertex& v : merged.vertices) {
+            mn.x = (std::min)(mn.x, v.pos.x);
+            mn.y = (std::min)(mn.y, v.pos.y);
+            mn.z = (std::min)(mn.z, v.pos.z);
+            mx.x = (std::max)(mx.x, v.pos.x);
+            mx.y = (std::max)(mx.y, v.pos.y);
+            mx.z = (std::max)(mx.z, v.pos.z);
+        }
+        const f32 dims[3] = {mx.x - mn.x, mx.y - mn.y, mx.z - mn.z};
+        const f32 maxDim = (std::max)(dims[0], (std::max)(dims[1], dims[2]));
+        elog::info("asset: limites finais min(%.3f %.3f %.3f) max(%.3f "
+                   "%.3f %.3f) — dimensões %.3f x %.3f x %.3f (unidades)",
+                   (double)mn.x, (double)mn.y, (double)mn.z, (double)mx.x,
+                   (double)mx.y, (double)mx.z, (double)dims[0],
+                   (double)dims[1], (double)dims[2]);
+        if (maxDim > 10000.0f) {
+            elog::warn("asset: o modelo importado mede %.1f unidades — "
+                       "grande de mais para a câmara padrão (aproxima ou "
+                       "reduz a escala; NADA foi escalado automaticamente)",
+                       (double)maxDim);
+        } else if (maxDim > 0.0f && maxDim < 0.001f) {
+            elog::warn("asset: o modelo importado mede %.4f unidades — "
+                       "pequeno de mais para a câmara padrão (afasta ou "
+                       "aumenta a escala; NADA foi escalado automaticamente)",
+                       (double)maxDim);
+        }
         std::vector<u8> bytes;
-        if (!writeGMesh(mesh, bytes, err)) {
+        if (!writeGMesh(merged, bytes, err)) {
             return false;
         }
         char nm[96];
-        if (model.meshes.size() == 1) {
-            std::snprintf(nm, sizeof(nm), "assets/%s.gmesh", stem.c_str());
-        } else {
-            std::snprintf(nm, sizeof(nm), "assets/%s_%zu.gmesh", stem.c_str(), i);
-        }
+        std::snprintf(nm, sizeof(nm), "assets/%s.gmesh", stem.c_str());
         if (!writeAsset(st, nm, bytes, stats.outputBytes, err)) {
             return false;
         }
         out.meshes.push_back(nm);
         stats.meshes++;
-        elog::info("asset: %s verts=%u idx=%u%s", nm, stats.verts,
-                   stats.indices, mesh.skinned() ? " (skin)" : "");
+        elog::info("asset: %s verts=%u idx=%u prims=%u%s — registado na "
+                   "lista como %s", nm, stats.verts, stats.indices,
+                   nPrimMerged, merged.skinned() ? " (skin)" : "", nm);
+    } else {
+        // sem nós com mesh (glTF atípico): o caminho antigo, mesh a mesh
+        for (size_t i = 0; i < model.meshes.size(); ++i) {
+            MeshData mesh = model.meshes[i];
+            stats.verts = static_cast<u32>(mesh.vertices.size());
+            stats.indices = static_cast<u32>(mesh.indices.size());
+            std::vector<u8> bytes;
+            if (!writeGMesh(mesh, bytes, err)) {
+                return false;
+            }
+            char nm[96];
+            if (model.meshes.size() == 1) {
+                std::snprintf(nm, sizeof(nm), "assets/%s.gmesh",
+                              stem.c_str());
+            } else {
+                std::snprintf(nm, sizeof(nm), "assets/%s_%zu.gmesh",
+                              stem.c_str(), i);
+            }
+            if (!writeAsset(st, nm, bytes, stats.outputBytes, err)) {
+                return false;
+            }
+            out.meshes.push_back(nm);
+            stats.meshes++;
+            elog::info("asset: %s verts=%u idx=%u — registado na lista "
+                       "como %s", nm, stats.verts, stats.indices, nm);
+        }
     }
     // ---- passe de TEXTURAS: imagens embutidas → .gtext (uma a uma) ------
+    // 0.9.6.3 (R-020 · spec PASSO 2b): FALHA PARCIAL NÃO ESCONDE O MODELO —
+    // uma textura que falha é um AVISO no log e o mesh entra com material
+    // por defeito (antes: UMA textura má derrubava o import inteiro)
     for (size_t i = 0; i < model.images.size(); ++i) {
         const GltfImage& im = model.images[i];
         if (im.bytes.empty()) {
+            elog::warn("asset: textura %zu é EXTERNA ('%s') — o .gltf não "
+                       "a traz; o mesh entra com material por defeito",
+                       i, im.uriPath.c_str());
             continue;   // externa — o ficheiro é que a traz (ou ignora)
         }
         if (im.mime != "image/png") {
-            elog::warn("asset: imagem %zu com mime '%s' ignorada (so PNG)",
+            elog::warn("asset: imagem %zu com mime '%s' ignorada (so PNG) "
+                       "— o mesh entra com material por defeito",
                        i, im.mime.c_str());
             continue;
         }
         if (im.bytes.size() > kMaxImageBytes) {
-            err = "textura embutida de " +
-                  std::to_string(im.bytes.size() / (1024 * 1024)) +
-                  " MB excede o orçamento";
-            return false;
+            elog::warn("asset: textura embutida %zu de %zu MB excede o "
+                       "orçamento — ignorada (o mesh entra com material "
+                       "por defeito)",
+                       i, im.bytes.size() / (1024 * 1024));
+            continue;
         }
         CompressedImage comp;
         if (pipeline) {
@@ -357,19 +540,24 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
             std::string perr;
             if (!pipeline->process(im.bytes.data(), im.bytes.size(),
                                    im.mime.c_str(), comp, info, perr)) {
-                err = "textura do glTF falhou: " + perr;
-                return false;
+                elog::warn("asset: textura %zu falhou (%s) — o mesh entra "
+                           "com material por defeito", i, perr.c_str());
+                continue;
             }
         } else {
             static PassthroughCompressor kPassthrough;
             RawImage img;
-            if (!loadPng(im.bytes.data(), im.bytes.size(), img, err)) {
-                return false;
+            std::string pngErr;
+            if (!loadPng(im.bytes.data(), im.bytes.size(), img, pngErr)) {
+                elog::warn("asset: textura %zu falhou (%s) — o mesh entra "
+                           "com material por defeito", i, pngErr.c_str());
+                continue;
             }
             std::string cerr2;
             if (!kPassthrough.compress(img, comp, cerr2)) {
-                err = "textura do glTF falhou: " + cerr2;
-                return false;
+                elog::warn("asset: textura %zu falhou (%s) — o mesh entra "
+                           "com material por defeito", i, cerr2.c_str());
+                continue;
             }
         }
         std::vector<u8> gtext;
@@ -523,17 +711,38 @@ bool convertGltfFile(const std::string& srcAbs, ProjectStorage& st,
     GltfBufferResolver resolver;
     // buffers externos: carrega INTEIRO com guarda (o .bin típico é pequeno;
     // o caso ENORME é o GLB — este é o .gltf textual)
-    resolver.fn = [](void*, const char* uri, std::vector<u8>& o) -> bool {
+    // 0.9.6.3 (R-020 · spec PASSO 2e): se o vizinho .bin não se consegue
+    // ler, a mensagem diz ISSO e sugere o GLB (nunca falha em silêncio)
+    struct ExternCtx {
+        bool failed = false;
+        std::string uri;
+    } externa;
+    resolver.fn = [](void* user, const char* uri, std::vector<u8>& o) -> bool {
+        auto* ctx = static_cast<ExternCtx*>(user);
         if (std::strlen(uri) > 512 || std::strstr(uri, "..") != nullptr) {
+            ctx->failed = true;
+            ctx->uri = uri;
             return false;
         }
-        return fileapi::readAll(uri, o) && !o.empty() &&
-               o.size() <= kMaxImageBytes * 4;
+        const bool ok = fileapi::readAll(uri, o) && !o.empty() &&
+                        o.size() <= kMaxImageBytes * 4;
+        if (!ok) {
+            ctx->failed = true;
+            ctx->uri = uri;
+        }
+        return ok;
     };
-    resolver.user = nullptr;
-    return convertGltfCommon(reinterpret_cast<const char*>(json.data()),
-                             json.size(), nullptr, 0, 0, resolver, st, stem,
-                             pipeline, out, stats, err);
+    resolver.user = &externa;
+    const bool ok = convertGltfCommon(
+        reinterpret_cast<const char*>(json.data()), json.size(), nullptr, 0,
+        0, resolver, st, stem, pipeline, out, stats, err);
+    if (!ok && externa.failed) {
+        err = "o .gltf referencia ficheiros externos ('" + externa.uri +
+              "') que não foi possível ler ao lado do ficheiro — o seletor "
+              "do Android não dá acesso aos vizinhos; exporta o modelo "
+              "como GLB (tudo embutido num só ficheiro)";
+    }
+    return ok;
 }
 
 } // namespace

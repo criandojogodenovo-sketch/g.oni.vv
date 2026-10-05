@@ -1510,3 +1510,129 @@ TEST(regress_density_escala_dp) {
     EXPECT(nearEqF(editor::scriptwin::keyboardHeight(),
                    5.0f * 48.0f + 4.0f * 6.0f + 2.0f * 8.0f));
 }
+
+// ============================================================================
+// R-020 · a importação glTF/GLB falhava em silêncio (FASE 0.9.6.3) —
+//         regress_gltf_draco_mensagem_clara / regress_gltf_transforms_nos
+//
+// O DONO: "modelos importados em OBJ aparecem em 'Adicionar mesh'...
+// Os importados em glTF ou GLB não aparecem... Falha em silêncio."
+// A FORENSE (leitura do código): (1) um glb/gltf com Draco/meshopt/KTX2
+// passava pelo parse e falhava DEPOIS com erros obscuros ("POSITION
+// inválido") — ninguém dizia que o problema era a compressão; (2) UMA
+// textura má derrubava o import inteiro (return false no meio do passe);
+// (3) o TRS dos nós era IGNORADO — o .gmesh saía cru (modelo fora do
+// sítio/invisível) e multi-mesh partia-se em <stem>_N.gmesh (o TIC só
+// recebia uma parte). O FIX: deteção ANTES do parse com mensagem clara
+// ("o ficheiro usa compressão X, que ainda não é suportada"), tolerância
+// parcial nas texturas (aviso + material por defeito), MERGE com as
+// transformações de mundo num ÚNICO .gmesh, limites finais no log (sem
+// auto-escala) e o log rico do parse (nós/malhas/primitivas/verts/
+// índices/materiais/texturas/extensões).
+// ============================================================================
+#include "assets/GOwnFormats.h"   // readGMesh (aferrar o .gmesh de saída)
+#include "core/FsStorage.h"
+
+TEST(regress_gltf_draco_mensagem_clara) {
+    using namespace vv;
+    // um glTF que EXIGE Draco: a falha tem de dizer QUAL é a compressão —
+    // nunca o "POSITION inválido" obscuro que vinha depois
+    const char* json =
+        "{\"asset\":{\"version\":\"2.0\"},"
+        "\"extensionsRequired\":[\"KHR_draco_mesh_compression\"],"
+        "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},"
+        "\"indices\":1}]}]}";
+    const std::string fixture = "goni_r020_draco.gltf";
+    FILE* f = std::fopen(fixture.c_str(), "wb");
+    ASSERT(f != nullptr);
+    std::fwrite(json, 1, std::strlen(json), f);
+    std::fclose(f);
+    char root[64];
+    std::snprintf(root, sizeof(root), "/tmp/goni_r020_%d", (int)::getpid());
+    FsStorage st(root);
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    const bool ok = convert::importFile(fixture, fixture, st, nullptr, out,
+                                        stats, err);
+    EXPECT(!ok);
+    EXPECT(err.find("compressão") != std::string::npos &&
+           err.find("KHR_draco_mesh_compression") != std::string::npos);
+    ::remove(fixture.c_str());
+}
+
+TEST(regress_gltf_transforms_dos_nos_no_gmesh) {
+    using namespace vv;
+    // triângulo unitário + nó com scale 2.5: o .gmesh de saída tem de ter
+    // os VÉRTICES EM MUNDO (2.5) — antes saía cru (o modelo importava e
+    // ficava fora do sítio) — e um ÚNICO ficheiro de saída
+    std::vector<u8> bin;
+    auto pushF = [&bin](f32 v) {
+        u8 t[4];
+        std::memcpy(t, &v, 4);
+        bin.insert(bin.end(), t, t + 4);
+    };
+    auto pushS = [&bin](u16 v) {
+        bin.push_back(static_cast<u8>(v & 0xFF));
+        bin.push_back(static_cast<u8>(v >> 8));
+    };
+    pushF(1.0f); pushF(0.0f); pushF(0.0f);
+    pushF(0.0f); pushF(1.0f); pushF(0.0f);
+    pushF(0.0f); pushF(0.0f); pushF(1.0f);
+    pushS(0); pushS(1); pushS(2);
+    const std::string binName = "goni_r020_scaled.bin";
+    {
+        FILE* f = std::fopen(binName.c_str(), "wb");
+        ASSERT(f != nullptr);
+        std::fwrite(bin.data(), 1, bin.size(), f);
+        std::fclose(f);
+    }
+    char js[768];
+    std::snprintf(js, sizeof(js),
+        "{\"asset\":{\"version\":\"2.0\"},"
+        "\"buffers\":[{\"uri\":\"%s\",\"byteLength\":%zu}],"
+        "\"bufferViews\":["
+        "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36,\"target\":34962},"
+        "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":6,\"target\":34963}],"
+        "\"accessors\":["
+        "{\"bufferView\":0,\"componentType\":5126,\"count\":3,"
+        "\"type\":\"VEC3\",\"min\":[0,0,0],\"max\":[1,1,1]},"
+        "{\"bufferView\":1,\"componentType\":5123,\"count\":3,"
+        "\"type\":\"SCALAR\"}],"
+        "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},"
+        "\"indices\":1,\"mode\":4}]}],"
+        "\"nodes\":[{\"mesh\":0,\"scale\":[2.5,2.5,2.5],"
+        "\"translation\":[1,0,0]}],"
+        "\"scenes\":[{\"nodes\":[0]}],\"scene\":0}",
+        binName.c_str(), bin.size());
+    const std::string fixture = "goni_r020_scaled.gltf";
+    {
+        FILE* f = std::fopen(fixture.c_str(), "wb");
+        ASSERT(f != nullptr);
+        std::fwrite(js, 1, std::strlen(js), f);
+        std::fclose(f);
+    }
+    char root[64];
+    std::snprintf(root, sizeof(root), "/tmp/goni_r020b_%d", (int)::getpid());
+    FsStorage st(root);
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    const bool ok = convert::importFile(fixture, fixture, st, nullptr, out,
+                                        stats, err);
+    ASSERT(ok);   // o erro, se houver, está em err
+    // UM modelo só (o merge — antes: <stem>.gmesh por mesh crua)
+    EXPECT(out.meshes.size() == 1u);
+    EXPECT(out.meshes[0] == "assets/goni_r020_scaled.gmesh");
+    // e os VÉRTICES saem EM MUNDO: o scale 2.5 + translation 1 do nó
+    MeshData md;
+    std::vector<u8> bytes;
+    ASSERT(st.readBytes("assets/goni_r020_scaled.gmesh", bytes));
+    ASSERT(readGMesh(bytes.data(), bytes.size(), md, err));
+    EXPECT(md.vertices.size() == 3u);
+    EXPECT(nearEqF(md.vertices[0].pos.x, 2.5f + 1.0f));   // scale×x + tx
+    EXPECT(nearEqF(md.vertices[1].pos.y, 2.5f));
+    EXPECT(nearEqF(md.vertices[2].pos.z, 2.5f));
+    ::remove(fixture.c_str());
+    ::remove(binName.c_str());
+}

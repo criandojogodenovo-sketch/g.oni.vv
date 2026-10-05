@@ -5,6 +5,8 @@
 // bounds-checked (byteOffset+byteLength dentro do buffer) — ficheiro
 // malicioso/truncado falha com erro, nunca lê fora.
 #include "assets/GltfImporter.h"
+
+#include "platform/EngineLog.h"   // 0.9.6.3: o log das extensões usadas
 #include "core/Json.h"
 #include <cstring>
 #include <deque>
@@ -230,6 +232,47 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
     if (!jasset || !jasset->find("version")) {
         err = "glTF: sem asset.version";
         return false;
+    }
+
+    // ---- 0.9.6.3 (R-020) · EXTENSÕES DE COMPRESSÃO: mensagem CLARA --------
+    // A falha em silêncio do dono: um glb com Draco/meshopt/KTX2 falhava
+    // DEPOIS com erros obscuros ("POSITION inválido") — o ficheiro usa
+    // compressão que a engine não decodifica. Agora DETETA-A ANTES e diz
+    // qual é. extensionsRequired = obrigatórias (sem elas o modelo é
+    // ilegível); extensionsUsed = log informativo.
+    {
+        static const char* const kUnsupported[] = {
+            "KHR_draco_mesh_compression",
+            "EXT_meshopt_compression",
+            "KHR_texture_basisu",
+            "KHR_mesh_quantization",
+        };
+        if (const Json* jr = doc.find("extensionsRequired");
+            jr && jr->type == Json::Type::Array) {
+            for (const Json& e : jr->items) {
+                if (e.type != Json::Type::String) {
+                    continue;
+                }
+                for (const char* bad : kUnsupported) {
+                    if (e.string == bad) {
+                        err = std::string("o ficheiro usa compressão ") +
+                              bad + ", que ainda não é suportada — "
+                              "exporta o modelo sem Draco/meshopt/KTX2 "
+                              "(ou converte para malha simples)";
+                        return false;
+                    }
+                }
+            }
+        }
+        if (const Json* ju = doc.find("extensionsUsed");
+            ju && ju->type == Json::Type::Array) {
+            for (const Json& e : ju->items) {
+                if (e.type == Json::Type::String) {
+                    elog::info("asset: glTF usa a extensão '%s' "
+                               "(informativo)", e.string.c_str());
+                }
+            }
+        }
     }
 
     // ---- buffers ------------------------------------------------------------

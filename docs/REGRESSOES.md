@@ -308,3 +308,18 @@ Prova de mutação (executada localmente antes do push): `dp()` revertido a iden
 | Padrão proibido | (nenhum — a vigília é a sentinela + a FASE 12.11) |
 
 Prova de mutação (executada localmente antes do push): o `st.caret = bo` removido (o offset volta a ser ignorado) → a FASE 12.11 FALHOU no check "(c) tocar no meio da linha 2 põe o cursor NA linha 2" (o tap deixou de mover o cursor — a razão certa; o check (a) passou por acaso: o caret inicial do esqueleto JÁ está entre as chavetas); reposto → 329/0 + 824/0 (818 + 6 novos casos do buffer).
+
+## R-020 · a importação glTF/GLB falhava em silêncio (FASE 0.9.6.3)
+
+| campo | valor |
+|---|---|
+| ID | R-020 |
+| Reportado | task 0.9.6.3: "modelos importados em OBJ aparecem em 'Adicionar mesh' e selecionam-se. Os importados em glTF ou GLB não aparecem: só os OBJ e as primitivas da engine. Falha em silêncio" |
+| Sintoma exato | o OBJ chegava ao seletor; o glTF/GLB não chegava (ou chegava errado) sem NENHUMA mensagem que dissesse o porquê |
+| Causa raiz | (forense lado a lado OBJ↔glTF, por leitura do código: browser → browserImportFile → importJobStart → convert::importFile → convertGltfCommon → writeGMesh → importJobFinish → refreshCatalog → drawAssetMenu — os caminhos PARTILHAM tudo depois do despacho por extensão, que aceita obj/gltf/glb IGUAIS) as divergências viviam DENTRO do ramo glTF: (1) sem deteção de extensionsRequired — um ficheiro Draco/meshopt/KTX2 falhava DEPOIS com erros obscuros ("POSITION inválido"); (2) UMA textura má derrubava o import inteiro (return false no passe de texturas); (3) o TRS dos nós era IGNORADO — o .gmesh saía CRU (modelo fora do sítio/invisível) e multi-mesh partia-se em <stem>_N.gmesh (o TIC só recebia UMA parte); (4) .gltf com .bin externo ilegível falhava com erro genérico de accessor |
+| Fix | (1) deteção ANTES do parse: extensionsRequired com Draco/meshopt/KTX2/quantization → "o ficheiro usa compressão X, que ainda não é suportada — exporta sem Draco/meshopt/KTX2" (extensionsUsed logada, informativo); (2) FALHA PARCIAL não esconde o modelo: textura que falha = AVISO + o mesh entra com material por defeito; (3) MERGE: um passe pela hierarquia compõe a matriz-mundo (T·R·S pela cadeia de pais) e junta TODAS as malhas/primitivas num ÚNICO assets/<stem>.gmesh (grupos preservam o material por primitiva; normais pela rotação de mundo; skin viaja com o merge; fallback cru quando não há nós); (4) .gltf com vizinho ilegível → "o seletor do Android não dá acesso aos vizinhos; exporta o modelo como GLB"; (5) os LIMITES FINAIS no log com aviso de grande/pequeno — NADA escalado automaticamente; (6) o LOG RICO do parse (nós/malhas/primitivas/verts/índices/materiais/texturas/animações/skins/extensões) + "registado na lista como assets/X.gmesh" + o CONTEÚDO da lista de "Adicionar mesh" logado quando o seletor abre |
+| Teste sentinela | `regress_gltf_draco_mensagem_clara` (um glTF com extensionsRequired Draco → importFile falha com a mensagem clara que nomeia a compressão) + `regress_gltf_transforms_dos_nos_no_gmesh` (triângulo unitário + nó scale 2.5 + translation 1 → o .gmesh lido de volta tem os vértices EM MUNDO (3.5, 2.5, 2.5) e UM único ficheiro de saída) |
+| Linha do replay | FASE 12.8 do c33_virtual continua verde (o import real pelo seletor); o log do catálogo existe a cada abertura |
+| Padrão proibido | (nenhum — a vigília é a sentinela) |
+
+Prova de mutação (executada localmente antes do push): a lista kUnsupported esvaziada (deteção off) → `regress_gltf_draco_mensagem_clara` FALHOU (o erro voltou ao obscuro, sem nomear a compressão — a razão certa); reposto → 826/0 + 330/330.
