@@ -15,6 +15,7 @@
 #include "render/Renderer.h"
 #include "render/Texture.h"   // 0.7.0: quads texturados da UI criável
 #include "ui/FontAtlas.h"
+#include "ui/LayoutDump.h"   // 0.9.6.5 (GRUPO B): o registo do layout auditado
 #include "ui/ScrollMath.h"
 #include "ui/SafeArea.h"
 #include "ui/TextFit.h"
@@ -153,6 +154,11 @@ public:
     // gesto.
     bool slider(u64 id, f32 x, f32 y, f32 w, f32 h, f32 minV, f32 maxV, f32& value);
 
+    // 0.9.6.5 (GRUPO B): o corpo do slider (o slider() público carrega o
+    // registo do layout à volta dele)
+    bool sliderCore(u64 id, f32 x, f32 y, f32 w, f32 h, f32 minV, f32 maxV,
+                    f32& value);
+
     // F4.1: região de scroll reutilizável (immediate-mode; estado por id em
     // slots fixos — o offset persiste entre frames). Entre begin/end, os quads
     // de panel/label são recortados à região e os BOTÕES só desenham (o tap é
@@ -169,6 +175,19 @@ public:
     // F5.2: define o offset de UMA região por id (viewer de logs salta para
     // o fundo ao abrir). O valor é clampado no próximo beginScroll da região.
     void scrollSetOffset(u64 id, f32 offset);
+
+    // ---- 0.9.6.5 (GRUPO B · FERRAMENTAS DE VERIFICAÇÃO): AUDITORIA DE LAYOUT
+    // Liga o REGISTO do que este frame desenha: cada widget acrescenta a
+    // SUA entrada (o rect REAL — o JSON exportado sai do MESMO código que
+    // desenha, não pode divergir; a lição R-020). O main liga no frame em
+    // que há export/auditoria pendentes (Diagnóstico ou harness); o custo
+    // com o audit DESLIGADO é um `if` por widget.
+    void auditBegin(const char* screenName, f32 screenW, f32 screenH,
+                    f32 insetT, f32 insetB, f32 insetL, f32 insetR,
+                    f32 density);
+    void auditEnd();                                   // desliga (Record fica)
+    const layout::Record& auditRecord() const { return audit_; }
+    bool auditing() const { return auditing_; }
 
     // hooks de TESTE (CI): leitura dos batches emitidos no frame — permitem
     // aos testes de hospedeiro aferir a geometria REAL desenhada pelos
@@ -388,6 +407,17 @@ private:
     bool xformActive_ = false;
     f32  xformCx_ = 0.0f, xformCy_ = 0.0f;
     f32  xformSin_ = 0.0f, xformCos_ = 1.0f;
+
+    // ---- 0.9.6.5 (GRUPO B): o registo do layout --------------------------------
+    // auditAdd_ é o CHOKE POINT de todas as entradas; auditComposite_ é o
+    // guard dos compostos (frame/panelRounded/button chamam panel() por
+    // dentro — o widget de TOPO regista UMA entrada, não as partes)
+    void auditAdd_(layout::Entry::Kind kind, u64 id, f32 x, f32 y, f32 w, f32 h);
+    void auditLabel_(f32 xBaseline, f32 yBaseline, const char* shown,
+                     f32 fullW, bool truncated, f32 k);
+    layout::Record audit_;
+    bool           auditing_ = false;
+    u32            auditComposite_ = 0;
 };
 
 } // namespace vv

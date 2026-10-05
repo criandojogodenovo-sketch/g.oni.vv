@@ -136,7 +136,68 @@ void UiContext::recordRun(QuadBatch& b, u32 tex, u32 firstVertex,
     runs_.push_back(Run{&b, tex, firstVertex, vertexCount});
 }
 
+// ---- 0.9.6.5 (GRUPO B): o registo do layout ---------------------------------
+
+void UiContext::auditBegin(const char* screenName, f32 screenW, f32 screenH,
+                            f32 insetT, f32 insetB, f32 insetL, f32 insetR,
+                            f32 density) {
+    audit_.clear();
+    audit_.screen = screenName ? screenName : "";
+    audit_.screenW = screenW;
+    audit_.screenH = screenH;
+    audit_.insetT = insetT;
+    audit_.insetB = insetB;
+    audit_.insetL = insetL;
+    audit_.insetR = insetR;
+    audit_.density = density;
+    auditComposite_ = 0;
+    auditing_ = true;
+}
+
+void UiContext::auditEnd() { auditing_ = false; }
+
+void UiContext::auditAdd_(layout::Entry::Kind kind, u64 id, f32 x, f32 y,
+                          f32 w, f32 h) {
+    if (!auditing_) return;
+    layout::Entry e;
+    e.kind = kind;
+    e.id = id;
+    e.x = x;
+    e.y = y;
+    e.w = w;
+    e.h = h;
+    e.clipped = inScroll_;
+    audit_.add(e);
+}
+
+void UiContext::auditLabel_(f32 xBaseline, f32 yBaseline, const char* shown,
+                            f32 fullW, bool truncated, f32 k) {
+    // o MESMO guard dos compostos: o label chamado POR DENTRO de um
+    // button/labelFitted não re-regista (quem chama regista a entrada
+    // CERTA — o button com a truncagem do SEU texto, o labelFitted com o
+    // fullW do texto ORIGINAL)
+    if (!auditing_ || auditComposite_ != 0 || !font_ || !font_->ok() ||
+        !shown) {
+        return;
+    }
+    layout::Entry e;
+    e.kind = layout::Entry::Label;
+    e.x = xBaseline;
+    e.y = yBaseline - font_->ascent() * k;
+    e.w = fontWidth(shown);
+    e.h = (font_->ascent() + font_->descent()) * k;
+    e.fullW = fullW > 0.0f ? fullW : e.w;
+    e.truncated = truncated;
+    e.clipped = inScroll_;
+    audit_.add(e);
+}
+
 void UiContext::panel(f32 x, f32 y, f32 w, f32 h, const f32 color[4]) {
+    // GRUPO B: o rect do painel DESENHADO (o bounding box — os cantos
+    // curvos cobrem por dentro desde a 0.9.0; o box é o mesmo)
+    if (auditing_ && auditComposite_ == 0) {
+        auditAdd_(layout::Entry::Panel, 0, x, y, w, h);
+    }
     const u32 fv = solids_.vertexCount();
     if (emitTo(solids_, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, color)) {
         recordRun(solids_, 0u, fv, 6u);   // 0.7.4: z-order real
@@ -144,6 +205,16 @@ void UiContext::panel(f32 x, f32 y, f32 w, f32 h, const f32 color[4]) {
 }
 
 void UiContext::frame(f32 x, f32 y, f32 w, f32 h, f32 t, const f32 color[4]) {
+    if (auditing_ && auditComposite_ == 0) {
+        auditAdd_(layout::Entry::Frame, 0, x, y, w, h);
+        ++auditComposite_;   // as 4 arestas são PARTES — uma entrada só
+        panel(x, y, w, t, color);
+        panel(x, y + h - t, w, t, color);
+        panel(x, y + t, t, h - 2.0f * t, color);
+        panel(x + w - t, y + t, t, h - 2.0f * t, color);
+        --auditComposite_;
+        return;
+    }
     panel(x, y, w, t, color);
     panel(x, y + h - t, w, t, color);
     panel(x, y + t, t, h - 2.0f * t, color);
@@ -168,13 +239,19 @@ inline f32 cornerInset(f32 r, f32 dy) {
 
 void UiContext::panelRounded(f32 x, f32 y, f32 w, f32 h, f32 radius,
                              const f32 color[4]) {
+    if (auditing_ && auditComposite_ == 0) {
+        auditAdd_(layout::Entry::Panel, 0, x, y, w, h);
+    }
+    ++auditComposite_;   // a escadaria toda é UMA entrada (o bounding box)
     if (w <= 0.0f || h <= 0.0f) {
+        --auditComposite_;
         return;
     }
     const f32 half = (w < h ? w : h) * 0.5f;
     const f32 r = radius < half ? (radius > 0.0f ? radius : 0.0f) : half;
     if (r < 1.0f) {   // raio degenerado = rect cru
         panel(x, y, w, h, color);
+        --auditComposite_;
         return;
     }
     // corpo (cruz central): coluna central inteira + 2 faixas laterais
@@ -204,17 +281,24 @@ void UiContext::panelRounded(f32 x, f32 y, f32 w, f32 h, f32 radius,
         }
         (void)in0;
     }
+    --auditComposite_;
 }
 
 void UiContext::frameRounded(f32 x, f32 y, f32 w, f32 h, f32 t, f32 radius,
                              const f32 color[4]) {
+    if (auditing_ && auditComposite_ == 0) {
+        auditAdd_(layout::Entry::Frame, 0, x, y, w, h);
+    }
+    ++auditComposite_;
     if (w <= 0.0f || h <= 0.0f || t <= 0.0f) {
+        --auditComposite_;
         return;
     }
     const f32 half = (w < h ? w : h) * 0.5f;
     const f32 r = radius < half ? (radius > 0.0f ? radius : 0.0f) : half;
     if (r < 1.0f) {
         frame(x, y, w, h, t, color);
+        --auditComposite_;
         return;
     }
     // arestas retas (entre os cantos)
@@ -239,9 +323,17 @@ void UiContext::frameRounded(f32 x, f32 y, f32 w, f32 h, f32 t, f32 radius,
             drawLine(px[i - 1], py[i - 1], px[i], py[i], t, color);
         }
     }
+    --auditComposite_;
 }
 
 void UiContext::panelPill(f32 x, f32 y, f32 w, f32 h, const f32 color[4]) {
+    if (auditing_ && auditComposite_ == 0) {
+        auditAdd_(layout::Entry::Panel, 0, x, y, w, h);
+        ++auditComposite_;
+        panelRounded(x, y, w, h, h * 0.5f, color);
+        --auditComposite_;
+        return;
+    }
     panelRounded(x, y, w, h, h * 0.5f, color);
 }
 
@@ -261,6 +353,9 @@ void UiContext::labelStyled(f32 xBaseline, f32 yBaseline, const char* text,
         return;
     }
     const f32 k = textScale_ * (fontScale > 0.05f ? fontScale : 1.0f);
+    // GRUPO B: o label DESENHADO (bounding box pelas métricas reais — o
+    // MESMO ascent/descent do centrado do button desde a F5.0-fix)
+    auditLabel_(xBaseline, yBaseline, text, 0.0f, false, k);
     const bool bold = style == static_cast<u8>(1);
     const bool italic = style == static_cast<u8>(2);
     f32 penX = xBaseline;
@@ -309,7 +404,10 @@ void UiContext::labelFitted(f32 xBaseline, f32 yBaseline, const char* text,
     if (!hasFont() || !text) {
         return;
     }
-    if (fontWidth(text) <= maxW) {
+    const f32 fullW = fontWidth(text);
+    if (fullW <= maxW) {
+        // GRUPO B: coube INTEIRO — a entrada diz a largura REAL (nunca
+        // trunca); o label() de dentro regista POR ELE (não há duplo)
         label(xBaseline, yBaseline, text, color);
         return;
     }
@@ -318,7 +416,12 @@ void UiContext::labelFitted(f32 xBaseline, f32 yBaseline, const char* text,
                        [this](const char* s) { return fontWidth(s); },
                        buf, sizeof(buf));
     if (buf[0]) {
-        label(xBaseline, yBaseline, buf, color);
+        // GRUPO B: TRUNCOU — a entrada carrega a largura INTEIRA do texto
+        // original e o flag (o validador conta a informação perdida)
+        auditLabel_(xBaseline, yBaseline, buf, fullW, true, textScale_);
+        ++auditComposite_;   // o label() de dentro já não regista (a
+        label(xBaseline, yBaseline, buf, color);   // entrada é ESTA)
+        --auditComposite_;
     }
 }
 
@@ -326,6 +429,13 @@ void UiContext::labelFitted(f32 xBaseline, f32 yBaseline, const char* text,
 // próprios widgets com ícones e precisa da MESMA semântica sem o desenho).
 bool UiContext::widgetHit(u64 id, f32 x, f32 y, f32 w, f32 h) {
     bool pressed = false;
+
+    // GRUPO B: o hit-rect do widget interativo (a toolbar/banner/fila do
+    // browser desenham por fora e capturam por AQUI — a região tocável é
+    // layout também; dentro do button() o guard evita a dupla)
+    if (auditing_ && auditComposite_ == 0) {
+        auditAdd_(layout::Entry::Button, id, x, y, w, h);
+    }
 
     const bool down = input_ && input_->down(0);
     f32 px = -1.0f, py = -1.0f;
@@ -349,6 +459,44 @@ bool UiContext::widgetHit(u64 id, f32 x, f32 y, f32 w, f32 h) {
 }
 
 bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
+    // GRUPO B: o button regista UMA entrada Button (o rect interativo) e
+    // UMA entrada Label (o texto dele — conteúdo que pode truncar); o
+    // guard cala o widgetHit, os painéis visuais E o label de dentro
+    if (auditing_ && auditComposite_ == 0) {
+        auditAdd_(layout::Entry::Button, id, x, y, w, h);
+        ++auditComposite_;
+        const bool pressedInner = widgetHit(id, x, y, w, h);
+        const bool downInner = input_ && input_->down(0);
+        const bool heldInner = (active_ == id && downInner);
+        const f32* bg = heldInner ? theme::ACCENT : theme::PANEL;
+        const f32* txt = heldInner ? theme::BG : theme::TEXT;
+        panel(x, y, w, h, bg);
+        frame(x, y, w, h, 1.0f, theme::LINE);
+        if (font_ && font_->ok() && text) {
+            char fit[256];
+            const char* shown = text;
+            if (font_->widthOf(text) > w - 8.0f) {
+                textfit::ellipsize(text, w - 8.0f,
+                                   [this](const char* s) { return font_->widthOf(s); },
+                                   fit, sizeof(fit));
+                shown = fit;
+            }
+            const f32 tw = font_->widthOf(shown);
+            const f32 asc = font_->ascent();
+            const f32 desc = font_->descent();
+            const f32 baseline = y + (h - asc - desc) * 0.5f + asc;
+            // a entrada do TEXTO do botão (com a truncagem do nome — os
+            // nomes longos de TIC da Hierarchy contam-se AQUI); o guard
+            // abre SÓ para o registo (o label() de dentro segue calado)
+            --auditComposite_;
+            auditLabel_(x + (w - tw) * 0.5f, baseline, shown,
+                        fontWidth(text), shown != text, textScale_);
+            ++auditComposite_;
+            label(x + (w - tw) * 0.5f, baseline, shown, txt);
+        }
+        --auditComposite_;
+        return pressedInner;
+    }
     const bool pressed = widgetHit(id, x, y, w, h);
     const bool down = input_ && input_->down(0);
     const bool held = (active_ == id && down);
@@ -382,6 +530,21 @@ bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
 }
 
 bool UiContext::slider(u64 id, f32 x, f32 y, f32 w, f32 h, f32 minV, f32 maxV, f32& value) {
+    // GRUPO B: o rect INTERATIVO do slider (o trilho/thumb são visuais)
+    if (auditing_ && auditComposite_ == 0) {
+        auditAdd_(layout::Entry::Slider, id, x, y, w, h);
+        ++auditComposite_;
+        const bool changedInner = sliderCore(id, x, y, w, h, minV, maxV, value);
+        --auditComposite_;
+        return changedInner;
+    }
+    return sliderCore(id, x, y, w, h, minV, maxV, value);
+}
+
+// o corpo do slider de sempre (gesto + trilho/thumb) — o slider() de cima
+// é que carrega o registo do layout (GRUPO B)
+bool UiContext::sliderCore(u64 id, f32 x, f32 y, f32 w, f32 h, f32 minV,
+                           f32 maxV, f32& value) {
     const bool down = input_ && input_->down(0);
     f32 px = -1.0f, py = -1.0f;
     if (input_) {
@@ -427,6 +590,13 @@ bool UiContext::slider(u64 id, f32 x, f32 y, f32 w, f32 h, f32 minV, f32 maxV, f
 
 // ---- scroll (F4.1) ----------------------------------------------------------
 void UiContext::beginScroll(u64 id, const UiRect& region, f32 contentHeight) {
+    // GRUPO B: a região de scroll é uma zona INTERATIVA de layout (o drag
+    // vive aqui); os filhos dela nascem com clipped=true (auditAdd_ lê
+    // inScroll_ — tem de ser registada ANTES do flag ligar)
+    if (auditing_ && auditComposite_ == 0) {
+        auditAdd_(layout::Entry::Scroll, id, region.x, region.y, region.w,
+                  region.h);
+    }
     // slot por id (procura; senão primeiro livre)
     i32 slot = kNoScroll;
     for (u32 i = 0; i < kMaxScrollSlots; ++i) {

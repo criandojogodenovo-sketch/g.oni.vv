@@ -772,6 +772,19 @@ void showToast(const char* msg);   // fwd: usada pelo feedCanvasPlay (abaixo)
 // projeto. A tela de projetos (Java) lê-o para o card (default = logo G).
 bool g_thumbPending = false;
 
+// 0.9.6.5 (GRUPO B · FERRAMENTAS DE VERIFICAÇÃO) — O LAYOUT EXPORTADO:
+// o pedido arma AQUI (Diagnóstico ou harness), o PRÓXIMO frame desenha
+// com o audit ligado (cada widget regista o rect real) e o ponto de swap
+// escreve layout/<ecrã>.png (backbuffer inteiro, full-res) + .json (as
+// entradas) [+ auditoria-<ecrã>.txt com o veredito do validador]. O dono
+// obtém a VARA DE MEDIR: o que o ecrã TEM de verdade, em px.
+bool g_layoutExportPending = false;
+bool g_layoutAuditPending = false;
+// o audit correu NESTE frame? (o pedido armado A MEIO do frame — a ação do
+// Settings dispara durante o draw — não pode ser consumido pelo dump do
+// MESMO frame com o registo STALE do ecrã anterior; espera o próximo)
+bool g_layoutFrameAudited = false;
+
 // ---- 0.7.0: UI criável em PLAY (hit-test + ações declarativas) -------------
 // estado do on-click: press ARMA (o slot fica reclamado — não vai à câmara
 // nem aos controlos), release DENTRO do mesmo elemento DISPARA a ação (o
@@ -4331,9 +4344,164 @@ static void captureThumbIfPending(f32 w, f32 h) {
                tw, th, png.size());
 }
 
+// ---- 0.9.6.5 (GRUPO B): O LAYOUT EXPORTADO + A AUDITORIA --------------------
+
+// o nome do ecrã ATIVO (a ordem é a dos fullscreen primeiro — o gating do
+// modalOpen já garante que só UM ecrã desenha; o nome documenta QUAL)
+static const char* currentScreenName() {
+    const editor::EditorState& st = g_editor;
+    if (g_importJob.active.load()) return "import";
+    if (st.playMode) return "play";
+    if (st.scriptWin.open) return "script";
+    if (st.docsScreen.open) return "docs";
+    if (st.settingsMenu) return "settings";
+    if (st.textWin.open) return "texto";
+    if (st.fileBrowser) return "browser";
+    if (st.logViewer) return "logs";
+    if (st.scenesMenu) return "cenas";
+    if (st.applyAsk) return "aplicar";
+    if (st.assetMenu != 0) return "seletor";
+    if (st.storageDialog) return "storage";
+    if (st.importMenu) return "menu_import";
+    if (st.fileMenu) return "menu_ficheiro";
+    if (st.plusMenu) return "menu_mais";
+    if (st.contextMenu) return "menu_contexto";
+    if (st.removeDialog) return "remover";
+    if (st.textInput) return "entrada_texto";
+    if (st.audioMode) return "audio";
+    if (st.uiMode) return "ui2d";
+    return "editor";
+}
+
+// escreve bytes no projeto (o padrão thumb: makeDirs do pai + stream)
+static bool layoutWriteFile(const char* rel, const u8* data, size_t n) {
+    std::string p(rel);
+    const size_t slash = p.rfind('/');
+    if (slash != std::string::npos) {
+        g_storage->makeDirs(p.substr(0, slash));
+    }
+    const int hs = g_storage->openWriteStream(rel);
+    if (hs <= 0) {
+        elog::error("layout: openWriteStream %s falhou", rel);
+        return false;
+    }
+    if (!g_storage->writeStreamChunk(hs, data, n)) {
+        elog::error("layout: escrita %s falhou (%zu B)", rel, n);
+        g_storage->closeWriteStream(hs);
+        return false;
+    }
+    g_storage->closeWriteStream(hs);
+    return true;
+}
+
+// o consumidor do pedido: corre no FIM do frame (frame COMPLETO no
+// backbuffer, antes do swap). PNG full-res + JSON das entradas; com o
+// audit pedido, o validador corre e o relatório vai para o log + projeto.
+static void layoutDumpIfPending(f32 w, f32 h) {
+    if (!g_layoutExportPending && !g_layoutAuditPending) {
+        return;
+    }
+    if (!g_layoutFrameAudited) {
+        // armado A MEIO deste frame (o botão do Settings disparou no draw):
+        // o registo atual é do ecrã ANTERIOR — NÃO consumir; o próximo frame
+        // desenha já com o audit ligado e é ele que exporta
+        return;
+    }
+    g_layoutExportPending = false;
+    const bool audit = g_layoutAuditPending;
+    g_layoutAuditPending = false;
+    if (!g_projectReady || !g_storage) {
+        elog::error("layout: sem projeto/storage — export cancelado");
+        return;
+    }
+    const layout::Record& rec = g_ui.auditRecord();
+    if (rec.entries.empty()) {
+        elog::error("layout: registo vazio (o audit não correu neste frame)");
+        return;
+    }
+    const u32 iw = static_cast<u32>(w);
+    const u32 ih = static_cast<u32>(h);
+    if (iw < 16 || ih < 16) {
+        elog::error("layout: superfície degenerada %ux%u", iw, ih);
+        return;
+    }
+    // ---- o PNG: o backbuffer INTEIRO (o ecrã como o dono o vê) ----------
+    std::vector<u8> rgba(static_cast<size_t>(iw) * ih * 4u);
+#ifndef GL_PACK_ALIGNMENT
+#define GL_PACK_ALIGNMENT 0x0D05
+#endif
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, static_cast<GLint>(iw), static_cast<GLint>(ih),
+                 GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    thumb::flipVerticalRgba(rgba.data(), iw, ih);   // GL é bottom-up
+    std::vector<u8> rgb(static_cast<size_t>(iw) * ih * 3u);
+    for (size_t i = 0; i < static_cast<size_t>(iw) * ih; ++i) {
+        rgb[i * 3u + 0u] = rgba[i * 4u + 0u];
+        rgb[i * 3u + 1u] = rgba[i * 4u + 1u];
+        rgb[i * 3u + 2u] = rgba[i * 4u + 2u];
+    }
+    const std::vector<u8> png = thumb::encodePngRgb(rgb.data(), iw, ih);
+    if (png.empty()) {
+        elog::error("layout: encode PNG falhou (%ux%u)", iw, ih);
+        return;
+    }
+    // ---- o JSON: as entradas REAIS do frame ------------------------------
+    const std::string json = layout::toJson(rec).dump();
+    char pngPath[96], jsonPath[96];
+    std::snprintf(pngPath, sizeof(pngPath), "layout/%s.png", rec.screen);
+    std::snprintf(jsonPath, sizeof(jsonPath), "layout/%s.json", rec.screen);
+    const bool okP = layoutWriteFile(pngPath, png.data(), png.size());
+    const bool okJ = layoutWriteFile(jsonPath,
+                                     reinterpret_cast<const u8*>(json.data()),
+                                     json.size());
+    elog::info("layout: export do ecrã \"%s\" — %s (%ux%u, %zu B) + %s "
+               "(%zu entradas, %zu B)",
+               rec.screen, okP ? pngPath : "PNG FALHOU", iw, ih, png.size(),
+               okJ ? jsonPath : "JSON FALHOU", rec.entries.size(), json.size());
+    // ---- a auditoria (o validador da casa sobre o ecrã REAL) -------------
+    if (audit) {
+        const std::vector<layout::Problem> ps = layout::validate(rec);
+        const std::string rep = layout::report(rec, ps);
+        elog::info("layout: AUDITORIA do ecrã \"%s\": %u ERRO(s), %u aviso(s)",
+                   rec.screen,
+                   [&]{ u32 n=0; for (auto& p:ps) if (p.sev==layout::Problem::Erro) ++n; return n; }(),
+                   [&]{ u32 n=0; for (auto& p:ps) if (p.sev==layout::Problem::Aviso) ++n; return n; }());
+        for (const layout::Problem& p : ps) {
+            const std::string line = layout::describe(rec, p);
+            if (p.sev == layout::Problem::Erro) {
+                elog::error("layout: %s", line.c_str());
+            } else {
+                elog::info("layout: %s", line.c_str());
+            }
+        }
+        char audPath[96];
+        std::snprintf(audPath, sizeof(audPath), "layout/auditoria-%s.txt",
+                      rec.screen);
+        const bool okA = layoutWriteFile(
+            audPath, reinterpret_cast<const u8*>(rep.data()), rep.size());
+        if (ps.empty()) {
+            showToast("auditoria: VERDE (relatório no projeto)");
+        } else {
+            char t[80];
+            u32 erros = 0, avisos = 0;
+            for (auto& p : ps) {
+                if (p.sev == layout::Problem::Erro) ++erros; else ++avisos;
+            }
+            std::snprintf(t, sizeof(t), "auditoria: %u erro(s), %u aviso(s)",
+                          erros, avisos);
+            showToast(t);
+        }
+        elog::info("layout: relatório %s (%zu B)%s", audPath, rep.size(),
+                   okA ? "" : " — ESCRITA FALHOU");
+    } else {
+        showToast("layout exportado (layout/ do projeto)");
+    }
+}
+
 void frame() {
     const f32 w = static_cast<f32>(g_egl.width());
     const f32 h = static_cast<f32>(g_egl.height());
+    g_layoutFrameAudited = false;   // GRUPO B: só o auditBegin deste frame acende
 
     // 0.9.0 (spec E): o estado do drawer alimenta os rects dos painéis/
     // viewport neste frame (a fonte é o BottomState — persistente)
@@ -4622,6 +4790,16 @@ void frame() {
     // ---- pass UI: immediate-mode da F1 por cima (sem depth — nunca ocluída)
     g_ui.beginFrame(&g_renderer, &g_input, w, h);
 
+    // 0.9.6.5 (GRUPO B): pedido de export/auditoria pendente? O registo liga
+    // AGORA (antes do 1.º widget deste frame) — as entradas saem do draw
+    // real; o ponto de swap escreve os ficheiros (layoutDumpIfPending)
+    if (g_layoutExportPending || g_layoutAuditPending) {
+        g_ui.auditBegin(currentScreenName(), w, h, g_ui.safeTop(),
+                        g_ui.safeBottom(), g_ui.safeLeft(), g_ui.safeRight(),
+                        theme::g_density);
+        g_layoutFrameAudited = true;
+    }
+
     // 0.8.10 — IMPORT EM CURSO: overlay MODAL (o resto da UI não desenha —
     // o job é a única coisa que acontece; cancelar é a única ação)
     if (g_importJob.active.load()) {
@@ -4668,8 +4846,10 @@ void frame() {
                        "chunk)");
         }
         drawToast();
+        if (g_ui.auditing()) g_ui.auditEnd();
         g_ui.endFrame();
         g_lastUiStats = g_renderer.endFrame();
+        layoutDumpIfPending(w, h);   // GRUPO B: o modal também é ecrã
         g_egl.swap();
         g_input.clearEdges();
         return;   // MODAL: nada mais desenha/processa este frame
@@ -4704,6 +4884,8 @@ void frame() {
         ui::transitionDraw(g_ui, g_sceneTrans, w, h);
         g_ui.endFrame();                       // submete solids + glyphs
         g_lastUiStats = g_renderer.endFrame(); // UI por cima do 3D
+        if (g_ui.auditing()) g_ui.auditEnd();
+        layoutDumpIfPending(w, h);   // GRUPO B: o play também é ecrã
         g_egl.swap();
         g_input.clearEdges();
         return;
@@ -4957,6 +5139,29 @@ void frame() {
             }
             case editor::settings::kCopyBench: {
                 benchCopyReport();
+                break;
+            }
+            case editor::settings::kExportLayout: {
+                // 0.9.6.5 (GRUPO B): o Settings FECHA e o frame seguinte (o
+                // ecrã que ficou por baixo — normalmente o editor) é o
+                // exportado: PNG do backbuffer + JSON das regiões reais em
+                // layout/ do projeto. Um ecrã de cada vez, sem o modal à
+                // mista (o validador não pode ver camadas sobrepostas).
+                g_editor.settingsMenu = false;
+                g_layoutExportPending = true;
+                elog::info("layout: export armado (o próximo frame é o "
+                           "exportado)");
+                break;
+            }
+            case editor::settings::kAuditScreen: {
+                // 0.9.6.5 (GRUPO B): idem + o VALIDADOR corre no fim do
+                // export — cada problema logado (o dono cola o engine.log),
+                // o relatório inteiro em layout/auditoria-<ecrã>.txt
+                g_editor.settingsMenu = false;
+                g_layoutExportPending = true;
+                g_layoutAuditPending = true;
+                elog::info("layout: auditoria armada (o validador corre no "
+                           "fim do próximo frame)");
                 break;
             }
             case editor::settings::kOpenTextWindow: {
@@ -5907,12 +6112,16 @@ void frame() {
 
     g_ui.endFrame();                       // submete solids + glyphs
     g_lastUiStats = g_renderer.endFrame(); // desenha a UI por cima do 3D
+    if (g_ui.auditing()) g_ui.auditEnd();
 
     // 0.9.0 (spec F) — a captura vem AQUI: o frame JÁ está completo no
     // backbuffer (3D + UI + overlays) e AINDA não passou ao ecrã; lê a
     // VIEWPORT CENTRAL (sem o chrome dos painéis; em Play, o contentRect),
     // crop 16:9 + downsample ≤480 e escreve thumb.png na raiz do projeto.
     captureThumbIfPending(w, h);
+    // 0.9.6.5 (GRUPO B): o layout exportado — MESMO ponto (frame completo,
+    // antes do swap); lê o backbuffer INTEIRO + o registo do audit.
+    layoutDumpIfPending(w, h);
 
     g_egl.swap();
     g_input.clearEdges();   // edges já consumidas pela UI/câmara neste frame

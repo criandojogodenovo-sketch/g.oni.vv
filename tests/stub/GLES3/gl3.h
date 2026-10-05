@@ -93,6 +93,15 @@ typedef float         GLfloat;
 typedef char          GLchar;
 typedef intptr_t      GLsizeiptr;
 
+// 0.9.6.5 (GRUPO B · FERRAMENTAS DE VERIFICAÇÃO): o FRAMEBUFFER REAL.
+// Com glstub::fb::enabled = true o stub deixa de ser no-op e RASTERIZA a
+// sério (RGBA8 + depth f32) — as MESMAS regras do Mali pelas MESMAS funções
+// que a engine chama (os DOIS shaders da casa + a grelha adaptativa).
+// enabled = false (default) = o no-op de SEMPRE, zero mudança para os
+// testes existentes; os CONTADORES de stats continuam a contar nos dois
+// caminhos (os testes que lêem stats não mentem com o fb ligado).
+#include "../glstub_fb.h"
+
 #define GL_FALSE 0
 #define GL_TRUE  1
 
@@ -139,12 +148,36 @@ typedef intptr_t      GLsizeiptr;
 #define GL_DEPTH_WRITEMASK 0x0B72
 #define GL_LESS 0x0201
 
-inline void glGenTextures(GLint n, GLuint* t) { glstub::stats.genTextures += (int)n; if (t) for (GLint i = 0; i < n; ++i) t[i] = 1u + i; }
-inline void glDeleteTextures(GLint n, const GLuint*) { glstub::stats.deleteTextures += (int)n; }
-inline void glBindTexture(GLenum, GLuint t) { ++glstub::stats.boundTextures; glstub::stats.lastBoundTexture = t; }
+inline void glGenTextures(GLint n, GLuint* t) {
+    glstub::stats.genTextures += (int)n;
+    if (glstub::failNextGenObjects) { if (t) for (GLint i = 0; i < n; ++i) t[i] = 0u; return; }
+    if (glstub::fb::enabled) {
+        if (t) for (GLint i = 0; i < n; ++i) {
+            t[i] = glstub::fb::genObjects();
+            glstub::fb::onGenTexture(t[i]);
+        }
+        return;
+    }
+    if (t) for (GLint i = 0; i < n; ++i) t[i] = 1u + i;
+}
+inline void glDeleteTextures(GLint n, const GLuint* t) {
+    glstub::stats.deleteTextures += (int)n;
+    if (glstub::fb::enabled && t) for (GLint i = 0; i < n; ++i) glstub::fb::delTexture(t[i]);
+}
+inline void glBindTexture(GLenum, GLuint t) {
+    ++glstub::stats.boundTextures;
+    glstub::stats.lastBoundTexture = t;
+    if (glstub::fb::enabled) glstub::fb::bindTexture(t);
+}
 inline void glPixelStorei(GLenum, GLint) {}
-inline void glTexImage2D(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void*) { ++glstub::stats.texImage2D; }
-inline void glCompressedTexImage2D(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLsizei, const void*) { ++glstub::stats.compressedTexImage2D; }
+inline void glTexImage2D(GLenum, GLint, GLint internalformat, GLsizei w, GLsizei h, GLint, GLenum format, GLenum, const void* pixels) {
+    ++glstub::stats.texImage2D;
+    if (glstub::fb::enabled) glstub::fb::texImage2D(internalformat, w, h, format, pixels);
+}
+inline void glCompressedTexImage2D(GLenum, GLint, GLsizei, GLsizei w, GLsizei h, GLint, GLsizei, const void*) {
+    ++glstub::stats.compressedTexImage2D;
+    if (glstub::fb::enabled) glstub::fb::compressedTexImage2D(w, h);
+}
 inline void glTexParameteri(GLenum, GLenum, GLint) {}
 inline void glGenerateMipmap(GLenum) {}
 inline void glActiveTexture(GLenum) {}
@@ -180,14 +213,28 @@ inline void glGetShaderiv(GLuint, GLenum, GLint* ok) { if (ok) *ok = GL_TRUE; }
 inline void glGetShaderInfoLog(GLuint, GLsizei, GLsizei*, GLchar*) {}
 inline void glGetProgramInfoLog(GLuint, GLsizei, GLsizei*, GLchar*) {}
 inline void glDeleteShader(GLuint) {}
-inline GLuint glCreateProgram() { ++glstub::stats.createProgram; return 1; }
+inline GLuint glCreateProgram() {
+    ++glstub::stats.createProgram;
+    if (glstub::fb::enabled) {
+        const GLuint id = glstub::fb::genObjects();
+        glstub::fb::onCreateProgram(id);
+        return id;
+    }
+    return 1;
+}
 inline void glAttachShader(GLuint, GLuint) {}
 inline void glLinkProgram(GLuint) {}
 inline void glGetProgramiv(GLuint, GLenum, GLint* ok) { if (ok) *ok = GL_TRUE; }
-inline void glDeleteProgram(GLuint) { ++glstub::stats.deleteProgram; }
-inline void glUseProgram(GLuint) {}
-inline GLint glGetUniformLocation(GLuint, const GLchar*) { return 0; }
-inline void glUniformMatrix4fv(GLint, GLsizei count, GLboolean, const GLfloat* m) {
+inline void glDeleteProgram(GLuint id) {
+    ++glstub::stats.deleteProgram;
+    if (glstub::fb::enabled) glstub::fb::delProgram(id);
+}
+inline void glUseProgram(GLuint id) { if (glstub::fb::enabled) glstub::fb::useProgram(id); }
+inline GLint glGetUniformLocation(GLuint prog, const GLchar* name) {
+    if (glstub::fb::enabled) return glstub::fb::getUniformLocation(prog, name);
+    return 0;
+}
+inline void glUniformMatrix4fv(GLint loc, GLsizei count, GLboolean, const GLfloat* m) {
     ++glstub::stats.matrix4fvCalls;
     if (count > 1) {
         // 0.8.2: upload de ARRAY de matrizes (uBones do skin)
@@ -199,32 +246,79 @@ inline void glUniformMatrix4fv(GLint, GLsizei count, GLboolean, const GLfloat* m
             glstub::stats.lastMatrix4fv[i] = m[i];
         }
     }
+    if (glstub::fb::enabled) glstub::fb::uniformMatrix4fv(loc, count, m);
 }
 // 0.8.2: uSkin do LitMaterial (liga/desliga o ramo de bones)
-inline void glUniform1i(GLint, GLint v) {
+inline void glUniform1i(GLint loc, GLint v) {
     glstub::stats.lastUniform1i = (int)v;
     ++glstub::stats.uniform1iCalls;
+    if (glstub::fb::enabled) glstub::fb::uniform1i(loc, int(v));
 }
-inline void glUniform1f(GLint, GLfloat v) { glstub::stats.lastUniform1f = v; }
-inline void glUniform3f(GLint, GLfloat x, GLfloat y, GLfloat z) {
+inline void glUniform1f(GLint loc, GLfloat v) {
+    glstub::stats.lastUniform1f = v;
+    if (glstub::fb::enabled) glstub::fb::uniform1f(loc, v);
+}
+inline void glUniform3f(GLint loc, GLfloat x, GLfloat y, GLfloat z) {
     glstub::stats.lastUniform3f[0] = x;
     glstub::stats.lastUniform3f[1] = y;
     glstub::stats.lastUniform3f[2] = z;
     ++glstub::stats.uniform3fCalls;
+    if (glstub::fb::enabled) glstub::fb::uniform3f(loc, x, y, z);
 }
-inline void glUniform2f(GLint, GLfloat, GLfloat) {}
+inline void glUniform2f(GLint loc, GLfloat x, GLfloat y) {
+    if (glstub::fb::enabled) glstub::fb::uniform2f(loc, x, y);
+}
 
-inline void glGenBuffers(GLsizei n, GLuint* t) { glstub::stats.genBuffers += (int)n; if (glstub::failNextGenObjects) { if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 0u; return; } if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 1u + i; }
-inline void glDeleteBuffers(GLsizei n, const GLuint*) { glstub::stats.deleteBuffers += (int)n; }
-inline void glBindBuffer(GLenum, GLuint) {}
-inline void glBufferData(GLenum, intptr_t, const void*, GLenum) { ++glstub::stats.bufferData; }
-inline void glGenVertexArrays(GLsizei n, GLuint* t) { glstub::stats.genVertexArrays += (int)n; if (glstub::failNextGenObjects) { if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 0u; return; } if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 1u + i; }
-inline void glDeleteVertexArrays(GLsizei n, const GLuint*) { glstub::stats.deleteVertexArrays += (int)n; }
-inline void glBindVertexArray(GLuint) {}
-inline void glEnableVertexAttribArray(GLuint) {}
-inline void glVertexAttribPointer(GLuint, GLint, GLenum, GLboolean, GLsizei, const void*) {}
-inline void glDrawArrays(GLenum, GLint, GLsizei) { ++glstub::stats.drawArraysCalls; }
-inline void glDrawElements(GLenum, GLsizei, GLenum, const void*) { ++glstub::stats.drawElementsCalls; }
+inline void glGenBuffers(GLsizei n, GLuint* t) {
+    glstub::stats.genBuffers += (int)n;
+    if (glstub::failNextGenObjects) { if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 0u; return; }
+    if (glstub::fb::enabled) {
+        if (t) for (GLsizei i = 0; i < n; ++i) {
+            t[i] = glstub::fb::genObjects();
+            glstub::fb::onGenBuffer(t[i]);
+        }
+        return;
+    }
+    if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 1u + i;
+}
+inline void glDeleteBuffers(GLsizei n, const GLuint* t) {
+    glstub::stats.deleteBuffers += (int)n;
+    if (glstub::fb::enabled && t) for (GLsizei i = 0; i < n; ++i) glstub::fb::delBuffer(t[i]);
+}
+inline void glBindBuffer(GLenum target, GLuint id) {
+    if (glstub::fb::enabled) glstub::fb::bindBuffer(target, id);
+}
+inline void glBufferData(GLenum target, intptr_t size, const void* data, GLenum) {
+    ++glstub::stats.bufferData;
+    if (glstub::fb::enabled) glstub::fb::bufferData(target, size, data);
+}
+inline void glGenVertexArrays(GLsizei n, GLuint* t) {
+    glstub::stats.genVertexArrays += (int)n;
+    if (glstub::failNextGenObjects) { if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 0u; return; }
+    if (glstub::fb::enabled) { if (t) for (GLsizei i = 0; i < n; ++i) { t[i] = glstub::fb::genObjects(); glstub::fb::onGenVao(t[i]); } return; }
+    if (t) for (GLsizei i = 0; i < n; ++i) t[i] = 1u + i;
+}
+inline void glDeleteVertexArrays(GLsizei n, const GLuint* t) {
+    glstub::stats.deleteVertexArrays += (int)n;
+    if (glstub::fb::enabled && t) for (GLsizei i = 0; i < n; ++i) glstub::fb::delVao(t[i]);
+}
+inline void glBindVertexArray(GLuint id) {
+    if (glstub::fb::enabled) glstub::fb::bindVao(id);
+}
+inline void glEnableVertexAttribArray(GLuint loc) {
+    if (glstub::fb::enabled) glstub::fb::enableAttrib(int(loc));
+}
+inline void glVertexAttribPointer(GLuint loc, GLint size, GLenum, GLboolean, GLsizei stride, const void* off) {
+    if (glstub::fb::enabled) glstub::fb::attribPointer(int(loc), size, stride, off);
+}
+inline void glDrawArrays(GLenum mode, GLint first, GLsizei count) {
+    ++glstub::stats.drawArraysCalls;
+    if (glstub::fb::enabled) glstub::fb::drawArrays(mode, first, count);
+}
+inline void glDrawElements(GLenum mode, GLsizei count, GLenum, const void*) {
+    ++glstub::stats.drawElementsCalls;
+    if (glstub::fb::enabled) glstub::fb::drawElements(mode, count);
+}
 
 // 0.7.8: os no-ops passam a GRAVAR o estado (inócuo p/ os testes antigos —
 // apenas leituras novas; nada do que existia lia estas funções)
@@ -235,24 +329,47 @@ inline void glViewport(GLint x, GLint y, GLsizei w, GLsizei h) {
     glstub::stats.viewport[1] = y;
     glstub::stats.viewport[2] = w;
     glstub::stats.viewport[3] = h;
+    if (glstub::fb::enabled) glstub::fb::setViewport(x, y, w, h);
 }
-inline void glClearColor(GLfloat, GLfloat, GLfloat, GLfloat) {}
-inline void glClear(GLenum) {}
+inline void glClearColor(GLfloat r, GLfloat g, GLfloat b, GLfloat a) {
+    if (glstub::fb::enabled) glstub::fb::setClearColor(r, g, b, a);
+}
+inline void glClear(GLenum mask) {
+    if (glstub::fb::enabled) glstub::fb::clear(mask);
+}
 inline void glEnable(GLenum cap) {
     if (cap == GL_SCISSOR_TEST) glstub::stats.scissorEnabled = true;
     else if (cap == GL_DEPTH_TEST) glstub::stats.depthEnabled = true;
     else if (cap == GL_CULL_FACE) glstub::stats.cullEnabled = true;
     else if (cap == GL_BLEND) glstub::stats.blendEnabled = true;
+    if (glstub::fb::enabled) {
+        if (cap == GL_SCISSOR_TEST) glstub::fb::setScissorEnabled(true);
+        else if (cap == GL_DEPTH_TEST) glstub::fb::setDepthEnabled(true);
+        else if (cap == GL_CULL_FACE) glstub::fb::setCullEnabled(true);
+        else if (cap == GL_BLEND) glstub::fb::setBlendEnabled(true);
+    }
 }
 inline void glDisable(GLenum cap) {
     if (cap == GL_SCISSOR_TEST) glstub::stats.scissorEnabled = false;
     else if (cap == GL_DEPTH_TEST) glstub::stats.depthEnabled = false;
     else if (cap == GL_CULL_FACE) glstub::stats.cullEnabled = false;
     else if (cap == GL_BLEND) glstub::stats.blendEnabled = false;
+    if (glstub::fb::enabled) {
+        if (cap == GL_SCISSOR_TEST) glstub::fb::setScissorEnabled(false);
+        else if (cap == GL_DEPTH_TEST) glstub::fb::setDepthEnabled(false);
+        else if (cap == GL_CULL_FACE) glstub::fb::setCullEnabled(false);
+        else if (cap == GL_BLEND) glstub::fb::setBlendEnabled(false);
+    }
 }
-inline void glDepthMask(GLboolean) {}
+inline void glDepthMask(GLboolean b) {
+    if (glstub::fb::enabled) glstub::fb::setDepthMask(b != 0);
+}
 inline void glDepthFunc(GLenum) {}
 inline void glBlendFunc(GLenum, GLenum) {}
-inline void glReadPixels(GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void*) {}
+inline void glReadPixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum, GLenum, void* dst) {
+    if (glstub::fb::enabled) glstub::fb::readPixels(x, y, w, h, dst);
+}
 
-inline void glScissor(int, int, int, int) {}
+inline void glScissor(int x, int y, int w, int h) {
+    if (glstub::fb::enabled) glstub::fb::setScissor(x, y, w, h);
+}

@@ -294,6 +294,22 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
             res = kCopyBench;
         }
         y += kRowH;
+        // 0.9.6.5 (GRUPO B · FERRAMENTAS DE VERIFICAÇÃO) — as duas linhas
+        // que dão ao dono a VARA DE MEDIR: o layout do ecrã exportado
+        // (PNG do framebuffer + JSON das regiões reais) e a AUDITORIA (o
+        // validador corre sobre o ecrã que fica por baixo — o Settings
+        // fecha e o próximo frame é o auditado; os ficheiros vão para
+        // layout/ dentro do projeto, o relatório para o engine.log)
+        if (actionRow(ui, kLayoutExpId, ox, y, aw,
+                      "PNG+JSON p/ layout/", "Exportar layout")) {
+            res = kExportLayout;
+        }
+        y += kRowH;
+        if (actionRow(ui, kLayoutAudId, ox, y, aw,
+                      "validador+log do ecrã", "Auditoria do ecrã")) {
+            res = kAuditScreen;
+        }
+        y += kRowH;
         // 0.9.1 — JANELA DE TEXTO: portrait + IME do sistema (a semente do
         // editor de script 0.9.2; vive em Diagnóstico enquanto não há
         // componente Script num TIC — decisão documentada no relatório)
@@ -453,6 +469,22 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
                     if (res == kNone &&
                         hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
                         res = kCopyBench;
+                    }
+                    hy += kRowH;
+                    // 0.9.6.5 (GRUPO B): os DOIS botões do layout — sem
+                    // ESTAS linhas o walk não re-despacha e os botões
+                    // NASCEM MORTOS ao toque (a MESMA classe do bug 0.9.1:
+                    // desenhar ≠ tocar; apanhado PELA FASE 13.2 do c33_virtual
+                    // no primeiro run — o tap no rect real do registo não
+                    // fechava o Settings)
+                    if (res == kNone &&
+                        hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        res = kExportLayout;
+                    }
+                    hy += kRowH;
+                    if (res == kNone &&
+                        hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        res = kAuditScreen;
                     }
                     hy += kRowH;
                     if (res == kNone &&

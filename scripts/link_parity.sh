@@ -12,9 +12,14 @@ INC="-I $ROOT/tests/stub -I $ROOT/app/src/main/cpp \
 BUILD=$(mktemp -d)
 trap 'rm -rf "$BUILD"' EXIT
 cd "$ROOT/app/src/main/cpp"
-# fontes do CMake da app (só .cpp — a MESMA lista que o NDK compila)
-grep -E '^[[:space:]]+[A-Za-z0-9_/.-]+\.cpp$' CMakeLists.txt \
-  | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sort -u > "$BUILD/srcs.txt"
+# fontes do CMake da app (só .cpp — a MESMA lista que o NDK compila).
+# 0.9.6.5 (GRUPO B): o grep antigo exigia a linha a TERMINAR em ".cpp" —
+# 10 TUs com comentário à direita (UndoStack.cpp incluído, cujo comentário
+# diz "faltou no APK: ld.lld undefined symbol no CI" — a EXATA classe de
+# bug que este gate existe para apanhar) estavam FORA da paridade.
+# Agora: o comentário à direita é tolerado e DESCARTADO.
+grep -E '^[[:space:]]+[A-Za-z0-9_/.-]+\.cpp([[:space:]]+#.*)?$' CMakeLists.txt \
+  | sed 's/^[[:space:]]*//;s/[[:space:]]*#.*$//;s/[[:space:]]*$//' | sort -u > "$BUILD/srcs.txt"
 N=$(wc -l < "$BUILD/srcs.txt")
 while IFS= read -r s; do
   printf "g++ -std=c++17 -fPIC -c %s -w '%s' -o '%s/%s.o'\n" \

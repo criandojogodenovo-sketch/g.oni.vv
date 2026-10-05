@@ -55,6 +55,8 @@ constexpr u64 kTextWindowId = 5830;  // 0.9.1: abrir a janela de texto (IME)
                                      // — IDs únicos por frame, immediate-mode)
 constexpr u64 kRunBenchId    = 5831;  // 0.9.6 (G6): benchmarks (R-017)
 constexpr u64 kCopyBenchId   = 5832;  // 0.9.6 (G6): copiar o bloco de 9 linhas
+constexpr u64 kLayoutExpId   = 5833;  // 0.9.6.5 (GRUPO B): exportar layout
+constexpr u64 kLayoutAudId   = 5834;  // 0.9.6.5 (GRUPO B): auditoria do ecrã
 constexpr u64 kScrollId     = 49;    // região de scroll da página
 
 // ---- bits das secções (colapsáveis — PERSISTE via layout.json) --------------
@@ -95,6 +97,8 @@ enum Result {
     kReconvert,        // reconverter assets
     kRunBench,         // 0.9.6 (G6): correr os benchmarks (R-017)
     kCopyBench,        // 0.9.6 (G6): copiar o relatório (bloco de 9 linhas)
+    kExportLayout,     // 0.9.6.5 (GRUPO B): exportar o layout (PNG+JSON)
+    kAuditScreen,      // 0.9.6.5 (GRUPO B): auditoria do ecrã (validador+log)
 };
 
 // desenha a PÁGINA inteira (full-screen na banda do viewport) e processa os

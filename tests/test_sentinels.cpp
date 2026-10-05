@@ -38,6 +38,9 @@
 
 #include <cstdio>
 #include <cstring>
+// 0.9.6.5 (GRUPO B · R-024): o encode/decode do PNG exportado + o layout
+#include "render/ThumbPng.h"
+#include "assets/PngLoader.h"
 #include <sstream>   // 0.9.6 (R-017): parse das 9 linhas do bench
 #include <string>
 #include <vector>
@@ -2149,5 +2152,374 @@ TEST(regress_scroll_slots_reciclados) {
         const f32 off = ui.scrollOffset();
         ui.endScroll();
         EXPECT(nearEqF(off, 60.0f, 0.5f));  // viva — não morta
+    }
+}
+
+// ============================================================================
+// R-024 (FASE 0.9.6-MASTER · GRUPO B) — O LAYOUT EXPORTADO NÃO MENTE —
+//         regress_layout_dump_nao_mente
+//
+// O mecanismo: com o audit ligado, cada widget do UiContext regista o rect
+// REAL que desenhou (o choke point único — o JSON que o dono abre sai do
+// MESMO código que desenha; a lição R-020: nada de duplicar o layout noutro
+// sítio que possa divergir). A sentinela afere os INVARIANTES do registo:
+// (a) os rects registados são os desenhadOS (panel/button/scroll nos sítios
+//     chamados — um retângulo por widget de topo, os compostos não explodem
+//     em partes);
+// (b) a labelFitted que TRUNCA deixa o rasto (fullW > w e truncated=true);
+// (c) a label que CABE nunca diz truncada;
+// (d) o guard dos compostos: o button() regista UMA entrada (não o
+//     widgetHit + os painéis visuais por dentro);
+// (e) os filhos do scroll nascem clipped=true (o validador usa o flag para
+//     não assinalar as linhas scrolled-out).
+// ============================================================================
+TEST(regress_layout_dump_nao_mente) {
+    using namespace vv;
+    UiContext ui;
+    ui.init();
+    InputState input;
+    FontAtlas font;
+    const char* fp = FONT_FIXTURE;
+    ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+    ui.setFont(&font);
+
+    ui.beginFrame(nullptr, &input, 1000.0f, 600.0f);
+    ui.auditBegin("sentinela", 1000.0f, 600.0f, 24.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+    ui.panel(10.0f, 10.0f, 200.0f, 100.0f, theme::PANEL);
+    ui.button(0xAABB, 300.0f, 50.0f, 152.0f, 48.0f, "OK");
+    ui.frame(10.0f, 200.0f, 100.0f, 40.0f, 2.0f, theme::LINE);
+    ui.beginScroll(0x5C9011, UiRect{50.0f, 300.0f, 400.0f, 200.0f}, 2000.0f);
+    ui.panel(60.0f, 320.0f - 500.0f, 100.0f, 50.0f, theme::PANEL);  // scrolled-out
+    ui.labelFitted(60.0f, 340.0f - 500.0f,
+                   "texto comprido que nao cabe em cem pixeis de largura",
+                   theme::TEXT, 100.0f);
+    ui.labelFitted(60.0f, 380.0f - 500.0f, "cabe", theme::TEXT, 300.0f);
+    ui.endScroll();
+    ui.auditEnd();
+
+    const layout::Record& r = ui.auditRecord();
+    // CONTAGEM EXATA: panel + Button + Label("OK") + Frame + Scroll +
+    // Panel(clipped) + Label(trunc) + Label(cabe) = 8 (o button NÃO explode
+    // em widgetHit+panel+frame — o guard dos compostos)
+    EXPECT(r.entries.size() == 8);
+    // (a) o panel solitário no sítio certo
+    bool foundPanel = false;
+    for (const auto& e : r.entries) {
+        if (e.kind == layout::Entry::Panel && !e.clipped &&
+            nearEqF(e.x, 10.0f) && nearEqF(e.y, 10.0f) &&
+            nearEqF(e.w, 200.0f) && nearEqF(e.h, 100.0f)) {
+            foundPanel = true;
+        }
+    }
+    EXPECT(foundPanel);
+    // (d) o button regista UMA entrada Button (o widgetHit e os painéis
+    // visuais de dentro CALADOS pelo guard — senão eram 4 entradas)
+    u32 btnCount = 0;
+    for (const auto& e : r.entries) {
+        if (e.kind == layout::Entry::Button && e.id == 0xAABB) ++btnCount;
+    }
+    EXPECT(btnCount == 1);
+    // o frame regista UMA Frame (as 4 arestas não explodem)
+    u32 frameCount = 0;
+    for (const auto& e : r.entries) {
+        if (e.kind == layout::Entry::Frame) ++frameCount;
+    }
+    EXPECT(frameCount == 1);
+    // o scroll registado com o id
+    bool foundScroll = false;
+    for (const auto& e : r.entries) {
+        if (e.kind == layout::Entry::Scroll && e.id == 0x5C9011 &&
+            nearEqF(e.w, 400.0f)) {
+            foundScroll = true;
+        }
+    }
+    EXPECT(foundScroll);
+    // (e) os filhos do scroll nascem clipped
+    bool clippedChild = false;
+    for (const auto& e : r.entries) {
+        if (e.clipped && e.kind == layout::Entry::Panel &&
+            nearEqF(e.w, 100.0f)) {
+            clippedChild = true;
+        }
+    }
+    EXPECT(clippedChild);
+    // (b) a labelFitted que NÃO CABE: truncated=true e fullW > w
+    bool truncFlag = false;
+    for (const auto& e : r.entries) {
+        if (e.kind == layout::Entry::Label && e.clipped && e.truncated &&
+            e.fullW > e.w + 1.0f) {
+            truncFlag = true;
+        }
+    }
+    EXPECT(truncFlag);
+    // (c) a que CABE: nunca truncada
+    bool fittedOk = false;
+    for (const auto& e : r.entries) {
+        if (e.kind == layout::Entry::Label && e.clipped && !e.truncated &&
+            nearEqF(e.w, font.widthOf("cabe"), 0.5f)) {
+            fittedOk = true;
+        }
+    }
+    EXPECT(fittedOk);
+
+    // o JSON é determinístico e PARSEÁVEL (o ida-e-volta pelo core/Json.h)
+    const std::string j1 = layout::toJson(r).dump();
+    const std::string j2 = layout::toJson(r).dump();
+    EXPECT(j1 == j2);
+    Json back;
+    EXPECT(Json::parse(j1.c_str(), j1.size(), back));
+    EXPECT(back.type == Json::Type::Object);
+    bool ecraOk = false;
+    for (const auto& kv : back.members) {
+        if (kv.first == "ecra" && kv.second.type == Json::Type::String &&
+            kv.second.string == "sentinela") {
+            ecraOk = true;
+        }
+    }
+    EXPECT(ecraOk);
+}
+
+// ============================================================================
+// R-024 (GRUPO B) — O VALIDADOR APANA (cada regra, o caso plantado) —
+//         regress_validador_apana
+//
+// O validador puro (ui/LayoutDump): as 6 regras da casa. A sentinela planta
+// UM caso POR REGRA e exige que APANHE — e que um registo LIMPO fique
+// LIMPO (zero falsos positivos; a lição do primeiro run: as linhas de
+// scroll scrolled-out NÃO são "fora do ecrã").
+// ============================================================================
+TEST(regress_validador_apana) {
+    using namespace vv;
+    layout::Record r;
+    r.screen = "plantado";
+    r.screenW = 1000.0f;
+    r.screenH = 600.0f;
+    r.insetT = 24.0f;
+    r.density = 1.0f;
+
+    auto addBtn = [&](f32 x, f32 y, f32 w, f32 h, bool clipped) {
+        layout::Entry e;
+        e.kind = layout::Entry::Button;
+        e.id = 0x100 + r.entries.size();
+        e.x = x; e.y = y; e.w = w; e.h = h;
+        e.clipped = clipped;
+        r.add(e);
+    };
+    auto addLabel = [&](f32 x, f32 y, f32 w, bool truncated) {
+        layout::Entry e;
+        e.kind = layout::Entry::Label;
+        e.x = x; e.y = y; e.w = w; e.h = 28.0f;
+        e.fullW = truncated ? w * 2.0f : w;
+        e.truncated = truncated;
+        r.add(e);
+    };
+
+    // 1. fora do ecrã (interativo meio fora — inacessível)
+    addBtn(900.0f, 100.0f, 152.0f, 48.0f, false);       // x+w=1052 > 1000
+    // 2. sobreposto (dois botões a pisarem-se, nenhum contém o outro)
+    addBtn(100.0f, 100.0f, 100.0f, 48.0f, false);
+    addBtn(150.0f, 120.0f, 100.0f, 48.0f, false);
+    // 3. toque pequeno (altura 30 < 48dp)
+    addBtn(300.0f, 200.0f, 152.0f, 30.0f, false);
+    // 4. texto truncado
+    addLabel(60.0f, 300.0f, 80.0f, true);
+    // 5. texto que sangra (label SEM clip a sair do ecrã à direita)
+    addLabel(980.0f, 350.0f, 120.0f, false);            // x+w=1100 > 1000
+    // 6. rect degenerado
+    addBtn(400.0f, 400.0f, 0.0f, 0.0f, false);
+    // 7. o scroll CONTÉM um filho (relação legítima — NÃO é sobreposto)
+    layout::Entry sc;
+    sc.kind = layout::Entry::Scroll;
+    sc.id = 0x999;
+    sc.x = 50.0f; sc.y = 450.0f; sc.w = 400.0f; sc.h = 120.0f;
+    r.add(sc);
+    addBtn(60.0f, 460.0f, 100.0f, 48.0f, true);         // contido no scroll
+    // 8. linha de scroll scrolled-out (fora do ecrã mas CLIPPED — limpa)
+    addBtn(60.0f, 700.0f, 100.0f, 48.0f, true);
+
+    const std::vector<layout::Problem> ps = layout::validate(r);
+    auto hasRule = [&](layout::Problem::Rule rule) {
+        for (const auto& p : ps) {
+            if (p.rule == rule) return true;
+        }
+        return false;
+    };
+    EXPECT(hasRule(layout::Problem::ForaDoEcra));
+    EXPECT(hasRule(layout::Problem::Sobreposto));
+    EXPECT(hasRule(layout::Problem::ToquePequeno));
+    EXPECT(hasRule(layout::Problem::TextoTruncado));
+    EXPECT(hasRule(layout::Problem::TextoSangra));
+    EXPECT(hasRule(layout::Problem::RectDegenerado));
+
+    // os FILHO-DO-SCROLL e o CLIPPED scrolled-out NÃO contam (a regra da
+    // contenção + a exceção do clip — o fix do falso positivo do 1º run)
+    u32 foraDeEcra = 0, sobrepostos = 0;
+    for (const auto& p : ps) {
+        if (p.rule == layout::Problem::ForaDoEcra) ++foraDeEcra;
+        if (p.rule == layout::Problem::Sobreposto) ++sobrepostos;
+    }
+    EXPECT(foraDeEcra == 1);   // só o botão 1 (o clipped scrolled-out é limpo)
+    EXPECT(sobrepostos == 1);  // só o par 2/3 (o filho do scroll é contenção)
+
+    // o descrever nomeia a regra e o relatório fecha as contagens
+    const std::string rep = layout::report(r, ps);
+    EXPECT(rep.find("ERRO") != std::string::npos);
+    EXPECT(rep.find("problemas:") != std::string::npos);
+
+    // um registo LIMPO fica LIMPO (zero falsos positivos)
+    layout::Record limpo;
+    limpo.screen = "limpo";
+    limpo.screenW = 1000.0f;
+    limpo.screenH = 600.0f;
+    limpo.insetT = 24.0f;
+    limpo.density = 1.0f;
+    addBtn(100.0f, 100.0f, 152.0f, 48.0f, false);
+    addBtn(300.0f, 100.0f, 152.0f, 48.0f, false);
+    addLabel(100.0f, 200.0f, 200.0f, false);
+    const std::vector<layout::Problem> psLimpos = layout::validate(limpo);
+    EXPECT(psLimpos.empty());
+    const std::string repLimpo = layout::report(limpo, psLimpos);
+    EXPECT(repLimpo.find("VERDE") != std::string::npos);
+}
+
+// ============================================================================
+// R-024 (GRUPO B) — O FRAMEBUFFER REAL RASTERIZA (o PNG tem mesmo píxeis) —
+//         regress_fb_rasteriza
+//
+// A sonda do Grupo B em forma de sentinela: pelo caminho GL EXATO que o
+// Renderer usa (programa uProj + VAO/VBO + textura branca R8 + drawArrays
+// TRIANGLES), um quad tem de aparecer no glReadPixels — na cor, no sítio,
+// com o SCISSOR a cortar e o BLEND a compor. É o alicerce do PNG exportado:
+// se o rasterizador mentir, tudo o que se lhe segue (PNG relido, píxel vs
+// registo) é ficção.
+// ============================================================================
+TEST(regress_fb_rasteriza) {
+    glstub::fb::resetState();
+    glstub::fb::enabled = true;
+
+    // o programa UI (como Renderer.cpp)
+    const GLuint prog = glCreateProgram();
+    const GLint locProj = glGetUniformLocation(prog, "uProj");
+    // orto y-down 0..64
+    const float proj[16] = {
+        2.0f / 64.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, -2.0f / 64.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, -1.0f, 0.0f,
+        -1.0f, 1.0f, 0.0f, 1.0f};
+    glViewport(0, 0, 64, 64);
+    glClearColor(0.078f, 0.078f, 0.078f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    GLuint vao = 0, vbo = 0, tex = 0;
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 32,
+                          reinterpret_cast<const void*>(0));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 32,
+                          reinterpret_cast<const void*>(8));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, 32,
+                          reinterpret_cast<const void*>(16));
+    const float verts[6][8] = {
+        {8, 8, 0, 0, 1, 1, 1, 1},    {56, 8, 1, 0, 1, 1, 1, 1},
+        {8, 56, 0, 1, 1, 1, 1, 1},   {8, 56, 0, 1, 1, 1, 1, 1},
+        {56, 8, 1, 0, 1, 1, 1, 1},   {56, 56, 1, 1, 1, 1, 1, 1},
+    };
+    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    const GLubyte wpx = 0xFF;
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 1, 1, 0, GL_RED, GL_UNSIGNED_BYTE, &wpx);
+    glUseProgram(prog);
+    glUniformMatrix4fv(locProj, 1, GL_FALSE, proj);
+    glEnable(GL_BLEND);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_SCISSOR_TEST);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    std::vector<unsigned char> px(64 * 64 * 4);
+    glReadPixels(0, 0, 64, 64, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    auto at = [&](int x, int y) -> const unsigned char* {
+        return &px[(size_t(y) * 64 + x) * 4];
+    };
+    // (a) o quad rasterizou NO SÍTIO: o centro é branco, o canto é o clear
+    // (a orto é y-down: o ecrã-top do quad vive na janela y-up topo)
+    EXPECT(at(32, 32)[0] == 255);
+    EXPECT(at(2, 2)[0] == 20 && at(2, 2)[2] == 20);
+    // (b) a borda do quad é DURA no sítio certo (x=8 ecrã → janela 12):
+    // fora dele o clear, dentro dele o branco (rasterizador errado
+    // desloca/espalha a borda)
+    // a orto de ecrã + viewport são IDENTIDADE em x (x=8 ecrã -> x=8
+    // janela): fora do quad o clear, dentro o branco, borda DURA
+    EXPECT(at(7, 32)[0] == 20 && at(9, 32)[0] == 255);
+
+    // (c) o SCISSOR corta: novo quad à esquerda com scissor na metade
+    // direita — NADA se desenha (o clip da 0.9.6.1 em ação)
+    glClear(GL_COLOR_BUFFER_BIT);
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(32, 0, 32, 64);   // só a metade DIREITA (janela y-up)
+    {
+        const float v2[6][8] = {
+            {4, 4, 0, 0, 1, 1, 1, 1},    {20, 4, 1, 0, 1, 1, 1, 1},
+            {4, 60, 0, 1, 1, 1, 1, 1},   {4, 60, 0, 1, 1, 1, 1, 1},
+            {20, 4, 1, 0, 1, 1, 1, 1},   {20, 60, 1, 1, 1, 1, 1, 1}};
+        glBufferData(GL_ARRAY_BUFFER, sizeof(v2), v2, GL_DYNAMIC_DRAW);
+    }
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glReadPixels(0, 0, 64, 64, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    EXPECT(at(12, 32)[0] == 20);   // fora do scissor: NADA desenhado
+
+    glDisable(GL_SCISSOR_TEST);
+    glstub::fb::enabled = false;
+    glstub::fb::resetState();
+}
+
+// ============================================================================
+// R-024 (GRUPO B) — O PNG EXPORTADO É VÁLIDO (ida-e-volta pelo decode de
+//         produção) — regress_png_layout_ida_e_volta
+//
+// O layout/<ecrã>.png é codificado pelo thumb::encodePngRgb e vai ser RELIDO
+// pelo loadPng (o decoder stb do pipeline de texturas) na FASE 13 e no
+// relatório do Grupo B. A sentinela garante o IDA-E-VOLTA num padrão
+// conhecido: os píxeis que saem são os que entraram (a 1536×720 — a
+// resolução REAL do C33).
+// ============================================================================
+TEST(regress_png_layout_ida_e_volta) {
+    using namespace vv;
+    const u32 W = 1536, H = 720;
+    std::vector<u8> rgb((size_t)W * H * 3);
+    for (u32 y = 0; y < H; ++y) {
+        for (u32 x = 0; x < W; ++x) {
+            const size_t p = ((size_t)y * W + x) * 3;
+            rgb[p + 0] = (u8)(x & 0xFF);
+            rgb[p + 1] = (u8)(y & 0xFF);
+            rgb[p + 2] = (u8)((x ^ y) & 0xFF);
+        }
+    }
+    const std::vector<u8> png = thumb::encodePngRgb(rgb.data(), W, H);
+    EXPECT(!png.empty());
+    RawImage img;
+    std::string err;
+    EXPECT(vv::loadPng(png.data(), png.size(), img, err));
+    EXPECT(img.ok() && img.width == W && img.height == H);
+    if (img.ok()) {
+        bool igual = true;
+        for (u32 y = 0; y < H && igual; ++y) {
+            for (u32 x = 0; x < W; ++x) {
+                const size_t p = ((size_t)y * W + x);
+                if (img.rgba[p * 4 + 0] != rgb[p * 3 + 0] ||
+                    img.rgba[p * 4 + 1] != rgb[p * 3 + 1] ||
+                    img.rgba[p * 4 + 2] != rgb[p * 3 + 2]) {
+                    igual = false;
+                    break;
+                }
+            }
+        }
+        EXPECT(igual);   // o píxel que sai é o que entrou — byte a byte
     }
 }

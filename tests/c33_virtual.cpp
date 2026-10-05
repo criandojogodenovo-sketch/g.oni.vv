@@ -286,6 +286,10 @@ void resetEngineForHarness() {
     g_pipeline.reset();
     g_texCache.reset();
     glstub::reset();
+    // 0.9.6.5 (GRUPO B): os OBJETOS do framebuffer real também morrem com o
+    // contexto (o `enabled` MANTÉM-SE — é configuração do ambiente, como o
+    // astcLdr; só a FASE 13 o liga)
+    glstub::fb::resetState();
 }
 
 }  // namespace
@@ -3028,6 +3032,295 @@ int main() {
         closeScriptEditor();
         // TERM (o par do lifecycle — o estado fica limpo p/ o sumário)
         onAppCmd(&app11, APP_CMD_TERM_WINDOW);
+    }
+
+    // ======================================================================
+    // FASE 13 — 0.9.6.5 (GRUPO B): LAYOUT EXPORTADO (PNG+JSON) + AUDITORIA
+    // + OS PNGs RELIDOS. O framebuffer REAL do C33 virtual rasteriza a
+    // sério (glstub::fb) e o engine exporta o que o dono obtém no device:
+    // layout/<ecrã>.png (backbuffer full-res) + .json (as entradas REAIS
+    // do frame) + auditoria-<ecrã>.txt (o validador da casa). A PROVA
+    // fecha o círculo: o PNG é RELIDO pelo loadPng DE PRODUÇÃO e os píxeis
+    // CONFIRMAM o que o JSON diz (o painel do botão está onde o registo
+    // diz, na cor do tema) — o "PNG lido" do relatório, ao pé da letra.
+    // ======================================================================
+    fase("FASE 13 — layout exportado (PNG+JSON) + auditoria + PNG relido");
+    {
+        // o ambiente: A GPU do C33 virtual deixa de ser no-op — rasteriza
+        glstub::fb::resetState();
+        glstub::fb::enabled = true;
+        resetEngineForHarness();
+        auto st13 = std::make_unique<FakeStorage>();
+        FakeStorage* rawSt13 = st13.get();
+        check(Project::createNew(*rawSt13, "c33", g_project), "13 projeto criado");
+        g_storage = std::move(st13);
+        g_projectReady = true;
+        g_resources.setStorage(rawSt13);
+        g_gpu.init(&g_resources);
+        g_texCache = std::make_unique<TextureCache>(*rawSt13);
+        g_pipeline = std::make_unique<TexturePipeline>(g_hwCompressor, *g_texCache);
+        eglstub::g_surfaceW = 1536;
+        eglstub::g_surfaceH = 720;
+        android_app app13;
+        std::memset(&app13, 0, sizeof(app13));
+        app13.contentRect = {0, 24, 1512, 720};   // insets: status 24 + pill 24
+        onAppCmd(&app13, APP_CMD_INIT_WINDOW);
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+        check(g_ready, "13 boot com o framebuffer REAL ligado (fb rasteriza)");
+        check(glstub::fb::enabled, "13 o modo fb persiste ao boot (ambiente)");
+
+        // helper: exporta o ecrã ATUAL e devolve os bytes do PNG+JSON
+        auto exportScreen = [&](const char* nome) {
+            g_layoutExportPending = true;
+            frame();
+            std::vector<u8> png, js;
+            const bool okP = rawSt13->readBytes(std::string("layout/") + nome + ".png", png);
+            const bool okJ = rawSt13->readBytes(std::string("layout/") + nome + ".json", js);
+            check(okP && !png.empty(),
+                  (std::string("13 o PNG de [") + nome + "] esta no projeto").c_str());
+            check(okJ && !js.empty(),
+                  (std::string("13 o JSON de [") + nome + "] esta no projeto").c_str());
+            return std::make_pair(png, js);
+        };
+
+        // ---- (a) O EDITOR 3D: export + PNG RELIDO ---------------------------
+        passo("13.1 editor: PNG relido confirma o registo do layout");
+        {
+            auto [png, js] = exportScreen("editor");
+            check(logHas("layout: export do ecrã \"editor\""),
+                  "13.1 o export LOGA o ecrã e os ficheiros");
+            // o PNG RELIDO (o decode de PRODUÇÃO do pipeline de texturas)
+            vv::RawImage img;
+            std::string err;
+            check(vv::loadPng(png.data(), png.size(), img, err) && img.ok(),
+                  "13.1 o PNG RELIDO decodifica (loadPng de produção)");
+            check(img.width == 1536 && img.height == 720,
+                  "13.1 o PNG tem a resolução da superfície (1536x720)");
+            // o registo (o MESMO frame que o PNG) — os botões da toolbar
+            const layout::Record& rec = g_ui.auditRecord();
+            check(rec.entries.size() > 8,
+                  "13.1 o JSON tem as entradas do ecrã (>8 widgets)");
+            u32 btns = 0;
+            f32 bigArea = 0.0f;
+            u32 bigIdx = 0xFFFFFFFFu;
+            for (u32 i = 0; i < rec.entries.size(); ++i) {
+                const auto& e = rec.entries[i];
+                if (e.kind == layout::Entry::Button) ++btns;
+                if (e.kind == layout::Entry::Panel && e.w * e.h > bigArea) {
+                    bigArea = e.w * e.h;
+                    bigIdx = i;
+                }
+            }
+            check(btns >= 4, "13.1 a toolbar regista os botões interativos");
+            check(bigIdx != 0xFFFFFFFFu,
+                  "13.1 o registo tem painéis (o chrome do editor)");
+            // PIXEL vs REGISTO (1): o MAIOR painel do registo (a banda da
+            // toolbar) - o canto dele no PNG NAO pode ser o clear BG
+            // (20,20,20): o rect do registo e o pixel dizem o MESMO
+            {
+                const auto& e = rec.entries[bigIdx];
+                const u32 px = (u32)(e.x + 3.0f), py = (u32)(e.y + 3.0f);
+                check(px < img.width && py < img.height,
+                      "13.1 o maior painel esta DENTRO do ecra");
+                const size_t pi = (size_t(py) * img.width + px) * 4;
+                const int d = (int)img.rgba[pi + 2] - 20;
+                check(d > 8 || d < -8,
+                      "13.1 o pixel do maior painel NAO e o fundo (o "
+                      "registo bate com o PNG)");
+            }
+            // PIXEL vs REGISTO (2): a BANDA da toolbar (56px) POVOADA -
+            // a fracao de pixels != clear passa 30% (o chrome RASTERIZOU)
+            {
+                u32 diff = 0, tot2 = 0;
+                for (u32 y = 24; y < 80; ++y) {
+                    for (u32 x = 0; x < img.width; x += 3) {
+                        const size_t pi = (size_t(y) * img.width + x) * 4;
+                        ++tot2;
+                        if (img.rgba[pi] != 20 || img.rgba[pi + 1] != 20 ||
+                            img.rgba[pi + 2] != 20) {
+                            ++diff;
+                        }
+                    }
+                }
+                check(tot2 > 0 && diff * 100u > tot2 * 30u,
+                      "13.1 a banda da toolbar esta POVOADA no PNG "
+                      "(>30% pixels != fundo)");
+            }
+            // o GLIFO: texto brilhante na banda da toolbar (o atlas R8
+            // rasterizou cobertura — o caminho do texto do device)
+            u32 bright = 0;
+            for (u32 y = 24; y < 80; ++y) {
+                for (u32 x = 0; x < img.width; ++x) {
+                    const size_t pi = (size_t(y) * img.width + x) * 4;
+                    if (img.rgba[pi] > 200) ++bright;
+                }
+            }
+            check(bright > 200,
+                  "13.1 o TEXTO desenha no PNG (glifos do atlas na toolbar)");
+            // a cópia para o CI colecionar como artefacto do run
+            fileapi::writeAll("layout-harness-editor.png", png.data(), png.size());
+            fileapi::writeAll("layout-harness-editor.json", js.data(), js.size());
+        }
+
+        // ---- (b) A AUDITORIA pelo CAMINHO DO DEVICE (botão do Diagnóstico) --
+        passo("13.2 auditoria: o botão do Diagnóstico audita o ecrã");
+        {
+            // o Settings com o Diagnóstico ABERTO (o padrão 12.9)
+            g_editor.settingsMenu = true;
+            g_editor.settingsCollapsed = editor::settings::kBitGeral |
+                                         editor::settings::kBitAudio |
+                                         editor::settings::kBitPerm |
+                                         editor::settings::kBitDocs |
+                                         editor::settings::kBitSobre;
+            frame();
+            g_ui.scrollSetOffset(editor::settings::kScrollId, 0.0f);
+            frame();
+            // O TAP PELO REGISTO (a vara de medir do Grupo B a trabalhar):
+            // um frame auditado dá o rect REAL do botão «Auditoria do
+            // ecrã» — o toque cai no CENTRO exato dele, ZERO fórmulas de
+            // layout que driftam quando a página muda (a lição deste run)
+            g_layoutExportPending = true;
+            frame();   // exporta o settings (ecrã também!) + registo
+            const layout::Record& rr = g_ui.auditRecord();
+            f32 ax = -1.0f, ay = -1.0f;
+            for (const auto& e : rr.entries) {
+                if (e.kind == layout::Entry::Button &&
+                    e.id == editor::settings::kLayoutAudId) {
+                    ax = e.x + e.w * 0.5f;
+                    ay = e.y + e.h * 0.5f;
+                }
+            }
+            check(ax > 0.0f && ay > 0.0f,
+                  "13.2 o botao Auditoria esta no registo (o rect real do "
+                  "frame real)");
+            std::vector<u8> setPng;
+            check(rawSt13->readBytes("layout/settings.png", setPng) &&
+                      !setPng.empty(),
+                  "13.2 o export do PROPRIO settings saiu (ecra completo)");
+            tap(ax, ay);
+            check(!g_editor.settingsMenu,
+                  "13.2 o botao Auditoria FECHA o Settings (o ecra por baixo "
+                  "e o auditado - um ecra de cada vez)");
+            check(g_layoutExportPending && g_layoutAuditPending,
+                  "13.2 o pedido armado (export+audit no proximo frame)");
+            frame();   // o frame auditado: registo + PNG + validador + log
+            check(logHas("layout: AUDITORIA do ecrã"),
+                  "13.2 a auditoria CORRE e LOGA o veredito");
+            std::vector<u8> aud;
+            check(rawSt13->readBytes("layout/auditoria-editor.txt", aud) &&
+                      !aud.empty(),
+                  "13.2 o relatorio auditoria-editor.txt esta no projeto");
+            std::string audS(aud.begin(), aud.end());
+            check(audS.find("AUDITORIA do ecr") != std::string::npos &&
+                      audS.find("problemas:") != std::string::npos,
+                  "13.2 o relatorio traz o cabecalho e as contagens");
+            fileapi::writeAll("layout-harness-auditoria.txt", aud.data(), aud.size());
+            std::printf("    [aud]  %s",
+                        audS.find("VERDE") != std::string::npos
+                            ? "editor: VERDE\n"
+                            : "editor: problemas documentados no relatorio\n");
+        }
+
+        // ---- (c) O EDITOR DE SCRIPT (portrait: o ciclo REAL da janela) ---
+        passo("13.3 script: export portrait + PNG relido");
+        {
+            // o editor de script e PORTRAIT no device — o ciclo completo
+            // (TERM -> superficie 720x1536 + insets T96/B48 -> INIT), o
+            // MESMO padrao da FASE 12.11
+            onAppCmd(&app13, APP_CMD_TERM_WINDOW);
+            eglstub::g_surfaceW = 720;
+            eglstub::g_surfaceH = 1536;
+            android_app app13p;
+            std::memset(&app13p, 0, sizeof(app13p));
+            app13p.contentRect = {0, 96, 720, 1488};
+            onAppCmd(&app13p, APP_CMD_INIT_WINDOW);
+            if (!g_font.ok()) {
+                const char* paths[] = {FONT_FIXTURE};
+                g_font.loadFromPaths(paths, 1, 28.0f);
+            }
+            g_ui.setFont(&g_font);
+            const Handle ator13 = g_scene.create("Ator");
+            openScriptEditor(ator13);
+            // o TECLADO da engine aberto — o layout dele é o INSUMO do
+            // Grupo E (a barra de símbolos que o substitui)
+            g_editor.scriptWin.kbOpen = true;
+            frame();
+            auto [png, js] = exportScreen("script");
+            vv::RawImage img;
+            std::string err;
+            check(vv::loadPng(png.data(), png.size(), img, err) &&
+                      img.width == 720 && img.height == 1536,
+                  "13.3 o PNG do script e 720x1536 (portrait real)");
+            const layout::Record& rec = g_ui.auditRecord();
+            check(std::string(rec.screen) == "script" &&
+                      rec.entries.size() > 8,
+                  "13.3 o registo do script tem as entradas (header/teclado)");
+            u32 kb = 0;
+            for (auto& e : rec.entries) {
+                if (e.kind == layout::Entry::Button) ++kb;
+            }
+            check(kb >= 10,
+                  "13.3 as teclas do teclado da engine estao registadas");
+            fileapi::writeAll("layout-harness-script.png", png.data(), png.size());
+            fileapi::writeAll("layout-harness-script.json", js.data(), js.size());
+            closeScriptEditor();
+
+            // ---- (d) O DOCS + (e) O BROWSER de volta ao landscape -------
+            passo("13.4 docs + 13.5 browser: os ecras restantes (landscape)");
+            onAppCmd(&app13p, APP_CMD_TERM_WINDOW);
+            eglstub::g_surfaceW = 1536;
+            eglstub::g_surfaceH = 720;
+            android_app app13l;
+            std::memset(&app13l, 0, sizeof(app13l));
+            app13l.contentRect = {0, 24, 1512, 720};
+            onAppCmd(&app13l, APP_CMD_INIT_WINDOW);
+            if (!g_font.ok()) {
+                const char* paths[] = {FONT_FIXTURE};
+                g_font.loadFromPaths(paths, 1, 28.0f);
+            }
+            g_ui.setFont(&g_font);
+            {
+                g_editor.docsScreen.open = true;
+                frame();
+                auto [png, js] = exportScreen("docs");
+                vv::RawImage img;
+                std::string err;
+                check(vv::loadPng(png.data(), png.size(), img, err) &&
+                          img.width == 1536 && img.height == 720,
+                      "13.4 o PNG do docs e 1536x720 (landscape)");
+                check(std::string(g_ui.auditRecord().screen) == "docs",
+                      "13.4 o registo diz o ecra CERTO (docs)");
+                fileapi::writeAll("layout-harness-docs.png", png.data(), png.size());
+                fileapi::writeAll("layout-harness-docs.json", js.data(), js.size());
+                g_editor.docsScreen.open = false;
+            }
+            {
+                // o browser REAL: browserOpen lista uma pasta (no host, o
+                // caminho do device falha e o estado "opendir FALHOU"
+                // desenha à mesma — o ecrã com o seu chrome)
+                browserOpen(std::string(fileapi::kExternalRoot) + "/Download");
+                g_editor.fileBrowser = true;
+                frame();
+                auto [png, js] = exportScreen("browser");
+                vv::RawImage img;
+                std::string err;
+                check(vv::loadPng(png.data(), png.size(), img, err) && img.ok(),
+                      "13.5 o PNG do browser decodifica");
+                fileapi::writeAll("layout-harness-browser.png", png.data(), png.size());
+                fileapi::writeAll("layout-harness-browser.json", js.data(), js.size());
+                g_editor.fileBrowser = false;
+            }
+            onAppCmd(&app13l, APP_CMD_TERM_WINDOW);
+        }
+
+        // a GPU volta ao no-op (o resto da suíte não paga o raster)
+        onAppCmd(&app13, APP_CMD_TERM_WINDOW);
+        glstub::fb::enabled = false;
+        glstub::fb::resetState();
     }
 
     // ---- sumário -----------------------------------------------------------

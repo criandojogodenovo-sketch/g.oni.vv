@@ -176,6 +176,7 @@ add_executable(test_core
         # EditorUi e InputState compilam contra os stubs GLES3/android
         # (tests/stub) e os testes aferem os batches de CPU (sem GL real)
         ${CORE_DIR}/ui/UiContext.cpp
+        ${CORE_DIR}/ui/LayoutDump.cpp   # 0.9.6.5 (GRUPO B): layout exportado + validador
         ${CORE_DIR}/ui/EditorUi.cpp
         # 0.7.0: UI criável (componente + runtime + editor dedicado)
         ${CORE_DIR}/components/UiCanvas.cpp
@@ -373,6 +374,7 @@ add_executable(c33_virtual
         ${CORE_DIR}/physics/PhysicsSystem.cpp
         ${CORE_DIR}/components/TouchControls.cpp
         ${CORE_DIR}/ui/UiContext.cpp
+        ${CORE_DIR}/ui/LayoutDump.cpp   # 0.9.6.5 (GRUPO B): layout exportado + validador
         ${CORE_DIR}/ui/EditorUi.cpp
         ${CORE_DIR}/components/UiCanvas.cpp
         ${CORE_DIR}/components/AnimationPlayer.cpp

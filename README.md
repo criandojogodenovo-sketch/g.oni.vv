@@ -34,6 +34,63 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.9.6.5 — GRUPO B: FERRAMENTAS DE VERIFICAÇÃO (FASE 0.9.6-MASTER · R-024)
+
+**O que existe agora (a vara de medir dos Grupos C-I):**
+- **O FRAMEBUFFER REAL do C33 virtual** (`tests/stub/glstub_fb.h`): com
+  `glstub::fb::enabled = true` o stub de GL deixa de ser no-op e RASTERIZA a
+  sério (RGBA8 + depth f32) — os DOIS shaders da casa (UI `vColor·tex.r` e lit
+  `0.16+alb·diff` com uTint/skin) e a GRELHA adaptativa (o fragment com o
+  fwidth analítico do plano y=0, TRIANGLE_STRIP incluído). Desligado (o
+  default) = o no-op de sempre, zero mudança nos testes existentes.
+- **O LAYOUT EXPORTADO (PNG+JSON)**: cada widget do UiContext regista o rect
+  REAL que desenhou (o choke point — o JSON sai do MESMO código que desenha,
+  a lição R-020); o fim do frame escreve `layout/<ecrã>.png` (o backbuffer
+  full-res) + `layout/<ecrã>.json` (as entradas com tipo/id/rect/truncagem)
+  na raiz do projeto. No DEVICE: Settings → Diagnóstico → **«Exportar
+  layout»**.
+- **A AUDITORIA** (o validador da casa): as 6 regras — `fora_do_ecra`,
+  `sobreposto` (interativos que se pisam, sem relação pai-filho),
+  `toque_pequeno` (< 48dp), `texto_truncado`, `texto_sangra` (label sem clip
+  fora do contentRect — a classe do bug do C33 0.9.2), `rect_degenerado`. No
+  DEVICE: Diagnóstico → **«Auditoria do ecrã»** — fecha o Settings, audita o
+  ecrã por baixo (um ecrã de cada vez), LOGA cada problema e escreve
+  `layout/auditoria-<ecrã>.txt` no projeto.
+- **OS PNGs RELIDOS**: a FASE 13 do c33_virtual exporta os ecrãs-chave
+  (editor/script portrait/docs/browser), RELÊ cada PNG com o `loadPng` de
+  produção e CONFIRMA que o píxel bate com o registo (o maior painel no
+  sítio, a toolbar povoada, os glifos do atlas). Os ficheiros sobem como
+  artefacto do CI (`layout-screens-c33-virtual`) — o dono VÊ o que o harness
+  viu.
+
+**Os bugs que a ferramenta apanhou NO PRIMEIRO RUN** (o loop da campanha a
+trabalhar): os dois botões novos do Diagnóstico desenhavam mas o WALK do tap
+do SettingsPage não os re-despachava — NATIVOS MORTOS ao toque (a mesma
+classe do bug 0.9.1: desenhar ≠ tocar; a FASE 13.2 tocou no rect REAL do
+registo e o Settings não fechou); e o validador assinalava as linhas de
+scroll scrolled-out como «fora do ecrã» (falso positivo — o clip é desenho).
+
+**O estado atual MEDIDO** (a linha de base dos Grupos C-I, o
+`docs/RELATORIO-0.9.6.5-GRUPO-B.md` tem as tabelas): o editor tem 1 ERRO
+(label que sangra 3px o fundo) e 3 avisos (2 botões de 40px + 1 label
+truncada); o browser tem 8 avisos de toque < 48dp; docs e script (152
+entradas, 54 teclas) limpos de erros.
+
+**Checklist de device do Grupo B (RMX3624):**
+1. Settings → Diagnóstico → «Exportar layout» — o Settings fecha, o toast
+   diz «layout exportado», e o projeto ganha `layout/editor.png` +
+   `layout/editor.json` (verificar no gestor de ficheiros: Android/data/
+   vv.goni/files/projects/<projeto>/layout/).
+2. «Auditoria do ecrã» — o toast traz as contagens (o mesmo 1 ERRO + 3
+   avisos do harness se o ecrã estiver igual) e o engine.log tem as linhas
+   `layout:` uma a uma.
+3. Repetir a auditoria com o editor de script aberto (navegar até ele) — o
+   `layout/auditoria-script.txt` sai com as 152 entradas.
+4. Abrir o `layout/editor.png` na galeria — tem de ser o ecrã do editor
+   EXATAMENTE como se vê (toolbar, painéis, texto — full-res 1536×720).
+5. O `layout/editor.json` abre em qualquer visualizador de JSON — as
+   entradas com tipo/rect em px são o ecrã por dentro.
+
 ## 0.9.6.4 — GRUPO A: IMPORT glTF/GLB REAL (FASE 0.9.6-MASTER · R-021/R-022/R-023)
 
 **Os três defeitos do device e o que os causava (forense por leitura de

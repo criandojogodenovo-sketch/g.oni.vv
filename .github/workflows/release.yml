@@ -242,6 +242,21 @@ jobs:
             c33-virtual-logs/engine.log
           if-no-files-found: error
 
+      # 0.9.6.5 (GRUPO B · FERRAMENTAS DE VERIFICAÇÃO) — OS LAYOUTS EXPORTADOS:
+      # os PNGs (backbuffer full-res rasterizado pelo C33 virtual) + JSONs
+      # (as entradas reais do frame) + a auditoria de cada ecrã. É o
+      # material do relatório do estado atual e a LINHA DE BASE dos Grupos
+      # C-I (o dono VÊ o que o harness viu, sem precisar do device).
+      - name: Publicar os layouts exportados (PNG+JSON+auditoria)
+        uses: actions/upload-artifact@v4
+        with:
+          name: layout-screens-c33-virtual
+          path: |
+            layout-harness-*.png
+            layout-harness-*.json
+            layout-harness-auditoria.txt
+          if-no-files-found: error
+
   build-release:
     name: APK release arm64 (assinado via secrets)
     # 0.8.12 — a release DEPENDE das sentinelas + gate de padrões + harness

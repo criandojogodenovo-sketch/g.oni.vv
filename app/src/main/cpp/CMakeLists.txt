@@ -195,6 +195,7 @@ add_library(goni_vv SHARED
         ui/AudioWorkspace.cpp
         ui/UiContext.h
         ui/UiContext.cpp
+        ui/LayoutDump.cpp   # 0.9.6.5 (GRUPO B): layout exportado + validador
         ui/EditorUi.h
         ui/EditorUi.cpp
         # 0.7.6: barra final de 5 grupos (G1..G5) + 8 ícones vetoriais
