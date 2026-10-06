@@ -58,6 +58,10 @@ struct Stats {
     // 0.9.6.4 (GRUPO A/R-021): irmãos copiados do diretório original
     // (.bin/texturas de um .gltf separado) — o log lista um por um.
     u32 siblings = 0;
+    // 0.9.6.12 (A2/R-014 · a spec 2d): primitivas LARGADAS por bufferView
+    // fora do buffer (exporter malformado) — o import SEGUE com o resto;
+    // o toast diz «K primitiva(s) fora» (nunca silencioso)
+    u32 primWarn = 0;
     u32 clips = 0;
     u32 joints = 0;
     u32 verts = 0;

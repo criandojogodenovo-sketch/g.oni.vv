@@ -93,6 +93,12 @@ public:
         entries_.push_back(std::move(e));
     }
     void setRangeLoader(const GltfRangeLoader& l) { loader_ = l; }
+    // 0.9.6.12 (A2): os byteLength DECLARADOS do JSON (a comparação do
+    // log do dono pede declared vs real lado a lado)
+    void setDeclaredLens(std::vector<u64>&& d) { declared_ = std::move(d); }
+    u64 declared(size_t bi) const {
+        return bi < declared_.size() ? declared_[bi] : 0;
+    }
 
     size_t count() const { return entries_.size(); }
     u64 size(size_t bi) const {
@@ -137,6 +143,7 @@ private:
         bool deferred = false;
     };
     std::vector<Entry> entries_;
+    std::vector<u64> declared_;   // buffers[].byteLength do JSON (A2)
     GltfRangeLoader loader_{};
     std::deque<std::vector<u8>> pool_;   // ranges materializados (ptr estáveis)
 };
@@ -145,17 +152,36 @@ private:
 // decide o texto e a gravidade. A validação usa o TAMANHO REAL do buffer
 // (GLB: o comprimento REAL do chunk BIN do header; externo/data: os bytes
 // que existem) — buffers[].byteLength declarado NÃO é a autoridade.
+//
+// 0.9.6.12 (A2 · R-014) — O DIAGNÓSTICO COMPLETO (a spec tarefa 1): a
+// falha carrega a COMPARAÇÃO INTEIRA — view/buffer/off/len/declared/real —
+// e os chamadores LOGAM a linha exata «glb: view<i> buffer<b> off=<o>
+// len=<l> declared=<d> real=<r>» (NUNCA truncada — é o que o dono lê no
+// device). E O FIX DA CAUSA RAIZ do log 10-06 do dono (high_poly):
+// o bound VAVA o accessorByteOffset DUAS VEZES — total = off + accOff +
+// bLen ultrapassa o buffer por accOff quando o view acaba no FIM do BIN
+// (views empacotadas estilo gltfpack, accessor com byteOffset > 0): um
+// GLB 100% válido era recusado com «fora do buffer». O bound correto é o
+// do VIEW (off + bLen ≤ real); o accessor dentro do view é afervado
+// depois por «accessor excede o bufferView» (accOff + count*elem ≤ bLen).
+struct ViewDiag {
+    size_t bufferIdx = 0;
+    size_t viewOff = 0;
+    size_t viewLen = 0;
+    size_t accOff = 0;
+    u64 declared = 0;   // buffers[b].byteLength do JSON
+    u64 real = 0;       // o tamanho REAL usado na validação
+};
 ViewFail resolveView(GltfBufferStore& store, const Json& bv,
-                     size_t accessorByteOffset, size_t elemSize, ViewSpan& out) {
+                     size_t accessorByteOffset, size_t elemSize, ViewSpan& out,
+                     ViewDiag* diag = nullptr) {
+    ViewDiag local;
+    ViewDiag& dg = diag ? *diag : local;
     const Json* jbuf = bv.find("buffer");
     if (!jbuf || jbuf->type != Json::Type::Number) {
         return ViewFail::NoBuffer;
     }
     const size_t bi = static_cast<size_t>(jbuf->number);
-    if (bi >= store.count()) {
-        return ViewFail::NoBuffer;
-    }
-    const u64 bufSize = store.size(bi);
     size_t off = 0;
     if (const Json* o = bv.find("byteOffset"); o && o->type == Json::Type::Number) {
         off = static_cast<size_t>(o->number);
@@ -163,7 +189,20 @@ ViewFail resolveView(GltfBufferStore& store, const Json& bv,
     size_t bLen = 0;
     if (const Json* l = bv.find("byteLength"); l && l->type == Json::Type::Number) {
         bLen = static_cast<size_t>(l->number);
-    } else {
+    }
+    // o diag leva os QUATRO números MESMO no NoBuffer (a spec: o erro
+    // nomeia o buffer — e a comparação completa aparece junto)
+    dg.bufferIdx = bi;
+    dg.viewOff = off;
+    dg.viewLen = bLen;
+    dg.accOff = accessorByteOffset;
+    dg.declared = store.declared(bi);
+    dg.real = bi < store.count() ? store.size(bi) : 0;
+    if (bi >= store.count()) {
+        return ViewFail::NoBuffer;
+    }
+    const u64 bufSize = store.size(bi);
+    if (bLen == 0 && !bv.find("byteLength")) {
         return ViewFail::BadLength;
     }
     if (accessorByteOffset > bLen) {
@@ -180,7 +219,11 @@ ViewFail resolveView(GltfBufferStore& store, const Json& bv,
     if (stride == 0) {
         stride = elemSize;
     }
-    const size_t total = off + accessorByteOffset + bLen;
+    // 0.9.6.12 (A2): O BOUND CORRETO — o view inteiro dentro do buffer
+    // (era off + accOff + bLen: dupla-contava o accessorByteOffset —
+    // GLB válido com view no fim do BIN + accessor com byteOffset > 0
+    // era recusado; a causa raiz do defeito 1 do dono)
+    const size_t total = off + bLen;
     if (static_cast<u64>(total) > bufSize) {
         return ViewFail::OutOfBounds;   // view fora do buffer — recusa
     }
@@ -313,11 +356,18 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
 
     // ---- buffers ------------------------------------------------------------
     GltfBufferStore store;
+    std::vector<u64> declaredLens;   // A2: buffers[].byteLength do JSON
     if (rangeLoader && rangeLoader->fn) {
         store.setRangeLoader(*rangeLoader);
     }
     if (const Json* jb = doc.find("buffers"); jb && jb->type == Json::Type::Array) {
         for (const Json& b : jb->items) {
+            u64 decl = 0;
+            if (const Json* bl = b.find("byteLength");
+                bl && bl->type == Json::Type::Number) {
+                decl = static_cast<u64>(bl->number);
+            }
+            declaredLens.push_back(decl);
             const Json* uri = b.find("uri");
             if (!uri || uri->type != Json::Type::String || uri->string.empty()) {
                 // sem URI = buffer do GLB (BIN chunk). 0.8.10: com RANGE
@@ -357,6 +407,7 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
             }
         }
     }
+    store.setDeclaredLens(std::move(declaredLens));
 
     // ---- bufferViews --------------------------------------------------------
     const Json* jviews = doc.find("bufferViews");
@@ -435,11 +486,25 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                             vLen = static_cast<u64>(l->number);
                         }
                         ViewSpan span;
+                        ViewDiag diag;
                         const ViewFail vf =
-                            resolveView(store, jv, 0, 1, span);
+                            resolveView(store, jv, 0, 1, span, &diag);
                         if (vf != ViewFail::None) {
-                            // A CAUSA DISTINTA: limites do buffer ≠ I/O —
-                            // antes era sempre «fora do buffer» (enganador)
+                            // A CAUSA DISTINTA + A COMPARAÇÃO COMPLETA
+                            // (A2, tarefa 1/3: a MESMA rotina, a MESMA
+                            // linha com os números — nunca dois checks a
+                            // divergir nem um log truncado)
+                            char linha[160];
+                            std::snprintf(
+                                linha, sizeof(linha),
+                                "glb: view%d buffer%zu off=%llu len=%llu "
+                                "declared=%llu real=%llu",
+                                vi, diag.bufferIdx,
+                                static_cast<unsigned long long>(diag.viewOff),
+                                static_cast<unsigned long long>(diag.viewLen),
+                                static_cast<unsigned long long>(diag.declared),
+                                static_cast<unsigned long long>(diag.real));
+                            elog::warn("import: %s", linha);
                             gi.broken = true;
                             elog::warn("asset: glTF imagem %u: bufferView %d "
                                        "(off %llu, len %llu) FALHOU: %s — "
@@ -517,6 +582,22 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
     }
 
     // ---- leitor de accessor (bounds-checked) ---------------------------------
+    // 0.9.6.12 (A2 · R-014): o estado da ÚLTIMA validação de view — o
+    // chamador da primitiva decide degradar (OutOfBounds = exporter
+    // malformado: larga a primitiva com W) ou matar o import (o resto)
+    ViewFail lastViewFail = ViewFail::None;
+    ViewDiag lastViewDiag;
+    i32 lastViewIdx = -1;
+    auto viewDiagLine = [&](i32 viewIdx, const ViewDiag& dg) {
+        char buf[160];
+        std::snprintf(buf, sizeof(buf),
+                      "glb: view%d buffer%zu off=%zu len=%zu acc=%zu "
+                      "declared=%llu real=%llu",
+                      viewIdx, dg.bufferIdx, dg.viewOff, dg.viewLen,
+                      dg.accOff, static_cast<unsigned long long>(dg.declared),
+                      static_cast<unsigned long long>(dg.real));
+        return std::string(buf);
+    };
     auto readAccessor = [&](i32 accIdx, std::vector<u8>& rawElems, size_t& elemCount,
                             size_t& compCount, size_t& compSize) -> bool {
         if (!jviews) {
@@ -566,16 +647,31 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
         }
         const size_t elemSize = compSize * compCount;
         ViewSpan span;
+        ViewDiag diag;
         const ViewFail vf =
             resolveView(store, jviews->items[static_cast<size_t>(viewIdx)],
-                        byteOff, elemSize, span);
+                        byteOff, elemSize, span, &diag);
+        lastViewFail = vf;
+        lastViewDiag = diag;
+        lastViewIdx = viewIdx;
         if (vf != ViewFail::None) {
             // GEOMETRIA falhou = import falha (a spec A3: textura falha
             // tolera-se, geometria NÃO) — mas com a CAUSA exata (R-022:
             // «fora do buffer» deixou de cobrir também as falhas de I/O)
-            err = std::string("glTF: accessor (view ") +
-                  std::to_string(viewIdx) + ") falhou: " + viewFailText(vf) +
-                  " (ficheiro corrompido?)";
+            // E COM A COMPARAÇÃO COMPLETA (A2, a tarefa 1: os quatro
+            // números NUNCA truncados — o dono lê off/len/declared/real)
+            const std::string line = viewDiagLine(viewIdx, diag);
+            elog::error("import: %s", line.c_str());
+            const std::string nomeado =
+                vf == ViewFail::NoBuffer
+                    ? std::string("glTF: bufferView refere o buffer ") +
+                          std::to_string(diag.bufferIdx) + ", que não "
+                          "existe (o ficheiro declara " +
+                          std::to_string(store.count()) + " buffer(s))"
+                    : std::string("glTF: accessor (view ") +
+                          std::to_string(viewIdx) + ") falhou: " +
+                          viewFailText(vf) + " (ficheiro corrompido?)";
+            err = nomeado + " — " + line;
             return false;
         }
         rawElems.resize(elemCount * elemSize);
@@ -617,6 +713,22 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
             err = "glTF: mesh sem primitives";
             return false;
         }
+        // 0.9.6.12 (A2 · a spec 2d): bufferView que GENUINAMENTE excede o
+        // buffer (exporter malformado) = DEGRADAR, não matar: larga a
+        // primitiva desse accessor com W + a linha completa da comparação
+        // e importa o resto. A queda conta em out.primsDropped (o toast
+        // do import diz — nunca silencioso)
+        auto dropPrim = [&](const char* what) {
+            ++out.primsDropped;
+            out.primDropCause =
+                "glTF: a primitiva foi largada (" + std::string(what) +
+                " — " + viewFailText(lastViewFail) + ") — " +
+                viewDiagLine(lastViewIdx, lastViewDiag);
+            elog::warn("import: primitiva %zu LARGADA (o view do %s está "
+                       "fora do buffer) — %s (o RESTO do modelo entra; o "
+                       "toast diz o total)",
+                       out.primsDropped, what, out.primDropCause.c_str());
+        };
         for (size_t pi = 0; pi < jprims->items.size(); ++pi) {
             const Json& jp = jprims->items[pi];
             if (const Json* mode = jp.find("mode");
@@ -642,6 +754,10 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                 size_t count = 0, cc = 0, cs = 0;
                 if (!readAccessor(static_cast<i32>(jpos->number), raw, count, cc, cs) ||
                     cc != 3 || cs != 4) {
+                    if (lastViewFail == ViewFail::OutOfBounds) {
+                        dropPrim("POSITION");
+                        continue;   // degrada a PRIMITIVA (a spec 2d)
+                    }
                     err = err.empty() ? "glTF: POSITION inválido" : err;
                     return false;
                 }
@@ -654,6 +770,10 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                 size_t count = 0, cc = 0, cs = 0;
                 if (!readAccessor(static_cast<i32>(jn->number), raw, count, cc, cs) ||
                     cc != 3 || cs != 4) {
+                    if (lastViewFail == ViewFail::OutOfBounds) {
+                        dropPrim("NORMAL");
+                        continue;
+                    }
                     err = err.empty() ? "glTF: NORMAL inválido" : err;
                     return false;
                 }
@@ -666,6 +786,10 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                 size_t count = 0, cc = 0, cs = 0;
                 if (!readAccessor(static_cast<i32>(jt->number), raw, count, cc, cs) ||
                     cc != 2 || cs != 4) {
+                    if (lastViewFail == ViewFail::OutOfBounds) {
+                        dropPrim("TEXCOORD_0");
+                        continue;
+                    }
                     err = err.empty() ? "glTF: TEXCOORD_0 inválido" : err;
                     return false;
                 }
@@ -741,6 +865,10 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                 size_t count = 0, cc = 0, cs = 0;
                 if (!readAccessor(static_cast<i32>(jidx->number), raw, count, cc, cs) ||
                     cc != 1) {
+                    if (lastViewFail == ViewFail::OutOfBounds) {
+                        dropPrim("índices");
+                        continue;
+                    }
                     err = err.empty() ? "glTF: índices inválidos" : err;
                     return false;
                 }
@@ -775,6 +903,14 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
             out.meshes.push_back(std::move(md));
             out.meshMaterial.push_back(meshMatIdx);   // alinhado com meshes
         }
+    }
+    // 0.9.6.12 (A2): TODAS as primitivas caíram? o import falha COM a
+    // comparação completa (a spec: fixture (ii) — a mensagem com os quatro
+    // números) — nunca um «sem meshes» seco que esconde a causa
+    if (out.meshes.empty() && out.primsDropped > 0) {
+        err = "glTF: TODAS as primitivas ficaram fora dos limites do "
+              "buffer — " + out.primDropCause;
+        return false;
     }
 
     // ---- scene/nodes (hierarquia simples) --------------------------------------

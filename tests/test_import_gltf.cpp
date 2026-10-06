@@ -748,3 +748,201 @@ TEST(gltf_e2e_storage_cache_instantiate) {
     // e o parse do ficheiro não foi repetido (cache de modelo)
     EXPECT(rm.meshLoads() == 1u);
 }
+
+// ============================================================================
+// 0.9.6.12 (A2 · R-014) — OS PERFIS REAIS DO DEVICE (as fixtures da spec,
+// proibido fixture «fácil»). Todos construídos em código com os NÚMEROS
+// do dono:
+//   (i)   view que acaba EXATAMENTE no fim do BIN (off+len == binLen) → passa
+//   (i')  accessor com byteOffset > 0 nesse view (o perfil gltfpack do
+//         high_poly_base_mesh.glb — o falso OutOfBounds: o bound antigo
+//         dupla-contava o accOff) → passa
+//   (ii)  view com offset+len == binLen+1 → falha com a MENSAGEM COMPLETA
+//         (os quatro números) — e, com 2 primitivas, DEGRADA (2d): a boa
+//         entra, a má cai com W + contador
+//   (iii) bufferView.buffer = 1 → erro que NOMEIA o buffer
+//   (v)   .gltf + .bin externo — coberto pelo R-021 (test_sentinels.cpp)
+//   (vi)  URI %20 — coberto pelo R-021 (test_sentinels.cpp, tex albedo)
+// ============================================================================
+TEST(glb_a2_perfis_do_device) {
+    // o BIN: POSITION (36) + TEX (32: 4 VEC2 f32) + índices u16 (6) = 74 B
+    std::vector<u8> bin;
+    pushF32(bin, 0.f); pushF32(bin, 0.f); pushF32(bin, 0.f);
+    pushF32(bin, 1.f); pushF32(bin, 0.f); pushF32(bin, 0.f);
+    pushF32(bin, 0.f); pushF32(bin, 1.f); pushF32(bin, 0.f);
+    for (int i = 0; i < 8; ++i) pushF32(bin, 0.25f * i);   // TEX 32 B
+    pushU16(bin, 0); pushU16(bin, 1); pushU16(bin, 2);     // índices 6 B
+    ASSERT(bin.size() == 74u);
+
+    // view0: POSITION [0,36) · view1: TEX [36,68) · view2: índices [68,74)
+    // accessors: a0 POSITION(view0,3) · a1 TEXCOORD(view1,accOff=8,3 — o
+    // perfil do dono) · a2 índices(view2,3)
+    auto makeJson = [&](int texViewLen, int texBuffer, int idxViewLen,
+                        int nPrims) {
+        char js[1400];
+        // nPrims == 2: a SEGUNDA primitiva usa um view/accessor PRÓPRIOS e
+        // BONS (view3/acessor 3 — o mesmo range válido [68,74)) — o perfil
+        // da degradação: a má cai, a boa entra (as duas a apontar o mesmo
+        // view mau fariam TODAS caírem — o caso (ii))
+        std::snprintf(js, sizeof(js),
+            "{\"asset\":{\"version\":\"2.0\"},"
+            "\"buffers\":[{\"byteLength\":74}],"
+            "\"bufferViews\":["
+            "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+            "{\"buffer\":%d,\"byteOffset\":36,\"byteLength\":%d},"
+            "{\"buffer\":0,\"byteOffset\":68,\"byteLength\":%d}%s],"
+            "\"accessors\":["
+            "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},"
+            "{\"bufferView\":1,\"componentType\":5126,\"count\":3,\"byteOffset\":8,\"type\":\"VEC2\"},"
+            "{\"bufferView\":2,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"}%s],"
+            "\"meshes\":[{\"primitives\":["
+            "{\"attributes\":{\"POSITION\":0,\"TEXCOORD_0\":1},\"indices\":2}"
+            "%s]}],"
+            "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}",
+            texBuffer, texViewLen, idxViewLen,
+            nPrims == 2
+                ? ",{\"buffer\":0,\"byteOffset\":68,\"byteLength\":6}"
+                : "",
+            nPrims == 2
+                ? ",{\"bufferView\":3,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"}"
+                : "",
+            nPrims == 2
+                ? ",{\"attributes\":{\"POSITION\":0},\"indices\":3}"
+                : "");
+        return std::string(js);
+    };
+    auto makeGlb = [](const std::string& json, const std::vector<u8>& binBuf,
+                      std::vector<u8>& out) {
+        out.clear();
+        auto u32p = [&out](u32 v) {
+            u8 t[4];
+            std::memcpy(t, &v, 4);
+            out.insert(out.end(), t, t + 4);
+        };
+        const u32 jsonPad = (4 - (static_cast<u32>(json.size()) % 4)) % 4;
+        u32p(0x46546C67u);
+        u32p(2);
+        u32p(12 + 8 + static_cast<u32>(json.size()) + jsonPad + 8 +
+             static_cast<u32>(binBuf.size()));
+        u32p(static_cast<u32>(json.size()));
+        u32p(0x4E4F534Au);
+        out.insert(out.end(), json.begin(), json.end());
+        for (u32 i = 0; i < jsonPad; ++i) {
+            out.push_back(0x20);
+        }
+        u32p(static_cast<u32>(binBuf.size()));
+        u32p(0x004E4942u);
+        out.insert(out.end(), binBuf.begin(), binBuf.end());
+    };
+
+    // ---- (i)+(i') o perfil do DONO: view TEX acaba a 68 (< 74), o
+    // accessor tem accOff=8 (o total do bound ANTIGO: 36+8+32=76 > 74 —
+    // o falso «fora do buffer»); e o view dos ÍNDICES acaba EXATAMENTE no
+    // fim do BIN (68+6 == 74 — off+len == binLen, a fixture (i)) ----------
+    {
+        const std::string json = makeJson(32, 0, 6, 1);
+        std::vector<u8> glb;
+        makeGlb(json, bin, glb);
+        GltfModel model;
+        std::string perr;
+        EXPECT(parseGlb(glb.data(), glb.size(),
+                        GltfBufferResolver{nullptr, 0}, model, perr));
+        EXPECT(model.meshes.size() == 1u);
+        EXPECT(model.meshes[0].vertices.size() == 3u);
+        EXPECT(model.meshes[0].indices.size() == 3u);
+        EXPECT(model.primsDropped == 0u);
+    }
+
+    // ---- (ii) offset+len == binLen+1 (o índice dos índices mente 1 B):
+    // degrada a primitiva; TODAS caírem → falha com a MENSAGEM COMPLETA
+    {
+        const std::string json = makeJson(32, 0, 7, 1);   // view2 len 7 > 6
+        std::vector<u8> glb;
+        makeGlb(json, bin, glb);
+        GltfModel model;
+        std::string perr;
+        EXPECT(!parseGlb(glb.data(), glb.size(),
+                         GltfBufferResolver{nullptr, 0}, model, perr));
+        // a MENSAGEM COMPLETA (a tarefa 1: os quatro números, NUNCA
+        // truncado — é o que o dono lê)
+        EXPECT(perr.find("TODAS as primitivas") != std::string::npos);
+        EXPECT(perr.find("glb: view2 buffer0 off=68 len=7 acc=0 "
+                         "declared=74 real=74") != std::string::npos);
+    }
+    // ---- (ii-b) A DEGRADAÇÃO (a spec 2d): DUAS primitivas — a má cai, a
+    // boa ENTRA (o import segue; o contador diz) --------------------------
+    {
+        const std::string json = makeJson(32, 0, 7, 2);
+        std::vector<u8> glb;
+        makeGlb(json, bin, glb);
+        GltfModel model;
+        std::string perr;
+        EXPECT(parseGlb(glb.data(), glb.size(),
+                        GltfBufferResolver{nullptr, 0}, model, perr));
+        // ASSERT: precondição dos derefs seguintes (sem mesh, model.meshes[0]
+        // é UB — a falha tem de ser LIMPA, não um crash do binário)
+        ASSERT(model.meshes.size() == 1u);           // a primitiva BOA entrou
+        EXPECT(model.meshes[0].groups.size() == 1u); // só ela
+        EXPECT(model.primsDropped == 1u);            // a má contou
+        EXPECT(model.primDropCause.find("glb: view2") != std::string::npos);
+    }
+
+    // ---- (iii) bufferView.buffer = 1: o erro NOMEIA o buffer -------------
+    {
+        const std::string json = makeJson(32, 1, 6, 1);   // o view do TEX
+                                                          // refere buffer 1
+        std::vector<u8> glb;
+        makeGlb(json, bin, glb);
+        GltfModel model;
+        std::string perr;
+        EXPECT(!parseGlb(glb.data(), glb.size(),
+                         GltfBufferResolver{nullptr, 0}, model, perr));
+        EXPECT(perr.find("refere o buffer 1, que não existe "
+                         "(o ficheiro declara 1 buffer(s))") !=
+               std::string::npos);
+        EXPECT(perr.find("glb: view1 buffer1 off=36 len=32") !=
+               std::string::npos);
+    }
+
+    // ---- (iv) o perfil STANFORD: textura embutida em bufferView (a
+    // imagem vive NO FIM do chunk) — o parse entrega os bytes -------------
+    {
+        const u8 pngFake[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A,
+                              'R', 'D', 'R'};
+        std::vector<u8> bin2 = bin;
+        const size_t imgOff = bin2.size();   // cola no fim (o perfil stanford)
+        bin2.insert(bin2.end(), pngFake, pngFake + sizeof(pngFake));
+        while (bin2.size() % 4 != 0) {
+            bin2.push_back(0);
+        }
+        char jv[128], js[1024];
+        std::snprintf(jv, sizeof(jv),
+                      "{\"buffer\":0,\"byteOffset\":%zu,\"byteLength\":%zu}",
+                      imgOff, sizeof(pngFake));
+        std::snprintf(js, sizeof(js),
+            "{\"asset\":{\"version\":\"2.0\"},"
+            "\"buffers\":[{\"byteLength\":%zu}],"
+            "\"bufferViews\":["
+            "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+            "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":32},"
+            "%s],"
+            "\"accessors\":["
+            "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},"
+            "{\"bufferView\":1,\"componentType\":5126,\"count\":3,\"byteOffset\":8,\"type\":\"VEC2\"}],"
+            "\"images\":[{\"bufferView\":2,\"mimeType\":\"image/png\"}],"
+            "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0,"
+            "\"TEXCOORD_0\":1}}]}],"
+            "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}",
+            bin2.size(), jv);
+        std::vector<u8> glb;
+        makeGlb(std::string(js), bin2, glb);
+        GltfModel model;
+        std::string perr;
+        EXPECT(parseGlb(glb.data(), glb.size(),
+                        GltfBufferResolver{nullptr, 0}, model, perr));
+        EXPECT(model.images.size() == 1u);
+        EXPECT(!model.images[0].broken);
+        EXPECT(model.images[0].bytes.size() == sizeof(pngFake));
+        EXPECT(model.meshes.size() == 1u);
+    }
+}

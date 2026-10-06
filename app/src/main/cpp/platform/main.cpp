@@ -2476,7 +2476,15 @@ void importJobFinish() {
     // (imagem podre, bufferView fora do buffer, mime não-PNG) DIZEM-SE no
     // toast — o import SEGUE sem elas e o dono SABE (as causas estão no
     // engine.log, uma linha por falha)
-    if (g_importJob.stats.texWarn > 0) {
+    if (g_importJob.stats.texWarn > 0 && g_importJob.stats.primWarn > 0) {
+        std::snprintf(msg, sizeof(msg),
+                      "importado: %u mesh(es) — SEM %u textura(s) e %u "
+                      "primitiva(s) (avisos no engine.log)",
+                      out.meshes.empty() ? 0u
+                                         : static_cast<unsigned>(
+                                               out.meshes.size()),
+                      g_importJob.stats.texWarn, g_importJob.stats.primWarn);
+    } else if (g_importJob.stats.texWarn > 0) {
         std::snprintf(msg, sizeof(msg),
                       "importado: %u mesh(es) — SEM %u textura(s) (avisos no "
                       "engine.log)",
@@ -2484,6 +2492,14 @@ void importJobFinish() {
                                          : static_cast<unsigned>(
                                                out.meshes.size()),
                       g_importJob.stats.texWarn);
+    } else if (g_importJob.stats.primWarn > 0) {
+        std::snprintf(msg, sizeof(msg),
+                      "importado: %u mesh(es) — %u primitiva(s) FORA "
+                      "(bufferView fora do buffer; avisos no engine.log)",
+                      out.meshes.empty() ? 0u
+                                         : static_cast<unsigned>(
+                                               out.meshes.size()),
+                      g_importJob.stats.primWarn);
     } else {
         std::snprintf(msg, sizeof(msg), "importado: %u mesh(es), %u tex (%llu B)",
                       out.meshes.size() + out.textures.size() > 0

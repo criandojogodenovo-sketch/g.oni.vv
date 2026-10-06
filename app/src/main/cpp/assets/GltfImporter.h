@@ -121,6 +121,15 @@ struct GltfModel {
     // por hash); vazio = sem textura. Alinhado com meshes.
     std::vector<std::string> meshTexture;
 
+    // 0.9.6.12 (A2/R-014 · a spec 2d): primitivas LARGADAS por bufferView
+    // que genuinamente excede o buffer (exporter malformado) — DEGRADA em
+    // vez de matar o import: cada queda LOGA W com a linha completa
+    // «glb: view<i> buffer<b> off=… len=… declared=… real=…» e o resto do
+    // modelo entra. A CAUSA da última queda fica aqui (o erro final quando
+    // TODAS caem nomeia a comparação completa — nunca truncado)
+    u32 primsDropped = 0;
+    std::string primDropCause;
+
     bool ok() const { return !meshes.empty(); }
 };
 

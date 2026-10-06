@@ -668,6 +668,13 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
         err = "glTF invalido: " + err;
         return false;
     }
+    stats.primWarn = model.primsDropped;   // 0.9.6.12 (A2): as quedas no toast
+    if (model.primsDropped > 0) {
+        elog::warn(
+            "import: %u primitiva(s) ficaram FORA (bufferView fora do "
+            "buffer — o RESTO do modelo entrou; causas acima no log)",
+            model.primsDropped);
+    }
     if (model.meshes.empty()) {
         err = "glTF sem meshes";
         return false;
@@ -1104,6 +1111,33 @@ bool convertGlbFile(const std::string& srcAbs, ProjectStorage& st,
                        ? ((binBase % 4) == 0 ? "sim" : "NÃO (corrompido?)")
                        : "n/a (sem BIN)",
                    static_cast<unsigned long long>(fileBytes));
+        // 0.9.6.12 (A2 · a spec 2a) — O SLICE BIN TEM DE VIVER INTEIRO NO
+        // FICHEIRO e o copiado TEM DE SER O TOTAL do header (a evidência
+        // do dono: copiado == total == 2794956). Um ficheiro que acaba
+        // ANTES do fim do BIN (cópia em chunks, fd posicionado errado,
+        // staging curto) morre AQUI com a comparação completa — nunca
+        // com um «bufferView fora do buffer» disfarçado lá no fundo
+        if (binLen > 0) {
+            const u64 binEnd = binBase + binLen;
+            if (fileBytes < binEnd) {
+                err = "glb: o chunk BIN acaba além do ficheiro (binFim " +
+                      std::to_string(binEnd) + " > copiado " +
+                      std::to_string(fileBytes) + ", total " +
+                      std::to_string(total) + ") — cópia truncada ou "
+                      "transferência incompleta; importa o ficheiro "
+                      "completo";
+                elog::error("import: %s", err.c_str());
+                break;
+            }
+            elog::info(
+                "glb: copiado=%llu total=%u binFim=%llu — %s",
+                static_cast<unsigned long long>(fileBytes), total,
+                static_cast<unsigned long long>(binEnd),
+                fileBytes == static_cast<u64>(total)
+                    ? "copiado == total (o header e o ficheiro COINCIDEM)"
+                    : "copiado != total (o header MENTE ou há chunk de "
+                      "padding extra — os ranges usam o REAL do chunk)");
+        }
         ok = convertGltfCommon(reinterpret_cast<const char*>(json.data()),
                                json.size(), f, binBase, binLen,
                                GltfBufferResolver{}, nullptr, st, stem,

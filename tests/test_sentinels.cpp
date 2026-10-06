@@ -4045,3 +4045,240 @@ TEST(regress_rodape_intocavel) {
     }
     theme::setDensity(1.0f);
 }
+
+// ============================================================================
+// R-014 (0.9.6.12 · IMPORT A2) — A SENTINELA REESCRITA
+//         — regress_import_r014_reescrita
+//
+// A SPEC do dono: «import → .gmesh em assets/ → picker lista <1s → troca
+// ok; fixture de imagem podre → mesh SEM texturas + warn assertado» + as
+// mutações (irmãos off · binStart sem alinhamento · validação só-imagens ·
+// slice BIN truncado de propósito). Esta versão vigia o caminho DE FICHEIRO
+// (importFile + range loader) com os perfis REAIS:
+//   (a) GLB stanford (geometria + PNG embutido no fim) → .gmesh em assets/
+//       listado pelo MESMO listDir que alimenta o picker (o <1s é a
+//       ausência de re-hash pesado — o c33 12.8 afere o e2e ao device)
+//   (b) imagem PODRE → o import SEGUE sem texturas + W contado
+//   (c) slice BIN truncado de propósito (o ficheiro acaba antes do BIN) →
+//       o guard copiado==total morre COM a comparação completa
+//   (d) view fora do buffer → a falha carrega os QUATRO números no log
+// ============================================================================
+TEST(regress_import_r014_reescrita) {
+    using namespace vv;
+    ASSERT(vv::elog::init(kSentinelLogs));
+
+    // um PNG REAL (a fixture da casa)
+    std::vector<u8> png;
+    {
+        const std::string p = std::string(FIXTURE_DIR) + "/yellow4.png";
+        FILE* f = std::fopen(p.c_str(), "rb");
+        ASSERT(f != nullptr);
+        u8 buf[4096];
+        size_t n;
+        while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+            png.insert(png.end(), buf, buf + n);
+        }
+        std::fclose(f);
+    }
+    ASSERT(!png.empty());
+
+    // o GLB: POSITION (36 B) + índices u16 (6 B) + a imagem NO FIM
+    auto makeGlbA2 = [&](const std::vector<u8>& imgBytes, size_t imgOff,
+                         size_t imgLen, std::vector<u8>& glbOut) {
+        std::vector<u8> binChunk;
+        auto pushF = [&binChunk](f32 v) {
+            u8 t[4];
+            std::memcpy(t, &v, 4);
+            binChunk.insert(binChunk.end(), t, t + 4);
+        };
+        pushF(0); pushF(0); pushF(0);
+        pushF(1); pushF(0); pushF(0);
+        pushF(0); pushF(1); pushF(0);                 // 36 B de POSITION
+        binChunk.push_back(0); binChunk.push_back(0); // índices u16
+        binChunk.push_back(1); binChunk.push_back(0);
+        binChunk.push_back(2); binChunk.push_back(0); // 6 B
+        if (!imgBytes.empty()) {
+            binChunk.resize(imgOff + imgLen, 0);
+            std::memcpy(binChunk.data() + imgOff, imgBytes.data(), imgLen);
+        }
+        // imgBytes vazio = o view MENTE (o chunk fica PEQUENO — o view
+        // aponta para fora do buffer, o caso (d))
+        while (binChunk.size() % 4 != 0) {
+            binChunk.push_back(0);
+        }
+        char jv[128];
+        std::snprintf(jv, sizeof(jv),
+            "{\"buffer\":0,\"byteOffset\":%zu,\"byteLength\":%zu}",
+            imgOff, imgLen);
+        char js[1024];
+        std::snprintf(js, sizeof(js),
+            "{\"asset\":{\"version\":\"2.0\"},"
+            "\"buffers\":[{\"byteLength\":%zu}],"
+            "\"bufferViews\":["
+            "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+            "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":6},"
+            "%s],"
+            "\"accessors\":["
+            "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},"
+            "{\"bufferView\":1,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"}],"
+            "\"images\":[{\"bufferView\":2,\"mimeType\":\"image/png\"}],"
+            "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},"
+            "\"indices\":1,\"material\":0}]}],"
+            "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}",
+            binChunk.size(), jv);
+        const std::string json = js;
+        auto& g = glbOut;
+        g.clear();
+        auto u32p = [&g](u32 v) {
+            u8 t[4];
+            std::memcpy(t, &v, 4);
+            g.insert(g.end(), t, t + 4);
+        };
+        const u32 jsonPad = (4 - (static_cast<u32>(json.size()) % 4)) % 4;
+        u32p(0x46546C67u); u32p(2);
+        u32p(12 + 8 + static_cast<u32>(json.size()) + jsonPad + 8 +
+             static_cast<u32>(binChunk.size()));
+        u32p(static_cast<u32>(json.size()));
+        u32p(0x4E4F534Au);
+        g.insert(g.end(), json.begin(), json.end());
+        for (u32 i = 0; i < jsonPad; ++i) {
+            g.push_back(0x20);
+        }
+        u32p(static_cast<u32>(binChunk.size()));
+        u32p(0x004E4942u);
+        g.insert(g.end(), binChunk.begin(), binChunk.end());
+    };
+
+    auto writeTmp = [](const char* nome, const std::vector<u8>& bytes,
+                       std::string& outPath) {
+        char src[96];
+        std::snprintf(src, sizeof(src), "/tmp/goni_r014_%s_%d.glb", nome,
+                      (int)::getpid());
+        FILE* f = std::fopen(src, "wb");
+        if (!f) {
+            return false;
+        }
+        std::fwrite(bytes.data(), 1, bytes.size(), f);
+        std::fclose(f);
+        outPath = src;
+        return true;
+    };
+
+    // ---- (a) O IMPORT → .gmesh EM assets/ → o LISTING DO PICKER ---------
+    {
+        std::vector<u8> glb;
+        makeGlbA2(png, 42, png.size(), glb);
+        std::string src;
+        ASSERT(writeTmp("ok", glb, src));
+        char root[64];
+        std::snprintf(root, sizeof(root), "/tmp/goni_r014_ok_%d",
+                      (int)::getpid());
+        FsStorage st(root);
+        convert::Output out;
+        convert::Stats stats;
+        std::string err;
+        const bool ok = convert::importFile(src, "stanford.glb", st, nullptr,
+                                            out, stats, err);
+        if (!ok) {
+            fprintf(stderr, "[r014-a] o import falhou: %s\n", err.c_str());
+        }
+        ASSERT(ok);
+        EXPECT(out.meshes.size() == 1u);
+        EXPECT(out.meshes[0] == "assets/stanford.gmesh");
+        EXPECT(st.exists("assets/stanford.gmesh"));
+        EXPECT(out.textures.size() == 1u);   // a textura entrou
+        // o LISTING que o picker consome (refreshCatalog → listDir): o
+        // .gmesh novo aparece na listagem do diretório assets/
+        std::vector<std::string> listed;
+        EXPECT(st.listDir("assets", listed));
+        bool temMesh = false;
+        for (const std::string& f : listed) {
+            if (f.find("stanford.gmesh") != std::string::npos) {
+                temMesh = true;
+            }
+        }
+        EXPECT_MSG(temMesh, "o .gmesh importado não aparece no listing de "
+                            "assets/ (o picker nunca o mostraria)");
+        ::remove(src.c_str());
+    }
+    // ---- (b) A IMAGEM PODRE: mesh SEM texturas + W (nunca silencioso) ---
+    {
+        const std::vector<u8> podre = {'P', 'O', 'D', 'R', 'E', '!'};
+        std::vector<u8> glb;
+        makeGlbA2(podre, 42, podre.size(), glb);
+        std::string src;
+        ASSERT(writeTmp("podre", glb, src));
+        char root[64];
+        std::snprintf(root, sizeof(root), "/tmp/goni_r014_podre_%d",
+                      (int)::getpid());
+        FsStorage st(root);
+        convert::Output out;
+        convert::Stats stats;
+        std::string err;
+        const bool ok = convert::importFile(src, "podre.glb", st, nullptr,
+                                            out, stats, err);
+        EXPECT(ok);                       // a GEOMETRIA salva o import
+        EXPECT(out.meshes.size() == 1u);
+        EXPECT(out.textures.empty());     // a textura ficou fora
+        EXPECT(stats.texWarn >= 1u);      // contada (o toast diz)
+        EXPECT(st.exists("assets/podre.gmesh"));
+        ::remove(src.c_str());
+    }
+    // ---- (c) O SLICE BIN TRUNCADO DE PROPÓSITO: o guard copiado==total --
+    {
+        std::vector<u8> glb;
+        makeGlbA2(png, 42, png.size(), glb);
+        std::vector<u8> truncado(glb.begin(),
+                                 glb.begin() + static_cast<long>(glb.size()) -
+                                     100);   // o BIN acaba antes
+        std::string src;
+        ASSERT(writeTmp("trunc", truncado, src));
+        char root[64];
+        std::snprintf(root, sizeof(root), "/tmp/goni_r014_trunc_%d",
+                      (int)::getpid());
+        FsStorage st(root);
+        convert::Output out;
+        convert::Stats stats;
+        std::string err;
+        const bool ok = convert::importFile(src, "trunc.glb", st, nullptr,
+                                            out, stats, err);
+        EXPECT(!ok);
+        EXPECT_MSG(err.find("binFim") != std::string::npos &&
+                       err.find("copiado") != std::string::npos,
+                   "o import de um GLB truncado falhou SEM a comparação "
+                   "completa (%s)", err.c_str());
+        ::remove(src.c_str());
+    }
+    // ---- (d) VIEW FORA DO BUFFER: os QUATRO números no engine.log -------
+    {
+        std::vector<u8> glb;
+        makeGlbA2({}, 20, 1000000, glb);   // o view da imagem aponta longe
+                                           // (o chunk fica no tamanho real)
+        std::string src;
+        ASSERT(writeTmp("fora", glb, src));
+        char root[64];
+        std::snprintf(root, sizeof(root), "/tmp/goni_r014_fora_%d",
+                      (int)::getpid());
+        FsStorage st(root);
+        convert::Output out;
+        convert::Stats stats;
+        std::string err;
+        const bool ok = convert::importFile(src, "fora.glb", st, nullptr,
+                                            out, stats, err);
+        EXPECT(ok);                          // imagem má ≠ import morto
+        std::vector<std::string> linhas;
+        vv::elog::readTail(linhas, 400);
+        bool temNumeros = false;
+        for (const std::string& l : linhas) {
+            if (l.find("glb: view2 buffer0 off=") != std::string::npos &&
+                l.find("declared=") != std::string::npos &&
+                l.find("real=") != std::string::npos) {
+                temNumeros = true;
+            }
+        }
+        EXPECT_MSG(temNumeros, "a linha glb: view<i> buffer<b> off=… len=… "
+                               "declared=… real=… não apareceu no log (a "
+                               "tarefa 1 da spec A2)");
+        ::remove(src.c_str());
+    }
+}
