@@ -47,9 +47,13 @@ namespace timeline {
 
 // altura da strip (header 48 + régua 24 + 3 rows de 40)
 constexpr f32 kTimelineH   = 192.0f;
-constexpr f32 kHeaderH     = 48.0f;
+// 0.9.6.11 (GRUPO G · A AUDITORIA): as constantes passam a dp() no .cpp
+// (a lição R-018 — a Timeline era uma ILHA px-only: no C33 @2.0 o header
+// media 24dp reais e os botões das linhas 40x32px = 20x16dp — INVISÍVEL
+// ao validador porque o harness nunca abriu a tab Animação)
+constexpr f32 kHeaderH     = 48.0f;   // dp (via theme::dp no draw)
 constexpr f32 kRulerH      = 24.0f;
-constexpr f32 kRowH        = 40.0f;
+constexpr f32 kRowH        = 48.0f;   // 0.9.6.11: 48dp — os alvos das linhas cabem INTEIROS (era 40px cru)
 constexpr u32 kMaxRows     = 3;      // rows visíveis (cap — ver header)
 
 // ids dos widgets (faixa 7000+; o EditorUi usa até ~6400)

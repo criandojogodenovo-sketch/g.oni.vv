@@ -483,3 +483,16 @@ Prova de mutação (mutacao-R029a-vermelho.txt): a fórmula antiga de volta (bas
 
 Prova de mutação (mutacao-R030a-vermelho.txt): `0x2196F3` (o azul órfão da spec A) plantado no BottomPanel.cpp → o gate VERMELHO com a linha exata (exit 1 — release bloqueada); reposto → limpo (exit 0).
 
+## R-031 · a timeline da Animação: uma ilha px-only com alvos 20×16dp no device (FASE 0.9.6-MASTER · GRUPO G · ANIMATION)
+
+| campo | valor |
+|---|---|
+| ID | R-031 |
+| Reportado | a auditoria exaustiva do GRUPO G (leitura de código — a classe exata do R-018 que o Grupo C curou em TUDO menos na Timeline) |
+| Sintoma exato | o header da timeline media 24dp REAIS no C33 (@2.0 — kHeaderH=48 px crus) e os botões das linhas (curva/adiciona/apaga) eram 40/44/36 × 32 px = 20×16dp no device — ABAIXO de qualquer piso da casa, INVISÍVEL ao validador porque NENHUMA fase do harness abre a tab Animação |
+| Causa raiz | a Timeline.cpp ficou FORA da migração dp() do Grupo C (zero chamadas theme::dp) e os alvos das linhas nunca passaram pelo orçamento de 48dp — a lição: o que o harness não desenha, o validador não vê |
+| Fix | as constantes do layout/header/régua/linhas passam a theme::dp() (kHeaderH 48dp · kRowH 40px→48dp — os alvos cabem INTEIROS) e os botões das linhas a 48×48dp CHEIOS (curva/adiciona chave/apaga chave) |
+| Teste sentinela | (a vigília honesta: os 21 testes do test_anim cobrem a LÓGICA — interp/playback/modos/velocidade — todos verdes; o PROVA de layout da timeline ao device fica REGISTADA como pendente: falta uma FASE do harness que abra a tab Animação com um TIC player — a dívida documentada no relatório do Grupo G) |
+| Linha do replay | (idem — a fase da timeline no c33_virtual é a dívida) |
+| Padrão proibido | (nenhum — a vigília é a dívida registada + a regra «nada de px crus na UI», apanhada por leitura) |
+

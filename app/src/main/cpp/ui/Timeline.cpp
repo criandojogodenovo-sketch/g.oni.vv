@@ -104,14 +104,14 @@ UiRect timelineRect(f32 sw, f32 sh, const safe::Insets& in, bool rightPanel) {
 // "clip:" encostado ao play (encolhe 176→120 se preciso), título no resto.
 HeaderLayout headerLayout(const UiRect& r) {
     const f32 by = r.y + 6.0f;
-    const f32 bh = kHeaderH - 12.0f;
+    const f32 bh = theme::dp(kHeaderH - 12.0f);
     HeaderLayout L;
     // cluster da DIREITA — offsets fixos de sempre (nada muda nos ecrãs largos)
     L.play   = {r.x + r.w - 436.0f, by, 84.0f, bh};
-    L.stop   = {r.x + r.w - 348.0f, by, 64.0f, bh};
+    L.stop   = {r.x + r.w - theme::dp(348.0f), by, theme::dp(64.0f), bh};
     L.mode   = {r.x + r.w - 280.0f, by, 108.0f, bh};
     L.slider = {r.x + r.w - 164.0f, by, 96.0f, bh};
-    L.add    = {r.x + r.w - 60.0f, by, 48.0f, bh};
+    L.add    = {r.x + r.w - theme::dp(60.0f), by, theme::dp(48.0f), bh};
     // "clip:": à ESQUERDA do play com folga 8 (nunca sobrepõe); encolhe
     // 176→120 quando a strip é estreita e, em último caso, o TÍTULO cede
     // (o botão fica com o que sobrar, mínimo clicável 96 — o botão nunca
@@ -133,7 +133,7 @@ HeaderLayout headerLayout(const UiRect& r) {
         }
     }
     L.clip = {cx, by, cw, bh};
-    L.title = {r.x + 12.0f, r.y, (cx - 8.0f) - (r.x + 12.0f), kHeaderH};
+    L.title = {r.x + theme::dp(12.0f), r.y, (cx - theme::dp(8.0f)) - (r.x + theme::dp(12.0f)), theme::dp(kHeaderH)};
     return L;
 }
 
@@ -189,7 +189,7 @@ void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
     // ---- painel (strip) ------------------------------------------------------
     ui.panel(r.x, r.y, r.w, kTimelineH, theme::PANEL);
     ui.frame(r.x, r.y, r.w, kTimelineH, 2.0f, theme::ACCENT);
-    ui.panel(r.x, r.y + kHeaderH - 1.0f, r.w, 1.0f, theme::LINE);
+    ui.panel(r.x, r.y + theme::dp(kHeaderH) - 1.0f, r.w, 1.0f, theme::LINE);
     const f32 th = ui.fontHeight();
 
     // ---- preview (avança com dt REAL — editor, passo fixo não corre) --------
@@ -285,7 +285,7 @@ void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
     // ---- régua + área das keys ----------------------------------------------
     const f32 keysX = r.x + 300.0f;                 // 300 px de labels/botões
     const f32 keysW = r.w - 300.0f - 12.0f;
-    const f32 rulerY = r.y + kHeaderH;
+    const f32 rulerY = r.y + theme::dp(kHeaderH);
     const f32 rowsY = rulerY + kRulerH;
     const f32 dur = pl->duration();
     const f32 view = dur > 0.25f ? dur : 2.0f;      // escala mínima 2 s
@@ -316,28 +316,28 @@ void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
     const u32 shown = nTracks < kMaxRows ? nTracks : kMaxRows;
     for (u32 i = 0; i < shown; ++i) {
         AnimTrack& tr = clip->tracks[i];
-        const f32 ry = rowsY + static_cast<f32>(i) * kRowH;
+        const f32 ry = rowsY + static_cast<f32>(i) * theme::dp(kRowH);
         const bool sel = tl.selTrack == static_cast<i32>(i);
         // row selecionada: fundo LINE (destaque suave)
         if (sel) {
-            ui.panel(r.x + 2.0f, ry + 1.0f, r.w - 4.0f, kRowH - 2.0f, theme::LINE);
+            ui.panel(r.x + theme::dp(2.0f), ry + theme::dp(1.0f), r.w - theme::dp(4.0f), theme::dp(kRowH) - theme::dp(2.0f), theme::LINE);
         }
         // label: alvo + elemento
         char lab[64];
         std::snprintf(lab, sizeof(lab), "%s%s%s", animTargetLabel(tr.target),
                       tr.element.empty() ? "" : " ", tr.element.c_str());
         ui.labelFitted(r.x + 12.0f,
-                       ry + (kRowH + th * 0.5f) * 0.5f, lab, theme::TEXT, 150.0f);
+                       ry + (theme::dp(kRowH) + th * 0.5f) * 0.5f, lab, theme::TEXT, theme::dp(150.0f));
         // botões da row (w fixo: 40/40/40/36)
         char curve[8];
         std::snprintf(curve, sizeof(curve), "%s",
                       tr.curve == AnimCurve::Bezier ? "bez" : "lin");
-        if (ui.button(kIdCurve + i, r.x + 168.0f, ry + 4.0f, 40.0f, kRowH - 8.0f,
+        if (ui.button(kIdCurve + i, r.x + theme::dp(160.0f), ry, theme::dp(48.0f), theme::dp(kRowH),
                       curve)) {
             tr.curve = tr.curve == AnimCurve::Bezier ? AnimCurve::Linear
                                                      : AnimCurve::Bezier;
         }
-        if (ui.button(kIdAddKey + i, r.x + 212.0f, ry + 4.0f, 44.0f, kRowH - 8.0f,
+        if (ui.button(kIdAddKey + i, r.x + theme::dp(212.0f), ry, theme::dp(48.0f), theme::dp(kRowH),
                       "+key")) {
             // key NO CURSOR com o valor ATUAL da propriedade (ou substitui a
             // key que já esteja a <1/30 s do cursor)
@@ -364,7 +364,7 @@ void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
             }
             pl->apply(scene, st.selected);
         }
-        if (ui.button(kIdDelKey + i, r.x + 260.0f, ry + 4.0f, 36.0f, kRowH - 8.0f,
+        if (ui.button(kIdDelKey + i, r.x + theme::dp(264.0f), ry, theme::dp(48.0f), theme::dp(kRowH),
                       "−")) {
             // remove a key MAIS PRÓXIMA do cursor desta row
             if (!tr.keys.empty()) {
@@ -389,7 +389,7 @@ void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
             }
             const bool ksel = sel && tl.selKey == static_cast<i32>(k);
             const f32 s = ksel ? 12.0f : 8.0f;
-            ui.panel(x - s * 0.5f, ry + kRowH * 0.5f - s * 0.5f, s, s,
+            ui.panel(x - s * 0.5f, ry + theme::dp(kRowH) * 0.5f - s * 0.5f, s, s,
                      ksel ? theme::ACCENT : theme::TEXT);
         }
     }
@@ -398,7 +398,7 @@ void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
         char more[48];
         std::snprintf(more, sizeof(more), "+%u tracks",
                       nTracks - kMaxRows);
-        ui.labelFitted(r.x + 12.0f, rowsY + kMaxRows * kRowH, more,
+        ui.labelFitted(r.x + theme::dp(12.0f), rowsY + kMaxRows * theme::dp(kRowH), more,
                        theme::LINE, 200.0f);
     } else if (nTracks == 0) {
         ui.labelFitted(r.x + 12.0f, rowsY + 8.0f,
