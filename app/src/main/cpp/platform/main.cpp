@@ -4883,6 +4883,34 @@ void frame() {
                       static_cast<i32>(h - vp3d.y - vp3d.h),
                       static_cast<i32>(vp3d.w), static_cast<i32>(vp3d.h));
             scissor3d = true;
+            // 0.9.6.12 (GRUPO J3 · R-024) — O LOG DE DIAGNÓSTICO DO RECT: a
+            // spec J3 pede «JNI: viewport set to (x, y, w, h)» — a
+            // arquitetura REAL não tem esse salto JNI (o glViewport vive no
+            // MESMO frame que calcula o rect; não há views Java a
+            // redimensionar), e o log equivalente da casa é ESTE: quando o
+            // retângulo visível MUDA (painel de baixo abre/fecha, divisores,
+            // rotação), a linha aparece com os QUATRO números + o aspect —
+            // se NÃO aparecer numa mudança de painéis, o evento não está a
+            // chegar ao render. Loga SÓ na mudança (nunca por frame).
+            {
+                static UiRect s_prevVp{0.0f, 0.0f, 0.0f, 0.0f};
+                static bool s_prevValid = false;
+                const bool changed =
+                    !s_prevValid ||
+                    std::fabs(s_prevVp.x - vp3d.x) > 0.5f ||
+                    std::fabs(s_prevVp.y - vp3d.y) > 0.5f ||
+                    std::fabs(s_prevVp.w - vp3d.w) > 0.5f ||
+                    std::fabs(s_prevVp.h - vp3d.h) > 0.5f;
+                if (changed) {
+                    elog::info(
+                        "vp3d: viewport set to (%.0f, %.0f, %.0f x %.0f) — "
+                        "aspect %.3f",
+                        (double)vp3d.x, (double)vp3d.y, (double)vp3d.w,
+                        (double)vp3d.h, (double)(vp3d.w / vp3d.h));
+                    s_prevVp = vp3d;
+                    s_prevValid = true;
+                }
+            }
         }
     }
     const DrawStats st3d = drawTics(vp);

@@ -3824,3 +3824,90 @@ TEST(regress_texto_strip_campo) {
     }
     theme::setDensity(1.0f);
 }
+
+// ============================================================================
+// R-024 (0.9.6.12 · GRUPO J3) — O RECT DO VIEWPORT SEGUE OS PAINÉIS
+//         — regress_viewport_rect_segue
+//
+// O DONO (defeito 4): «o canvas OpenGL não recomputa o retângulo quando os
+// painéis mudam de tamanho». A ARQUITETURA REAL: não há salto JNI
+// (Java_vv_goni_GoniRenderer_nativeSetViewport não existe — a UI é toda
+// C++ sobre UMA superfície); o equivalente é o glViewport/glScissor do
+// frame, alimentados pelo centerRect com o drawerH EFETIVO (desde o
+// G1-3/Grupo D) e o aspect DO RECT na câmara. A CAUSA que restava era a do
+// R-022 (o drawer cru vs tapado) — curada pela fonte única. A parte nova
+// da spec J3: o LOG de diagnóstico `vp3d: viewport set to (x, y, w x h)`
+// quando o rect muda (main.cpp; a prova no REPLAY — FASE 14.3). Esta
+// sentinela afere a matemática: abrir/fechar o painel muda o rect, o
+// aspect da câmara segue o rect (nunca o ecrã todo), e a fronteira 3D→UI
+// devolve o viewport cheio (o contrato do stub).
+// ============================================================================
+TEST(regress_viewport_rect_segue) {
+    using namespace vv;
+    theme::setDensity(2.0f);
+    // o device: 1600x720 @2.0, insets da 13.7
+    const f32 sw = 1600.0f, sh = 720.0f;
+    const safe::Insets in{0.0f, 48.0f, 48.0f, 0.0f};
+    const f32 vpH = safe::viewportRect(sw, sh, in).h;
+
+    // (a) O RECT MUDA com o painel: fechado (eff 0) vs aberto (raw 240)
+    const f32 effAberto = safe::effectiveDrawerH(240.0f, vpH);
+    const UiRect fechado = safe::centerRect(sw, sh, in, 0.0f, true, -1.0f,
+                                            -1.0f);
+    const UiRect aberto = safe::centerRect(sw, sh, in, effAberto, true,
+                                           -1.0f, -1.0f);
+    EXPECT_MSG(std::fabs(aberto.h - (fechado.h - effAberto)) < 0.5f,
+               "a altura do rect com o painel aberto (%.1f) não é a do "
+               "fechado (%.1f) menos a altura efetiva (%.1f)",
+               aberto.h, fechado.h, effAberto);
+    EXPECT(aberto.w == fechado.w && aberto.x == fechado.x);
+    EXPECT(aberto.h > 0.0f);   // o painel aberto NUNCA colapsa o viewport
+    EXPECT(aberto.h >= theme::dp(safe::kViewportMinH) - 0.5f);
+
+    // (b) O ASPECT segue o RECT (a janela é o ecrã da câmara — nunca o
+    // ecrã todo; o bug G1-3 histórico era este)
+    {
+        Camera cam;
+        const Mat4 projRect = cam.proj(aberto.w / aberto.h);
+        const Mat4 projScreen = cam.proj(sw / sh);
+        EXPECT(!test::matNearF(projRect, projScreen, 1e-3f));
+        // o aspect DO RECT é o que a produção usa (proj(viewRect.w/h) no
+        // main) — o Mesmo valor para o mesmo rect
+        const Mat4 projRect2 = cam.proj(aberto.w / aberto.h);
+        EXPECT(test::matNearF(projRect, projRect2));
+    }
+
+    // (c) A COERÊNCIA com o chrome: o MESMO rect alimenta a toolbar (o
+    // vpchrome) e o glViewport — a fonte única garantida pelo chamador
+    {
+        const editor::vpchrome::Layout L = editor::vpchrome::layout(aberto);
+        EXPECT(safe::rectInside(L.toolPanel, aberto));
+        EXPECT(L.selectBtn.y >= aberto.y);
+    }
+
+    // (d) O LOG de diagnóstico é PARTE DO CONTRATO (a spec J3 pede o log
+    // com os QUATRO números): o literal existe no main.cpp — apagá-lo
+    // silenciosamente é regressão do diagnóstico que o dono usa no device
+    // (a prova DELE acontecendo é a FASE 14.3 do replay)
+    {
+        const std::string mainCpp =
+            std::string(REPO_ROOT) + "/app/src/main/cpp/platform/main.cpp";
+        FILE* f = std::fopen(mainCpp.c_str(), "rb");
+        ASSERT(f != nullptr);
+        std::string src;
+        char buf[4096];
+        size_t n;
+        while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+            src.append(buf, n);
+        }
+        std::fclose(f);
+        EXPECT_MSG(src.find("vp3d: viewport set to") != std::string::npos,
+                   "o log de diagnóstico vp3d desapareceu do main.cpp — a "
+                   "spec J3 (o dono diagnostica o rect por esta linha)");
+        EXPECT_MSG(src.find("glViewport(static_cast<i32>(vp3d.x)") !=
+                       std::string::npos,
+                   "o glViewport do rect desapareceu do main.cpp (a "
+                   "fronteira do passe 3D)");
+    }
+    theme::setDensity(1.0f);
+}

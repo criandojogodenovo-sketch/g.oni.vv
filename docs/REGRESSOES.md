@@ -523,3 +523,17 @@ Prova de mutação (mutacao-R030a-vermelho.txt): `0x2196F3` (o azul órfão da s
 | Teste sentinela | `regress_texto_strip_campo` (tests/test_sentinels.cpp) — o encaixe em 3 densidades (mdpi 1.0 / hdpi 1.5 / xhdpi 2.0, a spec pede as três) com medidor fake density-invariante: texto inteiro, reserva do [+], sem sobreposição, degradação por ordem, fallback honesto; a FONTE REAL vive na FASE 14.1/14.2 do c33_virtual (o chip comporta «Global», o wrap-content com piso, «pesquisar TIC» cabe no piso 200dp da hierarquia) |
 | Prova de mutação | mutação R-023a: as medidas ignoradas (larguras fixas de volta) → `regress_texto_strip_campo` VERMELHA (o Global fora do [+, fora da strip, a degradação morta) + 16 testes; repostas → 0 falhas |
 | Padrão proibido | (novo) «largura de texto fixa em dp sem medir» — chip com texto passa pela medida da fonte (regra §2.5 do contrato) |
+
+## R-024 · o retângulo do canvas OpenGL e o log de diagnóstico (0.9.6.12 · GRUPO J3)
+
+| campo | valor |
+|---|---|
+| ID | R-024 |
+| Reportado | o dono (defeito 4: «canvas OpenGL não recomputa o retângulo quando painéis mudam de tamanho»; a spec J3 pede o log «JNI: viewport set to (x, y, w, h)») |
+| Sintoma exato | ao abrir/fechar o painel de baixo, o canvas 3D não acompanhava — o que restava do defeito no código atual era EXATAMENTE a causa do R-022 (o drawer cru vs tapado); o glViewport/glScissor/aspect do rect existiam desde o G1-3/Grupo D |
+| Causa raiz | a arquitetura REAL não tem o salto JNI da spec (não há views Java nem GoniRenderer — a UI é toda C++ sobre UMA superfície NativeActivity); o equivalente do log pedido não existia: nenhuma linha dizia QUE retângulo o render usou — o dono não tinha como diagnosticar no device |
+| Fix | (a) o log de diagnóstico `vp3d: viewport set to (x, y, w x h) — aspect N.NNN` no bloco do scissor (main.cpp), a logar SÓ na mudança do rect (nunca por frame) com os QUATRO números + o aspect; (b) a matemática seguida pela sentinela (o rect muda com o painel, o aspect é o DO RECT) |
+| Teste sentinela | `regress_viewport_rect_segue` (tests/test_sentinels.cpp): abrir/fechar muda o rect pela altura efetiva, o aspect segue o rect (nunca o ecrã), coerência com o chrome, e o literal do log vigiado no fonte (REPO_ROOT) |
+| Linha do replay | FASE 14.3 do c33_virtual — o log A ACONTECER: `vp3d: viewport set to (400, 160, 576 x 208)` com o painel aberto (o rect encolheu), a linha de volta ao rect cheio ao fechar, o aspect = w/h do rect |
+| Prova de mutação | mutação R-024a: o log MUTADO (a linha deixa de ser a do contrato) → FASE 14.3 com 4 falhas + `regress_viewport_rect_segue` vermelha; reposto → 454/454 + 0 falhas |
+| Padrão proibido | (novo) «mudança de rect visível sem linha vp3d no engine.log» |

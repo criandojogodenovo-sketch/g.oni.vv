@@ -22,6 +22,7 @@ CONTRACT = REPO / "docs" / "LAYOUT_HIERARCHY.md"
 SENTINELS = [
     ("regress_hierarquia_contrato", "tests/test_sentinels.cpp"),
     ("regress_texto_strip_campo", "tests/test_sentinels.cpp"),   # J2/R-023
+    ("regress_viewport_rect_segue", "tests/test_sentinels.cpp"),  # J3/R-024
 ]
 
 # os símbolos que o contrato menciona, por ficheiro — extraídos da tabela

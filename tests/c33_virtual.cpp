@@ -4276,6 +4276,77 @@ int main() {
                   "PISO 200dp (fonte real @2.0)");
         }
 
+        // ---- 14.3 (J3 · R-024) — O LOG DO RECT A ACONTECER: abrir o
+        // painel de baixo muda o retângulo visível → a linha
+        // `vp3d: viewport set to (x, y, w x h) — aspect` aparece com os
+        // números certos (a spec J3: se não aparecer, o evento não chegou
+        // ao render). O fecho produz a linha de volta
+        passo("14.3 o log vp3d a acontecer (abrir/fechar o painel)");
+        {
+            g_bottom.bottomTab = 0;
+            g_bottom.drawerH = 0.0f;
+            frame();
+            // o rect ESPERADO com o painel fechado
+            const UiRect fechado = editor::centerRect(
+                1600.0f, 720.0f, g_ui.safeArea(), currentDrawerH(),
+                g_editor.showInspector, g_editor.hierW, g_editor.inspW);
+            // força uma MUDANÇA: abre o painel (o drawer persistido 240 →
+            // a altura efetiva da fonte única) e corre um frame
+            g_bottom.bottomTab = 1;
+            g_bottom.drawerH = 240.0f;
+            frame();
+            const UiRect aberto = editor::centerRect(
+                1600.0f, 720.0f, g_ui.safeArea(), currentDrawerH(),
+                g_editor.showInspector, g_editor.hierW, g_editor.inspW);
+            // a ÚLTIMA linha vp3d tem de descrever o rect ABERTO
+            std::string lastVp;
+            for (const std::string& l : logLines()) {
+                if (l.find("vp3d: viewport set to") != std::string::npos) {
+                    lastVp = l;
+                }
+            }
+            check(!lastVp.empty(),
+                  "14.3 o log vp3d existe no engine.log (o diagnóstico da "
+                  "spec J3)");
+            char want[128];
+            std::snprintf(want, sizeof(want),
+                          "vp3d: viewport set to (%.0f, %.0f, %.0f x %.0f)",
+                          (double)aberto.x, (double)aberto.y,
+                          (double)aberto.w, (double)aberto.h);
+            check(lastVp.find(want) != std::string::npos,
+                  (std::string("14.3 a linha vp3d descreve o rect ABERTO (") +
+                   want + ") — o rect do render SEGUE o painel")
+                      .c_str());
+            // o aspect da linha é o DO RECT (a janela é o ecrã da câmara)
+            {
+                char wantAspect[48];
+                std::snprintf(wantAspect, sizeof(wantAspect), "aspect %.3f",
+                              (double)(aberto.w / aberto.h));
+                check(lastVp.find(wantAspect) != std::string::npos,
+                      "14.3 o aspect no log é o DO RECT (nunca o do ecrã)");
+            }
+            check(aberto.h < fechado.h,
+                  "14.3 o rect ENCOLHEU com o painel aberto (o canvas "
+                  "recomputa — o defeito 4 do dono)");
+            // fecha: a linha de volta ao rect fechado
+            g_bottom.bottomTab = 0;
+            frame();
+            std::string lastVp2;
+            for (const std::string& l : logLines()) {
+                if (l.find("vp3d: viewport set to") != std::string::npos) {
+                    lastVp2 = l;
+                }
+            }
+            char want2[128];
+            std::snprintf(want2, sizeof(want2),
+                          "vp3d: viewport set to (%.0f, %.0f, %.0f x %.0f)",
+                          (double)fechado.x, (double)fechado.y,
+                          (double)fechado.w, (double)fechado.h);
+            check(lastVp2.find(want2) != std::string::npos,
+                  "14.3 ao FECHAR o painel a linha vp3d volta ao rect "
+                  "cheio (o evento de fecho também chega)");
+        }
+
         // ---- 14.x — o PNG do estado J (drawer aberto + strip) — a prova
         // P-05 do dono (o estado que produzia os defeitos 1+2+3)
         passo("14.x o PNG do device com o drawer aberto (a prova P-05)");
