@@ -414,7 +414,11 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
     {
         const TextMetrics m = ui.textMetrics();
         const f32 base = y + (kHeaderH - m.block()) * 0.5f + m.ascent;
-        ui.label(x + kPad, base, "HIERARQUIA", theme::kTheme.text2);
+        // 0.9.6.10 (GRUPO UI · a imagem 1): o título do painel em 16sp
+        // text1 (era 12sp text2 — os painéis da referência têm títulos
+        // PRÓPRIOS, não legendas)
+        ui.labelStyled(x + kPad, base, "Hierarquia", theme::kTheme.text1,
+                       theme::fontScale(theme::kFontSection), 0);
         // chip da MULTI-SELEÇÃO (aparece com ≥1 no conjunto): "N ×" limpa
         if (st.multiSelectCount > 0) {
             char chip[24];
@@ -428,6 +432,10 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                 st.multiSelectCount = 0;   // volta à seleção simples
             }
         }
+        // 0.9.6.10 (GRUPO UI · o anti-exemplo da imagem 2): o [+] era um
+        // BLOCO cheio do accent (branco cegante no mono; âmbar gritaria
+        // agora) — a referência tem botões QUIETOS: chip de vidro com o
+        // ícone âmbar (o accent é ESTADO, não repouso — a regra spec A)
         const UiRect pr = {x + w - kPad - theme::dp(48.0f),
                            y + (kHeaderH - theme::dp(48.0f)) * 0.5f,
                            theme::dp(48.0f), theme::dp(48.0f)};
@@ -435,13 +443,38 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
         if (ui.widgetHit(kIdPlus, pr.x, pr.y, pr.w, pr.h)) {
             plus = true;
         }
+        const bool plusHeld = ui.widgetActive(kIdPlus);
         ui.panelRounded(pr.x, pr.y, pr.w, pr.h, theme::dp(theme::kRadiusCard),
-                        ui.widgetActive(kIdPlus) ? theme::kTheme.accentPress
-                                                 : theme::kTheme.accent);
+                        plusHeld ? theme::kTheme.surface2
+                                 : theme::kTheme.surface);
+        ui.frameRounded(pr.x, pr.y, pr.w, pr.h, 1.0f,
+                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
         icons::drawIcon(ui, icons::Icon::Plus,
                         pr.x + (pr.w - theme::dp(24.0f)) * 0.5f,
                         pr.y + (pr.h - theme::dp(24.0f)) * 0.5f,
-                        theme::dp(24.0f), theme::kTheme.accentInk);
+                        theme::dp(24.0f),
+                        plusHeld ? theme::kTheme.accentInk
+                                 : theme::kTheme.accent);
+        // o ⋮ da hierarquia (a imagem 1: cada painel com o seu menu) —
+        // abre o sheet com as ações reais da árvore (o main despacha)
+        const UiRect dr = {pr.x - theme::dp(48.0f),
+                           y + (kHeaderH - theme::dp(48.0f)) * 0.5f,
+                           theme::dp(48.0f), theme::dp(48.0f)};
+        const bool dotsHeld = ui.widgetActive(kHierDotsId);
+        ui.panelRounded(dr.x, dr.y, dr.w, dr.h, theme::dp(theme::kRadiusCard),
+                        (dotsHeld || st.hierMenu) ? theme::kTheme.surface2
+                                                  : theme::kTheme.surface);
+        ui.frameRounded(dr.x, dr.y, dr.w, dr.h, 1.0f,
+                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
+        for (int d = 0; d < 3; ++d) {
+            ui.panel(dr.x + dr.w * 0.5f - theme::dp(9.0f) +
+                         static_cast<f32>(d) * theme::dp(9.0f),
+                     dr.y + dr.h * 0.5f - theme::dp(2.0f), theme::dp(4.0f),
+                     theme::dp(4.0f), theme::kTheme.text1);
+        }
+        if (ui.widgetHit(kHierDotsId, dr.x, dr.y, dr.w, dr.h)) {
+            st.hierMenu = !st.hierMenu;
+        }
         // ---- pesquisa 48dp (scope: por nome no header da hierarquia) ----
         const f32 sy = y + kHeaderH;
         ui.panel(x, sy, w, 1.0f, theme::kTheme.border);
@@ -511,12 +544,22 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                 }
             }
 
-            // ---- fundo do estado (spec B) ----
+            // ---- fundo do estado (0.9.6.10 · GRUPO UI · a imagem 1) ----
+            // a linha selecionada: FILL accentDim (o âmbar a 25% sobre
+            // grafite — #4A3714) + BARRA ESQUERDA âmbar 3dp (a referência
+            // exata do dono). ANTES era o fill accent CHEIO — o BLOCO
+            // cegante do anti-exemplo. O texto/icones ficam text1/accent
+            // (9,6:1 / 6,2:1 sobre o accentDim — os pisos passam)
             if (selected && st.multiSelectCount == 0) {
-                ui.panel(x + 4.0f, ry, w - 8.0f, kRowH, theme::kTheme.accent);
+                ui.panel(x + 4.0f, ry, w - 8.0f, kRowH,
+                         theme::kTheme.accentDim);
+                ui.panel(x + 4.0f, ry, theme::dp(3.0f), kRowH,
+                         theme::kTheme.accent);
             } else if (multi) {
-                ui.panel(x + 4.0f, ry, w - 8.0f, kRowH, theme::kTheme.surface2);
-                ui.panel(x + 4.0f, ry, 3.0f, kRowH, theme::kTheme.accent);
+                ui.panel(x + 4.0f, ry, w - 8.0f, kRowH,
+                         theme::kTheme.accentDim);
+                ui.panel(x + 4.0f, ry, theme::dp(3.0f), kRowH,
+                         theme::kTheme.accent);
             } else if (ui.widgetActive(kIdRowBase + t->handle.index)) {
                 ui.panel(x + 4.0f, ry, w - 8.0f, kRowH, theme::kTheme.surface2);
             }
@@ -530,11 +573,11 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
             // ---- ícone de TIPO (24dp na zona de 48) ----
             const icons::Icon ic = hierIconFor(*t);
             const f32 iconX = x + theme::dp(16.0f) + indent;
-            const bool inkOn = selected && st.multiSelectCount == 0;
+            const bool inkOn = (selected && st.multiSelectCount == 0) || multi;
             icons::drawIcon(ui, ic, iconX,
                             ry + (kRowH - theme::dp(24.0f)) * 0.5f,
                             theme::dp(24.0f),
-                            inkOn ? theme::kTheme.accentInk
+                            inkOn ? theme::kTheme.accent
                                   : theme::kTheme.text2);
 
             // ---- nome 14sp (flex, truncado) ----
@@ -544,7 +587,7 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                 const f32 nameX = iconX + theme::dp(24.0f) + theme::dp(8.0f);
                 const f32 nameW = eyeX - nameX - theme::dp(8.0f);
                 ui.labelFitted(nameX, base, t->name.c_str(),
-                               inkOn ? theme::kTheme.accentInk
+                               inkOn ? theme::kTheme.text1
                                      : (t->visible ? theme::kTheme.text1
                                                    : theme::kTheme.text2),
                                nameW);
@@ -2072,6 +2115,71 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 }
 
 // ---------------------------------------------------------------------------
+// 0.9.6.10 (GRUPO UI) · O MENU ⋮ DA HIERARQUIA (a imagem 1: cada painel
+// com o seu menu) — um sheet pequeno ancorado sob o botão, com as ações
+// REAIS da árvore: 1 = limpar a multi-seleção · 2 = o nome COMPLETO do
+// TIC selecionado (o tip do long-press, sem esperar o long-press)
+// ---------------------------------------------------------------------------
+int drawHierMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                 EditorState& st, f32 ax, f32 ay) {
+    constexpr f32 kSheetW = 260.0f;
+    constexpr f32 kRowH = 48.0f;
+    const f32 h = 2.0f * kRowH + 8.0f;
+    f32 x = ax, y = ay + 8.0f;
+    const f32 maxX = ui.safeLeft() + sw - ui.safeRight() - kSheetW - 4.0f;
+    if (x > maxX) {
+        x = maxX > ui.safeLeft() ? maxX : ui.safeLeft();
+    }
+    const f32 maxY = sh - ui.safeBottom() - h - 28.0f;
+    if (y > maxY) {
+        y = maxY > static_cast<f32>(ui.safeTop()) + safe::kToolbarH ? maxY
+                : static_cast<f32>(ui.safeTop()) + safe::kToolbarH;
+    }
+    ui.panel(ui.safeLeft(), static_cast<f32>(ui.safeTop()),
+             sw - ui.safeLeft() - ui.safeRight(),
+             sh - ui.safeTop() - ui.safeBottom(), theme::kTheme.scrim);
+    if (pressedOutside(in, x, y, kSheetW, h)) {
+        st.hierMenu = false;
+        return 0;
+    }
+    ui.panelRounded(x, y, kSheetW, h, theme::kRadiusCard,
+                    theme::kTheme.surface);
+    ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::kRadiusCard,
+                    theme::kTheme.border);
+    static const struct {
+        const char* label;
+        icons::Icon ic;
+    } kRows[2] = {
+        {"Limpar seleção", icons::Icon::Check},
+        {"Nome completo do TIC", icons::Icon::Question},
+    };
+    const TextMetrics tm = ui.textMetrics();
+    int chosen = 0;
+    for (int i = 0; i < 2; ++i) {
+        const f32 ry = y + 4.0f + static_cast<f32>(i) * kRowH;
+        const u64 id = kHierMenuRowBase + static_cast<u64>(i);
+        if (ui.widgetActive(id)) {
+            ui.panel(x + 4.0f, ry, kSheetW - 8.0f, kRowH,
+                     theme::kTheme.surface2);
+        }
+        icons::drawIcon(ui, kRows[i].ic, x + 16.0f,
+                        ry + (kRowH - 24.0f) * 0.5f, 24.0f,
+                        theme::kTheme.text2);
+        if (ui.hasFont()) {
+            ui.labelFitted(x + 52.0f, ry + (kRowH - tm.block()) * 0.5f +
+                                           tm.ascent,
+                           kRows[i].label, theme::kTheme.text1,
+                           kSheetW - 68.0f);
+        }
+        if (ui.widgetHit(id, x + 4.0f, ry, kSheetW - 8.0f, kRowH)) {
+            chosen = i + 1;
+            st.hierMenu = false;
+        }
+    }
+    return chosen;
+}
+
+// ---------------------------------------------------------------------------
 // 0.7.1 — CENAS: overlay com a lista do manifesto (+ nova/trocar)
 // ---------------------------------------------------------------------------
 
@@ -3037,6 +3145,7 @@ UiTexPickOutcome applyUiTexPick(Scene& scene, Handle tic, i32 element, int pick,
 void closeAllOverlays(EditorState& st) {
     st.plusMenu = false;
     st.fileMenu = false;
+    st.hierMenu = false;   // 0.9.6.10 (GRUPO UI): o ⋮ da Hierarquia
     st.settingsMenu = false;
     st.assetMenu = 0;
     st.storageDialog = false;

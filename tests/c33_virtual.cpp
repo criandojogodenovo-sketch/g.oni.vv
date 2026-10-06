@@ -3522,31 +3522,40 @@ int main() {
                     check(editor::scriptwin::symPageCount(720.0f) == 3u,
                           "13.8 o device tem 3 paginas (22 simbolos / 8 por pagina)");
                 }
-                // (4) o título FLEXIONA no aperto: a 360dp o header é
-                // back+botões (a zona do título <48dp — o label SOME em
-                // vez de sangrar/sobrepor)
+                // (4) o título FICA e NADA SANGRA (RECALIBRADO
+                // 0.9.6.10 · GRUPO UI · E1): a spec manda «header flexível,
+                // overflow para ⋯, NADA por cima do título» — o título é
+                // SEMPRE visível (piso 48dp) e os BOTÕES recuam para o
+                // «⋯» (no 360dp: back+título+⋯+lupa+run/stop). O contrato
+                // novo: TODO o label do header termina ANTES do botão
+                // mais à esquerda (o título nunca sangra a zona deles)
                 {
-                    // a zona do HEADER: y em [48..160] px (inset 48 + 56dp
-                    // = 112px @2.0) — SÓ o título/subtítulo vivem aí; o
-                    // código começa DEBAIXO (os labels do corpo não contam)
-                    // a zona do TÍTULO: o header tem Run/Stop à direita
-                    // (x=521/630) e a 1ª linha de código no topo do corpo
-                    // (y~153) — o título vive em x<titleX+folga e y ACIMA
-                    // do corpo (o topo do label < 150px)
                     bool tituloSangra = false;
                     bool algumTitulo = false;
                     for (const auto& e : rd.entries) {
-                        if (e.kind == vv::layout::Entry::Label &&
-                            e.y < 150.0f && e.x < 152.0f) {
-                            algumTitulo = true;   // sobrou título?
-                            if (e.x + e.w > 152.0f) {   // helpX@2.0=76dp*2
-                                tituloSangra = true;
+                        if (e.kind != vv::layout::Entry::Label ||
+                            e.y >= 160.0f) {
+                            continue;
+                        }
+                        algumTitulo = true;   // o título FICA (E1)
+                        // o botão mais próximo À DIREITA do label (o Back
+                        // vive À ESQUERDA do título — não é ele quem
+                        // limita; limitam o ⋯/lupa/run/stop)
+                        f32 btnEdge = 1e9f;
+                        for (const auto& b : rd.entries) {
+                            if (b.kind == vv::layout::Entry::Button &&
+                                !b.compact && b.y < 200.0f &&
+                                b.x >= e.x && b.x < btnEdge) {
+                                btnEdge = b.x;
                             }
                         }
+                        if (btnEdge < 1e8f && e.x + e.w > btnEdge - 4.0f) {
+                            tituloSangra = true;   // invadiu os botões
+                        }
                     }
-                    check(!tituloSangra && !algumTitulo,
-                          "13.8 o título flexiona: no device estreito o "
-                          "label SOME (nada sangra a zona dos botões)");
+                    check(algumTitulo && !tituloSangra,
+                          "13.8 o título FICA e não sangra: o header E1 "
+                          "(título com piso 48dp + botões no ⋯)");
                 }
                 fileapi::writeAll("layout-harness-script-device.png",
                                   pngD.data(), pngD.size());

@@ -97,6 +97,7 @@ struct AssetCatalog {
 struct EditorState {
     Handle selected = Handle::invalid();   // TIC selecionado na Hierarchy
     bool   plusMenu = false;               // overlay de criação aberto
+    bool   hierMenu = false;   // 0.9.6.10 (GRUPO UI): o menu â® da Hierarquia
     bool   fileMenu = false;               // overlay Menu (Save/Load) aberto
     bool   settingsMenu = false;           // F5.1-hotfix: overlay Settings aberto
     int    assetMenu = 0;                  // F5-E: 0 fechado; 1 = seletor mesh;
@@ -425,9 +426,15 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 // scroll do sheet (kMenuScrollId 7410 — faixa exclusiva)
 constexpr u64 kMenuRowBase   = 7400;
 constexpr u64 kMenuScrollId  = 7410;
+constexpr u64 kHierDotsId    = 7420;   // ⋮ da Hierarquia (GRUPO UI)
+constexpr u64 kHierMenuRowBase = 7421; // linhas do menu ⋮ (2)
 int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                  EditorState& st, f32 ax = -1.0f, f32 ay = -1.0f,
                  bool snapOn = false);
+// 0.9.6.10 (GRUPO UI): o menu ⋮ da Hierarquia (1 = limpar multi-seleção ·
+// 2 = nome completo do selecionado; fechado ao toque fora)
+int drawHierMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                 EditorState& st, f32 ax, f32 ay);
 int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st,
                   const AssetCatalog& catalog, bool withImport = false);
 

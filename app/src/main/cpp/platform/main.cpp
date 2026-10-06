@@ -2853,9 +2853,46 @@ void applyContentRect(android_app* app) {
 // (formatos próprios, o que o runtime carrega) + legado meshes/|textures/
 // cujo convertido AINDA NÃO existe (falhou/marcou). O seletor do Inspector
 // e o "Sim" do diálogo usam as entradas DIRETAMENTE.
+// 0.9.6.10 (GRUPO UI): a ÁRVORE res:// do tab Ficheiros (as PASTAS REAIS
+// com contagens — construída AQUI junto do catálogo, ZERO IO por frame)
+editor::bottom::FilesTree g_filesTree;
+
+void refreshFilesTree() {
+    g_filesTree.n = 0;
+    g_filesTree.sceneCount =
+        g_projectReady ? static_cast<u32>(g_project.scenes.size()) : 0u;
+    if (!g_storage) {
+        return;
+    }
+    struct DirDef {
+        const char* dir;
+        const char* label;
+    };
+    static const DirDef kDirs[] = {
+        {Project::kDirAssets, "Modelos e texturas"},
+        {Project::kDirScenes, "Cenas"},
+        {Project::kDirSource, "Fontes importadas"},
+        {Project::kDirMeshes, "Malhas (legado)"},
+        {Project::kDirTextures, "Texturas (legado)"},
+        {"audio", "Sons"},
+    };
+    for (const DirDef& d : kDirs) {
+        if (g_filesTree.n >= 8) {
+            break;
+        }
+        std::vector<std::string> files;
+        u32 count = 0;
+        if (g_storage->listDir(d.dir, files)) {
+            count = static_cast<u32>(files.size());
+        }
+        g_filesTree.entries[g_filesTree.n++] = {d.dir, d.label, count};
+    }
+}
+
 void refreshCatalog() {
     g_catalog.meshes.clear();
     g_catalog.textures.clear();
+    refreshFilesTree();   // 0.9.6.10: a árvore acompanha o catálogo
     if (!g_storage) {
         return;
     }
@@ -5006,6 +5043,7 @@ void frame() {
             g_editor.fileMenu = !g_editor.fileMenu;
             g_editor.plusMenu = false;
             g_editor.settingsMenu = false;
+            g_editor.hierMenu = false;
         }
         if (ta.cenaDropdown) {
             // Cena → dropdown de cenas do projeto (overlay CENAS)
@@ -5340,9 +5378,9 @@ void frame() {
         // drawer fechado, a aba AUTO-ABRE (o comportamento "abre sozinha"
         // da 0.8.0 manteve-se — agora abre o drawer certo)
         if (tlVisible && g_bottom.bottomTab == 0) {
-            g_bottom.bottomTab = 3;
+            g_bottom.bottomTab = 4;   // 0.9.6.10: Animação é a 4ª tab
         }
-        if (g_bottom.bottomTab == 3 && tlVisible) {
+        if (g_bottom.bottomTab == 4 && tlVisible) {
             const UiRect d = editor::bottom::layout(
                 w, h, g_ui.safeArea(), g_bottom).drawer;
             timeline::drawTimelineInRect(
@@ -5853,6 +5891,29 @@ void frame() {
         }
     }
 
+    // 0.9.6.10 (GRUPO UI): o menu ⋮ da Hierarquia (as ações REAIS da
+    // árvore — limpar a multi-seleção / o nome completo do selecionado)
+    if (g_editor.hierMenu) {
+        const UiRect hierPanel = safe::hierarchyPanelRect(
+            w, h, g_ui.safeArea(), currentDrawerH(), g_editor.hierW,
+            g_editor.inspW);
+        const int hc = editor::drawHierMenu(
+            g_ui, g_input, w, h, g_editor,
+            hierPanel.x + hierPanel.w - theme::dp(16.0f) - theme::dp(48.0f),
+            hierPanel.y + theme::dp(48.0f));
+        if (hc == 1) {
+            g_editor.multiSelectCount = 0;
+            showToast("seleção limpa");
+        } else if (hc == 2) {
+            const Tic* sel = g_scene.get(g_editor.selected);
+            if (sel) {
+                showToast(sel->name.c_str());
+            } else {
+                showToast("nenhum TIC selecionado");
+            }
+        }
+    }
+
     // F5.2: overlays de armazenamento — DEPOIS dos painéis (ordem = z-order):
     // diálogo de permissão → import → viewer de logs (por cima de tudo)
     if (g_editor.storageDialog) {
@@ -6241,7 +6302,7 @@ void frame() {
         elog::readTail(logTail, 120);
         const editor::bottom::Actions ba = editor::bottom::draw(
             g_ui, g_input, g_editor, g_bottom, g_catalog, logTail,
-            static_cast<int>(g_fps + 0.5f), g_scene.count());
+            static_cast<int>(g_fps + 0.5f), g_scene.count(), g_filesTree);
         if (ba.filePick > 0) {
             // card de Ficheiros → aplica ao TIC selecionado (o MESMO
             // dispatch do seletor: menuKind por tipo, pick = i+1 doss files)

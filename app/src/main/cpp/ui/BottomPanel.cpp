@@ -19,6 +19,11 @@ namespace bottom {
 
 namespace {
 
+// 0.9.6.10 (GRUPO UI): a capacidade da árvore res:// e o TINT branco das
+// miniaturas (a textura desenha 1:1)
+constexpr u32 kTreeCap = 8;
+constexpr f32 kWhiteTint[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+
 f32 textBaseline(UiContext& ui, const UiRect& r) {
     if (!ui.hasFont()) {
         return r.y + r.h * 0.5f;
@@ -76,11 +81,12 @@ Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st) {
     L.drawer = {in.left, L.tabBar.y - d, sw - in.left - in.right, d};
     L.handle = {in.left, L.drawer.y, sw - in.left - in.right, theme::dp(12.0f)};
     L.drawerTop = L.drawer.y;
-    const f32 third = L.tabBar.w / 3.0f;
+    const f32 third = L.tabBar.w / 4.0f;   // 0.9.6.10: 4 tabs
     L.tab[0] = {L.tabBar.x, L.tabBar.y, third, L.tabBar.h};
     L.tab[1] = {L.tabBar.x + third, L.tabBar.y, third, L.tabBar.h};
     L.tab[2] = {L.tabBar.x + 2.0f * third, L.tabBar.y, third, L.tabBar.h};
-    if (st.bottomTab > 0 && st.bottomTab <= 3) {
+    L.tab[3] = {L.tabBar.x + 3.0f * third, L.tabBar.y, third, L.tabBar.h};
+    if (st.bottomTab > 0 && st.bottomTab <= 4) {
         L.underline = L.tab[st.bottomTab - 1];
         L.underline.y = L.tabBar.y;
         L.underline.h = 2.0f;
@@ -90,11 +96,13 @@ Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st) {
 
 Actions draw(UiContext& ui, const InputState& in, EditorState& st,
              BottomState& bs, const AssetCatalog& catalog,
-             const std::vector<std::string>& logLines, int fps, u32 ticCount) {
+             const std::vector<std::string>& logLines, int fps, u32 ticCount,
+             const FilesTree& tree) {
     (void)st;
     Actions a;
     const safe::Insets insets = ui.safeArea();
     const Layout L = layout(ui.screenWidth(), ui.screenHeight(), insets, bs);
+    const TextMetrics tmText = ui.textMetrics();   // 0.9.6.10: o browser
 
     // ---- fundo da tab bar ----
     ui.panel(L.tabBar.x, L.tabBar.y, L.tabBar.w, L.tabBar.h, theme::kTheme.bg);
@@ -103,16 +111,19 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
              theme::kTheme.border);
 
     // ---- tabs (ícone + palavra; ativo = accent + underline 2dp) ----
+    // 0.9.6.10 (GRUPO UI · a imagem 1): 4 tabs — Ficheiros (a árvore
+    // res://) · Assets (a grelha de miniaturas) · Consola · Animação
     const struct {
         u64        id;
         icons::Icon ic;
         const char* word;
-    } tabs[3] = {
+    } tabs[4] = {
         {kTabFilesId,   icons::Icon::Folder,   "Ficheiros"},
+        {kTabAssetsId,  icons::Icon::Box,      "Assets"},
         {kTabConsoleId, icons::Icon::Terminal, "Consola"},
         {kTabAnimId,    icons::Icon::Clapper,  "Animação"},
     };
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         const UiRect& r = L.tab[i];
         const bool active = bs.bottomTab == i + 1;
         const bool pressed = ui.widgetHit(tabs[i].id, r.x, r.y, r.w, r.h);
@@ -195,86 +206,328 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
     const Layout L2 = layout(ui.screenWidth(), ui.screenHeight(), insets, bs);
     const UiRect content = {L2.drawer.x, L2.drawer.y + 12.0f, L2.drawer.w,
                             L2.drawer.h - 12.0f};
+    // ---- 0.9.6.10 (GRUPO UI · a imagem 1) · TAB 1: A ÁRVORE res:// --------
+    // A região esquerda-baixa da referência («Ficheiros: árvore res:// com
+    // Assets/Cenas/…»): as PASTAS REAIS do projeto com contagem; o toque
+    // ABRE o browser de Assets FILTRADO à pasta
     if (bs.bottomTab == 1) {
-        // ---- FICHEIROS: grelha de cards 96dp (spec K) ----
+        const f32 rowH = theme::dp(48.0f);
+        const TextMetrics tmT = ui.textMetrics();
+        // o cabeçalho: "res://" + o nº de cenas do projeto
+        ui.labelStyled(content.x + theme::dp(16.0f),
+                       content.y + (rowH - tmT.block()) * 0.5f + tmT.ascent,
+                       "res://", theme::kTheme.text1,
+                       theme::fontScale(theme::kFontSection), 0);
+        {
+            char sc[48];
+            std::snprintf(sc, sizeof(sc), "%u cena(s)", tree.sceneCount);
+            ui.labelFitted(content.x + content.w - theme::dp(16.0f) -
+                               ui.fontWidth(sc),
+                           content.y + (rowH - tmT.block()) * 0.5f +
+                               tmT.ascent,
+                           sc, theme::kTheme.text2, theme::dp(120.0f));
+        }
+        ui.panel(content.x, content.y + rowH, content.w, 1.0f,
+                 theme::kTheme.border);
+        // as PASTAS (scroll quando não cabem)
+        const f32 listTop = content.y + rowH;
+        const UiRect listRegion = {content.x, listTop, content.w,
+                                   content.y + content.h - listTop};
+        const f32 contentH =
+            static_cast<f32>(tree.n) * rowH + theme::dp(8.0f);
+        ui.beginScroll(kTreeScrollId, listRegion, contentH);
+        const f32 offT = ui.scrollOffset();
+        f32 tyArr[kTreeCap];
+        for (u32 i = 0; i < tree.n && i < kTreeCap; ++i) {
+            tyArr[i] = listTop + static_cast<f32>(i) * rowH;
+            const f32 ry = tyArr[i] - offT;
+            if (ry + rowH < listTop || ry > listTop + listRegion.h) {
+                continue;
+            }
+            const bool sel = bs.filesFolder == static_cast<int>(i);
+            if (sel) {
+                ui.panel(content.x + theme::dp(4.0f), ry,
+                         content.w - theme::dp(8.0f), rowH,
+                         theme::kTheme.accentDim);
+                ui.panel(content.x + theme::dp(4.0f), ry, theme::dp(3.0f),
+                         rowH, theme::kTheme.accent);
+            } else if (ui.widgetActive(kTreeRowBase + i)) {
+                ui.panel(content.x + theme::dp(4.0f), ry,
+                         content.w - theme::dp(8.0f), rowH,
+                         theme::kTheme.surface2);
+            }
+            icons::drawIcon(ui, icons::Icon::Folder,
+                            content.x + theme::dp(20.0f),
+                            ry + (rowH - theme::dp(24.0f)) * 0.5f,
+                            theme::dp(24.0f),
+                            sel ? theme::kTheme.accent
+                                : theme::kTheme.text2);
+            if (ui.hasFont()) {
+                char lbl[96];
+                std::snprintf(lbl, sizeof(lbl), "%s  (%s)",
+                              tree.entries[i].label, tree.entries[i].dir);
+                char cnt[24];
+                std::snprintf(cnt, sizeof(cnt), "%u", tree.entries[i].count);
+                ui.labelFitted(content.x + theme::dp(56.0f),
+                               ry + (rowH - tmT.block()) * 0.5f + tmT.ascent,
+                               lbl, theme::kTheme.text1,
+                               content.w - theme::dp(56.0f) -
+                                   theme::dp(64.0f));
+                ui.labelFitted(content.x + content.w - theme::dp(16.0f) -
+                                   ui.fontWidth(cnt),
+                               ry + (rowH - tmT.block()) * 0.5f + tmT.ascent,
+                               cnt, theme::kTheme.text2, theme::dp(48.0f));
+            }
+        }
+        ui.endScroll();
+        // o RE-DESPACHO do tap (o padrão da casa em scrolls)
+        f32 txT, tyT;
+        if (ui.scrollTap(kTreeScrollId, txT, tyT)) {
+            const f32 cy = tyT + offT;
+            for (u32 i = 0; i < tree.n && i < kTreeCap; ++i) {
+                if (cy >= tyArr[i] && cy < tyArr[i] + rowH) {
+                    bs.filesFolder = static_cast<int>(i);
+                    bs.bottomTab = 2;   // abre o browser FILTRADO
+                    elog::info("ui: pasta '%s' selecionada na arvore res://",
+                               tree.entries[i].dir);
+                    break;
+                }
+            }
+        }
+        if (tree.n == 0 && ui.hasFont()) {
+            ui.labelFitted(content.x + theme::dp(16.0f), listTop + rowH,
+                           "sem pastas (projeto sem ficheiros)",
+                           theme::kTheme.text2, content.w - theme::dp(32.0f));
+        }
+    }
+    // ---- 0.9.6.10 · TAB 2: O BROWSER DE ASSETS (a grelha da imagem 1) ----
+    // A grelha de MINIATURAS REAIS (as texturas desenham a textura em si
+    // pelo imageQuad; meshes/áudio ficam com o ícone de tipo até haver um
+    // renderer de pré-visualização — a lista honesta do relatório) + o
+    // filtro por pasta (o toque na árvore) + o TOGGLE de vista (grelha/
+    // lista — a imagem 1)
+    else if (bs.bottomTab == 2) {
         struct Card {
             const char* name;
             icons::Icon ic;
             int kind;   // applyAssetPick menuKind
+            bool isTex; // miniatura REAL via imageQuad
         };
         Card cards[48];
         u32 nCards = 0;
-        for (const std::string& m : catalog.meshes) {
-            if (nCards < 48) {
-                cards[nCards++] = {m.c_str(), icons::Icon::Box, 1};
+        const std::string prefix =
+            bs.filesFolder >= 0 && static_cast<u32>(bs.filesFolder) < tree.n
+                ? std::string(tree.entries[bs.filesFolder].dir) + "/"
+                : std::string();
+        auto pushCard = [&](const std::string& m, icons::Icon ic, int kind,
+                            bool isTex) {
+            if (nCards >= 48) {
+                return;
             }
+            if (!prefix.empty() && m.compare(0, prefix.size(), prefix) != 0) {
+                return;   // o FILTRO da pasta selecionada na árvore
+            }
+            cards[nCards++] = {m.c_str(), ic, kind, isTex};
+        };
+        for (const std::string& m : catalog.meshes) {
+            pushCard(m, icons::Icon::Box, 1, false);
         }
         for (const std::string& t : catalog.textures) {
-            if (nCards < 48) {
-                cards[nCards++] = {t.c_str(), icons::Icon::Search, 2};
-            }
+            pushCard(t, icons::Icon::Search, 2, true);
         }
         for (const std::string& g : catalog.audio) {
-            if (nCards < 48) {
-                cards[nCards++] = {g.c_str(), icons::Icon::Speaker, 5};
-            }
+            pushCard(g, icons::Icon::Speaker, 5, false);
         }
-        // grelha: cards de 96dp, 8 por linha (~88dp de passo em 1536)
-        const f32 cardS = 96.0f;
-        const f32 step = 120.0f;
-        const u32 perRow =
-            static_cast<u32>(content.w / step) > 0 ? static_cast<u32>(content.w / step)
-                                                   : 1u;
-        const f32 rows = static_cast<f32>((nCards + perRow - 1) / (perRow ? perRow : 1));
-        const f32 contentH = rows * step + 8.0f;
-        ui.beginScroll(kFilesScrollId, content, contentH);
-        for (u32 c = 0; c < nCards; ++c) {
-            const f32 cx = content.x + 16.0f +
-                           static_cast<f32>(c % perRow) * step;
-            const f32 cy = content.y + 8.0f +
-                           static_cast<f32>(c / perRow) * step -
-                           ui.scrollOffset();
-            if (cy > content.y + content.h || cy + cardS < content.y) {
-                continue;
+        // a LINHA de topo: o chip da pasta (limpa o filtro) + o toggle
+        // grelha/lista (a imagem 1: pesquisa + toggles de vista)
+        const f32 chipY = content.y + theme::dp(4.0f);
+        const f32 chipH = theme::dp(40.0f);
+        if (!prefix.empty() && ui.hasFont()) {
+            char fl[96];
+            std::snprintf(fl, sizeof(fl), "%s x",
+                          tree.entries[bs.filesFolder].label);
+            const f32 cw = ui.fontWidth(fl) + theme::dp(24.0f);
+            const bool held = ui.widgetActive(kTreeRowBase + 100);
+            ui.panelRounded(content.x + theme::dp(16.0f), chipY, cw, chipH,
+                            theme::kRadiusField,
+                            held ? theme::kTheme.surface2
+                                 : theme::kTheme.accentDim);
+            ui.labelFitted(content.x + theme::dp(28.0f),
+                           chipY + (chipH - tmText.block()) * 0.5f +
+                               tmText.ascent,
+                           fl, theme::kTheme.text1, cw - theme::dp(24.0f));
+            if (ui.widgetHit(kTreeRowBase + 100, content.x + theme::dp(16.0f),
+                             chipY, cw, chipH)) {
+                bs.filesFolder = -1;   // limpa o filtro
             }
-            const bool held = ui.widgetActive(kFileCardBase + c);
-            ui.panelRounded(cx, cy, cardS, cardS, theme::kRadiusCard,
-                            held ? theme::kTheme.surface2 : theme::kTheme.bg);
-            ui.frameRounded(cx, cy, cardS, cardS, 1.0f, theme::kRadiusCard,
+        } else if (ui.hasFont()) {
+            ui.labelFitted(content.x + theme::dp(16.0f),
+                           chipY + (chipH - tmText.block()) * 0.5f +
+                               tmText.ascent,
+                           "todos os ficheiros", theme::kTheme.text2,
+                           theme::dp(200.0f));
+        }
+        {
+            // o TOGGLE grelha/lista (à direita — a imagem 1)
+            const f32 tw = theme::dp(96.0f);
+            const f32 tx0 = content.x + content.w - theme::dp(16.0f) - tw;
+            const bool heldV = ui.widgetActive(kAssetsViewId);
+            ui.panelRounded(tx0, chipY, tw, chipH, theme::kRadiusField,
+                            heldV ? theme::kTheme.surface2
+                                  : theme::kTheme.surface);
+            ui.frameRounded(tx0, chipY, tw, chipH, 1.0f, theme::kRadiusField,
                             theme::kTheme.border);
-            icons::drawIcon(ui, cards[c].ic, cx + (cardS - 32.0f) * 0.5f,
-                            cy + 18.0f, 32.0f, theme::kTheme.text2);
             if (ui.hasFont()) {
-                ui.labelFitted(cx + 6.0f, cy + cardS - 10.0f, cards[c].name,
-                               theme::kTheme.text2, cardS - 12.0f);
+                const char* lbl = bs.assetsList ? "lista" : "grelha";
+                ui.labelFitted(tx0 + (tw - ui.fontWidth(lbl)) * 0.5f,
+                               chipY + (chipH - tmText.block()) * 0.5f +
+                                   tmText.ascent,
+                               lbl, theme::kTheme.text2, tw - theme::dp(8.0f));
+            }
+            if (ui.widgetHit(kAssetsViewId, tx0, chipY, tw, chipH)) {
+                bs.assetsList = !bs.assetsList;
             }
         }
-        ui.endScroll();
-        f32 tx, ty;
-        if (ui.scrollTap(kFilesScrollId, tx, ty)) {
+        ui.panel(content.x + theme::dp(16.0f),
+                 chipY + chipH + theme::dp(2.0f), content.w - theme::dp(32.0f),
+                 1.0f, theme::kTheme.border);
+        const f32 gridTop = content.y + theme::dp(48.0f);
+        const UiRect grid = {content.x, gridTop, content.w,
+                             content.y + content.h - gridTop};
+        if (!bs.assetsList) {
+            // ---- a GRELHA (cards 96dp com MINIATURAS REAIS) ----
+            const f32 cardS = theme::dp(96.0f);
+            const f32 step = theme::dp(120.0f);
+            const u32 perRow = static_cast<u32>(grid.w / step) > 0
+                                   ? static_cast<u32>(grid.w / step)
+                                   : 1u;
+            const f32 rows = static_cast<f32>(
+                (nCards + perRow - 1) / (perRow ? perRow : 1));
+            const f32 contentH = rows * step + theme::dp(8.0f);
+            ui.beginScroll(kFilesScrollId, grid, contentH);
             for (u32 c = 0; c < nCards; ++c) {
-                const f32 cx = content.x + 16.0f +
+                const f32 cx = grid.x + theme::dp(16.0f) +
                                static_cast<f32>(c % perRow) * step;
-                const f32 cy = content.y + 8.0f +
+                const f32 cy = grid.y + theme::dp(8.0f) +
                                static_cast<f32>(c / perRow) * step -
-                               ui.scrollOffsetForTest(kFilesScrollId);
-                if (tx >= cx && tx < cx + cardS && ty >= cy && ty < cy + cardS) {
-                    a.filePick = static_cast<int>(c) + 1;
-                    a.filePickKind = cards[c].kind;
-                    break;
+                               ui.scrollOffset();
+                if (cy > grid.y + grid.h || cy + cardS < grid.y) {
+                    continue;
+                }
+                const bool held = ui.widgetActive(kFileCardBase + c);
+                ui.panelRounded(cx, cy, cardS, cardS, theme::kRadiusCard,
+                                held ? theme::kTheme.surface2
+                                     : theme::kTheme.bg);
+                ui.frameRounded(cx, cy, cardS, cardS, 1.0f, theme::kRadiusCard,
+                                theme::kTheme.border);
+                // a MINIATURA: a textura EM SI (imageQuad com o resolver do
+                // GpuAssets — o UI-QUAD de sempre); meshes/áudio ficam no
+                // ícone de tipo (a pré-visualização 3D fica na lista honesta)
+                const char* slash = std::strrchr(cards[c].name, '/');
+                const char* fname = slash ? slash + 1 : cards[c].name;
+                const f32 thumb = cardS - theme::dp(28.0f);
+                const bool realTex =
+                    cards[c].isTex &&
+                    ui.imageQuad(cx + (cardS - thumb) * 0.5f,
+                                 cy + (cardS - thumb - theme::dp(14.0f)) *
+                                          0.5f,
+                                 thumb, thumb, cards[c].name, kWhiteTint);
+                if (!realTex) {
+                    icons::drawIcon(ui, cards[c].ic,
+                                    cx + (cardS - theme::dp(32.0f)) * 0.5f,
+                                    cy + theme::dp(18.0f), theme::dp(32.0f),
+                                    theme::kTheme.text2);
+                }
+                if (ui.hasFont()) {
+                    ui.labelFitted(cx + theme::dp(6.0f),
+                                   cy + cardS - theme::dp(12.0f), fname,
+                                   theme::kTheme.text2,
+                                   cardS - theme::dp(12.0f));
+                }
+            }
+            ui.endScroll();
+            f32 tx, ty;
+            if (ui.scrollTap(kFilesScrollId, tx, ty)) {
+                for (u32 c = 0; c < nCards; ++c) {
+                    const f32 cx = grid.x + theme::dp(16.0f) +
+                                   static_cast<f32>(c % perRow) * step;
+                    const f32 cy = grid.y + theme::dp(8.0f) +
+                                   static_cast<f32>(c / perRow) * step -
+                                   ui.scrollOffsetForTest(kFilesScrollId);
+                    if (tx >= cx && tx < cx + cardS && ty >= cy &&
+                        ty < cy + cardS) {
+                        a.filePick = static_cast<int>(c) + 1;
+                        a.filePickKind = cards[c].kind;
+                        break;
+                    }
+                }
+            }
+        } else {
+            // ---- a LISTA (linhas compactas — o toggle da imagem 1) ----
+            const f32 rowH = theme::dp(48.0f);
+            const f32 contentH =
+                static_cast<f32>(nCards) * rowH + theme::dp(8.0f);
+            ui.beginScroll(kFilesScrollId, grid, contentH);
+            f32 rowYs[48];
+            for (u32 c = 0; c < nCards; ++c) {
+                rowYs[c] = grid.y + static_cast<f32>(c) * rowH;
+                const f32 ry = rowYs[c] - ui.scrollOffset();
+                if (ry + rowH < grid.y || ry > grid.y + grid.h) {
+                    continue;
+                }
+                const bool held = ui.widgetActive(kAssetsListRowBase + c);
+                if (held) {
+                    ui.panel(grid.x + theme::dp(4.0f), ry,
+                             grid.w - theme::dp(8.0f), rowH,
+                             theme::kTheme.surface2);
+                }
+                icons::drawIcon(ui, cards[c].ic, grid.x + theme::dp(16.0f),
+                                ry + (rowH - theme::dp(24.0f)) * 0.5f,
+                                theme::dp(24.0f), theme::kTheme.text2);
+                if (ui.hasFont()) {
+                    const char* slash = std::strrchr(cards[c].name, '/');
+                    const char* fname = slash ? slash + 1 : cards[c].name;
+                    ui.labelFitted(grid.x + theme::dp(56.0f),
+                                   ry + (rowH - tmText.block()) * 0.5f +
+                                       tmText.ascent,
+                                   fname, theme::kTheme.text1,
+                                   grid.w - theme::dp(160.0f));
+                    ui.labelFitted(grid.x + grid.w - theme::dp(140.0f),
+                                   ry + (rowH - tmText.block()) * 0.5f +
+                                       tmText.ascent,
+                                   cards[c].name, theme::kTheme.text2,
+                                   theme::dp(132.0f));
+                }
+            }
+            ui.endScroll();
+            f32 tx, ty;
+            if (ui.scrollTap(kFilesScrollId, tx, ty)) {
+                const f32 cy = ty + ui.scrollOffsetForTest(kFilesScrollId);
+                for (u32 c = 0; c < nCards; ++c) {
+                    if (cy >= rowYs[c] && cy < rowYs[c] + rowH) {
+                        a.filePick = static_cast<int>(c) + 1;
+                        a.filePickKind = cards[c].kind;
+                        break;
+                    }
                 }
             }
         }
         if (nCards == 0 && ui.hasFont()) {
             // vazio (spec M): ícone + convite
             icons::drawIcon(ui, icons::Icon::Folder,
-                            content.x + content.w * 0.5f - 20.0f,
-                            content.y + 24.0f, 40.0f, theme::kTheme.text2);
-            ui.labelFitted(content.x + 16.0f, content.y + 96.0f,
-                           "sem ficheiros - importe no seletor do Inspector",
-                           theme::kTheme.text2, content.w - 32.0f);
+                            content.x + content.w * 0.5f - theme::dp(20.0f),
+                            content.y + theme::dp(64.0f), theme::dp(40.0f),
+                            theme::kTheme.text2);
+            ui.labelFitted(content.x + theme::dp(16.0f),
+                           content.y + theme::dp(136.0f),
+                           prefix.empty()
+                               ? "sem ficheiros - importe no seletor do Inspector"
+                               : "pasta vazia",
+                           theme::kTheme.text2, content.w - theme::dp(32.0f));
         }
-    } else if (bs.bottomTab == 2) {
+    }
+    // ---- TAB 3: A CONSOLA (spec K — RECALIBRADA 0.9.6.10: era a tab 2) ----
+    else if (bs.bottomTab == 3) {
         // ---- CONSOLA (spec K): linhas coloridas + chips + auto-scroll ----
         const f32 chipY = content.y + 4.0f;
         const f32 chipH = 32.0f;
@@ -371,7 +624,8 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
                            theme::kTheme.text2, content.w - 32.0f);
         }
     }
-    // bottomTab == 3 (Animação): a TIMELINE desenha o main (precisa do estado
+
+    // bottomTab == 4 (Animação): a TIMELINE desenha o main (precisa do estado
     // da timeline/cena — ver o hook no main; o rect do drawer é passado lá)
     return a;
 }
@@ -444,7 +698,7 @@ bool parseLayout(const std::string& data, BottomState& bs, bool& showInspector,
         }
         ++p;
     }
-    if (tab < 0 || tab > 3 || dh < 0) {
+    if (tab < 0 || tab > 4 || dh < 0) {   // 0.9.6.10: 4 tabs
         return false;   // ilegível → defaults ("Repor layout")
     }
     bs.bottomTab = tab;

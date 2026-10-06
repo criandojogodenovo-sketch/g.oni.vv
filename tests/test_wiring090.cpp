@@ -612,9 +612,11 @@ TEST(undo_stack_delete_recria_e_paste_novo) {
 }
 
 // ---- K: consola filtra erros · cards de ficheiro aplicam --------------------------
+// RECALIBRADO 0.9.6.10 (GRUPO UI): a consola é a 3ª tab (era a 2ª — o
+// dock passou a Ficheiros/Assets/Consola/Animação)
 TEST(consola_chips_filtram_erros_e_cards_aplicam) {
     Env e;
-    e.bs.bottomTab = 2;   // Consola
+    e.bs.bottomTab = 3;   // Consola (0.9.6.10: a 3ª tab)
     e.frame();
     EXPECT(e.bs.consoleOnlyErrors == false);
     // chip [erros]: filtra (as 3 linhas → só a E)
