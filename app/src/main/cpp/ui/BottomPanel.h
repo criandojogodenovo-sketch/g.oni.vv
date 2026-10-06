@@ -56,6 +56,8 @@ constexpr u64 kFileCardBase = 5610;  // cards de ficheiro (+i, cap 48)
 constexpr u64 kTreeRowBase = 5620;   // 0.9.6.10: as linhas da árvore res://
 constexpr u64 kTreeScrollId = 49;    // scroll da árvore res://
 constexpr u64 kAssetsListRowBase = 5630;  // linhas da vista em LISTA
+constexpr u64 kConsoleTabBase = 5632;  // 0.9.6.10: tabs Consola/Logs/Erros/Avisos
+constexpr u64 kCmdFieldId    = 5636;  // 0.9.6.10: o campo de comando da consola
 constexpr u64 kConsoleScrollId = 47; // região de scroll da consola
 constexpr u64 kFilesScrollId  = 48;  // região de scroll dos ficheiros
 
@@ -74,6 +76,9 @@ struct BottomState {
     // tudo) e a vista (grelha/lista — o toggle da imagem 1)
     int  filesFolder = -1;
     bool assetsList = false;
+    // 0.9.6.10: a consola da imagem 1 — TABS Consola/Logs/Erros/Avisos
+    // (0=tudo · 1=info · 2=erros · 3=avisos; o filtro de chips antigo morre)
+    int  consoleTab = 0;
     // drag da pega (redimensionar o drawer — spec E)
     bool dragActive = false;
     f32  dragStartY = 0.0f;
@@ -109,6 +114,13 @@ struct Layout {
 // resolve o layout (drawerH CLAMPADO a 160..400 em passos de 8)
 Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st);
 
+// ---- STATUS BAR 24dp — 0.9.6.10 (GRUPO UI · a imagem 1) -----------------------
+struct StatusBarData {
+    const char* version = "";    // "0.9.6"
+    const char* project = "";    // o nome do projeto ativo
+    bool playing = false;        // o estado (play/editor)
+};
+
 // ---- DRAW -----------------------------------------------------------------------
 // catalog: meshes/textures/audio do projeto (cards de Ficheiros)
 // logLines: tail do engine.log (Consola); logDumps NÃO (só o viewer de sempre)
@@ -117,16 +129,19 @@ struct Actions {
     bool exportPressed = false;         // [Export] da consola
     int  filePick = 0;                  // 1.. = card i escolhido (aplicar)
     int  filePickKind = 0;              // 1 mesh, 2 tex, 5 áudio (applyAssetPick)
+    bool commandPressed = false;        // 0.9.6.10: o campo de comando (o
+                                        // main abre o teclado — propósito 9)
 };
+
+void drawStatusBar(UiContext& ui, f32 sw, f32 sh, const safe::Insets& in,
+                   int fps, u32 ticCount,
+                   const StatusBarData& data = StatusBarData{});
 
 Actions draw(UiContext& ui, const InputState& in, EditorState& st,
              BottomState& bs, const AssetCatalog& catalog,
              const std::vector<std::string>& logLines, int fps, u32 ticCount,
-             const FilesTree& tree = FilesTree{});
-
-// ---- STATUS BAR 24dp (spec E: SÓ "FPS N · TICs N" — zero abreviaturas) --------
-void drawStatusBar(UiContext& ui, f32 sw, f32 sh, const safe::Insets& in,
-                   int fps, u32 ticCount);
+             const FilesTree& tree = FilesTree{},
+             const StatusBarData& sbar = StatusBarData{});
 
 // ---- persistência (spec G: layout.json) ---------------------------------------
 // serializa/parse PURO do estado do layout (bottom + inspector + painéis) —

@@ -51,6 +51,18 @@ bool isErrorLine(const std::string& ln) {
     return lineColor(ln) == theme::kTheme.danger;
 }
 
+// 0.9.6.10 (GRUPO UI · a imagem 1): o nível como ÍNDICE — as tabs da
+// consola (1=info/Logs · 2=erros · 3=avisos)
+int lineLevel(const std::string& ln) {
+    if (lineColor(ln) == theme::kTheme.danger) {
+        return 2;
+    }
+    if (lineColor(ln) == theme::kTheme.warn) {
+        return 3;
+    }
+    return 1;
+}
+
 } // namespace
 
 Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st) {
@@ -97,7 +109,7 @@ Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st) {
 Actions draw(UiContext& ui, const InputState& in, EditorState& st,
              BottomState& bs, const AssetCatalog& catalog,
              const std::vector<std::string>& logLines, int fps, u32 ticCount,
-             const FilesTree& tree) {
+             const FilesTree& tree, const StatusBarData& sbar) {
     (void)st;
     Actions a;
     const safe::Insets insets = ui.safeArea();
@@ -154,7 +166,7 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
 
     // ---- status bar 24dp (SEM abreviaturas — spec E) ----
     drawStatusBar(ui, ui.screenWidth(), ui.screenHeight(), insets, fps,
-                  ticCount);
+                  ticCount, sbar);
 
     // ---- drawer ----
     if (bs.bottomTab == 0) {
@@ -528,100 +540,181 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
     }
     // ---- TAB 3: A CONSOLA (spec K — RECALIBRADA 0.9.6.10: era a tab 2) ----
     else if (bs.bottomTab == 3) {
-        // ---- CONSOLA (spec K): linhas coloridas + chips + auto-scroll ----
-        const f32 chipY = content.y + 4.0f;
-        const f32 chipH = 32.0f;
-        auto chip = [&](u64 id, const char* label, bool on, f32 x) {
-            const f32 w = 96.0f;
-            if (on) {
-                ui.panelRounded(x, chipY, w, chipH, theme::kRadiusField,
-                                theme::kTheme.accent);
-            } else {
-                ui.panelRounded(x, chipY, w, chipH, theme::kRadiusField,
-                                theme::kTheme.bg);
-                ui.frameRounded(x, chipY, w, chipH, 1.0f, theme::kRadiusField,
-                                theme::kTheme.border);
+        // ---- CONSOLA (spec K · 0.9.6.10 GRUPO UI — a imagem 1): as TABS
+        // Consola/Logs/Erros/Avisos (era o chip todos/erros) + as linhas
+        // com TIMESTAMP e COR POR SEVERIDADE (erro=danger · aviso=warn
+        // LARANJA · info=text2) + o CAMPO DE COMANDO com o botão enviar
+        // (os comandos REAIS: limpar/ajuda/play/stop/snap — o main corre)
+        {
+            const f32 tabY = content.y + theme::dp(4.0f);
+            const f32 tabH = theme::dp(36.0f);
+            static const struct {
+                const char* label;
+                int filter;   // -1 = tudo (Consola)
+            } kConTabs[4] = {
+                {"Consola", -1}, {"Logs", 1}, {"Erros", 2}, {"Avisos", 3},
+            };
+            f32 tx = content.x + theme::dp(16.0f);
+            for (int i = 0; i < 4; ++i) {
+                const f32 tw = ui.hasFont()
+                                   ? ui.fontWidth(kConTabs[i].label) +
+                                         theme::dp(24.0f)
+                                   : theme::dp(88.0f);
+                const bool active = bs.consoleTab == i;
+                if (active) {
+                    ui.panelRounded(tx, tabY, tw, tabH,
+                                    theme::kRadiusField,
+                                    theme::kTheme.accentDim);
+                } else if (ui.widgetActive(kConsoleTabBase +
+                                           static_cast<u64>(i))) {
+                    ui.panelRounded(tx, tabY, tw, tabH,
+                                    theme::kRadiusField,
+                                    theme::kTheme.surface2);
+                }
+                if (ui.hasFont()) {
+                    ui.labelFitted(
+                        tx + theme::dp(12.0f),
+                        tabY + (tabH - tmText.block()) * 0.5f + tmText.ascent,
+                        kConTabs[i].label,
+                        active ? theme::kTheme.text1 : theme::kTheme.text2,
+                        tw - theme::dp(16.0f));
+                }
+                if (ui.widgetHit(kConsoleTabBase + static_cast<u64>(i), tx,
+                                 tabY, tw, tabH)) {
+                    bs.consoleTab = i;   // a tab da imagem 1
+                }
+                tx += tw + theme::dp(8.0f);
             }
+            // auto-scroll + Export (à direita — os de sempre)
+            {
+                const f32 aw = theme::dp(88.0f);
+                const f32 ax0 = content.x + content.w - theme::dp(16.0f) -
+                                2.0f * aw - theme::dp(8.0f);
+                if (ui.widgetHit(kAutoScrollId, ax0, tabY, aw, tabH)) {
+                    bs.consoleAutoScroll = !bs.consoleAutoScroll;
+                }
+                if (ui.hasFont()) {
+                    const char* al = bs.consoleAutoScroll ? "auto: sim"
+                                                          : "auto: não";
+                    ui.labelFitted(ax0 + (aw - ui.fontWidth(al)) * 0.5f,
+                                   tabY + (tabH - tmText.block()) * 0.5f +
+                                       tmText.ascent,
+                                   al, theme::kTheme.text2, aw);
+                }
+                if (ui.widgetHit(kExportId, ax0 + aw + theme::dp(8.0f), tabY,
+                                 aw, tabH)) {
+                    a.exportPressed = true;
+                }
+                if (ui.hasFont()) {
+                    ui.labelFitted(
+                        ax0 + aw + theme::dp(8.0f) +
+                            (aw - ui.fontWidth("export")) * 0.5f,
+                        tabY + (tabH - tmText.block()) * 0.5f + tmText.ascent,
+                        "export", theme::kTheme.text1, aw);
+                }
+            }
+            ui.panel(content.x + theme::dp(16.0f),
+                     tabY + tabH + theme::dp(2.0f),
+                     content.w - theme::dp(32.0f), 1.0f,
+                     theme::kTheme.border);
+            // ---- o CAMPO DE COMANDO (a imagem 1: «Digite um comando…» +
+            // enviar) — o toque abre o teclado da casa (propósito 9); o
+            // main CORRE os comandos reais (limpar/ajuda/play/stop/snap)
+            const f32 cmdH = theme::dp(40.0f);
+            const f32 cmdY = content.y + content.h - cmdH - theme::dp(4.0f);
+            const UiRect cmdR = {content.x + theme::dp(16.0f), cmdY,
+                                 content.w - theme::dp(32.0f) -
+                                     theme::dp(56.0f) - theme::dp(8.0f),
+                                 cmdH};
+            ui.panelRounded(cmdR.x, cmdR.y, cmdR.w, cmdR.h,
+                            theme::kRadiusField, theme::kTheme.bg);
+            ui.frameRounded(cmdR.x, cmdR.y, cmdR.w, cmdR.h, 1.0f,
+                            theme::kRadiusField, theme::kTheme.border);
+            icons::drawIcon(ui, icons::Icon::Terminal,
+                            cmdR.x + theme::dp(10.0f),
+                            cmdR.y + (cmdR.h - theme::dp(20.0f)) * 0.5f,
+                            theme::dp(20.0f), theme::kTheme.text2);
             if (ui.hasFont()) {
-                const f32 tw = ui.fontWidth(label);
-                ui.label(x + (w - tw) * 0.5f, textBaseline(ui, {x, chipY, w, chipH}),
-                         label, on ? theme::kTheme.accentInk : theme::kTheme.text2);
+                ui.labelFitted(
+                    cmdR.x + theme::dp(40.0f),
+                    cmdR.y + (cmdR.h - tmText.block()) * 0.5f + tmText.ascent,
+                    "Digite um comando… (limpar/ajuda/play/stop/snap)",
+                    theme::kTheme.text2, cmdR.w - theme::dp(48.0f));
             }
-            return ui.widgetHit(id, x, chipY, w, chipH);
-        };
-        if (chip(kChipAllId, "todos", !bs.consoleOnlyErrors, content.x + 16.0f)) {
-            bs.consoleOnlyErrors = false;
-        }
-        if (chip(kChipErrId, "erros", bs.consoleOnlyErrors, content.x + 120.0f)) {
-            bs.consoleOnlyErrors = true;
-        }
-        // auto-scroll toggle + Export
-        if (ui.widgetHit(kAutoScrollId, content.x + 240.0f, chipY, 140.0f, chipH)) {
-            bs.consoleAutoScroll = !bs.consoleAutoScroll;
-        }
-        if (ui.hasFont()) {
-            ui.label(content.x + 248.0f, textBaseline(ui, {0, chipY, 0, chipH}),
-                     bs.consoleAutoScroll ? "auto: sim" : "auto: não",
-                     theme::kTheme.text2);
-        }
-        if (ui.widgetHit(kExportId, content.x + content.w - 112.0f, chipY, 96.0f,
-                         chipH)) {
-            a.exportPressed = true;
-        }
-        if (ui.hasFont()) {
-            ui.label(content.x + content.w - 104.0f,
-                     textBaseline(ui, {0, chipY, 0, chipH}), "export",
-                     theme::kTheme.text1);
-        }
-        ui.panel(content.x + 16.0f, chipY + chipH + 2.0f, content.w - 32.0f, 1.0f,
-                 theme::kTheme.border);
-        // linhas (12sp mono — a fonte é a de sempre; mono por cultura)
-        const f32 listTop = chipY + chipH + 8.0f;
-        const UiRect listRegion = {content.x, listTop, content.w,
-                                   content.y + content.h - listTop};
-        const TextMetrics m = ui.textMetrics();
-        const f32 rowH = m.block() + 4.0f;
-        // filtro
-        u32 shown = 0;
-        for (const std::string& ln : logLines) {
-            if (!bs.consoleOnlyErrors || isErrorLine(ln)) {
-                ++shown;
+            // o botão ENVIAR (▶ — a imagem 1)
+            const UiRect sendR = {cmdR.x + cmdR.w + theme::dp(8.0f), cmdY,
+                                  theme::dp(56.0f), cmdH};
+            const bool sendHeld = ui.widgetActive(kCmdFieldId);
+            ui.panelRounded(sendR.x, sendR.y, sendR.w, sendR.h,
+                            theme::kRadiusField,
+                            sendHeld ? theme::kTheme.surface2
+                                     : theme::kTheme.accentDim);
+            icons::drawIcon(ui, icons::Icon::Play,
+                            sendR.x + (sendR.w - theme::dp(20.0f)) * 0.5f,
+                            sendR.y + (sendR.h - theme::dp(20.0f)) * 0.5f,
+                            theme::dp(20.0f), theme::kTheme.accent);
+            if (ui.widgetHit(kCmdFieldId, cmdR.x, cmdR.y, cmdR.w, cmdR.h) ||
+                ui.widgetHit(kCmdFieldId, sendR.x, sendR.y, sendR.w,
+                             sendR.h)) {
+                a.commandPressed = true;   // o main abre o teclado (prop. 9)
             }
-        }
-        const f32 contentH = static_cast<f32>(shown) * rowH;
-        if (bs.consoleAutoScroll) {
-            ui.scrollSetOffset(kConsoleScrollId, contentH);
-        }
-        ui.beginScroll(kConsoleScrollId, listRegion, contentH);
-        const f32 off = ui.scrollOffset();
-        u32 idx = 0;
-        for (const std::string& ln : logLines) {
-            if (bs.consoleOnlyErrors && !isErrorLine(ln)) {
-                continue;
+            // as linhas (12sp mono; timestamp + cor por severidade — o
+            // formato do engine.log já traz "MM-DD HH:MM:SS.mmm I/GONI:")
+            const f32 listTop = tabY + tabH + theme::dp(8.0f);
+            const UiRect listRegion = {content.x, listTop, content.w,
+                                       cmdY - listTop - theme::dp(4.0f)};
+            const TextMetrics m = ui.textMetrics();
+            const f32 rowH = m.block() + theme::dp(4.0f);
+            const int wantLevel =
+                bs.consoleTab == 0 ? -1 : bs.consoleTab;   // a tab ativa
+            u32 shown = 0;
+            for (const std::string& ln : logLines) {
+                if (wantLevel < 0 || lineLevel(ln) == wantLevel) {
+                    ++shown;
+                }
             }
-            const f32 ly = listTop + static_cast<f32>(idx) * rowH - off;
-            ++idx;
-            if (ly > listTop + listRegion.h || ly + rowH < listTop) {
-                continue;
+            const f32 contentH = static_cast<f32>(shown) * rowH;
+            if (bs.consoleAutoScroll) {
+                ui.scrollSetOffset(kConsoleScrollId, contentH);
             }
-            const bool exp = bs.consoleExpanded == static_cast<int>(idx - 1);
-            if (exp) {
-                ui.panel(content.x, ly, content.w, rowH, theme::kTheme.surface2);
+            ui.beginScroll(kConsoleScrollId, listRegion, contentH);
+            const f32 off = ui.scrollOffset();
+            u32 idx = 0;
+            for (const std::string& ln : logLines) {
+                if (wantLevel >= 0 && lineLevel(ln) != wantLevel) {
+                    continue;
+                }
+                const f32 ly = listTop + static_cast<f32>(idx) * rowH - off;
+                ++idx;
+                if (ly > listTop + listRegion.h || ly + rowH < listTop) {
+                    continue;
+                }
+                const bool exp =
+                    bs.consoleExpanded == static_cast<int>(idx - 1);
+                if (exp) {
+                    ui.panel(content.x, ly, content.w, rowH,
+                             theme::kTheme.surface2);
+                }
+                ui.labelFitted(content.x + theme::dp(8.0f),
+                               ly + m.ascent + theme::dp(2.0f), ln.c_str(),
+                               lineColor(ln), content.w - theme::dp(16.0f));
             }
-            ui.labelFitted(content.x + 8.0f, ly + m.ascent + 2.0f, ln.c_str(),
-                           lineColor(ln), content.w - 16.0f);
-        }
-        ui.endScroll();
-        f32 tx, ty;
-        if (ui.scrollTap(kConsoleScrollId, tx, ty)) {
-            // toque EXPANDE a linha (spec K): a linha inteira, texto completo
-            const i32 row = static_cast<i32>((ty - listTop + off) / rowH);
-            bs.consoleExpanded = (row == bs.consoleExpanded) ? -1 : row;
-        }
-        if (shown == 0 && ui.hasFont()) {
-            ui.labelFitted(content.x + 16.0f, listTop + rowH,
-                           bs.consoleOnlyErrors ? "sem erros" : "(vazio)",
-                           theme::kTheme.text2, content.w - 32.0f);
+            ui.endScroll();
+            f32 tx2, ty2;
+            if (ui.scrollTap(kConsoleScrollId, tx2, ty2)) {
+                // toque EXPANDE a linha (spec K): a linha inteira
+                const i32 row = static_cast<i32>((ty2 - listTop + off) / rowH);
+                bs.consoleExpanded = (row == bs.consoleExpanded) ? -1 : row;
+            }
+            if (shown == 0 && ui.hasFont()) {
+                ui.labelFitted(content.x + theme::dp(16.0f), listTop + rowH,
+                               bs.consoleTab == 2
+                                   ? "sem erros"
+                                   : (bs.consoleTab == 3 ? "sem avisos"
+                                                         : "(vazio)"),
+                               theme::kTheme.text2,
+                               content.w - theme::dp(32.0f));
+            }
         }
     }
 
@@ -631,15 +724,21 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
 }
 
 void drawStatusBar(UiContext& ui, f32 sw, f32 sh, const safe::Insets& in,
-                   int fps, u32 ticCount) {
+                   int fps, u32 ticCount, const StatusBarData& data) {
     const UiRect r = safe::statusRect(sw, sh, in);
     ui.panel(r.x, r.y, r.w, r.h, theme::kTheme.bg);
     ui.panel(r.x, r.y, r.w, 1.0f, theme::kTheme.border);
     if (!ui.hasFont()) {
         return;
     }
-    char text[48];
-    std::snprintf(text, sizeof(text), "FPS %d · TICs %u", fps, ticCount);
+    // 0.9.6.10 (GRUPO UI · a imagem 1): a linha COMPLETA — à ESQUERDA a
+    // versão · o projeto · FPS · os objetos; à DIREITA o estado +
+    // "Mobile First" (a memória fica na lista honesta do relatório)
+    char left[160];
+    std::snprintf(left, sizeof(left), "G.One %s · %s · FPS %d · TICs %u",
+                  data.version, data.project, fps, ticCount);
+    const char* right = data.playing ? "play · Mobile First"
+                                     : "editor · Mobile First";
     // 0.9.6.6 (GRUPO C): 12sp REAL (o comentário antigo DIZIA «12sp
     // (fontScale 12/14)» mas o código chamava o label() de CORPO — o
     // bloco de 29px do atlas cru numa banda de 24dp SANGRAVA o fundo do
@@ -648,12 +747,22 @@ void drawStatusBar(UiContext& ui, f32 sw, f32 sh, const safe::Insets& in,
     // — a 1.0 o bloco é 14px na banda de 24px; a 2.0 é 28px na de 48px) e
     // o fit de sempre (o texto nunca sai do rect).
     const f32 pad = theme::dp(8.0f);   // kSpace1 em dp (era px cru)
+    const f32 rw = ui.hasFont() ? ui.fontWidth(right) + pad : theme::dp(96.0f);
+    // a ESQUERDA (trunca com … quando aperta — o fit de sempre)
     ui.labelFittedStyled(
         r.x + pad,
         theme::centeredBaseline(ui.textMetrics().ascent,
                                 ui.textMetrics().descent, r.y, r.h,
                                 theme::kFontCaption),
-        text, theme::kTheme.text2, r.w - 2.0f * pad,
+        left, theme::kTheme.text2, r.w - rw - 2.0f * pad,
+        theme::fontScale(theme::kFontCaption), 0);
+    // à DIREITA: o estado (aceso em play) + o selo Mobile First
+    ui.labelStyled(
+        r.x + r.w - pad - (ui.hasFont() ? ui.fontWidth(right) : 0.0f),
+        theme::centeredBaseline(ui.textMetrics().ascent,
+                                ui.textMetrics().descent, r.y, r.h,
+                                theme::kFontCaption),
+        right, data.playing ? theme::kTheme.accent : theme::kTheme.text2,
         theme::fontScale(theme::kFontCaption), 0);
 }
 

@@ -6134,11 +6134,49 @@ void frame() {
                             : g_editor.textPurpose == 4 ? "COR DO ELEMENTO"
                             : g_editor.textPurpose == 5 ? "COR DO TIC"
                             : g_editor.textPurpose == 7 ? "RENOMEAR CLIP"
+                            : g_editor.textPurpose == 9 ? "COMANDO DA CONSOLA"
                                                         : "ALVO DA AÇÃO";
         const int ch =
             editor::drawTextInput(g_ui, g_input, w, h, g_editor, title);
         if (ch == 1) {
-            if (g_editor.textPurpose == 1) {
+            if (g_editor.textPurpose == 9) {
+                // 0.9.6.10 (GRUPO UI · a imagem 1): O COMANDO DA CONSOLA —
+                // um conjunto PEQUENO e REAL (cada um liga a um caminho
+                // que JÁ existia; zero fingimento). O resultado LOGA (a
+                // consola é o sítio de sempre)
+                const std::string cmd(g_editor.textBuf);
+                if (cmd == "limpar") {
+                    g_logLines.clear();
+                    elog::info("consola: limpa por comando");
+                    showToast("consola limpa");
+                } else if (cmd == "ajuda") {
+                    elog::info("consola: comandos = limpar | ajuda | play | "
+                               "stop | snap");
+                } else if (cmd == "play") {
+                    if (!g_editor.playMode) {
+                        enterPlayMode();
+                        showToast("modo play");
+                    } else {
+                        elog::warn("consola: já em play");
+                    }
+                } else if (cmd == "stop") {
+                    if (g_editor.playMode) {
+                        leavePlayMode();
+                        showToast("modo editor");
+                    } else {
+                        elog::warn("consola: já em modo editor");
+                    }
+                } else if (cmd == "snap") {
+                    g_snapValue = g_snapValue > 0.0f ? 0.0f : 0.5f;
+                    elog::info("consola: snapping %s",
+                               g_snapValue > 0.0f ? "ligado" : "desligado");
+                } else if (!cmd.empty()) {
+                    elog::warn("consola: comando desconhecido '%s' (ajuda "
+                               "lista os comandos)", cmd.c_str());
+                }
+                g_logLines.clear();
+                elog::readTail(g_logLines, 300);   // a consola segue o log
+            } else if (g_editor.textPurpose == 1) {
                 // 0.7.1: NOVA CENA (o nome vem do teclado in-app)
                 createSceneNamed(g_editor.textBuf);
             } else if (g_editor.textPurpose == 7) {
@@ -6300,9 +6338,19 @@ void frame() {
         // linhas chegam — a consola filra por chips)
         std::vector<std::string> logTail;
         elog::readTail(logTail, 120);
+        editor::bottom::StatusBarData sbar;
+        sbar.version = buildinfo::g_version;
+        sbar.project = g_projectReady ? g_project.name.c_str() : "—";
+        sbar.playing = g_editor.playMode;
         const editor::bottom::Actions ba = editor::bottom::draw(
             g_ui, g_input, g_editor, g_bottom, g_catalog, logTail,
-            static_cast<int>(g_fps + 0.5f), g_scene.count(), g_filesTree);
+            static_cast<int>(g_fps + 0.5f), g_scene.count(), g_filesTree,
+            sbar);
+        if (ba.commandPressed) {
+            // 0.9.6.10 (GRUPO UI): o campo de comando da consola abre o
+            // teclado da casa (o propósito 9 — o commit corre o comando)
+            editor::openTextInput(g_editor, 9, Handle::invalid(), -1, "");
+        }
         if (ba.filePick > 0) {
             // card de Ficheiros → aplica ao TIC selecionado (o MESMO
             // dispatch do seletor: menuKind por tipo, pick = i+1 doss files)

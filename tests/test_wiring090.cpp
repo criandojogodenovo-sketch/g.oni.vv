@@ -618,13 +618,20 @@ TEST(consola_chips_filtram_erros_e_cards_aplicam) {
     Env e;
     e.bs.bottomTab = 3;   // Consola (0.9.6.10: a 3ª tab)
     e.frame();
-    EXPECT(e.bs.consoleOnlyErrors == false);
-    // chip [erros]: filtra (as 3 linhas → só a E)
+    // RECALIBRADO 0.9.6.10 (GRUPO UI): os CHIPS [todos][erros] morreram —
+    // a consola da imagem 1 tem TABS (Consola/Logs/Erros/Avisos). Tocar
+    // na tab [Erros] filtra (as 3 linhas de teste → só a E)
     const bottom::Layout L = bottom::layout(kSW, kSH, safe::Insets{}, e.bs);
-    const f32 chipX = 16.0f + 120.0f + 48.0f;   // conteúdo.x + 120 + meio
-    const f32 chipY = L.drawer.y + 12.0f + 4.0f + 16.0f;
-    e.tap(chipX, chipY);
-    EXPECT(e.bs.consoleOnlyErrors);
+    // a posição da tab [Erros]: a MESMA fórmula do draw (fontWidth+24,
+    // gaps de 8) — o Env tem a fonte real
+    const f32 t0 = L.drawer.x + 12.0f + 16.0f;   // content.x + 16
+    const f32 w0 = e.ui.fontWidth("Consola") + 24.0f;
+    const f32 w1 = e.ui.fontWidth("Logs") + 24.0f;
+    const f32 w2 = e.ui.fontWidth("Erros") + 24.0f;
+    const f32 errosX = t0 + w0 + 8.0f + w1 + 8.0f + w2 * 0.5f;
+    const f32 errosY = L.drawer.y + 12.0f + 4.0f + 18.0f;
+    e.tap(errosX, errosY);
+    EXPECT(e.bs.consoleTab == 2);
     // cards: tab Ficheiros → o card 0 (quad.obj) devolve pick
     e.bs.bottomTab = 1;
     e.frame();

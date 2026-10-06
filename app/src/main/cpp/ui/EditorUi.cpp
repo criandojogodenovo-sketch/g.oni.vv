@@ -748,9 +748,126 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         st.inspPrevSelected = st.selected;
     }
 
-    const f32 th = ui.fontHeight();
-    ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "INSPECTOR", theme::TEXT);
+    // 0.9.6.10 (GRUPO UI · a imagem 1): o cabeçalho com o título 16sp
+    // text1 + as TABS [Inspector][Nós] (a referência: Inspector/Nós —
+    // a 2ª vista é a LISTA DE NÓS da cena, a mesma árvore da hierarquia
+    // em compacto — dado real, zero funcionalidade nova)
+    {
+        const TextMetrics mh = ui.textMetrics();
+        const f32 base = y + (kHeaderH - mh.block()) * 0.5f + mh.ascent;
+        ui.labelStyled(x + kPad, base, "Inspector", theme::kTheme.text1,
+                       theme::fontScale(theme::kFontSection), 0);
+        // o alvo da tab é o PISO da casa: 48dp (a altura do cabeçalho
+        // TODO dele — o validador afere; os chips de 32dp davam aviso)
+        const f32 tabH = kHeaderH;
+        const f32 tabY = y + (kHeaderH - tabH) * 0.5f;
+        static const char* const kInspTabs[2] = {"Inspector", "Nós"};
+        f32 tx0 = x + w - kPad;
+        for (int i = 1; i >= 0; --i) {   // da direita para a esquerda
+            const f32 tw = ui.hasFont()
+                               ? std::max(ui.fontWidth(kInspTabs[i]) +
+                                              theme::dp(24.0f),
+                                          theme::dp(48.0f))   // o piso da casa
+                               : theme::dp(88.0f);
+            tx0 -= tw;
+            const bool active = st.inspTab == (u32)i;
+            if (active) {
+                ui.panelRounded(tx0, tabY, tw, tabH,
+                                theme::dp(theme::kRadiusField),
+                                theme::kTheme.accentDim);
+            } else if (ui.widgetActive(kInspTabBase +
+                                       static_cast<u64>(i))) {
+                ui.panelRounded(tx0, tabY, tw, tabH,
+                                theme::dp(theme::kRadiusField),
+                                theme::kTheme.surface2);
+            }
+            if (ui.hasFont()) {
+                ui.labelFitted(
+                    tx0 + theme::dp(12.0f),
+                    tabY + (tabH - mh.block()) * 0.5f + mh.ascent,
+                    kInspTabs[i],
+                    active ? theme::kTheme.text1 : theme::kTheme.text2,
+                    tw - theme::dp(16.0f));
+            }
+            if (ui.widgetHit(kInspTabBase + static_cast<u64>(i), tx0, tabY,
+                             tw, tabH)) {
+                st.inspTab = static_cast<u32>(i);
+            }
+            tx0 -= theme::dp(8.0f);
+        }
+    }
     ui.panel(x + kPad, y + kHeaderH - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
+
+    // ---- 0.9.6.10 (GRUPO UI · a imagem 1) · A VISTA «Nós» --------------
+    // a 2ª tab do Inspector da referência: a LISTA DE NÓS da cena (a
+    // MESMA árvore da hierarquia em compacto — o MESMO hierIconFor e a
+    // seleção da casa; tocar num nó SELECIONA e VOLTA às propriedades)
+    if (st.inspTab == 1) {
+        const TextMetrics tmN = ui.textMetrics();
+        const f32 rowH = theme::dp(48.0f);
+        struct NRow {
+            Handle h;
+            u32 depth;
+        };
+        NRow nrows[64];
+        u32 nNRows = 0;
+        scene.forEachActive([&](const Tic& t) {
+            if (nNRows < 64) {
+                nrows[nNRows++] = {t.handle, 0u};
+            }
+        });
+        const f32 listTopN = y + kHeaderH + 4.0f;
+        const UiRect regionN = {x, listTopN, w, h - kHeaderH - 4.0f};
+        const f32 contentHN = static_cast<f32>(nNRows) * rowH;
+        ui.beginScroll(kIdScrollInsp, regionN, contentHN);
+        const f32 offN = ui.scrollOffset();
+        for (u32 r = 0; r < nNRows; ++r) {
+            const Tic* t = scene.get(nrows[r].h);
+            if (!t) {
+                continue;
+            }
+            const f32 ry = listTopN + static_cast<f32>(r) * rowH - offN;
+            if (ry + rowH < listTopN || ry > listTopN + regionN.h) {
+                continue;
+            }
+            const bool selected = st.selected == t->handle;
+            if (selected) {
+                ui.panel(x + 4.0f, ry, w - 8.0f, rowH,
+                         theme::kTheme.accentDim);
+                ui.panel(x + 4.0f, ry, theme::dp(3.0f), rowH,
+                         theme::kTheme.accent);
+            } else if (ui.widgetActive(kIdRowBase + t->handle.index)) {
+                ui.panel(x + 4.0f, ry, w - 8.0f, rowH,
+                         theme::kTheme.surface2);
+            }
+            icons::drawIcon(ui, hierIconFor(*t), x + theme::dp(16.0f),
+                            ry + (rowH - theme::dp(24.0f)) * 0.5f,
+                            theme::dp(24.0f),
+                            selected ? theme::kTheme.accent
+                                     : theme::kTheme.text2);
+            if (ui.hasFont()) {
+                ui.labelFitted(x + theme::dp(56.0f),
+                               ry + (rowH - tmN.block()) * 0.5f + tmN.ascent,
+                               t->name.c_str(),
+                               selected ? theme::kTheme.text1
+                                        : (t->visible ? theme::kTheme.text1
+                                                      : theme::kTheme.text2),
+                               w - theme::dp(64.0f));
+            }
+            if (ui.widgetHit(kIdRowBase + t->handle.index, x + 4.0f, ry,
+                             w - 8.0f, rowH)) {
+                st.selected = t->handle;
+                st.inspTab = 0;   // selecionou → volta às propriedades
+                ui.scrollSetOffset(kIdScrollInsp, 0.0f);
+            }
+        }
+        ui.endScroll();
+        if (nNRows == 0 && ui.hasFont()) {
+            ui.labelFitted(x + kPad, listTopN + rowH, "sem nós na cena",
+                           theme::kTheme.text2, w - 2.0f * kPad);
+        }
+        return false;
+    }
 
     // valida seleção (TIC pode ter morrido neste frame)
     Tic* tic = scene.get(st.selected);
@@ -1131,9 +1248,15 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                                 theme::dp(theme::kRadiusField),
                                 theme::kTheme.border);
                 static const char* kAxis[3] = {"X", "Y", "Z"};
+                // 0.9.6.10 (GRUPO UI · a imagem 1): os rótulos X/Y/Z
+                // COLORIDOS pelas cores dos EIXOS do gizmo (os tokens do
+                // Theme — conteúdo, a exceção documentada de sempre)
+                static const f32* const kAxisCol[3] = {
+                    theme::kTheme.axisX, theme::kTheme.axisY,
+                    theme::kTheme.axisZ};
                 if (ui.hasFont()) {
                     ui.label(bx + theme::dp(6.0f), boxBase, kAxis[axis],
-                             theme::kTheme.text2);
+                             kAxisCol[axis]);
                     // valor ENTRE o rótulo do eixo e a borda direita —
                     // labelFitted TRUNCA (a auditoria de glifos vigia)
                     const f32 maxVw = boxW - theme::dp(6.0f) - theme::dp(14.0f) -

@@ -238,6 +238,7 @@ struct EditorState {
     // resto do layout (spec G); o clamp vivo é o da safe::clampPanelW.
     f32    hierW = -1.0f;
     f32    inspW = -1.0f;
+    u32    inspTab = 0;        // 0.9.6.10: 0=Inspector · 1=Nós (a lista de nós)
     // drag dos divisores (press arma; o movimento horizontal redimensiona
     // AO VIVO com clamp; release fixa — o padrão do drawer)
     bool   divDragActive = false;
@@ -426,6 +427,7 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 // scroll do sheet (kMenuScrollId 7410 — faixa exclusiva)
 constexpr u64 kMenuRowBase   = 7400;
 constexpr u64 kMenuScrollId  = 7410;
+constexpr u64 kInspTabBase   = 7430;   // 0.9.6.10: tabs Inspector/Nós
 constexpr u64 kHierDotsId    = 7420;   // ⋮ da Hierarquia (GRUPO UI)
 constexpr u64 kHierMenuRowBase = 7421; // linhas do menu ⋮ (2)
 int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
