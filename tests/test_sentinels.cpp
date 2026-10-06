@@ -3351,3 +3351,137 @@ TEST(regress_barra_simbolos_ime) {
     vv::elog::shutdown();
     rmrf(kSentinelLogs);
 }
+
+// ============================================================================
+// R-028 · A IDENTIDADE MONO+VIDRO (FASE 0.9.6-MASTER · GRUPO F)
+// «tokens mono+vidro (R-020 de tema); ícone G com 4 setas». O estado ANTES
+// do Grupo F: a spec A dera à app o AZUL #2196F3 de accent e a família
+// NAVY de superfícies — o tema mono original da F1 (a rampa neutra com que
+// a app nasceu: #141414/#1E1E1E/#2E2E2E/#E6E6E6/#F5F5F5) tinha ficado
+// apenas no glClearColor (um FÓSSIL: o literal #141414 do Renderer nunca
+// acompanhou a spec A — invisível enquanto TUDO era opaco). O Grupo F
+// fecha:
+//   - regress_identidade_mono_vidro — (1) a TABELA mono a sério (os 9
+//     tokens de chrome NEUTROS, ΔR=G=B≤2/255 — zero croma); (2) O VIDRO
+//     com a auditoria honesta: os pisos da casa SEGURAM no pior caso do
+//     vidro (surface α0.88 sobre BRANCO PURO — contrastOnGlass); (3) a
+//     TINTA ESCURA sobre o fill BRANCO do accent (accentInk — a spec A
+//     tinha accentInk=text1: branco sobre branco); (4) a paleta V.ONI
+//     (conteúdo, não chrome — a exceção documentada) com o piso 4,5:1 no
+//     bg novo (voniComment subiu um degrau #757575→#8A8A8A); (5) o
+//     blendOver puro (a matemática SRC_ALPHA/ONE_MINUS do device);
+//     (6) os ALIASES ligados à tabela bit-a-bit (a fonte única)
+// ============================================================================
+TEST(regress_identidade_mono_vidro) {
+    using namespace vv;
+    theme::setDensity(1.0f);
+
+    // ---- (1) A TABELA MONO: zero croma em TODO o chrome da casa --------
+    // o «tema mono» é a sério: os 9 tokens de chrome são NEUTROS (a rampa
+    // F1). As EXCEÇÕES documentadas (danger/warn/ok semânticas, a paleta
+    // V.ONI de sintaxe, os eixos do gizmo) são COR por CONTRATO — como
+    // sempre foram desde a 0.6.9
+    {
+        const f32* chrome[] = {
+            theme::kTheme.bg,      theme::kTheme.surface,
+            theme::kTheme.surface2, theme::kTheme.border,
+            theme::kTheme.text1,   theme::kTheme.text2,
+            theme::kTheme.accent,  theme::kTheme.accentPress,
+            theme::kTheme.accentInk};
+        for (int i = 0; i < 9; ++i) {
+            const f32 mx = std::max(std::max(chrome[i][0], chrome[i][1]),
+                                    chrome[i][2]);
+            const f32 mn = std::min(std::min(chrome[i][0], chrome[i][1]),
+                                    chrome[i][2]);
+            // mono a sério: Δ(máx,mín) ≤ 2/255 em TODO o canal do token
+            EXPECT((mx - mn) * 255.0f <= 2.0f);
+        }
+        // o accent E o branco da F1 (#F5F5F5 — o ACCENT original da casa)
+        EXPECT(nearEqF(theme::kTheme.accent[0], 245.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.accent[1], 245.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.accent[2], 245.0f / 255.0f, 1e-4f));
+        // a rampa F1 de volta (o bg e o PANEL com que a app nasceu)
+        EXPECT(nearEqF(theme::kTheme.bg[0], 20.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.surface[0], 30.0f / 255.0f, 1e-4f));
+        // accentPress MAIS ESCURO (o feedback de premir) e MONO também
+        EXPECT(theme::kTheme.accentPress[0] < theme::kTheme.accent[0]);
+    }
+
+    // ---- (2) O VIDRO: os alphas da tabela + a AUDITORIA NO PIOR CASO ----
+    // o pior caso de um painel de vidro é uma cena BRANCA PURA por trás
+    // (um modelo branco no viewport): os pisos da casa mantêm-se MESMO AÍ
+    // — o vidro não mente à auditoria (contrastOnGlass = a matemática do
+    // blend do device aplicada ao contraste)
+    {
+        EXPECT(nearEqF(theme::kTheme.surface[3], 0.88f, 1e-4f));   // vidro
+        EXPECT(nearEqF(theme::kTheme.surface2[3], 0.92f, 1e-4f));  // denso
+        EXPECT(nearEqF(theme::kTheme.border[3], 0.55f, 1e-4f));    // hairline
+        EXPECT(nearEqF(theme::kTheme.bg[3], 1.0f, 1e-4f));         // opaco
+        // TEXTO ≥ 4,5:1 mesmo sobre o vidro-no-branco
+        EXPECT(theme::contrastOnGlass(theme::kTheme.text1) >= 4.5f);
+        EXPECT(theme::contrastOnGlass(theme::kTheme.text2) >= 4.5f);
+        // COMPONENTES ≥ 3:1 idem
+        EXPECT(theme::contrastOnGlass(theme::kTheme.accent) >= 3.0f);
+        EXPECT(theme::contrastOnGlass(theme::kTheme.danger) >= 3.0f);
+        EXPECT(theme::contrastOnGlass(theme::kTheme.ok) >= 3.0f);
+        EXPECT(theme::contrastOnGlass(theme::kTheme.warn) >= 3.0f);
+        // e sobre a surface SÓLIDA (o caso clássico) tudo passa à mesma
+        EXPECT(theme::contrastOnSurface(theme::kTheme.text1) >= 4.5f);
+        EXPECT(theme::contrastOnSurface(theme::kTheme.text2) >= 4.5f);
+    }
+
+    // ---- (3) A TINTA SOBRE O FILL BRANCO ---------------------------------
+    // com o accent MONO (branco), a tinta em CIMA dele passa a ESCURA —
+    // a spec A tinha accentInk=text1: com o accent a #F5F5F5 seria branco
+    // sobre branco INVISÍVEL (o risco que o Java também tinha no Button24)
+    {
+        EXPECT(theme::kTheme.accentInk[0] < 0.5f);   // ESCURA
+        EXPECT(theme::contrastRatio(theme::kTheme.accentInk,
+                                    theme::kTheme.accent) >= 4.5f);
+    }
+
+    // ---- (4) A PALETA V.ONI NO BG NOVO (conteúdo, não chrome) -----------
+    // o bg neutro #141414 é mais CLARO que o navy #0B0E13 — o voniComment
+    // (#757575) ficava a 4,0:1 (<4,5): subiu um degrau para #8A8A8A
+    // (5,3:1). Os outros cinco caem <8% e ficam todos ≥7,7:1
+    {
+        EXPECT(nearEqF(theme::kTheme.voniComment[0], 138.0f / 255.0f,
+                       1e-4f));
+        EXPECT(theme::contrastOnBg(theme::kTheme.voniUser) >= 4.5f);
+        EXPECT(theme::contrastOnBg(theme::kTheme.voniEngine) >= 4.5f);
+        EXPECT(theme::contrastOnBg(theme::kTheme.voniReserved) >= 4.5f);
+        EXPECT(theme::contrastOnBg(theme::kTheme.voniString) >= 4.5f);
+        EXPECT(theme::contrastOnBg(theme::kTheme.voniNumber) >= 4.5f);
+        EXPECT(theme::contrastOnBg(theme::kTheme.voniComment) >= 4.5f);
+    }
+
+    // ---- (5) O BLEND PURO (a matemática do device) -----------------------
+    // blendOver = SRC_ALPHA/ONE_MINUS_SRC_ALPHA — o MESMO par do pass UI
+    // (Renderer::endFrame liga GL_BLEND para TODO o pass desde a F1)
+    {
+        const f32 cinza[4] = {0.5f, 0.5f, 0.5f, 0.5f};
+        const f32 branco[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+        const f32 preto[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        f32 out[4];
+        theme::blendOver(cinza, branco, out);
+        EXPECT(nearEqF(out[0], 0.75f, 1e-5f));   // 50% cinza s/ branco
+        EXPECT(nearEqF(out[2], 0.75f, 1e-5f));
+        theme::blendOver(cinza, preto, out);
+        EXPECT(nearEqF(out[0], 0.25f, 1e-5f));   // 50% cinza s/ preto
+        // o composto do painel da hierarquia sobre o clear (o valor que a
+        // FASE 13.9 afere no PNG: 0.88·30+0.12·20 = 28.8 → 29)
+        f32 painel[4];
+        theme::blendOver(theme::kTheme.surface, theme::kTheme.bg, painel);
+        EXPECT(nearEqF(painel[0], 28.8f / 255.0f, 0.01f));
+    }
+
+    // ---- (6) OS ALIASES LIGADOS (a fonte única bit-a-bit) ----------------
+    // BG/PANEL/LINE/TEXT/ACCENT/WARN são o legado — os static_assert do
+    // UiContext.h já os LIGAM à tabela; aqui afirma-se o VALOR com alpha
+    // (o PANEL é o vidro: α0.88; o LINE é a hairline: α0.55)
+    {
+        EXPECT(nearEqF(theme::PANEL[3], theme::kTheme.surface[3], 1e-6f));
+        EXPECT(nearEqF(theme::LINE[3], theme::kTheme.border[3], 1e-6f));
+        EXPECT(nearEqF(theme::ACCENT[0], theme::kTheme.accent[0], 1e-6f));
+    }
+}

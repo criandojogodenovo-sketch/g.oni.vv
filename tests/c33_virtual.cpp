@@ -3153,9 +3153,12 @@ int main() {
             check(btns >= 4, "13.1 a toolbar regista os botões interativos");
             check(bigIdx != 0xFFFFFFFFu,
                   "13.1 o registo tem painéis (o chrome do editor)");
-            // PIXEL vs REGISTO (1): o MAIOR painel do registo (a banda da
-            // toolbar) - o canto dele no PNG NAO pode ser o clear BG
-            // (20,20,20): o rect do registo e o pixel dizem o MESMO
+            // PIXEL vs REGISTO (1): o MAIOR painel do registo — o canto dele
+            // no PNG tem de ser o COMPOSTO DE VIDRO: surface α0.88 sobre o
+            // clear #141414 = (29,29,29), ≠ do fundo (20,20,20) — o rect do
+            // registo e o pixel dizem o MESMO (RECALIBRADO 0.9.6.9 · GRUPO
+            // F: ANTES os painéis eram OPACOS e o cheque era só «≠ fundo»;
+            // agora o PIXEL É a matemática do vidro: 0.88·30+0.12·20≈29)
             {
                 const auto& e = rec.entries[bigIdx];
                 const u32 px = (u32)(e.x + 3.0f), py = (u32)(e.y + 3.0f);
@@ -3167,8 +3170,13 @@ int main() {
                       "13.1 o pixel do maior painel NAO e o fundo (o "
                       "registo bate com o PNG)");
             }
-            // PIXEL vs REGISTO (2): a BANDA da toolbar (56px) POVOADA -
-            // a fracao de pixels != clear passa 30% (o chrome RASTERIZOU)
+            // PIXEL vs REGISTO (2): a BANDA da toolbar (56px) POVOADA — a
+            // fração de pixels != clear (RECALIBRADO 0.9.6.9 · GRUPO F: o
+            // piso era 30% quando a banda pintava um bg DIFERENTE do clear
+            // — o navy #0B0E13 vs o clear #141414 davam 100% «povoado» de
+            // graça; com o MONO a banda pinta o TOKEN bg que É o clear —
+            // a população é o CONTEÚDO (ícones/rótulos ≈5,5% medidos); o
+            // piso novo 3% afere o MESMO contrato: a banda não está VAZIA)
             {
                 u32 diff = 0, tot2 = 0;
                 for (u32 y = 24; y < 80; ++y) {
@@ -3181,9 +3189,9 @@ int main() {
                         }
                     }
                 }
-                check(tot2 > 0 && diff * 100u > tot2 * 30u,
+                check(tot2 > 0 && diff * 100u > tot2 * 3u,
                       "13.1 a banda da toolbar esta POVOADA no PNG "
-                      "(>30% pixels != fundo)");
+                      "(>3% pixels de CONTEUDO != fundo)");
             }
             // o GLIFO: texto brilhante na banda da toolbar (o atlas R8
             // rasterizou cobertura — o caminho do texto do device)
@@ -3903,6 +3911,222 @@ int main() {
                 vvstub::g_stubDensityDpi = 160;
                 theme::setDensity(1.0f);
                 editor::applyDensity();
+            }
+
+            // ---- (i) 13.9 · A IDENTIDADE (GRUPO F): o mono+vidro MEDIDO
+            // nos píxeis do export — o azul da spec A morto, o vidro com a
+            // matemática do device, o clear a LER o token. A vara: o PNG
+            // relido (o MESMO caminho do Grupo B) + o registo (os rects
+            // reais — zero fórmulas de layout que driftam)
+            passo("13.9 identidade: o mono+vidro nos pixels (GRUPO F)");
+            {
+                eglstub::g_surfaceW = 1536;
+                eglstub::g_surfaceH = 720;
+                android_app app13f;
+                std::memset(&app13f, 0, sizeof(app13f));
+                app13f.contentRect = {0, 24, 1512, 720};
+                onAppCmd(&app13f, APP_CMD_INIT_WINDOW);
+                if (!g_font.ok()) {
+                    const char* paths[] = {FONT_FIXTURE};
+                    g_font.loadFromPaths(paths, 1, 28.0f);
+                }
+                g_ui.setFont(&g_font);
+                // o estado da 13.1 (defaults, sem toast, cena vazia)
+                g_editor.hierW = -1.0f;
+                g_editor.inspW = -1.0f;
+                g_editor.divDragActive = false;
+                g_toastT = 0.0f;
+                g_toast[0] = '\0';
+                if (const Handle hAtor = g_scene.find("Ator"); hAtor.valid()) {
+                    g_scene.destroy(hAtor);
+                }
+                frame();
+                auto [pngF, jsF] = exportScreen("editor");
+                vv::RawImage imgF;
+                std::string errF;
+                check(vv::loadPng(pngF.data(), pngF.size(), imgF, errF) &&
+                          imgF.width == 1536 && imgF.height == 720,
+                      "13.9 o PNG do editor re-vestido (1536x720)");
+                const layout::Record& rf = g_ui.auditRecord();
+
+                // (1) O MONO: a paleta VELHA da spec A está AUSENTE do
+                // ecrã — o accent AZUL #2196F3, o accentPress azul, a
+                // família NAVY inteira (bg/surface/surface2/border) e o
+                // text2 azulado: NENHUM píxel (o azul do eixo Z do gizmo
+                // #4F92F5 é OUTRO azul — a exceção documentada, vive)
+                {
+                    const u8 velha[][3] = {{33, 150, 243},   // accent azul
+                                           {27, 127, 212},   // accentPress
+                                           {11, 14, 19},     // bg navy
+                                           {21, 26, 35},     // surface navy
+                                           {31, 39, 51},     // surface2 navy
+                                           {42, 52, 66},     // border navy
+                                           {152, 162, 179}}; // text2 azulado
+                    u32 achados = 0;
+                    for (u32 i = 0; i + 2 < imgF.width * imgF.height * 4;
+                         i += 4) {
+                        for (const auto& c : velha) {
+                            if (imgF.rgba[i] == c[0] &&
+                                imgF.rgba[i + 1] == c[1] &&
+                                imgF.rgba[i + 2] == c[2]) {
+                                ++achados;
+                                break;
+                            }
+                        }
+                    }
+                    check(achados == 0,
+                          "13.9 o MONO: a paleta velha (o azul #2196F3 e "
+                          "a familia navy) AUSENTE do ecra inteiro");
+                }
+
+                // (2) O CLEAR LÊ O TOKEN: o céu da viewport (entre os
+                // painéis, acima do horizonte da grelha) é o BG TOKEN
+                // #141414 — não o preto do framebuffer (o wipe do stub,
+                // o achado do Grupo F) nem um literal órfão
+                {
+                    // o céu: o meio da largura da viewport (entre a
+                    // hierarquia [0..300] e o inspector [1212..1512]),
+                    // 10px abaixo do topo da viewport — acima da grelha
+                    const u32 sx = 756, sy = 90;
+                    const size_t pi = (size_t(sy) * imgF.width + sx) * 4;
+                    check(imgF.rgba[pi] == 20 && imgF.rgba[pi + 1] == 20 &&
+                              imgF.rgba[pi + 2] == 20,
+                          "13.9 o clear LE o token: o ceu da viewport e o "
+                          "bg #141414 (era o literal fossil/um wipe preto)");
+                }
+
+                // (3) O VIDRO: o painel da hierarquia é o COMPOSTO
+                // blend(surface a0.88, bg) — A MATEMÁTICA do blend do
+                // device aplicada ao píxel (29,29,29 com a tabela F) —
+                // e NÃO a surface sólida (30): o vidro é translúcido
+                {
+                    f32 expF[4];
+                    theme::blendOver(theme::kTheme.surface,
+                                     theme::kTheme.bg, expF);
+                    const i32 e8[3] = {
+                        (i32)(expF[0] * 255.0f + 0.5f),
+                        (i32)(expF[1] * 255.0f + 0.5f),
+                        (i32)(expF[2] * 255.0f + 0.5f)};
+                    // o painel da hierarquia PELO REGISTO (x<10, o mais
+                    // alto) — o interior a meio da altura
+                    const layout::Entry* hier = nullptr;
+                    for (const auto& e : rf.entries) {
+                        if (e.kind == layout::Entry::Panel && e.x < 10.0f &&
+                            e.h > 400.0f) {
+                            hier = &e;
+                            break;
+                        }
+                    }
+                    check(hier != nullptr,
+                          "13.9 o painel da hierarquia esta no registo");
+                    if (hier) {
+                        const u32 px =
+                            (u32)(hier->x + hier->w * 0.5f);
+                        const u32 py = (u32)(hier->y + hier->h * 0.5f);
+                        const size_t pi =
+                            (size_t(py) * imgF.width + px) * 4;
+                        const i32 d0 = (i32)imgF.rgba[pi] - e8[0];
+                        const i32 d1 = (i32)imgF.rgba[pi + 1] - e8[1];
+                        const i32 d2 = (i32)imgF.rgba[pi + 2] - e8[2];
+                        check(d0 >= -1 && d0 <= 1 && d1 >= -1 && d1 <= 1 &&
+                                  d2 >= -1 && d2 <= 1,
+                              "13.9 o VIDRO: o painel e o composto "
+                              "blend(surface@0.88, bg) — a matematica do "
+                              "device no pixel");
+                        // translúcido a sério: NÃO é a surface sólida
+                        check(imgF.rgba[pi] != 30,
+                              "13.9 o VIDRO e translucido: o pixel NAO e a "
+                              "surface solida (a=1 desenharia 30)");
+                    }
+                }
+
+                // (4) O CHIP da toolstack: o MESMO composto — o vidro
+                // SOBRE a viewport (a cena por trás é o céu/clear aqui) —
+                // o vidro flutuante é o REAL, não o véu lateral
+                {
+                    f32 expF[4];
+                    theme::blendOver(theme::kTheme.surface,
+                                     theme::kTheme.bg, expF);
+                    const i32 e8 = (i32)(expF[0] * 255.0f + 0.5f);
+                    // o 1.º botão da toolstack PELO REGISTO (dentro da
+                    // viewport, no topo-esquerda dela)
+                    const layout::Entry* chip = nullptr;
+                    for (const auto& e : rf.entries) {
+                        if (e.kind == layout::Entry::Button &&
+                            e.x > 300.0f && e.x < 400.0f && e.y > 80.0f &&
+                            e.y < 120.0f && e.w > 40.0f && e.w < 60.0f) {
+                            chip = &e;
+                            break;
+                        }
+                    }
+                    check(chip != nullptr,
+                          "13.9 o chip da toolstack esta no registo");
+                    if (chip) {
+                        // o canto ESQ do chip (a 6px da borda, fora do
+                        // ícone central de 24dp): fill de vidro limpo
+                        const u32 px = (u32)(chip->x + 6.0f);
+                        const u32 py = (u32)(chip->y + chip->h * 0.5f);
+                        const size_t pi =
+                            (size_t(py) * imgF.width + px) * 4;
+                        const i32 d = (i32)imgF.rgba[pi] - e8;
+                        check(d >= -1 && d <= 1,
+                              "13.9 o VIDRO flutuante: o chip sobre a "
+                              "viewport e o MESMO composto (a cena por "
+                              "tras aparece)");
+                    }
+                }
+
+                // (5) O AUDIT re-vestido: o tema não mexeu em NENHUM rect
+                // — o validador continua 0/0 (a pele trocou, o layout
+                // é o mesmo)
+                {
+                    const auto probsF = layout::validate(rf);
+                    check(probsF.empty(),
+                          "13.9 o editor re-vestido passa o validador "
+                          "0/0 (o tema nao mexe nos rects)");
+                }
+
+                // (6) A DUPLA DENSIDADE com vidro: o painel a 2.0 é o
+                // MESMO composto — as CORES não escalam com a densidade
+                // (o vidro é invariante; o layout dobra, a pele não)
+                {
+                    std::vector<u8> png2x;
+                    if (fileapi::readAll("layout-harness-editor-2x.png",
+                                         png2x) && !png2x.empty()) {
+                        vv::RawImage img2x;
+                        std::string err2x;
+                        if (vv::loadPng(png2x.data(), png2x.size(), img2x,
+                                        err2x) &&
+                            img2x.width == 3072) {
+                            f32 expF[4];
+                            theme::blendOver(theme::kTheme.surface,
+                                             theme::kTheme.bg, expF);
+                            const i32 e8 =
+                                (i32)(expF[0] * 255.0f + 0.5f);
+                            // o interior da hierarquia a 2.0 (o rect da
+                            // 13.6 dobra: [0,160 600x1136])
+                            const size_t pi =
+                                (size_t(600) * img2x.width + 300) * 4;
+                            const i32 d = (i32)img2x.rgba[pi] - e8;
+                            check(d >= -1 && d <= 1,
+                                  "13.9 o VIDRO a 2.0: o MESMO composto "
+                                  "(as cores nao escalam — so o layout)");
+                        } else {
+                            check(false,
+                                  "13.9 o PNG 2x relido (a invariancia do "
+                                  "vidro)");
+                        }
+                    } else {
+                        check(false,
+                              "13.9 o PNG 2x disponivel (a invariancia do "
+                              "vidro)");
+                    }
+                }
+                fileapi::writeAll("layout-harness-editor.png",
+                                  pngF.data(), pngF.size());
+                fileapi::writeAll("layout-harness-editor.json",
+                                  jsF.data(), jsF.size());
+                onAppCmd(&app13f, APP_CMD_TERM_WINDOW);
             }
             onAppCmd(&app13l, APP_CMD_TERM_WINDOW);
         }

@@ -137,15 +137,32 @@ inline ProgObj* findProg_(unsigned id) {
     for (auto& p : progs_) if (p.id == id) return &p;
     return nullptr;
 }
-inline void allocFb_() {
-    if (viewport_[2] <= 0 || viewport_[3] <= 0) return;
-    if (hasFb_ && fbW_ == viewport_[2] && fbH_ == viewport_[3]) return;
-    fbW_ = viewport_[2];
-    fbH_ = viewport_[3];
+// 0.9.6.9 (GRUPO F · ACHADO AO VIVO): o framebuffer é da SUPERFÍCIE EGL,
+// não do viewport. ANTES o allocFb_ realocava a CADA glViewport de tamanho
+// DIFERENTE — desde o Grupo D (glViewport do rect no pass 3D) o fb era
+// REALOCADO (APAGADO) DUAS VEZES POR FRAME: o glViewport(912×568) do pass
+// 3D apagava o clear, e o glViewport(1536×720) do beginUiPass apagava o
+// PASS 3D INTEIRO — os PNGs exportados mostravam a UI sobre PRETO desde
+// a 0.9.6.7 (invisível: os painéis eram OPACOS e nenhuma check aferia
+// conteúdo 3D; o VIDRO α0.88 pôs o dst à VISTA e a FASE 13.1 FALHOU).
+// AGORA: a SUPERFÍCIE aloca (eglCreateWindowSurface → setSurface — muda
+// de tamanho só quando o ecrã muda de verdade, TERM→INIT); o glViewport
+// só regista a TRANSFORMAÇÃO (como no GL real) e aloca APENAS se ainda
+// não há fb (o caminho dos testes que não criam superfície).
+inline void allocFb_(int w, int h) {
+    if (w <= 0 || h <= 0) return;
+    if (hasFb_ && fbW_ == w && fbH_ == h) return;
+    fbW_ = w;
+    fbH_ = h;
     color_.assign(static_cast<size_t>(fbW_) * fbH_ * 4, 0);
     depth_.assign(static_cast<size_t>(fbW_) * fbH_, 1.0f);
     hasFb_ = true;
 }
+
+// o tamanho da SUPERFÍCIE EGL (eglCreateWindowSurface do stub empurra
+// aqui; o eglstub::g_surfaceW/H é a fonte). Realloc = wipe: uma superfície
+// NOVA começa preta (o TERM→INIT do harness entre FASEs)
+inline void setSurface(int w, int h) { allocFb_(w, h); }
 
 // ---- eventos chamados pelos ramos fb das funções GL (gl3.h) ------------------
 inline unsigned genObjects() { return ++nextId_; }
@@ -295,7 +312,9 @@ inline void uniform1i(int loc, int v) {
 
 inline void setViewport(int x, int y, int w, int h) {
     viewport_[0] = x; viewport_[1] = y; viewport_[2] = w; viewport_[3] = h;
-    allocFb_();   // o 1.º glViewport traz o tamanho da superfície
+    // 0.9.6.9: o viewport NUNCA realoca o fb (a superfície é quem manda —
+    // setSurface); o alloc aqui é só o bootstrap dos testes sem superfície
+    if (!hasFb_) allocFb_(w, h);
 }
 inline void setScissor(int x, int y, int w, int h) {
     scissor_[0] = x; scissor_[1] = y; scissor_[2] = w; scissor_[3] = h;
@@ -845,7 +864,7 @@ inline void rasterGridTriangle(const RVertex& a, const RVertex& b,
 // núcleo COMUM aos dois draws (arrays/elementos); idx(i) dá o índice do
 // vértice i (u16 do ELEMENT do VAO, ou first+i do arrays)
 template <typename IdxOf>
-inline void drawCore(unsigned mode, GLsizei count, IdxOf idxOf) {
+inline void drawCore(unsigned mode, int count, IdxOf idxOf) {
     // 0.9.6.5: TRIANGLE_STRIP a pedido do Grid (a engine usa TRIANGLES na
     // UI/malhas e STRIP no quad da grelha — nada mais)
     const bool strip = (mode == 0x0005 /*GL_TRIANGLE_STRIP*/);
@@ -894,8 +913,8 @@ inline void drawCore(unsigned mode, GLsizei count, IdxOf idxOf) {
     // TRIANGLES: (0,1,2)(3,4,5)…; STRIP: (0,1,2)(1,3,2)(2,3,4)… com o
     // winding alternado do strip (o grid desenha com cull OFF, mas a
     // decomposição é a correta à mesma)
-    for (GLsizei ti = 0; ti + 2 < count; ti += strip ? 1 : 3) {
-        GLsizei ix[3];
+    for (int ti = 0; ti + 2 < count; ti += strip ? 1 : 3) {
+        int ix[3];
         if (strip) {
             if ((ti & 1) == 0) { ix[0] = ti; ix[1] = ti + 1; ix[2] = ti + 2; }
             else               { ix[0] = ti + 1; ix[1] = ti; ix[2] = ti + 2; }
@@ -968,13 +987,13 @@ inline void drawCore(unsigned mode, GLsizei count, IdxOf idxOf) {
     }
 }
 
-inline void drawArrays(unsigned mode, GLint first, GLsizei count) {
-    drawCore(mode, count, [&](GLsizei i) { return int(first) + int(i); });
+inline void drawArrays(unsigned mode, int first, int count) {
+    drawCore(mode, count, [&](int i) { return int(first) + int(i); });
 }
 
-inline void drawElements(unsigned mode, GLsizei count) {
+inline void drawElements(unsigned mode, int count) {
     // os índices vivem no ELEMENT do VAO (Mesh::draw passa nullptr)
-    drawCore(mode, count, [&](GLsizei i) -> int {
+    drawCore(mode, count, [&](int i) -> int {
         const VaoObj* v = findVao_(curVao_);
         if (!v) return 0;
         const BufObj* eb = findBuf_(v->elemBuf);

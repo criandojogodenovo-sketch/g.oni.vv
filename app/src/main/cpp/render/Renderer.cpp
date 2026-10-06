@@ -2,6 +2,7 @@
 #include "render/Mesh.h"
 #include "math/Math.h"
 #include "platform/Log.h"
+#include "ui/Theme.h"   // 0.9.6.9: o clear lê o token bg (o vidro expõe o fundo)
 #include <GLES3/gl3.h>
 #include <vector>
 
@@ -142,7 +143,13 @@ void Renderer::beginUiPass(i32 w, i32 h) {
 
 void Renderer::beginFrame() {
     droppedLogged_ = false;   // 0.8.4: o aviso de cap vale 1× por frame
-    glClearColor(0.0784314f, 0.0784314f, 0.0784314f, 1.0f);   // BG #141414
+    // 0.9.6.9 (GRUPO F): o clear LÊ O TOKEN (era o literal #141414 — o BG DA
+    // F1! — que sobreviveu à spec A por TUDO ser opaco: ninguém via o fundo.
+    // COM VIDRO os painéis deixam-no À VISTA: o fundo por trás do vidro é
+    // PARTE da identidade e tem de vir da tabela única; com o mono de volta
+    // o valor É o mesmo #141414, mas agora por CONTRATO, não por fóssil)
+    glClearColor(theme::kTheme.bg[0], theme::kTheme.bg[1],
+                 theme::kTheme.bg[2], 1.0f);
     glDepthMask(GL_TRUE);                                     // restore pós-grid
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }

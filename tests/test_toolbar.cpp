@@ -264,22 +264,43 @@ TEST(icones_pelo_nome_funcional) {
     }
 }
 
-// ---- 4. THEME (spec A): tabela exata + CONTRASTES (a auditoria) ---------------
+// ---- 4. THEME (spec F): tabela exata + CONTRASTES (a auditoria) ---------------
+// RECALIBRADO 0.9.6.9 (GRUPO F · IDENTIDADE): os valores EXATOS eram os da
+// spec A (navy + accent AZUL #2196F3); o dono pediu «tokens mono+vidro» — o
+// REGRESSO à rampa neutra da F1 (#141414/#1E1E1E/#2E2E2E/#E6E6E6/#F5F5F5 —
+// os PRÓPRIOS valores com que a app nasceu) + o vidro (alphas 0.88/0.92/
+// 0.55 nas superfícies) + accentInk ESCURO (o fill do accent é BRANCO — a
+// tinta em cima dele já não pode ser text1). A asserção continua EXATA.
 
-TEST(theme_tabela_spec_a_exata) {
-    // accent 🔶 default azul do mockup #2196F3 (flip 1 token → #8AB4F8)
-    EXPECT(nearEqF(theme::kTheme.accent[0], 33.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.accent[1], 150.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.accent[2], 243.0f / 255.0f, 1e-4f));
-    // bg #0B0E13 · surface #151A23 · surface2 #1F2733 · border #2A3442
-    EXPECT(nearEqF(theme::kTheme.bg[0], 11.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.surface[0], 21.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.surface2[1], 39.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.border[2], 66.0f / 255.0f, 1e-4f));
-    // text1 #F5F5F5 · text2 #98A2B3 · scrim 60%
-    EXPECT(nearEqF(theme::kTheme.text1[0], 245.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.text2[1], 162.0f / 255.0f, 1e-4f));
+TEST(theme_tabela_spec_f_exata) {
+    // accent — O MONO: #F5F5F5 (o ACCENT da F1; o azul #2196F3 morreu)
+    EXPECT(nearEqF(theme::kTheme.accent[0], 245.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.accent[1], 245.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.accent[2], 245.0f / 255.0f, 1e-4f));
+    // MONO a sério: o accent é NEUTRO (ΔR=G=B = 0 — zero croma)
+    EXPECT(theme::kTheme.accent[0] == theme::kTheme.accent[1] &&
+           theme::kTheme.accent[1] == theme::kTheme.accent[2]);
+    // bg #141414 · surface #1E1E1E · surface2 #262626 · border #2E2E2E
+    // (a rampa F1 de volta)
+    EXPECT(nearEqF(theme::kTheme.bg[0], 20.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.surface[0], 30.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.surface2[1], 38.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.border[2], 46.0f / 255.0f, 1e-4f));
+    // O VIDRO: surface α0.88 · surface2 α0.92 · border α0.55 (bg opaco)
+    EXPECT(nearEqF(theme::kTheme.surface[3], 0.88f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.surface2[3], 0.92f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.border[3], 0.55f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.bg[3], 1.0f, 1e-4f));
+    // text1 #E6E6E6 · text2 #A6A6A6 (neutro) · scrim 60%
+    EXPECT(nearEqF(theme::kTheme.text1[0], 230.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.text2[1], 166.0f / 255.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.scrim[3], 0.60f, 1e-4f));
+    // accentInk ESCURO (#141414 — a tinta sobre o fill BRANCO; a spec A
+    // tinha accentInk=text1: com o accent mono seria branco sobre branco)
+    EXPECT(nearEqF(theme::kTheme.accentInk[0], 20.0f / 255.0f, 1e-4f));
+    // voniComment — o DEGRAU do mono (#757575 → #8A8A8A): o bg novo é mais
+    // claro que o navy e o piso 4,5:1 do comment mantém-se (4,0 → 5,3:1)
+    EXPECT(nearEqF(theme::kTheme.voniComment[0], 138.0f / 255.0f, 1e-4f));
 }
 
 TEST(theme_contraste_auditoria_spec) {
@@ -291,6 +312,18 @@ TEST(theme_contraste_auditoria_spec) {
     EXPECT(theme::contrastOnSurface(theme::kTheme.danger) >= 3.0f);
     EXPECT(theme::contrastOnSurface(theme::kTheme.ok) >= 3.0f);
     EXPECT(theme::contrastOnSurface(theme::kTheme.warn) >= 3.0f);
+    // 0.9.6.9 (GRUPO F) · O VIDRO NÃO MENTE À AUDITORIA: o pior caso de um
+    // painel α0.88 é estar sobre uma cena BRANCA PURA — os pisos SEGURAM
+    // lá também (contrastOnGlass — a matemática do blend do device)
+    EXPECT(theme::contrastOnGlass(theme::kTheme.text1) >= 4.5f);
+    EXPECT(theme::contrastOnGlass(theme::kTheme.text2) >= 4.5f);
+    EXPECT(theme::contrastOnGlass(theme::kTheme.accent) >= 3.0f);
+    EXPECT(theme::contrastOnGlass(theme::kTheme.danger) >= 3.0f);
+    EXPECT(theme::contrastOnGlass(theme::kTheme.ok) >= 3.0f);
+    EXPECT(theme::contrastOnGlass(theme::kTheme.warn) >= 3.0f);
+    // a TINTA sobre o fill accent (branco) — 16,9:1
+    EXPECT(theme::contrastRatio(theme::kTheme.accentInk,
+                                theme::kTheme.accent) >= 4.5f);
     // accentPress MAIS ESCURO que accent (feedback de premir)
     EXPECT(theme::kTheme.accentPress[0] < theme::kTheme.accent[0]);
     // a razão em si é estável (função PURA — determinística)

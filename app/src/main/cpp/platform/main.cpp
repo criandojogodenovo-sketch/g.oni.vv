@@ -4295,8 +4295,12 @@ void drawToast() {
     const f32 bx = ox + (aw - bw) * 0.5f;
     // por CIMA da tab bar do painel de baixo (spec E) — 16dp de folga
     const f32 by = oy + ah - bh2 - safe::kBottomTabH - safe::kStatusH - 16.0f;
+    // 0.9.6.9 (GRUPO F): o toast compõe o ALPHA DO TOKEN com o fade (o
+    // surface2 agora É vidro 0.92 — o fade multiplica o vidro, não o
+    // substitui; antes o 0.95*alpha era o vidro artesanal da spec M)
     const f32 bg[4] = {theme::kTheme.surface2[0], theme::kTheme.surface2[1],
-                       theme::kTheme.surface2[2], 0.95f * alpha};
+                       theme::kTheme.surface2[2],
+                       theme::kTheme.surface2[3] * alpha};
     const f32 tx[4] = {theme::kTheme.text1[0], theme::kTheme.text1[1],
                        theme::kTheme.text1[2], alpha};
     g_ui.panelRounded(bx, by, bw, bh2, theme::kRadiusCard, bg);

@@ -30,11 +30,14 @@
          (All Files Access — F5.2) e reencaminha o resultado por JNI; e
          desde a F5.4 é ela que recebe o projeto escolhido no Gestor
          (extras) e o reencaminha por nativeOpenProject. -->
-    <!-- 0.9.0 — ÍCONE DA APP (decisão do dono): G com a lâmpada — G azul
-         #8AB4F8 + lâmpada amarela #FFD54F sobre navy #1E2633 (gerado por
-         scripts-local/gen_app_icon.py — vetor puro, zero gradientes; o mesmo
-         gone_logo.png é a miniatura default dos cards e o header da tela de
-         projetos). -->
+    <!-- 0.9.6.9 — ÍCONE DA APP (decisão do dono · GRUPO F): G com 4 SETAS —
+         o G branco #F5F5F5 com as 4 setas do Move (o verbo primeiro do
+         editor — o MESMO motivo do ícone Move do conjunto da casa) em
+         #B5B5B5 sobre o bg mono #141414 (gerado por scripts/gen_app_icon.py
+         — vetor puro, zero gradientes, COMMITADO no repo; o gerador antigo
+         vivia em scripts-local/ fora do controlo de versões; o mesmo
+         gone_logo.png é a miniatura default dos cards e o header da tela
+         de projetos). -->
     <application
         android:label="G.One VV"
         android:icon="@mipmap/ic_launcher"

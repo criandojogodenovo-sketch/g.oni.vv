@@ -31,9 +31,10 @@ FMT = ROOT / "app/src/main/java/vv/goni/ProjectsFormat.java"
 VVP = ROOT / "app/src/main/java/vv/goni/VvProjects.java"
 ICN = ROOT / "app/src/main/java/vv/goni/UiIcons.java"
 
-TOKENS_090 = ("0xFF0B0E13", "0xFF151A23", "0xFF1F2733", "0xFF2A3442",
-              "0xFFF5F5F5", "0xFF98A2B3", "0xFF2196F3", "0xFF1B7FD4",
-              "0xFFEF5350", "0xFFFABB45")
+TOKENS_F = ("0xFF141414", "0xFF1E1E1E", "0xFF262626", "0xFF2E2E2E",
+            "0xFFE6E6E6", "0xFFA6A6A6", "0xFFF5F5F5", "0xFFDADADA",
+            "0xFF141414", "0xE01E1E1E", "0xEB262626",
+            "0xFFEF5350", "0xFFFABB45")   # 0.9.6.9 spec F: mono+vidro
 
 
 def strip_comments(src: str) -> str:
@@ -57,7 +58,7 @@ def main():
 
     # 1) FASE 9 (G1-4b): cabeçalho NUMA LINHA
     for frag, what in [("buildTopBar", "cabeçalho numa linha (buildTopBar)"),
-                       ("R.drawable.gone_logo", "logo G+lâmpada"),
+                       ("R.drawable.gone_logo", "logo G com 4 setas"),
                        ("dp(32), dp(32)", "logo 32dp compacto"),
                        ("title.setTextSize(16)", "título 16sp"),
                        ("pesquisar projetos", "hint da pesquisa"),
@@ -94,10 +95,11 @@ def main():
         bad += fail("botões 56dp ausentes")
     elif "ACCENT_PRESS, false" not in code or "0, 0, true" not in code:
         bad += fail("Novo FILL / Importar CONTORNO ausentes (G1-4b)")
-    elif "outline ? ACCENT : TEXT1" not in code:
-        bad += fail("variante contorno do botão ausente")
+    elif "outline ? ACCENT : ACCENT_INK" not in code:
+        bad += fail("variante contorno do botão ausente (a tinta do fill é "
+                    "ACCENT_INK desde o mono — branco sobre branco morreu)")
     else:
-        print("OK  Novo projeto FILL azul · Importar projeto SÓ CONTORNO")
+        print("OK  Novo projeto FILL mono · Importar projeto SÓ CONTORNO")
 
     # 3) FASE 9 (G1-4c): grelha adaptável
     if "GridView.AUTO_FIT" not in code or "setColumnWidth(dp(180))" not in code:
@@ -153,17 +155,18 @@ def main():
     else:
         print("OK  tempo relativo no card (ProjectsFormat.relativeTime)")
 
-    # 9) TOKENS 0.9.0 — zero hex fora das constantes
-    for tok in TOKENS_090:
+    # 9) TOKENS spec F — zero hex fora das constantes
+    for tok in TOKENS_F:
         if tok not in code:
-            bad += fail(f"token 0.9.0 ausente: {tok}")
+            bad += fail(f"token spec F ausente: {tok}")
     hexes = re.findall(r"0x[0-9A-Fa-f]{8}", code)
     allowed = sum(1 for h in hexes if h.upper() in
-                  tuple(t.upper() for t in TOKENS_090))
+                  tuple(t.upper() for t in TOKENS_F))
     if len(hexes) != allowed:
-        bad += fail(f"hex inline fora dos tokens 0.9.0: {len(hexes) - allowed}")
+        bad += fail(f"hex inline fora dos tokens spec F: {len(hexes) - allowed}")
     elif bad == 0:
-        print("OK  tokens 0.9.0 (espelho Java do ui/Theme.h) centralizados")
+        print("OK  tokens spec F (mono+vidro — espelho Java do ui/Theme.h) "
+              "centralizados")
 
     # 10) diálogos escuros
     n_builders = len(re.findall(r"new AlertDialog\.Builder\(", code))
@@ -194,7 +197,7 @@ def main():
     if bad:
         print(f"PROJECTS-UI CHECK: {bad} falha(s)")
         sys.exit(1)
-    print("PROJECTS-UI CHECK: OK (0.9.0 spec F)")
+    print("PROJECTS-UI CHECK: OK (0.9.6.9 spec F: mono+vidro)")
 
 
 if __name__ == "__main__":

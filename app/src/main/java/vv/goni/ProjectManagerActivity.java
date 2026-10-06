@@ -73,15 +73,23 @@ public class ProjectManagerActivity extends Activity {
     static final int REQ_PICK_TREE_DUP = 4304;     // 0.9.0: duplicar → destino
     static final int REQ_PICK_TREE_RECOVER = 4305; // 0.9.0: re-apontar pasta
 
-    // ---- TOKENS 0.9.0 (espelho Java do ui/Theme.h — tabela spec A) --------
-    static final int BG = 0xFF0B0E13;        // bg
-    static final int SURFACE = 0xFF151A23;   // surface (cards)
-    static final int SURFACE2 = 0xFF1F2733;  // surface-2 (premido)
-    static final int BORDER = 0xFF2A3442;    // border
-    static final int TEXT1 = 0xFFF5F5F5;     // text-1
-    static final int TEXT2 = 0xFF98A2B3;     // text-2 (6,7:1 sobre surface)
-    static final int ACCENT = 0xFF2196F3;    // accent 🔶 (flip 1 token)
-    static final int ACCENT_PRESS = 0xFF1B7FD4;
+    // ---- TOKENS 0.9.6.9 (espelho Java do ui/Theme.h — spec F: MONO+VIDRO).
+    // O mono de volta (a rampa neutra F1) + o vidro: os CARDS ganham o
+    // ALPHA do token (o GLA — a tela de projetos não tem cena 3D por trás,
+    // o vidro dela é o véu subtil sobre o BG, a MESMA matemática do nativo).
+    // O ACCENT_INK é NOVO: o fill do accent agora é BRANCO — a tinta em
+    // cima dele passa a ESCURA (branco sobre branco era INVISÍVEL).
+    static final int BG = 0xFF141414;        // bg (a F1 de volta)
+    static final int SURFACE = 0xFF1E1E1E;   // surface (RGB p/ texto/estado)
+    static final int SURFACE2 = 0xFF262626;  // surface-2 (premido)
+    static final int BORDER = 0xFF2E2E2E;    // border
+    static final int TEXT1 = 0xFFE6E6E6;     // text-1 (a F1)
+    static final int TEXT2 = 0xFFA6A6A6;     // text-2 (neutro; 6,9:1)
+    static final int ACCENT = 0xFFF5F5F5;    // accent — O MONO (era azul)
+    static final int ACCENT_PRESS = 0xFFDADADA;
+    static final int ACCENT_INK = 0xFF141414; // tinta SOBRE accent (16,9:1)
+    static final int SURFACE_GLA = 0xE01E1E1E; // vidro: α0.88 (cards/sheets)
+    static final int SURFACE2_GLA = 0xEB262626; // vidro denso: α0.92
     static final int DANGER = 0xFFEF5350;
     static final int WARN = 0xFFFABB45;
 
@@ -160,7 +168,9 @@ public class ProjectManagerActivity extends Activity {
         emptyBox.setGravity(Gravity.CENTER);
         ImageView bigLogo = new ImageView(this);
         bigLogo.setImageResource(R.drawable.gone_logo);
-        bigLogo.setColorFilter(TEXT2);
+        // 0.9.6.9 (GRUPO F): SEM tint — o ícone novo (G com 4 setas) já é
+        // mono por CONSTRUÇÃO; o setColorFilter(TEXT2) era para neutralizar
+        // o azul+amarelo do ícone velho
         emptyBox.addView(bigLogo, new LinearLayout.LayoutParams(dp(96), dp(96)));
         emptyTitle = new TextView(this);
         emptyTitle.setText("Nenhum projeto ainda");
@@ -242,7 +252,7 @@ public class ProjectManagerActivity extends Activity {
         search.setHint("pesquisar projetos");
         search.setPadding(dp(12), 0, dp(12), 0);
         GradientDrawable sf = new GradientDrawable();
-        sf.setColor(SURFACE);
+        sf.setColor(SURFACE_GLA);   // 0.9.6.9: o campo também é vidro (α0.88)
         sf.setStroke(dp(1), BORDER);
         sf.setCornerRadius(dp(4));       // campo = raio 4dp (spec A)
         search.setBackground(sf);
@@ -311,13 +321,13 @@ public class ProjectManagerActivity extends Activity {
             b.setText(label);
             b.setAllCaps(false);
             b.setTextSize(15);
-            b.setTextColor(outline ? ACCENT : TEXT1);
+            b.setTextColor(outline ? ACCENT : ACCENT_INK);
             b.setPadding(dp2(a, outline ? 10 : 16), 0,
                          dp2(a, outline ? 10 : 16), 0);
             GradientDrawable n = new GradientDrawable();
             if (outline) {
                 // FASE 9 (G1-4b): SÓ CONTORNO — fundo transparente + bordo
-                // accent 1dp (o par do preenchido azul)
+                // accent 1dp (o par do preenchido)
                 n.setColor(Color.TRANSPARENT);
                 n.setStroke(dp2(a, 1), ACCENT);
             } else {
@@ -337,7 +347,7 @@ public class ProjectManagerActivity extends Activity {
             st.addState(new int[]{}, n);
             b.setBackground(st);
             b.setCompoundDrawablesWithIntrinsicBounds(
-                    UiIcons.drawable(icon, outline ? ACCENT : TEXT1, 24,
+                    UiIcons.drawable(icon, outline ? ACCENT : ACCENT_INK, 24,
                                      a.getResources()
                                              .getDisplayMetrics().density),
                     null, null, null);
@@ -543,13 +553,13 @@ public class ProjectManagerActivity extends Activity {
 
             LinearLayout card = new LinearLayout(ProjectManagerActivity.this);
             card.setOrientation(LinearLayout.VERTICAL);
-            // card: surface + raio 8dp + bordo 1dp (spec A/F); premido=surface2
+            // card: vidro + raio 8dp + bordo 1dp (spec F); premido=vidro denso
             GradientDrawable nrm = new GradientDrawable();
-            nrm.setColor(SURFACE);
+            nrm.setColor(SURFACE_GLA);   // 0.9.6.9: o CARD é vidro (α0.88)
             nrm.setCornerRadius(dp(8));
             nrm.setStroke(dp(1), BORDER);
             GradientDrawable prs = new GradientDrawable();
-            prs.setColor(SURFACE2);
+            prs.setColor(SURFACE2_GLA);  // premido: vidro denso (α0.92)
             prs.setCornerRadius(dp(8));
             prs.setStroke(dp(1), BORDER);
             StateListDrawable bg = new StateListDrawable();
@@ -879,7 +889,7 @@ public class ProjectManagerActivity extends Activity {
         input.setText(text);
         input.setSelection(input.getText().length());
         GradientDrawable g = new GradientDrawable();
-        g.setColor(SURFACE);
+        g.setColor(SURFACE_GLA);   // 0.9.6.9: o campo de texto é vidro (α0.88)
         g.setStroke(dp(1), BORDER);
         g.setCornerRadius(dp(4));
         input.setBackground(g);

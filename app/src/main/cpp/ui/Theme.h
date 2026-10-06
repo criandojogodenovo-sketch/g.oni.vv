@@ -1,28 +1,48 @@
 #pragma once
-// ui/Theme.h — DESIGN SYSTEM 0.9.0 (spec A — tabela OBRIGATÓRIA).
+// ui/Theme.h — DESIGN SYSTEM 0.9.6.9 (spec F · GRUPO F: MONO+VIDRO).
 //
 // FONTE ÚNICA das cores/espaçamentos/tipografia/raios de TODO o editor e da
-// tela de projetos. 🔶 MUDANÇA ISOLADA: trocar UM token aqui muda a app toda
-// (o "flip de 1 token" do accent: kAccent de #2196F3 para #8AB4F8).
+// tela de projetos. 🔶 MUDANÇA ISOLADA: trocar UM token aqui muda a app toda.
 //
-// TABELA (spec 0.9.0 parte A):
-//   bg         #0B0E13  — fundo da app (atrás de tudo; barras do sistema)
-//   surface    #151A23  — painéis/cards (hierarquia, inspector, drawers)
-//   surface2   #1F2733  — premido/elevado (linhas tocadas, toasts, chips ativos)
-//   border     #2A3442  — traço fino de separação (strokes, molduras)
-//   text1      #F5F5F5  — texto primário (≥4,5:1 sobre surface)
-//   text2      #98A2B3  — texto secundário (6,7:1 sobre surface — afervável)
-//   accent     #2196F3  — 🔶 azul do mockup (flip de 1 token → #8AB4F8)
-//   accentPress#1B7FD4  — accent premido (feedback de toque)
-//   danger     #EF5350  — ações destrutivas (apagar, stop, gravar aceso)
-//   warn       #FABB45  — avisos (badge ANTIGO, W da consola)
-//   ok         #66BB6A  — sucesso (guardado, check)
+// 0.9.6.9 (GRUPO F · IDENTIDADE): o REGRESSO À RAMPA NEUTRA da F1 — o tema
+// mono original da casa (BG #141414 · PANEL #1E1E1E · LINE #2E2E2E · TEXT
+// #E6E6E6 · ACCENT #F5F5F5 — «tokens mono», f4.1) — com a ESTRUTURA da
+// spec A (text2/accentInk/scrim/raios/auditoria) e o VIDRO: as superfícies
+// ganham ALPHA e o pass UI já desenha com blend (GL_BLEND SRC_ALPHA em
+// TODO o pass desde a F1 — o scrim 60% e o toast 0.95 eram os precedentes).
+// Onde há profundidade (chips/toolbar/drawer/menus/toasts sobre a viewport
+// 3D) o vidro é REAL — a cena aparece por trás; os painéis laterais ficam
+// sobre o clear (véu escuro subtil). O AZUL da spec A (#2196F3) morre.
+//
+// TABELA (spec F — mono+vidro; ΔR=G=B ≤2 em TODO o chrome):
+//   bg         #141414 α1.00 — fundo da app (atrás de tudo; barras sistema)
+//   surface    #1E1E1E α0.88 — VIDRO: painéis/cards (hierarquia, inspector)
+//   surface2   #262626 α0.92 — vidro DENSO (premido, toasts, chips ativos)
+//   border     #2E2E2E α0.55 — hairline de vidro (traço fino)
+//   text1      #E6E6E6 α1.00 — texto primário (13,4:1 sobre surface)
+//   text2      #A6A6A6 α1.00 — texto secundário (6,9:1 sobre surface)
+//   accent     #F5F5F5 α1.00 — o MONO (o branco da F1; era azul #2196F3)
+//   accentPress#DADADA α1.00 — accent premido (feedback de toque)
+//   accentInk  #141414 α1.00 — tinta SOBRE accent (16,9:1 — o fill é BRANCO,
+//                              a tinta passa a ESCURA; era text1: branco
+//                              sobre branco, o risco que o Java também tinha)
+//   danger     #EF5350 α1.00 — ações destrutivas (exceção documentada: a
+//   warn       #FABB45 α1.00 — semântica É cor — como as cores dos EIXOS do
+//   ok         #66BB6A α1.00 — gizmo e a paleta V.ONI, sempre foram)
 //   scrim      preto 60% — véu modal por trás de sheets/diálogos
 //
-// CONTRASTE (auditoria 0.9.0 — contrastRatio() abaixo, PURA e testada no CI):
-//   text1 sobre surface 5,26:1 ✓ · text2 sobre surface 6,72:1 ✓
-//   accent sobre surface 5,56:1 ✓ · danger sobre surface 5,00:1 ✓
-//   ok sobre surface 7,29:1 ✓ · warn sobre surface 11,1:1 ✓
+// CONTRASTE — A AUDITORIA DO VIDRO NÃO MENTE (o padrão honesto do F): o
+// pior caso de um painel de vidro é estar sobre uma cena BRANCA PURA (o
+// dono pode pôr um modelo branco no viewport). O piso da casa mantém-se
+// MESMO AÍ (blendOver/worstCaseGlass abaixo, PURAS e testadas no CI):
+//   text1 9,25:1 · text2 4,74:1 (≥4,5 ✓) · accent 10,59:1 · danger 3,31:1
+//   warn 6,74:1 · ok 4,88:1 (≥3,0 ✓) — tudo sobre surface@0.88→(57,57,57)
+// Sobre a surface SÓLIDA: text1 13,4:1 · text2 6,9:1 · accent 15,3:1 ·
+//   danger 4,8:1 · warn 9,7:1 · ok 7,1:1.
+// A paleta V.ONI (sintaxe = CONTEÚDO, não chrome; exceção documentada ao
+// mono como as cores dos eixos): voniComment sobe um degrau (#757575 →
+// #8A8A8A) porque o bg novo #141414 é mais claro que o navy #0B0E13 — o
+// piso 4,5:1 mantém-se (4,0:1 → 5,3:1).
 //
 // ESCALA: espaçamento em múltiplos de 8dp (4 só p/ ícones internos);
 // alvos de toque ≥48dp com ≥8dp entre eles; texto 12sp legendas/status,
@@ -32,33 +52,36 @@
 // UiContext::panelRounded).
 //
 // COMPATIBILIDADE: os tokens históricos (BG/PANEL/LINE/TEXT/ACCENT/WARN de
-// UiContext.h e o kTheme 0.7.6) continuam a existir e passam a APONTAR para
-// ESTA tabela — a app inteira muda de pele num só sítio (o objetivo 0.9.0).
+// UiContext.h) continuam a existir e APONTAM para ESTA tabela — a app
+// inteira muda de pele num só sítio (desde a 0.9.0; agora mono+vidro).
 #include "core/Types.h"
 #include <cmath>
 
 namespace vv {
 namespace theme {
 
-// ---- tabela obrigatória (spec A) — UM struct, UM só lugar para mudar -------
+// ---- tabela mono+vidro (spec F) — UM struct, UM só lugar para mudar -------
 struct Theme {
-    // cores de fundo
-    f32 bg[4];         // #0B0E13
-    f32 surface[4];    // #151A23
-    f32 surface2[4];   // #1F2733 (premido)
+    // cores de fundo (o ALPHA é o VIDRO: 1.0 = opaco, <1.0 = vê-se o que
+    // está por trás — o pass UI desenha TODO com blend desde a F1)
+    f32 bg[4];         // #141414 α1.00 (a F1 — igual ao clear da app)
+    f32 surface[4];    // #1E1E1E α0.88 (VIDRO)
+    f32 surface2[4];   // #262626 α0.92 (vidro denso — premido)
     // traço
-    f32 border[4];     // #2A3442
+    f32 border[4];     // #2E2E2E α0.55 (hairline)
     // texto
-    f32 text1[4];      // #F5F5F5
-    f32 text2[4];      // #98A2B3 (≥4,5:1 sobre surface)
-    // ação
-    f32 accent[4];     // #2196F3 (🔶 flip de 1 token → #8AB4F8)
-    f32 accentPress[4];// #1B7FD4
-    f32 accentInk[4];  // #FFFFFF? não: tinta SOBRE accent = text1 (5,26:1
-                       // sobre surface; sobre accent 3,1:1 = componente ok)
-    f32 danger[4];     // #EF5350
-    f32 warn[4];       // #FABB45
-    f32 ok[4];         // #66BB6A
+    f32 text1[4];      // #E6E6E6 α1.00 (a F1)
+    f32 text2[4];      // #A6A6A6 α1.00 (neutro — 6,9:1 sobre surface)
+    // ação (MONO: branco da casa; o azul da spec A morreu)
+    f32 accent[4];     // #F5F5F5 α1.00 (o ACCENT da F1)
+    f32 accentPress[4];// #DADADA α1.00 (premido — mais escuro, feedback)
+    f32 accentInk[4];  // #141414 α1.00 (tinta SOBRE accent — o fill é
+                       // BRANCO, a tinta é ESCURA: 16,9:1. A spec A tinha
+                       // accentInk=text1: com accent mono seria branco
+                       // sobre branco — INVISÍVEL)
+    f32 danger[4];     // #EF5350 α1.00 (semântica — exceção documentada)
+    f32 warn[4];       // #FABB45 α1.00
+    f32 ok[4];         // #66BB6A α1.00
     f32 scrim[4];      // preto 60% (véu modal)
     // 0.9.2 — PALETA V.ONI (spec §10 🔶 — coloração do editor de script;
     // o parser classifica tokens, AS CORES VIVEM AQUI — flip de 1 token)
@@ -67,41 +90,47 @@ struct Theme {
     f32 voniUser[4];       // #F5F5F5 utilizador (branco)
     f32 voniString[4];     // #81C784 strings (verde)
     f32 voniNumber[4];     // #FFD54F números (amarelo)
-    f32 voniComment[4];    // #757575 comentários (cinzento)
+    f32 voniComment[4];    // #8A8A8A comentários (o degrau do mono — 5,3:1)
 };
 
-// hex→f32 normalizado (compile-time-friendly por field)
-#define VV_RGB(r, g, b) \
-    {static_cast<f32>(r) / 255.0f, static_cast<f32>(g) / 255.0f, \
-     static_cast<f32>(b) / 255.0f, 1.0f}
+// hex→f32 normalizado (compile-time-friendly por field) — com ALPHA:
+// VV_RGBA(r,g,b,a) com a em FLOAT 0..1 (o vidro: 0.88f/0.92f/0.55f);
+// VV_RGB = opaco (a=1)
+#define VV_RGBA(r, g, b, a)                                              \
+    {static_cast<f32>(r) / 255.0f, static_cast<f32>(g) / 255.0f,         \
+     static_cast<f32>(b) / 255.0f, static_cast<f32>(a)}
+#define VV_RGB(r, g, b) VV_RGBA(r, g, b, 1.0f)
 
-// 0B0E13=(11,14,19) · 151A23=(21,26,35) · 1F2733=(31,39,51) · 2A3442=(42,52,66)
-// F5F5F5=(245,245,245) · 98A2B3=(152,162,179) · 2196F3=(33,150,243)
-// 1B7FD4=(27,127,212) · EF5350=(239,83,80) · FABB45=(250,187,69)
+// 141414=(20,20,20) · 1E1E1E=(30,30,30) · 262626=(38,38,38) · 2E2E2E=(46,46,46)
+// E6E6E6=(230,230,230) · A6A6A6=(166,166,166) · F5F5F5=(245,245,245)
+// DADADA=(218,218,218) · EF5350=(239,83,80) · FABB45=(250,187,69)
 // 66BB6A=(102,187,106)
 inline constexpr Theme kTheme{
-    VV_RGB(11, 14, 19),     // bg
-    VV_RGB(21, 26, 35),     // surface
-    VV_RGB(31, 39, 51),     // surface2
-    VV_RGB(42, 52, 66),     // border
-    VV_RGB(245, 245, 245),  // text1
-    VV_RGB(152, 162, 179),  // text2
-    VV_RGB(33, 150, 243),   // accent     🔶 (flip 1 token → 138,180,248)
-    VV_RGB(27, 127, 212),   // accentPress
-    VV_RGB(245, 245, 245),  // accentInk (= text1)
-    VV_RGB(239, 83, 80),    // danger
-    VV_RGB(250, 187, 69),   // warn
-    VV_RGB(102, 187, 106),  // ok
-    {0.0f, 0.0f, 0.0f, 0.60f},  // scrim (60%)
-    // 0.9.2 V.ONI: B39DDB · 8AB4F8 · F5F5F5 · 81C784 · FFD54F · 757575
+    VV_RGB(20, 20, 20),        // bg         (a rampa F1 de volta)
+    VV_RGBA(30, 30, 30, 0.88f),  // surface    α0.88 — O VIDRO
+    VV_RGBA(38, 38, 38, 0.92f),  // surface2   α0.92 — vidro denso
+    VV_RGBA(46, 46, 46, 0.55f),  // border     α0.55 — hairline
+    VV_RGB(230, 230, 230),     // text1      (a F1)
+    VV_RGB(166, 166, 166),     // text2      (neutro)
+    VV_RGB(245, 245, 245),     // accent     (o MONO — o ACCENT da F1)
+    VV_RGB(218, 218, 218),     // accentPress
+    VV_RGB(20, 20, 20),        // accentInk  (tinta ESCURA no fill branco)
+    VV_RGB(239, 83, 80),       // danger     (semântica — exceção)
+    VV_RGB(250, 187, 69),      // warn
+    VV_RGB(102, 187, 106),     // ok
+    {0.0f, 0.0f, 0.0f, 0.60f},   // scrim (60%)
+    // V.ONI (sintaxe = conteúdo): voniComment sobe um degrau — o bg novo
+    // #141414 é mais claro que o navy #0B0E13 e o piso 4,5:1 mantém-se
+    // (4,0:1 → 5,3:1); os outros tokens caem <8% e ficam todos ≥7,7:1
     VV_RGB(179, 157, 219),  // voniReserved
     VV_RGB(138, 180, 248),  // voniEngine
     VV_RGB(245, 245, 245),  // voniUser
     VV_RGB(129, 199, 132),  // voniString
     VV_RGB(255, 213, 79),   // voniNumber
-    VV_RGB(117, 117, 117),  // voniComment
+    VV_RGB(138, 138, 138),  // voniComment (#757575 → #8A8A8A: o degrau)
 };
 #undef VV_RGB
+#undef VV_RGBA
 
 // ---- atalhos estáveis (o chamador escreve theme::SURFACE etc.) -------------
 // Os nomes HISTÓRICOS (BG/PANEL/LINE/TEXT/ACCENT/WARN — UiContext.h legado)
@@ -217,8 +246,8 @@ constexpr f32 kRadiusField = 4.0f;   // campos/chips
 
 // ---- AUDITORIA DE CONTRASTE (WCAG 2.x, PURA — host-testável no CI) ----------
 // razão de luminância relativa entre duas cores RGBA (alpha ignorado —
-// contraste afere-se cor sólida sobre cor sólida). Os testes de 0.9.0 usam
-// isto para PROVAR text2≥4,5:1 e componentes≥3:1.
+// contraste afere-se cor sólida sobre cor sólida). Os testes usam isto
+// para PROVAR text2≥4,5:1 e componentes≥3:1.
 inline f32 srgbChannelToLinear(f32 c) {
     return c <= 0.04045f ? c / 12.92f
                          : std::pow((c + 0.055f) / 1.055f, 2.4f);
@@ -241,9 +270,37 @@ inline f32 contrastOnSurface(const f32 color[4]) {
     return contrastRatio(color, kTheme.surface);
 }
 
-// 0.9.2 — contraste dos tokens V.ONI sobre o BG do editor (#0B0E13):
-// voniUser 18,3:1 · voniEngine 12,5:1 · voniReserved 8,0:1 ·
-// voniString 10,5:1 · voniNumber 12,3:1 · voniComment 4,7:1 (todos ≥4,5:1)
+// ---- 0.9.6.9 (GRUPO F) · A AUDITORIA DO VIDRO --------------------------------
+// O vidro não pode mentir à auditoria: um painel α0.88 sobre uma cena
+// BRANCA PURA (o pior caso — o dono pode pôr um modelo branco no viewport)
+// ainda tem de dar aos textos os pisos da casa. PURAS, testadas no CI.
+
+// a cor FINAL de um painel de vidro sobre o que está por trás (o MESMO
+// SRC_ALPHA/ONE_MINUS_SRC_ALPHA do pass UI — a matemática do device)
+inline void blendOver(const f32 fg[4], const f32 behind[4], f32 out[4]) {
+    const f32 a = fg[3];
+    for (int i = 0; i < 3; ++i) {
+        out[i] = fg[i] * a + behind[i] * (1.0f - a);
+    }
+    out[3] = 1.0f;
+}
+
+inline constexpr f32 kWorstBehind[4] = {1.0f, 1.0f, 1.0f, 1.0f};  // branco
+
+// O CONTRASTE DE UM TOKEN contra a superfície de vidro no pior caso dela
+// (surface α sobre BRANCO PURO). Com a tabela F: text1 9,25:1 · text2
+// 4,74:1 · accent 10,59:1 · danger 3,31:1 · warn 6,74:1 · ok 4,88:1 —
+// os pisos da casa (4,5 texto / 3,0 componente) SEGURAM no vidro.
+inline f32 contrastOnGlass(const f32 token[4]) {
+    f32 w[4];
+    blendOver(kTheme.surface, kWorstBehind, w);
+    return contrastRatio(token, w);
+}
+
+// 0.9.6.9 — contraste dos tokens V.ONI sobre o BG NOVO do editor (#141414,
+// o mono): voniUser 16,9:1 · voniEngine 8,7:1 · voniReserved 7,7:1 ·
+// voniString 9,2:1 · voniNumber 13,1:1 · voniComment 5,3:1 (todos ≥4,5:1 —
+// o comment subiu um degrau porque o bg neutro é mais claro que o navy)
 inline f32 contrastOnBg(const f32 color[4]) {
     return contrastRatio(color, kTheme.bg);
 }

@@ -41,6 +41,9 @@ typedef void* EGLNativeWindowType;
 // platform/main.cpp e corre o BOOT REAL (onAppCmd INIT_WINDOW) + frame()
 // no hospedeiro — com o lifecycle de destroy/recreate a cargo do stub
 // GLES3 (contadores).
+// 0.9.6.9 (GRUPO F): eglCreateWindowSurface empurra o tamanho da superfície
+// para o framebuffer do stub (fb::setSurface) — incluído aqui.
+#include "../glstub_fb.h"
 namespace eglstub {
 // tamanho da superfície fake (inline = 1 instância por binário; o harness
 // ajusta ANTES do INIT_WINDOW para reproduzir o ecrã do C33)
@@ -58,6 +61,12 @@ inline int eglChooseConfig(EGLDisplay, const EGLint*, EGLConfig* cfg, EGLint, EG
     return 1;
 }
 inline EGLSurface eglCreateWindowSurface(EGLDisplay, EGLConfig, void*, const EGLint*) {
+    // 0.9.6.9 (GRUPO F): a SUPERFÍCIE é quem define o tamanho do framebuffer
+    // do stub (glstub::fb::setSurface) — o glViewport NUNCA mais realoca
+    // (o achado ao vivo: desde o Grupo D o realloc por viewport APAGAVA o
+    // clear E o pass 3D de todos os PNGs exportados — a UI sobre preto,
+    // invisível enquanto os painéis eram opacos)
+    glstub::fb::setSurface(eglstub::g_surfaceW, eglstub::g_surfaceH);
     return reinterpret_cast<EGLSurface>(0x9ABC);
 }
 inline int eglDestroySurface(EGLDisplay, EGLSurface) { return 1; }

@@ -34,6 +34,74 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.9.6.9 — GRUPO F: IDENTIDADE (FASE 0.9.6-MASTER · R-028)
+
+**O que existe agora (o tema MONO de volta com VIDRO; o ícone G com 4
+setas; o stub do harness deixou de mentir nos PNGs):**
+- **A TABELA MONO+VIDRO** (`ui/Theme.h` — a spec F): o REGRESSO à rampa
+  NEUTRA com que a app nasceu (F1: bg #141414 · surface #1E1E1E · border
+  #2E2E2E · text1 #E6E6E6 · accent #F5F5F5 — o AZUL #2196F3 da spec A
+  morreu) com o VIDRO: as superfícies ganham ALPHA (surface α0.88 ·
+  surface2 α0.92 · border α0.55) e o pass UI já desenhava com blend
+  desde a F1 — onde há profundidade (chips/toolbar/drawer/menus/toasts
+  sobre a viewport 3D) a cena aparece por trás. A auditoria do vidro é
+  honesta: o pior caso (uma cena BRANCA PURA por trás) mantém os pisos
+  da casa (text2 4,74:1 ≥4,5 — `contrastOnGlass` no CI).
+- **A TINTA CERTA NO FILL BRANCO**: accentInk passa a ESCURO (#141414 —
+  16,9:1 sobre o accent). A spec A tinha accentInk=text1: com o accent
+  mono seria BRANCO SOBRE BRANCO. O espelho Java ganha o ACCENT_INK (o
+  «Novo projeto» tinha o mesmo risco) e os cards/campos o véu
+  (SURFACE_GLA α0.88).
+- **O CLEAR LÊ O TOKEN** (o fóssil morreu): o `glClearColor` era o
+  literal #141414 DA F1 desde sempre — a spec A mudou o bg token para
+  navy mas o clear NUNCA acompanhou (invisível com tudo opaco; COM
+  VIDRO o fundo por trás dos painéis fica à vista). Agora lê
+  `theme::kTheme.bg` — com o mono de volta o valor É o mesmo, mas por
+  CONTRATO.
+- **O ÍCONE «G COM 4 SETAS»** (`scripts/gen_app_icon.py` — COMMITADO no
+  repo; o gerador antigo vivia em scripts-local/ FORA do controlo de
+  versões e os PNGs eram órfãos): o G branco (as proporções do G
+  aprovado) + as 4 setas do Move em #B5B5B5 sobre o bg mono — vetor
+  puro, zero gradientes; o mestre 512 + as 5 mipmaps + o gone_logo.
+- **A PALETA V.ONI intacta** (sintaxe = CONTEÚDO, não chrome — a
+  exceção documentada, como as cores dos eixos do gizmo): só o
+  voniComment sobe um degrau (#757575→#8A8A8A) porque o bg neutro é
+  mais claro que o navy — o piso 4,5:1 mantém-se.
+- **O WIPE DO STUB** (o achado ao vivo): desde o Grupo D o framebuffer
+  do stub era APAGADO a cada glViewport de tamanho diferente — o clear E
+  o pass 3D desapareciam de TODOS os PNGs exportados (a UI sobre preto;
+  ninguém notava porque os painéis eram opacos e nenhuma check aferia
+  conteúdo 3D). O framebuffer é agora da SUPERFÍCIE EGL e o glViewport
+  só regista a transformação — o 3D VOLTOU aos PNGs e a FASE 13.9 afere
+  o vidro PIXEL a PIXEL (o painel = blend(surface@0.88, bg) = (29,29,29)
+  EXATO; o chip flutuante = o MESMO composto com a cena por trás).
+
+**Checklist C33/RMX3624 (VERIFICAR no device — Grupo F):**
+1. O ícone na gaveta/lanciador: o G BRANCO com as 4 SETAS cinzentas
+   sobre o fundo #141414 (o azul e a lâmpada morreram) — nítido ao
+   toque longo e no ecrã principal.
+2. A tela de projetos: o header com o logo novo SEM o tint cinzento (o
+   ícone já é mono), o «Novo projeto» com FILL BRANCO e TEXTO ESCURO
+   legível (o contrário do azul/branco antigo), os cards com o véu
+   subtil do vidro.
+3. O editor 3D: os painéis (hierarquia/inspector) com o véu escuro
+   subtil sobre o fundo — e os CHIPS da toolstack, a toolbar inferior,
+   os menus (⋮/MENU/CENAS) e os toasts com a CENA 3D VISÍVEL POR TRÁS
+   (o vidro real: mexa a câmara com um menu aberto — o fundo mexe-se).
+4. O AZUL morreu: nenhuma seleção/underline/chip azul no editor — as
+   seleções são BRANCAS com texto/tinta ESCURA (o «Novo projeto», a
+   linha selecionada da hierarquia, a tecla ativa da toolbar).
+5. O fundo do editor (o céu da viewport) é o #141414 do tema — o MESMO
+   tom das barras (o clear acompanha a identidade; antes o clear era um
+   literal que ninguém via).
+6. Os avisos semânticos mantêm a cor (o stop VERMELHO, o amarelo dos
+   avisos, o verde do guardado) — as exceções documentadas ao mono.
+7. No editor de script: os comentários do código ligeiramente MAIS
+   CLAROS que antes (o degrau #757575→#8A8A8A — o fundo neutro é mais
+   claro e o contraste mantém-se).
+8. A «Auditoria do ecrã» no editor e no script: «0 ERRO, 0 aviso» — a
+   pele nova não mexeu em NENHUM rect.
+
 ## 0.9.6.8 — GRUPO E: EDITOR DE SCRIPT + SÍMBOLOS (FASE 0.9.6-MASTER · R-027)
 
 **O que existe agora (o teclado da engine SAIU; a barra de 40dp desenha

@@ -27,21 +27,24 @@
 
 namespace vv {
 
-// Tokens do tema mono — 0.9.0: ALIASES da tabela única (ui/Theme.h, spec A).
-// A pele inteira da app muda num só sítio: BG=bg #0B0E13, PANEL=surface
-// #151A23, LINE=border #2A3442, TEXT=text1 #F5F5F5, ACCENT=text1 (era
-// #F5F5F5 — mesmo valor), WARN=warn. O struct completo com text2/accent/
-// danger/ok/scrim/accentPress + escala 8dp/tipografia/raios vive em Theme.h.
+// Tokens do tema — 0.9.6.9 (GRUPO F): ALIASES da tabela única (ui/Theme.h,
+// spec F mono+vidro). A pele inteira da app muda num só sítio: BG=bg
+// #141414 α1, PANEL=surface #1E1E1E α0.88 (VIDRO), LINE=border #2E2E2E
+// α0.55 (hairline), TEXT=text1 #E6E6E6, ACCENT=accent #F5F5F5 (o MONO —
+// coincidindo com text1 no BRILHO, não na hierarquia), WARN=warn. O struct
+// completo com text2/accentInk/danger/ok/scrim/accentPress + a auditoria
+// do vidro (blendOver/contrastOnGlass) vive em Theme.h. OS ALPHAS VÊM
+// CONOSCO (o legado era opaco; o pass UI desenha com blend desde a F1).
 namespace theme {
 // (arrays C++ não se copiam em constexpr — MESMAS expressões do Theme.h para
 // igualdade bit-a-bit, LIGADAS por static_assert: mudar Theme.h sem aqui =
 // build MORRE — a fonte única continua sendo Theme.h)
-constexpr f32 BG[4]     = {11.0f / 255.0f, 14.0f / 255.0f, 19.0f / 255.0f, 1.0f};   // bg #0B0E13
-constexpr f32 PANEL[4]  = {21.0f / 255.0f, 26.0f / 255.0f, 35.0f / 255.0f, 1.0f};   // surface #151A23
-constexpr f32 LINE[4]   = {42.0f / 255.0f, 52.0f / 255.0f, 66.0f / 255.0f, 1.0f};   // border #2A3442
-constexpr f32 TEXT[4]   = {245.0f / 255.0f, 245.0f / 255.0f, 245.0f / 255.0f, 1.0f};// text1 #F5F5F5
-constexpr f32 ACCENT[4] = {245.0f / 255.0f, 245.0f / 255.0f, 245.0f / 255.0f, 1.0f};// = text1
-constexpr f32 WARN[4]   = {250.0f / 255.0f, 187.0f / 255.0f, 69.0f / 255.0f, 1.0f}; // warn #FABB45
+constexpr f32 BG[4]     = {20.0f / 255.0f, 20.0f / 255.0f, 20.0f / 255.0f, 1.0f};       // bg #141414
+constexpr f32 PANEL[4]  = {30.0f / 255.0f, 30.0f / 255.0f, 30.0f / 255.0f, 0.88f};    // surface #1E1E1E α0.88
+constexpr f32 LINE[4]   = {46.0f / 255.0f, 46.0f / 255.0f, 46.0f / 255.0f, 0.55f};    // border #2E2E2E α0.55
+constexpr f32 TEXT[4]   = {230.0f / 255.0f, 230.0f / 255.0f, 230.0f / 255.0f, 1.0f};  // text1 #E6E6E6
+constexpr f32 ACCENT[4] = {245.0f / 255.0f, 245.0f / 255.0f, 245.0f / 255.0f, 1.0f};  // = accent (o MONO)
+constexpr f32 WARN[4]   = {250.0f / 255.0f, 187.0f / 255.0f, 69.0f / 255.0f, 1.0f};   // warn #FABB45
 static_assert(BG[0] == theme::kTheme.bg[0] && BG[2] == theme::kTheme.bg[2],
               "BG desincronizado de Theme.h — fonte única violada");
 static_assert(PANEL[1] == theme::kTheme.surface[1] &&
@@ -53,6 +56,9 @@ static_assert(TEXT[0] == theme::kTheme.text1[0] && TEXT[2] == theme::kTheme.text
               "TEXT desincronizado de Theme.h — fonte única violada");
 static_assert(WARN[1] == theme::kTheme.warn[1] && WARN[2] == theme::kTheme.warn[2],
               "WARN desincronizado de Theme.h — fonte única violada");
+static_assert(ACCENT[0] == theme::kTheme.accent[0] &&
+                  ACCENT[3] == theme::kTheme.accent[3],
+              "ACCENT desincronizado de Theme.h — fonte única violada");
 }
 
 // UiRect vive em ui/ScrollMath.h (matemática GL-free partilhada)
