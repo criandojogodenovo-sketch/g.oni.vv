@@ -74,6 +74,77 @@ inline const char* ellipsize(const char* text, f32 maxW, WidthFn&& width,
     }
 }
 
+// 0.9.6.12 (GRUPO J4 · R-025) — RETICÊNCIA A MEIO (o ellipsize="middle"
+// da spec J4 para o campo do PROJETO no rodapé): mantém a CABEÇA e a CAUDA
+// com "…" no meio — o fim do nome (a extensão, o sufixo significativo)
+// continua visível, e o que se corta é o MEIO (a parte menos identificável
+// do nome). O mesmo contrato do ellipsize: medidor injetado, GL-free,
+// fronteiras de code point respeitadas, determinístico (o maior par
+// cabeça+cauda que caiba, head obtido do primeiro metade dos caracteres
+// guardados). `out` cap bytes; string que cabe é copiada integralmente;
+// nem "…" cabendo → string vazia (não desenha).
+template <typename WidthFn>
+inline const char* ellipsizeMiddle(const char* text, f32 maxW,
+                                   WidthFn&& width, char* out, u32 cap) {
+    if (!out || cap == 0) {
+        return out;
+    }
+    out[0] = '\0';
+    if (!text || !text[0]) {
+        return out;
+    }
+    if (width(text) <= maxW) {
+        std::snprintf(out, cap, "%s", text);
+        return out;
+    }
+    const u32 len = static_cast<u32>(std::strlen(text));
+    const f32 ellW = width(kEllipsis);
+    if (ellW > maxW) {
+        out[0] = '\0';   // nem a reticência cabe — não desenha
+        return out;
+    }
+    // code point: byte de continuação UTF-8 (0b10xxxxxx)?
+    auto isCont = [&text, &len](u32 i) {
+        return i > 0 && i < len &&
+               (static_cast<unsigned char>(text[i]) & 0xC0u) == 0x80u;
+    };
+    auto boundaryL = [&](u32 i) {   // recua até ao início de um code point
+        while (i > 0 && isCont(i)) {
+            --i;
+        }
+        return i;
+    };
+    auto boundaryR = [&](u32 i) {   // avança até ao início de um code point
+        while (i < len && isCont(i)) {
+            ++i;
+        }
+        return i;
+    };
+    // o maior nº de glifos guardados (k), repartidos metade cabeça / metade
+    // cauda, cujo «cabeça…cauda» caiba em maxW — determinístico
+    for (u32 kept = len; kept >= 1; --kept) {
+        const u32 headLen = boundaryL(kept / 2);
+        u32 tailStart = len - (kept - kept / 2);
+        tailStart = boundaryR(tailStart);
+        if (headLen == 0 && tailStart >= len) {
+            continue;   // nem um glifo guardado
+        }
+        char buf[256];
+        std::snprintf(buf, sizeof(buf), "%.*s%s%s",
+                      static_cast<int>(headLen), text, kEllipsis,
+                      text + tailStart);
+        if (width(buf) <= maxW) {
+            std::snprintf(out, cap, "%s", buf);
+            return out;
+        }
+    }
+    // último recurso: só a reticência (não desenha o nome)
+    if (ellW <= maxW) {
+        std::snprintf(out, cap, "%s", kEllipsis);
+    }
+    return out;
+}
+
 } // namespace textfit
 
 // ---- 0.9.6 (G2-5): QUEBRA DE LINHA por palavras ( Docs sem "…") -------------

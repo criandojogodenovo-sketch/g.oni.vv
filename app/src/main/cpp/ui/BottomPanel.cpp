@@ -7,6 +7,7 @@
 #include "ui/BottomPanel.h"
 #include "ui/EditorUi.h"
 #include "ui/Timeline.h"
+#include "ui/TextFit.h"   // 0.9.6.12 (J4/R-025): ellipsizeMiddle do projeto
 #include "ui/UiContext.h"
 
 #include <cstdio>
@@ -720,9 +721,41 @@ void drawStatusBar(UiContext& ui, f32 sw, f32 sh, const safe::Insets& in,
     // 0.9.6.10 (GRUPO UI · a imagem 1): a linha COMPLETA — à ESQUERDA a
     // versão · o projeto · FPS · os objetos; à DIREITA o estado +
     // "Mobile First" (a memória fica na lista honesta do relatório)
-    char left[160];
-    std::snprintf(left, sizeof(left), "G.One %s · %s · FPS %d · TICs %u",
-                  data.version, data.project, fps, ticCount);
+    // 0.9.6.12 (GRUPO J4 · R-025 · a spec J4): o campo do PROJETO (o mais
+    // variável) é elipsado A MEIO, com o orçamento dele PRÓPRIO — antes a
+    // linha inteira ia ao labelFitted e o corte comia o FIM (o suffixo
+    // FPS/TICs sumia com nomes longos, que era a informação estável que
+    // devia ficar). Agora: prefixo + projeto ellipsado a meio + suffixo
+    // — o suffixo FICA sempre, o nome mostra cabeça+cauda («longo…nome»)
+    char prefix[64];
+    std::snprintf(prefix, sizeof(prefix), "G.One %s · ", data.version);
+    char suffix[48];
+    std::snprintf(suffix, sizeof(suffix), " · FPS %d · TICs %u", fps,
+                  ticCount);
+    char left[192];
+    if (ui.hasFont()) {
+        // O ORÇAMENTO na MEDIDA CORPO (fontWidth) — a MESMA que o maxW do
+        // labelFittedStyled usa (o rw de baixo, medida corpo): a linha
+        // composta prefixo+projeto+suffixo fica DENTRO do orçamento do fit
+        // (o draw em caption 12sp é 14% mais estreito — a folga é da casa);
+        // assim o middle é exercido A VALE e o fit nunca volta a cortar o
+        // FIM (o suffixo FPS/TICs sobrevive sempre — o contrato do J4)
+        auto wBody = [&](const char* s) { return ui.fontWidth(s); };
+        const char* rightTmp = data.playing ? "play · Mobile First"
+                                            : "editor · Mobile First";
+        const f32 padT = theme::dp(8.0f);
+        const f32 availT =
+            r.w - (wBody(rightTmp) + padT) - 2.0f * padT;
+        const f32 projBudget =
+            availT - wBody(prefix) - wBody(suffix);
+        char proj[96];
+        textfit::ellipsizeMiddle(
+            data.project, projBudget, wBody, proj, sizeof(proj));
+        std::snprintf(left, sizeof(left), "%s%s%s", prefix, proj, suffix);
+    } else {
+        std::snprintf(left, sizeof(left), "G.One %s · %s · FPS %d · TICs %u",
+                      data.version, data.project, fps, ticCount);
+    }
     const char* right = data.playing ? "play · Mobile First"
                                      : "editor · Mobile First";
     // 0.9.6.6 (GRUPO C): 12sp REAL (o comentário antigo DIZIA «12sp

@@ -537,3 +537,17 @@ Prova de mutação (mutacao-R030a-vermelho.txt): `0x2196F3` (o azul órfão da s
 | Linha do replay | FASE 14.3 do c33_virtual — o log A ACONTECER: `vp3d: viewport set to (400, 160, 576 x 208)` com o painel aberto (o rect encolheu), a linha de volta ao rect cheio ao fechar, o aspect = w/h do rect |
 | Prova de mutação | mutação R-024a: o log MUTADO (a linha deixa de ser a do contrato) → FASE 14.3 com 4 falhas + `regress_viewport_rect_segue` vermelha; reposto → 454/454 + 0 falhas |
 | Padrão proibido | (novo) «mudança de rect visível sem linha vp3d no engine.log» |
+
+## R-025 · o rodapé intocável e o projeto elipsado a meio (0.9.6.12 · GRUPO J4)
+
+| campo | valor |
+|---|---|
+| ID | R-025 |
+| Reportado | o dono (defeito 5: «rodapé de métricas muda de posição ou cobre elementos»; a spec J4 pede ellipsize=middle no campo do projeto) |
+| Sintoma exato | a posição do rodapé (BottomBar 24dp) nunca mudou no código atual (statusRect é a última faixa, vigiada pela R-022); o defeito REAL restante era o CORTE: com um nome de projeto longo, a linha inteira ia ao labelFitted e o «…» comia o FIM — o suffixo «FPS n · TICs n» (a informação estável) desaparecia |
+| Causa raiz | a composição juntava TUDO numa string e mandava o conjunto ao fit — o campo mais variável (o projeto) não tinha orçamento próprio; a spec J4 manda elipssar A MEIO o projeto, preservando a cauda |
+| Fix | `textfit::ellipsizeMiddle` (puro, GL-free, fronteiras UTF-8 — cabeça+…+cauda) + a composição em drawStatusBar: prefixo (versão) + projeto ellipsado ao SEU orçamento + suffixo (FPS/TICs) — o orçamento na MESMA medida corpo que o maxW do fit (a folga caption é a da casa); o posicionamento do lado direito ficou intocado (a convenção do registo) |
+| Teste sentinela | `regress_rodape_intocavel` (tests/test_sentinels.cpp): o ellipsizeMiddle (cabe inteiro / cabeça+cauda / orçamento absurdo → vazio / UTF-8 nunca partido) + o rodapé como ÚLTIMA faixa em 2 densidades × 3 estados do drawer (nada o cobre: drawer, tab bar e centro terminam acima) + a composição com nome longo mantém o suffixo no fim |
+| Linha do replay | FASE 14.4 do c33_virtual — projeto de 120 glifos com a fonte real: o label da faixa de status NÃO truncado (o flag `truncado` do audit) — o middle preservou o suffixo |
+| Prova de mutação | mutação R-025a: o middle morto (o projeto cru na composição) → FASE 14.4 VERMELHA (o label da status bar truncado); reposto → 456/456. (A 1ª rodada da mutação ficou verde POR ACIDENTE — o audit só corre no frame de export e a 14.4 lia o registo STALE; armado `g_layoutExportPending` — a lição R-014: a prova tem de falhar pela razão certa) |
+| Padrão proibido | (novo) «string composta inteira no fit do rodapé» — o projeto passa sempre pelo orçamento próprio com middle |

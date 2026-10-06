@@ -4347,6 +4347,46 @@ int main() {
                   "cheio (o evento de fecho também chega)");
         }
 
+        // ---- 14.4 (J4 · R-025) — O RODAPÉ COM UM NOME LONGO (a fonte
+        // real): o projeto ellipsado A MEIO mantém o suffixo FPS/TICs — o
+        // label da faixa de status NÃO fica truncado (o flag do audit)
+        passo("14.4 o rodapé com o projeto longo (o middle do J4)");
+        {
+            const std::string nomeAntigo = g_project.name;
+            // 120 glifos — o nome excede o orçamento REAL da faixa (o
+            // ecrã do device é largo: um nome de 60 ainda caberia inteiro;
+            // o middle tem de ser exercido A VALE)
+            g_project.name =
+                "projeto-do-dono-com-nome-extravagantemente-comprido-"
+                "que-continua-e-continua-e-continua-ate-transbordar-"
+                "qualquer-orcamento-de-largura-5678";
+            g_bottom.bottomTab = 0;
+            g_layoutExportPending = true;   // o audit só corre no frame de
+                                            // export (o registo do dump)
+            frame();
+            const UiRect status = safe::statusRect(
+                1600.0f, 720.0f, g_ui.safeArea());
+            u32 labelsNoRodape = 0, truncadosNoRodape = 0;
+            for (const vv::layout::Entry& e : g_ui.auditRecord().entries) {
+                // a faixa do rodapé: y dentro da banda de 24dp no fundo
+                if (e.kind == vv::layout::Entry::Label &&
+                    e.y >= status.y - 1.0f && e.y + e.h <= status.y +
+                        status.h + 1.0f) {
+                    ++labelsNoRodape;
+                    if (e.truncated) {
+                        ++truncadosNoRodape;
+                    }
+                }
+            }
+            check(labelsNoRodape > 0,
+                  "14.4 o rodapé desenhou labels na faixa de status");
+            check(truncadosNoRodape == 0,
+                  "14.4 NENHUM label do rodapé truncado com o nome longo "
+                  "(o middle do projeto preservou o suffixo FPS/TICs)");
+            g_project.name = nomeAntigo;
+            frame();
+        }
+
         // ---- 14.x — o PNG do estado J (drawer aberto + strip) — a prova
         // P-05 do dono (o estado que produzia os defeitos 1+2+3)
         passo("14.x o PNG do device com o drawer aberto (a prova P-05)");

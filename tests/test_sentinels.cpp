@@ -3911,3 +3911,137 @@ TEST(regress_viewport_rect_segue) {
     }
     theme::setDensity(1.0f);
 }
+
+// ============================================================================
+// R-025 (0.9.6.12 · GRUPO J4) — O RODAPÉ INTOCÁVEL
+//         — regress_rodape_intocavel
+//
+// O DONO (defeito 5): «o rodapé de métricas muda de posição ou cobre
+// elementos». A REALIDADE: o rodapé (BottomBar — a status bar de 24dp)
+// vive em safe::statusRect, a ÚLTIMA faixa do contentRect, e a sua posição
+// não depende de NENHUM estado (R-022 já a vigia no contrato). O que
+// FALTAVA (a spec J4): o campo do PROJETO (o mais variável) elipsado A
+// MEIO com o orçamento DELE — antes a linha inteira ia ao labelFitted e o
+// corte comia o FIM (o suffixo «FPS n · TICs n» sumia com nomes longos).
+// O FIX: textfit::ellipsizeMiddle (puro, GL-free, fronteiras UTF-8) +
+// prefixo + projeto ellipsado + suffixo em drawStatusBar. Esta sentinela
+// afere o ellipsizeMiddle com medidor fake E a inviolabilidade do rodapé
+// em múltiplos ecrãs/densidades/estados; a prova com a FONTE REAL e o
+// nome longo vive na FASE 14.4 do replay (o label do rodapé NÃO truncado).
+// ============================================================================
+TEST(regress_rodape_intocavel) {
+    using namespace vv;
+
+    // ---- (a) O ELLIPSIZE A MEIO (o contrato do J4) ----------------------
+    {
+        // medidor fake mono: 10px por glifo (bytes ASCII)
+        auto w = [](const char* s) { return static_cast<f32>(std::strlen(s)) * 10.0f; };
+        char out[96];
+        // cabe inteiro → cópia integral
+        textfit::ellipsizeMiddle("projeto", 70.0f, w, out, sizeof(out));
+        EXPECT(std::string(out) == "projeto");
+        // não cabe → cabeça+…+cauda, e CAIBA no orçamento
+        textfit::ellipsizeMiddle("nome-de-projeto-muito-longo", 100.0f, w,
+                                 out, sizeof(out));
+        const std::string mid = out;
+        EXPECT_MSG(w(out) <= 100.0f, "o resultado do middle não cabe "
+                   "(%s → %.0f px)", out, w(out));
+        EXPECT_MSG(mid.find("…") != std::string::npos,
+                   "o middle sem reticência (resultado: %s)", out);
+        EXPECT_MSG(mid.front() != '\xE2' || mid.size() > 3,
+                   "o middle começa pela reticência (a cabeça morreu: %s)",
+                   out);
+        // a CAUDA fica: o fim do nome é o sufixo significativo
+        EXPECT_MSG(mid.back() == 'o', "a cauda do nome morreu (%s)", out);
+        // orçamento absurdo → vazio (nunca desenha fora do rect)
+        textfit::ellipsizeMiddle("nome", 5.0f, w, out, sizeof(out));
+        EXPECT(out[0] == '\0');
+        // UTF-8: nome com acentos — o corte nunca parte um code point
+        const char* acentos = "animação-do-cão-feliz";
+        textfit::ellipsizeMiddle(acentos, 90.0f, w, out, sizeof(out));
+        // o resultado tem de ser UTF-8 VÁLIDO: cada 0xE2/0xC3/0xC5 seguido
+        // de continuação (o teste percorre os bytes)
+        bool valid = true;
+        for (size_t i = 0; i < std::strlen(out);) {
+            const unsigned char c = static_cast<unsigned char>(out[i]);
+            size_t n = 1;
+            if ((c & 0x80u) != 0) {
+                n = (c & 0xE0u) == 0xC0u ? 2
+                    : (c & 0xF0u) == 0xE0u ? 3 : 4;
+            }
+            for (size_t j = 1; j < n; ++j) {
+                if ((static_cast<unsigned char>(out[i + j]) & 0xC0u) !=
+                    0x80u) {
+                    valid = false;
+                }
+            }
+            i += n;
+        }
+        EXPECT_MSG(valid, "o middle partiu um code point UTF-8 (%s)", out);
+    }
+
+    // ---- (b) O RODAPÉ É A ÚLTIMA FAIXA (todos os estados) ---------------
+    const f32 densities[] = {1.0f, 2.0f};
+    for (f32 d : densities) {
+        theme::setDensity(d);
+        const f32 sw = 1600.0f * d, sh = 720.0f * d;
+        const safe::Insets in{0.0f, 48.0f * d, 48.0f * d, 0.0f};
+        for (f32 raw : {0.0f, 240.0f, 400.0f}) {
+            const UiRect status = safe::statusRect(sw, sh, in);
+            // a posição é ESTÁTUA: y = content bottom − 24dp, SEMPRE
+            EXPECT_MSG(nearEqF(status.y + status.h,
+                               sh - in.bottom, 0.5f),
+                       "d=%.1f raw=%.0f: o rodapé não encosta no fundo do "
+                       "content (y+h=%.1f vs %.1f)",
+                       d, raw, status.y + status.h, sh - in.bottom);
+            EXPECT(nearEqF(status.h, theme::dp(24.0f), 0.5f));
+            // nada o cobre: o drawer, a tab bar e o centro terminam acima
+            editor::bottom::BottomState bs{};
+            bs.bottomTab = 1;
+            bs.drawerH = raw;
+            const editor::bottom::Layout bl =
+                editor::bottom::layout(sw, sh, in, bs);
+            EXPECT(bl.drawer.y + bl.drawer.h <= status.y + 0.5f);
+            EXPECT(bl.tabBar.y + bl.tabBar.h <= status.y + 0.5f);
+            const f32 eff = safe::effectiveDrawerH(raw,
+                                                   safe::viewportRect(sw, sh, in).h);
+            const UiRect view = safe::centerRect(sw, sh, in, eff, true,
+                                                 -1.0f, -1.0f);
+            EXPECT(view.y + view.h <= status.y + 0.5f);
+            // a composição J4: com o suffixo no orçamento, o label NUNCA
+            // precisa de cortar o fim (a fórmula do drawStatusBar com o
+            // medidor fake: prefixo + projeto a meio + suffixo cabe)
+            {
+                auto w = [](const char* s) {
+                    return static_cast<f32>(std::strlen(s)) * 10.0f;
+                };
+                char prefix[64], suffix[48];
+                std::snprintf(prefix, sizeof(prefix), "G.One %s · ",
+                              "0.9.6.12");
+                std::snprintf(suffix, sizeof(suffix),
+                              " · FPS %d · TICs %u", 60, 42);
+                const f32 avail =
+                    theme::dp(776.0f) - (w("editor · Mobile First") + theme::dp(8.0f)) -
+                    2.0f * theme::dp(8.0f);
+                const f32 budget =
+                    avail - w(prefix) - w(suffix);
+                char proj[96];
+                textfit::ellipsizeMiddle("projeto-do-dono-com-nome-"
+                                         "extravagantemente-comprido",
+                                         budget, w, proj, sizeof(proj));
+                char left[192];
+                std::snprintf(left, sizeof(left), "%s%s%s", prefix, proj,
+                              suffix);
+                EXPECT_MSG(w(left) <= avail + 0.5f,
+                           "a linha composta excede o orçamento (w=%.0f "
+                           "avail=%.0f)", w(left), avail);
+                // o SUFFIXO está no fim (a informação estável sobrevive)
+                const std::string ls = left;
+                EXPECT(ls.size() >= std::strlen(suffix) &&
+                       ls.compare(ls.size() - std::strlen(suffix),
+                                  std::strlen(suffix), suffix) == 0);
+            }
+        }
+    }
+    theme::setDensity(1.0f);
+}
