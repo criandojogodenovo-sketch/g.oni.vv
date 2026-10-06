@@ -1904,17 +1904,72 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 }
 
 int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st,
-                 f32 ax, f32 ay) {
-    // 0.9.0 (spec H) — SHEET MENU ANCORADO: 8dp por baixo do botão [Menu ≡],
-    // largura 280dp, SCRIM 60% por trás, linhas 48dp ÍCONE+rótulo 14sp,
-    // separadores FINOS entre grupos. Toque fora fecha SEM ação; toque na
-    // linha executa e fecha. (ax/ay = rect do botão-âncora da top bar;
-    // −1/−1 = fallback centrado p/ compatibilidade dos testes.)
-    constexpr int kItems = 7;
+                 f32 ax, f32 ay, bool snapOn) {
+    // 0.9.6.10 (GRUPO UI · a região TOPO da imagem 1): o menu ≡ passa à
+    // ESTRUTURA DE 6 SECÇÕES da barra de topo da referência — Projeto /
+    // Cena / Editar / Visualizar / Ferramentas / Ajuda — com cabeçalhos
+    // 12sp text2 + separadores (a MESMA organização da imagem 1, ao
+    // alcance de um toque no telemóvel). As AÇÕES são as de sempre (mais
+    // as do chrome do viewport promovidas a linhas: Desfazer/Refazer/
+    // Duplicar/Colar — caminhos que JÁ existiam no main) + o Snap (o
+    // toggle real do íman) e a Documentação V.ONI (o ecrã das Docs).
+    // SHEET ANCORADO 8dp sob o botão [≡ Menu], largura 280dp, SCRIM 60%,
+    // linhas 48dp ÍCONE+rótulo 14sp; COM SCROLL quando o conteúdo excede
+    // o ecrã (14 linhas + 6 cabeçalhos não cabem no portrait — o sheet
+    // encolhe ao disponível e a lista rola).
+    constexpr int kItems = 14;
     constexpr f32 kSheetW = 280.0f;   // spec H
     constexpr f32 kRowH = 48.0f;      // spec H/A
-    const f32 h = static_cast<f32>(kItems) * kRowH + 3.0f * 9.0f + 8.0f;
+    constexpr f32 kHdrH = 28.0f;      // cabeçalho de secção (GRUPO UI)
+    // (ax/ay = rect do botão-âncora da top bar; −1/−1 = fallback centrado
+    // p/ compatibilidade dos testes.)
+    static const struct {
+        const char*  label;
+        icons::Icon  ic;
+        int          section;   // 0..5 (o cabeçalho desenha ANTES da 1ª
+                                // linha de cada secção)
+    } kMenu[kItems] = {
+        // PROJETO
+        {"Sair para projetos",  icons::Icon::Back,    0},
+        {"Importar…",           icons::Icon::Upload,  0},
+        {"Export Downloads",    icons::Icon::Download, 0},
+        // CENA
+        {"Guardar cena",        icons::Icon::Save,    1},
+        {"Carregar cena",       icons::Icon::Folder,  1},
+        {"Export OBJ",          icons::Icon::Download, 1},
+        // EDITAR
+        {"Desfazer",            icons::Icon::Undo,    2},
+        {"Refazer",             icons::Icon::Redo,    2},
+        {"Duplicar",            icons::Icon::Duplicate, 2},
+        {"Colar",               icons::Icon::Paste,   2},
+        // VISUALIZAR
+        {nullptr,               icons::Icon::Snap,    3},   // rótulo dinâmico
+        // FERRAMENTAS
+        {"Settings",            icons::Icon::Gear,    4},
+        {"Ver logs",            icons::Icon::Terminal, 4},
+        // AJUDA
+        {"Documentação V.ONI",  icons::Icon::Search,  5},
+    };
+    static const char* const kSections[6] = {
+        "PROJETO", "CENA", "EDITAR", "VISUALIZAR", "FERRAMENTAS", "AJUDA"};
+    // o rótulo dinâmico do Snap (linha 10 — o toggle REAL do íman)
+    char snapLabel[48];
+    std::snprintf(snapLabel, sizeof(snapLabel), "Snapping: %s",
+                  snapOn ? "ligado" : "desligado");
+    const char* labels[kItems];
+    for (int i = 0; i < kItems; ++i) {
+        labels[i] = kMenu[i].label ? kMenu[i].label : snapLabel;
+    }
+
+    const f32 contentH = static_cast<f32>(kItems) * kRowH +
+                         6.0f * kHdrH + 8.0f;
     f32 x, y;
+    // o ALTURA máxima disponível (o sheet NUNCA sai do contentRect — a
+    // invariante F4.2; o resto rola lá dentro)
+    const f32 maxH = sh - static_cast<f32>(ui.safeTop()) -
+                     theme::dp(safe::kToolbarH) - theme::dp(8.0f) -
+                     theme::dp(28.0f);
+    const f32 h = contentH < maxH ? contentH : maxH;
     if (ax >= 0.0f && ay >= 0.0f) {
         x = ax;
         y = ay + 8.0f;   // 8dp sob o botão (spec H)
@@ -1949,50 +2004,68 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::kRadiusCard,
                     theme::kTheme.border);
 
-    // linhas: ícone + rótulo; separadores finos ENTRE grupos (spec H):
-    // (Settings) | (Guardar/Carregar) | (Export OBJ/Importar/Export
-    // Downloads) | (Sair p/ projetos)
-    static const struct {
-        const char*  label;
-        icons::Icon  ic;
-    } kMenu[kItems] = {
-        {"Settings",          icons::Icon::Gear},
-        {"Guardar cena",      icons::Icon::Save},
-        {"Carregar cena",     icons::Icon::Folder},
-        {"Export OBJ",        icons::Icon::Download},
-        {"Importar…",         icons::Icon::Upload},
-        {"Export Downloads",  icons::Icon::Download},
-        {"Sair para projetos", icons::Icon::Back},
-    };
-    static const bool kGroupEnd[kItems] = {true, true, false, false, true,
-                                           true, false};
     const TextMetrics tm = ui.textMetrics();
     int chosen = 0;
+    const UiRect region{x, y + 4.0f, kSheetW, h - 8.0f};
+    ui.beginScroll(kMenuScrollId, region, contentH);
+    const f32 off = ui.scrollOffset();
+    // o y de CONTENT de cada linha (para o re-despacho do tap: dentro do
+    // scroll o botão SÓ desenha — o tap nasce da região e é mapeado aqui,
+    // o MESMO padrão dos cards dos Ficheiros no BottomPanel)
+    f32 rowContentY[kItems];
     f32 ry = y + 4.0f;
+    int lastSec = -1;
     for (int i = 0; i < kItems; ++i) {
-        const bool held = ui.widgetActive(static_cast<u64>(30 + i));
+        // o CABEÇALHO da secção (12sp text2 — a imagem 1)
+        if (kMenu[i].section != lastSec) {
+            lastSec = kMenu[i].section;
+            if (ui.hasFont()) {
+                const f32 hdrY = ry - off;
+                if (hdrY + kHdrH >= y && hdrY <= y + h) {
+                    ui.labelStyled(x + 16.0f,
+                                   hdrY + (kHdrH - tm.block()) * 0.5f +
+                                       tm.ascent,
+                                   kSections[lastSec], theme::kTheme.text2,
+                                   theme::fontScale(theme::kFontCaption), 0);
+                }
+            }
+            ry += kHdrH;
+        }
+        rowContentY[i] = ry;   // topo da linha EM COORDENADAS DE CONTENT
+        const f32 rowY = ry - off;
+        ry += kRowH;
+        if (rowY + kRowH < y || rowY > y + h) {
+            continue;   // culled (fora do sheet)
+        }
+        const u64 id = kMenuRowBase + static_cast<u64>(i);
+        const bool held = ui.widgetActive(id);
         if (held) {
-            ui.panel(x + 4.0f, ry, kSheetW - 8.0f, kRowH,
+            ui.panel(x + 4.0f, rowY, kSheetW - 8.0f, kRowH,
                      theme::kTheme.surface2);
         }
-        icons::drawIcon(ui, kMenu[i].ic, x + 16.0f, ry + (kRowH - 24.0f) * 0.5f,
-                        24.0f, theme::kTheme.text2);
+        icons::drawIcon(ui, kMenu[i].ic, x + 16.0f,
+                        rowY + (kRowH - 24.0f) * 0.5f, 24.0f,
+                        theme::kTheme.text2);
         if (ui.hasFont()) {
             ui.labelFitted(x + 16.0f + 24.0f + 12.0f,
-                           ry + (kRowH - tm.block()) * 0.5f + tm.ascent,
-                           kMenu[i].label, theme::kTheme.text1,
+                           rowY + (kRowH - tm.block()) * 0.5f + tm.ascent,
+                           labels[i], theme::kTheme.text1,
                            kSheetW - 24.0f - 36.0f - 12.0f);
         }
-        if (ui.widgetHit(static_cast<u64>(30 + i), x + 4.0f, ry, kSheetW - 8.0f,
-                         kRowH)) {
-            chosen = i + 1;
-            st.fileMenu = false;
-        }
-        ry += kRowH;
-        if (kGroupEnd[i] && i + 1 < kItems) {
-            ui.panel(x + 16.0f, ry - 0.5f, kSheetW - 32.0f, 1.0f,
-                     theme::kTheme.border);   // separador fino
-            ry += 9.0f;
+    }
+    ui.endScroll();
+    // o RE-DESPACHO do tap (o padrão da casa dentro de scrolls): o tap
+    // nasce da REGIÃO do sheet e mapeia para a linha pelo y de content
+    f32 tx, ty;
+    if (ui.scrollTap(kMenuScrollId, tx, ty)) {
+        const f32 contentTapY = ty + off;
+        for (int i = 0; i < kItems; ++i) {
+            if (contentTapY >= rowContentY[i] &&
+                contentTapY < rowContentY[i] + kRowH) {
+                chosen = i + 1;
+                st.fileMenu = false;
+                break;
+            }
         }
     }
     return chosen;

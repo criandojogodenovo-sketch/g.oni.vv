@@ -60,16 +60,28 @@ constexpr u64 kTbInspectId   = 13;            // (legacy: pega do painel — spe
 constexpr u64 kTbCenaId      = 14;
 constexpr u64 kModeAudioId   = 15;
 constexpr u64 kTbGearId      = 17;   // 0.9.0: PÁGINA de Settings (spec I)
+// 0.9.6.10 (GRUPO UI · região TOPO da imagem 1): o STOP explícito (o
+// botão de sair do play ao lado do play/pause — a imagem 1 manda) e o
+// CHIP de plataforma (o alvo REAL da build: Mobile/Android)
+constexpr u64 kTbStopId      = 18;
+constexpr u64 kTbPlatformId  = 19;
 
 // ---- A BARRA ÚNICA (56dp — FASE 9 G2-10) --------------------------------------
+// 0.9.6.10 (GRUPO UI · a região TOPO da imagem 1): [G logo + nome][≡ Menu]
+// [Cena ▾] · tabs de modo ao CENTRO · [▶][⏸][■][chip plataforma][⚙] — a
+// MESMA família da barra de topo da referência (o azul dela é o âmbar nosso)
 struct TopBarLayout {
     UiRect bar{};                 // a faixa toda (safe::toolbarRect — 56dp)
+    UiRect logo{}, name{};        // EXTREMA esquerda: o G âmbar + "G.One"
     UiRect menu{}, cena{};        // esquerda (ícone hamburger/folder + texto)
     UiRect tab3d{}, tabUi{}, tabAudio{};   // CENTRO — tabs de modo (G2-10)
     UiRect underline{};           // do tab ATIVO (2dp accent, fundo da barra)
     u32    active = 0;            // 0=3D, 1=UI, 2=ÁUDIO
-    UiRect pause{}, play{};       // direita (ícones)
+    UiRect play{}, pause{}, stop{};  // direita (ícones — a imagem 1: ▶⏸■)
+    UiRect platform{};            // o chip da plataforma alvo (Android)
     UiRect gear{};                // extrema direita (ancorado)
+    bool   showName = true;       // o nome some primeiro no aperto
+    bool   showPlatform = true;   // o chip some depois (é informativo)
     f32    iconSize = 24.0f;      // 24dp dentro dos alvos 48dp (spec A)
 };
 
@@ -84,6 +96,8 @@ struct TopBarActions {
     bool cenaDropdown = false;
     bool playPressed  = false;
     bool pausePressed = false;
+    bool stopPressed  = false;    // 0.9.6.10: o ■ explícito (sai do play)
+    bool platformPressed = false; // 0.9.6.10: o chip do alvo (informativo)
     bool gearPressed  = false;    // abre a página de Settings (spec I)
     bool modeChanged  = false;    // uma das tabs [3D|UI|ÁUDIO] mudou o modo
 };
@@ -100,6 +114,8 @@ struct Actions {
     bool cenaDropdown = false;
     bool playPressed  = false;
     bool pausePressed = false;
+    bool stopPressed  = false;
+    bool platformPressed = false;
     bool gearPressed  = false;
     bool modeChanged  = false;
 };

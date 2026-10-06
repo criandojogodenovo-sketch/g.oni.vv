@@ -527,12 +527,15 @@ TEST(menu_sheet_ancorado_8dp_sob_o_botao) {
     e.frame();
     EXPECT(e.st.fileMenu);   // aberto, sem toque
     // o sheet começa 8dp ABAIXO da âncora do botão Menu: tocar LÁ escolhe
-    // "Settings" (1) e FECHA
+    // a 1ª linha e FECHA (RECALIBRADO 0.9.6.10 · GRUPO UI: o menu de 6
+    // secções tem um CABEÇALHO "PROJETO" de 28dp ANTES da 1ª linha — o
+    // toque antigo ay+24 caía no cabeçalho, que NÃO é alvo; a 1ª linha
+    // ("Sair para projetos") começa a ay+28)
     const toolbar::TopBarLayout tb =
         toolbar::topbarLayout(kSW, kSH, safe::Insets{}, false, false);
     const f32 ax = tb.menu.x;
     const f32 ay = tb.menu.y + tb.menu.h + 8.0f;   // +8dp (spec H)
-    e.tap(ax + 140.0f, ay + 24.0f);   // linha 0 = Settings
+    e.tap(ax + 140.0f, ay + 28.0f + 24.0f);   // linha 0 (sob o cabeçalho)
     EXPECT(!e.st.fileMenu);
     // toque FORA (longe, no canto oposto) fecha SEM ação
     e.st.fileMenu = true;

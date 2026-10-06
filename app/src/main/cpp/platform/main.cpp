@@ -5100,6 +5100,23 @@ void frame() {
             leavePlayMode();
             showToast("modo editor");
         }
+        if (ta.stopPressed) {
+            // 0.9.6.10 (GRUPO UI · a imagem 1): o ■ EXPLÍCITO da top bar —
+            // em play sai com a pose restaurada (o mesmo caminho do Stop
+            // da play bar); em editor informa (não há nada a parar)
+            if (g_editor.playMode) {
+                leavePlayMode();
+                showToast("modo editor");
+            } else {
+                showToast("já em modo editor");
+            }
+        }
+        if (ta.platformPressed) {
+            // 0.9.6.10 (GRUPO UI · a imagem 1): o chip da plataforma — o
+            // alvo REAL da build (Mobile/Android); informar, NÃO fingir
+            // que há outros alvos para escolher
+            showToast("plataforma alvo: Mobile (Android)");
+        }
         // viewport 2D no modo UI (antes dos painéis — z-order de editor)
         if (g_editor.uiMode) {
             editor::drawUiViewport(g_ui, g_scene, g_editor, g_input, w, h);
@@ -5644,13 +5661,84 @@ void frame() {
         const editor::toolbar::TopBarLayout tbl = editor::toolbar::topbarLayout(
             w, h, g_ui.safeArea(), g_editor.uiMode, g_editor.audioMode);
         const int choice = editor::drawFileMenu(g_ui, g_input, w, h, g_editor,
-                                                tbl.menu.x, tbl.menu.y + tbl.menu.h);
-        if (choice == 1) {
+                                                tbl.menu.x, tbl.menu.y + tbl.menu.h,
+                                                g_snapValue > 0.0f);
+        if (choice == 7) {
+            // 0.9.6.10 (GRUPO UI · secção EDITAR): DESFAZER — o MESMO
+            // caminho do botão do viewport (o g_undo de sempre)
+            const Handle uh = g_undo.undo(g_scene);
+            if (uh.valid()) {
+                g_editor.selected = uh;
+                showToast("desfeito");
+            } else {
+                showToast("nada a desfazer");
+            }
+        } else if (choice == 8) {
+            // 0.9.6.10 (GRUPO UI · secção EDITAR): REFAZER
+            const Handle rh = g_undo.redo(g_scene);
+            if (rh.valid()) {
+                g_editor.selected = rh;
+                showToast("refeito");
+            } else {
+                showToast("nada a refazer");
+            }
+        } else if (choice == 9) {
+            // 0.9.6.10 (GRUPO UI · secção EDITAR): DUPLICAR — o MESMO
+            // caminho do botão do viewport (duplica E arma o clipboard)
+            if (const Tic* sel = g_scene.get(g_editor.selected)) {
+                g_clipSnap = editor::snapTic(g_scene, sel->handle);
+                g_clipValid = true;
+                const Handle dup = editor::duplicateTic(g_scene, g_editor.selected);
+                if (dup.valid()) {
+                    g_editor.selected = dup;
+                    showToast("TIC duplicado");
+                }
+            } else {
+                showToast("seleciona um TIC para duplicar");
+            }
+        } else if (choice == 10) {
+            // 0.9.6.10 (GRUPO UI · secção EDITAR): COLAR — o MESMO caminho
+            // do botão do viewport (o clipboard armado pelo duplicar/copiar)
+            if (g_clipValid) {
+                const editor::TicSnap before;   // vazio = criação
+                const Handle h = editor::pasteAsNew(g_scene, g_clipSnap);
+                if (h.valid()) {
+                    g_undo.push(before, editor::snapTic(g_scene, h), h);
+                    g_editor.selected = h;
+                    showToast("TIC colado");
+                }
+            } else {
+                showToast("nada para colar");
+            }
+        } else if (choice == 11) {
+            // 0.9.6.10 (GRUPO UI · secção VISUALIZAR): o TOGGLE REAL do
+            // íman (o mesmo estado do chip do viewport: 0 = desligado)
+            g_snapValue = g_snapValue > 0.0f ? 0.0f : 0.5f;
+            showToast(g_snapValue > 0.0f ? "snapping ligado" : "snapping desligado");
+            elog::info("ui: snapping %s (menu Visualizar)",
+                       g_snapValue > 0.0f ? "ligado" : "desligado");
+        } else if (choice == 12) {
             // 0.7.6: Settings (o item do dropdown do Menu — o botão próprio
             // deixou de existir na barra)
             g_editor.settingsMenu = true;
             elog::info("ui: menu Settings aberto (dropdown do Menu)");
-        } else if (choice == 2 && g_projectReady) {
+        } else if (choice == 13) {
+            // 0.9.6.10 (GRUPO UI · secção FERRAMENTAS): VER LOGS — o MESMO
+            // viewer de sempre (tail 300 + dumps com badge ANTIGO)
+            g_editor.logViewer = true;
+            g_editor.logViewerJustOpened = true;
+            g_logLines.clear();
+            elog::readTail(g_logLines, 300);
+            refreshLogDumps();
+        } else if (choice == 14) {
+            // 0.9.6.10 (GRUPO UI · secção AJUDA): a DOCUMENTAÇÃO V.ONI —
+            // o MESMO ecrã das Docs (a pesquisa estruturada do registo)
+            g_editor.docsScreen.open = true;
+            g_editor.docsScreen.queryLen = 0;
+            g_editor.docsScreen.query[0] = '\0';
+            g_editor.docsScreen.expanded = -1;
+            elog::info("ui: docs abertas (menu Ajuda)");
+        } else if (choice == 4 && g_projectReady) {
             const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
                             g_project.saveManifest(*g_storage);
             g_thumbPending = true;   // 0.9.0: captura no próximo fim de frame
@@ -5673,7 +5761,7 @@ void frame() {
                           g_scene.count());
             showToast(msg);
             LOGI("editor: %s → %s", msg, g_project.activeScenePath()->c_str());
-        } else if (choice == 3 && g_projectReady) {
+        } else if (choice == 5 && g_projectReady) {
             primMeshesToGrave();   // 0.8.10: posse antiga p/ cova
             const SceneSerializer::LoadCtx ctx = makeLoadCtx();
             const bool ok = g_project.loadActiveScene(*g_storage, g_scene, ctx);
@@ -5686,7 +5774,7 @@ void frame() {
             showToast(msg);
             g_editor.selected = Handle::invalid();   // seleção antiga não sobrevive ao load
             LOGI("editor: %s ← %s", msg, g_project.activeScenePath()->c_str());
-        } else if (choice == 4 && g_projectReady) {
+        } else if (choice == 6 && g_projectReady) {
             // F5-E: Export OBJ — mesh do TIC selecionado → meshes/export_<nome>.obj
             Tic* tsel = g_scene.get(g_editor.selected);
             MeshRenderer* mrs = tsel ? tsel->getComponent<MeshRenderer>() : nullptr;
@@ -5723,14 +5811,14 @@ void frame() {
                     }
                 }
             }
-        } else if (choice == 5) {
+        } else if (choice == 2) {
             // F5.2: IMPORTAR — All Files Access → varre Download/Documents →
             // overlay de escolha → cópia para meshes/ ou textures/
             attemptImport();
-        } else if (choice == 6) {
+        } else if (choice == 3) {
             // F5.2: EXPORT DOWNLOADS — All Files Access → Download/GOneVV/export
             attemptExport();
-        } else if (choice == 7) {
+        } else if (choice == 1) {
             // 0.6.7: SAIR PARA PROJETOS — auto-save da cena + volta ao
             // gestor SEM matar a app. A activity termina-se (finish() pela
             // ponte Java — o gestor está na back stack); o APP_CMD_TERM_WINDOW

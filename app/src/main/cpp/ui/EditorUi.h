@@ -401,10 +401,17 @@ Handle revalidateSelection(const Scene& scene, Handle selected,
 //   drawPlusMenu → 0 nada, 1..4 = PresetKind (1=Player, 2=Character,
 //                  3=Static, 4=Rigid); 0.7.3: modo UI 1..7 = elementos
 //                  (Panel..Article), 8 = Joystick; 0.7.4: 9/10 = VBox/HBox
-//   drawFileMenu → 0 nada; 1..7 (Settings/Guardar/Carregar/Export OBJ/
-//                  Importar…/Export Downloads/Sair p/ projetos). 0.9.0
-//                  (spec H): SHEET ANCORADO 8dp sob o botão (ax/ay do botão;
-//                  −1 = centrado, compat com os testes)
+//   drawFileMenu → 0 nada; 1..14 — 0.9.6.10 (GRUPO UI · a imagem 1): o
+//                  menu de 6 SECÇÕES (Projeto/Cena/Editar/Visualizar/
+//                  Ferramentas/Ajuda): 1 Sair p/ projetos · 2 Importar… ·
+//                  3 Export Downloads · 4 Guardar cena · 5 Carregar cena ·
+//                  6 Export OBJ · 7 Desfazer · 8 Refazer · 9 Duplicar ·
+//                  10 Colar · 11 Snapping (toggle real) · 12 Settings ·
+//                  13 Ver logs · 14 Documentação V.ONI. 0.9.0 (spec H):
+//                  SHEET ANCORADO 8dp sob o botão (ax/ay; −1 = centrado,
+//                  compat com os testes); 0.9.6.10: COM SCROLL quando o
+//                  conteúdo excede o ecrã e o RÓTULO do Snap dinâmico
+//                  (snapOn — o estado real do íman)
 //   drawAssetMenu → 0 nada; >0 = item 1-based do seletor ativo
 //                    (st.assetMenu: 1 = meshes → 1 = "cube", 2.. = ficheiros;
 //                     2 = texturas → 1 = "none", 2.. = ficheiros; 0.7.4:
@@ -413,8 +420,14 @@ Handle revalidateSelection(const Scene& scene, Handle selected,
 //     withImport (0.7.4) — acrescenta a linha "importar…" (só menuKind 3)
 // Todos fecham com toque fora do painel (mutam st) e centrados na safe-area.
 int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st);
+// 0.9.6.10 (GRUPO UI): as linhas do menu de 6 secções — ids 7400+ (a
+// faixa 30..43 antiga colidia com os kVp*Id 31..36 do viewport) e o
+// scroll do sheet (kMenuScrollId 7410 — faixa exclusiva)
+constexpr u64 kMenuRowBase   = 7400;
+constexpr u64 kMenuScrollId  = 7410;
 int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
-                 EditorState& st, f32 ax = -1.0f, f32 ay = -1.0f);
+                 EditorState& st, f32 ax = -1.0f, f32 ay = -1.0f,
+                 bool snapOn = false);
 int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st,
                   const AssetCatalog& catalog, bool withImport = false);
 

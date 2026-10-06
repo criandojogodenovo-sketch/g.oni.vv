@@ -27,14 +27,20 @@ namespace {
 // 0.9.6.1 (PASSO 0 · R-018): os valores são DP e multiplicam pela densidade
 // AQUI (na fonte do layout da barra) — antes eram px crus: no C33 os alvos
 // media ~24dp reais e o "Cena" truncava a "C…"
+// 0.9.6.10 (GRUPO UI · região TOPO da imagem 1): o LOGO (G âmbar 48dp) e
+// o NOME "G.One" à EXTREMA esquerda; o STOP (■) ao lado do play/pause;
+// o CHIP de plataforma antes do gear (o alvo REAL: Android)
 f32 kPadOuter()  { return theme::dp(12.0f); }   // margem da barra aos extremos
 f32 kBtnH()      { return theme::dp(48.0f); }   // ALVO de toque dentro dos 56dp
+f32 kLogoW()     { return theme::dp(48.0f); }   // o G âmbar (alvo inteiro)
+f32 kNameW()     { return theme::dp(58.0f); }   // "G.One" 16sp
 f32 kMenuW()     { return theme::dp(112.0f); }  // [≡ Menu]  (ícone + palavra)
 f32 kCenaW()     { return theme::dp(120.0f); }  // [Cena ▾] — largura para
                                                  // o rótulo inteiro (o
                                                  // 100 truncava a "C…")
 f32 kTabW()      { return theme::dp(96.0f); }   // cada tab [3D]/[UI]/[ÁUDIO]
-f32 kIconBtn()   { return theme::dp(48.0f); }   // [pause][play][gear]
+f32 kIconBtn()   { return theme::dp(48.0f); }   // [play][pause][stop][gear]
+f32 kPlatW()     { return theme::dp(92.0f); }   // o chip [Android ▾]
 f32 kGroupGap()  { return theme::dp(20.0f); }   // vão entre grupos
 
 // baseline do texto centrada no botão (métricas REAIS da fonte)
@@ -108,7 +114,7 @@ bool iconButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon) {
 } // namespace
 
 // ---------------------------------------------------------------------------
-// A BARRA ÚNICA — layout puro (FASE 9 G2-10)
+// A BARRA ÚNICA — layout puro (FASE 9 G2-10 · GRUPO UI região TOPO)
 // ---------------------------------------------------------------------------
 TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
                           bool uiMode, bool audioMode) {
@@ -116,39 +122,49 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
     L.bar = safe::toolbarRect(sw, sh, in);
     L.active = uiMode ? 1u : (audioMode ? 2u : 0u);
     const f32 avail = L.bar.w - 2.0f * kPadOuter();
-    if (avail <= 120.0f) {
+    if (avail <= 160.0f) {
         return L;   // degenerado — só o fundo
     }
     // escala graciosa: as larguras naturais encolhem PROPORCIONALMENTE se
-    // o ecrã for estreito (o gear NUNCA sai da direita)
-    const f32 natW = kMenuW() + theme::dp(4.0f) + kCenaW() +
-                     3.0f * kTabW() + 3.0f * kIconBtn() + 2.0f * theme::dp(8.0f);
+    // o ecrã for estreito. Os botões de ÍCONE (play/pause/stop/gear + o
+    // LOGO) NUNCA ENCOLHEM (Grupo D: o alvo 48dp é o PISO); o k divide
+    // só Menu/Cena/tabs/nome/plataforma. A DEGRADAÇÃO HONESTA (GRUPO UI):
+    // o NOME "G.One" some primeiro (k<0.78 — o logo fica, é a
+    // identidade), o CHIP da plataforma depois (k<0.62 — é informativo,
+    // o alvo REAL é sempre Android; fica na lista honesta do relatório).
+    const f32 nIcon = 5;   // play/pause/stop/gear + logo
+    f32 natFlex = kMenuW() + theme::dp(4.0f) + kCenaW() + 3.0f * kTabW() +
+                  kPlatW() + kNameW();
+    const f32 natW = natFlex + nIcon * kIconBtn() + 2.0f * theme::dp(8.0f);
+    auto scaleK = [&](f32 flexW) {
+        const f32 iconsW = nIcon * kIconBtn();
+        f32 k = (avail - iconsW - 4.0f * kGroupGap() - 2.0f * theme::dp(8.0f) -
+                 theme::dp(4.0f)) /
+                flexW;
+        return k > 1.0f ? 1.0f : (k < 0.55f ? 0.55f : k);
+    };
     f32 k = 1.0f;
     if (natW + 4.0f * kGroupGap() > avail) {
-        // GRUPO D (0.9.6.7 — achado ao vivo da 13.7): os botões de ÍCONE
-        // (pause/play/gear) NÃO ENCOLHEM — o alvo 48dp da casa é o PISO
-        // (no device de 776dp a escala antiga media-os a 47dp e a
-        // auditoria apontava <48dp). O k divide só o RESTO (Menu/Cena/
-        // tabs) pelo espaço que sobra DEPOIS dos ícones — a conta fecha
-        // EXATA (nada transborda a barra).
-        const f32 flexW = natW - 3.0f * kIconBtn();
-        k = (avail - 3.0f * kIconBtn() - 4.0f * kGroupGap()) / flexW;
-        if (k > 1.0f) {
-            k = 1.0f;
-        }
-        if (k < 0.55f) {
-            k = 0.55f;   // piso: os alvos ficam ≥26dp… o C33 (1536) nunca chega
-        }
+        k = scaleK(natFlex);
+    }
+    L.showName = k >= 0.78f;
+    L.showPlatform = k >= 0.62f;
+    if (!L.showName) {
+        natFlex -= kNameW();
+        k = scaleK(natFlex);
+    }
+    if (!L.showPlatform) {
+        natFlex -= kPlatW();
+        k = scaleK(natFlex);
     }
     L.menu.w  = kMenuW() * k;
     L.cena.w  = kCenaW() * k;
     L.tab3d.w = L.tabUi.w = L.tabAudio.w = kTabW() * k;
-    // GRUPO D (0.9.6.7 — achado ao vivo da 13.7): os botões de ÍCONE
-    // (pause/play/gear) NUNCA encolhem — o alvo 48dp da casa é o PISO (a
-    // escala graciosa comprime Menu/Cena/tabs; no device de 776dp os três
-    // mediam 47dp e a auditoria apontava <48dp). O k continua a decidir
-    // O QUE os outros cedem.
-    L.pause.w = L.play.w = L.gear.w = kIconBtn();
+    L.platform.w = kPlatW() * k;
+    L.name.w  = kNameW();
+    L.logo.w  = kIconBtn();
+    // os botões de ÍCONE nunca encolhem (o piso 48dp da casa)
+    L.play.w = L.pause.w = L.stop.w = L.gear.w = kIconBtn();
     L.iconSize = theme::dp(24.0f);
 
     const f32 by = L.bar.y + (L.bar.h - kBtnH()) * 0.5f;
@@ -158,17 +174,28 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
         r.h = kBtnH();
     };
 
-    // ---- esquerda: [≡ Menu][Cena ▾] ----
+    // ---- esquerda: [G][G.One][≡ Menu][Cena ▾] ----
     f32 x = L.bar.x + kPadOuter();
+    place(L.logo, x);            x += L.logo.w;
+    if (L.showName) {
+        place(L.name, x);        x += L.name.w;
+    }
     place(L.menu, x);            x += L.menu.w;
     place(L.cena, x + theme::dp(4.0f));     x += theme::dp(4.0f) + L.cena.w;
 
-    // ---- direita: [pause][play][gear] (ancorados — os grupos do centro
-    // cedem primeiro em ecrãs estreitos) ----
+    // ---- direita: [play][pause][stop][Android ▾][gear] (ancorados) ----
     f32 rgx = L.bar.x + L.bar.w - kPadOuter() - L.gear.w;
-    place(L.gear, rgx);          rgx -= theme::dp(8.0f) + L.play.w;
-    place(L.play, rgx);          rgx -= theme::dp(8.0f) + L.pause.w;
-    place(L.pause, rgx);
+    place(L.gear, rgx);          rgx -= theme::dp(8.0f);
+    if (L.showPlatform) {
+        rgx -= L.platform.w;
+        place(L.platform, rgx);  rgx -= theme::dp(8.0f);
+    }
+    rgx -= L.stop.w;
+    place(L.stop, rgx);          rgx -= theme::dp(8.0f);
+    rgx -= L.pause.w;
+    place(L.pause, rgx);         rgx -= theme::dp(8.0f);
+    rgx -= L.play.w;
+    place(L.play, rgx);
 
     // ---- centro: as tabs [3D][UI][ÁUDIO] — centradas na BARRA; se não
     // couberem entre a esquerda e a direita, comprimem-se ao espaço útil ----
@@ -217,6 +244,32 @@ TopBarActions drawTopBar(UiContext& ui, EditorState& st) {
     ui.panel(L.bar.x, L.bar.y, L.bar.w, L.bar.h, theme::kTheme.bg);
     ui.panel(L.bar.x, L.bar.y + L.bar.h - 1.0f, L.bar.w, 1.0f,
              theme::kTheme.border);
+
+    // ---- O LOGO (GRUPO UI · a imagem 1): o G âmbar num chip arredondado
+    // de 48dp — a identidade da casa à EXTREMA esquerda (o toque não faz
+    // nada: é a marca, não um botão — o rótulo de acessibilidade vive no
+    // nome ao lado)
+    {
+        const UiRect& r = L.logo;
+        ui.panelRounded(r.x + theme::dp(4.0f), r.y + theme::dp(4.0f),
+                        r.w - theme::dp(8.0f), r.h - theme::dp(8.0f),
+                        theme::dp(theme::kRadiusCard), theme::kTheme.accent);
+        if (ui.hasFont()) {
+            const TextMetrics m = ui.textMetrics();
+            ui.labelStyled(r.x + r.w * 0.5f - ui.fontWidth("G") * 0.5f,
+                           r.y + (r.h - m.block() * 1.3f) * 0.5f +
+                               m.ascent * 1.3f,
+                           "G", theme::kTheme.accentInk,
+                           theme::fontScale(theme::kFontSection), 0);
+        }
+        if (L.showName && ui.hasFont()) {
+            // o NOME ao lado do G (16sp text1 — some no aperto)
+            const TextMetrics m = ui.textMetrics();
+            ui.label(L.name.x + theme::dp(6.0f),
+                     L.name.y + (L.name.h - m.block()) * 0.5f + m.ascent,
+                     "G.One", theme::kTheme.text1);
+        }
+    }
 
     if (textIconButton(ui, kTbMenuId, L.menu, icons::Icon::Hamburger, "Menu",
                        false)) {
@@ -284,11 +337,49 @@ TopBarActions drawTopBar(UiContext& ui, EditorState& st) {
     ui.panel(L.underline.x, L.underline.y, L.underline.w, L.underline.h,
              theme::kTheme.accent);
 
+    if (iconButton(ui, kTbPlayId, L.play, icons::Icon::Play)) {
+        a.playPressed = true;
+    }
     if (iconButton(ui, kTbPauseId, L.pause, icons::Icon::Pause)) {
         a.pausePressed = true;
     }
-    if (iconButton(ui, kTbPlayId, L.play, icons::Icon::Play)) {
-        a.playPressed = true;
+    // 0.9.6.10 (GRUPO UI · a imagem 1): o STOP explícito — o ■ ao lado do
+    // play/pause (o main sai do modo play; em editor fica esbatido — o
+    // estado é o mesmo do play/pause defensivo de sempre)
+    if (iconButton(ui, kTbStopId, L.stop, icons::Icon::Stop)) {
+        a.stopPressed = true;
+    }
+    // o CHIP da plataforma (a imagem 1: o seletor): o alvo REAL da build —
+    // "Android" (o toque informa; NÃO há alvos falsos para escolher — a
+    // lista honesta do relatório diz exactamente isto)
+    if (L.showPlatform) {
+        const UiRect& r = L.platform;
+        const bool held = ui.widgetActive(kTbPlatformId);
+        ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusField),
+                        held ? theme::kTheme.surface2 : theme::kTheme.surface);
+        ui.frameRounded(r.x, r.y, r.w, r.h, 1.0f,
+                        theme::dp(theme::kRadiusField), theme::kTheme.border);
+        if (ui.hasFont()) {
+            const TextMetrics m = ui.textMetrics();
+            const f32 tw = ui.fontWidth("Android");
+            const f32 gap = theme::dp(4.0f);
+            const f32 total = tw + gap + theme::dp(8.0f);
+            const f32 x0 = r.x + (r.w - total) * 0.5f;
+            ui.label(x0, r.y + (r.h - m.block()) * 0.5f + m.ascent, "Android",
+                     theme::kTheme.text2);
+            // o caret ▾ do chip
+            const f32 cy = r.y + r.h * 0.5f;
+            const f32 cx = x0 + tw + gap + theme::dp(4.0f);
+            const f32 col[4] = {theme::kTheme.text2[0], theme::kTheme.text2[1],
+                                theme::kTheme.text2[2], 1.0f};
+            ui.drawLine(cx - theme::dp(3.0f), cy - theme::dp(2.0f), cx,
+                        cy + theme::dp(2.0f), theme::dp(2.0f), col);
+            ui.drawLine(cx, cy + theme::dp(2.0f), cx + theme::dp(3.0f),
+                        cy - theme::dp(2.0f), theme::dp(2.0f), col);
+        }
+        if (ui.widgetHit(kTbPlatformId, r.x, r.y, r.w, r.h)) {
+            a.platformPressed = true;
+        }
     }
     if (iconButton(ui, kTbGearId, L.gear, icons::Icon::Gear)) {
         a.gearPressed = true;
@@ -306,6 +397,8 @@ Actions draw(UiContext& ui, EditorState& st) {
     a.cenaDropdown = t.cenaDropdown;
     a.playPressed  = t.playPressed;
     a.pausePressed = t.pausePressed;
+    a.stopPressed  = t.stopPressed;
+    a.platformPressed = t.platformPressed;
     a.gearPressed  = t.gearPressed;
     a.modeChanged  = t.modeChanged;
     return a;
