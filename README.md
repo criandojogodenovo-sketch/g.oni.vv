@@ -34,6 +34,82 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.9.6.10 — GRUPO UI: A REESCRITA DA APRESENTAÇÃO (spec G · grafite+âmbar+vidro)
+
+**O que existe agora (a estrutura, densidade e inventário da imagem 1 do
+dono, ao alcance do telemóvel; o anti-exemplo da imagem 2 — ícones soltos
+sobre a grelha, blocos brancos cegantes — morreu):**
+- **A PALETA A OFICIAL grafite+âmbar+vidro** (`ui/Theme.h` spec G): bg
+  #0E0E10 · surface #161618 α0.80 · surface2 #202023 α0.86 · border
+  #2E2E32 · accent **ÂMBAR #FFB020** · accentDim #4A3714 (o fill da
+  SELEÇÃO) · text1 #ECECEE · text2 #A6A6AD · danger #E5484D · warn
+  **#FF8A3D LARANJA** (nunca o âmbar) · ok #46A758 · o vidro com a
+  receita da spec (fill 80% + **bordo #FFFFFF1F** + highlight #FFFFFF0A,
+  sem blur). ZERO azul no chrome (o azul do eixo Z e da sintaxe V.ONI são
+  conteúdo — exceção documentada). O GATE R-030 no CI: **qualquer hex de
+  cor fora do Theme = vermelho** (os eixos do gizmo passam a viver lá).
+- **O TOPO da imagem 1**: [G âmbar + G.One][≡ Menu][Cena ▾] · tabs de
+  modo ao centro · [▶][⏸][■][Android ▾][⚙] — o STOP explícito (sai do
+  play com a pose restaurada) e o chip da plataforma REAL (o toque
+  informa «Mobile (Android)» — não há alvos falsos). O menu ≡ tem as 6
+  SECÇÕES da referência (Projeto/Cena/Editar/Visualizar/Ferramentas/
+  Ajuda) com scroll, as ações de sempre + Desfazer/Refazer/Duplicar/
+  Colar/Snap/Docs promovidas a linhas.
+- **A HIERARQUIA**: a linha selecionada com **fill accentDim + BARRA
+  ESQUERDA âmbar** (o estilo exato da referência; o fill accent cheio —
+  o bloco cegante — morreu); o [+] quieto (chip de vidro + ícone âmbar);
+  o título do painel 16sp; o menu ⋮ (limpar seleção/nome completo).
+- **O DOCK INFERIOR de 4 TABS**: **Ficheiros** (a árvore res:// com as
+  PASTAS REAIS + contagens — o toque filtra o browser) · **Assets** (a
+  grelha com **MINIATURAS REAIS** — as texturas desenham A TEXTURA em si
+  via imageQuad — + o toggle grelha/lista) · **Consola** (as TABS
+  Consola/Logs/Erros/Avisos + cores por severidade + **o campo de
+  COMANDO** com botão enviar: limpar/ajuda/play/stop/snap — comandos
+  REAIS que logam o resultado) · **Animação** (a timeline de sempre).
+- **O VIEWPORT com a REGRA DO PAI-PAINEL** (o anti-exemplo morre por
+  construção): a STRIP do topo ([Cena][Perspetiva][Global] — informação
+  real), o RAIL esquerdo (undo/redo/save/dup/paste) e a TOOLBAR inferior
+  — TODOS dentro de PAIS de vidro com a receita completa (a prova VLM do
+  lado-a-lado: «visibly enclosed … with distinct visible edges»); o [+
+  ] quieto (chip de vidro + âmbar) e, nos ecrãs estreitos, DENTRO da
+  strip (nunca mais colide com o stack — a colisão real do validador).
+- **O INSPECTOR**: os rótulos **X/Y/Z COLORIDOS** (vermelho/verde/azul —
+  as cores dos eixos, tokens do Theme) · as TABS [Inspector][Nós] (a
+  vista Nós = a lista de nós da cena com a seleção da casa) · as caixas
+  48dp + R de sempre.
+- **A STATUS BAR COMPLETA**: «G.One <versão> · <projeto> · FPS n · TICs
+  n» à esquerda · o ESTADO (âmbar em play) + «Mobile First» à direita.
+- **E5 · O CARET DESALINHADO (confirmado no device)**: o texto usava a
+  baseline no TOPO da banda e o caret uma banda própria — «linha 3,5».
+  AGORA partilham a MESMA função linha→y (lineBaselineOnScreen) e o
+  caret desenha de lineTop a lineTop+lh (sentinela R-029).
+- **E1 · O BOTÃO COPIAR SOBRE O TÍTULO (confirmado no device)**: o
+  título NUNCA mais esconde nem sangra — tem o piso 48dp; os botões que
+  não cabem recolhem ao «⋯» com o menu de overflow (no 360dp: título +
+  ⋯ + lupa + Run/Stop).
+- **O ÍCONE**: o G passa a ÂMBAR #FFB020 com as setas #ECECEE sobre o
+  grafite #0E0E10 (a versão final do dono).
+
+**Checklist C33/RMX3624 (VERIFICAR no device — Grupo UI):**
+1. O editor inteiro em GRAFITE+ÂMBAR: as seleções com o fill âmbar-escuro
+   (#4A3714) e a BARRA esquerda âmbar; NENHUM bloco branco/amarelo
+   cegante (o [+] e as ferramentas ativas são chips quietos).
+2. ZERO azul no chrome (o azul só nos EIXOS do gizmo e na sintaxe V.ONI).
+3. O topo: o G âmbar + «G.One» · o ■ (stop) sai do play · o chip
+   «Android» informa o alvo ao toque.
+4. O viewport: a strip [Cena][Perspetiva][Global] no topo, o rail e a
+   toolbar de ferramentas DENTRO de painéis de vidro COM BORDO visível —
+   nada «solto» sobre a grelha.
+5. O dock: Ficheiros (a árvore res:// com contagens) → tocar uma pasta
+   abre o Assets FILTRADO; as texturas com MINIATURA REAL; o toggle
+   grelha/lista.
+6. A consola: as 4 tabs; o aviso LARANJA ≠ âmbar do acento; o comando
+   «ajuda» na lista e «limpar» limpa (o teclado abre no campo).
+7. O editor de script: tocar na linha 3 → o CARET NA LINHA 3 (alinhado
+   aos glifos); o título «Script» sempre visível; os botões que não
+   cabem no «⋯».
+8. O ícone na gaveta: o G ÂMBAR com as 4 setas sobre o grafite.
+
 ## 0.9.6.9 — GRUPO F: IDENTIDADE (FASE 0.9.6-MASTER · R-028)
 
 **O que existe agora (o tema MONO de volta com VIDRO; o ícone G com 4

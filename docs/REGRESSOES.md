@@ -452,3 +452,34 @@ RECALIBRADOS pela mudança legítima (documentado em cada sítio): `regress_dens
 Provas de mutação (coladas em mutacao-R028a/b/c/d/e-vermelho.txt): (a) **O AZUL DE VOLTA** (accent→#2196F3 em Theme.h + o alias — a 1ª tentativa só no Theme.h MORREU no static_assert do UiContext.h: a ligação bit-a-bit FUNCIONA) → `regress_identidade_mono_vidro` FALHOU no croma (ΔR−B=210/255) + o branco exato + `theme_tabela_spec_f_exata` + `theme_contraste_auditoria_spec` + o toast — **11 testes**; (b) **O VIDRO MORTO** (surface α→1.0) → a sentinela FALHOU no alpha + a tabela exata + **a 13.9 FALHOU no pixel** (o painel desenharia 30 sólido — o translúcido é vigiado no PIXEL, não só na tabela); (c) **A TINTA CLARA de volta** (accentInk→branco) → a sentinela FALHOU em accentInk<0.5 E no contraste 1:1 (o branco-sobre-branco, o bug que o Java também tinha); (d) **O CLEAR LITERAL de volta** (0.05 hardcoded) → **a 13.9 FALHOU no céu** (o clear não segue o token) + o 13.1 (o composto do painel deslizou); (e) **O WIPE DO STUB de volta** (allocFb_ por viewport) → **CINCO checks vermelhos** (o céu preto, o composto do painel, o chip flutuante, o 2.0 E o 13.1) — o comportamento REAL do stub desde o Grupo D, apanhado pela primeira vez porque o vidro pôs o dst À VISTA. Reposições → **843/0 + 440/440**.
 
 RECALIBRADOS pela mudança legítima (nota no sítio): `theme_tabela_spec_a_exata`→`theme_tabela_spec_f_exata` (test_toolbar: os valores EXATOS da spec F + o MONO Δ=0 + os alphas + voniComment), `theme_contraste_auditoria_spec` (+contrastOnGlass + a tinta), o wiring090 contrastes (re-validam sozinhos), `projects_ui_check.py` (TOKENS_F + ACCENT_INK + o rótulo «logo G com 4 setas»), o 13.1 (a matemática do vidro + o piso de conteúdo 3%), o comentário do manifest (o ícone novo + o gerador NO REPO).
+
+## R-029 · o caret desenhado desalinhado relativamente ao texto da linha tocada (FASE 0.9.6-MASTER · GRUPO UI · E5)
+
+| campo | valor |
+|---|---|
+| ID | R-029 |
+| Reportado | device (o dono: «Ao tocar na linha N, a inserção acontece na linha N (hit-test correto) mas o caret visível fica deslocado para baixo relativamente ao texto da linha N») |
+| Sintoma exato | o caret piscante aparecia ~meia linha ABAIXO dos glifos da linha («linha 3,5»); a inserção acertava na linha certa — só o DESENHO mentia |
+| Causa raiz | (leitura P-04 do draw) o TEXTO desenhava com a BASELINE no `lineTopOnScreen` (os glifos pendiam ACIMA da banda: [top−21, top+5]) e o CARET desenhava `ui.panel(x, lineTop, w, lh−8)` (banda [top, top+20]) — DUAS bandas diferentes para a mesma linha; o caret ficava ~18px abaixo do centro dos glifos |
+| Fix | a função ÚNICA `lineBaselineOnScreen(bodyY, i, lh, off, asc, desc)` = lineTop + (lh−bloco)/2 + ascent — os glifos CENTRADOS na banda; o nº de linha 12sp centrado na MESMA banda; o caret desenha de lineTop a lineTop+lineHeight (`caretRectOnScreen` partilha o contrato) |
+| Teste sentinela | `regress_caret_na_banda_dos_glifos` (tests/test_sentinels.cpp): em TODA a linha (com e SEM scroll) o caretRect é a banda [top, top+lh], a banda dos glifos vive DENTRO dela, o hitTest do CENTRO do caret devolve a MESMA linha, e o centro do bloco de glifos == centro da banda |
+| Linha do replay | o script editor ao device (FASE 13.8) — o PNG exportado mostra o caret na linha tocada |
+| Padrão proibido | (nenhum — a vigília é a sentinela) |
+
+Prova de mutação (mutacao-R029a-vermelho.txt): a fórmula antiga de volta (baseline = lineTop) → a sentinela VERMELHA (a banda dos glifos fora da banda do caret); reposta → 844/0.
+
+## R-030 · hex de cor fora do ficheiro de Theme (FASE 0.9.6-MASTER · GRUPO UI · o gate do dono)
+
+| campo | valor |
+|---|---|
+| ID | R-030 |
+| Reportado | a ordem expressa do dono (spec G): «Gate R-020: qualquer hex fora do ficheiro de Theme = CI vermelho» (o R-020 histórico estava ocupado — o glTF do 0.9.6.3; o gate novo é o R-030) |
+| Sintoma exato | literais hex de cor espalhados pela camada de UI (o fóssil da spec A: o clear #141414 literal, os eixos do gizmo em f32 crus) — tokens órfãos que a tabela única não governa |
+| Causa raiz | a tabela única existia desde a 0.9.0 mas NADA impedia escrever `0x2196F3` num .cpp qualquer — a fonte única era um costume, não uma lei |
+| Fix | `scripts/theme_hex_check.py` NOVO no CI (antes do build): qualquer literal hex de cor (6/8 dígitos) na camada de UI (ui/ + platform/main.cpp) fora do Theme.h e dos espelhos LIGADOS por static_assert (UiContext.h/Gizmo.h) = CI VERMELHO com a linha exata; os IDs de widget (sufixo u/ull) e máscaras 0x000000/0xFFFFFFFF ficam fora por contrato; os EIXOS do gizmo passam a MORAR no Theme (axisX/Y/Z/dim + o hover = accent âmbar) |
+| Teste sentinela | o gate em si (CI: «Gate theme-hex (R-030 — cores so no Theme)») + os static_assert dos espelhos (mexer num token sem o alias = o build morre) |
+| Linha do replay | o job de testes do CI corre o gate em CADA push |
+| Padrão proibido | o output do gate (qualquer hex listado) |
+
+Prova de mutação (mutacao-R030a-vermelho.txt): `0x2196F3` (o azul órfão da spec A) plantado no BottomPanel.cpp → o gate VERMELHO com a linha exata (exit 1 — release bloqueada); reposto → limpo (exit 0).
+
