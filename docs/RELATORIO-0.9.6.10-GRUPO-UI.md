@@ -42,7 +42,7 @@ d338ca9 · d95d7ff · 24c26dd · 8079f59 · a50ff89).
 
 AUDITORIA (o padrão honesto, PURA no CI): sobre surface SÓLIDA e sobre
 o VIDRO REAL (α0.80 sobre o bg — o que está de facto por trás dos
-painéis dokados) TODO o texto ≥4,5:1 e todo o componente ≥3:1. O caso
+painéis dokados) todo o texto ≥4,5:1 e todo o componente ≥3:1. O caso
 patológico (cena BRANCA PURA por trás do vidro 80%): text1 8,2 ✓ e
 accent 5,3 ✓ (o que PODE flutuar); text2 4,0 e danger 2,5 NÃO flutuam
 sobre a cena viva — A REGRA DA CASA (documentada no Theme.h e vigiada na
