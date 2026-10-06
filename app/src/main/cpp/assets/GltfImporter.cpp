@@ -9,7 +9,6 @@
 #include "platform/EngineLog.h"   // 0.9.6.3: o log das extensões usadas
 #include "core/Json.h"
 #include <cstring>
-#include <deque>
 
 namespace vv {
 
@@ -56,6 +55,10 @@ struct ViewSpan {
     const u8* data = nullptr;
     size_t byteLength = 0;
     size_t stride = 0;   // 0 = compacto
+    // 0.9.6.12g (A2-2): true = os bytes vivem no STAGING do store (buffer
+    // deferido) — o chamador pode ADOTAR o buffer (takeStaged) em vez de o
+    // copiar: o range grande nunca existe DUAS vezes em RAM (FAZ 5)
+    bool staged = false;
 };
 
 // 0.9.6.4 (GRUPO A/R-022) — A CAUSA da falha, distinguível: «view fora dos
@@ -68,15 +71,21 @@ enum class ViewFail {
     NoBuffer,      // buffer do view inexistente/inválido
     BadLength,     // sem byteLength
     OutOfBounds,   // offset+len > tamanho REAL do buffer
-    TooBig,        // range acima do teto kMaxRangeBytes
+    BeyondDeclared,// offset+len > o byteLength DECLARADO (A2-2: a regra do
+                   // dono — o view tem de caber em AMBOS os tetos)
+    TooBig,        // range acima do teto kMaxRangeBytes (A2-2: a mensagem
+                   // passa a ser «modelo demasiado grande para a memória»)
     ReadFail,      // a leitura do range falhou (I/O)
     BadStride,     // stride menor que o elemento
 };
 
 // 0.8.10 — STORE de buffers: residentes (base64/externo) OU DEFERIDOS (o
-// BIN chunk de um .glb EM FICHEIRO: ranges materializados POR DEMANDA com
-// ponteiros estáveis num pool — o import de 500 MB nunca carrega o BIN).
-constexpr u64 kMaxRangeBytes = 64ull * 1024 * 1024;   // teto por range (imagem enorme → erro legível)
+// BIN chunk de um .glb EM FICHEIRO: ranges materializados POR DEMANDA —
+// o import de 500 MB nunca carrega o BIN).
+// 0.9.6.12g (A2-2): kMaxRangeBytes vive AGORA no GltfImporter.h (256 MB) —
+// UMA constante partilhada com o fileRangeLoad (o teto de 64 MB daqui
+// recusava o view VÁLIDO de 118 MB do scene do dono, e o teto de 16 MB
+// REUSADO do kMaxJsonBytes no loader matava o dragão com mentira de I/O).
 
 class GltfBufferStore {
 public:
@@ -105,8 +114,16 @@ public:
         return bi < entries_.size() ? entries_[bi].deferredLen : 0;
     }
 
-    // ponteiro ESTÁVEL para [off, off+len) — materializa se for deferred
-    const u8* span(size_t bi, size_t off, size_t len) {
+    // ponteiro ESTÁVEL para [off, off+len) — materializa se for deferred.
+    // 0.9.6.12g (A2-2 · FAZ 5): o pool que SÓ CRESCIA (um deque com TODOS
+    // os ranges materializados até ao fim do parse — o scene.bin de 212 MB
+    // ia chegando à RAM inteira, view a view) é agora UM STAGING
+    // reutilizável: o pico de RAM é UM range. `*staged` diz ao chamador
+    // que pode ADOTAR os bytes (takeStaged) em vez de os duplicar.
+    const u8* span(size_t bi, size_t off, size_t len, bool* staged = nullptr) {
+        if (staged) {
+            *staged = false;
+        }
         if (bi >= entries_.size() || len == 0) {
             return nullptr;
         }
@@ -115,25 +132,49 @@ public:
             if (off + len > e.owned.size()) {
                 return nullptr;
             }
-            return e.owned.data() + off;
+            return e.owned.data() + off;   // residente — sem cópia
         }
         if (off + len > e.deferredLen) {
             return nullptr;
         }
         if (len > kMaxRangeBytes) {
-            return nullptr;   // range absurdo (imagem de >64 MB) — recusa
+            return nullptr;   // acima do teto honesto — o resolveView NOMEIA
         }
         if (!loader_.fn) {
             return nullptr;
         }
-        pool_.emplace_back();
-        std::vector<u8>& dst = pool_.back();
+        stage_.clear();
+        stage_.resize(static_cast<size_t>(len));
         if (!loader_.fn(loader_.user, static_cast<u32>(bi),
-                        static_cast<u64>(off), static_cast<u64>(len), dst) ||
-            dst.size() != len) {
+                        static_cast<u64>(off), static_cast<u64>(len),
+                        stage_) ||
+            stage_.size() != len) {
+            // o valor DEVOLVIDO pela leitura é afervado: um range curto
+            // (ficheiro truncado no último bloco) é falha, nunca silêncio
+            stage_.clear();
+            stage_.shrink_to_fit();
             return nullptr;
         }
-        return dst.data();
+        if (staged) {
+            *staged = true;
+        }
+        return stage_.data();
+    }
+
+    // 0.9.6.12g (A2-2): ADOTA o staging (só válido após um span() deferred
+    // bem-sucedido e antes do span() seguinte) — o accessor COMPACTO move
+    // os bytes em vez de os copiar (o range de 118 MB nunca é duplicado)
+    std::vector<u8> takeStaged() { return std::move(stage_); }
+
+    // 0.9.6.12g (A2-2 · FAZ 1 do dono): o tamanho do FICHEIRO em disco por
+    // buffer — deferido: o stat do ficheiro (loader.fileBytes); residente:
+    // os bytes que existem (real == file por construção)
+    u64 diskBytes(size_t bi) const {
+        if (bi >= entries_.size()) {
+            return 0;
+        }
+        return entries_[bi].deferred ? loader_.fileBytes
+                                     : entries_[bi].owned.size();
     }
 
 private:
@@ -145,7 +186,7 @@ private:
     std::vector<Entry> entries_;
     std::vector<u64> declared_;   // buffers[].byteLength do JSON (A2)
     GltfRangeLoader loader_{};
-    std::deque<std::vector<u8>> pool_;   // ranges materializados (ptr estáveis)
+    std::vector<u8> stage_;   // O staging único (A2-2: pico de RAM = UM range)
 };
 
 // 0.9.6.4 (R-022): devolve a CAUSA (ViewFail) em vez de bool — o chamador
@@ -171,6 +212,8 @@ struct ViewDiag {
     size_t accOff = 0;
     u64 declared = 0;   // buffers[b].byteLength do JSON
     u64 real = 0;       // o tamanho REAL usado na validação
+    u64 fileBytes = 0;  // o ficheiro EM DISCO (A2-2 · FAZ 1: «file=» — a
+                        // linha completa do dono, sem «…»)
 };
 ViewFail resolveView(GltfBufferStore& store, const Json& bv,
                      size_t accessorByteOffset, size_t elemSize, ViewSpan& out,
@@ -198,6 +241,7 @@ ViewFail resolveView(GltfBufferStore& store, const Json& bv,
     dg.accOff = accessorByteOffset;
     dg.declared = store.declared(bi);
     dg.real = bi < store.count() ? store.size(bi) : 0;
+    dg.fileBytes = store.diskBytes(bi);   // A2-2 · FAZ 1: o disco, no diag
     if (bi >= store.count()) {
         return ViewFail::NoBuffer;
     }
@@ -223,18 +267,30 @@ ViewFail resolveView(GltfBufferStore& store, const Json& bv,
     // (era off + accOff + bLen: dupla-contava o accessorByteOffset —
     // GLB válido com view no fim do BIN + accessor com byteOffset > 0
     // era recusado; a causa raiz do defeito 1 do dono)
+    // 0.9.6.12g (A2-2): o limite é EXCLUSIVO (off+len == fim do buffer é
+    // VÁLIDO — a evidência do dono: view2 a acabar em declared=212986848
+    // nunca foi «fora do buffer»; o que o matava eram os TETOS de range,
+    // abaixo) e o view tem de caber TAMBÉM no byteLength DECLARADO (a
+    // regra do dono: off+len ≤ real E ≤ declared — um exporter que
+    // declara menos do que o chunk tem é mentira distinguida AQUI)
     const size_t total = off + bLen;
     if (static_cast<u64>(total) > bufSize) {
         return ViewFail::OutOfBounds;   // view fora do buffer — recusa
     }
+    if (dg.declared > 0 && static_cast<u64>(total) > dg.declared) {
+        return ViewFail::BeyondDeclared;
+    }
     out.byteLength = bLen - accessorByteOffset;
     out.stride = stride;
     // 0.8.10: materializa SÓ o range necessário (deferred = streaming);
-    // 0.9.6.4: a falha da LEITURA é ReadFail — nunca «fora do buffer»
+    // 0.9.6.4: a falha da LEITURA é ReadFail — nunca «fora do buffer»;
+    // 0.9.6.12g (A2-2): acima do teto a falha é TooBig com a mensagem
+    // HONESTA de memória (o ficheiro é VÁLIDO — não cabe é que não cabe)
     if (out.byteLength > kMaxRangeBytes) {
         return ViewFail::TooBig;
     }
-    out.data = store.span(bi, off + accessorByteOffset, out.byteLength);
+    out.data = store.span(bi, off + accessorByteOffset, out.byteLength,
+                          &out.staged);
     if (!out.data) {
         return ViewFail::ReadFail;
     }
@@ -247,7 +303,14 @@ const char* viewFailText(ViewFail f) {
         case ViewFail::NoBuffer:   return "buffer do bufferView inexistente";
         case ViewFail::BadLength:  return "bufferView sem byteLength";
         case ViewFail::OutOfBounds:return "bufferView fora do buffer (offset+len > tamanho real)";
-        case ViewFail::TooBig:     return "range do bufferView acima do teto de 64 MB";
+        case ViewFail::BeyondDeclared:
+            return "bufferView acima do byteLength declarado do buffer";
+        case ViewFail::TooBig:
+            // 0.9.6.12g (A2-2 · FAZ 5): a mensagem HONESTA de memória —
+            // antes dizia «acima do teto de 64 MB» (e «ficheiro corrompido?»
+            // no erro final) para um ficheiro PERFEITAMENTE VÁLIDO
+            return "modelo demasiado grande para a memória (o range passa "
+                   "o teto de 256 MB)";
         case ViewFail::ReadFail:   return "leitura do range falhou (I/O)";
         case ViewFail::BadStride:  return "byteStride menor que o elemento";
     }
@@ -394,6 +457,14 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                     return false;
                 }
                 store.addOwned(std::move(decoded));
+            } else if (rangeLoader && rangeLoader->fn &&
+                       rangeLoader->binLen > 0 && u == rangeLoader->deferUri) {
+                // 0.9.6.12g (A2-2 · FAZ 5): o .gltf com irmão .bin GRANDE —
+                // o buffer externo do URI conhecido é DEFERIDO (ranges do
+                // ficheiro no disco; o scene.bin de 212 MB do dono nunca
+                // mais é lido INTEIRO para a RAM). Os OUTROS URIs (segundo
+                // .bin, texturas externas) seguem pelo resolver como sempre.
+                store.addDeferred(rangeLoader->binLen);
             } else if (resolver.fn) {
                 std::vector<u8> ext;
                 if (!resolver.fn(resolver.user, u.c_str(), ext) || ext.empty()) {
@@ -493,17 +564,18 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                             // A CAUSA DISTINTA + A COMPARAÇÃO COMPLETA
                             // (A2, tarefa 1/3: a MESMA rotina, a MESMA
                             // linha com os números — nunca dois checks a
-                            // divergir nem um log truncado)
-                            char linha[160];
+                            // divergir nem um log truncado; A2-2: file=)
+                            char linha[256];
                             std::snprintf(
                                 linha, sizeof(linha),
                                 "glb: view%d buffer%zu off=%llu len=%llu "
-                                "declared=%llu real=%llu",
+                                "declared=%llu real=%llu file=%llu",
                                 vi, diag.bufferIdx,
                                 static_cast<unsigned long long>(diag.viewOff),
                                 static_cast<unsigned long long>(diag.viewLen),
                                 static_cast<unsigned long long>(diag.declared),
-                                static_cast<unsigned long long>(diag.real));
+                                static_cast<unsigned long long>(diag.real),
+                                static_cast<unsigned long long>(diag.fileBytes));
                             elog::warn("import: %s", linha);
                             gi.broken = true;
                             elog::warn("asset: glTF imagem %u: bufferView %d "
@@ -589,13 +661,17 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
     ViewDiag lastViewDiag;
     i32 lastViewIdx = -1;
     auto viewDiagLine = [&](i32 viewIdx, const ViewDiag& dg) {
-        char buf[160];
+        // 0.9.6.12g (A2-2 · FAZ 1): a linha COMPLETA — os quatro números
+        // + file= (o ficheiro em disco) — nunca truncada (o buffer subiu
+        // para 256 e o EngineLog agora carrega linhas de 2048)
+        char buf[256];
         std::snprintf(buf, sizeof(buf),
                       "glb: view%d buffer%zu off=%zu len=%zu acc=%zu "
-                      "declared=%llu real=%llu",
+                      "declared=%llu real=%llu file=%llu",
                       viewIdx, dg.bufferIdx, dg.viewOff, dg.viewLen,
                       dg.accOff, static_cast<unsigned long long>(dg.declared),
-                      static_cast<unsigned long long>(dg.real));
+                      static_cast<unsigned long long>(dg.real),
+                      static_cast<unsigned long long>(dg.fileBytes));
         return std::string(buf);
     };
     auto readAccessor = [&](i32 accIdx, std::vector<u8>& rawElems, size_t& elemCount,
@@ -659,9 +735,22 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
             // tolera-se, geometria NÃO) — mas com a CAUSA exata (R-022:
             // «fora do buffer» deixou de cobrir também as falhas de I/O)
             // E COM A COMPARAÇÃO COMPLETA (A2, a tarefa 1: os quatro
-            // números NUNCA truncados — o dono lê off/len/declared/real)
+            // números NUNCA truncados — o dono lê off/len/declared/real;
+            // A2-2 acrescenta file= o disco)
             const std::string line = viewDiagLine(viewIdx, diag);
             elog::error("import: %s", line.c_str());
+            // 0.9.6.12g (A2-2): o suffixo é HONESTO por causa — um range
+            // acima do teto NÃO é corrupção (o ficheiro é válido) e uma
+            // leitura curta não é corrupção (o disco falhou)
+            const char* sufixo =
+                vf == ViewFail::TooBig
+                    ? " — o ficheiro é VÁLIDO mas o range não cabe na "
+                      "memória (divide a malha ou importa um modelo mais "
+                      "leve)"
+                    : vf == ViewFail::ReadFail
+                          ? " (a leitura do disco falhou ou o ficheiro "
+                            "mudou durante o import)"
+                          : " (ficheiro corrompido?)";
             const std::string nomeado =
                 vf == ViewFail::NoBuffer
                     ? std::string("glTF: bufferView refere o buffer ") +
@@ -670,20 +759,28 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                           std::to_string(store.count()) + " buffer(s))"
                     : std::string("glTF: accessor (view ") +
                           std::to_string(viewIdx) + ") falhou: " +
-                          viewFailText(vf) + " (ficheiro corrompido?)";
+                          viewFailText(vf) + sufixo;
             err = nomeado + " — " + line;
             return false;
         }
-        rawElems.resize(elemCount * elemSize);
         if (span.stride == elemSize) {
-            // compacto: cópia direta
+            // compacto: cópia direta — ou ADOTAR o staging (A2-2 · FAZ 5:
+            // o accessor compacto que ocupa o view INTEIRO, o perfil
+            // scene/dragão do dono com accOff=0, move os bytes em vez de
+            // os duplicar — o range de 118 MB nunca existe duas vezes)
             if (elemCount * elemSize > span.byteLength) {
                 err = "glTF: accessor excede o bufferView";
                 return false;
             }
-            std::memcpy(rawElems.data(), span.data, elemCount * elemSize);
+            if (span.staged && elemCount * elemSize == span.byteLength) {
+                rawElems = store.takeStaged();
+            } else {
+                rawElems.resize(elemCount * elemSize);
+                std::memcpy(rawElems.data(), span.data, elemCount * elemSize);
+            }
         } else {
             // interleaved: copia elemento a elemento respeitando o stride
+            rawElems.resize(elemCount * elemSize);
             for (size_t e = 0; e < elemCount; ++e) {
                 if ((e * span.stride) + elemSize > span.byteLength) {
                     err = "glTF: accessor excede o bufferView (stride)";
@@ -729,6 +826,14 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                        "toast diz o total)",
                        out.primsDropped, what, out.primDropCause.c_str());
         };
+        // 0.9.6.12g (A2-2): DEGRADA (não mata) o exporter malformado — o
+        // view fora do buffer REAL ou acima do DECLARADO (a mesma classe:
+        // o ficheiro mente; o resto do modelo pode entrar). TooBig/ReadFail
+        // continuam FATAIS na geometria (sem dados não há malha)
+        auto viewDegradavel = [&]() {
+            return lastViewFail == ViewFail::OutOfBounds ||
+                   lastViewFail == ViewFail::BeyondDeclared;
+        };
         for (size_t pi = 0; pi < jprims->items.size(); ++pi) {
             const Json& jp = jprims->items[pi];
             if (const Json* mode = jp.find("mode");
@@ -754,7 +859,7 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                 size_t count = 0, cc = 0, cs = 0;
                 if (!readAccessor(static_cast<i32>(jpos->number), raw, count, cc, cs) ||
                     cc != 3 || cs != 4) {
-                    if (lastViewFail == ViewFail::OutOfBounds) {
+                    if (viewDegradavel()) {
                         dropPrim("POSITION");
                         continue;   // degrada a PRIMITIVA (a spec 2d)
                     }
@@ -770,7 +875,7 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                 size_t count = 0, cc = 0, cs = 0;
                 if (!readAccessor(static_cast<i32>(jn->number), raw, count, cc, cs) ||
                     cc != 3 || cs != 4) {
-                    if (lastViewFail == ViewFail::OutOfBounds) {
+                    if (viewDegradavel()) {
                         dropPrim("NORMAL");
                         continue;
                     }
@@ -786,7 +891,7 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                 size_t count = 0, cc = 0, cs = 0;
                 if (!readAccessor(static_cast<i32>(jt->number), raw, count, cc, cs) ||
                     cc != 2 || cs != 4) {
-                    if (lastViewFail == ViewFail::OutOfBounds) {
+                    if (viewDegradavel()) {
                         dropPrim("TEXCOORD_0");
                         continue;
                     }
@@ -865,7 +970,7 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                 size_t count = 0, cc = 0, cs = 0;
                 if (!readAccessor(static_cast<i32>(jidx->number), raw, count, cc, cs) ||
                     cc != 1) {
-                    if (lastViewFail == ViewFail::OutOfBounds) {
+                    if (viewDegradavel()) {
                         dropPrim("índices");
                         continue;
                     }

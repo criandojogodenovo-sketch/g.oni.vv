@@ -351,13 +351,23 @@ bool fileRangeLoad(void* user, u32 bufferIndex, u64 offset, u64 len,
                    std::vector<u8>& outv) {
     (void)bufferIndex;   // o loader é construído por buffer (base já certa)
     FileRangeCtx* ctx = static_cast<FileRangeCtx*>(user);
-    if (!ctx || !ctx->f || len > kMaxJsonBytes) {
+    // 0.9.6.12g (A2-2): o teto era kMaxJsonBytes (16 MB!) REUSADO — qualquer
+    // range de (16, 64] MB passava a validação do parser e morria AQUI com
+    // «leitura falhou» (a mentira de I/O que matava o dragão do dono: um
+    // view de geometria >16 MB num ficheiro de 38 MB). O teto é agora o
+    // MESMO kMaxRangeBytes do parser (uma regra, os dois lados) e a falha
+    // honesta de memória é dita pelo resolveView, não daqui
+    if (!ctx || !ctx->f || len > kMaxRangeBytes) {
         return false;
     }
     outv.resize(static_cast<size_t>(len));
     if (std::fseek(ctx->f, static_cast<long>(ctx->base + offset), SEEK_SET) != 0) {
         return false;
     }
+    // o valor DEVOLVIDO pela leitura é afervado (o pedido do dono, FAZ 3:
+    // «verifica o valor devolvido pelo read») — um range curto (fim de
+    // ficheiro perdido, último bloco parcial cortado) é FALHA, nunca bytes
+    // a menos disfarçados
     return std::fread(outv.data(), 1, outv.size(), ctx->f) == outv.size();
 }
 
@@ -646,8 +656,12 @@ bool convertPng(const std::string& srcAbs, ProjectStorage& st,
 // com FS real) — as imagens uri-externas são LIDAS daí e entram no passe
 // de texturas como embutidas. null (GLB, ou SAF sem caminho real) = as
 // externas ficam no warn honesto de sempre.
+// 0.9.6.12g (A2-2): `fileBytes` (o ficheiro EM DISCO — vai ao diag file= do
+// dono) e `deferUri` (o URI do buffer externo de um .gltf que fica DEFERIDO
+// — o scene.bin de 212 MB lido por ranges, nunca inteiro em RAM).
 bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
-                       u64 binBase, u64 binLen,
+                       u64 binBase, u64 binLen, u64 fileBytes,
+                       const char* deferUri,
                        const GltfBufferResolver& resolver,
                        const char* siblingImageDir,
                        ProjectStorage& st, const std::string& stem,
@@ -661,6 +675,8 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
     loader.fn = binFile ? &fileRangeLoad : nullptr;
     loader.user = &ctx;
     loader.binLen = binLen;
+    loader.fileBytes = fileBytes;
+    loader.deferUri = deferUri ? deferUri : "";
 
     GltfModel model;
     if (!parseGltf(json, jsonLen, {}, resolver, model, err,
@@ -1139,7 +1155,8 @@ bool convertGlbFile(const std::string& srcAbs, ProjectStorage& st,
                       "padding extra — os ranges usam o REAL do chunk)");
         }
         ok = convertGltfCommon(reinterpret_cast<const char*>(json.data()),
-                               json.size(), f, binBase, binLen,
+                               json.size(), f, binBase, binLen, fileBytes,
+                               nullptr,
                                GltfBufferResolver{}, nullptr, st, stem,
                                pipeline, out, stats, err);
     } while (false);
@@ -1215,21 +1232,90 @@ bool convertGltfFile(const std::string& srcAbs, ProjectStorage& st,
                                  (ctx->baseDir.back() == '/' ? "" : "/") +
                                  dec;
         const bool exists = fileapi::isFile(path);
-        const bool ok = exists && fileapi::readAll(path, o) && !o.empty() &&
-                        o.size() <= kMaxImageBytes * 4;
+        // 0.9.6.12g (A2-2 · FAZ 5): o teto de memória é afervado ANTES da
+        // leitura (um .bin de 300 MB nunca entra inteiro em RAM) e a
+        // falha diz «modelo demasiado grande para a memória» — não uma
+        // «ilegível» que esconde a causa
+        u64 fsize = 0;
+        const bool sized = exists && fileapi::fileSize(path, fsize);
+        const bool tooBig = sized && fsize > kMaxImageBytes * 4;
+        const bool ok = sized && !tooBig && fileapi::readAll(path, o) &&
+                        !o.empty();
         if (!ok) {
             ctx->failed = true;
             ctx->uri = uri;
             ctx->cause = !exists ? "nao existe no diretorio do ficheiro"
-                                 : "ilegivel ou grande demais";
+                                 : tooBig
+                                       ? "modelo demasiado grande para a "  "memória (" + std::to_string(fsize / (1024 * 1024)) + " MB acima do teto de " + std::to_string((kMaxImageBytes * 4) / (1024 * 1024)) + " MB)"
+                                       : "ilegivel";
             o.clear();
         }
         return ok;
     };
     resolver.user = &externa;
+    // 0.9.6.12g (A2-2 · FAZ 5): o IRMÃO .bin GRANDE passa a ser DEFERIDO —
+    // abre-se o FICHEIRO e o parser lê POR RANGES (o scene.bin de 212 MB do
+    // dono nunca mais é lido INTEIRO para a RAM; o teto por range é o
+    // kMaxRangeBytes honesto). Elegível: o PRIMEIRO buffers[].uri externo
+    // (o caso real: UM .bin de geometria); imagens e outros buffers seguem
+    // pelo resolver como sempre. fopen falhado = cai ao resolver (a
+    // mensagem de erro é a de sempre, nomeia o ficheiro)
+    FILE* binF = nullptr;
+    u64 binLenExt = 0;
+    u64 binFileBytes = 0;
+    std::string binUri;
+    {
+        Json scan;
+        if (Json::parse(reinterpret_cast<const char*>(json.data()),
+                        json.size(), scan) &&
+            scan.type == Json::Type::Object) {
+            if (const Json* jb = scan.find("buffers");
+                jb && jb->type == Json::Type::Array) {
+                for (const Json& b : jb->items) {
+                    const Json* uri = b.find("uri");
+                    if (!uri || uri->type != Json::Type::String ||
+                        uri->string.empty() ||
+                        uri->string.compare(0, 5, "data:") == 0) {
+                        continue;
+                    }
+                    std::string path;
+                    std::string rel;
+                    std::string serr;
+                    if (!siblingPathOf(srcDir, uri->string, path, rel, serr)) {
+                        continue;   // uri inválida — o resolver/triagem de sempre trata
+                    }
+                    if (!fileapi::isFile(path)) {
+                        continue;   // ausente — o resolver dá o erro que nomeia
+                    }
+                    binF = std::fopen(path.c_str(), "rb");
+                    if (!binF) {
+                        elog::warn(
+                            "import: o irmao '%s' não abriu para ranges "
+                            "(%s) — lê-se inteiro pelo resolver",
+                            path.c_str(), fileapi::errnoText().c_str());
+                        break;
+                    }
+                    binUri = uri->string;
+                    binLenExt = 0;
+                    fileapi::fileSize(path, binFileBytes);
+                    binLenExt = binFileBytes;
+                    elog::info(
+                        "import: buffer externo '%s' DEFERIDO (%llu B em "
+                        "disco — ranges, sem o ler inteiro)",
+                        binUri.c_str(),
+                        static_cast<unsigned long long>(binFileBytes));
+                    break;   // só o PRIMEIRO
+                }
+            }
+        }
+    }
     const bool ok = convertGltfCommon(
-        reinterpret_cast<const char*>(json.data()), json.size(), nullptr, 0,
-        0, resolver, srcDir.c_str(), st, stem, pipeline, out, stats, err);
+        reinterpret_cast<const char*>(json.data()), json.size(), binF, 0,
+        binLenExt, binFileBytes, binUri.empty() ? nullptr : binUri.c_str(),
+        resolver, srcDir.c_str(), st, stem, pipeline, out, stats, err);
+    if (binF) {
+        std::fclose(binF);
+    }
     if (!ok && externa.failed) {
         err = "o .gltf referencia o buffer externo '" + externa.uri +
               "' que nao foi lido (" + externa.cause + " — '" + srcDir +

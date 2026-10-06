@@ -79,6 +79,19 @@ comparação completo e a degradação que não mata o import):**
   slice truncado morre com a comparação, não disfarçado). R-014
   reescrita: import → .gmesh em assets/ → o listing do picker; imagem
   podre → mesh sem texturas + W; browser isFile + 1-toque (A4) re-verificado.
+- **IMPORT A2-2 — os TETOS de range e o último bloco (0.9.6.12g)**: a
+  evidência nova do dono (a vista a acabar EXATAMENTE no fim do buffer de
+  212 MB e o dragão de 38 MB a falhar «de forma parecida») NÃO era off-by-one
+  nem bloco perdido — eram os TETOS: o `kMaxRangeBytes` de 64 MB recusava o
+  view VÁLIDO de 118 MB do scene e o `fileRangeLoad` tinha um teto escondido
+  de 16 MB (`kMaxJsonBytes` reusado) que matava o dragão com mentira de I/O.
+  Agora: UM teto de 256 MB partilhado (parser + loader) com a mensagem
+  honesta «modelo demasiado grande para a memória»; a regra `off+len ≤ real
+  E ≤ declared` (`BeyondDeclared` distingue o exporter mentiroso); a linha
+  do dono ganha `file=` (o disco) e o EngineLog carrega linhas de 2048 (sem
+  «…»); o pool de ranges é um staging único + o accessor compacto ADOTA os
+  bytes (o pico de RAM é UM range, nunca o BIN inteiro); o .gltf com irmão
+  .bin grande é DEFERIDO (o scene.bin de 212 MB lido POR RANGES). R-032.
 
 **Sentinelas novas:** `regress_hierarquia_contrato` (R-022) ·
 `regress_texto_strip_campo` (R-023) · `regress_viewport_rect_segue`

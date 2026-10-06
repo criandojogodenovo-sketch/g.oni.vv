@@ -4282,3 +4282,149 @@ TEST(regress_import_r014_reescrita) {
         ::remove(src.c_str());
     }
 }
+
+// ============================================================================
+// R-032 (0.9.6.12g · A2-2) — OS TETOS DE RANGE E O ÚLTIMO BLOCO PARCIAL
+// A evidência do dono (engine.log 06/10 23:24): «import: glb: view2 buffer0
+// off=89248320 len=123738528 acc=0 declared=212986848 re…» + «glTF invalido:
+// accessor (view 2) falhou: range do bufferView aci…» — a vista acaba
+// EXATAMENTE no fim do buffer (off+len == declared == 212986848 = VÁLIDO) e
+// o dragão (38051884 B = 6 blocos de 6 MB + 303148) falha «de forma
+// parecida». As hipóteses (a) off-by-one e (b) último bloco perdido NÃO
+// existiam (o bound já era exclusivo; o ChunkReader já lia o resto); as
+// causas REAIS: o teto de 64 MB (kMaxRangeBytes) recusava o view de 118 MB
+// do scene e o fileRangeLoad tinha um teto escondido de 16 MB (kMaxJsonBytes
+// reusado) que matava o dragão com mentira de I/O.
+// SENTINELA E2E (ficheiro REAL → importFile — o caminho que o device corre):
+//   (a) o perfil dragão: BIN = 3×6291456 + 12344 (NÃO múltiplo do chunk de
+//       6 MB) com o ÚNICO view de geometria a ocupar [0, binLen) — acaba
+//       EXATAMENTE no fim do buffer (a fixture (i) do dono) e tem 18.8 MB
+//       (> o teto escondido de 16 MB): a cópia em chunks guarda o último
+//       bloco parcial, o parse lê POR RANGES e o import ENTRA;
+//   (b) o view genuinamente fora (len = binLen+4, a fixture (iv)): o import
+//       falha com a COMPARAÇÃO COMPLETA (declared/real/file) no erro.
+// MUTAÇÕES guardadas: kMaxRangeBytes→64 MB mata o teste
+// glb_a2_ultimo_bloco_tetos_e_memoria (perfil scene); o teto de 16 MB de
+// volta no fileRangeLoad mata ESTA sentinela (o range de 18.8 MB).
+// ============================================================================
+TEST(regress_glb_range_tetos) {
+    using namespace vv;
+    ASSERT(vv::elog::init(kSentinelLogs));
+
+    constexpr size_t kBlk = 6291456;   // o kChunkBytes do import (6 MB)
+    const u64 binLen = 3ull * kBlk + 12344u;   // 18886712 — múltiplo de 4,
+                                               // NÃO múltiplo de 6 MB
+
+    auto makeProfileGlb = [](u64 binLenArg, u64 viewLenArg,
+                             std::vector<u8>& out) {
+        const u64 bl = binLenArg;
+        const u64 vl = viewLenArg;
+        std::vector<u8> bin(static_cast<size_t>(bl), 0);
+        // 3 vértices válidos nos primeiros 36 B (o accessor lê só isso; a
+        // cauda do view é legal — o perfil real dos exporters)
+        const f32 verts[9] = {0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 1.f, 0.f};
+        std::memcpy(bin.data(), verts, sizeof(verts));
+        for (size_t i = 36; i < bin.size(); ++i) {
+            bin[i] = static_cast<u8>((i * 7 + 13) & 0xFF);
+        }
+        char js[512];
+        std::snprintf(js, sizeof(js),
+            "{\"asset\":{\"version\":\"2.0\"},"
+            "\"buffers\":[{\"byteLength\":%llu}],"
+            "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,"
+            "\"byteLength\":%llu}],"
+            "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,"
+            "\"count\":3,\"type\":\"VEC3\"}],"
+            "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}],"
+            "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],"
+            "\"scene\":0}",
+            static_cast<unsigned long long>(bl),
+            static_cast<unsigned long long>(vl));
+        const std::string json = js;
+        const u32 jsonPad =
+            (4u - static_cast<u32>(json.size() % 4)) % 4u;
+        out.clear();
+        auto u32p = [&out](u32 v) {
+            u8 t[4];
+            std::memcpy(t, &v, 4);
+            out.insert(out.end(), t, t + 4);
+        };
+        u32p(0x46546C67u);   // 'glTF'
+        u32p(2);
+        u32p(12u + 8u + static_cast<u32>(json.size()) + jsonPad + 8u +
+             static_cast<u32>(bin.size()));
+        u32p(static_cast<u32>(json.size()));
+        u32p(0x4E4F534Au);   // 'JSON'
+        out.insert(out.end(), json.begin(), json.end());
+        for (u32 i = 0; i < jsonPad; ++i) {
+            out.push_back(0x20);
+        }
+        u32p(static_cast<u32>(bin.size()));
+        u32p(0x004E4942u);   // 'BIN'
+        out.insert(out.end(), bin.begin(), bin.end());
+    };
+
+    // ---- (a) O PERFIL DRAGÃO E2E: ficheiro real → importFile ------------
+    {
+        std::vector<u8> glb;
+        makeProfileGlb(binLen, binLen, glb);
+        char spath[96];
+        std::snprintf(spath, sizeof(spath), "/tmp/goni_a2teto_ok_%d.glb",
+                      static_cast<int>(::getpid()));
+        FILE* f = std::fopen(spath, "wb");
+        ASSERT(f != nullptr);
+        std::fwrite(glb.data(), 1, glb.size(), f);
+        std::fclose(f);
+        char root[64];
+        std::snprintf(root, sizeof(root), "/tmp/goni_a2teto_ok_%d",
+                      static_cast<int>(::getpid()));
+        FsStorage st(root);
+        convert::Output out;
+        convert::Stats stats;
+        std::string err;
+        const bool ok = convert::importFile(spath, "dragao.glb", st, nullptr,
+                                            out, stats, err);
+        if (!ok) {
+            fprintf(stderr, "[a2teto-a] o import do perfil dragão falhou: "
+                            "%s\n", err.c_str());
+        }
+        ASSERT(ok);
+        EXPECT(out.meshes.size() == 1u);
+        EXPECT(st.exists("assets/dragao.gmesh"));
+        EXPECT(stats.sourceBytes == glb.size());   // a fonte INTEIRA chegou
+        ::remove(spath);
+    }
+    // ---- (b) O VIEW GENUINAMENTE FORA (a fixture (iv) do dono): a falha
+    // traz a COMPARAÇÃO COMPLETA — declared/real/file — nunca truncada ----
+    {
+        std::vector<u8> glb;
+        makeProfileGlb(binLen, binLen + 4, glb);
+        char spath[96];
+        std::snprintf(spath, sizeof(spath), "/tmp/goni_a2teto_fora_%d.glb",
+                      static_cast<int>(::getpid()));
+        FILE* f = std::fopen(spath, "wb");
+        ASSERT(f != nullptr);
+        std::fwrite(glb.data(), 1, glb.size(), f);
+        std::fclose(f);
+        char root[64];
+        std::snprintf(root, sizeof(root), "/tmp/goni_a2teto_fora_%d",
+                      static_cast<int>(::getpid()));
+        FsStorage st(root);
+        convert::Output out;
+        convert::Stats stats;
+        std::string err;
+        const bool ok = convert::importFile(spath, "fora.glb", st, nullptr,
+                                            out, stats, err);
+        EXPECT(!ok);   // fora do buffer REAL é falha (a vista mente)
+        char alvo[128];
+        std::snprintf(alvo, sizeof(alvo),
+                      "declared=%llu real=%llu file=",
+                      static_cast<unsigned long long>(binLen),
+                      static_cast<unsigned long long>(binLen));
+        EXPECT_MSG(err.find("TODAS as primitivas") != std::string::npos &&
+                       err.find(alvo) != std::string::npos,
+                   "o view fora do buffer não falhou com a comparação "
+                   "completa (%s)", err.c_str());
+        ::remove(spath);
+    }
+}

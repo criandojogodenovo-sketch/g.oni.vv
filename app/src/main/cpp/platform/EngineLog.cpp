@@ -174,7 +174,12 @@ void writeLine(char level, const char* line) {
                   tmv.tm_hour, tmv.tm_min, tmv.tm_sec,
                   static_cast<int>(tv.tv_usec / 1000), level);
 
-    char buf[1024];
+    // 0.9.6.12g (A2-2 · FAZ 1 do dono): «Escreve a linha completa no log,
+    // sem "…"» — as linhas de diagnóstico do import (a comparação inteira
+    // de bufferView + o caminho do ficheiro) cabem INTEIRAS; 896 cortava
+    // a linha do dono a meio dos números. O teto do logcat do Android
+    // (~4 KB por linha) continua acima disto.
+    char buf[2176];
     const int pre = static_cast<int>(std::strlen(prefix));
     int n = std::snprintf(buf, sizeof(buf), "%s%s\n", prefix, line);
     if (n < 0) {
@@ -199,7 +204,10 @@ void writeLine(char level, const char* line) {
 namespace {
 
 void vwrite(char level, const char* fmt, va_list ap) {
-    char line[896];
+    // 0.9.6.12g (A2-2 · FAZ 1): 896 cortava a linha do import a meio dos
+    // números (o dono lia «real=…» sem o resto) — 2048 carrega a linha
+    // completa (o buf do writeLine é 2176 = 48 de prefixo + 2048 + \n)
+    char line[2048];
     int n = std::vsnprintf(line, sizeof(line), fmt, ap);
     if (n < 0) {
         return;

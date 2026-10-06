@@ -140,15 +140,31 @@ struct GltfBufferResolver {
     void* user = nullptr;
 };
 
+// 0.9.6.12g (A2-2 · FAZ 5 do dono): o TETO ÚNICO por range materializado —
+// PARTILHADO pelo parser (GltfBufferStore::span) e pelo range loader de
+// ficheiro (fileRangeLoad). O teto ANTIGO de 64 MB recusava views VÁLIDAS
+// (o scene do dono: UM view de 123738528 B = 118 MB num BIN de 212 MB —
+// glTF perfeitamente legal) e o fileRangeLoad tinha um SEGUNDO teto
+// escondido de 16 MB (kMaxJsonBytes reusado) que matava o dragão com uma
+// mentira de I/O. 256 MB = o mesmo kStreamAccumMax da casa (ProjectStorage).
+// Acima disto a falha é HONESTA: «modelo demasiado grande para a memória».
+constexpr u64 kMaxRangeBytes = 256ull * 1024 * 1024;
+
 // 0.8.10 — STREAMING: carrega RANGES de um buffer por demanda (o BIN chunk
 // de um .glb EM FICHEIRO: o import nunca o carrega inteiro — accessors e
 // imagens materializam SÓ os seus ranges, cada um ≤ kMaxRangeBytes).
 // `binLen`: tamanho total do buffer 0 (validação de bounds).
+// 0.9.6.12g (A2-2): `fileBytes` = o tamanho do FICHEIRO em disco (vai ao
+// log de diagnóstico do dono — «file=», FAZ 1) e `deferUri` = o URI do
+// buffer EXTERNO de um .gltf que passa a ser DEFERIDO também (o scene.bin
+// de 212 MB lido POR RANGES — nunca mais inteiro em RAM; vazio em GLB).
 struct GltfRangeLoader {
     bool (*fn)(void* user, u32 bufferIndex, u64 offset, u64 len,
                std::vector<u8>& out) = nullptr;
     void* user = nullptr;
-    u64  binLen = 0;   // tamanho do buffer 0 (GLB: o BIN chunk em ficheiro)
+    u64  binLen = 0;        // tamanho do buffer 0 (GLB: o BIN chunk em ficheiro)
+    u64  fileBytes = 0;     // o ficheiro EM DISCO (diag file= do dono, FAZ 1)
+    std::string deferUri;   // .gltf: o URI do buffer externo DEFERIDO (A2-2)
 };
 
 // parse de .gltf (JSON puro) ou do JSON chunk de um .glb.

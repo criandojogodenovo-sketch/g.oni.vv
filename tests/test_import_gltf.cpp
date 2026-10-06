@@ -5,9 +5,12 @@
 // e todos os caminhos de erro.
 #include "TestFramework.h"
 #include <cstring>
+#include <cstdio>
+#include <unistd.h>
 #include <string>
 #include <vector>
 #include "assets/GltfImporter.h"
+#include "platform/FileApi.h"
 
 using namespace vv;
 using ::test::nearEqF;
@@ -864,10 +867,10 @@ TEST(glb_a2_perfis_do_device) {
         EXPECT(!parseGlb(glb.data(), glb.size(),
                          GltfBufferResolver{nullptr, 0}, model, perr));
         // a MENSAGEM COMPLETA (a tarefa 1: os quatro números, NUNCA
-        // truncado — é o que o dono lê)
+        // truncado — é o que o dono lê; A2-2 acrescenta file= o disco)
         EXPECT(perr.find("TODAS as primitivas") != std::string::npos);
         EXPECT(perr.find("glb: view2 buffer0 off=68 len=7 acc=0 "
-                         "declared=74 real=74") != std::string::npos);
+                         "declared=74 real=74 file=74") != std::string::npos);
     }
     // ---- (ii-b) A DEGRADAÇÃO (a spec 2d): DUAS primitivas — a má cai, a
     // boa ENTRA (o import segue; o contador diz) --------------------------
@@ -943,6 +946,290 @@ TEST(glb_a2_perfis_do_device) {
         EXPECT(model.images.size() == 1u);
         EXPECT(!model.images[0].broken);
         EXPECT(model.images[0].bytes.size() == sizeof(pngFake));
+        EXPECT(model.meshes.size() == 1u);
+    }
+}
+
+// ============================================================================
+// 0.9.6.12g (A2-2) — OS TETOS DE RANGE, O ÚLTIMO BLOCO E A MEMÓRIA
+// A evidência do dono (engine.log 06/10 23:24): «import: glb: view2 buffer0
+// off=89248320 len=123738528 acc=0 declared=212986848 re…» seguido de
+// «glTF invalido: accessor (view 2) falhou: range do bufferView aci…» —
+// off+len == declared == 212986848: a vista acaba EXATAMENTE no fim do
+// buffer, o que é VÁLIDO. As hipóteses (a) off-by-one e (b) último bloco
+// parcial perdido NÃO existiam no código (o bound já era exclusivo e o
+// ChunkReader já lia o resto); as causas REAIS eram os TETOS:
+//   • kMaxRangeBytes = 64 MB recusava o view VÁLIDO de 118 MB do scene
+//     (TooBig → «acima do teto de 64 MB» — o «aci…» do log do dono);
+//   • fileRangeLoad tinha um SEGUNDO teto de 16 MB (kMaxJsonBytes
+//     reusado) que matava o dragão (38 MB) com mentira de I/O;
+//   • o pool de ranges nunca libertava (o BIN ia todo para a RAM).
+// Fixtures do dono (FAZ 4): (i) a última vista acaba no fim do buffer;
+// (ii) tamanho não múltiplo de 6291456; (iii) múltiplo exato; (iv) vista
+// genuinamente fora → mensagem clara. + file= na linha (FAZ 1) + o teto
+// honesto «modelo demasiado grande para a memória» (FAZ 5).
+// ============================================================================
+TEST(glb_a2_ultimo_bloco_tetos_e_memoria) {
+    constexpr size_t kBlk = 6291456;   // o kChunkBytes do import (6 MB)
+
+    // ---- fixtures de ficheiro (o padrão do conteúdo é determinístico) ----
+    auto writePattern = [](const std::string& path, size_t n) -> bool {
+        FILE* f = std::fopen(path.c_str(), "wb");
+        if (!f) {
+            return false;
+        }
+        std::vector<u8> chunk(1u << 20);
+        size_t done = 0;
+        while (done < n) {
+            const size_t k = chunk.size() < (n - done) ? chunk.size()
+                                                       : (n - done);
+            for (size_t i = 0; i < k; ++i) {
+                chunk[i] = static_cast<u8>(((done + i) * 7 + 13) & 0xFF);
+            }
+            if (std::fwrite(chunk.data(), 1, k, f) != k) {
+                std::fclose(f);
+                return false;
+            }
+            done += k;
+        }
+        std::fclose(f);
+        return true;
+    };
+    auto tmpName = [](const char* tag, std::string& out) {
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "/tmp/goni_a2teto_%s_%d.bin", tag,
+                      static_cast<int>(::getpid()));
+        out = buf;
+    };
+
+    // ---- (ii) o perfil do scene: 2 blocos + 5368800 — o ÚLTIMO BLOCO
+    // PARCIAL tem de chegar (a leitura verifica o valor DEVOLVIDO) -------
+    {
+        std::string p1;
+        tmpName("parcial", p1);
+        const size_t sz1 = 2 * kBlk + 5368800;
+        ASSERT(writePattern(p1, sz1));
+        fileapi::ChunkReader rd;
+        ASSERT(rd.open(p1, kBlk));
+        size_t blocks = 0;
+        size_t lastLen = 0;
+        bool padraoOk = true;
+        while (rd.next()) {
+            ++blocks;
+            lastLen = rd.last;
+            const size_t base = static_cast<size_t>(rd.done - rd.last);
+            for (size_t i = 0; i < rd.last && padraoOk; ++i) {
+                if (rd.buf[i] !=
+                    static_cast<u8>(((base + i) * 7 + 13) & 0xFF)) {
+                    padraoOk = false;
+                }
+            }
+        }
+        EXPECT_MSG(padraoOk && rd.done == sz1 && blocks == 3u &&
+                       lastLen == 5368800u,
+                   "o ChunkReader perdeu o último bloco parcial "
+                   "(done=%llu, blocos=%zu, último=%zu)",
+                   static_cast<unsigned long long>(rd.done), blocks, lastLen);
+        rd.close();
+        ::remove(p1.c_str());
+    }
+    // ---- (iii) o múltiplo EXATO: 2 blocos cheios, nada perdido ----------
+    {
+        std::string p1;
+        tmpName("exato", p1);
+        const size_t sz1 = 2 * kBlk;
+        ASSERT(writePattern(p1, sz1));
+        fileapi::ChunkReader rd;
+        ASSERT(rd.open(p1, kBlk));
+        size_t blocks = 0;
+        size_t lastLen = 0;
+        while (rd.next()) {
+            ++blocks;
+            lastLen = rd.last;
+        }
+        EXPECT(blocks == 2u && lastLen == kBlk && rd.done == sz1);
+        rd.close();
+        ::remove(p1.c_str());
+    }
+    // ---- o perfil EXATO do dragão do dono: 38051884 B = 6 blocos +
+    // 303148 — a CÓPIA streaming do import tem de ser byte a byte --------
+    {
+        std::string src;
+        std::string dst;
+        tmpName("dragao_src", src);
+        tmpName("dragao_dst", dst);
+        const size_t dragon = 38051884u;   // O tamanho real do ficheiro
+        ASSERT(writePattern(src, dragon));
+        EXPECT(fileapi::copyFileChunked(src, dst, kBlk, nullptr, nullptr));
+        u64 copied = 0;
+        EXPECT(fileapi::fileSize(dst, copied));
+        EXPECT_MSG(copied == dragon,
+                   "a cópia em chunks perdeu bytes: %llu de %zu",
+                   static_cast<unsigned long long>(copied), dragon);
+        // spot check: primeiro e último KB idênticos
+        u8 hb[2][1024];
+        FILE* fa = std::fopen(src.c_str(), "rb");
+        FILE* fb = std::fopen(dst.c_str(), "rb");
+        ASSERT(fa && fb);
+        const size_t ra = std::fread(hb[0], 1, 1024, fa);
+        const size_t rb = std::fread(hb[1], 1, 1024, fb);
+        EXPECT(ra == 1024 && rb == 1024 &&
+               std::memcmp(hb[0], hb[1], 1024) == 0);
+        std::fseek(fa, static_cast<long>(dragon) - 1024, SEEK_SET);
+        std::fseek(fb, static_cast<long>(dragon) - 1024, SEEK_SET);
+        std::fread(hb[0], 1, 1024, fa);
+        std::fread(hb[1], 1, 1024, fb);
+        EXPECT(std::memcmp(hb[0], hb[1], 1024) == 0);
+        std::fclose(fa);
+        std::fclose(fb);
+        ::remove(src.c_str());
+        ::remove(dst.c_str());
+    }
+
+    // ---- o loader FALSO (deferido, sem ficheiro): conta as chamadas e
+    // enche o padrão — o teto de 256 MB é afervado ANTES de materializar --
+    auto fakeLoad = [](void* user, u32 bi, u64 off, u64 len,
+                       std::vector<u8>& out) -> bool {
+        (void)bi;
+        if (user) {
+            ++*static_cast<u64*>(user);
+        }
+        out.resize(static_cast<size_t>(len));
+        for (size_t i = 0; i < out.size(); ++i) {
+            out[i] = static_cast<u8>(((off + i) * 7 + 13) & 0xFF);
+        }
+        return true;
+    };
+    // JSON do perfil scene: UM view de geometria que ocupa o buffer INTEIRO
+    // (a fixture (i) do dono — a vista acaba EXATAMENTE no fim) com um
+    // accessor pequeno (a cauda do view é legal)
+    auto bigViewJson = [](size_t binLen) {
+        char js[512];
+        std::snprintf(js, sizeof(js),
+            "{\"asset\":{\"version\":\"2.0\"},"
+            "\"buffers\":[{\"byteLength\":%zu}],"
+            "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,"
+            "\"byteLength\":%zu}],"
+            "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,"
+            "\"count\":3,\"type\":\"VEC3\"}],"
+            "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}],"
+            "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],"
+            "\"scene\":0}",
+            binLen, binLen);
+        return std::string(js);
+    };
+    auto parseWith = [&](const std::string& json, u64 binLen, u64 fileBytes,
+                         u64* calls, GltfModel& model,
+                         std::string& err) -> bool {
+        GltfRangeLoader loader;
+        loader.fn = fakeLoad;
+        loader.user = calls;
+        loader.binLen = binLen;
+        loader.fileBytes = fileBytes;
+        return parseGltf(json.data(), json.size(), {},
+                         GltfBufferResolver{nullptr, 0}, model, err,
+                         &loader);
+    };
+
+    // ---- O PERFIL SCENE: um view logo acima do teto VELHO de 64 MB
+    // (67108884 = 64 MB + 20) — VÁLIDO, tem de ENTRAR (era TooBig) --------
+    {
+        const size_t binLen = 67108884u;   // > 67108864 (o teto antigo)
+        const std::string json = bigViewJson(binLen);
+        GltfModel model;
+        std::string err;
+        u64 calls = 0;
+        const bool ok = parseWith(json, binLen, binLen + 12, &calls, model,
+                                  err);
+        if (!ok) {
+            EXPECT_MSG(false,
+                       "o view de %zu B (>64 MB, <256 MB) foi recusado: %s",
+                       binLen, err.c_str());
+            return;   // sem o mesh, os derefs seguintes são UB — sai LIMPO
+        }
+        EXPECT(model.meshes.size() == 1u);
+        EXPECT(model.meshes[0].vertices.size() == 3u);
+        EXPECT(calls >= 1u);   // o range foi materializado (uma vez só)
+    }
+
+    // ---- O TETO HONESTO (FAZ 5): um range de 300 MB NÃO materializa —
+    // a falha é «modelo demasiado grande para a memória», nunca
+    // «corrompido», e o loader NUNCA é chamado (zero RAM) -----------------
+    {
+        const size_t binLen = 314572800u;   // 300 MB declarados (só no papel)
+        const std::string json = bigViewJson(binLen);
+        GltfModel model;
+        std::string err;
+        u64 calls = 0;
+        const bool ok = parseWith(json, binLen, binLen, &calls, model, err);
+        EXPECT(!ok);
+        EXPECT_MSG(err.find("modelo demasiado grande para a memória") !=
+                       std::string::npos,
+                   "o teto de memória não deu a mensagem honesta: %s",
+                   err.c_str());
+        EXPECT(err.find("corrompido") == std::string::npos);
+        EXPECT(calls == 0u);   // nada foi materializado (sem crash, sem RAM)
+        // a linha COMPLETA do dono (FAZ 1) — com file= — no erro
+        EXPECT(err.find("glb: view0 buffer0 off=0 len=314572800 acc=0 "
+                        "declared=314572800 real=314572800") !=
+               std::string::npos);
+    }
+
+    // ---- A REGRA DO DONO (FAZ 3): off+len ≤ real E ≤ declared — um view
+    // dentro do REAL mas acima do DECLARADO é mentira distinguida --------
+    {
+        // buffer real 100 B (o loader), DECLARADO 50 B (o JSON), view [0,60)
+        char js[512];
+        std::snprintf(js, sizeof(js),
+            "{\"asset\":{\"version\":\"2.0\"},"
+            "\"buffers\":[{\"byteLength\":50}],"
+            "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,"
+            "\"byteLength\":60}],"
+            "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,"
+            "\"count\":3,\"type\":\"VEC3\"}],"
+            "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}],"
+            "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],"
+            "\"scene\":0}");
+        GltfModel model;
+        std::string err;
+        u64 calls = 0;
+        const bool ok =
+            parseWith(std::string(js), 100u, 38051884u, &calls, model, err);
+        EXPECT(!ok);
+        EXPECT_MSG(err.find("acima do byteLength declarado") !=
+                       std::string::npos,
+                   "o view acima do DECLARADO não deu a causa distinta: %s",
+                   err.c_str());
+        // a linha completa com os números DIVERGENTES (declared=50,
+        // real=100) + file= o disco (FAZ 1) — sem «…», sem truncar
+        EXPECT(err.find("glb: view0 buffer0 off=0 len=60 acc=0 "
+                        "declared=50 real=100 file=38051884") !=
+               std::string::npos);
+    }
+    // ---- e o view DENTRO de ambos (real 100, declarado 50, view [0,50))
+    // passa (o limite exclusivo em ação — a fixture (i) do dono) -----------
+    {
+        char js[512];
+        std::snprintf(js, sizeof(js),
+            "{\"asset\":{\"version\":\"2.0\"},"
+            "\"buffers\":[{\"byteLength\":50}],"
+            "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,"
+            "\"byteLength\":50}],"
+            "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,"
+            "\"count\":3,\"type\":\"VEC3\"}],"
+            "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}],"
+            "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],"
+            "\"scene\":0}");
+        GltfModel model;
+        std::string err;
+        u64 calls = 0;
+        const bool ok =
+            parseWith(std::string(js), 100u, 38051884u, &calls, model, err);
+        if (!ok) {
+            EXPECT_MSG(false, "o view a acabar no DECLARADO foi recusado: %s",
+                       err.c_str());
+            return;   // os derefs seguintes são UB — sai LIMPO
+        }
         EXPECT(model.meshes.size() == 1u);
     }
 }
