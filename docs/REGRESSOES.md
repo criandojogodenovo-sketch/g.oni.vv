@@ -551,3 +551,16 @@ Prova de mutação (mutacao-R030a-vermelho.txt): `0x2196F3` (o azul órfão da s
 | Linha do replay | FASE 14.4 do c33_virtual — projeto de 120 glifos com a fonte real: o label da faixa de status NÃO truncado (o flag `truncado` do audit) — o middle preservou o suffixo |
 | Prova de mutação | mutação R-025a: o middle morto (o projeto cru na composição) → FASE 14.4 VERMELHA (o label da status bar truncado); reposto → 456/456. (A 1ª rodada da mutação ficou verde POR ACIDENTE — o audit só corre no frame de export e a 14.4 lia o registo STALE; armado `g_layoutExportPending` — a lição R-014: a prova tem de falhar pela razão certa) |
 | Padrão proibido | (novo) «string composta inteira no fit do rodapé» — o projeto passa sempre pelo orçamento próprio com middle |
+
+## R-014 · a sentinela do import REESCRITA: os perfis reais do device (0.9.6.12 · IMPORT A2)
+
+| campo | valor |
+|---|---|
+| ID | R-014 |
+| Reportado | o dono (a spec A2: «os três ficheiros reais importam e chegam ao picker e aos Ficheiros; nenhum falha em silêncio») |
+| Sintoma exato | os logs do device: (1) high_poly_base_mesh.glb — o layout certo (copiado == total == 2794956) mas «accessor (view 2) falhou: bufferView fora do buffer»; (2) stanford_dragon_pbr.glb — «bufferView da imagem fora do buffer»; (3) scene.gltf — «buffer externo não resolvido: scene.bin» (errno=2) |
+| Causa raiz | (1) o bound da validação dupla-contava o accessorByteOffset (off+accOff+len > real): um GLB VÁLIDO com views empacotadas no fim do BIN era recusado — o falso «fora do buffer» que o dono viu; (2) curado pelo A1/R-022; (3) curado pelo A1/R-021 |
+| Fix | (a) o guard copiado==total (o chunk BIN tem de viver inteiro no ficheiro — a comparação completa no erro); (b) o bound correto (off + bLen ≤ real — o view dentro do buffer; o accessor dentro do view é o check de sempre); (c) o erro NOMEIA o buffer inexistente; (d) view genuinamente fora = DEGRADA a primitiva (W + a linha + contador + toast) e importa o resto; em toda a falha a linha «glb: view<i> buffer<b> off=… len=… declared=… real=…» (nunca truncado) |
+| Teste sentinela | `glb_a2_perfis_do_device` (test_import_gltf.cpp: as fixtures (i)/(i')/(ii)/(ii-b)/(iii)/(iv) da spec em código) + `regress_import_r014_reescrita` (test_sentinels.cpp: o caminho de ficheiro — .gmesh em assets/ + o listing do picker + a imagem podre + o slice truncado + os quatro números no log) |
+| Prova de mutação | A2-a irmãos off → regress_gltf_irmaos FALHOU (8 testes); A2-b binStart sem alinhamento → regress_glb_imagem FALHOU (2); A2-c validação só-imagens → glb_a2_perfis FALHOU (5); A2-d guard do slice morto → regress_import_r014_reescrita FALHOU (1); repostas → 0 falhas |
+| Padrão proibido | (novos) «falha de bufferView sem a comparação completa no log»; «geometria fora dos limites mata o import com primitivas boas a sobrar» |

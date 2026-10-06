@@ -34,6 +34,65 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.9.6.12 — GRUPOS J (ARQUITETURA DO EDITOR) + IMPORT A2 (o contrato da hierarquia; os três ficheiros reais do dono)
+
+**O que existe agora (P-08: a hierarquia é CONTRATO; os 5 defeitos de
+arquitetura curados nas suas causas raiz reais; o import com o log de
+comparação completo e a degradação que não mata o import):**
+- **O CONTRATO** (`docs/LAYOUT_HIERARCHY.md` — NOVO): a árvore de regiões
+  do editor é a fonte oficial (§0 a tabela nome↔símbolo, §1 a árvore, §2
+  as 7 regras, §3 os pisos, §4 as sentinelas); região nova entra PRIMEIRO
+  no contrato. O gate `hierarchy-check` (scripts/hierarchy_check.py, NOVO
+  no CI) afere que o contrato cita símbolos REAIS e que as sentinelas do
+  contrato vivem no fonte.
+- **J1/R-022 — a toolbar que subia à top bar**: a causa raiz eram DUAS
+  fontes para a altura do drawer (o draw tapava, o `currentDrawerH()` lia
+  o cru) — no device (drawer 240 persistido, viewport 208dp) o viewRect
+  colapsava a ZERO e a toolbar desenhava-se SOBRE a barra de topo. Agora:
+  `safe::effectiveDrawerH` (FONTE ÚNICA, piso `kViewportMinH` = 104dp) +
+  clamps no chrome (a toolbar nunca sai do rect POR CONSTRUÇÃO). A
+  sentinela apanhou TAMBÉM o `toolPanel` 8dp fora do viewport de 288dp e
+  o Ímã 4dp fora no C33 (756dp) — ambos corrigidos.
+- **J2/R-023 — o «Glob+»**: os chips da strip tinham larguras FIXAS
+  (312dp num viewport de 288dp com o [+] a viver na strip) — o chip
+  Global era COBERTO, não ellipsado. Agora: chips MEDIDOS (wrap-content
+  com piso 56dp), a reserva do [+] respeitada, a degradação por ordem
+  (Perspetiva → Cena → Global por último) e o ellipsis só como último
+  recurso. «pesquisar TIC» afervado no piso 200dp da hierarquia.
+- **J3/R-024 — o rect do canvas**: o glViewport/glScissor/aspect-do-rect
+  já existiam; o que faltava era o DIAGNÓSTICO — a linha
+  `vp3d: viewport set to (x, y, w x h) — aspect N.NNN` no engine.log
+  quando o rect muda (a arquitetura real não tem o salto JNI que a spec
+  imaginava — tudo é C++ sobre UMA superfície).
+- **J4/R-025 — o rodapé**: a posição sempre foi a última faixa (vigiada);
+  o defeito real era o CORTE: o nome do projeto é agora elipsado A MEIO
+  (`textfit::ellipsizeMiddle` NOVO) com o orçamento próprio — o suffixo
+  «FPS n · TICs n» sobrevive a nomes de 120 glifos.
+- **IMPORT A2 — os três ficheiros reais**: a CAUSA do high_poly era o
+  bound da validação que dupla-contava o `accessorByteOffset` (um GLB
+  válido com views empacotadas estilo gltfpack era recusado) — corrigido
+  (`off + bLen ≤ real`). Em toda a falha de bufferView a linha completa
+  «glb: view<i> buffer<b> off=… len=… declared=… real=…» vai ao
+  engine.log E ao erro (nunca truncado). `bufferView.buffer` inexistente
+  NOMEIA o índice. View genuinamente fora do BIN = DEGRADA a primitiva
+  (W + toast) e importa o resto. Guard `copiado == total` no GLB (um
+  slice truncado morre com a comparação, não disfarçado). R-014
+  reescrita: import → .gmesh em assets/ → o listing do picker; imagem
+  podre → mesh sem texturas + W; browser isFile + 1-toque (A4) re-verificado.
+
+**Sentinelas novas:** `regress_hierarquia_contrato` (R-022) ·
+`regress_texto_strip_campo` (R-023) · `regress_viewport_rect_segue`
+(R-024) · `regress_rodape_intocavel` (R-025) ·
+`glb_a2_perfis_do_device` (as fixtures reais da spec) ·
+`regress_import_r014_reescrita` (R-014). **FASE 14** do c33_virtual: o
+contrato ao device com a FONTE REAL + o PNG do estado J (drawer aberto)
++ o log vp3d A ACONTECER + o rodapé com o projeto longo.
+
+**Verificação no Realme C33 (checklist do dono — por preencher, ver
+RELATORIO-0.9.6.12):** os 4 grupos J (a checklist pass/fail do prompt) +
+o sign-off A2 (a-d): os três ficheiros importam e aparecem no picker e
+nos Ficheiros; 1 toque seleciona.
+
 ## 0.9.6.10 — GRUPO UI: A REESCRITA DA APRESENTAÇÃO (spec G · grafite+âmbar+vidro)
 
 **O que existe agora (a estrutura, densidade e inventário da imagem 1 do
