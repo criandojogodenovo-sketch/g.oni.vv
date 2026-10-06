@@ -14,7 +14,7 @@ namespace gizmo {
 
 const f32* axisColor(Axis a, bool hovered) {
     if (hovered) {
-        return kAxisHover;
+        return theme::kTheme.accent;   // o hover é o ÂMBAR (spec G)
     }
     switch (a) {
         case Axis::X:

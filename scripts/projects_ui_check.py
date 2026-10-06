@@ -31,10 +31,11 @@ FMT = ROOT / "app/src/main/java/vv/goni/ProjectsFormat.java"
 VVP = ROOT / "app/src/main/java/vv/goni/VvProjects.java"
 ICN = ROOT / "app/src/main/java/vv/goni/UiIcons.java"
 
-TOKENS_F = ("0xFF141414", "0xFF1E1E1E", "0xFF262626", "0xFF2E2E2E",
-            "0xFFE6E6E6", "0xFFA6A6A6", "0xFFF5F5F5", "0xFFDADADA",
-            "0xFF141414", "0xE01E1E1E", "0xEB262626",
-            "0xFFEF5350", "0xFFFABB45")   # 0.9.6.9 spec F: mono+vidro
+TOKENS_F = ("0xFF0E0E10", "0xFF161618", "0xFF202023", "0xFF2E2E32",
+            "0xFFECECEE", "0xFFA6A6AD", "0xFFFFB020", "0xFFE09A00",
+            "0xFF0E0E10", "0xCC161618", "0xDB202023", "0xFF4A3714",
+            "0xFFE5484D", "0xFFFF8A3D", "0xFF46A758")   # 0.9.6.10 spec G:
+            # grafite+Ã¢mbar+vidro (a reescrita da apresentaÃ§Ã£o)
 
 
 def strip_comments(src: str) -> str:
@@ -97,9 +98,9 @@ def main():
         bad += fail("Novo FILL / Importar CONTORNO ausentes (G1-4b)")
     elif "outline ? ACCENT : ACCENT_INK" not in code:
         bad += fail("variante contorno do botão ausente (a tinta do fill é "
-                    "ACCENT_INK desde o mono — branco sobre branco morreu)")
+                    "ACCENT_INK escuro — branco/claro sobre âmbar morreu)")
     else:
-        print("OK  Novo projeto FILL mono · Importar projeto SÓ CONTORNO")
+        print("OK  Novo projeto FILL âmbar · Importar projeto SÓ CONTORNO")
 
     # 3) FASE 9 (G1-4c): grelha adaptável
     if "GridView.AUTO_FIT" not in code or "setColumnWidth(dp(180))" not in code:
@@ -142,7 +143,9 @@ def main():
         print("OK  ⋮/long-press: abrir/renomear/duplicar/apagar")
 
     # 7) apagar COM confirmação + SEM swipe
-    if "confirmDelete" not in code or "0xFFEF5350" not in code:
+    # (RECALIBRADO 0.9.6.10: o danger é o TOKEN DANGER da spec G #E5484D —
+    # o hex antigo #EF5350 era da tabela F)
+    if "confirmDelete" not in code or "flatButton(\"Apagar\", DANGER, TEXT1)" not in code:
         bad += fail("apagar sem confirmação com botão danger")
     if re.search(r"setOnSwipe|SwipeRefresh|swipe", code, re.I):
         bad += fail("swipe-to-delete presente (PROIBIDO — spec F)")
@@ -158,15 +161,15 @@ def main():
     # 9) TOKENS spec F — zero hex fora das constantes
     for tok in TOKENS_F:
         if tok not in code:
-            bad += fail(f"token spec F ausente: {tok}")
+            bad += fail(f"token spec G ausente: {tok}")
     hexes = re.findall(r"0x[0-9A-Fa-f]{8}", code)
     allowed = sum(1 for h in hexes if h.upper() in
                   tuple(t.upper() for t in TOKENS_F))
     if len(hexes) != allowed:
-        bad += fail(f"hex inline fora dos tokens spec F: {len(hexes) - allowed}")
+        bad += fail(f"hex inline fora dos tokens spec G: {len(hexes) - allowed}")
     elif bad == 0:
-        print("OK  tokens spec F (mono+vidro — espelho Java do ui/Theme.h) "
-              "centralizados")
+        print("OK  tokens spec G (grafite+âmbar+vidro — espelho Java do "
+              "ui/Theme.h) centralizados")
 
     # 10) diálogos escuros
     n_builders = len(re.findall(r"new AlertDialog\.Builder\(", code))
@@ -197,7 +200,7 @@ def main():
     if bad:
         print(f"PROJECTS-UI CHECK: {bad} falha(s)")
         sys.exit(1)
-    print("PROJECTS-UI CHECK: OK (0.9.6.9 spec F: mono+vidro)")
+    print("PROJECTS-UI CHECK: OK (0.9.6.10 spec G: grafite+ambar+vidro)")
 
 
 if __name__ == "__main__":

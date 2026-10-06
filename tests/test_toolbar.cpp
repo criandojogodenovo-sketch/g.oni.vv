@@ -264,43 +264,57 @@ TEST(icones_pelo_nome_funcional) {
     }
 }
 
-// ---- 4. THEME (spec F): tabela exata + CONTRASTES (a auditoria) ---------------
-// RECALIBRADO 0.9.6.9 (GRUPO F · IDENTIDADE): os valores EXATOS eram os da
-// spec A (navy + accent AZUL #2196F3); o dono pediu «tokens mono+vidro» — o
-// REGRESSO à rampa neutra da F1 (#141414/#1E1E1E/#2E2E2E/#E6E6E6/#F5F5F5 —
-// os PRÓPRIOS valores com que a app nasceu) + o vidro (alphas 0.88/0.92/
-// 0.55 nas superfícies) + accentInk ESCURO (o fill do accent é BRANCO — a
-// tinta em cima dele já não pode ser text1). A asserção continua EXATA.
+// ---- 4. THEME (spec G): tabela exata + CONTRASTES (a auditoria) ---------------
+// RECALIBRADO 0.9.6.10 (GRUPO UI · A REESCRITA DA APRESENTAÇÃO): os
+// valores EXATOS eram os da spec F (mono+vidro — accent BRANCO #F5F5F5);
+// o dono DECIDIU a Paleta A OFICIAL depois de ver o mono no device (os
+// fills brancos cegantes do anti-exemplo): GRAFITE+ÂMBAR+VIDRO
+// (#0E0E10/#161618/#202023/#2E2E32 + accent ÂMBAR #FFB020 + accentDim
+// #4A3714 + warn LARANJA #FF8A3D ≠ accent). A asserção continua EXATA.
 
-TEST(theme_tabela_spec_f_exata) {
-    // accent — O MONO: #F5F5F5 (o ACCENT da F1; o azul #2196F3 morreu)
-    EXPECT(nearEqF(theme::kTheme.accent[0], 245.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.accent[1], 245.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.accent[2], 245.0f / 255.0f, 1e-4f));
-    // MONO a sério: o accent é NEUTRO (ΔR=G=B = 0 — zero croma)
-    EXPECT(theme::kTheme.accent[0] == theme::kTheme.accent[1] &&
-           theme::kTheme.accent[1] == theme::kTheme.accent[2]);
-    // bg #141414 · surface #1E1E1E · surface2 #262626 · border #2E2E2E
-    // (a rampa F1 de volta)
-    EXPECT(nearEqF(theme::kTheme.bg[0], 20.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.surface[0], 30.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.surface2[1], 38.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.border[2], 46.0f / 255.0f, 1e-4f));
-    // O VIDRO: surface α0.88 · surface2 α0.92 · border α0.55 (bg opaco)
-    EXPECT(nearEqF(theme::kTheme.surface[3], 0.88f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.surface2[3], 0.92f, 1e-4f));
+TEST(theme_tabela_spec_g_exata) {
+    // accent — O ÂMBAR: #FFB020 (o mono morreu com os fills brancos)
+    EXPECT(nearEqF(theme::kTheme.accent[0], 255.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.accent[1], 176.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.accent[2], 32.0f / 255.0f, 1e-4f));
+    // O AZUL MORREU no accent: B é o canal MENOR (o âmbar é quente)
+    EXPECT(theme::kTheme.accent[2] < theme::kTheme.accent[1]);
+    // bg #0E0E10 · surface #161618 · surface2 #202023 · border #2E2E32
+    // (a rampa GRAFITE — o tinge frio ≤4/255 no canal B)
+    EXPECT(nearEqF(theme::kTheme.bg[0], 14.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.surface[0], 22.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.surface2[1], 32.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.border[2], 50.0f / 255.0f, 1e-4f));
+    // O VIDRO (spec G): surface α0.80 (A DECISÃO DO DONO) · surface2 α0.86
+    // · border α0.55 · bg opaco
+    EXPECT(nearEqF(theme::kTheme.surface[3], 0.80f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.surface2[3], 0.86f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.border[3], 0.55f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.bg[3], 1.0f, 1e-4f));
-    // text1 #E6E6E6 · text2 #A6A6A6 (neutro) · scrim 60%
-    EXPECT(nearEqF(theme::kTheme.text1[0], 230.0f / 255.0f, 1e-4f));
+    // o BORDO e o HIGHLIGHT do vidro (#FFFFFF1F / #FFFFFF0A — a spec G)
+    EXPECT(nearEqF(theme::kTheme.glassEdge[0], 1.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.glassEdge[3], 31.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.glassTop[3], 10.0f / 255.0f, 1e-4f));
+    // text1 #ECECEE · text2 #A6A6AD · scrim 60%
+    EXPECT(nearEqF(theme::kTheme.text1[0], 236.0f / 255.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.text2[1], 166.0f / 255.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.scrim[3], 0.60f, 1e-4f));
-    // accentInk ESCURO (#141414 — a tinta sobre o fill BRANCO; a spec A
-    // tinha accentInk=text1: com o accent mono seria branco sobre branco)
-    EXPECT(nearEqF(theme::kTheme.accentInk[0], 20.0f / 255.0f, 1e-4f));
-    // voniComment — o DEGRAU do mono (#757575 → #8A8A8A): o bg novo é mais
-    // claro que o navy e o piso 4,5:1 do comment mantém-se (4,0 → 5,3:1)
+    // accentInk ESCURO (#0E0E10 — a tinta sobre o fill ÂMBAR, 10,5:1)
+    EXPECT(nearEqF(theme::kTheme.accentInk[0], 14.0f / 255.0f, 1e-4f));
+    // accentDim #4A3714 — o FILL DA SELEÇÃO (âmbar 25% sobre grafite)
+    EXPECT(nearEqF(theme::kTheme.accentDim[0], 74.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.accentDim[1], 55.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.accentDim[2], 20.0f / 255.0f, 1e-4f));
+    // warn LARANJA #FF8A3D — NUNCA igual ao accent (hue 24° vs 39°)
+    EXPECT(nearEqF(theme::kTheme.warn[0], 255.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.warn[1], 138.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.warn[2], 61.0f / 255.0f, 1e-4f));
+    EXPECT(theme::kTheme.warn[2] > theme::kTheme.accent[2]);   // laranja ≠ âmbar
+    EXPECT(theme::kTheme.warn[1] < theme::kTheme.accent[1]);
+    // voniComment #8A8A8A (5,6:1 no grafite — mantém-se do F)
     EXPECT(nearEqF(theme::kTheme.voniComment[0], 138.0f / 255.0f, 1e-4f));
+    // voniUser == text1 (o grafite trouxe o user ao text1 da casa)
+    EXPECT(theme::kTheme.voniUser[0] == theme::kTheme.text1[0]);
 }
 
 TEST(theme_contraste_auditoria_spec) {
@@ -312,18 +326,27 @@ TEST(theme_contraste_auditoria_spec) {
     EXPECT(theme::contrastOnSurface(theme::kTheme.danger) >= 3.0f);
     EXPECT(theme::contrastOnSurface(theme::kTheme.ok) >= 3.0f);
     EXPECT(theme::contrastOnSurface(theme::kTheme.warn) >= 3.0f);
-    // 0.9.6.9 (GRUPO F) · O VIDRO NÃO MENTE À AUDITORIA: o pior caso de um
-    // painel α0.88 é estar sobre uma cena BRANCA PURA — os pisos SEGURAM
-    // lá também (contrastOnGlass — a matemática do blend do device)
+    // 0.9.6.10 (GRUPO UI) · O VIDRO NÃO MENTE À AUDITORIA: os pisos REAIS
+    // (α0.80 sobre o bg grafite — o que está por trás dos painéis dokados)
+    // ficam TODOS ≥4,5 (contrastOnGlassReal — a matemática do blend do
+    // device aplicada ao caso REAL)
+    EXPECT(theme::contrastOnGlassReal(theme::kTheme.text1) >= 4.5f);
+    EXPECT(theme::contrastOnGlassReal(theme::kTheme.text2) >= 4.5f);
+    EXPECT(theme::contrastOnGlassReal(theme::kTheme.accent) >= 4.5f);
+    // O PIOR CASO PATOLÓGICO (cena BRANCA PURA por trás do vidro 80%):
+    // o que PODE flutuar sobre a cena viva (text1/accent — a regra da
+    // casa) mantém os pisos; text2/danger NÃO flutuam sobre a cena (vivem
+    // em painéis dokados — aferidos em cima); o gate é a própria regra
     EXPECT(theme::contrastOnGlass(theme::kTheme.text1) >= 4.5f);
-    EXPECT(theme::contrastOnGlass(theme::kTheme.text2) >= 4.5f);
     EXPECT(theme::contrastOnGlass(theme::kTheme.accent) >= 3.0f);
-    EXPECT(theme::contrastOnGlass(theme::kTheme.danger) >= 3.0f);
-    EXPECT(theme::contrastOnGlass(theme::kTheme.ok) >= 3.0f);
-    EXPECT(theme::contrastOnGlass(theme::kTheme.warn) >= 3.0f);
-    // a TINTA sobre o fill accent (branco) — 16,9:1
+    // a TINTA sobre o fill âmbar — 10,5:1
     EXPECT(theme::contrastRatio(theme::kTheme.accentInk,
                                 theme::kTheme.accent) >= 4.5f);
+    // text1/accent sobre o accentDim (o fill da SELEÇÃO) — 9,6/6,2:1
+    EXPECT(theme::contrastRatio(theme::kTheme.text1,
+                                theme::kTheme.accentDim) >= 4.5f);
+    EXPECT(theme::contrastRatio(theme::kTheme.accent,
+                                theme::kTheme.accentDim) >= 3.0f);
     // accentPress MAIS ESCURO que accent (feedback de premir)
     EXPECT(theme::kTheme.accentPress[0] < theme::kTheme.accent[0]);
     // a razão em si é estável (função PURA — determinística)

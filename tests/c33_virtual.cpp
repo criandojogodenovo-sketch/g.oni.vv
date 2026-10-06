@@ -3154,21 +3154,26 @@ int main() {
             check(bigIdx != 0xFFFFFFFFu,
                   "13.1 o registo tem painéis (o chrome do editor)");
             // PIXEL vs REGISTO (1): o MAIOR painel do registo — o canto dele
-            // no PNG tem de ser o COMPOSTO DE VIDRO: surface α0.88 sobre o
-            // clear #141414 = (29,29,29), ≠ do fundo (20,20,20) — o rect do
-            // registo e o pixel dizem o MESMO (RECALIBRADO 0.9.6.9 · GRUPO
-            // F: ANTES os painéis eram OPACOS e o cheque era só «≠ fundo»;
-            // agora o PIXEL É a matemática do vidro: 0.88·30+0.12·20≈29)
+            // no PNG tem de ser o COMPOSTO DE VIDRO: surface α0.80 sobre o
+            // clear #0E0E10 = (20,20,22), ≠ do fundo (14,14,16) — o rect do
+            // registo e o pixel dizem o MESMO (RECALIBRADO 0.9.6.10 ·
+            // GRUPO UI: o vidro passou a α0.80 — a diferença para o fundo
+            // é 6 (não ±8 crus): o cheque passou a ser A MATEMÁTICA do
+            // blend, como a 13.9 — o pixel É blend(surface@0.80, bg))
             {
                 const auto& e = rec.entries[bigIdx];
                 const u32 px = (u32)(e.x + 3.0f), py = (u32)(e.y + 3.0f);
                 check(px < img.width && py < img.height,
                       "13.1 o maior painel esta DENTRO do ecra");
+                f32 expG[4];
+                theme::blendOver(theme::kTheme.surface, theme::kTheme.bg,
+                                 expG);
+                const i32 comp = (i32)(expG[2] * 255.0f + 0.5f);
                 const size_t pi = (size_t(py) * img.width + px) * 4;
-                const int d = (int)img.rgba[pi + 2] - 20;
-                check(d > 8 || d < -8,
-                      "13.1 o pixel do maior painel NAO e o fundo (o "
-                      "registo bate com o PNG)");
+                const i32 d = (i32)img.rgba[pi + 2] - comp;
+                check(d >= -1 && d <= 1,
+                      "13.1 o pixel do maior painel e o COMPOSTO DO VIDRO "
+                      "(o registo bate com o PNG)");
             }
             // PIXEL vs REGISTO (2): a BANDA da toolbar (56px) POVOADA — a
             // fração de pixels != clear (RECALIBRADO 0.9.6.9 · GRUPO F: o
@@ -3981,18 +3986,24 @@ int main() {
 
                 // (2) O CLEAR LÊ O TOKEN: o céu da viewport (entre os
                 // painéis, acima do horizonte da grelha) é o BG TOKEN
-                // #141414 — não o preto do framebuffer (o wipe do stub,
-                // o achado do Grupo F) nem um literal órfão
+                // #0E0E10 (RECALIBRADO 0.9.6.10: o grafite da spec G) —
+                // não o preto do framebuffer (o wipe do stub, o achado
+                // do Grupo F) nem um literal órfão
                 {
                     // o céu: o meio da largura da viewport (entre a
                     // hierarquia [0..300] e o inspector [1212..1512]),
                     // 10px abaixo do topo da viewport — acima da grelha
                     const u32 sx = 756, sy = 90;
                     const size_t pi = (size_t(sy) * imgF.width + sx) * 4;
-                    check(imgF.rgba[pi] == 20 && imgF.rgba[pi + 1] == 20 &&
-                              imgF.rgba[pi + 2] == 20,
+                    const i32 bgR = (i32)(theme::kTheme.bg[0] * 255.0f +
+                                         0.5f);
+                    const i32 bgB = (i32)(theme::kTheme.bg[2] * 255.0f +
+                                         0.5f);
+                    check(imgF.rgba[pi] == bgR &&
+                              imgF.rgba[pi + 1] == bgR &&
+                              imgF.rgba[pi + 2] == bgB,
                           "13.9 o clear LE o token: o ceu da viewport e o "
-                          "bg #141414 (era o literal fossil/um wipe preto)");
+                          "bg #0E0E10 (era o literal fossil/um wipe preto)");
                 }
 
                 // (3) O VIDRO: o painel da hierarquia é o COMPOSTO
@@ -4031,12 +4042,14 @@ int main() {
                         check(d0 >= -1 && d0 <= 1 && d1 >= -1 && d1 <= 1 &&
                                   d2 >= -1 && d2 <= 1,
                               "13.9 o VIDRO: o painel e o composto "
-                              "blend(surface@0.88, bg) — a matematica do "
+                              "blend(surface@0.80, bg) — a matematica do "
                               "device no pixel");
                         // translúcido a sério: NÃO é a surface sólida
-                        check(imgF.rgba[pi] != 30,
+                        // (RECALIBRADO 0.9.6.10: a sólida é 22 — o
+                        // composto é 20; Δ2 > tolerância ±1)
+                        check(imgF.rgba[pi] != 22,
                               "13.9 o VIDRO e translucido: o pixel NAO e a "
-                              "surface solida (a=1 desenharia 30)");
+                              "surface solida (a=1 desenharia 22)");
                     }
                 }
 

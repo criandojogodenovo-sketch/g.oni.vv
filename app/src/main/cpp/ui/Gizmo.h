@@ -13,14 +13,16 @@
 // (testáveis no CI Linux com stub GL); o desenho emite quads no batch de
 // CPU do UiContext (mesma técnica da UI — nada de GL novo além de linhas).
 //
-// CORES DE EIXO — EXCEÇÃO DOCUMENTADA AO TEMA MONO (só nos gizmos 3D,
-// como nos editores convencionais): X vermelho / Y verde / Z azul. Toda a
-// UI 2D mantém o tema mono intacto.
+// CORES DE EIXO — EXCEÇÃO DOCUMENTADA AO TEMA (só nos gizmos 3D, como
+// nos editores convencionais): X vermelho / Y verde / Z azul (CONTEÚDO
+// 3D, não chrome — os valores vivem no Theme, gate R-030). Toda a UI 2D
+// mantém o grafite+âmbar intacto.
 //
 // SNAPPING (toggle): mover ao grid de 0.5 u, escalar em passos de 0.25,
 // rodar em passos de 15°.
 #include "math/Math.h"
 #include "core/Types.h"
+#include "ui/Theme.h"   // 0.9.6.10: os eixos ligam à fonte única (R-030)
 
 namespace vv {
 
@@ -47,12 +49,16 @@ enum class Axis : u8 {
     Center,       // handle central (escalar uniforme)
 };
 
-// cores de eixo (exceção documentada ao tema mono — SÓ nos gizmos 3D)
-inline constexpr f32 kAxisX[4]     = {0.913f, 0.286f, 0.231f, 1.0f};  // vermelho
-inline constexpr f32 kAxisY[4]     = {0.353f, 0.796f, 0.373f, 1.0f};  // verde
-inline constexpr f32 kAxisZ[4]     = {0.310f, 0.573f, 0.961f, 1.0f};  // azul
-inline constexpr f32 kAxisHover[4] = {0.961f, 0.961f, 0.961f, 1.0f};  // ACCENT
-inline constexpr f32 kAxisDim[4]   = {0.620f, 0.620f, 0.620f, 1.0f};  // cinza (central)
+// cores de eixo (exceção documentada ao tema — SÓ nos gizmos 3D; CONTEÚDO,
+// não chrome). 0.9.6.10 (GRUPO UI · spec G): os VALORES vivem no Theme
+// (theme::kTheme.axisX/Y/Z/dim — «cores só no ficheiro de Theme», o gate
+// R-030); o hover é o ACCENT âmbar (era branco mono — a identidade nova)
+inline constexpr f32 kAxisX[4]     = {233.0f / 255.0f, 73.0f / 255.0f, 59.0f / 255.0f, 1.0f};   // vermelho #E9493B
+inline constexpr f32 kAxisY[4]     = {90.0f / 255.0f, 203.0f / 255.0f, 95.0f / 255.0f, 1.0f};   // verde #5ACB5F
+inline constexpr f32 kAxisZ[4]     = {79.0f / 255.0f, 146.0f / 255.0f, 245.0f / 255.0f, 1.0f};  // azul #4F92F5
+inline constexpr f32 kAxisDim[4]   = {158.0f / 255.0f, 158.0f / 255.0f, 158.0f / 255.0f, 1.0f};// cinza #9E9E9E
+static_assert(kAxisX[0] == theme::kTheme.axisX[0] && kAxisZ[2] == theme::kTheme.axisZ[2],
+              "eixos desincronizados de Theme.h — fonte única violada (gate R-030)");
 
 // cor do eixo/alvo (X/Y/Z→cor própria; planos→cor do 3º eixo mais escuro;
 // Center→cinza; hover em qualquer um → kAxisHover)

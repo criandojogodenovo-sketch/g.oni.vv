@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""gen_app_icon.py — o ícone da app G.One VV (0.9.6.9 · GRUPO F).
+"""gen_app_icon.py — o ícone da app G.One VV (0.9.6.10 · GRUPO UI).
 
-«G com 4 SETAS»: o G branco #F5F5F5 (o accent MONO) com as 4 setas do
-Move — o verbo primeiro do editor, o MESMO motivo do ícone Move do
-conjunto da casa (ui/Icons.h) — em #B5B5B5 sobre o bg mono #141414.
+«G com 4 SETAS»: o G ÂMBAR #FFB020 (o traço âmbar da spec G sobre o
+grafite) com as 4 setas do Move — o verbo primeiro do editor, o MESMO
+motivo do ícone Move do conjunto da casa (ui/Icons.h) — em #ECECEE sobre
+o bg grafite #0E0E10.
 
 REGRAS DA CASA (o manifesto diz «vetor puro, zero gradientes»):
   • NADA de gradientes/blur/sombras — só preenchimentos sólidos;
@@ -25,9 +26,12 @@ import struct
 import zlib
 
 # ---- A PALETA (o espelho dos tokens ui/Theme.h · spec F) --------------------
-BG = (20, 20, 20)        # #141414 — o token bg (o mono; == o clear da app)
-G_WHITE = (245, 245, 245)  # #F5F5F5 — o token accent (o G)
-ARROWS = (181, 181, 181)   # #B5B5B5 — um cinza entre text1 e text2
+# 0.9.6.10 (GRUPO UI · spec G): o G passa a ÂMBAR #FFB020 (o traço âmbar
+# sobre fundo grafite #0E0E10 — a decisão final do dono) e as 4 setas a
+# #ECECEE (o text-1 — mono SÓ no ícone, onde o âmbar do G já é a identidade)
+BG = (14, 14, 16)         # #0E0E10 — o token bg (o grafite; == o clear)
+G_WHITE = (255, 176, 32)  # #FFB020 — o token accent (o G ÂMBAR)
+ARROWS = (236, 236, 238)  # #ECECEE — o token text1 (as setas)
 TRANSPARENT = (0, 0, 0, 0)
 
 SIZE = 512          # o mestre (as mipmaps saem daqui por downsample)

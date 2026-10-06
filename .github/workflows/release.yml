@@ -54,6 +54,15 @@ jobs:
       - name: Gate docs-lint (R-016)
         run: python3 scripts/docs_lint_check.py
 
+      # 0.9.6.10 (GRUPO UI · R-030) — GATE THEME-HEX: «qualquer hex fora
+      # do ficheiro de Theme = CI vermelho» (a ordem expressa do dono na
+      # spec G). As cores do chrome vivem SÓ em ui/Theme.h (a tabela
+      # única) + os espelhos ligados por static_assert (UiContext.h/
+      # Gizmo.h); um literal hex de cor noutro sítio da camada de UI é um
+      # token órfão — o fóssil da spec A de novo. UM match = vermelho
+      - name: Gate theme-hex (R-030 — cores so no Theme)
+        run: python3 scripts/theme_hex_check.py
+
       - name: Configurar build dos testes
         run: cmake -S tests -B build-tests -DCMAKE_BUILD_TYPE=Release
 

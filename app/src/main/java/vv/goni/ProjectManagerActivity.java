@@ -73,25 +73,27 @@ public class ProjectManagerActivity extends Activity {
     static final int REQ_PICK_TREE_DUP = 4304;     // 0.9.0: duplicar → destino
     static final int REQ_PICK_TREE_RECOVER = 4305; // 0.9.0: re-apontar pasta
 
-    // ---- TOKENS 0.9.6.9 (espelho Java do ui/Theme.h — spec F: MONO+VIDRO).
-    // O mono de volta (a rampa neutra F1) + o vidro: os CARDS ganham o
-    // ALPHA do token (o GLA — a tela de projetos não tem cena 3D por trás,
-    // o vidro dela é o véu subtil sobre o BG, a MESMA matemática do nativo).
-    // O ACCENT_INK é NOVO: o fill do accent agora é BRANCO — a tinta em
-    // cima dele passa a ESCURA (branco sobre branco era INVISÍVEL).
-    static final int BG = 0xFF141414;        // bg (a F1 de volta)
-    static final int SURFACE = 0xFF1E1E1E;   // surface (RGB p/ texto/estado)
-    static final int SURFACE2 = 0xFF262626;  // surface-2 (premido)
-    static final int BORDER = 0xFF2E2E2E;    // border
-    static final int TEXT1 = 0xFFE6E6E6;     // text-1 (a F1)
-    static final int TEXT2 = 0xFFA6A6A6;     // text-2 (neutro; 6,9:1)
-    static final int ACCENT = 0xFFF5F5F5;    // accent — O MONO (era azul)
-    static final int ACCENT_PRESS = 0xFFDADADA;
-    static final int ACCENT_INK = 0xFF141414; // tinta SOBRE accent (16,9:1)
-    static final int SURFACE_GLA = 0xE01E1E1E; // vidro: α0.88 (cards/sheets)
-    static final int SURFACE2_GLA = 0xEB262626; // vidro denso: α0.92
-    static final int DANGER = 0xFFEF5350;
-    static final int WARN = 0xFFFABB45;
+    // ---- TOKENS 0.9.6.10 (espelho Java do ui/Theme.h — spec G:
+    // GRAFITE+ÂMBAR+VIDRO, A REESCRITA DA APRESENTAÇÃO por ordem do dono).
+    // O mono morreu no device (os fills brancos do accent eram BLOCOS
+    // CEGANTES — o anti-exemplo do dono): a Paleta A OFICIAL é grafite
+    // #0E0E10 + âmbar #FFB020 + vidro 80%. O ACCENT_INK continua ESCURO
+    // (10,5:1 sobre o âmbar). Os CARDS mantêm o véu do vidro (GLA α0.80).
+    static final int BG = 0xFF0E0E10;        // bg (o grafite)
+    static final int SURFACE = 0xFF161618;   // surface (RGB p/ texto/estado)
+    static final int SURFACE2 = 0xFF202023;  // surface-2 (premido)
+    static final int BORDER = 0xFF2E2E32;    // border
+    static final int TEXT1 = 0xFFECECEE;     // text-1
+    static final int TEXT2 = 0xFFA6A6AD;     // text-2 (7,5:1)
+    static final int ACCENT = 0xFFFFB020;    // accent — O ÂMBAR (a spec G)
+    static final int ACCENT_PRESS = 0xFFE09A00;
+    static final int ACCENT_INK = 0xFF0E0E10; // tinta SOBRE âmbar (10,5:1)
+    static final int ACCENT_DIM = 0xFF4A3714; // o fill da seleção (âmbar 25%)
+    static final int SURFACE_GLA = 0xCC161618; // vidro: α0.80 (cards/sheets)
+    static final int SURFACE2_GLA = 0xDB202023; // vidro denso: α0.86
+    static final int DANGER = 0xFFE5484D;
+    static final int WARN = 0xFFFF8A3D;      // LARANJA (nunca == âmbar)
+    static final int OK = 0xFF46A758;
 
     private final List<VvProjects.Entry> all = new ArrayList<>();   // fonte (só a MAIN thread mexe — REG-001)
     private final List<VvProjects.Entry> shown = new ArrayList<>(); // filtro+ordem (idem)
