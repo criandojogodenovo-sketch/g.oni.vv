@@ -91,6 +91,14 @@ struct Layout {
                                   // viewport não comporta [+] ao lado da
                                   // toolbar (device: viewport de ~288dp)
     UiRect view{};            // o viewport central (para referência)
+    // 0.9.6.10 (GRUPO UI · a REGRA DO PAI-PAINEILO — o anti-exemplo da
+    // imagem 2: «nunca mais painéis/toolbar sem painel-mãe, sem cabeçalho,
+    // sem clip»): TUDO o que flutua sobre a grelha ganha um PAI de vidro
+    UiRect strip{};           // a strip do TOPO: [Cena][Perspetiva][Global]
+    UiRect stripCena{}, stripPersp{}, stripGlobal{};   // os chips da strip
+    UiRect stackPanel{};      // o pai do stack vertical (o rail esquerdo)
+    UiRect toolPanel{};       // o pai da toolbar inferior (+ a legenda)
+    UiRect plusPanel{};       // o pai do [+]
 };
 
 // resolve o layout dentro do rect do viewport central (o view JÁ vem

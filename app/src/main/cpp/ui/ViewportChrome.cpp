@@ -115,9 +115,13 @@ Layout layout(const UiRect& view) {
     // toolbar em baixo come 56dp + 8 de folga; o topo tem 8 de margem).
     // O menor nº de colunas que caiba — 1 coluna nos ecrãs largos (o
     // layout de sempre, ZERO mudança onde cabe), 2/3 nos curtos.
-    const f32 availH = view.h - margin - theme::dp(kBottomH) - margin;
-    const f32 availW = view.w - 2.0f * margin -
-                       (L.plusTopRight ? theme::dp(56.0f) + margin : 0.0f);
+    // 0.9.6.10: a strip do topo (48dp) come a altura disponível do stack
+    const f32 stripH = theme::dp(48.0f);
+    const f32 availH =
+        view.h - margin - stripH - margin - theme::dp(kBottomH) - margin;
+    // 0.9.6.10: SEM a reserva do [+] — no estreito ele vive DENTRO da
+    // strip do topo (o fim direito dela), não ao lado do stack
+    const f32 availW = view.w - 2.0f * margin;
     u32 cols = 1;
     bool fits = false;
     for (; cols < 5; ++cols) {
@@ -145,9 +149,26 @@ Layout layout(const UiRect& view) {
     // os rects ficam degenerados e o draw salta)
     L.stackVisible = fits;
     L.stackCols = fits ? cols : 1;
+    // ---- 0.9.6.10 (GRUPO UI · a imagem 1) · A STRIP DO TOPO DA VIEWPORT:
+    // a tab [Cena] (a vista ativa — o underline âmbar como as tabs de
+    // modo) + os chips [Perspetiva] (a projeção REAL da câmara do editor)
+    // e [Global] (o espaço REAL do gizmo — sempre mundial, ver Gizmo.h) —
+    // INFORMAÇÃO REAL em chips, na faixa de vidro de 48dp (o pai; o [+]
+    // dos ecrãs estreitos vive no fim direito DELA)
+    L.strip = {view.x, view.y, view.w, stripH};
+    {
+        const f32 chipH = theme::dp(32.0f);
+        const f32 cy = view.y + (stripH - chipH) * 0.5f;
+        L.stripCena   = {view.x + margin, cy, theme::dp(88.0f), chipH};
+        L.stripPersp  = {L.stripCena.x + theme::dp(88.0f) + theme::dp(8.0f),
+                         cy, theme::dp(112.0f), chipH};
+        L.stripGlobal = {L.stripPersp.x + theme::dp(112.0f) + theme::dp(8.0f),
+                         cy, theme::dp(88.0f), chipH};
+    }
     // ---- stack (coluna-major: undo/redo/save/dup/paste, preenchendo
     // coluna a coluna — a ordem de leitura de sempre; degenerado quando
-    // ESCONDIDO — o draw salta) ----
+    // ESCONDIDO — o draw salta). 0.9.6.10: desce abaixo da strip e ganha
+    // o PAI de vidro (o rail esquerdo da referência) ----
     const u32 rowsPerCol = (5u + L.stackCols - 1u) / L.stackCols;
     for (u32 i = 0; i < 5; ++i) {
         if (!L.stackVisible) {
@@ -156,11 +177,24 @@ Layout layout(const UiRect& view) {
         }
         const u32 col = i / rowsPerCol;
         const u32 row = i % rowsPerCol;
-        L.stack[i] = {view.x + margin +
+        L.stack[i] = {view.x + margin + theme::dp(8.0f) +
                           static_cast<f32>(col) * (stackBtn + stackGap),
-                      view.y + margin +
+                      view.y + stripH + margin +
                           static_cast<f32>(row) * (stackBtn + stackGap),
                       stackBtn, stackBtn};
+    }
+    if (L.stackVisible) {
+        // o PAI do stack: cobre as colunas com 8dp de folga (o rail)
+        const f32 panelW =
+            static_cast<f32>(L.stackCols) * stackBtn +
+            static_cast<f32>(L.stackCols - 1u) * stackGap + theme::dp(16.0f);
+        const f32 panelH =
+            static_cast<f32>(rowsPerCol) * stackBtn +
+            static_cast<f32>(rowsPerCol - 1u) * stackGap + theme::dp(16.0f);
+        L.stackPanel = {L.stack[0].x - theme::dp(8.0f),
+                        L.stack[0].y - theme::dp(8.0f), panelW, panelH};
+    } else {
+        L.stackPanel = {0.0f, 0.0f, 0.0f, 0.0f};
     }
     // FASE 9 (G2-10): o TRIAD foi REMOVIDO — os "pontinhos fantasma" do
     // dono (canto sup-dir do viewport, fora do mock); a orientação vive
@@ -171,20 +205,35 @@ Layout layout(const UiRect& view) {
     const f32 botH = theme::dp(kBottomH);
     const f32 toolW = theme::dp(kToolBtn);
     const f32 by = view.y + view.h - botH - theme::dp(8.0f);
-    f32 bx = view.x + theme::dp(8.0f);
+    f32 bx = view.x + theme::dp(16.0f);
     L.selectBtn = {bx, by, toolW, botH};  bx += toolW + theme::dp(8.0f);
     L.moveBtn   = {bx, by, toolW, botH};  bx += toolW + theme::dp(8.0f);
     L.rotateBtn = {bx, by, toolW, botH};  bx += toolW + theme::dp(8.0f);
     L.scaleBtn  = {bx, by, toolW, botH};  bx += toolW + theme::dp(8.0f);
     L.snapBtn   = {bx, by, toolW, botH};
+    // o PAI da toolbar: da legenda (12sp + 6dp acima) até AO LIMITE do
+    // fundo da viewport (flush — o padding de baixo do pai É a margem)
+    L.toolPanel = {L.selectBtn.x - theme::dp(8.0f),
+                   by - theme::dp(22.0f),
+                   5.0f * toolW + 4.0f * theme::dp(8.0f) + theme::dp(16.0f),
+                   botH + theme::dp(22.0f) + theme::dp(8.0f)};
     // "+" — inferior direito se cabe; senão o canto SUPERIOR direito
     if (plusBottom) {
         L.addTicBtn = {view.x + view.w - theme::dp(56.0f) - margin, by,
                        theme::dp(56.0f), botH};
     } else {
-        L.addTicBtn = {view.x + view.w - theme::dp(56.0f) - margin,
-                       view.y + margin, theme::dp(56.0f), botH};
+        // 0.9.6.10: no estreito o [+] vive DENTRO DA STRIP (o fim direito
+        // dela) — nunca mais colide com as colunas do stack (a colisão
+        // real que o validador apanhou no device de 288dp)
+        L.addTicBtn = {view.x + view.w - theme::dp(56.0f) - margin, view.y,
+                       theme::dp(56.0f), botH};
     }
+    // o pai do [+]: o padding dobra PARA DENTRO (o botão mantém o sítio
+    // de sempre — o canto inferior direito a 8dp da borda)
+    L.plusPanel = {L.addTicBtn.x - theme::dp(4.0f), L.addTicBtn.y -
+                                                      theme::dp(4.0f),
+                   L.addTicBtn.w + theme::dp(8.0f),
+                   L.addTicBtn.h + theme::dp(8.0f)};
     return L;
 }
 
@@ -197,6 +246,74 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
     const Layout L = layout(safe::centerRect(
         ui.screenWidth(), ui.screenHeight(), ui.safeArea(), drawerH,
         st.showInspector, st.hierW, st.inspW));
+
+    // ---- 0.9.6.10 (GRUPO UI) · OS PAIS DE VIDRO (a regra do
+    // anti-exemplo: NADA flutua sobre a grelha sem painel-mãe) — os pais
+    // desenham PRIMEIRO, os botões vivem POR CIMA deles ----
+    {
+        // a STRIP do topo: faixa de vidro com a tab [Cena] ATIVA (o
+        // underline âmbar no fundo, como as tabs de modo) + os chips de
+        // estado [Perspetiva]/[Global] (informação REAL, sem toggle falso)
+        ui.panelRounded(L.strip.x, L.strip.y, L.strip.w, L.strip.h, 0.0f,
+                        theme::kTheme.surface);
+        ui.panel(L.strip.x, L.strip.y + L.strip.h - 1.0f, L.strip.w, 1.0f,
+                 theme::kTheme.border);
+        const TextMetrics tmS = ui.textMetrics();
+        auto chipLabel = [&](const UiRect& r, const char* txt, bool active) {
+            const bool held = active;   // o chip ativo lê-se aceso
+            if (active) {
+                ui.panelRounded(r.x, r.y, r.w, r.h,
+                                theme::dp(theme::kRadiusField),
+                                theme::kTheme.accentDim);
+            } else {
+                ui.panelRounded(r.x, r.y, r.w, r.h,
+                                theme::dp(theme::kRadiusField),
+                                theme::kTheme.surface2);
+            }
+            (void)held;
+            if (ui.hasFont()) {
+                ui.labelFitted(r.x + theme::dp(8.0f),
+                               r.y + (r.h - tmS.block()) * 0.5f + tmS.ascent,
+                               txt,
+                               active ? theme::kTheme.text1
+                                      : theme::kTheme.text2,
+                               r.w - theme::dp(16.0f));
+            }
+        };
+        chipLabel(L.stripCena, "Cena", true);      // a vista ATIVA (única)
+        chipLabel(L.stripPersp, "Perspetiva", false);
+        chipLabel(L.stripGlobal, "Global", false);
+        // o RAIL esquerdo (o pai do stack)
+        if (L.stackVisible) {
+            ui.panelRounded(L.stackPanel.x, L.stackPanel.y, L.stackPanel.w,
+                            L.stackPanel.h, theme::dp(theme::kRadiusCard),
+                            theme::kTheme.surface);
+            ui.frameRounded(L.stackPanel.x, L.stackPanel.y, L.stackPanel.w,
+                            L.stackPanel.h, 1.0f,
+                            theme::dp(theme::kRadiusCard),
+                            theme::kTheme.border);
+            // o HIGHLIGHT do topo do vidro (a spec G: #FFFFFF0A)
+            ui.panelRounded(L.stackPanel.x + theme::dp(2.0f),
+                            L.stackPanel.y + theme::dp(1.0f),
+                            L.stackPanel.w - theme::dp(4.0f),
+                            theme::dp(2.0f), theme::dp(1.0f),
+                            theme::kTheme.glassTop);
+        }
+        // o PAI da toolbar inferior (cobre a legenda)
+        ui.panelRounded(L.toolPanel.x, L.toolPanel.y, L.toolPanel.w,
+                        L.toolPanel.h, theme::dp(theme::kRadiusCard),
+                        theme::kTheme.surface);
+        ui.frameRounded(L.toolPanel.x, L.toolPanel.y, L.toolPanel.w,
+                        L.toolPanel.h, 1.0f, theme::dp(theme::kRadiusCard),
+                        theme::kTheme.border);
+        // o PAI do [+]
+        ui.panelRounded(L.plusPanel.x, L.plusPanel.y, L.plusPanel.w,
+                        L.plusPanel.h, theme::dp(theme::kRadiusCard),
+                        theme::kTheme.surface2);
+        ui.frameRounded(L.plusPanel.x, L.plusPanel.y, L.plusPanel.w,
+                        L.plusPanel.h, 1.0f, theme::dp(theme::kRadiusCard),
+                        theme::kTheme.border);
+    }
 
     // ---- stack vertical (pulado quando o layout ESCONDE — degradação) ----
     if (L.stackVisible) {
@@ -296,17 +413,15 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
     // [+] Adicionar TIC — o plus-menu de sempre, no canto inferior DIREITO
     // da viewport (G1-1)
     {
+        // 0.9.6.10 (GRUPO UI · o anti-exemplo da imagem 2): o [+] era um
+        // BLOCO cheio do accent (o quadrado branco cegante do device) —
+        // agora é um chip de vidro (o pai) com o ícone ÂMBAR: o accent é
+        // ESTADO, não repouso (a regra spec A)
         const bool pressed =
             ui.widgetHit(kVpAddTicId, L.addTicBtn.x, L.addTicBtn.y,
                          L.addTicBtn.w, L.addTicBtn.h);
-        const bool held = ui.widgetActive(kVpAddTicId);
-        ui.panelRounded(L.addTicBtn.x, L.addTicBtn.y, L.addTicBtn.w,
-                        L.addTicBtn.h, theme::dp(theme::kRadiusCard),
-                        held ? theme::kTheme.accentPress
-                             : theme::kTheme.accent);
-        const f32 col[4] = {theme::kTheme.accentInk[0],
-                            theme::kTheme.accentInk[1],
-                            theme::kTheme.accentInk[2], 1.0f};
+        const f32 col[4] = {theme::kTheme.accent[0], theme::kTheme.accent[1],
+                            theme::kTheme.accent[2], 1.0f};
         icons::drawIcon(ui, icons::Icon::Plus,
                         L.addTicBtn.x + (L.addTicBtn.w - theme::dp(24.0f)) * 0.5f,
                         L.addTicBtn.y + (L.addTicBtn.h - theme::dp(24.0f)) * 0.5f,

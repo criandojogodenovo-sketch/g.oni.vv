@@ -4002,7 +4002,10 @@ int main() {
                     // o céu: o meio da largura da viewport (entre a
                     // hierarquia [0..300] e o inspector [1212..1512]),
                     // 10px abaixo do topo da viewport — acima da grelha
-                    const u32 sx = 756, sy = 90;
+                    // RECALIBRADO 0.9.6.10 (GRUPO UI): a strip do topo
+                    // da viewport ([Cena][Perspetiva][Global] — o pai de
+                    // vidro) cobre y 56..96; o céu afere-se BAIXO dela
+                    const u32 sx = 756, sy = 130;
                     const size_t pi = (size_t(sy) * imgF.width + sx) * 4;
                     const i32 bgR = (i32)(theme::kTheme.bg[0] * 255.0f +
                                          0.5f);
@@ -4074,9 +4077,12 @@ int main() {
                     // viewport, no topo-esquerda dela)
                     const layout::Entry* chip = nullptr;
                     for (const auto& e : rf.entries) {
+                        // RECALIBRADO 0.9.6.10 (GRUPO UI): a strip do
+                        // topo da viewport empurrou o stack para baixo (o
+                        // 1.º botão vive a view.y+48+16 ≈ 128 no harness)
                         if (e.kind == layout::Entry::Button &&
                             e.x > 300.0f && e.x < 400.0f && e.y > 80.0f &&
-                            e.y < 120.0f && e.w > 40.0f && e.w < 60.0f) {
+                            e.y < 160.0f && e.w > 40.0f && e.w < 60.0f) {
                             chip = &e;
                             break;
                         }
@@ -4084,17 +4090,21 @@ int main() {
                     check(chip != nullptr,
                           "13.9 o chip da toolstack esta no registo");
                     if (chip) {
-                        // o canto ESQ do chip (a 6px da borda, fora do
-                        // ícone central de 24dp): fill de vidro limpo
-                        const u32 px = (u32)(chip->x + 6.0f);
+                        // RECALIBRADO 0.9.6.10 (GRUPO UI · a regra do
+                        // painel-mãe): o botão do stack agora vive SOBRE o
+                        // RAIL de vidro (o pai) — o canto dele é
+                        // vidro-sobre-vidro. O vidro flutuante REAL afere-
+                        // se na MARGEM do pai (o padding de 8dp à esquerda
+                        // dos botões: vidro DIRETO sobre o céu da viewport)
+                        const u32 px = (u32)(chip->x - 4.0f);
                         const u32 py = (u32)(chip->y + chip->h * 0.5f);
                         const size_t pi =
                             (size_t(py) * imgF.width + px) * 4;
                         const i32 d = (i32)imgF.rgba[pi] - e8;
                         check(d >= -1 && d <= 1,
-                              "13.9 o VIDRO flutuante: o chip sobre a "
-                              "viewport e o MESMO composto (a cena por "
-                              "tras aparece)");
+                              "13.9 o VIDRO flutuante: o rail (o pai) "
+                              "sobre a viewport e o MESMO composto (a cena "
+                              "por tras aparece)");
                     }
                 }
 
