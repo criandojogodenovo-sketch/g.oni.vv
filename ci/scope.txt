@@ -6,6 +6,12 @@
 # (editar este ficheiro É o pedido).
 # 0.9.6.4 (GRUPO A): BACKLOG.md entra — o prompt mestre da campanha
 # (P-01/P-03) exige o rastreador de grupos na raiz; criá-lo É o pedido.
+# 0.9.6.9 (GRUPO F): app/src/main/AndroidManifest.xml entra — o pedido
+# «ícone G com 4 setas» INCLUI a documentação da decisão do ícone (o
+# comentário da 0.9.0 «G com a lâmpada» vive no manifest; deixá-lo
+# seria documentação a MENTIR sobre o ícone novo). SEM alteração de
+# código/comportamento do manifest — SÓ o comentário. Reportado à
+# dono na PARAGEM do grupo.
 #
 # Sintaxe: um caminho por linha; prefixo de diretório (barra final) cobre
 # TODO o conteúdo recursivamente; '#' inicia comentário; linha vazia ignora.
@@ -13,6 +19,7 @@
 ci/
 scripts/
 app/build.gradle
+app/src/main/AndroidManifest.xml
 app/src/main/cpp/
 app/src/main/java/
 app/src/main/res/
