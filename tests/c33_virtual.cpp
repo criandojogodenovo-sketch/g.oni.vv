@@ -4065,12 +4065,15 @@ int main() {
                     }
                 }
 
-                // (4) O CHIP da toolstack: o MESMO composto — o vidro
+                // (4) O RAIL da toolstack: o MESMO composto — o vidro
                 // SOBRE a viewport (a cena por trás é o céu/clear aqui) —
-                // o vidro flutuante é o REAL, não o véu lateral
+                // o vidro flutuante é o REAL, não o véu lateral.
+                // (RECALIBRADO 0.9.6.10: os pais flutuantes usam a receita
+                // COMPLETA da spec G — fill SURFACE2 α0.86 + bordo
+                // glassEdge — o vidro LÊ-SE sobre o céu escuro)
                 {
                     f32 expF[4];
-                    theme::blendOver(theme::kTheme.surface,
+                    theme::blendOver(theme::kTheme.surface2,
                                      theme::kTheme.bg, expF);
                     const i32 e8 = (i32)(expF[0] * 255.0f + 0.5f);
                     // o 1.º botão da toolstack PELO REGISTO (dentro da

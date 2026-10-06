@@ -254,10 +254,19 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
         // a STRIP do topo: faixa de vidro com a tab [Cena] ATIVA (o
         // underline âmbar no fundo, como as tabs de modo) + os chips de
         // estado [Perspetiva]/[Global] (informação REAL, sem toggle falso)
+        // — A RECEITA COMPLETA do vidro da spec G: fill surface2 + o BORDO
+        // #FFFFFF1F (glassEdge) TODO À VOLTA + o highlight #FFFFFF0A no
+        // topo (o vidro sobre o céu escuro TEM de se LER — o delta de
+        // 8/255 do fill só era invisível; o bordo é a assinatura)
         ui.panelRounded(L.strip.x, L.strip.y, L.strip.w, L.strip.h, 0.0f,
-                        theme::kTheme.surface);
+                        theme::kTheme.surface2);
+        ui.panelRounded(L.strip.x, L.strip.y, L.strip.w, L.strip.h, 0.0f,
+                        theme::kTheme.glassEdge);
+        ui.panelRounded(L.strip.x, L.strip.y + theme::dp(1.0f), L.strip.w,
+                        L.strip.h - theme::dp(2.0f), 0.0f,
+                        theme::kTheme.surface2);
         ui.panel(L.strip.x, L.strip.y + L.strip.h - 1.0f, L.strip.w, 1.0f,
-                 theme::kTheme.border);
+                 theme::kTheme.glassEdge);
         const TextMetrics tmS = ui.textMetrics();
         auto chipLabel = [&](const UiRect& r, const char* txt, bool active) {
             const bool held = active;   // o chip ativo lê-se aceso
@@ -283,15 +292,16 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
         chipLabel(L.stripCena, "Cena", true);      // a vista ATIVA (única)
         chipLabel(L.stripPersp, "Perspetiva", false);
         chipLabel(L.stripGlobal, "Global", false);
-        // o RAIL esquerdo (o pai do stack)
+        // o RAIL esquerdo (o pai do stack) — a receita do vidro spec G:
+        // fill surface2 + o BORDO glassEdge à volta + highlight no topo
         if (L.stackVisible) {
             ui.panelRounded(L.stackPanel.x, L.stackPanel.y, L.stackPanel.w,
                             L.stackPanel.h, theme::dp(theme::kRadiusCard),
-                            theme::kTheme.surface);
+                            theme::kTheme.surface2);
             ui.frameRounded(L.stackPanel.x, L.stackPanel.y, L.stackPanel.w,
                             L.stackPanel.h, 1.0f,
                             theme::dp(theme::kRadiusCard),
-                            theme::kTheme.border);
+                            theme::kTheme.glassEdge);
             // o HIGHLIGHT do topo do vidro (a spec G: #FFFFFF0A)
             ui.panelRounded(L.stackPanel.x + theme::dp(2.0f),
                             L.stackPanel.y + theme::dp(1.0f),
@@ -299,20 +309,20 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
                             theme::dp(2.0f), theme::dp(1.0f),
                             theme::kTheme.glassTop);
         }
-        // o PAI da toolbar inferior (cobre a legenda)
+        // o PAI da toolbar inferior (cobre a legenda) — idem
         ui.panelRounded(L.toolPanel.x, L.toolPanel.y, L.toolPanel.w,
                         L.toolPanel.h, theme::dp(theme::kRadiusCard),
-                        theme::kTheme.surface);
+                        theme::kTheme.surface2);
         ui.frameRounded(L.toolPanel.x, L.toolPanel.y, L.toolPanel.w,
                         L.toolPanel.h, 1.0f, theme::dp(theme::kRadiusCard),
-                        theme::kTheme.border);
+                        theme::kTheme.glassEdge);
         // o PAI do [+]
         ui.panelRounded(L.plusPanel.x, L.plusPanel.y, L.plusPanel.w,
                         L.plusPanel.h, theme::dp(theme::kRadiusCard),
                         theme::kTheme.surface2);
         ui.frameRounded(L.plusPanel.x, L.plusPanel.y, L.plusPanel.w,
                         L.plusPanel.h, 1.0f, theme::dp(theme::kRadiusCard),
-                        theme::kTheme.border);
+                        theme::kTheme.glassEdge);
     }
 
     // ---- stack vertical (pulado quando o layout ESCONDE — degradação) ----
