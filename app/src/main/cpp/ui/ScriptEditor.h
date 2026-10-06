@@ -87,6 +87,9 @@ constexpr u64 kFixId = 6557;   // 0.9.6 (G2-7e): botão SUBSTITUIR da barra de e
 constexpr u64 kSymBarPageId = 6558; // 0.9.6.8 (E): a PÁGINA da barra de símbolos
 constexpr u64 kHintStripId = 6559; // 0.9.6.1 (G2-8): a dica insere o esqueleto
 constexpr u64 kSymKeyBase = 6560;   // 0.9.6.8 (E): as teclas da barra (≤13/página)
+// 0.9.6.10 (GRUPO UI · E1): o «⋯» do header e as linhas do menu overflow
+constexpr u64 kHeaderDotsId = 6570;     // o botão ⋯ (abre/fecha o menu)
+constexpr u64 kHeaderOverflowBase = 6571;  // linhas do menu (3)
 // (o antigo kKbBase — as 54 teclas do teclado da engine — SAIU no Grupo E)
 
 constexpr f32 kTopH = 56.0f;    // barra de topo (padrão D)
@@ -150,6 +153,12 @@ struct State {
     u8 helpLevel = 1;
     bool helpTapped = false;    // a strip mostra a explicação do toque
     std::string helpWord;       // a palavra sob o dedo (ou vazia)
+    // 0.9.6.10 (GRUPO UI · E1 · o botão copiar sobre o título, confirmado
+    // NO DEVICE): o OVERFLOW do header — quando os 5 botões + Run/Stop
+    // não cabem ao lado do título, os de menor prioridade (nível → copiar
+    // → lupa) recolhem para o «⋯» e o menu abre AQUI (nada por cima do
+    // título, NUNCA)
+    bool headerOverflow = false;
     // 0.9.6 (G2-7e) · O BOTÃO SUBSTITUIR: quando o erro-que-ensina tem
     // equivalente de 1 token (if→exist…), a barra de erro acende o botão;
     // o toque troca a palavra estrangeira pela V.ONI no buffer (o caret
@@ -211,6 +220,26 @@ f32 lineHeight(UiContext& ui);
 // y de ecrã do TOPO da linha i (draw e scroll-follow)
 inline f32 lineTopOnScreen(f32 bodyY, u32 i, f32 lh, f32 scrollOff) {
     return bodyY + theme::dp(8.0f) + static_cast<f32>(i) * lh - scrollOff;
+}
+// 0.9.6.10 (GRUPO UI · E5 · o caret desalinhado confirmado NO DEVICE):
+// A BASELINE ÚNICA da linha — o texto E o caret partilham a MESMA função
+// linha→y. ANTES o código desenhava com a BASELINE no lineTop (os glifos
+// pendiam ACIMA da banda) e o caret de lineTop para baixo — bandas
+// DIFERENTES: o caret ficava ~meia linha ABAIXO do texto («linha 3,5»).
+// AGORA os glifos ficam CENTRADOS na banda [top, top+lh] e o caret
+// desenha de lineTop a lineTop+lh (a banda TODOS partilham).
+inline f32 lineBaselineOnScreen(f32 bodyY, u32 i, f32 lh, f32 scrollOff,
+                                f32 ascent, f32 descent) {
+    const f32 top = lineTopOnScreen(bodyY, i, lh, scrollOff);
+    const f32 block = ascent + descent;
+    return top + (lh - block) * 0.5f + ascent;
+}
+// O RECT DO CARET da linha i (o MESMO contrato do draw: a banda TODA,
+// de lineTop a lineTop+lh — alinhada à banda dos glifos centrados)
+inline UiRect caretRectOnScreen(f32 bodyY, u32 i, f32 lh, f32 scrollOff,
+                                f32 x, f32 w) {
+    const f32 top = lineTopOnScreen(bodyY, i, lh, scrollOff);
+    return {x, top, w, lh};
 }
 // o INVERSO (o toque): a linha que contém este y de ecrã (>= 0; o chamador
 // faz o clamp ao nº de linhas)

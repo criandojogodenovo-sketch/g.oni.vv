@@ -3323,7 +3323,9 @@ TEST(regress_barra_simbolos_ime) {
                 maxX = (e.x + e.w) > maxX ? (e.x + e.w) : maxX;
             }
         }
-        EXPECT(hdr48 >= 5u);   // back + nível + copiar + lupa + run/stop
+        EXPECT(hdr48 >= 5u);   // back + lupa + «⋯» + run + stop (E1: nível
+                              // e copiar recolhem ao menu no 360dp; o Stop
+                              // regista SEMPRE — 0.9.6.10)
         EXPECT(minX >= -0.5f && maxX <= 720.5f);   // NADA fora do ecrã
         // o VALIDADOR no orçamento do device: 0 problemas
         {
@@ -3517,3 +3519,63 @@ TEST(regress_identidade_grafite_ambar) {
         EXPECT(theme::contrastOnSurface(theme::kTheme.warn) >= 3.0f);
     }
 }
+
+
+// ============================================================================
+// R-029 · O CARET DESENHADO DESALINHADO (FASE 0.9.6-MASTER · GRUPO UI · E5)
+// «Ao tocar na linha N, a inserção acontece na linha N (hit-test correto)
+// mas o caret visível fica deslocado para baixo relativamente ao texto» —
+// CONFIRMADO NO DEVICE pelo dono. CAUSA (leitura P-04): o texto desenhava
+// com a BASELINE no lineTopOnScreen (glifos pendiam ACIMA da banda) e o
+// caret desenhava ui.panel(x, lineTop, w, lh-8) — bandas DIFERENTES: o
+// caret ficava ~meia linha abaixo dos glifos («linha 3,5»). FIX: o caret
+// e o texto partilham exatamente a MESMA função linha→y
+// (lineBaselineOnScreen — glifos CENTRADOS na banda) e o caret desenha de
+// lineTop a lineTop+lineHeight (caretRectOnScreen), alinhado à banda.
+// ============================================================================
+TEST(regress_caret_na_banda_dos_glifos) {
+    using namespace vv;
+    theme::setDensity(1.0f);
+    const f32 bodyY = 100.0f;
+    const f32 lh = 28.0f;          // o piso da casa (F5.0)
+    const f32 asc = 21.0f, desc = 5.0f;   // métricas típicas do atlas 28px
+    // (1) EM TODA a linha tocada: o caretRect INTERSETA o rect de texto da
+    // MESMA linha (a MESMA banda de baseline) — com e SEM scroll
+    for (u32 pass = 0; pass < 2; ++pass) {
+        const f32 off = pass == 0 ? 0.0f : 56.0f;   // scroll no meio
+        for (u32 i = 0; i < 12; ++i) {
+            const f32 top = editor::scriptwin::lineTopOnScreen(bodyY, i, lh, off);
+            const f32 base = editor::scriptwin::lineBaselineOnScreen(
+                bodyY, i, lh, off, asc, desc);
+            const UiRect caret = editor::scriptwin::caretRectOnScreen(
+                bodyY, i, lh, off, 200.0f, 2.0f);
+            // o caret é a banda TODA: [lineTop, lineTop+lineHeight]
+            EXPECT(nearEqF(caret.y, top, 1e-4f));
+            EXPECT(nearEqF(caret.h, lh, 1e-4f));
+            // a banda dos GLIFOS (base-ascent .. base+descent) vive DENTRO
+            // da banda do caret (o texto CENTRADO — antes pendia acima)
+            EXPECT(base - asc >= top - 0.01f);
+            EXPECT(base + desc <= top + lh + 0.01f);
+            // o hitTest do CENTRO do caret devolve a MESMA linha (o
+            // inverso exato — tocar onde o caret ESTÁ escolhe a linha dele)
+            const f32 cy = caret.y + caret.h * 0.5f;
+            EXPECT(editor::scriptwin::lineAtScreenY(cy, bodyY, lh, off) ==
+                   static_cast<i32>(i));
+        }
+    }
+    // (2) o CONTRATO da baseline ÚNICA: a MESMA fórmula para o draw do
+    // texto e para o caret — o centro do bloco de glifos é o centro da
+    // banda (o desalinhamento medido no device era ~lh/2)
+    {
+        const f32 top = editor::scriptwin::lineTopOnScreen(bodyY, 3, lh, 0.0f);
+        const f32 base = editor::scriptwin::lineBaselineOnScreen(
+            bodyY, 3, lh, 0.0f, asc, desc);
+        const f32 glyphCenter = (base - asc + base + desc) * 0.5f;
+        EXPECT(nearEqF(glyphCenter, top + lh * 0.5f, 0.01f));
+        // o ANTI-EXEMPLO (a fórmula ANTIGA: baseline == lineTop): os glifos
+        // ficariam com o centro ~asc/2 ACIMA do centro da banda — o caret
+        // parecia «meia linha abaixo». O delta do bug era > 8px no device
+        EXPECT(std::abs(glyphCenter - top) > 8.0f);   // o fix MOVEU o texto
+    }
+}
+

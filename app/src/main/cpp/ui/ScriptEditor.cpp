@@ -726,42 +726,82 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         result = 1;
     }
 
-    // ---- 0.9.6.8 (GRUPO E) · O HEADER FLEXÍVEL -------------------------------
+    // ---- 0.9.6.10 (GRUPO UI · E1) · O HEADER FLEXÍVEL COM OVERFLOW -------
     // O header ANTIGO media os botões a partir da LUPA (docsX−200/−152/−56):
-    // no device portrait (360dp de conteúdo) o botão do nível ficava a
-    // −56dp e o do teclado a −8dp — DOIS botões FORA DO ECRÃ (invisíveis e
-    // intocáveis; a medição do Grupo E). O layout novo ancora OS BOTÕES À
-    // DIREITA (Stop, Run, lupa, copiar, nível — nesta ordem, da direita)
-    // e o TÍTULO FLEXIONA com o que sobra: o subtítulo some primeiro
-    // (zona < 120dp), o título por último (zona < 48dp — no device 360dp
-    // o header é Back + 5 botões, ZERO sobreposição). Os alvos NUNCA
-    // encolhem: 48dp de altura sempre; Run/Stop 72dp nos largos e 48dp
-    // (o rótulo cabe) nos estreitos (< 420dp) — o padrão da top bar do
-    // Grupo D: os ícones inteiros, o k divide só o texto.
+    // no device portrait (360dp) DOIS botões ficavam FORA DO ECRÃ (Grupo E
+    // ancorou à direita) e o título ZONAVA a 4dp (invisível). A SPEC E1
+    // manda: NADA por cima do título, overflow para «⋯». AGORA: o TÍTULO
+    // RESERVA o piso 48dp PRIMEIRO (nunca escondido); Run/Stop ficam
+    // sempre; lupa/copiar/nível cabem enquanto o título mantém o piso —
+    // senão recolhem (por prioridade: nível primeiro, lupa por último) e
+    // o «⋯» os apresenta (st.headerOverflow; o menu abre por baixo).
     const f32 hdrBtnY = topY + (hdrH - theme::dp(48.0f)) * 0.5f;
     const f32 hdrBtnH = theme::dp(48.0f);
     const bool narrow = contentW < theme::dp(420.0f);
     const f32 actionW = narrow ? theme::dp(48.0f) : theme::dp(72.0f);
+    const f32 titleX = ins.left + hdrH + theme::dp(8.0f);
+    const f32 tMin = theme::dp(48.0f);       // o piso da spec E1
+    // (a) Run/Stop à direita (sempre); os EXTRAS vivem à esquerda deles
     const f32 stopX = ins.left + contentW - theme::dp(8.0f) - actionW;
     const f32 runX = stopX - theme::dp(8.0f) - actionW;
-    const f32 lupaX = runX - theme::dp(12.0f) - theme::dp(48.0f);
-    const f32 copyX = lupaX - theme::dp(8.0f) - theme::dp(48.0f);
-    const f32 helpX = copyX - theme::dp(8.0f) - theme::dp(48.0f);
-    const f32 titleX = ins.left + hdrH + theme::dp(8.0f);
-    const f32 titleW = helpX - theme::dp(8.0f) - titleX;
+    const f32 actionEdge = runX - theme::dp(12.0f);
+    // (b) os EXTRAS por prioridade: LUPA (a pesquisa das Docs) > COPIAR
+    // (a referência colável) > NÍVEL (I/N/S) — da direita para a esquerda;
+    // cada um cabe só se o título mantiver o piso 48dp
+    const f32 bW = theme::dp(48.0f);
+    const f32 gap = theme::dp(8.0f);
+    f32 lupaX = -1.0f, copyX = -1.0f, helpX = -1.0f;
+    f32 cursor = actionEdge;
+    int fitted = 0;
+    auto tryFit = [&](f32& slot) {
+        if (cursor - bW - gap - titleX >= tMin) {
+            cursor -= bW + gap;
+            slot = cursor + gap;   // o ALVO come no slot (o gap fica à dir.)
+            ++fitted;
+            return true;
+        }
+        return false;
+    };
+    tryFit(lupaX);
+    tryFit(copyX);
+    tryFit(helpX);
+    // (c) o «⋯» se ALGO recolheu — no primeiro slot livre; se NEM ele
+    // cabe, toma o lugar do extra mais à esquerda (o menu já o contém)
+    f32 dotsX = -1.0f;
+    if (fitted < 3) {
+        if (cursor - bW - gap - titleX >= tMin) {
+            cursor -= bW + gap;
+            dotsX = cursor + gap;
+        } else if (helpX >= 0.0f) {
+            dotsX = helpX; helpX = -1.0f;   // o nível cede ao ⋯ (está no menu)
+        } else if (copyX >= 0.0f) {
+            dotsX = copyX; copyX = -1.0f;
+        } else if (lupaX >= 0.0f) {
+            dotsX = lupaX; lupaX = -1.0f;
+        }
+    }
+    // (d) o título: do Back até o botão mais à esquerda (piso 48dp)
+    f32 leftEdge = actionEdge;
+    if (dotsX >= 0.0f) leftEdge = dotsX;
+    if (helpX >= 0.0f && helpX < leftEdge) leftEdge = helpX;
+    if (copyX >= 0.0f && copyX < leftEdge) leftEdge = copyX;
+    if (lupaX >= 0.0f && lupaX < leftEdge) leftEdge = lupaX;
+    f32 titleW = leftEdge - gap - titleX;
+    if (titleW < tMin) {
+        titleW = tMin;   // o piso da spec E1 (nada por cima do título)
+    }
 
-    // título 20sp + hint 12sp — SÓ se a zona aguenta (o header flexível:
-    // 120dp para os dois, 48dp só para o título; menos = só botões)
+    // título 20sp + hint 12sp — 0.9.6.10 (E1): o título é SEMPRE visível
+    // (titleW tem o piso 48dp — a spec manda «nada por cima do título»);
+    // o subtítulo só na zona larga (>=120dp)
     {
         const TextMetrics m = ui.textMetrics();
         const theme::HeaderBaselines hb =
             theme::headerBaselines(m.ascent, m.descent, hdrH);
-        if (titleW >= theme::dp(48.0f)) {
-            ui.labelFittedStyled(titleX, topY + hb.title, "Script",
-                                 theme::kTheme.text1,
-                                 titleW > 0.0f ? titleW : 1.0f,
-                                 theme::fontScale(theme::kFontScreen), 0);
-        }
+        ui.labelFittedStyled(titleX, topY + hb.title, "Script",
+                             theme::kTheme.text1,
+                             titleW > 0.0f ? titleW : 1.0f,
+                             theme::fontScale(theme::kFontScreen), 0);
         if (titleW >= theme::dp(120.0f)) {
             ui.labelStyled(titleX, topY + hb.sub, "V.ONI · .voni",
                            theme::kTheme.text2,
@@ -770,8 +810,9 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     }
 
     // LUPA (G0-3): abre as Docs POR CIMA (a pesquisa filtra as entradas
-    // estruturadas e mostra o exemplo). Alvo 48dp.
-    {
+    // estruturadas e mostra o exemplo). Alvo 48dp — SÓ se coube no header
+    // (E1: senão vive no «⋯»).
+    if (lupaX >= 0.0f) {
         const UiRect r{lupaX, hdrBtnY, theme::dp(48.0f), theme::dp(48.0f)};
         const bool held = ui.widgetActive(kDocsId);
         ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusCard),
@@ -787,8 +828,10 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
             result = 4;
         }
 
-        // 0.9.5 · COPIAR REFERÊNCIA (📋): a referência V.ONI COMPLETA como
-        // texto colável p/ IAs — o main põe no clipboard via JNI (result 6)
+        // 0.9.5 · COPIAR REFERÊNCIA: a referência V.ONI COMPLETA como
+        // texto colável p/ IAs — o main põe no clipboard via JNI (result 6);
+        // SÓ se coube (E1: senão vive no «⋯»)
+        if (copyX >= 0.0f) {
         const UiRect rc{copyX, hdrBtnY, theme::dp(48.0f), theme::dp(48.0f)};
         const bool heldC = ui.widgetActive(kCopyRefId);
         ui.panelRounded(rc.x, rc.y, rc.w, rc.h, theme::dp(theme::kRadiusCard),
@@ -808,8 +851,10 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         // teclado da engine morreu com ele; o IME do sistema é o ÚNICO
         // teclado e a BARRA DE SÍMBOLOS cobre a página 123)
 
+        }   // (fim do if copyX)
         // 0.9.5 · O NÍVEL DA AJUDA (I/N/S): Iniciante (desc+exemplo) ·
-        // Normal (desc) · Silencioso (nada) — um toque cicla
+        // Normal (desc) · Silencioso (nada) — um toque cicla; SÓ se coube
+        if (helpX >= 0.0f) {
         const UiRect rl{helpX, hdrBtnY, theme::dp(48.0f), theme::dp(48.0f)};
         const bool heldL = ui.widgetActive(kHelpLevelId);
         ui.panelRounded(rl.x, rl.y, rl.w, rl.h, theme::dp(theme::kRadiusCard),
@@ -828,6 +873,105 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         if (ui.widgetHit(kHelpLevelId, rl.x, rl.y, rl.w, rl.h)) {
             st.helpLevel = static_cast<u8>((st.helpLevel + 1) % 3);
         }
+        }
+    }
+
+    // ---- 0.9.6.10 (E1) · O «⋯» E O MENU DE OVERFLOW -----------------------
+    // Os extras que não couberam vivem AQUI (o menu abre por baixo do
+    // botão; fechar = toque fora ou re-toque). As AÇÕES são as MESMAS dos
+    // botões (result 4 = Docs · result 6 = copiar referência · nível cicla)
+    if (dotsX >= 0.0f) {
+        const UiRect rd{dotsX, hdrBtnY, theme::dp(48.0f), theme::dp(48.0f)};
+        const bool heldD = ui.widgetActive(kHeaderDotsId);
+        ui.panelRounded(rd.x, rd.y, rd.w, rd.h, theme::dp(theme::kRadiusCard),
+                        (heldD || st.headerOverflow) ? theme::kTheme.surface2
+                                                     : theme::kTheme.surface);
+        ui.frameRounded(rd.x, rd.y, rd.w, rd.h, 1.0f,
+                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
+        // o ⋯ (3 pontos)
+        for (int d = 0; d < 3; ++d) {
+            ui.panel(rd.x + rd.w * 0.5f - theme::dp(11.0f) +
+                         static_cast<f32>(d) * theme::dp(11.0f),
+                     rd.y + rd.h * 0.5f - theme::dp(2.0f), theme::dp(4.0f),
+                     theme::dp(4.0f), theme::kTheme.text1);
+        }
+        if (ui.widgetHit(kHeaderDotsId, rd.x, rd.y, rd.w, rd.h)) {
+            st.headerOverflow = !st.headerOverflow;
+        }
+        if (st.headerOverflow) {
+            // o MENU: as AÇÕES que não couberam no header (na ordem da
+            // prioridade) — lupa, copiar, nível (só as escondidas)
+            struct Row { const char* label; icons::Icon ic; int action; };
+            Row rows[3] = {
+                {"Pesquisar (Docs)", icons::Icon::Search, 4},
+                {"Copiar referência", icons::Icon::Copy, 6},
+                {"Nível da ajuda", icons::Icon::Question, 7},
+            };
+            const bool show[3] = {lupaX < 0.0f, copyX < 0.0f,
+                                  helpX < 0.0f};
+            const f32 menuW = theme::dp(224.0f);
+            const f32 rowH = theme::dp(48.0f);
+            int nRows = 0;
+            for (int i = 0; i < 3; ++i) {
+                if (show[i]) ++nRows;
+            }
+            const f32 menuH = static_cast<f32>(nRows) * rowH + theme::dp(8.0f);
+            const f32 mx = rd.x + rd.w - menuW;
+            const f32 my = topY + hdrH + theme::dp(4.0f);
+            ui.panelRounded(mx, my, menuW, menuH, theme::dp(theme::kRadiusCard),
+                            theme::kTheme.surface);
+            ui.frameRounded(mx, my, menuW, menuH, 1.0f,
+                            theme::dp(theme::kRadiusCard), theme::kTheme.border);
+            const TextMetrics mm = ui.textMetrics();
+            f32 ry = my + theme::dp(4.0f);
+            int ri = 0;
+            for (int i = 0; i < 3; ++i) {
+                if (!show[i]) continue;
+                const u64 id = kHeaderOverflowBase + static_cast<u64>(ri);
+                const bool held = ui.widgetActive(id);
+                if (held) {
+                    ui.panel(mx + theme::dp(4.0f), ry, menuW - theme::dp(8.0f),
+                             rowH, theme::kTheme.surface2);
+                }
+                icons::drawIcon(ui, rows[i].ic, mx + theme::dp(16.0f),
+                                ry + (rowH - theme::dp(24.0f)) * 0.5f,
+                                theme::dp(24.0f), theme::kTheme.text2);
+                if (ui.hasFont()) {
+                    ui.labelFitted(mx + theme::dp(52.0f),
+                                   ry + (rowH - mm.block()) * 0.5f + mm.ascent,
+                                   rows[i].label, theme::kTheme.text1,
+                                   menuW - theme::dp(68.0f));
+                }
+                if (ui.widgetHit(id, mx + theme::dp(4.0f), ry,
+                                 menuW - theme::dp(8.0f), rowH)) {
+                    if (rows[i].action == 4) {
+                        result = 4;
+                        st.headerOverflow = false;
+                    } else if (rows[i].action == 6) {
+                        result = 6;
+                        st.headerOverflow = false;
+                    } else {
+                        st.helpLevel = static_cast<u8>((st.helpLevel + 1) % 3);
+                        st.headerOverflow = false;
+                    }
+                }
+                ry += rowH;
+                ++ri;
+            }
+            // toque FORA do menu fecha (o ⋯ faz toggle acima)
+            if (in.pressed(0)) {
+                f32 px = -1.0f, py = -1.0f;
+                in.pos(0, px, py);
+                if (px < mx || px > mx + menuW || py < my ||
+                    py > my + menuH) {
+                    if (!ui.widgetActive(kHeaderDotsId)) {
+                        st.headerOverflow = false;
+                    }
+                }
+            }
+        }
+    } else {
+        st.headerOverflow = false;   // sem ⋯ não há menu
     }
 
     // RUN / STOP à direita (alvos ≥48 SEMPRE; 72dp nos largos, 48dp nos
@@ -858,8 +1002,14 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
                    "Stop",
                    running ? theme::kTheme.bg : theme::kTheme.text2,
                    theme::fontScale(theme::kFontBody), 0);
+    // 0.9.6.10 (E1/R-027): o ALVO do Stop regista SEMPRE (o widgetHit é
+    // o registo do audit — em editor o botão existe e é tocável, só não
+    // há nada a parar; antes o alvo NASCIA quando running, e o header
+    // perdia uma entrada no orçamento do device)
     if (running && ui.widgetHit(kStopId, stopX, btnY, btnW, btnH)) {
         result = 3;
+    } else {
+        ui.widgetHit(kStopId, stopX, btnY, btnW, btnH);   // regista o alvo
     }
 
     // ---- corpo: nºs de linha + código colorido em scroll -------------------
@@ -986,10 +1136,21 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         }
         // 0.9.6.6 (C2): o y pela FÓRMULA ÚNICA (o toque usa o INVERSO dela)
         const f32 y = lineTopOnScreen(body.y, i, lh, off);
+        // 0.9.6.10 (E5 · o caret desalinhado confirmado NO DEVICE): a
+        // BASELINE ÚNICA — o texto CENTRADO na banda [y, y+lh] pela MESMA
+        // função que o caret usa (antes a baseline ERA o topo da banda: os
+        // glifos pendiam acima e o caret parecia «meia linha abaixo»)
+        const TextMetrics tmE5 = ui.textMetrics();
+        const f32 base = lineBaselineOnScreen(body.y, i, lh, off, tmE5.ascent,
+                                              tmE5.descent);
 
-        // nº da linha (12sp text2; a linha do ERRO acende em danger)
+        // nº da linha (12sp text2; a linha do ERRO acende em danger) —
+        // centrado na MESMA banda com a escala caption
+        const f32 capA = tmE5.ascent * (theme::kFontCaption / 14.0f);
+        const f32 capD = tmE5.descent * (theme::kFontCaption / 14.0f);
         std::snprintf(num, sizeof(num), "%u", i + 1);
-        ui.labelStyled(ins.left + theme::dp(8.0f), y + theme::dp(4.0f), num,
+        ui.labelStyled(ins.left + theme::dp(8.0f),
+                       y + (lh - (capA + capD)) * 0.5f + capA, num,
                        st.errLine == i + 1 ? theme::kTheme.danger
                                            : theme::kTheme.text2,
                        theme::fontScale(theme::kFontCaption), 0);
@@ -1013,7 +1174,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
                                    : (u32)sizeof(piece) - 1;
                 std::memcpy(piece, lineStr.data() + rp.begin, pl);
                 piece[pl] = '\0';
-                ui.label(x, y, piece, clsColor(rp.cls));
+                ui.label(x, base, piece, clsColor(rp.cls));
                 x += ui.fontWidth(piece);
             }
         }
@@ -1035,7 +1196,10 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
                 before[bl] = '\0';
                 const f32 xCaret = xCode + ui.fontWidth(before) +
                                    caretInset();
-                ui.panel(xCaret, y, caretInset(), lh - theme::dp(8.0f),
+                // 0.9.6.10 (E5): o caret desenha de lineTop a
+                // lineTop+lineHeight — a MESMA banda dos glifos centrados
+                // (antes: y..y+lh-8, uma banda PRÓPRIA deslocada)
+                ui.panel(xCaret, y, caretInset(), lh,
                          theme::kTheme.accent);
             }
         }
