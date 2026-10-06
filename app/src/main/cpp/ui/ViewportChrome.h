@@ -110,7 +110,18 @@ struct Layout {
 
 // resolve o layout dentro do rect do viewport central (o view JÁ vem
 // encolhido pelo drawer aberto — o chamador passa currentDrawerH())
-Layout layout(const UiRect& view);
+// P-08 (0.9.6.12 · GRUPO J2 · R-023): os chips da strip passam a MEDIDOS
+// (wrap-content com piso) — `cw` traz as LARGURAS DO TEXTO em px medidas
+// pelo chamador (ui.fontWidth); null = as larguras fixas de sempre
+// (compat dos testes). A degradação: Perspetiva esconde primeiro, depois
+// Cena; o Global é o ÚLTIMO a ceder e SÓ então ellipsize (nunca «Glob+»
+// por cobertura de outro widget — a regra §2.5 do contrato)
+struct ChipWidths {
+    f32 cena = 0.0f;    // px do TEXTO «Cena» (sem padding)
+    f32 persp = 0.0f;   // px de «Perspetiva»
+    f32 global = 0.0f;  // px de «Global»
+};
+Layout layout(const UiRect& view, const ChipWidths* cw = nullptr);
 
 // ---- DRAW ---------------------------------------------------------------------
 // camera = a câmara do editor (para o TRIAD seguir a orientação).

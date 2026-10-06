@@ -4172,6 +4172,139 @@ int main() {
         glstub::fb::resetState();
     }
 
+    // ========================================================================
+    // FASE 14 — 0.9.6.12 (GRUPOS J): O CONTRATO AO DEVICE COM A FONTE REAL.
+    // As sentinelas puras (R-022/R-023) usam medidor fake; ESTA fase afere
+    // com a LiberationSans carregada + exporta o PNG do device (a prova
+    // P-05 do dono). 14.1/14.2 = J2 (strip + pesquisa); 14.3 = J3 (o rect
+    // do viewport segue o painel + o log vp3d); 14.4 = J4 (o rodapé).
+    // ========================================================================
+    fase("FASE 14 — GRUPOS J: o contrato ao device (strip/pesquisa/viewport/rodapé)");
+    {
+        // o ambiente da 13: GPU rasteriza + projeto de verdade (o export
+        // escreve layout/<ecrã>.png no storage)
+        glstub::fb::resetState();
+        glstub::fb::enabled = true;
+        resetEngineForHarness();
+        auto st14 = std::make_unique<FakeStorage>();
+        FakeStorage* rawSt14 = st14.get();
+        check(Project::createNew(*rawSt14, "c33", g_project), "14 projeto criado");
+        g_storage = std::move(st14);
+        g_projectReady = true;
+        g_resources.setStorage(rawSt14);
+        g_gpu.init(&g_resources);
+        g_texCache = std::make_unique<TextureCache>(*rawSt14);
+        g_pipeline = std::make_unique<TexturePipeline>(g_hwCompressor, *g_texCache);
+        eglstub::g_surfaceW = 1600;
+        eglstub::g_surfaceH = 720;
+        vvstub::g_stubDensityDpi = 320;   // 2.0 — o device real (RMX3624)
+        theme::setDensity(2.0f);
+        editor::applyDensity();
+        android_app app14;
+        std::memset(&app14, 0, sizeof(app14));
+        app14.contentRect = {0, 48, 1552, 720};
+        onAppCmd(&app14, APP_CMD_INIT_WINDOW);
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+        g_editor.hierW = -1.0f;
+        g_editor.inspW = -1.0f;
+        g_editor.divDragActive = false;
+        g_toastT = 0.0f;
+        g_toast[0] = '\0';
+        frame();
+
+        // o export da 14 (o MESMO caminho da 13 — layout/<nome>.png+json)
+        auto export14 = [&](const char* nome) {
+            g_layoutExportPending = true;
+            frame();
+            std::vector<u8> png, js;
+            const bool okP = rawSt14->readBytes(
+                std::string("layout/") + nome + ".png", png);
+            const bool okJ = rawSt14->readBytes(
+                std::string("layout/") + nome + ".json", js);
+            check(okP && !png.empty(),
+                  "14 o PNG do estado J está no projeto");
+            check(okJ && !js.empty(),
+                  "14 o JSON do estado J está no projeto");
+            return std::make_pair(png, js);
+        };
+
+        // ---- 14.1 (J2 · R-023) — os chips MEDIDOS com a fonte REAL: o
+        // Global INTEIRO dentro do chip, a reserva do [+] respeitada
+        passo("14.1 strip: o Global inteiro com a fonte real @2.0");
+        {
+            const UiRect view = editor::centerRect(
+                1600.0f, 720.0f, g_ui.safeArea(), currentDrawerH(),
+                g_editor.showInspector, g_editor.hierW, g_editor.inspW);
+            editor::vpchrome::ChipWidths cw;
+            cw.cena = g_ui.fontWidth("Cena");
+            cw.persp = g_ui.fontWidth("Perspetiva");
+            cw.global = g_ui.fontWidth("Global");
+            const editor::vpchrome::Layout L =
+                editor::vpchrome::layout(view, &cw);
+            check(L.stripVisible,
+                  "14.1 a strip do viewport está visível ao device");
+            check(L.stripGlobal.w >=
+                      cw.global + 2.0f * theme::dp(8.0f) - 0.5f,
+                  "14.1 o chip Global comporta o texto INTEIRO (fonte real "
+                  "@2.0 — o «Glob+» morreu)");
+            check(L.stripGlobal.x + L.stripGlobal.w <=
+                          L.addTicBtn.x + 0.5f,
+                  "14.1 os chips da strip não pisam o [+] (a reserva)");
+            // o wrap-content COM piso (a spec: minWidth adequado): o chip
+            // é o TEXTO + padding, salvo o piso de 56dp dos alvos
+            check(L.stripGlobal.w <=
+                      (std::max)(theme::dp(56.0f),
+                                 cw.global + 2.0f * theme::dp(8.0f)) + 1.0f,
+                  "14.1 o chip Global é wrap-content com piso (não é o "
+                  "bloco fixo de 88dp)");
+        }
+
+        // ---- 14.2 (J2 · R-023) — «pesquisar TIC» com a fonte REAL no
+        // PISO da hierarquia (200dp): o placeholder cabe sem recorte
+        passo("14.2 pesquisa: o placeholder cabe no piso 200dp (fonte real)");
+        {
+            const f32 fieldW =
+                theme::dp(safe::kHierMinW) - 2.0f * theme::dp(16.0f);
+            const f32 budget = fieldW - theme::dp(76.0f);
+            const f32 tw = g_ui.fontWidth("pesquisar TIC");
+            check(tw <= budget + 0.5f,
+                  "14.2 «pesquisar TIC» cabe no campo com a hierarquia no "
+                  "PISO 200dp (fonte real @2.0)");
+        }
+
+        // ---- 14.x — o PNG do estado J (drawer aberto + strip) — a prova
+        // P-05 do dono (o estado que produzia os defeitos 1+2+3)
+        passo("14.x o PNG do device com o drawer aberto (a prova P-05)");
+        {
+            g_bottom.bottomTab = 1;   // Ficheiros aberto
+            g_bottom.drawerH = 240.0f;
+            frame();
+            auto [png14, js14] = export14("editor");
+            fileapi::writeAll("j2-device-drawer-aberto.png", png14.data(),
+                              png14.size());
+            fileapi::writeAll("j2-device-drawer-aberto.json", js14.data(),
+                              js14.size());
+            vv::RawImage img14;
+            std::string err14;
+            check(vv::loadPng(png14.data(), png14.size(), img14, err14) &&
+                      img14.width == 1600 && img14.height == 720,
+                  "14.x o PNG do device com o drawer aberto (1600x720)");
+            g_bottom.bottomTab = 0;
+            g_bottom.drawerH = 0.0f;
+        }
+
+        onAppCmd(&app14, APP_CMD_TERM_WINDOW);
+        vvstub::g_stubDensityDpi = 160;
+        theme::setDensity(1.0f);
+        editor::applyDensity();
+        glstub::fb::enabled = false;
+        glstub::fb::resetState();
+    }
+
     // ---- sumário -----------------------------------------------------------
     std::printf("\n== C33 VIRTUAL: %d check(s), %d falha(s) ==\n", g_checks, g_failed);
     if (g_failed == 0) {

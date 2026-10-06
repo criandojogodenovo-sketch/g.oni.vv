@@ -510,3 +510,16 @@ Prova de mutação (mutacao-R030a-vermelho.txt): `0x2196F3` (o azul órfão da s
 | Gate | `scripts/hierarchy_check.py` (job core-tests do CI): o contrato cita símbolos REAIS + as sentinelas do contrato existem no fonte |
 | Prova de mutação | mutação R-022a: `effectiveDrawerH` a devolver o cru (a divergência de volta) → `regress_hierarquia_contrato` VERMELHA (eff ≤ cap falhado, alvos fora do rect, stackPanel fora) + 67 testes vermelhos no total; reposta → 0 falhas |
 | Padrão proibido | (novos) «altura efetiva com DUAS fontes» — o cap só pode viver em `safe::effectiveDrawerH`; «região fora do pai documentado» — o gate e a sentinela vigiam |
+
+## R-023 · o chip «Global» recortado para «Glob+» e o campo «pesquisar TIC» (0.9.6.12 · GRUPO J2)
+
+| campo | valor |
+|---|---|
+| ID | R-023 |
+| Reportado | o dono (defeito 3 dos 5 defeitos de arquitetura: «botão Global recortado para Glob+; campo pesquisar TIC colide com a hierarquia») |
+| Sintoma exato | na strip do viewport ao device, o chip [Global] aparecia cortado (o dono leu «Glob+») — o campo de pesquisa da hierarquia, esse, NUNCA colidiu (vive confinado ao painel por construção: `w − 2×kPad` com `labelFitted`) |
+| Causa raiz | os chips da strip tinham larguras FIXAS (88+112+88dp = 312dp) num viewport de piso 288dp COM o [+] a viver no fim direito da strip (plusTopRight no device): o chip Global transbordava a strip e era COBERTO pelo pai do [+] (desenhado depois) — o recorte era COBERTURA, não ellipsis |
+| Fix | chips MEDIDOS (o wrap-content da spec J2): largura = texto medido pela fonte real + 2×8dp, piso 56dp; a RESERVA do [+] respeitada; a degradação por ordem — Perspetiva esconde primeiro, depois Cena, o Global é o ÚLTIMO (e só ellipsize quando nem ele cabe — o fallback honesto da spec). `vpchrome::layout(view, ChipWidths*)` — null mantém as larguras fixas (compat de testes) |
+| Teste sentinela | `regress_texto_strip_campo` (tests/test_sentinels.cpp) — o encaixe em 3 densidades (mdpi 1.0 / hdpi 1.5 / xhdpi 2.0, a spec pede as três) com medidor fake density-invariante: texto inteiro, reserva do [+], sem sobreposição, degradação por ordem, fallback honesto; a FONTE REAL vive na FASE 14.1/14.2 do c33_virtual (o chip comporta «Global», o wrap-content com piso, «pesquisar TIC» cabe no piso 200dp da hierarquia) |
+| Prova de mutação | mutação R-023a: as medidas ignoradas (larguras fixas de volta) → `regress_texto_strip_campo` VERMELHA (o Global fora do [+, fora da strip, a degradação morta) + 16 testes; repostas → 0 falhas |
+| Padrão proibido | (novo) «largura de texto fixa em dp sem medir» — chip com texto passa pela medida da fonte (regra §2.5 do contrato) |

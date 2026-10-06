@@ -89,7 +89,7 @@ bool toolButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
 
 } // namespace
 
-Layout layout(const UiRect& view) {
+Layout layout(const UiRect& view, const ChipWidths* cw) {
     Layout L;
     L.view = view;
     // 0.9.6.1 (PASSO 0 · R-018): todos os alvos daqui são dp REAL — eram px
@@ -163,11 +163,70 @@ Layout layout(const UiRect& view) {
     {
         const f32 chipH = theme::dp(32.0f);
         const f32 cy = view.y + (stripH - chipH) * 0.5f;
-        L.stripCena   = {view.x + margin, cy, theme::dp(88.0f), chipH};
-        L.stripPersp  = {L.stripCena.x + theme::dp(88.0f) + theme::dp(8.0f),
-                         cy, theme::dp(112.0f), chipH};
-        L.stripGlobal = {L.stripPersp.x + theme::dp(112.0f) + theme::dp(8.0f),
-                         cy, theme::dp(88.0f), chipH};
+        // ---- 0.9.6.12 (GRUPO J2 · R-023 · a regra §2.5 do contrato) —
+        // CHIPS MEDIDOS (o wrap-content da spec J2): a largura de cada
+        // chip = o TEXTO medido + 2×8dp de padding, com o piso de 56dp.
+        // Era 88/112/88dp FIXOS = 312dp num viewport de piso 288dp COM o
+        // [+] a viver no fim direito da strip (plusTopRight no device):
+        // o chip Global transbordava e era COBERTO pelo [+] — o dono lia
+        // «Glob+». A degradação (por ordem): Perspetiva esconde primeiro
+        // (a projeção é a menos acionável), depois Cena; o Global é o
+        // ÚLTIMO e SÓ ellipsize quando nem ele cabe (fallback honesto da
+        // spec). cw=null → as larguras fixas antigas (compat dos testes)
+        const f32 pad2 = 2.0f * theme::dp(8.0f);
+        const f32 chipMin = theme::dp(56.0f);
+        f32 wCena = theme::dp(88.0f);
+        f32 wPersp = theme::dp(112.0f);
+        f32 wGlobal = theme::dp(88.0f);
+        bool showCena = true, showPersp = true, showGlobal = true;
+        if (cw) {
+            wCena = (std::max)(chipMin, cw->cena + pad2);
+            wPersp = (std::max)(chipMin, cw->persp + pad2);
+            wGlobal = (std::max)(chipMin, cw->global + pad2);
+            // a RESERVA do [+]: nos ecrãs estreitos ele vive no fim
+            // direito da strip — os chips nunca o pisam (o pai dele é
+            // desenhado DEPOIS: cobria o texto — o «Glob+» do dono).
+            // (o X do [+] é o MESMO nos dois casos — inferior/superior
+            // direito; só o Y difere, e o X é o que a reserva precisa)
+            const f32 plusRightX =
+                view.x + view.w - theme::dp(56.0f) - margin;
+            const f32 right =
+                L.plusTopRight ? plusRightX - theme::dp(4.0f)
+                               : view.x + view.w - margin;
+            f32 x = view.x + margin;
+            const f32 gap = theme::dp(8.0f);
+            if (x + wCena + gap + wPersp + gap + wGlobal <= right) {
+                // os três cabem — o layout de sempre
+            } else if (x + wCena + gap + wGlobal <= right) {
+                showPersp = false;   // o primeiro a ceder
+            } else if (x + wGlobal <= right) {
+                showPersp = false;
+                showCena = false;
+            } else {
+                // nem o Global cabe inteiro: ele fica SOZINHO, clamped à
+                // faixa, e o labelFitted ellipsiza HONESTAMENTE («Glob…»)
+                showPersp = false;
+                showCena = false;
+                wGlobal = (std::max)(chipMin, right - x);
+            }
+        }
+        L.stripCena = showCena
+                          ? UiRect{view.x + margin, cy, wCena, chipH}
+                          : UiRect{0.0f, 0.0f, 0.0f, 0.0f};
+        L.stripPersp =
+            showPersp
+                ? UiRect{L.stripCena.x + L.stripCena.w + theme::dp(8.0f), cy,
+                         wPersp, chipH}
+                : UiRect{0.0f, 0.0f, 0.0f, 0.0f};
+        L.stripGlobal =
+            showGlobal
+                ? UiRect{(showPersp ? L.stripPersp.x + L.stripPersp.w
+                                    : (showCena ? L.stripCena.x +
+                                                      L.stripCena.w
+                                                : view.x + margin)) +
+                             theme::dp(8.0f),
+                         cy, wGlobal, chipH}
+                : UiRect{0.0f, 0.0f, 0.0f, 0.0f};
     }
     // ---- stack (coluna-major: undo/redo/save/dup/paste, preenchendo
     // coluna a coluna — a ordem de leitura de sempre; degenerado quando
@@ -284,9 +343,18 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
     // G1-1: o rect da viewport com o drawerH REAL — a toolbar acompanha o
     // painel de baixo (aberto = sobe; fechado = desce ao fundo da viewport)
     // GRUPO D: larguras de ESTADO (divisores) — o chrome acompanha os painéis
-    const Layout L = layout(safe::centerRect(
+    const UiRect vpView = safe::centerRect(
         ui.screenWidth(), ui.screenHeight(), ui.safeArea(), drawerH,
-        st.showInspector, st.hierW, st.inspW));
+        st.showInspector, st.hierW, st.inspW);
+    // 0.9.6.12 (GRUPO J2 · R-023): os chips MEDIDOS pela fonte REAL (o
+    // wrap-content da spec — o Global inteiro ou degradação por ordem)
+    ChipWidths cw;
+    if (ui.hasFont()) {
+        cw.cena = ui.fontWidth("Cena");
+        cw.persp = ui.fontWidth("Perspetiva");
+        cw.global = ui.fontWidth("Global");
+    }
+    const Layout L = layout(vpView, &cw);
 
     // ---- 0.9.6.10 (GRUPO UI) · OS PAIS DE VIDRO (a regra do
     // anti-exemplo: NADA flutua sobre a grelha sem painel-mãe) — os pais
@@ -312,6 +380,9 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
                  theme::kTheme.glassEdge);
         const TextMetrics tmS = ui.textMetrics();
         auto chipLabel = [&](const UiRect& r, const char* txt, bool active) {
+            if (r.w <= 0.0f || r.h <= 0.0f) {
+                return;   // escondido pela degradação (J2) — não desenha
+            }
             const bool held = active;   // o chip ativo lê-se aceso
             if (active) {
                 ui.panelRounded(r.x, r.y, r.w, r.h,

@@ -3715,3 +3715,112 @@ TEST(regress_hierarquia_contrato) {
     }
     theme::setDensity(1.0f);
 }
+
+// ============================================================================
+// R-023 (0.9.6.12 · GRUPO J2) — O TEXTO DA STRIP E O CAMPO DE PESQUISA
+//         — regress_texto_strip_campo
+//
+// O DONO (defeito 3): «o botão Global recortado para "Glob+", o campo
+// "pesquisar TIC" colide com a hierarquia». A CAUSA RAIZ (leitura do
+// código): os chips da strip tinham larguras FIXAS (88+112+88dp = 312dp)
+// num viewport de piso 288dp COM o [+] a viver no fim direito da strip
+// (plusTopRight no device) — o chip Global transbordava e era COBERTO
+// pelo pai do [+] (desenhado depois). O FIX (a spec J2): chips MEDIDOS
+// (wrap-content com piso 56dp), a reserva do [+] respeitada e a
+// degradação por ordem — Perspetiva esconde primeiro, depois Cena, o
+// Global é o ÚLTIMO (e só ellipsize quando nem ele cabe). Esta sentinela
+// afere o ENCAIXE em 3 densidades (mdpi 1.0 / hdpi 1.5 / xhdpi 2.0 — a
+// spec pede as três) com um medidor mono fake escalado pela densidade; a
+// prova com a FONTE REAL + o campo de pesquisa vive na FASE 14 do
+// c33_virtual (o harness tem a LiberationSans carregada).
+// ============================================================================
+TEST(regress_texto_strip_campo) {
+    using namespace vv;
+
+    // o medidor fake MONO: 8dp por glifo — o dp JÁ carrega a densidade
+    // (o texto em sp cresce COM o ecrã; a invariant «o texto cabe no
+    // chip» é density-invariante — a lição R-018; a FONTE REAL é
+    // afervada na FASE 14 do harness)
+    auto monoW = [](const char* s, f32 /*d*/) {
+        return static_cast<f32>(std::strlen(s)) * theme::dp(8.0f);
+    };
+    const f32 densities[] = {1.0f, 1.5f, 2.0f};   // mdpi / hdpi / xhdpi
+
+    for (f32 d : densities) {
+        theme::setDensity(d);
+        // o device no pior caso: viewport 288dp de largura (776dp de
+        // conteúdo − 200 hier − 288 insp) — o ecrã em px @d
+        const f32 sw = 776.0f * d, sh = 336.0f * d;
+        const safe::Insets in{0.0f, 48.0f * d, 48.0f * d, 0.0f};
+        const f32 eff = safe::effectiveDrawerH(240.0f * d,
+                                               safe::viewportRect(sw, sh, in).h);
+        const UiRect view = safe::centerRect(sw, sh, in, eff, true, -1.0f,
+                                             -1.0f);
+        editor::vpchrome::ChipWidths cw;
+        cw.cena = monoW("Cena", d);
+        cw.persp = monoW("Perspetiva", d);
+        cw.global = monoW("Global", d);
+        const editor::vpchrome::Layout L =
+            editor::vpchrome::layout(view, &cw);
+
+        ASSERT(L.stripVisible);
+        // (a) o Global INTEIRO visível — o defeito do dono é impossível
+        EXPECT_MSG(L.stripGlobal.w >= cw.global + 2.0f * theme::dp(8.0f) - 0.5f,
+                   "d=%.1f: o chip Global NÃO comporta o texto inteiro "
+                   "(w=%.1f, texto=%.1f)",
+                   d, L.stripGlobal.w, cw.global);
+        // (b) os chips não pisam o [+] (a RESERVA — o «Glob+» era isto)
+        if (L.plusTopRight) {
+            EXPECT(L.stripGlobal.x + L.stripGlobal.w <=
+                   L.addTicBtn.x + 0.5f);
+        }
+        // (c) os chips vivem DENTRO da strip, sem sobrepor-se entre si
+        EXPECT(safe::rectInside(L.stripGlobal, L.strip));
+        if (L.stripCena.w > 0.0f) {
+            EXPECT(safe::rectInside(L.stripCena, L.strip));
+            EXPECT(L.stripCena.x + L.stripCena.w <=
+                   L.stripGlobal.x + 0.5f);
+        }
+        if (L.stripPersp.w > 0.0f) {
+            EXPECT(safe::rectInside(L.stripPersp, L.strip));
+            EXPECT(L.stripPersp.x + L.stripPersp.w <=
+                   L.stripGlobal.x + 0.5f);
+        }
+        // (d) A DEGRADAÇÃO: no MESMO ecrã, forçar viewports cada vez mais
+        // estreitos — a ordem de queda é Perspetiva → Cena; o Global é o
+        // ÚLTIMO e mantém o texto inteiro até não haver alternativa
+        const f32 stripY = view.y;
+        auto viewOfW = [&](f32 wDp) {
+            UiRect v{view.x, stripY, theme::dp(wDp), view.h};
+            return v;
+        };
+        {
+            const UiRect vNarrow = viewOfW(220.0f);   // 220dp de viewport
+            const editor::vpchrome::Layout ln =
+                editor::vpchrome::layout(vNarrow, &cw);
+            EXPECT(ln.stripCena.w > 0.0f && ln.stripPersp.w == 0.0f &&
+                       ln.stripGlobal.w > 0.0f);
+            EXPECT(ln.stripGlobal.w >=
+                   cw.global + 2.0f * theme::dp(8.0f) - 0.5f);
+        }
+        {
+            const UiRect vTight = viewOfW(140.0f);    // 140dp
+            const editor::vpchrome::Layout lt =
+                editor::vpchrome::layout(vTight, &cw);
+            EXPECT(lt.stripCena.w == 0.0f && lt.stripPersp.w == 0.0f);
+            EXPECT(lt.stripGlobal.w >=
+                   cw.global + 2.0f * theme::dp(8.0f) - 0.5f);
+        }
+        {
+            const UiRect vTiny = viewOfW(72.0f);      // 72dp — nem o Global
+            const editor::vpchrome::Layout vtt =
+                editor::vpchrome::layout(vTiny, &cw);
+            // o fallback HONESTO: o chip fica dentro da faixa (o
+            // labelFitted ellipsiza — «Glob…» DIZ que cortou, nunca um
+            // recorte silencioso por cobertura)
+            EXPECT(vtt.stripGlobal.w > 0.0f);
+            EXPECT(safe::rectInside(vtt.stripGlobal, vtt.strip));
+        }
+    }
+    theme::setDensity(1.0f);
+}
