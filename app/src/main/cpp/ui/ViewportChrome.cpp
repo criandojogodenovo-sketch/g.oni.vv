@@ -155,6 +155,10 @@ Layout layout(const UiRect& view) {
     // e [Global] (o espaço REAL do gizmo — sempre mundial, ver Gizmo.h) —
     // INFORMAÇÃO REAL em chips, na faixa de vidro de 48dp (o pai; o [+]
     // dos ecrãs estreitos vive no fim direito DELA)
+    // P-08 (0.9.6.12 · GRUPO J1 · R-022): em viewport sub-piso (só em
+    // testes — o cap do drawer garante kViewportMinH em produção) a strip
+    // ESCONDE (degradação honesta — a toolbar manda)
+    L.stripVisible = view.h >= stripH + theme::dp(kBottomH);
     L.strip = {view.x, view.y, view.w, stripH};
     {
         const f32 chipH = theme::dp(32.0f);
@@ -202,21 +206,58 @@ Layout layout(const UiRect& view) {
     // ---- toolbar inferior: SÓ ÍCONES, âncora = canto inferior ESQUERDO
     // do rect da viewport (G1-1). Uma fileira (garantida pelo
     // kViewportMinW = 320dp ≥ 272+16 da toolbar).
+    // P-08 (0.9.6.12 · GRUPO J1 · R-022 · a regra §2.2 do contrato): a
+    // toolbar vive DENTRO do rect da viewport e ABAIXO da strip POR
+    // CONSTRUÇÃO — o cap do drawer (safe::kViewportMinH) garante o espaço
+    // em produção; o clamp é a última defesa (viewport degenerado de
+    // teste): nunca acima do topo da strip, nunca fora por baixo. Era ESTE
+    // o caminho do defeito 1 do dono (a toolbar sobre a top bar) — agora o
+    // overlap é impossível por construção.
     const f32 botH = theme::dp(kBottomH);
     const f32 toolW = theme::dp(kToolBtn);
-    const f32 by = view.y + view.h - botH - theme::dp(8.0f);
-    f32 bx = view.x + theme::dp(16.0f);
+    f32 by = view.y + view.h - botH - theme::dp(8.0f);
+    const f32 byMin = view.y + (L.stripVisible ? stripH : 0.0f);
+    const f32 byMax = view.y + view.h - botH;
+    if (by < byMin) {
+        by = byMin;
+    }
+    if (by > byMax) {
+        by = byMax;
+    }
+    // a legenda (12sp acima da barra) só se NÃO cruzar a strip
+    L.legendVisible = (by - theme::dp(24.0f)) >= byMin;
+    // R-022 (o achado ao vivo): no C33 (content 756dp) os pisos da
+    // gangorra (200+272) deixam o viewport a 284dp < kViewportMinW — a
+    // fileira com margem 16dp transbordava 4dp (o Ímã saía do rect). A
+    // margem esquerda Cede (16→4dp) antes de transbordar
+    const f32 rowW = 5.0f * toolW + 4.0f * theme::dp(8.0f);
+    f32 lead = view.w >= rowW + theme::dp(16.0f)
+                   ? theme::dp(16.0f)
+                   : (std::max)(theme::dp(4.0f), view.w - rowW);
+    f32 bx = view.x + lead;
     L.selectBtn = {bx, by, toolW, botH};  bx += toolW + theme::dp(8.0f);
     L.moveBtn   = {bx, by, toolW, botH};  bx += toolW + theme::dp(8.0f);
     L.rotateBtn = {bx, by, toolW, botH};  bx += toolW + theme::dp(8.0f);
     L.scaleBtn  = {bx, by, toolW, botH};  bx += toolW + theme::dp(8.0f);
     L.snapBtn   = {bx, by, toolW, botH};
     // o PAI da toolbar: da legenda (12sp + 6dp acima) até AO LIMITE do
-    // fundo da viewport (flush — o padding de baixo do pai É a margem)
-    L.toolPanel = {L.selectBtn.x - theme::dp(8.0f),
-                   by - theme::dp(22.0f),
-                   5.0f * toolW + 4.0f * theme::dp(8.0f) + theme::dp(16.0f),
-                   botH + theme::dp(22.0f) + theme::dp(8.0f)};
+    // fundo da viewport (flush — o padding de baixo do pai É a margem).
+    // P-08 (J1): sem legenda (viewport apertado) o pai começa na barra;
+    // o fundo NUNCA passa o fundo do view e a LARGURA NUNCA passa a
+    // direita (o achado R-022: 8+288dp transbordava 8dp o viewport de
+    // 288dp por baixo do Inspector)
+    {
+        const f32 top = by - (L.legendVisible ? theme::dp(22.0f)
+                                              : theme::dp(4.0f));
+        const f32 bottom = by + botH + theme::dp(8.0f);
+        const f32 bottomLim = view.y + view.h;
+        const f32 left = L.selectBtn.x - theme::dp(8.0f);
+        const f32 rightLim = view.x + view.w;
+        const f32 right = (std::min)(left + rowW + theme::dp(16.0f),
+                                     rightLim);
+        L.toolPanel = {left, top, right - left,
+                       (bottom > bottomLim ? bottomLim : bottom) - top};
+    }
     // "+" — inferior direito se cabe; senão o canto SUPERIOR direito
     if (plusBottom) {
         L.addTicBtn = {view.x + view.w - theme::dp(56.0f) - margin, by,
@@ -258,6 +299,8 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
         // #FFFFFF1F (glassEdge) TODO À VOLTA + o highlight #FFFFFF0A no
         // topo (o vidro sobre o céu escuro TEM de se LER — o delta de
         // 8/255 do fill só era invisível; o bordo é a assinatura)
+        // P-08 (J1): escondida em viewport sub-piso (a toolbar manda)
+        if (L.stripVisible) {
         ui.panelRounded(L.strip.x, L.strip.y, L.strip.w, L.strip.h, 0.0f,
                         theme::kTheme.surface2);
         ui.panelRounded(L.strip.x, L.strip.y, L.strip.w, L.strip.h, 0.0f,
@@ -292,6 +335,7 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
         chipLabel(L.stripCena, "Cena", true);      // a vista ATIVA (única)
         chipLabel(L.stripPersp, "Perspetiva", false);
         chipLabel(L.stripGlobal, "Global", false);
+        }   // fim da strip visível (P-08)
         // o RAIL esquerdo (o pai do stack) — a receita do vidro spec G:
         // fill surface2 + o BORDO glassEdge à volta + highlight no topo
         if (L.stackVisible) {
@@ -373,7 +417,8 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
         gz.mode = 2;
     }
     // 0.9.6.1 (G1-2) · A LEGENDA: o nome da ferramenta ATIVA numa strip
-    // pequena ACIMA da barra — nunca dentro do botão (nada se sobrepõe)
+    // pequena ACIMA da barra — nunca dentro do botão (nada se sobrepõe).
+    // P-08 (J1): some em viewport apertado (não cruza a strip — regra §2.2)
     {
         const char* name = st.selectMode ? "Selecionar"
                            : gz.mode == 0 ? "Mover"
@@ -381,7 +426,7 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
                                           : "Escalar";
         const f32 legendY = L.selectBtn.y - theme::dp(6.0f) -
                             theme::dp(12.0f);   // 12sp acima do topo da barra
-        if (ui.hasFont()) {
+        if (ui.hasFont() && L.legendVisible) {
             ui.labelStyled(L.selectBtn.x + theme::dp(2.0f), legendY, name,
                            theme::kTheme.text2,
                            theme::fontScale(theme::kFontCaption), 0);

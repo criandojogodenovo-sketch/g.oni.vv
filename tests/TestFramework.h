@@ -2,6 +2,7 @@
 // tests/TestFramework.h — micro-framework de testes (zero dependências).
 #include <cmath>
 #include <cstdio>
+#include <string>
 #include <vector>
 #include "math/Math.h"
 
@@ -46,6 +47,19 @@ inline void expect(bool cond, const char* expr, const char* file, int line) {
     }
 }
 
+// 0.9.6.12 (R-022): EXPECT com MENSAGEM printf-style — a falha DIZ o caso
+// (ecrã/drawer/números) sem exigir que a expressão seja o diagnóstico
+template <typename... Args>
+inline void expectMsgF(bool cond, const char* file, int line,
+                       const char* fmt, Args&&... args) {
+    if (!cond) {
+        ++failures();
+        char buf[512];
+        std::snprintf(buf, sizeof(buf), fmt, args...);
+        std::printf("  FALHOU  %s:%d  %s\n", file, line, buf);
+    }
+}
+
 struct Registrar {
     Registrar(const char* name, void (*fn)()) { cases().push_back({name, fn}); }
 };
@@ -58,6 +72,8 @@ struct Registrar {
     static void test_##name()
 
 #define EXPECT(expr) ::test::expect((expr), #expr, __FILE__, __LINE__)
+#define EXPECT_MSG(expr, ...) \
+    ::test::expectMsgF((expr), __FILE__, __LINE__, __VA_ARGS__)
 
 // ASSERT: EXPECT que ABORTA o caso (pré-condições de teste — desreferenciar
 // um ponteiro nulo a meio do caso é crash, não falha limpa)

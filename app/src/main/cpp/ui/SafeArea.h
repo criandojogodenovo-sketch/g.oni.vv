@@ -19,6 +19,7 @@
 // CONSTANTES (spec A/E/G): top bar 56 · tab bars 48 · status 24 · drawer
 // default 240 (pega 160–400, passos de 8) · painéis 300 · alvos ≥48.
 #include "core/Types.h"
+#include <cmath>            // std::floor (effectiveDrawerH — passos de 8dp)
 #include "ui/ScrollMath.h"   // UiRect (GL-free)
 #include "ui/Theme.h"       // 0.9.6.1 (PASSO 0): dp() — as medidas dp daqui
                             // multiplicam pela densidade AO CALCULAR o rect
@@ -61,6 +62,38 @@ constexpr f32 kBottomTabH = 48.0f;  // spec E: tab bar do painel de baixo
 constexpr f32 kDrawerDef  = 240.0f; // spec E: drawer default
 constexpr f32 kDrawerMin  = 160.0f; // pega: 160..400 em passos de 8
 constexpr f32 kDrawerMax  = 400.0f;
+// P-08 (0.9.6.12 · GRUPO J1 · R-022) — O PISO DA ALTURA DO VIEWPORT
+// CENTRAL com o drawer aberto: strip do topo (48) + toolbar do viewport
+// (48) + folga (8) = 104dp. O cap do drawer usa ESTE piso (era só a tab
+// bar + 16 = 64dp — no device o drawer de 240dp persistido punha o
+// viewRect a ZERO e a transform toolbar desenhou-se 56dp POR CIMA da top
+// bar: os defeitos 1+2 do dono). Fonte ÚNICA consumida pelo draw do
+// drawer (bottom::layout) e pelos rects do centro (currentDrawerH) — as
+// duas medidas JÁ NUNCA divergem.
+constexpr f32 kViewportMinH = 104.0f;
+
+// P-08 (GRUPO J1 · R-022) — A ALTURA EFETIVA DO DRAWER (a fonte ÚNICA).
+// Ordem: clamp da pega (160..400) → o CAP pelo piso do viewport central
+// (kViewportMinH manda — a toolbar/strip nunca morrem) → passos de 8dp.
+// vpH = safe::viewportRect(sw, sh, in).h (a altura do viewport lógico).
+inline f32 effectiveDrawerH(f32 rawDrawerH, f32 vpH) {
+    f32 d = rawDrawerH;
+    if (d < theme::dp(kDrawerMin)) {
+        d = theme::dp(kDrawerMin);
+    }
+    if (d > theme::dp(kDrawerMax)) {
+        d = theme::dp(kDrawerMax);
+    }
+    const f32 cap = vpH - theme::dp(kViewportMinH);
+    const f32 capPos = cap > 0.0f ? cap : 0.0f;
+    if (d > capPos) {
+        d = capPos;
+    }
+    if (d <= 0.0f) {
+        return 0.0f;
+    }
+    return std::floor(d / theme::dp(8.0f)) * theme::dp(8.0f);
+}
 
 // Distância de cada borda da superfície EGL até à área desenhável
 // (contentRect do NativeActivity), em px.

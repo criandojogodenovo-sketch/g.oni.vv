@@ -3579,3 +3579,139 @@ TEST(regress_caret_na_banda_dos_glifos) {
     }
 }
 
+
+// ============================================================================
+// R-022 (0.9.6.12 · GRUPO J1) — O CONTRATO DA HIERARQUIA
+//         — regress_hierarquia_contrato
+//
+// O DONO (P-08): «a árvore de views tem de respeitar a hierarquia fixa de
+// docs/LAYOUT_HIERARCHY.md — qualquer região fora do contêiner correto é
+// violação de contrato». A REALIDADE da plataforma (honestidade antes de
+// tudo): o editor NÃO TEM views Java — a VvActivity é uma NativeActivity
+// com UMA superfície; a árvore do contrato são as REGIÕES do layout C++
+// (SafeArea.h + vpchrome::layout + bottom::layout). Os defeitos 1+2 do
+// dono (a transform toolbar POR CIMA da top bar / «estática» com o painel
+// de baixo aberto) tinham a causa raiz EXATA: currentDrawerH() lia o
+// drawer CRU enquanto o bottom::layout aplicava um cap DIFERENTE (64dp) —
+// no device (drawer 240 persistido, viewport 208dp) o viewRect colapsava
+// a ZERO e a toolbar desenhava-se ~56dp acima do topo da viewport = sobre
+// a top bar. O FIX: safe::effectiveDrawerH (FONTE ÚNICA do cap, piso
+// kViewportMinH = 104dp) + clamps no vpchrome (a toolbar nunca sai do
+// rect POR CONSTRUÇÃO). Esta sentinela afere o CONTRATO (§1-§3 do
+// documento) nos ecrãs 776×336 (RMX3624 @2.0) / 768×360 / 1512×568
+// (harness) e densidades 1.0/2.0, drawer fechado/aberto/tapado.
+// ============================================================================
+TEST(regress_hierarquia_contrato) {
+    using namespace vv;
+
+    struct ScreenCase {
+        f32 sw, sh;
+        safe::Insets in;
+        f32 density;
+        const char* name;
+    };
+    // o RMX3624 real: 1600x720 @2.0 com insets {0,48,48,0} (contentRect
+    // {0,48,1552,720} da FASE 13.7) — content 776x336dp; o C33: 1536x720
+    // @2.0 content 768x360dp; o harness: 1536x720 @1.0 insets {0,24,24,0}
+    ScreenCase cases[] = {
+        {1600.0f, 720.0f, {0.0f, 48.0f, 48.0f, 0.0f}, 2.0f,
+         "RMX3624 1600x720@2.0"},
+        {1536.0f, 720.0f, {0.0f, 24.0f, 24.0f, 0.0f}, 2.0f,
+         "C33 1536x720@2.0"},
+        {1536.0f, 720.0f, {0.0f, 24.0f, 24.0f, 0.0f}, 1.0f,
+         "harness 1536x720@1.0"},
+        {1024.0f, 640.0f, {0.0f, 0.0f, 0.0f, 0.0f}, 1.0f,
+         "ecra pequeno 1024x640@1.0"},
+    };
+    // os estados do drawer: fechado · o default persistido (240dp) · a
+    // pega no máximo (400dp) · um valor ABSURDO (o teto tem de aguentar)
+    const f32 drawerRaw[] = {0.0f, 240.0f, 400.0f, 100000.0f};
+
+    for (const ScreenCase& sc : cases) {
+        theme::setDensity(sc.density);
+        for (f32 raw : drawerRaw) {
+            const f32 vpH = safe::viewportRect(sc.sw, sc.sh, sc.in).h;
+            const f32 eff = safe::effectiveDrawerH(raw, vpH);
+
+            // ---- CONTRATO §2.3: a FONTE ÚNICA — a altura efetiva NUNCA
+            // passa o piso do viewport (kViewportMinH) e cai em passos de
+            // 8dp. (O estado FECHADO é bottomTab==0 — o raw 0 da pega levanta
+            // ao mínimo da pega, como sempre foi)
+            const f32 cap = vpH - theme::dp(safe::kViewportMinH);
+            EXPECT(eff > 0.0f);
+            EXPECT(eff <= cap > 0.0f ? cap : 0.0f);
+            const f32 steps = eff / theme::dp(8.0f);
+            EXPECT(std::fabs(steps - std::floor(steps)) < 0.01f);
+
+            // ---- o viewRect do CENTRO (o que o main/gizmo/scissor
+            // consomem) e o LAYOUT do chrome dentro dele
+            const UiRect view = safe::centerRect(sc.sw, sc.sh, sc.in, eff,
+                                                 true, -1.0f, -1.0f);
+            const editor::vpchrome::Layout L = editor::vpchrome::layout(view);
+
+            // ---- CONTRATO §2.4: nada sai do rect da viewport central
+            const UiRect targets[11] = {
+                L.stack[0], L.stack[1], L.stack[2], L.stack[3], L.stack[4],
+                L.selectBtn, L.moveBtn, L.rotateBtn, L.scaleBtn, L.snapBtn,
+                L.addTicBtn};
+            for (const UiRect& r : targets) {
+                if (r.w > 0.0f && r.h > 0.0f) {   // degenerado = escondido
+                    EXPECT_MSG(safe::rectInside(r, view),
+                               "%s raw=%.0f: um alvo do chrome sai do rect "
+                               "da viewport",
+                               sc.name, raw);
+                }
+            }
+            EXPECT(safe::rectInside(L.toolPanel, view));
+            if (L.stackVisible) {
+                EXPECT(safe::rectInside(L.stackPanel, view));
+            }
+
+            // ---- CONTRATO §2.2: a toolbar ABAIXO da strip (nunca sobe à
+            // top bar) — o defeito 1 do dono é impossível POR CONSTRUÇÃO
+            EXPECT_MSG(L.selectBtn.y >= view.y + 0.5f,
+                       "%s raw=%.0f: a toolbar subiu acima do topo da "
+                       "viewport (a top bar fica POR CIMA da viewport — "
+                       "cobiçá-la é violação)",
+                       sc.name, raw);
+            if (L.stripVisible) {
+                EXPECT_MSG(L.selectBtn.y >= L.strip.y + L.strip.h - 0.5f,
+                           "%s raw=%.0f: a toolbar pisa a banda da strip",
+                           sc.name, raw);
+                // (a regra §2.5 do ENCAIXE dos chips é afervada pela
+                // R-023 — regress_texto_strip_campo, GRUPO J2)
+            } else {
+                // viewport sub-piso: a degradação honesta — a toolbar
+                // CONTINUA dentro do rect (a última defesa)
+                EXPECT(view.h < theme::dp(safe::kViewportMinH) + 0.5f);
+            }
+
+            // ---- a top bar INTACTA: o viewport inteiro começa DEBAIXO
+            // dela (o toolbarRect é a faixa de 56dp do topo)
+            const UiRect topBar = safe::toolbarRect(sc.sw, sc.sh, sc.in);
+            EXPECT(view.y >= topBar.y + topBar.h - 0.5f);
+
+            // ---- o BOTTOM DOCK + o RODAPÉ (a ponte com §2.1 — a
+            // sentinela completa do rodapé é a R-025; aqui o CONTENIMENTO)
+            editor::bottom::BottomState bs{};
+            bs.bottomTab = 1;   // o drawer ABERTO (o fechado é bottomTab=0 —
+                                // o layout dele não é desenhado nesse caso)
+            bs.drawerH = raw;
+            const editor::bottom::Layout bl =
+                editor::bottom::layout(sc.sw, sc.sh, sc.in, bs);
+            // o drawer desenhado usa a MESMA fonte única (§2.3)
+            EXPECT_MSG(std::fabs(bl.drawer.h - eff) < 0.5f,
+                       "%s raw=%.0f: o drawer desenhado (%.1f) diverge da "
+                       "altura efetiva (%.1f) — DUAS fontes = o bug da "
+                       "toolbar flutuante de volta",
+                       sc.name, raw, bl.drawer.h, eff);
+            // CONTRATO §2.1: o status bar é a ÚLTIMA faixa e NINGUÉM o toca
+            const UiRect status = safe::statusRect(sc.sw, sc.sh, sc.in);
+            EXPECT(bl.status.y == status.y && bl.status.h == status.h);
+            EXPECT(bl.drawer.y + bl.drawer.h <= status.y + 0.5f);
+            EXPECT(bl.tabBar.y + bl.tabBar.h <= status.y + 0.5f);
+            EXPECT(view.y + view.h <= status.y + 0.5f);
+        }
+    }
+    theme::setDensity(1.0f);
+}

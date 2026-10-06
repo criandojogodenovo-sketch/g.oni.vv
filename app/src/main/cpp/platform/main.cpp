@@ -251,8 +251,20 @@ bool g_micGranted = false;
 std::string g_lastLayoutSaved;   // o layout.json da última escrita
 // altura do drawer ABERTO neste frame (0 = fechado) — todos os rects do
 // viewport central/painéis passam por AQUI (safe::centerRect com drawerH)
+// P-08 (0.9.6.12 · GRUPO J1 · R-022): a FONTE ÚNICA da altura efetiva —
+// o MESMO safe::effectiveDrawerH que o bottom::layout usa para DESENHAR o
+// drawer. Antes este getter lia o drawer CRU e o draw tapava: no device
+// (drawer 240 persistido, viewport 208dp) o viewRect colapsava a ZERO e a
+// transform toolbar desenhou-se 56dp POR CIMA da top bar (defeitos 1+2).
 static f32 currentDrawerH() {
-    return g_bottom.bottomTab > 0 ? g_bottom.drawerH : 0.0f;
+    if (g_bottom.bottomTab <= 0) {
+        return 0.0f;
+    }
+    return safe::effectiveDrawerH(
+        g_bottom.drawerH,
+        safe::viewportRect(g_ui.screenWidth(), g_ui.screenHeight(),
+                           g_ui.safeArea())
+            .h);
 }
 
 void showToast(const char* msg);   // fwd (definido abaixo)

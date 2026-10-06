@@ -69,27 +69,13 @@ Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st) {
     Layout L;
     L.tabBar = safe::bottomTabRect(sw, sh, in);
     L.status = safe::statusRect(sw, sh, in);
-    // drawerH: clamp 160..400dp, passos de 8dp (spec E) — 0.9.6.1: em dp
-    // REAL (R-018: os limites eram px crus)
-    // GRUPO D (0.9.6.7 — o orçamento vertical): o drawer NUNCA come o
-    // editor INTEIRO — deixa sempre a faixa da toolbar do viewport viva
-    // (kBottomH + margens). No harness (568dp de viewport) o clamp
-    // histórico (400) continua a mandar; no DEVICE (208dp de viewport) o
-    // drawer default de 240dp comia TUDO (painéis a zero) — agora cede.
-    f32 d = st.drawerH;
-    if (d < theme::dp(safe::kDrawerMin)) {
-        d = theme::dp(safe::kDrawerMin);
-    }
-    if (d > theme::dp(safe::kDrawerMax)) {
-        d = theme::dp(safe::kDrawerMax);
-    }
+    // P-08 (0.9.6.12 · GRUPO J1 · R-022): a altura efetiva vem da FONTE
+    // ÚNICA (safe::effectiveDrawerH) — o MESMO valor que o main usa para os
+    // rects do centro (currentDrawerH). Antes o cap vivia AQUI e o main lia
+    // o drawer CRU: no device o viewRect colapsava a 0 e a transform
+    // toolbar desenhava-se por cima da top bar (os defeitos 1+2 do dono).
     const f32 vpH = safe::viewportRect(sw, sh, in).h;
-    const f32 chromeFloor = theme::dp(safe::kBottomTabH) + theme::dp(16.0f);
-    const f32 cap = vpH - chromeFloor;
-    if (d > cap && cap > 0.0f) {
-        d = cap;   // o piso da toolbar do viewport manda sobre o drawer
-    }
-    d = std::floor(d / theme::dp(8.0f)) * theme::dp(8.0f);
+    const f32 d = safe::effectiveDrawerH(st.drawerH, vpH);
     L.drawer = {in.left, L.tabBar.y - d, sw - in.left - in.right, d};
     L.handle = {in.left, L.drawer.y, sw - in.left - in.right, theme::dp(12.0f)};
     L.drawerTop = L.drawer.y;

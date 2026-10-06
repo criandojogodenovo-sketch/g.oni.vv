@@ -62,6 +62,14 @@ jobs:
       # token órfão — o fóssil da spec A de novo. UM match = vermelho
       - name: Gate theme-hex (R-030 — cores so no Theme)
         run: python3 scripts/theme_hex_check.py
+      # 0.9.6.12 (P-08 · GRUPO J1 · R-022) — GATE HIERARCHY-CHECK: o
+      # contrato da hierarquia (docs/LAYOUT_HIERARCHY.md) é a fonte oficial
+      # da árvore de regiões do editor; o gate afere que o contrato cita
+      # símbolos REAIS (nada de fantasmas) e que as sentinelas R-022..R-025
+      # (regress_hierarquia_contrato e irmãs) vivem no fonte. Região nova
+      # sem contrato, contrato a mentir ou sentinela apagada = VERMELHO
+      - name: Gate hierarchy-check (P-08/R-022 — o contrato da arvore)
+        run: python3 scripts/hierarchy_check.py
 
       - name: Configurar build dos testes
         run: cmake -S tests -B build-tests -DCMAKE_BUILD_TYPE=Release

@@ -496,3 +496,17 @@ Prova de mutação (mutacao-R030a-vermelho.txt): `0x2196F3` (o azul órfão da s
 | Linha do replay | (idem — a fase da timeline no c33_virtual é a dívida) |
 | Padrão proibido | (nenhum — a vigília é a dívida registada + a regra «nada de px crus na UI», apanhada por leitura) |
 
+
+## R-022 · o contrato da hierarquia: a toolbar de transformação POR CIMA da top bar (0.9.6.12 · GRUPO J1 · P-08)
+
+| campo | valor |
+|---|---|
+| ID | R-022 |
+| Reportado | o dono (P-08 + os 5 defeitos de arquitetura do editor — defeitos 1 e 2: «TransformToolbar por cima do menu superior» e «estática quando painéis inferiores abrem») |
+| Sintoma exato | no device, com o painel de baixo aberto (drawer persistido a 240), a toolbar de transformação desenha-se SOBRE a barra de topo e não acompanha o painel |
+| Causa raiz | DUAS fontes para a altura do drawer: o `bottom::layout` aplicava um cap (viewport − 64dp) ao DESENHAR, mas o `currentDrawerH()` do main devolvia o drawer CRU aos rects do centro — no RMX3624 (viewport 208dp, drawer 240) o viewRect colapsava a ZERO e a toolbar desenhava-se ~56dp acima do topo da viewport = sobre a top bar. Falta também o piso que garantisse strip (48dp) + toolbar (48dp) sem sobreposição |
+| Fix | `safe::effectiveDrawerH` — a FONTE ÚNICA da altura efetiva (clamp 160..400 → cap pelo NOVO piso `kViewportMinH` = 104dp → passos de 8dp), consumida pelo draw do drawer E pelo main; clamps no `vpchrome::layout` (a toolbar nunca sai do rect POR CONSTRUÇÃO — regra §2.2 do contrato); achados ao vivo da sentinela: o `toolPanel` transbordava 8dp o viewport de 288dp e no C33 (756dp) a fileira de botões saía 4dp (o Ímã fora do rect) — a margem esquerda agora cede antes de transbordar |
+| Teste sentinela | `regress_hierarquia_contrato` (tests/test_sentinels.cpp) — o CONTRATO docs/LAYOUT_HIERARCHY.md §1-§3 inteiro: containment de todos os alvos, toolbar abaixo da strip/da top bar, fonte única do drawer, status bar intocável, pisos — nos ecrãs RMX3624@2.0 / C33@2.0 / harness@1.0 / 1024×640, com o drawer fechado/aberto/400/absurdo |
+| Gate | `scripts/hierarchy_check.py` (job core-tests do CI): o contrato cita símbolos REAIS + as sentinelas do contrato existem no fonte |
+| Prova de mutação | mutação R-022a: `effectiveDrawerH` a devolver o cru (a divergência de volta) → `regress_hierarquia_contrato` VERMELHA (eff ≤ cap falhado, alvos fora do rect, stackPanel fora) + 67 testes vermelhos no total; reposta → 0 falhas |
+| Padrão proibido | (novos) «altura efetiva com DUAS fontes» — o cap só pode viver em `safe::effectiveDrawerH`; «região fora do pai documentado» — o gate e a sentinela vigiam |

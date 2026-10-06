@@ -91,6 +91,13 @@ struct Layout {
                                   // viewport não comporta [+] ao lado da
                                   // toolbar (device: viewport de ~288dp)
     UiRect view{};            // o viewport central (para referência)
+    // P-08 (0.9.6.12 · GRUPO J1 · R-022): a degradação honesta da altura —
+    // com o drawer aberto o viewport central encolhe; quando nem strip +
+    // toolbar cabem (viewport sub-piso, só em testes), a strip ESCONDE e a
+    // legenda some — a toolbar fica DENTRO do rect (regra §2.2 do contrato
+    // docs/LAYOUT_HIERARCHY.md)
+    bool   stripVisible = true;   // false = viewport sub-piso (a strip some)
+    bool   legendVisible = true;  // false = a legenda da ferramenta some
     // 0.9.6.10 (GRUPO UI · a REGRA DO PAI-PAINEILO — o anti-exemplo da
     // imagem 2: «nunca mais painéis/toolbar sem painel-mãe, sem cabeçalho,
     // sem clip»): TUDO o que flutua sobre a grelha ganha um PAI de vidro
