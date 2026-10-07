@@ -21,6 +21,8 @@
 | J · ARQUITETURA DO EDITOR (P-08) | o contrato da hierarquia; os 5 defeitos (toolbar/top bar, chips medidos, log do rect, rodapé); R-022..R-025 + gate hierarchy-check | **FECHO 0.9.6.12** (ver RELATORIO-0.9.6.12) | ver commit |
 | IMPORT A2 · OS TRÊS FICHEIROS REAIS | o log com os 4 números; o bound corrigido (accOff); a degradação de primitiva; copiado==total; R-014 reescrita | **FECHO 0.9.6.12** (ver RELATORIO-0.9.6.12; sign-off do dono PENDENTE) | ver commit |
 | IMPORT A2-2 · OS TETOS DE RANGE (R-032) | o teto único de 256 MB (era 64 MB no parser + 16 MB escondido no loader — o scene 118 MB e o dragão morriam); «modelo demasiado grande para a memória»; off+len ≤ real E ≤ declared; file= na linha do dono + log de 2048; staging único sem duplicar; .bin irmão DEFERIDO | **FECHO 0.9.6.12g** (ver REGRESSOES R-032; as provas de mutação 1 e 2) | ver commit |
+| UI PASSO 0 · INVENTÁRIO (spec de layout) | todos os controlos com nome/função/posição; veredito dos suspeitos (chips sem função, logo marca, «prooksnsn» é dado); TABELA DE MEDIDAS baseline pelo código real — device: viewport 37,1%, cobertura 88,5%, chrome 38,1% (falha a/b/c); zero mudanças de código | **FECHO 0.9.6.13 PASSO 0** (ver RELATORIO-0.9.6.13-PASSO0-INVENTARIO) | ver commit |
+| UI PASSOS 1-4 · MEDIDAS/PAINÉIS/VIEWPORT/JANELAS | topo 36dp; abas 32dp com FPS·TICs; hierarquia 18%/inspector 22%; trilho 32dp; viewport ≥55%; controlos ≤10% a 60% alfa; logs 80%; settings 36dp | por fazer (após o OK do dono ao PASSO 0) | — |
 | H · FICHEIROS COM ASSETS REAIS | drawer enumera source/+assets/ reais; refresh; R-019 | por fazer | — |
 | I · BENCHMARKS | bench de 60s com JSON/loja/copiar; vsync; 3×; cena de benchmark | por fazer | — |
 

@@ -34,6 +34,28 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.9.6.13 — UI PASSO 0: INVENTÁRIO (spec do dono · sem alterações de código)
+
+**O que existe agora (o PASSO 0 da spec de layout: medir antes de mexer):**
+- **O INVENTÁRIO** (`docs/RELATORIO-0.9.6.13-PASSO0-INVENTARIO.md` — NOVO):
+  todos os controlos visíveis do editor 3D com nome, função real (o
+  símbolo chamado, ou «SEM FUNÇÃO») e posição — top bar (T1-T12), viewport
+  (V1-V18), hierarquia (H1-H9), inspector (I1-I5), dock de baixo (B1-B13),
+  status bar (S1-S2) e overlays. Os suspeitos da spec têm veredito por
+  leitura do fonte: os chips «Cena»/«Perspetiva»/«Global» da strip e o
+  logo «G» não têm função (info/marca); o «···» da hierarquia e a aba
+  «Nós» têm função real; «prooksnsn» não existe no código (é o nome do
+  projeto na status bar — dado do utilizador).
+- **A TABELA DE MEDIDAS baseline** medida pelo CÓDIGO REAL de layout
+  (`ui/SafeArea.h` corrido em anfitrião) nos dois perfis da casa: no
+  device 776×336dp o editor falha HOJE os critérios da spec — viewport
+  central 37,1% da largura (mín. 55%), 88,5% da área coberta por controlos
+  (máx. 10%), topo+abas+estado 38,1% da altura (máx. 20%). No harness
+  1536×720: 60,9% / 27,1% / 17,8%.
+- **Zero mudanças de código**: o diff deste passo é documentação. A
+  auditoria de layout (FASE 13, critério f) mantém a linha de base do
+  5edcbde (0 erros/0 avisos; c33_virtual 456/456).
+
 ## 0.9.6.12 — GRUPOS J (ARQUITETURA DO EDITOR) + IMPORT A2 (o contrato da hierarquia; os três ficheiros reais do dono)
 
 **O que existe agora (P-08: a hierarquia é CONTRATO; os 5 defeitos de
