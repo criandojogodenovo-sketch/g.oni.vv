@@ -34,6 +34,39 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.9.6.17 — UI PASSO 3: VIEWPORT (o rail esquerdo, 60% de alfa, nada full-width)
+
+**O que existe agora (o PASSO 3 da spec de layout — o chrome da cena
+medido):**
+- **O RAIL ESQUERDO**: as ferramentas (Selecionar/Mover/Rodar/Escalar/
+  Íman) vivem numa coluna à esquerda da cena (a toolbar horizontal do
+  fundo saiu); viewports baixos dividem em colunas — o que não cabe
+  ESCONDE, nunca transborda.
+- **A fila do topo-esquerdo**: desfazer/refazer/guardar/**⋯** — o ⋯ abre o
+  menu de ficheiro ancorado a ele; Duplicar/Colar saíram da viewport e
+  vivem no menu (itens 9/10).
+- **[+] 40dp REDONDO** no fundo-direito (era um chip de 56) e o **GIZMO
+  40dp** no topo-direito (o atalho mostrar/esconder o gizmo).
+- **NADA full-width**: a strip [Cena][Perspetiva][Global] FOI REMOVIDA
+  (era a barra que atravessava a cena; os chips eram SEM FUNÇÃO desde o
+  inventário do PASSO 0).
+- **60% DE ALFA** em tudo o que o chrome desenha (a cena lê-se através) —
+  a constante `kChromeAlpha` é pública e pinada na sentinela R-034.
+- Medido (o método do PASSO 0): o desenho do chrome cobre **7,7%** do
+  viewport no arranque do device (a cena 92,3%); os estados todos na
+  TABELA do RELATORIO-0.9.6.16-17.
+
+## 0.9.6.16 — UI PASSO 2-BIS: AS DECISÕES DO DONO (o pin do trilho + a consola ≥60%)
+
+- **Fixar aberto**: tocar no ícone do TRILHO abre o inspector E fixa
+  (`inspPinned` persiste no layout.json); a seta «recolher» no cabeçalho
+  desfaz. Fixado, o painel fica aberto MESMO sem seleção. Sem long-press.
+- **Consola ≥60%**: a lista de log ocupa ≥60% do conteúdo do drawer
+  (chips+extras ≤40%) — o campo de comando SAI quando a lista com ele
+  fica <60% (`bottom::conCmdVisible`, a fonte única); no device o campo
+  não aparece e a lista passa a existir (antes tinha ALTURA NEGATIVA —
+  o campo tapava as chips).
+
 ## 0.9.6.15 — UI PASSO 2: PAINÉIS (18%/22%, o trilho 32dp, o drawer no cap 35%)
 
 **O que existe agora (o PASSO 2 da spec de layout — painéis medidos):**

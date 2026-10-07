@@ -222,6 +222,12 @@ struct EditorState {
     // [viewport settings] da toolbar do viewport abrem o MESMO popover)
     bool   vpSettingsMenu = false;
 
+    // PASSO 3 (0.9.6.17): a âncora do menu de ficheiro — o ⋯ do viewport
+    // arma a folha ANCORADA a ele (ax/ay em px; −1 = a âncora de sempre, o
+    // botão Menu da top bar). O glifo/menu são os mesmos; só a âncora muda.
+    f32    menuAx = -1.0f;
+    f32    menuAy = -1.0f;
+
     // 0.9.0 (spec E) — altura do DRAWER aberto neste frame (0 = fechado).
     // O main injeta do BottomState; os PAINÉIS (hierarquia/inspector) e o
     // viewport central encolhem por ela (safe::panelsRect).

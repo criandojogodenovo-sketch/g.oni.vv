@@ -29,8 +29,8 @@ TransformToolbar, ViewportRail, BottomDock, BottomBar) mapeiam assim:
 | TopNavigationBar | TOP BAR 36dp (PASSO 1) | `safe::toolbarRect` em `ui/SafeArea.h`; desenhada por `toolbar::draw` em `ui/Toolbar.cpp` |
 | ViewportContainerLayout | viewportRect (entre a top bar e a tab bar) | `safe::viewportRect` em `ui/SafeArea.h` |
 | GLSurfaceView | o passe 3D (glViewport+glScissor no centerRect) | o bloco `scissor3d` em `platform/main.cpp` |
-| TransformToolbar | toolbar inferior do viewport (Sel/Mov/Rod/Esc/Ímã) | `vpchrome::layout` em `ui/ViewportChrome.cpp` |
-| ViewportRail | o stack vertical esquerdo (undo/redo/save/dup/paste) | `vpchrome::layout` — `L.stack` em `ui/ViewportChrome.cpp` |
+| TransformToolbar | REMOVIDA no PASSO 3 (0.9.6.17): a toolbar inferior HORIZONTAL saiu — as ferramentas vivem no RAIL ESQUERDO vertical (a spec do dono: nada full-width sobre a cena; o duplicar/colar saíram da viewport e vivem no menu ⋯ itens 9/10) | `vpchrome::layout` em `ui/ViewportChrome.cpp` |
+| ViewportRail | o RAIL ESQUERDO de ferramentas (Selecionar/Mover/Rodar/Escalar/Íman, col-major) + a FILA DO TOPO (undo/redo/save/⋯) + os cantos 40dp ([+] fundo-dir redondo, gizmo topo-dir) + a legenda — PASSO 3, TUDO a 60% de alfa (`vpchrome::kChromeAlpha`) | `vpchrome::layout` — `L.rail`/`L.quick`/`L.gizmoBtn`/`L.addTicBtn` em `ui/ViewportChrome.cpp` |
 | BottomDockLayout | o drawer de baixo + tab bar 32dp (Ficheiros/Assets/Consola/Animação + «FPS · TICs» à direita — PASSO 1). PASSO 2: o drawer NUNCA abre sozinho (o auto-abrir da 0.8.0 saiu) e a altura efetiva é capada a 35% da altura do content | `bottom::layout` em `ui/BottomPanel.cpp` |
 | BottomBar | REMOVIDA no PASSO 1 (0.9.6.14): a faixa extra de 24dp saiu — o «FPS · TICs» vive no canto direito da TAB BAR (`bottom::layout`); a versão/commit em Settings › Sobre. `safe::statusRect` devolve uma faixa de ALTURA ZERO (compat de testes; nada desenha nela) | `safe::statusRect` em `ui/SafeArea.h` (LEGACY, altura 0) |
 
@@ -42,12 +42,19 @@ contentRect (superfície EGL − insets do sistema)
 │   └── (a câmara projeta com o aspect DO RECT, nunca do ecrã todo)
 ├── TOP BAR (36dp — PASSO 1, faixa de topo)          [toolbar::draw]
 ├── VIEWPORT REGION (safe::viewportRect)             [pai lógico]
-│   ├── STRIP do topo (40dp — PASSO 1): [Cena][Perspetiva][Global] + [+] nos
-│   │   ecrãs estreitos (plusTopRight)                [vpchrome::layout]
-│   ├── RAIL esquerdo (stack undo/redo/save/dup/paste, pai de vidro)
-│   ├── TRANSFORM TOOLBAR (fundo: 5 botões 40dp + legenda acima — PASSO 1)
-│   └── [+] Adicionar TIC (canto inferior direito; sup-dir na strip
-│       quando a largura não dá — plusTopRight)
+│   ├── STRIP do topo — REMOVIDA no PASSO 3 (a barra full-width é
+│   │   PROIBIDA pela spec do dono; os chips [Cena][Perspetiva][Global]
+│   │   eram SEM FUNÇÃO desde o inventário do PASSO 0)
+│   ├── RAIL ESQUERDO (PASSO 3: as 5 ferramentas Selecionar/Mover/Rodar/
+│   │   Escalar/Íman em coluna(s) + pai de vidro a 60% — a fila do TOPO
+│   │   undo/redo/save/⋯ vive ao lado (ou abaixo, na degradação))
+│   │                                                 [vpchrome::layout]
+│   ├── GIZMO 40dp (canto SUPERIOR direito — o atalho mostrar/esconder o
+│   │   gizmo: a transição selectMode↔gizmo que já existia) [vpchrome]
+│   ├── LEGENDA (o nome da ferramenta ativa, à direita do rail; some na
+│   │   degradação)                                   [vpchrome::layout]
+│   └── [+] Adicionar TIC — 40dp REDONDO no canto inferior direito
+│       (PASSO 3; acompanhava o drawer — sobe com ele) [vpchrome::layout]
 ├── PAINEL HIERARQUIA (esquerda; PASSO 2: 18% da largura, piso 140dp;
 │   pesquisa com placeholder degradado + árvore)   [drawHierarchy]
 ├── PAINEL INSPECTOR (direita; PASSO 2: 22% da largura, piso 180dp /
@@ -82,10 +89,14 @@ contentRect (superfície EGL − insets do sistema)
    drawer, nem o viewport, nem overlays não-modais a cobrem. (A status
    bar de 24dp que ocupava esse papel foi REMOVIDA no PASSO 1;
    `safe::statusRect` devolve uma faixa de altura ZERO, por compat.)
-2. **A transform toolbar vive DENTRO da viewport region**, abaixo da
-   strip: `by ≥ view.y + stripH` e `by + 40dp ≤ view.y + view.h`. Nunca
-   sobe à top bar (o cap do drawer garante o piso; o clamp em
-   `vpchrome::layout` garante POR CONSTRUÇÃO).
+2. **O chrome do viewport vive DENTRO da viewport region (PASSO 3)**:
+   o rail, a fila do topo e os cantos derivam do rect POR CONSTRUÇÃO —
+   nunca sobem à top bar, nunca saem do rect, e NADA atravessa a largura
+   (nenhum pai de vidro ≥90% da largura — a strip morreu). A fila do topo
+   desce para baixo do rail quando não cabe ao lado do gizmo; o que não
+   cabe, ESCONDE (a degradação honesta). TUDO a 60% de alfa
+   (`vpchrome::kChromeAlpha`, o multiplicador é público e pinado na
+   R-034).
 3. **O drawer come o viewport por baixo, com CAP DUPLO**: a altura
    efetiva do drawer é `safe::effectiveDrawerH` — UMA fonte usada tanto
    pelo draw do drawer (bottom::layout) como pelos rects do centro
@@ -152,6 +163,8 @@ contentRect (superfície EGL − insets do sistema)
 | `kViewportMinW` | 288dp | piso da LARGURA do viewport central no DRAG (a toolbar cabe) |
 | `kViewportMinH` | 88dp | piso da ALTURA do viewport central com o drawer aberto (strip 40 + toolbar 40 + folga 8 — PASSO 1) |
 | `kDrawerMin`/`kDrawerMax` | 160..400dp | o ESTADO CRU da pega do drawer (o cap duplo §2.3 manda no efetivo) |
+| `vpchrome::kRailBtn`/`kQuickBtn`/`kCornerBtn` | 40dp | os alvos do chrome do viewport (PASSO 3 — desenho 32 nos botões; o [+] era 56) |
+| `vpchrome::kChromeAlpha` | 60% | a ALFA de TUDO o que o chrome do viewport desenha (PASSO 3 — a spec do dono; `chromeCol` é o multiplicador público) |
 | `layout::kTouchFloorDp` | 40dp | piso de toque do botão SOLTO (desenho 32 — a LEI DE OURO do PASSO 1; era 48) |
 | `layout::kRowFloorDp` | 36dp | piso de LINHA (top bar, listas, consola) |
 | `layout::kFieldFloorDp` | 32dp | piso de CAMPO (caixas X/Y/Z, tabs de baixo, pesquisa) |
@@ -162,11 +175,11 @@ contentRect (superfície EGL − insets do sistema)
 | ID | Onde | O que afere |
 |---|---|---|
 | R-022 | tests/test_sentinels.cpp `regress_hierarquia_contrato` | a árvore §1 inteira: containment, regras §2.1-2.6, pisos §3 (o cap DUPLO do drawer incluído), em ecrãs 776×336/800×360/1536×720 e densidades 1.0/2.0, drawer fechado/aberto/tapado |
-| R-023 | tests/test_sentinels.cpp `regress_texto_strip_campo` | chips da strip + campo «pesquisar» sem recorte em 3 densidades (mdpi/hdpi/xhdpi) |
+| R-023 | tests/test_sentinels.cpp `regress_texto_strip_campo` (REESCRITA no PASSO 3) | o chrome do viewport em 3 densidades: NADA full-width (nenhum pai ≥90% da largura — a strip é impossível), os 11 alvos ≥40dp DENTRO do rect, a escada 456→220→140→72dp (o rail a colunas, a fila a descer e a esconder — nada transborda), a fila nunca pisa o gizmo |
 | R-024 | tests/c33_virtual.cpp FASE 14.3 + sentinela `regress_viewport_rect_segue` | abrir/fechar o dock → o rect muda, o log `vp3d: viewport set to` aparece com os números certos, o aspect segue |
 | R-025 | tests/test_sentinels.cpp `regress_rodape_intocavel` | DESDE O PASSO 1: a TAB BAR de 32dp é a última faixa em todos os estados; nada a cobre; o «FPS · TICs» vive no canto direito (o middle do projeto ficou nas unidades puras de TextFit — a status bar saiu) |
 | R-033 | tests/test_sentinels.cpp `regress_paineis_passo2` | A SPEC PASSO 2 MEDIDA: defaults 18%/22% (piso 140/180, teto 260), viewport ≥55% nos ecrãs de referência, o trilho de 32dp sem seleção (e o centerRect a devolver a área), o intervalo [180..260] no drag, as pegas 24dp, o drawer default FECHADO e o teto de 35% |
-| R-034 | tests/test_sentinels.cpp `regress_p2bis_pin_e_consola` + c33 FASE 13.7i | P2-bis: o pin (o predicado com o pin, o round-trip inspPinned retrocompatível, os ids do par 7432/7433) + a regra da consola (conCmdVisible pura; a lista ≥60% nos conteúdos reais 80/88/136/191/216/336dp; o E2E no harness @2.0 — tap no trilho fixa, a seta desfaz, o campo de comando sai do drawer pequeno, os PNGs+JSON) |
+| R-034 | tests/test_sentinels.cpp `regress_p2bis_pin_e_consola` + c33 FASE 13.7i | P2-bis: o pin (o predicado com o pin, o round-trip inspPinned retrocompatível, os ids do par 7432/7433) + a regra da consola (conCmdVisible pura; a lista ≥60% nos conteúdos reais 80/88/136/191/216/336dp; o E2E no harness @2.0 — tap no trilho fixa, a seta desfaz, o campo de comando sai do drawer pequeno, os PNGs+JSON) + o PIN DA ALFA do chrome (kChromeAlpha 0.60 + o composto de `chromeCol` — PASSO 3) |
 | gate | scripts/hierarchy_check.py (job core-tests do CI) | este ficheiro existe, a tabela §0 aponta símbolos REAIS, as sentinelas R-022..R-025 + R-033 existem no fonte |
 
 Qualquer região nova: acrescenta AQUI (§1 + §0 se for topo de ramo) com

@@ -5113,8 +5113,11 @@ void frame() {
         const editor::toolbar::Actions ta = editor::toolbar::draw(g_ui,
                                                                   g_editor);
         if (ta.menuDropdown) {
-            // Menu → dropdown (Settings/Guardar/…/Sair)
+            // Menu → dropdown (Settings/Guardar/…/Sair) — a âncora VOLTA à
+            // de sempre (a top bar; o ⋯ do viewport arma a dele — PASSO 3)
             g_editor.fileMenu = !g_editor.fileMenu;
+            g_editor.menuAx = -1.0f;
+            g_editor.menuAy = -1.0f;
             g_editor.plusMenu = false;
             g_editor.settingsMenu = false;
             g_editor.hierMenu = false;
@@ -5138,7 +5141,6 @@ void frame() {
             editor::vpchrome::ChromeState cs;
             cs.canUndo = g_undo.canUndo();
             cs.canRedo = g_undo.canRedo();
-            cs.canPaste = g_clipValid;
             cs.snapValue = g_snapValue;
             const editor::vpchrome::Actions va = editor::vpchrome::draw(
                 g_ui, g_editor, g_gizmoMode, cs, g_camera, currentDrawerH());
@@ -5167,34 +5169,17 @@ void frame() {
                 g_thumbPending = true;
                 showToast(ok ? "cena salva" : "falha ao salvar");
             }
-            if (va.dupPressed) {
-                // DUPLICAR o selecionado (e ARMA a área de transferência —
-                // o paste cola o MESMO snapshot depois)
-                if (const Tic* sel = g_scene.get(g_editor.selected)) {
-                    g_clipSnap = editor::snapTic(g_scene, sel->handle);
-                    g_clipValid = true;
-                    const Handle dup =
-                        editor::duplicateTic(g_scene, g_editor.selected);
-                    if (dup.valid()) {
-                        g_editor.selected = dup;
-                        showToast("TIC duplicado");
-                    }
-                } else {
-                    showToast("seleciona um TIC para duplicar");
-                }
-            }
-            if (va.pastePressed) {
-                if (g_clipValid) {
-                    const editor::TicSnap before;   // vazio = criação
-                    const Handle h = editor::pasteAsNew(g_scene, g_clipSnap);
-                    if (h.valid()) {
-                        g_undo.push(before, editor::snapTic(g_scene, h), h);
-                        g_editor.selected = h;
-                        showToast("colado");
-                    }
-                } else {
-                    showToast("nada na área de transferência");
-                }
+            // PASSO 3 (0.9.6.17): os botões DUPLICAR/COLAR saíram da
+            // viewport (a spec do dono: o topo é desfazer/refazer/guardar/⋯)
+            // — as ações vivem no menu ⋯ (itens 9/10, o MESMO código do
+            // bloco fileMenu lá em baixo; zero caminho perdido)
+            if (va.menuPressed) {
+                // o ⋯ do viewport abre o menu de ficheiro ANCORADO a ele
+                // (a âncora vai em st.menuAx/menuAy, armada no draw)
+                g_editor.fileMenu = !g_editor.fileMenu;
+                g_editor.plusMenu = false;
+                g_editor.settingsMenu = false;
+                g_editor.hierMenu = false;
             }
             if (va.addTicPressed) {
                 g_editor.plusMenu = !g_editor.plusMenu;
@@ -5773,8 +5758,14 @@ void frame() {
     if (g_editor.fileMenu) {
         const editor::toolbar::TopBarLayout tbl = editor::toolbar::topbarLayout(
             w, h, g_ui.safeArea(), g_editor.uiMode, g_editor.audioMode);
+        // PASSO 3: a âncora do ⋯ do viewport (quando armada) ou a da top bar
+        const f32 menuAx = g_editor.menuAx >= 0.0f ? g_editor.menuAx
+                                                   : tbl.menu.x;
+        const f32 menuAy = g_editor.menuAy >= 0.0f
+                               ? g_editor.menuAy
+                               : tbl.menu.y + tbl.menu.h;
         const int choice = editor::drawFileMenu(g_ui, g_input, w, h, g_editor,
-                                                tbl.menu.x, tbl.menu.y + tbl.menu.h,
+                                                menuAx, menuAy,
                                                 g_snapValue > 0.0f);
         if (choice == 7) {
             // 0.9.6.10 (GRUPO UI · secção EDITAR): DESFAZER — o MESMO

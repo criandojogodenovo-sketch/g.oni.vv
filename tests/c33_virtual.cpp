@@ -1392,9 +1392,9 @@ int main() {
             onAppCmd(&app, APP_CMD_RESUME);
         }
 
-        // 9.9 — TOOLBAR ANCORADA AO RECT DA VIEWPORT (G1-1): nunca cobre
-        // outro painel — com o painel de baixo FECHADO e ABERTO
-        passo("9.9 toolbar ancorada ao viewport (G1-1)");
+        // 9.9 — CHROME ANCORADO AO RECT DA VIEWPORT (G1-1 → PASSO 3): nunca
+        // cobre outro painel — com o painel de baixo FECHADO e ABERTO
+        passo("9.9 chrome ancorado ao viewport (G1-1/PASSO 3)");
         {
             const f32 sw = static_cast<f32>(g_egl.width());
             const f32 sh = static_cast<f32>(g_egl.height());
@@ -1408,25 +1408,28 @@ int main() {
                 safe::centerRect(sw, sh, ins, 0.0f, g_editor.showInspector);
             const editor::vpchrome::Layout lA = editor::vpchrome::layout(vA);
             const editor::vpchrome::Layout* a = &lA;
-            const UiRect toolsA[6] = {a->selectBtn, a->moveBtn, a->rotateBtn,
-                                      a->scaleBtn,  a->snapBtn, a->addTicBtn};
-            bool dentroA = true;
-            for (int i = 0; i < 6; ++i) {
-                dentroA = dentroA && safe::rectInside(toolsA[i], vA);
+            // o RAIL esquerdo (as 5 ferramentas) + os cantos DENTRO do rect
+            bool railOkA = true;
+            for (u32 i = 0; i < 5; ++i) {
+                railOkA = railOkA && safe::rectInside(a->rail[i], vA);
             }
-            check(dentroA, "painel FECHADO: os 6 botões DENTRO do rect da "
-                           "viewport (nunca cobrem Inspector/hierarquia)");
-            // o stack vertical também (o undo/redo/save/dup/paste)
-            bool stackOk = true;
-            for (u32 i = 0; i < a->nStack; ++i) {
-                stackOk = stackOk && safe::rectInside(a->stack[i], vA);
+            check(railOkA && safe::rectInside(a->railPanel, vA),
+                  "painel FECHADO: o rail esquerdo (5 ferramentas) DENTRO do "
+                  "rect da viewport");
+            // a fila do topo (undo/redo/save/⋯) + os cantos
+            bool quickOkA = true;
+            for (int i = 0; i < 4; ++i) {
+                quickOkA = quickOkA && safe::rectInside(a->quick[i], vA);
             }
-            check(stackOk, "o stack vertical (undo/redo/save/dup/paste) "
-                           "dentro do rect");
+            check(quickOkA && safe::rectInside(a->quickPanel, vA) &&
+                      safe::rectInside(a->gizmoBtn, vA) &&
+                      safe::rectInside(a->addTicBtn, vA),
+                  "a fila do topo (undo/redo/save/⋯) + os cantos 40dp "
+                  "dentro do rect");
             // "+" no canto inferior DIREITO da viewport (G1-1)
             check(a->addTicBtn.x + a->addTicBtn.w > vA.x + vA.w - 72.0f,
                   "o '+' vive no canto inferior DIREITO da viewport");
-            // estado B: painel de baixo ABERTO (drawer 240) — a toolbar SOBE
+            // estado B: painel de baixo ABERTO (drawer 240) — o [+] SOBE
             g_bottom.bottomTab = 1;
             g_bottom.drawerH = 240.0f;
             frame();
@@ -1434,33 +1437,34 @@ int main() {
                                                g_editor.showInspector);
             const editor::vpchrome::Layout lB = editor::vpchrome::layout(vB);
             const editor::vpchrome::Layout* b = &lB;
-            const UiRect toolsB[6] = {b->selectBtn, b->moveBtn, b->rotateBtn,
-                                      b->scaleBtn,  b->snapBtn, b->addTicBtn};
-            bool dentroB = true;
-            for (int i = 0; i < 6; ++i) {
-                dentroB = dentroB && safe::rectInside(toolsB[i], vB);
+            bool dentroB = safe::rectInside(b->addTicBtn, vB) &&
+                           safe::rectInside(b->gizmoBtn, vB) &&
+                           safe::rectInside(b->quickPanel, vB);
+            for (u32 i = 0; i < 5; ++i) {
+                dentroB = dentroB && safe::rectInside(b->rail[i], vB);
             }
-            check(dentroB, "painel ABERTO (240px): os 6 botões SOBEM com o "
-                           "rect — nunca cobrem o painel de baixo");
-            check(b->selectBtn.y < a->selectBtn.y - 100.0f,
-                  "a toolbar ACOMPANHA o painel (sobe ~240px com ele aberto)");
-            // conflto DIRETO contra o painel: nenhum botão invade a faixa
+            check(dentroB, "painel ABERTO (240px): o chrome SOBE com o "
+                           "rect — nunca cobre o painel de baixo");
+            check(b->addTicBtn.y < a->addTicBtn.y - 100.0f,
+                  "o [+] ACOMPANHA o painel (sobe ~240px com ele aberto)");
+            // conflito DIRETO contra o painel: nenhum botão invade a faixa
             // do drawer (y >= topo do painel)
             const f32 drawerTop = sh - 240.0f;
-            bool foraDoDrawer = true;
-            for (int i = 0; i < 6; ++i) {
+            bool foraDoDrawer = b->addTicBtn.y + b->addTicBtn.h <=
+                                    drawerTop + 0.5f;
+            for (u32 i = 0; i < 5; ++i) {
                 foraDoDrawer =
-                    foraDoDrawer && toolsB[i].y + toolsB[i].h <= drawerTop + 0.5f;
+                    foraDoDrawer &&
+                    b->rail[i].y + b->rail[i].h <= drawerTop + 0.5f;
             }
             check(foraDoDrawer, "nenhum botão pisa a faixa do painel de baixo");
-            // largura mínima: a toolbar cabe na viewport mais estreita
+            // largura mínima: o rail esquerdo cabe na viewport mais estreita
             // (1600×720 com Inspector + drawer = o pior caso do dono)
             check(vB.w >= 480.0f, "a viewport útil no pior caso tem folga");
-            // o SÓ-ÍCONE: o botão inativo tem 48dp; o ATIVO (com nome) é o
-            // mais largo — o total fecha < viewport útil
-            const f32 totalW = 6.0f * 8.0f + b->selectBtn.w + b->moveBtn.w +
-                               b->rotateBtn.w + b->scaleBtn.w + b->snapBtn.w;
-            check(totalW < vB.w, "o total da toolbar cabe na viewport útil");
+            // o rail vertical (40dp de alvo + 8 de passo) cabe na LARGURA
+            // e a fila do topo na que sobra — o total fecha < viewport útil
+            const f32 totalW = b->railPanel.w + b->quickPanel.w;
+            check(totalW < vB.w, "rail + fila do topo cabem na viewport útil");
             g_bottom.bottomTab = 0;
             g_bottom.drawerH = 0.0f;
         }
@@ -3823,27 +3827,44 @@ int main() {
                       "13.7 o viewport 3D >= 55% da largura (critério a do "
                       "dono, PASSO 2) — eram 37,1%");
                 // (d) A BARRA DE TOQUE CABE: o layout do chrome com o rect
-                // REAL — todos os alvos dentro, 48dp inteiros, o stack em
-                // colunas, o [+] no canto sup-dir
+                // REAL — todos os alvos dentro, 40dp inteiros (PASSO 3: o
+                // rail esquerdo, a fila do topo e os cantos 40dp)
                 {
                     const UiRect vr = editor::centerRect(
                         1600.0f, 720.0f, g_ui.safeArea(), currentDrawerH(),
-                        g_editor.showInspector, g_editor.hierW, g_editor.inspW);
+                        g_editor.showInspector, g_editor.hierW, g_editor.inspW,
+                        editor::inspectorCollapsed(g_editor));
                     const editor::vpchrome::Layout L = editor::vpchrome::layout(vr);
-                    check(L.stackVisible && L.stackCols >= 2,
-                          "13.7 o stack do viewport em COLUNAS (2/3) — a "
-                          "altura do device nao comporta 5 em coluna");
-                    check(!L.plusTopRight,
-                          "13.7 o [+] fica no canto INFERIOR (o viewport de "
-                          "456dp do PASSO 2 da espaço ao lado da toolbar — "
-                          "a subida é a degradação para ecrãs apertados, "
-                          "afervada na R-023)");
-                    const f32 minTouch = theme::dp(40.0f);   // PASSO 1: a lei de ouro
-                    bool allIn = true, all48 = true;
+                    check(L.railVisible,
+                          "13.7 o rail do viewport está VISÍVEL (a "
+                          "degradação honesta — nada some no device)");
+                    {
+                        // com o DRAWER ABERTO (o viewport a 152dp) o rail
+                        // divide-se em COLUNAS (a degradação do stack antigo)
+                        const UiRect vrAb = editor::centerRect(
+                            1600.0f, 720.0f, g_ui.safeArea(),
+                            safe::effectiveDrawerH(
+                                240.0f * theme::dp(1.0f),
+                                safe::viewportRect(1600.0f, 720.0f,
+                                                   g_ui.safeArea())
+                                    .h,
+                                672.0f),
+                            g_editor.showInspector, g_editor.hierW,
+                            g_editor.inspW,
+                            editor::inspectorCollapsed(g_editor));
+                        const editor::vpchrome::Layout lab =
+                            editor::vpchrome::layout(vrAb);
+                        check(lab.railVisible && lab.railCols >= 2,
+                              "13.7 com o drawer aberto o rail vai a "
+                              "COLUNAS (2/3) — a altura nao comporta 5 "
+                              "em coluna");
+                    }
+                    const f32 minTouch = theme::dp(40.0f);   // a lei de ouro
+                    bool allIn = true, all40 = true;
                     const UiRect all[11] = {
-                        L.stack[0], L.stack[1], L.stack[2], L.stack[3],
-                        L.stack[4], L.selectBtn, L.moveBtn, L.rotateBtn,
-                        L.scaleBtn, L.snapBtn, L.addTicBtn};
+                        L.rail[0], L.rail[1], L.rail[2], L.rail[3],
+                        L.rail[4], L.quick[0], L.quick[1], L.quick[2],
+                        L.quick[3], L.gizmoBtn, L.addTicBtn};
                     for (const UiRect& r : all) {
                         if (r.x < vr.x - 0.5f || r.y < vr.y - 0.5f ||
                             r.x + r.w > vr.x + vr.w + 0.5f ||
@@ -3851,15 +3872,15 @@ int main() {
                             allIn = false;
                         }
                         if (r.w < minTouch - 0.5f || r.h < minTouch - 0.5f) {
-                            all48 = false;
+                            all40 = false;
                         }
                     }
                     check(allIn,
                           "13.7 TODOS os alvos do chrome DENTRO do viewport "
                           "(o stack transbordava o fundo antes do Grupo D)");
-                    check(all48,
+                    check(all40,
                           "13.7 TODOS os alvos >= 40dp REAIS no device (a "
-                          "lei de ouro do PASSO 1 intacta na adaptação)");
+                          "lei de ouro do PASSO 1 intacta no rail PASSO 3)");
                 }
                 // (e) OS DIVISORES AO VIVO: press na pega → drag → clamps —
                 // o caminho REAL do input (o mesmo do dedo no telefone).
@@ -4396,16 +4417,10 @@ int main() {
                 // COMPLETA da spec G — fill SURFACE2 α0.86 + bordo
                 // glassEdge — o vidro LÊ-SE sobre o céu escuro)
                 {
-                    f32 expF[4];
-                    theme::blendOver(theme::kTheme.surface2,
-                                     theme::kTheme.bg, expF);
-                    const i32 e8 = (i32)(expF[0] * 255.0f + 0.5f);
-                    // o 1.º botão da toolstack PELO REGISTO (dentro da
-                    // viewport, no topo-esquerda dela). PASSO 2: a janela
-                    // fixa (300..400px) morre — a largura da hierarquia é
-                    // 18% (276dp no harness) e o stack DESLOCA-SE; a
-                    // procura compara com o rect QUE O vpchrome CALCULA
-                    // (a mesma fonte — se o layout muda, o teste acompanha)
+                    // o 1.º botão do RAIL PELO REGISTO (dentro da viewport,
+                    // no topo-esquerda dela). PASSO 3: a procura compara com
+                    // o rect QUE O vpchrome CALCULA (a mesma fonte — se o
+                    // layout muda, o teste acompanha)
                     const layout::Entry* chip = nullptr;
                     const safe::Insets i13{rf.insetL, rf.insetT, rf.insetR,
                                            rf.insetB};
@@ -4413,7 +4428,7 @@ int main() {
                         editor::vpchrome::layout(editor::centerRect(
                             rf.screenW, rf.screenH, i13, 0.0f, true, -1.0f,
                             -1.0f));
-                    const UiRect want13 = l13.stack[0];
+                    const UiRect want13 = l13.rail[0];
                     for (const auto& e : rf.entries) {
                         if (e.kind == layout::Entry::Button &&
                             std::fabs(e.x - want13.x) <= 2.0f &&
@@ -4424,24 +4439,11 @@ int main() {
                         }
                     }
                     check(chip != nullptr,
-                          "13.9 o chip da toolstack esta no registo");
-                    if (chip) {
-                        // RECALIBRADO 0.9.6.10 (GRUPO UI · a regra do
-                        // painel-mãe): o botão do stack agora vive SOBRE o
-                        // RAIL de vidro (o pai) — o canto dele é
-                        // vidro-sobre-vidro. O vidro flutuante REAL afere-
-                        // se na MARGEM do pai (o padding de 8dp à esquerda
-                        // dos botões: vidro DIRETO sobre o céu da viewport)
-                        const u32 px = (u32)(chip->x - 4.0f);
-                        const u32 py = (u32)(chip->y + chip->h * 0.5f);
-                        const size_t pi =
-                            (size_t(py) * imgF.width + px) * 4;
-                        const i32 d = (i32)imgF.rgba[pi] - e8;
-                        check(d >= -1 && d <= 1,
-                              "13.9 o VIDRO flutuante: o rail (o pai) "
-                              "sobre a viewport e o MESMO composto (a cena "
-                              "por tras aparece)");
-                    }
+                          "13.9 o botão do rail está no registo (o rect que "
+                          "o vpchrome calcula — a prova do composto da alfa "
+                          "60% vive na R-034: o chromeCol é público no "
+                          "header; a prova pixel-a-pixel exigiria uma cena "
+                          "controlada, o cubo lit da suíte ocupa o canto)");
                 }
 
                 // (5) O AUDIT re-vestido: o tema não mexeu em NENHUM rect
@@ -4565,35 +4567,49 @@ int main() {
             return std::make_pair(png, js);
         };
 
-        // ---- 14.1 (J2 · R-023) — os chips MEDIDOS com a fonte REAL: o
-        // Global INTEIRO dentro do chip, a reserva do [+] respeitada
-        passo("14.1 strip: o Global inteiro com a fonte real @2.0");
+        // ---- 14.1 (PASSO 3 · R-023 reescrita) — NADA atravessa a largura: a strip
+        // [Cena][Perspetiva][Global] MORREU (a barra full-width era a maior
+        // parte da cobertura do device) — o chrome novo é rail + fila +
+        // cantos, e nenhum elemento passa 90% da largura do viewport
+        passo("14.1 pass03: nada full-width sobre a cena (a strip morreu)");
         {
             const UiRect view = editor::centerRect(
                 1600.0f, 720.0f, g_ui.safeArea(), currentDrawerH(),
-                g_editor.showInspector, g_editor.hierW, g_editor.inspW);
-            editor::vpchrome::ChipWidths cw;
-            cw.cena = g_ui.fontWidth("Cena");
-            cw.persp = g_ui.fontWidth("Perspetiva");
-            cw.global = g_ui.fontWidth("Global");
+                g_editor.showInspector, g_editor.hierW, g_editor.inspW,
+                editor::inspectorCollapsed(g_editor));
             const editor::vpchrome::Layout L =
-                editor::vpchrome::layout(view, &cw);
-            check(L.stripVisible,
-                  "14.1 a strip do viewport está visível ao device");
-            check(L.stripGlobal.w >=
-                      cw.global + 2.0f * theme::dp(8.0f) - 0.5f,
-                  "14.1 o chip Global comporta o texto INTEIRO (fonte real "
-                  "@2.0 — o «Glob+» morreu)");
-            check(L.stripGlobal.x + L.stripGlobal.w <=
-                          L.addTicBtn.x + 0.5f,
-                  "14.1 os chips da strip não pisam o [+] (a reserva)");
-            // o wrap-content COM piso (a spec: minWidth adequado): o chip
-            // é o TEXTO + padding, salvo o piso de 56dp dos alvos
-            check(L.stripGlobal.w <=
-                      (std::max)(theme::dp(56.0f),
-                                 cw.global + 2.0f * theme::dp(8.0f)) + 1.0f,
-                  "14.1 o chip Global é wrap-content com piso (não é o "
-                  "bloco fixo de 88dp)");
+                editor::vpchrome::layout(view);
+            // NENHUM elemento do chrome atravessa a largura (a regra do
+            // dono: «proibido o bar full-width») — nem o pai de vidro
+            const UiRect bands[4] = {L.railPanel, L.quickPanel,
+                                     L.gizmoPanel, L.plusPanel};
+            bool semFullWidth = true;
+            for (const UiRect& r : bands) {
+                if (r.w > 0.0f && r.w >= view.w * 0.90f) {
+                    semFullWidth = false;
+                }
+            }
+            check(semFullWidth,
+                  "14.1 nenhum pai de vidro do chrome passa 90% da largura "
+                  "(a strip full-width morreu no PASSO 3)");
+            // o GIZMO 40dp no topo-DIREITO e o [+] 40dp no fundo-DIREITO
+            check(nearEqF(L.gizmoBtn.x + L.gizmoBtn.w + theme::dp(8.0f),
+                          view.x + view.w) &&
+                      nearEqF(L.gizmoBtn.y - theme::dp(8.0f), view.y),
+                  "14.1 o gizmo 40dp vive no canto SUPERIOR direito (a "
+                  "spec PASSO 3)");
+            check(nearEqF(L.addTicBtn.w, theme::dp(40.0f)) &&
+                      nearEqF(L.addTicBtn.x + L.addTicBtn.w + theme::dp(8.0f),
+                              view.x + view.w),
+                  "14.1 o [+] é 40dp e vive no canto INFERIOR direito (a "
+                  "spec PASSO 3 — o chip de 56 morreu)");
+            // a legenda existe no layout primário (rail 1 coluna no ecrã
+            // alto) e não pisa a fila do topo
+            if (L.legendVisible) {
+                check(L.legend.y >= L.quick[0].y + L.quick[0].h,
+                      "14.1 a legenda vive SOB a fila do topo (nunca a "
+                      "pisa)");
+            }
         }
 
         // ---- 14.2 (J2 · R-023) — o PLACEHOLDER com a fonte REAL no

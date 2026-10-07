@@ -1,33 +1,41 @@
 #pragma once
-// ui/ViewportChrome.h — CHROME DO VIEWPORT (0.9.0 spec D; FASE 9 G1-1):
+// ui/ViewportChrome.h — CHROME DO VIEWPORT (0.9.0 spec D; FASE 9 G1-1;
+// PASSO 3 · 0.9.6.17 — A SPEC DO DONO: os controlos do viewport ocupam
+// ≤10% da área a 60% de alfa, NADA atravessa a largura toda e NADA se
+// sobrepõe):
 //
 //   ┌─────────────────────────────────────────────────────────────┐
-//   │ [redo]                                                       │
-//   │ [save]              VIEWPORT 3D                              │
-//   │ [dup ]                                                       │
-//   │ [paste]                                                      │
-//   │                                                               │
-//   │ [▲][✥][⟳][⤢] [🧲]                                     [+]   │
+//   │ [undo][redo][save][⋯]                    (gizmo)            │
+//   │ [Sele]                                                       │
+//   │ [Mover]              VIEWPORT 3D                             │
+//   │ [Rodar]                                                      │
+//   │ [Escar]                                                      │
+//   │ [Íman ]  legenda                                  [+]        │
 //   └─────────────────────────────────────────────────────────────┘
 //
-// FASE 9 (G1-1 — toolbar ANCORADA À VIEWPORT): a toolbar inferior vivia
-// ancorada ao fundo do ECRÃ (centerRect com drawerH=0 HARDCODED) — com o
-// painel de baixo ABERTO ela sobrepunha o drawer e o Inspector e o
-// "Selecionar" ficava cortado à esquerda. AGORA:
-//   • o layout recebe o drawerH REAL (a toolbar SOBE quando o painel de
-//     baixo abre e DESCE quando fecha — acompanha o rect da viewport);
-//   • SÓ ÍCONES; o NOME só no botão ATIVO (fill accent + palavra);
-//   • snap vira BOTÃO DE ÍMAN (estado ativo/inativo, sem texto — G2-9);
-//   • "Adicionar TIC" vira "+" no canto inferior DIREITO da viewport;
-//   • o botão de settings (sliders) REMOVIDO — estava MORTO desde a
-//     0.9.0 (vpSettingsMenu setado, NADA lia — inventário G0-4);
-//   • tudo DENTRO do rect da viewport (por construção: âncoras e larguras
-//     derivam do rect — nunca por cima de outro painel).
-//
-//   • stack de toque vertical à ESQUERDA: [undo][redo][save][duplicate]
-//     [paste] 48dp com ESTADOS DISABLED (icon text2 40% — sem alvo);
-//   • TRIAD REMOVIDO na FASE 9 (G2-10) — os "pontinhos fantasma" do dono;
-//   • os gizmos 3D existentes com grab-lock ficam INTACTOS (ui/Gizmo.h).
+// PASSO 3 (0.9.6.17 — a spec do dono, confirmada no arranque do passo):
+//   • O RAIL ESQUERDO: a fileira de ferramentas (Selecionar/Mover/Rodar/
+//     Escalar/Íman) vive VERTICAL na borda ESQUERDA (era a toolbar
+//     inferior HORIZONTAL — a degradação em colunas do stack antigo
+//     mantém-se para viewports baixos);
+//   • O GRUPO DO TOPO-ESQUERDO: desfazer/refazer/guardar/⋯ numa fila
+//     HORIZONTAL (era o stack vertical de 5 — o duplicar/colar SAÍRAM da
+//     viewport: as ações vivem no menu ⋯ itens 9/10, o caminho que já
+//     existia);
+//   • O [+]: 40dp REDONDO no canto inferior direito (era um chip de 56);
+//   • O GIZMO: 40dp no canto superior direito — o atalho mostrar/esconder
+//     o gizmo 3D (a transição selectMode↔gizmo que JÁ existe; zero lógica
+//     nova — a interpretação do "gizmo 40dp" da spec, documentada no
+//     relatório para o dono vetar);
+//   • A LEGENDA: o nome da ferramenta ativa, à direita do rail (por
+//     baixo da fila do topo);
+//   • A STRIP [Cena][Perspetiva][Global] MORREU — era a barra que
+//     atravessava a largura toda (PROIBIDA pela spec; os chips eram
+//     SEM FUNÇÃO desde o inventário do PASSO 0);
+//   • 60% DE ALFA em TUDO o que o chrome desenha (os pais de vidro, os
+//     chips, os ícones, a legenda — os glifos DESATIVados ficam nos seus
+//     0.4 de sempre, já transluúcidos por desenho);
+//   • a LEI DE OURO mantém-se: DESENHO 32dp / TOQUE 40dp, passos de 48.
 #include "ui/EditorLayout.h"
 #include "ui/Icons.h"
 #include "ui/Toolbar.h"     // GizmoModeState
@@ -52,93 +60,85 @@ namespace vpchrome {
 constexpr u64 kVpUndoId    = 30;
 constexpr u64 kVpRedoId    = 31;
 constexpr u64 kVpSaveId    = 32;
-constexpr u64 kVpDupId     = 33;
-constexpr u64 kVpPasteId   = 34;
 constexpr u64 kVpSelectId  = 35;   // modo Selecionar (cursor — SEM gizmo)
 constexpr u64 kVpSnapValId = 36;   // botão de ÍMAN (toggle do snap)
-constexpr u64 kVpAddTicId  = 38;   // [+] (canto inferior direito)
-// kVpSettingsId (37) REMOVIDO na FASE 9: o botão estava MORTO (inventário
-// G0-4 — vpSettingsMenu nunca era lido). O id fica LIVRE.
+constexpr u64 kVpMenuId    = 37;   // PASSO 3: o ⋯ do topo-esquerdo (abre o
+                                   // menu de ficheiro ancorado a ele — o id
+                                   // 37 do settings morto volta a usar-se)
+constexpr u64 kVpAddTicId  = 38;   // [+] (canto inferior direito, 40 redondo)
+constexpr u64 kVpGizmoId   = 39;   // PASSO 3: o gizmo 40dp do topo-direito
+// kVpDupId (33) / kVpPasteId (34) REMOVIDOS no PASSO 3: os botões saíram da
+// viewport (a spec do dono lista desfazer/refazer/guardar/⋯ no topo) — as
+// ações Duplicar/Colar vivem no menu ⋯ (itens 9/10, o caminho da 0.9.6.10)
 
 // ---- estado que o chrome precisa (o main possui TUDO; aqui só flags) -------
 struct ChromeState {
     bool canUndo = false;     // há operações na pilha (botão aceso)
     bool canRedo = false;
-    bool canPaste = false;    // há TIC copiado na área de transferência
     f32  snapValue = 0.5f;    // o valor do snap (0 = snap off)
+    // canPaste REMOVIDO no PASSO 3 (o botão Colar saiu da viewport; o menu
+    // ⋯ cola pelo estado g_clipValid do main — nada a apagar aqui)
 };
 
 // ---- LAYOUT PURO (fonte única — desenho e testes) ---------------------------
-// PASSO 1 (0.9.6.14 · spec UI do dono): a lei de ouro — DESENHO 32dp /
-// TOQUE 40dp, adjacentes nunca se pisam (passo 40+8); nada ≥48 no editor.
-constexpr f32 kStackBtn  = 40.0f;   // alvo do stack vertical (desenho 32)
-constexpr f32 kStackGap  = 8.0f;    // ≥8dp entre alvos (spec A)
-constexpr f32 kBottomH   = 40.0f;   // toolbar inferior (desenho 32 no alvo 40)
-constexpr f32 kToolBtn   = 40.0f;   // botão de ferramenta (desenho 32)
-constexpr f32 kStripH    = 40.0f;   // PASSO 1: a strip do topo (era 48 — o
-                                    // pai de vidro dos chips; nada ≥48)
-// kToolActiveW REMOVIDO na 0.9.6.1 (G1-2): os 4 botões são IGUAIS (PASSO 1:
-// 40dp de toque, desenho 32) só-ícone; o nome da ferramenta ativa vive numa
-// legenda ACIMA da barra
-constexpr f32 kToolActiveW = 40.0f;   // LEGACY (igual a kToolBtn; sem uso novo)
+// A LEI DE OURO (PASSO 1): DESENHO 32dp / TOQUE 40dp, passos de 48 — nada
+// ≥48 no editor (o [+] era 56: desce a 40 no PASSO 3, a spec do dono).
+constexpr f32 kRailBtn   = 40.0f;  // alvo dos botões do rail (desenho 32)
+constexpr f32 kRailGap   = 8.0f;   // ≥8dp entre alvos (spec A)
+constexpr f32 kQuickBtn  = 40.0f;  // alvo da fila do topo
+constexpr f32 kQuickGap  = 8.0f;
+constexpr f32 kCornerBtn = 40.0f;  // o [+] e o gizmo (a spec PASSO 3: 40dp)
+// PASSO 3: a ALFA do chrome do viewport (a spec do dono: «controlos a 60%»)
+constexpr f32 kChromeAlpha = 0.60f;
+// o multiplicador de alfa do chrome (inline no header para ser PERSISTENTE
+// na prova: a sentinela R-034 afere o composto e a mutação da alfa morre
+// no CI; os glifos desativados ficam nos 0.4 de sempre, fora disto)
+inline void chromeCol(const f32* c, f32 out[4]) {
+    out[0] = c[0];
+    out[1] = c[1];
+    out[2] = c[2];
+    out[3] = c[3] * kChromeAlpha;
+}
 
 struct Layout {
-    UiRect stack[5]{};        // undo redo save dup paste (coluna-major)
-    u32    nStack = 5;
-    u32    stackCols = 1;     // GRUPO D: 1 nos ecrãs largos; 2/3 nos curtos
-    bool   stackVisible = true;  // GRUPO D: false = viewport TÃO curto/estreito
-                                 // que nem 1 linha de 5 colunas cabe (a
-                                 // degradação honesta: toolbar+viewport mandam)
-    UiRect selectBtn{}, moveBtn{}, rotateBtn{}, scaleBtn{};
-    UiRect snapBtn{}, addTicBtn{};
-    bool   plusTopRight = false;  // GRUPO D: [+] no canto SUP-dir quando a
-                                  // viewport não comporta [+] ao lado da
-                                  // toolbar (device: viewport de ~288dp)
-    UiRect view{};            // o viewport central (para referência)
-    // P-08 (0.9.6.12 · GRUPO J1 · R-022): a degradação honesta da altura —
-    // com o drawer aberto o viewport central encolhe; quando nem strip +
-    // toolbar cabem (viewport sub-piso, só em testes), a strip ESCONDE e a
-    // legenda some — a toolbar fica DENTRO do rect (regra §2.2 do contrato
-    // docs/LAYOUT_HIERARCHY.md)
-    bool   stripVisible = true;   // false = viewport sub-piso (a strip some)
-    bool   legendVisible = true;  // false = a legenda da ferramenta some
-    // 0.9.6.10 (GRUPO UI · a REGRA DO PAI-PAINEILO — o anti-exemplo da
-    // imagem 2: «nunca mais painéis/toolbar sem painel-mãe, sem cabeçalho,
-    // sem clip»): TUDO o que flutua sobre a grelha ganha um PAI de vidro
-    UiRect strip{};           // a strip do TOPO: [Cena][Perspetiva][Global]
-    UiRect stripCena{}, stripPersp{}, stripGlobal{};   // os chips da strip
-    UiRect stackPanel{};      // o pai do stack vertical (o rail esquerdo)
-    UiRect toolPanel{};       // o pai da toolbar inferior (+ a legenda)
+    UiRect rail[5]{};         // Selecionar/Mover/Rodar/Escalar/Íman (coluna-
+                              // major; a degradação em colunas é a do stack
+                              // antigo — viewports baixos dividem a coluna)
+    u32    railCols = 1;
+    bool   railVisible = true;   // false = viewport tão baixo que nem 2
+                                 // colunas cabem (a degradação honesta)
+    UiRect quick[4]{};        // desfazer/refazer/guardar/⋯ (fila do topo)
+    UiRect gizmoBtn{};        // o gizmo 40dp do topo-direito
+    UiRect addTicBtn{};       // o [+] 40dp redondo do fundo-direito
+    // os PAIS DE VIDRO (a regra do pai-painelinho — nada flutua sem pai)
+    UiRect railPanel{};       // o pai do rail esquerdo
+    UiRect quickPanel{};      // o pai da fila do topo
+    UiRect gizmoPanel{};      // o pai do gizmo
     UiRect plusPanel{};       // o pai do [+]
+    // a LEGENDA: o nome da ferramenta ativa, à direita do rail (por baixo
+    // da fila do topo — o rect é a área do texto; some quando não cabe)
+    bool   legendVisible = true;
+    UiRect legend{};
+    UiRect view{};            // o viewport central (para referência)
 };
 
 // resolve o layout dentro do rect do viewport central (o view JÁ vem
-// encolhido pelo drawer aberto — o chamador passa currentDrawerH())
-// P-08 (0.9.6.12 · GRUPO J2 · R-023): os chips da strip passam a MEDIDOS
-// (wrap-content com piso) — `cw` traz as LARGURAS DO TEXTO em px medidas
-// pelo chamador (ui.fontWidth); null = as larguras fixas de sempre
-// (compat dos testes). A degradação: Perspetiva esconde primeiro, depois
-// Cena; o Global é o ÚLTIMO a ceder e SÓ então ellipsize (nunca «Glob+»
-// por cobertura de outro widget — a regra §2.5 do contrato)
-struct ChipWidths {
-    f32 cena = 0.0f;    // px do TEXTO «Cena» (sem padding)
-    f32 persp = 0.0f;   // px de «Perspetiva»
-    f32 global = 0.0f;  // px de «Global»
-};
-Layout layout(const UiRect& view, const ChipWidths* cw = nullptr);
+// encolhido pelo drawer aberto — o chamador passa currentDrawerH()).
+// PASSO 3: a strip e o ChipWidths saíram (a barra full-width é proibida e
+// os chips eram SEM FUNÇÃO — o inventário do PASSO 0)
+Layout layout(const UiRect& view);
 
 // ---- DRAW ---------------------------------------------------------------------
-// camera = a câmara do editor (para o TRIAD seguir a orientação).
-// drawerH = a altura do painel de baixo ABERTO neste frame (0 = fechado) —
-// a toolbar acompanha (G1-1).
-// Muta gz.mode/gz.snap + st.selectMode (novo: modo Selecionar sem gizmo).
-// Devolve as ações do frame (o main executa).
+// camera = a câmara do editor (o TRIAD foi removido na FASE 9; o parâmetro
+// fica por compat). drawerH = a altura do painel de baixo ABERTO neste
+// frame (0 = fechado). Muta gz.mode/gz.snap + st.selectMode; o ⋯ arma o
+// menu de ficheiro (st.fileMenu + as âncoras st.menuAx/menuAy); o gizmo
+// alterna st.selectMode. Devolve as ações do frame (o main executa).
 struct Actions {
     bool undoPressed  = false;
     bool redoPressed  = false;
     bool savePressed  = false;
-    bool dupPressed   = false;
-    bool pastePressed = false;
+    bool menuPressed  = false;    // PASSO 3: o ⋯ do topo-esquerdo
     bool addTicPressed = false;
 };
 

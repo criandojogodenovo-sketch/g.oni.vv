@@ -3086,6 +3086,17 @@ TEST(regress_p2bis_pin_e_consola) {
         EXPECT(editor::bottom::conCmdVisible(216.0f));
         EXPECT(nearEqF(216.0f - top - 44.0f, 140.0f, 0.001f));  // 64,8%
     }
+
+    // ---- (4) PASSO 3: a ALFA do chrome (a constante + o multiplicador)
+    {
+        EXPECT(nearEqF(editor::vpchrome::kChromeAlpha, 0.60f, 0.001f));
+        const f32 c[4] = {1.0f, 0.5f, 0.0f, 1.0f};
+        f32 out[4];
+        editor::vpchrome::chromeCol(c, out);
+        EXPECT(nearEqF(out[0], 1.0f, 0.001f) && nearEqF(out[3], 0.60f, 0.001f));
+        // o RGB passa intacto (a alfa é a ÚNICA coisa que muda)
+        EXPECT(nearEqF(out[1], 0.5f, 0.001f) && nearEqF(out[2], 0.0f, 0.001f));
+    }
 }
 
 TEST(regress_divisores_arrastaveis) {
@@ -3183,35 +3194,42 @@ TEST(regress_divisores_arrastaveis) {
                &hw, &iw) &&
            hw < 0.0f);
 
-    // ---- (e) o CHROME ADAPTATIVO (a barra de toque CABE): no rect do
-    // device o stack vai a COLUNAS e o [+] sobe; no largo fica o de sempre
+    // ---- (e) o CHROME ADAPTATIVO (PASSO 3): no rect do device o rail vai
+    // a COLUNAS e a fila do topo DESCE; no largo fica o layout primário
     {
         const editor::vpchrome::Layout lwide =
             editor::vpchrome::layout(UiRect{300.0f, 80.0f, 912.0f, 568.0f});
-        EXPECT(lwide.stackVisible && lwide.stackCols == 1u);
-        EXPECT(!lwide.plusTopRight);   // o [+] ao lado da toolbar (o de sempre)
+        EXPECT(lwide.railVisible && lwide.railCols == 1u);
+        EXPECT(lwide.legendVisible);   // o layout primário tem legenda
         // o rect do DEVICE em dp a 1.0 (hier 200 | vp 288×208)
         const editor::vpchrome::Layout ldev =
             editor::vpchrome::layout(UiRect{200.0f, 56.0f, 288.0f, 208.0f});
-        EXPECT(ldev.stackVisible && ldev.stackCols >= 2u);   // colunas
-        EXPECT(ldev.plusTopRight);                            // [+] no topo
+        EXPECT(ldev.railVisible && ldev.railCols >= 2u);   // colunas
+        // a fila do topo DESCE para baixo do rail (nunca sai do rect — o
+        // [+] vive sempre no fundo-direito, a spec PASSO 3)
+        EXPECT(ldev.quick[0].y > ldev.rail[0].y + ldev.rail[0].h);
         // TODOS os alvos ≥40dp (PASSO 1: a lei de ouro) e DENTRO do rect
         // (o stack TRANBORDAVA antes do Grupo D)
-        const UiRect all[] = {ldev.stack[0],  ldev.stack[1], ldev.stack[2],
-                              ldev.stack[3],  ldev.stack[4], ldev.selectBtn,
-                              ldev.moveBtn,   ldev.rotateBtn, ldev.scaleBtn,
-                              ldev.snapBtn,   ldev.addTicBtn};
+        const UiRect all[] = {ldev.rail[0],   ldev.rail[1],  ldev.rail[2],
+                              ldev.rail[3],   ldev.rail[4],  ldev.quick[0],
+                              ldev.quick[1],  ldev.quick[2], ldev.quick[3],
+                              ldev.gizmoBtn,  ldev.addTicBtn};
         for (const UiRect& r : all) {
             EXPECT(r.w >= 40.0f - 0.01f && r.h >= 40.0f - 0.01f);
             EXPECT(r.x >= 200.0f - 0.01f && r.y >= 56.0f - 0.01f);
             EXPECT(r.x + r.w <= 200.0f + 288.0f + 0.01f);
             EXPECT(r.y + r.h <= 56.0f + 208.0f + 0.01f);
         }
-        // a degradação HONESTA: um rect SUB-toolbar ESCONDE o stack (nada
-        // transborda por cima da toolbar — o bug medido do device)
+        // a degradação HONESTA: um rect SUB-mínimo ESCONDE o rail (a fila
+        // do topo e os cantos ficam — cabem no piso da casa)
         const editor::vpchrome::Layout ltiny =
             editor::vpchrome::layout(UiRect{200.0f, 56.0f, 200.0f, 60.0f});
-        EXPECT(!ltiny.stackVisible);
+        EXPECT(!ltiny.railVisible);
+        // o rect de 200×60 não dá nem para a fila do topo ao lado do gizmo
+        // nem para a fila abaixo de um rail inexistente — a fila ESCONDE
+        // (os cantos ficam: cabem sempre)
+        EXPECT(ltiny.quick[0].w == 0.0f && ltiny.addTicBtn.w > 0.0f &&
+               ltiny.gizmoBtn.w > 0.0f);
     }
 }
 
@@ -3947,9 +3965,10 @@ TEST(regress_hierarquia_contrato) {
             const editor::vpchrome::Layout L = editor::vpchrome::layout(view);
 
             // ---- CONTRATO §2.4: nada sai do rect da viewport central
+            // (PASSO 3: o rail de ferramentas + a fila do topo + os cantos)
             const UiRect targets[11] = {
-                L.stack[0], L.stack[1], L.stack[2], L.stack[3], L.stack[4],
-                L.selectBtn, L.moveBtn, L.rotateBtn, L.scaleBtn, L.snapBtn,
+                L.rail[0], L.rail[1], L.rail[2], L.rail[3], L.rail[4],
+                L.quick[0], L.quick[1], L.quick[2], L.quick[3], L.gizmoBtn,
                 L.addTicBtn};
             for (const UiRect& r : targets) {
                 if (r.w > 0.0f && r.h > 0.0f) {   // degenerado = escondido
@@ -3959,28 +3978,39 @@ TEST(regress_hierarquia_contrato) {
                                sc.name, raw);
                 }
             }
-            EXPECT(safe::rectInside(L.toolPanel, view));
-            if (L.stackVisible) {
-                EXPECT(safe::rectInside(L.stackPanel, view));
+            EXPECT(safe::rectInside(L.gizmoPanel, view));
+            EXPECT(safe::rectInside(L.plusPanel, view));
+            if (L.railVisible) {
+                EXPECT(safe::rectInside(L.railPanel, view));
+            }
+            if (L.quick[0].w > 0.0f) {   // degenerado = escondido (degradação)
+                EXPECT(safe::rectInside(L.quickPanel, view));
             }
 
-            // ---- CONTRATO §2.2: a toolbar ABAIXO da strip (nunca sobe à
-            // top bar) — o defeito 1 do dono é impossível POR CONSTRUÇÃO
-            EXPECT_MSG(L.selectBtn.y >= view.y + 0.5f,
-                       "%s raw=%.0f: a toolbar subiu acima do topo da "
+            // ---- CONTRATO §2.2 (PASSO 3): o chrome DENTRO do viewport —
+            // o rail e a fila do topo nascem NO TOPO do rect (nunca sobem
+            // à top bar) e a strip full-width JÁ NÃO EXISTE
+            EXPECT_MSG(L.rail[0].y >= view.y + 0.5f || !L.railVisible,
+                       "%s raw=%.0f: o rail subiu acima do topo da "
                        "viewport (a top bar fica POR CIMA da viewport — "
                        "cobiçá-la é violação)",
                        sc.name, raw);
-            if (L.stripVisible) {
-                EXPECT_MSG(L.selectBtn.y >= L.strip.y + L.strip.h - 0.5f,
-                           "%s raw=%.0f: a toolbar pisa a banda da strip",
-                           sc.name, raw);
-                // (a regra §2.5 do ENCAIXE dos chips é afervada pela
-                // R-023 — regress_texto_strip_campo, GRUPO J2)
-            } else {
-                // viewport sub-piso: a degradação honesta — a toolbar
-                // CONTINUA dentro do rect (a última defesa)
-                EXPECT(view.h < theme::dp(safe::kViewportMinH) + 0.5f);
+            EXPECT_MSG(L.quick[0].w == 0.0f ||
+                           L.quick[0].y >= view.y + 0.5f,
+                       "%s raw=%.0f: a fila do topo subiu acima do topo da "
+                       "viewport",
+                       sc.name, raw);
+            // a REGRAS PASSO 3: nada full-width (os pais de vidro < 90% da
+            // largura — a strip que atravessava a cena morreu)
+            EXPECT_MSG(L.railPanel.w < view.w * 0.9f &&
+                           L.quickPanel.w < view.w * 0.9f,
+                       "%s raw=%.0f: um pai de vidro atravessa a largura "
+                       "(a barra full-width é proibida — spec PASSO 3)",
+                       sc.name, raw);
+            if (!L.railVisible) {
+                // viewport sub-piso: a degradação honesta — a fila do topo
+                // e os cantos CONTINUAM dentro do rect (a última defesa)
+                EXPECT(view.h < theme::dp(152.0f) + 0.5f);
             }
 
             // ---- a top bar INTACTA: o viewport inteiro começa DEBAIXO
@@ -4016,133 +4046,107 @@ TEST(regress_hierarquia_contrato) {
 }
 
 // ============================================================================
-// R-023 (0.9.6.12 · GRUPO J2) — O TEXTO DA STRIP E O CAMPO DE PESQUISA
-//         — regress_texto_strip_campo
+// R-023 (0.9.6.12 · GRUPO J2 → REESCRITA no PASSO 3 · 0.9.6.17) — O CHROME
+// DO VIEWPORT SEM BARRA FULL-WIDTH + O ENCAIXE EM 3 DENSIDADES
+//         — regress_texto_strip_campo (o nome é o id da regressão; o tema
+//           mudou: a STRIP [Cena][Perspetiva][Global] que o teste vigiava
+//           MORREU no PASSO 3 — a barra que atravessava a largura era a
+//           maior parte da cobertura do device e os chips eram SEM FUNÇÃO
+//           desde o inventário do PASSO 0. O campo «pesquisar» da hierarquia
+//           mantém a sua prova na FASE 14.2 do c33 com a fonte real.)
 //
-// O DONO (defeito 3): «o botão Global recortado para "Glob+", o campo
-// "pesquisar TIC" colide com a hierarquia». A CAUSA RAIZ (leitura do
-// código): os chips da strip tinham larguras FIXAS (88+112+88dp = 312dp)
-// num viewport de piso 288dp COM o [+] a viver no fim direito da strip
-// (plusTopRight no device) — o chip Global transbordava e era COBERTO
-// pelo pai do [+] (desenhado depois). O FIX (a spec J2): chips MEDIDOS
-// (wrap-content com piso 56dp), a reserva do [+] respeitada e a
-// degradação por ordem — Perspetiva esconde primeiro, depois Cena, o
-// Global é o ÚLTIMO (e só ellipsize quando nem ele cabe). Esta sentinela
-// afere o ENCAIXE em 3 densidades (mdpi 1.0 / hdpi 1.5 / xhdpi 2.0 — a
-// spec pede as três) com um medidor mono fake escalado pela densidade; a
-// prova com a FONTE REAL + o campo de pesquisa vive na FASE 14 do
-// c33_virtual (o harness tem a LiberationSans carregada).
+// A SPEC DO DONO (PASSO 3): controlos ≤10% da área do viewport a 60% de
+// alfa; NADA atravessa a largura; NADA se sobrepõe. Esta sentinela afere,
+// em 3 densidades (mdpi 1.0 / hdpi 1.5 / xhdpi 2.0 — a spec pede as três):
+// (a) nenhum pai de vidro passa 90% da largura (a strip é impossível);
+// (b) os 11 alvos do chrome ≥40dp (a lei de ouro) e DENTRO do viewport;
+// (c) a degradação da ESCADA de larguras: 456 → 220 → 140 → 72dp — o rail
+//     vai a colunas, a fila do topo desce e, quando nem ela cabe, ESCONDE
+//     (a degradação honesta — nada sai do rect nunca);
+// (d) a fila do topo NUNCA pisa o gizmo (o recuo para baixo é automático).
 // ============================================================================
 TEST(regress_texto_strip_campo) {
     using namespace vv;
 
-    // o medidor fake MONO: 8dp por glifo — o dp JÁ carrega a densidade
-    // (o texto em sp cresce COM o ecrã; a invariant «o texto cabe no
-    // chip» é density-invariante — a lição R-018; a FONTE REAL é
-    // afervada na FASE 14 do harness)
-    auto monoW = [](const char* s, f32 /*d*/) {
-        return static_cast<f32>(std::strlen(s)) * theme::dp(8.0f);
-    };
     const f32 densities[] = {1.0f, 1.5f, 2.0f};   // mdpi / hdpi / xhdpi
 
     for (f32 d : densities) {
         theme::setDensity(d);
-        // o device no pior caso: viewport 288dp de largura (776dp de
-        // conteúdo − 140 hier − 180 insp = 456dp no PASSO 2 — o pior caso
-        // do ENCAIXE dos chips continua a ser o piso 288dp da toolbar)
-        const f32 sw = 776.0f * d, sh = 336.0f * d;
-        const safe::Insets in{0.0f, 48.0f * d, 48.0f * d, 0.0f};
-        const f32 eff = safe::effectiveDrawerH(
-            240.0f * d, safe::viewportRect(sw, sh, in).h,
-            sh - in.top - in.bottom);
-        const UiRect view = safe::centerRect(sw, sh, in, eff, true, -1.0f,
-                                             -1.0f);
-        editor::vpchrome::ChipWidths cw;
-        cw.cena = monoW("Cena", d);
-        cw.persp = monoW("Perspetiva", d);
-        cw.global = monoW("Global", d);
-        const editor::vpchrome::Layout L =
-            editor::vpchrome::layout(view, &cw);
-
-        ASSERT(L.stripVisible);
-        // (a) o Global INTEIRO visível — o defeito do dono é impossível
-        EXPECT_MSG(L.stripGlobal.w >= cw.global + 2.0f * theme::dp(8.0f) - 0.5f,
-                   "d=%.1f: o chip Global NÃO comporta o texto inteiro "
-                   "(w=%.1f, texto=%.1f)",
-                   d, L.stripGlobal.w, cw.global);
-        // (b) os chips não pisam o [+] (a RESERVA — o «Glob+» era isto)
-        if (L.plusTopRight) {
-            EXPECT(L.stripGlobal.x + L.stripGlobal.w <=
-                   L.addTicBtn.x + 0.5f);
-        }
-        // (c) os chips vivem DENTRO da strip, sem sobrepor-se entre si
-        EXPECT(safe::rectInside(L.stripGlobal, L.strip));
-        if (L.stripCena.w > 0.0f) {
-            EXPECT(safe::rectInside(L.stripCena, L.strip));
-            EXPECT(L.stripCena.x + L.stripCena.w <=
-                   L.stripGlobal.x + 0.5f);
-        }
-        if (L.stripPersp.w > 0.0f) {
-            EXPECT(safe::rectInside(L.stripPersp, L.strip));
-            EXPECT(L.stripPersp.x + L.stripPersp.w <=
-                   L.stripGlobal.x + 0.5f);
-        }
-        // (d) A DEGRADAÇÃO: no MESMO ecrã, forçar viewports cada vez mais
-        // estreitos — a ordem de queda é Perspetiva → Cena; o Global é o
-        // ÚLTIMO e mantém o texto inteiro até não haver alternativa
-        const f32 stripY = view.y;
-        auto viewOfW = [&](f32 wDp) {
-            UiRect v{view.x, stripY, theme::dp(wDp), view.h};
-            return v;
+        // o device no pior caso: viewport 456dp (776 − 140 hier − 180 insp
+        // — o piso do PASSO 2) e a escada de larguras de teste por baixo
+        auto checkLayout = [&](const char* tag, f32 wDp, f32 hDp) {
+            const UiRect view{theme::dp(100.0f), theme::dp(60.0f),
+                              theme::dp(wDp), theme::dp(hDp)};
+            const editor::vpchrome::Layout L = editor::vpchrome::layout(view);
+            // (a) NADA full-width (a regra do dono — a strip é impossível)
+            const UiRect bands[4] = {L.railPanel, L.quickPanel,
+                                     L.gizmoPanel, L.plusPanel};
+            for (const UiRect& r : bands) {
+                if (r.w > 0.0f) {
+                    EXPECT_MSG(r.w < view.w * 0.90f,
+                               "%s w=%.0fdp: um pai de vidro (%.0fdp) "
+                               "atravessa a largura (a barra full-width é "
+                               "proibida — spec PASSO 3)",
+                               tag, wDp, r.w / theme::dp(1.0f));
+                }
+            }
+            // (b) os 11 alvos ≥40dp e DENTRO do rect (a lei de ouro)
+            const UiRect all[11] = {L.rail[0],   L.rail[1],   L.rail[2],
+                                    L.rail[3],   L.rail[4],   L.quick[0],
+                                    L.quick[1],  L.quick[2],  L.quick[3],
+                                    L.gizmoBtn,  L.addTicBtn};
+            for (const UiRect& r : all) {
+                if (r.w > 0.0f && r.h > 0.0f) {
+                    EXPECT_MSG(r.w >= theme::dp(40.0f) - 0.5f &&
+                                   r.h >= theme::dp(40.0f) - 0.5f,
+                               "%s: um alvo do chrome desce abaixo do piso "
+                               "de 40dp (a lei de ouro)",
+                               tag);
+                    EXPECT_MSG(safe::rectInside(r, view),
+                               "%s: um alvo do chrome sai do rect (a "
+                               "degradação tem de ESCONDER, nunca "
+                               "transbordar)",
+                               tag);
+                }
+            }
+            // (d) a fila do topo NUNCA pisa o gizmo (mesma banda de y)
+            if (L.quick[0].w > 0.0f &&
+                L.quick[0].y < L.gizmoBtn.y + L.gizmoBtn.h &&
+                L.gizmoBtn.y < L.quick[0].y + L.quick[0].h) {
+                EXPECT(L.quick[3].x + L.quick[3].w <= L.gizmoPanel.x + 0.5f);
+            }
+            return L;
         };
+
+        // o device real com o inspector aberto: 456×244dp
+        const editor::vpchrome::Layout ldev = checkLayout("device", 456.0f, 244.0f);
+        EXPECT(ldev.railVisible);
+        EXPECT(ldev.addTicBtn.x + ldev.addTicBtn.w + theme::dp(8.0f) <=
+               ldev.view.x + ldev.view.w + 0.5f);
+
+        // (c) a ESCADA: 220dp — o rail 2 colunas e a fila DESCE
         {
-            const UiRect vNarrow = viewOfW(220.0f);   // 220dp de viewport
-            const editor::vpchrome::Layout ln =
-                editor::vpchrome::layout(vNarrow, &cw);
-            EXPECT(ln.stripCena.w > 0.0f && ln.stripPersp.w == 0.0f &&
-                       ln.stripGlobal.w > 0.0f);
-            EXPECT(ln.stripGlobal.w >=
-                   cw.global + 2.0f * theme::dp(8.0f) - 0.5f);
+            const editor::vpchrome::Layout ln = checkLayout("220dp", 220.0f, 208.0f);
+            EXPECT(ln.railVisible && ln.railCols >= 2u);
+            EXPECT(ln.quick[0].w > 0.0f);
+            EXPECT(ln.quick[0].y > ln.rail[0].y + ln.rail[0].h);
         }
+        // 140dp — a fila do topo JÁ NÃO CABE (esconde; o resto fica)
         {
-            const UiRect vTight = viewOfW(140.0f);    // 140dp
-            const editor::vpchrome::Layout lt =
-                editor::vpchrome::layout(vTight, &cw);
-            EXPECT(lt.stripCena.w == 0.0f && lt.stripPersp.w == 0.0f);
-            EXPECT(lt.stripGlobal.w >=
-                   cw.global + 2.0f * theme::dp(8.0f) - 0.5f);
+            const editor::vpchrome::Layout lt = checkLayout("140dp", 140.0f, 208.0f);
+            EXPECT(lt.quick[0].w == 0.0f);   // a fila esconde (honesto)
+            EXPECT(lt.gizmoBtn.w > 0.0f && lt.addTicBtn.w > 0.0f);
         }
+        // 72dp — nem o rail cabe (esconde); os cantos ficam
         {
-            const UiRect vTiny = viewOfW(72.0f);      // 72dp — nem o Global
-            const editor::vpchrome::Layout vtt =
-                editor::vpchrome::layout(vTiny, &cw);
-            // o fallback HONESTO: o chip fica dentro da faixa (o
-            // labelFitted ellipsiza — «Glob…» DIZ que cortou, nunca um
-            // recorte silencioso por cobertura)
-            EXPECT(vtt.stripGlobal.w > 0.0f);
-            EXPECT(safe::rectInside(vtt.stripGlobal, vtt.strip));
+            const editor::vpchrome::Layout vtt = checkLayout("72dp", 72.0f, 208.0f);
+            EXPECT(!vtt.railVisible);
+            EXPECT(vtt.gizmoBtn.w > 0.0f && vtt.addTicBtn.w > 0.0f);
         }
     }
     theme::setDensity(1.0f);
 }
 
-// ============================================================================
-// R-024 (0.9.6.12 · GRUPO J3) — O RECT DO VIEWPORT SEGUE OS PAINÉIS
-//         — regress_viewport_rect_segue
-//
-// O DONO (defeito 4): «o canvas OpenGL não recomputa o retângulo quando os
-// painéis mudam de tamanho». A ARQUITETURA REAL: não há salto JNI
-// (Java_vv_goni_GoniRenderer_nativeSetViewport não existe — a UI é toda
-// C++ sobre UMA superfície); o equivalente é o glViewport/glScissor do
-// frame, alimentados pelo centerRect com o drawerH EFETIVO (desde o
-// G1-3/Grupo D) e o aspect DO RECT na câmara. A CAUSA que restava era a do
-// R-022 (o drawer cru vs tapado) — curada pela fonte única. A parte nova
-// da spec J3: o LOG de diagnóstico `vp3d: viewport set to (x, y, w x h)`
-// quando o rect muda (main.cpp; a prova no REPLAY — FASE 14.3). Esta
-// sentinela afere a matemática: abrir/fechar o painel muda o rect, o
-// aspect da câmara segue o rect (nunca o ecrã todo), e a fronteira 3D→UI
-// devolve o viewport cheio (o contrato do stub).
-// ============================================================================
 TEST(regress_viewport_rect_segue) {
     using namespace vv;
     theme::setDensity(2.0f);
@@ -4179,12 +4183,13 @@ TEST(regress_viewport_rect_segue) {
         EXPECT(test::matNearF(projRect, projRect2));
     }
 
-    // (c) A COERÊNCIA com o chrome: o MESMO rect alimenta a toolbar (o
+    // (c) A COERÊNCIA com o chrome: o MESMO rect alimenta o chrome (o
     // vpchrome) e o glViewport — a fonte única garantida pelo chamador
     {
         const editor::vpchrome::Layout L = editor::vpchrome::layout(aberto);
-        EXPECT(safe::rectInside(L.toolPanel, aberto));
-        EXPECT(L.selectBtn.y >= aberto.y);
+        EXPECT(safe::rectInside(L.railPanel, aberto));
+        EXPECT(safe::rectInside(L.addTicBtn, aberto));
+        EXPECT(L.rail[0].y >= aberto.y);
     }
 
     // (d) O LOG de diagnóstico é PARTE DO CONTRATO (a spec J3 pede o log

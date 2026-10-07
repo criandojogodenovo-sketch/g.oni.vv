@@ -1,8 +1,20 @@
-// ui/ViewportChrome.cpp — stack vertical + toolbar inferior (FASE 9).
+// ui/ViewportChrome.cpp — o chrome do viewport (FASE 9 → PASSO 3).
 //
-// FASE 9 (G1-1): toolbar ancorada ao RETÂNGULO DA VIEWPORT (drawerH real),
-// só ícones (nome só no ativo), snap = íman, "+" no canto inferior
-// direito, botão de settings REMOVIDO (morto — inventário G0-4).
+// PASSO 3 (0.9.6.17 — a spec do dono): o rail ESQUERDO de ferramentas, a
+// fila do topo-esquerdo (undo/redo/save/⋯), o [+] 40dp redondo no fundo-
+// direito, o gizmo 40dp no topo-direito e a legenda — TUDO a 60% de alfa,
+// nada full-width, nada sobreposto. A strip [Cena][Perspetiva][Global]
+// (a barra que atravessava a largura) MORREU — os chips eram SEM FUNÇÃO
+// desde o inventário do PASSO 0.
+//
+// A GEOMETRIA (a fonte única é layout(), abaixo):
+//   • rail 1 coluna (ecrãs altos): a fila do topo vive À DIREITA do rail;
+//   • rail 2+ colunas (viewports baixos — a degradação do stack antigo):
+//     a fila do topo desce PARA BAIXO do rail (encostada à esquerda);
+//   • viewport sub-mínimo: o rail ESCONDE (a fila do topo e os cantos
+//     ficam — cabem sempre no piso kViewportMinH da casa);
+//   • a legenda só existe no layout primário (rail 1 coluna) e quando a
+//     largura dá — a degradação honesta da legenda de sempre.
 #include "ui/ViewportChrome.h"
 #include "ui/EditorUi.h"
 #include "ui/UiContext.h"
@@ -16,557 +28,412 @@ namespace vpchrome {
 
 namespace {
 
-f32 textBaseline(UiContext& ui, const UiRect& r) {
-    if (!ui.hasFont()) {
-        return r.y + r.h * 0.5f;
-    }
-    const TextMetrics m = ui.textMetrics();
-    return r.y + (r.h - m.block()) * 0.5f + m.ascent;
+// PASSO 3: a ALFA do chrome vive no HEADER (chromeCol — afervel pela
+// sentinela). Os glifos DESATIVADOS ficam nos 0.4 de sempre (já
+// translúcidos por desenho — multiplicá-los de novo os tornava invisíveis).
+static void colA(const f32* c, f32 out[4]) {
+    chromeCol(c, out);
 }
 
-// botão do STACK (PASSO 1): alvo 40×40, DESENHO em chip 32×32 centrado;
-// ícone 20; disabled = text2 40% (mesmo alvo)
-bool stackButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
-                 bool enabled) {
+// botão do RAIL (PASSO 1 → PASSO 3): alvo 40×40, DESENHO em chip 32×32
+// centrado; ícone 20; disabled = text2 40% (o seu alfa de sempre)
+bool railButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
+                bool enabled) {
     const bool pressed = ui.widgetHit(id, r.x, r.y, r.w, r.h);
     const bool held = ui.widgetActive(id);
     const f32 inset = theme::dp(4.0f);   // o desenho 32 dentro do alvo 40
     const UiRect d = {r.x + inset, r.y + inset, r.w - 2.0f * inset,
                       r.h - 2.0f * inset};
+    f32 surface[4], surface2[4], border[4], iconCol[4];
+    colA(theme::kTheme.surface, surface);
+    colA(theme::kTheme.surface2, surface2);
+    colA(theme::kTheme.border, border);
     if (held && enabled) {
         ui.panelRounded(d.x, d.y, d.w, d.h, theme::dp(theme::kRadiusCard),
-                        theme::kTheme.surface2);
+                        surface2);
     } else if (enabled) {
         // repouso: chip surface com bordo (o alvo é visível — nunca "quase
         // invisível", o problema documentado da 0.8.x)
         ui.panelRounded(d.x, d.y, d.w, d.h, theme::dp(theme::kRadiusCard),
-                        theme::kTheme.surface);
-        ui.frameRounded(d.x, d.y, d.w, d.h, 1.0f, theme::dp(theme::kRadiusCard),
-                        theme::kTheme.border);
-    } else {
-        ui.panelRounded(d.x, d.y, d.w, d.h, theme::dp(theme::kRadiusCard),
-                        theme::kTheme.bg);
+                        surface);
+        ui.frameRounded(d.x, d.y, d.w, d.h, 1.0f,
+                        theme::dp(theme::kRadiusCard), border);
     }
-    f32 col[4] = {theme::kTheme.text1[0], theme::kTheme.text1[1],
-                  theme::kTheme.text1[2], 1.0f};
     if (!enabled) {
-        col[0] = theme::kTheme.text2[0];
-        col[1] = theme::kTheme.text2[1];
-        col[2] = theme::kTheme.text2[2];
-        col[3] = 0.4f;
+        iconCol[0] = theme::kTheme.text2[0];
+        iconCol[1] = theme::kTheme.text2[1];
+        iconCol[2] = theme::kTheme.text2[2];
+        iconCol[3] = 0.4f;
+    } else {
+        colA(theme::kTheme.text1, iconCol);
     }
     const f32 s = theme::dp(20.0f);   // PASSO 1: ícone 20 no chip 32
     icons::drawIcon(ui, icon, r.x + (r.w - s) * 0.5f, r.y + (r.h - s) * 0.5f,
-                    s, col);
+                    s, iconCol);
     return pressed && enabled;
 }
 
-// botão da TOOLBAR INFERIOR (0.9.6.1 · G1-2): SÓ ÍCONE — os 4 botões são
-// IGUAIS (PASSO 1: alvo 40, desenho 32, só ícone 20). O NOME da ferramenta
-// ativa vive na LEGENDA ACIMA da barra (o "Escalar" de 48px estendia-se
-// POR CIMA dos botões vizinhos — o layout só dava largura larga ao
-// Selecionar e o draw pintava a palavra em QUALQUER ativo)
+// botão de ferramenta (0.9.6.1 · G1-2 → PASSO 3): SÓ ÍCONE — o nome vive
+// na LEGENDA (à direita do rail). Alvo 40, desenho 32, ícone 20.
 bool toolButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
-                const char* word, bool active) {
-    (void)word;   // o nome vive na legenda acima da barra (draw abaixo)
+                bool active) {
     const bool pressed = ui.widgetHit(id, r.x, r.y, r.w, r.h);
     const bool held = ui.widgetActive(id);
     const bool on = active || held;
-    const f32 inset = theme::dp(4.0f);   // o desenho 32 dentro do alvo 40
+    const f32 inset = theme::dp(4.0f);
     const UiRect d = {r.x + inset, r.y + inset, r.w - 2.0f * inset,
                       r.h - 2.0f * inset};
+    f32 accent[4], surface[4], border[4], onCol[4], offCol[4];
+    colA(theme::kTheme.accent, accent);
+    colA(theme::kTheme.surface, surface);
+    colA(theme::kTheme.border, border);
+    colA(theme::kTheme.accentInk, onCol);
+    colA(theme::kTheme.text1, offCol);
     if (on) {
         ui.panelRounded(d.x, d.y, d.w, d.h, theme::dp(theme::kRadiusCard),
-                        theme::kTheme.accent);
+                        accent);
     } else {
         ui.panelRounded(d.x, d.y, d.w, d.h, theme::dp(theme::kRadiusCard),
-                        theme::kTheme.surface);
-        ui.frameRounded(d.x, d.y, d.w, d.h, 1.0f, theme::dp(theme::kRadiusCard),
-                        theme::kTheme.border);
+                        surface);
+        ui.frameRounded(d.x, d.y, d.w, d.h, 1.0f,
+                        theme::dp(theme::kRadiusCard), border);
     }
     const f32 s = theme::dp(20.0f);   // PASSO 1: ícone 20
-    const f32 col[4] = {on ? theme::kTheme.accentInk[0] : theme::kTheme.text1[0],
-                        on ? theme::kTheme.accentInk[1] : theme::kTheme.text1[1],
-                        on ? theme::kTheme.accentInk[2] : theme::kTheme.text1[2],
-                        1.0f};
     icons::drawIcon(ui, icon, r.x + (r.w - s) * 0.5f,
-                    r.y + (r.h - s) * 0.5f, s, col);
+                    r.y + (r.h - s) * 0.5f, s, on ? onCol : offCol);
     return pressed;
+}
+
+// o chip de vidro do PASSO 3 (a receita do pai spec G — fill + bordo +
+// highlight no topo — TUDO a 60%: o pai é translúcido, a cena lê-se)
+void glassPanel(UiContext& ui, const UiRect& r, f32 radiusDp) {
+    if (r.w <= 0.0f || r.h <= 0.0f) {
+        return;
+    }
+    f32 fill[4], edge[4], top[4];
+    colA(theme::kTheme.surface2, fill);
+    colA(theme::kTheme.glassEdge, edge);
+    colA(theme::kTheme.glassTop, top);
+    ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(radiusDp), fill);
+    ui.frameRounded(r.x, r.y, r.w, r.h, 1.0f, theme::dp(radiusDp), edge);
+    // o HIGHLIGHT do topo do vidro (a spec G: #FFFFFF0A)
+    ui.panelRounded(r.x + theme::dp(2.0f), r.y + theme::dp(1.0f),
+                    r.w - theme::dp(4.0f), theme::dp(2.0f), theme::dp(1.0f),
+                    top);
 }
 
 } // namespace
 
-Layout layout(const UiRect& view, const ChipWidths* cw) {
+Layout layout(const UiRect& view) {
     Layout L;
     L.view = view;
-    // 0.9.6.1 (PASSO 0 · R-018): todos os alvos daqui são dp REAL — eram px
-    // crus (o dono media botões de ferramentas com 48px de altura no device)
-    const f32 stackBtn = theme::dp(kStackBtn);
-    const f32 stackGap = theme::dp(kStackGap);
-    const f32 margin = theme::dp(8.0f);
-    // GRUPO D (0.9.6.7 — A BARRA DE TOQUE CABE NO ORÇAMENTO): o chrome
-    // ADAPTa-se ao rect da viewport (o device de 800dp deixava o viewport a
-    // ~200dp: o stack de 5×48+4×8+8 = 280dp TRANBORDAVA o fundo por cima
-    // da toolbar e o [+] caía POR CIMA dos botões de ferramenta — o
-    // kViewportMinW dos divisores garante ≥320dp de largura; a ALTURA
-    // adapta-se AQUI, em colunas, SEMPRE com alvos de 48dp inteiros).
-    //
-    // (1) o [+] : canto inferior direito SE cabe ao lado da toolbar
-    // (toolbar = 5×48 + 4×8 = 272 + margens); senão sobe para o canto
-    // superior direito (onde o triad esteve até à FASE 9).
-    const f32 toolbarW = 5.0f * theme::dp(kToolBtn) + 4.0f * stackGap;
-    const bool plusBottom = view.w >= toolbarW + margin + theme::dp(56.0f) +
-                                       margin + margin;
-    L.plusTopRight = !plusBottom;
-    // (2) o stack: COLUNAS suficientes para a altura útil (a faixa da
-    // toolbar em baixo come 56dp + 8 de folga; o topo tem 8 de margem).
-    // O menor nº de colunas que caiba — 1 coluna nos ecrãs largos (o
-    // layout de sempre, ZERO mudança onde cabe), 2/3 nos curtos.
-    // PASSO 1 (0.9.6.14): a strip do topo (40dp — kStripH; era 48) come a
-    // altura disponível do stack
-    const f32 stripH = theme::dp(kStripH);
-    const f32 availH =
-        view.h - margin - stripH - margin - theme::dp(kBottomH) - margin;
-    // 0.9.6.10: SEM a reserva do [+] — no estreito ele vive DENTRO da
-    // strip do topo (o fim direito dela), não ao lado do stack
-    const f32 availW = view.w - 2.0f * margin;
+    // 0.9.6.1 (PASSO 0 · R-018): todos os alvos daqui são dp REAL
+    const f32 m = theme::dp(8.0f);
+    const f32 btn = theme::dp(kRailBtn);
+    const f32 gap = theme::dp(kRailGap);
+    const f32 qbtn = theme::dp(kQuickBtn);
+    const f32 qgap = theme::dp(kQuickGap);
+
+    // (1) o RAIL esquerdo (col-major; a degradação em colunas é a do stack
+    // antigo: o MENOR nº de colunas que caiba na altura útil)
+    const f32 availH = view.h - 2.0f * m;
+    const f32 availW = view.w - 2.0f * m;
     u32 cols = 1;
     bool fits = false;
     for (; cols < 5; ++cols) {
-        const u32 rowsPerCol = (5u + cols - 1u) / cols;   // ceil(5/cols)
-        const f32 needH = static_cast<f32>(rowsPerCol) * stackBtn +
-                          static_cast<f32>(rowsPerCol - 1u) * stackGap;
-        const f32 needW = static_cast<f32>(cols) * stackBtn +
-                          static_cast<f32>(cols - 1u) * stackGap;
+        const u32 rows = (5u + cols - 1u) / cols;   // ceil(5/cols)
+        const f32 needH = static_cast<f32>(rows) * btn +
+                          static_cast<f32>(rows - 1u) * gap;
+        const f32 needW = static_cast<f32>(cols) * btn +
+                          static_cast<f32>(cols - 1u) * gap;
         if (needH <= availH && needW <= availW) {
             fits = true;
             break;
         }
     }
-    if (!fits) {
-        // nem 4 colunas couberam — a ÚLTIMA tentativa: 5 colunas de 1 linha
-        // SEM a reserva do [+] (com ele no canto, a reserva pode ter sobrado)
-        const f32 needW = 5.0f * stackBtn + 4.0f * stackGap;
-        if (stackBtn <= availH && needW <= view.w - 2.0f * margin) {
-            cols = 5;
-            fits = true;
-        }
-    }
-    // DEGRADAÇÃO HONESTA: nem o mínimo coube (viewport sub-toolbar — ex. o
-    // drawer comido ao device) → o stack ESCONDE (toolbar+viewport mandam;
-    // os rects ficam degenerados e o draw salta)
-    L.stackVisible = fits;
-    L.stackCols = fits ? cols : 1;
-    // ---- 0.9.6.10 (GRUPO UI · a imagem 1) · A STRIP DO TOPO DA VIEWPORT:
-    // a tab [Cena] (a vista ativa — o underline âmbar como as tabs de
-    // modo) + os chips [Perspetiva] (a projeção REAL da câmara do editor)
-    // e [Global] (o espaço REAL do gizmo — sempre mundial, ver Gizmo.h) —
-    // INFORMAÇÃO REAL em chips, na faixa de vidro de 40dp (o pai; o [+]
-    // dos ecrãs estreitos vive no fim direito DELA)
-    // P-08 (0.9.6.12 · GRUPO J1 · R-022): em viewport sub-piso (só em
-    // testes — o cap do drawer garante kViewportMinH em produção) a strip
-    // ESCONDE (degradação honesta — a toolbar manda)
-    L.stripVisible = view.h >= stripH + theme::dp(kBottomH);
-    L.strip = {view.x, view.y, view.w, stripH};
-    {
-        const f32 chipH = theme::dp(32.0f);
-        const f32 cy = view.y + (stripH - chipH) * 0.5f;
-        // ---- 0.9.6.12 (GRUPO J2 · R-023 · a regra §2.5 do contrato) —
-        // CHIPS MEDIDOS (o wrap-content da spec J2): a largura de cada
-        // chip = o TEXTO medido + 2×8dp de padding, com o piso de 56dp.
-        // Era 88/112/88dp FIXOS = 312dp num viewport de piso 288dp COM o
-        // [+] a viver no fim direito da strip (plusTopRight no device):
-        // o chip Global transbordava e era COBERTO pelo [+] — o dono lia
-        // «Glob+». A degradação (por ordem): Perspetiva esconde primeiro
-        // (a projeção é a menos acionável), depois Cena; o Global é o
-        // ÚLTIMO e SÓ ellipsize quando nem ele cabe (fallback honesto da
-        // spec). cw=null → as larguras fixas antigas (compat dos testes)
-        const f32 pad2 = 2.0f * theme::dp(8.0f);
-        const f32 chipMin = theme::dp(56.0f);
-        f32 wCena = theme::dp(88.0f);
-        f32 wPersp = theme::dp(112.0f);
-        f32 wGlobal = theme::dp(88.0f);
-        bool showCena = true, showPersp = true, showGlobal = true;
-        if (cw) {
-            wCena = (std::max)(chipMin, cw->cena + pad2);
-            wPersp = (std::max)(chipMin, cw->persp + pad2);
-            wGlobal = (std::max)(chipMin, cw->global + pad2);
-            // a RESERVA do [+]: nos ecrãs estreitos ele vive no fim
-            // direito da strip — os chips nunca o pisam (o pai dele é
-            // desenhado DEPOIS: cobria o texto — o «Glob+» do dono).
-            // (o X do [+] é o MESMO nos dois casos — inferior/superior
-            // direito; só o Y difere, e o X é o que a reserva precisa)
-            const f32 plusRightX =
-                view.x + view.w - theme::dp(56.0f) - margin;
-            const f32 right =
-                L.plusTopRight ? plusRightX - theme::dp(4.0f)
-                               : view.x + view.w - margin;
-            f32 x = view.x + margin;
-            const f32 gap = theme::dp(8.0f);
-            if (x + wCena + gap + wPersp + gap + wGlobal <= right) {
-                // os três cabem — o layout de sempre
-            } else if (x + wCena + gap + wGlobal <= right) {
-                showPersp = false;   // o primeiro a ceder
-            } else if (x + wGlobal <= right) {
-                showPersp = false;
-                showCena = false;
-            } else {
-                // nem o Global cabe inteiro: ele fica SOZINHO, clamped à
-                // faixa, e o labelFitted ellipsiza HONESTAMENTE («Glob…»)
-                showPersp = false;
-                showCena = false;
-                wGlobal = (std::max)(chipMin, right - x);
-            }
-        }
-        L.stripCena = showCena
-                          ? UiRect{view.x + margin, cy, wCena, chipH}
-                          : UiRect{0.0f, 0.0f, 0.0f, 0.0f};
-        L.stripPersp =
-            showPersp
-                ? UiRect{L.stripCena.x + L.stripCena.w + theme::dp(8.0f), cy,
-                         wPersp, chipH}
-                : UiRect{0.0f, 0.0f, 0.0f, 0.0f};
-        L.stripGlobal =
-            showGlobal
-                ? UiRect{(showPersp ? L.stripPersp.x + L.stripPersp.w
-                                    : (showCena ? L.stripCena.x +
-                                                      L.stripCena.w
-                                                : view.x + margin)) +
-                             theme::dp(8.0f),
-                         cy, wGlobal, chipH}
-                : UiRect{0.0f, 0.0f, 0.0f, 0.0f};
-    }
-    // ---- stack (coluna-major: undo/redo/save/dup/paste, preenchendo
-    // coluna a coluna — a ordem de leitura de sempre; degenerado quando
-    // ESCONDIDO — o draw salta). 0.9.6.10: desce abaixo da strip e ganha
-    // o PAI de vidro (o rail esquerdo da referência) ----
-    const u32 rowsPerCol = (5u + L.stackCols - 1u) / L.stackCols;
+    L.railVisible = fits;
+    L.railCols = fits ? cols : 1u;
+    const u32 rowsPerCol = (5u + L.railCols - 1u) / L.railCols;
     for (u32 i = 0; i < 5; ++i) {
-        if (!L.stackVisible) {
-            L.stack[i] = {0.0f, 0.0f, 0.0f, 0.0f};
+        if (!L.railVisible) {
+            L.rail[i] = {0.0f, 0.0f, 0.0f, 0.0f};
             continue;
         }
         const u32 col = i / rowsPerCol;
         const u32 row = i % rowsPerCol;
-        L.stack[i] = {view.x + margin + theme::dp(8.0f) +
-                          static_cast<f32>(col) * (stackBtn + stackGap),
-                      view.y + stripH + margin +
-                          static_cast<f32>(row) * (stackBtn + stackGap),
-                      stackBtn, stackBtn};
+        L.rail[i] = {view.x + m + static_cast<f32>(col) * (btn + gap),
+                     view.y + m + static_cast<f32>(row) * (btn + gap),
+                     btn, btn};
     }
-    if (L.stackVisible) {
-        // o PAI do stack: cobre as colunas com 8dp de folga (o rail)
-        const f32 panelW =
-            static_cast<f32>(L.stackCols) * stackBtn +
-            static_cast<f32>(L.stackCols - 1u) * stackGap + theme::dp(16.0f);
-        const f32 panelH =
-            static_cast<f32>(rowsPerCol) * stackBtn +
-            static_cast<f32>(rowsPerCol - 1u) * stackGap + theme::dp(16.0f);
-        L.stackPanel = {L.stack[0].x - theme::dp(8.0f),
-                        L.stack[0].y - theme::dp(8.0f), panelW, panelH};
+    const f32 railW = static_cast<f32>(L.railCols) * btn +
+                      static_cast<f32>(L.railCols - 1u) * gap;
+    const f32 railH = static_cast<f32>(rowsPerCol) * btn +
+                      static_cast<f32>(rowsPerCol - 1u) * gap;
+    if (L.railVisible) {
+        L.railPanel = {L.rail[0].x - theme::dp(4.0f),
+                       L.rail[0].y - theme::dp(4.0f),
+                       railW + theme::dp(8.0f), railH + theme::dp(8.0f)};
     } else {
-        L.stackPanel = {0.0f, 0.0f, 0.0f, 0.0f};
+        L.railPanel = {0.0f, 0.0f, 0.0f, 0.0f};
     }
-    // FASE 9 (G2-10): o TRIAD foi REMOVIDO — os "pontinhos fantasma" do
-    // dono (canto sup-dir do viewport, fora do mock); a orientação vive
-    // no gizmo 3D e na câmara.
-    // ---- toolbar inferior: SÓ ÍCONES, âncora = canto inferior ESQUERDO
-    // do rect da viewport (G1-1). Uma fileira (garantida pelo
-    // kViewportMinW = 320dp ≥ 272+16 da toolbar).
-    // P-08 (0.9.6.12 · GRUPO J1 · R-022 · a regra §2.2 do contrato): a
-    // toolbar vive DENTRO do rect da viewport e ABAIXO da strip POR
-    // CONSTRUÇÃO — o cap do drawer (safe::kViewportMinH) garante o espaço
-    // em produção; o clamp é a última defesa (viewport degenerado de
-    // teste): nunca acima do topo da strip, nunca fora por baixo. Era ESTE
-    // o caminho do defeito 1 do dono (a toolbar sobre a top bar) — agora o
-    // overlap é impossível por construção.
-    const f32 botH = theme::dp(kBottomH);
-    const f32 toolW = theme::dp(kToolBtn);
-    f32 by = view.y + view.h - botH - theme::dp(8.0f);
-    const f32 byMin = view.y + (L.stripVisible ? stripH : 0.0f);
-    const f32 byMax = view.y + view.h - botH;
-    if (by < byMin) {
-        by = byMin;
+
+    // (2) o GIZMO (topo-direito) e o [+] (fundo-direito) — 40dp, a spec
+    // PASSO 3. Os cantos ficam mesmo com o rail escondido.
+    L.gizmoBtn = {view.x + view.w - m - btn, view.y + m, btn, btn};
+    L.addTicBtn = {view.x + view.w - m - btn, view.y + view.h - m - btn,
+                   btn, btn};
+    L.gizmoPanel = {L.gizmoBtn.x - theme::dp(4.0f),
+                    L.gizmoBtn.y - theme::dp(4.0f), btn + theme::dp(8.0f),
+                    btn + theme::dp(8.0f)};
+    L.plusPanel = {L.addTicBtn.x - theme::dp(4.0f),
+                   L.addTicBtn.y - theme::dp(4.0f), btn + theme::dp(8.0f),
+                   btn + theme::dp(8.0f)};
+
+    // (3) a fila do TOPO (undo/redo/save/⋯): a POSIÇÃO decide-se por
+    // tentativa — (a) o TOPO, ao lado do rail e antes do gizmo (o layout
+    // primário; vale mesmo com o rail em 2 colunas — o device com o
+    // drawer aberto tem 88dp de sobra); (b) senão PARA BAIXO do rail (o
+    // rect estreito); (c) senão ESCONDE (a degradação honesta — a fila
+    // NUNCA sai do rect nem pisa o gizmo; a regra vale para o piso
+    // kViewportMinW=288dp da casa)
+    const f32 quickW = 4.0f * qbtn + 3.0f * qgap;
+    const f32 qxTop = view.x + m +
+                      (L.railVisible ? railW + theme::dp(12.0f) : 0.0f);
+    const bool topFits =
+        (qxTop + quickW <= L.gizmoPanel.x - theme::dp(4.0f)) &&
+        (qxTop + quickW + m <= view.x + view.w);
+    const f32 qyBelow = view.y + m + railH + m;
+    const bool belowFits =
+        L.railVisible &&
+        (qyBelow + qbtn + m <= view.y + view.h) &&
+        (view.x + m + quickW + m <= view.x + view.w);
+    bool quickBelow = false;
+    f32 qy = view.y + m;
+    f32 qx = qxTop;
+    if (topFits) {
+        qy = view.y + m;
+    } else if (belowFits) {
+        quickBelow = true;
+        qy = qyBelow;
+        qx = view.x + m;
     }
-    if (by > byMax) {
-        by = byMax;
-    }
-    // a legenda (12sp acima da barra) só se NÃO cruzar a strip
-    L.legendVisible = (by - theme::dp(24.0f)) >= byMin;
-    // R-022 (o achado ao vivo): no C33 (content 756dp) os pisos da
-    // gangorra (200+272) deixam o viewport a 284dp < kViewportMinW — a
-    // fileira com margem 16dp transbordava 4dp (o Ímã saía do rect). A
-    // margem esquerda Cede (16→4dp) antes de transbordar
-    const f32 rowW = 5.0f * toolW + 4.0f * theme::dp(8.0f);
-    f32 lead = view.w >= rowW + theme::dp(16.0f)
-                   ? theme::dp(16.0f)
-                   : (std::max)(theme::dp(4.0f), view.w - rowW);
-    f32 bx = view.x + lead;
-    L.selectBtn = {bx, by, toolW, botH};  bx += toolW + theme::dp(8.0f);
-    L.moveBtn   = {bx, by, toolW, botH};  bx += toolW + theme::dp(8.0f);
-    L.rotateBtn = {bx, by, toolW, botH};  bx += toolW + theme::dp(8.0f);
-    L.scaleBtn  = {bx, by, toolW, botH};  bx += toolW + theme::dp(8.0f);
-    L.snapBtn   = {bx, by, toolW, botH};
-    // o PAI da toolbar: da legenda (12sp + 6dp acima) até AO LIMITE do
-    // fundo da viewport (flush — o padding de baixo do pai É a margem).
-    // P-08 (J1): sem legenda (viewport apertado) o pai começa na barra;
-    // o fundo NUNCA passa o fundo do view e a LARGURA NUNCA passa a
-    // direita (o achado R-022: 8+288dp transbordava 8dp o viewport de
-    // 288dp por baixo do Inspector)
-    {
-        const f32 top = by - (L.legendVisible ? theme::dp(22.0f)
-                                              : theme::dp(4.0f));
-        const f32 bottom = by + botH + theme::dp(8.0f);
-        const f32 bottomLim = view.y + view.h;
-        const f32 left = L.selectBtn.x - theme::dp(8.0f);
-        const f32 rightLim = view.x + view.w;
-        const f32 right = (std::min)(left + rowW + theme::dp(16.0f),
-                                     rightLim);
-        L.toolPanel = {left, top, right - left,
-                       (bottom > bottomLim ? bottomLim : bottom) - top};
-    }
-    // "+" — inferior direito se cabe; senão o canto SUPERIOR direito
-    if (plusBottom) {
-        L.addTicBtn = {view.x + view.w - theme::dp(56.0f) - margin, by,
-                       theme::dp(56.0f), botH};
+    const bool quickFits = topFits || belowFits;
+    if (!quickFits) {
+        for (int i = 0; i < 4; ++i) {
+            L.quick[i] = {0.0f, 0.0f, 0.0f, 0.0f};
+        }
+        L.quickPanel = {0.0f, 0.0f, 0.0f, 0.0f};
     } else {
-        // 0.9.6.10: no estreito o [+] vive DENTRO DA STRIP (o fim direito
-        // dela) — nunca mais colide com as colunas do stack (a colisão
-        // real que o validador apanhou no device de 288dp)
-        L.addTicBtn = {view.x + view.w - theme::dp(56.0f) - margin, view.y,
-                       theme::dp(56.0f), botH};
+        for (int i = 0; i < 4; ++i) {
+            L.quick[i] = {qx + static_cast<f32>(i) * (qbtn + qgap), qy, qbtn,
+                          qbtn};
+        }
+        L.quickPanel = {qx - theme::dp(4.0f), qy - theme::dp(4.0f),
+                        quickW + theme::dp(8.0f), qbtn + theme::dp(8.0f)};
     }
-    // o pai do [+]: o padding dobra PARA DENTRO (o botão mantém o sítio
-    // de sempre — o canto inferior direito a 8dp da borda)
-    L.plusPanel = {L.addTicBtn.x - theme::dp(4.0f), L.addTicBtn.y -
-                                                      theme::dp(4.0f),
-                   L.addTicBtn.w + theme::dp(8.0f),
-                   L.addTicBtn.h + theme::dp(8.0f)};
+
+    // (4) a LEGENDA — à direita do rail, SOB a fila do topo (o layout
+    // primário); some quando a largura/altura não dá (a degradação de
+    // sempre — e no layout "quick below" não há onde a pôr com dignidade)
+    const f32 legendX = view.x + m +
+                        (L.railVisible ? railW + theme::dp(4.0f) : 0.0f);
+    const f32 legendY = view.y + m + qbtn + theme::dp(2.0f);
+    const f32 legendMaxW = L.gizmoPanel.x - theme::dp(4.0f) - legendX;
+    L.legendVisible = L.railVisible && L.railCols == 1u && quickFits &&
+                      !quickBelow && legendMaxW >= theme::dp(72.0f) &&
+                      (legendY + theme::dp(16.0f) + m) <= view.y + view.h;
+    L.legend = L.legendVisible
+                   ? UiRect{legendX, legendY, legendMaxW, theme::dp(16.0f)}
+                   : UiRect{0.0f, 0.0f, 0.0f, 0.0f};
     return L;
 }
 
 Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
              const ChromeState& cs, const Camera& camera, f32 drawerH) {
+    (void)camera;
     Actions a;
-    // G1-1: o rect da viewport com o drawerH REAL — a toolbar acompanha o
-    // painel de baixo (aberto = sobe; fechado = desce ao fundo da viewport)
-    // GRUPO D: larguras de ESTADO (divisores) — o chrome acompanha os painéis
+    // G1-1: o rect da viewport com o drawerH REAL — o [+] acompanha o
+    // painel de baixo (aberto = sobe; fechado = desce ao fundo)
+    // GRUPO D: larguras de ESTADO (divisores) — o chrome acompanha os
+    // painéis. PASSO 3: o flag do TRILHO entra AQUI (o chrome ancorava ao
+    // rect do inspector ABERTO mesmo sem seleção — o gizmo/scissor do
+    // main usavam o rect REAL; as duas medidas voltam a coincidir)
     const UiRect vpView = safe::centerRect(
         ui.screenWidth(), ui.screenHeight(), ui.safeArea(), drawerH,
-        st.showInspector, st.hierW, st.inspW);
-    // 0.9.6.12 (GRUPO J2 · R-023): os chips MEDIDOS pela fonte REAL (o
-    // wrap-content da spec — o Global inteiro ou degradação por ordem)
-    ChipWidths cw;
-    if (ui.hasFont()) {
-        cw.cena = ui.fontWidth("Cena");
-        cw.persp = ui.fontWidth("Perspetiva");
-        cw.global = ui.fontWidth("Global");
-    }
-    const Layout L = layout(vpView, &cw);
+        st.showInspector, st.hierW, st.inspW, editor::inspectorCollapsed(st));
+    const Layout L = layout(vpView);
 
-    // ---- 0.9.6.10 (GRUPO UI) · OS PAIS DE VIDRO (a regra do
-    // anti-exemplo: NADA flutua sobre a grelha sem painel-mãe) — os pais
-    // desenham PRIMEIRO, os botões vivem POR CIMA deles ----
-    {
-        // a STRIP do topo: faixa de vidro com a tab [Cena] ATIVA (o
-        // underline âmbar no fundo, como as tabs de modo) + os chips de
-        // estado [Perspetiva]/[Global] (informação REAL, sem toggle falso)
-        // — A RECEITA COMPLETA do vidro da spec G: fill surface2 + o BORDO
-        // #FFFFFF1F (glassEdge) TODO À VOLTA + o highlight #FFFFFF0A no
-        // topo (o vidro sobre o céu escuro TEM de se LER — o delta de
-        // 8/255 do fill só era invisível; o bordo é a assinatura)
-        // P-08 (J1): escondida em viewport sub-piso (a toolbar manda)
-        if (L.stripVisible) {
-        ui.panelRounded(L.strip.x, L.strip.y, L.strip.w, L.strip.h, 0.0f,
-                        theme::kTheme.surface2);
-        ui.panelRounded(L.strip.x, L.strip.y, L.strip.w, L.strip.h, 0.0f,
-                        theme::kTheme.glassEdge);
-        ui.panelRounded(L.strip.x, L.strip.y + theme::dp(1.0f), L.strip.w,
-                        L.strip.h - theme::dp(2.0f), 0.0f,
-                        theme::kTheme.surface2);
-        ui.panel(L.strip.x, L.strip.y + L.strip.h - 1.0f, L.strip.w, 1.0f,
-                 theme::kTheme.glassEdge);
-        const TextMetrics tmS = ui.textMetrics();
-        auto chipLabel = [&](const UiRect& r, const char* txt, bool active) {
-            if (r.w <= 0.0f || r.h <= 0.0f) {
-                return;   // escondido pela degradação (J2) — não desenha
-            }
-            const bool held = active;   // o chip ativo lê-se aceso
-            if (active) {
-                ui.panelRounded(r.x, r.y, r.w, r.h,
-                                theme::dp(theme::kRadiusField),
-                                theme::kTheme.accentDim);
-            } else {
-                ui.panelRounded(r.x, r.y, r.w, r.h,
-                                theme::dp(theme::kRadiusField),
-                                theme::kTheme.surface2);
-            }
-            (void)held;
-            if (ui.hasFont()) {
-                ui.labelFitted(r.x + theme::dp(8.0f),
-                               r.y + (r.h - tmS.block()) * 0.5f + tmS.ascent,
-                               txt,
-                               active ? theme::kTheme.text1
-                                      : theme::kTheme.text2,
-                               r.w - theme::dp(16.0f));
-            }
-        };
-        chipLabel(L.stripCena, "Cena", true);      // a vista ATIVA (única)
-        chipLabel(L.stripPersp, "Perspetiva", false);
-        chipLabel(L.stripGlobal, "Global", false);
-        }   // fim da strip visível (P-08)
-        // o RAIL esquerdo (o pai do stack) — a receita do vidro spec G:
-        // fill surface2 + o BORDO glassEdge à volta + highlight no topo
-        if (L.stackVisible) {
-            ui.panelRounded(L.stackPanel.x, L.stackPanel.y, L.stackPanel.w,
-                            L.stackPanel.h, theme::dp(theme::kRadiusCard),
-                            theme::kTheme.surface2);
-            ui.frameRounded(L.stackPanel.x, L.stackPanel.y, L.stackPanel.w,
-                            L.stackPanel.h, 1.0f,
-                            theme::dp(theme::kRadiusCard),
-                            theme::kTheme.glassEdge);
-            // o HIGHLIGHT do topo do vidro (a spec G: #FFFFFF0A)
-            ui.panelRounded(L.stackPanel.x + theme::dp(2.0f),
-                            L.stackPanel.y + theme::dp(1.0f),
-                            L.stackPanel.w - theme::dp(4.0f),
-                            theme::dp(2.0f), theme::dp(1.0f),
-                            theme::kTheme.glassTop);
-        }
-        // o PAI da toolbar inferior (cobre a legenda) — idem
-        ui.panelRounded(L.toolPanel.x, L.toolPanel.y, L.toolPanel.w,
-                        L.toolPanel.h, theme::dp(theme::kRadiusCard),
-                        theme::kTheme.surface2);
-        ui.frameRounded(L.toolPanel.x, L.toolPanel.y, L.toolPanel.w,
-                        L.toolPanel.h, 1.0f, theme::dp(theme::kRadiusCard),
-                        theme::kTheme.glassEdge);
-        // o PAI do [+]
-        ui.panelRounded(L.plusPanel.x, L.plusPanel.y, L.plusPanel.w,
-                        L.plusPanel.h, theme::dp(theme::kRadiusCard),
-                        theme::kTheme.surface2);
-        ui.frameRounded(L.plusPanel.x, L.plusPanel.y, L.plusPanel.w,
-                        L.plusPanel.h, 1.0f, theme::dp(theme::kRadiusCard),
-                        theme::kTheme.glassEdge);
-    }
+    // ---- OS PAIS DE VIDRO (a regra do pai-painelinho — nada flutua sem
+    // pai) — a 60% de alfa (PASSO 3) ----
+    glassPanel(ui, L.railPanel, theme::kRadiusCard);
+    glassPanel(ui, L.quickPanel, theme::kRadiusCard);
+    glassPanel(ui, L.gizmoPanel, kCornerBtn);
+    glassPanel(ui, L.plusPanel, kCornerBtn);
 
-    // ---- stack vertical (pulado quando o layout ESCONDE — degradação) ----
-    if (L.stackVisible) {
-        if (stackButton(ui, kVpUndoId, L.stack[0], icons::Icon::Undo,
-                        cs.canUndo)) {
-            a.undoPressed = true;
+    // ---- o RAIL esquerdo: as ferramentas (a ordem da spec do dono) ----
+    if (L.railVisible) {
+        // Selecionar = SEM gizmo; gz.mode para o gizmo da 0.6.9; o
+        // st.selectMode é o cursor de seleção por toque
+        if (toolButton(ui, kVpSelectId, L.rail[0], icons::Icon::Cursor,
+                       st.selectMode)) {
+            st.selectMode = true;
+            gz.mode = 0;
         }
-        if (stackButton(ui, kVpRedoId, L.stack[1], icons::Icon::Redo,
-                        cs.canRedo)) {
-            a.redoPressed = true;
+        if (toolButton(ui, toolbar::kGizmoIds[0], L.rail[1], icons::Icon::Move,
+                       !st.selectMode && gz.mode == 0)) {
+            st.selectMode = false;
+            gz.mode = 0;
         }
-        if (stackButton(ui, kVpSaveId, L.stack[2], icons::Icon::Save, true)) {
-            a.savePressed = true;
+        if (toolButton(ui, toolbar::kGizmoIds[1], L.rail[2],
+                       icons::Icon::Rotate,
+                       !st.selectMode && gz.mode == 1)) {
+            st.selectMode = false;
+            gz.mode = 1;
         }
-        // FASE 9 (G2-11): o 4.º ícone era DUPLICATE (rect+plus — o
-        // "quadrado com ponto" do dono) → agora é o COPY padrão (2
-        // quadrados sobrepostos; a AÇÃO continua duplicar — só o GLIFO)
-        if (stackButton(ui, kVpDupId, L.stack[3], icons::Icon::Copy, true)) {
-            a.dupPressed = true;
+        if (toolButton(ui, toolbar::kGizmoIds[2], L.rail[3],
+                       icons::Icon::Scale,
+                       !st.selectMode && gz.mode == 2)) {
+            st.selectMode = false;
+            gz.mode = 2;
         }
-        if (stackButton(ui, kVpPasteId, L.stack[4], icons::Icon::Paste,
-                        cs.canPaste)) {
-            a.pastePressed = true;
+        // o ÍMAN: estado ativo/inativo, SEM texto (o valor segue no
+        // tooltip do gizmo — G2-9)
+        {
+            const bool pressed = ui.widgetHit(kVpSnapValId, L.rail[4].x,
+                                              L.rail[4].y, L.rail[4].w,
+                                              L.rail[4].h);
+            const bool held = ui.widgetActive(kVpSnapValId);
+            const bool on = gz.snap || held;
+            const f32 inset = theme::dp(4.0f);
+            const UiRect d = {L.rail[4].x + inset, L.rail[4].y + inset,
+                              L.rail[4].w - 2.0f * inset,
+                              L.rail[4].h - 2.0f * inset};
+            f32 accent[4], surface[4], border[4], onCol[4], offCol[4];
+            colA(theme::kTheme.accent, accent);
+            colA(theme::kTheme.surface, surface);
+            colA(theme::kTheme.border, border);
+            colA(theme::kTheme.accentInk, onCol);
+            colA(theme::kTheme.text1, offCol);
+            ui.panelRounded(d.x, d.y, d.w, d.h, theme::dp(theme::kRadiusCard),
+                            on ? accent : surface);
+            if (!on) {
+                ui.frameRounded(d.x, d.y, d.w, d.h, 1.0f,
+                                theme::dp(theme::kRadiusCard), border);
+            }
+            icons::drawIcon(ui, icons::Icon::Snap,
+                            L.rail[4].x + (L.rail[4].w - theme::dp(20.0f)) *
+                                              0.5f,
+                            L.rail[4].y + (L.rail[4].h - theme::dp(20.0f)) *
+                                              0.5f,
+                            theme::dp(20.0f), on ? onCol : offCol);
+            if (pressed) {
+                gz.snap = !gz.snap;
+            }
         }
-    }
-
-    // ---- toolbar inferior: modos (Selecionar = SEM gizmo; gz.mode para o
-    // gizmo da 0.6.9; o st.selectMode é o cursor de seleção por toque) ----
-    if (toolButton(ui, kVpSelectId, L.selectBtn, icons::Icon::Cursor,
-                   "Selecionar", st.selectMode)) {
-        st.selectMode = true;
-        gz.mode = 0;
-    }
-    if (toolButton(ui, toolbar::kGizmoIds[0], L.moveBtn, icons::Icon::Move,
-                   "Mover", !st.selectMode && gz.mode == 0)) {
-        st.selectMode = false;
-        gz.mode = 0;
-    }
-    if (toolButton(ui, toolbar::kGizmoIds[1], L.rotateBtn, icons::Icon::Rotate,
-                   "Rodar", !st.selectMode && gz.mode == 1)) {
-        st.selectMode = false;
-        gz.mode = 1;
-    }
-    if (toolButton(ui, toolbar::kGizmoIds[2], L.scaleBtn, icons::Icon::Scale,
-                   "Escalar", !st.selectMode && gz.mode == 2)) {
-        st.selectMode = false;
-        gz.mode = 2;
-    }
-    // 0.9.6.1 (G1-2) · A LEGENDA: o nome da ferramenta ATIVA numa strip
-    // pequena ACIMA da barra — nunca dentro do botão (nada se sobrepõe).
-    // P-08 (J1): some em viewport apertado (não cruza a strip — regra §2.2)
-    {
-        const char* name = st.selectMode ? "Selecionar"
-                           : gz.mode == 0 ? "Mover"
-                           : gz.mode == 1 ? "Rodar"
-                                          : "Escalar";
-        const f32 legendY = L.selectBtn.y - theme::dp(6.0f) -
-                            theme::dp(12.0f);   // 12sp acima do topo da barra
+        // a LEGENDA: o nome da ferramenta ATIVA (12sp, à direita do rail,
+        // por baixo da fila do topo — nunca dentro do botão)
         if (ui.hasFont() && L.legendVisible) {
-            ui.labelStyled(L.selectBtn.x + theme::dp(2.0f), legendY, name,
-                           theme::kTheme.text2,
+            const char* name = st.selectMode ? "Selecionar"
+                               : gz.mode == 0 ? "Mover"
+                               : gz.mode == 1 ? "Rodar"
+                                              : "Escalar";
+            f32 txt[4];
+            colA(theme::kTheme.text2, txt);
+            const TextMetrics tm = ui.textMetrics();
+            ui.labelStyled(L.legend.x,
+                           L.legend.y +
+                               (L.legend.h - tm.block()) * 0.5f + tm.ascent,
+                           name, txt,
                            theme::fontScale(theme::kFontCaption), 0);
         }
     }
 
-    // snap: BOTÃO DE ÍMAN (G2-9 no mock, aplicado com a toolbar nova) —
-    // estado ativo/inativo, SEM texto (o valor segue no tooltip do gizmo)
-    {
-        const bool pressed =
-            ui.widgetHit(kVpSnapValId, L.snapBtn.x, L.snapBtn.y, L.snapBtn.w,
-                         L.snapBtn.h);
-        const bool held = ui.widgetActive(kVpSnapValId);
-        const bool on = gz.snap || held;
-        ui.panelRounded(L.snapBtn.x, L.snapBtn.y, L.snapBtn.w, L.snapBtn.h,
-                        theme::dp(theme::kRadiusCard),
-                        on ? theme::kTheme.accent : theme::kTheme.surface);
-        if (!on) {
-            ui.frameRounded(L.snapBtn.x, L.snapBtn.y, L.snapBtn.w, L.snapBtn.h,
-                            1.0f, theme::dp(theme::kRadiusCard),
-                            theme::kTheme.border);
+    // ---- a fila do TOPO: desfazer/refazer/guardar/⋯ ----
+    if (L.quick[0].w > 0.0f) {
+        if (railButton(ui, kVpUndoId, L.quick[0], icons::Icon::Undo,
+                       cs.canUndo)) {
+            a.undoPressed = true;
         }
-        const f32 col[4] = {on ? theme::kTheme.accentInk[0]
-                               : theme::kTheme.text1[0],
-                            on ? theme::kTheme.accentInk[1]
-                               : theme::kTheme.text1[1],
-                            on ? theme::kTheme.accentInk[2]
-                               : theme::kTheme.text1[2],
-                            1.0f};
-        icons::drawIcon(ui, icons::Icon::Snap,
-                        L.snapBtn.x + (L.snapBtn.w - theme::dp(24.0f)) * 0.5f,
-                        L.snapBtn.y + (L.snapBtn.h - theme::dp(24.0f)) * 0.5f,
-                        theme::dp(24.0f), col);
-        if (pressed) {
-            gz.snap = !gz.snap;
+        if (railButton(ui, kVpRedoId, L.quick[1], icons::Icon::Redo,
+                       cs.canRedo)) {
+            a.redoPressed = true;
+        }
+        if (railButton(ui, kVpSaveId, L.quick[2], icons::Icon::Save, true)) {
+            a.savePressed = true;
+        }
+        // o ⋯: abre o menu de ficheiro ANCORADO a ele (a folha de sempre;
+        // o glifo é o ⋮ da casa — o mesmo do menu da hierarquia)
+        if (railButton(ui, kVpMenuId, L.quick[3], icons::Icon::Dots, true)) {
+            a.menuPressed = true;
+            st.menuAx = L.quick[3].x;
+            st.menuAy = L.quick[3].y + L.quick[3].h;
         }
     }
 
-    // [+] Adicionar TIC — o plus-menu de sempre, no canto inferior DIREITO
-    // da viewport (G1-1)
+    // ---- o GIZMO 40dp (topo-direito): o atalho mostrar/esconder o gizmo
+    // (a transição selectMode↔gizmo que JÁ existe — zero lógica nova; a
+    // interpretação do «gizmo 40dp» da spec, documentada no relatório) ----
     {
-        // 0.9.6.10 (GRUPO UI · o anti-exemplo da imagem 2): o [+] era um
-        // BLOCO cheio do accent (o quadrado branco cegante do device) —
-        // agora é um chip de vidro (o pai) com o ícone ÂMBAR: o accent é
-        // ESTADO, não repouso (a regra spec A)
+        const bool live = !st.selectMode;   // o gizmo vive fora do cursor
+        const icons::Icon ic = live ? (gz.mode == 0   ? icons::Icon::Move
+                                       : gz.mode == 1 ? icons::Icon::Rotate
+                                                      : icons::Icon::Scale)
+                                    : icons::Icon::Cursor;
+        const bool pressed =
+            ui.widgetHit(kVpGizmoId, L.gizmoBtn.x, L.gizmoBtn.y,
+                         L.gizmoBtn.w, L.gizmoBtn.h);
+        const bool held = ui.widgetActive(kVpGizmoId);
+        const f32 inset = theme::dp(4.0f);
+        const UiRect d = {L.gizmoBtn.x + inset, L.gizmoBtn.y + inset,
+                          L.gizmoBtn.w - 2.0f * inset,
+                          L.gizmoBtn.h - 2.0f * inset};
+        f32 accent[4], surface[4], border[4], onCol[4], offCol[4];
+        colA(theme::kTheme.accent, accent);
+        colA(theme::kTheme.surface, surface);
+        colA(theme::kTheme.border, border);
+        colA(theme::kTheme.accentInk, onCol);
+        colA(theme::kTheme.text2, offCol);
+        if (live || held) {
+            ui.panelRounded(d.x, d.y, d.w, d.h, theme::dp(theme::kRadiusCard),
+                            accent);
+        } else {
+            ui.panelRounded(d.x, d.y, d.w, d.h, theme::dp(theme::kRadiusCard),
+                            surface);
+            ui.frameRounded(d.x, d.y, d.w, d.h, 1.0f,
+                            theme::dp(theme::kRadiusCard), border);
+        }
+        icons::drawIcon(ui, ic,
+                        L.gizmoBtn.x + (L.gizmoBtn.w - theme::dp(20.0f)) * 0.5f,
+                        L.gizmoBtn.y + (L.gizmoBtn.h - theme::dp(20.0f)) * 0.5f,
+                        theme::dp(20.0f), live ? onCol : offCol);
+        if (pressed) {
+            st.selectMode = !st.selectMode;   // a transição existente
+        }
+    }
+
+    // ---- o [+] 40dp REDONDO (fundo-direito): o plus-menu de sempre
+    // (G1-1; o círculo é o panelRounded de meia-largura) ----
+    {
         const bool pressed =
             ui.widgetHit(kVpAddTicId, L.addTicBtn.x, L.addTicBtn.y,
                          L.addTicBtn.w, L.addTicBtn.h);
-        const f32 col[4] = {theme::kTheme.accent[0], theme::kTheme.accent[1],
-                            theme::kTheme.accent[2], 1.0f};
+        const bool held = ui.widgetActive(kVpAddTicId);
+        f32 fill[4], iconCol[4];
+        colA(held ? theme::kTheme.surface2 : theme::kTheme.surface, fill);
+        colA(theme::kTheme.accent, iconCol);
+        // o CÍRCULO: raio = metade do lado (40dp → raio 20)
+        ui.panelRounded(L.addTicBtn.x, L.addTicBtn.y, L.addTicBtn.w,
+                        L.addTicBtn.h, theme::dp(20.0f), fill);
         icons::drawIcon(ui, icons::Icon::Plus,
-                        L.addTicBtn.x + (L.addTicBtn.w - theme::dp(24.0f)) * 0.5f,
-                        L.addTicBtn.y + (L.addTicBtn.h - theme::dp(24.0f)) * 0.5f,
-                        theme::dp(24.0f), col);
+                        L.addTicBtn.x +
+                            (L.addTicBtn.w - theme::dp(24.0f)) * 0.5f,
+                        L.addTicBtn.y +
+                            (L.addTicBtn.h - theme::dp(24.0f)) * 0.5f,
+                        theme::dp(24.0f), iconCol);
         if (pressed) {
             a.addTicPressed = true;
         }
     }
-
-    // FASE 9 (G2-10): o TRIAD de orientação foi REMOVIDO (os
-    // "pontinhos fantasma" do dono — fora do mock).
 
     return a;
 }

@@ -336,73 +336,75 @@ TEST(inspector_sem_selecao_vira_trilho_32dp) {
     EXPECT(e.ui.glyphsForTest().vertexCount() > 0);
 }
 
-// ---- D: ViewportChrome: stack sem sobreposição, alvos 40 (PASSO 1) --------------
+// ---- D: ViewportChrome (PASSO 3): o rail esquerdo sem sobreposição, a fila
+// do topo e os cantos 40dp — nada se pisa, tudo ≥40 (a lei de ouro)
 TEST(vpchrome_stack_sem_sobreposicao_alvos_48) {
     const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{}, 0.0f, true);
     const vpchrome::Layout L = vpchrome::layout(view);
+    // o RAIL esquerdo (as 5 ferramentas): alvos ≥40 e sem sobreposição
     for (int i = 0; i < 5; ++i) {
-        EXPECT(L.stack[i].w >= 40.0f - 0.01f);   // PASSO 1: a lei de ouro
-        EXPECT(L.stack[i].h >= 40.0f - 0.01f);
+        EXPECT(L.rail[i].w >= 40.0f - 0.01f);   // a lei de ouro
+        EXPECT(L.rail[i].h >= 40.0f - 0.01f);
         for (int j = i + 1; j < 5; ++j) {
-            const f32 ox = std::min(L.stack[i].x + L.stack[i].w,
-                                    L.stack[j].x + L.stack[j].w) -
-                           std::max(L.stack[i].x, L.stack[j].x);
-            const f32 oy = std::min(L.stack[i].y + L.stack[i].h,
-                                    L.stack[j].y + L.stack[j].h) -
-                           std::max(L.stack[i].y, L.stack[j].y);
+            const f32 ox = std::min(L.rail[i].x + L.rail[i].w,
+                                    L.rail[j].x + L.rail[j].w) -
+                           std::max(L.rail[i].x, L.rail[j].x);
+            const f32 oy = std::min(L.rail[i].y + L.rail[i].h,
+                                    L.rail[j].y + L.rail[j].h) -
+                           std::max(L.rail[i].y, L.rail[j].y);
             EXPECT(ox <= 0.01f || oy <= 0.01f);
         }
     }
-    // toolbar inferior FASE 9 (G1-1): SÓ ÍCONES + íman + "+" à direita —
-    // nada sobrepõe, todos os alvos ≥48
-    const UiRect tools[6] = {L.selectBtn, L.moveBtn, L.rotateBtn, L.scaleBtn,
-                             L.snapBtn, L.addTicBtn};
+    // a fila do topo (undo/redo/save/⋯) + os cantos 40dp — nada sobrepõe
+    const UiRect quicks[6] = {L.quick[0], L.quick[1], L.quick[2],
+                              L.quick[3], L.gizmoBtn, L.addTicBtn};
     for (int i = 0; i < 6; ++i) {
-        EXPECT(tools[i].h >= 40.0f - 0.01f);   // PASSO 1: a lei de ouro
-        EXPECT(tools[i].w >= 40.0f - 0.01f);
+        EXPECT(quicks[i].h >= 40.0f - 0.01f);
+        EXPECT(quicks[i].w >= 40.0f - 0.01f);
         for (int j = i + 1; j < 6; ++j) {
-            const f32 ox = std::min(tools[i].x + tools[i].w,
-                                    tools[j].x + tools[j].w) -
-                           std::max(tools[i].x, tools[j].x);
-            const f32 oy = std::min(tools[i].y + tools[i].h,
-                                    tools[j].y + tools[j].h) -
-                           std::max(tools[i].y, tools[j].y);
+            const f32 ox = std::min(quicks[i].x + quicks[i].w,
+                                    quicks[j].x + quicks[j].w) -
+                           std::max(quicks[i].x, quicks[j].x);
+            const f32 oy = std::min(quicks[i].y + quicks[i].h,
+                                    quicks[j].y + quicks[j].h) -
+                           std::max(quicks[i].y, quicks[j].y);
             EXPECT(ox <= 0.01f || oy <= 0.01f);
         }
     }
     // FASE 9 (G2-10): o TRIAD foi REMOVIDO — os "pontinhos fantasma" do
-    // dono (canto sup-dir do viewport) não existem mais; o canto sup-dir
-    // do rect fica LIVRE (nada do chrome o ocupa)
+    // dono (canto sup-dir do viewport) não existem mais; no PASSO 3 o
+    // canto sup-dir tem o GIZMO 40dp (a spec do dono)
+    EXPECT(nearEqF(L.gizmoBtn.w, 40.0f));
     EXPECT(L.addTicBtn.y > view.y);   // (sanity: o + continua no fundo)
 }
 
-// ---- D2 (FASE 9 G1-1): a toolbar ANCORADA À VIEWPORT — acompanha o painel
-// de baixo (drawerH), nunca cobre o drawer/Inspector e fica DENTRO do rect
+// ---- D2 (FASE 9 G1-1 → PASSO 3): o chrome ANCORADO À VIEWPORT — o [+
+// acompanha o painel de baixo (drawerH), nunca cobre o drawer/Inspector e
+// fica DENTRO do rect
 TEST(vpchrome_toolbar_ancorada_a_viewport_g11) {
-    // 1600×720, drawer FECHADO: a toolbar assenta no fundo da viewport
+    // 1600×720, drawer FECHADO: o rail nasce no TOPO da viewport
     {
         const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{}, 0.0f,
                                              true);
         const vpchrome::Layout L = vpchrome::layout(view);
-        EXPECT(nearEqF(L.selectBtn.y + L.selectBtn.h + 8.0f,
-                       view.y + view.h));
-        EXPECT(safe::rectInside(L.selectBtn, view));
-        EXPECT(safe::rectInside(L.snapBtn, view));
+        EXPECT(nearEqF(L.rail[0].y, view.y + 8.0f));
+        EXPECT(safe::rectInside(L.rail[0], view));
+        EXPECT(safe::rectInside(L.quick[3], view));
         EXPECT(safe::rectInside(L.addTicBtn, view));
-        // "+" no canto inferior DIREITO da viewport
+        // "+" no canto inferior DIREITO da viewport (40dp — PASSO 3)
         EXPECT(nearEqF(L.addTicBtn.x + L.addTicBtn.w + 8.0f, view.x + view.w));
+        EXPECT(nearEqF(L.addTicBtn.w, 40.0f));
     }
-    // drawer ABERTO (240): a toolbar SOBE com o rect — nunca cobre o drawer
+    // drawer ABERTO (240): o [+] SOBE com o rect — nunca cobre o drawer
     {
         const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{}, 240.0f,
                                              true);
         const vpchrome::Layout L = vpchrome::layout(view);
-        EXPECT(safe::rectInside(L.selectBtn, view));
+        EXPECT(safe::rectInside(L.rail[0], view));
         EXPECT(safe::rectInside(L.addTicBtn, view));
-        // o fundo da toolbar está ACIMA do topo do drawer
+        // o fundo do [+] está ACIMA do topo do drawer
         const UiRect drawerTop{0.0f, kSH - safe::kStatusH - safe::kBottomTabH -
                                          240.0f, kSW, 240.0f};
-        EXPECT(L.selectBtn.y + L.selectBtn.h <= drawerTop.y + 0.01f);
         EXPECT(L.addTicBtn.y + L.addTicBtn.h <= drawerTop.y + 0.01f);
         // e NUNCA por cima do Inspector (o rect da viewport já exclui)
         const UiRect insp = safe::inspectorPanelRect(kSW, kSH, safe::Insets{},
@@ -411,13 +413,13 @@ TEST(vpchrome_toolbar_ancorada_a_viewport_g11) {
                        std::max(L.addTicBtn.x, insp.x);
         EXPECT(ox <= 0.01f);
     }
-    // largura ESTREITA (viewport 420): a toolbar cabe (368 ≤ 420)
+    // largura ESTREITA (viewport 420): o rail e a fila do topo cabem
     {
         const UiRect view{300.0f, 104.0f, 420.0f, 400.0f};
         const vpchrome::Layout L = vpchrome::layout(view);
-        EXPECT(safe::rectInside(L.snapBtn, view));
+        EXPECT(safe::rectInside(L.quick[3], view));
         EXPECT(safe::rectInside(L.addTicBtn, view));
-        EXPECT(safe::rectInside(L.selectBtn, view));
+        EXPECT(safe::rectInside(L.rail[0], view));
     }
 }
 
