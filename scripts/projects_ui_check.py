@@ -176,6 +176,27 @@ def main():
     if "thumb.png indisponível" not in code:
         bad += fail("sem o WARN do fallback de iniciais (D7)")
 
+    # 0.9.6.19 (D18): a REGRA DAS INICIAIS — 2+ palavras → as duas
+    # primeiras; 1 palavra → PRIMEIRA + ÚLTIMA letra (projetoyygf → "PF",
+    # prooksnsn → "PN"; todas "PR" era o defeito). Check ESTRUTURAL (o
+    # método é interno da Activity — a JVM do hospedeiro não o instancía):
+    # a fórmula primeira+última tem de existir e a antiga (as 2 primeiras
+    # com Math.min) não pode voltar; o retry do D16 (a leitura repete)
+    # também se afirma aqui
+    if "w.substring(w.length() - 1)).toUpperCase()" not in code:
+        bad += fail("regra de iniciais D18 ausente (1 palavra = primeira + "
+                    "última letra)")
+    if re.search(r"substring\(0,\s*Math\.min\(2,", code):
+        bad += fail("a regra antiga das iniciais (as 2 PRIMEIRAS letras — "
+                    "todas «PR») voltou; a do dono é primeira+última (D18)")
+    if "THUMB_RETRY_MS" not in code or "postDelayed" not in code:
+        bad += fail("a leitura do thumb não repete (D16: a escrita do "
+                    "engine chega DEPOIS do onResume — o card ficava em "
+                    "iniciais até ao próximo resume)")
+    else:
+        print("OK  iniciais D18 (primeira+última) · leitura do thumb repete "
+              "(D16)")
+
     # 9) TOKENS spec F — zero hex fora das constantes
     for tok in TOKENS_F:
         if tok not in code:

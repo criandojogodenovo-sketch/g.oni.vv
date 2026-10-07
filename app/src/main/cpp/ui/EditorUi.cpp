@@ -160,20 +160,20 @@ TransformBudget transformRowBudget(f32 usableWdp) {
     TransformBudget b;
     if (usableWdp >= 3.0f * kTfWideBox + 2.0f * kTfGapBox + kTfGapReset +
                          kTfChipW) {
-        return b;   // tentativa 1: caixas 64 + chip 40
+        return b;   // tentativa 1: caixas 64 + chip 40 (letra + valor cabem)
     }
     const f32 withChip =
         (usableWdp - 2.0f * kTfGapBox - kTfGapReset - kTfChipW) / 3.0f;
     if (withChip >= kTfMinBox) {
         b.boxW = withChip;   // tentativa 2: encolhe até ao piso 48, chip fica
-        return b;
+    } else {
+        // tentativa 3: o reset vira ÍCONE inline após o Z
+        b.resetIcon = true;
+        b.resetW = kTfIconW;
+        const f32 withIcon =
+            (usableWdp - 2.0f * kTfGapBox - kTfGapReset - kTfIconW) / 3.0f;
+        b.boxW = withIcon >= kTfFloorBox ? withIcon : kTfFloorBox;
     }
-    // tentativa 3: o reset vira ÍCONE inline após o Z
-    b.resetIcon = true;
-    b.resetW = kTfIconW;
-    const f32 withIcon =
-        (usableWdp - 2.0f * kTfGapBox - kTfGapReset - kTfIconW) / 3.0f;
-    b.boxW = withIcon >= kTfFloorBox ? withIcon : kTfFloorBox;
     // a ÚLTIMA defesa (painel sub-mínimo — impossível no clamp da casa,
     // mas a lei é o rect): a linha INTEIRA re-encolhe para caber
     const f32 total = 3.0f * b.boxW + 2.0f * kTfGapBox + kTfGapReset + b.resetW;
@@ -184,9 +184,62 @@ TransformBudget transformRowBudget(f32 usableWdp) {
                               // do painel guarda o resto
         }
     }
+    // ---- 0.9.6.19 (R1): A ORDEM DO DONO — letra → padding → NUNCA valor --
+    // (a) o valor intocável: se a caixa com a letra não dá o piso
+    //     kTfValueMinDp ao valor, a LETRA do eixo cede (o 1.º a dropar);
+    if (transformValueSpace(b) < kTfValueMinDp) {
+        b.axisLabels = false;
+    }
+    // (b) ainda sem o piso? o PADDING DA LINHA cede: as caixas usam a
+    //     largura toda do painel (as margens de 16dp caem a 4dp — o MESMO
+    //     regime do reset que a tentativa escolheu) e a caixa re-computa.
+    if (transformValueSpace(b) < kTfValueMinDp) {
+        b.rowPadDropped = true;
+        constexpr f32 kTfRowPadMin = 4.0f;   // a margem que nunca some
+        const f32 cheio =
+            usableWdp + 2.0f * (16.0f - kTfRowPadMin);   // 16→4 de cada lado
+        const f32 resetBudget = b.resetIcon ? kTfIconW : kTfChipW;
+        const f32 w3 =
+            (cheio - 2.0f * kTfGapBox - kTfGapReset - resetBudget) / 3.0f;
+        const f32 piso = b.resetIcon ? kTfFloorBox : kTfMinBox;
+        b.boxW = w3 >= piso ? w3 : piso;
+        const f32 totalCheio =
+            3.0f * b.boxW + 2.0f * kTfGapBox + kTfGapReset + b.resetW;
+        if (totalCheio > cheio && totalCheio > 1.0f) {
+            b.boxW -= (totalCheio - cheio) / 3.0f;
+            if (b.boxW < 16.0f) {
+                b.boxW = 16.0f;   // o scissor do painel é a última defesa
+            }
+        }
+    }
     return b;
 }
 
+
+// ---------------------------------------------------------------------------
+// 0.9.6.19 (HOTFIX D19) — O SWITCH DA CASA (a fonte ÚNICA do estado visível)
+// Trilho-pílula 32×16dp + knob 12dp: ON = trilho âmbar com o knob À DIREITA
+// (tinta escura sobre âmbar — o par do tema); OFF = trilho border com o
+// knob text2 à ESQUERDA. A POSIÇÃO do knob É o estado (o pin do dono:
+// «toggle desenhado com estado nos dois valores»).
+// ---------------------------------------------------------------------------
+void drawVisSwitch(UiContext& ui, bool on, f32 rightX, f32 cy) {
+    const f32 tw = theme::dp(kVisSwitchW);
+    const f32 th = theme::dp(kVisSwitchH);
+    const f32 tx = rightX - tw;
+    const f32 ty = cy - th * 0.5f;
+    const f32 kd = theme::dp(kVisKnobDp);
+    const f32 inset = theme::dp(2.0f);
+    if (on) {
+        ui.panelPill(tx, ty, tw, th, theme::kTheme.accent);
+        ui.panelRounded(tx + tw - inset - kd, ty + inset, kd, kd,
+                        kd * 0.5f, theme::kTheme.accentInk);
+    } else {
+        ui.panelPill(tx, ty, tw, th, theme::kTheme.border);
+        ui.panelRounded(tx + inset, ty + inset, kd, kd,
+                        kd * 0.5f, theme::kTheme.text2);
+    }
+}
 
 UiRect centerRect(f32 sw, f32 sh) {
     // QUALIFICADO: chamada não-qualificada era ambígua no NDK clang — o ADL
@@ -1127,6 +1180,10 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             // 0.9.6.18 (HOTFIX D10): a caixa de TEXTO «visível: sim/não»
             // era controlo-de-texto cru — o ESTADO vive agora no ícone da
             // casa (Eye/EyeOff) com o rótulo ao lado (a spec do dono).
+            // 0.9.6.19 (HOTFIX D19): o ícone + rótulo NÃO mostravam a
+            // posição — o SWITCH da casa (drawVisSwitch, a fonte única)
+            // desenha o knob on/off à direita da linha (o pin: estado
+            // desenhado nos DOIS valores).
             const bool heldV = ui.widgetActive(r.id);
             if (heldV) {
                 ui.panel(x + kPad, ry, w - 2.0f * kPad, r.h,
@@ -1144,6 +1201,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                                inspBaseline(ry, r.h, tm), "visível",
                                theme::kTheme.text1, w - 2.0f * kPad - theme::dp(56.0f));
             }
+            // o ESTADO (D19): o knob na posição — on/off lêem-se de longe
+            editor::drawVisSwitch(ui, tic->visible,
+                                  x + w - kPad, ry + r.h * 0.5f);
             // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira + a flag da
             // classe linha (o padrão PASSO 1 das tabs)
             ui.auditRowFloorNext(layout::kRowFloorDp);
@@ -1335,10 +1395,12 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             const TransformBudget tb =
                 transformRowBudgetPx(w - 2.0f * kPad);
             const f32 boxW = tb.boxW;
+            // R1: o padding da linha é o DO ORÇAMENTO (pode ter dropado)
+            const f32 rowPad = tb.rowPadDropped ? theme::dp(4.0f) : kPad;
             const f32 boxH = theme::dp(32.0f);
             const f32 boxY = ry + theme::dp(28.0f);
             const f32 boxBase = boxY + (boxH - m2.block()) * 0.5f + m2.ascent;
-            f32 bx = x + kPad;
+            f32 bx = x + rowPad;
             for (u32 axis = 0; axis < 3; ++axis) {
                 const u32 field = rowIdx * 3 + axis;
                 char val[20];
@@ -1361,13 +1423,23 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 static const f32* const kAxisCol[3] = {
                     theme::kTheme.axisX, theme::kTheme.axisY,
                     theme::kTheme.axisZ};
-                if (ui.hasFont()) {
+                // 0.9.6.19 (R1): O VALOR É INTOCÁVEL — a LETRA do eixo só
+                // desenha se o orçamento a manteve (axisLabels); o valor
+                // tem SEMPRE o espaço do orçamento (transformValueSpace —
+                // o pin: valor NÃO-VAZIO nos 3 campos em 180/220/260dp).
+                if (ui.hasFont() && tb.axisLabels) {
                     ui.label(bx + theme::dp(6.0f), boxBase, kAxis[axis],
                              kAxisCol[axis]);
-                    // valor ENTRE o rótulo do eixo e a borda direita —
-                    // labelFitted TRUNCA (a auditoria de glifos vigia)
-                    const f32 maxVw = boxW - theme::dp(6.0f) - theme::dp(14.0f) -
-                                      theme::dp(8.0f);
+                }
+                if (ui.hasFont()) {
+                    // valor ENTRE o rótulo do eixo (se existir) e a borda
+                    // direita — labelFitted TRUNCA mas o piso do orçamento
+                    // garante espaço para valor não-vazio (a fórmula antiga
+                    // maxVw = boxW−28 a 180dp dava 9.3dp: nem o «…» cabia)
+                    const f32 padL = theme::dp(6.0f);
+                    const f32 maxVw = tb.axisLabels
+                        ? boxW - padL - theme::dp(14.0f) - theme::dp(6.0f)
+                        : boxW - 2.0f * padL;
                     char fitted[16];
                     const char* shown = val;
                     if (ui.fontWidth(val) > maxVw) {
@@ -1386,7 +1458,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             // o RESET (D2+D10): CHIP 40×32 com o ícone quando cabe; ÍCONE
             // inline 20 após o Z abaixo do piso (a spec do dono)
             const f32 rW = tb.resetW;
-            const f32 rX = x + kPad + 3.0f * boxW + 2.0f * theme::dp(kTfGapBox) +
+            const f32 rX = x + rowPad + 3.0f * boxW + 2.0f * theme::dp(kTfGapBox) +
                            theme::dp(kTfGapReset);
             const f32 rHeld0 = ui.widgetActive(r.id);
             if (!tb.resetIcon) {
@@ -1920,8 +1992,11 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 const TransformBudget tb2 =
                     transformRowBudgetPx(w - 2.0f * kPad);
                 const f32 boxW = tb2.boxW;
-                f32 bx = x + kPad;
-                const f32 rResetX = x + kPad + 3.0f * boxW +
+                // R1: o MESMO padding da linha que o draw (o orçamento pode
+                // ter dropado as margens de 16→4dp — a lei é o rect)
+                const f32 rowPad = tb2.rowPadDropped ? theme::dp(4.0f) : kPad;
+                f32 bx = x + rowPad;
+                const f32 rResetX = x + rowPad + 3.0f * boxW +
                                     2.0f * theme::dp(kTfGapBox) +
                                     theme::dp(kTfGapReset);
                 bool handled = false;
@@ -2290,10 +2365,24 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     // linhas 48dp ÍCONE+rótulo 14sp; COM SCROLL quando o conteúdo excede
     // o ecrã (14 linhas + 6 cabeçalhos não cabem no portrait — o sheet
     // encolhe ao disponível e a lista rola).
+    //
+    // 0.9.6.19 (HOTFIX D14 — MENU CONTIDO): (1) o menu abre SEMPRE com
+    // offset 0 (o slot do scroll persistia entre aberturas — o reciclo do
+    // beginScroll podia devolver o offset de OUTRA região; a 1.ª linha
+    // nascia cortada no topo); (2) o sheet NUNCA cruza a TAB BAR do fundo
+    // (o maxY reserva kBottomTabH — o «Documentação V. …» cortado pela
+    // tab bar morre; a regra §2.1 do contrato P-08); (3) o scroll é
+    // PRÓPRIO e faz a ÚLTIMA linha chegar INTEIRA (maxOffset = content −
+    // região); os glifos ficam dentro do sheet pelo clip do beginScroll.
+    // 0.9.6.19 (HOTFIX D14 — A CAUSA-RAIZ ACRESCENTADA): as medidas do
+    // sheet eram PX CRU (kSheetW 280, kRowH 48, kHdrH 28 sem dp — a
+    // violação R-018/§2.9): no device @2.0 o menu desenhava a MEIA medida
+    // (140dp de largura, linhas 24dp) com o TEXTO a 2× — o texto sangrava
+    // as linhas e a 1.ª linha «cortada» do dono era isto. TUDO em dp AGORA.
     constexpr int kItems = 14;
-    constexpr f32 kSheetW = 280.0f;   // spec H
-    constexpr f32 kRowH = 48.0f;      // spec H/A
-    constexpr f32 kHdrH = 28.0f;      // cabeçalho de secção (GRUPO UI)
+    const f32 kSheetW = theme::dp(280.0f);   // spec H (era px cru)
+    const f32 kRowH = theme::dp(48.0f);      // spec H/A (era px cru)
+    const f32 kHdrH = theme::dp(28.0f);      // cabeçalho de secção (era px cru)
     // (ax/ay = rect do botão-âncora da top bar; −1/−1 = fallback centrado
     // p/ compatibilidade dos testes.)
     static const struct {
@@ -2305,11 +2394,15 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
         // PROJETO
         {"Sair para projetos",  icons::Icon::Back,    0},
         {"Importar…",           icons::Icon::Upload,  0},
-        {"Export Downloads",    icons::Icon::Download, 0},
+        // 0.9.6.19 (D15): «Export Downloads» era EN — a tabela do menu
+        // inteira é PT (o gate ui_vocab caça o regresso de «Export «)
+        {"Exportar Downloads",  icons::Icon::Download, 0},
         // CENA
         {"Guardar cena",        icons::Icon::Save,    1},
         {"Carregar cena",       icons::Icon::Folder,  1},
-        {"Export OBJ",          icons::Icon::Download, 1},
+        // 0.9.6.19 (D15): «Export OBJ» → «Exportar OBJ» (o dono; o gate
+        // estende-se à tabela do menu — M-D15 fica vermelho com o EN)
+        {"Exportar OBJ",        icons::Icon::Download, 1},
         // EDITAR
         {"Desfazer",            icons::Icon::Undo,    2},
         {"Refazer",             icons::Icon::Redo,    2},
@@ -2326,6 +2419,9 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     static const char* const kSections[6] = {
         "PROJETO", "CENA", "EDITAR", "VISUALIZAR", "FERRAMENTAS", "AJUDA"};
     // o rótulo dinâmico do Snap (linha 10 — o toggle REAL do íman)
+    // 0.9.6.19 (D15): «Snapping» fica POR DECISÃO EXPLÍCITA — entrou na
+    // allowlist de termos técnicos do gate ui_vocab (termo da ferramenta
+    // 3D sem tradução curta consensual; o par ligado/desligado é PT)
     char snapLabel[48];
     std::snprintf(snapLabel, sizeof(snapLabel), "Snapping: %s",
                   snapOn ? "ligado" : "desligado");
@@ -2339,23 +2435,27 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     labels[11] = strings::tr(strings::Key::OpenSettings);
 
     const f32 contentH = static_cast<f32>(kItems) * kRowH +
-                         6.0f * kHdrH + 8.0f;
+                         6.0f * kHdrH + theme::dp(8.0f);
     f32 x, y;
     // o ALTURA máxima disponível (o sheet NUNCA sai do contentRect — a
-    // invariante F4.2; o resto rola lá dentro)
+    // invariante F4.2; o resto rola lá dentro). D14: a reserva do fundo
+    // é a TAB BAR (32dp — era 28px crus, MENOS que a barra: o «Documentação
+    // V. …» ficava debaixo dela).
     const f32 maxH = sh - static_cast<f32>(ui.safeTop()) -
                      theme::dp(safe::kToolbarH) - theme::dp(8.0f) -
-                     theme::dp(28.0f);
+                     theme::dp(safe::kBottomTabH);
     const f32 h = contentH < maxH ? contentH : maxH;
     if (ax >= 0.0f && ay >= 0.0f) {
         x = ax;
-        y = ay + 8.0f;   // 8dp sob o botão (spec H)
-        // clamp ao contentRect (nada sai do ecrã — a invariante F4.2)
+        y = ay + theme::dp(8.0f);   // 8dp sob o botão (spec H)
+        // clamp ao contentRect (nada sai do ecrã — a invariante F4.2);
+        // D14: o fundo do sheet nunca passa do TOPO da tab bar
         const f32 maxX = ui.safeLeft() + sw - ui.safeRight() - kSheetW - 4.0f;
         if (x > maxX) {
             x = maxX > ui.safeLeft() ? maxX : ui.safeLeft();
         }
-        const f32 maxY = sh - ui.safeBottom() - h - 28.0f;
+        const f32 maxY = sh - ui.safeBottom() - h -
+                         theme::dp(safe::kBottomTabH);
         if (y > maxY) {
             y = maxY > static_cast<f32>(ui.safeTop()) + safe::kToolbarH
                     ? maxY
@@ -2383,14 +2483,15 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 
     const TextMetrics tm = ui.textMetrics();
     int chosen = 0;
-    const UiRect region{x, y + 4.0f, kSheetW, h - 8.0f};
+    const UiRect region{x, y + theme::dp(4.0f), kSheetW,
+                        h - theme::dp(8.0f)};
     ui.beginScroll(kMenuScrollId, region, contentH);
     const f32 off = ui.scrollOffset();
     // o y de CONTENT de cada linha (para o re-despacho do tap: dentro do
     // scroll o botão SÓ desenha — o tap nasce da região e é mapeado aqui,
     // o MESMO padrão dos cards dos Ficheiros no BottomPanel)
     f32 rowContentY[kItems];
-    f32 ry = y + 4.0f;
+    f32 ry = y + theme::dp(4.0f);
     int lastSec = -1;
     for (int i = 0; i < kItems; ++i) {
         // o CABEÇALHO da secção (12sp text2 — a imagem 1)
@@ -2399,7 +2500,7 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
             if (ui.hasFont()) {
                 const f32 hdrY = ry - off;
                 if (hdrY + kHdrH >= y && hdrY <= y + h) {
-                    ui.labelStyled(x + 16.0f,
+                    ui.labelStyled(x + theme::dp(16.0f),
                                    hdrY + (kHdrH - tm.block()) * 0.5f +
                                        tm.ascent,
                                    kSections[lastSec], theme::kTheme.text2,
@@ -2417,17 +2518,19 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
         const u64 id = kMenuRowBase + static_cast<u64>(i);
         const bool held = ui.widgetActive(id);
         if (held) {
-            ui.panel(x + 4.0f, rowY, kSheetW - 8.0f, kRowH,
-                     theme::kTheme.surface2);
+            ui.panel(x + theme::dp(4.0f), rowY, kSheetW - theme::dp(8.0f),
+                     kRowH, theme::kTheme.surface2);
         }
-        icons::drawIcon(ui, kMenu[i].ic, x + 16.0f,
-                        rowY + (kRowH - 24.0f) * 0.5f, 24.0f,
-                        theme::kTheme.text2);
+        icons::drawIcon(ui, kMenu[i].ic, x + theme::dp(16.0f),
+                        rowY + (kRowH - theme::dp(24.0f)) * 0.5f,
+                        theme::dp(24.0f), theme::kTheme.text2);
         if (ui.hasFont()) {
-            ui.labelFitted(x + 16.0f + 24.0f + 12.0f,
+            ui.labelFitted(x + theme::dp(16.0f) + theme::dp(24.0f) +
+                               theme::dp(12.0f),
                            rowY + (kRowH - tm.block()) * 0.5f + tm.ascent,
                            labels[i], theme::kTheme.text1,
-                           kSheetW - 24.0f - 36.0f - 12.0f);
+                           kSheetW - theme::dp(24.0f) - theme::dp(36.0f) -
+                               theme::dp(12.0f));
         }
     }
     ui.endScroll();
@@ -2456,15 +2559,18 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 // ---------------------------------------------------------------------------
 int drawHierMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                  EditorState& st, f32 ax, f32 ay) {
-    constexpr f32 kSheetW = 260.0f;
-    constexpr f32 kRowH = 48.0f;
-    const f32 h = 2.0f * kRowH + 8.0f;
-    f32 x = ax, y = ay + 8.0f;
+    // 0.9.6.19 (D14): dp real (era px cru — a mesma violação R-018)
+    const f32 kSheetW = theme::dp(260.0f);
+    const f32 kRowH = theme::dp(48.0f);
+    const f32 h = 2.0f * kRowH + theme::dp(8.0f);
+    f32 x = ax, y = ay + theme::dp(8.0f);
     const f32 maxX = ui.safeLeft() + sw - ui.safeRight() - kSheetW - 4.0f;
     if (x > maxX) {
         x = maxX > ui.safeLeft() ? maxX : ui.safeLeft();
     }
-    const f32 maxY = sh - ui.safeBottom() - h - 28.0f;
+    // D14 (0.9.6.19): a MESMA regra do menu de ficheiro — o fundo nunca
+    // passa do topo da tab bar (era 28px crus, menos que a barra)
+    const f32 maxY = sh - ui.safeBottom() - h - theme::dp(safe::kBottomTabH);
     if (y > maxY) {
         y = maxY > static_cast<f32>(ui.safeTop()) + safe::kToolbarH ? maxY
                 : static_cast<f32>(ui.safeTop()) + safe::kToolbarH;
@@ -2490,22 +2596,23 @@ int drawHierMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     const TextMetrics tm = ui.textMetrics();
     int chosen = 0;
     for (int i = 0; i < 2; ++i) {
-        const f32 ry = y + 4.0f + static_cast<f32>(i) * kRowH;
+        const f32 ry = y + theme::dp(4.0f) + static_cast<f32>(i) * kRowH;
         const u64 id = kHierMenuRowBase + static_cast<u64>(i);
         if (ui.widgetActive(id)) {
-            ui.panel(x + 4.0f, ry, kSheetW - 8.0f, kRowH,
+            ui.panel(x + theme::dp(4.0f), ry, kSheetW - theme::dp(8.0f), kRowH,
                      theme::kTheme.surface2);
         }
-        icons::drawIcon(ui, kRows[i].ic, x + 16.0f,
-                        ry + (kRowH - 24.0f) * 0.5f, 24.0f,
-                        theme::kTheme.text2);
+        icons::drawIcon(ui, kRows[i].ic, x + theme::dp(16.0f),
+                        ry + (kRowH - theme::dp(24.0f)) * 0.5f,
+                        theme::dp(24.0f), theme::kTheme.text2);
         if (ui.hasFont()) {
-            ui.labelFitted(x + 52.0f, ry + (kRowH - tm.block()) * 0.5f +
-                                           tm.ascent,
+            ui.labelFitted(x + theme::dp(52.0f),
+                           ry + (kRowH - tm.block()) * 0.5f + tm.ascent,
                            kRows[i].label, theme::kTheme.text1,
-                           kSheetW - 68.0f);
+                           kSheetW - theme::dp(68.0f));
         }
-        if (ui.widgetHit(id, x + 4.0f, ry, kSheetW - 8.0f, kRowH)) {
+        if (ui.widgetHit(id, x + theme::dp(4.0f), ry,
+                         kSheetW - theme::dp(8.0f), kRowH)) {
             chosen = i + 1;
             st.hierMenu = false;
         }
@@ -2539,20 +2646,24 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     // 280dp de largura, scrim 60%, [＋ Nova cena] com FILL ACCENT no topo,
     // linhas de cena 48dp com ÍCONE + nome + CHECK na ativa, separador fino.
     // Toque fora fecha SEM ação; toque na linha troca e fecha.
-    constexpr f32 kSheetW = 280.0f;   // spec H
-    const f32 rowH = 48.0f;
+    // 0.9.6.19 (D14): dp real (era px cru — a mesma violação R-018)
+    const f32 kSheetW = theme::dp(280.0f);   // spec H
+    const f32 rowH = theme::dp(48.0f);
     const u32 shown = scenes.size() < 6u ? static_cast<u32>(scenes.size()) : 6u;
     const f32 listH = static_cast<f32>(shown) * rowH;
-    const f32 h = 48.0f + 56.0f + 8.0f + listH + 8.0f;
+    const f32 h = theme::dp(48.0f) + theme::dp(56.0f) + theme::dp(8.0f) +
+                  listH + theme::dp(8.0f);
     f32 x, y;
     if (ax >= 0.0f && ay >= 0.0f) {
         x = ax;
-        y = ay + 8.0f;   // 8dp sob o botão (spec H)
+        y = ay + theme::dp(8.0f);   // 8dp sob o botão (spec H)
         const f32 maxX = ui.safeLeft() + sw - ui.safeRight() - kSheetW - 4.0f;
         if (x > maxX) {
             x = maxX > ui.safeLeft() ? maxX : ui.safeLeft();
         }
-        const f32 maxY = sh - ui.safeBottom() - h - 28.0f;
+        // D14 (0.9.6.19): o fundo nunca passa do topo da tab bar
+        const f32 maxY = sh - ui.safeBottom() - h -
+                         theme::dp(safe::kBottomTabH);
         if (y > maxY) {
             y = maxY > static_cast<f32>(ui.safeTop()) + safe::kToolbarH
                     ? maxY
@@ -2579,18 +2690,20 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                     theme::kTheme.border);
 
     // ＋ Nova cena — FILL ACCENT (spec H), fixo no topo
-    const f32 newBtnY = y + 4.0f;
-    const UiRect newBtn = {x + 8.0f, newBtnY, kSheetW - 16.0f, 48.0f};
+    const f32 newBtnY = y + theme::dp(4.0f);
+    const UiRect newBtn = {x + theme::dp(8.0f), newBtnY,
+                           kSheetW - theme::dp(16.0f), theme::dp(48.0f)};
     const bool newHeld = ui.widgetActive(6700);
     ui.panelRounded(newBtn.x, newBtn.y, newBtn.w, newBtn.h,
                     theme::kRadiusCard,
                     newHeld ? theme::kTheme.accentPress : theme::kTheme.accent);
-    icons::drawIcon(ui, icons::Icon::Plus, newBtn.x + 16.0f,
-                    newBtn.y + (newBtn.h - 24.0f) * 0.5f, 24.0f,
-                    theme::kTheme.accentInk);
+    icons::drawIcon(ui, icons::Icon::Plus, newBtn.x + theme::dp(16.0f),
+                    newBtn.y + (newBtn.h - theme::dp(24.0f)) * 0.5f,
+                    theme::dp(24.0f), theme::kTheme.accentInk);
     if (ui.hasFont()) {
         const TextMetrics tm0 = ui.textMetrics();
-        ui.label(newBtn.x + 16.0f + 24.0f + 12.0f,
+        ui.label(newBtn.x + theme::dp(16.0f) + theme::dp(24.0f) +
+                     theme::dp(12.0f),
                  newBtn.y + (newBtn.h - tm0.block()) * 0.5f + tm0.ascent,
                  "Nova cena", theme::kTheme.accentInk);
     }
@@ -2598,9 +2711,9 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                                        newBtn.h);
 
     // separador fino + lista (scroll id 44)
-    ui.panel(x + 16.0f, newBtnY + 48.0f + 4.0f, kSheetW - 32.0f, 1.0f,
-             theme::kTheme.border);
-    const f32 listTop = newBtnY + 56.0f + 8.0f;
+    ui.panel(x + theme::dp(16.0f), newBtnY + theme::dp(48.0f) + theme::dp(4.0f),
+             kSheetW - theme::dp(32.0f), 1.0f, theme::kTheme.border);
+    const f32 listTop = newBtnY + theme::dp(56.0f) + theme::dp(8.0f);
     const UiRect region{x, listTop, kSheetW, listH};
     const f32 contentH = static_cast<f32>(scenes.size()) * rowH;
     ui.beginScroll(44, region, contentH);
@@ -2612,33 +2725,41 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         const f32 ry = listTop + static_cast<f32>(i) * rowH - off;
         const bool active = i == activeScene;
         if (active) {
-            ui.panel(x + 4.0f, ry, kSheetW - 8.0f, rowH, theme::kTheme.surface2);
+            ui.panel(x + theme::dp(4.0f), ry, kSheetW - theme::dp(8.0f), rowH,
+                     theme::kTheme.surface2);
         }
         // ícone de cena (clapper) + nome + CHECK na ativa (spec H)
-        icons::drawIcon(ui, icons::Icon::Clapper, x + 16.0f,
-                        ry + (rowH - 24.0f) * 0.5f, 24.0f,
+        icons::drawIcon(ui, icons::Icon::Clapper, x + theme::dp(16.0f),
+                        ry + (rowH - theme::dp(24.0f)) * 0.5f,
+                        theme::dp(24.0f),
                         active ? theme::kTheme.accent : theme::kTheme.text2);
         if (ui.hasFont()) {
-            ui.labelFitted(x + 16.0f + 24.0f + 12.0f,
+            ui.labelFitted(x + theme::dp(16.0f) + theme::dp(24.0f) +
+                               theme::dp(12.0f),
                            ry + (rowH - tm.block()) * 0.5f + tm.ascent, name,
                            active ? theme::kTheme.accent : theme::kTheme.text1,
-                           kSheetW - 24.0f - 36.0f - 12.0f - 32.0f);
+                           kSheetW - theme::dp(24.0f) - theme::dp(36.0f) -
+                               theme::dp(12.0f) - theme::dp(32.0f));
         }
         if (active) {
             icons::drawIcon(ui, icons::Icon::Check,
-                            x + kSheetW - 16.0f - 24.0f,
-                            ry + (rowH - 24.0f) * 0.5f, 24.0f,
-                            theme::kTheme.accent);
+                            x + kSheetW - theme::dp(16.0f) - theme::dp(24.0f),
+                            ry + (rowH - theme::dp(24.0f)) * 0.5f,
+                            theme::dp(24.0f), theme::kTheme.accent);
         }
-        ui.widgetHit(6710 + static_cast<u64>(i), x + 4.0f, ry, kSheetW - 8.0f,
+        ui.widgetHit(6710 + static_cast<u64>(i), x + theme::dp(4.0f), ry,
+                     kSheetW - theme::dp(8.0f),
                      rowH);   // só desenha (scroll re-despacha)
     }
     ui.endScroll();
     if (scenes.empty() && ui.hasFont()) {
-        icons::drawIcon(ui, icons::Icon::Clapper, x + kSheetW * 0.5f - 16.0f,
-                        listTop + 20.0f, 32.0f, theme::kTheme.text2);
-        ui.labelFitted(x + 16.0f, listTop + 76.0f, "(sem cenas)",
-                       theme::kTheme.text2, kSheetW - 32.0f);
+        icons::drawIcon(ui, icons::Icon::Clapper,
+                        x + kSheetW * 0.5f - theme::dp(16.0f),
+                        listTop + theme::dp(20.0f), theme::dp(32.0f),
+                        theme::kTheme.text2);
+        ui.labelFitted(x + theme::dp(16.0f), listTop + theme::dp(76.0f),
+                       "(sem cenas)", theme::kTheme.text2,
+                       kSheetW - theme::dp(32.0f));
     }
 
     // tap re-despachado → escolha da linha (a MESMA geometria desenhada)

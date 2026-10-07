@@ -4978,4 +4978,120 @@ TEST(regress_hotfix_defeitos) {
                editor::brand::segmentCountFor(32.0f));
         EXPECT(editor::brand::kLodFullMinDp == 32.0f);
     }
+
+    // ---- (10) R1 (0.9.6.19): O VALOR É INTOCÁVEL no orçamento D2 --------
+    // O dono: «o clamp do D2 deixou os campos X/Y/Z sem o texto do valor
+    // (só a letra do eixo). O valor é intocável — se a largura aperta,
+    // dropa primeiro a letra do eixo, depois o padding, nunca o valor.»
+    // Pin: valor NÃO-VAZIO nos 3 campos em 180/220/260dp (os úteis
+    // 164/204/244 — o painel menos as margens kPad 16).
+    {
+        struct Caso { f32 util; const char* nome; };
+        const Caso casos[3] = {{164.0f, "180dp"}, {204.0f, "220dp"},
+                               {244.0f, "260dp"}};
+        for (const Caso& c : casos) {
+            const editor::TransformBudget b = editor::transformRowBudget(c.util);
+            // o piso do valor é cumprido EM TODOS (o pin do dono)
+            EXPECT_MSG(editor::transformValueSpace(b) >=
+                           editor::kTfValueMinDp - 0.01f,
+                       "R1 %s: o espaço do valor é %.1fdp < piso %.0fdp "
+                       "(o valor foi cortado — a mutação M-R1)",
+                       c.nome, (double)editor::transformValueSpace(b),
+                       (double)editor::kTfValueMinDp);
+            // a ORDEM do dono: a letra só sai DEPOIS de esgotada a caixa
+            // inteira; e a linha INTEIRA continua dentro do útil
+            const f32 rowPad = b.rowPadDropped ? 4.0f : 16.0f;
+            const f32 total = 3.0f * b.boxW + 2.0f * 8.0f + 8.0f + b.resetW +
+                              2.0f * (16.0f - rowPad);
+            EXPECT_MSG(total <= c.util + 0.01f,
+                       "R1 %s: a linha transborda (%.1f > %.1f)",
+                       c.nome, (double)total, (double)c.util);
+            // a PROVA DO VALOR NÃO-VAZIO com a fonte real: um valor típico
+            // da linha (%.2g — curtos) cabe INTEIRO no espaço do orçamento
+            FontAtlas font;
+            const char* fp = FONT_FIXTURE;
+            ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+            UiContext ui;
+            ui.init();
+            ui.setFont(&font);
+            char val[16];
+            std::snprintf(val, sizeof(val), "%.2g", -12.5);
+            EXPECT_MSG(ui.fontWidth(val) <=
+                           editor::transformValueSpace(b) * theme::dp(1.0f),
+                       "R1 %s: o valor «%s» (%.1fpx) não cabe no espaço "
+                       "(%.1fpx)",
+                       c.nome, val, (double)ui.fontWidth(val),
+                       (double)(editor::transformValueSpace(b) *
+                                theme::dp(1.0f)));
+        }
+        // a 180dp (164 úteis) a LETRA sai (o 1.º a ceder — a ordem do dono)
+        const editor::TransformBudget b164 = editor::transformRowBudget(164.0f);
+        EXPECT(!b164.axisLabels);   // o valor ficou com a caixa inteira
+        EXPECT(nearEqF(editor::transformValueSpace(b164), 28.0f, 0.01f));
+        // a 260dp (244 úteis) a letra FICA (cabe letra + valor)
+        const editor::TransformBudget b244 = editor::transformRowBudget(244.0f);
+        EXPECT(b244.axisLabels);
+        // MUTAÇÃO M-R1 (a fórmula antiga): maxVw = boxW−28 a 164 úteis dá
+        // 40−28 = 12dp < kTfValueMinDp — vermelho (o pin acima apanha-a)
+    }
+
+    // ---- (11) D19 (0.9.6.19): O TOGGLE «visível» MOSTRA O ESTADO -------
+    // O pin: «toggle desenhado com estado nos dois valores» — o knob ON
+    // vive à DIREITA do trilho; o OFF à ESQUERDA (a posição É o estado).
+    {
+        FontAtlas font;
+        const char* fp = FONT_FIXTURE;
+        ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+        UiContext ui;
+        ui.init();
+        ui.setFont(&font);
+        InputState in;
+        const f32 rightX = 300.0f, cy = 100.0f;
+        f32 knobXOn = -1.0f, knobXOff = -1.0f;
+        // ON: knob 12×12 à direita do trilho-pílula 32×16
+        ui.beginFrame(nullptr, &in, 800.0f, 600.0f);
+        ui.auditBegin("r035-d19-on", 800.0f, 600.0f, 0, 0, 0, 0, 1.0f);
+        editor::drawVisSwitch(ui, true, rightX, cy);
+        ui.endFrame();
+        {
+            const layout::Record& r = ui.auditRecord();
+            f32 pillL = -1.0f;
+            for (const auto& e : r.entries) {
+                if (e.kind == layout::Entry::Panel &&
+                    nearEqF(e.w, theme::dp(32.0f), 0.5f) &&
+                    nearEqF(e.h, theme::dp(16.0f), 0.5f)) {
+                    pillL = e.x;
+                }
+                if (e.kind == layout::Entry::Panel &&
+                    nearEqF(e.w, theme::dp(12.0f), 0.5f)) {
+                    knobXOn = e.x;   // o knob (o quad 12×12)
+                }
+            }
+            EXPECT(pillL > 0.0f);
+            EXPECT_MSG(knobXOn > pillL + theme::dp(16.0f),
+                       "D19 ON: o knob não está à DIREITA do trilho "
+                       "(knob %.1f, pílula %.1f)",
+                       (double)knobXOn, (double)pillL);
+        }
+        ui.auditEnd();
+        // OFF: knob à esquerda (a posição muda com o estado — o pin)
+        ui.beginFrame(nullptr, &in, 800.0f, 600.0f);
+        ui.auditBegin("r035-d19-off", 800.0f, 600.0f, 0, 0, 0, 0, 1.0f);
+        editor::drawVisSwitch(ui, false, rightX, cy);
+        ui.endFrame();
+        {
+            const layout::Record& r = ui.auditRecord();
+            for (const auto& e : r.entries) {
+                if (e.kind == layout::Entry::Panel &&
+                    nearEqF(e.w, theme::dp(12.0f), 0.5f)) {
+                    knobXOff = e.x;
+                }
+            }
+            EXPECT_MSG(knobXOff < knobXOn - theme::dp(8.0f),
+                       "D19 OFF: o knob não mudou de lado (on %.1f, off "
+                       "%.1f) — o estado não se lê no toggle",
+                       (double)knobXOn, (double)knobXOff);
+        }
+        ui.auditEnd();
+    }
 }

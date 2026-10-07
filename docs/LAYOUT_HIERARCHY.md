@@ -166,12 +166,51 @@ contentRect (superfície EGL − insets do sistema)
 14. **A marca é o glifo da função única (0.9.6.18 · D6)**: brand::drawIcon
    (G com 4 setas, LOD: ≥32dp completa / <32dp simplificada com traço
    ×1.2) — SEM fundo/tile com letra; o espelho Java é UiIcons.drawBrand.
-15. **A miniatura do projeto sai da captura OFF-thread (0.9.6.18 · D7)**:
-   o frame do save só faz glReadPixels; o encode 256×144 (≤60KB) corre no
-   thread de jobs (o padrão ImportJob); card sem thumb.png desenha o tile
-   de iniciais (paleta fixa de 6) — o ícone da app NUNCA é conteúdo de
-   card. Os empty-states das 4 tabs do drawer são centrados e CLIPADOS ao
-   rect de conteúdo (D3/D9 — o helper partilhado bottom::drawEmptyState).
+15. **A miniatura do projeto sai da captura OFF-thread (0.9.6.18 · D7**;
+     0.9.6.19 · D16: a captura SÓ corre em frame SEM overlay modal — o
+     frame do gesto (menu aberto) cede a vez ao frame limpo seguinte,
+     o arm é o `armThumbCapture` ponto único e o log diz «thumb: captura
+     ok/falhou (<motivo>)»**): o frame do save só faz glReadPixels; o
+     encode 256×144 (≤60KB) corre no thread de jobs (o padrão ImportJob);
+     card sem thumb.png desenha o tile de iniciais (paleta fixa de 6; a
+     leitura Java REPETE — 250/500/1000ms — porque a escrita chega depois
+     do onResume) — o ícone da app NUNCA é conteúdo de card. Os
+     empty-states das 4 tabs do drawer são centrados e CLIPADOS ao rect
+     de conteúdo (D3/D9 — o helper partilhado bottom::drawEmptyState).
+16. **O ORÇAMENTO DA LINHA TRANSFORM TEM O VALOR INTOCÁVEL (0.9.6.19 ·
+     R1)**: a regra do dono — «se a largura aperta, dropa primeiro a
+     letra do eixo, depois o padding, nunca o valor». A fonte única
+     `transformRowBudget` degrada POR DENTRO: (a) letra+valor; (b) sem
+     letra (`axisLabels=false` — o 1.º a ceder); (c) sem o padding da
+     linha (`rowPadDropped` — as margens 16→4dp); (d) a última defesa é
+     a scissor. O espaço do valor (`transformValueSpace`) tem o piso
+     `kTfValueMinDp` 26dp nos 3 campos em 180/220/260dp — o draw e o tap
+     partilham a MESMA fórmula (a fórmula antiga maxVw=boxW−28 deixava os
+     campos SEM valor a 180dp — a mutação M-R1 é caçada pela R-035(10)).
+17. **A CÂMARA É UM OBJETO PEQUENO (0.9.6.19 · D17)**: no passe 3D da
+     viewport, cada câmara desenha GLIFO ~24dp constante em ecrã (o ícone
+     Camera, na pos do Transform3D) + FRUSTUM FINO 1-2px — cinza mudo a
+     ~35% alfa sem seleção, âmbar com seleção — e handles de CANTO 12dp
+     SÓ com seleção (editam o fov; o handle do centro/far morreu — o far
+     edita-se no Inspector). Hit-test: gizmo de mover (que ancora ao
+     glifo) > handles de canto > frustum INTOCÁVEL — as linhas do frustum
+     nunca interceptam toque e a seleção da câmara é pelo GLIFO
+     (`camgizmo::kGlyphDp/kHandleDp/kMutedAlpha` — a FASE 16.1 afere com
+     drag injetado).
+18. **OS MENUS SHEET SÃO CONTIDOS E EM dp (0.9.6.19 · D14)**: o menu de
+     ficheiro abre SEMPRE com offset 0 (o reset vive nos ABRIDORES da
+     top bar/⋯ — o slot do scroll persiste/recicla), o fundo do sheet
+     NUNCA cruza a tab bar (o maxY reserva `kBottomTabH`) e o scroll
+     próprio torna a última linha alcançável INTEIRA. As medidas dos
+     três sheets (ficheiro 280dp, hier 260dp, cenas 280dp; linhas 48dp,
+     cabeçalhos 28dp) são dp REAL — eram px cru (a violação R-018 que
+     desenhava o menu a meia medida com o texto a 2× no device).
+19. **O TOGGLE «visível» MOSTRA O ESTADO (0.9.6.19 · D19)**: a linha
+     VisToggle do Inspector 3D e do editor de UI desenha o SWITCH da casa
+     (`editor::drawVisSwitch` — a fonte única) além do par Eye/EyeOff:
+     trilho-pílula 32×16dp + knob 12dp — ON: trilho âmbar, knob à
+     DIREITA; OFF: trilho border, knob à ESQUERDA. A posição do knob É o
+     estado (pin: estado desenhado nos dois valores).
 
 ## 3. OS PISOS (fontes únicas em ui/SafeArea.h)
 

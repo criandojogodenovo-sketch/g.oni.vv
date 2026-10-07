@@ -1,4 +1,11 @@
-// ui/CamGizmo.cpp — implementação do gizmo da câmara (0.7.7).
+// ui/CamGizmo.cpp — implementação do gizmo da câmara (0.7.7 · D17 0.9.6.19).
+//
+// D17 — A CÂMARA COMO OBJETO PEQUENO: glifo ~24dp constante em ecrã +
+// frustum fino (1-2px) mudo a 35% sem seleção / âmbar com seleção +
+// handles de canto 12dp (só com seleção) + hit-test pelo GLIFO (as linhas
+// do frustum nunca interceptam toque). O gizmo de mover ancora ao glifo
+// (a pos do Transform3D) — o main consulta o gizmo PRIMEIRO (a ordem do
+// dono: gizmo > handles > frustum intocável).
 //
 // Tudo projetado para px de ecrã (a técnica dos gizmos: gizmo::projectPoint
 // + distToSegmentPx) — o hit-test e o desenho partilham a MESMA geometria.
@@ -15,6 +22,7 @@
 #include "core/Scene.h"
 #include "render/Camera.h"
 #include "ui/Gizmo.h"
+#include "ui/Icons.h"
 #include "ui/Theme.h"
 #include "ui/UiContext.h"
 
@@ -23,29 +31,18 @@ namespace camgizmo {
 
 namespace {
 
-// dims do corpo (unidades de MUNDO — a caixa à volta do olho)
-constexpr f32 kBodyHalfW = 0.30f;
-constexpr f32 kBodyHalfH = 0.22f;
-constexpr f32 kBodyHalfD = 0.30f;    // frente/trás ao longo do eixo de visão
-constexpr f32 kBodyBack  = 0.34f;    // quanto do olho para trás
-constexpr f32 kLensDist  = 0.52f;    // plano da lente à frente do olho
-constexpr f32 kLensHalfW = 0.17f;
-constexpr f32 kLensHalfH = 0.12f;
-constexpr f32 kLensHalfD = 0.10f;
-
-// px de ecrã — 0.9.6.1 (PASSO 0): em dp REAL (R-018; no device a 2× os
-// traços/handles eram metade do tamanho visual)
-f32 kLineW()       { return theme::dp(3.0f); }    // traço do wireframe
-f32 kLineWSel()    { return theme::dp(4.0f); }    // câmara selecionada
-f32 kHandlePx()    { return theme::dp(26.0f); }   // quadrado do handle (lado)
-f32 kHandleHitPx() { return theme::dp(30.0f); }   // hit de handles (prioritário)
-
 f32 deg2rad(f32 d) { return d * 0.01745329252f; }
-constexpr f32 kHitPx = 22.0f;   // hit-test de segmentos (em dp no uso)
-f32 rad2deg(f32 r) { return r * 57.29577951f; }
 
 f32 snapStep(f32 v, f32 step) {
     return step > 0.0f ? std::round(v / step) * step : v;
+}
+
+// o cinza mudo (b): o text2 da casa com a alfa da spec (~35%) — construído
+// do TOKEN (nunca hex cru — o gate theme vigia); inicialização única
+const f32* mutedColor() {
+    static const f32 col[4] = {theme::kTheme.text2[0], theme::kTheme.text2[1],
+                               theme::kTheme.text2[2], kMutedAlpha};
+    return col;
 }
 
 // emite uma aresta do mundo (projeta; atrás da câmara → não desenha)
@@ -60,32 +57,6 @@ void edge(UiContext& ui, const Mat4& vp, f32 mw, f32 mh, f32 ox, f32 oy,
         return;
     }
     ui.drawLine(ax, ay, bx, by, w, col);
-}
-
-// caixa (8 cantos: 0..3 frente [+z local], 4..7 trás) → 12 arestas
-void drawBox(UiContext& ui, const Mat4& vp, f32 mw, f32 mh, f32 ox, f32 oy,
-             const Vec3 c[8], f32 w, const f32 col[4]) {
-    for (int i = 0; i < 4; ++i) {
-        edge(ui, vp, mw, mh, ox, oy, c[i], c[(i + 1) % 4], w, col);          // frente
-        edge(ui, vp, mw, mh, ox, oy, c[4 + i], c[4 + (i + 1) % 4], w, col);  // trás
-        edge(ui, vp, mw, mh, ox, oy, c[i], c[4 + i], w, col);                // ligação
-    }
-}
-
-// caixa orientada pela base da câmara, centrada em (center − fwd·cx etc.)
-void boxFromBasis(const Frustum& f, const Vec3& center, f32 hw, f32 hh,
-                  f32 hd, Vec3 out[8]) {
-    // índices: 0..3 = face FRONTAL (+fwd·hd), 4..7 = trás
-    const Vec3 corners[4] = {
-        center + f.fwd * hd + f.right * hw + f.up * hh,
-        center + f.fwd * hd - f.right * hw + f.up * hh,
-        center + f.fwd * hd - f.right * hw - f.up * hh,
-        center + f.fwd * hd + f.right * hw - f.up * hh,
-    };
-    for (int i = 0; i < 4; ++i) {
-        out[i] = corners[i];
-        out[4 + i] = corners[i] - f.fwd * (2.0f * hd);
-    }
 }
 
 } // namespace
@@ -148,14 +119,6 @@ Frustum computeFrustum(const Transform3D& tr, const CameraComp& cam,
     // tamanho do viewport). far curto fica REAL (informativo).
     f.drawFar = cam.farZ < visualFarCap ? cam.farZ : visualFarCap;
 
-    // corpo: caixa atrás do olho (o olho fica NO PLANO frontal da caixa —
-    // como uma máquina fotográfica: o corpo atrás, a lente à frente)
-    boxFromBasis(f, f.pos - f.fwd * (kBodyBack - kBodyHalfD), kBodyHalfW,
-                 kBodyHalfH, kBodyHalfD, f.box);
-    // lente: caixa pequena à frente (o "olho" da câmara)
-    boxFromBasis(f, f.pos + f.fwd * kLensDist, kLensHalfW, kLensHalfH,
-                 kLensHalfD, f.lens);
-
     // retângulos near/far (a MESMA matemática da projeção — aferida;
     // 0.7.10: o far desenha-se ao CAP VISUAL, o near fica real)
     f32 nw = 0.0f, nh = 0.0f, fw2 = 0.0f, fh2 = 0.0f;
@@ -176,47 +139,60 @@ Frustum computeFrustum(const Transform3D& tr, const CameraComp& cam,
     return f;
 }
 
-// ---- desenho ---------------------------------------------------------------------
+// ---- desenho (D17) ----------------------------------------------------------------
 
 void drawFrustum(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
                  const Frustum& f, bool selected, f32 vw, f32 vh, f32 ox,
                  f32 oy) {
-    const f32* col = theme::kTheme.accent;   // cor de gizmo/marca
-    const f32 w = selected ? kLineWSel() : kLineW();
+    // (b) as cores do ESTADO: sem seleção = cinza mudo a ~35%; com seleção
+    // = âmbar (a cor da casa). O traço: FINO — 1px sem seleção, 2px com.
+    const f32* col = selected ? theme::kTheme.accent : mutedColor();
+    const f32 w = selected ? kFrustumLinePxSel : kFrustumLinePx;
     // GRUPO D: o mapeamento da viewport 3D (0,0 = o ecrã todo — o de sempre)
     const f32 mw = (vw > 1.0f && vh > 1.0f) ? vw : sw;
     const f32 mh = (vw > 1.0f && vh > 1.0f) ? vh : sh;
 
-    drawBox(ui, vp, mw, mh, ox, oy, f.box, w, col);    // corpo
-    drawBox(ui, vp, mw, mh, ox, oy, f.lens, w, col);   // lente
+    // (b) o FRUSTUM FINO: near + cone near→far + far — as linhas NUNCA
+    // hit-testam (f); o corpo/lente wireframe da 0.7.7 morreu (o glifo é
+    // o corpo — (a))
     for (int i = 0; i < 4; ++i) {
-        // near + cone near→far + far
         edge(ui, vp, mw, mh, ox, oy, f.nearC[i], f.nearC[(i + 1) % 4], w, col);
         edge(ui, vp, mw, mh, ox, oy, f.farC[i], f.farC[(i + 1) % 4], w, col);
         edge(ui, vp, mw, mh, ox, oy, f.nearC[i], f.farC[i], w, col);
     }
-    // linha de visão central (do corpo ao centro do far)
-    edge(ui, vp, mw, mh, ox, oy, f.pos + f.fwd * (kLensDist + kLensHalfD),
-         f.farCenter, w, col);
 
-    // handles: SÓ na câmara selecionada (4 cantos + centro do far)
+    // (a) o GLIFO ~24dp CONSTANTE EM ECRÃ no olho (o mesmo padrão dos
+    // gizmos da casa — o ícone Camera do vocabulário). A cor segue o
+    // estado (mudo/âmbar) — é o alvo do toque (pickCameraTic) e a âncora
+    // do gizmo de mover (d).
+    {
+        f32 gx = 0.0f, gy = 0.0f;
+        if (gizmo::projectPoint(vp, f.pos, mw, mh, gx, gy, ox, oy)) {
+            const f32 gs = theme::dp(kGlyphDp);
+            icons::drawIcon(ui, icons::Icon::Camera, gx - gs * 0.5f,
+                            gy - gs * 0.5f, gs, col);
+        }
+    }
+
+    // (c) handles: SÓ na câmara selecionada — 4 CANTOS do far, 12dp
+    // (contorno âmbar + preenchimento a 25% — a linguagem D12; NUNCA os
+    // quadrados filled gigantes de 26dp; o handle do CENTRO/far morreu —
+    // o far edita-se no Inspector)
     if (!selected) {
         return;
     }
-    const f32 ink[4] = {theme::kTheme.accentInk[0], theme::kTheme.accentInk[1],
-                        theme::kTheme.accentInk[2], theme::kTheme.accentInk[3]};
-    const f32 hp = kHandlePx();
+    const f32 hp = theme::dp(kHandleDp);
+    const f32 fill[4] = {theme::kTheme.accent[0], theme::kTheme.accent[1],
+                         theme::kTheme.accent[2],
+                         vv::gizmo::kPlaneFillAlpha};
     for (int i = 0; i < 4; ++i) {
         f32 hx = 0.0f, hy = 0.0f;
-        if (gizmo::projectPoint(vp, f.farC[i], mw, mh, hx, hy, ox, oy)) {
-            ui.panel(hx - hp * 0.5f, hy - hp * 0.5f, hp, hp, col);
-            ui.frame(hx - hp * 0.5f, hy - hp * 0.5f, hp, hp, 2.0f, ink);
+        if (!gizmo::projectPoint(vp, f.farC[i], mw, mh, hx, hy, ox, oy)) {
+            continue;
         }
-    }
-    f32 cx = 0.0f, cy = 0.0f;
-    if (gizmo::projectPoint(vp, f.farCenter, mw, mh, cx, cy, ox, oy)) {
-        ui.panel(cx - hp * 0.5f, cy - hp * 0.5f, hp, hp, ink);
-        ui.frame(cx - hp * 0.5f, cy - hp * 0.5f, hp, hp, 2.0f, col);
+        ui.panel(hx - hp * 0.5f, hy - hp * 0.5f, hp, hp, fill);
+        ui.frame(hx - hp * 0.5f, hy - hp * 0.5f, hp, hp, 1.5f,
+                 theme::kTheme.accent);
     }
 }
 
@@ -256,12 +232,14 @@ void drawAll(UiContext& ui, Scene& scene, const Mat4& vp, f32 sw, f32 sh,
     });
 }
 
-// ---- hit-test ----------------------------------------------------------------------
+// ---- hit-test (D17-e/f) -------------------------------------------------------------
 
 int pickHandle(const Mat4& vp, f32 sw, f32 sh, const Frustum& f, f32 px,
                f32 py) {
+    // (c) SÓ os 4 CANTOS (o fov) — o hit é o kHandleHitDp (12dp do quad +
+    // dedo). O hit corre DEPOIS do gizmo no main (a ordem (e) do dono).
     int best = 0;
-    f32 bestD = kHandleHitPx();
+    f32 bestD = theme::dp(kHandleHitDp);
     auto tryHandle = [&](int id, const Vec3& world) {
         f32 hx = 0.0f, hy = 0.0f;
         if (!gizmo::projectPoint(vp, world, sw, sh, hx, hy)) {
@@ -276,48 +254,21 @@ int pickHandle(const Mat4& vp, f32 sw, f32 sh, const Frustum& f, f32 px,
     for (int i = 0; i < 4; ++i) {
         tryHandle(1 + i, f.farC[i]);   // 1..4 = cantos (fov)
     }
-    tryHandle(5, f.farCenter);         // 5 = centro (far)
     return best;
 }
-
-namespace {
-
-// distância do toque à CAIXA projetada (12 arestas) — helper do pickCameraTic
-f32 distToBox(const Mat4& vp, f32 sw, f32 sh, const Vec3 c[8], f32 px,
-              f32 py) {
-    f32 best = 1e9f;
-    for (int i = 0; i < 4; ++i) {
-        f32 a[2] = {0, 0}, b[2] = {0, 0}, c2[2] = {0, 0}, d2[2] = {0, 0};
-        if (!gizmo::projectPoint(vp, c[i], sw, sh, a[0], a[1]) ||
-            !gizmo::projectPoint(vp, c[(i + 1) % 4], sw, sh, b[0], b[1]) ||
-            !gizmo::projectPoint(vp, c[4 + i], sw, sh, c2[0], c2[1]) ||
-            !gizmo::projectPoint(vp, c[4 + (i + 1) % 4], sw, sh, d2[0],
-                                 d2[1])) {
-            return 1e9f;
-        }
-        best = (std::min)(best, gizmo::distToSegmentPx(px, py, a[0], a[1],
-                                                       b[0], b[1]));
-        best = (std::min)(best, gizmo::distToSegmentPx(px, py, c2[0], c2[1],
-                                                       d2[0], d2[1]));
-        f32 e[2] = {0, 0};
-        if (gizmo::projectPoint(vp, c[4 + i], sw, sh, e[0], e[1])) {
-            best = (std::min)(best, gizmo::distToSegmentPx(px, py, a[0], a[1],
-                                                           e[0], e[1]));
-        }
-    }
-    return best;
-}
-
-} // namespace
 
 Handle pickCameraTic(Scene& scene, const Mat4& vp, f32 sw, f32 sh, f32 px,
                      f32 py) {
     if (sw <= 1.0f || sh <= 1.0f) {
         return Handle::invalid();
     }
-    const f32 aspect = sw / sh;
+    // (f) HIT-TEST PELO GLIFO: o toque dentro do raio kGlyphHitDp do olho
+    // projetado seleciona a câmara; as LINHAS do frustum (cone/far/near)
+    // NUNCA interceptam toque (o cone "intocável" do dono — arrastar na
+    // cena move a câmara/orbita, nunca agarra o cone). O MAIS PRÓXIMO
+    // ganha (duas câmaras sobrepostas no ecrã).
     Handle best = Handle::invalid();
-    f32 bestD = theme::dp(kHitPx);   // hit em dp real (o desenho idem)
+    f32 bestD = theme::dp(kGlyphHitDp);
     scene.forEachActive([&](Tic& t) {
         if (!t.visible) {
             return;
@@ -327,14 +278,12 @@ Handle pickCameraTic(Scene& scene, const Mat4& vp, f32 sw, f32 sh, f32 px,
         if (!tr || !cam) {
             return;
         }
-        const Frustum f = computeFrustum(*tr, *cam, aspect);
-        // 0.7.10 — HIT-TEST RESTRITO: SÓ o CORPO + LENTE (a caixa pequena).
-        // O cone/far/linha de visão NÃO selecionam — o C33 tinha o cone a
-        // roubar toques (selecionava a câmara em vez do objeto/orbit). Os
-        // HANDLES continuam a ser apanhados pelo pickHandle (só com a
-        // câmara JÁ selecionada — regra do feedGizmo).
-        f32 d = distToBox(vp, sw, sh, f.box, px, py);
-        d = (std::min)(d, distToBox(vp, sw, sh, f.lens, px, py));
+        f32 gx = 0.0f, gy = 0.0f;
+        if (!gizmo::projectPoint(vp, tr->pos, sw, sh, gx, gy)) {
+            return;
+        }
+        const f32 d = std::sqrt((px - gx) * (px - gx) +
+                                (py - gy) * (py - gy));
         if (d < bestD) {
             bestD = d;
             best = t.handle;
@@ -355,7 +304,7 @@ Handle pickSceneTic(Scene& scene, const Mat4& vp, f32 sw, f32 sh, f32 px,
     // projetado (8 cantos locais pela matriz world) e o toque dentro do
     // rect de ecrã resultante SELECIONA — o 44 px do centro fica como
     // piso para objetos pequenos/longe. Prioridade: o mais PRÓXIMO DA
-    // CÂMERA entre os acertados (antes era o mais próximo do toque).
+    // CÂMARA entre os acertados (antes era o mais próximo do toque).
     Handle best = Handle::invalid();
     f32 bestDepth = 1e30f;
     scene.forEachActive([&](Tic& t) {
@@ -449,26 +398,12 @@ Handle pickSceneTic(Scene& scene, const Mat4& vp, f32 sw, f32 sh, f32 px,
     if (best.valid()) {
         return best;
     }
-    // 2) SÓ DEPOIS a câmara — e só via CORPO/LENTE (pickCameraTic restrito)
+    // 2) SÓ DEPOIS a câmara — e SÓ pelo GLIFO (D17-f: as linhas do frustum
+    // nunca interceptam toque)
     return pickCameraTic(scene, vp, sw, sh, px, py);
 }
 
 // ---- drag ---------------------------------------------------------------------------
-
-f32 dragFar(f32 anchorFar, const Vec3& hit0, const Vec3& hit1,
-            const Vec3& camFwd, bool snap) {
-    f32 far = anchorFar + dot(hit1 - hit0, camFwd);
-    if (snap) {
-        far = snapStep(far, 1.0f);
-    }
-    if (far < CameraComp::kMinFar) {
-        far = CameraComp::kMinFar;
-    }
-    if (far > CameraComp::kMaxFar) {
-        far = CameraComp::kMaxFar;
-    }
-    return far;
-}
 
 f32 dragFov(f32 anchorFovDeg, f32 d0, f32 d1, bool snap) {
     if (d0 < 4.0f) {

@@ -497,9 +497,24 @@ public class ProjectManagerActivity extends Activity {
     }
 
     // ---- MINIATURAS (spec F): thumb.png do projeto → cache em memória ------
+    // 0.9.6.19 (HOTFIX D16): a LEITURA REPETE — o engine escreve o thumb.png
+    // no thread de jobs DEPOIS do finish() (a captura é off-thread por
+    // desenho, D7): o primeiro openInputStream do gestor podia chegar ANTES
+    // da escrita terminar e o card ficava em iniciais ATÉ ao próximo onResume
+    // (a falha nunca se repetia na mesma sessão). Agora: repetições com
+    // espera por card — o thumb que chega tarde é apanhado na mesma sessão;
+    // cada tentativa loga (o dono segue a cura no logcat).
+    private static final long[] THUMB_RETRY_MS = {250, 500, 1000};
+    private final java.util.HashMap<String, Integer> thumbRetries =
+            new java.util.HashMap<>();
+
     private void requestThumb(VvProjects.Entry e) {
-        if (THUMBS.get(e.uri) != null || missingUris.contains(e.uri)) {
+        if (THUMBS.get(e.uri) != null) {
+            thumbRetries.remove(e.uri);   // chegou — o contador morre
             return;
+        }
+        if (missingUris.contains(e.uri)) {
+            return;   // projeto EM FALTA não tem thumb para ler (spec F)
         }
         synchronized (loadingThumbs) {
             if (loadingThumbs.contains(e.uri)) {
@@ -517,7 +532,7 @@ public class ProjectManagerActivity extends Activity {
                     in.close();
                 }
             } catch (Exception ex) {
-                bmp = null;   // sem thumb → fallback de iniciais (não é erro)
+                bmp = null;   // sem thumb (ainda) → fallback/retry (não é erro)
             }
             if (bmp == null) {
                 // 0.9.6.18 (HOTFIX D7): o WARN honesto — o save nunca
@@ -533,7 +548,25 @@ public class ProjectManagerActivity extends Activity {
                 }
                 if (fb != null) {
                     THUMBS.put(e.uri, fb);
+                    thumbRetries.remove(e.uri);
+                    adapter.notifyDataSetChanged();
+                    return;
                 }
+                // 0.9.6.19 (D16): a leitura REPETE — a escrita do engine
+                // (thread de jobs, D7) pode chegar DEPOIS do onResume
+                final int attempt = thumbRetries.containsKey(e.uri)
+                        ? thumbRetries.get(e.uri) : 0;
+                if (attempt < THUMB_RETRY_MS.length) {
+                    thumbRetries.put(e.uri, attempt + 1);
+                    Log.i(TAG, "projetos: thumb de '" + e.name
+                            + "' lê outra vez em " + THUMB_RETRY_MS[attempt]
+                            + "ms (tentativa " + (attempt + 1) + "/"
+                            + THUMB_RETRY_MS.length + ")");
+                    main.postDelayed(() -> requestThumb(e),
+                            THUMB_RETRY_MS[attempt]);
+                    return;   // o card fica com as iniciais nesta passagem
+                }
+                thumbRetries.remove(e.uri);   // esgotou — fica o fallback
                 adapter.notifyDataSetChanged();
             });
         });
@@ -737,8 +770,12 @@ public class ProjectManagerActivity extends Activity {
             this.hue = HUES[Math.abs(name.hashCode()) % HUES.length];
         }
 
-        /** as iniciais: 1ª letra de cada palavra (máx 2); 1 palavra = as
-         *  2 primeiras letras; vazio = "·" (o tile nunca fica mudo) */
+        /** as iniciais (0.9.6.19 · HOTFIX D18): 2+ palavras → a inicial das
+         *  DUAS primeiras; 1 palavra → a PRIMEIRA + a ÚLTIMA letra
+         *  (projetoyygf → "PF", prooksnsn → "PN" — todas saíam "PR" com a
+         *  regra antiga das duas primeiras letras; o pin: projetos com
+         *  prefixo comum distinguem-se por iniciais ou matiz); 1 letra →
+         *  ela própria; vazio → "·" (o tile nunca fica mudo) */
         private String initialsOf(String name) {
             if (name == null || name.trim().isEmpty()) {
                 return "·";
@@ -749,7 +786,11 @@ public class ProjectManagerActivity extends Activity {
                         + words[1].substring(0, 1)).toUpperCase();
             }
             String w = words[0];
-            return w.substring(0, Math.min(2, w.length())).toUpperCase();
+            if (w.length() == 1) {
+                return w.toUpperCase();
+            }
+            return (w.substring(0, 1)
+                    + w.substring(w.length() - 1)).toUpperCase();
         }
 
         @Override

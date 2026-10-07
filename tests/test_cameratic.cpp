@@ -127,9 +127,9 @@ TEST(cameratic_geometria_do_frustum) {
     EXPECT(nearEqF(hw, hh * 2.0f));
 }
 
-// ---- 2. seleção por toque no frustum ---------------------------------------------
+// ---- 2. seleção por toque NO GLIFO (D17-f: as linhas NUNCA apanham) ----
 
-TEST(cameratic_selecao_por_toque_so_corpo_lente) {
+TEST(cameratic_selecao_por_toque_pelo_glifo) {
     CamTic c;
     c.tr->pos = Vec3{0.0f, 0.5f, 0.0f};
     c.cam->farZ = 500.0f;   // GIGANTE — o caso do C33
@@ -138,20 +138,14 @@ TEST(cameratic_selecao_por_toque_so_corpo_lente) {
     const Mat4 vp = editorVp(kSW / kSH);
     const Frustum f = computeFrustum(*c.tr, *c.cam, kSW / kSH);
 
-    // 0.7.10 — HIT-TEST RESTRITO: tap no CORPO (o olho está na face frontal
-    // da caixa) → seleciona
+    // D17-a/f: tap NO GLIFO (o olho projetado, dentro do raio de toque)
+    // → seleciona
     f32 bx = 0.0f, by = 0.0f;
     EXPECT(gizmo::projectPoint(vp, f.pos, kSW, kSH, bx, by));
-    const Handle hit = pickCameraTic(c.scene, vp, kSW, kSH, bx, by);
-    EXPECT(hit == c.h);
+    EXPECT(pickCameraTic(c.scene, vp, kSW, kSH, bx, by) == c.h);
 
-    // tap na LENTE → seleciona
-    f32 lx = 0.0f, ly = 0.0f;
-    EXPECT(gizmo::projectPoint(vp, f.lens[0], kSW, kSH, lx, ly));
-    EXPECT(pickCameraTic(c.scene, vp, kSW, kSH, lx, ly) == c.h);
-
-    // tap no CENTRO do far projetado (fim da linha de visão) → NÃO seleciona
-    // (o cone vazio não rouba toques — o fix do C33)
+    // tap no CENTRO do far projetado → NÃO seleciona (o frustum é
+    // INTOCÁVEL — D17-f; o cone nunca rouba toques)
     f32 fx = 0.0f, fy = 0.0f;
     EXPECT(gizmo::projectPoint(vp, f.farCenter, kSW, kSH, fx, fy));
     EXPECT(!pickCameraTic(c.scene, vp, kSW, kSH, fx, fy).valid());
@@ -228,46 +222,34 @@ TEST(cameratic_gizmo_escalar_altera_fov_ortho) {
     EXPECT(nearEqF(c.cam->fovY, 90.0f));
 }
 
-// ---- 5. handles do far: far/fov + prioridade sobre o gizmo -------------------------
+// ---- 5. handles de CANTO do far: fov + a ordem do dono (D17-c/e) ---------
 
-TEST(cameratic_handles_far_fov_sem_conflito) {
+TEST(cameratic_handles_somente_cantos_fov) {
     CamTic c;
     const Mat4 vp = editorVp(kSW / kSH);
     const Frustum f = computeFrustum(*c.tr, *c.cam, kSW / kSH);
 
-    // pickHandle: canto (fov) e centro (far) — ids certos
+    // D17-c: SÓ os 4 CANTOS respondem — o handle do CENTRO/far MORREU
+    // (o far edita-se no Inspector); o tap no centro é 0
     f32 cx = 0.0f, cy = 0.0f;
     EXPECT(gizmo::projectPoint(vp, f.farCenter, kSW, kSH, cx, cy));
-    EXPECT(pickHandle(vp, kSW, kSH, f, cx, cy) == 5);
+    EXPECT(pickHandle(vp, kSW, kSH, f, cx, cy) == 0);
     f32 kx = 0.0f, ky = 0.0f;
     EXPECT(gizmo::projectPoint(vp, f.farC[1], kSW, kSH, kx, ky));
     EXPECT(pickHandle(vp, kSW, kSH, f, kx, ky) == 2);
     // longe de tudo → 0
     EXPECT(pickHandle(vp, kSW, kSH, f, 80.0f, 640.0f) == 0);
 
-    // PRIORIDADE sobre o eixo do gizmo: o raio do handle (30px) é MAIOR
-    // que o do eixo (22px) — no main o pickHandle corre PRIMEIRO; um toque
-    // a <30px do centro do far é do handle MESMO que um eixo esteja perto
-    // (aferido: no ponto do handle o eixo pode estar a <22px — o handle
-    // ganha porque é consultado antes)
-    const f32 hx = cx + 20.0f;   // dentro do raio do handle
-    EXPECT(pickHandle(vp, kSW, kSH, f, hx, cy) == 5);
-    (void)kx; (void)ky;
+    // D17-e: a ORDEM DO DONO é gizmo > handles — a prioridade vive no
+    // feedGizmo do main (o gizmo corre PRIMEIRO no press edge; o aferir
+    // E2E no device virtual); o raio do handle (16dp) já não esmaga o
+    // raio do eixo: um toque a 20px do CANTO é do handle, um toque a
+    // 20px do CENTRO do far é NINGUÉM (o centro deixou de ser handle)
+    EXPECT(pickHandle(vp, kSW, kSH, f, kx + 14.0f, ky) == 2);
+    EXPECT(pickHandle(vp, kSW, kSH, f, cx + 14.0f, cy) == 0);
+    (void)cx; (void)cy;
 
-    // drag do CENTRO (far): delta projetado no eixo de visão
-    const Vec3 h0{0.0f, 0.0f, 0.0f};
-    const Vec3 h1{0.0f, 0.0f, -40.0f};   // 40 u para a frente (−Z)
-    EXPECT(nearEqF(dragFar(100.0f, h0, h1, f.fwd, false), 140.0f));
-    // snap: passos de 1
-    EXPECT(nearEqF(dragFar(100.0f, h0, Vec3{0, 0, -40.6f}, f.fwd, true),
-                   141.0f));
-    // clamp (arrastar PARA A FRENTE = −Z da câmara: 3000 u → clamp 2000)
-    EXPECT(nearEqF(dragFar(100.0f, h0, Vec3{0, 0, -3000.0f}, f.fwd, false),
-                   CameraComp::kMaxFar));
-    EXPECT(nearEqF(dragFar(1.0f, h0, Vec3{0, 0, 5.0f}, f.fwd, false),
-                   CameraComp::kMinFar));
-
-    // drag do CANTO (fov): fator radial d1/d0
+    // drag do CANTO (fov): fator radial d1/d0 — o ÚNICO drag de handle
     EXPECT(nearEqF(dragFov(60.0f, 100.0f, 150.0f, false), 90.0f));
     EXPECT(nearEqF(dragFov(60.0f, 100.0f, 150.0f, true), 90.0f));   // snap 5°
     EXPECT(nearEqF(dragFov(60.0f, 100.0f, 50.0f, false), 30.0f));
@@ -607,16 +589,107 @@ TEST(cameratic_handles_sentam_no_far_visual) {
     const Mat4 vp = editorVp(kSW / kSH);
     const Frustum f = computeFrustum(*c.tr, *c.cam, kSW / kSH);   // clampado
 
-    // os handles PARTILHAM a geometria do desenho: o CENTRO do handle do
-    // far está no retângulo AO CAP (12 u), não a 2000
-    f32 cx = 0.0f, cy = 0.0f;
-    EXPECT(gizmo::projectPoint(vp, f.farCenter, kSW, kSH, cx, cy));
-    EXPECT(pickHandle(vp, kSW, kSH, f, cx, cy) == 5);
+    // D17: os handles PARTILHAM a geometria do desenho — os CANTOS estão
+    // no retângulo AO CAP (12 u), não a 2000; o CENTRO já não tem handle
+    f32 kx = 0.0f, ky = 0.0f;
+    EXPECT(gizmo::projectPoint(vp, f.farC[0], kSW, kSH, kx, ky));
+    EXPECT(pickHandle(vp, kSW, kSH, f, kx, ky) == 1);
     // o far REAL projetado está longe/fora — NÃO há handle lá
     const Frustum real = computeFrustum(*c.tr, *c.cam, kSW / kSH, 4000.0f);
     f32 rx = 0.0f, ry = 0.0f;
-    if (gizmo::projectPoint(vp, real.farCenter, kSW, kSH, rx, ry)) {
+    if (gizmo::projectPoint(vp, real.farC[0], kSW, kSH, rx, ry)) {
         EXPECT(pickHandle(vp, kSW, kSH, f, rx, ry) == 0);
+    }
+}
+
+// ---- 0.9.6.19 (D17) — OS PINS VISUAIS: mudo a 35% sem seleção, âmbar
+// com seleção, handles ≤12dp SÓ com seleção, glifo sempre presente -------
+TEST(cameratic_d17_objeto_pequeno_estados_e_medidas) {
+    CamTic c;
+    c.tr->updateWorld();
+    UiContext ui;
+    ui.init();
+    InputState in;
+    const Mat4 vp = editorVp(kSW / kSH);
+
+    // SEM seleção: o frustum mudo (alfa ~0.35 no batch) + ZERO handles
+    ui.beginFrame(nullptr, &in, kSW, kSH);
+    drawAll(ui, c.scene, vp, kSW, kSH, Handle{});
+    ui.endFrame();
+    {
+        const auto& vb = ui.solidsForTest();
+        u32 muted = 0, amber = 0;
+        const f32* accent = vv::theme::kTheme.accent;
+        for (u32 i = 0; i + 5 < vb.vertexCount(); i += 6) {
+            const auto& v = vb.vertices()[i];
+            (void)v;
+            const auto& v0 = vb.vertices()[i];
+            if (v0.a > 0.30f && v0.a < 0.40f) {
+                ++muted;   // o cinza mudo ~35%
+            }
+            if (v0.a > 0.95f && v0.r == accent[0] && v0.g == accent[1] &&
+                v0.b == accent[2]) {
+                ++amber;   // âmbar cheio (handle) — não deve existir
+            }
+        }
+        EXPECT(muted > 0u);   // o frustum mudo está presente (pin)
+        EXPECT(amber == 0u);  // ZERO handles sem seleção (pin)
+    }
+
+    // COM seleção: âmbar + os handles de canto ≤12dp
+    ui.beginFrame(nullptr, &in, kSW, kSH);
+    drawAll(ui, c.scene, vp, kSW, kSH, c.h);
+    ui.endFrame();
+    {
+        const auto& vb = ui.solidsForTest();
+        const f32* accent = vv::theme::kTheme.accent;
+        u32 amber = 0;
+        f32 maxHandle = 0.0f;
+        // um canto do far projetado (os handles vivem à volta dele) — o
+        // MESMO frustum que o draw usa (o cap VISUAL de ecrã, não o default)
+        f32 hx = 0.0f, hy = 0.0f;
+        const Frustum f = computeFrustum(
+            *c.tr, *c.cam, kSW / kSH,
+            visualCapForScreen(vp, kSW, kSH, c.tr->pos, c.cam->fovY));
+        ASSERT(gizmo::projectPoint(vp, f.farC[0], kSW, kSH, hx, hy));
+        const f32 tol = theme::dp(13.0f);   // o piso 12dp + a moldura
+        for (u32 i = 0; i + 5 < vb.vertexCount(); i += 6) {
+            // bbox do quad (6 vértices)
+            f32 minX = 1e9f, minY = 1e9f, maxX = -1e9f, maxY = -1e9f;
+            for (u32 k = 0; k < 6; ++k) {
+                const auto& v = vb.vertices()[i + k];
+                if (v.x < minX) minX = v.x;
+                if (v.x > maxX) maxX = v.x;
+                if (v.y < minY) minY = v.y;
+                if (v.y > maxY) maxY = v.y;
+            }
+            const f32* v0c = nullptr;
+            f32 a = vb.vertices()[i].a;
+            (void)v0c;
+            if (a > 0.95f && vb.vertices()[i].r == accent[0] &&
+                vb.vertices()[i].g == accent[1] &&
+                vb.vertices()[i].b == accent[2]) {
+                ++amber;
+            }
+            // quads INTEIROS dentro do raio do canto (os handles); linhas
+            // longas do frustum não cabem no raio — só os handles medem
+            if (maxX - minX <= tol && maxY - minY <= tol &&
+                minX >= hx - theme::dp(9.0f) &&
+                maxX <= hx + theme::dp(9.0f) &&
+                minY >= hy - theme::dp(9.0f) &&
+                maxY <= hy + theme::dp(9.0f)) {
+                const f32 ext = (maxX - minX) > (maxY - minY) ? (maxX - minX)
+                                                              : (maxY - minY);
+                if (ext > maxHandle) {
+                    maxHandle = ext;
+                }
+            }
+        }
+        EXPECT(amber > 0u);   // a seleção é âmbar (pin)
+        EXPECT(maxHandle > theme::dp(11.0f));   // o handle de 12dp existe
+        EXPECT_MSG(maxHandle <= theme::dp(13.0f),
+                   "D17: o handle mediu %.1fpx (limite 12dp+moldura)",
+                   (double)maxHandle);   // NUNCA o quadrado gigante de 26dp
     }
 }
 

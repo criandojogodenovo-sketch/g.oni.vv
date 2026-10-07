@@ -487,24 +487,18 @@ static Handle createTicUndoable(PresetKind kind) {
 gizmo::GizmoState       g_gizmo;
 gizmo::Grab             g_grab;   // 0.7.9: o lock do drag em curso
 
-// 0.7.7 — drag dos HANDLES do frustum da câmara (prioritários sobre o eixo
-// do gizmo quando a câmara está selecionada): 1..4 = canto do far (fovY),
-// 5 = centro do far (far). Âncoras: pose final = âncora + delta.
-// 0.7.9 — GRAB-LOCK também aqui: o raio (base da câmara), a normal do
-// plano e o CENTRO projetado são capturados NO GRAB — a orbit pode mexer
-// com outro dedo que o delta do handle não salta.
+// 0.7.7 — drag dos HANDLES do frustum da câmara: 1..4 = canto do far
+// (fovY). 0.9.6.19 (D17-c): o handle do CENTRO/far MORREU (o far edita-se
+// no Inspector) e os handles correm DEPOIS do gizmo (a ordem do dono:
+// gizmo de mover > handles de canto > frustum intocável). Âncoras: pose
+// final = âncora + delta. 0.7.9 — o CENTRO projetado é capturado NO GRAB
+// — a orbit pode mexer com outro dedo que o delta do handle não salta.
 struct CamHandleDrag {
     bool active = false;
     u32  slot = 0;
-    int  handle = 0;
-    f32  anchorFar = 0.0f;
+    int  handle = 0;          // 1..4 = canto i-1 (o 5/centro morreu no D17)
     f32  anchorFov = 0.0f;
     f32  anchorDist = 0.0f;   // |dedo − olho projetado| no arranque (fov)
-    Vec3 anchorHit{};         // hit raio×plano no arranque (far)
-    // 0.7.9 — o lock geométrico do grab:
-    gizmo::ViewBasis basis;   // base da câmara NO GRAB (o raio é fixo)
-    Vec3 planeN{};            // normal do plano do drag NO GRAB (fwd do frustum)
-    Vec3 planeOrigin{};       // pos da câmara NO ARRANQUE (o plano é fixo)
     f32  anchorOx = 0.0f;     // centro projetado (olho) NO GRAB (fov)
     f32  anchorOy = 0.0f;
 } g_camHandle;
@@ -526,45 +520,32 @@ Vec3 axisDirLocal(gizmo::Axis a) {
 void applyGizmoDrag(const gizmo::Grab& grab, const gizmo::ViewBasis& basis,
                     f32 sw, f32 sh, f32 px, f32 py);
 
-// aplica o drag do handle do frustum (0.7.9: SEMPRE no plano/centro FIXOS
-// do grab — nunca re-ancora na geometria atual)
+// aplica o drag do handle de CANTO do frustum (0.7.9: o centro do raio é
+// o do GRAB — nunca re-ancora na geometria atual). D17: só os cantos
+// (fov); o far edita-se no Inspector.
 void applyCamHandleDrag(const Mat4& vp, const gizmo::ViewBasis& basis,
                         f32 sw, f32 sh, f32 px, f32 py) {
     (void)vp;
     (void)basis;   // o drag usa o LOCK do grab, não a base atual
+    (void)sw;
+    (void)sh;
     Tic* t = g_scene.get(g_editor.selected);
     if (!t) {
         return;
     }
     CameraComp* cc = t->getComponent<CameraComp>();
-    Transform3D* tr = t->getComponent<Transform3D>();
-    if (!cc || !tr) {
+    if (!cc) {
         return;
     }
-    const bool snap = g_gizmoMode.snap;
-    if (g_camHandle.handle == 5) {
-        // CENTRO do far: arrasto projetado no EIXO DE VISÃO da câmara — no
-        // plano FIXO do grab (normal e origem capturadas no arranque)
-        bool ok = false;
-        const Vec3 h1 = gizmo::planeHit(g_camHandle.basis, g_camHandle.planeN,
-                                        g_camHandle.planeOrigin, px, py, sw,
-                                        sh, ok);
-        if (!ok) {
-            return;
-        }
-        cc->farZ = camgizmo::dragFar(g_camHandle.anchorFar,
-                                     g_camHandle.anchorHit, h1,
-                                     g_camHandle.planeN, snap);
-    } else {
-        // CANTO do far: fator radial do dedo em torno do olho projetado —
-        // o CENTRO é o do GRAB (nunca o projetado atual)
-        const f32 d = std::sqrt((px - g_camHandle.anchorOx) *
-                                    (px - g_camHandle.anchorOx) +
-                                (py - g_camHandle.anchorOy) *
-                                    (py - g_camHandle.anchorOy));
-        cc->fovY = camgizmo::dragFov(g_camHandle.anchorFov,
-                                     g_camHandle.anchorDist, d, snap);
-    }
+    // CANTO do far: fator radial do dedo em torno do olho projetado —
+    // o CENTRO é o do GRAB (nunca o projetado atual)
+    const f32 d = std::sqrt((px - g_camHandle.anchorOx) *
+                                (px - g_camHandle.anchorOx) +
+                            (py - g_camHandle.anchorOy) *
+                                (py - g_camHandle.anchorOy));
+    cc->fovY = camgizmo::dragFov(g_camHandle.anchorFov,
+                                 g_camHandle.anchorDist, d,
+                                 g_gizmoMode.snap);
 }
 
 // GRUPO D: o feed do gizmo recebe o RECT da viewport (hierarquia|
@@ -636,13 +617,49 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len,
         // GRUPO D: daqui para dentro é RETO-LOCAL
         const f32 lx = px - view.x;
         const f32 ly = py - view.y;
-        // 0.7.7 — PRIORIDADE ao handle do frustum: com uma CÂMARA
-        // selecionada, um toque perto de um handle do far é DELE (sem
-        // conflitos de drag com o eixo do gizmo)
+        // 0.9.6.19 (D17-e) — A ORDEM DO DONO: GIZMO DE MOVER > HANDLES DE
+        // CANTO > frustum (intocável). O gizmo corre PRIMEIRO no press
+        // edge: com a câmara selecionada, um drag que começa no gizmo (no
+        // glifo) MOVE a câmara — nunca é capturado por um handle.
+        // 0.7.9 — GRAB-LOCK: captura alvo (raio generoso kGrabPx) + raio +
+        // plano FIXO + âncoras — tudo medido NO ARRANQUE
+        const gizmo::Grab grab =
+            gizmo::beginGrab(g_gizmo.mode, vp, origin, len, mw, mh, lx, ly,
+                             static_cast<i32>(slot), basis);
+        if (grab.valid()) {
+            g_grab = grab;
+            g_gizmo.active = grab.target;
+            g_gizmo.hovered = grab.target;
+            g_gizmo.dragSlot = static_cast<i32>(slot);
+            // 0.9.0 — UNDO: captura o BEFORE no ARM (o release empurra a op)
+            g_gizmoBefore = editor::snapTic(g_scene, g_editor.selected);
+            g_gizmoBeforeValid = g_scene.get(g_editor.selected) != nullptr;
+            if (const Tic* tc = g_scene.get(g_editor.selected)) {
+                if (const Transform3D* trc =
+                        tc->getComponent<Transform3D>()) {
+                    g_gizmo.anchorPos = trc->pos;
+                    g_gizmo.anchorRot = trc->rot;
+                    g_gizmo.anchorScale = trc->scale;
+                    // 0.7.7 — o ESCALAR numa câmara escala o FRUSTUM (fov/
+                    // orthoSize), não o transform: âncoras dos parâmetros
+                    if (const CameraComp* ccc =
+                            tc->getComponent<CameraComp>()) {
+                        if (g_gizmo.mode == gizmo::Mode::Scale) {
+                            g_camScaleFov = ccc->fovY;
+                            g_camScaleOrtho = ccc->orthoSize;
+                        }
+                    }
+                }
+            }
+            applyGizmoDrag(g_grab, basis, mw, mh, lx, ly);
+            return 1u << slot;
+        }
+        // 0.7.7 — HANDLES DE CANTO (SÓ depois do gizmo — D17-e): com uma
+        // CÂMARA selecionada, um toque perto de um canto do far é DELE
         Tic* t = g_scene.get(g_editor.selected);
         if (t) {
-            CameraComp* cc = t->getComponent<CameraComp>();
-            Transform3D* tr = t->getComponent<Transform3D>();
+            const CameraComp* cc = t->getComponent<CameraComp>();
+            const Transform3D* tr = t->getComponent<Transform3D>();
             if (cc && tr) {
                 // o ASPECTO do frustum é o do JOGO (o ecrã todo — em Play
                 // a câmara renderiza a superfície); o cap mede no rect
@@ -655,12 +672,7 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len,
                     g_camHandle.active = true;
                     g_camHandle.slot = slot;
                     g_camHandle.handle = h;
-                    g_camHandle.anchorFar = cc->farZ;
                     g_camHandle.anchorFov = cc->fovY;
-                    // 0.7.9 — o LOCK do handle: raio/plano/centro do GRAB
-                    g_camHandle.basis = basis;
-                    g_camHandle.planeN = f.fwd;
-                    g_camHandle.planeOrigin = tr->pos;
                     f32 ox = 0.0f, oy = 0.0f;
                     if (gizmo::projectPoint(vp, tr->pos, mw, mh, ox, oy)) {
                         g_camHandle.anchorOx = ox;
@@ -673,48 +685,11 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len,
                         g_camHandle.anchorOy = ly;
                         g_camHandle.anchorDist = 0.0f;
                     }
-                    bool ok = false;
-                    g_camHandle.anchorHit =
-                        gizmo::planeHit(g_camHandle.basis, g_camHandle.planeN,
-                                        g_camHandle.planeOrigin, lx, ly, mw,
-                                        mh, ok);
                     applyCamHandleDrag(vp, basis, mw, mh, lx, ly);
                     return 1u << slot;
                 }
             }
         }
-        // 0.7.9 — GRAB-LOCK: captura alvo (raio generoso kGrabPx) + raio +
-        // plano FIXO + âncoras — tudo medido NO ARRANQUE
-        const gizmo::Grab grab =
-            gizmo::beginGrab(g_gizmo.mode, vp, origin, len, mw, mh, lx, ly,
-                             static_cast<i32>(slot), basis);
-        if (!grab.valid()) {
-            continue;
-        }
-        g_grab = grab;
-        g_gizmo.active = grab.target;
-        g_gizmo.hovered = grab.target;
-        g_gizmo.dragSlot = static_cast<i32>(slot);
-        // 0.9.0 — UNDO: captura o BEFORE no ARM (o release empurra a op)
-        g_gizmoBefore = editor::snapTic(g_scene, g_editor.selected);
-        g_gizmoBeforeValid = g_scene.get(g_editor.selected) != nullptr;
-        if (t) {
-            if (Transform3D* tr = t->getComponent<Transform3D>()) {
-                g_gizmo.anchorPos = tr->pos;
-                g_gizmo.anchorRot = tr->rot;
-                g_gizmo.anchorScale = tr->scale;
-                // 0.7.7 — o ESCALAR numa câmara escala o FRUSTUM (fov/
-                // orthoSize), não o transform: âncoras dos parâmetros
-                if (CameraComp* cc = t->getComponent<CameraComp>()) {
-                    if (g_gizmo.mode == gizmo::Mode::Scale) {
-                        g_camScaleFov = cc->fovY;
-                        g_camScaleOrtho = cc->orthoSize;
-                    }
-                }
-            }
-        }
-        applyGizmoDrag(g_grab, basis, mw, mh, lx, ly);
-        return 1u << slot;
     }
     // hover (sem press): destaque do alvo sob o dedo (feedback visual —
     // raio FINO, o alvo generoso é só do grab)
@@ -873,7 +848,9 @@ static void thumbJobWorker(ThumbJob& j) {
     const thumb::CropRect c = thumb::crop169(j.rw, j.rh);
     const u32 tw = thumb::targetWidth(c.w);   // o ALVO ~256 (a spec D7)
     if (tw == 0 || c.w == 0) {
-        elog::warn("thumb: crop degenerado (%ux%u) — save ok, sem thumb",
+        // 0.9.6.19 (D16): o formato do dono — ok/falhou COM o motivo
+        elog::warn("thumb: captura falhou (crop degenerado %ux%u) — save "
+                   "ok, fallback de iniciais no card",
                    j.rw, j.rh);
         j.msOff = static_cast<u64>(
             std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -894,8 +871,8 @@ static void thumbJobWorker(ThumbJob& j) {
                          c.w, c.h, tw, th, rgb.data());
     const std::vector<u8> png = thumb::encodePngRgb(rgb.data(), tw, th);
     if (png.empty()) {
-        elog::warn("thumb: encode PNG falhou (%ux%u) — save ok, fallback "
-                   "de iniciais no card",
+        elog::warn("thumb: captura falhou (encode PNG %ux%u) — save ok, "
+                   "fallback de iniciais no card",
                    tw, th);
         j.msOff = static_cast<u64>(
             std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -906,14 +883,14 @@ static void thumbJobWorker(ThumbJob& j) {
     }
     const int hs = g_storage->openWriteStream("thumb.png");
     if (hs <= 0) {
-        elog::warn("thumb: openWriteStream thumb.png falhou — save ok, "
-                   "fallback de iniciais no card");
+        elog::warn("thumb: captura falhou (openWriteStream thumb.png) — "
+                   "save ok, fallback de iniciais no card");
         j.done.store(true);
         return;
     }
     if (!g_storage->writeStreamChunk(hs, png.data(), png.size())) {
-        elog::warn("thumb: escrita falhou (%zu B) — save ok, fallback de "
-                   "iniciais no card",
+        elog::warn("thumb: captura falhou (escrita %zu B) — save ok, "
+                   "fallback de iniciais no card",
                    png.size());
         g_storage->closeWriteStream(hs);
         j.done.store(true);
@@ -937,10 +914,11 @@ static void thumbJobReap() {
             g_thumbJob.worker.join();
         }
         g_thumbJob.active.store(false);
-        // o LOG DO ORÇAMENTO (a spec: ≤~50ms off-thread, PNG ≤~60KB)
+        // o LOG DO ORÇAMENTO (a spec: ≤~50ms off-thread, PNG ≤~60KB) —
+        // 0.9.6.19 (D16): o formato do dono «thumb: captura ok/falhou»
         if (g_thumbJob.ok) {
-            elog::info("thumb: %ux%u PNG (%zu B) — captura OFF-thread "
-                       "%llums (orçamento 50ms)%s",
+            elog::info("thumb: captura ok (%ux%u PNG %zu B, %llums "
+                       "off-thread; orçamento 50ms)%s",
                        g_thumbJob.tw, g_thumbJob.th, g_thumbJob.pngBytes,
                        (unsigned long long)g_thumbJob.msOff,
                        g_thumbJob.pngBytes > 60u * 1024u
@@ -959,6 +937,22 @@ static void thumbJobReap() {
     }
 }
 
+bool g_thumbPending = false;
+// 0.9.6.19 (D16): o frame DO GESTO nunca é capturado — o save pelo menu
+// (Guardar cena/Sair) arma a captura NUM frame em que o sheet do menu
+// (e o backdrop opaco dos modais) está no backbuffer: o thumb saía com o
+// MENU desenhado por cima. O ARM põe 1 frame de CALMO: a captura corre
+// no fim do frame SEGUINTE (o menu já fechou) e SÓ num frame SEM overlay
+// modal (o guard no captureThumbIfPending re-arma).
+u32 g_thumbArmDelay = 0;
+
+// o ÚNICO ponto de armação da captura (todos os saves passam aqui — o
+// harness também: o mesmo caminho do device)
+void armThumbCapture() {
+    g_thumbPending = true;
+    g_thumbArmDelay = 1;
+}
+
 // a variante BLOQUEANTE (só no teardown/reboot da engine — quando o
 // storage vai ser destruído o worker NÃO pode sobreviver a ele)
 static void thumbJobWait() {
@@ -967,10 +961,24 @@ static void thumbJobWait() {
             g_thumbJob.worker.join();
         }
         g_thumbJob.active.store(false);
+        // 0.9.6.19 (D16): o destino do job fica no log (o worker logou o
+        // ok/falhou com o motivo; aqui fica o aceno do teardown)
+        elog::info("thumb: job do teardown colhido (%s)",
+                   g_thumbJob.ok ? "captura ok"
+                                 : "captura falhou — o card usa o fallback "
+                                   "de iniciais");
+    } else if (g_thumbPending) {
+        // a captura armada não chegou a correr (o destroy chegou antes do
+        // primeiro frame limpo) — a honestidade do D16: o card usa as
+        // iniciais e o log diz porquê
+        g_thumbPending = false;
+        elog::warn("thumb: captura falhou (teardown antes do frame limpo — "
+                   "o card usa o fallback de iniciais)");
     }
 }
 
-bool g_thumbPending = false;
+// a captura armada AGUARDA frame limpo (o detalhe do mecanismo vive na
+// declaração de g_thumbPending, acima)
 
 // 0.9.6.5 (GRUPO B · FERRAMENTAS DE VERIFICAÇÃO) — O LAYOUT EXPORTADO:
 // o pedido arma AQUI (Diagnóstico ou harness), o PRÓXIMO frame desenha
@@ -1148,7 +1156,7 @@ void doSwitchScene(u32 idx) {
     // 2) muda a ativa + persiste o manifesto
     g_project.activeScene = idx;
     g_project.saveManifest(*g_storage);
-    g_thumbPending = true;   // 0.9.0: captura da viewport no próximo fim de frame
+    armThumbCapture();   // 0.9.0/0.9.6.19 (D16): o ponto único de armação
     // 0.8.10: a posse dos meshes de prim da cena ANTIGA vai para a cova
     // (deferred free no próximo frame — os draws deste frame ainda contam)
     primMeshesToGrave();
@@ -1282,7 +1290,7 @@ void createSceneNamed(const std::string& name) {
     g_editor.selElement = -1;
     const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
                     g_project.saveManifest(*g_storage);
-    g_thumbPending = true;   // 0.9.0: captura da viewport no próximo fim de frame
+    armThumbCapture();   // 0.9.0/0.9.6.19 (D16): o ponto único de armação
     char msg[64];
     std::snprintf(msg, sizeof(msg), ok ? "cena criada: %s"
                                         : "cena criada (manifesto falhou)",
@@ -4553,8 +4561,21 @@ static void captureThumbIfPending(f32 w, f32 h) {
     if (!g_thumbPending) {
         return;
     }
+    // D16: o frame do gesto (menu aberto) cede a vez ao frame seguinte
+    if (g_thumbArmDelay > 0) {
+        --g_thumbArmDelay;
+        return;
+    }
+    // D16: a captura é da CENA — um frame com overlay modal (menu,
+    // settings, browser, teclado, backdrop opaco) NUNCA é capturado;
+    // espera o primeiro frame limpo (re-arma; se o teardown chegar
+    // antes, o thumbJobWait loga a captura abandonada)
+    if (editor::anyOverlayOpen(g_editor)) {
+        return;
+    }
     g_thumbPending = false;
     if (!g_projectReady || !g_storage) {
+        elog::warn("thumb: captura falhou (sem projeto/storage)");
         return;
     }
     // um job anterior ainda a correr? o NOVO save não o espera: arma de
@@ -4572,7 +4593,10 @@ static void captureThumbIfPending(f32 w, f32 h) {
     const u32 rw = static_cast<u32>(r.w);
     const u32 rh = static_cast<u32>(r.h);
     if (rw < 16 || rh < 16) {
-        return;   // viewport degenerado (transição/lifecycle) — sem thumb
+        // viewport degenerado (transição/lifecycle) — sem thumb
+        elog::warn("thumb: captura falhou (viewport degenerado %ux%u)",
+                   rw, rh);
+        return;
     }
     // o TRABALHO DO FRAME: um glReadPixels (o mesmo ponto seguro de
     // sempre — o frame completo está no backbuffer, ainda não passou ao
@@ -5247,6 +5271,13 @@ void frame() {
             // Menu → dropdown (Settings/Guardar/…/Sair) — a âncora VOLTA à
             // de sempre (a top bar; o ⋯ do viewport arma a dele — PASSO 3)
             g_editor.fileMenu = !g_editor.fileMenu;
+            if (g_editor.fileMenu) {
+                // 0.9.6.19 (D14): abre SEMPRE no topo — o slot do scroll
+                // persiste entre aberturas e o reciclo do beginScroll
+                // pode devolver o offset de OUTRA região (a 1.ª linha
+                // nascia cortada)
+                g_ui.scrollSetOffset(editor::kMenuScrollId, 0.0f);
+            }
             g_editor.menuAx = -1.0f;
             g_editor.menuAy = -1.0f;
             g_editor.plusMenu = false;
@@ -5297,7 +5328,7 @@ void frame() {
                 // o MESMO caminho do "Guardar cena" do menu (assets+manifesto)
                 const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
                                 g_project.saveManifest(*g_storage);
-                g_thumbPending = true;
+                armThumbCapture();   // 0.9.6.19 (D16): o ponto único
                 showToast(ok ? "cena salva" : "falha ao salvar");
             }
             // PASSO 3 (0.9.6.17): os botões DUPLICAR/COLAR saíram da
@@ -5308,6 +5339,11 @@ void frame() {
                 // o ⋯ do viewport abre o menu de ficheiro ANCORADO a ele
                 // (a âncora vai em st.menuAx/menuAy, armada no draw)
                 g_editor.fileMenu = !g_editor.fileMenu;
+                if (g_editor.fileMenu) {
+                    // 0.9.6.19 (D14): abre SEMPRE no topo (o slot do scroll
+                    // persiste/recicla — a 1.ª linha nascia cortada)
+                    g_ui.scrollSetOffset(editor::kMenuScrollId, 0.0f);
+                }
                 g_editor.plusMenu = false;
                 g_editor.settingsMenu = false;
                 g_editor.hierMenu = false;
@@ -5986,7 +6022,7 @@ void frame() {
         } else if (choice == 4 && g_projectReady) {
             const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
                             g_project.saveManifest(*g_storage);
-            g_thumbPending = true;   // 0.9.0: captura no próximo fim de frame
+            armThumbCapture();   // 0.9.0/0.9.6.19 (D16): o ponto único
             // F5.4-hotfix: Salvar materializa os assets que só existem em
             // runtime (cubo procedural → meshes/cube.obj, formato OBJ já
             // definido). Cada tipo de asset fica na SUBPASTA certa — a
@@ -6072,7 +6108,7 @@ void frame() {
             if (g_projectReady && g_storage) {
                 const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
                                 g_project.saveManifest(*g_storage);
-                g_thumbPending = true;   // 0.9.0: captura antes de sair
+                armThumbCapture();   // 0.9.0/0.9.6.19 (D16): o ponto único
                 std::vector<std::string> matWritten;
                 std::string matErr;
                 persistSceneAssets(*g_storage, g_scene, matWritten, matErr);

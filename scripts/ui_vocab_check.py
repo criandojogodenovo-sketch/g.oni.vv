@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""ui_vocab_check.py — GATE DO VOCABULÁRIO DE UI (0.9.6.18 · HOTFIX D5+D10).
+"""ui_vocab_check.py — GATE DO VOCABULÁRIO DE UI (0.9.6.18 · HOTFIX D5+D10
+· 0.9.6.19 · HOTFIX D15: A TABELA DO MENU ENTRA NO GATE).
 
 O dono fechou o princípio: «nenhum controlo é texto cru, nenhum glifo
 clipa, nenhum duplicado sobrevive». Este gate caça no FONTE os
 controlos-de-texto proibidos e o vocabulário estrangeiro à unidade da
-engine (TIC) — o voltar-a-meter é VERMELHO (as mutações M5/M9):
+engine (TIC) — o voltar-a-meter é VERMELHO (as mutações M5/M9/M-D15):
 
   D5 · a 2.ª tab do Inspector morreu (duplicado da hierarquia) — os
        rótulos «Nós»/«Node»/«GameObject»/«Entity» não podem voltar a
@@ -14,6 +15,12 @@ engine (TIC) — o voltar-a-meter é VERMELHO (as mutações M5/M9):
        Eye/EyeOff com o rótulo «visível» ao lado (nunca «visível: sim»);
        o reset da linha Transform é o ícone Reset (nunca o «R» nu);
        «on/off» como string desenhada também é proibido.
+  D15 (0.9.6.19) · O MENU DE FICHEIRO é PT: «Export OBJ»/«Export
+       Downloads» eram EN no meio da tabela — o gate caça os fragmentos
+       EN na tabela do menu (kMenu em EditorUi.cpp). «Snapping» fica SÓ
+       POR DECISÃO EXPLÍCITA (a allowlist TECNICOS_MENU abaixo — termo
+       da ferramenta 3D sem tradução curta consensual; o par
+       ligado/desligado é PT).
 
 A ALLOWLIST (explícita, o dono manda):
   * ui/Icons.cpp e UiIcons.java — a TABELA DE NOMES dos ícones
@@ -34,6 +41,12 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+# D15: os termos técnicos EXPLÍCITOS do menu (cada um com a justificação;
+# tudo o que não estiver AQUI tem de ser PT — o dono manda)
+TECNICOS_MENU = [
+    "Snapping",   # termo da ferramenta 3D (o par «ligado/desligado» é PT)
+]
 
 # (ficheiro, [(padrão literal, motivo)])
 # Os padrões são LITERAIS de string de UI procurados no fonte sem comentários.
@@ -121,11 +134,56 @@ def main() -> int:
               f"padrão (1 no worker do thumb + 1 no export de layout) — a "
               f"captura no hot path do render é a mutação M12")
 
+    # (D15 · 0.9.6.19) A TABELA DO MENU é PT: os fragmentos EN na tabela
+    # kMenu (e nos rótulos dinâmicos) do drawFileMenu são VERMELHOS. A
+    # veredicta corre sobre o fonte SEM comentários; a allowlist é a
+    # TECNICOS_MENU (explícita — «Snapping» entra por decisão do dono).
+    ed = strip_comments(
+        (ROOT / "app/src/main/cpp/ui/EditorUi.cpp").read_text(encoding="utf-8"))
+    m_start = ed.find("int drawFileMenu")
+    m_end = ed.find("int drawHierMenu")
+    if m_start < 0 or m_end <= m_start:
+        bad += 1
+        print("  FALHOU  ui/EditorUi.cpp: a tabela do menu não foi "
+              "encontrada (o gate apodreceu — drawFileMenu/drawHierMenu)")
+    else:
+        menu = ed[m_start:m_end]
+        # a tabela literal: as linhas {"rótulo", ...} entre kMenu[..] = {
+        tbl0 = menu.find("kMenu[kItems] = {")
+        tbl1 = menu.find("};", tbl0)
+        tabela = menu[tbl0:tbl1] if 0 <= tbl0 < tbl1 else ""
+        if not tabela:
+            bad += 1
+            print("  FALHOU  ui/EditorUi.cpp: a tabela kMenu desapareceu "
+                  "do fonte (o gate apodreceu)")
+        # os fragmentos EN crus NA TABELA (o PT é o certo — nada a caçar
+        # além deles; «Exportar OBJ»/«Exportar Downloads» passam)
+        for frag in ('"Export ', '"Export"', '"Save', '"Load', '"Open',
+                     '"Quit', '"File', 'Settings'):  # EN cru na tabela
+            if frag in tabela:
+                bad += 1
+                print(f"  FALHOU  ui/EditorUi.cpp: «{frag}» na tabela do "
+                      f"menu — o menu é PT (D15; a mutação M-D15 volta a "
+                      f"meter o EN)")
+        # os termos técnicos SÓ com entrada EXPLÍCITA na allowlist
+        for termo in ("Snapping", "Snap:"):
+            if termo in menu and termo not in TECNICOS_MENU:
+                bad += 1
+                print(f"  FALHOU  ui/EditorUi.cpp: «{termo}» no menu sem "
+                      f"entrada explícita na allowlist TECNICOS_MENU (D15)")
+        # e o inverso: se «Snapping» sair da tabela mas ficar na allowlist,
+        # a allowlist apodrece (o gate mantém-se honesto nos DOIS sentidos)
+        if "Snapping" in TECNICOS_MENU and "Snapping" not in menu:
+            bad += 1
+            print("  FALHOU  ui/EditorUi.cpp: «Snapping» está na allowlist "
+                  "TECNICOS_MENU mas já não existe no menu — limpa a "
+                  "allowlist (o gate apodreceu)")
+
     if bad:
         print(f"UI-VOCAB CHECK: {bad} violação(ões) — o vocabulário do dono "
               f"voltou ao fonte (ver docs/RELATORIO-0.9.6.18-HOTFIX-12-DEFEITOS.md)")
         return 1
-    print("UI-VOCAB CHECK: OK (D5/D10/D4/D6 — o vocabulário de UI está limpo)")
+    print("UI-VOCAB CHECK: OK (D5/D10/D4/D6/D15 — o vocabulário de UI está limpo)")
     return 0
 
 

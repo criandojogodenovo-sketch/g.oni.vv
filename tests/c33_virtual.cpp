@@ -5069,6 +5069,9 @@ int main() {
         }
 
         // ---- (D7) a CAPTURA: save → thumb.png 256×144 ≤60KB off-thread ----
+        // 0.9.6.19 (D16): o ARM é o armThumbCapture (o ponto único) — a
+        // captura corre no fim do frame SEGUINTE e SÓ num frame limpo (sem
+        // overlay modal); o job colhe-se nos frames seguintes
         passo("15.6 D7: a captura thumb.png no save (off-thread, orçamento)");
         {
             const Handle hT = g_scene.create("tic thumb");
@@ -5081,9 +5084,10 @@ int main() {
                     g_project.saveActiveScene(*g_storage, g_scene) &&
                     g_project.saveManifest(*g_storage);
                 check(okSave, "15.6 D7 o SAVE corre (o save nunca bloqueia pela thumb)");
-                g_thumbPending = true;
+                armThumbCapture();
             }
-            frame();   // o fim do frame lê a viewport e LANÇA o worker
+            frame();   // o frame do gesto (a captura cede a vez — D16)
+            frame();   // o frame limpo: lê a viewport e LANÇA o worker
             for (int i = 0; i < 30 && g_thumbJob.active.load(); ++i) {
                 frame();   // o main colhe o worker (nunca espera no frame)
             }
@@ -5163,6 +5167,546 @@ int main() {
         }
 
         onAppCmd(&app15, APP_CMD_TERM_WINDOW);
+        vvstub::g_stubDensityDpi = 160;
+        theme::setDensity(1.0f);
+        editor::applyDensity();
+        glstub::fb::enabled = false;
+        glstub::fb::resetState();
+    }
+
+    // ======================================================================
+    // FASE 16 — 0.9.6.19 (HOTFIX): R1 + D14/D15/D16/D17/D19 NO DEVICE.
+    // O device-equivalente (1600×720 @2.0) prova: (R1) os valores X/Y/Z
+    // não-vazios nos 3 campos em 180/220/260dp; (D14) o menu abre com
+    // offset 0, contido acima da tab bar, a última linha alcançável;
+    // (D15) «Exportar OBJ» no registo (o EN é caçado pelo gate); (D16) a
+    // captura só corre em frame limpo (o frame do menu nunca é capturado);
+    // (D17) a câmara objeto pequeno E2E — frustum mudo sem seleção, zero
+    // handles, glifo + handles ≤12dp com seleção, gizmo no glifo e UM
+    // DRAG INJETADO fora dos handles que MOVE a câmara; (D19) o toggle
+    // «visível» com o knob nos dois estados.
+    // ======================================================================
+    fase("FASE 16 — 0.9.6.19 HOTFIX: R1+D14..D19 medidos no device virtual");
+    {
+        vvstub::g_stubDensityDpi = 320;   // o device @2.0 (776×336dp)
+        theme::setDensity(2.0f);
+        editor::applyDensity();
+        glstub::fb::resetState();
+        glstub::fb::enabled = true;
+        resetEngineForHarness();
+        auto st16 = std::make_unique<FakeStorage>();
+        FakeStorage* rawSt16 = st16.get();
+        check(Project::createNew(*rawSt16, "c33", g_project), "16 projeto criado");
+        g_storage = std::move(st16);
+        g_projectReady = true;
+        g_resources.setStorage(rawSt16);
+        g_gpu.init(&g_resources);
+        g_texCache = std::make_unique<TextureCache>(*rawSt16);
+        g_pipeline = std::make_unique<TexturePipeline>(g_hwCompressor, *g_texCache);
+        eglstub::g_surfaceW = 1600;
+        eglstub::g_surfaceH = 720;
+        android_app app16;
+        std::memset(&app16, 0, sizeof(app16));
+        app16.contentRect = {0, 48, 1552, 720};   // insets do device
+        onAppCmd(&app16, APP_CMD_INIT_WINDOW);
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+        check(g_ready, "16 boot do device virtual (fb rasteriza)");
+
+        g_editor.hierW = -1.0f;
+        g_editor.inspW = -1.0f;
+        g_editor.inspPinned = false;
+        g_editor.divDragActive = false;
+        g_editor.playMode = false;
+        g_editor.uiMode = false;
+        g_editor.audioMode = false;
+        g_toastT = 0.0f;
+        g_toast[0] = '\0';
+        g_bottom.bottomTab = 0;
+        g_bottom.drawerH = 0.0f;
+        g_gizmo.mode = gizmo::Mode::Move;   // o modo do drag do D17-e
+        frame();
+
+        auto export16 = [&](const char* nome) {
+            g_layoutExportPending = true;
+            frame();
+            std::vector<u8> png, js;
+            const bool okP = rawSt16->readBytes(std::string("layout/") + nome + ".png", png);
+            const bool okJ = rawSt16->readBytes(std::string("layout/") + nome + ".json", js);
+            check(okP && !png.empty(), (std::string("16 o PNG de [") + nome + "] esta no projeto").c_str());
+            return std::make_pair(png, js);
+        };
+        // o vp do editor — o MESMO cálculo do frame (para projetar alvos)
+        auto viewRect16 = [&]() {
+            const bool inspRight =
+                g_editor.showInspector &&
+                !(g_editor.uiMode || editor::inspectorCollapsed(g_editor));
+            return editor::centerRect(
+                1600.0f, 720.0f, g_ui.safeArea(), currentDrawerH(),
+                inspRight, g_editor.hierW, g_editor.inspW,
+                !g_editor.uiMode && editor::inspectorCollapsed(g_editor));
+        };
+        auto editorVp16 = [&]() {
+            const UiRect vr = viewRect16();
+            return Mat4::mul(g_camera.proj(vr.w / vr.h), g_camera.view());
+        };
+        // quads SÓ da viewport (o chrome do viewport desenha a 60% — os
+        // quads FULL-âmbar daí são só gizmo/câmara/handles)
+        auto quads16 = [](const UiRect& vr) {
+            struct Q { f32 x0, y0, x1, y1, a, r, g, b; };
+            std::vector<Q> out;
+            const auto& vb = g_ui.solidsForTest();
+            for (u32 i = 0; i + 5 < vb.vertexCount(); i += 6) {
+                f32 minX = 1e9f, minY = 1e9f, maxX = -1e9f, maxY = -1e9f;
+                for (u32 k = 0; k < 6; ++k) {
+                    const auto& v = vb.vertices()[i + k];
+                    minX = v.x < minX ? v.x : minX;
+                    maxX = v.x > maxX ? v.x : maxX;
+                    minY = v.y < minY ? v.y : minY;
+                    maxY = v.y > maxY ? v.y : maxY;
+                }
+                if (minX >= vr.x && maxX <= vr.x + vr.w &&
+                    minY >= vr.y && maxY <= vr.y + vr.h) {
+                    const auto& v0 = vb.vertices()[i];
+                    out.push_back({minX, minY, maxX, maxY, v0.a, v0.r,
+                                   v0.g, v0.b});
+                }
+            }
+            return out;
+        };
+
+        // ---- (D17) A CÂMARA COMO OBJETO PEQUENO --------------------------
+        passo("16.1 D17: frustum mudo sem seleção; glifo+handles ≤12dp com seleção; drag move");
+        {
+            const Handle hCam = g_scene.create("cam 16");
+            if (Tic* t = g_scene.get(hCam)) {
+                Transform3D* tr = t->addComponent<Transform3D>();
+                tr->pos = Vec3{0.0f, 0.0f, 0.0f};
+                CameraComp* cc = t->addComponent<CameraComp>();
+                cc->fovY = 60.0f;
+                tr->updateWorld();
+            }
+            g_editor.selected = Handle::invalid();   // SEM seleção
+            frame();
+            auto [png0, js0] = export16("editor");
+            fileapi::writeAll("hotfix19-device-camara-sem-selecao.png",
+                              png0.data(), png0.size());
+            const UiRect vr0 = viewRect16();
+            {
+                u32 muted = 0, amber = 0;
+                const f32* accent = theme::kTheme.accent;
+                for (const auto& q : quads16(vr0)) {
+                    if (q.a > 0.30f && q.a < 0.40f) {
+                        ++muted;   // o frustum mudo ~35%
+                    }
+                    if (q.a > 0.95f && q.r == accent[0] && q.g == accent[1] &&
+                        q.b == accent[2]) {
+                        ++amber;   // âmbar cheio — handles/gizmo não há
+                    }
+                }
+                check(muted > 0, "16.1 D17 o frustum MUDO (cinza ~35%) está presente sem seleção");
+                check(amber == 0, "16.1 D17 ZERO quads âmbar cheio na viewport sem seleção (nenhum handle)");
+            }
+            // selecionar PELO GLIFO (o tap no olho projetado — a seleção
+            // nova do D17-f; o frustum em si é intocável)
+            const Mat4 vp16 = editorVp16();
+            f32 ex = 0.0f, ey = 0.0f;
+            check(gizmo::projectPoint(vp16, Vec3{0.0f, 0.0f, 0.0f},
+                                      vr0.w, vr0.h, ex, ey, vr0.x, vr0.y),
+                  "16.1 D17 o olho da câmara projeta na viewport");
+            g_input.injectDown(0, ex, ey);
+            frame();
+            g_input.injectUp(0);
+            frame();
+            check(g_editor.selected == hCam,
+                  "16.1 D17 o tap NO GLIFO seleciona a câmara");
+            // um tap na MEIO do cone (a meio do near→far) NÃO seleciona
+            {
+                Transform3D* tr = g_scene.get(hCam)->getComponent<Transform3D>();
+                const camgizmo::Frustum f = camgizmo::computeFrustum(
+                    *tr, *g_scene.get(hCam)->getComponent<CameraComp>(),
+                    1600.0f / 720.0f,
+                    camgizmo::visualCapForScreen(vp16, vr0.w, vr0.h, tr->pos,
+                                                 60.0f));
+                const Vec3 mid = (f.nearC[0] + f.farC[0]) * 0.5f;
+                f32 mx = 0.0f, my = 0.0f;
+                check(gizmo::projectPoint(vp16, mid, vr0.w, vr0.h, mx, my,
+                                          vr0.x, vr0.y),
+                      "16.1 D17 o meio do cone projeta");
+                g_editor.selected = Handle::invalid();
+                frame();
+                g_input.injectDown(0, mx, my);
+                frame();
+                g_input.injectUp(0);
+                frame();
+                check(g_editor.selected != hCam,
+                      "16.1 D17 o tap NO CONE não seleciona (o frustum é intocável — f)");
+                g_editor.selected = hCam;
+                frame();
+            }
+            // COM seleção: âmbar presente + handles ≤12dp + gizmo no glifo
+            auto [png1, js1] = export16("editor");
+            fileapi::writeAll("hotfix19-device-camara-selecionada.png",
+                              png1.data(), png1.size());
+            const UiRect vr1 = viewRect16();
+            // o vp PÓS-seleção (o inspector abriu — o rect e o aspecto mudam;
+            // o draw projeta com o rect ATUAL — as projeções aqui têm de
+            // usar o MESMO vp)
+            const Mat4 vpSel = editorVp16();
+            {
+                const f32* accent = theme::kTheme.accent;
+                u32 amber = 0;
+                for (const auto& q : quads16(vr1)) {
+                    if (q.a > 0.95f && q.r == accent[0] && q.g == accent[1] &&
+                        q.b == accent[2]) {
+                        ++amber;
+                    }
+                }
+                check(amber > 0, "16.1 D17 com seleção a câmara é ÂMBAR (frustum/glifo/handles)");
+                // os handles ≤12dp nos CANTOS do far (o MESMO frustum do draw)
+                Transform3D* tr = g_scene.get(hCam)->getComponent<Transform3D>();
+                CameraComp* cc = g_scene.get(hCam)->getComponent<CameraComp>();
+                // o ASPECTO do frustum é o da SUPERFÍCIE (o mesmo do
+                // drawAll — o jogo renderiza o ecrã todo); o cap mede no rect
+                const camgizmo::Frustum f = camgizmo::computeFrustum(
+                    *tr, *cc, 1600.0f / 720.0f,
+                    camgizmo::visualCapForScreen(vpSel, vr1.w, vr1.h, tr->pos,
+                                                 cc->fovY));
+                f32 hx = 0.0f, hy = 0.0f;
+                check(gizmo::projectPoint(vpSel, f.farC[0], vr1.w, vr1.h,
+                                          hx, hy, vr1.x, vr1.y),
+                      "16.1 D17 o canto do far projeta");
+                f32 maxHandle = 0.0f;
+                const f32 tol = theme::dp(13.0f);
+                for (const auto& q : quads16(vr1)) {
+                    const f32 exW = q.x1 - q.x0, exH = q.y1 - q.y0;
+                    if (exW <= tol && exH <= tol &&
+                        q.x0 >= hx - theme::dp(9.0f) &&
+                        q.x1 <= hx + theme::dp(9.0f) &&
+                        q.y0 >= hy - theme::dp(9.0f) &&
+                        q.y1 <= hy + theme::dp(9.0f)) {
+                        const f32 ext = exW > exH ? exW : exH;
+                        if (ext > maxHandle) {
+                            maxHandle = ext;
+                        }
+                    }
+                }
+                check(maxHandle > theme::dp(11.0f),
+                      "16.1 D17 o handle de canto 12dp existe no device");
+                check(maxHandle <= theme::dp(13.0f),
+                      "16.1 D17 o handle mede ≤12dp (NUNCA o quadrado de 26dp)");
+                // o GIZMO ancora NO GLIFO: quads âmbar junto ao olho
+                f32 gx = 0.0f, gy = 0.0f;
+                check(gizmo::projectPoint(vpSel, tr->pos, vr1.w, vr1.h,
+                                          gx, gy, vr1.x, vr1.y),
+                      "16.1 D17 o olho projeta (pós-seleção)");
+                u32 noGlifo = 0;
+                for (const auto& q : quads16(vr1)) {
+                    if (q.a > 0.95f &&
+                        q.x0 <= gx + theme::dp(24.0f) &&
+                        q.x1 >= gx - theme::dp(24.0f) &&
+                        q.y0 <= gy + theme::dp(24.0f) &&
+                        q.y1 >= gy - theme::dp(24.0f)) {
+                        ++noGlifo;
+                    }
+                }
+                check(noGlifo > 0,
+                      "16.1 D17 o gizmo ancora NO GLIFO (quads âmbar no olho — d)");
+                // ---- O TESTE DE GESTO INJETADO (o pin do dono): um drag
+                // começado FORA dos handles move a câmara
+                const f32 len = gizmo::gizmoLength(g_camera.dist);
+                f32 ax = 0.0f, ay = 0.0f;
+                check(gizmo::projectPoint(vpSel, Vec3{len, 0.0f, 0.0f},
+                                          vr1.w, vr1.h, ax, ay, vr1.x, vr1.y),
+                      "16.1 D17 a ponta do eixo X projeta");
+                // fora dos handles: a distância a CADA canto do far > 60px
+                bool foraDosHandles = true;
+                for (int i = 0; i < 4; ++i) {
+                    f32 cx = 0.0f, cy = 0.0f;
+                    if (gizmo::projectPoint(vpSel, f.farC[i], vr1.w, vr1.h,
+                                            cx, cy, vr1.x, vr1.y)) {
+                        const f32 d = std::sqrt((ax - cx) * (ax - cx) +
+                                                (ay - cy) * (ay - cy));
+                        if (d < 60.0f) {
+                            foraDosHandles = false;
+                        }
+                    }
+                }
+                check(foraDosHandles,
+                      "16.1 D17 o gesto nasce FORA dos handles (o press do drag)");
+                Transform3D* trD = g_scene.get(hCam)->getComponent<Transform3D>();
+                const Vec3 pos0 = trD->pos;
+                const f32 fov0 = cc->fovY;
+                g_input.injectDown(0, ax, ay);
+                frame();
+                g_input.injectMove(0, ax + 120.0f, ay);
+                frame();
+                g_input.injectMove(0, ax + 240.0f, ay);
+                frame();
+                g_input.injectUp(0);
+                frame();
+                const Vec3 pos1 = trD->pos;
+                check(pos1.x > pos0.x + 0.05f,
+                      "16.1 D17 o drag fora dos handles MOVE a câmara (e)");
+                check(nearEqF(cc->fovY, fov0, 0.01f),
+                      "16.1 D17 o drag no gizmo NÃO mexe o fov (os handles é que o fazem)");
+                // o frustum mudo dos OUTROS estados: zero handles voltou
+            }
+        }
+
+        // ---- (D14+D15) O MENU CONTIDO + AS STRINGS PT --------------------
+        passo("16.2 D14/D15: o menu abre no topo, contido, «Exportar OBJ» no registo");
+        {
+            const editor::toolbar::TopBarLayout tl = editor::toolbar::topbarLayout(
+                1600.0f, 720.0f, g_ui.safeArea(), false, false);
+            // (1.ª abertura) o slot nasce limpo → offset 0
+            g_input.injectDown(0, tl.menu.x + tl.menu.w * 0.5f,
+                               tl.menu.y + tl.menu.h * 0.5f);
+            frame();
+            g_input.injectUp(0);
+            frame();
+            check(g_editor.fileMenu,
+                  "16.2 D14 o menu abriu pelo botão [Menu] da top bar");
+            check(g_ui.scrollOffsetForTest(editor::kMenuScrollId) == 0.0f,
+                  "16.2 D14 o menu abre com offset 0 (a 1.ª linha inteira — o pin)");
+            // (reabertura — o CENÁRIO DO DONO) fecha, suja o offset do slot
+            // (agora existente) e reabre: o reset tem de repor a 0 (o slot
+            // do scroll persiste/recicla — a 1.ª linha nascia cortada)
+            g_input.injectDown(0, 1300.0f, 400.0f);
+            frame();
+            g_input.injectUp(0);
+            frame();
+            check(!g_editor.fileMenu, "16.2 D14 o menu fechou (1.ª vez)");
+            g_ui.scrollSetOffset(editor::kMenuScrollId, 333.0f);
+            g_input.injectDown(0, tl.menu.x + tl.menu.w * 0.5f,
+                               tl.menu.y + tl.menu.h * 0.5f);
+            frame();
+            g_input.injectUp(0);
+            frame();
+            check(g_editor.fileMenu, "16.2 D14 o menu reabriu (2.ª vez)");
+            check(g_ui.scrollOffsetForTest(editor::kMenuScrollId) == 0.0f,
+                  "16.2 D14 a REABERTURA repõe o offset 0 (o slot sujo a 333 "
+                  "não sobrevive — a 1.ª linha nunca nasce cortada)");
+            auto [pngM, jsM] = export16("menu_ficheiro");
+            fileapi::writeAll("hotfix19-device-menu-aberto.png", pngM.data(), pngM.size());
+            const layout::Record& rm = g_ui.auditRecord();
+            const UiRect tab = safe::bottomTabRect(1600.0f, 720.0f,
+                                                   g_ui.safeArea());
+            f32 sheetY1 = 0.0f, sheetY0 = 0.0f;
+            bool sheet = false;
+            for (const auto& e : rm.entries) {
+                if (e.kind == layout::Entry::Panel &&
+                    nearEqF(e.w, theme::dp(280.0f), 2.0f) &&
+                    e.h > theme::dp(48.0f)) {
+                    sheet = true;
+                    sheetY0 = e.y;
+                    sheetY1 = e.y + e.h;
+                }
+            }
+            check(sheet, "16.2 D14 o sheet de 280dp está no registo");
+            check(sheetY1 <= tab.y + 0.5f,
+                  "16.2 D14 o fundo do sheet NUNCA cruza a tab bar "
+                  "(o «Documentação V. …» cortado morreu)");
+            // a ÚLTIMA linha alcançável: salta ao fundo (o clamp do
+            // beginScroll) e o rótulo sai INTEIRO dentro do sheet
+            g_ui.scrollSetOffset(editor::kMenuScrollId, 99999.0f);
+            g_layoutExportPending = true;
+            frame();
+            {
+                const layout::Record& rb = g_ui.auditRecord();
+                const f32 wDoc = g_ui.fontWidth("Documentação V.ONI");
+                bool docInteira = false;
+                for (const auto& e : rb.entries) {
+                    if (e.kind == layout::Entry::Label &&
+                        std::fabs(e.fullW - wDoc) < theme::dp(4.0f) &&
+                        e.y >= sheetY0 - 1.0f && e.y + e.h <= sheetY1 + 1.0f) {
+                        docInteira = true;   // a última linha, inteira
+                    }
+                }
+                check(docInteira,
+                      "16.2 D14 a última linha («Documentação V.ONI») chega "
+                      "INTEIRA pelo scroll próprio (todas alcançáveis)");
+            }
+            // (D15) «Exportar OBJ» desenhado; o EN «Export OBJ» nunca
+            g_ui.scrollSetOffset(editor::kMenuScrollId, 0.0f);
+            g_layoutExportPending = true;
+            frame();
+            {
+                const layout::Record& rp = g_ui.auditRecord();
+                const f32 wOk = g_ui.fontWidth("Exportar OBJ");
+                const f32 wEn = g_ui.fontWidth("Export OBJ");
+                bool temPT = false, temEN = false;
+                for (const auto& e : rp.entries) {
+                    if (e.kind != layout::Entry::Label) {
+                        continue;
+                    }
+                    if (std::fabs(e.fullW - wOk) < theme::dp(4.0f)) {
+                        temPT = true;
+                    }
+                    if (std::fabs(e.fullW - wEn) < theme::dp(4.0f)) {
+                        temEN = true;
+                    }
+                }
+                check(temPT, "16.3 D15 «Exportar OBJ» está no menu (o registo prova o PT)");
+                check(!temEN, "16.3 D15 «Export OBJ» NÃO desenha (o EN morreu — o gate caça a tabela)");
+            }
+            // fecha com o toque fora
+            g_input.injectDown(0, 1300.0f, 400.0f);
+            frame();
+            g_input.injectUp(0);
+            frame();
+            check(!g_editor.fileMenu, "16.2 D14 o menu fecha com o toque fora");
+        }
+
+        // ---- (R1) OS VALORES DO TRANSFORM INTOCÁVEIS ---------------------
+        passo("16.4 R1: valores X/Y/Z não-vazios nos 3 campos em 180/220/260dp");
+        {
+            const Handle hT = g_scene.create("tic r1");
+            if (Tic* t = g_scene.get(hT)) {
+                Transform3D* tr = t->addComponent<Transform3D>();
+                tr->pos = Vec3{1.5f, -2.0f, 3.0f};
+                tr->updateWorld();
+            }
+            g_editor.selected = hT;
+            for (int iw : {180, 220, 260}) {
+                g_editor.inspW = static_cast<f32>(iw);
+                g_layoutAuditPending = true;   // o registo liga NESTE frame
+                frame();
+                const layout::Record& rr = g_ui.auditRecord();
+                // os 9 valores (3 linhas × 3 campos): rótulos não-vazios
+                // na faixa das caixas do painel (a fórmula antiga deixava
+                // os campos SEM texto — a mutação M-R1 é apanhada aqui)
+                const f32 inspX = g_ui.contentWidthPx() -
+                                  safe::resolvePanels(
+                                      g_ui.contentWidthPx(), -1,
+                                      g_editor.inspW).insp;
+                u32 valores = 0;
+                for (const auto& e : rr.entries) {
+                    if (e.kind == layout::Entry::Label && e.x >= inspX &&
+                        e.fullW > 0.5f) {
+                        ++valores;
+                    }
+                }
+                char msg[128];
+                std::snprintf(msg, sizeof(msg),
+                              "16.4 R1 a %ddp o painel desenha rótulos não-"
+                              "vazios (%u)", iw, valores);
+                check(valores >= 12, msg);   // 3 títulos + 9 valores + nome/visível
+                // o orçamento puro no device: o espaço do valor ≥ o piso
+                const editor::TransformBudget tb =
+                    editor::transformRowBudget(iw - 32.0f);   // 2×kPad 16dp
+                check(editor::transformValueSpace(tb) >=
+                          editor::kTfValueMinDp - 0.01f,
+                      "16.4 R1 o espaço do valor cumpre o piso (o valor é intocável)");
+            }
+            g_editor.inspW = -1.0f;
+            g_editor.selected = Handle::invalid();
+        }
+
+        // ---- (D16) A CAPTURA SÓ EM FRAME LIMPO ---------------------------
+        passo("16.5 D16: o frame do menu nunca é capturado; o limpo seguinte sim");
+        {
+            g_editor.selected = Handle::invalid();
+            frame();
+            // abre o menu (overlay modal) e arma a captura
+            const editor::toolbar::TopBarLayout tl = editor::toolbar::topbarLayout(
+                1600.0f, 720.0f, g_ui.safeArea(), false, false);
+            g_input.injectDown(0, tl.menu.x + tl.menu.w * 0.5f,
+                               tl.menu.y + tl.menu.h * 0.5f);
+            frame();
+            g_input.injectUp(0);
+            frame();
+            check(g_editor.fileMenu, "16.5 D16 o menu está aberto");
+            armThumbCapture();
+            frame();   // o frame DO MENU: a captura NÃO corre
+            check(!g_thumbJob.active.load(),
+                  "16.5 D16 o frame com overlay modal NÃO é capturado (o guard)");
+            check(g_thumbPending,
+                  "16.5 D16 a captura fica armada (espera o frame limpo)");
+            // fecha o menu → o próximo frame limpo captura
+            g_input.injectDown(0, 1300.0f, 400.0f);
+            frame();
+            g_input.injectUp(0);
+            frame();
+            check(!g_editor.fileMenu, "16.5 D16 o menu fechou");
+            frame();   // o frame limpo: lê a viewport e lança o worker
+            for (int i = 0; i < 30 && g_thumbJob.active.load(); ++i) {
+                frame();
+            }
+            check(g_thumbJob.ok,
+                  "16.5 D16 a captura correu no PRIMEIRO frame limpo (thumb.png escrito)");
+        }
+
+        // ---- (D19) O TOGGLE «visível» COM ESTADO -------------------------
+        passo("16.6 D19: o knob do «visível» nos dois estados no device");
+        {
+            const Handle hV = g_scene.create("tic d19");
+            if (Tic* t = g_scene.get(hV)) {
+                t->addComponent<Transform3D>();
+            }
+            g_editor.selected = hV;
+            auto knobX = [&]() -> f32 {
+                g_layoutAuditPending = true;   // o registo liga NESTE frame
+                frame();
+                const layout::Record& r = g_ui.auditRecord();
+                const f32 inspX = g_ui.contentWidthPx() -
+                                  safe::resolvePanels(
+                                      g_ui.contentWidthPx(), -1,
+                                      g_editor.inspW).insp;
+                for (const auto& e : r.entries) {
+                    if (e.kind == layout::Entry::Panel &&
+                        e.x >= inspX &&
+                        nearEqF(e.w, theme::dp(32.0f), 1.0f) &&
+                        nearEqF(e.h, theme::dp(16.0f), 1.0f)) {
+                        // o knob é o quad 12dp DENTRO da pílula
+                        for (const auto& k : r.entries) {
+                            if (k.kind == layout::Entry::Panel &&
+                                k.x >= e.x && k.x + k.w <= e.x + e.w &&
+                                k.y >= e.y && k.y + k.h <= e.y + e.h &&
+                                nearEqF(k.w, theme::dp(12.0f), 1.0f)) {
+                                return k.x;
+                            }
+                        }
+                    }
+                }
+                return -1.0f;
+            };
+            const f32 xOn = knobX();    // TIC visível (default) → knob à direita
+            if (Tic* t = g_scene.get(hV)) {
+                t->visible = false;
+            }
+            const f32 xOff = knobX();   // invisível → knob à esquerda
+            check(xOn > 0.0f && xOff > 0.0f,
+                  "16.6 D19 o switch da linha «visível» desenha no device");
+            check(xOff < xOn - theme::dp(8.0f),
+                  "16.6 D19 o knob muda de LADO com o estado (o pin: estado nos dois valores)");
+            g_editor.selected = Handle::invalid();
+        }
+
+        // ---- o validador inteiro ao device (o hotfix não abre exceções) --
+        {
+            frame();
+            const layout::Record& rZ = g_ui.auditRecord();
+            const auto probsZ = layout::validate(rZ);
+            char vmsg[256];
+            std::snprintf(vmsg, sizeof(vmsg),
+                          "16.7 o editor do hotfix 0.9.6.19 passa o VALIDADOR "
+                          "INTEIRO (0/0)%s",
+                          probsZ.empty() ? "" : " — ver o log acima");
+            for (const auto& pr : probsZ) {
+                // as entradas envolvidas apontam ao registo (ia/ib)
+                const layout::Entry& ea = rZ.entries[pr.ia];
+                std::printf("    [validador] %s: %s na entrada %u (kind=%s x=%.0f y=%.0f w=%.0f h=%.0f)\n",
+                            pr.sevName(), pr.ruleName(), pr.ia,
+                            ea.kindName(), ea.x, ea.y, ea.w, ea.h);
+            }
+            check(probsZ.empty(), vmsg);
+        }
+
+        onAppCmd(&app16, APP_CMD_TERM_WINDOW);
         vvstub::g_stubDensityDpi = 160;
         theme::setDensity(1.0f);
         editor::applyDensity();

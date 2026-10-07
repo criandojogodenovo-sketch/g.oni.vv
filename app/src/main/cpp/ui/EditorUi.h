@@ -318,12 +318,53 @@ safe::PanelBudget resolveEditorPanels(const EditorState& st, f32 contentWdp);
 //   2. encolhe: caixas (útil−24−40)/3 com PISO 48 — o chip fica
 //   3. abaixo do piso 48: reset ÍCONE inline 20 — caixas (útil−24−20)/3
 //      com PISO 40 (no painel 180dp dá 40 exato)
+//
+// 0.9.6.19 (HOTFIX R1 — A REGRA DO ORÇAMENTO DO DONO): «o valor é
+// intocável — se a largura aperta, dropa primeiro a letra do eixo, depois
+// o padding, nunca o valor.» A caixa degrada POR DENTRO nesta ordem:
+//   a. letra do eixo + valor (a caixa tem espaço para os DOIS);
+//   b. SEM letra (axisLabels=false) — o valor fica com a caixa inteira;
+//   c. SEM o padding da LINHA (rowPadDropped) — as caixas usam a largura
+//      toda do painel (as margens de 16dp cedem antes do valor);
+//   d. a ÚLTIMA defesa (a scissor do painel): encolher a caixa — o valor
+//      continua a ter o piso kTfValueMin sempre que a casa o permite.
+// O pin do dono: TIC com transform mostra valor NÃO-VAZIO nos 3 campos em
+// 180/220/260dp (a mutação M-R1 devolve a fórmula antiga maxVw = boxW−28 —
+// a 180dp dava 9.3dp: nem a reticência cabia → campos SEM valor).
 struct TransformBudget {
     f32  boxW = 64.0f;      // a caixa X/Y/Z (dp)
     f32  resetW = 40.0f;    // o alvo do reset (40 chip · 20 ícone inline)
     bool resetIcon = false; // true = reset ÍCONE inline após o Z
+    // ---- 0.9.6.19 (R1): a degradação POR DENTRO da caixa ----------------
+    bool axisLabels = true; // false = o clamp dropou a letra X/Y/Z (o valor manda)
+    bool rowPadDropped = false; // false = o padding da LINHA cedeu antes do valor
 };
 TransformBudget transformRowBudget(f32 usableWdp);
+
+// R1 — o espaço que o VALOR tem dentro da caixa (dp; a FONTE ÚNICA do draw
+// e do teste do pin «valor não-vazio»). A letra do eixo só ocupa espaço
+// quando axisLabels; o padding interno (6dp de cada lado) é fixo.
+inline f32 transformValueSpace(const TransformBudget& b) {
+    constexpr f32 kTfBoxPad = 6.0f;   // o respiro interno da caixa (cada lado)
+    constexpr f32 kTfAxisW  = 14.0f;  // a letra do eixo + vão (o 1.º a ceder)
+    return b.boxW - 2.0f * kTfBoxPad - (b.axisLabels ? kTfAxisW : 0.0f);
+}
+// R1 — o PISO do valor (intocável): abaixo disto a letra/padding cede. 26dp
+// lê «-12»/«45»/«1.2e» (os valores da casa são %.2g — curtos) sem encostar
+// ao piso 40 da caixa.
+inline constexpr f32 kTfValueMinDp = 26.0f;
+
+// ---- 0.9.6.19 (HOTFIX D19) — O SWITCH DA CASA (o estado VISÍVEL) ----------
+// A linha «visível» mostrava o par Eye/EyeOff + rótulo mas NÃO O ESTADO —
+// o dono: «o toggle da casa tem de mostrar a posição (knob on/off) além do
+// ícone». O desenho é ÚNICO (o Inspector 3D e o editor de UI partilham):
+// trilho-pílula 32×16dp + knob 12dp — ON: trilho âmbar, knob à DIREITA;
+// OFF: trilho border, knob à ESQUERDA. Desenha alinhado à direita da linha
+// (rightX = a borda direita útil; cy = o centro vertical da linha).
+inline constexpr f32 kVisSwitchW  = 32.0f;
+inline constexpr f32 kVisSwitchH  = 16.0f;
+inline constexpr f32 kVisKnobDp   = 12.0f;
+void drawVisSwitch(UiContext& ui, bool on, f32 rightX, f32 cy);
 
 // PASSO 2 (0.9.6.15 — spec do dono): SEM seleção o INSPECTOR colapsa ao
 // trilho de 32dp (safe::kInspTrackW) — a área junta-se ao viewport e volta

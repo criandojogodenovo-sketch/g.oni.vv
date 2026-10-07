@@ -882,6 +882,9 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
             // era controlo-de-texto cru — o ESTADO vive no ícone da casa
             // (Eye/EyeOff) com o rótulo ao lado; o alvo continua a LINHA
             // (o walk re-despacha por coordenadas de linha)
+            // 0.9.6.19 (HOTFIX D19): o SWITCH da casa (drawVisSwitch — a
+            // MESMA fonte única do Inspector 3D) desenha o knob on/off
+            // à direita (a posição É o estado, nos DOIS valores)
             const bool heldV = ui.widgetActive(r.id);
             if (heldV) {
                 ui.panel(x + kPad, ry, w - 2.0f * kPad, r.h,
@@ -900,6 +903,9 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                                "visível", theme::kTheme.text1,
                                w - 2.0f * kPad - theme::dp(56.0f));
             }
+            // o ESTADO (D19): o knob na posição — on/off lêem-se de longe
+            editor::drawVisSwitch(ui, e.visible, x + w - kPad,
+                                  ry + r.h * 0.5f);
             ui.widgetHit(r.id, x + kPad, ry, w - 2.0f * kPad, r.h - 4.0f);
             break;
         }

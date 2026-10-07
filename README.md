@@ -34,6 +34,44 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.9.6.19 — HOTFIX: OS ABERTOS DO RE-SIGN-OFF + A CÂMARA GIGANTE
+
+- **R1** o valor do Transform é INTOCÁVEL no orçamento: a letra do eixo
+  sai primeiro, depois o padding, nunca o valor (o piso 26dp nos 3
+  campos em 180/220/260dp — a 180dp os campos mostram o valor SEM a
+  letra).
+- **D17** a câmara é um OBJETO PEQUENO: glifo 24dp constante em ecrã +
+  frustum fino 1-2px (cinza mudo 35% sem seleção / âmbar com seleção) +
+  handles de canto 12dp SÓ com seleção (o do centro/far morreu) + a
+  ordem do dono no hit-test (gizmo > handles > frustum INTOCÁVEL) — o
+  drag na cena move a câmara pelo gizmo no glifo (provado com gesto
+  injetado no device virtual, FASE 16.1).
+- **D14** o menu é CONTIDO: abre com offset 0 (mesmo reabrindo com o
+  slot sujo), nunca cruza a tab bar, a última linha alcançável inteira;
+  CAUSA-RAIZ: os sheets eram px cru (o menu a meia medida com o texto
+  2× no device) — os três menus estão em dp real.
+- **D15** o menu inteiro é PT («Exportar OBJ», «Exportar Downloads») e
+  a tabela do menu entrou no gate ui_vocab (a allowlist técnica
+  explícita: «Snapping» fica por decisão do dono).
+- **D16** a captura: o pipeline já corria; as causas do card com
+  iniciais eram o frame do menu capturado (o guard de frame limpo cura)
+  e a leitura Java que não repetia (retry 250/500/1000ms cura); o log
+  do dono «thumb: captura ok/falhou (<motivo>)» existe nos 5 motivos.
+- **D18** as iniciais: 1 palavra = primeira + ÚLTIMA letra
+  (projetoyygf→PF, prooksnsn→PN — todas «PR» morreu); o gate apanha o
+  regresso.
+- **D19** o toggle «visível» mostra o ESTADO: o switch da casa (pílula
+  32×16 + knob 12) desenha on/off nos DOIS inspetores (fonte única
+  `drawVisSwitch`).
+- Testes: R-035 estendida ((10) R1, (11) D19); test_cameratic
+  recalibrado ao D17 + o teste novo dos estados/medidas; FASE 16 NOVA
+  no device virtual (D17 E2E com gesto injetado, D14/D15, R1, D16, D19)
+  — **572 checks, 0 falhas**; test_core 0 falhas. Mutações
+  vermelho→verde por item (8, coladas no relatório §8). Contrato P-08:
+  regras §2.16–§2.19 no MESMO commit. Relatório:
+  `docs/RELATORIO-0.9.6.19-HOTFIX-ABERTOS-DO-RESIGN.md` · versionCode
+  51 · PASSO 4 segue BLOQUEADO (re-sign-off do dono, 7 itens).
+
 ## 0.9.6.18b — O CI VERDE (o fix do APK: InitialsThumbView compila)
 
 - O APK release do 0.9.6.18 falhou a compilar (o Java só compila no CI —
