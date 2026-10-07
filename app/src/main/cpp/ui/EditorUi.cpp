@@ -22,6 +22,7 @@
 #include "ui/Strings.h"                  // 0.9.6.18 (D4): a tabela localizada
 #include "platform/BuildInfo.h"          // 0.8.12: badge ANTIGO dos dumps no viewer
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace vv {
@@ -139,7 +140,7 @@ bool sliderRow(UiContext& ui, u64 id, f32 x, f32 w, f32 rowTop, f32 rowH,
     const bool changed = ui.slider(id, trackX, rowTop, trackW, rowH, minV, maxV, value);
 
     char val[24];
-    std::snprintf(val, sizeof(val), fmt, value);
+    formatNum(val, sizeof(val), fmt, value);   // 0.9.6.19b (m2): -0 → 0
     if (ui.hasFont()) {
         const f32 tw = ui.fontWidth(val);
         ui.label(x + w - kPad - tw, baseline, val,
@@ -186,8 +187,13 @@ TransformBudget transformRowBudget(f32 usableWdp) {
     }
     // ---- 0.9.6.19 (R1): A ORDEM DO DONO — letra → padding → NUNCA valor --
     // (a) o valor intocável: se a caixa com a letra não dá o piso
-    //     kTfValueMinDp ao valor, a LETRA do eixo cede (o 1.º a dropar);
-    if (transformValueSpace(b) < kTfValueMinDp) {
+    //     kTfValueMinDp ao valor, a LETRA do eixo cede (o 1.º a dropar).
+    // 0.9.6.19b (m3 · A LIMIAR DO DONO): a letra SÓ sai abaixo de ~200dp de
+    //     painel (168 úteis na convenção do draw — kTfAxisMinUsableDp).
+    //     Entre 200 e 260dp letra e valor COEXISTEM: o passo salta direto
+    //     ao (b) — o PADDING da linha cede antes, e o valor nunca sai.
+    if (transformValueSpace(b) < kTfValueMinDp &&
+        usableWdp < kTfAxisMinUsableDp) {
         b.axisLabels = false;
     }
     // (b) ainda sem o piso? o PADDING DA LINHA cede: as caixas usam a
@@ -215,6 +221,38 @@ TransformBudget transformRowBudget(f32 usableWdp) {
     return b;
 }
 
+
+// ---------------------------------------------------------------------------
+// 0.9.6.19b (m2) — O FORMAT ÚNICO DOS NÚMEROS DO INSPECTOR: snprintf + a
+// normalização do zero negativo («-0» → «0» — qualquer formato que o produza:
+// %.2g de -0.0, %.1f de -0.04, %.0f de -0.4). Usada por TODOS os campos
+// (caixas X/Y/Z + sliders do Inspector 3D + sliders do editor de UI).
+// ---------------------------------------------------------------------------
+void formatNum(char* buf, size_t cap, const char* fmt, f32 v) {
+    std::snprintf(buf, cap, fmt, v);
+    if (buf[0] == '-' && std::strtof(buf, nullptr) == 0.0f) {
+        // zero negativo: o '-' sai (o valor lê-se como o zero que é)
+        std::memmove(buf, buf + 1, std::strlen(buf + 1) + 1);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 0.9.6.19b (m1) — O SLOT DO CHIP «N x» no cabeçalho da hierarquia (a fonte
+// única do draw e do teste): o chip fica ANTES do ⋮ (8dp) e DEPOIS do título
+// (8dp); sem espaço para os DOIS vãos, não desenha (a degradação honesta).
+// ---------------------------------------------------------------------------
+HierChipSlot hierChipSlot(f32 panelWpx, f32 titleEndPx, f32 chipWpx) {
+    const f32 pad = theme::dp(16.0f);
+    const f32 btn = theme::dp(28.0f);   // kHeaderH — o alvo do + e do ⋮
+    const f32 gap = theme::dp(8.0f);
+    // a borda direita do chip: 8dp antes do ⋮ (o ⋮ ocupa btn, o + ocupa btn)
+    const f32 maxX = panelWpx - pad - 2.0f * btn - gap - chipWpx;
+    const f32 minX = titleEndPx + gap;
+    HierChipSlot s;
+    s.fits = maxX >= minX;
+    s.x = s.fits ? maxX : 0.0f;
+    return s;
+}
 
 // ---------------------------------------------------------------------------
 // 0.9.6.19 (HOTFIX D19) — O SWITCH DA CASA (a fonte ÚNICA do estado visível)
@@ -559,16 +597,35 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
         // chip da MULTI-SELEÇÃO (aparece com ≥1 no conjunto): "N ×" limpa
         // PASSO 1: chip 28dp de altura (a LINHA do cabeçalho — o piso
         // kHeadFloorDp; o alvo é a linha do cabeçalho de 28dp)
+        // 0.9.6.19b (m1 · O CHIP PRÓPRIO COM ESPAÇO E PROPÓSITO): o chip
+        // tinha slot FIXO 48dp ancorado à direita e em painel estreito
+        // NASCIA SOBRE o título («Hierarquia1 x» do dono). O slot vem de
+        // hierChipSlot (a fonte única): 8dp depois do título MEDIDO e 8dp
+        // antes do ⋮; sem espaço, NÃO desenha (a limpeza continua no menu
+        // ⋮ da hierarquia — «Limpar seleção»). A largura do chip é a DO
+        // TEXTO (o propósito legível), não o retângulo fixo.
         if (st.multiSelectCount > 0) {
             char chip[24];
             std::snprintf(chip, sizeof(chip), "%u x", st.multiSelectCount);
-            const f32 cw = theme::dp(48.0f);
-            const UiRect cr = {x + w - kPad - theme::dp(48.0f) -
-                                   theme::dp(8.0f) - cw,
-                               y, cw, kHeaderH};
-            ui.auditRowFloorNext(layout::kHeadFloorDp);
-            if (ui.button(kHierMultiClearId, cr.x, cr.y, cr.w, cr.h, chip)) {
-                st.multiSelectCount = 0;   // volta à seleção simples
+            f32 chipW = theme::dp(40.0f);
+            f32 titleEnd = x + kPad + theme::dp(96.0f);
+            if (ui.hasFont()) {
+                // o título desenha em 16sp (kFontSection) — a largura escala
+                // pelo MESMO fator do labelStyled
+                titleEnd = x + kPad +
+                           ui.fontWidth("Hierarquia") *
+                               theme::fontScale(theme::kFontSection);
+                chipW = ui.fontWidth(chip) + theme::dp(16.0f);
+            }
+            const HierChipSlot slot = hierChipSlot(w, titleEnd - x, chipW);
+            if (slot.fits) {
+                const f32 cw = chipW;
+                const UiRect cr = {x + slot.x, y, cw, kHeaderH};
+                ui.auditRowFloorNext(layout::kHeadFloorDp);
+                if (ui.button(kHierMultiClearId, cr.x, cr.y, cr.w, cr.h,
+                              chip)) {
+                    st.multiSelectCount = 0;   // volta à seleção simples
+                }
             }
         }
         // 0.9.6.10 (GRUPO UI · o anti-exemplo da imagem 2): o [+] era um
@@ -1404,10 +1461,10 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             for (u32 axis = 0; axis < 3; ++axis) {
                 const u32 field = rowIdx * 3 + axis;
                 char val[20];
-                std::snprintf(val, sizeof(val), "%.2g",
-                              rowIdx == 0 ? (&posArr[0])[axis]
-                              : rowIdx == 1 ? (&rotDeg[0])[axis]
-                                            : (&sclArr[0])[axis]);
+                formatNum(val, sizeof(val), "%.2g",   // 0.9.6.19b (m2): -0 → 0
+                          rowIdx == 0 ? (&posArr[0])[axis]
+                          : rowIdx == 1 ? (&rotDeg[0])[axis]
+                                        : (&sclArr[0])[axis]);
                 const bool held = ui.widgetActive(kInspFieldBase + field);
                 ui.panelRounded(bx, boxY, boxW, boxH,
                                 theme::dp(theme::kRadiusField),
@@ -2379,7 +2436,7 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     // violação R-018/§2.9): no device @2.0 o menu desenhava a MEIA medida
     // (140dp de largura, linhas 24dp) com o TEXTO a 2× — o texto sangrava
     // as linhas e a 1.ª linha «cortada» do dono era isto. TUDO em dp AGORA.
-    constexpr int kItems = 14;
+    constexpr int kItems = 15;
     const f32 kSheetW = theme::dp(280.0f);   // spec H (era px cru)
     const f32 kRowH = theme::dp(48.0f);      // spec H/A (era px cru)
     const f32 kHdrH = theme::dp(28.0f);      // cabeçalho de secção (era px cru)
@@ -2403,6 +2460,10 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
         // 0.9.6.19 (D15): «Export OBJ» → «Exportar OBJ» (o dono; o gate
         // estende-se à tabela do menu — M-D15 fica vermelho com o EN)
         {"Exportar OBJ",        icons::Icon::Download, 1},
+        // 0.9.6.19b (D21): «Novo objeto» no menu ⋯ para DESCOBRIBILIDADE —
+        // o MESMO código do + da hierarquia (abre o plusMenu de presets;
+        // não é um caminho novo). O [+] do viewport morreu no mesmo bloco.
+        {"Novo objeto",         icons::Icon::Plus,     1},
         // EDITAR
         {"Desfazer",            icons::Icon::Undo,    2},
         {"Refazer",             icons::Icon::Redo,    2},
@@ -2430,9 +2491,10 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
         labels[i] = kMenu[i].label ? kMenu[i].label : snapLabel;
     }
     // 0.9.6.18 (HOTFIX D4): a linha Settings vem da TABELA LOCALIZADA
-    // (item 11 — «Definições» em PT, «Settings» só em locale EN; o literal
-    // inglês hardcoded era o defeito)
-    labels[11] = strings::tr(strings::Key::OpenSettings);
+    // («Definições» em PT, «Settings» só em locale EN; o literal inglês
+    // hardcoded era o defeito). 0.9.6.19b (D21): o item deslocou-se de 11
+    // para 12 (o «Novo objeto» entrou na secção CENA).
+    labels[12] = strings::tr(strings::Key::OpenSettings);
 
     const f32 contentH = static_cast<f32>(kItems) * kRowH +
                          6.0f * kHdrH + theme::dp(8.0f);

@@ -34,6 +34,45 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.9.6.19b — HOTFIX B: 4/4 PASS + m1/m2/m3 + D20 (câmara medível) + D21 (o [+] morre)
+
+- **Os 4 checks do 0.9.6.19 no C33: 4/4 pass** (menu inteiro · «Exportar
+  OBJ» · card com captura após save · gesto de mover a câmara) — a prova
+  FASE 15.6/16 reconfirmada no device virtual.
+- **m1** o cabeçalho da hierarquia lê-se limpo: o chip «N x» da
+  multi-seleção tem SLOT PRÓPRIO (`editor::hierChipSlot` — ≥8dp do título
+  medido e ≥8dp do ⋮; sem espaço, NÃO desenha) — a colagem
+  «Hierarquia1 x» morreu.
+- **m2** os números do inspector têm FORMAT ÚNICO (`editor::formatNum`,
+  usada pelos 3 sítios — caixas X/Y/Z, sliders 3D, sliders de UI): o
+  zero negativo normaliza («-0» → «0») e os não-zeros mantêm o sinal.
+- **m3** a LIMIAR da letra do eixo: a letra X/Y/Z só sai abaixo de
+  ~200dp de painel (`kTfAxisMinUsableDp`); entre 200 e 260 letra+valor
+  coexistem (o padding da linha cede antes); o valor nunca sai — pin nos
+  3 painéis 180/212/260dp.
+- **D20** a câmara AINDA MAIS PEQUENA com contrato medível: glifo 20dp,
+  handles 10dp, o frustum de PREVIEW com comprimento CONSTANTE em ecrã =
+  clamp(12%·dist(olho→câmara), 48..120dp) — o extent real do far plane
+  não é desenhado (o render NÃO muda); o cone é canónico (aspect 1). PIN
+  medível: o bounding do gizmo ocupa 2.07% da viewport sem seleção e
+  2.63% com (pins ≤4%/≤6%) — `camgizmo::gizmoBoundsPx` + o dump
+  commitado + o gate NOVO `scripts/gizmo_camera_medidas.py` no CI.
+- **D21** O [+] DO VIEWPORT MORRE (decisão do dono): redundante (o + da
+  hierarquia e o «Novo objeto» do menu ⋯ abrem o MESMO plusMenu) e
+  atrapalhava (cobria a cena, interceptava toques). Os alvos 40dp do
+  chrome passam a N−1 (10); `kCornerBtn` morreu (o gizmo tem
+  `kGizmoBtnDp`); o id 38 fica aposentado com PIN: nenhum widget de add
+  desenha no viewport em estado nenhum; a TABELA de medidas desce
+  (7,7→7,1 · 10,2→9,4 · 15,1→13,9).
+- Testes: R-035 (10)-(13), R-022/R-023 a N−1, `cameratic_d20_*` NOVA,
+  FASE 16 recalibrada + **FASE 17 NOVA** — **596 checks, 0 falhas**;
+  test_core 0 falhas; 5 mutações vermelho→verde (coladas no relatório
+  §4). Contrato P-08: §0/§1/§3 (o [+] e o kCornerBtn saem) + regras
+  §2.20–§2.24 NO MESMO COMMIT. Relatório:
+  `docs/RELATORIO-0.9.6.19b-HOTFIX-B.md` · versionCode 52 · **mini
+  sign-off do BLOCO A @C33: 4+4 itens (§7 do relatório)** · PASSO 4
+  (BLOCO B) segue BLOQUEADO até ao owner OK.
+
 ## 0.9.6.19 — HOTFIX: OS ABERTOS DO RE-SIGN-OFF + A CÂMARA GIGANTE
 
 - **R1** o valor do Transform é INTOCÁVEL no orçamento: a letra do eixo

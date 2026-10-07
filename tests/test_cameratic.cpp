@@ -66,6 +66,13 @@ Mat4 editorVp(f32 aspect) {
     return Mat4::mul(c.proj(aspect), c.view());
 }
 
+// 0.9.6.19b (D20): o OLHO da MESMA orbit default (o comprimento do preview
+// é clamp(12%·dist(olho→câmara), 48..120dp) — o draw e o teste partilham)
+Vec3 editorEye() {
+    Camera c;
+    return c.eye();
+}
+
 } // namespace
 
 // ---- 1. geometria do frustum ---------------------------------------------------
@@ -402,13 +409,15 @@ TEST(cameratic_play_usa_camara_ativa_e_nao_desenha_frustum) {
     ui.init();
     InputState in;
     ui.beginFrame(nullptr, &in, kSW, kSH);
-    drawAll(ui, c.scene, editorVp(kSW / kSH), kSW, kSH, c.h);
+    drawAll(ui, c.scene, editorVp(kSW / kSH), kSW, kSH, c.h,
+                 editorEye());
     ui.endFrame();
     EXPECT(ui.solidsForTest().vertexCount() > 0);
     // câmara selecionada: os handles saem também (mais quads que sem seleção)
     const u32 withSel = ui.solidsForTest().vertexCount();
     ui.beginFrame(nullptr, &in, kSW, kSH);
-    drawAll(ui, c.scene, editorVp(kSW / kSH), kSW, kSH, Handle{});
+    drawAll(ui, c.scene, editorVp(kSW / kSH), kSW, kSH, Handle{},
+                 editorEye());
     ui.endFrame();
     EXPECT(ui.solidsForTest().vertexCount() < withSel);
 }
@@ -614,7 +623,7 @@ TEST(cameratic_d17_objeto_pequeno_estados_e_medidas) {
 
     // SEM seleção: o frustum mudo (alfa ~0.35 no batch) + ZERO handles
     ui.beginFrame(nullptr, &in, kSW, kSH);
-    drawAll(ui, c.scene, vp, kSW, kSH, Handle{});
+    drawAll(ui, c.scene, vp, kSW, kSH, Handle{}, editorEye());
     ui.endFrame();
     {
         const auto& vb = ui.solidsForTest();
@@ -638,7 +647,7 @@ TEST(cameratic_d17_objeto_pequeno_estados_e_medidas) {
 
     // COM seleção: âmbar + os handles de canto ≤12dp
     ui.beginFrame(nullptr, &in, kSW, kSH);
-    drawAll(ui, c.scene, vp, kSW, kSH, c.h);
+    drawAll(ui, c.scene, vp, kSW, kSH, c.h, editorEye());
     ui.endFrame();
     {
         const auto& vb = ui.solidsForTest();
@@ -648,11 +657,12 @@ TEST(cameratic_d17_objeto_pequeno_estados_e_medidas) {
         // um canto do far projetado (os handles vivem à volta dele) — o
         // MESMO frustum que o draw usa (o cap VISUAL de ecrã, não o default)
         f32 hx = 0.0f, hy = 0.0f;
+        // D20: o MESMO cone canónico (aspect 1) que o draw desenha
         const Frustum f = computeFrustum(
-            *c.tr, *c.cam, kSW / kSH,
-            visualCapForScreen(vp, kSW, kSH, c.tr->pos, c.cam->fovY));
+            *c.tr, *c.cam, 1.0f,
+            previewCapWorld(vp, kSW, kSH, editorEye(), c.tr->pos));
         ASSERT(gizmo::projectPoint(vp, f.farC[0], kSW, kSH, hx, hy));
-        const f32 tol = theme::dp(13.0f);   // o piso 12dp + a moldura
+        const f32 tol = theme::dp(12.0f);   // o piso 10dp (D20) + a moldura
         for (u32 i = 0; i + 5 < vb.vertexCount(); i += 6) {
             // bbox do quad (6 vértices)
             f32 minX = 1e9f, minY = 1e9f, maxX = -1e9f, maxY = -1e9f;
@@ -686,9 +696,9 @@ TEST(cameratic_d17_objeto_pequeno_estados_e_medidas) {
             }
         }
         EXPECT(amber > 0u);   // a seleção é âmbar (pin)
-        EXPECT(maxHandle > theme::dp(11.0f));   // o handle de 12dp existe
-        EXPECT_MSG(maxHandle <= theme::dp(13.0f),
-                   "D17: o handle mediu %.1fpx (limite 12dp+moldura)",
+        EXPECT(maxHandle > theme::dp(9.0f));   // o handle de 10dp (D20) existe
+        EXPECT_MSG(maxHandle <= theme::dp(12.0f),
+                   "D20: o handle mediu %.1fpx (limite 10dp+moldura)",
                    (double)maxHandle);   // NUNCA o quadrado gigante de 26dp
     }
 }
@@ -703,7 +713,7 @@ TEST(cameratic_toggle_frustum_esconde_o_gizmo) {
 
     // visível (default) → linhas no batch
     ui.beginFrame(nullptr, &in, kSW, kSH);
-    drawAll(ui, c.scene, vp, kSW, kSH, c.h);
+    drawAll(ui, c.scene, vp, kSW, kSH, c.h, editorEye());
     ui.endFrame();
     const u32 comFrustum = ui.solidsForTest().vertexCount();
     EXPECT(comFrustum > 0u);
@@ -712,7 +722,7 @@ TEST(cameratic_toggle_frustum_esconde_o_gizmo) {
     // a valer para o render — só o desenho editor desaparece)
     c.cam->showFrustum = false;
     ui.beginFrame(nullptr, &in, kSW, kSH);
-    drawAll(ui, c.scene, vp, kSW, kSH, c.h);
+    drawAll(ui, c.scene, vp, kSW, kSH, c.h, editorEye());
     ui.endFrame();
     EXPECT(ui.solidsForTest().vertexCount() == 0u);
 
@@ -733,6 +743,87 @@ TEST(cameratic_toggle_frustum_esconde_o_gizmo) {
     CamTic d;
     const std::string dtext = SceneSerializer::dump(d.scene);
     EXPECT(dtext.find("\"frustum\"") == std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// 0.9.6.19b (D20) — O CONTRATO MEDÍVEL: glifo 20dp · preview de comprimento
+// CONSTANTE em ecrã = clamp(12%·dist(olho→câmara), 48..120dp) · handles 10dp.
+// O PIN do dono: o bounding do gizmo ≤6% da área do viewport COM seleção e
+// ≤4% SEM — medido em 2 densidades. O bounding vem de gizmoBoundsPx (a
+// MESMA projeção do draw) e o comprimento do preview de previewCapWorld.
+// ---------------------------------------------------------------------------
+TEST(cameratic_d20_contrato_medivel_bounding_e_preview) {
+    CamTic c;
+    c.tr->updateWorld();
+    c.cam->farZ = 2000.0f;   // o far GIGANTE de sempre — o preview NÃO o
+                             // desenha (o extent real morreu com o cap antigo)
+
+    // a densidade NÃO muda a medida EM DP (a lei de ouro da casa): mede-se
+    // o bounding em px e divide-se pela área do viewport em px — os ratios
+    // 4%/6% valem nas duas densidades
+    const f32 densities[] = {1.0f, 2.0f};
+    for (f32 dens : densities) {
+        vv::theme::setDensity(dens);
+        const Mat4 vp = editorVp(kSW / kSH);
+        const Vec3 eye = editorEye();
+
+        // (1) O PREVIEW: o comprimento desenhado projeta ~48dp (a distância
+        //     olho→câmara da orbit default ≈ 6 u → 12% = 0.72dp → o piso
+        //     48dp manda) — NUNCA o far real de 2000
+        const f32 cap = previewCapWorld(vp, kSW, kSH, eye, c.tr->pos);
+        EXPECT_MSG(cap < 5.0f,
+                   "D20 @%.1f: o cap do preview é %.2f u — o far de 2000u "
+                   "não pode ser o desenho (o extent real morreu)",
+                   (double)dens, (double)cap);
+        EXPECT(cap >= 0.05f);   // nem desaparece (o piso de 48dp em mundo)
+        const Frustum f = computeFrustum(*c.tr, *c.cam, 1.0f, cap);
+        EXPECT(nearEqF(f.drawFar, cap, 1e-3f));
+        // o comprimento PROJETADO do cone ≈ o alvo em dp (constante em ecrã)
+        {
+            f32 x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
+            ASSERT(gizmo::projectPoint(vp, f.pos, kSW, kSH, x0, y0));
+            ASSERT(gizmo::projectPoint(vp, f.farCenter, kSW, kSH, x1, y1));
+            const f32 lenPx = std::sqrt((x1 - x0) * (x1 - x0) +
+                                        (y1 - y0) * (y1 - y0));
+            const f32 lenDp = lenPx / vv::theme::dp(1.0f);
+            // a PROJEÇÃO do eixo depende da orientação da câmara de cena
+            // (foreshortening) — o contrato aferva o COMPRIMENTO FACE-ON;
+            // aqui basta provar que está na ordem do preview (12..126dp) e
+            // NUNCA na ordem do far real (2000u seriam milhares de dp)
+            EXPECT_MSG(lenDp >= 12.0f && lenDp <= 126.0f,
+                       "D20 @%.1f: o comprimento do preview mediu %.1fdp "
+                       "(a ordem do contrato 48..120dp constante em ecrã; "
+                       "o extent real do far não volta)",
+                       (double)dens, (double)lenDp);
+        }
+
+        // (2) O PIN DO BOUNDING: ≤4% sem seleção, ≤6% com — o viewport do
+        //     device (614×280dp ≈ o editor real com os painéis da casa)
+        const UiRect vpRect{0.0f, 0.0f,
+                            vv::theme::dp(614.0f), vv::theme::dp(280.0f)};
+        const f32 area = vpRect.w * vpRect.h;
+        const f32 mw = vpRect.w, mh = vpRect.h;
+        const UiRect bSem = gizmoBoundsPx(vp, kSW, kSH, f, false, mw, mh);
+        EXPECT(bSem.w > 0.0f && bSem.h > 0.0f);
+        const f32 pctSem = (bSem.w * bSem.h) / area * 100.0f;
+        EXPECT_MSG(pctSem <= 4.0f,
+                   "D20 @%.1f SEM seleção: o bounding do gizmo ocupa "
+                   "%.2f%% da viewport (o pin é ≤4%%)",
+                   (double)dens, (double)pctSem);
+        const UiRect bCom = gizmoBoundsPx(vp, kSW, kSH, f, true, mw, mh);
+        const f32 pctCom = (bCom.w * bCom.h) / area * 100.0f;
+        EXPECT_MSG(pctCom <= 6.0f,
+                   "D20 @%.1f COM seleção: o bounding ocupa %.2f%% (o pin "
+                   "é ≤6%%)", (double)dens, (double)pctCom);
+        // com seleção o bounding NÃO é menor (os handles acrescentam)
+        EXPECT(pctCom >= pctSem - 0.01f);
+
+        // (3) o glifo mediu 20dp (a mutação que devolve 24 fica vermelha
+        //     no bounding e no draw — o D17-E2E do device confirma)
+        EXPECT(nearEqF(vv::camgizmo::kGlyphDp, 20.0f));
+        EXPECT(nearEqF(vv::camgizmo::kHandleDp, 10.0f));
+    }
+    vv::theme::setDensity(1.0f);
 }
 
 // ---------------------------------------------------------------------------

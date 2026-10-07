@@ -1,11 +1,14 @@
-// ui/ViewportChrome.cpp — o chrome do viewport (FASE 9 → PASSO 3).
+// ui/ViewportChrome.cpp — o chrome do viewport (FASE 9 → PASSO 3 → 0.9.6.19b).
 //
 // PASSO 3 (0.9.6.17 — a spec do dono): o rail ESQUERDO de ferramentas, a
-// fila do topo-esquerdo (undo/redo/save/⋯), o [+] 40dp redondo no fundo-
-// direito, o gizmo 40dp no topo-direito e a legenda — TUDO a 60% de alfa,
-// nada full-width, nada sobreposto. A strip [Cena][Perspetiva][Global]
-// (a barra que atravessava a largura) MORREU — os chips eram SEM FUNÇÃO
-// desde o inventário do PASSO 0.
+// fila do topo-esquerdo (undo/redo/save/⋯), o gizmo 40dp no topo-direito e
+// a legenda — TUDO a 60% de alfa, nada full-width, nada sobreposto. A strip
+// [Cena][Perspetiva][Global] (a barra que atravessava a largura) MORREU —
+// os chips eram SEM FUNÇÃO desde o inventário do PASSO 0.
+// 0.9.6.19b (D21 · A DECISÃO DO DONO): o [+] REDONDO do fundo-direito MORREU
+// — era redundante (o + da hierarquia e o item «Novo objeto» do menu ⋯ fazem
+// o mesmo) e INTERCEPTAVA toques de orbit/seleção no canto. Os alvos de 40dp
+// do chrome passam a N−1 (10).
 //
 // A GEOMETRIA (a fonte única é layout(), abaixo):
 //   • rail 1 coluna (ecrãs altos): a fila do topo vive À DIREITA do rail;
@@ -177,17 +180,13 @@ Layout layout(const UiRect& view) {
         L.railPanel = {0.0f, 0.0f, 0.0f, 0.0f};
     }
 
-    // (2) o GIZMO (topo-direito) e o [+] (fundo-direito) — 40dp, a spec
-    // PASSO 3. Os cantos ficam mesmo com o rail escondido.
+    // (2) o GIZMO (topo-direito) — 40dp, a spec PASSO 3. Fica mesmo com o
+    // rail escondido. 0.9.6.19b (D21): o [+] do fundo-direito FOI REMOVIDO
+    // (o canto fica LIMPO — a orbit/drag nessa zona sem interceptação).
     L.gizmoBtn = {view.x + view.w - m - btn, view.y + m, btn, btn};
-    L.addTicBtn = {view.x + view.w - m - btn, view.y + view.h - m - btn,
-                   btn, btn};
     L.gizmoPanel = {L.gizmoBtn.x - theme::dp(4.0f),
                     L.gizmoBtn.y - theme::dp(4.0f), btn + theme::dp(8.0f),
                     btn + theme::dp(8.0f)};
-    L.plusPanel = {L.addTicBtn.x - theme::dp(4.0f),
-                   L.addTicBtn.y - theme::dp(4.0f), btn + theme::dp(8.0f),
-                   btn + theme::dp(8.0f)};
 
     // (3) a fila do TOPO (undo/redo/save/⋯): a POSIÇÃO decide-se por
     // tentativa — (a) o TOPO, ao lado do rail e antes do gizmo (o layout
@@ -267,8 +266,8 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
     // pai) — a 60% de alfa (PASSO 3) ----
     glassPanel(ui, L.railPanel, theme::kRadiusCard);
     glassPanel(ui, L.quickPanel, theme::kRadiusCard);
-    glassPanel(ui, L.gizmoPanel, kCornerBtn);
-    glassPanel(ui, L.plusPanel, kCornerBtn);
+    glassPanel(ui, L.gizmoPanel, kGizmoBtnDp);
+    // 0.9.6.19b (D21): o pai de vidro do [+] (plusPanel) FOI REMOVIDO
 
     // ---- o RAIL esquerdo: as ferramentas (a ordem da spec do dono) ----
     if (L.railVisible) {
@@ -411,29 +410,11 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
         }
     }
 
-    // ---- o [+] 40dp REDONDO (fundo-direito): o plus-menu de sempre
-    // (G1-1; o círculo é o panelRounded de meia-largura) ----
-    {
-        const bool pressed =
-            ui.widgetHit(kVpAddTicId, L.addTicBtn.x, L.addTicBtn.y,
-                         L.addTicBtn.w, L.addTicBtn.h);
-        const bool held = ui.widgetActive(kVpAddTicId);
-        f32 fill[4], iconCol[4];
-        colA(held ? theme::kTheme.surface2 : theme::kTheme.surface, fill);
-        colA(theme::kTheme.accent, iconCol);
-        // o CÍRCULO: raio = metade do lado (40dp → raio 20)
-        ui.panelRounded(L.addTicBtn.x, L.addTicBtn.y, L.addTicBtn.w,
-                        L.addTicBtn.h, theme::dp(20.0f), fill);
-        icons::drawIcon(ui, icons::Icon::Plus,
-                        L.addTicBtn.x +
-                            (L.addTicBtn.w - theme::dp(24.0f)) * 0.5f,
-                        L.addTicBtn.y +
-                            (L.addTicBtn.h - theme::dp(24.0f)) * 0.5f,
-                        theme::dp(24.0f), iconCol);
-        if (pressed) {
-            a.addTicPressed = true;
-        }
-    }
+    // 0.9.6.19b (D21): o bloco do [+] 40dp REDONDO (fundo-direito) FOI
+    // REMOVIDO — a decisão do dono (a ação vive no + da hierarquia e no
+    // menu ⋯ «Novo objeto»; o canto inferior direito do viewport fica
+    // LIMPO para a orbit/seleção). O pin: nenhum widget com o id 38
+    // (kVpAddTicIdRetired) desenha dentro do rect do viewport.
 
     return a;
 }

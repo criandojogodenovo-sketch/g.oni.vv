@@ -355,13 +355,14 @@ TEST(vpchrome_stack_sem_sobreposicao_alvos_48) {
             EXPECT(ox <= 0.01f || oy <= 0.01f);
         }
     }
-    // a fila do topo (undo/redo/save/⋯) + os cantos 40dp — nada sobrepõe
-    const UiRect quicks[6] = {L.quick[0], L.quick[1], L.quick[2],
-                              L.quick[3], L.gizmoBtn, L.addTicBtn};
-    for (int i = 0; i < 6; ++i) {
+    // a fila do topo (undo/redo/save/⋯) + o gizmo 40dp — nada sobrepõe
+    // (D21 0.9.6.19b: o [+] do fundo-direito MORREU — os alvos são N−1)
+    const UiRect quicks[5] = {L.quick[0], L.quick[1], L.quick[2],
+                              L.quick[3], L.gizmoBtn};
+    for (int i = 0; i < 5; ++i) {
         EXPECT(quicks[i].h >= 40.0f - 0.01f);
         EXPECT(quicks[i].w >= 40.0f - 0.01f);
-        for (int j = i + 1; j < 6; ++j) {
+        for (int j = i + 1; j < 5; ++j) {
             const f32 ox = std::min(quicks[i].x + quicks[i].w,
                                     quicks[j].x + quicks[j].w) -
                            std::max(quicks[i].x, quicks[j].x);
@@ -375,7 +376,9 @@ TEST(vpchrome_stack_sem_sobreposicao_alvos_48) {
     // dono (canto sup-dir do viewport) não existem mais; no PASSO 3 o
     // canto sup-dir tem o GIZMO 40dp (a spec do dono)
     EXPECT(nearEqF(L.gizmoBtn.w, 40.0f));
-    EXPECT(L.addTicBtn.y > view.y);   // (sanity: o + continua no fundo)
+    // D21 (0.9.6.19b): o fundo-direito ficou LIMPO — o gizmo (topo) é o
+    // alvo mais a sul do lado direito do viewport
+    EXPECT(L.gizmoBtn.y + L.gizmoBtn.h < view.y + view.h * 0.5f);
 }
 
 // ---- D2 (FASE 9 G1-1 → PASSO 3): o chrome ANCORADO À VIEWPORT — o [+
@@ -390,10 +393,11 @@ TEST(vpchrome_toolbar_ancorada_a_viewport_g11) {
         EXPECT(nearEqF(L.rail[0].y, view.y + 8.0f));
         EXPECT(safe::rectInside(L.rail[0], view));
         EXPECT(safe::rectInside(L.quick[3], view));
-        EXPECT(safe::rectInside(L.addTicBtn, view));
-        // "+" no canto inferior DIREITO da viewport (40dp — PASSO 3)
-        EXPECT(nearEqF(L.addTicBtn.x + L.addTicBtn.w + 8.0f, view.x + view.w));
-        EXPECT(nearEqF(L.addTicBtn.w, 40.0f));
+        // D21: o canto inferior direito não tem controlos; o gizmo é o
+        // único elemento do lado direito (topo)
+        EXPECT(safe::rectInside(L.gizmoBtn, view));
+        EXPECT(nearEqF(L.gizmoBtn.x + L.gizmoBtn.w + 8.0f, view.x + view.w));
+        EXPECT(nearEqF(L.gizmoBtn.w, 40.0f));
     }
     // drawer ABERTO (240): o [+] SOBE com o rect — nunca cobre o drawer
     {
@@ -401,16 +405,17 @@ TEST(vpchrome_toolbar_ancorada_a_viewport_g11) {
                                              true);
         const vpchrome::Layout L = vpchrome::layout(view);
         EXPECT(safe::rectInside(L.rail[0], view));
-        EXPECT(safe::rectInside(L.addTicBtn, view));
-        // o fundo do [+] está ACIMA do topo do drawer
+        EXPECT(safe::rectInside(L.gizmoBtn, view));   // D21: a prova do canto é o gizmo
+        // o fundo do gizmo está ACIMA do topo do drawer (o chrome nunca
+        // cobre o painel — o [+] acompanhante morreu no D21)
         const UiRect drawerTop{0.0f, kSH - safe::kStatusH - safe::kBottomTabH -
                                          240.0f, kSW, 240.0f};
-        EXPECT(L.addTicBtn.y + L.addTicBtn.h <= drawerTop.y + 0.01f);
+        EXPECT(L.gizmoBtn.y + L.gizmoBtn.h <= drawerTop.y + 0.01f);
         // e NUNCA por cima do Inspector (o rect da viewport já exclui)
         const UiRect insp = safe::inspectorPanelRect(kSW, kSH, safe::Insets{},
                                                      240.0f);
-        const f32 ox = std::min(L.addTicBtn.x + L.addTicBtn.w, insp.x + insp.w) -
-                       std::max(L.addTicBtn.x, insp.x);
+        const f32 ox = std::min(L.gizmoBtn.x + L.gizmoBtn.w, insp.x + insp.w) -
+                       std::max(L.gizmoBtn.x, insp.x);
         EXPECT(ox <= 0.01f);
     }
     // largura ESTREITA (viewport 420): o rail e a fila do topo cabem
@@ -418,7 +423,7 @@ TEST(vpchrome_toolbar_ancorada_a_viewport_g11) {
         const UiRect view{300.0f, 104.0f, 420.0f, 400.0f};
         const vpchrome::Layout L = vpchrome::layout(view);
         EXPECT(safe::rectInside(L.quick[3], view));
-        EXPECT(safe::rectInside(L.addTicBtn, view));
+        EXPECT(safe::rectInside(L.gizmoBtn, view));
         EXPECT(safe::rectInside(L.rail[0], view));
     }
 }
@@ -853,8 +858,8 @@ TEST(topbar_unica_56dp_e_viewport_ganha_48_g29) {
     const f32 hAntiga = 720.0f - 104.0f - 24.0f - 48.0f;   // chrome antigo (176)
     EXPECT(nearEqF(view.h, hAntiga + 108.0f));   // o chrome novo é 68 (36+0+32)
     // o TRIAD morreu (os "pontinhos fantasma"): o layout NÃO tem triad —
-    // compila = o campo não existe; a barra não desenha nada no canto
-    // sup-dir (afirmado pelo desenho: o + do fundo é o ÚNICO no canto dir)
+    // compila = o campo não existe. D21 (0.9.6.19b): o GIZMO do topo é o
+    // único elemento do canto direito (o fundo-direito ficou limpo)
     const vpchrome::Layout L = vpchrome::layout(view);
-    EXPECT(nearEqF(L.addTicBtn.x + L.addTicBtn.w + 8.0f, view.x + view.w));
+    EXPECT(nearEqF(L.gizmoBtn.x + L.gizmoBtn.w + 8.0f, view.x + view.w));
 }

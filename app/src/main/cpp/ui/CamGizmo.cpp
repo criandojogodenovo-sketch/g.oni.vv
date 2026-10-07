@@ -69,29 +69,38 @@ bool visible(bool playMode, bool uiMode) {
 
 // ---- geometria -----------------------------------------------------------------
 
-// 0.9.6.1 (G1-4): o cap que dá ~80dp de ALTURA PROJETADA ao far — mede os
-// px-por-unidade-de-mundo no OLHO (projeta eye e eye+X pelo MESMO vp) e
-// resolve a distância: alturaFar_px ≈ 2·tan(fov/2)·dist·ppu
-f32 visualCapForScreen(const Mat4& vp, f32 sw, f32 sh, const Vec3& eye,
-                       f32 fovYDeg) {
+// 0.9.6.19b (D20) — O CAP DO PREVIEW: o far VISUAL (em unidades de mundo)
+// que projeta clamp(12%·|olho→câmara|, 48..120dp) de COMPRIMENTO no ecrã.
+// O ppu mede-se no olho da câmara de cena (projeta camPos e camPos+X pelo
+// MESMO vp — o método da 0.7.10); o comprimento em dp NÃO cresce com o
+// zoom (constante em ecrã por construção) e nunca é o extent real do far.
+f32 previewCapWorld(const Mat4& vp, f32 sw, f32 sh, const Vec3& eyeEditor,
+                    const Vec3& camPos) {
+    // o comprimento ALVO em px de ecrã (dp — o contrato do dono)
+    const f32 dist = length(eyeEditor - camPos);
+    f32 targetPx = theme::dp(kPreviewDistPct * dist);
+    if (targetPx < theme::dp(kPreviewMinDp)) {
+        targetPx = theme::dp(kPreviewMinDp);
+    }
+    if (targetPx > theme::dp(kPreviewMaxDp)) {
+        targetPx = theme::dp(kPreviewMaxDp);
+    }
+    if (targetPx < 8.0f) {
+        targetPx = 8.0f;   // subpixel não lê — o piso físico
+    }
+    // px-por-unidade-de-mundo NO OLHO da câmara (a projeção do próprio vp)
     f32 x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
-    if (!gizmo::projectPoint(vp, eye, sw, sh, x0, y0) ||
-        !gizmo::projectPoint(vp, eye + Vec3{1.0f, 0.0f, 0.0f}, sw, sh, x1,
+    if (!gizmo::projectPoint(vp, camPos, sw, sh, x0, y0) ||
+        !gizmo::projectPoint(vp, camPos + Vec3{1.0f, 0.0f, 0.0f}, sw, sh, x1,
                              y1)) {
-        return kVisualFarCap;
+        return kVisualFarCap;   // projeção degenerada — o cap antigo
     }
     const f32 ppu =
         std::sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
     if (ppu < 1e-4f) {
         return kVisualFarCap;   // projeção degenerada — o cap antigo
     }
-    const f32 targetPx = theme::dp(80.0f);
-    const f32 tanF = std::tan(deg2rad(fovYDeg) * 0.5f);
-    if (tanF <= 1e-5f) {
-        return kVisualFarCap;
-    }
-    const f32 dist = targetPx / (2.0f * tanF * ppu);
-    return dist < 1.5f ? 1.5f : (dist < kVisualFarCap ? dist : kVisualFarCap);
+    return targetPx / ppu;
 }
 
 void planeHalfExtents(const CameraComp& cam, f32 dist, f32 aspect,
@@ -197,14 +206,17 @@ void drawFrustum(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
 }
 
 void drawAll(UiContext& ui, Scene& scene, const Mat4& vp, f32 sw, f32 sh,
-             Handle selected, f32 vw, f32 vh, f32 ox, f32 oy) {
+             Handle selected, const Vec3& eyeWorld, f32 vw, f32 vh, f32 ox,
+             f32 oy) {
     if (sw <= 1.0f || sh <= 1.0f) {
         return;
     }
-    // GRUPO D: o ASPECTO do frustum continua o do JOGO (sw/sh da SUPERFÍCIE
-    // — em Play a câmara renderiza o ecrã todo); o MAPEAMENTO do desenho é
-    // o rect da viewport (vw,vh,ox,oy; 0,0,0,0 = o ecrã todo — o de sempre)
-    const f32 aspect = sw / sh;
+    // GRUPO D: o MAPEAMENTO do desenho é o rect da viewport (vw,vh,ox,oy;
+    // 0,0,0,0 = o ecrã todo — o de sempre). 0.9.6.19b (D20): o PREVIEW
+    // desenha o cone CANÓNICO (aspect 1) — o gizmo é um INDICADOR da
+    // câmara (direção + abertura vertical real), não uma imagem do seu
+    // frame; o aspeto REAL do jogo vive no render (gameProj) e não muda.
+    const f32 aspect = 1.0f;
     const f32 mw = (vw > 1.0f && vh > 1.0f) ? vw : sw;
     const f32 mh = (vw > 1.0f && vh > 1.0f) ? vh : sh;
     scene.forEachActive([&](Tic& t) {
@@ -221,15 +233,55 @@ void drawAll(UiContext& ui, Scene& scene, const Mat4& vp, f32 sw, f32 sh,
         if (!cam->showFrustum) {
             return;
         }
-        // 0.9.6.1 (G1-4): o cap dá ~80dp no ecrã (antes: 12 unidades FIXAS —
-        // a pirâmide dominava a viewport quando a câmara estava perto).
-        // GRUPO D: o ppu mede-se pelo MAPEAMENTO do rect (consistente com
-        // o draw que o consume)
+        // 0.9.6.19b (D20): o comprimento do preview é CONSTANT EM ECRÃ =
+        // clamp(12%·dist(olho→câmara), 48..120dp) — o gizmo nunca desenha
+        // o extent real do far (o frustum do render continua o real).
         const Frustum f = computeFrustum(
             *tr, *cam, aspect,
-            visualCapForScreen(vp, mw, mh, tr->pos, cam->fovY));
+            previewCapWorld(vp, mw, mh, eyeWorld, tr->pos));
         drawFrustum(ui, vp, sw, sh, f, t.handle == selected, mw, mh, ox, oy);
     });
+}
+
+// ---- 0.9.6.19b (D20) — O BOUNDING DO GIZMO (o pin medível) --------------------
+// a união de TUDO o que o gizmo desenha: glifo (20dp no olho) + frustum
+// (near/far/cone) + handles de canto (10dp, só com seleção). A MESMA
+// projeção do draw (gizmo::projectPoint + o mapeamento (mw,mh,ox,oy)) —
+// o script de medidas (método PASSO 0) consome ESTA função.
+UiRect gizmoBoundsPx(const Mat4& vp, f32 sw, f32 sh, const Frustum& f,
+                      bool selected, f32 vw, f32 vh, f32 ox, f32 oy) {
+    const f32 mw = (vw > 1.0f && vh > 1.0f) ? vw : sw;
+    const f32 mh = (vw > 1.0f && vh > 1.0f) ? vh : sh;
+    f32 minX = 1e30f, minY = 1e30f, maxX = -1e30f, maxY = -1e30f;
+    bool any = false;
+    auto add = [&](f32 px, f32 py, f32 halfDp) {
+        const f32 h = theme::dp(halfDp);
+        minX = px - h < minX ? px - h : minX;
+        minY = py - h < minY ? py - h : minY;
+        maxX = px + h > maxX ? px + h : maxX;
+        maxY = py + h > maxY ? py + h : maxY;
+        any = true;
+    };
+    // o glifo (o quadrado de kGlyphDp no olho)
+    f32 gx = 0.0f, gy = 0.0f;
+    if (gizmo::projectPoint(vp, f.pos, mw, mh, gx, gy, ox, oy)) {
+        add(gx, gy, kGlyphDp * 0.5f);
+    }
+    // as 8 cantos do frustum + o centro do far (as linhas do cone vivem
+    // dentro do casco convexo dos cantos projetados)
+    for (int i = 0; i < 4; ++i) {
+        f32 nx = 0.0f, ny = 0.0f, fx = 0.0f, fy = 0.0f;
+        if (gizmo::projectPoint(vp, f.nearC[i], mw, mh, nx, ny, ox, oy)) {
+            add(nx, ny, 0.0f);
+        }
+        if (gizmo::projectPoint(vp, f.farC[i], mw, mh, fx, fy, ox, oy)) {
+            add(fx, fy, selected ? kHandleDp * 0.5f : 0.0f);
+        }
+    }
+    if (!any) {
+        return UiRect{0.0f, 0.0f, 0.0f, 0.0f};   // nada projetou (fora de ecrã)
+    }
+    return UiRect{minX, minY, maxX - minX, maxY - minY};
 }
 
 // ---- hit-test (D17-e/f) -------------------------------------------------------------

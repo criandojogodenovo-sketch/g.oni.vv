@@ -1422,14 +1422,19 @@ int main() {
                 quickOkA = quickOkA && safe::rectInside(a->quick[i], vA);
             }
             check(quickOkA && safe::rectInside(a->quickPanel, vA) &&
-                      safe::rectInside(a->gizmoBtn, vA) &&
-                      safe::rectInside(a->addTicBtn, vA),
-                  "a fila do topo (undo/redo/save/⋯) + os cantos 40dp "
-                  "dentro do rect");
-            // "+" no canto inferior DIREITO da viewport (G1-1)
-            check(a->addTicBtn.x + a->addTicBtn.w > vA.x + vA.w - 72.0f,
-                  "o '+' vive no canto inferior DIREITO da viewport");
-            // estado B: painel de baixo ABERTO (drawer 240) — o [+] SOBE
+                      safe::rectInside(a->gizmoBtn, vA),
+                  "a fila do topo (undo/redo/save/⋯) + o gizmo dentro do "
+                  "rect");
+            // 0.9.6.19b (D21): o canto inferior DIREITO fica LIMPO — o [+]
+            // morreu; o alvo mais a sul do lado direito é a fila do topo
+            check(safe::rectInside(a->quick[3], vA),
+                  "o ⋯ fica dentro do rect (a fila pode descer na "
+                  "degradação — o D21 é o canto INFERIOR limpo)");
+            check(a->gizmoBtn.y + a->gizmoBtn.h < vA.y + vA.h * 0.5f,
+                  "D21 o gizmo fica no TOPO-direito (nada no fundo-direito)");
+            // estado B: painel de baixo ABERTO (drawer 240) — o chrome SOBRE
+            // o rect (D21: a prova do canto é o gizmo do topo, o [+]
+            // acompanhante morreu)
             g_bottom.bottomTab = 1;
             g_bottom.drawerH = 240.0f;
             frame();
@@ -1437,20 +1442,20 @@ int main() {
                                                g_editor.showInspector);
             const editor::vpchrome::Layout lB = editor::vpchrome::layout(vB);
             const editor::vpchrome::Layout* b = &lB;
-            bool dentroB = safe::rectInside(b->addTicBtn, vB) &&
-                           safe::rectInside(b->gizmoBtn, vB) &&
+            bool dentroB = safe::rectInside(b->gizmoBtn, vB) &&
                            safe::rectInside(b->quickPanel, vB);
             for (u32 i = 0; i < 5; ++i) {
                 dentroB = dentroB && safe::rectInside(b->rail[i], vB);
             }
             check(dentroB, "painel ABERTO (240px): o chrome SOBE com o "
                            "rect — nunca cobre o painel de baixo");
-            check(b->addTicBtn.y < a->addTicBtn.y - 100.0f,
-                  "o [+] ACOMPANHA o painel (sobe ~240px com ele aberto)");
+            check(b->gizmoBtn.y < a->gizmoBtn.y + 100.0f,
+                  "o gizmo ACOMPANHA o topo do rect (o desenho segue o "
+                  "viewport, nunca pisa o painel)");
             // conflito DIRETO contra o painel: nenhum botão invade a faixa
             // do drawer (y >= topo do painel)
             const f32 drawerTop = sh - 240.0f;
-            bool foraDoDrawer = b->addTicBtn.y + b->addTicBtn.h <=
+            bool foraDoDrawer = b->gizmoBtn.y + b->gizmoBtn.h <=
                                     drawerTop + 0.5f;
             for (u32 i = 0; i < 5; ++i) {
                 foraDoDrawer =
@@ -1560,12 +1565,14 @@ int main() {
                   "o viewport central GANHOU 68px (barra 36 + status 0 vs "
                   "o antigo 56+24+48 — PASSO 1)");
             // o TRIAD morreu (os pontinhos fantasma) — o layout do chrome
-            // não tem triad (compila) e o canto sup-dir fica LIVRE
+            // não tem triad (compila). D21 (0.9.6.19b): o canto direito só
+            // tem o GIZMO do topo — o fundo-direito fica LIMPO
             const editor::vpchrome::Layout lg2 =
                 editor::vpchrome::layout(viewG2);
-            check(nearEqF(lg2.addTicBtn.x + lg2.addTicBtn.w + 8.0f,
+            check(nearEqF(lg2.gizmoBtn.x + lg2.gizmoBtn.w + 8.0f,
                           viewG2.x + viewG2.w),
-                  "o '+' continua o ÚNICO elemento do canto inferior direito");
+                  "o gizmo continua o ÚNICO elemento do canto direito (o "
+                  "fundo-direito ficou limpo no D21)");
             // ícones da hierarquia por TIPO DE CORPO (G2-7)
             {
                 const Handle hC = g_scene.create("CorpoG2");
@@ -3861,10 +3868,11 @@ int main() {
                     }
                     const f32 minTouch = theme::dp(40.0f);   // a lei de ouro
                     bool allIn = true, all40 = true;
-                    const UiRect all[11] = {
+                    // D21 (0.9.6.19b): os alvos do chrome são N−1 (10)
+                    const UiRect all[10] = {
                         L.rail[0], L.rail[1], L.rail[2], L.rail[3],
                         L.rail[4], L.quick[0], L.quick[1], L.quick[2],
-                        L.quick[3], L.gizmoBtn, L.addTicBtn};
+                        L.quick[3], L.gizmoBtn};
                     for (const UiRect& r : all) {
                         if (r.x < vr.x - 0.5f || r.y < vr.y - 0.5f ||
                             r.x + r.w > vr.x + vr.w + 0.5f ||
@@ -4583,8 +4591,9 @@ int main() {
                 editor::vpchrome::layout(view);
             // NENHUM elemento do chrome atravessa a largura (a regra do
             // dono: «proibido o bar full-width») — nem o pai de vidro
-            const UiRect bands[4] = {L.railPanel, L.quickPanel,
-                                     L.gizmoPanel, L.plusPanel};
+            // D21 (0.9.6.19b): o plusPanel FOI REMOVIDO com o [+]
+            const UiRect bands[3] = {L.railPanel, L.quickPanel,
+                                     L.gizmoPanel};
             bool semFullWidth = true;
             for (const UiRect& r : bands) {
                 if (r.w > 0.0f && r.w >= view.w * 0.90f) {
@@ -4594,17 +4603,18 @@ int main() {
             check(semFullWidth,
                   "14.1 nenhum pai de vidro do chrome passa 90% da largura "
                   "(a strip full-width morreu no PASSO 3)");
-            // o GIZMO 40dp no topo-DIREITO e o [+] 40dp no fundo-DIREITO
+            // o GIZMO 40dp no topo-DIREITO; o fundo-DIREITO fica LIMPO
             check(nearEqF(L.gizmoBtn.x + L.gizmoBtn.w + theme::dp(8.0f),
                           view.x + view.w) &&
                       nearEqF(L.gizmoBtn.y - theme::dp(8.0f), view.y),
                   "14.1 o gizmo 40dp vive no canto SUPERIOR direito (a "
                   "spec PASSO 3)");
-            check(nearEqF(L.addTicBtn.w, theme::dp(40.0f)) &&
-                      nearEqF(L.addTicBtn.x + L.addTicBtn.w + theme::dp(8.0f),
-                              view.x + view.w),
-                  "14.1 o [+] é 40dp e vive no canto INFERIOR direito (a "
-                  "spec PASSO 3 — o chip de 56 morreu)");
+            // 0.9.6.19b (D21): o [+] do fundo-direito MORREU (a decisão do
+            // dono — o canto fica limpo para a orbit/seleção; a ação vive
+            // no + da hierarquia e no menu ⋯ «Novo objeto»)
+            check(L.gizmoBtn.y + L.gizmoBtn.h < view.y + view.h * 0.5f,
+                  "14.1/D21 o alvo mais a sul do lado direito é o gizmo do "
+                  "TOPO — o fundo-direito não tem controlos");
             // a legenda existe no layout primário (rail 1 coluna no ecrã
             // alto) e não pisa a fila do topo
             if (L.legendVisible) {
@@ -5326,11 +5336,13 @@ int main() {
             // um tap na MEIO do cone (a meio do near→far) NÃO seleciona
             {
                 Transform3D* tr = g_scene.get(hCam)->getComponent<Transform3D>();
+                // D20: o preview desenha o cone CANÓNICO (aspect 1 — o
+                // aspeto REAL vive no render/gameProj; o gizmo é indicador)
                 const camgizmo::Frustum f = camgizmo::computeFrustum(
                     *tr, *g_scene.get(hCam)->getComponent<CameraComp>(),
-                    1600.0f / 720.0f,
-                    camgizmo::visualCapForScreen(vp16, vr0.w, vr0.h, tr->pos,
-                                                 60.0f));
+                    1.0f,
+                    camgizmo::previewCapWorld(vp16, vr0.w, vr0.h,
+                                              g_camera.eye(), tr->pos));
                 const Vec3 mid = (f.nearC[0] + f.farC[0]) * 0.5f;
                 f32 mx = 0.0f, my = 0.0f;
                 check(gizmo::projectPoint(vp16, mid, vr0.w, vr0.h, mx, my,
@@ -5370,17 +5382,18 @@ int main() {
                 Transform3D* tr = g_scene.get(hCam)->getComponent<Transform3D>();
                 CameraComp* cc = g_scene.get(hCam)->getComponent<CameraComp>();
                 // o ASPECTO do frustum é o da SUPERFÍCIE (o mesmo do
-                // drawAll — o jogo renderiza o ecrã todo); o cap mede no rect
+                // drawAll — o jogo renderiza o ecrã todo); o cap é o
+                // PREVIEW do D20 (o mesmo do draw — os handles vivem nele)
                 const camgizmo::Frustum f = camgizmo::computeFrustum(
-                    *tr, *cc, 1600.0f / 720.0f,
-                    camgizmo::visualCapForScreen(vpSel, vr1.w, vr1.h, tr->pos,
-                                                 cc->fovY));
+                    *tr, *cc, 1.0f,
+                    camgizmo::previewCapWorld(vpSel, vr1.w, vr1.h,
+                                              g_camera.eye(), tr->pos));
                 f32 hx = 0.0f, hy = 0.0f;
                 check(gizmo::projectPoint(vpSel, f.farC[0], vr1.w, vr1.h,
                                           hx, hy, vr1.x, vr1.y),
                       "16.1 D17 o canto do far projeta");
                 f32 maxHandle = 0.0f;
-                const f32 tol = theme::dp(13.0f);
+                const f32 tol = theme::dp(12.0f);   // D20: o piso 10dp + moldura
                 for (const auto& q : quads16(vr1)) {
                     const f32 exW = q.x1 - q.x0, exH = q.y1 - q.y0;
                     if (exW <= tol && exH <= tol &&
@@ -5394,10 +5407,10 @@ int main() {
                         }
                     }
                 }
-                check(maxHandle > theme::dp(11.0f),
-                      "16.1 D17 o handle de canto 12dp existe no device");
-                check(maxHandle <= theme::dp(13.0f),
-                      "16.1 D17 o handle mede ≤12dp (NUNCA o quadrado de 26dp)");
+                check(maxHandle > theme::dp(9.0f),
+                      "16.1/D20 o handle de canto 10dp existe no device");
+                check(maxHandle <= theme::dp(12.0f),
+                      "16.1/D20 o handle mede ≤10dp (NUNCA o quadrado de 26dp)");
                 // o GIZMO ancora NO GLIFO: quads âmbar junto ao olho
                 f32 gx = 0.0f, gy = 0.0f;
                 check(gizmo::projectPoint(vpSel, tr->pos, vr1.w, vr1.h,
@@ -5419,24 +5432,34 @@ int main() {
                 // começado FORA dos handles move a câmara
                 const f32 len = gizmo::gizmoLength(g_camera.dist);
                 f32 ax = 0.0f, ay = 0.0f;
-                check(gizmo::projectPoint(vpSel, Vec3{len, 0.0f, 0.0f},
+                // o press no MEIO do segmento do eixo X (o gizmo reclama o
+                // gesto em TODO o segmento; a ponta encostava ao canto do
+                // preview canónico do D20)
+                check(gizmo::projectPoint(vpSel, Vec3{len * 0.5f, 0.0f, 0.0f},
                                           vr1.w, vr1.h, ax, ay, vr1.x, vr1.y),
-                      "16.1 D17 a ponta do eixo X projeta");
+                      "16.1 D17 o meio do eixo X projeta");
                 // fora dos handles: a distância a CADA canto do far > 60px
-                bool foraDosHandles = true;
+                // o press está no SEGMENTO do eixo X (o gizmo reclama o
+                // gesto ANTES dos handles — a ordem (e) do dono); a prova
+                // comportamental é o fov INTACTO após o drag (abaixo) e a
+                // posição da câmara a mover. A folga ao canto desenhado
+                // (10dp — D20) fica registada:
+                f32 minD = 1e9f;
                 for (int i = 0; i < 4; ++i) {
                     f32 cx = 0.0f, cy = 0.0f;
                     if (gizmo::projectPoint(vpSel, f.farC[i], vr1.w, vr1.h,
                                             cx, cy, vr1.x, vr1.y)) {
                         const f32 d = std::sqrt((ax - cx) * (ax - cx) +
                                                 (ay - cy) * (ay - cy));
-                        if (d < 60.0f) {
-                            foraDosHandles = false;
+                        if (d < minD) {
+                            minD = d;
                         }
                     }
                 }
-                check(foraDosHandles,
-                      "16.1 D17 o gesto nasce FORA dos handles (o press do drag)");
+                check(minD >= theme::dp(12.0f),
+                      "16.1 D17 o press do drag não nasce SOBRE um handle "
+                      "(folga ao canto desenhado ≥12dp; a ordem gizmo > "
+                      "handles é a que manda)");
                 Transform3D* trD = g_scene.get(hCam)->getComponent<Transform3D>();
                 const Vec3 pos0 = trD->pos;
                 const f32 fov0 = cc->fovY;
@@ -5562,7 +5585,8 @@ int main() {
         }
 
         // ---- (R1) OS VALORES DO TRANSFORM INTOCÁVEIS ---------------------
-        passo("16.4 R1: valores X/Y/Z não-vazios nos 3 campos em 180/220/260dp");
+        passo("16.4 R1+m3: valores X/Y/Z não-vazios em 180/212/260dp; a letra "
+              "só sai abaixo de ~200dp de painel");
         {
             const Handle hT = g_scene.create("tic r1");
             if (Tic* t = g_scene.get(hT)) {
@@ -5571,7 +5595,7 @@ int main() {
                 tr->updateWorld();
             }
             g_editor.selected = hT;
-            for (int iw : {180, 220, 260}) {
+            for (int iw : {180, 212, 260}) {
                 g_editor.inspW = static_cast<f32>(iw);
                 g_layoutAuditPending = true;   // o registo liga NESTE frame
                 frame();
@@ -5595,12 +5619,30 @@ int main() {
                               "16.4 R1 a %ddp o painel desenha rótulos não-"
                               "vazios (%u)", iw, valores);
                 check(valores >= 12, msg);   // 3 títulos + 9 valores + nome/visível
-                // o orçamento puro no device: o espaço do valor ≥ o piso
+                // o orçamento puro no device (a convenção do draw: útil =
+                // painel − 2×kPad 16): o espaço do valor ≥ o piso
                 const editor::TransformBudget tb =
-                    editor::transformRowBudget(iw - 32.0f);   // 2×kPad 16dp
+                    editor::transformRowBudget(iw - 32.0f);
                 check(editor::transformValueSpace(tb) >=
                           editor::kTfValueMinDp - 0.01f,
                       "16.4 R1 o espaço do valor cumpre o piso (o valor é intocável)");
+                // 0.9.6.19b (m3 · A LIMIAR DO DONO): a letra do eixo SÓ sai
+                // abaixo de ~200dp de painel; a 212/260 ela COEXISTE com o
+                // valor (o padding da linha cede antes); a 180 pode sair
+                const bool letra = tb.axisLabels;
+                if (iw >= 212) {
+                    std::snprintf(msg, sizeof(msg),
+                                  "16.4/m3 a %ddp a letra do eixo FICA "
+                                  "(letra+valor coexistem)", iw);
+                    check(letra, msg);
+                } else {
+                    std::snprintf(msg, sizeof(msg),
+                                  "16.4/m3 a %ddp (abaixo do limiar ~200dp) "
+                                  "a letra pode sair — o valor fica", iw);
+                    check(editor::transformValueSpace(tb) >=
+                              editor::kTfValueMinDp - 0.01f,
+                          msg);
+                }
             }
             g_editor.inspW = -1.0f;
             g_editor.selected = Handle::invalid();
@@ -5704,6 +5746,372 @@ int main() {
                             ea.kindName(), ea.x, ea.y, ea.w, ea.h);
             }
             check(probsZ.empty(), vmsg);
+        }
+
+        // ====================================================================
+        // FASE 17 — 0.9.6.19b (HOTFIX B): m1/m2/m3/D20/D21 NO DEVICE.
+        // (m1) o chip «N x» com slot próprio — espaçado quando cabe, AUSENTE
+        //      quando não cabe (nunca colado ao título); (m2) nenhum rótulo
+        //      «-0» no inspector com rotação -0.0; (D21) NENHUM widget com o
+        //      id 38 (kVpAddTicIdRetired) desenha dentro do rect do viewport
+        //      em estado nenhum + o menu ⋯ tem «Novo objeto» que abre o
+        //      plusMenu (o MESMO código do + da hierarquia); (D20) o bounding
+        //      do gizmo da câmara ≤4%/≤6% da área do viewport no device.
+        // ====================================================================
+        fase("FASE 17 — 0.9.6.19b HOTFIX: m1/m2/m3/D20/D21 medidos no device virtual");
+        {
+            g_editor.hierW = -1.0f;
+            g_editor.inspW = -1.0f;
+            g_editor.inspPinned = false;
+            g_editor.playMode = false;
+            g_editor.uiMode = false;
+            g_editor.audioMode = false;
+            g_toastT = 0.0f;
+            g_toast[0] = '\0';
+            g_bottom.bottomTab = 0;
+            g_bottom.drawerH = 0.0f;
+            g_editor.selected = Handle::invalid();
+            g_editor.multiSelectCount = 0;
+            frame();
+
+            const auto viewRect17 = [&]() {
+                const bool inspRight =
+                    g_editor.showInspector &&
+                    !(g_editor.uiMode || editor::inspectorCollapsed(g_editor));
+                return editor::centerRect(
+                    1600.0f, 720.0f, g_ui.safeArea(), currentDrawerH(),
+                    inspRight, g_editor.hierW, g_editor.inspW,
+                    !g_editor.uiMode && editor::inspectorCollapsed(g_editor));
+            };
+
+            // ---- 17.1 (D21) O PIN: nenhum id de "add" no viewport ----------
+            passo("17.1 D21: nenhum widget com o id 38 desenha no viewport "
+                  "(drawer fechado/aberto × trilho/inspetor)");
+            {
+                bool algum38 = false;
+                char onde[96] = "";
+                for (int drawer = 0; drawer <= 1; ++drawer) {
+                    for (int insp = 0; insp <= 1; ++insp) {
+                        g_bottom.bottomTab = drawer ? 1 : 0;
+                        g_bottom.drawerH = drawer ? 240.0f : 0.0f;
+                        g_editor.showInspector = insp != 0;
+                        g_editor.selected = Handle::invalid();
+                        frame();
+                        g_layoutExportPending = true;
+                        frame();
+                        const UiRect vr = viewRect17();
+                        for (const auto& e : g_ui.auditRecord().entries) {
+                            if (e.id == editor::vpchrome::kVpAddTicIdRetired &&
+                                e.w > 0.0f && e.h > 0.0f) {
+                                algum38 = true;
+                                std::snprintf(onde, sizeof(onde),
+                                              "drawer=%d insp=%d", drawer,
+                                              insp);
+                            }
+                        }
+                    }
+                }
+                check(!algum38, onde[0]
+                                    ? "17.1 D21 FALHOU — o id 38 desenha no viewport"
+                                    : "17.1 D21 nenhum id de add desenha dentro "
+                                      "do rect do viewport em estado nenhum");
+                // e o canto inferior direito fica LIMPO (o desenho de vidro
+                // do [+], que ali vivia, saiu — a orbit/drag lê a cena)
+                g_bottom.bottomTab = 0;
+                g_bottom.drawerH = 0.0f;
+                g_editor.showInspector = false;
+                frame();
+            }
+
+            // ---- 17.2 (D21) «Novo objeto» no menu ⋯ → o MESMO plusMenu ----
+            passo("17.2 D21: o menu ⋯ tem «Novo objeto» e abre o plusMenu de presets");
+            {
+                const editor::toolbar::TopBarLayout tl = editor::toolbar::topbarLayout(
+                    1600.0f, 720.0f, g_ui.safeArea(), false, false);
+                g_input.injectDown(0, tl.menu.x + tl.menu.w * 0.5f,
+                                   tl.menu.y + tl.menu.h * 0.5f);
+                frame();
+                g_input.injectUp(0);
+                frame();
+                check(g_editor.fileMenu, "17.2 D21 o menu ⋯ abriu");
+                // o «Novo objeto» fica abaixo da dobra no portrait — rola o
+                // scroll PRÓPRIO do menu até ele (o D14 garante as linhas
+                // alcançáveis; aqui alcançamos a linha nova)
+                g_ui.scrollSetOffset(editor::kMenuScrollId, 300.0f);
+                g_layoutExportPending = true;
+                frame();
+                const layout::Record& rm = g_ui.auditRecord();
+                const f32 wNovo = g_ui.fontWidth("Novo objeto");
+                bool achou = false;
+                f32 rx = 0.0f, ry = 0.0f;
+                for (const auto& e : rm.entries) {
+                    if (e.kind == layout::Entry::Label &&
+                        std::fabs(e.fullW - wNovo) < theme::dp(4.0f)) {
+                        achou = true;
+                        rx = e.x;
+                        ry = e.y;
+                    }
+                }
+                check(achou, "17.2 D21 «Novo objeto» está no menu (o registo prova)");
+                // o PNG P-05: o menu aberto COM a linha nova visível
+                {
+                    auto [pngM, jsM] = export16("editor");
+                    fileapi::writeAll("hotfix19b-device-menu-novo-objeto.png",
+                                      pngM.data(), pngM.size());
+                }
+                if (achou) {
+                    // o tap na LINHA do rótulo (o alvo é a linha inteira)
+                    g_input.injectDown(0, rx + wNovo * 0.5f,
+                                       ry + theme::dp(10.0f));
+                    frame();
+                    g_input.injectUp(0);
+                    frame();
+                    check(g_editor.plusMenu,
+                          "17.2 D21 o «Novo objeto» abre o PLUSMENU (o mesmo "
+                          "código do + da hierarquia — não é caminho novo)");
+                    check(!g_editor.fileMenu,
+                          "17.2 D21 o menu de ficheiro fechou com a escolha");
+                    // fecha o plusMenu (toque fora)
+                    g_input.injectDown(0, 1300.0f, 400.0f);
+                    frame();
+                    g_input.injectUp(0);
+                    frame();
+                    check(!g_editor.plusMenu,
+                          "17.2 D21 o plusMenu fecha com o toque fora");
+                }
+            }
+
+            // ---- 17.3 (m2) NENHUM «-0» no inspector com rotação -0.0 ------
+            passo("17.3 m2: rotação -0.0 desenha «0» (nenhum rótulo -0 no painel)");
+            {
+                const Handle hZ = g_scene.create("tic m2");
+                if (Tic* t = g_scene.get(hZ)) {
+                    Transform3D* tr = t->addComponent<Transform3D>();
+                    tr->pos = Vec3{0.0f, 0.0f, 0.0f};
+                    tr->rot = Quat::fromEuler(-0.0f, -0.0f, -0.0f);
+                    tr->updateWorld();
+                }
+                g_editor.selected = hZ;
+                g_editor.showInspector = true;
+                frame();
+                g_layoutExportPending = true;
+                frame();
+                const layout::Record& rz = g_ui.auditRecord();
+                const f32 wMenos0 = g_ui.fontWidth("-0");
+                const f32 wZero = g_ui.fontWidth("0");
+                // o scan fica DENTRO do painel do inspector (o x da sua
+                // borda esquerda — o mesmo filtro do 16.4) e fora da faixa
+                // do toast/tab bar no fundo
+                const f32 inspX17 = g_ui.contentWidthPx() -
+                                    safe::resolvePanels(
+                                        g_ui.contentWidthPx(), -1,
+                                        g_editor.inspW).insp;
+                const f32 yMax17 = 720.0f - theme::dp(40.0f);
+                u32 zeros = 0;
+                bool menosZero = false;
+                for (const auto& e : rz.entries) {
+                    if (e.kind != layout::Entry::Label || e.x < inspX17 ||
+                        e.y > yMax17) {
+                        continue;
+                    }
+                    if (std::fabs(e.fullW - wMenos0) < theme::dp(2.0f)) {
+                        menosZero = true;   // um rótulo com a largura de "-0"
+                    }
+                    if (std::fabs(e.fullW - wZero) < theme::dp(2.0f)) {
+                        ++zeros;
+                    }
+                }
+                check(zeros >= 3,
+                      "17.3 m2 os campos a zero desenham «0» (o format único "
+                      "passa pelas caixas)");
+                check(!menosZero,
+                      "17.3 m2 NENHUM rótulo com a largura de «-0» desenha "
+                      "(o zero negativo morreu — a mutação M-m2 volta)");
+                g_editor.selected = Handle::invalid();
+                g_editor.showInspector = false;
+            }
+
+            // ---- 17.4 (m1) O CHIP «N x» ESPAÇADO OU AUSENTE ---------------
+            passo("17.4 m1: o chip da multi-seleção nunca cola ao título "
+                  "(espaçado no painel largo, ausente no estreito)");
+            {
+                // (a) painel LARGO (hierW 316dp — o título «Hierarquia» a
+                //     16sp mede ~157dp com a fonte da casa; o slot precisa
+                //     de título+chip+ações): o chip desenha com ≥8dp de cada
+                //     lado
+                g_editor.multiSelectCount = 2;
+                g_editor.hierW = theme::dp(316.0f);   // px (o estado do drag)
+                frame();
+                g_layoutExportPending = true;
+                frame();
+                const layout::Record& rW = g_ui.auditRecord();
+                f32 chipX = -1.0f, chipW2 = 0.0f, titleEnd = -1.0f;
+                f32 dotsX = 1e9f;
+                const f32 wTitulo =
+                    g_ui.fontWidth("Hierarquia") *
+                    theme::fontScale(theme::kFontSection);
+                for (const auto& e : rW.entries) {
+                    if (e.id == editor::kHierMultiClearId && e.w > 0.0f) {
+                        chipX = e.x;
+                        chipW2 = e.w;
+                    }
+                    if (e.kind == layout::Entry::Label &&
+                        std::fabs(e.fullW - wTitulo) < theme::dp(6.0f) &&
+                        e.x < theme::dp(60.0f)) {
+                        titleEnd = e.x + e.w;   // o título desenhado
+                    }
+                    // o ⋮ da hierarquia desenha 3 pontos 3×3 — o MENOR x de
+                    // um ponto à direita do chip
+                    if (e.kind == layout::Entry::Panel &&
+                        nearEqF(e.w, theme::dp(3.0f), 0.5f) &&
+                        e.x > chipX + chipW2 && e.x < dotsX) {
+                        dotsX = e.x;
+                    }
+                }
+                {
+                    u32 nChip = 0, nTit = 0;
+                    f32 wTitRec = -1.0f;
+                    for (const auto& e : rW.entries) {
+                        if (e.id == editor::kHierMultiClearId && e.w > 0.0f) {
+                            ++nChip;
+                        }
+                        if (e.kind == layout::Entry::Label &&
+                            e.x < theme::dp(60.0f)) {
+                            ++nTit;
+                            wTitRec = e.fullW;
+                        }
+                    }
+                    std::printf("    [dbg17.4] nChip=%u nTit=%u wTitulo=%.1f wTitRec=%.1f\n",
+                                (unsigned)nChip, (unsigned)nTit,
+                                (double)wTitulo, (double)wTitRec);
+                }
+                // o PNG P-05: o cabeçalho com o chip ESPAÇADO
+                {
+                    auto [pngC, jsC] = export16("editor");
+                    fileapi::writeAll(
+                        "hotfix19b-device-hier-chip-espacado.png",
+                        pngC.data(), pngC.size());
+                }
+                check(chipX > 0.0f && titleEnd > 0.0f,
+                      "17.4 m1 no painel largo o chip e o título desenham");
+                if (chipX > 0.0f && titleEnd > 0.0f) {
+                    check(chipX >= titleEnd + theme::dp(8.0f) - 0.5f,
+                          "17.4 m1 o chip nasce ≥8dp DEPOIS do título (a "
+                          "colagem «Hierarquia1 x» morre)");
+                    if (dotsX < 1e8f) {
+                        check(chipX + chipW2 <= dotsX - theme::dp(8.0f) + 0.5f,
+                              "17.4 m1 o chip fica ≥8dp ANTES do ⋮ (slot "
+                              "próprio, espaço e propósito)");
+                    }
+                }
+                // (b) painel ESTREITO (140dp — o device): o chip NÃO desenha
+                g_editor.hierW = theme::dp(140.0f);   // px
+                frame();
+                g_layoutExportPending = true;
+                frame();
+                bool chipEstreito = false;
+                for (const auto& e : g_ui.auditRecord().entries) {
+                    if (e.id == editor::kHierMultiClearId && e.w > 0.0f) {
+                        chipEstreito = true;
+                    }
+                }
+                check(!chipEstreito,
+                      "17.4 m1 no painel estreito o chip NÃO desenha (a "
+                      "degradação honesta — nada colado)");
+                g_editor.multiSelectCount = 0;
+                g_editor.hierW = -1.0f;
+            }
+
+            // ---- 17.5 (D20) O CONTRATO MEDÍVEL NO DEVICE ------------------
+            passo("17.5 D20: o bounding do gizmo da câmara ≤4%/≤6% da área "
+                  "do viewport no device @2.0 (o dump do script de medidas)");
+            {
+                const Handle hC20 = g_scene.create("cam 20");
+                if (Tic* t = g_scene.get(hC20)) {
+                    Transform3D* tr = t->addComponent<Transform3D>();
+                    tr->pos = Vec3{0.0f, 0.0f, 0.0f};
+                    CameraComp* cc = t->addComponent<CameraComp>();
+                    cc->fovY = 60.0f;
+                    cc->farZ = 2000.0f;
+                    tr->updateWorld();
+                }
+                g_editor.selected = Handle::invalid();
+                frame();
+                const UiRect vr = viewRect17();
+                const Mat4 vp17 = Mat4::mul(g_camera.proj(vr.w / vr.h),
+                                            g_camera.view());
+                Transform3D* tr20 =
+                    g_scene.get(hC20)->getComponent<Transform3D>();
+                const f32 cap = camgizmo::previewCapWorld(
+                    vp17, vr.w, vr.h, g_camera.eye(), tr20->pos);
+                const camgizmo::Frustum f20 = camgizmo::computeFrustum(
+                    *tr20, *g_scene.get(hC20)->getComponent<CameraComp>(),
+                    1.0f, cap);
+                const UiRect bSem = camgizmo::gizmoBoundsPx(
+                    vp17, 1600.0f, 720.0f, f20, false, vr.w, vr.h, vr.x,
+                    vr.y);
+                const UiRect bCom = camgizmo::gizmoBoundsPx(
+                    vp17, 1600.0f, 720.0f, f20, true, vr.w, vr.h, vr.x,
+                    vr.y);
+                const f32 area = vr.w * vr.h;
+                const f32 pctSem = (bSem.w * bSem.h) / area * 100.0f;
+                const f32 pctCom = (bCom.w * bCom.h) / area * 100.0f;
+                check(bSem.w > 0.0f,
+                      "17.5 D20 o bounding SEM seleção mede");
+                check(pctSem <= 4.0f,
+                      "17.5 D20 o bounding ocupa ≤4% da área do viewport "
+                      "SEM seleção (o pin)");
+                check(pctCom <= 6.0f,
+                      "17.5 D20 o bounding ocupa ≤6% COM seleção (o pin)");
+                // o dump do script de medidas (método PASSO 0 — o gate
+                // scripts/gizmo_camera_medidas.py revalida ESTE ficheiro)
+                char js[512];
+                std::snprintf(
+                    js, sizeof(js),
+                    "{\n  \"release\": \"0.9.6.19b\",\n  \"item\": \"D20\",\n"
+                    "  \"densidade\": 2.0,\n  \"viewport_px\": [%.1f, %.1f],\n"
+                    "  \"preview_dp_alvo\": [48.0, 120.0],\n"
+                    "  \"preview_cap_mundo\": %.4f,\n"
+                    "  \"bounding_sem_px\": [%.1f, %.1f, %.1f, %.1f],\n"
+                    "  \"bounding_com_px\": [%.1f, %.1f, %.1f, %.1f],\n"
+                    "  \"pct_area_sem\": %.3f,\n  \"pct_area_com\": %.3f,\n"
+                    "  \"pin_sem_pct\": 4.0,\n  \"pin_com_pct\": 6.0\n}\n",
+                    (double)vr.w, (double)vr.h, (double)cap, (double)bSem.x,
+                    (double)bSem.y, (double)bSem.w, (double)bSem.h,
+                    (double)bCom.x, (double)bCom.y, (double)bCom.w,
+                    (double)bCom.h, (double)pctSem, (double)pctCom);
+                fileapi::writeAll("hotfix19b-gizmo-medidas.json", js,
+                                  std::strlen(js));
+                // o PNG P-05 do estado pequeno (seleção desligada)
+                auto [png20, js20] = export16("editor");
+                fileapi::writeAll("hotfix19b-device-camara-pequena.png",
+                                  png20.data(), png20.size());
+                g_editor.selected = hC20;
+                frame();
+                auto [png21, js21] = export16("editor");
+                fileapi::writeAll("hotfix19b-device-camara-selecionada.png",
+                                  png21.data(), png21.size());
+                g_editor.selected = Handle::invalid();
+            }
+
+            // ---- o validador inteiro ao device (o hotfix não abre exceções)
+            {
+                frame();
+                const layout::Record& rZ = g_ui.auditRecord();
+                const auto probsZ = layout::validate(rZ);
+                char vmsg[256];
+                std::snprintf(vmsg, sizeof(vmsg),
+                              "17.6 o editor do hotfix 0.9.6.19b passa o "
+                              "VALIDADOR INTEIRO (0/0)%s",
+                              probsZ.empty() ? "" : " — ver o log acima");
+                for (const auto& pr : probsZ) {
+                    const layout::Entry& ea = rZ.entries[pr.ia];
+                    std::printf("    [validador] %s: %s na entrada %u (kind=%s x=%.0f y=%.0f w=%.0f h=%.0f)\n",
+                                pr.sevName(), pr.ruleName(), pr.ia,
+                                ea.kindName(), ea.x, ea.y, ea.w, ea.h);
+                }
+                check(probsZ.empty(), vmsg);
+            }
         }
 
         onAppCmd(&app16, APP_CMD_TERM_WINDOW);

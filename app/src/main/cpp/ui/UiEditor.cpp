@@ -50,7 +50,7 @@ bool uiSliderRow(UiContext& ui, u64 id, f32 x, f32 w, f32 rowTop, f32 rowH,
     const bool changed =
         ui.slider(id, x + 84.0f, rowTop, 118.0f, rowH, minV, maxV, value);
     char val[24];
-    std::snprintf(val, sizeof(val), fmt, value);
+    formatNum(val, sizeof(val), fmt, value);   // 0.9.6.19b (m2): -0 → 0
     if (ui.hasFont()) {
         const f32 tw = ui.fontWidth(val);
         ui.label(x + w - kPad - tw, baseline, val, theme::TEXT);

@@ -1,6 +1,20 @@
 #pragma once
-// ui/CamGizmo.h — GIZMO DA CÂMARA DE CENA (0.7.7) · D17 (0.9.6.19): A
-// CÂMARA É UM OBJETO PEQUENO QUE VÊ, NÃO UM CONE GIGANTE.
+// ui/CamGizmo.h — GIZMO DA CÂMARA DE CENA (0.7.7) · D17 (0.9.6.19) · D20
+// (0.9.6.19b): A CÂMARA É UM OBJETO AINDA MAIS PEQUENO (o contrato medível).
+//
+// 0.9.6.19b — HOTFIX D20 (a spec do dono, sobre o D17):
+//   (a) GLIFO 20dp (era 24) CONSTANTE EM ECRÃ na posição da câmara;
+//   (b) FRUSTUM de PREVIEW com comprimento CONSTANTE EM ECRÃ =
+//       clamp(12% da distância olho→câmara, 48..120dp) — o gizmo NÃO
+//       desenha o extent real do far plane (o cap antigo de ~80dp de
+//       altura morreu); o frustum REAL do render NÃO MUDA — só o gizmo;
+//   (c) HANDLES 10dp (era 12) nos 4 cantos, SÓ com seleção;
+//   (d) linhas 1-2px (mudo ~35% sem seleção, âmbar com seleção);
+//   (e) o gizmo de mover continua NO GLIFO e a ordem de hit-test do D17
+//       fica INTACTA (gizmo > handles > frustum intocável);
+//   (f) PIN medível: o bounding do gizmo ≤6% da área do viewport COM
+//       seleção e ≤4% SEM — medido pelo script de medidas (método PASSO 0)
+//       em 2 densidades (gizmoBoundsPx + o FASE 17 do device virtual).
 //
 // 0.9.6.19 — HOTFIX D17 (a spec do dono, que substitui o D13):
 //   (a) GLIFO de câmara ~24dp CONSTANTE EM ECRÃ na posição da câmara (o
@@ -51,6 +65,7 @@
 #include "core/Handle.h"    // Handle (seleção por toque devolve o TIC)
 #include "core/Types.h"
 #include "math/Math.h"
+#include "ui/ScrollMath.h"  // 0.9.6.19b (D20): UiRect (o bounding do gizmo)
 
 namespace vv {
 
@@ -73,15 +88,27 @@ bool visible(bool playMode, bool uiMode);
 inline constexpr f32 kVisualFarCap = 12.0f;
 
 // ---- 0.9.6.19 (D17) — AS MEDIDAS DO OBJETO PEQUENO (fontes únicas) ------
-inline constexpr f32 kGlyphDp      = 24.0f;  // (a) o glifo ~24dp constante
+// 0.9.6.19b (D20): o glifo 20dp e o handle 10dp (a câmara AINDA MAIS
+// PEQUENA — o contrato medível do dono).
+inline constexpr f32 kGlyphDp      = 20.0f;  // (a) o glifo 20dp constante
 inline constexpr f32 kGlyphHitDp   = 18.0f;  // o raio de toque do glifo
-                                             // (12dp do glifo + dedo)
-inline constexpr f32 kHandleDp     = 12.0f;  // (c) o handle de canto 12dp
-inline constexpr f32 kHandleHitDp  = 16.0f;  // o hit do canto (12 + dedo)
+                                             // (10dp do glifo + dedo — o
+                                             // agarre fácil mantém-se)
+inline constexpr f32 kHandleDp     = 10.0f;  // (c) o handle de canto 10dp
+inline constexpr f32 kHandleHitDp  = 16.0f;  // o hit do canto (10 + dedo)
 inline constexpr f32 kMutedAlpha   = 0.35f;  // (b) o cinza mudo ~35% alfa
 // o traço do frustum em PX DE ECRÃ (a spec do dono: «frustum fino (1-2px)»)
 inline constexpr f32 kFrustumLinePx = 1.0f;   // sem seleção
 inline constexpr f32 kFrustumLinePxSel = 2.0f; // com seleção
+
+// ---- 0.9.6.19b (D20) — O FRUSTUM DE PREVIEW (comprimento CONSTANTE) ------
+// O comprimento desenhado (EM ECRÃ) é clamp(12% da distância olho→câmara,
+// 48..120dp) — não cresce com o zoom (o mundo por dp muda, o dp não) e
+// NUNCA é o extent real do far plane. O frustum do RENDER (gameProj) não
+// vê nada disto.
+inline constexpr f32 kPreviewDistPct = 0.12f;  // 12% da distância olho→câmara
+inline constexpr f32 kPreviewMinDp   = 48.0f;  // o piso do comprimento
+inline constexpr f32 kPreviewMaxDp   = 120.0f; // o teto do comprimento
 
 // alvo de toque dos TICs 3D no picker de prioridade (px — o MESMO
 // generoso do grab-lock: alvo mínimo de toque do Android)
@@ -108,13 +135,14 @@ struct Frustum {
 void planeHalfExtents(const CameraComp& cam, f32 dist, f32 aspect,
                       f32& halfW, f32& halfH);
 
-// o frustum (aspect = w/h do render do jogo). 0.9.6.1 (G1-4): o cap VISUAL
-// por TAMANHO NO ECRÃ — a pirâmide da câmara deixa de dominar a viewport: o
-// comprimento do cone é o que projetar o far a ~80dp de altura, a partir de
-// px-por-unidade MEDIDO no olho pelo próprio vp. Devolve SEMPRE um cap
-// saneado (piso 1.5, teto kVisualFarCap).
-f32 visualCapForScreen(const Mat4& vp, f32 sw, f32 sh, const Vec3& eye,
-                       f32 fovYDeg);
+// ---- 0.9.6.19b (D20) — O CAP DO PREVIEW (substitui o cap G1-4 da 0.7.10):
+// devolve o far VISUAL em unidades de mundo que projeta EXATAMENTE
+// clamp(12%·|olho→câmara|, 48..120dp) de comprimento no ecrã — o ppu mede-se
+// no OLHO da câmara de cena (projeta camPos e camPos+X pelo MESMO vp, o
+// método da 0.7.10). Puro/afervel; a distância é a da ORBIT de edição
+// (eyeEditor) ao olho da câmara de cena (camPos).
+f32 previewCapWorld(const Mat4& vp, f32 sw, f32 sh, const Vec3& eyeEditor,
+                    const Vec3& camPos);
 // `visualFarCap` clampa o COMPRIMENTO VISUAL (far desenhado =
 // min(farZ, visualFarCap); default kVisualFarCap — passar um valor
 // maior devolve a geometria real).
@@ -127,18 +155,29 @@ Frustum computeFrustum(const Transform3D& tr, const CameraComp& cam,
 // testes e o Play ficam IGUAIS). O ASPECTO do frustum continua sw/sh da
 // SUPERFÍCIE (o jogo renderiza o ecrã todo em Play — o shape não muda).
 
-// desenha UMA câmara no estado D17: glifo + frustum fino (mudo a 35% sem
+// desenha UMA câmara no estado D17/D20: glifo + frustum fino (mudo a 35% sem
 // seleção, âmbar com seleção); `selected` acrescenta os HANDLES de canto
-// 12dp. Editor-only (o chamador faz o gate).
+// 10dp (D20). Editor-only (o chamador faz o gate).
 void drawFrustum(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
                  const Frustum& f, bool selected, f32 vw = 0.0f,
                  f32 vh = 0.0f, f32 ox = 0.0f, f32 oy = 0.0f);
 
 // desenha TODAS as câmaras visíveis da cena (o loop do main; cada frustum
-// com o aspeto do ecrã; a selecionada ganha os handles)
+// com o aspeto do ecrã; a selecionada ganha os handles). 0.9.6.19b (D20):
+// recebe o OLHO da orbit de edição — o comprimento do preview é
+// clamp(12%·dist(olho→câmara), 48..120dp) constante em ecrã.
 void drawAll(UiContext& ui, Scene& scene, const Mat4& vp, f32 sw, f32 sh,
-             Handle selected, f32 vw = 0.0f, f32 vh = 0.0f, f32 ox = 0.0f,
-             f32 oy = 0.0f);
+             Handle selected, const Vec3& eyeWorld, f32 vw = 0.0f,
+             f32 vh = 0.0f, f32 ox = 0.0f, f32 oy = 0.0f);
+
+// ---- 0.9.6.19b (D20) — O BOUNDING DO GIZMO (o pin medível) ----------------
+// o rect (px de ecrã) que abrange TUDO o que o gizmo de UMA câmara desenha:
+// glifo + frustum (near/far/cone) + handles (quando selecionado). O método
+// de medidas do pin (≤6% com seleção / ≤4% sem, 2 densidades) parte daqui —
+// a MESMA projeção do draw (gizmo::projectPoint).
+UiRect gizmoBoundsPx(const Mat4& vp, f32 sw, f32 sh, const Frustum& f,
+                      bool selected, f32 vw = 0.0f, f32 vh = 0.0f,
+                      f32 ox = 0.0f, f32 oy = 0.0f);
 
 // ---- hit-test ------------------------------------------------------------------
 

@@ -3222,15 +3222,15 @@ TEST(regress_divisores_arrastaveis) {
         const editor::vpchrome::Layout ldev =
             editor::vpchrome::layout(UiRect{200.0f, 56.0f, 288.0f, 208.0f});
         EXPECT(ldev.railVisible && ldev.railCols >= 2u);   // colunas
-        // a fila do topo DESCE para baixo do rail (nunca sai do rect — o
-        // [+] vive sempre no fundo-direito, a spec PASSO 3)
+        // a fila do topo DESCE para baixo do rail (nunca sai do rect —
+        // 0.9.6.19b · D21: o [+] do fundo-direito MORREU; o canto fica limpo)
         EXPECT(ldev.quick[0].y > ldev.rail[0].y + ldev.rail[0].h);
         // TODOS os alvos ≥40dp (PASSO 1: a lei de ouro) e DENTRO do rect
-        // (o stack TRANBORDAVA antes do Grupo D)
+        // (o stack TRANBORDAVA antes do Grupo D). D21: os alvos são N−1 (10)
         const UiRect all[] = {ldev.rail[0],   ldev.rail[1],  ldev.rail[2],
                               ldev.rail[3],   ldev.rail[4],  ldev.quick[0],
                               ldev.quick[1],  ldev.quick[2], ldev.quick[3],
-                              ldev.gizmoBtn,  ldev.addTicBtn};
+                              ldev.gizmoBtn};
         for (const UiRect& r : all) {
             EXPECT(r.w >= 40.0f - 0.01f && r.h >= 40.0f - 0.01f);
             EXPECT(r.x >= 200.0f - 0.01f && r.y >= 56.0f - 0.01f);
@@ -3244,9 +3244,10 @@ TEST(regress_divisores_arrastaveis) {
         EXPECT(!ltiny.railVisible);
         // o rect de 200×60 não dá nem para a fila do topo ao lado do gizmo
         // nem para a fila abaixo de um rail inexistente — a fila ESCONDE
-        // (os cantos ficam: cabem sempre)
-        EXPECT(ltiny.quick[0].w == 0.0f && ltiny.addTicBtn.w > 0.0f &&
-               ltiny.gizmoBtn.w > 0.0f);
+        // (o gizmo fica: cabe sempre. D21: o canto do [+], que aqui ficava,
+        // já não existe — nada no fundo-direito)
+        EXPECT(ltiny.quick[0].w == 0.0f && ltiny.gizmoBtn.w > 0.0f);
+        EXPECT(ltiny.gizmoBtn.y + ltiny.gizmoBtn.h < 56.0f + 60.0f);
     }
 }
 
@@ -3982,11 +3983,12 @@ TEST(regress_hierarquia_contrato) {
             const editor::vpchrome::Layout L = editor::vpchrome::layout(view);
 
             // ---- CONTRATO §2.4: nada sai do rect da viewport central
-            // (PASSO 3: o rail de ferramentas + a fila do topo + os cantos)
-            const UiRect targets[11] = {
+            // (PASSO 3: o rail de ferramentas + a fila do topo + o gizmo.
+            // D21 (0.9.6.19b): o [+] do fundo-direito saiu — os alvos são
+            // N−1 (10) e o §1/§3 do contrato perderam o [+] e kCornerBtn)
+            const UiRect targets[10] = {
                 L.rail[0], L.rail[1], L.rail[2], L.rail[3], L.rail[4],
-                L.quick[0], L.quick[1], L.quick[2], L.quick[3], L.gizmoBtn,
-                L.addTicBtn};
+                L.quick[0], L.quick[1], L.quick[2], L.quick[3], L.gizmoBtn};
             for (const UiRect& r : targets) {
                 if (r.w > 0.0f && r.h > 0.0f) {   // degenerado = escondido
                     EXPECT_MSG(safe::rectInside(r, view),
@@ -3996,7 +3998,8 @@ TEST(regress_hierarquia_contrato) {
                 }
             }
             EXPECT(safe::rectInside(L.gizmoPanel, view));
-            EXPECT(safe::rectInside(L.plusPanel, view));
+            // D21 (0.9.6.19b): o plusPanel FOI REMOVIDO com o [+] (nada a
+            // conter — o canto inferior direito fica limpo)
             if (L.railVisible) {
                 EXPECT(safe::rectInside(L.railPanel, view));
             }
@@ -4096,8 +4099,8 @@ TEST(regress_texto_strip_campo) {
                               theme::dp(wDp), theme::dp(hDp)};
             const editor::vpchrome::Layout L = editor::vpchrome::layout(view);
             // (a) NADA full-width (a regra do dono — a strip é impossível)
-            const UiRect bands[4] = {L.railPanel, L.quickPanel,
-                                     L.gizmoPanel, L.plusPanel};
+            const UiRect bands[3] = {L.railPanel, L.quickPanel,
+                                     L.gizmoPanel};
             for (const UiRect& r : bands) {
                 if (r.w > 0.0f) {
                     EXPECT_MSG(r.w < view.w * 0.90f,
@@ -4107,11 +4110,12 @@ TEST(regress_texto_strip_campo) {
                                tag, wDp, r.w / theme::dp(1.0f));
                 }
             }
-            // (b) os 11 alvos ≥40dp e DENTRO do rect (a lei de ouro)
-            const UiRect all[11] = {L.rail[0],   L.rail[1],   L.rail[2],
+            // (b) os 10 alvos ≥40dp e DENTRO do rect (a lei de ouro; D21:
+            // o [+] saiu — N−1)
+            const UiRect all[10] = {L.rail[0],   L.rail[1],   L.rail[2],
                                     L.rail[3],   L.rail[4],   L.quick[0],
                                     L.quick[1],  L.quick[2],  L.quick[3],
-                                    L.gizmoBtn,  L.addTicBtn};
+                                    L.gizmoBtn};
             for (const UiRect& r : all) {
                 if (r.w > 0.0f && r.h > 0.0f) {
                     EXPECT_MSG(r.w >= theme::dp(40.0f) - 0.5f &&
@@ -4138,8 +4142,12 @@ TEST(regress_texto_strip_campo) {
         // o device real com o inspector aberto: 456×244dp
         const editor::vpchrome::Layout ldev = checkLayout("device", 456.0f, 244.0f);
         EXPECT(ldev.railVisible);
-        EXPECT(ldev.addTicBtn.x + ldev.addTicBtn.w + theme::dp(8.0f) <=
+        EXPECT(ldev.gizmoBtn.x + ldev.gizmoBtn.w + theme::dp(8.0f) <=
                ldev.view.x + ldev.view.w + 0.5f);
+        // D21 (0.9.6.19b): o fundo-direito do viewport fica LIMPO — o
+        // gizmo (topo-direito) é o alvo mais a sul do lado direito
+        EXPECT(ldev.gizmoBtn.y + ldev.gizmoBtn.h <=
+               ldev.view.y + ldev.view.h * 0.5f);
 
         // (c) a ESCADA: 220dp — o rail 2 colunas e a fila DESCE
         {
@@ -4152,13 +4160,13 @@ TEST(regress_texto_strip_campo) {
         {
             const editor::vpchrome::Layout lt = checkLayout("140dp", 140.0f, 208.0f);
             EXPECT(lt.quick[0].w == 0.0f);   // a fila esconde (honesto)
-            EXPECT(lt.gizmoBtn.w > 0.0f && lt.addTicBtn.w > 0.0f);
+            EXPECT(lt.gizmoBtn.w > 0.0f);    // o gizmo fica (D21: sem o [+])
         }
-        // 72dp — nem o rail cabe (esconde); os cantos ficam
+        // 72dp — nem o rail cabe (esconde); o gizmo fica
         {
             const editor::vpchrome::Layout vtt = checkLayout("72dp", 72.0f, 208.0f);
             EXPECT(!vtt.railVisible);
-            EXPECT(vtt.gizmoBtn.w > 0.0f && vtt.addTicBtn.w > 0.0f);
+            EXPECT(vtt.gizmoBtn.w > 0.0f);
         }
     }
     theme::setDensity(1.0f);
@@ -4205,7 +4213,7 @@ TEST(regress_viewport_rect_segue) {
     {
         const editor::vpchrome::Layout L = editor::vpchrome::layout(aberto);
         EXPECT(safe::rectInside(L.railPanel, aberto));
-        EXPECT(safe::rectInside(L.addTicBtn, aberto));
+        EXPECT(safe::rectInside(L.gizmoBtn, aberto));   // D21: o gizmo substitui o [+] na prova do canto
         EXPECT(L.rail[0].y >= aberto.y);
     }
 
@@ -4793,23 +4801,35 @@ TEST(regress_hotfix_defeitos) {
         EXPECT(b164.resetIcon && nearEqF(b164.resetW, 20.0f, 0.01f));
         const f32 total164 = 3.0f * b164.boxW + 2.0f * 8.0f + 8.0f + b164.resetW;
         EXPECT(total164 <= 164.0f + 0.01f);   // NADA fora do rect
-        // o PISO 48 com o chip: usable = 3×48+2×8+8+40 = 208dp exato
+        // o PISO 48 com o chip: usable = 3×48+2×8+8+40 = 208dp exato.
+        // 0.9.6.19b (m3): a 208 úteis (≥ limiar 168) a LETRA É OBRIGATÓRIA —
+        // como 48−12−14 = 22dp < piso 26, o PADDING DA LINHA cede (as caixas
+        // usam a largura toda) e a caixa re-computa a 56: letra + valor
+        // coexistem (o regime antigo boxW 48 com a letra a saltar morreu)
         const editor::TransformBudget b208 = editor::transformRowBudget(208.0f);
-        EXPECT(nearEqF(b208.boxW, 48.0f, 0.01f) &&
-               !b208.resetIcon && nearEqF(b208.resetW, 40.0f, 0.01f));
-        // o largo (≥256dp úteis): caixas 64 + chip 40
+        EXPECT_MSG(nearEqF(b208.boxW, 56.0f, 0.01f) && !b208.resetIcon &&
+                       nearEqF(b208.resetW, 40.0f, 0.01f) && b208.axisLabels &&
+                       b208.rowPadDropped,
+                   "D2+m3: a 208 úteis o regime é letra obrigatória + "
+                   "padding cedido (boxW %.1f)",
+                   (double)b208.boxW);
+        // o largo (≥256dp úteis): caixas 64 + chip 40 (letra + valor cabem
+        // SEM ceder o padding — o valor fica com 34dp ≥ piso)
         const editor::TransformBudget b260 = editor::transformRowBudget(260.0f);
         EXPECT(nearEqF(b260.boxW, 64.0f, 0.01f) && !b260.resetIcon);
         // INVARIANTE: em QUALQUER largura que a casa produz (o piso do
         // painel 180dp → 164dp úteis; abaixo disso a scissor do painel é
-        // a última defesa, documentada) a linha inteira nunca passa do útil
+        // a última defesa, documentada) a linha inteira nunca passa do
+        // útil — com o padding dropado a linha usa o CHEIO (útil + 24;
+        // a regra m3/R1 do dono)
         for (f32 u = 164.0f; u <= 320.0f; u += 4.0f) {
             const editor::TransformBudget b = editor::transformRowBudget(u);
             const f32 total =
                 3.0f * b.boxW + 2.0f * 8.0f + 8.0f + b.resetW;
-            EXPECT_MSG(total <= u + 0.01f,
+            const f32 util = u + (b.rowPadDropped ? 24.0f : 0.0f);
+            EXPECT_MSG(total <= util + 0.01f,
                        "D2: a linha transform transborda (%.1f > %.1f)",
-                       (double)total, (double)u);
+                       (double)total, (double)util);
             EXPECT(b.boxW >= 16.0f);
         }
     }
@@ -4999,13 +5019,16 @@ TEST(regress_hotfix_defeitos) {
                        c.nome, (double)editor::transformValueSpace(b),
                        (double)editor::kTfValueMinDp);
             // a ORDEM do dono: a letra só sai DEPOIS de esgotada a caixa
-            // inteira; e a linha INTEIRA continua dentro do útil
+            // inteira; e a linha INTEIRA continua dentro do útil — D21 nota:
+            // com o PADDING DROPADO a linha usa o cheio (útil + 24)
             const f32 rowPad = b.rowPadDropped ? 4.0f : 16.0f;
             const f32 total = 3.0f * b.boxW + 2.0f * 8.0f + 8.0f + b.resetW +
                               2.0f * (16.0f - rowPad);
-            EXPECT_MSG(total <= c.util + 0.01f,
+            const f32 utilEfetivo =
+                c.util + (b.rowPadDropped ? 24.0f : 0.0f);
+            EXPECT_MSG(total <= utilEfetivo + 0.01f,
                        "R1 %s: a linha transborda (%.1f > %.1f)",
-                       c.nome, (double)total, (double)c.util);
+                       c.nome, (double)total, (double)utilEfetivo);
             // a PROVA DO VALOR NÃO-VAZIO com a fonte real: um valor típico
             // da linha (%.2g — curtos) cabe INTEIRO no espaço do orçamento
             FontAtlas font;
@@ -5033,6 +5056,42 @@ TEST(regress_hotfix_defeitos) {
         EXPECT(b244.axisLabels);
         // MUTAÇÃO M-R1 (a fórmula antiga): maxVw = boxW−28 a 164 úteis dá
         // 40−28 = 12dp < kTfValueMinDp — vermelho (o pin acima apanha-a)
+
+        // ---- 0.9.6.19b (m3): A LIMIAR DA LETRA (o dono: «a letra só sai
+        // abaixo de ~200dp de painel; entre 200 e 260 letra+valor coexistem;
+        // o valor nunca sai»). A convenção do draw: útil = painel − 2×kPad
+        // → o limiar kTfAxisMinUsableDp = 168 úteis = ~200dp de painel.
+        {
+            // a 212dp de painel (180 úteis) a letra FICA e o piso cumpre-se
+            // (o padding da linha cede antes)
+            const editor::TransformBudget b212 =
+                editor::transformRowBudget(180.0f);
+            EXPECT_MSG(b212.axisLabels,
+                       "m3: a 212dp de painel a letra do eixo TEM de ficar "
+                       "(letra+valor coexistem — a mutação M-m3 volta a "
+                       "dropá-la)");
+            EXPECT_MSG(editor::transformValueSpace(b212) >=
+                           editor::kTfValueMinDp - 0.01f,
+                       "m3: a 212dp o piso do valor cumpre-se COM a letra "
+                       "(%.1fdp)",
+                       (double)editor::transformValueSpace(b212));
+            // a INVARIANTE da limiar: acima de 168 úteis a letra NUNCA sai;
+            // abaixo, pode — mas o valor nunca fica vazio
+            for (f32 util = 140.0f; util <= 320.0f; util += 2.0f) {
+                const editor::TransformBudget bb =
+                    editor::transformRowBudget(util);
+                if (util >= editor::kTfAxisMinUsableDp) {
+                    EXPECT_MSG(bb.axisLabels,
+                               "m3: a %.0f úteis (≥limiar) a letra saiu",
+                               (double)util);
+                }
+                EXPECT_MSG(editor::transformValueSpace(bb) >= 20.0f,
+                           "m3: a %.0f úteis o valor fica sem espaço legível "
+                           "(%.1fdp — o valor NUNCA sai)",
+                           (double)util,
+                           (double)editor::transformValueSpace(bb));
+            }
+        }
     }
 
     // ---- (11) D19 (0.9.6.19): O TOGGLE «visível» MOSTRA O ESTADO -------
@@ -5093,5 +5152,100 @@ TEST(regress_hotfix_defeitos) {
                        (double)knobXOn, (double)knobXOff);
         }
         ui.auditEnd();
+    }
+
+    // ---- (12) m2 (0.9.6.19b): O FORMAT ÚNICO NORMALIZA «-0» → «0» --------
+    // O dono: «função única de format de números no inspector normaliza
+    // -0 → 0; usada por todos os campos. Pin: campo com -0.0 desenha "0".»
+    // A mutação M-m2 (a normalização morta — snprintf cru) fica VERMELHA
+    // no caso 1 (o «-0» volta).
+    {
+        char buf[24];
+        // (1) o caso do dono: %.2g de -0.0 → "0" (era "-0")
+        editor::formatNum(buf, sizeof(buf), "%.2g", -0.0f);
+        EXPECT_MSG(std::strcmp(buf, "0") == 0,
+                   "m2: %.2g de -0.0 desenhou «%s» (o «-0» tem de morrer)",
+                   buf);
+        // (2) %.1f de -0.04 arredonda a -0.0 → "0.0"
+        editor::formatNum(buf, sizeof(buf), "%.1f", -0.04f);
+        EXPECT_MSG(std::strcmp(buf, "0.0") == 0,
+                   "m2: %.1f de -0.04 desenhou «%s» (o «-0.0» tem de morrer)",
+                   buf);
+        // (3) %.0f de -0.4 → "0"
+        editor::formatNum(buf, sizeof(buf), "%.0f", -0.4f);
+        EXPECT_MSG(std::strcmp(buf, "0") == 0,
+                   "m2: %.0f de -0.4 desenhou «%s»", buf);
+        // (4) zero positivo já era "0" (a normalização não estraga)
+        editor::formatNum(buf, sizeof(buf), "%.2g", 0.0f);
+        EXPECT(std::strcmp(buf, "0") == 0);
+        // (5) valores NÃO-zero mantêm o sinal (a cura não come números)
+        editor::formatNum(buf, sizeof(buf), "%.2g", -1.5f);
+        EXPECT(std::strcmp(buf, "-1.5") == 0);
+        editor::formatNum(buf, sizeof(buf), "%.2g", -0.0001f);
+        EXPECT(std::strcmp(buf, "-0.0001") == 0);
+        editor::formatNum(buf, sizeof(buf), "%.1f", 12.5f);
+        EXPECT(std::strcmp(buf, "12.5") == 0);
+    }
+
+    // ---- (13) m1 (0.9.6.19b): O CHIP «N x» TEM SLOT PRÓPRIO -------------
+    // O dono: «header da hierarquia = título + (chip opcional espaçado) +
+    // ações, sem colagem, em 2 densidades.» O chip nasce SOBRE o título em
+    // painel estreito («Hierarquia1 x») — o slot hierChipSlot garante os
+    // 8dp de cada lado ou NÃO DESENHA.
+    {
+        const f32 chipW = theme::dp(36.0f);   // o texto "1 x" + 16dp de folga
+        // a largura do título MEDIDA pela fonte real (o draw mede o MESMO
+        // caminho: fontWidth × fontScale(16sp))
+        FontAtlas font;
+        const char* fp = FONT_FIXTURE;
+        ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+        UiContext ui;
+        ui.init();
+        ui.setFont(&font);
+        auto probe = [&](f32 density) {
+            theme::setDensity(density);
+            const f32 titleW = ui.fontWidth("Hierarquia") *
+                               theme::fontScale(theme::kFontSection);
+            // a largura MÍNIMA do painel em que o chip TEM de caber:
+            // pad + título + vão + chip + vão + 2 botões + pad (a conta
+            // exata do slot — o teste não assume o tamanho da fonte)
+            const f32 minW = theme::dp(16.0f) + titleW + theme::dp(8.0f) +
+                             chipW + theme::dp(8.0f) +
+                             2.0f * theme::dp(28.0f) + theme::dp(16.0f);
+            // (a) no mínimo exato + folga: cabe com os vãos ≥8dp
+            const editor::HierChipSlot s1 = editor::hierChipSlot(
+                minW + theme::dp(2.0f), theme::dp(16.0f) + titleW, chipW);
+            EXPECT_MSG(s1.fits,
+                       "m1 @%.1f: no painel que dá espaço o chip TEM de "
+                       "caber (o slot morreu?)", (double)density);
+            const f32 gapTitle = s1.x - (theme::dp(16.0f) + titleW);
+            const f32 gapDots = (minW + theme::dp(2.0f)) - theme::dp(16.0f) -
+                                2.0f * theme::dp(28.0f) - (s1.x + chipW);
+            EXPECT_MSG(gapTitle >= theme::dp(8.0f) - 0.5f,
+                       "m1 @%.1f: o chip nasce a %.1fdp do título (o vão "
+                       "≥8dp é o pin — a colagem «Hierarquia1 x» morre)",
+                       (double)density, (double)(gapTitle / theme::dp(1.0f)));
+            EXPECT_MSG(gapDots >= theme::dp(8.0f) - 0.5f,
+                       "m1 @%.1f: o chip colado ao ⋮ (vão %.1fdp)",
+                       (double)density,
+                       (double)(gapDots / theme::dp(1.0f)));
+            // (b) abaixo do mínimo: NÃO cabe (o chip some — degradação
+            //     honesta; a limpeza continua no menu ⋮ da hierarquia) OU,
+            //     se coubesse, nunca colado ao título
+            const editor::HierChipSlot s2 = editor::hierChipSlot(
+                minW - theme::dp(4.0f), theme::dp(16.0f) + titleW, chipW);
+            EXPECT_MSG(!s2.fits || s2.x >= theme::dp(16.0f) + titleW +
+                                           theme::dp(8.0f),
+                       "m1 @%.1f: o chip desenha colado ao título (o pin "
+                       "«sem colagem» é violado)", (double)density);
+            EXPECT(!s2.fits);   // 4dp abaixo do mínimo — o espaço não dá
+        };
+        probe(1.0f);   // mdpi/harness
+        probe(2.0f);   // xhdpi/device (os vãos são em dp — px dobram, os
+                       // vãos não)
+        theme::setDensity(1.0f);
+        // MUTAÇÃO M-m1 (o slot fixo antigo): o chip ancorado à direita sem
+        // ler o título desenha SOBRE ele em painel estreito — o
+        // EXPECT(!s2.fits) acima é o que fica vermelho quando o slot morre
     }
 }

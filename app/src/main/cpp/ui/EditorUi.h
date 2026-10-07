@@ -351,8 +351,43 @@ inline f32 transformValueSpace(const TransformBudget& b) {
 }
 // R1 — o PISO do valor (intocável): abaixo disto a letra/padding cede. 26dp
 // lê «-12»/«45»/«1.2e» (os valores da casa são %.2g — curtos) sem encostar
-// ao piso 40 da caixa.
+// ao piso 40 da caixa. 0.9.6.19b (m3): com a limiar da letra, o piso continua
+// a cumprir-se nos painéis 180/212/260 (a 212 o padding da linha cede e a
+// letra FICA).
+
+// ---- 0.9.6.19b (m1 · O SLOT DO CHIP DA MULTI-SELEÇÃO) ----------------------
+// O dono: «header da hierarquia = título + (chip opcional espaçado) + ações,
+// sem colagem.» O chip «N x» era retângulo fixo 48dp ancorado à direita e em
+// painel estreito NASCIA SOBRE o título («Hierarquia1 x» do dono). O slot é
+// agora calculado (puro — o draw e o teste partilham): o chip fica ANTES do
+// ⋮ com folga de 8dp e DEPOIS do título com folga de 8dp; quando o painel
+// não dá os dois vãos, o chip NÃO DESENHA (a degradação honesta — a limpeza
+// da multi-seleção continua no menu ⋮ da hierarquia, item «Limpar seleção»).
+struct HierChipSlot {
+    bool fits = false;   // false = o painel é estreito demais → não desenha
+    f32  x = 0.0f;       // o x do chip (px; válido só com fits)
+};
+HierChipSlot hierChipSlot(f32 panelWpx, f32 titleEndPx, f32 chipWpx);
+
 inline constexpr f32 kTfValueMinDp = 26.0f;
+
+// ---- 0.9.6.19b (m3 · a LIMIAR DA LETRA DO EIXO) ----------------------------
+// O dono: «a letra só sai abaixo de ~200dp de painel; entre 200 e 260dp
+// letra+valor coexistem; o valor nunca sai.» A função recebe a largura ÚTIL
+// NA CONVENÇÃO DO DRAW (o painel − 2×kPad — o que transformRowBudgetPx
+// recebe); a limiar em úteis é 168 = ~200dp de painel − 32 de padding.
+// ACIMA da limiar a letra É OBRIGATÓRIA (o passo (a) da R1 salta para o
+// (b) — o padding da linha cede antes); ABAIXO a ordem R1 vale na íntegra
+// (letra → padding → nunca o valor).
+inline constexpr f32 kTfAxisMinUsableDp = 168.0f;
+
+// ---- 0.9.6.19b (m2 · O FORMAT ÚNICO DOS NÚMEROS DO INSPECTOR) --------------
+// O dono: «função única de format de números no inspector normaliza -0 → 0;
+// usada por todos os campos.» O «-0» nascia de %.2g/%.1f sobre zero negativo
+// (rotações/arredondados a meio da cena) — lia-se como defeito. TODOS os
+// campos do inspector passam por AQUI (as caixas X/Y/Z, os sliders do
+// Inspector 3D e os do editor de UI).
+void formatNum(char* buf, size_t cap, const char* fmt, f32 v);
 
 // ---- 0.9.6.19 (HOTFIX D19) — O SWITCH DA CASA (o estado VISÍVEL) ----------
 // A linha «visível» mostrava o par Eye/EyeOff + rótulo mas NÃO O ESTADO —

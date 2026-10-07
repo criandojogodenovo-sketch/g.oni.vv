@@ -40,3 +40,13 @@
   o 1 ERRO do editor [label que sangra 3px] e os avisos de toque < 48dp
   são a LINHA DE BASE dos Grupos C-I, não dívida do B — o relatório
   do estado atual lista-os com os números medidos)
+## 0.9.6.19b (HOTFIX B) — as decisões novas candidatas (NÃO VERIFICADO do relatório)
+
+- (m1) a contagem da multi-seleção fica SEM leitura no cabeçalho quando o
+  painel é estreito (o chip não desenha para não colar ao título; a
+  limpeza segue no menu ⋮). Se o dono preferir a contagem SEMPRE visível
+  (comprimindo o título), é uma decisão nova.
+- (D21) o + da hierarquia mantém o alvo 28dp da linha do cabeçalho (o
+  piso kHeadFloorDp da casa). Se o dono quiser o TOQUE ≥40dp, é uma
+  decisão nova (o desenho PASSO 1 manda 28 na linha).
+

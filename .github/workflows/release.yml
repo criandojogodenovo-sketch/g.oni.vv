@@ -78,6 +78,13 @@ jobs:
       - name: Gate hierarchy-check (P-08/R-022 — o contrato da arvore)
         run: python3 scripts/hierarchy_check.py
 
+      # 0.9.6.19b (D20) — GATE DAS MEDIDAS DO GIZMO DA CÂMARA: o pin medível
+      # do dono («bounding ≤6% com seleção / ≤4% sem, método PASSO 0, 2
+      # densidades») — o dump docs/hotfix19b-gizmo-medidas.json nasce do
+      # device virtual (FASE 17.5) e é revalidado AQUI a cada push
+      - name: Gate medidas do gizmo da camara (D20 — o contrato medivel)
+        run: python3 scripts/gizmo_camera_medidas.py
+
       - name: Configurar build dos testes
         run: cmake -S tests -B build-tests -DCMAKE_BUILD_TYPE=Release
 

@@ -662,11 +662,15 @@ u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len,
             const Transform3D* tr = t->getComponent<Transform3D>();
             if (cc && tr) {
                 // o ASPECTO do frustum é o do JOGO (o ecrã todo — em Play
-                // a câmara renderiza a superfície); o cap mede no rect
+                // a câmara renderiza a superfície); o cap é o PREVIEW do
+                // D20 (0.9.6.19b): clamp(12%·dist(olho→câmara), 48..120dp)
+                // — o MESMO do draw (os handles vivem nos cantos DELE)
+                // D20: o MESMO cone canónico do draw (aspect 1) — os
+                // handles vivem nos cantos DESENHADOS
                 const camgizmo::Frustum f = camgizmo::computeFrustum(
-                    *tr, *cc, g_ui.screenWidth() / g_ui.screenHeight(),
-                    camgizmo::visualCapForScreen(vp, mw, mh, tr->pos,
-                                                 cc->fovY));
+                    *tr, *cc, 1.0f,
+                    camgizmo::previewCapWorld(vp, mw, mh, g_camera.eye(),
+                                              tr->pos));
                 const int h = camgizmo::pickHandle(vp, mw, mh, f, lx, ly);
                 if (h != 0) {
                     g_camHandle.active = true;
@@ -5247,9 +5251,12 @@ void frame() {
     // Play (como os gizmos)
     if (!modalOpen && camgizmo::visible(g_editor.playMode, g_editor.uiMode)) {
         // GRUPO D: o desenho dos frustus mapeia pelo RECT da viewport (o
-        // aspect do frustum continua o do JOGO — dentro da drawAll)
+        // aspect do frustum continua o do JOGO — dentro da drawAll).
+        // 0.9.6.19b (D20): o OLHO da orbit entra (o preview é
+        // clamp(12%·dist(olho→câmara), 48..120dp) constante em ecrã)
         camgizmo::drawAll(g_ui, g_scene, vp, w, h, g_editor.selected,
-                          viewRect.w, viewRect.h, viewRect.x, viewRect.y);
+                          g_camera.eye(), viewRect.w, viewRect.h,
+                          viewRect.x, viewRect.y);
     }
     if (!modalOpen && gizmo::visible(g_editor.playMode || g_editor.uiMode,
                                      gizmoTr != nullptr)) {
@@ -5333,8 +5340,9 @@ void frame() {
             }
             // PASSO 3 (0.9.6.17): os botões DUPLICAR/COLAR saíram da
             // viewport (a spec do dono: o topo é desfazer/refazer/guardar/⋯)
-            // — as ações vivem no menu ⋯ (itens 9/10, o MESMO código do
-            // bloco fileMenu lá em baixo; zero caminho perdido)
+            // — as ações vivem no menu ⋯ (itens 10/11 — eram 9/10 antes do
+            // D21; o MESMO código do bloco fileMenu lá em baixo; zero
+            // caminho perdido)
             if (va.menuPressed) {
                 // o ⋯ do viewport abre o menu de ficheiro ANCORADO a ele
                 // (a âncora vai em st.menuAx/menuAy, armada no draw)
@@ -5348,9 +5356,9 @@ void frame() {
                 g_editor.settingsMenu = false;
                 g_editor.hierMenu = false;
             }
-            if (va.addTicPressed) {
-                g_editor.plusMenu = !g_editor.plusMenu;
-            }
+            // 0.9.6.19b (D21): va.addTicPressed FOI REMOVIDO — o [+] do
+            // viewport morreu (a ação vive no + da hierarquia e no menu ⋯
+            // «Novo objeto», o MESMO plusMenu de sempre)
         }
         if (ta.playPressed && !g_editor.playMode) {
             // G2 play: a JANELA PLAY (sem painéis, orbit off); o Stop da
@@ -5945,8 +5953,16 @@ void frame() {
                                                 menuAx, menuAy,
                                                 g_snapValue > 0.0f);
         if (choice == 7) {
+            // 0.9.6.19b (D21 · NOVO OBJETO NO MENU ⋯): o MESMO código do +
+            // da hierarquia (o bloco drawHierarchy no main) — abre o
+            // plusMenu de presets; NÃO é um caminho novo. O [+] do viewport
+            // que morria repetia isto.
+            g_editor.plusMenu = true;
+            g_editor.fileMenu = false;
+        } else if (choice == 8) {
             // 0.9.6.10 (GRUPO UI · secção EDITAR): DESFAZER — o MESMO
             // caminho do botão do viewport (o g_undo de sempre)
+            // 0.9.6.19b (D21): era choice 7 (o «Novo objeto» desloca +1)
             const Handle uh = g_undo.undo(g_scene);
             if (uh.valid()) {
                 g_editor.selected = uh;
@@ -5954,8 +5970,9 @@ void frame() {
             } else {
                 showToast("nada a desfazer");
             }
-        } else if (choice == 8) {
+        } else if (choice == 9) {
             // 0.9.6.10 (GRUPO UI · secção EDITAR): REFAZER
+            // 0.9.6.19b (D21): era choice 8 (o «Novo objeto» desloca +1)
             const Handle rh = g_undo.redo(g_scene);
             if (rh.valid()) {
                 g_editor.selected = rh;
@@ -5963,9 +5980,10 @@ void frame() {
             } else {
                 showToast("nada a refazer");
             }
-        } else if (choice == 9) {
+        } else if (choice == 10) {
             // 0.9.6.10 (GRUPO UI · secção EDITAR): DUPLICAR — o MESMO
             // caminho do botão do viewport (duplica E arma o clipboard)
+            // 0.9.6.19b (D21): era choice 9 (o «Novo objeto» desloca +1)
             if (const Tic* sel = g_scene.get(g_editor.selected)) {
                 g_clipSnap = editor::snapTic(g_scene, sel->handle);
                 g_clipValid = true;
@@ -5977,9 +5995,10 @@ void frame() {
             } else {
                 showToast("seleciona um TIC para duplicar");
             }
-        } else if (choice == 10) {
+        } else if (choice == 11) {
             // 0.9.6.10 (GRUPO UI · secção EDITAR): COLAR — o MESMO caminho
             // do botão do viewport (o clipboard armado pelo duplicar/copiar)
+            // 0.9.6.19b (D21): era choice 10 (o «Novo objeto» desloca +1)
             if (g_clipValid) {
                 const editor::TicSnap before;   // vazio = criação
                 const Handle h = editor::pasteAsNew(g_scene, g_clipSnap);
@@ -5991,29 +6010,33 @@ void frame() {
             } else {
                 showToast("nada para colar");
             }
-        } else if (choice == 11) {
+        } else if (choice == 12) {
             // 0.9.6.10 (GRUPO UI · secção VISUALIZAR): o TOGGLE REAL do
             // íman (o mesmo estado do chip do viewport: 0 = desligado)
+            // 0.9.6.19b (D21): era choice 11 (o «Novo objeto» desloca +1)
             g_snapValue = g_snapValue > 0.0f ? 0.0f : 0.5f;
             showToast(g_snapValue > 0.0f ? "snapping ligado" : "snapping desligado");
             elog::info("ui: snapping %s (menu Visualizar)",
                        g_snapValue > 0.0f ? "ligado" : "desligado");
-        } else if (choice == 12) {
+        } else if (choice == 13) {
             // 0.7.6: Settings (o item do dropdown do Menu — o botão próprio
-            // deixou de existir na barra)
+            // deixou de existir na barra). 0.9.6.19b (D21): era choice 12
             g_editor.settingsMenu = true;
             elog::info("ui: menu Settings aberto (dropdown do Menu)");
-        } else if (choice == 13) {
+        } else if (choice == 14) {
             // 0.9.6.10 (GRUPO UI · secção FERRAMENTAS): VER LOGS — o MESMO
             // viewer de sempre (tail 300 + dumps com badge ANTIGO)
+            // 0.9.6.19b (D21): era choice 13 (o «Novo objeto» desloca +1)
             g_editor.logViewer = true;
             g_editor.logViewerJustOpened = true;
             g_logLines.clear();
             elog::readTail(g_logLines, 300);
             refreshLogDumps();
-        } else if (choice == 14) {
+        } else if (choice == 15) {
             // 0.9.6.10 (GRUPO UI · secção AJUDA): a DOCUMENTAÇÃO V.ONI —
-            // o MESMO ecrã das Docs (a pesquisa estruturada do registo)
+            // o MESMO ecrã das Docs (a pesquisa estruturada do registo).
+            // 0.9.6.19b (D21): era choice 14 — o «Novo objeto» entrou na
+            // secção CENA e as escolhas seguintes deslocaram-se +1.
             g_editor.docsScreen.open = true;
             g_editor.docsScreen.queryLen = 0;
             g_editor.docsScreen.query[0] = '\0';

@@ -2,7 +2,7 @@
 // ui/ViewportChrome.h — CHROME DO VIEWPORT (0.9.0 spec D; FASE 9 G1-1;
 // PASSO 3 · 0.9.6.17 — A SPEC DO DONO: os controlos do viewport ocupam
 // ≤10% da área a 60% de alfa, NADA atravessa a largura toda e NADA se
-// sobrepõe):
+// sobrepõe; 0.9.6.19b · D21 — O [+] DO VIEWPORT MORRE):
 //
 //   ┌─────────────────────────────────────────────────────────────┐
 //   │ [undo][redo][save][⋯]                    (gizmo)            │
@@ -10,9 +10,16 @@
 //   │ [Mover]              VIEWPORT 3D                             │
 //   │ [Rodar]                                                      │
 //   │ [Escar]                                                      │
-//   │ [Íman ]  legenda                                  [+]        │
+//   │ [Íman ]  legenda                                             │
 //   └─────────────────────────────────────────────────────────────┘
 //
+// 0.9.6.19b (D21 · A DECISÃO DO DONO): o botão redondo [+] do fundo-direito
+// foi REMOVIDO do chrome — era redundante (a hierarquia já tem o +, e o
+// menu ⋯ ganhou o item «Novo objeto» — o MESMO código) e ATRAPALHAVA: cobria
+// a cena e interceptava toques de orbit/seleção nessa zona. Os alvos de 40dp
+// do chrome passam a N−1 (10) e a medição de área do chrome desce (a TABELA
+// de medidas do relatório). O id 38 fica APOSENTADO (kVpAddTicIdRetired) —
+// o pin «nenhum id de add desenhado dentro do rect do viewport» caça-o.
 // PASSO 3 (0.9.6.17 — a spec do dono, confirmada no arranque do passo):
 //   • O RAIL ESQUERDO: a fileira de ferramentas (Selecionar/Mover/Rodar/
 //     Escalar/Íman) vive VERTICAL na borda ESQUERDA (era a toolbar
@@ -20,9 +27,11 @@
 //     mantém-se para viewports baixos);
 //   • O GRUPO DO TOPO-ESQUERDO: desfazer/refazer/guardar/⋯ numa fila
 //     HORIZONTAL (era o stack vertical de 5 — o duplicar/colar SAÍRAM da
-//     viewport: as ações vivem no menu ⋯ itens 9/10, o caminho que já
+//     viewport: as ações vivem no menu ⋯ itens 10/11 (eram 9/10 — o D21
+//     deslocou-as com o «Novo objeto»), o caminho que já
 //     existia);
-//   • O [+]: 40dp REDONDO no canto inferior direito (era um chip de 56);
+//   • O [+]: REMOVIDO no 0.9.6.19b (D21 — a decisão do dono); o «novo
+//     objeto» vive no + da hierarquia e no menu ⋯ («Novo objeto»);
 //   • O GIZMO: 40dp no canto superior direito — o atalho mostrar/esconder
 //     o gizmo 3D (a transição selectMode↔gizmo que JÁ existe; zero lógica
 //     nova — a interpretação do "gizmo 40dp" da spec, documentada no
@@ -65,11 +74,16 @@ constexpr u64 kVpSnapValId = 36;   // botão de ÍMAN (toggle do snap)
 constexpr u64 kVpMenuId    = 37;   // PASSO 3: o ⋯ do topo-esquerdo (abre o
                                    // menu de ficheiro ancorado a ele — o id
                                    // 37 do settings morto volta a usar-se)
-constexpr u64 kVpAddTicId  = 38;   // [+] (canto inferior direito, 40 redondo)
+// 0.9.6.19b (D21): kVpAddTicId (38) APOSENTADO — o [+] do viewport morreu.
+// O id PERMANECE aqui SÓ para o pin (nenhum widget com este id desenha
+// dentro do rect do viewport, em estado nenhum — a mutação M-D21 repõe um
+// botão com ele e o pin fica VERMELHO).
+inline constexpr u64 kVpAddTicIdRetired = 38;
 constexpr u64 kVpGizmoId   = 39;   // PASSO 3: o gizmo 40dp do topo-direito
 // kVpDupId (33) / kVpPasteId (34) REMOVIDOS no PASSO 3: os botões saíram da
 // viewport (a spec do dono lista desfazer/refazer/guardar/⋯ no topo) — as
-// ações Duplicar/Colar vivem no menu ⋯ (itens 9/10, o caminho da 0.9.6.10)
+// ações Duplicar/Colar vivem no menu ⋯ (itens 10/11 desde o D21; o caminho
+// da 0.9.6.10)
 
 // ---- estado que o chrome precisa (o main possui TUDO; aqui só flags) -------
 struct ChromeState {
@@ -87,7 +101,9 @@ constexpr f32 kRailBtn   = 40.0f;  // alvo dos botões do rail (desenho 32)
 constexpr f32 kRailGap   = 8.0f;   // ≥8dp entre alvos (spec A)
 constexpr f32 kQuickBtn  = 40.0f;  // alvo da fila do topo
 constexpr f32 kQuickGap  = 8.0f;
-constexpr f32 kCornerBtn = 40.0f;  // o [+] e o gizmo (a spec PASSO 3: 40dp)
+// 0.9.6.19b (D21): kCornerBtn MORREU (era «o [+] e o gizmo» — o [+] saiu).
+// O gizmo do canto superior direito mantém o alvo 40dp com nome PRÓPRIO:
+constexpr f32 kGizmoBtnDp = 40.0f; // o gizmo do topo-direito (a spec PASSO 3)
 // PASSO 3: a ALFA do chrome do viewport (a spec do dono: «controlos a 60%»)
 constexpr f32 kChromeAlpha = 0.60f;
 // o multiplicador de alfa do chrome (inline no header para ser PERSISTENTE
@@ -109,12 +125,11 @@ struct Layout {
                                  // colunas cabem (a degradação honesta)
     UiRect quick[4]{};        // desfazer/refazer/guardar/⋯ (fila do topo)
     UiRect gizmoBtn{};        // o gizmo 40dp do topo-direito
-    UiRect addTicBtn{};       // o [+] 40dp redondo do fundo-direito
+    // 0.9.6.19b (D21): addTicBtn/plusPanel REMOVIDOS — o [+] morreu
     // os PAIS DE VIDRO (a regra do pai-painelinho — nada flutua sem pai)
     UiRect railPanel{};       // o pai do rail esquerdo
     UiRect quickPanel{};      // o pai da fila do topo
     UiRect gizmoPanel{};      // o pai do gizmo
-    UiRect plusPanel{};       // o pai do [+]
     // a LEGENDA: o nome da ferramenta ativa, à direita do rail (por baixo
     // da fila do topo — o rect é a área do texto; some quando não cabe)
     bool   legendVisible = true;
@@ -139,7 +154,7 @@ struct Actions {
     bool redoPressed  = false;
     bool savePressed  = false;
     bool menuPressed  = false;    // PASSO 3: o ⋯ do topo-esquerdo
-    bool addTicPressed = false;
+    // 0.9.6.19b (D21): addTicPressed REMOVIDO — o [+] do viewport morreu
 };
 
 Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
