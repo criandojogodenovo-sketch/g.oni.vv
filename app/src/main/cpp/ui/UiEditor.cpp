@@ -40,7 +40,9 @@ namespace {
 
 // linha de slider do Inspector de UI (o mesmo desenho do Inspector de TICs:
 // label à esquerda + trilho + valor à direita; baseline pelas métricas REAIS)
-bool uiSliderRow(UiContext& ui, u64 id, f32 x, f32 rowTop, f32 rowH,
+// PASSO 2 (0.9.6.15): o valor alinha à largura REAL do painel (w) — o
+// kPanelW=300 fixo saía do painel de 22% (260dp)
+bool uiSliderRow(UiContext& ui, u64 id, f32 x, f32 w, f32 rowTop, f32 rowH,
                  const TextMetrics& tm, const char* labelText, f32 minV,
                  f32 maxV, f32& value, const char* fmt) {
     const f32 baseline = inspBaseline(rowTop, rowH, tm);
@@ -51,7 +53,7 @@ bool uiSliderRow(UiContext& ui, u64 id, f32 x, f32 rowTop, f32 rowH,
     std::snprintf(val, sizeof(val), fmt, value);
     if (ui.hasFont()) {
         const f32 tw = ui.fontWidth(val);
-        ui.label(x + kPanelW - kPad - tw, baseline, val, theme::TEXT);
+        ui.label(x + w - kPad - tw, baseline, val, theme::TEXT);
     }
     return changed;
 }
@@ -641,43 +643,43 @@ bool drawJoystickInspector(UiContext& ui, EditorState& st, Tic* tic,
                            theme::ACCENT, w - 2.0f * kPad);
             break;
         case UiInspRow::Kind::PosX:
-            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "pos X", 0.0f, 1.0f,
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "pos X", 0.0f, 1.0f,
                             joy->relX, "%.2f")) {
                 edited = true;
             }
             break;
         case UiInspRow::Kind::PosY:
-            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "pos Y", 0.0f, 1.0f,
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "pos Y", 0.0f, 1.0f,
                             joy->relY, "%.2f")) {
                 edited = true;
             }
             break;
         case UiInspRow::Kind::SizeW:   // payload: TAMANHO (escala do raio)
-            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "tamanho", 0.4f, 2.0f,
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "tamanho", 0.4f, 2.0f,
                             joy->size, "%.2f")) {
                 edited = true;
             }
             break;
         case UiInspRow::Kind::Sens:    // SENSIBILIDADE do joystick
-            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "sensib.", 0.2f, 3.0f,
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "sensib.", 0.2f, 3.0f,
                             joy->sens, "%.2f")) {
                 edited = true;
             }
             break;
         case UiInspRow::Kind::ColR:
-            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "cor R", 0.0f, 1.0f,
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "cor R", 0.0f, 1.0f,
                             joy->colR, "%.2f")) {
                 edited = true;
             }
             break;
         case UiInspRow::Kind::ColG:
-            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "cor G", 0.0f, 1.0f,
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "cor G", 0.0f, 1.0f,
                             joy->colG, "%.2f")) {
                 edited = true;
             }
             break;
         case UiInspRow::Kind::ColB:
-            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "cor B", 0.0f, 1.0f,
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "cor B", 0.0f, 1.0f,
                             joy->colB, "%.2f")) {
                 edited = true;
             }
@@ -805,25 +807,25 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                            theme::ACCENT, w - 2.0f * kPad);
             break;
         case UiInspRow::Kind::PosX:
-            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "x", -3000.0f, 3000.0f,
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "x", -3000.0f, 3000.0f,
                             e.ox, "%.0f")) {
                 edited = true;
             }
             break;
         case UiInspRow::Kind::PosY:
-            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "y", -3000.0f, 3000.0f,
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "y", -3000.0f, 3000.0f,
                             e.oy, "%.0f")) {
                 edited = true;
             }
             break;
         case UiInspRow::Kind::SizeW:
-            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "lar", 8.0f, 3000.0f,
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "lar", 8.0f, 3000.0f,
                             e.w, "%.0f")) {
                 edited = true;
             }
             break;
         case UiInspRow::Kind::SizeH:
-            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "alt", 8.0f, 3000.0f,
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "alt", 8.0f, 3000.0f,
                             e.h, "%.0f")) {
                 edited = true;
             }
@@ -832,7 +834,7 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
         case UiInspRow::Kind::ColG:
         case UiInspRow::Kind::ColB: {
             static const char* kLabels[3] = {"cor R", "cor G", "cor B"};
-            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, kLabels[colorIdx], 0.0f,
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, kLabels[colorIdx], 0.0f,
                             1.0f, e.color[colorIdx], "%.2f")) {
                 edited = true;
             }
@@ -842,7 +844,7 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
         case UiInspRow::Kind::ColA: {
             // 0.7.4 — ALPHA do fundo: 0 = sem fundo (Label default);
             // Menu = caixas ON/OFF; Panel/Button translúcidos se < 1
-            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "fundo A", 0.0f, 1.0f,
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "fundo A", 0.0f, 1.0f,
                             e.color[3], "%.2f")) {
                 edited = true;
             }
@@ -861,7 +863,7 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
         }
         case UiInspRow::Kind::FontScl:
             // 0.8.6 — TAMANHO DA LETRA do texto do elemento (×base 28 px)
-            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "letra", 0.5f, 3.0f,
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "letra", 0.5f, 3.0f,
                             e.fontScale, "%.2fx")) {
                 edited = true;
             }
@@ -956,14 +958,14 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
         }
         case UiInspRow::Kind::Spacing:
             // 0.7.4 — espaçamento entre itens (Menu) / filhos (containers)
-            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "espaco", 0.0f, 40.0f,
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "espaco", 0.0f, 40.0f,
                             e.spacing, "%.0f")) {
                 edited = true;
             }
             break;
         case UiInspRow::Kind::Pad:
             // 0.7.4 — resguardo interno do container
-            if (uiSliderRow(ui, r.id, x, ry, r.h, tm, "pad", 0.0f, 40.0f,
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "pad", 0.0f, 40.0f,
                             e.pad, "%.0f")) {
                 edited = true;
             }

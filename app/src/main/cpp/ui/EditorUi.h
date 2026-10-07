@@ -284,20 +284,34 @@ UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, bool rightPanel);
 UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, f32 drawerH,
                   bool rightPanel);
 // GRUPO D: COM AS LARGURAS DE ESTADO dos painéis (divisores arrastáveis)
-// — o rect que o EDITOR 3D usa (scissor/orbit/chrome acompanham)
+// — o rect que o EDITOR 3D usa (scissor/orbit/chrome acompanham);
+// PASSO 2: inspTrack colapsa o inspector ao trilho de 32dp
 UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, f32 drawerH,
-                  bool rightPanel, f32 hierWdp, f32 inspWdp);
+                  bool rightPanel, f32 hierWdp, f32 inspWdp,
+                  bool inspTrack = false);
 // resolve o PAR de larguras efetivas de um EditorState (a fonte ÚNICA é a
 // safe::resolvePanels — gangorra dos três pisos; o draw dos painéis, o drag
 // dos divisores, a sombra do save e os testes partilham ESTA)
 safe::PanelBudget resolveEditorPanels(const EditorState& st, f32 contentWdp);
 
+// PASSO 2 (0.9.6.15 — spec do dono): SEM seleção o INSPECTOR colapsa ao
+// trilho de 32dp (safe::kInspTrackW) — a área junta-se ao viewport e volta
+// ao selecionar um TIC (na hierarquia ou na aba Nós). Puro/afervel: os
+// rects (safe), o draw (drawInspector), o divisor direito e os testes
+// partilham ESTA pergunta — a fonte ÚNICA do colapso. A MULTI-seleção
+// conta como seleção (o gizmo vive nela).
+inline bool inspectorCollapsed(const EditorState& st) {
+    return st.selected == Handle::invalid() && st.multiSelectCount == 0;
+}
+
 // GRUPO D (0.9.6.7) — DIVISORES ARRASTÁVEIS hierarquia|viewport|inspector
-// (o padrão da pega do drawer: strip 12dp + hit 20dp, press arma, o move
-// redimensiona AO VIVO com clamp, release fixa; persiste no layout.json).
-// dividerInput corre ANTES dos painéis no UI pass (a pega RECLAMA o gesto
-// primeiro — o toque na pega nunca vira scroll/orbit/gizmo);
+// (o padrão da pega do drawer: strip 12dp + hit 24dp — PASSO 2, press arma,
+// o move redimensiona AO VIVO com clamp, release fixa; persiste no
+// layout.json). dividerInput corre ANTES dos painéis no UI pass (a pega
+// RECLAMA o gesto primeiro — o toque na pega nunca vira scroll/orbit/gizmo);
 // drawPanelDividers corre DEPOIS (o strip visível por cima da borda).
+// PASSO 2: com o inspector no TRILHO (inspectorCollapsed) não há divisor
+// direito — não há largura a arrastar.
 void dividerInput(UiContext& ui, const InputState& in, EditorState& st,
                   bool rightPanel);
 void drawPanelDividers(UiContext& ui, const EditorState& st, bool rightPanel);

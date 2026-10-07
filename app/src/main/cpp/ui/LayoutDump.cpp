@@ -83,6 +83,11 @@ Json toJson(const Record& r) {
             if (e.truncated) {
                 o.members.emplace_back("truncado", Json::makeBool(true));
             }
+            if (e.fitByDesign) {
+                // PASSO 2 (0.9.6.15): o corte É o desenho (nomes de linha
+                // da hierarquia/Nós com tip de long-press — spec B)
+                o.members.emplace_back("fit_por_desenho", Json::makeBool(true));
+            }
         }
         if (e.clipped) {
             o.members.emplace_back("recortado", Json::makeBool(true));
@@ -169,8 +174,11 @@ std::vector<Problem> validate(const Record& r) {
 
         if (e.kind == Entry::Label) {
             // TextoTruncado — o fit cortou (a informação perdeu-se; os
-            // Grupos C-I baixam a contagem alargando o que couber)
-            if (e.truncated) {
+            // Grupos C-I baixam a contagem alargando o que couber).
+            // PASSO 2: EXCETO quando o corte É o desenho (fitByDesign —
+            // os nomes de linha da hierarquia/Nós truncam POR DESENHO com
+            // o tip do long-press; a spec B define-o, o dump documenta)
+            if (e.truncated && !e.fitByDesign) {
                 Problem p;
                 p.rule = Problem::TextoTruncado;
                 p.sev = Problem::Aviso;

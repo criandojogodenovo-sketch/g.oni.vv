@@ -76,9 +76,11 @@ Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st) {
     // o drawer CRU: no device o viewRect colapsava a 0 e a transform
     // toolbar desenhava-se por cima da top bar (os defeitos 1+2 do dono).
     const f32 vpH = safe::viewportRect(sw, sh, in).h;
-    const f32 d = safe::effectiveDrawerH(st.drawerH, vpH);
+    const f32 contentH = sh - in.top - in.bottom;   // PASSO 2: o cap de 35%
+    const f32 d = safe::effectiveDrawerH(st.drawerH, vpH, contentH);
     L.drawer = {in.left, L.tabBar.y - d, sw - in.left - in.right, d};
-    L.handle = {in.left, L.drawer.y, sw - in.left - in.right, theme::dp(12.0f)};
+    L.handle = {in.left, L.drawer.y, sw - in.left - in.right,
+                theme::dp(kDrawerHandleH)};   // PASSO 2: pega 24dp (era 12)
     L.drawerTop = L.drawer.y;
     // PASSO 1 (0.9.6.14): as 4 tabs vivem à ESQUERDA do canto direito
     // «FPS · TICs» (a reserva kFpsW; a status bar de 24dp morreu)
@@ -221,18 +223,22 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
                  bs.dragActive ? theme::kTheme.surface2 : theme::kTheme.bg);
         const f32 col[4] = {theme::kTheme.text2[0], theme::kTheme.text2[1],
                             theme::kTheme.text2[2], 1.0f};
+        // grip: 9 traços verticais centrados na pega de 24dp (PASSO 2 —
+        // y+9..y+15; eram y+3..y+9 na pega de 12)
         for (int g = 0; g < 9; ++g) {
             const f32 gx = L.handle.x + L.handle.w * 0.5f - 32.0f +
                            static_cast<f32>(g) * 8.0f;
-            ui.drawLine(gx, L.handle.y + 3.0f, gx, L.handle.y + 9.0f, 2.0f, col);
+            ui.drawLine(gx, L.handle.y + 9.0f, gx, L.handle.y + 15.0f, 2.0f,
+                        col);
         }
     }
 
     // conteúdo do drawer por tab (rect RECALCULADO — o drag pode ter mudado
     // a altura NESTE frame; a pega fica no topo do drawer novo)
     const Layout L2 = layout(ui.screenWidth(), ui.screenHeight(), insets, bs);
-    const UiRect content = {L2.drawer.x, L2.drawer.y + 12.0f, L2.drawer.w,
-                            L2.drawer.h - 12.0f};
+    const UiRect content = {L2.drawer.x, L2.drawer.y + theme::dp(kDrawerHandleH),
+                            L2.drawer.w,
+                            L2.drawer.h - theme::dp(kDrawerHandleH)};
     // ---- 0.9.6.10 (GRUPO UI · a imagem 1) · TAB 1: A ÁRVORE res:// --------
     // A região esquerda-baixa da referência («Ficheiros: árvore res:// com
     // Assets/Cenas/…»): as PASTAS REAIS do projeto com contagem; o toque
@@ -555,22 +561,26 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
     }
     // ---- TAB 3: A CONSOLA (spec K — RECALIBRADA 0.9.6.10: era a tab 2) ----
     else if (bs.bottomTab == 3) {
-        // ---- CONSOLA (spec K · 0.9.6.10 GRUPO UI — a imagem 1): as TABS
-        // Consola/Logs/Erros/Avisos (era o chip todos/erros) + as linhas
-        // com TIMESTAMP e COR POR SEVERIDADE (erro=danger · aviso=warn
-        // LARANJA · info=text2) + o CAMPO DE COMANDO com o botão enviar
-        // (os comandos REAIS: limpar/ajuda/play/stop/snap — o main corre)
+        // ---- CONSOLA (spec K · 0.9.6.10 GRUPO UI — a imagem 1): as chips
+        // INTERNAS Logs/Erros/Avisos — PASSO 2 (0.9.6.15): de CABEÇALHO 28dp
+        // (era 36; o piso kHeadFloorDp, flagado antes do hit) e a chip
+        // «Consola» SAIU (duplicava o nome da TAB do dock — spec do dono);
+        // a vista COMPLETA do log é a chip «Logs» (filtro −1), Erros/Avisos
+        // filtram por nível (2/3) — cores por severidade (erro=danger ·
+        // aviso=warn LARANJA · info=text2) + o CAMPO DE COMANDO com o botão
+        // enviar (os comandos REAIS: limpar/ajuda/play/stop/snap — o main
+        // corre)
         {
             const f32 tabY = content.y + theme::dp(4.0f);
-            const f32 tabH = theme::dp(36.0f);
+            const f32 tabH = theme::dp(kConChipH);
             static const struct {
                 const char* label;
-                int filter;   // -1 = tudo (Consola)
-            } kConTabs[4] = {
-                {"Consola", -1}, {"Logs", 1}, {"Erros", 2}, {"Avisos", 3},
+                int filter;   // -1 = tudo (Logs — o log inteiro)
+            } kConTabs[3] = {
+                {"Logs", -1}, {"Erros", 2}, {"Avisos", 3},
             };
             f32 tx = content.x + theme::dp(16.0f);
-            for (int i = 0; i < 4; ++i) {
+            for (int i = 0; i < 3; ++i) {
                 const f32 tw = ui.hasFont()
                                    ? ui.fontWidth(kConTabs[i].label) +
                                          theme::dp(24.0f)
@@ -594,17 +604,21 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
                         active ? theme::kTheme.text1 : theme::kTheme.text2,
                         tw - theme::dp(16.0f));
                 }
+                // PASSO 2: a flag ANTES do hit — chip de CABEÇALHO 28dp
+                ui.auditRowFloorNext(layout::kHeadFloorDp);
                 if (ui.widgetHit(kConsoleTabBase + static_cast<u64>(i), tx,
                                  tabY, tw, tabH)) {
-                    bs.consoleTab = i;   // a tab da imagem 1
+                    bs.consoleTab = i;   // a chip da consola
                 }
                 tx += tw + theme::dp(8.0f);
             }
-            // auto-scroll + Export (à direita — os de sempre)
+            // auto-scroll + Export (à direita — os de sempre; PASSO 2:
+            // a MESMA linha de cabeçalho 28dp — flag kHeadFloorDp)
             {
                 const f32 aw = theme::dp(88.0f);
                 const f32 ax0 = content.x + content.w - theme::dp(16.0f) -
                                 2.0f * aw - theme::dp(8.0f);
+                ui.auditRowFloorNext(layout::kHeadFloorDp);
                 if (ui.widgetHit(kAutoScrollId, ax0, tabY, aw, tabH)) {
                     bs.consoleAutoScroll = !bs.consoleAutoScroll;
                 }
@@ -616,6 +630,7 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
                                        tmText.ascent,
                                    al, theme::kTheme.text2, aw);
                 }
+                ui.auditRowFloorNext(layout::kHeadFloorDp);
                 if (ui.widgetHit(kExportId, ax0 + aw + theme::dp(8.0f), tabY,
                                  aw, tabH)) {
                     a.exportPressed = true;
@@ -680,8 +695,12 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
                                        cmdY - listTop - theme::dp(4.0f)};
             const TextMetrics m = ui.textMetrics();
             const f32 rowH = m.block() + theme::dp(4.0f);
-            const int wantLevel =
-                bs.consoleTab == 0 ? -1 : bs.consoleTab;   // a tab ativa
+            // PASSO 2: o filtro vem da TABELA das chips (Logs=-1 tudo ·
+            // Erros=2 · Avisos=3) — o índice deixou de SER o nível quando a
+            // chip «Consola» saiu
+            const int wantLevel = (bs.consoleTab >= 0 && bs.consoleTab < 3)
+                                      ? kConTabs[bs.consoleTab].filter
+                                      : -1;
             u32 shown = 0;
             for (const std::string& ln : logLines) {
                 if (wantLevel < 0 || lineLevel(ln) == wantLevel) {
@@ -723,9 +742,9 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
             }
             if (shown == 0 && ui.hasFont()) {
                 ui.labelFitted(content.x + theme::dp(16.0f), listTop + rowH,
-                               bs.consoleTab == 2
+                               bs.consoleTab == 1
                                    ? "sem erros"
-                                   : (bs.consoleTab == 3 ? "sem avisos"
+                                   : (bs.consoleTab == 2 ? "sem avisos"
                                                          : "(vazio)"),
                                theme::kTheme.text2,
                                content.w - theme::dp(32.0f));

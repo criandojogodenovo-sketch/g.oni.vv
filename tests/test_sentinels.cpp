@@ -2777,23 +2777,28 @@ TEST(regress_orcamento_gangorra) {
     theme::setDensity(1.0f);
     editor::applyDensity();
 
-    // ---- (a) o HARNESS LARGO fica IGUAL (1512dp: 300 | 912 | 300) — o
-    // default assimétrico só aperta quando o orçamento NÃO dá
+    // ---- (a) o HARNESS LARGO (1512dp): os defaults POR PERCENTAGEM do
+    // PASSO 2 — hier 18% = 272,2dp · insp 22% afervado ao teto 260dp ·
+    // o viewport fica com 979,8dp (64,8% ≥ 55% — o critério a)
     {
         const safe::PanelBudget b = safe::resolvePanels(1512.0f, -1.0f, -1.0f);
-        EXPECT(nearEqF(b.hier, 300.0f) && nearEqF(b.insp, 300.0f));
-        EXPECT(nearEqF(1512.0f - b.hier - b.insp, 912.0f));
+        EXPECT_MSG(nearEqF(b.hier, 1512.0f * safe::kHierPct) &&
+                       nearEqF(b.insp, theme::dp(safe::kInspMaxW)),
+                   "harness: hier %.1f / insp %.1f — a spec PASSO 2 é 18%% "
+                   "/ 22%% (teto 260)", b.hier, b.insp);
+        EXPECT(1512.0f - b.hier - b.insp >= 1512.0f * 0.55f - 0.01f);
     }
-    // ---- (b) o DEVICE (776dp): a gangorra ASSIMÉTRICA — o inspector
-    // mantém a linha X/Y/Z (288dp), a hierarquia ABSORVE (200dp) e o
-    // viewport NUNCA fecha abaixo da toolbar (288dp) — eram 176dp
+    // ---- (b) o DEVICE (776dp): os percentuais caem NOS PISOS — hier 140
+    // (18% = 139,7) · insp 180 (22% = 170,7) · o viewport fica 456dp
+    // (58,8% ≥ 55% — o critério a; eram 288dp/37,1% no PASSO 1)
     {
         const safe::PanelBudget b = safe::resolvePanels(776.0f, -1.0f, -1.0f);
-        EXPECT(nearEqF(b.hier, theme::dp(safe::kHierMinW)));   // 200
+        EXPECT(nearEqF(b.hier, theme::dp(safe::kHierMinW)));   // 140 (o piso)
         EXPECT(b.insp >= theme::dp(safe::kInspMinW) - 0.01f &&
-               b.insp <= theme::dp(300.0f));
+               b.insp <= theme::dp(safe::kInspMaxW) + 0.01f);   // [180..260]
         EXPECT(776.0f - b.hier - b.insp >=
                theme::dp(safe::kViewportMinW) - 0.01f);        // >= 288
+        EXPECT(776.0f - b.hier - b.insp >= 776.0f * 0.55f - 0.01f);  // >= 55%
     }
     // ---- (c) a GANGORRA ao arrastar: nenhum painel fecha o viewport
     // abaixo do piso (o outro painel CONTA — o par nunca soma demais)
@@ -2823,11 +2828,11 @@ TEST(regress_orcamento_gangorra) {
     {
         const safe::PanelBudget b = safe::resolvePanels(776.0f, -1600.0f,
                                                         -1600.0f);
-        EXPECT(nearEqF(b.hier, theme::dp(safe::kHierMinW)));   // clamp, n default 300
+        EXPECT(nearEqF(b.hier, theme::dp(safe::kHierMinW)));   // clamp, n default
         // hmm: raw -1600 é «negativo» → default... o CONTRATO é: só −1
         // (ou qualquer <0) é default; o DRAG nunca escreve <0 (o snap
-        // guarda 0) — a hierarquia default do par é 200 no device:
-        EXPECT(nearEqF(b.hier, 200.0f));
+        // guarda 0) — a hierarquia default do par é 140 no device (PASSO 2):
+        EXPECT(nearEqF(b.hier, 140.0f));
     }
     // ---- (e) o DRAWER nunca come o editor: o clamp deixa a faixa da
     // toolbar do viewport VIVA (BottomPanel::layout) — no device o
@@ -2841,14 +2846,128 @@ TEST(regress_orcamento_gangorra) {
         EXPECT(lh.drawer.h <= 400.0f + 0.01f);
         EXPECT(nearEqF(lh.drawer.h, 240.0f));   // intacto onde cabe
         // device (776×336dp de conteúdo, insets 24/24dp): 240 NÃO PASSA —
-        // o viewport do device tem ~184dp e o default comia TUDO
+        // o teto de 35% do PASSO 2 manda (0,35 × 336 = 117,6 → 112dp em
+        // passos de 8) — e o piso da toolbar continua vivo por baixo
         const safe::Insets di{0.0f, 24.0f, 24.0f, 0.0f};
         const editor::bottom::Layout ld =
             editor::bottom::layout(776.0f, 336.0f, di, bs);
         const f32 vpH = safe::viewportRect(776.0f, 336.0f, di).h;
+        const f32 contentH = 336.0f - di.top - di.bottom;
         EXPECT(ld.drawer.h < 240.0f);           // cedeu
+        EXPECT_MSG(ld.drawer.h <= contentH * safe::kDrawerMaxPct + 0.01f,
+                   "o drawer do device (%.1f) passou o teto de 35%% (%.1f)",
+                   ld.drawer.h, contentH * safe::kDrawerMaxPct);
         EXPECT(ld.drawer.h <= vpH - theme::dp(48.0f) - theme::dp(16.0f) + 8.0f);
         EXPECT(vpH - ld.drawer.h >= theme::dp(48.0f));   // a toolbar viva
+    }
+}
+
+// ============================================================================
+// R-033 (PASSO 2 · 0.9.6.15 — PAINÉIS: a spec do dono medida, não olhada)
+//         — regress_paineis_passo2
+//
+// A spec PASSO 2 em NÚMEROS: (1) os DEFAULTS dos painéis são 18%
+// (hierarquia, piso 140dp) e 22% (inspector, piso 180/teto 260dp) e o
+// viewport central fica ≥55% nos ecrãs de referência — o critério (a) do
+// dono; (2) SEM seleção o inspector colapsa ao TRILHO de 32dp e a área
+// vai ao viewport; (3) o drag do inspector respeita o intervalo
+// [180..260] (o teto é NOVO — antes só tinha piso); (4) a pega do drawer
+// e dos divisores tem 24dp; (5) o drawer default é FECHADO (bottomTab=0
+// → altura 0) e aberto NUNCA passa 35% da altura do content.
+// ============================================================================
+TEST(regress_paineis_passo2) {
+    using namespace vv;
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+
+    // ---- (1) os DEFAULTS em TODOS os ecrãs de referência: viewport ≥55%
+    struct Case { f32 contentW; const char* name; };
+    const Case cases[] = {{776.0f, "device RMX3624"},
+                          {800.0f, "C33 800dp"},
+                          {1512.0f, "harness"},
+                          {1536.0f, "harness sem insets"}};
+    for (const Case& c : cases) {
+        const safe::PanelBudget b = safe::resolvePanels(c.contentW, -1, -1);
+        const f32 vp = c.contentW - b.hier - b.insp;
+        EXPECT_MSG(vp >= c.contentW * 0.55f - 0.01f,
+                   "%s: o viewport default é %.1f%% (spec PASSO 2: ≥55%%)",
+                   c.name, 100.0f * vp / c.contentW);
+        EXPECT(b.hier >= theme::dp(safe::kHierMinW) - 0.01f);
+        EXPECT(b.insp >= theme::dp(safe::kInspMinW) - 0.01f &&
+               b.insp <= theme::dp(safe::kInspMaxW) + 0.01f);
+    }
+
+    // ---- (2) o TRILHO: sem seleção o inspector É 32dp e a área vai
+    // TODA ao viewport (o centerRect acompanha — a MESMA fonte)
+    {
+        const safe::PanelBudget bt = safe::resolvePanels(776.0f, -1, -1, true);
+        EXPECT(nearEqF(bt.insp, theme::dp(safe::kInspTrackW)));
+        EXPECT(bt.hier >= theme::dp(safe::kHierMinW) - 0.01f);
+        // o viewport com o trilho é MAIOR que com o inspector aberto
+        const safe::PanelBudget ba = safe::resolvePanels(776.0f, -1, -1);
+        EXPECT(776.0f - bt.hier - bt.insp > 776.0f - ba.hier - ba.insp);
+        // o rect do trilho: encostado à direita, 32dp, dentro do content
+        const safe::Insets in{0.0f, 48.0f, 48.0f, 0.0f};
+        const UiRect tr = safe::inspectorPanelRect(1600.0f, 720.0f, in, 0.0f,
+                                                   -1, -1, true);
+        EXPECT(nearEqF(tr.w, theme::dp(safe::kInspTrackW), 0.01f));
+        EXPECT(tr.x + tr.w <= 1600.0f - in.right + 0.01f);
+        // e o centerRect devolve a área ao 3D (o MESMO flag)
+        const UiRect ct = safe::centerRect(1600.0f, 720.0f, in, 0.0f, true,
+                                           -1, -1, true);
+        EXPECT(ct.x + ct.w <= tr.x + 0.01f);   // o 3D não pisa o trilho
+    }
+
+    // ---- (3) o drag do inspector: o intervalo [180..260] é INVARIANTE
+    for (f32 iw = 0.0f; iw <= 900.0f; iw += 16.0f) {
+        const safe::PanelBudget b = safe::resolvePanels(776.0f, -1, iw);
+        EXPECT(b.insp >= theme::dp(safe::kInspMinW) - 0.01f);
+        EXPECT(b.insp <= theme::dp(safe::kInspMaxW) + 0.01f);
+    }
+
+    // ---- (4) as PEGAS medem 24dp (drawer + divisores — spec PASSO 2)
+    EXPECT(nearEqF(editor::bottom::kDrawerHandleH, 24.0f));
+    EXPECT(nearEqF(theme::dp(editor::kDividerHitW), theme::dp(24.0f)));
+    {
+        editor::bottom::BottomState bs{};
+        bs.bottomTab = 1;              // aberto
+        bs.drawerH = 240.0f;
+        const editor::bottom::Layout bl =
+            editor::bottom::layout(1536.0f, 720.0f, safe::Insets{}, bs);
+        EXPECT(nearEqF(bl.handle.h, theme::dp(24.0f), 0.01f));
+    }
+
+    // ---- (5) o drawer default FECHADO + o teto de 35% (device 336dp)
+    {
+        editor::bottom::BottomState bs0{};   // o ARRANQUE: bottomTab=0
+        // o default do dock é FECHADO (a spec PASSO 2 matou o auto-abrir
+        // da 0.8.0) — a altura que o editor CONSUME é ZERO (o main só
+        // passa o drawerH quando bottomTab>0; o rect do layout existe mas
+        // não desenha — o contrato da FASE E L4)
+        EXPECT(bs0.bottomTab == 0);
+        const editor::bottom::Layout bl0 =
+            editor::bottom::layout(776.0f, 336.0f, safe::Insets{}, bs0);
+        // com a tab FECHADA o drawer consumido é 0 (o currentDrawerH do
+        // main devolve 0 — a MESMA regra, afervel aqui pelo bottomTab)
+        const f32 consumed = bs0.bottomTab <= 0
+                                 ? 0.0f
+                                 : safe::effectiveDrawerH(
+                                       bs0.drawerH,
+                                       safe::viewportRect(776.0f, 336.0f,
+                                                          safe::Insets{})
+                                           .h,
+                                       336.0f);
+        EXPECT(nearEqF(consumed, 0.0f, 0.01f));
+        (void)bl0;
+        // o pior raw (a pega no máximo) fica no teto de 35% em passos de 8
+        editor::bottom::BottomState bs{};
+        bs.bottomTab = 3;
+        bs.drawerH = 400.0f;
+        const editor::bottom::Layout bm =
+            editor::bottom::layout(776.0f, 336.0f, safe::Insets{}, bs);
+        EXPECT(bm.drawer.h <= 336.0f * safe::kDrawerMaxPct + 0.01f);
+        const f32 steps = bm.drawer.h / theme::dp(8.0f);
+        EXPECT(std::fabs(steps - std::floor(steps)) < 0.01f);
     }
 }
 
@@ -2870,6 +2989,10 @@ TEST(regress_divisores_arrastaveis) {
     st.inspW = -1.0f;
     st.drawerH = 0.0f;
     st.showInspector = true;
+    // PASSO 2: SEM seleção o inspector colapsa ao TRILHO e o divisor
+    // direito desaparece — este teste afere O DIVISOR, por isso o estado
+    // tem de simular uma seleção VIVA (handle ≠ invalid; generation 1)
+    st.selected = Handle{1u, 1u};
 
     // ---- (a) a PEGA existe e ARMA: press no strip da hierarquia (o
     // hit de 20dp na borda do painel) — o toque é da pega, não do scroll
@@ -3677,15 +3800,26 @@ TEST(regress_hierarquia_contrato) {
         theme::setDensity(sc.density);
         for (f32 raw : drawerRaw) {
             const f32 vpH = safe::viewportRect(sc.sw, sc.sh, sc.in).h;
-            const f32 eff = safe::effectiveDrawerH(raw, vpH);
+            const f32 contentH = sc.sh - sc.in.top - sc.in.bottom;
+            const f32 eff =
+                safe::effectiveDrawerH(raw, vpH, contentH);
 
             // ---- CONTRATO §2.3: a FONTE ÚNICA — a altura efetiva NUNCA
-            // passa o piso do viewport (kViewportMinH) e cai em passos de
-            // 8dp. (O estado FECHADO é bottomTab==0 — o raw 0 da pega levanta
-            // ao mínimo da pega, como sempre foi)
-            const f32 cap = vpH - theme::dp(safe::kViewportMinH);
+            // passa o CAP DUPLO (o piso do viewport kViewportMinH E o teto
+            // de 35% da altura do content — spec PASSO 2) e cai em passos
+            // de 8dp. (O estado FECHADO é bottomTab==0 — o raw 0 da pega
+            // levanta ao mínimo da pega, como sempre foi)
+            f32 cap = vpH - theme::dp(safe::kViewportMinH);
+            const f32 cap35 = contentH * safe::kDrawerMaxPct;
+            if (cap35 < cap) {
+                cap = cap35;   // PASSO 2: o teto de 35% manda quando é menor
+            }
             EXPECT(eff > 0.0f);
             EXPECT(eff <= cap > 0.0f ? cap : 0.0f);
+            EXPECT_MSG(eff <= contentH * safe::kDrawerMaxPct + 0.01f,
+                       "%s raw=%.0f: o drawer efetivo (%.1f) passou o teto "
+                       "de 35%% do content (%.1f) — spec PASSO 2",
+                       sc.name, raw, eff, contentH * safe::kDrawerMaxPct);
             const f32 steps = eff / theme::dp(8.0f);
             EXPECT(std::fabs(steps - std::floor(steps)) < 0.01f);
 
@@ -3797,11 +3931,13 @@ TEST(regress_texto_strip_campo) {
     for (f32 d : densities) {
         theme::setDensity(d);
         // o device no pior caso: viewport 288dp de largura (776dp de
-        // conteúdo − 200 hier − 288 insp) — o ecrã em px @d
+        // conteúdo − 140 hier − 180 insp = 456dp no PASSO 2 — o pior caso
+        // do ENCAIXE dos chips continua a ser o piso 288dp da toolbar)
         const f32 sw = 776.0f * d, sh = 336.0f * d;
         const safe::Insets in{0.0f, 48.0f * d, 48.0f * d, 0.0f};
-        const f32 eff = safe::effectiveDrawerH(240.0f * d,
-                                               safe::viewportRect(sw, sh, in).h);
+        const f32 eff = safe::effectiveDrawerH(
+            240.0f * d, safe::viewportRect(sw, sh, in).h,
+            sh - in.top - in.bottom);
         const UiRect view = safe::centerRect(sw, sh, in, eff, true, -1.0f,
                                              -1.0f);
         editor::vpchrome::ChipWidths cw;
@@ -3899,7 +4035,8 @@ TEST(regress_viewport_rect_segue) {
     const f32 vpH = safe::viewportRect(sw, sh, in).h;
 
     // (a) O RECT MUDA com o painel: fechado (eff 0) vs aberto (raw 240)
-    const f32 effAberto = safe::effectiveDrawerH(240.0f, vpH);
+    const f32 effAberto = safe::effectiveDrawerH(
+        240.0f, vpH, sh - in.top - in.bottom);
     const UiRect fechado = safe::centerRect(sw, sh, in, 0.0f, true, -1.0f,
                                             -1.0f);
     const UiRect aberto = safe::centerRect(sw, sh, in, effAberto, true,
@@ -4053,8 +4190,9 @@ TEST(regress_rodape_intocavel) {
                 editor::bottom::layout(sw, sh, in, bs);
             EXPECT(bl.drawer.y + bl.drawer.h <= tb.y + 0.5f);
             EXPECT(nearEqF(bl.tabBar.y, tb.y, 0.5f));
-            const f32 eff = safe::effectiveDrawerH(raw,
-                                                   safe::viewportRect(sw, sh, in).h);
+            const f32 eff = safe::effectiveDrawerH(
+                raw, safe::viewportRect(sw, sh, in).h,
+                sh - in.top - in.bottom);
             const UiRect view = safe::centerRect(sw, sh, in, eff, true,
                                                  -1.0f, -1.0f);
             EXPECT(view.y + view.h <= tb.y + 0.5f);

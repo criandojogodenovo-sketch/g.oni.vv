@@ -3758,6 +3758,14 @@ int main() {
                 g_editor.divDragActive = false;
                 g_toastT = 0.0f;
                 g_toast[0] = '\0';
+                // PASSO 2: a FASE afere o editor com o INSPECTOR ABERTO
+                // (o drag da pega direita e o chrome presumem-no) — a cena
+                // está VAZIA neste frame, por isso CRIA um TIC real e
+                // seleciona (sem seleção o inspector colapsa ao TRILHO de
+                // 32dp e a pega direita não existe — o novo default); o
+                // TIC é DESTRUÍDO no fim da FASE (a suíte segue limpa)
+                const Handle hTic137 = g_scene.create("tic 13.7");
+                g_editor.selected = hTic137;
                 frame();
                 // como a 13.6: o export escreve por currentScreenName()
                 // ("editor") — as cópias do device vão para artefactos próprios
@@ -3794,20 +3802,26 @@ int main() {
                     why += ")";
                     check(false, why.c_str());
                 }
-                // (c) A GANGORRA: hier 200dp | vp 288dp | insp 288dp (os
-                // defaults assimétricos: o inspector mantém a linha X/Y/Z,
-                // a hierarquia absorve, o viewport nunca < a toolbar)
+                // (c) A GANGORRA: hier 140dp | insp 180dp | vp 456dp no
+                // device — os defaults POR PERCENTAGEM do PASSO 2 (18%/22%
+                // caem nos pisos 140/180 no ecrã de 776dp) e o viewport
+                // fica 58,8% ≥ 55% (o critério a do dono)
                 const safe::PanelBudget bd = editor::resolveEditorPanels(
                     g_editor, g_ui.contentWidthPx());
                 check(std::fabs(bd.hier - theme::dp(safe::kHierMinW)) < 1.0f,
-                      "13.7 a hierarquia default ABSORVE (200dp no device)");
+                      "13.7 a hierarquia default é o PISO 140dp (18% de 776 "
+                      "= 139,7 — spec PASSO 2)");
                 check(bd.insp >= theme::dp(safe::kInspMinW) - 1.0f &&
-                          std::fabs(bd.insp - theme::dp(288.0f)) < 9.0f,
-                      "13.7 o inspector default ~288dp (a linha X/Y/Z manda)");
+                          std::fabs(bd.insp - theme::dp(180.0f)) < 1.0f,
+                      "13.7 o inspector default é o PISO 180dp (22% de 776 = "
+                      "170,7 — spec PASSO 2)");
                 const f32 vpW = g_ui.contentWidthPx() - bd.hier - bd.insp;
                 check(vpW >= theme::dp(safe::kViewportMinW) - 1.0f,
                       "13.7 o viewport 3D >= 288dp (o piso da toolbar) — eram "
                       "176dp");
+                check(vpW >= g_ui.contentWidthPx() * 0.55f - 1.0f,
+                      "13.7 o viewport 3D >= 55% da largura (critério a do "
+                      "dono, PASSO 2) — eram 37,1%");
                 // (d) A BARRA DE TOQUE CABE: o layout do chrome com o rect
                 // REAL — todos os alvos dentro, 48dp inteiros, o stack em
                 // colunas, o [+] no canto sup-dir
@@ -3819,9 +3833,11 @@ int main() {
                     check(L.stackVisible && L.stackCols >= 2,
                           "13.7 o stack do viewport em COLUNAS (2/3) — a "
                           "altura do device nao comporta 5 em coluna");
-                    check(L.plusTopRight,
-                          "13.7 o [+] sobe ao canto SUP-dir (a toolbar "
-                          "preenche a largura)");
+                    check(!L.plusTopRight,
+                          "13.7 o [+] fica no canto INFERIOR (o viewport de "
+                          "456dp do PASSO 2 da espaço ao lado da toolbar — "
+                          "a subida é a degradação para ecrãs apertados, "
+                          "afervada na R-023)");
                     const f32 minTouch = theme::dp(40.0f);   // PASSO 1: a lei de ouro
                     bool allIn = true, all48 = true;
                     const UiRect all[11] = {
@@ -3855,7 +3871,7 @@ int main() {
                 {
                     // (e.1) a pega da HIERARQUIA arma e fica PRESA (piso)
                     const f32 stripX =
-                        bd.hier - theme::dp(10.0f);   // dentro do hit 20dp
+                        bd.hier - theme::dp(10.0f);   // dentro do hit 24dp
                     const f32 stripY = 300.0f;
                     g_input.injectDown(0, stripX, stripY);
                     frame();
@@ -3868,13 +3884,16 @@ int main() {
                         g_editor, g_ui.contentWidthPx());
                     check(std::fabs(bs.hier - theme::dp(safe::kHierMinW)) <
                               1.0f,
-                          "13.7 o PISO da hierarquia (200dp) segura o drag");
+                          "13.7 o PISO da hierarquia (140dp — spec PASSO 2) "
+                          "segura o drag");
                     g_input.injectUp(0);
                     frame();
                     check(!g_editor.divDragActive,
                           "13.7 o release FIXA a largura");
-                    // (e.2) a pega do INSPECTOR (a que tem INTERVALO no
-                    // device): encolhe → viewport CRESCE; alarga → teto
+                    // (e.2) a pega do INSPECTOR: no device o default É o
+                    // PISO 180dp (PASSO 2 — 22% de 776 = 170,7 < piso) — o
+                    // drag com INTERVALO é ALARGAR até ao TETO 260dp (novo)
+                    // e ENCOLHER de volta ao piso; a gangorra mostra os dois
                     const f32 inspX = g_ui.contentWidthPx() - bd.insp;
                     const f32 stripR = inspX + theme::dp(10.0f);
                     g_input.injectDown(0, stripR, stripY);
@@ -3882,30 +3901,30 @@ int main() {
                     check(g_editor.divDragActive && g_editor.divDragRight,
                           "13.7 o press na pega DIREITA arma o drag do "
                           "inspector");
-                    g_input.injectMove(0, stripR + 60.0f, stripY);
-                    frame();
-                    const safe::PanelBudget bw = editor::resolveEditorPanels(
-                        g_editor, g_ui.contentWidthPx());
-                    check(bw.insp < bd.insp - 24.0f,
-                          "13.7 o drag ENCOLHE o inspector ao vivo");
-                    check(g_ui.contentWidthPx() - bw.hier - bw.insp >
-                              g_ui.contentWidthPx() - bd.hier - bd.insp,
-                          "13.7 ao ENCOLHER o painel o viewport CRESCE (a "
-                          "gangorra a favor do 3D)");
-                    g_input.injectMove(0, stripR + 2000.0f, stripY);
-                    frame();
-                    const safe::PanelBudget bf = editor::resolveEditorPanels(
-                        g_editor, g_ui.contentWidthPx());
-                    check(std::fabs(bf.insp - theme::dp(safe::kInspMinW)) <
-                              1.0f,
-                          "13.7 o PISO do inspector (272dp) segura o drag");
                     g_input.injectMove(0, stripR - 2000.0f, stripY);
                     frame();
                     const safe::PanelBudget bt = editor::resolveEditorPanels(
                         g_editor, g_ui.contentWidthPx());
-                    check(std::fabs(bt.insp - bd.insp) < 1.0f,
-                          "13.7 o TETO da gangorra (o inspector volta ao "
-                          "maximo sem fechar o viewport)");
+                    check(std::fabs(bt.insp - theme::dp(safe::kInspMaxW)) <
+                              1.0f,
+                          "13.7 o TETO do inspector (260dp — spec PASSO 2) "
+                          "segura o drag ao alargar");
+                    check(g_ui.contentWidthPx() - bt.hier - bt.insp <
+                              g_ui.contentWidthPx() - bd.hier - bd.insp,
+                          "13.7 ao ALARGAR o painel o viewport ENCOLHE (a "
+                          "gangorra a favor do 3D)");
+                    g_input.injectMove(0, stripR + 2000.0f, stripY);
+                    frame();
+                    const safe::PanelBudget bw = editor::resolveEditorPanels(
+                        g_editor, g_ui.contentWidthPx());
+                    check(std::fabs(bw.insp - theme::dp(safe::kInspMinW)) <
+                              1.0f,
+                          "13.7 o PISO do inspector (180dp — spec PASSO 2) "
+                          "segura o drag ao encolher");
+                    check(g_ui.contentWidthPx() - bw.hier - bw.insp >
+                              g_ui.contentWidthPx() - bd.hier - bt.insp,
+                          "13.7 ao ENCOLHER o painel o viewport CRESCE (a "
+                          "gangorra a favor do 3D)");
                     g_input.injectUp(0);
                     frame();
                     // (f) a PERSISTENCIA: o layout.json leva as larguras
@@ -3933,7 +3952,113 @@ int main() {
                               hw2 < 0.0f && iw2 < 0.0f,
                           "13.7 o layout.json ANTIGO (sem larguras) → "
                           "defaults (retrocompativel)");
-                    // REPOEM o estado p/ o resto da suite
+                    // REPOEM o estado p/ o resto da suite — o TIC da FASE
+                    // sai (a cena volta ao estado de sempre) e a seleção
+                    // com ele (PASSO 2: sem seleção o trilho volta)
+                    g_scene.destroy(hTic137);
+                    g_editor.selected = Handle::invalid();
+
+                    // ---- (h) PASSO 2 · A EVIDÊNCIA (P-05): o TRILHO e a
+                    // CONSOLA nova — PNG + JSON exportados ao projeto
+                    passo("13.7h passo2: o trilho 32dp e a consola nova "
+                          "(PNG+JSON)");
+                    {
+                        // (h.1) SEM seleção: o inspector É o TRILHO de 32dp
+                        // (64px @2.0) — o JSON do export mostra o painel de
+                        // 64px na borda direita do content
+                        g_bottom.bottomTab = 0;
+                        frame();
+                        auto [pngT, jsT] = exportScreen("editor");
+                        fileapi::writeAll("layout-harness-editor-trilho.png",
+                                          pngT.data(), pngT.size());
+                        fileapi::writeAll("layout-harness-editor-trilho.json",
+                                          jsT.data(), jsT.size());
+                        {
+                            vv::RawImage imgT;
+                            std::string errT;
+                            check(vv::loadPng(pngT.data(), pngT.size(), imgT,
+                                              errT) &&
+                                      imgT.width == 1600 &&
+                                      imgT.height == 720,
+                                  "13.7h o PNG do trilho e 1600x720");
+                            const std::string jsStr(jsT.begin(), jsT.end());
+                            check(jsStr.find("\"w\":64") !=
+                                      std::string::npos,
+                                  "13.7h o JSON mostra o TRILHO de 64px "
+                                  "(32dp — spec PASSO 2)");
+                        }
+                        // (h.2) A CONSOLA: chips 28dp e a «Consola»
+                        // duplicada FORA — a linha dos chips fica com 5
+                        // alvos (Logs/Erros/Avisos + auto + export)
+                        elog::info("c33 linha info do passo2");
+                        elog::warn("c33 linha warn do passo2");
+                        elog::error("c33 linha ERRO um do passo2");
+                        elog::error("c33 linha ERRO dois do passo2");
+                        g_bottom.bottomTab = 3;
+                        frame();
+                        frame();
+                        auto [pngC, jsC] = exportScreen("editor");
+                        fileapi::writeAll("layout-harness-editor-consola.png",
+                                          pngC.data(), pngC.size());
+                        fileapi::writeAll("layout-harness-editor-consola.json",
+                                          jsC.data(), jsC.size());
+                        {
+                            vv::RawImage imgC;
+                            std::string errC;
+                            check(vv::loadPng(pngC.data(), pngC.size(), imgC,
+                                              errC) &&
+                                      imgC.width == 1600 &&
+                                      imgC.height == 720,
+                                  "13.7h o PNG da consola e 1600x720");
+                            // a linha dos chips: 5 BOTÕES com 56px (28dp) de
+                            // altura na banda do topo do drawer (eram 6 com
+                            // a chip duplicada; o h dos chips era 72px/36dp)
+                            const std::string jsStr(jsC.begin(), jsC.end());
+                            u32 nChips = 0;
+                            size_t p = jsStr.find("\"entradas\"");
+                            while (p != std::string::npos) {
+                                p = jsStr.find("\"tipo\":\"botao\"", p + 1);
+                                if (p == std::string::npos) {
+                                    break;
+                                }
+                                const size_t hy = jsStr.find("\"y\":", p);
+                                const size_t hh = jsStr.find("\"h\":", p);
+                                if (hy == std::string::npos ||
+                                    hh == std::string::npos) {
+                                    continue;
+                                }
+                                const f32 yv = std::strtof(
+                                    jsStr.c_str() + hy + 4, nullptr);
+                                const f32 hv = std::strtof(
+                                    jsStr.c_str() + hh + 4, nullptr);
+                                if (yv > 480.0f && yv < 560.0f &&
+                                    hv > 55.0f && hv < 57.0f) {
+                                    ++nChips;
+                                }
+                            }
+                            check(nChips == 5,
+                                  "13.7h a linha dos chips tem 5 alvos de "
+                                  "56px (Logs/Erros/Avisos/auto/export — a "
+                                  "chip «Consola» saiu e são 28dp)");
+                        }
+                        // (h.3) o FILTRO Erros mostra erros: o tap na chip
+                        // Erros (a 2.ª — [150..258]px no registo) arma o
+                        // filtro 1 e o engine.log tem as linhas E/ para
+                        // mostrar
+                        {
+                            const int nE = logCount(" E/GONI:");
+                            tap(200.0f, 516.0f);   // o padrão down/frame/up/frame
+                            check(g_bottom.consoleTab == 1,
+                                  "13.7h o tap na chip Erros ativa o filtro "
+                                  "(consoleTab=1 — Logs=0/Erros=1/Avisos=2)");
+                            check(nE >= 2,
+                                  "13.7h o engine.log tem as linhas E/ do "
+                                  "passo2 (o filtro Erros tem o que mostrar)");
+                        }
+                        g_bottom.bottomTab = 0;
+                        g_bottom.consoleTab = 0;
+                    }
+                    // REPOEM o resto do estado p/ a suíte
                     g_editor.hierW = -1.0f;
                     g_editor.inspW = -1.0f;
                 }
@@ -4094,15 +4219,24 @@ int main() {
                                      theme::kTheme.bg, expF);
                     const i32 e8 = (i32)(expF[0] * 255.0f + 0.5f);
                     // o 1.º botão da toolstack PELO REGISTO (dentro da
-                    // viewport, no topo-esquerda dela)
+                    // viewport, no topo-esquerda dela). PASSO 2: a janela
+                    // fixa (300..400px) morre — a largura da hierarquia é
+                    // 18% (276dp no harness) e o stack DESLOCA-SE; a
+                    // procura compara com o rect QUE O vpchrome CALCULA
+                    // (a mesma fonte — se o layout muda, o teste acompanha)
                     const layout::Entry* chip = nullptr;
+                    const safe::Insets i13{rf.insetL, rf.insetT, rf.insetR,
+                                           rf.insetB};
+                    const editor::vpchrome::Layout l13 =
+                        editor::vpchrome::layout(editor::centerRect(
+                            rf.screenW, rf.screenH, i13, 0.0f, true, -1.0f,
+                            -1.0f));
+                    const UiRect want13 = l13.stack[0];
                     for (const auto& e : rf.entries) {
-                        // RECALIBRADO 0.9.6.10 (GRUPO UI): a strip do
-                        // topo da viewport empurrou o stack para baixo (o
-                        // 1.º botão vive a view.y+48+16 ≈ 128 no harness)
                         if (e.kind == layout::Entry::Button &&
-                            e.x > 300.0f && e.x < 400.0f && e.y > 80.0f &&
-                            e.y < 160.0f && e.w > 30.0f && e.w < 60.0f) {
+                            std::fabs(e.x - want13.x) <= 2.0f &&
+                            std::fabs(e.y - want13.y) <= 2.0f &&
+                            std::fabs(e.w - want13.w) <= 2.0f) {
                             chip = &e;
                             break;
                         }
@@ -4280,17 +4414,27 @@ int main() {
                   "bloco fixo de 88dp)");
         }
 
-        // ---- 14.2 (J2 · R-023) — «pesquisar TIC» com a fonte REAL no
-        // PISO da hierarquia (200dp): o placeholder cabe sem recorte
-        passo("14.2 pesquisa: o placeholder cabe no piso 200dp (fonte real)");
+        // ---- 14.2 (J2 · R-023) — o PLACEHOLDER com a fonte REAL no
+        // PISO da hierarquia (PASSO 2: 140dp): a degradação POR ORDEM —
+        // «pesquisar TIC» quando o campo dá, «pesquisar» no piso — o
+        // placeholder NUNCA sai com reticência
+        passo("14.2 pesquisa: o placeholder degrada sem recorte no piso "
+              "140dp (fonte real)");
         {
             const f32 fieldW =
                 theme::dp(safe::kHierMinW) - 2.0f * theme::dp(16.0f);
-            const f32 budget = fieldW - theme::dp(76.0f);
-            const f32 tw = g_ui.fontWidth("pesquisar TIC");
-            check(tw <= budget + 0.5f,
-                  "14.2 «pesquisar TIC» cabe no campo com a hierarquia no "
-                  "PISO 200dp (fonte real @2.0)");
+            const f32 budget = fieldW - theme::dp(40.0f) - theme::dp(12.0f);
+            const f32 twFull = g_ui.fontWidth("pesquisar TIC");
+            const f32 twShort = g_ui.fontWidth("pesquisar");
+            if (twFull <= budget + 0.5f) {
+                check(true,
+                      "14.2 «pesquisar TIC» cabe inteiro no campo do piso");
+            } else {
+                check(twShort <= budget + 0.5f,
+                      "14.2 «pesquisar» cabe no PISO 140dp (a degradação da "
+                      "spec PASSO 2 — o placeholder nunca corta; fonte real "
+                      "@2.0)");
+            }
         }
 
         // ---- 14.3 (J3 · R-024) — O LOG DO RECT A ACONTECER: abrir o
@@ -4303,18 +4447,24 @@ int main() {
             g_bottom.bottomTab = 0;
             g_bottom.drawerH = 0.0f;
             frame();
-            // o rect ESPERADO com o painel fechado
+            // o rect ESPERADO com o painel fechado — a MESMA fórmula do
+            // main (PASSO 2: o trilho quando não há seleção e o modo 3D)
+            const bool inspR14 =
+                g_editor.showInspector &&
+                !(g_editor.uiMode || editor::inspectorCollapsed(g_editor));
+            const bool trk14 =
+                !g_editor.uiMode && editor::inspectorCollapsed(g_editor);
             const UiRect fechado = editor::centerRect(
-                1600.0f, 720.0f, g_ui.safeArea(), currentDrawerH(),
-                g_editor.showInspector, g_editor.hierW, g_editor.inspW);
+                1600.0f, 720.0f, g_ui.safeArea(), currentDrawerH(), inspR14,
+                g_editor.hierW, g_editor.inspW, trk14);
             // força uma MUDANÇA: abre o painel (o drawer persistido 240 →
             // a altura efetiva da fonte única) e corre um frame
             g_bottom.bottomTab = 1;
             g_bottom.drawerH = 240.0f;
             frame();
             const UiRect aberto = editor::centerRect(
-                1600.0f, 720.0f, g_ui.safeArea(), currentDrawerH(),
-                g_editor.showInspector, g_editor.hierW, g_editor.inspW);
+                1600.0f, 720.0f, g_ui.safeArea(), currentDrawerH(), inspR14,
+                g_editor.hierW, g_editor.inspW, trk14);
             // a ÚLTIMA linha vp3d tem de descrever o rect ABERTO
             std::string lastVp;
             for (const std::string& l : logLines()) {

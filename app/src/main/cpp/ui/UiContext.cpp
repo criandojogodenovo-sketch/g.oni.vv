@@ -209,6 +209,12 @@ void UiContext::auditLabel_(f32 xBaseline, f32 yBaseline, const char* shown,
     e.h = (font_->ascent() + font_->descent()) * k;
     e.fullW = fullW > 0.0f ? fullW : e.w;
     e.truncated = truncated;
+    // PASSO 2: a flag de DESENHO (o padrão da rowFloor — a 1ª label
+    // registada apanha-a e ela nunca escapa para o widget seguinte)
+    if (auditFitByDesign_) {
+        e.fitByDesign = true;
+        auditFitByDesign_ = false;
+    }
     e.clipped = inScroll_;
     audit_.add(e);
 }
@@ -372,6 +378,11 @@ void UiContext::labelStyled(f32 xBaseline, f32 yBaseline, const char* text,
                             const f32 color[4], f32 fontScale, u8 style) {
     if (!font_ || !font_->ok() || !text) {
         return;
+    }
+    if (std::getenv("VV_DBG_LABEL") && xBaseline > 1330.0f &&
+        yBaseline > 600.0f && yBaseline < 720.0f) {
+        std::fprintf(stderr, "LABEL: x=%.1f y=%.1f '%s'\n", xBaseline,
+                     yBaseline, text);
     }
     // 0.9.6.6 (GRUPO C): o k TOTAL = textScale_ (viewport 2D) × textK()
     // (a densidade do texto — o choke point) × fontScale (o sp RELATIVO

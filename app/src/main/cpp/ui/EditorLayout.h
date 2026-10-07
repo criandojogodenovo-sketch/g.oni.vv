@@ -81,7 +81,11 @@ constexpr u64 kHierMultiDistId = 5502;   // "distribuir" (≥3 selecionados)
 constexpr u64 kIdDividerL = 5503;   // pega do divisor da HIERARQUIA
 constexpr u64 kIdDividerR = 5504;   // pega do divisor do INSPECTOR
 constexpr f32 kDividerStripW = 12.0f;   // dp — o strip visível
-constexpr f32 kDividerHitW   = 20.0f;   // dp — a zona de toque (strip+folga)
+// PASSO 2 (0.9.6.15): a PEGA de arrasto tem 24dp (era 20 — spec do dono;
+// a pega do drawer também subiu 12→24). O strip VISÍVEL segue 12dp — os
+// 12dp restantes do hit são folga PARA DENTRO do painel (nunca para o
+// viewport: um toque na pega está sempre fora do centerRect).
+constexpr f32 kDividerHitW   = 24.0f;   // dp — a zona de toque da pega
 
 // 0.9.0 (spec C) — SECÇÕES COLAPSÁVEIS do Inspector: cabeçalho (PASSO 1:
 // 28dp) com título + chevron; o estado (bitmask por secção) vive no
@@ -325,7 +329,14 @@ inline f32 inspTransformRowH(const TextMetrics& m) {
 inline f32 inspSectionH() { return theme::dp(28.0f); }
 // altura da linha de MINIATURAS de Material (PASSO 1: 44dp — a lei «nada
 // ≥48»; eram 64) + legendas 12sp em LINHA RESERVADA
-inline f32 inspThumbsH() { return theme::dp(44.0f) + theme::sp(theme::kFontCaption); }
+inline f32 inspThumbsH() {
+    // PASSO 2 (0.9.6.15): o plano reserva o QUE O DRAW CONSOME —
+    // dp(4) topo + miniatura dp(44) + a linha da legenda sp(12) + dp(4)
+    // de respiro (antes: dp(44)+sp(12) e o draw punha a legenda DENTRO da
+    // linha seguinte — a colisão de glifos que o test_ui apanhou a 260dp)
+    return theme::dp(4.0f) + theme::dp(44.0f) + theme::sp(theme::kFontCaption) +
+           theme::dp(4.0f);
+}
 
 inline u32 inspectorRowCount(const InspProfile& p, bool selectable,
                              u32 collapsed) {

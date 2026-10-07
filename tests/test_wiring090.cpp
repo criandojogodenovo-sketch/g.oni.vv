@@ -322,14 +322,18 @@ TEST(inspector_botao_r_restat_a_linha) {
     EXPECT(nearEqF(tr->scale.z, 1.0f, 0.01f));
 }
 
-// ---- C: "Nada selecionado" VISIBLE (text2 — 6,7:1) ------------------------------
-TEST(inspector_nada_selecionado_visivel) {
+// ---- C (PASSO 2): SEM seleção o inspector vira o TRILHO de 32dp -----------
+TEST(inspector_sem_selecao_vira_trilho_32dp) {
     Env e;
     e.frame();   // sem seleção
-    // glifos DE FATO desenhados (o texto existe) — e a cor é text2 (aferva-se
-    // pelo CONTRASTE da cor usada ≥ 4,5:1 — a regra da spec C)
+    // PASSO 2 (0.9.6.15 — spec do dono): o painel INTEIRO colapsa ao
+    // trilho de 32dp (a área junta-se ao viewport) — o estado "Nada
+    // selecionado" deixou de existir como painel
+    const UiRect tr = safe::inspectorPanelRect(kSW, kSH, safe::Insets{}, 0.0f,
+                                               -1.0f, -1.0f, /*inspTrack=*/true);
+    EXPECT(nearEqF(tr.w, theme::dp(safe::kInspTrackW), 0.01f));
+    // e o editor inteiro continua a desenhar glifos (as tabs, os painéis)
     EXPECT(e.ui.glyphsForTest().vertexCount() > 0);
-    EXPECT(theme::contrastOnSurface(theme::kTheme.text2) >= 4.5f);
 }
 
 // ---- D: ViewportChrome: stack sem sobreposição, alvos 40 (PASSO 1) --------------
@@ -417,13 +421,17 @@ TEST(vpchrome_toolbar_ancorada_a_viewport_g11) {
     }
 }
 
-// ---- E: drawer clamp 160..400 + passos de 8 --------------------------------------
+// ---- E: drawer clamp 160..400 + passos de 8 + o TETO de 35% (PASSO 2) ---------
 TEST(bottom_drawer_clamp_e_passos_de_8) {
     bottom::BottomState bs;
-    bs.drawerH = 999.0f;   // fora do range → layout clampa a 400
+    bs.drawerH = 999.0f;   // fora do range → a pega clampa a 400, MAS a
+                           // altura EFETIVA é o teto de 35% do content
+                           // (spec PASSO 2: 0,35 × 720 = 252 → 248 em
+                           // passos de 8 — o cap duplo da fonte única)
     const bottom::Layout L1 = bottom::layout(kSW, kSH, safe::Insets{}, bs);
-    EXPECT(nearEqF(L1.drawer.h, 400.0f));
-    bs.drawerH = 32.0f;    // → 160
+    EXPECT(nearEqF(L1.drawer.h, 248.0f));
+    EXPECT(L1.drawer.h <= kSH * 0.35f + 0.01f);
+    bs.drawerH = 32.0f;    // → 160 (o piso da pega, abaixo do teto)
     const bottom::Layout L2 = bottom::layout(kSW, kSH, safe::Insets{}, bs);
     EXPECT(nearEqF(L2.drawer.h, 160.0f));
     bs.drawerH = 244.0f;   // não múltiplo de 8 → 240
@@ -678,9 +686,13 @@ TEST(material_legendas_inteiras_e_tint_rgba_g13) {
 
     // a linha de miniaturas GANHOU a linha reservada das legendas —
     // 0.9.6.6 (GRUPO C): 64dp + sp(12) REAL; PASSO 1 (0.9.6.14): 44dp
-    // (a lei «nada ≥48») + sp(12)
+    // (a lei «nada ≥48») + sp(12); PASSO 2 (0.9.6.15): o plano reserva o
+    // QUE O DRAW CONSOME — dp(4) + dp(44) + sp(12) + dp(4) — a legenda
+    // NUNCA mais desenha dentro da linha seguinte (a colisão de glifos
+    // que o test_ui apanhou no painel de 260dp)
     EXPECT(nearEqF(editor::inspThumbsH(),
-                   theme::dp(44.0f) + theme::sp(theme::kFontCaption)));
+                   theme::dp(4.0f) + theme::dp(44.0f) +
+                       theme::sp(theme::kFontCaption) + theme::dp(4.0f)));
 
     // o desenho com tint BRANCO não crasha e emite OS QUADS DO ALBEDO com
     // alfa 1 (o bug: tint f32[3] passado a API f32[4] lia o alfa FORA do

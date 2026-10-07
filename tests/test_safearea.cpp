@@ -129,7 +129,9 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     // 0.9.6.6 (GRUPO C): as linhas ganharam o PISO dp (eram bloco+px crus)
     // PASSO 1 (0.9.6.14): a tabela da spec (linha 36 · secção 28 ·
     // transform 64) — o plano do Player completo fica em 1046
-    EXPECT(nearEqF(contentH, 1046.0f));
+    // PASSO 2 (0.9.6.15): a linha de miniaturas reserva a legenda
+    // inteira (+8dp) — 1046 → 1054
+    EXPECT(nearEqF(contentH, 1054.0f));
 
     // DEPOIS: painel dentro do contentRect [0,24,·,628] (status 24 + nav 92)
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);

@@ -250,7 +250,10 @@ TEST(uieditor_toggle_abre_viewport_2d_dedicado) {
 TEST(uieditor_viewport_2d_nunca_corta_o_canvas) {
     // scale-to-fit: o espaço de design (1600x720) cabe INTEIRO no viewport
     // central (1000x592 no layout 1600x720) — sem cortes, sem sobreposição
-    const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{});
+    EditorState stFresh;   // o estado de arranque (o painel 22% do PASSO 2)
+    const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{}, 0.0f,
+                                         stFresh.showInspector,
+                                         stFresh.hierW, stFresh.inspW);
     const ViewportTransform t = uiViewportTransform(view, kSW, kSH);
     const Rect design{t.ox, t.oy, t.ox + kSW * t.scale, t.oy + kSH * t.scale};
     EXPECT(rectInside(design, {view.x, view.y, view.x + view.w, view.y + view.h}));
@@ -269,7 +272,7 @@ TEST(uieditor_viewport_bg_no_centro_sem_sobrepor_paineis) {
     e.st.uiMode = true;
     e.frame();
     // o bg do viewport 2D ocupa EXATAMENTE o centerRect (o mesmo da câmara)
-    const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{});
+    const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{}, 0.0f, e.st.showInspector, e.st.hierW, e.st.inspW);
     std::vector<Rect> rects;
     collectRects(e.ui.solidsForTest(), rects);
     bool found = false;
@@ -281,12 +284,16 @@ TEST(uieditor_viewport_bg_no_centro_sem_sobrepor_paineis) {
         }
     }
     EXPECT(found);
-    // e não invade os painéis: hierarchy [0..300], inspector [1300..1600]
+    // e não invade os painéis — os bands VÊM do resolvePanels (PASSO 2:
+    // 18%/22% de estado; os fixos [0..300]/[1300..1600] eram do painel
+    // de 300dp que morreu)
+    const safe::PanelBudget pb =
+        safe::resolvePanels(kSW, e.st.hierW, e.st.inspW);
     for (const Rect& r : rects) {
         if (std::fabs(r.x0 - view.x) < 0.5f && std::fabs(r.y0 - view.y) < 0.5f &&
             std::fabs(r.x1 - (view.x + view.w)) < 0.5f) {
-            EXPECT(!rectsOverlap(r, {0.0f, 88.0f, 299.0f, 680.0f}));
-            EXPECT(!rectsOverlap(r, {1301.0f, 88.0f, 1600.0f, 680.0f}));
+            EXPECT(!rectsOverlap(r, {0.0f, 88.0f, pb.hier, 680.0f}));
+            EXPECT(!rectsOverlap(r, {kSW - pb.insp, 88.0f, kSW, 680.0f}));
         }
     }
 }
@@ -314,7 +321,7 @@ TEST(uieditor_wysiwyg_tap_seleciona_drag_move_vazio_desseleciona) {
     e.st.uiMode = true;
     e.frame();
 
-    const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{});
+    const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{}, 0.0f, e.st.showInspector, e.st.hierW, e.st.inspW);
     const ViewportTransform t = uiViewportTransform(view, kSW, kSH);
     const Rect onScreen{t.ox + 400.0f * t.scale, t.oy + 200.0f * t.scale,
                         t.ox + 640.0f * t.scale, t.oy + 320.0f * t.scale};
@@ -356,7 +363,7 @@ TEST(uieditor_wysiwyg_o_de_cima_ganha) {
 
     e.st.uiMode = true;
     e.frame();
-    const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{});
+    const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{}, 0.0f, e.st.showInspector, e.st.hierW, e.st.inspW);
     const ViewportTransform t = uiViewportTransform(view, kSW, kSH);
     e.tap(t.ox + 200.0f * t.scale, t.oy + 200.0f * t.scale);
     EXPECT(e.st.selElement == 1);   // o ÚLTIMO desenhado (por cima)
@@ -806,7 +813,9 @@ TEST(uieditor_desselecionar_viewport_3d_tap_nao_drag) {
     EditorState st;
     InputState in;
     st.selected = Handle{5, 1};
-    const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{});
+    const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{}, 0.0f,
+                                         st.showInspector, st.hierW,
+                                         st.inspW);
 
     // TAP parado no viewport: press → release no mesmo sítio → desseleciona
     // (as edges valem 1 FRAME — clearEdges marca a fronteira, como no main)
@@ -1012,7 +1021,7 @@ TEST(uieditor_overlay_modal_tapa_o_canvas) {
     {
         std::vector<Rect> rects;
         collectRects(e.ui.solidsForTest(), rects);
-        const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{});
+        const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{}, 0.0f, e.st.showInspector, e.st.hierW, e.st.inspW);
         const ViewportTransform t = uiViewportTransform(view, kSW, kSH);
         const Rect want{t.ox + 600.0f * t.scale, t.oy + 300.0f * t.scale,
                         t.ox + 900.0f * t.scale, t.oy + 380.0f * t.scale};
@@ -1046,7 +1055,7 @@ TEST(uieditor_overlay_modal_tapa_o_canvas) {
         }
         EXPECT(backdrop);
         // NENHUM quad do elemento do canvas (transformado) existe
-        const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{});
+        const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{}, 0.0f, e.st.showInspector, e.st.hierW, e.st.inspW);
         const ViewportTransform t = uiViewportTransform(view, kSW, kSH);
         const Rect want{t.ox + 600.0f * t.scale, t.oy + 300.0f * t.scale,
                         t.ox + 900.0f * t.scale, t.oy + 380.0f * t.scale};
@@ -1079,7 +1088,7 @@ TEST(uieditor_overlay_modal_tapa_o_canvas) {
     {
         std::vector<Rect> rects;
         collectRects(e.ui.solidsForTest(), rects);
-        const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{});
+        const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{}, 0.0f, e.st.showInspector, e.st.hierW, e.st.inspW);
         const ViewportTransform t = uiViewportTransform(view, kSW, kSH);
         const Rect want{t.ox + 600.0f * t.scale, t.oy + 300.0f * t.scale,
                         t.ox + 900.0f * t.scale, t.oy + 380.0f * t.scale};

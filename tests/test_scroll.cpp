@@ -188,7 +188,9 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     // 0.9.6.6 (GRUPO C): o PISO dp em TODAS as linhas — 1420
     // PASSO 1 (0.9.6.14): a tabela da spec (linha 36 · secção 28 ·
     // transform 64: título 24 + caixas 32) baixa a receita para 1046
-    EXPECT(nearEqF(contentH, 1046.0f));
+    // PASSO 2 (0.9.6.15): a linha de miniaturas reserva a legenda
+    // inteira (+8dp) — 1046 → 1054
+    EXPECT(nearEqF(contentH, 1054.0f));
 
     // cursor Y PARTILHADO: linhas sequenciais (y estritamente crescente, sem
     // reinício por secção), todas dentro do conteúdo, e o fundo do plano =
@@ -229,9 +231,10 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     // 0.9.6.6 (GRUPO C): o PISO dp iguala addTc e label tc — o plano com
     // TouchControls fica IGUAL ao sem (PASSO 1: 1046): a troca não encolhe
     // PASSO 1: com TouchControls o addTc (42) dá lugar à label tc (36) —
-    // 1046 − 42 + 36 = 1040
+    // 1046 − 42 + 36 = 1040; PASSO 2 (0.9.6.15): a linha de miniaturas
+    // reserva a LEGENDA INTEIRA (+8dp) — 1040 + 8 = 1048
     EXPECT(nearEqF(inspectorContentHeight(inspectorProfile(*tic), m, false, 0u),
-                   1040.0f));
+                   1048.0f));
 }
 
 TEST(scroll_hierarquia_todos_os_tics_atingeis) {

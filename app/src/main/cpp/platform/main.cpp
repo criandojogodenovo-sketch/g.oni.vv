@@ -260,11 +260,11 @@ static f32 currentDrawerH() {
     if (g_bottom.bottomTab <= 0) {
         return 0.0f;
     }
+    const safe::Insets in = g_ui.safeArea();
     return safe::effectiveDrawerH(
         g_bottom.drawerH,
-        safe::viewportRect(g_ui.screenWidth(), g_ui.screenHeight(),
-                           g_ui.safeArea())
-            .h);
+        safe::viewportRect(g_ui.screenWidth(), g_ui.screenHeight(), in).h,
+        g_ui.screenHeight() - in.top - in.bottom);   // PASSO 2: o cap de 35%
 }
 
 void showToast(const char* msg);   // fwd (definido abaixo)
@@ -4686,10 +4686,17 @@ void frame() {
     // 0.9.0: a timeline vive no DRAWER (aba Animação) — o viewport central
     // encolhe pelo drawer (currentDrawerH), não pela strip antiga
     // GRUPO D: larguras de ESTADO (divisores) — o orbit acompanha os painéis
-    const UiRect viewRect = editor::centerRect(w, h, g_ui.safeArea(),
-                                               currentDrawerH(),
-                                               g_editor.showInspector,
-                                               g_editor.hierW, g_editor.inspW);
+    // PASSO 2 (0.9.6.15): o inspector no TRILHO (sem seleção) devolve a
+    // área ao viewport — a MESMA pergunta que o draw (inspectorCollapsed).
+    // SÓ no editor 3D: o modo UI tem o contrato próprio (paridade WYSIWYG
+    // play/edit — o painel de UI mantém a largura em ambos)
+    const bool inspRight =
+        g_editor.showInspector &&
+        !(g_editor.uiMode || editor::inspectorCollapsed(g_editor));
+    const UiRect viewRect = editor::centerRect(
+        w, h, g_ui.safeArea(), currentDrawerH(), inspRight,
+        g_editor.hierW, g_editor.inspW,
+        !g_editor.uiMode && editor::inspectorCollapsed(g_editor));
     (void)tlVisible;
     u32 gizmoClaimed = 0;
     Tic* gizmoTic = g_scene.get(g_editor.selected);
@@ -5431,18 +5438,17 @@ void frame() {
         editor::drawPanelDividers(g_ui, g_editor,
                                   g_editor.showInspector && !g_editor.uiMode);
         // 0.9.0 (spec E/K): a TIMELINE vive no DRAWER do painel de baixo
-        // (aba Animação) — a strip de fundo morreu. Com player presente e
-        // drawer fechado, a aba AUTO-ABRE (o comportamento "abre sozinha"
-        // da 0.8.0 manteve-se — agora abre o drawer certo)
-        if (tlVisible && g_bottom.bottomTab == 0) {
-            g_bottom.bottomTab = 4;   // 0.9.6.10: Animação é a 4ª tab
-        }
+        // (aba Animação). PASSO 2 (0.9.6.15): o AUTO-ABRIR da 0.8.0 SAIU —
+        // o drawer fica FECHADO por default (spec do dono: «o painel de
+        // baixo abre por toque») — quem quer a timeline TOCA a tab
+        // Animação; o main só desenha quando ela está aberta
         if (g_bottom.bottomTab == 4 && tlVisible) {
             const UiRect d = editor::bottom::layout(
                 w, h, g_ui.safeArea(), g_bottom).drawer;
             timeline::drawTimelineInRect(
                 g_ui, g_input, g_scene, g_editor, g_timeline, g_frameDt,
-                {d.x, d.y + 12.0f, d.w, d.h - 12.0f});
+                {d.x, d.y + theme::dp(editor::bottom::kDrawerHandleH), d.w,
+                 d.h - theme::dp(editor::bottom::kDrawerHandleH)});
         }
     }
 

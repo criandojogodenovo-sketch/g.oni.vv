@@ -6,16 +6,20 @@
 //   accent + underline 2dp; à DIREITA o «FPS n · TICs n» (a status bar de
 //   24dp MORREU — a spec PASSO 1: a faixa extra sai; a versão/commit
 //   vivem em Settings › Sobre)
-//   DRAWER: abre por baixo da tab bar; DEFAULT 240dp, PEGA de arrasto na
-//   borda superior (160..400, passos de 8dp — spec E); tocar na tab ATIVA
-//   fecha (o drawer desaparece, a tab bar fica)
+//   DRAWER: abre só por TOQUE na tab (PASSO 2: SEM auto-abrir — o default
+//   do editor é FECHADO); DEFAULT 240dp, PEGA de arrasto 24dp na borda
+//   superior (o ESTADO cru vai 160..400, passos de 8dp — spec E — mas a
+//   ALTURA EFETIVA é capada a 35% da altura do content pela fonte única
+//   safe::effectiveDrawerH, spec PASSO 2); tocar na tab ATIVA fecha
 //
 // CONTEÚDO do drawer (spec K):
 //   • FICHEIROS: grelha de cards 96dp (miniatura por imageQuad quando há
 //     textura, ícone de tipo caso contrário) + nome 12sp — o toque aplica
 //     ao TIC selecionado pelo MESMO caminho do seletor (applyAssetPick)
 //   • CONSOLA: linhas mono 12sp coloridas por nível (I=text-2, W=warn,
-//     E=danger), chips [todos][erros], toggle auto-scroll, [Export]; o
+//     E=danger), chips INTERNOS de CABEÇALHO 28dp (PASSO 2 — e a chip
+//     «Consola» SAIU: duplicava a TAB; a vista COMPLETA do log é a chip
+//     «Logs», Erros/Avisos filtram), toggle auto-scroll, [Export]; o
 //     toque numa linha EXPANDE (texto inteiro — o truncado abre)
 //   • ANIMAÇÃO: a TIMELINE de sempre dentro do rect do drawer (tracks +
 //     régua/keys + transporte + scrub — ui/Timeline.h intocado)
@@ -106,6 +110,12 @@ struct FilesTree {
 // largura é RESERVA FIXA em dp (o layout é PURO, não mede fonte; o draw
 // right-alinha o texto e o fit trunca honestamente se não couber)
 constexpr f32 kFpsW = 112.0f;   // dp — o canto direito da tab bar
+// PASSO 2 (0.9.6.15 — spec do dono): a PEGA do drawer tem 24dp de altura
+// (era 12 — a MESMA medida dos divisores dos painéis, kDividerHitW) e os
+// chips INTERNOS da consola são de CABEÇALHO 28dp (era 36 — o piso
+// kHeadFloorDp; a chip «Consola» duplicada SAIU)
+constexpr f32 kDrawerHandleH = 24.0f;  // dp — a pega de arrasto do drawer
+constexpr f32 kConChipH      = 28.0f;  // dp — os chips Logs/Erros/Avisos
 
 struct Layout {
     UiRect tabBar{};             // faixa 32dp (bottomTabRect)
@@ -118,7 +128,8 @@ struct Layout {
     f32    drawerTop = 0.0f;     // y da pega
 };
 
-// resolve o layout (drawerH CLAMPADO a 160..400 em passos de 8)
+// resolve o layout (drawerH CLAMPADO a 160..400 em passos de 8; a altura
+// EFETIVA é capada pela fonte única — kViewportMinH e 35% do content)
 Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st);
 
 // ---- DRAW -----------------------------------------------------------------------

@@ -61,6 +61,11 @@ struct Entry {
     // a entrada pelo piso da SUA classe; a flag vive SÓ durante a chamada
     // (o padrão auditCompactNext_ — nunca escapa)
     f32 rowFloorDp = 0.0f;
+    // PASSO 2 (0.9.6.15): o corte do fit É O DESENHO (nomes de linha da
+    // hierarquia/Nós com tip do long-press — spec B). O validador NÃO
+    // avisa TextoTruncado nas entradas com esta flag; o dump JSON
+    // documenta-a ("fit_por_desenho") para o auditor do device
+    bool fitByDesign = false;
 
     bool interactive() const {
         return kind == Button || kind == Scroll || kind == Slider;

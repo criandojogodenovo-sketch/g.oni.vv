@@ -34,6 +34,34 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.9.6.15 — UI PASSO 2: PAINÉIS (18%/22%, o trilho 32dp, o drawer no cap 35%)
+
+**O que existe agora (o PASSO 2 da spec de layout — painéis medidos):**
+- **Os painéis por PERCENTAGEM**: hierarquia **18%** (piso 140dp),
+  inspector **22%** (piso 180dp / teto 260dp — o teto é novo no drag);
+  o viewport central fica **≥55%** nos ecrãs de referência (device:
+  37,1% → **58,8%** com o inspector aberto, **77,8%** com o trilho).
+- **O TRILHO do inspector**: SEM seleção o painel colapsa a 32dp (a
+  área junta-se ao viewport; volta ao selecionar) — a pergunta única
+  `editor::inspectorCollapsed()` alimenta os rects (`safe::`), o draw,
+  o divisor (que desaparece) e o centerRect. SÓ no editor 3D (o modo UI
+  mantém a paridade WYSIWYG).
+- **O drawer domado**: NUNCA abre sozinho (o auto-abrir da 0.8.0 saiu) e
+  a altura efetiva é capada a **35% da altura do content** pelo CAP DUPLO
+  em `safe::effectiveDrawerH(raw, vpH, contentH)` — uma fonte para o
+  draw e o `currentDrawerH` (o P-08 mantém-se). Pegas de arrasto **24dp**
+  (drawer era 12; divisores era 20).
+- **A consola honesta**: chips internas **28dp** (Logs/Erros/Avisos — a
+  «Consola» duplicada SAIU; a vista completa do log é a chip «Logs») e
+  a FASE 13.7h prova o filtro Erros com linhas `E/GONI:` reais.
+- **TABELA DE MEDIDAS** (`docs/RELATORIO-0.9.6.15-PASSO2-PAINEIS.md`) +
+  PNGs (`docs/passo2-device-*.png`). Contrato P-08 atualizado (o trilho
+  na árvore, o cap duplo, as pegas) + sentinela **R-033**
+  (`regress_paineis_passo2`).
+- **MUTAÇÕES**: M1 (o cap 35% morto → 30 falhas) e M2 (o trilho morto →
+  4 falhas) vermelhas; repostas → test_core 0 falhas · c33 467/467 ·
+  gates verdes.
+
 ## 0.9.6.14 — UI PASSO 1: TAMANHOS (a LEI DE OURO: desenho 32 / toque 40)
 
 **O que existe agora (o PASSO 1 da spec de layout — só dp, sem lógica nova):**

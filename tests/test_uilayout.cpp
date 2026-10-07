@@ -277,7 +277,11 @@ BothFrames renderBoth(const UiCanvas& c) {
     collectRects(ui.solidsForTest(), out.editSolids);
     collectRects(ui.glyphsForTest(), out.editGlyphs);
     ui.endFrame();
-    const UiRect view = safe::centerRect(kSW, kSH, ins);
+    // PASSO 2: a transform vem do MESMO rect que o drawUiViewport usa (o
+    // estado do editor — os -1 caem nos defaults 18%/22%); o legacy 2-arg
+    // (painel fixo 300dp) divergia do draw e a paridade morria
+    const UiRect view = safe::centerRect(kSW, kSH, ins, 0.0f, st.showInspector,
+                                         st.hierW, st.inspW);
     out.t = uiViewportTransform(view, kSW, kSH);
     return out;
 }

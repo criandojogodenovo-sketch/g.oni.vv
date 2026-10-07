@@ -83,12 +83,15 @@ const char* assetBasename(const std::string& ref) {
 // 0.8.9: valueTappable — o VALOR (zona à direita do trilho) abre o teclado
 // NUMÉRICO (campos SEM TETO: py=10 000 escreve-se, o slider fica suave no
 // seu range). Desenha-se em ACCENT com sublinhado = affordance de toque.
-bool sliderRow(UiContext& ui, u64 id, f32 x, f32 rowTop, f32 rowH,
+bool sliderRow(UiContext& ui, u64 id, f32 x, f32 w, f32 rowTop, f32 rowH,
                const TextMetrics& tm, const char* labelText,
                f32 minV, f32 maxV, f32& value, const char* fmt,
                bool valueTappable = false) {
     // 0.9.6.6 (GRUPO C): rótulo/trilho em dp REAL (eram 84/118 px crus —
     // no device 2.0 o trilho saía a metade do pedido; a exata classe R-018)
+    // PASSO 2 (0.9.6.15): o VALOR alinha à largura REAL do painel (w —
+    // 22% afervado a [180..260]; o kPanelW=300 fixo cravava o valor FORA
+    // do painel estreito — a sobreposição de glifos que o test_ui apanhou)
     const f32 labelW = theme::dp(84.0f);
     const f32 trackX = x + labelW;
     const f32 trackW = theme::dp(118.0f);
@@ -101,12 +104,12 @@ bool sliderRow(UiContext& ui, u64 id, f32 x, f32 rowTop, f32 rowH,
     std::snprintf(val, sizeof(val), fmt, value);
     if (ui.hasFont()) {
         const f32 tw = ui.fontWidth(val);
-        ui.label(x + kPanelW - kPad - tw, baseline, val,
+        ui.label(x + w - kPad - tw, baseline, val,
                  valueTappable ? theme::ACCENT : theme::TEXT);
         if (valueTappable) {
             // sublinhado discreto: "isto é tocável" (a zona de toque é o
             // rect do valor — ver o re-despacho do tap abaixo)
-            ui.panel(x + kPanelW - kPad - tw - theme::dp(6.0f),
+            ui.panel(x + w - kPad - tw - theme::dp(6.0f),
                      rowTop + rowH - theme::dp(3.0f), tw + theme::dp(8.0f),
                      1.5f, theme::ACCENT);
         }
@@ -140,10 +143,12 @@ UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, f32 drawerH,
 }
 
 // GRUPO D — com as LARGURAS DE ESTADO (divisores arrastáveis): o rect que
-// o editor 3D usa; −1/−1 = defaults adaptativos (ecrãs largos = kPanelW)
+// o editor 3D usa; −1/−1 = defaults adaptativos. PASSO 2: inspTrack
+// colapsa o inspector ao trilho (a área vai ao viewport)
 UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, f32 drawerH,
-                  bool rightPanel, f32 hierWdp, f32 inspWdp) {
-    return safe::centerRect(sw, sh, in, drawerH, rightPanel, hierWdp, inspWdp);
+                  bool rightPanel, f32 hierWdp, f32 inspWdp, bool inspTrack) {
+    return safe::centerRect(sw, sh, in, drawerH, rightPanel, hierWdp, inspWdp,
+                            inspTrack);
 }
 
 // a resolução do par de larguras para um EditorState (a fonte ÚNICA é a
@@ -199,10 +204,14 @@ DividerRects dividerRects(UiContext& ui, const EditorState& st,
     d.stripL = {hier.x + hier.w - stripW, hier.y, stripW, hier.h};
     d.budget = b;
     if (rightPanel) {
+        // PASSO 2: com o inspector no TRILHO (sem seleção) não há divisor
+        // direito — não há largura a arrastar (o trilho não é pega)
+        const bool track = editor::inspectorCollapsed(st);
         const UiRect insp{panels.x + panels.w - b.insp, panels.y, b.insp,
                           panels.h};
         // painel direito válido (o G5 pode escondê-lo — sem divisor então)
-        d.rightOn = insp.w > hitW + theme::dp(48.0f) && insp.h > 1.0f;
+        d.rightOn = !track && insp.w > hitW + theme::dp(48.0f) &&
+                    insp.h > 1.0f;
         d.hitR = {insp.x, insp.y, hitW, insp.h};
         d.stripR = {insp.x, insp.y, stripW, insp.h};
     }
@@ -497,13 +506,20 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
             const TextMetrics mm = ui.textMetrics();
             const f32 bb = sfield.y + (sfield.h - mm.block()) * 0.5f +
                            mm.ascent;
+            // PASSO 2 (0.9.6.15): o placeholder DEGRADA POR ORDEM (o padrão
+            // dos chips da strip R-023): «pesquisar TIC» quando o campo dá,
+            // «pesquisar» no PISO 140dp da hierarquia (spec PASSO 2) — o
+            // campo nunca desenha reticência no placeholder
+            const f32 phBudget = sfield.w - theme::dp(40.0f) - theme::dp(12.0f);
+            const char* ph = ui.fontWidth("pesquisar TIC") <= phBudget
+                                 ? "pesquisar TIC"
+                                 : "pesquisar";
             if (st.hierSearchLen) {
                 ui.labelFitted(sfield.x + theme::dp(40.0f), bb, st.hierSearch,
-                               theme::kTheme.text1, sfield.w - theme::dp(76.0f));
+                               theme::kTheme.text1, phBudget);
             } else {
-                ui.labelFitted(sfield.x + theme::dp(40.0f), bb,
-                               "pesquisar TIC", theme::kTheme.text2,
-                               sfield.w - theme::dp(76.0f));
+                ui.labelFitted(sfield.x + theme::dp(40.0f), bb, ph,
+                               theme::kTheme.text2, phBudget);
             }
         }
         // o CAMPO abre o teclado (propósito 8) — captura normal FORA do scroll
@@ -594,6 +610,10 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                 const f32 base = ry + (kRowH - m2.block()) * 0.5f + m2.ascent;
                 const f32 nameX = iconX + theme::dp(24.0f) + theme::dp(8.0f);
                 const f32 nameW = eyeX - nameX - theme::dp(8.0f);
+                // PASSO 2: o nome trunca POR DESENHO (a spec B dá o tip do
+                // long-press como o acesso ao nome completo) — o validador
+                // não avisa (a flag vive SÓ para a label registada)
+                ui.auditFitByDesignNext();
                 ui.labelFitted(nameX, base, t->name.c_str(),
                                inkOn ? theme::kTheme.text1
                                      : (t->visible ? theme::kTheme.text1
@@ -655,18 +675,30 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                             theme::kTheme.text2);
             if (ui.hasFont()) {
                 const TextMetrics mv = ui.textMetrics();
-                // GRUPO D: em painel ESTREITO (divisores/device) o convite
-                // CURTO — o comprido trunca a meio (a 13.7 media 353px num
-                // painel de 400px@2.0 — aviso de texto truncado)
-                const bool narrow = w < theme::dp(240.0f);
+                // GRUPO D: em painel ESTREITO o convite CURTO — e PASSO 2
+                // (0.9.6.15): a LADDER mede o texto ao vivo (o padrão da
+                // pesquisa/chips): o convite mais comprido que caiba — no
+                // PISO 140dp da hierarquia sai «+ cria um TIC», nunca
+                // reticência num convite
+                const f32 invW = w - 2.0f * kPad;
+                const char* invite;
+                if (needle && *needle) {
+                    invite = ui.fontWidth("nenhum TIC com esse nome") <= invW
+                                 ? "nenhum TIC com esse nome"
+                                 : "sem resultados";
+                } else {
+                    invite =
+                        ui.fontWidth("sem TICs - toca em + para criar") <=
+                                invW
+                            ? "sem TICs - toca em + para criar"
+                            : (ui.fontWidth("toca em + para criar") <= invW
+                                   ? "toca em + para criar"
+                                   : "+ cria um TIC");
+                }
                 ui.labelFitted(x + kPad,
                                listTop + theme::dp(112.0f) - mv.block() +
                                    mv.ascent,
-                               needle && *needle
-                                   ? "nenhum TIC com esse nome"
-                                   : (narrow ? "toca em + para criar"
-                                             : "sem TICs - toca em + para criar"),
-                               theme::kTheme.text2, w - 2.0f * kPad);
+                               invite, theme::kTheme.text2, invW);
             }
         }
 
@@ -734,6 +766,25 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
 // ---------------------------------------------------------------------------
 bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                    const AssetCatalog* catalog, const VoniSystem* voni) {
+    // PASSO 2 (0.9.6.15 — spec do dono): SEM seleção o inspector É um
+    // TRILHO de 32dp (safe::kInspTrackW) — só a faixa com o ícone; a área
+    // restante junta-se ao viewport (o centerRect do main Já sabe — a
+    // MESMA fonte: safe::resolvePanels com inspTrack). Volta ao selecionar.
+    if (editor::inspectorCollapsed(st)) {
+        const UiRect track = safe::inspectorPanelRect(
+            ui.screenWidth(), ui.screenHeight(), ui.safeArea(), st.drawerH,
+            st.inspW, st.hierW, /*inspTrack=*/true);
+        ui.panel(track.x, track.y, track.w, track.h, theme::PANEL);
+        ui.panel(track.x, track.y, 1.0f, track.h, theme::LINE);  // separador
+        // o ícone do Inspector (o painel com 3 linhas) no topo do trilho —
+        // INFORMATIVO (sem widgetHit: o regresso é SELECIONAR um TIC; a
+        // spec PASSO 2 não define interação no trilho)
+        icons::drawIcon(ui, icons::Icon::Inspector,
+                        track.x + (track.w - theme::dp(20.0f)) * 0.5f,
+                        track.y + theme::dp(6.0f), theme::dp(20.0f),
+                        theme::kTheme.text2);
+        return false;
+    }
     // F4.2: painel inteiro dentro do contentRect — a altura REAL alimenta o
     // beginScroll → o overflow do Inspector é detetado e o scroll ativa (B1)
     // GRUPO D: a largura é ESTADO (divisores) — default adaptativo se −1
@@ -857,6 +908,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                             selected ? theme::kTheme.accent
                                      : theme::kTheme.text2);
             if (ui.hasFont()) {
+                // PASSO 2: o nome trunca POR DESENHO (o MESMO contrato da
+                // hierarquia — spec B, o tip é o acesso ao nome completo)
+                ui.auditFitByDesignNext();
                 ui.labelFitted(x + theme::dp(56.0f),
                                ry + (rowH - tmN.block()) * 0.5f + tmN.ascent,
                                t->name.c_str(),
@@ -1052,7 +1106,11 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             char vis[32];
             std::snprintf(vis, sizeof(vis), "visível: %s",
                           tic->visible ? "sim" : "não");
-            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+            // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira (o padrão PASSO 1
+            // das tabs; antes o botão desenhava r.h−4 = 34dp < o piso) + a
+            // flag da classe linha
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
                       vis);
             break;
         }
@@ -1060,7 +1118,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             // 0.7.0 — cor por TIC: sliders R/G/B do tint do MeshRenderer
             if (mrEdit) {
                 static const char* kColLabels[3] = {"cor R", "cor G", "cor B"};
-                if (sliderRow(ui, r.id, x, ry, r.h, tm, kColLabels[colorIdx],
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, kColLabels[colorIdx],
                               0.0f, 1.0f, mrEdit->tint[colorIdx], "%.2f")) {
                     edited = true;
                 }
@@ -1081,11 +1139,17 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             // RESERVADA (a célula = largura útil ÷ 3): "Textura",
             // "Cor base", "Prévia" — nunca mais "text… albe… pre…".
             if (mr) {
-                const f32 thumbS = 64.0f;
-                const f32 gap = 12.0f;
+                // PASSO 2 (0.9.6.15): TUDO em dp (R-018 — thumbS/gap eram px
+                // crus: no device 2.0 as miniaturas saíam a METADE, 32dp, e
+                // a legenda desenhava-SE DENTRO da linha seguinte — a 260dp
+                // do PASSO 2 a legenda invadia a coluna do rótulo e os
+                // glifos colidiam; o plano (inspThumbsH) e o draw coincidem
+                // AGORA: dp(4)+dp(44)+legenda+dp(4))
+                const f32 thumbS = theme::dp(44.0f);
+                const f32 gap = theme::dp(12.0f);
                 const f32 rowW = 3.0f * thumbS + 2.0f * gap;
                 const f32 tx0 = x + (w - rowW) * 0.5f;
-                const f32 ty0 = ry + 4.0f;
+                const f32 ty0 = ry + theme::dp(4.0f);
                 // o tint COMO COR RGBA (alfa 1 — o fix do quadrado escuro)
                 const f32 tint4[4] = {mr->tint[0], mr->tint[1], mr->tint[2],
                                       1.0f};
@@ -1109,8 +1173,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                     ui.frameRounded(ax, ty0, thumbS, thumbS, 1.0f,
                                     theme::kRadiusCard, theme::kTheme.border);
                     icons::drawIcon(ui, icons::Icon::Rename,
-                                    ax + thumbS - 24.0f, ty0, 20.0f,
-                                    theme::kTheme.text1);
+                                    ax + thumbS - theme::dp(24.0f), ty0,
+                                    theme::dp(20.0f), theme::kTheme.text1);
                 }
                 // 3) PREVIEW LIVE (textura × tint — como o TIC renderiza)
                 {
@@ -1131,7 +1195,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                     const TextMetrics m3 = ui.textMetrics();
                     const f32 capScale = theme::fontScale(theme::kFontCaption);
                     const f32 capBlock = m3.block() * capScale;
-                    const f32 base = ty0 + thumbS + capBlock + 4.0f;
+                    const f32 base = ty0 + thumbS + capBlock + theme::dp(4.0f);
                     static const char* kCaps[3] = {"Textura", "Cor base",
                                                    "Prévia"};
                     const f32 cellW = w / 3.0f;
@@ -1310,7 +1374,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             if (tr && sliderIdx < 9) {
                 const SliderSpec& sp = rows9[sliderIdx];
                 ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-                if (sliderRow(ui, r.id, x, ry, r.h, tm, sp.label, sp.min, sp.max,
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, sp.label, sp.min, sp.max,
                               *sp.value, sp.fmt, true)) {   // 0.8.9: valor tocável (campo numérico)
                     trEdited = true;
                     edited = true;
@@ -1322,7 +1386,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             if (bc) {
                 f32 vx = bc->velocity.x;
                 ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-                if (sliderRow(ui, r.id, x, ry, r.h, tm, "velx", -60.0f, 60.0f,
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "velx", -60.0f, 60.0f,
                               vx, "%.1f")) {
                     bc->velocity.x = vx;
                     edited = true;
@@ -1333,12 +1397,20 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             // botão da linha INTEIRA, centrado na linha do plano (o botão
             // antigo sangrava 2 px para a linha de baixo)
             ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+            // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira (o padrão PASSO 1
+            // das tabs; antes o botão desenhava r.h−4 = 34dp < o piso) + a
+            // flag da classe linha
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
                       meshLabel);
             break;
         case InspRow::Kind::TexButton:
             ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+            // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira (o padrão PASSO 1
+            // das tabs; antes o botão desenhava r.h−4 = 34dp < o piso) + a
+            // flag da classe linha
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
                       texLabel);
             break;
         case InspRow::Kind::MeshLabel:
@@ -1366,7 +1438,11 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             // repõe a escala {1,1,1} — o "tamanho original" do modelo (o fit
             // uniforme vive no Transform3D, a geometria nunca foi tocada)
             ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+            // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira (o padrão PASSO 1
+            // das tabs; antes o botão desenhava r.h−4 = 34dp < o piso) + a
+            // flag da classe linha
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
                       "escala: original");
             break;
         case InspRow::Kind::ScriptEdit: {
@@ -1462,7 +1538,11 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         }
         case InspRow::Kind::AddTc:
             ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+            // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira (o padrão PASSO 1
+            // das tabs; antes o botão desenhava r.h−4 = 34dp < o piso) + a
+            // flag da classe linha
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
                       "add TouchControls");
             break;
         // ---- 0.7.7 — CÂMARA --------------------------------------------------
@@ -1470,7 +1550,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         case InspRow::Kind::CamFov:
             if (camEdit) {
                 ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-                if (sliderRow(ui, r.id, x, ry, r.h, tm, "fov",
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "fov",
                               CameraComp::kMinFov, CameraComp::kMaxFov,
                               camEdit->fovY, "%.0f")) {
                     edited = true;
@@ -1480,7 +1560,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         case InspRow::Kind::CamNear:
             if (camEdit) {
                 ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-                if (sliderRow(ui, r.id, x, ry, r.h, tm, "near",
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "near",
                               CameraComp::kMinNear, 10.0f, camEdit->nearZ,
                               "%.2f")) {
                     edited = true;
@@ -1490,7 +1570,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         case InspRow::Kind::CamFar:
             if (camEdit) {
                 ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-                if (sliderRow(ui, r.id, x, ry, r.h, tm, "far",
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "far",
                               CameraComp::kMinFar, CameraComp::kMaxFar,
                               camEdit->farZ, "%.0f")) {
                     edited = true;
@@ -1500,7 +1580,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         case InspRow::Kind::CamOrtho:
             if (camEdit) {
                 ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-                if (sliderRow(ui, r.id, x, ry, r.h, tm, "ortho", 0.5f, 50.0f,
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "ortho", 0.5f, 50.0f,
                               camEdit->orthoSize, "%.2f")) {
                     edited = true;
                 }
@@ -1508,19 +1588,31 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             break;
         case InspRow::Kind::CamProj:
             ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+            // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira (o padrão PASSO 1
+            // das tabs; antes o botão desenhava r.h−4 = 34dp < o piso) + a
+            // flag da classe linha
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
                       camProjLabel);
             break;
         case InspRow::Kind::CamActive:
             ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+            // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira (o padrão PASSO 1
+            // das tabs; antes o botão desenhava r.h−4 = 34dp < o piso) + a
+            // flag da classe linha
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
                       camActiveLabel);
             break;
         case InspRow::Kind::CamFrustum:
             // 0.7.10 — toggle de visibilidade do GIZMO (o render no Play
             // NÃO muda; só o frustum do editor se esconde)
             ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+            // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira (o padrão PASSO 1
+            // das tabs; antes o botão desenhava r.h−4 = 34dp < o piso) + a
+            // flag da classe linha
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
                       camFrustumLabel);
             break;
         // ---- 0.8.0 (F7) — PRIMITIVA + ANIMAÇÃO ------------------------------
@@ -1533,7 +1625,11 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 std::snprintf(primLabel, sizeof(primLabel), "prim: -");
             }
             ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+            // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira (o padrão PASSO 1
+            // das tabs; antes o botão desenhava r.h−4 = 34dp < o piso) + a
+            // flag da classe linha
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
                       primLabel);
             break;
         }
@@ -1546,7 +1642,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                     const bool isSize = mrEdit->prim.kind == PrimKind::Box;
                     f32* val = isSize ? &mrEdit->prim.size : &mrEdit->prim.radius;
                     ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-                    if (sliderRow(ui, r.id, x, ry, r.h, tm,
+                    if (sliderRow(ui, r.id, x, w, ry, r.h, tm,
                                   isSize ? "tamanho" : "raio", 0.05f, 4.0f,
                                   *val, "%.2f")) {
                         primEdited = true;
@@ -1554,7 +1650,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 } else if (r.id == kInspectorPrimSeg) {
                     f32 seg = static_cast<f32>(mrEdit->prim.segments);
                     ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-                    if (sliderRow(ui, r.id, x, ry, r.h, tm, "segmentos", 3.0f,
+                    if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "segmentos", 3.0f,
                                   64.0f, seg, "%.0f")) {
                         mrEdit->prim.segments = static_cast<i32>(seg + 0.5f);
                         primEdited = true;
@@ -1562,7 +1658,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 } else if (r.id == kInspectorPrimRings) {
                     f32 rg = static_cast<f32>(mrEdit->prim.rings);
                     ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-                    if (sliderRow(ui, r.id, x, ry, r.h, tm, "aneis", 2.0f,
+                    if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "aneis", 2.0f,
                                   64.0f, rg, "%.0f")) {
                         mrEdit->prim.rings = static_cast<i32>(rg + 0.5f);
                         primEdited = true;
@@ -1573,7 +1669,11 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         }
         case InspRow::Kind::AddAnim:
             ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+            // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira (o padrão PASSO 1
+            // das tabs; antes o botão desenhava r.h−4 = 34dp < o piso) + a
+            // flag da classe linha
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
                       "adicionar Animação");
             break;
         case InspRow::Kind::AnimLabel: {
@@ -1611,7 +1711,11 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 std::snprintf(clipLine, sizeof(clipLine), "clip: -");
             }
             ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+            // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira (o padrão PASSO 1
+            // das tabs; antes o botão desenhava r.h−4 = 34dp < o piso) + a
+            // flag da classe linha
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
                       clipLine);
             break;
         }
@@ -1619,24 +1723,36 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             // o PREVIEW: o botão faz toggle do FLAG — o main (frame) mapeia
             // o flag ao misturador (o mesmo caminho do Play; puro aqui)
             ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+            // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira (o padrão PASSO 1
+            // das tabs; antes o botão desenhava r.h−4 = 34dp < o piso) + a
+            // flag da classe linha
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
                       auEdit && auEdit->previewing ? "parar" : "ouvir");
             break;
         case InspRow::Kind::AuAutoplay:
             ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+            // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira (o padrão PASSO 1
+            // das tabs; antes o botão desenhava r.h−4 = 34dp < o piso) + a
+            // flag da classe linha
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
                       auEdit && auEdit->autoplay ? "autoplay: sim"
                                                  : "autoplay: não");
             break;
         case InspRow::Kind::AuLoop:
             ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+            // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira (o padrão PASSO 1
+            // das tabs; antes o botão desenhava r.h−4 = 34dp < o piso) + a
+            // flag da classe linha
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
                       auEdit && auEdit->loop ? "loop: sim" : "loop: não");
             break;
         case InspRow::Kind::AuVolume:
             if (auEdit) {
                 ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-                if (sliderRow(ui, r.id, x, ry, r.h, tm, "volume", 0.0f, 1.0f,
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "volume", 0.0f, 1.0f,
                               auEdit->volume, "%.2f")) {
                     edited = true;
                 }
@@ -1645,7 +1761,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         case InspRow::Kind::AuPitch:
             if (auEdit) {
                 ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-                if (sliderRow(ui, r.id, x, ry, r.h, tm, "pitch", 0.5f, 2.0f,
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "pitch", 0.5f, 2.0f,
                               auEdit->pitch, "%.2f")) {
                     edited = true;
                 }
@@ -1653,14 +1769,18 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             break;
         case InspRow::Kind::AuPos:
             ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+            // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira (o padrão PASSO 1
+            // das tabs; antes o botão desenhava r.h−4 = 34dp < o piso) + a
+            // flag da classe linha
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
                       auEdit && auEdit->posicional ? "posicional: sim"
                                                    : "posicional: não");
             break;
         case InspRow::Kind::AuRint:
             if (auEdit) {
                 ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-                if (sliderRow(ui, r.id, x, ry, r.h, tm, "r. interno", 0.1f,
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "r. interno", 0.1f,
                               20.0f, auEdit->raioInterno, "%.1f")) {
                     auEdit->clampFields();
                     edited = true;
@@ -1670,7 +1790,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         case InspRow::Kind::AuRext:
             if (auEdit) {
                 ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
-                if (sliderRow(ui, r.id, x, ry, r.h, tm, "r. externo", 0.5f,
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "r. externo", 0.5f,
                               50.0f, auEdit->raioExterno, "%.1f")) {
                     auEdit->clampFields();
                     edited = true;
@@ -1890,7 +2010,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 }
             } else if (r.kind == InspRow::Kind::Slider) {
                 // 0.8.9 — CAMPO NUMÉRICO SEM TETO: toque na zona do VALOR
-                // (à direita do trilho, [x+206 .. x+kPanelW-kPad]) abre o
+                // (à direita do trilho, [x+206 .. x+w-kPad]) abre o
                 // teclado numérico (propósito 6) com o valor atual; o
                 // trilho continua a ser do SLIDER (gesto suave no range).
                 if (tx >= x + 206.0f && tr && sliderTapIdx < 9) {

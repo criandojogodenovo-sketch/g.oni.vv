@@ -162,6 +162,10 @@ public:
     // apanha (o padrão buttonCompact — nunca escapa). As constantes são
     // as nomeadas do LayoutDump.h — números frouxos NÃO passam.
     void auditRowFloorNext(f32 floorDp) { auditRowFloorNext_ = floorDp; }
+    // PASSO 2 (0.9.6.15): o corte do fit É O DESENHO (nomes de linha com
+    // tip — spec B); o validador não avisa TextoTruncado nessa entrada.
+    // O padrão da casa: flag consumida pela 1ª label registada, nunca escapa
+    void auditFitByDesignNext() { auditFitByDesign_ = true; }
 
     // 0.7.6 — CAPTURA DE GESTO sem desenho (a toolbar desenha os próprios
     // botões: ícones/segmented da ui/Toolbar). MESMA semântica do button():
@@ -476,6 +480,7 @@ private:
     // Button apanha-a (auditAdd_); nunca escapa da chamada
     bool           auditCompactNext_ = false;
     f32            auditRowFloorNext_ = 0.0f;   // PASSO 1: piso de linha
+    bool           auditFitByDesign_ = false;   // PASSO 2: corte por desenho
 };
 
 } // namespace vv
