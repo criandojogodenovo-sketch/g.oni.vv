@@ -284,6 +284,8 @@ static int g_layoutShadowTab = -1;
 static int g_layoutShadowDrawer = -1;
 static int g_layoutShadowInsp = -1;
 static u32 g_layoutShadowCollapsed = 0xFFFFFFFFu;
+// P2-bis: a sombra do PIN do inspector (o toggle do trilho/seta grava)
+static int g_layoutShadowPinned = -1;
 // GRUPO D: sombra das larguras dos divisores (hierW/inspW — px)
 static int g_layoutShadowHierW = -1;
 static int g_layoutShadowInspW = -1;
@@ -295,7 +297,7 @@ static void saveLayoutNow(const char* reason) {
     const std::string data = editor::bottom::serializeLayout(
         g_bottom, g_editor.showInspector,
         g_editor.inspCollapsed | (g_editor.settingsCollapsed << 8),
-        g_editor.hierW, g_editor.inspW);
+        g_editor.hierW, g_editor.inspW, g_editor.inspPinned);
     if (data == g_lastLayoutSaved) {
         return;   // nada mudou — NÃO grava (a regra de sempre)
     }
@@ -323,6 +325,7 @@ static void layoutSaveTick(f32 dt) {
     const int tab = g_bottom.bottomTab;
     const int drawer = static_cast<int>(g_bottom.drawerH);
     const int insp = g_editor.showInspector ? 1 : 0;
+    const int pinned = g_editor.inspPinned ? 1 : 0;   // P2-bis
     const u32 collapsed = g_editor.inspCollapsed |
                           (g_editor.settingsCollapsed << 8);
     // GRUPO D: as larguras EFETIVAS (a gangorra pode arredondar — a sombra
@@ -334,6 +337,7 @@ static void layoutSaveTick(f32 dt) {
     const bool seen = tab == g_layoutShadowTab &&
                       drawer == g_layoutShadowDrawer &&
                       insp == g_layoutShadowInsp &&
+                      pinned == g_layoutShadowPinned &&
                       collapsed == g_layoutShadowCollapsed &&
                       hierW == g_layoutShadowHierW &&
                       inspW == g_layoutShadowInspW;
@@ -344,6 +348,8 @@ static void layoutSaveTick(f32 dt) {
             why = "painel de baixo";
         } else if (insp != g_layoutShadowInsp) {
             why = "inspector";
+        } else if (pinned != g_layoutShadowPinned) {
+            why = "pin do inspector";
         } else if (hierW != g_layoutShadowHierW ||
                    inspW != g_layoutShadowInspW) {
             why = "divisores dos painéis";
@@ -354,6 +360,7 @@ static void layoutSaveTick(f32 dt) {
         g_layoutShadowTab = tab;
         g_layoutShadowDrawer = drawer;
         g_layoutShadowInsp = insp;
+        g_layoutShadowPinned = pinned;
         g_layoutShadowCollapsed = collapsed;
         g_layoutShadowHierW = hierW;
         g_layoutShadowInspW = inspW;
@@ -374,11 +381,13 @@ static void loadLayoutNow() {
         std::string text;
         if (g_storage->readText("layout.json", text)) {
             bool insp = true;
+            bool pin = false;   // P2-bis
             u32 collapsed = 0;
             if (editor::bottom::parseLayout(text, g_bottom, insp, collapsed,
                                              &g_editor.hierW,
-                                             &g_editor.inspW)) {
+                                             &g_editor.inspW, &pin)) {
                 g_editor.showInspector = insp;
+                g_editor.inspPinned = pin;
                 g_editor.inspCollapsed = collapsed & 0xFFu;
                 g_editor.settingsCollapsed = (collapsed >> 8) & 0x3Fu;
                 g_lastLayoutSaved = text;
@@ -388,6 +397,7 @@ static void loadLayoutNow() {
                 g_layoutShadowTab = g_bottom.bottomTab;
                 g_layoutShadowDrawer = static_cast<int>(g_bottom.drawerH);
                 g_layoutShadowInsp = g_editor.showInspector ? 1 : 0;
+                g_layoutShadowPinned = g_editor.inspPinned ? 1 : 0;
                 g_layoutShadowCollapsed = g_editor.inspCollapsed |
                                           (g_editor.settingsCollapsed << 8);
                 // GRUPO D: a sombra das larguras (a RESOLUÇÃO efetiva — o
@@ -397,10 +407,11 @@ static void loadLayoutNow() {
                     g_editor, g_ui.contentWidthPx());
                 g_layoutShadowHierW = static_cast<int>(pb.hier);
                 g_layoutShadowInspW = static_cast<int>(pb.insp);
-                LOGI("layout: carregado (tab=%d drawer=%d insp=%d hierW=%d "
-                     "inspW=%d)",
+                LOGI("layout: carregado (tab=%d drawer=%d insp=%d pin=%d "
+                     "hierW=%d inspW=%d)",
                      g_bottom.bottomTab, static_cast<int>(g_bottom.drawerH),
-                     g_editor.showInspector ? 1 : 0, g_layoutShadowHierW,
+                     g_editor.showInspector ? 1 : 0,
+                     g_editor.inspPinned ? 1 : 0, g_layoutShadowHierW,
                      g_layoutShadowInspW);
             } else {
                 LOGI("layout: ilegivel — defaults");
@@ -5271,6 +5282,7 @@ void frame() {
                 g_bottom.bottomTab = 0;
                 g_bottom.drawerH = safe::kDrawerDef;
                 g_editor.showInspector = true;
+                g_editor.inspPinned = false;   // P2-bis: o pin também repõe
                 g_editor.inspCollapsed = 0;
                 g_editor.settingsCollapsed = 0;
                 saveLayoutNow("repor layout");

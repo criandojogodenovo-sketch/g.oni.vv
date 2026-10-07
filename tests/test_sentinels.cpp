@@ -2971,6 +2971,123 @@ TEST(regress_paineis_passo2) {
     }
 }
 
+// ============================================================================
+// R-034 (P2-bis · 0.9.6.16 — AS DUAS DECISÕES DO DONO sobre o PASSO 2)
+//         — regress_p2bis_pin_e_consola
+//
+// (1) O PIN do inspector: tocar no ícone do TRILHO abre E fixa (o painel
+//     fica aberto MESMO sem seleção — inspectorCollapsed manda o pin);
+//     a seta de recolher desfaz. PERSISTE no layout.json (inspPinned=0/1,
+//     retrocompatível). (2) A CONSOLA ≥60%: a lista de log ocupa ≥60% da
+//     altura de CONTEÚDO do drawer (chips+extras ≤40%) SEM exceções — o
+//     campo de comando cede (o drawer pequeno = chips 28dp + a lista no
+//     resto). A decisão PURA é conCmdVisible (a fonte ÚNICA).
+// ============================================================================
+TEST(regress_p2bis_pin_e_consola) {
+    using namespace vv;
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+
+    // ---- (1) O PREDICADO (a fonte ÚNICA do colapso agora inclui o pin)
+    {
+        editor::EditorState st;
+        // sem seleção e sem pin: o TRILHO (o comportamento PASSO 2)
+        EXPECT(editor::inspectorCollapsed(st));
+        // PIN sem seleção: o painel abre E FICA (a regra do dono)
+        st.inspPinned = true;
+        EXPECT(!editor::inspectorCollapsed(st));
+        // a seta de recolher: limpa o pin → o trilho volta (sem seleção)
+        st.inspPinned = false;
+        EXPECT(editor::inspectorCollapsed(st));
+        // COM seleção: aberto com ou sem pin (a regra PASSO 2 intacta)
+        st.selected = Handle{1u, 1u};
+        EXPECT(!editor::inspectorCollapsed(st));
+        st.inspPinned = true;
+        EXPECT(!editor::inspectorCollapsed(st));
+        st.selected = Handle::invalid();
+        st.multiSelectCount = 1;   // a MULTI-seleção conta como seleção
+        EXPECT(!editor::inspectorCollapsed(st));
+        st.multiSelectCount = 0;
+        // a geometria da linha da seta: 28dp (o piso de cabeçalho) e os
+        // ids do par do pin DISTINTOS das tabs (faixa 7430/7431)
+        EXPECT(nearEqF(editor::kInspUnpinRowH, 28.0f, 0.01f));
+        EXPECT(editor::kInspTrackPinId != editor::kInspTabBase &&
+               editor::kInspUnpinId != editor::kInspTabBase &&
+               editor::kInspTrackPinId != editor::kInspUnpinId);
+    }
+
+    // ---- (2) A PERSISTÊNCIA (layout.json — spec G)
+    {
+        editor::bottom::BottomState bs{};
+        bs.bottomTab = 3;
+        bs.drawerH = 240.0f;
+        // o pin FIXADO vai para o formato novo
+        const std::string data =
+            editor::bottom::serializeLayout(bs, true, 0u, -1.0f, -1.0f, true);
+        EXPECT(data.find("inspPinned=1") != std::string::npos);
+        editor::bottom::BottomState bs2{};
+        bool insp = false, pin = false;
+        u32 col = 0xFFFFFFFFu;
+        f32 hw = -9.0f, iw = -9.0f;
+        EXPECT(editor::bottom::parseLayout(data, bs2, insp, col, &hw, &iw,
+                                           &pin));
+        EXPECT(pin);   // o que se guarda é o que volta
+        // o formato ANTIGO (sem a linha) → pin falso (retrocompatível)
+        bool pin2 = true;
+        EXPECT(editor::bottom::parseLayout(
+                   "bottomTab=1\ndrawerH=240\ninspector=1\n", bs2, insp, col,
+                   &hw, &iw, &pin2) &&
+               !pin2);
+        // sem passar o out-param: compila e lê (compat dos chamadores)
+        EXPECT(editor::bottom::parseLayout(data, bs2, insp, col));
+        // ilegível → defaults (o pin não sobrevive a lixo)
+        bool pin3 = true;
+        EXPECT(!editor::bottom::parseLayout("lixo total\n", bs2, insp, col,
+                                            nullptr, nullptr, &pin3));
+    }
+
+    // ---- (3) A REGRA DA CONSOLA (pura, em dp — densidade-invariante)
+    {
+        // os números da regra, NOMEADOS e intactos
+        EXPECT(nearEqF(editor::bottom::kConListMinPct, 0.60f, 0.001f));
+        EXPECT(nearEqF(editor::bottom::kConChipH, 28.0f, 0.01f));
+        EXPECT(nearEqF(editor::bottom::kConChipPad, 2.0f, 0.01f));
+        EXPECT(nearEqF(editor::bottom::kConListGap, 2.0f, 0.01f));
+        EXPECT(nearEqF(editor::bottom::kConCmdH, 40.0f, 0.01f));
+        EXPECT(nearEqF(editor::bottom::kConCmdPad, 4.0f, 0.01f));
+        const f32 top = editor::bottom::kConChipPad +
+                        editor::bottom::kConChipH +
+                        editor::bottom::kConListGap;   // 32dp de topo
+        // os CONTEÚDOS que o editor REAL produz:
+        //   80  = o device (drawer 104dp capado a 35% − pega 24)
+        //   88  = o harness @2.0 (drawer 112dp − pega 24)
+        //   136 = drawer no piso 160
+        //   191 = 1dp acima da FRONTEIRA do campo de comando (com campo)
+        //   216 = drawer 240 do harness @1.0 (com campo)
+        //   336 = um drawer alto (com campo)
+        const f32 cases[] = {80.0f, 88.0f, 136.0f, 191.0f, 216.0f, 336.0f};
+        for (const f32 ch : cases) {
+            const bool cmd = editor::bottom::conCmdVisible(ch);
+            const f32 listH = ch - top - (cmd ? 44.0f : 0.0f);
+            EXPECT_MSG(listH >= ch * editor::bottom::kConListMinPct - 0.01f,
+                       "conteúdo %.0fdp: a lista é %.1fdp (%.1f%% — o piso "
+                       "é 60%%)",
+                       ch, listH, 100.0f * listH / ch);
+        }
+        // a FRONTEIRA do campo (a poeira de 0.6f em f32 manda 1dp de folga:
+        // a fronteira exata é ch − top − cmd ≥ ch×0.6 — 189 fica FORA com
+        // folga, 191 fica DENTRO com folga; a banda exata não é spec)
+        EXPECT(!editor::bottom::conCmdVisible(189.0f));
+        EXPECT(editor::bottom::conCmdVisible(191.0f));
+        // o DEVICE (80dp): o campo SAI — chips 28dp + a lista no resto
+        EXPECT(!editor::bottom::conCmdVisible(80.0f));
+        EXPECT(nearEqF(80.0f - top, 48.0f, 0.001f));   // 48 = 60% de 80
+        // o HARNESS @1.0 (216dp): o campo fica (a lista mantém ≥60%)
+        EXPECT(editor::bottom::conCmdVisible(216.0f));
+        EXPECT(nearEqF(216.0f - top - 44.0f, 140.0f, 0.001f));  // 64,8%
+    }
+}
+
 TEST(regress_divisores_arrastaveis) {
     using namespace vv;
     theme::setDensity(1.0f);

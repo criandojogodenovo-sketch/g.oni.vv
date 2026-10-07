@@ -770,19 +770,37 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     // TRILHO de 32dp (safe::kInspTrackW) — só a faixa com o ícone; a área
     // restante junta-se ao viewport (o centerRect do main Já sabe — a
     // MESMA fonte: safe::resolvePanels com inspTrack). Volta ao selecionar.
+    // P2-bis (0.9.6.16 — a decisão do dono): o ícone do trilho É o toggle
+    // do PIN — tocar ABRE o painel E FIXA (inspPinned, persiste no
+    // layout.json; a seta de recolher do cabeçalho desfaz). Sem long-press.
     if (editor::inspectorCollapsed(st)) {
         const UiRect track = safe::inspectorPanelRect(
             ui.screenWidth(), ui.screenHeight(), ui.safeArea(), st.drawerH,
             st.inspW, st.hierW, /*inspTrack=*/true);
         ui.panel(track.x, track.y, track.w, track.h, theme::PANEL);
         ui.panel(track.x, track.y, 1.0f, track.h, theme::LINE);  // separador
-        // o ícone do Inspector (o painel com 3 linhas) no topo do trilho —
-        // INFORMATIVO (sem widgetHit: o regresso é SELECIONAR um TIC; a
-        // spec PASSO 2 não define interação no trilho)
+        // o alvo do toque: a CÉLULA de 32dp de largura × 40dp de altura no
+        // topo do trilho (a LEI DE OURO no toque: o desenho do ícone é 20;
+        // a largura é a do TRILHO — o elemento 32dp da spec do dono, a
+        // MESMA classe de piso das tabs de baixo, kFieldFloorDp)
+        const f32 cellH = theme::dp(40.0f);
+        const bool held = ui.widgetActive(kInspTrackPinId);
+        if (held) {
+            ui.panel(track.x, track.y, track.w, cellH, theme::kTheme.surface2);
+        }
         icons::drawIcon(ui, icons::Icon::Inspector,
                         track.x + (track.w - theme::dp(20.0f)) * 0.5f,
-                        track.y + theme::dp(6.0f), theme::dp(20.0f),
-                        theme::kTheme.text2);
+                        track.y + (cellH - theme::dp(20.0f)) * 0.5f,
+                        theme::dp(20.0f),
+                        held ? theme::kTheme.accent : theme::kTheme.text2);
+        // a flag ANTES do hit (o piso da classe CAMPO 32 — o trilho é o
+        // elemento 32dp da casa, o precedente das tabs de baixo)
+        ui.auditRowFloorNext(layout::kFieldFloorDp);
+        if (ui.widgetHit(kInspTrackPinId, track.x, track.y, track.w,
+                         cellH)) {
+            st.inspPinned = true;   // abre E FIXA (P2-bis — o dono decide)
+            ui.scrollSetOffset(kIdScrollInsp, 0.0f);
+        }
         return false;
     }
     // F4.2: painel inteiro dentro do contentRect — a altura REAL alimenta o
@@ -860,6 +878,49 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     }
     ui.panel(x + kPad, y + kHeaderH - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
 
+    // P2-bis (0.9.6.16 — a decisão do dono): a SETA DE RECOLHER — só
+    // existe ENQUANTO fixado; desfaz o pin (e o painel fecha se não
+    // houver seleção — a regra PASSO 2 do dono manda). Linha PRÓPRIA de
+    // 28dp sob o cabeçalho (piso kHeadFloorDp) — longe das chips [Nós]
+    // [Inspector] cujos rects REAIS (medidos no PNG do device: a chip
+    // «Inspector» começa a 34,5dp do painel de 180dp) não deixam espaço
+    // na 1ª linha; a título «Inspector» REPETE a chip e fica como está
+    // (fora do scope do P2-bis).
+    const bool unpinRow = st.inspPinned;
+    if (unpinRow) {
+        const f32 rowY = y + kHeaderH;
+        const bool heldU = ui.widgetActive(kInspUnpinId);
+        if (heldU) {
+            ui.panel(x, rowY, w, theme::dp(kInspUnpinRowH),
+                     theme::kTheme.surface2);
+        }
+        icons::drawIcon(ui, icons::Icon::ChevronRight,
+                        x + theme::dp(10.0f),
+                        rowY + (theme::dp(kInspUnpinRowH) - theme::dp(20.0f)) *
+                                   0.5f,
+                        theme::dp(20.0f),
+                        heldU ? theme::kTheme.accent : theme::kTheme.text2);
+        if (ui.hasFont()) {
+            const TextMetrics tmU = ui.textMetrics();
+            ui.labelFitted(x + theme::dp(38.0f),
+                           rowY + (theme::dp(kInspUnpinRowH) - tmU.block()) *
+                                      0.5f +
+                               tmU.ascent,
+                           "recolher", theme::kTheme.text2,
+                           w - theme::dp(48.0f));
+        }
+        // a flag ANTES do hit (a linha de cabeçalho 28 — o piso da casa)
+        ui.auditRowFloorNext(layout::kHeadFloorDp);
+        if (ui.widgetHit(kInspUnpinId, x, rowY, w,
+                         theme::dp(kInspUnpinRowH))) {
+            st.inspPinned = false;   // DESFAZ o pin (o trilho volta sem
+                                     // seleção — a regra PASSO 2)
+        }
+    }
+    // a altura do cabeçalho EFETIVA (a linha da seta conta quando fixado —
+    // as duas vistas abaixo partilham o mesmo desconto)
+    const f32 headH = kHeaderH + (unpinRow ? theme::dp(kInspUnpinRowH) : 0.0f);
+
     // ---- 0.9.6.10 (GRUPO UI · a imagem 1) · A VISTA «Nós» --------------
     // a 2ª tab do Inspector da referência: a LISTA DE NÓS da cena (a
     // MESMA árvore da hierarquia em compacto — o MESMO hierIconFor e a
@@ -878,8 +939,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 nrows[nNRows++] = {t.handle, 0u};
             }
         });
-        const f32 listTopN = y + kHeaderH + 4.0f;
-        const UiRect regionN = {x, listTopN, w, h - kHeaderH - 4.0f};
+        const f32 listTopN = y + headH + 4.0f;
+        const UiRect regionN = {x, listTopN, w, h - headH - 4.0f};
         const f32 contentHN = static_cast<f32>(nNRows) * rowH;
         ui.beginScroll(kIdScrollInsp, regionN, contentHN);
         const f32 offN = ui.scrollOffset();
@@ -978,11 +1039,12 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     const f32 contentH = inspectorContentHeight(prof, tm, selectable,
                                                 st.inspCollapsed);
 
-    // região de scroll: abaixo do cabeçalho
+    // região de scroll: abaixo do cabeçalho (+ a linha da seta quando
+    // fixado — P2-bis)
     // GRUPO D (plano B): SEM inset — o divisor sobrepõe a borda ESQUERDA e
     // RECLAMA o gesto ANTES do painel (dividerInput corre primeiro no main)
-    const f32 contentTop = y + kHeaderH + 4.0f;
-    const f32 listH = h - kHeaderH - 4.0f;
+    const f32 contentTop = y + headH + 4.0f;
+    const f32 listH = h - headH - 4.0f;
 
     ui.beginScroll(kIdScrollInsp, {x, contentTop, w, listH}, contentH);
     const f32 off = ui.scrollOffset();

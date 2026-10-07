@@ -4058,6 +4058,188 @@ int main() {
                         g_bottom.bottomTab = 0;
                         g_bottom.consoleTab = 0;
                     }
+                    // ---- (i) P2-bis · O PIN DO INSPECTOR + A CONSOLA ≥60%
+                    // (as DUAS decisões do dono sobre o PASSO 2 — R-034)
+                    passo("13.7i p2-bis: o pin do trilho e a consola ≥60% "
+                          "(PNG+JSON)");
+                    {
+                        // (i.1) O PIN: sem seleção o trilho está lá; tocar
+                        // no ÍCONE (a célula 64x80px no topo do trilho de
+                        // 64px @2.0 — x 1488..1552, y 120..200) ABRE o
+                        // painel E FIXA (inspPinned — a regra do dono)
+                        g_editor.inspPinned = false;
+                        check(editor::inspectorCollapsed(g_editor),
+                              "13.7i a pré-condição: sem seleção o trilho "
+                              "está de pé");
+                        tap(1520.0f, 160.0f);
+                        check(g_editor.inspPinned,
+                              "13.7i o toque no ícone do trilho FIXA o pin "
+                              "(P2-bis — abre E fixa)");
+                        check(!editor::inspectorCollapsed(g_editor),
+                              "13.7i fixado, o painel fica aberto MESMO sem "
+                              "seleção (a regra do dono)");
+                        frame();
+                        {
+                            auto [pngP, jsP] = exportScreen("editor");
+                            fileapi::writeAll("layout-harness-p2bis-pin.png",
+                                              pngP.data(), pngP.size());
+                            fileapi::writeAll("layout-harness-p2bis-pin.json",
+                                              jsP.data(), jsP.size());
+                            vv::RawImage imgP;
+                            std::string errP;
+                            check(vv::loadPng(pngP.data(), pngP.size(), imgP,
+                                              errP) &&
+                                      imgP.width == 1600 &&
+                                      imgP.height == 720,
+                                  "13.7i o PNG do pin e 1600x720");
+                            const std::string jsStr(jsP.begin(), jsP.end());
+                            // a SETA DE RECOLHER (id 7433) existe no painel
+                            // fixado; o BOTÃO do trilho (7432) desapareceu
+                            check(jsStr.find("\"id\":\"1d09\"") !=
+                                      std::string::npos,
+                                  "13.7i a seta de recolher (id 7433) vive "
+                                  "no painel fixado");
+                            check(jsStr.find("\"id\":\"1d08\"") ==
+                                      std::string::npos,
+                                  "13.7i o botão do trilho (id 7432) saiu — "
+                                  "o painel está aberto");
+                            // a PERSISTÊNCIA: o serialize do main leva o
+                            // pin (o layout.json grava inspPinned=1)
+                            const std::string dataP =
+                                editor::bottom::serializeLayout(
+                                    g_bottom, g_editor.showInspector,
+                                    g_editor.inspCollapsed |
+                                        (g_editor.settingsCollapsed << 8),
+                                    g_editor.hierW, g_editor.inspW,
+                                    g_editor.inspPinned);
+                            check(dataP.find("inspPinned=1") !=
+                                      std::string::npos,
+                                  "13.7i o layout.json leva inspPinned=1 "
+                                  "(spec G — o pin persiste)");
+                            // o VALIDADOR da casa afere o ecrã FIXADO (os
+                            // dois alvos novos: a célula do trilho e a seta)
+                            std::vector<u8> audP;
+                            if (rawSt13->readBytes(
+                                    "layout/auditoria-editor.txt", audP)) {
+                                std::string audPS(audP.begin(), audP.end());
+                                check(
+                                    audPS.find("problemas: 0 ERRO") !=
+                                            std::string::npos &&
+                                        audPS.find("VERDE") !=
+                                            std::string::npos,
+                                    "13.7i a auditoria do painel FIXADO é "
+                                    "VERDE (o validador afere o par do pin)");
+                            }
+                        }
+                        // (i.2) A SETA: tocar na linha «recolher» (y
+                        // 176..232px, longe da pega do divisor a 1240px)
+                        // DESFAZ o pin — o trilho volta (sem seleção)
+                        tap(1350.0f, 204.0f);
+                        check(!g_editor.inspPinned,
+                              "13.7i a seta de recolher DESFAZ o pin");
+                        check(editor::inspectorCollapsed(g_editor),
+                              "13.7i sem pin e sem seleção o TRILHO volta");
+                        // (i.3) A CONSOLA ≥60%: com a tab Consola ativa a
+                        // lista de log ocupa ≥60% da altura de CONTEÚDO do
+                        // drawer (chips+extras ≤40% — SEM exceções; no
+                        // drawer pequeno o campo de comando SAI)
+                        g_bottom.bottomTab = 3;
+                        frame();
+                        frame();
+                        {
+                            const editor::bottom::Layout Lc =
+                                editor::bottom::layout(1600.0f, 720.0f,
+                                                       g_ui.safeArea(),
+                                                       g_bottom);
+                            const f32 contentH =
+                                Lc.drawer.h - 48.0f;   // pega 24dp @2.0
+                            // @2.0 o drawer é capado a 35% → conteúdo
+                            // < 190dp → o campo de comando SAI (a regra)
+                            char msgPeq[160];
+                            std::snprintf(msgPeq, sizeof(msgPeq),
+                                          "13.7i a pre-condicao: o drawer @2.0 "
+                                          "e pequeno (%.0fpx = %.1fdp de "
+                                          "conteudo)",
+                                          contentH, contentH / 2.0f);
+                            check(contentH < 190.0f * 2.0f, msgPeq);
+                            auto [pngC2, jsC2] = exportScreen("editor");
+                            fileapi::writeAll(
+                                "layout-harness-p2bis-consola.png",
+                                pngC2.data(), pngC2.size());
+                            fileapi::writeAll(
+                                "layout-harness-p2bis-consola.json",
+                                jsC2.data(), jsC2.size());
+                            vv::RawImage imgC2;
+                            std::string errC2;
+                            check(vv::loadPng(pngC2.data(), pngC2.size(),
+                                              imgC2, errC2) &&
+                                      imgC2.width == 1600 &&
+                                      imgC2.height == 720,
+                                  "13.7i o PNG da consola e 1600x720");
+                            const std::string jsStr(jsC2.begin(), jsC2.end());
+                            // o CAMPO DE COMANDO (id 5636) não existe no
+                            // drawer pequeno — chips 28dp + a lista no resto
+                            check(jsStr.find("\"id\":\"1604\"") ==
+                                      std::string::npos,
+                                  "13.7i o campo de comando SAIU do drawer "
+                                  "pequeno (a regra do dono — sem exceções)");
+                            // a LISTA (scroll id 47) ocupa ≥60% do conteúdo
+                            size_t pS = jsStr.find("\"tipo\":\"scroll\"");
+                            bool achouLista = false;
+                            f32 listaH = -1.0f;
+                            while (pS != std::string::npos) {
+                                const size_t pId =
+                                    jsStr.find("\"id\":\"2f\"", pS);
+                                const size_t pFim =
+                                    jsStr.find("}", pS + 14);
+                                if (pId != std::string::npos &&
+                                    pId < pFim) {
+                                    const size_t hy =
+                                        jsStr.find("\"y\":", pS);
+                                    const size_t hh =
+                                        jsStr.find("\"h\":", pS);
+                                    if (hy != std::string::npos &&
+                                        hh != std::string::npos) {
+                                        listaH = std::strtof(
+                                            jsStr.c_str() + hh + 4, nullptr);
+                                        (void)std::strtof(
+                                            jsStr.c_str() + hy + 4, nullptr);
+                                        achouLista = true;
+                                    }
+                                    break;
+                                }
+                                pS = jsStr.find("\"tipo\":\"scroll\"",
+                                                pS + 14);
+                            }
+                            check(achouLista,
+                                  "13.7i a lista de log (scroll 47) está no "
+                                  "registo");
+                            char msg60[160];
+                            std::snprintf(msg60, sizeof(msg60),
+                                          "13.7i a lista de log ocupa %.0fpx "
+                                          "de %.0fpx de conteudo (%.1f%% — o "
+                                          "piso e 60%%)",
+                                          listaH, contentH,
+                                          100.0f * listaH / contentH);
+                            check(listaH >= contentH * 0.60f - 0.5f, msg60);
+                            // o VALIDADOR afere a consola nova (a lista ≥60%
+                            // é regra de LAYOUT; a auditoria cobre pisos/
+                            // sobreposições dos alvos que ficam)
+                            std::vector<u8> audC;
+                            if (rawSt13->readBytes(
+                                    "layout/auditoria-editor.txt", audC)) {
+                                std::string audCS(audC.begin(), audC.end());
+                                check(
+                                    audCS.find("problemas: 0 ERRO") !=
+                                            std::string::npos &&
+                                        audCS.find("VERDE") !=
+                                            std::string::npos,
+                                    "13.7i a auditoria da CONSOLA (sem o "
+                                    "campo, lista ≥60%) é VERDE");
+                            }
+                        }
+                        g_bottom.bottomTab = 0;
+                    }
                     // REPOEM o resto do estado p/ a suíte
                     g_editor.hierW = -1.0f;
                     g_editor.inspW = -1.0f;

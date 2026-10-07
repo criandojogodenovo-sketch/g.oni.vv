@@ -239,6 +239,13 @@ struct EditorState {
     f32    hierW = -1.0f;
     f32    inspW = -1.0f;
     u32    inspTab = 0;        // 0.9.6.10: 0=Inspector · 1=Nós (a lista de nós)
+    // P2-bis (0.9.6.16 — a decisão do dono sobre «fixar aberto»): o PIN do
+    // inspector. Tocar no ÍCONE do trilho (32dp, sem seleção) ABRE o painel
+    // E FIXA (inspPinned=true — PERSISTE no layout.json, spec G); a seta de
+    // recolher no cabeçalho DESFAZ o pin (e o painel fecha se não houver
+    // seleção). Sem long-press — toggle simples. Enquanto fixado, o painel
+    // mantém-se aberto MESMO sem seleção (a regra é do dono).
+    bool   inspPinned = false;
     // drag dos divisores (press arma; o movimento horizontal redimensiona
     // AO VIVO com clamp; release fixa — o padrão do drawer)
     bool   divDragActive = false;
@@ -300,8 +307,12 @@ safe::PanelBudget resolveEditorPanels(const EditorState& st, f32 contentWdp);
 // rects (safe), o draw (drawInspector), o divisor direito e os testes
 // partilham ESTA pergunta — a fonte ÚNICA do colapso. A MULTI-seleção
 // conta como seleção (o gizmo vive nela).
+// P2-bis (0.9.6.16): o PIN manda sobre a ausência de seleção — fixado, o
+// painel fica aberto MESMO sem seleção (a regra do dono). A seta de
+// recolher limpa o pin e o trilho volta (se não houver seleção).
 inline bool inspectorCollapsed(const EditorState& st) {
-    return st.selected == Handle::invalid() && st.multiSelectCount == 0;
+    return !st.inspPinned && st.selected == Handle::invalid() &&
+           st.multiSelectCount == 0;
 }
 
 // GRUPO D (0.9.6.7) — DIVISORES ARRASTÁVEIS hierarquia|viewport|inspector
@@ -442,6 +453,19 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 constexpr u64 kMenuRowBase   = 7400;
 constexpr u64 kMenuScrollId  = 7410;
 constexpr u64 kInspTabBase   = 7430;   // 0.9.6.10: tabs Inspector/Nós
+// P2-bis (0.9.6.16): o PAR do pin — o ícone do TRILHO abre E fixa (o
+// touch é a célula toda de 32dp de largura × 40dp de altura — a LEI DE
+// OURO no toque; a largura é a do trilho, o elemento 32dp da spec do
+// dono — a mesma classe de piso das tabs de baixo, kFieldFloorDp) e a
+// SETA de recolher no cabeçalho desfaz o pin e fecha.
+constexpr u64 kInspTrackPinId = 7432;  // o ícone do trilho (abre + fixa)
+constexpr u64 kInspUnpinId    = 7433;  // a seta de recolher (desfaz o pin)
+constexpr f32 kInspUnpinRowH  = 28.0f; // dp — a linha da seta (o piso de
+                                       // cabeçalho da casa, kHeadFloorDp).
+                                       // Só existe ENQUANTO fixado; vive
+                                       // SOB o cabeçalho — longe das chips
+                                       // no piso 180dp (o espaço da 1ª
+                                       // linha é medido, não adivinhado)
 constexpr u64 kHierDotsId    = 7420;   // ⋮ da Hierarquia (GRUPO UI)
 constexpr u64 kHierMenuRowBase = 7421; // linhas do menu ⋮ (2)
 int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,

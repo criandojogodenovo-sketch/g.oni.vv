@@ -52,13 +52,22 @@ contentRect (superfície EGL − insets do sistema)
 │   pesquisa com placeholder degradado + árvore)   [drawHierarchy]
 ├── PAINEL INSPECTOR (direita; PASSO 2: 22% da largura, piso 180dp /
 │   teto 260dp — SEM seleção colapsa ao TRILHO de 32dp, a área junta-se
-│   ao viewport e volta ao selecionar)             [drawInspector]
-│   └── TRILHO (32dp, ícone Inspector no topo, INFORMATIVO — sem
-│       widgetHit; a fonte única do colapso é editor::inspectorCollapsed)
+│   ao viewport e volta ao selecionar; P2-bis: o PIN fixa o painel
+│   aberto MESMO sem seleção — persiste no layout.json)
+│                                                   [drawInspector]
+│   ├── TRILHO (32dp; P2-bis: o ícone no topo É o toggle do PIN — a
+│   │   célula de toque 32×40dp, id 7432: tocar ABRE E FIXA; a fonte
+│   │   única do colapso é editor::inspectorCollapsed)
+│   └── LINHA «recolher» (28dp sob o cabeçalho, id 7433 — SÓ existe
+│       enquanto fixado: a seta DESFAZ o pin e o trilho volta sem
+│       seleção — P2-bis)
 ├── BOTTOM DOCK: drawer (altura variável 0..cap duplo) + TAB BAR (32dp —
 │   PASSO 1)
 │   └── tabs Ficheiros · Assets · Consola (chips internas Logs/Erros/
-│       Avisos 28dp — a chip «Consola» duplicada saiu no PASSO 2) +
+│       Avisos 28dp — a chip «Consola» duplicada saiu no PASSO 2;
+│       P2-bis: a LISTA de log ocupa ≥60% do conteúdo do drawer — o
+│       campo de comando SAI quando a lista com ele fica <60%, a fonte
+│       única é bottom::conCmdVisible) +
 │       «FPS · TICs» à direita                         [bottom::draw]
 ├── (a STATUS BAR de 24dp foi REMOVIDA no PASSO 1 — a tab bar é a última
 │   faixa viva; safe::statusRect devolve altura ZERO por compat)
@@ -95,7 +104,12 @@ contentRect (superfície EGL − insets do sistema)
    `editor::inspectorCollapsed` — alimenta os rects `safe::`, o draw, o
    divisor direito — que desaparece — e o centerRect). O drag dos
    divisores clampa o inspector a [180..260] e mantém o piso da toolbar
-   (`kViewportMinW`=288dp).
+   (`kViewportMinW`=288dp). **P2-bis — o PIN**: o ícone do trilho (id
+   `kInspTrackPinId` 7432, célula 32×40dp) ABRE e FIXA o painel
+   (`inspPinned`, persiste no layout.json); a seta de recolher (id
+   `kInspUnpinId` 7433, linha de 28dp sob o cabeçalho) DESFAZ o pin —
+   fixado, o painel fica aberto MESMO sem seleção; com seleção a regra
+   PASSO 2 manda (o painel volta a fechar ao limpar a seleção).
 5. **As PEGAS de arrasto medem 24dp (PASSO 2)**: a pega do drawer
    (`kDrawerHandleH`, era 12) e o hit dos divisores (`kDividerHitW`, era
    20). O strip VISÍVEL dos divisores segue 12dp — a folga vai PARA
@@ -113,6 +127,14 @@ contentRect (superfície EGL − insets do sistema)
    LOGA `vp3d: viewport set to (x, y, w x h)` (R-024).
 9. **Todo o texto usa sp** (`theme::fontScale`) e todas as medidas dp
    (`theme::dp`) — px cru é violação (R-018).
+10. **A CONSOLA cumpre o piso de 60% (P2-bis)**: com a tab Consola
+   ativa, a lista de log ocupa ≥60% da altura de CONTEÚDO do drawer
+   (chips+extras ≤40% — a regra do dono, SEM exceções). O extra que
+   cede é o campo de comando: `bottom::conCmdVisible` (a fonte ÚNICA,
+   pura e afervel) esconde-o quando a lista com ele fica <60% — o
+   drawer pequeno vive com chips 28dp + a lista no resto. Os números
+   são NOMEADOS (`kConListMinPct` 0.60, `kConChipPad` 2, `kConListGap`
+   2, `kConCmdH` 40, `kConCmdPad` 4).
 
 ## 3. OS PISOS (fontes únicas em ui/SafeArea.h)
 
@@ -133,7 +155,7 @@ contentRect (superfície EGL − insets do sistema)
 | `layout::kTouchFloorDp` | 40dp | piso de toque do botão SOLTO (desenho 32 — a LEI DE OURO do PASSO 1; era 48) |
 | `layout::kRowFloorDp` | 36dp | piso de LINHA (top bar, listas, consola) |
 | `layout::kFieldFloorDp` | 32dp | piso de CAMPO (caixas X/Y/Z, tabs de baixo, pesquisa) |
-| `layout::kHeadFloorDp` | 28dp | piso de CABEÇALHO/chips (kHeaderH, tabs Inspector/Nós, chips da consola — PASSO 2) |
+| `layout::kHeadFloorDp` | 28dp | piso de CABEÇALHO/chips (kHeaderH, tabs Inspector/Nós, chips da consola, a linha «recolher» do pin — PASSO 2/P2-bis) |
 
 ## 4. SENTINELAS E GATE
 
@@ -144,6 +166,7 @@ contentRect (superfície EGL − insets do sistema)
 | R-024 | tests/c33_virtual.cpp FASE 14.3 + sentinela `regress_viewport_rect_segue` | abrir/fechar o dock → o rect muda, o log `vp3d: viewport set to` aparece com os números certos, o aspect segue |
 | R-025 | tests/test_sentinels.cpp `regress_rodape_intocavel` | DESDE O PASSO 1: a TAB BAR de 32dp é a última faixa em todos os estados; nada a cobre; o «FPS · TICs» vive no canto direito (o middle do projeto ficou nas unidades puras de TextFit — a status bar saiu) |
 | R-033 | tests/test_sentinels.cpp `regress_paineis_passo2` | A SPEC PASSO 2 MEDIDA: defaults 18%/22% (piso 140/180, teto 260), viewport ≥55% nos ecrãs de referência, o trilho de 32dp sem seleção (e o centerRect a devolver a área), o intervalo [180..260] no drag, as pegas 24dp, o drawer default FECHADO e o teto de 35% |
+| R-034 | tests/test_sentinels.cpp `regress_p2bis_pin_e_consola` + c33 FASE 13.7i | P2-bis: o pin (o predicado com o pin, o round-trip inspPinned retrocompatível, os ids do par 7432/7433) + a regra da consola (conCmdVisible pura; a lista ≥60% nos conteúdos reais 80/88/136/191/216/336dp; o E2E no harness @2.0 — tap no trilho fixa, a seta desfaz, o campo de comando sai do drawer pequeno, os PNGs+JSON) |
 | gate | scripts/hierarchy_check.py (job core-tests do CI) | este ficheiro existe, a tabela §0 aponta símbolos REAIS, as sentinelas R-022..R-025 + R-033 existem no fonte |
 
 Qualquer região nova: acrescenta AQUI (§1 + §0 se for topo de ramo) com

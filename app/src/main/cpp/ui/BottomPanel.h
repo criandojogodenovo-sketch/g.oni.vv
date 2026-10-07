@@ -116,6 +116,31 @@ constexpr f32 kFpsW = 112.0f;   // dp — o canto direito da tab bar
 // kHeadFloorDp; a chip «Consola» duplicada SAIU)
 constexpr f32 kDrawerHandleH = 24.0f;  // dp — a pega de arrasto do drawer
 constexpr f32 kConChipH      = 28.0f;  // dp — os chips Logs/Erros/Avisos
+//
+// P2-bis (0.9.6.16 — A DECISÃO DO DONO sobre «consola ≥60%»): com a tab
+// Consola ativa, a LISTA de log ocupa ≥60% da altura de CONTEÚDO do
+// drawer (chips+extras ≤40%) — SEM exceções. O extra que CEdE é o campo
+// de comando: se com ele a lista fica <60%, o campo SAI (o drawer
+// pequeno vive com chips 28dp + a lista no resto — exatamente as
+// palavras do dono). Os números da regra, todos NOMEADOS:
+constexpr f32 kConListMinPct = 0.60f;  // a lista não desce abaixo disto
+constexpr f32 kConChipPad    = 2.0f;   // dp — respiro acima das chips (era 4)
+constexpr f32 kConListGap    = 2.0f;   // dp — chips → lista (era 8; a linha
+                                       // separadora de 1px vive DENTRO
+                                       // deste intervalo)
+constexpr f32 kConCmdH       = 40.0f;  // dp — o campo de comando (a LEI DE
+                                       // OURO: toque 40 — nunca encolhe)
+constexpr f32 kConCmdPad     = 4.0f;   // dp — a folga de baixo do campo
+//
+// a decisão PURA da regra (em dp — densidade-invariante, a lição R-018):
+// o campo de comando só existe se a lista com ele ainda cumpre o piso de
+// kConListMinPct; o draw e os testes partilham ESTA pergunta (a fonte
+// ÚNICA — o padrão da casa)
+inline bool conCmdVisible(f32 contentHdp) {
+    const f32 top = kConChipPad + kConChipH + kConListGap;
+    const f32 cmd = kConCmdH + kConCmdPad;
+    return (contentHdp - top - cmd) >= contentHdp * kConListMinPct;
+}
 
 struct Layout {
     UiRect tabBar{};             // faixa 32dp (bottomTabRect)
@@ -158,14 +183,16 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
 //   bottomTab=N drawerH=N inspector=0/1 inspCollapsed=0x..
 // GRUPO D: hierW=N inspW=N (larguras dp dos divisores; AUSENTE nos
 // ficheiros antigos = default −1 — o formato é retrocompatível)
+// P2-bis: inspPinned=0/1 (o pin do inspector; AUSENTE nos ficheiros
+// antigos = false — o formato é retrocompatível)
 std::string serializeLayout(const BottomState& bs, bool showInspector,
                             u32 inspCollapsed, f32 hierW = -1.0f,
-                            f32 inspW = -1.0f);
+                            f32 inspW = -1.0f, bool inspPinned = false);
 // devolve false se ilegível (o chamador usa DEFAULTS — "Repor layout").
-// hierW/inspW opcionais (nullptr = não ler; compat dos testes antigos)
+// hierW/inspW/inspPinned opcionais (nullptr = não ler; compat dos testes)
 bool parseLayout(const std::string& data, BottomState& bs, bool& showInspector,
                  u32& inspCollapsed, f32* hierW = nullptr,
-                 f32* inspW = nullptr);
+                 f32* inspW = nullptr, bool* inspPinned = nullptr);
 
 } // namespace bottom
 } // namespace editor

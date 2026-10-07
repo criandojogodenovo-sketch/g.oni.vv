@@ -571,7 +571,7 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
         // enviar (os comandos REAIS: limpar/ajuda/play/stop/snap — o main
         // corre)
         {
-            const f32 tabY = content.y + theme::dp(4.0f);
+            const f32 tabY = content.y + theme::dp(kConChipPad);
             const f32 tabH = theme::dp(kConChipH);
             static const struct {
                 const char* label;
@@ -644,55 +644,71 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
                 }
             }
             ui.panel(content.x + theme::dp(16.0f),
-                     tabY + tabH + theme::dp(2.0f),
+                     tabY + tabH + theme::dp(1.0f),
                      content.w - theme::dp(32.0f), 1.0f,
                      theme::kTheme.border);
             // ---- o CAMPO DE COMANDO (a imagem 1: «Digite um comando…» +
             // enviar) — o toque abre o teclado da casa (propósito 9); o
             // main CORRE os comandos reais (limpar/ajuda/play/stop/snap)
-            const f32 cmdH = theme::dp(40.0f);
-            const f32 cmdY = content.y + content.h - cmdH - theme::dp(4.0f);
-            const UiRect cmdR = {content.x + theme::dp(16.0f), cmdY,
-                                 content.w - theme::dp(32.0f) -
-                                     theme::dp(56.0f) - theme::dp(8.0f),
-                                 cmdH};
-            ui.panelRounded(cmdR.x, cmdR.y, cmdR.w, cmdR.h,
-                            theme::kRadiusField, theme::kTheme.bg);
-            ui.frameRounded(cmdR.x, cmdR.y, cmdR.w, cmdR.h, 1.0f,
-                            theme::kRadiusField, theme::kTheme.border);
-            icons::drawIcon(ui, icons::Icon::Terminal,
-                            cmdR.x + theme::dp(10.0f),
-                            cmdR.y + (cmdR.h - theme::dp(20.0f)) * 0.5f,
-                            theme::dp(20.0f), theme::kTheme.text2);
-            if (ui.hasFont()) {
-                ui.labelFitted(
-                    cmdR.x + theme::dp(40.0f),
-                    cmdR.y + (cmdR.h - tmText.block()) * 0.5f + tmText.ascent,
-                    "Digite um comando… (limpar/ajuda/play/stop/snap)",
-                    theme::kTheme.text2, cmdR.w - theme::dp(48.0f));
-            }
-            // o botão ENVIAR (▶ — a imagem 1)
-            const UiRect sendR = {cmdR.x + cmdR.w + theme::dp(8.0f), cmdY,
-                                  theme::dp(56.0f), cmdH};
-            const bool sendHeld = ui.widgetActive(kCmdFieldId);
-            ui.panelRounded(sendR.x, sendR.y, sendR.w, sendR.h,
-                            theme::kRadiusField,
-                            sendHeld ? theme::kTheme.surface2
-                                     : theme::kTheme.accentDim);
-            icons::drawIcon(ui, icons::Icon::Play,
-                            sendR.x + (sendR.w - theme::dp(20.0f)) * 0.5f,
-                            sendR.y + (sendR.h - theme::dp(20.0f)) * 0.5f,
-                            theme::dp(20.0f), theme::kTheme.accent);
-            if (ui.widgetHit(kCmdFieldId, cmdR.x, cmdR.y, cmdR.w, cmdR.h) ||
-                ui.widgetHit(kCmdFieldId, sendR.x, sendR.y, sendR.w,
-                             sendR.h)) {
-                a.commandPressed = true;   // o main abre o teclado (prop. 9)
-            }
+            // P2-bis (0.9.6.16 — a decisão do dono): SÓ existe quando a
+            // lista com ele ainda cumpre o piso de 60% (conCmdVisible — a
+            // fonte ÚNICA); no drawer pequeno o campo SAI — chips 28dp + a
+            // lista no resto (sem exceções — a regra da consola)
+            const bool conShowCmd = conCmdVisible(content.h /
+                                                  theme::dp(1.0f));
+            const f32 cmdH = theme::dp(kConCmdH);
+            const f32 cmdY = content.y + content.h - cmdH -
+                             theme::dp(kConCmdPad);
+            if (conShowCmd) {
+                const UiRect cmdR = {content.x + theme::dp(16.0f), cmdY,
+                                     content.w - theme::dp(32.0f) -
+                                         theme::dp(56.0f) - theme::dp(8.0f),
+                                     cmdH};
+                ui.panelRounded(cmdR.x, cmdR.y, cmdR.w, cmdR.h,
+                                theme::kRadiusField, theme::kTheme.bg);
+                ui.frameRounded(cmdR.x, cmdR.y, cmdR.w, cmdR.h, 1.0f,
+                                theme::kRadiusField, theme::kTheme.border);
+                icons::drawIcon(ui, icons::Icon::Terminal,
+                                cmdR.x + theme::dp(10.0f),
+                                cmdR.y + (cmdR.h - theme::dp(20.0f)) * 0.5f,
+                                theme::dp(20.0f), theme::kTheme.text2);
+                if (ui.hasFont()) {
+                    ui.labelFitted(
+                        cmdR.x + theme::dp(40.0f),
+                        cmdR.y + (cmdR.h - tmText.block()) * 0.5f + tmText.ascent,
+                        "Digite um comando… (limpar/ajuda/play/stop/snap)",
+                        theme::kTheme.text2, cmdR.w - theme::dp(48.0f));
+                }
+                // o botão ENVIAR (▶ — a imagem 1)
+                const UiRect sendR = {cmdR.x + cmdR.w + theme::dp(8.0f), cmdY,
+                                      theme::dp(56.0f), cmdH};
+                const bool sendHeld = ui.widgetActive(kCmdFieldId);
+                ui.panelRounded(sendR.x, sendR.y, sendR.w, sendR.h,
+                                theme::kRadiusField,
+                                sendHeld ? theme::kTheme.surface2
+                                         : theme::kTheme.accentDim);
+                icons::drawIcon(ui, icons::Icon::Play,
+                                sendR.x + (sendR.w - theme::dp(20.0f)) * 0.5f,
+                                sendR.y + (sendR.h - theme::dp(20.0f)) * 0.5f,
+                                theme::dp(20.0f), theme::kTheme.accent);
+                if (ui.widgetHit(kCmdFieldId, cmdR.x, cmdR.y, cmdR.w, cmdR.h) ||
+                    ui.widgetHit(kCmdFieldId, sendR.x, sendR.y, sendR.w,
+                                 sendR.h)) {
+                    a.commandPressed = true;   // o main abre o teclado (prop. 9)
+                }
+            }   // fim do conShowCmd (P2-bis — o campo cede à regra dos 60%)
             // as linhas (12sp mono; timestamp + cor por severidade — o
             // formato do engine.log já traz "MM-DD HH:MM:SS.mmm I/GONI:")
-            const f32 listTop = tabY + tabH + theme::dp(8.0f);
-            const UiRect listRegion = {content.x, listTop, content.w,
-                                       cmdY - listTop - theme::dp(4.0f)};
+            // P2-bis: a região da lista é ≥60% do conteúdo (a FONTE da
+            // regra: kConChipPad + chips 28 + kConListGap no topo; o campo
+            // de comando (40+4) SÓ no fundo quando conCmdVisible)
+            const f32 listTop = tabY + tabH + theme::dp(kConListGap);
+            const f32 listBot = conShowCmd
+                                    ? cmdY - theme::dp(kConCmdPad)
+                                    : content.y + content.h;
+            const UiRect listRegion = {
+                content.x, listTop, content.w,
+                listBot > listTop ? listBot - listTop : 0.0f};
             const TextMetrics m = ui.textMetrics();
             const f32 rowH = m.block() + theme::dp(4.0f);
             // PASSO 2: o filtro vem da TABELA das chips (Logs=-1 tudo ·
@@ -760,23 +776,25 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
 
 // ---- persistência (spec G) ----------------------------------------------------
 std::string serializeLayout(const BottomState& bs, bool showInspector,
-                            u32 inspCollapsed, f32 hierW, f32 inspW) {
-    char buf[128];
+                            u32 inspCollapsed, f32 hierW, f32 inspW,
+                            bool inspPinned) {
+    char buf[144];
     std::snprintf(buf, sizeof(buf),
                   "bottomTab=%d\ndrawerH=%d\ninspector=%d\ninspCollapsed=%u\n"
-                  "hierW=%d\ninspW=%d\n",
+                  "hierW=%d\ninspW=%d\ninspPinned=%d\n",
                   bs.bottomTab, static_cast<int>(bs.drawerH),
                   showInspector ? 1 : 0, inspCollapsed,
-                  static_cast<int>(hierW), static_cast<int>(inspW));
+                  static_cast<int>(hierW), static_cast<int>(inspW),
+                  inspPinned ? 1 : 0);
     return std::string(buf);
 }
 
 bool parseLayout(const std::string& data, BottomState& bs, bool& showInspector,
-                 u32& inspCollapsed, f32* hierW, f32* inspW) {
+                 u32& inspCollapsed, f32* hierW, f32* inspW, bool* inspPinned) {
     if (data.empty()) {
         return false;
     }
-    int tab = -1, dh = -1, insp = -1, hw = -9999, iw = -9999;
+    int tab = -1, dh = -1, insp = -1, hw = -9999, iw = -9999, pin = 0;
     unsigned collapsed = 0xFFFFFFFFu;
     const char* p = data.c_str();
     while (*p) {
@@ -792,6 +810,8 @@ bool parseLayout(const std::string& data, BottomState& bs, bool& showInspector,
             hw = std::atoi(p + 6);
         } else if (std::strncmp(p, "inspW=", 6) == 0) {
             iw = std::atoi(p + 6);
+        } else if (std::strncmp(p, "inspPinned=", 11) == 0) {
+            pin = std::atoi(p + 11);   // P2-bis: o pin do inspector
         }
         p = std::strchr(p, '\n');
         if (!p) {
@@ -822,6 +842,11 @@ bool parseLayout(const std::string& data, BottomState& bs, bool& showInspector,
     }
     if (inspW) {
         *inspW = (iw > 0 && iw < 4096) ? static_cast<f32>(iw) : -1.0f;
+    }
+    // P2-bis: o pin (AUSENTE nos ficheiros antigos → false — o formato é
+    // retrocompatível; só o 1 explícito fixa)
+    if (inspPinned) {
+        *inspPinned = pin == 1;
     }
     return true;
 }
