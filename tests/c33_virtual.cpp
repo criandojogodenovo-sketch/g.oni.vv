@@ -1542,17 +1542,19 @@ int main() {
         // Inspector que volta ao TOPO na troca de TIC
         passo("9.11 G2: barra única + ícones de corpo + inspector ao topo");
         {
-            // a BARRA ÚNICA: kToolbarH = 56 — o viewport GANHOU 48px
-            check(nearEqF(safe::kToolbarH, 56.0f),
-                  "kToolbarH = 56 (menu+tabs numa barra — G2-10)");
+            // a BARRA ÚNICA: kToolbarH = 36 (PASSO 1) — o viewport GANHOU
+            // os 20dp da barra mais baixa + os 24dp da status removida
+            check(nearEqF(safe::kToolbarH, 36.0f),
+                  "kToolbarH = 36 (menu+tabs numa barra — G2-10 · PASSO 1)");
             const UiRect viewG2 = safe::centerRect(
                 static_cast<f32>(g_egl.width()),
                 static_cast<f32>(g_egl.height()), g_ui.safeArea(), 0.0f,
                 false);
             const f32 hAntiga = static_cast<f32>(g_egl.height()) - 104.0f -
                                 safe::kStatusH - safe::kBottomTabH;
-            check(nearEqF(viewG2.h, hAntiga + 48.0f),
-                  "o viewport central GANHOU os 48px da tab bar fundida");
+            check(nearEqF(viewG2.h, hAntiga + 68.0f),
+                  "o viewport central GANHOU 68px (barra 36 + status 0 vs "
+                  "o antigo 56+24+48 — PASSO 1)");
             // o TRIAD morreu (os pontinhos fantasma) — o layout do chrome
             // não tem triad (compila) e o canto sup-dir fica LIVRE
             const editor::vpchrome::Layout lg2 =
@@ -2286,8 +2288,8 @@ int main() {
                 const QuadVertex* v = g.vertices();
                 const u32 n = g.vertexCount();
                 u32 inList = 0;
-                const f32 listTop = g_ui.safeArea().top + 56.0f + 8.0f +
-                                    48.0f + 8.0f;
+                const f32 listTop = g_ui.safeArea().top + 36.0f + 8.0f +
+                                    32.0f + 8.0f;   // PASSO 1: hdr 36 + campo 32
                 if (std::getenv("VV_DBG_126")) {
                     std::printf("126: cps=%u listTop=%.0f safeT=%.0f\n",
                                 cps, listTop, g_ui.safeArea().top);
@@ -2561,26 +2563,20 @@ int main() {
                 frame();   // o refresh-on-open + o desenho do seletor
                 // geometria do seletor (landscape 1536x720, insets T96/B48):
                 // overlayArea: oy=96+56=152, ah=720-96-48-56-24-48=448;
-                // fixedH=48+2*48+16=160; maxListH=448-160-8=280 → 5.8 linhas
-                // visíveis; 7 ficheiros → lista com scroll (336>280)
+                // PASSO 1: fixedH=28+2*36+16=116; maxListH=448-116-8=324 →
+                // 7 ficheiros = 252 CABEM (sem scroll) — o robo é visível
                 const f32 w = 340.0f;
-                const f32 fixedH = 48.0f + 2.0f * 48.0f + 16.0f;
+                const f32 fixedH = 28.0f + 2.0f * 36.0f + 16.0f;
                 const f32 maxListH = 448.0f - fixedH - 8.0f;
-                const f32 listH = 7.0f * 48.0f < maxListH ? 7.0f * 48.0f
+                const f32 listH = 7.0f * 36.0f < maxListH ? 7.0f * 36.0f
                                                           : maxListH;
                 const f32 h = fixedH + listH;
                 const f32 x = (1536.0f - w) * 0.5f;
                 const f32 y = 152.0f + (448.0f - h) * 0.5f;
-                const f32 listTop = y + 48.0f + 2.0f * 48.0f;
-                // drag p/ o FIM da lista (o robo é o 7º) — o dedo DENTRO
-                g_input.injectDown(0, x + w * 0.5f, listTop + 200.0f);
-                frame();
-                g_input.injectMove(0, x + w * 0.5f, listTop + 40.0f);
-                frame();
-                g_input.injectUp(0);
-                frame();
-                // a ÚLTIMA linha visível é o robo: tap
-                tap(x + w * 0.5f, listTop + listH - 24.0f);
+                const f32 listTop = y + 28.0f + 2.0f * 36.0f;
+                // PASSO 1: as 7 linhas de 36 CABEM (252 ≤ 324) — sem
+                // scroll; a ÚLTIMA linha (o robo) recebe o tap direto
+                tap(x + w * 0.5f, listTop + 6.0f * 36.0f + 18.0f);
                 const Tic* tA = g_scene.get(ator);
                 const MeshRenderer* mr =
                     tA ? tA->getComponent<MeshRenderer>() : nullptr;
@@ -2928,16 +2924,17 @@ int main() {
         editor::applyDensity();
         const safe::Insets zero{};
         const UiRect bar = safe::toolbarRect(1536.0f, 720.0f, zero);
-        check(bar.h == 112.0f,
-              "12.10 com densidade 2.0 a barra de cima mede 112px (56dp "
-              "REAL — o bug era 56px)");
+        check(bar.h == 72.0f,
+              "12.10 com densidade 2.0 a barra de cima mede 72px (36dp "
+              "REAL — PASSO 1; o bug era 56px)");
         const UiRect status = safe::statusRect(1536.0f, 720.0f, zero);
-        check(status.h == 48.0f && status.y + status.h == 720.0f,
-              "12.10 a status line mede 48px (24dp real) e continua no fundo");
-        check(editor::kRowH == 96.0f && editor::kPad == 32.0f,
-              "12.10 as linhas/paddings dos painéis duplicam (48dp/16dp "
-              "reais — applyDensity)");
-        check(safe::kTopBarH == 56.0f && theme::dp(safe::kTopBarH) == 112.0f,
+        check(status.h == 0.0f,
+              "12.10 a status line tem altura ZERO (REMOVIDA no PASSO 1 — "
+              "o FPS·TICs vive na tab bar de baixo)");
+        check(editor::kRowH == 72.0f && editor::kPad == 32.0f,
+              "12.10 as linhas/paddings dos painéis duplicam (36dp/16dp "
+              "reais — PASSO 1; applyDensity)");
+        check(safe::kTopBarH == 36.0f && theme::dp(safe::kTopBarH) == 72.0f,
               "12.10 o dp() da casa multiplica pela densidade corrente");
         // (b) 0.9.6.8 (GRUPO E · RECALIBRADO): o teclado da engine SAIU —
         // a vara passa a aferir a BARRA DE SÍMBOLOS (a spec E: 40dp = 80px
@@ -2958,9 +2955,9 @@ int main() {
         theme::setDensity(1.0f);
         editor::applyDensity();
         const UiRect bar1 = safe::toolbarRect(1536.0f, 720.0f, zero);
-        check(bar1.h == 56.0f && editor::kRowH == 48.0f,
-              "12.10 com densidade 1.0 o layout é EXATAMENTE o de sempre "
-              "(os testes não mudam)");
+        check(bar1.h == 36.0f && editor::kRowH == 36.0f,
+              "12.10 com densidade 1.0 o layout é EXATAMENTE o da spec "
+              "PASSO 1 (os testes não mudam)");
     }
 
     // ---- 12.11 (0.9.6.2 · R-019): O TOQUE MOVE O CURSOR ---------------------
@@ -3276,6 +3273,26 @@ int main() {
                   "13.2 o editor esta VERDE (o ERRO da status bar + os avisos "
                   "da linha de base do Grupo B curados pelo sp()/dp)");
             fileapi::writeAll("layout-harness-auditoria.txt", aud.data(), aud.size());
+            // PASSO 1: o relatório INTEIRO no stdout quando vermelho — o
+            // diagnóstico sem caçar o ficheiro no cache dir apagado
+            if (audS.find("VERDE") == std::string::npos) {
+                std::printf("%s", audS.c_str());
+                std::vector<u8> js;
+                if (rawSt13->readBytes("layout/editor.json", js)) {
+                    std::string jS(js.begin(), js.end());
+                    // dump das entradas no fundo do ecrã (y > 640)
+                    size_t pos = 0;
+                    while ((pos = jS.find("\"y\":6", pos)) != std::string::npos ||
+                           (pos = jS.find("\"y\":7", pos)) != std::string::npos) {
+                        const size_t b = jS.rfind('{', pos);
+                        const size_t e = jS.find('}', pos);
+                        if (b != std::string::npos && e != std::string::npos) {
+                            std::printf("JSON %s\n", jS.substr(b, e - b + 1).c_str());
+                        }
+                        pos = e;
+                    }
+                }
+            }
             std::printf("    [aud]  %s",
                         audS.find("VERDE") != std::string::npos
                             ? "editor: VERDE\n"
@@ -3805,7 +3822,7 @@ int main() {
                     check(L.plusTopRight,
                           "13.7 o [+] sobe ao canto SUP-dir (a toolbar "
                           "preenche a largura)");
-                    const f32 minTouch = theme::dp(48.0f);
+                    const f32 minTouch = theme::dp(40.0f);   // PASSO 1: a lei de ouro
                     bool allIn = true, all48 = true;
                     const UiRect all[11] = {
                         L.stack[0], L.stack[1], L.stack[2], L.stack[3],
@@ -3825,8 +3842,8 @@ int main() {
                           "13.7 TODOS os alvos do chrome DENTRO do viewport "
                           "(o stack transbordava o fundo antes do Grupo D)");
                     check(all48,
-                          "13.7 TODOS os alvos >= 48dp REAIS no device (a "
-                          "regra da casa intacta na adaptação)");
+                          "13.7 TODOS os alvos >= 40dp REAIS no device (a "
+                          "lei de ouro do PASSO 1 intacta na adaptação)");
                 }
                 // (e) OS DIVISORES AO VIVO: press na pega → drag → clamps —
                 // o caminho REAL do input (o mesmo do dedo no telefone).
@@ -4085,7 +4102,7 @@ int main() {
                         // 1.º botão vive a view.y+48+16 ≈ 128 no harness)
                         if (e.kind == layout::Entry::Button &&
                             e.x > 300.0f && e.x < 400.0f && e.y > 80.0f &&
-                            e.y < 160.0f && e.w > 40.0f && e.w < 60.0f) {
+                            e.y < 160.0f && e.w > 30.0f && e.w < 60.0f) {
                             chip = &e;
                             break;
                         }
@@ -4364,14 +4381,19 @@ int main() {
             g_layoutExportPending = true;   // o audit só corre no frame de
                                             // export (o registo do dump)
             frame();
-            const UiRect status = safe::statusRect(
+            // PASSO 1 (0.9.6.14): a faixa de status FOI REMOVIDA — o rodapé
+            // é a TAB BAR de 32dp (o «FPS · TICs» à direita; o nome do
+            // projeto já não se desenha, o middle do J4 fica nas unidades
+            // puras do test_sentinels). A prova: a banda da tab bar tem
+            // labels (o FPS·TICs) e NENHUMA truncada — com o nome longo
+            // ou curto, o rodapé é estável
+            const UiRect tb = safe::bottomTabRect(
                 1600.0f, 720.0f, g_ui.safeArea());
             u32 labelsNoRodape = 0, truncadosNoRodape = 0;
             for (const vv::layout::Entry& e : g_ui.auditRecord().entries) {
-                // a faixa do rodapé: y dentro da banda de 24dp no fundo
+                // a faixa do rodapé: y dentro da banda de 32dp no fundo
                 if (e.kind == vv::layout::Entry::Label &&
-                    e.y >= status.y - 1.0f && e.y + e.h <= status.y +
-                        status.h + 1.0f) {
+                    e.y >= tb.y - 1.0f && e.y + e.h <= tb.y + tb.h + 1.0f) {
                     ++labelsNoRodape;
                     if (e.truncated) {
                         ++truncadosNoRodape;
@@ -4379,10 +4401,11 @@ int main() {
                 }
             }
             check(labelsNoRodape > 0,
-                  "14.4 o rodapé desenhou labels na faixa de status");
+                  "14.4 o rodapé (a tab bar 32dp) desenhou labels — o "
+                  "FPS·TICs vive nela (PASSO 1)");
             check(truncadosNoRodape == 0,
                   "14.4 NENHUM label do rodapé truncado com o nome longo "
-                  "(o middle do projeto preservou o suffixo FPS/TICs)");
+                  "(o rodapé da tab bar é estável — PASSO 1)");
             g_project.name = nomeAntigo;
             frame();
         }

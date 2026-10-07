@@ -69,14 +69,18 @@ struct ChromeState {
 };
 
 // ---- LAYOUT PURO (fonte única — desenho e testes) ---------------------------
-constexpr f32 kStackBtn  = 48.0f;   // alvo do stack vertical (spec A)
+// PASSO 1 (0.9.6.14 · spec UI do dono): a lei de ouro — DESENHO 32dp /
+// TOQUE 40dp, adjacentes nunca se pisam (passo 40+8); nada ≥48 no editor.
+constexpr f32 kStackBtn  = 40.0f;   // alvo do stack vertical (desenho 32)
 constexpr f32 kStackGap  = 8.0f;    // ≥8dp entre alvos (spec A)
-constexpr f32 kBottomH   = 48.0f;   // toolbar inferior (FASE 9: 48dp — só ícones)
-constexpr f32 kToolBtn   = 48.0f;   // botão de ferramenta (ícone)
-// kToolActiveW REMOVIDO na 0.9.6.1 (G1-2): os 4 botões são IGUAIS de 48dp
-// só-ícone; o nome da ferramenta ativa vive numa legenda ACIMA da barra
-// (o "Escalar" de 48px estendia-se por cima dos vizinhos)
-constexpr f32 kToolActiveW = 48.0f;   // LEGACY (igual a kToolBtn; sem uso novo)
+constexpr f32 kBottomH   = 40.0f;   // toolbar inferior (desenho 32 no alvo 40)
+constexpr f32 kToolBtn   = 40.0f;   // botão de ferramenta (desenho 32)
+constexpr f32 kStripH    = 40.0f;   // PASSO 1: a strip do topo (era 48 — o
+                                    // pai de vidro dos chips; nada ≥48)
+// kToolActiveW REMOVIDO na 0.9.6.1 (G1-2): os 4 botões são IGUAIS (PASSO 1:
+// 40dp de toque, desenho 32) só-ícone; o nome da ferramenta ativa vive numa
+// legenda ACIMA da barra
+constexpr f32 kToolActiveW = 40.0f;   // LEGACY (igual a kToolBtn; sem uso novo)
 
 struct Layout {
     UiRect stack[5]{};        // undo redo save dup paste (coluna-major)

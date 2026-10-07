@@ -154,9 +154,9 @@ TEST(theme_escala_8dp_e_raios_da_spec) {
     EXPECT(nearEqF(theme::kSpace1, 8.0f));
     EXPECT(nearEqF(theme::kSpace2, 16.0f));
     EXPECT(nearEqF(theme::kSpace3, 24.0f));   // recuo dos filhos (spec B)
-    EXPECT(nearEqF(theme::kTarget, 48.0f));   // alvo mínimo (spec A)
+    EXPECT(nearEqF(theme::kTarget, 40.0f));   // PASSO 1: a LEI DE OURO (40/32)
     EXPECT(nearEqF(theme::kTargetGap, 8.0f));
-    EXPECT(nearEqF(theme::kIcon, 24.0f));
+    EXPECT(nearEqF(theme::kIcon, 20.0f));     // PASSO 1: ícone 20 (era 24)
     EXPECT(nearEqF(theme::kRadiusCard, 8.0f));   // cards/botões
     EXPECT(nearEqF(theme::kRadiusField, 4.0f));  // campos/chips
     // tipografia: 12/14/16/20sp com fontScale = sp/14
@@ -332,13 +332,13 @@ TEST(inspector_nada_selecionado_visivel) {
     EXPECT(theme::contrastOnSurface(theme::kTheme.text2) >= 4.5f);
 }
 
-// ---- D: ViewportChrome: stack sem sobreposição, alvos 48 ------------------------
+// ---- D: ViewportChrome: stack sem sobreposição, alvos 40 (PASSO 1) --------------
 TEST(vpchrome_stack_sem_sobreposicao_alvos_48) {
     const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{}, 0.0f, true);
     const vpchrome::Layout L = vpchrome::layout(view);
     for (int i = 0; i < 5; ++i) {
-        EXPECT(L.stack[i].w >= 48.0f - 0.01f);
-        EXPECT(L.stack[i].h >= 48.0f - 0.01f);
+        EXPECT(L.stack[i].w >= 40.0f - 0.01f);   // PASSO 1: a lei de ouro
+        EXPECT(L.stack[i].h >= 40.0f - 0.01f);
         for (int j = i + 1; j < 5; ++j) {
             const f32 ox = std::min(L.stack[i].x + L.stack[i].w,
                                     L.stack[j].x + L.stack[j].w) -
@@ -354,8 +354,8 @@ TEST(vpchrome_stack_sem_sobreposicao_alvos_48) {
     const UiRect tools[6] = {L.selectBtn, L.moveBtn, L.rotateBtn, L.scaleBtn,
                              L.snapBtn, L.addTicBtn};
     for (int i = 0; i < 6; ++i) {
-        EXPECT(tools[i].h >= 48.0f - 0.01f);
-        EXPECT(tools[i].w >= 48.0f - 0.01f);
+        EXPECT(tools[i].h >= 40.0f - 0.01f);   // PASSO 1: a lei de ouro
+        EXPECT(tools[i].w >= 40.0f - 0.01f);
         for (int j = i + 1; j < 6; ++j) {
             const f32 ox = std::min(tools[i].x + tools[i].w,
                                     tools[j].x + tools[j].w) -
@@ -454,13 +454,17 @@ TEST(bottom_pega_arrasta_o_drawer) {
     EXPECT(nearEqF(e.bs.drawerH, h0 + 64.0f, 8.1f));   // cresceu ~64 (passo 8)
 }
 
-// ---- E: status 24dp com "FPS N · TICs N" ------------------------------------------
+// ---- E: o rodapé do PASSO 1 — status REMOVIDA, tab bar 32dp com FPS·TICs ----
 TEST(bottom_status_24dp_fps_tics) {
     Env e;
     e.frame();
-    // a faixa existe (24dp no fundo do contentRect) e a linha desenha glifos
+    // a faixa de status é ALTURA ZERO (removida no PASSO 1) e a tab bar de
+    // 32dp é o rodapé — com glifos (as tabs + o «FPS N · TICs N» à direita)
     const UiRect st = safe::statusRect(kSW, kSH, safe::Insets{});
-    EXPECT(nearEqF(st.h, 24.0f));
+    EXPECT(nearEqF(st.h, 0.0f));
+    const UiRect tb = safe::bottomTabRect(kSW, kSH, safe::Insets{});
+    EXPECT(nearEqF(tb.h, 32.0f));
+    EXPECT(tb.y + tb.h == kSH);
     EXPECT(e.ui.glyphsForTest().vertexCount() > 0);
 }
 
@@ -673,9 +677,10 @@ TEST(material_legendas_inteiras_e_tint_rgba_g13) {
     EXPECT(e.font.widthOf("Prévia") * capScale <= cellW - 8.0f);
 
     // a linha de miniaturas GANHOU a linha reservada das legendas —
-    // 0.9.6.6 (GRUPO C): 64dp + sp(12) REAL (era «64+28px» do atlas cru)
+    // 0.9.6.6 (GRUPO C): 64dp + sp(12) REAL; PASSO 1 (0.9.6.14): 44dp
+    // (a lei «nada ≥48») + sp(12)
     EXPECT(nearEqF(editor::inspThumbsH(),
-                   theme::dp(64.0f) + theme::sp(theme::kFontCaption)));
+                   theme::dp(44.0f) + theme::sp(theme::kFontCaption)));
 
     // o desenho com tint BRANCO não crasha e emite OS QUADS DO ALBEDO com
     // alfa 1 (o bug: tint f32[3] passado a API f32[4] lia o alfa FORA do
@@ -798,9 +803,9 @@ TEST(hierarquia_long_press_nome_truncado_g27) {
     e.scene.get(h)->addComponent<UiCanvas>();
     e.st.selected = h;
     e.frame();
-    // a zona do nome da 1ª linha (painel 300: ícone 16+24+8 … olho a 196)
+    // a zona do nome da 1ª linha (painel 300: ícone 16+24+8 … olho a 212)
     const f32 nameX = 16.0f + 24.0f + 8.0f + 8.0f;
-    const f32 rowY = 56.0f + 48.0f + 48.0f + 24.0f;   // chrome+header+pesq/2
+    const f32 rowY = 36.0f + 28.0f + 32.0f + 18.0f;   // PASSO 1: chrome+header+pesq/2 (linha 36)
     // dedo PARADO 29 frames: ainda NADA (o limiar é 30 = ~0,5s)
     e.input.injectDown(0, nameX + 40.0f, rowY);
     for (int i = 0; i < 29; ++i) {
@@ -822,16 +827,17 @@ TEST(hierarquia_long_press_nome_truncado_g27) {
     EXPECT(e.st.hierHoldRow == -1 && e.st.hierHoldFrames == 0);
 }
 
-// (G2-9/G2-10) a BARRA ÚNICA: kToolbarH = 56 (a tab bar fundiu-se — os
-// ~48px vão ao viewport) e o botão sliders NÃO EXISTE mais (inventário G0-4)
+// (G2-9/G2-10 · PASSO 1) a BARRA ÚNICA: kToolbarH = 36 (a tab bar fundiu-se
+// e a status saiu — os px vão TODOS ao viewport) e o botão sliders NÃO
+// EXISTE mais (inventário G0-4)
 TEST(topbar_unica_56dp_e_viewport_ganha_48_g29) {
-    // a fonte única do chrome diz 56
-    EXPECT(nearEqF(safe::kToolbarH, 56.0f));
+    // a fonte única do chrome diz 36 (PASSO 1)
+    EXPECT(nearEqF(safe::kToolbarH, 36.0f));
     EXPECT(nearEqF(safe::kToolbarH, safe::kTopBarH));
-    // o viewport central GANHOU os 48px: em 1600×720 sem insets/drawer
+    // o viewport central GANHOU os px: em 1600×720 sem insets/drawer
     const UiRect view = safe::centerRect(1600.0f, 720.0f, safe::Insets{});
-    const f32 hAntiga = 720.0f - 104.0f - 24.0f - 48.0f;   // chrome antigo
-    EXPECT(nearEqF(view.h, hAntiga + 48.0f));
+    const f32 hAntiga = 720.0f - 104.0f - 24.0f - 48.0f;   // chrome antigo (176)
+    EXPECT(nearEqF(view.h, hAntiga + 108.0f));   // o chrome novo é 68 (36+0+32)
     // o TRIAD morreu (os "pontinhos fantasma"): o layout NÃO tem triad —
     // compila = o campo não existe; a barra não desenha nada no canto
     // sup-dir (afirmado pelo desenho: o + do fundo é o ÚNICO no canto dir)

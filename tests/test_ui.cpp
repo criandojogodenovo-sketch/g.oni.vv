@@ -304,8 +304,15 @@ TEST(ui_slider_captura_dentro_do_scroll) {
     }
     EXPECT(colY > 0.0f);
     // 0.9.0: o plano é MAIS ALTO (secções/trf) — a linha "cor R" está FORA
-    // do primeiro ecrã: ROLA o painel até ela primeiro
-    const f32 targetOff = colY - 40.0f;
+    // do primeiro ecrã: ROLA o painel até ela primeiro.
+    // PASSO 1 (0.9.6.14): o plano encolheu (1046 vs 1420) — o alvo é o
+    // MENOR entre (colY-40) e o offset máximo REAL (a fonte única do
+    // scroll: contentH − listH); com o clamp a linha fica VISÍVEL no fundo
+    const f32 contentHIns =
+        inspectorContentHeight(inspectorProfile(*tic), tm, true, 0u);
+    const f32 listHIns = panel.h - kHeaderH - 4.0f;
+    const f32 maxOffIns = contentHIns > listHIns ? contentHIns - listHIns : 0.0f;
+    const f32 targetOff = (colY - 40.0f) < maxOffIns ? (colY - 40.0f) : maxOffIns;
     e.input.injectDown(0, panel.x + panel.w * 0.5f, contentTop + 200.0f);
     e.frame();
     e.input.injectMove(0, panel.x + panel.w * 0.5f,
@@ -653,7 +660,7 @@ TEST(ui_settings_menu_modo_e_tres_itens) {
     // rects dos 7 itens (formula do drawSettingsMenu; 0.8.10: +fonte/+recon;
     // 0.8.11: +probe de áudio +volume geral)
     const f32 modeH = 30.0f;
-    const f32 h = kHeaderH + modeH + 7.0f * 64.0f + kPad;
+    const f32 h = kHeaderH + modeH + 7.0f * 48.0f + kPad;
     const f32 x = (kSW - kMenuW) * 0.5f;
     const f32 y = (kSH - h) * 0.5f;
     const f32 itemsTop = y + kHeaderH + modeH;
@@ -662,7 +669,7 @@ TEST(ui_settings_menu_modo_e_tres_itens) {
         e.st.settingsMenu = true;
         e.frame();
         e.input.injectDown(0, x + kMenuW * 0.5f,
-                           itemsTop + static_cast<f32>(i) * 64.0f + 28.0f);
+                           itemsTop + static_cast<f32>(i) * 48.0f + 20.0f);
         e.frame();
         e.input.injectUp(0);
         e.frame();
@@ -688,7 +695,7 @@ TEST(ui_settings_menu_modo_e_tres_itens) {
         EditorState st2;
         st2.settingsMenu = true;
         e.input.injectDown(0, x + kMenuW * 0.5f,
-                           itemsTop + static_cast<f32>(i) * 64.0f + 28.0f);
+                           itemsTop + static_cast<f32>(i) * 48.0f + 20.0f);
         // press processado na 1ª chamada; release na 2ª
         drawSettingsMenu(e.ui, e.input, kSW, kSH, st2, "all files");
         e.input.injectUp(0);

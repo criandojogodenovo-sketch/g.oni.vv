@@ -154,6 +154,15 @@ public:
     bool buttonCompact(u64 id, f32 x, f32 y, f32 w, f32 h,
                        const char* text);
 
+    // PASSO 1 (0.9.6.14) — O PISO DE LINHA da PRÓXIMA entrada interativa:
+    // os elementos DE LINHA (top bar 36 / campos e tabs de baixo 32 /
+    // cabeçalhos 28) têm o piso da ALTURA DA LINHA da spec — NÃO o 40 do
+    // botão solto. O desenhista chama auditRowFloorNext(layout::kRowFloorDp)
+    // ANTES do widgetHit/button; a flag vive SÓ até à 1ª entrada que a
+    // apanha (o padrão buttonCompact — nunca escapa). As constantes são
+    // as nomeadas do LayoutDump.h — números frouxos NÃO passam.
+    void auditRowFloorNext(f32 floorDp) { auditRowFloorNext_ = floorDp; }
+
     // 0.7.6 — CAPTURA DE GESTO sem desenho (a toolbar desenha os próprios
     // botões: ícones/segmented da ui/Toolbar). MESMA semântica do button():
     // press edge dentro do rect captura active_; release dentro = clique.
@@ -466,6 +475,7 @@ private:
     // 0.9.6.8 (GRUPO E): viva SÓ durante buttonCompact() — a 1ª entrada
     // Button apanha-a (auditAdd_); nunca escapa da chamada
     bool           auditCompactNext_ = false;
+    f32            auditRowFloorNext_ = 0.0f;   // PASSO 1: piso de linha
 };
 
 } // namespace vv

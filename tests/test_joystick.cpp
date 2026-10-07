@@ -406,11 +406,11 @@ TEST(joystick_plus_menu_dez_itens_e_addiciona) {
 
     st.plusMenu = true;
     // geometria do menu (10 itens): centrado, itens de 64px
-    const f32 h10 = kHeaderH + 10.0f * 64.0f + kPad;
+    const f32 h10 = kHeaderH + 10.0f * 48.0f + kPad;
     const f32 mx = (kSW - kMenuW) * 0.5f;
     const f32 my = (kSH - h10) * 0.5f;
     // item 8 (Joystick): id 27, oitava linha
-    in.injectDown(0, mx + kMenuW * 0.5f, my + kHeaderH + 7.0f * 64.0f + 28.0f);
+    in.injectDown(0, mx + kMenuW * 0.5f, my + kHeaderH + 7.0f * 48.0f + 20.0f);
     frame();
     in.injectUp(0);
     const int choice = frame();

@@ -175,6 +175,13 @@ void UiContext::auditAdd_(layout::Entry::Kind kind, u64 id, f32 x, f32 y,
         e.compact = true;
         auditCompactNext_ = false;
     }
+    // PASSO 1 (0.9.6.14): o piso DE LINHA (36/32/28 — LayoutDump.h) — a
+    // flag vive SÓ até à 1ª entrada interativa que a apanha (o padrão da
+    // tecla compacta; nunca escapa para o widget seguinte)
+    if (e.interactive() && auditRowFloorNext_ > 0.0f) {
+        e.rowFloorDp = auditRowFloorNext_;
+        auditRowFloorNext_ = 0.0f;
+    }
     audit_.add(e);
 }
 
@@ -192,7 +199,13 @@ void UiContext::auditLabel_(f32 xBaseline, f32 yBaseline, const char* shown,
     e.kind = layout::Entry::Label;
     e.x = xBaseline;
     e.y = yBaseline - font_->ascent() * k;
-    e.w = fontWidth(shown);
+    // PASSO 1 (0.9.6.14): a largura registada é a DESENHADA (widthOf × k
+    // TOTAL — o sp incluído, o MESMO fator do ascent/descent acima). ERA
+    // fontWidth(s) SEM o sp: as labels caption (12sp) ficavam ~14% mais
+    // largas NO REGISTO do que os glifos no ecrã — um falso «SANGRA» no
+    // validador para qualquer caption perto da borda (o FPS·TICs da tab
+    // bar, o primeiro caso real)
+    e.w = font_->widthOf(shown) * k;
     e.h = (font_->ascent() + font_->descent()) * k;
     e.fullW = fullW > 0.0f ? fullW : e.w;
     e.truncated = truncated;

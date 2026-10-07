@@ -538,6 +538,16 @@ Prova de mutação (mutacao-R030a-vermelho.txt): `0x2196F3` (o azul órfão da s
 | Prova de mutação | mutação R-024a: o log MUTADO (a linha deixa de ser a do contrato) → FASE 14.3 com 4 falhas + `regress_viewport_rect_segue` vermelha; reposto → 454/454 + 0 falhas |
 | Padrão proibido | (novo) «mudança de rect visível sem linha vp3d no engine.log» |
 
+## R-027/R-025 · REESCRITAS do PASSO 1 (0.9.6.14 · UI PASSO 1) — o rodapé é a TAB BAR e o piso da casa é a LEI DE OURO
+
+| campo | valor |
+|---|---|
+| Mudança de spec | a spec UI do dono (PASSO 1): barra única 36dp · tab bar 32dp com o «FPS · TICs» à direita · a status bar de 24dp REMOVIDA · nada ≥48dp (desenho 32/toque 40; linhas 36/32/28) |
+| O que reescreveu | (1) **R-025**: a última faixa viva do contentRect passou a ser a TAB BAR de 32dp (a status é faixa de altura ZERO, compat); o «FPS · TICs» vive no canto direito da tab bar; o middle do projeto ficou nas unidades puras (o nome do projeto já não se desenha). (2) **R-027**: o piso do validador por CLASSE — solto 40 (era 48), linha 36, campo 32, cabeçalho 28 (LayoutDump.h); 39dp falha em TODAS as classes; o botão regular de 40dp PASSA (a lei nova); a flag `auditRowFloorNext` nunca vaza (mutação M1 prova). |
+| Sentinelas | `regress_rodape_intocavel` (a tab bar como última faixa, 2 densidades × 3 estados) · `regress_toque_48dp_validador` (os pisos por classe + o [+] 28/cabeçalho e a pesquisa 32/campo flagados) |
+| Mutações | M1: o consumo da flag desligado → o validador dispara ToquePequeno nos 36/32/28 (test_core + c33 13.2 vermelhos); M2: kBottomTabH 48 → 17 falhas. Repostas → test_core 0 falhas · c33 456/456 |
+| ACHADO | o `auditLabel_` gravava a largura SEM o sp — labels caption ~14% mais largas no REGISTO do que os glifos (falso «SANGRA»; o 1º caso real: o FPS·TICs). O registo grava agora a largura DESENHADA (widthOf × k) — a lição R-020 |
+
 ## R-025 · o rodapé intocável e o projeto elipsado a meio (0.9.6.12 · GRUPO J4)
 
 | campo | valor |

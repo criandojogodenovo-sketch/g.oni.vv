@@ -50,9 +50,9 @@ namespace editor {
 // TODAS num só sítio quando a densidade é conhecida (arranque / mudança de
 // AConfiguration); nos testes (densidade 1.0) os valores são os de sempre.
 extern f32 kPad;        // 16dp — padding de painéis/linhas
-extern f32 kHeaderH;   // 48dp — cabeçalho dos painéis
-extern f32 kRowH;      // 48dp — linha de TIC/inspetor (alvo mínimo)
-extern f32 kSearchRowH; // 48dp — pesquisa de TIC no header da hierarquia
+extern f32 kHeaderH;   // PASSO 1: 28dp — cabeçalho dos painéis (era 48)
+extern f32 kRowH;      // PASSO 1: 36dp — linha de TIC/inspetor (era 48)
+extern f32 kSearchRowH; // PASSO 1: 32dp — pesquisa de TIC (o campo da spec)
 extern f32 kMenuW;     // 340dp — largura dos menus/overlays
 // atualiza as variáveis acima (e as do teclado do editor de script) a partir
 // da densidade corrente — chamada no arranque e em mudanças de config
@@ -83,11 +83,11 @@ constexpr u64 kIdDividerR = 5504;   // pega do divisor do INSPECTOR
 constexpr f32 kDividerStripW = 12.0f;   // dp — o strip visível
 constexpr f32 kDividerHitW   = 20.0f;   // dp — a zona de toque (strip+folga)
 
-// 0.9.0 (spec C) — SECÇÕES COLAPSÁVEIS do Inspector: cabeçalho 48dp com
-// título 14sp + chevron; o estado (bitmask por secção) vive no EditorState e
-// PERSISTE (spec G). Bits: 0=Transform 1=Camera 2=Malha 3=Material 4=Fisica
-// 5=Audio 6=Anim. Os botões R (repõe a LINHA pos/rot/scale) partilham a
-// faixa 5510+.
+// 0.9.0 (spec C) — SECÇÕES COLAPSÁVEIS do Inspector: cabeçalho (PASSO 1:
+// 28dp) com título + chevron; o estado (bitmask por secção) vive no
+// EditorState e PERSISTE (spec G). Bits: 0=Transform 1=Camera 2=Malha
+// 3=Material 4=Fisica 5=Audio 6=Anim. Os botões R (repõe a LINHA
+// pos/rot/scale) partilham a faixa 5510+.
 constexpr u64 kInspSectionBase = 5510;   // +bit da secção
 constexpr u64 kInspResetBase   = 5520;   // +0/1/2 = repõe Pos/Rot/Escala
 // caixas X/Y/Z das linhas de Transform (9 caixas: 3 linhas × 3 eixos) — o
@@ -146,8 +146,8 @@ constexpr u64 kLogsScrollId      = 43;   // F5.2: viewer de logs in-app
 // glifos a invadir a linha vizinha.
 // 0.9.6.6 (GRUPO C): as alturas das linhas do Inspector derivam das
 // MÉTRICAS DO CONTEXTO (sp — textK incluído) com paddings em dp e PISO
-// kRowH (48dp REAL — a regra da casa «alvos de toque ≥48dp», Theme.h).
-// ANTES: bloco do atlas CRU + paddings px — no device (2.0) as linhas
+// kRowH (PASSO 1: 36dp — a linha da spec; a auditoria vigia o TOQUE no
+// piso 40dp/um eixo — LayoutDump.cpp). ANTES: bloco do atlas CRU + paddings px — no device (2.0) as linhas
 // saíam a ~18dp (a exata classe R-018 que o dono mediu nas teclas); a
 // 1.0 com o textK novo teriam ~22px. O piso garante o alvo em QUALQUER
 // densidade; quando o texto manda (densidades altas com fontes grandes)
@@ -313,23 +313,19 @@ constexpr u32 kInspBitAudio     = 1u << 5;
 constexpr u32 kInspBitAnim      = 1u << 6;
 constexpr u32 kInspBitScript    = 1u << 7;   // 0.9.2: V.ONI
 
-// altura de UMA linha de Transform (spec C: "3 campos numéricos editáveis
-// 48dp"): título 12sp em LINHA PRÓPRIA (24px) + caixas X/Y/Z 48dp + R 48.
-// A largura do painel (268 úteis) não comporta título+3 caixas+R na MESMA
-// linha — o título sobe (o layout do mockup mantém-se: rótulos X/Y/Z dentro
-// das caixas, R à direita, alvo 48dp).
+// altura de UMA linha de Transform (PASSO 1: título 12sp + caixas 32dp +
+// folga — a spec: «campos 32dp»; eram caixas de 48)
 inline f32 inspTransformRowH(const TextMetrics& m) {
-    // 0.9.6.6: título (12sp REAL — métricas do contexto) + caixas 48dp + folga
     (void)m;
-    return theme::dp(24.0f) + theme::dp(4.0f) + theme::dp(48.0f) +
-           theme::dp(4.0f);   // título + caixas 48dp + folga
+    return theme::dp(24.0f) + theme::dp(4.0f) + theme::dp(32.0f) +
+           theme::dp(4.0f);   // título + caixas 32dp + folga
 }
-// altura do CABEÇALHO de secção (48dp — spec C)
-inline f32 inspSectionH() { return theme::dp(48.0f); }
-// altura da linha de MINIATURAS de Material (64dp + legendas; spec C).
-// FASE 9 (G1-3): legendas INTEIRAS em LINHA RESERVADA (célula = útil/3) —
-// 64 + bloco de texto 12sp + folga (0.9.6.6: dp/sp de verdade)
-inline f32 inspThumbsH() { return theme::dp(64.0f) + theme::sp(theme::kFontCaption); }
+// altura do CABEÇALHO de secção (28dp — PASSO 1: os cabeçalhos dos painéis;
+// eram 48)
+inline f32 inspSectionH() { return theme::dp(28.0f); }
+// altura da linha de MINIATURAS de Material (PASSO 1: 44dp — a lei «nada
+// ≥48»; eram 64) + legendas 12sp em LINHA RESERVADA
+inline f32 inspThumbsH() { return theme::dp(44.0f) + theme::sp(theme::kFontCaption); }
 
 inline u32 inspectorRowCount(const InspProfile& p, bool selectable,
                              u32 collapsed) {

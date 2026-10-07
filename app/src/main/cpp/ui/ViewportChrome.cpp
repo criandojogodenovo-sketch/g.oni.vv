@@ -24,23 +24,27 @@ f32 textBaseline(UiContext& ui, const UiRect& r) {
     return r.y + (r.h - m.block()) * 0.5f + m.ascent;
 }
 
-// botão do STACK: 48dp, ícone 24 centrado; disabled = text2 40% (mesmo alvo)
+// botão do STACK (PASSO 1): alvo 40×40, DESENHO em chip 32×32 centrado;
+// ícone 20; disabled = text2 40% (mesmo alvo)
 bool stackButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
                  bool enabled) {
     const bool pressed = ui.widgetHit(id, r.x, r.y, r.w, r.h);
     const bool held = ui.widgetActive(id);
+    const f32 inset = theme::dp(4.0f);   // o desenho 32 dentro do alvo 40
+    const UiRect d = {r.x + inset, r.y + inset, r.w - 2.0f * inset,
+                      r.h - 2.0f * inset};
     if (held && enabled) {
-        ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusCard),
+        ui.panelRounded(d.x, d.y, d.w, d.h, theme::dp(theme::kRadiusCard),
                         theme::kTheme.surface2);
     } else if (enabled) {
         // repouso: chip surface com bordo (o alvo é visível — nunca "quase
         // invisível", o problema documentado da 0.8.x)
-        ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusCard),
+        ui.panelRounded(d.x, d.y, d.w, d.h, theme::dp(theme::kRadiusCard),
                         theme::kTheme.surface);
-        ui.frameRounded(r.x, r.y, r.w, r.h, 1.0f, theme::dp(theme::kRadiusCard),
+        ui.frameRounded(d.x, d.y, d.w, d.h, 1.0f, theme::dp(theme::kRadiusCard),
                         theme::kTheme.border);
     } else {
-        ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusCard),
+        ui.panelRounded(d.x, d.y, d.w, d.h, theme::dp(theme::kRadiusCard),
                         theme::kTheme.bg);
     }
     f32 col[4] = {theme::kTheme.text1[0], theme::kTheme.text1[1],
@@ -51,33 +55,36 @@ bool stackButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
         col[2] = theme::kTheme.text2[2];
         col[3] = 0.4f;
     }
-    const f32 s = theme::dp(24.0f);
+    const f32 s = theme::dp(20.0f);   // PASSO 1: ícone 20 no chip 32
     icons::drawIcon(ui, icon, r.x + (r.w - s) * 0.5f, r.y + (r.h - s) * 0.5f,
                     s, col);
     return pressed && enabled;
 }
 
 // botão da TOOLBAR INFERIOR (0.9.6.1 · G1-2): SÓ ÍCONE — os 4 botões são
-// IGUAIS de 48dp (a spec do dono: "4 botões iguais de 48dp, só ícone"). O
-// NOME da ferramenta ativa passou para a LEGENDA ACIMA da barra (o "Escalar"
-// de 48px estendia-se POR CIMA dos botões vizinhos — o layout só dava
-// largura larga ao Selecionar e o draw pintava a palavra em QUALQUER ativo)
+// IGUAIS (PASSO 1: alvo 40, desenho 32, só ícone 20). O NOME da ferramenta
+// ativa vive na LEGENDA ACIMA da barra (o "Escalar" de 48px estendia-se
+// POR CIMA dos botões vizinhos — o layout só dava largura larga ao
+// Selecionar e o draw pintava a palavra em QUALQUER ativo)
 bool toolButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
                 const char* word, bool active) {
     (void)word;   // o nome vive na legenda acima da barra (draw abaixo)
     const bool pressed = ui.widgetHit(id, r.x, r.y, r.w, r.h);
     const bool held = ui.widgetActive(id);
     const bool on = active || held;
+    const f32 inset = theme::dp(4.0f);   // o desenho 32 dentro do alvo 40
+    const UiRect d = {r.x + inset, r.y + inset, r.w - 2.0f * inset,
+                      r.h - 2.0f * inset};
     if (on) {
-        ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusCard),
+        ui.panelRounded(d.x, d.y, d.w, d.h, theme::dp(theme::kRadiusCard),
                         theme::kTheme.accent);
     } else {
-        ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusCard),
+        ui.panelRounded(d.x, d.y, d.w, d.h, theme::dp(theme::kRadiusCard),
                         theme::kTheme.surface);
-        ui.frameRounded(r.x, r.y, r.w, r.h, 1.0f, theme::dp(theme::kRadiusCard),
+        ui.frameRounded(d.x, d.y, d.w, d.h, 1.0f, theme::dp(theme::kRadiusCard),
                         theme::kTheme.border);
     }
-    const f32 s = theme::dp(24.0f);
+    const f32 s = theme::dp(20.0f);   // PASSO 1: ícone 20
     const f32 col[4] = {on ? theme::kTheme.accentInk[0] : theme::kTheme.text1[0],
                         on ? theme::kTheme.accentInk[1] : theme::kTheme.text1[1],
                         on ? theme::kTheme.accentInk[2] : theme::kTheme.text1[2],
@@ -115,8 +122,9 @@ Layout layout(const UiRect& view, const ChipWidths* cw) {
     // toolbar em baixo come 56dp + 8 de folga; o topo tem 8 de margem).
     // O menor nº de colunas que caiba — 1 coluna nos ecrãs largos (o
     // layout de sempre, ZERO mudança onde cabe), 2/3 nos curtos.
-    // 0.9.6.10: a strip do topo (48dp) come a altura disponível do stack
-    const f32 stripH = theme::dp(48.0f);
+    // PASSO 1 (0.9.6.14): a strip do topo (40dp — kStripH; era 48) come a
+    // altura disponível do stack
+    const f32 stripH = theme::dp(kStripH);
     const f32 availH =
         view.h - margin - stripH - margin - theme::dp(kBottomH) - margin;
     // 0.9.6.10: SEM a reserva do [+] — no estreito ele vive DENTRO da
@@ -153,7 +161,7 @@ Layout layout(const UiRect& view, const ChipWidths* cw) {
     // a tab [Cena] (a vista ativa — o underline âmbar como as tabs de
     // modo) + os chips [Perspetiva] (a projeção REAL da câmara do editor)
     // e [Global] (o espaço REAL do gizmo — sempre mundial, ver Gizmo.h) —
-    // INFORMAÇÃO REAL em chips, na faixa de vidro de 48dp (o pai; o [+]
+    // INFORMAÇÃO REAL em chips, na faixa de vidro de 40dp (o pai; o [+]
     // dos ecrãs estreitos vive no fim direito DELA)
     // P-08 (0.9.6.12 · GRUPO J1 · R-022): em viewport sub-piso (só em
     // testes — o cap do drawer garante kViewportMinH em produção) a strip

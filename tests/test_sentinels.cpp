@@ -1492,21 +1492,21 @@ TEST(regress_density_escala_dp) {
     // ---- (a) densidade 2.0 (o par do C33): os dp duplicam ------------------
     theme::setDensity(2.0f);
     const UiRect bar = safe::toolbarRect(1536.0f, 720.0f, zero);
-    EXPECT(nearEqF(bar.h, 112.0f));   // 56dp REAL (o bug: 56px)
-    EXPECT(nearEqF(theme::dp(48.0f), 96.0f));   // o alvo mínimo é dp REAL
+    EXPECT(nearEqF(bar.h, 72.0f));   // PASSO 1: 36dp REAL (o bug era 56px)
+    EXPECT(nearEqF(theme::dp(48.0f), 96.0f));   // o dp é dp REAL
     const UiRect status = safe::statusRect(1536.0f, 720.0f, zero);
-    EXPECT(nearEqF(status.h, 48.0f));   // 24dp real, a última faixa
-    EXPECT(nearEqF(status.y + status.h, 720.0f));   // continua no fundo
+    EXPECT(nearEqF(status.h, 0.0f));   // PASSO 1: a status foi REMOVIDA
+    EXPECT(nearEqF(status.y + status.h, 720.0f));   // a faixa compat no fundo
     // o teclado: teclas de 96px de altura (48dp real — o dono media 48×65px)
     // 0.9.6.8 (GRUPO E · RECALIBRADA): o teclado da engine SAIU — a vara
     // passa a aferir a BARRA DE SÍMBOLOS (a spec E: 40dp — 80px @2.0)
     EXPECT(nearEqF(editor::scriptwin::symbolBarHeight(), 40.0f * 2.0f));
     EXPECT(editor::scriptwin::symKeysVisible(720.0f * 2.0f) == 14u);
     EXPECT(editor::scriptwin::symKeysVisible(360.0f * 2.0f) == 9u);
-    // ---- (b) densidade 1.0: o layout de SEMPRE (nenhum teste muda) ---------
+    // ---- (b) densidade 1.0: o layout da spec PASSO 1 -----------------------
     theme::setDensity(1.0f);
     const UiRect bar1 = safe::toolbarRect(1536.0f, 720.0f, zero);
-    EXPECT(nearEqF(bar1.h, 56.0f));
+    EXPECT(nearEqF(bar1.h, 36.0f));
     EXPECT(nearEqF(theme::dp(48.0f), 48.0f));
     EXPECT(nearEqF(editor::scriptwin::symbolBarHeight(), 40.0f));
 }
@@ -2580,19 +2580,19 @@ TEST(regress_sp_escala_unica) {
     EXPECT(nearEqF(b2, b1 * 2.0f, 0.05f));
     ui.endFrame();
 
-    // ---- (c) o ERRO medido do Grupo B NÃO VOLTA: a legenda 12sp da status
-    // bar CABE na banda de 24dp em QUALQUER densidade (o bloco era 29px
-    // crús e sangrava 3px o fundo do contentRect a insets b=0)
+    // ---- (c) PASSO 1: o ERRO medido do Grupo B NÃO VOLTA no NOVO rodapé —
+    // a legenda 12sp do «FPS · TICs» CABE na banda da TAB BAR de 32dp em
+    // QUALQUER densidade (a status de 24dp saiu; a tab bar é mais alta)
     for (f32 d = 1.0f; d < 3.1f; d += 1.0f) {
         theme::setDensity(d);
         editor::applyDensity();
         ui.beginFrame(nullptr, nullptr, 1600.0f, 720.0f);
-        const UiRect st = safe::statusRect(1600.0f, 720.0f, safe::Insets{});
+        const UiRect tb = safe::bottomTabRect(1600.0f, 720.0f, safe::Insets{});
         const TextMetrics m = ui.textMetrics();
         // o bloco da LEGENDA (12sp): métricas do corpo × 12/14
         const f32 capBlock = (m.ascent + m.descent) *
                              (theme::kFontCaption / 14.0f);
-        EXPECT(capBlock <= st.h + 0.01f);
+        EXPECT(capBlock <= tb.h + 0.01f);
         ui.endFrame();
     }
     theme::setDensity(1.0f);
@@ -2638,14 +2638,16 @@ TEST(regress_toque_48dp_validador) {
             }
         }
         EXPECT(!pequeno);
-        // e o [+] (kIdPlus=40=0x28) e a pesquisa (0x157C) existem ≥48
+        // e o [+] (kIdPlus=40=0x28) e a pesquisa (0x157C) existem nos SEUS
+        // pisos de classe (PASSO 1: [+] 28dp cabeçalho; pesquisa 32dp campo)
         bool plusOk = false, searchOk = false;
         for (const auto& e : r.entries) {
             if (e.kind == layout::Entry::Button && e.id == 40u) {
-                plusOk = e.w >= 47.9f && e.h >= 47.9f;
+                plusOk = e.w >= 27.9f && e.h >= 27.9f &&
+                         e.rowFloorDp == layout::kHeadFloorDp;
             }
             if (e.kind == layout::Entry::Button && e.id == 5500u) {
-                searchOk = e.h >= 47.9f;
+                searchOk = e.h >= 31.9f && e.rowFloorDp == layout::kFieldFloorDp;
             }
         }
         EXPECT(plusOk);
@@ -2953,13 +2955,14 @@ TEST(regress_divisores_arrastaveis) {
             editor::vpchrome::layout(UiRect{200.0f, 56.0f, 288.0f, 208.0f});
         EXPECT(ldev.stackVisible && ldev.stackCols >= 2u);   // colunas
         EXPECT(ldev.plusTopRight);                            // [+] no topo
-        // TODOS os alvos ≥48dp e DENTRO do rect (o stack TRANBORDAVA antes)
+        // TODOS os alvos ≥40dp (PASSO 1: a lei de ouro) e DENTRO do rect
+        // (o stack TRANBORDAVA antes do Grupo D)
         const UiRect all[] = {ldev.stack[0],  ldev.stack[1], ldev.stack[2],
                               ldev.stack[3],  ldev.stack[4], ldev.selectBtn,
                               ldev.moveBtn,   ldev.rotateBtn, ldev.scaleBtn,
                               ldev.snapBtn,   ldev.addTicBtn};
         for (const UiRect& r : all) {
-            EXPECT(r.w >= 48.0f - 0.01f && r.h >= 48.0f - 0.01f);
+            EXPECT(r.w >= 40.0f - 0.01f && r.h >= 40.0f - 0.01f);
             EXPECT(r.x >= 200.0f - 0.01f && r.y >= 56.0f - 0.01f);
             EXPECT(r.x + r.w <= 200.0f + 288.0f + 0.01f);
             EXPECT(r.y + r.h <= 56.0f + 208.0f + 0.01f);
@@ -3260,17 +3263,24 @@ TEST(regress_barra_simbolos_ime) {
             const auto ps = layout::validate(r);
             EXPECT(!ps.empty() && ps[0].rule == layout::Problem::ToquePequeno);
         }
-        // (c) o botão REGULAR a 40dp FALHA (a exceção NÃO vaza p/ os outros)
+        // (c) PASSO 1 (0.9.6.14): o botão REGULAR a 40dp PASSA AGORA (a
+        // LEI DE OURO é o novo piso da casa) e a 39dp FALHA (o piso é REAL)
         {
             r.entries.clear();
             layout::Entry e;
             e.kind = layout::Entry::Button;
             e.x = 0; e.y = 0; e.w = 40.0f; e.h = 40.0f;
             r.entries.push_back(e);
+            EXPECT(layout::validate(r).empty());
+            e.h = 39.0f;
+            r.entries.clear();
+            e.x = 0; e.y = 0; e.w = 40.0f; e.h = 39.0f;
+            r.entries.push_back(e);
             const auto ps = layout::validate(r);
             EXPECT(!ps.empty() && ps[0].rule == layout::Problem::ToquePequeno);
         }
-        // (d) o botão regular a 48dp passa (a regra da casa intacta)
+        // (d) o botão regular a 48dp também passa (≥40 — e a tabela PASSO 1
+        // mostra no relatório que NENHUM alvo chega a 48)
         {
             r.entries.clear();
             layout::Entry e;
@@ -3278,6 +3288,42 @@ TEST(regress_barra_simbolos_ime) {
             e.x = 0; e.y = 0; e.w = 48.0f; e.h = 48.0f;
             r.entries.push_back(e);
             EXPECT(layout::validate(r).empty());
+        }
+        // (e) PASSO 1: os PISOS DE LINHA — 36/32/28 passam flagados, 35/31/27
+        // FALHAM, e o botão SEM flag continua no piso de 40
+        {
+            struct { f32 w, h, floor; } casos[3] = {
+                {300.0f, 36.0f, layout::kRowFloorDp},
+                {300.0f, 32.0f, layout::kFieldFloorDp},
+                {300.0f, 28.0f, layout::kHeadFloorDp},
+            };
+            for (const auto& c : casos) {
+                r.entries.clear();
+                layout::Entry e;
+                e.kind = layout::Entry::Button;
+                e.rowFloorDp = c.floor;
+                e.x = 0; e.y = 0; e.w = c.w; e.h = c.h;
+                r.entries.push_back(e);
+                EXPECT(layout::validate(r).empty());
+                e.h = c.h - 1.0f;
+                r.entries.clear();
+                e.x = 0; e.y = 0; e.w = c.w; e.h = c.h - 1.0f;
+                e.rowFloorDp = c.floor;
+                r.entries.push_back(e);
+                const auto ps = layout::validate(r);
+                EXPECT(!ps.empty() &&
+                       ps[0].rule == layout::Problem::ToquePequeno);
+                // SEM a flag, a mesma linha de 36 FALHA (o piso de botão
+                // solto é 40 — a flag NUNCA vaza)
+                r.entries.clear();
+                layout::Entry e2;
+                e2.kind = layout::Entry::Button;
+                e2.x = 0; e2.y = 0; e2.w = c.w; e2.h = 36.0f;
+                r.entries.push_back(e2);
+                if (36.0f < layout::kTouchFloorDp) {
+                    EXPECT(!layout::validate(r).empty());
+                }
+            }
         }
     }
 
@@ -3705,11 +3751,13 @@ TEST(regress_hierarquia_contrato) {
                        "altura efetiva (%.1f) — DUAS fontes = o bug da "
                        "toolbar flutuante de volta",
                        sc.name, raw, bl.drawer.h, eff);
-            // CONTRATO §2.1: o status bar é a ÚLTIMA faixa e NINGUÉM o toca
+            // CONTRATO §2.1 (PASSO 1): a TAB BAR é a ÚLTIMA faixa viva e
+            // NINGUÉM a toca (a status bar foi REMOVIDA — a faixa de altura
+            // zero no fundo é só o compat do safe::; o FPS·TICs vive nela)
             const UiRect status = safe::statusRect(sc.sw, sc.sh, sc.in);
-            EXPECT(bl.status.y == status.y && bl.status.h == status.h);
-            EXPECT(bl.drawer.y + bl.drawer.h <= status.y + 0.5f);
-            EXPECT(bl.tabBar.y + bl.tabBar.h <= status.y + 0.5f);
+            EXPECT(status.h == 0.0f);   // a faixa morta (compat)
+            EXPECT(bl.tabBar.y + bl.tabBar.h == status.y);
+            EXPECT(bl.drawer.y + bl.drawer.h <= bl.tabBar.y + 0.5f);
             EXPECT(view.y + view.h <= status.y + 0.5f);
         }
     }
@@ -3987,27 +4035,29 @@ TEST(regress_rodape_intocavel) {
         const f32 sw = 1600.0f * d, sh = 720.0f * d;
         const safe::Insets in{0.0f, 48.0f * d, 48.0f * d, 0.0f};
         for (f32 raw : {0.0f, 240.0f, 400.0f}) {
+            // PASSO 1: a status de 24dp foi REMOVIDA (faixa de altura ZERO,
+            // compat) e a TAB BAR de 32dp é a ÚLTIMA faixa viva no fundo
             const UiRect status = safe::statusRect(sw, sh, in);
-            // a posição é ESTÁTUA: y = content bottom − 24dp, SEMPRE
-            EXPECT_MSG(nearEqF(status.y + status.h,
-                               sh - in.bottom, 0.5f),
-                       "d=%.1f raw=%.0f: o rodapé não encosta no fundo do "
-                       "content (y+h=%.1f vs %.1f)",
-                       d, raw, status.y + status.h, sh - in.bottom);
-            EXPECT(nearEqF(status.h, theme::dp(24.0f), 0.5f));
-            // nada o cobre: o drawer, a tab bar e o centro terminam acima
+            EXPECT(nearEqF(status.h, 0.0f, 0.5f));
+            const UiRect tb = safe::bottomTabRect(sw, sh, in);
+            EXPECT_MSG(nearEqF(tb.y + tb.h, sh - in.bottom, 0.5f),
+                       "d=%.1f raw=%.0f: o rodapé (tab bar) não encosta no "
+                       "fundo do content (y+h=%.1f vs %.1f)",
+                       d, raw, tb.y + tb.h, sh - in.bottom);
+            EXPECT(nearEqF(tb.h, theme::dp(32.0f), 0.5f));
+            // nada a cobre: o drawer e o centro terminam acima dela
             editor::bottom::BottomState bs{};
             bs.bottomTab = 1;
             bs.drawerH = raw;
             const editor::bottom::Layout bl =
                 editor::bottom::layout(sw, sh, in, bs);
-            EXPECT(bl.drawer.y + bl.drawer.h <= status.y + 0.5f);
-            EXPECT(bl.tabBar.y + bl.tabBar.h <= status.y + 0.5f);
+            EXPECT(bl.drawer.y + bl.drawer.h <= tb.y + 0.5f);
+            EXPECT(nearEqF(bl.tabBar.y, tb.y, 0.5f));
             const f32 eff = safe::effectiveDrawerH(raw,
                                                    safe::viewportRect(sw, sh, in).h);
             const UiRect view = safe::centerRect(sw, sh, in, eff, true,
                                                  -1.0f, -1.0f);
-            EXPECT(view.y + view.h <= status.y + 0.5f);
+            EXPECT(view.y + view.h <= tb.y + 0.5f);
             // a composição J4: com o suffixo no orçamento, o label NUNCA
             // precisa de cortar o fim (a fórmula do drawStatusBar com o
             // medidor fake: prefixo + projeto a meio + suffixo cabe)

@@ -1,4 +1,6 @@
-// ui/BottomPanel.cpp — painel de baixo + status bar 24dp (0.9.0, spec E/K).
+// ui/BottomPanel.cpp — painel de baixo + tab bar 32dp (0.9.0 spec E/K ·
+// PASSO 1 0.9.6.14: a status bar de 24dp FOI REMOVIDA — o «FPS · TICs»
+// vive no canto direito da tab bar; a versão/commit em Settings › Sobre).
 //
 // Tema: theme::kTheme (tabela spec A) — tabs ativas com texto accent +
 // underline 2dp, drawer surface, pega com traços (grip), consola mono 12sp
@@ -7,7 +9,6 @@
 #include "ui/BottomPanel.h"
 #include "ui/EditorUi.h"
 #include "ui/Timeline.h"
-#include "ui/TextFit.h"   // 0.9.6.12 (J4/R-025): ellipsizeMiddle do projeto
 #include "ui/UiContext.h"
 
 #include <cstdio>
@@ -69,7 +70,6 @@ int lineLevel(const std::string& ln) {
 Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st) {
     Layout L;
     L.tabBar = safe::bottomTabRect(sw, sh, in);
-    L.status = safe::statusRect(sw, sh, in);
     // P-08 (0.9.6.12 · GRUPO J1 · R-022): a altura efetiva vem da FONTE
     // ÚNICA (safe::effectiveDrawerH) — o MESMO valor que o main usa para os
     // rects do centro (currentDrawerH). Antes o cap vivia AQUI e o main lia
@@ -80,7 +80,12 @@ Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st) {
     L.drawer = {in.left, L.tabBar.y - d, sw - in.left - in.right, d};
     L.handle = {in.left, L.drawer.y, sw - in.left - in.right, theme::dp(12.0f)};
     L.drawerTop = L.drawer.y;
-    const f32 third = L.tabBar.w / 4.0f;   // 0.9.6.10: 4 tabs
+    // PASSO 1 (0.9.6.14): as 4 tabs vivem à ESQUERDA do canto direito
+    // «FPS · TICs» (a reserva kFpsW; a status bar de 24dp morreu)
+    L.fps = {L.tabBar.x + L.tabBar.w - theme::dp(kFpsW), L.tabBar.y,
+             theme::dp(kFpsW), L.tabBar.h};
+    const f32 tabsW = L.tabBar.w - L.fps.w;
+    const f32 third = tabsW / 4.0f;
     L.tab[0] = {L.tabBar.x, L.tabBar.y, third, L.tabBar.h};
     L.tab[1] = {L.tabBar.x + third, L.tabBar.y, third, L.tabBar.h};
     L.tab[2] = {L.tabBar.x + 2.0f * third, L.tabBar.y, third, L.tabBar.h};
@@ -96,7 +101,7 @@ Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st) {
 Actions draw(UiContext& ui, const InputState& in, EditorState& st,
              BottomState& bs, const AssetCatalog& catalog,
              const std::vector<std::string>& logLines, int fps, u32 ticCount,
-             const FilesTree& tree, const StatusBarData& sbar) {
+             const FilesTree& tree) {
     (void)st;
     Actions a;
     const safe::Insets insets = ui.safeArea();
@@ -109,9 +114,11 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
     ui.panel(L.tabBar.x + L.tabBar.w - 1.0f, L.tabBar.y, 1.0f, L.tabBar.h,
              theme::kTheme.border);
 
-    // ---- tabs (ícone + palavra; ativo = accent + underline 2dp) ----
+    // ---- tabs (ícone 20 + palavra 12sp; ativo = accent + underline 2dp) ----
     // 0.9.6.10 (GRUPO UI · a imagem 1): 4 tabs — Ficheiros (a árvore
     // res://) · Assets (a grelha de miniaturas) · Consola · Animação
+    // PASSO 1 (0.9.6.14): a faixa é 32dp — o alvo é a CÉLULA inteira (o
+    // piso de linha 32, LayoutDump.h); ícone 20, palavra caption 12sp
     const struct {
         u64        id;
         icons::Icon ic;
@@ -125,21 +132,23 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
     for (int i = 0; i < 4; ++i) {
         const UiRect& r = L.tab[i];
         const bool active = bs.bottomTab == i + 1;
+        ui.auditRowFloorNext(layout::kFieldFloorDp);   // linha de 32dp
         const bool pressed = ui.widgetHit(tabs[i].id, r.x, r.y, r.w, r.h);
         if (ui.widgetActive(tabs[i].id)) {
             ui.panel(r.x, r.y, r.w, r.h, theme::kTheme.surface2);
         }
-        // 0.9.6.6 (GRUPO C): ícone/gap em dp REAL (eram 24/8 px crus — a
-        // invariância da 13.6 apanhou: o rótulo da tab deslocava 16px a 2.0)
-        const f32 s = theme::dp(24.0f);
+        const f32 s = theme::dp(20.0f);   // PASSO 1: ícone 20 (era 24)
         const f32 wordW = ui.hasFont() ? ui.fontWidth(tabs[i].word) : 0.0f;
-        const f32 gap = theme::dp(8.0f);
+        const f32 gap = theme::dp(6.0f);
         const f32 x0 = r.x + (r.w - (s + gap + wordW)) * 0.5f;
         icons::drawIcon(ui, tabs[i].ic, x0, r.y + (r.h - s) * 0.5f, s,
                         active ? theme::kTheme.accent : theme::kTheme.text2);
         if (ui.hasFont()) {
-            ui.label(x0 + s + gap, textBaseline(ui, r), tabs[i].word,
-                     active ? theme::kTheme.accent : theme::kTheme.text2);
+            // PASSO 1: a palavra da tab em CAPTION 12sp
+            ui.labelStyled(x0 + s + gap, textBaseline(ui, r), tabs[i].word,
+                           active ? theme::kTheme.accent
+                                  : theme::kTheme.text2,
+                           theme::fontScale(theme::kFontCaption), 0);
         }
         if (pressed) {
             // tocar na tab ATIVA fecha o drawer (toggle — spec E)
@@ -151,9 +160,28 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
                  theme::kTheme.accent);
     }
 
-    // ---- status bar 24dp (SEM abreviaturas — spec E) ----
-    drawStatusBar(ui, ui.screenWidth(), ui.screenHeight(), insets, fps,
-                  ticCount, sbar);
+    // ---- PASSO 1 (0.9.6.14): o «FPS n · TICs n» no CANTO DIREITO da
+    // tab bar (a status bar de 24dp foi REMOVIDA — a spec: a faixa extra
+    // sai; a versão/commit vivem em Settings › Sobre). Caption 12sp
+    // text-2, right-aligned na reserva, o fit trunca honestamente.
+    if (ui.hasFont()) {
+        char fpsTxt[40];
+        std::snprintf(fpsTxt, sizeof(fpsTxt), "FPS %d · TICs %u", fps,
+                      ticCount);
+        const TextMetrics tmF = ui.textMetrics();
+        const f32 padF = theme::dp(8.0f);
+        const f32 maxW = L.fps.w - 2.0f * padF;
+        const f32 tw = ui.fontWidth(fpsTxt) *
+                       theme::fontScale(theme::kFontCaption);
+        const f32 xF = tw > maxW ? L.fps.x + padF
+                                 : L.fps.x + L.fps.w - padF - tw;
+        ui.labelStyled(xF,
+                       theme::centeredBaseline(tmF.ascent, tmF.descent,
+                                               L.fps.y, L.fps.h,
+                                               theme::kFontCaption),
+                       fpsTxt, theme::kTheme.text2,
+                       theme::fontScale(theme::kFontCaption), 0);
+    }
 
     // ---- drawer ----
     if (bs.bottomTab == 0) {
@@ -710,80 +738,6 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
     return a;
 }
 
-void drawStatusBar(UiContext& ui, f32 sw, f32 sh, const safe::Insets& in,
-                   int fps, u32 ticCount, const StatusBarData& data) {
-    const UiRect r = safe::statusRect(sw, sh, in);
-    ui.panel(r.x, r.y, r.w, r.h, theme::kTheme.bg);
-    ui.panel(r.x, r.y, r.w, 1.0f, theme::kTheme.border);
-    if (!ui.hasFont()) {
-        return;
-    }
-    // 0.9.6.10 (GRUPO UI · a imagem 1): a linha COMPLETA — à ESQUERDA a
-    // versão · o projeto · FPS · os objetos; à DIREITA o estado +
-    // "Mobile First" (a memória fica na lista honesta do relatório)
-    // 0.9.6.12 (GRUPO J4 · R-025 · a spec J4): o campo do PROJETO (o mais
-    // variável) é elipsado A MEIO, com o orçamento dele PRÓPRIO — antes a
-    // linha inteira ia ao labelFitted e o corte comia o FIM (o suffixo
-    // FPS/TICs sumia com nomes longos, que era a informação estável que
-    // devia ficar). Agora: prefixo + projeto ellipsado a meio + suffixo
-    // — o suffixo FICA sempre, o nome mostra cabeça+cauda («longo…nome»)
-    char prefix[64];
-    std::snprintf(prefix, sizeof(prefix), "G.One %s · ", data.version);
-    char suffix[48];
-    std::snprintf(suffix, sizeof(suffix), " · FPS %d · TICs %u", fps,
-                  ticCount);
-    char left[192];
-    if (ui.hasFont()) {
-        // O ORÇAMENTO na MEDIDA CORPO (fontWidth) — a MESMA que o maxW do
-        // labelFittedStyled usa (o rw de baixo, medida corpo): a linha
-        // composta prefixo+projeto+suffixo fica DENTRO do orçamento do fit
-        // (o draw em caption 12sp é 14% mais estreito — a folga é da casa);
-        // assim o middle é exercido A VALE e o fit nunca volta a cortar o
-        // FIM (o suffixo FPS/TICs sobrevive sempre — o contrato do J4)
-        auto wBody = [&](const char* s) { return ui.fontWidth(s); };
-        const char* rightTmp = data.playing ? "play · Mobile First"
-                                            : "editor · Mobile First";
-        const f32 padT = theme::dp(8.0f);
-        const f32 availT =
-            r.w - (wBody(rightTmp) + padT) - 2.0f * padT;
-        const f32 projBudget =
-            availT - wBody(prefix) - wBody(suffix);
-        char proj[96];
-        textfit::ellipsizeMiddle(
-            data.project, projBudget, wBody, proj, sizeof(proj));
-        std::snprintf(left, sizeof(left), "%s%s%s", prefix, proj, suffix);
-    } else {
-        std::snprintf(left, sizeof(left), "G.One %s · %s · FPS %d · TICs %u",
-                      data.version, data.project, fps, ticCount);
-    }
-    const char* right = data.playing ? "play · Mobile First"
-                                     : "editor · Mobile First";
-    // 0.9.6.6 (GRUPO C): 12sp REAL (o comentário antigo DIZIA «12sp
-    // (fontScale 12/14)» mas o código chamava o label() de CORPO — o
-    // bloco de 29px do atlas cru numa banda de 24dp SANGRAVA o fundo do
-    // ecrã: o ERRO medido do Grupo B). AGORA: labelFittedStyled a 12sp
-    // com a baseline CENTRADA pelas métricas do CONTEXTO (textK incluído
-    // — a 1.0 o bloco é 14px na banda de 24px; a 2.0 é 28px na de 48px) e
-    // o fit de sempre (o texto nunca sai do rect).
-    const f32 pad = theme::dp(8.0f);   // kSpace1 em dp (era px cru)
-    const f32 rw = ui.hasFont() ? ui.fontWidth(right) + pad : theme::dp(96.0f);
-    // a ESQUERDA (trunca com … quando aperta — o fit de sempre)
-    ui.labelFittedStyled(
-        r.x + pad,
-        theme::centeredBaseline(ui.textMetrics().ascent,
-                                ui.textMetrics().descent, r.y, r.h,
-                                theme::kFontCaption),
-        left, theme::kTheme.text2, r.w - rw - 2.0f * pad,
-        theme::fontScale(theme::kFontCaption), 0);
-    // à DIREITA: o estado (aceso em play) + o selo Mobile First
-    ui.labelStyled(
-        r.x + r.w - pad - (ui.hasFont() ? ui.fontWidth(right) : 0.0f),
-        theme::centeredBaseline(ui.textMetrics().ascent,
-                                ui.textMetrics().descent, r.y, r.h,
-                                theme::kFontCaption),
-        right, data.playing ? theme::kTheme.accent : theme::kTheme.text2,
-        theme::fontScale(theme::kFontCaption), 0);
-}
 
 // ---- persistência (spec G) ----------------------------------------------------
 std::string serializeLayout(const BottomState& bs, bool showInspector,

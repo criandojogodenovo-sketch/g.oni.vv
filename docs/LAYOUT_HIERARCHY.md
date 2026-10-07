@@ -26,13 +26,13 @@ TransformToolbar, ViewportRail, BottomDock, BottomBar) mapeiam assim:
 | Nome conceptual | Região real | Fonte no código (símbolo que manda) |
 |---|---|---|
 | RootLayout | o contentRect (superfície − insets) | `safe::contentRect` em `ui/SafeArea.h` |
-| TopNavigationBar | TOP BAR 56dp | `safe::toolbarRect` em `ui/SafeArea.h`; desenhada por `toolbar::draw` em `ui/Toolbar.cpp` |
+| TopNavigationBar | TOP BAR 36dp (PASSO 1) | `safe::toolbarRect` em `ui/SafeArea.h`; desenhada por `toolbar::draw` em `ui/Toolbar.cpp` |
 | ViewportContainerLayout | viewportRect (entre a top bar e a tab bar) | `safe::viewportRect` em `ui/SafeArea.h` |
 | GLSurfaceView | o passe 3D (glViewport+glScissor no centerRect) | o bloco `scissor3d` em `platform/main.cpp` |
 | TransformToolbar | toolbar inferior do viewport (Sel/Mov/Rod/Esc/Ímã) | `vpchrome::layout` em `ui/ViewportChrome.cpp` |
 | ViewportRail | o stack vertical esquerdo (undo/redo/save/dup/paste) | `vpchrome::layout` — `L.stack` em `ui/ViewportChrome.cpp` |
-| BottomDockLayout | o drawer de baixo + tab bar 48dp (Ficheiros/Assets/Consola/Animação) | `bottom::layout` em `ui/BottomPanel.cpp` |
-| BottomBar | a barra de estado 24dp (versão · projeto · FPS · TICs · estado · Mobile First) | `safe::statusRect` em `ui/SafeArea.h`; desenhada por `drawStatusBar` em `ui/BottomPanel.cpp` |
+| BottomDockLayout | o drawer de baixo + tab bar 32dp (Ficheiros/Assets/Consola/Animação + «FPS · TICs» à direita — PASSO 1) | `bottom::layout` em `ui/BottomPanel.cpp` |
+| BottomBar | REMOVIDA no PASSO 1 (0.9.6.14): a faixa extra de 24dp saiu — o «FPS · TICs» vive no canto direito da TAB BAR (`bottom::layout`); a versão/commit em Settings › Sobre. `safe::statusRect` devolve uma faixa de ALTURA ZERO (compat de testes; nada desenha nela) | `safe::statusRect` em `ui/SafeArea.h` (LEGACY, altura 0) |
 
 ## 1. A ÁRVORE (pai → filhos; a ordem de DESENHO é a ordem de z)
 
@@ -40,30 +40,34 @@ TransformToolbar, ViewportRail, BottomDock, BottomBar) mapeiam assim:
 contentRect (superfície EGL − insets do sistema)
 ├── PASS 3D (a "cena") — glViewport/glScissor = centerRect; aspect do rect
 │   └── (a câmara projeta com o aspect DO RECT, nunca do ecrã todo)
-├── TOP BAR (56dp, faixa de topo)                    [toolbar::draw]
+├── TOP BAR (36dp — PASSO 1, faixa de topo)          [toolbar::draw]
 ├── VIEWPORT REGION (safe::viewportRect)             [pai lógico]
-│   ├── STRIP do topo (48dp): [Cena][Perspetiva][Global] + [+] nos
+│   ├── STRIP do topo (40dp — PASSO 1): [Cena][Perspetiva][Global] + [+] nos
 │   │   ecrãs estreitos (plusTopRight)                [vpchrome::layout]
 │   ├── RAIL esquerdo (stack undo/redo/save/dup/paste, pai de vidro)
-│   ├── TRANSFORM TOOLBAR (fundo: 5 botões 48dp + legenda acima)
+│   ├── TRANSFORM TOOLBAR (fundo: 5 botões 40dp + legenda acima — PASSO 1)
 │   └── [+] Adicionar TIC (canto inferior direito; sup-dir na strip
 │       quando a largura não dá — plusTopRight)
 ├── PAINEL HIERARQUIA (esquerda; pesquisa + árvore)   [drawHierarchy]
 ├── PAINEL INSPECTOR (direita; tabs Inspector/Nós)    [drawInspector]
-├── BOTTOM DOCK: drawer (altura variável 0..cap) + TAB BAR (48dp)
-│   └── tabs Ficheiros · Assets · Consola · Animação  [bottom::draw]
-├── BOTTOM BAR / STATUS (24dp, SEMPRE a última faixa) [drawStatusBar]
+├── BOTTOM DOCK: drawer (altura variável 0..cap) + TAB BAR (32dp — PASSO 1)
+│   └── tabs Ficheiros · Assets · Consola · Animação + «FPS · TICs» à
+│       direita                                       [bottom::draw]
+├── (a STATUS BAR de 24dp foi REMOVIDA no PASSO 1 — a tab bar é a última
+│   faixa viva; safe::statusRect devolve altura ZERO por compat)
 └── OVERLAYS (por cima de TUDO): menus, Settings, browser, teclado,
     modais — a camada é: cena < painéis < dock < modais < teclado
 ```
 
 ## 2. AS REGRAS DO CONTRATO (o que a sentinela R-022 e o gate afere)
 
-1. **O status bar é intocável.** Nenhuma região interage com a faixa
-   `safe::statusRect` (a última 24dp do contentRect) — nem o drawer, nem
-   o viewport, nem overlays não-modais. A sua posição NUNCA muda.
+1. **A TAB BAR é intocável (PASSO 1).** A faixa de 32dp no fundo
+   (`safe::bottomTabRect`) é a ÚLTIMA faixa viva do contentRect — nem o
+   drawer, nem o viewport, nem overlays não-modais a cobrem. (A status
+   bar de 24dp que ocupava esse papel foi REMOVIDA no PASSO 1;
+   `safe::statusRect` devolve uma faixa de altura ZERO, por compat.)
 2. **A transform toolbar vive DENTRO da viewport region**, abaixo da
-   strip: `by ≥ view.y + stripH` e `by + 48dp ≤ view.y + view.h`. Nunca
+   strip: `by ≥ view.y + stripH` e `by + 40dp ≤ view.y + view.h`. Nunca
    sobe à top bar (o cap do drawer garante o piso; o clamp em
    `vpchrome::layout` garante POR CONSTRUÇÃO).
 3. **O drawer come o viewport por baixo, com PISO**: a altura efetiva do
@@ -88,12 +92,16 @@ contentRect (superfície EGL − insets do sistema)
 
 | Constante | Valor | Significado |
 |---|---|---|
-| `kTopBarH` | 56dp | a top bar |
-| `kStatusH` | 24dp | o status bar (BottomBar) |
-| `kBottomTabH` | 48dp | a tab bar do dock |
+| `kTopBarH` | 36dp | a top bar (PASSO 1 — era 56) |
+| `kStatusH` | 0 | a status bar saiu (PASSO 1; faixa compat de altura zero) |
+| `kBottomTabH` | 32dp | a tab bar do dock (PASSO 1 — era 48; o FPS·TICs vive nela) |
 | `kViewportMinW` | 288dp | piso da LARGURA do viewport central (a toolbar cabe) |
-| `kViewportMinH` | 104dp | piso da ALTURA do viewport central com o drawer aberto (strip 48 + toolbar 48 + folga 8) |
+| `kViewportMinH` | 88dp | piso da ALTURA do viewport central com o drawer aberto (strip 40 + toolbar 40 + folga 8 — PASSO 1; era 104) |
 | `kDrawerMin`/`kDrawerMax` | 160..400dp | a pega do drawer (o cap do viewport manda — regra 3) |
+| `layout::kTouchFloorDp` | 40dp | piso de toque do botão SOLTO (desenho 32 — a LEI DE OURO do PASSO 1; era 48) |
+| `layout::kRowFloorDp` | 36dp | piso de LINHA (top bar, listas, consola) |
+| `layout::kFieldFloorDp` | 32dp | piso de CAMPO (caixas X/Y/Z, tabs de baixo, pesquisa) |
+| `layout::kHeadFloorDp` | 28dp | piso de CABEÇALHO/chips (kHeaderH, tabs Inspector/Nós) |
 
 ## 4. SENTINELAS E GATE
 
@@ -102,7 +110,7 @@ contentRect (superfície EGL − insets do sistema)
 | R-022 | tests/test_sentinels.cpp `regress_hierarquia_contrato` | a árvore §1 inteira: containment, regras §2.1-2.4, pisos §3, em ecrãs 776×336/800×360/1536×720 e densidades 1.0/2.0, drawer fechado/aberto/tapado |
 | R-023 | tests/test_sentinels.cpp `regress_texto_strip_campo` | chips da strip + campo «pesquisar TIC» sem recorte em 3 densidades (mdpi/hdpi/xhdpi) |
 | R-024 | tests/c33_virtual.cpp FASE 14 + sentinela `regress_viewport_rect_segue` | abrir/fechar o dock → o rect muda, o log `vp3d: viewport set to` aparece com os números certos, o aspect segue |
-| R-025 | tests/test_sentinels.cpp `regress_rodape_intocavel` | o status bar no fundo em todos os estados; nada o cobre; projeto longo elipsado a meio com o suffixo FPS/TICs intacto |
+| R-025 | tests/test_sentinels.cpp `regress_rodape_intocavel` | DESDE O PASSO 1: a TAB BAR de 32dp é a última faixa em todos os estados; nada a cobre; o «FPS · TICs» vive no canto direito (o middle do projeto ficou nas unidades puras de TextFit — a status bar saiu) |
 | gate | scripts/hierarchy_check.py (job core-tests do CI) | este ficheiro existe, a tabela §0 aponta símbolos REAIS, as sentinelas R-022..R-025 existem no fonte |
 
 Qualquer região nova: acrescenta AQUI (§1 + §0 se for topo de ramo) com

@@ -1,13 +1,14 @@
 #pragma once
-// ui/BottomPanel.h — PAINEL DE BAIXO 0.9.0 (spec E/K):
+// ui/BottomPanel.h — PAINEL DE BAIXO 0.9.0 (spec E/K) · PASSO 1 (0.9.6.14):
 //
-//   TAB BAR 48dp largura total: [Ficheiros][Consola][Animação] — ícone+
-//   palavra (pasta/terminal/clapper), ativo com texto accent + underline 2dp
+//   TAB BAR 32dp largura total (era 48): [Ficheiros][Assets][Consola]
+//   [Animação] à ESQUERDA — ícone 20 + palavra 12sp, ativo com texto
+//   accent + underline 2dp; à DIREITA o «FPS n · TICs n» (a status bar de
+//   24dp MORREU — a spec PASSO 1: a faixa extra sai; a versão/commit
+//   vivem em Settings › Sobre)
 //   DRAWER: abre por baixo da tab bar; DEFAULT 240dp, PEGA de arrasto na
 //   borda superior (160..400, passos de 8dp — spec E); tocar na tab ATIVA
 //   fecha (o drawer desaparece, a tab bar fica)
-//   STATUS 24dp (a ÚLTIMA faixa): "FPS 60 · TICs 4" 12sp text-2 — as
-//   abreviaturas da 0.8.x morreram (spec E)
 //
 // CONTEÚDO do drawer (spec K):
 //   • FICHEIROS: grelha de cards 96dp (miniatura por imageQuad quando há
@@ -101,30 +102,32 @@ struct FilesTree {
 };
 
 // ---- layout PURO --------------------------------------------------------------
+// PASSO 1 (0.9.6.14): a faixa FPS·TICs da tab bar (o canto direito) — a
+// largura é RESERVA FIXA em dp (o layout é PURO, não mede fonte; o draw
+// right-alinha o texto e o fit trunca honestamente se não couber)
+constexpr f32 kFpsW = 112.0f;   // dp — o canto direito da tab bar
+
 struct Layout {
-    UiRect tabBar{};             // faixa 48dp (bottomTabRect)
-    UiRect tab[4]{};             // 0.9.6.10: Ficheiros/Assets/Consola/Animação (quartos)
+    UiRect tabBar{};             // faixa 32dp (bottomTabRect)
+    UiRect tab[4]{};             // 0.9.6.10: Ficheiros/Assets/Consola/Animação
+                                 // (PASSO 1: à esquerda do canto FPS·TICs)
+    UiRect fps{};                // PASSO 1: o canto direito «FPS n · TICs n»
     UiRect underline{};          // do tab ativo (2dp accent)
     UiRect drawer{};             // conteúdo (por CIMA da tab bar)
     UiRect handle{};             // pega de arrasto (borda sup. do drawer)
-    UiRect status{};             // 24dp (statusRect)
     f32    drawerTop = 0.0f;     // y da pega
 };
 
 // resolve o layout (drawerH CLAMPADO a 160..400 em passos de 8)
 Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st);
 
-// ---- STATUS BAR 24dp — 0.9.6.10 (GRUPO UI · a imagem 1) -----------------------
-struct StatusBarData {
-    const char* version = "";    // "0.9.6"
-    const char* project = "";    // o nome do projeto ativo
-    bool playing = false;        // o estado (play/editor)
-};
-
 // ---- DRAW -----------------------------------------------------------------------
 // catalog: meshes/textures/audio do projeto (cards de Ficheiros)
 // logLines: tail do engine.log (Consola); logDumps NÃO (só o viewer de sempre)
 // timeline visible: desenha a timeline dentro do drawer (o main liga)
+// PASSO 1: o «FPS n · TICs n» vive no CANTO DIREITO da tab bar (a status
+// bar de 24dp foi REMOVIDA — a versão/commit estão em Settings › Sobre;
+// StatusBarData/drawStatusBar apagados pela spec)
 struct Actions {
     bool exportPressed = false;         // [Export] da consola
     int  filePick = 0;                  // 1.. = card i escolhido (aplicar)
@@ -133,15 +136,10 @@ struct Actions {
                                         // main abre o teclado — propósito 9)
 };
 
-void drawStatusBar(UiContext& ui, f32 sw, f32 sh, const safe::Insets& in,
-                   int fps, u32 ticCount,
-                   const StatusBarData& data = StatusBarData{});
-
 Actions draw(UiContext& ui, const InputState& in, EditorState& st,
              BottomState& bs, const AssetCatalog& catalog,
              const std::vector<std::string>& logLines, int fps, u32 ticCount,
-             const FilesTree& tree = FilesTree{},
-             const StatusBarData& sbar = StatusBarData{});
+             const FilesTree& tree = FilesTree{});
 
 // ---- persistência (spec G: layout.json) ---------------------------------------
 // serializa/parse PURO do estado do layout (bottom + inspector + painéis) —

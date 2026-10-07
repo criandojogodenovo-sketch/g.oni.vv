@@ -866,10 +866,11 @@ TEST(wiring011_seletor_de_clips_draw_e_apply) {
     cat.audio = {"audio/salto.gi", "audio/musica.gi"};
 
     // geometria do overlay (a MESMA fórmula do drawAssetMenu: menu
-    // centrado, header + (1+shown)*48 + importar + pad; shown = cap 5)
+    // centrado, PASSO 1: header 28 + 1 linha de 36 + importar 40 + pad;
+    // a lista com 2 clips de 36)
     const f32 w = editor::kMenuW;
-    const f32 h = editor::kHeaderH + (1.0f + 2.0f) * 48.0f + 48.0f +
-                  editor::kPad;
+    const f32 h = editor::kHeaderH + 1.0f * 36.0f + 40.0f + editor::kPad +
+                  2.0f * 36.0f;
     const f32 x = (kSW - w) * 0.5f;
     const f32 y = (kSH - h) * 0.5f;
     // o seletor FECHA no clique (st.assetMenu = 0 dentro do draw) — cada
@@ -888,13 +889,14 @@ TEST(wiring011_seletor_de_clips_draw_e_apply) {
         in.clearEdges();
         return r2;
     };
+    // PASSO 1: o none é 40dp; as linhas de 36 (centro +18)
     // none → 1
     EXPECT(tap(x + w * 0.5f, y + editor::kHeaderH + 20.0f) == 1);
     // clip 1 → 2; clip 2 → 3
-    EXPECT(tap(x + w * 0.5f, y + editor::kHeaderH + 48.0f + 20.0f) == 2);
-    EXPECT(tap(x + w * 0.5f, y + editor::kHeaderH + 96.0f + 20.0f) == 3);
+    EXPECT(tap(x + w * 0.5f, y + editor::kHeaderH + 36.0f + 18.0f) == 2);
+    EXPECT(tap(x + w * 0.5f, y + editor::kHeaderH + 72.0f + 18.0f) == 3);
     // importar → kAssetPickImport (o seletor de clips SEMPRE oferece)
-    EXPECT(tap(x + w * 0.5f, y + editor::kHeaderH + 144.0f + 20.0f) ==
+    EXPECT(tap(x + w * 0.5f, y + editor::kHeaderH + 108.0f + 18.0f) ==
            editor::kAssetPickImport);
 
     // applyAssetPick menuKind 5 (PURO): none limpa, pick aplica, out-of-range
@@ -988,11 +990,11 @@ TEST(wiring011_plus_menu_3d_tem_audio) {
     editor::EditorState st;
     st.plusMenu = true;
     const f32 w = editor::kMenuW;
-    const f32 h = editor::kHeaderH + 7.0f * 64.0f + editor::kPad;
+    const f32 h = editor::kHeaderH + 7.0f * 48.0f + editor::kPad;   // PASSO 1
     const f32 x = (kSW - w) * 0.5f;
     const f32 y = (kSH - h) * 0.5f;
     // o 7º item (Audio) → choice 7
-    in.injectDown(0, x + w * 0.5f, y + editor::kHeaderH + 6.0f * 64.0f + 28.0f);
+    in.injectDown(0, x + w * 0.5f, y + editor::kHeaderH + 6.0f * 48.0f + 20.0f);
     ui.beginFrame(nullptr, &in, kSW, kSH);
     const int r = editor::drawPlusMenu(ui, in, kSW, kSH, st);
     ui.endFrame();

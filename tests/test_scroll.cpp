@@ -183,12 +183,12 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     InspRow plan[48];   // 0.8.0: +prim/anim
     const u32 n = inspectorPlan(prof, m, false, 0u, plan);
     const f32 contentH = inspectorContentHeight(prof, m, false, 0u);
-    // 0.9.0 (spec C): secções 48dp + 3 linhas de Transform (80dp: título
-    // + caixas X/Y/Z 48dp) + miniaturas 84dp → 1070; 0.9.2: +90 do Script
-    // FASE 9 G2-8: Física 1 Label → 3 TwoCol (+2·textRowH)
-    // 0.9.6.6 (GRUPO C): o PISO 48dp em TODAS as linhas (a regra da casa —
-    // eram bloco+px crus) — a receita do Player completo sobe para 1420
-    EXPECT(nearEqF(contentH, 1420.0f));
+    // 0.9.0 (spec C): secções + 3 linhas de Transform + miniaturas → 1070;
+    // 0.9.2: +90 do Script; FASE 9 G2-8: Física 1 Label → 3 TwoCol
+    // 0.9.6.6 (GRUPO C): o PISO dp em TODAS as linhas — 1420
+    // PASSO 1 (0.9.6.14): a tabela da spec (linha 36 · secção 28 ·
+    // transform 64: título 24 + caixas 32) baixa a receita para 1046
+    EXPECT(nearEqF(contentH, 1046.0f));
 
     // cursor Y PARTILHADO: linhas sequenciais (y estritamente crescente, sem
     // reinício por secção), todas dentro do conteúdo, e o fundo do plano =
@@ -212,7 +212,7 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     // C33 (pior caso: superfície mais baixa que a teórica) — lista 500 px:
     // sem scroll o fundo do botão fica FORA da região (o bug reportado)
     const f32 listH = 500.0f;
-    const f32 contentTop = 140.0f;   // y=88 + cabeçalho 48 + 4
+    const f32 contentTop = 120.0f;   // PASSO 1: y=88 + cabeçalho 28 + 4
     const f32 btnBottom0 = contentTop + plan[n - 1].y + plan[n - 1].h;
     EXPECT(btnBottom0 > contentTop + listH);
 
@@ -224,14 +224,14 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     EXPECT(btnTop >= contentTop);
     EXPECT(btnTop + plan[n - 1].h <= contentTop + listH + 0.01f);
 
-    // com TouchControls presente o botão dá lugar à label tc (42 → 34)
+    // com TouchControls presente o botão dá lugar à label tc
     EXPECT(tic->addComponent<TouchControls>() != nullptr);
-    // 0.9.0: 1070 − 42 (addTc) + 34 (label tc) = 1062; 0.9.2: +90 = 1152
-    // 0.9.0: 1070 − 42 (addTc) + 34 (label tc); 0.9.2: +90; 0.9.6.6 (GRUPO C):
-    // o PISO 48dp iguala addTc e label tc (eram 42/34 px) — o plano com
-    // TouchControls fica IGUAL ao sem (1420): a troca já não encolhe nada
+    // 0.9.6.6 (GRUPO C): o PISO dp iguala addTc e label tc — o plano com
+    // TouchControls fica IGUAL ao sem (PASSO 1: 1046): a troca não encolhe
+    // PASSO 1: com TouchControls o addTc (42) dá lugar à label tc (36) —
+    // 1046 − 42 + 36 = 1040
     EXPECT(nearEqF(inspectorContentHeight(inspectorProfile(*tic), m, false, 0u),
-                   1420.0f));
+                   1040.0f));
 }
 
 TEST(scroll_hierarquia_todos_os_tics_atingeis) {
@@ -242,10 +242,11 @@ TEST(scroll_hierarquia_todos_os_tics_atingeis) {
     EXPECT(s.count() == 14u);
 
     const f32 contentH = hierarchyContentHeight(14);
-    EXPECT(nearEqF(contentH, 672.0f));   // 0.9.0: 14 × 48 (spec B)
+    EXPECT(nearEqF(contentH, 504.0f));   // PASSO 1: 14 × 36 (a linha da spec)
 
-    const f32 listTop = 200.0f;   // 0.9.0: y=104 + cabeçalho 48 + pesquisa 48
-    const f32 listH = 540.0f;     // teórico (scroll math pura)
+    const f32 listTop = 164.0f;   // PASSO 1: y=104 + cabeçalho 28 + pesquisa 32
+    const f32 listH = 400.0f;     // teórico (scroll math pura) — FORÇA o
+                                  // scroll: 14×36 = 504 caberia em 540 sem ele
 
     // sem scroll a linha 13 (a 14.ª) fica cortada — o comportamento antigo
     const f32 row13_0 = listTop + 13.0f * kRowH;
@@ -253,15 +254,15 @@ TEST(scroll_hierarquia_todos_os_tics_atingeis) {
 
     // com o scroll no máximo TODAS as linhas cabem na região, incluindo a 13
     const f32 off = clampOffset(999.0f, contentH, listH);
-    EXPECT(nearEqF(off, 132.0f));   // 672 − 540
+    EXPECT(nearEqF(off, 104.0f));   // 504 − 400
     const f32 row13 = listTop + 13.0f * kRowH - off;
     EXPECT(row13 >= listTop);
     EXPECT(row13 + kRowH <= listTop + listH);
 }
 
 TEST(scroll_hierarquia_row_sob_tap) {
-    const f32 listTop = 200.0f;   // 0.9.0: +48 da linha de pesquisa
-    const f32 off = 132.0f;   // máximo do teste anterior (14 TICs)
+    const f32 listTop = 164.0f;   // PASSO 1: +32 da linha de pesquisa
+    const f32 off = 104.0f;   // máximo do teste anterior (14 TICs × 36)
 
     // tap no meio da linha 13 com o offset no máximo → índice 13
     EXPECT(hierarchyRowAtTap(listTop + 13.0f * kRowH - off + 10.0f,
@@ -300,10 +301,10 @@ TEST(scroll_linhas_mesh_tex_atingiveis_no_scroll) {
     EXPECT(primIdx == meshIdx + 1);
     EXPECT(texIdx == primIdx + 1);
 
-    // topo da linha mesh — 0.9.0 (spec C): 34+36+48+3×80+48 = 406
-    // 0.9.6.6 (GRUPO C): 48+48+48+3×80+48 = 432 (as duas primeiras linhas
-    // ganharam o piso 48dp — eram 34/36 px crus)
-    EXPECT(nearEqF(plan[meshIdx].y, 432.0f));
+    // topo da linha mesh — 0.9.6.6 (GRUPO C): 48+48+48+3×80+48 = 432
+    // PASSO 1 (0.9.6.14): o plano (fonte única) põe a mesh em 320 — as
+    // linhas da spec (36 · secção 28 · transform 64)
+    EXPECT(nearEqF(plan[meshIdx].y, 320.0f));
     // 0.8.0: a linha "prim:" fica entre mesh e tex (a ALTURA dela —
     // simbólico desde 0.9.6.6: zero números que driftam com o piso 48dp)
     EXPECT(nearEqF(plan[texIdx].y, plan[meshIdx].y + plan[meshIdx].h +

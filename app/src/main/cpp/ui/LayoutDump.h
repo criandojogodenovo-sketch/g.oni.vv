@@ -29,6 +29,19 @@
 namespace vv {
 namespace layout {
 
+// ---- OS PISOS DE TOQUE (PASSO 1 · 0.9.6.14 — a tabela da spec do dono) ------
+// A LEI DE OURO: DESENHO 32dp / TOQUE 40dp — nada ≥48 no editor (era o
+// piso único de 48dp da 0.9.0). Os elementos DE LINHA tomam a altura da
+// LINHA da spec (o alvo é a linha inteira — a barra de 36, o campo de 32,
+// o cabeçalho de 28): o piso DELES é a altura da linha, NÃO o 40 do botão
+// solto. As constantes vivem AQUI (o validador é a vara de medir) e os
+// desenhistas flagam a entrada com auditRowFloorNext(kXxx) — os números
+// NUNCA se repetem frouxos pelos ficheiros.
+constexpr f32 kTouchFloorDp = 40.0f;   // botão SOLTO (desenho 32 no alvo 40)
+constexpr f32 kRowFloorDp   = 36.0f;   // LINHA: top bar / listas / consola
+constexpr f32 kFieldFloorDp = 32.0f;   // CAMPO: caixas X/Y/Z / tabs de baixo
+constexpr f32 kHeadFloorDp  = 28.0f;   // CABEÇALHO/chips dentro do cabeçalho
+
 // ---- A ENTRADA (um widget desenhado) ---------------------------------------
 struct Entry {
     enum Kind : u8 { Panel, Frame, Label, Button, Scroll, Slider };
@@ -38,11 +51,16 @@ struct Entry {
     f32  fullW = 0;       // Label: largura do texto INTEIRO (antes do fit)
     bool truncated = false;   // labelFitted que cortou com "…"
     bool clipped = false;     // desenhado dentro de um clip de scroll
-    // 0.9.6.8 (GRUPO E): a tecla da BARRA DE SÍMBOLOS (spec do autor: 40dp
-    // — o precedente da pega do drawer, também da spec E). O piso compacto
-    // continua VIGIADO (40dp): a sentinela R-027 prova que compacto a 39dp
-    // FALHA e que um botão REGULAR a 40dp também falha (a exceção é estreita)
+    // 0.9.6.8 (GRUPO E): a tecla da BARRA DE SÍMBOLOS — o precedente da
+    // exceção VIGIADA (o piso compacto continua no validador; desde a
+    // PASSO 1 o piso regular também é 40, o flag passa a ser DOCUMENTAÇÃO
+    // no dump JSON — a sentinela R-027 reescrita prova o novo piso)
     bool compact = false;
+    // PASSO 1 (0.9.6.14): o piso DE LINHA (kRowFloorDp/kFieldFloorDp/
+    // kHeadFloorDp) — 0 = botão solto (kTouchFloorDp). O validador afere
+    // a entrada pelo piso da SUA classe; a flag vive SÓ durante a chamada
+    // (o padrão auditCompactNext_ — nunca escapa)
+    f32 rowFloorDp = 0.0f;
 
     bool interactive() const {
         return kind == Button || kind == Scroll || kind == Slider;
@@ -96,7 +114,7 @@ struct Problem {
     enum Rule : u8 {
         ForaDoEcra,     // interativo fora do contentRect (inacessível)
         Sobreposto,     // dois interativos a pisarem-se (nenhum contém o outro)
-        ToquePequeno,   // interativo < 48dp no menor lado
+        ToquePequeno,   // interativo abaixo do piso da SUA classe (40/36/32/28)
         TextoTruncado,  // label que o fit cortou com "…" (perdeu informação)
         TextoSangra,    // label SEM clip que sai do contentRect (o bug do C33)
         RectDegenerado  // interativo com rect ≤ 0 (zona morta)
@@ -121,7 +139,8 @@ struct Problem {
 };
 
 // as regras, UMA A UMA, com limiar de tolerância de 0.5px (o anti-ruído
-// do arredondamento de float→px nos cantos)
+// do arredondamento de float→px nos cantos). PISOS (PASSO 1): botão solto
+// 40dp · linha 36 · campo 32 · cabeçalho 28 — a tabela da spec do dono.
 std::vector<Problem> validate(const Record& r);
 
 // a linha humana-legível (o log do device e o auditoria.txt do projeto)

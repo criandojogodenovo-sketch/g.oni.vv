@@ -374,6 +374,13 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
     }
     y += settingsSectionH();
     if (!(collapsed & kBitSobre)) {
+        // PASSO 1 (0.9.6.14): o commit vive AQUI (a spec: a versão e o
+        // commit saem da status bar removida para o Sobre; "—" no dev)
+        char gitRow[24];
+        std::snprintf(gitRow, sizeof(gitRow), "%s",
+                      ctx.git && ctx.git[0] ? ctx.git : "—");
+        infoRow(ui, ox, y, aw, "git", gitRow);
+        y += settingsRowH();
         char sha[24];
         std::snprintf(sha, sizeof(sha), "%.20s…", ctx.soSha);
         infoRow(ui, ox, y, aw, "so sha256", sha);
@@ -521,6 +528,7 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
                     hy += settingsRowH();
                     break;
                 case kBitSobre:
+                    hy += settingsRowH();   // PASSO 1: info git (o commit)
                     hy += settingsRowH();   // info sha256
                     hy += settingsRowH();   // info licenças
                     break;

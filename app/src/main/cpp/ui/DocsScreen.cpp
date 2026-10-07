@@ -89,6 +89,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h) {
                     topY + hdrH / 2.0f - theme::dp(12.0f), theme::dp(24.0f),
                     theme::kTheme.text1);
     int result = 0;
+    ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: o cabeçalho de página
     if (ui.widgetHit(kBackId, ins.left, topY, hdrH, hdrH)) {
         result = 1;
     }
@@ -106,22 +107,23 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h) {
                        theme::fontScale(theme::kFontCaption), 0);
     }
 
-    // ---- campo de pesquisa 48dp COM LUPA (spec §11) -------------------------
+    // ---- campo de pesquisa 32dp COM LUPA (spec §11 · PASSO 1: o CAMPO da
+    // spec — eram 48dp) -----------------------------------------------
     // FASE 9 (G0-3): o segundo panelRounded era um FILL da cor da borda por
     // CIMA do surface (o campo ficava um bloco sólido) — é um FRAME.
     const UiRect field{ins.left + theme::dp(16.0f), topY + hdrH + theme::dp(8.0f),
-                       contentW - theme::dp(32.0f), theme::dp(48.0f)};
+                       contentW - theme::dp(32.0f), theme::dp(32.0f)};
     ui.panelRounded(field.x, field.y, field.w, field.h,
                     theme::kRadiusField, theme::kTheme.surface);
     ui.frameRounded(field.x, field.y, field.w, field.h, 1.0f,
                     theme::kRadiusField, theme::kTheme.border);
     icons::drawIcon(ui, icons::Icon::Search, field.x + theme::dp(16.0f),
-                    field.y + theme::dp(12.0f), theme::dp(24.0f),
-                    theme::kTheme.text2);
+                    field.y + (theme::dp(32.0f) - theme::dp(20.0f)) * 0.5f,
+                    theme::dp(20.0f), theme::kTheme.text2);
     // 0.9.6 (G2-5): o texto da pesquisa CENTRADO VERTICALMENTE no campo
     // (a altura real do bloco, não um offset fixo)
     {
-        f32 ty = field.y + 14.0f;
+        f32 ty = field.y + theme::dp(9.0f);   // centrado no campo de 32
         if (ui.hasFont()) {
             const TextMetrics m = ui.textMetrics();
             ty = field.y + (field.h - m.block()) * 0.5f + m.ascent;

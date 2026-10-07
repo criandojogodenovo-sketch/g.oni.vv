@@ -43,7 +43,8 @@
 // dokados (surface sólida). blendOver/contrastOnGlass medem TUDO no CI.
 //
 // ESCALA: espaçamento em múltiplos de 8dp (4 só p/ ícones internos);
-// alvos de toque ≥48dp com ≥8dp entre eles; texto 12sp legendas/status,
+// PASSO 1: alvos desenho 32 / toque 40 com ≥8dp entre eles; nada ≥48;
+// texto 12sp legendas/status,
 // 14sp corpo/linhas, 16sp títulos de secção, 20sp títulos de ecrã;
 // raios 8dp cards/botões, 4dp campos/chips. Zero emoji, zero blur/sombras/
 // gradientes (immediate-mode C++; o "canto curvo" é escadaria de quads —
@@ -165,10 +166,13 @@ constexpr f32 kSpace4 = 32.0f;
 constexpr f32 kSpace5 = 40.0f;
 constexpr f32 kSpace6 = 48.0f;
 
-// ---- ALVOS DE TOQUE ---------------------------------------------------------
-constexpr f32 kTarget = 48.0f;      // mínimo de qualquer alvo
+// ---- ALVOS DE TOQUE (PASSO 1 · 0.9.6.14 — a LEI DE OURO da spec) -----------
+// DESENHO 32dp / TOQUE 40dp — nada ≥48 no editor (era o alvo único 48dp);
+// os elementos DE LINHA tomam a altura da LINHA da spec (top bar 36 ·
+// campo/tabs de baixo 32 · cabeçalho 28 — LayoutDump.h tem os pisos).
+constexpr f32 kTarget = 40.0f;      // alvo de toque do botão SOLTO (desenho 32)
 constexpr f32 kTargetGap = 8.0f;    // mínimo ENTRE alvos vizinhos
-constexpr f32 kIcon = 24.0f;        // ícone outline dentro do alvo 48
+constexpr f32 kIcon = 20.0f;        // ícone outline dentro do alvo (era 24)
 
 // ---- TIPOGRAFIA (sp) — base do atlas = 28px ≈ 14sp no C33 ------------------
 // fontScale(sp) = sp/14 (labelStyled multiplica a base 28px). 12=legendas/

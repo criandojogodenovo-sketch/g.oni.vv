@@ -92,6 +92,13 @@ Json toJson(const Record& r) {
             // JSON mostra o QUE ela é (o auditor do device vê a exceção)
             o.members.emplace_back("compacto", Json::makeBool(true));
         }
+        if (e.rowFloorDp > 0.0f) {
+            // PASSO 1 (0.9.6.14): o piso DE LINHA da entrada (36/32/28) —
+            // o auditor do device vê a classe (o piso de botão solto 40
+            // é o default, não se dumpa)
+            o.members.emplace_back("piso_linha",
+                                   Json::makeNumber(double(e.rowFloorDp)));
+        }
         arr.items.push_back(std::move(o));
     }
     root.members.emplace_back("entradas", std::move(arr));
@@ -101,12 +108,13 @@ Json toJson(const Record& r) {
 std::vector<Problem> validate(const Record& r) {
     std::vector<Problem> ps;
     const f32 kTol = 0.5f;
-    const f32 minTouch = 48.0f * (r.density > 0.05f ? r.density : 1.0f);
-    // 0.9.6.8 (GRUPO E): o piso da BARRA DE SÍMBOLOS (spec do autor: 40dp).
-    // A exceção é ESTREITA e vigiada: só teclas compactas; 39dp compacto
-    // FALHA, botão REGULAR a 40dp FALHA (a sentinela R-027 prova os dois —
-    // a POLÍTICA #5: a mudança legítima está explicada no relatório)
-    const f32 minCompact = 40.0f * (r.density > 0.05f ? r.density : 1.0f);
+    // PASSO 1 (0.9.6.14 · a tabela da spec do dono): o piso do botão SOLTO
+    // é 40dp (a lei de ouro «desenho 32 / toque 40» — ERA o 48dp da 0.9.0);
+    // os elementos DE LINHA afervam-se pelo piso da SUA classe (36 linha /
+    // 32 campo / 28 cabeçalho) via rowFloorDp. O piso compacto (GRUPO E)
+    // mantém-se no validador (documentação no dump; o piso regular também
+    // é 40 desde a PASSO 1).
+    const f32 dens = r.density > 0.05f ? r.density : 1.0f;
     const f32 cx = r.contentX(), cy = r.contentY();
     const f32 cw = r.contentW(), ch = r.contentH();
 
@@ -137,13 +145,18 @@ std::vector<Problem> validate(const Record& r) {
                 p.ia = i;
                 ps.push_back(p);
             }
-            // ToquePequeno — 48dp da casa (commit 0.9.6.1-a: teclas ≥48dp;
-            // toolbar 48dp; a vara de medir do RMX3624 é a mesma).
-            // 0.9.6.8 (GRUPO E): tecla COMPACTA (a barra de símbolos) tem o
-            // piso da spec: 40dp — a exceção registada no relatório E e
-            // vigiada pela sentinela R-027 (a 39dp continua a falhar)
+            // ToquePequeno — o piso da CLASSE (PASSO 1: 40dp solto; 36/32/28
+            // de linha via rowFloorDp — LayoutDump.h tem as constantes
+            // nomeadas; era 48dp único da 0.9.0).
+            // 0.9.6.8 (GRUPO E): tecla COMPACTA (a barra de símbolos) — o
+            // piso de 40dp mantém-se vigiado (a sentinela R-027 reescrita
+            // prova o novo piso: 39dp falha em TODAS as classes)
             {
-                const f32 floor = e.compact ? minCompact : minTouch;
+                const f32 floorDp = e.rowFloorDp > 0.0f
+                                        ? e.rowFloorDp
+                                        : (e.compact ? 40.0f
+                                                     : layout::kTouchFloorDp);
+                const f32 floor = floorDp * dens;
                 if (e.w < floor - kTol || e.h < floor - kTol) {
                     Problem p;
                     p.rule = Problem::ToquePequeno;
@@ -205,6 +218,7 @@ std::vector<Problem> validate(const Record& r) {
 
 std::string describe(const Record& r, const Problem& p) {
     const Entry& a = r.entries[p.ia];
+    const f32 dens = r.density > 0.05f ? r.density : 1.0f;
     char buf[256];
     switch (p.rule) {
         case Problem::ForaDoEcra:
@@ -227,14 +241,27 @@ std::string describe(const Record& r, const Problem& p) {
             break;
         }
         case Problem::ToquePequeno:
-            // 0.9.6.8 (GRUPO E): a mensagem diz o PISO que falhou — 48dp da
-            // casa ou 40dp compacto (a barra de símbolos da spec E)
-            std::snprintf(buf, sizeof(buf),
-                          "aviso %s(id %llx) %.0fx%.0f < %s (%.0fpx) de toque",
-                          a.kindName(), (unsigned long long)a.id, a.w, a.h,
-                          a.compact ? "40dp compacto" : "48dp",
-                          (a.compact ? 40.0f : 48.0f) *
-                              (r.density > 0.05f ? r.density : 1.0f));
+            // PASSO 1 (0.9.6.14): a mensagem diz o PISO DA CLASSE que falhou
+            // — 40dp solto / 36 linha / 32 campo / 28 cabeçalho (a tabela
+            // da spec); o compacto mantém o rótulo da casa (GRUPO E)
+            {
+                const char* cls = "40dp";
+                f32 fd = layout::kTouchFloorDp;
+                if (a.rowFloorDp > 0.0f) {
+                    fd = a.rowFloorDp;
+                    cls = a.rowFloorDp > 32.5f   ? "36dp linha"
+                          : a.rowFloorDp > 27.5f ? "32dp campo"
+                                                 : "28dp cabeçalho";
+                } else if (a.compact) {
+                    fd = 40.0f;
+                    cls = "40dp compacto";
+                }
+                std::snprintf(buf, sizeof(buf),
+                              "aviso %s(id %llx) %.0fx%.0f < %s (%.0fpx) de "
+                              "toque",
+                              a.kindName(), (unsigned long long)a.id, a.w,
+                              a.h, cls, fd * dens);
+            }
             break;
         case Problem::TextoTruncado:
             std::snprintf(buf, sizeof(buf),

@@ -1,16 +1,17 @@
-// ui/Toolbar.cpp — A BARRA ÚNICA DE CIMA 56dp (FASE 9 G2-9/G2-10).
+// ui/Toolbar.cpp — A BARRA ÚNICA DE CIMA 36dp (FASE 9 G2-9/G2-10 · PASSO 1).
 //
 // [≡ Menu][Cena ▾]    [3D][UI][ÁUDIO]    [pause][play][gear]
 //
-// FASE 9 (G2-10): a menu bar (56) + tab bar (48) fundiram-se NESTA barra
-// de 56dp — os ~48px poupados vão ao viewport (safe::kToolbarH = 56).
-// FASE 9 (G2-9): o botão [sliders] REMOVIDO (morto desde 0.9.0 — o
-// inventário G0-4; slidersPressed nunca era consumido).
+// FASE 9 (G2-10): a menu bar + tab bar fundiram-se NESTA barra — os px
+// poupados vão ao viewport (safe::kToolbarH).
+// PASSO 1 (0.9.6.14 · spec UI do dono): a barra é UMA LINHA de 36dp (era
+// 56); os botões têm o alvo da ALTURA INTEIRA da barra (36) e o DESENHO
+// em chip de 28dp centrado — a lei de ouro «desenho 32 / toque 40» no
+// eixo que a barra permite (a largura); ÍCONES 20dp; texto 12sp (caption).
 //
 // Desenho: fundo bg #0B0E13 (chrome separado da área de trabalho — painéis
-// surface #151A23); botões-alvo 48dp centrados na altura de 56; tabs de
-// modo ao CENTRO com ícone+palavra e UNDERLINE accent 2dp no fundo da
-// barra (spec D — "ÁUDIO" desenha a palavra inteira).
+// surface #151A23); tabs de modo ao CENTRO com ícone+palavra e UNDERLINE
+// accent 2dp no fundo da barra (spec D — "ÁUDIO" desenha a palavra inteira).
 #include "ui/Toolbar.h"
 #include "ui/EditorUi.h"   // EditorState completo (declared-only no header)
 #include "ui/UiContext.h"
@@ -23,25 +24,27 @@ namespace toolbar {
 
 namespace {
 
-// ---- métricas naturais (px de design — spec A: alvos ≥48, ícone 24) ---------
+// ---- métricas naturais (PASSO 1 · 0.9.6.14: alvo = a linha inteira da
+// barra de 36dp; desenho em chip 28dp; ícones 20; texto caption 12sp) -----
 // 0.9.6.1 (PASSO 0 · R-018): os valores são DP e multiplicam pela densidade
 // AQUI (na fonte do layout da barra) — antes eram px crus: no C33 os alvos
 // media ~24dp reais e o "Cena" truncava a "C…"
-// 0.9.6.10 (GRUPO UI · região TOPO da imagem 1): o LOGO (G âmbar 48dp) e
+// 0.9.6.10 (GRUPO UI · região TOPO da imagem 1): o LOGO (G âmbar) e
 // o NOME "G.One" à EXTREMA esquerda; o STOP (■) ao lado do play/pause;
 // o CHIP de plataforma antes do gear (o alvo REAL: Android)
 f32 kPadOuter()  { return theme::dp(12.0f); }   // margem da barra aos extremos
-f32 kBtnH()      { return theme::dp(48.0f); }   // ALVO de toque dentro dos 56dp
-f32 kLogoW()     { return theme::dp(48.0f); }   // o G âmbar (alvo inteiro)
-f32 kNameW()     { return theme::dp(58.0f); }   // "G.One" 16sp
-f32 kMenuW()     { return theme::dp(112.0f); }  // [≡ Menu]  (ícone + palavra)
-f32 kCenaW()     { return theme::dp(120.0f); }  // [Cena ▾] — largura para
-                                                 // o rótulo inteiro (o
-                                                 // 100 truncava a "C…")
-f32 kTabW()      { return theme::dp(96.0f); }   // cada tab [3D]/[UI]/[ÁUDIO]
-f32 kIconBtn()   { return theme::dp(48.0f); }   // [play][pause][stop][gear]
-f32 kPlatW()     { return theme::dp(92.0f); }   // o chip [Android ▾]
-f32 kGroupGap()  { return theme::dp(20.0f); }   // vão entre grupos
+f32 kBtnH()      { return theme::dp(safe::kTopBarH); }  // alvo = a linha toda
+f32 kChipH()     { return theme::dp(28.0f); }  // o DESENHO do botão (na barra 36)
+f32 kLogoW()     { return theme::dp(40.0f); }  // o G âmbar (alvo inteiro)
+f32 kNameW()     { return theme::dp(48.0f); }  // "G.One" 14sp
+f32 kMenuW()     { return theme::dp(84.0f); }  // [≡ Menu]  (ícone + palavra)
+f32 kCenaW()     { return theme::dp(92.0f); }  // [Cena ▾] — largura para
+                                                // o rótulo inteiro
+f32 kTabW()      { return theme::dp(72.0f); }  // cada tab [3D]/[UI]/[ÁUDIO]
+f32 kIconBtn()   { return theme::dp(40.0f); }  // [play][pause][stop][gear]
+f32 kPlatW()     { return theme::dp(76.0f); }  // o chip [Android ▾]
+f32 kGroupGap()  { return theme::dp(12.0f); }  // vão entre grupos
+f32 kIconS()     { return theme::dp(20.0f); }  // PASSO 1: os ícones da barra
 
 // baseline do texto centrada no botão (métricas REAIS da fonte)
 f32 textBaseline(UiContext& ui, const UiRect& r) {
@@ -53,16 +56,21 @@ f32 textBaseline(UiContext& ui, const UiRect& r) {
 }
 
 // botão de TEXTO + ÍCONE (Menu/Cena): inativo = texto text1 + ícone text2;
-// held = fill surface2 (estado premido — spec A)
+// held = fill surface2 NO CHIP de desenho (28dp centrado no alvo da linha)
 bool textIconButton(UiContext& ui, u64 id, const UiRect& r,
                     icons::Icon icon, const char* text, bool withChevron) {
+    // PASSO 1: o alvo é a LINHA da barra (36dp — o piso kRowFloorDp)
+    ui.auditRowFloorNext(layout::kRowFloorDp);
     const bool pressed = ui.widgetHit(id, r.x, r.y, r.w, r.h);
     const bool held = ui.widgetActive(id);
+    // PASSO 1: o DESENHO vive num chip 4dp mais baixo de cada lado (o alvo
+    // é a linha inteira de 36dp)
+    const UiRect chip = {r.x, r.y + (r.h - kChipH()) * 0.5f, r.w, kChipH()};
     if (held) {
-        ui.panelRounded(r.x, r.y, r.w, r.h, theme::kRadiusCard,
+        ui.panelRounded(chip.x, chip.y, chip.w, chip.h, theme::kRadiusCard,
                         theme::kTheme.surface2);
     }
-    const f32 iconS = theme::dp(24.0f);
+    const f32 iconS = kIconS();
     const f32 iconX = r.x + theme::dp(10.0f);
     icons::drawIcon(ui, icon, iconX, r.y + (r.h - iconS) * 0.5f, iconS,
                     held ? theme::kTheme.text1 : theme::kTheme.text2);
@@ -78,8 +86,11 @@ bool textIconButton(UiContext& ui, u64 id, const UiRect& r,
                                fit, sizeof(fit));
             shown = fit;
         }
-        ui.label(iconX + iconS + theme::dp(8.0f), textBaseline(ui, r), shown,
-                 held ? theme::kTheme.text1 : theme::kTheme.text1);
+        // PASSO 1: o texto da barra é CAPTION 12sp (o secundário da spec)
+        ui.labelStyled(iconX + iconS + theme::dp(8.0f),
+                       textBaseline(ui, r), shown,
+                       theme::kTheme.text1,
+                       theme::fontScale(theme::kFontCaption), 0);
     }
     if (withChevron) {   // caret ▾ (2 traços)
         const f32 cy = r.y + r.h * 0.5f;
@@ -94,16 +105,19 @@ bool textIconButton(UiContext& ui, u64 id, const UiRect& r,
     return pressed;
 }
 
-// botão de ÍCONE puro (pause/play/gear): held = fill surface2,
+// botão de ÍCONE puro (pause/play/gear): held = fill surface2 NO CHIP,
 // ícone text1 (o accent fica para ESTADOS, não para repouso — spec A)
 bool iconButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon) {
+    // PASSO 1: o alvo é a LINHA da barra (36dp — o piso kRowFloorDp)
+    ui.auditRowFloorNext(layout::kRowFloorDp);
     const bool pressed = ui.widgetHit(id, r.x, r.y, r.w, r.h);
     const bool held = ui.widgetActive(id);
+    const UiRect chip = {r.x, r.y + (r.h - kChipH()) * 0.5f, r.w, kChipH()};
     if (held) {
-        ui.panelRounded(r.x, r.y, r.w, r.h, theme::kRadiusCard,
+        ui.panelRounded(chip.x, chip.y, chip.w, chip.h, theme::kRadiusCard,
                         theme::kTheme.surface2);
     }
-    const f32 s = r.h - theme::dp(12.0f);
+    const f32 s = kIconS();
     if (s >= theme::dp(12.0f)) {
         icons::drawIcon(ui, icon, r.x + (r.w - s) * 0.5f,
                         r.y + (r.h - s) * 0.5f, s, theme::kTheme.text1);
@@ -127,7 +141,7 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
     }
     // escala graciosa: as larguras naturais encolhem PROPORCIONALMENTE se
     // o ecrã for estreito. Os botões de ÍCONE (play/pause/stop/gear + o
-    // LOGO) NUNCA ENCOLHEM (Grupo D: o alvo 48dp é o PISO); o k divide
+    // LOGO) NUNCA ENCOLHEM (o alvo 40dp é o PISO); o k divide
     // só Menu/Cena/tabs/nome/plataforma. A DEGRADAÇÃO HONESTA (GRUPO UI):
     // o NOME "G.One" some primeiro (k<0.78 — o logo fica, é a
     // identidade), o CHIP da plataforma depois (k<0.62 — é informativo,
@@ -163,9 +177,9 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
     L.platform.w = kPlatW() * k;
     L.name.w  = kNameW();
     L.logo.w  = kIconBtn();
-    // os botões de ÍCONE nunca encolhem (o piso 48dp da casa)
+    // os botões de ÍCONE nunca encolhem (o piso 40dp da casa)
     L.play.w = L.pause.w = L.stop.w = L.gear.w = kIconBtn();
-    L.iconSize = theme::dp(24.0f);
+    L.iconSize = kIconS();
 
     const f32 by = L.bar.y + (L.bar.h - kBtnH()) * 0.5f;
     const auto place = [&by](UiRect& r, f32 x) {
@@ -209,15 +223,15 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
     if (cx > maxCx) {
         cx = maxCx;
     }
-    // ainda sem espaço? as tabs encolhem ao que sobrar (alvo ≥48 quando
+    // ainda sem espaço? as tabs encolhem ao que sobrar (alvo ≥40 quando
     // possível — o touch continua na linha inteira da barra)
     f32 tabW = L.tab3d.w;
     if (cx + tabsW > rgx - kGroupGap()) {
         const f32 room = (rgx - kGroupGap()) - cx;
-        if (room > 3.0f * theme::dp(48.0f)) {
+        if (room > 3.0f * kIconBtn()) {
             tabW = room / 3.0f;
         } else {
-            tabW = theme::dp(48.0f);   // piso 48dp — o grupo da direita cede
+            tabW = kIconBtn();   // piso 40dp — o grupo da direita cede
             cx = (x + kGroupGap() + rgx - kGroupGap() - 3.0f * tabW) * 0.5f;
         }
     }
@@ -246,9 +260,9 @@ TopBarActions drawTopBar(UiContext& ui, EditorState& st) {
              theme::kTheme.border);
 
     // ---- O LOGO (GRUPO UI · a imagem 1): o G âmbar num chip arredondado
-    // de 48dp — a identidade da casa à EXTREMA esquerda (o toque não faz
-    // nada: é a marca, não um botão — o rótulo de acessibilidade vive no
-    // nome ao lado)
+    // de 32×28 (PASSO 1: desenho pequeno no alvo 40×36) — a identidade da
+    // casa à EXTREMA esquerda (o toque não faz nada: é a marca, não um
+    // botão — o rótulo de acessibilidade vive no nome ao lado)
     {
         const UiRect& r = L.logo;
         ui.panelRounded(r.x + theme::dp(4.0f), r.y + theme::dp(4.0f),
@@ -263,7 +277,7 @@ TopBarActions drawTopBar(UiContext& ui, EditorState& st) {
                            theme::fontScale(theme::kFontSection), 0);
         }
         if (L.showName && ui.hasFont()) {
-            // o NOME ao lado do G (16sp text1 — some no aperto)
+            // o NOME ao lado do G (14sp text1 — some no aperto)
             const TextMetrics m = ui.textMetrics();
             ui.label(L.name.x + theme::dp(6.0f),
                      L.name.y + (L.name.h - m.block()) * 0.5f + m.ascent,
@@ -295,12 +309,14 @@ TopBarActions drawTopBar(UiContext& ui, EditorState& st) {
     };
     for (int i = 0; i < 3; ++i) {
         const UiRect& r = *tabs[i].r;
+        // PASSO 1: o alvo da tab é a LINHA da barra (36dp — kRowFloorDp)
+        ui.auditRowFloorNext(layout::kRowFloorDp);
         const bool pressed = ui.widgetHit(tabs[i].id, r.x, r.y, r.w, r.h);
         const bool held = ui.widgetActive(tabs[i].id);
         if (held) {
             ui.panel(r.x, r.y, r.w, r.h, theme::kTheme.surface2);
         }
-        const f32 s = theme::dp(24.0f);
+        const f32 s = kIconS();
         const f32 wordW = ui.hasFont() ? ui.fontWidth(tabs[i].word) : 0.0f;
         const f32 gap = theme::dp(8.0f);
         const f32 total = s + gap + wordW;
@@ -310,10 +326,13 @@ TopBarActions drawTopBar(UiContext& ui, EditorState& st) {
                                        : theme::kTheme.text2);
         if (ui.hasFont()) {
             const TextMetrics m = ui.textMetrics();
-            ui.label(x0 + s + gap,
-                     r.y + (r.h - m.block()) * 0.5f + m.ascent, tabs[i].word,
-                     tabs[i].active ? theme::kTheme.accent
-                                    : theme::kTheme.text2);
+            // PASSO 1: a palavra da tab em CAPTION 12sp
+            ui.labelStyled(x0 + s + gap,
+                           r.y + (r.h - m.block()) * 0.5f + m.ascent,
+                           tabs[i].word,
+                           tabs[i].active ? theme::kTheme.accent
+                                          : theme::kTheme.text2,
+                           theme::fontScale(theme::kFontCaption), 0);
         }
         if (pressed) {
             a.modeChanged = true;
@@ -365,8 +384,10 @@ TopBarActions drawTopBar(UiContext& ui, EditorState& st) {
             const f32 gap = theme::dp(4.0f);
             const f32 total = tw + gap + theme::dp(8.0f);
             const f32 x0 = r.x + (r.w - total) * 0.5f;
-            ui.label(x0, r.y + (r.h - m.block()) * 0.5f + m.ascent, "Android",
-                     theme::kTheme.text2);
+            // PASSO 1: o chip em CAPTION 12sp
+            ui.labelStyled(x0, r.y + (r.h - m.block()) * 0.5f + m.ascent,
+                           "Android", theme::kTheme.text2,
+                           theme::fontScale(theme::kFontCaption), 0);
             // o caret ▾ do chip
             const f32 cy = r.y + r.h * 0.5f;
             const f32 cx = x0 + tw + gap + theme::dp(4.0f);
@@ -377,6 +398,8 @@ TopBarActions drawTopBar(UiContext& ui, EditorState& st) {
             ui.drawLine(cx, cy + theme::dp(2.0f), cx + theme::dp(3.0f),
                         cy - theme::dp(2.0f), theme::dp(2.0f), col);
         }
+        // PASSO 1: o chip também é da LINHA (36dp — kRowFloorDp)
+        ui.auditRowFloorNext(layout::kRowFloorDp);
         if (ui.widgetHit(kTbPlatformId, r.x, r.y, r.w, r.h)) {
             a.platformPressed = true;
         }

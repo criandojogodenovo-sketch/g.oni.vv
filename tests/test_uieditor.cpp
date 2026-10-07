@@ -682,22 +682,27 @@ TEST(uieditor_hierarquia_olho_e_dots_e_vazio) {
     EXPECT(e.ok);
     e.frame();
 
-    // geometria (spec B): linha 48dp [ícone tipo 48zona][nome flex]
-    // [olho 48zona x=196..244][⋮ 48zona x=248..296]; FASE 9 (G2-10):
-    // listTop = chrome 56 (barra única) + cabeçalho 48 + pesquisa 48 = 152
-    const f32 listTop = 56.0f + 48.0f + 48.0f;
-    const f32 rowCY = listTop + 24.0f;   // meia linha de 48
+    // geometria (spec B · PASSO 1): linha 36dp [ícone tipo 20 na zona 40]
+    // [nome flex][olho 40zona][⋮ 40zona] — as zonas vêm do draw: painel
+    // x=0 w=300 → olho x=212..252, ⋮ x=256..296; listTop = chrome 36
+    // (barra única) + cabeçalho 28 + pesquisa 32 = 96
+    const f32 panelW = 300.0f;   // safe::kPanelW (painel padrão)
+    const f32 zoneW = 40.0f;     // a zona de toque (PASSO 1)
+    const f32 eyeX = panelW - zoneW - 8.0f - zoneW;    // 212
+    const f32 dotsX = panelW - zoneW - 4.0f;           // 256
+    const f32 listTop = 36.0f + 28.0f + 32.0f;
+    const f32 rowCY = listTop + 18.0f;   // meia linha de 36
 
     // OLHO: toggle de visibilidade imediato
     EXPECT(e.scene.get(e.hud)->visible);
-    e.tap(196.0f + 24.0f, rowCY);
+    e.tap(eyeX + zoneW * 0.5f, rowCY);
     EXPECT(!e.scene.get(e.hud)->visible);
-    e.tap(196.0f + 24.0f, rowCY);
+    e.tap(eyeX + zoneW * 0.5f, rowCY);
     EXPECT(e.scene.get(e.hud)->visible);
 
     // "⋮" abre o menu contextual
     EXPECT(!e.st.contextMenu);
-    e.tap(248.0f + 24.0f, rowCY);
+    e.tap(dotsX + zoneW * 0.5f, rowCY);
     EXPECT(e.st.contextMenu);
     EXPECT(e.st.contextTic == e.hud);
 
@@ -708,7 +713,7 @@ TEST(uieditor_hierarquia_olho_e_dots_e_vazio) {
 
     // VAZIO da lista (abaixo da última linha, dentro do painel) DESSELECIONA
     EXPECT(e.st.selected.valid());
-    e.tap(150.0f, 56.0f + 48.0f + 3.0f * 52.0f);   // sob a linha do único TIC (G2-10: 88→56)
+    e.tap(150.0f, listTop + 3.0f * 36.0f + 8.0f);   // sob a linha do único TIC
     EXPECT(!e.st.selected.valid());
 }
 
@@ -729,8 +734,8 @@ TEST(uieditor_menu_contextual_quatro_acoes) {
         e.st.contextMenu = true;
         e.frame();
         // itens: y = menuY + kHeaderH + i*64 + 28 — menu centrado
-        const f32 h = kHeaderH + 4.0f * 64.0f + kPad;
-        const f32 y = (kSH - h) * 0.5f + kHeaderH + static_cast<f32>(item) * 64.0f + 28.0f;
+        const f32 h = kHeaderH + 4.0f * 48.0f + kPad;
+        const f32 y = (kSH - h) * 0.5f + kHeaderH + static_cast<f32>(item) * 48.0f + 20.0f;
         e.tap(800.0f, y);
     };
 
@@ -925,12 +930,13 @@ TEST(uieditor_plus_modo_ui_cria_elementos_no_canvas) {
     e.st.uiMode = true;
     e.frame();
     // "+" da Hierarchy abre o menu (no modo UI: CRIAR ELEMENTO UI)
-    e.tap(300.0f - 12.0f - 28.0f, 56.0f + 24.0f);   // botão + do cabeçalho (G2-10: 88→56)
+    // PASSO 1: cabeçalho 28, [+] 28dp no topo do painel (chrome 36)
+    e.tap(300.0f - 16.0f - 14.0f, 36.0f + 14.0f);
     EXPECT(e.st.plusMenu);
     // 0.7.4: 10 itens (Panel/Label/Button/Image/Menu/Card/Article/Joystick/
-    // VBox/HBox)
-    const f32 h = kHeaderH + 10.0f * 64.0f + kPad;
-    const f32 y = (kSH - h) * 0.5f + kHeaderH + 2.0f * 64.0f + 28.0f;   // Button
+    // VBox/HBox) — PASSO 1: linhas de 40 num passo de 48
+    const f32 h = kHeaderH + 10.0f * 48.0f + kPad;
+    const f32 y = (kSH - h) * 0.5f + kHeaderH + 2.0f * 48.0f + 20.0f;   // Button
     e.tap(800.0f, y);
     EXPECT(!e.st.plusMenu);
     UiCanvas* c = e.canvas();

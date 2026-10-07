@@ -74,6 +74,8 @@ constexpr u32 kBitSobre = 1u << 5;
 // ---- contexto (o main injeta; TUDO só-leitura exceto o que devolve) ---------
 struct Ctx {
     const char* version = "";        // "0.9.0 (vc 43)"
+    const char* git = "";            // PASSO 1: o commit curto (o Sobre;
+                                     // vivia na status bar removida)
     const char* soSha = "";          // sha256 da .so (identidade 0.8.10)
     const char* storageMode = "";    // "saf" / "files"
     bool keepSource = true;

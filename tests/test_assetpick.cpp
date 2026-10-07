@@ -225,13 +225,13 @@ TEST(assetpick_sequencia_do_main_menukind_antes_do_draw) {
     const int menuKind = st.assetMenu;      // ← o FIX: capturado ANTES
 
     // geometria do seletor — as MESMAS fórmulas do drawAssetMenu (kMenuW
-    // 340, header 48, linhas de 48 com botões de 40, cap 5)
+    // 340, PASSO 1: header 28, linhas de 36 com botões da linha)
     const f32 w = kMenuW;
-    const f32 h = kHeaderH + (1.0f + 1.0f) * 48.0f + kPad;
+    const f32 h = kHeaderH + (1.0f + 1.0f) * 36.0f + kPad;
     const f32 x = (kSW - w) * 0.5f;
     const f32 y = (kSH - h) * 0.5f;
     const f32 bx = x + kPad + (w - 2.0f * kPad) * 0.5f;          // botão do ficheiro
-    const f32 by = y + kHeaderH + 1.0f * 48.0f + 20.0f;          // (i=0 → centro)
+    const f32 by = y + kHeaderH + 1.0f * 36.0f + 18.0f;          // (i=0 → centro)
 
     // frame 1: press dentro do botão do ficheiro (active_)
     input.injectDown(0, bx, by);
@@ -518,17 +518,17 @@ TEST(assetpick_r014_todos_os_ficheiros_aparecem_no_seletor) {
     const int menuKind = st.assetMenu;
 
     // a geometria NOVA (overlayArea + lista scrollável): landscape
-    // 1600x720, insets 0, withImport=FALSE → fixedH=48+2*48+16=160;
-    // maxListH=424 → as 7 linhas CABEM todas (sem scroll)
+    // 1600x720, insets 0, withImport=FALSE → PASSO 1: fixedH=28+2*36+16=116;
+    // maxListH maior → as 7 linhas CABEM todas (sem scroll)
     f32 ox, oy, aw, ah;
     overlayArea(kSW, kSH, safe::Insets{}, ox, oy, aw, ah);
     const f32 w = kMenuW;
-    const f32 fixedH = kHeaderH + 2.0f * 48.0f + kPad;
-    const f32 listH = 7.0f * 48.0f;
+    const f32 fixedH = kHeaderH + 2.0f * 36.0f + kPad;
+    const f32 listH = 7.0f * 36.0f;
     const f32 h = fixedH + listH;
     const f32 x = ox + (aw - w) * 0.5f;
     const f32 y = oy + (ah - h) * 0.5f;
-    const f32 listTop = y + kHeaderH + 2.0f * 48.0f;
+    const f32 listTop = y + kHeaderH + 2.0f * 36.0f;
 
     // o 7º ficheiro (idx 6 — o importado, INVISÍVEL no cap antigo):
     // primeiro AFERMOS QUE A LINHA DESSENHOU (glifos do label no rect da
@@ -542,9 +542,9 @@ TEST(assetpick_r014_todos_os_ficheiros_aparecem_no_seletor) {
         const QuadVertex* v = g.vertices();
         const u32 n = g.vertexCount();
         u32 naLinha = 0;
-        const f32 r0 = listTop + 6.0f * 48.0f;
+        const f32 r0 = listTop + 6.0f * 36.0f;
         for (u32 i = 0; i + 5 < n; i += 6) {
-            if (v[i].y >= r0 - 2.0f && v[i + 2].y <= r0 + 48.0f &&
+            if (v[i].y >= r0 - 2.0f && v[i + 2].y <= r0 + 36.0f &&
                 v[i].x >= x && v[i].x <= x + w) {
                 ++naLinha;
             }
@@ -553,7 +553,7 @@ TEST(assetpick_r014_todos_os_ficheiros_aparecem_no_seletor) {
                                 // desenhou INTEIRO na 7ª linha
     }
     const f32 bx = x + kPad + (w - 2.0f * kPad) * 0.5f;
-    const f32 by = listTop + 6.0f * 48.0f + 20.0f;
+    const f32 by = listTop + 6.0f * 36.0f + 18.0f;
     input.injectDown(0, bx, by);
     ui.beginFrame(nullptr, &input, kSW, kSH);
     drawAssetMenu(ui, input, kSW, kSH, st, e.cat);
@@ -603,13 +603,13 @@ TEST(assetpick_r014_o_scroll_alcanca_os_ficheiros_que_nao_cabem) {
     f32 ox, oy, aw, ah;
     overlayArea(kSW, kSH, safe::Insets{}, ox, oy, aw, ah);
     const f32 w = kMenuW;
-    const f32 fixedH = kHeaderH + 2.0f * 48.0f + kPad;   // withImport=false
+    const f32 fixedH = kHeaderH + 2.0f * 36.0f + kPad;   // PASSO 1 (36/28)
     const f32 maxListH = ah - fixedH - 8.0f;
-    const f32 listH = 9.0f * 48.0f < maxListH ? 9.0f * 48.0f : maxListH;
+    const f32 listH = 9.0f * 36.0f < maxListH ? 9.0f * 36.0f : maxListH;
     const f32 h = fixedH + listH;
     const f32 x = ox + (aw - w) * 0.5f;
     const f32 y = oy + (ah - h) * 0.5f;
-    const f32 listTop = y + kHeaderH + 2.0f * 48.0f;
+    const f32 listTop = y + kHeaderH + 2.0f * 36.0f;
 
     // DRAG para o fim da lista (o scroll do UiContext — press, move, up).
     // O dedo FICA DENTRO do menu (sair dele = pressedOutside = fechar)

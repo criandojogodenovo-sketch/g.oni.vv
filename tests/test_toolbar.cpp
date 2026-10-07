@@ -118,16 +118,17 @@ u64 iconSegHash(icons::Icon ic) {
 
 } // namespace
 
-// ---- 1. TOP BAR: layout 56dp sem sobreposição, alvos ≥48, gear à direita -----
+// ---- 1. TOP BAR: layout 36dp sem sobreposição, alvos da linha, gear à
+// direita (PASSO 1: a LEI DE OURO — desenho 32/toque 40, nada ≥48) ----
 
-// ---- FASE 9 (G2-9/G2-10): A BARRA ÚNICA — menu+tabs+ações numa faixa de 56 --
-// (a tab bar de 48dp FUNDEU-SE; o botão sliders MORREU — inventário G0-4)
+// ---- FASE 9 (G2-9/G2-10): A BARRA ÚNICA — menu+tabs+ações numa faixa ----
+// (a tab bar FUNDEU-SE; o botão sliders MORREU — inventário G0-4)
 
 TEST(topbar_layout_56dp_alvos48_sem_sobreposicao) {
     const safe::Insets in{0.0f, 24.0f, 0.0f, 24.0f};   // C33
     const toolbar::TopBarLayout L =
         toolbar::topbarLayout(kSW, kSH, in, false, false);
-    EXPECT(nearEqF(L.bar.h, 56.0f));
+    EXPECT(nearEqF(L.bar.h, 36.0f));   // PASSO 1: a linha da spec (era 56)
     EXPECT(nearEqF(L.bar.y, 24.0f));
     const UiRect content = safe::contentRect(kSW, kSH, in);
     EXPECT(safe::rectInside(L.bar, content));
@@ -137,7 +138,7 @@ TEST(topbar_layout_56dp_alvos48_sem_sobreposicao) {
     const char* names[8] = {"menu", "cena", "tab3d", "tabUi",
                             "tabAudio", "pause", "play", "gear"};
     for (int i = 0; i < 8; ++i) {
-        EXPECT(rects[i].h >= 48.0f - 0.01f);
+        EXPECT(rects[i].h >= 36.0f - 0.01f);   // o alvo é a LINHA (36)
         EXPECT(rects[i].w > 0.0f);
         EXPECT(safe::rectInside(rects[i], content));
         for (int j = i + 1; j < 8; ++j) {

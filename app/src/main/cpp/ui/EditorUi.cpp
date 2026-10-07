@@ -32,17 +32,19 @@ namespace editor {
 // uma vez quando a densidade do device fica conhecida (main.cpp no arranque
 // e em mudanças de AConfiguration) — os centenas de pontos de uso ficam
 // intocados; nos testes (densidade 1.0) os valores são os de sempre.
+// PASSO 1 (0.9.6.14 · a tabela da spec do dono): cabeçalho 28 · linha 36 ·
+// campo/pesquisa 32 (eram TUDO 48 — a lei de ouro: nada ≥48 no editor)
 f32 kPad       = 16.0f;
-f32 kHeaderH   = 48.0f;
-f32 kRowH      = 48.0f;
-f32 kSearchRowH = 48.0f;
+f32 kHeaderH   = 28.0f;
+f32 kRowH      = 36.0f;
+f32 kSearchRowH = 32.0f;
 f32 kMenuW     = 340.0f;
 
 void applyDensity() {
     kPad        = theme::dp(16.0f);
-    kHeaderH    = theme::dp(48.0f);
-    kRowH       = theme::dp(48.0f);
-    kSearchRowH = theme::dp(48.0f);
+    kHeaderH    = theme::dp(28.0f);
+    kRowH       = theme::dp(36.0f);
+    kSearchRowH = theme::dp(32.0f);
     kMenuW      = theme::dp(340.0f);
 }
 
@@ -420,14 +422,16 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
         ui.labelStyled(x + kPad, base, "Hierarquia", theme::kTheme.text1,
                        theme::fontScale(theme::kFontSection), 0);
         // chip da MULTI-SELEÇÃO (aparece com ≥1 no conjunto): "N ×" limpa
+        // PASSO 1: chip 28dp de altura (a LINHA do cabeçalho — o piso
+        // kHeadFloorDp; o alvo é a linha do cabeçalho de 28dp)
         if (st.multiSelectCount > 0) {
             char chip[24];
             std::snprintf(chip, sizeof(chip), "%u x", st.multiSelectCount);
-            const f32 cw = theme::dp(56.0f);
-            const UiRect cr = {x + w - kPad - theme::dp(56.0f) -
+            const f32 cw = theme::dp(48.0f);
+            const UiRect cr = {x + w - kPad - theme::dp(48.0f) -
                                    theme::dp(8.0f) - cw,
-                               y + (kHeaderH - theme::dp(48.0f)) * 0.5f, cw,
-                               theme::dp(48.0f)};
+                               y, cw, kHeaderH};
+            ui.auditRowFloorNext(layout::kHeadFloorDp);
             if (ui.button(kHierMultiClearId, cr.x, cr.y, cr.w, cr.h, chip)) {
                 st.multiSelectCount = 0;   // volta à seleção simples
             }
@@ -436,9 +440,10 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
         // BLOCO cheio do accent (branco cegante no mono; âmbar gritaria
         // agora) — a referência tem botões QUIETOS: chip de vidro com o
         // ícone âmbar (o accent é ESTADO, não repouso — a regra spec A)
-        const UiRect pr = {x + w - kPad - theme::dp(48.0f),
-                           y + (kHeaderH - theme::dp(48.0f)) * 0.5f,
-                           theme::dp(48.0f), theme::dp(48.0f)};
+        // PASSO 1: alvo 28×28 (a LINHA do cabeçalho), desenho 24, ícone 16
+        const f32 hdrBtn = kHeaderH;
+        const UiRect pr = {x + w - kPad - hdrBtn, y, hdrBtn, hdrBtn};
+        ui.auditRowFloorNext(layout::kHeadFloorDp);
         bool plus = false;
         if (ui.widgetHit(kIdPlus, pr.x, pr.y, pr.w, pr.h)) {
             plus = true;
@@ -450,16 +455,15 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
         ui.frameRounded(pr.x, pr.y, pr.w, pr.h, 1.0f,
                         theme::dp(theme::kRadiusCard), theme::kTheme.border);
         icons::drawIcon(ui, icons::Icon::Plus,
-                        pr.x + (pr.w - theme::dp(24.0f)) * 0.5f,
-                        pr.y + (pr.h - theme::dp(24.0f)) * 0.5f,
-                        theme::dp(24.0f),
+                        pr.x + (pr.w - theme::dp(16.0f)) * 0.5f,
+                        pr.y + (pr.h - theme::dp(16.0f)) * 0.5f,
+                        theme::dp(16.0f),
                         plusHeld ? theme::kTheme.accentInk
                                  : theme::kTheme.accent);
         // o ⋮ da hierarquia (a imagem 1: cada painel com o seu menu) —
         // abre o sheet com as ações reais da árvore (o main despacha)
-        const UiRect dr = {pr.x - theme::dp(48.0f),
-                           y + (kHeaderH - theme::dp(48.0f)) * 0.5f,
-                           theme::dp(48.0f), theme::dp(48.0f)};
+        const UiRect dr = {pr.x - hdrBtn, y, hdrBtn, hdrBtn};
+        ui.auditRowFloorNext(layout::kHeadFloorDp);
         const bool dotsHeld = ui.widgetActive(kHierDotsId);
         ui.panelRounded(dr.x, dr.y, dr.w, dr.h, theme::dp(theme::kRadiusCard),
                         (dotsHeld || st.hierMenu) ? theme::kTheme.surface2
@@ -467,19 +471,20 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
         ui.frameRounded(dr.x, dr.y, dr.w, dr.h, 1.0f,
                         theme::dp(theme::kRadiusCard), theme::kTheme.border);
         for (int d = 0; d < 3; ++d) {
-            ui.panel(dr.x + dr.w * 0.5f - theme::dp(9.0f) +
-                         static_cast<f32>(d) * theme::dp(9.0f),
-                     dr.y + dr.h * 0.5f - theme::dp(2.0f), theme::dp(4.0f),
-                     theme::dp(4.0f), theme::kTheme.text1);
+            ui.panel(dr.x + dr.w * 0.5f - theme::dp(7.0f) +
+                         static_cast<f32>(d) * theme::dp(7.0f),
+                     dr.y + dr.h * 0.5f - theme::dp(2.0f), theme::dp(3.0f),
+                     theme::dp(3.0f), theme::kTheme.text1);
         }
         if (ui.widgetHit(kHierDotsId, dr.x, dr.y, dr.w, dr.h)) {
             st.hierMenu = !st.hierMenu;
         }
-        // ---- pesquisa 48dp (scope: por nome no header da hierarquia) ----
+        // ---- pesquisa 32dp (PASSO 1: o CAMPO da spec — o campo OCUPA a
+        // linha kSearchRowH inteira; o piso de campo 32, LayoutDump.h) ----
         const f32 sy = y + kHeaderH;
         ui.panel(x, sy, w, 1.0f, theme::kTheme.border);
-        const UiRect sfield = {x + kPad, sy + (kSearchRowH - theme::dp(48.0f)) * 0.5f,
-                               w - 2.0f * kPad, theme::dp(48.0f)};
+        const UiRect sfield = {x + kPad, sy, w - 2.0f * kPad, kSearchRowH};
+        ui.auditRowFloorNext(layout::kFieldFloorDp);
         ui.panelRounded(sfield.x, sfield.y, sfield.w, sfield.h,
                         theme::dp(theme::kRadiusField), theme::kTheme.bg);
         ui.frameRounded(sfield.x, sfield.y, sfield.w, sfield.h, 1.0f,
@@ -521,11 +526,14 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
         ui.beginScroll(kIdScrollHier, listRegion, contentH);
         const f32 off = ui.scrollOffset();
 
-        // geometria da linha (spec B): [ícone tipo 48zona][nome flex]
-        // [olho 48zona][⋮ 48zona] — ícones 24 dentro de alvos 48 (dp, 0.9.6.6)
-        const f32 eyeX = x + w - theme::dp(48.0f) - theme::dp(8.0f) -
-                         theme::dp(48.0f);   // zona olho
-        const f32 dotsX = x + w - theme::dp(48.0f) - theme::dp(4.0f);   // zona ⋮ (até à borda)
+        // geometria da linha (PASSO 1 · spec B): [ícone tipo 20 na zona
+        // 40][nome flex][olho 40zona][⋮ 40zona] — as ZONAS de toque 40dp
+        // de largura × a LINHA de 36 (o despacho do scrollTap usa AS
+        // MESMAS zonas — desenho e toque NUNCA divergem; ícones 20)
+        const f32 zoneW = theme::dp(40.0f);
+        const f32 eyeX = x + w - zoneW - theme::dp(8.0f) -
+                         zoneW;   // zona olho
+        const f32 dotsX = x + w - zoneW - theme::dp(4.0f);   // zona ⋮ (até à borda)
 
         // FASE 9 (G2-7): houve dedo parado em algum nome neste frame?
         bool holdVivo = false;
@@ -570,13 +578,13 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                          1.5f, kRowH, theme::kTheme.border);
             }
 
-            // ---- ícone de TIPO (24dp na zona de 48) ----
+            // ---- ícone de TIPO (20dp na zona de 40 — PASSO 1) ----
             const icons::Icon ic = hierIconFor(*t);
             const f32 iconX = x + theme::dp(16.0f) + indent;
             const bool inkOn = (selected && st.multiSelectCount == 0) || multi;
             icons::drawIcon(ui, ic, iconX,
-                            ry + (kRowH - theme::dp(24.0f)) * 0.5f,
-                            theme::dp(24.0f),
+                            ry + (kRowH - theme::dp(20.0f)) * 0.5f,
+                            theme::dp(20.0f),
                             inkOn ? theme::kTheme.accent
                                   : theme::kTheme.text2);
 
@@ -614,19 +622,19 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                 }
             }
 
-            // ---- olho / ⋮ (ícones 24 em alvos 48; só desenham — o tap é
-            // re-despachado pelo scroll) ----
+            // ---- olho / ⋮ (ícones 20 em zonas 40×Linha — PASSO 1; só
+            // desenham — o tap é re-despachado pelo scroll) ----
             icons::drawIcon(ui, t->visible ? icons::Icon::Eye
                                            : icons::Icon::EyeOff,
-                            eyeX + (theme::dp(48.0f) - theme::dp(24.0f)) * 0.5f,
-                            ry + (kRowH - theme::dp(24.0f)) * 0.5f,
-                            theme::dp(24.0f),
+                            eyeX + (zoneW - theme::dp(20.0f)) * 0.5f,
+                            ry + (kRowH - theme::dp(20.0f)) * 0.5f,
+                            theme::dp(20.0f),
                             inkOn ? theme::kTheme.accentInk
                                   : theme::kTheme.text2);
             icons::drawIcon(ui, icons::Icon::Dots,
-                            dotsX + (theme::dp(48.0f) - theme::dp(24.0f)) * 0.5f,
-                            ry + (kRowH - theme::dp(24.0f)) * 0.5f,
-                            theme::dp(24.0f),
+                            dotsX + (zoneW - theme::dp(20.0f)) * 0.5f,
+                            ry + (kRowH - theme::dp(20.0f)) * 0.5f,
+                            theme::dp(20.0f),
                             inkOn ? theme::kTheme.accentInk
                                   : theme::kTheme.text2);
         }
@@ -676,19 +684,20 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                     const f32 ry = listTop + static_cast<f32>(sel) * kRowH - off;
                     const f32 indent = static_cast<f32>(rows[sel].depth) * 24.0f;
                     const f32 iconX = x + 16.0f + indent;
-                    const f32 eyeHit = eyeX;             // zona de 48dp
+                    const f32 eyeHit = eyeX;             // zona de 40dp
                     const f32 dotsHit = dotsX;
+                    const f32 zonePx = zoneW;   // px reais da zona (dp)
                     if (ty >= ry && ty < ry + kRowH && tx >= eyeHit &&
-                        tx < eyeHit + 48.0f) {
+                        tx < eyeHit + zonePx) {
                         if (Tic* tt = scene.get(t->handle)) {
                             tt->visible = !tt->visible;   // OLHO: toggle
                         }
                     } else if (ty >= ry && ty < ry + kRowH && tx >= dotsHit &&
-                               tx < dotsHit + 48.0f) {
+                               tx < dotsHit + zonePx) {
                         st.contextMenu = true;           // ⋮: menu (spec L)
                         st.contextTic = t->handle;
                     } else if (ty >= ry && ty < ry + kRowH && tx >= iconX &&
-                               tx < iconX + 48.0f) {
+                               tx < iconX + zonePx) {
                         // MULTI: o toque no ÍCONE DE TIPO alterna no conjunto
                         bool inSet = false;
                         u32 at = 0;
@@ -757,17 +766,17 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         const f32 base = y + (kHeaderH - mh.block()) * 0.5f + mh.ascent;
         ui.labelStyled(x + kPad, base, "Inspector", theme::kTheme.text1,
                        theme::fontScale(theme::kFontSection), 0);
-        // o alvo da tab é o PISO da casa: 48dp (a altura do cabeçalho
-        // TODO dele — o validador afere; os chips de 32dp davam aviso)
+        // o alvo da tab é a LINHA do cabeçalho (PASSO 1: 28dp — o piso
+        // kHeadFloorDp; o cabeçalho TODO é o alvo — o validador afere)
         const f32 tabH = kHeaderH;
-        const f32 tabY = y + (kHeaderH - tabH) * 0.5f;
+        const f32 tabY = y;
         static const char* const kInspTabs[2] = {"Inspector", "Nós"};
         f32 tx0 = x + w - kPad;
         for (int i = 1; i >= 0; --i) {   // da direita para a esquerda
             const f32 tw = ui.hasFont()
                                ? std::max(ui.fontWidth(kInspTabs[i]) +
                                               theme::dp(24.0f),
-                                          theme::dp(48.0f))   // o piso da casa
+                                          theme::dp(40.0f))   // o piso da casa
                                : theme::dp(88.0f);
             tx0 -= tw;
             const bool active = st.inspTab == (u32)i;
@@ -789,6 +798,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                     active ? theme::kTheme.text1 : theme::kTheme.text2,
                     tw - theme::dp(16.0f));
             }
+            // PASSO 1: a flag ANTES do hit (o piso de cabeçalho 28)
+            ui.auditRowFloorNext(layout::kHeadFloorDp);
             if (ui.widgetHit(kInspTabBase + static_cast<u64>(i), tx0, tabY,
                              tw, tabH)) {
                 st.inspTab = static_cast<u32>(i);
@@ -804,7 +815,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     // seleção da casa; tocar num nó SELECIONA e VOLTA às propriedades)
     if (st.inspTab == 1) {
         const TextMetrics tmN = ui.textMetrics();
-        const f32 rowH = theme::dp(48.0f);
+        const f32 rowH = kRowH;   // PASSO 1: a linha da spec (36, era 48)
         struct NRow {
             Handle h;
             u32 depth;
@@ -1166,6 +1177,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 char label[40];
                 std::snprintf(label, sizeof(label), "hex: %s", hex);
                 const f32 btnW = (swX - 8.0f) - (x + kPad);
+                ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
                 ui.button(r.id, x + kPad, ry + 2.0f, btnW, r.h - 4.0f, label);
             }
             break;
@@ -1196,40 +1208,39 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             icons::drawIcon(ui,
                             open ? icons::Icon::ChevronDown
                                  : icons::Icon::ChevronRight,
-                            x + w - kPad - theme::dp(24.0f),
-                            ry + (r.h - theme::dp(24.0f)) * 0.5f,
-                            theme::dp(24.0f), theme::kTheme.text2);
+                            x + w - kPad - theme::dp(20.0f),
+                            ry + (r.h - theme::dp(20.0f)) * 0.5f,
+                            theme::dp(20.0f), theme::kTheme.text2);
             ui.panel(x + kPad, ry + r.h - 1.0f, w - 2.0f * kPad, 1.0f,
                      theme::kTheme.border);
             break;
         }
         case InspRow::Kind::TransformRow: {
             // 0.9.0 (spec C): "linhas Pos/Rotação/Escala com 3 campos
-            // numéricos editáveis 48dp, raio 4dp, bordo, rótulos X/Y/Z +
-            // botão R que repõe a linha". Título em LINHA PRÓPRIA (a
-            // largura do painel não comporta tudo na mesma linha — o
-            // orçamento era o bug da caixa Z sob o R); caixas 48dp com o
-            // rótulo do eixo à esquerda e o valor à direita (labelFitted —
-            // nunca invade); o toque abre o teclado numérico (propósito 6).
+            // numéricos editáveis, raio 4dp, bordo, rótulos X/Y/Z + botão
+            // R que repõe a linha". Título em LINHA PRÓPRIA (a largura do
+            // painel não comporta tudo na mesma linha — o orçamento era o
+            // bug da caixa Z sob o R); PASSO 1: caixas 32dp (o CAMPO da
+            // spec — o piso kFieldFloorDp; eram 48) com o rótulo do eixo à
+            // esquerda e o valor à direita (labelFitted — nunca invade); o
+            // toque abre o teclado numérico (propósito 6).
             static const char* kRowTitles[3] = {"Posição", "Rotação", "Escala"};
             const u32 rowIdx = r.payload;
             const TextMetrics m2 = ui.textMetrics();
             const f32 titleBase = ry + theme::dp(2.0f) + m2.ascent;
             ui.label(x + kPad, titleBase, kRowTitles[rowIdx],
                      theme::kTheme.text2);
-            // caixas 48dp de ALTURA (spec C: campo numérico 48dp), largura
+            // caixas 32dp de ALTURA (PASSO 1: o campo da spec), largura
             // ADAPTATIVA (GRUPO D): 64dp quando a linha cabe inteira
-            // (3×64+2×8+8+48 = 272dp úteis); 56dp em painel estreito
-            // (divisores/device: 184+8+48 = 240dp — o alvo 48dp mantém-se
-            // pela ALTURA, o valor trunca com …). O R ao lado do TÍTULO é a
-            // defesa final (painel sub-mínimo — nunca sobre a caixa Z).
+            // (3×64+2×8+8+40 = 256dp úteis); 56dp em painel estreito
+            // (divisores/device). O R ao lado do TÍTULO é a defesa final
+            // (painel sub-mínimo — nunca sobre a caixa Z).
             const f32 usableW = w - 2.0f * kPad;
-            const bool narrowRow = usableW < theme::dp(272.0f);
+            const bool narrowRow = usableW < theme::dp(256.0f);
             const f32 boxW = narrowRow ? theme::dp(56.0f) : theme::dp(64.0f);
-            const f32 boxH = theme::dp(48.0f);
+            const f32 boxH = theme::dp(32.0f);
             const bool rOnTitle = usableW < theme::dp(240.0f);
-            const f32 boxY = rOnTitle ? ry + theme::dp(28.0f)
-                                      : ry + theme::dp(24.0f);
+            const f32 boxY = ry + theme::dp(28.0f);
             const f32 boxBase = boxY + (boxH - m2.block()) * 0.5f + m2.ascent;
             f32 bx = x + kPad;
             for (u32 axis = 0; axis < 3; ++axis) {
@@ -1276,11 +1287,12 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 }
                 bx += boxW + theme::dp(8.0f);
             }
-            // botão R (48dp — repõe a linha): na linha das CAIXAS quando
-            // cabe; no ESTREITO, ao lado do TÍTULO (nunca sobre a caixa Z)
-            const UiRect rr2 = {x + w - kPad - theme::dp(48.0f),
+            // botão R (PASSO 1: 40×32 — o alvo 40 na LARGURA, o campo 32
+            // na altura; repõe a linha): na linha das CAIXAS quando cabe;
+            // no ESTREITO, ao lado do TÍTULO (nunca sobre a caixa Z)
+            const UiRect rr2 = {x + w - kPad - theme::dp(40.0f),
                                 rOnTitle ? ry + theme::dp(2.0f) : boxY,
-                                theme::dp(48.0f), boxH};
+                                theme::dp(40.0f), boxH};
             const bool rHeld = ui.widgetActive(r.id);
             ui.panelRounded(rr2.x, rr2.y, rr2.w, rr2.h,
                             theme::dp(theme::kRadiusField),
@@ -1297,6 +1309,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         case InspRow::Kind::Slider:
             if (tr && sliderIdx < 9) {
                 const SliderSpec& sp = rows9[sliderIdx];
+                ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
                 if (sliderRow(ui, r.id, x, ry, r.h, tm, sp.label, sp.min, sp.max,
                               *sp.value, sp.fmt, true)) {   // 0.8.9: valor tocável (campo numérico)
                     trEdited = true;
@@ -1308,6 +1321,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         case InspRow::Kind::Velx:
             if (bc) {
                 f32 vx = bc->velocity.x;
+                ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
                 if (sliderRow(ui, r.id, x, ry, r.h, tm, "velx", -60.0f, 60.0f,
                               vx, "%.1f")) {
                     bc->velocity.x = vx;
@@ -1318,10 +1332,12 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         case InspRow::Kind::MeshButton:
             // botão da linha INTEIRA, centrado na linha do plano (o botão
             // antigo sangrava 2 px para a linha de baixo)
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       meshLabel);
             break;
         case InspRow::Kind::TexButton:
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       texLabel);
             break;
@@ -1349,6 +1365,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         case InspRow::Kind::ScaleOrig:
             // repõe a escala {1,1,1} — o "tamanho original" do modelo (o fit
             // uniforme vive no Transform3D, a geometria nunca foi tocada)
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       "escala: original");
             break;
@@ -1361,10 +1378,11 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             const TextMetrics m2 = ui.textMetrics();
             const f32 base = ry + (r.h - m2.block()) * 0.5f + m2.ascent;
             icons::drawIcon(ui, icons::Icon::Terminal, x + kPad,
-                            ry + (r.h - 24.0f) * 0.5f, 24.0f,
+                            ry + (r.h - 20.0f) * 0.5f, 20.0f,
                             theme::kTheme.accent);
             ui.label(x + kPad + 32.0f, base, "Editar script",
                      theme::kTheme.text1);
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
             if (ui.widgetHit(r.id, x, ry, w, r.h)) {
                 st.requestScriptEditor = true;   // o main abre (com o par)
                 st.scriptEditorTarget = tic->handle;
@@ -1379,10 +1397,11 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             const TextMetrics m2 = ui.textMetrics();
             const f32 base = ry + (r.h - m2.block()) * 0.5f + m2.ascent;
             icons::drawIcon(ui, icons::Icon::Plus, x + kPad,
-                            ry + (r.h - 24.0f) * 0.5f, 24.0f,
+                            ry + (r.h - 20.0f) * 0.5f, 20.0f,
                             theme::kTheme.accent);
             ui.label(x + kPad + 32.0f, base, "Adicionar script",
                      theme::kTheme.text1);
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
             if (ui.widgetHit(r.id, x, ry, w, r.h) &&
                 !tic->getComponent<ScriptComp>()) {
                 tic->addComponent<ScriptComp>();
@@ -1442,6 +1461,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             break;
         }
         case InspRow::Kind::AddTc:
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       "add TouchControls");
             break;
@@ -1449,6 +1469,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
 
         case InspRow::Kind::CamFov:
             if (camEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
                 if (sliderRow(ui, r.id, x, ry, r.h, tm, "fov",
                               CameraComp::kMinFov, CameraComp::kMaxFov,
                               camEdit->fovY, "%.0f")) {
@@ -1458,6 +1479,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             break;
         case InspRow::Kind::CamNear:
             if (camEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
                 if (sliderRow(ui, r.id, x, ry, r.h, tm, "near",
                               CameraComp::kMinNear, 10.0f, camEdit->nearZ,
                               "%.2f")) {
@@ -1467,6 +1489,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             break;
         case InspRow::Kind::CamFar:
             if (camEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
                 if (sliderRow(ui, r.id, x, ry, r.h, tm, "far",
                               CameraComp::kMinFar, CameraComp::kMaxFar,
                               camEdit->farZ, "%.0f")) {
@@ -1476,6 +1499,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             break;
         case InspRow::Kind::CamOrtho:
             if (camEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
                 if (sliderRow(ui, r.id, x, ry, r.h, tm, "ortho", 0.5f, 50.0f,
                               camEdit->orthoSize, "%.2f")) {
                     edited = true;
@@ -1483,16 +1507,19 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             }
             break;
         case InspRow::Kind::CamProj:
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       camProjLabel);
             break;
         case InspRow::Kind::CamActive:
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       camActiveLabel);
             break;
         case InspRow::Kind::CamFrustum:
             // 0.7.10 — toggle de visibilidade do GIZMO (o render no Play
             // NÃO muda; só o frustum do editor se esconde)
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       camFrustumLabel);
             break;
@@ -1505,6 +1532,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             } else {
                 std::snprintf(primLabel, sizeof(primLabel), "prim: -");
             }
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       primLabel);
             break;
@@ -1517,6 +1545,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                     // 0.8.10: esfera → raio; box → tamanho (mesma row)
                     const bool isSize = mrEdit->prim.kind == PrimKind::Box;
                     f32* val = isSize ? &mrEdit->prim.size : &mrEdit->prim.radius;
+                    ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
                     if (sliderRow(ui, r.id, x, ry, r.h, tm,
                                   isSize ? "tamanho" : "raio", 0.05f, 4.0f,
                                   *val, "%.2f")) {
@@ -1524,6 +1553,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                     }
                 } else if (r.id == kInspectorPrimSeg) {
                     f32 seg = static_cast<f32>(mrEdit->prim.segments);
+                    ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
                     if (sliderRow(ui, r.id, x, ry, r.h, tm, "segmentos", 3.0f,
                                   64.0f, seg, "%.0f")) {
                         mrEdit->prim.segments = static_cast<i32>(seg + 0.5f);
@@ -1531,6 +1561,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                     }
                 } else if (r.id == kInspectorPrimRings) {
                     f32 rg = static_cast<f32>(mrEdit->prim.rings);
+                    ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
                     if (sliderRow(ui, r.id, x, ry, r.h, tm, "aneis", 2.0f,
                                   64.0f, rg, "%.0f")) {
                         mrEdit->prim.rings = static_cast<i32>(rg + 0.5f);
@@ -1541,6 +1572,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             break;
         }
         case InspRow::Kind::AddAnim:
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       "adicionar Animação");
             break;
@@ -1578,6 +1610,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             } else {
                 std::snprintf(clipLine, sizeof(clipLine), "clip: -");
             }
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       clipLine);
             break;
@@ -1585,20 +1618,24 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         case InspRow::Kind::AuPlay:
             // o PREVIEW: o botão faz toggle do FLAG — o main (frame) mapeia
             // o flag ao misturador (o mesmo caminho do Play; puro aqui)
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       auEdit && auEdit->previewing ? "parar" : "ouvir");
             break;
         case InspRow::Kind::AuAutoplay:
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       auEdit && auEdit->autoplay ? "autoplay: sim"
                                                  : "autoplay: não");
             break;
         case InspRow::Kind::AuLoop:
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       auEdit && auEdit->loop ? "loop: sim" : "loop: não");
             break;
         case InspRow::Kind::AuVolume:
             if (auEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
                 if (sliderRow(ui, r.id, x, ry, r.h, tm, "volume", 0.0f, 1.0f,
                               auEdit->volume, "%.2f")) {
                     edited = true;
@@ -1607,6 +1644,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             break;
         case InspRow::Kind::AuPitch:
             if (auEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
                 if (sliderRow(ui, r.id, x, ry, r.h, tm, "pitch", 0.5f, 2.0f,
                               auEdit->pitch, "%.2f")) {
                     edited = true;
@@ -1614,12 +1652,14 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             }
             break;
         case InspRow::Kind::AuPos:
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       auEdit && auEdit->posicional ? "posicional: sim"
                                                    : "posicional: não");
             break;
         case InspRow::Kind::AuRint:
             if (auEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
                 if (sliderRow(ui, r.id, x, ry, r.h, tm, "r. interno", 0.1f,
                               20.0f, auEdit->raioInterno, "%.1f")) {
                     auEdit->clampFields();
@@ -1629,6 +1669,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             break;
         case InspRow::Kind::AuRext:
             if (auEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
                 if (sliderRow(ui, r.id, x, ry, r.h, tm, "r. externo", 0.5f,
                               50.0f, auEdit->raioExterno, "%.1f")) {
                     auEdit->clampFields();
@@ -1716,12 +1757,17 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 st.inspCollapsed ^= r.payload;
             } else if (r.kind == InspRow::Kind::TransformRow) {
                 // 0.9.0 (spec C): caixa X/Y/Z → teclado numérico (purpose 6,
-                // campo = rowIdx*3+axis) · R → repõe a linha. As caixas vivem
-                // na faixa Y [ry+24, ry+72) — o MESMO rect desenhado
-                if (ty >= ry + 24.0f && ty < ry + 72.0f) {
-                const f32 boxW = 64.0f;
+                // campo = rowIdx*3+axis) · R → repõe a linha. PASSO 1: as
+                // caixas vivem na faixa Y [ry+28, ry+60) — AS MESMAS fórmulas
+                // do draw (dp: boxY ry+28, boxH 32; boxW 64/56; R 40)
+                if (ty >= ry + theme::dp(28.0f) &&
+                    ty < ry + theme::dp(28.0f) + theme::dp(32.0f)) {
+                const f32 usableW2 = w - 2.0f * kPad;
+                const f32 boxW = usableW2 < theme::dp(256.0f)
+                                     ? theme::dp(56.0f)
+                                     : theme::dp(64.0f);
                 f32 bx = x + kPad;
-                const f32 rResetX = x + w - kPad - 48.0f;
+                const f32 rResetX = x + w - kPad - theme::dp(40.0f);
                 bool handled = false;
                 for (u32 axis = 0; axis < 3 && !handled; ++axis) {
                     if (tx >= bx && tx < bx + boxW) {
@@ -2024,8 +2070,12 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     // no Inspector/seletor — a ESTRUTURA primeiro, o som depois).
     const bool uiMode = st.uiMode;
     const int kItems = uiMode ? 10 : 7;   // 0.7.7: Camera; 0.8.0: Mesh; 0.8.11: Audio
+    // PASSO 1 (0.9.6.14): as linhas do menu são alvos de 40dp (a LEI DE
+    // OURO — eram 56 num passo de 64; nada ≥48 no editor)
+    const f32 rowH = 40.0f;
+    const f32 rowStep = 48.0f;
     const f32 w = kMenuW;
-    const f32 h = kHeaderH + static_cast<f32>(kItems) * 64.0f + kPad;
+    const f32 h = kHeaderH + static_cast<f32>(kItems) * rowStep + kPad;
     // F4.2: centrado no viewport ÚTIL (dentro do contentRect)
     // 0.9.0: os overlays centram na FAIXA DO VIEWPORT (não por baixo do
     // chrome — ver overlayArea no EditorLayout.h)
@@ -2060,8 +2110,9 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
                              "VBox", "HBox"};
     const char* const* labels = uiMode ? elems : names;
     for (int i = 0; i < kItems; ++i) {
-        if (ui.button(static_cast<u64>(20 + i), x + kPad, y + kHeaderH + i * 64.0f,
-                      w - 2.0f * kPad, 56.0f, labels[i])) {
+        if (ui.button(static_cast<u64>(20 + i), x + kPad,
+                      y + kHeaderH + static_cast<f32>(i) * rowStep,
+                      w - 2.0f * kPad, rowH, labels[i])) {
             chosen = i + 1;
             st.plusMenu = false;
         }
@@ -2457,9 +2508,13 @@ int drawSettingsMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     // 0.8.11: +2 — "diagnostico audio (probe)" e "volume geral" (o master).
     constexpr int kItems = 7;
     constexpr f32 kModeLineH = 30.0f;
+    // PASSO 1 (0.9.6.14): alvos de 40dp num passo de 48 (eram 56/64 — a
+    // LEI DE OURO: nada ≥48 no editor)
+    constexpr f32 kRowH = 40.0f;
+    constexpr f32 kRowStep = 48.0f;
     const bool showMode = storageMode && storageMode[0];
     const f32 h = kHeaderH + (showMode ? kModeLineH : 0.0f) +
-                  static_cast<f32>(kItems) * 64.0f + kPad;
+                  static_cast<f32>(kItems) * kRowStep + kPad;
     // 0.9.0: os overlays centram na FAIXA DO VIEWPORT (não por baixo do
     // chrome — ver overlayArea no EditorLayout.h)
     f32 ox, oy, aw, ah;
@@ -2501,8 +2556,8 @@ int drawSettingsMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                                   "diagnostico audio (probe)", vol};
     for (int i = 0; i < kItems; ++i) {
         if (ui.button(static_cast<u64>(4400 + i), x + kPad,
-                      itemsTop + static_cast<f32>(i) * 64.0f,
-                      kMenuW - 2.0f * kPad, 56.0f, labels[i])) {
+                      itemsTop + static_cast<f32>(i) * kRowStep,
+                      kMenuW - 2.0f * kPad, kRowH, labels[i])) {
             chosen = i + 1;
             st.settingsMenu = false;
         }
@@ -2841,12 +2896,13 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     // faz scroll — o MESMO padrão da Hierarchy/Inspector (o tap volta
     // pelo scrollTap e as linhas continuam alvos de 48dp).
     // 0.9.6.1 (PASSO 0): linha do seletor em dp REAL (R-018)
-    const f32 kAssetRowH = theme::dp(48.0f);
+    // PASSO 1: a LINHA da spec (36 — kRowH; eram 48)
+    const f32 kAssetRowH = theme::dp(36.0f);
     constexpr u64  kAssetScrollId = 50;   // slot de scroll próprio (≠ hier/insp/settings)
     const f32 w = kMenuW;
     // 0.7.4: withImport (seletor de textura de ELEMENTO de UI) acrescenta a
     // linha "importar…" que abre o NAVEGADOR 0.7.2 (escolhe de onde for)
-    const f32 importH = withImport ? theme::dp(48.0f) : 0.0f;
+    const f32 importH = withImport ? theme::dp(40.0f) : 0.0f;   // PASSO 1: alvo 40
     // 0.8.12 — picker de MESH: +1 linha (none + cube + ficheiros)
     f32 ox, oy, aw, ah;
     overlayArea(sw, sh, ui.safeArea(), ox, oy, aw, ah);
@@ -2928,8 +2984,8 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         // dentro do scroll o botão é SÓ VISUAL (o tap volta pelo scrollTap
         // — o padrão da Hierarchy/Inspector: drag em qualquer sítio =
         // scroll, tap parado = escolha)
-        ui.button(rowId, x + kPad, ry, w - 2.0f * kPad, theme::dp(40.0f),
-                  label);
+        ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha 36
+        ui.button(rowId, x + kPad, ry, w - 2.0f * kPad, kAssetRowH, label);
     }
     ui.endScroll();
     // o TAP parado na lista (o scroll devolve a posição — o mesmo padrão

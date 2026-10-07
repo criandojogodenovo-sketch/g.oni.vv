@@ -16,8 +16,10 @@
 //   │ STATUS 24dp  FPS 60 · TICs 4                                  │ bg │
 //   └──────────────────────────────────────────────────────────────┴─────┘
 //
-// CONSTANTES (spec A/E/G): top bar 56 · tab bars 48 · status 24 · drawer
-// default 240 (pega 160–400, passos de 8) · painéis 300 · alvos ≥48.
+// CONSTANTES (PASSO 1, 0.9.6.14): top bar 36 · tab bar de baixo 32 (status
+// 0 — REMOVIDA; o FPS·TICs vive na tab bar, a versão/commit em Settings ›
+// Sobre) · drawer default 240 (pega 160–400, passos de 8) · painéis 300 ·
+// A LEI DE OURO dos alvos: DESENHO 32dp / TOQUE 40dp — nada ≥48 no editor.
 #include "core/Types.h"
 #include <cmath>            // std::floor (effectiveDrawerH — passos de 8dp)
 #include "ui/ScrollMath.h"   // UiRect (GL-free)
@@ -30,13 +32,18 @@ namespace vv {
 namespace safe {
 
 // ---- alturas/larguras do chrome (FONTES ÚNICAS) ----------------------------
-constexpr f32 kTopBarH   = 56.0f;   // spec D: barra de cima
-// FASE 9 (G2-10 — A FUSÃO): a tab bar de modo (48dp) FUNDEU-SE à top bar
-// (as tabs [3D|UI|ÁUDIO] vivem AO CENTRO da barra de 56dp — ui/Toolbar.cpp);
-// kToolbarH passa a 56 — os ~48px poupados vão TODOS ao viewport
-constexpr f32 kToolbarH  = kTopBarH;           // 56 (era 56+48=104)
+// PASSO 1 (0.9.6.14 · spec UI do dono): a barra única de 36dp UMA linha
+// (era 56 — os 20dp poupados vão TODOS ao viewport, o critério (c))
+constexpr f32 kTopBarH   = 36.0f;   // barra de cima
+// FASE 9 (G2-10 — A FUSÃO): a tab bar de modo fundiu-se à top bar
+// (as tabs [3D|UI|ÁUDIO] vivem AO CENTRO da barra — ui/Toolbar.cpp)
+constexpr f32 kToolbarH  = kTopBarH;           // 36
 constexpr f32 kModeTabH  = 48.0f;   // LEGACY: só p/ modeTabRect (compat de testes)
-constexpr f32 kStatusH   = 24.0f;   // spec E: FPS 60 · TICs 4 (12sp text-2)
+// PASSO 1: a STATUS BAR 24dp desapareceu (a spec: «a status extra sai») —
+// o «FPS n · TICs n» vive na tab bar de baixo (direita) e a versão/commit
+// em Settings › Sobre. kStatusH fica a 0: statusRect devolve uma faixa
+// ALTURA ZERO (compat de testes; nada desenha nela).
+constexpr f32 kStatusH   = 0.0f;
 // GRUPO D (0.9.6.7 — ORÇAMENTO DO EDITOR 3D): os painéis laterais deixaram
 // de ser 300dp FIXOS — a largura é ESTADO (divisores arrastáveis, o padrão
 // da pega do drawer). kPanelW é o DEFAULT (ecrãs largos ficam IGUAIS).
@@ -58,19 +65,18 @@ constexpr f32 kPanelW      = 300.0f;  // painéis esquerdo/direito (DEFAULT)
 constexpr f32 kHierMinW    = 200.0f;  // piso do drag: hierarquia
 constexpr f32 kInspMinW    = 272.0f;  // piso do drag: inspector (X/Y/Z 56)
 constexpr f32 kViewportMinW = 288.0f; // piso do viewport (a toolbar 272+margens)
-constexpr f32 kBottomTabH = 48.0f;  // spec E: tab bar do painel de baixo
+constexpr f32 kBottomTabH = 32.0f;  // PASSO 1: tab bar de baixo (era 48); o
+                                    // «FPS · TICs» vive na faixa da direita
 constexpr f32 kDrawerDef  = 240.0f; // spec E: drawer default
 constexpr f32 kDrawerMin  = 160.0f; // pega: 160..400 em passos de 8
 constexpr f32 kDrawerMax  = 400.0f;
 // P-08 (0.9.6.12 · GRUPO J1 · R-022) — O PISO DA ALTURA DO VIEWPORT
-// CENTRAL com o drawer aberto: strip do topo (48) + toolbar do viewport
-// (48) + folga (8) = 104dp. O cap do drawer usa ESTE piso (era só a tab
-// bar + 16 = 64dp — no device o drawer de 240dp persistido punha o
-// viewRect a ZERO e a transform toolbar desenhou-se 56dp POR CIMA da top
-// bar: os defeitos 1+2 do dono). Fonte ÚNICA consumida pelo draw do
-// drawer (bottom::layout) e pelos rects do centro (currentDrawerH) — as
-// duas medidas JÁ NUNCA divergem.
-constexpr f32 kViewportMinH = 104.0f;
+// CENTRAL com o drawer aberto. PASSO 1 (0.9.6.14): strip do topo (40) +
+// toolbar do viewport (40) + folga (8) = 88dp (era 104 com strip/toolbar
+// de 48). O cap do drawer usa ESTE piso. Fonte ÚNICA consumida pelo draw
+// do drawer (bottom::layout) e pelos rects do centro (currentDrawerH) —
+// as duas medidas JÁ NUNCA divergem.
+constexpr f32 kViewportMinH = 88.0f;
 
 // P-08 (GRUPO J1 · R-022) — A ALTURA EFETIVA DO DRAWER (a fonte ÚNICA).
 // Ordem: clamp da pega (160..400) → o CAP pelo piso do viewport central
@@ -142,7 +148,7 @@ inline bool rectInside(const UiRect& inner, const UiRect& outer,
 
 // ---- rects do layout 0.9.0 (todos DENTRO do contentRect) --------------------
 
-// barra de cima (56dp) — [Menu][Cena] · [pause][play][sliders] · [gear]
+// barra de cima (36dp — PASSO 1) — [G][Menu][Cena] · tabs · [▶][⏸][■][⚙]
 inline UiRect toolbarRect(f32 sw, f32 sh, const Insets& i) {
     return {i.left, i.top, sw - i.left - i.right, theme::dp(kTopBarH)};
 }
@@ -154,12 +160,14 @@ inline UiRect modeTabRect(f32 sw, f32 sh, const Insets& i) {
 inline UiRect topChromeRect(f32 sw, f32 sh, const Insets& i) {
     return {i.left, i.top, sw - i.left - i.right, theme::dp(kToolbarH)};
 }
-// tab bar do painel de baixo (48, sempre visível — abre/fecha o drawer)
+// tab bar do painel de baixo (32 — PASSO 1; sempre visível, o «FPS · TICs»
+// à direita; AGORA é a ÚLTIMA faixa do contentRect — a status saiu)
 inline UiRect bottomTabRect(f32 sw, f32 sh, const Insets& i) {
     const f32 y = sh - i.bottom - theme::dp(kStatusH) - theme::dp(kBottomTabH);
     return {i.left, y, sw - i.left - i.right, theme::dp(kBottomTabH)};
 }
-// status line (24 — a última faixa do contentRect)
+// LEGACY PASSO 1: a status bar saiu — faixa de ALTURA ZERO no fundo (os
+// chamadores/testes antigos continuam a compilar; nada desenha nela)
 inline UiRect statusRect(f32 sw, f32 sh, const Insets& i) {
     return {i.left, sh - i.bottom - theme::dp(kStatusH), sw - i.left - i.right,
             theme::dp(kStatusH)};

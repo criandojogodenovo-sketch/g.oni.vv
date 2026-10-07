@@ -34,6 +34,27 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.9.6.14 — UI PASSO 1: TAMANHOS (a LEI DE OURO: desenho 32 / toque 40)
+
+**O que existe agora (o PASSO 1 da spec de layout — só dp, sem lógica nova):**
+- **A LEI DE OURO**: botão solto desenho 32 / toque 40; os elementos DE
+  LINHA tomam a altura da linha da spec — top bar **36dp** (era 56, ícones
+  20), cabeçalhos **28dp**, linhas **36dp**, campos **32dp**, tab bar de
+  baixo **32dp** (o «FPS · TICs» no canto direito; a status bar de 24dp
+  foi REMOVIDA — versão/commit em Settings › Sobre, linha git nova);
+  caixas X/Y/Z 32; miniaturas 44; strip da viewport 40; stack/toolbar
+  40/32; menus 40/48; NADA chega a 48dp.
+- **O VALIDADOR mede a spec**: pisos por classe (40/36/32/28 —
+  `ui/LayoutDump.h`) com a flag `auditRowFloorNext` (o padrão da tecla
+  compacta); o `auditLabel_` regista agora a largura DESENHADA (o falso
+  «SANGRA» das captions morto — o FPS·TICs foi o 1º caso).
+- **TABELA DE MEDIDAS** (`docs/RELATORIO-0.9.6.14-PASSO1-TAMANHOS.md`):
+  device — chrome 38,1% → **20,2%** (critério c); viewport 37,1% (a/b são
+  dos PASSOS 2-3); harness — 60,9% larg / 9,4% alt / cobertura 19,0%.
+- **MUTAÇÕES**: M1 (flags desligadas → o validador dispara) e M2 (tab bar
+  48 → 17 falhas) vermelhas; repostas → test_core 0 falhas · c33 456/456 ·
+  gates verdes. R-025/R-027 reescritas ao novo rodapé/piso.
+
 ## 0.9.6.13 — UI PASSO 0: INVENTÁRIO (spec do dono · sem alterações de código)
 
 **O que existe agora (o PASSO 0 da spec de layout: medir antes de mexer):**

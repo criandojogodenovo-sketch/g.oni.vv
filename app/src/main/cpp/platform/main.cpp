@@ -5249,6 +5249,7 @@ void frame() {
                       buildinfo::g_version, buildinfo::g_versionCode);
         editor::settings::Ctx sctx;
         sctx.version = verLine;
+        sctx.git = buildinfo::g_git;   // PASSO 1: o commit no Sobre (era a status bar)
         sctx.soSha = buildinfo::g_soSha;
         sctx.storageMode = modeText;
         sctx.keepSource = g_keepSource;
@@ -6394,14 +6395,12 @@ void frame() {
         // linhas chegam — a consola filra por chips)
         std::vector<std::string> logTail;
         elog::readTail(logTail, 120);
-        editor::bottom::StatusBarData sbar;
-        sbar.version = buildinfo::g_version;
-        sbar.project = g_projectReady ? g_project.name.c_str() : "—";
-        sbar.playing = g_editor.playMode;
+        // PASSO 1 (0.9.6.14): StatusBarData REMOVIDA com a status bar —
+        // o «FPS · TICs» vive no canto direito da tab bar; a versão/commit
+        // em Settings › Sobre (sctx.git abaixo)
         const editor::bottom::Actions ba = editor::bottom::draw(
             g_ui, g_input, g_editor, g_bottom, g_catalog, logTail,
-            static_cast<int>(g_fps + 0.5f), g_scene.count(), g_filesTree,
-            sbar);
+            static_cast<int>(g_fps + 0.5f), g_scene.count(), g_filesTree);
         if (ba.commandPressed) {
             // 0.9.6.10 (GRUPO UI): o campo de comando da consola abre o
             // teclado da casa (o propósito 9 — o commit corre o comando)

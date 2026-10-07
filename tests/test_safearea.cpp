@@ -106,7 +106,7 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     // scroll morria — maxOffset 0
     const f32 contentOld = 536.0f;
     const f32 listOld = (720.0f - kToolbarH - kStatusH) - kHeaderH - 4.0f;
-    EXPECT(nearEqF(listOld, 588.0f));   // FASE 9 G2-10: kToolbarH=56
+    EXPECT(nearEqF(listOld, 652.0f));   // PASSO 1: kToolbarH=36, kHeaderH=28
     EXPECT(nearEqF(scroll::maxOffset(contentOld, listOld), 0.0f));   // bug antigo
 
     // F5.0-fix → 0.9.0: o plano tem SECÇÕES COLAPSÁVEIS de 48dp (spec C) e
@@ -126,18 +126,19 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     const TextMetrics m{};
     const f32 contentH = inspectorContentHeight(prof, m, false, 0u);
     // 0.9.2: + secção Script; FASE 9 G2-8: Física em 3 linhas TwoCol.
-    // 0.9.6.6 (GRUPO C): as linhas ganharam o PISO 48dp (a regra da casa
-    // «alvos ≥48dp» — eram bloco+px crus: 34/36/42px no harness e ~18dp
-    // REAIS no device) — o plano do Player completo sobe para 1420
-    EXPECT(nearEqF(contentH, 1420.0f));
+    // 0.9.6.6 (GRUPO C): as linhas ganharam o PISO dp (eram bloco+px crus)
+    // PASSO 1 (0.9.6.14): a tabela da spec (linha 36 · secção 28 ·
+    // transform 64) — o plano do Player completo fica em 1046
+    EXPECT(nearEqF(contentH, 1046.0f));
 
     // DEPOIS: painel dentro do contentRect [0,24,·,628] (status 24 + nav 92)
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);
     const UiRect panel = inspectorPanelRect(1600.0f, 720.0f, in);
-    // FASE 9 (G2-10): 476 = 428 + 48 (a barra única poupou os 48 da tab bar)
-    EXPECT(nearEqF(panel.h, 476.0f));
+    // FASE 9 (G2-10): 476 = 428 + 48; PASSO 1 (0.9.6.14): 536 = 428 + 36
+    // (barra 36, tabs de baixo 32, status 0 — o viewport/painel ganham)
+    EXPECT(nearEqF(panel.h, 536.0f));
     const f32 listH = panel.h - kHeaderH - 4.0f;
-    EXPECT(nearEqF(listH, 424.0f));
+    EXPECT(nearEqF(listH, 504.0f));   // 536 − 28 (cabeçalho) − 4
     const f32 mo = scroll::maxOffset(contentH, listH);
     EXPECT(mo > 0.0f);                        // scroll ATIVA
     EXPECT(nearEqF(mo, contentH - listH));
@@ -158,28 +159,30 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
 
 // Hierarchy com insets: com >10 TICs todas as linhas continuam alcançáveis
 // (e a região encolhida pela nav bar continua a fazer scroll).
+// PASSO 1 (0.9.6.14): com linhas de 36dp, 14 TICs (504) JÁ CABEM na região
+// de 532 — o cenário passa a 20 TICs (720) para FORÇAR o scroll com insets.
 TEST(safearea_hierarchy_com_insets_todos_os_tics) {
     Scene s;
-    for (u32 i = 0; i < 14; ++i) {
+    for (u32 i = 0; i < 20; ++i) {
         s.create("t");
     }
-    const f32 contentH = hierarchyContentHeight(14);
-    EXPECT(nearEqF(contentH, 672.0f));   // 0.9.0: 14 × 48 (spec B)
+    const f32 contentH = hierarchyContentHeight(20);
+    EXPECT(nearEqF(contentH, 720.0f));   // PASSO 1: 20 × 36 (a linha da spec)
 
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);
     const UiRect panel = hierarchyPanelRect(1600.0f, 720.0f, in);
-    // 0.9.0: cabeçalho 48 + LINHA DE PESQUISA 48 (spec B/scope)
+    // PASSO 1: cabeçalho 28 + LINHA DE PESQUISA 32 (spec B/PASSO 1)
     const f32 listTop = panel.y + kHeaderH + kSearchRowH;
     const f32 listH = panel.h - kHeaderH - kSearchRowH;
-    EXPECT(nearEqF(listH, 380.0f));   // FASE 9 G2-10: +48 da barra única
+    EXPECT(nearEqF(listH, 476.0f));   // panel 536 (60..596) − 28 − 32
 
     const f32 off = scroll::clampOffset(999.0f, contentH, listH);
-    EXPECT(nearEqF(off, 292.0f));    // 672 − 380
-    // última linha inteira dentro da região com o offset no máximo
-    const f32 row13 = listTop + 13.0f * kRowH - off;
-    EXPECT(row13 >= listTop);
-    EXPECT(row13 + kRowH <= listTop + listH);
+    EXPECT(nearEqF(off, 244.0f));    // 720 − 476
+    // última linha (a 20.ª) inteira dentro da região com o offset no máximo
+    const f32 row19 = listTop + 19.0f * kRowH - off;
+    EXPECT(row19 >= listTop);
+    EXPECT(row19 + kRowH <= listTop + listH);
     // tap na última linha resolve o índice certo
-    EXPECT(hierarchyRowAtTap(listTop + 13.0f * kRowH - off + 10.0f,
-                             listTop, off, 14) == 13);
+    EXPECT(hierarchyRowAtTap(listTop + 19.0f * kRowH - off + 10.0f,
+                             listTop, off, 20) == 19);
 }
