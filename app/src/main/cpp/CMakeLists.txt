@@ -208,6 +208,10 @@ add_library(goni_vv SHARED
         ui/Timeline.h
         ui/Timeline.cpp
         ui/Icons.cpp
+        ui/Brand.h   # 0.9.6.18 (D6): a marca numa função com LOD
+        ui/Brand.cpp
+        ui/Strings.h   # 0.9.6.18 (D4): a tabela localizada do Settings
+        ui/Strings.cpp
         # 0.7.7: gizmo da câmara (frustum wireframe + handles + game view)
         ui/CamGizmo.cpp
         # 0.7.0: UI criável — runtime (layout ancorado/draw/hit-test/ações)

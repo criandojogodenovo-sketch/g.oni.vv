@@ -241,6 +241,8 @@ add_executable(test_core
         # test_wiring087 (único que inclui platform/main.cpp) — secção lá.
         test_wiring011.cpp
         ${CORE_DIR}/ui/Icons.cpp
+        ${CORE_DIR}/ui/Brand.cpp
+        ${CORE_DIR}/ui/Strings.cpp
         # 0.7.7: câmara de cena (componente/invariante + gizmo do frustum)
         ${CORE_DIR}/core/CameraUtil.cpp
         ${CORE_DIR}/ui/CamGizmo.cpp
@@ -386,6 +388,8 @@ add_executable(c33_virtual
         ${CORE_DIR}/ui/Toolbar.cpp
         ${CORE_DIR}/ui/Timeline.cpp
         ${CORE_DIR}/ui/Icons.cpp
+        ${CORE_DIR}/ui/Brand.cpp
+        ${CORE_DIR}/ui/Strings.cpp
         ${CORE_DIR}/core/CameraUtil.cpp
         ${CORE_DIR}/ui/CamGizmo.cpp
         ${CORE_DIR}/ui/FontAtlas.cpp

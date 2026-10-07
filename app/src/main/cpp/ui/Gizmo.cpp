@@ -511,8 +511,11 @@ void drawArrow(UiContext& ui, const Mat4& vp, f32 sw, f32 sh, f32 ox, f32 oy,
 void drawPlaneHandle(UiContext& ui, const Mat4& vp, f32 sw, f32 sh, f32 ox,
                      f32 oy, const Vec3& origin, f32 len, Axis plane,
                      Axis hovered) {
-    // quad de plano: contorno (4 segmentos) nos 2 eixos do plano, a 45%..75%
-    // do len — pequeno e afastado do centro (não colide com as setas)
+    // quad de plano: PREENCHIDO a ~25% alfa (0.9.6.18 · HOTFIX D12 — o
+    // dono: «planos = retângulos só de contorno» era o defeito; «quad
+    // preenchido a ~25% alfa + contorno na cor do eixo. Nunca só contorno»)
+    // + o contorno nos 2 eixos do plano, a 45%..75% do len — pequeno e
+    // afastado do centro (não colide com as setas)
     Vec3 u, v;
     planeAxesOf(plane, u, v);
     const f32 a = len * 0.45f;
@@ -530,6 +533,12 @@ void drawPlaneHandle(UiContext& ui, const Mat4& vp, f32 sw, f32 sh, f32 ox,
     }
     const bool hot = (hovered == plane);
     const f32* col = axisColor(plane, hot);
+    // o PREENCHIMENTO (25% do alfa do eixo — o contorno por cima manda):
+    // 2 triângulos na convenção do fan (p0,p1,p2 + p0,p2,p3)
+    const f32 fill[4] = {col[0], col[1], col[2], col[3] * kPlaneFillAlpha};
+    const f32 fx[6] = {p0x, p1x, p2x, p0x, p2x, p3x};
+    const f32 fy[6] = {p0y, p1y, p2y, p0y, p2y, p3y};
+    ui.quadCornersFilled(fx, fy, fill);
     const f32 w = hot ? kLineWHov : 3.0f;
     ui.drawLine(p0x, p0y, p1x, p1y, w, col);
     ui.drawLine(p1x, p1y, p2x, p2y, w, col);

@@ -159,6 +159,18 @@ void drawTimeline(UiContext& ui, const InputState& in, Scene& scene,
     drawTimelineInRect(ui, in, scene, st, tl, dt, r);
 }
 
+// 0.9.6.18 (HOTFIX D9): a pergunta PURA do main — a timeline desenha para
+// esta seleção? (TIC vivo + AnimationPlayer; o mesmo critério do início
+// do drawTimelineInRect, para o main poder desenhar o empty-state do
+// drawer quando a resposta é não)
+bool canDraw(const Scene& scene, Handle selected) {
+    const Tic* tic = scene.get(selected);
+    if (!tic || !tic->active) {
+        return false;
+    }
+    return tic->getComponent<AnimationPlayer>() != nullptr;
+}
+
 void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
                         editor::EditorState& st, State& tl, f32 dt,
                         const UiRect& rectIn) {

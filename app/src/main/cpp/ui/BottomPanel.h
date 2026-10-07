@@ -66,6 +66,19 @@ constexpr u64 kCmdFieldId    = 5636;  // 0.9.6.10: o campo de comando da consola
 constexpr u64 kConsoleScrollId = 47; // região de scroll da consola
 constexpr u64 kFilesScrollId  = 48;  // região de scroll dos ficheiros
 
+// 0.9.6.18 (HOTFIX D9): o empty-state da tab Animação (o main desenha-o
+// quando a timeline não pode desenhar) — centrado+clipado no rect de
+// conteúdo do drawer (o MESMO caminho das outras tabs)
+void drawDrawerEmptyState(UiContext& ui, const UiRect& rect,
+                          const char* label);
+
+// 0.9.6.18 (HOTFIX D3/D9): o HELPER de empty-state — centrado V/H no rect,
+// CLIPADO a ele (ScopedClip) e com a trava no fundo do texto (o fundo
+// nunca passa o fundo do rect). Exportado para a sentinela R-035 (o caso
+// do rect minúsculo — a mutação M3 fica vermelha)
+void drawEmptyState(UiContext& ui, const UiRect& rect, icons::Icon ic,
+                    const char* label);
+
 // ---- estado (o main é o dono; PERSISTE no layout.json — spec G) -----------
 struct BottomState {
     // 0.9.6.10 (GRUPO UI · a imagem 1): o dock inferior passou a 4 tabs —

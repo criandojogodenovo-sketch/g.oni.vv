@@ -90,14 +90,18 @@ void flipVerticalRgba(u8* buf, u32 w, u32 h) {
     }
 }
 
+// 0.9.6.18 (HOTFIX D7): o alvo da spec do dono é ~256×144 (PNG ≤~60KB,
+// encode ≤~50ms off-thread) — era ≤480 (o PNG 4× maior do necessário p/
+// um card de galeria). Nunca ACIMA (a ampliação não faz sentido — o card
+// desenha no máximo ~200dp) e nunca 0.
 u32 targetWidth(u32 cropW) {
     if (cropW == 0) {
         return 0;
     }
-    if (cropW <= 480u) {
+    if (cropW <= kThumbTargetW) {
         return cropW;
     }
-    return 480u;
+    return kThumbTargetW;
 }
 
 // ---- CRC32 IEEE (poly 0xEDB88320, init 0xFFFFFFFF, xor final) ---------------

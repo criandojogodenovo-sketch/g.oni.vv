@@ -71,6 +71,10 @@ inline constexpr f32 kScreenLen = 0.16f;   // ~16% da distância da câmara
 // espessuras dos traços (px de ecrã)
 inline constexpr f32 kLineW     = 5.0f;    // eixo/seta
 inline constexpr f32 kLineWHov  = 8.0f;    // eixo sob press/hover
+// 0.9.6.18 (HOTFIX D12): o ALFA do preenchimento dos planos (a spec do
+// dono: «quad preenchido a ~25% alfa + contorno na cor do eixo») —
+// afervel (o pin da sentinela lê ESTE valor, não um número frouxo)
+inline constexpr f32 kPlaneFillAlpha = 0.25f;
 inline constexpr f32 kRingSegs  = 48.0f;   // segmentos por anel
 inline constexpr f32 kHandlePx  = 26.0f;    // lado do handle de escala/centro
 

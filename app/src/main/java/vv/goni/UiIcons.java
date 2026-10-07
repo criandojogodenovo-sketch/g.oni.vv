@@ -175,6 +175,63 @@ public final class UiIcons {
         }
     }
 
+    /**
+     * 0.9.6.18 (HOTFIX D6) — O GLIFO DA MARCA ("G com 4 setas"): o espelho
+     * Java do ui/Brand.cpp (brand::drawIcon) — a MESMA geometria, o MESMO
+     * LOD, a MESMA regra («UMA função para todos os sítios; derivar
+     * cor/traço/função duplicada = vermelho»). O launcher (mipmap estático)
+     * é GERADO do mesmo desenho (scripts/gen_app_icon.py); um PNG não
+     * executa Java/C++ — a paridade é documentada de ambos os lados.
+     *
+     * @param lodFull true = versão COMPLETA (≥32dp — 4 setas COM pontas);
+     *                false = SIMPLIFICADA (&lt;32dp — 4 ticks, traço ~20%
+     *                mais grosso). NUNCA desenha fundo (âmbar sobre
+     *                grafite/transparente, nunca âmbar sobre âmbar).
+     */
+    public static void drawBrand(Canvas c, float cx, float cy, float sizePx,
+                                 int color, boolean lodFull) {
+        final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeCap(Paint.Cap.ROUND);
+        p.setStrokeJoin(Paint.Join.ROUND);
+        p.setColor(color);
+        // o traço do conjunto (size/12) — a simplificada ×1.2 (a spec: «traço
+        // ~20% mais grosso»)
+        p.setStrokeWidth(sizePx / 12f * (lodFull ? 1.0f : 1.2f));
+        final float k = sizePx / 24f;
+        final float x = cx - sizePx / 2f, y = cy - sizePx / 2f;
+        final float rG = 6.2f * k;             // o raio do arco do G
+        final float gcx = x + 12f * k, gcy = y + 12f * k;
+        // o G: arco com a abertura à direita (55°..305° — o MESMO intervalo
+        // do Brand.cpp) + barra até perto do centro + espelho vertical
+        c.drawArc(gcx - rG, gcy - rG, gcx + rG, gcy + rG, 55f, 250f, false, p);
+        p.setStrokeCap(Paint.Cap.BUTT);
+        c.drawLine(x + 18.8f * k, y + 12f * k, x + 11.4f * k, y + 12f * k, p);
+        c.drawLine(x + 18.8f * k, y + 12f * k, x + 18.8f * k, y + 7.6f * k, p);
+        p.setStrokeCap(Paint.Cap.ROUND);
+        // as 4 setas a N/E/S/W (ecrã: -90/0/90/180)
+        final float[] ang = {-90f, 0f, 90f, 180f};
+        final float rIn = 8.2f * k, rTip = 11.0f * k, rBack = 2.0f * k;
+        for (float a : ang) {
+            final double rad = Math.toRadians(a);
+            final float ca = (float) Math.cos(rad), sa = (float) Math.sin(rad);
+            final float x0 = gcx + rIn * ca, y0 = gcy + rIn * sa;
+            final float x1 = gcx + rTip * ca, y1 = gcy + rTip * sa;
+            c.drawLine(x0, y0, x1, y1, p);   // o eixo
+            if (lodFull) {
+                // as PONTAS (2 traços a ±32° — o mesmo ±32° do Brand.cpp)
+                for (int s = -1; s <= 1; s += 2) {
+                    final double ha = Math.toRadians(a + 32f * s);
+                    final float hx = gcx + (rTip - rBack)
+                            * (float) Math.cos(ha);
+                    final float hy = gcy + (rTip - rBack)
+                            * (float) Math.sin(ha);
+                    c.drawLine(x1, y1, hx, hy, p);
+                }
+            }
+        }
+    }
+
     /** Drawable de um ícone (para setCompoundDrawables/ImageView) */
     public static Drawable drawable(final int which, final int color,
                                     final int sizeDp, final float density) {

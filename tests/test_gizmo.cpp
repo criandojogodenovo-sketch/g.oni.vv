@@ -256,6 +256,14 @@ TEST(gizmo_mover_desenho_emite_linhas) {
     // 3 setas (haste + 2 traços da ponta = 3 linhas cada) + 3 planos
     // (4 segmentos cada) = 9 + 12 = 21 quads no mínimo
     EXPECT(quads >= 21u);
+    // 0.9.6.18 (HOTFIX D12 · mutação M11): os planos são PREENCHIDOS a
+    // 25% alfa — cada plano emite o quad de preenchimento (2 triângulos)
+    // para além dos 4 segmentos do contorno: 21 + 3 = 24. A mutação
+    // «planos só de contorno» volta a 21 e fica VERMELHA aqui.
+    EXPECT_MSG(quads >= 24u,
+               "D12: os planos do gizmo perderam o preenchimento "
+               "(esperados ≥24 quads, há %u — a mutação M11 fica vermelha)",
+               static_cast<unsigned>(quads));
     ui.endFrame();
 }
 

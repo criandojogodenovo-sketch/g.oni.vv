@@ -878,11 +878,29 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
             break;
         }
         case UiInspRow::Kind::VisToggle: {
-            char label[32];
-            std::snprintf(label, sizeof(label), "visível: %s",
-                          e.visible ? "sim" : "não");
-            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
-                      label);
+            // 0.9.6.18 (HOTFIX D10): a caixa de TEXTO «visível: sim/não»
+            // era controlo-de-texto cru — o ESTADO vive no ícone da casa
+            // (Eye/EyeOff) com o rótulo ao lado; o alvo continua a LINHA
+            // (o walk re-despacha por coordenadas de linha)
+            const bool heldV = ui.widgetActive(r.id);
+            if (heldV) {
+                ui.panel(x + kPad, ry, w - 2.0f * kPad, r.h,
+                         theme::kTheme.surface2);
+            }
+            const f32 sIc = theme::dp(20.0f);
+            icons::drawIcon(ui, e.visible ? icons::Icon::Eye
+                                          : icons::Icon::EyeOff,
+                            x + kPad + theme::dp(12.0f),
+                            ry + (r.h - sIc) * 0.5f, sIc,
+                            e.visible ? theme::kTheme.accent
+                                      : theme::kTheme.text2);
+            if (ui.hasFont()) {
+                ui.labelFitted(x + kPad + theme::dp(44.0f),
+                               ry + (r.h - tm.block()) * 0.5f + tm.ascent,
+                               "visível", theme::kTheme.text1,
+                               w - 2.0f * kPad - theme::dp(56.0f));
+            }
+            ui.widgetHit(r.id, x + kPad, ry, w - 2.0f * kPad, r.h - 4.0f);
             break;
         }
         case UiInspRow::Kind::AnchorH: {

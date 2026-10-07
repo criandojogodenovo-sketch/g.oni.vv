@@ -124,6 +124,11 @@ void drawTimeline(UiContext& ui, const InputState& in, Scene& scene,
 void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
                         editor::EditorState& st, State& tl, f32 dt,
                         const UiRect& rect);
+// 0.9.6.18 (HOTFIX D9): a timeline DESENHA para esta seleção? (TIC vivo +
+// AnimationPlayer) — o main usa-a para decidir entre a timeline e o
+// empty-state centrado do drawer (a aba Animação vazia desenhava NADA —
+// o drawer ficava em branco)
+bool canDraw(const Scene& scene, Handle selected);
 
 } // namespace timeline
 } // namespace vv

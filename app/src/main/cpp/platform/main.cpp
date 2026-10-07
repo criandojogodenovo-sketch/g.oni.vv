@@ -78,6 +78,7 @@
 #include "core/SceneBounds.h"   // 0.8.9: AABB da cena → far dinâmico editor+Play
 #include "core/UndoStack.h"    // 0.9.0: undo/redo por snapshot
 #include "ui/EditorUi.h"
+#include "ui/Strings.h"   // 0.9.6.18 (D4a): a tabela localizada (o locale do device)
 #include "ui/Toolbar.h"   // 0.9.0: top bar 56 + tab bar de modo 48 (spec D)
 #include "ui/ViewportChrome.h"   // 0.9.0: stack/toolbar inferior/triad (spec D)
 #include "ui/BottomPanel.h"     // 0.9.0: painel de baixo + status 24dp (spec E/K)
@@ -832,6 +833,143 @@ void showToast(const char* msg);   // fwd: usada pelo feedCanvasPlay (abaixo)
 // do frame DEPOIS de desenhar (antes do swap) lê a viewport central do
 // backbuffer, faz crop 16:9 + downsample e escreve thumb.png na raiz do
 // projeto. A tela de projetos (Java) lê-o para o card (default = logo G).
+// 0.9.6.18 (HOTFIX D7) — A CAPTURA DA MINIATURA FORA DO HOT PATH.
+// O dono: «No save do projeto, captura o viewport (glReadPixels num target
+// downscaled ~256×144, encode PNG assíncrono, FORA do frame, no thread de
+// jobs já existente; orçamento: ≤~50ms off-thread, PNG ≤~60KB, gravado
+// como thumb.png dentro do projeto). Nunca no hot path do render.»
+//
+// O PADRÃO DA CASA é o ImportJob (std::thread + atómicos + join no main —
+// o MESMO da extração de arquivos). O corte:
+//   • GL thread (fim do frame, o ponto seguro de SEMPRE — endFrame,
+//     antes do swap): UM glReadPixels da viewport central → buffer RGBA;
+//     é o único trabalho no frame (ms, sem encode);
+//   • o thread de jobs: flip + crop 16:9 + downsample a 256×144 (o alvo
+//     da spec — era ≤480) + encode PNG + escrita no storage + o log do
+//     orçamento; NUNCA toca em estado da UI;
+//   • o main junta (join) o job terminado no fim do frame seguinte.
+// O save NUNCA bloqueia (b): o frame do save só lê píxeis; a falha de
+// captura é WARN no log (o fallback de iniciais é do lado Java — o card
+// sem thumb.png desenha as iniciais, nunca o ícone da app).
+struct ThumbJob {
+    std::thread worker;
+    std::atomic<bool> active{false};   // job a correr (o buffer é dele)
+    std::atomic<bool> done{false};     // worker terminou (join no main)
+    std::vector<u8> rgba;              // o frame capturado (dono: o worker)
+    u32 rw = 0, rh = 0;                // dims do buffer RGBA (bottom-up)
+    u64 msOff = 0;                     // o orçamento off-thread MEDIDO
+    size_t pngBytes = 0;               // o tamanho do PNG escrito
+    u32 tw = 0, th = 0;                // as dims do PNG
+    bool ok = false;
+} g_thumbJob;
+
+// o corpo do job (thread de jobs): RGBA cru → thumb.png no projeto
+static void thumbJobWorker(ThumbJob& j) {
+    const auto t0 = std::chrono::steady_clock::now();
+    j.ok = false;
+    j.pngBytes = 0;
+    // flip vertical IN PLACE (glReadPixels é bottom-up)
+    thumb::flipVerticalRgba(j.rgba.data(), j.rw, j.rh);
+    const thumb::CropRect c = thumb::crop169(j.rw, j.rh);
+    const u32 tw = thumb::targetWidth(c.w);   // o ALVO ~256 (a spec D7)
+    if (tw == 0 || c.w == 0) {
+        elog::warn("thumb: crop degenerado (%ux%u) — save ok, sem thumb",
+                   j.rw, j.rh);
+        j.msOff = static_cast<u64>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - t0)
+                .count());
+        j.done.store(true);
+        return;
+    }
+    const u32 th = static_cast<u32>((u64)c.h * tw / c.w);
+    if (th == 0) {
+        j.done.store(true);
+        return;
+    }
+    j.tw = tw;
+    j.th = th;
+    std::vector<u8> rgb(static_cast<size_t>(tw) * th * 3u);
+    thumb::downsampleRgb(j.rgba.data() + ((size_t)c.y * j.rw + c.x) * 4u,
+                         c.w, c.h, tw, th, rgb.data());
+    const std::vector<u8> png = thumb::encodePngRgb(rgb.data(), tw, th);
+    if (png.empty()) {
+        elog::warn("thumb: encode PNG falhou (%ux%u) — save ok, fallback "
+                   "de iniciais no card",
+                   tw, th);
+        j.msOff = static_cast<u64>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - t0)
+                .count());
+        j.done.store(true);
+        return;
+    }
+    const int hs = g_storage->openWriteStream("thumb.png");
+    if (hs <= 0) {
+        elog::warn("thumb: openWriteStream thumb.png falhou — save ok, "
+                   "fallback de iniciais no card");
+        j.done.store(true);
+        return;
+    }
+    if (!g_storage->writeStreamChunk(hs, png.data(), png.size())) {
+        elog::warn("thumb: escrita falhou (%zu B) — save ok, fallback de "
+                   "iniciais no card",
+                   png.size());
+        g_storage->closeWriteStream(hs);
+        j.done.store(true);
+        return;
+    }
+    g_storage->closeWriteStream(hs);
+    j.pngBytes = png.size();
+    j.ok = true;
+    j.msOff = static_cast<u64>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t0)
+            .count());
+    j.done.store(true);
+}
+
+// junta o job anterior SE terminado (chamado do main — o frame NUNCA
+// espera por um thumb)
+static void thumbJobReap() {
+    if (g_thumbJob.active.load() && g_thumbJob.done.load()) {
+        if (g_thumbJob.worker.joinable()) {
+            g_thumbJob.worker.join();
+        }
+        g_thumbJob.active.store(false);
+        // o LOG DO ORÇAMENTO (a spec: ≤~50ms off-thread, PNG ≤~60KB)
+        if (g_thumbJob.ok) {
+            elog::info("thumb: %ux%u PNG (%zu B) — captura OFF-thread "
+                       "%llums (orçamento 50ms)%s",
+                       g_thumbJob.tw, g_thumbJob.th, g_thumbJob.pngBytes,
+                       (unsigned long long)g_thumbJob.msOff,
+                       g_thumbJob.pngBytes > 60u * 1024u
+                           ? " — AVISO: PNG acima do orçamento"
+                           : "");
+            if (g_thumbJob.pngBytes > 60u * 1024u) {
+                elog::warn("thumb: PNG %zu B > 60KB — o alvo 256×144 devia "
+                           "manter o PNG pequeno (verificar conteúdo)",
+                           g_thumbJob.pngBytes);
+            }
+            if (g_thumbJob.msOff > 50ull) {
+                elog::warn("thumb: %llums off-thread > orçamento 50ms",
+                           (unsigned long long)g_thumbJob.msOff);
+            }
+        }
+    }
+}
+
+// a variante BLOQUEANTE (só no teardown/reboot da engine — quando o
+// storage vai ser destruído o worker NÃO pode sobreviver a ele)
+static void thumbJobWait() {
+    if (g_thumbJob.active.load()) {
+        if (g_thumbJob.worker.joinable()) {
+            g_thumbJob.worker.join();
+        }
+        g_thumbJob.active.store(false);
+    }
+}
+
 bool g_thumbPending = false;
 
 // 0.9.6.5 (GRUPO B · FERRAMENTAS DE VERIFICAÇÃO) — O LAYOUT EXPORTADO:
@@ -4407,14 +4545,23 @@ void statusLine(const DrawStats& st3d, const DrawStats& stGrid) {
 // vias de desenho) e antes do swap (o conteúdo ainda está no buffer traseiro
 // — depois do swap o conteúdo é indefinido por definição EGL). Lê SÓ a
 // viewport central (a área 3D entre os painéis — SEM chrome; em Play, o
-// contentRect inteiro), crop 16:9 centrado, downsample box ≤480 e PNG para
-// thumb.png na raiz do projeto (ProjectStorage stream — SAF no device).
+// contentRect inteiro). 0.9.6.18 (HOTFIX D7): o frame SÓ faz o glReadPixels
+// (ms); o flip+crop+downsample (256×144)+encode PNG+escrita correm no
+// THREAD DE JOBS (o padrão ImportJob) — o hot path do render NUNCA espera
+// pelo encode, e o save NUNCA bloqueia.
 static void captureThumbIfPending(f32 w, f32 h) {
     if (!g_thumbPending) {
         return;
     }
     g_thumbPending = false;
     if (!g_projectReady || !g_storage) {
+        return;
+    }
+    // um job anterior ainda a correr? o NOVO save não o espera: arma de
+    // novo no próximo frame (o save mais recente vence — o buffer só é
+    // capturado quando o worker está livre)
+    if (g_thumbJob.active.load()) {
+        g_thumbPending = true;
         return;
     }
     const UiRect r = g_editor.playMode
@@ -4427,7 +4574,10 @@ static void captureThumbIfPending(f32 w, f32 h) {
     if (rw < 16 || rh < 16) {
         return;   // viewport degenerado (transição/lifecycle) — sem thumb
     }
-    std::vector<u8> rgba(static_cast<size_t>(rw) * rh * 4u);
+    // o TRABALHO DO FRAME: um glReadPixels (o mesmo ponto seguro de
+    // sempre — o frame completo está no backbuffer, ainda não passou ao
+    // ecrã); o buffer passa a ser DO worker
+    g_thumbJob.rgba.assign(static_cast<size_t>(rw) * rh * 4u, 0u);
 #ifndef GL_PACK_ALIGNMENT
 #define GL_PACK_ALIGNMENT 0x0D05   // stub do CI não define (GLES3 real define)
 #endif
@@ -4435,38 +4585,15 @@ static void captureThumbIfPending(f32 w, f32 h) {
     glReadPixels(static_cast<GLint>(r.x),
                  static_cast<GLint>(h - r.y - r.h),
                  static_cast<GLsizei>(rw), static_cast<GLsizei>(rh),
-                 GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
-    thumb::flipVerticalRgba(rgba.data(), rw, rh);   // bottom-up → top-down
-    const thumb::CropRect c = thumb::crop169(rw, rh);
-    const u32 tw = thumb::targetWidth(c.w);
-    if (tw == 0 || c.w == 0) {
-        return;
-    }
-    const u32 th = static_cast<u32>((u64)c.h * tw / c.w);
-    if (th == 0) {
-        return;
-    }
-    std::vector<u8> rgb(static_cast<size_t>(tw) * th * 3u);
-    thumb::downsampleRgb(rgba.data() + ((size_t)c.y * rw + c.x) * 4u,
-                         c.w, c.h, tw, th, rgb.data());
-    const std::vector<u8> png = thumb::encodePngRgb(rgb.data(), tw, th);
-    if (png.empty()) {
-        elog::error("thumb: encode PNG falhou (%ux%u)", tw, th);
-        return;
-    }
-    const int hs = g_storage->openWriteStream("thumb.png");
-    if (hs <= 0) {
-        elog::error("thumb: openWriteStream thumb.png falhou");
-        return;
-    }
-    if (!g_storage->writeStreamChunk(hs, png.data(), png.size())) {
-        elog::error("thumb: escrita falhou (%zu B)", png.size());
-        g_storage->closeWriteStream(hs);
-        return;
-    }
-    g_storage->closeWriteStream(hs);
-    elog::info("thumb: %ux%u PNG (%zu B) — captura da viewport no save",
-               tw, th, png.size());
+                 GL_RGBA, GL_UNSIGNED_BYTE, g_thumbJob.rgba.data());
+    g_thumbJob.rw = rw;
+    g_thumbJob.rh = rh;
+    g_thumbJob.ok = false;
+    g_thumbJob.done.store(false);
+    g_thumbJob.active.store(true);
+    g_thumbJob.worker = std::thread(thumbJobWorker, std::ref(g_thumbJob));
+    elog::info("thumb: captura %ux%u lida no fim do frame — encode OFF-"
+               "thread (o render não espera)");
 }
 
 // ---- 0.9.6.5 (GRUPO B): O LAYOUT EXPORTADO + A AUDITORIA --------------------
@@ -4627,6 +4754,10 @@ void frame() {
     const f32 w = static_cast<f32>(g_egl.width());
     const f32 h = static_cast<f32>(g_egl.height());
     g_layoutFrameAudited = false;   // GRUPO B: só o auditBegin deste frame acende
+
+    // 0.9.6.18 (HOTFIX D7): junta o job de thumb terminado (o frame NUNCA
+    // espera — só colhe o resultado se o worker já acabou)
+    thumbJobReap();
 
     // 0.9.0 (spec E): o estado do drawer alimenta os rects dos painéis/
     // viewport neste frame (a fonte é o BottomState — persistente)
@@ -5438,14 +5569,24 @@ void frame() {
         // (aba Animação). PASSO 2 (0.9.6.15): o AUTO-ABRIR da 0.8.0 SAIU —
         // o drawer fica FECHADO por default (spec do dono: «o painel de
         // baixo abre por toque») — quem quer a timeline TOCA a tab
-        // Animação; o main só desenha quando ela está aberta
+        // Animação; o main só desenha quando ela está aberta.
+        // 0.9.6.18 (HOTFIX D9): sem seleção com AnimationPlayer o drawer
+        // desenha o EMPTY-STATE centrado+clipado (antes ficava EM BRANCO)
         if (g_bottom.bottomTab == 4 && tlVisible) {
             const UiRect d = editor::bottom::layout(
                 w, h, g_ui.safeArea(), g_bottom).drawer;
-            timeline::drawTimelineInRect(
-                g_ui, g_input, g_scene, g_editor, g_timeline, g_frameDt,
-                {d.x, d.y + theme::dp(editor::bottom::kDrawerHandleH), d.w,
-                 d.h - theme::dp(editor::bottom::kDrawerHandleH)});
+            const UiRect content = {
+                d.x, d.y + theme::dp(editor::bottom::kDrawerHandleH), d.w,
+                d.h - theme::dp(editor::bottom::kDrawerHandleH)};
+            if (timeline::canDraw(g_scene, g_editor.selected)) {
+                timeline::drawTimelineInRect(
+                    g_ui, g_input, g_scene, g_editor, g_timeline, g_frameDt,
+                    content);
+            } else {
+                editor::bottom::drawDrawerEmptyState(
+                    g_ui, content,
+                    "seleciona um TIC com Animação");
+            }
         }
     }
 
@@ -6532,6 +6673,20 @@ void android_main(android_app* app) {
         elog::info("display: densidade %.3f (dpi %d/160) aplicada ao "
                    "layout (dp real — R-018)",
                    (double)theme::g_density, (int)dpi);
+        // 0.9.6.18 (HOTFIX D4a): a FONTE do locale para a tabela
+        // localizada (ui/Strings.h) — AConfiguration_getLanguage no MESMO
+        // ponto da densidade; o default é PT (a língua base da casa)
+        {
+            char lang[4] = {0, 0, 0, 0};
+            if (app->config) {
+                AConfiguration_getLanguage(app->config, lang);
+            }
+            strings::setLocale(lang);
+            elog::info("display: locale '%s' — a tabela localizada serve "
+                       "«%s»",
+                       strings::locale(),
+                       strings::tr(strings::Key::SettingsTitle));
+        }
     }
 
     // 0.8.11: o callback do backend puxa o MISTURADOR (instala 1× — o
@@ -6602,6 +6757,7 @@ void android_main(android_app* app) {
     g_orbit = editor::OrbitState{};
     g_texCache.reset();       // referenciam o storage antigo — libertados
     g_pipeline.reset();        // ANTES dele (remontados quando houver storage)
+    thumbJobWait();   // 0.9.6.18 (D7): o worker nunca sobrevive ao storage
     g_storage.reset();   // o antigo é destruído; remontado abaixo
 
     // F5-A: storage do projeto — F5.4: GESTOR DE PROJETOS. O arranque
@@ -6646,6 +6802,7 @@ void android_main(android_app* app) {
                     elog::error("projeto: '%s' SAF inutilizável — fallback "
                                 "app-private",
                                 req.name.c_str());
+                    thumbJobWait();   // 0.9.6.18 (D7): o worker não sobrevive
                     g_storage.reset();
                 }
             } else {

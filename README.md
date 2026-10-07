@@ -34,6 +34,47 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.9.6.18 — HOTFIX: OS 12 DEFEITOS DA IMAGEM REAL (D1–D12)
+
+- **D1+D5 · CABEÇALHO DO INSPECTOR NUMA LINHA**: título à esquerda + o
+  recolher do pin à direita; a 2.ª tab «Nós» MORREU (duplicado da
+  hierarquia — a unidade da engine é TIC). Nenhum botão partilha a faixa
+  do título, em 180/220/260dp, com e sem pin.
+- **D2 · A LINHA TRANSFORM NO ORÇAMENTO DO RECT**: `transformRowBudget`
+  (a fonte única do draw e do tap) — caixas 64→48→40dp com o reset a virar
+  ÍCONE inline abaixo do piso; nada desenha fora do rect (o campo Z
+  cortado e o «R» a flutuar morreram).
+- **D3+D9 · EMPTY-STATES CENTRADOS E CLIPADOS** nas 4 tabs do drawer (o
+  helper partilhado + `timeline::canDraw` para a Animação vazia).
+- **D4 · SETTINGS LOCALIZADO**: `ui/Strings.{h,cpp}` (PT «Definições» · EN
+  «Settings» — o locale entra por AConfiguration_getLanguage); «Repor
+  layout» outline compacto (a laje 152dp morreu); «concedido» é texto.
+- **D6 · A MARCA É O GLIFO DA FUNÇÃO ÚNICA**: `ui/Brand.{h,cpp}`
+  (`drawIcon` com LOD 32dp/×1.2) + o espelho Java `UiIcons.drawBrand` — o
+  tile âmbar com a letra lisa morreu (top bar, header Java, empty-state
+  Java e launcher partilham o desenho).
+- **D7 · A CAPTURA FORA DO HOT PATH**: o save só faz glReadPixels; o
+  worker (o padrão ImportJob) codifica 256×144 (≤60KB, orçamento logado)
+  no thread de jobs; o card sem thumb.png desenha INICIAIS com matiz de
+  hash (paleta fixa de 6) — o ícone da app NUNCA é conteúdo de card.
+- **D8 · O GLIFO «U» SAIU DO RAIL**: o ÍMAN é agora uma ferradura com
+  capacetes (a função fica — era a spec PASSO 3; a leitura «undo
+  duplicado» morre).
+- **D10 · ZERO CONTROLOS DE TEXTO CRU**: o toggle de vista é o par de
+  ícones Grid/List; o «visível» é Eye/EyeOff + rótulo; o reset é a seta
+  circular `Icon::Reset`.
+- **D11 · O DIVISOR É A LINHA 1dp** (a coluna de pontos flutuantes morreu;
+  a pill de grip só desenha durante o drag).
+- **D12 · OS PLANOS DO GIZMO PREENCHEM** a 25% do alfa do eixo + contorno
+  (`UiContext::quadCornersFilled` + `kPlaneFillAlpha`).
+- **GATES**: `scripts/ui_vocab_check.py` NOVO (o vocabulário do dono —
+  M4/M5/M6/M7/M9/M12 vermelhos) + docs-lint com o vocabulário D5 + R-035
+  (a sentinela) + FASE 15 do device virtual (40 checks @2.0) + 12
+  mutações vermelho→verde coladas.
+- **TABELA COMPLETA** (`docs/RELATORIO-0.9.6.18-HOTFIX-12-DEFEITOS.md`) ·
+  PNGs antes/depois em docs/hotfix-*.png · **RE-SIGN-OFF P-07**: a tabela
+  de 13 itens no relatório §8 (o PASSO 4 segue BLOQUEADO).
+
 ## 0.9.6.17 — UI PASSO 3: VIEWPORT (o rail esquerdo, 60% de alfa, nada full-width)
 
 **O que existe agora (o PASSO 3 da spec de layout — o chrome da cena

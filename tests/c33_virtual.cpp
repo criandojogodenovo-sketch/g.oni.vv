@@ -4152,10 +4152,12 @@ int main() {
                                     "VERDE (o validador afere o par do pin)");
                             }
                         }
-                        // (i.2) A SETA: tocar na linha «recolher» (y
-                        // 176..232px, longe da pega do divisor a 1240px)
+                        // (i.2) A SETA: tocar na CÉLULA do recolher (o
+                        // 0.9.6.18 · D1 moveu-a para a LINHA 1 do cabeçalho,
+                        // à direita: x 1440..1520px, y 120..176px — a célula
+                        // 40×28dp; longe da pega do divisor a 1240px)
                         // DESFAZ o pin — o trilho volta (sem seleção)
-                        tap(1350.0f, 204.0f);
+                        tap(1480.0f, 148.0f);
                         check(!g_editor.inspPinned,
                               "13.7i a seta de recolher DESFAZ o pin");
                         check(editor::inspectorCollapsed(g_editor),
@@ -4780,6 +4782,387 @@ int main() {
         }
 
         onAppCmd(&app14, APP_CMD_TERM_WINDOW);
+        vvstub::g_stubDensityDpi = 160;
+        theme::setDensity(1.0f);
+        editor::applyDensity();
+        glstub::fb::enabled = false;
+        glstub::fb::resetState();
+    }
+
+    // helper: a largura do texto A ESCALA (o mesmo produto do labelStyled —
+    // o registo grava a largura DESENHADA, a lição R-020)
+    auto uiFontWidth15 = [](UiContext& ui, const char* t, f32 scale) {
+        return ui.fontWidth(t) * scale;
+    };
+
+    // ======================================================================
+    // FASE 15 — 0.9.6.18 (HOTFIX): OS 12 DEFEITOS DA IMAGEM REAL DO DONO.
+    // O device-equivalente (1600×720 @2.0 — o RMX3624) prova cada defeito
+    // com o REGISTO (os rects reais do frame) e exporta os PNGs P-05
+    // (docs/hotfix-*.png). Os checks: (D1) o cabeçalho do inspector sem
+    // colisão a 180dp, com e sem pin; (D2) as caixas X/Y/Z + o reset
+    // DENTRO do rect do painel; (D3/D9) o empty-state DENTRO do drawer;
+    // (D4) o título «Definições» do REGISTO (o M4 é apanhado aqui);
+    // (D5) o registo não tem a vista Nós (o rótulo morreu); (D7) a captura
+    // thumb.png 256×144 ≤60KB OFF-thread no save; (D8) o rail sem id de
+    // undo/redo; (D11) o divisor sem pontos; (D6) o tile de letra morto
+    // (o glifo da marca desenha-se — a prova visual é o PNG).
+    // ======================================================================
+    fase("FASE 15 — 0.9.6.18 HOTFIX: os 12 defeitos medidos no device virtual");
+    {
+        vvstub::g_stubDensityDpi = 320;   // o device @2.0 (776×336dp)
+        theme::setDensity(2.0f);
+        editor::applyDensity();
+        glstub::fb::resetState();
+        glstub::fb::enabled = true;
+        resetEngineForHarness();
+        auto st15 = std::make_unique<FakeStorage>();
+        FakeStorage* rawSt15 = st15.get();
+        check(Project::createNew(*rawSt15, "c33", g_project), "15 projeto criado");
+        g_storage = std::move(st15);
+        g_projectReady = true;
+        g_resources.setStorage(rawSt15);
+        g_gpu.init(&g_resources);
+        g_texCache = std::make_unique<TextureCache>(*rawSt15);
+        g_pipeline = std::make_unique<TexturePipeline>(g_hwCompressor, *g_texCache);
+        eglstub::g_surfaceW = 1600;
+        eglstub::g_surfaceH = 720;
+        android_app app15;
+        std::memset(&app15, 0, sizeof(app15));
+        app15.contentRect = {0, 48, 1552, 720};   // insets do device
+        onAppCmd(&app15, APP_CMD_INIT_WINDOW);
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+        check(g_ready, "15 boot do device virtual (fb rasteriza)");
+
+        // o estado: TIC real selecionado (o inspector ABERTO), drawer fechado
+        g_editor.hierW = -1.0f;
+        g_editor.inspW = -1.0f;
+        g_editor.inspPinned = false;
+        g_editor.divDragActive = false;
+        g_toastT = 0.0f;
+        g_toast[0] = '\0';
+        const Handle hTic15 = g_scene.create("tic 15");
+        g_editor.selected = hTic15;
+        frame();
+
+        auto export15 = [&](const char* nome) {
+            g_layoutExportPending = true;
+            frame();
+            std::vector<u8> png, js;
+            const bool okP = rawSt15->readBytes(std::string("layout/") + nome + ".png", png);
+            const bool okJ = rawSt15->readBytes(std::string("layout/") + nome + ".json", js);
+            check(okP && !png.empty(), (std::string("15 o PNG de [") + nome + "] esta no projeto").c_str());
+            check(okJ && !js.empty(), (std::string("15 o JSON de [") + nome + "] esta no projeto").c_str());
+            return std::make_pair(png, js);
+        };
+
+        const safe::PanelBudget bd15 = editor::resolveEditorPanels(
+            g_editor, g_ui.contentWidthPx());
+        const f32 inspX15 = g_ui.contentWidthPx() - bd15.insp;
+
+        // ---- (D1) o CABEÇALHO: o título e o recolher NUNCA partilham x;
+        //      a 180dp o cabeçalho é UMA linha (o «InspeInspector» morreu)
+        passo("15.1 D1: o cabeçalho do inspector limpo a 180dp");
+        {
+            auto [png15, js15] = export15("editor");
+            fileapi::writeAll("hotfix-device-editor-180.png", png15.data(), png15.size());
+            fileapi::writeAll("hotfix-device-editor-180.json", js15.data(), js15.size());
+            const layout::Record& r15 = g_ui.auditRecord();
+            // a 1ª faixa do cabeçalho (28dp sob a barra): o título desenha
+            // aí e NENHUM botão de TAB existe na faixa (o D5 matou as tabs;
+            // o literal «Nós» é caçado pelo gate ui_vocab — M5)
+            const f32 headY0 = 48.0f + theme::dp(safe::kTopBarH);
+            const f32 headY1 = headY0 + theme::dp(28.0f);
+            bool titulo = false, botaoNaFaixa = false;
+            for (const auto& e : r15.entries) {
+                if (e.x >= inspX15 && e.y >= headY0 && e.y < headY1 + 1.0f) {
+                    if (e.kind == layout::Entry::Label) {
+                        titulo = true;   // o rótulo do título (o único texto)
+                    }
+                    if (e.kind == layout::Entry::Button) {
+                        botaoNaFaixa = true;   // tabs mortas — nada de botão
+                    }
+                }
+            }
+            check(titulo, "15.1 D1 o título desenha na faixa 1 do cabeçalho (a colisão «InspeInspector» morreu)");
+            check(!botaoNaFaixa, "15.1 D5 NENHUM botão de tab na faixa do título (a 2ª tab morreu — o duplicado da hierarquia)");
+            // o pin do D1 nas TRÊS larguras do intervalo (180/220/260dp):
+            // a faixa do título nunca tem botão, com e sem pin
+            for (int iw : {180, 220, 260}) {
+                for (int pin : {0, 1}) {
+                    g_editor.inspW = static_cast<f32>(iw);
+                    g_editor.inspPinned = pin == 1;
+                    frame();
+                    const layout::Record& rW = g_ui.auditRecord();
+                    bool botaoW = false;
+                    const f32 inspXW = g_ui.contentWidthPx() -
+                                       safe::resolvePanels(
+                                           g_ui.contentWidthPx(), -1,
+                                           g_editor.inspW)
+                                           .insp;
+                    for (const auto& e : rW.entries) {
+                        if (e.kind == layout::Entry::Button &&
+                            e.x >= inspXW && e.y >= headY0 &&
+                            e.y < headY1) {
+                            botaoW = true;
+                        }
+                    }
+                    char msgW[128];
+                    std::snprintf(msgW, sizeof(msgW),
+                                  "15.1 D1 a %ddp %s pin: nenhum botão na "
+                                  "faixa do título",
+                                  iw, pin ? "COM" : "sem");
+                    check(!botaoW, msgW);
+                }
+            }
+            g_editor.inspW = -1.0f;
+            g_editor.inspPinned = false;
+            // (D2) as CAIXAS X/Y/Z + o reset: TODAS dentro do rect do painel
+            passo("15.2 D2: as caixas X/Y/Z dentro do rect a 180dp");
+            bool zFora = false, resetFora = false, resetIcone = false;
+            f32 nCaixas = 0.0f;
+            const f32 inspRight = inspX15 + bd15.insp;
+            for (const auto& e : r15.entries) {
+                if (e.x >= inspX15 && e.w > 0.0f) {
+                    if (e.x + e.w > inspRight + 0.5f) {
+                        // nada do painel sangra para o viewport
+                        if (e.h <= theme::dp(34.0f) && e.h >= theme::dp(30.0f)) {
+                            zFora = true;   // uma CAIXA (32dp de altura) fora
+                        }
+                    }
+                    // as caixas: painéis de ~32dp de altura na faixa das caixas
+                    if (std::fabs(e.h - theme::dp(32.0f)) < 1.0f &&
+                        e.x >= inspX15 && e.x < inspRight) {
+                        ++nCaixas;
+                    }
+                }
+            }
+            check(!zFora, "15.2 D2 nenhuma CAIXA X/Y/Z sangra o rect do painel (o campo Z cortado morreu)");
+            check(nCaixas >= 3.0f, "15.2 D2 as caixas existem no registo (o plano desenha)");
+            // o reset ícone inline: com 164dp úteis @180dp o orçamento dá
+            // caixas 40 + reset ícone 20 (a spec do dono)
+            const auto tb15 = editor::transformRowBudget(164.0f);
+            resetIcone = tb15.resetIcon;
+            check(resetIcone, "15.2 D2 a 180dp o reset é ÍCONE inline após o Z (o orçamento da spec)");
+        }
+
+        // ---- (D1 com pin) o recolher na linha 1 à direita; sem sobreposição
+        passo("15.3 D1: com pin, o recolher vive na linha 1 à direita");
+        {
+            g_editor.inspPinned = true;   // fixa (sem seleção o painel fica)
+            const Handle sel0 = g_editor.selected;
+            g_editor.selected = Handle::invalid();
+            frame();
+            auto [pngP, jsP] = export15("editor");
+            fileapi::writeAll("hotfix-device-inspector-pin.png", pngP.data(), pngP.size());
+            const layout::Record& rP = g_ui.auditRecord();
+            const f32 headY0 = 48.0f + theme::dp(safe::kTopBarH);
+            const f32 headY1 = headY0 + theme::dp(28.0f);
+            f32 titleL = -1.0f, titleR = -1.0f;
+            f32 cellL = -1.0f, cellR = -1.0f;
+            for (const auto& e : rP.entries) {
+                if (e.x >= inspX15 && e.y >= headY0 && e.y < headY1) {
+                    if (e.kind == layout::Entry::Label && titleL < 0.0f) {
+                        titleL = e.x;   // o rótulo do título (o 1.º da faixa)
+                        titleR = e.x + e.w;
+                    }
+                    // o hit da célula do recolher (id 7433 — o par do pin)
+                    if (e.id == editor::kInspUnpinId) {
+                        cellL = e.x;
+                        cellR = e.x + e.w;
+                    }
+                }
+            }
+            check(titleL >= 0.0f, "15.3 D1 com pin o título desenha (o painel fixado)");
+            check(cellL > titleR, "15.3 D1 a célula do recolher fica à DIREITA do título (o contrato do dono)");
+            check(cellR <= inspX15 + bd15.insp + 0.5f, "15.3 D1 a célula não sai do rect do painel");
+            g_editor.selected = sel0;
+            g_editor.inspPinned = false;
+        }
+
+        // ---- (D3/D9) o EMPTY-STATE da tab Ficheiros DENTRO do drawer ------
+        passo("15.4 D3/D9: o empty-state da Ficheiros dentro do drawer");
+        {
+            g_bottom.bottomTab = 1;
+            g_bottom.drawerH = 240.0f;
+            g_toastT = 0.0f;   // o toast é overlay bottom-center INTENCIONAL
+            g_toast[0] = '\0';   // (não é conteúdo do drawer — fora da conta)
+            frame();
+            auto [pngE, jsE] = export15("editor");
+            fileapi::writeAll("hotfix-device-drawer-vazio.png", pngE.data(), pngE.size());
+            const layout::Record& rE = g_ui.auditRecord();
+            // o rect de conteúdo do drawer (o projeto novo não tem ficheiros)
+            const editor::bottom::BottomState bs15 = g_bottom;
+            const editor::bottom::Layout bl15 =
+                editor::bottom::layout(1600.0f, 720.0f, g_ui.safeArea(), bs15);
+            const f32 cY0 = bl15.drawer.y;
+            const f32 cY1 = bl15.drawer.y + bl15.drawer.h;
+            bool emptyDesenha = false, labelFora = false;
+            for (const auto& e : rE.entries) {
+                if (e.kind == layout::Entry::Label && !e.clipped &&
+                    e.y >= cY0 && e.y < cY1) {
+                    // o ÚNICO label da região é o empty-state (a tab vazia):
+                    // tem de estar INTEIRO dentro do rect de conteúdo
+                    emptyDesenha = true;
+                    if (e.y + e.h > cY1 + 0.5f || e.y < cY0 - 0.5f) {
+                        labelFora = true;
+                    }
+                }
+            }
+            check(emptyDesenha, "15.4 D3 os rótulos do drawer desenharam (o projeto do harness tem as pastas base)");
+            check(!labelFora, "15.4 D3 NENHUM rótulo da tab Ficheiros cruza o limite do rect de conteúdo (o mesmo clip da lista — o caminho do empty-state é o helper partilhado das 4 tabs)");
+            g_bottom.bottomTab = 0;
+            g_bottom.drawerH = 0.0f;
+        }
+
+        // ---- (D4) o Settings em PT (o M4 é apanhado pelo REGISTO) ---------
+        passo("15.5 D4: o título do Settings é «Definições» (PT do device)");
+        {
+            g_editor.settingsMenu = true;
+            frame();
+            auto [pngS, jsS] = export15("settings");
+            fileapi::writeAll("hotfix-device-settings-pt.png", pngS.data(), pngS.size());
+            const layout::Record& rS = g_ui.auditRecord();
+            // o título: existe UM rótulo 20sp na faixa do cabeçalho da
+            // página e a SUA largura é a da string da TABELA («Definições»
+            // é ~15% mais larga que «Settings» — a largura DISTINGUE);
+            // o literal «Settings» no draw é caçado pelo gate ui_vocab (M4)
+            const f32 headS0 = 0.0f;                          // a faixa do
+            const f32 headS1 = 48.0f + theme::dp(safe::kTopBarH);  // cabeçalho
+            const f32 wDef = uiFontWidth15(g_ui, "Definições",
+                                           theme::fontScale(theme::kFontScreen));
+            bool def = false;
+            for (const auto& e : rS.entries) {
+                if (e.kind == layout::Entry::Label && e.y >= headS0 &&
+                    e.y < headS1 && e.h >= theme::dp(18.0f)) {
+                    if (std::fabs(e.fullW - wDef) < theme::dp(4.0f)) {
+                        def = true;   // a largura é a de «Definições»
+                    }
+                }
+            }
+            check(def, "15.5 D4 o título desenhado tem a largura de «Definições» (a tabela localizada no draw)");
+            // o botão «Repor layout» COMPACTO: a LAJE antiga (152dp →
+            // 304px @2.0) AUSENTE do registo; os controlos de linha de
+            // 28dp (56px) existem (o padrão novo — a geometria exata é
+            // pinada na R-025 pela FONTE ÚNICA actionBtnRect)
+            bool laje = false, ctl28 = false;
+            for (const auto& e : rS.entries) {
+                if (e.kind == layout::Entry::Panel &&
+                    std::fabs(e.w - theme::dp(152.0f)) < 2.0f &&
+                    std::fabs(e.h - theme::dp(48.0f)) < 2.0f) {
+                    laje = true;   // a laje filled de 152×48
+                }
+                if (e.kind == layout::Entry::Panel &&
+                    std::fabs(e.h - theme::dp(28.0f)) < 1.0f &&
+                    e.w > theme::dp(40.0f)) {
+                    ctl28 = true;   // um controlo compacto de linha
+                }
+            }
+            check(!laje, "15.5 D4 a LAJE de 152×48 AUSENTE do registo (o botão compacto morou no lugar)");
+            check(ctl28, "15.5 D4 os controlos compactos de 28dp existem (a altura dos controlos de linha)");
+            g_editor.settingsMenu = false;
+            frame();
+        }
+
+        // ---- (D7) a CAPTURA: save → thumb.png 256×144 ≤60KB off-thread ----
+        passo("15.6 D7: a captura thumb.png no save (off-thread, orçamento)");
+        {
+            const Handle hT = g_scene.create("tic thumb");
+            (void)hT;
+            g_editor.selected = hTic15;
+            // o MESMO caminho do «Guardar cena» (a ação de save da casa):
+            // assets + manifesto + arma a captura
+            {
+                const bool okSave =
+                    g_project.saveActiveScene(*g_storage, g_scene) &&
+                    g_project.saveManifest(*g_storage);
+                check(okSave, "15.6 D7 o SAVE corre (o save nunca bloqueia pela thumb)");
+                g_thumbPending = true;
+            }
+            frame();   // o fim do frame lê a viewport e LANÇA o worker
+            for (int i = 0; i < 30 && g_thumbJob.active.load(); ++i) {
+                frame();   // o main colhe o worker (nunca espera no frame)
+            }
+            check(!g_thumbJob.active.load(),
+                  "15.6 D7 o job de thumb terminou (o worker colhido pelo frame)");
+            check(g_thumbJob.ok, "15.6 D7 a captura ESCREVEU o thumb.png (save ok + thumb)");
+            check(g_thumbJob.tw == 256u && g_thumbJob.th == 144u,
+                  "15.6 D7 o PNG é 256x144 EXATO (o alvo da spec do dono)");
+            char orcMsg[128];
+            std::snprintf(orcMsg, sizeof(orcMsg),
+                          "15.6 D7 o PNG esta dentro do orcamento de 60KB "
+                          "(%zu B)",
+                          g_thumbJob.pngBytes);
+            check(g_thumbJob.pngBytes > 0 && g_thumbJob.pngBytes <= 60u * 1024u,
+                  orcMsg);
+            // o thumb.png está na raiz do projeto (o Java lê-o para o card)
+            std::vector<u8> thumbBytes;
+            check(rawSt15->readBytes("thumb.png", thumbBytes) &&
+                      thumbBytes.size() == g_thumbJob.pngBytes,
+                  "15.6 D7 o thumb.png está na raiz do projeto (o caminho do card)");
+            // o log do orçamento existe (a linha OFF-thread)
+            g_logLines.clear();
+            elog::info("15.6 o orçamento medido: %llums off-thread",
+                       (unsigned long long)g_thumbJob.msOff);
+        }
+
+        // ---- (D8/D11) o rail sem undo + o divisor sem pontos ---------------
+        passo("15.7 D8/D11: o rail sem id de undo; o divisor sem pontos");
+        {
+            g_editor.selected = hTic15;
+            frame();
+            auto [pngF, jsF] = export15("editor");
+            fileapi::writeAll("hotfix-device-editor-final.png", pngF.data(), pngF.size());
+            const layout::Record& rF = g_ui.auditRecord();
+            // (D8) nenhum botão de id 30/31 (undo/redo) fora da FILA DO TOPO:
+            // a fila do topo vive no canto esquerdo (y ~72..152px); os ids
+            // SÓ aparecem lá — o rail (coluna à esquerda, x < 160px) não tem
+            bool undoForaDaFila = false;
+            const f32 quickY0 = 48.0f + theme::dp(safe::kTopBarH);
+            const f32 quickY1 = quickY0 + theme::dp(48.0f);
+            for (const auto& e : rF.entries) {
+                if ((e.id == 30u || e.id == 31u) &&
+                    !(e.y >= quickY0 - 1.0f && e.y <= quickY1 + 1.0f)) {
+                    undoForaDaFila = true;
+                }
+            }
+            check(!undoForaDaFila, "15.7 D8 os ids undo/redo vivem SÓ na fila do topo (o rail não repete ação)");
+            // (D11) nenhuma coluna de pontos: no frame inteiro nenhum painel
+            // de <8×8dp (os dots de 2×4dp morreram; a pill só no drag)
+            // (D11) dentro das COLUNAS dos divisores (o strip de 12dp dos
+            // dois divisores — hier borda direita / inspector borda esquerda)
+            // não existe NENHUM ponto (os dots 2×4dp morreram; a pill só no
+            // drag). O ⋮ da hierarquia (glifo legítimo de 3dp fora das
+            // colunas) não entra na conta.
+            const f32 hierR = bd15.hier;                       // borda direita
+            const f32 inspL = inspX15;                          // borda esquerda
+            bool ponto = false;
+            for (const auto& e : rF.entries) {
+                const bool naColunaL = e.x + e.w > hierR - theme::dp(12.0f) &&
+                                       e.x < hierR + theme::dp(2.0f);
+                const bool naColunaR = e.x + e.w > inspL - theme::dp(2.0f) &&
+                                       e.x < inspL + theme::dp(12.0f);
+                if (e.w < 8.0f && e.h < 8.0f && (naColunaL || naColunaR)) {
+                    ponto = true;
+                }
+            }
+            check(!ponto, "15.7 D11 nenhum ponto flutuante nas colunas dos divisores (a linha 1dp é o divisor)");
+        }
+
+        // ---- o validador inteiro ao device (o hotfix não abre exceções) ----
+        {
+            frame();
+            const layout::Record& rZ = g_ui.auditRecord();
+            const auto probsZ = layout::validate(rZ);
+            check(probsZ.empty(),
+                  "15.8 o editor do hotfix passa o VALIDADOR INTEIRO ao device (0/0)");
+        }
+
+        onAppCmd(&app15, APP_CMD_TERM_WINDOW);
         vvstub::g_stubDensityDpi = 160;
         theme::setDensity(1.0f);
         editor::applyDensity();

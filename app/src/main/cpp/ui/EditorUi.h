@@ -244,7 +244,10 @@ struct EditorState {
     // resto do layout (spec G); o clamp vivo é o da safe::clampPanelW.
     f32    hierW = -1.0f;
     f32    inspW = -1.0f;
-    u32    inspTab = 0;        // 0.9.6.10: 0=Inspector · 1=Nós (a lista de nós)
+    u32    inspTab = 0;        // 0.9.6.10: 0=Inspector · 1=Nós — 0.9.6.18
+                               // (D5): a vista Nós MORREU (duplicado da
+                               // hierarquia); o campo fica (compat de
+                               // formato) e o draw manda-o a 0
     // P2-bis (0.9.6.16 — a decisão do dono sobre «fixar aberto»): o PIN do
     // inspector. Tocar no ÍCONE do trilho (32dp, sem seleção) ABRE o painel
     // E FIXA (inspPinned=true — PERSISTE no layout.json, spec G); a seta de
@@ -306,6 +309,21 @@ UiRect centerRect(f32 sw, f32 sh, const safe::Insets& in, f32 drawerH,
 // safe::resolvePanels — gangorra dos três pisos; o draw dos painéis, o drag
 // dos divisores, a sombra do save e os testes partilham ESTA)
 safe::PanelBudget resolveEditorPanels(const EditorState& st, f32 contentWdp);
+
+// ---- 0.9.6.18 (HOTFIX D2) — O ORÇAMENTO DA LINHA TRANSFORM -----------------
+// A fonte ÚNICA do draw E do re-despacho do tap (o campo Z cortado nascia
+// de DUAS fórmulas). Pura/afervel — a sentinela R-035 afirma os pisos e o
+// teto «nada fora do rect». Em DP (a versão px é interna ao TU).
+//   1. painel largo (≥256dp úteis): caixas 64 + reset CHIP 40
+//   2. encolhe: caixas (útil−24−40)/3 com PISO 48 — o chip fica
+//   3. abaixo do piso 48: reset ÍCONE inline 20 — caixas (útil−24−20)/3
+//      com PISO 40 (no painel 180dp dá 40 exato)
+struct TransformBudget {
+    f32  boxW = 64.0f;      // a caixa X/Y/Z (dp)
+    f32  resetW = 40.0f;    // o alvo do reset (40 chip · 20 ícone inline)
+    bool resetIcon = false; // true = reset ÍCONE inline após o Z
+};
+TransformBudget transformRowBudget(f32 usableWdp);
 
 // PASSO 2 (0.9.6.15 — spec do dono): SEM seleção o INSPECTOR colapsa ao
 // trilho de 32dp (safe::kInspTrackW) — a área junta-se ao viewport e volta
@@ -458,20 +476,25 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 // scroll do sheet (kMenuScrollId 7410 — faixa exclusiva)
 constexpr u64 kMenuRowBase   = 7400;
 constexpr u64 kMenuScrollId  = 7410;
-constexpr u64 kInspTabBase   = 7430;   // 0.9.6.10: tabs Inspector/Nós
+constexpr u64 kInspTabBase   = 7430;   // 0.9.6.10: tabs Inspector/Nós —
+                                       // 0.9.6.18 (D5): a 2ª tab MORREU
+                                       // (duplicado da hierarquia); o id
+                                       // fica RESERVADO na faixa (os
+                                       // formatos antigos de layout podem
+                                       // referi-lo; nenhuma vista desenha)
 // P2-bis (0.9.6.16): o PAR do pin — o ícone do TRILHO abre E fixa (o
 // touch é a célula toda de 32dp de largura × 40dp de altura — a LEI DE
 // OURO no toque; a largura é a do trilho, o elemento 32dp da spec do
-// dono — a mesma classe de piso das tabs de baixo, kFieldFloorDp) e a
-// SETA de recolher no cabeçalho desfaz o pin e fecha.
+// dono — a mesma classe de piso das tabs de baixo, kFieldFloorDp).
+// 0.9.6.18 (D1): a SETA de recolher vive agora na LINHA 1 do cabeçalho
+// (à DIREITA — o contrato «título à esquerda + pin/fechar à direita»);
+// a linha própria de 28dp do P2-bis morreu (o espaço foi libertado pela
+// remoção das tabs do D5).
 constexpr u64 kInspTrackPinId = 7432;  // o ícone do trilho (abre + fixa)
 constexpr u64 kInspUnpinId    = 7433;  // a seta de recolher (desfaz o pin)
-constexpr f32 kInspUnpinRowH  = 28.0f; // dp — a linha da seta (o piso de
-                                       // cabeçalho da casa, kHeadFloorDp).
-                                       // Só existe ENQUANTO fixado; vive
-                                       // SOB o cabeçalho — longe das chips
-                                       // no piso 180dp (o espaço da 1ª
-                                       // linha é medido, não adivinhado)
+constexpr f32 kInspUnpinCellW = 40.0f; // dp — a célula do recolher na linha
+                                       // 1 (o alvo do toque, 40×28; o piso
+                                       // da classe cabeçalho kHeadFloorDp)
 constexpr u64 kHierDotsId    = 7420;   // ⋮ da Hierarquia (GRUPO UI)
 constexpr u64 kHierMenuRowBase = 7421; // linhas do menu ⋮ (2)
 int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,

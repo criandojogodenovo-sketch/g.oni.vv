@@ -67,6 +67,57 @@ int lineLevel(const std::string& ln) {
 
 } // namespace
 
+// 0.9.6.18 (HOTFIX D9): a versão para o MAIN (a tab Animação sem
+// timeline) — o ícone é o da casa (Claquette), o caminho é o MESMO
+// helper centrado+clipado das outras tabs (o drawEmptyState vive no
+// namespace anónimo; ESTA é a porta com linkage externo — o header decla)
+void drawDrawerEmptyState(UiContext& ui, const UiRect& rect,
+                          const char* label) {
+    drawEmptyState(ui, rect, icons::Icon::Clapper, label);
+}
+
+// ---- 0.9.6.18 (HOTFIX D3+D9) — O EMPTY-STATE DAS TABS DO DRAWER ----------
+// O dono: «Label centrado no rect de conteúdo do drawer e CLIPADO a ele
+// (o mesmo clip da lista). Nunca cruza o limite inferior nem a tab bar»
+// (D3) e «estende às 4 tabs: ícone dimensionado para caber, nada desenha
+// fora do drawer» (D9). O helper é o ÚNICO caminho: centrado V/H no rect,
+// ScopedClip no rect (o MESMO clip da lista), ícone dimensionado ao rect.
+void drawEmptyState(UiContext& ui, const UiRect& rect, icons::Icon ic,
+                    const char* label) {
+    if (rect.w <= 8.0f || rect.h <= 8.0f) {
+        return;   // rect degenerado (drawer mínimo) — nada a desenhar
+    }
+    UiContext::ScopedClip clip(ui, rect);
+    const TextMetrics m = ui.textMetrics();
+    // o ícone CABE no rect (nunca clipado pela tab bar — o defeito D9)
+    const f32 icS = std::min(theme::dp(28.0f), rect.h * 0.35f);
+    const f32 gap = theme::dp(8.0f);
+    const f32 block = (ui.hasFont() ? m.block() : theme::dp(14.0f)) + gap + icS;
+    const f32 cy = rect.y + (rect.h - block) * 0.5f;
+    icons::drawIcon(ui, ic, rect.x + (rect.w - icS) * 0.5f, cy, icS,
+                    theme::kTheme.text2);
+    if (ui.hasFont() && label && label[0]) {
+        const f32 maxW = rect.w - theme::dp(16.0f);
+        const f32 tw = ui.fontWidth(label);
+        // a TRAVA (0.9.6.18 · D3): o fundo do texto NUNCA passa o fundo do
+        // rect — a métrica pode divergir da escala do registo (a lição
+        // R-020); o clip é a lei e a trava é a segunda defesa
+        const f32 baseRaw = cy + icS + gap + m.ascent;
+        const f32 base = baseRaw < rect.y + rect.h - theme::dp(2.0f) - m.descent
+                             ? baseRaw
+                             : rect.y + rect.h - theme::dp(2.0f) - m.descent;
+        if (tw <= maxW) {
+            // centrado no rect (o defeito D3 era a label desalinhada a
+            // cruzar o limite inferior)
+            ui.label(rect.x + (rect.w - tw) * 0.5f, base, label,
+                     theme::kTheme.text2);
+        } else {
+            ui.labelFitted(rect.x + theme::dp(8.0f), base, label,
+                           theme::kTheme.text2, maxW);
+        }
+    }
+}
+
 Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st) {
     Layout L;
     L.tabBar = safe::bottomTabRect(sw, sh, in);
@@ -328,9 +379,12 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
             }
         }
         if (tree.n == 0 && ui.hasFont()) {
-            ui.labelFitted(content.x + theme::dp(16.0f), listTop + rowH,
-                           "sem pastas (projeto sem ficheiros)",
-                           theme::kTheme.text2, content.w - theme::dp(32.0f));
+            // 0.9.6.18 (HOTFIX D3): o empty-state centrado+clipado no rect
+            // de conteúdo (a label antiga desenhava a listTop+rowH FIXO —
+            // cruzava o limite inferior com o drawer curto e a linha âmbar
+            // do tab atravessava-a)
+            drawEmptyState(ui, content, icons::Icon::Folder,
+                           "sem pastas (projeto sem ficheiros)");
         }
     }
     // ---- 0.9.6.10 · TAB 2: O BROWSER DE ASSETS (a grelha da imagem 1) ----
@@ -402,7 +456,10 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
         }
         {
             // o TOGGLE grelha/lista (à direita — a imagem 1)
-            const f32 tw = theme::dp(96.0f);
+            // 0.9.6.18 (HOTFIX D10): o texto cru «grelha»/«lista» MORREU —
+            // o ESTADO vive nos ícones da casa (Grid = 4 quadrantes /
+            // List = 3 linhas com pontos), o ativo em accent
+            const f32 tw = theme::dp(64.0f);
             const f32 tx0 = content.x + content.w - theme::dp(16.0f) - tw;
             const bool heldV = ui.widgetActive(kAssetsViewId);
             ui.panelRounded(tx0, chipY, tw, chipH, theme::kRadiusField,
@@ -410,13 +467,18 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
                                   : theme::kTheme.surface);
             ui.frameRounded(tx0, chipY, tw, chipH, 1.0f, theme::kRadiusField,
                             theme::kTheme.border);
-            if (ui.hasFont()) {
-                const char* lbl = bs.assetsList ? "lista" : "grelha";
-                ui.labelFitted(tx0 + (tw - ui.fontWidth(lbl)) * 0.5f,
-                               chipY + (chipH - tmText.block()) * 0.5f +
-                                   tmText.ascent,
-                               lbl, theme::kTheme.text2, tw - theme::dp(8.0f));
-            }
+            // os DOIS ícones lado a lado (o toggle mostra o par — o ATIVO
+            // acende; o toque alterna)
+            const f32 sIc = theme::dp(20.0f);
+            const f32 icY = chipY + (chipH - sIc) * 0.5f;
+            icons::drawIcon(ui, icons::Icon::Grid,
+                            tx0 + tw * 0.30f - sIc * 0.5f, icY, sIc,
+                            !bs.assetsList ? theme::kTheme.accent
+                                           : theme::kTheme.text2);
+            icons::drawIcon(ui, icons::Icon::List,
+                            tx0 + tw * 0.70f - sIc * 0.5f, icY, sIc,
+                            bs.assetsList ? theme::kTheme.accent
+                                          : theme::kTheme.text2);
             if (ui.widgetHit(kAssetsViewId, tx0, chipY, tw, chipH)) {
                 bs.assetsList = !bs.assetsList;
             }
@@ -546,17 +608,14 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
             }
         }
         if (nCards == 0 && ui.hasFont()) {
-            // vazio (spec M): ícone + convite
-            icons::drawIcon(ui, icons::Icon::Folder,
-                            content.x + content.w * 0.5f - theme::dp(20.0f),
-                            content.y + theme::dp(64.0f), theme::dp(40.0f),
-                            theme::kTheme.text2);
-            ui.labelFitted(content.x + theme::dp(16.0f),
-                           content.y + theme::dp(136.0f),
+            // 0.9.6.18 (HOTFIX D9): o empty-state CENTRADO no rect da
+            // grelha e clipado a ele (a label antiga vivia a content.y+136
+            // FIXO — saía do drawer por baixo da tab bar; o ícone de pasta
+            // gigante 40dp clipava). O ícone dimensiona-se ao rect.
+            drawEmptyState(ui, grid, icons::Icon::Folder,
                            prefix.empty()
                                ? "sem ficheiros - importe no seletor do Inspector"
-                               : "pasta vazia",
-                           theme::kTheme.text2, content.w - theme::dp(32.0f));
+                               : "pasta vazia");
         }
     }
     // ---- TAB 3: A CONSOLA (spec K — RECALIBRADA 0.9.6.10: era a tab 2) ----
@@ -757,13 +816,15 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
                 bs.consoleExpanded = (row == bs.consoleExpanded) ? -1 : row;
             }
             if (shown == 0 && ui.hasFont()) {
-                ui.labelFitted(content.x + theme::dp(16.0f), listTop + rowH,
+                // 0.9.6.18 (HOTFIX D9): o empty-state da consola também é
+                // CENTRADO+CLIPADO na região da lista (a label antiga
+                // desenhava a listTop+rowH FIXO — com a lista curta
+                // flutuava no topo, fora do centro do drawer)
+                drawEmptyState(ui, listRegion, icons::Icon::Terminal,
                                bs.consoleTab == 1
                                    ? "sem erros"
                                    : (bs.consoleTab == 2 ? "sem avisos"
-                                                         : "(vazio)"),
-                               theme::kTheme.text2,
-                               content.w - theme::dp(32.0f));
+                                                         : "(vazio)"));
             }
         }
     }

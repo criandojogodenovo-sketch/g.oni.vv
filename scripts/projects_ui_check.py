@@ -34,8 +34,12 @@ ICN = ROOT / "app/src/main/java/vv/goni/UiIcons.java"
 TOKENS_F = ("0xFF0E0E10", "0xFF161618", "0xFF202023", "0xFF2E2E32",
             "0xFFECECEE", "0xFFA6A6AD", "0xFFFFB020", "0xFFE09A00",
             "0xFF0E0E10", "0xCC161618", "0xDB202023", "0xFF4A3714",
-            "0xFFE5484D", "0xFFFF8A3D", "0xFF46A758")   # 0.9.6.10 spec G:
-            # grafite+Ã¢mbar+vidro (a reescrita da apresentaÃ§Ã£o)
+            "0xFFE5484D", "0xFFFF8A3D", "0xFF46A758",
+            # 0.9.6.18 (HOTFIX D7): a PALETA FIXA dos 6 matizes dos tiles
+            # de iniciais (só em InitialsThumbView; matizes sóbrios sobre
+            # grafite — o âmbar 0xFFE09A00 já era token)
+            "0xFFC4573B", "0xFF3E8E7E", "0xFF5B7FA6", "0xFF6E8B3D",
+            "0xFF8B6FA0")   # 0.9.6.10 spec G: grafite+âmbar+vidro
 
 
 def strip_comments(src: str) -> str:
@@ -57,9 +61,10 @@ def main():
     icn = strip_comments(ICN.read_text(encoding="utf-8"))
     code = strip_comments(src)
 
-    # 1) FASE 9 (G1-4b): cabeçalho NUMA LINHA
+    # 1) FASE 9 (G1-4b): cabeçalho NUMA LINHA — 0.9.6.18 (D6): o logo é
+    # o glifo DESENHADO pela única função (UiIcons.drawBrand), não um PNG
     for frag, what in [("buildTopBar", "cabeçalho numa linha (buildTopBar)"),
-                       ("R.drawable.gone_logo", "logo G com 4 setas"),
+                       ("new BrandView(this, ACCENT", "logo desenhado pela função da marca (D6)"),
                        ("dp(32), dp(32)", "logo 32dp compacto"),
                        ("title.setTextSize(16)", "título 16sp"),
                        ("pesquisar projetos", "hint da pesquisa"),
@@ -157,6 +162,19 @@ def main():
         bad += fail("tempo relativo do card ausente (há 2 h)")
     else:
         print("OK  tempo relativo no card (ProjectsFormat.relativeTime)")
+
+    # 0.9.6.18 (D7): o ícone da app NUNCA é conteúdo de card — o default
+    # é o tile de iniciais (InitialsThumbView), e o gone_logo não desenha
+    # card nenhum (só pode existir no res/ para o launcher)
+    if "InitialsThumbView" not in code:
+        bad += fail("card default: falta o tile de iniciais (D7)")
+    if "R.drawable.gone_logo" in code:
+        bad += fail("card/header usa o PNG gone_logo — a marca desenha-se "
+                    "(D6) e o ícone da app nunca é conteúdo de card (D7)")
+    if "drawBrand" not in icn:
+        bad += fail("UiIcons sem drawBrand (o espelho Java da Brand.cpp, D6)")
+    if "thumb.png indisponível" not in code:
+        bad += fail("sem o WARN do fallback de iniciais (D7)")
 
     # 9) TOKENS spec F — zero hex fora das constantes
     for tok in TOKENS_F:

@@ -38,9 +38,13 @@ struct EditorState;
 
 namespace settings {
 
-// 0.9.6.6 (GRUPO C): o rect do BOTÃO de uma actionRow — FONTE ÚNICA exportada
-// (o draw, o re-despacho do scrollTap E os testes partilham-no; 48dp REAL)
-UiRect actionBtnRect(f32 x, f32 y, f32 w);
+// 0.9.6.18 (HOTFIX D4b): o rect do BOTÃO de uma actionRow — FONTE ÚNICA
+// exportada (o draw, o re-despacho do scrollTap E os testes partilham-no).
+// OUTLINE COMPACTO: largura = texto + padding (teto metade da linha),
+// altura dos controlos de linha (28dp — a altura do toggle da casa),
+// alinhado à direita. A assinatura pede o ui (mede o texto) e o texto
+// (o walk tem de calcular o MESMO rect que o draw)
+UiRect actionBtnRect(UiContext& ui, f32 x, f32 y, f32 w, const char* btn);
 
 // ---- ids (faixa 5800..5899 — nova, sem colisões) ---------------------------
 constexpr u64 kBackId     = 5800;   // ← voltar (56dp)

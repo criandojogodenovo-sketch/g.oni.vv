@@ -17,6 +17,11 @@
 namespace vv {
 namespace thumb {
 
+// 0.9.6.18 (HOTFIX D7): a LARGURA-ALVO da miniatura (a spec do dono:
+// ~256×144 — PNG ≤~60KB, encode ≤~50ms off-thread). Afervel: a sentinela
+// R-036.1 afirma ESTE valor.
+constexpr u32 kThumbTargetW = 256u;
+
 // ---- PURE (host-testável no CI) ---------------------------------------------
 
 // crop 16:9 CENTRADO dentro de um viewport (vw×vh): devolve o rect (origem

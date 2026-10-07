@@ -54,6 +54,13 @@ jobs:
       - name: Gate docs-lint (R-016)
         run: python3 scripts/docs_lint_check.py
 
+      # 0.9.6.18 (HOTFIX D5+D10) — GATE UI-VOCAB: «nenhum controlo é texto
+      # cru, nenhum duplicado sobrevive» — o vocabulário proibido («Nós»,
+      # o «R» nu, «grelha» como texto, o tile de letra da marca, o encode
+      # no hot path) voltar ao fonte = vermelho = release bloqueada
+      - name: Gate ui-vocab (D5/D10 — o vocabulário do dono)
+        run: python3 scripts/ui_vocab_check.py
+
       # 0.9.6.10 (GRUPO UI · R-030) — GATE THEME-HEX: «qualquer hex fora
       # do ficheiro de Theme = CI vermelho» (a ordem expressa do dono na
       # spec G). As cores do chrome vivem SÓ em ui/Theme.h (a tabela

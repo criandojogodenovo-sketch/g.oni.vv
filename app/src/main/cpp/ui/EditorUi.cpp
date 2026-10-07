@@ -19,6 +19,7 @@
 #include "core/Scene.h"
 #include "ui/UiEditor.h"                  // 0.8.6: uiHexFormat (linha hex)
 #include "ui/Icons.h"                    // 0.9.0: conjunto outline (spec A)
+#include "ui/Strings.h"                  // 0.9.6.18 (D4): a tabela localizada
 #include "platform/BuildInfo.h"          // 0.8.12: badge ANTIGO dos dumps no viewer
 #include <cstdio>
 #include <cstring>
@@ -65,6 +66,43 @@ bool pressedOutside(const InputState& in, f32 x, f32 y, f32 w, f32 h) {
     f32 px, py;
     in.pos(0, px, py);
     return !(px >= x && px < x + w && py >= y && py < y + h);
+}
+
+// ---- 0.9.6.18 (HOTFIX D2) — O ORÇAMENTO DA LINHA TRANSFORM ----------------
+// O dono: «Linha X/Y/Z clampada à largura real do painel (o padrão de
+// orçamento do labelFitted): campos encolhem com minWidth; abaixo de um
+// piso, o reset vira ícone inline após o Z. NADA desenha fora do rect do
+// painel.» A FUNÇÃO É PURA e é a FONTE ÚNICA do draw E do re-despacho do
+// tap (o padrão da casa: desenhar e tocar partilham a MESMA matemática —
+// o bug do campo Z cortado nascia de as duas metades terem fórmulas
+// diferentes, e o tap ainda usava gaps em px crus).
+//
+// As tentativas (em dp úteis = w − 2×kPad):
+//   1. painel largo:  3×64 + 2×8 + 8 + 40 = 256 → caixas 64 + reset CHIP 40
+//   2. encolhe:       boxW = (útil − 24 − 40)/3 com PISO 48 → o chip fica
+//   3. abaixo do piso: o reset vira ÍCONE 20 inline —
+//                     boxW = (útil − 24 − 20)/3 com PISO 40; no piso do
+//                     painel da casa (180dp → 164 úteis) dá 40 exato
+//                     (3×40+2×8+8+20 = 164). A ÚLTIMA DEFESA: se mesmo
+//                     assim a linha passar do útil, as caixas encolhem —
+//                     o rect do painel é a LEI (nada fora dele).
+constexpr f32 kTfGapBox   = 8.0f;   // o vão ENTRE caixas
+constexpr f32 kTfGapReset = 8.0f;   // o vão antes do reset
+constexpr f32 kTfChipW    = 40.0f;  // o chip do reset (a lei de ouro: alvo 40)
+constexpr f32 kTfIconW    = 20.0f;  // o ícone inline do reset
+constexpr f32 kTfWideBox  = 64.0f;  // a caixa larga (3×64 = o painel 272 antigo)
+constexpr f32 kTfMinBox   = 48.0f;  // o PISO com o chip (a spec: minWidth)
+constexpr f32 kTfFloorBox = 40.0f;  // o PISO com o ícone inline
+
+// a versão em PX (o que o draw e o dispatch consomem — os dois a MESMA,
+// density incluída; a dp é a afervel)
+TransformBudget transformRowBudgetPx(f32 usablePx) {
+    const f32 dp1 = theme::dp(1.0f);
+    TransformBudget b =
+        transformRowBudget(dp1 > 0.0f ? usablePx / dp1 : usablePx);
+    b.boxW *= dp1;
+    b.resetW *= dp1;
+    return b;
 }
 
 f32 rad2deg(f32 r) { return r * 57.29577951f; }
@@ -117,6 +155,38 @@ bool sliderRow(UiContext& ui, u64 id, f32 x, f32 w, f32 rowTop, f32 rowH,
     return changed;
 }
 } // namespace
+
+TransformBudget transformRowBudget(f32 usableWdp) {
+    TransformBudget b;
+    if (usableWdp >= 3.0f * kTfWideBox + 2.0f * kTfGapBox + kTfGapReset +
+                         kTfChipW) {
+        return b;   // tentativa 1: caixas 64 + chip 40
+    }
+    const f32 withChip =
+        (usableWdp - 2.0f * kTfGapBox - kTfGapReset - kTfChipW) / 3.0f;
+    if (withChip >= kTfMinBox) {
+        b.boxW = withChip;   // tentativa 2: encolhe até ao piso 48, chip fica
+        return b;
+    }
+    // tentativa 3: o reset vira ÍCONE inline após o Z
+    b.resetIcon = true;
+    b.resetW = kTfIconW;
+    const f32 withIcon =
+        (usableWdp - 2.0f * kTfGapBox - kTfGapReset - kTfIconW) / 3.0f;
+    b.boxW = withIcon >= kTfFloorBox ? withIcon : kTfFloorBox;
+    // a ÚLTIMA defesa (painel sub-mínimo — impossível no clamp da casa,
+    // mas a lei é o rect): a linha INTEIRA re-encolhe para caber
+    const f32 total = 3.0f * b.boxW + 2.0f * kTfGapBox + kTfGapReset + b.resetW;
+    if (total > usableWdp && total > 1.0f) {
+        b.boxW -= (total - usableWdp) / 3.0f;
+        if (b.boxW < 16.0f) {
+            b.boxW = 16.0f;   // abaixo disto o campo não lê — o scissor
+                              // do painel guarda o resto
+        }
+    }
+    return b;
+}
+
 
 UiRect centerRect(f32 sw, f32 sh) {
     // QUALIFICADO: chamada não-qualificada era ambígua no NDK clang — o ADL
@@ -278,10 +348,12 @@ void dividerInput(UiContext& ui, const InputState& in, EditorState& st,
 
 void drawPanelDividers(UiContext& ui, const EditorState& st, bool rightPanel) {
     const DividerRects d = dividerRects(ui, st, rightPanel);
-    const f32 col[4] = {theme::kTheme.text2[0], theme::kTheme.text2[1],
-                        theme::kTheme.text2[2], 1.0f};
-    // o strip: fundo (aceso durante o drag) + traços horizontais (o grip
-    // vertical — o espelho da pega do drawer, que tem traços verticais)
+    // 0.9.6.18 (HOTFIX D11) — o dono: «Divisor = linha sólida 1dp na cor
+    // border + pill de grip só durante o drag. Os pontos flutuantes
+    // morrem.» O fundo do strip (bg em repouso) e os 5 traços de 2×4dp
+    // (a "coluna de pontos" que flutuava sobre a grelha) MORRERAM: em
+    // repouso só a LINHA 1dp existe; no drag o strip acende (accent) e a
+    // PILL arredondada aparece no centro.
     const UiRect strips[2] = {d.stripL, d.stripR};
     const bool on[2] = {true, d.rightOn};
     const bool dragging[2] = {st.divDragActive && !st.divDragRight,
@@ -290,17 +362,18 @@ void drawPanelDividers(UiContext& ui, const EditorState& st, bool rightPanel) {
         if (!on[i] || strips[i].w <= 0.0f || strips[i].h <= 1.0f) {
             continue;
         }
-        ui.panel(strips[i].x, strips[i].y, strips[i].w, strips[i].h,
-                 dragging[i] ? theme::kTheme.accent : theme::kTheme.bg);
+        // a LINHA SÓLIDA (1dp na cor border — o divisor em repouso)
         ui.panel(strips[i].x, strips[i].y, 1.0f, strips[i].h,
                  theme::kTheme.border);
-        // grip: 5 traços horizontais de 2dp×8dp no centro vertical do strip
-        const f32 gy = strips[i].y + strips[i].h * 0.5f - theme::dp(20.0f);
-        const f32 gx = strips[i].x + (strips[i].w - theme::dp(2.0f)) * 0.5f;
-        for (int g = 0; g < 5; ++g) {
-            ui.panel(gx, gy + static_cast<f32>(g) * theme::dp(8.0f),
-                     theme::dp(2.0f), theme::dp(4.0f),
-                     dragging[i] ? theme::kTheme.accentInk : col);
+        if (dragging[i]) {
+            // o fundo ACENDE + a PILL de grip (só durante o drag)
+            ui.panel(strips[i].x, strips[i].y, strips[i].w, strips[i].h,
+                     theme::kTheme.accent);
+            const f32 pw = theme::dp(4.0f);
+            const f32 ph = theme::dp(40.0f);
+            ui.panelPill(strips[i].x + (strips[i].w - pw) * 0.5f,
+                         strips[i].y + (strips[i].h - ph) * 0.5f, pw, ph,
+                         theme::kTheme.accentInk);
         }
     }
 }
@@ -773,6 +846,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     // P2-bis (0.9.6.16 — a decisão do dono): o ícone do trilho É o toggle
     // do PIN — tocar ABRE o painel E FIXA (inspPinned, persiste no
     // layout.json; a seta de recolher do cabeçalho desfaz). Sem long-press.
+    st.inspTab = 0;   // D5: a 2ª tab morreu — o estado antigo volta a 0
     if (editor::inspectorCollapsed(st)) {
         const UiRect track = safe::inspectorPanelRect(
             ui.screenWidth(), ui.screenHeight(), ui.safeArea(), st.drawerH,
@@ -826,176 +900,61 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         st.inspPrevSelected = st.selected;
     }
 
-    // 0.9.6.10 (GRUPO UI · a imagem 1): o cabeçalho com o título 16sp
-    // text1 + as TABS [Inspector][Nós] (a referência: Inspector/Nós —
-    // a 2ª vista é a LISTA DE NÓS da cena, a mesma árvore da hierarquia
-    // em compacto — dado real, zero funcionalidade nova)
+    // 0.9.6.18 (HOTFIX D1+D5) — O CABEÇALHO NUMA LINHA SÓ: linha 1 =
+    // título à esquerda + o recolher (o par do pin) à direita. NUNCA há
+    // segunda faixa de conteúdo a partilhar o y do título.
+    //   • D1: título e tabs na MESMA faixa y lia-se «InspeInspector Nós»
+    //     (a colisão medida no PNG do device a 180dp);
+    //   • D5: a 2ª tab «Nós» MORREU — a vista listava TODOS os TICs ativos
+    //     em flat (o MESMO conjunto de linhas da hierarquia, sem a árvore,
+    //     sem pesquisa, sem olho, sem ⋮) — duplicado da hierarquia, a regra
+    //     do dono («duplicado da hierarquia → mata a tab») aplica-se; com
+    //     uma tab só a faixa de tabs inteira não existe, e o espaço da
+    //     linha 1 liberta-se para o recolher do pin (que antes vivia numa
+    //     linha própria por falta de espaço MEDIDO no device).
     {
         const TextMetrics mh = ui.textMetrics();
         const f32 base = y + (kHeaderH - mh.block()) * 0.5f + mh.ascent;
         ui.labelStyled(x + kPad, base, "Inspector", theme::kTheme.text1,
                        theme::fontScale(theme::kFontSection), 0);
-        // o alvo da tab é a LINHA do cabeçalho (PASSO 1: 28dp — o piso
-        // kHeadFloorDp; o cabeçalho TODO é o alvo — o validador afere)
-        const f32 tabH = kHeaderH;
-        const f32 tabY = y;
-        static const char* const kInspTabs[2] = {"Inspector", "Nós"};
-        f32 tx0 = x + w - kPad;
-        for (int i = 1; i >= 0; --i) {   // da direita para a esquerda
-            const f32 tw = ui.hasFont()
-                               ? std::max(ui.fontWidth(kInspTabs[i]) +
-                                              theme::dp(24.0f),
-                                          theme::dp(40.0f))   // o piso da casa
-                               : theme::dp(88.0f);
-            tx0 -= tw;
-            const bool active = st.inspTab == (u32)i;
-            if (active) {
-                ui.panelRounded(tx0, tabY, tw, tabH,
-                                theme::dp(theme::kRadiusField),
-                                theme::kTheme.accentDim);
-            } else if (ui.widgetActive(kInspTabBase +
-                                       static_cast<u64>(i))) {
-                ui.panelRounded(tx0, tabY, tw, tabH,
+        // o RECOLHER (o par do pin do P2-bis): célula 40×28 na DIREITA da
+        // linha 1 (o D1 manda «pin/fechar à direita»), só existe ENQUANTO
+        // fixado; o piso da classe cabeçalho (kHeadFloorDp)
+        if (st.inspPinned) {
+            const f32 cw = theme::dp(40.0f);
+            const UiRect cell = {x + w - kPad - cw, y, cw, kHeaderH};
+            const bool heldU = ui.widgetActive(kInspUnpinId);
+            if (heldU) {
+                ui.panelRounded(cell.x, cell.y, cell.w, cell.h,
                                 theme::dp(theme::kRadiusField),
                                 theme::kTheme.surface2);
             }
-            if (ui.hasFont()) {
-                ui.labelFitted(
-                    tx0 + theme::dp(12.0f),
-                    tabY + (tabH - mh.block()) * 0.5f + mh.ascent,
-                    kInspTabs[i],
-                    active ? theme::kTheme.text1 : theme::kTheme.text2,
-                    tw - theme::dp(16.0f));
-            }
-            // PASSO 1: a flag ANTES do hit (o piso de cabeçalho 28)
+            icons::drawIcon(ui, icons::Icon::ChevronRight,
+                            cell.x + (cell.w - theme::dp(20.0f)) * 0.5f,
+                            cell.y + (cell.h - theme::dp(20.0f)) * 0.5f,
+                            theme::dp(20.0f),
+                            heldU ? theme::kTheme.accent
+                                  : theme::kTheme.text2);
+            // a flag ANTES do hit (a linha de cabeçalho 28 — o piso da casa)
             ui.auditRowFloorNext(layout::kHeadFloorDp);
-            if (ui.widgetHit(kInspTabBase + static_cast<u64>(i), tx0, tabY,
-                             tw, tabH)) {
-                st.inspTab = static_cast<u32>(i);
+            if (ui.widgetHit(kInspUnpinId, cell.x, cell.y, cell.w, cell.h)) {
+                st.inspPinned = false;   // DESFAZ o pin (o trilho volta sem
+                                         // seleção — a regra PASSO 2)
             }
-            tx0 -= theme::dp(8.0f);
         }
     }
     ui.panel(x + kPad, y + kHeaderH - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
+    // a altura do cabeçalho EFETIVA: a linha 1 sola (a linha própria do
+    // recolher MORREU com o espaço libertado pelo D5)
+    const f32 headH = kHeaderH;
 
-    // P2-bis (0.9.6.16 — a decisão do dono): a SETA DE RECOLHER — só
-    // existe ENQUANTO fixado; desfaz o pin (e o painel fecha se não
-    // houver seleção — a regra PASSO 2 do dono manda). Linha PRÓPRIA de
-    // 28dp sob o cabeçalho (piso kHeadFloorDp) — longe das chips [Nós]
-    // [Inspector] cujos rects REAIS (medidos no PNG do device: a chip
-    // «Inspector» começa a 34,5dp do painel de 180dp) não deixam espaço
-    // na 1ª linha; a título «Inspector» REPETE a chip e fica como está
-    // (fora do scope do P2-bis).
-    const bool unpinRow = st.inspPinned;
-    if (unpinRow) {
-        const f32 rowY = y + kHeaderH;
-        const bool heldU = ui.widgetActive(kInspUnpinId);
-        if (heldU) {
-            ui.panel(x, rowY, w, theme::dp(kInspUnpinRowH),
-                     theme::kTheme.surface2);
-        }
-        icons::drawIcon(ui, icons::Icon::ChevronRight,
-                        x + theme::dp(10.0f),
-                        rowY + (theme::dp(kInspUnpinRowH) - theme::dp(20.0f)) *
-                                   0.5f,
-                        theme::dp(20.0f),
-                        heldU ? theme::kTheme.accent : theme::kTheme.text2);
-        if (ui.hasFont()) {
-            const TextMetrics tmU = ui.textMetrics();
-            ui.labelFitted(x + theme::dp(38.0f),
-                           rowY + (theme::dp(kInspUnpinRowH) - tmU.block()) *
-                                      0.5f +
-                               tmU.ascent,
-                           "recolher", theme::kTheme.text2,
-                           w - theme::dp(48.0f));
-        }
-        // a flag ANTES do hit (a linha de cabeçalho 28 — o piso da casa)
-        ui.auditRowFloorNext(layout::kHeadFloorDp);
-        if (ui.widgetHit(kInspUnpinId, x, rowY, w,
-                         theme::dp(kInspUnpinRowH))) {
-            st.inspPinned = false;   // DESFAZ o pin (o trilho volta sem
-                                     // seleção — a regra PASSO 2)
-        }
-    }
-    // a altura do cabeçalho EFETIVA (a linha da seta conta quando fixado —
-    // as duas vistas abaixo partilham o mesmo desconto)
-    const f32 headH = kHeaderH + (unpinRow ? theme::dp(kInspUnpinRowH) : 0.0f);
-
-    // ---- 0.9.6.10 (GRUPO UI · a imagem 1) · A VISTA «Nós» --------------
-    // a 2ª tab do Inspector da referência: a LISTA DE NÓS da cena (a
-    // MESMA árvore da hierarquia em compacto — o MESMO hierIconFor e a
-    // seleção da casa; tocar num nó SELECIONA e VOLTA às propriedades)
-    if (st.inspTab == 1) {
-        const TextMetrics tmN = ui.textMetrics();
-        const f32 rowH = kRowH;   // PASSO 1: a linha da spec (36, era 48)
-        struct NRow {
-            Handle h;
-            u32 depth;
-        };
-        NRow nrows[64];
-        u32 nNRows = 0;
-        scene.forEachActive([&](const Tic& t) {
-            if (nNRows < 64) {
-                nrows[nNRows++] = {t.handle, 0u};
-            }
-        });
-        const f32 listTopN = y + headH + 4.0f;
-        const UiRect regionN = {x, listTopN, w, h - headH - 4.0f};
-        const f32 contentHN = static_cast<f32>(nNRows) * rowH;
-        ui.beginScroll(kIdScrollInsp, regionN, contentHN);
-        const f32 offN = ui.scrollOffset();
-        for (u32 r = 0; r < nNRows; ++r) {
-            const Tic* t = scene.get(nrows[r].h);
-            if (!t) {
-                continue;
-            }
-            const f32 ry = listTopN + static_cast<f32>(r) * rowH - offN;
-            if (ry + rowH < listTopN || ry > listTopN + regionN.h) {
-                continue;
-            }
-            const bool selected = st.selected == t->handle;
-            if (selected) {
-                ui.panel(x + 4.0f, ry, w - 8.0f, rowH,
-                         theme::kTheme.accentDim);
-                ui.panel(x + 4.0f, ry, theme::dp(3.0f), rowH,
-                         theme::kTheme.accent);
-            } else if (ui.widgetActive(kIdRowBase + t->handle.index)) {
-                ui.panel(x + 4.0f, ry, w - 8.0f, rowH,
-                         theme::kTheme.surface2);
-            }
-            icons::drawIcon(ui, hierIconFor(*t), x + theme::dp(16.0f),
-                            ry + (rowH - theme::dp(24.0f)) * 0.5f,
-                            theme::dp(24.0f),
-                            selected ? theme::kTheme.accent
-                                     : theme::kTheme.text2);
-            if (ui.hasFont()) {
-                // PASSO 2: o nome trunca POR DESENHO (o MESMO contrato da
-                // hierarquia — spec B, o tip é o acesso ao nome completo)
-                ui.auditFitByDesignNext();
-                ui.labelFitted(x + theme::dp(56.0f),
-                               ry + (rowH - tmN.block()) * 0.5f + tmN.ascent,
-                               t->name.c_str(),
-                               selected ? theme::kTheme.text1
-                                        : (t->visible ? theme::kTheme.text1
-                                                      : theme::kTheme.text2),
-                               w - theme::dp(64.0f));
-            }
-            if (ui.widgetHit(kIdRowBase + t->handle.index, x + 4.0f, ry,
-                             w - 8.0f, rowH)) {
-                st.selected = t->handle;
-                st.inspTab = 0;   // selecionou → volta às propriedades
-                ui.scrollSetOffset(kIdScrollInsp, 0.0f);
-            }
-        }
-        ui.endScroll();
-        if (nNRows == 0 && ui.hasFont()) {
-            ui.labelFitted(x + kPad, listTopN + rowH, "sem nós na cena",
-                           theme::kTheme.text2, w - 2.0f * kPad);
-        }
-        return false;
-    }
-
-    // valida seleção (TIC pode ter morrido neste frame)
+    // ---- 0.9.6.18 (HOTFIX D5) — a vista «Nós» FOI REMOVIDA --------------
+    // Conteúdo real medido pela leitura (P-04): `scene.forEachActive` em
+    // flat — o MESMO conjunto de linhas da hierarquia (ícone+nome+toque
+    // seleciona) sem a árvore, sem pesquisa, sem olho, sem ⋮. A regra do
+    // dono: «duplicado da hierarquia → mata a tab». O st.inspTab fica no
+    // estado (retrocompatibilidade do layout.json futuro) e vale 0 —
+    // forçado AQUI no topo (o trilho de baixo também sai pelo return).
     Tic* tic = scene.get(st.selected);
     if (!tic) {
         st.selected = Handle::invalid();
@@ -1163,17 +1122,32 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                            theme::ACCENT, w - 2.0f * kPad);   // B2: ellipsis
             break;
         case InspRow::Kind::VisToggle: {
-            // 0.7.0 — checkbox de visibilidade do TIC (mesmo estado do olho
-            // da Hierarchy; TIC invisível não desenha em editor nem Play)
-            char vis[32];
-            std::snprintf(vis, sizeof(vis), "visível: %s",
-                          tic->visible ? "sim" : "não");
-            // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira (o padrão PASSO 1
-            // das tabs; antes o botão desenhava r.h−4 = 34dp < o piso) + a
-            // flag da classe linha
+            // 0.7.0 — estado de visibilidade do TIC (mesmo estado do olho
+            // da Hierarchy; TIC invisível não desenha em editor nem Play).
+            // 0.9.6.18 (HOTFIX D10): a caixa de TEXTO «visível: sim/não»
+            // era controlo-de-texto cru — o ESTADO vive agora no ícone da
+            // casa (Eye/EyeOff) com o rótulo ao lado (a spec do dono).
+            const bool heldV = ui.widgetActive(r.id);
+            if (heldV) {
+                ui.panel(x + kPad, ry, w - 2.0f * kPad, r.h,
+                         theme::kTheme.surface2);
+            }
+            const f32 sIc = theme::dp(20.0f);
+            icons::drawIcon(ui, tic->visible ? icons::Icon::Eye
+                                             : icons::Icon::EyeOff,
+                            x + kPad + theme::dp(12.0f),
+                            ry + (r.h - sIc) * 0.5f, sIc,
+                            tic->visible ? theme::kTheme.accent
+                                         : theme::kTheme.text2);
+            if (ui.hasFont()) {
+                ui.labelFitted(x + kPad + theme::dp(44.0f),
+                               inspBaseline(ry, r.h, tm), "visível",
+                               theme::kTheme.text1, w - 2.0f * kPad - theme::dp(56.0f));
+            }
+            // PASSO 2 (0.9.6.15): o alvo é a LINHA inteira + a flag da
+            // classe linha (o padrão PASSO 1 das tabs)
             ui.auditRowFloorNext(layout::kRowFloorDp);
-            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
-                      vis);
+            ui.widgetHit(r.id, x + kPad, ry, w - 2.0f * kPad, r.h);
             break;
         }
         case InspRow::Kind::ColorSlider: {
@@ -1344,28 +1318,24 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         case InspRow::Kind::TransformRow: {
             // 0.9.0 (spec C): "linhas Pos/Rotação/Escala com 3 campos
             // numéricos editáveis, raio 4dp, bordo, rótulos X/Y/Z + botão
-            // R que repõe a linha". Título em LINHA PRÓPRIA (a largura do
-            // painel não comporta tudo na mesma linha — o orçamento era o
-            // bug da caixa Z sob o R); PASSO 1: caixas 32dp (o CAMPO da
-            // spec — o piso kFieldFloorDp; eram 48) com o rótulo do eixo à
-            // esquerda e o valor à direita (labelFitted — nunca invade); o
-            // toque abre o teclado numérico (propósito 6).
+            // que repõe a linha". Título em LINHA PRÓPRIA.
+            // 0.9.6.18 (HOTFIX D2): o ORÇAMENTO vem de transformRowBudgetPx
+            // (a FONTE ÚNICA do draw E do tap) — no painel de 180dp as
+            // caixas encolhem a 40dp e o reset vira ÍCONE inline após o Z;
+            // NADA desenha fora do rect do painel (o campo Z cortado e o
+            // "R" a flutuar eram os sintomas).
+            // 0.9.6.18 (HOTFIX D10): o reset deixa de ser o texto "R" nu —
+            // é o ícone Reset (seta circular) da casa.
             static const char* kRowTitles[3] = {"Posição", "Rotação", "Escala"};
             const u32 rowIdx = r.payload;
             const TextMetrics m2 = ui.textMetrics();
             const f32 titleBase = ry + theme::dp(2.0f) + m2.ascent;
             ui.label(x + kPad, titleBase, kRowTitles[rowIdx],
                      theme::kTheme.text2);
-            // caixas 32dp de ALTURA (PASSO 1: o campo da spec), largura
-            // ADAPTATIVA (GRUPO D): 64dp quando a linha cabe inteira
-            // (3×64+2×8+8+40 = 256dp úteis); 56dp em painel estreito
-            // (divisores/device). O R ao lado do TÍTULO é a defesa final
-            // (painel sub-mínimo — nunca sobre a caixa Z).
-            const f32 usableW = w - 2.0f * kPad;
-            const bool narrowRow = usableW < theme::dp(256.0f);
-            const f32 boxW = narrowRow ? theme::dp(56.0f) : theme::dp(64.0f);
+            const TransformBudget tb =
+                transformRowBudgetPx(w - 2.0f * kPad);
+            const f32 boxW = tb.boxW;
             const f32 boxH = theme::dp(32.0f);
-            const bool rOnTitle = usableW < theme::dp(240.0f);
             const f32 boxY = ry + theme::dp(28.0f);
             const f32 boxBase = boxY + (boxH - m2.block()) * 0.5f + m2.ascent;
             f32 bx = x + kPad;
@@ -1411,25 +1381,25 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                     ui.label(bx + boxW - theme::dp(6.0f) - vw, boxBase, shown,
                              theme::kTheme.text1);
                 }
-                bx += boxW + theme::dp(8.0f);
+                bx += boxW + theme::dp(kTfGapBox);
             }
-            // botão R (PASSO 1: 40×32 — o alvo 40 na LARGURA, o campo 32
-            // na altura; repõe a linha): na linha das CAIXAS quando cabe;
-            // no ESTREITO, ao lado do TÍTULO (nunca sobre a caixa Z)
-            const UiRect rr2 = {x + w - kPad - theme::dp(40.0f),
-                                rOnTitle ? ry + theme::dp(2.0f) : boxY,
-                                theme::dp(40.0f), boxH};
-            const bool rHeld = ui.widgetActive(r.id);
-            ui.panelRounded(rr2.x, rr2.y, rr2.w, rr2.h,
-                            theme::dp(theme::kRadiusField),
-                            rHeld ? theme::kTheme.accentPress
-                                  : theme::kTheme.surface);
-            if (ui.hasFont()) {
-                const f32 rBase = rr2.y + (rr2.h - m2.block()) * 0.5f +
-                                  m2.ascent;
-                ui.label(rr2.x + (rr2.w - ui.fontWidth("R")) * 0.5f, rBase,
-                         "R", theme::kTheme.text1);
+            // o RESET (D2+D10): CHIP 40×32 com o ícone quando cabe; ÍCONE
+            // inline 20 após o Z abaixo do piso (a spec do dono)
+            const f32 rW = tb.resetW;
+            const f32 rX = x + kPad + 3.0f * boxW + 2.0f * theme::dp(kTfGapBox) +
+                           theme::dp(kTfGapReset);
+            const f32 rHeld0 = ui.widgetActive(r.id);
+            if (!tb.resetIcon) {
+                ui.panelRounded(rX, boxY, rW, boxH,
+                                theme::dp(theme::kRadiusField),
+                                rHeld0 ? theme::kTheme.accentPress
+                                       : theme::kTheme.surface);
             }
+            icons::drawIcon(ui, icons::Icon::Reset, rX + (rW - theme::dp(20.0f)) * 0.5f,
+                            boxY + (boxH - theme::dp(20.0f)) * 0.5f,
+                            theme::dp(20.0f),
+                            rHeld0 ? theme::kTheme.accent
+                                   : theme::kTheme.text1);
             break;
         }
         case InspRow::Kind::Slider:
@@ -1939,17 +1909,21 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 st.inspCollapsed ^= r.payload;
             } else if (r.kind == InspRow::Kind::TransformRow) {
                 // 0.9.0 (spec C): caixa X/Y/Z → teclado numérico (purpose 6,
-                // campo = rowIdx*3+axis) · R → repõe a linha. PASSO 1: as
-                // caixas vivem na faixa Y [ry+28, ry+60) — AS MESMAS fórmulas
-                // do draw (dp: boxY ry+28, boxH 32; boxW 64/56; R 40)
+                // campo = rowIdx*3+axis) · reset → repõe a linha.
+                // 0.9.6.18 (HOTFIX D2): a matemática vem de
+                // transformRowBudgetPx — a MESMA do draw (antes eram DUAS
+                // fórmulas, e o tap usava gaps em px crus: no device 2.0
+                // o tap errava as caixas). A linha das caixas vive na
+                // faixa Y [ry+28, ry+60) (dp: boxY ry+28, boxH 32).
                 if (ty >= ry + theme::dp(28.0f) &&
                     ty < ry + theme::dp(28.0f) + theme::dp(32.0f)) {
-                const f32 usableW2 = w - 2.0f * kPad;
-                const f32 boxW = usableW2 < theme::dp(256.0f)
-                                     ? theme::dp(56.0f)
-                                     : theme::dp(64.0f);
+                const TransformBudget tb2 =
+                    transformRowBudgetPx(w - 2.0f * kPad);
+                const f32 boxW = tb2.boxW;
                 f32 bx = x + kPad;
-                const f32 rResetX = x + w - kPad - theme::dp(40.0f);
+                const f32 rResetX = x + kPad + 3.0f * boxW +
+                                    2.0f * theme::dp(kTfGapBox) +
+                                    theme::dp(kTfGapReset);
                 bool handled = false;
                 for (u32 axis = 0; axis < 3 && !handled; ++axis) {
                     if (tx >= bx && tx < bx + boxW) {
@@ -1963,10 +1937,10 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                                       static_cast<i32>(field), cur);
                         handled = true;
                     }
-                    bx += boxW + 8.0f;
+                    bx += boxW + theme::dp(kTfGapBox);
                 }
-                if (!handled && tx >= rResetX) {
-                    // R: repõe a linha ao default (0/0/0 ou 1/1/1)
+                if (!handled && tx >= rResetX && tx < x + w - kPad) {
+                    // o RESET: repõe a linha ao default (0/0/0 ou 1/1/1)
                     if (tr) {
                         if (r.payload == 0) {
                             tr->pos = Vec3{0.0f, 0.0f, 0.0f};
@@ -2344,7 +2318,7 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
         // VISUALIZAR
         {nullptr,               icons::Icon::Snap,    3},   // rótulo dinâmico
         // FERRAMENTAS
-        {"Settings",            icons::Icon::Gear,    4},
+        {nullptr,               icons::Icon::Gear,    4},   // rótulo localizado
         {"Ver logs",            icons::Icon::Terminal, 4},
         // AJUDA
         {"Documentação V.ONI",  icons::Icon::Search,  5},
@@ -2359,6 +2333,10 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     for (int i = 0; i < kItems; ++i) {
         labels[i] = kMenu[i].label ? kMenu[i].label : snapLabel;
     }
+    // 0.9.6.18 (HOTFIX D4): a linha Settings vem da TABELA LOCALIZADA
+    // (item 11 — «Definições» em PT, «Settings» só em locale EN; o literal
+    // inglês hardcoded era o defeito)
+    labels[11] = strings::tr(strings::Key::OpenSettings);
 
     const f32 contentH = static_cast<f32>(kItems) * kRowH +
                          6.0f * kHdrH + 8.0f;

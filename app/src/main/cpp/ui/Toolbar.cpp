@@ -15,6 +15,7 @@
 #include "ui/Toolbar.h"
 #include "ui/EditorUi.h"   // EditorState completo (declared-only no header)
 #include "ui/UiContext.h"
+#include "ui/Brand.h"     // 0.9.6.18 (D6): o glifo da marca numa função
 
 #include <cstdio>
 
@@ -259,25 +260,25 @@ TopBarActions drawTopBar(UiContext& ui, EditorState& st) {
     ui.panel(L.bar.x, L.bar.y + L.bar.h - 1.0f, L.bar.w, 1.0f,
              theme::kTheme.border);
 
-    // ---- O LOGO (GRUPO UI · a imagem 1): o G âmbar num chip arredondado
-    // de 32×28 (PASSO 1: desenho pequeno no alvo 40×36) — a identidade da
-    // casa à EXTREMA esquerda (o toque não faz nada: é a marca, não um
-    // botão — o rótulo de acessibilidade vive no nome ao lado)
+    // ---- A MARCA (0.9.6.18 · HOTFIX D6): o tile âmbar com o "G" liso
+    // lia-se como PLACEHOLDER (o dono: «o launcher mostra o ícone real»).
+    // O slot vira LOCKUP: o glifo G-com-4-setas (âmbar, SEM FUNDO sobre o
+    // grafite da barra) pela ÚNICA função da casa brand::drawIcon — o
+    // chip de fundo MORREU (tiles com letra única proibidos como marca) —
+    // e o wordmark "G.One" ao lado (some no aperto, como sempre). O toque
+    // continua a não fazer nada (é a marca, não um botão). O glifo aqui é
+    // ~24dp de desenho no alvo 40 — o LOD simplificado (traço ×1.2), o
+    // MESMO que o launcher usa em pequeno (a paridade dos 4 sítios).
     {
         const UiRect& r = L.logo;
-        ui.panelRounded(r.x + theme::dp(4.0f), r.y + theme::dp(4.0f),
-                        r.w - theme::dp(8.0f), r.h - theme::dp(8.0f),
-                        theme::dp(theme::kRadiusCard), theme::kTheme.accent);
-        if (ui.hasFont()) {
-            const TextMetrics m = ui.textMetrics();
-            ui.labelStyled(r.x + r.w * 0.5f - ui.fontWidth("G") * 0.5f,
-                           r.y + (r.h - m.block() * 1.3f) * 0.5f +
-                               m.ascent * 1.3f,
-                           "G", theme::kTheme.accentInk,
-                           theme::fontScale(theme::kFontSection), 0);
-        }
+        // o glifo 24dp centrado no alvo 40 (sem fundo — âmbar sobre
+        // grafite, nunca âmbar sobre âmbar)
+        const f32 gs = theme::dp(24.0f);
+        editor::brand::drawIcon(ui, r.x + (r.w - gs) * 0.5f,
+                                r.y + (r.h - gs) * 0.5f, gs,
+                                theme::kTheme.accent);
         if (L.showName && ui.hasFont()) {
-            // o NOME ao lado do G (14sp text1 — some no aperto)
+            // o NOME ao lado do glifo (14sp text1 — some no aperto)
             const TextMetrics m = ui.textMetrics();
             ui.label(L.name.x + theme::dp(6.0f),
                      L.name.y + (L.name.h - m.block()) * 0.5f + m.ascent,

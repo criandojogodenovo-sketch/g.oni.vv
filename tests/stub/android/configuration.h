@@ -20,3 +20,15 @@ struct AConfiguration;
 inline int32_t AConfiguration_getDensity(AConfiguration*) {
     return vvstub::g_stubDensityDpi > 0 ? vvstub::g_stubDensityDpi : 0;
 }
+
+// 0.9.6.18 (HOTFIX D4a): o LOCALE do device (AConfiguration_getLanguage —
+// a fonte da tabela localizada ui/Strings.h). No hospedeiro o stub
+// devolve sempre "pt" (a língua base da casa — o default da tabela) e o
+// buffer de saída é preenchido como o NDK faz (2 chars + NUL).
+inline void AConfiguration_getLanguage(AConfiguration*, char* out) {
+    if (out) {
+        out[0] = 'p';
+        out[1] = 't';
+        out[2] = '\0';
+    }
+}

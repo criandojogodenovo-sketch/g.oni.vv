@@ -7,6 +7,7 @@
 #include "ui/SettingsPage.h"
 #include "ui/EditorUi.h"
 #include "ui/UiContext.h"
+#include "ui/Strings.h"   // 0.9.6.18 (D4): a tabela localizada
 
 #include <cstdio>
 #include <cstring>
@@ -47,35 +48,56 @@ void infoRow(UiContext& ui, f32 x, f32 y, f32 w, const char* label,
 
 } // namespace (actionBtnRect sai — exportada no header, 0.9.6.6)
 
+// 0.9.6.18 (HOTFIX D4b): a altura dos controlos de linha (o toggle da casa
+// é 28dp — o botão compacto partilha a MESMA altura)
+static f32 kActionCtlH() { return theme::dp(28.0f); }
+
 // rect do BOTÃO de uma actionRow (FONTE ÚNICA — o draw, o re-despacho do
 // scrollTap e os testes partilham a MESMA matemática; o scroll reclama o
 // gesto dentro da região e o tap volta por scrollTap, por isso o rect tem
 // de ser recalculável fora do draw)
-UiRect actionBtnRect(f32 x, f32 y, f32 w) {
-    // 0.9.6.6 (GRUPO C): o botão da actionRow é ALVO — 48dp REAL de altura
-    // (a linha INTEIRA; era 152×40 px crus — o aviso <48dp medido pelo
-    // Grupo B) com paddings em dp.
-    const f32 bw = theme::dp(152.0f);
-    return UiRect{x + w - theme::dp(16.0f) - bw, y, bw, settingsRowH()};
+// 0.9.6.18 (HOTFIX D4b): o botão deixa de ser a LAJE filled de 152dp — é
+// OUTLINE COMPACTO (a largura = o texto + padding) alinhado à direita da
+// linha, com a ALTURA DOS CONTROLOS DE LINHA (28dp — a altura do toggle
+// da casa); âmbar filled só para ações primárias (o Settings não tem
+// nenhuma — as ações daqui são secundárias/manutenção)
+UiRect actionBtnRect(UiContext& ui, f32 x, f32 y, f32 w, const char* btn) {
+    const f32 pad = theme::dp(12.0f);
+    f32 bw = theme::dp(24.0f) +
+             (ui.hasFont() ? ui.fontWidth(btn) : theme::dp(48.0f));
+    // o teto honesto: o botão NUNCA passa metade da linha (o rótulo respira)
+    const f32 bwMax = w * 0.5f;
+    if (bw > bwMax) {
+        bw = bwMax;
+    }
+    return UiRect{x + w - theme::dp(16.0f) - bw,
+                  y + (settingsRowH() - kActionCtlH()) * 0.5f, bw,
+                  kActionCtlH()};
 }
 
 namespace {
 
 // linha com rótulo + BOTÃO (ação) à direita
+// 0.9.6.18 (HOTFIX D4b): OUTLINE compacto (fundo transparente + bordo
+// border 1dp + texto text1) — âmbar filled só para ações primárias; o
+// premido acende surface2 (o padrão outline da casa, como o Importar da
+// tela de projetos)
 bool actionRow(UiContext& ui, u64 id, f32 x, f32 y, f32 w, const char* label,
                const char* btn) {
     if (ui.hasFont()) {
         ui.labelFitted(x + theme::dp(16.0f), baseline(ui, {x, y, w, settingsRowH()}), label,
                        theme::kTheme.text1, w * 0.55f);
     }
-    const UiRect b = actionBtnRect(x, y, w);
+    const UiRect b = actionBtnRect(ui, x, y, w, btn);
     const bool held = ui.widgetActive(id);
-    ui.panelRounded(b.x, b.y, b.w, b.h, theme::kRadiusCard,
-                    held ? theme::kTheme.accentPress : theme::kTheme.accent);
+    ui.panelRounded(b.x, b.y, b.w, b.h, theme::dp(theme::kRadiusField),
+                    held ? theme::kTheme.surface2 : theme::kTheme.surface);
+    ui.frameRounded(b.x, b.y, b.w, b.h, 1.0f, theme::dp(theme::kRadiusField),
+                    theme::kTheme.border);
     if (ui.hasFont()) {
         const f32 tw = ui.fontWidth(btn);
         ui.label(b.x + (b.w - tw) * 0.5f, baseline(ui, b), btn,
-                 theme::kTheme.accentInk);
+                 theme::kTheme.text1);
     }
     return ui.widgetHit(id, b.x, b.y, b.w, b.h);
 }
@@ -158,11 +180,15 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
     if (ui.hasFont()) {
         // 0.9.6 (G1-2): a baseline do CABEÇALHO PADRÃO (a MESMA das outras
         // telas — Theme é a fonte única; o título 20sp centrado sem corte)
+        // 0.9.6.18 (HOTFIX D4a): o título vem da TABELA LOCALIZADA —
+        // «Definições» em PT, «Settings» só em locale EN (o literal
+        // inglês hardcoded era o defeito)
         const TextMetrics m = ui.textMetrics();
         ui.labelStyled(back.x + back.w + theme::dp(12.0f),
                        oy + theme::headerBaselines(m.ascent, m.descent,
                                                    hdrH).title,
-                       "Settings", theme::kTheme.text1,
+                       strings::tr(strings::Key::SettingsTitle),
+                       theme::kTheme.text1,
                        theme::fontScale(theme::kFontScreen), 0);
     }
     ui.panel(ox, oy + hdrH, aw, 1.0f, theme::kTheme.border);
@@ -221,7 +247,7 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
         infoRow(ui, ox, y, aw, "versão / build", ver);
         y += settingsRowH();
         if (actionRow(ui, kResetLayoutId, ox, y, aw, "layout",
-                      "Repor layout")) {
+                      strings::tr(strings::Key::ResetLayout))) {
             res = kResetLayout;
         }
         y += settingsRowH();
@@ -261,13 +287,20 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
     }
     y += settingsSectionH();
     if (!(collapsed & kBitPerm)) {
-        if (actionRow(ui, kAllFilesId, ox, y, aw, "Todos os ficheiros",
-                      ctx.allFilesGranted ? "concedido" : "abrir")) {
+        // 0.9.6.18 (HOTFIX D4c): "concedido" é um ESTADO, não uma ação —
+        // vira TEXTO só-leitura (o padrão infoRow; âmbar filled era a
+        // leitura de botão primário num estado); a ação só existe quando
+        // NÃO está concedido (outline compacto)
+        if (ctx.allFilesGranted) {
+            infoRow(ui, ox, y, aw, "Todos os ficheiros", "concedido");
+        } else if (actionRow(ui, kAllFilesId, ox, y, aw,
+                             "Todos os ficheiros", "abrir")) {
             res = kAllFilesPressed;
         }
         y += settingsRowH();
-        if (actionRow(ui, kMicId, ox, y, aw, "Microfone",
-                      ctx.micGranted ? "concedido" : "pedir")) {
+        if (ctx.micGranted) {
+            infoRow(ui, ox, y, aw, "Microfone", "concedido");
+        } else if (actionRow(ui, kMicId, ox, y, aw, "Microfone", "pedir")) {
             res = kMicPressed;
         }
         y += settingsRowH();
@@ -434,7 +467,8 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
             switch (s3.bit) {
                 case kBitGeral:
                     hy += settingsRowH();   // info versão
-                    if (hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                    if (hit(tpx, tpy, actionBtnRect(ui, ox, hy, aw,
+                                                    strings::tr(strings::Key::ResetLayout)))) {
                         res = kResetLayout;   // Repor layout
                     }
                     hy += settingsRowH();
@@ -447,34 +481,39 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
                 case kBitAudio:
                     hy += settingsRowH();   // info volume
                     hy += settingsRowH();   // info fonte
-                    if (hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                    if (hit(tpx, tpy, actionBtnRect(ui, ox, hy, aw,
+                                                    "reconverter"))) {
                         res = kReconvert;
                     }
                     hy += settingsRowH();
                     break;
                 case kBitPerm:
-                    if (hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                    // (D4c) "concedido" é TEXTO sem alvo — o hit só existe
+                    // quando a permissão NÃO está concedida (o MESMO
+                    // ramo do draw; o estado vive no ctx partilhado)
+                    if (!ctx.allFilesGranted &&
+                        hit(tpx, tpy, actionBtnRect(ui, ox, hy, aw, "abrir"))) {
                         res = kAllFilesPressed;
                     }
                     hy += settingsRowH();
-                    if (res == kNone &&
-                        hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                    if (res == kNone && !ctx.micGranted &&
+                        hit(tpx, tpy, actionBtnRect(ui, ox, hy, aw, "pedir"))) {
                         res = kMicPressed;
                     }
                     hy += settingsRowH();
                     break;
                 case kBitDiag:
-                    if (hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                    if (hit(tpx, tpy, actionBtnRect(ui, ox, hy, aw, "Ver logs"))) {
                         res = kViewLogs;
                     }
                     hy += settingsRowH();
                     if (res == kNone &&
-                        hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        hit(tpx, tpy, actionBtnRect(ui, ox, hy, aw, "Export"))) {
                         res = kExportLogs;
                     }
                     hy += settingsRowH();
                     if (res == kNone &&
-                        hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        hit(tpx, tpy, actionBtnRect(ui, ox, hy, aw, "Probe"))) {
                         res = kProbeAudio;
                     }
                     hy += settingsRowH();
@@ -483,12 +522,12 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
                     // MORTO (a mesma classe do bug 0.9.1: desenhar ≠ tocar;
                     // apanhado pela FASE 12.9 no primeiro run do harness)
                     if (res == kNone &&
-                        hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        hit(tpx, tpy, actionBtnRect(ui, ox, hy, aw, "Correr bench"))) {
                         res = kRunBench;
                     }
                     hy += settingsRowH();
                     if (res == kNone &&
-                        hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        hit(tpx, tpy, actionBtnRect(ui, ox, hy, aw, "Copiar relatório"))) {
                         res = kCopyBench;
                     }
                     hy += settingsRowH();
@@ -499,17 +538,17 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
                     // no primeiro run — o tap no rect real do registo não
                     // fechava o Settings)
                     if (res == kNone &&
-                        hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        hit(tpx, tpy, actionBtnRect(ui, ox, hy, aw, "Exportar layout"))) {
                         res = kExportLayout;
                     }
                     hy += settingsRowH();
                     if (res == kNone &&
-                        hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        hit(tpx, tpy, actionBtnRect(ui, ox, hy, aw, "Auditoria do ecrã"))) {
                         res = kAuditScreen;
                     }
                     hy += settingsRowH();
                     if (res == kNone &&
-                        hit(tpx, tpy, actionBtnRect(ox, hy, aw))) {
+                        hit(tpx, tpy, actionBtnRect(ui, ox, hy, aw, "abrir"))) {
                         res = kOpenTextWindow;   // 0.9.1
                     }
                     hy += settingsRowH();

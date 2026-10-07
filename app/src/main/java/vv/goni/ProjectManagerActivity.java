@@ -165,14 +165,15 @@ public class ProjectManagerActivity extends Activity {
         // emptySub — o bigLogo 96dp cinzento (~190px @2x) ficava VISÍVEL
         // com projetos, FIXO em coords de ecrã (não rolava com o grid) e
         // TAPAVA os cards — o "quadrado cinzento fantasma" do dono.
+        // 0.9.6.18 (HOTFIX D6): o bigLogo deixa de ser o PNG (gone_logo) —
+        // é o glifo da marca DESENHADO pela ÚNICA função (UiIcons.drawBrand,
+        // o espelho Java do Brand.cpp — a paridade dos 4 sítios; 96dp ≥ 32
+        // = a versão COMPLETA, setas com pontas), SEM fundo (âmbar sobre o
+        // vidro do ecrã, nunca âmbar sobre âmbar)
         emptyBox = new LinearLayout(this);
         emptyBox.setOrientation(LinearLayout.VERTICAL);
         emptyBox.setGravity(Gravity.CENTER);
-        ImageView bigLogo = new ImageView(this);
-        bigLogo.setImageResource(R.drawable.gone_logo);
-        // 0.9.6.9 (GRUPO F): SEM tint — o ícone novo (G com 4 setas) já é
-        // mono por CONSTRUÇÃO; o setColorFilter(TEXT2) era para neutralizar
-        // o azul+amarelo do ícone velho
+        View bigLogo = new BrandView(this, ACCENT, /*lodFull=*/true);
         emptyBox.addView(bigLogo, new LinearLayout.LayoutParams(dp(96), dp(96)));
         emptyTitle = new TextView(this);
         emptyTitle.setText("Nenhum projeto ainda");
@@ -232,8 +233,10 @@ public class ProjectManagerActivity extends Activity {
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(0, dp(4), 0, dp(4));
 
-        ImageView logo = new ImageView(this);
-        logo.setImageResource(R.drawable.gone_logo);
+        // 0.9.6.18 (HOTFIX D6): o logo do cabeçalho é o GLIFO DESENHADO
+        // pela ÚNICA função (a paridade da marca — o mesmo BrandView do
+        // empty-state; 32dp = a versão completa), não um PNG solto
+        View logo = new BrandView(this, ACCENT, /*lodFull=*/true);
         bar.addView(logo, new LinearLayout.LayoutParams(dp(32), dp(32)));
         TextView title = new TextView(this);
         title.setText("G.One VV");
@@ -514,7 +517,14 @@ public class ProjectManagerActivity extends Activity {
                     in.close();
                 }
             } catch (Exception ex) {
-                bmp = null;   // sem thumb → default G (não é erro)
+                bmp = null;   // sem thumb → fallback de iniciais (não é erro)
+            }
+            if (bmp == null) {
+                // 0.9.6.18 (HOTFIX D7): o WARN honesto — o save nunca
+                // bloqueou e o card NUNCA mostra o ícone da app: mostra as
+                // iniciais (o aviso é o caminho do fallback assertado)
+                Log.w(TAG, "projetos: thumb.png indisponível para '"
+                        + e.name + "' — card usa iniciais (fallback)");
             }
             final Bitmap fb = bmp;
             main.post(() -> {
@@ -602,14 +612,17 @@ public class ProjectManagerActivity extends Activity {
                             ViewGroup.LayoutParams.WRAP_CONTENT,
                             Gravity.CENTER));
                 } else {
-                    // DEFAULT: o logo G.One (spec F: default = ícone G.One)
-                    ImageView iv = new ImageView(ProjectManagerActivity.this);
-                    iv.setImageResource(R.drawable.gone_logo);
-                    iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                    iv.setPadding(dp(16), dp(8), dp(16), dp(8));
-                    thumb.addView(iv, new FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT));
+                    // 0.9.6.18 (HOTFIX D7): o DEFAULT é o tile de INICIAIS
+                    // (máx 2) + matiz sóbrio de hash sobre grafite (paleta
+                    // fixa de 6) — o dono: «O ícone da app NUNCA é conteúdo
+                    // de card» (o gone_logo aqui era a galeria de
+                    // placeholders); o card sem thumb.png é DISTINTO dos
+                    // outros pelo hash do nome
+                    thumb.addView(new InitialsThumbView(
+                            ProjectManagerActivity.this, e.name),
+                            new FrameLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT));
                 }
             }
             card.addView(thumb, new LinearLayout.LayoutParams(
@@ -664,6 +677,98 @@ public class ProjectManagerActivity extends Activity {
                 return true;
             });
             return card;
+        }
+    }
+
+    /**
+     * 0.9.6.18 (HOTFIX D6) — o VIEW da marca: desenha o glifo pela ÚNICA
+     * função (UiIcons.drawBrand). O mesmo view no cabeçalho (32dp) e no
+     * empty-state (96dp) — a paridade da marca no lado Java.
+     */
+    private static final class BrandView extends View {
+        private final int color;
+        private final boolean lodFull;
+
+        BrandView(Activity a, int color, boolean lodFull) {
+            super(a);
+            this.color = color;
+            this.lodFull = lodFull;
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            super.onDraw(c);
+            UiIcons.drawBrand(c, getWidth() / 2f, getHeight() / 2f,
+                    Math.min(getWidth(), getHeight()), color, lodFull);
+        }
+    }
+
+    /**
+     * 0.9.6.18 (HOTFIX D7) — o FALLBACK determinístico do card sem
+     * thumb.png: tile de INICIAIS do nome (máx 2) + matiz sóbrio de hash
+     * sobre grafite (paleta FIXA de 6 matizes). NUNCA o ícone da app
+     * (a regra do dono); os cards distintos entre si pelo hash do nome.
+     */
+    private static final class InitialsThumbView extends View {
+        // a paleta fixa (6 matizes SÓBRIOS — saturação contida, todos
+        // legíveis sobre o grafite da casa; NUNCA cores vivas de placeholder)
+        private static final int[] HUES = {
+                0xFFE09A00,   // âmbar (a cor da casa, escurecida)
+                0xFFC4573B,   // terracota
+                0xFF3E8E7E,   // azul-petróleo
+                0xFF5B7FA6,   // azul-ardósia
+                0xFF6E8B3D,   // musgo
+                0xFF8B6FA0,   // malva
+        };
+        private final String initials;
+        private final int hue;
+
+        InitialsThumbView(Activity a, String name) {
+            super(a);
+            this.initials = initialsOf(name);
+            // o matiz: hash POSITIVO do nome sobre a paleta FIXA (o mesmo
+            // nome → sempre o mesmo matiz — determinístico, sem aleatório)
+            this.hue = HUES[Math.abs(name.hashCode()) % HUES.length];
+        }
+
+        /** as iniciais: 1ª letra de cada palavra (máx 2); 1 palavra = as
+         *  2 primeiras letras; vazio = "·" (o tile nunca fica mudo) */
+        private static String initialsOf(String name) {
+            if (name == null || name.trim().isEmpty()) {
+                return "·";
+            }
+            String[] words = name.trim().split("\\s+");
+            if (words.length >= 2) {
+                return (words[0].substring(0, 1)
+                        + words[1].substring(0, 1)).toUpperCase();
+            }
+            String w = words[0];
+            return w.substring(0, Math.min(2, w.length())).toUpperCase();
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            super.onDraw(c);
+            final android.graphics.Paint p = new android.graphics.Paint(
+                    android.graphics.Paint.ANTI_ALIAS_FLAG);
+            // o tile: grafite da casa + bordo 1dp + iniciais BOLD no matiz
+            p.setStyle(android.graphics.Paint.Style.FILL);
+            p.setColor(0xFF2E2E32);   // o SURFACE2 da casa
+            c.drawRect(0, 0, getWidth(), getHeight(), p);
+            p.setStroke(dp2(1));
+            p.setColor(0xFF4A3714);   // o BORDER da casa
+            c.drawRect(0.5f, 0.5f, getWidth() - 0.5f, getHeight() - 0.5f, p);
+            p.setColor(hue);
+            p.setTextAlign(android.graphics.Paint.Align.CENTER);
+            p.setFakeBoldText(true);
+            p.setTextSize(Math.min(getWidth(), getHeight()) * 0.38f);
+            final float base = getHeight() / 2f
+                    - (p.descent() + p.ascent()) / 2f;
+            c.drawText(initials, getWidth() / 2f, base, p);
+        }
+
+        private int dp2(int v) {
+            return Math.round(v * density());
         }
     }
 

@@ -132,6 +132,21 @@ public:
         }
     }
     void frame(f32 x, f32 y, f32 w, f32 h, f32 thickness, const f32 color[4]);
+    // 0.9.6.18 (HOTFIX D12) — quad PREENCHIDO com cantos explícitos (o
+    // gizmo preenche os planos XY/XZ/YZ a ~25% alfa por baixo do contorno).
+    // 6 vértices = 2 triângulos na convenção do QuadBatch::quadCorners
+    // (p0/p3 = 1º canto, p1 = 2.º, p2/p4 = 3.º, p5 = 4.º — o fan p0..p3 na
+    // ordem do perímetro). SEM clip (como drawLine — o gizmo vive fora de
+    // regiões de scroll). Degenerado não emite (o guard é do batch).
+    void quadCornersFilled(const f32 px[6], const f32 py[6],
+                           const f32 color[4]) {
+        const u32 fv = solids_.vertexCount();
+        solids_.quadCorners(px, py, 0.0f, 0.0f, 1.0f, 1.0f,
+                            color[0], color[1], color[2], color[3]);
+        if (solids_.vertexCount() > fv) {
+            recordRun(solids_, 0u, fv, solids_.vertexCount() - fv);
+        }
+    }
     void label(f32 xBaseline, f32 yBaseline, const char* text, const f32 color[4]);
     // F4.2/B2: label que NUNCA excede maxW — mede e trunca com "..." se
     // precisar (ui/TextFit.h). Todo texto dentro de painéis usa isto.

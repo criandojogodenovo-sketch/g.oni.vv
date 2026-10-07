@@ -2656,14 +2656,30 @@ TEST(regress_toque_48dp_validador) {
     theme::setDensity(1.0f);
     editor::applyDensity();
 
-    // o botão das actionRows do Settings: kRowH INTEIRO (48dp) — era
-    // y+4/kRowH-8 (40px crus). A FONTE ÚNICA exportada (o walk partilha-a)
-    const UiRect ab = editor::settings::actionBtnRect(0.0f, 0.0f, 400.0f);
-    EXPECT(ab.h >= 47.9f);
+    // o botão das actionRows do Settings (0.9.6.18 · D4b): OUTLINE COMPATO
+    // — altura dos CONTROLOS de linha (28dp, a altura do toggle da casa),
+    // largura = texto + padding com teto metade da linha, alinhado à
+    // direita (a fonte única exportada; o walk partilha-a). Era a LAJE
+    // filled de 152×48 com o rótulo do estado dentro.
+    {
+        const UiRect ab = editor::settings::actionBtnRect(
+            ui, 0.0f, 0.0f, 400.0f, "Repor layout");
+        EXPECT(ab.h >= theme::dp(28.0f) - 0.1f && ab.h <= theme::dp(28.0f) + 0.1f);
+        EXPECT(ab.w <= 400.0f * 0.5f + 0.1f);        // o teto honesto
+        EXPECT(ab.x + ab.w <= 400.0f + 0.1f);        // alinhado à direita
+        const UiRect abBig = editor::settings::actionBtnRect(
+            ui, 0.0f, 0.0f, 200.0f, "Auditoria do ecrã");
+        EXPECT(abBig.w <= 200.0f * 0.5f + 0.1f);     // o teto vence o texto
+        EXPECT(abBig.x + abBig.w <= 200.0f + 0.1f);
+    }
     theme::setDensity(2.0f);
     editor::applyDensity();
-    const UiRect ab2 = editor::settings::actionBtnRect(0.0f, 0.0f, 400.0f);
-    EXPECT(ab2.h >= 95.9f);   // 48dp a 2.0 = 96px
+    {
+        const UiRect ab2 = editor::settings::actionBtnRect(
+            ui, 0.0f, 0.0f, 400.0f, "Repor layout");
+        EXPECT(ab2.h >= theme::dp(28.0f) - 0.2f);    // 28dp a 2.0 = 56px
+        EXPECT(ab2.x + ab2.w <= 400.0f + 0.2f);
+    }
     theme::setDensity(1.0f);
     editor::applyDensity();
 }
@@ -3008,9 +3024,10 @@ TEST(regress_p2bis_pin_e_consola) {
         st.multiSelectCount = 1;   // a MULTI-seleção conta como seleção
         EXPECT(!editor::inspectorCollapsed(st));
         st.multiSelectCount = 0;
-        // a geometria da linha da seta: 28dp (o piso de cabeçalho) e os
-        // ids do par do pin DISTINTOS das tabs (faixa 7430/7431)
-        EXPECT(nearEqF(editor::kInspUnpinRowH, 28.0f, 0.01f));
+        // a geometria do recolher (0.9.6.18 · D1): célula 40dp na LINHA 1
+        // do cabeçalho (à direita do título) e os ids do par do pin
+        // DISTINTOS da faixa das tabs (7430/7431 — a 2ª tab morreu no D5)
+        EXPECT(nearEqF(editor::kInspUnpinCellW, 40.0f, 0.01f));
         EXPECT(editor::kInspTrackPinId != editor::kInspTabBase &&
                editor::kInspUnpinId != editor::kInspTabBase &&
                editor::kInspTrackPinId != editor::kInspUnpinId);
@@ -4736,5 +4753,229 @@ TEST(regress_glb_range_tetos) {
                    "o view fora do buffer não falhou com a comparação "
                    "completa (%s)", err.c_str());
         ::remove(spath);
+    }
+}
+
+// ============================================================================
+// R-035 (0.9.6.18 · HOTFIX — OS 12 DEFEITOS DA IMAGEM REAL DO DONO)
+//         — regress_hotfix_defeitos
+//
+// Os pins AFERVÉIS do hotfix (o resto é provado pelos PNGs P-05 e pelos
+// gates ui_vocab/docs-lint): (1) D2 o orçamento da linha Transform — nada
+// fora do rect em qualquer largura, os pisos 48/40 e o reset ícone inline;
+// (2) D4 a tabela localizada («Definições» em PT, «Settings» só em EN) e
+// o botão outline compacto; (3) D5 o inspTab é morto no draw; (4) D7 o
+// alvo da thumb 256 (PNG ≤60KB — o orçamento da spec); (5) D8 os ids de
+// undo/redo SÓ na fila do topo (o rail não tem ação de undo — o glifo "U"
+// era o ÍMAN, redesenhado como ferradura); (6) D10 os ícones Reset/List
+// existem no vocabulário (o texto cru morre); (7) D11 o divisor em
+// repouso é SÓ a linha 1dp (a coluna de pontos morreu); (8) D12 os planos
+// do gizmo preenchem a kPlaneFillAlpha (25%).
+// ============================================================================
+#include "ui/Brand.h"     // D6: o LOD da marca
+#include "ui/Strings.h"   // D4: a tabela localizada
+#include "ui/Icons.h"     // D10: Reset/List
+#include "ui/Gizmo.h"     // D12: kPlaneFillAlpha
+#include "ui/ViewportChrome.h"  // D8: os ids do rail/fila
+#include "ui/Toolbar.h"   // D8: os kGizmoIds
+
+TEST(regress_hotfix_defeitos) {
+    using namespace vv;
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+
+    // ---- (1) D2: o ORÇAMENTO da linha Transform (o campo Z cortado) ----
+    {
+        // o PISO do painel da casa: 180dp → 164dp úteis → caixas 40 EXATO
+        // e o reset ÍCONE inline (a spec do dono); a linha inteira cabe
+        const editor::TransformBudget b164 = editor::transformRowBudget(164.0f);
+        EXPECT(nearEqF(b164.boxW, 40.0f, 0.01f));
+        EXPECT(b164.resetIcon && nearEqF(b164.resetW, 20.0f, 0.01f));
+        const f32 total164 = 3.0f * b164.boxW + 2.0f * 8.0f + 8.0f + b164.resetW;
+        EXPECT(total164 <= 164.0f + 0.01f);   // NADA fora do rect
+        // o PISO 48 com o chip: usable = 3×48+2×8+8+40 = 208dp exato
+        const editor::TransformBudget b208 = editor::transformRowBudget(208.0f);
+        EXPECT(nearEqF(b208.boxW, 48.0f, 0.01f) &&
+               !b208.resetIcon && nearEqF(b208.resetW, 40.0f, 0.01f));
+        // o largo (≥256dp úteis): caixas 64 + chip 40
+        const editor::TransformBudget b260 = editor::transformRowBudget(260.0f);
+        EXPECT(nearEqF(b260.boxW, 64.0f, 0.01f) && !b260.resetIcon);
+        // INVARIANTE: em QUALQUER largura que a casa produz (o piso do
+        // painel 180dp → 164dp úteis; abaixo disso a scissor do painel é
+        // a última defesa, documentada) a linha inteira nunca passa do útil
+        for (f32 u = 164.0f; u <= 320.0f; u += 4.0f) {
+            const editor::TransformBudget b = editor::transformRowBudget(u);
+            const f32 total =
+                3.0f * b.boxW + 2.0f * 8.0f + 8.0f + b.resetW;
+            EXPECT_MSG(total <= u + 0.01f,
+                       "D2: a linha transform transborda (%.1f > %.1f)",
+                       (double)total, (double)u);
+            EXPECT(b.boxW >= 16.0f);
+        }
+    }
+
+    // ---- (2) D4: a TABELA LOCALIZADA (sem if solto no draw) -------------
+    {
+        // PT (o default da casa — o locale desconhecido cai aqui)
+        strings::setLocaleForTest("pt");
+        EXPECT(std::strcmp(strings::tr(strings::Key::SettingsTitle),
+                           "Definições") == 0);
+        EXPECT(std::strcmp(strings::locale(), "pt") == 0);
+        // EN só em locale EN
+        strings::setLocaleForTest("en");
+        EXPECT(std::strcmp(strings::tr(strings::Key::SettingsTitle),
+                           "Settings") == 0);
+        // locale desconhecido → a língua base (PT), nunca string vazia
+        strings::setLocaleForTest("xx");
+        EXPECT(std::strcmp(strings::tr(strings::Key::SettingsTitle),
+                           "Definições") == 0);
+        // o round-trip do teste repõe o default
+        strings::setLocaleForTest("pt");
+        EXPECT(std::strcmp(strings::tr(strings::Key::ResetLayout),
+                           "Repor layout") == 0);
+    }
+
+    // ---- (3) D5: a vista «Nós» MORREU (o draw manda o inspTab a 0) ------
+    {
+        FontAtlas font;
+        const char* fp = FONT_FIXTURE;
+        ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+        UiContext ui;
+        ui.init();
+        ui.setFont(&font);
+        Scene scene;
+        InputState in;
+        editor::EditorState st;
+        st.inspTab = 1;   // o estado antigo (layout.json de versões anteriores)
+        st.selected = Handle::invalid();   // sem seleção → o TRILHO desenha
+        ui.beginFrame(nullptr, &in, 1600.0f, 720.0f);
+        editor::drawInspector(ui, scene, st);
+        ui.endFrame();
+        // o draw NUNCA respeita o 1: a vista morreu, o trilho é o default
+        EXPECT(st.inspTab == 0);
+    }
+
+    // ---- (4) D7: o alvo da THUMB 256 (o orçamento da spec) --------------
+    {
+        EXPECT(thumb::kThumbTargetW == 256u);
+        EXPECT(thumb::targetWidth(3840) == 256u);   // o viewport grande
+        EXPECT(thumb::targetWidth(200) == 200u);    // nunca ampliar
+        EXPECT(thumb::targetWidth(0) == 0u);        // degenerado
+        // o crop 16:9 de um viewport 456×336dp @2.0 (912×672): o PNG fica
+        // 256×144 EXATO (a spec ~256×144)
+        const thumb::CropRect c = thumb::crop169(912, 672);
+        EXPECT(thumb::targetWidth(c.w) == 256u);
+    }
+
+    // ---- (5) D8: undo/redo SÓ na fila do topo (o rail não repete) -------
+    {
+        // os ids de AÇÃO do chrome do viewport: undo/redo/save vivem na
+        // FILA DO TOPO (30..32) e o rail usa SÓ ids de ferramenta
+        // (35/36 + os kGizmoIds) — nenhum id de ação aparece em dois
+        // containers (R-022 estendida)
+        EXPECT(editor::vpchrome::kVpUndoId < editor::vpchrome::kVpSelectId);
+        EXPECT(editor::vpchrome::kVpRedoId < editor::vpchrome::kVpSelectId);
+        EXPECT(editor::vpchrome::kVpSelectId != editor::vpchrome::kVpUndoId &&
+               editor::vpchrome::kVpSnapValId != editor::vpchrome::kVpUndoId &&
+               editor::vpchrome::kVpSnapValId != editor::vpchrome::kVpRedoId &&
+               editor::vpchrome::kVpSnapValId != editor::vpchrome::kVpSaveId);
+        // as 5 ferramentas do rail têm ids PRÓPRIOS (cursor/gizmo 0..2/ímã)
+        EXPECT(editor::toolbar::kGizmoIds[0] != editor::vpchrome::kVpUndoId &&
+               editor::toolbar::kGizmoIds[1] != editor::vpchrome::kVpUndoId &&
+               editor::toolbar::kGizmoIds[2] != editor::vpchrome::kVpUndoId);
+        // o glifo do ÍMAN já não lê como "U": a ferradura nova tem os
+        // CAPACETES dos pólos mais largos que os braços (7 segmentos, o
+        // traço do conjunto) — a prova visual é o PNG P-05
+        EXPECT(icons::segmentCount(icons::Icon::Snap) == 7u);
+    }
+
+    // ---- (6) D10: o vocabulário tem os ícones dos controlos novos -------
+    {
+        EXPECT(icons::iconByName("reset") >= 0);   // a seta circular (o "R" morre)
+        EXPECT(icons::iconByName("lista") >= 0);   // a vista em lista (o texto morre)
+        EXPECT(icons::iconByName("grelha") >= 0);  // o Grid existe (o par do toggle)
+        EXPECT(icons::Icon::Reset < icons::Icon::Count &&
+               icons::Icon::List < icons::Icon::Count);
+    }
+
+    // ---- (7) D11: o divisor em repouso é SÓ a linha 1dp -----------------
+    {
+        FontAtlas font;
+        const char* fp = FONT_FIXTURE;
+        ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+        UiContext ui;
+        ui.init();
+        ui.setFont(&font);
+        InputState in;
+        editor::EditorState st;
+        st.selected = Handle{1u, 1u};   // inspector aberto → divisor direito
+        ui.beginFrame(nullptr, &in, 1600.0f, 720.0f);
+        ui.auditBegin("r035-divisor", 1600.0f, 720.0f, 0.0f, 0.0f, 0.0f,
+                      0.0f, 1.0f);
+        editor::drawPanelDividers(ui, st, true);
+        ui.endFrame();
+        const layout::Record& r = ui.auditRecord();
+        ui.auditEnd();
+        // na coluna do divisor NÃO existe NENHUM ponto (painel < 8×8dp):
+        // a "coluna de pontos flutuantes" morreu; a LINHA 1dp existe
+        bool linha1dp = false;
+        for (const auto& e : r.entries) {
+            const bool estreito = e.w < 8.0f && e.h < 8.0f;
+            EXPECT_MSG(!estreito,
+                       "D11: sobrou um ponto flutuante %.0fx%.0f no divisor",
+                       (double)e.w, (double)e.h);
+            if (e.w <= 1.5f && e.h > 32.0f) {
+                linha1dp = true;
+            }
+        }
+        EXPECT(linha1dp);   // a linha sólida é o divisor
+    }
+
+    // ---- (9) D3: o empty-state NO RECT MINÚSCULO (a trava do fundo) -----
+    {
+        FontAtlas font;
+        const char* fp = FONT_FIXTURE;
+        ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+        UiContext ui;
+        ui.init();
+        ui.setFont(&font);
+        InputState in;
+        ui.beginFrame(nullptr, &in, 800.0f, 600.0f);
+        ui.auditBegin("r035-empty", 800.0f, 600.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                      1.0f);
+        // um rect de 40dp de altura (o drawer mínimo degenerado): o
+        // empty-state NÃO cruza o fundo — a trava é a segunda defesa
+        const UiRect tiny{100.0f, 200.0f, 300.0f, theme::dp(40.0f)};
+        editor::bottom::drawEmptyState(ui, tiny, icons::Icon::Folder,
+                                       "sem pastas (projeto sem ficheiros)");
+        ui.endFrame();
+        const layout::Record& rT = ui.auditRecord();
+        ui.auditEnd();
+        bool cruzou = false, desenhou = false;
+        for (const auto& e : rT.entries) {
+            if (e.kind == layout::Entry::Label && e.x >= tiny.x &&
+                e.x < tiny.x + tiny.w) {
+                desenhou = true;
+                if (e.y + e.h > tiny.y + tiny.h + 0.5f) {
+                    cruzou = true;
+                }
+            }
+        }
+        EXPECT(desenhou);
+        EXPECT_MSG(!cruzou,
+                   "D3: o empty-state no rect minúsculo cruzou o fundo "
+                   "(a trava morreu — a mutação M3 fica vermelha)");
+    }
+
+    // ---- (8) D12: o preenchimento dos planos do gizmo a 25% -------------
+    {
+        EXPECT(nearEqF(vv::gizmo::kPlaneFillAlpha, 0.25f, 0.001f));
+        // a FUNÇÃO do glifo da marca (D6 — paridade dos sítios): o LOD
+        // divide em 32dp e a versão completa tem MAIS segmentos
+        EXPECT(editor::brand::segmentCountFor(24.0f) <
+               editor::brand::segmentCountFor(32.0f));
+        EXPECT(editor::brand::segmentCountFor(96.0f) ==
+               editor::brand::segmentCountFor(32.0f));
+        EXPECT(editor::brand::kLodFullMinDp == 32.0f);
     }
 }

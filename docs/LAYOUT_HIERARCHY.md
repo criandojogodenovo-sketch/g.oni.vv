@@ -65,9 +65,10 @@ contentRect (superfície EGL − insets do sistema)
 │   ├── TRILHO (32dp; P2-bis: o ícone no topo É o toggle do PIN — a
 │   │   célula de toque 32×40dp, id 7432: tocar ABRE E FIXA; a fonte
 │   │   única do colapso é editor::inspectorCollapsed)
-│   └── LINHA «recolher» (28dp sob o cabeçalho, id 7433 — SÓ existe
-│       enquanto fixado: a seta DESFAZ o pin e o trilho volta sem
-│       seleção — P2-bis)
+│   └── CABEÇALHO 28dp UMA LINHA (0.9.6.18 · D1+D5): título à esquerda +
+│       o recolher do pin à DIREITA (célula 40×28dp, id 7433, só enquanto
+│       fixado). As TABS [Inspector][Nós] MORRERAM (D5: a vista «Nós» era
+│       duplicado da hierarquia — nenhum botão partilha a faixa do título)
 ├── BOTTOM DOCK: drawer (altura variável 0..cap duplo) + TAB BAR (32dp —
 │   PASSO 1)
 │   └── tabs Ficheiros · Assets · Consola (chips internas Logs/Erros/
@@ -118,9 +119,11 @@ contentRect (superfície EGL − insets do sistema)
    (`kViewportMinW`=288dp). **P2-bis — o PIN**: o ícone do trilho (id
    `kInspTrackPinId` 7432, célula 32×40dp) ABRE e FIXA o painel
    (`inspPinned`, persiste no layout.json); a seta de recolher (id
-   `kInspUnpinId` 7433, linha de 28dp sob o cabeçalho) DESFAZ o pin —
-   fixado, o painel fica aberto MESMO sem seleção; com seleção a regra
-   PASSO 2 manda (o painel volta a fechar ao limpar a seleção).
+   `kInspUnpinId` 7433) DESFAZ o pin — 0.9.6.18 (D1): a seta vive na
+   LINHA 1 do cabeçalho, à direita do título (célula 40×28dp,
+   `kInspUnpinCellW`) — fixado, o painel fica aberto MESMO sem seleção;
+   com seleção a regra PASSO 2 manda (o painel volta a fechar ao limpar
+   a seleção).
 5. **As PEGAS de arrasto medem 24dp (PASSO 2)**: a pega do drawer
    (`kDrawerHandleH`, era 12) e o hit dos divisores (`kDividerHitW`, era
    20). O strip VISÍVEL dos divisores segue 12dp — a folga vai PARA
@@ -146,6 +149,29 @@ contentRect (superfície EGL − insets do sistema)
    drawer pequeno vive com chips 28dp + a lista no resto. Os números
    são NOMEADOS (`kConListMinPct` 0.60, `kConChipPad` 2, `kConListGap`
    2, `kConCmdH` 40, `kConCmdPad` 4).
+11. **O cabeçalho do inspector é UMA linha (0.9.6.18 · D1+D5)**: título à
+   esquerda, o recolher do pin à direita, NUNCA outra faixa a partilhar
+   o y (as tabs [Inspector][Nós] morreram — a vista era duplicado da
+   hierarquia; nenhum botão desenha na faixa do título — a FASE 15.1 do
+   device virtual afere).
+12. **A linha Transform obedece ao ORÇAMENTO (0.9.6.18 · D2)**: a fonte
+   única `editor::transformRowBudget` (pura) decide as larguras — painel
+   largo: caixas 64 + reset chip 40; encolhe ao piso 48 com o chip;
+   abaixo do piso o reset é ÍCONE inline 20 (caixas ao piso 40; no painel
+   180dp dá 40 exato). NADA desenha fora do rect do painel — o draw e o
+   tap partilham a MESMA matemática.
+13. **O divisor é a LINHA 1dp (0.9.6.18 · D11)**: em repouso só a linha
+   sólida 1dp na cor border existe (a coluna de pontos flutuantes morreu);
+   a pill de grip só desenha DURANTE o drag.
+14. **A marca é o glifo da função única (0.9.6.18 · D6)**: brand::drawIcon
+   (G com 4 setas, LOD: ≥32dp completa / <32dp simplificada com traço
+   ×1.2) — SEM fundo/tile com letra; o espelho Java é UiIcons.drawBrand.
+15. **A miniatura do projeto sai da captura OFF-thread (0.9.6.18 · D7)**:
+   o frame do save só faz glReadPixels; o encode 256×144 (≤60KB) corre no
+   thread de jobs (o padrão ImportJob); card sem thumb.png desenha o tile
+   de iniciais (paleta fixa de 6) — o ícone da app NUNCA é conteúdo de
+   card. Os empty-states das 4 tabs do drawer são centrados e CLIPADOS ao
+   rect de conteúdo (D3/D9 — o helper partilhado bottom::drawEmptyState).
 
 ## 3. OS PISOS (fontes únicas em ui/SafeArea.h)
 
@@ -168,7 +194,7 @@ contentRect (superfície EGL − insets do sistema)
 | `layout::kTouchFloorDp` | 40dp | piso de toque do botão SOLTO (desenho 32 — a LEI DE OURO do PASSO 1; era 48) |
 | `layout::kRowFloorDp` | 36dp | piso de LINHA (top bar, listas, consola) |
 | `layout::kFieldFloorDp` | 32dp | piso de CAMPO (caixas X/Y/Z, tabs de baixo, pesquisa) |
-| `layout::kHeadFloorDp` | 28dp | piso de CABEÇALHO/chips (kHeaderH, tabs Inspector/Nós, chips da consola, a linha «recolher» do pin — PASSO 2/P2-bis) |
+| `layout::kHeadFloorDp` | 28dp | piso de CABEÇALHO/chips (kHeaderH, chips da consola, a célula «recolher» do pin — PASSO 2/P2-bis/0.9.6.18) |
 
 ## 4. SENTINELAS E GATE
 

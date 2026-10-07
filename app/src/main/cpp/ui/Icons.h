@@ -91,6 +91,10 @@ enum class Icon : u8 {
     Keyboard,       // teclado (rect + 2 filas de teclas)
     // ---- 0.9.6.1 (G2-6c — a tecla APAGA do teclado próprio) ----
     Erase,          // backspace (pentagono + × — o rótulo APA… truncava)
+    // ---- 0.9.6.18 (HOTFIX D2/D10 — o reset deixa de ser o texto "R" nu) --
+    Reset,          // seta circular (repõe o valor — o "R" do Transform morre)
+    // ---- 0.9.6.18 (HOTFIX D10 — o toggle grelha/lista deixa de ser texto) --
+    List,           // lista (3 linhas com pontos — a vista em lista do browser)
     Count
 };
 

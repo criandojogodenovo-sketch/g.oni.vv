@@ -45,3 +45,12 @@ re:(?i:\bprovavelmente\b)
 re:(?i:\bshould work\b)
 re:(?i:\bI think\b)
 re:(?i:\bdeve funcionar\b)
+
+# — 0.9.6.18 (HOTFIX D5) — O VOCABULÁRIO DE UI PROIBIDO NA DOCUMENTAÇÃO ———
+# A 2.ª tab do Inspector («Nós») morreu: era duplicado da hierarquia e a
+# unidade da engine é TIC. A documentação não volta a chamar nó/TIC de
+# «Node»/«GameObject»/«Entity» nem a tratar a tab morta como viva. A
+# DISCUSSÃO da regra usa o escape de linha (<!-- docs-lint:allow -->).
+re:\bNode\b
+re:\bGameObject\b
+re:\bEntity\b

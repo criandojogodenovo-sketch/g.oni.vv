@@ -47,19 +47,27 @@ constexpr Polyline kScaleLines[] = {
     {0, 2}, {2, 2}, {4, 2}, {6, 2}, {8, 2},
 };
 
-// ---- Snap: ímã geométrico ---------------------------------------------------
+// ---- Snap: ímã ferradura (0.9.6.18 HOTFIX D8 — REDESENHO) -------------------
+// O glifo antigo (U aberto para cima com as barras dos pólos dentro dos
+// braços) LIA-SE como a letra "U" — o dono leu "undo duplicado" no rail
+// (o defeito D8). O ímã vira FERRADURA de cabeça para baixo (∩, abertura
+// para baixo) com os CAPACETES dos pólos MAIS LARGOS que os braços e
+// DESTACADOS na ponta — a leitura "ímã" é unânime, a leitura "U" morre.
+// O botão continua a ser o ÍMAN da spec PASSO 3 (a função não sai do rail;
+// o GLIFO "U" é que sai).
 constexpr f32 kSnapPts[] = {
-    7.0f, 3.6f,   7.0f, 12.4f,
-    7.0f, 12.4f,  9.2f, 15.0f,
-    9.2f, 15.0f,  14.8f, 15.0f,
-    14.8f, 15.0f, 17.0f, 12.4f,
-    17.0f, 12.4f, 17.0f, 3.6f,
-    5.2f, 6.6f,   8.8f, 6.6f,
-    15.2f, 6.6f,  18.8f, 6.6f,
+    7.0f, 14.6f,  7.0f, 8.6f,      // braço esquerdo (sobe)
+    7.0f, 8.6f,   9.2f, 5.0f,      // arco ∩ (2 segmentos)
+    9.2f, 5.0f,   14.8f, 5.0f,
+    14.8f, 5.0f,  17.0f, 8.6f,
+    17.0f, 8.6f,  17.0f, 14.6f,    // braço direito (desce)
+    4.6f, 16.4f,  9.4f, 16.4f,     // capacete do pólo esquerdo (mais largo
+                                   // que o braço — a leitura ímã)
+    14.6f, 16.4f, 19.4f, 16.4f,    // capacete do pólo direito
 };
 constexpr Polyline kSnapLines[] = {
-    {0, 2}, {2, 2}, {4, 2}, {6, 2}, {8, 2},
-    {10, 2}, {12, 2},
+    {0, 2}, {2, 2}, {4, 2}, {6, 2}, {8, 2},   // ∩ com os braços
+    {10, 2}, {12, 2},                          // os 2 capacetes
 };
 
 // ---- Inspector: retângulo + 3 linhas ----------------------------------------
@@ -757,6 +765,31 @@ constexpr Polyline kEraseLines[] = {
     {10, 2}, {12, 2},                          // o ×
 };
 
+// ---- Reset (0.9.6.18 HOTFIX D2/D10 — seta circular, o "R" nu morre) --------
+// quase-círculo com um vão a 45° + ponta de seta no fim do arco (a leitura
+// "repõe/roda ao valor inicial" é universal — o Botão R de texto cru era a
+// entrada da lista proibida do D10).
+f32 kResetPts[2 * 14] = {};
+constexpr Polyline kResetLines[] = {
+    {0, 10},            // o arco (10 segmentos, 310°)
+    {10, 2}, {12, 2},   // a ponta da seta no fim do arco
+};
+
+// ---- List (0.9.6.18 HOTFIX D10 — a vista em LISTA do browser de assets) -----
+// 3 linhas com marcador de ponto à esquerda (o par do Grid — 4 quadrantes —
+// no mesmo estilo de traço; o toggle deixa de ser o texto "grelha"/"lista").
+constexpr f32 kListPts[] = {
+    4.0f, 6.0f,   4.2f, 6.0f,      // marcador + linha 1
+    8.0f, 6.0f,   20.0f, 6.0f,
+    4.0f, 12.0f,  4.2f, 12.0f,     // marcador + linha 2
+    8.0f, 12.0f,  20.0f, 12.0f,
+    4.0f, 18.0f,  4.2f, 18.0f,     // marcador + linha 3
+    8.0f, 18.0f,  20.0f, 18.0f,
+};
+constexpr Polyline kListLines[] = {
+    {0, 2}, {2, 2}, {4, 2}, {6, 2}, {8, 2}, {10, 2},
+};
+
 const IconDef kDefs[] = {
     {kMovePts,          12, kMoveLines,          6},
     {kRotatePts,        18, kRotateLines,        4},
@@ -811,6 +844,8 @@ const IconDef kDefs[] = {
     {kRigidPts,         20, kRigidLines,        10},
     {kKeyboardPts,      32, kKeyboardLines,      12},
     {kErasePts,         14, kEraseLines,         7},
+    {kResetPts,         28, kResetLines,         3},
+    {kListPts,          12, kListLines,          6},
 };
 static_assert(sizeof(kDefs) / sizeof(kDefs[0]) ==
               static_cast<size_t>(Icon::Count), "tabela de ícones incompleta");
@@ -892,6 +927,35 @@ struct SpinInit {
 };
 const SpinInit kSpinInit;
 
+// 0.9.6.18 — RESET: arco de 310° (r=8) com vão a 45° + ponta no fim (o MESMO
+// gerador do Rodar — a ponta é 2 traços tangentes).
+struct ResetArcInit {
+    ResetArcInit() {
+        // o arco vai de -50° a 260° (310° úteis; o vão fica em torno de 315°)
+        const f32 a0 = -50.0f * 0.01745329252f;
+        const f32 a1 = 260.0f * 0.01745329252f;
+        const f32 r = 8.0f;
+        for (int i = 0; i < 10; ++i) {
+            const f32 a = a0 + (a1 - a0) * (static_cast<f32>(i) / 9.0f);
+            kResetPts[2 * i]     = 12.0f + r * std::cos(a);
+            kResetPts[2 * i + 1] = 12.0f + r * std::sin(a);
+        }
+        // a ponta: no fim do arco (a1), 2 traços tangentes para dentro
+        const f32 tipx = 12.0f + r * std::cos(a1);
+        const f32 tipy = 12.0f + r * std::sin(a1);
+        const f32 tx = -std::sin(a1), ty = std::cos(a1);   // tangente
+        const f32 nx = -ty, ny = tx;                       // normal
+        const f32 head = 3.0f;
+        kResetPts[20] = tipx - tx * head + nx * head;
+        kResetPts[21] = tipy - ty * head + ny * head;
+        kResetPts[22] = tipx;
+        kResetPts[23] = tipy;
+        kResetPts[24] = tipx - tx * head - nx * head;
+        kResetPts[25] = tipy - ty * head - ny * head;
+    }
+};
+const ResetArcInit kResetArcInit;
+
 } // namespace
 
 const IconDef& def(Icon icon) {
@@ -943,6 +1007,7 @@ i32 iconByName(const char* name) {
         {Icon::Undo, "undo"}, {Icon::Redo, "redo"}, {Icon::Save, "save"},
         {Icon::Copy, "copy"}, {Icon::Paste, "paste"},
         {Icon::Cursor, "cursor"}, {Icon::Grid, "grelha"},
+        {Icon::Reset, "reset"}, {Icon::List, "lista"},
         {Icon::Terminal, "terminal"}, {Icon::Clapper, "clapper"},
         {Icon::Folder, "pasta"}, {Icon::Search, "lupa"},
         {Icon::Sort, "ordenar"}, {Icon::Upload, "upload"},
