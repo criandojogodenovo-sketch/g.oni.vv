@@ -147,7 +147,21 @@ a falhar NO DEVICE — é exatamente o trabalho dos PASSOS 2 (painéis:
 hierarquia 18%/inspector 22%) e 3 (viewport: controlos ≤10% a 60% alfa).
 No harness (A) os critérios a/c já cumprem; o b é do PASSO 3.
 
-## 7. NÃO VERIFICADO (honesto)
+## 7. O INCIDENTE P-01 (scope-check) — o .gitignore
+
+O commit do PASSO 1 levou DUAS linhas de higiene local no `.gitignore`
+(artefactos do harness escritos no CWD dos runs do c33). O `.gitignore`
+NÃO está em `ci/scope.txt` — o gate scope-check ficou VERMELHO no push
+(exatamente o desenho da cláusula P-01: tocar fora do scope = CI vermelho).
+RESOLUÇÃO SEM alargar o scope: as duas linhas REVERTIDAS (commit 0.9.6.14b)
+— o `.gitignore` volta ao estado aprovado; os artefactos eram lixo LOCAL e
+foram apagados do disco. Se o dono QUISER as linhas (evitam lixo no CWD dos
+runs locais do harness), editar o ci/scope.txt É o pedido — não decidimos
+por ele. O run seguinte (87dc088) permaneceu vermelho porque o gate compara
+o RANGE do push (07e74da..87dc088 = só a reversão); este commit é o primeiro
+cujo range não contém o .gitignore.
+
+## 8. NÃO VERIFICADO (honesto)
 
 - O toque no DEVICE (RMX3624) — os alvos de 40/36/32/28dp medem certo no
   código e no validador, mas o conforto do dedo é julgamento do dono
