@@ -708,11 +708,17 @@ public class ProjectManagerActivity extends Activity {
      * thumb.png: tile de INICIAIS do nome (máx 2) + matiz sóbrio de hash
      * sobre grafite (paleta FIXA de 6 matizes). NUNCA o ícone da app
      * (a regra do dono); os cards distintos entre si pelo hash do nome.
+     * 0.9.6.18b — a CLASSE DEIXA DE SER static (a densidade vem da
+     * activity por herança do contexto interno) e SEM membros static no
+     * corpo (o nível de linguagem 1.8 do AGP não os leva em classe
+     * interna); o bordo é STROKE com o dp da casa (o FILL pintava a laje
+     * TODA de BORDER e o setStroke não existe em Paint — era
+     * setStrokeWidth).
      */
-    private static final class InitialsThumbView extends View {
+    private final class InitialsThumbView extends View {
         // a paleta fixa (6 matizes SÓBRIOS — saturação contida, todos
         // legíveis sobre o grafite da casa; NUNCA cores vivas de placeholder)
-        private static final int[] HUES = {
+        private final int[] HUES = {
                 0xFFE09A00,   // âmbar (a cor da casa, escurecida)
                 0xFFC4573B,   // terracota
                 0xFF3E8E7E,   // azul-petróleo
@@ -733,7 +739,7 @@ public class ProjectManagerActivity extends Activity {
 
         /** as iniciais: 1ª letra de cada palavra (máx 2); 1 palavra = as
          *  2 primeiras letras; vazio = "·" (o tile nunca fica mudo) */
-        private static String initialsOf(String name) {
+        private String initialsOf(String name) {
             if (name == null || name.trim().isEmpty()) {
                 return "·";
             }
@@ -755,9 +761,12 @@ public class ProjectManagerActivity extends Activity {
             p.setStyle(android.graphics.Paint.Style.FILL);
             p.setColor(0xFF2E2E32);   // o SURFACE2 da casa
             c.drawRect(0, 0, getWidth(), getHeight(), p);
-            p.setStroke(dp2(1));
+            p.setStyle(android.graphics.Paint.Style.STROKE);
+            final float sw = dp(1);   // o dp da CASA (o dp2 local morreu — duplicava a derivação)
+            p.setStrokeWidth(sw);
             p.setColor(0xFF4A3714);   // o BORDER da casa
-            c.drawRect(0.5f, 0.5f, getWidth() - 0.5f, getHeight() - 0.5f, p);
+            c.drawRect(sw / 2f, sw / 2f, getWidth() - sw / 2f,
+                    getHeight() - sw / 2f, p);
             p.setColor(hue);
             p.setTextAlign(android.graphics.Paint.Align.CENTER);
             p.setFakeBoldText(true);
@@ -765,10 +774,6 @@ public class ProjectManagerActivity extends Activity {
             final float base = getHeight() / 2f
                     - (p.descent() + p.ascent()) / 2f;
             c.drawText(initials, getWidth() / 2f, base, p);
-        }
-
-        private int dp2(int v) {
-            return Math.round(v * density());
         }
     }
 

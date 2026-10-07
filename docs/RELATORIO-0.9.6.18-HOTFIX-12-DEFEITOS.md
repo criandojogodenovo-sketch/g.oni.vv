@@ -211,3 +211,45 @@ de linha `<!-- docs-lint:allow -->`).
   POR DECISÃO DO DONO.
 - **PASSO 4 · JANELAS**: BLOQUEADO até ao re-sign-off do dono (a tabela §8
   deste relatório é o instrumento).
+
+## 11. INCIDENTE 4 · A COMPILAÇÃO JAVA DO CI (fechado no 0.9.6.18b)
+
+O APK release do a277d0d FALHOU a compilar (run 37650280154, job «APK
+release arm64»): `ProjectManagerActivity.java:758 cannot find symbol
+method setStroke(int)` + `:771 non-static method density() cannot be
+referenced from a static context`. O core (856 testes) e o c33 virtual
+(526/526) passaram — a falha era SÓ Java. CAUSA RAIZ (a consequência
+direta do INCIDENTE 1 da §9 do worklog): o `git checkout` perdeu as
+edições do D7 e a reaplicação integrou a classe `InitialsThumbView` com
+TRÊS erros que nenhum gate local apanha (o Java só compila no CI):
+
+1. **`p.setStroke(...)` NÃO EXISTE em `android.graphics.Paint`** — o nome
+   real é `setStrokeWidth(float)` (o `MissingThumbView` da MESMA ficha usa
+   o nome certo; o erro do CI «method setStroke(int)» é o javac a procurar
+   qualquer assinatura). O dp2 devolvia `int` — mas nem `float` salvaria.
+2. **A classe era `static` e chamava `density()` da activity** (instância)
+   sem qualificador — `:771` vermelho por construção.
+3. **O bordo do tile era desenhado em `Style.FILL`** — o retângulo do
+   «bordo 1dp» pintava a LAJE TODA de BORDER (0xFF4A3714), violando o
+   contrato D7 («iniciais sobre GRAFITE»): o tile nunca mostrava grafite.
+
+FIX (0.9.6.18b, sem tocar em mais nada): a classe deixa de ser `static`
+(e SEM membros static no corpo — o nível de linguagem 1.8 do AGP 8.5 sem
+compileOptions não os leva em classe interna); o bordo é
+`Style.STROKE` + `setStrokeWidth(dp(1))` com o traço centrado no caminho
+(`sw/2` de folga — visível em qualquer densidade); o `dp2` local MORRE
+(duplicava a derivação do `dp` da casa). A Paridade com o desenhado: o
+tile volta a ser grafite + bordo 1dp + iniciais no matiz (o §8/7 e §9/6
+descrevem este tile).
+
+PROVA (sem SDK/jdk na sandbox — javac não existe, só JRE): o compilador
+ECJ 3.36.0 contra stubs mínimos das APIs usadas (Paint SEM setStroke,
+com a API real), ao nível 8: **a classe fixada COMPILA; a classe do
+a277d0d reproduz os DOIS erros do CI palavra a palavra** (script de
+verificação na sandbox do agente, FORA do repo — runs fixed/mutant, o
+mesmo vermelho→verde das mutações, aqui ao nível do compilador).
+
+LIÇÃO (entra no worklog): a reaplicação de edições perdidas tem de
+PASSAR PELA MESMA porta do original — no caso do Java, a compilação do
+CI é o único compilador da casa; um fix reaplicado a vermelho no CI
+manda PARAR e reabrir o incidente, nunca acumular trabalho por cima.

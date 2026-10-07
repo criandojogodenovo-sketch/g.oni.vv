@@ -34,6 +34,20 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.9.6.18b — O CI VERDE (o fix do APK: InitialsThumbView compila)
+
+- O APK release do 0.9.6.18 falhou a compilar (o Java só compila no CI —
+  o core e o c33 virtual passavam): `Paint` não tem `setStroke` (o nome
+  real é `setStrokeWidth`), a classe chamava `density()` da activity a
+  partir de classe `static` e o bordo do tile pintava a laje TODA de
+  BORDER em `Style.FILL` (o grafite do contrato D7 nunca aparecia).
+- FIX: classe não-static sem membros static no corpo (nível 1.8 do AGP),
+  bordo `Style.STROKE` + `setStrokeWidth(dp(1))`, o `dp2` local morre.
+- PROVA: ECJ ao nível 8 contra stubs da API real — a classe fixada
+  compila; a do a277d0d reproduz os DOIS erros do CI palavra a palavra
+  (script de verificação na sandbox do agente, FORA do repo). Causa
+  raiz e lição no relatório §11.
+
 ## 0.9.6.18 — HOTFIX: OS 12 DEFEITOS DA IMAGEM REAL (D1–D12)
 
 - **D1+D5 · CABEÇALHO DO INSPECTOR NUMA LINHA**: título à esquerda + o
