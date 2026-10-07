@@ -41,5 +41,3 @@ test-sentinels-cache/
 *.dump
 build-asan/
 build-dbg/
-layout-harness-*
-j2-device-drawer-aberto.*
