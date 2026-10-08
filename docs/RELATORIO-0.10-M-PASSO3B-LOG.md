@@ -198,6 +198,7 @@ caminho de produção).
 | c33_virtual | **670 check(s), 0 falha(s) — HARNESS VERDE** (era 631; a FASE 19 soma 39) |
 | release-identity (R-015) | VERDE: versionName 0.9.6 · **versionCode 57** (declarado no RELATORIO-0.9.6.md) |
 | scope-check (P-01) | VERDE: todo o diff (24 ficheiros) dentro de ci/scope.txt |
+| o CI do GitHub (run 37849657818, commit f09792d) | **VERDE — todos os jobs + o APK assinado versionCode 57 publicado** (o 1º push (e646803) morreu num ICE do GCC 13 do runner em gimplify.cc:774 — o construto «meta = GMeshV3Meta{}» de sempre, empurrado ao bug pelo TU novo; cura sem mudança de semântica: v3Reset() explícito + a mensagem por appends — commit 0.10.3b) |
 | docs-lint / gmesh-docs / ui-vocab / theme-hex / hierarchy / gizmo / glyph / jni-parity / reload / check_main | VERDES |
 
 ---
