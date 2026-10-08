@@ -108,9 +108,8 @@ f32 dequantU(u16 q) {
 }
 
 // header comum = SEMPRE 32 bytes (magic 4 + version 2 + endian 2 + align 4
-// + payloadSize 8 + checksum 8 + reserved 4) — kGHeaderBytes é a constante
-// única que leitores e escritores partilham
-constexpr size_t kGHeaderBytes = 32;
+// + payloadSize 8 + checksum 8 + reserved 4) — kGHeaderBytes vive no
+// header (o conversor streaming do PASSO 3 também o usa)
 
 void writeHeader(Writer& w, const char* magic, u64 payloadSize, u64 checksum,
                  u16 version = 1) {
@@ -431,6 +430,83 @@ void v3WriteMaterial(Writer& w, const std::string& s, u32& cursor) {
 }
 
 } // namespace
+
+// ---- o ESCRITOR v3 PARTILHADO (0.10-M PASSO 3) ------------------------------
+// A serialização da ESQUELETO (header+meta+tabela+materiais) usada pelos
+// DOIS escritores: writeGMesh (abaixo) e o conversor streaming
+// (GmeshV3Stream). A aritmética de offsets vive SÓ AQUI — um escritor não
+// pode divergir do outro (o layout é: dados 16-alinhados, tabela a seguir,
+// materiais no fim; o checksum do header cobre os 160 B de metadados).
+bool gmeshV3Skeleton(GMeshV3Meta& meta,
+                     std::vector<GMeshV3Block>& entries,
+                     const std::vector<std::string>& materials,
+                     GMeshV3Skeleton& sk, std::string& err) {
+    sk = GMeshV3Skeleton{};
+    if (entries.empty()) {
+        err = "v3 sem blocos — nada a escrever";
+        return false;
+    }
+    if (meta.materialCount != materials.size()) {
+        err = "v3: materialCount (" + std::to_string(meta.materialCount) +
+              ") != materiais dados (" + std::to_string(materials.size()) +
+              ")";
+        return false;
+    }
+    const u32 stride = meta.vertexStride();
+    // ---- o layout analítico (tudo conhecido ANTES de escrever) ------
+    u64 cursor = kGHeaderBytes + kGmeshV3MetaBytes;
+    for (size_t i = 0; i < entries.size(); ++i) {
+        GMeshV3Block& e = entries[i];
+        if (e.dataSize !=
+            e.vertexCount * stride +
+                e.indexCount * (e.indexType == 1 ? 4ull : 2ull)) {
+            err = "v3: dataSize do bloco #" + std::to_string(i) +
+                  " não bate com as contagens e o layout de atributos";
+            return false;
+        }
+        if (e.indexType == 0 && e.vertexCount > 65535) {
+            err = "v3: bloco #" + std::to_string(i) + " com " +
+                  std::to_string(e.vertexCount) +
+                  " vértices não cabe em índices locais u16";
+            return false;
+        }
+        cursor += (16 - cursor % 16) % 16;   // os dados alinham-se a 16
+        e.dataOffset = cursor;
+        cursor += e.dataSize;
+    }
+    cursor += (16 - cursor % 16) % 16;
+    meta.blockTableOffset = cursor;
+    cursor += entries.size() * kGmeshV3BlockEntryBytes;
+    meta.materialTableOffset = cursor;
+    for (const std::string& s : materials) {
+        cursor += 2ull + (s.size() > 65535 ? 65535ull : s.size());
+        cursor += (4 - cursor % 4) % 4;
+    }
+    meta.blockCount = entries.size();
+    const u64 payloadSize = cursor - kGHeaderBytes;
+    // ---- a tabela (com o CRC de cada entrada já preenchido) --------
+    {
+        Writer tw(sk.table);
+        for (const GMeshV3Block& e : entries) v3WriteBlockEntry(tw, e);
+        meta.tableCrc32 = gcrc32(sk.table.data(), sk.table.size());
+    }
+    // ---- os metadados (com o CRC final) + o header (com o checksum) -
+    {
+        Writer mw(sk.meta);
+        v3WriteMeta(mw, meta);
+        Writer hw(sk.header);
+        writeHeader(hw, "GMES", payloadSize,
+                    gfnv1a(sk.meta.data(), sk.meta.size()),
+                    kGmeshVersionWrite);
+    }
+    // ---- os materiais (o cursor REAL — o alinhamento 4 depende dele) -
+    {
+        Writer mw(sk.materials);
+        u32 cur = static_cast<u32>(meta.materialTableOffset);
+        for (const std::string& s : materials) v3WriteMaterial(mw, s, cur);
+    }
+    return true;
+}
 
 u32 GMeshV3Meta::vertexStride() const {
     u32 s = 0;
@@ -934,56 +1010,8 @@ bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err) {
         matIdx[i] = found;
     }
     meta.materialCount = mats.size();
-    // ---- o layout analítico (tudo conhecido ANTES de escrever)
-    const u64 dataStart = kGHeaderBytes + kGmeshV3MetaBytes;
-    u64 cursor = dataStart;
-    std::vector<GMeshV3Block> entries(bins.size());
-    for (size_t i = 0; i < bins.size(); ++i) {
-        const GMeshV3BlockIn& b = bins[i];
-        const u64 vb = b.vertices.size() * stride;
-        const u64 ib = b.indices32.size() * (b.use32 ? 4ull : 2ull);
-        cursor += (4 - cursor % 4) % 4;
-        cursor += (16 - cursor % 16) % 16;   // os dados alinham-se a 16
-        GMeshV3Block& e = entries[i];
-        e.dataOffset = cursor;
-        e.dataSize = vb + ib;
-        e.vertexCount = b.vertices.size();
-        e.indexCount = b.indices32.size();
-        e.aabbMin = b.aabbMin;
-        e.aabbMax = b.aabbMax;
-        e.materialIndex = matIdx[i];
-        e.indexType = b.use32 ? 1u : 0u;
-        cursor += e.dataSize;
-    }
-    cursor += (16 - cursor % 16) % 16;
-    meta.blockTableOffset = cursor;
-    cursor += bins.size() * kGmeshV3BlockEntryBytes;
-    meta.materialTableOffset = cursor;
-    for (const std::string& s : mats) {
-        cursor += 2ull + (s.size() > 65535 ? 65535ull : s.size());
-        cursor += (4 - cursor % 4) % 4;
-    }
-    const u64 payloadSize = cursor - kGHeaderBytes;
-    // ---- a serialização (header → metadados → blocos → tabela → materiais;
-    // o CRC da tabela e o checksum dos metadados entram NO SÍTIO no fim)
-    out.reserve(static_cast<size_t>(payloadSize + kGHeaderBytes));
-    Writer o(out);
-    {
-        std::vector<u8> hdr;
-        Writer hw(hdr);
-        writeHeader(hw, "GMES", payloadSize, 0, kGmeshVersionWrite);
-        o.bytes_(hdr.data(), hdr.size());
-    }
-    {
-        std::vector<u8> mb;
-        Writer mw(mb);
-        v3WriteMeta(mw, meta);
-        o.bytes_(mb.data(), mb.size());
-    }
-    for (size_t i = 0; i < bins.size(); ++i) {
-        const GMeshV3BlockIn& b = bins[i];
-        while (out.size() < entries[i].dataOffset) o.u8_(0);
-        std::vector<u8> blob;
+    // ---- a serialização de UM bloco (a MESMA nos dois passes abaixo) ---
+    auto serializeBlock = [&](const GMeshV3BlockIn& b, std::vector<u8>& blob) {
         Writer bw(blob);
         for (const Vertex& v : b.vertices) {
             bw.f32_(v.pos.x); bw.f32_(v.pos.y); bw.f32_(v.pos.z);
@@ -1004,36 +1032,55 @@ bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err) {
         } else {
             for (const u32 idx : b.indices32) bw.u16_(static_cast<u16>(idx));
         }
-        entries[i].crc32 = gcrc32(blob.data(), blob.size());
-        o.bytes_(blob.data(), blob.size());
+    };
+    // ---- as ENTRADAS da tabela (tamanhos + CRCs — o blob de cada bloco
+    // serializa-se UMA vez para o CRC e é descartado; a emissão abaixo
+    // reconstrói e CONFIRMA o CRC — o custo é CPU, nunca a memória)
+    std::vector<GMeshV3Block> entries(bins.size());
+    for (size_t i = 0; i < bins.size(); ++i) {
+        const GMeshV3BlockIn& b = bins[i];
+        GMeshV3Block& e = entries[i];
+        const u64 vb = b.vertices.size() * stride;
+        const u64 ib = b.indices32.size() * (b.use32 ? 4ull : 2ull);
+        e.dataSize = vb + ib;
+        e.vertexCount = b.vertices.size();
+        e.indexCount = b.indices32.size();
+        e.aabbMin = b.aabbMin;
+        e.aabbMax = b.aabbMax;
+        e.materialIndex = matIdx[i];
+        e.indexType = b.use32 ? 1u : 0u;
+        std::vector<u8> blob;
+        serializeBlock(b, blob);
+        e.crc32 = gcrc32(blob.data(), blob.size());
     }
-    while (out.size() < meta.blockTableOffset) o.u8_(0);
-    {
-        std::vector<u8> tb;
-        Writer tw(tb);
-        for (const GMeshV3Block& e : entries) v3WriteBlockEntry(tw, e);
-        meta.tableCrc32 = gcrc32(tb.data(), tb.size());
-        // o CRC da tabela vive DENTRO dos metadados → reescreve os
-        // metadados (160 B) no sítio com o CRC final e só depois emite
-        std::vector<u8> mb2;
-        Writer mw2(mb2);
-        v3WriteMeta(mw2, meta);
-        for (size_t i = 0; i < kGmeshV3MetaBytes; ++i) {
-            out[kGHeaderBytes + i] = mb2[i];
+    // ---- a ESQUELETO PARTILHADA (offsets + header + meta + tabela +
+    // materiais — a MESMA rotina que o conversor streaming usa: zero
+    // drift de formato entre os dois escritores)
+    GMeshV3Skeleton sk;
+    if (!gmeshV3Skeleton(meta, entries, mats, sk, err)) {
+        return false;
+    }
+    // ---- a emissão (header → metadados → blocos 16-alinhados → tabela
+    // → materiais; a ORDEM é a mesma do layout analítico da esqueleto)
+    out = sk.header;
+    out.insert(out.end(), sk.meta.begin(), sk.meta.end());
+    for (size_t i = 0; i < bins.size(); ++i) {
+        while (out.size() < entries[i].dataOffset) out.push_back(0);
+        std::vector<u8> blob;
+        serializeBlock(bins[i], blob);
+        if (gcrc32(blob.data(), blob.size()) != entries[i].crc32) {
+            err = "v3: o CRC do bloco #" + std::to_string(i) +
+                  " divergiu entre a pré-passada e a emissão (bug interno)";
+            return false;
         }
-        o.bytes_(tb.data(), tb.size());
+        out.insert(out.end(), blob.begin(), blob.end());
     }
-    {
-        u32 cur = static_cast<u32>(meta.materialTableOffset);
-        for (const std::string& s : mats) v3WriteMaterial(o, s, cur);
-    }
-    // o checksum dos METADADOS (160 B) — no sítio (offset 20 do ficheiro)
-    {
-        const u64 crc = gfnv1a(out.data() + kGHeaderBytes, kGmeshV3MetaBytes);
-        for (int i = 0; i < 8; ++i) {
-            out[20 + i] = static_cast<u8>((crc >> (8 * i)) & 0xFF);
-        }
-    }
+    // o PAD de 16-alinhamento ANTES da tabela (a esqueleto decidiu o
+    // offset; a emissão tem de o respeitar — um mesh com dataSize não
+    // múltiplo de 16 deixa um vão aqui)
+    while (out.size() < meta.blockTableOffset) out.push_back(0);
+    out.insert(out.end(), sk.table.begin(), sk.table.end());
+    out.insert(out.end(), sk.materials.begin(), sk.materials.end());
     return true;
 }
 

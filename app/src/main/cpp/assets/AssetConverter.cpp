@@ -18,6 +18,7 @@
 
 #include "assets/GltfAnim.h"
 #include "assets/GltfImporter.h"
+#include "assets/GmeshV3Stream.h"   // 0.10-M (PASSO 3): o conversor streaming v3
 #include "assets/ObjImporter.h"
 #include "assets/PngLoader.h"
 #include "assets/TexturePipeline.h"
@@ -659,14 +660,22 @@ bool convertPng(const std::string& srcAbs, ProjectStorage& st,
 // 0.9.6.12g (A2-2): `fileBytes` (o ficheiro EM DISCO — vai ao diag file= do
 // dono) e `deferUri` (o URI do buffer externo de um .gltf que fica DEFERIDO
 // — o scene.bin de 212 MB lido por ranges, nunca inteiro em RAM).
+// 0.10-M (PASSO 3): `mmapBinPath` — o ficheiro REAL do buffer 0 (o GLB
+// próprio, ou o irmão .bin deferido) que o conversor STREAMING mmapa;
+// null = sem streaming (SAF) → o caminho de sempre. onProgress/user
+// alimentam as fases corte/assembly/verificação (cancelamento incluído);
+// o caminho de sempre ignora-os.
 bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
                        u64 binBase, u64 binLen, u64 fileBytes,
                        const char* deferUri,
                        const GltfBufferResolver& resolver,
                        const char* siblingImageDir,
+                       const char* mmapBinPath,
                        ProjectStorage& st, const std::string& stem,
                        TexturePipeline* pipeline, Output& out, Stats& stats,
-                       std::string& err) {
+                       std::string& err,
+                       bool (*onProgress)(void*, u64, u64) = nullptr,
+                       void* user = nullptr) {
     GltfRangeLoader loader;
     FileRangeCtx ctx;
     ctx.f = binFile;
@@ -678,11 +687,35 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
     loader.fileBytes = fileBytes;
     loader.deferUri = deferUri ? deferUri : "";
 
+    // 0.10-M (PASSO 3): com ficheiro REAL do buffer 0, o parse corre em
+    // modo STREAMING (primRefs SEM geometria materializada) e a geometria
+    // vai pelo conversor streaming (mmap → corte por material em blocos →
+    // assembly → verificação bit a bit; o pico de RAM é a maior primitiva
+    // + um bloco por worker — nunca o modelo). Sem ficheiro real (SAF) OU
+    // modelo com PELE (o streaming não tem skin — decisão do PASSO 3), o
+    // caminho é o de sempre: parse integral + merge + writeGMesh (v3).
+    bool canStream = mmapBinPath != nullptr && binFile != nullptr &&
+                     !st.root().empty() &&
+                     st.root().rfind("content://", 0) != 0;
     GltfModel model;
     if (!parseGltf(json, jsonLen, {}, resolver, model, err,
-                   binFile ? &loader : nullptr)) {
+                   binFile ? &loader : nullptr, canStream)) {
         err = "glTF invalido: " + err;
         return false;
+    }
+    if (canStream && !model.skins.empty()) {
+        // a pele preserva joints/weights no MERGE — o caminho de sempre
+        // (o re-parse é o JSON outra vez: pequeno, honesto, no log)
+        elog::info("asset: modelo com %u skin(s) — o caminho de sempre "
+                   "(o merge preserva a pele; o streaming não tem skin)",
+                   static_cast<u32>(model.skins.size()));
+        model = GltfModel{};
+        if (!parseGltf(json, jsonLen, {}, resolver, model, err,
+                       binFile ? &loader : nullptr, false)) {
+            err = "glTF invalido: " + err;
+            return false;
+        }
+        canStream = false;
     }
     stats.primWarn = model.primsDropped;   // 0.9.6.12 (A2): as quedas no toast
     if (model.primsDropped > 0) {
@@ -691,7 +724,11 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
             "buffer — o RESTO do modelo entrou; causas acima no log)",
             model.primsDropped);
     }
-    if (model.meshes.empty()) {
+    // NÃO-const: a degradação do mmap abaixo pode desligá-lo (o mesmo
+    // padrão da pele acima — o re-parse é o JSON outra vez)
+    bool streamed =
+        canStream && !model.primRefs.empty() && model.meshes.empty();
+    if (model.meshes.empty() && model.primRefs.empty()) {
         err = "glTF sem meshes";
         return false;
     }
@@ -699,8 +736,12 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
     // nós, malhas, primitivas, vértices, índices, materiais, texturas) ----
     {
         u32 nPrims = 0;
-        for (const MeshData& md : model.meshes) {
-            nPrims += static_cast<u32>(md.groups.size());
+        if (streamed) {
+            nPrims = static_cast<u32>(model.primRefs.size());
+        } else {
+            for (const MeshData& md : model.meshes) {
+                nPrims += static_cast<u32>(md.groups.size());
+            }
         }
         u32 nTexOk = 0;
         for (const GltfImage& im : model.images) {
@@ -721,6 +762,57 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
                    static_cast<u32>(model.animations.size()),
                    static_cast<u32>(model.skins.size()));
     }
+    if (streamed) {
+        // ---- 0.10-M (PASSO 3) · A GEOMETRIA VAI PELO CONVERSOR
+        // STREAMING: mmap da fonte → corte por material em blocos
+        // (pool de núcleos−1, transformações dos nós baked) → assembly
+        // com a esqueleto v3 PARTILHADA com o writeGMesh → verificação
+        // POR TRIÂNGULO bit a bit. O modelo NUNCA está inteiro em RAM.
+        // mapFile64 fala `unsigned long long` (FileApi) — acompanha
+        unsigned long long mapLen = 0;
+        u8* map = static_cast<u8*>(
+            fileapi::mapFile64(mmapBinPath, 0, fileBytes, &mapLen));
+        if (map == nullptr) {
+            // A DEGRADAÇÃO HONESTA (o diagnóstico do dono no C33, item
+            // b): o mmap é o caminho RÁPIDO, não um requisito — se o SO
+            // o recusa, o import degrada para o caminho de sempre (parse
+            // integral + merge + writeGMesh, o modelo inteiro em RAM:
+            // mais lento e mais gordo, MAS CORRETO — e o teto 65535 do
+            // merge morre com a causa REAL no erro, nunca silencioso).
+            elog::warn("asset: o mmap da fonte falhou: %s (%s) — a "
+                       "degradar para o caminho de sempre (o modelo "
+                       "inteiro em RAM)",
+                       mmapBinPath, fileapi::errnoText().c_str());
+            model = GltfModel{};
+            if (!parseGltf(json, jsonLen, {}, resolver, model, err,
+                           binFile ? &loader : nullptr, false)) {
+                err = "glTF invalido: " + err;
+                return false;
+            }
+            canStream = false;
+            streamed = false;
+        } else {
+        Json doc;
+        if (!Json::parse(json, jsonLen, doc) ||
+            doc.type != Json::Type::Object) {
+            fileapi::unmapFile64(map, mapLen);
+            err = "glTF: o documento não relê (JSON inválido)";
+            return false;
+        }
+        V3StreamResult res;
+        const bool ok =
+            convertGltfToV3(model, doc, map + binBase, binLen, fileBytes,
+                            stem, st, out, stats, res, err, onProgress, user);
+        fileapi::unmapFile64(map, mapLen);
+        if (!ok) {
+            return false;
+        }
+        elog::info("asset: v3 streaming completo — corte %.0f ms · "
+                   "assembly %.0f ms · verificação %.0f ms",
+                   res.cutMs, res.assembleMs, res.verifyMs);
+        }
+    }
+    if (!streamed) {
     // ---- 0.9.6.3 (R-020) · MERGE COM AS TRANSFORMS DOS NÓS ---------------
     // A spec: "Importa TODAS as malhas e primitivas, aplicando as
     // transformações dos nós, e junta num só modelo." ANTES: cada mesh saía
@@ -780,9 +872,10 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
             const u16 base = static_cast<u16>(merged.vertices.size());
             if (merged.vertices.size() + src.vertices.size() > 65535) {
                 err = "glTF: o modelo fundido excede 65535 vértices "
-                      "(o teto do caminho de mesh única; o formato v3 já "
-                      "não tem teto — o corte em blocos entra no PASSO 3 "
-                      "do 0.10-M)";
+                      "(o caminho de mesh única — SAF sem ficheiro real, "
+                      "ou modelo com pele). O conversor streaming do "
+                      "0.10-M trata os ficheiros reais SEM teto; importa "
+                      "o modelo como GLB/GLTF com armazenamento real";
                 return false;
             }
             for (const Vertex& pv : src.vertices) {
@@ -896,6 +989,7 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
                        "como %s", nm, stats.verts, stats.indices, nm);
         }
     }
+    }   // !streamed — o caminho de sempre (merge + writeGMesh)
     // ---- passe de TEXTURAS: imagens embutidas → .gtext (uma a uma) ------
     // 0.9.6.3 (R-020 · spec PASSO 2b): FALHA PARCIAL NÃO ESCONDE O MODELO —
     // uma textura que falha é um AVISO no log e o mesh entra com material
@@ -1042,9 +1136,12 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
 }
 
 // GLB em ficheiro: header + chunks por fread; JSON inteiro; BIN deferred
+// 0.10-M (PASSO 3): onProgress/user alimentam o conversor streaming
 bool convertGlbFile(const std::string& srcAbs, ProjectStorage& st,
                     const std::string& stem, TexturePipeline* pipeline,
-                    Output& out, Stats& stats, std::string& err) {
+                    Output& out, Stats& stats, std::string& err,
+                    bool (*onProgress)(void*, u64, u64) = nullptr,
+                    void* user = nullptr) {
     FILE* f = std::fopen(srcAbs.c_str(), "rb");
     if (!f) {
         err = "fonte ilegivel: " + srcAbs;
@@ -1159,8 +1256,9 @@ bool convertGlbFile(const std::string& srcAbs, ProjectStorage& st,
         ok = convertGltfCommon(reinterpret_cast<const char*>(json.data()),
                                json.size(), f, binBase, binLen, fileBytes,
                                nullptr,
-                               GltfBufferResolver{}, nullptr, st, stem,
-                               pipeline, out, stats, err);
+                               GltfBufferResolver{}, nullptr, srcAbs.c_str(),
+                               st, stem, pipeline, out, stats, err,
+                               onProgress, user);
     } while (false);
     std::fclose(f);
     return ok;
@@ -1174,9 +1272,13 @@ bool convertGlbFile(const std::string& srcAbs, ProjectStorage& st,
 // As TEXTURAS externas vêm do MESMO diretório (siblingImageDir) — os irmãos
 // já foram copiados para source/ pelo importFile; o reconvert (que lê de
 // source/) resolve igualmente contra source/.
+// 0.10-M (PASSO 3): o irmão .bin DEFERIDO é também o mmap do conversor
+// streaming (o caminho só é streaming quando ele existe).
 bool convertGltfFile(const std::string& srcAbs, ProjectStorage& st,
                      const std::string& stem, TexturePipeline* pipeline,
-                     Output& out, Stats& stats, std::string& err) {
+                     Output& out, Stats& stats, std::string& err,
+                     bool (*onProgress)(void*, u64, u64) = nullptr,
+                     void* user = nullptr) {
     std::vector<u8> json;
     if (!fileapi::readAll(srcAbs.c_str(), json) || json.empty()) {
         err = "leitura falhou: " + srcAbs + " (" + fileapi::errnoText() + ")";
@@ -1266,6 +1368,7 @@ bool convertGltfFile(const std::string& srcAbs, ProjectStorage& st,
     u64 binLenExt = 0;
     u64 binFileBytes = 0;
     std::string binUri;
+    std::string binPathAbs;   // 0.10-M: o caminho do irmão (o mmap do streaming)
     {
         Json scan;
         if (Json::parse(reinterpret_cast<const char*>(json.data()),
@@ -1301,6 +1404,7 @@ bool convertGltfFile(const std::string& srcAbs, ProjectStorage& st,
                     binLenExt = 0;
                     fileapi::fileSize(path, binFileBytes);
                     binLenExt = binFileBytes;
+                    binPathAbs = path;   // o mmap do streaming (se houver)
                     elog::info(
                         "import: buffer externo '%s' DEFERIDO (%llu B em "
                         "disco — ranges, sem o ler inteiro)",
@@ -1314,7 +1418,9 @@ bool convertGltfFile(const std::string& srcAbs, ProjectStorage& st,
     const bool ok = convertGltfCommon(
         reinterpret_cast<const char*>(json.data()), json.size(), binF, 0,
         binLenExt, binFileBytes, binUri.empty() ? nullptr : binUri.c_str(),
-        resolver, srcDir.c_str(), st, stem, pipeline, out, stats, err);
+        resolver, srcDir.c_str(),
+        binF ? binPathAbs.c_str() : nullptr, st, stem, pipeline, out,
+        stats, err, onProgress, user);
     if (binF) {
         std::fclose(binF);
     }
@@ -1414,9 +1520,11 @@ bool importFile(const std::string& srcAbs, const std::string& srcNameIn,
         ok = convertObjStream(srcAbs, st, stem, out, stats, err, nullptr,
                               nullptr);
     } else if (ext == "glb") {
-        ok = convertGlbFile(srcAbs, st, stem, pipeline, out, stats, err);
+        ok = convertGlbFile(srcAbs, st, stem, pipeline, out, stats, err,
+                            onProgress, user);
     } else if (ext == "gltf") {
-        ok = convertGltfFile(srcAbs, st, stem, pipeline, out, stats, err);
+        ok = convertGltfFile(srcAbs, st, stem, pipeline, out, stats, err,
+                             onProgress, user);
     } else if (ext == "png") {
         ok = convertPng(srcAbs, st, stem, pipeline, out, stats, err);
     } else {

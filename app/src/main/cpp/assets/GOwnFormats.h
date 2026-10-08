@@ -85,6 +85,7 @@ bool readGMesh(const u8* bytes, size_t len, MeshData& out, std::string& err);
 // FNV-1a do payload inteiro obrigava a ler o ficheiro inteiro — inimigo
 // do mmap/streaming); a integridade do resto vive na tabela: CRC32 por
 // bloco + CRC32 da própria tabela.
+constexpr size_t kGHeaderBytes = 32;        // o header comum (CONTRATO)
 constexpr size_t kGmeshV3MetaBytes = 160;   // o bloco de metadados (fixo)
 constexpr u32    kGmeshV3BlockVertexCap = 65535;  // o teto configurável
 constexpr u32    kGmeshV3MaxAttrs = 8;
@@ -168,6 +169,31 @@ struct GMeshV3BlockIn {
     std::string material;           // nome (dedup na escrita)
     bool use32 = false;
 };
+
+// ---- o ESCRITOR v3 PARTILHADO (0.10-M PASSO 3) ------------------------------
+// A "esqueleto" do ficheiro v3 — header (32 B, com o checksum dos
+// metadados) + metadados (160 B, com o CRC da tabela) + tabela de blocos
+// (80 B/entrada) + secção de materiais. O writeGMesh (em memória) e o
+// conversor streaming (GmeshV3Stream, em disco) partilham EXATAMENTE esta
+// serialização — ZERO drift de formato entre os dois escritores (a mesma
+// ordem de campos, a mesma aritmética de offsets, os mesmos CRCs). Os
+// DADOS dos blocos NÃO passam por aqui (o writeGMesh emite dos bins; o
+// streaming emite do temporário em disco — nunca o modelo inteiro em RAM).
+// ENTRADA: `meta` com flags/attrs/contagens/AABB/blockVertexCap; `entries`
+// com dataSize/vertexCount/indexCount/aabbMin/aabbMax/materialIndex/
+// indexType/crc32, NA ORDEM de emissão dos dados. SAÍDA: os offsets
+// preenchidos (meta.blockTableOffset/materialTableOffset,
+// entry.dataOffset) + os 4 vetores prontos a escrever NESTA ordem.
+struct GMeshV3Skeleton {
+    std::vector<u8> header;      // 32 B
+    std::vector<u8> meta;        // 160 B
+    std::vector<u8> table;       // entries.size() × 80 B
+    std::vector<u8> materials;   // variável (entrada 4-alinhada)
+};
+bool gmeshV3Skeleton(GMeshV3Meta& meta,
+                     std::vector<GMeshV3Block>& entries,
+                     const std::vector<std::string>& materials,
+                     GMeshV3Skeleton& sk, std::string& err);
 
 // ---- .gtext -----------------------------------------------------------------
 bool writeGText(const CompressedImage& img, std::vector<u8>& out,

@@ -1028,61 +1028,70 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
     }
 
     // ---- scene/nodes (hierarquia simples) --------------------------------------
-    if (const Json* jnodes = doc.find("nodes"); jnodes && jnodes->type == Json::Type::Array) {
-        // 0.10-M (PASSO 3): no modo streaming as refs de primitiva são
-        // por NÓ (a transformação mundo é que baked por bloco)
-        std::vector<i32> meshRemapStream(jmeshes->items.size(), -1);
-        if (streamMeshes) {
-            const Json* jaccessors = doc.find("accessors");
-            for (size_t m = 0; m < jmeshes->items.size(); ++m) {
-                const Json& jm = jmeshes->items[m];
-                const Json* jprims = jm.find("primitives");
-                if (!jprims || jprims->type != Json::Type::Array) continue;
-                for (const Json& jp : jprims->items) {
-                    if (const Json* mode = jp.find("mode");
-                        mode && (mode->type != Json::Type::Number ||
-                                 static_cast<i32>(mode->number) != 4)) {
-                        continue;   // só TRIANGLES (a regra da casa)
-                    }
-                    const Json* jattrs = jp.find("attributes");
-                    if (!jattrs) continue;
-                    GltfPrimRef ref;
-                    ref.mesh = static_cast<i32>(m);
-                    if (const Json* j = jattrs->find("POSITION");
-                        j && j->type == Json::Type::Number) {
-                        ref.posAcc = static_cast<i32>(j->number);
-                    }
-                    if (ref.posAcc < 0 || !jaccessors ||
-                        ref.posAcc >= static_cast<i32>(jaccessors->items.size())) {
-                        continue;   // sem POSITION não há primitiva
-                    }
-                    const Json& jpa = jaccessors->items[static_cast<size_t>(ref.posAcc)];
-                    ref.posCount = jpa.find("count")
-                                       ? static_cast<u32>(jpa.find("count")->number)
-                                       : 0;
-                    if (const Json* j = jattrs->find("NORMAL");
-                        j && j->type == Json::Type::Number) {
-                        ref.nrmAcc = static_cast<i32>(j->number);
-                    }
-                    if (const Json* j = jattrs->find("TEXCOORD_0");
-                        j && j->type == Json::Type::Number) {
-                        ref.uvAcc = static_cast<i32>(j->number);
-                    }
-                    if (const Json* j = jp.find("indices");
-                        j && j->type == Json::Type::Number) {
-                        ref.idxAcc = static_cast<i32>(j->number);
-                    }
-                    if (const Json* jmat = jp.find("material");
-                        jmat && jmat->type == Json::Type::Number) {
-                        ref.material = static_cast<i32>(jmat->number);
-                    }
-                    meshRemapStream[m] = 1;
-                    out.primRefs.push_back(ref);
+    const Json* jnodes = doc.find("nodes");
+    const bool hasNodes =
+        jnodes != nullptr && jnodes->type == Json::Type::Array;
+    // 0.10-M (PASSO 3): no modo streaming as refs de primitiva são por NÓ
+    // (a transformação mundo é que baked por bloco) — e COLHEM-SE SEMPRE,
+    // mesmo em glTF sem nodes (atípico: o robo.glb do C33 — a casa legada
+    // escrevia os meshes crus, «sem nós com mesh: o caminho antigo, mesh
+    // a mesh»). Sem nós — ou nenhum nó a referenciar mesh — as refs ficam
+    // com node=-1 = transformação IDENTIDADE, o MESMO resultado do cru.
+    std::vector<i32> meshRemapStream(jmeshes->items.size(), -1);
+    if (streamMeshes) {
+        const Json* jaccessors = doc.find("accessors");
+        for (size_t m = 0; m < jmeshes->items.size(); ++m) {
+            const Json& jm = jmeshes->items[m];
+            const Json* jprims = jm.find("primitives");
+            if (!jprims || jprims->type != Json::Type::Array) continue;
+            for (const Json& jp : jprims->items) {
+                if (const Json* mode = jp.find("mode");
+                    mode && (mode->type != Json::Type::Number ||
+                             static_cast<i32>(mode->number) != 4)) {
+                    continue;   // só TRIANGLES (a regra da casa)
                 }
+                const Json* jattrs = jp.find("attributes");
+                if (!jattrs) continue;
+                GltfPrimRef ref;
+                ref.mesh = static_cast<i32>(m);
+                if (const Json* j = jattrs->find("POSITION");
+                    j && j->type == Json::Type::Number) {
+                    ref.posAcc = static_cast<i32>(j->number);
+                }
+                if (ref.posAcc < 0 || !jaccessors ||
+                    ref.posAcc >= static_cast<i32>(jaccessors->items.size())) {
+                    continue;   // sem POSITION não há primitiva
+                }
+                const Json& jpa = jaccessors->items[static_cast<size_t>(ref.posAcc)];
+                ref.posCount = jpa.find("count")
+                                   ? static_cast<u32>(jpa.find("count")->number)
+                                   : 0;
+                if (const Json* j = jattrs->find("NORMAL");
+                    j && j->type == Json::Type::Number) {
+                    ref.nrmAcc = static_cast<i32>(j->number);
+                }
+                if (const Json* j = jattrs->find("TEXCOORD_0");
+                    j && j->type == Json::Type::Number) {
+                    ref.uvAcc = static_cast<i32>(j->number);
+                }
+                if (const Json* j = jp.find("indices");
+                    j && j->type == Json::Type::Number) {
+                    ref.idxAcc = static_cast<i32>(j->number);
+                }
+                if (const Json* jmat = jp.find("material");
+                    jmat && jmat->type == Json::Type::Number) {
+                    ref.material = static_cast<i32>(jmat->number);
+                }
+                meshRemapStream[m] = 1;
+                out.primRefs.push_back(ref);
             }
-            // o nó de CADA ref: os nós apontam o mesh ORIGINAL — como o
-            // mesmo mesh pode ser partilhado por vários nós (instancing),
-            // a expansão nó×primitiva acontece AQUI por nó
+        }
+        // o nó de CADA ref: os nós apontam o mesh ORIGINAL — como o
+        // mesmo mesh pode ser partilhado por vários nós (instancing),
+        // a expansão nó×primitiva acontece AQUI por nó. SÓ quando há nós:
+        // a expansão vazia (nenhum nó referencia mesh — glTF atípico)
+        // deixa as refs com node=-1 = o MESMO resultado do caminho cru.
+        if (hasNodes) {
             std::vector<GltfPrimRef> expanded;
             for (const Json& jn : jnodes->items) {
                 i32 meshIdx = -1;
@@ -1098,14 +1107,17 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                 for (const GltfPrimRef& r : out.primRefs) {
                     if (r.mesh == meshIdx) {
                         GltfPrimRef c = r;
-                        c.node = static_cast<i32>(expanded.size()) * 0 +
-                                 static_cast<i32>(&jn - jnodes->items.data());
+                        c.node = static_cast<i32>(&jn - jnodes->items.data());
                         expanded.push_back(c);
                     }
                 }
             }
-            out.primRefs = std::move(expanded);
+            if (!expanded.empty()) {
+                out.primRefs = std::move(expanded);
+            }
         }
+    }
+    if (hasNodes) {
         out.nodes.reserve(jnodes->items.size());
         // mapeia o índice do mesh ORIGINAL → posição em out.meshes (meshes
         // sem primitivas TRIANGLES não entram no modelo)
@@ -1179,7 +1191,9 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
         }
     }
 
-    if (!out.ok()) {
+    // 0.10-M (PASSO 3): no modo STREAMING a geometria não se materializa
+    // (meshes vazio é o normal — as refs vivem em primRefs)
+    if (!out.ok() && !streamMeshes) {
         err = err.empty() ? "glTF: nenhum mesh com triângulos" : err;
         return false;
     }

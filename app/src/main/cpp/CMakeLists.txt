@@ -72,6 +72,8 @@ add_library(goni_vv SHARED
         # 0.8.10: formatos próprios (.gmesh/.gtext/.gm) + conversor streaming
         assets/GOwnFormats.cpp
         assets/AssetConverter.cpp
+        # 0.10-M (PASSO 3): o conversor STREAMING glTF/GLB → .gmesh v3
+        assets/GmeshV3Stream.cpp
         # 0.8.10: archives — parser ZIP próprio + inflate zlib
         assets/ZipExtract.cpp
         # 0.8.11: ÁUDIO — contentor .gi + IMA-ADPCM + WAV + decoders vendors

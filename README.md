@@ -34,6 +34,49 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.10.2 — 0.10-M PASSO 3: O CONVERSOR STREAMING E PARALELO (a parede do 65,535 MORREU)
+
+- **O CAMINHO** (GmeshV3Stream, novo): glTF/GLB com ficheiro real →
+  parse em modo STREAMING (`primRefs` sem geometria materializada) →
+  mmap da fonte (`fileapi::mapFile64`) → CORTE por material em blocos
+  ≤65,535 verts (pool de **núcleos−1** — `v3StreamWorkerCount`, NUNCA 0:
+  single-core/desconhecido cai para 1 e corre SEQUENCIAL; os blocos
+  appendam-se a um temporário em disco com o mutex a ordenar o disco) →
+  ASSEMBLY que ordena material→nó→bloco e escreve o final pela escrita
+  streaming do storage → **VERIFICAÇÃO POR TRIÂNGULO bit a bit**
+  (re-corta e compara com o final lido pelo leitor v3 de produção; a
+  linha contrato `gmesh: v3 blocos=<n> verts=<v> tris=<t> verificado=1`
+  ou o PRIMEIRO desvio — nunca silencioso). SEM PERDA: float32 exato,
+  sem soldar; as transformações dos nós baked com a MESMA multiplicação
+  do merge antigo.
+- **A PROMESSA MEDIDA (R-039)**: 50 M vértices / 20 M triângulos /
+  **1754 MB** de GLB convertem em 31,3 s com **RAM pico 107 MB**
+  (920 blocos, verificado=1) — o pico é do ALGORITMO, não do ficheiro.
+  Os 4 perfis do dono completam (a scene de 228 MB: 55 MB de pico).
+- **AS 11 e2e DO C33 (12.8/12.9) FECHADAS** — o diagnóstico do dono
+  (a→d) cumprido: (a) o engine.log mostrava o TEMP STORE a morrer
+  ENOENT em `/fake/.staging` (o makeDirs do storage virtual "aceita", o
+  fopen não) e o `robo` a morrer em silêncio com `glTF sem meshes`
+  (GLB sem nodes — as refs só colhiam dentro do guard dos nós);
+  (b) o temp store agora segue a CASCATA do stagingWrite (projeto →
+  cache dir da app → erro legível) e o mmap da fonte que falhar degrada
+  para o caminho de sempre com warn; (c) o offset do mmap VERIFICADO
+  seguro por construção (o mapFile64 alinha para baixo) + o teste das
+  sondas não alinhadas; (d) o pool extraído para função pura com o
+  fallback de single-core pinned. O achado profundo: o `MADV_DONTNEED`
+  da higiene de RSS sobre o buffer do HEAP da verificação virtual zerava
+  páginas com vizinhos (`free(): invalid pointer`) — `VerifyCtx.
+  droppable` cura. **M1/M2/M3** vermelho→verde coladas (o readAll
+  reposto → R-039 vermelha a 1787 MB; o alinhamento morto → 2 testes
+  vermelhos; o pool a 0 → os pins vermelhos).
+- **A LIMPEZA**: o `rmrf` do wiring010 ficou recursivo DE VERDADE (o
+  `::remove` não apagava subdiretórios — o root de 500 MB vazava em
+  /tmp e matava a sentinela de disco cheio).
+- Suítes: test_core 0 falhas · c33_virtual **631/631 HARNESS VERDE** ·
+  release-identity **versionCode 56** · gates verdes. Relatório:
+  `docs/RELATORIO-0.10-M-PASSO3-CONVERSOR.md` · **PÁRO ABSOLUTO — o
+  PASSO 4 (render por blocos) fica bloqueado à espera do OK do dono**.
+
 ## 0.10.1 — 0.10-M PASSO 2: O FORMATO v3 (o escritor só escreve v3; o leitor abre v1+v2+v3)
 
 - **O ESCRITOR v3** (`writeGMesh` reescrito): header com contagens

@@ -114,6 +114,8 @@ add_executable(test_core
         # 0.8.10: formatos próprios (.gmesh/.gtext/.gm) + conversor streaming
         ${CORE_DIR}/assets/GOwnFormats.cpp
         ${CORE_DIR}/assets/AssetConverter.cpp
+        # 0.10-M (PASSO 3): o conversor STREAMING glTF/GLB → .gmesh v3
+        ${CORE_DIR}/assets/GmeshV3Stream.cpp
         # 0.8.10: archives — parser ZIP próprio + inflate zlib
         ${CORE_DIR}/assets/ZipExtract.cpp
         ${CORE_DIR}/assets/ObjExporter.cpp
@@ -238,6 +240,10 @@ add_executable(test_core
         # 0.10-M (PASSO 2): o formato v3 sob prova (round-trip exato,
         # retrocompat v1/v2, contagens >2^32 sem alocar, CRC32, mmap)
         test_gmeshv3.cpp
+        # 0.10-M (PASSO 3): o conversor streaming sob prova (round-trip vs
+        # o caminho de sempre, agrupamento por material, 70k verts em
+        # blocos, cancelamento sem estado, texturas no passe delas)
+        test_gmeshv3stream.cpp
         # 0.8.11: ÁUDIO — .gi (ADPCM round-trip/WAV/OGG/MP3 erros),
         # misturador (vozes/loop/pitch/posicional/master), PROBE harness
         # (fake backends: falha→fallback, ok→AAudio), workspace (fake host:
@@ -319,6 +325,8 @@ add_executable(c33_virtual
         ${CORE_DIR}/assets/ObjImporter.cpp
         ${CORE_DIR}/assets/GOwnFormats.cpp
         ${CORE_DIR}/assets/AssetConverter.cpp
+        # 0.10-M (PASSO 3): o conversor STREAMING glTF/GLB → .gmesh v3
+        ${CORE_DIR}/assets/GmeshV3Stream.cpp
         ${CORE_DIR}/assets/ZipExtract.cpp
         ${CORE_DIR}/assets/ObjExporter.cpp
         ${CORE_DIR}/assets/ResourceManager.cpp

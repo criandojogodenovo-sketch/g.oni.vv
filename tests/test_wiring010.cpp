@@ -24,6 +24,7 @@
 #include <EGL/egl.h>
 #include <dirent.h>
 #include <sys/resource.h>
+#include <sys/stat.h>   // 0.10-M: lstat/S_ISDIR do rmrf recursivo
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -63,17 +64,27 @@ namespace {
 const char* kTestLogs = "test-wiring010-logs";
 
 void rmrf(const std::string& dir) {
+    // 0.10-M (R-039): RECURSIVO de verdade — o ::remove não apaga
+    // subdiretórios com conteúdo (assets/, source/ do import ficavam
+    // para trás e o root de 500 MB inteiro vazava em /tmp; a corrida da
+    // sentinela R-039 morria de DISCO CHEIO). A recursão é a mesma do
+    // rmRf das medições (test_010m_medicoes.cpp).
     DIR* d = ::opendir(dir.c_str());
     if (d) {
         while (dirent* e = ::readdir(d)) {
             const std::string n = e->d_name;
-            if (n != "." && n != "..") {
-                ::remove((dir + "/" + n).c_str());
+            if (n == "." || n == "..") continue;
+            const std::string full = dir + "/" + n;
+            struct stat st;
+            if (::lstat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+                rmrf(full);
+            } else {
+                ::unlink(full.c_str());
             }
         }
         ::closedir(d);
     }
-    ::remove(dir.c_str());
+    ::rmdir(dir.c_str());
 }
 
 bool logHas(const char* needle) {

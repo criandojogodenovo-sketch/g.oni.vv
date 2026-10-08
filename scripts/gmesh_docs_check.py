@@ -50,7 +50,7 @@ EXTERNAL = {
 # âncoras numéricas/byte: (doc-referência, padrão, ficheiro onde TEM de
 # existir) — os números do formato não podem divergir do código.
 ANCHORS = [
-    ("header 32 B", r"kGHeaderBytes\s*=\s*32", "assets/GOwnFormats.cpp"),
+    ("header 32 B", r"kGHeaderBytes\s*=\s*32", "assets/GOwnFormats.h"),   # 0.10.2: a constante vive no header (a esqueleto v3 partilha)
     ("marca endian", r"0x1A2B", "assets/GOwnFormats.cpp"),
     ("teto vértices", r"65535", "assets/GOwnFormats.cpp"),
     ("FNV offset", r"1469598103934665603|0xcbf29ce484222325",

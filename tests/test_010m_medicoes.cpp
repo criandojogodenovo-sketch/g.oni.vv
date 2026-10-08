@@ -53,14 +53,14 @@ struct Profile {
     bool expectOk;     // true = o import TEM de completar (perfil fit)
 };
 
-// os 4 perfis (a composição vive no relatório; os 3 primeiros morrem no
-// teto 65535 de hoje — é o diagnóstico do PASSO 1). Tamanhos-alvo = os
-// ficheiros do dono (dragão 38,05 MB · scene 213 MB · buddha clássico
-// 543,652 verts/10,7M tris — a composição exata é declarada na tabela).
+// os 4 perfis (a composição vive no relatório). PASSO 1: os 3 grandes
+// morriam EXATAMENTE no teto 65 535 (o diagnóstico). PASSO 3: o conversor
+// STREAMING removeu a parede — TODOS completam com verificação bit a bit
+// (a linha «gmesh: v3 ... verificado=1» é o veredito de cada perfil).
 constexpr Profile kProfiles[] = {
-    {"dragao-38MB", 1, 1, 300001, 2370000, true, false},
-    {"buddha-classico", 1, 12, 543652, 10670000, false, false},
-    {"scene-213MB", 80, 1, 5242880, 10000000, false, false},
+    {"dragao-38MB", 1, 1, 300001, 2370000, true, true},
+    {"buddha-classico", 1, 12, 543652, 10670000, false, true},
+    {"scene-213MB", 80, 1, 5242880, 10000000, false, true},
     {"dragao-fit", 1, 1, 65535, 130000, false, true},
 };
 
@@ -335,6 +335,36 @@ struct LogMark {
     double ms;
     std::string line;
 };
+// o nº de BLOCOS da linha contrato «gmesh: v3 blocos=N verts=...» (0 = ausente)
+u64 blocosFromLog(const std::string& logPath) {
+    FILE* f = std::fopen(logPath.c_str(), "rb");
+    if (!f) return 0;
+    char buf[4096];
+    u64 n = 0;
+    while (std::fgets(buf, sizeof(buf), f)) {
+        const char* m = std::strstr(buf, "gmesh: v3 blocos=");
+        if (m != nullptr) {
+            n = std::strtoull(m + 17, nullptr, 10);
+            break;
+        }
+    }
+    std::fclose(f);
+    return n;
+}
+bool fileHasLine(const std::string& logPath, const char* needle) {
+    FILE* f = std::fopen(logPath.c_str(), "rb");
+    if (!f) return false;
+    char buf[4096];
+    bool found = false;
+    while (std::fgets(buf, sizeof(buf), f)) {
+        if (std::strstr(buf, needle) != nullptr) {
+            found = true;
+            break;
+        }
+    }
+    std::fclose(f);
+    return found;
+}
 std::vector<LogMark> readMarks(const std::string& logPath) {
     std::vector<LogMark> out;
     FILE* f = std::fopen(logPath.c_str(), "rb");
@@ -459,6 +489,8 @@ TEST(medicoes_010m_perfis_do_dono_por_fase) {
                 spanBetween(marks, "I/GONI", "import: fonte copiada");
             const double parseMs = spanBetween(marks, "import: fonte copiada",
                                                "parse ok");
+            // no caminho streaming: corte = parse ok → limites finais;
+            // assembly = limites finais → registado na lista
             const double mergeMs =
                 spanBetween(marks, "parse ok", "limites finais");
             const double writeMs =
@@ -467,9 +499,10 @@ TEST(medicoes_010m_perfis_do_dono_por_fase) {
 
             std::printf(
                 "  [010m] %s: fonte=%llu B (gen %.0f ms%s) | "
-                "cópia=%.0f parse=%.0f fusão+ranges=%.0f escrita=%.0f | "
+                "cópia=%.0f parse=%.0f corte=%.0f assembly=%.0f | "
                 "total=%.0f ms | RAM pico=%llu MB (base %llu, delta %lld)%s"
-                " | verts=%u idx=%u meshes=%u | ok=%d err=%.120s\n",
+                " | verts=%u idx=%u meshes=%u | ok=%d verificado=%d "
+                "err=%.120s\n",
                 p.name,
                 static_cast<unsigned long long>(glbBytes), genMs,
                 peakReset ? "" : " (pico SEM reset)",
@@ -479,17 +512,20 @@ TEST(medicoes_010m_perfis_do_dono_por_fase) {
                 static_cast<long long>(peakKb / 1024) -
                     static_cast<long long>(rssBefore / 1024),
                 "", stats.verts, stats.indices, stats.meshes, ok ? 1 : 0,
+                fileHasLine(logs + "/engine.log", "verificado=1") ? 1 : 0,
                 err.c_str());
             std::fflush(stdout);   // o _exit NÃO flusheia
 
-            // ---- o VEREDITO (o diagnóstico tem de bater certo) --------
+            // ---- o VEREDITO (o PASSO 3: a parede morreu — TODOS os
+            // perfis completam com a verificação bit a bit no log) ----
+            // (a linha verificado=1 lê-se ANTES da limpeza do filho)
+            const bool verOk =
+                fileHasLine(logs + "/engine.log", "verificado=1");
             elog::shutdown();
             childCleanup(dir);
             int verdict;
             if (p.expectOk) {
-                verdict = ok && out.meshes.size() == 1 &&
-                          stats.verts == p.vertsTotal
-                              ? 0 : 10;
+                verdict = ok && out.meshes.size() == 1 && verOk ? 0 : 10;
             } else {
                 // o diagnóstico do PASSO 1: morre EXATAMENTE no teto
                 verdict = !ok && err.find("65535") != std::string::npos
@@ -501,4 +537,88 @@ TEST(medicoes_010m_perfis_do_dono_por_fase) {
         ::waitpid(pid, &status, 0);
         EXPECT(WIFEXITED(status) && WEXITSTATUS(status) == 0);
     }
+}
+
+// ---- R-039 · A SENTINELA DO PICO DE RAM (a promessa do dono) -----------
+// Um modelo de 50M vértices (~1.8 GB — a classe «> 1 GB» da spec) tem de
+// converter com RAM pico ≤ 512 MB: o modelo NUNCA está inteiro em RAM
+// (o pico é o remap da primitiva em voo + um bloco por worker + as
+// páginas do mmap ainda residentes — a higiene dropRange larga-as).
+// SE alguém reintroduzir um readAll no caminho streaming (a mutação M1
+// do relatório), o pico salta para o tamanho do FICHEIRO e esta sentinela
+// fica VERMELHA — é exatamente o que ela vigia.
+TEST(sentinela_r039_50m_verts_ram_pico_512mb) {
+    static const Profile kSentinel = {"r039-50M", 40, 1, 50000000,
+                                      20000000, true, true};
+    const pid_t pid = ::fork();
+    ASSERT(pid >= 0);
+    if (pid == 0) {
+        // ---- FILHO: gerar (streaming) → reset do pico → import → medir
+        const std::string dir =
+            std::string("/tmp/goni_r039_") + std::to_string(int(::getpid()));
+        const std::string src = dir + "/fonte.glb";
+        u64 glbBytes = 0;
+        rmRf(dir);   // resto de corrida anterior — nunca (lição w010)
+        if (!mkDir(dir)) {
+            std::printf("  [r039] FALHA a criar %s\n", dir.c_str());
+            std::fflush(stdout);
+            ::_exit(21);
+        }
+        const auto tGen = std::chrono::steady_clock::now();
+        if (!generateGlb(kSentinel, src, glbBytes)) {
+            std::printf("  [r039] FALHA a gerar a sentinela\n");
+            std::fflush(stdout);
+            childCleanup(dir);
+            ::_exit(20);
+        }
+        const double genMs =
+            std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - tGen)
+                .count();
+
+        // o pico mede SÓ o import (o gerador já passou — clear_refs 5)
+        const bool peakReset = resetPeakRss();
+        const u64 rssBefore = currentRssKb();
+
+        const std::string logs = dir + "/logs";
+        elog::init(logs.c_str());
+        FsStorage st((dir + "/proj").c_str());
+        convert::Output out;
+        convert::Stats stats;
+        std::string err;
+        const auto t0 = std::chrono::steady_clock::now();
+        const bool ok = convert::importFile(src, "fonte.glb", st, nullptr,
+                                            out, stats, err, nullptr,
+                                            nullptr);
+        const double totalMs =
+            std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - t0)
+                .count();
+        const u64 peakKb = bench::readPeakRssKb();
+        const bool verOk =
+            fileHasLine(logs + "/engine.log", "verificado=1");
+
+        std::printf(
+            "  [r039] fonte=%llu MB (gen %.0f ms) | total=%.0f ms | "
+            "RAM pico=%llu MB (base %llu) | blocos=%llu | verts=%u "
+            "idx=%u | ok=%d verificado=%d%s err=%.120s\n",
+            static_cast<unsigned long long>(glbBytes / (1024 * 1024)),
+            genMs, totalMs,
+            static_cast<unsigned long long>(peakKb / 1024),
+            static_cast<unsigned long long>(rssBefore / 1024),
+            static_cast<unsigned long long>(
+                blocosFromLog(logs + "/engine.log")),
+            stats.verts, stats.indices, ok ? 1 : 0, verOk ? 1 : 0,
+            peakReset ? "" : " (pico SEM reset)", err.c_str());
+        std::fflush(stdout);   // o _exit NÃO flusheia
+
+        elog::shutdown();
+        childCleanup(dir);   // ~5 GB de /tmp NUNCA ficam (lição w010)
+        // O VEREDITO: completo + verificado bit a bit + pico ≤ 512 MB
+        const bool peakOk = peakReset && (peakKb / 1024) <= 512;
+        ::_exit(ok && out.meshes.size() == 1 && verOk && peakOk ? 0 : 10);
+    }
+    int status = 0;
+    ::waitpid(pid, &status, 0);
+    EXPECT(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 }
