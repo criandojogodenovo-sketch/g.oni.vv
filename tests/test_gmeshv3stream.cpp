@@ -11,6 +11,7 @@
 #include "assets/AssetConverter.h"
 #include "assets/GltfImporter.h"
 #include "assets/GmeshV3Stream.h"
+#include "assets/ResourceManager.h"   // 0.10-M (PASSO 3B): o guard cedo do load
 #include "core/FsStorage.h"
 #include "core/Json.h"
 #include "platform/EngineLog.h"
@@ -500,13 +501,99 @@ TEST(v3stream_70k_verts_parte_em_blocos) {
     }
     EXPECT(poolsOk);
     EXPECT(fileHas(dir + "/logs/engine.log", "verificado=1"));
-    // o RUNTIME de hoje não monta >65535 (o erro nomeia o PASSO 4 — o
-    // FICHEIRO está correto)
+    // o RUNTIME de hoje não monta >65535 — a MENSAGEM DO PASSO 3B: a causa
+    // do «fail de 203 MB» registada com nome e números (o load inteiro é a
+    // parede; a cura é o render por blocos; o FICHEIRO está correto)
     MeshData cannot;
     EXPECT(!readGMesh(gmesh.data(), gmesh.size(), cannot, err));
-    EXPECT(err.find("PASSO 4") != std::string::npos);
+    EXPECT(err.find("memória insuficiente ao carregar mesh") !=
+           std::string::npos);
+    EXPECT(err.find("cura no PASSO 4: render por blocos") != std::string::npos);
+    EXPECT(err.find("70000") != std::string::npos);       // os vértices
+    EXPECT(err.find("O FICHEIRO ESTÁ CORRETO") != std::string::npos);
+    // 0.10-M (PASSO 3B) — O ESPIÃO DE 192 B (readBytesAt + gmeshV3PeekMeta):
+    // o guard cedo vê os MESMOS números SEM ler o ficheiro inteiro — a
+    // recusa no ResourceManager sai por 192 B (a mensagem chega ao dono sem
+    // incendiar a RAM; a 1ª versão do guard media 2007 MB para recusar)
+    {
+        std::vector<u8> peek;
+        EXPECT(st.readBytesAt(out.meshes[0], 0,
+                              kGHeaderBytes + kGmeshV3MetaBytes, peek));
+        EXPECT(peek.size() == kGHeaderBytes + kGmeshV3MetaBytes);
+        GMeshV3Meta pmeta;
+        std::string perr;
+        EXPECT(gmeshV3PeekMeta(peek.data(), peek.size(), pmeta, perr));
+        EXPECT(pmeta.vertexCount >= 70000);   // o MESMO número do caminho
+        EXPECT(pmeta.blockCount >= 2);        // inteiro
+        // o guard do peek dispara a MESMA mensagem (uma só fonte de verdade)
+        EXPECT(pmeta.vertexCount > 65535 ||
+               gmeshV3LoadEstimateBytes(pmeta) > kMeshLoadBudgetBytes);
+        EXPECT(gmeshV3LoadRefusalErr(pmeta).find(
+                   "memória insuficiente ao carregar mesh") !=
+               std::string::npos);
+        // o range SÓ: além do fim = false honesto; len 0 = true vazio
+        std::vector<u8> nada;
+        EXPECT(!st.readBytesAt(out.meshes[0], gmesh.size() - 2, 8, nada));
+        EXPECT(st.readBytesAt(out.meshes[0], 0, 0, nada) && nada.empty());
+        // o peek de UM v1 (fixtures reais) NÃO parseia como v3 — o chamador
+        // cai no caminho de sempre (o guard só decide o que É v3)
+        std::vector<u8> v1;
+        if (FsStorage fs64(FIXTURE_DIR); fs64.readBytes(
+                "gmesh_v1_esfera.gmesh", v1) && v1.size() > 8) {
+            GMeshV3Meta m1;
+            std::string e1;
+            EXPECT(!gmeshV3PeekMeta(v1.data(), v1.size(), m1, e1));
+            EXPECT(e1.find("não é um .gmesh v3") != std::string::npos);
+        }
+        // e o ResourceManager RECUSA cedo: 192 B, SEM o ficheiro inteiro
+        ResourceManager rm;
+        rm.setStorage(&st);
+        std::string rerr;
+        const MeshData* r = rm.mesh(out.meshes[0], rerr);
+        EXPECT(r == nullptr);
+        EXPECT(rerr.find("memória insuficiente ao carregar mesh") !=
+               std::string::npos);
+        EXPECT(rerr.find("70000") != std::string::npos);
+        EXPECT(fileHas(dir + "/logs/engine.log",
+                       "RECUSADO antes da leitura"));
+    }
+    // 0.10-M (PASSO 3B) — as LINHAS DE TEMPO por fase no log do import (a
+    // linha contrato «gmesh: fase=…» — os minutos do dono com dono)
+    EXPECT(fileHas(dir + "/logs/engine.log", "gmesh: fase=parse ms="));
+    EXPECT(fileHas(dir + "/logs/engine.log", "gmesh: fase=cut ms="));
+    EXPECT(fileHas(dir + "/logs/engine.log", "gmesh: fase=assembly ms="));
+    EXPECT(fileHas(dir + "/logs/engine.log", "gmesh: fase=verify ms="));
+    EXPECT(fileHas(dir + "/logs/engine.log", "import: copia ms="));
     elog::shutdown();
     rmRf(dir);
+}
+
+// 0.10-M (PASSO 3B) — a ESTIMATURA PURA do load (o contrato aferível sem
+// ficheiro: verts×sizeof(Vertex) + índices×2 + pele 20 B/vértice). O
+// orçamento declarado (256 MB) é o que separa «carrega» de «recusa com a
+// mensagem do PASSO 4».
+TEST(v3stream_estimativa_de_load_e_orcamento) {
+    // estático pequeno: 1000 verts + 3000 índices = 32000 + 6000 B
+    GMeshV3Meta m1;
+    m1.vertexCount = 1000;
+    m1.indexCount = 3000;
+    EXPECT(gmeshV3LoadEstimateBytes(m1) == 1000 * sizeof(Vertex) + 6000);
+    // skinned (flags bit0): +20 B por vértice
+    GMeshV3Meta m2 = m1;
+    m2.flags = 1;
+    EXPECT(gmeshV3LoadEstimateBytes(m2) ==
+           1000 * (sizeof(Vertex) + 20) + 6000);
+    // o caso do dono em Miniatura: 6,5 M verts estático ≈ 229 MB (a classe
+    // do scene-213MB: ~5,2 M verts + 30 M índices = ~227 MB — acima não por
+    // vértices (65535) mas o MESMO tipo de parede: o mesh único em RAM)
+    GMeshV3Meta m3;
+    m3.vertexCount = 65000;          // ≤65535: passa o teto de vértices…
+    m3.indexCount = 150ull * 1000 * 1000;  // …mas 150 M de índices
+    EXPECT(gmeshV3LoadEstimateBytes(m3) ==
+           65000 * sizeof(Vertex) + 150ull * 1000 * 1000 * 2);
+    EXPECT(gmeshV3LoadEstimateBytes(m3) > kMeshLoadBudgetBytes);
+    // o orçamento é o número da casa (256 MB — o teto de range R-032)
+    EXPECT(kMeshLoadBudgetBytes == 256ull * 1024 * 1024);
 }
 
 TEST(v3stream_cancelar_nao_deixa_estado) {

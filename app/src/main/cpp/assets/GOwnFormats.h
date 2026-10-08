@@ -76,6 +76,13 @@ bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err);
 // sempre. v3: os blocos montados por ordem da tabela (1 grupo por bloco).
 // Um v3 com > 65535 vértices NÃO monta (MeshData é u16): erro legível que
 // nomeia o PASSO 4 (render por blocos) — o ficheiro está correto.
+// 0.10-M (PASSO 3B): a mensagem COMEÇA por «memória insuficiente ao
+// carregar mesh (cura no PASSO 4: render por blocos)» — o load de hoje
+// monta o mesh ÚNICO em RAM (o par file+MeshData) e é ESSA a parede do
+// modelo de 203 MB do dono; a causa fica registada com números, NÃO
+// contornada (o PASSO 4 é a cura). O orçamento declarado
+// (kMeshLoadBudgetBytes) vigia o caso «poucos vértices, índices gigantes»
+// com a MESMA mensagem.
 bool readGMesh(const u8* bytes, size_t len, MeshData& out, std::string& err);
 
 // ---- .gmesh v3 — o formato (a spec viva: docs/GMESH_formato.md §v3) --------
@@ -143,6 +150,33 @@ struct GMeshV3Block {
 // CRC32 (IEEE, tabela própria — sem dependência de zlib; os formatos
 // próprios são GL-free E lib-free)
 u32 gcrc32(const u8* data, size_t len);
+
+// 0.10-M (PASSO 3B) — O ORÇAMENTO DO LOAD INTEIRO: o runtime de hoje
+// materializa o MeshData ÚNICO (u16) — verts×sizeof(Vertex) + índices×2 B
+// (+ pele 20 B/vértice quando skinned). Acima do orçamento o load RECUSA
+// com a mensagem «memória insuficiente ao carregar mesh (cura no PASSO 4:
+// render por blocos)» + os números. 256 MB = o número da casa (o teto de
+// range R-032): num C33 (3-4 GB com LMK + VRAM partilhada) um MeshData de
+// 256 MB pede ~512 MB vivos (RAM + upload GPU) — a beira do device; o
+// PASSO 4 substitui este teto pelo orçamento do CACHE de blocos.
+constexpr u64 kMeshLoadBudgetBytes = 256ull * 1024 * 1024;
+
+// A ESTIMATURA PURA (bytes de MeshData que o load materializaria a partir
+// da META v3 — sem abrir nada): verts×sizeof(Vertex) + índices×2 + pele.
+// Exportada porque é o contrato AFERÍVEL (o teste pino sem ficheiro real).
+u64 gmeshV3LoadEstimateBytes(const GMeshV3Meta& meta);
+
+// 0.10-M (PASSO 3B) — O ESPIÃO DO GUARDO: header + meta do v3 validados num
+// buffer de kGHeaderBytes + kGmeshV3MetaBytes (192 B) lido com
+// ProjectStorage::readBytesAt ANTES do ficheiro inteiro. false com err em
+// tudo o que não seja um v3 válido (o chamador cai no caminho de sempre).
+// A MENSAGEM da recusa (gmeshV3LoadRefusalErr) é a MESMA do readGMesh —
+// uma só fonte de verdade entre o guard cedo e a rede do caminho inteiro.
+bool gmeshV3PeekMeta(const u8* bytes, size_t len, GMeshV3Meta& meta,
+                     std::string& err);
+
+// a mensagem de recusa do load (o guard cedo e o readGMesh dizem o MESMO)
+std::string gmeshV3LoadRefusalErr(const GMeshV3Meta& meta);
 
 // lê SÓ header + metadados + tabela (NUNCA aloca os dados dos blocos) —
 // o caminho do PASSO 4 e das contagens acima de 2^32. Os materiais vêm

@@ -86,6 +86,21 @@ public:
         (void)relPath; (void)outBytes;
         return false;
     }
+
+    // 0.10-M (PASSO 3B) — LEITURA POR RANGE: `len` bytes de `relPath`
+    // começando em `offset` (0-based). O GUARDO do load usa-a para espiar
+    // o header+meta do .gmesh v3 (192 B) ANTES de decidir se lê o ficheiro
+    // inteiro — a recusa «memória insuficiente ao carregar mesh» chega ao
+    // dono SEM queimar o tamanho do ficheiro em RAM primeiro (no C33, um
+    // .gmesh de ~1 GB matava a app ANTES da mensagem). É também a semente
+    // do carregamento POR BLOCOS do PASSO 4 (a tabela v3 aponta offsets
+    // absolutos — ler um bloco é exatamente ISTO).
+    //   true  = leu `len` bytes exatos (out tem exatamente len);
+    //   false = ficheiro ausente/offset além do fim/len 0/erro de I/O.
+    // DEFAULT (correto, não poupado): readBytes inteiro + fatia — as
+    // implementações REAIS (Fs/Saf/Fake) sobrepõem com a leitura exata.
+    virtual bool readBytesAt(const std::string& relPath, u64 offset,
+                             size_t len, std::vector<u8>& out) const;
 };
 
 // teto do DEFAULT acumulador de escrita streaming (implementações reais

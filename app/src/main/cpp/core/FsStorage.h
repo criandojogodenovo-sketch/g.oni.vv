@@ -41,6 +41,11 @@ public:
     // 0.9.6 (G6 · R-017): stat real por ficheiro (o bench do relatório)
     bool statBytes(const std::string& relPath, u64& outBytes) const override;
 
+    // 0.10-M (PASSO 3B): o range real (fopen + fseek + fread exatos) — o
+    // espião do guard do load e a semente do load por blocos do PASSO 4
+    bool readBytesAt(const std::string& relPath, u64 offset, size_t len,
+                     std::vector<u8>& out) const override;
+
 private:
     std::string root_;
 };

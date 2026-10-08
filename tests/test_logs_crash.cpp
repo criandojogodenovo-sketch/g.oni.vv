@@ -155,6 +155,82 @@ TEST(log_rotation_keeps_appending_after_rotate) {
 }
 
 // ---------------------------------------------------------------------------
+// 0.10-M (PASSO 3B) — O BUG DO «LOG DE ONTEM» no viewer (readTail)
+//
+// A ordem de leitura antiga (.2 → .1 → ativo, break ao encher maxLines)
+// entregava o backup MAIS ANTIGO quando havia rotação: o ficheiro ATIVO
+// — o de HOJE, com o banner do boot e os erros da sessão — nunca era
+// lido. O dono abria «Ver logs» e via conteúdo de ONTEM. A cura: o ATIVO
+// lê-se primeiro; os backups só completam quando FALTAM linhas (pela
+// cauda). Estes testes são a tripwire da mutação M-A (repor a ordem
+// antiga = VERMELHO).
+// ---------------------------------------------------------------------------
+
+TEST(log_readtail_o_ativo_de_hoje_ganha_as_rotacoes) {
+    rmrf(kTestDir);
+    // A REPRODUÇÃO DO DEVICE: cada ficheiro de rotação guarda MUITAS linhas
+    // (no device 1 MB ≈ centenas de linhas de 2 KB do import). Aqui: 20 KB
+    // por ficheiro, ~350 linhas de ~55 B cada — o .2 tem MUITO mais que as
+    // 300 linhas da janela do viewer. Era isto que fazia o viewer mostrar
+    // ONTEM: o .2 enchia a janela sozinho e o ativo nunca era lido.
+    EXPECT(vv::elog::init(kTestDir, 20 * 1024, 2));
+    const std::string line = "conteudo-velho-de-ontem-0123456789012345"; // ~40
+    for (int i = 0; i < 700; ++i) {              // 2+ rotações: .2 cheio
+        vv::elog::writeLine('I', line.c_str());
+    }
+    // AS LINHAS DE HOJE (as últimas escritas — o que o dono PRECISA de ver)
+    for (int i = 1; i <= 5; ++i) {
+        char m[48];
+        std::snprintf(m, sizeof(m), "hoje-marcador-%02d", i);
+        vv::elog::info("%s", m);
+    }
+    EXPECT(fileExists(std::string(kTestDir) + "/engine.log.2"));   // rodou 2×
+
+    // o viewer (300 linhas como no device) TEM as linhas de hoje — com a
+    // ordem antiga o .2 enchia as 300 e HOJE NUNCA ENTRAVA (o vermelho da
+    // mutação M-A é exatamente aqui)
+    std::vector<std::string> out;
+    const int n = vv::elog::readTail(out, 300);
+    EXPECT(n == 300);
+    bool hasToday = false;
+    for (const std::string& l : out) {
+        if (l.find("hoje-marcador-05") != std::string::npos) {
+            hasToday = true;
+        }
+    }
+    EXPECT(hasToday);
+
+    // e o ÚLTIMO elemento é o MAIS RECENTE (ordem cronológica — o fim do
+    // ativo, não o fim de um backup velho)
+    EXPECT(!out.empty() &&
+           out.back().find("hoje-marcador-05") != std::string::npos);
+
+    // janela APERTADA (menos linhas que as disponíveis): as mais RECENTES
+    // ganham — as 3 últimas são hoje-03..05, não conteúdo de ontem
+    std::vector<std::string> out3;
+    EXPECT(vv::elog::readTail(out3, 3) == 3);
+    EXPECT(out3[0].find("hoje-marcador-03") != std::string::npos);
+    EXPECT(out3[2].find("hoje-marcador-05") != std::string::npos);
+    vv::elog::shutdown();
+    rmrf(kTestDir);
+}
+
+TEST(log_readtail_sem_rotacao_le_o_ativo) {
+    rmrf(kTestDir);
+    EXPECT(vv::elog::init(kTestDir));
+    // sem rotação nenhuma (o cenário comum de uma sessão leve)
+    vv::elog::info("linha-unica-1");
+    vv::elog::info("linha-unica-2");
+    std::vector<std::string> out;
+    EXPECT(vv::elog::readTail(out, 300) == 2);
+    EXPECT(out.size() == 2);
+    EXPECT(out[0].find("linha-unica-1") != std::string::npos);
+    EXPECT(out[1].find("linha-unica-2") != std::string::npos);
+    vv::elog::shutdown();
+    rmrf(kTestDir);
+}
+
+// ---------------------------------------------------------------------------
 // parte 1.4 — export de logs: caminho canónico no Downloads público
 // ---------------------------------------------------------------------------
 

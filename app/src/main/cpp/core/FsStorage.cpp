@@ -161,12 +161,35 @@ bool FsStorage::readBytes(const std::string& relPath, std::vector<u8>& out) cons
     if (real.empty()) {
         return false;
     }
-    std::string tmp;
-    if (!readWholeFile(real, tmp)) {
+    // 0.10-M (PASSO 3B) — a DUPLICAÇÃO morta: o caminho antigo lia para uma
+    // std::string (crescendo por realocação) e COPIAVA para o vector — o
+    // pico de RAM era ~2x o ficheiro (medido: 2007 MB para ler um .gmesh de
+    // 972 MB — a app do C33 morria só de LER para recusar). Agora: o
+    // tamanho vem do stat (resize UMA vez) e o fread corre direto no buffer
+    u64 want = 0;
+    if (!statBytes(relPath, want)) {
         return false;
     }
-    out.assign(tmp.begin(), tmp.end());
-    return true;
+    // (size_t == u64 em arm64/x86_64 — os alvos da engine e do CI)
+    FILE* f = std::fopen(real.c_str(), "rb");
+    if (!f) {
+        return false;
+    }
+    out.resize(static_cast<size_t>(want));
+    size_t got = 0;
+    while (got < out.size()) {
+        const size_t n = std::fread(out.data() + got, 1, out.size() - got, f);
+        if (n == 0) {
+            break;
+        }
+        got += n;
+    }
+    const bool ok = got == out.size() && std::ferror(f) == 0;
+    if (!ok) {
+        out.clear();
+    }
+    std::fclose(f);
+    return ok;
 }
 
 // 0.9.6 (G6 · R-017): stat REAL (o tamanho do projeto no relatório do
@@ -182,6 +205,35 @@ bool FsStorage::statBytes(const std::string& relPath, u64& outBytes) const {
     }
     outBytes = static_cast<u64>(st.st_size);
     return true;
+}
+
+bool FsStorage::readBytesAt(const std::string& relPath, u64 offset,
+                            size_t len, std::vector<u8>& out) const {
+    // 0.10-M (PASSO 3B) — o range EXATO: fopen → fseek(offset) → fread(len).
+    // O guard do load espia os 192 B do header+meta do .gmesh v3 sem tocar
+    // no resto; o PASSO 4 usará o MESMO caminho para materializar blocos
+    // pela tabela (offsets absolutos)
+    const std::string real = joinRelPath(root_, relPath);
+    if (real.empty() || len == 0) {
+        out.clear();
+        return len == 0;
+    }
+    FILE* f = std::fopen(real.c_str(), "rb");
+    if (!f) {
+        return false;
+    }
+    if (std::fseek(f, static_cast<long>(offset), SEEK_SET) != 0) {
+        std::fclose(f);
+        return false;
+    }
+    out.resize(len);
+    const size_t got = std::fread(out.data(), 1, len, f);
+    const bool ok = got == len && std::ferror(f) == 0;
+    if (!ok) {
+        out.clear();
+    }
+    std::fclose(f);
+    return ok;
 }
 
 bool FsStorage::listDir(const std::string& relDir,

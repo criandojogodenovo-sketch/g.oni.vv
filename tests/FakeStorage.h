@@ -101,4 +101,25 @@ struct FakeStorage final : public vv::ProjectStorage {
         outBytes = static_cast<vv::u64>(it->second.size());
         return true;
     }
+
+    // 0.10-M (PASSO 3B): o range em memória (a fatia exata — o mesmo
+    // contrato do Fs/Saf; o guard do load espia o header+meta por aqui)
+    bool readBytesAt(const std::string& relPath, vv::u64 offset, size_t len,
+                     std::vector<vv::u8>& out) const override {
+        out.clear();
+        if (!vv::validRelPath(relPath) || len == 0) {
+            return len == 0 && vv::validRelPath(relPath);
+        }
+        const auto it = files.find(relPath);
+        if (it == files.end()) {
+            return false;
+        }
+        const auto& data = it->second;
+        if (offset >= data.size() || data.size() - offset < len) {
+            return false;   // além do fim — range inválido
+        }
+        out.assign(data.begin() + static_cast<long>(offset),
+                   data.begin() + static_cast<long>(offset + len));
+        return true;
+    }
 };

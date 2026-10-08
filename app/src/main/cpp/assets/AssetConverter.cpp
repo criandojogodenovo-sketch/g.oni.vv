@@ -12,6 +12,7 @@
 //     esqueleto: gltfAttachSkin no mesmo dummy → joints copiados p/ o .gm.
 #include "assets/AssetConverter.h"
 
+#include <chrono>
 #include <cstdio>
 #include <unistd.h>
 #include <cstring>
@@ -698,11 +699,20 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
                      !st.root().empty() &&
                      st.root().rfind("content://", 0) != 0;
     GltfModel model;
+    // 0.10-M (PASSO 3B) — o tempo da fase de PARSE (a linha contrato
+    // «gmesh: fase=parse ms=<n>»: os ~2 min do dragão / ~3,5 min do modelo
+    // de 203 MB do dono passam a ter dono por fase — parse/corte/assembly/
+    // verificação aqui, load/render no runtime)
+    const auto tParse = std::chrono::steady_clock::now();
     if (!parseGltf(json, jsonLen, {}, resolver, model, err,
                    binFile ? &loader : nullptr, canStream)) {
         err = "glTF invalido: " + err;
         return false;
     }
+    elog::info("gmesh: fase=parse ms=%.0f",
+               std::chrono::duration<double, std::milli>(
+                   std::chrono::steady_clock::now() - tParse)
+                   .count());
     if (canStream && !model.skins.empty()) {
         // a pele preserva joints/weights no MERGE — o caminho de sempre
         // (o re-parse é o JSON outra vez: pequeno, honesto, no log)
@@ -807,6 +817,13 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
         if (!ok) {
             return false;
         }
+        // 0.10-M (PASSO 3B) — as fases do streaming na LINHA CONTRATO
+        // («gmesh: fase=cut|assembly|verify ms=<n>»): a linha agregada de
+        // sempre fica (o histórico dos relatórios), as novas são as que o
+        // dono pediu para dar dono aos minutos
+        elog::info("gmesh: fase=cut ms=%.0f", res.cutMs);
+        elog::info("gmesh: fase=assembly ms=%.0f", res.assembleMs);
+        elog::info("gmesh: fase=verify ms=%.0f", res.verifyMs);
         elog::info("asset: v3 streaming completo — corte %.0f ms · "
                    "assembly %.0f ms · verificação %.0f ms",
                    res.cutMs, res.assembleMs, res.verifyMs);
@@ -821,6 +838,10 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
     // só recebia UMA parte). AGORA: um passe pela hierarquia compõe a
     // matriz-mundo de cada nó e TODAS as primitivas entram num ÚNICO
     // .gmesh (os grupos preservam o material por primitiva).
+    // 0.10-M (PASSO 3B): o caminho de sempre TEM fase de assembly também
+    // (merge + writeGMesh) — a linha contrato continua «gmesh: fase=» para
+    // que os minutos do dono tenham dono NESTE caminho igualmente
+    const auto tAssembly = std::chrono::steady_clock::now();
     MeshData merged;
     u32 nPrimMerged = 0;
     {
@@ -959,6 +980,10 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
         }
         out.meshes.push_back(nm);
         stats.meshes++;
+        elog::info("gmesh: fase=assembly ms=%.0f",
+                   std::chrono::duration<double, std::milli>(
+                       std::chrono::steady_clock::now() - tAssembly)
+                       .count());
         elog::info("asset: %s verts=%u idx=%u prims=%u%s — registado na "
                    "lista como %s", nm, stats.verts, stats.indices,
                    nPrimMerged, merged.skinned() ? " (skin)" : "", nm);
@@ -1473,6 +1498,10 @@ bool importFile(const std::string& srcAbs, const std::string& srcNameIn,
             : fileapi::realPath(joinRelPath(st.root(), srcRel));
     const bool selfCopy = !srcAbsReal.empty() && !dstAbsReal.empty() &&
                           srcAbsReal == dstAbsReal;
+    // 0.10-M (PASSO 3B) — o tempo da CÓPIA (não é fase «gmesh:» — é a fase
+    // do import que lê o ficheiro do partilhá-lo; SEM este número os ~2 min
+    // do dragão / ~3,5 min do modelo de 203 MB não somam o total do dono)
+    const auto tCopy = std::chrono::steady_clock::now();
     if (selfCopy) {
         elog::info("import: a fonte JA vive em %s — copia saltada (o "
                    "reconvert le o ficheiro no lugar)", srcRel.c_str());
@@ -1485,6 +1514,11 @@ bool importFile(const std::string& srcAbs, const std::string& srcNameIn,
                    srcAbs.c_str(), srcRel.c_str(),
                    static_cast<unsigned long long>(srcSize), kChunkBytes);
     }
+    elog::info("import: copia ms=%.0f%s",
+               std::chrono::duration<double, std::milli>(
+                   std::chrono::steady_clock::now() - tCopy)
+                   .count(),
+               selfCopy ? " (saltada — a fonte ja vive no projeto)" : "");
 
     // 1b) 0.9.6.4 (GRUPO A/R-021) — OS IRMÃOS DO .gltf: lê o JSON da fonte,
     // coleta buffers[].uri/images[].uri externos e COPIA-OS do diretório

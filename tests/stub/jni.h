@@ -113,6 +113,14 @@ struct JniFake {
     std::vector<std::string> static_bool_calls;
     bool manager_result = false;     // valor de isExternalStorageManager()
     int  export_int_result = 3;      // resultado do exportLogsToDownloads
+    // 0.10-M (PASSO 3B): o EXPORT DE LOGS com CORPO — o hook espelha o
+    // loop REAL da VvActivity.exportLogsToDownloads (listar o diretório,
+    // copiar CADA ficheiro; ver "Java fake" abaixo); sem hook fica o
+    // inteiro fixo de sempre (o comportamento antigo). Regista o relPath
+    // recebido por JNI para aferir a constante kDownloadsRelPath no caminho.
+    std::function<int(const std::string&)> export_logs;
+    std::string export_logs_relpath;   // o ÚLTIMO relPath pedido
+    int  export_logs_calls = 0;        // nº de chamadas (aferir o wiring)
     bool mic_granted = true;         // 0.8.11: ensureMicPermission() da VvActivity
     std::string last_new_string;     // última NewStringUTF
     std::string cache_dir;           // 0.8.12: cacheDirPath() da VvActivity
@@ -316,6 +324,16 @@ struct JNIEnv {
             va_end(ap);
             return static_cast<jint>(
                 g_jni.bridge_open_fd(g_jni.strOf(ju), g_jni.strOf(jm)));
+        }
+        if (name == "exportLogsToDownloads") {
+            jstring jrel = va_arg(ap, jstring);
+            ++g_jni.export_logs_calls;
+            g_jni.export_logs_relpath = g_jni.strOf(jrel);
+            if (g_jni.export_logs) {
+                const int r = g_jni.export_logs(g_jni.export_logs_relpath);
+                va_end(ap);
+                return static_cast<jint>(r);
+            }
         }
         va_end(ap);
         return static_cast<jint>(g_jni.export_int_result);

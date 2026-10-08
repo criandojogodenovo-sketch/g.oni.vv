@@ -110,5 +110,27 @@ bool ProjectStorage::remove(const std::string&) {
     return false;   // default honesto: esta implementação não remove
 }
 
+bool ProjectStorage::readBytesAt(const std::string& relPath, u64 offset,
+                                 size_t len, std::vector<u8>& out) const {
+    // 0.10-M (PASSO 3B) — o DEFAULT correto (não poupado): lê o ficheiro
+    // INTEIRO e devolve a fatia. As implementações reais (Fs/Saf/Fake)
+    // sobrepõem com a leitura exata do range — este default só existe para
+    // que uma storage futura nunca minta (false) sobre algo que SABE ler.
+    out.clear();
+    if (len == 0) {
+        return true;   // zero bytes pedidos = zero bytes dados
+    }
+    std::vector<u8> all;
+    if (!readBytes(relPath, all)) {
+        return false;
+    }
+    if (offset >= all.size() || all.size() - offset < len) {
+        return false;   // além do fim — range inválido
+    }
+    out.assign(all.begin() + static_cast<long>(offset),
+               all.begin() + static_cast<long>(offset + len));
+    return true;
+}
+
 } // namespace vv
 

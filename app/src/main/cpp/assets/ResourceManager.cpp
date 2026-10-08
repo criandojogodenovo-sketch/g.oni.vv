@@ -169,21 +169,64 @@ const MeshData* ResourceManager::mesh(const std::string& ref, std::string& err) 
             return nullptr;
         }
         const auto t0 = std::chrono::steady_clock::now();
+        // 0.10-M (PASSO 3B) — O GUARDO CEDO: espia os 192 B do header+meta
+        // v3 com readBytesAt ANTES de ler o ficheiro inteiro. Medição que o
+        // motivou: o load da scene de 213 MB queimava ~2 GB de RAM SÓ PARA
+        // RECUSAR (o readBytes inteiro + a duplicação do vector) — no C33 a
+        // app morria ANTES da mensagem chegar ao dono. Agora a recusa sai
+        // por 192 B; o ficheiro NÃO abre por blocos ainda (isso é o PASSO 4)
+        // — só a MENSAGEM é entregue sem incendiar a RAM. O peek falha em
+        // v1/v2/corrompido → o caminho de sempre decide (readBytes inteiro).
+        {
+            std::vector<u8> peek;
+            if (storage_->readBytesAt(path, 0,
+                                      kGHeaderBytes + kGmeshV3MetaBytes,
+                                      peek)) {
+                GMeshV3Meta meta;
+                std::string perr;
+                if (gmeshV3PeekMeta(peek.data(), peek.size(), meta, perr) &&
+                    (meta.vertexCount > 65535 ||
+                     gmeshV3LoadEstimateBytes(meta) > kMeshLoadBudgetBytes)) {
+                    err = gmeshV3LoadRefusalErr(meta);
+                    const double ms =
+                        std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - t0)
+                            .count();
+                    elog::info(
+                        "gmesh: fase=load ms=%.1f (espião de %zu B)%s", ms,
+                        peek.size(),
+                        " — RECUSADO antes da leitura (ver causa abaixo)");
+                    elog::error("asset: load %s RECUSADO — %s", path.c_str(),
+                                err.c_str());
+                    return nullptr;
+                }
+            }
+        }
         std::vector<u8> bytes;
         if (!storage_->readBytes(path, bytes) || bytes.empty()) {
             err = "ficheiro não encontrado: " + path;
             return nullptr;
         }
         auto data = std::make_shared<MeshData>();
-        if (!readGMesh(bytes.data(), bytes.size(), *data, err)) {
+        const bool ok = readGMesh(bytes.data(), bytes.size(), *data, err);
+        // 0.10-M (PASSO 3B) — a linha contrato do LOAD (a que o dono pediu:
+        // «gmesh: fase=load ms=<n>» — o par com parse/cut/assembly/verify do
+        // conversor e render do upload GPU). Logada no SUCESSO e na RECUSA:
+        // um fail de load de 3,5 min TEM de ter dono no tempo também (a
+        // recusa do mesh inteiro é rápida, a LEITURA do ficheiro inteiro é
+        // o que pesa — e é exatamente o que a linha mostra)
+        const double ms = std::chrono::duration<double, std::milli>(
+                              std::chrono::steady_clock::now() - t0)
+                              .count();
+        elog::info("gmesh: fase=load ms=%.1f (%llu B)%s", ms,
+                   static_cast<unsigned long long>(bytes.size()),
+                   ok ? "" : " — RECUSADO (ver causa abaixo)");
+        if (!ok) {
             err = ".gmesh inválido (" + path + "): " + err;
             return nullptr;
         }
         data->name = path;
         ++meshLoads_;
-        const double ms = std::chrono::duration<double, std::milli>(
-                              std::chrono::steady_clock::now() - t0)
-                              .count();
         // a linha exigida pelo prompt (log viewer do C33 mostra os tempos)
         elog::info("asset: load %s verts=%u em %.1fms", path.c_str(),
                    static_cast<unsigned>(data->vertices.size()), ms);

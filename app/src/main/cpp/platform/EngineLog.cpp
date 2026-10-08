@@ -243,9 +243,18 @@ void error(const char* fmt, ...) {
 
 // ---- F5.2: log viewer (Settings → "Ver logs") ------------------------------
 //
-// readTail: lê o ficheiro ATIVO do fim para o começo (janela de 256KB no
-// máximo — o viewer nunca parte o frame por um ficheiro de 1MB); se o ativo
-// não tem linhas suficientes, continua nos backups .1/.2 (histórico recente).
+// readTail: as ÚLTIMAS maxLines linhas do log (ativo + rotações), em ordem
+// cronológica (a mais antiga primeiro, como no ficheiro). Linhas >
+// kViewerLineMax chars são truncadas na leitura.
+//
+// 0.10-M (PASSO 3B): A ORDEM É O FICHEIRO ATIVO PRIMEIRO. A leitura antiga
+// (.2 → .1 → ativo, com break ao encher maxLines) tinha o bug do «log de
+// ontem»: com 1+ rotação o backup MAIS ANTIGO enchia a janela sozinho e o
+// ficheiro ATIVO — o de HOJE, com o banner do boot e os erros da sessão —
+// nunca era lido (o dono via conteúdo velho no viewer; o diagnóstico
+// «ver causa no log» morria aí). A cura: lê-se o ativo; só quando FALTAM
+// linhas se completar com o .1 e depois o .2, sempre pela CAUDA (as linhas
+// mais recentes de cada backup) — o mais recente GANHA, nunca perde.
 int readTail(std::vector<std::string>& out, int maxLines) {
     out.clear();
     if (maxLines <= 0) {
@@ -255,15 +264,16 @@ int readTail(std::vector<std::string>& out, int maxLines) {
     if (g_dir.empty()) {
         return 0;
     }
-    // ordem de leitura: .2 → .1 → ativo (antigo primeiro)
+    // ordem de leitura: ativo → .1 → .2 (o NOVO primeiro; cada backup só
+    // entra quando faltam linhas — e entra PELA CAUDA, prependando)
     char path[512];
     std::vector<std::string> parts;
-    for (int i = g_backups; i >= 1; --i) {
+    std::snprintf(path, sizeof(path), "%s/engine.log", g_dir.c_str());
+    parts.emplace_back(path);
+    for (int i = 1; i <= g_backups; ++i) {
         std::snprintf(path, sizeof(path), "%s/engine.log.%d", g_dir.c_str(), i);
         parts.emplace_back(path);
     }
-    std::snprintf(path, sizeof(path), "%s/engine.log", g_dir.c_str());
-    parts.emplace_back(path);
 
     constexpr long kWindow = 256L * 1024L;
     for (const std::string& p : parts) {
@@ -294,7 +304,8 @@ int readTail(std::vector<std::string>& out, int maxLines) {
                 data.clear();
             }
         }
-        // separa linhas; mantém só as que faltam para o pedido
+        // separa linhas (mantém todas as deste ficheiro; o corte por
+        // maxLines é feito ABAIXO, pela CAUDA — as linhas mais recentes)
         size_t pos = 0;
         std::vector<std::string> lines;
         while (pos < data.size()) {
@@ -316,15 +327,15 @@ int readTail(std::vector<std::string>& out, int maxLines) {
             }
             pos = nl + 1;
         }
-        // do backup só entram as linhas que faltam (as MAIS RECENTES dele:
-        // é o fim que liga ao ficheiro seguinte)
+        // faltam maxLines - out.size() linhas: entra a CAUDA deste ficheiro
+        // (o fim dele é o que LIGA ao já lido — ordem cronológica certa),
+        // PREPENDADA no resultado (este ficheiro é MAIS ANTIGO que o lido)
         const int missing = maxLines - static_cast<int>(out.size());
         const size_t first =
             lines.size() > static_cast<size_t>(missing)
                 ? lines.size() - static_cast<size_t>(missing) : 0;
-        for (size_t i = first; i < lines.size(); ++i) {
-            out.push_back(lines[i]);
-        }
+        out.insert(out.begin(), lines.begin() + static_cast<long>(first),
+                   lines.end());
     }
     return static_cast<int>(out.size());
 }

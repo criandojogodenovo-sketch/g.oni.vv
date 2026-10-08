@@ -4,9 +4,11 @@
 #include "assets/TextureCompressor.h"
 #include "assets/TexturePipeline.h"
 #include "platform/Log.h"
+#include "platform/EngineLog.h"   // 0.10-M (PASSO 3B): elog — o dono lê o FICHEIRO
 #include "render/Mesh.h"
 #include "render/Texture.h"
 #include <cctype>
+#include <chrono>
 
 namespace vv {
 
@@ -55,8 +57,25 @@ Mesh* GpuAssets::mesh(const std::string& ref) {
         }
     }
     if (!data || !data->ok()) {
+        // 0.10-M (PASSO 3B) — A CAUSA CHEGA AO engine.LOG: o LOGE de sempre
+        // só fala com o logcat (o dono não tem PC); o err do ResourceManager
+        // (a mensagem «memória insuficiente ao carregar mesh — cura no
+        // PASSO 4: render por blocos», com verts/blocos/MB) ia MORRER aqui
+        // sem nunca entrar no ficheiro que o viewer/export mostram. O elog
+        // escreve NOS DOIS (logcat + engine.log).
+        if (!err.empty()) {
+            elog::error("gpu: '%s' FALHOU ao carregar — %s", ref.c_str(),
+                        err.c_str());
+        } else {
+            elog::error("gpu: '%s' FALHOU ao carregar (mesh vazio/inválido)",
+                        ref.c_str());
+        }
         return nullptr;
     }
+    // 0.10-M (PASSO 3B) — a fase de RENDER (o upload GPU do mesh inteiro —
+    // o último dono dos minutos do dono: parse/cut/assembly/verify no
+    // conversor, load aqui atrás, render é o upload)
+    const auto tUpload = std::chrono::steady_clock::now();
     auto m = std::make_unique<Mesh>();
     // 0.8.2 (F7): MeshData com skin → createSkinned (aJoints/aWeights nas
     // locations 3/4); estático → create de sempre (comportamento idêntico)
@@ -67,14 +86,22 @@ Mesh* GpuAssets::mesh(const std::string& ref) {
                               static_cast<u32>(data->indices.size()),
                               data->skinJoints.data(),
                               data->skinWeights.data())) {
+            elog::error("gpu: '%s' FALHOU no upload (createSkinned)",
+                        ref.c_str());
             return nullptr;
         }
     } else if (!m->create(data->vertices.data(),
                           static_cast<u32>(data->vertices.size()),
                           data->indices.data(),
                           static_cast<u32>(data->indices.size()))) {
+        elog::error("gpu: '%s' FALHOU no upload (create)", ref.c_str());
         return nullptr;   // upload falhou — sem cache de objeto quebrado
     }
+    elog::info("gmesh: fase=render ms=%.1f (%s, %u verts)",
+               std::chrono::duration<double, std::milli>(
+                   std::chrono::steady_clock::now() - tUpload)
+                   .count(),
+               ref.c_str(), static_cast<unsigned>(data->vertices.size()));
     Mesh* raw = m.get();
     gpuMeshes_.emplace(ref, std::move(m));
     return raw;

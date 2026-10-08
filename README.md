@@ -34,6 +34,68 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.10.3 — 0.10-M PASSO 3B: LOG + CAUSA DA IMPORTAÇÃO (o «log de ontem» e o «ver causa no log» morrem)
+
+**O que o dono reportou** (C33, vc 56): o dragão de 32 MB importa em ~2 min;
+o modelo de 203 MB falha após ~3,5 min com «ver causa no log» — e o log
+viewer mostrava **conteúdo de ONTEM**. Nenhum contorno sem medir primeiro.
+
+- **O BUG DO VIEWER STALE (causa real, medida)**: `elog::readTail` lia a
+  rotação na ordem `.2 → .1 → ativo` com `break` ao encher a janela de 300
+  linhas — com 1+ rotação (1 MB por ficheiro; as linhas de 2 KB do import
+  enchem-no depressa) o backup MAIS ANTIGO enchia a janela sozinho e **o
+  ficheiro ATIVO — o de HOJE, com o banner do boot e os erros da sessão —
+  nunca era lido**. O writer estava CORRETO (banner + `[boot N/6]` em cada
+  arranque; caminhos JNI_OnLoad/android_main idênticos); a rotação, o errno
+  e o offset estavam CORRETOS — a culpa era a ORDEM do leitor. Cura: o
+  ATIVO lê-se primeiro; os backups só completam quando FALTAM linhas
+  (sempre pela cauda). Sentinelas novas em test_logs_crash
+  (`log_readtail_o_ativo_de_hoje_ganha_as_rotacoes` — a reprodução do
+  device: 20 KB/ficheiro, ~350 linhas por backup contra a janela de 300) +
+  a FASE 19.2 do c33 (o viewer REAL a abrir com .2/.1 cheios).
+- **OS TEMPOS POR FASE (a linha contrato)**: `gmesh: fase=parse|cut|
+  assembly|verify|load|render ms=<n>` + `import: copia ms=<n>` — os ~2 min
+  do dragão e os ~3,5 min do modelo de 203 MB passam a ter dono por fase
+  (o load loga o tempo no sucesso E na recusa).
+- **A CAUSA DO «FAIL DE 203 MB» CONFIRMADA E REGISTADA (não contornada)**:
+  o load pós-conversão (`ResourceManager::mesh` → `readGMesh`) lê o
+  ficheiro INTEIRO e monta o mesh ÚNICO (u16) — a parede. A MEDIÇÃO nova
+  (`medicao_010m_load_pos_conversao_a_parede_do_mesh_unico`): a scene de
+  213 MB importa verificada=1 (o .gmesh sai a 972 MB) e o LOAD RECUSA com
+  **«memória insuficiente ao carregar mesh (cura no PASSO 4: render por
+  blocos)»** com verts/blocos/índices/~MB — o orçamento declarado
+  `kMeshLoadBudgetBytes` (256 MB, o número da casa R-032) +
+  `gmeshV3LoadEstimateBytes` (a estimativa pura, aferível sem ficheiro).
+  **O GUARDO CEDO**: a 1ª medição (sem espião) mostrava a recusa a queimar
+  **2007 MB** de RAM (o readBytes inteiro + a cópia string→vector do
+  FsStorage) — no C33 a app morria ANTES da mensagem chegar ao dono. Agora
+  o `ResourceManager` espia os **192 B** do header+meta com
+  `ProjectStorage::readBytesAt` (NOVO — Fs/Saf/Fake com range exato; a
+  semente do load por blocos do PASSO 4) + `gmeshV3PeekMeta` e recusa com
+  pico de RAM = base (**0 MB extra**, medido); o `FsStorage::readBytes`
+  deixou de duplicar (stat → resize único). O PASSO 4 é a cura — NADA foi
+  contornado aqui (o modelo continua sem abrir; só a MENSAGEM chega viva).
+- **A CAUSA CHEGA AO engine.LOG**: o `LOGE` do `GpuAssets` só falava com o
+  LOGCAT (que o dono não tem) — o err do load morria sem nunca entrar no
+  ficheiro que o viewer/export mostram. Agora o elog loga
+  `gpu: '<ref>' FALHOU ao carregar — <causa completa>`.
+- **O EXPORT = A MESMA FONTE**: a Java lê `getExternalFilesDir("logs")`
+  (o diretório do writer por contrato Android); o stub JNI ganhou o hook
+  `export_logs` que espelha o loop REAL — a FASE 19.5 prova o caminho
+  inteiro: toque em Export → o ativo exportado traz a linha de erro de
+  HOJE, a causa do load e os tempos por fase (nunca stale).
+- **FASE 19 do c33** (+39 checks): banner do boot ATUAL no viewer (com
+  audit do draw — as linhas desenhadas no card), fail de import visível
+  no viewer E no export, o 70k-verts que importa e recusa no apply com a
+  mensagem do PASSO 4, os tempos por fase por DELTA.
+- **MUTAÇÕES**: M-A (a ordem stale do readTail reposta → o teste novo
+  VERMELHO a «hasToday» — o log de ontem reproduzido) e M-B (o banner de
+  boot calado → a FASE 19.1 VERMELHA) — repostas → tudo verde.
+- Suítes: test_core 0 falhas · c33_virtual **670/670 HARNESS VERDE** ·
+  release-identity **versionCode 57** · gates verdes. Relatório:
+  `docs/RELATORIO-0.10-M-PASSO3B-LOG.md` · **PÁRA — o PASSO 4 (render por
+  blocos) fica à espera do OK do dono**.
+
 ## 0.10.2 — 0.10-M PASSO 3: O CONVERSOR STREAMING E PARALELO (a parede do 65,535 MORREU)
 
 - **O CAMINHO** (GmeshV3Stream, novo): glTF/GLB com ficheiro real →

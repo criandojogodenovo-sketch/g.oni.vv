@@ -151,6 +151,111 @@ int logCount(const char* needle) {
     return n;
 }
 
+// 0.10-M (PASSO 3B · FASE 19.4): o GLB de N vértices com índices u32 — o
+// perfil do «modelo demasiado grande para o runtime de hoje» (70 000 >
+// 65 535: o streaming converte em 2 blocos; o load do mesh único recusa).
+// Uma primitiva, um nó, SEM pele (o caminho streaming de produção).
+bool buildGlbFase19(u32 verts, u32 tris, const std::string& path) {
+    // layout do BIN: pos (12) + nrm (12) + uv (8) por vértice, idx u32×3
+    // por triângulo — offsets alinhados a 4
+    const u64 posLen = u64(verts) * 12;
+    const u64 nrmOff = (posLen + 3) & ~3ull;
+    const u64 nrmLen = u64(verts) * 12;
+    const u64 uvOff = (nrmOff + nrmLen + 3) & ~3ull;
+    const u64 uvLen = u64(verts) * 8;
+    const u64 idxOff = (uvOff + uvLen + 3) & ~3ull;
+    const u64 idxLen = u64(tris) * 3 * 4;
+    const u64 binLen = idxOff + idxLen;
+    char j[1024];   // o JSON com os 12 números (~760 B com os literais)
+    std::snprintf(j, sizeof(j),
+        "{\"asset\":{\"version\":\"2.0\"},\"scene\":0,"
+        "\"scenes\":[{\"nodes\":[0]}],"
+        "\"nodes\":[{\"mesh\":0,\"name\":\"gigante\"}],"
+        "\"meshes\":[{\"primitives\":[{\"attributes\":"
+        "{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":2},"
+        "\"indices\":3,\"mode\":4}]}],"
+        "\"buffers\":[{\"byteLength\":%llu}],"
+        "\"bufferViews\":["
+        "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":%llu},"
+        "{\"buffer\":0,\"byteOffset\":%llu,\"byteLength\":%llu},"
+        "{\"buffer\":0,\"byteOffset\":%llu,\"byteLength\":%llu},"
+        "{\"buffer\":0,\"byteOffset\":%llu,\"byteLength\":%llu}],"
+        "\"accessors\":["
+        "{\"bufferView\":0,\"componentType\":5126,\"count\":%u,"
+        "\"type\":\"VEC3\"},"
+        "{\"bufferView\":1,\"componentType\":5126,\"count\":%u,"
+        "\"type\":\"VEC3\"},"
+        "{\"bufferView\":2,\"componentType\":5126,\"count\":%u,"
+        "\"type\":\"VEC2\"},"
+        "{\"bufferView\":3,\"componentType\":5125,\"count\":%u,"
+        "\"type\":\"SCALAR\"}]}",
+        (unsigned long long)binLen, (unsigned long long)posLen,
+        (unsigned long long)nrmOff, (unsigned long long)nrmLen,
+        (unsigned long long)uvOff, (unsigned long long)uvLen,
+        (unsigned long long)idxOff, (unsigned long long)idxLen,
+        verts, verts, verts, tris * 3u);
+    std::string json = j;
+    while (json.size() % 4 != 0) json += ' ';
+    std::vector<u8> bin(static_cast<size_t>(binLen), 0);
+    auto putF32 = [&bin](u64 off, f32 v) {
+        u32 raw;
+        std::memcpy(&raw, &v, 4);
+        for (int b = 0; b < 4; ++b) {
+            bin[static_cast<size_t>(off) + b] =
+                static_cast<u8>((raw >> (8 * b)) & 0xFF);
+        }
+    };
+    // determinístico (i mod pequeno): posição em [-1,1], normal +Y, uv
+    for (u32 i = 0; i < verts; ++i) {
+        putF32(u64(i) * 12 + 0, -1.0f + 2.0f * (i % 997u) / 996.0f);
+        putF32(u64(i) * 12 + 4, -1.0f + 2.0f * (i % 991u) / 990.0f);
+        putF32(u64(i) * 12 + 8, -1.0f + 2.0f * (i % 983u) / 982.0f);
+        putF32(nrmOff + u64(i) * 12 + 0, 0.0f);
+        putF32(nrmOff + u64(i) * 12 + 4, 1.0f);
+        putF32(nrmOff + u64(i) * 12 + 8, 0.0f);
+        putF32(uvOff + u64(i) * 8 + 0, (i % 251u) / 250.0f);
+        putF32(uvOff + u64(i) * 8 + 4, (i % 241u) / 240.0f);
+    }
+    // índices u32: triângulos sobre os primeiros verts (determinístico)
+    for (u32 t = 0; t < tris; ++t) {
+        const u32 tri[3] = {(t * 3u + 0u) % verts, (t * 3u + 1u) % verts,
+                            (t * 3u + 2u) % verts};
+        for (int k = 0; k < 3; ++k) {
+            const u64 off = idxOff + (u64(t) * 3 + k) * 4;
+            bin[static_cast<size_t>(off) + 0] =
+                static_cast<u8>(tri[k] & 0xFF);
+            bin[static_cast<size_t>(off) + 1] =
+                static_cast<u8>((tri[k] >> 8) & 0xFF);
+            bin[static_cast<size_t>(off) + 2] =
+                static_cast<u8>((tri[k] >> 16) & 0xFF);
+            bin[static_cast<size_t>(off) + 3] =
+                static_cast<u8>((tri[k] >> 24) & 0xFF);
+        }
+    }
+    // o container GLB (header 12 + JSON chunk 8+json + BIN chunk 8+bin)
+    std::vector<u8> glb;
+    auto u32push = [&glb](u32 v) {
+        glb.push_back(static_cast<u8>(v & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 8) & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 16) & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 24) & 0xFF));
+    };
+    u32push(0x46546C67u);   // 'glTF'
+    u32push(2);
+    u32push(static_cast<u32>(12 + 8 + json.size() + 8 + bin.size()));
+    u32push(static_cast<u32>(json.size()));
+    u32push(0x4E4F534Au);   // 'JSON'
+    glb.insert(glb.end(), json.begin(), json.end());
+    u32push(static_cast<u32>(bin.size()));
+    u32push(0x004E4942u);   // 'BIN'
+    glb.insert(glb.end(), bin.begin(), bin.end());
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) return false;
+    const bool ok = std::fwrite(glb.data(), 1, glb.size(), f) == glb.size();
+    std::fclose(f);
+    return ok;
+}
+
 jobject kFakeActivity = reinterpret_cast<jobject>(static_cast<intptr_t>(0xD001));
 jclass  kFakeCls      = reinterpret_cast<jclass>(static_cast<intptr_t>(0xD002));
 
@@ -6448,6 +6553,439 @@ int main() {
         editor::applyDensity();
         glstub::fb::enabled = false;
         glstub::fb::resetState();
+    }
+
+    // ======================================================================
+    // FASE 19 — 0.10-M PASSO 3B: O LOG DE HOJE (viewer + export + causa
+    // do load). O dono reportou: «o log viewer mostra conteúdo de ONTEM
+    // (stale)» e «o modelo de 203 MB falha com 'ver causa no log'» — mas
+    // nunca VIA a causa: (a) o readTail lia o backup MAIS ANTIGO primeiro
+    // e o ficheiro ATIVO nunca entrava na janela do viewer; (b) a causa
+    // do load (a recusa do mesh único) morria no LOGE do GpuAssets — só
+    // logcat, que o dono não tem. Aqui prova-se o caminho inteiro no
+    // dispositivo virtual: o banner do boot ATUAL no viewer, linhas novas
+    // refletidas COM rotação, o fail de import visível no viewer E no
+    // export, e a recusa do >65 535 com a mensagem do PASSO 4 no log.
+    // ======================================================================
+    fase("FASE 19 — 0.10-M PASSO 3B: o log de HOJE (viewer + export + causa)");
+    {
+        resetEngineForHarness();
+        auto st19 = std::make_unique<FakeStorage>();
+        FakeStorage* rawSt19 = st19.get();
+        check(Project::createNew(*rawSt19, "c33", g_project),
+              "19.0 projeto criado");
+        // o TIC ALVO (com MeshRenderer — o "Sim" do import aplica aqui):
+        // gravado ANTES do boot (o INIT_WINDOW faz o LOAD da cena ativa —
+        // o TIC por gravar morreria aí; a lição da FASE 1)
+        {
+            const Handle h = g_scene.create("Alvo");
+            Tic* t = g_scene.get(h);
+            t->addComponent<Transform3D>();
+            t->addComponent<MeshRenderer>();
+            check(g_project.saveActiveScene(*rawSt19, g_scene),
+                  "19.0 cena gravada com o TIC Alvo");
+        }
+        g_storage = std::move(st19);
+        g_projectReady = true;
+        g_resources.setStorage(rawSt19);
+        g_gpu.init(&g_resources);
+        // o BOOT de HOJE (o viewer tem de mostrar ESTE boot, não o de ontem)
+        android_app app19;
+        std::memset(&app19, 0, sizeof(app19));
+        app19.contentRect = {0, 24, 1512, 720};
+        onAppCmd(&app19, APP_CMD_INIT_WINDOW);
+        check(g_ready, "19.0 boot completo (g_ready)");
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+        // o load do boot trocou os handles — o Alvo re-selecionado pelo NOME
+        g_editor.selected = g_scene.find("Alvo");
+        check(g_scene.get(g_editor.selected) != nullptr &&
+                  g_scene.get(g_editor.selected)
+                          ->getComponent<MeshRenderer>() != nullptr,
+              "19.0 TIC Alvo vivo com MeshRenderer (re-selecionado "
+              "pós-boot)");
+
+        // ---- 19.1 o viewer mostra o banner do BOOT ATUAL -----------------
+        passo("19.1 o viewer mostra o boot de HOJE (banner + [boot N/6])");
+        {
+            g_editor.settingsMenu = true;
+            g_editor.settingsCollapsed = editor::settings::kBitGeral |
+                                         editor::settings::kBitAudio |
+                                         editor::settings::kBitPerm |
+                                         editor::settings::kBitDocs |
+                                         editor::settings::kBitSobre;
+            frame();
+            g_ui.scrollSetOffset(editor::settings::kScrollId, 0.0f);
+            g_layoutExportPending = true;
+            frame();
+            const layout::Record& rr = g_ui.auditRecord();
+            f32 vx = -1.0f, vy = -1.0f;
+            for (const auto& e : rr.entries) {
+                if (e.kind == layout::Entry::Button &&
+                    e.id == editor::settings::kViewLogsId) {
+                    vx = e.x + e.w * 0.5f;
+                    vy = e.y + e.h * 0.5f;
+                }
+            }
+            check(vx > 0.0f && vy > 0.0f,
+                  "19.1 o botao 'Ver logs' esta no registo (rect real)");
+            tap(vx, vy);
+            check(g_editor.logViewer,
+                  "19.1 o toque ABRE o viewer (logViewer=true)");
+            bool bootHoje = false;
+            for (const std::string& l : g_logLines) {
+                if (l.find("[boot 1/6] contentRect OK") != std::string::npos) {
+                    bootHoje = true;
+                }
+            }
+            check(bootHoje,
+                  "19.1 o viewer mostra o [boot 1/6] do boot ATUAL (as "
+                  "linhas de HOJE — o bug do 'log de ontem' morreu)");
+            // a AUDITORIA DO DRAW: o frame com o viewer aberto desenha AS
+            // linhas (labels dentro do card) — armar o audit e provar
+            {
+                g_layoutExportPending = true;
+                frame();
+                const layout::Record& rv = g_ui.auditRecord();
+                // o card do viewer: overlayArea 80%x80% centrado (a MESMA
+                // fórmula do drawLogViewer)
+                f32 ox, oy, aw, ah;
+                editor::overlayArea(static_cast<f32>(g_egl.width()),
+                                    static_cast<f32>(g_egl.height()),
+                                    g_ui.safeArea(), ox, oy, aw, ah);
+                const f32 cw = aw * 0.80f, chh = ah * 0.80f;
+                const f32 cx = ox + (aw - cw) * 0.5f, cy = oy + (ah - chh) * 0.5f;
+                int labelsIn = 0;
+                for (const auto& e : rv.entries) {
+                    if (e.kind == layout::Entry::Label &&
+                        e.x >= cx && e.x < cx + cw && e.y >= cy &&
+                        e.y < cy + chh) {
+                        ++labelsIn;
+                    }
+                }
+                check(labelsIn >= 3,
+                      "19.1 as linhas do log estao DESNHADAS no card do "
+                      "viewer (audit do draw)");
+            }
+            g_editor.logViewer = false;
+            g_editor.settingsMenu = false;
+            frame();
+        }
+
+        // ---- 19.2 rotação: escrever N linhas → o viewer reflete-as -----
+        passo("19.2 com rotações, as linhas NOVAS ganham (o fix da ordem)");
+        {
+            // a experiência corre num DIRETÓRIO PRÓPRIO (o gate do CI
+            // grepa o c33-virtual-logs/engine.log ATIVO — as rotações da
+            // experiência não podem empurrar as linhas das FASEs 1..18
+            // para os backups)
+            const std::string dir19 = std::string(kHarnessLogs) + "-19";
+            rmrf(dir19);
+            check(vv::elog::init(dir19.c_str(), 24 * 1024, 2),
+                  "19.2 elog re-iniciado com rotação pequena (24 KB)");
+            // ~1500 linhas × ~67 B ≈ 100 KB → 4+ rotações: .2 e .1 CHEIOS
+            // (cada um ~350 linhas — MUITO mais que a janela de 300)
+            for (int i = 0; i < 1500; ++i) {
+                vv::elog::writeLine('I', "conteudo-velho-de-ontem-0123456789");
+            }
+            for (int i = 1; i <= 5; ++i) {
+                char m[48];
+                std::snprintf(m, sizeof(m), "f19-hoje-marcador-%02d", i);
+                vv::elog::info("%s", m);
+            }
+            g_editor.settingsMenu = true;
+            g_editor.settingsCollapsed = editor::settings::kBitGeral |
+                                         editor::settings::kBitAudio |
+                                         editor::settings::kBitPerm |
+                                         editor::settings::kBitDocs |
+                                         editor::settings::kBitSobre;
+            frame();
+            g_ui.scrollSetOffset(editor::settings::kScrollId, 0.0f);
+            g_layoutExportPending = true;
+            frame();
+            const layout::Record& rr = g_ui.auditRecord();
+            f32 vx = -1.0f, vy = -1.0f;
+            for (const auto& e : rr.entries) {
+                if (e.kind == layout::Entry::Button &&
+                    e.id == editor::settings::kViewLogsId) {
+                    vx = e.x + e.w * 0.5f;
+                    vy = e.y + e.h * 0.5f;
+                }
+            }
+            check(vx > 0.0f && vy > 0.0f, "19.2 o botao 'Ver logs' visivel");
+            tap(vx, vy);
+            check(g_editor.logViewer, "19.2 o viewer aberto (log do -19)");
+            bool temHoje = false, ultima = false;
+            for (const std::string& l : g_logLines) {
+                if (l.find("f19-hoje-marcador-05") != std::string::npos) {
+                    temHoje = true;
+                }
+            }
+            // a última linha NÃO é o filler VELHO: com a ordem antiga a
+            // janela enchia-se do .2 (conteúdo de ontem) e a última linha
+            // ERA o filler; agora a janela termina nas linhas RECENTES (os
+            // marcadores ou as linhas que os frames seguintes escreveram)
+            if (!g_logLines.empty() &&
+                g_logLines.back().find("conteudo-velho-de-ontem") ==
+                    std::string::npos) {
+                ultima = true;
+            }
+            check(temHoje,
+                  "19.2 o viewer mostra as linhas NOVAS (com .2/.1 cheios — "
+                  "a ordem antiga mostrava ONTEM)");
+            check(ultima, "19.2 a ÚLTIMA linha do viewer é a mais recente");
+            g_editor.logViewer = false;
+            g_editor.settingsMenu = false;
+            // o elog VOLTA ao log do harness (o resto das FASEs escreve aí)
+            vv::elog::init(kHarnessLogs);
+            rmrf(dir19);
+            frame();
+        }
+
+        // ---- 19.3 um fail de IMPORT visível no viewer (o caminho do job) -
+        passo("19.3 fail de import: a linha de erro de HOJE no viewer");
+        {
+            // um GLB TRUNCADO (só o header de 12 B — "GLB sem chunk header")
+            const std::string src = "/tmp/goni_fase19_corrompido.glb";
+            {
+                FILE* f = std::fopen(src.c_str(), "wb");
+                check(f != nullptr, "19.3a fixture criada (GLB truncado)");
+                u8 hdr[12] = {0};
+                const u32 magic = 0x46546C67u, ver = 2, total = 12;
+                std::memcpy(hdr, &magic, 4);
+                std::memcpy(hdr + 4, &ver, 4);
+                std::memcpy(hdr + 8, &total, 4);
+                std::fwrite(hdr, 1, 12, f);
+                std::fclose(f);
+            }
+            fileapi::DirEntry ent;
+            ent.name = "corrompido.glb";
+            ent.path = src;
+            ent.isDir = false;
+            ent.kind = 'm';
+            check(browserImportFile(ent),
+                  "19.3 o job de import arranca (1 toque no corrompido)");
+            int guard = 0;
+            while (g_importJob.active.load() && guard++ < 3000) {
+                frame();
+            }
+            frame();   // o importJobFinish (quem LOGA 'import: FALHOU')
+            check(!g_importJob.err.empty(),
+                  "19.3 o job FALHOU com err (a causa real)");
+            check(logHas("import: FALHOU"),
+                  "19.3 a linha 'import: FALHOU' está no engine.log de HOJE");
+            // o VIEWER mostra a linha de erro de HOJE
+            g_editor.settingsMenu = true;
+            g_editor.settingsCollapsed = editor::settings::kBitGeral |
+                                         editor::settings::kBitAudio |
+                                         editor::settings::kBitPerm |
+                                         editor::settings::kBitDocs |
+                                         editor::settings::kBitSobre;
+            frame();
+            g_ui.scrollSetOffset(editor::settings::kScrollId, 0.0f);
+            g_layoutExportPending = true;
+            frame();
+            const layout::Record& rr = g_ui.auditRecord();
+            f32 vx = -1.0f, vy = -1.0f;
+            for (const auto& e : rr.entries) {
+                if (e.kind == layout::Entry::Button &&
+                    e.id == editor::settings::kViewLogsId) {
+                    vx = e.x + e.w * 0.5f;
+                    vy = e.y + e.h * 0.5f;
+                }
+            }
+            check(vx > 0.0f && vy > 0.0f, "19.3 o botao 'Ver logs' visivel");
+            tap(vx, vy);
+            check(g_editor.logViewer, "19.3 o viewer aberto");
+            bool erroNoViewer = false;
+            for (const std::string& l : g_logLines) {
+                if (l.find("import: FALHOU") != std::string::npos) {
+                    erroNoViewer = true;
+                }
+            }
+            check(erroNoViewer,
+                  "19.3 a linha de erro de HOJE está no VIEWER (o dono VÊ a "
+                  "causa sem PC)");
+            g_editor.logViewer = false;
+            g_editor.settingsMenu = false;
+            std::remove(src.c_str());
+            frame();
+        }
+
+        // ---- 19.4 o load do >65 535 recusa com a mensagem do PASSO 4 ----
+        passo("19.4 causa do 'fail de 203 MB': o load recusa com nome e números");
+        {
+            // UM GLB de 70 000 vértices (u32 idx) — o MESMO perfil do
+            // test_gmeshv3stream: o streaming converte (2 blocos,
+            // verificado=1) e o RUNTIME de hoje recusa o mesh único
+            const std::string src = "/tmp/goni_fase19_70k.glb";
+            check(buildGlbFase19(70000, 90000, src),
+                  "19.4a fixture criada (GLB 70k verts, u32 idx)");
+            convert::Output out;
+            convert::Stats stats;
+            std::string err;
+            // contagens ANTES (os checks são por DELTA — os imports das
+            // FASEs 12.x também logam fases; o que prova o 19.4 é o SEU)
+            const int parseAntes = logCount("gmesh: fase=parse ms=");
+            const int cutAntes = logCount("gmesh: fase=cut ms=");
+            const int assAntes = logCount("gmesh: fase=assembly ms=");
+            const int verAntes = logCount("gmesh: fase=verify ms=");
+            const int copAntes = logCount("import: copia ms=");
+            const int loadAntes = logCount("gmesh: fase=load ms=");
+            const auto t0 = std::chrono::steady_clock::now();
+            const bool ok = convert::importFile(src, "gigante.glb", *g_storage,
+                                                g_pipeline.get(), out, stats,
+                                                err, nullptr, nullptr);
+            const double impMs =
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - t0)
+                    .count();
+            check(ok && out.meshes.size() == 1 &&
+                      out.meshes[0] == "assets/gigante.gmesh",
+                  "19.4 o import do 70k COMPLETA (a conversão está correta)");
+            if (!ok) {
+                std::printf("    [19.4-ERR] import falhou: %.200s\n",
+                            err.c_str());
+            }
+            std::printf("    [19.4] import 70k verts: %.0f ms\n", impMs);
+            // as LINHAS DE TEMPO por fase (a linha contrato do PASSO 3B —
+            // por DELTA: as linhas DESTE import, não as das FASEs 12.x)
+            check(logCount("gmesh: fase=parse ms=") > parseAntes,
+                  "19.4 o tempo de PARSE no log (fase=parse ms=)");
+            check(logCount("gmesh: fase=cut ms=") > cutAntes,
+                  "19.4 o tempo de CORTE no log (fase=cut ms=)");
+            check(logCount("gmesh: fase=assembly ms=") > assAntes,
+                  "19.4 o tempo de ASSEMBLY no log (fase=assembly ms=)");
+            check(logCount("gmesh: fase=verify ms=") > verAntes,
+                  "19.4 o tempo de VERIFICAÇÃO no log (fase=verify ms=)");
+            check(logCount("import: copia ms=") > copAntes,
+                  "19.4 o tempo da CÓPIA no log (import: copia ms=)");
+            // o APLICAR ao TIC (o corpo do 'Sim' — o mesmo do diálogo):
+            // o load RECUSA com a mensagem do dono e a causa CHEGA AO LOG
+            refreshCatalog();
+            bool noCatalogo = false;
+            for (const auto& m : g_catalog.meshes) {
+                if (m == "assets/gigante.gmesh") noCatalogo = true;
+            }
+            check(noCatalogo, "19.4 o catálogo vê o gigante.gmesh");
+            g_applyAsk.open = true;
+            g_applyAsk.kind = 'm';
+            g_applyAsk.rel = "assets/gigante.gmesh";
+            g_applyAsk.fileName = "gigante.glb";
+            g_editor.applyAsk = true;
+            applyImportedAssetToSelectedTic();
+            check(logHas("gpu: 'assets/gigante.gmesh' FALHOU ao carregar"),
+                  "19.4 a falha do load CHEGA ao engine.log (o LOGE de "
+                  "sempre só falava com o logcat)");
+            check(logCount("memória insuficiente ao carregar mesh") >= 1 &&
+                      logHas("cura no PASSO 4: render por blocos"),
+                  "19.4 a CAUSA com nome e números: 'memória insuficiente ao "
+                  "carregar mesh (cura no PASSO 4: render por blocos)'");
+            check(logCount("gmesh: fase=load ms=") > loadAntes,
+                  "19.4 o tempo do LOAD no log — mesmo RECUSADO (fase=load "
+                  "ms= … RECUSADO)");
+            check(std::strncmp(g_toast, "falha ao carregar mesh", 22) == 0,
+                  "19.4 o toast honesto 'falha ao carregar mesh'");
+            std::remove(src.c_str());
+            frame();
+        }
+
+        // ---- 19.5 o EXPORT: a mesma fonte de verdade do writer -----------
+        passo("19.5 export de logs: a MESMA fonte do writer (não stale)");
+        {
+            // o hook espelha o loop REAL da VvActivity.exportLogsToDownloads
+            // (getExternalFilesDir("logs") == o diretório do elog no device;
+            // aqui: listar elog::dir(), copiar CADA ficheiro, 1× por nome)
+            const std::string fakeDl = std::string(kCacheDir) + "/fake-dl";
+            rmrf(fakeDl);
+            ::mkdir(fakeDl.c_str(), 0775);
+            g_jni.export_logs = [&](const std::string& rel) -> int {
+                (void)rel;   // o relPath vai ao kDownloadsRelPath (check abaixo)
+                const std::string dir = vv::elog::dir();
+                DIR* d = ::opendir(dir.c_str());
+                if (!d) return -3;
+                int count = 0;
+                while (dirent* e = ::readdir(d)) {
+                    const std::string n = e->d_name;
+                    if (n == "." || n == "..") continue;
+                    const std::string from = dir + "/" + n;
+                    const std::string to = fakeDl + "/" + n;
+                    ::remove(to.c_str());   // export repetido SUBSTITUI
+                    FILE* fi = std::fopen(from.c_str(), "rb");
+                    if (!fi) continue;
+                    FILE* fo = std::fopen(to.c_str(), "wb");
+                    if (fo) {
+                        u8 buf[16 * 1024];
+                        size_t n2;
+                        while ((n2 = std::fread(buf, 1, sizeof(buf), fi)) > 0) {
+                            std::fwrite(buf, 1, n2, fo);
+                        }
+                        std::fclose(fo);
+                        ++count;
+                    }
+                    std::fclose(fi);
+                }
+                ::closedir(d);
+                return count;
+            };
+            g_editor.settingsMenu = true;
+            g_editor.settingsCollapsed = editor::settings::kBitGeral |
+                                         editor::settings::kBitAudio |
+                                         editor::settings::kBitPerm |
+                                         editor::settings::kBitDocs |
+                                         editor::settings::kBitSobre;
+            frame();
+            g_ui.scrollSetOffset(editor::settings::kScrollId, 0.0f);
+            g_layoutExportPending = true;
+            frame();
+            const layout::Record& rr = g_ui.auditRecord();
+            f32 vx = -1.0f, vy = -1.0f;
+            for (const auto& e : rr.entries) {
+                if (e.kind == layout::Entry::Button &&
+                    e.id == editor::settings::kExportLogsId) {
+                    vx = e.x + e.w * 0.5f;
+                    vy = e.y + e.h * 0.5f;
+                }
+            }
+            check(vx > 0.0f && vy > 0.0f,
+                  "19.5 o botao 'Export' está no registo (rect real)");
+            tap(vx, vy);
+            check(g_jni.export_logs_calls >= 1,
+                  "19.5 o toque chama o exportLogsToDownloads REAL (JNI)");
+            check(g_jni.export_logs_relpath ==
+                      std::string(vv::elog::kDownloadsRelPath),
+                  "19.5 o relPath é a constante da casa (Download/GOneVV/logs)");
+            // o ATIVO exportado é o ATIVO do writer — com o erro de HOJE
+            std::string expS;
+            {
+                FILE* f = std::fopen((fakeDl + "/engine.log").c_str(), "rb");
+                check(f != nullptr, "19.5 o engine.log exportado existe");
+                if (f) {
+                    char buf[4096];
+                    while (std::fgets(buf, sizeof(buf), f)) {
+                        expS += buf;
+                    }
+                    std::fclose(f);
+                }
+            }
+            check(expS.find("import: FALHOU") != std::string::npos,
+                  "19.5 o exportado traz a linha de erro de HOJE (não é "
+                  "stale)");
+            check(expS.find("memória insuficiente ao carregar mesh") !=
+                      std::string::npos,
+                  "19.5 o exportado traz a CAUSA do load (PASSO 4)");
+            check(expS.find("gmesh: fase=parse ms=") != std::string::npos,
+                  "19.5 o exportado traz os tempos por fase");
+            g_jni.export_logs = nullptr;   // limpa o hook (o resto do harness)
+            g_editor.settingsMenu = false;
+            rmrf(fakeDl);
+            frame();
+        }
+
+        onAppCmd(&app19, APP_CMD_TERM_WINDOW);
     }
 
     // ---- sumário -----------------------------------------------------------

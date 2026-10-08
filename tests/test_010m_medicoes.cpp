@@ -18,6 +18,7 @@
 #include "TestFramework.h"
 
 #include "assets/AssetConverter.h"
+#include "assets/ResourceManager.h"
 #include "core/Bench.h"
 #include "core/FsStorage.h"
 #include "platform/EngineLog.h"
@@ -617,6 +618,125 @@ TEST(sentinela_r039_50m_verts_ram_pico_512mb) {
         // O VEREDITO: completo + verificado bit a bit + pico ≤ 512 MB
         const bool peakOk = peakReset && (peakKb / 1024) <= 512;
         ::_exit(ok && out.meshes.size() == 1 && verOk && peakOk ? 0 : 10);
+    }
+    int status = 0;
+    ::waitpid(pid, &status, 0);
+    EXPECT(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+// ---- 0.10-M (PASSO 3B) · A MEDIÇÃO DO LOAD PÓS-CONVERSÃO -------------------
+// A CONFIRMAÇÃO MEDIDA da causa do «fail de 203 MB»: o import STREAMING
+// completa com pico baixo (a sentinela R-039 acima); o LOAD de hoje
+// RECUSA o mesh único (>65 535 verts) com a mensagem «memória insuficiente
+// ao carregar mesh (cura no PASSO 4: render por blocos)». Números:
+//   · fase=load ms= e o pico de RAM DO LOAD — com o GUARDO CEDO (o espião
+//     de 192 B) a recusa custa a BASE do processo, não o ficheiro: a 1ª
+//     medição deste teste (sem o guard) queimava 2007 MB para ler um
+//     .gmesh de 972 MB e recusar — no C33 a app morria ANTES da mensagem;
+//   · a RECUSA com a mensagem do dono (a causa REGISTADA, não contornada).
+// A conversão NÃO é medida de novo — o perfil scene-213MB já a provou
+// acima (55 MB de pico); aqui mede-se o LOAD, com o pico REINICIADO
+// DEPOIS do import (a RAM medida é SÓ a do load).
+TEST(medicao_010m_load_pos_conversao_a_parede_do_mesh_unico) {
+    static const Profile kProf = {"scene-213MB", 80, 1, 5242880, 10000000,
+                                  false, true};
+    const pid_t pid = ::fork();
+    ASSERT(pid >= 0);
+    if (pid == 0) {
+        // ---- FILHO: import (o caminho de produção) → reset do pico → LOAD
+        const std::string dir =
+            std::string("/tmp/goni_010m_load_") +
+            std::to_string(int(::getpid()));
+        const std::string src = dir + "/fonte.glb";
+        u64 glbBytes = 0;
+        rmRf(dir);
+        if (!mkDir(dir)) {
+            std::printf("  [010m-load] FALHA a criar %s\n", dir.c_str());
+            std::fflush(stdout);
+            ::_exit(21);
+        }
+        if (!generateGlb(kProf, src, glbBytes)) {
+            std::printf("  [010m-load] FALHA a gerar o perfil\n");
+            std::fflush(stdout);
+            childCleanup(dir);
+            ::_exit(20);
+        }
+        const std::string logs = dir + "/logs";
+        elog::init(logs.c_str());
+        FsStorage st((dir + "/proj").c_str());
+        convert::Output out;
+        convert::Stats stats;
+        std::string err;
+        const bool impOk = convert::importFile(src, "fonte.glb", st, nullptr,
+                                                out, stats, err, nullptr,
+                                                nullptr);
+        const bool verOk =
+            impOk && fileHasLine(logs + "/engine.log", "verificado=1");
+        if (!impOk || out.meshes.empty()) {
+            std::printf("  [010m-load] o import FALHOU: %.120s\n",
+                        err.c_str());
+            std::fflush(stdout);
+            elog::shutdown();
+            childCleanup(dir);
+            ::_exit(22);
+        }
+
+        // o pico mede SÓ o LOAD (o import + gerador já passaram — clear_refs)
+        const bool peakReset = resetPeakRss();
+        const u64 rssBefore = currentRssKb();
+        ResourceManager rm;
+        rm.setStorage(&st);
+        std::string lerr;
+        const auto t0 = std::chrono::steady_clock::now();
+        const MeshData* m = rm.mesh(out.meshes[0], lerr);
+        const double loadMs =
+            std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - t0)
+                .count();
+        const u64 peakKb = bench::readPeakRssKb();
+        u64 gmeshBytes = 0;
+        {
+            std::vector<u8> gm;
+            if (st.readBytes(out.meshes[0], gm)) {
+                gmeshBytes = gm.size();
+            }
+        }
+        const bool loadMsOk =
+            fileHasLine(logs + "/engine.log", "gmesh: fase=load ms=");
+        const bool causaOk =
+            lerr.find("memória insuficiente ao carregar mesh") !=
+                std::string::npos &&
+            lerr.find("cura no PASSO 4: render por blocos") !=
+                std::string::npos;
+
+        std::printf(
+            "  [010m-load] fonte=%llu MB → .gmesh=%llu MB | import "
+            "verificado=%d | LOAD: ms=%.1f | RAM pico do load=%llu MB "
+            "(base %llu)%s | mesh=%s | causa=%.160s\n",
+            static_cast<unsigned long long>(glbBytes / (1024 * 1024)),
+            static_cast<unsigned long long>(gmeshBytes / (1024 * 1024)),
+            verOk ? 1 : 0, loadMs,
+            static_cast<unsigned long long>(peakKb / 1024),
+            static_cast<unsigned long long>(rssBefore / 1024),
+            peakReset ? "" : " (pico SEM reset)",
+            m ? "CARREGOU (mesh único)" : "RECUSADO",
+            lerr.c_str());
+        std::fflush(stdout);   // o _exit NÃO flusheia
+
+        elog::shutdown();
+        childCleanup(dir);
+        // O VEREDITO (a causa confirmada, registada, NÃO contornada — e a
+        // MENSAGEM entregue barata):
+        //  · o import completou e verificou (a conversão está CORRETA);
+        //  · o load RECUSOU com a mensagem do dono (mesh único > 65 535);
+        //  · a linha de tempo fase=load existe (os minutos têm dono);
+        //  · o pico do load é a BASE + ε (o espião de 192 B): a recusa não
+        //    incendeia a RAM — no C33 a mensagem CHEGA ao dono (a 1ª versão
+        //    sem o guard media 2007 MB de pico: a app morria calada).
+        //    A cura de VERDADE continua a ser o PASSO 4 (render por blocos).
+        const bool peakBarato = peakReset &&
+                                (peakKb / 1024) <= (rssBefore / 1024) + 32;
+        ::_exit(verOk && !m && causaOk && loadMsOk && peakBarato ? 0 : 10);
     }
     int status = 0;
     ::waitpid(pid, &status, 0);

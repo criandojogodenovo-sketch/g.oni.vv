@@ -97,15 +97,28 @@ O v1 é um formato PERDIDO (lossy) — o v3 do PASSO 2 mata isto:
   — `M·pos` + `worldRot·normal` — e as primitivas concatenadas) ou, no
   caminho sem nós, um por mesh. O OBJ passa pelo `ObjStreamParser` →
   mesmo `writeGMesh`.
-- **Leitura runtime**: `ResourceManager.cpp` (branch `ext == "gmesh"`) —
-  `storage_->readBytes(path, bytes)` lê o FICHEIRO INTEIRO para a RAM e
-  chama `readGMesh`; o log é a linha da casa
-  `asset: load <nome>.gmesh verts=N em Xms`.
+- **Leitura runtime**: `ResourceManager.cpp` (branch `ext == "gmesh"`) — o
+  **GUARDO CEDO** (0.10-M PASSO 3B) espia os 192 B do header+meta com
+  `ProjectStorage::readBytesAt` + `gmeshV3PeekMeta` ANTES de ler o ficheiro
+  inteiro: um v3 acima da parede recusa por 192 B (medido: a scene de
+213 MB recusa com pico de RAM = base, 0 MB extra; a 1ª versão sem o
+  espião media **2007 MB** para ler um .gmesh de 972 MB e recusar — no C33
+  a app morria ANTES da mensagem). Passando o guard, o caminho de sempre:
+  `storage_->readBytes(path, bytes)` lê o ficheiro inteiro (o
+  `FsStorage::readBytes` agora dimensiona UMA vez — o pico era ~2× o
+  ficheiro pela cópia string→vector) e chama `readGMesh`; o log é a linha
+  da casa `asset: load <nome>.gmesh verts=N em Xms`.
 - **Upload GPU**: `GpuAssets` monta o interleaved stride-32
   (`render/Vertex.h`: pos 3f + normal 3f + uv 2f) a partir do MeshData
   dequantizado.
 - **Picking/colisores/OBJ**: consomem o MESMO MeshData (nada sabe de
   bytes .gmesh — a camada de bytes morre em `readGMesh`).
+- **TEMPOS POR FASE (0.10-M PASSO 3B)**: cada fase do caminho loga a
+  linha contrato `gmesh: fase=<parse|cut|assembly|verify|load|render>`
+  ms=<n> (parse/corte/assembly/verificação no conversor; load na leitura
+  runtime — logado no sucesso E na recusa; render no upload GPU do
+  `GpuAssets`) + `import: copia ms=<n>` para a fase da cópia da fonte —
+  os minutos de um import do dono passam a ter dono por fase.
 
 ## 7. O .gm (clips de animação) — resumo (a spec completa vive no código)
 
@@ -181,8 +194,16 @@ CORROMPIDO e os outros continuam a abrir.
 
 `readGMesh` num v3 com ≤65,535 vértices TOTAIS monta o MeshData (1
 grupo por bloco — os nomes passam a «bloco N»; os materiais vêm da
-tabela). Acima disso devolve erro legível que nomeia o PASSO 4 (render
-por blocos) — o FICHEIRO está correto. As pools são POR BLOCO (por
+tabela). Acima disso — ou quando a estimativa do mesh único
+(`gmeshV3LoadEstimateBytes`: verts×`sizeof(Vertex)` + índices×2 + pele
+20 B/vértice) passa o orçamento declarado `kMeshLoadBudgetBytes`
+(256 MB, o número da casa do teto de range R-032) — devolve o erro
+**«memória insuficiente ao carregar mesh (cura no PASSO 4: render por
+blocos)»** com os números (vértices, blocos, índices, ~MB): o runtime de
+hoje monta o mesh ÚNICO em RAM e é ESSA a parede do modelo grande; a
+causa fica REGISTADA com números, NÃO contornada — o FICHEIRO está
+correto (a conversão verificou-o bit a bit) e abre por blocos (tabela
+v3) quando o render por blocos existir. As pools são POR BLOCO (por
 grupo/primitiva): vértices partilhados entre grupos viajam duplicados
 por bloco — NUNCA soldados; o conjunto de triângulos é idêntico ao da
 entrada. Vértices órfãos (referenciados por nenhum triângulo) não

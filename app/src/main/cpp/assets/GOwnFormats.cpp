@@ -527,6 +527,111 @@ const GMeshV3Attr* GMeshV3Meta::attr(u8 semantic) const {
     return nullptr;
 }
 
+// 0.10-M (PASSO 3B) — o ESPião do GUARDO do load: header + meta do .gmesh v3
+// validados num PEQUENO buffer (kGHeaderBytes + kGmeshV3MetaBytes = 192 B —
+// o ResourceManager lê SÓ isto com readBytesAt ANTES de decidir ler o
+// ficheiro inteiro). O decode dos campos é o MESMO v3ReadMeta (zero drift);
+// as validações são as que não dependem do comprimento do ficheiro. O
+// gReadHeader de sempre NÃO serve aqui: recusa payloadSize > len (o payload
+// do v3 é o ficheiro quase inteiro) — o peek decodifica o header à mão.
+bool gmeshV3PeekMeta(const u8* bytes, size_t len, GMeshV3Meta& meta,
+                     std::string& err) {
+    meta = GMeshV3Meta{};
+    if (!bytes || len < kGHeaderBytes + kGmeshV3MetaBytes) {
+        err = "peek curto demais (" + std::to_string(len) + " B)";
+        return false;
+    }
+    // o header comum, decodificado à mão (as validações de sempre)
+    GFileHeader h;
+    for (int i = 0; i < 4; ++i) {
+        h.magic[i] = static_cast<char>(bytes[i]);
+    }
+    h.version = static_cast<u16>(bytes[4] | (bytes[5] << 8));
+    h.endianMark = static_cast<u16>(bytes[6] | (bytes[7] << 8));
+    h.align = static_cast<u32>(bytes[8]) | (static_cast<u32>(bytes[9]) << 8) |
+              (static_cast<u32>(bytes[10]) << 16) |
+              (static_cast<u32>(bytes[11]) << 24);
+    u64 payload = 0, checksum = 0;
+    for (int b = 0; b < 8; ++b) {
+        payload |= static_cast<u64>(bytes[12 + b]) << (8 * b);
+        checksum |= static_cast<u64>(bytes[20 + b]) << (8 * b);
+    }
+    // (bytes 28..31 = reserved — o padding até os 32 B do CONTRATO)
+    h.payloadSize = payload;
+    h.checksum = checksum;
+    if (std::memcmp(h.magic, "GMES", 4) != 0) {
+        err = "magic errado (esperado GMES): não é um ficheiro próprio válido";
+        return false;
+    }
+    if (h.endianMark != 0x1A2B) {
+        err = "endianess trocada (marca 0x" + std::to_string(h.endianMark) +
+              ") — ficheiro de outra plataforma";
+        return false;
+    }
+    if (h.version != 3) {
+        err = "não é um .gmesh v3 (version=" + std::to_string(h.version) + ")";
+        return false;
+    }
+    if (h.payloadSize < kGmeshV3MetaBytes) {
+        err = "metadados do .gmesh v3 truncados (payload " +
+              std::to_string(h.payloadSize) + " B < " +
+              std::to_string(kGmeshV3MetaBytes) + ")";
+        return false;
+    }
+    // o checksum do header num v3 cobre SÓ os metadados — com 192 B isto é
+    // a validação COMPLETA do header+meta (a tabela tem o seu próprio CRC,
+    // verificado no caminho inteiro)
+    const u64 got = gfnv1a(bytes + kGHeaderBytes, kGmeshV3MetaBytes);
+    if (got != h.checksum) {
+        err = "CHECKSUM CORROMPIDO: metadados dizem 0x" +
+              std::to_string(h.checksum) + ", recalculado 0x" +
+              std::to_string(got) + " — o ficheiro foi danificado";
+        return false;
+    }
+    Reader r(bytes + kGHeaderBytes, kGmeshV3MetaBytes);
+    if (!v3ReadMeta(r, meta, err)) {
+        return false;
+    }
+    if (meta.attrCount == 0 || meta.attrCount > kGmeshV3MaxAttrs) {
+        err = "número de atributos inválido no .gmesh v3 (" +
+              std::to_string(meta.attrCount) + ")";
+        return false;
+    }
+    bool hasPos = false;
+    for (u32 i = 0; i < meta.attrCount; ++i) {
+        const GMeshV3Attr& a = meta.attrs[i];
+        if (v3AttrComponents(a.semantic) == 0) {
+            err = "semântica de atributo desconhecida no .gmesh v3 (" +
+                  std::to_string(a.semantic) + ")";
+            return false;
+        }
+        if (a.storage > kAttrU8) {
+            err = "armazenamento de atributo desconhecido no .gmesh v3 (" +
+                  std::to_string(a.storage) + ")";
+            return false;
+        }
+        if (a.semantic == kAttrPosition) hasPos = true;
+    }
+    if (!hasPos) {
+        err = "o layout de atributos do .gmesh v3 não tem POSITION";
+        return false;
+    }
+    if (meta.vertexCount == 0 || meta.indexCount == 0 ||
+        (meta.indexCount % 3) != 0) {
+        err = "contagens inválidas no .gmesh v3 (verts=" +
+              std::to_string(meta.vertexCount) + " idx=" +
+              std::to_string(meta.indexCount) + ")";
+        return false;
+    }
+    if (meta.blockCount == 0 || meta.blockVertexCap == 0) {
+        err = "blocos/cap inválidos no .gmesh v3 (blocos=" +
+              std::to_string(meta.blockCount) + " cap=" +
+              std::to_string(meta.blockVertexCap) + ")";
+        return false;
+    }
+    return true;
+}
+
 bool readGMeshV3Meta(const u8* bytes, size_t len, GMeshV3Meta& meta,
                      std::vector<GMeshV3Block>& blocks,
                      std::vector<std::string>& materials, std::string& err) {
@@ -1086,6 +1191,40 @@ bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err) {
 
 // ---- o dispatcher de leitura (v1/v2 payload cru · v3 blocos) ----------------
 
+// 0.10-M (PASSO 3B) — a estimativa PURA do MeshData único: o que o load de
+// hoje materializaria (RAM) antes do upload GPU. A fórmula é o CONTRATO
+// (aferida no teste sem ficheiro): verts×sizeof(Vertex) + índices×2 (u16)
+// + pele 20 B/vértice quando o meta diz skinned.
+u64 gmeshV3LoadEstimateBytes(const GMeshV3Meta& meta) {
+    const u64 skinPerVert = (meta.flags & 1u) ? 20ull : 0ull;
+    return meta.vertexCount * (sizeof(Vertex) + skinPerVert) +
+           meta.indexCount * sizeof(u16);
+}
+
+// 0.10-M (PASSO 3B) — A MENSAGEM da recusa (a que o dono pediu), UMA só
+// fonte de verdade: o guard CEDO do ResourceManager (o espião de 192 B) e
+// o readGMesh (a rede no caminho inteiro) dizem EXATAMENTE o mesmo.
+std::string gmeshV3LoadRefusalErr(const GMeshV3Meta& meta) {
+    const u64 estimate = gmeshV3LoadEstimateBytes(meta);
+    const bool overVerts = meta.vertexCount > 65535;
+    const bool overBudget = estimate > kMeshLoadBudgetBytes;
+    std::string err = "memória insuficiente ao carregar mesh (cura no "
+                      "PASSO 4: render por blocos): " +
+                      std::to_string(meta.vertexCount) + " vértices em " +
+                      std::to_string(meta.blockCount) + " blocos (" +
+                      std::to_string(meta.indexCount) + " índices) — o "
+                      "runtime de hoje monta o mesh ÚNICO em RAM (~" +
+                      std::to_string(estimate / (1024 * 1024)) + " MB";
+    if (overBudget) {
+        err += ", acima do orçamento de " +
+               std::to_string(kMeshLoadBudgetBytes / (1024 * 1024)) + " MB";
+    }
+    err += "). O FICHEIRO ESTÁ CORRETO — a conversão verificou-o; nada foi "
+           "perdido. O ficheiro abre por blocos (tabela v3) quando o render "
+           "por blocos existir.";
+    return err;
+}
+
 bool readGMesh(const u8* bytes, size_t len, MeshData& out, std::string& err) {
     out = MeshData{};
     if (len < 6) {
@@ -1108,13 +1247,14 @@ bool readGMesh(const u8* bytes, size_t len, MeshData& out, std::string& err) {
     if (!readGMeshV3Meta(bytes, len, meta, blocks, mats, err)) {
         return false;
     }
-    if (meta.vertexCount > 65535) {
-        err = ".gmesh v3 com " + std::to_string(meta.vertexCount) +
-              " vértices em " + std::to_string(meta.blockCount) +
-              " blocos — o runtime de hoje monta meshes únicas (u16); o "
-              "render POR BLOCOS é o PASSO 4 do 0.10-M (bloqueado à espera "
-              "de aprovação). O FICHEIRO ESTÁ CORRETO — a conversão "
-              "verificou-o; nada foi perdido.";
+    // 0.10-M (PASSO 3B) — A PAREDE DO LOAD DE HOJE, com nome e números: o
+    // runtime monta o mesh ÚNICO (u16) — o modelo INTEIRO em RAM (+ o upload
+    // GPU dele). A conversão está CORRETA (verificou-a bit a bit); a causa
+    // do «fail de 203 MB» É este load inteiro; a cura é o PASSO 4 (render
+    // por blocos) — NÃO se contorna aqui. A mensagem é a que o dono pediu.
+    if (meta.vertexCount > 65535 ||
+        gmeshV3LoadEstimateBytes(meta) > kMeshLoadBudgetBytes) {
+        err = gmeshV3LoadRefusalErr(meta);
         return false;
     }
     u32 baseV = 0, baseI = 0;

@@ -290,6 +290,59 @@ bool SafStorage::readBytes(const std::string& relPath,
     return true;
 }
 
+bool SafStorage::readBytesAt(const std::string& relPath, u64 offset,
+                             size_t len, std::vector<u8>& out) const {
+    // 0.10-M (PASSO 3B) — o range EXATO pelo fd do SAF: openFd → lseek →
+    // read(len). O guard do load espia o header+meta do .gmesh v3 (192 B)
+    // sem ler o ficheiro inteiro pelo content:// (o mesmo contrato do
+    // FsStorage::readBytesAt)
+    out.clear();
+    if (!io_ || !validRelPath(relPath)) {
+        return false;
+    }
+    if (len == 0) {
+        return true;
+    }
+    std::string err, uri;
+    if (!resolveFile(relPath, false, uri, err)) {
+        elog::error("saf: readAt %s — %s", relPath.c_str(), err.c_str());
+        return false;
+    }
+    int fd = -1;
+    if (!io_->openFd(uri, "r", &fd, err)) {
+        elog::error("saf: open(r) %s — %s", relPath.c_str(), err.c_str());
+        return false;
+    }
+    FdGuard g{fd};
+    if (::lseek(fd, static_cast<off_t>(offset), SEEK_SET) ==
+        static_cast<off_t>(-1)) {
+        elog::error("saf: lseek(%llu) %s FALHOU — errno=%d (%s)",
+                    static_cast<unsigned long long>(offset),
+                    relPath.c_str(), errno, errnoText().c_str());
+        return false;
+    }
+    out.resize(len);
+    size_t got = 0;
+    while (got < len) {
+        const ssize_t r = ::read(fd, out.data() + got, len - got);
+        if (r < 0) {
+            elog::error("saf: read(fd) %s FALHOU — errno=%d (%s)",
+                        relPath.c_str(), errno, errnoText().c_str());
+            out.clear();
+            return false;
+        }
+        if (r == 0) {
+            break;   // EOF antes de len — range além do fim
+        }
+        got += static_cast<size_t>(r);
+    }
+    if (got != len) {
+        out.clear();
+        return false;
+    }
+    return true;
+}
+
 bool SafStorage::listDir(const std::string& relDir,
                          std::vector<std::string>& outFiles) const {
     outFiles.clear();
