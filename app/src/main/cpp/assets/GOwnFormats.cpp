@@ -355,6 +355,28 @@ void v3WriteMeta(Writer& w, const GMeshV3Meta& m) {
     w.u32_(0);
 }
 
+// 0.10-M (PASSO 3B) — o reset EXPLÍCITO membro-a-membro. O «m = GMeshV3Meta{}»
+// de sempre faz o GCC 13 do runner do CI dar ICE (gimplify.cc:774,
+// gimple_add_tmp_var — o agregado com array de agregados como temporário);
+// o reset explícito é o MESMO efeito sem o construto que parte o compiler.
+void v3Reset(GMeshV3Meta& m) {
+    m.flags = 0;
+    m.blockVertexCap = kGmeshV3BlockVertexCap;
+    m.vertexCount = 0;
+    m.indexCount = 0;
+    m.blockCount = 0;
+    m.materialCount = 0;
+    m.aabbMin = Vec3{};
+    m.aabbMax = Vec3{};
+    m.blockTableOffset = 0;
+    m.materialTableOffset = 0;
+    for (u32 i = 0; i < kGmeshV3MaxAttrs; ++i) {
+        m.attrs[i] = GMeshV3Attr{};
+    }
+    m.attrCount = 0;
+    m.tableCrc32 = 0;
+}
+
 bool v3ReadMeta(Reader& r, GMeshV3Meta& m, std::string& err) {
     m.attrCount = r.u32_();
     m.flags = r.u32_();
@@ -536,7 +558,7 @@ const GMeshV3Attr* GMeshV3Meta::attr(u8 semantic) const {
 // do v3 é o ficheiro quase inteiro) — o peek decodifica o header à mão.
 bool gmeshV3PeekMeta(const u8* bytes, size_t len, GMeshV3Meta& meta,
                      std::string& err) {
-    meta = GMeshV3Meta{};
+    v3Reset(meta);
     if (!bytes || len < kGHeaderBytes + kGmeshV3MetaBytes) {
         err = "peek curto demais (" + std::to_string(len) + " B)";
         return false;
@@ -635,7 +657,7 @@ bool gmeshV3PeekMeta(const u8* bytes, size_t len, GMeshV3Meta& meta,
 bool readGMeshV3Meta(const u8* bytes, size_t len, GMeshV3Meta& meta,
                      std::vector<GMeshV3Block>& blocks,
                      std::vector<std::string>& materials, std::string& err) {
-    meta = GMeshV3Meta{};
+    v3Reset(meta);
     blocks.clear();
     materials.clear();
     GFileHeader h;
@@ -1205,23 +1227,30 @@ u64 gmeshV3LoadEstimateBytes(const GMeshV3Meta& meta) {
 // fonte de verdade: o guard CEDO do ResourceManager (o espião de 192 B) e
 // o readGMesh (a rede no caminho inteiro) dizem EXATAMENTE o mesmo.
 std::string gmeshV3LoadRefusalErr(const GMeshV3Meta& meta) {
+    // (construída por APPENDS, sem a cadeia de temporários do operator+ —
+    // o GCC 13 do runner do CI também se engasgava aí a caminho do ICE)
     const u64 estimate = gmeshV3LoadEstimateBytes(meta);
-    const bool overVerts = meta.vertexCount > 65535;
     const bool overBudget = estimate > kMeshLoadBudgetBytes;
-    std::string err = "memória insuficiente ao carregar mesh (cura no "
-                      "PASSO 4: render por blocos): " +
-                      std::to_string(meta.vertexCount) + " vértices em " +
-                      std::to_string(meta.blockCount) + " blocos (" +
-                      std::to_string(meta.indexCount) + " índices) — o "
-                      "runtime de hoje monta o mesh ÚNICO em RAM (~" +
-                      std::to_string(estimate / (1024 * 1024)) + " MB";
+    std::string err;
+    err.reserve(384);
+    err += "memória insuficiente ao carregar mesh (cura no PASSO 4: render ";
+    err += "por blocos): ";
+    err += std::to_string(meta.vertexCount);
+    err += " vértices em ";
+    err += std::to_string(meta.blockCount);
+    err += " blocos (";
+    err += std::to_string(meta.indexCount);
+    err += " índices) — o runtime de hoje monta o mesh ÚNICO em RAM (~";
+    err += std::to_string(estimate / (1024 * 1024));
+    err += " MB";
     if (overBudget) {
-        err += ", acima do orçamento de " +
-               std::to_string(kMeshLoadBudgetBytes / (1024 * 1024)) + " MB";
+        err += ", acima do orçamento de ";
+        err += std::to_string(kMeshLoadBudgetBytes / (1024 * 1024));
+        err += " MB";
     }
-    err += "). O FICHEIRO ESTÁ CORRETO — a conversão verificou-o; nada foi "
-           "perdido. O ficheiro abre por blocos (tabela v3) quando o render "
-           "por blocos existir.";
+    err += "). O FICHEIRO ESTÁ CORRETO — a conversão verificou-o; nada foi ";
+    err += "perdido. O ficheiro abre por blocos (tabela v3) quando o render ";
+    err += "por blocos existir.";
     return err;
 }
 
