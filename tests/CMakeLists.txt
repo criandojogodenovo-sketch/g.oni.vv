@@ -235,6 +235,9 @@ add_executable(test_core
         # 0.10-M (PASSO 1c): medições reais por fase (cópia/parse/fusão/
         # escrita) + RAM pico dos 3 perfis do dono — o relatório cita-as
         test_010m_medicoes.cpp
+        # 0.10-M (PASSO 2): o formato v3 sob prova (round-trip exato,
+        # retrocompat v1/v2, contagens >2^32 sem alocar, CRC32, mmap)
+        test_gmeshv3.cpp
         # 0.8.11: ÁUDIO — .gi (ADPCM round-trip/WAV/OGG/MP3 erros),
         # misturador (vozes/loop/pitch/posicional/master), PROBE harness
         # (fake backends: falha→fallback, ok→AAudio), workspace (fake host:

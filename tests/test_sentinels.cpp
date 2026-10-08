@@ -5428,3 +5428,90 @@ TEST(regress_janelas_passo4) {
         ui.endFrame();
     }
 }
+
+// ---------------------------------------------------------------------------
+// R-038 (0.10-M PASSO 2) — RETROCOMPATIBILIDADE DO .gmesh: os ficheiros
+// v1 e v2 REAIS (fixtures commitadas, geradas com o escritor da era
+// 0.9.6 ANTES do escritor passar a v3) continuam a abrir, o escritor só
+// escreve v3 e o round-trip v3 é EXATO (float32). AS MUTAÇÕES:
+//   • M-V3a  o escritor a gravar v2 (kGmeshVersionWrite 3→2) → VERMELHO
+//   • M-V3b  o leitor a recusar v1 (a fixture v1 falha no dispatch) → VERMELHO
+// A retrocompatibilidade é a CLÁUSULA do dono na spec 0.10-M: «quebrar
+// isto é vermelho por definição».
+TEST(regress_gmesh_v3_retrocompat) {
+    using namespace vv;
+    const std::string root = REPO_ROOT;
+    std::vector<u8> bytes;
+    std::string err;
+
+    // (1) o v1 REAL abre (o payload quantizado dequantiza como sempre)
+    ASSERT(fileapi::readAll(root + "/tests/fixtures/gmesh_v1_esfera.gmesh",
+                            bytes));
+    MeshData v1;
+    ASSERT((readGMesh(bytes.data(), bytes.size(), v1, err)) ||
+           (std::fprintf(stderr, "R-038 v1: %s\n", err.c_str()), 0));
+    EXPECT(v1.vertices.size() == 221);
+    EXPECT(v1.indices.size() == 1152);
+    EXPECT(v1.groups[0].name == "corpo");
+    EXPECT(v1.groups[0].material == "laca");
+
+    // (2) o v2 abre (a interpretação tolerante documentada — os MESMOS
+    // bytes com version=2; nunca existiu v2 no histórico do repo)
+    bytes.clear();
+    ASSERT(fileapi::readAll(root + "/tests/fixtures/gmesh_v2_esfera.gmesh",
+                            bytes));
+    MeshData v2;
+    ASSERT((readGMesh(bytes.data(), bytes.size(), v2, err)) ||
+           (std::fprintf(stderr, "R-038 v2: %s\n", err.c_str()), 0));
+    EXPECT(v2.vertices.size() == 221);
+    EXPECT(v2.groups[0].material == "laca");
+
+    // (3) o ESCRITOR só escreve v3 (o header leva a versão 3 — M-V3a troca
+    // kGmeshVersionWrite para 2 → este EXPECT fica vermelho)
+    MeshData m;
+    for (int r = 0; r <= 12; ++r) {
+        const f32 phi = 3.14159265f * f32(r) / 12.0f;
+        for (int s = 0; s <= 16; ++s) {
+            const f32 th = 6.28318530f * f32(s) / 16.0f;
+            Vertex v;
+            v.pos = Vec3{std::sin(phi) * std::cos(th), std::cos(phi),
+                         std::sin(phi) * std::sin(th)};
+            v.normal = v.pos;
+            v.uv = Vec2{f32(s) / 16.0f, f32(r) / 12.0f};
+            m.vertices.push_back(v);
+        }
+    }
+    for (int r = 0; r < 12; ++r) {
+        for (int s = 0; s < 16; ++s) {
+            const u16 a = u16(r * 17 + s);
+            const u16 b = u16(a + 17);
+            m.indices.push_back(a);
+            m.indices.push_back(b);
+            m.indices.push_back(u16(a + 1));
+            m.indices.push_back(b);
+            m.indices.push_back(u16(b + 1));
+            m.indices.push_back(u16(a + 1));
+        }
+    }
+    std::vector<u8> out;
+    ASSERT(writeGMesh(m, out, err));
+    const u16 ver = static_cast<u16>(out[4] | (out[5] << 8));
+    // o LITERAL 3 é de propósito: a mutação M-V3a troca a CONSTANTE
+    // (kGmeshVersionWrite 3→2) e este check tem de a apanhar
+    EXPECT_MSG(ver == 3,
+               "o escritor grava version=%u (a cláusula do dono: só v3)",
+               ver);
+
+    // (4) o round-trip v3 é EXATO (float32 bit a bit)
+    MeshData back;
+    ASSERT(readGMesh(out.data(), out.size(), back, err));
+    bool exact = true;
+    for (size_t i = 0; i < m.vertices.size(); ++i) {
+        if (std::memcmp(&back.vertices[i].pos, &m.vertices[i].pos, 12) != 0) {
+            exact = false;
+        }
+    }
+    EXPECT(exact);
+    EXPECT(back.indices.size() == m.indices.size());
+    EXPECT(back.vertices.size() == m.vertices.size());
+}

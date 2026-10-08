@@ -13,7 +13,10 @@
 #include <cstdlib>   // 0.9.6.4: realpath (isFile/realPath do GRUPO A)
 #include <cstring>
 #include <dirent.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <unistd.h>
 
 namespace vv::fileapi {
@@ -532,5 +535,76 @@ void clearReadonlyPrefix() {
 }
 
 }  // namespace testing
+
+
+// ---- 0.10-M (PASSO 2): mmap com offsets de 64 bits -------------------------
+void* mapFile64(const char* path, unsigned long long offset,
+                unsigned long long len, unsigned long long* mappedLen) {
+    if (mappedLen != nullptr) *mappedLen = 0;
+    if (path == nullptr || len == 0) {
+        elog::warn("fileapi: mapFile64 falhou em '(null)' — errno=22 (args inválidos len=%llu)",
+                   static_cast<unsigned long long>(len));
+        return nullptr;
+    }
+    const int fd = ::open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        elog::warn("fileapi: mapFile64: open falhou em '%s' — errno=%d (%s)",
+                   path, errno, std::strerror(errno));
+        return nullptr;
+    }
+    struct stat st;
+    if (::fstat(fd, &st) != 0) {
+        elog::warn("fileapi: mapFile64: fstat falhou em '%s' — errno=%d (%s)",
+                   path, errno, std::strerror(errno));
+        ::close(fd);
+        return nullptr;
+    }
+    const long long page = ::sysconf(_SC_PAGESIZE);
+    const unsigned long long pageOff =
+        (offset / static_cast<unsigned long long>(page)) *
+        static_cast<unsigned long long>(page);
+    const unsigned long long within = offset - pageOff;
+    const unsigned long long mapLen = len + within;
+    if (offset > static_cast<unsigned long long>(st.st_size) ||
+        len > static_cast<unsigned long long>(st.st_size) - offset) {
+        // a validação honesta: a range PEDIDA tem de estar no ficheiro
+        // (o kernel alinha o mapeamento à página por conta dele)
+        elog::warn("fileapi: mapFile64: range [%llu, %llu) fora de '%s' "
+                   "(%lld B) — fora do ficheiro",
+                   static_cast<unsigned long long>(offset),
+                   static_cast<unsigned long long>(offset + len), path,
+                   static_cast<long long>(st.st_size));
+        ::close(fd);
+        return nullptr;
+    }
+    void* base = ::mmap(nullptr, mapLen, PROT_READ, MAP_PRIVATE, fd,
+                        static_cast<off_t>(pageOff));
+    ::close(fd);
+    if (base == MAP_FAILED) {
+        elog::warn("fileapi: mapFile64: mmap falhou em '%s' (%llu B) — "
+                   "errno=%d (%s)",
+                   path, static_cast<unsigned long long>(mapLen), errno,
+                   std::strerror(errno));
+        return nullptr;
+    }
+    if (mappedLen != nullptr) *mappedLen = mapLen;
+    return static_cast<char*>(base) + within;
+}
+
+void unmapFile64(void* ptr, unsigned long long mappedLen) {
+    if (ptr == nullptr || mappedLen == 0) return;
+    // o ptr devolvido é base+within — o munmap quer o BASE alinhado: o
+    // contrato é (ptr, mappedLen) como devolvidos; alinha para trás
+    const long long page = ::sysconf(_SC_PAGESIZE);
+    const uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+    const uintptr_t base = addr & ~(static_cast<uintptr_t>(page) - 1);
+    // o mapeamento original começou em base e tinha ≥ mappedLen bytes
+    const unsigned long long guess =
+        addr - base + mappedLen;   // bytes desde o base alinhado
+    if (::munmap(reinterpret_cast<void*>(base), guess) != 0) {
+        elog::warn("fileapi: unmapFile64: munmap falhou — errno=%d (%s)",
+                   errno, std::strerror(errno));
+    }
+}
 
 } // namespace vv::fileapi

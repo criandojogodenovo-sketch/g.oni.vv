@@ -34,6 +34,37 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.10.1 — 0.10-M PASSO 2: O FORMATO v3 (o escritor só escreve v3; o leitor abre v1+v2+v3)
+
+- **O ESCRITOR v3** (`writeGMesh` reescrito): header com contagens
+  64-bit (vértices/triângulos/blocos/materiais) + AABB + offsets
+  absolutos 64-bit; blocos ≤65,535 verts (cap configurável) com índices
+  locais u16 (u32 quando a pool passa); entradas de 80 B com offset/
+  tamanho/AABB/material/**CRC32**; o layout de atributos DESCRITO no
+  header (pos/normal/UV0 + tangente/UV1/cor/bones quando existirem —
+  acrescentar atributos não muda a versão); alinhamento a 16; SEM
+  perda: float32 exato, zero quantização.
+- **A INTEGRIDADE SEM LER TUDO**: o checksum do header cobre só os 160 B
+  de metadados; a tabela e cada bloco têm o próprio CRC32 — um bloco
+  corrompido não derruba os outros (o requisito do mmap/streaming).
+- **O LEITOR ABRE v1+v2+v3** (a cláusula do dono): as fixtures REAIS v1
+  (gerada com o escritor da era 0.9.6 e commitada ANTES da troca) e a
+  variante v2 abrem — **R-038** `regress_gmesh_v3_retrocompat` vigia.
+  **M-V3a** (o escritor a gravar v2) e **M-V3b** (o leitor a recusar o
+  v1) vermelho→verde coladas.
+- **MMap de 64 bits**: `fileapi::mapFile64/unmapFile64` (FileApi) + o
+  teste que lê o ficheiro mapeado; o meta lê header+tabela SEM alocar os
+  dados — contagens >2^32 e offsets >4 GB provados num ficheiro de <1 KB.
+- **RECALIBRAÇÕES honestas**: o rácio do wiring010 (o v3 é float32 — em
+  meshes pequenas é maior que o texto; a promessa agora é zero limites e
+  zero perdas), a versão futura da recusa (9), as mensagens dos 2 guards
+  do merge, e o filho do 500 MB limpa o seu root (a lição /tmp: o disco
+  desta sandbox encheu a 99% — 500 MB × N corridas).
+- Suítes: test_core 0 falhas (8 casos v3 novos) · c33_virtual 631/631 ·
+  gates verdes. Relatório: `docs/RELATORIO-0.10-M-PASSO2-FORMATO.md` ·
+  versionCode 54 · **o PASSO 3 (conversor streaming) segue; PÁRO
+  ABSOLUTO antes do PASSO 4**.
+
 ## 0.10.0 — 0.10-M PASSO 1: DIAGNÓSTICO E DOCUMENTO (a fase .gmesh v3 abre)
 
 - **Os docs FONTE DE VERDADE dos formatos**: `docs/GMESH_formato.md` (o

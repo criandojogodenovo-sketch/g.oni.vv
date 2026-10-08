@@ -935,7 +935,9 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
             // funde a primitiva no MeshData do mesh (rebase de índices)
             const u16 base = static_cast<u16>(md.vertices.size());
             if (md.vertices.size() + pos.size() > 65536) {
-                err = "glTF: mesh fundido excede 65535 vértices (limite u16)";
+                err = "glTF: mesh fundido excede 65535 vértices (o teto do caminho de "
+                          "mesh única; o formato v3 já não tem teto — o "
+                          "corte em blocos entra no PASSO 3 do 0.10-M)";
                 return false;
             }
             MeshData::Group grp;

@@ -93,6 +93,17 @@ std::string parentPath(const std::string& dir);
 // leitura binária inteira. false = fopen falhou (errno logado).
 bool readAll(const std::string& path, std::vector<u8>& out);
 
+// 0.10-M (PASSO 2) — MMAP com offsets de 64 bits: mapeia UMA range de
+// ficheiro (o caminho do leitor de blocos v3, do conversor streaming do
+// PASSO 3 e do render por blocos do PASSO 4). O offset interno é alinhado
+// à página pelo helper (o ponteiro devolvido já aponta para `offset`);
+// `*mappedLen` recebe os bytes mapeados a partir do ponteiro devolvido —
+// o unmapFile64 recebe EXATAMENTE o par (ptr, *mappedLen). nullptr =
+// falha (errno já logado). POSIX puro — CI Linux e Android.
+void* mapFile64(const char* path, unsigned long long offset,
+                unsigned long long len, unsigned long long* mappedLen);
+void unmapFile64(void* ptr, unsigned long long mappedLen);
+
 // escrita binária inteira (cria as pastas-mãe em falta; substitui se
 // existir). false = mkdirs/fopen/write falharam (errno logado).
 bool writeAll(const std::string& path, const void* data, size_t n);

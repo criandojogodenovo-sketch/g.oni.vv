@@ -266,12 +266,17 @@ TEST(wiring010_gmesh_roundtrip_e_ratio) {
     }
     EXPECT(unit);
 
-    // OUTPUT REAL: o rácio (o que o relatório cola)
+    // OUTPUT REAL: o rácio (o que o relatório cola). 0.10-M RECALIBRADO:
+    // desde o PASSO 2 o escritor só escreve v3 (float32 SEM PERDA) — em
+    // meshes PEQUENAS o float32 é maior que o texto do OBJ (o rácio <1
+    // era a propriedade da QUANTIZAÇÃO 16-bit do v1; a fixture v1 real
+    // commitada continua a prová-lo — test_gmeshv3). Em meshes grandes o
+    // float32 volta a ganhar ao texto (sem o custo de 6 f32 por linha).
     std::printf("  [gmesh] esfera %zu verts %zu idx — OBJ-texto %zu B → "
-                ".gmesh %zu B (%.2fx menor)\n",
+                ".gmesh v3 %zu B (%.2fx; a v1 quantizada da fixture real: "
+                "5930 B)\n",
                 m.vertices.size(), m.indices.size(), objBytes, out.size(),
                 static_cast<double>(objBytes) / static_cast<double>(out.size()));
-    EXPECT(out.size() < objBytes);   // "menor dentro da engine"
 }
 
 TEST(wiring010_gtext_e_ganm_roundtrip) {
@@ -363,11 +368,13 @@ TEST(warning010_magic_versao_endian_rejeitados) {
                         *reinterpret_cast<GFileHeader*>(out.data()), err));
     EXPECT(err.find("magic errado") != std::string::npos);
 
-    // versão futura
-    std::vector<u8> v2 = out;
-    v2[4] = 2;   // version = 2
-    EXPECT(!readGMesh(v2.data(), v2.size(), back, err));
-    EXPECT(err.find("versão 2 desconhecida") != std::string::npos);
+    // versão futura (0.10-M RECALIBRADO: a 2 ABRE — a retrocompatibilidade
+    // que o dono mandou; a recusa é de versões ACIMA da 3 — o R-038 prova
+    // a v1 e a v2 a abrir com as fixtures reais)
+    std::vector<u8> v9 = out;
+    v9[4] = 9;   // version = 9
+    EXPECT(!readGMesh(v9.data(), v9.size(), back, err));
+    EXPECT(err.find("desconhecida") != std::string::npos);
 
     // endianess trocada (a marca lida com os bytes trocados: 0x3412 ≠ 0x1A2B)
     std::vector<u8> be = out;
@@ -451,6 +458,9 @@ TEST(wiring010_import_500mb_streaming_rss_e_tempo_reais) {
                         : 0.0,
                     ms, rssKB / 1024);
         std::fflush(stdout);   // o _exit NÃO flusheia — o output é a prova
+        // 0.10-M: a LIMPEZA do root do filho (a lição /tmp: 500 MB × N
+        // corridas enchiam o disco — o import anterior morria de disco cheio)
+        rmrf(root);
         // VEREDITO do filho: sucesso + orçamento de RAM + saída menor
         ::_exit(ok && stats.outputBytes < stats.sourceBytes &&
                 rssKB / 1024 < 300   // orçamento: JAMAIS ~500 MB do readAll

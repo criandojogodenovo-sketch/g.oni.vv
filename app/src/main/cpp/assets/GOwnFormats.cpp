@@ -10,6 +10,7 @@
 //     arm64 do device são LE; o endianMark apanha o contrário).
 #include "assets/GOwnFormats.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -111,11 +112,12 @@ f32 dequantU(u16 q) {
 // única que leitores e escritores partilham
 constexpr size_t kGHeaderBytes = 32;
 
-void writeHeader(Writer& w, const char* magic, u64 payloadSize, u64 checksum) {
+void writeHeader(Writer& w, const char* magic, u64 payloadSize, u64 checksum,
+                 u16 version = 1) {
     w.bytes_(reinterpret_cast<const u8*>(magic), 4);
-    w.u16_(1);          // version
+    w.u16_(version);    // 0.10-M: o .gmesh escreve 3; os outros ficam na 1
     w.u16_(0x1A2B);     // endianMark
-    w.u32_(8);          // align (eco informativo)
+    w.u32_(version >= 3 ? 16 : 8);   // align (eco informativo)
     w.u64_(payloadSize);
     w.u64_(checksum);
     w.u32_(0);          // reserved (padding até 32 — o tamanho é CONTRATO)
@@ -149,100 +151,46 @@ bool gReadHeader(const u8* bytes, size_t len, const char* wantMagic,
               ") — ficheiro de outra plataforma";
         return false;
     }
-    if (h.version != 1) {
-        err = "versão " + std::to_string(h.version) +
-              " desconhecida (a engine lê a 1)";
+    if (h.version == 0) {
+        err = "versão 0 inválida";
         return false;
     }
+    // o RANGE de versões suportadas é DECISÃO DE CADA FORMATO (o .gmesh
+    // abre 1..3 — ver kGmeshVersion*; o .gtext/.gm continuam na 1)
     if (h.payloadSize + kGHeaderBytes > len) {
         err = "payload truncado: header diz " +
               std::to_string(h.payloadSize) + " B mas só há " +
               std::to_string(len - kGHeaderBytes) + " B";
         return false;
     }
-    const u64 got = gfnv1a(bytes + kGHeaderBytes,
-                           static_cast<size_t>(h.payloadSize));
-    if (got != h.checksum) {
-        err = "CHECKSUM CORROMPIDO: payload diz 0x" +
-              std::to_string(h.checksum) + ", recalculado 0x" +
-              std::to_string(got) + " — o ficheiro foi danificado";
-        return false;
+    if (h.version <= 2) {
+        // v1/v2 do .gmesh: o FNV-1a cobre o PAYLOAD INTEIRO (a regra de
+        // 0.8.10) — e é a regra VIGENTE do .gtext/.gm em qualquer versão
+        const u64 got = gfnv1a(bytes + kGHeaderBytes,
+                               static_cast<size_t>(h.payloadSize));
+        if (got != h.checksum) {
+            err = "CHECKSUM CORROMPIDO: payload diz 0x" +
+                  std::to_string(h.checksum) + ", recalculado 0x" +
+                  std::to_string(got) + " — o ficheiro foi danificado";
+            return false;
+        }
     }
+    // v3: o checksum do header cobre SÓ os 160 B de metadados (o payload
+    // inteiro obrigava a LER o ficheiro todo — inimigo do mmap/streaming);
+    // a verificação dos metadados é feita pelo leitor v3 (que conhece o
+    // tamanho fixo) e a integridade do resto vive nos CRC32 da tabela.
     return true;
 }
 
 // ---- .gmesh -------------------------------------------------------------------
-// payload: verts u32, indices u32, bounds f32×6, groups u32, [skin u8],
+// PAYLOAD v1 (e v2 — a interpretação tolerante documentada):
+// verts u32, indices u32, bounds f32×6, groups u32, [skin u8],
 // depois verts×(pos u16×3 + nrm u16×3 + uv u16×2 [+ joints u8×4 + w u16×4]),
 // indices×u16, groups×(nome str, material str, first u32, count u32),
 // skin verts×(joints u8×4, weights u16×4)
-bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err) {
-    out.clear();
-    if (m.vertices.empty() || m.indices.empty()) {
-        err = "geometria vazia — nada a converter";
-        return false;
-    }
-    if (m.vertices.size() > 65535) {
-        err = "mesh com " + std::to_string(m.vertices.size()) +
-              " vértices — o limite do engine é 65535 (índices u16)";
-        return false;
-    }
-    const bool skinned = m.vertices.size() * 4 == m.skinJoints.size();
-    // bounds (o leitor dequantiza por aqui — e o runtime lê o AABB SEM
-    // tocar nos vértices)
-    Vec3 mn{1e30f, 1e30f, 1e30f}, mx{-1e30f, -1e30f, -1e30f};
-    for (const Vertex& v : m.vertices) {
-        mn.x = mn.x < v.pos.x ? mn.x : v.pos.x;
-        mn.y = mn.y < v.pos.y ? mn.y : v.pos.y;
-        mn.z = mn.z < v.pos.z ? mn.z : v.pos.z;
-        mx.x = mx.x > v.pos.x ? mx.x : v.pos.x;
-        mx.y = mx.y > v.pos.y ? mx.y : v.pos.y;
-        mx.z = mx.z > v.pos.z ? mx.z : v.pos.z;
-    }
-    std::vector<u8> payload;
-    Writer w(payload);
-    w.u32_(static_cast<u32>(m.vertices.size()));
-    w.u32_(static_cast<u32>(m.indices.size()));
-    w.f32_(mn.x); w.f32_(mn.y); w.f32_(mn.z);
-    w.f32_(mx.x); w.f32_(mx.y); w.f32_(mx.z);
-    w.u32_(static_cast<u32>(m.groups.size()));
-    w.u8_(skinned ? 1 : 0);
-    for (const Vertex& v : m.vertices) {
-        w.u16_(quantF(v.pos.x, mn.x, mx.x - mn.x));
-        w.u16_(quantF(v.pos.y, mn.y, mx.y - mn.y));
-        w.u16_(quantF(v.pos.z, mn.z, mx.z - mn.z));
-        w.u16_(quantS(v.normal.x));
-        w.u16_(quantS(v.normal.y));
-        w.u16_(quantS(v.normal.z));
-        w.u16_(quantU(v.uv.x));
-        w.u16_(quantU(v.uv.y));
-        if (skinned) {
-            const size_t vi = &v - m.vertices.data();
-            for (int k = 0; k < 4; ++k) {
-                w.u8_(m.skinJoints[vi * 4 + static_cast<size_t>(k)]);
-            }
-            for (int k = 0; k < 4; ++k) {
-                w.u16_(quantU(m.skinWeights[vi * 4 + static_cast<size_t>(k)]));
-            }
-        }
-    }
-    for (const u16 idx : m.indices) {
-        w.u16_(idx);
-    }
-    for (const MeshData::Group& g : m.groups) {
-        w.str_(g.name);
-        w.str_(g.material);
-        w.u32_(g.firstIndex);
-        w.u32_(g.indexCount);
-    }
-    // header comum + payload
-    Writer o(out);
-    writeHeader(o, "GMES", payload.size(), gfnv1a(payload.data(), payload.size()));
-    o.bytes_(payload.data(), payload.size());
-    return true;
-}
-
-bool readGMesh(const u8* bytes, size_t len, MeshData& out, std::string& err) {
+namespace {
+bool readGMeshV1Payload(const u8* bytes, size_t len, MeshData& out,
+                        std::string& err) {
     out = MeshData{};
     GFileHeader h;
     if (!gReadHeader(bytes, len, "GMES", h, err)) {
@@ -331,6 +279,827 @@ bool readGMesh(const u8* bytes, size_t len, MeshData& out, std::string& err) {
     return true;
 }
 
+} // namespace (o leitor v1 cru — o resto do .gmesh volta ao nível do vv)
+
+// ---- .gmesh v3 (0.10-M PASSO 2) ------------------------------------------------
+// A spec viva é docs/GMESH_formato.md §v3. Resumo dos bytes:
+//   [header comum 32][metadados 160][dados dos blocos, 16-alinhados]
+//   [tabela de blocos 80 B/entrada][materiais (u16 len + bytes, 4-alinhados)]
+// O checksum do header num v3 = FNV-1a dos 160 B de metadados; cada bloco
+// leva CRC32 próprio e a tabela leva CRC32 próprio (a integridade sem
+// ler o ficheiro inteiro — o requisito do mmap/streaming).
+u32 gcrc32(const u8* data, size_t len) {
+    static u32 table[256];
+    static const bool ready = []() {
+        for (u32 i = 0; i < 256; ++i) {
+            u32 c = i;
+            for (int k = 0; k < 8; ++k) {
+                c = (c & 1u) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+            }
+            table[i] = c;
+        }
+        return true;
+    }();
+    (void)ready;
+    u32 c = 0xFFFFFFFFu;
+    for (size_t i = 0; i < len; ++i) {
+        c = table[(c ^ data[i]) & 0xFFu] ^ (c >> 8);
+    }
+    return c ^ 0xFFFFFFFFu;
+}
+
+namespace {
+
+u32 v3AttrComponents(u8 semantic) {
+    switch (semantic) {
+        case kAttrPosition:
+        case kAttrNormal: return 3;
+        case kAttrUv0:
+        case kAttrUv1: return 2;
+        case kAttrTangent:
+        case kAttrColor:
+        case kAttrBones:
+        case kAttrWeights: return 4;
+        default: return 0;   // semântica desconhecida → rejeitada na leitura
+    }
+}
+
+u32 v3AttrBytes(const GMeshV3Attr& a) {
+    const u32 n = v3AttrComponents(a.semantic);
+    if (n == 0) return 0;
+    const u32 sz = a.storage == kAttrF32 ? 4u : (a.storage == kAttrU16 ? 2u : 1u);
+    return n * sz;
+}
+
+void v3WriteMeta(Writer& w, const GMeshV3Meta& m) {
+    w.u32_(m.attrCount);
+    w.u32_(m.flags);
+    w.u32_(m.blockVertexCap);
+    w.u32_(m.tableCrc32);
+    w.u64_(m.vertexCount);
+    w.u64_(m.indexCount);
+    w.u64_(m.blockCount);
+    w.u64_(m.materialCount);
+    w.f32_(m.aabbMin.x); w.f32_(m.aabbMin.y); w.f32_(m.aabbMin.z);
+    w.f32_(m.aabbMax.x); w.f32_(m.aabbMax.y); w.f32_(m.aabbMax.z);
+    w.u64_(m.blockTableOffset);
+    w.u64_(m.materialTableOffset);
+    for (u32 i = 0; i < kGmeshV3MaxAttrs; ++i) {
+        const GMeshV3Attr& a = m.attrs[i];
+        w.u8_(a.semantic);
+        w.u8_(a.storage);
+        w.u8_(a.normalized);
+        w.u8_(a.reserved);
+        w.u32_(a.reserved2);
+    }
+    w.u32_(0);
+    w.u32_(0);
+}
+
+bool v3ReadMeta(Reader& r, GMeshV3Meta& m, std::string& err) {
+    m.attrCount = r.u32_();
+    m.flags = r.u32_();
+    m.blockVertexCap = r.u32_();
+    m.tableCrc32 = r.u32_();
+    m.vertexCount = r.u64_();
+    m.indexCount = r.u64_();
+    m.blockCount = r.u64_();
+    m.materialCount = r.u64_();
+    m.aabbMin.x = r.f32_(); m.aabbMin.y = r.f32_(); m.aabbMin.z = r.f32_();
+    m.aabbMax.x = r.f32_(); m.aabbMax.y = r.f32_(); m.aabbMax.z = r.f32_();
+    m.blockTableOffset = r.u64_();
+    m.materialTableOffset = r.u64_();
+    for (u32 i = 0; i < kGmeshV3MaxAttrs; ++i) {
+        GMeshV3Attr& a = m.attrs[i];
+        a.semantic = r.u8_();
+        a.storage = r.u8_();
+        a.normalized = r.u8_();
+        a.reserved = r.u8_();
+        a.reserved2 = r.u32_();
+    }
+    (void)r.u32_();
+    (void)r.u32_();
+    if (r.bad) {
+        err = "metadados do .gmesh v3 truncados";
+        return false;
+    }
+    return true;
+}
+
+void v3WriteBlockEntry(Writer& w, const GMeshV3Block& b) {
+    w.u64_(b.dataOffset);
+    w.u64_(b.dataSize);
+    w.u64_(b.vertexCount);
+    w.u64_(b.indexCount);
+    w.f32_(b.aabbMin.x); w.f32_(b.aabbMin.y); w.f32_(b.aabbMin.z);
+    w.f32_(b.aabbMax.x); w.f32_(b.aabbMax.y); w.f32_(b.aabbMax.z);
+    w.u32_(b.materialIndex);
+    w.u32_(b.indexType);
+    w.u32_(b.crc32);
+    w.u32_(0);
+    w.u64_(0);
+}
+
+bool v3ReadBlockEntry(Reader& r, GMeshV3Block& b, std::string& err) {
+    b.dataOffset = r.u64_();
+    b.dataSize = r.u64_();
+    b.vertexCount = r.u64_();
+    b.indexCount = r.u64_();
+    b.aabbMin.x = r.f32_(); b.aabbMin.y = r.f32_(); b.aabbMin.z = r.f32_();
+    b.aabbMax.x = r.f32_(); b.aabbMax.y = r.f32_(); b.aabbMax.z = r.f32_();
+    b.materialIndex = r.u32_();
+    b.indexType = r.u32_();
+    b.crc32 = r.u32_();
+    (void)r.u32_();
+    (void)r.u64_();
+    if (r.bad) {
+        err = "tabela de blocos do .gmesh v3 truncada";
+        return false;
+    }
+    return true;
+}
+
+void v3WriteMaterial(Writer& w, const std::string& s, u32& cursor) {
+    const u16 n = static_cast<u16>(s.size() > 65535 ? 65535 : s.size());
+    w.u16_(n);
+    w.bytes_(reinterpret_cast<const u8*>(s.data()), n);
+    cursor += 2u + n;
+    while (cursor % 4 != 0) {   // 4-alinhado (as entradas são variáveis)
+        w.u8_(0);
+        ++cursor;
+    }
+}
+
+} // namespace
+
+u32 GMeshV3Meta::vertexStride() const {
+    u32 s = 0;
+    for (u32 i = 0; i < attrCount && i < kGmeshV3MaxAttrs; ++i) {
+        s += v3AttrBytes(attrs[i]);
+    }
+    return s;
+}
+
+bool GMeshV3Meta::hasAttr(u8 semantic) const {
+    return attr(semantic) != nullptr;
+}
+
+const GMeshV3Attr* GMeshV3Meta::attr(u8 semantic) const {
+    for (u32 i = 0; i < attrCount && i < kGmeshV3MaxAttrs; ++i) {
+        if (attrs[i].semantic == semantic) return &attrs[i];
+    }
+    return nullptr;
+}
+
+bool readGMeshV3Meta(const u8* bytes, size_t len, GMeshV3Meta& meta,
+                     std::vector<GMeshV3Block>& blocks,
+                     std::vector<std::string>& materials, std::string& err) {
+    meta = GMeshV3Meta{};
+    blocks.clear();
+    materials.clear();
+    GFileHeader h;
+    if (!gReadHeader(bytes, len, "GMES", h, err)) {
+        return false;
+    }
+    if (h.version != 3) {
+        err = "não é um .gmesh v3 (version=" + std::to_string(h.version) + ")";
+        return false;
+    }
+    if (h.payloadSize < kGmeshV3MetaBytes) {
+        err = "metadados do .gmesh v3 truncados (payload " +
+              std::to_string(h.payloadSize) + " B < " +
+              std::to_string(kGmeshV3MetaBytes) + ")";
+        return false;
+    }
+    // o checksum do header num v3 cobre SÓ os metadados
+    const u64 got = gfnv1a(bytes + kGHeaderBytes, kGmeshV3MetaBytes);
+    if (got != h.checksum) {
+        err = "CHECKSUM CORROMPIDO: metadados dizem 0x" +
+              std::to_string(h.checksum) + ", recalculado 0x" +
+              std::to_string(got) + " — o ficheiro foi danificado";
+        return false;
+    }
+    Reader r(bytes + kGHeaderBytes, kGmeshV3MetaBytes);
+    if (!v3ReadMeta(r, meta, err)) {
+        return false;
+    }
+    if (meta.attrCount == 0 || meta.attrCount > kGmeshV3MaxAttrs) {
+        err = "número de atributos inválido no .gmesh v3 (" +
+              std::to_string(meta.attrCount) + ")";
+        return false;
+    }
+    bool hasPos = false;
+    for (u32 i = 0; i < meta.attrCount; ++i) {
+        const GMeshV3Attr& a = meta.attrs[i];
+        if (v3AttrComponents(a.semantic) == 0) {
+            err = "semântica de atributo desconhecida no .gmesh v3 (" +
+                  std::to_string(a.semantic) + ")";
+            return false;
+        }
+        if (a.storage > kAttrU8) {
+            err = "armazenamento de atributo desconhecido no .gmesh v3 (" +
+                  std::to_string(a.storage) + ")";
+            return false;
+        }
+        if (a.semantic == kAttrPosition) hasPos = true;
+    }
+    if (!hasPos) {
+        err = "o layout de atributos do .gmesh v3 não tem POSITION";
+        return false;
+    }
+    if (meta.vertexCount == 0 || meta.indexCount == 0 ||
+        (meta.indexCount % 3) != 0) {
+        err = "contagens inválidas no .gmesh v3 (verts=" +
+              std::to_string(meta.vertexCount) + " idx=" +
+              std::to_string(meta.indexCount) + ")";
+        return false;
+    }
+    if (meta.blockCount == 0 || meta.blockVertexCap == 0) {
+        // o cap é CONFIGURÁVEL pela spec (u32 inteiro); a proteção do
+        // índice é o indexType de cada bloco (u16 exige ≤65535)
+        err = "blocos/cap inválidos no .gmesh v3 (blocos=" +
+              std::to_string(meta.blockCount) + " cap=" +
+              std::to_string(meta.blockVertexCap) + ")";
+        return false;
+    }
+    // a TABELA tem de caber no ficheiro (a multiplicação é segura: cada
+    // entrada tem 80 B — um bloco nunca cabe em menos de 80 B de ficheiro)
+    if (meta.blockCount > static_cast<u64>(len) ||
+        meta.blockTableOffset > static_cast<u64>(len) ||
+        meta.blockTableOffset + meta.blockCount * kGmeshV3BlockEntryBytes >
+            static_cast<u64>(len)) {
+        err = "tabela de blocos do .gmesh v3 fora do ficheiro (offset " +
+              std::to_string(meta.blockTableOffset) + ", blocos " +
+              std::to_string(meta.blockCount) + ")";
+        return false;
+    }
+    if (meta.materialCount > static_cast<u64>(len) ||
+        meta.materialTableOffset > static_cast<u64>(len) ||
+        meta.materialTableOffset <
+            meta.blockTableOffset +
+                meta.blockCount * kGmeshV3BlockEntryBytes) {
+        err = "tabela de materiais do .gmesh v3 fora do sítio (offset " +
+              std::to_string(meta.materialTableOffset) + " antes do fim da "
+              "tabela de blocos)";
+        return false;
+    }
+    // as ENTRADAS (bounded pelo ficheiro — nunca pelos dados dos blocos)
+    blocks.resize(static_cast<size_t>(meta.blockCount));
+    Reader tr(bytes + meta.blockTableOffset,
+              static_cast<size_t>(meta.blockCount * kGmeshV3BlockEntryBytes));
+    const u8* tableStart = bytes + meta.blockTableOffset;
+    for (u64 i = 0; i < meta.blockCount; ++i) {
+        if (!v3ReadBlockEntry(tr, blocks[static_cast<size_t>(i)], err)) {
+            return false;
+        }
+        const GMeshV3Block& b = blocks[static_cast<size_t>(i)];
+        if (b.indexType > 1 || b.vertexCount == 0 ||
+            (b.indexCount % 3) != 0 || b.materialIndex >= meta.materialCount) {
+            err = "entrada de bloco inválida no .gmesh v3 (#" +
+                  std::to_string(i) + ")";
+            return false;
+        }
+        if (b.indexType == 0 && b.vertexCount > 65535) {
+            err = "bloco #" + std::to_string(i) +
+                  " usa índices u16 com " + std::to_string(b.vertexCount) +
+                  " vértices — ilegal";
+            return false;
+        }
+        if (b.vertexCount > meta.blockVertexCap) {
+            err = "bloco #" + std::to_string(i) + " com " +
+                  std::to_string(b.vertexCount) +
+                  " vértices excede o cap (" +
+                  std::to_string(meta.blockVertexCap) + ")";
+            return false;
+        }
+        // N.B. os dados do bloco podem viver FORA do ficheiro na leitura
+        // de metadados (o contrato do dono: header+tabela sem alocar os
+        // dados — offsets de 64 bits declarados à frente dos bytes); a
+        // validação do fit acontece no readGMeshV3Block, ao materializar.
+        const u64 expect = b.vertexCount * meta.vertexStride() +
+                           b.indexCount * (b.indexType ? 4u : 2u);
+        if (expect != b.dataSize) {
+            err = "bloco #" + std::to_string(i) + " com tamanho " +
+                  std::to_string(b.dataSize) + " B ≠ esperado " +
+                  std::to_string(expect) + " B (stride " +
+                  std::to_string(meta.vertexStride()) + ")";
+            return false;
+        }
+    }
+    // o CRC32 da PRÓPRIA tabela (a integridade do índice)
+    const u32 tableCrc = gcrc32(
+        tableStart,
+        static_cast<size_t>(meta.blockCount * kGmeshV3BlockEntryBytes));
+    if (tableCrc != meta.tableCrc32) {
+        err = "CHECKSUM CORROMPIDO: a tabela de blocos (CRC32 0x" +
+              std::to_string(meta.tableCrc32) + ", recalculado 0x" +
+              std::to_string(tableCrc) + ") — o ficheiro foi danificado";
+        return false;
+    }
+    // os MATERIAIS (nomes — 4-alinhados, bounded pelo offset da tabela)
+    materials.resize(static_cast<size_t>(meta.materialCount));
+    Reader mr(bytes + meta.materialTableOffset,
+              static_cast<size_t>(meta.blockTableOffset -
+                                  meta.materialTableOffset));
+    for (u64 i = 0; i < meta.materialCount; ++i) {
+        materials[static_cast<size_t>(i)] = mr.str_();
+        // o pad a 4 (o escritor alinha cada nome)
+        const u64 used = mr.i % 4;
+        if (used != 0) {
+            const u64 skip = 4 - used;
+            for (u64 k = 0; k < skip; ++k) (void)mr.u8_();
+        }
+        if (mr.bad) {
+            err = "tabela de materiais do .gmesh v3 truncada";
+            return false;
+        }
+    }
+    return true;
+}
+
+bool readGMeshV3Block(const u8* bytes, size_t len, const GMeshV3Meta& meta,
+                      const GMeshV3Block& blk, MeshData& out,
+                      std::string& err) {
+    out = MeshData{};
+    if (blk.dataOffset > static_cast<u64>(len) ||
+        blk.dataSize > static_cast<u64>(len) - blk.dataOffset) {
+        err = "dados do bloco fora do ficheiro";
+        return false;
+    }
+    const u8* data = bytes + blk.dataOffset;
+    // a integridade ANTES de qualquer parse (o CRC32 do bloco)
+    const u32 crc = gcrc32(data, static_cast<size_t>(blk.dataSize));
+    if (crc != blk.crc32) {
+        err = "CHECKSUM CORROMPIDO: bloco de " +
+              std::to_string(blk.vertexCount) + " verts (CRC32 0x" +
+              std::to_string(blk.crc32) + ", recalculado 0x" +
+              std::to_string(crc) + ") — o ficheiro foi danificado";
+        return false;
+    }
+    const u32 stride = meta.vertexStride();
+    const u64 vb = blk.vertexCount * stride;
+    const u64 ib = blk.indexCount * (blk.indexType ? 4u : 2u);
+    if (vb + ib != blk.dataSize) {
+        err = "tamanhos do bloco inconsistentes (stride " +
+              std::to_string(stride) + ")";
+        return false;
+    }
+    // os vértices (o cursor anda pelos ATRIBUTOS — o layout é o descrito)
+    out.vertices.resize(static_cast<size_t>(blk.vertexCount));
+    const u32 attrCount = meta.attrCount < kGmeshV3MaxAttrs
+                              ? meta.attrCount
+                              : kGmeshV3MaxAttrs;
+    const bool wantSkin = (meta.flags & 1u) != 0 && meta.hasAttr(kAttrBones) &&
+                          meta.hasAttr(kAttrWeights);
+    for (u64 v = 0; v < blk.vertexCount; ++v) {
+        const u8* p = data + v * stride;
+        Vertex& vt = out.vertices[static_cast<size_t>(v)];
+        for (u32 ai = 0; ai < attrCount; ++ai) {
+            const GMeshV3Attr& a = meta.attrs[ai];
+            f32 comp[4] = {0, 0, 0, 0};
+            const u32 n = v3AttrComponents(a.semantic);
+            for (u32 c = 0; c < n; ++c) {
+                if (a.storage == kAttrF32) {
+                    f32 f;
+                    std::memcpy(&f, p, 4);
+                    comp[c] = f;
+                    p += 4;
+                } else if (a.storage == kAttrU16) {
+                    u16 q;
+                    std::memcpy(&q, p, 2);
+                    p += 2;
+                    comp[c] = a.normalized
+                                  ? static_cast<f32>(q) / 65535.0f
+                                  : static_cast<f32>(q);
+                } else {
+                    comp[c] = a.normalized
+                                  ? static_cast<f32>(*p) / 255.0f
+                                  : static_cast<f32>(*p);
+                    p += 1;
+                }
+            }
+            switch (a.semantic) {
+                case kAttrPosition:
+                    vt.pos = Vec3{comp[0], comp[1], comp[2]};
+                    break;
+                case kAttrNormal:
+                    vt.normal = Vec3{comp[0], comp[1], comp[2]};
+                    break;
+                case kAttrUv0:
+                    vt.uv = Vec2{comp[0], comp[1]};
+                    break;
+                case kAttrBones:
+                    if (wantSkin) {
+                        for (u32 c = 0; c < 4; ++c) {
+                            out.skinJoints.push_back(static_cast<u8>(comp[c]));
+                        }
+                    }
+                    break;
+                case kAttrWeights:
+                    if (wantSkin) {
+                        for (u32 c = 0; c < 4; ++c) {
+                            out.skinWeights.push_back(comp[c]);
+                        }
+                    }
+                    break;
+                default:
+                    break;   // tangente/UV1/cor: lidos e ignorados (o
+                             // MeshData de hoje não os tem)
+            }
+        }
+    }
+    // os índices (locais ao bloco)
+    const u8* ip = data + vb;
+    out.indices.resize(static_cast<size_t>(blk.indexCount));
+    for (u64 i = 0; i < blk.indexCount; ++i) {
+        u32 idx;
+        if (blk.indexType) {
+            std::memcpy(&idx, ip + i * 4, 4);
+        } else {
+            u16 q;
+            std::memcpy(&q, ip + i * 2, 2);
+            idx = q;
+        }
+        if (idx >= blk.vertexCount) {
+            err = "índice local fora da pool do bloco (" +
+                  std::to_string(idx) + " ≥ " +
+                  std::to_string(blk.vertexCount) + ")";
+            return false;
+        }
+        out.indices[static_cast<size_t>(i)] = idx;
+    }
+    MeshData::Group g;
+    g.firstIndex = 0;
+    g.indexCount = static_cast<u32>(blk.indexCount);
+    out.groups.push_back(g);   // nome/material preenche o CHAMADOR
+    out.name = "gmesh";
+    return true;
+}
+
+// ---- o ESCRITOR v3 (o único escritor desde o 0.10-M) ----------------------------
+
+namespace {
+
+// corta UMA faixa de índices (um grupo) em blocos de ≤ cap vértices — a
+// MESMA rotina que o conversor streaming do PASSO 3 usa por primitiva.
+// A pool do bloco = os vértices REFERENCIADOS (1.ª referência —
+// determinístico, sem soldadura); o corte só acontece em FRONTEIRA DE
+// TRIÂNGULO (um triângulo nunca fica partido por dois blocos).
+bool v3CutGroup(const MeshData& m, u32 firstIndex, u32 indexCount,
+                const std::string& material, u32 cap, bool skinned,
+                std::vector<GMeshV3BlockIn>& outBlocks, std::string& err) {
+    GMeshV3BlockIn bin;
+    std::vector<u32> remap(m.vertices.size(), 0xFFFFFFFFu);
+    std::vector<u32> orig;   // a origem de CADA vértice da pool (para a
+                             // ordenação ascendente no fecho do bloco)
+    auto flush = [&]() {
+        if (bin.vertices.empty()) return;
+        // a pool do bloco sai em ordem ASCENDENTE do índice original —
+        // o round-trip de um mesh sem soldadura fica IDÊNTICO ao de entrada
+        std::vector<u32> order(bin.vertices.size());
+        for (u32 i = 0; i < order.size(); ++i) order[i] = i;
+        std::sort(order.begin(), order.end(), [&](u32 a, u32 b) {
+            return orig[a] < orig[b];
+        });
+        std::vector<u32> newPos(bin.vertices.size());
+        GMeshV3BlockIn sorted;
+        sorted.material = bin.material;
+        sorted.use32 = bin.use32;
+        sorted.vertices.resize(bin.vertices.size());
+        if (skinned) {
+            sorted.bones.resize(bin.bones.size());
+            sorted.weights.resize(bin.weights.size());
+        }
+        for (u32 n = 0; n < order.size(); ++n) {
+            const u32 oldPos = order[n];
+            newPos[oldPos] = n;
+            sorted.vertices[n] = bin.vertices[oldPos];
+            if (skinned) {
+                for (int c = 0; c < 4; ++c) {
+                    sorted.bones[n * 4 + c] = bin.bones[oldPos * 4 + c];
+                    sorted.weights[n * 4 + c] =
+                        bin.weights[oldPos * 4 + c];
+                }
+            }
+        }
+        for (const u32 li : bin.indices32) {
+            sorted.indices32.push_back(newPos[li]);
+        }
+        outBlocks.push_back(std::move(sorted));
+        bin = GMeshV3BlockIn{};
+        bin.material = material;
+        std::fill(remap.begin(), remap.end(), 0xFFFFFFFFu);
+        orig.clear();
+    };
+    bin.material = material;
+    if ((indexCount % 3) != 0) {
+        err = "grupo com " + std::to_string(indexCount) +
+              " índices — não é múltiplo de 3 (triângulos)";
+        return false;
+    }
+    for (u32 t = 0; t < indexCount; t += 3) {
+        u32 tri[3];
+        for (int k = 0; k < 3; ++k) {
+            const u32 gi = m.indices[static_cast<size_t>(firstIndex) + t + k];
+            if (gi >= m.vertices.size()) {
+                err = "índice " + std::to_string(gi) +
+                      " fora da pool de vértices do mesh";
+                return false;
+            }
+            tri[k] = gi;
+        }
+        // quantos vértices NOVOS este triângulo traz?
+        u32 fresh = 0;
+        for (int k = 0; k < 3; ++k) {
+            if (remap[tri[k]] == 0xFFFFFFFFu) ++fresh;
+        }
+        if (bin.vertices.size() + fresh > cap && !bin.vertices.empty()) {
+            flush();   // fronteira de triângulo: o bloco fecha INTEIRO
+        }
+        for (int k = 0; k < 3; ++k) {
+            const u32 gi = tri[k];
+            if (remap[gi] == 0xFFFFFFFFu) {
+                remap[gi] = static_cast<u32>(bin.vertices.size());
+                bin.vertices.push_back(m.vertices[gi]);
+                orig.push_back(gi);
+                if (skinned) {
+                    for (int c = 0; c < 4; ++c) {
+                        bin.bones.push_back(
+                            m.skinJoints[static_cast<size_t>(gi) * 4 +
+                                         static_cast<size_t>(c)]);
+                    }
+                    for (int c = 0; c < 4; ++c) {
+                        bin.weights.push_back(
+                            m.skinWeights[static_cast<size_t>(gi) * 4 +
+                                          static_cast<size_t>(c)]);
+                    }
+                }
+            }
+            bin.indices32.push_back(remap[gi]);
+        }
+    }
+    flush();
+    return true;
+}
+
+void v3FillAabb(GMeshV3BlockIn& b) {
+    Vec3 mn{1e30f, 1e30f, 1e30f}, mx{-1e30f, -1e30f, -1e30f};
+    for (const Vertex& v : b.vertices) {
+        mn.x = mn.x < v.pos.x ? mn.x : v.pos.x;
+        mn.y = mn.y < v.pos.y ? mn.y : v.pos.y;
+        mn.z = mn.z < v.pos.z ? mn.z : v.pos.z;
+        mx.x = mx.x > v.pos.x ? mx.x : v.pos.x;
+        mx.y = mx.y > v.pos.y ? mx.y : v.pos.y;
+        mx.z = mx.z > v.pos.z ? mx.z : v.pos.z;
+    }
+    b.aabbMin = mn;
+    b.aabbMax = mx;
+}
+
+} // namespace
+
+bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err) {
+    out.clear();
+    if (m.vertices.empty() || m.indices.empty()) {
+        err = "geometria vazia — nada a converter";
+        return false;
+    }
+    const bool skinned = m.skinned();
+    // ---- o corte em blocos: 1 bloco POR GRUPO (sem grupos → 1 único)
+    std::vector<GMeshV3BlockIn> bins;
+    if (m.groups.empty()) {
+        if (!v3CutGroup(m, 0, static_cast<u32>(m.indices.size()), "",
+                        kGmeshV3BlockVertexCap, skinned, bins, err)) {
+            return false;
+        }
+    } else {
+        for (const MeshData::Group& g : m.groups) {
+            if (!v3CutGroup(m, g.firstIndex, g.indexCount, g.material,
+                            kGmeshV3BlockVertexCap, skinned, bins, err)) {
+                return false;
+            }
+        }
+    }
+    for (GMeshV3BlockIn& b : bins) v3FillAabb(b);
+    // ---- os atributos canónicos (float32 SEM PERDA + skin quando há)
+    GMeshV3Meta meta;
+    meta.flags = skinned ? 1u : 0u;
+    meta.blockVertexCap = kGmeshV3BlockVertexCap;
+    meta.attrs[0] = GMeshV3Attr{kAttrPosition, kAttrF32, 0, 0, 0};
+    meta.attrs[1] = GMeshV3Attr{kAttrNormal, kAttrF32, 0, 0, 0};
+    meta.attrs[2] = GMeshV3Attr{kAttrUv0, kAttrF32, 0, 0, 0};
+    if (skinned) {
+        meta.attrs[3] = GMeshV3Attr{kAttrBones, kAttrU8, 0, 0, 0};
+        meta.attrs[4] = GMeshV3Attr{kAttrWeights, kAttrF32, 0, 0, 0};
+        meta.attrCount = 5;
+    } else {
+        meta.attrCount = 3;
+    }
+    const u32 stride = meta.vertexStride();
+    u64 totalV = 0, totalI = 0;
+    Vec3 gmn{1e30f, 1e30f, 1e30f}, gmx{-1e30f, -1e30f, -1e30f};
+    for (GMeshV3BlockIn& b : bins) {
+        totalV += b.vertices.size();
+        totalI += b.indices32.size();
+        // o tipo do índice decide-se pelo TAMANHO DA POOL (a pool ≤65535
+        // leva u16; acima disso — cap configurável — leva u32)
+        b.use32 = b.vertices.size() > 65535;
+        gmn.x = (std::min)(gmn.x, b.aabbMin.x);
+        gmn.y = (std::min)(gmn.y, b.aabbMin.y);
+        gmn.z = (std::min)(gmn.z, b.aabbMin.z);
+        gmx.x = (std::max)(gmx.x, b.aabbMax.x);
+        gmx.y = (std::max)(gmx.y, b.aabbMax.y);
+        gmx.z = (std::max)(gmx.z, b.aabbMax.z);
+    }
+    meta.vertexCount = totalV;
+    meta.indexCount = totalI;
+    meta.blockCount = bins.size();
+    meta.aabbMin = gmn;
+    meta.aabbMax = gmx;
+    // ---- os materiais (dedup em ordem de 1.ª utilização)
+    std::vector<std::string> mats;
+    std::vector<u32> matIdx(bins.size());
+    for (size_t i = 0; i < bins.size(); ++i) {
+        u32 found = 0xFFFFFFFFu;
+        for (size_t k = 0; k < mats.size(); ++k) {
+            if (mats[k] == bins[i].material) {
+                found = static_cast<u32>(k);
+                break;
+            }
+        }
+        if (found == 0xFFFFFFFFu) {
+            mats.push_back(bins[i].material);
+            found = static_cast<u32>(mats.size() - 1);
+        }
+        matIdx[i] = found;
+    }
+    meta.materialCount = mats.size();
+    // ---- o layout analítico (tudo conhecido ANTES de escrever)
+    const u64 dataStart = kGHeaderBytes + kGmeshV3MetaBytes;
+    u64 cursor = dataStart;
+    std::vector<GMeshV3Block> entries(bins.size());
+    for (size_t i = 0; i < bins.size(); ++i) {
+        const GMeshV3BlockIn& b = bins[i];
+        const u64 vb = b.vertices.size() * stride;
+        const u64 ib = b.indices32.size() * (b.use32 ? 4ull : 2ull);
+        cursor += (4 - cursor % 4) % 4;
+        cursor += (16 - cursor % 16) % 16;   // os dados alinham-se a 16
+        GMeshV3Block& e = entries[i];
+        e.dataOffset = cursor;
+        e.dataSize = vb + ib;
+        e.vertexCount = b.vertices.size();
+        e.indexCount = b.indices32.size();
+        e.aabbMin = b.aabbMin;
+        e.aabbMax = b.aabbMax;
+        e.materialIndex = matIdx[i];
+        e.indexType = b.use32 ? 1u : 0u;
+        cursor += e.dataSize;
+    }
+    cursor += (16 - cursor % 16) % 16;
+    meta.blockTableOffset = cursor;
+    cursor += bins.size() * kGmeshV3BlockEntryBytes;
+    meta.materialTableOffset = cursor;
+    for (const std::string& s : mats) {
+        cursor += 2ull + (s.size() > 65535 ? 65535ull : s.size());
+        cursor += (4 - cursor % 4) % 4;
+    }
+    const u64 payloadSize = cursor - kGHeaderBytes;
+    // ---- a serialização (header → metadados → blocos → tabela → materiais;
+    // o CRC da tabela e o checksum dos metadados entram NO SÍTIO no fim)
+    out.reserve(static_cast<size_t>(payloadSize + kGHeaderBytes));
+    Writer o(out);
+    {
+        std::vector<u8> hdr;
+        Writer hw(hdr);
+        writeHeader(hw, "GMES", payloadSize, 0, kGmeshVersionWrite);
+        o.bytes_(hdr.data(), hdr.size());
+    }
+    {
+        std::vector<u8> mb;
+        Writer mw(mb);
+        v3WriteMeta(mw, meta);
+        o.bytes_(mb.data(), mb.size());
+    }
+    for (size_t i = 0; i < bins.size(); ++i) {
+        const GMeshV3BlockIn& b = bins[i];
+        while (out.size() < entries[i].dataOffset) o.u8_(0);
+        std::vector<u8> blob;
+        Writer bw(blob);
+        for (const Vertex& v : b.vertices) {
+            bw.f32_(v.pos.x); bw.f32_(v.pos.y); bw.f32_(v.pos.z);
+            bw.f32_(v.normal.x); bw.f32_(v.normal.y); bw.f32_(v.normal.z);
+            bw.f32_(v.uv.x); bw.f32_(v.uv.y);
+            if (skinned) {
+                const size_t vi = &v - b.vertices.data();
+                for (int c = 0; c < 4; ++c) {
+                    bw.u8_(b.bones[vi * 4 + static_cast<size_t>(c)]);
+                }
+                for (int c = 0; c < 4; ++c) {
+                    bw.f32_(b.weights[vi * 4 + static_cast<size_t>(c)]);
+                }
+            }
+        }
+        if (b.use32) {
+            for (const u32 idx : b.indices32) bw.u32_(idx);
+        } else {
+            for (const u32 idx : b.indices32) bw.u16_(static_cast<u16>(idx));
+        }
+        entries[i].crc32 = gcrc32(blob.data(), blob.size());
+        o.bytes_(blob.data(), blob.size());
+    }
+    while (out.size() < meta.blockTableOffset) o.u8_(0);
+    {
+        std::vector<u8> tb;
+        Writer tw(tb);
+        for (const GMeshV3Block& e : entries) v3WriteBlockEntry(tw, e);
+        meta.tableCrc32 = gcrc32(tb.data(), tb.size());
+        // o CRC da tabela vive DENTRO dos metadados → reescreve os
+        // metadados (160 B) no sítio com o CRC final e só depois emite
+        std::vector<u8> mb2;
+        Writer mw2(mb2);
+        v3WriteMeta(mw2, meta);
+        for (size_t i = 0; i < kGmeshV3MetaBytes; ++i) {
+            out[kGHeaderBytes + i] = mb2[i];
+        }
+        o.bytes_(tb.data(), tb.size());
+    }
+    {
+        u32 cur = static_cast<u32>(meta.materialTableOffset);
+        for (const std::string& s : mats) v3WriteMaterial(o, s, cur);
+    }
+    // o checksum dos METADADOS (160 B) — no sítio (offset 20 do ficheiro)
+    {
+        const u64 crc = gfnv1a(out.data() + kGHeaderBytes, kGmeshV3MetaBytes);
+        for (int i = 0; i < 8; ++i) {
+            out[20 + i] = static_cast<u8>((crc >> (8 * i)) & 0xFF);
+        }
+    }
+    return true;
+}
+
+// ---- o dispatcher de leitura (v1/v2 payload cru · v3 blocos) ----------------
+
+bool readGMesh(const u8* bytes, size_t len, MeshData& out, std::string& err) {
+    out = MeshData{};
+    if (len < 6) {
+        err = "ficheiro próprio curto demais (" + std::to_string(len) + " B)";
+        return false;
+    }
+    const u16 ver = static_cast<u16>(bytes[4] | (bytes[5] << 8));
+    if (ver <= 2) {
+        return readGMeshV1Payload(bytes, len, out, err);
+    }
+    if (ver > 3) {
+        err = "versão " + std::to_string(ver) +
+              " desconhecida (o .gmesh lê 1..3)";
+        return false;
+    }
+    // ---- v3: os blocos montados por ordem da TABELA (1 grupo por bloco)
+    GMeshV3Meta meta;
+    std::vector<GMeshV3Block> blocks;
+    std::vector<std::string> mats;
+    if (!readGMeshV3Meta(bytes, len, meta, blocks, mats, err)) {
+        return false;
+    }
+    if (meta.vertexCount > 65535) {
+        err = ".gmesh v3 com " + std::to_string(meta.vertexCount) +
+              " vértices em " + std::to_string(meta.blockCount) +
+              " blocos — o runtime de hoje monta meshes únicas (u16); o "
+              "render POR BLOCOS é o PASSO 4 do 0.10-M (bloqueado à espera "
+              "de aprovação). O FICHEIRO ESTÁ CORRETO — a conversão "
+              "verificou-o; nada foi perdido.";
+        return false;
+    }
+    u32 baseV = 0, baseI = 0;
+    for (size_t i = 0; i < blocks.size(); ++i) {
+        MeshData part;
+        if (!readGMeshV3Block(bytes, len, meta, blocks[i], part, err)) {
+            return false;
+        }
+        for (const Vertex& v : part.vertices) out.vertices.push_back(v);
+        for (const u16 idx : part.indices) {
+            out.indices.push_back(static_cast<u16>(baseV + idx));
+        }
+        MeshData::Group g;
+        g.name = "bloco " + std::to_string(i + 1);
+        g.material = blocks[i].materialIndex < mats.size()
+                         ? mats[blocks[i].materialIndex]
+                         : "";
+        g.firstIndex = baseI;
+        g.indexCount = static_cast<u32>(part.indices.size());
+        out.groups.push_back(g);
+        out.skinJoints.insert(out.skinJoints.end(), part.skinJoints.begin(),
+                              part.skinJoints.end());
+        out.skinWeights.insert(out.skinWeights.end(),
+                               part.skinWeights.begin(),
+                               part.skinWeights.end());
+        baseV += static_cast<u32>(part.vertices.size());
+        baseI += static_cast<u32>(part.indices.size());
+    }
+    out.name = "gmesh";
+    return true;
+}
+
 // ---- .gtext --------------------------------------------------------------------
 // payload: format u8, w u32, h u32, mipCount u32, mips×(w,h,off,size),
 // blob (o mesmo layout contíguo do CompressedImage)
@@ -366,6 +1135,11 @@ bool readGText(const u8* bytes, size_t len, CompressedImage& out,
     out = CompressedImage{};
     GFileHeader h;
     if (!gReadHeader(bytes, len, "GVTX", h, err)) {
+        return false;
+    }
+    if (h.version != 1) {
+        err = "versão " + std::to_string(h.version) +
+              " desconhecida (o .gtext lê a 1)";
         return false;
     }
     Reader r(bytes + kGHeaderBytes, static_cast<size_t>(h.payloadSize));
@@ -484,6 +1258,11 @@ bool readGAnim(const u8* bytes, size_t len, GAnimFile& out,
     out = GAnimFile{};
     GFileHeader h;
     if (!gReadHeader(bytes, len, "GANM", h, err)) {
+        return false;
+    }
+    if (h.version != 1) {
+        err = "versão " + std::to_string(h.version) +
+              " desconhecida (o .gm lê a 1)";
         return false;
     }
     Reader r(bytes + kGHeaderBytes, static_cast<size_t>(h.payloadSize));

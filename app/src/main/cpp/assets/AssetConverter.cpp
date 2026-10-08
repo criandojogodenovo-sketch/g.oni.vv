@@ -780,7 +780,9 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
             const u16 base = static_cast<u16>(merged.vertices.size());
             if (merged.vertices.size() + src.vertices.size() > 65535) {
                 err = "glTF: o modelo fundido excede 65535 vértices "
-                      "(limite u16 do .gmesh)";
+                      "(o teto do caminho de mesh única; o formato v3 já "
+                      "não tem teto — o corte em blocos entra no PASSO 3 "
+                      "do 0.10-M)";
                 return false;
             }
             for (const Vertex& pv : src.vertices) {
