@@ -359,7 +359,8 @@ bool decodeBase64(const char* src, size_t len, std::vector<u8>& out) {
 
 bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                const GltfBufferResolver& resolver, GltfModel& out,
-               std::string& err, const GltfRangeLoader* rangeLoader) {
+               std::string& err, const GltfRangeLoader* rangeLoader,
+               bool streamMeshes) {
     out = GltfModel{};
     if (!json || len == 0) {
         err = "glTF: json vazio";
@@ -800,6 +801,12 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
         return false;
     }
     for (const Json& jm : jmeshes->items) {
+        if (streamMeshes) {
+            // 0.10-M (PASSO 3): a geometria NÃO se materializa aqui — o
+            // conversor streaming lê os accessors por bloco (mmap). O que
+            // resta do parse (nós/materiais/anims/skins/imagens) é pequeno.
+            continue;
+        }
         MeshData md;
         if (const Json* n = jm.find("name"); n && n->type == Json::Type::String) {
             md.name = n->string;
@@ -1022,6 +1029,83 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
 
     // ---- scene/nodes (hierarquia simples) --------------------------------------
     if (const Json* jnodes = doc.find("nodes"); jnodes && jnodes->type == Json::Type::Array) {
+        // 0.10-M (PASSO 3): no modo streaming as refs de primitiva são
+        // por NÓ (a transformação mundo é que baked por bloco)
+        std::vector<i32> meshRemapStream(jmeshes->items.size(), -1);
+        if (streamMeshes) {
+            const Json* jaccessors = doc.find("accessors");
+            for (size_t m = 0; m < jmeshes->items.size(); ++m) {
+                const Json& jm = jmeshes->items[m];
+                const Json* jprims = jm.find("primitives");
+                if (!jprims || jprims->type != Json::Type::Array) continue;
+                for (const Json& jp : jprims->items) {
+                    if (const Json* mode = jp.find("mode");
+                        mode && (mode->type != Json::Type::Number ||
+                                 static_cast<i32>(mode->number) != 4)) {
+                        continue;   // só TRIANGLES (a regra da casa)
+                    }
+                    const Json* jattrs = jp.find("attributes");
+                    if (!jattrs) continue;
+                    GltfPrimRef ref;
+                    ref.mesh = static_cast<i32>(m);
+                    if (const Json* j = jattrs->find("POSITION");
+                        j && j->type == Json::Type::Number) {
+                        ref.posAcc = static_cast<i32>(j->number);
+                    }
+                    if (ref.posAcc < 0 || !jaccessors ||
+                        ref.posAcc >= static_cast<i32>(jaccessors->items.size())) {
+                        continue;   // sem POSITION não há primitiva
+                    }
+                    const Json& jpa = jaccessors->items[static_cast<size_t>(ref.posAcc)];
+                    ref.posCount = jpa.find("count")
+                                       ? static_cast<u32>(jpa.find("count")->number)
+                                       : 0;
+                    if (const Json* j = jattrs->find("NORMAL");
+                        j && j->type == Json::Type::Number) {
+                        ref.nrmAcc = static_cast<i32>(j->number);
+                    }
+                    if (const Json* j = jattrs->find("TEXCOORD_0");
+                        j && j->type == Json::Type::Number) {
+                        ref.uvAcc = static_cast<i32>(j->number);
+                    }
+                    if (const Json* j = jp.find("indices");
+                        j && j->type == Json::Type::Number) {
+                        ref.idxAcc = static_cast<i32>(j->number);
+                    }
+                    if (const Json* jmat = jp.find("material");
+                        jmat && jmat->type == Json::Type::Number) {
+                        ref.material = static_cast<i32>(jmat->number);
+                    }
+                    meshRemapStream[m] = 1;
+                    out.primRefs.push_back(ref);
+                }
+            }
+            // o nó de CADA ref: os nós apontam o mesh ORIGINAL — como o
+            // mesmo mesh pode ser partilhado por vários nós (instancing),
+            // a expansão nó×primitiva acontece AQUI por nó
+            std::vector<GltfPrimRef> expanded;
+            for (const Json& jn : jnodes->items) {
+                i32 meshIdx = -1;
+                if (const Json* m = jn.find("mesh");
+                    m && m->type == Json::Type::Number) {
+                    const i32 mi = static_cast<i32>(m->number);
+                    if (mi >= 0 && mi < static_cast<i32>(meshRemapStream.size()) &&
+                        meshRemapStream[static_cast<size_t>(mi)] == 1) {
+                        meshIdx = mi;
+                    }
+                }
+                if (meshIdx < 0) continue;
+                for (const GltfPrimRef& r : out.primRefs) {
+                    if (r.mesh == meshIdx) {
+                        GltfPrimRef c = r;
+                        c.node = static_cast<i32>(expanded.size()) * 0 +
+                                 static_cast<i32>(&jn - jnodes->items.data());
+                        expanded.push_back(c);
+                    }
+                }
+            }
+            out.primRefs = std::move(expanded);
+        }
         out.nodes.reserve(jnodes->items.size());
         // mapeia o índice do mesh ORIGINAL → posição em out.meshes (meshes
         // sem primitivas TRIANGLES não entram no modelo)

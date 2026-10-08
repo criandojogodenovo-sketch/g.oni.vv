@@ -106,8 +106,23 @@ struct GltfSkin {
     std::vector<i32> nodeToJoint;        // alinhado com GltfModel::nodes
 };
 
+// 0.10-M (PASSO 3): a REFERÊNCIA de uma primitiva SEM materializar a
+// geometria — o conversor streaming (GmeshV3Stream) lê os accessors POR
+// BLOCO via mmap do ficheiro copiado; o parse nunca segura o modelo.
+struct GltfPrimRef {
+    i32 posAcc = -1, nrmAcc = -1, uvAcc = -1;
+    i32 idxAcc = -1;        // -1 = primitiva não indexada (0..count-1)
+    u32 posCount = 0;       // o count do accessor POSITION
+    i32 material = -1;      // índice em GltfModel::materials (-1 = nenhum)
+    i32 node = -1;          // o nó dono (a transformação mundo que baked)
+    i32 mesh = -1;          // o mesh glTF origem (diag)
+};
+
 struct GltfModel {
     std::vector<MeshData> meshes;      // 1 MeshData por glTF mesh
+    // 0.10-M (PASSO 3): preenchido SÓ no modo streaming (parseGltf com
+    // streamMeshes=true) — as primitivas TRIANGLES na ordem dos nós
+    std::vector<GltfPrimRef> primRefs;
     std::vector<GltfMaterial> materials;
     std::vector<GltfNode> nodes;
     std::vector<GltfImage> images;     // F5.1-B: texturas embutidas/externas
@@ -175,7 +190,8 @@ struct GltfRangeLoader {
 // — ranges carregados por demanda (import de ficheiros enormes).
 bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                const GltfBufferResolver& resolver, GltfModel& out,
-               std::string& err, const GltfRangeLoader* rangeLoader = nullptr);
+               std::string& err, const GltfRangeLoader* rangeLoader = nullptr,
+               bool streamMeshes = false);
 
 // container binário .glb (magic 'glTF', JSON chunk + BIN chunk) → parseGltf
 bool parseGlb(const u8* data, size_t len, const GltfBufferResolver& resolver,

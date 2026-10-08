@@ -26,7 +26,7 @@ android {
         applicationId 'vv.goni'
         minSdk 24
         targetSdk 34
-        versionCode 54
+        versionCode 55
         versionName '0.9.6'
 
         // 0.8.10: BuildConfig ON (a identidade da build — VERSION_NAME/
