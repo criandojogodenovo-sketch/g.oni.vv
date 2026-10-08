@@ -34,6 +34,34 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.10.0 — 0.10-M PASSO 1: DIAGNÓSTICO E DOCUMENTO (a fase .gmesh v3 abre)
+
+- **Os docs FONTE DE VERDADE dos formatos**: `docs/GMESH_formato.md` (o
+  .gmesh v1 campo a campo — header comum 32 B, payload, a quantização
+  16-bit que é a perda de qualidade, os tetos, o pipeline) e
+  `docs/GTEX_formato.md` (.gtext + cache .gtc + os 5 formatos de
+  compressão + os gates). O gate NOVO `scripts/gmesh_docs_check.py`
+  (no CI) afere que os símbolos citados e as 14 âncoras de bytes batem
+  com o código — doc que mente = CI vermelho.
+- **A TABELA DE TETOS** (§4 do relatório): os 4 guards do teto 65,535
+  (GltfImporter fusão de primitivas · AssetConverter fusão de nós ·
+  writeGMesh · readGMesh) + o MeshData u16 + o GL_UNSIGNED_SHORT da GPU
+  + os tetos de range (256 MB), JSON (16 MB) e PNG (64 MB) + os achados
+  latentes (a fronteira inconsistente 65,536/65,535; a truncagem u16
+  mascarada pelo guard; o que picking/colisores/export/serialização
+  herdam).
+- **AS MEDIÇÕES REAIS por fase + RAM pico** (§5): o dragão (38 MB) e o
+  Buddha clássico morrem DENTRO do parse («mesh fundido excede 65535»);
+  o scene (228 MB, 80 meshes) passa o parse (311 ms) e morre na fusão
+  dos nós com **+217 MB de RAM de pico — o modelo INTEIRO esteve em
+  RAM**; o dragão-fit (65,535 verts, o maior que cabe) completa em
+  28 ms (+7 MB). Teste NOVO `medicoes_010m_perfis_do_dono_por_fase` no
+  CI (filhos com VmHWM reiniciado; /tmp limpo).
+- ZERO código de app alterado (o PASSO 1 é diagnóstico, por spec).
+  Relatório: `docs/RELATORIO-0.10-M-PASSO1-DIAGNOSTICO.md` · versionCode
+  53 (inalterado — sem código) · **o PASSO 2 (formato v3) segue; PÁRO
+  ABSOLUTO antes do PASSO 4**.
+
 ## 0.9.6.19b — HOTFIX B: 4/4 PASS + m1/m2/m3 + D20 (câmara medível) + D21 (o [+] morre)
 
 - **Os 4 checks do 0.9.6.19 no C33: 4/4 pass** (menu inteiro · «Exportar

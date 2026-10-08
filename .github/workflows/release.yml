@@ -54,6 +54,13 @@ jobs:
       - name: Gate docs-lint (R-016)
         run: python3 scripts/docs_lint_check.py
 
+      # 0.10-M (PASSO 1) — GATE DOS DOCS DE FORMATO: GMESH_formato.md e
+      # GTEX_formato.md são a FONTE DE VERDADE dos formatos próprios; o
+      # gate afere que os símbolos citados e as âncoras de bytes/números
+      # batem com o código (o formato mudou sem os docs = vermelho)
+      - name: Gate docs de formato (0.10-M — GMESH/GTEX fonte de verdade)
+        run: python3 scripts/gmesh_docs_check.py
+
       # 0.9.6.18 (HOTFIX D5+D10) — GATE UI-VOCAB: «nenhum controlo é texto
       # cru, nenhum duplicado sobrevive» — o vocabulário proibido («Nós»,
       # o «R» nu, «grelha» como texto, o tile de letra da marca, o encode

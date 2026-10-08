@@ -232,6 +232,9 @@ add_executable(test_core
         test_wiring092.cpp  # 0.9.2: central VoniSystem + EngineHost + UI
         # 0.8.10: formatos próprios + 500 MB + archives + migração + identidade
         test_wiring010.cpp
+        # 0.10-M (PASSO 1c): medições reais por fase (cópia/parse/fusão/
+        # escrita) + RAM pico dos 3 perfis do dono — o relatório cita-as
+        test_010m_medicoes.cpp
         # 0.8.11: ÁUDIO — .gi (ADPCM round-trip/WAV/OGG/MP3 erros),
         # misturador (vozes/loop/pitch/posicional/master), PROBE harness
         # (fake backends: falha→fallback, ok→AAudio), workspace (fake host:
