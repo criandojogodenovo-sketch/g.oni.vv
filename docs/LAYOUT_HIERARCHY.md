@@ -254,6 +254,47 @@ contentRect (superfície EGL − insets do sistema)
      viewport, em estado nenhum (drawer aberto/fechado × trilho/
      inspetor) — R-041/FASE 17.1; a mutação M-D21 repõe-no → vermelho.
      O §1 perde o [+] e o §3 perde o `kCornerBtn` (NESTE commit).
+25. **J-01 — OS LOGS SÃO OPAQUES, 80%, COM CORTE/SCROLL/WRAP (PASSO 4 ·
+     0.9.6.20)**: o card do viewer de logs (`EditorUi.cpp
+     drawLogViewer`) passa a 80% × 80% da faixa útil do overlay (era
+     86% × 80% — a LARGURA passava do cap do dono) e o fundo é OPAQUE
+     (`theme::kTheme.bg` α1.00 — o vidro surface deixava a cena
+     atravessar o log de crash). As linhas longas QUEBRAM por palavras
+     (`textwrap::wrap` — a FONTE ÚNICA das Docs; corte = `labelFitted`
+     por linha visual como rede; scroll = `beginScroll` kLogsScrollId
+     de sempre) e o contentH soma as LINHAS VISÍVEIS (o auto-fundo do
+     1.º frame segue certo). PIN: o card no registo ≤80% da faixa nos
+     dois eixos + a contagem de labels da lista == o wrap puro + os
+     pixels OPAQUE #0E0E10 no device — R-037/FASE 18.2; a mutação
+     M-J1 (o wrap morto) e M-J1b (o vidro de volta) → vermelho.
+26. **J-02 — O VÉU DOS MENUS ANCORADOS É 40% (PASSO 4 · 0.9.6.20)**:
+     o token NOVO `theme::kTheme.scrimMenu` (preto α0.40) é o fundo dos
+     TRÊS menus ancorados (fileMenu ⋯ / scenesMenu Cena ▾ / hierMenu ⋮
+     — os únicos overlays ancorados da casa); o `scrim` 60% fica sendo
+     o véu MODAL. PIN: o valor do token + o pixel do véu == o composto
+     `blendOver(scrimMenu, bg)` no device (a matemática no pixel) —
+     R-037/FASE 18.1; a mutação M-J2 (o 60% de volta) → vermelho.
+27. **J-03 — AS LINHAS DO SETTINGS SÃO 36DP (PASSO 4 · 0.9.6.20)**:
+     `settings::settingsRowH()` 48→36dp (a FONTE ÚNICA exportada no
+     header; o contentH do scroll segue-a); os CABEÇALHOS de secção
+     mantêm 48dp (a spec manda nas LINHAS) e os controlos de linha
+     mantêm os 28dp da casa (o toggle D4b e o botão compacto centram a
+     dp(4) na linha de 36). O alvo de toque é a LINHA INTEIRA (classe
+     de piso 36 — kRowFloorDp). PIN: o valor da fonte + o h da linha no
+     registo do device == 36dp e o cabeçalho == 48dp — R-037/FASE 18.3;
+     a mutação M-J3 (o 48 de volta) → vermelho.
+28. **J-04 — OS CANTOS SUAVES FECHAM (PASSO 4 · 0.9.6.20)**: os últimos
+     cards com painel/frame DUROS ganham os raios da casa —
+     drawStorageDialog, drawImportMenu (EditorUi) e drawRemoveDialog,
+     drawTextInput (card + buffer com kRadiusField), drawApplyDialog
+     (UiEditor) — e os TRÊS sheets ancorados passam a medir o raio em
+     dp REAL (`theme::dp(kRadiusCard)` — era o token cru 8px = 4dp a
+     2.0, a mesma classe R-018). PIN: o pixel (2,2) do card fica FORA
+     do raio 8dp e mostra o fundo (o painel duro mostraria o vidro) —
+     R-037/FASE 18.1(c)/18.4; a mutação M-J4 (o painel duro de volta)
+     → vermelho. ACHADO honesto: `drawSettingsMenu` é código morto no
+     app (a página Settings 0.9.0 substituiu-o; só os testes o
+     chamam) — NÃO tocado, candidata a remoção (decisão do dono).
 
 ## 3. OS PISOS (fontes únicas em ui/SafeArea.h)
 
@@ -273,6 +314,7 @@ contentRect (superfície EGL − insets do sistema)
 | `kDrawerMin`/`kDrawerMax` | 160..400dp | o ESTADO CRU da pega do drawer (o cap duplo §2.3 manda no efetivo) |
 | `vpchrome::kRailBtn`/`kQuickBtn` | 40dp | os alvos do chrome do viewport (PASSO 3 — desenho 32 nos botões). D21 (0.9.6.19b): o `kCornerBtn` MORREU com o [+] — os alvos do chrome são N−1 (10) e o gizmo do canto tem nome próprio (`vpchrome::kGizmoBtnDp` 40dp) |
 | `vpchrome::kChromeAlpha` | 60% | a ALFA de TUDO o que o chrome do viewport desenha (PASSO 3 — a spec do dono; `chromeCol` é o multiplicador público) |
+| `theme::kTheme.scrimMenu` | preto 40% | o VÉU dos menus ANCORADOS (PASSO 4 — a spec do dono; o `scrim` 60% fica sendo o véu MODAL — §2.26) |
 | `layout::kTouchFloorDp` | 40dp | piso de toque do botão SOLTO (desenho 32 — a LEI DE OURO do PASSO 1; era 48) |
 | `layout::kRowFloorDp` | 36dp | piso de LINHA (top bar, listas, consola) |
 | `layout::kFieldFloorDp` | 32dp | piso de CAMPO (caixas X/Y/Z, tabs de baixo, pesquisa) |
@@ -292,6 +334,7 @@ contentRect (superfície EGL − insets do sistema)
 | R-039 | tests/test_sentinels.cpp `regress_hotfix_defeitos` (12)+(10) + c33 FASE 16.4/17.3 | m2: o format único normaliza «-0»→«0» (e os não-zeros mantêm o sinal) · m3: a limiar da letra do eixo (a 212/260dp a letra FICA; o valor nunca fica sem espaço) |
 | R-040 | tests/test_cameratic.cpp `cameratic_d20_contrato_medivel_bounding_e_preview` + c33 FASE 17.5 + scripts/gizmo_camera_medidas.py | D20: o bounding do gizmo ≤4%/≤6% da área do viewport (sem/com seleção) em 2 densidades; o comprimento do preview na ordem 48..120dp constante em ecrã; o far real (2000u) não é o desenho |
 | R-041 | tests/c33_virtual.cpp FASE 17.1/17.2 | D21: nenhum widget com o id 38 desenha no viewport em 4 estados; o menu ⋯ tem «Novo objeto» que abre o MESMO plusMenu do + da hierarquia |
+| R-037 | tests/test_sentinels.cpp `regress_janelas_passo4` + c33 FASE 18 (18.1-18.5) | PASSO 4 (0.9.6.20): J-01 os logs opacos 80% com o wrap no registo e no pixel · J-02 o véu 40% dos menus ancorados (o composto no pixel) · J-03 as linhas 36dp do Settings (a fonte + o registo) · J-04 os cantos suaves (o pixel (2,2) fora do raio) · o validador inteiro 0/0 |
 | gate | scripts/hierarchy_check.py (job core-tests do CI) | este ficheiro existe, a tabela §0 aponta símbolos REAIS, as sentinelas R-022..R-025 + R-033 existem no fonte |
 | gate | scripts/gizmo_camera_medidas.py (job core-tests do CI) | o dump `docs/hotfix19b-gizmo-medidas.json` (D20) cumpre os pins ≤4%/≤6% e a proveniência (viewport, bounding, preview) |
 

@@ -5249,3 +5249,182 @@ TEST(regress_hotfix_defeitos) {
         // EXPECT(!s2.fits) acima é o que fica vermelho quando o slot morre
     }
 }
+
+// ---------------------------------------------------------------------------
+// R-037 · PASSO 4 (0.9.6.20) — AS JANELAS: logs opacos com corte/scroll/wrap
+// (80% do ecrã) · menus ancorados com fundo 40% · settings linhas 36dp ·
+// cantos suaves nos cards que faltavam (o contrato J-01..J-04,
+// docs/LAYOUT_HIERARCHY.md §2.25-§2.28)
+// ---------------------------------------------------------------------------
+#include "ui/TextFit.h"   // textwrap::wrap (a fonte única do wrap)
+
+TEST(regress_janelas_passo4) {
+    using namespace vv;
+
+    // ---- (J-02) OS VÉUS: o menu ancorado tem 40%, o modal mantém 60% ------
+    EXPECT(nearEqF(theme::kTheme.scrimMenu[3], 0.40f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.scrimMenu[0], 0.0f, 1e-4f) &&
+           nearEqF(theme::kTheme.scrimMenu[1], 0.0f, 1e-4f) &&
+           nearEqF(theme::kTheme.scrimMenu[2], 0.0f, 1e-4f));   // preto puro
+    EXPECT(nearEqF(theme::kTheme.scrim[3], 0.60f, 1e-4f));      // modal intacto
+
+    // ---- (J-04) OS RAIOS dos cards (o tema é a fonte única) ---------------
+    EXPECT(nearEqF(theme::kRadiusCard, 8.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kRadiusField, 4.0f, 1e-4f));
+
+    // ---- (J-01) O WRAP puro (medidor fake mono 10px/code point) -----------
+    //      «corte/scroll/wrap»: o wrap é o textwrap::wrap (a fonte única
+    //      das Docs); o corte é a rede (labelFitted por linha); o scroll
+    //      é o beginScroll do viewer.
+    {
+        const auto mono = [](const char* s) {
+            return 10.0f * static_cast<f32>(std::strlen(s));
+        };
+        std::vector<textwrap::Line> rows;
+
+        // (a) linha que QUEBRA por palavras: "aaaa bbbb cccc" (140px) a
+        //     100px → [aaaa bbbb][cccc] (2 linhas visíveis)
+        textwrap::wrap("aaaa bbbb cccc", 100.0f, mono, rows);
+        EXPECT(rows.size() == 2);
+        EXPECT(rows[0].begin == 0 && rows[0].len == 9);   // "aaaa bbbb"
+        EXPECT(rows[1].begin == 10 && rows[1].len == 4);  // "cccc"
+
+        // (b) linha curta = 1 linha; linha vazia = NENHUMA (o viewer conta
+        //     1 linha visual de respiro — o contrato do draw)
+        textwrap::wrap("curta", 100.0f, mono, rows);
+        EXPECT(rows.size() == 1);
+        textwrap::wrap("", 100.0f, mono, rows);
+        EXPECT(rows.empty());
+
+        // (c) palavra MAIOR que a largura: parte por largura SEM partir um
+        //     code point (o acento morre inteiro — o padrão da casa)
+        //     "áááááááááá" = 10 cps (20 bytes), mono-byte 10px → 200px;
+        //     a 150px: [7 cps (14 bytes=140px)][3 cps restantes]
+        textwrap::wrap("\xC3\xA1\xC3\xA1\xC3\xA1\xC3\xA1\xC3\xA1"
+                       "\xC3\xA1\xC3\xA1\xC3\xA1\xC3\xA1\xC3\xA1",
+                       150.0f, mono, rows);
+        EXPECT(rows.size() == 2);
+        EXPECT(rows[0].len == 14);   // 7 code points INTEIROS (14 bytes)
+        // a fronteira é byte-líder (nunca meio acento): byte 14 é 0xC3
+        const char* t = "\xC3\xA1\xC3\xA1\xC3\xA1\xC3\xA1\xC3\xA1"
+                        "\xC3\xA1\xC3\xA1\xC3\xA1\xC3\xA1\xC3\xA1";
+        EXPECT((static_cast<unsigned char>(t[rows[0].len]) & 0xC0u) == 0xC0u);
+
+        // (d) a CONCATENAÇÃO das linhas (reunidas com o espaço separador)
+        //     repõe o original — o conteúdo não se perde no wrap
+        textwrap::wrap("um dois tres quatro", 60.0f, mono, rows);
+        EXPECT(rows.size() == 4);   // uma palavra por linha (30px cada)
+        std::string rebuilt;
+        for (size_t i = 0; i < rows.size(); ++i) {
+            if (!rebuilt.empty()) {
+                rebuilt += ' ';
+            }
+            rebuilt.append("um dois tres quatro" + rows[i].begin,
+                           rows[i].len);
+        }
+        EXPECT(rebuilt == "um dois tres quatro");
+    }
+
+    // ---- (J-01) O VIEWER E2E: card 80%×80% OPAQUE (a geometria no
+    //      REGISTO) + as linhas visíveis do wrap no audit ------------------
+    {
+        FontAtlas font;
+        const char* fp = FONT_FIXTURE;
+        ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+        UiContext ui;
+        ui.init();
+        ui.setFont(&font);
+        InputState in;
+        editor::EditorState st;
+        theme::setDensity(1.0f);
+        editor::applyDensity();
+
+        // uma linha LONGA (garante ≥3 linhas visíveis a 80% de 1600) + curta
+        std::string longLine;
+        for (int i = 0; i < 150; ++i) {
+            longLine += "palavra ";
+        }
+        const std::vector<std::string> lines{longLine, "curta"};
+        const std::vector<std::string> dumps{};
+
+        ui.beginFrame(nullptr, &in, 1600.0f, 720.0f);
+        ui.auditBegin("r037-logs", 1600.0f, 720.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                      1.0f);
+        editor::drawLogViewer(ui, in, 1600.0f, 720.0f, st, lines, dumps);
+        ui.endFrame();
+        const layout::Record& rec = ui.auditRecord();
+        ui.auditEnd();
+
+        // (a) o CARD (o maior painel do frame): 80% × 80% da faixa útil
+        f32 ox, oy, aw, ah;
+        editor::overlayArea(1600.0f, 720.0f, safe::Insets{}, ox, oy, aw, ah);
+        const layout::Entry* card = nullptr;
+        f32 best = 0.0f;
+        for (const auto& e : rec.entries) {
+            if (e.kind == layout::Entry::Panel && e.w * e.h > best) {
+                best = e.w * e.h;
+                card = &e;
+            }
+        }
+        EXPECT(card != nullptr);
+        EXPECT(card && nearEqF(card->w, aw * 0.80f, 0.5f));
+        EXPECT(card && nearEqF(card->h, ah * 0.80f, 0.5f));
+        EXPECT(card && card->w <= aw * 0.80f + 0.1f);   // o cap do dono
+
+        // (b) o WRAP no registo: as labels das linhas visíveis (as linhas
+        //     do log partem de x = card.x + kPad) — a contagem do draw
+        //     (1 cabeçalho + N linhas visíveis) BATE com o textwrap puro
+        //     medindo com a MESMA fonte
+        std::vector<textwrap::Line> rows;
+        textwrap::wrap(longLine.c_str(),
+                       card->w - 2.0f * theme::dp(16.0f),
+                       [&](const char* s) { return ui.fontWidth(s); }, rows);
+        EXPECT(rows.size() >= 3);   // a linha é longa o bastante
+        u32 logLabels = 0;
+        // as labels DA LISTA (abaixo do cabeçalho do card — o título
+        // "LOGS (…)" vive na banda de 28dp e não conta)
+        for (const auto& e : rec.entries) {
+            if (e.kind == layout::Entry::Label &&
+                nearEqF(e.x, card->x + theme::dp(16.0f), 0.5f) &&
+                e.y >= card->y + theme::dp(28.0f)) {
+                ++logLabels;
+            }
+        }
+        EXPECT(logLabels == 1u + static_cast<u32>(rows.size()) + 1u);
+        // (o 1 = o cabeçalho "engine.log:", o +1 = a linha "curta")
+
+        // (c) nada sai do card pela largura (o corte de rede)
+        bool sangrou = false;
+        for (const auto& e : rec.entries) {
+            if (e.kind == layout::Entry::Label && e.x >= card->x &&
+                e.x + e.w > card->x + card->w + 0.5f) {
+                sangrou = true;
+            }
+        }
+        EXPECT(!sangrou);
+    }
+
+    // ---- (J-03) O SETTINGS: linhas 36dp (a fonte única) + o botão
+    //      compacto centrado na linha de 36 ------------------------------
+    {
+        EXPECT(nearEqF(editor::settings::settingsRowH(), theme::dp(36.0f),
+                       0.01f));
+        EXPECT(nearEqF(editor::settings::settingsSectionH(), theme::dp(48.0f),
+                       0.01f));   // os CABEÇALHOS mantêm 48 (a spec manda
+                                  // nas linhas)
+        FontAtlas font;
+        const char* fp = FONT_FIXTURE;
+        ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+        UiContext ui;
+        ui.init();
+        ui.setFont(&font);
+        ui.beginFrame(nullptr, nullptr, 1600.0f, 720.0f);
+        const UiRect ab = editor::settings::actionBtnRect(
+            ui, 0.0f, 0.0f, 400.0f, "Repor layout");
+        // a linha está em y=0: o controlo 28dp centra a dp(4) do topo
+        // ((36−28)/2 — o respiro da linha de 36)
+        EXPECT(nearEqF(ab.y, theme::dp(4.0f), 0.1f));
+        EXPECT(nearEqF(ab.h, theme::dp(28.0f), 0.1f));
+        ui.endFrame();
+    }
+}

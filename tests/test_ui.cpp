@@ -560,11 +560,12 @@ TEST(ui_log_viewer_scroll_e_autoscroll_fundo) {
     e.logLines = lines;
     e.logDumps = {"crash-300.dump - signal: SIGSEGV (11)"};
 
-    // geometria do painel (86% × 80% da BANDA DO VIEWPORT 0.9.0: o overlay
+    // geometria do painel (PASSO 4 · 0.9.6.20 J-01: 80% × 80% da BANDA DO
+    // VIEWPORT 0.9.0 — a largura desceu de 86% para o cap do dono; o overlay
     // nunca fica por baixo do chrome — o "fechar" sempre clicável)
     f32 ox, oy, aw, ah;
     overlayArea(kSW, kSH, safe::Insets{}, ox, oy, aw, ah);
-    const f32 w = aw * 0.86f, h = ah * 0.80f;
+    const f32 w = aw * 0.80f, h = ah * 0.80f;
     const f32 x = ox + (aw - w) * 0.5f, y = oy + (ah - h) * 0.5f;
     const f32 listTop = y + kHeaderH;
     const f32 regionH = h - kHeaderH;

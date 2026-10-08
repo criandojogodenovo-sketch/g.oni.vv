@@ -1368,8 +1368,11 @@ int drawRemoveDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         return 0;
     }
 
-    ui.panel(dlg.x, dlg.y, dlg.w, dlg.h, theme::PANEL);
-    ui.frame(dlg.x, dlg.y, dlg.w, dlg.h, 2.0f, theme::ACCENT);
+    // PASSO 4 (0.9.6.20 · J-04): o CARD com raios 8dp (era painel/frame DUROS)
+    ui.panelRounded(dlg.x, dlg.y, dlg.w, dlg.h, theme::dp(theme::kRadiusCard),
+                    theme::PANEL);
+    ui.frameRounded(dlg.x, dlg.y, dlg.w, dlg.h, 2.0f,
+                    theme::dp(theme::kRadiusCard), theme::ACCENT);
     const f32 th = ui.fontHeight();
     ui.label(dlg.x + kPad, dlg.y + kHeaderH * 0.5f + th * 0.30f,
              "REMOVER TIC", theme::TEXT);
@@ -1596,9 +1599,11 @@ int drawTextInput(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         return 2;
     }
 
-    ui.panel(k.dialog.x, k.dialog.y, k.dialog.w, k.dialog.h, theme::PANEL);
-    ui.frame(k.dialog.x, k.dialog.y, k.dialog.w, k.dialog.h, 2.0f,
-             theme::ACCENT);
+    // J-04: o CARD com raios 8dp + o buffer (campo interno) com os 4dp
+    ui.panelRounded(k.dialog.x, k.dialog.y, k.dialog.w, k.dialog.h,
+                    theme::dp(theme::kRadiusCard), theme::PANEL);
+    ui.frameRounded(k.dialog.x, k.dialog.y, k.dialog.w, k.dialog.h, 2.0f,
+                    theme::dp(theme::kRadiusCard), theme::ACCENT);
     const f32 th = ui.fontHeight();
     ui.labelFitted(k.dialog.x + kPad,
                    k.dialog.y + kHeaderH * 0.5f + th * 0.30f, title,
@@ -1608,9 +1613,10 @@ int drawTextInput(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     char shown[48];
     std::snprintf(shown, sizeof(shown), "%.*s_", static_cast<int>(st.textLen),
                   st.textBuf);
-    ui.panel(k.buffer.x, k.buffer.y, k.buffer.w, k.buffer.h, theme::BG);
-    ui.frame(k.buffer.x, k.buffer.y, k.buffer.w, k.buffer.h, 1.0f,
-             theme::LINE);
+    ui.panelRounded(k.buffer.x, k.buffer.y, k.buffer.w, k.buffer.h,
+                    theme::dp(theme::kRadiusField), theme::BG);
+    ui.frameRounded(k.buffer.x, k.buffer.y, k.buffer.w, k.buffer.h, 1.0f,
+                    theme::dp(theme::kRadiusField), theme::LINE);
     const TextMetrics tm = ui.textMetrics();
     ui.labelFitted(k.buffer.x + 12.0f,
                    k.buffer.y + (k.buffer.h - tm.block()) * 0.5f + tm.ascent,
@@ -2054,8 +2060,11 @@ int drawApplyDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         return 2;
     }
 
-    ui.panel(dlg.x, dlg.y, dlg.w, dlg.h, theme::PANEL);
-    ui.frame(dlg.x, dlg.y, dlg.w, dlg.h, 2.0f, theme::ACCENT);
+    // J-04: o CARD com raios 8dp (o fecho das janelas quadradas)
+    ui.panelRounded(dlg.x, dlg.y, dlg.w, dlg.h, theme::dp(theme::kRadiusCard),
+                    theme::PANEL);
+    ui.frameRounded(dlg.x, dlg.y, dlg.w, dlg.h, 2.0f,
+                    theme::dp(theme::kRadiusCard), theme::ACCENT);
     const f32 th = ui.fontHeight();
     ui.label(dlg.x + kPad, dlg.y + kHeaderH * 0.5f + th * 0.30f,
              "APLICAR AO TIC?", theme::TEXT);

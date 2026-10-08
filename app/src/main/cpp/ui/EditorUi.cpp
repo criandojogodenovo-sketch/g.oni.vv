@@ -1,4 +1,5 @@
 #include "ui/EditorUi.h"
+#include "ui/TextFit.h"   // 0.9.6.20 (PASSO 4 J-01): textwrap::wrap dos logs
 #include "core/VoniSystem.h"   // 0.9.2: exported() das vars @+
 #include "platform/EngineLog.h"  // 0.9.2: log do ScriptAdd
 #include "components/ScriptComp.h"  // 0.9.2: ScriptAdd cria o componente
@@ -2530,17 +2531,22 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
         y = oy + (ah - h) * 0.5f;
     }
 
-    // SCRIM 60% (spec H): toque fora fecha SEM ação
+    // PASSO 4 (0.9.6.20 · J-02): SCRIM MENU 40% («menus ancorados com fundo
+    // 40%» — o véu dos ancorados desce de 60% para 40%; os modais centrados
+    // mantêm o véu de 60%). Toque fora fecha SEM ação.
     ui.panel(ui.safeLeft(), static_cast<f32>(ui.safeTop()),
              sw - ui.safeLeft() - ui.safeRight(),
-             sh - ui.safeTop() - ui.safeBottom(), theme::kTheme.scrim);
+             sh - ui.safeTop() - ui.safeBottom(), theme::kTheme.scrimMenu);
     if (pressedOutside(in, x, y, kSheetW, h)) {
         st.fileMenu = false;
         return 0;
     }
 
-    ui.panelRounded(x, y, kSheetW, h, theme::kRadiusCard, theme::kTheme.surface);
-    ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::kRadiusCard,
+    // J-04: o raio em dp REAL (era kRadiusCard cru — 8px = 4dp a 2.0, a
+    // mesma classe R-018 dos sheets px crus do D14)
+    ui.panelRounded(x, y, kSheetW, h, theme::dp(theme::kRadiusCard),
+                    theme::kTheme.surface);
+    ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::dp(theme::kRadiusCard),
                     theme::kTheme.border);
 
     const TextMetrics tm = ui.textMetrics();
@@ -2637,16 +2643,17 @@ int drawHierMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         y = maxY > static_cast<f32>(ui.safeTop()) + safe::kToolbarH ? maxY
                 : static_cast<f32>(ui.safeTop()) + safe::kToolbarH;
     }
+    // J-02: o MESMO véu de menu de 40% (o scrim de 60% é dos modais)
     ui.panel(ui.safeLeft(), static_cast<f32>(ui.safeTop()),
              sw - ui.safeLeft() - ui.safeRight(),
-             sh - ui.safeTop() - ui.safeBottom(), theme::kTheme.scrim);
+             sh - ui.safeTop() - ui.safeBottom(), theme::kTheme.scrimMenu);
     if (pressedOutside(in, x, y, kSheetW, h)) {
         st.hierMenu = false;
         return 0;
     }
-    ui.panelRounded(x, y, kSheetW, h, theme::kRadiusCard,
+    ui.panelRounded(x, y, kSheetW, h, theme::dp(theme::kRadiusCard),
                     theme::kTheme.surface);
-    ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::kRadiusCard,
+    ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::dp(theme::kRadiusCard),
                     theme::kTheme.border);
     static const struct {
         const char* label;
@@ -2738,17 +2745,20 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         y = oy + (ah - h) * 0.5f;
     }
 
-    // scrim + toque fora fecha SEM ação
+    // J-02: o MESMO véu de menu de 40% + toque fora fecha SEM ação
     ui.panel(ui.safeLeft(), static_cast<f32>(ui.safeTop()),
              sw - ui.safeLeft() - ui.safeRight(),
-             sh - ui.safeTop() - ui.safeBottom(), theme::kTheme.scrim);
+             sh - ui.safeTop() - ui.safeBottom(), theme::kTheme.scrimMenu);
     if (pressedOutside(in, x, y, kSheetW, h)) {
         st.scenesMenu = false;
         return 0;
     }
 
-    ui.panelRounded(x, y, kSheetW, h, theme::kRadiusCard, theme::kTheme.surface);
-    ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::kRadiusCard,
+    // J-04: o raio em dp REAL (era kRadiusCard cru — 8px = 4dp a 2.0, a
+    // mesma classe R-018 dos sheets px crus do D14)
+    ui.panelRounded(x, y, kSheetW, h, theme::dp(theme::kRadiusCard),
+                    theme::kTheme.surface);
+    ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::dp(theme::kRadiusCard),
                     theme::kTheme.border);
 
     // ＋ Nova cena — FILL ACCENT (spec H), fixo no topo
@@ -2976,8 +2986,12 @@ int drawStorageDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         return 0;
     }
 
-    ui.panel(dlg.x, dlg.y, dlg.w, dlg.h, theme::PANEL);
-    ui.frame(dlg.x, dlg.y, dlg.w, dlg.h, 2.0f, theme::ACCENT);
+    // 0.9.6.6 (GRUPO C) + PASSO 4 (0.9.6.20 · J-04): o CARD com raios 8dp
+    // (era o painel/frame DUROS — o último grupo de janelas quadradas)
+    ui.panelRounded(dlg.x, dlg.y, dlg.w, dlg.h, theme::dp(theme::kRadiusCard),
+                    theme::PANEL);
+    ui.frameRounded(dlg.x, dlg.y, dlg.w, dlg.h, 2.0f,
+                    theme::dp(theme::kRadiusCard), theme::ACCENT);
     const f32 th = ui.fontHeight();
     ui.label(dlg.x + kPad, dlg.y + kHeaderH * 0.5f + th * 0.30f,
              "ARMAZENAMENTO", theme::TEXT);
@@ -3036,8 +3050,11 @@ int drawImportMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         return 0;
     }
 
-    ui.panel(x, y, kMenuW, h, theme::PANEL);
-    ui.frame(x, y, kMenuW, h, 2.0f, theme::ACCENT);
+    // J-04: o CARD com raios 8dp (o fecho das janelas quadradas)
+    ui.panelRounded(x, y, kMenuW, h, theme::dp(theme::kRadiusCard),
+                    theme::PANEL);
+    ui.frameRounded(x, y, kMenuW, h, 2.0f, theme::dp(theme::kRadiusCard),
+                    theme::ACCENT);
     const f32 th = ui.fontHeight();
     ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "IMPORTAR",
              theme::TEXT);
@@ -3085,8 +3102,10 @@ void drawLogViewer(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     // chrome — ver overlayArea no EditorLayout.h)
     f32 ox, oy, aw, ah;
     overlayArea(sw, sh, ui.safeArea(), ox, oy, aw, ah);
-    // painel GRANDE central (86% × 80% da área útil — o log precisa de espaço)
-    const f32 w = aw * 0.86f;
+    // PASSO 4 (0.9.6.20 · J-01): «logs opacos … (80% do ecrã)» — o card
+    // passou a 80% × 80% da faixa útil (era 86% × 80%: a LARGURA passava
+    // do cap do dono)
+    const f32 w = aw * 0.80f;
     const f32 h = ah * 0.80f;
     const f32 x = ox + (aw - w) * 0.5f;
     const f32 y = oy + (ah - h) * 0.5f;
@@ -3096,8 +3115,13 @@ void drawLogViewer(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         return;
     }
 
-    // 0.9.6.6 (GRUPO C · CANTOS SUAVIZADOS): o CARD modal com raios 8dp
-    ui.panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard), theme::PANEL);
+    // PASSO 4 (J-01): O CARD É OPAQUE — o vidro surface (α0.80) deixava
+    // a cena viva atravessar o LOG (a leitura de um log de crash sobre a
+    // cena a mexer era o defeito). O fundo do tema (grafite α1.00) é a
+    // cor do card; o contraste text1 16,4:1 sobre bg fica na auditoria.
+    // O frame ACCENT e o resto do card mantêm-se.
+    ui.panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard),
+                    theme::kTheme.bg);
     ui.frameRounded(x, y, w, h, 2.0f, theme::dp(theme::kRadiusCard),
                     theme::ACCENT);
     const f32 th = ui.fontHeight();
@@ -3109,11 +3133,35 @@ void drawLogViewer(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     }
     ui.panel(x + kPad, y + kHeaderH - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
 
-    // conteúdo: altura REAL = linhas (block da fonte) + secção de dumps
+    // PASSO 4 (J-01 · o WRAP): as linhas longas QUEBRAM (por palavras —
+    // textwrap::wrap, a FONTE ÚNICA das Docs) em vez de só cortar com
+    // reticência. «corte» continua a existir como rede (labelFitted por
+    // linha visual — o passo-through é literal quando cabe); «scroll» é
+    // o beginScroll de sempre. contentH soma as LINHAS VISÍVEIS (o wrap
+    // muda a altura do conteúdo — o auto-fundo do 1.º frame segue certo).
     const TextMetrics tm = ui.textMetrics();
     const f32 rowH = tm.block() + 6.0f;
-    const f32 dumpsH = dumps.empty() ? 0.0f : (34.0f + static_cast<f32>(dumps.size()) * rowH);
-    const f32 contentH = 34.0f + static_cast<f32>(lines.size()) * rowH + dumpsH;
+    const f32 maxW = w - 2.0f * kPad;
+    std::vector<textwrap::Line> rows;
+    auto lineRows = [&](const std::string& s) -> u32 {
+        rows.clear();
+        textwrap::wrap(s.c_str(), maxW,
+                       [&](const char* t) { return ui.fontWidth(t); }, rows);
+        // linha vazia/só-espaços = 1 linha visual (o respiro do log)
+        return rows.empty() ? 1u : static_cast<u32>(rows.size());
+    };
+    u32 lineRowsTotal = 0;
+    for (const std::string& l : lines) {
+        lineRowsTotal += lineRows(l);
+    }
+    u32 dumpRowsTotal = 0;
+    for (const std::string& d : dumps) {
+        dumpRowsTotal += lineRows(d);
+    }
+    const f32 dumpsH =
+        dumps.empty() ? 0.0f : (34.0f + static_cast<f32>(dumpRowsTotal) * rowH);
+    const f32 contentH =
+        34.0f + static_cast<f32>(lineRowsTotal) * rowH + dumpsH;
 
     const f32 listTop = y + kHeaderH;
     const UiRect region{x, listTop, w, h - kHeaderH};
@@ -3123,21 +3171,39 @@ void drawLogViewer(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     auto baselineOf = [&](f32 rowTop) {
         return rowTop + rowH * 0.5f + tm.ascent - tm.block() * 0.5f;
     };
+    // desenha UMA linha de log QUEBRADA nas suas linhas visíveis (o wrap
+    // manda; labelFitted é o corte de rede por linha — nada sai do card)
+    auto drawWrapped = [&](const std::string& s, f32 cy, const f32 color[4],
+                           f32& advY) {
+        rows.clear();
+        textwrap::wrap(s.c_str(), maxW,
+                       [&](const char* t) { return ui.fontWidth(t); }, rows);
+        if (rows.empty()) {
+            advY += rowH;
+            return;
+        }
+        for (const textwrap::Line& r : rows) {
+            // (as linhas de log entram aqui ≤255 bytes — o cap de leitura do
+            // tail; o buf de 512 cobre qualquer linha visual com folga)
+            char buf[512];
+            std::snprintf(buf, sizeof(buf), "%.*s",
+                          static_cast<int>(r.len), s.c_str() + r.begin);
+            ui.labelFitted(x + kPad, baselineOf(advY), buf, color, maxW);
+            advY += rowH;
+        }
+    };
 
     f32 cy = listTop - off;
     ui.labelFitted(x + kPad, baselineOf(cy + 4.0f),
                    lines.empty() ? "(log vazio)" : "engine.log:",
-                   theme::LINE, w - 2.0f * kPad);
+                   theme::LINE, maxW);
     cy += 34.0f;
     for (const std::string& l : lines) {
-        // logs são longos — labelFitted corta na largura do painel
-        ui.labelFitted(x + kPad, baselineOf(cy), l.c_str(), theme::TEXT,
-                       w - 2.0f * kPad);
-        cy += rowH;
+        drawWrapped(l, cy, theme::TEXT, cy);
     }
     if (!dumps.empty()) {
         ui.labelFitted(x + kPad, baselineOf(cy + 4.0f), "crash dumps:",
-                       theme::ACCENT, w - 2.0f * kPad);
+                       theme::ACCENT, maxW);
         cy += 34.0f;
         for (const std::string& d : dumps) {
             // 0.8.12 — badge ANTIGO: dump de OUTRA build (vc do nome !=
@@ -3146,12 +3212,9 @@ void drawLogViewer(UiContext& ui, const InputState& in, f32 sw, f32 sh,
             // NUNCA era chamado aqui — o dono via o dump VELHO sem rótulo
             // (crash-1790830406.dump, offsets idênticos) e não sabia.
             const std::string badge = vv::buildinfo::dumpBadge(d);
-            ui.labelFitted(x + kPad, baselineOf(cy),
-                           badge.empty() ? d.c_str()
-                                         : (d + badge).c_str(),
-                           badge.empty() ? theme::TEXT : theme::WARN,
-                           w - 2.0f * kPad);
-            cy += rowH;
+            const std::string full = badge.empty() ? d : (d + badge);
+            drawWrapped(full, cy, badge.empty() ? theme::TEXT : theme::WARN,
+                        cy);
         }
     }
     ui.endScroll();

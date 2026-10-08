@@ -26,7 +26,7 @@
 | UI PASSO 2 · PAINÉIS | hierarquia 18% (min 140); inspector 22% (min 180/max 260) com trilho 32dp quando sem seleção; drawer default fechado, máx 35%; pegas 24dp; chips 28dp sem o duplicado; «Erros» mostra erros; viewport 37,1%→58,8% | **FEITO 0.9.6.15** (ver RELATORIO-0.9.6.15-PASSO2-PAINEIS) | ver commit |
 | UI PASSO 2-BIS · AS 2 DECISÕES DO DONO | fixar aberto: o ícone do trilho ABRE E FIXA (inspPinned persiste no layout.json; a seta de recolher desfaz e fecha — sem long-press); consola ≥60%: a lista de log ocupa ≥60% do conteúdo do drawer (chips+extras ≤40% — o campo de comando cede no drawer pequeno; sem exceções) | **FEITO 0.9.6.16** (R-034 + c33 13.7i; LAYOUT_HIERARCHY §1/§2.4/§2.10) | ver commit |
 | UI PASSO 3 · VIEWPORT | controlos ≤10% da área a 60% alfa: rail esquerdo (Sel/Mov/Rod/Esc/Ímã), desfazer/refazer/guardar/⋯ topo-esq (o ⋯ abre o menu ancorado; dup/colar vivem no menu), [+] 40dp redondo, gizmo 40dp topo-dir, legenda; a STRIP full-width REMOVIDA; o desenho cobre 7,7% do viewport no arranque do device (a tabela completa no relatório; o estado com o drawer aberto fica a 15,1% — §7 do relatório para o dono decidir) | **FEITO 0.9.6.17** (ver RELATORIO-0.9.6.16-17-P2BIS-PASSO3-VIEWPORT; R-023 reescrita + R-034 com o pin da alfa) | ver commit |
-| UI PASSO 4 · JANELAS | logs opacos com corte/scroll/wrap (80% do ecrã); menus ancorados com fundo 40%; settings linhas 36dp, secundários só-contorno, «concedido» como texto; cantos suaves — (o hotfix 0.9.6.18 adiantou 3 itens: o botão outline compacto, «concedido» como texto e a tabela localizada do Settings; o PASSO 4 segue BLOQUEADO até ao re-sign-off do dono) | por fazer (BLOQUEADO — re-sign-off) | — |
+| UI PASSO 4 · JANELAS | logs opacos com corte/scroll/wrap (80% do ecrã — o card opaco bg + o wrap por palavras da fonte única das Docs); menus ancorados com fundo 40% (o token scrimMenu nos 3 ancorados; o scrim 60% fica modal); settings linhas 36dp (secções 48 mantêm; controlos 28 centram a dp(4)); cantos suaves fechados (os 5 cards duros + os raios dos sheets em dp) — os 3 sub-itens do Settings já tinham entrado no 0.9.6.18 (D4) | **FEITO 0.9.6.20** (ver RELATORIO-0.9.6.20-PASSO4-JANELAS; R-037 + c33 FASE 18; contrato §2.25-§2.28; versionCode 53) | ver commit |
 | HOTFIX · OS 12 DEFEITOS DA IMAGEM REAL (spec do dono) | D1 cabeçalho do inspector uma linha · D2 linha Transform no orçamento do rect (minWidth + reset ícone) · D3/D9 empty-states centrados+clipados nas 4 tabs · D4 Settings localizado + outline compacto + «concedido» texto · D5 a tab «Nós» morta (duplicado da hierarquia) · D6 a marca = glifo da função única com LOD (tile de letra morto) · D7 captura thumb.png 256×144 off-thread no save + fallback de iniciais (o ícone da app nunca é card) · D8 o glifo «U» saiu do rail (o ÍMAN redesenhado como ferradura) · D10 controlos de texto cru → ícones (Reset/List/Eye) · D11 divisor = linha 1dp + pill só no drag · D12 planos do gizmo preenchidos a 25% | **FEITO 0.9.6.18** (ver RELATORIO-0.9.6.18-HOTFIX-12-DEFEITOS; R-035 + gate ui_vocab + FASE 15 do device virtual) | ver commit |
 | HOTFIX 0.9.6.19 · OS ABERTOS DO RE-SIGN-OFF | R1 valores do Transform intocáveis (letra→padding→nunca o valor; piso 26dp em 180/220/260dp) · D17 a câmara objeto pequeno (glifo 24dp + frustum fino 1-2px mudo/âmbar + handles de canto 12dp + hit-test gizmo>handles>frustum intocável — o drag na cena move a câmara, provado com gesto injetado) · D14 menu contido + a CAUSA-RAIZ px cru (offset 0 na reabertura, nunca sob a tab bar, última linha alcançável) · D15 o menu no gate (Exportar OBJ; Snapping na allowlist explícita) · D16 o guard do frame limpo + o retry Java das thumbs + o log ok/falhou · D18 iniciais 1ª+última letra · D19 o switch com knob on/off (fonte única nos 2 inspetores) | **FEITO 0.9.6.19** (ver RELATORIO-0.9.6.19-HOTFIX-ABERTOS-DO-RESIGN; R-035 estendida + FASE 16 do device virtual; 8 mutações vermelho→verde; contrato §2.16-§2.19; versionCode 51) | ver commit |
 | F17 · ADIADOS COM NOME (o dono: «entra no BACKLOG agora») | (1) fade de distância da grelha (a grelha 3D desenha a malha inteira com o MESMO alfa — o esbatimento com a distância evita o moiré ao longe); (2) dithering anti-banding (o céu/degradês da cena mostram banding em 8-bit — dithering ordenado barato no clear/composto) | adiado com nome — POR DECISÃO DO DONO (não é esquecimento) | — |
@@ -49,4 +49,17 @@
 - (D21) o + da hierarquia mantém o alvo 28dp da linha do cabeçalho (o
   piso kHeadFloorDp da casa). Se o dono quiser o TOQUE ≥40dp, é uma
   decisão nova (o desenho PASSO 1 manda 28 na linha).
+
+## 0.9.6.20 (PASSO 4 · JANELAS) — as decisões novas candidatas (NÃO VERIFICADO do relatório)
+
+- (J-02) o «fundo 40%» dos menus ancorados foi lido como o VÉU (a área
+  à volta do sheet). A alternativa (o vidro do próprio menu a 40%)
+  quebra as pisos de contraste da casa sobre cena clara — se o dono a
+  quiser, é uma decisão nova com um trade-off de contraste.
+- (J-04) o `drawSettingsMenu` (o card "SETTINGS" de 7 linhas) é CÓDIGO
+  MORTO no app (a página Settings 0.9.0 substituiu-o; só o test_ui o
+  chama) — não foi tocado. A remoção é decisão do dono.
+- (J-02) o token `scrim` (60%) ficou SEM utilizadores vivos (os cards
+  centrados nunca tiveram véu) — mantido como o véu MODAL documentado;
+  a remoção (ou o véu nos centrados) é decisão do dono.
 

@@ -18,8 +18,13 @@ namespace settings {
 
 // 0.9.6.6 (GRUPO C): as alturas de linha/secção do Settings em dp REAL —
 // eram constexpr px crus (a exata classe R-018: a 2.0 saíam a 24dp)
+// PASSO 4 (0.9.6.20 · J-03): as LINHAS descem para 36dp (a LINHA da spec —
+// «settings linhas 36dp»; era 48). Os CABEÇALHOS de secção mantêm 48dp
+// (a spec manda nas LINHAS; o cabeçalho é outra classe). Os CONTROLOS de
+// linha (o toggle 28dp e o botão compacto D4b) mantêm-se: (36−28)/2 = 4dp
+// de respiro — e o alvo de toque é a LINHA INTEIRA (a classe de piso 36).
 f32 settingsSectionH() { return theme::dp(48.0f); }
-f32 settingsRowH()     { return theme::dp(48.0f); }
+f32 settingsRowH()     { return theme::dp(36.0f); }
 
 // 0.9.2 — id da linha Docs (faixa do Settings; imediato único)
 constexpr u64 kDocsRowId = 6409;

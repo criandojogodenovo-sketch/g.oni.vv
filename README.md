@@ -70,8 +70,38 @@ O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
   §4). Contrato P-08: §0/§1/§3 (o [+] e o kCornerBtn saem) + regras
   §2.20–§2.24 NO MESMO COMMIT. Relatório:
   `docs/RELATORIO-0.9.6.19b-HOTFIX-B.md` · versionCode 52 · **mini
-  sign-off do BLOCO A @C33: 4+4 itens (§7 do relatório)** · PASSO 4
-  (BLOCO B) segue BLOQUEADO até ao owner OK.
+  sign-off do BLOCO A @C33: 4+4 itens (§7 do relatório)**.
+
+## 0.9.6.20 — PASSO 4: AS JANELAS (o BLOCO B fechado)
+
+- **J-01 LOGS OPAQUES 80% COM WRAP**: o viewer de logs (`drawLogViewer`)
+  perde o vidro (o card é o `bg` OPAQUE — a cena não atravessa o log de
+  crash), passa a 80% × 80% da faixa útil (era 86% × 80%) e as linhas
+  longas QUEBRAM por palavras (`textwrap::wrap` — a fonte única das
+  Docs) com o contentH a somar as linhas visíveis; o corte
+  (`labelFitted`) fica como rede e o scroll/auto-fundo mantêm-se.
+- **J-02 O VÉU DOS ANCORADOS É 40%**: token NOVO
+  `theme::kTheme.scrimMenu` (preto α0.40) nos 3 menus ancorados
+  (fileMenu ⋯ / scenesMenu Cena ▾ / hierMenu ⋮); o `scrim` 60% fica
+  sendo o véu MODAL.
+- **J-03 SETTINGS LINHAS 36DP**: `settingsRowH()` 48→36dp (a fonte
+  EXPORTADA no header; secções mantêm 48dp; os controlos 28dp centram a
+  dp(4)); as constantes mortas `kSectionH/kRowH` do header saem.
+- **J-04 CANTOS SUAVES FECHAM**: os 5 cards duros vivos (storage, import
+  menu, remover TIC, entrada de texto, aplicar) ganham
+  `panelRounded/frameRounded` em dp + os raios dos 3 sheets ancorados
+  deixam de ser px crus (kRadiusCard cru = 4dp a 2.0 — a classe R-018).
+- Testes: R-037 `regress_janelas_passo4` NOVA (os pins J-01..J-04 no
+  hospedeiro) + c33 FASE 18 NOVA (as provas por PIXEL no device @2.0 —
+  18.1-18.5; o ACHADO do export: ele nomeia pelo ECRÃ corrente, os
+  overlays tinham de ler o nome certo) + 5 MUTAÇÕES vermelho→verde
+  (M-J1/M-J1b/M-J2/M-J3/M-J4) + recalibrações honestas (test_ui 80%,
+  wiring091 + c33 9.6/12.9 às linhas 36dp).
+- Contrato P-08: regras §2.25–§2.28 (as JANELAS) + §3 ganha o
+  `scrimMenu` + §4 ganha a R-037 NO MESMO COMMIT. Relatório:
+  `docs/RELATORIO-0.9.6.20-PASSO4-JANELAS.md` · versionCode 53 ·
+  **sign-off do PORTÃO B @C33: 4 itens (§7 do relatório)** · o BLOCO C
+  (0.10-M .gmesh v3) segue BLOQUEADO até ao owner OK.
 
 ## 0.9.6.19 — HOTFIX: OS ABERTOS DO RE-SIGN-OFF + A CÂMARA GIGANTE
 

@@ -14,9 +14,10 @@
 //   │ ▾ SOBRE           sha256 da .so · licenças            │
 //   └──────────────────────────────────────────────────────┘
 //
-// Linhas 48dp (spec A); secções colapsáveis 48dp com chevron (título 14sp);
-// toggles PERSISTEM (layout.json p/ imersivo; settings.goni p/ áudio);
-// BACK devolve ao editor com a seleção INTACTA (nada fecha a seleção).
+// Linhas 36dp (PASSO 4 · 0.9.6.20 J-03 — «settings linhas 36dp»; era 48,
+// spec A); secções colapsáveis 48dp com chevron (título 14sp); toggles
+// PERSISTEM (layout.json p/ imersivo; settings.goni p/ áudio); BACK devolve
+// ao editor com a seleção INTACTA (nada fecha a seleção).
 #include "ui/EditorLayout.h"
 #include "ui/Icons.h"
 #include "ui/SafeArea.h"
@@ -45,6 +46,13 @@ namespace settings {
 // alinhado à direita. A assinatura pede o ui (mede o texto) e o texto
 // (o walk tem de calcular o MESMO rect que o draw)
 UiRect actionBtnRect(UiContext& ui, f32 x, f32 y, f32 w, const char* btn);
+
+// PASSO 4 (0.9.6.20 · J-03): as ALTURAS da página — FONTE ÚNICA exportada
+// (o draw, o contentH do scroll E os testes partilham). LINHA 36dp (a spec
+// do dono; era 48) · CABEÇALHO de secção mantém 48dp (a spec manda nas
+// LINHAS; os controlos de linha 28dp centram a dp(4) na linha de 36).
+f32 settingsRowH();
+f32 settingsSectionH();
 
 // ---- ids (faixa 5800..5899 — nova, sem colisões) ---------------------------
 constexpr u64 kBackId     = 5800;   // ← voltar (56dp)
@@ -114,10 +122,6 @@ enum Result {
 // desenha a PÁGINA inteira (full-screen na banda do viewport) e processa os
 // toques; devolve a ação do frame. st.settingsMenu fecha no kBackPressed.
 Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx);
-
-// alturas PURAS (fonte única — desenho e testes): secção 48 + linha 48
-constexpr f32 kSectionH = 48.0f;
-constexpr f32 kRowH = 48.0f;
 
 } // namespace settings
 } // namespace editor

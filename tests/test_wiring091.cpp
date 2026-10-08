@@ -318,16 +318,15 @@ TEST(settings_diagnostico_linha_texto_devolve_kOpenTextWindow) {
     e.input.clearEdges();
 
     // y da linha: 8 (pad) + 3 headers colapsados ×48 + header Diag ×48 +
-    // 7 linhas (logs/export/probe/CORRER BENCH/COPIAR RELATÓRIO +
-    // EXPORTAR LAYOUT/AUDITORIA DO ECRÃ — os dois do G6/R-017 e os dois do
-    // GRUPO B/R-024) ×48 + meia linha. O tap vai no BOTÃO COMPACTO da
+    // 7 linhas ×36 (PASSO 4 · 0.9.6.20 J-03: as LINHAS do Settings são
+    // 36dp — era 48) + meia linha (18). O tap vai no BOTÃO COMPACTO da
     // linha (0.9.6.18 · D4b: outline compacto à direita — x no interior do
     // botão, ~w-60; o tap no DEVICE também mira o botão). O draw corre nos
     // DOIS frames do gesto (o widgetHit captura o press no frame do down).
     // 0.9.6 (G1): Settings ECRÃ CHEIO — sem a banda kToolbarH do overlayArea
     // 0.9.6.5 (GRUPO B): recalibrado às 2 linhas novas do Diagnóstico
     const f32 yRow = 56.0f + 8.0f + 3.0f * 48.0f +
-                     48.0f + 7.0f * 48.0f + 24.0f;
+                     48.0f + 7.0f * 36.0f + 18.0f;
     settings::Ctx ctx;
     ctx.version = "0.9.1 (vc 44)";
     e.input.injectDown(0, 1540.0f, yRow);   // dentro do botão compacto

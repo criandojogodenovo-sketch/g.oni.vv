@@ -1313,9 +1313,11 @@ int main() {
                                      editor::settings::kBitPerm |
                                      editor::settings::kBitDiag;
         frame();   // layout estabiliza (slot de scroll)
-        // y da linha Docs: 8 + 4 headers colapsados*48 + header Docs 48 + 24
+        // y da linha Docs: 8 + 4 headers colapsados*48 + header Docs 48 + 18
+        // (PASSO 4 · 0.9.6.20 J-03: as LINHAS do Settings são 36dp — a meia
+        // linha era 24 nos 48dp)
         // 0.9.6 (G1): Settings ECRÃ CHEIO — sem a banda kToolbarH do overlayArea
-        tap(800.0f, 56.0f + 8.0f + 4.0f * 48.0f + 48.0f + 24.0f);
+        tap(800.0f, 56.0f + 8.0f + 4.0f * 48.0f + 48.0f + 18.0f);
         check(g_editor.docsScreen.open,
               "o toque na linha Docs do Settings ABRE as Docs (era morta)");
         check(logHas("voni: docs abertas"), "a abertura fica LOGADA");
@@ -2818,8 +2820,9 @@ int main() {
             // y do botão Correr bench: 3 headers fechados ANTES do
             // Diagnóstico (Geral/Áudio/Permissões — Docs e Sobre vêm
             // DEPOIS na página) + header Diag + logs/Export/Probe + centro
+            // (PASSO 4 · J-03: linhas 36dp — era 3×48 + 24)
             const f32 yRun = si.top + 56.0f + 8.0f + 3.0f * 48.0f +
-                             48.0f + 3.0f * 48.0f + 24.0f;
+                             48.0f + 3.0f * 36.0f + 18.0f;
             tap(btnCx, yRun);
             check(!g_editor.settingsMenu,
                   "12.9 o botão Correr bench FECHA o Settings (o bench é "
@@ -2899,7 +2902,7 @@ int main() {
                                          editor::settings::kBitDocs |
                                          editor::settings::kBitSobre;
             frame();
-            const f32 yCopy = yRun + 48.0f;   // a linha SEGUINTE
+            const f32 yCopy = yRun + 36.0f;   // a linha SEGUINTE (36dp — J-03)
             tap(btnCx, yCopy);
             bool sawClip = false;
             for (const auto& c : g_jni.void_calls) {
@@ -6111,6 +6114,331 @@ int main() {
                                 ea.kindName(), ea.x, ea.y, ea.w, ea.h);
                 }
                 check(probsZ.empty(), vmsg);
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // FASE 18 — 0.9.6.20 (PASSO 4 · JANELAS): J-01..J-04 NO DEVICE.
+        // J-01 logs opacos 80% com wrap · J-02 o véu 40% dos menus
+        // ancorados · J-03 settings linhas 36dp · J-04 os cantos suaves
+        // nos últimos cards duros. Provas por PIXEL (o loadPng de produção
+        // relê o PNG do export — o método 13.1/13.9) + o registo. O export
+        // nomeia pelo ECRÃ corrente (currentScreenName): menu_ficheiro /
+        // cenas / logs / settings / storage — o nome certo POR ESTADO.
+        // ------------------------------------------------------------------
+        fase("FASE 18 — 0.9.6.20 PASSO 4: as JANELAS (logs/menus/settings/"
+             "cantos) medidas no device virtual");
+        {
+            // estado limpo (o padrão 17)
+            g_editor.hierW = -1.0f;
+            g_editor.inspW = -1.0f;
+            g_editor.inspPinned = false;
+            g_editor.playMode = false;
+            g_editor.uiMode = false;
+            g_editor.audioMode = false;
+            g_toastT = 0.0f;
+            g_toast[0] = '\0';
+            g_bottom.bottomTab = 0;
+            g_bottom.drawerH = 0.0f;
+            g_editor.selected = Handle::invalid();
+            g_editor.multiSelectCount = 0;
+            g_editor.fileMenu = false;
+            g_editor.hierMenu = false;
+            g_editor.scenesMenu = false;
+            g_editor.settingsMenu = false;
+            g_editor.storageDialog = false;
+            g_editor.importMenu = false;
+            g_editor.logViewer = false;
+            frame();
+
+            auto export18 = [&](const char* ecra) {
+                g_layoutExportPending = true;
+                frame();
+                std::vector<u8> png, js;
+                const bool okP = rawSt16->readBytes(
+                    std::string("layout/") + ecra + ".png", png);
+                const bool okJ = rawSt16->readBytes(
+                    std::string("layout/") + ecra + ".json", js);
+                check(okP && !png.empty(),
+                      (std::string("18 o PNG do ecrã [") + ecra +
+                       "] está no projeto (o export nomeia pelo ECRÃ)")
+                          .c_str());
+                return std::make_pair(png, js);
+            };
+
+            // o composto esperado do VÉU DE MENU (J-02): preto 40% sobre o
+            // bg grafite — a matemática do device (o MESMO blend do pass UI)
+            f32 veu40[4];
+            theme::blendOver(theme::kTheme.scrimMenu, theme::kTheme.bg,
+                             veu40);
+            // e o vidro do sheet (surface 80%) SOBRE o véu 40%
+            f32 glassSobreVeu[4];
+            theme::blendOver(theme::kTheme.surface, veu40, glassSobreVeu);
+
+            // a sonda: relê o PNG (loadPng de produção) e compara o pixel
+            // (er,eg,eb) com tolerância ±1 (o padrão 13.1/13.9)
+            auto probePx18 = [&](const std::vector<u8>& pngBytes, u32 px,
+                                 u32 py, int er, int eg, int eb,
+                                 const char* msg) {
+                vv::RawImage img;
+                std::string err;
+                check(vv::loadPng(pngBytes.data(), pngBytes.size(), img,
+                                  err) &&
+                          img.ok(),
+                      "18 o PNG do export decodifica (loadPng de produção)");
+                check(px < img.width && py < img.height,
+                      "18 o pixel da sonda está dentro do ecrã");
+                const size_t pi = (size_t(py) * img.width + px) * 4;
+                const int dr = (int)img.rgba[pi] - er;
+                const int dg = (int)img.rgba[pi + 1] - eg;
+                const int db = (int)img.rgba[pi + 2] - eb;
+                check(dr >= -1 && dr <= 1 && dg >= -1 && dg <= 1 &&
+                          db >= -1 && db <= 1,
+                      msg);
+            };
+
+            // o CARD de um overlay no registo: o maior painel que NÃO é
+            // full-screen (o quad da cena cobre o ecrã todo e não é janela)
+            auto cardDe18 = [](const layout::Record& rec, f32 sw, f32 sh)
+                -> const layout::Entry* {
+                const layout::Entry* card = nullptr;
+                f32 best = 0.0f;
+                for (const auto& e : rec.entries) {
+                    if (e.kind != layout::Entry::Panel) {
+                        continue;
+                    }
+                    if (e.w >= sw * 0.90f || e.h >= sh * 0.90f) {
+                        continue;   // full-screen (a cena) — não é card
+                    }
+                    if (e.w * e.h > best) {
+                        best = e.w * e.h;
+                        card = &e;
+                    }
+                }
+                return card;
+            };
+
+            // ---- 18.1 (J-02) O VÉU DOS MENUS ANCORADOS É 40% --------------
+            passo("18.1 J-02: o véu dos menus ancorados = preto 40% "
+                  "(ficheiro/cenas) e o vidro do sheet mantém 80%");
+            {
+                // o menu abre PELO BOTÃO [Menu] da top bar (o caminho REAL
+                // do dono — o abridor repõe o offset 0 do D14; um set
+                // direto do flag saltaria o reset e nascia scrollado)
+                const editor::toolbar::TopBarLayout tlM =
+                    editor::toolbar::topbarLayout(1600.0f, 720.0f,
+                                                  g_ui.safeArea(), false,
+                                                  false);
+                g_input.injectDown(0, tlM.menu.x + tlM.menu.w * 0.5f,
+                                   tlM.menu.y + tlM.menu.h * 0.5f);
+                frame();
+                g_input.injectUp(0);
+                frame();
+                check(g_editor.fileMenu,
+                      "18.1 J-02 o menu ⋯ abriu pelo botão [Menu] (o "
+                      "caminho real, com o offset 0 do D14)");
+                auto [pngM, jsM] = export18("menu_ficheiro");
+                // o sheet vem do REGISTO (o card do ecrã menu_ficheiro)
+                const layout::Entry* sheet =
+                    cardDe18(g_ui.auditRecord(), 1600.0f, 720.0f);
+                check(sheet != nullptr,
+                      "18.1 J-02 o registo tem o sheet do menu ⋯");
+                if (sheet) {
+                    // (a) o VÉU fora do sheet (à direita dele, no
+                    //     viewport): o composto preto-40% — o véu 60%
+                    //     antigo daria (5,5,6)
+                    const u32 vx = (u32)(sheet->x + sheet->w + 120.0f);
+                    const u32 vy = (u32)(sheet->y + sheet->h * 0.5f);
+                    probePx18(pngM, vx, vy,
+                              (int)(veu40[0] * 255.0f + 0.5f),
+                              (int)(veu40[1] * 255.0f + 0.5f),
+                              (int)(veu40[2] * 255.0f + 0.5f),
+                              "18.1 J-02 o véu do menu ⋯ mede preto 40% (o "
+                              "composto do scrimMenu sobre o bg — a "
+                              "matemática do device no pixel)");
+                    // (b) o VIDRO do sheet na banda de rodapé (4dp sob a
+                    //     última linha): surface 80% SOBRE o véu 40%
+                    probePx18(pngM, (u32)(sheet->x + 40.0f),
+                              (u32)(sheet->y + sheet->h - 3.0f),
+                              (int)(glassSobreVeu[0] * 255.0f + 0.5f),
+                              (int)(glassSobreVeu[1] * 255.0f + 0.5f),
+                              (int)(glassSobreVeu[2] * 255.0f + 0.5f),
+                              "18.1 J-02 o vidro do sheet mantém 80% SOBRE "
+                              "o véu de 40% (o composto duplo no pixel)");
+                    // (c) o CANTO do sheet (raio 8dp — o J-04 no ancorado):
+                    //     o pixel (2,2) diagonal fica FORA do raio → véu
+                    probePx18(pngM, (u32)(sheet->x + 2.0f),
+                              (u32)(sheet->y + 2.0f),
+                              (int)(veu40[0] * 255.0f + 0.5f),
+                              (int)(veu40[1] * 255.0f + 0.5f),
+                              (int)(veu40[2] * 255.0f + 0.5f),
+                              "18.1 J-04 o canto do sheet é suave (o pixel "
+                              "diagonal fora do raio 8dp mostra o véu)");
+                }
+                fileapi::writeAll("hotfix20-device-menu-veu40.png",
+                                  pngM.data(), pngM.size());
+                g_editor.fileMenu = false;
+
+                // o menu de CENAS: o MESMO véu de 40% (o ecrã dele é
+                // "cenas" — currentScreenName)
+                g_editor.scenesMenu = true;
+                frame();
+                frame();
+                auto [pngS, jsS] = export18("cenas");
+                probePx18(pngS, 1250, 600, (int)(veu40[0] * 255.0f + 0.5f),
+                          (int)(veu40[1] * 255.0f + 0.5f),
+                          (int)(veu40[2] * 255.0f + 0.5f),
+                          "18.1 J-02 o véu do menu de cenas mede preto 40% "
+                          "(o MESMO token dos ancorados)");
+                g_editor.scenesMenu = false;
+                frame();
+            }
+
+            // ---- 18.2 (J-01) LOGS OPAQUES 80% COM WRAP ---------------------
+            passo("18.2 J-01: o viewer de logs é OPAQUE (o card é o bg), "
+                  "80% da faixa e quebra a linha longa");
+            {
+                std::string longLine;
+                for (int i = 0; i < 150; ++i) {
+                    longLine += "palavra ";
+                }
+                g_logLines.clear();
+                g_logLines.push_back(longLine);
+                g_logLines.push_back("curta");
+                g_logDumps.clear();
+                g_editor.logViewer = true;
+                g_editor.logViewerJustOpened = true;
+                frame();
+                frame();
+                auto [pngL, jsL] = export18("logs");
+                // o card do viewer vem do REGISTO (o ecrã "logs")
+                const layout::Entry* card18 =
+                    cardDe18(g_ui.auditRecord(), 1600.0f, 720.0f);
+                check(card18 != nullptr,
+                      "18.2 J-01 o registo tem o card do viewer");
+                f32 ox18, oy18, aw18, ah18;
+                editor::overlayArea(1600.0f, 720.0f, g_ui.safeArea(), ox18,
+                                    oy18, aw18, ah18);
+                check(card18 && card18->w <= aw18 * 0.80f + 0.1f,
+                      "18.2 J-01 o card ocupa ≤80% da LARGURA da faixa "
+                      "(o cap do dono — era 86%)");
+                check(card18 && card18->h <= ah18 * 0.80f + 0.1f,
+                      "18.2 J-01 o card ocupa ≤80% da ALTURA da faixa");
+                if (card18) {
+                    // OPAQUE: o pixel no interior do card É o bg grafite
+                    // exato (o vidro antigo deixaria a cena atravessar) —
+                    // na banda de rodapé do card, longe do texto
+                    probePx18(pngL, (u32)(card18->x + 24.0f),
+                              (u32)(card18->y + card18->h - 6.0f), 14, 14,
+                              16,
+                              "18.2 J-01 o card do log é OPAQUE (o pixel "
+                              "interior é o bg #0E0E10 exato — a cena não "
+                              "atravessa)");
+                }
+                fileapi::writeAll("hotfix20-device-logs.png", pngL.data(),
+                                  pngL.size());
+                g_editor.logViewer = false;
+                g_logLines.clear();
+                frame();
+            }
+
+            // ---- 18.3 (J-03) SETTINGS LINHAS 36DP --------------------------
+            passo("18.3 J-03: as linhas do Settings medem 36dp (os "
+                  "cabeçalhos mantêm 48dp) — a página inteira no device");
+            {
+                g_editor.settingsMenu = true;
+                g_editor.settingsCollapsed = 0;   // TODAS as secções abertas
+                frame();
+                frame();
+                auto [pngS36, jsS36] = export18("settings");
+                // o alvo de toque da LINHA (o toggle Imersivo — a linha
+                // INTEIRA é o alvo): h == 36dp × 2.0 = 72px
+                const layout::Record& rec36 = g_ui.auditRecord();
+                bool linhaOk = false, headerOk = false;
+                for (const auto& e : rec36.entries) {
+                    if (e.kind == layout::Entry::Button &&
+                        e.id == editor::settings::kImmersiveId) {
+                        linhaOk = e.h >= theme::dp(36.0f) - 0.5f &&
+                                  e.h <= theme::dp(36.0f) + 0.5f;
+                    }
+                    if (e.kind == layout::Entry::Button &&
+                        e.id == editor::settings::kSectionBase +
+                                    editor::settings::kBitGeral) {
+                        headerOk = e.h >= theme::dp(48.0f) - 0.5f &&
+                                   e.h <= theme::dp(48.0f) + 0.5f;
+                    }
+                }
+                check(linhaOk, "18.3 J-03 a linha (toggle Imersivo) mede "
+                               "36dp no registo (era 48dp)");
+                check(headerOk, "18.3 J-03 o cabeçalho de secção mantém "
+                                "48dp (a spec manda nas LINHAS)");
+                fileapi::writeAll("hotfix20-device-settings-36.png",
+                                  pngS36.data(), pngS36.size());
+                g_editor.settingsMenu = false;
+                frame();
+            }
+
+            // ---- 18.4 (J-04) OS CANTOS SUAVES DOS ÚLTIMOS CARDS DUROS -----
+            passo("18.4 J-04: o diálogo de armazenamento tem CANTOS "
+                  "suaves (o pixel diagonal fora do raio mostra o fundo)");
+            {
+                g_editor.storageDialog = true;
+                frame();
+                frame();
+                auto [pngD, jsD] = export18("storage");
+                const layout::Entry* dlg =
+                    cardDe18(g_ui.auditRecord(), 1600.0f, 720.0f);
+                check(dlg != nullptr,
+                      "18.4 J-04 o registo tem o card do diálogo");
+                if (dlg) {
+                    f32 glassBg[4];
+                    theme::blendOver(theme::kTheme.surface,
+                                     theme::kTheme.bg, glassBg);
+                    // o CANTO (2,2) fora do raio 8dp: o fundo por trás
+                    // (o painel duro mostraria o vidro do card)
+                    probePx18(pngD, (u32)(dlg->x + 2.0f),
+                              (u32)(dlg->y + 2.0f), 14, 14, 16,
+                              "18.4 J-04 o canto do diálogo é SUAVE (o "
+                              "pixel (2,2) fora do raio 8dp mostra o fundo "
+                              "— o painel duro mostraria o vidro)");
+                    // o interior perto do canto é o VIDRO do card (o
+                    // composto surface sobre o fundo)
+                    probePx18(pngD, (u32)(dlg->x + 16.0f),
+                              (u32)(dlg->y + 16.0f),
+                              (int)(glassBg[0] * 255.0f + 0.5f),
+                              (int)(glassBg[1] * 255.0f + 0.5f),
+                              (int)(glassBg[2] * 255.0f + 0.5f),
+                              "18.4 J-04 o interior do card é o vidro "
+                              "surface 80% (o composto no pixel)");
+                }
+                fileapi::writeAll("hotfix20-device-storage-cantos.png",
+                                  pngD.data(), pngD.size());
+                g_editor.storageDialog = false;
+                frame();
+            }
+
+            // ---- 18.5 o validador inteiro ao device (o PASSO 4 não abre
+            //      exceções — o EDITOR limpo, o mesmo âmbito do 17.6; o
+            //      registo tem de ser FRESCO: armar o audit deste frame,
+            //      não validar o registo stale do diálogo do 18.4) --------
+            {
+                g_layoutExportPending = true;
+                frame();
+                const layout::Record& rW = g_ui.auditRecord();
+                const auto probsW = layout::validate(rW);
+                char vmsgW[256];
+                std::snprintf(vmsgW, sizeof(vmsgW),
+                              "18.5 o editor do PASSO 4 passa o VALIDADOR "
+                              "INTEIRO (0/0)%s",
+                              probsW.empty() ? "" : " — ver o log acima");
+                for (const auto& pr : probsW) {
+                    const layout::Entry& ea = rW.entries[pr.ia];
+                    std::printf("    [validador] %s: %s na entrada %u "
+                                "(kind=%s x=%.0f y=%.0f w=%.0f h=%.0f)\n",
+                                pr.sevName(), pr.ruleName(), pr.ia,
+                                ea.kindName(), ea.x, ea.y, ea.w, ea.h);
+                }
+                check(probsW.empty(), vmsgW);
             }
         }
 

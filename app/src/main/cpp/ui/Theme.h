@@ -29,7 +29,10 @@
 //   danger     #E5484D α1.00 — semântica (exceção documentada, como sempre)
 //   warn       #FF8A3D α1.00 — LARANJA (nunca == accent: hue 24° vs 39°)
 //   ok         #46A758 α1.00
-//   scrim      preto 60% — véu modal
+//   scrim      preto 60% — véu MODAL (os cards centrados que têm véu)
+//   scrimMenu  preto 40% — véu dos MENUS ANCORADOS (PASSO 4 · 0.9.6.20:
+//              «menus ancorados com fundo 40%» — o véu mais leve mantém a
+//              cena legível à volta do menu; os modais mantêm os 60%)
 //
 // CONTRASTE — OS PISOS REAIS (o padrão honesto): sobre surface SÓLIDA e
 // sobre o VIDRO REAL (α0.80 sobre o bg grafite — o que está de facto por
@@ -84,6 +87,7 @@ struct Theme {
     f32 warn[4];       // #FF8A3D α1.00 (LARANJA — hue 24°, nunca o accent 39°)
     f32 ok[4];         // #46A758 α1.00
     f32 scrim[4];      // preto 60% (véu modal)
+    f32 scrimMenu[4];  // preto 40% (véu dos menus ANCORADOS — PASSO 4)
     // 0.9.2 — PALETA V.ONI (spec §10 🔶 — coloração do editor de script;
     // o parser classifica tokens, AS CORES VIVEM AQUI — flip de 1 token).
     // CONTEÚDO, não chrome (exceção documentada ao «zero azul» — como os
@@ -132,6 +136,7 @@ inline constexpr Theme kTheme{
     VV_RGB(255, 138, 61),        // warn       (LARANJA ≠ âmbar)
     VV_RGB(70, 167, 88),         // ok
     {0.0f, 0.0f, 0.0f, 0.60f},   // scrim (60%)
+    {0.0f, 0.0f, 0.0f, 0.40f},   // scrimMenu (40% — PASSO 4, menus ancorados)
     // V.ONI (sintaxe = conteúdo): voniUser passa a text1 (#ECECEE); no
     // grafite #0E0E10 TODOS ≥5,6:1 (user 16,4 · engine 9,2 · reserved 8,1
     // · string 9,6 · number 13,7 · comment 5,6)
