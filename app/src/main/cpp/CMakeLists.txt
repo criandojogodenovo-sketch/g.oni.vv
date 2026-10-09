@@ -137,6 +137,7 @@ add_library(goni_vv SHARED
         core/UndoStack.cpp   # 0.9.0: undo/redo por snapshot + snapTic/pasteAsNew (faltou no APK: ld.lld undefined symbol no CI)
         render/GpuAssets.h
         render/GpuAssets.cpp
+        render/BlockMesh.cpp   # 0.10-M (PASSO 4): render por blocos
         core/Project.h
         core/Project.cpp
         core/SceneSerializer.h

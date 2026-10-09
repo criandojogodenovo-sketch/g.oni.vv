@@ -135,8 +135,10 @@ Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st) {
     L.drawerTop = L.drawer.y;
     // PASSO 1 (0.9.6.14): as 4 tabs vivem à ESQUERDA do canto direito
     // «FPS · TICs» (a reserva kFpsW; a status bar de 24dp morreu)
-    L.fps = {L.tabBar.x + L.tabBar.w - theme::dp(kFpsW), L.tabBar.y,
-             theme::dp(kFpsW), L.tabBar.h};
+    // 0.10-M (PASSO 4): com BLOCOS em cena a reserva CRESCE (o chip ganha
+    // «· bl n/m» — o HUD do render por blocos; sem blocos, o de sempre)
+    const f32 fpsW = theme::dp(st.blTotal > 0 ? kFpsW + kFpsWBlocks : kFpsW);
+    L.fps = {L.tabBar.x + L.tabBar.w - fpsW, L.tabBar.y, fpsW, L.tabBar.h};
     const f32 tabsW = L.tabBar.w - L.fps.w;
     const f32 third = tabsW / 4.0f;
     L.tab[0] = {L.tabBar.x, L.tabBar.y, third, L.tabBar.h};
@@ -217,10 +219,18 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
     // tab bar (a status bar de 24dp foi REMOVIDA — a spec: a faixa extra
     // sai; a versão/commit vivem em Settings › Sobre). Caption 12sp
     // text-2, right-aligned na reserva, o fit trunca honestamente.
+    // 0.10-M (PASSO 4): com blocos em cena o chip ganha «· bl n/m» — os
+    // DESNENADOS/TOTAIS do frame (a métrica REAL do render por blocos,
+    // coerente com o dc/verts do LOG; muda com o orbit — o culling à vista)
     if (ui.hasFont()) {
-        char fpsTxt[40];
-        std::snprintf(fpsTxt, sizeof(fpsTxt), "FPS %d · TICs %u", fps,
-                      ticCount);
+        char fpsTxt[48];
+        if (bs.blTotal > 0) {
+            std::snprintf(fpsTxt, sizeof(fpsTxt), "FPS %d · TICs %u · bl %u/%u",
+                          fps, ticCount, bs.blDrawn, bs.blTotal);
+        } else {
+            std::snprintf(fpsTxt, sizeof(fpsTxt), "FPS %d · TICs %u", fps,
+                          ticCount);
+        }
         const TextMetrics tmF = ui.textMetrics();
         const f32 padF = theme::dp(8.0f);
         const f32 maxW = L.fps.w - 2.0f * padF;

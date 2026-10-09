@@ -1,10 +1,12 @@
 // render/GpuAssets.cpp — 1 ref → 1 objeto GL (F5-E; texturas F5.1-A).
+// 0.10-M (PASSO 4): + o caminho dos BLOCOS (BlockMesh por ref + hull).
 #include "render/GpuAssets.h"
 #include "assets/GOwnFormats.h"
 #include "assets/TextureCompressor.h"
 #include "assets/TexturePipeline.h"
 #include "platform/Log.h"
 #include "platform/EngineLog.h"   // 0.10-M (PASSO 3B): elog — o dono lê o FICHEIRO
+#include "render/BlockMesh.h"
 #include "render/Mesh.h"
 #include "render/Texture.h"
 #include <cctype>
@@ -37,6 +39,27 @@ Mesh* GpuAssets::mesh(const std::string& ref) {
     const auto it = gpuMeshes_.find(ref);
     if (it != gpuMeshes_.end()) {
         return it->second.get();   // MESMO objeto GL — sem duplicar GPU
+    }
+    // 0.10-M (PASSO 4) — O CAMINHO DOS BLOCOS: um .gmesh v3 que o mesh
+    // ÚNICO recusaria (verts > 65 535 ou estimativa > orçamento — a MESMA
+    // condição do guard cedo do ResourceManager, uma só verdade) abre
+    // pela TABELA e devolve o HULL de bounds. O peek é o MESMO espião de
+    // 192 B do PASSO 3B (uma leitura por ref, antes do ficheiro inteiro).
+    {
+        const std::string ext = lowerExtOf(ref);
+        if (ext == "gmesh" && rm_->storage()) {
+            std::vector<u8> peek;
+            if (rm_->storage()->readBytesAt(
+                    ref, 0, kGHeaderBytes + kGmeshV3MetaBytes, peek)) {
+                GMeshV3Meta meta;
+                std::string perr;
+                if (gmeshV3PeekMeta(peek.data(), peek.size(), meta, perr) &&
+                    (meta.vertexCount > 65535 ||
+                     gmeshV3LoadEstimateBytes(meta) > kMeshLoadBudgetBytes)) {
+                    return blockHull(ref);
+                }
+            }
+        }
     }
     std::string err;
     const MeshData* data = rm_->mesh(ref, err);
@@ -202,9 +225,57 @@ const Texture* GpuAssets::texture(const std::string& relPath, std::string* warn)
     return raw;
 }
 
+BlockMesh* GpuAssets::blockMeshIfOpen(const std::string& ref) const {
+    const auto it = blockMeshes_.find(ref);
+    return it != blockMeshes_.end() ? it->second.get() : nullptr;
+}
+
+Mesh* GpuAssets::blockHull(const std::string& ref) {
+    // (1) o BlockMesh — 1 ref = 1 abertura (a tabela; NUNCA os dados)
+    BlockMesh* bm = blockMeshIfOpen(ref);
+    if (!bm) {
+        auto nb = std::make_unique<BlockMesh>();
+        std::string err;
+        if (!nb->open(*rm_->storage(), ref, err)) {
+            // a recusa do mesh único (PASSO 3B) já logou a CAUSA; aqui é a
+            // falha da ABERTURA por blocos (corrupção de tabela/faixa) —
+            // o elog chega ao engine.log que o dono LÊ
+            elog::error("gpu: '%s' FALHOU ao abrir por BLOCOS — %s",
+                        ref.c_str(), err.c_str());
+            return nullptr;
+        }
+        bm = nb.get();
+        blockMeshes_.emplace(ref, std::move(nb));
+    }
+    // (2) o HULL — o Mesh* do contrato (bounds EXATOS do meta; o render é
+    // do BlockMesh: drawTics consulta MeshRenderer::blocks PRIMEIRO)
+    auto hull = std::make_unique<Mesh>();
+    if (!bm->createHull(*hull)) {
+        elog::error("gpu: '%s' FALHOU no hull de bounds (upload GL)",
+                    ref.c_str());
+        return nullptr;
+    }
+    Mesh* raw = hull.get();
+    gpuMeshes_.emplace(ref, std::move(hull));
+    elog::info(
+        "blocos: '%s' aplicado — %u blocos, %llu verts, %.1f MB de dados "
+        "POR CARREGAR (lazy: a 1ª visibilidade de cada bloco é que lê)",
+        ref.c_str(), static_cast<unsigned>(bm->table().size()),
+        static_cast<unsigned long long>(bm->meta().vertexCount),
+        static_cast<double>([&]() {
+            u64 n = 0;
+            for (const GMeshV3Block& b : bm->table()) {
+                n += b.dataSize;
+            }
+            return n;
+        }()) / (1024.0 * 1024.0));
+    return raw;
+}
+
 void GpuAssets::releaseAll() {
     gpuMeshes_.clear();
     gpuTextures_.clear();
+    blockMeshes_.clear();   // TERM_WINDOW: o re-open é 192 B + tabela
 }
 
 } // namespace vv

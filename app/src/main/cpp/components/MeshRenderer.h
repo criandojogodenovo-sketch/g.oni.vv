@@ -19,6 +19,14 @@
 // desta assinatura FALHOU (GL exausto/contexto morto) e o rebind por frame
 // NÃO insiste (anti retry-storm); um pedido NOVO (pick/params/load) ou um
 // INIT_WINDOW limpa a flag. Runtime-only — nunca serializado.
+//
+// 0.10-M (PASSO 4) — RENDER POR BLOCOS: `blocks` aponta para o BlockMesh
+// aberto do `meshPath` (o GpuAssets é o dono; o blockRebind() do main
+// sincroniza no PONTO SEGURO de cada frame — a fonte é o meshPath, o
+// MESMO contrato do resolveMesh do serializer). Quando `blocks` != null o
+// drawTics desenha POR BLOCOS (frustum + lazy + LRU) e o `mesh` (o HULL de
+// bounds do GpuAssets) fica para os BOUNDS (cena/fit/gizmo — o AABB
+// global do meta) — nunca é desenhado. Runtime-only — nunca serializado.
 #include "core/Component.h"
 #include "render/Material.h"
 #include "render/Primitives.h"
@@ -28,6 +36,7 @@ namespace vv {
 
 class Mesh;      // render/Mesh.h — recurso GL (fwd: manter header GL-free)
 class Texture;   // render/Texture.h — idem (F5-D)
+class BlockMesh; // render/BlockMesh.h — idem (PASSO 4; fwd p/ GL-free)
 
 class MeshRenderer : public Component {
 public:
@@ -35,6 +44,10 @@ public:
     Material*  material = nullptr;
     // F5-D: textura opcional do material (não-dono; ligada pelo GpuAssets)
     const Texture* texture = nullptr;
+
+    // 0.10-M (PASSO 4): o render por blocos deste meshPath (não-dono — o
+    // GpuAssets é dono; ver comentário da classe). null = mesh único/prim.
+    BlockMesh* blocks   = nullptr;
 
     // 0.7.0 — COR POR TIC (gestão de TICs): tint multiplicativo do albedo no
     // shader lit (uniform uTint; default branco = comportamento 0.6.x byte

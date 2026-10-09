@@ -217,3 +217,28 @@ sobrevivem ao corte. A pool de cada bloco sai em ordem ASCENDENTE do
 nunca fica partido por dois blocos). A pool do bloco = os vértices
 REFERENCIADOS. indexType = u16 quando a pool ≤ 65,535; u32 quando
 acima (o cap é configurável — a spec manda).
+
+### O runtime por blocos (0.10-M PASSO 4 — A CURA CHEGOU)
+
+O render por blocos EXISTE: um .gmesh v3 que o mesh único recusaria
+(> 65.535 verts ou estimativa acima do orçamento) abre pela TABELA —
+`gmeshV3PeekMeta` espia os 192 B, `gmeshV3ReadTableOnly` lê a faixa da
+tabela, `gmeshV3ReadMaterialsOnly` a faixa dos materiais (NUNCA um byte
+dos dados: o `BlockMesh` de `render/BlockMesh.h` é o dono do caminho).
+O bloco materializa-se pela faixa exata (`readBytesAt` +
+`gmeshV3MaterializeBlock` — o MESMO decodificador do `readGMeshV3Block`,
+uma só fonte de verdade) na PRIMEIRA frame em que fica visível (lazy),
+desenha-se bloco a bloco com frustum AABB por entrada da tabela, e a
+cache é LRU com os ORÇAMENTOS DECLARADOS da casa:
+`kBlockCacheRamBudgetBytes` (64 MB de MeshData retidos) +
+`kBlockCacheVramBudgetBytes` (192 MB de uploads estimados) — o MESMO
+total de 256 MB do mesh único, agora LIMITADO POR CONSTRUÇÃO, seja o
+modelo de 38 MB ou de 972 MB. O picker/serializer recebem o HULL de
+bounds (o AABB global do meta como mesh de 8 cantos — o contrato
+MeshData→Mesh intacto, zero mudanças na UI do seletor); o picking, os
+corpos de colisão e o AABB da cena leem os bounds do meta (a tabela,
+nunca os dados); o export OBJ anda pela tabela com o stream por blocos
+(`objStreamBegin`/`objStreamAppend` — pico de RAM = 1 bloco). As
+métricas REAIS por frame (blocos totais/visíveis/desenhados, dc, verts)
+vivem no HUD (o chip «FPS · TICs · bl n/m») e no `engine.log`
+(throttled); a sentinela R-040 vigia os orçamentos para sempre.

@@ -34,6 +34,52 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.10.4 — 0.10-M PASSO 4: O RENDER POR BLOCOS (o «fail de 203 MB» morreu)
+
+**O que o dono reportou** (C33, vc 57): o modelo de 203 MB importa
+(verificado=1) e o apply falha com «memória insuficiente ao carregar mesh
+(cura no PASSO 4: render por blocos)» — a causa registrada no 3B com
+números. A cura prometida chegou: o runtime desenha BLOCO A BLOCO.
+
+- **A ABERTURA é a TABELA** (zero dados): `BlockMesh` espia os 192 B do
+  header+meta (`gmeshV3PeekMeta`), lê a faixa da tabela
+  (`gmeshV3ReadTableOnly` — os MESMOS validadores do caminho inteiro) e a
+  faixa dos materiais. O apply de um modelo de 972 MB custa ~192 B +
+  tabela (~75 KB para 920 blocos) — o `import` NÃO carrega nada.
+- **O FRUSTUM por bloco**: o AABB de cada entrada da tabela (8 cantos ×
+  6 planos, conservativo) decide quem desenha; o lazy lê a faixa exata
+  (`readBytesAt` + `gmeshV3MaterializeBlock` — o mesmo decodificador) na
+  PRIMEIRA frame de visibilidade; a cache é **LRU com orçamentos
+  declarados**: 64 MB RAM + 192 MB VRAM (`kBlockCacheRamBudgetBytes`/
+  `kBlockCacheVramBudgetBytes`) — o MESMO 256 MB da casa, agora limitado
+  por construção, seja o modelo de 38 MB ou de 972 MB.
+- **O CONTRATO DO PICKER intacto**: o GpuAssets devolve o HULL de bounds
+  (o AABB global do meta como mesh de 8 cantos) — o fit/normalização, o
+  AABB da cena e o gizmo funcionam SEM carregar nada; o render é do
+  `BlockMesh` (o drawTics consulta `MeshRenderer::blocks` primeiro — o
+  hull nunca desenha). ZERO mudanças em ui/EditorUi.
+- **O HUD é honesto**: o chip «FPS · TICs · bl n/m» no canto da tab bar
+  (a métrica DO frame: desenhados/totais — muda com o orbit, o culling à
+  vista do dono) + o log throttled `blocos: total=… desenhados=… dc=…
+  verts=…` (coerente com o dc/verts da MESMA frame).
+- **O PIN dos 920 blocos** (fork + VmHWM): orbit realista (a câmara perto,
+  ~15% visível) — pico **0 KB** acima da base; o pior caso honesto (o
+  frustum engole os 920 TODOS com orçamento apertado de 2+4 MB) — pico
+  **10,6 MB < 19 MB** do modelo: o churn nunca alcança o caminho do mesh
+  único. A cache ≤ orçamento em TODOS os frames (verificado no filho).
+- **O EXPORT OBJ pela tabela**: um bloco materializado de cada vez
+  (`objStreamBegin`/`objStreamAppend`, numeração global) — pico de RAM =
+  1 bloco; o parity da geometria contra o caminho inteiro é do CI.
+- **Provas**: `test_blockmesh.cpp` (9 casos: o storage CONTADOR que prova
+  que a abertura não lê dados; o audit do culling; o lazy; o LRU sob
+  orbit; a corrupção isolada; o export parity; o v1 recusado; o skinned)
+  · R-040 no test_sentinels (orçamentos literais + frustum) · c33 FASE 20
+  (+36 checks: o gigante de 80 000 verts aplica pelo picker REAL,
+  renderiza com 2 dc, o orbit muda «bl 2/2»→«bl 1/2», o export pela
+  tabela, o PNG do HUD `docs/p05/passo4-hud-blocos.png`) · mutações
+  M1/M2/M3 (culling morto → vermelho; evicção morta → vermelho; eager no
+  open → vermelho) · versionCode **58**.
+
 ## 0.10.3 — 0.10-M PASSO 3B: LOG + CAUSA DA IMPORTAÇÃO (o «log de ontem» e o «ver causa no log» morrem)
 
 **O que o dono reportou** (C33, vc 56): o dragão de 32 MB importa em ~2 min;

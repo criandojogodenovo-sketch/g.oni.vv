@@ -18,6 +18,67 @@ void appendFloat(std::string& s, f32 v) {
 }
 } // namespace
 
+// ---- 0.10-M (PASSO 4): o STREAM POR BLOCOS --------------------------------
+
+void objStreamBegin(ObjStreamBlock& s, const std::string& name) {
+    s.out.clear();
+    s.baseVertex = 0;
+    s.blocks = 0;
+    s.verts = 0;
+    s.tris = 0;
+    s.out = "# exportado pela G.One VV (formato .goni) — por BLOCOS\n";
+    if (!name.empty()) {
+        s.out += "o " + name + "\n";
+    }
+}
+
+void objStreamAppend(ObjStreamBlock& s, const MeshData& block,
+                     const std::string& groupName,
+                     const std::string& material) {
+    // v/vt/vn do bloco (numeração GLOBAL: o índice do OBJ = base + local)
+    char line[96];
+    const u32 base = static_cast<u32>(s.baseVertex);
+    for (const Vertex& v : block.vertices) {
+        s.out += "v ";
+        appendFloat(s.out, v.pos.x); s.out += ' ';
+        appendFloat(s.out, v.pos.y); s.out += ' ';
+        appendFloat(s.out, v.pos.z);
+        s.out += '\n';
+    }
+    for (const Vertex& v : block.vertices) {
+        s.out += "vt ";
+        appendFloat(s.out, v.uv.x); s.out += ' ';
+        appendFloat(s.out, v.uv.y);
+        s.out += '\n';
+    }
+    for (const Vertex& v : block.vertices) {
+        s.out += "vn ";
+        appendFloat(s.out, v.normal.x); s.out += ' ';
+        appendFloat(s.out, v.normal.y); s.out += ' ';
+        appendFloat(s.out, v.normal.z);
+        s.out += '\n';
+    }
+    s.out += "g " + (groupName.empty() ? std::string("bloco") : groupName) + "\n";
+    if (!material.empty()) {
+        s.out += "usemtl " + material + "\n";
+    }
+    const u32 idxEnd = static_cast<u32>(block.indices.size());
+    for (u32 i = 0; i + 2 < idxEnd; i += 3) {
+        const u32 a = base + block.indices[i];
+        const u32 b = base + block.indices[i + 1];
+        const u32 c = base + block.indices[i + 2];
+        std::snprintf(line, sizeof(line), "f %u/%u/%u %u/%u/%u %u/%u/%u\n",
+                      a + 1u, a + 1u, a + 1u,
+                      b + 1u, b + 1u, b + 1u,
+                      c + 1u, c + 1u, c + 1u);
+        s.out += line;
+        ++s.tris;
+    }
+    s.baseVertex += block.vertices.size();
+    s.verts += block.vertices.size();
+    ++s.blocks;
+}
+
 std::string exportObj(const MeshData& mesh) {
     std::string s = "# exportado pela G.One VV (formato .goni)\n";
     if (!mesh.name.empty()) {

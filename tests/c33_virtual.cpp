@@ -256,6 +256,148 @@ bool buildGlbFase19(u32 verts, u32 tris, const std::string& path) {
     return ok;
 }
 
+// 0.10-M (PASSO 4 · FASE 20): o GLB de DUAS meshes em nós SEPARADOS
+// (x=−10 e x=+10), cada com `verts` vértices — o modelo que o mesh único
+// RECUSA (total > 65 535) e que o render POR BLOCOS desenha bloco a bloco
+// com AABBs DISTINTOS (o frustum escolhe metades; o orbit muda o HUD).
+// Duas primitivas, dois nós com translation, SEM pele (o streaming de
+// produção; cada primitiva vira UM grupo → UM bloco).
+bool buildGlbFase20(u32 verts, u32 tris, const std::string& path) {
+    // layout do BIN (por mesh: pos 12 + nrm 12 + uv 8 + idx u32; as duas
+    // meshes partilham o layout com offsets deslocados)
+    const u64 perPos = u64(verts) * 12;
+    const u64 m0nrm = (perPos + 3) & ~3ull;
+    const u64 m0nrmLen = u64(verts) * 12;
+    const u64 m0uv = (m0nrm + m0nrmLen + 3) & ~3ull;
+    const u64 m0uvLen = u64(verts) * 8;
+    const u64 m0idx = (m0uv + m0uvLen + 3) & ~3ull;
+    const u64 m0idxLen = u64(tris) * 12;
+    const u64 m1pos = (m0idx + m0idxLen + 3) & ~3ull;
+    const u64 m1nrm = (m1pos + perPos + 3) & ~3ull;
+    const u64 m1uv = (m1nrm + m0nrmLen + 3) & ~3ull;
+    const u64 m1idx = (m1uv + m0uvLen + 3) & ~3ull;
+    const u64 binLen = m1idx + m0idxLen;
+    char j[1600];
+    std::snprintf(j, sizeof(j),
+        "{\"asset\":{\"version\":\"2.0\"},\"scene\":0,"
+        "\"scenes\":[{\"nodes\":[0,1]}],"
+        "\"nodes\":["
+        "{\"mesh\":0,\"name\":\"esquerda\",\"translation\":[-10.0,0.0,0.0]},"
+        "{\"mesh\":1,\"name\":\"direita\",\"translation\":[10.0,0.0,0.0]}],"
+        "\"meshes\":["
+        "{\"primitives\":[{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,"
+        "\"TEXCOORD_0\":2},\"indices\":3,\"mode\":4}]},"
+        "{\"primitives\":[{\"attributes\":{\"POSITION\":4,\"NORMAL\":5,"
+        "\"TEXCOORD_0\":6},\"indices\":7,\"mode\":4}]}],"
+        "\"buffers\":[{\"byteLength\":%llu}],"
+        "\"bufferViews\":["
+        "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":%llu},"
+        "{\"buffer\":0,\"byteOffset\":%llu,\"byteLength\":%llu},"
+        "{\"buffer\":0,\"byteOffset\":%llu,\"byteLength\":%llu},"
+        "{\"buffer\":0,\"byteOffset\":%llu,\"byteLength\":%llu},"
+        "{\"buffer\":0,\"byteOffset\":%llu,\"byteLength\":%llu},"
+        "{\"buffer\":0,\"byteOffset\":%llu,\"byteLength\":%llu},"
+        "{\"buffer\":0,\"byteOffset\":%llu,\"byteLength\":%llu},"
+        "{\"buffer\":0,\"byteOffset\":%llu,\"byteLength\":%llu}],"
+        "\"accessors\":["
+        "{\"bufferView\":0,\"componentType\":5126,\"count\":%u,"
+        "\"type\":\"VEC3\"},"
+        "{\"bufferView\":1,\"componentType\":5126,\"count\":%u,"
+        "\"type\":\"VEC3\"},"
+        "{\"bufferView\":2,\"componentType\":5126,\"count\":%u,"
+        "\"type\":\"VEC2\"},"
+        "{\"bufferView\":3,\"componentType\":5125,\"count\":%u,"
+        "\"type\":\"SCALAR\"},"
+        "{\"bufferView\":4,\"componentType\":5126,\"count\":%u,"
+        "\"type\":\"VEC3\"},"
+        "{\"bufferView\":5,\"componentType\":5126,\"count\":%u,"
+        "\"type\":\"VEC3\"},"
+        "{\"bufferView\":6,\"componentType\":5126,\"count\":%u,"
+        "\"type\":\"VEC2\"},"
+        "{\"bufferView\":7,\"componentType\":5125,\"count\":%u,"
+        "\"type\":\"SCALAR\"}]}",
+        (unsigned long long)binLen,
+        (unsigned long long)perPos,
+        (unsigned long long)m0nrm, (unsigned long long)m0nrmLen,
+        (unsigned long long)m0uv, (unsigned long long)m0uvLen,
+        (unsigned long long)m0idx, (unsigned long long)m0idxLen,
+        (unsigned long long)m1pos, (unsigned long long)perPos,
+        (unsigned long long)m1nrm, (unsigned long long)m0nrmLen,
+        (unsigned long long)m1uv, (unsigned long long)m0uvLen,
+        (unsigned long long)m1idx, (unsigned long long)m0idxLen,
+        verts, verts, verts, tris * 3u,
+        verts, verts, verts, tris * 3u);
+    std::string json = j;
+    while (json.size() % 4 != 0) json += ' ';
+    std::vector<u8> bin(static_cast<size_t>(binLen), 0);
+    auto putF32 = [&bin](u64 off, f32 v) {
+        u32 raw;
+        std::memcpy(&raw, &v, 4);
+        for (int b = 0; b < 4; ++b) {
+            bin[static_cast<size_t>(off) + b] =
+                static_cast<u8>((raw >> (8 * b)) & 0xFF);
+        }
+    };
+    // determinístico (i mod pequeno): posição em [-1,1] (cada mesh é uma
+    // nuvem unitária; a TRANSLAÇÃO do nó separa-as em x=±10)
+    for (u32 i = 0; i < verts; ++i) {
+        for (int mesh = 0; mesh < 2; ++mesh) {
+            const u64 pos = mesh == 0 ? u64(i) * 12 : m1pos + u64(i) * 12;
+            const u64 nrm = mesh == 0 ? m0nrm + u64(i) * 12
+                                      : m1nrm + u64(i) * 12;
+            const u64 uv = mesh == 0 ? m0uv + u64(i) * 8 : m1uv + u64(i) * 8;
+            putF32(pos + 0, -1.0f + 2.0f * (i % 997u) / 996.0f);
+            putF32(pos + 4, -1.0f + 2.0f * (i % 991u) / 990.0f);
+            putF32(pos + 8, -1.0f + 2.0f * (i % 983u) / 982.0f);
+            putF32(nrm + 0, 0.0f);
+            putF32(nrm + 4, 1.0f);
+            putF32(nrm + 8, 0.0f);
+            putF32(uv + 0, (i % 251u) / 250.0f);
+            putF32(uv + 4, (i % 241u) / 240.0f);
+        }
+    }
+    for (u32 t = 0; t < tris; ++t) {
+        const u32 tri[3] = {(t * 3u + 0u) % verts, (t * 3u + 1u) % verts,
+                            (t * 3u + 2u) % verts};
+        for (int mesh = 0; mesh < 2; ++mesh) {
+            const u64 base = mesh == 0 ? m0idx : m1idx;
+            for (int k = 0; k < 3; ++k) {
+                const u64 off = base + (u64(t) * 3 + k) * 4;
+                bin[static_cast<size_t>(off) + 0] =
+                    static_cast<u8>(tri[k] & 0xFF);
+                bin[static_cast<size_t>(off) + 1] =
+                    static_cast<u8>((tri[k] >> 8) & 0xFF);
+                bin[static_cast<size_t>(off) + 2] =
+                    static_cast<u8>((tri[k] >> 16) & 0xFF);
+                bin[static_cast<size_t>(off) + 3] =
+                    static_cast<u8>((tri[k] >> 24) & 0xFF);
+            }
+        }
+    }
+    // o container GLB (o MESMO empacotamento do buildGlbFase19)
+    std::vector<u8> glb;
+    auto u32push = [&glb](u32 v) {
+        glb.push_back(static_cast<u8>(v & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 8) & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 16) & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 24) & 0xFF));
+    };
+    u32push(0x46546C67u);   // 'glTF'
+    u32push(2);
+    u32push(static_cast<u32>(12 + 8 + json.size() + 8 + bin.size()));
+    u32push(static_cast<u32>(json.size()));
+    u32push(0x4E4F534Au);   // 'JSON'
+    glb.insert(glb.end(), json.begin(), json.end());
+    u32push(static_cast<u32>(bin.size()));
+    u32push(0x004E4942u);   // 'BIN'
+    glb.insert(glb.end(), bin.begin(), bin.end());
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) return false;
+    const bool ok = std::fwrite(glb.data(), 1, glb.size(), f) == glb.size();
+    std::fclose(f);
+    return ok;
+}
+
 jobject kFakeActivity = reinterpret_cast<jobject>(static_cast<intptr_t>(0xD001));
 jclass  kFakeCls      = reinterpret_cast<jclass>(static_cast<intptr_t>(0xD002));
 
@@ -6877,20 +7019,24 @@ int main() {
             g_applyAsk.fileName = "gigante.glb";
             g_editor.applyAsk = true;
             applyImportedAssetToSelectedTic();
-            check(logHas("gpu: 'assets/gigante.gmesh' FALHOU ao carregar"),
-                  "19.4 a falha do load CHEGA ao engine.log (o LOGE de "
-                  "sempre só falava com o logcat)");
-            check(logCount("memória insuficiente ao carregar mesh") >= 1 &&
-                      logHas("cura no PASSO 4: render por blocos"),
-                  "19.4 a CAUSA com nome e números: 'memória insuficiente ao "
-                  "carregar mesh (cura no PASSO 4: render por blocos)'");
+            // 0.10-M (PASSO 4) — RECALIBRADO: a causa REGISTADA no 3B
+            // era «memória insuficiente ao carregar mesh (cura no PASSO 4:
+            // render por blocos)»; A CURA CHEGOU — o gigante de 70k APLICA
+            // pela TABELA e RENDERIZA bloco a bloco (a FASE 20 é a prova
+            // completa; aqui: a mesma fixture do 3B, o mesmo 'Sim')
+            check(logHas("blocos: 'assets/gigante.gmesh' aplicado"),
+                  "19.4 o gigante de 70k APLICA por BLOCOS (a cura do PASSO "
+                  "4 — o 'Sim' funciona; era a recusa do mesh único)");
             check(logCount("gmesh: fase=load ms=") > loadAntes,
-                  "19.4 o tempo do LOAD no log — mesmo RECUSADO (fase=load "
-                  "ms= … RECUSADO)");
-            check(std::strncmp(g_toast, "falha ao carregar mesh", 22) == 0,
-                  "19.4 o toast honesto 'falha ao carregar mesh'");
+                  "19.4 o tempo do LOAD no log (a TABELA aberta pelo apply)");
+            check(std::strstr(g_toast, "mesh aplicado") != nullptr,
+                  "19.4 o toast 'mesh aplicado' (o caminho do dono funciona "
+                  "de ponta a ponta)");
             std::remove(src.c_str());
-            frame();
+            frame();   // a 1ª frame com o gigante em cena: o lazy + o RENDER
+            check(logHas("blocos: total=5"),
+                  "19.4 o gigante RENDERIZA: a linha de métricas com "
+                  "desenhados/totais no engine.log de HOJE");
         }
 
         // ---- 19.5 o EXPORT: a mesma fonte de verdade do writer -----------
@@ -6974,9 +7120,10 @@ int main() {
             check(expS.find("import: FALHOU") != std::string::npos,
                   "19.5 o exportado traz a linha de erro de HOJE (não é "
                   "stale)");
-            check(expS.find("memória insuficiente ao carregar mesh") !=
+            check(expS.find("blocos: 'assets/gigante.gmesh' aplicado") !=
                       std::string::npos,
-                  "19.5 o exportado traz a CAUSA do load (PASSO 4)");
+                  "19.5 o exportado traz a LINHA DA CURA (blocos aplicado — "
+                  "PASSO 4; a recusa do 3B é história)");
             check(expS.find("gmesh: fase=parse ms=") != std::string::npos,
                   "19.5 o exportado traz os tempos por fase");
             g_jni.export_logs = nullptr;   // limpa o hook (o resto do harness)
@@ -6986,6 +7133,273 @@ int main() {
         }
 
         onAppCmd(&app19, APP_CMD_TERM_WINDOW);
+    }
+
+    // ======================================================================
+    // FASE 20 — 0.10-M PASSO 4: O RENDER POR BLOCOS. A recusa do 3B era
+    // «memória insuficiente ao carregar mesh (cura no PASSO 4: render por
+    // blocos)» — AQUI está a cura no caminho REAL do device: o modelo de
+    // 2 meshes separadas (80 000 verts > 65 535 — o mesh único RECUSA)
+    // APLICA pelo picker (o hull de bounds), RENDERIZA bloco a bloco (2
+    // draw calls, 2 lazy loads na 1ª frame), o ORBIT muda o HUD
+    // «bl desenhados/totais» (o culling trabalha), a cache fica DENTRO
+    // dos orçamentos declarados, e o EXPORT OBJ anda pela TABELA (pico
+    // de RAM = 1 bloco). O PNG do HUD sai para o P-05.
+    // ======================================================================
+    fase("FASE 20 — 0.10-M PASSO 4: render por blocos (o gigante renderiza)");
+    {
+        resetEngineForHarness();
+        // o intervalo do log de métricas a ZERO (determinismo: os frames
+        // do harness correm em ms, o device a 60 fps — lá o 1 s manda)
+        g_blockLogIntervalSecs = 0.0f;
+        // o framebuffer REAL do stub (o PNG do P-05 é o glReadPixels do
+        // frame INTEIRO — sem fb o readback é preto; o padrão da FASE 13)
+        glstub::fb::resetState();
+        glstub::fb::enabled = true;
+        auto st20 = std::make_unique<FakeStorage>();
+        FakeStorage* rawSt20 = st20.get();
+        check(Project::createNew(*rawSt20, "c33", g_project),
+              "20.0 projeto criado");
+        {
+            const Handle h = g_scene.create("Alvo");
+            Tic* t = g_scene.get(h);
+            t->addComponent<Transform3D>();
+            t->addComponent<MeshRenderer>();
+            check(g_project.saveActiveScene(*rawSt20, g_scene),
+                  "20.0 cena gravada com o TIC Alvo");
+        }
+        g_storage = std::move(st20);
+        g_projectReady = true;
+        g_resources.setStorage(rawSt20);
+        g_gpu.init(&g_resources);
+        android_app app20;
+        std::memset(&app20, 0, sizeof(app20));
+        app20.contentRect = {0, 24, 1512, 720};
+        onAppCmd(&app20, APP_CMD_INIT_WINDOW);
+        check(g_ready, "20.0 boot completo (g_ready)");
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+        g_editor.selected = g_scene.find("Alvo");
+        check(g_scene.get(g_editor.selected) != nullptr &&
+                  g_scene.get(g_editor.selected)
+                          ->getComponent<MeshRenderer>() != nullptr,
+              "20.0 TIC Alvo vivo com MeshRenderer");
+
+        // ---- 20.1 o IMPORT + o APPLY pela TABELA (o hull de bounds) ------
+        passo("20.1 o gigante APLICA: a tabela abre, NADA carrega (lazy)");
+        u32 blocks20 = 0;
+        {
+            const std::string src = "/tmp/goni_fase20_2x40k.glb";
+            check(buildGlbFase20(40000, 30000, src),
+                  "20.1a fixture criada (GLB 2 meshes x 40k verts = 80k)");
+            convert::Output out;
+            convert::Stats stats;
+            std::string err;
+            const int loadAntes = logCount("gmesh: fase=load ms=");
+            const bool ok = convert::importFile(src, "par.glb", *g_storage,
+                                                g_pipeline.get(), out, stats,
+                                                err, nullptr, nullptr);
+            check(ok && out.meshes.size() == 1 &&
+                      out.meshes[0] == "assets/par.gmesh",
+                  "20.1 o import do 80k COMPLETA (a conversão está correta)");
+            if (!ok) {
+                std::printf("    [20.1-ERR] import falhou: %.200s\n",
+                            err.c_str());
+            }
+            std::remove(src.c_str());
+            // o APPLY: o MESMO caminho do 'Sim' do diálogo (o picker real)
+            refreshCatalog();
+            g_applyAsk.open = true;
+            g_applyAsk.kind = 'm';
+            g_applyAsk.rel = "assets/par.gmesh";
+            g_applyAsk.fileName = "par.glb";
+            g_editor.applyAsk = true;
+            applyImportedAssetToSelectedTic();
+            Tic* talvo = g_scene.get(g_editor.selected);
+            MeshRenderer* mr20 =
+                talvo ? talvo->getComponent<MeshRenderer>() : nullptr;
+            check(mr20 != nullptr && mr20->meshPath == "assets/par.gmesh",
+                  "20.1 o APPLY funciona: meshPath ligado (o hull de bounds "
+                  "preserva o contrato do picker)");
+            check(mr20 && mr20->mesh != nullptr && mr20->mesh->ok(),
+                  "20.1 o HULL está no slot (bounds como Mesh* — nunca "
+                  "desenhado)");
+            const vv::BlockMesh* bm = g_gpu.blockMeshIfOpen("assets/par.gmesh");
+            check(bm != nullptr && bm->ok(),
+                  "20.1 o BlockMesh aberto no GpuAssets (1 ref = 1 abertura)");
+            check(bm && bm->table().size() == 2,
+                  "20.1 a TABELA tem 2 blocos (1 por mesh)");
+            blocks20 = bm ? static_cast<u32>(bm->table().size()) : 0;
+            check(bm && bm->meta().vertexCount == 80000,
+                  "20.1 80 000 verts contados pela TABELA (o mesh único "
+                  "recusaria)");
+            // o HULL: bounds EXATOS do meta (a fonte do fit/cena/gizmo)
+            check(mr20 && bm &&
+                      mr20->mesh->boundsMaxExtent() == bm->boundsMaxExtent(),
+                  "20.1 os bounds do hull == o AABB global do meta");
+            // o LAZY: a abertura loga UMA fase=load (a TABELA) — os DADOS
+            // esperam a 1ª visibilidade
+            check(logCount("gmesh: fase=load ms=") == loadAntes + 1,
+                  "20.1 a abertura é UMA linha fase=load (a tabela — nada "
+                  "de dados)");
+            check(logHas("por BLOCOS: tabela de 2 blocos"),
+                  "20.1 o log diz «por BLOCOS: tabela de 2 blocos» (a causa "
+                  "chegou ao log do dono)");
+            check(logHas("blocos: 'assets/par.gmesh' aplicado"),
+                  "20.1 a linha do apply: blocos + verts + MB por carregar");
+            // (SEM frame aqui: a 1ª frame — e o lazy da 1ª visibilidade — é
+            // do passo 20.2, com a câmara controlada)
+        }
+
+        // ---- 20.2 o RENDER por blocos (a 1ª frame carrega os visíveis) ---
+        passo("20.2 o RENDER: 2 blocos desenham, o HUD diz bl 2/2");
+        {
+            // escala 1:1 (cancela o fit do apply — a geometria fica em
+            // x=±10, determinística para o frustum)
+            Tic* talvo = g_scene.get(g_editor.selected);
+            if (Transform3D* tr = talvo->getComponent<Transform3D>()) {
+                tr->scale = Vec3{1.0f, 1.0f, 1.0f};
+                tr->updateWorld();
+            }
+            // a câmara LARGA: vê os DOIS (x=±10, dist 60)
+            g_camera.target = Vec3{0.0f, 0.0f, 0.0f};
+            g_camera.yaw = 0.0f;
+            g_camera.pitch = 0.0f;
+            g_camera.dist = 60.0f;
+            const int drawsAntes = glstub::stats.drawElementsCalls;
+            const int renderAntes = logCount("gmesh: fase=render ms=");
+            frame();
+            check(g_blockFrame.any && g_blockFrame.total == blocks20 &&
+                      g_blockFrame.drawn == blocks20,
+                  "20.2 a frame desenha OS 2 BLOCOS (o mesh único recusava "
+                  "este modelo)");
+            check(g_blockFrame.drawCalls == blocks20,
+                  "20.2 1 draw call POR BLOCO (a honestidade do dc)");
+            check(glstub::stats.drawElementsCalls - drawsAntes == blocks20,
+                  "20.2 o glstub conta 2 drawElements (o HULL nunca desenha)");
+            check(logCount("gmesh: fase=render ms=") > renderAntes,
+                  "20.2 os uploads LAZY no log (fase=render por bloco)");
+            // o HUD do EDITOR: o chip «FPS · TICs · bl n/m» no canto
+            // direito da tab bar — a FONTE é o g_bottom (o MESMO par que o
+            // chip desenha; o audit do registo prova o label DESENHADO)
+            check(g_bottom.blTotal == 2 && g_bottom.blDrawn == 2,
+                  "20.2 o HUD (chip FPS · TICs · bl) diz «bl 2/2» — a "
+                  "métrica REAL do frame no ecrã do EDITOR");
+            check(logHas("blocos: total=2"),
+                  "20.2 o LOG das métricas (blocos: total=2 … desenhados=2)");
+            // a contabilidade: dentro dos orçamentos da casa
+            const vv::BlockMesh* bm = g_gpu.blockMeshIfOpen("assets/par.gmesh");
+            check(bm && bm->lastStats().vramBytes <= bm->vramBudget() &&
+                      bm->lastStats().ramBytes <= bm->ramBudget(),
+                  "20.2 a cache DENTRO dos orçamentos declarados "
+                  "(64+192 MB da casa)");
+            const u64 vramF = bm ? bm->lastStats().vramBytes : 1;
+            const u64 ramF = bm ? bm->lastStats().ramBytes : 1;
+            // a 2ª frame NÃO recarrega (a cache entregou)
+            const int loadDepois = logCount("gmesh: fase=load ms=");
+            frame();
+            check(logCount("gmesh: fase=load ms=") == loadDepois,
+                  "20.2 a 2ª frame NÃO relê NADA (o caminho quente da cache)");
+            check(bm && bm->lastStats().vramBytes == vramF &&
+                      bm->lastStats().ramBytes == ramF,
+                  "20.2 a RAM estável entre frames (o pin do dono)");
+        }
+
+        // ---- 20.3 o ORBIT muda o HUD (o culling trabalha) -----------------
+        passo("20.3 o orbit: o HUD passa a bl 1/2 (o frustum culling)");
+        {
+            // a câmara PERTO da mesh DIREITA (x=+10): o bloco esquerdo sai
+            // do frustum — o HUD muda sozinho
+            g_camera.target = Vec3{10.0f, 0.0f, 0.0f};
+            g_camera.yaw = 0.0f;
+            g_camera.pitch = 0.0f;
+            g_camera.dist = 6.0f;
+            g_camera.fovY = 0.5f;
+            frame();
+            check(g_blockFrame.drawn == 1 && g_blockFrame.total == 2,
+                  "20.3 o orbit CULLED: só 1 bloco desenhado (o AABB do "
+                  "esquerdo está fora do frustum)");
+            check(g_bottom.blDrawn == 1 && g_bottom.blTotal == 2,
+                  "20.3 o HUD (chip) diz «bl 1/2» (mudou com o orbit — o "
+                  "dono VÊ o culling a trabalhar)");
+            check(g_blockFrame.drawCalls == 1,
+                  "20.3 1 draw call (o bloco culled não paga dc)");
+            // de volta à vista larga: 2/2 outra vez (sem recarregar — a
+            // cache ainda tem os dois)
+            const int loadApos = logCount("gmesh: fase=load ms=");
+            g_camera.target = Vec3{0.0f, 0.0f, 0.0f};
+            g_camera.dist = 60.0f;
+            g_camera.fovY = 1.0472f;
+            frame();
+            check(g_blockFrame.drawn == 2,
+                  "20.3 a vista larga volta aos 2 (a cache não esqueceu)");
+            check(g_bottom.blDrawn == 2 && g_bottom.blTotal == 2,
+                  "20.3 o HUD (chip) volta a «bl 2/2»");
+            check(logCount("gmesh: fase=load ms=") == loadApos,
+                  "20.3 ZERO recargas no regresso (a cache LRU entregou)");
+        }
+
+        // ---- 20.4 o EXPORT OBJ pela TABELA (pico de RAM = 1 bloco) --------
+        passo("20.4 o export OBJ anda pela TABELA do .gmesh");
+        {
+            const int expAntes = logCount("fileapi: export");
+            beginExportToDownloads();
+            check(logCount("fileapi: export por BLOCOS") > 0 &&
+                      logCount("fileapi: export") > expAntes,
+                  "20.4 o export do gigante correu pela TABELA (o caminho do "
+                  "mesh único recusaria este mesh)");
+            check(logHas("pico de RAM = 1 bloco"),
+                  "20.4 o pico de RAM do export = 1 BLOCO (nunca o modelo "
+                  "inteiro)");
+            // o harness não tem /storage/emulated/0 (o device real tem): a
+            // ESCRITA falha aqui com a causa honesta no log — o STREAM em
+            // si correu com os números; o parity da GEOMETRIA está no
+            // test_blockmesh (export == o caminho inteiro, verts a verts)
+            std::printf("    [20.4] export: %s\n", g_toast);
+        }
+
+        // ---- 20.5 o PNG do HUD (a prova P-05 do PASSO 4) ------------------
+        passo("20.5 o PNG do HUD com «bl 2/2» (P-05)");
+        {
+            g_layoutExportPending = true;
+            frame();
+            std::vector<u8> png20;
+            check(rawSt20->readBytes("layout/editor.png", png20) &&
+                      !png20.empty(),
+                  "20.5 o PNG da frame exportado (layout/editor.png)");
+            check(fileapi::writeAll("passo4-hud-blocos.png", png20.data(),
+                                    png20.size()),
+                  "20.5 o PNG do HUD gravado (passo4-hud-blocos.png — P-05)");
+            // o AUDIT do draw: o CHIP desenhou (label dentro do rect da
+            // reserva «FPS · TICs · bl» — o layout com a reserva CRESCIDA
+            // prova que o blTotal>0 do frame entrou no layout do ecrã)
+            const editor::bottom::Layout Lb = editor::bottom::layout(
+                static_cast<f32>(g_egl.width()),
+                static_cast<f32>(g_egl.height()), g_ui.safeArea(), g_bottom);
+            check(Lb.fps.w > theme::dp(editor::bottom::kFpsW),
+                  "20.5 a reserva do chip CRESCEU (blTotal>0 no layout — o "
+                  "HUD dos blocos entrou no ecrã)");
+            const layout::Record& rr = g_ui.auditRecord();
+            int chipLabels = 0;
+            for (const auto& e : rr.entries) {
+                if (e.kind == layout::Entry::Label && e.x >= Lb.fps.x - 1 &&
+                    e.x < Lb.fps.x + Lb.fps.w + 1 &&
+                    e.y >= Lb.fps.y - 1 && e.y < Lb.fps.y + Lb.fps.h + 1) {
+                    ++chipLabels;
+                }
+            }
+            check(chipLabels >= 1,
+                  "20.5 o label do CHIP está NO REGISTO do draw (o HUD "
+                  "desenhou mesmo — o PNG é a prova P-05)");
+        }
+
+        onAppCmd(&app20, APP_CMD_TERM_WINDOW);
+        g_blockLogIntervalSecs = 1.0f;   // repõe o ritmo do device
+        glstub::fb::enabled = false;     // e o ambiente do stub
+        glstub::fb::resetState();
     }
 
     // ---- sumário -----------------------------------------------------------

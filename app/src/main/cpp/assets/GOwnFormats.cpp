@@ -746,11 +746,62 @@ bool readGMeshV3Meta(const u8* bytes, size_t len, GMeshV3Meta& meta,
               "tabela de blocos)";
         return false;
     }
-    // as ENTRADAS (bounded pelo ficheiro — nunca pelos dados dos blocos)
-    blocks.resize(static_cast<size_t>(meta.blockCount));
-    Reader tr(bytes + meta.blockTableOffset,
-              static_cast<size_t>(meta.blockCount * kGmeshV3BlockEntryBytes));
+    // as ENTRADAS (bounded pelo ficheiro — nunca pelos dados dos blocos):
+    // o PASSO 4 partilha ESTE validador com o caminho por FAIXAS
+    // (gmeshV3ReadTableOnly) — um só leitor da tabela, zero drift.
     const u8* tableStart = bytes + meta.blockTableOffset;
+    if (!gmeshV3ReadTableOnly(tableStart,
+                              static_cast<size_t>(meta.blockCount *
+                                                  kGmeshV3BlockEntryBytes),
+                              meta, blocks, err)) {
+        return false;
+    }
+    // os MATERIAIS (nomes — 4-alinhados; o leitor partilhado do PASSO 4;
+    // a faixa EXATA = do offset até ao fim do ficheiro)
+    if (!gmeshV3ReadMaterialsOnly(
+            bytes + meta.materialTableOffset,
+            static_cast<size_t>(len - meta.materialTableOffset),
+            meta, materials, err)) {
+        return false;
+    }
+    return true;
+}
+
+bool readGMeshV3Block(const u8* bytes, size_t len, const GMeshV3Meta& meta,
+                      const GMeshV3Block& blk, MeshData& out,
+                      std::string& err) {
+    out = MeshData{};
+    if (blk.dataOffset > static_cast<u64>(len) ||
+        blk.dataSize > static_cast<u64>(len) - blk.dataOffset) {
+        err = "dados do bloco fora do ficheiro";
+        return false;
+    }
+    // 0.10-M (PASSO 4): o decode é o MESMO do caminho por FAIXAS
+    // (gmeshV3MaterializeBlock) — um só materializador de bloco.
+    return gmeshV3MaterializeBlock(bytes + blk.dataOffset,
+                                   static_cast<size_t>(blk.dataSize), meta,
+                                   blk, out, err);
+}
+
+// ---- 0.10-M (PASSO 4) — os leitores POR FAIXA (o render por blocos) ------
+
+bool gmeshV3ReadTableOnly(const u8* tableBytes, size_t tableLen,
+                          const GMeshV3Meta& meta,
+                          std::vector<GMeshV3Block>& blocks,
+                          std::string& err) {
+    blocks.clear();
+    if (meta.blockCount == 0) {
+        err = "tabela de blocos vazia";
+        return false;
+    }
+    const u64 want = meta.blockCount * kGmeshV3BlockEntryBytes;
+    if (tableLen < want) {
+        err = "faixa da tabela curta demais (" + std::to_string(tableLen) +
+              " B < " + std::to_string(want) + " B)";
+        return false;
+    }
+    blocks.resize(static_cast<size_t>(meta.blockCount));
+    Reader tr(tableBytes, static_cast<size_t>(want));
     for (u64 i = 0; i < meta.blockCount; ++i) {
         if (!v3ReadBlockEntry(tr, blocks[static_cast<size_t>(i)], err)) {
             return false;
@@ -778,7 +829,7 @@ bool readGMeshV3Meta(const u8* bytes, size_t len, GMeshV3Meta& meta,
         // N.B. os dados do bloco podem viver FORA do ficheiro na leitura
         // de metadados (o contrato do dono: header+tabela sem alocar os
         // dados — offsets de 64 bits declarados à frente dos bytes); a
-        // validação do fit acontece no readGMeshV3Block, ao materializar.
+        // validação do fit acontece ao materializar.
         const u64 expect = b.vertexCount * meta.vertexStride() +
                            b.indexCount * (b.indexType ? 4u : 2u);
         if (expect != b.dataSize) {
@@ -790,20 +841,23 @@ bool readGMeshV3Meta(const u8* bytes, size_t len, GMeshV3Meta& meta,
         }
     }
     // o CRC32 da PRÓPRIA tabela (a integridade do índice)
-    const u32 tableCrc = gcrc32(
-        tableStart,
-        static_cast<size_t>(meta.blockCount * kGmeshV3BlockEntryBytes));
+    const u32 tableCrc = gcrc32(tableBytes, static_cast<size_t>(want));
     if (tableCrc != meta.tableCrc32) {
         err = "CHECKSUM CORROMPIDO: a tabela de blocos (CRC32 0x" +
               std::to_string(meta.tableCrc32) + ", recalculado 0x" +
               std::to_string(tableCrc) + ") — o ficheiro foi danificado";
         return false;
     }
-    // os MATERIAIS (nomes — 4-alinhados, bounded pelo offset da tabela)
+    return true;
+}
+
+bool gmeshV3ReadMaterialsOnly(const u8* matBytes, size_t matLen,
+                              const GMeshV3Meta& meta,
+                              std::vector<std::string>& materials,
+                              std::string& err) {
+    materials.clear();
     materials.resize(static_cast<size_t>(meta.materialCount));
-    Reader mr(bytes + meta.materialTableOffset,
-              static_cast<size_t>(meta.blockTableOffset -
-                                  meta.materialTableOffset));
+    Reader mr(matBytes, matLen);
     for (u64 i = 0; i < meta.materialCount; ++i) {
         materials[static_cast<size_t>(i)] = mr.str_();
         // o pad a 4 (o escritor alinha cada nome)
@@ -820,16 +874,18 @@ bool readGMeshV3Meta(const u8* bytes, size_t len, GMeshV3Meta& meta,
     return true;
 }
 
-bool readGMeshV3Block(const u8* bytes, size_t len, const GMeshV3Meta& meta,
-                      const GMeshV3Block& blk, MeshData& out,
-                      std::string& err) {
+bool gmeshV3MaterializeBlock(const u8* dataBytes, size_t dataLen,
+                             const GMeshV3Meta& meta,
+                             const GMeshV3Block& blk, MeshData& out,
+                             std::string& err) {
     out = MeshData{};
-    if (blk.dataOffset > static_cast<u64>(len) ||
-        blk.dataSize > static_cast<u64>(len) - blk.dataOffset) {
-        err = "dados do bloco fora do ficheiro";
+    if (dataBytes == nullptr || dataLen != blk.dataSize) {
+        err = "faixa do bloco com tamanho errado (" +
+              std::to_string(dataLen) + " B ≠ dataSize " +
+              std::to_string(blk.dataSize) + " B)";
         return false;
     }
-    const u8* data = bytes + blk.dataOffset;
+    const u8* data = dataBytes;
     // a integridade ANTES de qualquer parse (o CRC32 do bloco)
     const u32 crc = gcrc32(data, static_cast<size_t>(blk.dataSize));
     if (crc != blk.crc32) {

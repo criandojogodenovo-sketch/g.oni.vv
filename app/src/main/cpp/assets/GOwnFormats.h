@@ -191,6 +191,39 @@ bool readGMeshV3Block(const u8* bytes, size_t len, const GMeshV3Meta& meta,
                       const GMeshV3Block& blk, MeshData& out,
                       std::string& err);
 
+// ---- 0.10-M (PASSO 4) — abertura por FAIXAS (o render por blocos) ---------
+// O layout v3 põe os DADOS dos blocos ANTES da tabela ([header][meta]
+// [dados][tabela][materiais]) — abrir pela tabela = ler 192 B de
+// header+meta (gmeshV3PeekMeta), a TABELA pela sua faixa e os MATERIAIS
+// pela faixa deles: NUNCA um byte dos dados dos blocos. Os validadores
+// são OS MESMOS do caminho inteiro (readGMeshV3Meta chama estas funções
+// sobre o ficheiro inteiro — zero drift entre os dois leitores).
+//
+// gmeshV3ReadTableOnly: `tableBytes` = os blockCount×80 B da faixa da
+// tabela (valida cada entrada E o CRC32 da própria tabela).
+bool gmeshV3ReadTableOnly(const u8* tableBytes, size_t tableLen,
+                          const GMeshV3Meta& meta,
+                          std::vector<GMeshV3Block>& blocks,
+                          std::string& err);
+
+// gmeshV3ReadMaterialsOnly: `matBytes` = a faixa dos materiais (do
+// materialTableOffset em diante — o fim pode trazer bytes a mais do que
+// os nomes precisam; o reader para em materialCount nomes).
+bool gmeshV3ReadMaterialsOnly(const u8* matBytes, size_t matLen,
+                              const GMeshV3Meta& meta,
+                              std::vector<std::string>& materials,
+                              std::string& err);
+
+// gmeshV3MaterializeBlock: materializa UM bloco a partir da FAIXA EXATA
+// dos seus dados (dataLen == blk.dataSize, lida por readBytesAt — o
+// readGMeshV3Block de sempre espera o ficheiro INTEIRO e valida offsets
+// absolutos; este é o par por-faixa do runtime por blocos). O CRC32 do
+// bloco é verificado ANTES de qualquer parse (o mesmo contrato).
+bool gmeshV3MaterializeBlock(const u8* dataBytes, size_t dataLen,
+                             const GMeshV3Meta& meta,
+                             const GMeshV3Block& blk, MeshData& out,
+                             std::string& err);
+
 // um bloco de ENTRADA do escritor v3 (a pool já com índices locais; o
 // conversor do PASSO 3 produz isto em streaming)
 struct GMeshV3BlockIn {

@@ -67,6 +67,7 @@
 #include "platform/StorageBridge.h"
 #include "platform/StoragePerm.h"
 #include "platform/ImeQueue.h"   // 0.9.1: fila do IME do sistema + orientação
+#include "render/BlockMesh.h"   // 0.10-M (PASSO 4): render por blocos
 #include "render/Camera.h"
 #include "render/Cube.h"
 #include "render/Grid.h"
@@ -802,6 +803,33 @@ void applyGizmoDrag(const gizmo::Grab& grab, const gizmo::ViewBasis& basis,
 }
 
 DrawStats g_lastUiStats;   // métricas do pass UI (disponíveis 1 frame depois)
+
+// 0.10-M (PASSO 4) — as métricas de BLOCOS do frame corrente (o HUD e o
+// log espelham ISTO: totais/visíveis/desenhados por frame, somados por
+// todos os BlockMesh desenhados; coerente com o DrawStats do drawTics)
+struct BlockFrameStats {
+    u32 total = 0;     // blocos na(s) tabela(s) desenhada(s) neste frame
+    u32 visible = 0;
+    u32 drawn = 0;
+    u32 drawCalls = 0;    // == dc dos blocos (já somados no st3d)
+    u32 drawnVerts = 0;   // == índices desenhados (já somados no st3d)
+    u32 loaded = 0;       // lazy: carregados neste frame
+    u64 ramBytes = 0;
+    u64 vramBytes = 0;
+    bool any = false;
+};
+BlockFrameStats g_blockFrame;
+BlockFrameStats g_blockFramePrev;   // o log throttled compara contra este
+
+// 0.10-M (PASSO 4) — o INTERVALO do log de métricas (1 s no device — o
+// orbit produz a linha quando o culling muda; o harness põe 0 para
+// determinismo nos frames acelerados)
+f32 g_blockLogIntervalSecs = 1.0f;
+
+// 0.10-M (PASSO 4) — a STRING EXATA da status line do frame (o harness
+// afera o HUD «bl desenhados/totais» contra o que o device DESENHOU; o
+// diagnóstico do dono também a lê no crash dump)
+char g_statusLine[160] = "";
 
 // toast (mensagem transitória acima da status line — feedback Save/Load/criação)
 char g_toast[96] = "";
@@ -2986,6 +3014,12 @@ u32 detachRenderersFromGpu() {
             mr.texture = nullptr;
             drop = true;
         }
+        // 0.10-M (PASSO 4): o BlockMesh do GpuAssets morre no releaseAll
+        // que se segue — o ponteiro não-dono sai AQUI (use-after-free nunca)
+        if (mr.blocks) {
+            mr.blocks = nullptr;
+            drop = true;
+        }
         if (drop) {
             ++detached;
         }
@@ -3419,6 +3453,23 @@ void primFlushPending() {
         if (mr.primRetire) {
             primRetire(mr.primRetire);
             mr.primRetire = nullptr;
+        }
+    }
+}
+
+// 0.10-M (PASSO 4) — O REBIND DOS BLOCOS: liga o MeshRenderer ao BlockMesh
+// aberto do SEU meshPath (o GpuAssets é o dono; aberto pelo mesh() do
+// picker/serializer/load). Idempotente e barato (1 lookup por TIC com
+// meshPath por frame); a FONTE é o meshPath — o MESMO contrato do
+// resolveMesh, então pick/load/apply/ciclo de vida ficam cobertos por
+// construção. Chamado no PONTO SEGURO (antes de qualquer submissão).
+void blockRebind() {
+    auto& mrs = g_scene.components().meshRenderers();
+    for (u32 i = 0; i < mrs.size(); ++i) {
+        MeshRenderer& mr = mrs.at(i);
+        mr.blocks = nullptr;
+        if (!mr.meshPath.empty()) {
+            mr.blocks = g_gpu.blockMeshIfOpen(mr.meshPath);
         }
     }
 }
@@ -3861,6 +3912,9 @@ void onStorageResult(void* /*user*/, const saf::SafResult& r) {
 
 // EXPORT: mesh do TIC selecionado → /storage/emulated/0/Download/GOneVV/
 // export/export_<nome>.obj (File API direta, visível no gestor de ficheiros)
+// 0.10-M (PASSO 4): um mesh DE BLOCOS exporta pela TABELA (um bloco de
+// cada vez materializado, numeração global — o pico de RAM é 1 bloco,
+// nunca o modelo inteiro; o caminho do mesh único fica para os de sempre).
 void beginExportToDownloads() {
     Tic* tsel = g_scene.get(g_editor.selected);
     MeshRenderer* mrs = tsel ? tsel->getComponent<MeshRenderer>() : nullptr;
@@ -3871,13 +3925,22 @@ void beginExportToDownloads() {
     std::string err;
     const MeshData* src = nullptr;
     MeshData cubeCopy;
+    BlockMesh* bm = nullptr;
     if (!mrs->meshPath.empty()) {
-        src = g_resources.mesh(mrs->meshPath, err);
+        // o caminho dos blocos primeiro (a TABELA — sem carregar nada)
+        bm = g_gpu.blockMeshIfOpen(mrs->meshPath);
+        if (!bm) {
+            g_gpu.mesh(mrs->meshPath);   // abre (se for o caminho de blocos)
+            bm = g_gpu.blockMeshIfOpen(mrs->meshPath);
+        }
+        if (!bm) {
+            src = g_resources.mesh(mrs->meshPath, err);   // mesh único
+        }
     } else if (mrs->mesh == &g_cubeMesh) {
         cubeCopy = cubeToMeshData();
         src = &cubeCopy;
     }
-    if (!src || !src->ok()) {
+    if (!bm && (!src || !src->ok())) {
         showToast("mesh não disponível p/ export");
         return;
     }
@@ -3887,7 +3950,37 @@ void beginExportToDownloads() {
     for (char& c : outName) {
         if (c == '/' || c == '\\' || c == ':' || c == '#') c = '_';
     }
-    const std::string obj = exportObj(*src);
+    std::string obj;
+    if (bm) {
+        // o STREAM por blocos: a TABELA manda, 1 bloco materializado de
+        // cada vez (o pico é o bloco, não o modelo — o contrato do PASSO 4)
+        ObjStreamBlock stream;
+        objStreamBegin(stream, tsel->name);
+        MeshData part;
+        for (size_t bi = 0; bi < bm->table().size(); ++bi) {
+            if (!bm->materializeBlock(bi, part, err)) {
+                elog::error("fileapi: export %s FALHOU no bloco %zu — %s",
+                            outName.c_str(), bi, err.c_str());
+                showToast("falha ao exportar (causa no engine.log)");
+                return;
+            }
+            const GMeshV3Block& blk = bm->table()[bi];
+            const std::string mat = blk.materialIndex < bm->materials().size()
+                ? bm->materials()[static_cast<size_t>(blk.materialIndex)]
+                : std::string();
+            objStreamAppend(stream, part,
+                            "bloco " + std::to_string(bi), mat);
+            part = MeshData{};   // o bloco morre AGORA (pico = 1 bloco)
+        }
+        obj = std::move(stream.out);
+        elog::info("fileapi: export por BLOCOS de '%s' — %u blocos, %llu "
+                   "verts, %llu tris (pico de RAM = 1 bloco)",
+                   mrs->meshPath.c_str(), stream.blocks,
+                   static_cast<unsigned long long>(stream.verts),
+                   static_cast<unsigned long long>(stream.tris));
+    } else {
+        obj = exportObj(*src);
+    }
     const std::string path = std::string(fileapi::kExternalRoot) + "/" +
                              fileapi::kExportRelDir + "/" + outName;
     if (fileapi::writeAll(path, obj.data(), obj.size())) {
@@ -4464,13 +4557,18 @@ i32 onInputEvent(android_app* /*app*/, AInputEvent* event) {
 // 0.7.0: TIC INVISÍVEL não desenha (gestão de TICs — física/lógica
 // continuam; só o render salta) e o TINT do MeshRenderer (cor por TIC,
 // sliders R/G/B do Inspector) vai ao drawMesh.
+// 0.10-M (PASSO 4): o caminho dos BLOCOS primeiro — mr->blocks (o
+// BlockMesh do meshPath, ligado pelo blockRebind do ponto seguro) desenha
+// BLOCO A BLOCO (frustum por AABB + lazy + LRU); o mr->mesh desses TICs é
+// o HULL de bounds (nunca desenhado — fica para cena/fit/gizmo).
 DrawStats drawTics(const Mat4& vp) {
     DrawStats st{};
+    g_blockFrame = BlockFrameStats{};   // as métricas DO frame (HUD/log)
     const ComponentStore& comps = g_scene.components();
     const auto& mrs = comps.meshRenderers();
     for (u32 i = 0; i < mrs.size(); ++i) {
         const MeshRenderer& mr = mrs.at(i);
-        if (!mr.mesh) {
+        if (!mr.mesh && !mr.blocks) {
             continue;   // sem mesh (tag "none" de cena antiga) — nada a desenhar
         }
         const Tic* owner = g_scene.get(mrs.owner(i));
@@ -4480,6 +4578,34 @@ DrawStats drawTics(const Mat4& vp) {
         Mat4 model = Mat4::identity();
         if (const Transform3D* tr = comps.transforms().find(mrs.owner(i))) {
             model = tr->world;   // mantido por TransformSystem (grupo Update)
+        }
+        // ---- 0.10-M (PASSO 4): O CAMINHO DOS BLOCOS -----------------------
+        if (mr.blocks) {
+            // o skin segue o MESMO contrato (esqueleto do TIC + mesh com
+            // pele — cada bloco traz aJoints/aWeights próprios)
+            const SkeletonComp* sk = comps.skeletons().find(mrs.owner(i));
+            Mat4 bones[SkeletonComp::kMaxBones];
+            u32 nBones = 0;
+            if (sk && mr.blocks->skinned()) {
+                nBones = computeSkinMatrices(*sk, bones,
+                                             SkeletonComp::kMaxBones);
+            }
+            BlockMesh::Stats bs;
+            const DrawStats sb =
+                mr.blocks->draw(g_renderer, model, vp, mr.texture, mr.tint,
+                                nBones > 0 ? bones : nullptr, nBones, bs);
+            g_blockFrame.any = true;
+            g_blockFrame.total += bs.totalBlocks;
+            g_blockFrame.visible += bs.visible;
+            g_blockFrame.drawn += bs.drawn;
+            g_blockFrame.loaded += bs.loadedThisFrame;
+            g_blockFrame.drawCalls += sb.drawCalls;
+            g_blockFrame.drawnVerts += sb.vertices;   // índices desenhados
+                                                       // (== o st3d do frame)
+            g_blockFrame.ramBytes += bs.ramBytes;
+            g_blockFrame.vramBytes += bs.vramBytes;
+            st = st + sb;
+            continue;
         }
         // 0.8.2 (F7): mesh SKINADO com esqueleto → matrizes de skin ao
         // shader (a pose vive nos joints; o TRS do TIC continua a ser o
@@ -4537,19 +4663,36 @@ void drawToast() {
 }
 
 // 0.6.8: status line inferior partilhada pelos DOIS modos (fps/tics/verts/
-// dc/formato/cache — em play também é útil e não é painel de edição)
+// dc/formato/cache — em play também é útil e não é painel de edição).
+// 0.10-M (PASSO 4): os BLOCOS do frame — «bl desenhados/totais» (a métrica
+// real do render por blocos, coerente com o dc/verts da MESMA linha; sem
+// blocos em cena o campo não aparece — a linha de sempre fica intacta).
 void statusLine(const DrawStats& st3d, const DrawStats& stGrid) {
     const DrawStats total = st3d + stGrid + g_lastUiStats;
-    char status[128];
-    std::snprintf(status, sizeof(status),
-                  "fps %d  tics %u  verts %u  dc %u  am %u at %u  %s c%u/%u",
-                  static_cast<int>(g_fps + 0.5f), g_scene.count(),
-                  total.vertices, total.drawCalls,
-                  g_gpu.meshCount(), g_gpu.textureCount(),
-                  shortTexFormat(g_hwCompressor.lastFormat()),
-                  g_texCache ? g_texCache->hits() : 0u,
-                  g_texCache ? g_texCache->misses() : 0u);
+    char status[160];
+    if (g_blockFrame.any) {
+        std::snprintf(status, sizeof(status),
+                      "fps %d  tics %u  verts %u  dc %u  bl %u/%u  am %u at %u"
+                      "  %s c%u/%u",
+                      static_cast<int>(g_fps + 0.5f), g_scene.count(),
+                      total.vertices, total.drawCalls, g_blockFrame.drawn,
+                      g_blockFrame.total, g_gpu.meshCount(),
+                      g_gpu.textureCount(),
+                      shortTexFormat(g_hwCompressor.lastFormat()),
+                      g_texCache ? g_texCache->hits() : 0u,
+                      g_texCache ? g_texCache->misses() : 0u);
+    } else {
+        std::snprintf(status, sizeof(status),
+                      "fps %d  tics %u  verts %u  dc %u  am %u at %u  %s c%u/%u",
+                      static_cast<int>(g_fps + 0.5f), g_scene.count(),
+                      total.vertices, total.drawCalls,
+                      g_gpu.meshCount(), g_gpu.textureCount(),
+                      shortTexFormat(g_hwCompressor.lastFormat()),
+                      g_texCache ? g_texCache->hits() : 0u,
+                      g_texCache ? g_texCache->misses() : 0u);
+    }
     g_ui.statusLine(status);
+    std::snprintf(g_statusLine, sizeof(g_statusLine), "%s", status);
 }
 
 // 0.9.0 (spec F) — captura da MINIATURA no fim do frame de um save.
@@ -4800,6 +4943,7 @@ void frame() {
     // com draws em curso, e um glDelete* nunca apanha buffers em voo.
     primGraveDig();
     primFlushPending();
+    blockRebind();   // 0.10-M (PASSO 4): os BlockMesh* do frame (meshPath)
 
     // 0.8.10 — IMPORT JOB: o worker sinalizou done? join + finalize
     // (catálogo/diálogo) AQUI, na thread da UI — nunca no worker.
@@ -5107,6 +5251,34 @@ void frame() {
         }
     }
     const DrawStats st3d = drawTics(vp);
+    // 0.10-M (PASSO 4) — o LOG das métricas reais (AQUI: editor E play — o
+    // statusLine de baixo só vive em play; throttled 1×/s e só quando o nº
+    // de desenhados MUDA — o orbit do dono produz a linha quando o culling
+    // muda, sem afogar a rotação de 1 MB)
+    if (g_blockFrame.any) {
+        static double s_lastLog = -10.0;
+        static double s_clock = 0.0;
+        s_clock += g_frameDt;
+        if (g_blockFrame.drawn != g_blockFramePrev.drawn &&
+            s_clock - s_lastLog >=
+                static_cast<double>(g_blockLogIntervalSecs)) {
+            s_lastLog = s_clock;
+            elog::info(
+                "blocos: total=%u visiveis=%u desenhados=%u "
+                "dc=%u verts=%u carregados-agora=%u ram=%.1fMB vram=%.1fMB "
+                "(residente, orçamento %llu+%llu MB)",
+                g_blockFrame.total, g_blockFrame.visible,
+                g_blockFrame.drawn, g_blockFrame.drawCalls,
+                g_blockFrame.drawnVerts, g_blockFrame.loaded,
+                static_cast<double>(g_blockFrame.ramBytes) / (1024.0 * 1024.0),
+                static_cast<double>(g_blockFrame.vramBytes) / (1024.0 * 1024.0),
+                static_cast<unsigned long long>(kBlockCacheRamBudgetBytes /
+                                                (1024 * 1024)),
+                static_cast<unsigned long long>(kBlockCacheVramBudgetBytes /
+                                                (1024 * 1024)));
+        }
+        g_blockFramePrev = g_blockFrame;
+    }
     const DrawStats stGrid = g_grid.draw(vp, camEye, camFocus);
     if (scissor3d) {
         glDisable(GL_SCISSOR_TEST);   // a UI nunca é recortada (beginUiPass
@@ -6607,6 +6779,11 @@ void frame() {
         // PASSO 1 (0.9.6.14): StatusBarData REMOVIDA com a status bar —
         // o «FPS · TICs» vive no canto direito da tab bar; a versão/commit
         // em Settings › Sobre (sctx.git abaixo)
+        // 0.10-M (PASSO 4) — o HUD dos blocos no chip «FPS · TICs · bl n/m»
+        // (a métrica DO frame que acabou de desenhar — o mesmo g_blockFrame
+        // que o log throttled espelha; sem blocos o chip é o de sempre)
+        g_bottom.blDrawn = g_blockFrame.drawn;
+        g_bottom.blTotal = g_blockFrame.total;
         const editor::bottom::Actions ba = editor::bottom::draw(
             g_ui, g_input, g_editor, g_bottom, g_catalog, logTail,
             static_cast<int>(g_fps + 0.5f), g_scene.count(), g_filesTree);

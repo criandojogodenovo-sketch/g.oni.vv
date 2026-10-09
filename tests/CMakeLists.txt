@@ -244,6 +244,11 @@ add_executable(test_core
         # o caminho de sempre, agrupamento por material, 70k verts em
         # blocos, cancelamento sem estado, texturas no passe delas)
         test_gmeshv3stream.cpp
+        # 0.10-M (PASSO 4): o render por blocos — abertura por faixas
+        # (zero dados), frustum por bloco com audit, lazy, LRU com
+        # orçamentos contidos, o pin de RAM dos 920 blocos (fork+VmHWM),
+        # corrupção isolada, export por tabela com parity
+        test_blockmesh.cpp
         # 0.8.11: ÁUDIO — .gi (ADPCM round-trip/WAV/OGG/MP3 erros),
         # misturador (vozes/loop/pitch/posicional/master), PROBE harness
         # (fake backends: falha→fallback, ok→AAudio), workspace (fake host:
@@ -275,6 +280,7 @@ add_executable(test_core
         ${CORE_DIR}/render/Texture.cpp
         # 0.6.7: GpuAssets na suíte — releaseAll/re-upload após TERM_WINDOW
         ${CORE_DIR}/render/GpuAssets.cpp
+        ${CORE_DIR}/render/BlockMesh.cpp   # 0.10-M (PASSO 4): render por blocos
         # 0.8.7: o CAMINHO REAL DO DEVICE na suíte — test_wiring087
         # #include platform/main.cpp (primMesh/attemptImport/rebind/
         # browserImportFile/applyImported/boot INIT_WINDOW/frame); estes
@@ -418,6 +424,7 @@ add_executable(c33_virtual
         ${CORE_DIR}/render/Material.cpp
         ${CORE_DIR}/render/Texture.cpp
         ${CORE_DIR}/render/GpuAssets.cpp
+        ${CORE_DIR}/render/BlockMesh.cpp   # 0.10-M (PASSO 4): render por blocos
         ${CORE_DIR}/platform/EglContext.cpp
         ${CORE_DIR}/render/Grid.cpp
         ${CORE_DIR}/assets/GiFormat.cpp

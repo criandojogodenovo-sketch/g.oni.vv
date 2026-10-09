@@ -74,6 +74,12 @@ ANCHORS = [
      "assets/AssetConverter.h"),
     ("gate 256 px", r"w >= 256u && h >= 256u", "assets/TextureCompressor.h"),
     ("gtc kDir", r"kDir", "assets/TextureCache.h"),
+    # 0.10-M (PASSO 4): os orçamentos DECLARADOS da cache de blocos (o
+    # MESMO 256 MB da casa — agora limitado por construção)
+    ("orçamento RAM de blocos", r"kBlockCacheRamBudgetBytes\s*=\s*64ull \* 1024 \* 1024",
+     "render/BlockMesh.h"),
+    ("orçamento VRAM de blocos", r"kBlockCacheVramBudgetBytes\s*=\s*192ull \* 1024 \* 1024",
+     "render/BlockMesh.h"),
 ]
 
 # sentinelas por passo (cresce com os passos 2/3 — PASSO 1: só o formato

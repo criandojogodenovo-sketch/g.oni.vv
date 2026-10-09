@@ -53,6 +53,7 @@
 #include "components/CameraComp.h"
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
+#include "render/BlockMesh.h"   // 0.10-M (PASSO 4 · R-040): orçamentos+frustum
 #include "render/Primitives.h"
 #include "ui/EditorUi.h"
 #include "platform/EngineLog.h"
@@ -5514,4 +5515,59 @@ TEST(regress_gmesh_v3_retrocompat) {
     EXPECT(exact);
     EXPECT(back.indices.size() == m.indices.size());
     EXPECT(back.vertices.size() == m.vertices.size());
+}
+
+// ---------------------------------------------------------------------------
+// R-040 (0.10-M PASSO 4) — O RENDER POR BLOCOS: o orçamento é o CONTRATO.
+// A parede do «fail de 203 MB» era o mesh ÚNICO; a cura é a cache de
+// blocos com orçamentos DECLARADOS (kBlockCacheRamBudgetBytes +
+// kBlockCacheVramBudgetBytes) vigiada AQUI para sempre: os literals são de
+// PROPÓSITO (mudar a constante sem mudar a sentinela = vermelho), o
+// frustum é o pin da fórmula (8 cantos × 6 planos) e a evicção RAM conta
+// as DUAS pool. As mutações M1/M2/M3 do PASSO 4 (culling morto, evicção
+// morta, eager no open) estão coladas no RELATORIO-0.10-M-PASSO4.
+// ---------------------------------------------------------------------------
+TEST(regress_render_por_blocos_r040) {
+    // (1) os ORÇAMENTOS da casa (64+192 = o MESMO 256 MB do mesh único,
+    // agora LIMITADO POR CONSTRUÇÃO independentemente do modelo)
+    EXPECT(kBlockCacheRamBudgetBytes == 64ull * 1024 * 1024);
+    EXPECT(kBlockCacheVramBudgetBytes == 192ull * 1024 * 1024);
+    EXPECT(kBlockCacheRamBudgetBytes + kBlockCacheVramBudgetBytes ==
+           kMeshLoadBudgetBytes);
+
+    // (2) a estimativa de VRAM de um bloco é o contrato aferível
+    {
+        MeshData b;
+        b.vertices.resize(100);
+        b.indices.resize(300);
+        EXPECT(blockMeshVramBytes(b) ==
+               100ull * sizeof(Vertex) + 300ull * 2);
+        b.skinJoints.resize(400);
+        b.skinWeights.resize(400);
+        EXPECT(blockMeshVramBytes(b) ==
+               100ull * sizeof(Vertex) + 300ull * 2 + 100ull * 20);
+    }
+
+    // (3) o FRUSTUM é o pin da fórmula: identidade = o cubo [-1,1]³ (os
+    // planos de Gribb-Hart sobre as colunas do VP; fora = a·x+b·y+c·z+d<0)
+    {
+        f32 planes[6][4];
+        BlockMesh::frustumPlanes(Mat4::identity(), planes);
+        // (2,0,0) fora do plano right (-x+1<0); (0,0,0) dentro dos 6
+        EXPECT(planes[1][0] * 2.0f + planes[1][3] < 0.0f);
+        bool origemDentro = true;
+        for (int p = 0; p < 6; ++p) {
+            origemDentro = origemDentro && planes[p][3] >= 0.0f;
+        }
+        EXPECT(origemDentro);
+        // o AABB LONGE do frustum cai TODOS os cantos no MESMO plano
+        GMeshV3Block blk;
+        blk.aabbMin = Vec3{50.0f, 50.0f, 50.0f};
+        blk.aabbMax = Vec3{51.0f, 51.0f, 51.0f};
+        EXPECT(!BlockMesh::blockVisible(Mat4::identity(), blk, planes));
+        // o AABB ENCOSTADO (um canto dentro) segue VIVO (conservativo)
+        blk.aabbMin = Vec3{0.5f, 0.5f, 0.5f};
+        blk.aabbMax = Vec3{2.0f, 2.0f, 2.0f};
+        EXPECT(BlockMesh::blockVisible(Mat4::identity(), blk, planes));
+    }
 }

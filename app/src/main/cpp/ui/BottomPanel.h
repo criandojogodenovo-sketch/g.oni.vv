@@ -94,6 +94,11 @@ struct BottomState {
     // tudo) e a vista (grelha/lista — o toggle da imagem 1)
     int  filesFolder = -1;
     bool assetsList = false;
+    // 0.10-M (PASSO 4): as métricas de BLOCOS do frame (o main alimenta
+    // com g_blockFrame — o chip «FPS · TICs» cresce para «… · bl n/m» SÓ
+    // quando há blocos em cena; sem blocos o layout é O DE SEMPRE)
+    u32  blDrawn = 0;
+    u32  blTotal = 0;
     // 0.9.6.10: a consola da imagem 1 — TABS Consola/Logs/Erros/Avisos
     // (0=tudo · 1=info · 2=erros · 3=avisos; o filtro de chips antigo morre)
     int  consoleTab = 0;
@@ -123,6 +128,10 @@ struct FilesTree {
 // largura é RESERVA FIXA em dp (o layout é PURO, não mede fonte; o draw
 // right-alinha o texto e o fit trunca honestamente se não couber)
 constexpr f32 kFpsW = 112.0f;   // dp — o canto direito da tab bar
+// 0.10-M (PASSO 4): o EXTRA da reserva quando há BLOCOS em cena (o chip
+// ganha «· bl n/m» — o HUD do render por blocos; sem blocos a reserva é
+// a de sempre e o layout fica INTACTO byte a byte)
+constexpr f32 kFpsWBlocks = 72.0f;   // dp — «· bl 123/920» no caption
 // PASSO 2 (0.9.6.15 — spec do dono): a PEGA do drawer tem 24dp de altura
 // (era 12 — a MESMA medida dos divisores dos painéis, kDividerHitW) e os
 // chips INTERNOS da consola são de CABEÇALHO 28dp (era 36 — o piso
