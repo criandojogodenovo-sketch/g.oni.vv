@@ -188,10 +188,14 @@ struct GltfRangeLoader {
 // se o ficheiro só tem buffers embutidos).
 // `rangeLoader` (0.8.10, opcional): com `bin` VAZIO, o buffer 0 é DEFERIDO
 // — ranges carregados por demanda (import de ficheiros enormes).
+// `streamOwnedBin` (0.10-M SAF-STREAM, opcional): no modo streaming, o
+// buffer 0 EMBUTIDO (data: URI) sai INTEIRO daqui — o conversor streaming
+// corre sobre os bytes (a geometria data-uri também fica SEM teto).
 bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                const GltfBufferResolver& resolver, GltfModel& out,
                std::string& err, const GltfRangeLoader* rangeLoader = nullptr,
-               bool streamMeshes = false);
+               bool streamMeshes = false,
+               std::vector<u8>* streamOwnedBin = nullptr);
 
 // container binário .glb (magic 'glTF', JSON chunk + BIN chunk) → parseGltf
 bool parseGlb(const u8* data, size_t len, const GltfBufferResolver& resolver,

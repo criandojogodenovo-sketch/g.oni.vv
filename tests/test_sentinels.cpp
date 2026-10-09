@@ -35,6 +35,7 @@
 #include <dirent.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <fcntl.h>   // 0.10-M (SAF-STREAM/R-041): ::open/O_RDONLY
 
 #include <cstdio>
 #include <cstring>
@@ -5569,5 +5570,115 @@ TEST(regress_render_por_blocos_r040) {
         blk.aabbMin = Vec3{0.5f, 0.5f, 0.5f};
         blk.aabbMax = Vec3{2.0f, 2.0f, 2.0f};
         EXPECT(BlockMesh::blockVisible(Mat4::identity(), blk, planes));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// R-041 (0.10-M HOTFIX SAF-STREAM) — O STREAMING SOB QUALQUER STORAGE: o
+// mmap POR FD é o CONTRATO. A causa do city era o gate content:// que
+// desligava o streaming nos projetos SAF (o import caía no legado do teto
+// de 65535); a cura tem TRÊS degraus aferíveis AQUI: (1) o mapFd64 mapeia
+// um fd REAL e lê os bytes EXATOS (o alinhamento à página é o MESMO do
+// mapFile64); (2) um fd que o SO recusa mapear (o PIPE — FIFO, size 0)
+// devolve nullptr SEM fechar o fd (a recusa é REAL do kernel, não um hook
+// — é o caso FUSE-sem-mmap do device); (3) o openReadFd do FsStorage
+// entrega o fd do caminho (o 2.º degrau da cascata). A degradação final —
+// o pread de RANGES do readBytesAt — fica provada no
+// safstream_fd_que_recusa_mmap_importa_por_ranges (test_gmeshv3stream).
+// As mutações M-S1/M-S2/M-S3 do hotfix estão coladas no
+// RELATORIO-0.10-M-HOTFIX-SAF-STREAM.
+// ---------------------------------------------------------------------------
+TEST(regress_safstream_fd_mmap_e_ranges_r041) {
+    // (fcntl p/ o ::open do fd real — o MESMO include do FileApi.cpp)
+    // (1) o mapFd64 sobre um fd REAL: os bytes EXATOS, offset NÃO alinhado
+    // (a page-down do mapFile64 — o MESMO contrato, sem caminho)
+    const std::string path =
+        "/tmp/goni_r041_fd_" + std::to_string(::getpid()) + ".bin";
+    constexpr size_t kSize = 9 * 1024 + 123;   // ~3 páginas + resto
+    {
+        std::vector<u8> f(kSize);
+        for (size_t i = 0; i < f.size(); ++i) {
+            f[i] = static_cast<u8>((i * 11 + 29) & 0xFF);
+        }
+        FILE* fp = std::fopen(path.c_str(), "wb");
+        ASSERT(fp != nullptr);
+        std::fwrite(f.data(), 1, f.size(), fp);
+        std::fclose(fp);
+    }
+    const int fd = ::open(path.c_str(), O_RDONLY);
+    ASSERT(fd >= 0);
+    {
+        const unsigned long long off = 4097;   // DENTRO da 2.ª página
+        unsigned long long mapLen = 0;
+        void* p = fileapi::mapFd64(fd, off, 4000, &mapLen);
+        ASSERT(p != nullptr);
+        const u8* m = static_cast<const u8*>(p);
+        bool exact = true;
+        for (u64 i = 0; i < 4000 && exact; ++i) {
+            const u8 want = static_cast<u8>(((off + i) * 11 + 29) & 0xFF);
+            exact = m[i] == want;
+        }
+        EXPECT(exact);   // o mmap por fd lê os bytes EXATOS do ficheiro
+        fileapi::unmapFile64(p, mapLen);
+    }
+    // o fd CONTINUA USÁVEL (o mapFd64 não o fecha — quem abriu fecha)
+    {
+        char buf[4] = {0, 0, 0, 0};
+        EXPECT(::lseek(fd, 0, SEEK_SET) == 0);
+        EXPECT(::read(fd, buf, 4) == 4);
+        EXPECT(buf[0] == static_cast<u8>(29) && buf[1] == 40 &&
+               buf[2] == 51 && buf[3] == 62);
+    }
+    // (2) a RECUSA REAL do SO: um PIPE (FIFO — o fstat dá size 0) NÃO se
+    // mapeia — o mesmo veredito do ENODEV do ::mmap num FUSE-sem-mmap.
+    // nullptr SEM crash: o chamador degrada para pread de RANGES
+    {
+        int pfd[2];
+        ASSERT(::pipe(pfd) == 0);
+        unsigned long long mapLen = 0;
+        EXPECT(fileapi::mapFd64(pfd[0], 0, 16, &mapLen) == nullptr);
+        ::close(pfd[0]);
+        ::close(pfd[1]);
+    }
+    // a range fora do fd RECUSADO também (ficheiro curto — honesto)
+    {
+        unsigned long long mapLen = 0;
+        EXPECT(fileapi::mapFd64(fd, kSize - 10, 100, &mapLen) == nullptr);
+    }
+    ::close(fd);
+    std::remove(path.c_str());
+
+    // (3) o openReadFd do FsStorage: o fd DO CAMINHO (o 2.º degrau da
+    // cascata quando o mmap por caminho falha — FUSE) — e o fd ABRE em
+    // leitura de verdade
+    {
+        const std::string dir =
+            "/tmp/goni_r041_st_" + std::to_string(::getpid());
+        rmrf(dir);
+        // o mkdir -p mínimo da sentinela (a FsStorage cria no makeDirs)
+        const std::string proj = dir + "/proj";
+        ASSERT(std::system(("mkdir -p '" + proj + "'").c_str()) == 0);
+        const std::string rel = "source/binario.bin";
+        {
+            FsStorage st(dir + "/proj");
+            ASSERT(st.makeDirs("source"));
+            const u8 bytes[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+            ASSERT(st.writeBytes(rel, bytes, sizeof(bytes)));
+        }
+        FsStorage st(dir + "/proj");
+        int rfd = -1;
+        std::string rerr;
+        ASSERT(st.openReadFd(rel, &rfd, rerr));
+        EXPECT(rfd >= 0);
+        u8 got[8] = {};
+        EXPECT(::lseek(rfd, 2, SEEK_SET) == 2);   // seek funciona (é um fd)
+        EXPECT(::read(rfd, got, 4) == 4);
+        EXPECT(got[0] == 3 && got[1] == 4 && got[2] == 5 && got[3] == 6);
+        ::close(rfd);
+        // ausente → false HONESTO (o err diz)
+        int nada = -1;
+        EXPECT(!st.openReadFd("source/nao-existe.bin", &nada, rerr));
+        EXPECT(nada == -1);
+        rmrf(dir);
     }
 }

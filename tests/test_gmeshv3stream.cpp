@@ -906,3 +906,564 @@ TEST(mmap64_offset_nao_alinhado_le_bytes_exatos) {
     }
     std::remove(path.c_str());
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 0.10-M (HOTFIX SAF-STREAM) — O STREAMING SOB QUALQUER STORAGE. A causa do
+// city: o gate `st.root().rfind("content://", 0) != 0` desligava o streaming
+// nos projetos SAF e o import caía no legado do teto de 65535. A fonte do
+// bin agora é uma CASCATA: mmap-caminho → MMAP POR FD (o fd do bridge
+// bridgeOpenFd via SafStorage::openReadFd — o irmão copiado em source/) →
+// PREAD DE RANGES (o degradado honesto: o provider recusou o mapa). O
+// data: URI também streama (os bytes saem do parse). Nunca o legado por
+// causa do storage.
+// ═══════════════════════════════════════════════════════════════════════════
+#include "core/SafStorage.h"
+#include "FakeSafIo.h"
+
+// a cidade do dono em miniatura: 72 primitivas × 1000 verts = 72 000 (o
+// legado morria no teto de 65535; o streaming corta em blocos)
+bool buildCityGlb(const std::string& path) {
+    std::vector<PrimSpec> prims;
+    std::vector<NodeSpec> nodes;
+    for (u32 i = 0; i < 72; ++i) {
+        prims.push_back({1000, 600, i % 4, false});
+        nodes.push_back({i, 0.0f, 0.0f, 0.0f});
+    }
+    std::vector<u8> glb;
+    if (!buildGlb(prims, nodes, {"A", "B", "C", "D"}, {}, glb)) {
+        return false;
+    }
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) return false;
+    std::fwrite(glb.data(), 1, glb.size(), f);
+    std::fclose(f);
+    return true;
+}
+
+// 21.1 · SAF (content://): o city IMPORTA EM BLOCOS pelo FD DO BRIDGE — a
+// recusa content:// MORREU; a fonte é o mmap POR FD (sem caminho); a
+// mensagem «excede 65535» NÃO EXISTE no log (o teto deixou de ser visível)
+TEST(safstream_saf_importa_city_em_blocos_pelo_fd_do_bridge) {
+    const std::string dir = "/tmp/goni_saf_fd_" + std::to_string(::getpid());
+    rmRf(dir);
+    ASSERT(mkDir(dir));
+    registersWithCacheDir(dir + "/appcache");
+    elog::init((dir + "/logs").c_str());
+    const std::string src = dir + "/city.glb";
+    ASSERT(buildCityGlb(src));
+
+    FakeSafIo io;   // o provider content:// (o modelo da suíte)
+    SafStorage st(&io, "content://tree/primary:GOneVV/cidade");
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    const bool ok = convert::importFile(src, "city.glb", st, nullptr, out,
+                                        stats, err, nullptr, nullptr);
+    if (!ok) {
+        std::printf("  [saf-fd] err=%.200s\n", err.c_str());
+        std::fflush(stdout);
+    }
+    ASSERT(ok);   // sem UB: falha limpa (a mutação fica VERMELHA, não crash)
+    EXPECT(out.meshes.size() == 1);
+    EXPECT(out.meshes[0] == "assets/city.gmesh");
+    // A FONTE: o fd do bridge, mmap POR FD (o log é a evidência)
+    EXPECT(fileHas(dir + "/logs/engine.log", "fonte=mmap-fd"));
+    EXPECT(fileHas(dir + "/logs/engine.log", "o fd do bridge"));
+    // o round-trip com verificação bit a bit
+    EXPECT(fileHas(dir + "/logs/engine.log", "verificado=1"));
+    // A MENSAGEM DO TETO NÃO EXISTE (nunca visível ao não-skinned)
+    EXPECT(!fileHas(dir + "/logs/engine.log", "excede 65535"));
+    // a fase de ranges tem LINHA PRÓPRIA (o 5395 do dono com dono)
+    EXPECT(fileHas(dir + "/logs/engine.log", "gmesh: fase=parse ms="));
+    EXPECT(fileHas(dir + "/logs/engine.log", "gmesh: fase=ranges ms="));
+    // a tabela: 72 blocos (1 por primitiva — 1000 verts < cap), 72k verts
+    io.flushWrites();
+    std::vector<u8> gmesh;
+    EXPECT(st.readBytes(out.meshes[0], gmesh));
+    GMeshV3Meta meta;
+    std::vector<GMeshV3Block> blocks;
+    std::vector<std::string> mats;
+    EXPECT(readGMeshV3Meta(gmesh.data(), gmesh.size(), meta, blocks, mats,
+                           err));
+    EXPECT(meta.vertexCount >= 72000);
+    EXPECT(meta.blockCount >= 72);
+    elog::shutdown();
+    rmRf(dir);
+}
+
+// 21.2 · o provider RECUSA o mmap do fd (o pipe da sonda — a recusa REAL do
+// SO: o fstat do FIFO dá size 0): o import segue VERDE pelos RANGES (o
+// pread degradado — readBytesAt abre fd NOVO por range; NUNCA o legado)
+TEST(safstream_fd_que_recusa_mmap_importa_por_ranges) {
+    const std::string dir = "/tmp/goni_saf_rng_" + std::to_string(::getpid());
+    rmRf(dir);
+    ASSERT(mkDir(dir));
+    registersWithCacheDir(dir + "/appcache");
+    elog::init((dir + "/logs").c_str());
+    const std::string src = dir + "/city.glb";
+    ASSERT(buildCityGlb(src));
+
+    FakeSafIo io;
+    io.refuseMmapFds = true;   // a sonda do mmap leva o PIPE (recusa real)
+    SafStorage st(&io, "content://tree/primary:GOneVV/cidade");
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    const bool ok = convert::importFile(src, "city.glb", st, nullptr, out,
+                                        stats, err, nullptr, nullptr);
+    if (!ok) {
+        std::printf("  [saf-rng] err=%.200s\n", err.c_str());
+        std::fflush(stdout);
+    }
+    ASSERT(ok);   // sem UB: falha limpa (a mutação fica VERMELHA, não crash)
+    // A DEGRADAÇÃO HONESTA no log: o mmap recusado → pread de RANGES
+    EXPECT(fileHas(dir + "/logs/engine.log",
+                   "a degradar para pread de RANGES"));
+    EXPECT(fileHas(dir + "/logs/engine.log", "fonte=ranges"));
+    // nunca desceu ao legado (o teto invisível) — verificado=1
+    EXPECT(fileHas(dir + "/logs/engine.log", "verificado=1"));
+    EXPECT(!fileHas(dir + "/logs/engine.log", "excede 65535"));
+    // o evidência do conversor: UMA carga de span por tarefa (72 no corte)
+    EXPECT(fileHas(dir + "/logs/engine.log", "ranges do corte: 72"));
+    // a tabela abre igual (72 blocos, 72k verts — a MESMA geometria)
+    io.flushWrites();
+    std::vector<u8> gmesh;
+    EXPECT(st.readBytes(out.meshes[0], gmesh));
+    GMeshV3Meta meta;
+    std::vector<GMeshV3Block> blocks;
+    std::vector<std::string> mats;
+    EXPECT(readGMeshV3Meta(gmesh.data(), gmesh.size(), meta, blocks, mats,
+                           err));
+    EXPECT(meta.vertexCount >= 72000);
+    EXPECT(meta.blockCount >= 72);
+    elog::shutdown();
+    rmRf(dir);
+}
+
+// 21.3 · a CENA SINTÉTICA >65535 SOB FakeStorage (o /fake virtual): verde
+// pelo mmap-CAMINHO da fonte real (o de sempre — a regressão literal do
+// dono; o pino de que o /fake nunca regrediu)
+TEST(safstream_cena_sintetica_65535_fakestorage_verde) {
+    const std::string dir = "/tmp/goni_saf_fs_" + std::to_string(::getpid());
+    rmRf(dir);
+    ASSERT(mkDir(dir));
+    registersWithCacheDir(dir + "/appcache");
+    elog::init((dir + "/logs").c_str());
+    const std::vector<PrimSpec> prims = {{70000, 90000, 0, true}};
+    const std::vector<NodeSpec> nodes = {{0, 0, 0, 0}};
+    std::vector<u8> glb;
+    ASSERT(buildGlb(prims, nodes, {"gigante"}, {}, glb));
+    const std::string src = dir + "/gigante.glb";
+    FILE* f = std::fopen(src.c_str(), "wb");
+    ASSERT(f != nullptr);
+    std::fwrite(glb.data(), 1, glb.size(), f);
+    std::fclose(f);
+
+    FakeStorage st;   // raiz /fake — o virtual do harness
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    if (!convert::importFile(src, "gigante.glb", st, nullptr, out, stats,
+                             err, nullptr, nullptr)) {
+        std::printf("  [saf-fs] err=%.200s\n", err.c_str());
+        std::fflush(stdout);
+    }
+    ASSERT(out.meshes.size() == 1);   // sem UB: falha limpa sob mutação
+    EXPECT(fileHas(dir + "/logs/engine.log", "verificado=1"));
+    EXPECT(fileHas(dir + "/logs/engine.log", "fonte=mmap-caminho"));
+    EXPECT(!fileHas(dir + "/logs/engine.log", "excede 65535"));
+    std::vector<u8> gmesh;
+    EXPECT(st.readBytes(out.meshes[0], gmesh));
+    GMeshV3Meta meta;
+    std::vector<GMeshV3Block> blocks;
+    std::vector<std::string> mats;
+    EXPECT(readGMeshV3Meta(gmesh.data(), gmesh.size(), meta, blocks, mats,
+                           err));
+    EXPECT(meta.vertexCount >= 70000);
+    EXPECT(meta.blockCount >= 2);   // 70000 > 65535 → cortou
+    elog::shutdown();
+    rmRf(dir);
+}
+
+// 21.4 · o CONVERSOR PURO por ranges (bin=nullptr + V3RangeSource): o
+// contrato do degradado SEM storage por meio — o span de cada tarefa
+// carrega por range e a verificação bit a bit segue VERDE
+TEST(safstream_ranges_no_conversor_puro) {
+    const std::string dir = "/tmp/goni_saf_puro_" + std::to_string(::getpid());
+    rmRf(dir);
+    ASSERT(mkDir(dir));
+    elog::init((dir + "/logs").c_str());
+    const std::vector<PrimSpec> prims = {{70000, 90000, 0, true},
+                                         {30000, 40000, 0, false}};
+    const std::vector<NodeSpec> nodes = {{0, 0, 0, 0}, {1, 1, 0, 0}};
+    std::vector<u8> glb;
+    ASSERT(buildGlb(prims, nodes, {"M"}, {}, glb));
+    // o JSON e o BIN do GLB (12 header + 8 + json + 8 + bin)
+    ASSERT(glb.size() > 28);
+    u32 jsonLen = 0;
+    std::memcpy(&jsonLen, glb.data() + 12, 4);
+    const std::string json(reinterpret_cast<const char*>(glb.data()) + 20,
+                           jsonLen);
+    const u64 binBase = (u64(20) + jsonLen + 3) & ~u64(3);
+    const std::vector<u8> bin(glb.begin() + static_cast<long>(binBase + 8),
+                              glb.end());
+
+    // o parse em modo streaming (primRefs; o owned sai — aqui usamo-lo só
+    // como BIN em memória p/ os ranges, provando o contrato do conversor)
+    GltfModel model;
+    std::vector<u8> owned;
+    std::string perr;
+    ASSERT(parseGltf(json.data(), json.size(), bin, GltfBufferResolver{},
+                     model, perr, nullptr, true, &owned));
+    EXPECT(model.primRefs.size() == 2);
+    Json doc;
+    ASSERT(Json::parse(json.data(), json.size(), doc));
+
+    // o contador: os ranges carregam UMA vez por tarefa (no corte; a
+    // verificação re-carrega — o contrato do pico = 1 span em voo)
+    struct Cnt {
+        const std::vector<u8>* bin;
+        u64 loads = 0;
+    } cnt{&bin, 0};
+    V3RangeSource ranges;
+    ranges.fn = [](void* user, u64 off, u64 len, std::vector<u8>& outv,
+                   std::string& rerr) -> bool {
+        auto* c = static_cast<Cnt*>(user);
+        if (off + len > c->bin->size()) {
+            rerr = "range fora do bin";
+            return false;
+        }
+        outv.assign(c->bin->begin() + static_cast<long>(off),
+                    c->bin->begin() + static_cast<long>(off + len));
+        ++c->loads;
+        return true;
+    };
+    ranges.user = &cnt;
+
+    FsStorage st((dir + "/proj").c_str());
+    st.makeDirs("assets");
+    convert::Output out;
+    convert::Stats stats;
+    V3StreamResult res;
+    std::string err;
+    const bool ok = convertGltfToV3(model, doc, nullptr, bin.size(),
+                                    bin.size(), "puro", st, out, stats, res,
+                                    err, nullptr, nullptr, &ranges, false);
+    if (!ok) {
+        std::printf("  [puro] err=%.200s\n", err.c_str());
+        std::fflush(stdout);
+    }
+    ASSERT(ok);   // sem UB: falha limpa (a mutação fica VERMELHA, não crash)
+    EXPECT(res.verified);
+    EXPECT(res.blocks >= 2);
+    EXPECT(res.verts >= 100000);
+    EXPECT(cnt.loads >= 2);   // UMA carga por tarefa no corte (2 tarefas)
+    EXPECT(fileHas(dir + "/logs/engine.log", "ranges do corte: 2"));
+    elog::shutdown();
+    rmRf(dir);
+}
+
+// 21.5 · o data: URI (a geometria EMBUTIDA no JSON) também streama: o parse
+// exporta o buffer 0 e o conversor corre SOBRE os bytes — o teto de 65535
+// não-skinned fica invisível até no canto sem ficheiro de buffer
+TEST(safstream_data_uri_sem_ficheiro_tambem_streama) {
+    const std::string dir = "/tmp/goni_saf_du_" + std::to_string(::getpid());
+    rmRf(dir);
+    ASSERT(mkDir(dir));
+    elog::init((dir + "/logs").c_str());
+
+    // o .gltf com buffers[0].uri = data:...;base64 — 70 000 verts (os
+    // 25 000 triângulos referenciam TODOS — órfãos não sobrevivem ao corte)
+    constexpr u32 kVerts = 70000;
+    constexpr u32 kTris = 25000;
+    std::vector<u8> bin;
+    for (u32 i = 0; i < kVerts; ++i) {
+        f32 v[3];
+        vertexOf(i, v);
+        for (int c = 0; c < 3; ++c) {
+            const u32 b = *reinterpret_cast<const u32*>(&v[c]);
+            bin.push_back((u8)(b & 0xFF)); bin.push_back((u8)((b >> 8) & 0xFF));
+            bin.push_back((u8)((b >> 16) & 0xFF));
+            bin.push_back((u8)((b >> 24) & 0xFF));
+        }
+    }
+    for (u32 i = 0; i < kVerts; ++i) {
+        const f32 n[3] = {(i % 97) / 48.0f - 1.0f, (i % 89) / 44.0f - 1.0f,
+                          (i % 83) / 41.0f - 1.0f};
+        for (int c = 0; c < 3; ++c) {
+            const u32 b = *reinterpret_cast<const u32*>(&n[c]);
+            bin.push_back((u8)(b & 0xFF)); bin.push_back((u8)((b >> 8) & 0xFF));
+            bin.push_back((u8)((b >> 16) & 0xFF));
+            bin.push_back((u8)((b >> 24) & 0xFF));
+        }
+    }
+    for (u32 i = 0; i < kVerts; ++i) {
+        const f32 t[2] = {f32(i % 64) / 63.0f, f32(i % 32) / 31.0f};
+        for (int c = 0; c < 2; ++c) {
+            const u32 b = *reinterpret_cast<const u32*>(&t[c]);
+            bin.push_back((u8)(b & 0xFF)); bin.push_back((u8)((b >> 8) & 0xFF));
+            bin.push_back((u8)((b >> 16) & 0xFF));
+            bin.push_back((u8)((b >> 24) & 0xFF));
+        }
+    }
+    for (u32 ti = 0; ti < kTris; ++ti) {
+        for (int c = 0; c < 3; ++c) {
+            const u16 g = static_cast<u16>((3 * ti + u32(c)) % kVerts);
+            bin.push_back((u8)(g & 0xFF));
+            bin.push_back((u8)(g >> 8));
+        }
+    }
+    // base64 (o encoder mínimo do teste — o decoder é o da engine)
+    static const char kTbl[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string b64;
+    b64.reserve(((bin.size() + 2) / 3) * 4);
+    for (size_t i = 0; i < bin.size(); i += 3) {
+        const u32 n0 = bin[i];
+        const u32 n1 = i + 1 < bin.size() ? bin[i + 1] : 0;
+        const u32 n2 = i + 2 < bin.size() ? bin[i + 2] : 0;
+        const u32 v = (n0 << 16) | (n1 << 8) | n2;
+        b64.push_back(kTbl[(v >> 18) & 63]);
+        b64.push_back(kTbl[(v >> 12) & 63]);
+        b64.push_back(i + 1 < bin.size() ? kTbl[(v >> 6) & 63] : '=');
+        b64.push_back(i + 2 < bin.size() ? kTbl[v & 63] : '=');
+    }
+    char head[2048];
+    std::snprintf(head, sizeof(head),
+        "{\"asset\":{\"version\":\"2.0\"},\"scene\":0,"
+        "\"scenes\":[{\"nodes\":[0]}],\"nodes\":[{\"mesh\":0}],"
+        "\"meshes\":[{\"primitives\":[{\"attributes\":{"
+        "\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":2},\"indices\":3,"
+        "\"mode\":4}]}],"
+        "\"accessors\":["
+        "{\"bufferView\":0,\"componentType\":5126,\"count\":%u,"
+        "\"type\":\"VEC3\",\"min\":[-1,-1,-1],\"max\":[1,1,1]},"
+        "{\"bufferView\":1,\"componentType\":5126,\"count\":%u,"
+        "\"type\":\"VEC3\"},"
+        "{\"bufferView\":2,\"componentType\":5126,\"count\":%u,"
+        "\"type\":\"VEC2\"},"
+        "{\"bufferView\":3,\"componentType\":5123,\"count\":%u,"
+        "\"type\":\"SCALAR\"}],"
+        "\"bufferViews\":["
+        "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":%zu},"
+        "{\"buffer\":0,\"byteOffset\":%zu,\"byteLength\":%zu},"
+        "{\"buffer\":0,\"byteOffset\":%zu,\"byteLength\":%zu},"
+        "{\"buffer\":0,\"byteOffset\":%zu,\"byteLength\":%zu}],"
+        "\"buffers\":[{\"uri\":\"data:application/octet-stream;base64,",
+        kVerts, kVerts, kVerts, u64(kTris) * 3,
+        size_t(kVerts) * 12, size_t(kVerts) * 12, size_t(kVerts) * 12,
+        size_t(kVerts) * 24, size_t(kVerts) * 8, size_t(kVerts) * 32,
+        size_t(kTris) * 3 * 2);
+    const std::string json = std::string(head) + b64 + "\"}]}";
+    const std::string src = dir + "/embutido.gltf";
+    FILE* f = std::fopen(src.c_str(), "wb");
+    ASSERT(f != nullptr);
+    std::fwrite(json.data(), 1, json.size(), f);
+    std::fclose(f);
+
+    FsStorage st((dir + "/proj").c_str());
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    const bool ok = convert::importFile(src, "embutido.gltf", st, nullptr,
+                                        out, stats, err, nullptr, nullptr);
+    if (!ok) {
+        std::printf("  [data-uri] err=%.200s\n", err.c_str());
+        std::fflush(stdout);
+    }
+    ASSERT(ok);   // sem UB: o resto só faz sentido com o import verde
+    EXPECT(out.meshes.size() == 1);
+    EXPECT(fileHas(dir + "/logs/engine.log", "fonte=data-uri"));
+    EXPECT(fileHas(dir + "/logs/engine.log", "verificado=1"));
+    EXPECT(!fileHas(dir + "/logs/engine.log", "excede 65535"));
+    std::vector<u8> gmesh;
+    EXPECT(st.readBytes(out.meshes[0], gmesh));
+    GMeshV3Meta meta;
+    std::vector<GMeshV3Block> blocks;
+    std::vector<std::string> mats;
+    EXPECT(readGMeshV3Meta(gmesh.data(), gmesh.size(), meta, blocks, mats,
+                           err));
+    EXPECT(meta.vertexCount >= 70000);
+    EXPECT(meta.blockCount >= 2);
+    elog::shutdown();
+    rmRf(dir);
+}
+
+// 21.6 · a fase=ranges TEM LINHA PRÓPRIA (o 5395 ms do dono com dono): um
+// GLB com imagem embutida materializa o range da textura DURANTE o parse —
+// o parse diz SÓ o JSON, o scan de ranges diz o resto
+TEST(safstream_fase_ranges_linha_propria) {
+    const std::string dir = "/tmp/goni_saf_fr_" + std::to_string(::getpid());
+    rmRf(dir);
+    ASSERT(mkDir(dir));
+    elog::init((dir + "/logs").c_str());
+    const std::vector<PrimSpec> prims = {{3000, 5000, 0, false}};
+    const std::vector<NodeSpec> nodes = {{0, 0, 0, 0}};
+    // um "PNG" de 4 KB embutido (o parse materializa o range; o decode
+    // falha no passe de texturas — o modelo entra na mesma, sem teto)
+    const std::string png(4096, '\x89');
+    std::vector<u8> glb;
+    ASSERT(buildGlb(prims, nodes, {"M"}, {png}, glb));
+    const std::string src = dir + "/tex.glb";
+    FILE* f = std::fopen(src.c_str(), "wb");
+    ASSERT(f != nullptr);
+    std::fwrite(glb.data(), 1, glb.size(), f);
+    std::fclose(f);
+
+    FsStorage st((dir + "/proj").c_str());
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    EXPECT(convert::importFile(src, "tex.glb", st, nullptr, out, stats, err,
+                               nullptr, nullptr));
+    // AS DUAS LINHAS existem (parse=só JSON; ranges=o scan do bin)
+    EXPECT(fileHas(dir + "/logs/engine.log", "gmesh: fase=parse ms="));
+    EXPECT(fileHas(dir + "/logs/engine.log", "gmesh: fase=ranges ms="));
+    EXPECT(fileHas(dir + "/logs/engine.log",
+                   "o scan de ranges do bin"));
+    EXPECT(fileHas(dir + "/logs/engine.log", "verificado=1"));
+    elog::shutdown();
+    rmRf(dir);
+}
+
+// 21.7 · o modelo COM PELE acima do teto: a mensagem clara do BACKLOG (nunca
+// a mensagem de storage; a pele segue o merge — o contrato do PASSO 3)
+TEST(safstream_pele_grande_mensagem_backlog) {
+    const std::string dir = "/tmp/goni_saf_pele_" + std::to_string(::getpid());
+    rmRf(dir);
+    ASSERT(mkDir(dir));
+    elog::init((dir + "/logs").c_str());
+
+    // 70 000 verts COM JOINTS_0/WEIGHTS_0 + skin de 2 joints (o padrão do
+    // test_skin.cpp, esticado para além do teto do merge)
+    constexpr u32 kVerts = 70000;
+    constexpr u32 kTris = 20000;
+    std::vector<u8> bin;
+    auto pushF32x3 = [&bin](f32 x, f32 y, f32 z) {
+        const f32 v[3] = {x, y, z};
+        for (int c = 0; c < 3; ++c) {
+            const u32 b = *reinterpret_cast<const u32*>(&v[c]);
+            bin.push_back((u8)(b & 0xFF)); bin.push_back((u8)((b >> 8) & 0xFF));
+            bin.push_back((u8)((b >> 16) & 0xFF));
+            bin.push_back((u8)((b >> 24) & 0xFF));
+        }
+    };
+    for (u32 i = 0; i < kVerts; ++i) {
+        f32 v[3];
+        vertexOf(i, v);
+        pushF32x3(v[0], v[1], v[2]);
+    }
+    for (u32 i = 0; i < kVerts; ++i) {
+        pushF32x3(0.0f, 1.0f, 0.0f);
+    }
+    // JOINTS_0 (u8×4): todos no joint 0
+    for (u32 i = 0; i < kVerts * 4; ++i) {
+        bin.push_back(0);
+    }
+    // WEIGHTS_0 (f32×4): (1,0,0,0)
+    for (u32 i = 0; i < kVerts; ++i) {
+        const f32 w[4] = {1.0f, 0.0f, 0.0f, 0.0f};
+        for (int c = 0; c < 4; ++c) {
+            const u32 b = *reinterpret_cast<const u32*>(&w[c]);
+            bin.push_back((u8)(b & 0xFF)); bin.push_back((u8)((b >> 8) & 0xFF));
+            bin.push_back((u8)((b >> 16) & 0xFF));
+            bin.push_back((u8)((b >> 24) & 0xFF));
+        }
+    }
+    for (u32 ti = 0; ti < kTris; ++ti) {
+        for (int c = 0; c < 3; ++c) {
+            const u16 g = static_cast<u16>((3 * ti + u32(c)) % kVerts);
+            bin.push_back((u8)(g & 0xFF));
+            bin.push_back((u8)(g >> 8));
+        }
+    }
+    // IBM ×2 (identidade — o bind não importa para o teto)
+    for (int j = 0; j < 2; ++j) {
+        for (int i = 0; i < 16; ++i) {
+            const f32 v = i % 5 == 0 ? 1.0f : 0.0f;
+            const u32 b = *reinterpret_cast<const u32*>(&v);
+            bin.push_back((u8)(b & 0xFF)); bin.push_back((u8)((b >> 8) & 0xFF));
+            bin.push_back((u8)((b >> 16) & 0xFF));
+            bin.push_back((u8)((b >> 24) & 0xFF));
+        }
+    }
+    const size_t posLen = size_t(kVerts) * 12;
+    const size_t jntOff = posLen * 2;
+    const size_t wgtOff = jntOff + size_t(kVerts) * 4;
+    const size_t idxOff = wgtOff + size_t(kVerts) * 16;
+    const size_t ibmOff = idxOff + size_t(kTris) * 3 * 2;
+    char j[1600];
+    std::snprintf(j, sizeof(j),
+        "{\"asset\":{\"version\":\"2.0\"},"
+        "\"buffers\":[{\"byteLength\":%zu}],"
+        "\"bufferViews\":["
+        "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":%zu},"
+        "{\"buffer\":0,\"byteOffset\":%zu,\"byteLength\":%zu},"
+        "{\"buffer\":0,\"byteOffset\":%zu,\"byteLength\":%zu},"
+        "{\"buffer\":0,\"byteOffset\":%zu,\"byteLength\":%zu},"
+        "{\"buffer\":0,\"byteOffset\":%zu,\"byteLength\":%zu},"
+        "{\"buffer\":0,\"byteOffset\":%zu,\"byteLength\":%zu}],"
+        "\"accessors\":["
+        "{\"bufferView\":0,\"componentType\":5126,\"count\":%u,\"type\":\"VEC3\"},"
+        "{\"bufferView\":1,\"componentType\":5126,\"count\":%u,\"type\":\"VEC3\"},"
+        "{\"bufferView\":2,\"componentType\":5121,\"count\":%u,\"type\":\"VEC4\"},"
+        "{\"bufferView\":3,\"componentType\":5126,\"count\":%u,\"type\":\"VEC4\"},"
+        "{\"bufferView\":4,\"componentType\":5123,\"count\":%u,\"type\":\"SCALAR\"},"
+        "{\"bufferView\":5,\"componentType\":5126,\"count\":2,\"type\":\"MAT4\"}],"
+        "\"meshes\":[{\"primitives\":[{\"attributes\":{"
+        "\"POSITION\":0,\"NORMAL\":1,\"JOINTS_0\":2,\"WEIGHTS_0\":3},"
+        "\"indices\":4}]}],"
+        "\"nodes\":["
+        "{\"mesh\":0,\"name\":\"raiz\"},"
+        "{\"name\":\"pai\",\"children\":[2]},"
+        "{\"name\":\"filho\",\"translation\":[1,0,0]}],"
+        "\"scenes\":[{\"nodes\":[0]}],"
+        "\"skins\":[{\"joints\":[1,2],\"inverseBindMatrices\":5}]}",
+        bin.size(), posLen, posLen, posLen, jntOff, size_t(kVerts) * 4,
+        wgtOff, size_t(kVerts) * 16, idxOff, size_t(kTris) * 3,
+        ibmOff, size_t(2) * 64,
+        kVerts, kVerts, kVerts, kVerts, u64(kTris) * 3);
+    const std::string json(j);
+    std::string jsonP = json;
+    while (jsonP.size() % 4 != 0) jsonP += ' ';
+    std::vector<u8> binP = bin;
+    while (binP.size() % 4 != 0) binP.push_back(0);
+    std::vector<u8> glb;
+    auto u32push = [&glb](u32 v) {
+        glb.push_back((u8)(v & 0xFF));
+        glb.push_back((u8)((v >> 8) & 0xFF));
+        glb.push_back((u8)((v >> 16) & 0xFF));
+        glb.push_back((u8)((v >> 24) & 0xFF));
+    };
+    u32push(0x46546C67u);
+    u32push(2);
+    u32push(12 + 8 + (u32)jsonP.size() + 8 + (u32)binP.size());
+    u32push((u32)jsonP.size());
+    u32push(0x4E4F534Au);
+    glb.insert(glb.end(), jsonP.begin(), jsonP.end());
+    u32push((u32)binP.size());
+    u32push(0x004E4942u);
+    glb.insert(glb.end(), binP.begin(), binP.end());
+    const std::string src = dir + "/dragao.glb";
+    FILE* f = std::fopen(src.c_str(), "wb");
+    ASSERT(f != nullptr);
+    std::fwrite(glb.data(), 1, glb.size(), f);
+    std::fclose(f);
+
+    FsStorage st((dir + "/proj").c_str());
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    const bool ok = convert::importFile(src, "dragao.glb", st, nullptr, out,
+                                        stats, err, nullptr, nullptr);
+    // COM PELE acima do teto: FALHA com a MENSAGEM CLARA do BACKLOG (o
+    // streaming não tem skin — o merge é o que preserva joints/weights)
+    EXPECT(!ok);
+    EXPECT(err.find("pele ainda não suportada no streaming (BACKLOG)") !=
+           std::string::npos);
+    // ...e NUNCA a mensagem de storage do texto antigo
+    EXPECT(err.find("SAF sem ficheiro real") == std::string::npos);
+    EXPECT(err.find("excede 65535") == std::string::npos);
+    elog::shutdown();
+    rmRf(dir);
+}

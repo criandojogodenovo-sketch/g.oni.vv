@@ -104,6 +104,18 @@ void* mapFile64(const char* path, unsigned long long offset,
                 unsigned long long len, unsigned long long* mappedLen);
 void unmapFile64(void* ptr, unsigned long long mappedLen);
 
+// 0.10-M (SAF-STREAM) — MMAP POR FD: o MESMO contrato do mapFile64, mas
+// sobre um descritor JÁ ABERTO — o mmap não precisa de caminho nenhum.
+// É a porta do streaming sob SAF: o fd vem do bridge (bridgeOpenFd via
+// SafStorage::openReadFd) e mapeia-se DIRETAMENTE. O fd NÃO é fechado
+// aqui (quem abriu fecha — o mmap segura a sua própria referência).
+// Um fd que o SO recusa mapear (pipe/socket do provider, FUSE sem mmap)
+// devolve nullptr com o errno no log — o chamador degrada para pread de
+// RANGES (nunca para o legado por causa do storage).
+void* mapFd64(int fd, unsigned long long offset, unsigned long long len,
+              unsigned long long* mappedLen);
+
+
 // escrita binária inteira (cria as pastas-mãe em falta; substitui se
 // existir). false = mkdirs/fopen/write falharam (errno logado).
 bool writeAll(const std::string& path, const void* data, size_t n);

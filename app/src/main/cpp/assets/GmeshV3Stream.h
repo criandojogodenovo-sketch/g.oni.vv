@@ -67,12 +67,35 @@ struct V3StreamResult {
 // (a mutação M3 do relatório vigia: pool a 0 sem fallback = vermelho).
 u32 v3StreamWorkerCount(u32 hardwareThreads);
 
+// 0.10-M (SAF-STREAM) — A FONTE ALTERNATIVA do bin: quando não há mmap
+// (o fd do provider RECUSOU o mapa — pipe/FUSE sem mmap; ou os bytes
+// vieram embutidos no JSON — data: URI), cada TAREFA carrega o SEU SPAN
+// por ranges (o «pread de ranges» que o dono manda preservar — a
+// degradação honesta, NUNCA o legado por causa do storage). O contrato:
+//   fn(user, off, len, out, err) carrega [off, off+len) DO BIN (offsets
+//   desde o INÍCIO do buffer 0 — o chamador soma o binBase do GLB);
+//   true = out tem exatamente len bytes.
+// A higiene de RSS (MADV_DONTNEED) fica DESLIGADA neste caminho — em heap
+// o madvise ZERA páginas de vizinhos (a lição F3 do PASSO 3); o pico é o
+// span da tarefa em voo (a mesma fórmula do mmap, sem o drop).
+struct V3RangeSource {
+    bool (*fn)(void* user, u64 off, u64 len, std::vector<u8>& out,
+               std::string& err) = nullptr;
+    void* user = nullptr;
+};
+
 // converte as primitivas do modelo (parseGltf em modo streaming —
 // primRefs SEM geometria materializada) para assets/<stem>.gmesh v3.
 //   `bin`      — o buffer 0 JÁ mmapado pelo chamador (GLB: o ficheiro
 //                inteiro com a base NO INÍCIO DO CHUNK BIN; .gltf: o
 //                irmão .bin); os offsets dos accessors são desde aqui.
+//                nullptr + `ranges` = o caminho dos RANGES (SAF-STREAM:
+//                o fd recusou o mmap ou os bytes vêm do JSON — cada
+//                tarefa carrega o seu span).
 //   `doc`      — o documento glTF parseado (accessors/bufferViews).
+//   `binDroppable` — false quando `bin` é HEAP (data: URI exportado pelo
+//                parse): o MADV_DONTNEED só é legítimo em mmap de ficheiro
+//                (a lição F3 — em heap zera páginas de vizinhos).
 // Escreve o ficheiro final por openWriteStream/writeStreamChunk do
 // storage (nunca o ficheiro inteiro em RAM). onProgress(done,total) é
 // chamado por fase com o total de triângulos; devolve false = CANCELADO
@@ -83,6 +106,8 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
                      convert::Output& out, convert::Stats& stats,
                      V3StreamResult& result, std::string& err,
                      bool (*onProgress)(void*, u64, u64) = nullptr,
-                     void* user = nullptr);
+                     void* user = nullptr,
+                     const V3RangeSource* ranges = nullptr,
+                     bool binDroppable = true);
 
 } // namespace vv

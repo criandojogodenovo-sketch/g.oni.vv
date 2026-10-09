@@ -6,6 +6,13 @@
 // (failProbe/failWrites) para afervelar os caminhos honestos — Unknown
 // NUNCA vira "não existe" e falha de escrita propaga com a causa.
 #pragma once
+// memfd_create (o fd do openReadFd do SAF-STREAM) — o MESMO padrão do
+// FakeSafIo.h: _GNU_SOURCE explícito + protótipo estável da glibc
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
+#include <unistd.h>
+extern "C" int memfd_create(const char* name, unsigned int flags);
 #include <map>
 #include <set>
 #include <string>
@@ -120,6 +127,34 @@ struct FakeStorage final : public vv::ProjectStorage {
         }
         out.assign(data.begin() + static_cast<long>(offset),
                    data.begin() + static_cast<long>(offset + len));
+        return true;
+    }
+
+    // 0.10-M (SAF-STREAM) — o fd do streaming: um MEMFD com os bytes (o
+    // mmap POR FD funciona — o caminho mmap-fd fica aferível no /fake).
+    // O 2.º degrau da cascata da engine só chega aqui se o mmap por
+    // CAMINHO da fonte falhar — nos testes de /fake nunca falha (fontes
+    // reais em /tmp); o contrato existe para o futuro reconvert virtual.
+    bool openReadFd(const std::string& relPath, int* outFd,
+                    std::string& err) override {
+        if (outFd != nullptr) {
+            *outFd = -1;
+        }
+        const auto it = files.find(relPath);
+        if (!vv::validRelPath(relPath) || it == files.end()) {
+            err = "o ficheiro '" + relPath + "' não vive no storage fake";
+            return false;
+        }
+        const int fd = ::memfd_create("vv-fake-storage", 0);
+        if (fd < 0) {
+            err = "memfd_create falhou no fake";
+            return false;
+        }
+        if (!it->second.empty()) {
+            ::write(fd, it->second.data(), it->second.size());
+        }
+        ::lseek(fd, 0, SEEK_SET);
+        *outFd = fd;
         return true;
     }
 };

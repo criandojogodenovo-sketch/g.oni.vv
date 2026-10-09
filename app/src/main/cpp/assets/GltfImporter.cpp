@@ -166,6 +166,22 @@ public:
     // os bytes em vez de os copiar (o range de 118 MB nunca é duplicado)
     std::vector<u8> takeStaged() { return std::move(stage_); }
 
+    // 0.10-M (SAF-STREAM) — o buffer OWNED (data: URI) sai INTEIRO para o
+    // chamador: o conversor streaming corre SOBRE ELE (bin=heap, sem
+    // madvise) — o teto de 65535 não-skinned morre também no canto do
+    // JSON-embutido. Só o buffer 0 (o de sempre: a geometria vive lá).
+    bool ownedAt(size_t bi) const {
+        return bi < entries_.size() && !entries_[bi].deferred &&
+               !entries_[bi].owned.empty();
+    }
+    std::vector<u8> takeOwned(size_t bi) {
+        std::vector<u8> out;
+        if (bi < entries_.size() && !entries_[bi].deferred) {
+            out = std::move(entries_[bi].owned);
+        }
+        return out;
+    }
+
     // 0.9.6.12g (A2-2 · FAZ 1 do dono): o tamanho do FICHEIRO em disco por
     // buffer — deferido: o stat do ficheiro (loader.fileBytes); residente:
     // os bytes que existem (real == file por construção)
@@ -360,7 +376,8 @@ bool decodeBase64(const char* src, size_t len, std::vector<u8>& out) {
 bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                const GltfBufferResolver& resolver, GltfModel& out,
                std::string& err, const GltfRangeLoader* rangeLoader,
-               bool streamMeshes) {
+               bool streamMeshes,
+               std::vector<u8>* streamOwnedBin) {
     out = GltfModel{};
     if (!json || len == 0) {
         err = "glTF: json vazio";
@@ -942,9 +959,26 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
             // funde a primitiva no MeshData do mesh (rebase de índices)
             const u16 base = static_cast<u16>(md.vertices.size());
             if (md.vertices.size() + pos.size() > 65536) {
-                err = "glTF: mesh fundido excede 65535 vértices (o teto do caminho de "
-                          "mesh única; o formato v3 já não tem teto — o "
-                          "corte em blocos entra no PASSO 3 do 0.10-M)";
+                // 0.10-M (SAF-STREAM) — este teto SÓ é alcançável no parse
+                // INTEGRAL (o legado): modelo COM PELE (o streaming não tem
+                // skin — o merge é o que preserva joints/weights) ou a
+                // geometria num buffer que NÃO o 0 (multi-buffer .gltf).
+                // A mensagem NUNCA culpa o storage (o streaming corre sob
+                // QUALQUER armazenamento desde o hotfix SAF-STREAM).
+                if (!out.skins.empty() || jnt.size() == pos.size() * 4) {
+                    err = "pele ainda não suportada no streaming (BACKLOG) "
+                          "— o modelo com pele passa o teto de 65535 "
+                          "vértices do caminho de mesh única (o merge é o "
+                          "que preserva joints/weights; o corte em blocos "
+                          "da pele está no BACKLOG do 0.10-M)";
+                } else {
+                    err = "o mesh passa o teto de 65535 vértices do "
+                          "caminho de mesh única SEM pele e SEM falta de "
+                          "armazenamento (o streaming corre em QUALQUER "
+                          "storage) — a causa provável: a geometria vive "
+                          "num buffer que não o buffer 0 (multi-buffer "
+                          ".gltf); exporta com UM .bin único ou GLB";
+                }
                 return false;
             }
             MeshData::Group grp;
@@ -1409,6 +1443,17 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                 out.skins.push_back(std::move(skin));
             }
         }
+    }
+    // 0.10-M (SAF-STREAM) — o buffer 0 EMBUTIDO (data: URI) sai INTEIRO
+    // para o chamador no modo streaming: o conversor corre SOBRE os bytes
+    // (bin=heap — sem madvise) e o teto de 65535 não-skinned morre também
+    // neste canto (um .gltf SEM ficheiro de buffer não fica preso no
+    // legado). No fim do parse NADA mais lê o store — o move é seguro.
+    if (streamMeshes && streamOwnedBin != nullptr && store.ownedAt(0)) {
+        *streamOwnedBin = store.takeOwned(0);
+        elog::info("asset: v3 fonte=data-uri — o buffer 0 embutido (%llu B) "
+                   "sai do parse para o streaming (sem ficheiro, sem teto)",
+                   static_cast<unsigned long long>(streamOwnedBin->size()));
     }
     return true;
 }

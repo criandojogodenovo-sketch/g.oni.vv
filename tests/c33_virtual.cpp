@@ -401,6 +401,142 @@ bool buildGlbFase20(u32 verts, u32 tris, const std::string& path) {
 jobject kFakeActivity = reinterpret_cast<jobject>(static_cast<intptr_t>(0xD001));
 jclass  kFakeCls      = reinterpret_cast<jclass>(static_cast<intptr_t>(0xD002));
 
+// 0.10-M (HOTFIX SAF-STREAM · FASE 21): o CITY do dono em miniatura —
+// `nMeshes` primitivas (72 no real), cada com `verts` vértices e `tris`
+// triângulos, SEM pele (o streaming de produção), nós crus. O total passa
+// o teto de 65535 do caminho de mesh única: sob SAF era AQUI que o import
+// do dono morria (o gate content:// desligava o streaming → legado → teto).
+bool buildGlbFase21(u32 nMeshes, u32 verts, u32 tris,
+                    const std::string& path) {
+    // layout do BIN: por mesh, pos 12 + nrm 12 + uv 8 + idx u32; alinhado 4
+    std::vector<u64> posOff(nMeshes), nrmOff(nMeshes), uvOff(nMeshes),
+        idxOff(nMeshes);
+    u64 binLen = 0;
+    for (u32 m = 0; m < nMeshes; ++m) {
+        posOff[m] = (binLen + 3) & ~3ull;
+        binLen = posOff[m] + u64(verts) * 12;
+        nrmOff[m] = (binLen + 3) & ~3ull;
+        binLen = nrmOff[m] + u64(verts) * 12;
+        uvOff[m] = (binLen + 3) & ~3ull;
+        binLen = uvOff[m] + u64(verts) * 8;
+        idxOff[m] = (binLen + 3) & ~3ull;
+        binLen = idxOff[m] + u64(tris) * 3 * 4;
+    }
+    // o JSON (montado por strings — 72 meshes não cabem num snprintf)
+    std::string j = "{\"asset\":{\"version\":\"2.0\"},\"scene\":0,"
+                    "\"scenes\":[{\"nodes\":[";
+    for (u32 m = 0; m < nMeshes; ++m) {
+        if (m) j += ",";
+        j += std::to_string(m);
+    }
+    j += "]}],\"nodes\":[";
+    for (u32 m = 0; m < nMeshes; ++m) {
+        if (m) j += ",";
+        j += "{\"mesh\":" + std::to_string(m) + ",\"name\":\"c" +
+             std::to_string(m) + "\"}";
+    }
+    j += "],\"meshes\":[";
+    for (u32 m = 0; m < nMeshes; ++m) {
+        if (m) j += ",";
+        j += "{\"primitives\":[{\"attributes\":{\"POSITION\":" +
+             std::to_string(u64(m) * 4) + ",\"NORMAL\":" +
+             std::to_string(u64(m) * 4 + 1) + ",\"TEXCOORD_0\":" +
+             std::to_string(u64(m) * 4 + 2) + "},\"indices\":" +
+             std::to_string(u64(m) * 4 + 3) + ",\"material\":0,"
+             "\"mode\":4}]}";
+    }
+    j += "],\"materials\":[{\"name\":\"cidade\"}],\"accessors\":[";
+    for (u32 m = 0; m < nMeshes; ++m) {
+        if (m) j += ",";
+        j += "{\"bufferView\":" + std::to_string(m * 4) +
+             ",\"componentType\":5126,\"count\":" + std::to_string(verts) +
+             ",\"type\":\"VEC3\"}";
+        j += ",{\"bufferView\":" + std::to_string(m * 4 + 1) +
+             ",\"componentType\":5126,\"count\":" + std::to_string(verts) +
+             ",\"type\":\"VEC3\"}";
+        j += ",{\"bufferView\":" + std::to_string(m * 4 + 2) +
+             ",\"componentType\":5126,\"count\":" + std::to_string(verts) +
+             ",\"type\":\"VEC2\"}";
+        j += ",{\"bufferView\":" + std::to_string(m * 4 + 3) +
+             ",\"componentType\":5125,\"count\":" +
+             std::to_string(u64(tris) * 3) + ",\"type\":\"SCALAR\"}";
+    }
+    j += "],\"bufferViews\":[";
+    for (u32 m = 0; m < nMeshes; ++m) {
+        if (m) j += ",";
+        j += "{\"buffer\":0,\"byteOffset\":" + std::to_string(posOff[m]) +
+             ",\"byteLength\":" + std::to_string(u64(verts) * 12) + "}";
+        j += ",{\"buffer\":0,\"byteOffset\":" + std::to_string(nrmOff[m]) +
+             ",\"byteLength\":" + std::to_string(u64(verts) * 12) + "}";
+        j += ",{\"buffer\":0,\"byteOffset\":" + std::to_string(uvOff[m]) +
+             ",\"byteLength\":" + std::to_string(u64(verts) * 8) + "}";
+        j += ",{\"buffer\":0,\"byteOffset\":" + std::to_string(idxOff[m]) +
+             ",\"byteLength\":" + std::to_string(u64(tris) * 3 * 4) + "}";
+    }
+    j += "],\"buffers\":[{\"byteLength\":" + std::to_string(binLen) + "}]}";
+    while (j.size() % 4 != 0) j += ' ';
+
+    std::vector<u8> bin(static_cast<size_t>(binLen), 0);
+    auto putF32 = [&bin](u64 off, f32 v) {
+        u32 raw;
+        std::memcpy(&raw, &v, 4);
+        for (int b = 0; b < 4; ++b) {
+            bin[static_cast<size_t>(off) + b] =
+                static_cast<u8>((raw >> (8 * b)) & 0xFF);
+        }
+    };
+    for (u32 m = 0; m < nMeshes; ++m) {
+        for (u32 i = 0; i < verts; ++i) {
+            putF32(posOff[m] + u64(i) * 12 + 0,
+                   -1.0f + 2.0f * ((i + m) % 997u) / 996.0f);
+            putF32(posOff[m] + u64(i) * 12 + 4,
+                   -1.0f + 2.0f * ((i + m) % 991u) / 990.0f);
+            putF32(posOff[m] + u64(i) * 12 + 8,
+                   -1.0f + 2.0f * ((i + m) % 983u) / 982.0f);
+            putF32(nrmOff[m] + u64(i) * 12 + 0, 0.0f);
+            putF32(nrmOff[m] + u64(i) * 12 + 4, 1.0f);
+            putF32(nrmOff[m] + u64(i) * 12 + 8, 0.0f);
+            putF32(uvOff[m] + u64(i) * 8 + 0, (i % 251u) / 250.0f);
+            putF32(uvOff[m] + u64(i) * 8 + 4, (i % 241u) / 240.0f);
+        }
+        for (u32 t = 0; t < tris; ++t) {
+            for (int k = 0; k < 3; ++k) {
+                const u32 v = (t * 3u + static_cast<u32>(k)) % verts;
+                const u64 off = idxOff[m] + (u64(t) * 3 + k) * 4;
+                bin[static_cast<size_t>(off) + 0] = static_cast<u8>(v & 0xFF);
+                bin[static_cast<size_t>(off) + 1] =
+                    static_cast<u8>((v >> 8) & 0xFF);
+                bin[static_cast<size_t>(off) + 2] =
+                    static_cast<u8>((v >> 16) & 0xFF);
+                bin[static_cast<size_t>(off) + 3] =
+                    static_cast<u8>((v >> 24) & 0xFF);
+            }
+        }
+    }
+    // o container GLB (o MESMO empacotamento dos outros geradores)
+    std::vector<u8> glb;
+    auto u32push = [&glb](u32 v) {
+        glb.push_back(static_cast<u8>(v & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 8) & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 16) & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 24) & 0xFF));
+    };
+    u32push(0x46546C67u);
+    u32push(2);
+    u32push(static_cast<u32>(12 + 8 + j.size() + 8 + bin.size()));
+    u32push(static_cast<u32>(j.size()));
+    u32push(0x4E4F534Au);
+    glb.insert(glb.end(), j.begin(), j.end());
+    u32push(static_cast<u32>(bin.size()));
+    u32push(0x004E4942u);
+    glb.insert(glb.end(), bin.begin(), bin.end());
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) return false;
+    const bool ok = std::fwrite(glb.data(), 1, glb.size(), f) == glb.size();
+    std::fclose(f);
+    return ok;
+}
+
 // o registo da activity (o papel do VvActivity.onCreate) + o CACHE DIR da
 // app (o papel do getCacheDir — a ponte jniCacheDir resolve no fallback)
 void javaRegistersWithCacheDir() {
@@ -7400,6 +7536,113 @@ int main() {
         g_blockLogIntervalSecs = 1.0f;   // repõe o ritmo do device
         glstub::fb::enabled = false;     // e o ambiente do stub
         glstub::fb::resetState();
+    }
+
+    // ======================================================================
+    // FASE 21 — 0.10-M HOTFIX SAF-STREAM: o city (72 primitivas, 0 skins)
+    // importa sob content://. A CAUSA do dono: o gate «raiz content://»
+    // desligava o streaming nos projetos SAF → o import caía no legado do
+    // teto de 65535 (o city de 130 MB morria aí). A CURA aferida AQUI no
+    // caminho do device: (21.1) o import sob SAF COMPLETA com a fonte = o
+    // FD DO BRIDGE (bridgeOpenFd → SafStorage::openReadFd → mapFd64 — mmap
+    // POR FD, sem caminho) e a verificação bit a bit; a mensagem do teto
+    // NÃO EXISTE; (21.2) o provider que RECUSA o mmap (o pipe da sonda —
+    // a recusa REAL do SO) degrada para pread de RANGES — VERDE na mesma,
+    // nunca o legado; (21.3) a fase de ranges TEM LINHA PRÓPRIA (os 5395
+    // ms do dono passam a ter dono) e a tabela do city abre (72+ blocos).
+    // ======================================================================
+    fase("FASE 21 — hotfix SAF-STREAM: o city importa sob content://");
+    {
+        resetEngineForHarness();
+        javaRegistersWithCacheDir();
+        const std::string src = "/tmp/goni_fase21_city.glb";
+        check(buildGlbFase21(72, 1000, 600, src),
+              "21.0 fixture criada (GLB 72 primitivas x 1000 verts = 72k)");
+
+        // ---- 21.1 o import sob content:// (o gate MORREU) ---------------
+        passo("21.1 o city importa sob SAF: o fd do bridge, mmap por fd");
+        {
+            FakeSafIo io;   // o provider content:// (o modelo da suíte)
+            SafStorage saf(&io, "content://tree/primary:GOneVV/cidade");
+            convert::Output out;
+            convert::Stats stats;
+            std::string err;
+            const bool ok = convert::importFile(src, "city.glb", saf,
+                                                nullptr, out, stats, err,
+                                                nullptr, nullptr);
+            if (!ok) {
+                std::printf("    [21.1-ERR] import falhou: %.200s\n",
+                            err.c_str());
+            }
+            check(ok && out.meshes.size() == 1 &&
+                      out.meshes[0] == "assets/city.gmesh",
+                  "21.1 o import sob content:// COMPLETA (o streaming ATIVA "
+                  "em SAF — o gate morreu)");
+            check(logHas("fonte=mmap-fd"),
+                  "21.1 a fonte: o FD DO BRIDGE (mmap POR fd, sem caminho)");
+            check(logHas("o fd do bridge"),
+                  "21.1 o log nomeia o fd do bridge (a evidência do hotfix)");
+            check(logCount("verificado=1") >= 1,
+                  "21.1 o round-trip verificado bit a bit");
+            check(logCount("excede 65535") == 0,
+                  "21.1 a mensagem do teto NÃO EXISTE no log (o 65535 deixou "
+                  "de ser visível ao não-skinned)");
+            check(logHas("gmesh: fase=parse ms="),
+                  "21.1 a fase de parse cobre SÓ o JSON");
+            check(logHas("gmesh: fase=ranges ms="),
+                  "21.1 a fase de ranges TEM LINHA PRÓPRIA (os 5395 ms do "
+                  "dono com dono)");
+            io.flushWrites();
+            std::vector<u8> gmesh;
+            check(saf.readBytes("assets/city.gmesh", gmesh),
+                  "21.1 o .gmesh final relê pelo provider");
+            GMeshV3Meta meta;
+            std::vector<GMeshV3Block> blocks;
+            std::vector<std::string> mats;
+            std::string merr;
+            check(readGMeshV3Meta(gmesh.data(), gmesh.size(), meta, blocks,
+                                  mats, merr),
+                  "21.1 a tabela do city abre (o leitor de produção)");
+            check(meta.vertexCount >= 72000,
+                  "21.1 72 000 verts pela TABELA (o legado morria no teto)");
+            check(meta.blockCount >= 72,
+                  "21.1 72+ blocos (1 por primitiva — o corte em blocos)");
+            check(meta.materialCount == 1 && !mats.empty() &&
+                      mats[0] == "cidade",
+                  "21.1 o material da cidade na tabela");
+        }
+
+        // ---- 21.2 o provider que RECUSA o mmap do fd (o pipe) -----------
+        passo("21.2 o provider recusa o mmap: VERDE por pread de RANGES");
+        {
+            FakeSafIo io;
+            io.refuseMmapFds = true;   // a sonda do mmap leva o PIPE
+            SafStorage saf(&io, "content://tree/primary:GOneVV/cidade2");
+            convert::Output out;
+            convert::Stats stats;
+            std::string err;
+            const bool ok = convert::importFile(src, "city.glb", saf,
+                                                nullptr, out, stats, err,
+                                                nullptr, nullptr);
+            if (!ok) {
+                std::printf("    [21.2-ERR] import falhou: %.200s\n",
+                            err.c_str());
+            }
+            check(ok,
+                  "21.2 o import VERDE pela DEGRADAÇÃO (o mmap recusado → "
+                  "pread de ranges — NUNCA o legado)");
+            check(logHas("a degradar para pread de RANGES"),
+                  "21.2 a degradação honesta LOGADA (o provider recusou o "
+                  "mapa)");
+            check(logHas("fonte=ranges"),
+                  "21.2 a fonte: RANGES pelo storage (readBytesAt)");
+            check(logCount("excede 65535") == 0,
+                  "21.2 nunca desceu ao legado (o teto invisível)");
+            check(logHas("ranges do corte: 72"),
+                  "21.2 UMA carga de span por tarefa (72 — o pico é o span "
+                  "em voo, nunca o modelo)");
+        }
+        std::remove(src.c_str());
     }
 
     // ---- sumário -----------------------------------------------------------

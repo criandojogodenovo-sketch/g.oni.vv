@@ -242,3 +242,41 @@ nunca os dados); o export OBJ anda pela tabela com o stream por blocos
 métricas REAIS por frame (blocos totais/visíveis/desenhados, dc, verts)
 vivem no HUD (o chip «FPS · TICs · bl n/m») e no `engine.log`
 (throttled); a sentinela R-040 vigia os orçamentos para sempre.
+
+### A fonte do streaming sob QUALQUER storage (0.10-M HOTFIX SAF-STREAM)
+
+O conversor streaming lê o buffer 0 por uma CASCATA que NUNCA desce ao
+legado por causa do armazenamento (a causa do «city»: o gate
+`content://` desligava o streaming nos projetos SAF e o import caía no
+merge do teto de 65.535):
+
+1. **mmap por CAMINHO** do ficheiro real (`mapFile64`) — o de sempre
+   (browser/Fs; raiz POSIX ou virtual com fonte real);
+2. **mmap POR FD** — o mmap não precisa de caminho: sob SAF (raiz
+   `content://`) a fonte oficial é o FD DO IRMÃO JÁ COPIADO em `source/`
+   (`ProjectStorage::openReadFd` → `SafStorage` resolve o URI e abre pelo
+   bridge `bridgeOpenFd`; `fileapi::mapFd64` mapeia o descritor direto —
+   no device é o `ContentResolver.openFileDescriptor` + `detachFd`);
+3. **pread de RANGES** — o degradado honesto quando o provider recusa o
+   mapa (FUSE sem mmap, streams): cada TAREFA do corte carrega o seu
+   SPAN por `readBytesAt` (o pico de RAM é o maior span em voo — a mesma
+   fórmula do mmap, sem a higiene MADV em heap); a verificação re-carrega
+   o que precisa. O log nomeia a escolha: `asset: v3 fonte=<mmap-caminho
+   |mmap-fd|ranges|data-uri>`.
+
+O 4.º canto: um `.gltf` SEM ficheiro de buffer (`data:` URI) também
+streama — o `parseGltf` exporta os bytes embutidos (`streamOwnedBin`) e o
+conversor corre sobre eles. Com isto, o teto de 65.535 deixa de ser
+visível a um modelo SEM pele em qualquer storage; a PELE acima do teto
+falha com a mensagem clara «pele ainda não suportada no streaming
+(BACKLOG)» (o merge é o que preserva joints/weights — ver BACKLOG.md).
+
+A linha contrato de tempos ganhou a fase que faltava: `gmesh:
+fase=parse` cobre SÓ o JSON; o SCAN DE RANGES do bin (as imagens que
+materializam os seus bufferViews durante o parse) loga `gmesh:
+fase=ranges ms=<n>` EM LINHA PRÓPRIA — os 5.395 ms que o dono viu no
+parse do city passam a ter dono. A sentinela R-041 (mapFd64: bytes
+exatos / recusa real do SO / fd do Fs) e a FASE 21 do c33_virtual (o
+city de 72 primitivas importando sob `content://` pelo fd do bridge, e
+o provider que recusa o mapa ficando VERDE pelos ranges) vigiam o
+hotfix para sempre.

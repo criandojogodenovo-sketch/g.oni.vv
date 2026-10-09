@@ -45,6 +45,14 @@ public:
     // 0.10-M (PASSO 3B): o range real (openFd + lseek + read exatos)
     bool readBytesAt(const std::string& relPath, u64 offset, size_t len,
                      std::vector<u8>& out) const override;
+
+    // 0.10-M (SAF-STREAM) — O FD DO BRIDGE: resolve o URI e abre por
+    // io_->openFd(uri, "r") — no device é o VvActivity.bridgeOpenFd
+    // (ContentResolver.openFileDescriptor + detachFd). O conversor
+    // streaming mapeia POR FD (mmap sem caminho); o chamador FECHA.
+    bool openReadFd(const std::string& relPath, int* outFd,
+                    std::string& err) override;
+
     // 0.8.10 — escrita STREAMING real (fd SAF aberto até ao close)
     int  openWriteStream(const std::string& relPath) override;
     bool writeStreamChunk(int handle, const void* data, size_t n) override;

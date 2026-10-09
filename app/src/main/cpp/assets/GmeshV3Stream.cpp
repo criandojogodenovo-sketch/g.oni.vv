@@ -205,11 +205,14 @@ void dropRange(const u8* base, u64 off, u64 len) {
 // o corte de UMA primitiva (os vértices leem-se do mmap pelo índice).
 // Cada bloco FECHADO vai ao sink (o corte appenda ao temp; a verificação
 // compara com o ficheiro final) — a RAM segura o remap + UM bloco.
-// `drop` (higiene de RSS): a marca de água do span já percorrido.
+// `drop` (higiene de RSS): a marca de água do span já percorrido — SÓ
+// quando `canDrop` (mmap de ficheiro; em HEAP o madvise ZERA páginas de
+// vizinhos — a lição F3 do PASSO 3 — e o caminho dos ranges NUNCA dropa).
 struct TaskCtx {
     AccInfo pos, nrm, uv, idx;
     bool hasNrm = false, hasUv = false, hasIdx = false;
     const u8* base = nullptr;
+    bool canDrop = true;   // false = base é HEAP (ranges/data:) — sem madvise
     Mat4 world = Mat4::identity();
     Mat4 worldRot = Mat4::identity();
     u32 materialOrder = 0;
@@ -219,6 +222,11 @@ struct TaskCtx {
     u64 trisTotal = 0;
     u64 spanOff = 0;    // o span da fonte desta tarefa (higiene de RSS)
     u64 spanLen = 0;
+    // 0.10-M (SAF-STREAM) — o span carregado por RANGES (o degradado):
+    // o buffer vive AQUI e `base` aponta para ele menos o spanOff (a
+    // aritmética base+offset do corte fica INTACTA). Carregado ANTES do
+    // corte, largado DEPOIS (o pico = o span da tarefa em voo).
+    std::vector<u8> spanBuf;
     std::string material;
 };
 
@@ -363,14 +371,17 @@ bool cutPrimitive(TaskCtx* c, std::atomic<u64>& trisDone, u64 trisTotal,
             }
             // a higiene de RSS dentro de tarefas grandes: o span da
             // fonte já percorrido larga-se (páginas limpas — reler é
-            // barato; o pico fica nos blocos, não no ficheiro)
-            const u64 curOff =
-                c->pos.offset + (t * 3) * c->pos.stride;
-            if (curOff > c->spanOff + dropped + kDropWindow &&
-                curOff + kDropWindow < c->spanOff + c->spanLen) {
-                const u64 upto = curOff - c->spanOff;
-                dropRange(c->base, c->spanOff + dropped, upto - dropped);
-                dropped = upto;
+            // barato; o pico fica nos blocos, não no ficheiro) — SÓ no
+            // mmap (c->canDrop): em HEAP o madvise é o crash F3
+            if (c->canDrop) {
+                const u64 curOff =
+                    c->pos.offset + (t * 3) * c->pos.stride;
+                if (curOff > c->spanOff + dropped + kDropWindow &&
+                    curOff + kDropWindow < c->spanOff + c->spanLen) {
+                    const u64 upto = curOff - c->spanOff;
+                    dropRange(c->base, c->spanOff + dropped, upto - dropped);
+                    dropped = upto;
+                }
             }
         }
     }
@@ -379,8 +390,11 @@ bool cutPrimitive(TaskCtx* c, std::atomic<u64>& trisDone, u64 trisTotal,
                                         std::memory_order_relaxed);
     (void)done;
     if (!flush()) return false;
-    // a tarefa inteira passou — o span dela larga-se TODO
-    dropRange(c->base, c->spanOff, c->spanLen);
+    // a tarefa inteira passou — o span dela larga-se TODO (só no mmap:
+    // o caminho dos ranges/data: larga o BUFFER, não as páginas)
+    if (c->canDrop) {
+        dropRange(c->base, c->spanOff, c->spanLen);
+    }
     return true;
 }
 
@@ -579,11 +593,17 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
                      const std::string& stem, ProjectStorage& st,
                      convert::Output& out, convert::Stats& stats,
                      V3StreamResult& result, std::string& err,
-                     bool (*onProgress)(void*, u64, u64), void* user) {
+                     bool (*onProgress)(void*, u64, u64), void* user,
+                     const V3RangeSource* ranges, bool binDroppable) {
     result = V3StreamResult{};
-    if (bin == nullptr || binLen == 0) {
-        err = "o conversor streaming precisa do buffer mmapado (o chamador "
-              "mmapa o GLB/irmão .bin — sem ficheiro real não há streaming)";
+    // 0.10-M (SAF-STREAM) — UMA fonte chega: o mmap (caminho OU fd — o
+    // ponteiro `bin`) OU os RANGES (o degradado: o fd recusou o mapa /
+    // os bytes vêm do JSON). Sem NENHUMA não há streaming.
+    const bool haveMap = bin != nullptr && binLen > 0;
+    const bool haveRanges = ranges != nullptr && ranges->fn != nullptr;
+    if (!haveMap && !haveRanges) {
+        err = "o conversor streaming precisa de UMA fonte do bin (mmap por "
+              "caminho/fd OU ranges — o chamador resolve a cascata)";
         return false;
     }
     if (model.primRefs.empty()) {
@@ -757,8 +777,12 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
         }
         t.materialOrder = matOrder[t.material];
         // o BASE do buffer (os offsets dos accessors são daqui) — o mmap
-        // do chamador, já no início do chunk BIN (GLB) ou do irmão .bin
-        t.base = bin;
+        // do chamador, já no início do chunk BIN (GLB) ou do irmão .bin.
+        // No caminho dos RANGES o base fica NULL até o worker carregar o
+        // span da tarefa (base = spanBuf.data() - spanOff — a MESMA
+        // aritmética, sem tocar no corte)
+        t.base = haveMap ? bin : nullptr;
+        t.canDrop = haveMap && binDroppable;   // heap (ranges/data:) NUNCA
         // a transformação MUNDO do nó (a MESMA composição do merge
         // antigo — a verificação reavalia EXATAMENTE esta multiplicação)
         if (r.node >= 0 &&
@@ -906,12 +930,53 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
                    "host não deu núcleos úteis; mais lento, correto)");
     }
     const auto tCut = std::chrono::steady_clock::now();
+    // 0.10-M (SAF-STREAM) — o carregador de SPANS do caminho dos ranges:
+    // uma chamada por tarefa (o pico = o span em voo). O MUTEX serializa
+    // as chamadas entre workers — o readBytesAt do SAF abre fd NOVO por
+    // range (o resolveFile caches mapas internos: sem lock seria corrida);
+    // o I/O fica serializado mas o CORTE (CPU) continua paralelo.
+    std::mutex rangeMu;
+    u64 rangeLoads = 0;   // a evidência: UMA carga por tarefa (o log diz)
+    // (o erro sai por PARÂMETRO — `err` (o out-param partilhado) só se
+    // escreve no fim, na thread do chamador: zero corridas)
+    auto loadSpan = [&](TaskCtx& t, std::string& outErr) -> bool {
+        if (!haveRanges || !t.spanBuf.empty() || t.spanLen == 0) {
+            return true;   // mmap (nada a carregar) ou já carregado
+        }
+        std::vector<u8> buf;
+        std::string rerr;
+        if (!ranges->fn(ranges->user, t.spanOff, t.spanLen, buf, rerr) ||
+            buf.size() != t.spanLen) {
+            outErr = "o range [" + std::to_string(t.spanOff) + ", " +
+                     std::to_string(t.spanOff + t.spanLen) +
+                     ") da tarefa " + std::to_string(t.taskIdx) +
+                     " não carregou (o storage é o limite): " +
+                     (rerr.empty() ? "range curto" : rerr);
+            return false;
+        }
+        t.spanBuf = std::move(buf);
+        t.base = t.spanBuf.data() - t.spanOff;   // a MESMA aritmética
+        ++rangeLoads;
+        return true;
+    };
     auto worker = [&]() {
         try {
             for (;;) {
                 if (canceled.load(std::memory_order_relaxed)) return;
                 const size_t i = nextTask.fetch_add(1);
                 if (i >= tasks.size()) return;
+                if (haveRanges) {
+                    std::string lerr;
+                    {
+                        std::lock_guard<std::mutex> lk(rangeMu);
+                        if (!loadSpan(tasks[i], lerr)) {
+                            std::lock_guard<std::mutex> lk2(resMu);
+                            if (workerErr.empty()) workerErr = lerr;
+                            canceled.store(true, std::memory_order_relaxed);
+                            return;
+                        }
+                    }
+                }
                 CutCtx cut{&temp, &recs[i]};
                 std::string werr;
                 if (!cutPrimitive(&tasks[i], trisDone, totalTris, canceled,
@@ -921,6 +986,12 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
                     if (workerErr.empty()) workerErr = werr;
                     canceled.store(true, std::memory_order_relaxed);
                     return;
+                }
+                // o span carregado LARGA-SE aqui (o pico = 1 span por
+                // tarefa em voo; a verificação RE-CARREGA o que precisa)
+                if (!tasks[i].spanBuf.empty()) {
+                    tasks[i].spanBuf.clear();
+                    tasks[i].spanBuf.shrink_to_fit();
                 }
             }
         } catch (const std::bad_alloc&) {
@@ -955,6 +1026,13 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
     result.cutMs = std::chrono::duration<double, std::milli>(
                        std::chrono::steady_clock::now() - tCut)
                        .count();
+    // 0.10-M (SAF-STREAM) — a evidência do caminho dos ranges: UMA carga
+    // por tarefa (a linha que o relatório do hotfix cita)
+    if (haveRanges) {
+        elog::info("asset: v3 ranges do corte: %llu carga(s) de span — "
+                   "o pico é o MAIOR span em voo (nunca o modelo)",
+                   static_cast<unsigned long long>(rangeLoads));
+    }
 
     // ---- 4. o ASSEMBLY (ordena material→nó→bloco; escreve o final pela
     // escrita streaming do storage — a ESQUELETO v3 partilhada com o
@@ -1235,10 +1313,20 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
             dev = "as contagens do ficheiro final divergem do assembly";
         }
         if (dev.empty()) {
-            // o re-corte POR TAREFA (a MESMA rotina; o sink compara)
+            // o re-corte POR TAREFA (a MESMA rotina; o sink compara).
+            // 0.10-M (SAF-STREAM): no caminho dos ranges o span RE-CARREGA
+            // (o corte largou-o — o pico continua = 1 span em voo) e volta
+            // a largar-se no fim
             std::atomic<u64> verDone{0};
             for (size_t tsk = 0; tsk < tasks.size(); ++tsk) {
                 if (taskStart[tsk] == 0xFFFFFFFFu) continue;
+                if (haveRanges) {
+                    std::string lerr;
+                    if (!loadSpan(tasks[tsk], lerr)) {
+                        dev = lerr;   // o range da verificação não carregou
+                        break;
+                    }
+                }
                 VerifyCtx vc;
                 vc.map = vbase;
                 vc.droppable = vmap != nullptr;
@@ -1262,8 +1350,15 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
                     }
                     break;
                 }
-                // o span da fonte desta tarefa larga-se (higiene de RSS)
-                dropRange(bin, tasks[tsk].spanOff, tasks[tsk].spanLen);
+                // o span da fonte desta tarefa larga-se (higiene de RSS —
+                // SÓ no mmap; o caminho dos ranges larga o BUFFER)
+                if (bin != nullptr && binDroppable) {
+                    dropRange(bin, tasks[tsk].spanOff, tasks[tsk].spanLen);
+                }
+                if (!tasks[tsk].spanBuf.empty()) {
+                    tasks[tsk].spanBuf.clear();
+                    tasks[tsk].spanBuf.shrink_to_fit();
+                }
             }
         }
     }

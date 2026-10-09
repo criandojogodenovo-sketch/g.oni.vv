@@ -343,6 +343,35 @@ bool SafStorage::readBytesAt(const std::string& relPath, u64 offset,
     return true;
 }
 
+bool SafStorage::openReadFd(const std::string& relPath, int* outFd,
+                            std::string& err) {
+    // 0.10-M (SAF-STREAM) — O FD DO BRIDGE, p/ o mmap POR FD do conversor
+    // streaming: resolveFile → io_->openFd(uri, "r"). No device o
+    // JniSafIo chama o VvActivity.bridgeOpenFd (ContentResolver
+    // .openFileDescriptor + detachFd) — o fd é PROPRIEDADE do chamador
+    // (o mmap segura a própria referência; quem abriu FECHA o fd).
+    if (outFd != nullptr) {
+        *outFd = -1;
+    }
+    if (!io_ || !validRelPath(relPath)) {
+        err = "caminho inválido: " + relPath;
+        return false;
+    }
+    std::string uri;
+    if (!resolveFile(relPath, false, uri, err)) {
+        elog::error("saf: openReadFd %s — %s", relPath.c_str(), err.c_str());
+        return false;
+    }
+    int fd = -1;
+    if (!io_->openFd(uri, "r", &fd, err)) {
+        elog::error("saf: openReadFd open(r) %s — %s", relPath.c_str(),
+                    err.c_str());
+        return false;
+    }
+    *outFd = fd;
+    return true;
+}
+
 bool SafStorage::listDir(const std::string& relDir,
                          std::vector<std::string>& outFiles) const {
     outFiles.clear();

@@ -38,6 +38,21 @@ struct FakeSafIo final : public vv::storage::SafIo {
     // F5.4-hotfix: injeção de falha — list/resolveChild falham (provider
     // recusou a query). O SafStorage tem de responder Unknown/nunca criar.
     bool failQueries = false;
+    // 0.10-M (SAF-STREAM) — o PROVIDER QUE RECUSA O MMAP: o PRIMEIRO fd
+    // de leitura do import (a sonda do mmap do bin em source/) é um PIPE
+    // — o mapFd64 recusa-o de VERDADE (o fstat do FIFO dá size 0: a range
+    // pedida não cabe — o MESMO veredito do ENODEV/EOPNOTSUPP real do
+    // ::mmap num FUSE-sem-mmap). O conversor degrada para pread de RANGES:
+    // as REABERTURAS (o readBytesAt abre fd NOVO por range) servem
+    // memfds seekable — exatamente o caso real FUSE-sem-mmap (o mapa é
+    // recusado, as leituras com lseek FUNCIONAM). Não existe fd
+    // seekable+com-conteúdo+não-mapeável construível no CI sem mount FUSE
+    // real — o pipe dá a recusa REAL do SO, não um hook da engine.
+    // `mmapRefusalsLeft` desconta por CHAMADA (não por doc): a sonda do
+    // bin é a 1.ª leitura do import — o readback do verify (assets/) e o
+    // resto seguem memfds.
+    bool refuseMmapFds = false;
+    int mmapRefusalsLeft = 1;
 
     FakeSafIo() {
         Node root;
@@ -184,12 +199,51 @@ struct FakeSafIo final : public vv::storage::SafIo {
             err = "é pasta: " + docUri;
             return false;
         }
-        const int fd = ::memfd_create("vv-fake-saf", 0);
-        if (fd < 0) {
-            err = "memfd_create falhou";
-            return false;
-        }
         if (std::string(mode) == "r") {
+            // 0.10-M (SAF-STREAM) — o provider REAL persiste ao FECHAR o
+            // fd de escrita e o PRÓXIMO fd de leitura serve os bytes
+            // persistidos. O modelo antigo só materializava no
+            // flushWrites() EXPLÍCITO do teste — o import do streaming lê
+            // source/<nome> DENTRO do próprio importFile (a cópia acabou
+            // de fechar o fd de escrita): materializa-se o PENDENTE deste
+            // doc ANTES de servir (o flushWrites global fica às suítes
+            // que o usam — nenhuma vê diferença, os delas já foi feito)
+            for (auto w = openWrites.begin(); w != openWrites.end();) {
+                if (w->second != docUri) {
+                    ++w;
+                    continue;
+                }
+                std::string data;
+                char buf[4096];
+                ::lseek(w->first, 0, SEEK_SET);
+                ssize_t r;
+                while ((r = ::read(w->first, buf, sizeof(buf))) > 0) {
+                    data.append(buf, static_cast<size_t>(r));
+                }
+                it->second.data = data;
+                ::close(w->first);
+                w = openWrites.erase(w);
+            }
+            // o knob da REGRESSÃO: a sonda do mmap (a 1.ª leitura do
+            // import) leva um PIPE — o mapFd64 recusa-o de verdade (o
+            // fstat do FIFO dá size 0). O conteúdo é IRRELEVANTE: a engine
+            // só tenta o MAPA com este fd (falha) e fecha-o — os RANGES
+            // reabrem (openFd de novo) e aí vêm os memfds seekable
+            // (escrever bytes no pipe bloquearia >64 KB sem leitor)
+            if (refuseMmapFds && mmapRefusalsLeft > 0) {
+                --mmapRefusalsLeft;
+                int pfd[2];
+                if (::pipe(pfd) == 0) {
+                    ::close(pfd[1]);   // EOF imediato — ninguém lê isto
+                    *outFd = pfd[0];
+                    return true;
+                }
+            }
+            const int fd = ::memfd_create("vv-fake-saf", 0);
+            if (fd < 0) {
+                err = "memfd_create falhou";
+                return false;
+            }
             if (!it->second.data.empty()) {
                 ::write(fd, it->second.data.data(), it->second.data.size());
             }
@@ -203,8 +257,13 @@ struct FakeSafIo final : public vv::storage::SafIo {
         // o original sobrevive para o flushWrites() ler o que foi escrito.
         // Sem o dup, o kernel reutilizava o nº do fd fechado e a 2ª escrita
         // sobrepunha a 1ª no mapa (fd=3 para sempre).
-        openWrites[fd] = docUri;
-        *outFd = ::dup(fd);
+        const int wfd = ::memfd_create("vv-fake-saf", 0);
+        if (wfd < 0) {
+            err = "memfd_create falhou";
+            return false;
+        }
+        openWrites[wfd] = docUri;
+        *outFd = ::dup(wfd);
         return true;
     }
 

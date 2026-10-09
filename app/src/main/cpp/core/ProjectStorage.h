@@ -101,6 +101,19 @@ public:
     // implementações REAIS (Fs/Saf/Fake) sobrepõem com a leitura exata.
     virtual bool readBytesAt(const std::string& relPath, u64 offset,
                              size_t len, std::vector<u8>& out) const;
+
+    // 0.10-M (SAF-STREAM) — O FD DE LEITURA do conversor streaming: o mmap
+    // não precisa de CAMINHO, precisa de DESCRITOR — e sob SAF o descritor
+    // vem do bridge (VvActivity.bridgeOpenFd → ContentResolver
+    // .openFileDescriptor → detachFd). Contrato:
+    //   true  = *outFd é um fd ABERTO em leitura (propriedade do CHAMADOR,
+    //           que o FECHA — o mapping, se houver, segura a própria ref);
+    //   false = sem fd (err diz a causa honesta).
+    // Implementações: FsStorage = ::open do caminho real; SafStorage =
+    // o fd do bridge. DEFAULT: false — o storage sem fds (o caminho de
+    // sempre / os RANGES do readBytesAt cobrem o resto).
+    virtual bool openReadFd(const std::string& relPath, int* outFd,
+                            std::string& err);
 };
 
 // teto do DEFAULT acumulador de escrita streaming (implementações reais

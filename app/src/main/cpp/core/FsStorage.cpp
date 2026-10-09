@@ -10,6 +10,7 @@
 #include <map>
 #include <cstring>
 #include <dirent.h>
+#include <fcntl.h>   // 0.10-M (SAF-STREAM): ::open do openReadFd
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -234,6 +235,29 @@ bool FsStorage::readBytesAt(const std::string& relPath, u64 offset,
     }
     std::fclose(f);
     return ok;
+}
+
+bool FsStorage::openReadFd(const std::string& relPath, int* outFd,
+                           std::string& err) {
+    // 0.10-M (SAF-STREAM) — o fd REAL do caminho (::open) p/ o mmap POR FD
+    // do conversor streaming. Sob Fs o mmap por CAMINHO chega lá primeiro
+    // (o de sempre); este é o 2.º degrau da cascata quando o caminho
+    // recusa o mapa (FUSE sem mmap) e a cópia em source/ tem fd próprio.
+    if (outFd != nullptr) {
+        *outFd = -1;
+    }
+    const std::string real = joinRelPath(root_, relPath);
+    if (real.empty()) {
+        err = "caminho inválido: " + relPath;
+        return false;
+    }
+    const int fd = ::open(real.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        err = "open(" + real + ") falhou — errno " + std::to_string(errno);
+        return false;
+    }
+    *outFd = fd;   // propriedade do chamador (quem abriu, fecha)
+    return true;
 }
 
 bool FsStorage::listDir(const std::string& relDir,

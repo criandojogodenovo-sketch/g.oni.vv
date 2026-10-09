@@ -34,6 +34,45 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.10.4c — 0.10-M HOTFIX SAF-STREAM: o city importa sob SAF (o gate content:// morreu)
+
+**O que o dono reportou** (entre o PASSO 4 e o PASSO 5): sob SAF o
+streaming do 0.10-M não ativa — o mmap era por CAMINHO POSIX e o gate
+`content://` recusava o streaming nos projetos SAF; o import caía no
+legado de mesh única, que ainda tem o teto de 65535 vértices. O city
+(130 MB bin, 72 primitivas, 0 skins) morria aí.
+
+- **O mmap por FD** (`fileapi::mapFd64` NOVO): o mmap não precisa de
+  caminho — sob SAF a fonte oficial do streaming é o FD DO IRMÃO já
+  copiado em `source/` (`ProjectStorage::openReadFd` → no device é o
+  `bridgeOpenFd` do `ContentResolver.openFileDescriptor`), mapeado
+  DIRETAMENTE pelo descritor.
+- **O pread de RANGES** (o degradado honesto): se o provider recusar o
+  mmap (FUSE sem mmap, streams), cada TAREFA do corte carrega o seu SPAN
+  por `readBytesAt` — o pico de RAM é o maior span em voo, nunca o
+  modelo; NUNCA desce ao legado por causa do storage. A higiene
+  MADV_DONTNEED fica DESLIGADA em heap (a lição F3 do PASSO 3).
+- **O data: URI também streama**: o `parseGltf` exporta o buffer 0
+  embutido no JSON e o conversor corre sobre os bytes — o teto de 65535
+  deixa de ser visível a um modelo SEM pele em QUALQUER storage; a pele
+  acima do teto falha com «pele ainda não suportada no streaming
+  (BACKLOG)» (a entrada vive no BACKLOG.md).
+- **`fase=parse` cobre SÓ o JSON**: o scan de ranges do bin (as imagens)
+  loga `gmesh: fase=ranges ms=<n>` em linha própria — os 5395 ms que o
+  dono viu no parse do city passam a ter dono.
+- **Provas**: `safstream_*` no test_gmeshv3stream (+7 TESTs: o city sob
+  content:// pelo fd do bridge; o provider que recusa o mmap VERDE por
+  ranges; a cena >65535 sob FakeStorage; o conversor puro por ranges; o
+  data-uri; a fase=ranges; a pele grande com a mensagem do BACKLOG) ·
+  R-041 no test_sentinels (o mapFd64: bytes exatos / recusa REAL do SO
+  com o pipe / o fd do Fs) · c33 FASE 21 (+18 checks, 706→724: o city de
+  72 primitivas importa sob content:// com verificado=1 e ZERO «excede
+  65535»; o provider que recusa fica VERDE pelos ranges) · mutações
+  M-S1/M-S2/M-S3 (o gate content:// reposto → vermelho; a degradação
+  morta → vermelho; o mapFd64 nunca chamado → vermelho) · versionCode
+  **59**. Relatório: `docs/RELATORIO-0.10-M-HOTFIX-SAF-STREAM.md` ·
+  **PÁRA — o PASSO 5 (texturas ASTC) continua à espera do OK do dono.**
+
 ## 0.10.4 — 0.10-M PASSO 4: O RENDER POR BLOCOS (o «fail de 203 MB» morreu)
 
 **O que o dono reportou** (C33, vc 57): o modelo de 203 MB importa

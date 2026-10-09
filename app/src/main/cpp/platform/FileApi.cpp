@@ -607,4 +607,57 @@ void unmapFile64(void* ptr, unsigned long long mappedLen) {
     }
 }
 
+// 0.10-M (SAF-STREAM) — o mmap POR FD (sem caminho): o fd do bridge
+// (bridgeOpenFd) mapeia-se aqui. O MESMO alinhamento/validação do
+// mapFile64; o fd NÃO se fecha (quem abriu fecha — o mapping segura a
+// referência). Um fd não mapeável (pipe/socket de um provider de cloud,
+// FUSE sem mmap) recusa AQUI com o errno no log — a recusa é REAL do SO.
+void* mapFd64(int fd, unsigned long long offset, unsigned long long len,
+              unsigned long long* mappedLen) {
+    if (mappedLen != nullptr) *mappedLen = 0;
+    if (fd < 0 || len == 0) {
+        elog::warn("fileapi: mapFd64 falhou — args inválidos (fd=%d len=%llu)",
+                   fd, static_cast<unsigned long long>(len));
+        return nullptr;
+    }
+    struct stat st;
+    if (::fstat(fd, &st) != 0) {
+        elog::warn("fileapi: mapFd64: fstat falhou (fd=%d) — errno=%d (%s)",
+                   fd, errno, std::strerror(errno));
+        return nullptr;
+    }
+    const long long page = ::sysconf(_SC_PAGESIZE);
+    const unsigned long long pageOff =
+        (offset / static_cast<unsigned long long>(page)) *
+        static_cast<unsigned long long>(page);
+    const unsigned long long within = offset - pageOff;
+    const unsigned long long mapLen = len + within;
+    // a validação honesta (a MESMA do mapFile64): a range PEDIDA tem de
+    // viver no ficheiro. Um FIFO/pipe tem st_size=0 — recusa AQUI (é o
+    // caso do provider de cloud que entrega stream: o mesmo veredito que
+    // o ENODEV do mmap, dito mais cedo)
+    if (offset > static_cast<unsigned long long>(st.st_size) ||
+        len > static_cast<unsigned long long>(st.st_size) - offset) {
+        elog::warn("fileapi: mapFd64: range [%llu, %llu) fora do fd=%d "
+                   "(%lld B — pipe/stream ou ficheiro curto)",
+                   static_cast<unsigned long long>(offset),
+                   static_cast<unsigned long long>(offset + len), fd,
+                   static_cast<long long>(st.st_size));
+        return nullptr;
+    }
+    void* base = ::mmap(nullptr, mapLen, PROT_READ, MAP_PRIVATE, fd,
+                        static_cast<off_t>(pageOff));
+    if (base == MAP_FAILED) {
+        // A RECUSA DO PROVIDER: pipes (ENODEV), sockets, alguns FUSE
+        // (EOPNOTSUPP/EPERM) — o chamador degrada para pread de RANGES
+        elog::warn("fileapi: mapFd64: mmap falhou no fd=%d (%llu B) — "
+                   "errno=%d (%s)",
+                   fd, static_cast<unsigned long long>(mapLen), errno,
+                   std::strerror(errno));
+        return nullptr;
+    }
+    if (mappedLen != nullptr) *mappedLen = mapLen;
+    return static_cast<char*>(base) + within;
+}
+
 } // namespace vv::fileapi

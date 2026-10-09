@@ -132,5 +132,18 @@ bool ProjectStorage::readBytesAt(const std::string& relPath, u64 offset,
     return true;
 }
 
+bool ProjectStorage::openReadFd(const std::string&, int* outFd,
+                                std::string& err) {
+    // 0.10-M (SAF-STREAM) — default honesto: este storage não entrega fds
+    // de leitura (o readBytesAt é a via). Quem precisa do mmap por fd usa
+    // as implementações que o suportam (Fs/Saf).
+    if (outFd != nullptr) {
+        *outFd = -1;
+    }
+    err = "este armazenamento não fornece fds de leitura (o caminho/ranges "
+          "cobrem)";
+    return false;
+}
+
 } // namespace vv
 

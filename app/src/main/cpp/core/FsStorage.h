@@ -46,6 +46,11 @@ public:
     bool readBytesAt(const std::string& relPath, u64 offset, size_t len,
                      std::vector<u8>& out) const override;
 
+    // 0.10-M (SAF-STREAM): o fd REAL (::open) p/ o mmap POR FD do streaming
+    // (o 2.º degrau da cascata — o mmap por caminho é o de sempre)
+    bool openReadFd(const std::string& relPath, int* outFd,
+                    std::string& err) override;
+
 private:
     std::string root_;
 };

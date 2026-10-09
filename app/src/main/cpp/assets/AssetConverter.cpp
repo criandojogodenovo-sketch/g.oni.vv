@@ -348,6 +348,11 @@ struct FileRangeCtx {
     FILE* f = nullptr;
     u64 base = 0;      // offset do INÍCIO do buffer no ficheiro
     const char* debugName = "";
+    // 0.10-M (SAF-STREAM) — o TEMPO do scan de ranges do bin: a fase=parse
+    // da linha contrato cobre SÓ o JSON; o tempo das leituras de ranges
+    // (as imagens que materializam os seus bufferViews — os 5395 ms do
+    // dono) sai EM LINHA PRÓPRIA «gmesh: fase=ranges ms=<n>» logo depois
+    double rangeMs = 0.0;
 };
 bool fileRangeLoad(void* user, u32 bufferIndex, u64 offset, u64 len,
                    std::vector<u8>& outv) {
@@ -362,6 +367,7 @@ bool fileRangeLoad(void* user, u32 bufferIndex, u64 offset, u64 len,
     if (!ctx || !ctx->f || len > kMaxRangeBytes) {
         return false;
     }
+    const auto tRange = std::chrono::steady_clock::now();
     outv.resize(static_cast<size_t>(len));
     if (std::fseek(ctx->f, static_cast<long>(ctx->base + offset), SEEK_SET) != 0) {
         return false;
@@ -370,7 +376,12 @@ bool fileRangeLoad(void* user, u32 bufferIndex, u64 offset, u64 len,
     // «verifica o valor devolvido pelo read») — um range curto (fim de
     // ficheiro perdido, último bloco parcial cortado) é FALHA, nunca bytes
     // a menos disfarçados
-    return std::fread(outv.data(), 1, outv.size(), ctx->f) == outv.size();
+    const bool ok =
+        std::fread(outv.data(), 1, outv.size(), ctx->f) == outv.size();
+    ctx->rangeMs += std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - tRange)
+                        .count();
+    return ok;
 }
 
 // lê um range EXATO de uma FILE* (header/JSON)
@@ -662,16 +673,22 @@ bool convertPng(const std::string& srcAbs, ProjectStorage& st,
 // dono) e `deferUri` (o URI do buffer externo de um .gltf que fica DEFERIDO
 // — o scene.bin de 212 MB lido por ranges, nunca inteiro em RAM).
 // 0.10-M (PASSO 3): `mmapBinPath` — o ficheiro REAL do buffer 0 (o GLB
-// próprio, ou o irmão .bin deferido) que o conversor STREAMING mmapa;
-// null = sem streaming (SAF) → o caminho de sempre. onProgress/user
-// alimentam as fases corte/assembly/verificação (cancelamento incluído);
-// o caminho de sempre ignora-os.
+// próprio, ou o irmão .bin deferido) que o conversor STREAMING mmapa.
+// 0.10-M (SAF-STREAM): `binRel` — o caminho NO STORAGE da CÓPIA em
+// source/ do buffer 0 ("source/<nome>.glb" ou "source/<irmão>.bin"):
+// sob SAF (raiz content://) é a FONTE OFICIAL do streaming — o FD do
+// bridge (bridgeOpenFd via SafStorage::openReadFd) mapeado POR FD; se o
+// provider recusar o mmap, RANGES (readBytesAt — o pread que já existia).
+// NUNCA o legado por causa do storage. onProgress/user alimentam as fases
+// corte/assembly/verificação (cancelamento incluído); o caminho de sempre
+// ignora-os.
 bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
                        u64 binBase, u64 binLen, u64 fileBytes,
                        const char* deferUri,
                        const GltfBufferResolver& resolver,
                        const char* siblingImageDir,
                        const char* mmapBinPath,
+                       const char* binRel,
                        ProjectStorage& st, const std::string& stem,
                        TexturePipeline* pipeline, Output& out, Stats& stats,
                        std::string& err,
@@ -688,31 +705,69 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
     loader.fileBytes = fileBytes;
     loader.deferUri = deferUri ? deferUri : "";
 
-    // 0.10-M (PASSO 3): com ficheiro REAL do buffer 0, o parse corre em
-    // modo STREAMING (primRefs SEM geometria materializada) e a geometria
-    // vai pelo conversor streaming (mmap → corte por material em blocos →
-    // assembly → verificação bit a bit; o pico de RAM é a maior primitiva
-    // + um bloco por worker — nunca o modelo). Sem ficheiro real (SAF) OU
-    // modelo com PELE (o streaming não tem skin — decisão do PASSO 3), o
-    // caminho é o de sempre: parse integral + merge + writeGMesh (v3).
-    bool canStream = mmapBinPath != nullptr && binFile != nullptr &&
-                     !st.root().empty() &&
-                     st.root().rfind("content://", 0) != 0;
+    // 0.10-M (SAF-STREAM) — O STREAMING SOB QUALQUER STORAGE. A recusa
+    // «raiz content://» MORREU (era a causa do city: o gate desligava o
+    // streaming nos projetos SAF e o import caía no legado com o teto de
+    // 65535 — o temp e o verify JÁ funcionavam sob content:// desde os
+    // fixes F2/F4 do PASSO 3; só a FONTE exigia caminho POSIX). A fonte
+    // do bin, em CASCATA (nunca o legado por causa do storage):
+    //   1. mmap por CAMINHO do ficheiro real (o de sempre — browser/Fs);
+    //   2. o FD DO IRMÃO já copiado em source/ (SAF — o fd do bridge
+    //      bridgeOpenFd, mmap POR FD: o mmap não precisa de caminho);
+    //   3. RANGES pelo storage (a degradação honesta: o provider recusou
+    //      o mmap do fd — o pread de ranges do readBytesAt, que JÁ existia).
+    // E o 4.º canto: um .gltf SEM ficheiro de buffer (data: URI) também
+    // streama — o parse exporta os bytes embutidos e o conversor corre
+    // sobre ELES (o teto de 65535 não-skinned deixa de ser visível).
+    const bool safRoot = st.root().rfind("content://", 0) == 0;
+    // pré-scan barato: o buffer 0 é um data: URI? (o owned sai do parse)
+    bool dataUriBin0 = false;
+    {
+        Json scan;
+        if (Json::parse(json, jsonLen, scan) &&
+            scan.type == Json::Type::Object) {
+            if (const Json* jb = scan.find("buffers");
+                jb && jb->type == Json::Type::Array &&
+                !jb->items.empty()) {
+                if (const Json* u = jb->items[0].find("uri");
+                    u && u->type == Json::Type::String &&
+                    u->string.compare(0, 5, "data:") == 0) {
+                    dataUriBin0 = true;
+                }
+            }
+        }
+    }
+    const bool hasBinSource =
+        (binFile != nullptr &&
+         (mmapBinPath != nullptr || (binRel != nullptr && *binRel))) ||
+        dataUriBin0;
+    bool canStream = !st.root().empty() && hasBinSource;
     GltfModel model;
+    // 0.10-M (SAF-STREAM) — os bytes EMBUTIDOS do buffer 0 (data: URI):
+    // o parse exporta-os no modo streaming e o conversor corre sobre ELES
+    std::vector<u8> ownedBin;
     // 0.10-M (PASSO 3B) — o tempo da fase de PARSE (a linha contrato
     // «gmesh: fase=parse ms=<n>»: os ~2 min do dragão / ~3,5 min do modelo
     // de 203 MB do dono passam a ter dono por fase — parse/corte/assembly/
-    // verificação aqui, load/render no runtime)
+    // verificação aqui, load/render no runtime).
+    // 0.10-M (SAF-STREAM): o parse cobre SÓ O JSON — o tempo do SCAN DE
+    // RANGES do bin (as imagens que materializam os seus bufferViews — os
+    // 5395 ms do dono) sai na linha PRÓPRIA «gmesh: fase=ranges ms=<n>»
     const auto tParse = std::chrono::steady_clock::now();
     if (!parseGltf(json, jsonLen, {}, resolver, model, err,
-                   binFile ? &loader : nullptr, canStream)) {
+                   binFile ? &loader : nullptr, canStream,
+                   canStream ? &ownedBin : nullptr)) {
         err = "glTF invalido: " + err;
         return false;
     }
     elog::info("gmesh: fase=parse ms=%.0f",
                std::chrono::duration<double, std::milli>(
                    std::chrono::steady_clock::now() - tParse)
-                   .count());
+                       .count() -
+                   (binFile ? ctx.rangeMs : 0.0));
+    elog::info("gmesh: fase=ranges ms=%.0f%s", binFile ? ctx.rangeMs : 0.0,
+               binFile ? " (o scan de ranges do bin — as imagens)"
+                       : " (sem ranges — o bin não é ficheiro)");
     if (canStream && !model.skins.empty()) {
         // a pele preserva joints/weights no MERGE — o caminho de sempre
         // (o re-parse é o JSON outra vez: pequeno, honesto, no log)
@@ -720,6 +775,7 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
                    "(o merge preserva a pele; o streaming não tem skin)",
                    static_cast<u32>(model.skins.size()));
         model = GltfModel{};
+        ownedBin.clear();   // os bytes data-uri voltam ao parse de sempre
         if (!parseGltf(json, jsonLen, {}, resolver, model, err,
                        binFile ? &loader : nullptr, false)) {
             err = "glTF invalido: " + err;
@@ -734,8 +790,9 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
             "buffer — o RESTO do modelo entrou; causas acima no log)",
             model.primsDropped);
     }
-    // NÃO-const: a degradação do mmap abaixo pode desligá-lo (o mesmo
-    // padrão da pele acima — o re-parse é o JSON outra vez)
+    // NÃO-const: a degradação da fonte abaixo pode desligá-lo — mas
+    // NUNCA para o LEGADO por causa do STORAGE (0.10-M SAF-STREAM: a
+    // cascata desce até aos RANGES; o legado só por PELE ou sem fonte)
     bool streamed =
         canStream && !model.primRefs.empty() && model.meshes.empty();
     if (model.meshes.empty() && model.primRefs.empty()) {
@@ -773,47 +830,149 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
                    static_cast<u32>(model.skins.size()));
     }
     if (streamed) {
-        // ---- 0.10-M (PASSO 3) · A GEOMETRIA VAI PELO CONVERSOR
-        // STREAMING: mmap da fonte → corte por material em blocos
-        // (pool de núcleos−1, transformações dos nós baked) → assembly
-        // com a esqueleto v3 PARTILHADA com o writeGMesh → verificação
-        // POR TRIÂNGULO bit a bit. O modelo NUNCA está inteiro em RAM.
-        // mapFile64 fala `unsigned long long` (FileApi) — acompanha
+        // ---- 0.10-M (PASSO 3 + SAF-STREAM) · A GEOMETRIA VAI PELO CONVERSOR
+        // STREAMING: a FONTE do bin em CASCATA → corte por material em
+        // blocos (pool de núcleos−1, transformações dos nós baked) →
+        // assembly com a esqueleto v3 PARTILHADA com o writeGMesh →
+        // verificação POR TRIÂNGULO bit a bit. O modelo NUNCA está
+        // inteiro em RAM. A fonte (por ordem, NUNCA o legado por storage):
+        //   mmap-caminho (o de sempre) → mmap-fd (o fd do bridge, sob
+        //   content:// é a fonte OFICIAL — o irmão copiado em source/) →
+        //   ranges (o pread degradado — o provider recusou o mmap).
+        // O 4.º canto: os bytes data: URI do próprio JSON (o ownedBin).
+        // mapFile64/mapFd64 falam `unsigned long long` (FileApi) — acompanha
         unsigned long long mapLen = 0;
-        u8* map = static_cast<u8*>(
-            fileapi::mapFile64(mmapBinPath, 0, fileBytes, &mapLen));
-        if (map == nullptr) {
-            // A DEGRADAÇÃO HONESTA (o diagnóstico do dono no C33, item
-            // b): o mmap é o caminho RÁPIDO, não um requisito — se o SO
-            // o recusa, o import degrada para o caminho de sempre (parse
-            // integral + merge + writeGMesh, o modelo inteiro em RAM:
-            // mais lento e mais gordo, MAS CORRETO — e o teto 65535 do
-            // merge morre com a causa REAL no erro, nunca silencioso).
-            elog::warn("asset: o mmap da fonte falhou: %s (%s) — a "
-                       "degradar para o caminho de sempre (o modelo "
-                       "inteiro em RAM)",
-                       mmapBinPath, fileapi::errnoText().c_str());
-            model = GltfModel{};
-            if (!parseGltf(json, jsonLen, {}, resolver, model, err,
-                           binFile ? &loader : nullptr, false)) {
-                err = "glTF invalido: " + err;
+        u8* map = nullptr;          // o mmap ativo (caminho OU fd)
+        const u8* bin = nullptr;    // a base do buffer 0 (o início do BIN)
+        u64 binLenEff = binLen;
+        bool binDroppable = true;   // heap (data-uri/ranges) NUNCA droppa
+        V3RangeSource rangeSrc;     // o degradado (pread de ranges)
+        struct RangeCtx {
+            ProjectStorage* st;
+            const char* rel;
+            u64 base;
+        } rctx{&st, (binRel != nullptr ? binRel : ""), binBase};
+        auto rangeFn = [](void* user, u64 off, u64 len,
+                          std::vector<u8>& outv, std::string& rerr) -> bool {
+            auto* c = static_cast<RangeCtx*>(user);
+            if (!c->st->readBytesAt(c->rel, c->base + off,
+                                    static_cast<size_t>(len), outv)) {
+                rerr = "o range [" + std::to_string(c->base + off) + ", " +
+                       std::to_string(c->base + off + len) + ") de '" +
+                       c->rel + "' não leu pelo storage";
                 return false;
             }
-            canStream = false;
-            streamed = false;
+            return outv.size() == len;
+        };
+        // (a) os bytes EMBUTIDOS: o parse exportou o buffer 0 data: URI
+        if (!ownedBin.empty()) {
+            bin = ownedBin.data();
+            binLenEff = ownedBin.size();
+            binDroppable = false;
+            elog::info("asset: v3 fonte=data-uri (%llu B embutidos no JSON "
+                       "— o buffer 0 sem ficheiro, SEM teto)",
+                       static_cast<unsigned long long>(binLenEff));
+        } else if (safRoot) {
+            // (b) SAF: o FD DO IRMÃO JÁ COPIADO EM source/ (o item 2 do
+            // dono) — o fd do bridge (bridgeOpenFd), mmap POR FD. Se o
+            // provider recusar o mapa: RANGES (nunca o legado)
+            int fd = -1;
+            std::string ferr;
+            bool fdAbriu = false;
+            if (st.openReadFd(binRel, &fd, ferr)) {
+                fdAbriu = true;
+                map = static_cast<u8*>(
+                    fileapi::mapFd64(fd, binBase, binLen, &mapLen));
+                ::close(fd);   // o mapping segura a própria referência
+                if (map != nullptr) {
+                    bin = map;
+                    elog::info("asset: v3 fonte=mmap-fd '%s' (o fd do "
+                               "bridge — mmap por fd, SEM caminho)", binRel);
+                }
+            } else {
+                elog::warn("asset: o fd de '%s' não abriu (%s) — a degradar "
+                           "para pread de RANGES pelo storage (nunca o "
+                           "legado)",
+                           binRel, ferr.c_str());
+            }
+            if (map == nullptr) {
+                if (fdAbriu) {
+                    elog::warn("asset: o mmap do fd de '%s' FALHOU (%s) — o "
+                               "provider recusou o mapa: a degradar para "
+                               "pread de RANGES (o degradado honesto; "
+                               "nunca o legado)",
+                               binRel, fileapi::errnoText().c_str());
+                }
+                rangeSrc.fn = rangeFn;
+                rangeSrc.user = &rctx;
+                elog::info("asset: v3 fonte=ranges '%s' (pread de ranges "
+                           "pelo storage — o pico é o span da tarefa)",
+                           binRel);
+            }
         } else {
+            // (c) o de sempre: mmap por CAMINHO da fonte real; se o SO
+            // recusar (FUSE sem mmap), desce ao FD da cópia em source/ —
+            // e depois aos RANGES. NUNCA o legado por causa disto.
+            map = static_cast<u8*>(
+                fileapi::mapFile64(mmapBinPath, 0, fileBytes, &mapLen));
+            if (map != nullptr) {
+                bin = map + binBase;
+                elog::info("asset: v3 fonte=mmap-caminho '%s' (o de sempre)",
+                           mmapBinPath);
+            } else {
+                elog::warn("asset: o mmap da fonte '%s' FALHOU (%s) — a "
+                           "tentar o FD da cópia em source/ (nunca o "
+                           "legado)",
+                           mmapBinPath, fileapi::errnoText().c_str());
+            }
+            if (map == nullptr && binRel != nullptr && *binRel) {
+                int fd = -1;
+                std::string ferr;
+                if (st.openReadFd(binRel, &fd, ferr)) {
+                    map = static_cast<u8*>(
+                        fileapi::mapFd64(fd, binBase, binLen, &mapLen));
+                    ::close(fd);
+                    if (map != nullptr) {
+                        bin = map;
+                        elog::info("asset: v3 fonte=mmap-fd '%s' (a cópia em "
+                                   "source/ — mmap por fd)", binRel);
+                    }
+                }
+                if (map == nullptr) {
+                    rangeSrc.fn = rangeFn;
+                    rangeSrc.user = &rctx;
+                    elog::info("asset: v3 fonte=ranges '%s' (pread de ranges "
+                               "pelo storage — o degradado honesto)", binRel);
+                }
+            }
+            if (map == nullptr && rangeSrc.fn == nullptr) {
+                // sem NENHUMA fonte (o mmap falhou E não há cópia em
+                // source/): o erro honesto — não o legado às cegas
+                err = std::string("o mmap da fonte '") + mmapBinPath +
+                      "' falhou e a cópia em source/ não dá fd/ranges — o "
+                      "storage é o limite, não o modelo";
+                return false;
+            }
+        }
+        {
         Json doc;
         if (!Json::parse(json, jsonLen, doc) ||
             doc.type != Json::Type::Object) {
-            fileapi::unmapFile64(map, mapLen);
+            if (map != nullptr) {
+                fileapi::unmapFile64(map, mapLen);
+            }
             err = "glTF: o documento não relê (JSON inválido)";
             return false;
         }
         V3StreamResult res;
         const bool ok =
-            convertGltfToV3(model, doc, map + binBase, binLen, fileBytes,
-                            stem, st, out, stats, res, err, onProgress, user);
-        fileapi::unmapFile64(map, mapLen);
+            convertGltfToV3(model, doc, bin, binLenEff, fileBytes,
+                            stem, st, out, stats, res, err, onProgress, user,
+                            rangeSrc.fn != nullptr ? &rangeSrc : nullptr,
+                            binDroppable);
+        if (map != nullptr) {
+            fileapi::unmapFile64(map, mapLen);
+        }
         if (!ok) {
             return false;
         }
@@ -892,11 +1051,27 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
             const MeshData& src = model.meshes[static_cast<size_t>(nd.mesh)];
             const u16 base = static_cast<u16>(merged.vertices.size());
             if (merged.vertices.size() + src.vertices.size() > 65535) {
-                err = "glTF: o modelo fundido excede 65535 vértices "
-                      "(o caminho de mesh única — SAF sem ficheiro real, "
-                      "ou modelo com pele). O conversor streaming do "
-                      "0.10-M trata os ficheiros reais SEM teto; importa "
-                      "o modelo como GLB/GLTF com armazenamento real";
+                // 0.10-M (SAF-STREAM) — a REDE DE SEGURANÇA do legado: com
+                // o streaming sob QUALQUER storage (+ o canto data-uri), o
+                // teto de 65535 SÓ é alcançável por PELE (o streaming não
+                // tem skin — a mensagem clara que o dono pediu) ou pela
+                // geometria num buffer que não o 0. NUNCA culpa o storage.
+                if (!model.skins.empty() || merged.skinned() ||
+                    !src.skinJoints.empty()) {
+                    err = "pele ainda não suportada no streaming (BACKLOG) "
+                          "— o modelo com pele passa o teto de 65535 "
+                          "vértices do caminho de mesh única (o merge é o "
+                          "que preserva joints/weights; a pele em blocos "
+                          "está no BACKLOG do 0.10-M)";
+                } else {
+                    err = "o modelo passa o teto de 65535 vértices do "
+                          "caminho de mesh única SEM pele e SEM falta de "
+                          "armazenamento (o streaming corre em QUALQUER "
+                          "storage desde o SAF-STREAM) — a causa provável: "
+                          "geometria num buffer que não o buffer 0 "
+                          "(multi-buffer .gltf); exporta com UM .bin único "
+                          "ou GLB (causa detalhada no engine.log)";
+                }
                 return false;
             }
             for (const Vertex& pv : src.vertices) {
@@ -1162,7 +1337,10 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
 
 // GLB em ficheiro: header + chunks por fread; JSON inteiro; BIN deferred
 // 0.10-M (PASSO 3): onProgress/user alimentam o conversor streaming
-bool convertGlbFile(const std::string& srcAbs, ProjectStorage& st,
+// 0.10-M (SAF-STREAM): `srcRel` — o rel da CÓPIA em source/ (o fd do
+// bridge sob SAF lê-A; o 2.º degrau da cascata nas outras raízes)
+bool convertGlbFile(const std::string& srcAbs, const std::string& srcRel,
+                    ProjectStorage& st,
                     const std::string& stem, TexturePipeline* pipeline,
                     Output& out, Stats& stats, std::string& err,
                     bool (*onProgress)(void*, u64, u64) = nullptr,
@@ -1282,6 +1460,7 @@ bool convertGlbFile(const std::string& srcAbs, ProjectStorage& st,
                                json.size(), f, binBase, binLen, fileBytes,
                                nullptr,
                                GltfBufferResolver{}, nullptr, srcAbs.c_str(),
+                               srcRel.c_str(),
                                st, stem, pipeline, out, stats, err,
                                onProgress, user);
     } while (false);
@@ -1299,7 +1478,11 @@ bool convertGlbFile(const std::string& srcAbs, ProjectStorage& st,
 // source/) resolve igualmente contra source/.
 // 0.10-M (PASSO 3): o irmão .bin DEFERIDO é também o mmap do conversor
 // streaming (o caminho só é streaming quando ele existe).
-bool convertGltfFile(const std::string& srcAbs, ProjectStorage& st,
+// 0.10-M (SAF-STREAM): `srcRel` (a cópia do .gltf em source/) não é a
+// fonte do bin — a fonte é o IRMÃO copiado para "source/<rel>" pelo
+// copyGltfSiblings: o binRel aponta-LHE (o fd do bridge sob SAF).
+bool convertGltfFile(const std::string& srcAbs, const std::string& srcRel,
+                     ProjectStorage& st,
                      const std::string& stem, TexturePipeline* pipeline,
                      Output& out, Stats& stats, std::string& err,
                      bool (*onProgress)(void*, u64, u64) = nullptr,
@@ -1394,6 +1577,8 @@ bool convertGltfFile(const std::string& srcAbs, ProjectStorage& st,
     u64 binFileBytes = 0;
     std::string binUri;
     std::string binPathAbs;   // 0.10-M: o caminho do irmão (o mmap do streaming)
+    std::string binRel;       // 0.10-M (SAF-STREAM): "source/<rel>" do irmão
+                              // (o fd do bridge sob content://)
     {
         Json scan;
         if (Json::parse(reinterpret_cast<const char*>(json.data()),
@@ -1430,6 +1615,7 @@ bool convertGltfFile(const std::string& srcAbs, ProjectStorage& st,
                     fileapi::fileSize(path, binFileBytes);
                     binLenExt = binFileBytes;
                     binPathAbs = path;   // o mmap do streaming (se houver)
+                    binRel = "source/" + rel;   // a cópia do copyGltfSiblings
                     elog::info(
                         "import: buffer externo '%s' DEFERIDO (%llu B em "
                         "disco — ranges, sem o ler inteiro)",
@@ -1444,7 +1630,8 @@ bool convertGltfFile(const std::string& srcAbs, ProjectStorage& st,
         reinterpret_cast<const char*>(json.data()), json.size(), binF, 0,
         binLenExt, binFileBytes, binUri.empty() ? nullptr : binUri.c_str(),
         resolver, srcDir.c_str(),
-        binF ? binPathAbs.c_str() : nullptr, st, stem, pipeline, out,
+        binF ? binPathAbs.c_str() : nullptr,
+        binF ? binRel.c_str() : nullptr, st, stem, pipeline, out,
         stats, err, onProgress, user);
     if (binF) {
         std::fclose(binF);
@@ -1547,18 +1734,21 @@ bool importFile(const std::string& srcAbs, const std::string& srcNameIn,
         }
     }
 
-    // 2) CONVERSÃO pela extensão (lê da FONTE original — mesma bytes)
+    // 2) CONVERSÃO pela extensão (lê da FONTE original — mesma bytes;
+    // sob SAF a fonte DO BIN do streaming é a CÓPIA em source/ pelo FD do
+    // bridge — o item 2 do dono: o mmap/pread do scene.bin usa o fd do
+    // irmão já copiado em source/)
     st.makeDirs("assets");
     bool ok = false;
     if (ext == "obj") {
         ok = convertObjStream(srcAbs, st, stem, out, stats, err, nullptr,
                               nullptr);
     } else if (ext == "glb") {
-        ok = convertGlbFile(srcAbs, st, stem, pipeline, out, stats, err,
-                            onProgress, user);
+        ok = convertGlbFile(srcAbs, srcRel, st, stem, pipeline, out, stats,
+                            err, onProgress, user);
     } else if (ext == "gltf") {
-        ok = convertGltfFile(srcAbs, st, stem, pipeline, out, stats, err,
-                             onProgress, user);
+        ok = convertGltfFile(srcAbs, srcRel, st, stem, pipeline, out, stats,
+                             err, onProgress, user);
     } else if (ext == "png") {
         ok = convertPng(srcAbs, st, stem, pipeline, out, stats, err);
     } else {
