@@ -172,6 +172,13 @@ ficheiros) · gmesh-docs (símbolos e âncoras batem — §EXPANDIR-NÓS novo)
 (main.cpp compila contra os stubs) · release-identity versionCode 60
 (declarado no RELATORIO-0.9.6 §14).
 
+**O CI do push 3c6a7d5 (run 37970116508): VERDE À PRIMEIRA** — Testes do
+core (Linux) ✓ · C33 virtual (dispositivo + sentinelas + gates) ✓ com a
+FASE 22 a 743/743 · APK release arm64 assinado ✓ (versionCode 60) ·
+verify-entry-symbols ✓. O artefacto é o
+`goni-vv-0.9.6-release-signed` — o APK que o dono instala para o
+sign-off dos 3 itens do §8.
+
 ## 6. O que NÃO foi tocado
 
 O caminho FUNDIDO inteiro (o `convertGltfToV3` só ganhou um param com
