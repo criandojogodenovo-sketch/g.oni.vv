@@ -281,3 +281,15 @@ Para o sign-off no aparelho (vc 58), o dono verifica:
 O PASSO 4 fecha aqui: commit próprio, CI a correr, gates verdes, provas
 coladas. **PÁRA** — o PASSO 5 (texturas ASTC) e o PASSO 6 (a prova de
 mesa no C33) ficam à espera do OK explícito do dono.
+
+---
+
+## §13 · A NOTA DO CI (o run que fecha o passo)
+
+O push **2cc7dd0** (commit próprio do PASSO 4) correu verde À PRIMEIRA:
+run **37889113662** — `Testes do core (Linux)`: **success** ·
+`C33 virtual (dispositivo + sentinelas + gates)`: **success** (706/706) ·
+`APK release arm64 (assinado via secrets)`: **success** ·
+`verify-entry-symbols`: **success**. Artefacto publicado:
+**goni-vv-0.9.6-release-signed** (versionCode **58** — o APK que o dono
+instala para o sign-off do §11).
