@@ -151,8 +151,13 @@ build.gradle) · docs-lint 70 ficheiros · gmesh-docs 21 âncoras ·
 check_main (paridade main.cpp/StorageBridge.cpp no hospedeiro) ·
 test_core 0 falhas · c33_virtual 724/724 (FASE 21: +18 checks, 706→724) ·
 release-identity versionCode 59 (declarado no RELATORIO-0.9.6 §14) · APK
-arm64 assinado `goni-vv-0.9.6-release-signed`. A nota do CI do run entra
-aqui após o push.
+arm64 assinado `goni-vv-0.9.6-release-signed`.
+
+**A NOTA DO CI (colada)**: o push `74580bd` → run **37911218605** —
+**VERDE À PRIMEIRA**: Testes do core (Linux) ✓ · C33 virtual
+(dispositivo + sentinelas + gates) ✓ · APK release arm64 assinado ✓ ·
+verify-entry-symbols ✓ · artefacto **goni-vv-0.9.6-release-signed**
+(versionCode 59) — o APK que o dono instala para o re-sign-off do §8.
 
 ## 7. O que NÃO foi tocado
 
