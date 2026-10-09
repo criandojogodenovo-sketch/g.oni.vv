@@ -537,6 +537,146 @@ bool buildGlbFase21(u32 nMeshes, u32 verts, u32 tris,
     return ok;
 }
 
+// 0.10-M (EXT · FASE 22) — o CITY do dono ESPALHADO: as 72 primitivas em
+// FAIXAS de x (10 em 10, a faixa do meio no 0) com NOMES «c<i>». O pin do
+// dono é «city scene expandido = 72 TICs com nomes, culling por TIC
+// verde» — o culling POR TIC só é AFERÍVEL com peças SEPARADAS no espaço
+// (o buildGlbFase21 põe todas sobrepostas em [-1,1]).
+bool buildGlbFase22(u32 nMeshes, u32 verts, u32 tris,
+                    const std::string& path) {
+    std::vector<u64> posOff(nMeshes), nrmOff(nMeshes), uvOff(nMeshes),
+        idxOff(nMeshes);
+    u64 binLen = 0;
+    for (u32 m = 0; m < nMeshes; ++m) {
+        posOff[m] = (binLen + 3) & ~3ull;
+        binLen = posOff[m] + u64(verts) * 12;
+        nrmOff[m] = (binLen + 3) & ~3ull;
+        binLen = nrmOff[m] + u64(verts) * 12;
+        uvOff[m] = (binLen + 3) & ~3ull;
+        binLen = uvOff[m] + u64(verts) * 8;
+        idxOff[m] = (binLen + 3) & ~3ull;
+        binLen = idxOff[m] + u64(tris) * 3 * 4;
+    }
+    std::string j = "{\"asset\":{\"version\":\"2.0\"},\"scene\":0,"
+                    "\"scenes\":[{\"nodes\":[";
+    for (u32 m = 0; m < nMeshes; ++m) {
+        if (m) j += ",";
+        j += std::to_string(m);
+    }
+    j += "]}],\"nodes\":[";
+    for (u32 m = 0; m < nMeshes; ++m) {
+        if (m) j += ",";
+        // a FAIXA do nó (o meio no 0): é a transformação que o expand põe
+        // no Transform3D do TIC e o que separa as peças p/ o culling
+        char tr[96];
+        std::snprintf(tr, sizeof(tr), "\"translation\":[%.1f,0,0]",
+                      (double)(static_cast<i64>(m) -
+                               static_cast<i64>(nMeshes / 2)) * 10.0);
+        j += "{\"mesh\":" + std::to_string(m) + ",\"name\":\"c" +
+             std::to_string(m) + "\"," + tr + "}";
+    }
+    j += "],\"meshes\":[";
+    for (u32 m = 0; m < nMeshes; ++m) {
+        if (m) j += ",";
+        j += "{\"primitives\":[{\"attributes\":{\"POSITION\":" +
+             std::to_string(u64(m) * 4) + ",\"NORMAL\":" +
+             std::to_string(u64(m) * 4 + 1) + ",\"TEXCOORD_0\":" +
+             std::to_string(u64(m) * 4 + 2) + "},\"indices\":" +
+             std::to_string(u64(m) * 4 + 3) + ",\"material\":0,"
+             "\"mode\":4}]}";
+    }
+    j += "],\"materials\":[{\"name\":\"cidade\"}],\"accessors\":[";
+    for (u32 m = 0; m < nMeshes; ++m) {
+        if (m) j += ",";
+        j += "{\"bufferView\":" + std::to_string(m * 4) +
+             ",\"componentType\":5126,\"count\":" + std::to_string(verts) +
+             ",\"type\":\"VEC3\"}";
+        j += ",{\"bufferView\":" + std::to_string(m * 4 + 1) +
+             ",\"componentType\":5126,\"count\":" + std::to_string(verts) +
+             ",\"type\":\"VEC3\"}";
+        j += ",{\"bufferView\":" + std::to_string(m * 4 + 2) +
+             ",\"componentType\":5126,\"count\":" + std::to_string(verts) +
+             ",\"type\":\"VEC2\"}";
+        j += ",{\"bufferView\":" + std::to_string(m * 4 + 3) +
+             ",\"componentType\":5125,\"count\":" +
+             std::to_string(u64(tris) * 3) + ",\"type\":\"SCALAR\"}";
+    }
+    j += "],\"bufferViews\":[";
+    for (u32 m = 0; m < nMeshes; ++m) {
+        if (m) j += ",";
+        j += "{\"buffer\":0,\"byteOffset\":" + std::to_string(posOff[m]) +
+             ",\"byteLength\":" + std::to_string(u64(verts) * 12) + "}";
+        j += ",{\"buffer\":0,\"byteOffset\":" + std::to_string(nrmOff[m]) +
+             ",\"byteLength\":" + std::to_string(u64(verts) * 12) + "}";
+        j += ",{\"buffer\":0,\"byteOffset\":" + std::to_string(uvOff[m]) +
+             ",\"byteLength\":" + std::to_string(u64(verts) * 8) + "}";
+        j += ",{\"buffer\":0,\"byteOffset\":" + std::to_string(idxOff[m]) +
+             ",\"byteLength\":" + std::to_string(u64(tris) * 3 * 4) + "}";
+    }
+    j += "],\"buffers\":[{\"byteLength\":" + std::to_string(binLen) + "}]}";
+    while (j.size() % 4 != 0) j += ' ';
+    std::vector<u8> bin(static_cast<size_t>(binLen), 0);
+    auto putF32 = [&bin](u64 off, f32 v) {
+        u32 raw;
+        std::memcpy(&raw, &v, 4);
+        for (int b = 0; b < 4; ++b) {
+            bin[static_cast<size_t>(off) + b] =
+                static_cast<u8>((raw >> (8 * b)) & 0xFF);
+        }
+    };
+    for (u32 m = 0; m < nMeshes; ++m) {
+        for (u32 i = 0; i < verts; ++i) {
+            // a rede 3×3×3 em {-1,0,1}³: o AABB LOCAL de cada peça é
+            // EXATAMENTE [-1,1]³ (o culling lê ISTO — determinístico)
+            putF32(posOff[m] + u64(i) * 12 + 0,
+                   static_cast<f32>(i % 3u) - 1.0f);
+            putF32(posOff[m] + u64(i) * 12 + 4,
+                   static_cast<f32>((i / 3u) % 3u) - 1.0f);
+            putF32(posOff[m] + u64(i) * 12 + 8,
+                   static_cast<f32>((i / 9u) % 3u) - 1.0f);
+            putF32(nrmOff[m] + u64(i) * 12 + 0, 0.0f);
+            putF32(nrmOff[m] + u64(i) * 12 + 4, 1.0f);
+            putF32(nrmOff[m] + u64(i) * 12 + 8, 0.0f);
+            putF32(uvOff[m] + u64(i) * 8 + 0, (i % 251u) / 250.0f);
+            putF32(uvOff[m] + u64(i) * 8 + 4, (i % 241u) / 240.0f);
+        }
+        for (u32 t = 0; t < tris; ++t) {
+            for (int k = 0; k < 3; ++k) {
+                const u32 v = (t * 3u + static_cast<u32>(k)) % verts;
+                const u64 off = idxOff[m] + (u64(t) * 3 + k) * 4;
+                bin[static_cast<size_t>(off) + 0] = static_cast<u8>(v & 0xFF);
+                bin[static_cast<size_t>(off) + 1] =
+                    static_cast<u8>((v >> 8) & 0xFF);
+                bin[static_cast<size_t>(off) + 2] =
+                    static_cast<u8>((v >> 16) & 0xFF);
+                bin[static_cast<size_t>(off) + 3] =
+                    static_cast<u8>((v >> 24) & 0xFF);
+            }
+        }
+    }
+    std::vector<u8> glb;
+    auto u32push = [&glb](u32 v) {
+        glb.push_back(static_cast<u8>(v & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 8) & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 16) & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 24) & 0xFF));
+    };
+    u32push(0x46546C67u);
+    u32push(2);
+    u32push(static_cast<u32>(12 + 8 + j.size() + 8 + bin.size()));
+    u32push(static_cast<u32>(j.size()));
+    u32push(0x4E4F534Au);
+    glb.insert(glb.end(), j.begin(), j.end());
+    u32push(static_cast<u32>(bin.size()));
+    u32push(0x004E4942u);
+    glb.insert(glb.end(), bin.begin(), bin.end());
+    FILE* f2 = std::fopen(path.c_str(), "wb");
+    if (!f2) return false;
+    const bool ok2 = std::fwrite(glb.data(), 1, glb.size(), f2) == glb.size();
+    std::fclose(f2);
+    return ok2;
+}
+
 // o registo da activity (o papel do VvActivity.onCreate) + o CACHE DIR da
 // app (o papel do getCacheDir — a ponte jniCacheDir resolve no fallback)
 void javaRegistersWithCacheDir() {
@@ -7641,6 +7781,208 @@ int main() {
             check(logHas("ranges do corte: 72"),
                   "21.2 UMA carga de span por tarefa (72 — o pico é o span "
                   "em voo, nunca o modelo)");
+        }
+        std::remove(src.c_str());
+    }
+
+    // ======================================================================
+    // FASE 22 — 0.10-M (EXT): IMPORT DE NÓS COMO SUB-ÁRVORE. A spec do
+    // dono (BACKLOG 0.10-M-ext): «opção no import "expandir nós" que cria
+    // um TIC por nó com mesh (nomes do glTF preservados, transformação do
+    // nó como Transform do TIC), em vez de fundir num TIC só. Default
+    // fundido por performance mobile; expandido para peças editáveis.
+    // Pin: city scene expandido = 72 TICs com nomes, culling por TIC
+    // verde». Aferido AQUI pelo caminho do device: (22.1) o import
+    // EXPANDIDO produz as 72 PEÇAS com nomes/flag/verificação e o registro
+    // do TIC com a transformação do nó; (22.2) a sub-árvore ENTRA na cena
+    // pelo gltfExpandInstantiate com o binder blockHull do GpuAssets — 72
+    // TICs com nomes, cada peça aberta POR BLOCOS; (22.3) O PINO: o
+    // frustum de uma câmara estreita culle 71 TICs e deixa passar 1 — o
+    // culling é POR TIC (o AABB do bloco no model do TIC dono).
+    // ======================================================================
+    fase("FASE 22 — expandir nós: o city = 72 TICs com nomes, culling por TIC");
+    {
+        resetEngineForHarness();
+        auto st22 = std::make_unique<FakeStorage>();
+        FakeStorage* rawSt22 = st22.get();
+        check(Project::createNew(*rawSt22, "c33", g_project),
+              "22.0 projeto criado");
+        g_storage = std::move(st22);
+        g_projectReady = true;
+        g_resources.setStorage(rawSt22);
+        g_gpu.init(&g_resources);
+        const std::string src = "/tmp/goni_fase22_city.glb";
+        check(buildGlbFase22(72, 1000, 600, src),
+              "22.0 fixture criada (city ESPALHADO: 72 nós «c<i>» em faixas "
+              "de 10 em 10)");
+
+        // ---- 22.1 o import EXPANDIDO (o setting «expandir nós») --------
+        passo("22.1 o city EXPANDIDO: 72 peças com nomes + a flag");
+        convert::Output out;
+        convert::Stats stats;
+        std::string err;
+        {
+            const int verAntes = logCount("verificado=1");
+            const bool ok = convert::importFile(src, "city.glb", *g_storage,
+                                                nullptr, out, stats, err,
+                                                nullptr, nullptr, true);
+            if (!ok) {
+                std::printf("    [22.1-ERR] import falhou: %.200s\n",
+                            err.c_str());
+            }
+            check(ok, "22.1 o import EXPANDIDO completa (72× a MESMA "
+                      "conversão do fundido, uma por nó)");
+            check(out.meshes.size() == 72u,
+                  "22.1 72 PEÇAS — um .gmesh por nó com mesh (o fundido é "
+                  "UM; é ISTO que o setting troca)");
+            check(out.meshes.size() == 72u &&
+                      out.meshes[0] == "assets/city_c0.gmesh" &&
+                      out.meshes[71] == "assets/city_c71.gmesh",
+                  "22.1 os NOMES do glTF nos ficheiros das peças");
+            check(out.expandNodes.size() == 72u,
+                  "22.1 72 REGISTROS de TIC (Output::expandNodes)");
+            check(out.expandNodes.size() == 72u &&
+                      out.expandNodes[0].name == "c0" &&
+                      out.expandNodes[71].name == "c71",
+                  "22.1 os NOMES PRESERVADOS nos registros");
+            check(logCount("verificado=1") - verAntes >= 72,
+                  "22.1 a verificação bit a bit POR PEÇA (72 linhas)");
+            check(logHas("expandir nós=72 peça(s)"),
+                  "22.1 a linha contrato do expand no engine.log");
+            // a flag em CADA peça + «transformação do nó como Transform do
+            // TIC» (a faixa do nó no TRS do registro — o MUNDO decomposto)
+            bool flagOk = true, trsOk = true;
+            for (u32 i = 0; i < out.meshes.size(); ++i) {
+                std::vector<u8> gmesh;
+                if (i >= out.expandNodes.size() ||
+                    !g_storage->readBytes(out.meshes[i], gmesh)) {
+                    flagOk = false;
+                    break;
+                }
+                GMeshV3Meta meta;
+                std::string perr;
+                if (!gmeshV3PeekMeta(gmesh.data(), gmesh.size(), meta,
+                                     perr) ||
+                    (meta.flags & kGmeshV3FlagPiece) == 0) {
+                    flagOk = false;
+                    break;
+                }
+                const f32 faixa =
+                    (static_cast<f32>(i) - 36.0f) * 10.0f;
+                if (std::fabs(out.expandNodes[i].translation.x - faixa) >
+                    0.01f) {
+                    trsOk = false;
+                }
+            }
+            check(flagOk, "22.1 kGmeshV3FlagPiece em TODAS as 72 (o runtime "
+                          "abre-as por blocos — o culling por TIC)");
+            check(trsOk, "22.1 a transformação do nó no registro do TIC (a "
+                         "faixa de cada peça)");
+        }
+
+        // ---- 22.2 a SUB-ÁRVORE na cena (o caminho do device) -----------
+        passo("22.2 a sub-árvore: 72 TICs com nomes, peças por blocos");
+        {
+            struct Bind22 {
+                GpuAssets* gpu;
+            } b22{&g_gpu};
+            GltfInstantiateCtx ictx;
+            ictx.user = &b22;
+            ictx.bindMesh = [](void* user, const std::string& ref) -> Mesh* {
+                // O BINDER DO DEVICE: blockHull abre a peça PELA TABELA
+                // (kGmeshV3FlagPiece — culling por TIC + lazy + LRU)
+                return static_cast<Bind22*>(user)->gpu->blockHull(ref);
+            };
+            ictx.material = g_renderer.litMaterial();
+            const std::vector<Handle> tics =
+                gltfExpandInstantiate(g_scene, out.expandNodes, out.meshes,
+                                      ictx);
+            check(tics.size() == 72u,
+                  "22.2 72 TICs criados — O PINO do dono (um por nó com "
+                  "mesh)");
+            const Tic* t0 = tics.size() == 72u ? g_scene.get(tics[0])
+                                                : nullptr;
+            const Tic* t71 = tics.size() == 72u ? g_scene.get(tics[71])
+                                                 : nullptr;
+            check(t0 != nullptr && t0->name == "c0" && t71 != nullptr &&
+                      t71->name == "c71",
+                  "22.2 os TICs com os NOMES do glTF (o pin do dono)");
+            // cada TIC: o meshPath da PEÇA + o BlockMesh aberto no GpuAssets
+            u32 porBlocos = 0, comHull = 0;
+            for (const Handle h : tics) {
+                const Tic* t = g_scene.get(h);
+                const MeshRenderer* mr =
+                    t ? t->getComponent<MeshRenderer>() : nullptr;
+                if (mr && mr->mesh != nullptr) ++comHull;
+                if (mr && g_gpu.blockMeshIfOpen(mr->meshPath) != nullptr) {
+                    ++porBlocos;
+                }
+            }
+            check(comHull == 72u,
+                  "22.2 o hull de bounds no slot de cada TIC (o contrato do "
+                  "picker/serializer preservado)");
+            check(porBlocos == 72u,
+                  "22.2 as 72 PEÇAS abertas POR BLOCOS no GpuAssets (o "
+                  "caminho do PASSO 4 — mesmo PEQUENAS, pela flag)");
+            // «transformação do nó como Transform do TIC» no Transform3D:
+            const Transform3D* tr36 =
+                tics.size() == 72u
+                    ? g_scene.get(tics[36])->getComponent<Transform3D>()
+                    : nullptr;
+            const Transform3D* tr0 =
+                tics.size() == 72u
+                    ? g_scene.get(tics[0])->getComponent<Transform3D>()
+                    : nullptr;
+            check(tr36 != nullptr && std::fabs(tr36->pos.x) < 0.01f,
+                  "22.2 o TIC 36 na faixa 0 (a transformação MUNDO no "
+                  "Transform3D)");
+            check(tr0 != nullptr && std::fabs(tr0->pos.x + 360.0f) < 0.01f,
+                  "22.2 o TIC 0 na faixa -360 (a cadeia em TRS)");
+        }
+
+        // ---- 22.3 O PINO: CULLING POR TIC -------------------------------
+        passo("22.3 culling por TIC: 1 visível, 71 culled");
+        {
+            // a câmara DE FRENTE ao centro (faixa 0): meia-largura ~5.1 no
+            // plano do alvo (fovY 0.5 rad, D=20) — SÓ a peça da faixa 0
+            // (AABB x∈[-1,1]) cabe; as 71 faixas vizinhas (de 10 em 10)
+            // caem TODAS fora dos planos laterais. O teste é o AUDIT de
+            // produção (BlockMesh::visibleBlocks — o MESMO que o draw usa)
+            // com o model de CADA TIC: o veredicto é POR TIC
+            Camera cam;
+            cam.target = Vec3{0.0f, 0.0f, 0.0f};
+            cam.yaw = 0.0f;
+            cam.pitch = 0.0f;
+            cam.dist = 20.0f;
+            cam.fovY = 0.5f;
+            const Mat4 vp = Mat4::mul(cam.proj(1.0f), cam.view());
+            u32 visiveis = 0, culled = 0;
+            std::string nomeVisivel;
+            const auto& mrs = g_scene.components().meshRenderers();
+            for (u32 i = 0; i < mrs.size(); ++i) {
+                const vv::BlockMesh* bm =
+                    g_gpu.blockMeshIfOpen(mrs.at(i).meshPath);
+                const Tic* owner = g_scene.get(mrs.owner(i));
+                const Transform3D* tr =
+                    owner ? owner->getComponent<Transform3D>() : nullptr;
+                if (!bm || !tr) {
+                    continue;
+                }
+                std::vector<u32> vis;
+                bm->visibleBlocks(tr->world, vp, vis);
+                if (vis.empty()) {
+                    ++culled;
+                } else {
+                    ++visiveis;
+                    nomeVisivel = owner ? owner->name : "?";
+                }
+            }
+            check(visiveis == 1u && culled == 71u,
+                  "22.3 CULLING POR TIC VERDE: 1 TIC visível, 71 culled (o "
+                  "pin do dono fecha no device virtual)");
+            check(nomeVisivel == "c36",
+                  "22.3 o TIC visível é o da faixa 0 («c36» — o frustum "
+                  "escolhe a PEÇA, não o modelo inteiro)");
         }
         std::remove(src.c_str());
     }

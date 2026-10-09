@@ -45,6 +45,11 @@ Mesh* GpuAssets::mesh(const std::string& ref) {
     // condição do guard cedo do ResourceManager, uma só verdade) abre
     // pela TABELA e devolve o HULL de bounds. O peek é o MESMO espião de
     // 192 B do PASSO 3B (uma leitura por ref, antes do ficheiro inteiro).
+    // 0.10-M (EXT) — uma PEÇA do import expandido (kGmeshV3FlagPiece no
+    // meta) TAMBÉM abre por blocos MESMO PEQUENA: é isso que dá o culling
+    // por TIC (o frustum por bloco do BlockMesh, o MESMO caminho do
+    // modelo grande) ao apply/reload das peças — sem a flag, um .gmesh de
+    // 1000 verts cairia no mesh único SEM culling.
     {
         const std::string ext = lowerExtOf(ref);
         if (ext == "gmesh" && rm_->storage()) {
@@ -55,7 +60,8 @@ Mesh* GpuAssets::mesh(const std::string& ref) {
                 std::string perr;
                 if (gmeshV3PeekMeta(peek.data(), peek.size(), meta, perr) &&
                     (meta.vertexCount > 65535 ||
-                     gmeshV3LoadEstimateBytes(meta) > kMeshLoadBudgetBytes)) {
+                     gmeshV3LoadEstimateBytes(meta) > kMeshLoadBudgetBytes ||
+                     (meta.flags & kGmeshV3FlagPiece) != 0)) {
                     return blockHull(ref);
                 }
             }

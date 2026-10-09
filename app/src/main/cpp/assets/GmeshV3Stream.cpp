@@ -22,6 +22,7 @@
 #include <map>
 #include <mutex>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include <sys/mman.h>
@@ -173,6 +174,39 @@ struct BlockOut {
     u64 tStart = 0;
     u64 triCount = 0;
 };
+
+// 0.10-M (EXT) — a matriz-MUNDO de um nó glTF: a cadeia de pais composta
+// da raiz para baixo (pw = T·R·S de cada nível, rw = só as rotações —
+// para as normais). UMA SÓ VERDADE partilhada pelo bake das tarefas do
+// streaming (convertGltfToV3) e pelo driver do import expandido
+// (convertGltfToV3Nodes decompondo ESTA matriz no TRS do TIC — a peça
+// shear cai no bake do PRÓPRIO streaming, que usa a MESMA rotina: a
+// igualdade bit a bit entre as duas é o que garante o desenho exato).
+void worldChainOf(const GltfModel& model, i32 nodeIdx, Mat4& pw, Mat4& rw) {
+    pw = Mat4::identity();
+    rw = Mat4::identity();
+    if (nodeIdx < 0 || nodeIdx >= static_cast<i32>(model.nodes.size())) {
+        return;
+    }
+    std::vector<u32> chain;
+    i32 k = nodeIdx;
+    while (k >= 0 && k < static_cast<i32>(model.nodes.size())) {
+        chain.push_back(static_cast<u32>(k));
+        k = model.nodes[static_cast<size_t>(k)].parent;
+    }
+    for (size_t c2 = chain.size(); c2-- > 0;) {
+        const GltfNode& n2 = model.nodes[chain[c2]];
+        const Mat4 local =
+            Mat4::mul(Mat4::translation(n2.translation.x,
+                                        n2.translation.y,
+                                        n2.translation.z),
+                      Mat4::mul(n2.rotation.toMat4(),
+                                Mat4::scale(n2.scale.x, n2.scale.y,
+                                            n2.scale.z)));
+        pw = Mat4::mul(pw, local);
+        rw = Mat4::mul(rw, n2.rotation.toMat4());
+    }
+}
 
 // o registo do bloco no temp (o assembly ordena por material→task→idx)
 struct BlockRec {
@@ -594,7 +628,8 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
                      convert::Output& out, convert::Stats& stats,
                      V3StreamResult& result, std::string& err,
                      bool (*onProgress)(void*, u64, u64), void* user,
-                     const V3RangeSource* ranges, bool binDroppable) {
+                     const V3RangeSource* ranges, bool binDroppable,
+                     u32 metaFlags) {
     result = V3StreamResult{};
     // 0.10-M (SAF-STREAM) — UMA fonte chega: o mmap (caminho OU fd — o
     // ponteiro `bin`) OU os RANGES (o degradado: o fd recusou o mapa /
@@ -784,30 +819,13 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
         t.base = haveMap ? bin : nullptr;
         t.canDrop = haveMap && binDroppable;   // heap (ranges/data:) NUNCA
         // a transformação MUNDO do nó (a MESMA composição do merge
-        // antigo — a verificação reavalia EXATAMENTE esta multiplicação)
-        if (r.node >= 0 &&
-            r.node < static_cast<i32>(model.nodes.size())) {
-            const i32 nodeIdx = r.node;
+        // antigo — a verificação reavalia EXATAMENTE esta multiplicação;
+        // 0.10-M EXT: a rotina worldChainOf é a ÚNICA verdade — o driver
+        // das peças decompõe a MESMA matriz no TRS do TIC)
+        {
             Mat4 pw = Mat4::identity();
             Mat4 rw = Mat4::identity();
-            std::vector<u32> chain;
-            i32 k = nodeIdx;
-            while (k >= 0 && k < static_cast<i32>(model.nodes.size())) {
-                chain.push_back(static_cast<u32>(k));
-                k = model.nodes[static_cast<size_t>(k)].parent;
-            }
-            for (size_t c2 = chain.size(); c2-- > 0;) {
-                const GltfNode& n2 = model.nodes[chain[c2]];
-                const Mat4 local =
-                    Mat4::mul(Mat4::translation(n2.translation.x,
-                                                n2.translation.y,
-                                                n2.translation.z),
-                              Mat4::mul(n2.rotation.toMat4(),
-                                        Mat4::scale(n2.scale.x, n2.scale.y,
-                                                    n2.scale.z)));
-                pw = Mat4::mul(pw, local);
-                rw = Mat4::mul(rw, n2.rotation.toMat4());
-            }
+            worldChainOf(model, r.node, pw, rw);
             t.world = pw;
             t.worldRot = rw;
         }
@@ -1070,8 +1088,9 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
     }
     // os totais + a AABB global + as entradas da tabela
     GMeshV3Meta meta;
-    meta.flags = 0;   // o streaming não tem skin (a pele segue o caminho
-                      // de sempre — decisão do PASSO 3, no relatório)
+    meta.flags = metaFlags;   // 0.10-M (EXT): 0 no fundido de sempre; as
+                              // peças trazem kGmeshV3FlagPiece (o runtime
+                              // abre-as por blocos — o culling por TIC)
     meta.blockVertexCap = kGmeshV3BlockVertexCap;
     meta.attrs[0] = GMeshV3Attr{kAttrPosition, kAttrF32, 0, 0, 0};
     meta.attrs[1] = GMeshV3Attr{kAttrNormal, kAttrF32, 0, 0, 0};
@@ -1406,6 +1425,261 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
     }
     stats.meshes = 1;
     out.meshes.push_back(outRel);
+    return true;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// 0.10-M (EXT) · IMPORT DE NÓS COMO SUB-ÁRVORE — o driver das PEÇAS
+// (a spec do dono: «opção no import "expandir nós" que cria um TIC por nó
+// com mesh (nomes do glTF preservados, transformação do nó como Transform
+// do TIC), em vez de fundir num TIC só»). Cada peça é UMA chamada completa
+// ao convertGltfToV3 — corte/assembly/verificação bit a bit POR PEÇA, a
+// MESMA rotina do fundido (zero código novo de corte); a diferença vive
+// em DUAS decisões por nó:
+//   (a) o TRS: worldChainOf dá a matriz-mundo do nó; mat4ToTRS decompõe
+//       T/R/S; quando a reconstrução T·R·S é EXATA (o caso normal — os nós
+//       glTF são TRS), a geometria da peça sai CRUA (primRefs com node=-1:
+//       bake identidade) e o TRS vai no registro NodeOut → o Transform3D
+//       do TIC (o engine compõe flat — TransformSystem não resolve pais —
+//       e é por isso que o TRS é o MUNDO: a peça desenha no sítio exato);
+//   (b) o SHEAR (escala não-uniforme do pai + rotação do filho — sem
+//       representação TRS exata): a peça mantém o nó nas primRefs → o
+//       bake de sempre (o MUNDO na geometria, pela MESMA worldChainOf) e
+//       o registro fica com TRS identidade — o desenho é EXATO na mesma;
+//       o log DIZ (nunca silencioso).
+// O meta de TODAS as peças traz kGmeshV3FlagPiece — o runtime abre-as POR
+// BLOCOS mesmo pequenas (o culling por TIC do pin do dono).
+// ──────────────────────────────────────────────────────────────────────────
+namespace {
+
+// a decomposição TRS (column-major): escala = comprimentos das colunas
+// da 3x3; rotação = colunas normalizadas → quat (Shepperd); a
+// reconstrução T·R·S (a MESMA composição do Transform3D::computeMatrix)
+// confirma a matriz EXACTA — false quando há shear/espelho (sem TRS).
+bool mat4ToTRS(const Mat4& m, Vec3& t, Quat& q, Vec3& s) {
+    t = Vec3{m.m[12], m.m[13], m.m[14]};
+    const Vec3 c0{m.m[0], m.m[1], m.m[2]};
+    const Vec3 c1{m.m[4], m.m[5], m.m[6]};
+    const Vec3 c2{m.m[8], m.m[9], m.m[10]};
+    const f32 l0 = std::sqrt(c0.x * c0.x + c0.y * c0.y + c0.z * c0.z);
+    const f32 l1 = std::sqrt(c1.x * c1.x + c1.y * c1.y + c1.z * c1.z);
+    const f32 l2 = std::sqrt(c2.x * c2.x + c2.y * c2.y + c2.z * c2.z);
+    s = Vec3{l0, l1, l2};
+    if (!std::isfinite(l0) || !std::isfinite(l1) || !std::isfinite(l2) ||
+        l0 < 1e-8f || l1 < 1e-8f || l2 < 1e-8f) {
+        return false;   // degenerada — sem TRS confiável
+    }
+    // a rotação: as colunas normalizadas (column-major: m[col*4+row])
+    const f32 r00 = c0.x / l0, r10 = c0.y / l0, r20 = c0.z / l0;
+    const f32 r01 = c1.x / l1, r11 = c1.y / l1, r21 = c1.z / l1;
+    const f32 r02 = c2.x / l2, r12 = c2.y / l2, r22 = c2.z / l2;
+    // Shepperd: o maior ramo primeiro (estabilidade numérica)
+    const f32 tr = r00 + r11 + r22;
+    if (tr > 0.0f) {
+        const f32 S = std::sqrt(tr + 1.0f) * 2.0f;
+        q = Quat{(r21 - r12) / S, (r02 - r20) / S, (r10 - r01) / S, S / 4.0f};
+    } else if (r00 > r11 && r00 > r22) {
+        const f32 S = std::sqrt(1.0f + r00 - r11 - r22) * 2.0f;
+        q = Quat{S / 4.0f, (r01 + r10) / S, (r02 + r20) / S, (r21 - r12) / S};
+    } else if (r11 > r22) {
+        const f32 S = std::sqrt(1.0f + r11 - r00 - r22) * 2.0f;
+        q = Quat{(r01 + r10) / S, S / 4.0f, (r12 + r21) / S, (r02 - r20) / S};
+    } else {
+        const f32 S = std::sqrt(1.0f + r22 - r00 - r11) * 2.0f;
+        q = Quat{(r02 + r20) / S, (r12 + r21) / S, S / 4.0f, (r10 - r01) / S};
+    }
+    q.normalize();
+    // a PROVA: a reconstrução T·R·S (a composição do computeMatrix) tem
+    // de ser a matriz original — senão há shear/espelho e o TRS MENTE
+    const Mat4 rec = Mat4::mul(
+        Mat4::translation(t.x, t.y, t.z),
+        Mat4::mul(q.toMat4(), Mat4::scale(s.x, s.y, s.z)));
+    for (int i = 0; i < 16; ++i) {
+        if (std::fabs(rec.m[i] - m.m[i]) > 1e-4f) {
+            return false;   // shear/espelho — o chamador faz o bake do mundo
+        }
+    }
+    return true;
+}
+
+// o progresso MONÓTONO entre peças (o ratchet: o total só sobe — o overlay
+// do import nunca anda para trás; cada peça reinicia o seu `done`, o
+// doneBase acumula o que as anteriores fizeram)
+struct PieceProg {
+    bool (*onProgress)(void*, u64, u64);
+    void* user;
+    u64 doneBase = 0;
+    u64 totalSeen = 0;
+};
+bool pieceProgress(void* user, u64 done, u64 total) {
+    auto* p = static_cast<PieceProg*>(user);
+    const u64 tot = p->doneBase + total;
+    if (tot > p->totalSeen) {
+        p->totalSeen = tot;
+    }
+    if (p->onProgress == nullptr) {
+        return true;
+    }
+    return p->onProgress(p->user, p->doneBase + done, p->totalSeen);
+}
+
+} // namespace
+
+bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
+                          const u8* bin, u64 binLen, u64 fileBytes,
+                          const std::string& stem, ProjectStorage& st,
+                          convert::Output& out, convert::Stats& stats,
+                          V3StreamResult& result, std::string& err,
+                          bool (*onProgress)(void*, u64, u64), void* user,
+                          const V3RangeSource* ranges,
+                          bool binDroppable) {
+    result = V3StreamResult{};
+    // o modelo tem NÓS para expandir? (primRefs com node=-1 = o glTF
+    // atípico sem nós — o expand DEGENERA no fundido, com o log honesto;
+    // expandNodes fica VAZIO e o main segue o fluxo fundido de sempre)
+    bool anyNode = false;
+    for (const GltfPrimRef& r : model.primRefs) {
+        if (r.node >= 0 && r.node < static_cast<i32>(model.nodes.size())) {
+            anyNode = true;
+            break;
+        }
+    }
+    if (!anyNode) {
+        elog::warn("asset: expandir nós — o modelo NÃO tem nós (glTF "
+                   "atípico): fica FUNDIDO (o caminho de sempre)");
+        return convertGltfToV3(model, doc, bin, binLen, fileBytes, stem, st,
+                               out, stats, result, err, onProgress, user,
+                               ranges, binDroppable, 0);
+    }
+    // (1) agrupa as primitivas por NÓ (a ordem do array de nós — a MESMA
+    // ordem em que o parse as produziu; determinístico)
+    std::vector<std::vector<size_t>> byNode(model.nodes.size());
+    for (size_t ri = 0; ri < model.primRefs.size(); ++ri) {
+        const i32 n = model.primRefs[ri].node;
+        if (n >= 0 && n < static_cast<i32>(model.nodes.size())) {
+            byNode[static_cast<size_t>(n)].push_back(ri);
+        }
+    }
+    // (2) a peça MODELO partilhada (o que o convertGltfToV3 LÊ: os nós —
+    // o chain walk do bake do caso shear — e os materiais; as primRefs
+    // trocam-se por nó; NADA de imagens/anims duplicado em RAM)
+    GltfModel piece;
+    piece.nodes = model.nodes;
+    piece.materials = model.materials;
+    // o progresso monótono (o ratchet acima)
+    PieceProg prog{onProgress, user, 0, 0};
+    std::unordered_set<std::string> usedStems;
+    u32 pieces = 0;
+    u64 sumBlocks = 0, sumVerts = 0, sumTris = 0;
+    bool allVerified = true;
+    for (size_t n = 0; n < model.nodes.size(); ++n) {
+        if (byNode[n].empty()) {
+            continue;   // nó sem mesh (ou cujas primitivas TODAS caíram —
+                        // o toast do primWarn já disse quantas)
+        }
+        const GltfNode& nd = model.nodes[n];
+        // (a) o TRS MUNDO do nó (a MESMA matriz do bake — worldChainOf)
+        Mat4 world = Mat4::identity();
+        Mat4 worldRot = Mat4::identity();
+        worldChainOf(model, static_cast<i32>(n), world, worldRot);
+        Vec3 t{};
+        Quat q = Quat::identity();
+        Vec3 s{1.0f, 1.0f, 1.0f};
+        const bool trsExact = mat4ToTRS(world, t, q, s);
+        if (!trsExact) {
+            elog::warn("asset: expandir nós — o nó %zu ('%s') tem SHEAR no "
+                       "mundo (escala não-uniforme composta com rotação): "
+                       "a transformação vai BAKED na geometria e o TIC fica "
+                       "com TRS identidade (o desenho é exato; a edição por "
+                       "TRS fica para nós sem shear)",
+                       n, nd.name.c_str());
+        }
+        // as primRefs da peça: CRUAS (node=-1 → bake identidade) quando o
+        // TRS é exato; com o NÓ de sempre (mundo baked) quando há shear
+        piece.primRefs.clear();
+        for (size_t ri : byNode[n]) {
+            GltfPrimRef r = model.primRefs[ri];
+            if (trsExact) {
+                r.node = -1;   // o TRS viaja no TIC, não na geometria
+            }
+            piece.primRefs.push_back(r);
+        }
+        // o nome da peça: do glTF («n<i>» se anónimo), dedup determinístico
+        const std::string pieceName =
+            nd.name.empty() ? ("n" + std::to_string(n)) : nd.name;
+        std::string safe = convert::sanitizeName(pieceName);
+        if (safe.empty()) {
+            safe = "n" + std::to_string(n);
+        }
+        std::string pstem = stem + "_" + safe;
+        if (usedStems.find(pstem) != usedStems.end()) {
+            pstem += "_" + std::to_string(n);   // dois nós com o MESMO nome
+        }
+        usedStems.insert(pstem);
+        // a PEÇA: uma chamada completa (corte+assembly+verificação bit a
+        // bit — a MESMA rotina do fundido) com a flag que abre por blocos
+        V3StreamResult r1;
+        if (!convertGltfToV3(piece, doc, bin, binLen, fileBytes, pstem, st,
+                             out, stats, r1, err, &pieceProgress, &prog,
+                             ranges, binDroppable, kGmeshV3FlagPiece)) {
+            return false;   // err/cancelado já preenchidos pela chamada
+        }
+        prog.doneBase += r1.tris;
+        sumBlocks += r1.blocks;
+        sumVerts += r1.verts;
+        sumTris += r1.tris;
+        result.cutMs += r1.cutMs;
+        result.assembleMs += r1.assembleMs;
+        result.verifyMs += r1.verifyMs;
+        if (!r1.verified) {
+            allVerified = false;
+            if (result.firstDeviation.empty()) {
+                result.firstDeviation = r1.firstDeviation;
+            }
+        }
+        // o registro do TIC (o main cria a sub-árvore com ISTO)
+        convert::Output::NodeOut no;
+        no.name = pieceName;
+        no.node = static_cast<i32>(n);
+        if (trsExact) {
+            no.translation = t;
+            no.rotation = q;
+            no.scale = s;
+        }
+        no.mesh = static_cast<i32>(out.meshes.size()) - 1;
+        out.expandNodes.push_back(std::move(no));
+        ++pieces;
+    }
+    if (pieces == 0) {
+        err = "expandir nós: nenhuma peça saiu do corte (as primitivas "
+              "caíram todas — as causas estão no log)";
+        return false;
+    }
+    // os stats do IMPORT inteiro (as chamadas deixam o da ÚLTIMA peça —
+    // o toast/log do dono falam do MODELO, não da peça final)
+    constexpr u64 kU32Max = 0xFFFFFFFFull;
+    stats.meshes = pieces;
+    stats.verts = sumVerts > kU32Max ? kU32Max : static_cast<u32>(sumVerts);
+    stats.indices =
+        sumTris > (kU32Max / 3ull) ? kU32Max : static_cast<u32>(sumTris * 3ull);
+    if (sumVerts > kU32Max || sumTris > (kU32Max / 3ull)) {
+        elog::warn("asset: expandir nós — as contagens saturam o contador "
+                   "u32 do toast; as contagens dos FICHEIROS estão corretas");
+    }
+    result.blocks = sumBlocks;
+    result.verts = sumVerts;
+    result.tris = sumTris;
+    result.verified = allVerified;
+    if (!allVerified && result.firstDeviation.empty()) {
+        result.firstDeviation = "uma peça falhou a verificação bit a bit";
+    }
+    // A LINHA CONTRATO do expand (o pino do dono lê ISTA)
+    elog::info("gmesh: v3 expandir nós=%u peça(s) blocos=%llu verts=%llu "
+               "tris=%llu verificado=%d",
+               pieces, static_cast<unsigned long long>(sumBlocks),
+               static_cast<unsigned long long>(sumVerts),
+               static_cast<unsigned long long>(sumTris),
+               allVerified ? 1 : 0);
     return true;
 }
 

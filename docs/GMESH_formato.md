@@ -146,7 +146,8 @@ gmesh` documentam os bytes exatos que abrem).
                            metadados (NÃO do payload inteiro — ver abaixo)
     [metadados 160 B]    — fixos (kGmeshV3MetaBytes), 16-alinhados:
         u32 attrCount            (≤ kGmeshV3MaxAttrs = 8)
-        u32 flags                (bit0 = skinned)
+        u32 flags                (bit0 = skinned · bit1 = kGmeshV3FlagPiece
+                                 — PEÇA do import expandido, §EXPANDIR-NÓS)
         u32 blockVertexCap       (o teto configurável; default
                                   kGmeshV3BlockVertexCap = 65535)
         u32 tableCrc32           (CRC32 das entradas da tabela)
@@ -269,7 +270,8 @@ streama — o `parseGltf` exporta os bytes embutidos (`streamOwnedBin`) e o
 conversor corre sobre eles. Com isto, o teto de 65.535 deixa de ser
 visível a um modelo SEM pele em qualquer storage; a PELE acima do teto
 falha com a mensagem clara «pele ainda não suportada no streaming
-(BACKLOG)» (o merge é o que preserva joints/weights — ver BACKLOG.md).
+(BACKLOG 0.10-A)» (o merge é o que preserva joints/weights — ver o
+BACKLOG.md, entrada 0.10-A SKELETAL).
 
 A linha contrato de tempos ganhou a fase que faltava: `gmesh:
 fase=parse` cobre SÓ o JSON; o SCAN DE RANGES do bin (as imagens que
@@ -280,3 +282,70 @@ exatos / recusa real do SO / fd do Fs) e a FASE 21 do c33_virtual (o
 city de 72 primitivas importando sob `content://` pelo fd do bridge, e
 o provider que recusa o mapa ficando VERDE pelos ranges) vigiam o
 hotfix para sempre.
+
+### §EXPANDIR-NÓS — o import de nós como sub-árvore e as PEÇAS (0.10-M EXT)
+
+O BACKLOG 0.10-M-ext do dono: «opção no import "expandir nós" que cria
+um TIC por nó com mesh (nomes do glTF preservados, transformação do nó
+como Transform do TIC), em vez de fundir num TIC só. Default fundido por
+performance mobile; expandido para peças editáveis». O **default é o
+FUNDIDO de sempre** — o caminho vigente byte a byte idêntico (o driver
+só entra com o setting «expandir nós» ligado nas Definições;
+`settings.goni` guarda `expandNodes=0/1`, capturado no lançamento do job
+de import e honrado pelo «reconverter assets»).
+
+**O driver das peças** (`convertGltfToV3Nodes` em GmeshV3Stream.cpp):
+agrupa as `primRefs` por nó (a ordem do array de nós) e faz de CADA
+nó-com-mesh UMA chamada completa ao `convertGltfToV3` de sempre — corte,
+assembly e VERIFICAÇÃO bit a bit por peça (a mesma rotina, zero código
+novo de corte). O produto é uma **PEÇA por nó**:
+
+- ficheiro `assets/<stem>_<nomeDoNó>.gmesh` (o nome do glTF sanitizado;
+  anónimos viram `n<i>`; dois nós com o mesmo nome ganham o sufixo
+  determinístico `_<i>`); a linha contrato do expand no log:
+  `gmesh: v3 expandir nós=<N> peça(s) blocos=… verts=… tris=… verificado=<0|1>`;
+- o registro `convert::Output::NodeOut` (nome, TRS, índice da peça em
+  `Output::meshes`) — é ISTO que o `gltfExpandInstantiate` (assets/
+  GltfInstantiate.cpp, GL-free) lê para criar os TICs: um TIC por nó com
+  mesh, o nome preservado, o TRS no `Transform3D`, o `MeshRenderer` com a
+  ref da peça (no device o binder é o `GpuAssets::blockHull`);
+- o **bit1 do meta** (`kGmeshV3FlagPiece`): «este .gmesh é UM NÓ» — o
+  `GpuAssets::mesh` abre a peça **POR BLOCOS mesmo pequena** (o peek de
+  192 B já lê o meta; sem a flag, um .gmesh de 1000 verts caía no mesh
+  único SEM culling). É o bit1 que dá o **culling por TIC** do pin do
+  dono: cada peça é um `BlockMesh` próprio e o frustum AABB por bloco é
+  avaliado com o model do TIC dono — o MESMO caminho lazy+LRU do PASSO 4.
+
+**A transformação e a geometria** (a parte fina): o registro traz o TRS
+**MUNDO** do nó, decomposto por `mat4ToTRS` da matriz da `worldChainOf`
+(a MESMA rotina do bake das tarefas — a igualdade é garantida por
+construção), e a peça sai com a geometria **CRUA no espaço local** (as
+`primRefs` da peça levam `node=-1`: o bake é a identidade). É assim
+porque o engine compõe FLAT (`TransformSystem::tick` não resolve pais —
+verificado no código, «trabalho da fase de editor polish»): com o TRS
+mundo no TIC, a peça desenha no sítio EXATO sem hierarquia entre TICs, e
+«transformação do nó como Transform do TIC» fica literal. Um nó cujo
+mundo tem SHEAR (escala não-uniforme do pai composta com rotação do
+filho — sem representação TRS exata; a reconstrução T·R·S diverge) cai
+no bake do mundo na geometria (as `primRefs` mantêm o nó → o bake de
+sempre pela `worldChainOf`) com TRS identidade no registro — o desenho é
+exato na mesma e o LOG DIZ («tem SHEAR»; nunca silencioso).
+
+**O fecho no main** (`importJobFinish`): com registros no Output, a
+sub-árvore ENTRA na cena — sem diálogo «aplicar ao TIC?» (os TICs novos
+são o resultado), com o fit único (a caixa do modelo inteiro em mundo =
+união dos AABBs das peças transformados pelos seus TICs; `pos*=s` e
+`scale*=s` em cada TIC novo — a translação FORA do TRS encolhe o
+conjunto NO SÍTIO sem partir o layout relativo; o mesmo alvo
+`kImportTargetSize` do apply), o 1º TIC selecionado e o toast «expandido:
+N TIC(s) na cena». Animações: os clips de um .gm ficam SEM attach no
+modo expandido (os alvos de um clip são NÓS do glTF — o expand é para
+peças; o BACKLOG 0.10-A traz os clips) — o log diz.
+
+As sentinelas: 5 TESTs `ext_*` no `test_gmeshv3stream.cpp` (peças com
+nomes/flag/verificação + a geometria TOTAL igual à do fundido; o AABB
+LOCAL da peça provando a geometria crua; o shear no bake com TRS
+identidade; o instantiate puro; a peça por blocos no GpuAssets com o
+contraste fundido) e a FASE 22 do c33 (o pin: o city espalhado em 72
+faixas vira 72 TICs com nomes e o frustum estreito culle 71, deixa 1) —
+R-042 no `docs/REGRESSOES.md` com as mutações M-E1..M-E4.

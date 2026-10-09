@@ -1459,11 +1459,504 @@ TEST(safstream_pele_grande_mensagem_backlog) {
     // COM PELE acima do teto: FALHA com a MENSAGEM CLARA do BACKLOG (o
     // streaming não tem skin — o merge é o que preserva joints/weights)
     EXPECT(!ok);
-    EXPECT(err.find("pele ainda não suportada no streaming (BACKLOG)") !=
-           std::string::npos);
+    // 0.10-A (SKELETAL): a mensagem APONTA a entrada do BACKLOG pelo nome
+    // (a spec do dono: «mantém-se clara e com apontador para este BACKLOG»)
+    EXPECT(err.find("pele ainda não suportada no streaming (BACKLOG "
+                    "0.10-A)") != std::string::npos);
     // ...e NUNCA a mensagem de storage do texto antigo
     EXPECT(err.find("SAF sem ficheiro real") == std::string::npos);
     EXPECT(err.find("excede 65535") == std::string::npos);
+    elog::shutdown();
+    rmRf(dir);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 0.10-M (EXT) · IMPORT DE NÓS COMO SUB-ÁRVORE — o BACKLOG 0.10-M-ext do
+// dono: «opção no import "expandir nós" que cria um TIC por nó com mesh
+// (nomes do glTF preservados, transformação do nó como Transform do TIC),
+// em vez de fundir num TIC só. Default fundido por performance mobile;
+// expandido para peças editáveis. Pin: city scene expandido = 72 TICs com
+// nomes, culling por TIC verde».
+// ═══════════════════════════════════════════════════════════════════════════
+#include <GLES3/gl3.h>   // o STUB (tests/stub primeiro no include path) —
+                         // o EXT-5 sobe meshes ao GpuAssets como o device
+#include "assets/GltfInstantiate.h"
+#include "components/MeshRenderer.h"
+#include "components/Transform3D.h"
+#include "core/Scene.h"
+#include "render/GpuAssets.h"
+#include "render/Mesh.h"
+
+// conta as OCORRÊNCIAS de uma linha no log (o «verificado=1» ×72 das peças)
+int fileCount(const std::string& path, const char* needle) {
+    FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return 0;
+    char buf[4096];
+    int n = 0;
+    while (std::fgets(buf, sizeof(buf), f)) {
+        if (std::strstr(buf, needle) != nullptr) ++n;
+    }
+    std::fclose(f);
+    return n;
+}
+
+// o GLB de HIERARQUIA (pai→filho, TRS explícitos no JSON): as posições são
+// uma rede 3×3×3 em {-1,0,1}³ — o AABB LOCAL é EXATAMENTE [-1,1]³ (a prova
+// «geometria crua vs mundo baked» lê ISTO; 24 tris cobrem os 27 verts)
+bool buildGlbHier(const std::string& node0Json, const std::string& node1Json,
+                  const std::string& path) {
+    const u32 verts = 27, tris = 24;
+    u64 off = 0;
+    std::vector<u64> posOff(2), nrmOff(2), uvOff(2), idxOff(2);
+    for (int m = 0; m < 2; ++m) {
+        posOff[m] = off; off += u64(verts) * 12;
+        nrmOff[m] = off; off += u64(verts) * 12;
+        uvOff[m]  = off; off += u64(verts) * 8;
+        idxOff[m] = off; off += u64(tris) * 3 * 4;
+    }
+    std::string j = "{\"asset\":{\"version\":\"2.0\"},\"scene\":0,"
+                    "\"scenes\":[{\"nodes\":[0]}],\"nodes\":[";
+    j += node0Json + "," + node1Json;
+    j += "],\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0,"
+         "\"NORMAL\":1,\"TEXCOORD_0\":2},\"indices\":3,\"material\":0,"
+         "\"mode\":4}]},{\"primitives\":[{\"attributes\":{\"POSITION\":4,"
+         "\"NORMAL\":5,\"TEXCOORD_0\":6},\"indices\":7,\"material\":0,"
+         "\"mode\":4}]}],\"materials\":[{\"name\":\"m\"}],\"accessors\":[";
+    for (int m = 0; m < 2; ++m) {
+        if (m) j += ",";
+        j += "{\"bufferView\":" + std::to_string(m * 4) +
+             ",\"componentType\":5126,\"count\":27,\"type\":\"VEC3\"}";
+        j += ",{\"bufferView\":" + std::to_string(m * 4 + 1) +
+             ",\"componentType\":5126,\"count\":27,\"type\":\"VEC3\"}";
+        j += ",{\"bufferView\":" + std::to_string(m * 4 + 2) +
+             ",\"componentType\":5126,\"count\":27,\"type\":\"VEC2\"}";
+        j += ",{\"bufferView\":" + std::to_string(m * 4 + 3) +
+             ",\"componentType\":5125,\"count\":72,\"type\":\"SCALAR\"}";
+    }
+    j += "],\"bufferViews\":[";
+    for (int m = 0; m < 2; ++m) {
+        if (m) j += ",";
+        j += "{\"buffer\":0,\"byteOffset\":" + std::to_string(posOff[m]) +
+             ",\"byteLength\":324},{\"buffer\":0,\"byteOffset\":" +
+             std::to_string(nrmOff[m]) +
+             ",\"byteLength\":324},{\"buffer\":0,\"byteOffset\":" +
+             std::to_string(uvOff[m]) +
+             ",\"byteLength\":216},{\"buffer\":0,\"byteOffset\":" +
+             std::to_string(idxOff[m]) + ",\"byteLength\":288}";
+    }
+    j += "],\"buffers\":[{\"byteLength\":" + std::to_string(off) + "}]}";
+    while (j.size() % 4 != 0) j += ' ';
+    std::vector<u8> bin(static_cast<size_t>(off), 0);
+    for (int m = 0; m < 2; ++m) {
+        for (u32 i = 0; i < verts; ++i) {
+            const f32 p[3] = {static_cast<f32>(i % 3) - 1.0f,
+                              static_cast<f32>((i / 3) % 3) - 1.0f,
+                              static_cast<f32>((i / 9) % 3) - 1.0f};
+            const f32 n[3] = {0.0f, 1.0f, 0.0f};
+            const f32 uv[2] = {0.0f, 0.0f};
+            for (int k = 0; k < 3; ++k) {
+                std::memcpy(bin.data() + posOff[m] + u64(i) * 12 + k * 4,
+                            &p[k], 4);
+                std::memcpy(bin.data() + nrmOff[m] + u64(i) * 12 + k * 4,
+                            &n[k], 4);
+            }
+            std::memcpy(bin.data() + uvOff[m] + u64(i) * 8, uv, 8);
+        }
+        for (u32 t = 0; t < tris; ++t) {
+            for (int k = 0; k < 3; ++k) {
+                const u32 v = (t * 3u + static_cast<u32>(k)) % verts;
+                std::memcpy(bin.data() + idxOff[m] + (u64(t) * 3 + k) * 4,
+                            &v, 4);
+            }
+        }
+    }
+    std::vector<u8> glb;
+    auto u32push = [&glb](u32 v) {
+        for (int b = 0; b < 4; ++b) {
+            glb.push_back(static_cast<u8>((v >> (8 * b)) & 0xFF));
+        }
+    };
+    u32push(0x46546C67u); u32push(2);
+    u32push(static_cast<u32>(12 + 8 + j.size() + 8 + bin.size()));
+    u32push(static_cast<u32>(j.size()));
+    u32push(0x4E4F534Au);
+    glb.insert(glb.end(), j.begin(), j.end());
+    u32push(static_cast<u32>(bin.size()));
+    u32push(0x004E4942u);
+    glb.insert(glb.end(), bin.begin(), bin.end());
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) return false;
+    const bool ok = std::fwrite(glb.data(), 1, glb.size(), f) == glb.size();
+    std::fclose(f);
+    return ok;
+}
+
+// a leitura da meta de UMA peça (o helper das provas abaixo)
+bool pieceMeta(FsStorage& st, const std::string& rel, GMeshV3Meta& meta,
+               std::vector<GMeshV3Block>& blocks,
+               std::vector<std::string>& mats) {
+    std::vector<u8> gmesh;
+    if (!st.readBytes(rel, gmesh)) return false;
+    std::string err;
+    return readGMeshV3Meta(gmesh.data(), gmesh.size(), meta, blocks, mats,
+                           err);
+}
+
+// EXT-1 · o city EXPANDIDO: 72 PEÇAS com nomes, a flag em todas, a
+// verificação POR PEÇA, a geometria TOTAL == à do fundido, e o DEFAULT
+// FUNDIDO intocado (sem expandNodes: 1 ficheiro, expandNodes vazio)
+TEST(ext_uma_peça_por_nó_nomes_flag_e_geometria_igual_ao_fundido) {
+    const std::string dir = "/tmp/goni_ext1_" + std::to_string(::getpid());
+    rmRf(dir);
+    ASSERT(mkDir(dir));
+    elog::init((dir + "/logs").c_str());
+    const std::string src = dir + "/city.glb";
+    ASSERT(buildCityGlb(src));   // 72 nós «n<i>» × 1000 verts
+
+    FsStorage st((dir + "/proj").c_str());
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    const bool ok = convert::importFile(src, "city.glb", st, nullptr, out,
+                                        stats, err, nullptr, nullptr,
+                                        /*expandNodes=*/true);
+    if (!ok) {
+        std::printf("  [ext1-ERR] %.200s\n", err.c_str());
+    }
+    ASSERT(ok);
+    // UM .gmesh POR NÓ COM MESH: 72 peças com o NOME do nó no ficheiro
+    // (ASSERT = sem UB sob mutação — a lição do SAF-STREAM)
+    ASSERT(out.meshes.size() == 72u);
+    EXPECT(out.meshes[0] == "assets/city_n0.gmesh");
+    EXPECT(out.meshes[71] == "assets/city_n71.gmesh");
+    EXPECT(stats.meshes == 72u);
+    // OS REGISTROS do TIC: nomes do glTF PRESERVADOS, ordem dos nós
+    ASSERT(out.expandNodes.size() == 72u);
+    EXPECT(out.expandNodes[0].name == "n0");
+    EXPECT(out.expandNodes[71].name == "n71");
+    bool ordemOk = true;
+    for (size_t i = 0; i < out.expandNodes.size(); ++i) {
+        if (out.expandNodes[i].mesh != static_cast<i32>(i) ||
+            out.expandNodes[i].node != static_cast<i32>(i)) {
+            ordemOk = false;
+        }
+    }
+    EXPECT(ordemOk);   // expandNodes[i].mesh indexa out.meshes (a peça dele)
+    // o city é FLAT e sem transforms → o TRS do TIC é a identidade
+    EXPECT(out.expandNodes[0].translation.x == 0.0f);
+    EXPECT(out.expandNodes[0].scale.x == 1.0f);
+    // A LINHA CONTRATO do expand + a verificação POR PEÇA (72×)
+    EXPECT(fileHas(dir + "/logs/engine.log", "expandir nós=72 peça(s)"));
+    EXPECT(fileCount(dir + "/logs/engine.log", "verificado=1") >= 72);
+    // A FLAG em TODAS as peças (é ela que abre POR BLOCOS no runtime)
+    bool flagOk = true, vertsOk = true;
+    u64 sumVerts = 0;
+    for (const std::string& rel : out.meshes) {
+        GMeshV3Meta meta;
+        std::vector<GMeshV3Block> blocks;
+        std::vector<std::string> mats;
+        if (!pieceMeta(st, rel, meta, blocks, mats) ||
+            (meta.flags & kGmeshV3FlagPiece) == 0 || meta.blockCount < 1) {
+            flagOk = false;
+            continue;
+        }
+        sumVerts += meta.vertexCount;
+        if (meta.vertexCount != 1000) vertsOk = false;
+    }
+    EXPECT(flagOk);
+    EXPECT(vertsOk);
+    // A GEOMETRIA É A MESMA do fundido: a soma das peças == o total do
+    // merge (a duplicação entre blocos é do corte — o CONJUNTO é igual)
+    EXPECT(sumVerts == 72000u);
+    // O DEFAULT FUNDIDO intocado: sem expandNodes é 1 ficheiro, sem
+    // registros, SEM flag (o caminho vigente — byte a byte o de sempre)
+    {
+        FsStorage st2((dir + "/proj2").c_str());
+        convert::Output out2;
+        convert::Stats stats2;
+        std::string err2;
+        EXPECT(convert::importFile(src, "city.glb", st2, nullptr, out2,
+                                   stats2, err2, nullptr, nullptr,
+                                   /*expandNodes=*/false));
+        ASSERT(out2.meshes.size() == 1u);   // sem UB sob mutação
+        EXPECT(out2.meshes[0] == "assets/city.gmesh");
+        EXPECT(out2.expandNodes.empty());
+        GMeshV3Meta meta2;
+        std::vector<GMeshV3Block> blocks2;
+        std::vector<std::string> mats2;
+        EXPECT(pieceMeta(st2, out2.meshes[0], meta2, blocks2, mats2));
+        EXPECT((meta2.flags & kGmeshV3FlagPiece) == 0u);
+        EXPECT(meta2.vertexCount == sumVerts);   // o MESMO conjunto
+    }
+    elog::shutdown();
+    rmRf(dir);
+}
+
+// EXT-2 · a transformação do nó VAI NO TIC e a geometria fica CRUA: um
+// pai (10,0,0) com filho (0,5,0) — o registro do filho traz o TRS MUNDO
+// (10,5,0) e a PEÇA dele o AABB LOCAL [-1,1]³ (nunca o mundo baked — senão
+// a transformação aplicaria DUAS vezes; é ISTO que a mutação M-E2 caça)
+TEST(ext_transformação_do_nó_no_tic_e_geometria_crua) {
+    const std::string dir = "/tmp/goni_ext2_" + std::to_string(::getpid());
+    rmRf(dir);
+    ASSERT(mkDir(dir));
+    elog::init((dir + "/logs").c_str());
+    const std::string src = dir + "/hier.glb";
+    ASSERT(buildGlbHier(
+        "{\"mesh\":0,\"name\":\"pai\",\"translation\":[10,0,0],"
+        "\"children\":[1]}",
+        "{\"mesh\":1,\"name\":\"filho\",\"translation\":[0,5,0]}", src));
+
+    FsStorage st((dir + "/proj").c_str());
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    const bool ok = convert::importFile(src, "hier.glb", st, nullptr, out,
+                                        stats, err, nullptr, nullptr, true);
+    if (!ok) {
+        std::printf("  [ext2-ERR] %.200s\n", err.c_str());
+    }
+    ASSERT(ok);
+    ASSERT(out.meshes.size() == 2u);   // sem UB sob mutação
+    EXPECT(out.meshes[0] == "assets/hier_pai.gmesh");
+    EXPECT(out.meshes[1] == "assets/hier_filho.gmesh");
+    ASSERT(out.expandNodes.size() == 2u);
+    // «transformação do nó como Transform do TIC»: o MUNDO do filho é a
+    // cadeia composta (10,0,0)·(0,5,0) = (10,5,0) — o engine compõe flat,
+    // o registro traz o mundo para a peça desenhar no sítio EXATO
+    EXPECT(out.expandNodes[0].name == "pai");
+    EXPECT(out.expandNodes[1].name == "filho");
+    EXPECT(out.expandNodes[0].translation.x == 10.0f);
+    EXPECT(out.expandNodes[1].translation.x == 10.0f);
+    EXPECT(out.expandNodes[1].translation.y == 5.0f);
+    EXPECT(out.expandNodes[1].translation.z == 0.0f);
+    // a PEÇA do filho: AABB LOCAL [-1,1]³ — GEOMETRIA CRUA (o TRS viaja no
+    // TIC). Se viesse o mundo baked, o AABB seria [9,11]×[4,6]×[-1,1] e o
+    // desenho aplicaria a transformação DUAS vezes (a mutação M-E2)
+    {
+        GMeshV3Meta meta;
+        std::vector<GMeshV3Block> blocks;
+        std::vector<std::string> mats;
+        EXPECT(pieceMeta(st, out.meshes[1], meta, blocks, mats));
+        EXPECT(meta.aabbMin.x < -0.999f && meta.aabbMax.x > 0.999f);
+        EXPECT(meta.aabbMin.y < -0.999f && meta.aabbMax.y > 0.999f);
+        EXPECT(meta.aabbMin.z < -0.999f && meta.aabbMax.z > 0.999f);
+        EXPECT(meta.aabbMin.x > -1.001f && meta.aabbMax.x < 1.001f);
+    }
+    // a PEÇA do pai: também crua (o pai é o topo da cadeia — mundo == TRS)
+    {
+        GMeshV3Meta meta;
+        std::vector<GMeshV3Block> blocks;
+        std::vector<std::string> mats;
+        EXPECT(pieceMeta(st, out.meshes[0], meta, blocks, mats));
+        EXPECT(meta.aabbMin.x > -1.001f && meta.aabbMax.x < 1.001f);
+    }
+    // o TRS do registro RECONSTRÓI a matriz-mundo (a prova da decomposição)
+    {
+        const convert::Output::NodeOut& no = out.expandNodes[1];
+        const Mat4 rec =
+            Mat4::mul(Mat4::translation(no.translation.x, no.translation.y,
+                                        no.translation.z),
+                      Mat4::mul(no.rotation.toMat4(),
+                                Mat4::scale(no.scale.x, no.scale.y,
+                                            no.scale.z)));
+        EXPECT(std::fabs(rec.m[12] - 10.0f) < 1e-4f);
+        EXPECT(std::fabs(rec.m[13] - 5.0f) < 1e-4f);
+        EXPECT(std::fabs(rec.m[0] - 1.0f) < 1e-4f);
+    }
+    elog::shutdown();
+    rmRf(dir);
+}
+
+// EXT-3 · o SHEAR (escala não-uniforme do pai + rotação do filho): sem
+// representação TRS exata — a peça traz o MUNDO BAKED (o AABB é o da caixa
+// local transformada) e o registro fica com TRS IDENTIDADE (o desenho é
+// exato na mesma; o log DIZ — nunca silencioso)
+TEST(ext_shear_cai_no_bake_mundo_com_trs_identidade) {
+    const std::string dir = "/tmp/goni_ext3_" + std::to_string(::getpid());
+    rmRf(dir);
+    ASSERT(mkDir(dir));
+    elog::init((dir + "/logs").c_str());
+    const std::string src = dir + "/shear.glb";
+    // pai: escala (1,3,1); filho: rotação 45° em Z (quat 0.38268/0.92388)
+    ASSERT(buildGlbHier(
+        "{\"mesh\":0,\"name\":\"pai\",\"scale\":[1,3,1],\"children\":[1]}",
+        "{\"mesh\":1,\"name\":\"filho\","
+        "\"rotation\":[0,0,0.38268343,0.92387953]}", src));
+
+    FsStorage st((dir + "/proj").c_str());
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    const bool ok = convert::importFile(src, "shear.glb", st, nullptr, out,
+                                        stats, err, nullptr, nullptr, true);
+    if (!ok) {
+        std::printf("  [ext3-ERR] %.200s\n", err.c_str());
+    }
+    ASSERT(ok);
+    ASSERT(out.expandNodes.size() == 2u);   // sem UB sob mutação
+    // o FILHO tem shear no mundo → TRS identidade no registro + o aviso
+    const convert::Output::NodeOut& filho = out.expandNodes[1];
+    EXPECT(filho.translation.x == 0.0f);
+    EXPECT(filho.rotation.w == 1.0f && filho.rotation.z == 0.0f);
+    EXPECT(filho.scale.x == 1.0f && filho.scale.y == 1.0f);
+    EXPECT(fileHas(dir + "/logs/engine.log", "tem SHEAR"));
+    EXPECT(fileHas(dir + "/logs/engine.log", "'filho'"));
+    // a peça do FILHO: o MUNDO BAKED — o AABB da caixa [-1,1]³ rodada 45°
+    // em Z e depois escalada (1,3,1): x∈[−√2,√2], y∈[−3√2,3√2], z∈[−1,1]
+    {
+        GMeshV3Meta meta;
+        std::vector<GMeshV3Block> blocks;
+        std::vector<std::string> mats;
+        EXPECT(pieceMeta(st, out.meshes[1], meta, blocks, mats));
+        const f32 r2 = 1.4142136f, r2x3 = 4.2426407f;
+        EXPECT(meta.aabbMin.x > -r2 - 2e-3f && meta.aabbMax.x < r2 + 2e-3f);
+        EXPECT(meta.aabbMin.y > -r2x3 - 2e-3f &&
+               meta.aabbMax.y < r2x3 + 2e-3f);
+        EXPECT(meta.aabbMin.z > -1.001f && meta.aabbMax.z < 1.001f);
+        EXPECT(meta.aabbMax.y > r2x3 - 2e-3f);   // é o MUNDO, não o local
+    }
+    // o PAI (só escala — TRS exato): registro com a escala, peça CRUA
+    {
+        const convert::Output::NodeOut& pai = out.expandNodes[0];
+        EXPECT(pai.scale.y == 3.0f);
+        EXPECT(pai.rotation.w == 1.0f);
+        GMeshV3Meta meta;
+        std::vector<GMeshV3Block> blocks;
+        std::vector<std::string> mats;
+        EXPECT(pieceMeta(st, out.meshes[0], meta, blocks, mats));
+        EXPECT(meta.aabbMin.y > -1.001f && meta.aabbMax.y < 1.001f);
+    }
+    elog::shutdown();
+    rmRf(dir);
+}
+
+// EXT-4 · o gltfExpandInstantiate PURO (GL-free): um TIC por registro com
+// nome/TRS/ref da peça; o registro estrutural (mesh=-1) NÃO vira TIC; o
+// bind nullptr NÃO aborta (o meshPath fica para o reload)
+TEST(ext_gltfexpandinstantiate_um_tic_por_nó) {
+    Scene scene;
+    std::vector<convert::Output::NodeOut> nodes(3);
+    nodes[0].name = "c0";
+    nodes[0].mesh = 0;
+    nodes[0].translation = Vec3{1.0f, 2.0f, 3.0f};
+    nodes[1].name = "c1";
+    nodes[1].mesh = 1;
+    nodes[1].rotation = Quat::axisAngle(Vec3{0.0f, 0.0f, 1.0f}, 1.5708f);
+    nodes[1].scale = Vec3{2.0f, 2.0f, 2.0f};
+    nodes[2].name = "estrutural";
+    nodes[2].mesh = -1;   // sem peça — não vira TIC
+    const std::vector<std::string> refs = {"assets/peça0.gmesh",
+                                           "assets/peça1.gmesh"};
+    // (a) SEM binder: os TICs entram na mesma (meshPath p/ o reload)
+    {
+        GltfInstantiateCtx ctx;
+        const std::vector<Handle> tics =
+            gltfExpandInstantiate(scene, nodes, refs, ctx);
+        EXPECT(tics.size() == 2u);
+        const Tic* t0 = scene.get(tics[0]);
+        const Tic* t1 = scene.get(tics[1]);
+        EXPECT(t0 != nullptr && t0->name == "c0");
+        EXPECT(t1 != nullptr && t1->name == "c1");
+        const Transform3D* tr0 = t0->getComponent<Transform3D>();
+        const Transform3D* tr1 = t1->getComponent<Transform3D>();
+        EXPECT(tr0 != nullptr && tr0->pos.x == 1.0f && tr0->pos.z == 3.0f);
+        EXPECT(tr1 != nullptr && tr1->scale.x == 2.0f);
+        const MeshRenderer* mr0 = t0->getComponent<MeshRenderer>();
+        const MeshRenderer* mr1 = t1->getComponent<MeshRenderer>();
+        EXPECT(mr0 != nullptr && mr0->meshPath == refs[0]);
+        EXPECT(mr1 != nullptr && mr1->meshPath == refs[1]);
+        EXPECT(mr0->mesh == nullptr);   // sem bind — fica o meshPath
+        EXPECT(mr0->material == nullptr);
+        // FLAT: os TICs na RAIZ (o engine não compõe pais — o registro JÁ
+        // traz a transformação mundo; hierarquia entre TICs seria dobrar)
+        EXPECT(t0->parent == -1 && t1->parent == -1);
+    }
+    // (b) COM binder: o mesh/material ligam quando o bind devolve
+    {
+        Scene scene2;
+        GltfInstantiateCtx ctx;
+        int chamadas = 0;
+        struct Cnt {
+            int* n;
+        } cnt{&chamadas};
+        ctx.user = &cnt;
+        ctx.bindMesh = [](void* user, const std::string& ref) -> Mesh* {
+            ++*static_cast<Cnt*>(user)->n;   // (o apontador desreferenciado
+                                             // — nunca o ++ no ponteiro)
+            (void)ref;
+            return reinterpret_cast<Mesh*>(0x1234);   // sentinela (nunca
+                                                      // desreferenciada)
+        };
+        ctx.material = reinterpret_cast<Material*>(0x5678);
+        const std::vector<Handle> tics =
+            gltfExpandInstantiate(scene2, nodes, refs, ctx);
+        EXPECT(tics.size() == 2u);
+        EXPECT(chamadas == 2);
+        const MeshRenderer* mr =
+            scene2.get(tics[0])->getComponent<MeshRenderer>();
+        EXPECT(mr->mesh == reinterpret_cast<Mesh*>(0x1234));
+        EXPECT(mr->material == reinterpret_cast<Material*>(0x5678));
+    }
+}
+
+// EXT-5 · a PEÇA abre POR BLOCOS no GpuAssets (kGmeshV3FlagPiece): mesmo
+// PEQUENA (27 verts) o caminho é o BlockMesh (culling por TIC + lazy +
+// LRU) — e o fundido pequeno (flag 0) segue o mesh único de sempre (o
+// CONTRASTE prova que é a FLAG que decide — a mutação M-E3 caça ISTO)
+TEST(ext_a_peça_abre_por_blocos_no_gpuassets) {
+    glstub::reset();
+    const std::string dir = "/tmp/goni_ext5_" + std::to_string(::getpid());
+    rmRf(dir);
+    ASSERT(mkDir(dir));
+    elog::init((dir + "/logs").c_str());
+    const std::string src = dir + "/hier.glb";
+    ASSERT(buildGlbHier(
+        "{\"mesh\":0,\"name\":\"pai\",\"children\":[1]}",
+        "{\"mesh\":1,\"name\":\"filho\",\"translation\":[0,5,0]}", src));
+
+    FsStorage st((dir + "/proj").c_str());
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    ASSERT(convert::importFile(src, "hier.glb", st, nullptr, out, stats, err,
+                               nullptr, nullptr, true));
+    // o fundido pequenino para o CONTRASTE
+    {
+        FsStorage st2((dir + "/proj2").c_str());
+        convert::Output out2;
+        convert::Stats stats2;
+        std::string err2;
+        ASSERT(convert::importFile(src, "hier.glb", st2, nullptr, out2,
+                                   stats2, err2, nullptr, nullptr, false));
+        std::vector<u8> gmesh;
+        ASSERT(st2.readBytes(out2.meshes[0], gmesh));
+        FakeStorage fake;
+        fake.files[out2.meshes[0]].assign(
+            reinterpret_cast<const char*>(gmesh.data()), gmesh.size());
+        ResourceManager rm;
+        rm.setStorage(&fake);
+        GpuAssets gpu;
+        gpu.init(&rm);
+        Mesh* m = gpu.mesh(out2.meshes[0]);
+        ASSERT(m != nullptr);
+        // SEM a flag → mesh único de sempre (54 verts em RAM, SEM culling)
+        EXPECT(gpu.blockMeshIfOpen(out2.meshes[0]) == nullptr);
+        EXPECT(gpu.blockMeshCount() == 0u);
+    }
+    // as PEÇAS: abertas POR BLOCOS (a flag manda, mesmo com 27 verts)
+    ResourceManager rm;
+    rm.setStorage(&st);
+    GpuAssets gpu;
+    gpu.init(&rm);
+    u32 porBlocos = 0;
+    for (const std::string& rel : out.meshes) {
+        Mesh* hull = gpu.mesh(rel);
+        ASSERT(hull != nullptr);
+        if (gpu.blockMeshIfOpen(rel) != nullptr) ++porBlocos;
+    }
+    EXPECT(porBlocos == 2u);
+    EXPECT(gpu.blockMeshCount() == 2u);
     elog::shutdown();
     rmRf(dir);
 }

@@ -966,11 +966,14 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                 // A mensagem NUNCA culpa o storage (o streaming corre sob
                 // QUALQUER armazenamento desde o hotfix SAF-STREAM).
                 if (!out.skins.empty() || jnt.size() == pos.size() * 4) {
-                    err = "pele ainda não suportada no streaming (BACKLOG) "
-                          "— o modelo com pele passa o teto de 65535 "
-                          "vértices do caminho de mesh única (o merge é o "
-                          "que preserva joints/weights; o corte em blocos "
-                          "da pele está no BACKLOG do 0.10-M)";
+                    // 0.10-A (SKELETAL) — o apontador EXPLÍCITO que o dono
+                    // pediu: a mensagem nomeia a entrada do BACKLOG
+                    err = "pele ainda não suportada no streaming (BACKLOG "
+                          "0.10-A) — o modelo com pele passa o teto de "
+                          "65535 vértices do caminho de mesh única (o "
+                          "merge é o que preserva joints/weights; ossos+"
+                          "pesos em blocos e skinning por GPU estão no "
+                          "BACKLOG 0.10-A do 0.10-M)";
                 } else {
                     err = "o mesh passa o teto de 65535 vértices do "
                           "caminho de mesh única SEM pele e SEM falta de "

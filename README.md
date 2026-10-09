@@ -34,6 +34,62 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.10.5 — 0.10-M EXT: IMPORT DE NÓS COMO SUB-ÁRVORE (o «expandir nós» — um TIC por nó com mesh)
+
+**O que o dono pediu** (BACKLOG 0.10-M-ext): «opção no import "expandir
+nós" que cria um TIC por nó com mesh (nomes do glTF preservados,
+transformação do nó como Transform do TIC), em vez de fundir num TIC só.
+Default fundido por performance mobile; expandido para peças editáveis.
+Pin: city scene expandido = 72 TICs com nomes, culling por TIC verde.»
+
+- **A opção**: o toggle «expandir nós» nas Definições (secção Áudio, ao
+  lado de «fonte após import»; persistido em settings.goni como
+  `expandNodes=0/1`). **Default OFF = o FUNDIDO de sempre** — o caminho
+  vigente fica byte a byte idêntico (R-039/R-040/R-041 intocadas: o
+  driver só entra com o setting ligado).
+- **O driver das peças** (`convertGltfToV3Nodes`, GmeshV3Stream.cpp):
+  agrupa as primRefs por nó e faz de CADA nó-com-mesh uma chamada
+  COMPLETA ao `convertGltfToV3` de sempre — corte/assembly/verificação
+  bit a bit POR PEÇA (a MESMA rotina, zero código novo de corte) —
+  escrevendo `assets/<stem>_<nomeDoNó>.gmesh` (nomes do glTF no nome do
+  ficheiro, dedup determinístico `_<i>` quando repete) com a flag
+  `kGmeshV3FlagPiece` (bit1 do meta v3: «este .gmesh é UM NÓ — abre por
+  BLOCOS mesmo pequeno»).
+- **A transformação no TIC, a geometria CRUA**: o NodeOut do registro
+  traz o TRS MUNDO do nó decomposto (`mat4ToTRS` — a matriz vem da
+  `worldChainOf`, a MESMA rotina do bake: igualdade garantida) e a peça
+  sai no espaço LOCAL (bake identidade) — o engine compõe flat
+  (TransformSystem não resolve pais), é isso que faz a peça desenhar no
+  sítio EXATO com a transformação no TIC. Nós com SHEAR no mundo (escala
+  não-uniforme do pai + rotação do filho) caem no bake do mundo com TRS
+  identidade — o desenho é exato na mesma e o log DIZ.
+- **A sub-árvore na cena** (`gltfExpandInstantiate`, GL-free): o
+  importJobFinish cria os TICs (nome, TRS, MeshRenderer com a ref da
+  peça) pelo binder `GpuAssets::blockHull` — SEM diálogo «aplicar ao
+  TIC?» (os TICs NOVOS são o resultado), com o fit único (a caixa do
+  modelo em mundo define o fator; `pos*=s, scale*=s` em cada TIC novo —
+  o layout relativo não parte), o 1º TIC selecionado e o toast
+  «expandido: N TIC(s) na cena».
+- **O culling por TIC** (o pin): cada peça abre POR BLOCOS no
+  `GpuAssets::mesh` (a flag decide — mesmo com 27 verts) → o frustum
+  AABB por bloco com o model do TIC dono é CULLING POR TIC; o MESMO
+  caminho lazy+LRU do PASSO 4. O «reconverter» também honra o setting.
+- **O 0.10-A apontado**: a mensagem «pele ainda não suportada no
+  streaming (BACKLOG 0.10-A)» nomeia a entrada SKELETAL do BACKLOG
+  (ossos+pesos em blocos, skinning por GPU UBO/SSBO, clips do glTF).
+- **Provas**: 5 TESTs `ext_*` no test_gmeshv3stream (72 peças com nomes
+  + flag + verificação POR PEÇA + geometria TOTAL == à do fundido; a
+  transformação no TIC e a geometria CRUA no AABB local; o shear no bake
+  com TRS identidade; o gltfExpandInstantiate puro; a peça POR BLOCOS
+  no GpuAssets com o CONTRASTE fundido) · c33 FASE 22 (+19 checks,
+  724→743: O PINO — o city espalhado em 72 faixas vira 72 TICs com nomes
+  «c0..c71» e o frustum estreito culle 71 e deixa 1) · mutações
+  M-E1/M-E2/M-E3/M-E4 (setting ignorado / mundo baked em vez de cru /
+  flag nunca escrita / nomes mortos — todas vermelho→verde) ·
+  versionCode **60**. Relatório:
+  `docs/RELATORIO-0.10-M-EXT-IMPORT-NOS.md` · **PÁRA — o PASSO 5
+  (texturas ASTC) continua à espera do OK do dono.**
+
 ## 0.10.4c — 0.10-M HOTFIX SAF-STREAM: o city importa sob SAF (o gate content:// morreu)
 
 **O que o dono reportou** (entre o PASSO 4 e o PASSO 5): sob SAF o

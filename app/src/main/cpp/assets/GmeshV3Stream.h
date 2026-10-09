@@ -96,6 +96,9 @@ struct V3RangeSource {
 //   `binDroppable` — false quando `bin` é HEAP (data: URI exportado pelo
 //                parse): o MADV_DONTNEED só é legítimo em mmap de ficheiro
 //                (a lição F3 — em heap zera páginas de vizinhos).
+//   `metaFlags` — bits OR'd no meta.flags do ficheiro (0.10-M EXT: o
+//                driver das peças passa kGmeshV3FlagPiece; o caminho
+//                fundido passa 0 — NADA muda para ele).
 // Escreve o ficheiro final por openWriteStream/writeStreamChunk do
 // storage (nunca o ficheiro inteiro em RAM). onProgress(done,total) é
 // chamado por fase com o total de triângulos; devolve false = CANCELADO
@@ -108,6 +111,38 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
                      bool (*onProgress)(void*, u64, u64) = nullptr,
                      void* user = nullptr,
                      const V3RangeSource* ranges = nullptr,
-                     bool binDroppable = true);
+                     bool binDroppable = true,
+                     u32 metaFlags = 0);
+
+// ---- 0.10-M (EXT) · IMPORT DE NÓS COMO SUB-ÁRVORE --------------------------
+// O DRIVER do import EXPANDIDO: em vez de UM .gmesh fundido, UMA PEÇA por
+// NÓ COM MESH — «assets/<stem>_<nomeDoNó>.gmesh» (nomes do glTF
+// preservados no nome do ficheiro E no Output::expandNodes; dedup
+// determinístico "_<i>" quando o nome repete). Cada peça é uma chamada
+// COMPLETA ao convertGltfToV3 (corte + assembly + VERIFICAÇÃO bit a bit
+// por peça — a mesma rotina, o mesmo contrato) com:
+//   • a GEOMETRIA CRUA no espaço LOCAL do nó (primRefs com node=-1 → o
+//     bake é a IDENTIDADE) quando a transformação MUNDO do nó é TRS
+//     exata — a transformação vai para o Transform3D do TIC (o registro
+//     NodeOut traz o TRS MUNDO decomposto: o engine compõe flat,
+//     TransformSystem não resolve pais — a peça desenha no sítio EXATO);
+//   • o MUNDO BAKED na geometria (primRefs com o nó de sempre) quando a
+//     cadeia produz SHEAR (escala não-uniforme do pai + rotação do filho
+//     — sem representação TRS exata): o NodeOut fica com TRS identidade e
+//     o log DIZ (honesto — a peça desenha exata na mesma, só não é
+//     editável por TRS);
+//   • kGmeshV3FlagPiece no meta.flags de TODAS as peças (o runtime abre-
+//     as POR BLOCOS mesmo pequenas — o culling por TIC do import).
+// O DEFAULT FUNDIDO não passa por AQUI (convertGltfCommon chama o
+// convertGltfToV3 de sempre — byte a byte idêntico ao caminho vigente).
+bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
+                           const u8* bin, u64 binLen, u64 fileBytes,
+                           const std::string& stem, ProjectStorage& st,
+                           convert::Output& out, convert::Stats& stats,
+                           V3StreamResult& result, std::string& err,
+                           bool (*onProgress)(void*, u64, u64) = nullptr,
+                           void* user = nullptr,
+                           const V3RangeSource* ranges = nullptr,
+                           bool binDroppable = true);
 
 } // namespace vv

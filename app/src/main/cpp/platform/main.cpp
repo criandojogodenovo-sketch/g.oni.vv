@@ -211,7 +211,11 @@ char g_selectedName[40] = "";   // nome do TIC p/ o ficheiro de export
 // Persistido por projeto em settings.goni ("keepSource=0/1").
 // 0.8.11: + "audioMaster=<0..1>" (o volume geral — as DEFINIÇÕES vivem
 // junto do áudio, mais abaixo, porque lêem o misturador global)
+// 0.10-M (EXT): + "expandNodes=0/1" — o import EXPANDIDO (BACKLOG
+// 0.10-M-ext feito): false (default) = o FUNDIDO de sempre por
+// performance mobile; true = um TIC por nó com mesh (peças editáveis)
 bool g_keepSource = true;
+bool g_expandNodes = false;
 void loadProjectSettings();   // definido após o bloco de áudio (usa o mixer)
 void saveProjectSettings();
 
@@ -451,8 +455,12 @@ static void reconvertAllAssets() {
         convert::Output out;
         convert::Stats stats;
         std::string err;
+        // 0.10-M (EXT): a reconversão honra o setting «expandir nós» —
+        // quem importou fundido re-converte fundido; quem mudou o
+        // setting, re-converte no modo novo (o log do import diz qual)
         if (convert::reconvertFile("source/" + rel, *g_storage, nullptr, out,
-                                   stats, err)) {
+                                   stats, err, nullptr, nullptr,
+                                   g_expandNodes)) {
             ++converted;
         } else {
             ++failed;
@@ -1451,10 +1459,13 @@ void refreshAudioCatalog() {
 void loadProjectSettings() {
     g_keepSource = true;
     g_audioMaster = 1.0f;
+    g_expandNodes = false;
     if (g_storage) {
         std::string text;
         if (g_storage->readText("settings.goni", text)) {
             g_keepSource = text.find("keepSource=0") == std::string::npos;
+            // 0.10-M (EXT): o modo do import (fundido = default mobile)
+            g_expandNodes = text.find("expandNodes=1") != std::string::npos;
             const size_t p = text.find("audioMaster=");
             if (p != std::string::npos) {
                 const f32 v = static_cast<f32>(std::atof(text.c_str() + p + 12));
@@ -1470,9 +1481,11 @@ void saveProjectSettings() {
     if (!g_storage) {
         return;
     }
-    char buf[64];
-    std::snprintf(buf, sizeof(buf), "keepSource=%s\naudioMaster=%.2f\n",
-                  g_keepSource ? "1" : "0", g_audioMaster);
+    char buf[96];
+    std::snprintf(buf, sizeof(buf),
+                  "keepSource=%s\naudioMaster=%.2f\nexpandNodes=%s\n",
+                  g_keepSource ? "1" : "0", g_audioMaster,
+                  g_expandNodes ? "1" : "0");
     g_storage->writeText("settings.goni", buf);
 }
 
@@ -2522,14 +2535,18 @@ bool importJobStart(const fileapi::DirEntry& e) {
     TexturePipeline* pipe = g_pipeline.get();
     const std::string srcPath = e.path;
     const std::string srcName = safe;
-    g_importJob.worker = std::thread([st, pipe, srcPath, srcName]() {
+    // 0.10-M (EXT) — o modo do import capturado NO LANÇAMENTO (o setting
+    // pode mudar durante o job; o job corre com o que o dono escolheu)
+    const bool expandNodes = g_expandNodes;
+    g_importJob.worker = std::thread([st, pipe, srcPath, srcName,
+                                      expandNodes]() {
         // cópia do estado do job para o LOCAL (o g_importJob fica estável
         // para o progresso em atómicos; o resultado escreve-se no fim)
         convert::Output out;
         convert::Stats stats;
         std::string err;
         convert::importFile(srcPath, srcName, *st, pipe, out, stats, err,
-                            &importJobProgress, &g_importJob);
+                            &importJobProgress, &g_importJob, expandNodes);
         g_importJob.out = std::move(out);
         g_importJob.stats = stats;
         g_importJob.err = std::move(err);
@@ -2708,6 +2725,114 @@ void importJobFinish() {
         elog::info("import: %u irmao(s) do .gltf copiado(s) para source/ "
                    "(o reconvert funciona sem a pasta original)",
                    g_importJob.stats.siblings);
+    }
+    // ---- 0.10-M (EXT) · A SUB-ÁRVORE ENTRA NA CENA -----------------------
+    // O import EXPANDIDO (setting «expandir nós»): um TIC por nó com mesh
+    // — nomes do glTF preservados, a transformação do nó no Transform3D, o
+    // MeshRenderer com a ref da PEÇA. As peças abrem POR BLOCOS
+    // (kGmeshV3FlagPiece → blockHull): frustum por bloco = CULLING POR
+    // TIC, o MESMO caminho do modelo grande do PASSO 4. SEM diálogo
+    // «aplicar ao TIC?» — os TICs NOVOS é que são o resultado.
+    if (!out.expandNodes.empty()) {
+        struct ExpandBindCtx {
+            GpuAssets* gpu;
+        } bctx{&g_gpu};
+        GltfInstantiateCtx ictx;
+        ictx.user = &bctx;
+        ictx.bindMesh = [](void* user, const std::string& ref) -> Mesh* {
+            // blockHull: abre a peça pela TABELA (zero dados) + cria o
+            // hull de bounds — o blockRebind do ponto seguro do PRÓXIMO
+            // frame liga o BlockMesh* ao MeshRenderer (este frame ainda
+            // corre com o blocks==null dos TICs recém-nascidos)
+            return static_cast<ExpandBindCtx*>(user)->gpu->blockHull(ref);
+        };
+        ictx.material = g_renderer.litMaterial();
+        const std::vector<Handle> created =
+            gltfExpandInstantiate(g_scene, out.expandNodes, out.meshes, ictx);
+        // o FIT único (o MESMO alvo do applyAssetPick 0.8.9): a caixa do
+        // modelo INTEIRO em mundo (união das PEÇAS novas transformadas
+        // pelos seus TICs) define o fator — aplicado a CADA TIC novo como
+        // pos*=s e scale*=s (a translação FORA do TRS faz o conjunto
+        // encolher NO SÍTIO, sem partir o layout relativo; o resto da
+        // cena NÃO é tocado — só os handles que ACABARAM de nascer)
+        if (!created.empty()) {
+            Vec3 mn{1e30f, 1e30f, 1e30f}, mx{-1e30f, -1e30f, -1e30f};
+            for (const Handle h : created) {
+                const Tic* owner = g_scene.get(h);
+                const MeshRenderer* mr =
+                    owner ? owner->getComponent<MeshRenderer>() : nullptr;
+                // o BlockMesh da PEÇA pelo meshPath (o blockRebind deste
+                // frame correu ANTES dos TICs existirem — o blocks* ainda
+                // é null; a abertura do binder JÁ deixou o BlockMesh no
+                // mapa do GpuAssets, e é ELE que tem o AABB do meta)
+                const BlockMesh* bm =
+                    mr ? (mr->blocks ? mr->blocks
+                                     : g_gpu.blockMeshIfOpen(mr->meshPath))
+                       : nullptr;
+                const Transform3D* tr =
+                    owner ? owner->getComponent<Transform3D>() : nullptr;
+                if (!bm || !tr) {
+                    continue;
+                }
+                const Vec3 lo = bm->boundsMin();
+                const Vec3 hi = bm->boundsMax();
+                const Vec3 corn[8] = {
+                    {lo.x, lo.y, lo.z}, {hi.x, lo.y, lo.z},
+                    {lo.x, hi.y, lo.z}, {hi.x, hi.y, lo.z},
+                    {lo.x, lo.y, hi.z}, {hi.x, lo.y, hi.z},
+                    {lo.x, hi.y, hi.z}, {hi.x, hi.y, hi.z}};
+                for (const Vec3& c : corn) {
+                    const Vec3 w{
+                        tr->world.m[0] * c.x + tr->world.m[4] * c.y +
+                            tr->world.m[8] * c.z + tr->world.m[12],
+                        tr->world.m[1] * c.x + tr->world.m[5] * c.y +
+                            tr->world.m[9] * c.z + tr->world.m[13],
+                        tr->world.m[2] * c.x + tr->world.m[6] * c.y +
+                            tr->world.m[10] * c.z + tr->world.m[14]};
+                    mn.x = (std::min)(mn.x, w.x);
+                    mn.y = (std::min)(mn.y, w.y);
+                    mn.z = (std::min)(mn.z, w.z);
+                    mx.x = (std::max)(mx.x, w.x);
+                    mx.y = (std::max)(mx.y, w.y);
+                    mx.z = (std::max)(mx.z, w.z);
+                }
+            }
+            const Vec3 ext{mx.x - mn.x, mx.y - mn.y, mx.z - mn.z};
+            const f32 maior =
+                ext.x > ext.y ? (ext.x > ext.z ? ext.x : ext.z)
+                              : (ext.y > ext.z ? ext.y : ext.z);
+            f32 s = 1.0f;
+            if (maior > 1e-6f && std::isfinite(maior)) {
+                s = editor::kImportTargetSize / maior;
+                if (!std::isfinite(s) || s <= 0.0f) {
+                    s = 1.0f;   // defesa: geometria absurda = sem fit
+                }
+            }
+            if (s != 1.0f) {
+                for (const Handle h : created) {
+                    Tic* owner = g_scene.get(h);
+                    Transform3D* tr =
+                        owner ? owner->getComponent<Transform3D>() : nullptr;
+                    if (tr) {
+                        tr->pos = Vec3{tr->pos.x * s, tr->pos.y * s,
+                                       tr->pos.z * s};
+                        tr->scale = Vec3{tr->scale.x * s, tr->scale.y * s,
+                                         tr->scale.z * s};
+                        tr->updateWorld();
+                    }
+                }
+            }
+            // o 1º TIC selecionado (o dono VÊ a sub-árvore no inspector)
+            g_editor.selected = created[0];
+        }
+        char emsg[128];
+        std::snprintf(emsg, sizeof(emsg), "expandido: %u TIC(s) na cena",
+                      static_cast<unsigned>(out.expandNodes.size()));
+        showToast(emsg);
+        elog::info("import: EXPANDIDO — %u TIC(s) criados (um por nó com "
+                   "mesh; nomes do glTF; culling por TIC pelos blocos)",
+                   static_cast<unsigned>(out.expandNodes.size()));
+        return;   // SEM diálogo «aplicar ao TIC?» — os TICs são o resultado
     }
     Tic* tsel = g_scene.get(g_editor.selected);
     if (tsel && tsel->getComponent<MeshRenderer>() &&
@@ -5603,6 +5728,7 @@ void frame() {
         sctx.soSha = buildinfo::g_soSha;
         sctx.storageMode = modeText;
         sctx.keepSource = g_keepSource;
+        sctx.expandNodes = g_expandNodes;   // 0.10-M (EXT): o modo do import
         sctx.audioMaster = g_audioMaster;
         sctx.immersive = g_immersive;
         sctx.allFilesGranted = g_perm.mode() == storage::Mode::AllFiles;
@@ -5628,6 +5754,23 @@ void frame() {
                 showToast(g_immersive ? "imersivo: sim" : "imersivo: não");
                 elog::info("ui: modo imersivo = %s",
                            g_immersive ? "on" : "off");
+                break;
+            }
+            case editor::settings::kToggleExpandNodes: {
+                // 0.10-M (EXT) — o modo do IMPORT (persistido no projeto):
+                // fundido (default — performance mobile) ↔ expandido (um
+                // TIC por nó com mesh, peças editáveis). O PRÓXIMO import
+                // usa a escolha (o job captura-a no lançamento); o
+                // «reconverter assets» também a honra
+                g_expandNodes = !g_expandNodes;
+                saveProjectSettings();
+                showToast(g_expandNodes
+                              ? "import: expandir nós (peças)"
+                              : "import: fundido (default)");
+                elog::info("import: modo expandir nós = %s (o próximo "
+                           "import e o reconverter usam ISTO — o fundido é "
+                           "o default de performance mobile)",
+                           g_expandNodes ? "on" : "off");
                 break;
             }
             case editor::settings::kAllFilesPressed: {

@@ -98,6 +98,16 @@ constexpr u32    kGmeshV3BlockVertexCap = 65535;  // o teto configurável
 constexpr u32    kGmeshV3MaxAttrs = 8;
 constexpr u32    kGmeshV3BlockEntryBytes = 80;    // entrada da tabela
 
+// 0.10-M (EXT) — os bits do campo `flags` do meta v3. bit0 = skinned (o
+// de sempre). bit1 = PEÇA do import expandido (0.10-M-ext: este .gmesh
+// é UM NÓ do modelo — «assets/cidade_c7.gmesh»; quem o ABRE deve usar o
+// caminho POR BLOCOS do BlockMesh mesmo sendo pequeno, porque é isso que
+// dá o culling por TIC do import expandido — ver GpuAssets::mesh e
+// GMESH_formato.md §EXPANDIR-NÓS). Ficheiros merged (o default) ficam a 0
+// — NADA muda para eles.
+constexpr u32 kGmeshV3FlagSkinned = 0x1u;
+constexpr u32 kGmeshV3FlagPiece   = 0x2u;
+
 // semânticas de atributo (o layout é DESCRITO no header — acrescentar um
 // atributo NÃO muda a versão; um leitor que não conheça a semântica usa
 // o tamanho do descritor para saltar)
@@ -118,7 +128,7 @@ struct GMeshV3Attr {
 };
 
 struct GMeshV3Meta {
-    u32 flags = 0;   // bit0 = skinned (bones+weights por vértice)
+    u32 flags = 0;   // bits: kGmeshV3FlagSkinned | kGmeshV3FlagPiece
     u32 blockVertexCap = kGmeshV3BlockVertexCap;
     u64 vertexCount = 0;   // TOTAL (pode passar 2^32 — é o ponto do v3)
     u64 indexCount = 0;    // TOTAL (múltiplo de 3)

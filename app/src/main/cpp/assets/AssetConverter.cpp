@@ -693,7 +693,8 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
                        TexturePipeline* pipeline, Output& out, Stats& stats,
                        std::string& err,
                        bool (*onProgress)(void*, u64, u64) = nullptr,
-                       void* user = nullptr) {
+                       void* user = nullptr,
+                       bool expandNodes = false) {
     GltfRangeLoader loader;
     FileRangeCtx ctx;
     ctx.f = binFile;
@@ -965,11 +966,21 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
             return false;
         }
         V3StreamResult res;
-        const bool ok =
-            convertGltfToV3(model, doc, bin, binLenEff, fileBytes,
-                            stem, st, out, stats, res, err, onProgress, user,
-                            rangeSrc.fn != nullptr ? &rangeSrc : nullptr,
-                            binDroppable);
+        // 0.10-M (EXT) — IMPORT DE NÓS COMO SUB-ÁRVORE: o driver das
+        // PEÇAS (uma por nó com mesh — nomes preservados, TRS no NodeOut,
+        // kGmeshV3FlagPiece, verificação POR PEÇA). O DEFAULT FUNDIDO é
+        // a chamada de sempre — byte a byte idêntico ao caminho vigente
+        // (o expand nunca LHE toca: R-039/R-040/R-041 ficam verdes).
+        const bool ok = expandNodes
+            ? convertGltfToV3Nodes(model, doc, bin, binLenEff, fileBytes,
+                                   stem, st, out, stats, res, err,
+                                   onProgress, user,
+                                   rangeSrc.fn != nullptr ? &rangeSrc : nullptr,
+                                   binDroppable)
+            : convertGltfToV3(model, doc, bin, binLenEff, fileBytes,
+                              stem, st, out, stats, res, err, onProgress, user,
+                              rangeSrc.fn != nullptr ? &rangeSrc : nullptr,
+                              binDroppable);
         if (map != nullptr) {
             fileapi::unmapFile64(map, mapLen);
         }
@@ -1058,11 +1069,14 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
                 // geometria num buffer que não o 0. NUNCA culpa o storage.
                 if (!model.skins.empty() || merged.skinned() ||
                     !src.skinJoints.empty()) {
-                    err = "pele ainda não suportada no streaming (BACKLOG) "
-                          "— o modelo com pele passa o teto de 65535 "
-                          "vértices do caminho de mesh única (o merge é o "
-                          "que preserva joints/weights; a pele em blocos "
-                          "está no BACKLOG do 0.10-M)";
+                    // 0.10-A (SKELETAL) — o apontador EXPLÍCITO que o dono
+                    // pediu: a mensagem nomeia a entrada do BACKLOG
+                    err = "pele ainda não suportada no streaming (BACKLOG "
+                          "0.10-A) — o modelo com pele passa o teto de "
+                          "65535 vértices do caminho de mesh única (o "
+                          "merge é o que preserva joints/weights; ossos+"
+                          "pesos em blocos e skinning por GPU estão no "
+                          "BACKLOG 0.10-A do 0.10-M)";
                 } else {
                     err = "o modelo passa o teto de 65535 vértices do "
                           "caminho de mesh única SEM pele e SEM falta de "
@@ -1330,6 +1344,18 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
                 return false;
             }
             out.anim = rel;
+            // 0.10-M (EXT) — o import EXPANDIDO não ata os clips (os alvos
+            // de um clip são NÓS do glTF, não peças soltas — os clips ficam
+            // para o import fundido e para o BACKLOG 0.10-A; o .gm fica
+            // escrito para o merge futuro)
+            if (!out.expandNodes.empty()) {
+                elog::info("asset: expandir nós — %u clip(s)/esqueleto "
+                           "ficam em %s SEM attach (os clips animam NÓS do "
+                           "glTF; o expand é para PEÇAS — o BACKLOG 0.10-A "
+                           "traz os clips)",
+                           static_cast<u32>(anim.clips.size()),
+                           rel.c_str());
+            }
         }
     }
     return true;
@@ -1339,12 +1365,13 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
 // 0.10-M (PASSO 3): onProgress/user alimentam o conversor streaming
 // 0.10-M (SAF-STREAM): `srcRel` — o rel da CÓPIA em source/ (o fd do
 // bridge sob SAF lê-A; o 2.º degrau da cascata nas outras raízes)
+// 0.10-M (EXT): `expandNodes` — o import expandido (peças por nó)
 bool convertGlbFile(const std::string& srcAbs, const std::string& srcRel,
                     ProjectStorage& st,
                     const std::string& stem, TexturePipeline* pipeline,
                     Output& out, Stats& stats, std::string& err,
                     bool (*onProgress)(void*, u64, u64) = nullptr,
-                    void* user = nullptr) {
+                    void* user = nullptr, bool expandNodes = false) {
     FILE* f = std::fopen(srcAbs.c_str(), "rb");
     if (!f) {
         err = "fonte ilegivel: " + srcAbs;
@@ -1462,7 +1489,7 @@ bool convertGlbFile(const std::string& srcAbs, const std::string& srcRel,
                                GltfBufferResolver{}, nullptr, srcAbs.c_str(),
                                srcRel.c_str(),
                                st, stem, pipeline, out, stats, err,
-                               onProgress, user);
+                               onProgress, user, expandNodes);
     } while (false);
     std::fclose(f);
     return ok;
@@ -1486,7 +1513,7 @@ bool convertGltfFile(const std::string& srcAbs, const std::string& srcRel,
                      const std::string& stem, TexturePipeline* pipeline,
                      Output& out, Stats& stats, std::string& err,
                      bool (*onProgress)(void*, u64, u64) = nullptr,
-                     void* user = nullptr) {
+                     void* user = nullptr, bool expandNodes = false) {
     std::vector<u8> json;
     if (!fileapi::readAll(srcAbs.c_str(), json) || json.empty()) {
         err = "leitura falhou: " + srcAbs + " (" + fileapi::errnoText() + ")";
@@ -1632,7 +1659,7 @@ bool convertGltfFile(const std::string& srcAbs, const std::string& srcRel,
         resolver, srcDir.c_str(),
         binF ? binPathAbs.c_str() : nullptr,
         binF ? binRel.c_str() : nullptr, st, stem, pipeline, out,
-        stats, err, onProgress, user);
+        stats, err, onProgress, user, expandNodes);
     if (binF) {
         std::fclose(binF);
     }
@@ -1650,7 +1677,8 @@ bool convertGltfFile(const std::string& srcAbs, const std::string& srcRel,
 bool importFile(const std::string& srcAbs, const std::string& srcNameIn,
                 ProjectStorage& st, TexturePipeline* pipeline,
                 Output& out, Stats& stats, std::string& err,
-                bool (*onProgress)(void*, u64, u64), void* user) {
+                bool (*onProgress)(void*, u64, u64), void* user,
+                bool expandNodes) {
     out = Output{};
     stats = Stats{};
     err.clear();
@@ -1745,10 +1773,10 @@ bool importFile(const std::string& srcAbs, const std::string& srcNameIn,
                               nullptr);
     } else if (ext == "glb") {
         ok = convertGlbFile(srcAbs, srcRel, st, stem, pipeline, out, stats,
-                            err, onProgress, user);
+                            err, onProgress, user, expandNodes);
     } else if (ext == "gltf") {
         ok = convertGltfFile(srcAbs, srcRel, st, stem, pipeline, out, stats,
-                             err, onProgress, user);
+                             err, onProgress, user, expandNodes);
     } else if (ext == "png") {
         ok = convertPng(srcAbs, st, stem, pipeline, out, stats, err);
     } else {
@@ -1851,7 +1879,8 @@ bool stagingWrite(ProjectStorage& st, const void* data, size_t n,
 bool reconvertFile(const std::string& sourceRel, ProjectStorage& st,
                    TexturePipeline* pipeline, Output& out, Stats& stats,
                    std::string& err,
-                   bool (*onProgress)(void*, u64, u64), void* user) {
+                   bool (*onProgress)(void*, u64, u64), void* user,
+                   bool expandNodes) {
     // lê a FONTE guardada no projeto: se o storage tem raiz REAL (FsStorage)
     // usa o caminho absoluto (streaming por chunks); se não (SAF), lê pelo
     // readBytes com GUARDA de orçamento (erro legível além do teto — o
@@ -1861,7 +1890,7 @@ bool reconvertFile(const std::string& sourceRel, ProjectStorage& st,
     const std::string name = sourceRel.substr(sourceRel.rfind('/') + 1);
     if (!abs.empty() && fileapi::fileSize(abs.c_str(), stats.sourceBytes)) {
         return importFile(abs, name, st, pipeline, out, stats, err,
-                          onProgress, user);
+                          onProgress, user, expandNodes);
     }
     std::vector<u8> bytes;
     if (!st.readBytes(sourceRel, bytes) || bytes.empty()) {
@@ -1943,7 +1972,7 @@ bool reconvertFile(const std::string& sourceRel, ProjectStorage& st,
         }
     }
     const bool ok = importFile(tmp, name, st, pipeline, out, stats, err,
-                               onProgress, user);
+                               onProgress, user, expandNodes);
     ::remove(tmp.c_str());
     for (const std::string& s : stagedSiblings) {
         ::remove(s.c_str());   // os irmãos stageados saem com a fonte

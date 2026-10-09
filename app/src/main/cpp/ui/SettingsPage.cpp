@@ -278,6 +278,15 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
         infoRow(ui, ox, y, aw, "fonte após import",
                 ctx.keepSource ? "manter" : "largar");
         y += settingsRowH();
+        // 0.10-M (EXT) — o modo do IMPORT: fundido (default — performance
+        // mobile) ou expandido (um TIC por nó com mesh, peças editáveis;
+        // a conversão de cada modo escreve ficheiros DIFERENTES, por isso
+        // a escolha vive AQUI e o job captura-a no lançamento)
+        if (toggleRow(ui, kExpandNodesId, ox, y, aw, "expandir nós",
+                      ctx.expandNodes)) {
+            res = kToggleExpandNodes;
+        }
+        y += settingsRowH();
         if (actionRow(ui, 5829, ox, y, aw, "assets de source/",
                       "reconverter")) {
             res = kReconvert;

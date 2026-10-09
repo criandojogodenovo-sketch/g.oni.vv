@@ -73,6 +73,7 @@ constexpr u64 kRunBenchId    = 5831;  // 0.9.6 (G6): benchmarks (R-017)
 constexpr u64 kCopyBenchId   = 5832;  // 0.9.6 (G6): copiar o bloco de 9 linhas
 constexpr u64 kLayoutExpId   = 5833;  // 0.9.6.5 (GRUPO B): exportar layout
 constexpr u64 kLayoutAudId   = 5834;  // 0.9.6.5 (GRUPO B): auditoria do ecrã
+constexpr u64 kExpandNodesId = 5835;  // 0.10-M (EXT): toggle «expandir nós»
 constexpr u64 kScrollId     = 49;    // região de scroll da página
 
 // ---- bits das secções (colapsáveis — PERSISTE via layout.json) --------------
@@ -91,6 +92,7 @@ struct Ctx {
     const char* soSha = "";          // sha256 da .so (identidade 0.8.10)
     const char* storageMode = "";    // "saf" / "files"
     bool keepSource = true;
+    bool expandNodes = false;        // 0.10-M (EXT): import expandido (peças)
     f32  audioMaster = 1.0f;
     bool immersive = false;          // toggle Imersivo (JNI)
     bool allFilesGranted = false;
@@ -112,6 +114,7 @@ enum Result {
     kOpenTextWindow,   // 0.9.1: abrir a janela de texto (portrait + IME)
     kOpenDocs,         // 0.9.2: abrir o ecrã de Docs da V.ONI
     kToggleKeepSource, // fonte manter/largar
+    kToggleExpandNodes,// 0.10-M (EXT): import expandido (peças por nó)
     kReconvert,        // reconverter assets
     kRunBench,         // 0.9.6 (G6): correr os benchmarks (R-017)
     kCopyBench,        // 0.9.6 (G6): copiar o relatório (bloco de 9 linhas)

@@ -53,4 +53,43 @@ Handle gltfInstantiate(Scene& scene, const GltfModel& model,
     return created[0];
 }
 
+// 0.10-M (EXT) — os TICs do import EXPANDIDO: um por nó com mesh, FLAT
+// (o NodeOut traz a transformação MUNDO já decomposta — o engine compõe
+// flat e a peça desenha no sítio exato sem hierarquia; a geometria da
+// peça ficou CRUA no espaço local do nó). O bindMesh injetado recebe a
+// REF DA PEÇA; nullptr NÃO aborta (o meshPath fica — o reload re-liga).
+// Devolve os handles NA ORDEM dos registros (o pino do dono conta ISTO).
+std::vector<Handle> gltfExpandInstantiate(
+        Scene& scene, const std::vector<convert::Output::NodeOut>& nodes,
+        const std::vector<std::string>& refs,
+        const GltfInstantiateCtx& ctx) {
+    std::vector<Handle> created;
+    for (const convert::Output::NodeOut& n : nodes) {
+        if (n.mesh < 0 || n.mesh >= static_cast<i32>(refs.size())) {
+            continue;   // registro sem peça (estrutural) — não vira TIC
+        }
+        const std::string name =
+            n.name.empty() ? ("node " + std::to_string(n.node)) : n.name;
+        const Handle h = scene.create(name);
+        created.push_back(h);
+        Tic* t = scene.get(h);
+        if (!t) {
+            continue;
+        }
+        if (Transform3D* tr = t->addComponent<Transform3D>()) {
+            tr->pos = n.translation;
+            tr->rot = n.rotation;
+            tr->scale = n.scale;
+            tr->updateWorld();
+        }
+        const std::string& ref = refs[static_cast<size_t>(n.mesh)];
+        MeshRenderer mr;
+        mr.meshPath = ref;   // a ref vive no componente mesmo sem bind
+        mr.mesh = ctx.bindMesh ? ctx.bindMesh(ctx.user, ref) : nullptr;
+        mr.material = mr.mesh ? ctx.material : nullptr;
+        t->addComponent<MeshRenderer>(mr);
+    }
+    return created;
+}
+
 } // namespace vv

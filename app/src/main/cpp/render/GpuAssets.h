@@ -52,6 +52,13 @@ public:
     // aberto — mesh(ref) abre-o; o lookup puro para o drawTics/export).
     BlockMesh* blockMeshIfOpen(const std::string& ref) const;
 
+    // 0.10-M (EXT): abre (ou encontra) o BlockMesh da ref + cria o hull —
+    // o caminho do mesh() quando o peek diz «blocos». PÚBLICO porque o
+    // import EXPANDIDO ata as PEÇAS por AQUI (o binder do
+    // gltfExpandInstantiate: a peça abre POR BLOCOS pelo
+    // kGmeshV3FlagPiece — o culling por TIC — mesmo sendo pequena).
+    Mesh* blockHull(const std::string& ref);
+
     // aviso (gate 2K no fallback) sai da carga — o chamador mostra em toast
     const Texture* texture(const std::string& relPath, std::string* warn = nullptr);
 
@@ -64,10 +71,6 @@ public:
     u32 blockMeshCount() const { return static_cast<u32>(blockMeshes_.size()); }
 
 private:
-    // abre (ou encontra) o BlockMesh da ref + cria o hull — o caminho do
-    // mesh() quando o peek diz «blocos»
-    Mesh* blockHull(const std::string& ref);
-
     ResourceManager* rm_ = nullptr;
     TexturePipeline* pipeline_ = nullptr;
     std::unordered_map<std::string, std::unique_ptr<Mesh>> gpuMeshes_;

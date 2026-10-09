@@ -31,6 +31,7 @@
 
 #include "assets/GOwnFormats.h"
 #include "core/ProjectStorage.h"
+#include "math/Math.h"   // 0.10-M (EXT): Vec3/Quat do NodeOut
 
 namespace vv {
 
@@ -73,6 +74,30 @@ struct Output {
     std::vector<std::string> meshes;     // "assets/casa.gmesh"
     std::vector<std::string> textures;   // "assets/casa_0.gtext"
     std::string anim;                    // "assets/casa.gm" ("" sem clips)
+
+    // ---- 0.10-M (EXT · IMPORT DE NÓS COMO SUB-ÁRVORE) --------------------
+    // PREENCHIDO SÓ pelo import com `expandNodes=true` (vazio = o default
+    // FUNDIDO de sempre — um .gmesh por fonte, ZERO mudanças nesse caminho).
+    // Um registo por NÓ COM MESH (≥1 primitiva que sobreviveu ao corte),
+    // NA ORDEM dos nós do glTF; `mesh` = índice em `Output::meshes` (a
+    // PEÇA daquele nó — "assets/<stem>_<nomeDoNó>.gmesh"). O main cria o
+    // TIC por registo (gltfExpandInstantiate): nome do glTF preservado,
+    // `translation/rotation/scale` = a transformação MUNDO do nó no
+    // Transform3D do TIC (o engine compõe flat — TransformSystem não
+    // resolve pais — por isso a MUNDO: a peça desenha no sítio EXATO; a
+    // geometria da peça fica CRUA no espaço local do nó). Nós com shear
+    // no mundo (escala não-uniforme do pai + rotação do filho) trazem a
+    // transformação baked na geometria e TRS de identidade — honesto, no
+    // log. `node` = índice no array de nós do glTF (diag).
+    struct NodeOut {
+        std::string name;                 // do glTF ("n<i>" se anónimo)
+        Vec3 translation{0.0f, 0.0f, 0.0f};
+        Quat rotation{0.0f, 0.0f, 0.0f, 1.0f};
+        Vec3 scale{1.0f, 1.0f, 1.0f};
+        i32 mesh = -1;   // índice em Output::meshes (-1 = sem peça)
+        i32 node = -1;   // índice no GltfModel::nodes (diag)
+    };
+    std::vector<NodeOut> expandNodes;    // vazio = import fundido
 };
 
 // converte UMA fonte escolhida no navegador (caminho ABSOLUTO do FileApi)
@@ -80,20 +105,25 @@ struct Output {
 // null cai no passthrough RGBA. onProgress(user, done, total) por chunk
 // da cópia; devolve false = CANCELADO (a cópia parcial é removida).
 // Falha → false + err LEGÍVEL (nunca crash, nunca silêncio).
+// 0.10-M (EXT): `expandNodes` = true → o import EXPANDIDO (um .gmesh
+// PEÇA por nó com mesh + Output::expandNodes p/ criar os TICs; o default
+// false = o FUNDIDO de sempre — byte a byte idêntico ao caminho vigente).
 bool importFile(const std::string& srcAbs, const std::string& srcName,
                 ProjectStorage& st, TexturePipeline* pipeline,
                 Output& out, Stats& stats, std::string& err,
                 bool (*onProgress)(void*, u64, u64) = nullptr,
-                void* user = nullptr);
+                void* user = nullptr, bool expandNodes = false);
 
 // ---- RECONVERSÃO (botão "reconverter"): lê a FONTE guardada em source/ ----
 // Mesma conversão a partir da cópia do projeto (chunks/ranges contra o
 // storage quando FS real; no SAF lê inteiro com guarda de orçamento).
+// 0.10-M (EXT): `expandNodes` segue o MESMO setting do import (a
+// reconversão honra o modo que o dono escolheu nas Definições).
 bool reconvertFile(const std::string& sourceRel, ProjectStorage& st,
                    TexturePipeline* pipeline, Output& out, Stats& stats,
                    std::string& err,
                    bool (*onProgress)(void*, u64, u64) = nullptr,
-                   void* user = nullptr);
+                   void* user = nullptr, bool expandNodes = false);
 
 // ---- MIGRAÇÃO de projeto antigo (meshes/*.obj|gltf|glb, textures/*.png) ----
 // Converte EM SILÊNCIO no primeiro load: cada fonte legada → assets/*.gmesh
