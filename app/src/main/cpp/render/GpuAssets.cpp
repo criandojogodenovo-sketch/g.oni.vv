@@ -38,6 +38,7 @@ Mesh* GpuAssets::mesh(const std::string& ref) {
     }
     const auto it = gpuMeshes_.find(ref);
     if (it != gpuMeshes_.end()) {
+        lastMeshErr_.clear();   // 0.10.6: o hit do cache é o SUCESSO de sempre
         return it->second.get();   // MESMO objeto GL — sem duplicar GPU
     }
     // 0.10-M (PASSO 4) — O CAMINHO DOS BLOCOS: um .gmesh v3 que o mesh
@@ -98,7 +99,11 @@ Mesh* GpuAssets::mesh(const std::string& ref) {
         } else {
             elog::error("gpu: '%s' FALHOU ao carregar (mesh vazio/inválido)",
                         ref.c_str());
+            err = "mesh vazio/inválido";
         }
+        // 0.10.6 (SAF-SEAM) — o ÚLTIMO erro fica AQUI (o toast do picker
+        // diz a CAUSA — «asset corrompido, reimporta» — não só o log)
+        lastMeshErr_ = ref + ": " + err;
         return nullptr;
     }
     // 0.10-M (PASSO 3B) — a fase de RENDER (o upload GPU do mesh inteiro —
@@ -117,6 +122,7 @@ Mesh* GpuAssets::mesh(const std::string& ref) {
                               data->skinWeights.data())) {
             elog::error("gpu: '%s' FALHOU no upload (createSkinned)",
                         ref.c_str());
+            lastMeshErr_ = ref + ": upload GL falhou (createSkinned)";
             return nullptr;
         }
     } else if (!m->create(data->vertices.data(),
@@ -124,6 +130,7 @@ Mesh* GpuAssets::mesh(const std::string& ref) {
                           data->indices.data(),
                           static_cast<u32>(data->indices.size()))) {
         elog::error("gpu: '%s' FALHOU no upload (create)", ref.c_str());
+        lastMeshErr_ = ref + ": upload GL falhou (create)";
         return nullptr;   // upload falhou — sem cache de objeto quebrado
     }
     elog::info("gmesh: fase=render ms=%.1f (%s, %u verts)",
@@ -133,6 +140,7 @@ Mesh* GpuAssets::mesh(const std::string& ref) {
                ref.c_str(), static_cast<unsigned>(data->vertices.size()));
     Mesh* raw = m.get();
     gpuMeshes_.emplace(ref, std::move(m));
+    lastMeshErr_.clear();   // 0.10.6: sucesso limpa o último erro
     return raw;
 }
 
@@ -248,6 +256,10 @@ Mesh* GpuAssets::blockHull(const std::string& ref) {
             // o elog chega ao engine.log que o dono LÊ
             elog::error("gpu: '%s' FALHOU ao abrir por BLOCOS — %s",
                         ref.c_str(), err.c_str());
+            // 0.10.6 (SAF-SEAM) — o ÚLTIMO erro fica AQUI: o «asset
+            // corrompido, reimporta» (a QUARENTENA já renomeou p/ .corrupt)
+            // chega ao TOAST do picker — nunca a troca silenciosa pela bola
+            lastMeshErr_ = err;
             return nullptr;
         }
         bm = nb.get();
@@ -259,10 +271,12 @@ Mesh* GpuAssets::blockHull(const std::string& ref) {
     if (!bm->createHull(*hull)) {
         elog::error("gpu: '%s' FALHOU no hull de bounds (upload GL)",
                     ref.c_str());
+        lastMeshErr_ = ref + ": hull de bounds falhou (upload GL)";
         return nullptr;
     }
     Mesh* raw = hull.get();
     gpuMeshes_.emplace(ref, std::move(hull));
+    lastMeshErr_.clear();   // 0.10.6: sucesso limpa o último erro
     elog::info(
         "blocos: '%s' aplicado — %u blocos, %llu verts, %.1f MB de dados "
         "POR CARREGAR (lazy: a 1ª visibilidade de cada bloco é que lê)",

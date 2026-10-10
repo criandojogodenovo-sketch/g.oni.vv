@@ -5682,3 +5682,66 @@ TEST(regress_safstream_fd_mmap_e_ranges_r041) {
         rmrf(dir);
     }
 }
+
+// 0.10.6 (SAF-SEAM · R-043) — A QUARENTENA (.corrupt) NAS TRÊS camadas do
+// storage: o rename é o PRIMITIVO da quarentena do asset corrompido (o
+// BlockMesh chama-o quando a tabela não valida). O contrato:
+//   true  = os bytes vivem agora em `to` (o `from` deixou de existir);
+//   false = SEM rename (nada muda — o diagnóstico NÃO depende do rename).
+// FsStorage = ::rename POSIX (atómico); FakeStorage = o mapa em memória;
+// ausente → false HONESTO (o catálogo de .gmesh é que decide a saída).
+TEST(regress_safseam_quarentena_rename_r043) {
+    // (1) o FsStorage: o ::rename ATÓMICO de sempre (o disco confirma)
+    {
+        const std::string dir =
+            "/tmp/goni_r043_fs_" + std::to_string(::getpid());
+        rmrf(dir);
+        ASSERT(std::system(("mkdir -p '" + dir + "'").c_str()) == 0);
+        {
+            FsStorage st(dir);
+            const u8 bytes[10] = {9, 8, 7, 6, 5, 4, 3, 2, 1, 0};
+            ASSERT(st.makeDirs("assets"));
+            ASSERT(st.writeBytes("assets/city.gmesh", bytes, sizeof(bytes)));
+            // o RENAME da quarentena: o nome sai, os bytes FICAM (forense)
+            EXPECT(st.rename("assets/city.gmesh",
+                             "assets/city.gmesh.corrupt"));
+            EXPECT(!st.exists("assets/city.gmesh"));
+            EXPECT(st.exists("assets/city.gmesh.corrupt"));
+            std::vector<u8> got;
+            EXPECT(st.readBytes("assets/city.gmesh.corrupt", got) &&
+                   got.size() == 10 && got[0] == 9 && got[9] == 0);
+            // o ausente → false HONESTO (não cria, não apaga)
+            EXPECT(!st.rename("assets/nao-existe.gmesh",
+                              "assets/x.corrupt"));
+        }
+        rmrf(dir);
+    }
+    // (2) o FakeStorage: os bytes MUDAM de nome no mapa (a prova do
+    // harness — o mesmo contrato, sem disco)
+    {
+        FakeStorage st;
+        const std::string orig = "assets/trunc.gmesh";
+        ASSERT(st.writeText(orig, "GMES-cortado"));
+        EXPECT(st.rename(orig, orig + ".corrupt"));
+        EXPECT(!st.exists(orig));
+        EXPECT(st.exists(orig + ".corrupt"));
+        std::string s;
+        EXPECT(st.readText(orig + ".corrupt", s) && s == "GMES-cortado");
+        EXPECT(!st.rename(orig, "assets/outro.corrupt"));   // já saiu
+    }
+    // (3) o SafStorage: a CÓPIA STREAMING por fd (a interface SafIo não
+    // tem renameDocument) — o provider CONFIRMA os dois lados
+    {
+        FakeSafIo io;
+        SafStorage saf(&io, "content://tree/primary:GOneVV/r043");
+        const std::string orig = "assets/trunc.gmesh";
+        ASSERT(saf.makeDirs("assets"));
+        ASSERT(saf.writeBytes(orig, "GMES", 4));
+        EXPECT(saf.rename(orig, orig + ".corrupt"));
+        io.flushWrites();   // o provider persiste ao fechar
+        EXPECT(!saf.exists(orig));   // a CACHE segue o nome (o fix do R-043)
+        EXPECT(saf.exists(orig + ".corrupt"));
+        std::vector<u8> got;
+        EXPECT(saf.readBytes(orig + ".corrupt", got) && got.size() == 4);
+    }
+}

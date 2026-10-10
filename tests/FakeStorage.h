@@ -157,4 +157,19 @@ struct FakeStorage final : public vv::ProjectStorage {
         *outFd = fd;
         return true;
     }
+
+    // 0.10.6 (SAF-SEAM) — a quarentena em memória (o rename do /fake):
+    // os bytes MUDAM de nome; a origem sai do mapa.
+    bool rename(const std::string& from, const std::string& to) override {
+        if (!vv::validRelPath(from) || !vv::validRelPath(to)) {
+            return false;
+        }
+        const auto it = files.find(from);
+        if (it == files.end()) {
+            return false;
+        }
+        files[to] = it->second;
+        files.erase(it);
+        return true;
+    }
 };

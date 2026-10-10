@@ -18,6 +18,7 @@
 
 #include <GLES3/gl3.h>   // stub do hospedeiro (glstub::stats)
 
+#include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -35,6 +36,7 @@
 #include "core/FsStorage.h"
 #include "core/ProjectStorage.h"
 #include "math/Math.h"
+#include "platform/EngineLog.h"
 #include "render/BlockMesh.h"
 #include "render/Camera.h"
 #include "render/Mesh.h"
@@ -968,4 +970,487 @@ TEST(blockmesh_skinned_por_blocos) {
                                  nullptr, 0, stt);
     EXPECT(stt.drawn == 2);
     EXPECT(ds.drawCalls == 2);
+}
+
+// ---- 0.10.6 (SAF-SEAM) — A FONTE DA ABERTURA (fd) + A QUARENTENA ------------
+//
+// O contrato do dono: a abertura por blocos usa a MESMA cascata do
+// conversor — openReadFd / mapFd64; se o provider recusar o mmap, pread
+// de faixas NO MESMO fd; NUNCA um caminho POSIX sob content://. Em falha
+// o log diz QUAL das 3 leituras, o errno e o tamanho VISTO; a tabela que
+// não valida (peek v3 verde) põe o asset em QUARENTENA (.corrupt) com a
+// mensagem «asset corrompido, reimporta» — nunca a bola silenciosa.
+namespace {
+
+// o storage que serve FICHEIROS por fd E conta os ranges (a prova de que
+// o mmap-fd serviu AS 3 LEITURAS: zero readBytesAt na abertura)
+struct FdCountStorage final : vv::ProjectStorage {
+    std::map<std::string, std::string> files;
+    mutable u32 rangeReads = 0;
+
+    std::string root() const override { return "/fdcount"; }
+    bool makeDirs(const std::string&) override { return true; }
+    bool exists(const std::string& relPath) const override {
+        return files.count(relPath) != 0;
+    }
+    vv::Presence probe(const std::string& relPath) const override {
+        return files.count(relPath) != 0 ? vv::Presence::Present
+                                         : vv::Presence::Absent;
+    }
+    bool writeText(const std::string& relPath, const std::string& text) override {
+        files[relPath] = text;
+        return true;
+    }
+    bool readText(const std::string& relPath,
+                  std::string& out) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        out = it->second;
+        return true;
+    }
+    bool writeBytes(const std::string& relPath, const void* data,
+                    size_t n) override {
+        files[relPath].assign(static_cast<const char*>(data), n);
+        return true;
+    }
+    bool readBytes(const std::string&, std::vector<vv::u8>&) const override {
+        return false;
+    }
+    bool listDir(const std::string&,
+                 std::vector<std::string>&) const override {
+        return false;
+    }
+    bool statBytes(const std::string& relPath,
+                   vv::u64& outBytes) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        outBytes = it->second.size();
+        return true;
+    }
+    bool readBytesAt(const std::string& relPath, vv::u64 offset, size_t len,
+                     std::vector<vv::u8>& out) const override {
+        ++rangeReads;   // ZERO disto na abertura por mmap-fd (o pin)
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        const std::string& data = it->second;
+        if (offset >= data.size() || data.size() - offset < len) {
+            return false;
+        }
+        out.assign(data.begin() + static_cast<long>(offset),
+                   data.begin() + static_cast<long>(offset + len));
+        return true;
+    }
+    // o fd do bridge: um MEMFD com os bytes (o mmap POR FD funciona — o
+    // mesmo padrão do FakeStorage)
+    bool openReadFd(const std::string& relPath, int* outFd,
+                    std::string& err) override {
+        if (outFd != nullptr) {
+            *outFd = -1;
+        }
+        const auto it = files.find(relPath);
+        if (it == files.end()) {
+            err = "o ficheiro '" + relPath + "' não vive no storage fake";
+            return false;
+        }
+        const int fd = ::memfd_create("vv-fdcount", 0);
+        if (fd < 0) {
+            err = "memfd_create falhou no fake";
+            return false;
+        }
+        if (!it->second.empty()) {
+            const ssize_t w = ::write(fd, it->second.data(), it->second.size());
+            (void)w;
+        }
+        ::lseek(fd, 0, SEEK_SET);
+        *outFd = fd;
+        return true;
+    }
+};
+
+// o storage que serve um PIPE no openReadFd (o provider de cloud que
+// entrega stream: fstat size 0, pread ESPIPE — a recusa REAL do SO)
+struct PipeFdStorage final : vv::ProjectStorage {
+    std::map<std::string, std::string> files;
+    mutable u32 rangeReads = 0;
+
+    std::string root() const override { return "/pipefd"; }
+    bool makeDirs(const std::string&) override { return true; }
+    bool exists(const std::string& relPath) const override {
+        return files.count(relPath) != 0;
+    }
+    vv::Presence probe(const std::string& relPath) const override {
+        return files.count(relPath) != 0 ? vv::Presence::Present
+                                         : vv::Presence::Absent;
+    }
+    bool writeText(const std::string& relPath, const std::string& text) override {
+        files[relPath] = text;
+        return true;
+    }
+    bool readText(const std::string& relPath,
+                  std::string& out) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        out = it->second;
+        return true;
+    }
+    bool writeBytes(const std::string& relPath, const void* data,
+                    size_t n) override {
+        files[relPath].assign(static_cast<const char*>(data), n);
+        return true;
+    }
+    bool readBytes(const std::string&, std::vector<vv::u8>&) const override {
+        return false;
+    }
+    bool listDir(const std::string&,
+                 std::vector<std::string>&) const override {
+        return false;
+    }
+    bool statBytes(const std::string& relPath,
+                   vv::u64& outBytes) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        outBytes = it->second.size();
+        return true;
+    }
+    bool readBytesAt(const std::string& relPath, vv::u64 offset, size_t len,
+                     std::vector<vv::u8>& out) const override {
+        ++rangeReads;
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        const std::string& data = it->second;
+        if (offset >= data.size() || data.size() - offset < len) {
+            return false;
+        }
+        out.assign(data.begin() + static_cast<long>(offset),
+                   data.begin() + static_cast<long>(offset + len));
+        return true;
+    }
+    // o «fd do bridge» é um PIPE: o fstat dá 0 B (stream) e o pread leva
+    // ESPIPE — a degradação para ranges é a RECUSA REAL do SO
+    bool openReadFd(const std::string& relPath, int* outFd,
+                    std::string& err) override {
+        if (outFd != nullptr) {
+            *outFd = -1;
+        }
+        const auto it = files.find(relPath);
+        if (it == files.end()) {
+            err = "o ficheiro '" + relPath + "' não vive no storage fake";
+            return false;
+        }
+        int fds[2];
+        if (::pipe(fds) != 0) {
+            err = "pipe falhou no fake";
+            return false;
+        }
+        if (!it->second.empty()) {
+            const ssize_t w = ::write(fds[1], it->second.data(),
+                                      it->second.size());
+            (void)w;
+        }
+        ::close(fds[1]);   // o writer fecha — EOF depois dos bytes
+        *outFd = fds[0];
+        return true;
+    }
+};
+
+// o storage cujo readBytesAt FALHA na faixa da TABELA (I/O — o provider
+// engasga): a falha é REPORTADA com qual-leitura/tamanho; NÃO é quarentena
+// (I/O não é corrupção — o ficheiro FICA no sítio)
+struct FailTableStorage final : vv::ProjectStorage {
+    std::map<std::string, std::string> files;
+    u64 failFromOff = 256;   // falha a partir deste offset (a tabela)
+
+    std::string root() const override { return "/failtable"; }
+    bool makeDirs(const std::string&) override { return true; }
+    bool exists(const std::string& relPath) const override {
+        return files.count(relPath) != 0;
+    }
+    vv::Presence probe(const std::string& relPath) const override {
+        return files.count(relPath) != 0 ? vv::Presence::Present
+                                         : vv::Presence::Absent;
+    }
+    bool writeText(const std::string& relPath, const std::string& text) override {
+        files[relPath] = text;
+        return true;
+    }
+    bool readText(const std::string& relPath,
+                  std::string& out) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        out = it->second;
+        return true;
+    }
+    bool writeBytes(const std::string& relPath, const void* data,
+                    size_t n) override {
+        files[relPath].assign(static_cast<const char*>(data), n);
+        return true;
+    }
+    bool readBytes(const std::string&, std::vector<vv::u8>&) const override {
+        return false;
+    }
+    bool listDir(const std::string&,
+                 std::vector<std::string>&) const override {
+        return false;
+    }
+    bool statBytes(const std::string& relPath,
+                   vv::u64& outBytes) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        outBytes = it->second.size();
+        return true;
+    }
+    bool readBytesAt(const std::string& relPath, vv::u64 offset, size_t len,
+                     std::vector<vv::u8>& out) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        if (offset >= failFromOff) {
+            return false;   // o provider engasga NA faixa da tabela
+        }
+        const std::string& data = it->second;
+        if (offset >= data.size() || data.size() - offset < len) {
+            return false;
+        }
+        out.assign(data.begin() + static_cast<long>(offset),
+                   data.begin() + static_cast<long>(offset + len));
+        return true;
+    }
+    // sem openReadFd (o default honesto) — os ranges de sempre
+};
+
+bool bmLogHas(const char* dir, const char* needle) {
+    FILE* f = std::fopen((std::string(dir) + "/logs/engine.log").c_str(),
+                         "rb");
+    if (!f) {
+        return false;
+    }
+    std::string data;
+    char buf[4096];
+    size_t r;
+    while ((r = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+        data.append(buf, r);
+    }
+    std::fclose(f);
+    return data.find(needle) != std::string::npos;
+}
+
+// o elog::init cria o diretório (e os pais) — o padrão do test_gmeshv3stream
+std::string bmLogInit(const char* tag) {
+    const std::string dir =
+        "/tmp/goni_bm_safseam_" + std::to_string(::getpid()) + "_" + tag;
+    elog::init((dir + "/logs").c_str());
+    return dir;
+}
+
+void bmLogTerm(const std::string& dir) {
+    elog::shutdown();
+    // o rmRf do padrão (dirent + remove)
+    DIR* d = ::opendir((dir + "/logs").c_str());
+    if (d) {
+        while (dirent* e = ::readdir(d)) {
+            const std::string n = e->d_name;
+            if (n != "." && n != "..") {
+                ::remove((dir + "/logs/" + n).c_str());
+            }
+        }
+        ::closedir(d);
+    }
+    ::remove((dir + "/logs").c_str());
+    ::remove(dir.c_str());
+}
+
+}   // namespace
+
+// (SAF-SEAM 1) A ABERTURA POR FD DO BRIDGE: o mmap POR FD serve as 3
+// leituras (peek 192 B + tabela + materiais) — ZERO readBytesAt, e a
+// linha contrato do load nomeia a FONTE (fonte=mmap-fd, o par do
+// «asset: v3 fonte=…» do conversor). Seria VERMELHO na abertura por
+// caminho/ranges de sempre (a mutação M-SS1).
+TEST(blockmesh_fonte_mmapfd_o_fd_do_bridge_serve_as_3_leituras) {
+    glstub::reset();
+    const std::string dir = bmLogInit("mmapfd");
+    std::vector<u8> gmesh;
+    std::string err;
+    EXPECT(makeStripBlocks(8, 8, 4, gmesh, err));
+    FdCountStorage st;
+    st.files["assets/tira.gmesh"].assign(
+        reinterpret_cast<const char*>(gmesh.data()), gmesh.size());
+
+    BlockMesh bm;
+    EXPECT(bm.open(st, "assets/tira.gmesh", err));
+    EXPECT(bm.ok());
+    EXPECT(bm.table().size() == 8);
+    // O PIN: o mmap POR FD serviu TUDO — nenhum range pelo storage
+    EXPECT(st.rangeReads == 0);
+    // a linha contrato nomeia a FONTE (o par do conversor)
+    EXPECT(bmLogHas(dir.c_str(), "fonte=mmap-fd"));
+    EXPECT(bmLogHas(dir.c_str(), "gmesh: fase=load"));
+    // o hull continua EXATO (o contrato do picker intacto)
+    {
+        Mesh hull;
+        EXPECT(bm.createHull(hull));
+        EXPECT(hull.ok());
+        EXPECT(hull.vertexCount() == 8);
+    }
+    bmLogTerm(dir);
+}
+
+// (SAF-SEAM 2) O PROVIDER QUE ENTREGA STREAM (o pipe): o fstat do fd dá
+// 0 B e o pread leva a RECUSA REAL do SO — a abertura DEGRADA para os
+// ranges do storage (VERDE na mesma; o log diz a degradação honesta).
+TEST(blockmesh_pipe_do_provider_degrada_para_ranges) {
+    glstub::reset();
+    const std::string dir = bmLogInit("pipe");
+    std::vector<u8> gmesh;
+    std::string err;
+    EXPECT(makeStripBlocks(8, 8, 4, gmesh, err));
+    PipeFdStorage st;
+    st.files["assets/tira.gmesh"].assign(
+        reinterpret_cast<const char*>(gmesh.data()), gmesh.size());
+
+    BlockMesh bm;
+    EXPECT(bm.open(st, "assets/tira.gmesh", err));
+    EXPECT(bm.ok());
+    EXPECT(bm.table().size() == 8);
+    // os ranges serviram as 3 leituras (o mmap/pread não deu)
+    EXPECT(st.rangeReads == 3);
+    // o AVISO do fd com 0 B + a degradação LOGADA (a causa honesta)
+    EXPECT(bmLogHas(dir.c_str(), "veio com 0 B"));
+    EXPECT(bmLogHas(dir.c_str(), "a degradar para RANGES pelo storage"));
+    // a linha contrato: a fonte acabou nos ranges
+    EXPECT(bmLogHas(dir.c_str(), "fonte=ranges"));
+    bmLogTerm(dir);
+}
+
+// (SAF-SEAM 3) A TABELA TRUNCADA (o peek v3 VERDE, o fim do ficheiro não
+// acompanha): QUARENTENA — o asset sai do catálogo (rename .corrupt, os
+// bytes ficam p/ forense) e o err manda REIMPORTAR. NUNCA a bola
+// silenciosa: o ficheiro não volta a aparecer como se nada fosse.
+TEST(blockmesh_tabela_truncada_quarentena_corrupt) {
+    glstub::reset();
+    const std::string dir = bmLogInit("trunc");
+    std::vector<u8> gmesh;
+    std::string err;
+    EXPECT(makeStripBlocks(8, 8, 4, gmesh, err));
+    // o blockTableOffset da META (o peek valida; a faixa da tabela vai
+    // além do fim — truncado a meio da tabela)
+    {
+        GMeshV3Meta meta;
+        std::vector<GMeshV3Block> blocks;
+        std::vector<std::string> mats;
+        EXPECT(readGMeshV3Meta(gmesh.data(), gmesh.size(), meta, blocks,
+                               mats, err));
+        const u64 tableLen =
+            static_cast<u64>(blocks.size()) * kGmeshV3BlockEntryBytes;
+        const u64 cut = meta.blockTableOffset + tableLen / 2;
+        gmesh.resize(static_cast<size_t>(cut));
+    }
+    FakeStorage st;
+    st.files["assets/tira.gmesh"].assign(
+        reinterpret_cast<const char*>(gmesh.data()), gmesh.size());
+
+    BlockMesh bm;
+    EXPECT(!bm.open(st, "assets/tira.gmesh", err));
+    EXPECT(!bm.ok());
+    // a MENSAGEM CLARA (a spec do dono, palavra a palavra)
+    EXPECT(err.find("asset corrompido, reimporta") != std::string::npos);
+    EXPECT(err.find("tabela") != std::string::npos);
+    // a QUARENTENA: o nome saiu do catálogo; os bytes ficam p/ forense
+    EXPECT(!st.exists("assets/tira.gmesh"));
+    EXPECT(st.exists("assets/tira.gmesh.corrupt"));
+    {
+        std::vector<u8> quar;
+        EXPECT(st.readBytes("assets/tira.gmesh.corrupt", quar));
+        EXPECT(quar.size() == gmesh.size());
+    }
+    EXPECT(bmLogHas(dir.c_str(), "ASSET CORROMPIDO"));
+    EXPECT(bmLogHas(dir.c_str(), "quarentena"));
+    bmLogTerm(dir);
+}
+
+// (SAF-SEAM 3b) OS MATERIAIS ALÉM DO FIM: o meta PROMETE uma tabela de
+// materiais que começa depois do fim (patch do materialTableOffset +
+// checksum FNV recalculado — o peek segue VERDE, a promessa é falsa).
+// A MESMA quarentena: o asset sai do catálogo com a causa nos materiais.
+TEST(blockmesh_materiais_alem_do_fim_quarentena) {
+    glstub::reset();
+    const std::string dir = bmLogInit("matoff");
+    std::vector<u8> gmesh;
+    std::string err;
+    EXPECT(makeStripBlocks(8, 8, 4, gmesh, err));
+    // o patch: materialTableOffset (meta offset 80 → ficheiro 112) aponta
+    // ALÉM do fim; o checksum do header (offset 20, FNV1a dos 160 B do
+    // meta) recalcula-se — o PEEK segue verde (a corrupção é a PROMESSA)
+    {
+        const u64 beyond = gmesh.size() + 999;
+        for (int b = 0; b < 8; ++b) {
+            gmesh[112 + b] = static_cast<u8>((beyond >> (8 * b)) & 0xFF);
+        }
+        const u64 sum = gfnv1a(gmesh.data() + kGHeaderBytes,
+                               kGmeshV3MetaBytes);
+        for (int b = 0; b < 8; ++b) {
+            gmesh[20 + b] = static_cast<u8>((sum >> (8 * b)) & 0xFF);
+        }
+        GMeshV3Meta meta;
+        std::string perr;
+        EXPECT(gmeshV3PeekMeta(gmesh.data(),
+                               kGHeaderBytes + kGmeshV3MetaBytes, meta,
+                               perr));   // o peek continua VERDE
+        EXPECT(meta.materialTableOffset == beyond);
+    }
+    FakeStorage st;
+    st.files["assets/tira.gmesh"].assign(
+        reinterpret_cast<const char*>(gmesh.data()), gmesh.size());
+
+    BlockMesh bm;
+    EXPECT(!bm.open(st, "assets/tira.gmesh", err));
+    EXPECT(err.find("asset corrompido, reimporta") != std::string::npos);
+    EXPECT(err.find("materiais") != std::string::npos);
+    EXPECT(err.find("alem do fim") != std::string::npos ||
+           err.find("além do fim") != std::string::npos);
+    EXPECT(!st.exists("assets/tira.gmesh"));
+    EXPECT(st.exists("assets/tira.gmesh.corrupt"));
+    bmLogTerm(dir);
+}
+
+// (SAF-SEAM 3c) O PEEK QUE NÃO VALIDA NÃO É QUARENTENA: um v1 VÁLIDO (ou
+// lixo) que morre no peek segue para o caminho do mesh ÚNICO — o
+// ficheiro FICA no sítio (renomear um v1 válido de <192 B matia-o).
+TEST(blockmesh_peek_invalido_nao_e_quarentena) {
+    glstub::reset();
+    FakeStorage st;
+    // lixo de 64 B: o peek falha — o ficheiro NÃO é renomeado
+    st.files["assets/lixo.gmesh"] = std::string(64, '\x5A');
+    BlockMesh bm;
+    std::string err;
+    EXPECT(!bm.open(st, "assets/lixo.gmesh", err));
+    EXPECT(err.find("asset corrompido") == std::string::npos);
+    EXPECT(st.exists("assets/lixo.gmesh"));
+    EXPECT(!st.exists("assets/lixo.gmesh.corrupt"));
+}
+
+// (SAF-SEAM 4) A FALHA DE I/O (o provider engasga na faixa da tabela):
+// o err diz QUAL das 3 leituras falhou e o tamanho VISTO — e NÃO é
+// quarentena (I/O não é corrupção: o ficheiro fica p/ RETENTAR).
+TEST(blockmesh_falha_de_io_diz_qual_leitura_e_tamanho_sem_quarentena) {
+    glstub::reset();
+    const std::string dir = bmLogInit("iotable");
+    std::vector<u8> gmesh;
+    std::string err;
+    EXPECT(makeStripBlocks(8, 8, 4, gmesh, err));
+    FailTableStorage st;
+    st.files["assets/tira.gmesh"].assign(
+        reinterpret_cast<const char*>(gmesh.data()), gmesh.size());
+
+    BlockMesh bm;
+    EXPECT(!bm.open(st, "assets/tira.gmesh", err));
+    // QUAL leitura: a TABELA (o peek de 192 B passou)
+    EXPECT(err.find("faixa da TABELA") != std::string::npos);
+    // O TAMANHO VISTO (a linha de sempre truncava a causa)
+    EXPECT(err.find("ficheiro visto com") != std::string::npos);
+    EXPECT(err.find(std::to_string(gmesh.size())) != std::string::npos);
+    // I/O ≠ corrupção: SEM quarentena (o ficheiro fica no sítio)
+    EXPECT(st.exists("assets/tira.gmesh"));
+    EXPECT(!st.exists("assets/tira.gmesh.corrupt"));
+    EXPECT(err.find("asset corrompido") == std::string::npos);
+    bmLogTerm(dir);
 }

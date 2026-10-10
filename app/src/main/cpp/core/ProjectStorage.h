@@ -114,6 +114,17 @@ public:
     // sempre / os RANGES do readBytesAt cobrem o resto).
     virtual bool openReadFd(const std::string& relPath, int* outFd,
                             std::string& err);
+
+    // 0.10.6 (SAF-SEAM) — A QUARENTENA do asset corrompido: rename
+    // <rel> → <rel>.corrupt (os bytes FICAM para forense, o nome tira-o do
+    // catálogo — o picker lista .gmesh, não .corrupt). Contrato:
+    //   true  = o ficheiro vive agora em `to` (o `from` deixou de existir);
+    //   false = sem rename (o chamador LOGA honesto e segue SEM quarentena
+    //           — a mensagem de corrompido NÃO depende do rename sair).
+    // FsStorage = ::rename POSIX; SafStorage = cópia streaming por fd +
+    // remove (a interface SafIo não tem renameDocument — o degradado
+    // honesto, UMA abertura por fd + UM create). DEFAULT: false.
+    virtual bool rename(const std::string& from, const std::string& to);
 };
 
 // teto do DEFAULT acumulador de escrita streaming (implementações reais

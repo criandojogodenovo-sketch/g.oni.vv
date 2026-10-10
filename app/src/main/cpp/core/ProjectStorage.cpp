@@ -145,5 +145,12 @@ bool ProjectStorage::openReadFd(const std::string&, int* outFd,
     return false;
 }
 
+bool ProjectStorage::rename(const std::string&, const std::string&) {
+    // 0.10.6 (SAF-SEAM) — default honesto: este storage não renomeia. O
+    // chamador da QUARENTENA loga a falha e devolve a mensagem de corrompido
+    // NA MESMA (o diagnóstico não depende do rename sair).
+    return false;
+}
+
 } // namespace vv
 

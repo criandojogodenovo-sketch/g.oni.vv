@@ -2503,6 +2503,46 @@ bool importJobProgress(void* user, u64 doneBytes, u64 totalBytes) {
     return !job->cancel.load();
 }
 
+// 0.10.6 (SAF-SEAM) — A LINHA «bytes/total» DO OVERLAY DE IMPORT, EXTRAÍDA
+// em função PURO com NOME (o padrão applyImportedAssetToSelectedTic: o
+// MESMO código corre no device e na suíte). O CONTRATO da spec:
+//   • o total vem do length do BRIDGE (os atómicos do job — a ponte
+//     worker→UI); length=0 (o bridge AINDA não anunciou, ou o provider
+//     mentiu no tamanho) com a fonte NÃO vazia → «copiando… N B» (os
+//     bytes que JÁ correram) — quando o valor REAL chega, MUDA para a
+//     fração;
+//   • NUNCA «0 / 0»: a linha de sempre dividia por MB e um total
+//     sub-megabyte (o cut reporta TRIÂNGULOS; o assembly, bytes de
+//     SAÍDA; a cópia, bytes da fonte — unidades mistas de sempre)
+//     arredondava para «0 / 0 MB» e o dono via 0/0 num import de 29 MB
+//     A CORRER (o cut do city: 72k «unidades» → 0 MB durante MINUTOS).
+//     Totais < 1 MB mostram-se em B (nunca zero à direita do «/»); sem
+//     total, «copiando…» com o contador.
+std::string importOverlayBytesText(u64 doneB, u64 totalB) {
+    char buf[64];
+    if (totalB == 0) {
+        // length=0: a fonte é REAL (o job corre) — o contador é o que HÁ
+        if (doneB == 0) {
+            std::snprintf(buf, sizeof(buf), "a copiar...");
+        } else {
+            std::snprintf(buf, sizeof(buf), "copiando... %llu B",
+                          static_cast<unsigned long long>(doneB));
+        }
+        return std::string(buf);
+    }
+    if (totalB < 1024ull * 1024ull) {
+        // total conhecido mas sub-MB: BYTES (a divisão de MB mentia «0/0»)
+        std::snprintf(buf, sizeof(buf), "%llu / %llu B",
+                      static_cast<unsigned long long>(doneB),
+                      static_cast<unsigned long long>(totalB));
+        return std::string(buf);
+    }
+    std::snprintf(buf, sizeof(buf), "%llu / %llu MB",
+                  static_cast<unsigned long long>(doneB / (1024ull * 1024ull)),
+                  static_cast<unsigned long long>(totalB / (1024ull * 1024ull)));
+    return std::string(buf);
+}
+
 // lança o job (chamado pelo browserImportFile no toque do utilizador).
 // false = já há um job a correr (não relança — o overlay é modal)
 bool importJobStart(const fileapi::DirEntry& e) {
@@ -3804,6 +3844,38 @@ editor::AssetResolvers makeAssetResolvers() {
     return res;
 }
 
+// 0.10.6 (SAF-SEAM) — O PÓS-FALHA DO PICK DE MESH (o MESMO relatório nos
+// DOIS dispatches: o «Sim» do diálogo pós-import e o seletor do Inspector).
+// O applyAssetPick já manteve o estado ANTERIOR do TIC (o mesh/prim de
+// sempre — nunca a troca silenciosa pela bola); o que FALTAVA era a CAUSA
+// no TOAST: o «falha ao carregar mesh» de sempre não dizia CORROMPIDO nem
+// mandava REIMPORTAR. AQUI: o último erro do GpuAssets diz «asset
+// corrompido, reimporta» → o toast REPETE a ordem + o catálogo re-lista
+// (a QUARENTENA renomeou o ficheiro p/ .corrupt — o picker deixa de o
+// oferecer); outras causas → a linha curta do erro. O estado do picker
+// (o mesh anterior no TIC) NÃO é tocado — só o DIAGNÓSTICO melhora.
+void reportMeshPickFailure(int menuKind) {
+    if (menuKind != 1) {
+        return;   // só o seletor de MESH (texturas têm o seu próprio toast)
+    }
+    const std::string& merr = g_gpu.lastMeshError();
+    if (merr.empty()) {
+        return;   // sem causa registada — o toast do applyAssetPick basta
+    }
+    if (merr.find("corrompido") != std::string::npos) {
+        showToast("asset corrompido, reimporta (renomeado .corrupt; causa "
+                  "no engine.log)");
+        elog::error("editor: pick FALHOU — asset em QUARENTENA (%s) — o "
+                    "TIC mantém o mesh anterior; REIMPORTA o ficheiro "
+                    "original", merr.c_str());
+        refreshCatalog();   // o .corrupt saiu do catálogo (o picker re-lista)
+    } else {
+        char msg[128];
+        std::snprintf(msg, sizeof(msg), "falha: %.96s", merr.c_str());
+        showToast(msg);
+    }
+}
+
 // 0.8.7 — o "Sim" do diálogo APLICAR-APÓS-IMPORT, EXTRAÍDO do corpo do
 // frame() para função com NOME: o MESMO código corre no device (frame) e
 // na suíte do hospedeiro (test_wiring087 — que inclui ESTE ficheiro). O
@@ -3860,6 +3932,11 @@ void applyImportedAssetToSelectedTic() {
             }
             if (out.log[0] != '\0') {
                 elog::info("%s", out.log);   // 0.8.9: idem (o "Sim" do import prova o fit uniforme no log)
+            }
+            // 0.10.6 (SAF-SEAM) — a CAUSA no toast quando o mesh FALHOU
+            // («asset corrompido, reimporta» + o catálogo re-listado)
+            if (!out.applied) {
+                reportMeshPickFailure(menuKind);
             }
             // 0.8.7 — contagens do mesh APLICADO (o TIC tem meshes reais no
             // caminho do import; o applyAssetPick é puro — não desreferencia)
@@ -5458,12 +5535,15 @@ void frame() {
                          pw - 28.0f);
         const u64 doneB = g_importJob.bytesDone.load();
         const u64 totalB = g_importJob.bytesTotal.load();
-        char bytes[64];
-        std::snprintf(bytes, sizeof(bytes), "%llu / %llu MB",
-                      static_cast<unsigned long long>(doneB / (1024 * 1024)),
-                      static_cast<unsigned long long>(totalB / (1024 * 1024)));
-        g_ui.label(x + 14.0f, y + 88.0f + th * 0.3f, bytes, theme::TEXT);
-        // barra de progresso (trilho + preenchimento ACCENT)
+        // 0.10.6 (SAF-SEAM) — NUNCA «0 / 0»: length=0 → «copiando… N B»
+        // (os bytes que já correram; «a copiar…» antes do 1.º chunk);
+        // total sub-MB → B inteiros (a divisão de MB mentia «0 / 0 MB» no
+        // cut de 72k unidades do city — MINUTOS de 0/0 num import de 29 MB)
+        g_ui.label(x + 14.0f, y + 88.0f + th * 0.3f,
+                   importOverlayBytesText(doneB, totalB).c_str(), theme::TEXT);
+        // barra de progresso (trilho + preenchimento ACCENT). Sem total
+        // conhecido o trilho fica VAZIO (o «copiando…» ao lado diz a
+        // verdade — uma barra a 0 com número nenhum era o 0/0 disfarçado)
         const f32 bx = x + 14.0f;
         const f32 bw = pw - 28.0f;
         g_ui.panel(bx, y + 112.0f, bw, 12.0f, theme::LINE);
@@ -6240,6 +6320,13 @@ void frame() {
                 }
                 if (out.log[0] != '\0') {
                     elog::info("%s", out.log);   // 0.8.9: vai ao engine.log (a prova no log viewer do C33)
+                }
+                // 0.10.6 (SAF-SEAM) — a CAUSA no toast quando o pick de MESH
+                // falhou (o TIC MANTÉM o mesh/prim anterior — nunca a bola
+                // silenciosa; o «asset corrompido, reimporta» + o catálogo
+                // re-listado sem o .corrupt)
+                if (!out.applied) {
+                    reportMeshPickFailure(menuKind);
                 }
                 }   // 0.8.12: fim do else do GUARDA (pick aplicado com alvo válido)
             }

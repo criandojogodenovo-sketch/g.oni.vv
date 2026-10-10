@@ -283,6 +283,65 @@ city de 72 primitivas importando sob `content://` pelo fd do bridge, e
 o provider que recusa o mapa ficando VERDE pelos ranges) vigiam o
 hotfix para sempre.
 
+### §SAF-SEAM — o runtime por blocos pela MESMA cascata + a QUARENTENA (0.10.6)
+
+O HOTFIX SAF-STREAM fechou a costura do CONVERSOR; sobravam DUAS no
+RUNTIME — o `BlockMesh::open` (a abertura por blocos) abria por RANGES
+do storage mesmo quando o provider dá FD, e os MATERIAIS morriam sob um
+provider SEM tamanho (as sondas de 256 B+ exigem o comprimento EXATO e
+a cauda de nomes é quase sempre mais curta — «cidade» são 8 B).
+
+**A abertura usa a MESMA cascata do conversor** (nunca um caminho POSIX
+sob `content://`): `openReadFd` (o FD DO BRIDGE) → `mapFd64` serve as 3
+leituras (peek 192 B + tabela + materiais — ZERO ranges) → o provider
+que recusa o mapa (FUSE) degrada para **pread das faixas NO MESMO fd**
+→ o pipe/stream (fstat 0 B) cai nos RANGES do `readBytesAt`. O fd e o
+mapping vivem SÓ durante a abertura — o lazy de cada bloco continua a
+ser o `readBytesAt` de sempre (o contrato do PASSO 4 intacto). A linha
+contrato do load NOMEIA a fonte: `gmesh: fase=load ms=<n> (por BLOCOS:
+tabela de <k> blocos, <b> B lidos, fonte=<mmap-fd|pread-fd|ranges>;
+dados=<d> B por carregar em lazy)` — o par exato do `asset: v3 fonte=`
+do conversor (é assim que o dono confere no engine.log que runtime e
+conversor leem pelo MESMO fd).
+
+**Os materiais sem tamanho** leem-se NOME A NOME (a tabela é
+auto-descritiva: `u16` comprimento + nome + pad a 4 do offset ABSOLUTO —
+o MESMO alinhamento do escritor): a leitura incremental monta os bytes
+exatos sem conhecer o tamanho do ficheiro; as sondas continuam a ser a
+primeira tentativa (uma leitura quando a cauda é grande).
+
+**Em falha, o `err` diz TUDO**: QUAL das 3 leituras (peek/tabela/
+materiais), o errno do pread quando o fd recusa e o tamanho do ficheiro
+VISTO (`ficheiro visto com <n> B`) — a linha de sempre confundia «não
+encontrado» com «faixa ilegível» sem dizer qual nem porque.
+
+**A QUARENTENA do asset corrompido** (o peek v3 VERDE + a tabela ou os
+materiais que não validam ou acabam além do fim): o ficheiro é renomeado
+`<rel>.corrupt` — os bytes FICAM para forense, o NOME sai do catálogo
+(o picker lista `.gmesh`, nunca `.corrupt`) — e a mensagem é
+«**asset corrompido, reimporta** — <causa>». NUNCA a troca silenciosa
+por primitiva: o TIC MANTÉM o mesh anterior e o toast do dispatch diz a
+causa (`GpuAssets::lastMeshError`). O rename é o primitivo novo
+`ProjectStorage::rename` — `FsStorage` = `::rename` POSIX atómico;
+`SafStorage` = **cópia streaming por fd** (uma abertura de leitura +
+o write stream do destino em chunks de 1 MB + remove; a interface SafIo
+não tem `renameDocument`) com a cache de URIS a seguir o nome (o
+`exists()` não mente depois da quarentena); um peek que NÃO valida (v1/
+garbage) NÃO entra em quarentena — o caminho do mesh único decide.
+
+**O overlay de import nunca diz «0 / 0»**: o total vem do length do
+bridge (os atómicos do job); `length=0` com a fonte a correr mostra
+«copiando… <N> B» (os bytes que já correram) e «a copiar…» no arranque;
+totais sub-megabyte mostram-se em B inteiros (o corte reporta
+TRIÂNGULOS, o assembly bytes de SAÍDA — a divisão de MB incondicional
+arredondava «0 / 0 MB» durante o import de 29 MB). A função é PURA e
+aferível (`importOverlayBytesText`).
+
+A sentinela R-043 (o rename nas 3 camadas de storage) e a FASE 23 do
+c33_virtual (a abertura nomeando `fonte=mmap-fd` sob `content://`, o
+chip «bl n/m», o overlay, o provider que recusa o mapa e a quarentena
+com o rename streaming) vigiam tudo isto para sempre.
+
 ### §EXPANDIR-NÓS — o import de nós como sub-árvore e as PEÇAS (0.10-M EXT)
 
 O BACKLOG 0.10-M-ext do dono: «opção no import "expandir nós" que cria

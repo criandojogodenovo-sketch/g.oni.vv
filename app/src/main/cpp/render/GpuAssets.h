@@ -59,6 +59,13 @@ public:
     // kGmeshV3FlagPiece — o culling por TIC — mesmo sendo pequena).
     Mesh* blockHull(const std::string& ref);
 
+    // 0.10.6 (SAF-SEAM) — o ÚLTIMO erro de mesh()/blockHull() (a linha do
+    // «asset corrompido, reimporta» chega ao TOAST do picker, não SÓ ao
+    // engine.log: a spec manda o estado do picker ANTERIOR + a mensagem
+    // CLARA — nunca a troca silenciosa pela bola). Vazio = sem falha
+    // recente (o sucesso limpa). Thread do main (o picker corre lá).
+    const std::string& lastMeshError() const { return lastMeshErr_; }
+
     // aviso (gate 2K no fallback) sai da carga — o chamador mostra em toast
     const Texture* texture(const std::string& relPath, std::string* warn = nullptr);
 
@@ -76,6 +83,7 @@ private:
     std::unordered_map<std::string, std::unique_ptr<Mesh>> gpuMeshes_;
     std::unordered_map<std::string, std::unique_ptr<Texture>> gpuTextures_;
     std::unordered_map<std::string, std::unique_ptr<BlockMesh>> blockMeshes_;
+    std::string lastMeshErr_;   // 0.10.6 (SAF-SEAM): o último erro de mesh
 };
 
 } // namespace vv

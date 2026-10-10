@@ -1923,3 +1923,219 @@ TEST(wiring091_device_rotacao_nao_corrompe_render_nem_perde_buffer) {
     eglstub::g_surfaceH = 720;
     onAppCmd(&app, APP_CMD_TERM_WINDOW);
 }
+
+// ---------------------------------------------------------------------------
+// 0.10.6 (SAF-SEAM) — (2) O OVERLAY NUNCA MOSTRA «0 / 0». A linha de
+// sempre dividia por MB: um total sub-megabyte (o cut reporta TRIÂNGULOS,
+// o assembly bytes de SAÍDA — unidades mistas) arredondava para
+// «0 / 0 MB» e o dono via 0/0 num import de 29 MB A CORRER. O contrato:
+// length=0 (o bridge ainda não anunciou / o provider mentiu) com a fonte
+// NÃO vazia → «copiando… N B»; o valor REAL chega → muda para a fração.
+// ---------------------------------------------------------------------------
+
+TEST(wiring087_overlay_import_nunca_zero_sobre_zero) {
+    const u64 MB = 1024ull * 1024ull;
+    // A JANELA INICIAL do job (antes do 1.º chunk: 0/0 na linha de sempre)
+    EXPECT(importOverlayBytesText(0, 0) == "a copiar...");
+    EXPECT(importOverlayBytesText(0, 0).find("0 / 0") == std::string::npos);
+    // length=0 E A FONTE CORRE (o provider mentiu no tamanho): o contador
+    // dos bytes é o que HÁ — «copiando… N B», nunca 0/0
+    EXPECT(importOverlayBytesText(5 * MB + 123, 0) ==
+           "copiando... 5243003 B");
+    EXPECT(importOverlayBytesText(4096, 0).find("0 / 0") == std::string::npos);
+    // O PIN DO DONO: o overlay de uma fonte de 29 MB mostra os MB REAIS
+    EXPECT(importOverlayBytesText(0, 29 * MB) == "0 / 29 MB");
+    EXPECT(importOverlayBytesText(6 * MB, 29 * MB) == "6 / 29 MB");
+    EXPECT(importOverlayBytesText(29 * MB, 29 * MB) == "29 / 29 MB");
+    // totais sub-MB: BYTES (o cut de 72k «unidades» do city não mente 0/0)
+    EXPECT(importOverlayBytesText(0, 72000) == "0 / 72000 B");
+    EXPECT(importOverlayBytesText(36000, 72000) == "36000 / 72000 B");
+    EXPECT(importOverlayBytesText(1, 500) == "1 / 500 B");
+    EXPECT(importOverlayBytesText(0, 500).find("0 / 0") == std::string::npos);
+
+    // A SEQUÊNCIA REAL das fases de um import de 29 MB com 72k tris (o
+    // city do dono): copy (bytes) → cut (tris) → assembly (bytes de
+    // saída) — NENHUMA linha renderiza «0 / 0»
+    const std::vector<std::pair<u64, u64>> fases = {
+        {0, 29 * MB}, {6 * MB, 29 * MB}, {29 * MB, 29 * MB},   // cópia
+        {0, 72000}, {36000, 72000}, {72000, 72000},            // corte
+        {0, 145 * MB}, {72 * MB, 145 * MB},                     // assembly
+    };
+    for (const auto& f : fases) {
+        const std::string linha = importOverlayBytesText(f.first, f.second);
+        EXPECT(linha.find("0 / 0") == std::string::npos);
+        EXPECT(!linha.empty());
+    }
+
+    // O JOB REAL: o overlay lê os atómicos do bridge (a ponte worker→UI).
+    // No arranque (0,0) e no fim (o último relatório) — nunca 0/0
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    javaRegistersGranted();
+    ensureEngineReady();
+    auto st = std::make_unique<FakeStorage>();
+    FakeStorage* rawSt = st.get();
+    rawSt->makeDirs("meshes");
+    g_storage = std::move(st);
+    g_resources.setStorage(rawSt);
+    g_gpu.init(&g_resources);
+    g_projectReady = true;
+    refreshCatalog();
+
+    // o arranque do job: (0,0) — a copiar…, NUNCA 0/0
+    g_importJob.bytesDone.store(0);
+    g_importJob.bytesTotal.store(0);
+    EXPECT(importOverlayBytesText(g_importJob.bytesDone.load(),
+                                  g_importJob.bytesTotal.load())
+               .find("0 / 0") == std::string::npos);
+
+    const std::string tmp = writeTempObj("goni_w087_ovl.obj");
+    ASSERT(!tmp.empty());
+    fileapi::DirEntry e;
+    e.name = "goni_w087_ovl.obj";
+    e.path = tmp;
+    e.isDir = false;
+    e.kind = 'm';
+    EXPECT(browserImportFile(e));
+    EXPECT(g_importJob.active.load());
+    pumpImportJob();
+    // o FIM: o último relatório do bridge — nunca 0/0 (o OBJ é sub-MB:
+    // a linha de sempre arredondava «0 / 0 MB» no FIM do import!)
+    const std::string fim = importOverlayBytesText(
+        g_importJob.bytesDone.load(), g_importJob.bytesTotal.load());
+    EXPECT(fim.find("0 / 0") == std::string::npos);
+    EXPECT(fim.find(" B") != std::string::npos);   // sub-MB → bytes reais
+    std::remove(tmp.c_str());
+    vv::elog::shutdown();
+}
+
+// ---------------------------------------------------------------------------
+// 0.10.6 (SAF-SEAM) — (3) O GMSH TRUNCADO: mensagem CLARA + o picker MANTÉM
+// o estado anterior + a QUARENTENA (.corrupt sai do catálogo) — NUNCA a
+// troca silenciosa pela bola. O caminho REAL: GpuAssets::mesh → peek 192 B
+// (v3 verde, >65535 verts) → blockHull → BlockMesh::open → a tabela acaba
+// além do fim → QUARENTENA + err «asset corrompido, reimporta» → o
+// applyAssetPick falha LIMPO (o mesh ANTERIOR fica) → o toast do dispatch
+// diz a CAUSA (o lastMeshError do GpuAssets).
+// ---------------------------------------------------------------------------
+
+TEST(wiring087_gmesh_truncado_picker_mantem_estado_e_quarentena) {
+    EXPECT(vv::elog::init(kTestLogs));
+    resetEngineForTest();
+    javaRegistersGranted();
+    ensureEngineReady();
+
+    // projeto com storage fake + GPU REAL (o caminho do device)
+    auto st = std::make_unique<FakeStorage>();
+    FakeStorage* rawSt = st.get();
+    rawSt->makeDirs("meshes");
+    g_storage = std::move(st);
+    g_resources.setStorage(rawSt);
+    g_gpu.init(&g_resources);
+    g_projectReady = true;
+    refreshCatalog();
+
+    // (1) o TIC com um mesh ANTERIOR (o estado que o picker há-de MANTER)
+    const Handle h = addMeshTic("Alvo");
+    ASSERT(h.valid());
+    MeshRenderer* mr = g_scene.get(h)->getComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+    {
+        const std::string tmp = writeTempObj("goni_w087_prev.obj");
+        ASSERT(!tmp.empty());
+        fileapi::DirEntry e;
+        e.name = "goni_w087_prev.obj";
+        e.path = tmp;
+        e.isDir = false;
+        e.kind = 'm';
+        browserImportFile(e);
+        pumpImportJob();
+        g_applyAsk.kind = 'm';
+        g_applyAsk.rel = "assets/goni_w087_prev.gmesh";
+        g_applyAsk.fileName = "goni_w087_prev.obj";
+        applyImportedAssetToSelectedTic();
+        ASSERT(mr->mesh != nullptr);
+        std::remove(tmp.c_str());
+    }
+    const Mesh* prevMesh = mr->mesh;
+    const std::string prevPath = mr->meshPath;
+    ASSERT(!prevPath.empty());
+    ASSERT(prevMesh != nullptr);
+
+    // (2) O ASSET «GRANDE» CORROMPIDO: parte do .gmesh VÁLIDO do import
+    // acima (o irmão pequeno), com o vertexCount do meta ENGANADO para
+    // 70000 (>65535 — o picker segue o caminho dos BLOCOS/blockHull) e o
+    // checksum FNV recalculado (o PEEK fica VERDE); a seguir a
+    // TRUNCATURA a meio da tabela — o fim do ficheiro não acompanha a
+    // tabela que o meta promete
+    const std::string bigRel = "assets/goni_w087_grande.gmesh";
+    std::vector<u8> gmesh;
+    ASSERT(rawSt->readBytes(prevPath, gmesh) && gmesh.size() > 192);
+    {
+        // o patch: vertexCount (meta offset 16 → ficheiro 48) = 70000
+        const u64 bigVerts = 70000;
+        for (int b = 0; b < 8; ++b) {
+            gmesh[48 + b] = static_cast<u8>((bigVerts >> (8 * b)) & 0xFF);
+        }
+        // o checksum do header (offset 20) recalculado — peek VERDE
+        const u64 sum = gfnv1a(gmesh.data() + kGHeaderBytes,
+                               kGmeshV3MetaBytes);
+        for (int b = 0; b < 8; ++b) {
+            gmesh[20 + b] = static_cast<u8>((sum >> (8 * b)) & 0xFF);
+        }
+        // confere: o peek diz v3 com 70000 verts (o caminho do blockHull)
+        GMeshV3Meta meta;
+        std::string perr;
+        std::vector<u8> peek(gmesh.begin(),
+                             gmesh.begin() + kGHeaderBytes +
+                                 kGmeshV3MetaBytes);
+        ASSERT(gmeshV3PeekMeta(peek.data(), peek.size(), meta, perr));
+        ASSERT(meta.vertexCount == bigVerts);
+        // a TRUNCATURA: corta a meio da TABELA de blocos
+        const u64 tableLen =
+            static_cast<u64>(meta.blockCount) * kGmeshV3BlockEntryBytes;
+        gmesh.resize(static_cast<size_t>(meta.blockTableOffset + tableLen / 2));
+        ASSERT(rawSt->writeBytes(bigRel, gmesh.data(), gmesh.size()));
+    }
+    refreshCatalog();
+    bool listed = false;
+    for (const std::string& m : g_catalog.meshes) {
+        listed = listed || m == bigRel;
+    }
+    ASSERT(listed);   // o picker ainda o OFERECE (o dono escolhe-o)
+
+    // (4) O PICK: falha LIMPA — o estado ANTERIOR fica, a mensagem diz
+    // CORROMPIDO/REIMPORTA, e o asset entra em QUARENTENA
+    g_applyAsk.open = true;
+    g_applyAsk.kind = 'm';
+    g_applyAsk.rel = bigRel;
+    g_applyAsk.fileName = "goni_w087_grande.gmesh";
+    g_editor.applyAsk = true;
+    g_editor.selected = h;   // o TIC com o mesh ANTERIOR
+    applyImportedAssetToSelectedTic();
+
+    // O PICKER MANTÉM O ESTADO ANTERIOR (a spec, palavra a palavra):
+    // o mesh é o MESMO ponteiro, o path é o MESMO, e NENHUMA bola
+    // silenciosa (primOn segue OFF — a troca por primitiva é do dono)
+    EXPECT(mr->mesh == prevMesh);
+    EXPECT(mr->meshPath == prevPath);
+    EXPECT(!mr->primOn);
+    EXPECT(mr->primPending == false);
+    // a MENSAGEM CLARA no toast (o lastMeshError do GpuAssets no dispatch)
+    EXPECT(std::strstr(g_toast, "asset corrompido, reimporta") != nullptr);
+    // ... e no engine.log (o que o viewer/export do C33 mostram)
+    EXPECT(logHas("ASSET CORROMPIDO"));
+    EXPECT(logHas("asset em QUARENTENA"));
+    EXPECT(logHas("asset corrompido, reimporta"));
+    // a QUARENTENA: o ficheiro saiu do catálogo (renomeado .corrupt)
+    EXPECT(!rawSt->exists(bigRel));
+    EXPECT(rawSt->exists(bigRel + ".corrupt"));
+    bool stillListed = false;
+    for (const std::string& m : g_catalog.meshes) {
+        stillListed = stillListed || m == bigRel;
+    }
+    EXPECT(!stillListed);   // o refreshCatalog do dispatch re-listou
+    // o mesh ANTERIOR continua a DESENHAR (o TIC não perdeu nada)
+    EXPECT(mr->mesh == prevMesh);
+    vv::elog::shutdown();
+}

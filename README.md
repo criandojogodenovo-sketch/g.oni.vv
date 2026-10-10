@@ -34,6 +34,65 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.10.6 — HOTFIX SAF-SEAM: as duas últimas costuras do SAF (a abertura do runtime + o overlay + a quarentena)
+
+**O que o dono pediu** (hotfix, o PASSO 5 continua à espera): o
+BlockMesh::open do RUNTIME tem de usar a MESMA cascata do conversor —
+`openReadFd`/`mapFd64`, e se o provider recusar o mmap, pread de
+ranges; NUNCA abrir por caminho POSIX sob `content://`; em falha o log
+diz qual das 3 leituras, o errno e o tamanho do ficheiro. O overlay de
+import: o total vem do length do bridge; length=0 com a fonte não vazia
+mostra «copiando… B», o valor real muda quando chega; NUNCA «0/0». A
+tabela que não valida entra em QUARENTENA (rename `.corrupt`) com
+«asset corrompido, reimporta» — nunca a troca silenciosa pela bola, o
+picker mantém o estado anterior.
+
+- **A abertura pela cascata** (render/BlockMesh.cpp): o FD DO BRIDGE
+  (`openReadFd` — no device o `bridgeOpenFd`) → `mapFd64` serve as 3
+  leituras da abertura (peek 192 B + tabela + materiais — ZERO ranges;
+  o FdCountStorage do teste PROVA) → o provider que recusa o mapa
+  degrada para pread NO MESMO fd → o pipe/stream (fstat 0 B) cai nos
+  RANGES do `readBytesAt`. O fd/mapping vivem SÓ durante a abertura — o
+  lazy de cada bloco é o contrato do PASSO 4 intocado. A linha contrato
+  do load NOMEIA a fonte: `gmesh: fase=load … fonte=<mmap-fd|pread-fd|
+  ranges>; dados=<n> B por carregar em lazy` — o par do `asset: v3
+  fonte=` do conversor (o dono confere no engine.log que runtime e
+  conversor leem pelo MESMO fd).
+- **Os materiais sem tamanho, nome a nome**: a sonda mínima de 256 B
+  exigia o comprimento EXATO e a cauda de nomes é quase sempre mais
+  curta («cidade» são 8 B) — a leitura incremental monta os bytes
+  exatos pela tabela AUTO-DESCRITIVA (u16 comprimento + nome + pad a 4
+  do offset absoluto, o MESMO alinhamento do escritor).
+- **A quarentena**: `ProjectStorage::rename` NOVO — Fs = `::rename`
+  POSIX atómico; Saf = CÓPIA STREAMING por fd (1 abertura de leitura +
+  o write stream do destino em chunks de 1 MB + remove — a interface
+  SafIo não tem `renameDocument`) com a cache de URIs a seguir o nome;
+  os bytes FICAM para forense, o NOME sai do catálogo. O
+  `GpuAssets::lastMeshError` alimenta o toast do dispatch
+  («asset corrompido, reimporta (renomeado .corrupt; causa no
+  engine.log)») e o catálogo re-lista — o TIC MANTÉM o mesh anterior.
+  Peek inválido (v1/garbage) NÃO é quarentena; falha de I/O NÃO é
+  quarentena (o ficheiro fica para retentar).
+- **O overlay nunca «0 / 0»** (`importOverlayBytesText`, pura): length=0
+  → «a copiar…»/«copiando… N B»; totais sub-MB (o cut reporta
+  TRIÂNGULOS, o assembly bytes de SAÍDA — unidades mistas) mostram-se
+  em B inteiros; ≥1 MB → «N / M MB» (o pin do 29 MB).
+- **Provas**: test_blockmesh +7 (fonte mmap-fd com ZERO ranges; o pipe
+  → degradação logada; a tabela truncada → quarentena; os materiais
+  além do fim; o peek inválido SEM quarentena; a falha de I/O com
+  qual-leitura/tamanho) · test_wiring087 +2 (o overlay nunca 0/0 com a
+  sequência real copy→cut→assembly + o job REAL; o truncado pelo
+  caminho REAL do apply — picker mantém, toast/log dizem, o `.corrupt`
+  vive, o catálogo re-listou) · sentinela R-043 (o rename nas 3 camadas
+  de storage) · c33 FASE 23 (+38 checks, 743→781: o city abrindo por
+  blocos sob `content://` com `fonte=mmap-fd`, o chip «bl 72/72» pela
+  frame REAL, o overlay, o provider que recusa e a quarentena com o
+  rename streaming) · mutações M-SS1/M-SS2/M-SS3 (por caminho apenas /
+  total só do length / a bola silenciosa — todas vermelho→verde) ·
+  versionCode **61**. Relatório:
+  `docs/RELATORIO-0.10-M-HOTFIX-SAF-SEAM.md` · **PÁRA — o PASSO 5
+  (texturas ASTC) continua à espera do OK do dono.**
+
 ## 0.10.5 — 0.10-M EXT: IMPORT DE NÓS COMO SUB-ÁRVORE (o «expandir nós» — um TIC por nó com mesh)
 
 **O que o dono pediu** (BACKLOG 0.10-M-ext): «opção no import "expandir

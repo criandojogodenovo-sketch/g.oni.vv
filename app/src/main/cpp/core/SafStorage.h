@@ -53,6 +53,13 @@ public:
     bool openReadFd(const std::string& relPath, int* outFd,
                     std::string& err) override;
 
+    // 0.10.6 (SAF-SEAM) — A QUARENTENA sob SAF: a interface SafIo não tem
+    // renameDocument — o rename é CÓPIA STREAMING por fd (UMA abertura de
+    // leitura + o write stream do destino) seguida do remove da origem.
+    // O degradado honesto: paga os bytes UMA vez, num caminho patológico
+    // (o asset corrompido que sai do catálogo).
+    bool rename(const std::string& from, const std::string& to) override;
+
     // 0.8.10 — escrita STREAMING real (fd SAF aberto até ao close)
     int  openWriteStream(const std::string& relPath) override;
     bool writeStreamChunk(int handle, const void* data, size_t n) override;

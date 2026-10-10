@@ -260,6 +260,23 @@ bool FsStorage::openReadFd(const std::string& relPath, int* outFd,
     return true;
 }
 
+bool FsStorage::rename(const std::string& from, const std::string& to) {
+    // 0.10.6 (SAF-SEAM) — a QUARENTENA sob POSIX: ::rename atómico (os
+    // bytes nunca duplicam; um crash a meio ou deixa o nome VELHO ou o
+    // NOVO — nunca zero). O errno falha ao log da causa.
+    const std::string realFrom = joinRelPath(root_, from);
+    const std::string realTo = joinRelPath(root_, to);
+    if (realFrom.empty() || realTo.empty()) {
+        return false;
+    }
+    if (::rename(realFrom.c_str(), realTo.c_str()) != 0) {
+        elog::error("fs: rename %s -> %s FALHOU — errno=%d (%s)",
+                    from.c_str(), to.c_str(), errno, std::strerror(errno));
+        return false;
+    }
+    return true;
+}
+
 bool FsStorage::listDir(const std::string& relDir,
                         std::vector<std::string>& outFiles) const {
     const std::string real = joinRelPath(root_, relDir);

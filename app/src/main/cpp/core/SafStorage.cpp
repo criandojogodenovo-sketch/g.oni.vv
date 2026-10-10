@@ -372,6 +372,75 @@ bool SafStorage::openReadFd(const std::string& relPath, int* outFd,
     return true;
 }
 
+bool SafStorage::rename(const std::string& from, const std::string& to) {
+    // 0.10.6 (SAF-SEAM) — A QUARENTENA sob SAF, em STREAMING: uma só
+    // abertura por fd da ORIGEM (o bridge), chunks de 1 MB para o write
+    // stream do DESTINO, close (persiste no provider) e remove da origem.
+    // Nunca o ficheiro inteiro em RAM; a falha a meio LIMPA o destino
+    // (sem estado parcial — a regra da casa). A cópia só acontece no
+    // caminho patológico do asset corrompido.
+    if (!io_ || !validRelPath(from) || !validRelPath(to)) {
+        return false;
+    }
+    int fd = -1;
+    std::string rerr;
+    if (!openReadFd(from, &fd, rerr)) {
+        elog::error("saf: quarentena — o fd de '%s' não abriu (%s)",
+                    from.c_str(), rerr.c_str());
+        return false;
+    }
+    const int h = openWriteStream(to);
+    if (h <= 0) {
+        ::close(fd);
+        elog::error("saf: quarentena — o write stream de '%s' não abriu",
+                    to.c_str());
+        return false;
+    }
+    bool ok = true;
+    {
+        char buf[1024 * 1024];
+        ssize_t r;
+        while ((r = ::read(fd, buf, sizeof(buf))) > 0) {
+            if (!writeStreamChunk(h, buf, static_cast<size_t>(r))) {
+                elog::error("saf: quarentena — escrita de '%s' FALHOU — "
+                            "errno=%d (%s)",
+                            to.c_str(), errno, errnoText().c_str());
+                ok = false;
+                break;
+            }
+        }
+        if (r < 0) {
+            elog::error("saf: quarentena — leitura de '%s' FALHOU — errno=%d "
+                        "(%s)",
+                        from.c_str(), errno, errnoText().c_str());
+            ok = false;
+        }
+    }
+    ::close(fd);
+    closeWriteStream(h);
+    if (!ok) {
+        remove(to);   // sem estado parcial — a origem fica NO SÍTIO
+        return false;
+    }
+    if (!remove(from)) {
+        // o destino JÁ persistiu: fica a DUPLICAR (honesto no log — o
+        // catálogo só lista .gmesh, e o .corrupt duplo não engana ninguém)
+        elog::warn("saf: quarentena — o remove de '%s' falhou; '%s' ficou "
+                   "no lugar (duplicado)",
+                   from.c_str(), to.c_str());
+        return false;
+    }
+    // 0.10.6 (SAF-SEAM) — A CACHE DE URIS SEGUE O NOME: o probe responde
+    // pela cache QUENTE (fileUris_) — sem isto o renomeado «existia»
+    // AINDA (o exists() mentia depois da quarentena). O `to` já está na
+    // cache (o create do openWriteStream pô-lo lá); o `from` SAI.
+    fileUris_.erase(from);
+    elog::info("saf: quarentena %s -> %s (copia streaming por fd — a "
+               "interface SafIo nao tem rename)",
+               from.c_str(), to.c_str());
+    return true;
+}
+
 bool SafStorage::listDir(const std::string& relDir,
                          std::vector<std::string>& outFiles) const {
     outFiles.clear();

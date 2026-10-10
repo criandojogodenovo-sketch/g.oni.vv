@@ -7987,6 +7987,302 @@ int main() {
         std::remove(src.c_str());
     }
 
+    // ======================================================================
+    // FASE 23 — 0.10.6 HOTFIX SAF-SEAM: o SEAM do runtime fechado. A
+    // última costura: o BlockMesh (a abertura por blocos do RUNTIME)
+    // abria por RANGES do storage — o conversor já abria pelo FD DO
+    // BRIDGE (mmap por fd). AQUI no caminho do device: (23.1) o city
+    // importa sob content:// E A ABERTURA nomeia a MESMA fonte
+    // (fonte=mmap-fd — o par do «asset: v3 fonte=» do conversor); (23.2)
+    // o chip «bl n/m» desenha com o HUD REAL sob SAF; (23.3) o OVERLAY
+    // de import NUNCA mostra «0 / 0» (o pin do 29 MB — o length do bridge
+    // a 0 deixa «copiando… N B», o total sub-MB mostra B); (23.4) o
+    // provider que RECUSA o mmap (o pipe) degrada a abertura para RANGES
+    // — VERDE na mesma, NUNCA caminho POSIX; (23.5) o gmesh TRUNCADO
+    // entra em QUARENTENA (rename .corrupt pela CÓPIA STREAMING do SAF) +
+    // o lastMeshError diz «asset corrompido, reimporta».
+    // ======================================================================
+    fase("FASE 23 — hotfix SAF-SEAM: o fd do bridge na abertura + o overlay + a quarentena");
+    {
+        resetEngineForHarness();
+        javaRegistersWithCacheDir();
+        g_blockLogIntervalSecs = 0.0f;
+        FakeSafIo io;   // o provider content:// (o modelo da suíte)
+        {
+            auto safPtr = std::make_unique<SafStorage>(
+                &io, "content://tree/primary:GOneVV/cidade23");
+            SafStorage* saf = safPtr.get();
+            check(Project::createNew(*saf, "c33", g_project),
+                  "23.0 projeto SAF criado (content://)");
+            {
+                const Handle h = g_scene.create("Alvo");
+                Tic* t = g_scene.get(h);
+                t->addComponent<Transform3D>();
+                t->addComponent<MeshRenderer>();
+                check(g_project.saveActiveScene(*saf, g_scene),
+                      "23.0 cena gravada no provider SAF");
+            }
+            g_storage = std::move(safPtr);
+            g_projectReady = true;
+            g_resources.setStorage(saf);
+            g_gpu.init(&g_resources);
+            io.flushWrites();   // o provider persiste
+        }
+
+        // ---- 23.1 o city IMPORTA e ABRE por blocos com a MESMA fonte ----
+        passo("23.1 o city sob SAF: o import E a abertura pelo fd do bridge");
+        std::vector<u8> cityBytes;
+        {
+            const std::string src = "/tmp/goni_fase23_city.glb";
+            check(buildGlbFase21(72, 1000, 600, src),
+                  "23.1a fixture criada (GLB 72 primitivas x 1000 verts)");
+            convert::Output out;
+            convert::Stats stats;
+            std::string err;
+            const bool ok = convert::importFile(src, "city.glb", *g_storage,
+                                                g_pipeline.get(), out, stats,
+                                                err, nullptr, nullptr);
+            io.flushWrites();
+            if (!ok) {
+                std::printf("    [23.1-ERR] import falhou: %.200s\n",
+                            err.c_str());
+            }
+            check(ok && out.meshes.size() == 1 &&
+                      out.meshes[0] == "assets/city.gmesh",
+                  "23.1 o import sob content:// COMPLETA (o de sempre)");
+            check(logCount("verificado=1") >= 1,
+                  "23.1 verificado=1 (o round-trip bit a bit)");
+            check(logCount("excede 65535") == 0,
+                  "23.1 ZERO «excede 65535» (o teto invisível)");
+            std::remove(src.c_str());
+            check(g_storage->readBytes("assets/city.gmesh", cityBytes) &&
+                      cityBytes.size() > 192,
+                  "23.1 o .gmesh do city relê pelo provider");
+
+            // A ABERTURA POR BLOCOS pelo caminho do GpuAssets (blockHull):
+            // a cascata do fd — openReadFd (o FD DO BRIDGE) → mapFd64
+            const int loadsAntes = logCount("gmesh: fase=load ms=");
+            Mesh* hull = g_gpu.mesh("assets/city.gmesh");
+            check(hull != nullptr && hull->ok(),
+                  "23.1 o hull no slot (a TABELA abriu por blocos)");
+            check(logCount("gmesh: fase=load ms=") == loadsAntes + 1,
+                  "23.1 UMA linha fase=load (a abertura é a tabela)");
+            // O SEAM: a linha contrato do LOAD nomeia a MESMA fonte do
+            // conversor (mmap POR fd — «fonte=mmap-fd; dados=…» é o formato
+            // SÓ da linha do BlockMesh; a do conversor diz «v3 fonte=»)
+            check(logHas("fonte=mmap-fd; dados="),
+                  "23.1 A FONTE da ABERTURA: o fd do bridge MAPEADO (o SEAM "
+                  "fechado — o runtime e o conversor leem pelo MESMO fd)");
+            const vv::BlockMesh* bm = g_gpu.blockMeshIfOpen("assets/city.gmesh");
+            check(bm != nullptr && bm->table().size() >= 72,
+                  "23.1 a tabela do city (72+ blocos)");
+            check(bm && bm->meta().vertexCount >= 72000,
+                  "23.1 72 000 verts pela TABELA");
+        }
+
+        // ---- 23.2 o CHIP «bl n/m» sob content:// (a frame REAL) ---------
+        passo("23.2 o chip bl n/m sob SAF: a frame desenha por blocos");
+        {
+            android_app app23;
+            std::memset(&app23, 0, sizeof(app23));
+            app23.contentRect = {0, 24, 1512, 720};
+            onAppCmd(&app23, APP_CMD_INIT_WINDOW);
+            check(g_ready, "23.2 boot completo sob content:// (g_ready)");
+            if (!g_font.ok()) {
+                const char* paths[] = {FONT_FIXTURE};
+                g_font.loadFromPaths(paths, 1, 28.0f);
+            }
+            g_ui.setFont(&g_font);
+            g_editor.selected = g_scene.find("Alvo");
+            check(g_scene.get(g_editor.selected) != nullptr,
+                  "23.2 o TIC Alvo vivo após o boot SAF");
+            // o APPLY pelo picker REAL (o «Sim» do diálogo)
+            refreshCatalog();
+            g_applyAsk.open = true;
+            g_applyAsk.kind = 'm';
+            g_applyAsk.rel = "assets/city.gmesh";
+            g_applyAsk.fileName = "city.glb";
+            g_editor.applyAsk = true;
+            applyImportedAssetToSelectedTic();
+            Tic* talvo = g_scene.get(g_editor.selected);
+            MeshRenderer* mr23 =
+                talvo ? talvo->getComponent<MeshRenderer>() : nullptr;
+            check(mr23 != nullptr && mr23->meshPath == "assets/city.gmesh",
+                  "23.2 o APPLY funciona sob SAF (o hull no slot)");
+            // escala 1:1 (cancela o fit — determinismo) + câmara LARGA
+            if (Transform3D* tr = talvo->getComponent<Transform3D>()) {
+                tr->scale = Vec3{1.0f, 1.0f, 1.0f};
+                tr->updateWorld();
+            }
+            g_camera.target = Vec3{0.0f, 0.0f, 0.0f};
+            g_camera.yaw = 0.0f;
+            g_camera.pitch = 0.0f;
+            g_camera.dist = 12.0f;
+            g_camera.fovY = 1.0472f;
+            frame();
+            check(g_blockFrame.any && g_blockFrame.total >= 72,
+                  "23.2 a frame desenha o city POR BLOCOS sob SAF");
+            check(g_blockFrame.drawn == g_blockFrame.total,
+                  "23.2 a câmara larga vê TODOS os blocos");
+            check(g_bottom.blTotal >= 72 && g_bottom.blDrawn >= 72,
+                  "23.2 o HUD (chip FPS · TICs · bl) diz «bl 72/72» sob "
+                  "content:// — o PIN do dono (o chip n/m com o city)");
+            // o TIC solto do slot (o storage muda nos passos seguintes —
+            // o hull/blockmesh velhos não podem ficar pendurados)
+            if (mr23) {
+                mr23->mesh = nullptr;
+                mr23->meshPath.clear();
+                mr23->blocks = nullptr;
+            }
+        }
+
+        // ---- 23.3 o OVERLAY nunca «0 / 0» (o pin do 29 MB) --------------
+        passo("23.3 o overlay de import: NUNCA «0 / 0» (o pin do 29 MB)");
+        {
+            const u64 MB = 1024ull * 1024ull;
+            // A JANELA INICIAL (length=0, fonte NÃO vazia): «a copiar…»
+            check(importOverlayBytesText(0, 0) == "a copiar...",
+                  "23.3 length=0 no arranque: «a copiar…» (nunca 0/0)");
+            // o provider MENTIU no tamanho (length=0, a fonte corre):
+            // «copiando… N B» — os bytes que JÁ correram
+            check(importOverlayBytesText(5 * MB + 123, 0) ==
+                      "copiando... 5243003 B",
+                  "23.3 length=0 com a fonte a correr: «copiando… N B»");
+            // O PIN: uma fonte de 29 MB mostra os MB REAIS
+            check(importOverlayBytesText(6 * MB, 29 * MB) == "6 / 29 MB",
+                  "23.3 o 29 MB mostra «6 / 29 MB» (os MB reais)");
+            // totais sub-MB (o cut reporta TRIÂNGULOS): BYTES, nunca 0/0
+            check(importOverlayBytesText(0, 72000) == "0 / 72000 B",
+                  "23.3 o total sub-MB mostra B (o cut do city nunca 0/0)");
+            // a SEQUÊNCIA das fases de um import de 29 MB: nenhuma 0/0
+            const std::pair<u64, u64> fases[] = {
+                {0, 29 * MB}, {29 * MB, 29 * MB}, {0, 72000},
+                {72000, 72000}, {0, 145 * MB}};
+            bool nunca00 = true;
+            for (const auto& f : fases) {
+                nunca00 = nunca00 && importOverlayBytesText(f.first, f.second)
+                                         .find("0 / 0") == std::string::npos;
+            }
+            check(nunca00,
+                  "23.3 a SEQUÊNCIA copy→cut→assembly NUNCA renderiza «0 / 0»");
+            // os atómicos do job (o bridge worker→UI) no ARRANQUE real
+            g_importJob.bytesDone.store(0);
+            g_importJob.bytesTotal.store(0);
+            check(importOverlayBytesText(g_importJob.bytesDone.load(),
+                                         g_importJob.bytesTotal.load())
+                      .find("0 / 0") == std::string::npos,
+                  "23.3 o job no arranque (0,0): nunca 0/0");
+        }
+
+        // ---- 23.4 o provider que RECUSA o mmap: ranges, NUNCA POSIX -----
+        passo("23.4 o provider recusa o mmap: a abertura VERDE por ranges");
+        std::unique_ptr<FakeSafIo> io23b;
+        std::unique_ptr<SafStorage> saf23b;
+        {
+            // o storage VELHO sai (o BlockMesh do city tem de não ficar
+            // pendurado num provider morto)
+            g_gpu.releaseAll();
+            g_scene.clear();
+            io23b = std::make_unique<FakeSafIo>();
+            io23b->refuseMmapFds = true;   // a sonda do mmap leva o PIPE
+            io23b->mmapRefusalsLeft = 1;   // a 1.ª abertura de fd
+            saf23b = std::make_unique<SafStorage>(
+                io23b.get(), "content://tree/primary:GOneVV/recusa23");
+            SafStorage* saf2 = saf23b.get();
+            g_storage = std::move(saf23b);
+            g_projectReady = true;
+            g_resources.setStorage(saf2);
+            g_gpu.init(&g_resources);
+            saf2->makeDirs("assets");
+            check(saf2->writeBytes("assets/citypipe.gmesh",
+                                   cityBytes.data(), cityBytes.size()),
+                  "23.4 o city escrito no provider que recusa o mmap");
+            // A ABERTURA DIRETA do BlockMesh (o caminho da cascata — o
+            // roteamento do GpuAssets já provou-se no 23.1): o fd (PIPE)
+            // → fstat 0 B → pread ESPIPE → os RANGES do storage — VERDE
+            vv::BlockMesh bm24;
+            std::string err24;
+            check(bm24.open(*saf2, "assets/citypipe.gmesh", err24) &&
+                      bm24.table().size() >= 72,
+                  "23.4 a abertura VERDE pela degradação (a tabela lida por "
+                  "ranges — NUNCA caminho POSIX)");
+            if (!err24.empty()) {
+                std::printf("    [23.4-ERR] %.200s\n", err24.c_str());
+            }
+            check(logHas("veio com 0 B"),
+                  "23.4 o fd com 0 B LOGADO (o pipe do provider)");
+            // «fonte=ranges; dados=» é o formato SÓ da linha do BlockMesh
+            // (a do conversor diz «v3 fonte=») — o degradado honesto
+            check(logHas("fonte=ranges; dados="),
+                  "23.4 a linha contrato: fonte=ranges (o degradado honesto)");
+            check(bm24.meta().vertexCount >= 72000,
+                  "23.4 a tabela COMPLETA pelos ranges (72 000 verts)");
+        }
+
+        // ---- 23.5 o gmesh TRUNCADO: QUARENTENA sob SAF (a cópia ---------
+        //        streaming do rename) + o lastMeshError
+        passo("23.5 o truncado: quarentena .corrupt + «reimporta»");
+        std::unique_ptr<FakeSafIo> io23c;
+        std::unique_ptr<SafStorage> saf23c;
+        {
+            g_gpu.releaseAll();
+            io23c = std::make_unique<FakeSafIo>();
+            saf23c = std::make_unique<SafStorage>(
+                io23c.get(), "content://tree/primary:GOneVV/quar23");
+            SafStorage* saf3 = saf23c.get();
+            g_storage = std::move(saf23c);
+            g_resources.setStorage(saf3);
+            g_gpu.init(&g_resources);
+            saf3->makeDirs("assets");
+            // a TRUNCATURA: corta a meio da tabela (o peek segue verde)
+            std::vector<u8> trunc = cityBytes;
+            {
+                GMeshV3Meta meta;
+                std::string perr;
+                std::vector<u8> peek(trunc.begin(),
+                                     trunc.begin() + kGHeaderBytes +
+                                         kGmeshV3MetaBytes);
+                check(gmeshV3PeekMeta(peek.data(), peek.size(), meta, perr),
+                      "23.5 o peek do city truncável (v3 verde)");
+                const u64 tableLen =
+                    static_cast<u64>(meta.blockCount) * kGmeshV3BlockEntryBytes;
+                trunc.resize(static_cast<size_t>(meta.blockTableOffset +
+                                                 tableLen / 2));
+            }
+            check(saf3->writeBytes("assets/citytrunc.gmesh", trunc.data(),
+                                   trunc.size()),
+                  "23.5 o city TRUNCADO escrito no provider");
+            // A ABERTURA: quarentena (rename .corrupt) + o err CLARO
+            Mesh* hull = g_gpu.mesh("assets/citytrunc.gmesh");
+            check(hull == nullptr,
+                  "23.5 a abertura do truncado FALHA (nunca silêncio)");
+            check(logHas("ASSET CORROMPIDO"),
+                  "23.5 o log: ASSET CORROMPIDO — em quarentena");
+            check(g_gpu.lastMeshError().find("asset corrompido, reimporta") !=
+                      std::string::npos,
+                  "23.5 o lastMeshError: «asset corrompido, reimporta» (a "
+                  "mensagem que o toast do picker mostra)");
+            // A QUARENTENA sob SAF: o rename é a CÓPIA STREAMING por fd —
+            // o .corrupt vive no provider; o original SAI do catálogo
+            io23c->flushWrites();
+            check(!saf3->exists("assets/citytrunc.gmesh"),
+                  "23.5 o original SAIU do catálogo (o picker deixa de o "
+                  "oferecer)");
+            check(saf3->exists("assets/citytrunc.gmesh.corrupt"),
+                  "23.5 o .corrupt vive no provider (os bytes ficam p/ "
+                  "forense — o rename streaming do SAF funcionou)");
+            {
+                std::vector<u8> quar;
+                check(saf3->readBytes("assets/citytrunc.gmesh.corrupt", quar) &&
+                          quar.size() == trunc.size(),
+                      "23.5 o .corrupt tem os bytes EXATOS (a cópia por fd "
+                      "não corrompe nada)");
+            }
+            check(logHas("quarentena"),
+                  "23.5 a linha da quarentena no engine.log (o dono LÊ)");
+        }
+    }
+
     // ---- sumário -----------------------------------------------------------
     std::printf("\n== C33 VIRTUAL: %d check(s), %d falha(s) ==\n", g_checks, g_failed);
     if (g_failed == 0) {

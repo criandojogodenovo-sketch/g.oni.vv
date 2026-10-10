@@ -77,7 +77,18 @@ public:
     BlockMesh& operator=(const BlockMesh&) = delete;
 
     // ABRE pela tabela (faixas: peek 192 B + tabela + materiais — ZERO
-    // dados). `st` não-dono: as leituras por faixa voltam a ele em CADA
+    // dados). 0.10.6 (SAF-SEAM): a FONTE da abertura é a MESMA cascata do
+    // conversor — `st.openReadFd` (o fd do bridge sob content:// — NUNCA
+    // um caminho POSIX) → `mapFd64` (o mapa serve as 3 leituras) → pread
+    // das faixas NO MESMO fd (o provider recusou o mapa) → os RANGES do
+    // readBytesAt (storages sem fds / o pipe do provider). O fd/mapping
+    // vivem SÓ durante a abertura — o LAZY de sempre é o readBytesAt
+    // (1 leitura por bloco, o contrato do PASSO 4). Em falha o `err` diz
+    // QUAL das 3 leituras, o errno e o tamanho do ficheiro VISTO (a linha
+    // de sempre truncava a causa). Uma TABELA/materiais que não valida
+    // (com o peek v3 verde) põe o asset em QUARENTENA (rename .corrupt)
+    // e o err diz «asset corrompido, reimporta» — nunca o swap silencioso.
+    // `st` não-dono: as leituras por faixa voltam a ele em CADA
     // lazy load (o storage tem de viver enquanto o BlockMesh viver).
     bool open(ProjectStorage& st, const std::string& relPath,
               std::string& err);

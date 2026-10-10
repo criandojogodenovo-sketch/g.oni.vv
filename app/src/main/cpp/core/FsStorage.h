@@ -51,6 +51,9 @@ public:
     bool openReadFd(const std::string& relPath, int* outFd,
                     std::string& err) override;
 
+    // 0.10.6 (SAF-SEAM): a quarentena do asset corrompido (::rename POSIX)
+    bool rename(const std::string& from, const std::string& to) override;
+
 private:
     std::string root_;
 };
