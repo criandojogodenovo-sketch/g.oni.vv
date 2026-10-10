@@ -9,7 +9,30 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <execinfo.h>
+
+// 0.10-M (5A): GONI_ONLY=<substring> corre SÓ os testes que casam (a caça
+// a um crash com ASAN teste a teste); GONI_SKIP=<a,b,c> salta os que casam
+static bool wanted(const char* name) {
+    const char* only = std::getenv("GONI_ONLY");
+    const char* skip = std::getenv("GONI_SKIP");
+    if (only && !std::strstr(name, only)) return false;
+    if (skip) {
+        const std::string skips(skip);
+        size_t pos = 0;
+        while (pos <= skips.size()) {
+            size_t v = skips.find(',', pos);
+            if (v == std::string::npos) v = skips.size();
+            if (v > pos &&
+                std::strstr(name, skips.substr(pos, v - pos).c_str())) {
+                return false;
+            }
+            pos = v + 1;
+        }
+    }
+    return true;
+}
 
 namespace {
 
@@ -38,6 +61,9 @@ int main() {
     std::signal(SIGILL, testCrashHandler);
     std::printf("== testes do core — G.One VV 0.7.7 ==\n");
     for (const auto& c : ::test::cases()) {
+        if (!wanted(c.name)) {
+            continue;
+        }
         const int before = ::test::failures();
         std::printf("%-46s ...", c.name);
         std::fflush(stdout);

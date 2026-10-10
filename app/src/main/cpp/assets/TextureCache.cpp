@@ -74,7 +74,7 @@ std::string TextureCache::fileNameForKey(u64 hash, const std::string& suffix) {
     if (suffix.empty()) {
         return fileNameFor(hash, CompressedFormat::RGBA8);
     }
-    char buf[16];
+    char buf[40];
     std::snprintf(buf, sizeof(buf), "cache_%016llx",
                   static_cast<unsigned long long>(hash));
     return std::string(buf) + suffix + ".gtc";
