@@ -170,7 +170,11 @@ mente no length) → «6 / 29 MB» … «29 / 29 MB» (o pin) → «0 / 72000 B�
   ficheiros do hotfix em `ci/scope.txt`) · check_main · ui-vocab ·
   theme · hierarchy · gizmo · glyph · projects-ui · reload · link
   parity · jni-parity.
-- A linha do CI do push fica colada AQUI após o run (a nota final).
+- **CI do push e610d0e — run 38035189359: 100% VERDE À PRIMEIRA**
+  (core-tests ✓ · c33 781/781 com a FASE 23 ✓ · APK arm64 assinado ✓ ·
+  symbol gate ✓). Artefacto publicado:
+  **goni-vv-0.9.6-release-signed (versionCode 61)** — o APK que o dono
+  instala para o sign-off do C33 (os 3 itens do §8).
 
 ## 7. O que NÃO foi tocado
 
