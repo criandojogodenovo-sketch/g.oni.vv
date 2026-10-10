@@ -62,7 +62,7 @@ bool hasUsefulAlpha(const RawImage& img) {
 } // namespace
 
 bool Etc2Compressor::compress(const RawImage& in, CompressedImage& out,
-                              std::string& err) {
+                              std::string& err, bool mipLinear) {
     err.clear();
     out = CompressedImage{};
     if (!in.ok()) {
@@ -75,7 +75,10 @@ bool Etc2Compressor::compress(const RawImage& in, CompressedImage& out,
     out.height = in.height;
 
     std::vector<RawImage> chain;
-    genMipChainRGBA(in, chain);
+    // PASSO 5A: o espaço da filtragem vem do chamador (texturas de COR
+    // filtram em LUZ; normal maps/dados lineares ficam nos bytes)
+    genMipChainRGBA(in, chain, mipLinear ? MipSpace::SrgbLinear
+                                         : MipSpace::Bytes);
     const u32 count = static_cast<u32>(chain.size());
     out.mips.resize(count);
 

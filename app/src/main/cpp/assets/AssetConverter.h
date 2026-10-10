@@ -59,6 +59,10 @@ struct Stats {
     // 0.9.6.4 (GRUPO A/R-021): irmãos copiados do diretório original
     // (.bin/texturas de um .gltf separado) — o log lista um por um.
     u32 siblings = 0;
+    // ---- PASSO 5A: as duas operações contam SEPARADAS (a tabela do
+    // relatório lê daqui): redução de resolução e normal maps
+    u32 texReduced = 0;   // texturas cuja RESOLUÇÃO desceu (perfil/override/teto)
+    u32 texNormal = 0;    // texturas no caminho RGBA8 (normal maps — sem perda)
     // 0.9.6.12 (A2/R-014 · a spec 2d): primitivas LARGADAS por bufferView
     // fora do buffer (exporter malformado) — o import SEGUE com o resto;
     // o toast diz «K primitiva(s) fora» (nunca silencioso)

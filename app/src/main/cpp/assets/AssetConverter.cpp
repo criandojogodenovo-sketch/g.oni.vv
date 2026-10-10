@@ -12,8 +12,10 @@
 //     esqueleto: gltfAttachSkin no mesmo dummy → joints copiados p/ o .gm.
 #include "assets/AssetConverter.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <thread>
 #include <unistd.h>
 #include <cstring>
 
@@ -627,10 +629,16 @@ bool convertPng(const std::string& srcAbs, ProjectStorage& st,
     if (pipeline) {
         TextureLoadInfo info;
         std::string perr;
+        // PNG solto = conteúdo de COR (sem material que diga o contrário);
+        // o stem é a chave do override por asset
+        const std::string key = stem;
         if (!pipeline->process(bytes.data(), bytes.size(), srcAbs.c_str(),
-                               comp, info, perr)) {
+                               comp, info, perr, TexJob{key.c_str(), false})) {
             err = "textura falhou: " + perr;
             return false;
+        }
+        if (info.reduced) {
+            ++stats.texReduced;
         }
     } else {
         static PassthroughCompressor kPassthrough;
@@ -1204,112 +1212,217 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
         }
     }
     }   // !streamed — o caminho de sempre (merge + writeGMesh)
-    // ---- passe de TEXTURAS: imagens embutidas → .gtext (uma a uma) ------
+    // ---- passe de TEXTURAS (PASSO 5A: valida/coleta → PARALELO → escreve) --
     // 0.9.6.3 (R-020 · spec PASSO 2b): FALHA PARCIAL NÃO ESCONDE O MODELO —
     // uma textura que falha é um AVISO no log e o mesh entra com material
     // por defeito (antes: UMA textura má derrubava o import inteiro)
     // 0.9.6.4 (GRUPO A): cada falha CONTA (stats.texWarn) — o toast do
     // import diz «SEM N textura(s)» (nunca silencioso); texturas EXTERNAS
     // de um .gltf são LIDAS do diretório dos irmãos (R-021) quando existe.
-    for (size_t i = 0; i < model.images.size(); ++i) {
-        GltfImage im = model.images[i];   // cópia: as externas ganham bytes
-        if (im.broken) {
-            // a causa já foi logada pelo parse (R-022: bufferView/data:)
-            ++stats.texWarn;
-            continue;
+    // PASSO 5A: a COMPRESSÃO/REDUÇÃO corre num POOL de threads FORA da UI
+    // (o pipeline loga cada operação de dentro; a escrita no storage volta
+    // a ser SEQUENCIAL e em ORDEM — o storage não partilha threads).
+    {
+        // ---- a) normal maps: imagem→marca (materiais do glTF) -------------
+        std::vector<char> isNormal(model.images.size(), 0);
+        for (const GltfMaterial& m : model.materials) {
+            if (m.normalTex >= 0 &&
+                static_cast<size_t>(m.normalTex) < isNormal.size()) {
+                isNormal[static_cast<size_t>(m.normalTex)] = 1;
+            }
         }
-        if (im.bytes.empty() && !im.uriPath.empty()) {
-            // EXTERNA: lê do diretório dos irmãos (import: a pasta original;
-            // reconvert FS: source/) — o irmão foi COPIADO para source/
-            if (siblingImageDir && uriHasScheme(im.uriPath) == false &&
-                im.uriPath.find("..") == std::string::npos) {
-                const std::string dec = uriDecode(im.uriPath);
-                const std::string sep =
-                    (siblingImageDir[strlen(siblingImageDir) - 1] == '/')
-                        ? "" : "/";
-                const std::string p =
-                    std::string(siblingImageDir) + sep + dec;
-                if (fileapi::isFile(p) &&
-                    fileapi::readAll(p, im.bytes) &&
-                    im.bytes.size() <= kMaxImageBytes) {
-                    im.mime = "image/png";   // o engine só consome PNG
-                    elog::info("asset: textura externa '%s' LIDA do diretorio"
-                               " dos irmaos (%llu B)",
-                               im.uriPath.c_str(),
-                               static_cast<unsigned long long>(
-                                   im.bytes.size()));
+        // ---- b) VALIDAÇÃO + COLETA (sequencial, logs idênticos aos de
+        //         sempre) — os bytes MOVEM-SE para o job (o pico de RAM é o
+        //         do job, não 2× o modelo)
+        struct TexWork {
+            size_t index = 0;
+            std::vector<u8> bytes;
+            std::string key;          // stem do .gtext ("cidade_3")
+            bool normal = false;
+        };
+        std::vector<TexWork> jobs;
+        jobs.reserve(model.images.size());
+        for (size_t i = 0; i < model.images.size(); ++i) {
+            GltfImage& im = model.images[i];   // referência: os bytes MOVEM
+            if (im.broken) {
+                // a causa já foi logada pelo parse (R-022: bufferView/data:)
+                ++stats.texWarn;
+                continue;
+            }
+            if (im.bytes.empty() && !im.uriPath.empty()) {
+                // EXTERNA: lê do diretório dos irmãos (import: a pasta
+                // original; reconvert FS: source/) — o irmão foi COPIADO
+                if (siblingImageDir && uriHasScheme(im.uriPath) == false &&
+                    im.uriPath.find("..") == std::string::npos) {
+                    const std::string dec = uriDecode(im.uriPath);
+                    const std::string sep =
+                        (siblingImageDir[strlen(siblingImageDir) - 1] == '/')
+                            ? "" : "/";
+                    const std::string p =
+                        std::string(siblingImageDir) + sep + dec;
+                    if (fileapi::isFile(p) &&
+                        fileapi::readAll(p, im.bytes) &&
+                        im.bytes.size() <= kMaxImageBytes) {
+                        im.mime = "image/png";   // o engine só consome PNG
+                        elog::info("asset: textura externa '%s' LIDA do "
+                                   "diretorio dos irmaos (%llu B)",
+                                   im.uriPath.c_str(),
+                                   static_cast<unsigned long long>(
+                                       im.bytes.size()));
+                    } else {
+                        ++stats.texWarn;
+                        elog::warn("asset: textura externa '%s' nao foi lida "
+                                   "em '%s' — o mesh entra com material por "
+                                   "defeito (copia o ficheiro ao lado do "
+                                   ".gltf)",
+                                   im.uriPath.c_str(), siblingImageDir);
+                        continue;
+                    }
                 } else {
                     ++stats.texWarn;
-                    elog::warn("asset: textura externa '%s' nao foi lida em "
-                               "'%s' — o mesh entra com material por defeito "
-                               "(copia o ficheiro ao lado do .gltf)",
-                               im.uriPath.c_str(), siblingImageDir);
+                    elog::warn("asset: textura %zu e EXTERNA ('%s') e o "
+                               "diretorio dos irmaos nao esta disponivel — o "
+                               "mesh entra com material por defeito",
+                               i, im.uriPath.c_str());
                     continue;
                 }
-            } else {
+            }
+            if (im.mime != "image/png") {
                 ++stats.texWarn;
-                elog::warn("asset: textura %zu e EXTERNA ('%s') e o diretorio"
-                           " dos irmaos nao esta disponivel — o mesh entra "
-                           "com material por defeito",
-                           i, im.uriPath.c_str());
+                elog::warn("asset: imagem %zu com mime '%s' ignorada (so PNG) "
+                           "— o mesh entra com material por defeito",
+                           i, im.mime.c_str());
                 continue;
             }
-        }
-        if (im.mime != "image/png") {
-            ++stats.texWarn;
-            elog::warn("asset: imagem %zu com mime '%s' ignorada (so PNG) "
-                       "— o mesh entra com material por defeito",
-                       i, im.mime.c_str());
-            continue;
-        }
-        if (im.bytes.size() > kMaxImageBytes) {
-            ++stats.texWarn;
-            elog::warn("asset: textura embutida %zu de %zu MB excede o "
-                       "orçamento — ignorada (o mesh entra com material "
-                       "por defeito)",
-                       i, im.bytes.size() / (1024 * 1024));
-            continue;
-        }
-        CompressedImage comp;
-        if (pipeline) {
-            TextureLoadInfo info;
-            std::string perr;
-            if (!pipeline->process(im.bytes.data(), im.bytes.size(),
-                                   im.mime.c_str(), comp, info, perr)) {
+            if (im.bytes.size() > kMaxImageBytes) {
                 ++stats.texWarn;
-                elog::warn("asset: textura %zu falhou (%s) — o mesh entra "
-                           "com material por defeito", i, perr.c_str());
+                elog::warn("asset: textura embutida %zu de %zu MB excede o "
+                           "orçamento — ignorada (o mesh entra com material "
+                           "por defeito)",
+                           i, im.bytes.size() / (1024 * 1024));
                 continue;
+            }
+            TexWork w;
+            w.index = i;
+            w.bytes = std::move(im.bytes);   // o job é o dono (zero cópias)
+            char nm[96];
+            std::snprintf(nm, sizeof(nm), "%s_%zu", stem.c_str(), i);
+            w.key = nm;
+            w.normal = isNormal[i] != 0;
+            jobs.push_back(std::move(w));
+        }
+
+        // ---- c) CODIFICAÇÃO PARALELA (fora da UI; progresso no log) -------
+        // 1 resultado por job, NA ORDEM (a escrita fecha em sequência);
+        // o pipeline é thread-safe p/ process() concorrentes (o cache é
+        // serializado por mutex dentro dele).
+        struct TexResult {
+            bool ok = false;
+            CompressedImage comp;
+            TextureLoadInfo info;
+            std::string err;
+        };
+        std::vector<TexResult> results(jobs.size());
+        if (!pipeline) {
+            // sem pipeline (testes/legado): passthrough SEQUENCIAL (o caminho
+            // de sempre — os bytes já estão nos jobs)
+            static PassthroughCompressor kPassthrough;
+            for (size_t j = 0; j < jobs.size(); ++j) {
+                RawImage img;
+                std::string pngErr;
+                TexResult& r = results[j];
+                if (!loadPng(jobs[j].bytes.data(), jobs[j].bytes.size(),
+                             img, pngErr)) {
+                    r.err = pngErr;
+                    continue;
+                }
+                std::string cerr2;
+                if (!kPassthrough.compress(img, r.comp, cerr2)) {
+                    r.err = cerr2;
+                    continue;
+                }
+                r.ok = true;
             }
         } else {
-            static PassthroughCompressor kPassthrough;
-            RawImage img;
-            std::string pngErr;
-            if (!loadPng(im.bytes.data(), im.bytes.size(), img, pngErr)) {
+            u32 workers = std::thread::hardware_concurrency();
+            if (workers == 0) {
+                workers = 1;
+            }
+            if (workers > 4) {
+                workers = 4;   // o pico de RAM é ~1 decodificado por worker
+            }
+            if (workers > jobs.size()) {
+                workers = static_cast<u32>(jobs.size());
+            }
+            const bool many = workers > 1;
+            elog::info("asset: texturas %zu em %u worker(s) — passe "
+                       "paralelo fora da UI",
+                       jobs.size(), workers);
+            std::atomic<u32> next{0};
+            std::atomic<u32> done{0};
+            const auto total = static_cast<u32>(jobs.size());
+            const auto worker = [&, pipeline]() {
+                for (;;) {
+                    const u32 j = next.fetch_add(1);
+                    if (j >= jobs.size()) {
+                        return;
+                    }
+                    TexWork& w = jobs[j];
+                    TexResult& r = results[j];
+                    TexJob job{w.key.c_str(), w.normal};
+                    r.ok = pipeline->process(w.bytes.data(), w.bytes.size(),
+                                             w.key.c_str(), r.comp, r.info,
+                                             r.err, job);
+                    const u32 d = done.fetch_add(1) + 1;
+                    if (many && (d % 4 == 0 || d == total)) {
+                        elog::info("texturas: %u/%u codificadas", d, total);
+                    }
+                }
+            };
+            if (workers <= 1) {
+                worker();   // 1 textura ou 1 CPU: o MESMO código, na hora
+            } else {
+                std::vector<std::thread> pool;
+                pool.reserve(workers - 1);
+                for (u32 t = 1; t < workers; ++t) {
+                    pool.emplace_back(worker);
+                }
+                worker();
+                for (std::thread& t : pool) {
+                    t.join();
+                }
+            }
+        }
+
+        // ---- d) ESCRITA (sequencial e em ordem — contagens + avisos) -------
+        for (size_t j = 0; j < jobs.size(); ++j) {
+            TexResult& r = results[j];
+            if (!r.ok) {
                 ++stats.texWarn;
                 elog::warn("asset: textura %zu falhou (%s) — o mesh entra "
-                           "com material por defeito", i, pngErr.c_str());
+                           "com material por defeito", jobs[j].index,
+                           r.err.c_str());
                 continue;
             }
-            std::string cerr2;
-            if (!kPassthrough.compress(img, comp, cerr2)) {
-                ++stats.texWarn;
-                elog::warn("asset: textura %zu falhou (%s) — o mesh entra "
-                           "com material por defeito", i, cerr2.c_str());
-                continue;
+            if (r.info.reduced) {
+                ++stats.texReduced;
             }
+            if (jobs[j].normal) {
+                ++stats.texNormal;
+            }
+            std::vector<u8> gtext;
+            if (!writeGText(r.comp, gtext, err)) {
+                return false;
+            }
+            char nm[96];
+            std::snprintf(nm, sizeof(nm), "assets/%s_%zu.gtext", stem.c_str(),
+                          jobs[j].index);
+            if (!writeAsset(st, nm, gtext, stats.outputBytes, err)) {
+                return false;
+            }
+            out.textures.push_back(nm);
+            stats.textures++;
         }
-        std::vector<u8> gtext;
-        if (!writeGText(comp, gtext, err)) {
-            return false;
-        }
-        char nm[96];
-        std::snprintf(nm, sizeof(nm), "assets/%s_%zu.gtext", stem.c_str(), i);
-        if (!writeAsset(st, nm, gtext, stats.outputBytes, err)) {
-            return false;
-        }
-        out.textures.push_back(nm);
-        stats.textures++;
     }
     // ---- clips + esqueleto → .gm (O MESMO código do runtime) -------------
     {

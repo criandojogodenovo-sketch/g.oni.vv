@@ -273,6 +273,11 @@ bool gmeshV3Skeleton(GMeshV3Meta& meta,
                      GMeshV3Skeleton& sk, std::string& err);
 
 // ---- .gtext -----------------------------------------------------------------
+// PASSO 5A: o ESCRITOR grava v2 (payload ganha um u8 `flags` — bits
+// kTexFlagSrgb/kTexFlagNormal, TexturePolicy.h); o LEITOR abre v1 (flags=0,
+// os ficheiros antigos continuam a carregar byte a byte) e v2.
+constexpr u16 kGtextVersionWrite = 2;
+constexpr u16 kGtextVersionMinRead = 1;
 bool writeGText(const CompressedImage& img, std::vector<u8>& out,
                 std::string& err);
 bool readGText(const u8* bytes, size_t len, CompressedImage& out,

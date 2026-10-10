@@ -1,10 +1,11 @@
 // assets/TextureCache.cpp — persistência do blob comprimido (F5.1-A).
 //
-// Chave do ficheiro = hash do PNG (o formato é derivado do conteúdo e
-// vive DENTRO do header). Inteiros little-endian EXPLÍCITO (byte a byte)
-// — o formato em disco não depende da ordem da máquina. Corrupção ou
-// truncamento → load() devolve miss com erro, nunca crash.
+// Chave do ficheiro = hash do PNG (+ suffix de PERFIL do PASSO 5A). Inteiros
+// little-endian EXPLÍCITO (byte a byte) — o formato em disco não depende da
+// ordem da máquina. Corrupção ou truncamento → load() devolve miss com
+// erro, nunca crash.
 #include "assets/TextureCache.h"
+#include "assets/TexturePolicy.h"   // PASSO 5A: kTexFlagSrgb/kTexFlagNormal
 #include <cstdio>
 #include <cstring>
 
@@ -15,7 +16,11 @@ const char* TextureCache::kDir = "textures/cache";
 namespace {
 
 constexpr u8 kMagic[4] = {'G', 'V', 'T', 'C'};
-constexpr u8 kVersion = 1;
+// PASSO 5A: v2 acrescenta o byte de FLAGS (offset 6 — era reservado) — o
+// hit tem de devolver os MESMOS bits (sRGB/normal) do que foi guardado;
+// v1 (pré-5A) continua a abrir, com flags=0 (nunca mente)
+constexpr u8 kVersion = 2;
+constexpr u8 kVersionMinRead = 1;
 constexpr size_t kHeaderSize = 28;   // até à tabela de mips
 
 void putU32(std::vector<u8>& v, u32 x) {
@@ -33,7 +38,7 @@ void putU64(std::vector<u8>& v, u64 x) {
 
 u32 getU32(const u8* p) {
     return static_cast<u32>(p[0]) | (static_cast<u32>(p[1]) << 8) |
-           (static_cast<u32>(p[2]) << 16) | (static_cast<u32>(p[3]) << 24);
+           static_cast<u32>(p[2]) << 16 | static_cast<u32>(p[3]) << 24;
 }
 
 u64 getU64(const u8* p) {
@@ -63,41 +68,65 @@ std::string TextureCache::fileNameFor(u64 hash, CompressedFormat) {
     return buf;   // (2º parâmetro reservado — a chave é só o hash do PNG)
 }
 
-bool TextureCache::load(u64 hash, CompressedImage& out,
-                        std::string& err) const {
+// PASSO 5A: o nome com suffix de perfil («_p1_o0_n0_a1») — a MESMA textura
+// nos 3 perfis = 3 ficheiros distintos (o pin dos 3 tamanhos)
+std::string TextureCache::fileNameForKey(u64 hash, const std::string& suffix) {
+    if (suffix.empty()) {
+        return fileNameFor(hash, CompressedFormat::RGBA8);
+    }
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "cache_%016llx",
+                  static_cast<unsigned long long>(hash));
+    return std::string(buf) + suffix + ".gtc";
+}
+
+namespace {
+
+// o corpo do load partilhado (a chave só muda o NOME — o formato em disco
+// é o mesmo; o eco do hash no header continua a validar)
+bool loadFrom(const ProjectStorage& st, const std::string& rel, u64 hash,
+              CompressedImage& out, std::string& err, u32& hits,
+              u32& misses) {
     out = CompressedImage{};
-    const std::string rel = std::string(kDir) + "/" + fileNameFor(hash, out.format);
     std::vector<u8> bytes;
-    if (!st_.readBytes(rel, bytes) || bytes.empty()) {
-        ++misses_;
+    if (!st.readBytes(rel, bytes) || bytes.empty()) {
+        ++misses;
         err = "cache: miss";
         return false;
     }
     const u8* p = bytes.data();
     if (bytes.size() < kHeaderSize || std::memcmp(p, kMagic, 4) != 0) {
-        ++misses_;
+        ++misses;
         err = "cache: magic/tamanho inválido";
         return false;
     }
-    if (p[4] != kVersion) {
-        ++misses_;
+    if (p[4] != kVersion && p[4] != kVersionMinRead) {
+        ++misses;
         err = "cache: versão desconhecida";
         return false;
     }
     const auto format = static_cast<CompressedFormat>(p[5]);
+    if (p[4] >= 2) {
+        out.flags = p[6];   // v2: os bits sRGB/normal guardados
+        if (out.flags & ~(kTexFlagSrgb | kTexFlagNormal)) {
+            ++misses;
+            err = "cache: flags de textura desconhecidas";
+            return false;
+        }
+    }
     const u32 w = getU32(p + 8);
     const u32 h = getU32(p + 12);
     const u32 mipCount = getU32(p + 16);
     const u64 storedHash = getU64(p + 20);
     if (storedHash != hash || w == 0 || h == 0 || mipCount == 0 ||
         mipCount > 32u) {
-        ++misses_;
+        ++misses;
         err = "cache: header incoerente";
         return false;
     }
     const size_t mipTableBytes = static_cast<size_t>(mipCount) * 16u;
     if (bytes.size() < kHeaderSize + mipTableBytes) {
-        ++misses_;
+        ++misses;
         err = "cache: truncado (tabela de mips)";
         return false;
     }
@@ -115,7 +144,7 @@ bool TextureCache::load(u64 hash, CompressedImage& out,
         m.size = getU32(e + 12);
         if (m.size == 0 || m.width == 0 || m.height == 0 ||
             m.offset != (i == 0 ? 0u : out.mips[i - 1].offset + out.mips[i - 1].size)) {
-            ++misses_;
+            ++misses;
             err = "cache: mips incoerentes";
             return false;
         }
@@ -124,19 +153,19 @@ bool TextureCache::load(u64 hash, CompressedImage& out,
     const CompressedMip& last = out.mips[mipCount - 1];
     const size_t blobStart = kHeaderSize + mipTableBytes;
     if (static_cast<size_t>(last.offset) + last.size != bytes.size() - blobStart) {
-        ++misses_;
+        ++misses;
         err = "cache: blob truncado";
         return false;
     }
     out.data.assign(bytes.begin() + static_cast<std::ptrdiff_t>(blobStart),
                     bytes.end());
-    ++hits_;
+    ++hits;
     err.clear();
     return true;
 }
 
-bool TextureCache::store(u64 hash, const CompressedImage& img,
-                         std::string& err) {
+bool storeTo(ProjectStorage& st, const std::string& rel, u64 hash,
+             const CompressedImage& img, std::string& err) {
     err.clear();
     if (!img.ok()) {
         err = "cache: imagem inválida para store";
@@ -147,7 +176,7 @@ bool TextureCache::store(u64 hash, const CompressedImage& img,
     bytes.insert(bytes.end(), kMagic, kMagic + 4);
     bytes.push_back(kVersion);
     bytes.push_back(static_cast<u8>(img.format));
-    bytes.push_back(0);
+    bytes.push_back(img.flags);   // v2: os bits (era reservado a 0)
     bytes.push_back(0);
     putU32(bytes, img.width);
     putU32(bytes, img.height);
@@ -161,16 +190,45 @@ bool TextureCache::store(u64 hash, const CompressedImage& img,
     }
     bytes.insert(bytes.end(), img.data.begin(), img.data.end());
 
-    if (!st_.makeDirs(kDir)) {
-        err = "cache: falha ao criar " + std::string(kDir);
+    if (!st.makeDirs(TextureCache::kDir)) {
+        err = "cache: falha ao criar " + std::string(TextureCache::kDir);
         return false;
     }
-    const std::string rel = std::string(kDir) + "/" + fileNameFor(hash, img.format);
-    if (!st_.writeBytes(rel, bytes.data(), bytes.size())) {
+    if (!st.writeBytes(rel, bytes.data(), bytes.size())) {
         err = "cache: falha ao escrever " + rel;
         return false;
     }
     return true;
+}
+
+} // namespace
+
+bool TextureCache::load(u64 hash, CompressedImage& out,
+                        std::string& err) const {
+    const std::string rel =
+        std::string(kDir) + "/" + fileNameFor(hash, out.format);
+    return loadFrom(st_, rel, hash, out, err, hits_, misses_);
+}
+
+bool TextureCache::loadKeyed(u64 hash, const std::string& suffix,
+                             CompressedImage& out, std::string& err) const {
+    const std::string rel =
+        std::string(kDir) + "/" + fileNameForKey(hash, suffix);
+    return loadFrom(st_, rel, hash, out, err, hits_, misses_);
+}
+
+bool TextureCache::store(u64 hash, const CompressedImage& img,
+                         std::string& err) {
+    const std::string rel =
+        std::string(kDir) + "/" + fileNameFor(hash, img.format);
+    return storeTo(st_, rel, hash, img, err);
+}
+
+bool TextureCache::storeKeyed(u64 hash, const std::string& suffix,
+                              const CompressedImage& img, std::string& err) {
+    const std::string rel =
+        std::string(kDir) + "/" + fileNameForKey(hash, suffix);
+    return storeTo(st_, rel, hash, img, err);
 }
 
 } // namespace vv

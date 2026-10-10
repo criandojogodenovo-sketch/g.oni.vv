@@ -34,6 +34,55 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.10.7 — 0.10-M PASSO 5A: TEXTURAS — compressão E redução separadas, três perfis, override por asset
+
+**O que o dono pediu** (o PASSO 5 abre com o sub-passo 5A): «duas
+operações distintas, ambas logadas — compressão (ASTC 4x4 padrão, ETC2
+fallback) e redução de resolução. Nunca confundir no código nem nos
+logs.» Três perfis (Qualidade/Equilibrado/Mobile) escolhidos por
+projeto, override por asset a vencer, mips em espaço linear + flag
+sRGB, normais sem perda de canais, teto do device sem erro, codificação
+paralela fora da UI.
+
+- **A política** (`assets/TexturePolicy.cpp` NOVO — a tabela vive SÓ
+  aqui): classe = a MAIOR dimensão; ≤1024 mantém nos três perfis · 2048
+  avalia→1K nos perfis limitados (Equilibrado e Mobile) · 4096→2K ou 1K
+  conforme perfil · 5120+ conforme perfil. Qualidade (o default do
+  projeto) nunca reduz — o pré-5A fica intocado sem decisão.
+- **As duas linhas** (`assets/TexturePipeline.cpp`, `process()`):
+  «textura: reduzida 4096→2048 (perfil Equilibrado)» e «textura:
+  comprimida ASTC 4x4 (5461 KB)» — a RESOLUÇÃO e o FORMATO nunca
+  partilham linha; as causas do override e do teto do device têm as
+  suas.
+- **O override** (`textures/overrides.goni`, lido por
+  `loadProjectSettings`): uma linha `<stem> <maxDim>` por asset (0 =
+  nunca reduzir) — VENCE o perfil; o teto FÍSICO do
+  GL_MAX_TEXTURE_SIZE vence até ao override «nunca» (física não é
+  gosto) e loga «(teto do device)».
+- **Os mips em luz** (`assets/MipGen.cpp`): `MipSpace::SrgbLinear` —
+  decode sRGB → média → encode; a prova do 50%: o mip do tabuleiro
+  preto/branco fica 188, não 127. O `compress` dos compressores tem o
+  parâmetro `mipLinear` com default FALSE (o pré-5A byte a byte para
+  quem chama sem saber).
+- **A flag sRGB viaja** no `.gtext` v2 e no `.gtc` v2
+  (`assets/GOwnFormats.cpp`, `assets/TextureCache.cpp`) — o SAMPLER
+  sRGB na GPU é decisão de render do dono (5A-m1 do relatório).
+- **As normais** (`assets/GltfImporter.cpp` + o passe do conversor): o
+  `normalTexture` do glTF marca a imagem (`GltfMaterial::normalTex`) →
+  RGBA8 SEM PERDA de canais (a prova é o byte a byte).
+- **O cache por perfil** (`assets/TextureCache.cpp`): a chave ganhou o
+  suffix `_p<perfil>_o<override>_n<normal>_a<astc>` — a MESMA textura
+  nos 3 perfis = TRÊS ficheiros (o pin); o hit devolve os MESMOS bits.
+- **O passe paralelo** (`assets/AssetConverter.cpp`): valida/coleta em
+  sequência (os avisos R-020/R-022 intocados), comprime em até 4
+  workers FORA da UI com progresso no log, escreve em ordem; `Stats::
+  texReduced`/`texNormal` contam as duas operações separadas.
+- **Provas**: 9 TESTs novos (`tests/test_texture_profiles.cpp`) ·
+  test_core 925/0 · M-T1/T3/T5/T6/T7 vermelho→verde (coladas no
+  relatório §4) · tabela tempo/tamanho por perfil (§3: 21 845 / 5 461 /
+  1 365 KB na green4096) · versionCode **62**. Relatório:
+  `docs/RELATORIO-0.10-M-PASSO5A-TEXTURAS.md`.
+
 ## 0.10.6 — HOTFIX SAF-SEAM: as duas últimas costuras do SAF (a abertura do runtime + o overlay + a quarentena)
 
 **O que o dono pediu** (hotfix, o PASSO 5 continua à espera): o

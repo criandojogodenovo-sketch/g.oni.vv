@@ -21,6 +21,11 @@ namespace vv {
 // false + `err` se os bytes não são um PNG decodificável
 bool loadPng(const u8* data, size_t len, RawImage& out, std::string& err);
 
+// PASSO 5A: as DIMS do PNG do header (stbi_info — SEM decodificar pixels);
+// a decisão de redução precisa delas antes do trabalho. false + err = PNG
+// inválido/truncado (mesma honestidade do loadPng).
+bool pngDims(const u8* data, size_t len, u32& w, u32& h, std::string& err);
+
 // reduz `img` por fator 2 (média 2×2) enquanto exceder 2048 em qualquer
 // dimensão. Devolve true se a imagem foi reduzida e preenche `warn` com a
 // mensagem para o utilizador ("textura 4096x4096 reduzida para 2048x2048 …").

@@ -28,6 +28,7 @@
 #include "assets/ObjExporter.h"
 #include "assets/TextureCache.h"
 #include "assets/TexturePipeline.h"
+#include "assets/TexturePolicy.h"   // 0.10-M (5A): o perfil do projeto
 #include "components/CameraComp.h"   // 0.7.7: câmara de cena
 #include "components/MeshRenderer.h"
 #include "components/TouchControls.h"
@@ -214,8 +215,13 @@ char g_selectedName[40] = "";   // nome do TIC p/ o ficheiro de export
 // 0.10-M (EXT): + "expandNodes=0/1" — o import EXPANDIDO (BACKLOG
 // 0.10-M-ext feito): false (default) = o FUNDIDO de sempre por
 // performance mobile; true = um TIC por nó com mesh (peças editáveis)
+// 0.10-M (PASSO 5A): + "texPerfil=0/1/2" — o PERFIL de texturas do projeto
+// (0=Qualidade sem redução [default] · 1=Equilibrado · 2=Mobile; a tabela
+// vive em TexturePolicy; override por asset em textures/overrides.goni —
+// o override VENCE o perfil)
 bool g_keepSource = true;
 bool g_expandNodes = false;
+TexPerfil g_texPerfil = TexPerfil::Qualidade;
 void loadProjectSettings();   // definido após o bloco de áudio (usa o mixer)
 void saveProjectSettings();
 
@@ -1460,6 +1466,7 @@ void loadProjectSettings() {
     g_keepSource = true;
     g_audioMaster = 1.0f;
     g_expandNodes = false;
+    g_texPerfil = TexPerfil::Qualidade;
     if (g_storage) {
         std::string text;
         if (g_storage->readText("settings.goni", text)) {
@@ -1473,19 +1480,70 @@ void loadProjectSettings() {
                     g_audioMaster = v;
                 }
             }
+            // 0.10-M (PASSO 5A): o perfil de texturas do projeto
+            const size_t tp = text.find("texPerfil=");
+            if (tp != std::string::npos) {
+                g_texPerfil = texPerfilFromInt(
+                    std::atoi(text.c_str() + tp + 10));
+            }
         }
     }
     g_audioEngine.master = g_audioMaster;
+    // PASSO 5A: o perfil desce ao pipeline (o import/reconvert/migração
+    // lêem-no daqui; o override por asset é lido a seguir)
+    if (g_pipeline) {
+        g_pipeline->setPerfil(g_texPerfil);
+        g_pipeline->clearOverrides();
+        u32 nOvr = 0;
+        std::string text;
+        if (g_storage && g_storage->readText("textures/overrides.goni",
+                                             text)) {
+            // uma linha por asset: «<stem> <maxDim>» — maxDim 0 = NUNCA
+            // reduzir; # inicia comentário (a convenção da casa)
+            size_t pos = 0;
+            while (pos < text.size()) {
+                size_t eol = text.find('\n', pos);
+                if (eol == std::string::npos) {
+                    eol = text.size();
+                }
+                std::string line = text.substr(pos, eol - pos);
+                pos = eol + 1;
+                if (!line.empty() && line.back() == '\r') {
+                    line.pop_back();
+                }
+                if (line.empty() || line[0] == '#') {
+                    continue;
+                }
+                const size_t sp = line.find(' ');
+                if (sp == std::string::npos || sp == 0 ||
+                    sp + 1 >= line.size()) {
+                    continue;
+                }
+                const std::string key = line.substr(0, sp);
+                const u32 dim =
+                    static_cast<u32>(std::strtoul(line.c_str() + sp + 1,
+                                                  nullptr, 10));
+                g_pipeline->setOverride(key, dim);
+                ++nOvr;
+            }
+        }
+        elog::info("textura: perfil %s (texPerfil=%d) — %u override(s) por "
+                   "asset (textures/overrides.goni)",
+                   texPerfilName(g_texPerfil), static_cast<int>(g_texPerfil),
+                   nOvr);
+    }
 }
 void saveProjectSettings() {
     if (!g_storage) {
         return;
     }
-    char buf[96];
+    char buf[128];
     std::snprintf(buf, sizeof(buf),
-                  "keepSource=%s\naudioMaster=%.2f\nexpandNodes=%s\n",
+                  "keepSource=%s\naudioMaster=%.2f\nexpandNodes=%s\n"
+                  "texPerfil=%d\n",
                   g_keepSource ? "1" : "0", g_audioMaster,
-                  g_expandNodes ? "1" : "0");
+                  g_expandNodes ? "1" : "0",
+                  static_cast<int>(g_texPerfil));
     g_storage->writeText("settings.goni", buf);
 }
 
@@ -4540,11 +4598,27 @@ void onAppCmd(android_app* app, i32 cmd) {
                     // tem; sem a extensão o HardwareCompressor cai p/ ETC2)
                     const bool astc = glAstcSupported();
                     g_hwCompressor.setAstcSupported(astc);
+                    // 0.10-M (PASSO 5A): o TETO FÍSICO do device — uma
+                    // textura maior que GL_MAX_TEXTURE_SIZE nunca crasha:
+                    // o pipeline halva do ORIGINAL e loga «teto do device»
+                    GLint maxTex = 0;
+#ifdef GL_MAX_TEXTURE_SIZE
+                    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTex);
+#endif
+                    if (maxTex > 0) {
+                        g_pipeline->setMaxTextureSize(
+                            static_cast<u32>(maxTex));
+                    }
+                    // o perfil do projeto re-aplica (a ordem load do projeto
+                    // × boot GL varia com o lifecycle — idempotente)
+                    g_pipeline->setPerfil(g_texPerfil);
                     g_gpu.setPipeline(g_pipeline.get());
                     g_texCache->resetStats();
-                    elog::info("f5.1: compressão de texturas ativa — ASTC %s (fallback ETC2), cache %s",
+                    elog::info("f5.1: compressão de texturas ativa — ASTC %s (fallback ETC2), cache %s, GL_MAX_TEXTURE_SIZE=%d, perfil %s",
                                astc ? "SIM" : "não",
-                               g_projectReady ? "textures/cache" : "off");
+                               g_projectReady ? "textures/cache" : "off",
+                               static_cast<int>(maxTex),
+                               texPerfilName(g_texPerfil));
                 }
             }
             elog::info("[boot 4/6] renderer OK (shaders, materiais, geometria)");

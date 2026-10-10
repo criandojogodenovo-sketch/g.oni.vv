@@ -5,16 +5,22 @@
 // PNG alterado → hash diferente → re-comprime (a entrada antiga fica órfã
 // até limpeza manual — barato e nunca falso-hit).
 //
-// Ficheiro: textures/cache/cache_<hash16>_<fmt>.gtc (little-endian):
+// Ficheiro: textures/cache/cache_<hash16>[_suffix].gtc (little-endian):
 //   [0..3]  magic 'G','V','T','C'
-//   [4]     versão = 1
+//   [4]     versão = 2 (PASSO 5A; a 1 pré-5A continua a abrir)
 //   [5]     CompressedFormat
-//   [6..7]  reservado (0)
+//   [6]     flags (v2; bits kTexFlagSrgb/kTexFlagNormal) [7] reservado
 //   [8..11] width   u32        [12..15] height u32
 //   [16..19] mipCount u32
 //   [20..27] hash de origem u64 (eco — valida a chave da entrada)
 //   [28..]  mipCount × { width u32, height u32, offset u32, size u32 }
 //   depois  blob contíguo (mesma disposição de CompressedImage::data)
+//
+// PASSO 5A — SUFFIX da chave: o RESULTADO do pipeline depende do perfil
+// (redução), do override do asset, do caminho normal-map e da presença de
+// ASTC — a MESMA textura nos 3 perfis = TRÊS blobs distintos (o pin).
+// O suffix («_p1_o0_n0_a1») separa essas variantes; vazio = a chave legada
+// de sempre (hash puro) para quem não usa perfis.
 //
 // GL-free / Android-free (ProjectStorage): testável no CI com FakeStorage.
 #include <string>
@@ -39,6 +45,13 @@ public:
 
     // persiste (best effort — false + `err` se o storage falhar)
     bool store(u64 hash, const CompressedImage& img, std::string& err);
+
+    // ---- PASSO 5A: variantes COM SUFFIX de perfil (ver topo) ---------------
+    static std::string fileNameForKey(u64 hash, const std::string& suffix);
+    bool loadKeyed(u64 hash, const std::string& suffix, CompressedImage& out,
+                   std::string& err) const;
+    bool storeKeyed(u64 hash, const std::string& suffix,
+                    const CompressedImage& img, std::string& err);
 
     // telemetria p/ a status line (F5.1-D)
     u32 hits() const { return hits_; }

@@ -36,7 +36,7 @@ AstcCompressor::AstcCompressor(u32 block) : block_(block) {
 }
 
 bool AstcCompressor::compress(const RawImage& in, CompressedImage& out,
-                              std::string& err) {
+                              std::string& err, bool mipLinear) {
     err.clear();
     out = CompressedImage{};
     if (!in.ok()) {
@@ -60,7 +60,10 @@ bool AstcCompressor::compress(const RawImage& in, CompressedImage& out,
 
     const char* exitErr = nullptr;
     std::vector<RawImage> chain;
-    genMipChainRGBA(in, chain);
+    // PASSO 5A: o espaço da filtragem vem do chamador (luz p/ cor; bytes
+    // p/ dados lineares) — o default false preserva o byte a byte do pré-5A
+    genMipChainRGBA(in, chain, mipLinear ? MipSpace::SrgbLinear
+                                         : MipSpace::Bytes);
     const u32 count = static_cast<u32>(chain.size());
     out.format = block_ == 6 ? CompressedFormat::ASTC_6x6 : CompressedFormat::ASTC_4x4;
     out.width = in.width;

@@ -667,6 +667,18 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                     }
                 }
             }
+            // PASSO 5A: normalTexture.index → IMAGEM (mesmo mapa das texturas
+            // de cor) — a marca do caminho RGBA8 sem perda de canais
+            if (const Json* nt = m.find("normalTexture");
+                nt && nt->type == Json::Type::Object) {
+                if (const Json* ix = nt->find("index");
+                    ix && ix->type == Json::Type::Number &&
+                    ix->number >= 0 &&
+                    ix->number < static_cast<f64>(textureSources.size())) {
+                    gm.normalTex =
+                        textureSources[static_cast<size_t>(ix->number)];
+                }
+            }
             out.materials.push_back(std::move(gm));
         }
     }

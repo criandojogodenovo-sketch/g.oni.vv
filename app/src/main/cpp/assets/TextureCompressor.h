@@ -36,6 +36,9 @@ struct CompressedImage {
     CompressedFormat format = CompressedFormat::RGBA8;
     u32 width = 0;
     u32 height = 0;
+    // PASSO 5A: bits kTexFlagSrgb/kTexFlagNormal (TexturePolicy.h) — viajam
+    // no .gtext v2 e no .gtc; 0 nos caminhos antigos (nunca mentem)
+    u8 flags = 0;
     std::vector<u8> data;    // blob contíguo; nível 0 = full resolution
     std::vector<CompressedMip> mips;
 
@@ -61,12 +64,20 @@ public:
     // com base nisto: true = 4K entra inteira; false = downscale 2K + aviso)
     virtual bool canCompress(u32 w, u32 h) const = 0;
 
-    // comprime `in` (RGBA8) gerando TODOS os mips em `out`
+    // comprime `in` (RGBA8) gerando TODOS os mips em `out`. `mipLinear`
+    // (PASSO 5A) escolhe o ESPAÇO da filtragem dos mips: false = bytes (a
+    // matemática de sempre, dados lineares) | true = luz (decode sRGB →
+    // média → encode — texturas de COR). O default false mantém byte a byte
+    // o resultado pré-5A de quem chama sem saber (bench/testes antigos).
     virtual bool compress(const RawImage& in, CompressedImage& out,
-                          std::string& err) = 0;
+                          std::string& err, bool mipLinear = false) = 0;
 
     // nome curto p/ telemetria/log ("passthrough", "etc2", "astc", "auto")
     virtual const char* name() const = 0;
+
+    // PASSO 5A: a ASTC está disponível neste compressor? (a chave do cache
+    // separa as variantes ASTC/ETC2 — o FACADE diz; os outros dizem false)
+    virtual bool astcAvailable() const { return false; }
 };
 
 // F5: identidade — RGBA in → RGBA out (1 nível; mips geram na GPU).
@@ -76,7 +87,7 @@ class PassthroughCompressor final : public TextureCompressor {
 public:
     bool canCompress(u32 /*w*/, u32 /*h*/) const override { return false; }
     bool compress(const RawImage& in, CompressedImage& out,
-                  std::string& err) override;
+                  std::string& err, bool mipLinear = false) override;
     const char* name() const override { return "passthrough"; }
 };
 
@@ -90,7 +101,7 @@ public:
         return compressible(w, h);
     }
     bool compress(const RawImage& in, CompressedImage& out,
-                  std::string& err) override;
+                  std::string& err, bool mipLinear = false) override;
     const char* name() const override { return "etc2"; }
     bool heuristics = true;
 
@@ -108,7 +119,7 @@ public:
         return Etc2Compressor::compressible(w, h);
     }
     bool compress(const RawImage& in, CompressedImage& out,
-                  std::string& err) override;
+                  std::string& err, bool mipLinear = false) override;
     const char* name() const override { return "astc"; }
     u32 blockX() const { return block_; }
 
@@ -134,8 +145,9 @@ public:
     }
 
     bool compress(const RawImage& in, CompressedImage& out,
-                  std::string& err) override;
+                  std::string& err, bool mipLinear = false) override;
     const char* name() const override { return "auto"; }
+    bool astcAvailable() const override { return astcSupported_; }
 
     // última decisão (telemetria/status line do editor)
     CompressedFormat lastFormat() const { return lastFormat_; }

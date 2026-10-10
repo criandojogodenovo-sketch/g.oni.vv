@@ -58,6 +58,10 @@ struct GltfMaterial {
     std::string name;
     f32 baseColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     i32 baseColorTex = -1;    // índice em GltfModel::images (-1 = sem)
+    // PASSO 5A: o índice da IMAGEM do normalTexture (-1 = sem) — o conversor
+    // encaminha estas imagens para o caminho RGBA8 SEM PERDA DE CANAIS
+    // (comprimidos lossy destruem normais: os canais cruzam-se nos blocos)
+    i32 normalTex = -1;
 };
 
 // ---- 0.8.1 (F7): ANIMAÇÕES ------------------------------------------------

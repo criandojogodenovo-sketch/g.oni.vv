@@ -43,6 +43,26 @@ bool loadPng(const u8* data, size_t len, RawImage& out, std::string& err) {
     return true;
 }
 
+bool pngDims(const u8* data, size_t len, u32& w, u32& h, std::string& err) {
+    w = h = 0;
+    if (!data || len < 8) {
+        err = "png: dados vazios ou truncados";
+        return false;
+    }
+    int iw = 0, ih = 0, comp = 0;
+    if (!stbi_info_from_memory(data, static_cast<int>(len), &iw, &ih, &comp) ||
+        iw <= 0 || ih <= 0) {
+        err = std::string("png: ") +
+              (stbi_failure_reason() ? stbi_failure_reason()
+                                     : "header inválido");
+        return false;
+    }
+    w = static_cast<u32>(iw);
+    h = static_cast<u32>(ih);
+    err.clear();
+    return true;
+}
+
 bool downscaleTo2K(RawImage& img, std::string& warn) {
     warn.clear();
     if (!img.ok()) {

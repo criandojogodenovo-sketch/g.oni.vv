@@ -63,7 +63,7 @@ const char* formatName(CompressedFormat f) {
 // ---- PassthroughCompressor (F5) ---------------------------------------------
 
 bool PassthroughCompressor::compress(const RawImage& in, CompressedImage& out,
-                                     std::string& err) {
+                                     std::string& err, bool /*mipLinear*/) {
     err.clear();
     out = CompressedImage{};
     if (!in.ok()) {
@@ -73,7 +73,8 @@ bool PassthroughCompressor::compress(const RawImage& in, CompressedImage& out,
     out.format = CompressedFormat::RGBA8;
     out.width = in.width;
     out.height = in.height;
-    out.data = in.rgba;   // identidade — bytes saem como entraram
+    out.data = in.rgba;   // identidade — bytes saem como entraram (a prova
+                          // «sem perda de canais» dos normal maps do 5A)
     CompressedMip m;
     m.width = in.width;
     m.height = in.height;
@@ -86,7 +87,7 @@ bool PassthroughCompressor::compress(const RawImage& in, CompressedImage& out,
 // ---- HardwareCompressor (F5.1-A: ASTC se extensão, senão ETC2; <256 → RGBA) --
 
 bool HardwareCompressor::compress(const RawImage& in, CompressedImage& out,
-                                  std::string& err) {
+                                  std::string& err, bool mipLinear) {
     err.clear();
     out = CompressedImage{};
     if (!in.ok()) {
@@ -100,13 +101,13 @@ bool HardwareCompressor::compress(const RawImage& in, CompressedImage& out,
     }
     if (astcSupported_) {
         std::string astcErr;
-        if (astc4_.compress(in, out, astcErr)) {
+        if (astc4_.compress(in, out, astcErr, mipLinear)) {
             lastFormat_ = out.format;
             return true;   // err permanece vazio (contrato: sucesso limpo)
         }
         // ASTC falhou → cai para ETC2 (garantido em GLES3.0+)
     }
-    if (etc2_.compress(in, out, err)) {
+    if (etc2_.compress(in, out, err, mipLinear)) {
         lastFormat_ = out.format;
         return true;
     }

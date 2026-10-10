@@ -9,6 +9,7 @@
 //   •Little-endian explícito (memcpy de u16/u32/u64/f32 — o host e o
 //     arm64 do device são LE; o endianMark apanha o contrário).
 #include "assets/GOwnFormats.h"
+#include "assets/TexturePolicy.h"   // PASSO 5A: kTexFlagSrgb/kTexFlagNormal
 
 #include <algorithm>
 #include <cmath>
@@ -1373,8 +1374,9 @@ bool readGMesh(const u8* bytes, size_t len, MeshData& out, std::string& err) {
 }
 
 // ---- .gtext --------------------------------------------------------------------
-// payload: format u8, w u32, h u32, mipCount u32, mips×(w,h,off,size),
-// blob (o mesmo layout contíguo do CompressedImage)
+// payload v2: format u8, FLAGS u8 (PASSO 5A: kTexFlagSrgb/kTexFlagNormal),
+// w u32, h u32, mipCount u32, mips×(w,h,off,size), blob (o mesmo layout
+// contíguo do CompressedImage). O leitor v1 (sem flags) fica intacto.
 bool writeGText(const CompressedImage& img, std::vector<u8>& out,
                 std::string& err) {
     out.clear();
@@ -1385,6 +1387,7 @@ bool writeGText(const CompressedImage& img, std::vector<u8>& out,
     std::vector<u8> payload;
     Writer w(payload);
     w.u8_(static_cast<u8>(img.format));
+    w.u8_(img.flags);   // v2: os bits da cor/normal (0 = o comportamento v1)
     w.u32_(img.width);
     w.u32_(img.height);
     w.u32_(static_cast<u32>(img.mips.size()));
@@ -1397,7 +1400,7 @@ bool writeGText(const CompressedImage& img, std::vector<u8>& out,
     w.bytes_(img.data.data(), img.data.size());
     Writer o(out);
     writeHeader(o, "GVTX", payload.size(),
-                gfnv1a(payload.data(), payload.size()));
+                gfnv1a(payload.data(), payload.size()), kGtextVersionWrite);
     o.bytes_(payload.data(), payload.size());
     return true;
 }
@@ -1409,9 +1412,9 @@ bool readGText(const u8* bytes, size_t len, CompressedImage& out,
     if (!gReadHeader(bytes, len, "GVTX", h, err)) {
         return false;
     }
-    if (h.version != 1) {
+    if (h.version < kGtextVersionMinRead || h.version > kGtextVersionWrite) {
         err = "versão " + std::to_string(h.version) +
-              " desconhecida (o .gtext lê a 1)";
+              " desconhecida (o .gtext lê a 1 e a 2)";
         return false;
     }
     Reader r(bytes + kGHeaderBytes, static_cast<size_t>(h.payloadSize));
@@ -1420,6 +1423,15 @@ bool readGText(const u8* bytes, size_t len, CompressedImage& out,
     if (fmtInt < 0 || fmtInt > 4) {
         err = "formato de textura desconhecido no .gtext";
         return false;
+    }
+    if (h.version >= 2) {
+        // v2 (PASSO 5A): os bits da cor/normal; v1 fica a 0 (nunca mente —
+        // os ficheiros antigos eram tratados como hoje)
+        out.flags = r.u8_();
+        if (out.flags & ~(kTexFlagSrgb | kTexFlagNormal)) {
+            err = "flags de textura desconhecidas no .gtext (v2)";
+            return false;
+        }
     }
     out.width = r.u32_();
     out.height = r.u32_();
