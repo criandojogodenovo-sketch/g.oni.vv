@@ -30,6 +30,14 @@ struct Case {
     void (*fn)();
 };
 
+// 0.10-M (PASSO 5A): o teste EM CURSO (o handler de crash do test_main
+// diz o NOME — o banner órfão do CI não dizia nada)
+inline const char*& currentName() {
+    static const char* n = nullptr;
+    return n;
+}
+inline void setCurrentName(const char* n) { currentName() = n; }
+
 inline std::vector<Case>& cases() {
     static std::vector<Case> c;
     return c;

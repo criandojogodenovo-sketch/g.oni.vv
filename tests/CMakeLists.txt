@@ -512,6 +512,10 @@ target_compile_definitions(test_core PRIVATE
         # referência pública commitados estão SINCRONIZADOS com o registo
         REPO_ROOT="${CMAKE_CURRENT_LIST_DIR}/..")
 
+# 0.10-M (5A): -rdynamic dá os SÍMBOLOS ao backtrace do handler de crash
+# do test_main (o CI apanhou um SEGFAULT cujo teste só dizia o banner)
+target_link_options(test_core PRIVATE -rdynamic)
+
 enable_testing()
 add_test(NAME core COMMAND test_core)
 # 0.8.12: o C33 virtual como TESTE (o CI corre-o em TODAS as runs; o output
