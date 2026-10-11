@@ -102,6 +102,7 @@ add_library(goni_vv SHARED
         assets/TextureCache.cpp
         assets/TexturePipeline.h
         assets/TexturePipeline.cpp
+        assets/TexturePolicy.cpp   # 0.10-M (PASSO 5A): os 3 perfis do projeto
         assets/Etc2Compressor.cpp
         assets/AstcCompressor.cpp
         assets/stb/stb_image.h

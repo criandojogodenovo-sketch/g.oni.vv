@@ -92,31 +92,15 @@ jobs:
       - name: Gate medidas do gizmo da camara (D20 — o contrato medivel)
         run: python3 scripts/gizmo_camera_medidas.py
 
-      # 0.10-M (PASSO 5A · PROVA): o CI apanhou um SEGFAULT no core (o
-      # banner órfão do teste data-uri; o handler não chegou a correr) que
-      # NÃO reproduz local — o core corre AQUI sob ASAN (options afinadas:
-      # sem leak-check, halt_on_error=0 para atravessar o overflow KNOWN
-      # dos ícones, BACKLOG 0.10.2) até ao relatório simbolizado
-      - name: Configurar build dos testes (ASAN probe)
-        run: cmake -S tests -B build-tests -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_FLAGS="-fsanitize=address -fsanitize-recover=address -fno-omit-frame-pointer -g -O1"
+      - name: Configurar build dos testes
+        run: cmake -S tests -B build-tests -DCMAKE_BUILD_TYPE=Release
+
       - name: Compilar
-        run: cmake --build build-tests --target test_core --parallel
-      - name: Executar suíte do core (ASAN probe)
-        run: ctest --test-dir build-tests --output-on-failure -R "^core$" --timeout 1800
-        env:
-          ASAN_OPTIONS: "detect_leaks=0:halt_on_error=0:quarantine_size_mb=8:malloc_context_size=6:log_path=stdout"
-
-      # (o par de passos ORIGINAL fica abaixo desligado nesta prova)
-      - name: Configurar build dos testes (original — desligado na sonda)
-        if: false
-        run: cmake -S tests -B build-tests-orig -DCMAKE_BUILD_TYPE=Release
-
-      - name: Compilar (original — desligado na sonda)
-        if: false
+        # 0.9.5: só o alvo que ESTE job afere (o c33_virtual compila no
+        # próprio job) — metade do tempo de build por job
         run: cmake --build build-tests --target test_core --parallel
 
-      - name: Executar suíte do core (original — desligado na sonda)
-        if: false
+      - name: Executar suíte do core
         run: ctest --test-dir build-tests --output-on-failure -R "^core$"
 
       # F5.1: paridade de compilação do main.cpp no hospedeiro (stubs) —
@@ -189,24 +173,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 0.10-M (PASSO 5A · PROVA): o CI apanhou um SEGFAULT no core (o
-      # banner órfão do teste data-uri; o handler não chegou a correr) que
-      # NÃO reproduz local — o core corre AQUI sob ASAN (options afinadas:
-      # sem leak-check, halt_on_error=0 para atravessar o overflow KNOWN
-      # dos ícones, BACKLOG 0.10.2) até ao relatório simbolizado
-      - name: Configurar build dos testes (ASAN probe)
-        run: cmake -S tests -B build-tests -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_FLAGS="-fsanitize=address -fsanitize-recover=address -fno-omit-frame-pointer -g -O1"
-      - name: Compilar
-        run: cmake --build build-tests --target test_core --parallel
-      - name: Executar suíte do core (ASAN probe)
-        run: ctest --test-dir build-tests --output-on-failure -R "^core$" --timeout 1800
-        env:
-          ASAN_OPTIONS: "detect_leaks=0:halt_on_error=0:quarantine_size_mb=8:malloc_context_size=6:log_path=stdout"
-
-      # (o par de passos ORIGINAL fica abaixo desligado nesta prova)
-      - name: Configurar build dos testes (original — desligado na sonda)
-        if: false
-        run: cmake -S tests -B build-tests-orig -DCMAKE_BUILD_TYPE=Release
+      - name: Configurar build dos testes
+        run: cmake -S tests -B build-tests -DCMAKE_BUILD_TYPE=Release
 
       - name: Compilar (suíte + harness do dispositivo virtual)
         # 0.9.5: só o alvo que ESTE job afere (o replay; o test_core compila
