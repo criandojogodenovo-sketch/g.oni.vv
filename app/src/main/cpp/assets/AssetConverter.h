@@ -63,6 +63,8 @@ struct Stats {
     // relatório lê daqui): redução de resolução e normal maps
     u32 texReduced = 0;   // texturas cuja RESOLUÇÃO desceu (perfil/override/teto)
     u32 texNormal = 0;    // texturas no caminho RGBA8 (normal maps — sem perda)
+    // ---- PASSO 5C: as miniaturas pré-renderizadas no import (thumbs/)
+    u32 thumbs = 0;       // thumbs/<stem>.png escritos (256×256 por mesh)
     // 0.9.6.12 (A2/R-014 · a spec 2d): primitivas LARGADAS por bufferView
     // fora do buffer (exporter malformado) — o import SEGUE com o resto;
     // o toast diz «K primitiva(s) fora» (nunca silencioso)

@@ -103,6 +103,8 @@ add_library(goni_vv SHARED
         assets/TexturePipeline.h
         assets/TexturePipeline.cpp
         assets/TexturePolicy.cpp   # 0.10-M (PASSO 5A): os 3 perfis do projeto
+        assets/ThumbRender.cpp     # 0.10-M (PASSO 5C): o render software das thumbs
+        assets/ThumbIndex.cpp      # 0.10-M (PASSO 5C): o índice (render sob demanda)
         assets/Etc2Compressor.cpp
         assets/AstcCompressor.cpp
         assets/stb/stb_image.h

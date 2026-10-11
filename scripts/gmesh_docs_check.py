@@ -80,6 +80,10 @@ ANCHORS = [
      "render/BlockMesh.h"),
     ("orçamento VRAM de blocos", r"kBlockCacheVramBudgetBytes\s*=\s*192ull \* 1024 \* 1024",
      "render/BlockMesh.h"),
+    # 0.10-M (PASSO 5C): as miniaturas pré-renderizadas (o tamanho do pin
+    # e o orçamento de triângulos do render software)
+    ("thumb 256", r"kThumbSize\s*=\s*256u", "assets/ThumbRender.h"),
+    ("thumb teto tris", r"kMaxTrisPorThumb\s*=\s*4096u", "assets/ThumbRender.h"),
 ]
 
 # sentinelas por passo (cresce com os passos 2/3 — PASSO 1: só o formato

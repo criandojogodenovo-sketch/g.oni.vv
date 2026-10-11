@@ -408,3 +408,55 @@ identidade; o instantiate puro; a peça por blocos no GpuAssets com o
 contraste fundido) e a FASE 22 do c33 (o pin: o city espalhado em 72
 faixas vira 72 TICs com nomes e o frustum estreito culle 71, deixa 1) —
 R-042 no `docs/REGRESSOES.md` com as mutações M-E1..M-E4.
+
+### §THUMBS — as miniaturas pré-renderizadas (0.10-M PASSO 5C)
+
+A spec do dono: «no import, renderizar uma miniatura 256×256 e guardá-la
+em thumbs/; o browser mostra-a imediatamente». O CONTRATO tem três pernas
+e vive em DOIS módulos novos e só neles:
+
+- **`thumbs/<stem>.png`** — UM PNG 256×256 por mesh do import (o stem da
+  peça: `assets/city_n3.gmesh` → `thumbs/city_n3.png`; o import FUNDIDO
+  escreve a do mesh único). A escrita é o ÚLTIMO passo do `importFile`
+  (depois da verificação da cópia, antes do rácio) — `writeImportThumbs`
+  em AssetConverter.cpp chama `ThumbIndex::ensureThumb` com `force=true`
+  (o asset ACABOU de mudar: o render é sempre novo) e a MESMA rotina é
+  a que o browser usa sem o force (o hit devolve o PNG pronto). O
+  `Stats::thumbs` conta as escritas (o log do rácio e o c33 leem-no).
+  Falha de thumb = aviso no log + o import SEGUE (o browser fica com o
+  placeholder — NUNCA mata o import).
+
+- **`ThumbRender`** (assets/ThumbRender.cpp — PURO, sem GL, afervel no
+  CI): o render SOFTWARE da miniatura — câmara ortográfica isométrica
+  fixa (a vista 3/4) que ENCAIXA o AABB do mesh com 8% de folga de cada
+  lado, z-buffer de floats, lambert flat com a luz da casa (a MESMA
+  direção `kLightDir` do Material) e fundo grafite. DETERMINÍSTICO
+  (mesmos vértices → mesmos bytes — TEST). O orçamento: um .gmesh
+  gigante contribui com os PRIMEIROS `kMaxTrisPorThumb` (4096)
+  triângulos — a pré-visualização é representativa e o custo fica
+  limitado. O `placeholder` (asset sem render possível): fundo + quadro
+  + as iniciais do stem (1.ª+última letra — a regra D18 das telas de
+  projeto; «grelha1» → «G1»). O PNG sai pelo `encodePngRgb` do
+  render/ThumbPng (o zlib do 0.9.0) em RGB.
+
+- **`ThumbIndex`** (assets/ThumbIndex.cpp — o lado do browser, GL-free):
+  `hasThumb` (existe o PNG?), `ensureThumb` (o RENDER SOB DEMANDA —
+  falta? renderiza do .gmesh e escreve; o asset AUSENTE é erro limpo e
+  NUNCA nasce thumb do nada), `loadRows` (o custo de LISTAR: carrega+
+  decodifica as thumbs de N assets; o que falta entra como placeholder
+  no sítio). O render sob demanda lê o .gmesh PELA TABELA DE BLOCOS do
+  PASSO 4 — peek 192 B **por faixa** (`readBytesAt 0..192`), a tabela,
+  o data do bloco 0 e `gmeshV3MaterializeBlock`: **o pico de RAM é UM
+  bloco, nunca o modelo** (a lição R-044: um peek pelo ficheiro INTEIRO
+  mediu 1965 MB no gigante de 50M verts; a leitura por faixa volta ao
+  99 MB do orçamento).
+
+Os pins do dono, medidos: o import escreve a thumb POR MESH (o glTF de
+2 nós com mesh na EXPAND → 2 peças → 2 thumbs — TEST + c33 24.1 sob
+content://); 100 assets no browser = 100 thumbs carregadas+decodificadas
+em **15,6 ms** no hospedeiro (o piso: <500 ms — TEST pin_100_thumbs_em_menos_de_500ms) e
+**0,5 ms** sob o provider SAF do c33 (FASE 24.4); thumb ausente =
+placeholder + render sob demanda VERDE (TEST + c33 24.2); o fantasma
+não nasce (TEST + c33 24.3). As mutações TH1..TH4 (o import sem thumbs,
+o peek pelo ficheiro inteiro, o loadRows a mentir, o guard do fantasma
+morto) — vermelho→verde em `docs/REGRESSOES.md` R-044.

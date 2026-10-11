@@ -34,6 +34,25 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.10.7 — 0.10-M PASSO 5C: THUMBNAILS — o import pré-renderiza 256×256 por mesh, o browser mostra-as instantâneo
+
+**O que o dono pediu** (o terceiro sub-passo do PASSO 5): «no import,
+renderizar uma miniatura 256×256 e guardá-la em thumbs/; o browser
+mostra-a imediatamente; thumb ausente = placeholder + render a pedido».
+Entregue em DOIS módulos novos e só neles: `ThumbRender` (o render
+SOFTWARE puro — câmara isométrica fixa que encaixa o AABB, z-buffer,
+lambert flat com a luz da casa, DETERMINÍSTICO; teto de 4096 triângulos;
+placeholder com as iniciais do stem) e `ThumbIndex` (o índice do
+browser — `ensureThumb` é a MESMA rotina do import e do render sob
+demanda, `loadRows` é o custo de listar). Os pins medidos: 100 thumbs
+carregadas+decodificadas em **15,6 ms** (piso <500 ms; 0,5 ms sob SAF
+no c33 FASE 24); o import escreve POR MESH (2 peças → 2 thumbs); o
+gigante de 50M verts custa UM bloco (o peek POR FAIXA 192 B — a lição
+R-044: o ficheiro inteiro media 1965 MB, a faixa volta ao 99 MB da
+sentinela R-039); o asset fantasma nunca nasce thumb. Mutações
+TH1..TH4 vermelho→verde. O relatório completo:
+`docs/RELATORIO-0.10-M-PASSO5C-THUMBS.md`.
+
 ## 0.10.7 — 0.10-M PASSO 5A: TEXTURAS — compressão E redução separadas, três perfis, override por asset
 
 **O que o dono pediu** (o PASSO 5 abre com o sub-passo 5A): «duas

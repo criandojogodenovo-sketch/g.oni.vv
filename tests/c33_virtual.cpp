@@ -64,6 +64,11 @@
 // ---- O CAMINHO REAL DO DEVICE (namespace anónimo = mesmo TU) ---------------
 #include "voni/VoniDocs.h"   // FASE 9: a pesquisa das Docs
 #include "platform/main.cpp"
+// 0.10-M (PASSO 5C): as thumbs — o índice (render sob demanda) + o writer
+// v3 (o asset da caixa) + o decodificador PNG (as dims 256×256 do pin)
+#include "assets/ThumbIndex.h"
+#include "assets/GOwnFormats.h"
+#include "assets/PngLoader.h"
 
 // ponte Java (o papel do "stub Java" — como o test_wiring087/test_handshake)
 extern "C" void Java_vv_goni_VvActivity_nativeRegisterActivity(
@@ -8280,6 +8285,149 @@ int main() {
             }
             check(logHas("quarentena"),
                   "23.5 a linha da quarentena no engine.log (o dono LÊ)");
+        }
+    }
+
+    // ======================================================================
+    // FASE 24 — 0.10-M PASSO 5C: AS THUMBS PRÉ-RENDERIZADAS. O pin do
+    // dono no caminho do DEVICE: (24.1) o import sob content:// escreve
+    // thumbs/<stem>.png 256×256 POR MESH (a MESMA rotina do browser —
+    // ensureThumb force=true) e o PNG decodifica; (24.2) o RENDER SOB
+    // DEMANDA pela TABELA de blocos (o pico de RAM é UM bloco — o
+    // peek é LEITURA POR FAIXA, a lição da sentinela R-039: 1965→99 MB);
+    // (24.3) o asset FANTASMA não nasce thumb do nada (erro limpo, o
+    // browser segue com o placeholder); (24.4) o pin do browser: N
+    // assets = N thumbs carregadas+decodificadas <500 ms (loadRows).
+    // ======================================================================
+    fase("FASE 24 — PASSO 5C: as thumbs do import + render sob demanda sob SAF");
+    {
+        resetEngineForHarness();
+        javaRegistersWithCacheDir();
+        FakeSafIo io24;   // o provider content:// (o modelo da suíte)
+        {
+            auto safPtr = std::make_unique<SafStorage>(
+                &io24, "content://tree/primary:GOneVV/thumbs24");
+            SafStorage* saf = safPtr.get();
+            check(Project::createNew(*saf, "c33", g_project),
+                  "24.0 projeto SAF criado (content://)");
+            g_storage = std::move(safPtr);
+            g_projectReady = true;
+            g_resources.setStorage(saf);
+            g_gpu.init(&g_resources);
+            io24.flushWrites();
+        }
+
+        // ---- 24.1 o import escreve thumbs/<stem>.png POR MESH sob SAF --
+        passo("24.1 o import sob SAF: a thumb 256×256 por mesh");
+        std::vector<std::string> assets24;
+        {
+            const std::string src = "/tmp/goni_fase24_city.glb";
+            check(buildGlbFase21(2, 40, 30, src),
+                  "24.1a fixture criada (GLB 2 meshes — 2 peças na EXPAND)");
+            convert::Output out;
+            convert::Stats stats;
+            std::string err;
+            const bool ok =
+                convert::importFile(src, "city.glb", *g_storage,
+                                    g_pipeline.get(), out, stats, err,
+                                    nullptr, nullptr, /*expandNodes=*/true);
+            io24.flushWrites();
+            if (!ok) {
+                std::printf("    [24.1-ERR] import falhou: %.200s\n",
+                            err.c_str());
+            }
+            check(ok && out.meshes.size() == 2,
+                  "24.1b o import EXPANDIDO: 2 peças (2 nós com mesh)");
+            check(stats.thumbs == 2,
+                  "24.1c stats.thumbs=2 (a thumb POR MESH escrita)");
+            for (const std::string& rel : out.meshes) {
+                assets24.push_back(rel);
+            }
+            std::remove(src.c_str());
+        }
+        // as thumbs EXISTEM no provider e decodificam 256×256
+        {
+            bool todas = true;
+            bool dimsOk = true;
+            for (const std::string& rel : assets24) {
+                std::vector<u8> png;
+                if (!g_storage->readBytes(ThumbIndex::relFor(rel), png) ||
+                    png.empty()) {
+                    todas = false;
+                    break;
+                }
+                vv::RawImage img;
+                std::string perr;
+                if (!vv::loadPng(png.data(), png.size(), img, perr) ||
+                    img.width != 256u || img.height != 256u) {
+                    dimsOk = false;
+                }
+            }
+            check(todas, "24.1d as 2 thumbs em thumbs/ (o PNG lido do "
+                         "provider content://)");
+            check(dimsOk, "24.1e as thumbs decodificam 256×256 (o tamanho "
+                          "do pin)");
+        }
+
+        // ---- 24.2 o render sob demanda pela TABELA (o orçamento) ------
+        passo("24.2 o render sob demanda: a tabela de blocos, UM bloco");
+        {
+            // o asset .gmesh DIRECTO no provider (sem import — o caminho
+            // do browser para um asset que veio de outra origem)
+            vv::MeshData caixa;
+            for (u32 i = 0; i < 8; ++i) {
+                vv::Vertex vt;
+                vt.pos = Vec3((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f,
+                              (i & 4) ? 1.0f : -1.0f);
+                caixa.vertices.push_back(vt);
+            }
+            const u16 q24[36] = {0,1,2, 0,2,3, 4,6,5, 4,7,6, 0,4,5, 0,5,1,
+                                 2,6,7, 2,7,3, 0,3,7, 0,7,4, 1,5,6, 1,6,2};
+            caixa.indices.assign(q24, q24 + 36);
+            std::vector<u8> gmesh;
+            std::string err24;
+            check(vv::writeGMesh(caixa, gmesh, err24),
+                  "24.2a o .gmesh da caixa escrito (o writer v3)");
+            check(g_storage->writeBytes("assets/caixa.gmesh", gmesh.data(),
+                                        gmesh.size()),
+                  "24.2b o asset no provider (sem thumb — o placeholder)");
+            check(!ThumbIndex::hasThumb(*g_storage, "assets/caixa.gmesh"),
+                  "24.2c hasThumb=false (o browser mostra o placeholder)");
+            check(ThumbIndex::ensureThumb(*g_storage, "assets/caixa.gmesh",
+                                          /*force=*/false, err24),
+                  "24.2d o render SOB DEMANDA VERDE (a tabela + o bloco 0)");
+            check(ThumbIndex::hasThumb(*g_storage, "assets/caixa.gmesh"),
+                  "24.2e a thumb NASCEU (o hit do browser a seguir)");
+            assets24.push_back("assets/caixa.gmesh");
+        }
+
+        // ---- 24.3 o fantasma: erro limpo, NUNCA thumb do nada ---------
+        passo("24.3 o asset fantasma: sem thumb nascida do nada");
+        {
+            std::string err24;
+            check(!ThumbIndex::ensureThumb(*g_storage,
+                                           "assets/fantasma.gmesh",
+                                           /*force=*/true, err24),
+                  "24.3a o ensureThumb do fantasma FALHA (erro legível)");
+            check(!err24.empty(),
+                  "24.3b o err diz a causa («o asset não existe»)");
+            check(!ThumbIndex::hasThumb(*g_storage, "assets/fantasma.gmesh"),
+                  "24.3c NENHUMA thumb órfã em thumbs/ (a honestidade)");
+        }
+
+        // ---- 24.4 O PIN: N assets = N thumbs <500 ms (o browser) ------
+        passo("24.4 o pin do browser: as thumbs PRONTAS <500 ms");
+        {
+            const ThumbIndex::Rows r =
+                ThumbIndex::loadRows(*g_storage, assets24);
+            std::printf("    [24.4] %u thumbs carregadas, %u placeholder(s), "
+                        "%.1f ms (o piso do dono: <500 ms)\n",
+                        r.loaded, r.placeholders, r.ms);
+            check(r.loaded == assets24.size() && r.placeholders == 0,
+                  "24.4a TODAS as thumbs carregadas+decodificadas do "
+                  "provider SAF");
+            check(r.ms >= 0.0 && r.ms < 500.0,
+                  "24.4b O PIN: N thumbs em <500 ms (o custo de LISTAR)");
         }
     }
 

@@ -38,6 +38,7 @@ add_executable(test_core
         test_import_gltf.cpp
         test_gltf_textures.cpp
         test_texture_profiles.cpp   # 0.10-M (PASSO 5A): perfis/override/normal/mips lineares
+        test_thumbs.cpp             # 0.10-M (PASSO 5C): as thumbs pré-renderizadas
         test_f51_roundtrip.cpp
         test_assets.cpp
         test_storage.cpp
@@ -130,6 +131,8 @@ add_executable(test_core
         ${CORE_DIR}/assets/TextureCache.cpp
         ${CORE_DIR}/assets/TexturePipeline.cpp
         ${CORE_DIR}/assets/TexturePolicy.cpp   # 0.10-M (PASSO 5A): os 3 perfis (o c33 também)
+        ${CORE_DIR}/assets/ThumbRender.cpp     # 0.10-M (PASSO 5C): o render software das thumbs
+        ${CORE_DIR}/assets/ThumbIndex.cpp      # 0.10-M (PASSO 5C): o índice (o browser puro)
         ${CORE_DIR}/assets/TextureCompressor.cpp
         ${CORE_DIR}/assets/Etc2Compressor.cpp
         ${CORE_DIR}/assets/AstcCompressor.cpp
@@ -347,6 +350,8 @@ add_executable(c33_virtual
         ${CORE_DIR}/assets/TextureCache.cpp
         ${CORE_DIR}/assets/TexturePipeline.cpp
         ${CORE_DIR}/assets/TexturePolicy.cpp   # 0.10-M (PASSO 5A): os 3 perfis
+        ${CORE_DIR}/assets/ThumbRender.cpp     # 0.10-M (PASSO 5C): o render software das thumbs
+        ${CORE_DIR}/assets/ThumbIndex.cpp      # 0.10-M (PASSO 5C): o índice (render sob demanda)
         ${CORE_DIR}/assets/TextureCompressor.cpp
         ${CORE_DIR}/assets/Etc2Compressor.cpp
         ${CORE_DIR}/assets/AstcCompressor.cpp

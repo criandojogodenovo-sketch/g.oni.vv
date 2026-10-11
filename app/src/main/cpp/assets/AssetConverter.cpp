@@ -23,6 +23,7 @@
 #include "assets/GltfImporter.h"
 #include "assets/GmeshV3Stream.h"   // 0.10-M (PASSO 3): o conversor streaming v3
 #include "assets/ObjImporter.h"
+#include "assets/ThumbIndex.h"   // 0.10-M (PASSO 5C): as thumbs do import
 #include "assets/PngLoader.h"
 #include "assets/TexturePipeline.h"
 #include "components/AnimationPlayer.h"
@@ -1669,6 +1670,23 @@ bool convertGltfFile(const std::string& srcAbs, const std::string& srcRel,
 
 } // namespace
 
+// ---- PASSO 5C: a thumb de CADA mesh do import (thumbs/<stem>.png) ------
+// A MESMA rotina do browser (ThumbIndex::ensureThumb com force=true — o
+// asset mudou, o render é sempre novo). O pico de RAM é UM bloco (a
+// máquina de faixas do PASSO 4). Falha de thumb = log + segue (o browser
+// fica com o placeholder — NUNCA mata o import).
+static void writeImportThumbs(ProjectStorage& st, const convert::Output& out,
+                              Stats& stats) {
+    for (const std::string& rel : out.meshes) {
+        std::string terr;
+        if (ThumbIndex::ensureThumb(st, rel, /*force=*/true, terr)) {
+            ++stats.thumbs;
+            continue;
+        }
+        elog::warn("import: %s", terr.c_str());
+    }
+}
+
 bool importFile(const std::string& srcAbs, const std::string& srcNameIn,
                 ProjectStorage& st, TexturePipeline* pipeline,
                 Output& out, Stats& stats, std::string& err,
@@ -1797,6 +1815,9 @@ bool importFile(const std::string& srcAbs, const std::string& srcNameIn,
             return false;
         }
     }
+    // PASSO 5C: as thumbs pré-renderizadas (o browser mostra-as
+    // instantâneo; o placeholder + render sob demanda ficam no ThumbIndex)
+    writeImportThumbs(st, out, stats);
     // 3) o RÁCIO no log (a prova de "menor dentro da engine") — com os
     // AVISOS de textura e irmãos EXPLÍCITOS (0.9.6.4: nunca silencioso)
     const double ratio = stats.outputBytes > 0
