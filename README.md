@@ -73,10 +73,13 @@ paralela fora da UI.
 - **O cache por perfil** (`assets/TextureCache.cpp`): a chave ganhou o
   suffix `_p<perfil>_o<override>_n<normal>_a<astc>` — a MESMA textura
   nos 3 perfis = TRÊS ficheiros (o pin); o hit devolve os MESMOS bits.
-- **O passe paralelo** (`assets/AssetConverter.cpp`): valida/coleta em
-  sequência (os avisos R-020/R-022 intocados), comprime em até 4
-  workers FORA da UI com progresso no log, escreve em ordem; `Stats::
-  texReduced`/`texNormal` contam as duas operações separadas.
+- **O passe de texturas FORA DA UI** (`assets/AssetConverter.cpp`):
+  corre no job thread do conversor com progresso no log; `Stats::
+  texReduced`/`texNormal` contam as duas operações separadas. **A POOL
+  paralela ficou POR FAZER**: a reestruturação (jobs/results/move)
+  detonou um segfault no CI (probe-A verde / probe-B vermelho / probe-D
+  inline+API-nova verde — a caça no relatório §5-A); a estrutura INLINE
+  de sempre é a que segue (BACKLOG 0.10-M PASSO 5A-b).
 - **Provas**: 9 TESTs novos (`tests/test_texture_profiles.cpp`) ·
   test_core 925/0 · M-T1/T3/T5/T6/T7 vermelho→verde (coladas no
   relatório §4) · tabela tempo/tamanho por perfil (§3: 21 845 / 5 461 /

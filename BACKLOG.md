@@ -44,6 +44,27 @@
 | H · FICHEIROS COM ASSETS REAIS | drawer enumera source/+assets/ reais; refresh; R-019 | por fazer | — |
 | I · BENCHMARKS | bench de 60s com JSON/loja/copiar; vsync; 3×; cena de benchmark | por fazer | — |
 
+## 0.10-M PASSO 5A-b · A POOL PARALELA DO PASSE DE TEXTURAS (dívida do 5A)
+
+- A spec do dono pede «codificação paralela fora da UI com progresso».
+  O 5A entregou «fora da UI» (o job thread) e «com progresso» (as linhas
+  por textura); a POOL (jobs/results com os bytes movidos do modelo +
+  até 4 workers) detonou um SEGFAULT no CI (o teste data-uri; 4×;
+  nunca local) — a bissecção (probe-A verde / probe-B vermelho sem
+  threads / probe-D inline+API-nova verde) APONTA a reestruturação e o
+  mecanismo exato ficou ABERTO (o ASAN morreu dentro do próprio
+  alocador em ChunkReader::close/shrink_to_fit, FileApi.cpp:406, sem
+  relatório de programa). A estrutura INLINE de sempre ficou VERDE e é
+  a que segue. Reabrir com: a pool desenhada sem mover os bytes do
+  modelo (copiar ou processar por janela deslizante), o ASAN do CI com
+  -fsanitize-recover e sem o overflow KNOWN dos ícones no caminho, e o
+  handler de crash do runner a dizer o teste (já está).
+- (o fix KNOWN dos ícones — Icons.cpp `kKeyboardPts` com nPts=32 >
+  24 pontos reais, BACKLOG 0.10.2 — continua POR DECISÃO DO DONO; o
+  overrun de LEITURA deixou de ser «benigno em prática» no dia em que
+  o layout o pôs numa fronteira de página — continua sem ser o gatilho
+  deste segfault, mas a cura é uma linha: nPts 32→24.)
+
 ## Dívidas registadas durante a campanha (fora do scope do grupo em curso)
 
 - (nenhuma no Grupo B — os dois bugs apanhados ao vivo ERAM do scope: os

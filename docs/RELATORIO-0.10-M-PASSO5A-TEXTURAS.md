@@ -178,10 +178,17 @@ ci/scope.txt) · docs-lint VERDE · gmesh-docs-check VERDE (GTEX v2 com
 glyph/projects VERDES · check_main VERDE · link-parity VERDE (119 TUs)
 · test_core 925/0 (suíte local, inclui os 9 TESTs novos do 5A).
 O release-identity (R-15) passa com ESTE relatório a declarar
-versionCode 62. A linha do CI (run verde) entra no commit -docs.
+versionCode 62. **CI VERDE À PRIMEIRA no commit do fix (bb51eb0, run
+38097682476): core-tests, c33, APK arm64 assinado versionCode 62,
+symbol gate — documentados; o run do commit original (ca6e124) morreu no
+segfault do §5-A e os runs das sondas contam a caça.
 
 ## 7. NÃO VERIFICADO (honestidade da casa)
 
+- **A POOL PARALELA**: o item «codificação paralela» da spec ficou a
+  meio — «fora da UI» e «com progresso» entregues, a pool NÃO (§5-A);
+  o root cause do segfault que a pool detonou ficou ABERTO (BACKLOG
+  0.10-M PASSO 5A-b).
 - **Device real (C33)**: NENHUMA verificação em hardware nesta sessão —
   o CI corre a suíte do core e o c33 virtual; o APK assinado (vc 62)
   precisa de instalar e converter um modelo COM texturas para ver as
