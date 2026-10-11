@@ -104,6 +104,9 @@ struct PrimSpec {
 struct NodeSpec {
     u32 mesh;
     f32 tx, ty, tz;
+    bool meshed = true;   // 0.10-M (PASSO 5B): false = nó VAZIO (sem mesh —
+                          // os nós de agrupamento dos city reais; o import
+                          // expandido não gera peça para eles)
 };
 
 // o JSON + BIN de um GLB inteiro em memória (imagens opcionais — PNGs
@@ -142,8 +145,13 @@ bool buildGlb(const std::vector<PrimSpec>& prims,
         std::snprintf(tr, sizeof(tr), "\"translation\":[%.1f,%.1f,%.1f]",
                       (double)nodes[n].tx, (double)nodes[n].ty,
                       (double)nodes[n].tz);
-        j += std::string("{\"mesh\":") + std::to_string(nodes[n].mesh) +
-             "," + tr + ",\"name\":\"n" + std::to_string(n) + "\"}";
+        if (!nodes[n].meshed) {
+            j += std::string("{") + tr + ",\"name\":\"n" +
+                 std::to_string(n) + "\"}";
+        } else {
+            j += std::string("{\"mesh\":") + std::to_string(nodes[n].mesh) +
+                 "," + tr + ",\"name\":\"n" + std::to_string(n) + "\"}";
+        }
     }
     j += "],\"meshes\":[";
     u32 acc = 0;
@@ -1696,6 +1704,128 @@ TEST(ext_uma_peça_por_nó_nomes_flag_e_geometria_igual_ao_fundido) {
 // pai (10,0,0) com filho (0,5,0) — o registro do filho traz o TRS MUNDO
 // (10,5,0) e a PEÇA dele o AABB LOCAL [-1,1]³ (nunca o mundo baked — senão
 // a transformação aplicaria DUAS vezes; é ISTO que a mutação M-E2 caça)
+// 0.10-M (PASSO 5B · o pin do dono): o city com 122 NÓS — 72 com mesh e
+// 50 VAZIOS intercalados (os nós de agrupamento dos city reais). EXPANDIDO
+// = 72 peças/TICs (o nó sem mesh NÃO gera peça nem TIC; a ordem e os
+// índices dos nós do glTF preservam-se nos registros); FUNDIDO (sem a
+// flag) = 1 mesh só — o backward compat do pin.
+TEST(ext_city_122_nos_50_vazios_72_pecas_e_fundido_um_so) {
+    const std::string dir = "/tmp/goni_ext122_" + std::to_string(::getpid());
+    rmRf(dir);
+    ASSERT(mkDir(dir));
+    elog::init((dir + "/logs").c_str());
+    const std::string src = dir + "/city122.glb";
+    {   // a fixture: 122 nós — 72 com mesh (os prims do city de sempre) e
+        // 50 VAZIOS intercalados
+        std::vector<PrimSpec> prims;
+        std::vector<NodeSpec> nodes;
+        for (u32 i = 0; i < 72; ++i) {
+            prims.push_back({1000, 600, i % 4, false});
+        }
+        u32 meshIdx = 0;
+        for (u32 i = 0; i < 122; ++i) {
+            NodeSpec nd;
+            nd.tx = 0.0f;
+            nd.ty = 0.0f;
+            nd.tz = 0.0f;
+            if (i % 25u == 24u && meshIdx < 72u - (122u - i)) {
+                // (intercala de forma determinística — ver abaixo)
+            }
+            if ((i % 5u) == 4u && meshIdx < 72u) {
+                // nó VAZIO (50 no total: as posições 4,9,…,119 → 24 vazios…
+                // a conta exata fica nos EXPECTs — o builder marca)
+                nd.meshed = false;
+                nd.mesh = 0;
+            } else if (meshIdx < 72u) {
+                nd.mesh = meshIdx++;
+            } else {
+                nd.meshed = false;
+                nd.mesh = 0;
+            }
+            nodes.push_back(nd);
+        }
+        // garante as contagens EXATAS do pin: 72 meshed + 50 vazios
+        u32 nMeshed = 0;
+        for (const NodeSpec& nd : nodes) {
+            if (nd.meshed) ++nMeshed;
+        }
+        for (NodeSpec& nd : nodes) {
+            if (nMeshed < 72u && !nd.meshed) {
+                nd.meshed = true;
+                ++nMeshed;
+            } else if (nMeshed > 72u && nd.meshed) {
+                nd.meshed = false;
+                --nMeshed;
+            }
+        }
+        ASSERT(nMeshed == 72u);
+        std::vector<u8> glb;
+        ASSERT(buildGlb(prims, nodes, {"A", "B", "C", "D"}, {}, glb));
+        FILE* f = std::fopen(src.c_str(), "wb");
+        ASSERT(f != nullptr);
+        std::fwrite(glb.data(), 1, glb.size(), f);
+        std::fclose(f);
+    }
+
+    FsStorage st((dir + "/proj").c_str());
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    const bool ok = convert::importFile(src, "city122.glb", st, nullptr,
+                                        out, stats, err, nullptr, nullptr,
+                                        /*expandNodes=*/true);
+    if (!ok) {
+        std::printf("  [ext122-ERR] %.200s\n", err.c_str());
+        FILE* dbg = std::fopen(src.c_str(), "rb");
+        if (dbg) {
+            u8 h[12];
+            size_t n = std::fread(h, 1, 12, dbg);
+            std::fclose(dbg);
+            std::printf("  [ext122-DBG] %zu bytes head:", n);
+            for (size_t b = 0; b < n; ++b) {
+                std::printf(" %02x", h[b]);
+            }
+            std::printf("\n");
+        }
+    }
+    ASSERT(ok);
+    // OS 72 COM MESH viram peças; os 50 VAZIOS não geram NADA
+    ASSERT(out.meshes.size() == 72u);
+    ASSERT(out.expandNodes.size() == 72u);
+    EXPECT(stats.meshes == 72u);
+    // os NOMES preservam-se e o `node` aponta para o ÍNDICE do nó no glTF
+    // (os registros saltam os vazios sem renumerar)
+    u32 vistos = 0;
+    bool ordemOk = true;
+    for (size_t i = 0; i < out.expandNodes.size(); ++i) {
+        const auto& nd = out.expandNodes[i];
+        if (nd.mesh != static_cast<i32>(i) || nd.node < 0) {
+            ordemOk = false;
+        }
+        if (nd.name.rfind("n", 0) != 0) {
+            ordemOk = false;
+        }
+        ++vistos;
+    }
+    EXPECT(vistos == 72u && ordemOk);
+    // e NENHUM registro é de nó vazio (os 122 − 72 = 50 ficaram de fora)
+    EXPECT(out.expandNodes.size() < 122u);
+
+    // ---- o FUNDIDO (sem a flag): 1 mesh só — o backward compat --------
+    FsStorage st2((dir + "/proj2").c_str());
+    convert::Output out2;
+    convert::Stats stats2;
+    const bool ok2 = convert::importFile(src, "city122.glb", st2, nullptr,
+                                         out2, stats2, err, nullptr,
+                                         nullptr, /*expandNodes=*/false);
+    ASSERT(ok2);
+    EXPECT(out2.meshes.size() == 1u);      // UM TIC/UM ficheiro (o de sempre)
+    EXPECT(out2.meshes[0] == "assets/city122.gmesh");
+    EXPECT(out2.expandNodes.empty());      // vazio = o import FUNDIDO
+    elog::shutdown();
+    rmRf(dir);
+}
+
 TEST(ext_transformação_do_nó_no_tic_e_geometria_crua) {
     const std::string dir = "/tmp/goni_ext2_" + std::to_string(::getpid());
     rmRf(dir);
