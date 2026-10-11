@@ -149,7 +149,14 @@ mutações repostas e as suítes inteiras verdes DEPOIS delas.
   f9a70e5 fica NÃO VERIFICADO — o remédio é o rerun do run
   38117399890 quando o pool do GitHub deixar de ceifar os VMs (a
   prática da casa desde a 0.10.5: a linha do CI entra pelo commit
-  -docs, verde ou honesta).
+  -docs, verde ou honesta). **CI VERDE COM O FIX (commit cc9b8bc, run
+  38136779345): o paralelismo dos DOIS builds cmake (test_core +
+  c33_virtual) desce para -j2 — o pico de RAM de 4 cc1plus grandes em
+  -j4 era o que ceifava o VM (6 mortes SIGTERM/exit 143) — e a árvore
+  INTEIRA passa de uma vez: core-tests, c33, APK arm64 assinado
+  versionCode 63, symbol gate. O selo do PASSO 5C fecha com ESTE run;
+  a reversão para --parallel quando o pool estabilizar vive no
+  comentário do workflow.**
 
 ## 7. NÃO VERIFICADO (honestidade da casa)
 
