@@ -98,7 +98,8 @@ jobs:
       - name: Compilar
         # 0.9.5: só o alvo que ESTE job afere (o c33_virtual compila no
         # próprio job) — metade do tempo de build por job
-        run: cmake --build build-tests --target test_core --parallel
+        # -j2 fix for infra OOM; revert to --parallel when pool stable
+        run: cmake --build build-tests --target test_core --parallel 2
 
       - name: Executar suíte do core
         run: ctest --test-dir build-tests --output-on-failure -R "^core$"
@@ -179,7 +180,8 @@ jobs:
       - name: Compilar (suíte + harness do dispositivo virtual)
         # 0.9.5: só o alvo que ESTE job afere (o replay; o test_core compila
         # no próprio job) — metade do tempo de build por job
-        run: cmake --build build-tests --target c33_virtual --parallel
+        # -j2 fix for infra OOM; revert to --parallel when pool stable
+        run: cmake --build build-tests --target c33_virtual --parallel 2
 
       # as SENTINELAS (regress_*) correm dentro do test_core — TODAS as
       # runs, TODAS as releases futuras, para sempre (docs/REGRESSOES.md).
