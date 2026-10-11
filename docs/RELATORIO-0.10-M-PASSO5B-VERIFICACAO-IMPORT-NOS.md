@@ -41,7 +41,8 @@
 ## 4. Gates e CI
 
 Locais: docs-lint VERDE · scope VERDE (tests/ + docs/ estão no scope) ·
-suíte 926/0. A linha do CI verde entra no commit -docs.
+suíte 926/0. **CI VERDE À PRIMEIRA (run 38100676868): core-tests, c33,
+APK arm64 assinado, symbol gate — documentados.
 
 ## 5. NÃO VERIFICADO (honestidade da casa)
 
