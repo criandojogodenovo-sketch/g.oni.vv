@@ -402,8 +402,11 @@ void ChunkReader::close() {
         std::fclose(static_cast<FILE*>(file));
         file = nullptr;
     }
+    // 0.10.7: SEM shrink_to_fit — o destrutor liberta o buffer inteiro
+    // a seguir e o shrink (um deallocate+NULL) foi o ponto onde a corrupção
+    // flaky do CI detonou (o CHECK do alocador num pointer podre; ver o
+    // BACKLOG 0.10-M PASSO 5A-b). clear() mantém o contrato.
     buf.clear();
-    buf.shrink_to_fit();
     last = 0;
     done = 0;
     total = 0;
