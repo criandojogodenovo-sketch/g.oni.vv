@@ -178,10 +178,13 @@ ci/scope.txt) · docs-lint VERDE · gmesh-docs-check VERDE (GTEX v2 com
 glyph/projects VERDES · check_main VERDE · link-parity VERDE (119 TUs)
 · test_core 925/0 (suíte local, inclui os 9 TESTs novos do 5A).
 O release-identity (R-15) passa com ESTE relatório a declarar
-versionCode 62. **CI VERDE À PRIMEIRA no commit do fix (bb51eb0, run
-38097682476): core-tests, c33, APK arm64 assinado versionCode 62,
-symbol gate — documentados; o run do commit original (ca6e124) morreu no
-segfault do §5-A e os runs das sondas contam a caça.
+versionCode 62. **CI VERDE no commit do fix (bb51eb0, run 38097682476: core-tests, c33,
+APK arm64 assinado versionCode 62, symbol gate) — e o run do -docs
+(MESMO CÓDIGO) ficou VERMELHO no MESMO sítio: o segfault é FLAKY, não
+determinístico. O fix2 (ChunkReader::close SEM shrink_to_fit — o ponto
+de detonação observado; o destrutor liberta o buffer de qualquer forma)
+fechou VERDE de novo (run 38099021529: core-tests, c33, APK, symbol
+gate). O race RAIZ continua aberto no BACKLOG 5A-b.
 
 ## 7. NÃO VERIFICADO (honestidade da casa)
 
