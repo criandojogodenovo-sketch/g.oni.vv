@@ -1654,7 +1654,7 @@ TEST(ext_uma_peça_por_nó_nomes_flag_e_geometria_igual_ao_fundido) {
     EXPECT(out.expandNodes[0].translation.x == 0.0f);
     EXPECT(out.expandNodes[0].scale.x == 1.0f);
     // A LINHA CONTRATO do expand + a verificação POR PEÇA (72×)
-    EXPECT(fileHas(dir + "/logs/engine.log", "expandir nós=72 peça(s)"));
+    EXPECT(fileHas(dir + "/logs/engine.log", "expandir em sub-TICs=72 peça(s)"));
     EXPECT(fileCount(dir + "/logs/engine.log", "verificado=1") >= 72);
     // A FLAG em TODAS as peças (é ela que abre POR BLOCOS no runtime)
     bool flagOk = true, vertsOk = true;
@@ -1851,13 +1851,16 @@ TEST(ext_transformação_do_nó_no_tic_e_geometria_crua) {
     EXPECT(out.meshes[0] == "assets/hier_pai.gmesh");
     EXPECT(out.meshes[1] == "assets/hier_filho.gmesh");
     ASSERT(out.expandNodes.size() == 2u);
-    // «transformação do nó como Transform do TIC»: o MUNDO do filho é a
-    // cadeia composta (10,0,0)·(0,5,0) = (10,5,0) — o engine compõe flat,
-    // o registro traz o mundo para a peça desenhar no sítio EXATO
+    // «transformação do nó como Transform do TIC»: 0.10-M HOTFIX (e/f) — a
+    // SUB-ÁRVORE REAL: o pai fica FLAT com o TRS MUNDO (10,0,0); o filho
+    // PENDE do pai (parentRec=0) com o TRS LOCAL (0,5,0) — o mundo compõe
+    // parent∘local no TransformSystem/gltfExpandComposeWorlds (o (10,5,0)
+    // de antes era o mundo pré-composto no registo)
     EXPECT(out.expandNodes[0].name == "pai");
     EXPECT(out.expandNodes[1].name == "filho");
     EXPECT(out.expandNodes[0].translation.x == 10.0f);
-    EXPECT(out.expandNodes[1].translation.x == 10.0f);
+    EXPECT(out.expandNodes[1].parentRec == 0);
+    EXPECT(out.expandNodes[1].translation.x == 0.0f);
     EXPECT(out.expandNodes[1].translation.y == 5.0f);
     EXPECT(out.expandNodes[1].translation.z == 0.0f);
     // a PEÇA do filho: AABB LOCAL [-1,1]³ — GEOMETRIA CRUA (o TRS viaja no
@@ -1881,16 +1884,21 @@ TEST(ext_transformação_do_nó_no_tic_e_geometria_crua) {
         EXPECT(pieceMeta(st, out.meshes[0], meta, blocks, mats));
         EXPECT(meta.aabbMin.x > -1.001f && meta.aabbMax.x < 1.001f);
     }
-    // o TRS do registro RECONSTRÓI a matriz-mundo (a prova da decomposição)
+    // o TRS do registro RECONSTRÓI a matriz do SEU espaço (a prova da
+    // decomposição). 0.10-M HOTFIX (e/f): o filho é PARENTED — o registo
+    // guarda o TRS LOCAL (0,5,0); o mundo composto (10,5,0) sai da
+    // composição parent∘local (o TransformSystem — o teste
+    // transform_system_compoe_pais cobre a matemática)
     {
         const convert::Output::NodeOut& no = out.expandNodes[1];
+        EXPECT(no.parentRec == 0);
         const Mat4 rec =
             Mat4::mul(Mat4::translation(no.translation.x, no.translation.y,
                                         no.translation.z),
                       Mat4::mul(no.rotation.toMat4(),
                                 Mat4::scale(no.scale.x, no.scale.y,
                                             no.scale.z)));
-        EXPECT(std::fabs(rec.m[12] - 10.0f) < 1e-4f);
+        EXPECT(std::fabs(rec.m[12] - 0.0f) < 1e-4f);
         EXPECT(std::fabs(rec.m[13] - 5.0f) < 1e-4f);
         EXPECT(std::fabs(rec.m[0] - 1.0f) < 1e-4f);
     }
@@ -1978,12 +1986,16 @@ TEST(ext_gltfexpandinstantiate_um_tic_por_nó) {
     nodes[2].mesh = -1;   // sem peça — não vira TIC
     const std::vector<std::string> refs = {"assets/peça0.gmesh",
                                            "assets/peça1.gmesh"};
-    // (a) SEM binder: os TICs entram na mesma (meshPath p/ o reload)
+    // (a) SEM binder: os TICs entram na mesma (meshPath p/ o reload).
+    // 0.10-M HOTFIX (f): o vetor devolvido ALINHA com os registos (o
+    // parentRec indexa ISTO) — o registo estrutural entra como handle
+    // inválido (o TIC dele nunca existiu — o pin do 5B mantém-se)
     {
         GltfInstantiateCtx ctx;
         const std::vector<Handle> tics =
             gltfExpandInstantiate(scene, nodes, refs, ctx);
-        EXPECT(tics.size() == 2u);
+        EXPECT(tics.size() == 3u);
+        EXPECT(!tics[2].valid());   // o estrutural NÃO vira TIC
         const Tic* t0 = scene.get(tics[0]);
         const Tic* t1 = scene.get(tics[1]);
         EXPECT(t0 != nullptr && t0->name == "c0");
@@ -1998,8 +2010,8 @@ TEST(ext_gltfexpandinstantiate_um_tic_por_nó) {
         EXPECT(mr1 != nullptr && mr1->meshPath == refs[1]);
         EXPECT(mr0->mesh == nullptr);   // sem bind — fica o meshPath
         EXPECT(mr0->material == nullptr);
-        // FLAT: os TICs na RAIZ (o engine não compõe pais — o registro JÁ
-        // traz a transformação mundo; hierarquia entre TICs seria dobrar)
+        // FLAT: os TICs na RAIZ — estes registos são hand-built (parentRec
+        // default −1): o TRS nos campos é MUNDO e a composição seria dobrar
         EXPECT(t0->parent == -1 && t1->parent == -1);
     }
     // (b) COM binder: o mesh/material ligam quando o bind devolve
@@ -2021,7 +2033,9 @@ TEST(ext_gltfexpandinstantiate_um_tic_por_nó) {
         ctx.material = reinterpret_cast<Material*>(0x5678);
         const std::vector<Handle> tics =
             gltfExpandInstantiate(scene2, nodes, refs, ctx);
-        EXPECT(tics.size() == 2u);
+        // 0.10-M HOTFIX (f): o vetor ALINHA com os registos (3 registos,
+        // o estrutural inválido — o TIC dele nunca existiu)
+        EXPECT(tics.size() == 3u);
         EXPECT(chamadas == 2);
         const MeshRenderer* mr =
             scene2.get(tics[0])->getComponent<MeshRenderer>();

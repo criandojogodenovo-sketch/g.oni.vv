@@ -190,7 +190,9 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     // transform 64: título 24 + caixas 32) baixa a receita para 1046
     // PASSO 2 (0.9.6.15): a linha de miniaturas reserva a legenda
     // inteira (+8dp) — 1046 → 1054
-    EXPECT(nearEqF(contentH, 1054.0f));
+    // 0.10-M HOTFIX TEXTURAS-VINCULA: a secção Material ganhou as 5
+    // linhas de SLOT (36 dp cada) — 1054 → 1234
+    EXPECT(nearEqF(contentH, 1234.0f));
 
     // cursor Y PARTILHADO: linhas sequenciais (y estritamente crescente, sem
     // reinício por secção), todas dentro do conteúdo, e o fundo do plano =
@@ -233,8 +235,10 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     // PASSO 1: com TouchControls o addTc (42) dá lugar à label tc (36) —
     // 1046 − 42 + 36 = 1040; PASSO 2 (0.9.6.15): a linha de miniaturas
     // reserva a LEGENDA INTEIRA (+8dp) — 1040 + 8 = 1048
+    // 0.10-M HOTFIX TEXTURAS-VINCULA: as 5 linhas de SLOT (+180 dp) —
+    // 1048 → 1228
     EXPECT(nearEqF(inspectorContentHeight(inspectorProfile(*tic), m, false, 0u),
-                   1048.0f));
+                   1228.0f));
 }
 
 TEST(scroll_hierarquia_todos_os_tics_atingeis) {

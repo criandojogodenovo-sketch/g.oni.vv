@@ -70,7 +70,9 @@ constexpr u16 kGmeshVersionMinRead = 1;  // a versão mais antiga que abre
 // float32 exato (a quantização 16-bit do v1 só existe nos ficheiros v1).
 // Vértices não referenciados por nenhum grupo não sobrevivem ao corte
 // (não afetam o conjunto de triângulos — documentado no formato).
-bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err);
+struct GMeshMatBind;   // 0.10-M HOTFIX: os binds (definidos mais abaixo)
+bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err,
+                const std::vector<GMeshMatBind>* binds = nullptr);
 
 // lê bytes .gmesh (v1, v2 ou v3) → MeshData. v1/v2: dequantizado como
 // sempre. v3: os blocos montados por ordem da tabela (1 grupo por bloco).
@@ -190,10 +192,12 @@ std::string gmeshV3LoadRefusalErr(const GMeshV3Meta& meta);
 
 // lê SÓ header + metadados + tabela (NUNCA aloca os dados dos blocos) —
 // o caminho do PASSO 4 e das contagens acima de 2^32. Os materiais vêm
-// como nomes (a tabela de materiais é pequena).
+// como nomes (a tabela de materiais é pequena). `binds` (0.10-M HOTFIX
+// TEXTURAS-VINCULA): as vinculações do bloco GTB1 da cauda (se houver).
 bool readGMeshV3Meta(const u8* bytes, size_t len, GMeshV3Meta& meta,
                      std::vector<GMeshV3Block>& blocks,
-                     std::vector<std::string>& materials, std::string& err);
+                     std::vector<std::string>& materials, std::string& err,
+                     std::vector<GMeshMatBind>* binds = nullptr);
 
 // materializa UM bloco → MeshData de 1 grupo (o streaming do PASSO 3 na
 // verificação e, no PASSO 4, o carregamento por blocos)
@@ -218,11 +222,14 @@ bool gmeshV3ReadTableOnly(const u8* tableBytes, size_t tableLen,
 
 // gmeshV3ReadMaterialsOnly: `matBytes` = a faixa dos materiais (do
 // materialTableOffset em diante — o fim pode trazer bytes a mais do que
-// os nomes precisam; o reader para em materialCount nomes).
+// os nomes precisam; o reader para em materialCount nomes). `binds`
+// (0.10-M HOTFIX TEXTURAS-VINCULA): parse do bloco GTB1 da CAUDA (os
+// bytes depois dos nomes) — ausente = vazio; corrompido = false.
 bool gmeshV3ReadMaterialsOnly(const u8* matBytes, size_t matLen,
                               const GMeshV3Meta& meta,
                               std::vector<std::string>& materials,
-                              std::string& err);
+                              std::string& err,
+                              std::vector<GMeshMatBind>* binds = nullptr);
 
 // gmeshV3MaterializeBlock: materializa UM bloco a partir da FAIXA EXATA
 // dos seus dados (dataLen == blk.dataSize, lida por readBytesAt — o
@@ -233,6 +240,74 @@ bool gmeshV3MaterializeBlock(const u8* dataBytes, size_t dataLen,
                              const GMeshV3Meta& meta,
                              const GMeshV3Block& blk, MeshData& out,
                              std::string& err);
+
+// ---- 0.10-M HOTFIX TEXTURAS-VINCULA — os SLOTS de textura por material ----
+// O bug do dono (C33): o import gerava os .gtext das imagens mas NADA os
+// ligava ao mesh — a tabela de materiais do v3 guardava SÓ o nome
+// (v3WriteMaterial) e o índice material→textura→imagem morria no parse
+// (textureSources era local a parseGltf). A CURA: o bloco de VINCULAÇÃO
+// (magic "GTB1") APPENDADO ao FIM da secção de materiais — o leitor de
+// sempre PARA em materialCount nomes (o contrato «o fim pode trazer bytes
+// a mais» já documentado), logo os ficheiros antigos LEEM-SE byte a byte
+// e os leitores antigos lêm os novos SEM saber (ignoram a cauda).
+//
+// Os 5 slots do PBR core do glTF (a ordem é o CONTRATO — o inspector e o
+// escritor usam os MESMOS índices):
+enum : u8 {
+    kBindBaseColor = 0, kBindNormal = 1, kBindMetalRough = 2,
+    kBindEmissive = 3, kBindOcclusion = 4,
+};
+constexpr u8 kBindSlotCount = 5;
+
+// o NOME do slot (os logs e o inspector dizem o MESMO vocabulário — o
+// glTF core em português da casa; PURO, afervel)
+inline const char* kBindSlotName(u8 slot) {
+    switch (slot) {
+        case kBindBaseColor: return "baseColor";
+        case kBindNormal: return "normal";
+        case kBindMetalRough: return "metalRough";
+        case kBindEmissive: return "emissive";
+        case kBindOcclusion: return "occlusion";
+        default: return "?";
+    }
+}
+
+// uma VINCULAÇÃO por material: o caminho REL do .gtext por slot ("" = o
+// slot vazio — o glTF não referenciou textura aí). O materialIndex é o
+// ÍNDICE NA TABELA DE MATERIAIS do próprio ficheiro (a ordem dos nomes).
+struct GMeshMatBind {
+    u32 materialIndex = 0;
+    std::string tex[kBindSlotCount];
+    bool empty() const {
+        for (u8 s = 0; s < kBindSlotCount; ++s) {
+            if (!tex[s].empty()) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
+// ESCRITOR: appenda o bloco ao FIM da secção de materiais (a mesma vector
+// que recebe os nomes — o chamador é o gmeshV3Skeleton). Layout do bloco
+// (little-endian, tudo contíguo no fim do ficheiro):
+//   magic u32 "GTB1" (0x31504247... os bytes 'G','T','B','1')
+//   u32 bindCount (só materiais com PELO MENOS um slot não-vazio)
+//   bindCount × { u16 materialIndex · u8 slotCount · slotCount ×
+//                 { u8 slot · u16 pathLen · path bytes } · pad a 4 }
+//   u32 crc32 (de TODOS os bytes desde o fim do bindCount)
+// Sem binds (vazio) NADA é appendado — o ficheiro fica byte a byte com o
+// pré-hotfix.
+void gmeshV3AppendBinds(std::vector<u8>& materialsSection, u64 cursorAbs,
+                        const std::vector<GMeshMatBind>& binds);
+
+// LEITOR: `tail` = os bytes do FIM da secção de materiais DEPOIS dos
+// materialCount nomes (o resto da faixa). Sem magic → true com out vazio
+// (ficheiro pré-hotfix ou mesh sem texturas). Magic presente mas bytes
+// truncados/CRC mau → false com err LEGÍVEL (a quarentena do chamador
+// decide — o mesmo contrato da tabela).
+bool gmeshV3ReadBinds(const u8* tail, size_t tailLen,
+                      std::vector<GMeshMatBind>& out, std::string& err);
 
 // um bloco de ENTRADA do escritor v3 (a pool já com índices locais; o
 // conversor do PASSO 3 produz isto em streaming)
@@ -267,10 +342,15 @@ struct GMeshV3Skeleton {
     std::vector<u8> table;       // entries.size() × 80 B
     std::vector<u8> materials;   // variável (entrada 4-alinhada)
 };
+// `binds` (0.10-M HOTFIX TEXTURAS-VINCULA): as vinculações material→slot
+// →.gtext appendadas ao FIM da secção de materiais (o bloco GTB1). nullptr
+// OU vazio = o ficheiro fica byte a byte com o pré-hotfix. O payloadSize
+// do header CONTA os bytes do bloco (o leitor valida pelo tamanho).
 bool gmeshV3Skeleton(GMeshV3Meta& meta,
                      std::vector<GMeshV3Block>& entries,
                      const std::vector<std::string>& materials,
-                     GMeshV3Skeleton& sk, std::string& err);
+                     GMeshV3Skeleton& sk, std::string& err,
+                     const std::vector<GMeshMatBind>* binds = nullptr);
 
 // ---- .gtext -----------------------------------------------------------------
 // PASSO 5A: o ESCRITOR grava v2 (payload ganha um u8 `flags` — bits

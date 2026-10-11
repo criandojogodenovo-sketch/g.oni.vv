@@ -454,6 +454,122 @@ void v3WriteMaterial(Writer& w, const std::string& s, u32& cursor) {
 
 } // namespace
 
+// ---- 0.10-M HOTFIX TEXTURAS-VINCULA — o bloco GTB1 --------------------------
+// (a spec vive no GOwnFormats.h — o comentário junto das declarações)
+void gmeshV3AppendBinds(std::vector<u8>& materialsSection, u64 cursorAbs,
+                        const std::vector<GMeshMatBind>& binds) {
+    // só materiais com PELO MENOS um slot não-vazio entram
+    std::vector<const GMeshMatBind*> with;
+    with.reserve(binds.size());
+    for (const GMeshMatBind& b : binds) {
+        if (!b.empty()) {
+            with.push_back(&b);
+        }
+    }
+    if (with.empty()) {
+        return;   // sem vinculações o ficheiro fica byte a byte com o pré-hotfix
+    }
+    // o bloco constrói num TEMP (o CRC cobre as entradas; o payloadSize da
+    // esqueleto precisa do tamanho ANTES da emissão)
+    std::vector<u8> blk;
+    Writer w(blk);
+    w.u8_(static_cast<u8>('G'));
+    w.u8_(static_cast<u8>('T'));
+    w.u8_(static_cast<u8>('B'));
+    w.u8_(static_cast<u8>('1'));
+    w.u32_(static_cast<u32>(with.size()));
+    const size_t crcFrom = blk.size();
+    for (const GMeshMatBind* b : with) {
+        std::vector<u8> ent;
+        Writer ew(ent);
+        ew.u16_(static_cast<u16>(b->materialIndex));
+        u8 count = 0;
+        for (u8 s = 0; s < kBindSlotCount; ++s) {
+            if (!b->tex[s].empty()) {
+                ++count;
+            }
+        }
+        ew.u8_(count);
+        for (u8 s = 0; s < kBindSlotCount; ++s) {
+            if (b->tex[s].empty()) {
+                continue;
+            }
+            ew.u8_(s);
+            ew.u16_(static_cast<u16>(b->tex[s].size() > 65535
+                                         ? 65535
+                                         : b->tex[s].size()));
+            ew.bytes_(reinterpret_cast<const u8*>(b->tex[s].data()),
+                      static_cast<size_t>(b->tex[s].size() > 65535
+                                              ? 65535
+                                              : b->tex[s].size()));
+        }
+        while (ent.size() % 4 != 0) {
+            ew.u8_(0);   // pad da entrada (o leitor salta)
+        }
+        w.bytes_(ent.data(), ent.size());
+    }
+    const u32 crc = gcrc32(blk.data() + crcFrom, blk.size() - crcFrom);
+    w.u32_(crc);
+    (void)cursorAbs;   // informativo (a secção vive no fim; nada depois dela)
+    materialsSection.insert(materialsSection.end(), blk.begin(), blk.end());
+}
+
+bool gmeshV3ReadBinds(const u8* tail, size_t tailLen,
+                      std::vector<GMeshMatBind>& out, std::string& err) {
+    out.clear();
+    if (tailLen < 4) {
+        return true;   // sem cauda (ficheiro pré-hotfix) — NÃO é erro
+    }
+    if (!(tail[0] == 'G' && tail[1] == 'T' && tail[2] == 'B' &&
+          tail[3] == '1')) {
+        return true;   // cauda desconhecida — os leitores de sempre ignoram
+    }
+    Reader r(tail, tailLen);
+    (void)r.u32_();   // magic já validado
+    const u32 count = r.u32_();
+    const size_t crcFrom = r.i;
+    out.reserve(count);
+    for (u32 k = 0; k < count && !r.bad; ++k) {
+        GMeshMatBind b;
+        b.materialIndex = r.u16_();
+        const u8 slots = r.u8_();
+        for (u8 j = 0; j < slots && !r.bad; ++j) {
+            const u8 slot = r.u8_();
+            const std::string path = r.str_();
+            if (!r.bad && slot < kBindSlotCount) {
+                b.tex[slot] = path;
+            }
+        }
+        if (r.bad) {
+            break;
+        }
+        while (r.i % 4 != 0) {
+            (void)r.u8_();   // o pad da entrada
+        }
+        if (b.materialIndex < 0x10000) {
+            out.push_back(std::move(b));
+        }
+    }
+    if (r.bad || r.i + 4 > tailLen) {
+        err = "bloco de vinculação do .gmesh (GTB1) truncado";
+        out.clear();
+        return false;
+    }
+    const u32 stored = [&] {
+        Reader c(tail + r.i, 4);
+        return c.u32_();
+    }();
+    const u32 got = gcrc32(tail + crcFrom, r.i - crcFrom);
+    if (stored != got) {
+        err = "CHECKSUM CORROMPIDO: bloco de vinculação (GTB1) diz CRC 0x" +
+              std::to_string(stored) + ", recalculado 0x" + std::to_string(got) +
+              " — o ficheiro foi danificado";
+        out.clear();
+        return false;
+    }
+    return true;
+}
+
 // ---- o ESCRITOR v3 PARTILHADO (0.10-M PASSO 3) ------------------------------
 // A serialização da ESQUELETO (header+meta+tabela+materiais) usada pelos
 // DOIS escritores: writeGMesh (abaixo) e o conversor streaming
@@ -463,7 +579,8 @@ void v3WriteMaterial(Writer& w, const std::string& s, u32& cursor) {
 bool gmeshV3Skeleton(GMeshV3Meta& meta,
                      std::vector<GMeshV3Block>& entries,
                      const std::vector<std::string>& materials,
-                     GMeshV3Skeleton& sk, std::string& err) {
+                     GMeshV3Skeleton& sk, std::string& err,
+                     const std::vector<GMeshMatBind>* binds) {
     sk = GMeshV3Skeleton{};
     if (entries.empty()) {
         err = "v3 sem blocos — nada a escrever";
@@ -506,6 +623,14 @@ bool gmeshV3Skeleton(GMeshV3Meta& meta,
         cursor += (4 - cursor % 4) % 4;
     }
     meta.blockCount = entries.size();
+    // 0.10-M HOTFIX TEXTURAS-VINCULA: o bloco GTB1 no FIM da secção de
+    // materiais (o cursor é o offset ABSOLUTO após os nomes — o tamanho
+    // dele entra no payloadSize ANTES do header ser escrito)
+    std::vector<u8> bindBytes;
+    if (binds != nullptr && !binds->empty()) {
+        gmeshV3AppendBinds(bindBytes, cursor, *binds);
+        cursor += bindBytes.size();
+    }
     const u64 payloadSize = cursor - kGHeaderBytes;
     // ---- a tabela (com o CRC de cada entrada já preenchido) --------
     {
@@ -527,6 +652,11 @@ bool gmeshV3Skeleton(GMeshV3Meta& meta,
         Writer mw(sk.materials);
         u32 cur = static_cast<u32>(meta.materialTableOffset);
         for (const std::string& s : materials) v3WriteMaterial(mw, s, cur);
+        // 0.10-M HOTFIX TEXTURAS-VINCULA: o GTB1 é appendado DEPOIS dos
+        // nomes (o leitor de sempre para em materialCount — o contrato da
+        // faixa «pode trazer bytes a mais»)
+        sk.materials.insert(sk.materials.end(), bindBytes.begin(),
+                            bindBytes.end());
     }
     return true;
 }
@@ -657,7 +787,8 @@ bool gmeshV3PeekMeta(const u8* bytes, size_t len, GMeshV3Meta& meta,
 
 bool readGMeshV3Meta(const u8* bytes, size_t len, GMeshV3Meta& meta,
                      std::vector<GMeshV3Block>& blocks,
-                     std::vector<std::string>& materials, std::string& err) {
+                     std::vector<std::string>& materials, std::string& err,
+                     std::vector<GMeshMatBind>* binds) {
     v3Reset(meta);
     blocks.clear();
     materials.clear();
@@ -758,11 +889,12 @@ bool readGMeshV3Meta(const u8* bytes, size_t len, GMeshV3Meta& meta,
         return false;
     }
     // os MATERIAIS (nomes — 4-alinhados; o leitor partilhado do PASSO 4;
-    // a faixa EXATA = do offset até ao fim do ficheiro)
+    // a faixa EXATA = do offset até ao fim do ficheiro; o GTB1 da cauda
+    // vem para fora quando o chamador o pede)
     if (!gmeshV3ReadMaterialsOnly(
             bytes + meta.materialTableOffset,
             static_cast<size_t>(len - meta.materialTableOffset),
-            meta, materials, err)) {
+            meta, materials, err, binds)) {
         return false;
     }
     return true;
@@ -855,7 +987,8 @@ bool gmeshV3ReadTableOnly(const u8* tableBytes, size_t tableLen,
 bool gmeshV3ReadMaterialsOnly(const u8* matBytes, size_t matLen,
                               const GMeshV3Meta& meta,
                               std::vector<std::string>& materials,
-                              std::string& err) {
+                              std::string& err,
+                              std::vector<GMeshMatBind>* binds) {
     materials.clear();
     materials.resize(static_cast<size_t>(meta.materialCount));
     Reader mr(matBytes, matLen);
@@ -869,6 +1002,15 @@ bool gmeshV3ReadMaterialsOnly(const u8* matBytes, size_t matLen,
         }
         if (mr.bad) {
             err = "tabela de materiais do .gmesh v3 truncada";
+            return false;
+        }
+    }
+    // 0.10-M HOTFIX TEXTURAS-VINCULA: a CAUDA (os bytes depois dos nomes)
+    // pode trazer o bloco GTB1 — parse quando o chamador o pede. A cauda
+    // é 4-alinhada (cada nome termina alinhado e o materialTableOffset
+    // também é)
+    if (binds != nullptr && mr.i < matLen) {
+        if (!gmeshV3ReadBinds(matBytes + mr.i, matLen - mr.i, *binds, err)) {
             return false;
         }
     }
@@ -1118,7 +1260,8 @@ void v3FillAabb(GMeshV3BlockIn& b) {
 
 } // namespace
 
-bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err) {
+bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err,
+                const std::vector<GMeshMatBind>* binds) {
     out.clear();
     if (m.vertices.empty() || m.indices.empty()) {
         err = "geometria vazia — nada a converter";
@@ -1241,7 +1384,7 @@ bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err) {
     // materiais — a MESMA rotina que o conversor streaming usa: zero
     // drift de formato entre os dois escritores)
     GMeshV3Skeleton sk;
-    if (!gmeshV3Skeleton(meta, entries, mats, sk, err)) {
+    if (!gmeshV3Skeleton(meta, entries, mats, sk, err, binds)) {
         return false;
     }
     // ---- a emissão (header → metadados → blocos 16-alinhados → tabela

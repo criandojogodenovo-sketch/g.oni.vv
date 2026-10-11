@@ -73,7 +73,7 @@ constexpr u64 kRunBenchId    = 5831;  // 0.9.6 (G6): benchmarks (R-017)
 constexpr u64 kCopyBenchId   = 5832;  // 0.9.6 (G6): copiar o bloco de 9 linhas
 constexpr u64 kLayoutExpId   = 5833;  // 0.9.6.5 (GRUPO B): exportar layout
 constexpr u64 kLayoutAudId   = 5834;  // 0.9.6.5 (GRUPO B): auditoria do ecrã
-constexpr u64 kExpandNodesId = 5835;  // 0.10-M (EXT): toggle «expandir nós»
+constexpr u64 kExpandNodesId = 5835;  // 0.10-M (EXT): toggle «expandir em sub-TICs»
 constexpr u64 kScrollId     = 49;    // região de scroll da página
 
 // ---- bits das secções (colapsáveis — PERSISTE via layout.json) --------------

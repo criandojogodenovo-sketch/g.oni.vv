@@ -105,6 +105,10 @@ constexpr u64 kInspectorVelX       = 2100;   // slider velx do BodyComp
 constexpr u64 kInspectorAddTc      = 3001;   // botão "add TouchControls"
 constexpr u64 kInspectorMeshSel    = 5001;   // F5-E: linha "mesh: …"
 constexpr u64 kInspectorTexSel     = 5002;   // F5-E: linha "tex: …"
+// 0.10-M HOTFIX TEXTURAS-VINCULA: as 5 linhas de SLOT na secção Material
+// (payload = kInspectorTexSlot0 + slot; o pick do browser escreve O SLOT
+// escolhido — os irmãos ficam intactos, o pin da auditoria de estado)
+constexpr u64 kInspectorTexSlot0   = 5011;   // +0 baseColor … +4 occlusion
 constexpr u64 kInspectorVis        = 5200;   // 0.7.0: "visivel: sim/nao"
 constexpr u64 kInspectorColBase    = 5300;   // 0.7.0: sliders R/G/B (+i)
 constexpr u64 kInspectorColHex     = 5303;   // 0.8.6: "hex: #RRGGBB" do tint
@@ -253,6 +257,8 @@ struct InspRow {
         MeshLabel,   // F5-E: "mesh: …" só leitura (sem catálogo)
         TexButton,   // F5-E: "tex: …" (selecionável)
         TexLabel,    // F5-E: "tex: …" só leitura
+        TexSlotRow,  // 0.10-M HOTFIX: o slot do material (payload = slot
+                     // 0..4 — kInspectorTexSlot0+i; o pick escreve O slot)
         Label,       // linha de texto (input/tc)
         TwoCol,      // FASE 9 (G2-8): duas colunas nome/valor (Física) —
                      // payload 0=tipo, 1=forma, 2=no chão (BodyComp VIVO)
@@ -489,6 +495,13 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
              kInspBitMaterial);
         if (!(collapsed & kInspBitMaterial)) {
             push(InspRow::Kind::MaterialThumbs, inspThumbsH(), 0);
+            // 0.10-M HOTFIX TEXTURAS-VINCULA: os 5 SLOTS visíveis (o nome
+            // do .gtext em cada; o tap arma o slot e abre o browser — o
+            // pick escreve O SLOT selecionado sem tocar nos irmãos)
+            for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
+                push(InspRow::Kind::TexSlotRow, btnH,
+                     kInspectorTexSlot0 + s);
+            }
             for (u32 i = 0; i < 3; ++i) {
                 push(InspRow::Kind::ColorSlider, sldH, kInspectorColBase + i);
             }

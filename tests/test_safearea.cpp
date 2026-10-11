@@ -131,7 +131,9 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     // transform 64) — o plano do Player completo fica em 1046
     // PASSO 2 (0.9.6.15): a linha de miniaturas reserva a legenda
     // inteira (+8dp) — 1046 → 1054
-    EXPECT(nearEqF(contentH, 1054.0f));
+    // 0.10-M HOTFIX TEXTURAS-VINCULA: a secção Material ganhou as 5
+    // linhas de SLOT (36 dp cada) — 1054 → 1234
+    EXPECT(nearEqF(contentH, 1234.0f));
 
     // DEPOIS: painel dentro do contentRect [0,24,·,628] (status 24 + nav 92)
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);

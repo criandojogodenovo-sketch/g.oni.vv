@@ -115,6 +115,13 @@ struct EditorState {
     // estado (não numa global do main) para ser afervável na suíte.
     bool   pickBlockedHint = false;
 
+    // 0.10-M HOTFIX TEXTURAS-VINCULA — O SLOT ARMADO da secção Material
+    // (0..4 = kBind* do GOwnFormats.h; 0 = baseColor, o default). O tap
+    // numa linha de slot arma ISTO e abre o browser; o pick escreve O
+    // SLOT selecionado (a causa (d) do bug morre — nunca mais um slot
+    // único global). Afervel na suíte (o pin da auditoria de estado).
+    u8     inspTexSlot = 0;
+
     // FASE 9 (G2-7 — long-press no nome truncado da hierarquia): o contador
     // de frames do dedo PARADO na linha + o tip pendente (o main converte
     // em toast). ~30 frames = 0.5s @60fps.
@@ -615,6 +622,10 @@ struct AssetResolvers {
     Mesh* (*mesh)(const std::string& ref) = nullptr;   // GpuAssets::mesh
     const Texture* (*texture)(const std::string& relPath, std::string* warn) = nullptr;
     std::string (*meshTextureFor)(const std::string& ref) = nullptr;  // glTF embutida
+    // 0.10-M HOTFIX TEXTURAS-VINCULA: o bind baseColor do GTB1 do .gmesh
+    // (o auto do apply — o dono escolhe o mesh e a textura VEM; o pin
+    // «zero passos manuais no caso comum»). Null = sem auto-bind.
+    std::string (*baseColorBind)(const std::string& ref, u32 materialIndex) = nullptr;
     Mesh*       cubeMesh = nullptr;      // cubo procedural do main
     LitMaterial* material = nullptr;    // lit do renderer
     // 0.8.10: o resolver `prim` MORREU com o cache — o pick ARMA o pedido
@@ -647,8 +658,13 @@ struct AssetPickOutcome {
 // resolver + log "editor: primitiva <nome> aplicada"; escolher cube/file
 // LIMPA o prim (uma fonte de mesh de cada vez); escolher none (kind 4)
 // desliga o prim (mesh null — "prim: -" no Inspector).
+// 0.10-M HOTFIX TEXTURAS-VINCULA: `texSlot` = o slot ARMADO na secção
+// Material (0..4; 0 = baseColor) — o pick de textura escreve O SLOT
+// escolhido (os irmãos intactos; o pin da auditoria de estado). O
+// default 0 mantém o contrato dos chamadores antigos byte a byte.
 AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int pick,
-                                const AssetCatalog& catalog, const AssetResolvers& res);
+                                const AssetCatalog& catalog, const AssetResolvers& res,
+                                u32 texSlot = 0);
 
 // ---- 0.7.4: DISPATCH da escolha do seletor de TEXTURA DE ELEMENTO (menuKind 3)
 //

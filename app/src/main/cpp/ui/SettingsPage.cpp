@@ -282,7 +282,7 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
         // mobile) ou expandido (um TIC por nó com mesh, peças editáveis;
         // a conversão de cada modo escreve ficheiros DIFERENTES, por isso
         // a escolha vive AQUI e o job captura-a no lançamento)
-        if (toggleRow(ui, kExpandNodesId, ox, y, aw, "expandir nós",
+        if (toggleRow(ui, kExpandNodesId, ox, y, aw, "expandir em sub-TICs",
                       ctx.expandNodes)) {
             res = kToggleExpandNodes;
         }

@@ -461,7 +461,7 @@ static void reconvertAllAssets() {
         convert::Output out;
         convert::Stats stats;
         std::string err;
-        // 0.10-M (EXT): a reconversão honra o setting «expandir nós» —
+        // 0.10-M (EXT): a reconversão honra o setting «expandir em sub-TICs» —
         // quem importou fundido re-converte fundido; quem mudou o
         // setting, re-converte no modo novo (o log do import diz qual)
         if (convert::reconvertFile("source/" + rel, *g_storage, nullptr, out,
@@ -2825,7 +2825,7 @@ void importJobFinish() {
                    g_importJob.stats.siblings);
     }
     // ---- 0.10-M (EXT) · A SUB-ÁRVORE ENTRA NA CENA -----------------------
-    // O import EXPANDIDO (setting «expandir nós»): um TIC por nó com mesh
+    // O import EXPANDIDO (setting «expandir em sub-TICs»): um TIC por nó com mesh
     // — nomes do glTF preservados, a transformação do nó no Transform3D, o
     // MeshRenderer com a ref da PEÇA. As peças abrem POR BLOCOS
     // (kGmeshV3FlagPiece → blockHull): frustum por bloco = CULLING POR
@@ -2907,8 +2907,16 @@ void importJobFinish() {
                 }
             }
             if (s != 1.0f) {
-                for (const Handle h : created) {
-                    Tic* owner = g_scene.get(h);
+                for (size_t i = 0; i < created.size() &&
+                                 i < out.expandNodes.size();
+                     ++i) {
+                    // 0.10-M HOTFIX (f): a escala SÓ nas RAÍZES — os
+                    // filhos têm TRS LOCAL e seguem o pai (escalar todos
+                    // compunha s² na profundidade)
+                    if (out.expandNodes[i].parentRec >= 0) {
+                        continue;
+                    }
+                    Tic* owner = g_scene.get(created[i]);
                     Transform3D* tr =
                         owner ? owner->getComponent<Transform3D>() : nullptr;
                     if (tr) {
@@ -2917,6 +2925,52 @@ void importJobFinish() {
                         tr->scale = Vec3{tr->scale.x * s, tr->scale.y * s,
                                          tr->scale.z * s};
                         tr->updateWorld();
+                    }
+                }
+                // os filhos seguem o pai: recomps os mundos pela cadeia
+                gltfExpandComposeWorlds(out.expandNodes, created, g_scene);
+            }
+            // 0.10-M HOTFIX TEXTURAS-VINCULA — O AUTO-BIND (o pin: render
+            // texturado SEM toque manual): a baseColor do GTB1 da peça.
+            // Peça com 1 material → texPath+texture do TIC (o caminho
+            // serializável de sempre); multi-material → SEM TIC-field: o
+            // draw POR BLOCO usa a do material de cada bloco (o pin: 4
+            // materiais = 4 bindings — nunca um material global). Falha
+            // = warn honesto + segue (nunca mata o import).
+            for (size_t i = 0; i < created.size() &&
+                                 i < out.expandNodes.size();
+                 ++i) {
+                Tic* owner = g_scene.get(created[i]);
+                MeshRenderer* mr =
+                    owner ? owner->getComponent<MeshRenderer>() : nullptr;
+                if (!mr || !mr->texPath.empty()) {
+                    continue;   // o manual do dono NUNCA é sobrescrito
+                }
+                const BlockMesh* bm = g_gpu.blockMeshIfOpen(mr->meshPath);
+                if (bm == nullptr || bm->binds().empty()) {
+                    continue;
+                }
+                std::string rel;
+                for (const GMeshMatBind& b : bm->binds()) {
+                    if (b.materialIndex == 0) {
+                        rel = b.tex[kBindBaseColor];
+                        break;
+                    }
+                }
+                if (rel.empty()) {
+                    continue;
+                }
+                if (bm->materials().size() <= 1) {
+                    if (const Texture* t = g_gpu.texture(rel)) {
+                        mr->texPath = rel;
+                        mr->texture = t;
+                        elog::info("textura: vinculada '%s' slot baseColor "
+                                   "-> %s (auto do import)",
+                                   owner->name.c_str(), rel.c_str());
+                    } else {
+                        elog::warn("textura: '%s' slot baseColor (%s) SEM "
+                                   "ficheiro — o TIC fica sem (reimporta)",
+                                   owner->name.c_str(), rel.c_str());
                     }
                 }
             }
@@ -2928,7 +2982,8 @@ void importJobFinish() {
                       static_cast<unsigned>(out.expandNodes.size()));
         showToast(emsg);
         elog::info("import: EXPANDIDO — %u TIC(s) criados (um por nó com "
-                   "mesh; nomes do glTF; culling por TIC pelos blocos)",
+                   "mesh; nomes do glTF; sub-árvore real — sub-TICs com TRS "
+                   "local; culling por TIC pelos blocos)",
                    static_cast<unsigned>(out.expandNodes.size()));
         return;   // SEM diálogo «aplicar ao TIC?» — os TICs são o resultado
     }
@@ -3891,6 +3946,11 @@ editor::AssetResolvers makeAssetResolvers() {
     res.meshTextureFor = [](const std::string& ref) -> std::string {
         return g_resources.meshTextureFor(ref);   // textura embutida glTF/GLB
     };
+    // 0.10-M HOTFIX TEXTURAS-VINCULA: o bind baseColor do GTB1 do .gmesh
+    res.baseColorBind = [](const std::string& ref,
+                           u32 materialIndex) -> std::string {
+        return g_gpu.baseColorBindOf(ref, materialIndex);
+    };
     res.cubeMesh = &g_cubeMesh;
     res.material = g_renderer.litMaterial();
     // 0.8.9: AABB do mesh COMO DADOS (o applyAssetPick é puro — nunca
@@ -3980,7 +4040,7 @@ void applyImportedAssetToSelectedTic() {
                 editor::snapTic(g_scene, g_editor.selected);
             const editor::AssetPickOutcome out = editor::applyAssetPick(
                 g_scene, g_editor.selected, menuKind, pickOf, g_catalog,
-                makeAssetResolvers());
+                makeAssetResolvers(), g_editor.inspTexSlot);
             applied = out.applied;
             if (out.applied) {
                 pushUndo(uBefore, g_scene.get(g_editor.selected));
@@ -5919,9 +5979,9 @@ void frame() {
                 g_expandNodes = !g_expandNodes;
                 saveProjectSettings();
                 showToast(g_expandNodes
-                              ? "import: expandir nós (peças)"
+                              ? "import: expandir em sub-TICs (peças)"
                               : "import: fundido (default)");
-                elog::info("import: modo expandir nós = %s (o próximo "
+                elog::info("import: modo expandir em sub-TICs = %s (o próximo "
                            "import e o reconverter usam ISTO — o fundido é "
                            "o default de performance mobile)",
                            g_expandNodes ? "on" : "off");
@@ -6354,7 +6414,8 @@ void frame() {
                     editor::snapTic(g_scene, g_editor.selected);
                 const editor::AssetPickOutcome out =
                     editor::applyAssetPick(g_scene, g_editor.selected, menuKind,
-                                           pick, g_catalog, makeAssetResolvers());
+                                           pick, g_catalog, makeAssetResolvers(),
+                                           g_editor.inspTexSlot);
                 if (out.applied) {
                     pushUndo(uBefore, g_scene.get(g_editor.selected));
                 }
@@ -7107,7 +7168,7 @@ void frame() {
                     editor::snapTic(g_scene, g_editor.selected);
                 const editor::AssetPickOutcome out = editor::applyAssetPick(
                     g_scene, g_editor.selected, ba.filePickKind, pick,
-                    g_catalog, makeAssetResolvers());
+                    g_catalog, makeAssetResolvers(), g_editor.inspTexSlot);
                 if (out.applied) {
                     pushUndo(uBefore, g_scene.get(g_editor.selected));
                 }

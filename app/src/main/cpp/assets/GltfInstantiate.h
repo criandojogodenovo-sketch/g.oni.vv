@@ -56,9 +56,20 @@ Handle gltfInstantiate(Scene& scene, const GltfModel& model,
 // criados NA ORDEM dos registros (vazio se `nodes` vazio ou sem peça
 // válida — o pino do dono conta ISTO: o city expandido = 72). O TIC SEM
 // bind (nullptr) entra na mesma com o meshPath — o reload re-liga.
+// 0.10-M HOTFIX (e/f): a SUB-ÁRVORE é REAL — parentRec >= 0 pendura o TIC
+// no ancestral (TRS LOCAL nos campos) e os mundos compõem-se parent∘local
+// AQUI e no TransformSystem (a dívida «editor polish» paga). parentRec =
+// -1 mantém o flat (TRS MUNDO — o comportamento byte a byte de sempre).
 std::vector<Handle> gltfExpandInstantiate(
         Scene& scene, const std::vector<convert::Output::NodeOut>& nodes,
         const std::vector<std::string>& refs,
         const GltfInstantiateCtx& ctx);
+
+// 0.10-M HOTFIX (f) — recomps os mundos dos TICs criados pelo expand
+// (parentWorld ∘ TRS local pela cadeia dos parentRec; raiz = TRS). O fit
+// do import chama DEPOIS de escalar as raízes (os filhos seguem o pai).
+void gltfExpandComposeWorlds(
+        const std::vector<convert::Output::NodeOut>& nodes,
+        const std::vector<Handle>& created, Scene& scene);
 
 } // namespace vv

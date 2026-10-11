@@ -73,6 +73,9 @@ ANCHORS = [
     ("teto PNG", r"kMaxImageBytes\s*=\s*64ull \* 1024 \* 1024",
      "assets/AssetConverter.h"),
     ("gate 256 px", r"w >= 256u && h >= 256u", "assets/TextureCompressor.h"),
+    # 0.10-M HOTFIX TEXTURAS-VINCULA: o bloco GTB1 (os 5 slots por material)
+    ("bind slots", r"kBindSlotCount\s*=\s*5", "assets/GOwnFormats.h"),
+    ("bind append", r"void gmeshV3AppendBinds\(", "assets/GOwnFormats.cpp"),
     ("gtc kDir", r"kDir", "assets/TextureCache.h"),
     # 0.10-M (PASSO 4): os orçamentos DECLARADOS da cache de blocos (o
     # MESMO 256 MB da casa — agora limitado por construção)

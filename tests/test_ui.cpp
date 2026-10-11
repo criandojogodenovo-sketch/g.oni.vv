@@ -197,7 +197,7 @@ TEST(ui_inspector_sem_sobreposicao_glifos_c33) {
     const Tic* tic = e.scene.get(e.selected);
     const TextMetrics tm = e.ui.textMetrics();
     const InspProfile prof = inspectorProfile(*tic);
-    InspRow plan[32];
+    InspRow plan[64];   // 0.10-M HOTFIX: o plano cresceu (as 5 linhas de slot)
     const u32 n = inspectorPlan(prof, tm, true, 0u, plan);
     for (u32 i = 1; i < n; ++i) {
         EXPECT(plan[i].y > plan[i - 1].y);   // sequencial, sem reinício
@@ -255,7 +255,7 @@ TEST(ui_scroll_revela_ultimo_campo) {
     EXPECT(off > 0.0f);
 
     // a ÚLTIMA linha do plano fica INTEIRA dentro da região com o offset
-    InspRow plan[32];
+    InspRow plan[64];   // 0.10-M HOTFIX: o plano cresceu (as 5 linhas de slot)
     const u32 n = inspectorPlan(prof, tm, true, 0u, plan);
     const InspRow& last = plan[n - 1];
     const f32 lastTop = contentTop + last.y - off;
@@ -292,7 +292,7 @@ TEST(ui_slider_captura_dentro_do_scroll) {
     // linha "cor R" — derivada do PLANO com as métricas reais (não diverge
     // do desenho)
     const TextMetrics tm = e.ui.textMetrics();
-    InspRow plan[32];
+    InspRow plan[64];   // 0.10-M HOTFIX: o plano cresceu (as 5 linhas de slot)
     const u32 n = inspectorPlan(inspectorProfile(*tic), tm, true, 0u, plan);
     f32 colY = -1.0f;
     for (u32 i = 0; i < n; ++i) {
@@ -348,7 +348,7 @@ TEST(ui_tap_redespachado_botoes_do_plano) {
     const Tic* tic = e.scene.get(e.selected);
     const TextMetrics tm = e.ui.textMetrics();
     const InspProfile prof = inspectorProfile(*tic);
-    InspRow plan[32];
+    InspRow plan[64];   // 0.10-M HOTFIX: o plano cresceu (as 5 linhas de slot)
     const u32 n = inspectorPlan(prof, tm, true, 0u, plan);
     const UiRect panel = safe::inspectorPanelRect(kSW, kSH, safe::Insets{});
     const f32 contentTop = panel.y + kHeaderH + 4.0f;

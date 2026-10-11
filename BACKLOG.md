@@ -133,3 +133,19 @@
   MESMO job core-tests do CI; a escotilha (mover o TEST para um job
   próprio) está documentada no relatório §7 — mover é só workflow, sem
   tocar no teste. Nada a fazer hoje.
+
+## 0.10.7 HOTFIX — TEXTURAS-VINCULA (+ sub-TICs reais) — FEITO
+
+- **FEITO 0.10.7-hotfix**: o import liga as texturas ao mesh (o bloco
+  GTB1 no fim da secção de materiais do .gmesh — material→5 slots→.gtext;
+  retro-compat total: os leitores de sempre param nos nomes), o draw por
+  blocos usa a textura DO SEU material, o Inspector ganha os 5 slots
+  (o pick escreve O SLOT — irmãos intactos), «expandir em sub-TICs» (o
+  vocabulário TIC) e a sub-árvore REAL (parentRec + TRS local + o
+  TransformSystem a compor pais — a dívida «editor polish» do F3 paga).
+  Mutações M-TB1/M-TB3 vermelho→verde · test_core 932/0 · c33 797/797.
+  Relatório: docs/RELATORIO-0.10-M-HOTFIX-TEXTURAS-VINCULA.md.
+- **POR FAZER (o dono agenda)**: os samplers dos slots 1-4 no shader lit
+  (os slots ficam vinculados; o GL só carrega o baseColor de hoje —
+  NÃO VERIFICADO no relatório §6); a migração dos .gmesh antigos é
+  reimportar/reconverter (o GTB1 nasce no conversor).

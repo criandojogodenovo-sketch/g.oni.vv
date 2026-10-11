@@ -112,7 +112,8 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
                      void* user = nullptr,
                      const V3RangeSource* ranges = nullptr,
                      bool binDroppable = true,
-                     u32 metaFlags = 0);
+                     u32 metaFlags = 0,
+                     const convert::MatTexMap* matTex = nullptr);
 
 // ---- 0.10-M (EXT) · IMPORT DE NÓS COMO SUB-ÁRVORE --------------------------
 // O DRIVER do import EXPANDIDO: em vez de UM .gmesh fundido, UMA PEÇA por
@@ -133,6 +134,15 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
 //     editável por TRS);
 //   • kGmeshV3FlagPiece no meta.flags de TODAS as peças (o runtime abre-
 //     as POR BLOCOS mesmo pequenas — o culling por TIC do import).
+// 0.10-M HOTFIX (e/f — a spec do dono): a SUB-ÁRVORE é REAL — o NodeOut
+// traz o TRS LOCAL da cadeia (do ancestral registado mais próximo até ao
+// nó) + `parentRec` (o índice do registo pai) quando a composição é TRS
+// exata; o TransformSystem compõe parent∘local (a dívida do «editor
+// polish» paga). Nós com shear continuam FLAT (parentRec=-1, TRS mundo /
+// baked) — o log DIZ. `matTex` (HOTFIX TEXTURAS-VINCULA): o mapa
+// material→slots→.gtext (construído pelo convertGltfCommon com o stem do
+// MODELO — os .gtext vivem no namespace dele); o que existir entra no
+// bloco GTB1 de cada peça (e do fundido).
 // O DEFAULT FUNDIDO não passa por AQUI (convertGltfCommon chama o
 // convertGltfToV3 de sempre — byte a byte idêntico ao caminho vigente).
 bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
@@ -143,6 +153,7 @@ bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
                            bool (*onProgress)(void*, u64, u64) = nullptr,
                            void* user = nullptr,
                            const V3RangeSource* ranges = nullptr,
-                           bool binDroppable = true);
+                           bool binDroppable = true,
+                           const convert::MatTexMap* matTex = nullptr);
 
 } // namespace vv

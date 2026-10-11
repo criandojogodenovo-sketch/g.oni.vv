@@ -110,6 +110,20 @@ void appendComponentJson(Json& arr, const MeshRenderer* mr) {
     if (!mr->texPath.empty()) {
         c.addMember("texPath", Json::makeString(mr->texPath));
     }
+    // 0.10-M HOTFIX TEXTURAS-VINCULA: os SLOTS 1-4 do material (o 0 é o
+    // texPath; ausente = vazio — os ficheiros antigos abrem sem os campos)
+    if (!mr->texNormal.empty()) {
+        c.addMember("texNormal", Json::makeString(mr->texNormal));
+    }
+    if (!mr->texMetalRough.empty()) {
+        c.addMember("texMetalRough", Json::makeString(mr->texMetalRough));
+    }
+    if (!mr->texEmissive.empty()) {
+        c.addMember("texEmissive", Json::makeString(mr->texEmissive));
+    }
+    if (!mr->texOcclusion.empty()) {
+        c.addMember("texOcclusion", Json::makeString(mr->texOcclusion));
+    }
     // 0.7.0 — cor por TIC: tint R/G/B só é gravado quando NÃO é o branco
     // default (ficheiros 0.6.x abrem sem o campo → branco)
     if (mr->tint[0] != 1.0f || mr->tint[1] != 1.0f || mr->tint[2] != 1.0f) {
@@ -471,6 +485,16 @@ void fillMeshRenderer(MeshRenderer* mr, const Json& comp, const LoadCtx& ctx) {
     } else {
         mr->texPath.clear();
         mr->texture = nullptr;
+    }
+    // 0.10-M HOTFIX TEXTURAS-VINCULA: os slots 1-4 (ausentes = vazios)
+    struct SlotKey { const char* key; u32 slot; };
+    for (const SlotKey& sk :
+         {SlotKey{"texNormal", 1}, SlotKey{"texMetalRough", 2},
+          SlotKey{"texEmissive", 3}, SlotKey{"texOcclusion", 4}}) {
+        if (const Json* j = comp.find(sk.key);
+            j && j->type == Json::Type::String) {
+            mr->texSlotRef(sk.slot) = j->string;   // vazio limpa — honesto
+        }
     }
     // 0.7.0 — cor por TIC: "tint":[r,g,b] opcional (ausente = branco)
     mr->tint[0] = mr->tint[1] = mr->tint[2] = 1.0f;

@@ -39,6 +39,12 @@ struct TicSnap {
     bool     hasMr = false;
     char     meshPath[96] = "";
     char     texPath[96] = "";
+    // 0.10-M HOTFIX TEXTURAS-VINCULA: os slots 1-4 (o 0 é o texPath) — o
+    // undo restaura O SLOT que o pick escreveu (irmãos intactos)
+    char     texNormal[96] = "";
+    char     texMetalRough[96] = "";
+    char     texEmissive[96] = "";
+    char     texOcclusion[96] = "";
     f32      tint[3] = {1.0f, 1.0f, 1.0f};
     bool     primOn = false;
     PrimKind primKind = PrimKind::Box;

@@ -629,7 +629,7 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
                      V3StreamResult& result, std::string& err,
                      bool (*onProgress)(void*, u64, u64), void* user,
                      const V3RangeSource* ranges, bool binDroppable,
-                     u32 metaFlags) {
+                     u32 metaFlags, const convert::MatTexMap* matTex) {
     result = V3StreamResult{};
     // 0.10-M (SAF-STREAM) — UMA fonte chega: o mmap (caminho OU fd — o
     // ponteiro `bin`) OU os RANGES (o degradado: o fd recusou o mapa /
@@ -1124,8 +1124,45 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
     meta.materialCount = matNames.size();
     meta.aabbMin = gmn;
     meta.aabbMax = gmx;
+    // 0.10-M HOTFIX TEXTURAS-VINCULA: as vinculações material→slot→.gtext
+    // do mapa do convertGltfCommon (o índice material→textura→imagem que
+    // morria no parse — a causa (c) do bug do dono). Entram no bloco GTB1
+    // do ficheiro (o leitor de sempre para nos nomes — retro-compat).
+    std::vector<GMeshMatBind> binds;
+    if (matTex != nullptr && !matTex->empty()) {
+        binds.resize(matNames.size());
+        u32 boundSlots = 0;
+        for (size_t k = 0; k < matNames.size(); ++k) {
+            const auto it = matTex->find(matNames[k]);
+            if (it == matTex->end()) {
+                continue;
+            }
+            binds[k].materialIndex = static_cast<u32>(k);
+            for (u8 s = 0; s < kBindSlotCount; ++s) {
+                binds[k].tex[s] = it->second[s];
+                if (!it->second[s].empty()) {
+                    ++boundSlots;
+                }
+            }
+        }
+        if (boundSlots > 0) {
+            for (size_t k = 0; k < matNames.size(); ++k) {
+                for (u8 s = 0; s < kBindSlotCount; ++s) {
+                    if (!binds[k].tex[s].empty()) {
+                        elog::info(
+                            "textura: vinculada material '%s' slot %s -> %s",
+                            matNames[k].c_str(), kBindSlotName(s),
+                            binds[k].tex[s].c_str());   // O PIN: 1 linha/slot
+                    }
+                }
+            }
+        } else {
+            binds.clear();
+        }
+    }
     GMeshV3Skeleton sk;
-    if (!gmeshV3Skeleton(meta, entries, matNames, sk, err)) {
+    if (!gmeshV3Skeleton(meta, entries, matNames, sk, err,
+                         binds.empty() ? nullptr : &binds)) {
         return false;
     }
     // o LIMITE final no log (o MESMO marcador do caminho de sempre — as
@@ -1532,7 +1569,8 @@ bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
                           V3StreamResult& result, std::string& err,
                           bool (*onProgress)(void*, u64, u64), void* user,
                           const V3RangeSource* ranges,
-                          bool binDroppable) {
+                          bool binDroppable,
+                          const convert::MatTexMap* matTex) {
     result = V3StreamResult{};
     // o modelo tem NÓS para expandir? (primRefs com node=-1 = o glTF
     // atípico sem nós — o expand DEGENERA no fundido, com o log honesto;
@@ -1545,11 +1583,11 @@ bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
         }
     }
     if (!anyNode) {
-        elog::warn("asset: expandir nós — o modelo NÃO tem nós (glTF "
+        elog::warn("asset: expandir em sub-TICs — o modelo NÃO tem nós (glTF "
                    "atípico): fica FUNDIDO (o caminho de sempre)");
         return convertGltfToV3(model, doc, bin, binLen, fileBytes, stem, st,
                                out, stats, result, err, onProgress, user,
-                               ranges, binDroppable, 0);
+                               ranges, binDroppable, 0, matTex);
     }
     // (1) agrupa as primitivas por NÓ (a ordem do array de nós — a MESMA
     // ordem em que o parse as produziu; determinístico)
@@ -1587,7 +1625,8 @@ bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
         Vec3 s{1.0f, 1.0f, 1.0f};
         const bool trsExact = mat4ToTRS(world, t, q, s);
         if (!trsExact) {
-            elog::warn("asset: expandir nós — o nó %zu ('%s') tem SHEAR no "
+            elog::warn("asset: expandir em sub-TICs — o nó %zu ('%s') tem "
+                       "SHEAR no "
                        "mundo (escala não-uniforme composta com rotação): "
                        "a transformação vai BAKED na geometria e o TIC fica "
                        "com TRS identidade (o desenho é exato; a edição por "
@@ -1621,7 +1660,8 @@ bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
         V3StreamResult r1;
         if (!convertGltfToV3(piece, doc, bin, binLen, fileBytes, pstem, st,
                              out, stats, r1, err, &pieceProgress, &prog,
-                             ranges, binDroppable, kGmeshV3FlagPiece)) {
+                             ranges, binDroppable, kGmeshV3FlagPiece,
+                             matTex)) {
             return false;   // err/cancelado já preenchidos pela chamada
         }
         prog.doneBase += r1.tris;
@@ -1650,8 +1690,104 @@ bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
         out.expandNodes.push_back(std::move(no));
         ++pieces;
     }
+    // ---- 0.10-M HOTFIX (e/f) — A SUB-ÁRVORE REAL (o 2.º passe) ----------
+    // O ancestral REGISTADO mais próximo (os nós vazios não viram TICs —
+    // o pin do 5B mantém-se): a peça pende dele com o TRS LOCAL da cadeia
+    // quando a composição é TRS exata; senão fica FLAT (o TRS MUNDO no
+    // registo — o desenho de sempre). Nada de inversos: a cadeia local
+    // compõe-se PARA A FRENTE, de cima para baixo (a MESMA ordem de
+    // multiplicações do worldChainOf — o composto é o bit do mundo).
+    {
+        std::vector<i32> recOfNode(model.nodes.size(), -1);
+        for (size_t i = 0; i < out.expandNodes.size(); ++i) {
+            const i32 nIdx = out.expandNodes[i].node;
+            if (nIdx >= 0 && nIdx < static_cast<i32>(recOfNode.size())) {
+                recOfNode[static_cast<size_t>(nIdx)] = static_cast<i32>(i);
+            }
+        }
+        u32 nested = 0;
+        for (size_t i = 0; i < out.expandNodes.size(); ++i) {
+            convert::Output::NodeOut& no = out.expandNodes[i];
+            if (no.node < 0 ||
+                no.node >= static_cast<i32>(model.nodes.size())) {
+                continue;
+            }
+            // o ancestral registado (sobe pelos nós vazios — os TICs
+            // deles nunca existiram)
+            i32 ancRec = -1;
+            {
+                i32 p = model.nodes[static_cast<size_t>(no.node)].parent;
+                while (p >= 0 && p < static_cast<i32>(model.nodes.size())) {
+                    if (recOfNode[static_cast<size_t>(p)] >= 0) {
+                        ancRec = recOfNode[static_cast<size_t>(p)];
+                        break;
+                    }
+                    p = model.nodes[static_cast<size_t>(p)].parent;
+                }
+            }
+            if (ancRec < 0) {
+                continue;   // raiz — mantém o TRS MUNDO (o flat de sempre)
+            }
+            const i32 ancNode =
+                out.expandNodes[static_cast<size_t>(ancRec)].node;
+            // o MUNDO do registo tem de ser TRS exato (a geometria CRUA —
+            // baked sob um pai transformado era TRANSFORMAR DUAS VEZES)
+            Mat4 world = Mat4::identity();
+            Mat4 worldRot = Mat4::identity();
+            worldChainOf(model, no.node, world, worldRot);
+            Vec3 wt{};
+            Quat wq = Quat::identity();
+            Vec3 ws{1.0f, 1.0f, 1.0f};
+            if (!mat4ToTRS(world, wt, wq, ws)) {
+                continue;   // o bake de sempre (identity + geometria)
+            }
+            // a cadeia LOCAL entre o ancestral (exclusivo) e o nó
+            // (inclusive), de cima para baixo
+            Mat4 local = Mat4::identity();
+            {
+                std::vector<u32> chain;
+                i32 k = no.node;
+                while (k >= 0 && k != ancNode) {
+                    chain.push_back(static_cast<u32>(k));
+                    k = model.nodes[static_cast<size_t>(k)].parent;
+                }
+                if (k != ancNode) {
+                    continue;   // defesa: o ancestral não é ascendente
+                }
+                for (size_t c = chain.size(); c-- > 0;) {
+                    const GltfNode& cn = model.nodes[chain[c]];
+                    local = Mat4::mul(
+                        local,
+                        Mat4::mul(Mat4::translation(cn.translation.x,
+                                                    cn.translation.y,
+                                                    cn.translation.z),
+                                  Mat4::mul(cn.rotation.toMat4(),
+                                            Mat4::scale(cn.scale.x,
+                                                        cn.scale.y,
+                                                        cn.scale.z))));
+                }
+            }
+            Vec3 lt{};
+            Quat lq = Quat::identity();
+            Vec3 ls{1.0f, 1.0f, 1.0f};
+            if (!mat4ToTRS(local, lt, lq, ls)) {
+                continue;   // shear NA CADEIA LOCAL — o filho fica FLAT
+            }
+            no.parentRec = ancRec;
+            no.translation = lt;
+            no.rotation = lq;
+            no.scale = ls;
+            ++nested;
+        }
+        if (nested > 0) {
+            elog::info("asset: sub-árvore real — %u peça(s) pende(m) de TIC "
+                       "pai (TRS local; o resto fica flat no TRS mundo)",
+                       nested);
+        }
+    }
     if (pieces == 0) {
-        err = "expandir nós: nenhuma peça saiu do corte (as primitivas "
+        err = "expandir em sub-TICs: nenhuma peça saiu do corte (as "
+              "primitivas "
               "caíram todas — as causas estão no log)";
         return false;
     }
@@ -1663,7 +1799,8 @@ bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
     stats.indices =
         sumTris > (kU32Max / 3ull) ? kU32Max : static_cast<u32>(sumTris * 3ull);
     if (sumVerts > kU32Max || sumTris > (kU32Max / 3ull)) {
-        elog::warn("asset: expandir nós — as contagens saturam o contador "
+        elog::warn("asset: expandir em sub-TICs — as contagens saturam o "
+                   "contador "
                    "u32 do toast; as contagens dos FICHEIROS estão corretas");
     }
     result.blocks = sumBlocks;
@@ -1674,7 +1811,8 @@ bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
         result.firstDeviation = "uma peça falhou a verificação bit a bit";
     }
     // A LINHA CONTRATO do expand (o pino do dono lê ISTA)
-    elog::info("gmesh: v3 expandir nós=%u peça(s) blocos=%llu verts=%llu "
+    elog::info("gmesh: v3 expandir em sub-TICs=%u peça(s) blocos=%llu "
+               "verts=%llu "
                "tris=%llu verificado=%d",
                pieces, static_cast<unsigned long long>(sumBlocks),
                static_cast<unsigned long long>(sumVerts),

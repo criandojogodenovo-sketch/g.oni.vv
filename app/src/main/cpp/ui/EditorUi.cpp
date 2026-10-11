@@ -13,6 +13,7 @@
 #include "components/BodyComp.h"     // FASE 9 (G2-7): ícone da hierarquia por corpo
 #include "core/CameraUtil.h"          // 0.7.7: uma ativa por cena
 #include "components/MeshRenderer.h"
+#include "assets/GOwnFormats.h"   // 0.10-M HOTFIX: kBindSlotName (os slots)
 #include "components/Transform3D.h"
 #include "components/AnimationPlayer.h"   // 0.8.0: add Animacao no Inspector
 #include "render/Primitives.h"            // 0.8.0: seletor de primitivas
@@ -1154,6 +1155,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     AudioPlayer* auEdit = tic->getComponent<AudioPlayer>();
     char meshLabel[64] = "";
     char texLabel[64] = "";
+    // 0.10-M HOTFIX TEXTURAS-VINCULA: os rótulos dos 5 slots (só preenchidos
+    // com mr — o draw dos TexSlotRow lê)
+    char slotLabels[MeshRenderer::kMeshTexSlots][64] = {};
     char inputLine[48] = "";
     char camProjLabel[48] = "";   // 0.7.7
     char camActiveLabel[48] = "";
@@ -1184,6 +1188,14 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         } else {
             std::snprintf(texLabel, sizeof(texLabel), "textura: %s",
                           mr->texture ? "ligada" : "—");
+        }
+        // 0.10-M HOTFIX TEXTURAS-VINCULA: os 5 SLOTS da secção Material
+        // (o nome do .gtext em cada — o pin do dono; slot 0 = o texPath)
+        for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
+            const std::string& p = mr->texSlot(s);
+            std::snprintf(slotLabels[s], sizeof(slotLabels[s]), "%s: %s",
+                          kBindSlotName(static_cast<u8>(s)),
+                          p.empty() ? "—" : assetBasename(p.c_str()));
         }
     }
     if (im) {
@@ -1575,6 +1587,21 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
                       texLabel);
             break;
+        case InspRow::Kind::TexSlotRow: {
+            // 0.10-M HOTFIX TEXTURAS-VINCULA: a linha do SLOT (o mesmo
+            // padrão de piso da linha; o tap arma o slot e abre o browser)
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            const u32 s = r.id >= kInspectorTexSlot0
+                              ? static_cast<u32>(r.id -
+                                                 kInspectorTexSlot0)
+                              : 0u;
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
+                      slotLabels[s < MeshRenderer::kMeshTexSlots
+                                     ? s
+                                     : 0u]);
+            break;
+        }
         case InspRow::Kind::MeshLabel:
             ui.labelFitted(x + kPad + 12.0f, inspBaseline(ry, r.h, tm), meshLabel,
                            theme::TEXT, w - 2.0f * kPad - 12.0f);
@@ -2003,6 +2030,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             if (r.kind != InspRow::Kind::AddTc &&
                 r.kind != InspRow::Kind::MeshButton &&
                 r.kind != InspRow::Kind::TexButton &&
+                r.kind != InspRow::Kind::TexSlotRow &&  // 0.10-M HOTFIX: slots
                 r.kind != InspRow::Kind::VisToggle &&
                 r.kind != InspRow::Kind::ColorHex &&    // 0.8.6
                 r.kind != InspRow::Kind::CamProj &&     // 0.7.7
@@ -2102,6 +2130,18 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                     st.assetMenu = 1;                 // F5-E: seletor de meshes
                 } else if (r.kind == InspRow::Kind::TexButton) {
                     st.assetMenu = 2;                 // F5-E: seletor de texturas
+                    st.inspTexSlot = 0;               // a linha clássica = baseColor
+                } else if (r.kind == InspRow::Kind::TexSlotRow) {
+                    // 0.10-M HOTFIX TEXTURAS-VINCULA: arma O SLOT e abre o
+                    // browser — o pick escreve O SLOT (irmãos intactos)
+                    st.inspTexSlot = static_cast<u8>(
+                        r.id >= kInspectorTexSlot0
+                            ? (r.id - kInspectorTexSlot0)
+                            : 0u);
+                    if (st.inspTexSlot >= MeshRenderer::kMeshTexSlots) {
+                        st.inspTexSlot = 0;
+                    }
+                    st.assetMenu = 2;
                 } else {
                     st.assetMenu = 4;                 // 0.8.0: seletor de primitivas
                 }
@@ -3431,7 +3471,8 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 // código morto desde a F5-E. A mesma lógica, agora PURA e afervel no CI.
 // ---------------------------------------------------------------------------
 AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int pick,
-                                const AssetCatalog& catalog, const AssetResolvers& res) {
+                                const AssetCatalog& catalog, const AssetResolvers& res,
+                                u32 texSlot) {
     AssetPickOutcome out;
     if (pick <= 0) {
         return out;   // nada escolhido neste frame
@@ -3619,6 +3660,22 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
                         }
                     }
                 }
+                if (!withTex && res.baseColorBind) {
+                    // 0.10-M HOTFIX TEXTURAS-VINCULA: o bind baseColor do
+                    // GTB1 (o material 0 do .gmesh) — o apply de um mesh
+                    // importado vem TEXTURADO (zero passos manuais)
+                    const std::string bindRel = res.baseColorBind(rel, 0);
+                    if (!bindRel.empty()) {
+                        std::string warn;
+                        if (const Texture* tex =
+                                res.texture ? res.texture(bindRel, &warn)
+                                            : nullptr) {
+                            mr->texture = tex;
+                            mr->texPath = bindRel;
+                            withTex = true;
+                        }
+                    }
+                }
                 out.applied = true;
                 std::snprintf(out.toast, sizeof(out.toast), "%s",
                               withTex ? "mesh aplicado (+textura)" : "mesh aplicado");
@@ -3649,12 +3706,23 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
         }
     } else if (menuKind == 2) {
         // ---- seletor de TEXTURAS -----------------------------------------
-        if (pick == 1) {   // none → liberta a referência
-            mr->texture = nullptr;
-            mr->texPath.clear();
+        // 0.10-M HOTFIX TEXTURAS-VINCULA: o pick escreve O SLOT SELECIONADO
+        // (a causa (d) do bug morre — o slot armado na secção Material; 0
+        // = baseColor, o de sempre). Os IRMÃOS ficam intactos (o pin da
+        // auditoria de estado).
+        const u32 slot =
+            texSlot < MeshRenderer::kMeshTexSlots ? texSlot : 0u;
+        if (pick == 1) {   // none → liberta O SLOT escolhido
+            mr->texSlotRef(slot).clear();
+            if (slot == 0) {
+                mr->texture = nullptr;
+            }
             out.applied = true;
-            std::snprintf(out.toast, sizeof(out.toast), "tex: none");
-            std::snprintf(out.log, sizeof(out.log), "material: textura removida");
+            std::snprintf(out.toast, sizeof(out.toast), "tex[%s]: none",
+                          kBindSlotName(static_cast<u8>(slot)));
+            std::snprintf(out.log, sizeof(out.log),
+                          "material: slot %s removido (os irmãos intactos)",
+                          kBindSlotName(static_cast<u8>(slot)));
         } else {
             const size_t idx = static_cast<size_t>(pick - 2);
             if (idx >= catalog.textures.size()) {
@@ -3663,13 +3731,16 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
             const std::string rel = catalog.textures[idx];   // caminho completo
             std::string warn;
             if (const Texture* tex = res.texture ? res.texture(rel, &warn) : nullptr) {
-                mr->texture = tex;
-                mr->texPath = rel;
+                mr->texSlotRef(slot) = rel;
+                if (slot == 0) {
+                    mr->texture = tex;
+                }
                 out.applied = true;
                 std::snprintf(out.toast, sizeof(out.toast), "%s",
                               warn.empty() ? "textura aplicada" : warn.c_str());
                 std::snprintf(out.log, sizeof(out.log),
-                              "material: textura aplicada %s", rel.c_str());
+                              "material: slot %s = %s (os irmãos intactos)",
+                              kBindSlotName(static_cast<u8>(slot)), rel.c_str());
             } else {
                 // carga falhou — o estado ANTERIOR fica intacto
                 std::snprintf(out.toast, sizeof(out.toast), "falha ao carregar textura");

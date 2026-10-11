@@ -28,6 +28,10 @@ TicSnap snapTic(const Scene& scene, Handle h) {
         s.hasMr = true;
         std::snprintf(s.meshPath, sizeof(s.meshPath), "%s", mr->meshPath.c_str());
         std::snprintf(s.texPath, sizeof(s.texPath), "%s", mr->texPath.c_str());
+        std::snprintf(s.texNormal, sizeof(s.texNormal), "%s", mr->texNormal.c_str());
+        std::snprintf(s.texMetalRough, sizeof(s.texMetalRough), "%s", mr->texMetalRough.c_str());
+        std::snprintf(s.texEmissive, sizeof(s.texEmissive), "%s", mr->texEmissive.c_str());
+        std::snprintf(s.texOcclusion, sizeof(s.texOcclusion), "%s", mr->texOcclusion.c_str());
         s.tint[0] = mr->tint[0];
         s.tint[1] = mr->tint[1];
         s.tint[2] = mr->tint[2];
@@ -80,6 +84,10 @@ Handle restoreTic(Scene& scene, const TicSnap& s, Handle current) {
         if (mr) {
             mr->meshPath = s.meshPath;
             mr->texPath = s.texPath;
+            mr->texNormal = s.texNormal;
+            mr->texMetalRough = s.texMetalRough;
+            mr->texEmissive = s.texEmissive;
+            mr->texOcclusion = s.texOcclusion;
             mr->tint[0] = s.tint[0];
             mr->tint[1] = s.tint[1];
             mr->tint[2] = s.tint[2];
@@ -129,6 +137,10 @@ Handle pasteAsNew(Scene& scene, const TicSnap& s) {
         if (MeshRenderer* mr = t->addComponent<MeshRenderer>()) {
             mr->meshPath = s.meshPath;
             mr->texPath = s.texPath;
+            mr->texNormal = s.texNormal;
+            mr->texMetalRough = s.texMetalRough;
+            mr->texEmissive = s.texEmissive;
+            mr->texOcclusion = s.texOcclusion;
             mr->tint[0] = s.tint[0];
             mr->tint[1] = s.tint[1];
             mr->tint[2] = s.tint[2];
@@ -154,6 +166,10 @@ bool snapEq(const TicSnap& a, const TicSnap& b) {
            a.rot.w == b.rot.w &&
            std::strcmp(a.meshPath, b.meshPath) == 0 &&
            std::strcmp(a.texPath, b.texPath) == 0 &&
+           std::strcmp(a.texNormal, b.texNormal) == 0 &&
+           std::strcmp(a.texMetalRough, b.texMetalRough) == 0 &&
+           std::strcmp(a.texEmissive, b.texEmissive) == 0 &&
+           std::strcmp(a.texOcclusion, b.texOcclusion) == 0 &&
            a.primOn == b.primOn && a.primKind == b.primKind &&
            a.primRadius == b.primRadius && a.primSize == b.primSize &&
            a.primSegments == b.primSegments && a.primRings == b.primRings;

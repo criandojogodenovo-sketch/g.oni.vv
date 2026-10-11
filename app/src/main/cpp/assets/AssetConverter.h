@@ -26,6 +26,8 @@
 // intermédios libertam-se entre passes).
 //
 // GL-free / Android-free: FileApi POSIX + ProjectStorage — CI Linux.
+#include <array>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -87,14 +89,16 @@ struct Output {
     // Um registo por NÓ COM MESH (≥1 primitiva que sobreviveu ao corte),
     // NA ORDEM dos nós do glTF; `mesh` = índice em `Output::meshes` (a
     // PEÇA daquele nó — "assets/<stem>_<nomeDoNó>.gmesh"). O main cria o
-    // TIC por registo (gltfExpandInstantiate): nome do glTF preservado,
-    // `translation/rotation/scale` = a transformação MUNDO do nó no
-    // Transform3D do TIC (o engine compõe flat — TransformSystem não
-    // resolve pais — por isso a MUNDO: a peça desenha no sítio EXATO; a
-    // geometria da peça fica CRUA no espaço local do nó). Nós com shear
-    // no mundo (escala não-uniforme do pai + rotação do filho) trazem a
-    // transformação baked na geometria e TRS de identidade — honesto, no
-    // log. `node` = índice no array de nós do glTF (diag).
+    // TIC por registo (gltfExpandInstantiate): nome do glTF preservado.
+    // 0.10-M HOTFIX (e/f — sub-árvore REAL): quando o TRS local da cadeia
+    // (do ancestral registado até ao nó) é EXATO, `parentRec` aponta para
+    // o registo do ancestral e `translation/rotation/scale` são LOCAIS —
+    // o TransformSystem compõe parent∘local (a dívida «editor polish»
+    // paga: o TransformSystem agora resolve pais). Nós com shear no mundo
+    // (escala não-uniforme composta com rotação) mantêm o comportamento
+    // FLAT de sempre (parentRec = -1 e o TRS MUNDO no registo, geometria
+    // baked quando o mundo não é TRS exato) — honesto, no log. `node` =
+    // índice no array de nós do glTF (diag).
     struct NodeOut {
         std::string name;                 // do glTF ("n<i>" se anónimo)
         Vec3 translation{0.0f, 0.0f, 0.0f};
@@ -102,9 +106,18 @@ struct Output {
         Vec3 scale{1.0f, 1.0f, 1.0f};
         i32 mesh = -1;   // índice em Output::meshes (-1 = sem peça)
         i32 node = -1;   // índice no GltfModel::nodes (diag)
+        i32 parentRec = -1;   // 0.10-M HOTFIX: índice EM expandNodes do TIC
+                              // pai (-1 = raiz/flat — TRS é então MUNDO)
     };
     std::vector<NodeOut> expandNodes;    // vazio = import fundido
 };
+
+// 0.10-M HOTFIX TEXTURAS-VINCULA: material NOME → os 5 slots (a ordem
+// kBind* do GOwnFormats.h) → caminho REL do .gtext ("" = vazio).
+// Construído pelo convertGltfCommon do PARSE (material→textura→imagem
+// — o índice que morria em textureSources) com os nomes DERIVADOS dos
+// ficheiros (<stem>_<imgIdx>.gtext); entra no bloco GTB1 do .gmesh.
+using MatTexMap = std::map<std::string, std::array<std::string, 5>>;
 
 // converte UMA fonte escolhida no navegador (caminho ABSOLUTO do FileApi)
 // para os formatos próprios do projeto. `pipeline` (texturas) opcional —

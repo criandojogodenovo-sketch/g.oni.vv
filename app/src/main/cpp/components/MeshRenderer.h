@@ -60,6 +60,43 @@ public:
     std::string meshPath;
     std::string texPath;
 
+    // 0.10-M HOTFIX TEXTURAS-VINCULA — os SLOTS 1-4 do material (o slot 0
+    // baseColor É o texPath de cima — UMA fonte de verdade por slot; a
+    // ordem é o contrato kBind* do GOwnFormats.h). O import preenche
+    // texPath (a baseColor do GTB1 — o auto-bind); o picker do inspector
+    // escreve O SLOT SELECIONADO sem tocar nos irmãos (o pin do dono —
+    // a causa (d) do bug: «o picker escreve um slot único global»).
+    // Os slots 1-4 ficam vinculados (serializer/inspector/log) — o GL
+    // carrega-os quando o shader ganhar os samplers (o lit de hoje tem
+    // SÓ o unit 0 — a fronteira está no relatório do hotfix).
+    static constexpr u32 kMeshTexSlots = 5;   // inclui o texPath (slot 0)
+    std::string texNormal;       // kBindNormal
+    std::string texMetalRough;   // kBindMetalRough
+    std::string texEmissive;     // kBindEmissive
+    std::string texOcclusion;    // kBindOcclusion
+    // o caminho do slot k (0 = texPath; kBindSlotName dá o rótulo)
+    const std::string& texSlot(u32 k) const {
+        static const std::string kEmpty;
+        switch (k) {
+            case 0: return texPath;
+            case 1: return texNormal;
+            case 2: return texMetalRough;
+            case 3: return texEmissive;
+            case 4: return texOcclusion;
+            default: return kEmpty;
+        }
+    }
+    std::string& texSlotRef(u32 k) {
+        switch (k) {
+            case 0: return texPath;
+            case 1: return texNormal;
+            case 2: return texMetalRough;
+            case 3: return texEmissive;
+            case 4: return texOcclusion;
+            default: return texPath;   // nunca acontece (k < kMeshTexSlots)
+        }
+    }
+
     // 0.8.10 — primitiva procedural ativa? kind+parâmetros em `prim`; o
     // ponteiro `mesh` aponta para o mesh PRÓPRIO deste TIC (sem cache —
     // posse no main; ver plataforma/main.cpp).

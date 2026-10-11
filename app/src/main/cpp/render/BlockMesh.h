@@ -98,6 +98,23 @@ public:
     const GMeshV3Meta& meta() const { return meta_; }
     const std::vector<GMeshV3Block>& table() const { return blocks_; }
     const std::vector<std::string>& materials() const { return materials_; }
+    // 0.10-M HOTFIX TEXTURAS-VINCULA: as vinculações do bloco GTB1 (o
+    // import escreve material→slot→.gtext; o GpuAssets resolve a baseColor
+    // de cada material para GL e o draw usa-a POR BLOCO — nunca um
+    // material global a substituir todos)
+    const std::vector<GMeshMatBind>& binds() const { return binds_; }
+    // a textura RESOLVIDA de um material (o GpuAssets injeta; nullptr =
+    // o material fica sem — o draw cai no tex do chamador)
+    void setMaterialTexture(u32 materialIndex, const Texture* tex) {
+        if (materialIndex < matTex_.size()) {
+            matTex_[static_cast<size_t>(materialIndex)] = tex;
+        }
+    }
+    const Texture* materialTexture(u32 materialIndex) const {
+        return materialIndex < matTex_.size()
+                   ? matTex_[static_cast<size_t>(materialIndex)]
+                   : nullptr;
+    }
     const std::string& path() const { return path_; }
     bool skinned() const { return (meta_.flags & 1u) != 0; }
 
@@ -176,6 +193,10 @@ private:
     GMeshV3Meta meta_{};
     std::vector<GMeshV3Block> blocks_;
     std::vector<std::string> materials_;
+    std::vector<GMeshMatBind> binds_;             // o GTB1 (o auto do import)
+    std::vector<const Texture*> matTex_;          // baseColor por material
+                                                  // (não-dono: o cache do
+                                                  // GpuAssets é o dono)
     std::vector<Entry> entries_;
     bool opened_ = false;
     u64 frame_ = 0;

@@ -393,7 +393,7 @@ TEST(uieditor_inspector_ui_sem_sobreposicao_e_dentro_do_painel) {
     // HEX, visivel, ancoraH, ancoraV, texto, LETRA, ESTILO, acao, alvo,
     // TEX, COLOCAR EM, remover)
     const TextMetrics tm = e.ui.textMetrics();
-    UiInspRow plan[32];
+    UiInspRow plan[64];   // 0.10-M HOTFIX: o plano cresceu (as 5 linhas de slot)
     const u32 n = uiInspectorPlan(c->elements[0], tm, plan, 32);
     EXPECT(n == 21u);   // 0.8.6: + hex + letra + estilo (18 → 21)
     // y CUMULATIVO estrito: nenhuma linha invade a anterior
@@ -911,7 +911,7 @@ TEST(uieditor_inspector_tic_mostra_visivel_e_cor) {
     const Tic* t = e.scene.get(player);
     const InspProfile prof = inspectorProfile(*t);
     EXPECT(prof.mr);   // preset Player tem MeshRenderer → linhas de cor
-    InspRow plan[32];
+    InspRow plan[64];   // 0.10-M HOTFIX: o plano cresceu (as 5 linhas de slot)
     const u32 n = inspectorPlan(prof, tm, false, 0u, plan);
     u32 visRows = 0, colorRows = 0;
     for (u32 i = 0; i < n; ++i) {

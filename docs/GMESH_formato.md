@@ -147,7 +147,7 @@ gmesh` documentam os bytes exatos que abrem).
     [metadados 160 B]    — fixos (kGmeshV3MetaBytes), 16-alinhados:
         u32 attrCount            (≤ kGmeshV3MaxAttrs = 8)
         u32 flags                (bit0 = skinned · bit1 = kGmeshV3FlagPiece
-                                 — PEÇA do import expandido, §EXPANDIR-NÓS)
+                                 — PEÇA do import expandido, §EXPANDIR-EM-SUB-TICs)
         u32 blockVertexCap       (o teto configurável; default
                                   kGmeshV3BlockVertexCap = 65535)
         u32 tableCrc32           (CRC32 das entradas da tabela)
@@ -171,6 +171,27 @@ gmesh` documentam os bytes exatos que abrem).
         u32 materialIndex, u32 indexType (0=u16/1=u32), u32 crc32 (dos
         dataSize bytes do bloco), u32 reserved, u64 reserved
     [materiais]          — materialCount × (u16 len + bytes UTF-8, pad a 4)
+    [vinculação]       — OPCIONAL (o bloco GTB1 do hotfix TEXTURAS-VINCULA;
+                         sem texturas o ficheiro acaba nos nomes — byte a
+                         byte com o pré-hotfix; os leitores de sempre PARAM
+                         em materialCount nomes e ignoram a cauda)
+
+### A vinculação de texturas por material (o bloco GTB1 — hotfix 0.10-M)
+
+O import glTF escreve, DEPOIS dos nomes de material, o bloco de
+vinculação material→slot→.gtext (a cura do bug do dono: os .gtext
+existiam mas NADA os ligava ao mesh — o índice material→textura→imagem
+morria no `textureSources` local do parse). Layout: magic u32 `GTB1`,
+u32 bindCount (só materiais COM textura), bindCount × (u16
+materialIndex · u8 slotCount · slotCount × (u8 slot · u16 pathLen ·
+path) · pad a 4), u32 crc32 das entradas. Os 5 slots (o contrato
+`kBindSlotCount = 5`): 0 baseColor · 1 normal · 2 metalRough ·
+3 emissive · 4 occlusion. O LEITOR de sempre para em materialCount —
+ficheiros novos abrem em builds antigas SEM saber; o CRC mau = erro
+legível («CHECKSUM CORROMPIDO: bloco de vinculação (GTB1)»). O runtime
+resolve a baseColor de cada material no `GpuAssets::blockHull` (uma
+linha de log por slot vinculado) e o draw POR BLOCO usa a textura DO
+SEU material — nunca um material global a substituir todos.
 
 ### As semânticas de atributo (o layout é DESCRITO — acrescentar não muda a versão)
 
@@ -342,14 +363,14 @@ c33_virtual (a abertura nomeando `fonte=mmap-fd` sob `content://`, o
 chip «bl n/m», o overlay, o provider que recusa o mapa e a quarentena
 com o rename streaming) vigiam tudo isto para sempre.
 
-### §EXPANDIR-NÓS — o import de nós como sub-árvore e as PEÇAS (0.10-M EXT)
+### §EXPANDIR-EM-SUB-TICs — o import de nós como sub-árvore e as PEÇAS (0.10-M EXT; o hotfix 0.10-M tornou a sub-árvore REAL)
 
 O BACKLOG 0.10-M-ext do dono: «opção no import "expandir nós" que cria
 um TIC por nó com mesh (nomes do glTF preservados, transformação do nó
 como Transform do TIC), em vez de fundir num TIC só. Default fundido por
 performance mobile; expandido para peças editáveis». O **default é o
 FUNDIDO de sempre** — o caminho vigente byte a byte idêntico (o driver
-só entra com o setting «expandir nós» ligado nas Definições;
+só entra com o setting «expandir em sub-TICs» ligado nas Definições;
 `settings.goni` guarda `expandNodes=0/1`, capturado no lançamento do job
 de import e honrado pelo «reconverter assets»).
 
@@ -362,7 +383,7 @@ novo de corte). O produto é uma **PEÇA por nó**:
 - ficheiro `assets/<stem>_<nomeDoNó>.gmesh` (o nome do glTF sanitizado;
   anónimos viram `n<i>`; dois nós com o mesmo nome ganham o sufixo
   determinístico `_<i>`); a linha contrato do expand no log:
-  `gmesh: v3 expandir nós=<N> peça(s) blocos=… verts=… tris=… verificado=<0|1>`;
+  `gmesh: v3 expandir em sub-TICs=<N> peça(s) blocos=… verts=… tris=… verificado=<0|1>`;
 - o registro `convert::Output::NodeOut` (nome, TRS, índice da peça em
   `Output::meshes`) — é ISTO que o `gltfExpandInstantiate` (assets/
   GltfInstantiate.cpp, GL-free) lê para criar os TICs: um TIC por nó com

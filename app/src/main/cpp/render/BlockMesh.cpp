@@ -50,6 +50,8 @@ void BlockMesh::close() {
     entries_.clear();
     blocks_.clear();
     materials_.clear();
+    binds_.clear();     // 0.10-M HOTFIX: o GTB1 morre com o ficheiro
+    matTex_.clear();    // (os Texture* são do cache do GpuAssets — não-nossos)
     storage_ = nullptr;
     path_.clear();
     opened_ = false;
@@ -456,7 +458,7 @@ bool BlockMesh::open(ProjectStorage& st, const std::string& relPath,
         }
         if (got && !gmeshV3ReadMaterialsOnly(matBytes.data(),
                                               matBytes.size(), meta_,
-                                              materials_, err)) {
+                                              materials_, err, &binds_)) {
             quarentena("a validação dos MATERIAIS falhou (" + err + ")");
             got = false;
         }
@@ -481,6 +483,9 @@ bool BlockMesh::open(ProjectStorage& st, const std::string& relPath,
     path_ = relPath;
     entries_.resize(blocks_.size());   // Entry move-only: resize constrói
     opened_ = true;
+    // 0.10-M HOTFIX TEXTURAS-VINCULA: a tabela de texturas POR MATERIAL
+    // (a baseColor do GTB1 resolve-se no GpuAssets — o GL vive lá)
+    matTex_.assign(materials_.size(), nullptr);
 
     // a linha contrato do LOAD (o par das fases do conversor): a abertura
     // É o load do runtime por blocos — a tabela, nunca os dados. A FONTE
@@ -844,7 +849,13 @@ DrawStats BlockMesh::draw(Renderer& r, const Mat4& model, const Mat4& vp,
         if (!wasResident) {
             ++st.loadedThisFrame;
         }
-        total = total + r.drawMesh(*e.gpu, model, vp, tex, tint, bones,
+        // 0.10-M HOTFIX TEXTURAS-VINCULA: a textura do BLOCO é a do SEU
+        // material (o GTB1 resolvido pelo GpuAssets) quando o chamador não
+        // traz override (mr.texture nula = o auto-bind manda); o override
+        // manual do TIC (mr.texture) vence — o contrato de sempre intacto
+        const Texture* eff =
+            tex ? tex : materialTexture(blocks_[i].materialIndex);
+        total = total + r.drawMesh(*e.gpu, model, vp, eff, tint, bones,
                                    boneCount);
     }
 

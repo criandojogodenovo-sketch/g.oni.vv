@@ -34,6 +34,39 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.10.7 — 0.10-M HOTFIX: TEXTURAS-VINCULA (+ sub-TICs reais) — o import liga as texturas ao mesh, zero passos manuais
+
+**O bug do dono (C33)**: modelo importado com texturas chegava SEM textura
+— as imagens viravam `.gtext` mas NADA as ligava ao mesh, e a atribuição
+manual trocava a textura INTEIRA em vez de preencher o slot.
+
+- **A causa raiz (ficheiro+função)**: o índice material→textura→imagem
+  morria no `parseGltf` (`textureSources` local, GltfImporter.cpp) e a
+  tabela de materiais do gmesh guardava SÓ o nome (`v3WriteMaterial`,
+  GOwnFormats.cpp); o GPU recebia UMA textura por TIC (`MeshRenderer::texPath`)
+  e o `BlockMesh::draw` ignorava o `materialIndex` de cada bloco.
+- **A cura (1)+(2)+(4)**: o import escreve o bloco **GTB1** no fim da
+  secção de materiais do `.gmesh` (material→5 slots→.gtext; os leitores
+  de sempre param nos nomes — retro-compat total, sem atlas). O
+  `GpuAssets::blockHull` resolve a baseColor de cada material e o draw
+  usa a textura DO SEU material POR BLOCO. **Uma linha de log por slot
+  vinculado.**
+- **A cura (3)**: a secção Material do Inspector mostra os **5 slots**
+  (baseColor/normal/metalRough/emissive/occlusion) com o nome do .gtext
+  em cada; o pick do browser escreve O SLOT selecionado — **os irmãos
+  ficam intactos** (a auditoria de estado é TEST).
+- **(e)** «expandir nós» passou a «expandir em sub-TICs» (settings, docs
+  e logs — o vocabulário da casa é TIC).
+- **(f)** a sub-árvore do import é REAL: `parentRec` + TRS LOCAL por TIC
+  e o `TransformSystem` agora compõe parent∘local (a dívida «editor
+  polish» do F3 paga). Shear continua flat (o log diz).
+- **Provas**: `test_texbind.cpp` (9 TESTs: 2 slots+log, 4 materiais=4
+  bindings, 50 sintéticas=50 vinculadas, retro-compat, CRC mau, auditoria
+  de slots, sub-árvore, composição) · mutações M-TB1 (vinculação saltada)
+  e M-TB3 (picker limpa irmãos) VERMELHAS → repostas → **932/0** ·
+  c33 **797/797**.
+- Relatório: docs/RELATORIO-0.10-M-HOTFIX-TEXTURAS-VINCULA.md
+
 ## 0.10.7 — 0.10-M PASSO 5C: THUMBNAILS — o import pré-renderiza 256×256 por mesh, o browser mostra-as instantâneo
 
 **O que o dono pediu** (o terceiro sub-passo do PASSO 5): «no import,
@@ -164,7 +197,7 @@ picker mantém o estado anterior.
   `docs/RELATORIO-0.10-M-HOTFIX-SAF-SEAM.md` · **PÁRA — o PASSO 5
   (texturas ASTC) continua à espera do OK do dono.**
 
-## 0.10.5 — 0.10-M EXT: IMPORT DE NÓS COMO SUB-ÁRVORE (o «expandir nós» — um TIC por nó com mesh)
+## 0.10.5 — 0.10-M EXT: IMPORT DE NÓS COMO SUB-ÁRVORE (o «expandir em sub-TICs» — um TIC por nó com mesh)
 
 **O que o dono pediu** (BACKLOG 0.10-M-ext): «opção no import "expandir
 nós" que cria um TIC por nó com mesh (nomes do glTF preservados,
@@ -172,7 +205,7 @@ transformação do nó como Transform do TIC), em vez de fundir num TIC só.
 Default fundido por performance mobile; expandido para peças editáveis.
 Pin: city scene expandido = 72 TICs com nomes, culling por TIC verde.»
 
-- **A opção**: o toggle «expandir nós» nas Definições (secção Áudio, ao
+- **A opção**: o toggle «expandir em sub-TICs» nas Definições (secção Áudio, ao
   lado de «fonte após import»; persistido em settings.goni como
   `expandNodes=0/1`). **Default OFF = o FUNDIDO de sempre** — o caminho
   vigente fica byte a byte idêntico (R-039/R-040/R-041 intocadas: o

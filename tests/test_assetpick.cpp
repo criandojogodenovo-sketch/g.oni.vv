@@ -2,7 +2,7 @@
 //
 // REGRESSÃO DO C33 (0.6.9): após importar um PNG (import OK, ficheiro em
 // textures/ do projeto) e tocar "tex:" no Inspector escolhendo a imagem,
-// NADA acontecia — o estado permanecia "tex: none", o cubo ficava sem
+// NADA acontecia — o estado permanecia "tex[baseColor]: none", o cubo ficava sem
 // textura e o engine.log não registava linha de aplicação NEM de erro.
 //
 // CAUSA RAIZ (diagnóstico por leitura de código): drawAssetMenu fecha o
@@ -16,7 +16,7 @@
 //     de log "material: textura aplicada <ref>" + toast;
 //   • o warn do gate (texturas >2K) chega ao toast;
 //   • carga que falha mantém o estado ANTERIOR intacto (sem estragar);
-//   • remover (pick 1) liberta a referência + "material: textura removida";
+//   • remover (pick 1) liberta a referência + "material: slot baseColor removido (os irm\u00e3os intactos)";
 //   • A SEQUÊNCIA DO MAIN (o fix): menuKind capturado ANTES do drawAssetMenu
 //     com um clique REAL injetado (InputState) — o pick chega ao componente;
 //   • mesh pick aplica mesh/material + textura embutida do glTF;
@@ -101,7 +101,7 @@ TEST(assetpick_escolher_textura_aplica_estado_e_log) {
     EXPECT(e.mr() != nullptr);
     EXPECT(e.mr()->texture == kTexA);                        // referência ligada
     EXPECT(e.mr()->texPath == "textures/wood.png");         // ref relativa no material
-    EXPECT(std::strcmp(out.log, "material: textura aplicada textures/wood.png") == 0);
+    EXPECT(std::strcmp(out.log, "material: slot baseColor = textures/wood.png (os irm\u00e3os intactos)") == 0);
     EXPECT(std::strcmp(out.toast, "textura aplicada") == 0);
 }
 
@@ -120,7 +120,7 @@ TEST(assetpick_textura_screenshot_do_c33) {
     EXPECT(out.applied);
     EXPECT(e.mr()->texPath == "textures/screenshot-20260930-1010.png");
     EXPECT(std::strcmp(out.log,
-           "material: textura aplicada textures/screenshot-20260930-1010.png") == 0);
+           "material: slot baseColor = textures/screenshot-20260930-1010.png (os irm\u00e3os intactos)") == 0);
 }
 
 // ---- 2. warn do gate (texturas >2K) chega ao toast ---------------------------
@@ -139,7 +139,7 @@ TEST(assetpick_textura_com_aviso_do_gate_mostra_o_aviso) {
     EXPECT(out.applied);   // aplicou MESMO com aviso (comportamento F5.1-A)
     EXPECT(e.mr()->texture == kTexA);
     EXPECT(std::strcmp(out.toast, "textura >2K: sem compressao") == 0);
-    EXPECT(std::strcmp(out.log, "material: textura aplicada textures/big.png") == 0);
+    EXPECT(std::strcmp(out.log, "material: slot baseColor = textures/big.png (os irm\u00e3os intactos)") == 0);
 }
 
 // ---- 3. carga que falha mantém o estado ANTERIOR ----------------------------
@@ -166,7 +166,7 @@ TEST(assetpick_textura_que_falha_mantem_estado_anterior) {
     EXPECT(std::strstr(out.log, "corrompida.png") != nullptr);
 }
 
-// ---- 4. remover (pick 1) liberta a referência → "tex: none" ------------------
+// ---- 4. remover (pick 1) liberta a referência → "tex[baseColor]: none" ------------------
 
 TEST(assetpick_remover_textura_volta_a_none) {
     PickEnv e;
@@ -184,9 +184,9 @@ TEST(assetpick_remover_textura_volta_a_none) {
     const AssetPickOutcome out = applyAssetPick(e.scene, e.sel, 2, 1, e.cat, e.res);
     EXPECT(out.applied);
     EXPECT(e.mr()->texture == nullptr);        // referência libertada
-    EXPECT(e.mr()->texPath.empty());          // Inspector volta a "tex: none"
-    EXPECT(std::strcmp(out.toast, "tex: none") == 0);
-    EXPECT(std::strcmp(out.log, "material: textura removida") == 0);
+    EXPECT(e.mr()->texPath.empty());          // Inspector volta a "tex[baseColor]: none"
+    EXPECT(std::strcmp(out.toast, "tex[baseColor]: none") == 0);
+    EXPECT(std::strcmp(out.log, "material: slot baseColor removido (os irm\u00e3os intactos)") == 0);
 
     // e aplicar de NOVO volta a funcionar (o ciclo não fica preso)
     const AssetPickOutcome again = applyAssetPick(e.scene, e.sel, 2, 2, e.cat, e.res);
@@ -259,7 +259,7 @@ TEST(assetpick_sequencia_do_main_menukind_antes_do_draw) {
     EXPECT(e.mr() != nullptr);
     EXPECT(e.mr()->texture == kTexA);
     EXPECT(e.mr()->texPath == "textures/wood.png");
-    EXPECT(std::strcmp(out.log, "material: textura aplicada textures/wood.png") == 0);
+    EXPECT(std::strcmp(out.log, "material: slot baseColor = textures/wood.png (os irm\u00e3os intactos)") == 0);
 }
 
 // ---- 6. mesh pick: aplica mesh/material + textura embutida do glTF ----------

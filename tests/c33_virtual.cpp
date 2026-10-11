@@ -826,6 +826,7 @@ void resetEngineForHarness() {
 // main — o REPLAY inteiro; sai non-zero em qualquer falha
 // ===========================================================================
 int main() {
+
     std::printf("== C33 VIRTUAL — dispositivo headless em CI (0.9.3) ==\n");
     std::printf("   reproduz: /tmp read-only (errno=30), cache dir da app,\n");
     std::printf("   content:// SAF, lifecycle EGL TERM/INIT, 1536x720 + insets,\n");
@@ -7852,7 +7853,7 @@ int main() {
                   "22.1 os NOMES PRESERVADOS nos registros");
             check(logCount("verificado=1") - verAntes >= 72,
                   "22.1 a verificação bit a bit POR PEÇA (72 linhas)");
-            check(logHas("expandir nós=72 peça(s)"),
+            check(logHas("expandir em sub-TICs=72 peça(s)"),
                   "22.1 a linha contrato do expand no engine.log");
             // a flag em CADA peça + «transformação do nó como Transform do
             // TIC» (a faixa do nó no TRS do registro — o MUNDO decomposto)

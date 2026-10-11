@@ -39,6 +39,7 @@ add_executable(test_core
         test_gltf_textures.cpp
         test_texture_profiles.cpp   # 0.10-M (PASSO 5A): perfis/override/normal/mips lineares
         test_thumbs.cpp             # 0.10-M (PASSO 5C): as thumbs pré-renderizadas
+        test_texbind.cpp            # 0.10-M HOTFIX: TEXTURAS-VINCULA (+ sub-TICs)
         test_f51_roundtrip.cpp
         test_assets.cpp
         test_storage.cpp

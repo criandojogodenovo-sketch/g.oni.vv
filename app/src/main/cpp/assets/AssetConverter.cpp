@@ -820,6 +820,46 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
         err = "glTF sem meshes";
         return false;
     }
+    // ---- 0.10-M HOTFIX TEXTURAS-VINCULA — O MAPA material→slots→.gtext --
+    // A cura das causas (a)+(c): o índice material→textura→imagem que
+    // morria no parse (textureSources era local a parseGltf) vira MAPA
+    // com os nomes DERIVADOS dos ficheiros do passe de texturas
+    // (assets/<stem>_<imgIdx>.gtext — a MESMA regra de naming). Entra no
+    // bloco GTB1 do .gmesh (o leitor de sempre para nos nomes —
+    // retro-compat total). Slot sem textura no glTF = "".
+    convert::MatTexMap matTex;
+    {
+        std::vector<char> imgViable(model.images.size(), 0);
+        for (size_t i = 0; i < model.images.size(); ++i) {
+            const GltfImage& im = model.images[static_cast<size_t>(i)];
+            imgViable[i] =
+                !im.broken &&
+                (im.mime == "image/png" || !im.uriPath.empty()) &&
+                im.bytes.size() <= kMaxImageBytes;
+        }
+        for (const GltfMaterial& m : model.materials) {
+            std::array<std::string, 5> slots{};
+            if (m.baseColorTex >= 0 &&
+                m.baseColorTex < static_cast<i32>(imgViable.size()) &&
+                imgViable[static_cast<size_t>(m.baseColorTex)]) {
+                slots[kBindBaseColor] = "assets/" + stem + "_" +
+                                        std::to_string(m.baseColorTex) +
+                                        ".gtext";
+            }
+            if (m.normalTex >= 0 &&
+                m.normalTex < static_cast<i32>(imgViable.size()) &&
+                imgViable[static_cast<size_t>(m.normalTex)]) {
+                slots[kBindNormal] = "assets/" + stem + "_" +
+                                     std::to_string(m.normalTex) + ".gtext";
+            }
+            const bool any = !slots[0].empty() || !slots[1].empty() ||
+                             !slots[2].empty() || !slots[3].empty() ||
+                             !slots[4].empty();
+            if (any && matTex.find(m.name) == matTex.end()) {
+                matTex[m.name] = slots;   // 1.º material com o nome vence
+            }
+        }
+    }
     // ---- 0.9.6.3 (R-020) · O LOG DO PARSE (a spec PASSO 1 pede: formato,
     // nós, malhas, primitivas, vértices, índices, materiais, texturas) ----
     {
@@ -996,11 +1036,11 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
                                    stem, st, out, stats, res, err,
                                    onProgress, user,
                                    rangeSrc.fn != nullptr ? &rangeSrc : nullptr,
-                                   binDroppable)
+                                   binDroppable, &matTex)
             : convertGltfToV3(model, doc, bin, binLenEff, fileBytes,
                               stem, st, out, stats, res, err, onProgress, user,
                               rangeSrc.fn != nullptr ? &rangeSrc : nullptr,
-                              binDroppable);
+                              binDroppable, 0, &matTex);
         if (map != nullptr) {
             fileapi::unmapFile64(map, mapLen);
         }
@@ -1179,7 +1219,39 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
                        (double)maxDim);
         }
         std::vector<u8> bytes;
-        if (!writeGMesh(merged, bytes, err)) {
+        // 0.10-M HOTFIX TEXTURAS-VINCULA: os binds do FUNDIDO — a MESMA
+        // ordem de dedup do writeGMesh (1.ª aparição do nome nos grupos)
+        std::vector<GMeshMatBind> mergedBinds;
+        {
+            std::vector<std::string> order;
+            for (const MeshData::Group& g : merged.groups) {
+                bool seen = false;
+                for (const std::string& s : order) {
+                    if (s == g.material) {
+                        seen = true;
+                        break;
+                    }
+                }
+                if (seen) {
+                    continue;
+                }
+                order.push_back(g.material);
+                const auto it = matTex.find(g.material);
+                if (it == matTex.end()) {
+                    continue;
+                }
+                GMeshMatBind b;
+                b.materialIndex = static_cast<u32>(order.size() - 1);
+                for (u8 s2 = 0; s2 < kBindSlotCount; ++s2) {
+                    b.tex[s2] = it->second[s2];
+                }
+                if (!b.empty()) {
+                    mergedBinds.push_back(std::move(b));
+                }
+            }
+        }
+        if (!writeGMesh(merged, bytes, err,
+                        mergedBinds.empty() ? nullptr : &mergedBinds)) {
             return false;
         }
         char nm[96];
@@ -1203,7 +1275,39 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
             stats.verts = static_cast<u32>(mesh.vertices.size());
             stats.indices = static_cast<u32>(mesh.indices.size());
             std::vector<u8> bytes;
-            if (!writeGMesh(mesh, bytes, err)) {
+            // 0.10-M HOTFIX TEXTURAS-VINCULA: os binds do mesh solto (o
+            // MESMO dedup por 1.ª aparição — um mesh por ficheiro)
+            std::vector<GMeshMatBind> meshBinds;
+            {
+                std::vector<std::string> order;
+                for (const MeshData::Group& g : mesh.groups) {
+                    bool seen = false;
+                    for (const std::string& s : order) {
+                        if (s == g.material) {
+                            seen = true;
+                            break;
+                        }
+                    }
+                    if (seen) {
+                        continue;
+                    }
+                    order.push_back(g.material);
+                    const auto it = matTex.find(g.material);
+                    if (it == matTex.end()) {
+                        continue;
+                    }
+                    GMeshMatBind b;
+                    b.materialIndex = static_cast<u32>(order.size() - 1);
+                    for (u8 s2 = 0; s2 < kBindSlotCount; ++s2) {
+                        b.tex[s2] = it->second[s2];
+                    }
+                    if (!b.empty()) {
+                        meshBinds.push_back(std::move(b));
+                    }
+                }
+            }
+            if (!writeGMesh(mesh, bytes, err,
+                            meshBinds.empty() ? nullptr : &meshBinds)) {
                 return false;
             }
             char nm[96];

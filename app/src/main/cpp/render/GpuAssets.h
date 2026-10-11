@@ -59,6 +59,12 @@ public:
     // kGmeshV3FlagPiece — o culling por TIC — mesmo sendo pequena).
     Mesh* blockHull(const std::string& ref);
 
+    // 0.10-M HOTFIX TEXTURAS-VINCULA — o caminho LIGEIRO do auto-bind (o
+    // apply/reload sem abrir BlockMesh): peek 192 B + statBytes + a faixa
+    // dos materiais; devolve o caminho .gtext do slot baseColor do
+    // material ("" = sem bind/sem stat — o chamador segue honesto).
+    std::string baseColorBindOf(const std::string& ref, u32 materialIndex);
+
     // 0.10.6 (SAF-SEAM) — o ÚLTIMO erro de mesh()/blockHull() (a linha do
     // «asset corrompido, reimporta» chega ao TOAST do picker, não SÓ ao
     // engine.log: a spec manda o estado do picker ANTERIOR + a mensagem

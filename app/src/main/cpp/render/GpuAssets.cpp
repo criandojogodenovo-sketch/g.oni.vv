@@ -244,6 +244,59 @@ BlockMesh* GpuAssets::blockMeshIfOpen(const std::string& ref) const {
     return it != blockMeshes_.end() ? it->second.get() : nullptr;
 }
 
+// 0.10-M HOTFIX TEXTURAS-VINCULA — O CAMINHO LIGEIRO DO BIND (o auto do
+// apply/reload sem abrir BlockMesh): peek 192 B + statBytes + a faixa dos
+// materiais (os nomes + o GTB1 — NUNCA os dados dos blocos; a disciplina
+// R-044 mantém-se). Sem stat no storage (o SAF não tem stat barato) ou
+// sem bloco GTB1 → "" (o chamador segue sem auto-bind — honesto).
+std::string GpuAssets::baseColorBindOf(const std::string& ref,
+                                       u32 materialIndex) {
+    if (!rm_ || !rm_->storage()) {
+        return "";
+    }
+    ProjectStorage* st = rm_->storage();
+    const std::string ext = lowerExtOf(ref);
+    if (ext != "gmesh") {
+        return "";
+    }
+    std::vector<u8> peek;
+    if (!st->readBytesAt(ref, 0, kGHeaderBytes + kGmeshV3MetaBytes, peek)) {
+        return "";
+    }
+    GMeshV3Meta meta;
+    std::string perr;
+    if (!gmeshV3PeekMeta(peek.data(), peek.size(), meta, perr)) {
+        return "";
+    }
+    if (materialIndex >= meta.materialCount) {
+        return "";
+    }
+    u64 sz = 0;
+    if (!st->statBytes(ref, sz) ||
+        sz <= meta.materialTableOffset) {
+        return "";   // sem stat (SAF) — o auto fica para a abertura por blocos
+    }
+    std::vector<u8> matBytes;
+    const size_t matLen = static_cast<size_t>(
+        sz - meta.materialTableOffset);
+    if (!st->readBytesAt(ref, meta.materialTableOffset, matLen, matBytes)) {
+        return "";
+    }
+    std::vector<std::string> names;
+    std::vector<GMeshMatBind> binds;
+    std::string merr;
+    if (!gmeshV3ReadMaterialsOnly(matBytes.data(), matBytes.size(), meta,
+                                  names, merr, &binds)) {
+        return "";
+    }
+    for (const GMeshMatBind& b : binds) {
+        if (b.materialIndex == materialIndex) {
+            return b.tex[kBindBaseColor];
+        }
+    }
+    return "";
+}
+
 Mesh* GpuAssets::blockHull(const std::string& ref) {
     // (1) o BlockMesh — 1 ref = 1 abertura (a tabela; NUNCA os dados)
     BlockMesh* bm = blockMeshIfOpen(ref);
@@ -264,6 +317,36 @@ Mesh* GpuAssets::blockHull(const std::string& ref) {
         }
         bm = nb.get();
         blockMeshes_.emplace(ref, std::move(nb));
+        // 0.10-M HOTFIX TEXTURAS-VINCULA: a baseColor de CADA material do
+        // GTB1 resolve para GL (o cache de sempre) e injeta-se no
+        // BlockMesh — o draw usa-a POR BLOCO (nunca um material global a
+        // substituir todos). UMA LINHA DE LOG POR SLOT VINCULADO (o pin do
+        // dono). Falha de ficheiro = warn honesto + segue (o material fica
+        // sem — nunca mata o mesh)
+        for (const GMeshMatBind& b : bm->binds()) {
+            if (b.materialIndex >= bm->materials().size()) {
+                continue;
+            }
+            const std::string& rel = b.tex[kBindBaseColor];
+            if (rel.empty()) {
+                continue;
+            }
+            const Texture* t = texture(rel);
+            if (t != nullptr) {
+                bm->setMaterialTexture(b.materialIndex, t);
+                elog::info("textura: vinculada '%s' material '%s' slot "
+                           "baseColor -> %s",
+                           ref.c_str(),
+                           bm->materials()[b.materialIndex].c_str(),
+                           rel.c_str());
+            } else {
+                elog::warn("textura: '%s' material '%s' slot baseColor SEM "
+                           "ficheiro (%s) — o material fica sem (reimporta)",
+                           ref.c_str(),
+                           bm->materials()[b.materialIndex].c_str(),
+                           rel.c_str());
+            }
+        }
     }
     // (2) o HULL — o Mesh* do contrato (bounds EXATOS do meta; o render é
     // do BlockMesh: drawTics consulta MeshRenderer::blocks PRIMEIRO)
