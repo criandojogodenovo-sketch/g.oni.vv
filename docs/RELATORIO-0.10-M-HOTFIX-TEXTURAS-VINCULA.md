@@ -95,7 +95,9 @@ gmesh-docs **25 âncoras** (2 NOVAS: bind slots kBindSlotCount=5, bind
 append gmeshV3AppendBinds) · ui-vocab · theme · hierarchy · gizmo ·
 projects-ui · reload · glyph · jni-parity · check_main · link-parity ·
 release-identity versionCode **64** (declarado no RELATORIO-0.9.6 §14).
-A linha do CI entra pelo commit -docs (a prática da casa).
+**CI VERDE À PRIMEIRA (run 38173544228, commit 8d2b709): core-tests,
+c33 virtual, APK arm64 assinado versionCode 64, symbol gate —
+documentados. (a prática da casa desde a 0.10.5).**
 
 ## 6. NÃO VERIFICADO (honestidade da casa)
 
