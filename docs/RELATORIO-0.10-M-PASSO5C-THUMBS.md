@@ -132,8 +132,24 @@ mutações repostas e as suítes inteiras verdes DEPOIS delas.
   tris — o tamanho e o teto do render vigiados pelo CI) · ui-vocab ·
   theme · hierarchy · gizmo · projects-ui · reload · glyph · jni-parity ·
   check_main (os 3 TUs device-only) · link-parity · release-identity
-  versionCode **63** (declarado no RELATORIO-0.9.6 §14). A linha do run
-  do CI entra pelo commit -docs (a prática da casa desde a 0.10.5).
+  versionCode **63** (declarado no RELATORIO-0.9.6 §14). **CI VERMELHO
+  POR INFRA, NÃO POR CÓDIGO (run 38117399890, 2026-10-11 06:14→07:22
+  UTC, 5 attempts): o job core-tests foi morto 5× PELO RUNNER («The
+  runner has received a shutdown signal», exit 143 = SIGTERM), sempre
+  a compilar os TUs grandes de ui/ — DocsScreen.cpp (a1, 3m18s) e
+  ScriptEditor.cpp (a2 4m23s · a3 12m03s · a4 74 s · a5 4m10s) — com
+  ZERO erros de compilação em qualquer log. O código está exonerado:
+  o MESMO ScriptEditor.cpp está no c33_virtual (tests/CMakeLists.txt)
+  e o job c33 ficou VERDE na attempt 1 com a MESMA árvore; o run 215
+  (839041a, 5 h antes) compilou a árvore INTEIRA em ~2 min; os únicos
+  warnings (o %zu do GltfImporter, o write() do test_main) já vinham
+  no run 215 VERDE; NADA que o TU inclua foi tocado no 5C (o diff
+  toca AssetConverter.h +2 linhas e os headers NOVOS Thumb*, fora da
+  cadeia de includes do TU). O selo verde do core-tests para o
+  f9a70e5 fica NÃO VERIFICADO — o remédio é o rerun do run
+  38117399890 quando o pool do GitHub deixar de ceifar os VMs (a
+  prática da casa desde a 0.10.5: a linha do CI entra pelo commit
+  -docs, verde ou honesta).
 
 ## 7. NÃO VERIFICADO (honestidade da casa)
 
