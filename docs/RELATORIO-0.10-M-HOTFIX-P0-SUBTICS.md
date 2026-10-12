@@ -103,6 +103,15 @@ cria a sub-árvore no próprio import. NADA mais tocado.
   check_main · link-parity 122 TUs · release-identity **versionCode 67**
   (declarado no RELATORIO-0.9.6 §14).
 
+## 5-A. O CI (o selo)
+
+- **CI VERDE À PRIMEIRA — run 38322688785 (c7a1638)**: core-tests SUCCESS
+  · c33 virtual SUCCESS · APK release arm64 assinado SUCCESS
+  (versionCode 67) · verify-entry-symbols SUCCESS. Artefacto:
+  **goni-vv-0.9.6-release-signed** 1,7 MB (id 11779463544, expira
+  2027-01-10) — o APK que o dono instala para o sign-off (o city com o
+  overlay «A EXPANDIR… d/t» sem ANR + o cancelamento a meio).
+
 ## 6. NÃO VERIFICADO (honesto)
 
 - O sign-off no DEVICE: o city (122 nós) com a opção ativa — o overlay

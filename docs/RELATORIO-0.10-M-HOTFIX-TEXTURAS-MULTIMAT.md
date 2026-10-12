@@ -102,6 +102,15 @@ materiais chegavam ao TIC, logo nem o seletor os podia mostrar.
   jni-parity · check_main · link-parity 122 TUs · release-identity
   **versionCode 66** (declarado no RELATORIO-0.9.6 §14).
 
+## 5-A. O CI (o selo)
+
+- **CI VERDE À PRIMEIRA — run 38320152995 (b2f63e4)**: core-tests SUCCESS
+  · c33 SUCCESS · APK release arm64 assinado SUCCESS · verify-entry-symbols
+  SUCCESS — o r039 passa no runner (o flake é da sandbox, confirmado).
+  Artefacto: **goni-vv-0.9.6-release-signed** 1,7 MB (versionCode 66, id
+  11779463544 pertence ao P0; o 66 correu neste run) — o APK para o
+  sign-off no device.
+
 ## 6. NÃO VERIFICADO (honesto)
 
 - O sign-off no DEVICE (o dono importa um modelo multi-material e vê o
