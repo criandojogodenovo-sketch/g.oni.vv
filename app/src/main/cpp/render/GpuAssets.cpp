@@ -248,53 +248,72 @@ BlockMesh* GpuAssets::blockMeshIfOpen(const std::string& ref) const {
 // apply/reload sem abrir BlockMesh): peek 192 B + statBytes + a faixa dos
 // materiais (os nomes + o GTB1 — NUNCA os dados dos blocos; a disciplina
 // R-044 mantém-se). Sem stat no storage (o SAF não tem stat barato) ou
-// sem bloco GTB1 → "" (o chamador segue sem auto-bind — honesto).
-std::string GpuAssets::baseColorBindOf(const std::string& ref,
-                                       u32 materialIndex) {
+// sem bloco GTB1 → false (o chamador segue sem auto-bind — honesto).
+// 0.10-M HOTFIX-2: os CINCO slots saem do MESMO bloco (o bug do device:
+// só o baseColor era lido — os outros 4 slots do TIC ficavam vazios).
+bool GpuAssets::matBindsOf(const std::string& ref, u32 materialIndex,
+                           std::string (&out)[kBindSlotCount]) {
+    for (u8 s = 0; s < kBindSlotCount; ++s) {
+        out[s].clear();
+    }
     if (!rm_ || !rm_->storage()) {
-        return "";
+        return false;
     }
     ProjectStorage* st = rm_->storage();
     const std::string ext = lowerExtOf(ref);
     if (ext != "gmesh") {
-        return "";
+        return false;
     }
     std::vector<u8> peek;
     if (!st->readBytesAt(ref, 0, kGHeaderBytes + kGmeshV3MetaBytes, peek)) {
-        return "";
+        return false;
     }
     GMeshV3Meta meta;
     std::string perr;
     if (!gmeshV3PeekMeta(peek.data(), peek.size(), meta, perr)) {
-        return "";
+        return false;
     }
     if (materialIndex >= meta.materialCount) {
-        return "";
+        return false;
     }
     u64 sz = 0;
     if (!st->statBytes(ref, sz) ||
         sz <= meta.materialTableOffset) {
-        return "";   // sem stat (SAF) — o auto fica para a abertura por blocos
+        return false;   // sem stat (SAF) — o auto fica para a abertura por blocos
     }
     std::vector<u8> matBytes;
     const size_t matLen = static_cast<size_t>(
         sz - meta.materialTableOffset);
     if (!st->readBytesAt(ref, meta.materialTableOffset, matLen, matBytes)) {
-        return "";
+        return false;
     }
     std::vector<std::string> names;
     std::vector<GMeshMatBind> binds;
     std::string merr;
     if (!gmeshV3ReadMaterialsOnly(matBytes.data(), matBytes.size(), meta,
                                   names, merr, &binds)) {
-        return "";
+        return false;
     }
     for (const GMeshMatBind& b : binds) {
         if (b.materialIndex == materialIndex) {
-            return b.tex[kBindBaseColor];
+            for (u8 s = 0; s < kBindSlotCount; ++s) {
+                out[s] = b.tex[s];
+            }
+            return true;
         }
     }
-    return "";
+    return false;
+}
+
+std::string GpuAssets::baseColorBindOf(const std::string& ref,
+                                       u32 materialIndex) {
+    // 0.10-M HOTFIX-2: o wrapper do matBindsOf (UMA leitura de sempre, o
+    // contrato byte a byte: "" = sem bind OU baseColor vazio)
+    std::string slots[kBindSlotCount];
+    if (!matBindsOf(ref, materialIndex, slots)) {
+        return "";
+    }
+    return slots[kBindBaseColor];
 }
 
 Mesh* GpuAssets::blockHull(const std::string& ref) {

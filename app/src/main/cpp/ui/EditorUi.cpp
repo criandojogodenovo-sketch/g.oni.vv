@@ -2118,12 +2118,18 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 tic->addComponent<TouchControls>();   // F4: cria no TIC
             } else if (r.kind == InspRow::Kind::MeshButton ||
                        r.kind == InspRow::Kind::TexButton ||
+                       r.kind == InspRow::Kind::TexSlotRow ||
                        r.kind == InspRow::Kind::PrimButton) {
                 // 0.8.12 — GUARDA DE UI: as linhas de picker (mesh/tex/prim)
                 // só abrem o seletor com um TIC VIVO selecionado que tenha
                 // MeshRenderer. Sem alvo: hint (o main converte o flag em
                 // toast + log "ui: pick bloqueado (sem seleção)") — nunca
                 // o caminho "ERRO(sem TIC com mesh selecionado)" do C33.
+                // 0.10-M HOTFIX-2 (a causa (d) do bug do device): o
+                // TexSlotRow FALTAVA nesta condição — o ramo de baixo era
+                // CÓDIGO MORTO e o tap nas 5 linhas de slot não fazia NADA
+                // (o único caminho era a linha clássica que arma o slot 0 —
+                // "o picker escreve sempre no baseColor").
                 if (pickerGuardBlocked(scene, st.selected)) {
                     st.pickBlockedHint = true;
                 } else if (r.kind == InspRow::Kind::MeshButton) {
@@ -2133,7 +2139,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                     st.inspTexSlot = 0;               // a linha clássica = baseColor
                 } else if (r.kind == InspRow::Kind::TexSlotRow) {
                     // 0.10-M HOTFIX TEXTURAS-VINCULA: arma O SLOT e abre o
-                    // browser — o pick escreve O SLOT (irmãos intactos)
+                    // browser — o pick escreve O SLOT (irmãos intactos).
+                    // O id DA LINHA (kInspectorTexSlot0 + slot) é a identidade
+                    // do alvo: cada linha passa o SEU slot ao pick.
                     st.inspTexSlot = static_cast<u8>(
                         r.id >= kInspectorTexSlot0
                             ? (r.id - kInspectorTexSlot0)
@@ -3647,7 +3655,16 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
                 }
                 // F5.1-B: textura embutida do glTF/GLB aplica-se logo
                 // (import sem PC — o material fica referenciado)
+                // 0.10-M HOTFIX-2: os slots SEGUEM O MESH (a troca de mesh
+                // não herda as refs do mesh anterior) — limpa primeiro, o
+                // auto-bind de baixo volta a encher do GTB1 do NOVO mesh.
                 bool withTex = false;
+                std::string binds[MeshRenderer::kMeshTexSlots];
+                const bool haveBinds =
+                    res.matBinds && res.matBinds(rel, 0, binds);
+                for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
+                    mr->texSlotRef(s).clear();
+                }
                 if (res.meshTextureFor) {
                     const std::string texRel = res.meshTextureFor(rel);
                     if (!texRel.empty()) {
@@ -3660,10 +3677,22 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
                         }
                     }
                 }
-                if (!withTex && res.baseColorBind) {
+                if (!withTex && !binds[0].empty()) {
                     // 0.10-M HOTFIX TEXTURAS-VINCULA: o bind baseColor do
                     // GTB1 (o material 0 do .gmesh) — o apply de um mesh
                     // importado vem TEXTURADO (zero passos manuais)
+                    std::string warn;
+                    if (const Texture* tex =
+                            res.texture ? res.texture(binds[0], &warn)
+                                        : nullptr) {
+                        mr->texture = tex;
+                        mr->texPath = binds[0];
+                        withTex = true;
+                    }
+                }
+                if (!withTex && res.baseColorBind) {
+                    // o caminho de sempre (resolvers antigos/testes que só
+                    // trazem o baseColor — retro-compat byte a byte)
                     const std::string bindRel = res.baseColorBind(rel, 0);
                     if (!bindRel.empty()) {
                         std::string warn;
@@ -3673,6 +3702,19 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
                             mr->texture = tex;
                             mr->texPath = bindRel;
                             withTex = true;
+                        }
+                    }
+                }
+                if (haveBinds) {
+                    // 0.10-M HOTFIX-2 (o bug do device: 4 slots vazios): o
+                    // auto-bind COMPLETO — cada slot não-vazio do GTB1
+                    // entra na sua linha do Inspector (o slot 0 já pode ter
+                    // vindo da embutida acima; nunca se sobrepõe). O GL de
+                    // hoje carrega o slot 0 — os 1-4 esperam os samplers
+                    // (a fronteira documentada no relatório do hotfix 1).
+                    for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
+                        if (!binds[s].empty()) {
+                            mr->texSlotRef(s) = binds[s];
                         }
                     }
                 }

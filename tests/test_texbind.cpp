@@ -21,12 +21,15 @@
 #include "assets/AssetConverter.h"
 #include "assets/GOwnFormats.h"
 #include "assets/GltfInstantiate.h"
+#include "assets/ResourceManager.h"   // o matBindsOf REAL (HOTFIX-2)
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
 #include "core/FsStorage.h"
 #include "core/Scene.h"
 #include "core/TransformSystem.h"
 #include "platform/EngineLog.h"   // elog::init — o log que os pins leem
+#include "render/GpuAssets.h"     // o matBindsOf REAL (HOTFIX-2)
+#include "render/Mesh.h"          // o sentinela do apply (HOTFIX-2)
 #include "render/Texture.h"
 #include "ui/EditorUi.h"
 
@@ -166,6 +169,47 @@ std::string gltfBinds(u32 nMats, bool comPai) {
                "\"nodes\":" +
                nodes +
                ",\"scenes\":[{\"nodes\":[0]}]}");
+}
+
+// 1 material com OS CINCO slots (5 imagens distintas) — a matriz do
+// HOTFIX-2 (o bug do device: o parse só trazia baseColor+normal e os
+// outros 3 slots nunca chegavam ao GTB1)
+std::string gltf5slots() {
+    const std::string mats =
+        "{\"name\":\"mat0\",\"pbrMetallicRoughness\":{"
+        "\"baseColorTexture\":{\"index\":0},"
+        "\"metallicRoughnessTexture\":{\"index\":2}},"
+        "\"normalTexture\":{\"index\":1},"
+        "\"emissiveTexture\":{\"index\":3},"
+        "\"occlusionTexture\":{\"index\":4}}";
+    std::string texs;
+    for (u32 i = 0; i < 5; ++i) {
+        texs += (i ? "," : "") + std::string("{\"source\":") +
+                std::to_string(i) + "}";
+    }
+    return std::string(
+               "{\"asset\":{\"version\":\"2.0\"},"
+               "\"buffers\":[{\"byteLength\":42}],"
+               "\"bufferViews\":["
+               "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+               "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":6}],"
+               "\"accessors\":["
+               "{\"bufferView\":0,\"componentType\":5126,\"count\":3,"
+               "\"type\":\"VEC3\",\"min\":[0,0,0],\"max\":[1,1,0]},"
+               "{\"bufferView\":1,\"componentType\":5123,\"count\":3,"
+               "\"type\":\"SCALAR\"}],"
+               "\"materials\":[" +
+               mats +
+               "],"
+               "\"textures\":[" +
+               texs +
+               "],"
+               "\"images\":[],"
+               "\"meshes\":[{\"name\":\"tri\",\"primitives\":["
+               "{\"attributes\":{\"POSITION\":0},\"indices\":1,"
+               "\"material\":0}]}],"
+               "\"nodes\":[{\"name\":\"raiz\",\"mesh\":0}],"
+               "\"scenes\":[{\"nodes\":[0]}]}");
 }
 
 std::string gltfComImagens(const std::string& jsonNoImgs,
@@ -462,6 +506,146 @@ TEST(subarvore_real_pai_local_e_mundo_composto) {
     EXPECT(trf->world.m[12] == 2.5f);   // 2.0 (pai) + 0.5 (filho local)
     EXPECT(trf->world.m[13] == 0.25f);
     EXPECT(trp->world.m[12] == 2.0f);
+}
+
+// ---- HOTFIX-2 · o PIN da matriz: import com OS 5 SLOTS do glTF -----------
+// (o bug do device: «4 .gtext no disco mas só o baseColor preenchido» —
+// o parse só lia baseColor+normal; a cura lê os 5 e o GTB1 leva-os TODOS
+// + 1 linha de log por slot + o matBindsOf REAL devolve os 5)
+TEST(bind2_import_5_slots_matriz_log_e_matbindsof) {
+    const std::string base = std::string("/tmp/goni_tb4_") +
+                             std::to_string(static_cast<long>(::getpid()));
+    system(("mkdir -p " + base + "/proj " + base + "/logs").c_str());
+    const std::vector<u8> png = readFixture("green4096.png");
+    ASSERT(png.size() > 8u);
+    const std::vector<u8> glb = makeGlb(
+        gltfComImagens(gltf5slots(), png, 5u), triBuffer());
+    const std::string src = base + "/modelo.glb";
+    ASSERT(writeSrc(src, glb));
+    elog::init((base + "/logs").c_str());   // o engine.log que o pin lê
+    FsStorage st((base + "/proj").c_str());
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    ASSERT(convert::importFile(src, "modelo.glb", st, nullptr, out, stats,
+                               err));
+    elog::shutdown();
+    EXPECT(stats.textures == 5u);   // OS CINCO .gtext (o pin do dono)
+    ASSERT(out.meshes.size() == 1u);
+    std::vector<u8> bytes;
+    ASSERT(st.readBytes(out.meshes[0], bytes));
+    GMeshV3Meta meta;
+    std::vector<GMeshV3Block> blocks;
+    std::vector<std::string> names;
+    std::vector<GMeshMatBind> binds;
+    ASSERT(readGMeshV3Meta(bytes.data(), bytes.size(), meta, blocks, names,
+                           err, &binds));
+    ASSERT(binds.size() == 1u);
+    EXPECT(binds[0].materialIndex == 0u);
+    // OS 5 SLOTS no GTB1 (a cura da causa (a)): cada slot com o SEU caminho
+    for (u8 s = 0; s < kBindSlotCount; ++s) {
+        EXPECT(binds[0].tex[s] == "assets/modelo_" +
+                                      std::to_string(static_cast<int>(s)) +
+                                      ".gtext");
+    }
+    EXPECT(contaSlots(binds) == 5u);
+    // os 5 ficheiros EXISTEM (o passe de texturas escreveu-os)
+    for (u8 s = 0; s < kBindSlotCount; ++s) {
+        std::vector<u8> tb;
+        EXPECT(st.readBytes("assets/modelo_" +
+                                std::to_string(static_cast<int>(s)) +
+                                ".gtext",
+                            tb) && !tb.empty());
+    }
+    // O PIN: UMA LINHA DE LOG POR SLOT (slot+nome) — 5 linhas
+    const std::string log = slurp(base + "/logs/engine.log");
+    for (u8 s = 0; s < kBindSlotCount; ++s) {
+        const std::string want =
+            std::string("textura: vinculada material 'mat0' slot ") +
+            kBindSlotName(s) + " -> assets/modelo_" +
+            std::to_string(static_cast<int>(s)) + ".gtext";
+        EXPECT(log.find(want) != std::string::npos);
+    }
+    // A CURA (b) no RUNTIME: o matBindsOf REAL sobre o storage — os 5
+    // slots saem do MESMO bloco (o auto-bind do apply enche-os todos)
+    ResourceManager rm;
+    rm.setStorage(&st);
+    GpuAssets gpu;
+    gpu.init(&rm);
+    std::string rb[kBindSlotCount];
+    ASSERT(gpu.matBindsOf(out.meshes[0], 0, rb));
+    for (u8 s = 0; s < kBindSlotCount; ++s) {
+        EXPECT(rb[s] == binds[0].tex[s]);
+    }
+    EXPECT(!gpu.matBindsOf(out.meshes[0], 1, rb));   // material 1 não existe
+    EXPECT(gpu.baseColorBindOf(out.meshes[0], 0) ==
+           "assets/modelo_0.gtext");   // o wrapper de sempre (contrato)
+}
+
+// ---- HOTFIX-2 · o PIN do auto-bind: o apply enche OS 5 SLOTS do TIC ------
+// (a cura (b): o baseColorBindOf só devolvia o baseColor — os outros 4
+// slots do Inspector ficavam vazios mesmo com o GTB1 completo). E a troca
+// de mesh leva os slots ATRÁS (o vestígio do mesh anterior morre).
+TEST(bind2_autobind_5_slots_no_apply_e_troca_de_mesh) {
+    Scene scene;
+    const Handle h = scene.create("tic");
+    MeshRenderer* mr = scene.get(h)->addComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+    mr->texPath = "assets/velha.gtext";       // do mesh anterior
+    mr->texNormal = "assets/vestigio.gtext";  // idem
+    editor::AssetCatalog cat;
+    cat.meshes = {"assets/m.gmesh", "assets/o.gmesh", "assets/s.gmesh"};
+    editor::AssetResolvers res;
+    static Texture dummy;
+    static Mesh* const kMeshSent = reinterpret_cast<Mesh*>(0x21);
+    res.mesh = [](const std::string&) -> Mesh* { return kMeshSent; };
+    res.texture = [](const std::string&, std::string*) -> const Texture* {
+        return &dummy;
+    };
+    res.matBinds = [](const std::string& ref, u32,
+                      std::string (&out)[MeshRenderer::kMeshTexSlots]) -> bool {
+        for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
+            out[s].clear();
+        }
+        if (ref == "assets/m.gmesh") {
+            out[0] = "assets/m_0.gtext"; out[1] = "assets/m_1.gtext";
+            out[2] = "assets/m_2.gtext"; out[3] = "assets/m_3.gtext";
+            out[4] = "assets/m_4.gtext";
+            return true;
+        }
+        if (ref == "assets/o.gmesh") {
+            out[0] = "assets/o_0.gtext"; out[1] = "assets/o_1.gtext";
+            return true;
+        }
+        return false;   // o s.gmesh não tem GTB1
+    };
+    // o apply do m.gmesh (pick 3 = ficheiro 0): OS 5 SLOTS preenchidos
+    const editor::AssetPickOutcome o1 =
+        editor::applyAssetPick(scene, h, 1, 3, cat, res, 0);
+    ASSERT(o1.applied);
+    EXPECT(mr->meshPath == "assets/m.gmesh");
+    EXPECT(mr->texPath == "assets/m_0.gtext");   // slot 0 + GL carregado
+    EXPECT(mr->texture == &dummy);
+    EXPECT(mr->texNormal == "assets/m_1.gtext");
+    EXPECT(mr->texMetalRough == "assets/m_2.gtext");
+    EXPECT(mr->texEmissive == "assets/m_3.gtext");
+    EXPECT(mr->texOcclusion == "assets/m_4.gtext");
+    // a troca para o o.gmesh: os slots SEGUEM O MESH (o vestígio morre)
+    const editor::AssetPickOutcome o2 =
+        editor::applyAssetPick(scene, h, 1, 4, cat, res, 0);
+    ASSERT(o2.applied);
+    EXPECT(mr->texPath == "assets/o_0.gtext");
+    EXPECT(mr->texNormal == "assets/o_1.gtext");
+    EXPECT(mr->texMetalRough.empty());   // o m_2 NÃO sobrevive à troca
+    EXPECT(mr->texEmissive.empty());
+    EXPECT(mr->texOcclusion.empty());
+    // mesh SEM GTB1: os slots ficam LIMPOS (nenhum vestígio falso)
+    const editor::AssetPickOutcome o3 =
+        editor::applyAssetPick(scene, h, 1, 5, cat, res, 0);
+    ASSERT(o3.applied);
+    EXPECT(mr->texPath.empty());
+    EXPECT(mr->texNormal.empty());
+    EXPECT(mr->texEmissive.empty());
 }
 
 // ---- a composição de pais no TransformSystem (a dívida do polish paga) -----

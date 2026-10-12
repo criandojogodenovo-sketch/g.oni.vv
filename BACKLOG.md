@@ -134,6 +134,25 @@
   próprio) está documentada no relatório §7 — mover é só workflow, sem
   tocar no teste. Nada a fazer hoje.
 
+## 0.10.7 HOTFIX-2 — TEXTURAS-VINCULA-2 (os 5 slots do import e do picker) — FEITO
+
+- **FEITO 0.10.7-hotfix-2**: o device revelou 2 bugs residuais do vc 64
+  e a cura fecha-os: (1) o parse lê OS 5 slots do glTF
+  (metallicRoughness/emissive/occlusion faltavam — o GTB1 nunca os
+  recebia) e o auto-bind (apply + import EXPANDIDO) enche OS 5 slots do
+  TIC pelo `GpuAssets::matBindsOf` novo (o `baseColorBindOf` vira
+  wrapper); a troca de mesh leva os slots atrás; (2) o ramo do
+  `TexSlotRow` no dispatch do Inspector era CÓDIGO MORTO (faltava na
+  condição externa — o tap nas 5 linhas não fazia nada e o único caminho
+  era a linha clássica que arma o 0: «o picker escreve sempre no
+  baseColor»). Mutações M-TB2a/M-TB2b vermelho→verde · test_core 935/0 ·
+  c33 797/797. Relatório:
+  docs/RELATORIO-0.10-M-HOTFIX-TEXTURAS-VINCULA-2.md.
+- **POR FAZER (o dono agenda)**: os samplers dos slots 1-4 no shader lit
+  (mantém-se do hotfix 1); a edição por MATERIAL no Inspector (o conjunto
+  do TIC é o material 0 do auto-bind — o render por material já é do
+  blockHull); a migração dos .gmesh antigos é reimportar.
+
 ## 0.10.7 HOTFIX — TEXTURAS-VINCULA (+ sub-TICs reais) — FEITO
 
 - **FEITO 0.10.7-hotfix**: o import liga as texturas ao mesh (o bloco

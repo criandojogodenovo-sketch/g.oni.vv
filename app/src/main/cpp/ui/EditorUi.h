@@ -626,6 +626,13 @@ struct AssetResolvers {
     // (o auto do apply — o dono escolhe o mesh e a textura VEM; o pin
     // «zero passos manuais no caso comum»). Null = sem auto-bind.
     std::string (*baseColorBind)(const std::string& ref, u32 materialIndex) = nullptr;
+    // 0.10-M HOTFIX-2 (TEXTURAS-VINCULA-2): os CINCO binds do GTB1 (o
+    // mesmo bloco, o material pedido) — o auto-bind COMPLETO: os 5 slots
+    // do TIC ficam preenchidos (o bug do device: só o baseColor ficava).
+    // True = o material TEM entrada no GTB1 (out[] carregado; "" = slot
+    // vazio). Null/sem bloco = o caminho de sempre (baseColorBind).
+    bool (*matBinds)(const std::string& ref, u32 materialIndex,
+                     std::string (&out)[MeshRenderer::kMeshTexSlots]) = nullptr;
     Mesh*       cubeMesh = nullptr;      // cubo procedural do main
     LitMaterial* material = nullptr;    // lit do renderer
     // 0.8.10: o resolver `prim` MORREU com o cache — o pick ARMA o pedido

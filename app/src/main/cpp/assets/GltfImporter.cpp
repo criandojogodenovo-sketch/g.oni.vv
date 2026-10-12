@@ -666,6 +666,18 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                             textureSources[static_cast<size_t>(ix->number)];
                     }
                 }
+                // 0.10-M HOTFIX-2: o metallicRoughnessTexture vive DENTRO do
+                // pbrMetallicRoughness (o mesmo mapa textureSources → IMAGEM)
+                if (const Json* mt = pbr->find("metallicRoughnessTexture");
+                    mt && mt->type == Json::Type::Object) {
+                    if (const Json* ix = mt->find("index");
+                        ix && ix->type == Json::Type::Number &&
+                        ix->number >= 0 &&
+                        ix->number < static_cast<f64>(textureSources.size())) {
+                        gm.metalRoughTex =
+                            textureSources[static_cast<size_t>(ix->number)];
+                    }
+                }
             }
             // PASSO 5A: normalTexture.index → IMAGEM (mesmo mapa das texturas
             // de cor) — a marca do caminho RGBA8 sem perda de canais
@@ -676,6 +688,28 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                     ix->number >= 0 &&
                     ix->number < static_cast<f64>(textureSources.size())) {
                     gm.normalTex =
+                        textureSources[static_cast<size_t>(ix->number)];
+                }
+            }
+            // 0.10-M HOTFIX-2: emissiveTexture e occlusionTexture ao nível do
+            // material (o mesmo mapa) — os 5 slots do GTB1 ficam COMPLETOS
+            if (const Json* et = m.find("emissiveTexture");
+                et && et->type == Json::Type::Object) {
+                if (const Json* ix = et->find("index");
+                    ix && ix->type == Json::Type::Number &&
+                    ix->number >= 0 &&
+                    ix->number < static_cast<f64>(textureSources.size())) {
+                    gm.emissiveTex =
+                        textureSources[static_cast<size_t>(ix->number)];
+                }
+            }
+            if (const Json* ot = m.find("occlusionTexture");
+                ot && ot->type == Json::Type::Object) {
+                if (const Json* ix = ot->find("index");
+                    ix && ix->type == Json::Type::Number &&
+                    ix->number >= 0 &&
+                    ix->number < static_cast<f64>(textureSources.size())) {
+                    gm.occlusionTex =
                         textureSources[static_cast<size_t>(ix->number)];
                 }
             }

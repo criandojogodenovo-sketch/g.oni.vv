@@ -406,6 +406,83 @@ TEST(ui_tap_redespachado_botoes_do_plano) {
     // (o gesto nasceu DENTRO da região → foi de scroll/tap sem alvo)
 }
 
+// ---------------------------------------------------------------------------
+// 0.10-M HOTFIX-2 (TEXTURAS-VINCULA-2) — O PIN DA CAUSA (d): o tap numa
+// linha de SLOT arma O SLOT. No device o ramo do TexSlotRow era CÓDIGO
+// MORTO (faltava na condição externa do dispatch) — o tap nas 5 linhas não
+// fazia NADA e o único caminho era a linha clássica (tex:) que arma o 0 —
+// "o picker escreve sempre no baseColor". Aqui: a cadeia COMPLETA — linha
+// → inspTexSlot → applyAssetPick escreve O SLOT (irmãos intactos).
+TEST(ui_tap_na_linha_de_slot_arma_o_slot) {
+    Env e(false, true);   // TIC com MeshRenderer (o alvo do pick)
+    EXPECT(e.ok);
+
+    const Tic* tic = e.scene.get(e.selected);
+    const TextMetrics tm = e.ui.textMetrics();
+    const InspProfile prof = inspectorProfile(*tic);
+    InspRow plan[64];
+    const u32 n = inspectorPlan(prof, tm, true, 0u, plan);
+    const UiRect panel = safe::inspectorPanelRect(kSW, kSH, safe::Insets{});
+    const f32 contentTop = panel.y + kHeaderH + 4.0f;
+
+    // as 5 linhas de slot (kInspectorTexSlot0..+4) com ids DISTINTOS
+    f32 slotY[MeshRenderer::kMeshTexSlots] = {};
+    u32 nSlots = 0;
+    for (u32 i = 0; i < n; ++i) {
+        if (plan[i].kind == InspRow::Kind::TexSlotRow &&
+            plan[i].id >= kInspectorTexSlot0 &&
+            plan[i].id < kInspectorTexSlot0 + MeshRenderer::kMeshTexSlots) {
+            slotY[plan[i].id - kInspectorTexSlot0] = plan[i].y;
+            ++nSlots;
+        }
+    }
+    ASSERT(nSlots == 5u);   // as 5 linhas no plano (o Material não colapsado)
+
+    e.frame();   // cria o slot de scroll do Inspector
+    const f32 contentH = inspectorContentHeight(prof, tm, true, 0u);
+    const f32 listH = panel.h - kHeaderH - 4.0f;
+    // a secção Material fica A MEIO do plano — rolamos SÓ o suficiente para
+    // a linha ficar visível (o max-offset do addTc deixa-a ACIMA da janela)
+    const f32 off = scroll::clampOffset(slotY[1] - 24.0f, contentH, listH);
+    e.ui.scrollSetOffset(kInspectorScrollId, off);
+
+    // tap na linha do slot 1 (normal) → arma O SLOT 1 e abre o seletor
+    e.input.injectDown(0, panel.x + panel.w * 0.5f,
+                       contentTop + slotY[1] - off + 10.0f);
+    e.input.injectUp(0);
+    e.frame();
+    EXPECT(e.st.assetMenu == 2);
+    EXPECT(e.st.inspTexSlot == 1);   // O SLOT da linha (era 0 — código morto)
+
+    // tap na linha do slot 3 (emissive) → arma 3 (o id É a identidade)
+    e.st.assetMenu = 0;
+    e.input.injectDown(0, panel.x + panel.w * 0.5f,
+                       contentTop + slotY[3] - off + 10.0f);
+    e.input.injectUp(0);
+    e.frame();
+    EXPECT(e.st.assetMenu == 2);
+    EXPECT(e.st.inspTexSlot == 3);
+
+    // a CADEIA COMPLETA do device: o pick com o slot ARMADO escreve O SLOT
+    // — o emissive muda, o baseColor (texPath) fica INTACTO (o pin do dono)
+    e.st.assetMenu = 0;
+    editor::AssetCatalog cat;
+    cat.textures = {"assets/nova.gtext"};
+    editor::AssetResolvers res;
+    static Texture dummy;
+    res.texture = [](const std::string&, std::string*) -> const Texture* {
+        return &dummy;
+    };
+    const editor::AssetPickOutcome out = editor::applyAssetPick(
+        e.scene, e.selected, 2, 2, cat, res, e.st.inspTexSlot);
+    EXPECT(out.applied);
+    const MeshRenderer* mr = e.scene.get(e.selected)->getComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+    EXPECT(mr->texEmissive == "assets/nova.gtext");   // O SLOT armado
+    EXPECT(mr->texPath == "textures/wood.png");       // o baseColor INTACTO
+    EXPECT(mr->texNormal.empty());                    // irmão intocado
+}
+
 // o plano e o conteúdo respeitam a área ÚTIL com insets do C33 (nav bar à
 // direita): o painel encolhe e o scroll compensa — nada sai do contentRect
 TEST(ui_inspector_com_insets_scroll_compensa) {

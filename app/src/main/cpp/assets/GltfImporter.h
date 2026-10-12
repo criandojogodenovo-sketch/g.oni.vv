@@ -62,6 +62,14 @@ struct GltfMaterial {
     // encaminha estas imagens para o caminho RGBA8 SEM PERDA DE CANAIS
     // (comprimidos lossy destruem normais: os canais cruzam-se nos blocos)
     i32 normalTex = -1;
+    // 0.10-M HOTFIX-2 (TEXTURAS-VINCULA-2): os OUTROS TRÊS slots do glTF —
+    // o bug do device («só o baseColor aparece preenchido»): o parse só lia
+    // baseColor+normal, o mapa material→slots ficava com 4 slots vazios e o
+    // GTB1 nunca os trazia. metallicRoughness vive DENTRO de
+    // pbrMetallicRoughness; emissive e occlusion ao nível do material.
+    i32 metalRoughTex = -1;   // pbrMetallicRoughness.metallicRoughnessTexture
+    i32 emissiveTex = -1;     // emissiveTexture
+    i32 occlusionTex = -1;    // occlusionTexture
 };
 
 // ---- 0.8.1 (F7): ANIMAÇÕES ------------------------------------------------

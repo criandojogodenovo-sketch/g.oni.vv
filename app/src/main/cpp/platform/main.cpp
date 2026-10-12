@@ -2847,6 +2847,29 @@ void importJobFinish() {
         ictx.material = g_renderer.litMaterial();
         const std::vector<Handle> created =
             gltfExpandInstantiate(g_scene, out.expandNodes, out.meshes, ictx);
+        // 0.10-M HOTFIX-2 (TEXTURAS-VINCULA-2): o auto-bind dos 5 slots do
+        // Inspector NAS PEÇAS do import EXPANDIDO (o MESMO do apply do
+        // fundido): os binds do GTB1 da peça (material 0) enchem os slots
+        // do MeshRenderer — o dono vê o .gtext de cada slot sem um passo
+        // manual. TICs recém-nascidos (todos os slots vazios — nada a
+        // limpar); falha de leitura = segue honesto (o render das PEÇAS já
+        // vem do blockHull — o bind por material do bloco).
+        for (const Handle h : created) {
+            Tic* t = g_scene.get(h);
+            MeshRenderer* mr = t ? t->getComponent<MeshRenderer>() : nullptr;
+            if (!mr || mr->meshPath.empty()) {
+                continue;
+            }
+            std::string binds[MeshRenderer::kMeshTexSlots];
+            if (!g_gpu.matBindsOf(mr->meshPath, 0, binds)) {
+                continue;
+            }
+            for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
+                if (!binds[s].empty()) {
+                    mr->texSlotRef(s) = binds[s];
+                }
+            }
+        }
         // o FIT único (o MESMO alvo do applyAssetPick 0.8.9): a caixa do
         // modelo INTEIRO em mundo (união das PEÇAS novas transformadas
         // pelos seus TICs) define o fator — aplicado a CADA TIC novo como
@@ -3950,6 +3973,12 @@ editor::AssetResolvers makeAssetResolvers() {
     res.baseColorBind = [](const std::string& ref,
                            u32 materialIndex) -> std::string {
         return g_gpu.baseColorBindOf(ref, materialIndex);
+    };
+    // 0.10-M HOTFIX-2: os CINCO binds do GTB1 (o auto-bind completo — os
+    // 5 slots do TIC ficam preenchidos no apply do mesh importado)
+    res.matBinds = [](const std::string& ref, u32 materialIndex,
+                      std::string (&out)[MeshRenderer::kMeshTexSlots]) -> bool {
+        return g_gpu.matBindsOf(ref, materialIndex, out);
     };
     res.cubeMesh = &g_cubeMesh;
     res.material = g_renderer.litMaterial();

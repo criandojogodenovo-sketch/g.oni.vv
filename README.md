@@ -34,6 +34,33 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.10.7 — 0.10-M HOTFIX-2: TEXTURAS-VINCULA-2 — os 5 slots do import e do picker fechados no device
+
+**Os 2 bugs residuais do vc 64 (o dono no device)**: o import criava vários
+`.gtext` mas só o baseColor aparecia preenchido no Inspector (normal,
+emissive, metallicRoughness, occlusion vazios) e o picker não aceitava
+preencher os 4 — escrevia sempre no mesmo slot.
+
+- **A causa raiz (ficheiro+função)**: o `parseGltf` (GltfImporter.cpp) só
+  lia `baseColorTexture`+`normalTexture` — `GltfMaterial` NÃO TINHA campos
+  para os outros 3, logo o GTB1 nunca os recebia; e o ramo do `TexSlotRow`
+  no dispatch do Inspector (EditorUi.cpp) era **CÓDIGO MORTO** (faltava na
+  condição externa) — o tap nas 5 linhas não fazia NADA e o único caminho
+  era a linha clássica `tex:` que arma o 0 («o picker escreve sempre no
+  baseColor»).
+- **A cura**: o parse lê OS 5 slots (metallicRoughness dentro do pbr,
+  emissive/occlusion ao nível do material); `GpuAssets::matBindsOf` (novo;
+  `baseColorBindOf` vira wrapper) devolve os 5 binds pelo caminho ligeiro
+  R-044; o auto-bind (apply + import EXPANDIDO) enche os 5 slots do TIC e
+  a troca de mesh leva-os atrás; o `TexSlotRow` entra na condição externa
+  — cada linha passa o SEU slot ao pick (irmãos intactos, o pin mantém-se).
+- **As provas**: 3 pins novos (a matriz de 5 slots com 5 linhas de log
+  slot+nome; o auto-bind dos 5 + a troca; o tap a armar 1 e 3 com o pick a
+  escrever o emissive sem tocar no baseColor) · mutações M-TB2a (write só
+  1 slot → 8 asserts vermelhos) e M-TB2b (pick rejeita não-base → 2+8
+  vermelhos) vermelho→verde · test_core 935/0 · c33 797/797 · versionCode
+  65. Relatório: docs/RELATORIO-0.10-M-HOTFIX-TEXTURAS-VINCULA-2.md.
+
 ## 0.10.7 — 0.10-M HOTFIX: TEXTURAS-VINCULA (+ sub-TICs reais) — o import liga as texturas ao mesh, zero passos manuais
 
 **O bug do dono (C33)**: modelo importado com texturas chegava SEM textura

@@ -839,19 +839,24 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
         }
         for (const GltfMaterial& m : model.materials) {
             std::array<std::string, 5> slots{};
-            if (m.baseColorTex >= 0 &&
-                m.baseColorTex < static_cast<i32>(imgViable.size()) &&
-                imgViable[static_cast<size_t>(m.baseColorTex)]) {
-                slots[kBindBaseColor] = "assets/" + stem + "_" +
-                                        std::to_string(m.baseColorTex) +
-                                        ".gtext";
-            }
-            if (m.normalTex >= 0 &&
-                m.normalTex < static_cast<i32>(imgViable.size()) &&
-                imgViable[static_cast<size_t>(m.normalTex)]) {
-                slots[kBindNormal] = "assets/" + stem + "_" +
-                                     std::to_string(m.normalTex) + ".gtext";
-            }
+            // 0.10-M HOTFIX-2: helper local — o gate é o MESMO dos 5 slots
+            // (imagem viva + dentro do teto); o nome deriva do ÍNDICE DA
+            // IMAGEM (a MESMA regra de naming do passe de texturas)
+            const auto viable = [&](i32 img) -> std::string {
+                if (img < 0 || img >= static_cast<i32>(imgViable.size()) ||
+                    !imgViable[static_cast<size_t>(img)]) {
+                    return "";
+                }
+                return "assets/" + stem + "_" + std::to_string(img) + ".gtext";
+            };
+            slots[kBindBaseColor] = viable(m.baseColorTex);
+            slots[kBindNormal] = viable(m.normalTex);
+            // 0.10-M HOTFIX-2 (o bug do device: 4 slots vazios): os TRÊS
+            // slots que o parse agora traz — o mapa material→slots fica
+            // COMPLETO e o GTB1 leva os 5 (o log por slot do stream segue)
+            slots[kBindMetalRough] = viable(m.metalRoughTex);
+            slots[kBindEmissive] = viable(m.emissiveTex);
+            slots[kBindOcclusion] = viable(m.occlusionTex);
             const bool any = !slots[0].empty() || !slots[1].empty() ||
                              !slots[2].empty() || !slots[3].empty() ||
                              !slots[4].empty();

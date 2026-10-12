@@ -65,6 +65,14 @@ public:
     // material ("" = sem bind/sem stat — o chamador segue honesto).
     std::string baseColorBindOf(const std::string& ref, u32 materialIndex);
 
+    // 0.10-M HOTFIX-2 (TEXTURAS-VINCULA-2) — o MESMO caminho ligeiro, os
+    // CINCO slots: o bug do device («só o baseColor fica preenchido») era
+    // o auto-bind só-baseColor; o TIC fica com os 5 slots do GTB1 (o
+    // material pedidxo). false = sem bind/sem stat — o chamador segue
+    // honesto (out fica todo vazio).
+    bool matBindsOf(const std::string& ref, u32 materialIndex,
+                    std::string (&out)[kBindSlotCount]);
+
     // 0.10.6 (SAF-SEAM) — o ÚLTIMO erro de mesh()/blockHull() (a linha do
     // «asset corrompido, reimporta» chega ao TOAST do picker, não SÓ ao
     // engine.log: a spec manda o estado do picker ANTERIOR + a mensagem
