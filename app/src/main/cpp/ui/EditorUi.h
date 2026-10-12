@@ -122,6 +122,14 @@ struct EditorState {
     // único global). Afervel na suíte (o pin da auditoria de estado).
     u8     inspTexSlot = 0;
 
+    // 0.10-M HOTFIX TEXTURAS-MULTIMAT — O MATERIAL ARMADO da secção
+    // Material (0..N-1; 0 = o de sempre). O seletor «material: i/N» (as
+    // setas ‹ ›) arma ISTO; as 5 linhas de slot mostram O MATERIAL
+    // SELECIONADO e o pick escreve NO MATERIAL selecionado (o pin: pick no
+    // material 2 não toca no 0). Reposto a 0 na TROCA de TIC selecionado
+    // (o mesmo ponto do inspPrevSelected).
+    u32    inspMatIdx = 0;
+
     // FASE 9 (G2-7 — long-press no nome truncado da hierarquia): o contador
     // de frames do dedo PARADO na linha + o tip pendente (o main converte
     // em toast). ~30 frames = 0.5s @60fps.
@@ -669,9 +677,14 @@ struct AssetPickOutcome {
 // Material (0..4; 0 = baseColor) — o pick de textura escreve O SLOT
 // escolhido (os irmãos intactos; o pin da auditoria de estado). O
 // default 0 mantém o contrato dos chamadores antigos byte a byte.
+// 0.10-M HOTFIX TEXTURAS-MULTIMAT: `materialIndex` = o material ARMADO
+// pelo seletor «material: i/N» (0 = o de sempre) — o pick escreve NO
+// MATERIAL selecionado (os OUTROS materiais intactos — o pin do dono).
+// Fora da grade do mesh = clamp ao último material (nunca material
+// fantasma); mesh de 1 material = 0 (o comportamento byte a byte).
 AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int pick,
                                 const AssetCatalog& catalog, const AssetResolvers& res,
-                                u32 texSlot = 0);
+                                u32 texSlot = 0, u32 materialIndex = 0);
 
 // ---- 0.7.4: DISPATCH da escolha do seletor de TEXTURA DE ELEMENTO (menuKind 3)
 //

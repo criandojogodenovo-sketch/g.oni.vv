@@ -31,6 +31,7 @@
 #include "render/Material.h"
 #include "render/Primitives.h"
 #include <string>
+#include <vector>
 
 namespace vv {
 
@@ -95,6 +96,57 @@ public:
             case 4: return texOcclusion;
             default: return texPath;   // nunca acontece (k < kMeshTexSlots)
         }
+    }
+
+    // 0.10-M HOTFIX TEXTURAS-MULTIMAT — os SLOTS dos MATERIAIS 1..N-1 do
+    // .gmesh (o material 0 são os 5 campos de cima — fonte de verdade de
+    // sempre). O auto-bind (import/apply/troca) enche (N-1)×5 refs do GTB1
+    // (VAZIAS incluídas — a grade é retangular); o seletor «material: i/N»
+    // do Inspector mostra ESTE material e o pick escreve NO MATERIAL
+    // SELECIONADO (o pin do dono: pick no material 2 não toca no 0).
+    // Vector achatado — 5 refs por material extra na ordem kBind*. Vazio =
+    // mesh de 1 material (o comportamento byte a byte de sempre). O Nº de
+    // materiais deriva AQUI (zero leitura de ficheiro por frame — a lei
+    // R-044: a UI não faz I/O no caminho quente).
+    std::vector<std::string> matExtraTex;
+
+    // nº de materiais que ESTE TIC conhece (1 + os extras carregados do
+    // GTB1; o render POR BLOCO usa o GTB1 na mesma — aqui é a EDIÇÃO)
+    u32 matCount() const {
+        return static_cast<u32>(matExtraTex.size()) / kMeshTexSlots + 1u;
+    }
+    // reposição da grade extras (o auto-bind; n = 1 limpa — honesto)
+    void setMatCount(u32 n) {
+        const size_t want =
+            n > 0 ? static_cast<size_t>(n - 1) * kMeshTexSlots : 0u;
+        matExtraTex.resize(want);
+    }
+    // a ref do slot (mat, slot) — LEITURA; fora da grade = vazia (nunca
+    // cresce por aqui — a leitura é const)
+    const std::string& matTex(u32 mat, u32 slot) const {
+        static const std::string kEmpty;
+        if (mat == 0) {
+            return texSlot(slot);
+        }
+        if (slot >= kMeshTexSlots) {
+            return kEmpty;
+        }
+        const size_t i =
+            (static_cast<size_t>(mat) - 1) * kMeshTexSlots + slot;
+        return i < matExtraTex.size() ? matExtraTex[i] : kEmpty;
+    }
+    // a ref do slot (mat, slot) — ESCRITA (o pick); nullptr = fora da grade
+    // (o chamador NÃO cria material fantasma — o guard do clamp manda)
+    std::string* matTexRef(u32 mat, u32 slot) {
+        if (mat == 0) {
+            return &texSlotRef(slot);
+        }
+        if (slot >= kMeshTexSlots) {
+            return nullptr;
+        }
+        const size_t i =
+            (static_cast<size_t>(mat) - 1) * kMeshTexSlots + slot;
+        return i < matExtraTex.size() ? &matExtraTex[i] : nullptr;
     }
 
     // 0.8.10 — primitiva procedural ativa? kind+parâmetros em `prim`; o

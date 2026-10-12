@@ -46,6 +46,7 @@ enum class Icon : u8 {
     Hamburger,      // ☰ menu
     ChevronDown,    // v (expande/colapsa)
     ChevronRight,   // > (fechado/avança)
+    ChevronLeft,    // < (0.10-M MULTIMAT: a seta ‹ do seletor de material)
     Sliders,        // 3 linhas com knobs (viewport settings)
     Gear,           // definições
     Cube,           // modo 3D / TIC de mesh

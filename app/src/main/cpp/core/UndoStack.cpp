@@ -32,6 +32,7 @@ TicSnap snapTic(const Scene& scene, Handle h) {
         std::snprintf(s.texMetalRough, sizeof(s.texMetalRough), "%s", mr->texMetalRough.c_str());
         std::snprintf(s.texEmissive, sizeof(s.texEmissive), "%s", mr->texEmissive.c_str());
         std::snprintf(s.texOcclusion, sizeof(s.texOcclusion), "%s", mr->texOcclusion.c_str());
+        s.matExtraTex = mr->matExtraTex;   // MULTIMAT: a grade inteira
         s.tint[0] = mr->tint[0];
         s.tint[1] = mr->tint[1];
         s.tint[2] = mr->tint[2];
@@ -88,6 +89,7 @@ Handle restoreTic(Scene& scene, const TicSnap& s, Handle current) {
             mr->texMetalRough = s.texMetalRough;
             mr->texEmissive = s.texEmissive;
             mr->texOcclusion = s.texOcclusion;
+            mr->matExtraTex = s.matExtraTex;   // MULTIMAT: a grade inteira
             mr->tint[0] = s.tint[0];
             mr->tint[1] = s.tint[1];
             mr->tint[2] = s.tint[2];
@@ -141,6 +143,7 @@ Handle pasteAsNew(Scene& scene, const TicSnap& s) {
             mr->texMetalRough = s.texMetalRough;
             mr->texEmissive = s.texEmissive;
             mr->texOcclusion = s.texOcclusion;
+            mr->matExtraTex = s.matExtraTex;   // MULTIMAT: a grade inteira
             mr->tint[0] = s.tint[0];
             mr->tint[1] = s.tint[1];
             mr->tint[2] = s.tint[2];
@@ -170,6 +173,7 @@ bool snapEq(const TicSnap& a, const TicSnap& b) {
            std::strcmp(a.texMetalRough, b.texMetalRough) == 0 &&
            std::strcmp(a.texEmissive, b.texEmissive) == 0 &&
            std::strcmp(a.texOcclusion, b.texOcclusion) == 0 &&
+           a.matExtraTex == b.matExtraTex &&   // MULTIMAT: a grade conta
            a.primOn == b.primOn && a.primKind == b.primKind &&
            a.primRadius == b.primRadius && a.primSize == b.primSize &&
            a.primSegments == b.primSegments && a.primRings == b.primRings;

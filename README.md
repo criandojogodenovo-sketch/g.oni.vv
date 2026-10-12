@@ -34,6 +34,31 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.10.7 — 0.10-M HOTFIX-3: TEXTURAS-MULTIMAT — a honestidade dos slots + o seletor de material
+
+**Os 2 gaps do vc 65 (o dono no device)**: os 4 slots não-baseColor
+apareciam preenchidos mas o shader lit só amostra o baseColor («aparecem
+mas não influenciam»), e um modelo com N materiais mostrava só o material 0.
+
+- **A honestidade**: os 4 slots não-baseColor PREENCHIDOS mostram o sufixo
+  «(vinculado · render na 0.11-L)»; o baseColor fica sem sufixo (renderiza
+  de verdade). A política é a função pura `texSlotRenders`/`inspTexSlotLabel`
+  (EditorLayout.h) — o draw pré-trunca o NOME para o sufixo nunca sair do
+  ecrã. Quando a 0.11-L trouxer os samplers, a mesma função muda.
+- **O multi-material**: a grade (N−1)×5 dos materiais entra no TIC
+  (`MeshRenderer::matExtraTex`; o auto-bind sonda o GTB1 inteiro); o
+  seletor «material: i/N» com setas ‹ › vetoriais entra SÓ com N>1; as 5
+  linhas mostram O MATERIAL SELECIONADO e o pick escreve NO MATERIAL
+  selecionado (clamp honesto; material >0 não toca o ponteiro GL).
+  Serializer + undo acompanham a grade.
+- **As provas**: 4 pins novos (3 materiais = 15 texturas + a grade; o pick
+  no material 2 sem tocar no 0; o sufixo honesto; a UI REAL a trocar
+  material e a escrever nele) · mutações M-MM1 (seletor hardcoded material
+  0 → vermelho) e M-MM2 (sufixo removido → vermelho) vermelho→verde ·
+  test_core 944/945 (o 1 = o flake de disco r039 da sandbox) · c33
+  797/797 · versionCode 66. Relatório:
+  docs/RELATORIO-0.10-M-HOTFIX-TEXTURAS-MULTIMAT.md.
+
 ## 0.10.7 — 0.10-M HOTFIX-2: TEXTURAS-VINCULA-2 — os 5 slots do import e do picker fechados no device
 
 **Os 2 bugs residuais do vc 64 (o dono no device)**: o import criava vários

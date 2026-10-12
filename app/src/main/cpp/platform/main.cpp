@@ -2860,14 +2860,26 @@ void importJobFinish() {
             if (!mr || mr->meshPath.empty()) {
                 continue;
             }
+            // 0.10-M TEXTURAS-MULTIMAT: a peça pode ter N materiais (o nó
+            // do glTF com várias primitivas) — a sonda percorre os N e
+            // enche a grade INTEIRA (o material 0 nos campos de sempre; os
+            // extras no matExtraTex — o seletor do inspector mostra N)
+            mr->matExtraTex.clear();
             std::string binds[MeshRenderer::kMeshTexSlots];
-            if (!g_gpu.matBindsOf(mr->meshPath, 0, binds)) {
-                continue;
-            }
-            for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
-                if (!binds[s].empty()) {
-                    mr->texSlotRef(s) = binds[s];
+            u32 mi = 0;
+            while (mi < 64u && g_gpu.matBindsOf(mr->meshPath, mi, binds)) {
+                if (mi == 0) {
+                    for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
+                        if (!binds[s].empty()) {
+                            mr->texSlotRef(s) = binds[s];
+                        }
+                    }
+                } else {
+                    for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
+                        mr->matExtraTex.push_back(binds[s]);
+                    }
                 }
+                ++mi;
             }
         }
         // o FIT único (o MESMO alvo do applyAssetPick 0.8.9): a caixa do
@@ -6444,7 +6456,8 @@ void frame() {
                 const editor::AssetPickOutcome out =
                     editor::applyAssetPick(g_scene, g_editor.selected, menuKind,
                                            pick, g_catalog, makeAssetResolvers(),
-                                           g_editor.inspTexSlot);
+                                           g_editor.inspTexSlot,
+                                           g_editor.inspMatIdx);
                 if (out.applied) {
                     pushUndo(uBefore, g_scene.get(g_editor.selected));
                 }
@@ -7197,7 +7210,8 @@ void frame() {
                     editor::snapTic(g_scene, g_editor.selected);
                 const editor::AssetPickOutcome out = editor::applyAssetPick(
                     g_scene, g_editor.selected, ba.filePickKind, pick,
-                    g_catalog, makeAssetResolvers(), g_editor.inspTexSlot);
+                    g_catalog, makeAssetResolvers(), g_editor.inspTexSlot,
+                    g_editor.inspMatIdx);
                 if (out.applied) {
                     pushUndo(uBefore, g_scene.get(g_editor.selected));
                 }

@@ -124,6 +124,16 @@ void appendComponentJson(Json& arr, const MeshRenderer* mr) {
     if (!mr->texOcclusion.empty()) {
         c.addMember("texOcclusion", Json::makeString(mr->texOcclusion));
     }
+    // 0.10-M HOTFIX TEXTURAS-MULTIMAT: os SLOTS dos MATERIAIS 1..N-1 (a
+    // grade achatada (N-1)*5 na ordem kBind*; VAZIOS incluídos — o
+    // round-trip é byte a byte; ausente = mesh de 1 material, o de sempre)
+    if (!mr->matExtraTex.empty()) {
+        Json me = Json::makeArray();
+        for (const std::string& s : mr->matExtraTex) {
+            me.addItem(Json::makeString(s));
+        }
+        c.addMember("matExtraTex", std::move(me));
+    }
     // 0.7.0 — cor por TIC: tint R/G/B só é gravado quando NÃO é o branco
     // default (ficheiros 0.6.x abrem sem o campo → branco)
     if (mr->tint[0] != 1.0f || mr->tint[1] != 1.0f || mr->tint[2] != 1.0f) {
@@ -495,6 +505,21 @@ void fillMeshRenderer(MeshRenderer* mr, const Json& comp, const LoadCtx& ctx) {
             j && j->type == Json::Type::String) {
             mr->texSlotRef(sk.slot) = j->string;   // vazio limpa — honesto
         }
+    }
+    // 0.10-M HOTFIX TEXTURAS-MULTIMAT: a grade dos materiais extra
+    // ("matExtraTex":[...]; ausente = 1 material; a largura floors para
+    // múltiplo de 5 — ficheiro cortado não cria material fantasma)
+    mr->matExtraTex.clear();
+    if (const Json* jm = comp.find("matExtraTex");
+        jm && jm->type == Json::Type::Array) {
+        for (const Json& it : jm->items) {
+            if (it.type == Json::Type::String) {
+                mr->matExtraTex.push_back(it.string);
+            }
+        }
+        mr->matExtraTex.resize(mr->matExtraTex.size() -
+                               mr->matExtraTex.size() %
+                                   MeshRenderer::kMeshTexSlots);
     }
     // 0.7.0 — cor por TIC: "tint":[r,g,b] opcional (ausente = branco)
     mr->tint[0] = mr->tint[1] = mr->tint[2] = 1.0f;

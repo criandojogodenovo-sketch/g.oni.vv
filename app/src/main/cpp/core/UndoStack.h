@@ -19,6 +19,7 @@
 
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace vv {
 
@@ -45,6 +46,9 @@ struct TicSnap {
     char     texMetalRough[96] = "";
     char     texEmissive[96] = "";
     char     texOcclusion[96] = "";
+    // 0.10-M HOTFIX TEXTURAS-MULTIMAT: a grade dos MATERIAIS 1..N-1 (o
+    // undo restaura O MATERIAL que o pick escreveu — os outros intactos)
+    std::vector<std::string> matExtraTex;
     f32      tint[3] = {1.0f, 1.0f, 1.0f};
     bool     primOn = false;
     PrimKind primKind = PrimKind::Box;

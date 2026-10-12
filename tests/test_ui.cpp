@@ -483,6 +483,116 @@ TEST(ui_tap_na_linha_de_slot_arma_o_slot) {
     EXPECT(mr->texNormal.empty());                    // irmão intocado
 }
 
+// ---- 0.10-M HOTFIX TEXTURAS-MULTIMAT · o PIN do dono na UI REAL ----------
+// O seletor «material: i/N» (setas ‹ › nos terços): trocar de material
+// mostra OS 5 SLOTS DAQUELE material e o pick escreve NO MATERIAL
+// selecionado (o pin: o pick no material 1 não toca no 0).
+TEST(ui_seletor_de_material_troca_e_o_pick_escreve_no_material) {
+    Env e(false, true);   // TIC com MeshRenderer (o alvo do pick)
+    EXPECT(e.ok);
+    MeshRenderer* mre =
+        e.scene.get(e.selected)->getComponent<MeshRenderer>();
+    ASSERT(mre != nullptr);
+    // a grade de 3 materiais (o material 0 veio do Env: texPath=wood.png,
+    // slots 1-4 vazios; os extras preenchem aqui — o auto-bind da grade)
+    mre->setMatCount(3);
+    for (u32 m = 1; m < 3; ++m) {
+        for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
+            *mre->matTexRef(m, s) = "assets/m" + std::to_string(m) + "_" +
+                                    std::to_string(s) + ".gtext";
+        }
+    }
+
+    const Tic* tic = e.scene.get(e.selected);
+    const TextMetrics tm = e.ui.textMetrics();
+    const InspProfile prof = inspectorProfile(*tic);
+    EXPECT(prof.matCount == 3u);   // O PERFIL sabe os 3 (a fonte é a grade)
+    InspRow plan[64];
+    const u32 n = inspectorPlan(prof, tm, true, 0u, plan);
+    const UiRect panel = safe::inspectorPanelRect(kSW, kSH, safe::Insets{});
+    const f32 contentTop = panel.y + kHeaderH + 4.0f;
+    f32 selY = -1.0f;
+    f32 slotY[MeshRenderer::kMeshTexSlots] = {};
+    u32 nSlots = 0;
+    for (u32 i = 0; i < n; ++i) {
+        if (plan[i].kind == InspRow::Kind::MatSelRow) {
+            selY = plan[i].y;
+        }
+        if (plan[i].kind == InspRow::Kind::TexSlotRow &&
+            plan[i].id >= kInspectorTexSlot0 &&
+            plan[i].id < kInspectorTexSlot0 + MeshRenderer::kMeshTexSlots) {
+            slotY[plan[i].id - kInspectorTexSlot0] = plan[i].y;
+            ++nSlots;
+        }
+    }
+    ASSERT(nSlots == 5u);
+    ASSERT(selY >= 0.0f);   // O SELETOR entrou no plano (N>1)
+
+    e.frame();   // cria o slot de scroll do Inspector
+    const f32 contentH = inspectorContentHeight(prof, tm, true, 0u);
+    const f32 listH = panel.h - kHeaderH - 4.0f;
+    const f32 off = scroll::clampOffset(selY - 24.0f, contentH, listH);
+    e.ui.scrollSetOffset(kInspectorScrollId, off);
+    const f32 rowL = panel.x + panel.w * 0.5f - (panel.w - 2.0f * 16.0f) * 0.5f;
+    const f32 rowW = panel.w - 2.0f * 16.0f;
+    const f32 selScreenY = contentTop + selY - off;
+
+    // o tap no TERÇO DIREITO (›) → material 1; de novo → 2; ‹ → 1
+    e.input.injectDown(0, rowL + rowW - rowW / 6.0f, selScreenY + 10.0f);
+    e.input.injectUp(0);
+    e.frame();
+    EXPECT(e.st.inspMatIdx == 1u);   // A SETA › armou o material 1
+    e.st.assetMenu = 0;
+    e.input.injectDown(0, rowL + rowW - rowW / 6.0f,
+                       contentTop + selY - off + 10.0f);
+    e.input.injectUp(0);
+    e.frame();
+    EXPECT(e.st.inspMatIdx == 2u);   // › de novo = o ÚLTIMO (clamp em N-1)
+    e.st.assetMenu = 0;
+    e.input.injectDown(0, rowL + rowW / 6.0f,
+                       contentTop + selY - off + 10.0f);
+    e.input.injectUp(0);
+    e.frame();
+    EXPECT(e.st.inspMatIdx == 1u);   // ‹ volta ao 1
+    e.st.assetMenu = 0;
+
+    // o tap no MEIO da linha do seletor NÃO mexe (só os terços são setas)
+    e.input.injectDown(0, rowL + rowW * 0.5f,
+                       contentTop + selY - off + 10.0f);
+    e.input.injectUp(0);
+    e.frame();
+    EXPECT(e.st.inspMatIdx == 1u);
+
+    // o tap na linha do slot 3 (emissive DO material 1) arma O SLOT
+    const f32 off2 = scroll::clampOffset(slotY[3] - 24.0f, contentH, listH);
+    e.ui.scrollSetOffset(kInspectorScrollId, off2);
+    e.input.injectDown(0, panel.x + panel.w * 0.5f,
+                       contentTop + slotY[3] - off2 + 10.0f);
+    e.input.injectUp(0);
+    e.frame();
+    EXPECT(e.st.assetMenu == 2);
+    EXPECT(e.st.inspTexSlot == 3);
+
+    // a CADEIA COMPLETA: o pick com (material 1, slot 3) escreve NO MATERIAL
+    // 1 — o material 0 INTACTO (o pin do dono)
+    e.st.assetMenu = 0;
+    editor::AssetCatalog cat;
+    cat.textures = {"textures/wood.png", "assets/nova.gtext"};
+    editor::AssetResolvers res;
+    static Texture dummy;
+    res.texture = [](const std::string&, std::string*) -> const Texture* {
+        return &dummy;
+    };
+    const editor::AssetPickOutcome out = editor::applyAssetPick(
+        e.scene, e.selected, 2, 3, cat, res, e.st.inspTexSlot,
+        e.st.inspMatIdx);
+    EXPECT(out.applied);
+    EXPECT(mre->matTex(1, 3) == "assets/nova.gtext");   // O MATERIAL armado
+    EXPECT(mre->matTex(0, 3).empty());                  // o 0 INTACTO (o pin)
+    EXPECT(mre->texPath == "textures/wood.png");        // o base do 0 intacto
+    EXPECT(mre->matTex(1, 0) == "assets/m1_0.gtext");   // o base do 1 intacto
+}
+
 // o plano e o conteúdo respeitam a área ÚTIL com insets do C33 (nav bar à
 // direita): o painel encolhe e o scroll compensa — nada sai do contentRect
 TEST(ui_inspector_com_insets_scroll_compensa) {

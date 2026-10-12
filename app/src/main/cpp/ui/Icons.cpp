@@ -141,6 +141,14 @@ constexpr f32 kChevronRightPts[] = {
 constexpr Polyline kChevronRightLines[] = {
     {0, 3},
 };
+// 0.10-M HOTFIX TEXTURAS-MULTIMAT: a ‹ do seletor de material — o ESPELHO
+// do ChevronRight (o atlas não tem U+2039/U+203A; glifo vetorial ou nada)
+constexpr f32 kChevronLeftPts[] = {
+    15.0f, 6.5f,   9.5f, 12.0f,   15.0f, 17.5f,
+};
+constexpr Polyline kChevronLeftLines[] = {
+    {0, 3},
+};
 
 // ---- Sliders (3 linhas + knobs defasados) -----------------------------------
 constexpr f32 kSlidersPts[] = {
@@ -802,6 +810,7 @@ const IconDef kDefs[] = {
     {kHamburgerPts,      6, kHamburgerLines,     3},
     {kChevronDownPts,    3, kChevronDownLines,   1},
     {kChevronRightPts,   3, kChevronRightLines,  1},
+    {kChevronLeftPts,    3, kChevronLeftLines,   1},
     {kSlidersPts,       12, kSlidersLines,       6},
     {kGearPts,          26, kGearLines,           2},
     {kCubePts,          18, kCubeLines,          9},
@@ -998,7 +1007,8 @@ i32 iconByName(const char* name) {
         {Icon::Inspector, "inspector"}, {Icon::Scene, "cena"},
         {Icon::Play, "play"}, {Icon::Pause, "pause"},
         {Icon::Hamburger, "hamburger"}, {Icon::ChevronDown, "chevron"},
-        {Icon::ChevronRight, "chevron-direita"}, {Icon::Sliders, "sliders"},
+        {Icon::ChevronRight, "chevron-direita"},
+        {Icon::ChevronLeft, "chevron-esquerda"}, {Icon::Sliders, "sliders"},
         {Icon::Gear, "gear"}, {Icon::Cube, "cubo"}, {Icon::Monitor, "monitor"},
         {Icon::Speaker, "speaker"}, {Icon::Plus, "plus"},
         {Icon::Eye, "olho"}, {Icon::EyeOff, "olho-off"},

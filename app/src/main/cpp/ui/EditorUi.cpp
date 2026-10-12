@@ -1007,9 +1007,13 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     // FASE 9 (G2-8): o TIC selecionado MUDOU → o Inspector volta ao TOPO
     // (o scroll do TIC anterior não se arrasta para o novo — era por isso
     // que o "Transform não aparecia": ficava rolado para lá do fundo)
+    // 0.10-M TEXTURAS-MULTIMAT: o MATERIAL armado repõe-se TAMBÉM (as 5
+    // linhas do novo TIC mostram o material 0 — nunca o índice do TIC
+    // anterior, que podia nem existir no mesh novo)
     if (st.inspPrevSelected != st.selected) {
         ui.scrollSetOffset(kIdScrollInsp, 0.0f);
         st.inspPrevSelected = st.selected;
+        st.inspMatIdx = 0;
     }
 
     // 0.9.6.18 (HOTFIX D1+D5) — O CABEÇALHO NUMA LINHA SÓ: linha 1 =
@@ -1156,8 +1160,10 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     char meshLabel[64] = "";
     char texLabel[64] = "";
     // 0.10-M HOTFIX TEXTURAS-VINCULA: os rótulos dos 5 slots (só preenchidos
-    // com mr — o draw dos TexSlotRow lê)
-    char slotLabels[MeshRenderer::kMeshTexSlots][64] = {};
+    // com mr — o draw dos TexSlotRow lê). 0.10-M MULTIMAT: buffer maior — o
+    // SUFIXO HONESTO vive no fim e o NOME é que trunca (a honestidade é o
+    // pin: "(vinculado · render na 0.11-L)" nunca sai do ecrã)
+    char slotLabels[MeshRenderer::kMeshTexSlots][128] = {};
     char inputLine[48] = "";
     char camProjLabel[48] = "";   // 0.7.7
     char camActiveLabel[48] = "";
@@ -1190,12 +1196,46 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                           mr->texture ? "ligada" : "—");
         }
         // 0.10-M HOTFIX TEXTURAS-VINCULA: os 5 SLOTS da secção Material
-        // (o nome do .gtext em cada — o pin do dono; slot 0 = o texPath)
+        // (o nome do .gtext em cada — o pin do dono; slot 0 = o texPath).
+        // 0.10-M TEXTURAS-MULTIMAT: OS SLOTS DO MATERIAL SELECIONADO (o
+        // seletor «material: i/N» arma o índice; o clamp honesto mantém o
+        // rótulo dentro da grade mesmo com a troca de mesh no mesmo TIC)
+        u32 matIdx = st.inspMatIdx;
+        if (matIdx >= mr->matCount()) {
+            matIdx = mr->matCount() - 1u;
+            st.inspMatIdx = matIdx;
+        }
         for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
-            const std::string& p = mr->texSlot(s);
-            std::snprintf(slotLabels[s], sizeof(slotLabels[s]), "%s: %s",
-                          kBindSlotName(static_cast<u8>(s)),
-                          p.empty() ? "—" : assetBasename(p.c_str()));
+            const std::string& p = mr->matTex(matIdx, s);
+            // o NOME é que trunca (o padrão textfit do button) — o sufixo
+            // honesto fica visível mesmo no painel estreito do device
+            char base[64] = "";
+            if (!p.empty()) {
+                std::snprintf(base, sizeof(base), "%s",
+                              assetBasename(p.c_str()));
+                char full[160];
+                editor::inspTexSlotLabel(full, sizeof(full),
+                                         kBindSlotName(static_cast<u8>(s)), s,
+                                         base);
+                const f32 rowW = w - 2.0f * kPad;
+                if (ui.fontWidth(full) > rowW - theme::dp(8.0f)) {
+                    const std::string prefix =
+                        std::string(kBindSlotName(static_cast<u8>(s))) + ": ";
+                    const f32 budget =
+                        rowW - theme::dp(8.0f) - ui.fontWidth(prefix.c_str()) -
+                        ui.fontWidth(editor::kTexSlotPendingRenderSuffix);
+                    char fitted[64];
+                    textfit::ellipsize(base, budget,
+                                       [&ui](const char* s) {
+                                           return ui.fontWidth(s);
+                                       },
+                                       fitted, sizeof(fitted));
+                    std::snprintf(base, sizeof(base), "%s", fitted);
+                }
+            }
+            editor::inspTexSlotLabel(slotLabels[s], sizeof(slotLabels[s]),
+                                     kBindSlotName(static_cast<u8>(s)), s,
+                                     base);
         }
     }
     if (im) {
@@ -1600,6 +1640,29 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                       slotLabels[s < MeshRenderer::kMeshTexSlots
                                      ? s
                                      : 0u]);
+            break;
+        }
+        case InspRow::Kind::MatSelRow: {
+            // 0.10-M HOTFIX TEXTURAS-MULTIMAT: "material: i/N" — o SELETOR
+            // da secção Material (o tap nos TERÇOS ‹/› troca; o dispatch de
+            // baixo lê o mesmo rect). As setas são VETORIAIS (o atlas não
+            // tem U+2039/U+203A — o glifo em falta no device é o bug que
+            // esta linha evita)
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            const u32 nMats = mr ? mr->matCount() : 1u;
+            char matLabel[48];
+            std::snprintf(matLabel, sizeof(matLabel), "material: %u/%u",
+                          static_cast<unsigned>(st.inspMatIdx + 1u),
+                          static_cast<unsigned>(nMats));
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h, matLabel);
+            const f32 icY = ry + (r.h - 16.0f) * 0.5f;
+            icons::drawIcon(ui, icons::Icon::ChevronLeft,
+                            x + kPad + theme::dp(6.0f), icY, 16.0f,
+                            theme::kTheme.text1);
+            icons::drawIcon(ui, icons::Icon::ChevronRight,
+                            x + w - kPad - theme::dp(6.0f) - 16.0f, icY,
+                            16.0f, theme::kTheme.text1);
             break;
         }
         case InspRow::Kind::MeshLabel:
@@ -2031,6 +2094,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 r.kind != InspRow::Kind::MeshButton &&
                 r.kind != InspRow::Kind::TexButton &&
                 r.kind != InspRow::Kind::TexSlotRow &&  // 0.10-M HOTFIX: slots
+                r.kind != InspRow::Kind::MatSelRow &&   // 0.10-M MULTIMAT: ‹ ›
                 r.kind != InspRow::Kind::VisToggle &&
                 r.kind != InspRow::Kind::ColorHex &&    // 0.8.6
                 r.kind != InspRow::Kind::CamProj &&     // 0.7.7
@@ -2119,6 +2183,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             } else if (r.kind == InspRow::Kind::MeshButton ||
                        r.kind == InspRow::Kind::TexButton ||
                        r.kind == InspRow::Kind::TexSlotRow ||
+                       r.kind == InspRow::Kind::MatSelRow ||
                        r.kind == InspRow::Kind::PrimButton) {
                 // 0.8.12 — GUARDA DE UI: as linhas de picker (mesh/tex/prim)
                 // só abrem o seletor com um TIC VIVO selecionado que tenha
@@ -2150,6 +2215,26 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                         st.inspTexSlot = 0;
                     }
                     st.assetMenu = 2;
+                } else if (r.kind == InspRow::Kind::MatSelRow) {
+                    // 0.10-M HOTFIX TEXTURAS-MULTIMAT: ‹ no TERÇO esquerdo,
+                    // › no terço direito (o MESMO rect que o draw). O índice
+                    // armado muda DENTRO da grade [0, N-1] — as 5 linhas de
+                    // baixo mostram O MATERIAL no frame seguinte e o pick
+                    // escreve NELE (o pin: material 2 não toca no 0)
+                    if (mr && mr->matCount() > 1) {
+                        const f32 rowL = x + kPad;
+                        const f32 rowW = w - 2.0f * kPad;
+                        const f32 third = rowW / 3.0f;
+                        if (tx < rowL + third) {
+                            if (st.inspMatIdx > 0) {
+                                --st.inspMatIdx;
+                            }
+                        } else if (tx >= rowL + rowW - third) {
+                            if (st.inspMatIdx < mr->matCount() - 1u) {
+                                ++st.inspMatIdx;
+                            }
+                        }
+                    }
                 } else {
                     st.assetMenu = 4;                 // 0.8.0: seletor de primitivas
                 }
@@ -3480,11 +3565,15 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 // ---------------------------------------------------------------------------
 AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int pick,
                                 const AssetCatalog& catalog, const AssetResolvers& res,
-                                u32 texSlot) {
+                                u32 texSlot, u32 materialIndex) {
     AssetPickOutcome out;
     if (pick <= 0) {
         return out;   // nada escolhido neste frame
     }
+    // 0.10-M TEXTURAS-MULTIMAT: o teto da SONDA de materiais do auto-bind
+    // (o GTB1 real acaba — matBindsOf devolve false fora da faixa; um
+    // resolver MALUCO que devolva true sempre NÃO gira aqui para sempre)
+    constexpr u32 kMatProbeMax = 64;
     Tic* tic = scene.get(selected);
     if (!tic) {
         return out;   // TIC morto — sem crash, sem ação
@@ -3591,6 +3680,7 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
             mr->primOn = false;
             mr->primPending = false;
             mr->primNeg = false;
+            mr->matExtraTex.clear();   // MULTIMAT: a grade morre com o mesh
             out.applied = true;
             std::snprintf(out.toast, sizeof(out.toast), "mesh: none");
             std::snprintf(out.log, sizeof(out.log),
@@ -3604,6 +3694,7 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
             mr->meshPath.clear();
             mr->primOn = false;   // 0.8.0: cube LIMPA o prim (fonte única)
             mr->primPending = false;
+            mr->matExtraTex.clear();   // MULTIMAT: a grade morre com o mesh
             out.applied = true;
             std::snprintf(out.toast, sizeof(out.toast), "mesh: cube");
             std::snprintf(out.log, sizeof(out.log), "editor: mesh cube aplicado");
@@ -3658,10 +3749,35 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
                 // 0.10-M HOTFIX-2: os slots SEGUEM O MESH (a troca de mesh
                 // não herda as refs do mesh anterior) — limpa primeiro, o
                 // auto-bind de baixo volta a encher do GTB1 do NOVO mesh.
+                // 0.10-M TEXTURAS-MULTIMAT: a grade INTEIRA segue o mesh —
+                // a sonda percorre os materiais 0..N-1 do GTB1 (o material
+                // 0 no caminho de sempre; os extras na grade matExtraTex,
+                // VAZIOS incluídos). A troca limpa a grade primeiro (o
+                // vestígio do mesh anterior morre aqui também).
                 bool withTex = false;
                 std::string binds[MeshRenderer::kMeshTexSlots];
-                const bool haveBinds =
-                    res.matBinds && res.matBinds(rel, 0, binds);
+                mr->matExtraTex.clear();
+                if (res.matBinds) {
+                    std::string mb[MeshRenderer::kMeshTexSlots];
+                    u32 mi = 0;
+                    while (mi < kMatProbeMax &&
+                           res.matBinds(rel, mi, mb)) {
+                        if (mi == 0) {
+                            for (u32 s = 0;
+                                 s < MeshRenderer::kMeshTexSlots; ++s) {
+                                binds[s] = mb[s];
+                            }
+                        } else {
+                            for (u32 s = 0;
+                                 s < MeshRenderer::kMeshTexSlots; ++s) {
+                                mr->matExtraTex.push_back(mb[s]);
+                            }
+                        }
+                        ++mi;
+                    }
+                }
+                const bool haveBinds = !binds[0].empty() ||
+                                       !mr->matExtraTex.empty();
                 for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
                     mr->texSlotRef(s).clear();
                 }
@@ -3752,19 +3868,39 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
         // (a causa (d) do bug morre — o slot armado na secção Material; 0
         // = baseColor, o de sempre). Os IRMÃOS ficam intactos (o pin da
         // auditoria de estado).
+        // 0.10-M TEXTURAS-MULTIMAT: e NO MATERIAL SELECIONADO (o seletor
+        // «material: i/N»; o pin: pick no material 2 não toca no 0). O
+        // clamp honesto: fora da grade = o ÚLTIMO material real (nunca
+        // material fantasma); mesh de 1 material = 0 (o de sempre).
         const u32 slot =
             texSlot < MeshRenderer::kMeshTexSlots ? texSlot : 0u;
+        const u32 nMats = mr->matCount();
+        const u32 mat = materialIndex < nMats ? materialIndex : nMats - 1u;
+        std::string* const ref = mr->matTexRef(mat, slot);
+        if (!ref) {
+            return out;   // grade ausente (defesa — nunca acontece pelo UI)
+        }
+        const bool multimat = mat != 0;
         if (pick == 1) {   // none → liberta O SLOT escolhido
-            mr->texSlotRef(slot).clear();
-            if (slot == 0) {
+            ref->clear();
+            if (!multimat && slot == 0) {
                 mr->texture = nullptr;
             }
             out.applied = true;
             std::snprintf(out.toast, sizeof(out.toast), "tex[%s]: none",
                           kBindSlotName(static_cast<u8>(slot)));
-            std::snprintf(out.log, sizeof(out.log),
-                          "material: slot %s removido (os irmãos intactos)",
-                          kBindSlotName(static_cast<u8>(slot)));
+            if (multimat) {
+                std::snprintf(out.log, sizeof(out.log),
+                              "material: material %u slot %s removido "
+                              "(os irmãos intactos)",
+                              static_cast<unsigned>(mat),
+                              kBindSlotName(static_cast<u8>(slot)));
+            } else {
+                std::snprintf(out.log, sizeof(out.log),
+                              "material: slot %s removido (os irmãos "
+                              "intactos)",
+                              kBindSlotName(static_cast<u8>(slot)));
+            }
         } else {
             const size_t idx = static_cast<size_t>(pick - 2);
             if (idx >= catalog.textures.size()) {
@@ -3773,16 +3909,26 @@ AssetPickOutcome applyAssetPick(Scene& scene, Handle selected, int menuKind, int
             const std::string rel = catalog.textures[idx];   // caminho completo
             std::string warn;
             if (const Texture* tex = res.texture ? res.texture(rel, &warn) : nullptr) {
-                mr->texSlotRef(slot) = rel;
-                if (slot == 0) {
+                *ref = rel;
+                if (!multimat && slot == 0) {
                     mr->texture = tex;
                 }
                 out.applied = true;
                 std::snprintf(out.toast, sizeof(out.toast), "%s",
                               warn.empty() ? "textura aplicada" : warn.c_str());
-                std::snprintf(out.log, sizeof(out.log),
-                              "material: slot %s = %s (os irmãos intactos)",
-                              kBindSlotName(static_cast<u8>(slot)), rel.c_str());
+                if (multimat) {
+                    std::snprintf(out.log, sizeof(out.log),
+                                  "material: material %u slot %s = %s (os "
+                                  "irmãos intactos)",
+                                  static_cast<unsigned>(mat),
+                                  kBindSlotName(static_cast<u8>(slot)),
+                                  rel.c_str());
+                } else {
+                    std::snprintf(out.log, sizeof(out.log),
+                                  "material: slot %s = %s (os irmãos intactos)",
+                                  kBindSlotName(static_cast<u8>(slot)),
+                                  rel.c_str());
+                }
             } else {
                 // carga falhou — o estado ANTERIOR fica intacto
                 std::snprintf(out.toast, sizeof(out.toast), "falha ao carregar textura");

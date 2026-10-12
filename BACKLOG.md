@@ -134,6 +134,29 @@
   próprio) está documentada no relatório §7 — mover é só workflow, sem
   tocar no teste. Nada a fazer hoje.
 
+## 0.10.7 HOTFIX-3 — TEXTURAS-MULTIMAT (a honestidade dos slots + o seletor de material) — FEITO
+
+- **FEITO 0.10.7-hotfix-3**: o vc 65 no device revelou 2 gaps e a cura
+  fecha-os: (1) a HONESTIDADE — os 4 slots não-baseColor preenchidos
+  mostram o sufixo «(vinculado · render na 0.11-L)» (a política é a
+  função pura `texSlotRenders`/`inspTexSlotLabel` em EditorLayout.h; o
+  baseColor sem sufixo; o nome trunca primeiro — o sufixo nunca sai do
+  ecrã); (2) o MULTI-MATERIAL — a grade (N−1)×5 no `MeshRenderer`
+  (`matExtraTex` + matCount/matTex/matTexRef), o auto-bind sonda o GTB1
+  inteiro, o seletor «material: i/N» com setas ‹ › vetoriais (ícone
+  ChevronLeft novo) entra só com N>1, as 5 linhas mostram o material
+  selecionado e o pick escreve NELE (`applyAssetPick` +materialIndex,
+  clamp honesto); serializer («matExtraTex») + undo acompanham. Pins:
+  3 materiais = 15 texturas + a grade · pick no material 2 sem tocar no
+  0 · sufixo honesto · UI real (‹ › + pick no material). Mutações M-MM1
+  (seletor hardcoded material 0) e M-MM2 (sufixo removido) → vermelhas.
+  test_core 944/945 (o 1 = r039, flake de DISCO da sandbox) · c33
+  797/797 · versionCode 66. Relatório:
+  docs/RELATORIO-0.10-M-HOTFIX-TEXTURAS-MULTIMAT.md.
+- **POR FAZER (a fronteira documentada)**: o draw refletir o pick por
+  material e os samplers 1-4 no shader lit = a 0.11-L (o sufixo honesto
+  anuncia-a); .gmesh antigos = reimportar.
+
 ## 0.10.7 HOTFIX-2 — TEXTURAS-VINCULA-2 (os 5 slots do import e do picker) — FEITO
 
 - **FEITO 0.10.7-hotfix-2**: o device revelou 2 bugs residuais do vc 64

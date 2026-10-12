@@ -24,6 +24,7 @@
 // CI aferem o MESMO plano + a geometria REAL dos glifos.
 #include "core/Types.h"
 #include <cmath>
+#include <cstdio>
 #include "ui/Theme.h"      // 0.9.6.1 (PASSO 0): applyDensity() — R-018
 #include "ui/FontAtlas.h"   // TextMetrics (GL-free)
 #include "core/Scene.h"
@@ -109,6 +110,9 @@ constexpr u64 kInspectorTexSel     = 5002;   // F5-E: linha "tex: …"
 // (payload = kInspectorTexSlot0 + slot; o pick do browser escreve O SLOT
 // escolhido — os irmãos ficam intactos, o pin da auditoria de estado)
 constexpr u64 kInspectorTexSlot0   = 5011;   // +0 baseColor … +4 occlusion
+// 0.10-M HOTFIX TEXTURAS-MULTIMAT: o SELETOR de material «material: i/N»
+// (a linha só existe com N>1; o tap no terço esquerdo = ‹, no direito = ›)
+constexpr u64 kInspectorMatSel     = 5311;
 constexpr u64 kInspectorVis        = 5200;   // 0.7.0: "visivel: sim/nao"
 constexpr u64 kInspectorColBase    = 5300;   // 0.7.0: sliders R/G/B (+i)
 constexpr u64 kInspectorColHex     = 5303;   // 0.8.6: "hex: #RRGGBB" do tint
@@ -205,6 +209,10 @@ struct InspProfile {
     // 0.8.9 — IMPORT DE FICHEIRO: linhas dims + "escala: original" (o fit
     // uniforme normaliza o TAMANHO; estes mostram/devolvem o original)
     bool fileMesh = false;
+    // 0.10-M HOTFIX TEXTURAS-MULTIMAT: nº de materiais do mesh do TIC (o
+    // seletor «material: i/N» só entra com >1 — a grade do MeshRenderer é
+    // a fonte, zero I/O no caminho quente)
+    u32 matCount = 1;
 };
 
 inline InspProfile inspectorProfile(const Tic& tic) {
@@ -223,6 +231,8 @@ inline InspProfile inspectorProfile(const Tic& tic) {
         p.primKind = mr->prim.kind;
         // 0.8.9: mesh DE FICHEIRO (não prim, ref por meshPath) → dims+escala
         p.fileMesh = !mr->primOn && !mr->meshPath.empty();
+        // 0.10-M TEXTURAS-MULTIMAT: os materiais que a grade do TIC conhece
+        p.matCount = mr->matCount();
     }
     if (const UiCanvas* uic = tic.getComponent<UiCanvas>()) {
         p.canAnim = !uic->elements.empty();
@@ -259,6 +269,8 @@ struct InspRow {
         TexLabel,    // F5-E: "tex: …" só leitura
         TexSlotRow,  // 0.10-M HOTFIX: o slot do material (payload = slot
                      // 0..4 — kInspectorTexSlot0+i; o pick escreve O slot)
+        MatSelRow,   // 0.10-M TEXTURAS-MULTIMAT: "material: i/N" com ‹ ›
+                     // (terço esquerdo/direito da linha; N>1 é que entra)
         Label,       // linha de texto (input/tc)
         TwoCol,      // FASE 9 (G2-8): duas colunas nome/valor (Física) —
                      // payload 0=tipo, 1=forma, 2=no chão (BodyComp VIVO)
@@ -309,6 +321,39 @@ struct InspRow {
 
 // payload do ColorSlider por índice (0=R, 1=G, 2=B) — o desenho e o
 // hit-test partilham esta ordem
+//
+// ---- 0.10-M HOTFIX TEXTURAS-MULTIMAT — A HONESTIDADE DOS SLOTS ------------
+// O bug do device: os 4 slots não-baseColor APARECEM preenchidos no
+// inspector mas o shader lit de hoje SÓ amostra o baseColor — "aparecem
+// mas não influenciam". A cura: cada linha de slot não-renderizado com
+// ref mostra o SUFIXO HONESTO (a promessa da 0.11-L fica no ecrã); o
+// baseColor NUNCA leva sufixo (ele renderiza de verdade). NUNCA mostrar
+// slot preenchido como se renderizasse quando não renderiza.
+constexpr const char* kTexSlotPendingRenderSuffix =
+    " (vinculado \xc2\xb7 render na 0.11-L)";   // · = U+00B7 (no atlas)
+
+// O slot `slot` RENDERIZA hoje? (o lit de hoje tem SÓ o unit 0/baseColor;
+// os samplers 1-4 chegam na 0.11-L — a fronteira do relatório do hotfix)
+inline bool texSlotRenders(u32 slot) {
+    return slot == 0;
+}
+
+// o rótulo da linha de slot (FONTE ÚNICA do draw e dos pins — a mutação
+// do sufixo morre AQUI): "<slot>: <base>" + o sufixo honesto quando o
+// slot está preenchido e não renderiza; vazio = "<slot>: —"
+inline void inspTexSlotLabel(char* out, size_t sz, const char* slotName,
+                             u32 slot, const char* base) {
+    if (base != nullptr && base[0] != '\0') {
+        if (texSlotRenders(slot)) {
+            std::snprintf(out, sz, "%s: %s", slotName, base);
+        } else {
+            std::snprintf(out, sz, "%s: %s%s", slotName, base,
+                          kTexSlotPendingRenderSuffix);
+        }
+    } else {
+        std::snprintf(out, sz, "%s: —", slotName);
+    }
+}
 //
 // 0.9.0 (spec C) — BITS das secções colapsáveis do Inspector (o bitmask
 // vive no EditorState::inspCollapsed e PERSISTE — spec G):
@@ -373,9 +418,13 @@ inline u32 inspectorRowCount(const InspProfile& p, bool selectable,
         }
     }
     // ---- MATERIAL (bit3): miniaturas + R/G/B + hex (+swatch na linha hex)
+    // 0.10-M TEXTURAS-MULTIMAT: o seletor «material: i/N» (N>1)
     if (p.mr) {
         n += 1;
         if (!(collapsed & kInspBitMaterial)) {
+            if (p.matCount > 1) {
+                n += 1;        // o seletor de material (a linha própria)
+            }
             n += 1;            // 0.9.0: 3 miniaturas 64dp (spec C)
             n += 3 + 1;
         }
@@ -494,6 +543,12 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
         push(InspRow::Kind::Section, secH, kInspSectionBase + 3,
              kInspBitMaterial);
         if (!(collapsed & kInspBitMaterial)) {
+            // 0.10-M HOTFIX TEXTURAS-MULTIMAT: o SELETOR de material (só
+            // com N>1 — o mesh de 1 material NÃO ganha a linha; o tap no
+            // terço ‹/› troca e as 5 linhas de baixo mostram O MATERIAL)
+            if (p.matCount > 1) {
+                push(InspRow::Kind::MatSelRow, btnH, kInspectorMatSel);
+            }
             push(InspRow::Kind::MaterialThumbs, inspThumbsH(), 0);
             // 0.10-M HOTFIX TEXTURAS-VINCULA: os 5 SLOTS visíveis (o nome
             // do .gtext em cada; o tap arma o slot e abre o browser — o

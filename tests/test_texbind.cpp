@@ -31,6 +31,7 @@
 #include "render/GpuAssets.h"     // o matBindsOf REAL (HOTFIX-2)
 #include "render/Mesh.h"          // o sentinela do apply (HOTFIX-2)
 #include "render/Texture.h"
+#include "ui/EditorLayout.h"      // MULTIMAT: o plano (o seletor + o sufixo)
 #include "ui/EditorUi.h"
 
 using namespace vv;
@@ -646,6 +647,264 @@ TEST(bind2_autobind_5_slots_no_apply_e_troca_de_mesh) {
     EXPECT(mr->texPath.empty());
     EXPECT(mr->texNormal.empty());
     EXPECT(mr->texEmissive.empty());
+}
+
+// ---- MULTIMAT · nMats materiais, CADA um com OS CINCO slots ---------------
+// (a matriz do dono: 3 materiais × 5 slots = 15 texturas; material i →
+// imagens i*5+0 .. i*5+4 — o naming do convert é assets/<stem>_<img>.gtext)
+std::string gltfMultimat(u32 nMats) {
+    std::string mats, texs, prims;
+    const u32 nImgs = nMats * 5;
+    for (u32 i = 0; i < nImgs; ++i) {
+        texs += (i ? "," : "") + std::string("{\"source\":") +
+                std::to_string(i) + "}";
+    }
+    for (u32 m = 0; m < nMats; ++m) {
+        mats += (m ? "," : "") + std::string("{\"name\":\"mat") +
+                std::to_string(m) + "\",\"pbrMetallicRoughness\":{"
+                "\"baseColorTexture\":{\"index\":" +
+                std::to_string(m * 5 + 0) +
+                "},\"metallicRoughnessTexture\":{\"index\":" +
+                std::to_string(m * 5 + 2) +
+                "}},\"normalTexture\":{\"index\":" +
+                std::to_string(m * 5 + 1) +
+                "},\"emissiveTexture\":{\"index\":" +
+                std::to_string(m * 5 + 3) +
+                "},\"occlusionTexture\":{\"index\":" +
+                std::to_string(m * 5 + 4) + "}}";
+        prims += (m ? "," : "") + std::string("{\"attributes\":"
+                                              "{\"POSITION\":0},\"indices\":1,"
+                                              "\"material\":") +
+                 std::to_string(m) + "}";
+    }
+    return std::string(
+               "{\"asset\":{\"version\":\"2.0\"},"
+               "\"buffers\":[{\"byteLength\":42}],"
+               "\"bufferViews\":["
+               "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+               "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":6}],"
+               "\"accessors\":["
+               "{\"bufferView\":0,\"componentType\":5126,\"count\":3,"
+               "\"type\":\"VEC3\",\"min\":[0,0,0],\"max\":[1,1,0]},"
+               "{\"bufferView\":1,\"componentType\":5123,\"count\":3,"
+               "\"type\":\"SCALAR\"}],"
+               "\"materials\":[" +
+               mats +
+               "],"
+               "\"textures\":[" +
+               texs +
+               "],"
+               "\"images\":[],"
+               "\"meshes\":[{\"name\":\"tri\",\"primitives\":[" +
+               prims +
+               "]}],"
+               "\"nodes\":[{\"name\":\"raiz\",\"mesh\":0}],"
+               "\"scenes\":[{\"nodes\":[0]}]}");
+}
+
+// ---- MULTIMAT · o PIN do dono: 3 materiais → o seletor mostra 3, cada um
+// com os seus 5 slots (o import fundido + o auto-bind da grade INTEIRA) ----
+TEST(multimat_3_materiais_import_seletor_e_slots) {
+    const std::string base = std::string("/tmp/goni_tb5_") +
+                             std::to_string(static_cast<long>(::getpid()));
+    system(("mkdir -p " + base + "/proj " + base + "/logs").c_str());
+    const std::vector<u8> png = readFixture("green4096.png");
+    ASSERT(png.size() > 8u);
+    const std::vector<u8> glb = makeGlb(
+        gltfComImagens(gltfMultimat(3), png, 15u), triBuffer());
+    const std::string src = base + "/modelo.glb";
+    ASSERT(writeSrc(src, glb));
+    FsStorage st((base + "/proj").c_str());
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    ASSERT(convert::importFile(src, "modelo.glb", st, nullptr, out, stats,
+                               err));
+    EXPECT(stats.textures == 15u);   // 3 materiais × 5 slots (o pin do dono)
+    ASSERT(out.meshes.size() == 1u);
+    // o GTB1 no ficheiro: 3 bindings, 15 slots
+    std::vector<u8> bytes;
+    ASSERT(st.readBytes(out.meshes[0], bytes));
+    GMeshV3Meta meta;
+    std::vector<GMeshV3Block> blocks;
+    std::vector<std::string> names;
+    std::vector<GMeshMatBind> binds;
+    ASSERT(readGMeshV3Meta(bytes.data(), bytes.size(), meta, blocks, names,
+                           err, &binds));
+    EXPECT(meta.materialCount == 3u);
+    ASSERT(binds.size() == 3u);
+    EXPECT(contaSlots(binds) == 15u);
+    // o apply do mesh com o matBindsOf REAL (o auto-bind da grade inteira)
+    ResourceManager rm;
+    rm.setStorage(&st);
+    GpuAssets gpu;
+    gpu.init(&rm);
+    static GpuAssets* const sGpu = &gpu;   // o REAL (a lambda é sem captura)
+    Scene scene;
+    const Handle h = scene.create("tic");
+    MeshRenderer* mr = scene.get(h)->addComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+    editor::AssetCatalog cat;
+    cat.meshes = {out.meshes[0]};
+    editor::AssetResolvers res;
+    static Texture dummy;
+    static Mesh* const kMeshSent = reinterpret_cast<Mesh*>(0x41);
+    res.mesh = [](const std::string&) -> Mesh* { return kMeshSent; };
+    res.texture = [](const std::string&, std::string*) -> const Texture* {
+        return &dummy;
+    };
+    res.matBinds = [](const std::string& ref, u32 mi,
+                      std::string (&o)[MeshRenderer::kMeshTexSlots]) {
+        return sGpu->matBindsOf(ref, mi, o);
+    };
+    const editor::AssetPickOutcome o1 =
+        editor::applyAssetPick(scene, h, 1, 3, cat, res, 0);
+    ASSERT(o1.applied);
+    EXPECT(mr->meshPath == out.meshes[0]);
+    // O PIN: 3 MATERIAIS na grade, cada um com os seus 5 slots do GTB1
+    EXPECT(mr->matCount() == 3u);
+    for (u32 m = 0; m < 3; ++m) {
+        for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
+            const std::string want =
+                "assets/modelo_" + std::to_string(m * 5 + static_cast<int>(s)) +
+                ".gtext";
+            EXPECT(mr->matTex(m, s) == want);
+        }
+    }
+    // O SELETOR: o perfil diz 3 e o plano ganha a linha «material: i/N»
+    const Tic* tic = scene.get(h);
+    const TextMetrics tm{20.0f, 6.0f};
+    const editor::InspProfile prof = editor::inspectorProfile(*tic);
+    EXPECT(prof.matCount == 3u);
+    editor::InspRow plan[64];
+    const u32 n = editor::inspectorPlan(prof, tm, true, 0u, plan);
+    u32 nSel = 0, nSlots = 0;
+    for (u32 i = 0; i < n; ++i) {
+        if (plan[i].kind == editor::InspRow::Kind::MatSelRow) {
+            ++nSel;
+        }
+        if (plan[i].kind == editor::InspRow::Kind::TexSlotRow) {
+            ++nSlots;
+        }
+    }
+    EXPECT(nSel == 1u);    // O SELETOR existe (N>1)
+    EXPECT(nSlots == 5u);  // as 5 linhas de slot continuam 5
+    // mesh de 1 material: SEM a linha do seletor (o comportamento de sempre)
+    editor::AssetCatalog cat2;
+    cat2.meshes = {"assets/o.gmesh"};
+    editor::AssetResolvers res2;
+    res2.mesh = res.mesh;
+    res2.texture = res.texture;
+    res2.matBinds = [](const std::string&, u32,
+                       std::string (&o)[MeshRenderer::kMeshTexSlots]) {
+        for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
+            o[s].clear();
+        }
+        return false;   // sem GTB1 — 1 material
+    };
+    const editor::AssetPickOutcome o2 =
+        editor::applyAssetPick(scene, h, 1, 3, cat2, res2, 0);
+    ASSERT(o2.applied);
+    EXPECT(mr->matCount() == 1u);   // a grade morre com o mesh (o vestígio)
+    const editor::InspProfile prof2 = editor::inspectorProfile(*scene.get(h));
+    EXPECT(prof2.matCount == 1u);
+    editor::InspRow plan2[64];
+    const u32 n2 = editor::inspectorPlan(prof2, tm, true, 0u, plan2);
+    u32 nSel2 = 0;
+    for (u32 i = 0; i < n2; ++i) {
+        if (plan2[i].kind == editor::InspRow::Kind::MatSelRow) {
+            ++nSel2;
+        }
+    }
+    EXPECT(nSel2 == 0u);   // N=1 → sem seletor
+}
+
+// ---- MULTIMAT · o PIN do dono: o pick no MATERIAL 2 não toca no 0 ---------
+TEST(multimat_pick_no_material_2_nao_toca_no_0) {
+    Scene scene;
+    const Handle h = scene.create("tic");
+    MeshRenderer* mr = scene.get(h)->addComponent<MeshRenderer>();
+    ASSERT(mr != nullptr);
+    mr->meshPath = "assets/m.gmesh";
+    mr->texPath = "assets/m0_0.gtext";
+    mr->texNormal = "assets/m0_1.gtext";
+    mr->texMetalRough = "assets/m0_2.gtext";
+    mr->texEmissive = "assets/m0_3.gtext";
+    mr->texOcclusion = "assets/m0_4.gtext";
+    mr->setMatCount(3);
+    for (u32 m = 1; m < 3; ++m) {
+        for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
+            *mr->matTexRef(m, s) = "assets/m" + std::to_string(m) + "_" +
+                                   std::to_string(s) + ".gtext";
+        }
+    }
+    editor::AssetCatalog cat;
+    cat.textures = {"assets/nova.gtext"};
+    editor::AssetResolvers res;
+    static Texture dummy;
+    res.texture = [](const std::string&, std::string*) -> const Texture* {
+        return &dummy;
+    };
+    // o pick no MATERIAL 2, slot emissive (3): o 2 muda, o 0 INTACTO
+    const editor::AssetPickOutcome o1 =
+        editor::applyAssetPick(scene, h, 2, 2, cat, res, 3, 2);
+    ASSERT(o1.applied);
+    EXPECT(mr->matTex(2, 3) == "assets/nova.gtext");
+    EXPECT(mr->matTex(2, 0) == "assets/m2_0.gtext");   // o base do 2 intacto
+    EXPECT(mr->texPath == "assets/m0_0.gtext");        // o 0 INTACTO (o pin)
+    EXPECT(mr->texNormal == "assets/m0_1.gtext");
+    EXPECT(mr->texEmissive == "assets/m0_3.gtext");
+    // o GL pointer NÃO é tocado num material >0 (o baseColor do 0 é o de
+    // sempre — o lit de hoje amostra-o; o pick multimat não mente)
+    EXPECT(mr->texture == nullptr);
+    // a linha de log diz O MATERIAL (o dono lê: material 2 slot emissive)
+    EXPECT(std::strstr(o1.log, "material 2 slot emissive") != nullptr);
+    // o none no MATERIAL 1 slot normal: limpa SÓ esse (os outros 14 ficam)
+    const editor::AssetPickOutcome o2 =
+        editor::applyAssetPick(scene, h, 2, 1, cat, res, 1, 1);
+    ASSERT(o2.applied);
+    EXPECT(mr->matTex(1, 1).empty());
+    EXPECT(mr->matTex(1, 0) == "assets/m1_0.gtext");
+    EXPECT(mr->matTex(0, 1) == "assets/m0_1.gtext");
+    EXPECT(mr->matTex(2, 3) == "assets/nova.gtext");
+    // o clamp honesto: materialIndex 7 numa grade de 3 → escreve no ÚLTIMO
+    const editor::AssetPickOutcome o3 =
+        editor::applyAssetPick(scene, h, 2, 2, cat, res, 4, 7);
+    ASSERT(o3.applied);
+    EXPECT(mr->matTex(2, 4) == "assets/nova.gtext");
+    // mesh de 1 material: o materialIndex é clamp a 0 (o caminho de sempre)
+    mr->setMatCount(1);
+    const editor::AssetPickOutcome o4 =
+        editor::applyAssetPick(scene, h, 2, 2, cat, res, 1, 2);
+    ASSERT(o4.applied);
+    EXPECT(mr->texNormal == "assets/nova.gtext");   // slot 1 DO material 0
+}
+
+// ---- MULTIMAT · o PIN da HONESTIDADE: o sufixo «vinculado · render na
+// 0.11-L» nos slots não-baseColor preenchidos; o baseColor SEM sufixo ------
+TEST(multimat_sufixo_honesto_no_rotulo) {
+    char b[160];
+    // o baseColor (slot 0) RENDERIZA — SEM sufixo nunca
+    editor::inspTexSlotLabel(b, sizeof(b), "baseColor", 0, "modelo_0.gtext");
+    EXPECT(std::strcmp(b, "baseColor: modelo_0.gtext") == 0);
+    // o normal preenchido NÃO renderiza hoje — o SUFIXO HONESTO (o pin)
+    editor::inspTexSlotLabel(b, sizeof(b), "normal", 1, "modelo_1.gtext");
+    EXPECT(std::strstr(b, "normal: modelo_1.gtext ") == b);
+    EXPECT(std::strstr(b, "(vinculado \xc2\xb7 render na 0.11-L)") !=
+           nullptr);
+    // o emissive idem (o 3) — e o VAZIO não leva sufixo (nada a esconder)
+    editor::inspTexSlotLabel(b, sizeof(b), "emissive", 3, "modelo_3.gtext");
+    EXPECT(std::strstr(b, "(vinculado \xc2\xb7 render na 0.11-L)") !=
+           nullptr);
+    editor::inspTexSlotLabel(b, sizeof(b), "normal", 1, "");
+    EXPECT(std::strcmp(b, "normal: —") == 0);
+    // a fronteira é a FUNÇÃO (o lit de hoje: só o 0; a 0.11-L traz os
+    // samplers 1-4 — e o sufixo morre com eles)
+    EXPECT(editor::texSlotRenders(0));
+    EXPECT(!editor::texSlotRenders(1));
+    EXPECT(!editor::texSlotRenders(2));
+    EXPECT(!editor::texSlotRenders(3));
+    EXPECT(!editor::texSlotRenders(4));
 }
 
 // ---- a composição de pais no TransformSystem (a dívida do polish paga) -----
