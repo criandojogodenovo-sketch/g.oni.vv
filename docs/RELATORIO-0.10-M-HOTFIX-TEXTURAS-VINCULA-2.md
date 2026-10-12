@@ -103,6 +103,15 @@ por construção: `assetMenu` fica 0.)
   jni-parity · check_main · link-parity 122 TUs · release-identity
   **versionCode 65** (declarado no RELATORIO-0.9.6 §14).
 
+## 5-A. O CI (o selo)
+
+- **CI VERDE À PRIMEIRA — run 38250308996 (02c8614)**: core-tests SUCCESS
+  (12:38→12:44) · c33 SUCCESS (12:38→12:40) · APK release arm64 assinado
+  SUCCESS (12:44→12:47) · verify-entry-symbols SUCCESS — o fix -j2 do
+  paralelismo continua a segurar (4 runs verdes seguidos desde o 218).
+  Artefacto: **goni-vv-0.9.6-release-signed** 1,7 MB (versionCode 65,
+  id 11747799810) — o APK que o dono instala para o sign-off no device.
+
 ## 6. NÃO VERIFICADO (honesto)
 
 - O GL dos slots 1-4 continua à espera dos samplers (o lit de hoje tem só
