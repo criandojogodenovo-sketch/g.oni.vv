@@ -48,6 +48,15 @@ constexpr size_t kMaxJsonBytes = 16ull * 1024 * 1024;
 // PNG em RAM p/ decode (fotos normais: 2-8 MB)
 constexpr size_t kMaxImageBytes = 64ull * 1024 * 1024;
 
+// 0.10-M HOTFIX P0 — O LIMITE DECLARADO (a cura (c) do dono: «limites
+// declarados — máx de nós por operação, aviso claro acima»): o import
+// expandido cria NO MÁXIMO ESTE nº de peças/TICs por operação. A
+// explosão (milhares de nós → milhares de entidades → o device morre)
+// morre NO conversor; os nós de fora ficam com o AVISO CLARO no log +
+// toast (Stats::expandLimited leva o nº). Declarado AQUI (a fonte única
+// que o conversor, o GmeshV3Stream, o main e os pins partilham).
+constexpr u32 kGmeshV3ExpandMaxTics = 2000;
+
 struct Stats {
     u64 sourceBytes = 0;    // bytes da fonte (cópia streaming)
     u64 outputBytes = 0;    // soma dos convertidos escritos
@@ -75,6 +84,10 @@ struct Stats {
     u32 joints = 0;
     u32 verts = 0;
     u32 indices = 0;
+    // 0.10-M HOTFIX P0: os nós com mesh que ficaram FORA pelo limite
+    // declarado do expand (kGmeshV3ExpandMaxTics abaixo) — o toast/log do
+    // dono diz o nº (o aviso claro acima do limite; NUNCA silencioso)
+    u32 expandLimited = 0;
     bool canceled = false;
 };
 

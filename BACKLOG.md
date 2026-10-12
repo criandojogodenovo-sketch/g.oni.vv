@@ -134,6 +134,29 @@
   próprio) está documentada no relatório §7 — mover é só workflow, sem
   tocar no teste. Nada a fazer hoje.
 
+## 0.10.7 HOTFIX P0 — SUB-TICs em lotes (o expand deixa de travar) — FEITO
+
+- **FEITO 0.10.7-hotfix-p0**: o dono no C33: «expandir em sub-TICs»
+  travava/crashava. As 4 causas confirmadas e curadas: (a) o expand
+  inteiro na thread de UI → o `GltfExpandBatch` (≤32 peças por frame no
+  ponto seguro, `perPiece` para o auto-bind, o one-shot como wrapper —
+  o estado final é o MESMO); (b) os walks sem visitados → conjunto de
+  visitados nos TRÊS (o ciclo corta e o log diz); (c) TICs ilimitados →
+  `convert::kGmeshV3ExpandMaxTics`=2000 + `Stats::expandLimited` + o
+  aviso claro no log/toast; (d) a reentrância → guardas (sem expand em
+  PLAY; sem import/extract com o expand a correr). + progresso no
+  overlay («A EXPANDIR… d/t» + barra) · cancelamento limpo (os TICs
+  nascidos morrem em ordem inversa) · (e) os últimos «expandir nós»
+  vivos morrem · (f) o import cria a sub-árvore no próprio import (em
+  lotes). Pins: o ciclo termina+ diz · 2100 nós → ≤2000 + aviso · o
+  lote 32/64/96/100 + o cancelamento + o one-shot igual. Mutações
+  M-P0a (sem visitados → abort) e M-P0b (sem lote → vermelho) →
+  vermelhas. test_core 947/948 (o 1 = r039, flake de DISCO da sandbox)
+  · c33 797/797 · versionCode 67. Relatório:
+  docs/RELATORIO-0.10-M-HOTFIX-P0-SUBTICS.md.
+- **POR FAZER (o sign-off do dono)**: o city no device com a opção
+  ativa (o overlay sem ANR + os 72 TICs) e o cancelamento a meio.
+
 ## 0.10.7 HOTFIX-3 — TEXTURAS-MULTIMAT (a honestidade dos slots + o seletor de material) — FEITO
 
 - **FEITO 0.10.7-hotfix-3**: o vc 65 no device revelou 2 gaps e a cura

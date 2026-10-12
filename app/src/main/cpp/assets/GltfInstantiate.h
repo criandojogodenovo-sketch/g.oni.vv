@@ -72,4 +72,59 @@ void gltfExpandComposeWorlds(
         const std::vector<convert::Output::NodeOut>& nodes,
         const std::vector<Handle>& created, Scene& scene);
 
+// ---------------------------------------------------------------------------
+// 0.10-M HOTFIX P0 — A EXPANSÃO EM LOTES (o dono: «expansão assíncrona com
+// progresso+cancelamento · lotes fora da thread de UI»; o device travava
+// com o expand INTEIRO no frame do finalize — importJobFinish corre na
+// thread da UI e fazia criar+configurar+ligar N TICs de UMA vez).
+//
+// O contrato: `gltfExpandBatchStart` cria TODOS os TICs (a 1.ª passada de
+// sempre — barata, sem GL nem I/O) e devolve o job; o chamador corre
+// `gltfExpandBatchTick` UMA VEZ POR FRAME no ponto seguro (o MESMO do
+// importJobFinish — nunca dentro da submissão GL): cada tick configura no
+// MÁXIMO kGltfExpandBatchTics registos (parent+TRS+MeshRenderer+bind).
+// O progresso (done/total) alimenta o overlay; o cancelamento limpo
+// (`gltfExpandBatchCancel`) destrói os TICs criados — a cena fica COMO
+// ESTAVA. O resultado final (todas as ticks + gltfExpandComposeWorlds) é
+// o MESMO estado do `gltfExpandInstantiate` de sempre (o one-shot fica
+// como wrapper por cima do lote — UMA fonte de verdade; o pin compara).
+// O gancho `perPiece` corre DEPOIS de configurar cada peça (o main injeta
+// o auto-bind dos slots; os testes contam as chamadas).
+// ---------------------------------------------------------------------------
+constexpr u32 kGltfExpandBatchTics = 32;   // o lote por frame (a lei)
+
+struct GltfExpandBatch {
+    Scene* scene = nullptr;
+    const std::vector<convert::Output::NodeOut>* nodes = nullptr;
+    const std::vector<std::string>* refs = nullptr;
+    const GltfInstantiateCtx* ctx = nullptr;
+    std::vector<Handle> created;   // NA ORDEM dos registos (o contrato)
+    size_t next = 0;               // o próximo registo a configurar
+    u32 done_ = 0;                 // peças configuradas (o progresso)
+    u32 total_ = 0;                // peças no total (o progresso)
+    bool finished = false;
+    bool canceled = false;
+    void (*perPiece)(Scene&, Handle, void* user) = nullptr;
+    void* perPieceUser = nullptr;
+
+    // 1.ª passada: TODOS os TICs (nomes; ordem dos registos — um pai pode
+    // ter índice MAIOR que o filho; os links ficam para as ticks)
+    static GltfExpandBatch start(
+            Scene& scene,
+            const std::vector<convert::Output::NodeOut>& nodes,
+            const std::vector<std::string>& refs,
+            const GltfInstantiateCtx& ctx);
+    // configura O PRÓXIMO LOTE (≤ kGltfExpandBatchTics registos) — o lote
+    // É A LEI: nunca tudo num só tick (a mutação M-P0b morre AQUI).
+    // Devolve true quando acabou.
+    bool tick();
+    // o cancelamento LIMPO: destrói os TICs criados (ordem inversa) e
+    // fecha o job — zero TIC metade-nascido na cena
+    void cancel();
+    bool active() const { return !finished && !canceled; }
+    u32 done() const { return done_; }
+    u32 total() const { return total_; }
+    const std::vector<Handle>& handles() const { return created; }
+};
+
 } // namespace vv

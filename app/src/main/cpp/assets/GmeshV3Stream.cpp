@@ -188,9 +188,23 @@ void worldChainOf(const GltfModel& model, i32 nodeIdx, Mat4& pw, Mat4& rw) {
     if (nodeIdx < 0 || nodeIdx >= static_cast<i32>(model.nodes.size())) {
         return;
     }
+    // 0.10-M HOTFIX P0 — o CONJUNTO DE VISITADOS (a cura (b) do dono): um
+    // glTF MALFORMADO com pais em CICLO (n1.parent=n2, n2.parent=n1) fazia
+    // este walk girar PARA SEMPRE (o worker do import nunca acabava — a
+    // engine «travada»). O visitado corta o ciclo no PRIMEIRO re-visit e
+    // loga a causa (o dono LÊ). A cadeia válida é acíclica ≤ N — o
+    // comportamento sem ciclo é byte a byte.
+    std::vector<char> seen(model.nodes.size(), 0);
     std::vector<u32> chain;
     i32 k = nodeIdx;
     while (k >= 0 && k < static_cast<i32>(model.nodes.size())) {
+        if (seen[static_cast<size_t>(k)]) {
+            elog::warn("asset: ciclo nos nós do glTF (pai em ciclo em %d) — "
+                       "a cadeia do mundo corta no visitado (o modelo fica "
+                       "com o TRS parcial)", k);
+            break;
+        }
+        seen[static_cast<size_t>(k)] = 1;
         chain.push_back(static_cast<u32>(k));
         k = model.nodes[static_cast<size_t>(k)].parent;
     }
@@ -1467,7 +1481,7 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
 
 // ──────────────────────────────────────────────────────────────────────────
 // 0.10-M (EXT) · IMPORT DE NÓS COMO SUB-ÁRVORE — o driver das PEÇAS
-// (a spec do dono: «opção no import "expandir nós" que cria um TIC por nó
+// (a spec do dono: «opção no import "expandir em sub-TICs" que cria um TIC por nó
 // com mesh (nomes do glTF preservados, transformação do nó como Transform
 // do TIC), em vez de fundir num TIC só»). Cada peça é UMA chamada completa
 // ao convertGltfToV3 — corte/assembly/verificação bit a bit POR PEÇA, a
@@ -1610,10 +1624,33 @@ bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
     u32 pieces = 0;
     u64 sumBlocks = 0, sumVerts = 0, sumTris = 0;
     bool allVerified = true;
+    u32 skippedOverLimit = 0;
+    bool warnedLimit = false;
     for (size_t n = 0; n < model.nodes.size(); ++n) {
         if (byNode[n].empty()) {
             continue;   // nó sem mesh (ou cujas primitivas TODAS caíram —
                         // o toast do primWarn já disse quantas)
+        }
+        // 0.10-M HOTFIX P0 — O LIMITE DECLARADO (a cura (c) do dono): a
+        // explosão de TICs (milhares de nós → milhares de entidades) morre
+        // AQUI — convert::kGmeshV3ExpandMaxTics peças por operação, o resto FICA DE
+        // FORA com o AVISO CLARO (log + o toast do finalize diz o nº). Os
+        // nós de fora NÃO viram peças (nada de gmesh órfão no disco); os
+        // filhos deles re-atracam ao ancestral mantido ou ficam FLAT (o
+        // 2.º passe de baixo resolve — o ancestral walk sobe pelos não-
+        // registados).
+        if (pieces >= convert::kGmeshV3ExpandMaxTics) {
+            ++skippedOverLimit;
+            if (!warnedLimit) {
+                warnedLimit = true;
+                elog::warn("asset: expandir em sub-TICs — LIMITE de %u "
+                           "peças atingido (os nós com mesh a partir daqui "
+                           "ficam FORA deste import: %u até agora; agrupa "
+                           "o glTF ou importa em partes)",
+                           convert::kGmeshV3ExpandMaxTics,
+                           static_cast<unsigned>(n));
+            }
+            continue;
         }
         const GltfNode& nd = model.nodes[n];
         // (a) o TRS MUNDO do nó (a MESMA matriz do bake — worldChainOf)
@@ -1690,6 +1727,9 @@ bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
         out.expandNodes.push_back(std::move(no));
         ++pieces;
     }
+    // 0.10-M HOTFIX P0: o nº de nós que ficaram FORA pelo limite — o
+    // stats leva-o ao finalize (o toast/log do dono diz o aviso claro)
+    stats.expandLimited = skippedOverLimit;
     // ---- 0.10-M HOTFIX (e/f) — A SUB-ÁRVORE REAL (o 2.º passe) ----------
     // O ancestral REGISTADO mais próximo (os nós vazios não viram TICs —
     // o pin do 5B mantém-se): a peça pende dele com o TRS LOCAL da cadeia
@@ -1714,10 +1754,18 @@ bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
             }
             // o ancestral registado (sobe pelos nós vazios — os TICs
             // deles nunca existiram)
+            // 0.10-M HOTFIX P0: o CONJUNTO DE VISITADOS (a cura (b)) — o
+            // mesmo corte de ciclo do worldChainOf (o pai em ciclo girava
+            // para sempre AQUI também)
             i32 ancRec = -1;
             {
+                std::vector<char> seen(model.nodes.size(), 0);
                 i32 p = model.nodes[static_cast<size_t>(no.node)].parent;
                 while (p >= 0 && p < static_cast<i32>(model.nodes.size())) {
+                    if (seen[static_cast<size_t>(p)]) {
+                        break;   // ciclo — corta (o log do worldChainOf diz)
+                    }
+                    seen[static_cast<size_t>(p)] = 1;
                     if (recOfNode[static_cast<size_t>(p)] >= 0) {
                         ancRec = recOfNode[static_cast<size_t>(p)];
                         break;
@@ -1743,11 +1791,19 @@ bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
             }
             // a cadeia LOCAL entre o ancestral (exclusivo) e o nó
             // (inclusive), de cima para baixo
+            // 0.10-M HOTFIX P0: o VISITADO corta o ciclo aqui também (o
+            // push_back ilimitado era OOM a girar num glTF cíclico)
             Mat4 local = Mat4::identity();
             {
                 std::vector<u32> chain;
+                std::vector<char> seen(model.nodes.size(), 0);
                 i32 k = no.node;
                 while (k >= 0 && k != ancNode) {
+                    if (k >= static_cast<i32>(model.nodes.size()) ||
+                        seen[static_cast<size_t>(k)]) {
+                        break;   // fora do modelo OU ciclo — corta
+                    }
+                    seen[static_cast<size_t>(k)] = 1;
                     chain.push_back(static_cast<u32>(k));
                     k = model.nodes[static_cast<size_t>(k)].parent;
                 }

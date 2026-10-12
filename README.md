@@ -34,6 +34,28 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.10.7 — 0.10-M HOTFIX P0: SUB-TICs em lotes — o expand deixa de travar a engine
+
+**O bug (dono, C33)**: o «expandir em sub-TICs» nos settings fazia a
+engine travar / não responder / crashar.
+
+- **As causas (a)-(d), todas confirmadas**: o expand INTEIRO corria no
+  frame do finalize (thread da UI — ANR); os walks de pais não tinham
+  conjunto de visitados (glTF cíclico = loop infinito/OOM); a criação de
+  TICs não tinha teto; não havia guard de reentrância (import/play).
+- **A cura**: `GltfExpandBatch` — o import cria a sub-árvore EM LOTES
+  (32 peças por frame no ponto seguro, progresso «A EXPANDIR… d/t» no
+  overlay, cancelamento limpo — a cena fica como estava); os walks com
+  visitados; o limite declarado 2000 peças com aviso claro; os guardas
+  de estado (nada de expand em play, nada de import com o expand a
+  correr); os últimos «expandir nós» vivos morrem (logs+docs).
+- **As provas**: 3 pins novos (o ciclo termina e diz; 2100 nós →
+  TICs ≤ 2000 + aviso; o lote 32/64/96/100 + o cancelamento limpo + o
+  one-shot igual) · mutações M-P0a (sem visitados → abort bad_alloc) e
+  M-P0b (tick sem lote → vermelho ×3) vermelho→verde · test_core 947/948
+  (o 1 = o flake de disco r039 da sandbox) · c33 797/797 · versionCode
+  67. Relatório: docs/RELATORIO-0.10-M-HOTFIX-P0-SUBTICS.md.
+
 ## 0.10.7 — 0.10-M HOTFIX-3: TEXTURAS-MULTIMAT — a honestidade dos slots + o seletor de material
 
 **Os 2 gaps do vc 65 (o dono no device)**: os 4 slots não-baseColor

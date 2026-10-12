@@ -1454,7 +1454,7 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
             // para o import fundido e para o BACKLOG 0.10-A; o .gm fica
             // escrito para o merge futuro)
             if (!out.expandNodes.empty()) {
-                elog::info("asset: expandir nós — %u clip(s)/esqueleto "
+                elog::info("asset: expandir em sub-TICs — %u clip(s)/esqueleto "
                            "ficam em %s SEM attach (os clips animam NÓS do "
                            "glTF; o expand é para PEÇAS — o BACKLOG 0.10-A "
                            "traz os clips)",

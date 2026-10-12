@@ -907,6 +907,170 @@ TEST(multimat_sufixo_honesto_no_rotulo) {
     EXPECT(!editor::texSlotRenders(4));
 }
 
+// ---- P0 · o PIN do CICLO de pais (a cura (b) — o walk SEM visitados
+// girava para sempre num glTF malformado; o mutante M-P0a HANGA aqui) ------
+TEST(expand_p0_ciclo_de_pais_termina_e_diz) {
+    const std::string base = std::string("/tmp/goni_tb6_") +
+                             std::to_string(static_cast<long>(::getpid()));
+    system(("mkdir -p " + base + "/proj " + base + "/logs").c_str());
+    // DOIS nós com mesh e pais em CICLO (0→1→0 pelos children): o parse
+    // produz nodes[0].parent=1 e nodes[1].parent=0 — o walk do ancestral/
+    // da cadeia/mundo tinha de TERMINAR (o mutante sem visitados nunca
+    // volta — o timeout do ctest é o vermelho)
+    const std::string json =
+        std::string("{\"asset\":{\"version\":\"2.0\"},"
+                    "\"buffers\":[{\"byteLength\":42}],"
+                    "\"bufferViews\":["
+                    "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+                    "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":6}],"
+                    "\"accessors\":["
+                    "{\"bufferView\":0,\"componentType\":5126,\"count\":3,"
+                    "\"type\":\"VEC3\",\"min\":[0,0,0],\"max\":[1,1,0]},"
+                    "{\"bufferView\":1,\"componentType\":5123,\"count\":3,"
+                    "\"type\":\"SCALAR\"}],"
+                    "\"materials\":[{\"name\":\"m\"}],"
+                    "\"meshes\":[{\"name\":\"tri\",\"primitives\":["
+                    "{\"attributes\":{\"POSITION\":0},\"indices\":1,"
+                    "\"material\":0}]}],"
+                    "\"nodes\":["
+                    "{\"name\":\"a\",\"mesh\":0,\"children\":[1]},"
+                    "{\"name\":\"b\",\"mesh\":0,\"children\":[0]}],"
+                    "\"scenes\":[{\"nodes\":[0]}]}");
+    const std::vector<u8> glb = makeGlb(json, triBuffer());
+    const std::string src = base + "/modelo.glb";
+    ASSERT(writeSrc(src, glb));
+    elog::init((base + "/logs").c_str());
+    FsStorage st((base + "/proj").c_str());
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    const bool ok =
+        convert::importFile(src, "modelo.glb", st, nullptr, out, stats,
+                            err, nullptr, nullptr, /*expandNodes=*/true);
+    elog::shutdown();
+    EXPECT(ok);   // TERMINA (o pin é o próprio retorno — o mutante hanga)
+    EXPECT(out.expandNodes.size() == 2u);   // as 2 peças saíram
+    // o dono LÊ a causa (o conjunto de visitados cortou e disse)
+    const std::string log = slurp(base + "/logs/engine.log");
+    EXPECT(log.find("ciclo nos nós do glTF") != std::string::npos);
+}
+
+// ---- P0 · o PIN do LIMITE declarado (a cura (c): 2100 nós com mesh →
+// TICs ≤ kGmeshV3ExpandMaxTics + o aviso claro dos que ficaram fora) -----
+TEST(expand_p0_limite_de_pecas_e_aviso) {
+    const std::string base = std::string("/tmp/goni_tb7_") +
+                             std::to_string(static_cast<long>(::getpid()));
+    system(("mkdir -p " + base + "/proj " + base + "/logs").c_str());
+    // 2100 nós COM mesh (todos referem o mesmo triângulo — peças de 1
+    // primitiva sem texturas, o caminho mais barato do conversor)
+    const u32 kNodes = 2100;
+    std::string nodes;
+    for (u32 i = 0; i < kNodes; ++i) {
+        nodes += (i ? "," : "") + std::string("{\"name\":\"n") +
+                 std::to_string(i) + "\",\"mesh\":0}";
+    }
+    const std::string json =
+        std::string("{\"asset\":{\"version\":\"2.0\"},"
+                    "\"buffers\":[{\"byteLength\":42}],"
+                    "\"bufferViews\":["
+                    "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+                    "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":6}],"
+                    "\"accessors\":["
+                    "{\"bufferView\":0,\"componentType\":5126,\"count\":3,"
+                    "\"type\":\"VEC3\",\"min\":[0,0,0],\"max\":[1,1,0]},"
+                    "{\"bufferView\":1,\"componentType\":5123,\"count\":3,"
+                    "\"type\":\"SCALAR\"}],"
+                    "\"materials\":[{\"name\":\"m\"}],"
+                    "\"meshes\":[{\"name\":\"tri\",\"primitives\":["
+                    "{\"attributes\":{\"POSITION\":0},\"indices\":1,"
+                    "\"material\":0}]}],"
+                    "\"nodes\":[" +
+                    nodes +
+                    "],\"scenes\":[{\"nodes\":[0]}]}");
+    const std::vector<u8> glb = makeGlb(json, triBuffer());
+    const std::string src = base + "/modelo.glb";
+    ASSERT(writeSrc(src, glb));
+    elog::init((base + "/logs").c_str());
+    FsStorage st((base + "/proj").c_str());
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    ASSERT(convert::importFile(src, "modelo.glb", st, nullptr, out, stats,
+                               err, nullptr, nullptr, /*expandNodes=*/true));
+    elog::shutdown();
+    // O PIN: os TICs NÃO passam do limite declarado (a explosão morre)
+    EXPECT(out.expandNodes.size() ==
+           static_cast<size_t>(convert::kGmeshV3ExpandMaxTics));
+    // o resto dos nós FICOU DE FORA com o aviso claro (o nº no stats)
+    EXPECT(stats.expandLimited == kNodes - convert::kGmeshV3ExpandMaxTics);
+    const std::string log = slurp(base + "/logs/engine.log");
+    EXPECT(log.find("LIMITE de 2000") != std::string::npos);
+}
+
+// ---- P0 · o PIN do LOTE (a cura (a): o tick configura ≤
+// kGltfExpandBatchTics peças — a expansão NÃO corre tudo na thread de UI
+// num só frame; o progresso done/total avança; o cancelamento LIMPA) ----
+TEST(expand_p0_lote_progresso_e_cancelamento_limpo) {
+    Scene scene;
+    // 100 registos COM peça (a ref é a "assets/x.gmesh" — o bindMesh null
+    // do ctx deixa o meshPath, o reload re-liga; o pin conta o lote)
+    std::vector<convert::Output::NodeOut> nodes;
+    std::vector<std::string> refs = {"assets/x.gmesh"};
+    for (u32 i = 0; i < 100; ++i) {
+        convert::Output::NodeOut no;
+        no.name = "p" + std::to_string(i);
+        no.node = static_cast<i32>(i);
+        no.mesh = 0;
+        nodes.push_back(no);
+    }
+    GltfInstantiateCtx ctx;   // bindMesh null — o meshPath fica
+    GltfExpandBatch job = GltfExpandBatch::start(scene, nodes, refs, ctx);
+    EXPECT(job.total() == 100u);
+    EXPECT(job.done() == 0u);
+    EXPECT(job.active());
+    // o gancho por peça conta (o main injeta o auto-bind; o pin prova que
+    // corre DENTRO do lote)
+    u32 perPieceCalls = 0;
+    job.perPiece = [](Scene&, Handle, void* user) {
+        ++*static_cast<u32*>(user);
+    };
+    job.perPieceUser = &perPieceCalls;
+    // A LEI DO LOTE: 1 tick = NO MÁXIMO kGltfExpandBatchTics peças — a
+    // mutação M-P0b (tudo num tick = a expansão na thread de UI) morre
+    // NESTE assert
+    EXPECT(!job.tick());
+    EXPECT(job.done() == 32u);   // ← o mutante faz 100 aqui (vermelho)
+    EXPECT(perPieceCalls == 32u);
+    EXPECT(scene.count() == 100u);   // os TICs existem (a 1.ª passada)
+    EXPECT(!job.tick());
+    EXPECT(job.done() == 64u);
+    EXPECT(!job.tick());
+    EXPECT(job.done() == 96u);
+    EXPECT(job.tick());   // a última: 4 peças + fim
+    EXPECT(job.done() == 100u);
+    EXPECT(!job.active());
+    EXPECT(scene.count() == 100u);
+    // o CANCELAMENTO LIMPO (o pin do dono): os TICs já nascidos MORREM —
+    // a cena fica COMO ESTAVA antes do expand
+    GltfExpandBatch job2 = GltfExpandBatch::start(scene, nodes, refs, ctx);
+    EXPECT(!job2.tick());
+    EXPECT(scene.count() == 200u);   // +100 do 2.º job (32 configurados)
+    job2.cancel();
+    EXPECT(job2.canceled);
+    EXPECT(scene.count() == 100u);   // os 100 do 1.º job INTACTOS
+    // e o one-shot é o MESMO estado final (o wrapper do lote — a fonte
+    // única; a sub-árvore real dos pins de cima passou por AQUI)
+    Scene scene2;
+    const std::vector<Handle> created =
+        gltfExpandInstantiate(scene2, nodes, refs, ctx);
+    EXPECT(created.size() == 100u);
+    EXPECT(scene2.count() == 100u);
+    const Tic* t0 = scene2.get(created[0]);
+    ASSERT(t0 != nullptr);
+    EXPECT(t0->getComponent<MeshRenderer>() != nullptr);
+    EXPECT(t0->getComponent<MeshRenderer>()->meshPath == "assets/x.gmesh");
+}
+
 // ---- a composição de pais no TransformSystem (a dívida do polish paga) -----
 TEST(transform_system_compoe_pais) {
     Scene scene;

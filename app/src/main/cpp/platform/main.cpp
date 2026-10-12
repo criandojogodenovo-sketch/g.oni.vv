@@ -2552,6 +2552,25 @@ struct ImportJob {
     std::string fileName;   // p/ o overlay e o diálogo
 } g_importJob;
 
+// ---- 0.10-M HOTFIX P0 — O JOB DO EXPAND (lotes por frame) ------------------
+// A cura (a) do dono: o expand INTEIRO no frame do finalize travava a UI
+// (importJobFinish corre na thread da UI — criar+configurar+ligar N TICs
+// de uma vez com blockHull+matBindsOf por peça = ANR no city e pior num
+// modelo grande). O job mantém o GltfExpandBatch vivo ENTRE frames; o
+// frame corre UM tick no PONTO SEGURO (o mesmo do importJobFinish) e o
+// overlay mostra o progresso (done/total) com o cancelamento limpo.
+// O finalize (composeWorlds + fit + seleção + toast) corre no frame em
+// que a última tick acaba — o MESMO estado final do caminho de sempre.
+// O job é DONO das cópias dos registos/refs (o g_importJob.out pode ser
+// sobreposto por um import novo — o guard do lançamento recusa import
+// com o expand a correr, mas a cópia é a defesa barata: ~200 KB a 2000).
+struct ExpandJob {
+    bool active = false;               // SÓ a thread da UI toca (sem átomos)
+    GltfExpandBatch batch;
+    std::vector<convert::Output::NodeOut> nodes;   // A CÓPIA (dono)
+    std::vector<std::string> refs;                 // A CÓPIA (dono)
+} g_expandJob;
+
 // progresso do job (chamado na THREAD do job): atualiza os atómicos e
 // devolve false quando o utilizador cancelou
 bool importJobProgress(void* user, u64 doneBytes, u64 totalBytes) {
@@ -2605,6 +2624,15 @@ std::string importOverlayBytesText(u64 doneB, u64 totalB) {
 // false = já há um job a correr (não relança — o overlay é modal)
 bool importJobStart(const fileapi::DirEntry& e) {
     if (g_importJob.active.load()) {
+        return false;
+    }
+    // 0.10-M HOTFIX P0 (a cura (d) — a reentrância): com o expand a correr
+    // NENHUM import arranca (o worker novo escreveria g_importJob.out e a
+    // cena mudaria por baixo do lote) — honesto no toast + no log
+    if (g_expandJob.active) {
+        showToast("expansao em curso — espera ou cancela no overlay");
+        elog::warn("import: recusado — o job do expand (em lotes) está a "
+                   "correr; cancela no overlay ou espera o fim");
         return false;
     }
     if (!g_storage) {
@@ -2684,6 +2712,11 @@ void browserExtractArchive(const fileapi::DirEntry& e) {
         showToast("import ja em curso...");
         return;
     }
+    // 0.10-M HOTFIX P0 (a cura (d)): o extract também respeita o expand
+    if (g_expandJob.active) {
+        showToast("expansao em curso — espera ou cancela no overlay");
+        return;
+    }
     std::string safe = e.name;
     for (char& ch : safe) {
         if (ch == '/' || ch == '\\' || ch == ':') ch = '_';
@@ -2713,6 +2746,246 @@ void browserExtractArchive(const fileapi::DirEntry& e) {
     elog::info("archive: job de extracao iniciado '%s' → %s (thread "
                "propria; NADA converte neste passo)", e.path.c_str(),
                dest.c_str());
+}
+
+// ---- 0.10-M HOTFIX P0 · O CICLO DE VIDA DO JOB DO EXPAND -------------------
+// O gancho POR PEÇA (o MESMO conteúdo do pós-instantiate de sempre, agora
+// por peça dentro do lote): (1) o auto-bind da grade INTEIRA dos materiais
+// do GTB1 (TEXTURAS-MULTIMAT — o material 0 nos campos de sempre, os
+// extras no matExtraTex); (2) o auto-tex da peça de 1 material (o caminho
+// TEXTURAS-VINCULA — o manual do dono nunca é sobrescrito; a peça sem
+// GTB1 segue honesta). TICs recém-nascidos — nada a limpar aqui.
+static void expandJobPerPiece(Scene& scene, Handle h, void* /*user*/) {
+    Tic* t = scene.get(h);
+    MeshRenderer* mr = t ? t->getComponent<MeshRenderer>() : nullptr;
+    if (!mr || mr->meshPath.empty()) {
+        return;
+    }
+    // (1) a grade dos N materiais do GTB1 da peça (a sonda para no false)
+    mr->matExtraTex.clear();
+    std::string binds[MeshRenderer::kMeshTexSlots];
+    u32 mi = 0;
+    while (mi < 64u && g_gpu.matBindsOf(mr->meshPath, mi, binds)) {
+        if (mi == 0) {
+            for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
+                if (!binds[s].empty()) {
+                    mr->texSlotRef(s) = binds[s];
+                }
+            }
+        } else {
+            for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
+                mr->matExtraTex.push_back(binds[s]);
+            }
+        }
+        ++mi;
+    }
+    // (2) o auto-tex da peça de 1 material (binds do BlockMesh aberto pelo
+    // blockHull do configure — o MESMO bloco que o render vai desenhar)
+    if (!mr->texPath.empty()) {
+        return;   // a grade já vinculou o baseColor — o manual não existe
+                  // aqui (recém-nascido), mas o guard é o mesmo de sempre
+    }
+    const BlockMesh* bm = g_gpu.blockMeshIfOpen(mr->meshPath);
+    if (bm == nullptr || bm->binds().empty()) {
+        return;
+    }
+    std::string rel;
+    for (const GMeshMatBind& b : bm->binds()) {
+        if (b.materialIndex == 0) {
+            rel = b.tex[kBindBaseColor];
+            break;
+        }
+    }
+    if (rel.empty()) {
+        return;
+    }
+    if (bm->materials().size() <= 1) {
+        if (const Texture* tex = g_gpu.texture(rel)) {
+            mr->texPath = rel;
+            mr->texture = tex;
+            elog::info("textura: vinculada '%s' slot baseColor -> %s (auto "
+                       "do import)",
+                       t->name.c_str(), rel.c_str());
+        } else {
+            elog::warn("textura: '%s' slot baseColor (%s) SEM ficheiro — o "
+                       "TIC fica sem (reimporta)",
+                       t->name.c_str(), rel.c_str());
+        }
+    }
+}
+
+// o ARRANQUE (o importJobFinish chama — a thread da UI): copia os
+// registos/refs (o job é DONO — o g_importJob.out pode ser sobreposto),
+// monta o ctx do blockHull (o MESMO binder do caminho de sempre) e arma o
+// lote; o progresso/overlay/cancel correm por frame a partir daqui
+void expandJobStart(const convert::Output& out) {
+    g_expandJob.nodes = out.expandNodes;
+    g_expandJob.refs = out.meshes;
+    static GltfInstantiateCtx ictx;   // os ponteiros do batch vivem além
+    ictx.user = &g_gpu;
+    ictx.bindMesh = [](void* user, const std::string& ref) -> Mesh* {
+        // blockHull: abre a peça pela TABELA (zero dados) + cria o hull de
+        // bounds — o blockRebind do ponto seguro do PRÓXIMO frame liga o
+        // BlockMesh* ao MeshRenderer (este frame ainda corre com o
+        // blocks==null dos TICs recém-nascidos)
+        return static_cast<GpuAssets*>(user)->blockHull(ref);
+    };
+    ictx.material = g_renderer.litMaterial();
+    g_expandJob.batch =
+        GltfExpandBatch::start(g_scene, g_expandJob.nodes, g_expandJob.refs,
+                               ictx);
+    g_expandJob.batch.perPiece = &expandJobPerPiece;
+    g_expandJob.batch.perPieceUser = nullptr;
+    g_expandJob.active = true;
+    elog::info("import: EXPANDIDO em lotes — %u peça(s) (%u por frame, "
+               "progresso no overlay; cancelar aí)%s",
+               g_expandJob.batch.total(), kGltfExpandBatchTics,
+               g_importJob.stats.expandLimited > 0
+                   ? " — LIMITE atingido (o resto ficou fora)"
+                   : "");
+}
+
+// o FINALIZE (a última tick acabou): o fit único + a composição + a
+// seleção + o toast/log (o MESMO conteúdo do caminho síncrono de sempre;
+// o aviso do LIMITE entra no toast — nunca silencioso)
+static void expandJobFinalize() {
+    const std::vector<Handle>& created = g_expandJob.batch.handles();
+    const std::vector<convert::Output::NodeOut>& nodes = g_expandJob.nodes;
+    // o FIT único (o MESMO alvo do applyAssetPick 0.8.9): a caixa do
+    // modelo INTEIRO em mundo (união das PEÇAS transformadas) define o
+    // fator — aplicado a CADA TIC novo como pos*=s e scale*=s (a
+    // translação FORA do TRS faz o conjunto encolher NO SÍTIO; o resto da
+    // cena NÃO é tocado — só os handles que ACABARAM de nascer)
+    if (!created.empty()) {
+        Vec3 mn{1e30f, 1e30f, 1e30f}, mx{-1e30f, -1e30f, -1e30f};
+        for (const Handle h : created) {
+            const Tic* owner = g_scene.get(h);
+            const MeshRenderer* mr =
+                owner ? owner->getComponent<MeshRenderer>() : nullptr;
+            // o BlockMesh da PEÇA pelo meshPath (a abertura do binder JÁ
+            // deixou o BlockMesh no mapa do GpuAssets — é ELE que tem o
+            // AABB do meta)
+            const BlockMesh* bm =
+                mr ? (mr->blocks ? mr->blocks
+                                 : g_gpu.blockMeshIfOpen(mr->meshPath))
+                   : nullptr;
+            const Transform3D* tr =
+                owner ? owner->getComponent<Transform3D>() : nullptr;
+            if (!bm || !tr) {
+                continue;
+            }
+            const Vec3 lo = bm->boundsMin();
+            const Vec3 hi = bm->boundsMax();
+            const Vec3 corn[8] = {
+                {lo.x, lo.y, lo.z}, {hi.x, lo.y, lo.z},
+                {lo.x, hi.y, lo.z}, {hi.x, hi.y, lo.z},
+                {lo.x, lo.y, hi.z}, {hi.x, lo.y, hi.z},
+                {lo.x, hi.y, hi.z}, {hi.x, hi.y, hi.z}};
+            for (const Vec3& c : corn) {
+                const Vec3 w{
+                    tr->world.m[0] * c.x + tr->world.m[4] * c.y +
+                        tr->world.m[8] * c.z + tr->world.m[12],
+                    tr->world.m[1] * c.x + tr->world.m[5] * c.y +
+                        tr->world.m[9] * c.z + tr->world.m[13],
+                    tr->world.m[2] * c.x + tr->world.m[6] * c.y +
+                        tr->world.m[10] * c.z + tr->world.m[14]};
+                mn.x = (std::min)(mn.x, w.x);
+                mn.y = (std::min)(mn.y, w.y);
+                mn.z = (std::min)(mn.z, w.z);
+                mx.x = (std::max)(mx.x, w.x);
+                mx.y = (std::max)(mx.y, w.y);
+                mx.z = (std::max)(mx.z, w.z);
+            }
+        }
+        const Vec3 ext{mx.x - mn.x, mx.y - mn.y, mx.z - mn.z};
+        const f32 maior =
+            ext.x > ext.y ? (ext.x > ext.z ? ext.x : ext.z)
+                          : (ext.y > ext.z ? ext.y : ext.z);
+        f32 s = 1.0f;
+        if (maior > 1e-6f && std::isfinite(maior)) {
+            s = editor::kImportTargetSize / maior;
+            if (!std::isfinite(s) || s <= 0.0f) {
+                s = 1.0f;   // defesa: geometria absurda = sem fit
+            }
+        }
+        if (s != 1.0f) {
+            for (size_t i = 0; i < created.size() && i < nodes.size(); ++i) {
+                // 0.10-M HOTFIX (f): a escala SÓ nas RAÍZES — os filhos
+                // têm TRS LOCAL e seguem o pai (escalar todos compunha s²
+                // na profundidade)
+                if (nodes[i].parentRec >= 0) {
+                    continue;
+                }
+                Tic* owner = g_scene.get(created[i]);
+                Transform3D* tr =
+                    owner ? owner->getComponent<Transform3D>() : nullptr;
+                if (tr) {
+                    tr->pos = Vec3{tr->pos.x * s, tr->pos.y * s,
+                                   tr->pos.z * s};
+                    tr->scale = Vec3{tr->scale.x * s, tr->scale.y * s,
+                                     tr->scale.z * s};
+                    tr->updateWorld();
+                }
+            }
+            // os filhos seguem o pai: recomps os mundos pela cadeia
+            gltfExpandComposeWorlds(nodes, created, g_scene);
+        }
+        // o 1º TIC selecionado (o dono VÊ a sub-árvore no inspector)
+        g_editor.selected = created[0];
+    }
+    if (g_importJob.stats.expandLimited > 0) {
+        char wmsg[160];
+        std::snprintf(wmsg, sizeof(wmsg),
+                      "expandido: %u TIC(s) — LIMITE (%u peça(s) fora)",
+                      static_cast<unsigned>(created.size()),
+                      g_importJob.stats.expandLimited);
+        showToast(wmsg);
+        elog::warn("import: EXPANDIDO — LIMITE %u atingido (%u peça(s) "
+                   "ficaram FORA; agrupa o glTF ou importa em partes)",
+                   convert::kGmeshV3ExpandMaxTics,
+                   g_importJob.stats.expandLimited);
+    } else {
+        char emsg[128];
+        std::snprintf(emsg, sizeof(emsg), "expandido: %u TIC(s) na cena",
+                      static_cast<unsigned>(created.size()));
+        showToast(emsg);
+    }
+    elog::info("import: EXPANDIDO — %u TIC(s) criados em lotes de %u (um "
+               "por nó com mesh; nomes do glTF; sub-árvore real — sub-TICs "
+               "com TRS local; culling por TIC pelos blocos)",
+               static_cast<unsigned>(created.size()),
+               kGltfExpandBatchTics);
+}
+
+// O TICK DO FRAME (o ponto seguro chama — o MESMO sítio do
+// importJobFinish): UM lote por frame; o overlay mostra o progresso; o
+// cancel do overlay limpa (os TICs criados MORREM — a cena fica como
+// estava); a última tick corre o finalize no MESMO frame
+void expandJobTick() {
+    if (!g_expandJob.active) {
+        return;
+    }
+    if (g_importJob.cancel.load()) {
+        // o cancelamento LIMPO (a cura do dono): os TICs já nascidos
+        // saem (ordem inversa — os filhos primeiro); a cena fica COMO
+        // ESTAVA e o toast diz a verdade
+        const u32 born = g_expandJob.batch.done();
+        g_expandJob.batch.cancel();
+        g_expandJob.active = false;
+        g_importJob.cancel.store(false);
+        showToast("expansão cancelada (a cena ficou como estava)");
+        elog::info("import: expandir em sub-TICs CANCELADO — %u TIC(s) "
+                   "recém-nascido(s) removido(s) (a cena limpa)",
+                   born);
+        return;
+    }
+    const bool doneNow = g_expandJob.batch.tick();
+    if (doneNow) {
+        expandJobFinalize();
+        g_expandJob.active = false;
+        g_expandJob.nodes.clear();
+        g_expandJob.refs.clear();
+    }
 }
 
 // FINALIZE no frame(): join + catálogo + diálogo aplicar/toast honesto
@@ -2824,203 +3097,30 @@ void importJobFinish() {
                    "(o reconvert funciona sem a pasta original)",
                    g_importJob.stats.siblings);
     }
-    // ---- 0.10-M (EXT) · A SUB-ÁRVORE ENTRA NA CENA -----------------------
-    // O import EXPANDIDO (setting «expandir em sub-TICs»): um TIC por nó com mesh
-    // — nomes do glTF preservados, a transformação do nó no Transform3D, o
-    // MeshRenderer com a ref da PEÇA. As peças abrem POR BLOCOS
-    // (kGmeshV3FlagPiece → blockHull): frustum por bloco = CULLING POR
-    // TIC, o MESMO caminho do modelo grande do PASSO 4. SEM diálogo
-    // «aplicar ao TIC?» — os TICs NOVOS é que são o resultado.
+    // ---- 0.10-M (EXT) · A SUB-ÁRVORE ENTRA NA CENA (EM LOTES — P0) -------
+    // O import EXPANDIDO (setting «expandir em sub-TICs»): um TIC por nó com
+    // mesh — nomes do glTF preservados, a transformação no Transform3D, o
+    // MeshRenderer com a ref da PEÇA, as peças POR BLOCOS (kGmeshV3FlagPiece
+    // → blockHull). 0.10-M HOTFIX P0: NADA disto corre SÍNCRONO aqui — o
+    // importJobFinish é a thread da UI e o expand inteiro de uma vez era o
+    // ANR do dono (cura (a)). O job arranca AQUI e o frame corre UM lote
+    // por tick no ponto seguro, com progresso no overlay + cancelamento
+    // limpo (o overlay é o MESMO, agora com a fase «A EXPANDIR…»).
+    // GUARDA (a cura (d)): em PLAY a cena está a simular — o expand
+    // ADIA-SE (honesto: o modelo entra FUNDIDO? NÃO — os ficheiros já
+    // estão no disco; o dono reimporta fora do play).
     if (!out.expandNodes.empty()) {
-        struct ExpandBindCtx {
-            GpuAssets* gpu;
-        } bctx{&g_gpu};
-        GltfInstantiateCtx ictx;
-        ictx.user = &bctx;
-        ictx.bindMesh = [](void* user, const std::string& ref) -> Mesh* {
-            // blockHull: abre a peça pela TABELA (zero dados) + cria o
-            // hull de bounds — o blockRebind do ponto seguro do PRÓXIMO
-            // frame liga o BlockMesh* ao MeshRenderer (este frame ainda
-            // corre com o blocks==null dos TICs recém-nascidos)
-            return static_cast<ExpandBindCtx*>(user)->gpu->blockHull(ref);
-        };
-        ictx.material = g_renderer.litMaterial();
-        const std::vector<Handle> created =
-            gltfExpandInstantiate(g_scene, out.expandNodes, out.meshes, ictx);
-        // 0.10-M HOTFIX-2 (TEXTURAS-VINCULA-2): o auto-bind dos 5 slots do
-        // Inspector NAS PEÇAS do import EXPANDIDO (o MESMO do apply do
-        // fundido): os binds do GTB1 da peça (material 0) enchem os slots
-        // do MeshRenderer — o dono vê o .gtext de cada slot sem um passo
-        // manual. TICs recém-nascidos (todos os slots vazios — nada a
-        // limpar); falha de leitura = segue honesto (o render das PEÇAS já
-        // vem do blockHull — o bind por material do bloco).
-        for (const Handle h : created) {
-            Tic* t = g_scene.get(h);
-            MeshRenderer* mr = t ? t->getComponent<MeshRenderer>() : nullptr;
-            if (!mr || mr->meshPath.empty()) {
-                continue;
-            }
-            // 0.10-M TEXTURAS-MULTIMAT: a peça pode ter N materiais (o nó
-            // do glTF com várias primitivas) — a sonda percorre os N e
-            // enche a grade INTEIRA (o material 0 nos campos de sempre; os
-            // extras no matExtraTex — o seletor do inspector mostra N)
-            mr->matExtraTex.clear();
-            std::string binds[MeshRenderer::kMeshTexSlots];
-            u32 mi = 0;
-            while (mi < 64u && g_gpu.matBindsOf(mr->meshPath, mi, binds)) {
-                if (mi == 0) {
-                    for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
-                        if (!binds[s].empty()) {
-                            mr->texSlotRef(s) = binds[s];
-                        }
-                    }
-                } else {
-                    for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
-                        mr->matExtraTex.push_back(binds[s]);
-                    }
-                }
-                ++mi;
-            }
+        if (g_editor.playMode) {
+            showToast("expandir em sub-TICs adiado (estava em play)");
+            elog::warn("import: EXPANDIDO adiado — a cena estava em PLAY "
+                       "(os %u peça(s) ficam nos assets; reimporta fora do "
+                       "play para as ver na cena)",
+                       static_cast<unsigned>(out.expandNodes.size()));
+            return;
         }
-        // o FIT único (o MESMO alvo do applyAssetPick 0.8.9): a caixa do
-        // modelo INTEIRO em mundo (união das PEÇAS novas transformadas
-        // pelos seus TICs) define o fator — aplicado a CADA TIC novo como
-        // pos*=s e scale*=s (a translação FORA do TRS faz o conjunto
-        // encolher NO SÍTIO, sem partir o layout relativo; o resto da
-        // cena NÃO é tocado — só os handles que ACABARAM de nascer)
-        if (!created.empty()) {
-            Vec3 mn{1e30f, 1e30f, 1e30f}, mx{-1e30f, -1e30f, -1e30f};
-            for (const Handle h : created) {
-                const Tic* owner = g_scene.get(h);
-                const MeshRenderer* mr =
-                    owner ? owner->getComponent<MeshRenderer>() : nullptr;
-                // o BlockMesh da PEÇA pelo meshPath (o blockRebind deste
-                // frame correu ANTES dos TICs existirem — o blocks* ainda
-                // é null; a abertura do binder JÁ deixou o BlockMesh no
-                // mapa do GpuAssets, e é ELE que tem o AABB do meta)
-                const BlockMesh* bm =
-                    mr ? (mr->blocks ? mr->blocks
-                                     : g_gpu.blockMeshIfOpen(mr->meshPath))
-                       : nullptr;
-                const Transform3D* tr =
-                    owner ? owner->getComponent<Transform3D>() : nullptr;
-                if (!bm || !tr) {
-                    continue;
-                }
-                const Vec3 lo = bm->boundsMin();
-                const Vec3 hi = bm->boundsMax();
-                const Vec3 corn[8] = {
-                    {lo.x, lo.y, lo.z}, {hi.x, lo.y, lo.z},
-                    {lo.x, hi.y, lo.z}, {hi.x, hi.y, lo.z},
-                    {lo.x, lo.y, hi.z}, {hi.x, lo.y, hi.z},
-                    {lo.x, hi.y, hi.z}, {hi.x, hi.y, hi.z}};
-                for (const Vec3& c : corn) {
-                    const Vec3 w{
-                        tr->world.m[0] * c.x + tr->world.m[4] * c.y +
-                            tr->world.m[8] * c.z + tr->world.m[12],
-                        tr->world.m[1] * c.x + tr->world.m[5] * c.y +
-                            tr->world.m[9] * c.z + tr->world.m[13],
-                        tr->world.m[2] * c.x + tr->world.m[6] * c.y +
-                            tr->world.m[10] * c.z + tr->world.m[14]};
-                    mn.x = (std::min)(mn.x, w.x);
-                    mn.y = (std::min)(mn.y, w.y);
-                    mn.z = (std::min)(mn.z, w.z);
-                    mx.x = (std::max)(mx.x, w.x);
-                    mx.y = (std::max)(mx.y, w.y);
-                    mx.z = (std::max)(mx.z, w.z);
-                }
-            }
-            const Vec3 ext{mx.x - mn.x, mx.y - mn.y, mx.z - mn.z};
-            const f32 maior =
-                ext.x > ext.y ? (ext.x > ext.z ? ext.x : ext.z)
-                              : (ext.y > ext.z ? ext.y : ext.z);
-            f32 s = 1.0f;
-            if (maior > 1e-6f && std::isfinite(maior)) {
-                s = editor::kImportTargetSize / maior;
-                if (!std::isfinite(s) || s <= 0.0f) {
-                    s = 1.0f;   // defesa: geometria absurda = sem fit
-                }
-            }
-            if (s != 1.0f) {
-                for (size_t i = 0; i < created.size() &&
-                                 i < out.expandNodes.size();
-                     ++i) {
-                    // 0.10-M HOTFIX (f): a escala SÓ nas RAÍZES — os
-                    // filhos têm TRS LOCAL e seguem o pai (escalar todos
-                    // compunha s² na profundidade)
-                    if (out.expandNodes[i].parentRec >= 0) {
-                        continue;
-                    }
-                    Tic* owner = g_scene.get(created[i]);
-                    Transform3D* tr =
-                        owner ? owner->getComponent<Transform3D>() : nullptr;
-                    if (tr) {
-                        tr->pos = Vec3{tr->pos.x * s, tr->pos.y * s,
-                                       tr->pos.z * s};
-                        tr->scale = Vec3{tr->scale.x * s, tr->scale.y * s,
-                                         tr->scale.z * s};
-                        tr->updateWorld();
-                    }
-                }
-                // os filhos seguem o pai: recomps os mundos pela cadeia
-                gltfExpandComposeWorlds(out.expandNodes, created, g_scene);
-            }
-            // 0.10-M HOTFIX TEXTURAS-VINCULA — O AUTO-BIND (o pin: render
-            // texturado SEM toque manual): a baseColor do GTB1 da peça.
-            // Peça com 1 material → texPath+texture do TIC (o caminho
-            // serializável de sempre); multi-material → SEM TIC-field: o
-            // draw POR BLOCO usa a do material de cada bloco (o pin: 4
-            // materiais = 4 bindings — nunca um material global). Falha
-            // = warn honesto + segue (nunca mata o import).
-            for (size_t i = 0; i < created.size() &&
-                                 i < out.expandNodes.size();
-                 ++i) {
-                Tic* owner = g_scene.get(created[i]);
-                MeshRenderer* mr =
-                    owner ? owner->getComponent<MeshRenderer>() : nullptr;
-                if (!mr || !mr->texPath.empty()) {
-                    continue;   // o manual do dono NUNCA é sobrescrito
-                }
-                const BlockMesh* bm = g_gpu.blockMeshIfOpen(mr->meshPath);
-                if (bm == nullptr || bm->binds().empty()) {
-                    continue;
-                }
-                std::string rel;
-                for (const GMeshMatBind& b : bm->binds()) {
-                    if (b.materialIndex == 0) {
-                        rel = b.tex[kBindBaseColor];
-                        break;
-                    }
-                }
-                if (rel.empty()) {
-                    continue;
-                }
-                if (bm->materials().size() <= 1) {
-                    if (const Texture* t = g_gpu.texture(rel)) {
-                        mr->texPath = rel;
-                        mr->texture = t;
-                        elog::info("textura: vinculada '%s' slot baseColor "
-                                   "-> %s (auto do import)",
-                                   owner->name.c_str(), rel.c_str());
-                    } else {
-                        elog::warn("textura: '%s' slot baseColor (%s) SEM "
-                                   "ficheiro — o TIC fica sem (reimporta)",
-                                   owner->name.c_str(), rel.c_str());
-                    }
-                }
-            }
-            // o 1º TIC selecionado (o dono VÊ a sub-árvore no inspector)
-            g_editor.selected = created[0];
-        }
-        char emsg[128];
-        std::snprintf(emsg, sizeof(emsg), "expandido: %u TIC(s) na cena",
-                      static_cast<unsigned>(out.expandNodes.size()));
-        showToast(emsg);
-        elog::info("import: EXPANDIDO — %u TIC(s) criados (um por nó com "
-                   "mesh; nomes do glTF; sub-árvore real — sub-TICs com TRS "
-                   "local; culling por TIC pelos blocos)",
-                   static_cast<unsigned>(out.expandNodes.size()));
-        return;   // SEM diálogo «aplicar ao TIC?» — os TICs são o resultado
+        expandJobStart(out);
+        return;   // SEM diálogo «aplicar ao TIC?» — os TICs (em lotes) são
+                  // o resultado; o overlay mostra o progresso
     }
     Tic* tsel = g_scene.get(g_editor.selected);
     if (tsel && tsel->getComponent<MeshRenderer>() &&
@@ -5328,6 +5428,12 @@ void frame() {
         importJobFinish();
     }
 
+    // 0.10-M HOTFIX P0 — O TICK DO EXPAND (o MESMO ponto seguro): UM lote
+    // por frame fora do caminho quente (a cura (a) do ANR); o overlay
+    // mostra o progresso e o cancelamento limpa (o finalize corre na
+    // última tick — o MESMO estado final do caminho síncrono de sempre)
+    expandJobTick();
+
     // 0.7.1 — TRANSIÇÃO DE CENA: avança o relógio e faz o SWAP no ponto
     // médio (com o ecrã tapado — doSwitchScene guarda/carrega as cenas)
     if (ui::transitionStep(g_sceneTrans, g_frameDt)) {
@@ -5688,8 +5794,13 @@ void frame() {
     }
 
     // 0.8.10 — IMPORT EM CURSO: overlay MODAL (o resto da UI não desenha —
-    // o job é a única coisa que acontece; cancelar é a única ação)
-    if (g_importJob.active.load()) {
+    // o job é a única coisa que acontece; cancelar é a única ação).
+    // 0.10-M HOTFIX P0: o MESMO overlay tem a FASE DO EXPAND (o job dos
+    // lotes): «A EXPANDIR… d/t peças» + a barra + o MESMO cancelar (o
+    // expandJobTick do ponto seguro deste frame já correu — o progresso
+    // aqui é o do lote DESTE frame)
+    if (g_importJob.active.load() || g_expandJob.active) {
+        const bool expandPhase = !g_importJob.active.load() && g_expandJob.active;
         const f32 ox = g_ui.safeLeft();
         const f32 oy = g_ui.safeTop();
         const f32 aw = w - ox - g_ui.safeRight();
@@ -5701,11 +5812,19 @@ void frame() {
         g_ui.panel(x, y, pw, ph, theme::PANEL);
         g_ui.frame(x, y, pw, ph, 2.0f, theme::ACCENT);
         const f32 th = g_ui.fontHeight();
-        g_ui.label(x + 14.0f, y + 40.0f + th * 0.3f, "IMPORT...",
-                   theme::TEXT);
+        g_ui.label(x + 14.0f, y + 40.0f + th * 0.3f,
+                   expandPhase ? "A EXPANDIR..." : "IMPORT...", theme::TEXT);
         char fname[72];
-        std::snprintf(fname, sizeof(fname), "%s",
-                      g_importJob.fileName.c_str());
+        if (expandPhase) {
+            // 0.10-M HOTFIX P0 — O PROGRESSO VISÍVEL (o pin do dono): o
+            // done/total do lote (peças configuradas / peças no total)
+            std::snprintf(fname, sizeof(fname), "materializando sub-TICs: "
+                          "%u / %u",
+                          g_expandJob.batch.done(), g_expandJob.batch.total());
+        } else {
+            std::snprintf(fname, sizeof(fname), "%s",
+                          g_importJob.fileName.c_str());
+        }
         g_ui.labelFitted(x + 14.0f, y + 64.0f + th * 0.3f, fname, theme::LINE,
                          pw - 28.0f);
         const u64 doneB = g_importJob.bytesDone.load();
@@ -5714,28 +5833,43 @@ void frame() {
         // (os bytes que já correram; «a copiar…» antes do 1.º chunk);
         // total sub-MB → B inteiros (a divisão de MB mentia «0 / 0 MB» no
         // cut de 72k unidades do city — MINUTOS de 0/0 num import de 29 MB)
-        g_ui.label(x + 14.0f, y + 88.0f + th * 0.3f,
-                   importOverlayBytesText(doneB, totalB).c_str(), theme::TEXT);
+        // 0.10-M HOTFIX P0: na fase do expand os BYTES estão velhos — a
+        // terceira linha diz a fração do lote (o d/t já está na linha de
+        // cima; aqui a BARRA é que segue o lote)
+        if (!expandPhase) {
+            g_ui.label(x + 14.0f, y + 88.0f + th * 0.3f,
+                       importOverlayBytesText(doneB, totalB).c_str(),
+                       theme::TEXT);
+        }
         // barra de progresso (trilho + preenchimento ACCENT). Sem total
         // conhecido o trilho fica VAZIO (o «copiando…» ao lado diz a
         // verdade — uma barra a 0 com número nenhum era o 0/0 disfarçado)
         const f32 bx = x + 14.0f;
         const f32 bw = pw - 28.0f;
         g_ui.panel(bx, y + 112.0f, bw, 12.0f, theme::LINE);
-        const f32 frac = totalB > 0
-            ? static_cast<f32>(doneB) / static_cast<f32>(totalB)
-            : 0.0f;
+        const f32 frac =
+            expandPhase
+                ? (g_expandJob.batch.total() > 0
+                       ? static_cast<f32>(g_expandJob.batch.done()) /
+                             static_cast<f32>(g_expandJob.batch.total())
+                       : 0.0f)
+                : (totalB > 0
+                       ? static_cast<f32>(doneB) / static_cast<f32>(totalB)
+                       : 0.0f);
         if (frac > 0.0f) {
             g_ui.panel(bx, y + 112.0f, bw * (frac > 1.0f ? 1.0f : frac),
                        12.0f, theme::ACCENT);
         }
         // 0.9.6.6 (GRUPO C): o CANCELAR é alvo 48dp REAL com dp (era px cru)
+        // 0.10-M HOTFIX P0: o MESMO botão cancela a FASE DO EXPAND (o tick
+        // do frame seguinte vê o átomo e limpa — os TICs já nascidos saem;
+        // o cancelamento limpo é o pin do dono)
         if (g_ui.button(0x81010, x + theme::dp(14.0f),
                         y + ph - theme::dp(52.0f), pw - theme::dp(28.0f),
                         theme::dp(48.0f), "cancelar")) {
             g_importJob.cancel.store(true);
             elog::info("import: cancelamento pedido (o job para no próximo "
-                       "chunk)");
+                       "chunk; na fase do expand o lote seguinte limpa)");
         }
         drawToast();
         if (g_ui.auditing()) g_ui.auditEnd();
