@@ -99,6 +99,15 @@ TUs · release-identity versionCode 68.
   multi-seleção leva TICs VIVAS — o audit compacta os órfãos; o chip não
   conta fantasmas)
 
+## 5-A. O SELO DO CI
+
+- **CI run 38367449546 (645773c) — SUCCESS À PRIMEIRA**: core-tests ✓ ·
+  c33 virtual ✓ · APK release arm64 ASSINADO ✓ (goni-vv-0.9.6-release-signed
+  1,79 MB, **versionCode 68**, artefacto expira 2027-01-11) ·
+  verify-entry-symbols ✓.
+- O selo do dono: o APK do vc 68 está no run 38367449546 para o sign-off
+  no device (as 4 provas do §6).
+
 ## 6. NÃO VERIFICADO (honesto)
 
 - **O sign-off no device** — o dono reproduz o vc 67 (troca de prim/mesh
