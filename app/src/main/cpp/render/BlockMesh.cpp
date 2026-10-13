@@ -51,6 +51,7 @@ void BlockMesh::close() {
     blocks_.clear();
     materials_.clear();
     binds_.clear();     // 0.10-M HOTFIX: o GTB1 morre com o ficheiro
+    matProps_.clear();  // 0.11-M (FASE 2): o GTB2 idem
     matTex_.clear();    // (os Texture* são do cache do GpuAssets — não-nossos)
     storage_ = nullptr;
     path_.clear();
@@ -458,7 +459,8 @@ bool BlockMesh::open(ProjectStorage& st, const std::string& relPath,
         }
         if (got && !gmeshV3ReadMaterialsOnly(matBytes.data(),
                                               matBytes.size(), meta_,
-                                              materials_, err, &binds_)) {
+                                              materials_, err, &binds_,
+                                              &matProps_)) {
             quarentena("a validação dos MATERIAIS falhou (" + err + ")");
             got = false;
         }
@@ -812,6 +814,26 @@ void BlockMesh::setBudgets(u64 ramBudgetBytes, u64 vramBudgetBytes) {
     vramBudget_ = vramBudgetBytes;
 }
 
+// 0.11-M (FASE 2 · PURO): a ordem do passe BLEND — longe→perto (z NDC
+// descendente, ESTÁVEL: empates ficam na ordem da tabela). Insertion sort:
+// a contagem visível de blend é pequena (dezenas) e a ordem estável é o
+// contrato do pin (o teste chama ISTO, o draw chama o teste).
+void BlockMesh::blendDrawOrder(const f32* zNdc, u32 count, u32* outOrder) {
+    for (u32 i = 0; i < count; ++i) {
+        outOrder[i] = i;
+    }
+    for (u32 i = 1; i < count; ++i) {
+        const u32 key = outOrder[i];
+        const f32 kz = zNdc[key];
+        u32 j = i;
+        while (j > 0 && zNdc[outOrder[j - 1]] < kz) {
+            outOrder[j] = outOrder[j - 1];   // o MAIOR z (mais longe) vai primeiro
+            --j;
+        }
+        outOrder[j] = key;
+    }
+}
+
 // ---- o frame ----------------------------------------------------------------
 
 DrawStats BlockMesh::draw(Renderer& r, const Mat4& model, const Mat4& vp,
@@ -827,6 +849,18 @@ DrawStats BlockMesh::draw(Renderer& r, const Mat4& model, const Mat4& vp,
     st.totalBlocks = static_cast<u32>(blocks_.size());
     f32 planes[6][4];
     frustumPlanes(vp, planes);
+
+    // 0.11-M (FASE 2): a PARTIÇÃO opaco/blend — o GTB2 diz o alphaMode de
+    // cada material (vazio = OPAQUE de sempre). Os opacos desenham NA
+    // ORDEM DA TABELA (o caminho de sempre byte a byte); os BLEND esperam
+    // e desenham DEPOIS, longe→perto (a única ordem em que a mistura
+    // clássica é correta — o pin do teste manda nesta ordem).
+    std::vector<u32> opaqueIdx;
+    std::vector<u32> blendIdx;
+    std::vector<f32> blendZ;
+    opaqueIdx.reserve(blocks_.size());
+    blendIdx.reserve(16);
+    blendZ.reserve(16);
 
     std::string err;
     for (size_t i = 0; i < blocks_.size(); ++i) {
@@ -849,14 +883,70 @@ DrawStats BlockMesh::draw(Renderer& r, const Mat4& model, const Mat4& vp,
         if (!wasResident) {
             ++st.loadedThisFrame;
         }
-        // 0.10-M HOTFIX TEXTURAS-VINCULA: a textura do BLOCO é a do SEU
-        // material (o GTB1 resolvido pelo GpuAssets) quando o chamador não
-        // traz override (mr.texture nula = o auto-bind manda); o override
-        // manual do TIC (mr.texture) vence — o contrato de sempre intacto
+        // 0.11-M (FASE 2): a partição opaco/blend pelo alphaMode do GTB2
+        // (nullptr = OPAQUE de sempre). O z NDC do centro (a ordem do
+        // passe blend calcula-se AQUI — o clip do VP com o model aplicado)
+        const GMeshMatProps* mp =
+            propsOf(blocks_[i].materialIndex);
+        if (mp != nullptr && mp->alphaMode == 2) {
+            const Vec3 c{(blocks_[i].aabbMin.x + blocks_[i].aabbMax.x) * 0.5f,
+                         (blocks_[i].aabbMin.y + blocks_[i].aabbMax.y) * 0.5f,
+                         (blocks_[i].aabbMin.z + blocks_[i].aabbMax.z) * 0.5f};
+            // o centro no MUNDO (model) e depois no CLIP (vp)
+            const f32 px = model.m[0] * c.x + model.m[4] * c.y +
+                           model.m[8] * c.z + model.m[12];
+            const f32 py = model.m[1] * c.x + model.m[5] * c.y +
+                           model.m[9] * c.z + model.m[13];
+            const f32 pz = model.m[2] * c.x + model.m[6] * c.y +
+                           model.m[10] * c.z + model.m[14];
+            const f32 clipZ = vp.m[2] * px + vp.m[6] * py +
+                              vp.m[10] * pz + vp.m[14];
+            const f32 clipW = vp.m[3] * px + vp.m[7] * py +
+                              vp.m[11] * pz + vp.m[15];
+            // z de NDC = clip.z/clip.w (w=0/atrás → z grande = primeiro, o
+            // «mais longe» — o pin da ordem cobre o caso)
+            blendZ.push_back(clipW > 1e-6f ? clipZ / clipW : 1e9f);
+            blendIdx.push_back(static_cast<u32>(i));
+        } else {
+            opaqueIdx.push_back(static_cast<u32>(i));
+        }
+    }
+
+    // ---- o PASSE DOS OPACOS (a ordem da tabela — o caminho de sempre) --
+    for (const u32 i : opaqueIdx) {
+        const Entry& e = entries_[i];
+        const GMeshMatProps* mp = propsOf(blocks_[i].materialIndex);
+        DrawProps dp;
+        const DrawProps* dpp = nullptr;
+        if (mp != nullptr) {
+            dp = DrawProps::fromGMesh(*mp);
+            dpp = &dp;
+        }
         const Texture* eff =
             tex ? tex : materialTexture(blocks_[i].materialIndex);
         total = total + r.drawMesh(*e.gpu, model, vp, eff, tint, bones,
-                                   boneCount);
+                                   boneCount, dpp);
+    }
+    // ---- o PASSE DOS BLEND (longe→perto; depth write off no drawMesh) --
+    if (!blendIdx.empty()) {
+        std::vector<u32> order(blendIdx.size());
+        blendDrawOrder(blendZ.data(), static_cast<u32>(blendIdx.size()),
+                       order.data());
+        for (const u32 k : order) {
+            const u32 i = blendIdx[k];
+            const Entry& e = entries_[i];
+            const GMeshMatProps* mp = propsOf(blocks_[i].materialIndex);
+            DrawProps dp;
+            const DrawProps* dpp = nullptr;
+            if (mp != nullptr) {
+                dp = DrawProps::fromGMesh(*mp);
+                dpp = &dp;
+            }
+            const Texture* eff =
+                tex ? tex : materialTexture(blocks_[i].materialIndex);
+            total = total + r.drawMesh(*e.gpu, model, vp, eff, tint, bones,
+                                       boneCount, dpp);
+        }
     }
 
     evictOverBudget();

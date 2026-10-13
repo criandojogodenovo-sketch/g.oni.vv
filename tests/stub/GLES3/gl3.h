@@ -66,6 +66,23 @@ struct Stats {
     int matrix4fvArrayCalls = 0;   // glUniformMatrix4fv com count > 1 (uBones)
     int lastMatrix4fvCount = 1;
     int drawElementsCalls = 0;
+    // 0.11-M (FASE 2): as props do material — o ESTADO que a FASE 25 do c33
+    // aferre (o mesmo padrão dos contadores acima: o último valor de cada)
+    float lastUniform4f[4] = {-1.0f, -1.0f, -1.0f, -1.0f};  // uBaseColor
+    int uniform4fCalls = 0;
+    float lastMatrix2fv[4] = {0, 0, 0, 0};   // uUvRot (column-major)
+    int matrix2fvCalls = 0;
+    float lastUniform2f[2] = {-1.0f, -1.0f}; // uUvOff
+    int uniform2fCalls = 0;
+    int blendFuncCalls = 0;        // glBlendFunc (o passe BLEND)
+    unsigned lastBlendSrc = 0, lastBlendDst = 0;
+    int depthMaskCalls = 0;        // glDepthMask (BLEND escreve FALSE)
+    int lastDepthMask = 1;         // 1 = GL_TRUE (o default GL)
+    int texParamCalls = 0;         // glTexParameteri (os samplers do glTF)
+    unsigned lastTexParamTarget = 0, lastTexParamPname = 0;
+    int lastTexParamValue = -1;
+    int cullDisableCalls = 0;      // glDisable(GL_CULL_FACE) — o two-sided
+    int cullEnableCalls = 0;       // glEnable(GL_CULL_FACE) — o restore
 };
 inline Stats stats;              // inline C++17: 1 instância por binário
 // 0.8.7 — INJETOR DE FALHA: simula o device a ficar sem capacidade de gerar
@@ -178,7 +195,8 @@ inline void glCompressedTexImage2D(GLenum, GLint, GLsizei, GLsizei w, GLsizei h,
     ++glstub::stats.compressedTexImage2D;
     if (glstub::fb::enabled) glstub::fb::compressedTexImage2D(w, h);
 }
-inline void glTexParameteri(GLenum, GLenum, GLint) {}
+// 0.11-M (FASE 2): o glTexParameteri com tracking vive MAIS ABAIXO (junto
+// às enums dos samplers — o wrap/filter que a FASE 25 do c33 aferre)
 inline void glGenerateMipmap(GLenum) {}
 inline void glActiveTexture(GLenum) {}
 
@@ -266,7 +284,30 @@ inline void glUniform3f(GLint loc, GLfloat x, GLfloat y, GLfloat z) {
     if (glstub::fb::enabled) glstub::fb::uniform3f(loc, x, y, z);
 }
 inline void glUniform2f(GLint loc, GLfloat x, GLfloat y) {
+    ++glstub::stats.uniform2fCalls;   // 0.11-M: uUvOff do transform
+    glstub::stats.lastUniform2f[0] = x;
+    glstub::stats.lastUniform2f[1] = y;
     if (glstub::fb::enabled) glstub::fb::uniform2f(loc, x, y);
+}
+// 0.11-M (FASE 2): uBaseColor (vec4) + uUvRot (mat2 column-major)
+inline void glUniform4f(GLint loc, GLfloat x, GLfloat y, GLfloat z, GLfloat w) {
+    (void)loc;
+    glstub::stats.lastUniform4f[0] = x;
+    glstub::stats.lastUniform4f[1] = y;
+    glstub::stats.lastUniform4f[2] = z;
+    glstub::stats.lastUniform4f[3] = w;
+    ++glstub::stats.uniform4fCalls;
+}
+inline void glUniformMatrix2fv(GLint loc, GLsizei count, GLboolean,
+                               const GLfloat* m) {
+    (void)loc;
+    (void)count;
+    if (m) {
+        for (int i = 0; i < 4; ++i) {
+            glstub::stats.lastMatrix2fv[i] = m[i];
+        }
+    }
+    ++glstub::stats.matrix2fvCalls;
 }
 
 inline void glGenBuffers(GLsizei n, GLuint* t) {
@@ -340,7 +381,7 @@ inline void glClear(GLenum mask) {
 inline void glEnable(GLenum cap) {
     if (cap == GL_SCISSOR_TEST) glstub::stats.scissorEnabled = true;
     else if (cap == GL_DEPTH_TEST) glstub::stats.depthEnabled = true;
-    else if (cap == GL_CULL_FACE) glstub::stats.cullEnabled = true;
+    else if (cap == GL_CULL_FACE) { glstub::stats.cullEnabled = true; ++glstub::stats.cullEnableCalls; }
     else if (cap == GL_BLEND) glstub::stats.blendEnabled = true;
     if (glstub::fb::enabled) {
         if (cap == GL_SCISSOR_TEST) glstub::fb::setScissorEnabled(true);
@@ -352,7 +393,7 @@ inline void glEnable(GLenum cap) {
 inline void glDisable(GLenum cap) {
     if (cap == GL_SCISSOR_TEST) glstub::stats.scissorEnabled = false;
     else if (cap == GL_DEPTH_TEST) glstub::stats.depthEnabled = false;
-    else if (cap == GL_CULL_FACE) glstub::stats.cullEnabled = false;
+    else if (cap == GL_CULL_FACE) { glstub::stats.cullEnabled = false; ++glstub::stats.cullDisableCalls; }
     else if (cap == GL_BLEND) glstub::stats.blendEnabled = false;
     if (glstub::fb::enabled) {
         if (cap == GL_SCISSOR_TEST) glstub::fb::setScissorEnabled(false);
@@ -362,10 +403,39 @@ inline void glDisable(GLenum cap) {
     }
 }
 inline void glDepthMask(GLboolean b) {
+    ++glstub::stats.depthMaskCalls;   // 0.11-M: o BLEND escreve FALSE (o pin)
+    glstub::stats.lastDepthMask = b != 0 ? 1 : 0;
     if (glstub::fb::enabled) glstub::fb::setDepthMask(b != 0);
 }
 inline void glDepthFunc(GLenum) {}
-inline void glBlendFunc(GLenum, GLenum) {}
+// 0.11-M (FASE 2): o par do blend do passe BLEND (o MESMO do grid/UI)
+#define GL_SRC_ALPHA 0x0302
+#define GL_ONE_MINUS_SRC_ALPHA 0x0303
+inline void glBlendFunc(GLenum sfactor, GLenum dfactor) {
+    ++glstub::stats.blendFuncCalls;
+    glstub::stats.lastBlendSrc = sfactor;
+    glstub::stats.lastBlendDst = dfactor;
+}
+// 0.11-M (FASE 2): os samplers do glTF — o wrap/filter que a FASE 25 aferre
+#define GL_TEXTURE_WRAP_S 0x2802
+#define GL_TEXTURE_WRAP_T 0x2803
+#define GL_TEXTURE_MIN_FILTER 0x2801
+#define GL_TEXTURE_MAG_FILTER 0x2800
+#define GL_REPEAT 0x2901
+#define GL_CLAMP_TO_EDGE 0x812F
+#define GL_MIRRORED_REPEAT 0x8370
+#define GL_NEAREST 0x2600
+#define GL_LINEAR 0x2601
+#define GL_LINEAR_MIPMAP_LINEAR 0x2703
+#define GL_NEAREST_MIPMAP_LINEAR 0x2702
+#define GL_LINEAR_MIPMAP_NEAREST 0x2701
+#define GL_NEAREST_MIPMAP_NEAREST 0x2700
+inline void glTexParameteri(GLenum target, GLenum pname, GLint param) {
+    ++glstub::stats.texParamCalls;
+    glstub::stats.lastTexParamTarget = target;
+    glstub::stats.lastTexParamPname = pname;
+    glstub::stats.lastTexParamValue = param;
+}
 inline void glReadPixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum, GLenum, void* dst) {
     if (glstub::fb::enabled) glstub::fb::readPixels(x, y, w, h, dst);
 }

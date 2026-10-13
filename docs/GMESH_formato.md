@@ -175,6 +175,9 @@ gmesh` documentam os bytes exatos que abrem).
                          sem texturas o ficheiro acaba nos nomes — byte a
                          byte com o pré-hotfix; os leitores de sempre PARAM
                          em materialCount nomes e ignoram a cauda)
+    [propriedades]     — OPCIONAL (o bloco GTB2 da FASE 2 0.11-M, DEPOIS do
+                         GTB1; sem props não-default o ficheiro acaba no
+                         GTB1 ou nos nomes — byte a byte com o pré-FASE 2)
 
 ### A vinculação de texturas por material (o bloco GTB1 — hotfix 0.10-M)
 
@@ -192,6 +195,38 @@ legível («CHECKSUM CORROMPIDO: bloco de vinculação (GTB1)»). O runtime
 resolve a baseColor de cada material no `GpuAssets::blockHull` (uma
 linha de log por slot vinculado) e o draw POR BLOCO usa a textura DO
 SEU material — nunca um material global a substituir todos.
+
+### As propriedades por material (o bloco GTB2 — FASE 2 0.11-M)
+
+O import glTF escreve, DEPOIS do GTB1, o bloco de PROPRIEDADES
+material→props (a FASE 2 do dono: alphaMode/alphaCutoff/doubleSided,
+os QUATRO factors — baseColorFactor/metallicFactor/roughnessFactor/
+emissiveFactor —, o transform UV por slot do `KHR_texture_transform` e
+os samplers normalizados). Layout: magic u32 `GTB2`, u32 propCount (só
+materiais com PELO MENOS UMA propriedade fora do default glTF —
+`GMeshMatProps::isDefault`), propCount × ENTRADA FIXA de 164 B
+(`kGmeshMatPropsEntryBytes`: u16 materialIndex · u8 alphaMode · u8
+doubleSided · f32 alphaCutoff · f32 baseColor[4] · f32 metallic · f32
+roughness · f32 emissive[3] · 5 × { f32 offset[2] · f32 rotation ·
+f32 scale[2] · u8 wrapS · u8 wrapT · u8 minFilter · u8 magFilter }),
+u32 crc32 das entradas. Os samplers viajam nos CÓDIGOS DA CASA
+(`kSampler*`: 0 = o default REPEAT/LINEAR_MIPMAP_LINEAR/LINEAR — os
+enums RAW do glTF não cabem num u8; a fonte do mapeamento é a função
+pura `gltfSamplerToCodes`, o GL vive no `Texture::setSampler`). O MESMO
+contrato de cauda do GTB1: o leitor de nomes para em materialCount, o
+leitor de binds diz quantos bytes consumiu (o `consumed` do
+`gmeshV3ReadBinds`) e o `gmeshV3ReadProps` arranca DAÍ; ficheiros novos
+abrem em builds antigas SEM saber (perdem SÓ as props — os defaults
+honestos entram, nunca o mesh); CRC mau = erro legível («CHECKSUM
+CORROMPIDO: bloco de propriedades (GTB2)»). O runtime aplica as props
+POR MATERIAL no draw por blocos (o `BlockMesh::propsOf` → as uniforms
+do lit: uBaseColor/uAlphaMode/uAlphaCutoff/uTwoSided/uEmissive/uUvRot/
+uUvOff — o lit PBR GGX completo que consome metallic/roughness é a
+FASE 5; o GTB2 já os transporta). O critério do RUNTIME: um .gmesh
+pequeno fundido com materialCount > 1 OU props não-default abre POR
+BLOCOS (`GpuAssets::mesh`) — é o caminho onde o render POR MATERIAL
+existe; o modelo pequeno de 1 material sem props fica no mesh único
+byte a byte.
 
 ### As semânticas de atributo (o layout é DESCRITO — acrescentar não muda a versão)
 

@@ -37,9 +37,15 @@ public:
     // 0.7.0: tint opcional — cor por TIC (nullptr = branco, o de sempre)
     // 0.8.2 (F7): bones opcional — matrizes de skin (uBones+uSkin; nullptr
     // = mesh estático, o caminho de sempre byte a byte)
+    // 0.11-M (FASE 2): props opcional — as PROPRIEDADES do material glTF
+    // (alphaMode/twoSided/factors/transform UV do GTB2; nullptr = os
+    // defaults de sempre = o comportamento byte a byte pré-FASE 2). O
+    // estado GL (blend/depthMask/cull) segue as props e é RESTAURADO aqui
+    // (o UI/grid setam os seus próprios — nunca estado a vingar).
     DrawStats drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp,
                        const Texture* tex = nullptr, const f32* tint = nullptr,
-                       const Mat4* bones = nullptr, u32 boneCount = 0);
+                       const Mat4* bones = nullptr, u32 boneCount = 0,
+                       const DrawProps* props = nullptr);
 
     // pass UI (F1 mantido): submissões desenhadas em endFrame, sem depth
     void submit(const QuadBatch& batch, u32 texture);

@@ -30,6 +30,34 @@ std::string lowerExtOf(const std::string& path) {
     return e;
 }
 
+// 0.11-M (FASE 2): o modelo pequeno tem PROPS não-default no GTB2? A
+// leitura POR FAIXA (o padrão matBindsOf: peek já feito, stat + a faixa
+// dos materiais — NUNCA os dados dos blocos). Sem stat (SAF) ou sem cauda
+// = false honesto (o mesh único segue — o mesmo degradé do auto-bind).
+bool gmeshPropsPresent(const std::string& ref, const GMeshV3Meta& meta,
+                       ProjectStorage* st) {
+    if (st == nullptr) {
+        return false;
+    }
+    u64 sz = 0;
+    if (!st->statBytes(ref, sz) || sz <= meta.materialTableOffset) {
+        return false;
+    }
+    std::vector<u8> matBytes;
+    const size_t matLen = static_cast<size_t>(sz - meta.materialTableOffset);
+    if (!st->readBytesAt(ref, meta.materialTableOffset, matLen, matBytes)) {
+        return false;
+    }
+    std::vector<std::string> names;
+    std::vector<GMeshMatProps> props;
+    std::string err;
+    if (!gmeshV3ReadMaterialsOnly(matBytes.data(), matBytes.size(), meta,
+                                  names, err, nullptr, &props)) {
+        return false;
+    }
+    return !props.empty();
+}
+
 } // namespace
 
 Mesh* GpuAssets::mesh(const std::string& ref) {
@@ -59,11 +87,32 @@ Mesh* GpuAssets::mesh(const std::string& ref) {
                     ref, 0, kGHeaderBytes + kGmeshV3MetaBytes, peek)) {
                 GMeshV3Meta meta;
                 std::string perr;
-                if (gmeshV3PeekMeta(peek.data(), peek.size(), meta, perr) &&
-                    (meta.vertexCount > 65535 ||
-                     gmeshV3LoadEstimateBytes(meta) > kMeshLoadBudgetBytes ||
-                     (meta.flags & kGmeshV3FlagPiece) != 0)) {
-                    return blockHull(ref);
+                if (gmeshV3PeekMeta(peek.data(), peek.size(), meta, perr)) {
+                    bool blocks =
+                        meta.vertexCount > 65535 ||
+                        gmeshV3LoadEstimateBytes(meta) > kMeshLoadBudgetBytes ||
+                        (meta.flags & kGmeshV3FlagPiece) != 0;
+                    // 0.11-M (FASE 2): os DOIS critérios novos — o render
+                    // POR MATERIAL (props/texturas por bloco) só existe no
+                    // caminho por blocos:
+                    //   (a) materialCount > 1 — o modelo pequeno fundido
+                    //       com VÁRIOS materiais desenhava TUDO com a
+                    //       textura do material 0 (a limitação do mesh
+                    //       único); por blocos cada bloco leva o SEU.
+                    //   (b) GTB2 presente (props não-default: BLEND/MASK/
+                    //       two-sided/transform/sampler) — o lit só as
+                    //       recebe via DrawProps do draw por blocos.
+                    // O modelo pequeno de 1 material SEM props fica no
+                    // mesh único (byte a byte com o pré-FASE 2).
+                    if (!blocks && meta.materialCount > 1) {
+                        blocks = true;
+                    }
+                    if (!blocks && meta.materialCount >= 1) {
+                        blocks = gmeshPropsPresent(ref, meta, rm_->storage());
+                    }
+                    if (blocks) {
+                        return blockHull(ref);
+                    }
                 }
             }
         }
@@ -350,7 +399,15 @@ Mesh* GpuAssets::blockHull(const std::string& ref) {
             if (rel.empty()) {
                 continue;
             }
-            const Texture* t = texture(rel);
+            // 0.11-M (FASE 2): o sampler do glTF (GTB2 do slot baseColor)
+            // acompanha a resolução — o first-wins por caminho é do método
+            u8 sampler[4] = {0, 0, 0, 0};
+            if (const GMeshMatProps* mp = bm->propsOf(b.materialIndex)) {
+                for (int i = 0; i < 4; ++i) {
+                    sampler[i] = mp->sampler[kBindBaseColor][i];
+                }
+            }
+            const Texture* t = textureWithSampler(rel, sampler);
             if (t != nullptr) {
                 bm->setMaterialTexture(b.materialIndex, t);
                 elog::info("textura: vinculada '%s' material '%s' slot "
@@ -398,6 +455,41 @@ void GpuAssets::releaseAll() {
     gpuMeshes_.clear();
     gpuTextures_.clear();
     blockMeshes_.clear();   // TERM_WINDOW: o re-open é 192 B + tabela
+    samplerApplied_.clear();   // 0.11-M: os sampliers morrem com as texturas
+}
+
+// 0.11-M (FASE 2): a resolução COM sampler do glTF (o first-wins por
+// caminho — o contrato do header; o conflito é logado honesto UMA vez)
+const Texture* GpuAssets::textureWithSampler(const std::string& relPath,
+                                             const u8 sampler[4]) {
+    const Texture* t = texture(relPath);
+    if (t == nullptr) {
+        return nullptr;
+    }
+    if (sampler[0] == 0 && sampler[1] == 0 && sampler[2] == 0 &&
+        sampler[3] == 0) {
+        return t;   // default da casa — o par de sempre, nada a aplicar
+    }
+    const u32 code = static_cast<u32>(sampler[0]) |
+                     (static_cast<u32>(sampler[1]) << 8) |
+                     (static_cast<u32>(sampler[2]) << 16) |
+                     (static_cast<u32>(sampler[3]) << 24);
+    const auto it = samplerApplied_.find(relPath);
+    if (it == samplerApplied_.end()) {
+        // a textura do cache é não-dona mas viva (o cache é o dono) — o
+        // setSampler é first-wins por textura (a disciplina do Texture)
+        const_cast<Texture*>(t)->setSampler(sampler[0], sampler[1],
+                                            sampler[2], sampler[3]);
+        samplerApplied_.emplace(relPath, code);
+        elog::info("textura: sampler '%s' wrap=%u/%u min=%u mag=%u (glTF)",
+                   relPath.c_str(), sampler[0], sampler[1], sampler[2],
+                   sampler[3]);   // O PIN: 1 linha por sampler aplicado
+    } else if (it->second != code) {
+        elog::warn("textura: '%s' já tem sampler de outro material (o "
+                   "PRIMEIRO vence — a duplicação por sampler é memória a "
+                   "dobrar no device)", relPath.c_str());
+    }
+    return t;
 }
 
 } // namespace vv

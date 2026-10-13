@@ -470,8 +470,12 @@ private:
     static constexpr u32 kMaxRuns = 64;   // limiar de aviso (não corta)
     std::vector<Run>     runs_;           // dinâmico — NUNCA descarta
 
-    // 0.7.0 — imagens da UI criável: até 4 batches (um por textura)
-    static constexpr u32 kMaxImageBatches = 4;
+    // 0.7.0 — imagens da UI criável: um batch por textura. 0.11-M (FASE
+    // 2): 4 → 8 — o inspector de slots desenha ATÉ 5 thumbs de material
+    // num frame (o pior caso: material com os 5 slots vinculados + o resto
+    // da UI). O batch é só um buffer de vértices — o custo é memória de
+    // CPU mínima; o cap continua a ser o guarda-chuva do ecrã excessivo.
+    static constexpr u32 kMaxImageBatches = 8;
     QuadBatch         images_[kMaxImageBatches];
     u32               imageTex_[kMaxImageBatches] = {};
     u32               imageCount_ = 0;

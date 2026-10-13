@@ -515,8 +515,12 @@ void gmeshV3AppendBinds(std::vector<u8>& materialsSection, u64 cursorAbs,
 }
 
 bool gmeshV3ReadBinds(const u8* tail, size_t tailLen,
-                      std::vector<GMeshMatBind>& out, std::string& err) {
+                      std::vector<GMeshMatBind>& out, std::string& err,
+                      size_t* consumed) {
     out.clear();
+    if (consumed != nullptr) {
+        *consumed = 0;   // 0 = nenhum GTB1 (o GTB2, se houver, começa em 0)
+    }
     if (tailLen < 4) {
         return true;   // sem cauda (ficheiro pré-hotfix) — NÃO é erro
     }
@@ -567,6 +571,223 @@ bool gmeshV3ReadBinds(const u8* tail, size_t tailLen,
         out.clear();
         return false;
     }
+    // 0.11-M (FASE 2): o fim do GTB1 = o início do GTB2, se existir
+    if (consumed != nullptr) {
+        *consumed = r.i + 4;
+    }
+    return true;
+}
+
+// ---- 0.11-M (FASE 2) — GTB2: as PROPRIEDADES por material ------------------
+
+bool GMeshMatProps::isDefault() const {
+    if (alphaMode != 0 || doubleSided != 0) {
+        return false;
+    }
+    if (alphaCutoff != 0.5f) {
+        return false;
+    }
+    static const f32 kWhite[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    for (int i = 0; i < 4; ++i) {
+        if (baseColor[i] != kWhite[i]) {
+            return false;
+        }
+    }
+    if (metallic != 1.0f || roughness != 1.0f) {
+        return false;
+    }
+    for (int i = 0; i < 3; ++i) {
+        if (emissive[i] != 0.0f) {
+            return false;
+        }
+    }
+    for (u8 s = 0; s < kBindSlotCount; ++s) {
+        if (!slotDefault(s)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool GMeshMatProps::slotDefault(u8 slot) const {
+    if (slot >= kBindSlotCount) {
+        return true;
+    }
+    if (uvOffset[slot][0] != 0.0f || uvOffset[slot][1] != 0.0f) {
+        return false;
+    }
+    if (uvRotation[slot] != 0.0f) {
+        return false;
+    }
+    if (uvScale[slot][0] != 1.0f || uvScale[slot][1] != 1.0f) {
+        return false;
+    }
+    return sampler[slot][0] == 0 && sampler[slot][1] == 0 &&
+           sampler[slot][2] == 0 && sampler[slot][3] == 0;
+}
+
+bool gltfSamplerToCodes(i32 wrapS, i32 wrapT, i32 minFilter, i32 magFilter,
+                        u8 out[4]) {
+    out[0] = out[1] = out[2] = out[3] = kSamplerDefault;
+    bool ok = true;
+    const auto wrap = [&ok](i32 v) -> u8 {
+        switch (v) {
+            case 10497: return kSamplerDefault;      // REPEAT (o default)
+            case 33071: return kSamplerWrapClamp;    // CLAMP_TO_EDGE
+            case 33648: return kSamplerWrapMirrored; // MIRRORED_REPEAT
+            default:    ok = false; return kSamplerDefault;
+        }
+    };
+    const auto filt = [&ok](i32 v, bool minSide) -> u8 {
+        if (v < 0) {
+            return kSamplerDefault;   // glTF sem default obrigatório
+        }
+        switch (v) {
+            case 9728: return kSamplerNearest;
+            case 9729: return kSamplerLinear;
+            case 9984: ok = false; return kSamplerDefault;  // NEAREST_MIPMAP_NEAREST
+            case 9985: ok = false; return kSamplerDefault;  // LINEAR_MIPMAP_NEAREST
+            // os mips no MAG (o glTF não os define aí): desconhecido; no
+            // MIN são válidos e NÃO mexem no ok (o wrap anterior manda)
+            case 9986: if (!minSide) ok = false;
+                       return minSide ? kSamplerNearestMipmapLinear
+                                      : kSamplerDefault;
+            case 9987: if (!minSide) ok = false;
+                       return minSide ? kSamplerLinearMipmapLinear
+                                      : kSamplerDefault;
+            default:   ok = false; return kSamplerDefault;
+        }
+    };
+    out[0] = wrap(wrapS);
+    out[1] = wrap(wrapT);
+    out[2] = filt(minFilter, true);
+    out[3] = filt(magFilter, false);
+    // os mipmap-filters SÓ existem no minFilter (o glTF não os define no
+    // mag) — o mag com enum de mip cai no default E marca desconhecido
+    return ok;
+}
+
+void gmeshV3AppendProps(std::vector<u8>& materialsSection,
+                        const std::vector<GMeshMatProps>& props) {
+    // só materiais com PELO MENOS UMA propriedade fora do default glTF
+    std::vector<const GMeshMatProps*> with;
+    with.reserve(props.size());
+    for (const GMeshMatProps& p : props) {
+        if (!p.isDefault()) {
+            with.push_back(&p);
+        }
+    }
+    if (with.empty()) {
+        return;   // nada não-default — o ficheiro fica byte a byte
+    }
+    std::vector<u8> blk;
+    Writer w(blk);
+    w.u8_(static_cast<u8>('G'));
+    w.u8_(static_cast<u8>('T'));
+    w.u8_(static_cast<u8>('B'));
+    w.u8_(static_cast<u8>('2'));
+    w.u32_(static_cast<u32>(with.size()));
+    const size_t crcFrom = blk.size();
+    for (const GMeshMatProps* pp : with) {
+        const GMeshMatProps& p = *pp;
+        w.u16_(static_cast<u16>(p.materialIndex));
+        w.u8_(p.alphaMode);
+        w.u8_(p.doubleSided ? 1 : 0);
+        w.f32_(p.alphaCutoff);
+        for (int i = 0; i < 4; ++i) {
+            w.f32_(p.baseColor[i]);
+        }
+        w.f32_(p.metallic);
+        w.f32_(p.roughness);
+        for (int i = 0; i < 3; ++i) {
+            w.f32_(p.emissive[i]);
+        }
+        for (u8 s = 0; s < kBindSlotCount; ++s) {
+            w.f32_(p.uvOffset[s][0]);
+            w.f32_(p.uvOffset[s][1]);
+            w.f32_(p.uvRotation[s]);
+            w.f32_(p.uvScale[s][0]);
+            w.f32_(p.uvScale[s][1]);
+            w.u8_(p.sampler[s][0]);
+            w.u8_(p.sampler[s][1]);
+            w.u8_(p.sampler[s][2]);
+            w.u8_(p.sampler[s][3]);
+        }
+        // 2+1+1+4+16+4+4+12 = 44 de props + 5×24 = 120 de slots = 164 —
+        // já 4-alinhado por construção (o guard fica mesmo assim)
+        while (blk.size() % 4 != 0) {
+            w.u8_(0);
+        }
+    }
+    const u32 crc = gcrc32(blk.data() + crcFrom, blk.size() - crcFrom);
+    w.u32_(crc);
+    materialsSection.insert(materialsSection.end(), blk.begin(), blk.end());
+}
+
+bool gmeshV3ReadProps(const u8* tail, size_t tailLen,
+                      std::vector<GMeshMatProps>& out, std::string& err) {
+    out.clear();
+    if (tailLen < 4) {
+        return true;   // sem cauda (ficheiro pré-FASE 2) — NÃO é erro
+    }
+    if (!(tail[0] == 'G' && tail[1] == 'T' && tail[2] == 'B' &&
+          tail[3] == '2')) {
+        return true;   // cauda desconhecida — os leitores de sempre ignoram
+    }
+    Reader r(tail, tailLen);
+    (void)r.u32_();   // magic já validado
+    const u32 count = r.u32_();
+    const size_t crcFrom = r.i;
+    out.reserve(count);
+    for (u32 k = 0; k < count && !r.bad; ++k) {
+        GMeshMatProps p;
+        p.materialIndex = r.u16_();
+        p.alphaMode = r.u8_();
+        p.doubleSided = r.u8_() ? true : false;
+        p.alphaCutoff = r.f32_();
+        for (int i = 0; i < 4; ++i) {
+            p.baseColor[i] = r.f32_();
+        }
+        p.metallic = r.f32_();
+        p.roughness = r.f32_();
+        for (int i = 0; i < 3; ++i) {
+            p.emissive[i] = r.f32_();
+        }
+        for (u8 s = 0; s < kBindSlotCount; ++s) {
+            p.uvOffset[s][0] = r.f32_();
+            p.uvOffset[s][1] = r.f32_();
+            p.uvRotation[s] = r.f32_();
+            p.uvScale[s][0] = r.f32_();
+            p.uvScale[s][1] = r.f32_();
+            p.sampler[s][0] = r.u8_();
+            p.sampler[s][1] = r.u8_();
+            p.sampler[s][2] = r.u8_();
+            p.sampler[s][3] = r.u8_();
+        }
+        if (r.bad) {
+            break;
+        }
+        if (p.materialIndex < 0x10000) {
+            out.push_back(std::move(p));
+        }
+    }
+    if (r.bad || r.i + 4 > tailLen) {
+        err = "bloco de propriedades do .gmesh (GTB2) truncado";
+        out.clear();
+        return false;
+    }
+    const u32 stored = [&] {
+        Reader c(tail + r.i, 4);
+        return c.u32_();
+    }();
+    const u32 got = gcrc32(tail + crcFrom, r.i - crcFrom);
+    if (stored != got) {
+        err = "CHECKSUM CORROMPIDO: bloco de propriedades (GTB2) diz CRC 0x" +
+              std::to_string(stored) + ", recalculado 0x" + std::to_string(got) +
+              " — o ficheiro foi danificado";
+        out.clear();
+        return false;
+    }
     return true;
 }
 
@@ -580,7 +801,8 @@ bool gmeshV3Skeleton(GMeshV3Meta& meta,
                      std::vector<GMeshV3Block>& entries,
                      const std::vector<std::string>& materials,
                      GMeshV3Skeleton& sk, std::string& err,
-                     const std::vector<GMeshMatBind>* binds) {
+                     const std::vector<GMeshMatBind>* binds,
+                     const std::vector<GMeshMatProps>* props) {
     sk = GMeshV3Skeleton{};
     if (entries.empty()) {
         err = "v3 sem blocos — nada a escrever";
@@ -631,6 +853,13 @@ bool gmeshV3Skeleton(GMeshV3Meta& meta,
         gmeshV3AppendBinds(bindBytes, cursor, *binds);
         cursor += bindBytes.size();
     }
+    // 0.11-M (FASE 2): o bloco GTB2 DEPOIS do GTB1 (o MESMO padrão de
+    // cauda — o payloadSize do header conta os DOIS blocos)
+    std::vector<u8> propBytes;
+    if (props != nullptr && !props->empty()) {
+        gmeshV3AppendProps(propBytes, *props);
+        cursor += propBytes.size();
+    }
     const u64 payloadSize = cursor - kGHeaderBytes;
     // ---- a tabela (com o CRC de cada entrada já preenchido) --------
     {
@@ -657,6 +886,10 @@ bool gmeshV3Skeleton(GMeshV3Meta& meta,
         // faixa «pode trazer bytes a mais»)
         sk.materials.insert(sk.materials.end(), bindBytes.begin(),
                             bindBytes.end());
+        // 0.11-M (FASE 2): o GTB2 é appendado DEPOIS do GTB1 (a ordem da
+        // cauda é nomes→GTB1→GTB2 — o leitor do binds diz onde o GTB2 começa)
+        sk.materials.insert(sk.materials.end(), propBytes.begin(),
+                            propBytes.end());
     }
     return true;
 }
@@ -788,7 +1021,8 @@ bool gmeshV3PeekMeta(const u8* bytes, size_t len, GMeshV3Meta& meta,
 bool readGMeshV3Meta(const u8* bytes, size_t len, GMeshV3Meta& meta,
                      std::vector<GMeshV3Block>& blocks,
                      std::vector<std::string>& materials, std::string& err,
-                     std::vector<GMeshMatBind>* binds) {
+                     std::vector<GMeshMatBind>* binds,
+                     std::vector<GMeshMatProps>* props) {
     v3Reset(meta);
     blocks.clear();
     materials.clear();
@@ -890,11 +1124,11 @@ bool readGMeshV3Meta(const u8* bytes, size_t len, GMeshV3Meta& meta,
     }
     // os MATERIAIS (nomes — 4-alinhados; o leitor partilhado do PASSO 4;
     // a faixa EXATA = do offset até ao fim do ficheiro; o GTB1 da cauda
-    // vem para fora quando o chamador o pede)
+    // vem para fora quando o chamador o pede; o GTB2 idem — 0.11-M)
     if (!gmeshV3ReadMaterialsOnly(
             bytes + meta.materialTableOffset,
             static_cast<size_t>(len - meta.materialTableOffset),
-            meta, materials, err, binds)) {
+            meta, materials, err, binds, props)) {
         return false;
     }
     return true;
@@ -988,7 +1222,8 @@ bool gmeshV3ReadMaterialsOnly(const u8* matBytes, size_t matLen,
                               const GMeshV3Meta& meta,
                               std::vector<std::string>& materials,
                               std::string& err,
-                              std::vector<GMeshMatBind>* binds) {
+                              std::vector<GMeshMatBind>* binds,
+                              std::vector<GMeshMatProps>* props) {
     materials.clear();
     materials.resize(static_cast<size_t>(meta.materialCount));
     Reader mr(matBytes, matLen);
@@ -1008,10 +1243,22 @@ bool gmeshV3ReadMaterialsOnly(const u8* matBytes, size_t matLen,
     // 0.10-M HOTFIX TEXTURAS-VINCULA: a CAUDA (os bytes depois dos nomes)
     // pode trazer o bloco GTB1 — parse quando o chamador o pede. A cauda
     // é 4-alinhada (cada nome termina alinhado e o materialTableOffset
-    // também é)
+    // também é). 0.11-M (FASE 2): o GTB1 diz quantos bytes consumiu — o
+    // GTB2 (se existir) arranca DAÍ (a ordem da cauda é nomes→GTB1→GTB2)
+    size_t bindConsumed = 0;
     if (binds != nullptr && mr.i < matLen) {
-        if (!gmeshV3ReadBinds(matBytes + mr.i, matLen - mr.i, *binds, err)) {
+        if (!gmeshV3ReadBinds(matBytes + mr.i, matLen - mr.i, *binds, err,
+                              &bindConsumed)) {
             return false;
+        }
+    }
+    if (props != nullptr && mr.i < matLen) {
+        const size_t tailOff = mr.i + bindConsumed;
+        if (tailOff < matLen) {
+            if (!gmeshV3ReadProps(matBytes + tailOff, matLen - tailOff,
+                                  *props, err)) {
+                return false;
+            }
         }
     }
     return true;
@@ -1261,7 +1508,8 @@ void v3FillAabb(GMeshV3BlockIn& b) {
 } // namespace
 
 bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err,
-                const std::vector<GMeshMatBind>* binds) {
+                const std::vector<GMeshMatBind>* binds,
+                const std::vector<GMeshMatProps>* props) {
     out.clear();
     if (m.vertices.empty() || m.indices.empty()) {
         err = "geometria vazia — nada a converter";
@@ -1384,7 +1632,7 @@ bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err,
     // materiais — a MESMA rotina que o conversor streaming usa: zero
     // drift de formato entre os dois escritores)
     GMeshV3Skeleton sk;
-    if (!gmeshV3Skeleton(meta, entries, mats, sk, err, binds)) {
+    if (!gmeshV3Skeleton(meta, entries, mats, sk, err, binds, props)) {
         return false;
     }
     // ---- a emissão (header → metadados → blocos 16-alinhados → tabela

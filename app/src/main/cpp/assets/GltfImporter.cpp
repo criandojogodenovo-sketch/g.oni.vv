@@ -18,6 +18,12 @@ constexpr u32 kMagicGltf  = 0x46546C67u;   // 'glTF'
 constexpr u32 kChunkJson  = 0x4E4F534Au;   // 'JSON'
 constexpr u32 kChunkBin   = 0x004E4942u;   // 'BIN'
 
+// 0.11-M (FASE 2): os 5 slots de textura do material (o MESMO contrato
+// kBind* do GOwnFormats.h — o parse NÃO inclui esse header para manter o
+// importer GL-free e sem dependência dos formatos; o número é o pin do
+// teste — se um dia divergir, o teste acusa)
+constexpr u8 kMaxTexInfoSlots = 5;
+
 // ---- base64 -----------------------------------------------------------------
 bool base64Decode(const char* src, size_t len, std::vector<u8>& out) {
     out.clear();
@@ -626,10 +632,37 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
         }
     }
 
+    // ---- samplers (0.11-M FASE 2: wrap/filter do glTF) ---------------------
+    // Valores RAW (os enums oficiais do glTF); o mapeamento para GL é do
+    // device. Sampler fora do padrão (enum desconhecido) entra como veio —
+    // o device decide o default honesto (e loga).
+    if (const Json* js = doc.find("samplers"); js && js->type == Json::Type::Array) {
+        for (const Json& s : js->items) {
+            GltfSampler gs;
+            if (const Json* w = s.find("wrapS"); w && w->type == Json::Type::Number) {
+                gs.wrapS = static_cast<i32>(w->number);
+            }
+            if (const Json* w = s.find("wrapT"); w && w->type == Json::Type::Number) {
+                gs.wrapT = static_cast<i32>(w->number);
+            }
+            if (const Json* f = s.find("magFilter"); f && f->type == Json::Type::Number) {
+                gs.magFilter = static_cast<i32>(f->number);
+            }
+            if (const Json* f = s.find("minFilter"); f && f->type == Json::Type::Number) {
+                gs.minFilter = static_cast<i32>(f->number);
+            }
+            out.samplers.push_back(gs);
+        }
+    }
+
     // ---- textures (fontes de imagem; F5.1-B) --------------------------------
     std::vector<i32> textureSources;
+    // 0.11-M (FASE 2): o índice do SAMPLER por textura (glTF "sampler"; -1 =
+    // ausente — o device usa o par de sempre). Paralelo a textureSources.
+    std::vector<i32> textureSamplerIdx;
     if (const Json* jt = doc.find("textures"); jt && jt->type == Json::Type::Array) {
         textureSources.reserve(jt->items.size());
+        textureSamplerIdx.reserve(jt->items.size());
         for (const Json& t : jt->items) {
             i32 src = -1;
             if (const Json* s = t.find("source"); s && s->type == Json::Type::Number) {
@@ -639,10 +672,57 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                 }
             }
             textureSources.push_back(src);
+            i32 smi = -1;
+            if (const Json* s = t.find("sampler"); s && s->type == Json::Type::Number) {
+                if (s->number >= 0 &&
+                    s->number < static_cast<f64>(out.samplers.size())) {
+                    smi = static_cast<i32>(s->number);
+                }
+            }
+            textureSamplerIdx.push_back(smi);
         }
     }
 
     // ---- materials (básico) --------------------------------------------------
+    // 0.11-M (FASE 2): o parse COMPLETO do material — os 5 textureInfo com
+    // o KHR_texture_transform + o sampler, e as propriedades do material
+    // (alphaMode/alphaCutoff/doubleSided + os QUATRO factors).
+    // helper local: o transform + o sampler de UM textureInfo (a extensão
+    // vive NO textureInfo — a spec KHR_texture_transform; valores fora do
+    // range/set ficam com o default e o slot segue honesto)
+    auto parseTexInfo = [&](const Json& ti, u8 slot, GltfMaterial& gm) {
+        if (slot >= kMaxTexInfoSlots) {
+            return;
+        }
+        if (const Json* ex = ti.find("extensions"); ex && ex->type == Json::Type::Object) {
+            if (const Json* tt = ex->find("KHR_texture_transform");
+                tt && tt->type == Json::Type::Object) {
+                if (const Json* o = tt->find("offset");
+                    o && o->type == Json::Type::Array && o->items.size() == 2) {
+                    gm.texOffset[slot][0] = static_cast<f32>(o->items[0].number);
+                    gm.texOffset[slot][1] = static_cast<f32>(o->items[1].number);
+                }
+                if (const Json* r = tt->find("rotation"); r && r->type == Json::Type::Number) {
+                    gm.texRotation[slot] = static_cast<f32>(r->number);
+                }
+                if (const Json* sc = tt->find("scale");
+                    sc && sc->type == Json::Type::Array && sc->items.size() == 2) {
+                    gm.texScale[slot][0] = static_cast<f32>(sc->items[0].number);
+                    gm.texScale[slot][1] = static_cast<f32>(sc->items[1].number);
+                }
+            }
+        }
+        // o sampler do textureInfo: o glTF define-o NA TEXTURA (não no
+        // textureInfo) — o índice do textureInfo resolvem-no os chamadores
+        // via textureSamplerIdx; AQUI entra o índice da TEXTURA:
+        if (const Json* ix = ti.find("index");
+            ix && ix->type == Json::Type::Number &&
+            ix->number >= 0 &&
+            ix->number < static_cast<f64>(textureSamplerIdx.size())) {
+            gm.texSampler[slot] =
+                static_cast<i16>(textureSamplerIdx[static_cast<size_t>(ix->number)]);
+        }
+    };
     if (const Json* jm = doc.find("materials"); jm && jm->type == Json::Type::Array) {
         for (const Json& m : jm->items) {
             GltfMaterial gm;
@@ -656,6 +736,15 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                         gm.baseColor[i] = static_cast<f32>(bc->items[i].number);
                     }
                 }
+                // 0.11-M: os DOIS factors que vivem no pbr (glTF defaults 1)
+                if (const Json* mf = pbr->find("metallicFactor");
+                    mf && mf->type == Json::Type::Number) {
+                    gm.metallic = static_cast<f32>(mf->number);
+                }
+                if (const Json* rf = pbr->find("roughnessFactor");
+                    rf && rf->type == Json::Type::Number) {
+                    gm.roughness = static_cast<f32>(rf->number);
+                }
                 if (const Json* bt = pbr->find("baseColorTexture");
                     bt && bt->type == Json::Type::Object) {
                     if (const Json* ix = bt->find("index");
@@ -665,6 +754,7 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                         gm.baseColorTex =
                             textureSources[static_cast<size_t>(ix->number)];
                     }
+                    parseTexInfo(*bt, 0, gm);   // kBindBaseColor
                 }
                 // 0.10-M HOTFIX-2: o metallicRoughnessTexture vive DENTRO do
                 // pbrMetallicRoughness (o mesmo mapa textureSources → IMAGEM)
@@ -677,7 +767,38 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                         gm.metalRoughTex =
                             textureSources[static_cast<size_t>(ix->number)];
                     }
+                    parseTexInfo(*mt, 2, gm);   // kBindMetalRough
                 }
+            }
+            // 0.11-M: emissiveFactor (ao nível do material, glTF default 0)
+            if (const Json* ef = m.find("emissiveFactor");
+                ef && ef->type == Json::Type::Array && ef->items.size() == 3) {
+                for (int i = 0; i < 3; ++i) {
+                    gm.emissive[i] = static_cast<f32>(ef->items[i].number);
+                }
+            }
+            // 0.11-M: alphaMode (0/1/2; o glTF tolera SÓ estes — outro valor
+            // fica OPAQUE com um warn honesto) + alphaCutoff + doubleSided
+            if (const Json* am = m.find("alphaMode"); am && am->type == Json::Type::String) {
+                if (am->string == "MASK") {
+                    gm.alphaMode = 1;
+                } else if (am->string == "BLEND") {
+                    gm.alphaMode = 2;
+                } else if (am->string != "OPAQUE") {
+                    elog::warn("asset: glTF material '%s': alphaMode '%s' "
+                               "desconhecido — OPAQUE (o mesh segue)",
+                               gm.name.c_str(), am->string.c_str());
+                }
+            }
+            if (gm.alphaMode == 1) {
+                if (const Json* ac = m.find("alphaCutoff");
+                    ac && ac->type == Json::Type::Number) {
+                    gm.alphaCutoff = static_cast<f32>(ac->number);
+                }
+            }
+            if (const Json* ds = m.find("doubleSided");
+                ds && ds->type == Json::Type::Bool) {
+                gm.doubleSided = ds->boolean;
             }
             // PASSO 5A: normalTexture.index → IMAGEM (mesmo mapa das texturas
             // de cor) — a marca do caminho RGBA8 sem perda de canais
@@ -690,6 +811,7 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                     gm.normalTex =
                         textureSources[static_cast<size_t>(ix->number)];
                 }
+                parseTexInfo(*nt, 1, gm);   // kBindNormal
             }
             // 0.10-M HOTFIX-2: emissiveTexture e occlusionTexture ao nível do
             // material (o mesmo mapa) — os 5 slots do GTB1 ficam COMPLETOS
@@ -702,6 +824,7 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                     gm.emissiveTex =
                         textureSources[static_cast<size_t>(ix->number)];
                 }
+                parseTexInfo(*et, 3, gm);   // kBindEmissive
             }
             if (const Json* ot = m.find("occlusionTexture");
                 ot && ot->type == Json::Type::Object) {
@@ -712,6 +835,7 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                     gm.occlusionTex =
                         textureSources[static_cast<size_t>(ix->number)];
                 }
+                parseTexInfo(*ot, 4, gm);   // kBindOcclusion
             }
             out.materials.push_back(std::move(gm));
         }

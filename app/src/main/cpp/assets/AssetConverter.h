@@ -132,6 +132,12 @@ struct Output {
 // ficheiros (<stem>_<imgIdx>.gtext); entra no bloco GTB1 do .gmesh.
 using MatTexMap = std::map<std::string, std::array<std::string, 5>>;
 
+// 0.11-M (FASE 2): material NOME → as PROPRIEDADES do GTB2 (alphaMode/
+// factors/twoSided/transform UV/samplers — só os materiais com ALGUMA
+// propriedade fora do default glTF entram; o escritor filtra o resto).
+// O MESMO contrato do MatTexMap (1.º material com o nome vence).
+using MatPropsMap = std::map<std::string, GMeshMatProps>;
+
 // converte UMA fonte escolhida no navegador (caminho ABSOLUTO do FileApi)
 // para os formatos próprios do projeto. `pipeline` (texturas) opcional —
 // null cai no passthrough RGBA. onProgress(user, done, total) por chunk

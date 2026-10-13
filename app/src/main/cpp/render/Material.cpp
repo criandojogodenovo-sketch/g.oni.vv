@@ -1,5 +1,6 @@
 #include "render/Material.h"
 #include "render/Texture.h"
+#include "assets/GOwnFormats.h"   // 0.11-M: o GMeshMatProps do GTB2 (fromGMesh)
 #include "platform/Log.h"
 #include <GLES3/gl3.h>
 
@@ -20,6 +21,8 @@ namespace {
 // (mesh estático: atributos não ligados → valor constante, uSkin=0 ignora).
 // A matriz efetiva é a soma ponderada das 4 influências (a MESMA conta do
 // skinVertex de CPU — o teste de CI aferiu as duas contra o mesmo valor).
+// 0.11-M (FASE 2): uUvRot/uUvOff — o KHR_texture_transform no slot
+// baseColor (mat2 column-major + offset; identidade = o uv de sempre).
 constexpr char kVsSrc[] = R"(#version 300 es
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
@@ -30,6 +33,8 @@ uniform mat4 uVP;
 uniform mat4 uModel;
 uniform int uSkin;
 uniform mat4 uBones[64];
+uniform mat2 uUvRot;
+uniform vec2 uUvOff;
 out vec3 vNormal;
 out vec2 vUV;
 void main() {
@@ -44,10 +49,15 @@ void main() {
         nrm = mat3(b) * nrm;
     }
     vNormal = mat3(uModel) * nrm;
-    vUV = aUV;
+    vUV = uUvRot * aUV + uUvOff;
     gl_Position = uVP * uModel * pos;
 })";
 
+// 0.11-M (FASE 2): uBaseColor (o factor multiplicativo do glTF), uEmissive
+// (self-glow — a luz PBR GGX completa é a FASE 5), uAlphaMode/uAlphaCutoff
+// (MASK = discard abaixo do cutoff; BLEND = alpha no outColor para o
+// blend SRC_ALPHA/ONE_MINUS_SRC_ALPHA do draw) e uTwoSided (o verso com
+// a normal invertida — o culling OFF é do draw, o verso é daqui).
 constexpr char kFsSrc[] = R"(#version 300 es
 precision mediump float;
 in vec3 vNormal;
@@ -56,18 +66,31 @@ out vec4 outColor;
 uniform sampler2D uTex;
 uniform float uHasTex;
 uniform vec3 uTint;
+uniform vec4 uBaseColor;
+uniform vec3 uEmissive;
+uniform int uAlphaMode;
+uniform float uAlphaCutoff;
+uniform int uTwoSided;
 const vec3 kLightDir = vec3(0.4545, 0.7435, 0.2891);  // já normalizada, PARA a luz
 const vec3 kAmbient  = vec3(0.16);
 const vec3 kAlbedo   = vec3(0.58);
 void main() {
     vec3 n = normalize(vNormal);
-    float diff = max(dot(n, kLightDir), 0.0);
-    vec3 alb = kAlbedo;
-    if (uHasTex > 0.5) {
-        alb *= texture(uTex, vUV).rgb;
+    if (uTwoSided == 1 && !gl_FrontFacing) {
+        n = -n;   // o verso de um material doubleSided ilumina com a normal dele
     }
-    vec3 c = kAmbient + alb * diff;
-    outColor = vec4(c * uTint, 1.0);
+    float diff = max(dot(n, kLightDir), 0.0);
+    vec4 texel = vec4(1.0);
+    if (uHasTex > 0.5) {
+        texel = texture(uTex, vUV);
+    }
+    vec3 alb = kAlbedo * texel.rgb * uBaseColor.rgb;
+    float alpha = uBaseColor.a * texel.a;
+    if (uAlphaMode == 1 && alpha < uAlphaCutoff) {
+        discard;   // MASK: abaixo do cutoff o fragmento NÃO EXISTE (depth intacto)
+    }
+    vec3 c = kAmbient + alb * diff + uEmissive;
+    outColor = vec4(c * uTint, uAlphaMode == 2 ? alpha : 1.0);
 })";
 
 GLuint compileShader(GLenum type, const char* src) {
@@ -116,8 +139,16 @@ bool LitMaterial::init() {
     locTint_ = glGetUniformLocation(prog_, "uTint");
     locSkin_ = glGetUniformLocation(prog_, "uSkin");        // 0.8.2
     locBones_ = glGetUniformLocation(prog_, "uBones[0]");   // 0.8.2
+    locBaseColor_ = glGetUniformLocation(prog_, "uBaseColor");   // 0.11-M
+    locAlphaMode_ = glGetUniformLocation(prog_, "uAlphaMode");
+    locAlphaCutoff_ = glGetUniformLocation(prog_, "uAlphaCutoff");
+    locTwoSided_ = glGetUniformLocation(prog_, "uTwoSided");
+    locEmissive_ = glGetUniformLocation(prog_, "uEmissive");
+    locUvRot_ = glGetUniformLocation(prog_, "uUvRot");
+    locUvOff_ = glGetUniformLocation(prog_, "uUvOff");
     LOGI("LitMaterial: lit difusa fixa + ambient + textura opcional + uTint "
-         "+ skin (uBones[64]) pronto");
+         "+ skin (uBones[64]) + props do material glTF (alpha/factors/"
+         "twoSided/uvTransform) pronto");
     return true;
 }
 
@@ -125,6 +156,8 @@ void LitMaterial::destroy() {
     if (prog_) { glDeleteProgram(prog_); prog_ = 0; }
     locVP_ = locModel_ = locTex_ = locHasTex_ = locTint_ = -1;
     locSkin_ = locBones_ = -1;   // 0.8.2
+    locBaseColor_ = locAlphaMode_ = locAlphaCutoff_ = locTwoSided_ = -1;
+    locEmissive_ = locUvRot_ = locUvOff_ = -1;   // 0.11-M
 }
 
 void LitMaterial::use() const {
@@ -185,6 +218,57 @@ void LitMaterial::setBones(const Mat4* bones, u32 count) const {
     const u32 n = count < kMaxBones ? count : kMaxBones;
     glUniformMatrix4fv(locBones_, static_cast<GLsizei>(n), GL_FALSE,
                        bones->m);
+}
+
+// 0.11-M (FASE 2) — as props A CADA draw (o mesmo contrato do uTint:
+// uniforms nascem a 0 — o default É EXPLÍCITO, nunca estado de draw
+// anterior a vingar). nullptr = o default de sempre (opaco, branco,
+// front-facing, sem emissive, uv identidade) = o byte a byte pré-FASE 2.
+void LitMaterial::setProps(const DrawProps* p) const {
+    static const DrawProps kDefaults;
+    const DrawProps& d = p ? *p : kDefaults;
+    if (locBaseColor_ >= 0) {
+        glUniform4f(locBaseColor_, d.baseColor[0], d.baseColor[1],
+                    d.baseColor[2], d.baseColor[3]);
+    }
+    if (locAlphaMode_ >= 0) {
+        glUniform1i(locAlphaMode_, static_cast<GLint>(d.alphaMode));
+    }
+    if (locAlphaCutoff_ >= 0) {
+        glUniform1f(locAlphaCutoff_, d.alphaCutoff);
+    }
+    if (locTwoSided_ >= 0) {
+        glUniform1i(locTwoSided_, d.twoSided ? 1 : 0);
+    }
+    if (locEmissive_ >= 0) {
+        glUniform3f(locEmissive_, d.emissive[0], d.emissive[1], d.emissive[2]);
+    }
+    if (locUvRot_ >= 0) {
+        glUniformMatrix2fv(locUvRot_, 1, GL_FALSE, d.uvRot);
+    }
+    if (locUvOff_ >= 0) {
+        glUniform2f(locUvOff_, d.uvOff[0], d.uvOff[1]);
+    }
+}
+
+// a conversão GTB2 → DrawProps (o SLOT 0/baseColor — o único que o lit de
+// hoje amostra; os outros 4 esperam o lit PBR da 0.11-L, o GTB2 transporta)
+DrawProps DrawProps::fromGMesh(const GMeshMatProps& p) {
+    DrawProps d;
+    d.alphaMode = p.alphaMode;
+    d.alphaCutoff = p.alphaCutoff;
+    d.twoSided = p.doubleSided != 0;
+    for (int i = 0; i < 4; ++i) {
+        d.baseColor[i] = p.baseColor[i];
+    }
+    for (int i = 0; i < 3; ++i) {
+        d.emissive[i] = p.emissive[i];
+    }
+    khrTextureTransformMat2(p.uvRotation[0], p.uvScale[0][0], p.uvScale[0][1],
+                            d.uvRot);
+    d.uvOff[0] = p.uvOffset[0][0];
+    d.uvOff[1] = p.uvOffset[0][1];
+    return d;
 }
 
 } // namespace vv

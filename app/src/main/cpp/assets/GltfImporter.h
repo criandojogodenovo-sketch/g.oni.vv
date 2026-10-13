@@ -54,6 +54,11 @@ struct GltfImage {
 };
 
 // material básico (PBR mínimo; interp. p/ lit acontece no device)
+// 0.11-M (FASE 2): as PROPRIEDADES COMPLETAS do material glTF — o parse
+// lê alphaMode/alphaCutoff/doubleSided, os QUATRO factors
+// (baseColorFactor de sempre + metallicFactor/roughnessFactor/
+// emissiveFactor) e por CADA slot de textura o KHR_texture_transform
+// (offset/rotation/scale) + o índice do sampler do glTF.
 struct GltfMaterial {
     std::string name;
     f32 baseColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -70,6 +75,39 @@ struct GltfMaterial {
     i32 metalRoughTex = -1;   // pbrMetallicRoughness.metallicRoughnessTexture
     i32 emissiveTex = -1;     // emissiveTexture
     i32 occlusionTex = -1;    // occlusionTexture
+
+    // ---- 0.11-M (FASE 2): as propriedades por MATERIAL ------------------
+    // alphaMode do glTF (0=OPAQUE default, 1=MASK, 2=BLEND) — os valores
+    // são os PRÓPRIOS do glTF (enum inteiro: 0/1/2).
+    u8 alphaMode = 0;
+    f32 alphaCutoff = 0.5f;   // glTF default 0.5 (só com MASK)
+    bool doubleSided = false; // glTF default false (culling de trás)
+    f32 metallic = 1.0f;      // metallicFactor (glTF default 1)
+    f32 roughness = 1.0f;     // roughnessFactor (glTF default 1)
+    f32 emissive[3] = {0.0f, 0.0f, 0.0f};   // emissiveFactor (glTF default 0)
+
+    // ---- 0.11-M (FASE 2): por SLOT (a ordem é o contrato kBind* do
+    // GOwnFormats.h — o mesmo índice dos campos de cima): o
+    // KHR_texture_transform + o sampler do glTF. Os 5 arrays ficam
+    // PARALELOS aos campos i32 de cima (byte a byte para o código antigo —
+    // zero ripple; o conversor é quem os lê). Transform default = identidade.
+    f32 texOffset[5][2] = {};       // offset.uv (glTF default [0,0])
+    f32 texRotation[5] = {};        // radianos (glTF default 0)
+    f32 texScale[5][2] = {{1.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 1.0f},
+                          {1.0f, 1.0f}, {1.0f, 1.0f}};   // glTF default [1,1]
+    i16 texSampler[5] = {-1,-1,-1,-1,-1};   // índice em GltfModel::samplers
+};
+
+// 0.11-M (FASE 2): o sampler do glTF — os valores RAW do ficheiro (os
+// enums oficiais): wrap 10497=REPEAT (default), 33071=CLAMP_TO_EDGE,
+// 33648=MIRRORED_REPEAT; filtro 9728=NEAREST, 9729=LINEAR,
+// 9984..9987=NEAREST/LINEAR com mipmaps. O mapeamento para GL vive
+// NO DEVICE (render/Texture.cpp) — aqui é só o transporte honesto.
+struct GltfSampler {
+    i32 wrapS = 10497;
+    i32 wrapT = 10497;
+    i32 magFilter = -1;    // glTF: SEM default obrigatório (o device usa o
+    i32 minFilter = -1;    //   seu par de sempre quando ausente)
 };
 
 // ---- 0.8.1 (F7): ANIMAÇÕES ------------------------------------------------
@@ -140,6 +178,7 @@ struct GltfModel {
     std::vector<GltfImage> images;     // F5.1-B: texturas embutidas/externas
     std::vector<GltfAnimation> animations;   // 0.8.1 (F7): channels/samplers
     std::vector<GltfSkin> skins;             // 0.8.2 (F7): joints + ibm
+    std::vector<GltfSampler> samplers;       // 0.11-M (FASE 2): wrap/filter
     // material de CADA mesh de saída (primeiro material usado pelas
     // primitivas; -1 = nenhum) — alinhado com meshes
     std::vector<i32> meshMaterial;

@@ -156,13 +156,20 @@ void Renderer::beginFrame() {
 
 DrawStats Renderer::drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp,
                              const Texture* tex, const f32* tint,
-                             const Mat4* bones, u32 boneCount) {
+                             const Mat4* bones, u32 boneCount,
+                             const DrawProps* props) {
     if (!mesh.ok()) {
         return {};
     }
     lit_.use();
     lit_.setVP(vp);
     lit_.setModel(model);
+    // 0.11-M (FASE 2): as props do material A CADA draw (nullptr = o
+    // default de sempre — o byte a byte pré-FASE 2). ANTES do tex/tint/
+    // skin: o ÚLTIMO glUniform1f/3f/1i do draw continua a ser o uHasTex/
+    // uTint/uSkin (o contrato dos pins do glstub fica byte a byte — as
+    // uniforms novas u4f/mat2/2f não têm leitor antes da FASE 2).
+    lit_.setProps(props);
     lit_.setTexture(tex);   // F5-E: albedo opcional (unit 0 + uHasTex)
     lit_.setTint(tint);     // 0.7.0: cor por TIC (nullptr = branco, o de sempre)
     // 0.8.2 (F7): skin — uSkin+uBones quando há matrizes; SEMPRE definido
@@ -176,8 +183,30 @@ DrawStats Renderer::drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp
     // pass 3D: depth visível (faces frontais ocluem as traseiras) + cull
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
+    // 0.11-M (FASE 2): o ESTADO GL segue as props — BLEND liga o blend
+    // clássico (o MESMO par do grid/UI) e desliga a ESCRITA de depth (o
+    // Blend não oclui — o pin do c33 lê o estado); twoSided desliga o
+    // culling (o verso existe). TUDO restaurado no fim do draw (o grid/
+    // UI setam os seus, mas nunca estado de 3D a vingar entre draws).
+    const bool blending = props != nullptr && props->alphaMode == 2;
+    const bool twoSided = props != nullptr && props->twoSided;
+    if (blending) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE);
+    }
+    if (twoSided) {
+        glDisable(GL_CULL_FACE);
+    }
     mesh.bind();
     mesh.draw();
+    if (twoSided) {
+        glEnable(GL_CULL_FACE);
+    }
+    if (blending) {
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
+    }
     glBindVertexArray(0);
     return {mesh.indexCount(), 1};
 }

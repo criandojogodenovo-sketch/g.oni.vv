@@ -70,9 +70,12 @@ constexpr u16 kGmeshVersionMinRead = 1;  // a versão mais antiga que abre
 // float32 exato (a quantização 16-bit do v1 só existe nos ficheiros v1).
 // Vértices não referenciados por nenhum grupo não sobrevivem ao corte
 // (não afetam o conjunto de triângulos — documentado no formato).
+// `props` (0.11-M FASE 2): o GTB2 — o MESMO contrato do gmeshV3Skeleton.
 struct GMeshMatBind;   // 0.10-M HOTFIX: os binds (definidos mais abaixo)
+struct GMeshMatProps;  // 0.11-M FASE 2: as props (definidas mais abaixo)
 bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err,
-                const std::vector<GMeshMatBind>* binds = nullptr);
+                const std::vector<GMeshMatBind>* binds = nullptr,
+                const std::vector<GMeshMatProps>* props = nullptr);
 
 // lê bytes .gmesh (v1, v2 ou v3) → MeshData. v1/v2: dequantizado como
 // sempre. v3: os blocos montados por ordem da tabela (1 grupo por bloco).
@@ -194,10 +197,13 @@ std::string gmeshV3LoadRefusalErr(const GMeshV3Meta& meta);
 // o caminho do PASSO 4 e das contagens acima de 2^32. Os materiais vêm
 // como nomes (a tabela de materiais é pequena). `binds` (0.10-M HOTFIX
 // TEXTURAS-VINCULA): as vinculações do bloco GTB1 da cauda (se houver).
+// `props` (0.11-M FASE 2): as propriedades do bloco GTB2 (se houver) —
+// o MESMO contrato de cauda do binds.
 bool readGMeshV3Meta(const u8* bytes, size_t len, GMeshV3Meta& meta,
                      std::vector<GMeshV3Block>& blocks,
                      std::vector<std::string>& materials, std::string& err,
-                     std::vector<GMeshMatBind>* binds = nullptr);
+                     std::vector<GMeshMatBind>* binds = nullptr,
+                     std::vector<GMeshMatProps>* props = nullptr);
 
 // materializa UM bloco → MeshData de 1 grupo (o streaming do PASSO 3 na
 // verificação e, no PASSO 4, o carregamento por blocos)
@@ -225,11 +231,14 @@ bool gmeshV3ReadTableOnly(const u8* tableBytes, size_t tableLen,
 // os nomes precisam; o reader para em materialCount nomes). `binds`
 // (0.10-M HOTFIX TEXTURAS-VINCULA): parse do bloco GTB1 da CAUDA (os
 // bytes depois dos nomes) — ausente = vazio; corrompido = false.
+// `props` (0.11-M FASE 2): parse do bloco GTB2 DEPOIS do GTB1 — o MESMO
+// contrato (ausente = vazio = defaults; corrompido = false).
 bool gmeshV3ReadMaterialsOnly(const u8* matBytes, size_t matLen,
                               const GMeshV3Meta& meta,
                               std::vector<std::string>& materials,
                               std::string& err,
-                              std::vector<GMeshMatBind>* binds = nullptr);
+                              std::vector<GMeshMatBind>* binds = nullptr,
+                              std::vector<GMeshMatProps>* props = nullptr);
 
 // gmeshV3MaterializeBlock: materializa UM bloco a partir da FAIXA EXATA
 // dos seus dados (dataLen == blk.dataSize, lida por readBytesAt — o
@@ -306,8 +315,85 @@ void gmeshV3AppendBinds(std::vector<u8>& materialsSection, u64 cursorAbs,
 // (ficheiro pré-hotfix ou mesh sem texturas). Magic presente mas bytes
 // truncados/CRC mau → false com err LEGÍVEL (a quarentena do chamador
 // decide — o mesmo contrato da tabela).
+// 0.11-M (FASE 2): `consumed` (OPCIONAL, out) recebe o nº de bytes do
+// bloco GTB1 (do início do tail até ao fim do CRC) — o leitor do GTB2
+// arranca DAÍ (o GTB2 é APPENDADO DEPOIS do GTB1 na mesma secção; os
+// chamadores antigos byte a byte com o out-param ausente).
 bool gmeshV3ReadBinds(const u8* tail, size_t tailLen,
-                      std::vector<GMeshMatBind>& out, std::string& err);
+                      std::vector<GMeshMatBind>& out, std::string& err,
+                      size_t* consumed = nullptr);
+
+// ---- 0.11-M (FASE 2) — GTB2: as PROPRIEDADES por material ------------------
+// O GTB1 levou os CAMINHOS das texturas; o GTB2 leva as PROPRIEDADES do
+// material glTF (alphaMode/alphaCutoff/doubleSided, os QUATRO factors, o
+// transform UV por slot do KHR_texture_transform e os samplers normalizados).
+// MESMO padrão do GTB1: bloco APPENDADO à secção de materiais (DEPOIS do
+// GTB1), o leitor de nomes para nos nomes, os leitores antigos ignoram a
+// cauda — ficheiros antigos leem-se byte a byte, ficheiros novos em apps
+// antigas perdem SÓ as props (defaults honestos), nunca o mesh.
+//
+// Layout do bloco (little-endian): magic u32 "GTB2" · u32 propCount (só
+// materiais com PELO MENOS UMA propriedade não-default) · propCount ×
+// ENTRADA FIXA de 164 B · u32 crc32 (das entradas). A entrada fixa:
+//   u16 materialIndex · u8 alphaMode · u8 doubleSided · f32 alphaCutoff
+//   f32 baseColor[4] · f32 metallic · f32 roughness · f32 emissive[3]
+//   5 × { f32 offset[2] · f32 rotation · f32 scale[2] · u8 wrapS · u8 wrapT
+//         · u8 minFilter · u8 magFilter }
+// (44 B de props + 5×24 B de slots = 164, já 4-alinhado)
+constexpr u32 kGmeshMatPropsEntryBytes = 164;
+
+// os CÓDIGOS de sampler no GTB2 (normalizados — os enums RAW do glTF não
+// cabem num u8): 0 = DEFAULT da casa (wrap REPEAT, min LINEAR_MIPMAP_LINEAR,
+// mag LINEAR — o par de sempre); wrap: 1=CLAMP_TO_EDGE, 2=MIRRORED_REPEAT;
+// filtro: 1=NEAREST, 2=LINEAR, 3=LINEAR_MIPMAP_LINEAR, 4=NEAREST_MIPMAP_
+// LINEAR, 5=LINEAR_MIPMAP_NEAREST, 6=NEAREST_MIPMAP_NEAREST.
+enum : u8 {
+    kSamplerDefault = 0, kSamplerNearest = 1, kSamplerLinear = 2,
+    kSamplerLinearMipmapLinear = 3, kSamplerNearestMipmapLinear = 4,
+    kSamplerLinearMipmapNearest = 5, kSamplerNearestMipmapNearest = 6,
+    kSamplerWrapClamp = 1, kSamplerWrapMirrored = 2,
+};
+
+// o MAPEAMENTO puro glTF → códigos da casa (out[4] = wrapS/wrapT/min/mag).
+// GL-free e afervel: o enum desconhecido cai no DEFAULT (out=0) e devolve
+// false (o chamador loga o warn honesto UMA vez).
+bool gltfSamplerToCodes(i32 wrapS, i32 wrapT, i32 minFilter, i32 magFilter,
+                        u8 out[4]);
+
+struct GMeshMatProps {
+    u32 materialIndex = 0;
+    u8 alphaMode = 0;          // 0=OPAQUE, 1=MASK, 2=BLEND (os valores glTF)
+    u8 doubleSided = 0;
+    f32 alphaCutoff = 0.5f;
+    f32 baseColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    f32 metallic = 1.0f;
+    f32 roughness = 1.0f;
+    f32 emissive[3] = {0.0f, 0.0f, 0.0f};
+    // por slot (kBind*): o transform UV + o sampler (códigos da casa)
+    f32 uvOffset[5][2] = {};
+    f32 uvRotation[5] = {};
+    f32 uvScale[5][2] = {{1,1},{1,1},{1,1},{1,1},{1,1}};
+    u8 sampler[5][4] = {};     // {wrapS, wrapT, min, mag}; 0 = default casa
+
+    // o material tem ALGUMA propriedade fora do default glTF? false =
+    // NÃO entra no GTB2 (o ficheiro fica byte a byte com o pré-FASE 2)
+    bool isDefault() const;
+    // o SLOT tem transform/sampler fora do default? (o shader de hoje só
+    // aplica o slot 0 — os outros esperam os samplers 1-4 no lit, 0.11-L)
+    bool slotDefault(u8 slot) const;
+};
+
+// ESCRITOR: appenda o bloco GTB2 ao FIM da secção de materiais (DEPOIS do
+// GTB1 — o chamador é o gmeshV3Skeleton; a ordem na cauda é nomes→GTB1→GTB2).
+// Sem props não-default NADA é appendado (o ficheiro fica byte a byte).
+void gmeshV3AppendProps(std::vector<u8>& materialsSection,
+                        const std::vector<GMeshMatProps>& props);
+
+// LEITOR: `tail` = os bytes DEPOIS do fim do GTB1 (o `consumed` do
+// gmeshV3ReadBinds). Sem magic → true com out vazio (pré-FASE 2). Truncado
+// /CRC mau → false com err LEGÍVEL (o mesmo contrato do GTB1).
+bool gmeshV3ReadProps(const u8* tail, size_t tailLen,
+                      std::vector<GMeshMatProps>& out, std::string& err);
 
 // um bloco de ENTRADA do escritor v3 (a pool já com índices locais; o
 // conversor do PASSO 3 produz isto em streaming)
@@ -346,11 +432,15 @@ struct GMeshV3Skeleton {
 // →.gtext appendadas ao FIM da secção de materiais (o bloco GTB1). nullptr
 // OU vazio = o ficheiro fica byte a byte com o pré-hotfix. O payloadSize
 // do header CONTA os bytes do bloco (o leitor valida pelo tamanho).
+// `props` (0.11-M FASE 2): as propriedades por material appendadas DEPOIS
+// do GTB1 (o bloco GTB2 — o MESMO padrão de cauda). nullptr OU vazio/total-
+// default = byte a byte com o pré-FASE 2.
 bool gmeshV3Skeleton(GMeshV3Meta& meta,
                      std::vector<GMeshV3Block>& entries,
                      const std::vector<std::string>& materials,
                      GMeshV3Skeleton& sk, std::string& err,
-                     const std::vector<GMeshMatBind>* binds = nullptr);
+                     const std::vector<GMeshMatBind>* binds = nullptr,
+                     const std::vector<GMeshMatProps>* props = nullptr);
 
 // ---- .gtext -----------------------------------------------------------------
 // PASSO 5A: o ESCRITOR grava v2 (payload ganha um u8 `flags` — bits

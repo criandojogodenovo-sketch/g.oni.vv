@@ -83,6 +83,15 @@ public:
     // aviso (gate 2K no fallback) sai da carga — o chamador mostra em toast
     const Texture* texture(const std::string& relPath, std::string* warn = nullptr);
 
+    // 0.11-M (FASE 2): resolve a textura E aplica o sampler do glTF (os
+    // códigos kSampler* da casa — o GTB2 transporta). FIRST-WINS por
+    // caminho: a 1.ª resolução com sampler não-default vence; um material
+    // seguinte com sampler DIFERENTE para a MESMA textura é logado e
+    // ignorado (a alternativa — texturas duplicadas por sampler — é
+    // memória a dobrar no device; o limite fica documentado no relatório).
+    const Texture* textureWithSampler(const std::string& relPath,
+                                      const u8 sampler[4]);
+
     void releaseAll();   // TERM_WINDOW: apaga TUDO (blocks incluídos — o
                          // re-open custa 192 B + tabela, nada de dados)
 
@@ -97,6 +106,9 @@ private:
     std::unordered_map<std::string, std::unique_ptr<Mesh>> gpuMeshes_;
     std::unordered_map<std::string, std::unique_ptr<Texture>> gpuTextures_;
     std::unordered_map<std::string, std::unique_ptr<BlockMesh>> blockMeshes_;
+    // 0.11-M (FASE 2): o sampler JÁ APLICADO por caminho (first-wins;
+    // os 4 códigos kSampler* empacotados — 0 em tudo = sem sampler)
+    std::unordered_map<std::string, u32> samplerApplied_;
     std::string lastMeshErr_;   // 0.10.6 (SAF-SEAM): o último erro de mesh
 };
 

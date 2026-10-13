@@ -865,6 +865,56 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
             }
         }
     }
+    // ---- 0.11-M (FASE 2) — O MAPA material→PROPS (o bloco GTB2) ---------
+    // O parse completo (alphaMode/factors/twoSided/transform UV/samplers)
+    // vira props por material — o MESMO contrato do matTex (1.º com o nome
+    // vence). Materiais 100% default NEM ENTRAM (o ficheiro fica byte a
+    // byte com o pré-FASE 2 — o isDefault filtra, aqui e no escritor).
+    convert::MatPropsMap matProps;
+    for (const GltfMaterial& m : model.materials) {
+        GMeshMatProps p;
+        p.alphaMode = m.alphaMode;
+        p.doubleSided = m.doubleSided ? 1u : 0u;
+        p.alphaCutoff = m.alphaCutoff;
+        for (int i = 0; i < 4; ++i) {
+            p.baseColor[i] = m.baseColor[i];
+        }
+        p.metallic = m.metallic;
+        p.roughness = m.roughness;
+        for (int i = 0; i < 3; ++i) {
+            p.emissive[i] = m.emissive[i];
+        }
+        bool samplerWarn = false;
+        for (u8 s = 0; s < kBindSlotCount; ++s) {
+            p.uvOffset[s][0] = m.texOffset[s][0];
+            p.uvOffset[s][1] = m.texOffset[s][1];
+            p.uvRotation[s] = m.texRotation[s];
+            p.uvScale[s][0] = m.texScale[s][0];
+            p.uvScale[s][1] = m.texScale[s][1];
+            if (m.texSampler[s] >= 0 &&
+                m.texSampler[s] < static_cast<i32>(model.samplers.size())) {
+                const GltfSampler& gs =
+                    model.samplers[static_cast<size_t>(m.texSampler[s])];
+                u8 codes[4] = {};
+                if (!gltfSamplerToCodes(gs.wrapS, gs.wrapT, gs.minFilter,
+                                        gs.magFilter, codes)) {
+                    samplerWarn = true;   // enum desconhecido — o default entra
+                }
+                p.sampler[s][0] = codes[0];
+                p.sampler[s][1] = codes[1];
+                p.sampler[s][2] = codes[2];
+                p.sampler[s][3] = codes[3];
+            }
+        }
+        if (samplerWarn) {
+            elog::warn("asset: material '%s' tem sampler com enums fora do "
+                       "padrão glTF — o default da casa entra (REPEAT/"
+                       "LINEAR_MIPMAP) e o log DIZ", m.name.c_str());
+        }
+        if (!p.isDefault() && matProps.find(m.name) == matProps.end()) {
+            matProps[m.name] = p;   // 1.º material com o nome vence
+        }
+    }
     // ---- 0.9.6.3 (R-020) · O LOG DO PARSE (a spec PASSO 1 pede: formato,
     // nós, malhas, primitivas, vértices, índices, materiais, texturas) ----
     {
@@ -1041,11 +1091,13 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
                                    stem, st, out, stats, res, err,
                                    onProgress, user,
                                    rangeSrc.fn != nullptr ? &rangeSrc : nullptr,
-                                   binDroppable, &matTex)
+                                   binDroppable, &matTex,
+                                   matProps.empty() ? nullptr : &matProps)
             : convertGltfToV3(model, doc, bin, binLenEff, fileBytes,
                               stem, st, out, stats, res, err, onProgress, user,
                               rangeSrc.fn != nullptr ? &rangeSrc : nullptr,
-                              binDroppable, 0, &matTex);
+                              binDroppable, 0, &matTex,
+                              matProps.empty() ? nullptr : &matProps);
         if (map != nullptr) {
             fileapi::unmapFile64(map, mapLen);
         }
@@ -1226,7 +1278,10 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
         std::vector<u8> bytes;
         // 0.10-M HOTFIX TEXTURAS-VINCULA: os binds do FUNDIDO — a MESMA
         // ordem de dedup do writeGMesh (1.ª aparição do nome nos grupos)
+        // 0.11-M (FASE 2): as props na MESMA ordem dedup (materialIndex =
+        // a posição na tabela do ficheiro — o MESMO índice do GTB1)
         std::vector<GMeshMatBind> mergedBinds;
+        std::vector<GMeshMatProps> mergedProps;
         {
             std::vector<std::string> order;
             for (const MeshData::Group& g : merged.groups) {
@@ -1253,10 +1308,17 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
                 if (!b.empty()) {
                     mergedBinds.push_back(std::move(b));
                 }
+                const auto itp = matProps.find(g.material);
+                if (itp != matProps.end()) {
+                    GMeshMatProps p = itp->second;
+                    p.materialIndex = static_cast<u32>(order.size() - 1);
+                    mergedProps.push_back(std::move(p));
+                }
             }
         }
         if (!writeGMesh(merged, bytes, err,
-                        mergedBinds.empty() ? nullptr : &mergedBinds)) {
+                        mergedBinds.empty() ? nullptr : &mergedBinds,
+                        mergedProps.empty() ? nullptr : &mergedProps)) {
             return false;
         }
         char nm[96];
@@ -1282,7 +1344,9 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
             std::vector<u8> bytes;
             // 0.10-M HOTFIX TEXTURAS-VINCULA: os binds do mesh solto (o
             // MESMO dedup por 1.ª aparição — um mesh por ficheiro)
+            // 0.11-M (FASE 2): as props na MESMA ordem dedup
             std::vector<GMeshMatBind> meshBinds;
+            std::vector<GMeshMatProps> meshProps;
             {
                 std::vector<std::string> order;
                 for (const MeshData::Group& g : mesh.groups) {
@@ -1309,10 +1373,18 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
                     if (!b.empty()) {
                         meshBinds.push_back(std::move(b));
                     }
+                    const auto itp = matProps.find(g.material);
+                    if (itp != matProps.end()) {
+                        GMeshMatProps p = itp->second;
+                        p.materialIndex =
+                            static_cast<u32>(order.size() - 1);
+                        meshProps.push_back(std::move(p));
+                    }
                 }
             }
             if (!writeGMesh(mesh, bytes, err,
-                            meshBinds.empty() ? nullptr : &meshBinds)) {
+                            meshBinds.empty() ? nullptr : &meshBinds,
+                            meshProps.empty() ? nullptr : &meshProps)) {
                 return false;
             }
             char nm[96];

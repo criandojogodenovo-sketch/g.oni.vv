@@ -103,6 +103,19 @@ public:
     // de cada material para GL e o draw usa-a POR BLOCO — nunca um
     // material global a substituir todos)
     const std::vector<GMeshMatBind>& binds() const { return binds_; }
+    // 0.11-M (FASE 2): as PROPRIEDADES do bloco GTB2 (alphaMode/factors/
+    // twoSided/transform UV/samplers por material — o draw aplica POR
+    // MATERIAL; vazio = ficheiro pré-FASE 2 = defaults de sempre)
+    const std::vector<GMeshMatProps>& matProps() const { return matProps_; }
+    // as props de UM material (nullptr = defaults — sem entrada no GTB2)
+    const GMeshMatProps* propsOf(u32 materialIndex) const {
+        for (const GMeshMatProps& p : matProps_) {
+            if (p.materialIndex == materialIndex) {
+                return &p;
+            }
+        }
+        return nullptr;
+    }
     // a textura RESOLVIDA de um material (o GpuAssets injeta; nullptr =
     // o material fica sem — o draw cai no tex do chamador)
     void setMaterialTexture(u32 materialIndex, const Texture* tex) {
@@ -149,6 +162,11 @@ public:
     // do MESMO plano (nunca exclui o que se vê).
     static bool blockVisible(const Mat4& model, const GMeshV3Block& blk,
                              const f32 planes[6][4]);
+    // 0.11-M (FASE 2 · PURO): a ORDEM do passe BLEND — longe→perto. `zNdc`
+    // = o z de NDC do centro de cada bloco (o -1 é perto, +1 longe; z fora
+    // de [-1,1] = atrás/diante do clip → desenha PRIMEIRO, o «mais longe»).
+    // out recebe os índices 0..count-1 ordenados por z DESCENDENTE (estável).
+    static void blendDrawOrder(const f32* zNdc, u32 count, u32* outOrder);
     // o AUDIT: os índices dos blocos visíveis para (model, vp) — a prova
     // do pin do culling (o teste puro chama ISTO, o draw chama o teste)
     u32 visibleBlocks(const Mat4& model, const Mat4& vp,
@@ -194,6 +212,7 @@ private:
     std::vector<GMeshV3Block> blocks_;
     std::vector<std::string> materials_;
     std::vector<GMeshMatBind> binds_;             // o GTB1 (o auto do import)
+    std::vector<GMeshMatProps> matProps_;         // 0.11-M: o GTB2 (as props)
     std::vector<const Texture*> matTex_;          // baseColor por material
                                                   // (não-dono: o cache do
                                                   // GpuAssets é o dono)

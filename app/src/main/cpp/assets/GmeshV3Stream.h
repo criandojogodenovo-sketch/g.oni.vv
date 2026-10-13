@@ -113,7 +113,8 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
                      const V3RangeSource* ranges = nullptr,
                      bool binDroppable = true,
                      u32 metaFlags = 0,
-                     const convert::MatTexMap* matTex = nullptr);
+                     const convert::MatTexMap* matTex = nullptr,
+                     const convert::MatPropsMap* matProps = nullptr);
 
 // ---- 0.10-M (EXT) · IMPORT DE NÓS COMO SUB-ÁRVORE --------------------------
 // O DRIVER do import EXPANDIDO: em vez de UM .gmesh fundido, UMA PEÇA por
@@ -154,6 +155,7 @@ bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
                            void* user = nullptr,
                            const V3RangeSource* ranges = nullptr,
                            bool binDroppable = true,
-                           const convert::MatTexMap* matTex = nullptr);
+                           const convert::MatTexMap* matTex = nullptr,
+                           const convert::MatPropsMap* matProps = nullptr);
 
 } // namespace vv

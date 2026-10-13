@@ -1393,6 +1393,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     // SUFIXO HONESTO vive no fim e o NOME é que trunca (a honestidade é o
     // pin: "(vinculado · render na 0.11-L)" nunca sai do ecrã)
     char slotLabels[MeshRenderer::kMeshTexSlots][128] = {};
+    // 0.11-M (FASE 2): a REF de CADA slot (o thumb do inspector desenha a
+    // textura VIVA — o mesmo resolver do elemento Image; vazia = sem)
+    char slotRefs[MeshRenderer::kMeshTexSlots][96] = {};
     char inputLine[48] = "";
     char camProjLabel[48] = "";   // 0.7.7
     char camActiveLabel[48] = "";
@@ -1436,6 +1439,11 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         }
         for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
             const std::string& p = mr->matTex(matIdx, s);
+            slotRefs[s][0] = '\0';
+            if (!p.empty() && p.size() < sizeof(slotRefs[s])) {
+                std::snprintf(slotRefs[s], sizeof(slotRefs[s]), "%s",
+                              p.c_str());
+            }
             // o NOME é que trunca (o padrão textfit do button) — o sufixo
             // honesto fica visível mesmo no painel estreito do device
             char base[64] = "";
@@ -1447,11 +1455,18 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                                          kBindSlotName(static_cast<u8>(s)), s,
                                          base);
                 const f32 rowW = w - 2.0f * kPad;
-                if (ui.fontWidth(full) > rowW - theme::dp(8.0f)) {
+                // 0.11-M (FASE 2): o thumb 24dp no lado direito da linha
+                // COME o orçamento do texto (o MESMO padrão do sufixo —
+                // o texto truncado cede, o thumb nunca fica sob o nome)
+                const f32 thumbBudget =
+                    theme::dp(24.0f) + theme::dp(6.0f);
+                if (ui.fontWidth(full) >
+                    rowW - theme::dp(8.0f) - thumbBudget) {
                     const std::string prefix =
                         std::string(kBindSlotName(static_cast<u8>(s))) + ": ";
                     const f32 budget =
-                        rowW - theme::dp(8.0f) - ui.fontWidth(prefix.c_str()) -
+                        rowW - theme::dp(8.0f) - thumbBudget -
+                        ui.fontWidth(prefix.c_str()) -
                         ui.fontWidth(editor::kTexSlotPendingRenderSuffix);
                     char fitted[64];
                     textfit::ellipsize(base, budget,
@@ -1869,6 +1884,22 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                       slotLabels[s < MeshRenderer::kMeshTexSlots
                                      ? s
                                      : 0u]);
+            // 0.11-M (FASE 2): o THUMB do slot — a textura VIVA (o mesmo
+            // resolver do elemento Image) num quad 24dp no lado direito
+            // (o padrão MatSelRow: desenho por cima do botão; o orçamento
+            // do texto já reservou o espaço no pré-pass). Falha do
+            // resolver (asset ausente/falhado) = moldura honesta, NUNCA
+            // o vazio silencioso (o padrão Image da casa).
+            if (s < MeshRenderer::kMeshTexSlots &&
+                slotRefs[s][0] != '\0') {
+                const f32 th = theme::dp(24.0f);
+                const f32 tx = x + w - kPad - th - theme::dp(4.0f);
+                const f32 ty = ry + (r.h - th) * 0.5f;
+                const f32 kWhite[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+                if (!ui.imageQuad(tx, ty, th, th, slotRefs[s], kWhite)) {
+                    ui.frame(tx, ty, th, th, 1.0f, theme::LINE);
+                }
+            }
             break;
         }
         case InspRow::Kind::MatSelRow: {

@@ -542,6 +542,158 @@ bool buildGlbFase21(u32 nMeshes, u32 verts, u32 tris,
     return ok;
 }
 
+// 0.11-M (FASE 2 · FASE 25) — o GLB dos MATERIAIS: 1 mesh, 2 primitivas
+// (cada uma 1 triângulo em x=−2 e x=+2), DOIS materiais com props da
+// FASE 2 (mat0 BLEND + factor + transform UV + sampler CLAMP/NEAREST;
+// mat1 MASK 0.25 + doubleSided + sampler MIRRORED) e as texturas
+// EMBUTIDAS (PNG data: URI — o mesmo caminho do device).
+static std::string b64Fase25(const std::vector<u8>& data) {
+    static const char* t =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    for (size_t i = 0; i < data.size(); i += 3) {
+        const u32 b0 = data[i];
+        const u32 b1 = i + 1 < data.size() ? data[i + 1] : 0;
+        const u32 b2 = i + 2 < data.size() ? data[i + 2] : 0;
+        out += t[b0 >> 2];
+        out += t[((b0 & 3) << 4) | (b1 >> 4)];
+        out += i + 1 < data.size() ? t[((b1 & 15) << 2) | (b2 >> 6)] : '=';
+        out += i + 2 < data.size() ? t[b2 & 63] : '=';
+    }
+    return out;
+}
+
+bool buildGlbFase25(const std::string& path) {
+    // os 2 PNGs embutidos (16×16, vermelho distinto — o dedup não colapsa)
+    std::vector<std::vector<u8>> pngs;
+    std::vector<std::string> uris;
+    for (int k = 0; k < 2; ++k) {
+        std::vector<u8> rgb(16u * 16u * 3u,
+                            static_cast<u8>(k == 0 ? 200 : 40));
+        pngs.push_back(thumb::encodePngRgb(rgb.data(), 16u, 16u));
+        uris.push_back("data:image/png;base64," +
+                       b64Fase25(pngs.back()));
+    }
+    // o BIN: 2 primitivas × 1 tri (pos 36 + nrm 36 + uv 24 + idx u32 12)
+    u64 off = 0;
+    u64 posOff[2], nrmOff[2], uvOff[2], idxOff[2];
+    for (int k = 0; k < 2; ++k) {
+        posOff[k] = off; off += 36;
+        nrmOff[k] = off; off += 36;
+        uvOff[k] = off; off += 24;
+        idxOff[k] = (off + 3) & ~3ull; off = idxOff[k] + 12;
+    }
+    const u64 binLen = off;
+    std::string j =
+        "{\"asset\":{\"version\":\"2.0\"},\"scene\":0,"
+        "\"scenes\":[{\"nodes\":[0,1]}],"
+        "\"samplers\":["
+        "{\"wrapS\":33071,\"wrapT\":33071,\"magFilter\":9728,"
+        "\"minFilter\":9728},"
+        "{\"wrapS\":33648,\"wrapT\":10497,\"magFilter\":9729,"
+        "\"minFilter\":9987}],"
+        "\"nodes\":["
+        "{\"mesh\":0,\"name\":\"blend\",\"translation\":[-2.0,0,0]},"
+        "{\"mesh\":1,\"name\":\"mask\",\"translation\":[2.0,0,0]}],"
+        "\"meshes\":["
+        "{\"primitives\":[{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,"
+        "\"TEXCOORD_0\":2},\"indices\":3,\"material\":0,\"mode\":4}]},"
+        "{\"primitives\":[{\"attributes\":{\"POSITION\":4,\"NORMAL\":5,"
+        "\"TEXCOORD_0\":6},\"indices\":7,\"material\":1,\"mode\":4}]}],"
+        "\"materials\":["
+        "{\"name\":\"vidro\",\"alphaMode\":\"BLEND\",\"doubleSided\":false,"
+        "\"pbrMetallicRoughness\":{"
+        "\"baseColorFactor\":[0.5,0.4,0.3,0.8],"
+        "\"baseColorTexture\":{\"index\":0,\"extensions\":"
+        "{\"KHR_texture_transform\":{\"offset\":[0.25,0.5],"
+        "\"rotation\":1.5707964,\"scale\":[2,3]}}}}},"
+        "{\"name\":\"folha\",\"alphaMode\":\"MASK\",\"alphaCutoff\":0.25,"
+        "\"doubleSided\":true,"
+        "\"pbrMetallicRoughness\":{"
+        "\"baseColorTexture\":{\"index\":1}}}],"
+        "\"textures\":[{\"source\":0,\"sampler\":0},"
+        "{\"source\":1,\"sampler\":1}],"
+        "\"images\":[{\"uri\":\"" + uris[0] + "\"},{\"uri\":\"" +
+        uris[1] + "\"}],"
+        "\"accessors\":["
+        "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\",\"min\":[0,0,0],\"max\":[1,1,0]},"
+        "{\"bufferView\":1,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},"
+        "{\"bufferView\":2,\"componentType\":5126,\"count\":3,\"type\":\"VEC2\"},"
+        "{\"bufferView\":3,\"componentType\":5125,\"count\":3,\"type\":\"SCALAR\"},"
+        "{\"bufferView\":4,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\",\"min\":[0,0,0],\"max\":[1,1,0]},"
+        "{\"bufferView\":5,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},"
+        "{\"bufferView\":6,\"componentType\":5126,\"count\":3,\"type\":\"VEC2\"},"
+        "{\"bufferView\":7,\"componentType\":5125,\"count\":3,\"type\":\"SCALAR\"}],"
+        "\"bufferViews\":["
+        "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+        "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":36},"
+        "{\"buffer\":0,\"byteOffset\":72,\"byteLength\":24},"
+        "{\"buffer\":0,\"byteOffset\":96,\"byteLength\":12},"
+        "{\"buffer\":0,\"byteOffset\":108,\"byteLength\":36},"
+        "{\"buffer\":0,\"byteOffset\":144,\"byteLength\":36},"
+        "{\"buffer\":0,\"byteOffset\":180,\"byteLength\":24},"
+        "{\"buffer\":0,\"byteOffset\":204,\"byteLength\":12}],"
+        "\"buffers\":[{\"byteLength\":" + std::to_string(binLen) + "}]}";
+    while (j.size() % 4 != 0) j += ' ';
+    std::vector<u8> bin(static_cast<size_t>(binLen), 0);
+    auto putF32 = [&bin](u64 o, f32 v) {
+        u32 raw;
+        std::memcpy(&raw, &v, 4);
+        for (int b = 0; b < 4; ++b) {
+            bin[static_cast<size_t>(o) + b] =
+                static_cast<u8>((raw >> (8 * b)) & 0xFF);
+        }
+    };
+    for (int k = 0; k < 2; ++k) {
+        putF32(posOff[k] + 0, 0.0f);
+        putF32(posOff[k] + 4, 0.0f);
+        putF32(posOff[k] + 8, 0.0f);
+        putF32(posOff[k] + 12, 1.0f);
+        putF32(posOff[k] + 16, 0.0f);
+        putF32(posOff[k] + 20, 0.0f);
+        putF32(posOff[k] + 24, 0.0f);
+        putF32(posOff[k] + 28, 1.0f);
+        putF32(posOff[k] + 32, 0.0f);
+        for (int v = 0; v < 3; ++v) {
+            putF32(nrmOff[k] + u64(v) * 12 + 4, 1.0f);   // normal +Y
+            putF32(uvOff[k] + u64(v) * 8 + 0, 0.25f * v);
+            putF32(uvOff[k] + u64(v) * 8 + 4, 0.5f);
+        }
+        const u32 idx[3] = {0, 1, 2};
+        for (int q = 0; q < 3; ++q) {
+            const u64 o = idxOff[k] + u64(q) * 4;
+            bin[static_cast<size_t>(o) + 0] = static_cast<u8>(idx[q] & 0xFF);
+            bin[static_cast<size_t>(o) + 1] =
+                static_cast<u8>((idx[q] >> 8) & 0xFF);
+            bin[static_cast<size_t>(o) + 2] =
+                static_cast<u8>((idx[q] >> 16) & 0xFF);
+            bin[static_cast<size_t>(o) + 3] =
+                static_cast<u8>((idx[q] >> 24) & 0xFF);
+        }
+    }
+    std::vector<u8> glb;
+    auto u32push = [&glb](u32 v) {
+        glb.push_back(static_cast<u8>(v & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 8) & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 16) & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 24) & 0xFF));
+    };
+    u32push(0x46546C67u);
+    u32push(2);
+    u32push(static_cast<u32>(12 + 8 + j.size() + 8 + bin.size()));
+    u32push(static_cast<u32>(j.size()));
+    u32push(0x4E4F534Au);
+    glb.insert(glb.end(), j.begin(), j.end());
+    u32push(static_cast<u32>(bin.size()));
+    u32push(0x004E4942u);
+    glb.insert(glb.end(), bin.begin(), bin.end());
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) return false;
+    const bool ok = std::fwrite(glb.data(), 1, glb.size(), f) == glb.size();
+    std::fclose(f);
+    return ok;
+}
+
 // 0.10-M (EXT · FASE 22) — o CITY do dono ESPALHADO: as 72 primitivas em
 // FAIXAS de x (10 em 10, a faixa do meio no 0) com NOMES «c<i>». O pin do
 // dono é «city scene expandido = 72 TICs com nomes, culling por TIC
@@ -8449,6 +8601,201 @@ int main() {
                   "provider SAF");
             check(r.ms >= 0.0 && r.ms < 500.0,
                   "24.4b O PIN: N thumbs em <500 ms (o custo de LISTAR)");
+        }
+    }
+
+    // ======================================================================
+    // FASE 25 — 0.11-M FASE 2: GLTF MATERIAIS. A spec do dono («15+
+    // texturas + alpha blend + texture_transform mostra tudo correto»)
+    // provada NO CAMINHO REAL do device: o GLB com 2 materiais (vidro
+    // BLEND com factor+transform UV+sampler; folha MASK 0.25 two-sided)
+    // importa, o GTB2 chega ao BlockMesh, o draw parte OPACOS→BLEND, as
+    // uniforms das props chegam ao glstub (uBaseColor/uUvRot/uUvOff), o
+    // blend SRC_ALPHA/ONE_MINUS com depthMask FALSE, o two-sided desliga
+    // o cull e os samplers do glTF chegam ao glTexParameteri.
+    // ======================================================================
+    fase("FASE 25 — 0.11-M FASE 2: os materiais glTF no draw real");
+    {
+        resetEngineForHarness();
+        glstub::fb::resetState();
+        glstub::fb::enabled = true;
+        auto st25 = std::make_unique<FakeStorage>();
+        FakeStorage* rawSt25 = st25.get();
+        check(Project::createNew(*rawSt25, "c33", g_project),
+              "25.0 projeto criado");
+        {
+            const Handle h = g_scene.create("Alvo");
+            Tic* t = g_scene.get(h);
+            t->addComponent<Transform3D>();
+            t->addComponent<MeshRenderer>();
+            check(g_project.saveActiveScene(*rawSt25, g_scene),
+                  "25.0 cena gravada com o TIC Alvo");
+        }
+        g_storage = std::move(st25);
+        g_projectReady = true;
+        g_resources.setStorage(rawSt25);
+        g_gpu.init(&g_resources);
+        android_app app25;
+        std::memset(&app25, 0, sizeof(app25));
+        app25.contentRect = {0, 24, 1512, 720};
+        onAppCmd(&app25, APP_CMD_INIT_WINDOW);
+        check(g_ready, "25.0 boot completo (g_ready)");
+        g_editor.selected = g_scene.find("Alvo");
+
+        // ---- 25.1 o import: 2 texturas + 2 materiais com props ---------
+        passo("25.1 o import do GLB dos materiais");
+        {
+            const std::string src = "/tmp/goni_fase25_mats.glb";
+            check(buildGlbFase25(src), "25.1a fixture criada");
+            convert::Output out;
+            convert::Stats stats;
+            std::string err;
+            const bool ok =
+                convert::importFile(src, "mats.glb", *g_storage,
+                                    g_pipeline.get(), out, stats, err);
+            if (!ok) {
+                std::printf("    [25.1-ERR] import falhou: %.200s\n",
+                            err.c_str());
+            }
+            check(ok && out.meshes.size() == 1,
+                  "25.1b o import COMPLETA (materiais com props não matam)");
+            check(stats.textures == 2u,
+                  "25.1c 2 texturas distintas escritas (o dedup honesto)");
+            std::remove(src.c_str());
+            refreshCatalog();
+            g_applyAsk.open = true;
+            g_applyAsk.kind = 'm';
+            g_applyAsk.rel = "assets/mats.gmesh";
+            g_applyAsk.fileName = "mats.glb";
+            g_editor.applyAsk = true;
+            applyImportedAssetToSelectedTic();
+            const vv::BlockMesh* bm =
+                g_gpu.blockMeshIfOpen("assets/mats.gmesh");
+            check(bm != nullptr && bm->ok(),
+                  "25.1d o BlockMesh aberto no GpuAssets");
+            // O PIN: o GTB2 chegou ao runtime POR BLOCOS
+            check(bm && bm->matProps().size() == 2u,
+                  "25.1e o GTB2 no runtime: 2 materiais com props");
+            if (bm) {
+                const GMeshMatProps* vidro = bm->propsOf(0u);
+                const GMeshMatProps* folha = bm->propsOf(1u);
+                check(vidro != nullptr && vidro->alphaMode == 2,
+                      "25.1f o vidro é BLEND (o alphaMode do glTF)");
+                check(vidro &&
+                          nearEqF(vidro->baseColor[3], 0.8f, 1e-5f),
+                      "25.1g o factor do vidro (alpha 0.8 no GTB2)");
+                check(folha != nullptr && folha->alphaMode == 1 &&
+                          nearEqF(folha->alphaCutoff, 0.25f, 1e-5f) &&
+                          folha->doubleSided == 1,
+                      "25.1h a folha é MASK 0.25 two-sided");
+            }
+            check(logHas("textura: sampler") &&
+                      logHas("wrap=1/1 min=1 mag=1"),
+                  "25.1i O PIN: o sampler do glTF no log (vidro: "
+                  "CLAMP/NEAREST — wrap=1/1 min=1 mag=1)");
+            check(logHas("wrap=2/0 min=3 mag=2"),
+                  "25.1j o sampler da folha (MIRRORED wrapS, REPEAT wrapT, "
+                  "min mip-linear, mag linear — os códigos da casa)");
+        }
+
+        // ---- 25.2 o draw: opacos→blend + as uniforms no glstub ---------
+        passo("25.2 o draw com props: 2 passes + as uniforms das props");
+        {
+            Tic* talvo = g_scene.get(g_editor.selected);
+            if (Transform3D* tr = talvo->getComponent<Transform3D>()) {
+                tr->scale = Vec3{1.0f, 1.0f, 1.0f};
+                tr->updateWorld();
+            }
+            g_camera.target = Vec3{0.5f, 0.0f, 0.0f};
+            g_camera.yaw = 0.0f;
+            g_camera.pitch = 0.0f;
+            g_camera.dist = 20.0f;
+            frame();
+            check(g_blockFrame.any && g_blockFrame.drawn == 2,
+                  "25.2a os 2 blocos desenham (o passe dividido transparente "
+                  "para o HUD)");
+            // o draw DIRETO (sem o UI pass — as uniforms das props ficam
+            // as ÚLTIMAS e o glstub diz o que o lit recebeu)
+            g_renderer.beginFrame();   // (fora dos deltas: o clear/restore)
+            const int u4fAntes = glstub::stats.uniform4fCalls;
+            const int m2Antes = glstub::stats.matrix2fvCalls;
+            const int u2fAntes = glstub::stats.uniform2fCalls;
+            const int blendAntes = glstub::stats.blendFuncCalls;
+            const int dmAntes = glstub::stats.depthMaskCalls;
+            const int cdAntes = glstub::stats.cullDisableCalls;
+            const Mat4 view25 = g_camera.view();
+            const Mat4 proj25 = g_camera.proj(1512.0f / 696.0f);
+            drawTics(Mat4::mul(proj25, view25));
+            // O PIN DO BLEND: o passe do vidro ligou o blend clássico com
+            // a escrita de depth OFF (o 1.º drawMesh do blend)
+            check(glstub::stats.blendFuncCalls - blendAntes == 1,
+                  "25.2b 1 glBlendFunc (SÓ o material BLEND mistura)");
+            check(glstub::stats.lastBlendSrc == GL_SRC_ALPHA &&
+                      glstub::stats.lastBlendDst == GL_ONE_MINUS_SRC_ALPHA,
+                  "25.2c o par SRC_ALPHA/ONE_MINUS_SRC_ALPHA (o MESMO do "
+                  "grid/UI)");
+            check(glstub::stats.depthMaskCalls - dmAntes == 2,
+                  "25.2d o depthMask FALSE→TRUE do blend (a mistura não "
+                  "escreve depth)");
+            // O PIN DAS PROPS: as uniforms do lit receberam o material
+            check(glstub::stats.uniform4fCalls - u4fAntes == 2,
+                  "25.2e uBaseColor definido EM AMBOS os draws (nunca o "
+                  "estado do anterior)");
+            check(glstub::stats.lastUniform4f[0] > 0.49f &&
+                      glstub::stats.lastUniform4f[0] < 0.51f &&
+                      glstub::stats.lastUniform4f[3] > 0.79f &&
+                      glstub::stats.lastUniform4f[3] < 0.81f,
+                  "25.2f O PIN: uBaseColor = (0.5, …, 0.8) do glTF (o "
+                  "factor no lit)");
+            check(glstub::stats.matrix2fvCalls - m2Antes == 2,
+                  "25.2g uUvRot definido nos DOIS draws (o transform do "
+                  "KHR_texture_transform)");
+            check(glstub::stats.lastMatrix2fv[0] < 1e-4f &&
+                      glstub::stats.lastMatrix2fv[1] > 1.99f &&
+                      glstub::stats.lastMatrix2fv[1] < 2.01f &&
+                      glstub::stats.lastMatrix2fv[2] < -2.99f &&
+                      glstub::stats.lastMatrix2fv[2] > -3.01f,
+                  "25.2h O PIN: uUvRot = rot90·scale(2,3) column-major "
+                  "(0,2,−3,0 — o shader recebe a MESMA matriz do pin puro)");
+            check(glstub::stats.uniform2fCalls - u2fAntes == 2 &&
+                      glstub::stats.lastUniform2f[0] > 0.24f &&
+                      glstub::stats.lastUniform2f[0] < 0.26f &&
+                      glstub::stats.lastUniform2f[1] > 0.49f &&
+                      glstub::stats.lastUniform2f[1] < 0.51f,
+                  "25.2i uUvOff = (0.25, 0.5) (o offset do transform)");
+            // O PIN DO TWO-SIDED: SÓ a folha (MASK) desliga o cull — e o
+            // draw RESTAURA (o estado GL nunca fica a vingar)
+            check(glstub::stats.cullDisableCalls - cdAntes == 1,
+                  "25.2j O PIN: 1 glDisable(GL_CULL_FACE) — só o material "
+                  "two-sided (o BLEND não o é)");
+            check(glstub::stats.cullEnabled,
+                  "25.2k o cull RESTAURADO no fim do draw (o estado limpo)");
+        }
+
+        // ---- 25.3 os samplers no GL (o glTexParameteri) -----------------
+        passo("25.3 os samplers do glTF chegam ao glTexParameteri");
+        {
+            const int tpAntes = glstub::stats.texParamCalls;
+            g_gpu.releaseAll();   // o cache esvazia — a re-resolução REAPLICA
+            const vv::BlockMesh* bm =
+                g_gpu.blockMeshIfOpen("assets/mats.gmesh");
+            (void)bm;   // (o releaseAll fechou os blocks — o hull reabre)
+            Tic* talvo = g_scene.get(g_editor.selected);
+            (void)talvo;
+            // re-resolve: o caminho do draw (blockHull) aplica de novo
+            g_resources.setStorage(rawSt25);
+            const Mesh* hull = g_gpu.mesh("assets/mats.gmesh");
+            check(hull != nullptr && hull->ok(),
+                  "25.3a a re-resolução do mesh (o hull de bounds)");
+            check(glstub::stats.texParamCalls - tpAntes >= 8,
+                  "25.3b O PIN: 4 params × 2 texturas no glTexParameteri "
+                  "(wrapS/wrapT/min/mag do glTF)");
+            check(glstub::stats.lastTexParamPname ==
+                          static_cast<unsigned>(GL_TEXTURE_MAG_FILTER) &&
+                      glstub::stats.lastTexParamValue ==
+                          static_cast<int>(GL_LINEAR),
+                  "25.3c o ÚLTIMO sampler é o da folha (mag LINEAR — o "
+                  "sampler 1 do glTF)");
         }
     }
 

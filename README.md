@@ -34,6 +34,31 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.11-M — FASE 2: GLTF MATERIAIS (o glTF completo)
+
+O glTF deixa de ser «só geometria+baseColor»: o material chega COMPLETO
+ao render. O parse lê alphaMode (OPAQUE/MASK/BLEND) + alphaCutoff +
+doubleSided + os QUATRO factors (baseColor/metallic/roughness/emissive)
++ o `KHR_texture_transform` POR SLOT + os samplers do glTF. Tudo viaja
+no bloco **GTB2** do .gmesh (o MESMO padrão de cauda do GTB1 —
+retro-compat total, CRC honesto, o material default nem entra) e chega
+ao lit por `DrawProps`: o MASK faz discard do alphaCutoff, o BLEND
+mistura (SRC_ALPHA/ONE_MINUS + depthMask FALSE) desenhado DEPOIS dos
+opacos e ordenado longe→perto por bloco, o two-sided desliga o cull com
+o verso iluminado, o transform UV e o sampler (wrap/filter — first-wins
+por ficheiro, com log) aplicam-se no upload/draw. O critério do runtime
+ganhou dois casos: .gmesh pequeno com materialCount>1 ou props
+não-default abre POR BLOCOS — é o render POR MATERIAL (antes o mesh
+único desenhava tudo com a textura do material 0). As linhas de slot do
+inspector ganham a THUMB da textura viva (24dp, o padrão Image —
+kMaxImageBatches 4→8). O u32 (accessor 5125 + bloco use32) provado por
+pins. Pins ×10 (test_fase2_materiais.cpp) + a FASE 25 do c33 (+27
+checks = 824/824: o vidro-BLEND/folha-MASK desenhados com as uniforms,
+o blend, o cull e os samplers aferidos no glstub). test_core 0 falhas.
+A fronteira documentada: o lit PBR GGX que consome metallic/roughness e
+os slots 1-4 é a FASE 5 (o GTB2 já os transporta — o sufixo honesto das
+linhas mantém-se). `docs/RELATORIO-0.11-M-MATERIAIS.md`. versionCode 70.
+
 ## 0.11-H — FASE 1: HIERARQUIA (a árvore edita-se)
 
 **O que o dono pediu**: os 5 itens da FASE 1 do plano por fases — drag-reparent

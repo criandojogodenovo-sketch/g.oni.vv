@@ -150,4 +150,46 @@ void Texture::bind(u32 unit) const {
     glBindTexture(GL_TEXTURE_2D, tex_);
 }
 
+// 0.11-M (FASE 2): o sampler do glTF por cima do par de sempre — os
+// códigos kSampler* da casa mapeiam para os params GL aqui (o único
+// sítio GL do mapeamento; a função pura gltfSamplerToCodes é a fonte dos
+// códigos e o pin do teste aferre AQUI o produto). Primeiro vence: uma
+// textura partilhada por N materiais recebe O PRIMEIRO sampler (o
+// conflito é do chamador — o GpuAssets loga honesto).
+void Texture::setSampler(u8 wrapS, u8 wrapT, u8 minF, u8 magF) {
+    if (!tex_ || samplerSet_) {
+        return;   // sem textura OU já venceu outro sampler — nada a fazer
+    }
+    samplerSet_ = true;
+    const auto wrap = [](u8 c) -> GLint {
+        switch (c) {
+            case 1:  return GL_CLAMP_TO_EDGE;
+            case 2:  return GL_MIRRORED_REPEAT;
+            default: return GL_REPEAT;          // 0 = o default da casa
+        }
+    };
+    const auto filtMin = [](u8 c) -> GLint {
+        switch (c) {
+            case 1:  return GL_NEAREST;
+            case 2:  return GL_LINEAR;
+            case 3:  return GL_LINEAR_MIPMAP_LINEAR;    // 0 = o mesmo
+            case 4:  return GL_NEAREST_MIPMAP_LINEAR;
+            case 5:  return GL_LINEAR_MIPMAP_NEAREST;
+            case 6:  return GL_NEAREST_MIPMAP_NEAREST;
+            default: return GL_LINEAR_MIPMAP_LINEAR;    // o par de sempre
+        }
+    };
+    const auto filtMag = [](u8 c) -> GLint {
+        switch (c) {
+            case 1:  return GL_NEAREST;
+            default: return GL_LINEAR;          // 0/2 = o default da casa
+        }
+    };
+    glBindTexture(GL_TEXTURE_2D, tex_);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap(wrapS));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap(wrapT));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filtMin(minF));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filtMag(magF));
+}
+
 } // namespace vv

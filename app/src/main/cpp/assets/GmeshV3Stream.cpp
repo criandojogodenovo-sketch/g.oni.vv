@@ -643,7 +643,8 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
                      V3StreamResult& result, std::string& err,
                      bool (*onProgress)(void*, u64, u64), void* user,
                      const V3RangeSource* ranges, bool binDroppable,
-                     u32 metaFlags, const convert::MatTexMap* matTex) {
+                     u32 metaFlags, const convert::MatTexMap* matTex,
+                     const convert::MatPropsMap* matProps) {
     result = V3StreamResult{};
     // 0.10-M (SAF-STREAM) — UMA fonte chega: o mmap (caminho OU fd — o
     // ponteiro `bin`) OU os RANGES (o degradado: o fd recusou o mapa /
@@ -1174,9 +1175,26 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
             binds.clear();
         }
     }
+    // 0.11-M (FASE 2): as PROPS por material (o bloco GTB2) — o MESMO
+    // contrato dos binds (procura PELO NOME na tabela DESTE ficheiro;
+    // materialIndex = a posição na tabela)
+    std::vector<GMeshMatProps> propsVec;
+    if (matProps != nullptr && !matProps->empty()) {
+        propsVec.reserve(matNames.size());
+        for (size_t k = 0; k < matNames.size(); ++k) {
+            const auto it = matProps->find(matNames[k]);
+            if (it == matProps->end()) {
+                continue;
+            }
+            GMeshMatProps p = it->second;
+            p.materialIndex = static_cast<u32>(k);
+            propsVec.push_back(std::move(p));
+        }
+    }
     GMeshV3Skeleton sk;
     if (!gmeshV3Skeleton(meta, entries, matNames, sk, err,
-                         binds.empty() ? nullptr : &binds)) {
+                         binds.empty() ? nullptr : &binds,
+                         propsVec.empty() ? nullptr : &propsVec)) {
         return false;
     }
     // o LIMITE final no log (o MESMO marcador do caminho de sempre — as
@@ -1584,7 +1602,8 @@ bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
                           bool (*onProgress)(void*, u64, u64), void* user,
                           const V3RangeSource* ranges,
                           bool binDroppable,
-                          const convert::MatTexMap* matTex) {
+                          const convert::MatTexMap* matTex,
+                          const convert::MatPropsMap* matProps) {
     result = V3StreamResult{};
     // o modelo tem NÓS para expandir? (primRefs com node=-1 = o glTF
     // atípico sem nós — o expand DEGENERA no fundido, com o log honesto;
@@ -1601,7 +1620,7 @@ bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
                    "atípico): fica FUNDIDO (o caminho de sempre)");
         return convertGltfToV3(model, doc, bin, binLen, fileBytes, stem, st,
                                out, stats, result, err, onProgress, user,
-                               ranges, binDroppable, 0, matTex);
+                               ranges, binDroppable, 0, matTex, matProps);
     }
     // (1) agrupa as primitivas por NÓ (a ordem do array de nós — a MESMA
     // ordem em que o parse as produziu; determinístico)
@@ -1698,7 +1717,7 @@ bool convertGltfToV3Nodes(const GltfModel& model, const Json& doc,
         if (!convertGltfToV3(piece, doc, bin, binLen, fileBytes, pstem, st,
                              out, stats, r1, err, &pieceProgress, &prog,
                              ranges, binDroppable, kGmeshV3FlagPiece,
-                             matTex)) {
+                             matTex, matProps)) {
             return false;   // err/cancelado já preenchidos pela chamada
         }
         prog.doneBase += r1.tris;
