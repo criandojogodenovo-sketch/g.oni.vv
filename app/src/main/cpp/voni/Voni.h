@@ -140,6 +140,26 @@ public:
     virtual void explodeTic(bool hide) = 0;                 // Explode.TIC.et/.er
     virtual bool importAnim(const std::string& name, std::string& err) = 0;
 
+    // 0.11-S (FASE 3): stop() — PARA a animação do TIC anfitrião (playing=
+    // false, tempo a 0 — NÃO é pause: o stop() do par play()/stop() volta
+    // ao início). Default "indisponível" — hosts que não animam respondem
+    // com erro legível, o script não morre.
+    virtual bool stopAnim(std::string& err) {
+        (void)err;
+        err = "stop(): animação indisponível neste hospedeiro";
+        return false;
+    }
+    // 0.11-S (FASE 3): blend("clip", seg) — CROSSFADE do clip ativo para o
+    // clip `clip` em `seg` segundos (o peso 0→1 do AnimationPlayer; ao
+    // completar, o clip de destino É o ativo com o tempo contínuo).
+    virtual bool blendAnim(const std::string& clip, f32 seconds,
+                           std::string& err) {
+        (void)clip;
+        (void)seconds;
+        err = "blend(): animação indisponível neste hospedeiro";
+        return false;
+    }
+
     // nomedacena.transition.for("destino") (spec §9 — NÃO se chama importar)
     // fromName tem de ser a cena ATUAL (decisão 🔶 documentada).
     virtual bool transitionTo(const std::string& fromName,

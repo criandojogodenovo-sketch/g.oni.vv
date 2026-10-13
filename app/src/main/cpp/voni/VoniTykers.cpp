@@ -568,6 +568,40 @@ bool compPlay(Ctx& c, const Comp& m, std::string& err) {
     return true;
 }
 
+// 0.11-S (FASE 3): stop() — PARA a animação do TIC anfitrião (o par do
+// play(); sem linker — age sempre no dono do script)
+bool compStop(Ctx& c, const Comp& m, std::string& err) {
+    (void)m;
+    std::string herr;
+    if (!c.host.stopAnim(herr)) {
+        err = herr.empty() ? "stop(): falhou a parar a animação" : herr;
+        return false;
+    }
+    return true;
+}
+
+// 0.11-S (FASE 3): blend(nome, seg) — CROSSFADE do clip ativo para o clip
+// `nome` em `seg` segundos (seg é opcional — sem ele 0.3 s). O nome vem CRU
+// (raw1 — o mesmo caminho do copy/colorpars) e o seg é VALOR avaliado.
+bool compBlend(Ctx& c, const Comp& m, std::string& err) {
+    if (m.raw1.empty()) {
+        err = "blend: falta o nome da animação — blend(correr, 0.3)";
+        return false;
+    }
+    f64 seg = 0.0;
+    if (!m.vals.empty() && !argNum(m, 0, seg, err)) {
+        return false;   // seg presente mas não é número (erro do argNum)
+    }
+    std::string herr;
+    if (!c.host.blendAnim(m.raw1, (f32)seg, herr)) {
+        err = herr.empty() ? ("blend(): animação '" + m.raw1 +
+                              "' não encontrada")
+                           : herr;
+        return false;
+    }
+    return true;
+}
+
 // limit(min,max): distância mín/máx da origem ao alvo (follow/orbit)
 bool compLimit(Ctx& c, const Comp& m, std::string& err) {
     f64 mn = 0, mx = 0;

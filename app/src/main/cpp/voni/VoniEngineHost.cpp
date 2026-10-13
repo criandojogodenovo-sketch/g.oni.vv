@@ -330,6 +330,58 @@ bool EngineHost::importAnim(const std::string& name, std::string& err) {
     return false;
 }
 
+// 0.11-S (FASE 3): stop() — o par do play()/Import.Animation: PARA a
+// animação do anfitrião (playing=false + tempo a 0 + blend cancelado — o
+// próximo play() nasce do início; o crossfade a meio morre com o stop,
+// senão a pose continuava a migrar depois de "parado")
+bool EngineHost::stopAnim(std::string& err) {
+    Tic* t = hostTic();
+    if (!t) {
+        err = "TIC anfitrião não existe";
+        return false;
+    }
+    AnimationPlayer* ap = t->getComponent<AnimationPlayer>();
+    if (!ap) {
+        err = "stop(): o TIC '" + t->name + "' não tem AnimationPlayer";
+        return false;
+    }
+    ap->playing = false;
+    ap->time = 0.0f;
+    ap->stopBlend();
+    return true;
+}
+
+// 0.11-S (FASE 3): blend("nome", seg) — o CROSSFADE do player (o peso
+// anima 0→1 em seg segundos; ao completar o clip de destino é o ATIVO com
+// o tempo contínuo — a pose não salta). seg ≤ 0 → 0.3 s (o default do
+// crossfade da 0.8.3).
+bool EngineHost::blendAnim(const std::string& clip, f32 seconds,
+                           std::string& err) {
+    Tic* t = hostTic();
+    if (!t) {
+        err = "TIC anfitrião não existe";
+        return false;
+    }
+    AnimationPlayer* ap = t->getComponent<AnimationPlayer>();
+    if (!ap) {
+        err = "blend(): o TIC '" + t->name + "' não tem AnimationPlayer";
+        return false;
+    }
+    for (size_t i = 0; i < ap->clips.size(); ++i) {
+        if (ap->clips[i].name == clip) {
+            if (static_cast<i32>(i) == ap->activeClip) {
+                err = "blend(): o clip '" + clip + "' já é o ativo";
+                return false;
+            }
+            ap->crossfade(static_cast<i32>(i),
+                          seconds > 0.0f ? seconds : 0.3f);
+            return true;
+        }
+    }
+    err = "blend(): animação '" + clip + "' não encontrada";
+    return false;
+}
+
 bool EngineHost::transitionTo(const std::string& fromName,
                               const std::string& toName, std::string& err) {
     // a cena nomeada tem de ser a ATUAL (decisão 🔶: nomedacena = origem)

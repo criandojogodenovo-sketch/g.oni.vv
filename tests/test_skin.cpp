@@ -302,12 +302,16 @@ TEST(skin_bind_pose_e_identidade_e_pose_rodada_move) {
 }
 
 TEST(skin_compute_cap_de_64_bones) {
+    // 0.11-S (FASE 3): o cap é 128 (UBO) — o nome histórico mantém-se; a
+    // semântica é a MESMA: respeita o maxBones EXPLICITO e o cap da casa.
     SkeletonComp sk;
     sk.joints.resize(80);
     Mat4 bones[SkeletonComp::kMaxBones];
-    EXPECT(computeSkinMatrices(sk, bones, SkeletonComp::kMaxBones) == 64);
+    EXPECT(computeSkinMatrices(sk, bones, SkeletonComp::kMaxBones) == 80);
     EXPECT(computeSkinMatrices(sk, bones, 2) == 2);
     EXPECT(computeSkinMatrices(sk, nullptr, 64) == 0);
+    sk.joints.resize(200);   // acima do cap da casa: para EM 128
+    EXPECT(computeSkinMatrices(sk, bones, SkeletonComp::kMaxBones) == 128);
     sk.joints.clear();
     EXPECT(computeSkinMatrices(sk, bones, 64) == 0);
 }
@@ -341,8 +345,15 @@ TEST(skin_mesh_skinado_desenha_com_bones) {
     EXPECT(st.drawCalls == 1);                      // DESENHOU
     EXPECT(glstub::stats.drawElementsCalls == 1);
     EXPECT(glstub::stats.lastUniform1i == 1);       // uSkin LIGADO
-    EXPECT(glstub::stats.matrix4fvArrayCalls == 1); // uBones[2] uplodeado
-    EXPECT(glstub::stats.lastMatrix4fvCount == 2);
+    // 0.11-S (FASE 3): os bones vão no UBO — 8192 B determinísticos (2 bones
+    // + cauda de identidade até 128) com glBindBufferBase no slot 0
+    EXPECT(glstub::stats.bufferSubDataCalls == 1);
+    EXPECT(glstub::stats.lastBufferSubDataBytes == 128 * 64);
+    EXPECT(glstub::stats.bindBufferBaseCalls == 1);
+    EXPECT(glstub::stats.matrix4fvArrayCalls == 0); // o array uniform MORREU
+    EXPECT(nearEqF(glstub::stats.lastBoneTail[0], 1.0f));   // cauda = I
+    EXPECT(nearEqF(glstub::stats.lastBoneTail[15], 1.0f));
+    EXPECT(nearEqF(glstub::stats.lastBoneTail[5], 1.0f));
 
     // MESH ESTÁTICO com bones passados: uSkin fica OFF (mesh não skinado —
     // o renderer decide pelo MESH, não pelos bones)

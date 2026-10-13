@@ -113,13 +113,21 @@ struct GltfSampler {
 // ---- 0.8.1 (F7): ANIMAÇÕES ------------------------------------------------
 // Um sampler = curva de um canal (times do accessor `input`, values do
 // `output`); um channel liga (nó alvo, path) a um sampler. Interpolação:
-// LINEAR (default) é a que o AnimationPlayer reproduz; STEP é tolerada
-// como linear (dívida); CUBICSPLINE tem layout [in, valor, out] por key —
-// extraímos o VALOR (meio) e seguimos linear (dívida documentada).
+// 0.11-S (FASE 3) transporta as TRÊS do glTF — `interp` diz qual e o
+// GltfAnim (gltfAttachClips) é quem mapeia para as curvas da casa:
+//   kInterpLinear (0): values é [key × comps] (o layout de sempre)
+//   kInterpStep   (1): idem linear no transporte (a curva é que segura)
+//   kInterpCubic  (2): values é [key × 3 × comps] — [in, VALOR, out] por
+//       key (as tangentes hermite VÃO no bloco; antes o parse cortava
+//       tudo para o meio e seguia linear — a dívida da 0.8.1 morre aqui)
 struct GltfAnimSampler {
+    static constexpr u8 kInterpLinear = 0;
+    static constexpr u8 kInterpStep   = 1;
+    static constexpr u8 kInterpCubic  = 2;
     std::vector<f32> times;    // input: SCALAR f32 (segundos)
-    std::vector<f32> values;   // output: VEC3 (translation/scale) ou VEC4 (rotation)
+    std::vector<f32> values;   // output (layout por `interp` — ver acima)
     u32 components = 3;        // 3 ou 4 floats por key
+    u8 interp = kInterpLinear; // 0.11-S: a interpolação glTF do sampler
 };
 
 struct GltfAnimChannel {

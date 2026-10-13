@@ -49,6 +49,24 @@ inline f32 lerp1d(f32 a, f32 b, f32 u) {
 
 } // namespace
 
+// 0.11-S (FASE 3): slerp sobre keys em euler GRAUS — a conta do ramo Slerp
+// do evalTrack, exposta p/ o CI aferir isolada. Os quats nascem dos euler
+// (fromEuler) e o resultado volta a euler graus (toEuler) — o apply/consumo
+// continua a ver o formato de sempre (graus), nada muda fora daqui.
+void evalSlerp(const f32 e0[4], const f32 e1[4], f32 u, f32 out[4]) {
+    const Quat q0 = Quat::fromEuler(deg2rad(e0[0]), deg2rad(e0[1]),
+                                    deg2rad(e0[2]));
+    const Quat q1 = Quat::fromEuler(deg2rad(e1[0]), deg2rad(e1[1]),
+                                    deg2rad(e1[2]));
+    const Quat q = Quat::slerp(q0, q1, u);
+    f32 ex = 0.0f, ey = 0.0f, ez = 0.0f;
+    Quat::toEuler(q, ex, ey, ez);
+    out[0] = rad2deg(ex);
+    out[1] = rad2deg(ey);
+    out[2] = rad2deg(ez);
+    out[3] = e0[3] + (e1[3] - e0[3]) * u;   // canal 4 continua linear
+}
+
 bool evalTrack(const AnimTrack& tr, f32 t, f32 out[4]) {
     if (tr.keys.empty()) {
         return false;
@@ -79,11 +97,28 @@ bool evalTrack(const AnimTrack& tr, f32 t, f32 out[4]) {
     const f32 span = k1.t - k0.t;
     const f32 u = span > 1e-6f ? (t - k0.t) / span : 1.0f;
     for (int c = 0; c < 4; ++c) {
-        if (tr.curve == AnimCurve::Bezier) {
-            out[c] = bezier1d(k0.v[c], k0.v[c] + k0.tanOut[c],
-                              k1.v[c] + k1.tanIn[c], k1.v[c], u);
-        } else {
-            out[c] = lerp1d(k0.v[c], k1.v[c], u);
+        switch (tr.curve) {
+            case AnimCurve::Bezier:
+                out[c] = bezier1d(k0.v[c], k0.v[c] + k0.tanOut[c],
+                                  k1.v[c] + k1.tanIn[c], k1.v[c], u);
+                break;
+            case AnimCurve::Step:
+                // 0.11-S: o glTF STEP segura o valor da key à ESQUERDA —
+                // o valor muda NO instante da key seguinte
+                out[c] = k0.v[c];
+                break;
+            case AnimCurve::Slerp:
+                if (c == 0) {
+                    // rotação: o arco CURTO entre os quats das keys (a conta
+                    // roda UMA vez — o ramo escreve os 4 canais e salta os
+                    // restantes c do switch)
+                    evalSlerp(k0.v, k1.v, u, out);
+                }
+                break;
+            case AnimCurve::Linear:
+            default:
+                out[c] = lerp1d(k0.v[c], k1.v[c], u);
+                break;
         }
     }
     return true;

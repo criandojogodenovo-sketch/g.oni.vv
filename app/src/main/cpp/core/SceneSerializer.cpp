@@ -829,8 +829,17 @@ void fillAnimationPlayer(AnimationPlayer* ap, const Json& comp) {
                     tr.element = j->string;
                 }
                 if (const Json* j = jt.find("curve");
-                    j && j->type == Json::Type::String && j->string == "bez") {
-                    tr.curve = AnimCurve::Bezier;
+                    j && j->type == Json::Type::String) {
+                    // 0.11-S: as 4 curvas viajam por nome (lin/bez/step/slerp);
+                    // nome desconhecido → Linear (o default honesto de sempre —
+                    // ficheiros antigos sem "curve" nem entram aqui)
+                    if (j->string == "bez") {
+                        tr.curve = AnimCurve::Bezier;
+                    } else if (j->string == "step") {
+                        tr.curve = AnimCurve::Step;
+                    } else if (j->string == "slerp") {
+                        tr.curve = AnimCurve::Slerp;
+                    }
                 }
                 const Json* keys = jt.find("keys");
                 if (keys && keys->type == Json::Type::Array) {
@@ -1091,8 +1100,10 @@ void appendComponentJson(Json& arr, const AnimationPlayer* ap) {
                 if (!tr.element.empty()) {
                     jt.addMember("element", Json::makeString(tr.element));
                 }
-                if (tr.curve == AnimCurve::Bezier) {
-                    jt.addMember("curve", Json::makeString("bez"));
+                if (tr.curve != AnimCurve::Linear) {
+                    // 0.11-S: o default (lin) continua FORA do ficheiro —
+                    // os ficheiros 0.11-M e antigos ficam byte a byte
+                    jt.addMember("curve", Json::makeString(animCurveName(tr.curve)));
                 }
                 Json keys = Json::makeArray();
                 for (const AnimKey& k : tr.keys) {

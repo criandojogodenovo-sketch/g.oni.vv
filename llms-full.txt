@@ -394,6 +394,24 @@ linker(ator)to(correr)=RF(a)
 tyker(t){ find(a) play() }
 ```
 
+### stop
+- **Sintaxe**: `stop()`
+- **Descrição**: Para a animação do TIC dono do script (o par do play/Import.Animation): volta ao início e cancela o blend a meio.
+- **Equivalência**: parar uma animação
+- **Exemplo**:
+```
+tyker(t){ find(a) stop() }
+```
+
+### blend
+- **Sintaxe**: `blend(animação, segundos)`
+- **Descrição**: Mistura suavemente (crossfade) a animação atual com a animação 'nome' em 'segundos' (0.3 se faltar); ao completar, ela é a ativa.
+- **Equivalência**: misturar duas animações
+- **Exemplo**:
+```
+tyker(t){ find(a) blend(correr, 0.4) }
+```
+
 ### limit
 - **Sintaxe**: `limit(min,max)`
 - **Descrição**: Limita a distância da origem ao alvo entre min e max (aplica-se ao follow e ao orbit).

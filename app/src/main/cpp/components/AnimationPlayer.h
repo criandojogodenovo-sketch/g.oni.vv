@@ -93,7 +93,26 @@ struct AnimKey {
     f32 tanOut[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 };
 
-enum class AnimCurve : u8 { Linear = 0, Bezier = 1 };
+// 0.11-S (FASE 3): Step e Slerp entram — as interpolações do glTF chegam
+// COMPLETAS (antes: STEP tolerada como linear, CUBICSPLINE perdia as
+// tangentes e rotações iam euler-linear). O mapa do import (GltfAnim):
+//   STEP → Step (segura o valor da key à ESQUERDA até à seguinte)
+//   LINEAR → Linear (pos/escala) ou Slerp (rotação — o arco CURTO entre
+//            os quats das keys; as keys continuam euler graus no v[])
+//   CUBICSPLINE → Bezier com as tangentes hermite→bezier EXATAS (pos/escala;
+//            a rotação chega por diferença finita em euler — documentado)
+enum class AnimCurve : u8 { Linear = 0, Bezier = 1, Step = 2, Slerp = 3 };
+
+// nome canônico da curva (serializer + timeline — honesto em TODAS)
+inline const char* animCurveName(AnimCurve c) {
+    switch (c) {
+        case AnimCurve::Linear: return "lin";
+        case AnimCurve::Bezier: return "bez";
+        case AnimCurve::Step:   return "step";
+        case AnimCurve::Slerp:  return "slerp";
+    }
+    return "lin";
+}
 
 // um track: alvo + curva + keys ordenadas por t
 struct AnimTrack {
@@ -117,6 +136,12 @@ struct AnimClip {
 // interpolação: avalia o track em `t` (puro — CI). false = sem keys.
 // Fora do intervalo: primeiro/último valor (clamp honesto).
 bool evalTrack(const AnimTrack& tr, f32 t, f32 out[4]);
+
+// 0.11-S: ramo de SLERP do evalTrack, exposto puro p/ o CI — v[0..2] são
+// euler GRAUS de k0/k1; devolve euler graus no arco CURTO (a MESMA conta
+// que o evalTrack faz por dentro). Slerp de euler-linear é o que o
+// euler-linear NÃO é: rotação composta pelo caminho certo.
+void evalSlerp(const f32 e0[4], const f32 e1[4], f32 u, f32 out[4]);
 
 // blend de dois samples (0.8.3 usa isto; exposto p/ testes desde 0.8.0)
 void blendKeys(const f32 a[4], const f32 b[4], f32 w, f32 out[4]);

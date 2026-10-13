@@ -1260,9 +1260,16 @@ tykers::Comp resolveComp(Vm& vm, const TykerComp& a) {
     }
     // slots de NOME (copy/colorpars) × slots de VALOR (o resto)
     const bool nameSlot = (a.name == "copy" || a.name == "colorpars");
-    if (nameSlot) {
+    // 0.11-S (FASE 3): blend(nome, seg) — o nome vai CRU (raw1, como o
+    // copy) e o 2.º argumento é VALOR avaliado (os segundos do crossfade;
+    // ausente = 0.3 no handler). Um tail só de nomes impedia o número.
+    const bool blendLike = (a.name == "blend");
+    if (nameSlot || blendLike) {
         if (!a.args.empty()) {
             rawName(vm, *a.args[0], m.raw1, a.line, a.name.c_str());
+        }
+        if (blendLike && a.args.size() > 1 && a.args[1]) {
+            m.vals.push_back(vm.eval(*a.args[1]));
         }
     } else {
         m.vals.reserve(a.args.size());

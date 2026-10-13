@@ -79,6 +79,9 @@ add_executable(test_core
         # filhos, expandir/colapsar persistente, ícones por tipo
         test_fase1_hierarquia.cpp
         test_fase2_materiais.cpp   # 0.11-M FASE 2: glTF MATERIAIS (alpha/factors/transform/samplers/GTB2)
+        # 0.11-S (FASE 3): ESQUELETO/ANIMAÇÃO — slerp/step/cubicspline, UBO
+        # 128 bones, V.ONI stop/blend, bench 10 personagens
+        test_fase3_skeleton.cpp
         # 0.7.1: cenas múltiplas + transições (projeto e2e, SceneFx puro,
         # overlay CENAS, ações Scene.Load/Transition)
         test_scenes.cpp

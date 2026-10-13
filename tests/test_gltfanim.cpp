@@ -6,8 +6,10 @@
 //   • lista de clips + escolher clip ativo (o seletor da timeline);
 //   • playback do clip importado (o TIC move-se);
 //   • round-trip .goni dos clips importados;
-//   • canais de OUTROS nós são saltados (0.8.2); CUBICSPLINE→meio;
-//     STEP tolerada como linear (dívidas documentadas).
+//   • canais de OUTROS nós são saltados (0.8.2). 0.11-S (FASE 3): o
+//     CUBICSPLINE viaja COMPLETO ([in,valor,out] — o mapeamento é do
+//     GltfAnim) e a interpolação VIAJA no sampler (`interp`) — as dívidas
+//     de 0.8.1 morreram; os pins de curva vivem no test_fase3_skeleton.
 //
 // Fixtures construídas em código (o padrão do test_import_gltf): buffer
 // binário com times/values, JSON com offsets reais, container GLB com
@@ -181,9 +183,14 @@ TEST(gltfanim_parser_le_clips_channels_samplers) {
     EXPECT(nearEqF(a.samplers[1].values[4], 0.0f));
     EXPECT(nearEqF(a.samplers[1].values[5], 0.70710678f));   // y do 90° Y
 
-    // CUBICSPLINE: extraído o MEIO (6 keys VEC3→2 keys de valor 9)
-    EXPECT(a.samplers[3].values.size() == 6);
-    EXPECT(nearEqF(a.samplers[3].values[0], 9.0f));
+    // CUBICSPLINE: 0.11-S viaja COMPLETO ([in,valor,out] ×2 keys VEC3 = 18
+    // floats) com interp=2 — o mapeamento hermite→bezier é do gltfAttachClips
+    EXPECT(a.samplers[3].interp == GltfAnimSampler::kInterpCubic);
+    EXPECT(a.samplers[3].values.size() == 18);
+    EXPECT(nearEqF(a.samplers[3].values[3], 9.0f));   // o VALOR da key 0
+    // STEP viaja com interp=1 (o layout de values é o linear de sempre)
+    EXPECT(a.samplers[2].interp == GltfAnimSampler::kInterpStep);
+    EXPECT(a.samplers[0].interp == GltfAnimSampler::kInterpLinear);
 
     // channels: nó 0 com os 3 paths + nó 1 (ignorado no attach)
     EXPECT(a.channels[0].node == 0);
@@ -289,8 +296,11 @@ TEST(gltfanim_playback_o_tic_move_se) {
     pl->apply(s, h);
     Transform3D* tr = tic->getComponent<Transform3D>();
     EXPECT(nearEqF(tr->pos.x, 1.0f));                       // translation lerp
-    EXPECT(nearEqF(tr->scale.x, 1.5f));                     // scale lerp
-    // rot: quat 90°Y no fim → euler yaw 45° no meio
+    // 0.11-S: o scale do sampler STEP SEGURA o valor da key à esquerda
+    // (antes era tolerado como linear e dava 1.5 — a interpolação honesta)
+    EXPECT(nearEqF(tr->scale.x, 1.0f));                     // step segura
+    // rot: quat 90°Y no fim → euler yaw 45° no meio (slerp == euler-linear
+    // NESTE arco simples de 1 eixo — o arco composto é o pin da FASE 3)
     EXPECT(nearEqF(tr->rot.y, 0.38268f, 1e-3f));            // sin(22.5°)
     // loop: 5 s → 5 mod 2 = 1 (o default é loop)
     pl->advance(4.0f);

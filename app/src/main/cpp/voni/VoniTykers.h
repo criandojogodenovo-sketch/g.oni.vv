@@ -148,6 +148,8 @@ bool compChange(Ctx& c, const Comp& m, std::string& err);
 bool compPoint(Ctx& c, const Comp& m, std::string& err);
 bool compColorpars(Ctx& c, const Comp& m, std::string& err);
 bool compPlay(Ctx& c, const Comp& m, std::string& err);
+bool compStop(Ctx& c, const Comp& m, std::string& err);    // 0.11-S
+bool compBlend(Ctx& c, const Comp& m, std::string& err);   // 0.11-S
 bool compLimit(Ctx& c, const Comp& m, std::string& err);
 bool compDelay(Ctx& c, const Comp& m, std::string& err);
 bool compShading(Ctx& c, const Comp& m, std::string& err);

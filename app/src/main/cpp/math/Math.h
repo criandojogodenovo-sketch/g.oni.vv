@@ -237,6 +237,33 @@ struct Quat {
         }
     }
 
+    // 0.11-S (FASE 3): interpolação esférica SHORTEST-ARC entre duas rotações
+    // unitárias — o caminho da FASE 3 para os tracks de rotação (o
+    // euler-linear distorce arcos compostos). dot<0 ⇒ b invertido (o arco
+    // CURTO); dot≈1 (quase paralelos) ⇒ nlerp normalizado (o sin(θ)→0 do
+    // denominador morre; o resultado converge para o slerp exato).
+    static Quat slerp(const Quat& a, const Quat& b, f32 u) {
+        Quat bb = b;
+        f32  d = a.x * bb.x + a.y * bb.y + a.z * bb.z + a.w * bb.w;
+        if (d < 0.0f) {
+            bb = Quat{-bb.x, -bb.y, -bb.z, -bb.w};
+            d = -d;
+        }
+        if (d > 0.9995f) {
+            // nlerp: os quats são quase iguais — a média normalizada É o arco
+            Quat r{a.x + (bb.x - a.x) * u, a.y + (bb.y - a.y) * u,
+                   a.z + (bb.z - a.z) * u, a.w + (bb.w - a.w) * u};
+            r.normalize();
+            return r;
+        }
+        const f32 th = std::acos(d < -1.0f ? -1.0f : d);
+        const f32 st = std::sin(th);
+        const f32 wa = std::sin((1.0f - u) * th) / st;
+        const f32 wb = std::sin(u * th) / st;
+        return Quat{a.x * wa + bb.x * wb, a.y * wa + bb.y * wb,
+                    a.z * wa + bb.z * wb, a.w * wa + bb.w * wb};
+    }
+
     // Roda v por q (q unitário): v' = v + 2w(qv×v) + 2 qv×(qv×v).
     Vec3 rotate(const Vec3& v) const {
         const Vec3 qv{x, y, z};

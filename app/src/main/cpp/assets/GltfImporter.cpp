@@ -1407,8 +1407,9 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
 
     // ---- animations (0.8.1, F7): channels/samplers → GltfAnimation --------
     // O converter para CLIPS do AnimationPlayer vive em assets/GltfAnim
-    // (o parser fica GL-free puro; interpolação LINEAR é a suportada — STEP
-    // tolerada como linear, CUBICSPLINE extrai o valor do MEIO [in,val,out]).
+    // (o parser fica GL-free puro). 0.11-S (FASE 3): as interpolações glTF
+    // VIAJAM no sampler (`interp`) — STEP/LINEAR/CUBICSPLINE com o layout
+    // [in, valor, out] INTACTO; o mapa curva-da-casa é do gltfAttachClips.
     if (const Json* janims = doc.find("animations");
         janims && janims->type == Json::Type::Array) {
         for (size_t ai = 0; ai < janims->items.size(); ++ai) {
@@ -1462,23 +1463,28 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                         }
                     }
                     if (ok) {
-                        // CUBICSPLINE: [in, valor, out] por key → fica o MEIO
+                        // 0.11-S (FASE 3): a interpolação glTF VIAJA — o parse
+                        // nunca mais decide a curva (era o parse que cortava
+                        // as tangentes do CUBICSPLINE e tolerava STEP como
+                        // linear; agora o GltfAnim mapeia com as 3 completas).
+                        // Desconhecida → LINEAR (o default da spec glTF).
                         std::string interp = "LINEAR";
                         if (const Json* ip = js.find("interpolation");
                             ip && ip->type == Json::Type::String) {
                             interp = ip->string;
                         }
-                        if (interp == "CUBICSPLINE" &&
-                            s.values.size() == s.times.size() * 3u * s.components) {
-                            std::vector<f32> mid(s.times.size() * s.components);
-                            for (size_t k = 0; k < s.times.size(); ++k) {
-                                std::memcpy(&mid[k * s.components],
-                                            &s.values[(k * 3 + 1) * s.components],
-                                            s.components * sizeof(f32));
-                            }
-                            s.values = std::move(mid);
+                        if (interp == "STEP") {
+                            s.interp = GltfAnimSampler::kInterpStep;
+                        } else if (interp == "CUBICSPLINE" &&
+                                   s.values.size() ==
+                                       s.times.size() * 3u * s.components) {
+                            s.interp = GltfAnimSampler::kInterpCubic;
+                            // o layout [in, VALOR, out] por key fica INTACTO
+                            // (as tangentes hermite vão no bloco — o mapeamento
+                            // hermite→bezier é do gltfCubicToKeys, no attach)
+                        } else {
+                            s.interp = GltfAnimSampler::kInterpLinear;
                         }
-                        // STEP: tolerada como linear (dívida documentada)
                         anim.samplers.push_back(std::move(s));
                     }
                 }

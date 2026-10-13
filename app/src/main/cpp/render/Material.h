@@ -79,8 +79,11 @@ public:
     void setTint(const f32 rgb[3]) const;
 
     // 0.8.2 (F7) — SKINNING: liga o ramo de bones do vertex shader (uSkin)
-    // e faz upload das matrizes (uBones[64]); nullptr/0 desliga — o mesh
-    // estático segue o caminho de sempre (atributos 3/4 não ligados).
+    // e faz upload das matrizes; nullptr/0 desliga — o mesh estático segue o
+    // caminho de sempre (atributos 3/4 não ligados). 0.11-S (FASE 3): as
+    // matrizes vão num UBO "Bones" (std140, 128 mat4 = 8 KB) — glBindBuffer-
+    // Base + glBufferSubData POR draw (o array uniform antigo não garantia
+    // espaço no mínimo ES 3.0 para 128).
     void setSkin(bool on) const;
     void setBones(const Mat4* bones, u32 count) const;
 
@@ -89,8 +92,8 @@ public:
     // de sempre = o comportamento byte a byte dos draws pré-FASE 2)
     void setProps(const DrawProps* p) const;
 
-    // tem de casar com o SkeletonComp (limite do array no shader)
-    static constexpr u32 kMaxBones = 64;
+    // tem de casar com o SkeletonComp (limite do bloco UBO no shader)
+    static constexpr u32 kMaxBones = 128;   // 0.11-S: 128 (era 64)
 
     bool ok() const { return prog_ != 0; }
 
@@ -102,7 +105,14 @@ private:
     i32 locHasTex_ = -1;
     i32 locTint_ = -1;   // 0.7.0: uTint (cor por TIC)
     i32 locSkin_ = -1;   // 0.8.2: uSkin (ramo de bones)
-    i32 locBones_ = -1;  // 0.8.2: uBones[64]
+    // 0.11-S (FASE 3): o bloco de bones — o INDEX do bloco no programa
+    // (glGetUniformBlockIndex; <0 = shader sem skin) + o buffer UBO criado
+    // à 1.ª upload (lazy — meshes estáticos nunca pagam o glBufferData)
+    i32 boneBlockIdx_ = -1;   // 0.11-S: índice do bloco "Bones" (era locBones_)
+    mutable u32 uboBones_ = 0; // criado lazy no 1.º setBones (const-foo)
+    mutable Mat4 upload_[128]; // 0.11-S: o palco do upload (n bones + cauda
+                               // de identidade — 8 KB determinísticos)
+    static constexpr u32 kBoneBinding = 0;   // o slot de binding do UBO
     // 0.11-M (FASE 2): as props do material
     i32 locBaseColor_ = -1;   // uBaseColor (vec4)
     i32 locAlphaMode_ = -1;   // uAlphaMode (int)

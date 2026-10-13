@@ -9,9 +9,12 @@
 //
 // O RENDER: o main chama computeSkinMatrices por frame (para TICs com
 // MeshRenderer de mesh SKINADO) e passa as matrizes ao Renderer/LitMaterial
-// (uniform uBones[64] + uSkin — o shader pesa os 4 influências por vértice
-// no VERTEX SHADER; a CPU só compõe as matrizes). O LIMITE de 64 bones é o
-// do shader (glTF mobile típico: <60; cap documentado).
+// (UBO "Bones" com uBones[128] + uSkin — o shader pesa os 4 influências por
+// vértice no VERTEX SHADER; a CPU só compõe as matrizes). O LIMITE de 128
+// bones É o do bloco UBO std140 (8 KB ≤ 16 KB do mínimo garantido ES 3.0);
+// rigs acima do cap entram TRUNCADOS com log honesto e o PLAN B (palette de
+// textura — 4 texels RGBA32F por bone amostrados no VS) está DOCUMENTADO no
+// relatório da 0.11-S (não implementado — glTF mobile típico: <60 bones).
 //
 // SERIALIZAÇÃO (.goni): componente "Skeleton" com os joints por valor
 // (nome/pai/pos/rot/scale/ibm[16]) — os JOINTS_0/WEIGHTS_0 vivem no mesh
@@ -43,7 +46,11 @@ public:
         Mat4 inverseBind = Mat4::identity();   // do glTF
     };
 
-    static constexpr u32 kMaxBones = 64;   // tem de casar com o shader (uBones)
+    // 0.11-S (FASE 3): 128 — o cap do bloco UBO "Bones" do shader (o
+    // array uniform mat4[64] antigo não garantia espaço no mínimo ES 3.0;
+    // 128 mat4 std140 = 8 KB cabem SEMPRE). Tem de casar com o
+    // LitMaterial::kMaxBones (o pin da FASE 3 aferre o PAR).
+    static constexpr u32 kMaxBones = 128;
 
     std::vector<Joint> joints;
 

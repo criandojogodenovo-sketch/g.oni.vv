@@ -31,6 +31,15 @@ class Scene;
 u32 gltfAttachClips(Scene& scene, Handle tic, const GltfModel& model,
                     i32 rootNode = 0);
 
+// 0.11-S (FASE 3): CUBICSPLINE glTF → keys bezier da casa — PURO (o CI
+// aferre contra a hermite de referência canal a canal). `values` no layout
+// glTF [in, valor, out] ×3 por key; `rot` converte quats→euler graus (as
+// tangentes por diferença finita — aproximação documentada no .cpp).
+// keysz malformado (times vazio/values curtos) → out vazio.
+void gltfCubicToKeys(const std::vector<f32>& times,
+                     const std::vector<f32>& values, u32 comps, bool rot,
+                     std::vector<AnimKey>& out);
+
 // 0.8.2: cria o SkeletonComp do TIC com a 1ª skin do modelo (joints +
 // inverseBind). Devolve o número de joints (0 se sem skin/já tem esqueleto)
 u32 gltfAttachSkin(Scene& scene, Handle tic, const GltfModel& model,

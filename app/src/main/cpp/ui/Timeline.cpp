@@ -341,13 +341,17 @@ void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
         ui.labelFitted(r.x + 12.0f,
                        ry + (theme::dp(kRowH) + th * 0.5f) * 0.5f, lab, theme::TEXT, theme::dp(150.0f));
         // botões da row (w fixo: 40/40/40/36)
+        // 0.11-S: o rótulo mostra a curva REAL (lin/bez/step/slerp — as
+        // importadas glTF chegam com as novas curvas; mostrar "lin" numa
+        // track STEP era mentir); o tap numa curva especial DROP-A para
+        // lin (a edição da casa continua binária — reimportar devolve a
+        // curva original, documentado no relatório da FASE 3)
         char curve[8];
-        std::snprintf(curve, sizeof(curve), "%s",
-                      tr.curve == AnimCurve::Bezier ? "bez" : "lin");
+        std::snprintf(curve, sizeof(curve), "%s", animCurveName(tr.curve));
         if (ui.button(kIdCurve + i, r.x + theme::dp(160.0f), ry, theme::dp(48.0f), theme::dp(kRowH),
                       curve)) {
-            tr.curve = tr.curve == AnimCurve::Bezier ? AnimCurve::Linear
-                                                     : AnimCurve::Bezier;
+            tr.curve = tr.curve == AnimCurve::Linear ? AnimCurve::Bezier
+                                                     : AnimCurve::Linear;
         }
         if (ui.button(kIdAddKey + i, r.x + theme::dp(212.0f), ry, theme::dp(48.0f), theme::dp(kRowH),
                       "+key")) {

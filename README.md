@@ -34,6 +34,40 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.11-S — FASE 3: ESQUELETO/ANIMAÇÃO (o personagem move-se)
+
+As interpolações do glTF chegam COMPLETAS e o skinning passa ao UBO de
+128 bones. **Interpolations**: `Quat::slerp` (o arco curto, com o
+fallback nlerp dos quase-paralelos) + `AnimCurve::Step/Slerp` no
+AnimationPlayer; o parse transporta a interpolação do sampler
+(`GltfAnimSampler.interp`) e as tangentes do CUBICSPLINE INTACTAS (a
+dívida 0.8.1 morre); `gltfCubicToKeys` converte a hermite→bezier da
+casa EXATO para pos/escala (e por diferença finita em euler para
+rotação — documentado); LINEAR de rotação vira track SLERP (o arco
+curto: 0°→350° interpola por −5°, nunca 175°); a timeline mostra o
+rótulo REAL (lin/bez/step/slerp) e o serializer viaja as curvas por
+nome — os .goni antigos ficam byte a byte. **UBO de 128 bones**: o
+array uniform `uBones[64]` morre (não garante espaço no mínimo ES 3.0);
+`layout(std140) uniform Bones { mat4 uBones[128]; }` = 8 KB garantidos,
+upload por `glBufferSubData` determinístico com cauda de identidade +
+`glBindBufferBase`; skins acima de 128 joints são RECUSADAS com log
+honesto — o PLAN B (palette de textura) está DOCUMENTADO no relatório
+(design completo, não implementado: glTF mobile típico <60 bones).
+**V.ONI**: `stop()` e `blend(nome, seg)` entram (o par do play()/
+Import.Animation; o blend é o crossfade do player com o tempo contínuo;
+a referência pública foi regenerada do registo). **FIX do conversor**
+(apanhado pela FASE 26): os clips do .gm nasciam VAZIOS para modelos
+skinados (o attach dos clips corria sem esqueleto — o personagem
+convertido nascia estático para sempre; reimportar a fonte regenera o
+.gm correto). Provas: 12 pins novos (`tests/test_fase3_skeleton.cpp` —
+slerp/step/cubic/serializer/V.ONI/128 + o BENCH: 10 personagens ×
+64 joints × 300 frames = **0.21 ms/frame de CPU**, 1.3% do orçamento de
+60 fps) + a FASE 26 do device virtual (+33 checks = 857): o GLB skinado
+com 2 joints e 2 animações no caminho REAL (o .gm com as curvas, a pose
+do slerp, o crossfade completo, o draw com o UBO, 10 personagens = 10
+draws com 10 uploads do UBO). `docs/RELATORIO-0.11-S-ESQUELETO.md`.
+versionCode 71.
+
 ## 0.11-M — FASE 2: GLTF MATERIAIS (o glTF completo)
 
 O glTF deixa de ser «só geometria+baseColor»: o material chega COMPLETO

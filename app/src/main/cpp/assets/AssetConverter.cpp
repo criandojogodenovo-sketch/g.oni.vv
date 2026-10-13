@@ -1489,10 +1489,17 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
         stats.textures++;
     }
     // ---- clips + esqueleto → .gm (O MESMO código do runtime) -------------
+    // 0.11-S (FASE 3 · FIX): o esqueleto entra NO MESMO dummy ANTES dos
+    // clips — os canais de JOINT só viram track com o SkeletonComp no TIC
+    // (a ordem antiga: clips num dummy SEM skin → 0 clips de joint no .gm;
+    // o personagem convertido nascia SEM animação — a FASE 26 apanhou-o)
     {
         Scene dummy;
         const Handle h = dummy.create("conv");
         AnimationPlayer* pl = dummy.get(h)->addComponent<AnimationPlayer>();
+        if (!model.skins.empty()) {
+            gltfAttachSkin(dummy, h, model);
+        }
         const u32 nClips = pl ? gltfAttachClips(dummy, h, model) : 0;
         GAnimFile anim;
         if (pl) {
@@ -1500,15 +1507,11 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
         }
         stats.clips = nClips;
         if (!model.skins.empty()) {
-            Scene dummy2;
-            const Handle h2 = dummy2.create("skel");
-            dummy2.get(h2)->addComponent<MeshRenderer>();
-            const u32 nJoints = gltfAttachSkin(dummy2, h2, model);
             if (const SkeletonComp* sk =
-                    dummy2.get(h2)->getComponent<SkeletonComp>()) {
+                    dummy.get(h)->getComponent<SkeletonComp>()) {
                 anim.joints = sk->joints;
+                stats.joints = static_cast<u32>(anim.joints.size());
             }
-            stats.joints = nJoints;
         }
         if (!anim.clips.empty() || !anim.joints.empty()) {
             std::vector<u8> bytes;

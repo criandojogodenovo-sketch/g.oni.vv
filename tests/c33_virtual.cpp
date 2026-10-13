@@ -694,6 +694,149 @@ bool buildGlbFase25(const std::string& path) {
     return ok;
 }
 
+// 0.11-S (FASE 3 · FASE 26) — o GLB do ESQUELETO: 1 mesh skinado (3 verts,
+// JOINTS_0/WEIGHTS_0) + skin de 2 joints ("pai"/"filho") + DUAS animações
+// no joint filho — a aceitação do dono («2 clips transição suave») com as
+// curvas novas da FASE 3:
+//   "andar"  — rotation LINEAR (identidade → 90° Y)  → track SLERP no .gm
+//   "correr" — rotation STEP   (identidade → −90° Y) → track STEP no .gm
+bool buildGlbFase26(const std::string& path) {
+    std::vector<u8> bin;
+    auto putF32 = [&bin](f32 v) {
+        u32 raw;
+        std::memcpy(&raw, &v, 4);
+        for (int b = 0; b < 4; ++b) {
+            bin.push_back(static_cast<u8>((raw >> (8 * b)) & 0xFF));
+        }
+    };
+    auto putU8 = [&bin](u8 v) { bin.push_back(v); };
+    auto putU16 = [&bin](u16 v) {
+        bin.push_back(static_cast<u8>(v & 0xFF));
+        bin.push_back(static_cast<u8>((v >> 8) & 0xFF));
+    };
+    // times [0,1] (partilhado pelas 2 animações)
+    const u32 timesOff = 0;
+    putF32(0.0f);
+    putF32(1.0f);
+    // quats "andar": identidade → +90° Y
+    const u32 quatOff = static_cast<u32>(bin.size());
+    putF32(0); putF32(0); putF32(0); putF32(1);
+    putF32(0); putF32(0.70710678f); putF32(0); putF32(0.70710678f);
+    // quats "correr": identidade → −90° Y
+    const u32 quatBOff = static_cast<u32>(bin.size());
+    putF32(0); putF32(0); putF32(0); putF32(1);
+    putF32(0); putF32(-0.70710678f); putF32(0); putF32(0.70710678f);
+    // POSITION/NORMAL
+    const u32 posOff = static_cast<u32>(bin.size());
+    for (int v = 0; v < 3; ++v) {
+        putF32(v == 0 ? 0.0f : 1.0f);
+        putF32(0.0f);
+        putF32(0.0f);
+    }
+    const u32 norOff = static_cast<u32>(bin.size());
+    for (int v = 0; v < 3; ++v) {
+        putF32(0); putF32(1); putF32(0);
+    }
+    // JOINTS_0 (u8 cru) + WEIGHTS_0 (f32): v0→joint0, v1/v2→joint1
+    const u32 jntOff = static_cast<u32>(bin.size());
+    putU8(0); putU8(0); putU8(0); putU8(0);
+    putU8(1); putU8(0); putU8(0); putU8(0);
+    putU8(1); putU8(0); putU8(0); putU8(0);
+    const u32 wgtOff = static_cast<u32>(bin.size());
+    for (int v = 0; v < 3; ++v) {
+        putF32(1); putF32(0); putF32(0); putF32(0);
+    }
+    const u32 idxOff = static_cast<u32>(bin.size());
+    putU16(0); putU16(1); putU16(2);
+    // IBM ×2: "pai" identidade + "filho" T(−1,0,0)
+    const u32 ibmOff = static_cast<u32>(bin.size());
+    putF32(1); putF32(0); putF32(0); putF32(0);   // I column-major
+    putF32(0); putF32(1); putF32(0); putF32(0);
+    putF32(0); putF32(0); putF32(1); putF32(0);
+    putF32(0); putF32(0); putF32(0); putF32(1);
+    putF32(1); putF32(0); putF32(0); putF32(0);   // T(−1,0,0)
+    putF32(0); putF32(1); putF32(0); putF32(0);
+    putF32(0); putF32(0); putF32(1); putF32(0);
+    putF32(-1); putF32(0); putF32(0); putF32(1);
+    const u32 binLen = static_cast<u32>(bin.size());
+
+    char j[2200];
+    std::snprintf(j, sizeof(j),
+        "{\"asset\":{\"version\":\"2.0\"},"
+        "\"buffers\":[{\"byteLength\":%u}],"
+        "\"bufferViews\":["
+        "{\"buffer\":0,\"byteOffset\":%u,\"byteLength\":8},"     // 0 times
+        "{\"buffer\":0,\"byteOffset\":%u,\"byteLength\":32},"    // 1 quat
+        "{\"buffer\":0,\"byteOffset\":%u,\"byteLength\":32},"    // 2 quatB
+        "{\"buffer\":0,\"byteOffset\":%u,\"byteLength\":36},"    // 3 pos
+        "{\"buffer\":0,\"byteOffset\":%u,\"byteLength\":36},"    // 4 nor
+        "{\"buffer\":0,\"byteOffset\":%u,\"byteLength\":12},"    // 5 jnt
+        "{\"buffer\":0,\"byteOffset\":%u,\"byteLength\":48},"    // 6 wgt
+        "{\"buffer\":0,\"byteOffset\":%u,\"byteLength\":6},"     // 7 idx
+        "{\"buffer\":0,\"byteOffset\":%u,\"byteLength\":128}],\"" // 8 ibm
+        "accessors\":["
+        "{\"bufferView\":0,\"componentType\":5126,\"count\":2,\"type\":\"SCALAR\"},"
+        "{\"bufferView\":1,\"componentType\":5126,\"count\":2,\"type\":\"VEC4\"},"
+        "{\"bufferView\":2,\"componentType\":5126,\"count\":2,\"type\":\"VEC4\"},"
+        "{\"bufferView\":3,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},"
+        "{\"bufferView\":4,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},"
+        "{\"bufferView\":5,\"componentType\":5121,\"count\":3,\"type\":\"VEC4\"},"
+        "{\"bufferView\":6,\"componentType\":5126,\"count\":3,\"type\":\"VEC4\"},"
+        "{\"bufferView\":7,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"},"
+        "{\"bufferView\":8,\"componentType\":5126,\"count\":2,\"type\":\"MAT4\"}],"
+        "\"meshes\":[{\"primitives\":[{\"attributes\":{"
+        "\"POSITION\":3,\"NORMAL\":4,\"JOINTS_0\":5,\"WEIGHTS_0\":6},"
+        "\"indices\":7}]}],"
+        "\"nodes\":["
+        "{\"mesh\":0,\"name\":\"raiz\",\"translation\":[0,0,0]},"
+        "{\"name\":\"pai\",\"translation\":[0,0,0],\"children\":[2]},"
+        "{\"name\":\"filho\",\"translation\":[1,0,0]}],"
+        "\"scenes\":[{\"nodes\":[0]}],"
+        "\"skins\":[{\"joints\":[1,2],\"inverseBindMatrices\":8}],"
+        "\"animations\":["
+        "{\"name\":\"andar\",\"channels\":["
+        "{\"sampler\":0,\"target\":{\"node\":2,\"path\":\"rotation\"}}],"
+        "\"samplers\":[{\"input\":0,\"output\":1}]},"
+        "{\"name\":\"correr\",\"channels\":["
+        "{\"sampler\":0,\"target\":{\"node\":2,\"path\":\"rotation\"}}],"
+        "\"samplers\":[{\"input\":0,\"output\":2,"
+        "\"interpolation\":\"STEP\"}]}]}",
+        binLen, timesOff, quatOff, quatBOff, posOff, norOff, jntOff, wgtOff,
+        idxOff, ibmOff);
+    const std::string json(j);
+    std::string jsonP = json;
+    while (jsonP.size() % 4 != 0) {
+        jsonP += ' ';
+    }
+    std::vector<u8> binP = bin;
+    while (binP.size() % 4 != 0) {
+        binP.push_back(0);
+    }
+    std::vector<u8> glb;
+    auto u32push = [&glb](u32 v) {
+        glb.push_back(static_cast<u8>(v & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 8) & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 16) & 0xFF));
+        glb.push_back(static_cast<u8>((v >> 24) & 0xFF));
+    };
+    u32push(0x46546C67u);
+    u32push(2);
+    u32push(static_cast<u32>(12 + 8 + jsonP.size() + 8 + binP.size()));
+    u32push(static_cast<u32>(jsonP.size()));
+    u32push(0x4E4F534Au);
+    glb.insert(glb.end(), jsonP.begin(), jsonP.end());
+    u32push(static_cast<u32>(binP.size()));
+    u32push(0x004E4942u);
+    glb.insert(glb.end(), binP.begin(), binP.end());
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) {
+        return false;
+    }
+    const bool ok = std::fwrite(glb.data(), 1, glb.size(), f) == glb.size();
+    std::fclose(f);
+    return ok;
+}
+
 // 0.10-M (EXT · FASE 22) — o CITY do dono ESPALHADO: as 72 primitivas em
 // FAIXAS de x (10 em 10, a faixa do meio no 0) com NOMES «c<i>». O pin do
 // dono é «city scene expandido = 72 TICs com nomes, culling por TIC
@@ -8797,6 +8940,287 @@ int main() {
                   "25.3c o ÚLTIMO sampler é o da folha (mag LINEAR — o "
                   "sampler 1 do glTF)");
         }
+    }
+
+    // ======================================================================
+    // FASE 26 — 0.11-S (FASE 3): ESQUELETO/ANIMAÇÃO. A aceitação do dono
+    // («personagem sem deformação, 2 clips transição suave, 10 personagens
+    // estáveis») no CAMINHO REAL do device:
+    //   26.1 o import do GLB skinado (2 joints + 2 animações) — .gmesh com
+    //        JOINTS/WEIGHTS + o .gm irmão (clips + esqueleto);
+    //   26.2 o apply: attachGAnim anexa esqueleto + 2 clips — as curvas da
+    //        FASE 3 VIAJAM no .gm (Slerp no clip LINEAR, Step no STEP);
+    //   26.3 o playback: a pose do "andar" a 1 s roda o filho 90° Y (o
+    //        slerp entre keys, o pin do quat) e o crossfade 0.5 s para o
+    //        "correr" COMPLETA sem salto (o destino é o ativo, o STEP
+    //        segura a identidade — a pose descansa);
+    //   26.4 o draw skinado: uSkin=1 + o UBO (glBufferSubData 8192 B +
+    //        glBindBufferBase) POR draw — NENHUM glUniformMatrix4fv array;
+    //   26.5 10 personagens: 10 draws skinados + o TEMPO da simulação
+    //        (a linha da tabela C33 — o device real é o árbitro final).
+    // ======================================================================
+    fase("FASE 26 — 0.11-S FASE 3: o esqueleto no device (UBO 128 + curvas + 10)");
+    {
+        resetEngineForHarness();
+        glstub::fb::resetState();
+        glstub::fb::enabled = true;
+        auto st26 = std::make_unique<FakeStorage>();
+        FakeStorage* rawSt26 = st26.get();
+        check(Project::createNew(*rawSt26, "c33", g_project),
+              "26.0 projeto criado");
+        {
+            const Handle h = g_scene.create("Pele");
+            Tic* t = g_scene.get(h);
+            t->addComponent<Transform3D>();
+            t->addComponent<MeshRenderer>();
+            check(g_project.saveActiveScene(*rawSt26, g_scene),
+                  "26.0 cena gravada com o TIC Pele");
+        }
+        g_storage = std::move(st26);
+        g_projectReady = true;
+        g_resources.setStorage(rawSt26);
+        g_gpu.init(&g_resources);
+        android_app app26;
+        std::memset(&app26, 0, sizeof(app26));
+        app26.contentRect = {0, 24, 1512, 720};
+        onAppCmd(&app26, APP_CMD_INIT_WINDOW);
+        check(g_ready, "26.0 boot completo (g_ready)");
+        g_editor.selected = g_scene.find("Pele");
+
+        // ---- 26.1 o import skinado: .gmesh + .gm irmão ------------------
+        passo("26.1 o import do GLB do esqueleto");
+        {
+            const std::string src = "/tmp/goni_fase26_pele.glb";
+            check(buildGlbFase26(src), "26.1a fixture criada");
+            convert::Output out;
+            convert::Stats stats;
+            std::string err;
+            const bool ok =
+                convert::importFile(src, "pele.glb", *g_storage,
+                                    g_pipeline.get(), out, stats, err);
+            if (!ok) {
+                std::printf("    [26.1-ERR] import falhou: %.200s\n",
+                            err.c_str());
+            }
+            check(ok && out.meshes.size() == 1 &&
+                      out.meshes[0] == "assets/pele.gmesh",
+                  "26.1b o import COMPLETA (pele ≤65535 pelo caminho fundido)");
+            check(out.anim == "assets/pele.gm",
+                  "26.1c o .gm IRMÃO escrito (clips + esqueleto)");
+            check(stats.clips == 2u && stats.joints == 2u,
+                  "26.1d 2 clips + 2 joints no .gm (as DUAS animações)");
+            check(logCount("verificado=1") >= 1,
+                  "26.1e verificado=1 (o round-trip bit a bit do v3)");
+            std::vector<u8> gmb;
+            check(g_storage->readBytes("assets/pele.gm", gmb) && !gmb.empty(),
+                  "26.1f o .gm relê do provider");
+            std::remove(src.c_str());
+        }
+
+        // ---- 26.2 o apply: esqueleto + clips COM as curvas da FASE 3 ----
+        passo("26.2 o apply: attachGAnim traz esqueleto + curvas");
+        Tic* pele = nullptr;
+        {
+            refreshCatalog();
+            g_applyAsk.open = true;
+            g_applyAsk.kind = 'm';
+            g_applyAsk.rel = "assets/pele.gmesh";
+            g_applyAsk.fileName = "pele.glb";
+            g_editor.applyAsk = true;
+            applyImportedAssetToSelectedTic();
+            pele = g_scene.get(g_editor.selected);
+            check(pele != nullptr, "26.2a o TIC Pele existe");
+            const SkeletonComp* sk =
+                pele ? pele->getComponent<SkeletonComp>() : nullptr;
+            check(sk != nullptr && sk->joints.size() == 2u,
+                  "26.2b O PIN: o esqueleto no TIC (2 joints do .gm)");
+            check(sk && sk->joints[1].name == "filho" &&
+                      sk->joints[1].parent == 0,
+                  "26.2c o filho pendurado no pai (pais-primeiro)");
+            const AnimationPlayer* pl =
+                pele ? pele->getComponent<AnimationPlayer>() : nullptr;
+            check(pl != nullptr && pl->clips.size() == 2u,
+                  "26.2d 2 clips do .gm (andar + correr — o attach não cria "
+                  "\"edit\")");
+            check(pl && pl->clips.size() == 2u &&
+                      pl->clips[0].name == "andar" &&
+                      pl->clips[0].tracks.size() == 1u &&
+                      pl->clips[0].tracks[0].curve == AnimCurve::Slerp &&
+                      pl->clips[0].tracks[0].target == AnimTarget::JointRot &&
+                      pl->clips[0].tracks[0].element == "filho",
+                  "26.2e O PIN: «andar» = track de joint SLERP (a curva "
+                  "LINEAR glTF virou slerp da casa)");
+            check(pl && pl->clips.size() == 2u &&
+                      pl->clips[1].name == "correr" &&
+                      pl->clips[1].tracks.size() == 1u &&
+                      pl->clips[1].tracks[0].curve == AnimCurve::Step,
+                  "26.2f O PIN: «correr» = track STEP (a interpolação glTF "
+                  "viajou no .gm)");
+            const MeshRenderer* mr =
+                pele ? pele->getComponent<MeshRenderer>() : nullptr;
+            check(mr != nullptr && mr->mesh != nullptr && mr->mesh->skinned(),
+                  "26.2g o mesh abriu SKINADO (aJoints/aWeights no VAO)");
+        }
+
+        // ---- 26.3 o playback: pose + crossfade 2 clips ------------------
+        passo("26.3 o playback: slerp na pose + crossfade completo");
+        if (pele) {
+            AnimationPlayer* pl = pele->getComponent<AnimationPlayer>();
+            SkeletonComp* sk = pele->getComponent<SkeletonComp>();
+            check(pl != nullptr && sk != nullptr,
+                  "26.3.0 o player e o esqueleto no TIC");
+            if (!pl || !sk) {
+                g_gpu.releaseAll();
+                std::remove("/tmp/goni_fase26_pele.glb");
+            } else {
+            pl->activeClip = 0;   // "andar"
+            pl->playing = true;
+            pl->mode = AnimationPlayer::Mode::Once;
+            pl->advance(1.0f);    // para EXATAMENTE no fim (t=1)
+            pl->apply(g_scene, g_editor.selected);
+            check(nearEqF(sk->joints[1].rot.y, 0.70710678f, 1e-3f) &&
+                      nearEqF(sk->joints[1].rot.w, 0.70710678f, 1e-3f),
+                  "26.3a O PIN: a pose a 1 s = 90° Y (o slerp entre keys "
+                  "escreve o TRS do joint — o personagem anima)");
+            // crossfade para o "correr" (o par da aceitação do dono)
+            pl->mode = AnimationPlayer::Mode::Loop;
+            pl->playing = true;
+            pl->crossfade(1, 0.5f);
+            check(pl->blendClip == 1, "26.3b o crossfade marcado");
+            for (int i = 0; i < 41; ++i) {   // 0.683 s > 0.5 s
+                pl->advance(1.0f / 60.0f);
+                pl->apply(g_scene, g_editor.selected);
+            }
+            check(!pl->blending() && pl->activeClip == 1,
+                  "26.3c O PIN: o crossfade COMPLETOU — «correr» é o ativo "
+                  "com o tempo contínuo (a transição suave do dono)");
+            check(nearEqF(sk->joints[1].rot.y, 0.0f, 1e-3f) &&
+                      nearEqF(sk->joints[1].rot.w, 1.0f, 1e-3f),
+                  "26.3d a pose no STEP: o valor da key à ESQUERDA segura "
+                  "(t<1 → identidade — o joint descansa, NUNCA interpola)");
+        }
+
+        // ---- 26.4 o draw skinado: uSkin + UBO no glstub ------------------
+        passo("26.4 o draw skinado: uSkin=1 + o UBO de bones");
+        {
+            glstub::reset();   // só os contadores (o contexto fica)
+            Tic* peleT = g_scene.get(g_editor.selected);
+            if (Transform3D* tr = peleT->getComponent<Transform3D>()) {
+                tr->scale = Vec3{1.0f, 1.0f, 1.0f};
+                tr->updateWorld();
+            }
+            g_camera.target = Vec3{0.5f, 0.0f, 0.0f};
+            g_camera.yaw = 0.0f;
+            g_camera.pitch = 0.0f;
+            g_camera.dist = 20.0f;
+            g_renderer.beginFrame();
+            const Mat4 view26 = g_camera.view();
+            const Mat4 proj26 = g_camera.proj(1512.0f / 696.0f);
+            const DrawStats st26 = drawTics(Mat4::mul(proj26, view26));
+            check(st26.drawCalls == 1,
+                  "26.4a o personagem DESENHA (1 draw)");
+            check(glstub::stats.drawElementsCalls == 1,
+                  "26.4b 1 drawElements (o draw real)");
+            check(glstub::stats.lastUniform1i == 1,
+                  "26.4c O PIN: uSkin=1 (o ramo de bones ligado)");
+            check(glstub::stats.bufferSubDataCalls == 1 &&
+                      glstub::stats.lastBufferSubDataBytes == 128 * 64,
+                  "26.4d O PIN: o UBO de bones — 1 glBufferSubData de "
+                  "8192 B (128 mat4 std140 com cauda de identidade)");
+            check(glstub::stats.bindBufferBaseCalls == 1,
+                  "26.4e o glBindBufferBase no slot 0 (o binding fixo)");
+            check(glstub::stats.matrix4fvArrayCalls == 0,
+                  "26.4f O PIN: ZERO uploads por array (o uBones[64] "
+                  "uniform morreu — o UBO é o caminho)");
+            check(nearEqF(glstub::stats.lastBoneTail[0], 1.0f) &&
+                      nearEqF(glstub::stats.lastBoneTail[15], 1.0f),
+                  "26.4g a cauda do bloco = identidade (nenhum índice sai "
+                  "do bounds no shader)");
+        }
+
+        // ---- 26.5 10 personagens: 10 draws + o tempo da simulação --------
+        passo("26.5 10 personagens skinados: 10 draws + o tempo");
+        {
+            // 9 clones: MESMA skin/clips (cópia por valor — o mapa do deep
+            // clone da FASE 1), MESMO mesh, posição espalhada em X
+            Tic* orig = g_scene.get(g_editor.selected);
+            const SkeletonComp* skO = orig->getComponent<SkeletonComp>();
+            const AnimationPlayer* plO = orig->getComponent<AnimationPlayer>();
+            for (int i = 0; i < 9; ++i) {
+                char nm[16];
+                std::snprintf(nm, sizeof(nm), "clone%d", i);
+                const Handle h = g_scene.create(nm);
+                Tic* t = g_scene.get(h);
+                Transform3D* tr = t->addComponent<Transform3D>();
+                tr->pos = Vec3{static_cast<f32>(i + 1) * 2.0f, 0.0f, 0.0f};
+                tr->updateWorld();
+                MeshRenderer* mr = t->addComponent<MeshRenderer>();
+                mr->meshPath = "assets/pele.gmesh";
+                mr->mesh = g_gpu.mesh("assets/pele.gmesh");
+                if (skO) {
+                    t->addComponent<SkeletonComp>()->joints = skO->joints;
+                }
+                if (plO) {
+                    AnimationPlayer* pl = t->addComponent<AnimationPlayer>();
+                    pl->clips = plO->clips;
+                    pl->activeClip = 1;   // "correr" (o crossfade já trocou)
+                    pl->playing = true;
+                }
+            }
+            // 10 personagens a TOCAR por 300 frames (5 s @60): advance+apply
+            // + compose de skin — o tempo de CPU da simulação (a linha da
+            // tabela C33; o device real é o árbitro do sign-off)
+            const auto t0 = std::chrono::steady_clock::now();
+            f32 acc26 = 0.0f;
+            auto& comps = g_scene.components();
+            const auto& mrs = comps.meshRenderers();
+            for (int f = 0; f < 300; ++f) {
+                for (u32 i = 0; i < mrs.size(); ++i) {
+                    const Handle own = mrs.owner(i);
+                    if (AnimationPlayer* pl =
+                            comps.animators().find(own)) {
+                        pl->advance(1.0f / 60.0f);
+                        pl->apply(g_scene, own);
+                    }
+                    if (const SkeletonComp* sk =
+                            comps.skeletons().find(own)) {
+                        Mat4 bones[SkeletonComp::kMaxBones];
+                        acc26 += computeSkinMatrices(*sk, bones,
+                                                     SkeletonComp::kMaxBones) >
+                                         0
+                                     ? 1.0f
+                                     : 0.0f;
+                    }
+                }
+            }
+            const auto t1 = std::chrono::steady_clock::now();
+            const double ms26 =
+                std::chrono::duration<double, std::milli>(t1 - t0).count();
+            std::printf("    [26.5] 10 personagens × 300 frames: %.1f ms "
+                        "(%.3f ms/frame · %.3f ms/personagem/frame)\n",
+                        ms26, ms26 / 300.0, ms26 / 3000.0);
+            check(acc26 > 0.0f,
+                  "26.5a a simulação correu (composes de skin > 0)");
+            // o DRAW dos 10: o drawTics do frame com todos ligados
+            glstub::reset();
+            g_renderer.beginFrame();
+            const Mat4 view26b = g_camera.view();
+            const Mat4 proj26b = g_camera.proj(1512.0f / 696.0f);
+            const DrawStats st26b = drawTics(Mat4::mul(proj26b, view26b));
+            check(st26b.drawCalls == 10,
+                  "26.5b O PIN: 10 draws (UM por personagem — a casa não "
+                  "batcha skin, o custo é contado honesto)");
+            check(glstub::stats.drawElementsCalls == 10,
+                  "26.5c 10 drawElements (o device desenha os 10)");
+            check(glstub::stats.lastUniform1i == 1,
+                  "26.5d uSkin=1 no ÚLTIMO draw (todos skinados)");
+            check(glstub::stats.bufferSubDataCalls == 10 &&
+                      glstub::stats.bindBufferBaseCalls == 10,
+                  "26.5e 10 uploads do UBO (1 por draw — o bloco de bones "
+                  "é POR personagem)");
+        }
+        }   // fim do else do 26.3 (o caminho do playback)
+        g_gpu.releaseAll();
     }
 
     // ---- sumário -----------------------------------------------------------

@@ -32,7 +32,10 @@ layout(location = 4) in vec4 aWeights;
 uniform mat4 uVP;
 uniform mat4 uModel;
 uniform int uSkin;
-uniform mat4 uBones[64];
+// 0.11-S (FASE 3): os bones vivem num UBO std140 — 128 mat4 = 8 KB cabem no
+// mínimo garantido do ES 3.0 (MAX_UNIFORM_BLOCK_SIZE ≥ 16 KB); o array
+// uniform antigo [64] não garantia espaço para 128 no limite mínimo.
+layout(std140) uniform Bones { mat4 uBones[128]; };
 uniform mat2 uUvRot;
 uniform vec2 uUvOff;
 out vec3 vNormal;
@@ -138,7 +141,13 @@ bool LitMaterial::init() {
     locHasTex_ = glGetUniformLocation(prog_, "uHasTex");
     locTint_ = glGetUniformLocation(prog_, "uTint");
     locSkin_ = glGetUniformLocation(prog_, "uSkin");        // 0.8.2
-    locBones_ = glGetUniformLocation(prog_, "uBones[0]");   // 0.8.2
+    // 0.11-S (FASE 3): o bloco UBO dos bones — o INDEX (não location) e o
+    // binding fixo do programa (o buffer entra por glBindBufferBase POR draw)
+    boneBlockIdx_ = static_cast<i32>(glGetUniformBlockIndex(prog_, "Bones"));
+    if (boneBlockIdx_ >= 0) {
+        glUniformBlockBinding(prog_, static_cast<GLuint>(boneBlockIdx_),
+                              kBoneBinding);
+    }
     locBaseColor_ = glGetUniformLocation(prog_, "uBaseColor");   // 0.11-M
     locAlphaMode_ = glGetUniformLocation(prog_, "uAlphaMode");
     locAlphaCutoff_ = glGetUniformLocation(prog_, "uAlphaCutoff");
@@ -147,15 +156,17 @@ bool LitMaterial::init() {
     locUvRot_ = glGetUniformLocation(prog_, "uUvRot");
     locUvOff_ = glGetUniformLocation(prog_, "uUvOff");
     LOGI("LitMaterial: lit difusa fixa + ambient + textura opcional + uTint "
-         "+ skin (uBones[64]) + props do material glTF (alpha/factors/"
+         "+ skin (UBO Bones[128]) + props do material glTF (alpha/factors/"
          "twoSided/uvTransform) pronto");
     return true;
 }
 
 void LitMaterial::destroy() {
     if (prog_) { glDeleteProgram(prog_); prog_ = 0; }
+    if (uboBones_) { glDeleteBuffers(1, &uboBones_); uboBones_ = 0; }
     locVP_ = locModel_ = locTex_ = locHasTex_ = locTint_ = -1;
-    locSkin_ = locBones_ = -1;   // 0.8.2
+    locSkin_ = -1;             // 0.8.2
+    boneBlockIdx_ = -1;        // 0.11-S
     locBaseColor_ = locAlphaMode_ = locAlphaCutoff_ = locTwoSided_ = -1;
     locEmissive_ = locUvRot_ = locUvOff_ = -1;   // 0.11-M
 }
@@ -204,20 +215,38 @@ void LitMaterial::setTint(const f32 rgb[3]) const {
 
 // 0.8.2 (F7) — ramo de bones: uSkin liga/desliga (A CADA draw, como o
 // uTint — uniforms nascem a 0 e 0 = caminho estático, que é o default
-// correto); setBones faz upload do array (cap 64 = kMaxBones do shader).
+// correto); setBones faz upload do bloco (cap 128 = kMaxBones do UBO).
 void LitMaterial::setSkin(bool on) const {
     if (locSkin_ >= 0) {
         glUniform1i(locSkin_, on ? 1 : 0);
     }
 }
 
+// 0.11-S (FASE 3) — o upload dos bones via UBO: n matrizes + CAUDA de
+// identidade até 128 (o upload é SEMPRE de 8 KB determinísticos — nenhum
+// índice do mesh, nem corrupto, sai do bounds do array no shader; o custo
+// por draw é de 8 KB, nada no orçamento de 10 personagens).
 void LitMaterial::setBones(const Mat4* bones, u32 count) const {
-    if (!bones || count == 0 || locBones_ < 0) {
+    if (!bones || count == 0 || boneBlockIdx_ < 0) {
         return;
     }
     const u32 n = count < kMaxBones ? count : kMaxBones;
-    glUniformMatrix4fv(locBones_, static_cast<GLsizei>(n), GL_FALSE,
-                       bones->m);
+    if (uboBones_ == 0) {
+        glGenBuffers(1, &uboBones_);
+        glBindBuffer(GL_UNIFORM_BUFFER, uboBones_);
+        glBufferData(GL_UNIFORM_BUFFER,
+                     static_cast<GLintptr>(kMaxBones * 64), nullptr,
+                     GL_DYNAMIC_DRAW);
+    }
+    static const Mat4 kIdentity = Mat4::identity();
+    for (u32 i = 0; i < kMaxBones; ++i) {
+        upload_[i] = i < n ? bones[i] : kIdentity;
+    }
+    glBindBuffer(GL_UNIFORM_BUFFER, uboBones_);
+    glBufferSubData(GL_UNIFORM_BUFFER, 0,
+                    static_cast<GLintptr>(kMaxBones * 64), upload_[0].m);
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    glBindBufferBase(GL_UNIFORM_BUFFER, kBoneBinding, uboBones_);
 }
 
 // 0.11-M (FASE 2) — as props A CADA draw (o mesmo contrato do uTint:

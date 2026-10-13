@@ -58,6 +58,9 @@ public:
     void moveTic(f32 dx, f32 dy, f32 dz) override;
     void explodeTic(bool hide) override;
     bool importAnim(const std::string& name, std::string& err) override;
+    bool stopAnim(std::string& err) override;                     // 0.11-S
+    bool blendAnim(const std::string& clip, f32 seconds,
+                   std::string& err) override;                    // 0.11-S
     bool transitionTo(const std::string& fromName, const std::string& toName,
                       std::string& err) override;
     std::string currentSceneName() override;

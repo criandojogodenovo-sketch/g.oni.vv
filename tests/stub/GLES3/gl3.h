@@ -83,6 +83,17 @@ struct Stats {
     int lastTexParamValue = -1;
     int cullDisableCalls = 0;      // glDisable(GL_CULL_FACE) — o two-sided
     int cullEnableCalls = 0;       // glEnable(GL_CULL_FACE) — o restore
+    // 0.11-S (FASE 3): o UBO dos bones — o ESTADO que a FASE 26 do c33 e os
+    // pins aferrem (o upload deixou de ser glUniformMatrix4fv: é glBuffer-
+    // SubData de 8192 B com a cauda de identidade + glBindBufferBase)
+    int bufferSubDataCalls = 0;    // uploads do UBO (1 por draw skinado)
+    int lastBufferSubDataBytes = 0;
+    float lastBoneUpload[16] = {};// 1.ª matriz do último upload (a bone 0)
+    float lastBoneTail[16] = {};   // a ÚLTIMA matriz do bloco (cauda de
+                                   // identidade — o pin do bounds)
+    int bindBufferBaseCalls = 0;   // glBindBufferBase(GL_UNIFORM_BUFFER)
+    int uniformBlockBindingCalls = 0; // glUniformBlockBinding (no init)
+    int uniformBlockIndexCalls = 0;   // glGetUniformBlockIndex (no init)
 };
 inline Stats stats;              // inline C++17: 1 instância por binário
 // 0.8.7 — INJETOR DE FALHA: simula o device a ficar sem capacidade de gerar
@@ -109,6 +120,7 @@ typedef unsigned char GLboolean;
 typedef float         GLfloat;
 typedef char          GLchar;
 typedef intptr_t      GLsizeiptr;
+typedef intptr_t      GLintptr;      // 0.11-S: o offset do glBufferSubData
 
 // 0.9.6.5 (GRUPO B · FERRAMENTAS DE VERIFICAÇÃO): o FRAMEBUFFER REAL.
 // Com glstub::fb::enabled = true o stub deixa de ser no-op e RASTERIZA a
@@ -143,6 +155,8 @@ typedef intptr_t      GLsizeiptr;
 #define GL_ELEMENT_ARRAY_BUFFER 0x8893
 #define GL_STATIC_DRAW 0x88E4
 #define GL_DYNAMIC_DRAW 0x88E8
+// 0.11-S (FASE 3): o UBO dos bones (os valores reais do GL)
+#define GL_UNIFORM_BUFFER 0x8A11
 #define GL_FLOAT 0x1406
 #define GL_TRIANGLES 0x0004
 #define GL_TRIANGLE_STRIP 0x0005
@@ -332,6 +346,42 @@ inline void glBindBuffer(GLenum target, GLuint id) {
 inline void glBufferData(GLenum target, intptr_t size, const void* data, GLenum) {
     ++glstub::stats.bufferData;
     if (glstub::fb::enabled) glstub::fb::bufferData(target, size, data);
+}
+// 0.11-S (FASE 3): o UBO dos bones — o upload POR draw e o binding fixo
+inline void glBufferSubData(GLenum target, intptr_t offset, intptr_t size,
+                            const void* data) {
+    (void)target;
+    (void)offset;
+    ++glstub::stats.bufferSubDataCalls;
+    glstub::stats.lastBufferSubDataBytes = (int)size;
+    if (data) {
+        const float* m = (const float*)data;
+        for (int i = 0; i < 16; ++i) glstub::stats.lastBoneUpload[i] = m[i];
+        // a ÚLTIMA matriz do bloco de 128: 127 mat4 × 16 floats = 8128
+        // floats (= 127 × 64 B — o stride std140 do array; NÃO floats×4)
+        const float* tail = m + 127 * 16;
+        for (int i = 0; i < 16; ++i) glstub::stats.lastBoneTail[i] = tail[i];
+    }
+}
+inline void glBindBufferBase(GLenum target, GLuint index, GLuint buffer) {
+    (void)target;
+    (void)buffer;
+    if (index == 0) ++glstub::stats.bindBufferBaseCalls;   // o slot da casa
+}
+inline GLuint glGetUniformBlockIndex(GLuint program, const GLchar* name) {
+    (void)program;
+    ++glstub::stats.uniformBlockIndexCalls;
+    // "Bones" existe no programa da casa → índice 0; outro nome → GL_INVALID_INDEX
+    const char* want = "Bones";
+    const char* p = name;
+    while (*p && *p == *want) { ++p; ++want; }
+    return (*p == '\0' && *want == '\0') ? 0u : 0xFFFFFFFFu;
+}
+inline void glUniformBlockBinding(GLuint program, GLuint blockIndex,
+                                  GLuint blockBinding) {
+    (void)program;
+    (void)blockIndex;
+    if (blockBinding == 0) ++glstub::stats.uniformBlockBindingCalls;
 }
 inline void glGenVertexArrays(GLsizei n, GLuint* t) {
     glstub::stats.genVertexArrays += (int)n;
