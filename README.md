@@ -34,6 +34,37 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.10.7 — 0.10-M PASSO 6: A VALIDAÇÃO FINAL (a campanha .gmesh v3 fecha com a tabela de medições)
+
+**O que o dono pediu**: a validação final da campanha COM a tabela de
+medições — o fecho do 0.10-M. A PROVA FINAL
+(`tests/test_010m_prova_final.cpp`) corre o caminho INTEIRO num filho
+com o pico de RSS reiniciado a cada fase: import do dragão-38MB (as
+fases pelas LINHAS CONTRATO do engine.log — o MESMO número que o dono
+lê no device) → a abertura pela TABELA (192 B + tabela + materiais,
+zero dados) → o audit do culling (centrada vê TUDO, lateral NADA) → o
+materialize de 1 bloco (o pico é o SPAN+MeshData, nunca o modelo) → a
+thumb 256×256 (o piso do dono).
+
+A TABELA (corrida isolada no hospedeiro; a MESMA sai no CI e no device
+pelas mesmas linhas): import 2725 ms (cópia 21 · corte 947 · assembly
+728 · verificação 991) com **RAM pico 59 MB** [≤512 da R-039] ·
+.gmesh 230,5 MB · 109 blocos · verificado=1 · **abrir pela tabela
+0,1 ms, Δ 416 KB** [≤2 MB] · culling 109/109 e 0/109 · **bloco 7,1 ms,
+faixa+MeshData 4,3 MB** [≤16 MB, NUNCA o modelo] · **thumb 9,3 ms**
+[<500]. A honestidade das pools (pools=7 110 000 vs 300 001 da fonte —
+a duplicação do corte no PIOR caso do perfil) está no §2 do relatório.
+
+O toolkit dos perfis/gerador/medidores saiu para
+`tests/Medicoes010m.h` (uma fonte de verdade entre o PASSO 1 e o 6).
+ZERO código de app (o versionCode 68 mantém-se — o precedente dos
+passos sem app). Provas: 8/8 pins · test_core 0 falhas · c33 797/797.
+O checklist de sign-off no C33 (a prova de mesa do dono com o APK
+vc 68) é o §4 do relatório:
+`docs/RELATORIO-0.10-M-PASSO6-VALIDACAO-FINAL.md`. **PÁRA ABSOLUTO —
+a campanha 0.10-M fecha; a FASE 1 (hierarquia) começa quando o dono
+escrever CONTINUAR.**
+
 ## 0.10.7 — 0.10-M HOTFIX SELEÇÃO-ÚNICA — o estado contraditório da seleção morre
 
 **O bug (dono, C33, vc 67)**: linha da hierarquia âmbar com nome em
