@@ -59,8 +59,10 @@ O toolkit dos perfis/gerador/medidores saiu para
 `tests/Medicoes010m.h` (uma fonte de verdade entre o PASSO 1 e o 6).
 ZERO código de app (o versionCode 68 mantém-se — o precedente dos
 passos sem app). Provas: 8/8 pins · test_core 0 falhas · c33 797/797.
-O checklist de sign-off no C33 (a prova de mesa do dono com o APK
-vc 68) é o §4 do relatório:
+**SELADO com o CI verde à primeira** (run 38405344132 — core-tests,
+c33, APK arm64 assinado versionCode 68, symbol gate; o fix 703f22f no
+run 38407319609). O checklist de sign-off no C33 (a prova de mesa do
+dono com o APK vc 68) é o §4 do relatório:
 `docs/RELATORIO-0.10-M-PASSO6-VALIDACAO-FINAL.md`. **PÁRA ABSOLUTO —
 a campanha 0.10-M fecha; a FASE 1 (hierarquia) começa quando o dono
 escrever CONTINUAR.**

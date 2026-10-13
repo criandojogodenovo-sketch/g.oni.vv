@@ -151,8 +151,13 @@
   toolkit dos perfis/gerador/medidores saiu do medicoes para
   `tests/Medicoes010m.h` (uma fonte de verdade entre o PASSO 1 e o 6).
   8/8 pins · test_core 0 falhas · c33 797/797 · ZERO código de app (o
-  versionCode 68 mantém-se — o precedente dos passos sem app).
-  Relatório: docs/RELATORIO-0.10-M-PASSO6-VALIDACAO-FINAL.md (a tabela
+  versionCode 68 mantém-se — o precedente dos passos sem app). SELADO
+  com o CI verde: run 38405344132 (98bf439, À PRIMEIRA — core-tests
+  1/1 em 143,64 s · c33 · APK arm64 assinado vc 68 [goni-vv-0.9.6-
+  release-signed, 1,79 MB, expira 2027-01-11] · symbol gate) e o fix
+  703f22f (run 38407319609 — 2 casts de printf + a frase honesta do §2,
+  os 5 jobs verdes). Relatório:
+  docs/RELATORIO-0.10-M-PASSO6-VALIDACAO-FINAL.md (a tabela
   §2 + o inventário §3 + o checklist de sign-off §4).
 - **POR FAZER (a prova de mesa do dono)**: o §4 do relatório com o APK
   vc 68 — os 3 modelos reais com as linhas contrato no engine.log, o

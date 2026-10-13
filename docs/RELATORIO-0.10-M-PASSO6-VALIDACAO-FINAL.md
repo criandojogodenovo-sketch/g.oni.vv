@@ -153,6 +153,19 @@ hierarchy · gizmo · projects-ui · reload · glyph · jni-parity ·
 check_main · link-parity 122 TUs · release-identity versionCode 68
 (inalterado — ZERO código de app, o precedente do PASSO 1/5B).
 
+## 5-A. O SELO DO CI
+
+- **CI run 38405344132 (98bf439) — SUCCESS À PRIMEIRA**: core-tests ✓
+  (1/1 Passed, 143,64 s) · c33 virtual ✓ · APK release arm64 ASSINADO ✓
+  (goni-vv-0.9.6-release-signed 1 794 090 B = 1,79 MB, **versionCode
+  68**, artefacto expira 2027-01-11) · verify-entry-symbols ✓.
+- **O fix 703f22f (run 38407319609) — SUCCESS**: os 2 casts do printf
+  (2 warnings `-Wformat` do gcc no TU novo) + a frase honesta do §2 (o
+  ctest com `--output-on-failure` cala a prova verde) — o mesmo selo,
+  os 5 jobs verdes.
+- O selo do dono: o APK do vc 68 está no run para o sign-off no device
+  (o checklist §4 — a prova de mesa).
+
 ## 6. Os números finais
 
 - **test_core: 0 falhas** (a suíte inteira com a prova nova; a sentinela
