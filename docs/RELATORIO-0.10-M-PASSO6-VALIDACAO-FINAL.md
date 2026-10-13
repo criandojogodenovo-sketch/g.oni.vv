@@ -39,9 +39,11 @@ comparáveis linha a linha).
 ## 2. A TABELA DE MEDIÇÕES (o artefacto do PASSO 6)
 
 Corrida isolada (`GONI_ONLY=prova_final`) no hospedeiro da sandbox,
-GL-free, disco limpo — a MESMA tabela sai no log do CI (job core-tests)
-a cada push, e o dono reproduz os MESMOS campos no C33 pelas MESMAS
-linhas de contrato do engine.log (§4):
+GL-free, disco limpo — a tabela imprime-se no stdout do teste (no CI o
+ctest corre com `--output-on-failure`: a prova VERDE cala-se, a saída
+aparece se ALGUM pin falhar — o run 38405344132 passou 143,64 s verde);
+o dono reproduz os MESMOS campos no C33 pelas MESMAS linhas de contrato
+do engine.log (§4):
 
 | Medição | Valor | Limite/promessa |
 |---|---|---|

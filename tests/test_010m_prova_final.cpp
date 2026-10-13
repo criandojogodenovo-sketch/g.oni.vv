@@ -296,11 +296,11 @@ TEST(prova_final_010m_dragao_o_caminho_inteiro_com_a_tabela) {
         std::printf(
             "  [prova-final] culling (centrada)     | %u/%u bloco(s) "
             "visíveis\n",
-            nCenter, tableBlocks);
+            nCenter, static_cast<unsigned>(tableBlocks));
         std::printf(
             "  [prova-final] culling (lateral)      | %u/%u (o exclusivo "
             "funciona)\n",
-            nLateral, tableBlocks);
+            nLateral, static_cast<unsigned>(tableBlocks));
         std::printf(
             "  [prova-final] materializar bloco 0   | %.1f ms · faixa %llu B + "
             "MeshData %llu B (%zu verts / %zu idx) · RAM delta %llu KB "

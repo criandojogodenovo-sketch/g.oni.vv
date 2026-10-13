@@ -46,9 +46,9 @@ zero dados) → o audit do culling (centrada vê TUDO, lateral NADA) → o
 materialize de 1 bloco (o pico é o SPAN+MeshData, nunca o modelo) → a
 thumb 256×256 (o piso do dono).
 
-A TABELA (corrida isolada no hospedeiro; a MESMA sai no CI e no device
-pelas mesmas linhas): import 2725 ms (cópia 21 · corte 947 · assembly
-728 · verificação 991) com **RAM pico 59 MB** [≤512 da R-039] ·
+A TABELA (corrida isolada no hospedeiro — `GONI_ONLY=prova_final`; no CI
+o ctest só mostra a saída em falha, a prova verde cala-se): import
+2725 ms (cópia 21 · corte 947 · assembly 728 · verificação 991) com **RAM pico 59 MB** [≤512 da R-039] ·
 .gmesh 230,5 MB · 109 blocos · verificado=1 · **abrir pela tabela
 0,1 ms, Δ 416 KB** [≤2 MB] · culling 109/109 e 0/109 · **bloco 7,1 ms,
 faixa+MeshData 4,3 MB** [≤16 MB, NUNCA o modelo] · **thumb 9,3 ms**
