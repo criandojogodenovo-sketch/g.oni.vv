@@ -37,6 +37,7 @@
 | 0.10.6 HOTFIX SAF-SEAM (as duas últimas costuras do SAF) | (1) o BlockMesh::open do RUNTIME usa a MESMA CASCATA do conversor — `openReadFd` (o FD DO BRIDGE sob content://) → `mapFd64` serve as 3 leituras (peek 192 B + tabela + materiais, ZERO ranges) → pread NO MESMO fd (o provider recusou o mapa) → os RANGES; a linha `gmesh: fase=load … fonte=<mmap-fd\|pread-fd\|ranges>` — o par do `asset: v3 fonte=` do conversor; em falha o `err` diz QUAL das 3 leituras + o errno + o tamanho VISTO; os MATERIAIS sem tamanho leem-se NOME A NOME (a sonda de 256 B matava caudas curtas — «cidade» são 8 B); (2) o overlay de import NUNCA «0 / 0» (length=0 → «a copiar…»/«copiando… N B»; sub-MB → B; o pin do 29 MB); (3) a QUARENTENA do asset corrompido: `ProjectStorage::rename` NOVO (`<rel>.corrupt` — Fs = `::rename` atómico; Saf = cópia streaming por fd + remove com a cache de URIS a seguir o nome) + «asset corrompido, reimporta» no err/toast/engine.log; o picker MANTÉM o estado anterior (nunca a bola silenciosa — o `GpuAssets::lastMeshError` alimenta o toast e o catálogo re-lista); peek inválido NÃO é quarentena; I/O falho NÃO é quarentena; R-043 + M-SS1/M-SS2/M-SS3 vermelho→verde | **FEITO 0.10.6** (ver RELATORIO-0.10-M-HOTFIX-SAF-SEAM; c33 781/781; versionCode 61) | ver commit |
 | 0.10-M PASSO 5B · IMPORT DE NÓS COMO SUB-ÁRVORE — A VERIFICAÇÃO DOS PINS | o 0.10.5 (a fase 0.10-M-ext) já entregava o «expandir nós»; ESTE passo verificou os pins da spec do PASSO 5 contra o código em pé e fechou o buraco que a spec trouxe: o city de **122 NÓS** (72 com mesh + 50 VAZIOS intercalados — os agrupadores reais) EXPANDIDO = 72 peças/TICs com nomes (os vazios não geram peça, os índices do glTF preservam-se) e FUNDIDO = 1 mesh (o backward compat); a hierarquia pai→filhos honra-se pela composição de transformações (o mundo do filho = pai∘filho; o editor fica flat — decisão do 0.10.5) | **FEITO 0.10.7 (verificação)** (ver RELATORIO-0.10-M-PASSO5B-VERIFICACAO-IMPORT-NOS; 926/0; ZERO app) | ver commit |
 | 0.10-M PASSO 5C · THUMBNAILS PRÉ-RENDERIZADAS (a spec do dono) | no import, UMA miniatura 256×256 POR MESH em `thumbs/<stem>.png` (o render SOFTWARE puro de `ThumbRender`: câmara isométrica fixa que encaixa o AABB com 8% de folga, z-buffer, lambert flat com a luz da casa, DETERMINÍSTICO; teto de 4096 triângulos — a pré-visualização é representativa e o custo fica limitado; o placeholder = quadro + iniciais do stem, regra D18); o browser lê os PNGs PRONTOS (`ThumbIndex::loadRows` — o pin: 100 thumbs carregadas+decodificadas em 15,6 ms no hospedeiro, 0,5 ms sob SAF no c33; piso <500 ms); thumb ausente = placeholder + RENDER SOB DEMANDA pela tabela de blocos (o pico de RAM é UM bloco — o peek POR FAIXA 192 B, a lição R-044: o readBytes inteiro media 1965 MB no gigante, a faixa volta ao 99 MB); o asset fantasma NUNCA nasce thumb do nada; falha de thumb = aviso + o import SEGUE; R-044 + TH1..TH4 vermelho→verde | **FEITO 0.10.7 (5C)** (ver RELATORIO-0.10-M-PASSO5C-THUMBS; 5 TESTs novos + c33 FASE 24 797/797; test_core 931/0; versionCode 63) | ver commit |
+| 0.10-M HOTFIX SELEÇÃO-ÚNICA (a spec do dono, o vc 67 no C33) | o estado CONTRADITÓRIO da seleção morre: `selectTic`/`clearSelection` são os ÚNICOS escritores de `EditorState::selected` (os 26 sítios passam pelos dois), o `selectionAudit` limpa o ID PENDURADO antes dos leitores (o frame do main ANTES do gizmo + a entrada do `drawHierarchy`) e compacta os órfãos do multiSelect, a troca de prim/mesh mantém a seleção (o rebuild é DENTRO do TIC), o clear-on-empty-tap só com toque NASCIDO no viewport (o `dividerInput` mata o arm quando o toque nasce na pega), e a pasta `audio/` nasce com o projeto (`Project::kDirAudio`) com o `SafStorage::listDir` a registar AUSÊNCIA em I (nunca o E fantasma do catálogo) | **FEITO 0.10.7** (ver RELATORIO-0.10-M-HOTFIX-SELECAO-UNICA; pins ×8; M1/M2/M3 vermelho→verde; test_core 0 falhas; c33 797/797; versionCode 68) | ver commit |
 | 0.10-M PASSO 5A · TEXTURAS (a spec do dono) | DUAS operações distintas e logadas distintas: COMPRESSÃO (ASTC 4x4 padrão, ETC2 fallback, `HardwareCompressor` de sempre) e REDUÇÃO (a política por resolução em `TexturePolicy::texProfileCapMaxDim`); TRÊS perfis por projeto (`texPerfil=0/1/2` em settings.goni — Qualidade sem redução [default], Equilibrado seletiva, Mobile agressiva) com OVERRIDE por asset a vencer (`textures/overrides.goni`, `TexturePipeline::setOverride`); os avisos no log separados («textura: reduzida A→B (perfil/override/teto do device)» ≠ «textura: comprimida ASTC 4x4 (N KB)»); o original fica no projeto e a entrada é SEMPRE o PNG de origem (nunca recomprimir de comprimido); mips filtrados em ESPAÇO LINEAR para cor (`MipGen::SrgbLinear`, a prova do 50%: 188 vs 127) + flags sRGB/normal no .gtext v2 e no .gtc v2 (o hit devolve os MESMOS bits); normal maps do glTF (`GltfMaterial::normalTex`) → RGBA8 SEM PERDA de canais (byte a byte); GL_MAX_TEXTURE_SIZE injetado do boot → halva do original com a linha «teto do device», NUNCA erro; o passe de texturas do conversor em POOL de até 4 workers FORA da UI com progresso no log; cache com CHAVE POR PERFIL (a mesma textura nos 3 perfis = 3 ficheiros/3 tamanhos: 21 845 / 5 461 / 1 365 KB na green4096) | **FEITO 0.10.7** (ver RELATORIO-0.10-M-PASSO5A-TEXTURAS; 9 TESTs novos; M-T1/T3/T5/T6/T7 vermelho→verde; test_core 925/0; versionCode 62) | ver commit |
 | 0.10-A · SKELETAL (o BACKLOG que a mensagem «pele ainda não suportada no streaming» nomeia) | (1) o CONVERSOR escreve ossos+pesos nos blocos — o v3 JÁ reserva os atributos (`kAttrBones`/`kAttrWeights` no layout descrito do header; hoje um modelo COM PELE acima de 65535 vértices falha com «pele ainda não suportada no streaming (BACKLOG 0.10-A)» — mensagem clara com apontador para ESTA entrada; o merge ≤65535 é o que preserva joints/weights e o dragão de 32 MB entra por ser ≤65535); (2) RENDER com skinning por GPU — bones em UBO/SSBO (o upload vivo do `drawMesh`/`BlockMesh::draw` estende o contrato `bones/boneCount` que JÁ existe); (3) os CLIPS de animação do glTF também no import expandido (hoje ficam para o import fundido) | **POR FAZER** — decisão do dono (candidato a fase própria depois do PASSO 6) | — |
 | 0.10-M PASSO 3-b · OBJ SEM TETO (dívida assumida) | o streaming do OBJ gigante (o parser atual acumula v/vt/vn globais sem teto) — os 3 modelos do dono são GLB; o OBJ ≤65,535 segue o caminho vigente | **POR FAZER** — candidato a fase própria; decisão do dono | — |
@@ -133,6 +134,36 @@
   MESMO job core-tests do CI; a escotilha (mover o TEST para um job
   próprio) está documentada no relatório §7 — mover é só workflow, sem
   tocar no teste. Nada a fazer hoje.
+
+## 0.10.7 HOTFIX SELEÇÃO-ÚNICA (o estado contraditório da seleção morre) — FEITO
+
+- **FEITO 0.10.7-hotfix-selecao-unica**: o vc 67 no device mostrou a linha
+  âmbar com nome em branco + inspector «Nada selecionado» + sem gizmo AO
+  MESMO TEMPO, o id pendurado após troca de prim/mesh ou guarda-restauro
+  de layout e o highlight a sobreviver ao modelo. As causas confirmadas:
+  26 escritores diretos de `selected`, nenhuma auditoria do id pendurado
+  antes dos leitores, o inspector a escrever direto, e a pasta audio/ a
+  não nascer com o projeto (o E fantasma «pasta ausente» no catálogo).
+  A cura nas 5 pernas: (1) UMA FONTE DE VERDADE — selectTic/clearSelection
+  únicos escritores, a linha âmbar DERIVADA no draw; (2) ID PENDURADO NÃO
+  É SELEÇÃO — o selectionAudit em duas linhas de defesa (o frame antes do
+  gizmo + a entrada do drawHierarchy) com os órfãos do multi por compação;
+  (3) a troca de prim/mesh mantém a seleção; (4) a ORIGEM do toque (o
+  clear só nasce no viewport; painel/resize/layout nunca limpam nem
+  selecionam); (5) a pasta audio/ no create + o listDir em I para
+  ausência. Pins: o contrato do audit · apagar limpa o highlight NO DRAW
+  (prova VISUAL de zero quads âmbar) · layout não mexe na seleção · a
+  origem do toque ×4 · os três leitores em harmonia · tap na hierarquia →
+  TIC viva com nome no frame seguinte · troca prim/mesh mantém · projeto
+  novo com audio/ e zero E. Mutações M1 (highlight por índice próprio),
+  M2 (clear sem origem) e M3 (draw sem audit) → vermelhas. test_core 0
+  falhas · c33 797/797 (o 17.4 à lei nova: TICs VIVAS no conjunto da
+  multi) · versionCode 68. Relatório:
+  docs/RELATORIO-0.10-M-HOTFIX-SELECAO-UNICA.md.
+- **POR FAZER (o sign-off do dono)**: reproduzir o vc 67 no device (troca
+  de prim/mesh com a TIC selecionada; guarda-restauro de layout; apagar a
+  TIC selecionada; abrir o catálogo num projeto novo) e ver os três
+  leitores SEMPRE em harmonia + ZERO linhas E de audio.
 
 ## 0.10.7 HOTFIX P0 — SUB-TICs em lotes (o expand deixa de travar) — FEITO
 

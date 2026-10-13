@@ -67,6 +67,12 @@ bool Project::createNew(ProjectStorage& st, const std::string& name, Project& ou
     if (!st.makeDirs(kDirScenes) || !st.makeDirs(kDirMeshes) || !st.makeDirs(kDirTextures)) {
         return false;
     }
+    // 0.10.7 SELEÇÃO-ÚNICA (cura 5): o audio/ nasce COM o projeto — o
+    // catálogo lista-o desde o 1.º dia sem E fantasma no SAF (os projects
+    // antigos, sem a pasta, ficam com o listDir em I — nunca E)
+    if (!st.makeDirs(kDirAudio)) {
+        return false;
+    }
     Project p;
     p.name = name.empty() ? "projeto" : name;
     p.scenes.push_back(std::string(kDirScenes) + "/main.goni");

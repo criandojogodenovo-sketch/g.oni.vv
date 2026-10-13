@@ -5745,3 +5745,63 @@ TEST(regress_safseam_quarentena_rename_r043) {
         EXPECT(saf.readBytes(orig + ".corrupt", got) && got.size() == 4);
     }
 }
+
+// ===========================================================================
+// SENTINELA — regress_selecao_unica_audio (0.10.7 · PIN 7 do dono)
+// O catálogo aberto num projeto NOVO não pode ter NENHUMA linha E de audio:
+// (1) o Project::create nasce COM a pasta audio/ (o «Sons» da árvore lista
+// pasta real desde o 1.º dia); (2) projects ANTIGOS sem audio/ ficam com o
+// listDir em I honesto («pasta ausente») — NUNCA o E fantasma
+// «saf: listDir audio — pasta ausente no projeto SAF: audio» que sujava o
+// diagnóstico do dono no vc 67.
+// ===========================================================================
+TEST(regress_selecao_unica_audio) {
+    rmrf(kSentinelLogs);
+    EXPECT(vv::elog::init(kSentinelLogs));
+
+    // (1) PROJETO NOVO: a estrutura nasce COMPLETA (audio/ incluída) e o
+    // listing do catálogo (a MESMA sequência do refreshFilesTree) corre
+    // SEM UMA linha E sequer
+    {
+        FakeSafIo io;
+        SafStorage st(&io, "content://tree/primary:GOneVV/novo");
+        Project p;
+        EXPECT(Project::openOrCreate(st, "novo", p));
+        // a pasta audio/ EXISTE (o exists passa pelo resolveChild real)
+        EXPECT(st.exists(Project::kDirAudio));
+        std::vector<std::string> files;
+        EXPECT(st.listDir(Project::kDirAudio, files));
+        EXPECT(files.empty());   // nasce vazia (o listing é honesto)
+        // a VARREDURA do catálogo (os 6 ramos da árvore de ficheiros)
+        const char* dirs[] = {Project::kDirAssets, Project::kDirScenes,
+                              Project::kDirSource, Project::kDirMeshes,
+                              Project::kDirTextures, Project::kDirAudio};
+        for (const char* d : dirs) {
+            std::vector<std::string> ls;
+            st.listDir(d, ls);   // o MESMO caminho do refreshFilesTree
+        }
+        // ZERO linhas E na varredura TODA (o assets/source não nascidos são
+        // I honesto — a ausência é estado; o E fantasma morreu)
+        EXPECT(logCount("E/GONI: saf: listDir") == 0);
+        // o audio NEM sequer aparece (a pasta existe — o listing é calado)
+        EXPECT(logCount("listDir audio") == 0);
+    }
+
+    // (2) PROJETO ANTIGO sem audio/ (criado antes da cura): o listing da
+    // pasta em falta é I honesto — e o E fantasma NUNCA existe
+    {
+        FakeSafIo io;
+        SafStorage st(&io, "content://tree/primary:GOneVV/velho");
+        // a mão: scenes/ só (o padrão dos projects pré-SELEÇÃO-ÚNICA)
+        std::vector<std::string> ignored;
+        EXPECT(st.makeDirs(Project::kDirScenes));
+        (void)ignored;
+        std::vector<std::string> files;
+        EXPECT(!st.listDir(Project::kDirAudio, files));   // falta → false
+        EXPECT(logCount("I/GONI: saf: listDir audio") == 1);   // o I honesto
+        EXPECT(logCount("E/GONI: saf: listDir audio") == 0);   // NUNCA E
+        EXPECT(logHas("pasta ausente (ok, lista vazia)"));
+    }
+
+    rmrf(kSentinelCache);
+}

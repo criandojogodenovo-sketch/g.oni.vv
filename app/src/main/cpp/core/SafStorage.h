@@ -72,8 +72,12 @@ public:
 private:
     // resolve o URI de um diretório ("" = raiz); createMissing=true cria os
     // segmentos em falta (mkdir -p via createDocument DIR)
+    // 0.10.7 SELEÇÃO-ÚNICA: `absent` (opcional) diz «a pasta NÃO existe» —
+    // o listDir usa para registar I (pasta ausente é estado esperado, não
+    // erro) em vez do E fantasma que o dono via ao abrir o catálogo
     bool resolveDir(const std::string& relDir, bool createMissing,
-                    std::string& outUri, std::string& err) const;
+                    std::string& outUri, std::string& err,
+                    bool* absent = nullptr) const;
     // resolve o URI de um ficheiro; createMissing=true cria no pai
     bool resolveFile(const std::string& relPath, bool createMissing,
                      std::string& outUri, std::string& err) const;

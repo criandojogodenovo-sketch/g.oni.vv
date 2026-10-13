@@ -397,16 +397,23 @@ void dividerInput(UiContext& ui, const InputState& in, EditorState& st,
         in.pos(0, px, py);
     }
     // press edge na pega → arma (âncoras capturadas — o padrão do drawer)
+    // 0.10.7 SELEÇÃO-ÚNICA (cura 4 — a ORIGEM do toque): o toque que nasce
+    // NA PEGA é um REDIMENSIONAMENTO, nunca um tap do viewport — mata o arm
+    // do deselect (o main arma ANTES de aqui correr: a pega invade o rect
+    // do viewport meia-largura e o press era «dentro do view» para ambos).
+    // Painel/resize/layout NÃO limpam NEM selecionam — a regra do dono.
     if (in.pressed(0) && heldL) {
         st.divDragActive = true;
         st.divDragRight = false;
         st.divDragStartX = px;
         st.divDragBaseW = d.budget.hier;
+        st.deselectArm = false;
     } else if (d.rightOn && in.pressed(0) && heldR) {
         st.divDragActive = true;
         st.divDragRight = true;
         st.divDragStartX = px;
         st.divDragBaseW = d.budget.insp;
+        st.deselectArm = false;
     }
     // o drag: redimensiona AO VIVO com clamp + passos de 8dp (o granular
     // do drawer; o estado escreve o VALOR SNAPPED — o que o dono vê é o
@@ -515,6 +522,16 @@ icons::Icon hierIconFor(const Tic& t) {
 }
 
 bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
+    // 0.10.7 HOTFIX SELEÇÃO-ÚNICA (cura 2, defesa em profundidade): o draw
+    // AUDITA À ENTRADA — id pendurado (troca de prim/mesh que re-criou o
+    // slot, guarda-restauro de layout, TIC apagada por trás da UI) NÃO é
+    // seleção: clearSelection COMPLETO ANTES de qualquer linha existir. A
+    // linha âmbar é DERIVADA (st.selected == t->handle) e o inspector/gizmo
+    // leem O MESMO estado — nunca mais «linha âmbar + nome em branco» com
+    // inspector «Nada selecionado». O frame do main audita TAMBÉM (antes do
+    // gizmo — o primeiro leitor); aqui é a segunda linha (os painéis podem
+    // correr sem o frame completo — o padrão da suíte).
+    selectionAudit(scene, st);
     // GRUPO D: a largura é ESTADO (divisores) — default adaptativo se −1
     // (a resolução é a fonte ÚNICA: resolvePanels — gangorra dos 3 pisos)
     const UiRect panel = safe::hierarchyPanelRect(ui.screenWidth(),
@@ -893,7 +910,7 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
             scroll::inside(listRegion, tx, ty)) {
             const i32 sel = hierarchyRowAtTap(ty, listTop, off, nRows);
             if (sel < 0) {
-                st.selected = Handle::invalid();   // vazio = desseleciona
+                clearSelection(st);   // vazio = desseleciona (ÚNICO escritor)
                 st.multiSelectCount = 0;
             } else {
                 const Tic* t = scene.get(rows[sel].h);
@@ -933,8 +950,7 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                             st.multiSelect[st.multiSelectCount++] = t->handle;
                         }
                     } else {
-                        st.selected = t->handle;   // corpo: seleciona
-                        st.selElement = -1;
+                        selectTic(st, t->handle);   // corpo: seleciona (ÚNICO escritor)
                     }
                 }
             }
@@ -1073,7 +1089,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     // forçado AQUI no topo (o trilho de baixo também sai pelo return).
     Tic* tic = scene.get(st.selected);
     if (!tic) {
-        st.selected = Handle::invalid();
+        // SELEÇÃO-ÚNICA: o MESMO clearSelection (o único escritor; o main
+        // e o drawHierarchy já auditam — isto é a 3.ª linha de defesa)
+        clearSelection(st);
         // 0.9.0 (spec C/M): "Nada selecionado" 14sp text-2 CENTRADO —
         // text2 #98A2B3 sobre surface #151A23 = 6,7:1 (≥4,5:1 da auditoria);
         // o ANTIGO "(nada selecionado)" era theme::LINE (1,7:1 — INVISÍVEL,
@@ -2450,8 +2468,7 @@ bool viewportTapClearsSelection(EditorState& st, const InputState& in,
         py >= view.y + view.h) {
         return false;
     }
-    st.selected = Handle::invalid();
-    st.selElement = -1;
+    clearSelection(st);   // SELEÇÃO-ÚNICA: o único escritor
     return true;
 }
 
@@ -2479,6 +2496,48 @@ Handle revalidateSelection(const Scene& scene, Handle selected,
         return scene.find(name);
     }
     return Handle::invalid();
+}
+
+// ---- 0.10.7 HOTFIX SELEÇÃO-ÚNICA — OS ÚNICOS ESCRITORES ---------------------
+
+Handle selectTic(EditorState& st, Handle h) {
+    st.selected = h;
+    st.selElement = -1;   // o elemento de UI do TIC antigo não sobrevive
+    return h;
+}
+
+void clearSelection(EditorState& st) {
+    st.selected = Handle::invalid();
+    st.selElement = -1;
+}
+
+bool selectionAudit(const Scene& scene, EditorState& st) {
+    bool mudou = false;
+    // (2) ID PENDURADO NÃO É SELEÇÃO: o handle marcado tem de estar VIVO
+    // na cena. Handle inválido OU morto (generation velha / index fora) →
+    // clearSelection COMPLETO — a linha âmbar é DERIVADA e morre junto;
+    // o inspector e o gizmo vêem O MESMO estado neste frame. NUNCA mais
+    // linha âmbar com nome em branco.
+    if (st.selected.valid() && scene.get(st.selected) == nullptr) {
+        elog::info("seleção limpa: id pendurado (o TIC não existe na cena)");
+        clearSelection(st);
+        mudou = true;
+    }
+    // os ÓRFÃOS do multiSelect: um handle morto no conjunto é estado sujo
+    // (não acende linha nenhuma — a linha também deriva — mas o chip «N x»
+    // contava fantasmas e a multi-operação podia apanhar um morto). Saem
+    // por COMPACÇÃO (a ordem dos vivos preservada).
+    u32 w = 0;
+    for (u32 i = 0; i < st.multiSelectCount; ++i) {
+        if (scene.get(st.multiSelect[i]) != nullptr) {
+            st.multiSelect[w++] = st.multiSelect[i];
+        }
+    }
+    if (w != st.multiSelectCount) {
+        st.multiSelectCount = w;
+        mudou = true;
+    }
+    return mudou;
 }
 
 int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorState& st) {

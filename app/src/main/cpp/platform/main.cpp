@@ -1221,8 +1221,7 @@ void doSwitchScene(u32 idx) {
         showToast("falha ao carregar a cena");
         elog::error("cena: load de '%s' FALHOU", g_project.scenes[idx].c_str());
     }
-    g_editor.selected = Handle::invalid();   // seleção não sobrevive à troca
-    g_editor.selElement = -1;
+    editor::clearSelection(g_editor);   // seleção não sobrevive à troca
     g_playUi.armed = false;
     refreshCatalog();
 }
@@ -1332,8 +1331,7 @@ void createSceneNamed(const std::string& name) {
     // 3) cena VAZIA em memória → escreve o .goni novo + manifesto
     primMeshesToGrave();   // 0.8.10: posse da cena antiga p/ cova
     g_scene.clear();
-    g_editor.selected = Handle::invalid();
-    g_editor.selElement = -1;
+    editor::clearSelection(g_editor);
     const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
                     g_project.saveManifest(*g_storage);
     armThumbCapture();   // 0.9.0/0.9.6.19 (D16): o ponto único de armação
@@ -2146,7 +2144,7 @@ static void benchTick(f32 dt, const DrawStats& total) {
         }
         g_bench.benchTics.clear();
         if (g_editor.selected.valid() && !g_scene.get(g_editor.selected)) {
-            g_editor.selected = Handle{};
+            editor::clearSelection(g_editor);
         }
         g_bench.phase = BenchRunner::Phase::Done;
         showToast("bench: pronto — Copiar relatório no Diagnóstico");
@@ -2931,7 +2929,7 @@ static void expandJobFinalize() {
             gltfExpandComposeWorlds(nodes, created, g_scene);
         }
         // o 1º TIC selecionado (o dono VÊ a sub-árvore no inspector)
-        g_editor.selected = created[0];
+        editor::selectTic(g_editor, created[0]);
     }
     if (g_importJob.stats.expandLimited > 0) {
         char wmsg[160];
@@ -3510,7 +3508,7 @@ void refreshFilesTree() {
         {Project::kDirSource, "Fontes importadas"},
         {Project::kDirMeshes, "Malhas (legado)"},
         {Project::kDirTextures, "Texturas (legado)"},
-        {"audio", "Sons"},
+        {Project::kDirAudio, "Sons"},
     };
     for (const DirDef& d : kDirs) {
         if (g_filesTree.n >= 8) {
@@ -4854,7 +4852,7 @@ void onAppCmd(android_app* app, i32 cmd) {
                         g_scene, g_editor.selected, selName);
                     if (revalidated.valid() &&
                         revalidated != g_editor.selected) {
-                        g_editor.selected = revalidated;
+                        editor::selectTic(g_editor, revalidated);
                         elog::info("lifecycle: seleção re-validada pós-INIT "
                                    "WINDOW (re-mapeada por nome '%s')",
                                    selName);
@@ -4863,7 +4861,7 @@ void onAppCmd(android_app* app, i32 cmd) {
                         elog::info("lifecycle: seleção pós-INIT WINDOW "
                                    "dispensada (TIC '%s' não existe na cena "
                                    "recarregada)", selName);
-                        g_editor.selected = Handle::invalid();
+                        editor::clearSelection(g_editor);
                     }
                     g_editor.selElement = -1;
                     elog::info("[boot 6/6] scene OK → editor ('%s', %u tics)",
@@ -5443,6 +5441,17 @@ void frame() {
         g_sceneTransIdx = 0xFFFFFFFFu;
     }
 
+    // 0.10.7 HOTFIX SELEÇÃO-ÚNICA (cura 2 — o AUDIT DO FRAME): o id
+    // pendurado NÃO é seleção. Os jobs de cima (import/expand/transição)
+    // podem ter destruído TICs — o handle marcado pode estar MORTO. A
+    // auditoria corre AQUI, antes do PRIMEIRO leitor do frame (o gizmo em
+    // baixo), e devolve a cena limpa a TODOS (gizmo, deselect, hierarquia,
+    // inspector leem O MESMO estado neste frame). Os órfãos do multiSelect
+    // saem por compação (o chip «N x» nunca conta fantasmas).
+    if (editor::selectionAudit(g_scene, g_editor)) {
+        elog::info("seleção: audit do frame limpou id pendurado");
+    }
+
     // F4: TouchControls primeiro (só em modo Play) — os dedos que nasceram
     // nos controlos não vão para a câmara
     bool tcDrawn = false;
@@ -5575,7 +5584,7 @@ void frame() {
                     elog::info("seleção: TIC '%s' (toque no viewport)",
                                nt ? nt->name.c_str() : "?");
                 }
-                g_editor.selected = hc;
+                editor::selectTic(g_editor, hc);
             } else {
                 // FASE 9 (G1-6): CADA mudança de seleção LOGA o motivo
                 // (selAntesTap: o handle JÁ foi limpo lá dentro)
@@ -5585,8 +5594,7 @@ void frame() {
                                "(era '%s')",
                                velho ? velho->name.c_str() : "ID órfão");
                 }
-                g_editor.selected = Handle::invalid();
-                g_editor.selElement = -1;
+                editor::clearSelection(g_editor);
             }
         }
     }
@@ -6002,7 +6010,7 @@ void frame() {
             if (va.undoPressed) {
                 const Handle uh = g_undo.undo(g_scene);
                 if (uh.valid()) {
-                    g_editor.selected = uh;
+                    editor::selectTic(g_editor, uh);
                     showToast("desfeito");
                 } else {
                     showToast("nada a desfazer");
@@ -6011,7 +6019,7 @@ void frame() {
             if (va.redoPressed) {
                 const Handle rh = g_undo.redo(g_scene);
                 if (rh.valid()) {
-                    g_editor.selected = rh;
+                    editor::selectTic(g_editor, rh);
                     showToast("refeito");
                 } else {
                     showToast("nada a refazer");
@@ -6394,7 +6402,7 @@ void frame() {
                     if (ct->addComponent<CameraComp>()) {
                         setOnlyActiveCamera(g_scene, hnew);
                     }
-                    g_editor.selected = hnew;
+                    editor::selectTic(g_editor, hnew);
                     showToast("Câmara criada (ativa)");
                     LOGI("editor: TIC de câmara criada (ativa)");
                 }
@@ -6412,7 +6420,7 @@ void frame() {
                     }
                 }
                 if (hnew.valid()) {
-                    g_editor.selected = hnew;
+                    editor::selectTic(g_editor, hnew);
                     showToast("Mesh criado (esfera)");
                     LOGI("editor: TIC Mesh criado (primitiva esfera default)");
                 }
@@ -6422,7 +6430,7 @@ void frame() {
                 // glifo de altifalante no editor, som no Play)
                 const Handle hnew = createTicUndoable(PresetKind::Audio);
                 if (hnew.valid()) {
-                    g_editor.selected = hnew;
+                    editor::selectTic(g_editor, hnew);
                     showToast("Audio criado (atribua o clip no Inspector)");
                     LOGI("editor: TIC Audio criado (Transform+AudioPlayer)");
                 }
@@ -6430,7 +6438,7 @@ void frame() {
                 const PresetKind kind = static_cast<PresetKind>(choice - 1);
                 const Handle hnew = createTicUndoable(kind);
                 if (hnew.valid()) {
-                    g_editor.selected = hnew;
+                    editor::selectTic(g_editor, hnew);
                     char msg[64];
                     std::snprintf(msg, sizeof(msg), "%s criado", presetName(kind));
                     showToast(msg);
@@ -6678,7 +6686,7 @@ void frame() {
             // 0.9.6.19b (D21): era choice 7 (o «Novo objeto» desloca +1)
             const Handle uh = g_undo.undo(g_scene);
             if (uh.valid()) {
-                g_editor.selected = uh;
+                editor::selectTic(g_editor, uh);
                 showToast("desfeito");
             } else {
                 showToast("nada a desfazer");
@@ -6688,7 +6696,7 @@ void frame() {
             // 0.9.6.19b (D21): era choice 8 (o «Novo objeto» desloca +1)
             const Handle rh = g_undo.redo(g_scene);
             if (rh.valid()) {
-                g_editor.selected = rh;
+                editor::selectTic(g_editor, rh);
                 showToast("refeito");
             } else {
                 showToast("nada a refazer");
@@ -6702,7 +6710,7 @@ void frame() {
                 g_clipValid = true;
                 const Handle dup = editor::duplicateTic(g_scene, g_editor.selected);
                 if (dup.valid()) {
-                    g_editor.selected = dup;
+                    editor::selectTic(g_editor, dup);
                     showToast("TIC duplicado");
                 }
             } else {
@@ -6717,7 +6725,7 @@ void frame() {
                 const Handle h = editor::pasteAsNew(g_scene, g_clipSnap);
                 if (h.valid()) {
                     g_undo.push(before, editor::snapTic(g_scene, h), h);
-                    g_editor.selected = h;
+                    editor::selectTic(g_editor, h);
                     showToast("TIC colado");
                 }
             } else {
@@ -6789,7 +6797,7 @@ void frame() {
             std::snprintf(msg, sizeof(msg), ok ? "cena carregada (%u tics)" : "falha ao carregar",
                           g_scene.count());
             showToast(msg);
-            g_editor.selected = Handle::invalid();   // seleção antiga não sobrevive ao load
+            editor::clearSelection(g_editor);   // seleção antiga não sobrevive ao load
             LOGI("editor: %s ← %s", msg, g_project.activeScenePath()->c_str());
         } else if (choice == 6 && g_projectReady) {
             // F5-E: Export OBJ — mesh do TIC selecionado → meshes/export_<nome>.obj
@@ -7060,7 +7068,7 @@ void frame() {
                 const Handle dup =
                     editor::duplicateTic(g_scene, g_editor.contextTic);
                 if (dup.valid()) {
-                    g_editor.selected = dup;
+                    editor::selectTic(g_editor, dup);
                     showToast("TIC duplicado");
                     if (const Tic* nd = g_scene.get(dup)) {
                         LOGI("editor: TIC duplicado → '%s'", nd->name.c_str());
@@ -7098,8 +7106,7 @@ void frame() {
                 std::snprintf(goneName, sizeof(goneName), "%.40s", ct->name.c_str());
                 g_scene.destroy(g_editor.contextTic);
                 if (g_editor.selected == g_editor.contextTic) {
-                    g_editor.selected = Handle::invalid();
-                    g_editor.selElement = -1;
+                    editor::clearSelection(g_editor);
                 }
                 showToast("TIC removido");
                 LOGI("editor: TIC '%s' removido", goneName);

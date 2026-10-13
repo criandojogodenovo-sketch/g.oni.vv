@@ -85,7 +85,11 @@ const char* SafStorage::mimeForName(const std::string& name) {
 }
 
 bool SafStorage::resolveDir(const std::string& relDir, bool createMissing,
-                            std::string& outUri, std::string& err) const {
+                            std::string& outUri, std::string& err,
+                            bool* absent) const {
+    if (absent) {
+        *absent = false;
+    }
     const auto cached = dirUris_.find(relDir);
     if (cached != dirUris_.end()) {
         outUri = cached->second;
@@ -107,7 +111,7 @@ bool SafStorage::resolveDir(const std::string& relDir, bool createMissing,
     const std::string leaf =
         slash == std::string::npos ? relDir : relDir.substr(slash + 1);
     std::string parentUri;
-    if (!resolveDir(parentRel, createMissing, parentUri, err)) {
+    if (!resolveDir(parentRel, createMissing, parentUri, err, absent)) {
         return false;
     }
     bool found = false;
@@ -118,6 +122,9 @@ bool SafStorage::resolveDir(const std::string& relDir, bool createMissing,
     if (!found) {
         if (!createMissing) {
             err = "pasta ausente no projeto SAF: " + relDir;
+            if (absent) {
+                *absent = true;   // SELEÇÃO-ÚNICA: ausência é estado, não erro
+            }
             return false;
         }
         if (!io_->create(parentUri, kSafDirMime, leaf.c_str(), uri, err)) {
@@ -448,8 +455,17 @@ bool SafStorage::listDir(const std::string& relDir,
         return false;
     }
     std::string err, dirUri;
-    if (!resolveDir(relDir, false, dirUri, err)) {
-        elog::error("saf: listDir %s — %s", relDir.c_str(), err.c_str());
+    bool absent = false;
+    if (!resolveDir(relDir, false, dirUri, err, &absent)) {
+        // SELEÇÃO-ÚNICA (cura 5): a pasta AUSENTE (projects antigos sem
+        // audio/, por exemplo) é estado ESPERADO — I honesto, nunca o E
+        // fantasma que sujava o diagnóstico do dono ao abrir o catálogo
+        if (absent) {
+            elog::info("saf: listDir %s — pasta ausente (ok, lista vazia)",
+                       relDir.c_str());
+        } else {
+            elog::error("saf: listDir %s — %s", relDir.c_str(), err.c_str());
+        }
         return false;
     }
     std::vector<SafEntry> kids;

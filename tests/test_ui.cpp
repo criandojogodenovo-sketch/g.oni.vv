@@ -951,3 +951,55 @@ TEST(textwrap_quebra_por_palavras_e_cobre_tudo) {
         EXPECT(ls.size() == 1 && ls[0].len == 5);
     }
 }
+
+// ---------------------------------------------------------------------------
+// 0.10.7 HOTFIX SELEÇÃO-ÚNICA — PIN 1/2 do dono (UI REAL com gestos):
+// tap numa LINHA da hierarquia → no frame SEGUINTE o gizmo e o inspector
+// leem O MESMO TIC vivo (a fonte única) e a linha acende ÂMBAR COM O NOME.
+// O nome vem do TIC vivo (scene.get do MESMO handle) — nunca «âmbar com
+// nome em branco» + «Nada selecionado» ao mesmo tempo.
+TEST(ui_tap_hierarquia_selecao_viva_no_frame_seguinte) {
+    Env e(false, true);   // TIC com MeshRenderer + catálogo
+    EXPECT(e.ok);
+    // o Env nasce com o TIC selecionado — começa LIMPO (o tap é o caminho)
+    editor::clearSelection(e.st);
+    e.frame();
+    EXPECT(!e.st.selected.valid());
+
+    // geometria da linha 0 (o MESMO cálculo do draw): o painel JÁ nasce
+    // sob o chrome (panel.y = 36 — a barra única); listTop = cabeçalho 28 +
+    // pesquisa 32 POR CIMA do y do painel
+    const UiRect panel = safe::hierarchyPanelRect(kSW, kSH, safe::Insets{});
+    const f32 listTop = panel.y + 28.0f + 32.0f;
+    const f32 rowCY = listTop + 18.0f;   // meia linha de 36 (linha 0)
+    const f32 bodyX = panel.x + 120.0f;  // o CORPO da linha (não olho/⋮/ícone)
+
+    // o TAP na linha (gesto REAL: press → frame → release → frame — o
+    // MESMO padrão das widgets de scroll da casa)
+    e.input.injectDown(0, bodyX, rowCY);
+    e.frame();
+    e.input.injectUp(0);
+    e.frame();
+
+    // PIN 2: a linha acende — a seleção é O TIC da linha, VIVO, com nome
+    ASSERT(e.st.selected.valid());
+    const Tic* sel = e.scene.get(e.st.selected);   // A LEITURA DO GIZMO
+    ASSERT(sel != nullptr);                        // vivo — o gizmo TEM alvo
+    EXPECT(!sel->name.empty());                    // NOME (nunca em branco)
+
+    std::printf("DBG panel=(%.0f,%.0f,%.0f,%.0f) bodyX=%.0f rowCY=%.0f sel=%d\n",
+                panel.x, panel.y, panel.w, panel.h, bodyX, rowCY,
+                (int)e.st.selected.index);
+    // o frame SEGUINTE: os leitores continuam EM HARMONIA (o gizmo e o
+    // inspector leem O MESMO estado vivo — o pin 1 do dono)
+    e.frame();
+    EXPECT(e.st.selected.valid());
+    EXPECT(e.scene.get(e.st.selected) == sel);   // o MESMO TIC vivo
+    EXPECT(!editor::selectionAudit(e.scene, e.st));   // zero pendurado
+
+    // o inspector de TICs desenha (a condição do «Nada selecionado» é
+    // scene.get nulo — aqui NUNCA): o perfil do TIC vivo tem CONTEÚDO
+    // (o MeshRenderer do TIC dá a secção Material — o plano não é vazio)
+    const InspProfile prof = inspectorProfile(*sel);
+    EXPECT(prof.mr);   // o inspector TEM o que mostrar (nunca «Nada selecionado»)
+}

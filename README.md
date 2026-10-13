@@ -34,6 +34,37 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.10.7 — 0.10-M HOTFIX SELEÇÃO-ÚNICA — o estado contraditório da seleção morre
+
+**O bug (dono, C33, vc 67)**: linha da hierarquia âmbar com nome em
+branco + inspector «Nada selecionado» + sem gizmo, AO MESMO TEMPO; o id
+selecionado ficava pendurado após troca de prim/mesh ou guarda-restauro
+de layout; o highlight da lista sobrevivia ao modelo.
+
+**A cura (5 pernas)**:
+
+1. **UMA FONTE DE VERDADE** — `selectTic`/`clearSelection` são os ÚNICOS
+   escritores de `EditorState::selected` (os 26 sítios passam pelos
+   dois); a linha âmbar é DERIVADA no draw e o inspector e o gizmo leem
+   O MESMO estado.
+2. **ID PENDURADO NÃO É SELEÇÃO** — o `selectionAudit` limpa o id que
+   não existe na cena ANTES de qualquer leitor (no frame, antes do
+   gizmo; e à entrada do draw da hierarquia) e compacta os órfãos da
+   multi-seleção.
+3. **A TROCA DE PRIM/MESH MANTÉM A SELEÇÃO** — o rebuild é dentro do TIC;
+   o handle é da TIC, não do mesh.
+4. **A ORIGEM DO TOQUE** — o clear-on-empty-tap só vale para toques
+   nascidos no viewport; painel, redimensionamento e layout nunca limpam
+   nem selecionam.
+5. **A PASTA AUDIO** — nasce com o projeto; o `listDir` SAF regista
+   ausência em I (nunca o E fantasma ao abrir o catálogo).
+
+Provas: pins ×8 (a família `selecao_unica` + o de audio, com a prova
+VISUAL do highlight por quads) · mutações M1 (highlight por índice
+próprio), M2 (clear sem origem) e M3 (draw sem audit) vermelho→verde ·
+test_core 0 falhas · c33 797/797. Relatório:
+`docs/RELATORIO-0.10-M-HOTFIX-SELECAO-UNICA.md`.
+
 ## 0.10.7 — 0.10-M HOTFIX P0: SUB-TICs em lotes — o expand deixa de travar a engine
 
 **O bug (dono, C33)**: o «expandir em sub-TICs» nos settings fazia a

@@ -535,6 +535,37 @@ bool pickerGuardBlocked(const Scene& scene, Handle selected);
 Handle revalidateSelection(const Scene& scene, Handle selected,
                            const char* name);
 
+// ---- 0.10.7 HOTFIX SELEÇÃO-ÚNICA — A FONTE ÚNICA DA SELEÇÃO -----------------
+// O device (vc 67) mostrou estado CONTRADITÓRIO: linha âmbar com nome em
+// branco + inspector «Nada selecionado» + sem gizmo — o id selecionado ficou
+// PENDURADO (troca de prim/mesh, guarda-restauro de layout) e cada leitor
+// via um estado diferente. A cura, na ordem da spec do dono:
+//
+//   (1) UMA FONTE DE VERDADE — selectTic/clearSelection são os ÚNICOS
+//       escritores de EditorState::selected na produção (os ~25 sítios
+//       escreviam direto, uns levavam selElement, outros não — a
+//       divergência era a matéria-prima do estado contradictório).
+//       O highlight da linha é DERIVADO no draw (st.selected == t->handle)
+//       e o inspector e o gizmo lêem O MESMO estado.
+//   (2) ID PENDURADO NÃO É SELEÇÃO — selectionAudit: se o id não existe na
+//       cena → clearSelection COMPLETO (a linha incluída — ela é derivada,
+//       morre junto). O frame do main audita ANTES de qualquer leitor e a
+//       drawHierarchy audita à entrada (defesa em profundidade).
+//
+// Ambos PUROS e afervel no CI (a suíte arma o estado e afera o resultado).
+// selectTic devolve o handle escrito (o contrato dos chamadores que
+// propagam o vivo); limpar/re-selecionar NÃO mexe no multiSelect (o
+// conjunto continua a ser gestão da hierarquia — a spec não muda isso).
+Handle selectTic(EditorState& st, Handle h);
+void clearSelection(EditorState& st);
+
+// A AUDIT do frame (a cura (2)): id pendurado → clearSelection; os órfãos
+// do multiSelect (handles mortos no conjunto) saem por COMPACÇÃO. Devolve
+// true quando o estado mudou (o main usa para o log honesto do motivo).
+// NÃO re-mapeia por nome — isso é o revalidateSelection do lifecycle; aqui
+// a regra é a do dono: o que não existe na cena não é seleção.
+bool selectionAudit(const Scene& scene, EditorState& st);
+
 // ---- 0.6.9 → 0.7.6: GIZMOS DE TRANSFORMAÇÃO ----------------------------------
 // (o seletor de modo/snap é o GRUPO G4 da barra final — struct GizmoModeState
 // e tudo o resto vive em ui/Toolbar.h; a antiga drawGizmoToolbar desapareceu)

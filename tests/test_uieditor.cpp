@@ -32,6 +32,7 @@
 #include "render/Mesh.h"
 #include "render/Renderer.h"
 #include "ui/EditorLayout.h"
+#include "ui/BottomPanel.h"   // 0.10.7: serialize/parseLayout (o pin do layout)
 #include "ui/Toolbar.h"   // 0.7.6: barra final (G3 segmented 3D|UI)
 #include "components/CameraComp.h"   // 0.7.7: TIC de câmara no "+"
 #include "core/CameraUtil.h"
@@ -1142,4 +1143,252 @@ TEST(uieditor_teclado_minusculas_apos_toggle) {
 
     // o commit aplica minúsculas sem filtro (uiTextCharAllowed já aceitava)
     EXPECT(uiTextCharAllowed('a') && uiTextCharAllowed('Z'));
+}
+
+// ===========================================================================
+// 0.10.7 HOTFIX SELEÇÃO-ÚNICA — OS PINS DO DONO (vc 67, C33)
+// O estado CONTRADITÓRIO (linha âmbar + nome em branco + inspector «Nada
+// selecionado» + sem gizmo) morre por TRÊS leis: (1) selectTic/clearSelection
+// são os ÚNICOS escritores; (2) id pendurado NÃO é seleção — o audit limpa
+// ANTES de qualquer leitor (o drawHierarchy audita à entrada); (3) o toque
+// que limpa nasce no viewport (painel/resize/layout NÃO limpam NEM
+// selecionam). A linha âmbar é DERIVADA no draw — nunca armazenada por
+// índice próprio.
+// ===========================================================================
+
+TEST(uieditor_selecao_unica_audit_id_pendurado_nao_e_selecao) {
+    Scene scene;
+    EditorState st;
+    const Handle a = scene.create("A");
+    const Handle b = scene.create("B");
+
+    // (1) O CONTRATO dos únicos escritores: selectTic repõe selElement;
+    // clearSelection limpa TUDO
+    st.selElement = 3;
+    EXPECT(editor::selectTic(st, a) == a);
+    EXPECT(st.selected == a);
+    EXPECT(st.selElement == -1);   // o elemento do TIC antigo não sobrevive
+    st.selElement = 7;
+    editor::clearSelection(st);
+    EXPECT(!st.selected.valid());
+    EXPECT(st.selElement == -1);
+
+    // (2) O AUDIT: handle VIVO fica (o audit NÃO mexe)
+    editor::selectTic(st, a);
+    EXPECT(!editor::selectionAudit(scene, st));
+    EXPECT(st.selected == a);
+
+    // (3) O AUDIT: handle MORTO (geração velha — o slot morreu) → limpeza
+    // COMPLETA e o audit DIZ que mudou (o main loga o motivo)
+    const Handle morto{a.index, a.generation + 3u};
+    st.selected = morto;
+    st.selElement = 2;
+    EXPECT(editor::selectionAudit(scene, st));
+    EXPECT(!st.selected.valid());
+    EXPECT(st.selElement == -1);
+
+    // (4) O AUDIT: handle inválido → nada a fazer (false, sem escrita)
+    st.selected = Handle::invalid();
+    EXPECT(!editor::selectionAudit(scene, st));
+
+    // (5) O AUDIT: os ÓRFÃOS do multiSelect saem por COMPAÇÃO — a ordem dos
+    // vivos preservada (o chip «N x» nunca conta fantasmas)
+    const Handle c = scene.create("C");
+    const Handle cMorto{c.index, c.generation};
+    scene.destroy(c);   // órfão: morto mas ainda no conjunto
+    st.multiSelectCount = 3;
+    st.multiSelect[0] = b;         // vivo
+    st.multiSelect[1] = cMorto;    // morto (órfão)
+    st.multiSelect[2] = a;         // vivo
+    EXPECT(editor::selectionAudit(scene, st));
+    EXPECT(st.multiSelectCount == 2u);
+    EXPECT(st.multiSelect[0] == b);   // a ORDEM dos vivos preservada
+    EXPECT(st.multiSelect[1] == a);
+}
+
+// o contador de QUADS âmbar (a LINHA da hierarquia acesa): os sólidos com
+// a cor accentDim (o fill + a barra de 3dp da linha selecionada). A linha
+// âmbar é DERIVADA — este contador é a prova VISUAL do highlight.
+int hierQuadsAmbar(const Env& e) {
+    int n = 0;
+    const QuadBatch& b = e.ui.solidsForTest();
+    const QuadVertex* v = b.vertices();
+    const u32 q = b.vertexCount();
+    for (u32 i = 0; i + 5 < q; i += 6) {
+        const bool cor = std::fabs(v[i].r - theme::kTheme.accentDim[0]) < 0.01f &&
+                         std::fabs(v[i].g - theme::kTheme.accentDim[1]) < 0.01f &&
+                         std::fabs(v[i].b - theme::kTheme.accentDim[2]) < 0.01f;
+        if (cor) {
+            ++n;   // o FILL accentDim (a barra lateral é o accent cheio)
+        }
+    }
+    return n;
+}
+
+// PIN (4) do dono + a caça a M1 e M3: apagar a TIC selecionada POR TRÁS da
+// UI (o destroy direto da cena — o caminho que deixou o id pendurado no
+// device) limpa o highlight NO PRÓPRIO draw: o drawHierarchy audita À
+// ENTRADA, antes de qualquer linha existir. O inspector NEM corre aqui — a
+// limpeza é do draw da HIERARQUIA. Com a linha RESTA (outra TIC sobe para
+// o índice 0), o highlight por ÍNDICE PRÓPRIO (a mutação M1) acendia a
+// linha ERRADA — aqui fica a ZERO (a derivação morre com a seleção).
+TEST(uieditor_selecao_unica_apagar_limpa_o_highlight_no_draw) {
+    Env e;
+    EXPECT(e.ok);
+    e.scene.create("Sub");   // a 2.ª linha: quem SOBE quando o HUD morre
+
+    // o TAP REAL na linha 0 (o corpo — o MESMO gesto do device)
+    const UiRect panel = safe::hierarchyPanelRect(kSW, kSH, safe::Insets{});
+    const f32 listTop = panel.y + 28.0f + 32.0f;
+    const f32 rowCY = listTop + 18.0f;
+    e.input.injectDown(0, panel.x + 120.0f, rowCY);
+    e.frame();
+    e.input.injectUp(0);
+    e.frame();
+    EXPECT(e.st.selected == e.hud);   // o tap selecionou (o único escritor)
+
+    // a linha ÂMBAR COM O NOME do TIC vivo (a prova visual — o FILL)
+    EXPECT(hierQuadsAmbar(e) == 1);
+    // a seleção VIVA: o estado e a cena EM HARMONIA (zero pendurado)
+    EXPECT(editor::selectionAudit(e.scene, e.st) == false);
+
+    // APAGAR por trás da UI (o device: o id fica pendurado)
+    e.scene.destroy(e.hud);
+    EXPECT(e.st.selected == e.hud);   // o estado AINDA marca o morto…
+    // …mas o draw da hierarquia AUDITA à entrada e limpa ANTES das linhas
+    e.ui.beginFrame(nullptr, &e.input, kSW, kSH);
+    editor::drawHierarchy(e.ui, e.scene, e.st);
+    e.ui.endFrame();
+    e.input.clearEdges();
+    EXPECT(!e.st.selected.valid());   // ID PENDURADO NÃO É SELEÇÃO (M3)
+    // o highlight MORRE JUNTO — ZERO quads âmbar (a «Sub» que subiu para o
+    // índice 0 NÃO acende: o highlight é DERIVADO, nunca por índice — M1)
+    EXPECT(hierQuadsAmbar(e) == 0);
+    // o frame de novo: o estado fica LIMPO (sem rebote, sem fantasma)
+    e.ui.beginFrame(nullptr, &e.input, kSW, kSH);
+    editor::drawHierarchy(e.ui, e.scene, e.st);
+    e.ui.endFrame();
+    e.input.clearEdges();
+    EXPECT(!e.st.selected.valid());
+    EXPECT(hierQuadsAmbar(e) == 0);
+}
+
+// PIN (5) do dono: o guarda-restauro de layout NÃO muda a seleção (nem
+// seleciona, nem limpa) — o layout persiste PAINÉIS, nunca identidades.
+TEST(uieditor_selecao_unica_layout_nao_mexe_na_selecao) {
+    Scene scene;
+    EditorState st;
+    const Handle a = scene.create("A");
+    editor::selectTic(st, a);
+
+    // o round-trip COMPLETO do layout.json (o MESMO par serialize/parse do
+    // saveLayoutNow/loadLayoutNow do main)
+    editor::bottom::BottomState bs;
+    bs.bottomTab = 1;
+    bs.drawerH = 208.0f;
+    const std::string data = editor::bottom::serializeLayout(
+        bs, true, 0u, 280.0f, 260.0f, true);
+    EXPECT(!data.empty());
+    bool insp = false, pin = true;
+    u32 collapsed = 0xFFFFFFFFu;
+    f32 hierW = -1.0f, inspW = -1.0f;
+    editor::bottom::BottomState bs2;
+    EXPECT(editor::bottom::parseLayout(data, bs2, insp, collapsed, &hierW,
+                                       &inspW, &pin));
+    EXPECT(insp && pin);   // o layout RESTAUROU (o teste não é vazio)
+    // a seleção NEM existia no ficheiro — o estado fica INTACTO
+    EXPECT(st.selected == a);
+    EXPECT(st.selected.valid());
+    EXPECT(editor::selectionAudit(scene, st) == false);   // segue viva
+}
+
+// PIN (4-bis) do dono — a ORIGEM do toque (cura 4): o clear-on-empty-tap só
+// vale para toques NASCIDOS no viewport. Painel (hierarquia), release fora
+// do viewport e gesto RECLAMADO (gizmo) NUNCA limpam. Este pin é o que
+// morre com a mutação M2 (o clear sem verificação de origem).
+TEST(uieditor_selecao_unica_clear_so_com_toque_do_viewport) {
+    Scene scene;
+    EditorState st;
+    const Handle a = scene.create("A");
+    editor::selectTic(st, a);
+    const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{}, 0.0f,
+                                         st.showInspector, st.hierW,
+                                         st.inspW);
+
+    // (a) toque NASCIDO no PAINEL da hierarquia (fora do view, à esquerda):
+    // não arma, não limpa — mesmo com o release no mesmo sítio
+    {
+        InputState in;
+        in.injectDown(0, view.x - 40.0f, 300.0f);
+        (void)editor::viewportTapClearsSelection(st, in, view, 0);
+        in.clearEdges();
+        in.injectUp(0);
+        EXPECT(!editor::viewportTapClearsSelection(st, in, view, 0));
+        EXPECT(st.selected == a);   // O PAINEL NÃO LIMPA
+    }
+
+    // (b) nascido no viewport, MAS solto FORA (deslizou 12px até ao painel
+    // direito — menos que o limiar de drag): o release fora do view não é
+    // tap do viewport
+    {
+        InputState in;
+        in.injectDown(0, view.x + view.w - 6.0f, 300.0f);
+        (void)editor::viewportTapClearsSelection(st, in, view, 0);
+        in.clearEdges();
+        in.injectMove(0, view.x + view.w + 6.0f, 300.0f);   // +12px, < limiar
+        in.injectUp(0);
+        EXPECT(!editor::viewportTapClearsSelection(st, in, view, 0));
+        EXPECT(st.selected == a);   // sobrevive
+    }
+
+    // (c) nascido no viewport MAS RECLAMADO pelo gizmo (claimedMask bit 0):
+    // nem arma
+    {
+        InputState in;
+        in.injectDown(0, view.x + view.w * 0.5f, 300.0f);
+        EXPECT(!editor::viewportTapClearsSelection(st, in, view, 1u));
+        in.clearEdges();
+        in.injectUp(0);
+        EXPECT(!editor::viewportTapClearsSelection(st, in, view, 1u));
+        EXPECT(st.selected == a);
+    }
+
+    // (d) o CONTRASTE honesto: tap nascido E solto no vazio do viewport LIMPA
+    // (a regra de sempre — o guard não a matou)
+    {
+        InputState in;
+        in.injectDown(0, view.x + view.w * 0.5f, 300.0f);
+        in.injectUp(0);
+        EXPECT(editor::viewportTapClearsSelection(st, in, view, 0));
+        EXPECT(!st.selected.valid());
+    }
+}
+
+// PIN (6) do dono: o tap no vazio limpa OS TRÊS leitores em harmonia —
+// linha (estado), inspector («Nada selecionado» = scene.get nulo) e gizmo
+// (o MESMO scene.get nulo). Um estado, três leitores, zero contradição.
+TEST(uieditor_selecao_unica_vazio_limpa_os_tres_leitores) {
+    Env e;
+    EXPECT(e.ok);
+    editor::selectTic(e.st, e.hud);
+    e.frame();
+
+    // ANTES: a fonte é ÚNICA — o gizmo e o inspector leem O MESMO estado
+    EXPECT(e.scene.get(e.st.selected) == e.scene.get(e.st.selected));
+    EXPECT(e.st.selected == e.hud);   // vivo (o audit não mexeu)
+
+    // o tap no VAZIO do viewport (o MESMO caminho puro do main)
+    const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{}, 0.0f,
+                                         e.st.showInspector, e.st.hierW,
+                                         e.st.inspW);
+    e.input.injectDown(0, view.x + view.w * 0.5f, 300.0f);
+    e.input.injectUp(0);
+    EXPECT(editor::viewportTapClearsSelection(e.st, e.input, view, 0));
+    e.frame();
+
+    // DEPOIS: os três leitores continuam EM HARMONIA (agora vazios)
+    EXPECT(!e.st.selected.valid());
+    EXPECT(e.scene.get(e.st.selected) == nullptr);   // gizmo SEM alvo
+    EXPECT(editor::pickerGuardBlocked(e.scene, e.st.selected));   // inspector
+    EXPECT(!editor::selectionAudit(e.scene, e.st));   // zero órfãos em cena
 }

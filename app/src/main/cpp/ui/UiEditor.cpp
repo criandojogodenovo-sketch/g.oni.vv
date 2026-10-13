@@ -1225,8 +1225,7 @@ Handle ensureUiTic(Scene& scene, EditorState& st) {
     if (!t->getComponent<UiCanvas>()) {
         t->addComponent<UiCanvas>();
     }
-    st.selected = h;
-    st.selElement = -1;
+    selectTic(st, h);   // SELEÇÃO-ÚNICA: o único escritor
     return h;
 }
 

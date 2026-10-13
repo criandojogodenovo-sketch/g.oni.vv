@@ -646,3 +646,39 @@ TEST(assetpick_r014_o_scroll_alcanca_os_ficheiros_que_nao_cabem) {
     EXPECT(out.applied);
     EXPECT(e.mr()->meshPath == "assets/m9.gmesh");
 }
+
+// ---------------------------------------------------------------------------
+// 0.10.7 HOTFIX SELEÇÃO-ÚNICA — PIN 3 do dono: a TIC SELECIONADA troca de
+// prim/mesh DENTRO do TIC (o rebuild da primitiva / a troca do MeshRenderer)
+// e a seleção SOBREVIVE — o handle é da TIC, não do mesh; gizmo e inspector
+// continuam com alvo. ZERO órfãos: o audit não encontra nada pendurado.
+TEST(assetpick_selecao_unica_troca_prim_mesh_mantem_selecao) {
+    PickEnv e;
+    e.cat.meshes = {"assets/modelo.gmesh"};
+    // o estado do editor com a TIC selecionada (o ÚNICO escritor)
+    editor::EditorState st;
+    editor::selectTic(st, e.sel);
+
+    // (1) a TROCA DE PRIMITIVA (menuKind 4, pick 3 = esfera): o pick ARMA o
+    // pedido (primPending) — a TIC continua a MESMA, a seleção intacta
+    const AssetPickOutcome prim = applyAssetPick(
+        e.scene, e.sel, /*menuKind=*/4, /*pick=*/3, e.cat, e.res);
+    EXPECT(prim.applied);
+    EXPECT(e.scene.get(st.selected) != nullptr);   // a TIC VIVE (gizmo tem alvo)
+    EXPECT(!editor::selectionAudit(e.scene, st));  // NADA pendurado
+
+    // (2) a TROCA DE MESH (menuKind 1, pick 3 = ficheiro): o MeshRenderer
+    // muda POR DENTRO — a identidade da TIC é intocada
+    e.res.mesh = [](const std::string&) -> Mesh* { return kMeshStub; };
+    e.res.material = kMatStub;
+    const AssetPickOutcome mesh = applyAssetPick(
+        e.scene, e.sel, /*menuKind=*/1, /*pick=*/3, e.cat, e.res);
+    EXPECT(mesh.applied);
+    EXPECT(e.mr()->mesh == kMeshStub);            // o mesh trocou
+
+    // A LEI: a seleção é da TIC — o MESMO handle vivo, os leitores em
+    // harmonia, zero órfãos no audit
+    EXPECT(st.selected == e.sel);                 // o handle NÃO mudou
+    EXPECT(e.scene.get(st.selected) != nullptr);  // gizmo/inspector TÊM alvo
+    EXPECT(!editor::selectionAudit(e.scene, st));
+}

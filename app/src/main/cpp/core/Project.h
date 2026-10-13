@@ -42,6 +42,10 @@ public:
     // vive em assets/ (.gmesh/.gtext/.gm — o QUE o runtime carrega)
     static constexpr const char* kDirSource    = "source";
     static constexpr const char* kDirAssets    = "assets";
+    // 0.10.7 SELEÇÃO-ÚNICA (cura 5): o audio/ NASCE com o projeto — sem isto
+    // o catálogo (árvore de ficheiros) listava uma pasta que não existia e o
+    // SAF registava um E fantasma («pasta ausente no projeto SAF: audio»)
+    static constexpr const char* kDirAudio     = "audio";
     static constexpr u32 kVersion = 1;
 
     std::string name = "projeto";

@@ -6471,7 +6471,27 @@ int main() {
                 //     16sp mede ~157dp com a fonte da casa; o slot precisa
                 //     de título+chip+ações): o chip desenha com ≥8dp de cada
                 //     lado
-                g_editor.multiSelectCount = 2;
+                // 0.10.7 SELEÇÃO-ÚNICA: o conjunto da multi TEM de conter
+                // TICs VIVAS — o audit do drawHierarchy compacta os órfãos
+                // (a lei nova: o chip nunca conta fantasmas). As 2 entradas
+                // são TICs reais da cena (criadas aqui se faltarem).
+                {
+                    u32 vivos = 0;
+                    g_scene.forEachActive([&](const Tic&) { ++vivos; });
+                    if (vivos < 2u) {
+                        while (vivos < 2u) {
+                            g_scene.create(vivos == 0 ? "MultiA" : "MultiB");
+                            ++vivos;
+                        }
+                    }
+                    u32 n = 0;
+                    g_scene.forEachActive([&](const Tic& t) {
+                        if (n < 2u) {
+                            g_editor.multiSelect[n++] = t.handle;
+                        }
+                    });
+                    g_editor.multiSelectCount = 2u;
+                }
                 g_editor.hierW = theme::dp(316.0f);   // px (o estado do drag)
                 frame();
                 g_layoutExportPending = true;
