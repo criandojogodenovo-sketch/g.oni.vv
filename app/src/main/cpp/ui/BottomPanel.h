@@ -209,12 +209,20 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
 // antigos = false — o formato é retrocompatível)
 std::string serializeLayout(const BottomState& bs, bool showInspector,
                             u32 inspCollapsed, f32 hierW = -1.0f,
-                            f32 inspW = -1.0f, bool inspPinned = false);
+                            f32 inspW = -1.0f, bool inspPinned = false,
+                            // 0.11-H (FASE 1): os NOMES das TICs recolhidas
+                            // da hierarquia (a lista da cena aberta; vazio
+                            // = tudo aberto — os ficheiros antigos não têm
+                            // as linhas e lêem vazio)
+                            const std::vector<std::string>& hierCollapsed = {});
 // devolve false se ilegível (o chamador usa DEFAULTS — "Repor layout").
 // hierW/inspW/inspPinned opcionais (nullptr = não ler; compat dos testes)
+// 0.11-H: hierCollapsed opcional (nullptr = não ler — os chamadores antigos
+// ficam byte a byte; preenchido SEMPRE que presente, vazio se sem linhas)
 bool parseLayout(const std::string& data, BottomState& bs, bool& showInspector,
                  u32& inspCollapsed, f32* hierW = nullptr,
-                 f32* inspW = nullptr, bool* inspPinned = nullptr);
+                 f32* inspW = nullptr, bool* inspPinned = nullptr,
+                 std::vector<std::string>* hierCollapsed = nullptr);
 
 } // namespace bottom
 } // namespace editor

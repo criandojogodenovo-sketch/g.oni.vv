@@ -295,49 +295,21 @@ contentRect (superfície EGL − insets do sistema)
      → vermelho. ACHADO honesto: `drawSettingsMenu` é código morto no
      app (a página Settings 0.9.0 substituiu-o; só os testes o
      chamam) — NÃO tocado, candidata a remoção (decisão do dono).
-
-## 3. OS PISOS (fontes únicas em ui/SafeArea.h)
-
-| Constante | Valor | Significado |
-|---|---|---|
-| `kTopBarH` | 36dp | a top bar (PASSO 1 — era 56) |
-| `kStatusH` | 0 | a status bar saiu (PASSO 1; faixa compat de altura zero) |
-| `kBottomTabH` | 32dp | a tab bar do dock (PASSO 1 — era 48; o FPS·TICs vive nela) |
-| `kHierPct` / `kInspPct` | 18% / 22% | os DEFAULTS dos painéis (PASSO 2 — spec do dono) |
-| `kHierMinW` | 140dp | piso da hierarquia (PASSO 2 — era 200) |
-| `kInspMinW` / `kInspMaxW` | 180 / 260dp | piso e teto do inspector (PASSO 2 — o piso era 272) |
-| `kInspTrackW` | 32dp | o TRILHO do inspector sem seleção (PASSO 2) |
-| `kDrawerMaxPct` | 35% | o teto da ALTURA do drawer aberto (PASSO 2 — o cap vive em `effectiveDrawerH`) |
-| `kDrawerHandleH` / `kDividerHitW` | 24dp | as PEGAS de arrasto (PASSO 2 — eram 12/20) |
-| `kViewportMinW` | 288dp | piso da LARGURA do viewport central no DRAG (a toolbar cabe) |
-| `kViewportMinH` | 88dp | piso da ALTURA do viewport central com o drawer aberto (strip 40 + toolbar 40 + folga 8 — PASSO 1) |
-| `kDrawerMin`/`kDrawerMax` | 160..400dp | o ESTADO CRU da pega do drawer (o cap duplo §2.3 manda no efetivo) |
-| `vpchrome::kRailBtn`/`kQuickBtn` | 40dp | os alvos do chrome do viewport (PASSO 3 — desenho 32 nos botões). D21 (0.9.6.19b): o `kCornerBtn` MORREU com o [+] — os alvos do chrome são N−1 (10) e o gizmo do canto tem nome próprio (`vpchrome::kGizmoBtnDp` 40dp) |
-| `vpchrome::kChromeAlpha` | 60% | a ALFA de TUDO o que o chrome do viewport desenha (PASSO 3 — a spec do dono; `chromeCol` é o multiplicador público) |
-| `theme::kTheme.scrimMenu` | preto 40% | o VÉU dos menus ANCORADOS (PASSO 4 — a spec do dono; o `scrim` 60% fica sendo o véu MODAL — §2.26) |
-| `layout::kTouchFloorDp` | 40dp | piso de toque do botão SOLTO (desenho 32 — a LEI DE OURO do PASSO 1; era 48) |
-| `layout::kRowFloorDp` | 36dp | piso de LINHA (top bar, listas, consola) |
-| `layout::kFieldFloorDp` | 32dp | piso de CAMPO (caixas X/Y/Z, tabs de baixo, pesquisa) |
-| `layout::kHeadFloorDp` | 28dp | piso de CABEÇALHO/chips (kHeaderH, chips da consola, a célula «recolher» do pin — PASSO 2/P2-bis/0.9.6.18) |
-
-## 4. SENTINELAS E GATE
-
-| ID | Onde | O que afere |
-|---|---|---|
-| R-022 | tests/test_sentinels.cpp `regress_hierarquia_contrato` | a árvore §1 inteira: containment, regras §2.1-2.6, pisos §3 (o cap DUPLO do drawer incluído), em ecrãs 776×336/800×360/1536×720 e densidades 1.0/2.0, drawer fechado/aberto/tapado |
-| R-023 | tests/test_sentinels.cpp `regress_texto_strip_campo` (REESCRITA no PASSO 3) | o chrome do viewport em 3 densidades: NADA full-width (nenhum pai ≥90% da largura — a strip é impossível), os 10 alvos ≥40dp DENTRO do rect (D21: N−1 — o [+] saiu), a escada 456→220→140→72dp (o rail a colunas, a fila a descer e a esconder — nada transborda), a fila nunca pisa o gizmo |
-| R-024 | tests/c33_virtual.cpp FASE 14.3 + sentinela `regress_viewport_rect_segue` | abrir/fechar o dock → o rect muda, o log `vp3d: viewport set to` aparece com os números certos, o aspect segue |
-| R-025 | tests/test_sentinels.cpp `regress_rodape_intocavel` | DESDE O PASSO 1: a TAB BAR de 32dp é a última faixa em todos os estados; nada a cobre; o «FPS · TICs» vive no canto direito (o middle do projeto ficou nas unidades puras de TextFit — a status bar saiu) |
-| R-033 | tests/test_sentinels.cpp `regress_paineis_passo2` | A SPEC PASSO 2 MEDIDA: defaults 18%/22% (piso 140/180, teto 260), viewport ≥55% nos ecrãs de referência, o trilho de 32dp sem seleção (e o centerRect a devolver a área), o intervalo [180..260] no drag, as pegas 24dp, o drawer default FECHADO e o teto de 35% |
-| R-034 | tests/test_sentinels.cpp `regress_p2bis_pin_e_consola` + c33 FASE 13.7i | P2-bis: o pin (o predicado com o pin, o round-trip inspPinned retrocompatível, os ids do par 7432/7433) + a regra da consola (conCmdVisible pura; a lista ≥60% nos conteúdos reais 80/88/136/191/216/336dp; o E2E no harness @2.0 — tap no trilho fixa, a seta desfaz, o campo de comando sai do drawer pequeno, os PNGs+JSON) + o PIN DA ALFA do chrome (kChromeAlpha 0.60 + o composto de `chromeCol` — PASSO 3) |
-| R-038 | tests/test_sentinels.cpp `regress_hotfix_defeitos` (13) + c33 FASE 17.4 | m1: o slot do chip «N x» (vãos ≥8dp do título e do ⋮ em 2 densidades; sem espaço, o chip NÃO desenha — nada colado) |
-| R-039 | tests/test_sentinels.cpp `regress_hotfix_defeitos` (12)+(10) + c33 FASE 16.4/17.3 | m2: o format único normaliza «-0»→«0» (e os não-zeros mantêm o sinal) · m3: a limiar da letra do eixo (a 212/260dp a letra FICA; o valor nunca fica sem espaço) |
-| R-040 | tests/test_cameratic.cpp `cameratic_d20_contrato_medivel_bounding_e_preview` + c33 FASE 17.5 + scripts/gizmo_camera_medidas.py | D20: o bounding do gizmo ≤4%/≤6% da área do viewport (sem/com seleção) em 2 densidades; o comprimento do preview na ordem 48..120dp constante em ecrã; o far real (2000u) não é o desenho |
-| R-041 | tests/c33_virtual.cpp FASE 17.1/17.2 | D21: nenhum widget com o id 38 desenha no viewport em 4 estados; o menu ⋯ tem «Novo objeto» que abre o MESMO plusMenu do + da hierarquia |
-| R-037 | tests/test_sentinels.cpp `regress_janelas_passo4` + c33 FASE 18 (18.1-18.5) | PASSO 4 (0.9.6.20): J-01 os logs opacos 80% com o wrap no registo e no pixel · J-02 o véu 40% dos menus ancorados (o composto no pixel) · J-03 as linhas 36dp do Settings (a fonte + o registo) · J-04 os cantos suaves (o pixel (2,2) fora do raio) · o validador inteiro 0/0 |
-| gate | scripts/hierarchy_check.py (job core-tests do CI) | este ficheiro existe, a tabela §0 aponta símbolos REAIS, as sentinelas R-022..R-025 + R-033 existem no fonte |
-| gate | scripts/gizmo_camera_medidas.py (job core-tests do CI) | o dump `docs/hotfix19b-gizmo-medidas.json` (D20) cumpre os pins ≤4%/≤6% e a proveniência (viewport, bounding, preview) |
-
-Qualquer região nova: acrescenta AQUI (§1 + §0 se for topo de ramo) com
-a fonte no código, e a sentinela R-022 estende-se ao novo pai — o gate
-não deixa o código passar sem o contrato.
+29. **A ÁRVORE EDITA-SE (0.11-H · FASE 1)**: a linha da hierarquia passa a
+     `[chev 24][ícone 40][nome][olho 40][⋮ 40]` — o CHEVRON (só em TIC
+     com filhos; `icons::ChevronDown/ChevronRight`) expande/colapsa e o
+     estado vive POR NOME em `EditorState::hierCollapsed` (persiste no
+     layout.json via `bottom::serializeLayout`/`parseLayout` — as linhas
+     `hierColN=`/`hierCol=`; limpa na troca de cena). A zona do ÍCONE é o
+     claim do DRAG-REPARTENT (`UiContext::dragClaim` — a prioridade é a
+     do slider: drag na zona = o drag, no resto da linha = scroll; o tap
+     sem movimento mantém o toggle da multi-seleção). O drop ARMA
+     `hierReparentPending` e o main CONSUME no ponto seguro: revalida com
+     `editor::canReparentTo` (ciclo/alvo morto recusados — o drop num
+     alvo ilegal cancela), aplica com `editor::reparentTic` (muda SÓ o
+     pai — o TRS local fica) e empurra o undo do snapshot. Apagar com
+     filhos = `editor::destroyWithChildren` (o diálogo conta com
+     `editor::countSubtree` e DIZ o N); duplicar com filhos =
+     `editor::duplicateWithChildren` (deep clone, nomes únicos). PINs:
+     test_fase1_hierarquia (12 testes — o drag real do neto para outra
+     raiz com os filhos a acompanhar incluído).

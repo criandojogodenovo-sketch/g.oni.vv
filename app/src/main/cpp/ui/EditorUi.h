@@ -65,6 +65,9 @@
 #include "render/Primitives.h"   // 0.8.0: PrimParams no AssetResolvers
 #include "ui/Icons.h"            // FASE 9 (G2-7): hierIconFor devolve icons::Icon
 
+#include <string>
+#include <vector>
+
 namespace vv {
 
 class VoniSystem;   // 0.9.2: a central da V.ONI (fwd — o ponteiro chega ao drawInspector)
@@ -222,11 +225,39 @@ struct EditorState {
     // determinístico e afervável no CI.)
     Handle multiSelect[16] = {};
     u32    multiSelectCount = 0;
-    // DRAG de reparenting (parenting visual): arrastar do ÍCONE DE TIPO de
-    // uma linha para outra linha reparenta (drop no vazio = raiz)
-    bool   hierDrag = false;
-    Handle hierDragSrc{};
-    Handle hierDragDst{};
+    // DRAG de reparenting (0.11-H · FASE 1 — AGORA IMPLEMENTADO; os campos
+    // existiam como placeholder desde 0.9.0): arrastar do ÍCONE DE TIPO de
+    // uma linha para outra linha reparenta (drop no vazio da lista = raiz).
+    // O gesto: o claim é o do SLIDER (prioridade dentro do scroll — drag na
+    // zona do ícone = drag, no RESTO da linha continua a ser scroll; tap sem
+    // movimento na zona do ícone mantém o toggle da multi-seleção).
+    bool   hierDrag = false;      // arrasto em curso (movimento ≥ kTapPx)
+    Handle hierDragSrc{};         // a TIC arrastada
+    Handle hierDragDst{};         // a TIC alvo (invalid = drop no vazio → raiz)
+    bool   hierDragDstOk = false; // o alvo é LEGAL (canReparentTo; drop num
+                                  // alvo ilegal = cancelar, nunca aplica)
+    f32    hierDragX = 0.0f, hierDragY = 0.0f;   // pos do dedo (o fantasma)
+    // o claim ANTES do arrasto (dedo na zona do ícone, ainda sem mover):
+    bool   hierDragArm = false;
+    f32    hierDragArmX = 0.0f, hierDragArmY = 0.0f;   // pos do press
+    u64    hierDragClaimId = 0;   // o id do widget que reclamou o gesto (a
+                                  // limpeza do claim stale — a linha pode
+                                  // desaparecer a meio do gesto)
+    // o PEDIDO de reparent (o padrão dos pedidos do estado — o draw ARMA, o
+    // main CONSUME no ponto seguro: revalida com canReparentTo, empurra o
+    // undo do snapshot, toast + log). dst invalid = raiz.
+    bool   hierReparentPending = false;
+    Handle hierReparentSrc{};
+    Handle hierReparentDst{};
+
+    // 0.11-H (FASE 1) — EXPANDIR/COLAPSAR da árvore: os NOMES das TICs
+    // recolhidas (chave = nome — os handles morrem entre sessões; nomes
+    // repetidos partilham o estado, a limitação documentada). Persiste no
+    // layout.json (a mesma casa das preferências de UI — spec G) e é
+    // limpa na TROCA de cena (o estado é da cena aberta).
+    std::vector<std::string> hierCollapsed;
+    // o draw SETA e o main LIMPA com o save agendado (o debounce G1-5)
+    bool   hierCollapsedDirty = false;
 
     // 0.9.0 (spec C/G) — SECÇÕES COLAPSÁVEIS do Inspector (bitmask por
     // secção — ver kInspBit* no EditorLayout.h). PERSISTE no layout.json
@@ -301,6 +332,34 @@ struct EditorState {
     };
     ScriptVarView scriptVars[8];
 };
+
+// ---- 0.11-H (FASE 1) — o COLAPSO da árvore por NOME --------------------------
+// PURO e afervel (o draw e os testes partilham; o layout.json leva a lista).
+inline bool hierCollapsedHas(const std::vector<std::string>& v,
+                             const char* name) {
+    if (!name) {
+        return false;
+    }
+    for (const std::string& s : v) {
+        if (s == name) {
+            return true;
+        }
+    }
+    return false;
+}
+// toggle: presente → sai (expandir); ausente → entra (colapsar)
+inline void hierCollapsedToggle(std::vector<std::string>& v, const char* name) {
+    if (!name) {
+        return;
+    }
+    for (u32 i = 0; i < v.size(); ++i) {
+        if (v[i] == name) {
+            v.erase(v.begin() + static_cast<ptrdiff_t>(i));
+            return;
+        }
+    }
+    v.push_back(name);
+}
 
 // Rect do viewport central (entre os painéis) — usado para o gate da câmara.
 // Versão SEM safe-area (insets zero) mantida para compat/testes.

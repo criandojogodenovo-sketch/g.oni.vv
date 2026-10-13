@@ -34,6 +34,48 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.11-H — FASE 1: HIERARQUIA (a árvore edita-se)
+
+**O que o dono pediu**: os 5 itens da FASE 1 do plano por fases — drag-reparent
+na hierarquia, ícone por tipo de TIC, apagar com filhos (confirmação +
+recursivo), duplicar com filhos (deep clone com novos IDs) e expandir/colapsar
+persistente entre sessões. A auditoria prévia (e862479) confirmou o que já
+havia: o parêntelo/children, a composição do TransformSystem, o serializer e o
+undo por snapshot; os campos `hierDrag*` eram PLACEHOLDER desde 0.9.0; o
+apagar era SÓ o TIC (os filhos ficavam com parent para slot reutilizável —
+corrupção latente); o duplicar clonava UM TIC; o colapso não existia.
+
+**O que foi feito**: as operações puras de árvore em `ui/UiEditor`
+(`isDescendant`/`canReparentTo`/`reparentTic`/`collectSubtree`/
+`countSubtree`/`destroyWithChildren`/`duplicateWithChildren` — o guard de
+ciclo é o mesmo teto do `composeAt`); o drag-reparent com o claim de
+prioridade SLIDER na zona do ÍCONE DE TIPO (o scroll continua a nascer no
+resto da linha; o tap sem movimento mantém o toggle da multi-seleção), o
+alvo a seguir o dedo (o flick de 2 frames não perde o alvo), drop no vazio
+da lista = raiz, ciclo cancela sem aplicar, o consumo no main revalida e
+empurra o undo do snapshot, o fantasma segue o dedo e o guard do claim
+órfão limpa o gesto se a linha morrer; apagar com filhos com o diálogo a
+DIZER «e a sub-árvore (N TICs)?» (UM TIC mantém o undo de sempre; sub-árvore
+não tem undo — o op do UndoStack é por-UM-TIC, decisão documentada); deep
+clone com novos handles/nomes únicos/estrutura espelhada; o chevron por TIC
+com filhos com o estado POR NOME persistido no layout.json
+(`hierColN/hierCol` — retrocompatível, o mesmo debounce G1-5, a pesquisa
+ignora o colapso, a troca de cena limpa); ícones por tipo: ScriptComp→
+Terminal e AnimationPlayer→Clapper (a LUZ é da FASE 5 — sem componente de
+luz hoje, o placeholder está DECLARADO no `hierIconFor`). FIX de passagem: o
+tap da hierarquia calculava zonas em px crus (divergia do draw com
+densidade ≠ 1 — desenho e toque partilham a fórmula dp).
+
+**Provas**: 12 pins novos em `tests/test_fase1_hierarquia.cpp` (a aceitação
+da spec incluída: o drag REAL do neto para outra raiz com os filhos a
+acompanhar). Suíte inteira 0 falhas no harness local (a r039 verde com o
+disco limpo — o flake da sandbox documentado); gates locais verdes
+(check_main, link_parity, docs-lint 83, hierarchy-check com a regra 29 nova
+do contrato, ui-vocab, theme-hex, release-identity vc 69). O relatório
+completo (decisões e limites: o reparent mantém o TRS LOCAL — a casa não
+tem Mat4::inverse/decompose; o c33_virtual não foi estendido) está em
+`docs/RELATORIO-0.11-H-HIERARQUIA.md`. versionCode 69.
+
 ## 0.10.7 — 0.10-M PASSO 6: A VALIDAÇÃO FINAL (a campanha .gmesh v3 fecha com a tabela de medições)
 
 **O que o dono pediu**: a validação final da campanha COM a tabela de

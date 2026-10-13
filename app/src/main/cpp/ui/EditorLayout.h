@@ -741,6 +741,9 @@ constexpr u64 kGizmoSnapId        = 10;
 // colidem com as linhas 1000+ nem com os sliders 2000+ do Inspector)
 constexpr u64 kHierEyeBase  = 100000;
 constexpr u64 kHierDotsBase = 200000;
+// 0.11-H (FASE 1): o claim do DRAG-REPARTENT da zona do ícone (faixa alta
+// nova: + handle.index — 300000 está livre entre as duas faixas acima)
+constexpr u64 kHierDragBase = 300000;
 
 // menu contextual (⋮): Renomear/Remover/Duplicar/Visibilidade
 constexpr u64 kCtxRenameId  = 6500;

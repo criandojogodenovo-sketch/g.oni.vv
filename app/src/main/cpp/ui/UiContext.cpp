@@ -527,6 +527,28 @@ bool UiContext::dragHandle(u64 id, f32 x, f32 y, f32 w, f32 h) {
     return active_ == id;
 }
 
+// 0.11-H (FASE 1) — a pega com prioridade de SLIDER: a MESMA captura do
+// sliderCore (scroll::sliderCaptures — dentro da região de scroll o gesto é
+// DESTE widget), sem o trilho/thumb e sem o audit (não é alvo de tap). O
+// release limpa o claim; o gesto em si é consumido pelo chamador com o
+// input cru (o padrão da pega do drawer).
+bool UiContext::dragClaim(u64 id, f32 x, f32 y, f32 w, f32 h) {
+    const bool down = input_ && input_->down(0);
+    f32 px = -1.0f, py = -1.0f;
+    if (input_) {
+        input_->pos(0, px, py);
+    }
+    const bool inside = (px >= x && px < x + w && py >= y && py < y + h);
+    if (down && inside && active_ == 0 && scroll::sliderCaptures(inScroll_)) {
+        active_ = id;
+    }
+    if (active_ == id && !down) {
+        active_ = 0;
+        return false;
+    }
+    return active_ == id;
+}
+
 bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
     // 0.9.6.6 (GRUPO C): o texto do botão mede-se pelo CONTEXTO (fontWidth/
     // textMetrics — textK incluído). ANTES media-se pelo ATLAS CRU

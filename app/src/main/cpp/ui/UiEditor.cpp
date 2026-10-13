@@ -1347,7 +1347,7 @@ int drawContextMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 }
 
 int drawRemoveDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
-                     EditorState& st, const char* ticName) {
+                     EditorState& st, const char* ticName, u32 subtreeCount) {
     const f32 h = storageDialogHeight();   // título + 3 linhas + 2 botões
     const f32 ox = ui.safeLeft();
     const f32 oy = ui.safeTop();
@@ -1376,8 +1376,18 @@ int drawRemoveDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     ui.label(dlg.x + kPad, dlg.y + kHeaderH * 0.5f + th * 0.30f,
              "REMOVER TIC", theme::TEXT);
 
+    // 0.11-H (FASE 1 — apagar com filhos): com sub-árvore o pergunta DIZ o
+    // alcance (o dono nunca apaga N TICs sem saber que eram N); com UM TIC
+    // o texto é o de sempre, byte a byte.
     char line[96];
-    std::snprintf(line, sizeof(line), "Remover '%s'?", ticName ? ticName : "?");
+    if (subtreeCount > 1) {
+        std::snprintf(line, sizeof(line),
+                      "Remover '%s' e a sub-árvore (%u TICs)?",
+                      ticName ? ticName : "?", subtreeCount);
+    } else {
+        std::snprintf(line, sizeof(line), "Remover '%s'?",
+                      ticName ? ticName : "?");
+    }
     ui.labelFitted(dlg.x + kPad, dlg.y + kHeaderH + 20.0f, line, theme::TEXT,
                    dlg.w - 2.0f * kPad);
     ui.labelFitted(dlg.x + kPad, dlg.y + kHeaderH + 54.0f,
@@ -1399,54 +1409,238 @@ int drawRemoveDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     return chosen;
 }
 
+// ---------------------------------------------------------------------------
+// 0.11-H (FASE 1) — OPERAÇÕES DE ÁRVORE + o clone raso partilhado
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// mapa slot→Tic* dos TICs ativos (as operações de árvore constroem UMA vez
+// e resolvem pais por índice de slot — o MESMO contrato do drawHierarchy e
+// do TransformSystem; a Scene não expõe at(i) e não precisa de expor).
+std::vector<const Tic*> slotTable(const Scene& scene) {
+    std::vector<const Tic*> tab(scene.capacity(), nullptr);
+    scene.forEachActive([&](const Tic& t) {
+        if (t.handle.index < tab.size()) {
+            tab[t.handle.index] = &t;
+        }
+    });
+    return tab;
+}
+
+// clone raso de UM TIC (o corpo extraído do duplicateTic de sempre — UMA
+// fonte de verdade para o clone raso E para o deep clone): cria com nome/
+// pai dados, copia visible + TODOS os componentes por valor. Devolve o
+// handle novo (invalid se a cena recusar).
+Handle cloneTicInto(Scene& scene, Handle src, i32 parent,
+                    const std::string& name) {
+    const Tic* s = scene.get(src);
+    if (!s) {
+        return Handle::invalid();
+    }
+    const Handle nh = scene.create(name, parent);
+    Tic* dst = scene.get(nh);
+    if (!dst) {
+        return Handle::invalid();
+    }
+    dst->visible = s->visible;
+
+    // componentes por VALOR (os storages são SoA — a cópia é exata; os
+    // ponteiros não-donos de Mesh/Texture/Material apontam para objetos
+    // partilhados de runtime — a mesma política do load do serializer)
+    ComponentStore& store = scene.components();
+    if (const Transform3D* c = store.transforms().find(src)) {
+        dst->addComponent<Transform3D>(*c);
+    }
+    if (const MeshRenderer* c = store.meshRenderers().find(src)) {
+        dst->addComponent<MeshRenderer>(*c);
+    }
+    if (const InputMap* c = store.inputMaps().find(src)) {
+        dst->addComponent<InputMap>(*c);
+    }
+    if (const BodyComp* c = store.bodies().find(src)) {
+        dst->addComponent<BodyComp>(*c);
+    }
+    if (const TouchControls* c = store.touchControls().find(src)) {
+        dst->addComponent<TouchControls>(*c);
+    }
+    if (const UiCanvas* c = store.uiCanvases().find(src)) {
+        dst->addComponent<UiCanvas>(*c);
+    }
+    return nh;
+}
+
+// nome único Godot-style a partir de `base` («base.001», «base.002»… contra
+// TODOS os nomes vivos da cena — o find() da cena continua determinístico).
+std::string uniqueTicName(Scene& scene, const std::string& base) {
+    std::string b = base;
+    if (b.size() > 28) {
+        b = b.substr(0, 28);
+    }
+    char name[48];
+    u32 suffix = 1;
+    do {
+        std::snprintf(name, sizeof(name), "%s.%03u", b.c_str(), suffix);
+        ++suffix;
+    } while (scene.find(name).valid() && suffix < 1000);
+    return std::string(name);
+}
+
+} // namespace
+
+bool isDescendant(const Scene& scene, Handle ancestor, Handle h) {
+    if (!ancestor.valid() || !h.valid()) {
+        return false;
+    }
+    const std::vector<const Tic*> tab = slotTable(scene);
+    u32 slot = h.index;
+    const u32 target = ancestor.index;
+    // caminho pelos pais com teto = capacidade (um parent em ciclo TERMINA —
+    // o mesmo guard do composeAt do TransformSystem)
+    for (u32 i = 0; i < tab.size() && slot < tab.size(); ++i) {
+        if (slot == target) {
+            return true;
+        }
+        const Tic* t = tab[slot];
+        if (!t || t->parent < 0) {
+            return false;
+        }
+        slot = static_cast<u32>(t->parent);
+    }
+    return false;
+}
+
+bool canReparentTo(const Scene& scene, Handle src, Handle newParent) {
+    if (!scene.get(src)) {
+        return false;   // src morto
+    }
+    if (!newParent.valid()) {
+        return true;    // raiz — sempre legal com src vivo
+    }
+    if (newParent == src) {
+        return false;   // pai de si próprio
+    }
+    if (!scene.get(newParent)) {
+        return false;   // alvo morto
+    }
+    // o alvo dentro da sub-árvore de src = ciclo (o pai do próprio ascendente)
+    return !isDescendant(scene, src, newParent);
+}
+
+bool reparentTic(Scene& scene, Handle src, Handle newParent) {
+    if (!canReparentTo(scene, src, newParent)) {
+        return false;
+    }
+    Tic* t = scene.get(src);
+    t->parent = newParent.valid() ? static_cast<i32>(newParent.index) : -1;
+    return true;
+}
+
+std::vector<Handle> collectSubtree(const Scene& scene, Handle root) {
+    std::vector<Handle> out;
+    const Tic* r = scene.get(root);
+    if (!r) {
+        return out;
+    }
+    const std::vector<const Tic*> tab = slotTable(scene);
+    out.push_back(r->handle);
+    // BFS por slots (pais antes de filhos por construção); guard de ciclo
+    // com o conjunto de visitados (o mesmo padrão dos walks do hotfix P0)
+    for (u32 i = 0; i < out.size(); ++i) {
+        const u32 parentSlot = out[i].index;
+        if (parentSlot >= tab.size()) {
+            continue;
+        }
+        for (u32 slot = 0; slot < tab.size(); ++slot) {
+            const Tic* t = tab[slot];
+            if (!t || t->parent != static_cast<i32>(parentSlot)) {
+                continue;
+            }
+            bool seen = false;
+            for (const Handle& h : out) {
+                if (h.index == slot) {
+                    seen = true;   // ciclo — nunca re-enfileira
+                    break;
+                }
+            }
+            if (!seen) {
+                out.push_back(t->handle);
+            }
+        }
+    }
+    return out;
+}
+
+u32 countSubtree(const Scene& scene, Handle root) {
+    return static_cast<u32>(collectSubtree(scene, root).size());
+}
+
+u32 destroyWithChildren(Scene& scene, Handle root) {
+    const std::vector<Handle> sub = collectSubtree(scene, root);
+    u32 n = 0;
+    // destrói FILHOS primeiro (a ordem segura: se algo interromper a meio,
+    // os pais vivos nunca apontam para slots já libertados)
+    for (u32 i = sub.size(); i > 0; --i) {
+        if (scene.destroy(sub[i - 1])) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+Handle duplicateWithChildren(Scene& scene, Handle root) {
+    const Tic* srcRoot = scene.get(root);
+    if (!srcRoot) {
+        return Handle::invalid();
+    }
+    const std::vector<Handle> sub = collectSubtree(scene, root);
+    if (sub.empty()) {
+        return Handle::invalid();
+    }
+    // mapa slot de ORIGEM → handle do CLONE (a estrutura espelha-se pelos
+    // pais: o clone de um filho recebe o clone do SEU pai)
+    std::vector<Handle> cloneBySlot(scene.capacity(), Handle::invalid());
+    Handle cloneRoot = Handle::invalid();
+    for (const Handle& h : sub) {
+        const Tic* s = scene.get(h);
+        if (!s) {
+            continue;   // mutação durante o clone — o resto segue
+        }
+        // pai do clone: o root clona com o pai do ORIGINAL; os filhos com o
+        // clone do SEU pai (o collectSubtree garante pais antes de filhos)
+        i32 parent = -1;
+        if (h != root) {
+            const u32 pslot = static_cast<u32>(s->parent);
+            const Handle& pc =
+                (s->parent >= 0 && pslot < cloneBySlot.size())
+                    ? cloneBySlot[pslot]
+                    : Handle::invalid();
+            parent = pc.valid() ? static_cast<i32>(pc.index) : -1;
+        } else {
+            parent = s->parent;
+        }
+        const Handle nh = cloneTicInto(scene, h, parent,
+                                       uniqueTicName(scene, s->name));
+        if (!nh.valid()) {
+            continue;
+        }
+        cloneBySlot[h.index] = nh;
+        if (h == root) {
+            cloneRoot = nh;
+        }
+    }
+    return cloneRoot;
+}
+
 Handle duplicateTic(Scene& scene, Handle h) {
     Tic* src = scene.get(h);
     if (!src) {
         return Handle::invalid();
     }
     // nome único Godot-style: base.001, base.002, …
-    std::string base = src->name;
-    if (base.size() > 28) {
-        base = base.substr(0, 28);
-    }
-    char name[48];
-    u32 suffix = 1;
-    do {
-        std::snprintf(name, sizeof(name), "%s.%03u", base.c_str(), suffix);
-        ++suffix;
-    } while (scene.find(name).valid() && suffix < 1000);
-
-    const Handle nh = scene.create(name);
-    Tic* dst = scene.get(nh);
-    if (!dst) {
-        return Handle::invalid();
-    }
-    dst->visible = src->visible;
-    dst->parent = src->parent;
-
-    // componentes por VALOR (os storages são SoA — a cópia é exata; os
-    // ponteiros não-donos de Mesh/Texture/Material apontam para objetos
-    // partilhados de runtime — a mesma política do load do serializer)
-    ComponentStore& store = scene.components();
-    if (const Transform3D* c = store.transforms().find(h)) {
-        dst->addComponent<Transform3D>(*c);
-    }
-    if (const MeshRenderer* c = store.meshRenderers().find(h)) {
-        dst->addComponent<MeshRenderer>(*c);
-    }
-    if (const InputMap* c = store.inputMaps().find(h)) {
-        dst->addComponent<InputMap>(*c);
-    }
-    if (const BodyComp* c = store.bodies().find(h)) {
-        dst->addComponent<BodyComp>(*c);
-    }
-    if (const TouchControls* c = store.touchControls().find(h)) {
-        dst->addComponent<TouchControls>(*c);
-    }
-    if (const UiCanvas* c = store.uiCanvases().find(h)) {
-        dst->addComponent<UiCanvas>(*c);
-    }
-    return nh;
+    const std::string name = uniqueTicName(scene, src->name);
+    // o clone raso de sempre: MESMO pai, MESMOS componentes por valor
+    return cloneTicInto(scene, h, src->parent, name);
 }
 
 // ---------------------------------------------------------------------------

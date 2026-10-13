@@ -196,6 +196,23 @@ public:
     // dedo segura a pega.
     bool dragHandle(u64 id, f32 x, f32 y, f32 w, f32 h);
 
+    // 0.11-H (FASE 1) — PEGA DE ARRASTO com prioridade de SLIDER (captura
+    // DENTRO da região de scroll — o padrão do sliderCore: «drag na zona
+    // reclamada = o dono, no resto = scroll»). Sem registo no audit (não é
+    // alvo de tap — o mesmo do dragHandle). Devolve true enquanto o gesto
+    // é DESTE widget; o release limpa (o chamador decide o que o gesto fez).
+    // O consumidor: a zona do ÍCONE DE TIPO da hierarquia (drag-reparent).
+    bool dragClaim(u64 id, f32 x, f32 y, f32 w, f32 h);
+
+    // 0.11-H: a limpeza EXPLÍCITA de um claim órfão (a linha reclamante pode
+    // desaparecer a meio do gesto — TIC apagada por trás da UI; sem isto o
+    // active_ preso bloqueava TODOS os gestos seguintes).
+    void releaseClaim(u64 id) {
+        if (active_ == id) {
+            active_ = 0;
+        }
+    }
+
     // FASE 9 (G2-7): o dedo (slot 0) está EM CIMA deste rect AGORA?
     // Leitura PURA do input (sem claim, sem gesto) — para o long-press do
     // nome da hierarquia (o contador de frames vive no EditorState).
@@ -206,6 +223,17 @@ public:
         f32 px = -1.0f, py = -1.0f;
         input_->pos(0, px, py);
         return px >= x && px < x + w && py >= y && py < y + h;
+    }
+
+    // 0.11-H (FASE 1): a POS do dedo (slot 0), leitura PURA (sem claim).
+    // false = sem dedo em baixo (x/y intocados). O drag da hierarquia lê o
+    // dedo por frame (alvo sob o dedo + o fantasma).
+    bool pointerPos(f32& x, f32& y) const {
+        if (!input_ || !input_->down(0)) {
+            return false;
+        }
+        input_->pos(0, x, y);
+        return true;
     }
 
     // F3: slider horizontal immediate-mode (Inspector do Transform3D).

@@ -848,7 +848,8 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
 // ---- persistência (spec G) ----------------------------------------------------
 std::string serializeLayout(const BottomState& bs, bool showInspector,
                             u32 inspCollapsed, f32 hierW, f32 inspW,
-                            bool inspPinned) {
+                            bool inspPinned,
+                            const std::vector<std::string>& hierCollapsed) {
     char buf[144];
     std::snprintf(buf, sizeof(buf),
                   "bottomTab=%d\ndrawerH=%d\ninspector=%d\ninspCollapsed=%u\n"
@@ -857,16 +858,43 @@ std::string serializeLayout(const BottomState& bs, bool showInspector,
                   showInspector ? 1 : 0, inspCollapsed,
                   static_cast<int>(hierW), static_cast<int>(inspW),
                   inspPinned ? 1 : 0);
-    return std::string(buf);
+    std::string out(buf);
+    // 0.11-H (FASE 1): o colapso da hierarquia — hierColN=<n> + n linhas
+    // hierCol=<nome>. Um nome com '\n' NUNCA se grava (partiria o formato
+    // linha-a-linha — a defesa é aqui, na fonte única; nomes com '=' são
+    // inofensivos: o prefixo hierCol= consome só a cabecinha).
+    u32 writable = 0;
+    for (const std::string& n : hierCollapsed) {
+        if (n.find('\n') == std::string::npos && !n.empty()) {
+            ++writable;
+        }
+    }
+    if (writable > 0) {
+        char head[32];
+        std::snprintf(head, sizeof(head), "hierColN=%u\n", writable);
+        out += head;
+        for (const std::string& n : hierCollapsed) {
+            if (n.find('\n') == std::string::npos && !n.empty()) {
+                out += "hierCol=";
+                out += n;
+                out += "\n";
+            }
+        }
+    }
+    return out;
 }
 
 bool parseLayout(const std::string& data, BottomState& bs, bool& showInspector,
-                 u32& inspCollapsed, f32* hierW, f32* inspW, bool* inspPinned) {
+                 u32& inspCollapsed, f32* hierW, f32* inspW, bool* inspPinned,
+                 std::vector<std::string>* hierCollapsed) {
     if (data.empty()) {
         return false;
     }
     int tab = -1, dh = -1, insp = -1, hw = -9999, iw = -9999, pin = 0;
     unsigned collapsed = 0xFFFFFFFFu;
+    if (hierCollapsed) {
+        hierCollapsed->clear();   // 0.11-H: o out-param é SEMPRE reposto
+    }
     const char* p = data.c_str();
     while (*p) {
         if (std::strncmp(p, "bottomTab=", 10) == 0) {
@@ -883,6 +911,16 @@ bool parseLayout(const std::string& data, BottomState& bs, bool& showInspector,
             iw = std::atoi(p + 6);
         } else if (std::strncmp(p, "inspPinned=", 11) == 0) {
             pin = std::atoi(p + 11);   // P2-bis: o pin do inspector
+        } else if (std::strncmp(p, "hierCol=", 8) == 0 &&
+                   hierCollapsed) {
+            // 0.11-H: o nome vai ATÉ ao '\n' (o '=' dentro do nome é
+            // inofensivo — o prefixo já consumiu a cabecinha)
+            const char* eol = std::strchr(p, '\n');
+            const u32 len = static_cast<u32>(
+                (eol ? eol : p + std::strlen(p)) - (p + 8));
+            if (len > 0 && len < 256) {
+                hierCollapsed->emplace_back(p + 8, len);
+            }
         }
         p = std::strchr(p, '\n');
         if (!p) {

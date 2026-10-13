@@ -75,6 +75,9 @@ add_executable(test_core
         # editor dedicado (viewport 2D, teclado in-app, gestão de TICs, cor)
         test_uicanvas.cpp
         test_uieditor.cpp
+        # 0.11-H (FASE 1): a HIERARQUIA — drag-reparent, apagar/duplicar com
+        # filhos, expandir/colapsar persistente, ícones por tipo
+        test_fase1_hierarquia.cpp
         # 0.7.1: cenas múltiplas + transições (projeto e2e, SceneFx puro,
         # overlay CENAS, ações Scene.Load/Transition)
         test_scenes.cpp

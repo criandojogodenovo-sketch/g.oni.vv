@@ -207,12 +207,59 @@ int drawContextMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                     bool hasCamera = false);
 
 // diálogo de confirmação de remoção: 0 nada / 1 confirmar / 2 cancelar.
+// 0.11-H (FASE 1): `subtreeCount` = o nº de TICs que vão morrer (o root
+// incluído — o main conta com countSubtree); >1 muda o texto para
+// «Remover 'X' e a sub-árvore (N TICs)?» (o apagar de UM TIC mantém o
+// texto de sempre, byte a byte).
 int drawRemoveDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
-                     EditorState& st, const char* ticName);
+                     EditorState& st, const char* ticName,
+                     u32 subtreeCount = 1);
 
 // duplica o TIC (todos os componentes por valor; nome único com sufixo
 // Godot-style ".001"). Devolve o handle novo (invalid se o alvo morreu).
 Handle duplicateTic(Scene& scene, Handle h);
+
+// ---- 0.11-H (FASE 1) — OPERAÇÕES DE ÁRVORE da hierarquia --------------------
+// O contrato do parêntelo/children já existia (Tic.parent + TransformSystem
+// + serializer); o que faltava era a EDIÇÃO da árvore. Tudo PURO sobre a
+// Scene (sem GL, sem storage) — afervel no CI (test_fase1_hierarquia).
+
+// `h` é descendente de `ancestor` (ou o próprio)? Caminho pelos pais com
+// guard de ciclo (um parent em ciclo termina no teto da capacidade — nunca
+// pendura). Pura/afervel.
+bool isDescendant(const Scene& scene, Handle ancestor, Handle h);
+
+// O reparent de `src` para `newParent` é legal? `newParent` invalid = RAIZ
+// (legal com src vivo). Recusas: src morto; newParent == src; newParent
+// DENTRO da sub-árvore de src (mexe para o próprio descendente = ciclo).
+// Pura/afervel — a MESMA função do drop do drag e do consumo no main.
+bool canReparentTo(const Scene& scene, Handle src, Handle newParent);
+
+// executa o reparent: MUDA SÓ o pai (o TRS local fica — o TransformSystem
+// recomputa os mundos no próximo tick; decisão documentada: a matriz da
+// casa não tem inverse/decompose, o «manter transform mundial» fica para
+// uma fase futura se o dono quiser). false se canReparentTo recusa.
+bool reparentTic(Scene& scene, Handle src, Handle newParent);
+
+// sub-árvore de `root` (o root PRIMEIRO, pais antes de filhos, ordem de
+// slot dentro de cada nível; guard de ciclo). Vazia se o root morreu.
+std::vector<Handle> collectSubtree(const Scene& scene, Handle root);
+
+// nº de TICs na sub-árvore (root incluído) — o contador do diálogo de
+// remoção. 0 se o root morreu.
+u32 countSubtree(const Scene& scene, Handle root);
+
+// apaga a sub-árvore INTEIRA (root incluído; filhos primeiro NUNCA deixa
+// parent pendurado para slot reutilizável — a corrupção latente do delete
+// simples morre). Devolve o nº apagado. SEM undo (o op do UndoStack cobre
+// UM TIC — sub-árvore não cabe; o diálogo diz «não há desfazer»).
+u32 destroyWithChildren(Scene& scene, Handle root);
+
+// deep clone: duplica root + TODA a sub-árvore (novos handles, nomes únicos
+// Godot-style, estrutura espelhada, componentes por valor — a mesma
+// política do duplicateTic). Devolve o handle do clone RAIZ (invalid se o
+// root morreu). SEM undo (o duplicar de sempre também não empurra).
+Handle duplicateWithChildren(Scene& scene, Handle root);
 
 // ---- teclado in-app + input de texto ---------------------------------------------
 

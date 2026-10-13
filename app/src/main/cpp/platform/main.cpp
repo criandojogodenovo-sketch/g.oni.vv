@@ -309,7 +309,8 @@ static void saveLayoutNow(const char* reason) {
     const std::string data = editor::bottom::serializeLayout(
         g_bottom, g_editor.showInspector,
         g_editor.inspCollapsed | (g_editor.settingsCollapsed << 8),
-        g_editor.hierW, g_editor.inspW, g_editor.inspPinned);
+        g_editor.hierW, g_editor.inspW, g_editor.inspPinned,
+        g_editor.hierCollapsed);   // 0.11-H: a lista das TICs recolhidas
     if (data == g_lastLayoutSaved) {
         return;   // nada mudou — NÃO grava (a regra de sempre)
     }
@@ -333,6 +334,12 @@ static void scheduleLayoutSave(const char* reason) {
 static void layoutSaveTick(f32 dt) {
     if (!g_storage) {
         return;
+    }
+    // 0.11-H (FASE 1): o draw da hierarquia ARMA o dirty no toggle do
+    // chevron — o save entra no MESMO debounce do layout (G1-5)
+    if (g_editor.hierCollapsedDirty) {
+        g_editor.hierCollapsedDirty = false;
+        scheduleLayoutSave("árvore recolhida/expandida");
     }
     const int tab = g_bottom.bottomTab;
     const int drawer = static_cast<int>(g_bottom.drawerH);
@@ -397,7 +404,8 @@ static void loadLayoutNow() {
             u32 collapsed = 0;
             if (editor::bottom::parseLayout(text, g_bottom, insp, collapsed,
                                              &g_editor.hierW,
-                                             &g_editor.inspW, &pin)) {
+                                             &g_editor.inspW, &pin,
+                                             &g_editor.hierCollapsed)) {
                 g_editor.showInspector = insp;
                 g_editor.inspPinned = pin;
                 g_editor.inspCollapsed = collapsed & 0xFFu;
@@ -1222,6 +1230,12 @@ void doSwitchScene(u32 idx) {
         elog::error("cena: load de '%s' FALHOU", g_project.scenes[idx].c_str());
     }
     editor::clearSelection(g_editor);   // seleção não sobrevive à troca
+    // 0.11-H (FASE 1): o colapso da árvore é estado DA CENA — a troca
+    // recomeça (a lista do layout.json é a da cena que estava aberta ao
+    // gravar; cada cena própria reabre com o SEU estado quando for a ativa
+    // no arranque — a limitação é documentada no relatório)
+    g_editor.hierCollapsed.clear();
+    g_editor.hierCollapsedDirty = false;
     g_playUi.armed = false;
     refreshCatalog();
 }
@@ -6308,6 +6322,41 @@ void frame() {
             g_editor.plusMenu = true;   // "+" no cabeçalho abre os presets
             g_editor.fileMenu = false;
         }
+        // 0.11-H (FASE 1) — O CONSUMO do reparent do DRAG (o padrão dos
+        // pedidos do estado): o draw ARMOU, aqui é o PONTO SEGURO —
+        // revalidação com canReparentTo (a cena pode ter mudado no frame),
+        // undo do snapshot (o reparent é UMA edição de UM TIC — o TicSnap
+        // cobre), toast + log. O alvo invalid = drop no vazio = RAIZ.
+        if (g_editor.hierReparentPending) {
+            g_editor.hierReparentPending = false;
+            const Handle src = g_editor.hierReparentSrc;
+            const Handle dstP = g_editor.hierReparentDst;
+            const Tic* moved = g_scene.get(src);
+            if (moved && editor::canReparentTo(g_scene, src, dstP)) {
+                const editor::TicSnap before = editor::snapTic(g_scene, src);
+                if (editor::reparentTic(g_scene, src, dstP)) {
+                    g_undo.push(before, editor::snapTic(g_scene, src), src);
+                    char movedName[48];
+                    std::snprintf(movedName, sizeof(movedName), "%.40s",
+                                  moved->name.c_str());
+                    if (dstP.valid()) {
+                        const Tic* p = g_scene.get(dstP);
+                        showToast("reparent concluído");
+                        LOGI("hierarquia: '%s' reparentado para '%s'",
+                             movedName, p ? p->name.c_str() : "?");
+                    } else {
+                        showToast("TIC movido para a raiz");
+                        LOGI("hierarquia: '%s' reparentado para a RAIZ",
+                             movedName);
+                    }
+                }
+            } else if (moved) {
+                // a revalidação recusou (alvo morreu / ciclo): honesto
+                showToast("reparent recusado (alvo inválido ou ciclo)");
+                LOGI("hierarquia: reparent RECUSADO (canReparentTo false — "
+                     "alvo morto ou dentro da própria sub-árvore)");
+            }
+        }
         const bool uiInsp =
             g_editor.uiMode && (g_editor.selElement >= 0 || g_editor.selJoystick);
         if (uiInsp) {
@@ -6705,10 +6754,13 @@ void frame() {
             // 0.9.6.10 (GRUPO UI · secção EDITAR): DUPLICAR — o MESMO
             // caminho do botão do viewport (duplica E arma o clipboard)
             // 0.9.6.19b (D21): era choice 9 (o «Novo objeto» desloca +1)
+            // 0.11-H (FASE 1): DEEP CLONE (a sub-árvore segue; com UM TIC é
+            // o duplicar de sempre)
             if (const Tic* sel = g_scene.get(g_editor.selected)) {
                 g_clipSnap = editor::snapTic(g_scene, sel->handle);
                 g_clipValid = true;
-                const Handle dup = editor::duplicateTic(g_scene, g_editor.selected);
+                const Handle dup = editor::duplicateWithChildren(
+                    g_scene, g_editor.selected);
                 if (dup.valid()) {
                     editor::selectTic(g_editor, dup);
                     showToast("TIC duplicado");
@@ -7064,14 +7116,19 @@ void frame() {
                 // REMOVER: com confirmação (substitui o apagar sem aviso)
                 g_editor.removeDialog = true;
             } else if (ch == 3) {
-                // DUPLICAR: todos os componentes por valor + nome único
+                // DUPLICAR — 0.11-H (FASE 1): DEEP CLONE (a sub-árvore
+                // inteira, novos handles, nomes únicos); com UM TIC o
+                // comportamento é o de sempre, byte a byte
+                const u32 subN = editor::countSubtree(g_scene, g_editor.contextTic);
                 const Handle dup =
-                    editor::duplicateTic(g_scene, g_editor.contextTic);
+                    editor::duplicateWithChildren(g_scene, g_editor.contextTic);
                 if (dup.valid()) {
                     editor::selectTic(g_editor, dup);
-                    showToast("TIC duplicado");
+                    showToast(subN > 1 ? "sub-árvore duplicada"
+                                       : "TIC duplicado");
                     if (const Tic* nd = g_scene.get(dup)) {
-                        LOGI("editor: TIC duplicado → '%s'", nd->name.c_str());
+                        LOGI("editor: TIC '%s' duplicado (sub-árvore %u TICs)",
+                             nd->name.c_str(), subN);
                     }
                 }
             } else if (ch == 4) {
@@ -7094,22 +7151,42 @@ void frame() {
         if (!ct) {
             g_editor.removeDialog = false;
         } else {
+            // 0.11-H (FASE 1): o diálogo SABE o alcance (a sub-árvore inteira
+            // morre — o texto mostra o N; o dono nunca apaga às cegas)
+            const u32 subN = editor::countSubtree(g_scene, ct->handle);
             const int ch =
                 editor::drawRemoveDialog(g_ui, g_input, w, h, g_editor,
-                                         ct->name.c_str());
+                                         ct->name.c_str(), subN);
             if (ch == 1) {
-                // 0.9.0 — UNDO do delete: before = o TIC, after = vazio
-                const editor::TicSnap gone = editor::snapTic(g_scene, ct->handle);
-                editor::TicSnap empty;
-                g_undo.push(gone, empty, ct->handle);
                 char goneName[48];
                 std::snprintf(goneName, sizeof(goneName), "%.40s", ct->name.c_str());
-                g_scene.destroy(g_editor.contextTic);
+                if (subN <= 1) {
+                    // 0.9.0 — UNDO do delete de UM TIC (before = o TIC,
+                    // after = vazio; o undo re-cria pelo snapshot)
+                    const editor::TicSnap gone =
+                        editor::snapTic(g_scene, ct->handle);
+                    editor::TicSnap empty;
+                    g_undo.push(gone, empty, ct->handle);
+                    g_scene.destroy(g_editor.contextTic);
+                    showToast("TIC removido");
+                } else {
+                    // 0.11-H — APAGAR COM FILHOS: a sub-árvore INTEIRA (a
+                    // corrupção latente do delete simples — filhos com
+                    // parent para slot reutilizável — morre aqui). SEM undo
+                    // (o op do UndoStack cobre UM TIC; o diálogo diz
+                    // «não há desfazer» — a decisão documentada da FASE 1)
+                    const u32 n = editor::destroyWithChildren(
+                        g_scene, g_editor.contextTic);
+                    showToast("TICs removidos");
+                    LOGI("editor: sub-árvore de '%s' removida (%u TICs)",
+                         goneName, n);
+                }
                 if (g_editor.selected == g_editor.contextTic) {
                     editor::clearSelection(g_editor);
                 }
-                showToast("TIC removido");
-                LOGI("editor: TIC '%s' removido", goneName);
+                if (subN <= 1) {
+                    LOGI("editor: TIC '%s' removido", goneName);
+                }
             }
         }
     }

@@ -494,6 +494,10 @@ void drawPanelDividers(UiContext& ui, const EditorState& st, bool rightPanel) {
 // FASE 9 (G2-7): o ícone de tipo da HIERARQUIA — o BodyComp é consultado
 // PRIMEIRO (corpos têm ícone PRÓPRIO: tic_static/tic_player/tic_rigid),
 // depois câmara/áudio/UI/mesh/entrada. Função PURA (afervável no CI).
+// 0.11-H (FASE 1): o TIC de SCRIPT e o de ANIMAÇÃO saem do «cubo genérico»
+// (Terminal/Clapper — ícones que JÁ existem no conjunto). A LUZ entra na
+// FASE 5 (0.11-L): não há componente de luz na engine hoje — nada para
+// consultar aqui (limitação DECLARADA, não escondida).
 icons::Icon hierIconFor(const Tic& t) {
     if (t.getComponent<CameraComp>()) {
         return icons::Icon::Camera;
@@ -511,6 +515,12 @@ icons::Icon hierIconFor(const Tic& t) {
     }
     if (t.getComponent<UiCanvas>()) {
         return icons::Icon::Monitor;
+    }
+    if (t.getComponent<AnimationPlayer>()) {
+        return icons::Icon::Clapper;   // 0.11-H: animação ≠ mesh genérica
+    }
+    if (t.getComponent<ScriptComp>()) {
+        return icons::Icon::Terminal;  // 0.11-H: script ≠ mesh genérica
     }
     if (const MeshRenderer* mr = t.getComponent<MeshRenderer>()) {
         return mr->primOn ? icons::Icon::Cube : icons::Icon::Box;
@@ -549,9 +559,14 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
     // ---- árvore visível: raízes primeiro, filhos recursivamente ------------
     // (o filtro de pesquisa esconde linhas que não casam; os filhos de uma
     // linha escondida também saem — a árvore continua coerente)
+    // 0.11-H (FASE 1): a linha com FILHOS leva o chevron (expandir/colapsar);
+    // uma TIC recolhida (o NOME em st.hierCollapsed) NÃO visita os filhos —
+    // com pesquisa ativa o colapso é IGNORADO (a pesquisa mostra tudo o que
+    // casa, a decisão da spec B de sempre)
     struct Row {
         Handle h;
         u32    depth;
+        bool   hasKids;
     };
     Row rows[64];
     u32 nRows = 0;
@@ -571,13 +586,29 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
             slots[nSlots++] = {static_cast<i32>(t.handle.index), &t};
         }
     });
+    // quem tem filhos (o chevron só nasce em pai — UMA passada, o mesmo
+    // contrato de parent = índice do slot)
+    bool hasKidsTab[64] = {};
+    for (u32 i = 0; i < nSlots; ++i) {
+        const i32 p = slots[i].t->parent;
+        if (p >= 0) {
+            for (u32 j = 0; j < nSlots; ++j) {
+                if (slots[j].idx == p) {
+                    hasKidsTab[j] = true;
+                    break;
+                }
+            }
+        }
+    }
     // visita depth-first: filhos de cur (parent == cur) por ordem de slot
     struct Walk {
         const Slot* slots;
         u32 nSlots;
+        const bool* hasKidsTab;
         Row* rows;
         u32* n;
         const char* needle;
+        const std::vector<std::string>* collapsed;   // 0.11-H: os recolhidos
         void visit(i32 cur, u32 depth) {
             if (*n >= 64) {
                 return;
@@ -593,12 +624,20 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                     visit(slots[i].idx, depth);   // filho pode casar
                     continue;
                 }
-                rows[(*n)++] = {t.handle, depth};
-                visit(slots[i].idx, depth + 1);
+                rows[(*n)++] = {t.handle, depth, hasKidsTab[i]};
+                // 0.11-H: TIC recolhida esconde a sub-árvore (a pesquisa
+                // ignora o colapso — mostrar tudo o que casa)
+                const bool folded =
+                    !needle && collapsed &&
+                    hierCollapsedHas(*collapsed, t.name.c_str());
+                if (!folded) {
+                    visit(slots[i].idx, depth + 1);
+                }
             }
         }
     };
-    Walk wk{slots, nSlots, rows, &nRows, needle};
+    Walk wk{slots, nSlots, hasKidsTab, rows, &nRows, needle,
+            &st.hierCollapsed};
     wk.visit(-1, 0);
 
     // ---- cabeçalho 48dp: título 12sp text-2 + [+] 48dp ----------------------
@@ -744,14 +783,84 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
         ui.beginScroll(kIdScrollHier, listRegion, contentH);
         const f32 off = ui.scrollOffset();
 
-        // geometria da linha (PASSO 1 · spec B): [ícone tipo 20 na zona
-        // 40][nome flex][olho 40zona][⋮ 40zona] — as ZONAS de toque 40dp
-        // de largura × a LINHA de 36 (o despacho do scrollTap usa AS
-        // MESMAS zonas — desenho e toque NUNCA divergem; ícones 20)
+        // geometria da linha (PASSO 1 · spec B): [chev 24 (0.11-H)][ícone
+        // tipo 20 na zona 40][nome flex][olho 40zona][⋮ 40zona] — as ZONAS
+        // de toque 40dp de largura × a LINHA de 36 (o despacho do scrollTap
+        // usa AS MESMAS zonas — desenho e toque NUNCA divergem; ícones 20).
+        // 0.11-H: a zona do CHEVRON (24dp) vem antes da do ícone — TODAS as
+        // linhas deslocam +24dp (grelha consistente); o nome perde os 24dp
+        // (trunca por desenho como sempre; o tip do long-press é o acesso)
         const f32 zoneW = theme::dp(40.0f);
+        const f32 chevW = theme::dp(24.0f);   // 0.11-H: a zona do chevron
         const f32 eyeX = x + w - zoneW - theme::dp(8.0f) -
                          zoneW;   // zona olho
         const f32 dotsX = x + w - zoneW - theme::dp(4.0f);   // zona ⋮ (até à borda)
+
+        // ---- 0.11-H (FASE 1) — O DRAG-REPARTENT (o estado é do EditorState,
+        // o claim é o do slider): o gesto nasce na zona do ÍCONE DE TIPO.
+        //   press na zona   → hierDragArm (o claim é DESTE widget)
+        //   move ≥ kTapPx   → hierDrag (o alvo segue o dedo; drop no vazio
+        //                     da lista = raiz; alvo ilegal NÃO acende)
+        //   release sem mover = o tap de sempre (toggle da multi-seleção)
+        //   release com drag  = ARMA hierReparentPending (o main aplica com
+        //                       undo no ponto seguro)
+        f32 dragPx = -1.0f, dragPy = -1.0f;
+        const bool dragFinger = ui.pointerPos(dragPx, dragPy);
+        if (!dragFinger && (st.hierDrag || st.hierDragArm)) {
+            // o dedo LEVANTOU (fora do loop — a linha reclamante pode ter
+            // saído do array visível): finalize AQUI
+            if (st.hierDrag && st.hierDragDstOk) {
+                st.hierReparentPending = true;
+                st.hierReparentSrc = st.hierDragSrc;
+                st.hierReparentDst = st.hierDragDst;
+            } else if (st.hierDragArm && !st.hierDrag) {
+                // TAP na zona do ícone: o toggle da multi-seleção de sempre
+                // (o gesto é DESTE widget agora — o scrollTap já não o vê;
+                // o MESMO contrato do despacho antigo, alternativa simétrica)
+                bool inSet = false;
+                u32 at = 0;
+                for (u32 m = 0; m < st.multiSelectCount; ++m) {
+                    if (st.multiSelect[m] == st.hierDragSrc) {
+                        inSet = true;
+                        at = m;
+                    }
+                }
+                if (inSet) {
+                    for (u32 m = at; m + 1 < st.multiSelectCount; ++m) {
+                        st.multiSelect[m] = st.multiSelect[m + 1];
+                    }
+                    --st.multiSelectCount;
+                } else if (st.multiSelectCount < 16) {
+                    st.multiSelect[st.multiSelectCount++] = st.hierDragSrc;
+                }
+            }
+            st.hierDrag = false;
+            st.hierDragDstOk = false;
+            st.hierDragArm = false;
+            ui.releaseClaim(st.hierDragClaimId);
+            st.hierDragClaimId = 0;
+        } else if (st.hierDrag && dragFinger) {
+            st.hierDragX = dragPx;
+            st.hierDragY = dragPy;
+        }
+        // o ALVO segue o dedo (a lambda corre DEPOIS do loop de linhas — o
+        // frame em que o drag COMEÇA inclui-se: um flick de 2 frames nunca
+        // perde o alvo). Legal = acende; ilegal/fora da lista = o release
+        // cancela — nunca aplica a meio gesto.
+        auto updateDragTarget = [&](f32 px, f32 py) {
+            st.hierDragDst = Handle::invalid();
+            st.hierDragDstOk = false;
+            if (scroll::inside(listRegion, px, py)) {
+                const i32 dstRow = hierarchyRowAtTap(py, listTop, off, nRows);
+                if (dstRow < 0) {
+                    st.hierDragDstOk = true;   // vazio da lista = RAIZ
+                } else if (const Tic* dt = scene.get(rows[dstRow].h)) {
+                    st.hierDragDst = dt->handle;
+                    st.hierDragDstOk =
+                        canReparentTo(scene, st.hierDragSrc, dt->handle);
+                }
+            }
+        };
 
         // FASE 9 (G2-7): houve dedo parado em algum nome neste frame?
         bool holdVivo = false;
@@ -762,6 +871,9 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
             }
             const f32 ry = listTop + static_cast<f32>(r) * kRowH - off;
             const f32 indent = static_cast<f32>(rows[r].depth) * theme::dp(24.0f);
+            // 0.11-H: as zonas da linha — [chev 24][ícone 40][nome][olho][⋮]
+            const f32 chevX = x + theme::dp(16.0f) + indent;
+            const f32 iconZoneX = chevX + chevW;
             const bool selected = st.selected == t->handle;
             bool multi = false;
             for (u32 m = 0; m < st.multiSelectCount; ++m) {
@@ -789,6 +901,15 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
             } else if (ui.widgetActive(kIdRowBase + t->handle.index)) {
                 ui.panel(x + 4.0f, ry, w - 8.0f, kRowH, theme::kTheme.surface2);
             }
+            // 0.11-H: a ORIGEM do drag fica marcada (surface2 — o tom de
+            // «premido») e o ALVO LEGAL leva a barra âmbar no topo
+            if (st.hierDrag && t->handle == st.hierDragSrc) {
+                ui.panel(x + 4.0f, ry, w - 8.0f, kRowH, theme::kTheme.surface2);
+            }
+            if (st.hierDrag && st.hierDragDstOk &&
+                st.hierDragDst.valid() && t->handle == st.hierDragDst) {
+                ui.panel(x + 4.0f, ry, w - 8.0f, 2.0f, theme::kTheme.accent);
+            }
 
             // ---- conector de filhos + recuo (parenting VISUAL) ----
             if (rows[r].depth > 0) {
@@ -796,9 +917,43 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                          1.5f, kRowH, theme::kTheme.border);
             }
 
+            // ---- 0.11-H: o CHEVRON (só em pai — expandir/colapsar; o tap
+            // é re-despachado pelo scroll como o olho/⋮) ----
+            if (rows[r].hasKids) {
+                const bool folded =
+                    hierCollapsedHas(st.hierCollapsed, t->name.c_str());
+                icons::drawIcon(ui, folded ? icons::Icon::ChevronRight
+                                           : icons::Icon::ChevronDown,
+                                chevX + (chevW - theme::dp(16.0f)) * 0.5f,
+                                ry + (kRowH - theme::dp(16.0f)) * 0.5f,
+                                theme::dp(16.0f), theme::kTheme.text2);
+            }
+
+            // ---- 0.11-H: o CLAIM do drag na zona do ÍCONE (a prioridade é
+            // a do slider — o gesto é DESTE widget; o scroll nasce no resto
+            // da linha). O tap sem movimento é o toggle da multi no release.
+            const u64 dragId = kHierDragBase + t->handle.index;
+            if (ui.dragClaim(dragId, iconZoneX, ry, zoneW, kRowH)) {
+                if (!st.hierDrag && !st.hierDragArm) {
+                    st.hierDragArm = true;
+                    st.hierDragArmX = dragPx;
+                    st.hierDragArmY = dragPy;
+                    st.hierDragSrc = t->handle;
+                    st.hierDragClaimId = dragId;
+                } else if (st.hierDragArm && st.hierDragSrc == t->handle &&
+                           dragFinger) {
+                    // o limiar é o do scroll (maxMove ≥ kTapPx = arrasto)
+                    const f32 adx = std::fabs(dragPx - st.hierDragArmX);
+                    const f32 ady = std::fabs(dragPy - st.hierDragArmY);
+                    if (adx >= scroll::kTapPx || ady >= scroll::kTapPx) {
+                        st.hierDrag = true;
+                    }
+                }
+            }
+
             // ---- ícone de TIPO (20dp na zona de 40 — PASSO 1) ----
             const icons::Icon ic = hierIconFor(*t);
-            const f32 iconX = x + theme::dp(16.0f) + indent;
+            const f32 iconX = iconZoneX;
             const bool inkOn = (selected && st.multiSelectCount == 0) || multi;
             icons::drawIcon(ui, ic, iconX,
                             ry + (kRowH - theme::dp(20.0f)) * 0.5f,
@@ -861,12 +1016,50 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                                   : theme::kTheme.text2);
         }
         ui.endScroll();
+        // 0.11-H: o alvo do drag (DEPOIS do loop — o frame da transição
+        // arm-drag inclui-se; o re-cálculo é idempotente nos seguintes)
+        if (st.hierDrag && dragFinger) {
+            updateDragTarget(dragPx, dragPy);
+        }
         // o long-press MENTE quando o dedo sai da zona do nome — o
         // contador regressa a zero (o próximo conta de novo)
         if (!holdVivo) {
             st.hierHoldRow = -1;
             st.hierHoldFrames = 0;
             st.hierHoldShown = false;
+        }
+
+        // ---- 0.11-H: o GUARD do claim órfão + o FANTASMA do drag ----------
+        // a linha reclamante pode ter SAÍDO do array visível a meio do
+        // gesto (TIC apagada por trás da UI, import a terminar): sem a
+        // linha, o claim nunca se limpa e TODOS os gestos seguintes morrem.
+        if ((st.hierDrag || st.hierDragArm) && st.hierDragClaimId) {
+            bool srcNaLista = false;
+            for (u32 r = 0; r < nRows; ++r) {
+                if (rows[r].h == st.hierDragSrc) {
+                    srcNaLista = true;
+                    break;
+                }
+            }
+            if (!srcNaLista) {
+                st.hierDrag = false;
+                st.hierDragArm = false;
+                st.hierDragDstOk = false;
+                ui.releaseClaim(st.hierDragClaimId);
+                st.hierDragClaimId = 0;
+            }
+        }
+        // o FANTASMA: o ícone de tipo da TIC arrastada segue o dedo (por
+        // cima de tudo no painel — desenhado FORA do clip do scroll; o
+        // dedo cobre a linha de origem no device, o fantasma devolve a
+        // noção do que está a ser movido)
+        if (st.hierDrag) {
+            if (const Tic* src = scene.get(st.hierDragSrc)) {
+                icons::drawIcon(ui, hierIconFor(*src),
+                                st.hierDragX + theme::dp(12.0f),
+                                st.hierDragY + theme::dp(12.0f),
+                                theme::dp(20.0f), theme::kTheme.accent);
+            }
         }
 
         // ---- VAZIO (spec M): ícone + convite --------------------------------
@@ -916,8 +1109,14 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                 const Tic* t = scene.get(rows[sel].h);
                 if (t) {
                     const f32 ry = listTop + static_cast<f32>(sel) * kRowH - off;
-                    const f32 indent = static_cast<f32>(rows[sel].depth) * 24.0f;
-                    const f32 iconX = x + 16.0f + indent;
+                    // 0.11-H: as zonas em dp (a MESMA fórmula do desenho —
+                    // o iconX antigo era px CRUO e divergia do draw no
+                    // device com densidade ≠ 1; o fix passa pelo padrão da
+                    // casa: desenho e toque partilham a MESMA matemática)
+                    const f32 indent = static_cast<f32>(rows[sel].depth) *
+                                       theme::dp(24.0f);
+                    const f32 chevHit = x + theme::dp(16.0f) + indent;
+                    const f32 iconX = chevHit + chevW;
                     const f32 eyeHit = eyeX;             // zona de 40dp
                     const f32 dotsHit = dotsX;
                     const f32 zonePx = zoneW;   // px reais da zona (dp)
@@ -930,9 +1129,21 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                                tx < dotsHit + zonePx) {
                         st.contextMenu = true;           // ⋮: menu (spec L)
                         st.contextTic = t->handle;
+                    } else if (ty >= ry && ty < ry + kRowH &&
+                               tx >= chevHit && tx < chevHit + chevW &&
+                               rows[sel].hasKids) {
+                        // 0.11-H: CHEVRON — expandir/colapsar (o estado é
+                        // por NOME e persiste no layout.json; o dirty arma
+                        // o save com debounce no main)
+                        hierCollapsedToggle(st.hierCollapsed,
+                                            t->name.c_str());
+                        st.hierCollapsedDirty = true;
                     } else if (ty >= ry && ty < ry + kRowH && tx >= iconX &&
                                tx < iconX + zonePx) {
                         // MULTI: o toque no ÍCONE DE TIPO alterna no conjunto
+                        // (o caminho de FALLBACK — com o claim da 0.11-H o
+                        // gesto da zona do ícone termina no finalize; este
+                        // ramo só corre se o claim não pegou o gesto)
                         bool inSet = false;
                         u32 at = 0;
                         for (u32 m = 0; m < st.multiSelectCount; ++m) {
