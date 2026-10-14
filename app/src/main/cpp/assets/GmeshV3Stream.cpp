@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -244,19 +245,10 @@ struct BlockRec {
     Vec3 lodAabbMin{}, lodAabbMax{};
 };
 
-// a higiene de RSS: larga (MADV_DONTNEED) as páginas limpas de um range
-// do mmap da fonte/final — as páginas de ficheiro contam no pico (VmHWM)
-// mesmo sem ser memória do algoritmo; a casa larga o que já usou. O
-// endereço alinha-se à página (o madvise exige).
-void dropRange(const u8* base, u64 off, u64 len) {
-    if (len == 0) return;
-    const long pz = ::sysconf(_SC_PAGESIZE);
-    if (pz <= 0) return;
-    const uintptr_t addr = reinterpret_cast<uintptr_t>(base) + off;
-    const uintptr_t aligned = addr & ~static_cast<uintptr_t>(pz - 1);
-    const size_t span = static_cast<size_t>(addr + len - aligned);
-    ::madvise(reinterpret_cast<void*>(aligned), span, MADV_DONTNEED);
-}
+// a higiene de RSS vive AGORA no fileapi::dropRange (0.11-T-FIX Perna
+// 1.3 — o PONTO ÚNICO, com a proveniência file-backed verificada antes
+// do madvise; a lição F3 fica à prova de chamador). Os call sites
+// antigos chamam o fileapi diretamente.
 
 // 0.11-T (FASE 3.5a): o LOD do bloco NO ASSEMBLY (single-thread — os
 // workers do corte ficam byte a byte pré-3.5a: o intercalamento das
@@ -347,10 +339,16 @@ struct TaskCtx {
 
 using BlockSink = bool (*)(void* user, BlockOut& b, std::string& err);
 
+// `onProgressMu` — 0.11-T-FIX (Perna 1.2): o MUTEX que serializa a
+// invocação do callback entre os workers (o callback de progresso tem
+// contrato de thread ÚNICA; chamado de N workers em paralelo era uma
+// corrida à entrada — a hipótese 1 da ABERTURA). null = o chamador é
+// single-thread (a verificação) e não precisa de proteção.
 bool cutPrimitive(TaskCtx* c, std::atomic<u64>& trisDone, u64 trisTotal,
                   std::atomic<bool>& canceled, u32 taskIdx,
                   BlockSink sink, void* sinkUser,
                   bool (*onProgress)(void*, u64, u64), void* user,
+                  std::mutex* onProgressMu,
                   std::string& err) {
     BlockOut cur;
     cur.materialOrder = c->materialOrder;
@@ -479,10 +477,25 @@ bool cutPrimitive(TaskCtx* c, std::atomic<u64>& trisDone, u64 trisTotal,
             // o progresso é GLOBAL (triângulos feitos por TODOS os
             // workers — a barra é monotónica, a ordem das threads não)
             trisDone.fetch_add(kProgressStride, std::memory_order_relaxed);
-            if (onProgress != nullptr &&
-                !onProgress(user, trisDone.load(std::memory_order_relaxed),
-                            trisTotal)) {
-                canceled.store(true, std::memory_order_relaxed);
+            if (onProgress != nullptr) {
+                // 0.11-T-FIX (Perna 1.2): a invocação é SERIALIZADA entre
+                // os workers (o mutex da conversão) — o callback nunca
+                // corre em N threads em paralelo. O cancelamento continua
+                // a fluir pelo atómico `canceled` (fora do mutex).
+                bool cont = true;
+                if (onProgressMu != nullptr) {
+                    std::lock_guard<std::mutex> lk(*onProgressMu);
+                    cont = onProgress(
+                        user, trisDone.load(std::memory_order_relaxed),
+                        trisTotal);
+                } else {
+                    cont = onProgress(
+                        user, trisDone.load(std::memory_order_relaxed),
+                        trisTotal);
+                }
+                if (!cont) {
+                    canceled.store(true, std::memory_order_relaxed);
+                }
             }
             // a higiene de RSS dentro de tarefas grandes: o span da
             // fonte já percorrido larga-se (páginas limpas — reler é
@@ -494,7 +507,8 @@ bool cutPrimitive(TaskCtx* c, std::atomic<u64>& trisDone, u64 trisTotal,
                 if (curOff > c->spanOff + dropped + kDropWindow &&
                     curOff + kDropWindow < c->spanOff + c->spanLen) {
                     const u64 upto = curOff - c->spanOff;
-                    dropRange(c->base, c->spanOff + dropped, upto - dropped);
+                    fileapi::dropRange(c->base, c->spanOff + dropped,
+                                       upto - dropped);
                     dropped = upto;
                 }
             }
@@ -508,7 +522,7 @@ bool cutPrimitive(TaskCtx* c, std::atomic<u64>& trisDone, u64 trisTotal,
     // a tarefa inteira passou — o span dela larga-se TODO (só no mmap:
     // o caminho dos ranges/data: larga o BUFFER, não as páginas)
     if (c->canDrop) {
-        dropRange(c->base, c->spanOff, c->spanLen);
+        fileapi::dropRange(c->base, c->spanOff, c->spanLen);
     }
     return true;
 }
@@ -697,7 +711,7 @@ bool verifySink(void* user, BlockOut& b, std::string& err) {
     // (páginas limpas do mmap — o pico fica num bloco, não no ficheiro)
     // SÓ no caminho mmap: o readback do heap NÃO droppa (ver VerifyCtx)
     if (c->droppable) {
-        dropRange(c->map, e.dataOffset, e.dataSize);
+        fileapi::dropRange(c->map, e.dataOffset, e.dataSize);
     }
     return true;
 }
@@ -706,10 +720,35 @@ bool verifySink(void* user, BlockOut& b, std::string& err) {
 
 // ---- o CONVERSOR (a spec do PASSO 3 inteira) --------------------------------
 
-// o POOL do corte: núcleos−1 e NUNCA 0 (o contrato está no header —
-// single-core/desconhecido cai para 1: sequencial, mais lento, CORRETO)
+// o POOL do corte: núcleos−1 com TETO DE 4 e NUNCA 0 (o contrato está no
+// header — single-core/desconhecido cai para 1: sequencial, mais lento,
+// CORRETO). 0.11-T-FIX (Perna 1.1): o teto de 4 é o CONTORNO do crash de
+// heap intermitente que só se manifesta com ≥7 workers (C33, 8 cores) —
+// o bug está a ser investigado (docs/RELATORIO-0.11-T-FIX-ABERTURA.md §1,
+// o BACKLOG 0.11-T-FIX-Perna3); reverter para o núcleos−1 sem teto quando
+// a cura real chegar.
 u32 v3StreamWorkerCount(const u32 hardwareThreads) {
-    return hardwareThreads > 1u ? hardwareThreads - 1u : 1u;
+    const u32 raw = hardwareThreads > 1u ? hardwareThreads - 1u : 1u;
+    return raw > 4u ? 4u : raw;
+}
+
+// 0.11-T-FIX (Perna 1/2) — o override de EXPERIMENTO: GONI_STREAM_WORKERS
+// força o nº de workers do corte (1..64). Serve a DUAS entidades desta
+// campanha: os pins (fix_p1_onprogress_seguro força 8 na sandbox de 2
+// cores) e o job streaming-stress do CI (Perna 2 — reproduz a configuração
+// do device de 8 cores). Precedência sobre o teto de 4 POR DESENHO: a
+// utilidade dele é recriar a ZONA DE PERIGO para a prova; produção nunca
+// define a variável. Fóra de faixa/lixo = ignorado (o default manda).
+static u32 v3StreamWorkersForced(const u32 fallback) {
+    const char* env = ::getenv("GONI_STREAM_WORKERS");
+    if (env == nullptr || *env == '\0') {
+        return fallback;
+    }
+    const long v = std::strtol(env, nullptr, 10);
+    if (v < 1 || v > 64) {
+        return fallback;
+    }
+    return static_cast<u32>(v);
 }
 
 bool convertGltfToV3(const GltfModel& model, const Json& doc,
@@ -1030,10 +1069,16 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
     std::atomic<bool> canceled{false};
     std::atomic<u64> trisDone{0};
     std::mutex resMu;
+    // 0.11-T-FIX (Perna 1.2): o mutex do callback de progresso — a mesma
+    // instância para TODOS os workers do corte (a verificação é
+    // single-thread e corre sem ele)
+    std::mutex progMu;
     std::string workerErr;
     std::vector<std::vector<BlockRec>> recs(tasks.size());
-    const u32 nWorkers =
+    const u32 nWorkersRaw =
         v3StreamWorkerCount(std::thread::hardware_concurrency());
+    const u32 nWorkers =
+        v3StreamWorkersForced(nWorkersRaw);   // o override de experimento
     if (nWorkers == 1) {
         elog::info("asset: v3 corte em MODO SEQUENCIAL (1 worker — o "
                    "host não deu núcleos úteis; mais lento, correto)");
@@ -1090,7 +1135,7 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
                 std::string werr;
                 if (!cutPrimitive(&tasks[i], trisDone, totalTris, canceled,
                                   tasks[i].taskIdx, &cutSink, &cut,
-                                  onProgress, user, werr)) {
+                                  onProgress, user, &progMu, werr)) {
                     std::lock_guard<std::mutex> lk(resMu);
                     if (workerErr.empty()) workerErr = werr;
                     canceled.store(true, std::memory_order_relaxed);
@@ -1644,7 +1689,7 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
                 if (!cutPrimitive(&tasks[tsk], verDone, totalTris,
                                   canceled, tasks[tsk].taskIdx,
                                   &verifySink, &vc, onProgress, user,
-                                  werr)) {
+                                  nullptr, werr)) {
                     if (dev.empty()) {
                         dev = werr == "cancelado"
                                   ? "cancelado"
@@ -1657,7 +1702,8 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
                 // o span da fonte desta tarefa larga-se (higiene de RSS —
                 // SÓ no mmap; o caminho dos ranges larga o BUFFER)
                 if (bin != nullptr && binDroppable) {
-                    dropRange(bin, tasks[tsk].spanOff, tasks[tsk].spanLen);
+                    fileapi::dropRange(bin, tasks[tsk].spanOff,
+                                       tasks[tsk].spanLen);
                 }
                 if (!tasks[tsk].spanBuf.empty()) {
                     tasks[tsk].spanBuf.clear();

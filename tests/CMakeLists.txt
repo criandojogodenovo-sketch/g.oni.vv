@@ -84,6 +84,7 @@ add_executable(test_core
         test_fase3_skeleton.cpp
         # 0.11-T (FASE 3.5a): SKINNED CULL + LOD por distância (a cauda GLOD)
         test_fase35a_lod_cull.cpp
+        test_fase35fix_p1.cpp   # 0.11-T-FIX (Perna 1): os 6 pins do contorno
         # 0.7.1: cenas múltiplas + transições (projeto e2e, SceneFx puro,
         # overlay CENAS, ações Scene.Load/Transition)
         test_scenes.cpp

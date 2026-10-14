@@ -863,12 +863,14 @@ TEST(v3stream_c33_fakestorage_cascata_e_sem_nodes) {
 
 // ---- M3 · O POOL NUNCA FICA A 0 (single-core cai para 1: sequencial,
 // mais lento, CORRETO — a mutação "pool a 0 sem fallback" fica vermelha)
+// 0.11-T-FIX (Perna 1.1): o contrato ganhou o TETO DE 4 (o contorno do
+// crash §4.1 da 3.5a — os pins novos vivem em test_fase35fix_p1.cpp)
 TEST(v3stream_worker_count_nunca_zero) {
     EXPECT(v3StreamWorkerCount(0) == 1);   // desconhecido → 1
     EXPECT(v3StreamWorkerCount(1) == 1);   // single-core → 1
     EXPECT(v3StreamWorkerCount(2) == 1);   // núcleos−1
-    EXPECT(v3StreamWorkerCount(8) == 7);   // núcleos−1
-    EXPECT(v3StreamWorkerCount(16) == 15);
+    EXPECT(v3StreamWorkerCount(8) == 4);   // 0.11-T-FIX: o teto de 4
+    EXPECT(v3StreamWorkerCount(16) == 4);  // (era 7/15 no contrato antigo)
 }
 
 // ---- M2 · O OFFSET DO mmap NÃO ALINHADO (o Android arm64 exige página):

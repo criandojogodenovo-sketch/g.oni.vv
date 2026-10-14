@@ -39,6 +39,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <sys/stat.h>   // 0.11-T-FIX (R-046): o sfixRmRf (S_ISDIR)
 // 0.9.6.5 (GRUPO B · R-024): o encode/decode do PNG exportado + o layout
 #include "render/ThumbPng.h"
 #include "assets/PngLoader.h"
@@ -69,12 +70,16 @@
 #include "platform/StorageBridge.h"
 #include "assets/AssetConverter.h"
 #include "assets/GltfImporter.h"   // 0.9.6 (R-017): o GLB do bench
+#include "assets/GmeshV3Stream.h"  // 0.11-T-FIX (R-046): o teto do pool
+#include "core/FsStorage.h"        // 0.11-T-FIX (R-046): a raiz real do import
 #include "core/Bench.h"            // 0.9.6 (R-017): o relatório não mente
 // 0.9.3 (REG-002): o backend Oboe de PRODUÇÃO (TU comum) contra o stub
 // tests/stub/oboe/Oboe.h — o MESMO código que corre no APK
 #include "platform/AudioOut.h"
 #include <oboe/Oboe.h>
 #include <thread>
+#include <atomic>
+#include <chrono>
 
 using namespace vv;
 using ::test::nearEqF;
@@ -5994,4 +5999,284 @@ TEST(regress_lod_cull) {
         EXPECT(mr->lodDistance == 0.0f);   // abre SEM LOD
         EXPECT(SceneSerializer::dump(s2) == canonic);   // byte a byte
     }
+}
+
+// SENTINELA — regress_streaming_paralelo (0.11-T-FIX · PERNA 1 · R-046)
+//
+// O bug vigiado: a corrupção de heap do corte paralelo do convertGltfToV3
+// (o crash §4.1 do RELATORIO-0.11-T-3.5A — SIGSEGV no pthread_join /
+// ~FakeSafIo, TSAN sem data race = wild-write; 3 vítimas: data-uri, city
+// fd/mmap, ranges). O contorno da Perna 1 (os pins vivem em
+// test_fase35fix_p1.cpp): teto de 4 workers + callback de progresso
+// serializado + madvise só em mapeamento file-backed. O registo completo
+// vive no docs/REGRESSOES.md (R-046).
+
+// ---- helpers com nomes próprios (sem colidir com os de cima) --------------
+namespace {
+
+bool sfixMkDir(const std::string& p) {
+    return ::mkdir(p.c_str(), 0755) == 0 || errno == EEXIST;
+}
+
+bool sfixRmRf(const std::string& path) {
+    DIR* d = opendir(path.c_str());
+    if (d) {
+        while (dirent* e = readdir(d)) {
+            const std::string n = e->d_name;
+            if (n == "." || n == "..") continue;
+            const std::string full = path + "/" + n;
+            struct stat st;
+            if (lstat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+                sfixRmRf(full);
+            } else {
+                unlink(full.c_str());
+            }
+        }
+        closedir(d);
+        rmdir(path.c_str());
+        return true;
+    }
+    unlink(path.c_str());
+    return true;
+}
+
+// o fixture MÍNIMO do caminho vítima (data: URI — o bin HEAP; 2 primitivas
+// = 2 tarefas = os workers competem de verdade)
+struct SfixPrim { u32 verts; u32 tris; };
+
+bool sfixBuildDataUri(const std::vector<SfixPrim>& prims,
+                      const std::string& path) {
+    std::vector<u8> bin;
+    struct V { size_t off, len; };
+    std::vector<V> views;
+    auto align4 = [&bin]() { while (bin.size() % 4) bin.push_back(0); };
+    for (const SfixPrim& p : prims) {
+        align4();
+        views.push_back({bin.size(), size_t(p.verts) * 12});
+        for (u32 i = 0; i < p.verts; ++i) {
+            const f32 v[3] = {-1.0f + 2.0f * f32(i % 997) / 996.0f,
+                              -1.0f + 2.0f * f32(i % 991) / 990.0f,
+                              -1.0f + 2.0f * f32(i % 983) / 982.0f};
+            for (int c = 0; c < 3; ++c) {
+                u32 raw;
+                std::memcpy(&raw, &v[c], 4);
+                bin.push_back(u8(raw)); bin.push_back(u8(raw >> 8));
+                bin.push_back(u8(raw >> 16)); bin.push_back(u8(raw >> 24));
+            }
+        }
+        align4();
+        views.push_back({bin.size(), size_t(p.verts) * 12});
+        for (u32 i = 0; i < p.verts; ++i) {
+            const f32 v[3] = {f32(i % 97) / 48.0f - 1.0f,
+                              f32(i % 89) / 44.0f - 1.0f,
+                              f32(i % 83) / 41.0f - 1.0f};
+            for (int c = 0; c < 3; ++c) {
+                u32 raw;
+                std::memcpy(&raw, &v[c], 4);
+                bin.push_back(u8(raw)); bin.push_back(u8(raw >> 8));
+                bin.push_back(u8(raw >> 16)); bin.push_back(u8(raw >> 24));
+            }
+        }
+        align4();
+        views.push_back({bin.size(), size_t(p.verts) * 8});
+        for (u32 i = 0; i < p.verts; ++i) {
+            const f32 v[2] = {f32(i % 64) / 63.0f, f32(i % 32) / 31.0f};
+            for (int c = 0; c < 2; ++c) {
+                u32 raw;
+                std::memcpy(&raw, &v[c], 4);
+                bin.push_back(u8(raw)); bin.push_back(u8(raw >> 8));
+                bin.push_back(u8(raw >> 16)); bin.push_back(u8(raw >> 24));
+            }
+        }
+    }
+    for (const SfixPrim& p : prims) {
+        align4();
+        views.push_back({bin.size(), size_t(p.tris) * 6});
+        for (u32 t = 0; t < p.tris; ++t) {
+            for (int c = 0; c < 3; ++c) {
+                const u16 g = u16((3 * t + u32(c)) % p.verts);
+                bin.push_back(u8(g & 0xFF));
+                bin.push_back(u8(g >> 8));
+            }
+        }
+    }
+    static const char kTbl[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string b64;
+    b64.reserve(((bin.size() + 2) / 3) * 4);
+    for (size_t i = 0; i < bin.size(); i += 3) {
+        const u32 n0 = bin[i];
+        const u32 n1 = i + 1 < bin.size() ? bin[i + 1] : 0;
+        const u32 n2 = i + 2 < bin.size() ? bin[i + 2] : 0;
+        const u32 v = (n0 << 16) | (n1 << 8) | n2;
+        b64.push_back(kTbl[(v >> 18) & 63]);
+        b64.push_back(kTbl[(v >> 12) & 63]);
+        b64.push_back(i + 1 < bin.size() ? kTbl[(v >> 6) & 63] : '=');
+        b64.push_back(i + 2 < bin.size() ? kTbl[v & 63] : '=');
+    }
+    std::string json =
+        "{\"asset\":{\"version\":\"2.0\"},\"scene\":0,"
+        "\"scenes\":[{\"nodes\":[0]}],\"nodes\":[{\"mesh\":0}],"
+        "\"meshes\":[{\"primitives\":[";
+    for (size_t p = 0; p < prims.size(); ++p) {
+        if (p != 0) json += ",";
+        json += "{\"attributes\":{\"POSITION\":" + std::to_string(p * 3) +
+                ",\"NORMAL\":" + std::to_string(p * 3 + 1) +
+                ",\"TEXCOORD_0\":" + std::to_string(p * 3 + 2) +
+                "},\"indices\":" + std::to_string(prims.size() * 3 + p) +
+                ",\"mode\":4}";
+    }
+    json += "]}],\"accessors\":[";
+    for (size_t p = 0; p < prims.size(); ++p) {
+        json += std::string(p != 0 ? "," : "") +
+                "{\"bufferView\":" + std::to_string(p * 3) +
+                ",\"componentType\":5126,\"count\":" +
+                std::to_string(prims[p].verts) + ",\"type\":\"VEC3\"}," +
+                "{\"bufferView\":" + std::to_string(p * 3 + 1) +
+                ",\"componentType\":5126,\"count\":" +
+                std::to_string(prims[p].verts) + ",\"type\":\"VEC3\"}," +
+                "{\"bufferView\":" + std::to_string(p * 3 + 2) +
+                ",\"componentType\":5126,\"count\":" +
+                std::to_string(prims[p].verts) + ",\"type\":\"VEC2\"}";
+    }
+    for (size_t p = 0; p < prims.size(); ++p) {
+        // a vírgula é SEMPRE: o array de accessors já tem os 3 por prim
+        json += ",{\"bufferView\":" + std::to_string(prims.size() * 3 + p) +
+                ",\"componentType\":5123,\"count\":" +
+                std::to_string(prims[p].tris * 3) + ",\"type\":\"SCALAR\"}";
+    }
+    json += "],\"bufferViews\":[";
+    for (size_t v = 0; v < views.size(); ++v) {
+        json += std::string(v != 0 ? "," : "") +
+                "{\"buffer\":0,\"byteOffset\":" +
+                std::to_string(views[v].off) + ",\"byteLength\":" +
+                std::to_string(views[v].len) + "}";
+    }
+    json += "],\"buffers\":[{\"uri\":\"data:application/octet-stream;base64,";
+    json += b64;
+    json += "\"}]}";
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (f == nullptr) return false;
+    const bool ok = std::fwrite(json.data(), 1, json.size(), f) ==
+                    json.size();
+    std::fclose(f);
+    return ok;
+}
+
+// o callback adversário: o DETECTOR de sobreposição (duas invocações em
+// paralelo = ambas veem inFlight==1; o total não-atómico perde somas).
+// O append ao std::string partilhado é o alvo da corrupção (a hipótese 1
+// da ABERTURA). Serializado pelo mutex da Perna 1.2: tudo exato.
+struct SfixProg {
+    std::string log;
+    std::atomic<u64> calls{0};
+    u64 total = 0;
+    u32 inFlight = 0;
+    u64 overlaps = 0;
+};
+bool sfixProgCb(void* user, u64 done, u64 total) {
+    auto* s = static_cast<SfixProg*>(user);
+    if (s->inFlight != 0) ++s->overlaps;
+    s->inFlight = 1;
+    for (int i = 0; i < 8; ++i) s->total += 1;
+    s->log.push_back('x');
+    if (s->log.size() >= 512) s->log.clear();
+    std::this_thread::sleep_for(std::chrono::microseconds(200));
+    s->inFlight = 0;
+    s->calls.fetch_add(1);
+    (void)done;
+    (void)total;
+    return true;
+}
+
+bool sfixImportOnce(const std::string& src, const std::string& projDir,
+                    SfixProg* prog, u64* callsOut) {
+    sfixRmRf(projDir);
+    if (!sfixMkDir(projDir)) return false;
+    elog::init((projDir + "/logs").c_str());
+    FsStorage st((projDir + "/proj").c_str());
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    SfixProg local;
+    SfixProg* p = prog != nullptr ? prog : &local;
+    const bool ok = convert::importFile(src, "modelo.gltf", st, nullptr, out,
+                                        stats, err,
+                                        prog != nullptr ? sfixProgCb : nullptr,
+                                        p);
+    // a verificação bit a bit é INTERNA ao import: o retorno false cobre-a
+    // (o conversor falha SEM verificado=1 — nunca silencioso)
+    elog::shutdown();
+    sfixRmRf(projDir);
+    if (callsOut != nullptr) *callsOut = p->calls.load();
+    return ok && out.meshes.size() == 1;
+}
+
+} // namespace
+
+TEST(regress_streaming_paralelo) {
+    // (1) O TETO: o pool nunca passa de 4 (o C33 tem 8 cores — a zona de
+    // crash era 7 workers) e nunca fica a 0
+    EXPECT(v3StreamWorkerCount(8) == 4);
+    EXPECT(v3StreamWorkerCount(16) == 4);
+    EXPECT(v3StreamWorkerCount(0) == 1);
+    // (2) O CALLBACK SEGURO: 100 imports com 8 workers FORÇADOS (o override
+    // de experimento — a configuração do device) e o callback a escrever em
+    // estado partilhado: zero corrupção (o mutex da 1.2)
+    const std::string dir =
+        "/tmp/goni_sent_r046_" + std::to_string(::getpid());
+    sfixRmRf(dir);
+    ASSERT(sfixMkDir(dir));
+    ASSERT(setenv("GONI_STREAM_WORKERS", "8", 1) == 0);
+    // 3 primitivas × 17000 tris: CADA tarefa cruza o kProgressStride
+    // (16384) — os WORKERS disparam o callback de verdade (fixture menor
+    // só atingia as chamadas single-thread do assembly/verify)
+    const std::vector<SfixPrim> prims = {{1200, 17000}, {1200, 17000},
+                                         {1200, 17000}};
+    const std::string src = dir + "/modelo.gltf";
+    ASSERT(sfixBuildDataUri(prims, src));
+    SfixProg prog;
+    bool ok = true;
+    for (int i = 0; i < 100 && ok; ++i) {
+        if (!sfixImportOnce(src, dir + "/proj", &prog, nullptr)) ok = false;
+    }
+    unsetenv("GONI_STREAM_WORKERS");
+    EXPECT(ok);   // 100 imports × 8 workers: nenhum crash, nenhum erro
+    EXPECT(prog.calls.load() > 0);   // o callback correu de verdade
+    EXPECT(prog.overlaps == 0);      // zero sobreposições (o mutex manda)
+    EXPECT(prog.total == prog.calls.load() * 8);   // zero perdas
+    // (3) O MADVISE SÓ EM MMAP: heap é NO-OP (o conteúdo fica byte a byte —
+    // o crash F3 §2e zeroeava as páginas); o ficheiro real é file-backed
+    std::vector<u8> heap(2 * 4096, 0);
+    for (size_t i = 0; i < heap.size(); ++i) {
+        heap[i] = static_cast<u8>((i * 29 + 11) & 0xFF);
+    }
+    const std::vector<u8> copia = heap;
+    EXPECT(!fileapi::rangeIsFileBacked(heap.data(), heap.size()));
+    fileapi::dropRange(heap.data(), 0, heap.size());
+    EXPECT(heap == copia);
+    {
+        const std::string path = dir + "/drop.bin";
+        FILE* f = std::fopen(path.c_str(), "wb");
+        ASSERT(f != nullptr);
+        const std::vector<u8> dados(8192, 0x5A);
+        std::fwrite(dados.data(), 1, dados.size(), f);
+        std::fclose(f);
+        unsigned long long mapped = 0;
+        u8* m = static_cast<u8*>(
+            fileapi::mapFile64(path.c_str(), 0, dados.size(), &mapped));
+        ASSERT(m != nullptr);
+        EXPECT(fileapi::rangeIsFileBacked(m, dados.size()));
+        fileapi::dropRange(m, 0, dados.size());
+        EXPECT(std::memcmp(m, dados.data(), dados.size()) == 0);
+        fileapi::unmapFile64(m, mapped);
+    }
+    // (4) O STREAMING 10× (o cenário da vítima, sem crash nem erro)
+    for (int i = 0; i < 10 && ok; ++i) {
+        if (!sfixImportOnce(src, dir + "/proj", nullptr, nullptr)) {
+            ok = false;
+        }
+    }
+    EXPECT(ok);
+    sfixRmRf(dir);
 }

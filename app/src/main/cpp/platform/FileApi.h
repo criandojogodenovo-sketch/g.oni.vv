@@ -162,6 +162,29 @@ std::string errnoText();
 // linha de erro explícita. Corre no boot ANTES de qualquer I/O pesado.
 void logStorageSelfCheck(const char* root, bool isExternal);
 
+// ---- 0.11-T-FIX (Perna 1.3) — O MADVISE SÓ EM MMAP -------------------------
+// A proveniência de um range de memória: true quando [addr, addr+len)
+// vive INTEIRO dentro de UM mapeamento FILE-BACKED do processo (mmap de
+// ficheiro/memfd — o MADV_DONTNEED é legítimo: as páginas re-lêem do
+// ficheiro). false = memória anónima/heap (malloc/new/stack, os
+// pseudo-nomes [heap]/[stack]/[anon:*]) ou range a atravessar
+// mapeamentos — o DONTNEED aí ZERA páginas inteiras de 4K com os
+// vizinhos incluídos (a lição F3 do PASSO 3 §2e: «free(): invalid
+// pointer»; o perfil do crash §4.1 da 3.5a é o MESMO). Lê
+// /proc/self/maps com cache thread-local de UMA entrada (os chamadores
+// perguntam em sequência ascendente). /proc indisponível → false
+// (o madvise NUNCA corre — a higiene perde-se, a correção não).
+bool rangeIsFileBacked(const void* addr, size_t len);
+
+// 0.11-T-FIX (Perna 1.3) — a higiene de RSS no PONTO ÚNICO: larga
+// (MADV_DONTNEED) as páginas limpas de um range de um mapeamento — MAS
+// SÓ depois de rangeIsFileBacked o confirmar (a defesa POR CONSTRUÇÃO:
+// um chamador com flag errado NÃO reabre o F3). Chamadores: o streaming
+// do conversor (a fonte mmapada e o final verificado). Em heap/anónima
+// é NO-OP.
+void dropRange(const void* base, unsigned long long off,
+               unsigned long long len);
+
 // ---- 0.8.12 — SEAM DO DISPOSITIVO VIRTUAL (C33 virtual) ---------------------
 // O harness do CI reproduz as condições do Android que morderam a engine:
 // o /tmp do device é READ-ONLY (errno=30/EROFS) e o runner do CI tem /tmp

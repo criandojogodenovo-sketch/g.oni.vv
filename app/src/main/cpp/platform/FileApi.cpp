@@ -663,4 +663,90 @@ void* mapFd64(int fd, unsigned long long offset, unsigned long long len,
     return static_cast<char*>(base) + within;
 }
 
+// ---- 0.11-T-FIX (Perna 1.3): a proveniência + o dropRange PONTO ÚNICO -------
+
+bool rangeIsFileBacked(const void* addr, size_t len) {
+    if (addr == nullptr || len == 0) return false;
+    const uintptr_t lo = reinterpret_cast<uintptr_t>(addr);
+    const uintptr_t hi = lo + static_cast<uintptr_t>(len);
+    // o cache thread-local de UMA entrada (os chamadores perguntam em
+    // sequência ascendente — o verifySink pergunta bloco a bloco; o
+    // corte por janela de 32 MB idem)
+    struct LastMap {
+        uintptr_t lo = 0, hi = 0;
+        bool valid = false;
+        bool backed = false;
+    };
+    thread_local LastMap last;
+    if (last.valid && lo >= last.lo && hi <= last.hi) {
+        return last.backed;
+    }
+    FILE* f = std::fopen("/proc/self/maps", "r");
+    if (f == nullptr) {
+        // sem /proc (sandbox exótica): NUNCA drop — a higiene fora,
+        // a correção dentro
+        last.valid = true;
+        last.lo = lo;
+        last.hi = hi;
+        last.backed = false;
+        return false;
+    }
+    bool found = false;
+    bool backed = false;
+    uintptr_t mlo = lo, mhi = hi;
+    char line[512];
+    while (std::fgets(line, sizeof(line), f)) {
+        // formato: lo-hi perms offset dev inode [pathname]
+        uintptr_t a = 0, b = 0;
+        if (std::sscanf(line, "%lx-%lx", &a, &b) != 2) continue;
+        if (lo >= a && hi <= b) {
+            // o pathname (5 campos à frente); anónimas NÃO têm pathname
+            const char* p = line;
+            int fields = 0;
+            while (*p != '\0' && fields < 5) {
+                while (*p == ' ' || *p == '\t') ++p;
+                while (*p != '\0' && *p != ' ' && *p != '\t') ++p;
+                ++fields;
+            }
+            while (*p == ' ' || *p == '\t') ++p;
+            const bool hasPath = *p != '\0' && *p != '\n';
+            // os pseudo-nomes do kernel NÃO são ficheiro: [stack] [heap]
+            // [vvar] [vdso] [anon:*] — o DONTNEED neles é o crash F3
+            const bool pseudo = hasPath && p[0] == '[';
+            backed = hasPath && !pseudo;
+            found = true;
+            mlo = a;
+            mhi = b;
+            break;
+        }
+        if (a >= hi) break;   // as linhas vêm ordenadas — nada à frente
+    }
+    std::fclose(f);
+    last.valid = true;
+    last.lo = mlo;
+    last.hi = mhi;
+    last.backed = found && backed;
+    return found && backed;
+}
+
+void dropRange(const void* base, unsigned long long off,
+               unsigned long long len) {
+    if (base == nullptr || len == 0) return;
+    // 0.11-T-FIX (Perna 1.3): a DEFESA no ponto único — o madvise só
+    // corre em mapeamento FILE-BACKED (as páginas re-lêem do ficheiro).
+    // Em heap/anónima o DONTNEED zera páginas de vizinhos inteiros (a
+    // lição F3 — o crash §2e do PASSO 3 e o perfil do §4.1 da 3.5a) —
+    // NUNCA, independentemente dos flags dos chamadores.
+    const u8* b = static_cast<const u8*>(base);
+    if (!rangeIsFileBacked(b + off, static_cast<size_t>(len))) {
+        return;
+    }
+    const long pz = ::sysconf(_SC_PAGESIZE);
+    if (pz <= 0) return;
+    const uintptr_t addr = reinterpret_cast<uintptr_t>(b) + off;
+    const uintptr_t aligned = addr & ~static_cast<uintptr_t>(pz - 1);
+    const size_t span = static_cast<size_t>(addr + len - aligned);
+    ::madvise(reinterpret_cast<void*>(aligned), span, MADV_DONTNEED);
+}
+
 } // namespace vv::fileapi

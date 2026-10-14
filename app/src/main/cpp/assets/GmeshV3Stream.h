@@ -61,10 +61,15 @@ struct V3StreamResult {
     double verifyMs = 0.0;        // fase verificação (re-corte + compare)
 };
 
-// O POOL do corte: núcleos−1, e NUNCA 0 — um host single-core (ou com
-// hardware_concurrency()==0, "desconhecido") cai para 1 worker e o corte
-// corre SEQUENCIAL no próprio thread do chamador: mais lento, MAS CORRETO
-// (a mutação M3 do relatório vigia: pool a 0 sem fallback = vermelho).
+// O POOL do corte: núcleos−1 com TETO DE 4, e NUNCA 0 — um host
+// single-core (ou com hardware_concurrency()==0, "desconhecido") cai para
+// 1 worker e o corte corre SEQUENCIAL no próprio thread do chamador: mais
+// lento, MAS CORRETO (a mutação M3 do relatório vigia: pool a 0 sem
+// fallback = vermelho). 0.11-T-FIX (Perna 1): o teto de 4 é o CONTORNO do
+// crash de heap intermitente do corte (só se manifesta com ≥7 workers —
+// o C33 tem 8 cores; ver docs/RELATORIO-0.11-T-FIX-ABERTURA.md e o
+// BACKLOG 0.11-T-FIX-Perna3) — reverter para o núcleos−1 sem teto quando
+// a cura real chegar.
 u32 v3StreamWorkerCount(u32 hardwareThreads);
 
 // 0.10-M (SAF-STREAM) — A FONTE ALTERNATIVA do bin: quando não há mmap
