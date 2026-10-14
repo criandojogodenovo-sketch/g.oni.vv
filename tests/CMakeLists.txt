@@ -82,6 +82,8 @@ add_executable(test_core
         # 0.11-S (FASE 3): ESQUELETO/ANIMAÇÃO — slerp/step/cubicspline, UBO
         # 128 bones, V.ONI stop/blend, bench 10 personagens
         test_fase3_skeleton.cpp
+        # 0.11-T (FASE 3.5a): SKINNED CULL + LOD por distância (a cauda GLOD)
+        test_fase35a_lod_cull.cpp
         # 0.7.1: cenas múltiplas + transições (projeto e2e, SceneFx puro,
         # overlay CENAS, ações Scene.Load/Transition)
         test_scenes.cpp

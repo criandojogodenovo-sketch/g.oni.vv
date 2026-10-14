@@ -8868,7 +8868,7 @@ int main() {
             const int cdAntes = glstub::stats.cullDisableCalls;
             const Mat4 view25 = g_camera.view();
             const Mat4 proj25 = g_camera.proj(1512.0f / 696.0f);
-            drawTics(Mat4::mul(proj25, view25));
+            drawTics(Mat4::mul(proj25, view25), g_camera.eye());
             // O PIN DO BLEND: o passe do vidro ligou o blend clássico com
             // a escrita de depth OFF (o 1.º drawMesh do blend)
             check(glstub::stats.blendFuncCalls - blendAntes == 1,
@@ -9116,7 +9116,7 @@ int main() {
             g_renderer.beginFrame();
             const Mat4 view26 = g_camera.view();
             const Mat4 proj26 = g_camera.proj(1512.0f / 696.0f);
-            const DrawStats st26 = drawTics(Mat4::mul(proj26, view26));
+            const DrawStats st26 = drawTics(Mat4::mul(proj26, view26), g_camera.eye());
             check(st26.drawCalls == 1,
                   "26.4a o personagem DESENHA (1 draw)");
             check(glstub::stats.drawElementsCalls == 1,
@@ -9206,7 +9206,7 @@ int main() {
             g_renderer.beginFrame();
             const Mat4 view26b = g_camera.view();
             const Mat4 proj26b = g_camera.proj(1512.0f / 696.0f);
-            const DrawStats st26b = drawTics(Mat4::mul(proj26b, view26b));
+            const DrawStats st26b = drawTics(Mat4::mul(proj26b, view26b), g_camera.eye());
             check(st26b.drawCalls == 10,
                   "26.5b O PIN: 10 draws (UM por personagem — a casa não "
                   "batcha skin, o custo é contado honesto)");
@@ -9218,6 +9218,136 @@ int main() {
                       glstub::stats.bindBufferBaseCalls == 10,
                   "26.5e 10 uploads do UBO (1 por draw — o bloco de bones "
                   "é POR personagem)");
+        }
+
+        // ====================================================================
+        // FASE 27 — 0.11-T (FASE 3.5a): GPU EFFICIENCY — o skinned cull e o
+        // LOD por distância NO CAMINHO REAL do device (a cena da FASE 26
+        // vive: Pele + 9 clones skinados com mesh/UBO a funcionar):
+        //   27.1 o LOD: a grelha .gmesh COM a cauda GLOD (o decimate ½ do
+        //        import) escrita no storage do device abre POR BLOCOS e o
+        //        draw à distância consome a ENTRADA LOD (½ dos índices);
+        //   27.2 o skinned cull: 10 skinados no drawTics REAL, 5 atrás do
+        //        plano near → 5 draws + skinned: culled=5 (o contador do
+        //        HUD — SkinFrameStats, a MESMA fonte do status line) e os
+        //        culled não pagam NEM skin NEM drawElements;
+        //   27.3 o default OFF: lodDistance=0 desenha o normal mesmo longe
+        //        (o default jogável manda — o pin da sub-fase).
+        // ====================================================================
+        fase("FASE 27 — 0.11-T FASE 3.5a: skinned cull + LOD (GPU efficiency)");
+        {
+            std::string err27;
+            // ---- 27.1 o LOD no caminho real do device --------------------
+            passo("27.1 o LOD por distância no device (a cauda GLOD)");
+            {
+                // a grelha row-major 32×32 (os ímpares soldam: 1024 → 512)
+                MeshData grid27;
+                const u32 cols = 32, rows = 32;
+                grid27.vertices.resize(cols * rows);
+                for (u32 j = 0; j < rows; ++j) {
+                    for (u32 i = 0; i < cols; ++i) {
+                        Vertex& v = grid27.vertices[static_cast<size_t>(
+                            j * cols + i)];
+                        v.pos = Vec3{static_cast<f32>(i), 0.0f,
+                                     static_cast<f32>(j)};
+                        v.normal = Vec3{0.0f, 1.0f, 0.0f};
+                    }
+                }
+                for (u32 j = 0; j + 1 < rows; ++j) {
+                    for (u32 i = 0; i + 1 < cols; ++i) {
+                        const u32 a = j * cols + i;
+                        const u16 b = static_cast<u16>(a + 1);
+                        const u16 c = static_cast<u16>(a + cols);
+                        const u16 d = static_cast<u16>(c + 1);
+                        const u16 A = static_cast<u16>(a);
+                        const u16 idx[6] = {A, c, b, b, c, d};
+                        grid27.indices.insert(grid27.indices.end(), idx,
+                                              idx + 6);
+                    }
+                }
+                std::vector<u8> bytes27;
+                check(writeGMesh(grid27, bytes27, err27, nullptr, nullptr,
+                                 /*withLod=*/true),
+                      "27.1a a grelha .gmesh COM cauda GLOD escrita");
+                check(g_storage->writeBytes("assets/grelha.gmesh",
+                                            bytes27.data(), bytes27.size()),
+                      "27.1b no storage REAL do device");
+                BlockMesh bm27;
+                check(bm27.open(*g_storage, "assets/grelha.gmesh", err27),
+                      "27.1c abre POR BLOCOS (o caminho do runtime)");
+                check(bm27.hasLod() && bm27.lodBlocks().size() == 1 &&
+                          bm27.lodBlocks()[0].vertexCount == 512,
+                      "27.1d O PIN: a cauda GLOD chegou ao runtime (o LOD "
+                      "com EXATAMENTE metade dos vértices)");
+                const Mat4 model27 = Mat4::translation(0.0f, 0.0f, -20.0f);
+                const Mat4 vp27 = Mat4::ortho(-50.0f, 50.0f, -50.0f, 50.0f,
+                                              0.1f, 400.0f);
+                const Vec3 camFar27{0.0f, 0.0f, 100.0f};
+                glstub::reset();
+                g_renderer.beginFrame();
+                BlockMesh::Stats bs27;
+                const DrawStats ds27 =
+                    bm27.draw(g_renderer, model27, vp27, nullptr, nullptr,
+                              nullptr, 0, bs27, &camFar27, 20.0f);
+                check(bs27.drawn == 1 && bs27.lodDrawn == 1,
+                      "27.1e O PIN: longe (104 u > 20 u) → a ENTRADA LOD "
+                      "desenha");
+                check(ds27.vertices == bm27.lodBlocks()[0].indexCount,
+                      "27.1f os índices consumidos são os do LOD (a "
+                      "metade — a GPU eficiente)");
+                BlockMesh::Stats bs27b;
+                bm27.draw(g_renderer, model27, vp27, nullptr, nullptr,
+                          nullptr, 0, bs27b, &camFar27, 0.0f);
+                check(bs27b.drawn == 1 && bs27b.lodDrawn == 0,
+                      "27.1g O PIN: o DEFAULT OFF desenha o normal mesmo "
+                      "longe (o default jogável manda)");
+            }
+            // ---- 27.2 o skinned cull no drawTics REAL do device ----------
+            passo("27.2 o skinned cull no drawTics do device");
+            {
+                // 5 dos 10 skinados da FASE 26 vão para ATRÁS do plano
+                // near do ortho (z=+10 com a câmara na origem a olhar −Z)
+                const char* nomes27[10] = {"Pele", "clone0", "clone1",
+                                           "clone2", "clone3", "clone4",
+                                           "clone5", "clone6", "clone7",
+                                           "clone8"};
+                u32 n27 = 0;
+                for (const char* nm : nomes27) {
+                    Tic* t = g_scene.get(g_scene.find(nm));
+                    if (t == nullptr) {
+                        continue;
+                    }
+                    if (Transform3D* tr = t->getComponent<Transform3D>()) {
+                        const bool front = n27 < 5;
+                        tr->pos = Vec3{front ? -8.0f + 4.0f * static_cast<f32>(n27)
+                                             : -8.0f + 4.0f *
+                                                   static_cast<f32>(n27 - 5),
+                                       0.0f, front ? -10.0f : 10.0f};
+                        tr->updateWorld();
+                    }
+                    ++n27;
+                }
+                check(n27 == 10, "27.2a os 10 skinados da cena reposicionados");
+                glstub::reset();
+                g_renderer.beginFrame();
+                // o ortho que só vê a FRENTE (z∈[−100,−0.1]) — os z=+10
+                // ficam TODOS atrás do plano near
+                const Mat4 vp27c =
+                    Mat4::ortho(-30.0f, 30.0f, -30.0f, 30.0f, 0.1f, 100.0f);
+                const DrawStats ds27c = drawTics(vp27c, Vec3{0.0f, 0.0f, 0.0f});
+                check(g_skinFrame.any && g_skinFrame.skinados == 10,
+                      "27.2b os 10 skinados vistos pelo draw (o contador "
+                      "SkinFrameStats vive — a fonte do HUD)");
+                check(g_skinFrame.culled == 5,
+                      "27.2c O PIN: skinned: culled=5 (os de trás NÃO "
+                      "desenham — o número do HUD/engine.log)");
+                check(ds27c.drawCalls == 5,
+                      "27.2d O PIN: 5 draws (a GPU só vê a frente)");
+                check(glstub::stats.drawElementsCalls == 5 &&
+                          glstub::stats.bufferSubDataCalls == 5,
+                      "27.2e 5 drawElements + 5 uploads do UBO (os culled "
+                      "não pagam NEM skin NEM draw)");
+            }
         }
         }   // fim do else do 26.3 (o caminho do playback)
         g_gpu.releaseAll();

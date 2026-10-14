@@ -1957,6 +1957,24 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
                       "escala: original");
             break;
+        case InspRow::Kind::LodDistance: {
+            // 0.11-T (FASE 3.5a): "lod distance: N u" — a distância a partir
+            // da qual ESTE TIC desenha os blocos LOD da cauda GLOD do seu
+            // .gmesh (o decimate ½ do import). 0 = OFF e o label DIZ "off"
+            // (nunca um 0 silencioso); o .gmesh sem cauda GLOD ignora o
+            // valor (o render não o tem — a cauda é do import).
+            if (mrEdit) {
+                f32 lod = mrEdit->lodDistance;
+                ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "lod distance",
+                              0.0f, 500.0f, lod,
+                              lod > 0.0f ? "%.0f u" : "off")) {
+                    mrEdit->lodDistance = lod;
+                    edited = true;
+                }
+            }
+            break;
+        }
         case InspRow::Kind::ScriptEdit: {
             // 0.9.2 §10: abre o EDITOR DE SCRIPT (portrait + IME — o main
             // faz o par inseparável ao ver o flag)

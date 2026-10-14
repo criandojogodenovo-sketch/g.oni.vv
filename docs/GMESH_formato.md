@@ -228,6 +228,37 @@ BLOCOS (`GpuAssets::mesh`) — é o caminho onde o render POR MATERIAL
 existe; o modelo pequeno de 1 material sem props fica no mesh único
 byte a byte.
 
+### O LOD por distância (a cauda GLOD — 0.11-T FASE 3.5a)
+
+O import gera, DEPOIS do GTB2, a cauda do **LOD por distância**: o
+`kGmeshV3FlagLOD` (0x4) acende-se no `meta.flags` e os bytes vivem ALÉM
+do fim do payload declarado no header (o MESMO padrão de cauda do
+GTB1/GTB2 — os leitores v3 de sempre nunca chegam lá; o `payloadSize`
+NÃO conta o GLOD, ficheiros novos abrem em builds antigas SEM saber e
+perdem SÓ o LOD, nunca o mesh; ficheiros antigos em apps novas abrem
+sem LOD — a cauda não existe). Layout: magic u32 `GLOD`, u32 version=1,
+u32 lodCount (== blockCount — o leitor recusa outro valor), lodCount ×
+ENTRADAS de 80 B (o MESMO layout da tabela de blocos, 1:1 POR ORDEM — a
+entrada k é o LOD do bloco k; `indexCount==0` = o bloco k não tem LOD),
+u32 crc32 (de magic ao fim das entradas) e DEPOIS os BLOBS LOD nos
+offsets ABSOLUTOS que as entradas declaram (16-alinhados, o MESMO
+layout de dados dos blocos normais — pos/normal/uv f32 + índices, pele
+quando o meta diz skinned). A DECIMAÇÃO é o parity-weld determinístico
+`gmeshDecimateHalf`: o vértice ÍMPAR solda ao vizinho PAR mais próximo
+(i-1/i+1) dentro de 25% da diagonal do AABB do bloco (fora disso o
+ímpar é MANTIDO — nunca um sliver alongado), triângulos degenerados
+CAEM, os atributos do REPRESENTANTE vencem (a pele também — a emenda de
+pesos é a fronteira documentada; uma grelha row-major decima EXATAMENTE
+para metade — o pin aferre o número). Um bloco pequenino (< 8 verts,
+AABB degenerado, nada soldável) fica com a entrada VAZIA e o draw usa o
+normal. O RUNTIME: o `BlockMesh` carrega o índice na abertura (a faixa
+dos materiais cresce pelo índice — `gmeshV3LodIndexBytes` — os blobs
+ficam no disco), as entradas LOD partilham o MESMO LRU/orçamentos das
+normais e o draw troca bloco normal→LOD quando o TIC está além da
+`lodDistance` do dono (o `Stats::lodDrawn` conta; o `.goni` transporta
+"lodDist" por TIC SÓ quando != 0 — o default é OFF, o default jogável
+manda).
+
 ### As semânticas de atributo (o layout é DESCRITO — acrescentar não muda a versão)
 
 `kAttrPosition`(0) 3×, `kAttrNormal`(1) 3×, `kAttrUv0`(2) 2×,

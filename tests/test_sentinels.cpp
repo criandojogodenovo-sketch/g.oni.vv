@@ -54,7 +54,12 @@
 #include "components/CameraComp.h"
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
+#include "components/AnimationPlayer.h"   // 0.11-T (R-045): o cull do system
+#include "components/SkeletonComp.h"
+#include "core/AnimationSystem.h"          // 0.11-T (R-045)
 #include "render/BlockMesh.h"   // 0.10-M (PASSO 4 · R-040): orçamentos+frustum
+#include "render/Mesh.h"        // 0.11-T (R-045): o mesh skinado do cull
+#include "render/Renderer.h"
 #include "render/Primitives.h"
 #include "ui/EditorUi.h"
 #include "platform/EngineLog.h"
@@ -5804,4 +5809,189 @@ TEST(regress_selecao_unica_audio) {
     }
 
     rmrf(kSentinelCache);
+}
+
+// ===========================================================================
+// SENTINELA — regress_lod_cull (0.11-T · FASE 3.5a · R-045)
+//
+// O QUE VIGIA (a GPU efficiency do dono): (1) o SKINNED CULL — um TIC
+// skinado FORA do frustum NÃO anima (o AnimationSystem salta advance+apply:
+// o tempo do clip congela) e o contador diz a verdade (skinned: culled=N);
+// (2) o LOD POR DISTÂNCIA — o import gera a cauda GLOD (o decimate ½ por
+// bloco), o BlockMesh a USA à distância certa (perto = normal, longe =
+// entrada LOD) e o DEFAULT É OFF (um TIC novo NUNCA usa LOD — o default
+// jogável manda). A cena da 0.11-S abre SEM LOD e fica byte a byte.
+//
+// MUTAÇÕES que a matam (a prova está no RELATORIO-0.11-T-3.5A.md):
+//   M-3.5a1 (o skinned cull removido — o system volta a avançar tudo) →
+//           skinnedCulled==0 != 1 → VERMELHA;
+//   M-3.5a2 (o default do LOD on — o MeshRenderer nasce com distância) →
+//           fase35a_lod_off_default VERMELHA (o pin irmão no test_core).
+// ===========================================================================
+TEST(regress_lod_cull) {
+    glstub::reset();
+
+    // ---- (1) O SKINNED CULL: 2 personagens, 1 fora do frustum ------------
+    {
+        Scene scene;
+        MeshData md;
+        const Vec3 P[4] = {Vec3{-0.5f, -0.5f, 0.0f}, Vec3{0.5f, -0.5f, 0.0f},
+                           Vec3{0.5f, 0.5f, 0.0f}, Vec3{-0.5f, 0.5f, 0.0f}};
+        for (int k = 0; k < 4; ++k) {
+            Vertex v;
+            v.pos = P[k];
+            v.normal = Vec3{0.0f, 0.0f, 1.0f};
+            md.vertices.push_back(v);
+            for (int c = 0; c < 4; ++c) {
+                md.skinJoints.push_back(0);
+                md.skinWeights.push_back(c == 0 ? 1.0f : 0.0f);
+            }
+        }
+        const u16 IDX[6] = {0, 1, 2, 0, 2, 3};
+        md.indices.assign(IDX, IDX + 6);
+        Mesh skinned;
+        EXPECT(skinned.createSkinned(md.vertices.data(), 4, md.indices.data(),
+                                     6, md.skinJoints.data(),
+                                     md.skinWeights.data()));
+        Handle hs[2];
+        for (u32 k = 0; k < 2; ++k) {
+            char nm[16];
+            std::snprintf(nm, sizeof(nm), "Pers%u", k);
+            hs[k] = scene.create(nm);
+            Tic* t = scene.get(hs[k]);
+            ASSERT(t != nullptr);
+            Transform3D* tr = t->addComponent<Transform3D>();
+            tr->pos = Vec3{0.0f, 0.0f, k == 0 ? -10.0f : 10.0f};
+            tr->updateWorld();
+            MeshRenderer* mr = t->addComponent<MeshRenderer>();
+            mr->mesh = &skinned;
+            t->addComponent<SkeletonComp>();
+            AnimationPlayer* pl = t->addComponent<AnimationPlayer>();
+            AnimClip& clip = *pl->editClip();
+            clip.name = "andar";
+            AnimTrack& trk = *pl->addTrack(AnimTarget::TicPos);
+            AnimKey k0;
+            k0.t = 0.0f;
+            AnimKey k1;
+            k1.t = 1.0f;
+            k1.v[1] = 1.0f;
+            trk.keys.push_back(k0);
+            trk.keys.push_back(k1);
+            pl->activeClip = 0;
+            pl->playing = true;
+        }
+        // o ortho que só vê a FRENTE: o P0 (z=−10) dentro, o P1 (z=+10) fora
+        const Mat4 vp =
+            Mat4::ortho(-10.0f, 10.0f, -10.0f, 10.0f, 0.1f, 100.0f);
+        f32 planes[6][4];
+        BlockMesh::frustumPlanes(vp, planes);
+        AnimationSystem sys;
+        sys.enabled = true;
+        sys.frustum = planes;
+        sys.frustumValid = true;
+        sys.tick(scene, 1.0f / 60.0f);
+        EXPECT(sys.skinnedCulled == 1);   // O NÚMERO: 1 fora → culled=1
+        EXPECT(sys.culledOwners.size() == 1);
+        // (o guard: com o cull MORTO — a mutação M-3.5a1 — a lista vem
+        // vazia e a sentinela tem de falhar LIMPO nos EXPECT acima, nunca
+        // crashar no índice)
+        if (sys.culledOwners.size() == 1) {
+            auto& players = scene.components().animators();
+            for (u32 i = 0; i < players.size(); ++i) {
+                const AnimationPlayer& pl = players.at(i);
+                if (players.owner(i) == sys.culledOwners[0]) {
+                    EXPECT(pl.time == 0.0f);   // CONGELADO — não anima fora
+                } else {
+                    EXPECT(nearEqF(pl.time, 1.0f / 60.0f));  // o visível avança
+                }
+            }
+        }
+    }
+
+    // ---- (2) O LOD: gerado no import, usado à distância, DEFAULT OFF -----
+    {
+        // a grelha row-major (os ímpares soldam: 1024 → 512 EXATOS)
+        MeshData grid;
+        const u32 cols = 32, rows = 32;
+        grid.vertices.resize(cols * rows);
+        for (u32 j = 0; j < rows; ++j) {
+            for (u32 i = 0; i < cols; ++i) {
+                Vertex& v = grid.vertices[static_cast<size_t>(j * cols + i)];
+                v.pos = Vec3{static_cast<f32>(i), 0.0f, static_cast<f32>(j)};
+                v.normal = Vec3{0.0f, 1.0f, 0.0f};
+            }
+        }
+        for (u32 j = 0; j + 1 < rows; ++j) {
+            for (u32 i = 0; i + 1 < cols; ++i) {
+                const u32 a = j * cols + i;
+                const u16 b = static_cast<u16>(a + 1);
+                const u16 c = static_cast<u16>(a + cols);
+                const u16 d = static_cast<u16>(c + 1);
+                const u16 A = static_cast<u16>(a);
+                const u16 idx[6] = {A, c, b, b, c, d};
+                grid.indices.insert(grid.indices.end(), idx, idx + 6);
+            }
+        }
+        std::string err;
+        std::vector<u8> bytes;
+        EXPECT(writeGMesh(grid, bytes, err, nullptr, nullptr,
+                          /*withLod=*/true));
+        FakeStorage st;
+        st.files["assets/sent.gmesh"].assign(
+            reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        BlockMesh bm;
+        EXPECT(bm.open(st, "assets/sent.gmesh", err));
+        EXPECT(bm.hasLod());   // a cauda GLOD chegou ao runtime
+        EXPECT(bm.lodBlocks().size() == 1);
+        EXPECT(bm.lodBlocks()[0].vertexCount == 512);   // A METADE EXATA
+        Renderer r;
+        const Mat4 model = Mat4::translation(0.0f, 0.0f, -20.0f);
+        const Mat4 vp =
+            Mat4::ortho(-50.0f, 50.0f, -50.0f, 50.0f, 0.1f, 400.0f);
+        {   // LONGE: a entrada LOD desenha (o pin «usa»)
+            BlockMesh::Stats bs;
+            const Vec3 camPos{0.0f, 0.0f, 100.0f};
+            bm.draw(r, model, vp, nullptr, nullptr, nullptr, 0, bs, &camPos,
+                    20.0f);
+            EXPECT(bs.drawn == 1);
+            EXPECT(bs.lodDrawn == 1);
+        }
+        {   // PERTO: o normal (a distância manda)
+            BlockMesh::Stats bs;
+            const Vec3 camPos{0.0f, 0.0f, -10.0f};
+            bm.draw(r, model, vp, nullptr, nullptr, nullptr, 0, bs, &camPos,
+                    20.0f);
+            EXPECT(bs.drawn == 1);
+            EXPECT(bs.lodDrawn == 0);
+        }
+        {   // DEFAULT OFF: sem distância NUNCA liga (o default jogável)
+            BlockMesh::Stats bs;
+            const Vec3 camPos{0.0f, 0.0f, 100.0f};
+            bm.draw(r, model, vp, nullptr, nullptr, nullptr, 0, bs, &camPos,
+                    0.0f);
+            EXPECT(bs.drawn == 1);
+            EXPECT(bs.lodDrawn == 0);
+        }
+        MeshRenderer fresh;
+        EXPECT(fresh.lodDistance == 0.0f);   // o TIC novo nasce OFF
+    }
+
+    // ---- (3) O COMPAT: a cena 0.11-S abre sem LOD e fica byte a byte -----
+    {
+        Scene s1;
+        const Handle h = s1.create("Corpo");
+        Tic* t = s1.get(h);
+        t->addComponent<Transform3D>();
+        t->addComponent<MeshRenderer>();
+        const std::string canonic = SceneSerializer::dump(s1);
+        EXPECT(std::strstr(canonic.c_str(), "lodDist") == nullptr);
+        Scene s2;
+        SceneSerializer::LoadCtx ctx;
+        EXPECT(SceneSerializer::loadText(s2, canonic, ctx));
+        const MeshRenderer* mr =
+            s2.get(s2.find("Corpo"))->getComponent<MeshRenderer>();
+        ASSERT(mr != nullptr);
+        EXPECT(mr->lodDistance == 0.0f);   // abre SEM LOD
+        EXPECT(SceneSerializer::dump(s2) == canonic);   // byte a byte
+    }
 }

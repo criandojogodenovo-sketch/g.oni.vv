@@ -49,6 +49,8 @@ void BlockMesh::close() {
     destroyGpu();
     entries_.clear();
     blocks_.clear();
+    lodBlocks_.clear();   // 0.11-T (3.5a): a cauda GLOD morre com o ficheiro
+    lodBase_ = 0;
     materials_.clear();
     binds_.clear();     // 0.10-M HOTFIX: o GTB1 morre com o ficheiro
     matProps_.clear();  // 0.11-M (FASE 2): o GTB2 idem
@@ -333,14 +335,24 @@ bool BlockMesh::open(ProjectStorage& st, const std::string& relPath,
     }
 
     // (3) os MATERIAIS pela faixa deles: com o tamanho visto é a cauda
-    //     EXATA; sem tamanho (SAF puro), as sondas de sempre
+    //     EXATA; sem tamanho (SAF puro), as sondas de sempre.
+    //     0.11-T (FASE 3.5a): com a cauda GLOD a faixa inclui o ÍNDICE
+    //     GLOD (16 + blockCount×80 B — conhecido do meta) e os BLOBS LOD
+    //     (que NÃO se leem aqui — os dataOffsets das entradas apontam
+    //     para lá e o lazy de sempre carrega-os POR FAIXA). O teto da
+    //     faixa cresce pelo índice; os blobs além dele ficam no disco.
+    const u64 lodIndexBytes =
+        (meta_.flags & kGmeshV3FlagLOD)
+            ? gmeshV3LodIndexBytes(meta_.blockCount)
+            : 0u;
     {
         std::vector<u8> matBytes;
         bool got = false;
         if (fileBytesKnown) {
             if (fileBytes >= meta_.materialTableOffset) {
                 const u64 tail = fileBytes - meta_.materialTableOffset;
-                if (tail > kMaterialsRangeMax) {
+                const u64 matCap = kMaterialsRangeMax + lodIndexBytes;
+                if (tail > matCap && lodIndexBytes == 0) {
                     err = "tabela de materiais absurda (" +
                           std::to_string(tail) + " B — o .gmesh v3 da casa "
                           "escreve nomes)";
@@ -354,9 +366,14 @@ bool BlockMesh::open(ProjectStorage& st, const std::string& relPath,
                     }
                     return false;
                 }
+                // com GLOD: lê ATÉ AO TETO (nomes+GTB1+GTB2+índice) — os
+                // blobs LOD além do teto ficam para o lazy (a faixa curta
+                // é inofensiva: o reader para no CRC do índice)
+                const u64 rangeLen =
+                    tail > matCap ? matCap : tail;
                 got = readRange("faixa dos MATERIAIS",
                                 meta_.materialTableOffset,
-                                static_cast<size_t>(tail), matBytes);
+                                static_cast<size_t>(rangeLen), matBytes);
                 if (!got) {
                     elog::error("blocos: '%s' FALHOU nos MATERIAIS — %s",
                                 relPath.c_str(), err.c_str());
@@ -377,11 +394,19 @@ bool BlockMesh::open(ProjectStorage& st, const std::string& relPath,
                 return false;
             }
         } else {
-            // SAF (sem stat): 1 MB → 64 KB → 4 KB → 256 B; o reader para
-            // em materialCount nomes — bytes a mais no fim são inofensivos
-            static const size_t kProbes[] = {1024u * 1024u, 64u * 1024u,
-                                             4u * 1024u, 256u};
-            for (size_t probe : kProbes) {
+            // SAF (sem stat): sondas decrescentes — com GLOD a PRIMEIRA
+            // sonda cobre nomes+GTB1+GTB2+ÍNDICE (o tamanho é conhecido do
+            // meta); os blobs LOD além disso nunca entram nesta leitura
+            std::vector<size_t> probes;
+            if (lodIndexBytes > 0) {
+                probes.push_back(static_cast<size_t>(
+                    kMaterialsRangeMax + lodIndexBytes));
+            }
+            probes.push_back(1024u * 1024u);
+            probes.push_back(64u * 1024u);
+            probes.push_back(4u * 1024u);
+            probes.push_back(256u);
+            for (size_t probe : probes) {
                 if (st.readBytesAt(relPath, meta_.materialTableOffset,
                                    probe, matBytes)) {
                     got = true;
@@ -460,7 +485,7 @@ bool BlockMesh::open(ProjectStorage& st, const std::string& relPath,
         if (got && !gmeshV3ReadMaterialsOnly(matBytes.data(),
                                               matBytes.size(), meta_,
                                               materials_, err, &binds_,
-                                              &matProps_)) {
+                                              &matProps_, &lodBlocks_)) {
             quarentena("a validação dos MATERIAIS falhou (" + err + ")");
             got = false;
         }
@@ -483,7 +508,11 @@ bool BlockMesh::open(ProjectStorage& st, const std::string& relPath,
     }
     storage_ = &st;
     path_ = relPath;
-    entries_.resize(blocks_.size());   // Entry move-only: resize constrói
+    // 0.11-T (FASE 3.5a): as entradas cobrem NORMALS + LOD (as entradas
+    // [blocks_.size(), +lodBlocks_.size()) são os LOD — o MESMO LRU/orça
+    // mentos: o LOD residente é geometria na cache como qualquer outra)
+    lodBase_ = static_cast<u32>(blocks_.size());
+    entries_.resize(blocks_.size() + lodBlocks_.size());   // Entry move-only
     opened_ = true;
     // 0.10-M HOTFIX TEXTURAS-VINCULA: a tabela de texturas POR MATERIAL
     // (a baseColor do GTB1 resolve-se no GpuAssets — o GL vive lá)
@@ -571,13 +600,24 @@ void BlockMesh::frustumPlanes(const Mat4& vp, f32 out[6][4]) {
 
 bool BlockMesh::blockVisible(const Mat4& model, const GMeshV3Block& blk,
                              const f32 planes[6][4]) {
-    // o AABB do bloco (8 cantos) transformado pelo model — testado DIRETO
+    // o AABB do bloco (8 cantos) transformado pelo model — o MESMO teste
+    // do worldAabbVisible (0.11-T 3.5a extraiu-o para o skinned cull
+    // reutilizar — UMA fonte do cálculo, zero drift)
+    return worldAabbVisible(model, blk.aabbMin, blk.aabbMax, planes);
+}
+
+// 0.11-T (FASE 3.5a · PURO): o teste do AABB QUALQUER — o corpo do
+// blockVisible de sempre (o pin R-040 do culling continua a aferir ISTO
+// através do blockVisible; o AnimationSystem chama-o DIRETO)
+bool BlockMesh::worldAabbVisible(const Mat4& model, const Vec3& mn,
+                                 const Vec3& mx, const f32 planes[6][4]) {
+    // o AABB (8 cantos) transformado pelo model — testado DIRETO
     // contra cada plano: conservative-exact para OBB (rodado incluído)
     Vec3 c[8];
     for (int k = 0; k < 8; ++k) {
-        const Vec3 local{k & 1 ? blk.aabbMax.x : blk.aabbMin.x,
-                         k & 2 ? blk.aabbMax.y : blk.aabbMin.y,
-                         k & 4 ? blk.aabbMax.z : blk.aabbMin.z};
+        const Vec3 local{k & 1 ? mx.x : mn.x,
+                         k & 2 ? mx.y : mn.y,
+                         k & 4 ? mx.z : mn.z};
         // model * local (coluna-major)
         const f32* m = model.m;
         c[k] = Vec3{m[0] * local.x + m[4] * local.y + m[8] * local.z + m[12],
@@ -595,10 +635,30 @@ bool BlockMesh::blockVisible(const Mat4& model, const GMeshV3Block& blk,
             }
         }
         if (outside == 8) {
-            return false;   // o bloco INTEIRO está fora deste plano
+            return false;   // o AABB INTEIRO está fora deste plano
         }
     }
     return true;
+}
+
+// 0.11-T (FASE 3.5a · PURO): o centro do AABB (no mundo) contra a câmara.
+// dist > lodDistance ativa (no limiar ainda é o normal — a fronteira é
+// exclusiva no lado longe).
+bool BlockMesh::lodActive(const Mat4& model, const Vec3& mn, const Vec3& mx,
+                          const Vec3& camPos, f32 lodDistance) {
+    if (!(lodDistance > 0.0f)) {
+        return false;   // OFF (o default jogável manda)
+    }
+    const f32 cx = (mn.x + mx.x) * 0.5f;
+    const f32 cy = (mn.y + mx.y) * 0.5f;
+    const f32 cz = (mn.z + mx.z) * 0.5f;
+    const f32* m = model.m;
+    const f32 wx = m[0] * cx + m[4] * cy + m[8] * cz + m[12];
+    const f32 wy = m[1] * cx + m[5] * cy + m[9] * cz + m[13];
+    const f32 wz = m[2] * cx + m[6] * cy + m[10] * cz + m[14];
+    const f32 dx = wx - camPos.x, dy = wy - camPos.y, dz = wz - camPos.z;
+    const f32 d2 = dx * dx + dy * dy + dz * dz;
+    return d2 > lodDistance * lodDistance;
 }
 
 u32 BlockMesh::visibleBlocks(const Mat4& model, const Mat4& vp,
@@ -622,11 +682,12 @@ u32 BlockMesh::visibleBlocks(const Mat4& model, const Mat4& vp,
 bool BlockMesh::materializeBlock(size_t index, MeshData& out,
                                   std::string& err) const {
     out = MeshData{};
-    if (!opened_ || !storage_ || index >= blocks_.size()) {
+    const size_t tableCount = blocks_.size() + lodBlocks_.size();
+    if (!opened_ || !storage_ || index >= tableCount) {
         err = "bloco #" + std::to_string(index) + " fora da tabela";
         return false;
     }
-    const GMeshV3Block& blk = blocks_[index];
+    const GMeshV3Block& blk = blockAt(index);   // normal ou LOD (3.5a)
     std::vector<u8> range;
     const auto t0 = std::chrono::steady_clock::now();
     if (!storage_->readBytesAt(path_, blk.dataOffset,
@@ -662,7 +723,7 @@ bool BlockMesh::materializeBlock(size_t index, MeshData& out,
 
 bool BlockMesh::ensureBlock(size_t index, std::string& err) {
     Entry& e = entries_[index];
-    const GMeshV3Block& blk = blocks_[index];
+    const GMeshV3Block& blk = blockAt(index);   // normal ou LOD (3.5a)
     if (e.gpu && e.gpu->ok()) {
         return true;   // residente em VRAM — o caminho quente (a cache
                        // CPU pode ter sido evictada: só pesa no RE-upload)
@@ -838,7 +899,8 @@ void BlockMesh::blendDrawOrder(const f32* zNdc, u32 count, u32* outOrder) {
 
 DrawStats BlockMesh::draw(Renderer& r, const Mat4& model, const Mat4& vp,
                           const Texture* tex, const f32* tint,
-                          const Mat4* bones, u32 boneCount, Stats& st) {
+                          const Mat4* bones, u32 boneCount, Stats& st,
+                          const Vec3* camPos, f32 lodDistance) {
     DrawStats total{};
     st = Stats{};
     if (!opened_) {
@@ -849,17 +911,29 @@ DrawStats BlockMesh::draw(Renderer& r, const Mat4& model, const Mat4& vp,
     st.totalBlocks = static_cast<u32>(blocks_.size());
     f32 planes[6][4];
     frustumPlanes(vp, planes);
+    // 0.11-T (FASE 3.5a): o LOD por distância liga com camPos + distância
+    // + cauda GLOD no ficheiro; sem qualquer um dos três, o caminho é o
+    // de sempre byte a byte.
+    const bool lodOn = camPos != nullptr && lodDistance > 0.0f &&
+                       !lodBlocks_.empty();
 
     // 0.11-M (FASE 2): a PARTIÇÃO opaco/blend — o GTB2 diz o alphaMode de
     // cada material (vazio = OPAQUE de sempre). Os opacos desenham NA
     // ORDEM DA TABELA (o caminho de sempre byte a byte); os BLEND esperam
     // e desenham DEPOIS, longe→perto (a única ordem em que a mistura
     // clássica é correta — o pin do teste manda nesta ordem).
+    // 0.11-T (3.5a): cada partição carrega o índice NORMAL (o material/
+    // z da partição continuam dele) + o índice de ENTRADA a desenhar (o
+    // LOD quando o TIC está além da distância — senão o próprio).
     std::vector<u32> opaqueIdx;
+    std::vector<u32> opaqueEntry;
     std::vector<u32> blendIdx;
+    std::vector<u32> blendEntry;
     std::vector<f32> blendZ;
     opaqueIdx.reserve(blocks_.size());
+    opaqueEntry.reserve(blocks_.size());
     blendIdx.reserve(16);
+    blendEntry.reserve(16);
     blendZ.reserve(16);
 
     std::string err;
@@ -868,14 +942,25 @@ DrawStats BlockMesh::draw(Renderer& r, const Mat4& model, const Mat4& vp,
             continue;   // CULL: o AABB do bloco está todo fora do frustum
         }
         ++st.visible;
-        Entry& e = entries_[i];
+        // 0.11-T (3.5a): a escolha do LOD (por TIC — o chamador passa a
+        // distância; o draw executa). O bloco desenhado pode ser a
+        // ENTRADA LOD (lazy pelo MESMO LRU/orçamentos).
+        u32 entryIdx = static_cast<u32>(i);
+        if (lodOn && lodBlocks_[i].indexCount > 0 &&
+            lodActive(model, blocks_[i].aabbMin, blocks_[i].aabbMax,
+                      *camPos, lodDistance)) {
+            entryIdx = lodBase_ + static_cast<u32>(i);
+            ++st.lodDrawn;
+        }
+        Entry& e = entries_[entryIdx];
         const bool wasResident = e.gpu != nullptr;
-        if (!ensureBlock(i, err)) {
+        if (!ensureBlock(entryIdx, err)) {
             // honesto: o bloco falhou (corrupção/faixa) — loga e segue;
             // os OUTROS blocos não morrem por causa dele
             elog::error("blocos: '%s' bloco %zu FALHOU — %s", path_.c_str(),
-                        i, err.c_str());
+                        entryIdx, err.c_str());
             err.clear();
+            --st.lodDrawn;
             continue;
         }
         e.lastSeen = frame_;
@@ -885,7 +970,9 @@ DrawStats BlockMesh::draw(Renderer& r, const Mat4& model, const Mat4& vp,
         }
         // 0.11-M (FASE 2): a partição opaco/blend pelo alphaMode do GTB2
         // (nullptr = OPAQUE de sempre). O z NDC do centro (a ordem do
-        // passe blend calcula-se AQUI — o clip do VP com o model aplicado)
+        // passe blend calcula-se AQUI — o clip do VP com o model aplicado;
+        // o CENTRO é o do bloco NORMAL — o LOD partilha o material e o
+        // AABB é subconjunto do dele)
         const GMeshMatProps* mp =
             propsOf(blocks_[i].materialIndex);
         if (mp != nullptr && mp->alphaMode == 2) {
@@ -907,14 +994,17 @@ DrawStats BlockMesh::draw(Renderer& r, const Mat4& model, const Mat4& vp,
             // «mais longe» — o pin da ordem cobre o caso)
             blendZ.push_back(clipW > 1e-6f ? clipZ / clipW : 1e9f);
             blendIdx.push_back(static_cast<u32>(i));
+            blendEntry.push_back(entryIdx);
         } else {
             opaqueIdx.push_back(static_cast<u32>(i));
+            opaqueEntry.push_back(entryIdx);
         }
     }
 
     // ---- o PASSE DOS OPACOS (a ordem da tabela — o caminho de sempre) --
-    for (const u32 i : opaqueIdx) {
-        const Entry& e = entries_[i];
+    for (size_t k = 0; k < opaqueIdx.size(); ++k) {
+        const u32 i = opaqueIdx[k];
+        const Entry& e = entries_[opaqueEntry[k]];
         const GMeshMatProps* mp = propsOf(blocks_[i].materialIndex);
         DrawProps dp;
         const DrawProps* dpp = nullptr;
@@ -934,7 +1024,7 @@ DrawStats BlockMesh::draw(Renderer& r, const Mat4& model, const Mat4& vp,
                        order.data());
         for (const u32 k : order) {
             const u32 i = blendIdx[k];
-            const Entry& e = entries_[i];
+            const Entry& e = entries_[blendEntry[k]];
             const GMeshMatProps* mp = propsOf(blocks_[i].materialIndex);
             DrawProps dp;
             const DrawProps* dpp = nullptr;

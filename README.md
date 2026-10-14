@@ -34,6 +34,32 @@ V.ONI (a fonte única, gerada do registo) está em `VONI_referencia.md`.
 O rastreador da campanha em curso (FASE 0.9.6-MASTER, grupos A-I) está em
 `BACKLOG.md`.
 
+## 0.11-T — FASE 3.5a: GPU EFFICIENCY (skinned cull + LOD por distância)
+
+A campanha 0.11-T abre com a sub-fase 3.5a (o pin `docs/FASE3.5-PIN.md`
+manda: os alvos do C33 são o CONTRATO — a FASE 5 só arranca com o pin
+fechado). **Skinned cull**: o AnimationSystem salta os TICs skinados
+cujo AABB inchado 25% está fora do frustum — NEM advance NEM apply (o
+tempo do clip congela fora do ecrã e retoma ao voltar); o drawTics
+re-testa com os planos frescos e salta nem skin nem draw; o HUD ganha o
+chip «skinned: culled N/M» + o log throttled (o padrão do chip bl).
+Sem frustum injetado o custo é ZERO. **LOD por distância**: o import
+GERA a cauda **GLOD** no .gmesh (o decimate ½ — parity-weld
+determinístico, uma grelha decima para EXATAMENTE metade; o MESMO
+padrão de cauda do GTB1/GTB2 — builds antigas ignoram, ficheiros antigos
+abrem sem LOD; os blobs ficam no disco e sobem pelo MESMO LRU/orçamentos
+por bloco) e o draw troca bloco normal→LOD quando o TIC está além da
+distância do TIC ("lod distance: N u" no inspector; **0 = OFF — o
+default jogável manda**; o .goni transporta "lodDist" só quando != 0 —
+a 0.11-S fica byte a byte). Provas: 5 pins novos
+(test_fase35a_lod_cull.cpp) + a sentinela **R-045** `regress_lod_cull`
+com as mutações M-3.5a1/M-3.5a2 coladas + a FASE 27 do device virtual
+(+12 checks = 869: a cauda GLOD no storage REAL do device, o draw à
+distância consome o LOD, 10 skinados com 5 atrás do near → 5 draws +
+culled=5). Suíte 997 testes no harness local (o FIX do harness do
+sandbox: as sentinelas agora correm localmente também).
+`docs/RELATORIO-0.11-T-3.5A.md`. versionCode 72.
+
 ## 0.11-S — FASE 3: ESQUELETO/ANIMAÇÃO (o personagem move-se)
 
 As interpolações do glTF chegam COMPLETAS e o skinning passa ao UBO de

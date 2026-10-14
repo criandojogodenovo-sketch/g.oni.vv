@@ -234,6 +234,14 @@ struct BlockRec {
     u64 triCount = 0;
     Vec3 aabbMin{}, aabbMax{};
     u32 crc = 0;
+    // 0.11-T (FASE 3.5a): o LOD ½ do bloco (a cauda GLOD) — os bytes
+    // vivem DEPOIS do blob normal no MESMO temporário (o assembly emite
+    // para a cauda do ficheiro final). lodIdxCount == 0 = sem LOD.
+    u64 lodTempOff = 0;
+    u32 lodVerts = 0;
+    u32 lodIdxCount = 0;
+    u32 lodCrc = 0;
+    Vec3 lodAabbMin{}, lodAabbMax{};
 };
 
 // a higiene de RSS: larga (MADV_DONTNEED) as páginas limpas de um range
@@ -488,6 +496,38 @@ struct TempStore {
             blob.push_back(static_cast<u8>(i & 0xFF));
             blob.push_back(static_cast<u8>((i >> 8) & 0xFF));
         }
+        // 0.11-T (FASE 3.5a): o LOD ½ (a geração é do import — SEMPRE no
+        // streaming). A decimação é determinística e corre FORA do mutex
+        // (b é do worker; os out-vectors são locais). Um bloco que não
+        // decima (pequenino/sem soldáveis) não escreve blob LOD.
+        std::vector<u8> lodBlob;
+        u32 lodVertsN = 0, lodIdxN = 0;
+        u32 lodCrc = 0;
+        Vec3 lodMn, lodMx;
+        {
+            std::vector<u32> wide(b.idx.begin(), b.idx.end());
+            std::vector<Vertex> lodPool;
+            std::vector<u32> lodIdx;
+            if (gmeshDecimateHalf(b.pool, wide, nullptr, nullptr,
+                                  b.aabbMin, b.aabbMax, lodPool, lodIdx,
+                                  nullptr, nullptr, lodMn, lodMx)) {
+                lodVertsN = static_cast<u32>(lodPool.size());
+                lodIdxN = static_cast<u32>(lodIdx.size());
+                lodBlob.reserve(lodPool.size() * 32 + lodIdx.size() * 2);
+                for (const Vertex& v : lodPool) {
+                    u8 raw[32];
+                    std::memcpy(raw, &v.pos, 12);
+                    std::memcpy(raw + 12, &v.normal, 12);
+                    std::memcpy(raw + 24, &v.uv, 8);
+                    lodBlob.insert(lodBlob.end(), raw, raw + 32);
+                }
+                for (const u32 i : lodIdx) {
+                    lodBlob.push_back(static_cast<u8>(i & 0xFF));
+                    lodBlob.push_back(static_cast<u8>((i >> 8) & 0xFF));
+                }
+                lodCrc = gcrc32(lodBlob.data(), lodBlob.size());
+            }
+        }
         std::lock_guard<std::mutex> lk(mu);
         // std::ftell — a casa usa long (LP64: 64-bit em arm64/x86_64,
         // os alvos da engine; o temporário vive no mesmo volume)
@@ -514,6 +554,29 @@ struct TempStore {
         rec.blockIdx = b.blockIdx;
         rec.tStart = b.tStart;
         rec.triCount = b.triCount;
+        // o blob LOD logo a seguir (o MESMO mutex — os offsets são do
+        // tempfile sequencial); lodTempOff==0 é legal (o 1.º blob pode
+        // nascer em 0) — o marcador de «sem LOD» é o lodIdxCount
+        if (!lodBlob.empty()) {
+            const long lpos = std::ftell(f);
+            if (lpos < 0) {
+                err = "ftello do temporário falhou (LOD)";
+                return false;
+            }
+            if (std::fwrite(lodBlob.data(), 1, lodBlob.size(), f) !=
+                lodBlob.size()) {
+                err = "a escrita do temporário falhou (LOD, errno " +
+                      std::to_string(errno) + ")" +
+                      (errno == ENOSPC ? " — DISCO CHEIO" : "");
+                return false;
+            }
+            rec.lodTempOff = static_cast<u64>(lpos);
+            rec.lodVerts = lodVertsN;
+            rec.lodIdxCount = lodIdxN;
+            rec.lodCrc = lodCrc;
+            rec.lodAabbMin = lodMn;
+            rec.lodAabbMax = lodMx;
+        }
         return true;
     }
     std::mutex mu;
@@ -1103,9 +1166,11 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
     }
     // os totais + a AABB global + as entradas da tabela
     GMeshV3Meta meta;
-    meta.flags = metaFlags;   // 0.10-M (EXT): 0 no fundido de sempre; as
-                              // peças trazem kGmeshV3FlagPiece (o runtime
-                              // abre-as por blocos — o culling por TIC)
+    meta.flags = metaFlags | kGmeshV3FlagLOD;   // 0.10-M (EXT): 0 no fundido
+    // de sempre; as peças trazem kGmeshV3FlagPiece (o runtime abre-as por
+    // blocos — o culling por TIC). 0.11-T (FASE 3.5a): o streaming é
+    // caminho de IMPORT — a cauda GLOD nasce SEMPRE (as entradas sem LOD
+    // ficam vazias; os leitores antigos ignoram a cauda inteira)
     meta.blockVertexCap = kGmeshV3BlockVertexCap;
     meta.attrs[0] = GMeshV3Attr{kAttrPosition, kAttrF32, 0, 0, 0};
     meta.attrs[1] = GMeshV3Attr{kAttrNormal, kAttrF32, 0, 0, 0};
@@ -1230,7 +1295,21 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
         return false;
     }
     u64 written = 0;
-    const u64 outFileBytes = meta.materialTableOffset + sk.materials.size();
+    // o tamanho do ficheiro final (o denominador do progresso) — a cauda
+    // GLOD (0.11-T 3.5a) entra: índice + blobs 16-alinhados dos recs
+    u64 lodTailBytes = gmeshV3LodIndexBytes(sorted.size());
+    {
+        u64 c = meta.materialTableOffset + sk.materials.size() +
+                lodTailBytes;
+        for (const BlockRec& r : sorted) {
+            if (r.lodIdxCount == 0) continue;
+            c += (16 - c % 16) % 16;
+            c += u64(r.lodVerts) * 32 + u64(r.lodIdxCount) * 2;
+        }
+        lodTailBytes = c - (meta.materialTableOffset + sk.materials.size());
+    }
+    const u64 outFileBytes = meta.materialTableOffset + sk.materials.size() +
+                             lodTailBytes;
     auto failWrite = [&](const std::string& why) {
         st.closeWriteStream(wh);
         st.remove(outRel);   // sem estado parcial (a regra da casa)
@@ -1330,6 +1409,95 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
         return failWrite("a escrita de '" + outRel +
                          "' falhou na tabela (errno " +
                          std::to_string(errno) + ")");
+    }
+    // ---- 0.11-T (FASE 3.5a): a cauda GLOD (o índice + os blobs do
+    // temporário) — os bytes vivem ALÉM do payloadSize (os leitores v3
+    // de sempre nunca chegam aqui). Os offsets são ABSOLUTOS e conhecidos
+    // antes do índice (os tamanhos vêm dos recs do corte). A ordem é
+    // índice→blobs (o leitor valida o índice e carrega os blobs POR FAIXA
+    // — o mesmo contrato lazy dos blocos normais).
+    {
+        std::vector<GMeshV3Block> lodEntries(sorted.size());
+        u64 tailCursor = meta.materialTableOffset + sk.materials.size() +
+                         gmeshV3LodIndexBytes(sorted.size());
+        for (size_t p = 0; p < sorted.size(); ++p) {
+            const BlockRec& r = sorted[p];
+            GMeshV3Block& e = lodEntries[p];
+            e.materialIndex = r.materialOrder;
+            e.indexType = 0;
+            if (r.lodIdxCount == 0) {
+                continue;   // sem LOD para este bloco (entrada vazia)
+            }
+            e.dataSize = u64(r.lodVerts) * 32 + u64(r.lodIdxCount) * 2;
+            e.vertexCount = r.lodVerts;
+            e.indexCount = r.lodIdxCount;
+            e.aabbMin = r.lodAabbMin;
+            e.aabbMax = r.lodAabbMax;
+            e.crc32 = r.lodCrc;
+            tailCursor += (16 - tailCursor % 16) % 16;
+            e.dataOffset = tailCursor;
+            tailCursor += e.dataSize;
+        }
+        std::vector<u8> lodIndex;
+        gmeshV3AppendLod(lodIndex, lodEntries);
+        u64 emitCursor =
+            meta.materialTableOffset + sk.materials.size();
+        emitCursor += lodIndex.size();
+        if (!wchunk(lodIndex.data(), lodIndex.size(), "g lod")) {
+            return failWrite("a escrita de '" + outRel +
+                             "' falhou no índice GLOD (errno " +
+                             std::to_string(errno) + ")");
+        }
+        for (size_t p = 0; p < sorted.size(); ++p) {
+            const BlockRec& r = sorted[p];
+            const GMeshV3Block& e = lodEntries[p];
+            if (e.indexCount == 0) {
+                continue;
+            }
+            if (e.dataOffset > emitCursor) {
+                if (!wchunk(kZero,
+                            static_cast<size_t>(e.dataOffset - emitCursor),
+                            "g pad")) {
+                    return failWrite("a escrita de '" + outRel +
+                                     "' falhou no pad GLOD (errno " +
+                                     std::to_string(errno) + ")");
+                }
+            }
+            emitCursor = e.dataOffset;
+            if (std::fseek(temp.f, static_cast<long>(r.lodTempOff),
+                           SEEK_SET) != 0) {
+                return failWrite("o seek no temporário falhou (LOD #" +
+                                 std::to_string(p) + ")");
+            }
+            blob.resize(static_cast<size_t>(e.dataSize));
+            size_t got2 = 0;
+            while (got2 < blob.size()) {
+                const size_t want =
+                    (std::min)(kStreamChunk, blob.size() - got2);
+                const size_t n = std::fread(blob.data() + got2, 1, want,
+                                            temp.f);
+                if (n == 0) {
+                    return failWrite("o temporário acabou cedo (LOD #" +
+                                     std::to_string(p) + ", errno " +
+                                     std::to_string(errno) + ")");
+                }
+                got2 += n;
+            }
+            if (gcrc32(blob.data(), blob.size()) != e.crc32) {
+                return failWrite("o bloco LOD #" + std::to_string(p) +
+                                 " corrompeu no temporário (o CRC diverge)");
+            }
+            if (!wchunk(blob.data(), blob.size(), "g bloco")) {
+                return failWrite("a escrita de '" + outRel +
+                                 "' falhou no bloco LOD #" +
+                                 std::to_string(p) + " (errno " +
+                                 std::to_string(errno) + ")");
+            }
+            emitCursor += e.dataSize;
+            if (canceled.load(std::memory_order_relaxed)) {
+                return failWrite("cancelado (o import foi interrompido)");
+            }
+        }
     }
     st.closeWriteStream(wh);
     // o temporário MORRE AQUI (a verificação só precisa da fonte e do

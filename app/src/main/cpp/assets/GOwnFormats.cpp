@@ -724,9 +724,13 @@ void gmeshV3AppendProps(std::vector<u8>& materialsSection,
     materialsSection.insert(materialsSection.end(), blk.begin(), blk.end());
 }
 
+// 0.11-T (FASE 3.5a): `consumed` (OPCIONAL, out) recebe o nº de bytes do
+// bloco GTB2 (0 = sem bloco — o GLOD, se existir, arranca nos nomes+GTB1).
 bool gmeshV3ReadProps(const u8* tail, size_t tailLen,
-                      std::vector<GMeshMatProps>& out, std::string& err) {
+                      std::vector<GMeshMatProps>& out, std::string& err,
+                      size_t* consumed) {
     out.clear();
+    if (consumed != nullptr) *consumed = 0;
     if (tailLen < 4) {
         return true;   // sem cauda (ficheiro pré-FASE 2) — NÃO é erro
     }
@@ -785,6 +789,243 @@ bool gmeshV3ReadProps(const u8* tail, size_t tailLen,
         err = "CHECKSUM CORROMPIDO: bloco de propriedades (GTB2) diz CRC 0x" +
               std::to_string(stored) + ", recalculado 0x" + std::to_string(got) +
               " — o ficheiro foi danificado";
+        out.clear();
+        return false;
+    }
+    if (consumed != nullptr) *consumed = r.i + 4;   // até ao fim do CRC
+    return true;
+}
+
+// ---- 0.11-T (FASE 3.5a) — a DECIMAÇÃO ½ + a cauda GLOD ----------------------
+// O contrato está no header (gmeshDecimateHalf/gmeshV3AppendLod/
+// gmeshV3ReadLod). O weld é PARITY (ímpar → o vizinho par mais próximo,
+// tolerância 25% da diagonal do AABB do bloco) — determinístico, O(n),
+// sem estado global: o MESMO bloco decima SEMPRE para o MESMO LOD (o
+// re-corte da verificação é byte-idêntico).
+bool gmeshDecimateHalf(const std::vector<Vertex>& pool,
+                       const std::vector<u32>& indices32,
+                       const std::vector<u8>* bones,
+                       const std::vector<f32>* weights,
+                       const Vec3& aabbMin, const Vec3& aabbMax,
+                       std::vector<Vertex>& outPool,
+                       std::vector<u32>& outIndices,
+                       std::vector<u8>* outBones,
+                       std::vector<f32>* outWeights,
+                       Vec3& outMn, Vec3& outMx) {
+    outPool.clear();
+    outIndices.clear();
+    if (outBones != nullptr) outBones->clear();
+    if (outWeights != nullptr) outWeights->clear();
+    const size_t n = pool.size();
+    if (n < 8 || indices32.size() < 3 || (indices32.size() % 3) != 0) {
+        return false;   // pequeno demais para LOD (a entrada fica vazia)
+    }
+    const f32 dx = aabbMax.x - aabbMin.x;
+    const f32 dy = aabbMax.y - aabbMin.y;
+    const f32 dz = aabbMax.z - aabbMin.z;
+    const f32 diag = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (!(diag > 0.0f)) {
+        return false;   // AABB degenerado (plano/linha) — sem LOD
+    }
+    const f32 tol = 0.25f * diag;
+    auto d2 = [](const Vec3& a, const Vec3& b) {
+        const f32 x = a.x - b.x, y = a.y - b.y, z = a.z - b.z;
+        return x * x + y * y + z * z;
+    };
+    // pass 1: o destino dos ímpares (o vizinho PAR mais próximo dentro da
+    // tolerância; fora dela o ímpar é MANTIDO — nunca um sliver alongado)
+    std::vector<i32> weld(n, -1);        // ímpar soldado → índice ORIGINAL par
+    std::vector<u32> keep;               // os ORIGINAIS mantidos (ascendente)
+    keep.reserve(n / 2 + 1);
+    for (size_t i = 0; i < n; ++i) {
+        if ((i & 1u) == 0u) {
+            keep.push_back(static_cast<u32>(i));
+            continue;
+        }
+        f32 bestD = d2(pool[i].pos, pool[i - 1].pos);
+        u32 best = static_cast<u32>(i - 1);
+        if (i + 1 < n) {
+            const f32 dNext = d2(pool[i].pos, pool[i + 1].pos);
+            if (dNext < bestD) {
+                bestD = dNext;
+                best = static_cast<u32>(i + 1);
+            }
+        }
+        if (bestD <= tol * tol) {
+            weld[i] = static_cast<i32>(best);
+        } else {
+            keep.push_back(static_cast<u32>(i));
+        }
+    }
+    // pass 2: os novos índices (os mantidos em ordem ASCENDENTE — a pool
+    // do LOD preserva a ordem relativa, o mesmo contrato do corte)
+    std::vector<u32> newIdx(n, 0xFFFFFFFFu);
+    for (size_t k = 0; k < keep.size(); ++k) {
+        newIdx[keep[k]] = static_cast<u32>(k);
+    }
+    for (size_t i = 0; i < n; ++i) {
+        if (weld[i] >= 0) {
+            newIdx[i] = newIdx[static_cast<size_t>(weld[i])];
+        }
+    }
+    // pass 3: os triângulos remapeados (degenerados CAEM)
+    outIndices.reserve(indices32.size() / 2);
+    for (size_t t = 0; t + 2 < indices32.size(); t += 3) {
+        const u32 a = newIdx[indices32[t]];
+        const u32 b = newIdx[indices32[t + 1]];
+        const u32 c = newIdx[indices32[t + 2]];
+        if (a == 0xFFFFFFFFu || b == 0xFFFFFFFFu || c == 0xFFFFFFFFu) {
+            return false;   // índice fora da pool — mesh corrompido na origem
+        }
+        if (a == b || b == c || a == c) {
+            continue;   // degenerou no weld — cai (o LOD é aproximação)
+        }
+        outIndices.push_back(a);
+        outIndices.push_back(b);
+        outIndices.push_back(c);
+    }
+    if (outIndices.empty()) {
+        return false;   // tudo degenerou — o draw usa o bloco normal
+    }
+    // pass 4: a pool do LOD (os mantidos, por valor) + o AABB + a pele do
+    // REPRESENTANTE (o par — a emenda de pesos é a fronteira documentada)
+    outPool.resize(keep.size());
+    for (size_t k = 0; k < keep.size(); ++k) {
+        outPool[k] = pool[keep[k]];
+    }
+    if (outBones != nullptr && bones != nullptr &&
+        bones->size() >= pool.size() * 4) {
+        outBones->resize(keep.size() * 4);
+        for (size_t k = 0; k < keep.size(); ++k) {
+            for (int c = 0; c < 4; ++c) {
+                (*outBones)[k * 4 + static_cast<size_t>(c)] =
+                    (*bones)[static_cast<size_t>(keep[k]) * 4 +
+                             static_cast<size_t>(c)];
+            }
+        }
+    }
+    if (outWeights != nullptr && weights != nullptr &&
+        weights->size() >= pool.size() * 4) {
+        outWeights->resize(keep.size() * 4);
+        for (size_t k = 0; k < keep.size(); ++k) {
+            for (int c = 0; c < 4; ++c) {
+                (*outWeights)[k * 4 + static_cast<size_t>(c)] =
+                    (*weights)[static_cast<size_t>(keep[k]) * 4 +
+                               static_cast<size_t>(c)];
+            }
+        }
+    }
+    Vec3 mn{1e30f, 1e30f, 1e30f};
+    Vec3 mx{-1e30f, -1e30f, -1e30f};
+    for (const Vertex& v : outPool) {
+        mn.x = mn.x < v.pos.x ? mn.x : v.pos.x;
+        mn.y = mn.y < v.pos.y ? mn.y : v.pos.y;
+        mn.z = mn.z < v.pos.z ? mn.z : v.pos.z;
+        mx.x = mx.x > v.pos.x ? mx.x : v.pos.x;
+        mx.y = mx.y > v.pos.y ? mx.y : v.pos.y;
+        mx.z = mx.z > v.pos.z ? mx.z : v.pos.z;
+    }
+    outMn = mn;
+    outMx = mx;
+    return true;
+}
+
+void gmeshV3AppendLod(std::vector<u8>& out,
+                      const std::vector<GMeshV3Block>& lodEntries) {
+    if (lodEntries.empty()) {
+        return;
+    }
+    const size_t start = out.size();
+    Writer w(out);
+    w.u8_('G');
+    w.u8_('L');
+    w.u8_('O');
+    w.u8_('D');
+    w.u32_(1);   // version
+    w.u32_(static_cast<u32>(lodEntries.size()));
+    for (const GMeshV3Block& e : lodEntries) {
+        v3WriteBlockEntry(w, e);
+    }
+    const u32 crc = gcrc32(out.data() + start, out.size() - start);
+    w.u32_(crc);
+}
+
+bool gmeshV3ReadLod(const u8* tail, size_t tailLen,
+                    const GMeshV3Meta& meta,
+                    std::vector<GMeshV3Block>& out, std::string& err) {
+    out.clear();
+    if (tailLen < 4) {
+        return true;   // sem cauda — NÃO é erro (ficheiro sem LOD)
+    }
+    if (!(tail[0] == 'G' && tail[1] == 'L' && tail[2] == 'O' &&
+          tail[3] == 'D')) {
+        return true;   // cauda desconhecida — o contrato dos irmãos (ignora)
+    }
+    if (tailLen < 16) {
+        err = "bloco GLOD do .gmesh truncado (cabeçalho)";
+        return false;
+    }
+    Reader r(tail, tailLen);
+    (void)r.u32_();   // magic já validado
+    const u32 version = r.u32_();
+    const u32 count = r.u32_();
+    if (version != 1) {
+        err = "bloco GLOD do .gmesh com versão desconhecida (" +
+              std::to_string(version) + ")";
+        return false;
+    }
+    if (count != meta.blockCount) {
+        err = "bloco GLOD do .gmesh diz " + std::to_string(count) +
+              " entradas mas a tabela tem " +
+              std::to_string(meta.blockCount) + " blocos";
+        return false;
+    }
+    out.resize(count);
+    for (u32 k = 0; k < count && !r.bad; ++k) {
+        if (!v3ReadBlockEntry(r, out[static_cast<size_t>(k)], err)) {
+            out.clear();
+            return false;
+        }
+        const GMeshV3Block& b = out[static_cast<size_t>(k)];
+        if (b.indexType > 1 || b.materialIndex >= meta.materialCount) {
+            err = "entrada LOD inválida no GLOD (#" + std::to_string(k) + ")";
+            out.clear();
+            return false;
+        }
+        if (b.indexCount == 0) {
+            continue;   // sem LOD para este bloco (o draw usa o normal)
+        }
+        if (b.vertexCount == 0 || (b.vertexCount > meta.blockVertexCap) ||
+            (b.indexCount % 3) != 0) {
+            err = "entrada LOD com contagens inválidas (#" +
+                  std::to_string(k) + ")";
+            out.clear();
+            return false;
+        }
+        const u64 expect = b.vertexCount * meta.vertexStride() +
+                           b.indexCount * (b.indexType ? 4u : 2u);
+        if (expect != b.dataSize) {
+            err = "entrada LOD com tamanho " + std::to_string(b.dataSize) +
+                  " B ≠ esperado " + std::to_string(expect) + " B (#" +
+                  std::to_string(k) + ")";
+            out.clear();
+            return false;
+        }
+    }
+    if (r.bad || r.i + 4 > tailLen) {
+        err = "bloco GLOD do .gmesh truncado (entradas)";
+        out.clear();
+        return false;
+    }
+    const u32 stored = [&] {
+        Reader c(tail + r.i, 4);
+        return c.u32_();
+    }();
+    const u32 got = gcrc32(tail, r.i);   // o CRC cobre desde o magic
+    if (stored != got) {
+        err = "CHECKSUM CORROMPIDO: bloco GLOD diz CRC 0x" +
+              std::to_string(stored) + ", recalculado 0x" +
+              std::to_string(got) + " — o ficheiro foi danificado";
         out.clear();
         return false;
     }
@@ -1022,10 +1263,12 @@ bool readGMeshV3Meta(const u8* bytes, size_t len, GMeshV3Meta& meta,
                      std::vector<GMeshV3Block>& blocks,
                      std::vector<std::string>& materials, std::string& err,
                      std::vector<GMeshMatBind>* binds,
-                     std::vector<GMeshMatProps>* props) {
+                     std::vector<GMeshMatProps>* props,
+                     std::vector<GMeshV3Block>* lod) {
     v3Reset(meta);
     blocks.clear();
     materials.clear();
+    if (lod != nullptr) lod->clear();
     GFileHeader h;
     if (!gReadHeader(bytes, len, "GMES", h, err)) {
         return false;
@@ -1124,11 +1367,12 @@ bool readGMeshV3Meta(const u8* bytes, size_t len, GMeshV3Meta& meta,
     }
     // os MATERIAIS (nomes — 4-alinhados; o leitor partilhado do PASSO 4;
     // a faixa EXATA = do offset até ao fim do ficheiro; o GTB1 da cauda
-    // vem para fora quando o chamador o pede; o GTB2 idem — 0.11-M)
+    // vem para fora quando o chamador o pede; o GTB2 idem — 0.11-M; o
+    // GLOD idem — 0.11-T 3.5a)
     if (!gmeshV3ReadMaterialsOnly(
             bytes + meta.materialTableOffset,
             static_cast<size_t>(len - meta.materialTableOffset),
-            meta, materials, err, binds, props)) {
+            meta, materials, err, binds, props, lod)) {
         return false;
     }
     return true;
@@ -1223,7 +1467,8 @@ bool gmeshV3ReadMaterialsOnly(const u8* matBytes, size_t matLen,
                               std::vector<std::string>& materials,
                               std::string& err,
                               std::vector<GMeshMatBind>* binds,
-                              std::vector<GMeshMatProps>* props) {
+                              std::vector<GMeshMatProps>* props,
+                              std::vector<GMeshV3Block>* lod) {
     materials.clear();
     materials.resize(static_cast<size_t>(meta.materialCount));
     Reader mr(matBytes, matLen);
@@ -1245,6 +1490,9 @@ bool gmeshV3ReadMaterialsOnly(const u8* matBytes, size_t matLen,
     // é 4-alinhada (cada nome termina alinhado e o materialTableOffset
     // também é). 0.11-M (FASE 2): o GTB1 diz quantos bytes consumiu — o
     // GTB2 (se existir) arranca DAÍ (a ordem da cauda é nomes→GTB1→GTB2)
+    // 0.11-T (FASE 3.5a): o GLOD arranca onde o GTB2 acabou (a ordem é
+    // nomes→GTB1→GTB2→GLOD). O props pode precisar de parse em scratch
+    // (só para achar o fim) quando o chamador pede o lod sem os props.
     size_t bindConsumed = 0;
     if (binds != nullptr && mr.i < matLen) {
         if (!gmeshV3ReadBinds(matBytes + mr.i, matLen - mr.i, *binds, err,
@@ -1252,12 +1500,45 @@ bool gmeshV3ReadMaterialsOnly(const u8* matBytes, size_t matLen,
             return false;
         }
     }
+    size_t propsConsumed = 0;
     if (props != nullptr && mr.i < matLen) {
         const size_t tailOff = mr.i + bindConsumed;
         if (tailOff < matLen) {
             if (!gmeshV3ReadProps(matBytes + tailOff, matLen - tailOff,
-                                  *props, err)) {
+                                  *props, err, &propsConsumed)) {
                 return false;
+            }
+        }
+    }
+    if (lod != nullptr) {
+        lod->clear();
+        if ((meta.flags & kGmeshV3FlagLOD) != 0u && mr.i < matLen) {
+            std::vector<GMeshMatProps> scratch;
+            std::vector<GMeshMatProps>* propsArg = props;
+            size_t scratchConsumed = 0;
+            if (propsArg == nullptr) {
+                propsArg = &scratch;   // só para achar o fim do GTB2
+            } else {
+                scratchConsumed = propsConsumed;
+            }
+            if (scratchConsumed == 0 && propsArg == &scratch) {
+                const size_t tailOff = mr.i + bindConsumed;
+                if (tailOff < matLen) {
+                    if (!gmeshV3ReadProps(matBytes + tailOff,
+                                          matLen - tailOff, scratch, err,
+                                          &scratchConsumed)) {
+                        return false;
+                    }
+                }
+            }
+            const size_t lodOff =
+                mr.i + bindConsumed +
+                (propsArg == props ? propsConsumed : scratchConsumed);
+            if (lodOff < matLen) {
+                if (!gmeshV3ReadLod(matBytes + lodOff, matLen - lodOff,
+                                    meta, *lod, err)) {
+                    return false;
+                }
             }
         }
     }
@@ -1509,7 +1790,8 @@ void v3FillAabb(GMeshV3BlockIn& b) {
 
 bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err,
                 const std::vector<GMeshMatBind>* binds,
-                const std::vector<GMeshMatProps>* props) {
+                const std::vector<GMeshMatProps>* props,
+                bool withLod) {
     out.clear();
     if (m.vertices.empty() || m.indices.empty()) {
         err = "geometria vazia — nada a converter";
@@ -1532,9 +1814,42 @@ bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err,
         }
     }
     for (GMeshV3BlockIn& b : bins) v3FillAabb(b);
+    // ---- 0.11-T (FASE 3.5a): a DECIMAÇÃO ½ por bloco (a cauda GLOD).
+    // A geração é do IMPORT (withLod=true) — os round-trips/exports
+    // (default false) ficam byte a byte. Um bloco que não decima (peque
+    // nino/sem soldáveis) fica com a entrada VAZIA (indexCount==0 — o
+    // draw usa o normal). O LOD NÃO entra nas contagens do meta (elas
+    // descrevem a geometria NORMAL — a tabela é a verdade do ficheiro).
+    std::vector<GMeshV3BlockIn> lodBins;
+    bool anyLod = false;
+    if (withLod) {
+        lodBins.resize(bins.size());
+        for (size_t i = 0; i < bins.size(); ++i) {
+            GMeshV3BlockIn& lb = lodBins[i];
+            lb.material = bins[i].material;
+            const bool ok = gmeshDecimateHalf(
+                bins[i].vertices, bins[i].indices32,
+                skinned ? &bins[i].bones : nullptr,
+                skinned ? &bins[i].weights : nullptr,
+                bins[i].aabbMin, bins[i].aabbMax,
+                lb.vertices, lb.indices32,
+                skinned ? &lb.bones : nullptr,
+                skinned ? &lb.weights : nullptr,
+                lb.aabbMin, lb.aabbMax);
+            if (ok) {
+                anyLod = true;
+            } else {
+                lb.vertices.clear();
+                lb.indices32.clear();
+                lb.bones.clear();
+                lb.weights.clear();
+            }
+        }
+    }
     // ---- os atributos canónicos (float32 SEM PERDA + skin quando há)
     GMeshV3Meta meta;
-    meta.flags = skinned ? 1u : 0u;
+    meta.flags = (skinned ? kGmeshV3FlagSkinned : 0u) |
+                 (anyLod ? kGmeshV3FlagLOD : 0u);
     meta.blockVertexCap = kGmeshV3BlockVertexCap;
     meta.attrs[0] = GMeshV3Attr{kAttrPosition, kAttrF32, 0, 0, 0};
     meta.attrs[1] = GMeshV3Attr{kAttrNormal, kAttrF32, 0, 0, 0};
@@ -1656,6 +1971,51 @@ bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err,
     while (out.size() < meta.blockTableOffset) out.push_back(0);
     out.insert(out.end(), sk.table.begin(), sk.table.end());
     out.insert(out.end(), sk.materials.begin(), sk.materials.end());
+    // ---- 0.11-T (FASE 3.5a): a cauda GLOD (o índice + os blobs) — os
+    // bytes vivem ALÉM do payloadSize declarado no header (os leitores
+    // v3 de sempre nunca chegam aqui; o readGMesh tolera bytes a mais).
+    // Os offsets dos blobs são ABSOLUTOS e conhecidos ANTES do índice
+    // (os tamanhos são todos conhecidos — a ordem é índice→blobs).
+    if (anyLod) {
+        std::vector<GMeshV3Block> lodEntries(lodBins.size());
+        std::vector<std::vector<u8>> lodBlobs(lodBins.size());
+        u64 cursor = meta.materialTableOffset + sk.materials.size() +
+                     gmeshV3LodIndexBytes(lodBins.size());
+        for (size_t i = 0; i < lodBins.size(); ++i) {
+            GMeshV3BlockIn& lb = lodBins[i];
+            lb.use32 = lb.vertices.size() > 65535;
+            GMeshV3Block& e = lodEntries[i];
+            e.materialIndex = matIdx[i];
+            e.indexType = lb.use32 ? 1u : 0u;
+            if (lb.vertices.empty() || lb.indices32.empty()) {
+                continue;   // sem LOD para este bloco (entrada vazia)
+            }
+            const u64 vb = lb.vertices.size() * stride;
+            const u64 ib =
+                lb.indices32.size() * (lb.use32 ? 4ull : 2ull);
+            e.dataSize = vb + ib;
+            e.vertexCount = lb.vertices.size();
+            e.indexCount = lb.indices32.size();
+            e.aabbMin = lb.aabbMin;
+            e.aabbMax = lb.aabbMax;
+            serializeBlock(lb, lodBlobs[i]);
+            e.crc32 = gcrc32(lodBlobs[i].data(), lodBlobs[i].size());
+            cursor += (16 - cursor % 16) % 16;
+            e.dataOffset = cursor;
+            cursor += e.dataSize;
+        }
+        std::vector<u8> lodIndex;
+        gmeshV3AppendLod(lodIndex, lodEntries);
+        out.insert(out.end(), lodIndex.begin(), lodIndex.end());
+        for (size_t i = 0; i < lodBins.size(); ++i) {
+            const GMeshV3Block& e = lodEntries[i];
+            if (e.indexCount == 0) {
+                continue;
+            }
+            while (out.size() < e.dataOffset) out.push_back(0);
+            out.insert(out.end(), lodBlobs[i].begin(), lodBlobs[i].end());
+        }
+    }
     return true;
 }
 

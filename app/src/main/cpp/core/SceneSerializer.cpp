@@ -143,6 +143,12 @@ void appendComponentJson(Json& arr, const MeshRenderer* mr) {
         tint.addItem(Json::makeNumber(mr->tint[2]));
         c.addMember("tint", std::move(tint));
     }
+    // 0.11-T (FASE 3.5a) — LOD por distância: SÓ quando != 0 (o default
+    // OFF fica fora do ficheiro — os .goni da 0.11-S ficam byte a byte;
+    // ausente = 0 = OFF no loader)
+    if (mr->lodDistance != 0.0f) {
+        c.addMember("lodDist", Json::makeNumber(mr->lodDistance));
+    }
     arr.addItem(std::move(c));
 }
 
@@ -527,6 +533,16 @@ void fillMeshRenderer(MeshRenderer* mr, const Json& comp, const LoadCtx& ctx) {
         jt && jt->type == Json::Type::Array && jt->items.size() == 3) {
         for (int i = 0; i < 3; ++i) {
             mr->tint[i] = static_cast<f32>(jt->items[static_cast<size_t>(i)].number);
+        }
+    }
+    // 0.11-T (FASE 3.5a): "lodDist" opcional (ausente = 0 = OFF — o
+    // default jogável; negativo/zero não liga nunca)
+    mr->lodDistance = 0.0f;
+    if (const Json* jl = comp.find("lodDist");
+        jl && jl->type == Json::Type::Number) {
+        const f32 v = static_cast<f32>(jl->number);
+        if (v > 0.0f) {
+            mr->lodDistance = v;
         }
     }
 }

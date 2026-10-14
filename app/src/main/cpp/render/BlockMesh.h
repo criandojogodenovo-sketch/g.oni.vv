@@ -69,6 +69,7 @@ public:
         u32 evictedTotal = 0;     // evictions LRU desde o open
         u64 ramBytes = 0;         // MeshData retidos (cache CPU)
         u64 vramBytes = 0;        // uploads estimados (cache GPU)
+        u32 lodDrawn = 0;         // 0.11-T (3.5a): desenhados como LOD
     };
 
     BlockMesh() = default;
@@ -97,6 +98,11 @@ public:
 
     const GMeshV3Meta& meta() const { return meta_; }
     const std::vector<GMeshV3Block>& table() const { return blocks_; }
+    // 0.11-T (FASE 3.5a): os blocos LOD da cauda GLOD (1:1 POR ORDEM com a
+    // tabela — a entrada k é o LOD do bloco k; indexCount==0 = sem LOD).
+    // Vazio em ficheiros sem cauda (pré-3.5a) — o draw usa o normal.
+    const std::vector<GMeshV3Block>& lodBlocks() const { return lodBlocks_; }
+    bool hasLod() const { return !lodBlocks_.empty(); }
     const std::vector<std::string>& materials() const { return materials_; }
     // 0.10-M HOTFIX TEXTURAS-VINCULA: as vinculações do bloco GTB1 (o
     // import escreve material→slot→.gtext; o GpuAssets resolve a baseColor
@@ -162,6 +168,24 @@ public:
     // do MESMO plano (nunca exclui o que se vê).
     static bool blockVisible(const Mat4& model, const GMeshV3Block& blk,
                              const f32 planes[6][4]);
+    // 0.11-T (FASE 3.5a · PURO): o MESMO teste para um AABB QUALQUER (o
+    // skinned cull do AnimationSystem usa-o com os bounds do TIC; o
+    // blockVisible de cima é o MESMO cálculo sobre o AABB do bloco).
+    // Conservativo igual: false só quando TODOS os 8 cantos estão fora
+    // do MESMO plano.
+    static bool worldAabbVisible(const Mat4& model, const Vec3& mn,
+                                 const Vec3& mx, const f32 planes[6][4]);
+    // o INCHAMENTO do AABB do skinned cull (a pose animada ultrapassa o
+    // AABB de bind — 25% da extensão em cada lado cobre o swing típico;
+    // conservativo = nunca culle um personagem visível; o pin C33 valida
+    // nos rigs reais do dono — se saltar, é UMA constante a subir).
+    static constexpr f32 kSkinCullAabbSwell = 0.25f;
+    // 0.11-T (FASE 3.5a · PURO): o TIC está além da distância do LOD? O
+    // centro do AABB (transformado pelo model) contra a posição da
+    // câmara. dist > lodDistance ativa (no próprio limiar ainda é o
+    // normal — a fronteira é exclusiva no lado longe).
+    static bool lodActive(const Mat4& model, const Vec3& mn, const Vec3& mx,
+                          const Vec3& camPos, f32 lodDistance);
     // 0.11-M (FASE 2 · PURO): a ORDEM do passe BLEND — longe→perto. `zNdc`
     // = o z de NDC do centro de cada bloco (o -1 é perto, +1 longe; z fora
     // de [-1,1] = atrás/diante do clip → desenha PRIMEIRO, o «mais longe»).
@@ -176,9 +200,15 @@ public:
     // cull → lazy load → draw → evict. Os DrawStats somam-se ao do frame
     // (dc/verts coerentes com a status line); `bones/boneCount` seguem o
     // MESMO contrato do drawMesh de sempre (skin por TIC).
+    // 0.11-T (FASE 3.5a): `camPos` + `lodDistance` (OPCIONAIS) ligam o
+    // LOD por distância — com o TIC além da distância, cada bloco visível
+    // desenha a ENTRADA LOD (a cauda GLOD) em vez do normal; sem LOD no
+    // ficheiro, sem camPos, ou lodDistance ≤ 0 o comportamento é byte a
+    // byte o de sempre (os chamadores antigos intocados).
     DrawStats draw(Renderer& r, const Mat4& model, const Mat4& vp,
                    const Texture* tex, const f32* tint,
-                   const Mat4* bones, u32 boneCount, Stats& st);
+                   const Mat4* bones, u32 boneCount, Stats& st,
+                   const Vec3* camPos = nullptr, f32 lodDistance = 0.0f);
 
     // orçamentos (defaults = as constantes da casa; os pins apertam-nos)
     void setBudgets(u64 ramBudgetBytes, u64 vramBudgetBytes);
@@ -210,6 +240,10 @@ private:
     std::string path_;
     GMeshV3Meta meta_{};
     std::vector<GMeshV3Block> blocks_;
+    std::vector<GMeshV3Block> lodBlocks_;         // 0.11-T (3.5a): a cauda
+                                                  // GLOD (1:1 com blocks_)
+    u32 lodBase_ = 0;                             // entries_[lodBase_+k] é o
+                                                  // LOD do bloco k
     std::vector<std::string> materials_;
     std::vector<GMeshMatBind> binds_;             // o GTB1 (o auto do import)
     std::vector<GMeshMatProps> matProps_;         // 0.11-M: o GTB2 (as props)
@@ -217,6 +251,13 @@ private:
                                                   // (não-dono: o cache do
                                                   // GpuAssets é o dono)
     std::vector<Entry> entries_;
+
+    // o registo da tabela de UM índice de entrada (normal ou LOD)
+    const GMeshV3Block& blockAt(size_t index) const {
+        return index < blocks_.size()
+                   ? blocks_[index]
+                   : lodBlocks_[static_cast<size_t>(index) - blocks_.size()];
+    }
     bool opened_ = false;
     u64 frame_ = 0;
     u64 evictedTotal_ = 0;      // acumulado de evictions LRU (o Stats lê)

@@ -56,6 +56,15 @@ public:
     // ("tint":[r,g,b], default [1,1,1] quando ausente).
     f32 tint[3] = {1.0f, 1.0f, 1.0f};
 
+    // 0.11-T (FASE 3.5a) — LOD POR DISTÂNCIA: a distância (em unidades) a
+    // partir da qual ESTE TIC desenha os blocos LOD da cauda GLOD do seu
+    // .gmesh (o decimate ½ do import). 0 = OFF (o default jogável manda —
+    // um TIC novo NUNCA usa LOD; o pin manda nele). Serializado no .goni
+    // como "lodDist" SÓ quando != 0 (os ficheiros da 0.11-S ficam byte a
+    // byte). O .gmesh sem cauda GLOD ignora o valor (o draw usa o normal
+    // — honesto: o inspector mostra o valor, o render não o tem).
+    f32 lodDistance = 0.0f;
+
     // F5-C/E: refs relativas do asset — vazias = procedural ("cube"/sem tex).
     // Vivem no componente para o serializer e para a UI mostrarem a origem.
     std::string meshPath;

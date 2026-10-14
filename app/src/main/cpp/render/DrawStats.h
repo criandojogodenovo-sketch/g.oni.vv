@@ -13,4 +13,14 @@ inline DrawStats operator+(const DrawStats& a, const DrawStats& b) {
     return {a.vertices + b.vertices, a.drawCalls + b.drawCalls};
 }
 
+// 0.11-T (FASE 3.5a) — as métricas do SKINNED CULL do frame (o HUD e o
+// engine.log espelham ISTO — o padrão do BlockFrameStats dos blocos, a
+// MESMA fonte para o main, o harness do c33 e os pins).
+struct SkinFrameStats {
+    u32 skinados = 0;   // TICs skinados vistos pelo draw neste frame
+    u32 culled = 0;     // skinados que o draw NÃO desenhou (fora do
+                        // frustum deste frame — o número do HUD/log)
+    bool any = false;   // há skinados em cena (a linha só nasce com eles)
+};
+
 } // namespace vv

@@ -843,6 +843,23 @@ struct BlockFrameStats {
 BlockFrameStats g_blockFrame;
 BlockFrameStats g_blockFramePrev;   // o log throttled compara contra este
 
+// 0.11-T (FASE 3.5a) — as métricas do SKINNED CULL do frame (o HUD e o
+// log espelham ISTO). O contador é o do LADO DO DRAW (os TICs skinados
+// que este frame NÃO desenhou por estarem fora do frustum — funciona em
+// editor E play, e é o número que a cena do pin mostra). O contador do
+// LADO DA ANIMAÇÃO (g_animSystem.skinnedCulled) fica para os pins do
+// test_core (fase35a_skinned_cull) — somá-los aqui DUPLICAVA (5+5) o
+// mesmo TIC culled nos dois lados. O TIPO vive no DrawStats.h (a fonte
+// única — o harness do c33 lê o MESMO struct).
+SkinFrameStats g_skinFrame;
+
+// os 6 planos do VP do frame (a MESMA fonte do render por blocos) —
+// escritos no frame() depois do vp e consumidos PELO AnimationSystem no
+// frame seguinte (o vp nasce DEPOIS dos systems — a ordem do Tick; o
+// inchamento conservativo do AABB cobre a diferença de um frame)
+f32 g_skinFrustum[6][4];
+bool g_skinFrustumValid = false;
+
 // 0.10-M (PASSO 4) — o INTERVALO do log de métricas (1 s no device — o
 // orbit produz a linha quando o culling muda; o harness põe 0 para
 // determinismo nos frames acelerados)
@@ -5050,11 +5067,57 @@ i32 onInputEvent(android_app* /*app*/, AInputEvent* event) {
 // BlockMesh do meshPath, ligado pelo blockRebind do ponto seguro) desenha
 // BLOCO A BLOCO (frustum por AABB + lazy + LRU); o mr->mesh desses TICs é
 // o HULL de bounds (nunca desenhado — fica para cena/fit/gizmo).
-DrawStats drawTics(const Mat4& vp) {
+// 0.11-T (FASE 3.5a): (a) o SKINNED CULL do lado do DRAW — um TIC skinado
+// cujo AABB (inchado 25%) está TODO fora do frustum deste frame não
+// desenha e não paga computeSkinMatrices (o AnimationSystem já saltou o
+// avanço dele; este é o mesmo teste com os planos FRESCOS do frame — o
+// ping-pong de planos evita o pop de 1 frame); (b) o LOD por distância —
+// camEye + mr->lodDistance vão ao blocks->draw (o .gmesh sem cauda GLOD
+// ignora — byte a byte). Conta skinados/culled para o HUD/engine.log.
+DrawStats drawTics(const Mat4& vp, const Vec3& camEye) {
     DrawStats st{};
     g_blockFrame = BlockFrameStats{};   // as métricas DO frame (HUD/log)
+    g_skinFrame = SkinFrameStats{};
     const ComponentStore& comps = g_scene.components();
     const auto& mrs = comps.meshRenderers();
+    f32 skinPlanes[6][4];
+    bool skinPlanesReady = false;   // os planos só se extraem com skinados
+    auto skinCulledNow = [&](Handle h, const MeshRenderer& mr) -> bool {
+        if (!(mr.blocks != nullptr ? mr.blocks->skinned()
+                                   : (mr.mesh != nullptr &&
+                                      mr.mesh->skinned()))) {
+            return false;
+        }
+        ++g_skinFrame.skinados;
+        if (!skinPlanesReady) {
+            BlockMesh::frustumPlanes(vp, skinPlanes);
+            skinPlanesReady = true;
+        }
+        Vec3 mn{0.0f, 0.0f, 0.0f}, mx{0.0f, 0.0f, 0.0f};
+        if (mr.blocks != nullptr) {
+            mn = mr.blocks->boundsMin();
+            mx = mr.blocks->boundsMax();
+        } else {
+            mn = mr.mesh->boundsMin();
+            mx = mr.mesh->boundsMax();
+        }
+        const Vec3 ext{(mx.x - mn.x) * BlockMesh::kSkinCullAabbSwell,
+                       (mx.y - mn.y) * BlockMesh::kSkinCullAabbSwell,
+                       (mx.z - mn.z) * BlockMesh::kSkinCullAabbSwell};
+        mn.x -= ext.x; mn.y -= ext.y; mn.z -= ext.z;
+        mx.x += ext.x; mx.y += ext.y; mx.z += ext.z;
+        Mat4 model = Mat4::identity();
+        if (const Transform3D* tr = comps.transforms().find(h)) {
+            model = tr->world;
+        }
+        const bool vis = BlockMesh::worldAabbVisible(model, mn, mx,
+                                                      skinPlanes);
+        if (!vis) {
+            ++g_skinFrame.culled;   // o lado do DRAW também conta (o HUD
+                                    // mostra o MAIOR dos dois lados)
+        }
+        return !vis;
+    };
     for (u32 i = 0; i < mrs.size(); ++i) {
         const MeshRenderer& mr = mrs.at(i);
         if (!mr.mesh && !mr.blocks) {
@@ -5070,19 +5133,27 @@ DrawStats drawTics(const Mat4& vp) {
         }
         // ---- 0.10-M (PASSO 4): O CAMINHO DOS BLOCOS -----------------------
         if (mr.blocks) {
+            // 0.11-T (3.5a): o skinned cull do DRAW (antes do skin
+            // compute — o TIC fora do frustum não paga NADA)
+            const SkeletonComp* sk = comps.skeletons().find(mrs.owner(i));
+            if (sk != nullptr && skinCulledNow(mrs.owner(i), mr)) {
+                g_skinFrame.any = true;
+                continue;
+            }
             // o skin segue o MESMO contrato (esqueleto do TIC + mesh com
             // pele — cada bloco traz aJoints/aWeights próprios)
-            const SkeletonComp* sk = comps.skeletons().find(mrs.owner(i));
             Mat4 bones[SkeletonComp::kMaxBones];
             u32 nBones = 0;
             if (sk && mr.blocks->skinned()) {
+                g_skinFrame.any = true;
                 nBones = computeSkinMatrices(*sk, bones,
                                              SkeletonComp::kMaxBones);
             }
             BlockMesh::Stats bs;
             const DrawStats sb =
                 mr.blocks->draw(g_renderer, model, vp, mr.texture, mr.tint,
-                                nBones > 0 ? bones : nullptr, nBones, bs);
+                                nBones > 0 ? bones : nullptr, nBones, bs,
+                                &camEye, mr.lodDistance);
             g_blockFrame.any = true;
             g_blockFrame.total += bs.totalBlocks;
             g_blockFrame.visible += bs.visible;
@@ -5100,9 +5171,14 @@ DrawStats drawTics(const Mat4& vp) {
         // shader (a pose vive nos joints; o TRS do TIC continua a ser o
         // model matrix — o esqueleto é RELATIVO ao TIC)
         const SkeletonComp* sk = comps.skeletons().find(mrs.owner(i));
+        if (sk != nullptr && skinCulledNow(mrs.owner(i), mr)) {
+            g_skinFrame.any = true;
+            continue;   // 0.11-T (3.5a): fora do frustum — nem skin nem draw
+        }
         Mat4 bones[SkeletonComp::kMaxBones];
         u32 nBones = 0;
         if (sk && mr.mesh->skinned()) {
+            g_skinFrame.any = true;
             nBones = computeSkinMatrices(*sk, bones, SkeletonComp::kMaxBones);
         }
         st = st + g_renderer.drawMesh(*mr.mesh, model, vp, mr.texture, mr.tint,
@@ -5179,6 +5255,16 @@ void statusLine(const DrawStats& st3d, const DrawStats& stGrid) {
                       shortTexFormat(g_hwCompressor.lastFormat()),
                       g_texCache ? g_texCache->hits() : 0u,
                       g_texCache ? g_texCache->misses() : 0u);
+    }
+    // 0.11-T (FASE 3.5a): o chip do SKINNED CULL — «skinned: culled/N»
+    // (os skinados que o frame NÃO desenhou por estarem fora do frustum,
+    // sobre os skinados em cena — o padrão do chip bl desenhados/totais;
+    // SÓ nasce com skinados em cena: sem eles a linha fica byte a byte).
+    if (g_skinFrame.any) {
+        const size_t len = std::strlen(status);
+        std::snprintf(status + len, sizeof(status) - len,
+                      "  skinned: culled %u/%u", g_skinFrame.culled,
+                      g_skinFrame.skinados);
     }
     g_ui.statusLine(status);
     std::snprintf(g_statusLine, sizeof(g_statusLine), "%s", status);
@@ -5704,6 +5790,14 @@ void frame() {
     }
     g_renderer.beginFrame();
     const Mat4 vp = Mat4::mul(proj, view);
+    // 0.11-T (FASE 3.5a): os planos do VP deste frame para o SKINNED CULL
+    // (a MESMA extração do render por blocos) — o AnimationSystem consome
+    // -os no frame seguinte (o vp nasce DEPOIS dos systems; o inchamento
+    // conservativo do AABB cobre a diferença de 1 frame)
+    BlockMesh::frustumPlanes(vp, g_skinFrustum);
+    g_skinFrustumValid = true;
+    g_animSystem.frustum = g_skinFrustum;
+    g_animSystem.frustumValid = true;
     // 0.9.6.1 (G1-3) — O RENDER 3D NÃO SANGRA: no EDITOR o pass 3D (malhas
     // + grid) fica confinado ao retângulo da viewport por SCISSOR — o dono
     // via as linhas azuis do grid POR BAIXO da barra de FPS e na faixa dos
@@ -5755,7 +5849,7 @@ void frame() {
             }
         }
     }
-    const DrawStats st3d = drawTics(vp);
+    const DrawStats st3d = drawTics(vp, camEye);
     // 0.10-M (PASSO 4) — o LOG das métricas reais (AQUI: editor E play — o
     // statusLine de baixo só vive em play; throttled 1×/s e só quando o nº
     // de desenhados MUDA — o orbit do dono produz a linha quando o culling
@@ -5783,6 +5877,26 @@ void frame() {
                                                 (1024 * 1024)));
         }
         g_blockFramePrev = g_blockFrame;
+    }
+    // 0.11-T (FASE 3.5a) — o LOG do skinned cull (o MESMO padrão do log
+    // dos blocos: throttled 1×/s e SÓ quando o número MUDA — o corredor
+    // do pin produz a linha quando o culling muda, sem afogar o log)
+    if (g_skinFrame.any) {
+        static u32 s_lastCulled = 0xFFFFFFFFu;
+        static double s_lastLog = -10.0;
+        static double s_clock = 0.0;
+        s_clock += g_frameDt;
+        if (g_skinFrame.culled != s_lastCulled &&
+            s_clock - s_lastLog >=
+                static_cast<double>(g_blockLogIntervalSecs)) {
+            s_lastLog = s_clock;
+            s_lastCulled = g_skinFrame.culled;
+            elog::info("skinned: culled=%u de %u skinados (fora do frustum "
+                       "— nem animam nem desenham; AABB +%.0f%)",
+                       g_skinFrame.culled, g_skinFrame.skinados,
+                       static_cast<double>(BlockMesh::kSkinCullAabbSwell *
+                                           100.0f));
+        }
     }
     const DrawStats stGrid = g_grid.draw(vp, camEye, camFocus);
     if (scissor3d) {

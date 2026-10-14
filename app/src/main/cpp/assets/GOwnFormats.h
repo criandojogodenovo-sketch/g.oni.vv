@@ -73,9 +73,14 @@ constexpr u16 kGmeshVersionMinRead = 1;  // a versão mais antiga que abre
 // `props` (0.11-M FASE 2): o GTB2 — o MESMO contrato do gmeshV3Skeleton.
 struct GMeshMatBind;   // 0.10-M HOTFIX: os binds (definidos mais abaixo)
 struct GMeshMatProps;  // 0.11-M FASE 2: as props (definidas mais abaixo)
+// `withLod` (0.11-T FASE 3.5a): GERA a cauda GLOD (o decimate ½ por
+// bloco + o índice + os blobs). false (o default) = byte a byte com o
+// escritor pré-3.5a — os round-trips/exports não mudam; os IMPORTS
+// (AssetConverter) passam true (a geração de LOD é do import).
 bool writeGMesh(const MeshData& m, std::vector<u8>& out, std::string& err,
                 const std::vector<GMeshMatBind>* binds = nullptr,
-                const std::vector<GMeshMatProps>* props = nullptr);
+                const std::vector<GMeshMatProps>* props = nullptr,
+                bool withLod = false);
 
 // lê bytes .gmesh (v1, v2 ou v3) → MeshData. v1/v2: dequantizado como
 // sempre. v3: os blocos montados por ordem da tabela (1 grupo por bloco).
@@ -112,6 +117,14 @@ constexpr u32    kGmeshV3BlockEntryBytes = 80;    // entrada da tabela
 // — NADA muda para eles.
 constexpr u32 kGmeshV3FlagSkinned = 0x1u;
 constexpr u32 kGmeshV3FlagPiece   = 0x2u;
+// 0.11-T (FASE 3.5a): bit2 = o ficheiro traz a cauda GLOD (o LOD por
+// distância). O MESMO padrão das peças: um bit no meta que muda o
+// comportamento de QUEM ABRE — os leitores de sempre ignoram a cauda
+// (o payloadSize do header NÃO conta os bytes GLOD: eles vivem DEPOIS
+// do fim da secção de materiais, onde os leitores v3 nunca chegam).
+// Ficheiro novo em app antiga perde SÓ o LOD (o mesh fica inteiro);
+// ficheiro antigo em app nova abre sem LOD (a cauda não existe).
+constexpr u32 kGmeshV3FlagLOD     = 0x4u;
 
 // semânticas de atributo (o layout é DESCRITO no header — acrescentar um
 // atributo NÃO muda a versão; um leitor que não conheça a semântica usa
@@ -198,12 +211,15 @@ std::string gmeshV3LoadRefusalErr(const GMeshV3Meta& meta);
 // como nomes (a tabela de materiais é pequena). `binds` (0.10-M HOTFIX
 // TEXTURAS-VINCULA): as vinculações do bloco GTB1 da cauda (se houver).
 // `props` (0.11-M FASE 2): as propriedades do bloco GTB2 (se houver) —
-// o MESMO contrato de cauda do binds.
+// o MESMO contrato de cauda do binds. `lod` (0.11-T FASE 3.5a): os
+// blocos LOD da cauda GLOD (se o meta tiver kGmeshV3FlagLOD e o
+// chamador os pedir) — vazia em ficheiros sem LOD.
 bool readGMeshV3Meta(const u8* bytes, size_t len, GMeshV3Meta& meta,
                      std::vector<GMeshV3Block>& blocks,
                      std::vector<std::string>& materials, std::string& err,
                      std::vector<GMeshMatBind>* binds = nullptr,
-                     std::vector<GMeshMatProps>* props = nullptr);
+                     std::vector<GMeshMatProps>* props = nullptr,
+                     std::vector<GMeshV3Block>* lod = nullptr);
 
 // materializa UM bloco → MeshData de 1 grupo (o streaming do PASSO 3 na
 // verificação e, no PASSO 4, o carregamento por blocos)
@@ -238,7 +254,8 @@ bool gmeshV3ReadMaterialsOnly(const u8* matBytes, size_t matLen,
                               std::vector<std::string>& materials,
                               std::string& err,
                               std::vector<GMeshMatBind>* binds = nullptr,
-                              std::vector<GMeshMatProps>* props = nullptr);
+                              std::vector<GMeshMatProps>* props = nullptr,
+                              std::vector<GMeshV3Block>* lod = nullptr);
 
 // gmeshV3MaterializeBlock: materializa UM bloco a partir da FAIXA EXATA
 // dos seus dados (dataLen == blk.dataSize, lida por readBytesAt — o
@@ -389,11 +406,76 @@ struct GMeshMatProps {
 void gmeshV3AppendProps(std::vector<u8>& materialsSection,
                         const std::vector<GMeshMatProps>& props);
 
+// ---- 0.11-T (FASE 3.5a) — GLOD: o LOD por distância no .gmesh -------------
+// O MESMO padrão de cauda do GTB1/GTB2: um bloco APPENDADO DEPOIS do GTB2
+// (a ordem da cauda é nomes→GTB1→GTB2→GLOD), o leitor de nomes para nos
+// nomes, os leitores antigos nunca chegam aqui (o payloadSize NÃO conta
+// o GLOD — os bytes vivem além do fim do payload, onde os leitores v3
+// de sempre não leem). O bloco GLOD é um ÍNDICE de entradas de bloco
+// (o MESMO layout de 80 B da tabela) 1:1 POR ORDEM com a tabela normal
+// (a entrada k é o LOD do bloco k), seguido dos DADOS dos blocos LOD
+// (escritos PELO CHAMADOR depois do índice, nos offsets ABSOLUTOS que as
+// entradas declaram). Layout:
+//   magic u32 "GLOD" · u32 version=1 · u32 lodCount · lodCount × 80 B
+//   · u32 crc32 (de magic..fim das entradas)
+// Uma entrada com indexCount==0 = o bloco k NÃO tem LOD (pequenino — o
+// draw usa o normal). O chamador valida lodCount == blockCount (o
+// leitor recusa outro valor — a corrupção honesta).
+//
+// A DECIMAÇÃO (o «a ½ dos vértices» do pin): PARITY-WELD determinístico
+// — os vértices ÍMPARES soldam ao vizinho PAR mais próximo (i-1 ou i+1)
+// se a distância ≤ 25% da diagonal do AABB do bloco (fora disso o
+// ímpar é MANTIDO — nunca um sliver alongado); triângulos degenerados
+// após o remapeamento CAEM; os atributos do REPRESENTANTE (o par) vencem
+// (a pele também — a emenda de pesos é a fronteira documentada). Pura,
+// O(n), sem alocações além da saída. false = não há LOD para esta pool
+// (< 8 verts, AABB degenerado, ou NENHUM soldável — o LOD igual ao
+// original não é LOD).
+bool gmeshDecimateHalf(const std::vector<Vertex>& pool,
+                       const std::vector<u32>& indices32,
+                       const std::vector<u8>* bones,
+                       const std::vector<f32>* weights,
+                       const Vec3& aabbMin, const Vec3& aabbMax,
+                       std::vector<Vertex>& outPool,
+                       std::vector<u32>& outIndices,
+                       std::vector<u8>* outBones,
+                       std::vector<f32>* outWeights,
+                       Vec3& outMn, Vec3& outMx);
+
+// ESCRITOR: serializa o ÍNDICE GLOD para `out` (o chamador appenda-o ao
+// fim da secção de materiais, DEPOIS do GTB2). As entradas chegam COM
+// dataOffset/dataSize/crc32 JÁ preenchidos (os offsets absolutos dos
+// blobs que o chamador escreve DEPOIS do índice). `cursorAbs` = o offset
+// ABSOLUTO onde o índice vai nascer (só para o log/contract — os CRCs
+// não dependem dele). lodCount == 0 NÃO escreve nada.
+void gmeshV3AppendLod(std::vector<u8>& out,
+                      const std::vector<GMeshV3Block>& lodEntries);
+
+// o tamanho do índice GLOD para lodCount entradas (o chamador precisa
+// dele ANTES de escrever para calcular os offsets dos blobs):
+// 16 (magic+ver+count+crc) + lodCount × 80.
+constexpr u64 gmeshV3LodIndexBytes(u64 lodCount) {
+    return 16ull + lodCount * kGmeshV3BlockEntryBytes;
+}
+
+// LEITOR: `tail` = os bytes DEPOIS do fim do GTB2 (o `consumed` do
+// gmeshV3ReadProps). Sem magic → true com out vazio (ficheiro sem LOD).
+// Magic presente: version!=1, lodCount != meta.blockCount, CRC mau ou
+// entrada inválida → false com err LEGÍVEL (o mesmo contrato dos irmãos).
+// Os dataOffset das entradas são ABSOLUTOS (apontam PARA A FRENTE, para
+// os blobs que vivem depois do índice — validados ao materializar).
+bool gmeshV3ReadLod(const u8* tail, size_t tailLen,
+                    const GMeshV3Meta& meta,
+                    std::vector<GMeshV3Block>& out, std::string& err);
+
 // LEITOR: `tail` = os bytes DEPOIS do fim do GTB1 (o `consumed` do
 // gmeshV3ReadBinds). Sem magic → true com out vazio (pré-FASE 2). Truncado
 // /CRC mau → false com err LEGÍVEL (o mesmo contrato do GTB1).
+// 0.11-T (FASE 3.5a): `consumed` (OPCIONAL, out) recebe o nº de bytes do
+// bloco GTB2 — o leitor do GLOD arranca DAÍ (a ordem é nomes→GTB1→GTB2→GLOD).
 bool gmeshV3ReadProps(const u8* tail, size_t tailLen,
-                      std::vector<GMeshMatProps>& out, std::string& err);
+                      std::vector<GMeshMatProps>& out, std::string& err,
+                      size_t* consumed = nullptr);
 
 // um bloco de ENTRADA do escritor v3 (a pool já com índices locais; o
 // conversor do PASSO 3 produz isto em streaming)

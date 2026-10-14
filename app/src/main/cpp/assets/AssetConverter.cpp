@@ -330,7 +330,8 @@ bool convertObjStream(const std::string& srcAbs, ProjectStorage& st,
     stats.verts = static_cast<u32>(mesh.vertices.size());
     stats.indices = static_cast<u32>(mesh.indices.size());
     std::vector<u8> bytes;
-    if (!writeGMesh(mesh, bytes, err)) {
+    // 0.11-T (FASE 3.5a): o import gera a cauda GLOD (o LOD ½ por bloco)
+    if (!writeGMesh(mesh, bytes, err, nullptr, nullptr, /*withLod=*/true)) {
         return false;
     }
     const std::string rel = std::string("assets/") + stem + ".gmesh";
@@ -1318,7 +1319,8 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
         }
         if (!writeGMesh(merged, bytes, err,
                         mergedBinds.empty() ? nullptr : &mergedBinds,
-                        mergedProps.empty() ? nullptr : &mergedProps)) {
+                        mergedProps.empty() ? nullptr : &mergedProps,
+                        /*withLod=*/true)) {
             return false;
         }
         char nm[96];
@@ -1384,7 +1386,8 @@ bool convertGltfCommon(const char* json, size_t jsonLen, FILE* binFile,
             }
             if (!writeGMesh(mesh, bytes, err,
                             meshBinds.empty() ? nullptr : &meshBinds,
-                            meshProps.empty() ? nullptr : &meshProps)) {
+                            meshProps.empty() ? nullptr : &meshProps,
+                            /*withLod=*/true)) {
                 return false;
             }
             char nm[96];

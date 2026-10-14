@@ -50,6 +50,9 @@ struct TicSnap {
     // undo restaura O MATERIAL que o pick escreveu — os outros intactos)
     std::vector<std::string> matExtraTex;
     f32      tint[3] = {1.0f, 1.0f, 1.0f};
+    // 0.11-T (FASE 3.5a): o LOD por distância entra no snapshot (o undo
+    // da linha do inspector restaura-o; 0 = OFF)
+    f32      lodDistance = 0.0f;
     bool     primOn = false;
     PrimKind primKind = PrimKind::Box;
     f32      primRadius = 0.5f, primSize = 1.0f;
