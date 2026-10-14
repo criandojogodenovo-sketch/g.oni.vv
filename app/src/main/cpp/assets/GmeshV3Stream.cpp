@@ -258,6 +258,65 @@ void dropRange(const u8* base, u64 off, u64 len) {
     ::madvise(reinterpret_cast<void*>(aligned), span, MADV_DONTNEED);
 }
 
+// 0.11-T (FASE 3.5a): o LOD do bloco NO ASSEMBLY (single-thread — os
+// workers do corte ficam byte a byte pré-3.5a: o intercalamento das
+// threads não muda). Decodifica o blob do corte (poolVerts×32 de pos/
+// normal/uv + índices u16 LOCAIS), decima (o parity-weld determinístico
+// gmeshDecimateHalf) e preenche os campos lod* do rec. Os bytes LOD
+// serializados saem SEMPRE (o chamador larga-os; a 2.ª passada de
+// emissão re-decima e CONFERE o CRC contra o daqui — a determinismo é
+// o pin). false = o bloco não tem LOD (os campos ficam a 0).
+bool blockLodFromBlob(const u8* blob, size_t blobLen, u32 poolVerts,
+                      const Vec3& aabbMin, const Vec3& aabbMax,
+                      BlockRec& rec, std::vector<u8>& outBlob) {
+    rec.lodIdxCount = 0;
+    rec.lodVerts = 0;
+    rec.lodCrc = 0;
+    outBlob.clear();
+    const size_t vb = static_cast<size_t>(poolVerts) * 32;
+    if (blobLen < vb || ((blobLen - vb) % 2) != 0) {
+        return false;
+    }
+    std::vector<Vertex> pool(poolVerts);
+    for (u32 v = 0; v < poolVerts; ++v) {
+        const u8* p = blob + static_cast<size_t>(v) * 32;
+        std::memcpy(&pool[v].pos, p, 12);
+        std::memcpy(&pool[v].normal, p + 12, 12);
+        std::memcpy(&pool[v].uv, p + 24, 8);
+    }
+    const size_t ni = (blobLen - vb) / 2;
+    std::vector<u32> idx(ni);
+    for (size_t i = 0; i < ni; ++i) {
+        idx[i] = static_cast<u32>(blob[vb + i * 2]) |
+                 (static_cast<u32>(blob[vb + i * 2 + 1]) << 8);
+    }
+    std::vector<Vertex> lodPool;
+    std::vector<u32> lodIdx;
+    Vec3 mn, mx;
+    if (!gmeshDecimateHalf(pool, idx, nullptr, nullptr, aabbMin, aabbMax,
+                           lodPool, lodIdx, nullptr, nullptr, mn, mx)) {
+        return false;   // sem LOD para este bloco (a entrada fica vazia)
+    }
+    rec.lodVerts = static_cast<u32>(lodPool.size());
+    rec.lodIdxCount = static_cast<u32>(lodIdx.size());
+    rec.lodAabbMin = mn;
+    rec.lodAabbMax = mx;
+    outBlob.reserve(lodPool.size() * 32 + lodIdx.size() * 2);
+    for (const Vertex& v : lodPool) {
+        u8 raw[32];
+        std::memcpy(raw, &v.pos, 12);
+        std::memcpy(raw + 12, &v.normal, 12);
+        std::memcpy(raw + 24, &v.uv, 8);
+        outBlob.insert(outBlob.end(), raw, raw + 32);
+    }
+    for (const u32 i : lodIdx) {
+        outBlob.push_back(static_cast<u8>(i & 0xFF));
+        outBlob.push_back(static_cast<u8>((i >> 8) & 0xFF));
+    }
+    rec.lodCrc = gcrc32(outBlob.data(), outBlob.size());
+    return true;
+}
+
 // o corte de UMA primitiva (os vértices leem-se do mmap pelo índice).
 // Cada bloco FECHADO vai ao sink (o corte appenda ao temp; a verificação
 // compara com o ficheiro final) — a RAM segura o remap + UM bloco.
@@ -496,38 +555,13 @@ struct TempStore {
             blob.push_back(static_cast<u8>(i & 0xFF));
             blob.push_back(static_cast<u8>((i >> 8) & 0xFF));
         }
-        // 0.11-T (FASE 3.5a): o LOD ½ (a geração é do import — SEMPRE no
-        // streaming). A decimação é determinística e corre FORA do mutex
-        // (b é do worker; os out-vectors são locais). Um bloco que não
-        // decima (pequenino/sem soldáveis) não escreve blob LOD.
-        std::vector<u8> lodBlob;
-        u32 lodVertsN = 0, lodIdxN = 0;
-        u32 lodCrc = 0;
-        Vec3 lodMn, lodMx;
-        {
-            std::vector<u32> wide(b.idx.begin(), b.idx.end());
-            std::vector<Vertex> lodPool;
-            std::vector<u32> lodIdx;
-            if (gmeshDecimateHalf(b.pool, wide, nullptr, nullptr,
-                                  b.aabbMin, b.aabbMax, lodPool, lodIdx,
-                                  nullptr, nullptr, lodMn, lodMx)) {
-                lodVertsN = static_cast<u32>(lodPool.size());
-                lodIdxN = static_cast<u32>(lodIdx.size());
-                lodBlob.reserve(lodPool.size() * 32 + lodIdx.size() * 2);
-                for (const Vertex& v : lodPool) {
-                    u8 raw[32];
-                    std::memcpy(raw, &v.pos, 12);
-                    std::memcpy(raw + 12, &v.normal, 12);
-                    std::memcpy(raw + 24, &v.uv, 8);
-                    lodBlob.insert(lodBlob.end(), raw, raw + 32);
-                }
-                for (const u32 i : lodIdx) {
-                    lodBlob.push_back(static_cast<u8>(i & 0xFF));
-                    lodBlob.push_back(static_cast<u8>((i >> 8) & 0xFF));
-                }
-                lodCrc = gcrc32(lodBlob.data(), lodBlob.size());
-            }
-        }
+        // 0.11-T (FASE 3.5a): a DECIMAÇÃO LOD NÃO corre AQUI (nos workers)
+        // — o assembly (single-thread) faz o decimate POR BLOCO quando lê
+        // o temporário (o MESMO bytes do corte re-decimados; a 2.ª passada
+        // de emissão confere o CRC contra o 1.º decimate — a determinismo
+        // é o pin). Os workers ficam com o comportamento pré-3.5a byte a
+        // byte (o intercalamento das threads não muda — a corrida latente
+        // que o decimate nos workers expôs no CI morre AQUI).
         std::lock_guard<std::mutex> lk(mu);
         // std::ftell — a casa usa long (LP64: 64-bit em arm64/x86_64,
         // os alvos da engine; o temporário vive no mesmo volume)
@@ -554,29 +588,8 @@ struct TempStore {
         rec.blockIdx = b.blockIdx;
         rec.tStart = b.tStart;
         rec.triCount = b.triCount;
-        // o blob LOD logo a seguir (o MESMO mutex — os offsets são do
-        // tempfile sequencial); lodTempOff==0 é legal (o 1.º blob pode
-        // nascer em 0) — o marcador de «sem LOD» é o lodIdxCount
-        if (!lodBlob.empty()) {
-            const long lpos = std::ftell(f);
-            if (lpos < 0) {
-                err = "ftello do temporário falhou (LOD)";
-                return false;
-            }
-            if (std::fwrite(lodBlob.data(), 1, lodBlob.size(), f) !=
-                lodBlob.size()) {
-                err = "a escrita do temporário falhou (LOD, errno " +
-                      std::to_string(errno) + ")" +
-                      (errno == ENOSPC ? " — DISCO CHEIO" : "");
-                return false;
-            }
-            rec.lodTempOff = static_cast<u64>(lpos);
-            rec.lodVerts = lodVertsN;
-            rec.lodIdxCount = lodIdxN;
-            rec.lodCrc = lodCrc;
-            rec.lodAabbMin = lodMn;
-            rec.lodAabbMax = lodMx;
-        }
+        // (o LOD é do assembly — os campos lod* do rec preenchem-se LÁ,
+        // single-thread, quando o blob do corte é re-lido e re-decimado)
         return true;
     }
     std::mutex mu;
@@ -1349,7 +1362,7 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
                  kGmeshV3BlockVertexCap * 6);
     u64 cursor = kGHeaderBytes + kGmeshV3MetaBytes;
     for (size_t p = 0; p < sorted.size(); ++p) {
-        const BlockRec& r = sorted[p];
+        BlockRec& r = sorted[p];
         if (entries[p].dataOffset > cursor) {
             const u64 pad = entries[p].dataOffset - cursor;
             if (!wchunk(kZero, static_cast<size_t>(pad), "pad") ||
@@ -1379,6 +1392,16 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
             return failWrite("o bloco #" + std::to_string(p) +
                              " corrompeu no temporário (o CRC diverge) — "
                              "o disco é o suspeito, não o modelo");
+        }
+        // 0.11-T (FASE 3.5a): a PASSADA A do LOD — o MESMO bytes do corte,
+        // decimados AQUI (single-thread; os workers ficam pré-3.5a). Os
+        // tamanhos/CRC/aabb vão para os campos lod* do rec (o índice GLOD
+        // precisa deles ANTES dos blobs); os bytes são largados — a 2.ª
+        // passada re-decima e CONFERE o CRC (a determinismo é o pin).
+        {
+            std::vector<u8> lodDiscard;
+            blockLodFromBlob(blob.data(), blob.size(), r.poolVerts,
+                             r.aabbMin, r.aabbMax, r, lodDiscard);
         }
         if (!wchunk(blob.data(), blob.size(), "bloco")) {
             return failWrite("a escrita de '" + outRel +
@@ -1464,12 +1487,16 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
                 }
             }
             emitCursor = e.dataOffset;
-            if (std::fseek(temp.f, static_cast<long>(r.lodTempOff),
+            // 0.11-T (FASE 3.5a): a PASSADA B do LOD — o blob NORMAL do
+            // temporário re-lê-se e re-decima (o decimate é determinístico:
+            // o CRC tem de bater com o da passada A — o pin da igualdade;
+            // o pico de RAM continua a ser UM bloco, nunca o modelo)
+            if (std::fseek(temp.f, static_cast<long>(r.tempOff),
                            SEEK_SET) != 0) {
                 return failWrite("o seek no temporário falhou (LOD #" +
                                  std::to_string(p) + ")");
             }
-            blob.resize(static_cast<size_t>(e.dataSize));
+            blob.resize(static_cast<size_t>(entries[p].dataSize));
             size_t got2 = 0;
             while (got2 < blob.size()) {
                 const size_t want =
@@ -1483,11 +1510,32 @@ bool convertGltfToV3(const GltfModel& model, const Json& doc,
                 }
                 got2 += n;
             }
-            if (gcrc32(blob.data(), blob.size()) != e.crc32) {
-                return failWrite("o bloco LOD #" + std::to_string(p) +
-                                 " corrompeu no temporário (o CRC diverge)");
+            if (gcrc32(blob.data(), blob.size()) != r.crc) {
+                return failWrite("o bloco #" + std::to_string(p) +
+                                 " corrompeu no temporário (o CRC diverge "
+                                 "na passada do LOD)");
             }
-            if (!wchunk(blob.data(), blob.size(), "g bloco")) {
+            std::vector<u8> lodBlob2;
+            BlockRec rec2;   // só para a assinatura do helper
+            if (!blockLodFromBlob(blob.data(), blob.size(), r.poolVerts,
+                                  r.aabbMin, r.aabbMax, rec2, lodBlob2)) {
+                return failWrite("o bloco #" + std::to_string(p) +
+                                 " decimou na passada A mas não na B "
+                                 "(bug interno — o decimate é "
+                                 "determinístico)");
+            }
+            if (rec2.lodCrc != r.lodCrc ||
+                rec2.lodVerts != r.lodVerts ||
+                rec2.lodIdxCount != r.lodIdxCount) {
+                return failWrite("o bloco LOD #" + std::to_string(p) +
+                                 " divergiu entre as duas passadas (o "
+                                 "decimate é determinístico — bug interno)");
+            }
+            if (gcrc32(lodBlob2.data(), lodBlob2.size()) != e.crc32) {
+                return failWrite("o bloco LOD #" + std::to_string(p) +
+                                 " com CRC divergente do índice GLOD");
+            }
+            if (!wchunk(lodBlob2.data(), lodBlob2.size(), "g bloco")) {
                 return failWrite("a escrita de '" + outRel +
                                  "' falhou no bloco LOD #" +
                                  std::to_string(p) + " (errno " +

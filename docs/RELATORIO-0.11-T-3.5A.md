@@ -220,6 +220,51 @@ desce com a distância; fps ≥ 58. O device real é o árbitro.)
   corrido localmente (o CI corria-as; o sandbox não). Corrigido: a
   suíte local subiu de ~948 para 997 testes com as sentinelas dentro.
   O repo não muda por isso (o CMakeLists estava sempre certo).
+- **§4.1 — O CI VERMELHO (run 38548829262) — a causa medida e o estado
+  da caça** (a regra 1.7: PÁRA e reporta; nada fica escondido):
+  - O SINTOMA: o job core-tests morre com SIGSEGV (sinal 11) no teste
+    `safstream_data_uri_sem_ficheiro_tambem_streama` — a stack do crash
+    (do handler) é a MAIN thread dentro de `std::thread::join` do corte
+    paralelo do `convertGltfToV3`. 2 attempts, 2 crashes no MESMO sítio
+    (901 testes OK antes em ambos).
+  - **A PROVA DE QUE NÃO É O DIFF DA 3.5a**: o código PRÉ-3.5a (o
+    commit `3575344` — VERDE no CI no run 38466867752) reproduz o crash
+    IDÊNTICO (mesmo teste, mesma stack: join dentro do convertGltfToV3)
+    quando o nº de workers é FORÇADO a 8 — 2 crashes em ~5 suítes.
+    Com 3 workers (o que um runner de 4 vCPU dá), o pré-3.5a E o meu
+    push correm 3 suítes cada SEM crash (local, -O3).
+  - A CAUSA RAIZ: uma **corrida latente PRÉ-EXISTENTE** no corte
+    paralelo do streaming (o caminho multi-worker existe desde a
+    0.10-M PASSO 3). A probabilidade depende do nº de workers real e
+    do intercalamento (o meu push mudou o layout do heap/binário com os
+    testes novos — a lotaria do CI virou). O sandbox (2 cores → 1
+    worker) NUNCA a viu; o CI (3 workers) passava e agora perde 2×.
+  - **O RISCO REAL PARA O DEVICE**: o C33 tem 8 cores → 7 workers no
+    import streaming → o crash pode acontecer NO DEVICE do dono (um
+    SIGSEGV a meio de um import grande). NÃO é só CI.
+  - **O QUE EU MUDEI ENTRETANTO (à prova de bala para a 3.5a)**: a
+    decimação LOD saiu do caminho dos WORKERS — corre no ASSEMBLY
+    (single-thread) em DUAS PASSADAS: a A calcula tamanhos/CRC/aabb por
+    bloco (o índice GLOD), a B re-lê o blob NORMAL do temporário,
+    RE-DECIMA (o decimate é determinístico) e CONFERE o CRC contra a A
+    antes de emitir — o pico de RAM continua a ser UM bloco e o
+    intercalamento dos workers fica byte a byte pré-3.5a. Local: a
+    suíte inteira + c33 869/869 verdes com esta versão.
+  - **O QUE NÃO CONSEGUI**: apanhar a corrida em flagrante — o sandbox
+    não tem gdb; TSAN (a -O1 isolado ×4 e a suíte sem as medições)
+    não reportou a corrida (o TSAN não apanha o SIGSEGV de um wild
+    write no TCB de outra thread; a suíte TSAN completa não coube no
+    tempo). A caça continua com o dono a decidir o caminho.
+  - **AS OPÇÕES PARA O DONO** (nenhuma executada sem OK):
+    (a) caçar a corrida com TSAN num machine multi-core real (o CI
+        mesmo, com um passo temporário de TSAN);
+    (b) CAPAR os workers do streaming (ex.: min(4, núcleos)) — 1 linha,
+        custo real no tempo de import dos modelos grandes no device,
+        muda o envelope de performance declarado no relatório 0.10-M;
+    (c) cortar SEQUENCIAL o caminho HEAP/data-URI (o que o teste que
+        crasha usa) — mais cirúrgico, o mmap paralelo fica;
+    (d) aceitar a lotaria (re-runs até verde) — NÃO recomendo: o device
+        8-core do dono está na zona de crash.
 - **O frustum do cull da animação é o do frame anterior** — o vp nasce
   DEPOIS dos systems (a ordem do Tick); o inchamento conservativo de
   25% cobre a diferença; o drawTics re-testa com os planos frescos (o
