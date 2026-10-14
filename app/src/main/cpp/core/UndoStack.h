@@ -53,6 +53,9 @@ struct TicSnap {
     // 0.11-T (FASE 3.5a): o LOD por distância entra no snapshot (o undo
     // da linha do inspector restaura-o; 0 = OFF)
     f32      lodDistance = 0.0f;
+    // 0.11-W (3.5b): o toggle do instancing entra no snapshot (o MESMO
+    // contrato do lodDistance)
+    bool     instancing = true;
     bool     primOn = false;
     PrimKind primKind = PrimKind::Box;
     f32      primRadius = 0.5f, primSize = 1.0f;

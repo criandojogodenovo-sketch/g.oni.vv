@@ -149,6 +149,12 @@ void appendComponentJson(Json& arr, const MeshRenderer* mr) {
     if (mr->lodDistance != 0.0f) {
         c.addMember("lodDist", Json::makeNumber(mr->lodDistance));
     }
+    // 0.11-W (3.5b) — instancing: SÓ quando false (o default ON fica fora
+    // do ficheiro — os .goni da 0.11-T ficam byte a byte; ausente = ON no
+    // loader)
+    if (!mr->instancing) {
+        c.addMember("instancing", Json::makeBool(false));
+    }
     arr.addItem(std::move(c));
 }
 
@@ -544,6 +550,13 @@ void fillMeshRenderer(MeshRenderer* mr, const Json& comp, const LoadCtx& ctx) {
         if (v > 0.0f) {
             mr->lodDistance = v;
         }
+    }
+    // 0.11-W (3.5b): "instancing" opcional (ausente = ON — o default;
+    // false é o único valor escrito)
+    mr->instancing = true;
+    if (const Json* ji = comp.find("instancing");
+        ji && ji->type == Json::Type::Bool) {
+        mr->instancing = ji->boolean;
     }
 }
 

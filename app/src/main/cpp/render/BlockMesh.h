@@ -196,6 +196,42 @@ public:
     u32 visibleBlocks(const Mat4& model, const Mat4& vp,
                       std::vector<u32>& out) const;
 
+    // ---- 0.11-W (3.5b) · GPU INSTANCING -----------------------------------
+    // Um pick = UM bloco visível de UM TIC (a colheita não desenha nem
+    // carrega — o agrupamento corre DEPOIS do culling e ANTES do upload,
+    // §3.5b.2 do prompt). `blend` = o bloco é do passe BLEND (alphaMode 2 —
+    // os blends NÃO se fundem: a ordem longe→perto é por fragmento e um
+    // draw por bloco é o que a ordena; viajam com o z NDC de sempre).
+    struct InstPick {
+        u32 block = 0;    // o índice NORMAL na tabela (o material é dele)
+        u32 entry = 0;    // o índice a desenhar (o LOD quando o TIC está
+                          // além da distância — o MESMO critério do draw)
+        bool blend = false;
+        f32 zNdc = 0.0f;  // só os blends (a ordem do passe)
+    };
+    // o MESMO cull/LOD do draw de sempre (a MESMA função classify) sobre os
+    // blocos deste TIC — devolve os picks VISÍVEIS (opacos primeiro, blends
+    // depois; a ordem da tabela dentro de cada grupo). NADA é desenhado
+    // nem carregado aqui (o lazy corre na submissão do grupo).
+    u32 collectVisible(const Mat4& model, const Mat4& vp, const Vec3* camPos,
+                       f32 lodDistance, std::vector<InstPick>& out) const;
+    // submete UM grupo instanciado: `count` TICs a desenhar a MESMA entrada
+    // `entryIdx` (o mesmo mesh GPU!) — 1+ draw(s) instanciados (o teto de 64
+    // matrizes por draw fatia AQUI, §3.5b.3; nunca falha). O lazy/LRU correm
+    // como no draw de sempre; `st` soma drawn/loaded/lodDrawn do grupo.
+    DrawStats drawInstancedGroup(Renderer& r, u32 entryIdx, const Mat4* mats,
+                                 u32 count, const Mat4& vp, const Texture* tex,
+                                 const f32* tint, Stats& st);
+    // os blends de UM TIC instanciado (não se fundem): a ordem longe→perto
+    // de sempre (blendDrawOrder) sobre os picks colhidos; 1 draw por bloco.
+    DrawStats drawBlendPicks(Renderer& r, const u32* entries, const Mat4* model,
+                             const f32* zNdc, u32 count, const Mat4& vp,
+                             const Texture* tex, const f32* tint, Stats& st);
+    // a contabilidade VIVA (resident/ram/vram/evicted) SEM desenhar — o HUD
+    // soma UMA vez por mesh tocado no frame (os bytes são do mesh, não do
+    // TIC — somar por TIC duplicava na cena dos 6 clones)
+    void storageStats(Stats& st) const;
+
     // ---- o FRAME -----------------------------------------------------------
     // cull → lazy load → draw → evict. Os DrawStats somam-se ao do frame
     // (dc/verts coerentes com a status line); `bones/boneCount` seguem o
@@ -231,6 +267,18 @@ private:
         u64 vramBytes = 0;
         u64 ramBytes = 0;
     };
+
+    // 0.11-W (3.5b): a classificação do frame EXTRAÍDA do draw (a MESMA
+    // lógica de cull/LOD/partição, uma ÚNICA fonte para o draw de sempre e
+    // para a colheita do instancing — zero drift). Conta st.visible; os
+    // ensureBlock/drawn ficam nos chamadores (o draw nos passes, a
+    // submissão instanciada no drawInstancedGroup/drawBlendPicks).
+    void classifyFrame(const Mat4& model, const Mat4& vp,
+                       const f32 planes[6][4], bool lodOn,
+                       const Vec3* camPos, f32 lodDistance,
+                       std::vector<u32>& opaqueIdx, std::vector<u32>& opaqueEntry,
+                       std::vector<u32>& blendIdx, std::vector<u32>& blendEntry,
+                       std::vector<f32>& blendZ, Stats& st) const;
 
     bool ensureBlock(size_t index, std::string& err);   // lazy: faixa→decode→upload
     void evictOverBudget();                             // LRU estrito por pool

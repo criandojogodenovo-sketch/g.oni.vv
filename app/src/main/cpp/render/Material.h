@@ -95,6 +95,22 @@ public:
     // tem de casar com o SkeletonComp (limite do bloco UBO no shader)
     static constexpr u32 kMaxBones = 128;   // 0.11-S: 128 (era 64)
 
+    // 0.11-W (3.5b) — GPU INSTANCING: o teto de matrizes por draw (bloco
+    // std140 de 64 × 64 B = 4 KB — o orçamento declarado do GE8320; acima
+    // disto o chamador divide em múltiplos draws, nunca falha). As matrizes
+    // vão no UBO "Instances" (binding 1 — o Bones é o 0) e o vertex shader
+    // indexa uInst[gl_InstanceID] quando uInstOn != 0 — SEM atributos
+    // divisor (o padrão do UBO Bones da casa, provado no GE8320 pela 0.11-S).
+    static constexpr u32 kMaxInstances = 64;
+
+    // 0.11-W (3.5b) — o interruptor do ramo de instâncias (A CADA draw,
+    // como o uTint/uSkin — uniforms nascem a 0 e o draw de sempre define
+    // EXPLICITAMENTE false; o estado nunca vinga de um draw anterior).
+    void setInstancing(bool on) const;
+    // o upload do bloco (n matrizes + cauda de identidade até 64 — o MESMO
+    // contrato determinístico do setBones: o upload é SEMPRE 4 KB).
+    void setInstances(const Mat4* instances, u32 count) const;
+
     bool ok() const { return prog_ != 0; }
 
 private:
@@ -105,6 +121,7 @@ private:
     i32 locHasTex_ = -1;
     i32 locTint_ = -1;   // 0.7.0: uTint (cor por TIC)
     i32 locSkin_ = -1;   // 0.8.2: uSkin (ramo de bones)
+    i32 locInstOn_ = -1; // 0.11-W (3.5b): uInstOn (ramo das instâncias)
     // 0.11-S (FASE 3): o bloco de bones — o INDEX do bloco no programa
     // (glGetUniformBlockIndex; <0 = shader sem skin) + o buffer UBO criado
     // à 1.ª upload (lazy — meshes estáticos nunca pagam o glBufferData)
@@ -113,6 +130,13 @@ private:
     mutable Mat4 upload_[128]; // 0.11-S: o palco do upload (n bones + cauda
                                // de identidade — 8 KB determinísticos)
     static constexpr u32 kBoneBinding = 0;   // o slot de binding do UBO
+    // 0.11-W (3.5b): o bloco das instâncias (o MESMO padrão do Bones — o
+    // índice do bloco no programa + o buffer UBO criado à 1.ª upload lazy)
+    i32 instBlockIdx_ = -1;    // índice do bloco "Instances"
+    mutable u32 uboInst_ = 0;  // criado lazy no 1.º setInstances
+    mutable Mat4 uploadInst_[64]; // o palco do upload (n instâncias + cauda
+                                  // de identidade — 4 KB determinísticos)
+    static constexpr u32 kInstBinding = 1;   // o slot de binding (Bones = 0)
     // 0.11-M (FASE 2): as props do material
     i32 locBaseColor_ = -1;   // uBaseColor (vec4)
     i32 locAlphaMode_ = -1;   // uAlphaMode (int)

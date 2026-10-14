@@ -47,6 +47,18 @@ public:
                        const Mat4* bones = nullptr, u32 boneCount = 0,
                        const DrawProps* props = nullptr);
 
+    // 0.11-W (3.5b) — o IRMÃO INSTANCIADO do drawMesh: N cópias da MESMA
+    // geometria num draw (glDrawElementsInstanced). A matriz de CADA cópia
+    // viaja no UBO "Instances" (uInst[i] × uModel no VS; uModel = IDENTIDADE
+    // aqui — a instância leva TUDO, §3.5b.3). `instCount` ≤ 64 é o contrato
+    // do chamador (o BlockMesh::drawInstancedGroup fatia o teto do GE8320).
+    // O estado GL segue as props e é RESTAURADO como no drawMesh.
+    DrawStats drawMeshInstanced(const Mesh& mesh, const Mat4* instMats,
+                                u32 instCount, const Mat4& vp,
+                                const Texture* tex = nullptr,
+                                const f32* tint = nullptr,
+                                const DrawProps* props = nullptr);
+
     // pass UI (F1 mantido): submissões desenhadas em endFrame, sem depth
     void submit(const QuadBatch& batch, u32 texture);
     // 0.7.4 — submissão por RANGE de vértices (z-order sólidos↔texturas:

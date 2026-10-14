@@ -7,10 +7,14 @@ namespace vv {
 struct DrawStats {
     u32 vertices  = 0;   // vértices/índices processados pelo draw
     u32 drawCalls = 0;
+    // 0.11-W (3.5b): blocos fundidos em draws instanciados neste frame
+    // (o HUD/log espelham — o «instanciados=N» do log dos blocos)
+    u32 instancesMerged = 0;
 };
 
 inline DrawStats operator+(const DrawStats& a, const DrawStats& b) {
-    return {a.vertices + b.vertices, a.drawCalls + b.drawCalls};
+    return {a.vertices + b.vertices, a.drawCalls + b.drawCalls,
+            a.instancesMerged + b.instancesMerged};
 }
 
 // 0.11-T (FASE 3.5a) — as métricas do SKINNED CULL do frame (o HUD e o

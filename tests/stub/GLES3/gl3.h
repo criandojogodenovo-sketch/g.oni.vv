@@ -94,6 +94,14 @@ struct Stats {
     int bindBufferBaseCalls = 0;   // glBindBufferBase(GL_UNIFORM_BUFFER)
     int uniformBlockBindingCalls = 0; // glUniformBlockBinding (no init)
     int uniformBlockIndexCalls = 0;   // glGetUniformBlockIndex (no init)
+    // 0.11-W (3.5b): o instancing — o draw instanciado (o instance count),
+    // o bloco "Instances" (o binding 1) e o upload do UBO de 4 KB
+    int drawElementsInstancedCalls = 0;
+    int lastInstanceCount = 0;
+    int bindBufferBaseInstCalls = 0;      // glBindBufferBase index 1
+    int uniformBlockBindingInstCalls = 0; // glUniformBlockBinding 1
+    int instanceUploadCalls = 0;          // glBufferSubData de 4096 B
+    float lastInstUpload[16] = {};        // a 1.ª matriz do upload (inst 0)
 };
 inline Stats stats;              // inline C++17: 1 instância por binário
 // 0.8.7 — INJETOR DE FALHA: simula o device a ficar sem capacidade de gerar
@@ -347,41 +355,64 @@ inline void glBufferData(GLenum target, intptr_t size, const void* data, GLenum)
     ++glstub::stats.bufferData;
     if (glstub::fb::enabled) glstub::fb::bufferData(target, size, data);
 }
-// 0.11-S (FASE 3): o UBO dos bones — o upload POR draw e o binding fixo
+// 0.11-S (FASE 3): o UBO dos bones — o upload POR draw e o binding fixo.
+// 0.11-W (3.5b): o mesmo caminho serve o bloco Instances (4096 B) — o
+// conteúdo entra nos bytes do buffer bound (o fb lê no rasterizador) e os
+// contadores distinguem os uploads pelo TAMANHO (8192 = bones, 4096 =
+// instâncias) — nenhum pin antigo muda de valor.
 inline void glBufferSubData(GLenum target, intptr_t offset, intptr_t size,
                             const void* data) {
-    (void)target;
     (void)offset;
     ++glstub::stats.bufferSubDataCalls;
     glstub::stats.lastBufferSubDataBytes = (int)size;
-    if (data) {
-        const float* m = (const float*)data;
-        for (int i = 0; i < 16; ++i) glstub::stats.lastBoneUpload[i] = m[i];
-        // a ÚLTIMA matriz do bloco de 128: 127 mat4 × 16 floats = 8128
-        // floats (= 127 × 64 B — o stride std140 do array; NÃO floats×4)
-        const float* tail = m + 127 * 16;
-        for (int i = 0; i < 16; ++i) glstub::stats.lastBoneTail[i] = tail[i];
+    if (data && target == 0x8A11 /*GL_UNIFORM_BUFFER*/) {
+        if (size >= 8192) {
+            const float* m = (const float*)data;
+            for (int i = 0; i < 16; ++i) glstub::stats.lastBoneUpload[i] = m[i];
+            // a ÚLTIMA matriz do bloco de 128: 127 mat4 × 16 floats = 8128
+            // floats (= 127 × 64 B — o stride std140 do array; NÃO floats×4)
+            const float* tail = m + 127 * 16;
+            for (int i = 0; i < 16; ++i) glstub::stats.lastBoneTail[i] = tail[i];
+        } else if (size == 4096) {
+            const float* m = (const float*)data;
+            for (int i = 0; i < 16; ++i) glstub::stats.lastInstUpload[i] = m[i];
+            ++glstub::stats.instanceUploadCalls;
+        }
+    }
+    if (glstub::fb::enabled && target == 0x8A11) {
+        glstub::fb::bufferSubData(offset, size, data);
     }
 }
 inline void glBindBufferBase(GLenum target, GLuint index, GLuint buffer) {
     (void)target;
     (void)buffer;
     if (index == 0) ++glstub::stats.bindBufferBaseCalls;   // o slot da casa
+    if (index == 1) ++glstub::stats.bindBufferBaseInstCalls;   // 0.11-W
+    if (glstub::fb::enabled && target == 0x8A11) {
+        glstub::fb::uboBaseBind(index, buffer);
+    }
 }
 inline GLuint glGetUniformBlockIndex(GLuint program, const GLchar* name) {
     (void)program;
     ++glstub::stats.uniformBlockIndexCalls;
-    // "Bones" existe no programa da casa → índice 0; outro nome → GL_INVALID_INDEX
-    const char* want = "Bones";
-    const char* p = name;
-    while (*p && *p == *want) { ++p; ++want; }
-    return (*p == '\0' && *want == '\0') ? 0u : 0xFFFFFFFFu;
+    // "Bones" existe no programa da casa → índice 0; "Instances" (0.11-W)
+    // → 1; outro nome → GL_INVALID_INDEX
+    auto eq = [](const char* a, const char* b) {
+        const char* p = a;
+        const char* q = b;
+        while (*p && *p == *q) { ++p; ++q; }
+        return *p == '\0' && *q == '\0';
+    };
+    if (eq(name, "Bones")) return 0u;
+    if (eq(name, "Instances")) return 1u;
+    return 0xFFFFFFFFu;
 }
 inline void glUniformBlockBinding(GLuint program, GLuint blockIndex,
                                   GLuint blockBinding) {
     (void)program;
     (void)blockIndex;
     if (blockBinding == 0) ++glstub::stats.uniformBlockBindingCalls;
+    if (blockBinding == 1) ++glstub::stats.uniformBlockBindingInstCalls;
 }
 inline void glGenVertexArrays(GLsizei n, GLuint* t) {
     glstub::stats.genVertexArrays += (int)n;
@@ -409,6 +440,16 @@ inline void glDrawArrays(GLenum mode, GLint first, GLsizei count) {
 inline void glDrawElements(GLenum mode, GLsizei count, GLenum, const void*) {
     ++glstub::stats.drawElementsCalls;
     if (glstub::fb::enabled) glstub::fb::drawElements(mode, count);
+}
+
+// 0.11-W (3.5b): o GLES 3.0 core — N cópias da MESMA geometria num draw
+inline void glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum,
+                                    const void*, GLsizei instanceCount) {
+    ++glstub::stats.drawElementsInstancedCalls;
+    glstub::stats.lastInstanceCount = (int)instanceCount;
+    if (glstub::fb::enabled) {
+        glstub::fb::drawElements(mode, count, instanceCount);
+    }
 }
 
 // 0.7.8: os no-ops passam a GRAVAR o estado (inócuo p/ os testes antigos —

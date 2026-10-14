@@ -104,6 +104,8 @@ inline std::vector<ProgObj> progs_;
 inline unsigned curTex_ = 0;
 inline unsigned curArrayBuf_ = 0;
 inline unsigned curElemBuf_ = 0;
+inline unsigned curUniBuf_ = 0;      // 0.11-W: o UNIFORM_BUFFER corrente
+inline unsigned uboBase_[2] = {0, 0}; // 0.11-W: os slots do BindBufferBase
 inline unsigned curVao_ = 0;
 inline unsigned curProg_ = 0;
 inline float clearColor_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -220,14 +222,32 @@ inline void compressedTexImage2D(int w, int h) {
 inline void bindBuffer(unsigned target, unsigned id) {
     if (target == 0x8892 /*ARRAY*/) curArrayBuf_ = id;
     else if (target == 0x8893 /*ELEMENT*/) curElemBuf_ = id;
+    else if (target == 0x8A11 /*UNIFORM — 0.11-W*/) curUniBuf_ = id;
 }
 
 inline void bufferData(unsigned target, intptr_t size, const void* data) {
-    const unsigned id = (target == 0x8892) ? curArrayBuf_ : curElemBuf_;
+    const unsigned id = (target == 0x8892) ? curArrayBuf_
+                        : (target == 0x8A11) ? curUniBuf_ : curElemBuf_;
     BufObj* b = findBuf_(id);
     if (!b || size <= 0 || !data) return;
     b->bytes.assign(static_cast<size_t>(size), 0);
     std::memcpy(b->bytes.data(), data, b->bytes.size());
+}
+
+// 0.11-W (3.5b): o glBufferSubData do UBO escreve nos bytes do buffer
+// UNIFORM corrente (o padrão do UBO das bones — o rasterizador lê o slot)
+inline void bufferSubData(intptr_t offset, intptr_t size, const void* data) {
+    BufObj* b = findBuf_(curUniBuf_);
+    if (!b || size <= 0 || !data) return;
+    const size_t end = static_cast<size_t>(offset) + static_cast<size_t>(size);
+    if (b->bytes.size() < end) b->bytes.resize(end, 0);
+    std::memcpy(b->bytes.data() + offset, data, static_cast<size_t>(size));
+}
+
+// 0.11-W (3.5b): os slots do glBindBufferBase(GL_UNIFORM_BUFFER) — o 0 é o
+// Bones da 0.11-S, o 1 é o Instances da 3.5b (o rasterizador lê o 1)
+inline void uboBaseBind(unsigned index, unsigned buffer) {
+    if (index < 2) uboBase_[index] = buffer;
 }
 
 inline void bindVao(unsigned id) {
@@ -455,6 +475,7 @@ struct ProgramKind {
     float hasTex = 0.0f;            // lit (uHasTex)
     int skin = 0;                   // lit (uSkin)
     const float* bones = nullptr;   // lit (uBones)
+    int instOn = 0;                 // lit (uInstOn — 0.11-W: 3.5b)
     // grid (render/Grid.cpp — a grelha adaptativa 0.8.9)
     const float* gridVp = nullptr;  // uVP
     float center[3] = {};           // uCenter (xz da câmara)
@@ -540,6 +561,12 @@ inline ProgramKind resolveProgram() {
         if (locSkin >= 0 && locSkin < int(p->slots.size()) &&
             p->slots[size_t(locSkin)].kind == 'I') {
             pk.skin = p->slots[size_t(locSkin)].i;
+        }
+        // 0.11-W (3.5b): o interruptor do ramo das instâncias
+        const int locInst = slotByName("uInstOn");
+        if (locInst >= 0 && locInst < int(p->slots.size()) &&
+            p->slots[size_t(locInst)].kind == 'I') {
+            pk.instOn = p->slots[size_t(locInst)].i;
         }
         if (p->bonesSet) pk.bones = p->bones.data();
         return pk;
@@ -862,9 +889,13 @@ inline void rasterGridTriangle(const RVertex& a, const RVertex& b,
 }
 
 // núcleo COMUM aos dois draws (arrays/elementos); idx(i) dá o índice do
-// vértice i (u16 do ELEMENT do VAO, ou first+i do arrays)
+// vértice i (u16 do ELEMENT do VAO, ou first+i do arrays).
+// 0.11-W (3.5b): `instances` > 1 = o glDrawElementsInstanced do GLES 3.0 —
+// o lit com uInstOn != 0 lê as matrizes do UBO (slot 1) e rasteriza os
+// triângulos UMA vez por instância com mEff = uInst[i] × uModel (o MESMO
+// produto do VS real — o pin visual do instancing depende disto).
 template <typename IdxOf>
-inline void drawCore(unsigned mode, int count, IdxOf idxOf) {
+inline void drawCore(unsigned mode, int count, IdxOf idxOf, int instances = 1) {
     // 0.9.6.5: TRIANGLE_STRIP a pedido do Grid (a engine usa TRIANGLES na
     // UI/malhas e STRIP no quad da grelha — nada mais)
     const bool strip = (mode == 0x0005 /*GL_TRIANGLE_STRIP*/);
@@ -880,17 +911,15 @@ inline void drawCore(unsigned mode, int count, IdxOf idxOf) {
     for (int loc = 0; loc < 8; ++loc) vf.bufOf[loc] = findBuf_(vao->attribs[loc].buf);
     const TexObj* tex = findTex_(curTex_);
 
-    // lit: mm = uVP × uModel (UMA vez por draw) — e o skin por vértice
-    float mm[16] = {};
-    if (pk.kind == ProgramKind::Lit) {
-        for (int col = 0; col < 4; ++col) {
-            for (int row = 0; row < 4; ++row) {
-                float s = 0.0f;
-                for (int k = 0; k < 4; ++k) {
-                    s += pk.vp[k * 4 + row] * pk.model[col * 4 + k];
-                }
-                mm[col * 4 + row] = s;
-            }
+    // 0.11-W (3.5b): o nº de instâncias deste draw + o bloco do slot 1
+    int instCount = instances < 1 ? 1 : instances;
+    const uint8_t* instBytes = nullptr;
+    if (pk.kind == ProgramKind::Lit && pk.instOn != 0) {
+        const BufObj* ib = findBuf_(uboBase_[1]);
+        if (ib && ib->bytes.size() >= 64u * 16u * 4u) {
+            instBytes = ib->bytes.data();
+        } else {
+            instCount = 1;   // sem bloco ligado NUNCA rasteriza lixo
         }
     }
     auto skinMatrix = [&](float jx, float jy, float jz, float jw,
@@ -910,6 +939,38 @@ inline void drawCore(unsigned mode, int count, IdxOf idxOf) {
     };
 
     RVertex rv[3];
+    // 0.11-W (3.5b): o loop de INSTÂNCIAS (o mm/nrmM por instância; o
+    // caminho de sempre é 1 instância = byte a byte o mm de sempre)
+    for (int inst = 0; inst < instCount; ++inst) {
+    float tmpEff[16];   // 0.11-W: uInst[i] × uModel (o mat3 da normal)
+    const float* nrmM = pk.model;   // o mat3 da normal (lit)
+    float mm[16] = {};
+    if (pk.kind == ProgramKind::Lit) {
+        if (instBytes) {
+            const float* im = reinterpret_cast<const float*>(
+                instBytes + static_cast<size_t>(inst) * 64u);
+            // tmpEff = uInst[i] × uModel (coluna-major, o MESMO produto)
+            for (int col = 0; col < 4; ++col) {
+                for (int row = 0; row < 4; ++row) {
+                    float s = 0.0f;
+                    for (int k = 0; k < 4; ++k) {
+                        s += im[k * 4 + row] * pk.model[col * 4 + k];
+                    }
+                    tmpEff[col * 4 + row] = s;
+                }
+            }
+            nrmM = tmpEff;
+        }
+        for (int col = 0; col < 4; ++col) {
+            for (int row = 0; row < 4; ++row) {
+                float s = 0.0f;
+                for (int k = 0; k < 4; ++k) {
+                    s += pk.vp[k * 4 + row] * nrmM[col * 4 + k];
+                }
+                mm[col * 4 + row] = s;
+            }
+        }
+    }
     // TRIANGLES: (0,1,2)(3,4,5)…; STRIP: (0,1,2)(1,3,2)(2,3,4)… com o
     // winding alternado do strip (o grid desenha com cull OFF, mas a
     // decomposição é a correta à mesma)
@@ -972,7 +1033,7 @@ inline void drawCore(unsigned mode, int count, IdxOf idxOf) {
                     nx = ns[0]; ny = ns[1]; nz = ns[2];
                 }
                 float nrmW[3];
-                mat3ByVec(pk.model, nx, ny, nz, nrmW);
+                mat3ByVec(nrmM, nx, ny, nz, nrmW);   // 0.11-W: mat3(m) do VS
                 r.nx = nrmW[0]; r.ny = nrmW[1]; r.nz = nrmW[2];
                 float clip[4];
                 mat4ByVec(mm, px, py, pz, 1.0f, clip);
@@ -984,24 +1045,34 @@ inline void drawCore(unsigned mode, int count, IdxOf idxOf) {
         } else {
             rasterTriangle(rv[0], rv[1], rv[2], pk, tex);
         }
-    }
+    }   // for ti (o raster corre por triângulo — o MESMO corpo do pré-3.5b)
+    }   // 0.11-W: fim do loop de instâncias
 }
 
 inline void drawArrays(unsigned mode, int first, int count) {
     drawCore(mode, count, [&](int i) { return int(first) + int(i); });
 }
 
-inline void drawElements(unsigned mode, int count) {
-    // os índices vivem no ELEMENT do VAO (Mesh::draw passa nullptr)
-    drawCore(mode, count, [&](int i) -> int {
+// 0.11-W (3.5b): `instances` = o glDrawElementsInstanced do GLES 3.0
+class ElementIdx {
+public:
+    explicit ElementIdx(int count) : count_(count) {}
+    int operator()(int i) const {
         const VaoObj* v = findVao_(curVao_);
         if (!v) return 0;
         const BufObj* eb = findBuf_(v->elemBuf);
-        if (!eb || eb->bytes.size() < 2u * size_t(count)) return -1;
+        if (!eb || eb->bytes.size() < 2u * size_t(count_)) return -1;
         uint16_t idx = 0;
         std::memcpy(&idx, eb->bytes.data() + size_t(i) * 2u, 2);
         return int(idx);
-    });
+    }
+private:
+    int count_;
+};
+
+inline void drawElements(unsigned mode, int count, int instances = 1) {
+    // os índices vivem no ELEMENT do VAO (Mesh::draw passa nullptr)
+    drawCore(mode, count, ElementIdx(count), instances);
 }
 
 inline void readPixels(int x, int y, int w, int h, void* dst) {
@@ -1035,6 +1106,8 @@ inline void resetState() {
     curTex_ = 0;
     curArrayBuf_ = 0;
     curElemBuf_ = 0;
+    curUniBuf_ = 0;                    // 0.11-W: o UNIFORM corrente
+    uboBase_[0] = uboBase_[1] = 0;     // 0.11-W: os slots do BindBufferBase
     curVao_ = 0;
     curProg_ = 0;
     scissorOn_ = false;

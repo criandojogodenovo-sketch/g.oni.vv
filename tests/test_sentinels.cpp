@@ -6280,3 +6280,288 @@ TEST(regress_streaming_paralelo) {
     EXPECT(ok);
     sfixRmRf(dir);
 }
+
+
+// ---- R-047 · O INSTANCING NÃO MENTE (0.11-W 3.5b) --------------------------
+// Vigia: (1) 6 TICs com o MESMO mesh+material fundem em EXATAMENTE 1 draw
+// instanciado (o dc do HUD baixa 6×); (2) o toggle por TIC desliga (o .goni
+// transporta "instancing":false e o ausente = ON); (3) o skinado NUNCA
+// funde (a pose é por TIC) e o entry LOD é da assinatura; (4) o teto de 64
+// matrizes por draw fatia em múltiplos draws (nunca falha nem funde além).
+// Prova de mutação: M-3.5b1 (o caminho instanciado morto), M-3.5b2 (a skin
+// flag ignorada), M-3.5b3 (o teto removido) — ver RELATORIO-0.11-W-3.5B §2.
+namespace r047 {
+
+void r047QuadStrip(MeshData& m, f32 cx, f32 cz, const std::string& mat) {
+    const u32 base = static_cast<u32>(m.vertices.size());
+    for (int iz = 0; iz <= 4; ++iz) {
+        for (int ix = 0; ix <= 4; ++ix) {
+            Vertex v;
+            v.pos = Vec3{cx - 1.0f + 2.0f * f32(ix) / 4.0f, 0.0f,
+                         cz - 1.0f + 2.0f * f32(iz) / 4.0f};
+            v.normal = Vec3{0.0f, 1.0f, 0.0f};
+            v.uv = Vec2{f32(ix) / 4.0f, f32(iz) / 4.0f};
+            m.vertices.push_back(v);
+        }
+    }
+    MeshData::Group g;
+    g.material = mat;
+    g.firstIndex = static_cast<u32>(m.indices.size());
+    for (int iz = 0; iz < 4; ++iz) {
+        for (int ix = 0; ix < 4; ++ix) {
+            const u32 a = base + static_cast<u32>(iz * 5 + ix);
+            const u32 b = a + 5;
+            m.indices.push_back(static_cast<u16>(a));
+            m.indices.push_back(static_cast<u16>(b));
+            m.indices.push_back(static_cast<u16>(a + 1));
+            m.indices.push_back(static_cast<u16>(b));
+            m.indices.push_back(static_cast<u16>(b + 1));
+            m.indices.push_back(static_cast<u16>(a + 1));
+            g.indexCount += 6;
+        }
+    }
+    m.groups.push_back(g);
+}
+
+struct R047Storage final : vv::ProjectStorage {
+    std::map<std::string, std::string> files;
+    std::string root() const override { return "/r047"; }
+    bool makeDirs(const std::string&) override { return true; }
+    bool exists(const std::string& relPath) const override {
+        return files.count(relPath) != 0;
+    }
+    vv::Presence probe(const std::string& relPath) const override {
+        return files.count(relPath) != 0 ? vv::Presence::Present
+                                         : vv::Presence::Absent;
+    }
+    bool writeText(const std::string& relPath,
+                   const std::string& text) override {
+        files[relPath] = text;
+        return true;
+    }
+    bool readText(const std::string& relPath, std::string& out) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        out = it->second;
+        return true;
+    }
+    bool writeBytes(const std::string& relPath, const void* data,
+                    size_t n) override {
+        files[relPath].assign(static_cast<const char*>(data), n);
+        return true;
+    }
+    bool readBytes(const std::string& relPath,
+                   std::vector<vv::u8>& out) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        out.assign(it->second.begin(), it->second.end());
+        return !out.empty();
+    }
+    bool listDir(const std::string&,
+                 std::vector<std::string>&) const override {
+        return false;
+    }
+    bool readBytesAt(const std::string& relPath, vv::u64 offset, size_t len,
+                     std::vector<vv::u8>& out) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        if (offset + len > it->second.size()) return false;
+        out.assign(it->second.begin() + static_cast<long>(offset),
+                   it->second.begin() + static_cast<long>(offset + len));
+        return out.size() == len;
+    }
+};
+
+} // namespace r047
+
+TEST(regress_instancing) {
+    glstub::reset();
+    using namespace r047;
+
+    std::string err;
+    MeshData one;
+    r047QuadStrip(one, 0.0f, 0.0f, "verde");
+    std::vector<u8> gmesh;
+    EXPECT(writeGMesh(one, gmesh, err));
+    R047Storage st;
+    st.files["assets/r047.gmesh"].assign(
+        reinterpret_cast<const char*>(gmesh.data()), gmesh.size());
+    BlockMesh bm;
+    EXPECT(bm.open(st, "assets/r047.gmesh", err));
+    EXPECT(bm.table().size() == 1);
+    const u32 idxCount = bm.table()[0].indexCount;
+
+    Renderer r;
+    EXPECT(r.init());
+    const Mat4 vp = Mat4::ortho(-200.0f, 200.0f, -200.0f, 200.0f, 0.1f, 500.0f);
+    const Vec3 camEye{0.0f, 0.0f, 0.0f};
+
+    // (1) 6 TICs (o padrão da cena do dono) → 1 draw instanciado × 6
+    std::vector<Mat4> models;
+    for (u32 k = 0; k < 6; ++k) {
+        models.push_back(Mat4::translation(-5.0f + 2.0f * f32(k), 0.0f,
+                                           -10.0f));
+    }
+    {
+        std::vector<BlockMesh::InstPick> picks;
+        std::vector<Mat4> mats;
+        for (const Mat4& m : models) {
+            if (bm.collectVisible(m, vp, &camEye, 0.0f, picks) > 0) {
+                mats.push_back(m);
+            }
+        }
+        EXPECT(mats.size() == 6);
+        BlockMesh::Stats ss;
+        const u32 d0 =
+            static_cast<u32>(glstub::stats.drawElementsInstancedCalls);
+        const DrawStats ds = bm.drawInstancedGroup(r, 0, mats.data(), 6, vp,
+                                                  nullptr, nullptr, ss);
+        EXPECT(static_cast<u32>(glstub::stats.drawElementsInstancedCalls) -
+                   d0 ==
+               1);
+        EXPECT(glstub::stats.lastInstanceCount == 6);
+        EXPECT(ds.drawCalls == 1);
+        EXPECT(ds.instancesMerged == 6);
+        EXPECT(ds.vertices == idxCount * 6u);
+        EXPECT(ss.drawn == 6);
+    }
+    // (2) O TOGGLE: o .goni sem a chave abre ON; com false abre OFF
+    {
+        Scene scene;
+        Handle h = scene.create("A");
+        Tic* t = scene.get(h);
+        ASSERT(t != nullptr);
+        Transform3D* tr = t->addComponent<Transform3D>();
+        tr->pos = Vec3{1.0f, 2.0f, 3.0f};
+        tr->updateWorld();
+        MeshRenderer* mr = t->addComponent<MeshRenderer>();
+        ASSERT(mr != nullptr);
+        const std::string plain = SceneSerializer::dump(scene);
+        EXPECT(plain.find("instancing") == std::string::npos);
+        mr->instancing = false;
+        const std::string off = SceneSerializer::dump(scene);
+        EXPECT(off.find("\"instancing\":false") != std::string::npos);
+        SceneSerializer::LoadCtx ctx;
+        Scene s1;
+        EXPECT(SceneSerializer::loadText(s1, plain, ctx));
+        EXPECT(s1.components().meshRenderers().size() == 1);
+        EXPECT(s1.components().meshRenderers().at(0).instancing);
+        Scene s2;
+        EXPECT(SceneSerializer::loadText(s2, off, ctx));
+        EXPECT(!s2.components().meshRenderers().at(0).instancing);
+    }
+    // (3a) O SKIN NUNCA FUNDE: o mesh skinado diz-o pela flag (o guard do
+    // drawTics usa ESTA leitura — os skinados seguem o caminho de sempre)
+    {
+        MeshData sk;
+        const Vec3 P[4] = {Vec3{-0.5f, -0.5f, 0.0f}, Vec3{0.5f, -0.5f, 0.0f},
+                           Vec3{0.5f, 0.5f, 0.0f}, Vec3{-0.5f, 0.5f, 0.0f}};
+        for (int k = 0; k < 4; ++k) {
+            Vertex v;
+            v.pos = P[k];
+            v.normal = Vec3{0.0f, 0.0f, 1.0f};
+            sk.vertices.push_back(v);
+            for (int c = 0; c < 4; ++c) {
+                sk.skinJoints.push_back(0);
+                sk.skinWeights.push_back(c == 0 ? 1.0f : 0.0f);
+            }
+        }
+        const u16 IDX[6] = {0, 1, 2, 0, 2, 3};
+        sk.indices.assign(IDX, IDX + 6);
+        std::vector<u8> gmeshSkin;
+        EXPECT(writeGMesh(sk, gmeshSkin, err));
+        GMeshV3Meta metaSkin;
+        std::vector<GMeshV3Block> bSkin;
+        std::vector<std::string> mSkin;
+        EXPECT(readGMeshV3Meta(gmeshSkin.data(), gmeshSkin.size(), metaSkin,
+                               bSkin, mSkin, err));
+        EXPECT((metaSkin.flags & kGmeshV3FlagSkinned) != 0u);
+        R047Storage ss2;
+        ss2.files["assets/skin.gmesh"].assign(
+            reinterpret_cast<const char*>(gmeshSkin.data()), gmeshSkin.size());
+        BlockMesh bmSkin;
+        EXPECT(bmSkin.open(ss2, "assets/skin.gmesh", err));
+        EXPECT(bmSkin.skinned());   // o guard do drawTics: skinado não colhe
+    }
+    // (3b) O LOD É DA ASSINATURA: 3 perto (entry normal) + 3 longe (entry
+    // LOD) = 2 grupos (NUNCA 1 — o fundir desenharia a geometria errada)
+    {
+        MeshData grid;
+        const u32 cols = 32, rows = 32;
+        grid.vertices.resize(cols * rows);
+        for (u32 j = 0; j < rows; ++j) {
+            for (u32 i = 0; i < cols; ++i) {
+                Vertex& v = grid.vertices[j * cols + i];
+                v.pos = Vec3{f32(i), 0.0f, f32(j)};
+                v.normal = Vec3{0.0f, 1.0f, 0.0f};
+                v.uv = Vec2{f32(i) / 31.0f, f32(j) / 31.0f};
+            }
+        }
+        for (u32 j = 0; j + 1 < rows; ++j) {
+            for (u32 i = 0; i + 1 < cols; ++i) {
+                const u32 a = j * cols + i, b = a + 1, c = a + cols,
+                          d = c + 1;
+                grid.indices.push_back(static_cast<u16>(a));
+                grid.indices.push_back(static_cast<u16>(c));
+                grid.indices.push_back(static_cast<u16>(b));
+                grid.indices.push_back(static_cast<u16>(b));
+                grid.indices.push_back(static_cast<u16>(c));
+                grid.indices.push_back(static_cast<u16>(d));
+            }
+        }
+        std::vector<u8> gmeshLod;
+        EXPECT(writeGMesh(grid, gmeshLod, err, nullptr, nullptr,
+                          /*withLod=*/true));
+        R047Storage st3;
+        st3.files["assets/lod.gmesh"].assign(
+            reinterpret_cast<const char*>(gmeshLod.data()), gmeshLod.size());
+        BlockMesh bmLod;
+        EXPECT(bmLod.open(st3, "assets/lod.gmesh", err));
+        EXPECT(bmLod.hasLod());
+        std::vector<BlockMesh::InstPick> picks;
+        u32 normal = 0, lod = 0;
+        for (u32 k = 0; k < 6; ++k) {
+            const f32 z = k < 3 ? -26.0f : -116.0f;
+            const Mat4 m =
+                Mat4::translation(-15.5f + 2.0f * f32(k % 3), 0.0f, z);
+            EXPECT(bmLod.collectVisible(m, vp, &camEye, 20.0f, picks) == 1);
+            if (picks[0].entry == 0) {
+                ++normal;
+            } else {
+                EXPECT(picks[0].entry == 1);   // lodBase_ + 0
+                ++lod;
+            }
+        }
+        EXPECT(normal == 3);
+        EXPECT(lod == 3);
+    }
+    // (4) O TETO DE 64: 100 instâncias → exatamente 2 draws (64+36), o
+    // instancesMerged É 100 (a soma dos fundidos, não dos draws)
+    {
+        std::vector<Mat4> many;
+        for (u32 k = 0; k < 100; ++k) {
+            many.push_back(
+                Mat4::translation(-99.0f + 2.0f * f32(k), 0.0f, -100.0f));
+        }
+        std::vector<BlockMesh::InstPick> picks;
+        std::vector<Mat4> mats;
+        for (const Mat4& m : many) {
+            if (bm.collectVisible(m, vp, &camEye, 0.0f, picks) > 0) {
+                mats.push_back(m);
+            }
+        }
+        EXPECT(mats.size() == 100);
+        BlockMesh::Stats ss;
+        const u32 d0 =
+            static_cast<u32>(glstub::stats.drawElementsInstancedCalls);
+        const DrawStats ds = bm.drawInstancedGroup(r, 0, mats.data(), 100, vp,
+                                                  nullptr, nullptr, ss);
+        EXPECT(static_cast<u32>(glstub::stats.drawElementsInstancedCalls) -
+                   d0 ==
+               2);
+        EXPECT(glstub::stats.lastInstanceCount == 36);   // a cauda
+        EXPECT(ds.drawCalls == 2);
+        EXPECT(ds.instancesMerged == 100);
+        EXPECT(ss.drawn == 100);
+    }
+}

@@ -1975,6 +1975,17 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             }
             break;
         }
+        case InspRow::Kind::Instancing: {
+            // 0.11-W (3.5b): "instancing: sim/não" — o fundo de blocos por
+            // TIC (default ON: visualmente idêntico, o dc é que baixa). O
+            // MESMO padrão do toggle posicional do áudio.
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
+                      mrEdit && mrEdit->instancing ? "instancing: sim"
+                                                   : "instancing: não");
+            break;
+        }
         case InspRow::Kind::ScriptEdit: {
             // 0.9.2 §10: abre o EDITOR DE SCRIPT (portrait + IME — o main
             // faz o par inseparável ao ver o flag)
@@ -2386,6 +2397,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 r.kind != InspRow::Kind::AuAutoplay &&  // 0.8.11
                 r.kind != InspRow::Kind::AuLoop &&      // 0.8.11
                 r.kind != InspRow::Kind::AuPos &&       // 0.8.11
+                r.kind != InspRow::Kind::Instancing &&  // 0.11-W (3.5b)
                 !isSection &&                           // 0.9.0: colapsar
                 r.kind != InspRow::Kind::TransformRow &&// 0.9.0: caixas X/Y/Z + R
                 r.kind != InspRow::Kind::Slider) {      // 0.8.9: zona do VALOR
@@ -2542,6 +2554,13 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 if (AudioPlayer* au = tic->getComponent<AudioPlayer>()) {
                     au->posicional = !au->posicional;
                     au->clampFields();
+                }
+            } else if (r.kind == InspRow::Kind::Instancing) {
+                // 0.11-W (3.5b): o toggle do fundo de blocos (o default é
+                // ON; o TicSnap transporta — o undo restaura)
+                if (mrEdit) {
+                    mrEdit->instancing = !mrEdit->instancing;
+                    edited = true;
                 }
             } else if (r.kind == InspRow::Kind::ColorHex) {
                 // 0.8.6 — teclado em MODO HEX (propósito 5) com o hex atual

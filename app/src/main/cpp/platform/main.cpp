@@ -6,6 +6,7 @@
 #include <android_native_app_glue.h>
 #include <android/configuration.h>   // 0.9.6.1 (PASSO 0): AConfiguration_getDensity
 #include <GLES3/gl3.h>
+#include <algorithm>   // 0.11-W (3.5b): stable_sort/find do batch instanciado
 #include <atomic>   // 0.8.10: progresso do import entre threads
 #include <cmath>
 #include <cstdio>
@@ -836,6 +837,8 @@ struct BlockFrameStats {
     u32 drawCalls = 0;    // == dc dos blocos (já somados no st3d)
     u32 drawnVerts = 0;   // == índices desenhados (já somados no st3d)
     u32 loaded = 0;       // lazy: carregados neste frame
+    u32 instancesMerged = 0;  // 0.11-W (3.5b): blocos fundidos em draws
+                              // instanciados neste frame (o log espelha)
     u64 ramBytes = 0;
     u64 vramBytes = 0;
     bool any = false;
@@ -5118,6 +5121,41 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye) {
         }
         return !vis;
     };
+    // ---- 0.11-W (3.5b): o BATCH do instancing ------------------------------
+    // A COLHEITA corre por TIC (o MESMO cull/LOD do draw de sempre — a
+    // mesma classifyFrame); o AGRUPAMENTO por assinatura (§3.5b.2) e a
+    // SUBMISSÃO correm DEPOIS do loop: os opacos fundidos primeiro, os
+    // blends por TIC no fim (a ordem longe→perto de sempre dentro de cada
+    // TIC — agora DEPOIS de todos os opacos do frame, mais correto para
+    // o depth; entre TICs não-instanciados nada muda).
+    struct BatchPick {
+        BlockMesh* bm;
+        u32 entry;
+        const Mat4* model;   // o tr->world do store (estável no frame)
+        const Texture* tex;
+        const f32* tint;
+    };
+    struct BlendRow {
+        BlockMesh* bm;
+        const u32* entries;   // as ENTRADAS dos blends deste TIC
+        const f32* zNdc;
+        u32 count;
+        const Mat4* model;
+        const Texture* tex;
+        const f32* tint;
+    };
+    std::vector<BatchPick> batch;
+    std::vector<std::vector<u32>> blendIdxs;   // dono dos índices por TIC
+    std::vector<std::vector<f32>> blendZs;     // dono dos z por TIC
+    std::vector<BlendRow> blends;
+    std::vector<BlockMesh::InstPick> picks;
+    std::vector<const BlockMesh*> counted;   // o storage soma 1× por mesh
+    static const Mat4 kIdentityModel = Mat4::identity();
+    auto sameKey = [](const BatchPick& a, const BatchPick& b) {
+        return a.bm == b.bm && a.entry == b.entry && a.tex == b.tex &&
+               std::memcmp(a.tint, b.tint, 3 * sizeof(f32)) == 0;
+    };
+
     for (u32 i = 0; i < mrs.size(); ++i) {
         const MeshRenderer& mr = mrs.at(i);
         if (!mr.mesh && !mr.blocks) {
@@ -5127,10 +5165,11 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye) {
         if (owner && !owner->visible) {
             continue;   // 0.7.0: invisível — o editor e o play NÃO desenham
         }
-        Mat4 model = Mat4::identity();
+        const Mat4* modelPtr = &kIdentityModel;
         if (const Transform3D* tr = comps.transforms().find(mrs.owner(i))) {
-            model = tr->world;   // mantido por TransformSystem (grupo Update)
+            modelPtr = &tr->world;   // mantido por TransformSystem (grupo Update)
         }
+        const Mat4 model = *modelPtr;
         // ---- 0.10-M (PASSO 4): O CAMINHO DOS BLOCOS -----------------------
         if (mr.blocks) {
             // 0.11-T (3.5a): o skinned cull do DRAW (antes do skin
@@ -5148,6 +5187,61 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye) {
                 g_skinFrame.any = true;
                 nBones = computeSkinMatrices(*sk, bones,
                                              SkeletonComp::kMaxBones);
+            }
+            // ---- 0.11-W (3.5b): a COLHEITA do instancing ----------------
+            // Skinado NUNCA funde (a pose é por TIC — §3.5b.2, o pin do
+            // skin mismatch); o toggle OFF desenha como sempre.
+            if (mr.instancing && !mr.blocks->skinned()) {
+                const u32 n = mr.blocks->collectVisible(
+                    model, vp, &camEye, mr.lodDistance, picks);
+                if (n > 0) {
+                    g_blockFrame.any = true;
+                    g_blockFrame.total += static_cast<u32>(
+                        mr.blocks->table().size());
+                    g_blockFrame.visible += n;
+                    // os bytes são DO MESH (não do TIC) — 1× por frame
+                    if (std::find(counted.begin(), counted.end(),
+                                  mr.blocks) == counted.end()) {
+                        counted.push_back(mr.blocks);
+                        BlockMesh::Stats ss;
+                        mr.blocks->storageStats(ss);
+                        g_blockFrame.ramBytes += ss.ramBytes;
+                        g_blockFrame.vramBytes += ss.vramBytes;
+                    }
+                    u32 nBlend = 0;
+                    for (const BlockMesh::InstPick& p : picks) {
+                        if (p.blend) {
+                            ++nBlend;
+                        }
+                    }
+                    if (nBlend > 0) {
+                        blendIdxs.emplace_back();
+                        blendZs.emplace_back();
+                        blendIdxs.back().reserve(nBlend);
+                        blendZs.back().reserve(nBlend);
+                        for (const BlockMesh::InstPick& p : picks) {
+                            if (p.blend) {
+                                blendIdxs.back().push_back(p.entry);
+                                blendZs.back().push_back(p.zNdc);
+                            } else {
+                                batch.push_back(BatchPick{
+                                    mr.blocks, p.entry, modelPtr, mr.texture,
+                                    mr.tint});
+                            }
+                        }
+                        blends.push_back(BlendRow{
+                            mr.blocks, blendIdxs.back().data(),
+                            blendZs.back().data(), nBlend, modelPtr,
+                            mr.texture, mr.tint});
+                    } else {
+                        for (const BlockMesh::InstPick& p : picks) {
+                            batch.push_back(BatchPick{mr.blocks, p.entry,
+                                                      modelPtr, mr.texture,
+                                                      mr.tint});
+                        }
+                    }
+                }
+                continue;
             }
             BlockMesh::Stats bs;
             const DrawStats sb =
@@ -5183,6 +5277,59 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye) {
         }
         st = st + g_renderer.drawMesh(*mr.mesh, model, vp, mr.texture, mr.tint,
                                       nBones > 0 ? bones : nullptr, nBones);
+    }
+
+    // ---- 0.11-W (3.5b): o AGRUPAMENTO + a SUBMISSÃO dos opacos ---------
+    // A assinatura (bm, entry, tex, tint) — o MESMO mesh GPU desenha N
+    // TICs num draw instanciado (o teto de 64 fatia lá dentro, §3.5b.3).
+    if (!batch.empty()) {
+        std::stable_sort(batch.begin(), batch.end(),
+                         [](const BatchPick& a, const BatchPick& b) {
+                             if (a.bm != b.bm) return a.bm < b.bm;
+                             if (a.entry != b.entry) return a.entry < b.entry;
+                             if (a.tex != b.tex) return a.tex < b.tex;
+                             return std::memcmp(a.tint, b.tint,
+                                                3 * sizeof(f32)) < 0;
+                         });
+        std::vector<Mat4> mats;
+        size_t k = 0;
+        while (k < batch.size()) {
+            size_t j = k + 1;
+            while (j < batch.size() && sameKey(batch[j], batch[k])) {
+                ++j;
+            }
+            const u32 n = static_cast<u32>(j - k);
+            mats.clear();
+            mats.reserve(n);
+            for (size_t t = k; t < j; ++t) {
+                mats.push_back(*batch[t].model);
+            }
+            BlockMesh::Stats ss;
+            const DrawStats ds = batch[k].bm->drawInstancedGroup(
+                g_renderer, batch[k].entry, mats.data(), n, vp, batch[k].tex,
+                batch[k].tint, ss);
+            g_blockFrame.drawn += ss.drawn;
+            g_blockFrame.loaded += ss.loadedThisFrame;
+            g_blockFrame.drawCalls += ds.drawCalls;
+            g_blockFrame.drawnVerts += ds.vertices;
+            g_blockFrame.instancesMerged += ds.instancesMerged;
+            st = st + ds;
+            k = j;
+        }
+    }
+    // os blends colhidos (a ordem longe→perto DENTRO de cada TIC; a
+    // submissão corre DEPOIS de todos os opacos — a única ordem em que a
+    // mistura clássica é correta para o frame inteiro)
+    for (const BlendRow& b : blends) {
+        BlockMesh::Stats ss;
+        const DrawStats ds = b.bm->drawBlendPicks(
+            g_renderer, b.entries, b.model, b.zNdc, b.count, vp, b.tex,
+            b.tint, ss);
+        g_blockFrame.drawn += ss.drawn;
+        g_blockFrame.loaded += ss.loadedThisFrame;
+        g_blockFrame.drawCalls += ds.drawCalls;
+        g_blockFrame.drawnVerts += ds.vertices;
+        st = st + ds;
     }
     return st;
 }
@@ -5863,11 +6010,12 @@ void frame() {
                 static_cast<double>(g_blockLogIntervalSecs)) {
             s_lastLog = s_clock;
             elog::info(
-                "blocos: total=%u visiveis=%u desenhados=%u "
+                "blocos: total=%u visiveis=%u desenhados=%u instanciados=%u "
                 "dc=%u verts=%u carregados-agora=%u ram=%.1fMB vram=%.1fMB "
                 "(residente, orçamento %llu+%llu MB)",
                 g_blockFrame.total, g_blockFrame.visible,
-                g_blockFrame.drawn, g_blockFrame.drawCalls,
+                g_blockFrame.drawn, g_blockFrame.instancesMerged,
+                g_blockFrame.drawCalls,
                 g_blockFrame.drawnVerts, g_blockFrame.loaded,
                 static_cast<double>(g_blockFrame.ramBytes) / (1024.0 * 1024.0),
                 static_cast<double>(g_blockFrame.vramBytes) / (1024.0 * 1024.0),

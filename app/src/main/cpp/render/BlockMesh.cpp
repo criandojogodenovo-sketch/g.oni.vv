@@ -897,89 +897,54 @@ void BlockMesh::blendDrawOrder(const f32* zNdc, u32 count, u32* outOrder) {
 
 // ---- o frame ----------------------------------------------------------------
 
-DrawStats BlockMesh::draw(Renderer& r, const Mat4& model, const Mat4& vp,
-                          const Texture* tex, const f32* tint,
-                          const Mat4* bones, u32 boneCount, Stats& st,
-                          const Vec3* camPos, f32 lodDistance) {
-    DrawStats total{};
-    st = Stats{};
-    if (!opened_) {
-        return total;
-    }
-    ++frame_;
-
-    st.totalBlocks = static_cast<u32>(blocks_.size());
-    f32 planes[6][4];
-    frustumPlanes(vp, planes);
-    // 0.11-T (FASE 3.5a): o LOD por distância liga com camPos + distância
-    // + cauda GLOD no ficheiro; sem qualquer um dos três, o caminho é o
-    // de sempre byte a byte.
-    const bool lodOn = camPos != nullptr && lodDistance > 0.0f &&
-                       !lodBlocks_.empty();
-
-    // 0.11-M (FASE 2): a PARTIÇÃO opaco/blend — o GTB2 diz o alphaMode de
-    // cada material (vazio = OPAQUE de sempre). Os opacos desenham NA
-    // ORDEM DA TABELA (o caminho de sempre byte a byte); os BLEND esperam
-    // e desenham DEPOIS, longe→perto (a única ordem em que a mistura
-    // clássica é correta — o pin do teste manda nesta ordem).
-    // 0.11-T (3.5a): cada partição carrega o índice NORMAL (o material/
-    // z da partição continuam dele) + o índice de ENTRADA a desenhar (o
-    // LOD quando o TIC está além da distância — senão o próprio).
-    std::vector<u32> opaqueIdx;
-    std::vector<u32> opaqueEntry;
-    std::vector<u32> blendIdx;
-    std::vector<u32> blendEntry;
-    std::vector<f32> blendZ;
+// 0.11-W (3.5b): a classificação do frame EXTRAÍDA do draw — a ÚNICA fonte
+// do cull/LOD/partição (o draw de sempre e a colheita do instancing usam a
+// MESMA; zero drift entre os dois caminhos). O contrato do corpo é o do
+// loop do draw pré-3.5b: cull por bloco → a escolha do entry (LOD quando o
+// TIC está além da distância) → a partição opaco/blend com o z NDC do
+// centro (o CENTRO é o do bloco NORMAL — o LOD partilha o material e o
+// AABB é subconjunto). Conta SÓ st.visible (o ensureBlock/drawn/lodDrawn
+// são dos chamadores).
+void BlockMesh::classifyFrame(const Mat4& model, const Mat4& vp,
+                              const f32 planes[6][4], bool lodOn,
+                              const Vec3* camPos, f32 lodDistance,
+                              std::vector<u32>& opaqueIdx,
+                              std::vector<u32>& opaqueEntry,
+                              std::vector<u32>& blendIdx,
+                              std::vector<u32>& blendEntry,
+                              std::vector<f32>& blendZ, Stats& st) const {
+    opaqueIdx.clear();
+    opaqueEntry.clear();
+    blendIdx.clear();
+    blendEntry.clear();
+    blendZ.clear();
     opaqueIdx.reserve(blocks_.size());
     opaqueEntry.reserve(blocks_.size());
     blendIdx.reserve(16);
     blendEntry.reserve(16);
     blendZ.reserve(16);
-
-    std::string err;
     for (size_t i = 0; i < blocks_.size(); ++i) {
         if (!blockVisible(model, blocks_[i], planes)) {
             continue;   // CULL: o AABB do bloco está todo fora do frustum
         }
         ++st.visible;
         // 0.11-T (3.5a): a escolha do LOD (por TIC — o chamador passa a
-        // distância; o draw executa). O bloco desenhado pode ser a
-        // ENTRADA LOD (lazy pelo MESMO LRU/orçamentos).
+        // distância). O bloco desenhado pode ser a ENTRADA LOD.
         u32 entryIdx = static_cast<u32>(i);
         if (lodOn && lodBlocks_[i].indexCount > 0 &&
             lodActive(model, blocks_[i].aabbMin, blocks_[i].aabbMax,
                       *camPos, lodDistance)) {
             entryIdx = lodBase_ + static_cast<u32>(i);
-            ++st.lodDrawn;
-        }
-        Entry& e = entries_[entryIdx];
-        const bool wasResident = e.gpu != nullptr;
-        if (!ensureBlock(entryIdx, err)) {
-            // honesto: o bloco falhou (corrupção/faixa) — loga e segue;
-            // os OUTROS blocos não morrem por causa dele
-            elog::error("blocos: '%s' bloco %zu FALHOU — %s", path_.c_str(),
-                        entryIdx, err.c_str());
-            err.clear();
-            --st.lodDrawn;
-            continue;
-        }
-        e.lastSeen = frame_;
-        st.drawn++;
-        if (!wasResident) {
-            ++st.loadedThisFrame;
         }
         // 0.11-M (FASE 2): a partição opaco/blend pelo alphaMode do GTB2
-        // (nullptr = OPAQUE de sempre). O z NDC do centro (a ordem do
-        // passe blend calcula-se AQUI — o clip do VP com o model aplicado;
-        // o CENTRO é o do bloco NORMAL — o LOD partilha o material e o
-        // AABB é subconjunto do dele)
-        const GMeshMatProps* mp =
-            propsOf(blocks_[i].materialIndex);
+        // (nullptr = OPAQUE de sempre). Os opacos desenham NA ORDEM DA
+        // TABELA; os BLEND esperam e desenham DEPOIS, longe→perto. O z
+        // NDC do centro (o clip do VP com o model aplicado).
+        const GMeshMatProps* mp = propsOf(blocks_[i].materialIndex);
         if (mp != nullptr && mp->alphaMode == 2) {
             const Vec3 c{(blocks_[i].aabbMin.x + blocks_[i].aabbMax.x) * 0.5f,
                          (blocks_[i].aabbMin.y + blocks_[i].aabbMax.y) * 0.5f,
                          (blocks_[i].aabbMin.z + blocks_[i].aabbMax.z) * 0.5f};
-            // o centro no MUNDO (model) e depois no CLIP (vp)
             const f32 px = model.m[0] * c.x + model.m[4] * c.y +
                            model.m[8] * c.z + model.m[12];
             const f32 py = model.m[1] * c.x + model.m[5] * c.y +
@@ -1000,11 +965,62 @@ DrawStats BlockMesh::draw(Renderer& r, const Mat4& model, const Mat4& vp,
             opaqueEntry.push_back(entryIdx);
         }
     }
+}
 
+DrawStats BlockMesh::draw(Renderer& r, const Mat4& model, const Mat4& vp,
+                          const Texture* tex, const f32* tint,
+                          const Mat4* bones, u32 boneCount, Stats& st,
+                          const Vec3* camPos, f32 lodDistance) {
+    DrawStats total{};
+    st = Stats{};
+    if (!opened_) {
+        return total;
+    }
+    ++frame_;
+
+    st.totalBlocks = static_cast<u32>(blocks_.size());
+    f32 planes[6][4];
+    frustumPlanes(vp, planes);
+    // 0.11-T (FASE 3.5a): o LOD por distância liga com camPos + distância
+    // + cauda GLOD no ficheiro; sem qualquer um dos três, o caminho é o
+    // de sempre byte a byte.
+    const bool lodOn = camPos != nullptr && lodDistance > 0.0f &&
+                       !lodBlocks_.empty();
+
+    // 0.11-W (3.5b): a partição vem da classificação ÚNICA (o MESMO cull/
+    // LOD/z que a colheita do instancing usa — zero drift).
+    std::vector<u32> opaqueIdx;
+    std::vector<u32> opaqueEntry;
+    std::vector<u32> blendIdx;
+    std::vector<u32> blendEntry;
+    std::vector<f32> blendZ;
+    classifyFrame(model, vp, planes, lodOn, camPos, lodDistance, opaqueIdx,
+                  opaqueEntry, blendIdx, blendEntry, blendZ, st);
+
+    std::string err;
     // ---- o PASSE DOS OPACOS (a ordem da tabela — o caminho de sempre) --
     for (size_t k = 0; k < opaqueIdx.size(); ++k) {
         const u32 i = opaqueIdx[k];
-        const Entry& e = entries_[opaqueEntry[k]];
+        const u32 entryIdx = opaqueEntry[k];
+        Entry& e = entries_[entryIdx];
+        const bool wasResident = e.gpu != nullptr;
+        if (!ensureBlock(entryIdx, err)) {
+            // honesto: o bloco falhou (corrupção/faixa) — loga e segue;
+            // os OUTROS blocos não morrem por causa dele
+            elog::error("blocos: '%s' bloco %u FALHOU — %s", path_.c_str(),
+                        entryIdx, err.c_str());
+            err.clear();
+            continue;
+        }
+        e.lastSeen = frame_;
+        st.drawn++;
+        if (!wasResident) {
+            ++st.loadedThisFrame;
+        }
+        if (entryIdx >= lodBase_ && entryIdx >= blocks_.size() && lodOn) {
+            ++st.lodDrawn;   // 0.11-W: agora é o contador dos DESenhados
+                             // (o resultado é o mesmo do ++/-- do pré-3.5b)
+        }
         const GMeshMatProps* mp = propsOf(blocks_[i].materialIndex);
         DrawProps dp;
         const DrawProps* dpp = nullptr;
@@ -1017,6 +1033,7 @@ DrawStats BlockMesh::draw(Renderer& r, const Mat4& model, const Mat4& vp,
         total = total + r.drawMesh(*e.gpu, model, vp, eff, tint, bones,
                                    boneCount, dpp);
     }
+
     // ---- o PASSE DOS BLEND (longe→perto; depth write off no drawMesh) --
     if (!blendIdx.empty()) {
         std::vector<u32> order(blendIdx.size());
@@ -1024,7 +1041,23 @@ DrawStats BlockMesh::draw(Renderer& r, const Mat4& model, const Mat4& vp,
                        order.data());
         for (const u32 k : order) {
             const u32 i = blendIdx[k];
-            const Entry& e = entries_[blendEntry[k]];
+            const u32 entryIdx = blendEntry[k];
+            Entry& e = entries_[entryIdx];
+            const bool wasResident = e.gpu != nullptr;
+            if (!ensureBlock(entryIdx, err)) {
+                elog::error("blocos: '%s' bloco %u FALHOU — %s",
+                            path_.c_str(), entryIdx, err.c_str());
+                err.clear();
+                continue;
+            }
+            e.lastSeen = frame_;
+            st.drawn++;
+            if (!wasResident) {
+                ++st.loadedThisFrame;
+            }
+            if (entryIdx >= lodBase_ && entryIdx >= blocks_.size() && lodOn) {
+                ++st.lodDrawn;
+            }
             const GMeshMatProps* mp = propsOf(blocks_[i].materialIndex);
             DrawProps dp;
             const DrawProps* dpp = nullptr;
@@ -1054,6 +1087,158 @@ DrawStats BlockMesh::draw(Renderer& r, const Mat4& model, const Mat4& vp,
     st.evictedTotal = static_cast<u32>(evictedTotal_);
     last_ = st;
     return total;
+}
+
+// ---- 0.11-W (3.5b) · o instancing -------------------------------------------
+
+u32 BlockMesh::collectVisible(const Mat4& model, const Mat4& vp,
+                              const Vec3* camPos, f32 lodDistance,
+                              std::vector<InstPick>& out) const {
+    out.clear();
+    if (!opened_) {
+        return 0;
+    }
+    f32 planes[6][4];
+    frustumPlanes(vp, planes);
+    const bool lodOn = camPos != nullptr && lodDistance > 0.0f &&
+                       !lodBlocks_.empty();
+    Stats tmp{};
+    std::vector<u32> opaqueIdx, opaqueEntry, blendIdx, blendEntry;
+    std::vector<f32> blendZ;
+    classifyFrame(model, vp, planes, lodOn, camPos, lodDistance, opaqueIdx,
+                  opaqueEntry, blendIdx, blendEntry, blendZ, tmp);
+    out.reserve(opaqueIdx.size() + blendIdx.size());
+    for (size_t k = 0; k < opaqueIdx.size(); ++k) {
+        out.push_back(InstPick{opaqueIdx[k], opaqueEntry[k], false, 0.0f});
+    }
+    for (size_t k = 0; k < blendIdx.size(); ++k) {
+        out.push_back(InstPick{blendIdx[k], blendEntry[k], true, blendZ[k]});
+    }
+    return static_cast<u32>(out.size());
+}
+
+DrawStats BlockMesh::drawInstancedGroup(Renderer& r, u32 entryIdx,
+                                        const Mat4* mats, u32 count,
+                                        const Mat4& vp, const Texture* tex,
+                                        const f32* tint, Stats& st) {
+    DrawStats total{};
+    if (!opened_ || mats == nullptr || count == 0 ||
+        entryIdx >= entries_.size()) {
+        return total;
+    }
+    ++frame_;   // o carimbo LRU do frame (o MESMO contrato do draw)
+    // o material é do BLOCO NORMAL (o LOD partilha — o padrão da 3.5a)
+    const u32 blockIdx = entryIdx < static_cast<u32>(blocks_.size())
+                             ? entryIdx
+                             : entryIdx - static_cast<u32>(blocks_.size());
+    const bool isLod = entryIdx >= blocks_.size();
+    const GMeshMatProps* mp = propsOf(blocks_[blockIdx].materialIndex);
+    DrawProps dp;
+    const DrawProps* dpp = nullptr;
+    if (mp != nullptr) {
+        dp = DrawProps::fromGMesh(*mp);
+        dpp = &dp;
+    }
+    const Texture* eff =
+        tex ? tex : materialTexture(blocks_[blockIdx].materialIndex);
+    // o lazy é DA SUBMISSÃO (o agrupamento corre antes do upload, §3.5b.2):
+    // o mesh GPU carrega UMA vez e serve TODAS as instâncias do grupo
+    std::string err;
+    const bool wasResident = entries_[entryIdx].gpu != nullptr;
+    if (!ensureBlock(entryIdx, err)) {
+        elog::error("blocos: '%s' bloco %u FALHOU (instanciado) — %s",
+                    path_.c_str(), entryIdx, err.c_str());
+        return total;
+    }
+    entries_[entryIdx].lastSeen = frame_;
+    st.drawn += count;
+    if (!wasResident) {
+        ++st.loadedThisFrame;
+    }
+    if (isLod) {
+        st.lodDrawn += count;
+    }
+    // o TETO por draw (§3.5b.3): 64 matrizes = 4 KB de bloco std140 no
+    // GE8320 — acima fatia em múltiplos draws (nunca falha).
+    u32 done = 0;
+    std::vector<Mat4> slice;
+    slice.reserve(LitMaterial::kMaxInstances);
+    while (done < count) {
+        const u32 n = count - done > LitMaterial::kMaxInstances
+                          ? LitMaterial::kMaxInstances
+                          : count - done;
+        slice.assign(mats + done, mats + done + n);
+        total = total + r.drawMeshInstanced(*entries_[entryIdx].gpu,
+                                            slice.data(), n, vp, eff, tint,
+                                            dpp);
+        done += n;
+    }
+    evictOverBudget();
+    return total;
+}
+
+DrawStats BlockMesh::drawBlendPicks(Renderer& r, const u32* entries,
+                                    const Mat4* model, const f32* zNdc,
+                                    u32 count, const Mat4& vp,
+                                    const Texture* tex, const f32* tint,
+                                    Stats& st) {
+    DrawStats total{};
+    if (!opened_ || entries == nullptr || model == nullptr || count == 0) {
+        return total;
+    }
+    ++frame_;
+    // a ordem longe→perto de sempre (o MESMO blendDrawOrder do draw)
+    std::vector<u32> order(count);
+    blendDrawOrder(zNdc, count, order.data());
+    std::string err;
+    for (const u32 k : order) {
+        const u32 entryIdx = entries[k];
+        const u32 blockIdx =
+            entryIdx < static_cast<u32>(blocks_.size())
+                ? entryIdx
+                : entryIdx - static_cast<u32>(blocks_.size());
+        Entry& e = entries_[entryIdx];
+        const bool wasResident = e.gpu != nullptr;
+        if (!ensureBlock(entryIdx, err)) {
+            elog::error("blocos: '%s' bloco %u FALHOU (blend) — %s",
+                        path_.c_str(), entryIdx, err.c_str());
+            err.clear();
+            continue;
+        }
+        e.lastSeen = frame_;
+        st.drawn++;
+        if (!wasResident) {
+            ++st.loadedThisFrame;
+        }
+        const GMeshMatProps* mp = propsOf(blocks_[blockIdx].materialIndex);
+        DrawProps dp;
+        const DrawProps* dpp = nullptr;
+        if (mp != nullptr) {
+            dp = DrawProps::fromGMesh(*mp);
+            dpp = &dp;
+        }
+        const Texture* eff =
+            tex ? tex : materialTexture(blocks_[blockIdx].materialIndex);
+        total = total + r.drawMesh(*e.gpu, *model, vp, eff, tint, nullptr, 0,
+                                   dpp);
+    }
+    evictOverBudget();
+    return total;
+}
+
+void BlockMesh::storageStats(Stats& st) const {
+    st = Stats{};
+    st.totalBlocks = static_cast<u32>(blocks_.size());
+    for (const Entry& e : entries_) {
+        if (e.gpu) {
+            ++st.resident;
+            st.vramBytes += e.vramBytes;
+        }
+        if (e.cpu) {
+            st.ramBytes += e.ramBytes;
+        }
+    }
+    st.evictedTotal = static_cast<u32>(evictedTotal_);
 }
 
 // (o uploadDead limpa no close() — um open novo merece novas tentativas)

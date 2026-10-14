@@ -164,6 +164,10 @@ DrawStats Renderer::drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp
     lit_.use();
     lit_.setVP(vp);
     lit_.setModel(model);
+    // 0.11-W (3.5b): o ramo de instâncias EXPLICITAMENTE off no draw de
+    // sempre (o contrato das uniforms da casa — o estado nunca vinga de um
+    // draw instanciado anterior no MESMO programa)
+    lit_.setInstancing(false);
     // 0.11-M (FASE 2): as props do material A CADA draw (nullptr = o
     // default de sempre — o byte a byte pré-FASE 2). ANTES do tex/tint/
     // skin: o ÚLTIMO glUniform1f/3f/1i do draw continua a ser o uHasTex/
@@ -209,6 +213,55 @@ DrawStats Renderer::drawMesh(const Mesh& mesh, const Mat4& model, const Mat4& vp
     }
     glBindVertexArray(0);
     return {mesh.indexCount(), 1};
+}
+
+// 0.11-W (3.5b) — o irmão instanciado do drawMesh (§ Renderer.h). O estado
+// GL segue as props EXATAMENTE como no drawMesh (o MESMO par de enable/
+// restore — os pins do estado do c33 leem o MESMO); a única diferença é o
+// uModel (identidade — a instância leva tudo) e o ramo uInstOn/uInst.
+DrawStats Renderer::drawMeshInstanced(const Mesh& mesh, const Mat4* instMats,
+                                      u32 instCount, const Mat4& vp,
+                                      const Texture* tex, const f32* tint,
+                                      const DrawProps* props) {
+    if (!mesh.ok() || instMats == nullptr || instCount == 0) {
+        return {};
+    }
+    lit_.use();
+    lit_.setVP(vp);
+    static const Mat4 kIdentity = Mat4::identity();
+    lit_.setModel(kIdentity);   // a instância leva TUDO (uInst[i] × I)
+    lit_.setProps(props);
+    lit_.setTexture(tex);
+    lit_.setTint(tint);
+    lit_.setSkin(false);        // instâncias nunca skinam (a pose é por TIC)
+    lit_.setInstancing(true);
+    lit_.setInstances(instMats, instCount);   // ≤ 64 (o contrato)
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+    const bool blending = props != nullptr && props->alphaMode == 2;
+    const bool twoSided = props != nullptr && props->twoSided;
+    if (blending) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE);
+    }
+    if (twoSided) {
+        glDisable(GL_CULL_FACE);
+    }
+    mesh.bind();
+    mesh.drawInstanced(instCount);
+    if (twoSided) {
+        glEnable(GL_CULL_FACE);
+    }
+    if (blending) {
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
+    }
+    lit_.setInstancing(false);   // o estado do programa fica limpo
+    glBindVertexArray(0);
+    // 0.11-W (3.5b): o 3.º campo É o contador do prompt (§3.5b.5) — N
+    // blocos fundidos neste draw instanciado
+    return {mesh.indexCount() * instCount, 1, instCount};
 }
 
 void Renderer::submit(const QuadBatch& batch, u32 texture) {

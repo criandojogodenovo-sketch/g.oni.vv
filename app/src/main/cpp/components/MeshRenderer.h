@@ -65,6 +65,15 @@ public:
     // — honesto: o inspector mostra o valor, o render não o tem).
     f32 lodDistance = 0.0f;
 
+    // 0.11-W (3.5b) — GPU INSTANCING: funde blocos com a MESMA assinatura
+    // (mesh+bloco+material+textura, nunca skin) em draws instanciados —
+    // visualmente IDÊNTICO (o pin do screenshot manda), por isso o default
+    // é ON (ao contrário do LOD, que muda a aparência; o default jogável
+    // manda no que se VÊ, não no custo). Serializado no .goni como
+    // "instancing":false SÓ quando false (o default omitido — os .goni da
+    // 0.11-T ficam byte a byte).
+    bool instancing = true;
+
     // F5-C/E: refs relativas do asset — vazias = procedural ("cube"/sem tex).
     // Vivem no componente para o serializer e para a UI mostrarem a origem.
     std::string meshPath;

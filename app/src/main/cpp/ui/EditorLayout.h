@@ -120,6 +120,8 @@ constexpr u64 kInspectorColHex     = 5303;   // 0.8.6: "hex: #RRGGBB" do tint
 // (o fit uniforme vive no Transform3D — este botão devolve o tamanho real)
 constexpr u64 kInspectorScaleOrig  = 5310;   // "escala: original"
 constexpr u64 kInspectorLodDist    = 5311;   // 0.11-T (3.5a): slider do LOD
+constexpr u64 kInspectorInstancing = 5312;   // 0.11-W (3.5b): toggle do
+                                             // instancing (sim/não)
 // 0.7.7 — inspector da CÂMARA (sliders + botões; faixa 5400..5419)
 constexpr u64 kInspectorCamFov     = 5400;
 constexpr u64 kInspectorCamNear    = 5401;
@@ -299,6 +301,8 @@ struct InspRow {
         ScaleOrig,   // "escala: original" (repõe Transform3D::scale a {1,1,1})
         LodDistance, // 0.11-T (FASE 3.5a): "lod distance: N u" (0 = off —
                      // o default jogável manda; slider 0..500)
+        Instancing,  // 0.11-W (3.5b): "instancing: sim/não" (o toggle do
+                     // fundo de blocos — default ON, visualmente idêntico)
         // 0.8.11 — ÁUDIO (secção do AudioPlayer)
         AuSection,   // cabeçalho "Audio" + separador
         ScriptEdit,  // 0.9.2: botão "Editar script" (abre o editor modal)
@@ -542,6 +546,9 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
                 // é OFF — o slider nasce a 0; o .gmesh sem cauda GLOD
                 // ignora o valor e o label mantém-se honesto)
                 push(InspRow::Kind::LodDistance, sldH, kInspectorLodDist);
+                // 0.11-W (3.5b): o fundo do instancing por TIC (o default
+                // é ON — visualmente idêntico, o custo é que muda)
+                push(InspRow::Kind::Instancing, btnH, kInspectorInstancing);
             }
         }
     }

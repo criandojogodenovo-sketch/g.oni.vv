@@ -152,4 +152,15 @@ void Mesh::draw() const {
                    GL_UNSIGNED_SHORT, nullptr);
 }
 
+// 0.11-W (3.5b): N cópias da MESMA geometria num draw — o GLES 3.0 core
+// (o GE8320 do alvo suporta); a matriz por instância viaja no UBO.
+void Mesh::drawInstanced(u32 instanceCount) const {
+    if (!vao_ || indexCount_ == 0 || instanceCount == 0) {
+        return;
+    }
+    glDrawElementsInstanced(GL_TRIANGLES, static_cast<GLsizei>(indexCount_),
+                            GL_UNSIGNED_SHORT, nullptr,
+                            static_cast<GLsizei>(instanceCount));
+}
+
 } // namespace vv

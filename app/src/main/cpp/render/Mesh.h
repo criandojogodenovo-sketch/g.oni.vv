@@ -36,6 +36,11 @@ public:
 
     void bind() const;
     void draw() const;                    // glDrawElements(GL_TRIANGLES)
+    // 0.11-W (3.5b): N cópias da MESMA geometria num draw (glDrawElements-
+    // Instanced; a matriz por instância vem do UBO "Instances" do lit — o
+    // setInstancing(true)+setInstances do drawMeshInstanced manda). O teto
+    // de 64 por draw é do chamador (LitMaterial::kMaxInstances).
+    void drawInstanced(u32 instanceCount) const;
 
     u32 vertexCount() const { return vertexCount_; }
     u32 indexCount() const { return indexCount_; }

@@ -7867,6 +7867,7 @@ int main() {
             g_camera.pitch = 0.0f;
             g_camera.dist = 60.0f;
             const int drawsAntes = glstub::stats.drawElementsCalls;
+            const int instAntes = glstub::stats.drawElementsInstancedCalls;
             const int renderAntes = logCount("gmesh: fase=render ms=");
             frame();
             check(g_blockFrame.any && g_blockFrame.total == blocks20 &&
@@ -7875,8 +7876,15 @@ int main() {
                   "este modelo)");
             check(g_blockFrame.drawCalls == blocks20,
                   "20.2 1 draw call POR BLOCO (a honestidade do dc)");
-            check(glstub::stats.drawElementsCalls - drawsAntes == blocks20,
-                  "20.2 o glstub conta 2 drawElements (o HULL nunca desenha)");
+            // 0.11-W (3.5b) recalibração honesta: com o instancing ON
+            // (o default) os 2 blocos desenham como drawElementsINSTANCED
+            // (1 instância cada — 2 assinaturas de material) — o dc é o
+            // MESMO 2 (1 por bloco), o HULL continua a nunca desenhar
+            check(glstub::stats.drawElementsCalls - drawsAntes == 0 &&
+                      glstub::stats.drawElementsInstancedCalls - instAntes ==
+                          blocks20,
+                  "20.2 o glstub conta 2 draws INSTANCIADOS (1 por bloco — "
+                  "o dc honesto do instancing; o HULL nunca desenha)");
             check(logCount("gmesh: fase=render ms=") > renderAntes,
                   "20.2 os uploads LAZY no log (fase=render por bloco)");
             // o HUD do EDITOR: o chip «FPS · TICs · bl n/m» no canto
@@ -9347,6 +9355,212 @@ int main() {
                           glstub::stats.bufferSubDataCalls == 5,
                       "27.2e 5 drawElements + 5 uploads do UBO (os culled "
                       "não pagam NEM skin NEM draw)");
+            }
+        }
+        // ====================================================================
+        // FASE 28 — 0.11-W (3.5b): GPU INSTANCING — o drawTics REAL do
+        // device funde os clones com o MESMO mesh:
+        //   28.1 6 TICs com o MESMO .gmesh (o storage REAL) → 1 draw
+        //        instanciado (o glstub conta 1 × 6) + instancesMerged=6 no
+        //        BlockFrameStats (a fonte do log/HUD) + dc=1;
+        //   28.2 o toggle OFF num TIC: 5 fundidos (1 dc instanciado) + 1
+        //        individual (1 dc normal) = 2 dc — o orquestrador salta a
+        //        colheita do TIC desligado (o §3.5b.4);
+        //   28.3 o .gmesh SKINADO NUNCA funde (a pose é por TIC): zero
+        //        draws instanciados, o caminho de sempre por baixo.
+        // ====================================================================
+        fase("FASE 28 — 0.11-W 3.5b: instancing no device (6 clones → 1 dc)");
+        {
+            std::string err28;
+            // ---- 28.1 os 6 clones fundidos no caminho real ----------------
+            passo("28.1 6 TICs do mesmo .gmesh → 1 draw instanciado");
+            MeshData one28;
+            {
+                const u32 base = 0;
+                for (int iz = 0; iz <= 4; ++iz) {
+                    for (int ix = 0; ix <= 4; ++ix) {
+                        Vertex v;
+                        v.pos = Vec3{-1.0f + 2.0f * f32(ix) / 4.0f, 0.0f,
+                                     -1.0f + 2.0f * f32(iz) / 4.0f};
+                        v.normal = Vec3{0.0f, 1.0f, 0.0f};
+                        v.uv = Vec2{f32(ix) / 4.0f, f32(iz) / 4.0f};
+                        one28.vertices.push_back(v);
+                    }
+                }
+                for (int iz = 0; iz < 4; ++iz) {
+                    for (int ix = 0; ix < 4; ++ix) {
+                        const u32 a =
+                            base + static_cast<u32>(iz * 5 + ix);
+                        const u32 b = a + 5;
+                        const u16 idx[6] = {
+                            static_cast<u16>(a), static_cast<u16>(b),
+                            static_cast<u16>(a + 1), static_cast<u16>(b),
+                            static_cast<u16>(b + 1),
+                            static_cast<u16>(a + 1)};
+                        one28.indices.insert(one28.indices.end(), idx,
+                                             idx + 6);
+                    }
+                }
+                MeshData::Group g28;
+                g28.material = "verde";
+                g28.indexCount =
+                    static_cast<u32>(one28.indices.size());
+                one28.groups.push_back(g28);
+                std::vector<u8> bytes28;
+                check(writeGMesh(one28, bytes28, err28),
+                      "28.1a o .gmesh de 1 bloco escrito");
+                check(g_storage->writeBytes("assets/clone.gmesh",
+                                            bytes28.data(), bytes28.size()),
+                      "28.1b no storage REAL do device");
+            }
+            check(g_gpu.blockHull("assets/clone.gmesh") != nullptr,
+                  "28.1c o BlockMesh aberto no GpuAssets (o caminho do "
+                  "blockRebind)");
+            // os 10 skinados da FASE 26 vão para TRÁS do plano near (o
+            // skinned cull da 3.5a culle-os — a cena do 28 fica só com os
+            // clones; sem isto eles desenhavam nos contadores do pin)
+            for (const char* nm : {"Pele", "clone0", "clone1", "clone2",
+                                   "clone3", "clone4", "clone5", "clone6",
+                                   "clone7", "clone8"}) {
+                Tic* t27 = g_scene.get(g_scene.find(nm));
+                if (t27) {
+                    if (Transform3D* tr27 =
+                            t27->getComponent<Transform3D>()) {
+                        tr27->pos = Vec3{0.0f, 0.0f, 10.0f};
+                        tr27->updateWorld();
+                    }
+                }
+            }
+            for (u32 k = 0; k < 6; ++k) {
+                char nm[16];
+                std::snprintf(nm, sizeof(nm), "inst%u", k);
+                const Handle h28 = g_scene.create(nm);
+                Tic* t28 = g_scene.get(h28);
+                check(t28 != nullptr, "28.1d o clone criado");
+                Transform3D* tr28 =
+                    t28 ? t28->addComponent<Transform3D>() : nullptr;
+                if (tr28) {
+                    tr28->pos = Vec3{-5.0f + 2.0f * f32(k), 0.0f, -10.0f};
+                    tr28->updateWorld();
+                }
+                if (MeshRenderer* mr28 =
+                        t28 ? t28->addComponent<MeshRenderer>() : nullptr) {
+                    mr28->meshPath = "assets/clone.gmesh";
+                }
+            }
+            blockRebind();   // o ponto seguro do frame (liga os blocks*)
+            {
+                u32 ligados = 0;
+                auto& mrs28 = g_scene.components().meshRenderers();
+                for (u32 i = 0; i < mrs28.size(); ++i) {
+                    if (mrs28.at(i).blocks != nullptr) {
+                        ++ligados;
+                    }
+                }
+                check(ligados >= 6u,
+                      "28.1e os 6 clones com o BlockMesh ligado (o "
+                      "blockRebind do frame)");
+            }
+            glstub::reset();
+            g_renderer.beginFrame();
+            const Mat4 vp28 =
+                Mat4::ortho(-30.0f, 30.0f, -30.0f, 30.0f, 0.1f, 100.0f);
+            const DrawStats ds28 = drawTics(vp28, Vec3{0.0f, 0.0f, 0.0f});
+            check(g_blockFrame.any &&
+                      glstub::stats.drawElementsInstancedCalls == 1 &&
+                      glstub::stats.lastInstanceCount == 6,
+                  "28.1f O PIN: 6 clones → 1 drawElementsInstanced × 6 (o "
+                  "dc do HUD baixa 6×)");
+            check(g_blockFrame.instancesMerged == 6 &&
+                      g_blockFrame.drawn == 6,
+                  "28.1g instanciados=6 desenhados=6 (a fonte do log/HUD — "
+                  "o BlockFrameStats)");
+            check(ds28.drawCalls == 1 && g_blockFrame.drawCalls == 1,
+                  "28.1h dc=1 (o caminho de sempre seria 6)");
+            check(glstub::stats.drawElementsCalls == 0,
+                  "28.1i ZERO drawElements individuais (tudo fundido)");
+            // ---- 28.2 o toggle OFF num TIC --------------------------------
+            passo("28.2 o toggle OFF: 5 fundidos + 1 individual = 2 dc");
+            {
+                Tic* tOff = g_scene.get(g_scene.find("inst5"));
+                MeshRenderer* mrOff =
+                    tOff ? tOff->getComponent<MeshRenderer>() : nullptr;
+                check(mrOff != nullptr, "28.2a o clone 5 à mão");
+                if (mrOff) {
+                    mrOff->instancing = false;   // o toggle do inspector
+                }
+                glstub::reset();
+                g_renderer.beginFrame();
+                const DrawStats ds28b =
+                    drawTics(vp28, Vec3{0.0f, 0.0f, 0.0f});
+                check(g_blockFrame.instancesMerged == 5 &&
+                          glstub::stats.drawElementsInstancedCalls == 1 &&
+                          glstub::stats.lastInstanceCount == 5,
+                      "28.2b os 5 ON fundem (1 instanciado × 5)");
+                check(g_blockFrame.drawn == 6 && ds28b.drawCalls == 2 &&
+                          glstub::stats.drawElementsCalls == 1,
+                      "28.2c O PIN: 6 blocos em 2 dc (1 instanciado + 1 "
+                      "individual do TIC OFF — o §3.5b.4)");
+                if (mrOff) {
+                    mrOff->instancing = true;   // repõe (o 28.3 segue limpo)
+                }
+            }
+            // ---- 28.3 o skinado NUNCA funde -------------------------------
+            passo("28.3 o .gmesh skinado no instancing: zero fundição");
+            {
+                MeshData sk28;
+                const Vec3 P28[4] = {Vec3{-0.5f, -0.5f, 0.0f},
+                                     Vec3{0.5f, -0.5f, 0.0f},
+                                     Vec3{0.5f, 0.5f, 0.0f},
+                                     Vec3{-0.5f, 0.5f, 0.0f}};
+                for (int k = 0; k < 4; ++k) {
+                    Vertex v;
+                    v.pos = P28[k];
+                    v.normal = Vec3{0.0f, 0.0f, 1.0f};
+                    sk28.vertices.push_back(v);
+                    for (int c = 0; c < 4; ++c) {
+                        sk28.skinJoints.push_back(0);
+                        sk28.skinWeights.push_back(c == 0 ? 1.0f : 0.0f);
+                    }
+                }
+                const u16 IDX28[6] = {0, 1, 2, 0, 2, 3};
+                sk28.indices.assign(IDX28, IDX28 + 6);
+                std::vector<u8> bytesSk;
+                check(writeGMesh(sk28, bytesSk, err28),
+                      "28.3a o .gmesh skinado escrito");
+                check(g_storage->writeBytes("assets/skinclone.gmesh",
+                                            bytesSk.data(), bytesSk.size()),
+                      "28.3b no storage REAL");
+                check(g_gpu.blockHull("assets/skinclone.gmesh") != nullptr,
+                      "28.3c aberto no GpuAssets (o meta skinado)");
+                const Handle hSk = g_scene.create("instskin");
+                Tic* tSk = g_scene.get(hSk);
+                check(tSk != nullptr, "28.3d o TIC skinado criado");
+                if (Transform3D* trSk =
+                        tSk ? tSk->addComponent<Transform3D>() : nullptr) {
+                    trSk->pos = Vec3{6.0f, 0.0f, -10.0f};
+                    trSk->updateWorld();
+                }
+                if (MeshRenderer* mrSk =
+                        tSk ? tSk->addComponent<MeshRenderer>() : nullptr) {
+                    mrSk->meshPath = "assets/skinclone.gmesh";
+                }
+                blockRebind();
+                glstub::reset();
+                g_renderer.beginFrame();
+                drawTics(vp28, Vec3{0.0f, 0.0f, 0.0f});
+                // a prova RELATIVA: os 6 estáticos fundem (o ÚNICO draw
+                // instanciado é ×6 — o lastInstanceCount diz) e o skinado
+                // desenha INDIVIDUAL (1 drawElements). Se o guard do skin
+                // morresse, o skinado entraria no batch: o instanciado
+                // seria 2 e o drawElements 0 (a pose quebrada)
+                check(glstub::stats.drawElementsInstancedCalls == 1 &&
+                          glstub::stats.lastInstanceCount == 6 &&
+                          glstub::stats.drawElementsCalls == 1,
+                      "28.3e O PIN: o skinado desenha pelo caminho de "
+                      "sempre (1 drawElements individual; o único draw "
+                      "instanciado é o dos 6 estáticos — a pose é por TIC, "
+                      "§3.5b.2)");
             }
         }
         }   // fim do else do 26.3 (o caminho do playback)
