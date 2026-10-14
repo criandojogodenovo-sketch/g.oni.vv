@@ -113,6 +113,7 @@ jobs:
       # NÃO decide o veredicto do job (continue-on-error) — a caça é do
       # §4.1 e as opções estão reportadas ao dono.
       - name: Diagnóstico TSAN (temporário — §4.1)
+        if: always()
         continue-on-error: true
         timeout-minutes: 30
         run: |
