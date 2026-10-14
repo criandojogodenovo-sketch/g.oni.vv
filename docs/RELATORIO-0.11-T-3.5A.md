@@ -255,6 +255,28 @@ desce com a distância; fps ≥ 58. O device real é o árbitro.)
     não reportou a corrida (o TSAN não apanha o SIGSEGV de um wild
     write no TCB de outra thread; a suíte TSAN completa não coube no
     tempo). A caça continua com o dono a decidir o caminho.
+  - **A EVIDÊNCIA DO TSAN NO CI (o passo diagnóstico, commit b0613af —
+    o run 38573108989)**: o `hardware_concurrency` REAL do runner é
+    **4** (→ 3 workers). Sob TSAN o crash disparou num SEGUNDO teste
+    do streaming (`safstream_saf_importa_city_em_blocos_pelo_fd_do_
+    bridge` — o caminho fd/mmap), com a stack do handler a mostrar a
+    destruição do `std::map` do `FakeSafIo` (~FakeSafIo — o crash é
+    REAL dentro da destruição, não frames de stack podre) — e o TSAN
+    **NÃO reportou NENHUMA data race**: o perfil é de CORRUPÇÃO DE
+    HEAP (a falha dentro do malloc/free-land — as stacks dos outros
+    crashes em pthread_join/destrutores batem certo), não de uma
+    corrida de variáveis partilhadas. Os 4 avisos do TSAN são o
+    handler de crash dele próprio (malloc dentro do signal — o
+    test_main.cpp:50, conhecido e assumido).
+  - **O ESTADO DO FECHO DA 3.5a**: o run **38573108989** (commit
+    `b0613af`) fechou **VERDE em TODOS os jobs** (core ✓ · c33 ✓ ·
+    APK arm64 assinado com o **versionCode 72** ✓ · symbol gate ✓) —
+    o artefacto `goni-vv-0.9.6-release-signed` está publicado para o
+    sign-off do dono no C33. O CI é INTERMITENTE nesta área (2
+    vermelhos + 1 verde nos 3 runs da 3.5a — a lotaria da corrupção
+    latente pré-existente); o passo TSAN fica no workflow (temporário,
+    continue-on-error) a colher evidência em cada run até o dono
+    decidir a cura (as opções (a)-(d) acima).
   - **AS OPÇÕES PARA O DONO** (nenhuma executada sem OK):
     (a) caçar a corrida com TSAN num machine multi-core real (o CI
         mesmo, com um passo temporário de TSAN);
