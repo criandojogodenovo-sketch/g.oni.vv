@@ -104,6 +104,24 @@ jobs:
       - name: Executar suíte do core
         run: ctest --test-dir build-tests --output-on-failure -R "^core$"
 
+      # 0.11-T (FASE 3.5a · §4.1 do relatório) — DIAGNÓSTICO TEMPORÁRIO da
+      # corrida latente do corte paralelo do streaming (o SIGSEGV no
+      # pthread_join do convertGltfToV3 que o pré-3.5a também mostra com
+      # muitos workers). O CI é o ÚNICO sítio com os workers reais onde
+      # ela dispara — este passo corre o crasher sob TSAN com os MESMOS
+      # workers e imprime o hardware_concurrency REAL do runner. O passo
+      # NÃO decide o veredicto do job (continue-on-error) — a caça é do
+      # §4.1 e as opções estão reportadas ao dono.
+      - name: Diagnóstico TSAN (temporário — §4.1)
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          printf '#include <thread>\n#include <cstdio>\nint main(){std::printf("hw_concurrency=%%u\\n", std::thread::hardware_concurrency());}' > /tmp/hw.cpp
+          g++ /tmp/hw.cpp -o /tmp/hw && /tmp/hw
+          cmake -S tests -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=thread -O1 -g"
+          cmake --build build-tsan --target test_core --parallel 2
+          GONI_ONLY=safstream TSAN_OPTIONS="halt_on_error=0 history_size=7" ./build-tsan/test_core || true
+
       # F5.1: paridade de compilação do main.cpp no hospedeiro (stubs) —
       # erros de símbolo no main.cpp apareciam só no job do NDK
       - name: Check de sintaxe dos TUs device-only (stubs)
