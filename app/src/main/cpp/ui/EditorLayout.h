@@ -122,6 +122,8 @@ constexpr u64 kInspectorScaleOrig  = 5310;   // "escala: original"
 constexpr u64 kInspectorLodDist    = 5311;   // 0.11-T (3.5a): slider do LOD
 constexpr u64 kInspectorInstancing = 5312;   // 0.11-W (3.5b): toggle do
                                              // instancing (sim/não)
+constexpr u64 kInspectorStreaming  = 5313;   // 0.11-W (3.75a): toggle do
+                                             // streaming (sim/não)
 // 0.7.7 — inspector da CÂMARA (sliders + botões; faixa 5400..5419)
 constexpr u64 kInspectorCamFov     = 5400;
 constexpr u64 kInspectorCamNear    = 5401;
@@ -303,6 +305,9 @@ struct InspRow {
                      // o default jogável manda; slider 0..500)
         Instancing,  // 0.11-W (3.5b): "instancing: sim/não" (o toggle do
                      // fundo de blocos — default ON, visualmente idêntico)
+        Streaming,   // 0.11-W (3.75a): "streaming: sim/não" (o toggle do
+                     // fill por camadas — default ON; o OFF devolve o
+                     // freeze de sempre)
         // 0.8.11 — ÁUDIO (secção do AudioPlayer)
         AuSection,   // cabeçalho "Audio" + separador
         ScriptEdit,  // 0.9.2: botão "Editar script" (abre o editor modal)
@@ -549,6 +554,9 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
                 // 0.11-W (3.5b): o fundo do instancing por TIC (o default
                 // é ON — visualmente idêntico, o custo é que muda)
                 push(InspRow::Kind::Instancing, btnH, kInspectorInstancing);
+                // 0.11-W (3.75a): o fill por camadas por TIC (o default é
+                // ON — a cura do freeze; o OFF é o caminho de sempre)
+                push(InspRow::Kind::Streaming, btnH, kInspectorStreaming);
             }
         }
     }

@@ -8448,7 +8448,17 @@ int main() {
             g_camera.pitch = 0.0f;
             g_camera.dist = 12.0f;
             g_camera.fovY = 1.0472f;
-            frame();
+            // 0.11-W (3.75a): o fill do city é POR CAMADAS agora (o
+            // orçamento de 8 loads/frame do stream) — os 72 blocos
+            // enchem em ~9 frames; o contrato do SAF-SEAM avalia na
+            // CONVERGÊNCIA (o frame a frame do fill é o da FASE 29)
+            for (int i = 0; i < 16; ++i) {
+                frame();
+                if (g_blockFrame.any && g_blockFrame.pending == 0 &&
+                    g_blockFrame.drawn == g_blockFrame.total) {
+                    break;   // o fill secou — o city está inteiro
+                }
+            }
             check(g_blockFrame.any && g_blockFrame.total >= 72,
                   "23.2 a frame desenha o city POR BLOCOS sob SAF");
             check(g_blockFrame.drawn == g_blockFrame.total,
@@ -9561,6 +9571,220 @@ int main() {
                       "sempre (1 drawElements individual; o único draw "
                       "instanciado é o dos 6 estáticos — a pose é por TIC, "
                       "§3.5b.2)");
+            }
+        }
+
+        // ====================================================================
+        // FASE 29 — 0.11-W (3.75a): STREAMING PROGRESSIVO no drawTics REAL
+        // O freeze do import morre por ORÇAMENTO: o 1.º frame dos 6
+        // clones × 12 blocos carrega SÓ a vaga (8) e conta «a transmitir»
+        //   29.1 o 1.º frame: loads==8, drawn==48 (8 grupos × 6), pending
+        //        ==24 (4 grupos × 6), dc==8 — o frame é LEVE por
+        //        construção (o lazy inline de sempre carregava 12 de uma
+        //        vez);
+        //   29.2 as CAMADAS: os residentes após o 1.º frame são os 8 mais
+        //        pertos (os blocos estão EM LINHA a 10×i; os empates
+        //        ficam na ordem da tabela — o stable_sort do streamIn);
+        //   29.3 o 2.º frame carrega a cauda (4) e o frame fica COMPLETO
+        //        (pending==0, dc==12, merge==72);
+        //   29.4 o 3.º frame é o steady state (0 loads, o merge completo);
+        //   29.5 o streaming OFF num clone: sai do batch e desenha
+        //        individualmente (o fallback — 12 drawElements; os 5 ON
+        //        fundem em 12 instanciados × 5).
+        // ====================================================================
+        fase("FASE 29 — 0.11-W 3.75a: streaming no device (12 blocos × "
+             "6 clones)");
+        {
+            std::string err29;
+            // a LIMPEZA: os TICs com mesh/blocks de fases anteriores ficam
+            // SEM fonte de mesh (o caminho individual soma o total da
+            // tabela MESMO culled — o instskin de 1 bloco da 28.3 poluía o
+            // total do 29.1a); a cena do 29 fica SÓ com os str*
+            {
+                auto& mrsC = g_scene.components().meshRenderers();
+                for (u32 i = 0; i < mrsC.size(); ++i) {
+                    MeshRenderer& mrC = mrsC.at(i);
+                    if (mrC.mesh == nullptr && mrC.blocks == nullptr) {
+                        continue;
+                    }
+                    mrC.mesh = nullptr;
+                    mrC.blocks = nullptr;
+                    mrC.meshPath.clear();
+                    mrC.primOn = false;
+                }
+            }
+            // o mesh de 12 blocos EM LINHA (o bloco i centrado em
+            // (10×i, 0, 0) — a distância ao olho é determinística)
+            MeshData m29;
+            for (int i = 0; i < 12; ++i) {
+                const u32 base29 = static_cast<u32>(m29.vertices.size());
+                for (int iz = 0; iz <= 4; ++iz) {
+                    for (int ix = 0; ix <= 4; ++ix) {
+                        Vertex v29;
+                        v29.pos = Vec3{f32(i) * 10.0f - 1.0f +
+                                           2.0f * f32(ix) / 4.0f,
+                                       0.0f,
+                                       -1.0f + 2.0f * f32(iz) / 4.0f};
+                        v29.normal = Vec3{0.0f, 1.0f, 0.0f};
+                        v29.uv = Vec2{f32(ix) / 4.0f, f32(iz) / 4.0f};
+                        m29.vertices.push_back(v29);
+                    }
+                }
+                MeshData::Group g29;
+                g29.material = i % 2 == 0 ? "verde" : "ambar";
+                g29.firstIndex = static_cast<u32>(m29.indices.size());
+                for (int iz = 0; iz < 4; ++iz) {
+                    for (int ix = 0; ix < 4; ++ix) {
+                        const u32 a29 =
+                            base29 + static_cast<u32>(iz * 5 + ix);
+                        const u32 b29 = a29 + 5;
+                        const u16 idx29[6] = {
+                            static_cast<u16>(a29), static_cast<u16>(b29),
+                            static_cast<u16>(a29 + 1),
+                            static_cast<u16>(b29),
+                            static_cast<u16>(b29 + 1),
+                            static_cast<u16>(a29 + 1)};
+                        m29.indices.insert(m29.indices.end(), idx29,
+                                           idx29 + 6);
+                    }
+                }
+                g29.indexCount = static_cast<u32>(m29.indices.size()) -
+                                 g29.firstIndex;
+                m29.groups.push_back(g29);
+            }
+            std::vector<u8> bytes29;
+            check(writeGMesh(m29, bytes29, err29),
+                  "29.0a o .gmesh de 12 blocos escrito");
+            check(g_storage->writeBytes("assets/stream12.gmesh",
+                                        bytes29.data(), bytes29.size()),
+                  "29.0b no storage REAL do device");
+            check(g_gpu.blockHull("assets/stream12.gmesh") != nullptr,
+                  "29.0c o BlockMesh aberto no GpuAssets (12 entradas)");
+            for (u32 k = 0; k < 6; ++k) {
+                char nm29[16];
+                std::snprintf(nm29, sizeof(nm29), "str%u", k);
+                const Handle h29 = g_scene.create(nm29);
+                Tic* t29 = g_scene.get(h29);
+                check(t29 != nullptr, "29.0d o clone do stream criado");
+                if (Transform3D* tr29 =
+                        t29 ? t29->addComponent<Transform3D>() : nullptr) {
+                    tr29->pos = Vec3{-5.0f + 2.0f * f32(k), 0.0f, -10.0f};
+                    tr29->updateWorld();
+                }
+                if (MeshRenderer* mr29 =
+                        t29 ? t29->addComponent<MeshRenderer>() : nullptr) {
+                    mr29->meshPath = "assets/stream12.gmesh";
+                    check(mr29->streaming,
+                          "29.0e o default ON (a cura é o comportamento "
+                          "jogável)");
+                }
+            }
+            blockRebind();
+            const Mat4 vp29 =
+                Mat4::ortho(-200.0f, 200.0f, -200.0f, 200.0f, 0.1f, 500.0f);
+            const Vec3 eye29{0.0f, 0.0f, 0.0f};
+            // ---- 29.1 o 1.º frame: SÓ a vaga (o anti-freeze) ------------
+            passo("29.1 o 1.º frame carrega 8 de 12 (o freeze morre)");
+            {
+                glstub::reset();
+                g_renderer.beginFrame();
+                drawTics(vp29, eye29);
+                check(g_blockFrame.any && g_blockFrame.total == 72,
+                      "29.1a o total é 12 blocos × 6 clones (a colheita)");
+                check(g_blockFrame.loaded ==
+                              static_cast<u32>(
+                                  BlockMesh::kBlockStreamBudgetPerFrame) &&
+                          g_blockFrame.loaded == 8,
+                      "29.1b O PIN: o frame carrega SÓ a vaga (8 — o lazy "
+                      "de sempre carregava 12 de uma vez)");
+                check(g_blockFrame.drawn == 48 &&
+                          g_blockFrame.instancesMerged == 48,
+                      "29.1c os 8 grupos residentes fundem (8 dc × 6)");
+                check(g_blockFrame.pending == 24,
+                      "29.1d O PIN: «a transmitir» = 24 (4 grupos × 6 — "
+                      "as camadas a chegar)");
+                check(g_blockFrame.drawCalls == 8,
+                      "29.1e 8 dc instanciados (um por grupo residente)");
+            }
+            // ---- 29.2 as CAMADAS: os 8 mais pertos primeiro -------------
+            passo("29.2 os residentes são os 8 mais pertos do olho");
+            {
+                MeshRenderer* mrS = nullptr;
+                Tic* tS = g_scene.get(g_scene.find("str0"));
+                if (tS) mrS = tS->getComponent<MeshRenderer>();
+                check(mrS != nullptr && mrS->blocks != nullptr,
+                      "29.2a o clone str0 com o BlockMesh ligado");
+                if (mrS && mrS->blocks) {
+                    bool nearOk = true, farOk = true;
+                    for (u32 i = 0; i < 12; ++i) {
+                        if (mrS->blocks->resident(i) != (i < 8)) {
+                            if (i < 8) nearOk = false;
+                            else farOk = false;
+                        }
+                    }
+                    check(nearOk,
+                          "29.2b os entries 0..7 residentes (os mais "
+                          "pertos — os empates ficam na ordem da tabela)");
+                    check(farOk, "29.2c os entries 8..11 à espera de vaga");
+                }
+            }
+            // ---- 29.3 o 2.º frame: a cauda e o frame COMPLETO -----------
+            passo("29.3 o 2.º frame carrega a cauda (4) e fica completo");
+            {
+                glstub::reset();
+                g_renderer.beginFrame();
+                drawTics(vp29, eye29);
+                check(g_blockFrame.loaded == 4,
+                      "29.3a a última vaga carrega os 4 que faltavam");
+                check(g_blockFrame.pending == 0,
+                      "29.3b O PIN: «a transmitir» secou (o fill fechou)");
+                check(g_blockFrame.drawn == 72 &&
+                          g_blockFrame.instancesMerged == 72,
+                      "29.3c o merge completo (12 grupos × 6 clones)");
+                check(g_blockFrame.drawCalls == 12,
+                      "29.3d 12 dc (o dc teórico do fill completo)");
+            }
+            // ---- 29.4 o steady state: nada a carregar -------------------
+            passo("29.4 o 3.º frame não carrega nada");
+            {
+                glstub::reset();
+                g_renderer.beginFrame();
+                drawTics(vp29, eye29);
+                check(g_blockFrame.loaded == 0 && g_blockFrame.pending == 0,
+                      "29.4a o steady state (0 loads, 0 pendentes)");
+                check(g_blockFrame.drawn == 72 && g_blockFrame.drawCalls == 12,
+                      "29.4b o merge completo de novo (nada degradou)");
+            }
+            // ---- 29.5 o streaming OFF sai do batch ----------------------
+            passo("29.5 o streaming OFF: o caminho individual de sempre");
+            {
+                Tic* t5 = g_scene.get(g_scene.find("str5"));
+                MeshRenderer* mr5 = t5 ? t5->getComponent<MeshRenderer>()
+                                       : nullptr;
+                check(mr5 != nullptr, "29.5a o clone str5 à mão");
+                if (mr5) {
+                    mr5->streaming = false;   // o toggle do inspector
+                }
+                glstub::reset();
+                g_renderer.beginFrame();
+                drawTics(vp29, eye29);
+                check(g_blockFrame.loaded == 0 && g_blockFrame.pending == 0,
+                      "29.5b o TIC OFF não conta «a transmitir» (o lazy "
+                      "inline de sempre — tudo residente)");
+                check(glstub::stats.drawElementsCalls == 12,
+                      "29.5c o TIC OFF desenha 12 drawElements "
+                      "individuais (o fallback do streaming)");
+                check(glstub::stats.drawElementsInstancedCalls == 12 &&
+                          glstub::stats.lastInstanceCount == 5,
+                      "29.5d os 5 ON fundem em 12 instanciados × 5 (o "
+                      "batch sem o TIC OFF)");
+                check(g_blockFrame.drawn == 72 &&
+                          g_blockFrame.instancesMerged == 60,
+                      "29.5e 72 desenhados (60 fundidos + 12 "
+                      "individuais)");
+                if (mr5) {
+                    mr5->streaming = true;   // repõe (o default ON)
+                }
             }
         }
         }   // fim do else do 26.3 (o caminho do playback)

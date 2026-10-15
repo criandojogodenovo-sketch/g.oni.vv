@@ -56,6 +56,9 @@ struct TicSnap {
     // 0.11-W (3.5b): o toggle do instancing entra no snapshot (o MESMO
     // contrato do lodDistance)
     bool     instancing = true;
+    // 0.11-W (3.75a): o toggle do streaming entra no snapshot (o MESMO
+    // contrato do instancing)
+    bool     streaming = true;
     bool     primOn = false;
     PrimKind primKind = PrimKind::Box;
     f32      primRadius = 0.5f, primSize = 1.0f;

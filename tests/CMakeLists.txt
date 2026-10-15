@@ -86,6 +86,7 @@ add_executable(test_core
         test_fase35a_lod_cull.cpp
         test_fase35fix_p1.cpp   # 0.11-T-FIX (Perna 1): os 6 pins do contorno
         test_fase35b_instancing.cpp   # 0.11-W (3.5b): os 9 pins do instancing
+        test_fase375a_streaming.cpp   # 0.11-W (3.75a): os pins do streaming
         # 0.7.1: cenas múltiplas + transições (projeto e2e, SceneFx puro,
         # overlay CENAS, ações Scene.Load/Transition)
         test_scenes.cpp

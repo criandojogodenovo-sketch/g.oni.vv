@@ -232,6 +232,63 @@ public:
     // TIC — somar por TIC duplicava na cena dos 6 clones)
     void storageStats(Stats& st) const;
 
+    // ---- 0.11-W (3.75a) · STREAMING PROGRESSIVO ----------------------------
+    // O freeze do import não é a abertura (a TABELA — o PASSO 4) nem o
+    // conversor (a thread do import — o PASSO 3): é o PRIMEIRO frame em
+    // que a cena fica visível — o lazy de sempre carrega TODOS os blocos
+    // visíveis não residentes NO MESMO frame (863 leituras+decodes+uploads
+    // na cena do dono = segundos de freeze). A cura: o carregamento ganha
+    // ORÇAMENTO POR FRAME e prioridade POR DISTÂNCIA — as CAMADAS: perto
+    // primeiro, o resto chega nas vagas dos frames seguintes (o HUD diz
+    // «a transmitir=N» até a vaga secar). ZERO mudança ao formato .gmesh —
+    // as camadas calculam-se da TABELA (os AABB) em runtime; o ficheiro de
+    // 203 MB do dono NÃO precisa de reimport. ZERO mudança aos caminhos de
+    // draw (o lazy inline de sempre é o caminho dos chamadores antigos —
+    // byte a byte); a política vive no ORQUESTRADOR (o drawTics), que
+    // colhe os pedidos, manda o streamIn e SÓ submete o residente.
+    //
+    // O ORÇAMENTO por frame (o anti-freeze declarado): 8 blocos/frame no
+    // CAMINHO INTEIRO (a soma de todos os meshes do frame) — ~1-3 ms por
+    // bloco (leitura+decode+upload) = um frame de trabalho honesto a
+    // 30-60 FPS; o fill de 863 blocos espalha-se por ~108 frames (~2-4 s)
+    // em vez de UM frame de segundos.
+    static constexpr u32 kBlockStreamBudgetPerFrame = 8;
+
+    // UM pedido de carregamento (o orquestrador colhe; o streamIn ordena e
+    // carrega). `dist` = a distância do camEye ao CENTRO do AABB do bloco
+    // NORMAL transformado pelo model do TIC (o MESMO centro que o classify
+    // usa para o z dos blends; o LOD partilha o AABB do normal) — a
+    // distância MÍNIMA dos clones quando o mesmo entry serve N TICs.
+    struct StreamReq {
+        BlockMesh* bm = nullptr;   // o mesh dono do entry (não-dono)
+        u32 entry = 0;             // o índice na entries_ (normal ou LOD)
+        f32 dist = 0.0f;           // em unidades de mundo (perto primeiro)
+    };
+
+    // O STREAM IN (o coração do 3.75a · PURO exceto o load): ordena os
+    // pedidos por distância ASCENDENTE (estável — empates ficam na ordem
+    // dada: a ordem da tabela sobrevive) e carrega até `budget` blocos,
+    // PERTO PRIMEIRO (as camadas). Os já residentes NÃO consomem a vaga
+    // (o dedup é o próprio resident()); os que FALHAM (corrupção/faixa)
+    // TAMBÉM não (um bloco partido não esfomeia os vizinhos — o retry por
+    // frame é o de sempre do lazy). Devolve os carregados com sucesso
+    // (o orquestrador soma no BlockFrameStats.loaded). NÃO desenha NADA —
+    // a submissão é dos caminhos de sempre, agora com a PORTA (resident).
+    static u32 streamIn(StreamReq* reqs, u32 count, u32 budget);
+
+    // A PORTA da submissão com o stream ativo: o entry tem GPU vivo AGORA?
+    // O orquestrador SÓ submete o residente — o não-residente NÃO desenha
+    // neste frame (não carrega inline: a vaga é do streamIn) e conta como
+    // «a transmitir». Fora do stream (os chamadores antigos) ninguém
+    // pergunta — o lazy inline de sempre, byte a byte.
+    bool resident(u32 entry) const;
+
+    // O load ÚNICO do stream (o mesmo ensureBlock do lazy de sempre — a
+    // mesma faixa, o mesmo decode, o mesmo upload, o mesmo anti
+    // retry-storm). Público para o streamIn estático e para os pins;
+    // false = falhou (o err diz a causa; NÃO consome a vaga).
+    bool streamLoad(u32 entry, std::string& err);
+
     // ---- o FRAME -----------------------------------------------------------
     // cull → lazy load → draw → evict. Os DrawStats somam-se ao do frame
     // (dc/verts coerentes com a status line); `bones/boneCount` seguem o

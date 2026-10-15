@@ -839,6 +839,9 @@ struct BlockFrameStats {
     u32 loaded = 0;       // lazy: carregados neste frame
     u32 instancesMerged = 0;  // 0.11-W (3.5b): blocos fundidos em draws
                               // instanciados neste frame (o log espelha)
+    u32 pending = 0;      // 0.11-W (3.75a): visíveis à espera de vaga do
+                          // stream (não desenhados neste frame — o log
+                          // espelha «a transmitir» até a vaga secar)
     u64 ramBytes = 0;
     u64 vramBytes = 0;
     bool any = false;
@@ -5190,8 +5193,11 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye) {
             }
             // ---- 0.11-W (3.5b): a COLHEITA do instancing ----------------
             // Skinado NUNCA funde (a pose é por TIC — §3.5b.2, o pin do
-            // skin mismatch); o toggle OFF desenha como sempre.
-            if (mr.instancing && !mr.blocks->skinned()) {
+            // skin mismatch); o toggle OFF desenha como sempre. 0.11-W
+            // (3.75a): o streaming OFF também sai do batch — desenha
+            // individualmente pelo caminho de sempre (o lazy inline com o
+            // freeze de sempre — o fallback é o MESMO do instancing OFF).
+            if (mr.instancing && mr.streaming && !mr.blocks->skinned()) {
                 const u32 n = mr.blocks->collectVisible(
                     model, vp, &camEye, mr.lodDistance, picks);
                 if (n > 0) {
@@ -5279,9 +5285,40 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye) {
                                       nBones > 0 ? bones : nullptr, nBones);
     }
 
-    // ---- 0.11-W (3.5b): o AGRUPAMENTO + a SUBMISSÃO dos opacos ---------
+    // ---- 0.11-W (3.5b): o AGRUPAMENTO dos opacos ------------------------
     // A assinatura (bm, entry, tex, tint) — o MESMO mesh GPU desenha N
     // TICs num draw instanciado (o teto de 64 fatia lá dentro, §3.5b.3).
+    // ---- 0.11-W (3.75a): o STREAM dos pendentes (as CAMADAS) ------------
+    // Os grupos e os blends NÃO residentes pedem vaga ANTES da submissão:
+    // o streamIn ordena por distância (perto primeiro — a distância MÍNIMA
+    // dos clones manda) e carrega até ao orçamento do frame; a submissão
+    // abaixo SÓ desenha o residente (a PORTA) — o resto conta
+    // «a transmitir» e chega nas vagas dos frames seguintes. O lazy inline
+    // de sempre fica INTACTO para os chamadores antigos (a porta só existe
+    // aqui, no orquestrador).
+    auto blockDist = [](BlockMesh* bm, u32 entry, const Mat4& m,
+                        const Vec3& eye) -> f32 {
+        // o centro do AABB do bloco NORMAL (o MESMO centro que o classify
+        // usa para o z dos blends; o LOD partilha-o) transformado pelo
+        // model do TIC, contra o camEye — unidades de mundo
+        const u32 blockIdx =
+            entry < static_cast<u32>(bm->table().size())
+                ? entry
+                : entry - static_cast<u32>(bm->table().size());
+        const GMeshV3Block& blk = bm->table()[blockIdx];
+        const f32 cx = (blk.aabbMin.x + blk.aabbMax.x) * 0.5f;
+        const f32 cy = (blk.aabbMin.y + blk.aabbMax.y) * 0.5f;
+        const f32 cz = (blk.aabbMin.z + blk.aabbMax.z) * 0.5f;
+        const f32 px = m.m[0] * cx + m.m[4] * cy + m.m[8] * cz + m.m[12];
+        const f32 py = m.m[1] * cx + m.m[5] * cy + m.m[9] * cz + m.m[13];
+        const f32 pz = m.m[2] * cx + m.m[6] * cy + m.m[10] * cz + m.m[14];
+        const f32 dx = px - eye.x;
+        const f32 dy = py - eye.y;
+        const f32 dz = pz - eye.z;
+        return std::sqrt(dx * dx + dy * dy + dz * dz);
+    };
+    std::vector<BlockMesh::StreamReq> reqs;
+    u32 pendingAll = 0;
     if (!batch.empty()) {
         std::stable_sort(batch.begin(), batch.end(),
                          [](const BatchPick& a, const BatchPick& b) {
@@ -5291,6 +5328,45 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye) {
                              return std::memcmp(a.tint, b.tint,
                                                 3 * sizeof(f32)) < 0;
                          });
+        size_t k = 0;
+        while (k < batch.size()) {
+            size_t j = k + 1;
+            while (j < batch.size() && sameKey(batch[j], batch[k])) {
+                ++j;
+            }
+            BlockMesh* bm = batch[k].bm;
+            const u32 entry = batch[k].entry;
+            if (!bm->resident(entry)) {
+                f32 dmin = blockDist(bm, entry, *batch[k].model, camEye);
+                for (size_t t = k + 1; t < j; ++t) {
+                    const f32 d =
+                        blockDist(bm, entry, *batch[t].model, camEye);
+                    if (d < dmin) dmin = d;
+                }
+                reqs.push_back(BlockMesh::StreamReq{bm, entry, dmin});
+            }
+            k = j;
+        }
+    }
+    // os blends pendentes também pedem vaga (a porta da submissão é a
+    // mesma — senão um blend fora da cache nunca chegava)
+    for (const BlendRow& b : blends) {
+        for (u32 t = 0; t < b.count; ++t) {
+            if (!b.bm->resident(b.entries[t])) {
+                reqs.push_back(BlockMesh::StreamReq{
+                    b.bm, b.entries[t],
+                    blockDist(b.bm, b.entries[t], *b.model, camEye)});
+            }
+        }
+    }
+    if (!reqs.empty()) {
+        g_blockFrame.loaded += BlockMesh::streamIn(
+            reqs.data(), static_cast<u32>(reqs.size()),
+            BlockMesh::kBlockStreamBudgetPerFrame);
+    }
+
+    // ---- 0.11-W (3.5b): a SUBMISSÃO dos opacos (3.75a: com a PORTA) -----
+    if (!batch.empty()) {
         std::vector<Mat4> mats;
         size_t k = 0;
         while (k < batch.size()) {
@@ -5299,6 +5375,12 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye) {
                 ++j;
             }
             const u32 n = static_cast<u32>(j - k);
+            if (!batch[k].bm->resident(batch[k].entry)) {
+                pendingAll += n;   // «a transmitir» — a vaga chega; NADA
+                                   // desenhado nem carregado inline
+                k = j;
+                continue;
+            }
             mats.clear();
             mats.reserve(n);
             for (size_t t = k; t < j; ++t) {
@@ -5317,14 +5399,39 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye) {
             k = j;
         }
     }
+    g_blockFrame.pending += pendingAll;
     // os blends colhidos (a ordem longe→perto DENTRO de cada TIC; a
     // submissão corre DEPOIS de todos os opacos — a única ordem em que a
-    // mistura clássica é correta para o frame inteiro)
+    // mistura clássica é correta para o frame inteiro). 0.11-W (3.75a): a
+    // PORTA do stream — só o residente entra; o filtro é ESTÁVEL (a ordem
+    // longe→perto sobrevive) e o pendente conta «a transmitir».
+    std::vector<u32> blendKeep;
+    std::vector<u32> blendEntF;
+    std::vector<f32> blendZF;
     for (const BlendRow& b : blends) {
+        blendKeep.clear();
+        for (u32 t = 0; t < b.count; ++t) {
+            if (b.bm->resident(b.entries[t])) {
+                blendKeep.push_back(t);
+            }
+        }
+        pendingAll = b.count - static_cast<u32>(blendKeep.size());
+        g_blockFrame.pending += pendingAll;
+        if (blendKeep.empty()) {
+            continue;   // nada residente neste TIC — a vaga chega
+        }
+        blendEntF.clear();
+        blendZF.clear();
+        blendEntF.reserve(blendKeep.size());
+        blendZF.reserve(blendKeep.size());
+        for (u32 t : blendKeep) {
+            blendEntF.push_back(b.entries[t]);
+            blendZF.push_back(b.zNdc[t]);
+        }
         BlockMesh::Stats ss;
         const DrawStats ds = b.bm->drawBlendPicks(
-            g_renderer, b.entries, b.model, b.zNdc, b.count, vp, b.tex,
-            b.tint, ss);
+            g_renderer, blendEntF.data(), b.model, blendZF.data(),
+            static_cast<u32>(blendEntF.size()), vp, b.tex, b.tint, ss);
         g_blockFrame.drawn += ss.drawn;
         g_blockFrame.loaded += ss.loadedThisFrame;
         g_blockFrame.drawCalls += ds.drawCalls;
@@ -6011,12 +6118,14 @@ void frame() {
             s_lastLog = s_clock;
             elog::info(
                 "blocos: total=%u visiveis=%u desenhados=%u instanciados=%u "
-                "dc=%u verts=%u carregados-agora=%u ram=%.1fMB vram=%.1fMB "
+                "dc=%u verts=%u carregados-agora=%u a transmitir=%u "
+                "ram=%.1fMB vram=%.1fMB "
                 "(residente, orçamento %llu+%llu MB)",
                 g_blockFrame.total, g_blockFrame.visible,
                 g_blockFrame.drawn, g_blockFrame.instancesMerged,
                 g_blockFrame.drawCalls,
                 g_blockFrame.drawnVerts, g_blockFrame.loaded,
+                g_blockFrame.pending,
                 static_cast<double>(g_blockFrame.ramBytes) / (1024.0 * 1024.0),
                 static_cast<double>(g_blockFrame.vramBytes) / (1024.0 * 1024.0),
                 static_cast<unsigned long long>(kBlockCacheRamBudgetBytes /

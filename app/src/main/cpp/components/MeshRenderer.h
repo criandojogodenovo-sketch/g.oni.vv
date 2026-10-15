@@ -74,6 +74,17 @@ public:
     // 0.11-T ficam byte a byte).
     bool instancing = true;
 
+    // 0.11-W (3.75a) — STREAMING PROGRESSIVO: os blocos deste TIC chegam
+    // POR CAMADAS (orçamento de 8 loads/frame no caminho inteiro + perto
+    // primeiro) em vez de TODOS no 1.º frame visível (o freeze do import).
+    // O default é ON (a cura é o comportamento jogável; o OFF devolve o
+    // caminho de sempre — lazy inline de sempre, com o freeze de sempre).
+    // Vive no par do instancing: com o OFF o TIC sai do batch e desenha
+    // individualmente (o MESMO fallback do instancing OFF). Serializado no
+    // .goni como "streaming":false SÓ quando false (o default omitido —
+    // os .goni da 0.11-T ficam byte a byte).
+    bool streaming = true;
+
     // F5-C/E: refs relativas do asset — vazias = procedural ("cube"/sem tex).
     // Vivem no componente para o serializer e para a UI mostrarem a origem.
     std::string meshPath;

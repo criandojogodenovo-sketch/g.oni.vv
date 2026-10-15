@@ -6565,3 +6565,261 @@ TEST(regress_instancing) {
         EXPECT(ss.drawn == 100);
     }
 }
+
+
+// ---- R-048 · O STREAM NÃO CONGELA (0.11-W 3.75a) ---------------------------
+// Vigia: (1) o orçamento por frame — 12 blocos visíveis carregam SÓ a vaga
+// (8) no 1.º frame (o freeze de import morre por construção); (2) as
+// CAMADAS — com a vaga apertada os residentes são EXATAMENTE os mais
+// perto do camEye; (3) o toggle por TIC (o .goni transporta
+// "streaming":false e o ausente = ON — os .goni da 0.11-T ficam byte a
+// byte); (4) o fill fecha: Σ loads == os blocos do ficheiro e o pendente
+// seca (drawn + pending == visible).
+// Prova de mutação: M-3.75a1 (o orçamento removido), M-3.75a2 (a ordem
+// removida), M-3.75a3 (a porta morta) — ver RELATORIO-0.11-W-3.75A §2.
+namespace r048 {
+
+void r048Strip(MeshData& m, f32 cx, const std::string& mat) {
+    const u32 base = static_cast<u32>(m.vertices.size());
+    for (int iz = 0; iz <= 4; ++iz) {
+        for (int ix = 0; ix <= 4; ++ix) {
+            Vertex v;
+            v.pos = Vec3{cx - 1.0f + 2.0f * f32(ix) / 4.0f, 0.0f,
+                         -1.0f + 2.0f * f32(iz) / 4.0f};
+            v.normal = Vec3{0.0f, 1.0f, 0.0f};
+            v.uv = Vec2{f32(ix) / 4.0f, f32(iz) / 4.0f};
+            m.vertices.push_back(v);
+        }
+    }
+    MeshData::Group g;
+    g.material = mat;
+    g.firstIndex = static_cast<u32>(m.indices.size());
+    for (int iz = 0; iz < 4; ++iz) {
+        for (int ix = 0; ix < 4; ++ix) {
+            const u32 a = base + static_cast<u32>(iz * 5 + ix);
+            const u32 b = a + 5;
+            m.indices.push_back(static_cast<u16>(a));
+            m.indices.push_back(static_cast<u16>(b));
+            m.indices.push_back(static_cast<u16>(a + 1));
+            m.indices.push_back(static_cast<u16>(b));
+            m.indices.push_back(static_cast<u16>(b + 1));
+            m.indices.push_back(static_cast<u16>(a + 1));
+            g.indexCount += 6;
+        }
+    }
+    m.groups.push_back(g);
+}
+
+struct R048Storage final : vv::ProjectStorage {
+    std::map<std::string, std::string> files;
+    std::string root() const override { return "/r048"; }
+    bool makeDirs(const std::string&) override { return true; }
+    bool exists(const std::string& relPath) const override {
+        return files.count(relPath) != 0;
+    }
+    vv::Presence probe(const std::string& relPath) const override {
+        return files.count(relPath) != 0 ? vv::Presence::Present
+                                         : vv::Presence::Absent;
+    }
+    bool writeText(const std::string& relPath,
+                   const std::string& text) override {
+        files[relPath] = text;
+        return true;
+    }
+    bool readText(const std::string& relPath, std::string& out) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        out = it->second;
+        return true;
+    }
+    bool writeBytes(const std::string& relPath, const void* data,
+                    size_t n) override {
+        files[relPath].assign(static_cast<const char*>(data), n);
+        return true;
+    }
+    bool readBytes(const std::string& relPath,
+                   std::vector<vv::u8>& out) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        out.assign(it->second.begin(), it->second.end());
+        return !out.empty();
+    }
+    bool listDir(const std::string&,
+                 std::vector<std::string>&) const override {
+        return false;
+    }
+    bool statBytes(const std::string& relPath,
+                   vv::u64& outBytes) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        outBytes = it->second.size();
+        return true;
+    }
+    bool readBytesAt(const std::string& relPath, vv::u64 offset, size_t len,
+                     std::vector<vv::u8>& out) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        if (offset + len > it->second.size()) return false;
+        out.assign(it->second.begin() + static_cast<long>(offset),
+                   it->second.begin() + static_cast<long>(offset + len));
+        return out.size() == len;
+    }
+};
+
+// o walk do drawTics condensado (o MESMO contrato do runStreamed dos pins)
+struct R048Run {
+    u32 loads = 0;
+    u32 drawn = 0;
+    u32 pending = 0;
+};
+R048Run r048Frame(BlockMesh& bm, Renderer& r, const Mat4& vp,
+                  const Vec3& camEye, const std::vector<Mat4>& models,
+                  u32 budget) {
+    R048Run out;
+    std::vector<BlockMesh::InstPick> picks;
+    std::vector<u32> entries;
+    std::vector<const Mat4*> modelsOf;
+    for (const Mat4& m : models) {
+        if (bm.collectVisible(m, vp, &camEye, 0.0f, picks) == 0) continue;
+        for (const BlockMesh::InstPick& p : picks) {
+            if (p.blend) continue;
+            entries.push_back(p.entry);
+            modelsOf.push_back(&m);
+        }
+    }
+    // os pedidos por entry (dist = MÍNIMO sobre as instâncias)
+    std::vector<BlockMesh::StreamReq> reqs;
+    {
+        std::vector<u32> uniq;
+        for (u32 e : entries) {
+            bool seen = false;
+            for (u32 u : uniq) seen = seen || (u == e);
+            if (!seen) uniq.push_back(e);
+        }
+        for (u32 e : uniq) {
+            if (bm.resident(e)) continue;
+            f32 dmin = -1.0f;
+            for (size_t t = 0; t < entries.size(); ++t) {
+                if (entries[t] != e) continue;
+                const u32 bi =
+                    e < static_cast<u32>(bm.table().size())
+                        ? e
+                        : e - static_cast<u32>(bm.table().size());
+                const GMeshV3Block& blk = bm.table()[bi];
+                const f32 cx =
+                    (blk.aabbMin.x + blk.aabbMax.x) * 0.5f;
+                const f32 cy =
+                    (blk.aabbMin.y + blk.aabbMax.y) * 0.5f;
+                const f32 cz =
+                    (blk.aabbMin.z + blk.aabbMax.z) * 0.5f;
+                const Mat4& m = *modelsOf[t];
+                const f32 px =
+                    m.m[0] * cx + m.m[4] * cy + m.m[8] * cz + m.m[12];
+                const f32 py =
+                    m.m[1] * cx + m.m[5] * cy + m.m[9] * cz + m.m[13];
+                const f32 pz =
+                    m.m[2] * cx + m.m[6] * cy + m.m[10] * cz + m.m[14];
+                const f32 dx = px - camEye.x, dy = py - camEye.y,
+                          dz = pz - camEye.z;
+                const f32 d = std::sqrt(dx * dx + dy * dy + dz * dz);
+                if (dmin < 0.0f || d < dmin) dmin = d;
+            }
+            reqs.push_back(BlockMesh::StreamReq{&bm, e, dmin});
+        }
+    }
+    out.loads = BlockMesh::streamIn(reqs.data(),
+                                    static_cast<u32>(reqs.size()), budget);
+    for (size_t t = 0; t < entries.size(); ++t) {
+        if (bm.resident(entries[t])) {
+            BlockMesh::Stats ss;
+            const Mat4 one[1] = {*modelsOf[t]};
+            bm.drawInstancedGroup(r, entries[t], one, 1, vp, nullptr,
+                                  nullptr, ss);
+            out.drawn += ss.drawn;
+        } else {
+            ++out.pending;
+        }
+    }
+    return out;
+}
+
+} // namespace r048
+
+TEST(regress_streaming) {
+    glstub::reset();
+    using namespace r048;
+
+    std::string err;
+    MeshData m12;
+    for (int i = 0; i < 12; ++i) {
+        r048Strip(m12, f32(i) * 10.0f, i % 2 == 0 ? "verde" : "ambar");
+    }
+    std::vector<u8> gmesh;
+    EXPECT(writeGMesh(m12, gmesh, err));
+    R048Storage st;
+    st.files["assets/r048.gmesh"].assign(
+        reinterpret_cast<const char*>(gmesh.data()), gmesh.size());
+    BlockMesh bm;
+    EXPECT(bm.open(st, "assets/r048.gmesh", err));
+    EXPECT(bm.table().size() == 12);
+
+    Renderer r;
+    EXPECT(r.init());
+    const Mat4 vp = Mat4::ortho(-200.0f, 200.0f, -200.0f, 200.0f, 0.1f, 500.0f);
+    const Vec3 camEye{0.0f, 0.0f, 0.0f};
+    const std::vector<Mat4> models{Mat4::identity()};
+
+    // (1) O ORÇAMENTO: o 1.º frame carrega SÓ a vaga (8 de 12) — o frame
+    //     é leve POR CONSTRUÇÃO (o freeze morre aqui)
+    const R048Run f1 = r048Frame(bm, r, vp, camEye, models,
+                                 BlockMesh::kBlockStreamBudgetPerFrame);
+    EXPECT(f1.loads == BlockMesh::kBlockStreamBudgetPerFrame);
+    EXPECT(f1.loads == 8);
+    EXPECT(f1.pending == 4);
+
+    // (2) AS CAMADAS: vaga 3 num mesh novo → os residentes são os 3 mais
+    //     perto (0,1,2 — os blocos estão EM LINHA a 10×i do olho)
+    BlockMesh bm2;
+    EXPECT(bm2.open(st, "assets/r048.gmesh", err));
+    const R048Run f2 = r048Frame(bm2, r, vp, camEye, models, 3);
+    EXPECT(f2.loads == 3);
+    EXPECT(bm2.resident(0) && bm2.resident(1) && bm2.resident(2));
+    EXPECT(!bm2.resident(3) && !bm2.resident(11));
+
+    // (3) O TOGGLE no .goni: ausente = ON; false nasce e restaura
+    {
+        Scene scene;
+        Handle h = scene.create("A");
+        Tic* t = scene.get(h);
+        ASSERT(t != nullptr);
+        t->addComponent<MeshRenderer>();
+        const std::string dump1 = SceneSerializer::dump(scene);
+        EXPECT(dump1.find("streaming") == std::string::npos);
+        Scene s1;
+        SceneSerializer::LoadCtx ctx;
+        EXPECT(SceneSerializer::loadText(s1, dump1, ctx));
+        EXPECT(s1.components().meshRenderers().at(0).streaming);
+        // com false a chave nasce e o load restaura
+        MeshRenderer* mr = scene.get(h)->getComponent<MeshRenderer>();
+        ASSERT(mr != nullptr);
+        mr->streaming = false;
+        const std::string dump2 = SceneSerializer::dump(scene);
+        EXPECT(dump2.find("\"streaming\":false") != std::string::npos);
+        Scene s2;
+        EXPECT(SceneSerializer::loadText(s2, dump2, ctx));
+        EXPECT(!s2.components().meshRenderers().at(0).streaming);
+    }
+
+    // (4) O FILL FECHA: os frames seguintes carregam a cauda (4) e o
+    //     pendente seca — Σ loads == 12, o steady state não carrega nada
+    const R048Run f3 = r048Frame(bm, r, vp, camEye, models,
+                                 BlockMesh::kBlockStreamBudgetPerFrame);
+    EXPECT(f3.loads == 4);
+    EXPECT(f3.pending == 0);
+    EXPECT(f3.drawn == 12);
+    const R048Run f4 = r048Frame(bm, r, vp, camEye, models,
+                                 BlockMesh::kBlockStreamBudgetPerFrame);
+    EXPECT(f4.loads == 0);
+    EXPECT(f4.pending == 0);
+    EXPECT(f4.drawn == 12);
+}

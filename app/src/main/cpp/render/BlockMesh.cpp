@@ -1241,6 +1241,61 @@ void BlockMesh::storageStats(Stats& st) const {
     st.evictedTotal = static_cast<u32>(evictedTotal_);
 }
 
+// ---- 0.11-W (3.75a) · o streaming progressivo --------------------------------
+
+bool BlockMesh::resident(u32 entry) const {
+    if (!opened_ || entry >= entries_.size()) {
+        return false;   // fora da tabela NUNCA é residente (a porta fecha)
+    }
+    const Entry& e = entries_[entry];
+    return e.gpu != nullptr && e.gpu->ok();
+}
+
+bool BlockMesh::streamLoad(u32 entry, std::string& err) {
+    if (!opened_ || entry >= entries_.size()) {
+        err = "entry fora da tabela";
+        return false;
+    }
+    // o MESMO ensureBlock do lazy de sempre (a mesma faixa, o mesmo decode,
+    // o mesmo upload, o mesmo anti retry-storm — zero caminhos novos)
+    return ensureBlock(entry, err);
+}
+
+u32 BlockMesh::streamIn(StreamReq* reqs, u32 count, u32 budget) {
+    if (reqs == nullptr || count == 0 || budget == 0) {
+        return 0;
+    }
+    // as CAMADAS: perto primeiro (ESTÁVEL — os empates ficam na ordem
+    // dada, que é a ordem da tabela: o fill respeita o ficheiro)
+    std::stable_sort(reqs, reqs + count,
+                     [](const StreamReq& a, const StreamReq& b) {
+                         return a.dist < b.dist;
+                     });
+    u32 loaded = 0;
+    std::string err;
+    for (u32 i = 0; i < count && loaded < budget; ++i) {
+        StreamReq& rq = reqs[i];
+        if (rq.bm == nullptr) {
+            continue;
+        }
+        if (rq.bm->resident(rq.entry)) {
+            continue;   // já lá está — a vaga NÃO se gasta (o dedup é o
+                        // próprio resident(): N clones do mesmo entry
+                        // produzem N pedidos e UM load)
+        }
+        if (rq.bm->streamLoad(rq.entry, err)) {
+            ++loaded;   // a vaga gasta-se SÓ no sucesso — um bloco
+                        // corrupto não esfomeia os vizinhos (o retry
+                        // por frame é o de sempre do lazy)
+        } else {
+            elog::error("stream: '%s' bloco %u FALHOU — %s",
+                        rq.bm->path_.c_str(), rq.entry, err.c_str());
+            err.clear();
+        }
+    }
+    return loaded;
+}
+
 // (o uploadDead limpa no close() — um open novo merece novas tentativas)
 
 } // namespace vv

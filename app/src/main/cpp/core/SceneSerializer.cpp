@@ -155,6 +155,11 @@ void appendComponentJson(Json& arr, const MeshRenderer* mr) {
     if (!mr->instancing) {
         c.addMember("instancing", Json::makeBool(false));
     }
+    // 0.11-W (3.75a) — streaming: o MESMO contrato do instancing (só o
+    // false nasce; ausente = ON no loader — os .goni antigos intocados)
+    if (!mr->streaming) {
+        c.addMember("streaming", Json::makeBool(false));
+    }
     arr.addItem(std::move(c));
 }
 
@@ -557,6 +562,13 @@ void fillMeshRenderer(MeshRenderer* mr, const Json& comp, const LoadCtx& ctx) {
     if (const Json* ji = comp.find("instancing");
         ji && ji->type == Json::Type::Bool) {
         mr->instancing = ji->boolean;
+    }
+    // 0.11-W (3.75a): "streaming" opcional (o MESMO contrato — ausente =
+    // ON; false é o único valor escrito)
+    mr->streaming = true;
+    if (const Json* js = comp.find("streaming");
+        js && js->type == Json::Type::Bool) {
+        mr->streaming = js->boolean;
     }
 }
 

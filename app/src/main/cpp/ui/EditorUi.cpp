@@ -1986,6 +1986,17 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                                                    : "instancing: não");
             break;
         }
+        case InspRow::Kind::Streaming: {
+            // 0.11-W (3.75a): "streaming: sim/não" — o fill por camadas
+            // por TIC (default ON: a cura do freeze; o OFF devolve o
+            // caminho de sempre). O MESMO padrão do instancing.
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
+                      mrEdit && mrEdit->streaming ? "streaming: sim"
+                                                  : "streaming: não");
+            break;
+        }
         case InspRow::Kind::ScriptEdit: {
             // 0.9.2 §10: abre o EDITOR DE SCRIPT (portrait + IME — o main
             // faz o par inseparável ao ver o flag)
@@ -2560,6 +2571,13 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 // ON; o TicSnap transporta — o undo restaura)
                 if (mrEdit) {
                     mrEdit->instancing = !mrEdit->instancing;
+                    edited = true;
+                }
+            } else if (r.kind == InspRow::Kind::Streaming) {
+                // 0.11-W (3.75a): o toggle do fill por camadas (o default
+                // é ON; o TicSnap transporta — o undo restaura)
+                if (mrEdit) {
+                    mrEdit->streaming = !mrEdit->streaming;
                     edited = true;
                 }
             } else if (r.kind == InspRow::Kind::ColorHex) {
