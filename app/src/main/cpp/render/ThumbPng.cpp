@@ -4,6 +4,8 @@
 // REAL do zlib — a mesma libz do ZIP da 0.8.10) + IEND, com CRC32 IEEE por
 // tabela própria (o crc32() do zlib também serviria; a tabela própria
 // mantém o módulo afervel de forma independente).
+// 0.11-W (3.75b): encodePngRgba — o IRMÃO RGBA (color type 6) do impostor:
+// o alpha é o que o MASK do lit corta (o fundo transparente do billboard).
 #include "render/ThumbPng.h"
 
 #include <cstring>
@@ -185,6 +187,55 @@ std::vector<u8> encodePngRgb(const u8* rgb, u32 w, u32 h) {
         raw[(size_t)y * (1u + (size_t)w * 3u)] = 0;   // filter None
         std::memcpy(&raw[(size_t)y * (1u + (size_t)w * 3u) + 1u],
                     rgb + (size_t)y * w * 3u, (size_t)w * 3u);
+    }
+    uLongf compSize = compressBound(rawSize);
+    std::vector<u8> comp(compSize);
+    const int zrc = compress2(comp.data(), &compSize, raw.data(),
+                              static_cast<uLong>(rawSize), 6);
+    if (zrc != Z_OK) {
+        return std::vector<u8>();   // falha honesta → sem PNG
+    }
+    comp.resize(compSize);
+    pushChunkImpl(out, "IDAT", comp.data(), comp.size());
+
+    // ---- IEND ----
+    pushChunkImpl(out, "IEND", nullptr, 0);
+    return out;
+}
+
+// 0.11-W (3.75b) — o IRMÃO RGBA do encodePngRgb (color type 6, 4 bytes por
+// pixel; o MESMO deflate/CRC/chunks — o RGB de cima fica byte a byte).
+// O alpha é o canal do MASK: 0 = o fundo transparente do billboard (o
+// discard do lit), 255 = a geometria.
+std::vector<u8> encodePngRgba(const u8* rgba, u32 w, u32 h) {
+    std::vector<u8> out;
+    if (!rgba || w == 0 || h == 0) {
+        return out;
+    }
+    // assinatura (a mesma)
+    static const u8 kSig[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+    out.insert(out.end(), kSig, kSig + 8);
+
+    // ---- IHDR (color type 6 = RGBA) ----
+    u8 ihdr[13] = {};
+    ihdr[0] = (w >> 24) & 0xFF; ihdr[1] = (w >> 16) & 0xFF;
+    ihdr[2] = (w >> 8) & 0xFF;  ihdr[3] = w & 0xFF;
+    ihdr[4] = (h >> 24) & 0xFF; ihdr[5] = (h >> 16) & 0xFF;
+    ihdr[6] = (h >> 8) & 0xFF;  ihdr[7] = h & 0xFF;
+    ihdr[8]  = 8;    // bit depth
+    ihdr[9]  = 6;    // color type RGBA
+    ihdr[10] = 0;    // compression
+    ihdr[11] = 0;    // filter
+    ihdr[12] = 0;    // interlace
+    pushChunkImpl(out, "IHDR", ihdr, 13);
+
+    // ---- IDAT: scanlines com filtro 0 + deflate REAL ----
+    const size_t rawSize = (size_t)h * (1u + (size_t)w * 4u);
+    std::vector<u8> raw(rawSize);
+    for (u32 y = 0; y < h; ++y) {
+        raw[(size_t)y * (1u + (size_t)w * 4u)] = 0;   // filter None
+        std::memcpy(&raw[(size_t)y * (1u + (size_t)w * 4u) + 1u],
+                    rgba + (size_t)y * w * 4u, (size_t)w * 4u);
     }
     uLongf compSize = compressBound(rawSize);
     std::vector<u8> comp(compSize);

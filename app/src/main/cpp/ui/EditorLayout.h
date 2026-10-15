@@ -124,6 +124,8 @@ constexpr u64 kInspectorInstancing = 5312;   // 0.11-W (3.5b): toggle do
                                              // instancing (sim/não)
 constexpr u64 kInspectorStreaming  = 5313;   // 0.11-W (3.75a): toggle do
                                              // streaming (sim/não)
+constexpr u64 kInspectorImpostorDist = 5314; // 0.11-W (3.75b): slider do
+                                             // impostor (0 = off)
 // 0.7.7 — inspector da CÂMARA (sliders + botões; faixa 5400..5419)
 constexpr u64 kInspectorCamFov     = 5400;
 constexpr u64 kInspectorCamNear    = 5401;
@@ -308,6 +310,8 @@ struct InspRow {
         Streaming,   // 0.11-W (3.75a): "streaming: sim/não" (o toggle do
                      // fill por camadas — default ON; o OFF devolve o
                      // freeze de sempre)
+        ImpostorDistance, // 0.11-W (3.75b): "impostor: N u" (0 = off —
+                          // o PNG alfa por distância; slider 0..500)
         // 0.8.11 — ÁUDIO (secção do AudioPlayer)
         AuSection,   // cabeçalho "Audio" + separador
         ScriptEdit,  // 0.9.2: botão "Editar script" (abre o editor modal)
@@ -557,6 +561,11 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
                 // 0.11-W (3.75a): o fill por camadas por TIC (o default é
                 // ON — a cura do freeze; o OFF é o caminho de sempre)
                 push(InspRow::Kind::Streaming, btnH, kInspectorStreaming);
+                // 0.11-W (3.75b): a distância do impostor por TIC (o
+                // default é OFF — o slider nasce a 0; o PNG nasce sob
+                // demanda na 1.ª vez que o TIC fica longe)
+                push(InspRow::Kind::ImpostorDistance, sldH,
+                     kInspectorImpostorDist);
             }
         }
     }

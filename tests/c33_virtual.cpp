@@ -9787,6 +9787,315 @@ int main() {
                 }
             }
         }
+
+        // ====================================================================
+        // FASE 30 — 0.11-W (3.75b): IMPOSTORES no drawTics REAL
+        // O TIC além da distância dele desenha o PNG alfa da silhueta
+        // (1 dc) em vez dos blocos
+        //   30.1 o default OFF (impostorDistance 0): os blocos de sempre
+        //        (o byte a byte do pré-3.75b);
+        //   30.2 além da distância: o PNG nasce SOB DEMANDA no storage
+        //        REAL (impostors/<stem>.png), os 2 clones desenham 2
+        //        quads (2 dc) e ZERO draws de blocos — g_impFrame diz
+        //        «imp 2» (a fonte do chip/log do HUD);
+        //   30.3 dentro da distância: os blocos voltam (o limiar é
+        //        exclusivo no lado longe — o MESMO contrato do LOD);
+        //   30.4 o SKINADO NUNCA desenha impostor (a pose é dinâmica —
+        //        um PNG estático mente; o guard lê a flag do meta);
+        //   30.5 o FALLBACK honesto: o PNG removido + o cache limpo →
+        //        os blocos desenham (nunca um quad branco a mentir).
+        // ====================================================================
+        fase("FASE 30 — 0.11-W 3.75b: impostores no device (PNG alfa por "
+             "distância)");
+        {
+            std::string err30;
+            // a LIMPEZA (o MESMO padrão da FASE 29 — os TICs com fontes
+            // de fases anteriores ficam sem fonte)
+            {
+                auto& mrsC30 = g_scene.components().meshRenderers();
+                for (u32 i = 0; i < mrsC30.size(); ++i) {
+                    MeshRenderer& mrC30 = mrsC30.at(i);
+                    if (mrC30.mesh == nullptr && mrC30.blocks == nullptr) {
+                        continue;
+                    }
+                    mrC30.mesh = nullptr;
+                    mrC30.blocks = nullptr;
+                    mrC30.meshPath.clear();
+                    mrC30.primOn = false;
+                }
+            }
+            // o mesh de 2 blocos EM LINHA (o strip da casa)
+            MeshData m30;
+            for (int i = 0; i < 2; ++i) {
+                const u32 base30 = static_cast<u32>(m30.vertices.size());
+                for (int iz = 0; iz <= 4; ++iz) {
+                    for (int ix = 0; ix <= 4; ++ix) {
+                        Vertex v30;
+                        v30.pos = Vec3{f32(i) * 10.0f - 1.0f +
+                                           2.0f * f32(ix) / 4.0f,
+                                       0.0f,
+                                       -1.0f + 2.0f * f32(iz) / 4.0f};
+                        v30.normal = Vec3{0.0f, 1.0f, 0.0f};
+                        v30.uv = Vec2{f32(ix) / 4.0f, f32(iz) / 4.0f};
+                        m30.vertices.push_back(v30);
+                    }
+                }
+                MeshData::Group g30;
+                g30.material = i == 0 ? "verde" : "ambar";
+                g30.firstIndex = static_cast<u32>(m30.indices.size());
+                for (int iz = 0; iz < 4; ++iz) {
+                    for (int ix = 0; ix < 4; ++ix) {
+                        const u32 a30 =
+                            base30 + static_cast<u32>(iz * 5 + ix);
+                        const u32 b30 = a30 + 5;
+                        const u16 idx30[6] = {
+                            static_cast<u16>(a30), static_cast<u16>(b30),
+                            static_cast<u16>(a30 + 1),
+                            static_cast<u16>(b30),
+                            static_cast<u16>(b30 + 1),
+                            static_cast<u16>(a30 + 1)};
+                        m30.indices.insert(m30.indices.end(), idx30,
+                                           idx30 + 6);
+                    }
+                }
+                g30.indexCount = static_cast<u32>(m30.indices.size()) -
+                                 g30.firstIndex;
+                m30.groups.push_back(g30);
+            }
+            std::vector<u8> bytes30;
+            check(writeGMesh(m30, bytes30, err30),
+                  "30.0a o .gmesh de 2 blocos escrito");
+            check(g_storage->writeBytes("assets/imp2b.gmesh",
+                                        bytes30.data(), bytes30.size()),
+                  "30.0b no storage REAL do device");
+            check(g_storage->exists("assets/imp2b.gmesh"),
+                  "30.0c o asset existe (o guard do fantasma tem o que "
+                  "proteger)");
+            check(g_gpu.blockHull("assets/imp2b.gmesh") != nullptr,
+                  "30.0d o BlockMesh aberto no GpuAssets (o blockRebind "
+                  "só liga o ABERTO — o mesmo passo do 29.0c)");
+            const Handle h30a = g_scene.create("impA");
+            const Handle h30b = g_scene.create("impB");
+            if (Tic* t30a = g_scene.get(h30a)) {
+                if (Transform3D* tr30 = t30a->addComponent<Transform3D>()) {
+                    tr30->pos = Vec3{0.0f, 0.0f, -50.0f};
+                    tr30->updateWorld();
+                }
+                if (MeshRenderer* mr30 = t30a->addComponent<MeshRenderer>()) {
+                    mr30->meshPath = "assets/imp2b.gmesh";
+                    check(mr30->impostorDistance == 0.0f,
+                          "30.0e o default OFF (o byte a byte do "
+                          "pré-3.75b)");
+                }
+            }
+            if (Tic* t30b = g_scene.get(h30b)) {
+                if (Transform3D* tr30 = t30b->addComponent<Transform3D>()) {
+                    tr30->pos = Vec3{6.0f, 0.0f, -50.0f};
+                    tr30->updateWorld();
+                }
+                if (MeshRenderer* mr30 = t30b->addComponent<MeshRenderer>()) {
+                    mr30->meshPath = "assets/imp2b.gmesh";
+                }
+            }
+            blockRebind();
+            const Mat4 vp30 =
+                Mat4::ortho(-200.0f, 200.0f, -200.0f, 200.0f, 0.1f, 500.0f);
+            const Vec3 eye30{0.0f, 0.0f, 0.0f};
+            // ---- 30.1 o default OFF: os blocos de sempre ----------------
+            passo("30.1 o default OFF desenha os blocos (o byte a byte)");
+            {
+                glstub::reset();
+                g_renderer.beginFrame();
+                drawTics(vp30, eye30);
+                check(!g_impFrame.any && g_impFrame.drawn == 0,
+                      "30.1a NENHUM impostor com a distância 0 (o OFF)");
+                check(g_blockFrame.drawn == 4,
+                      "30.1b os blocos desenham como sempre (2 TICs × 2 "
+                      "blocos)");
+            }
+            // ---- 30.2 além da distância: o PNG sob demanda + 2 quads ----
+            passo("30.2 além da distância: 2 quads, ZERO dc de blocos");
+            {
+                auto setImpDist = [&](const char* name, f32 v) {
+                    if (Tic* t = g_scene.get(g_scene.find(name))) {
+                        if (MeshRenderer* mr =
+                                t->getComponent<MeshRenderer>()) {
+                            mr->impostorDistance = v;
+                        }
+                    }
+                };
+                setImpDist("impA", 20.0f);
+                setImpDist("impB", 20.0f);
+                glstub::reset();
+                g_renderer.beginFrame();
+                drawTics(vp30, eye30);
+                check(g_storage->exists("impostors/imp2b.png"),
+                      "30.2a O PIN: o PNG nasceu SOB DEMANDA no storage "
+                      "REAL (o pico de RAM foi UM bloco)");
+                check(g_impFrame.any && g_impFrame.drawn == 2,
+                      "30.2b O PIN: 2 TICs desenhados como impostor (o "
+                      "chip/log diz «imp 2»)");
+                check(g_blockFrame.drawn == 0,
+                      "30.2c O PIN: os blocos DESCANSARAM (o dc do TIC "
+                      "longe é 1, não 2)");
+                check(g_blockFrame.drawCalls == 0,
+                      "30.2d ZERO dc de blocos (os 2 dc do frame são os "
+                      "quads)");
+                // o PNG é RGBA com o fundo transparente (o MASK tem o
+                // que cortar)
+                std::vector<u8> png30;
+                check(g_storage->readBytes("impostors/imp2b.png", png30) &&
+                          !png30.empty(),
+                      "30.2e o PNG lê do storage REAL");
+                RawImage img30;
+                check(loadPng(png30.data(), png30.size(), img30, err30) &&
+                          img30.width == 256 && img30.height == 256,
+                      "30.2f o PNG é o tile 256×256 RGBA");
+                bool anyOpaque30 = false, anyClear30 = false;
+                for (size_t i = 0; i < img30.rgba.size(); i += 4) {
+                    if (img30.rgba[i + 3] == 0xFF) anyOpaque30 = true;
+                    if (img30.rgba[i + 3] == 0) anyClear30 = true;
+                }
+                check(anyOpaque30 && anyClear30,
+                      "30.2g o alpha tem silhueta E fundo (o MASK corta "
+                      "de verdade)");
+            }
+            // ---- 30.3 dentro da distância: os blocos voltam -------------
+            passo("30.3 dentro da distância: os blocos de sempre voltam");
+            {
+                auto setImpDist = [&](const char* name, f32 v) {
+                    if (Tic* t = g_scene.get(g_scene.find(name))) {
+                        if (MeshRenderer* mr =
+                                t->getComponent<MeshRenderer>()) {
+                            mr->impostorDistance = v;
+                        }
+                    }
+                };
+                setImpDist("impA", 60.0f);   // 50 < 60 — o limiar exclusive
+                setImpDist("impB", 60.0f);
+                glstub::reset();
+                g_renderer.beginFrame();
+                drawTics(vp30, eye30);
+                check(!g_impFrame.any && g_impFrame.drawn == 0,
+                      "30.3a NENHUM impostor a 50 u com o limiar 60 (o "
+                      "limiar é EXCLUSIVO no lado longe — o MESMO "
+                      "contrato do lodActive)");
+                check(g_blockFrame.drawn == 4,
+                      "30.3b os 4 blocos desenham de novo (o instancing "
+                      "funde em 2 dc)");
+            }
+            // ---- 30.4 o SKINADO NUNCA desenha impostor ------------------
+            passo("30.4 o skinado segue o caminho de sempre (a pose mente "
+                  "num PNG estático)");
+            {
+                // os 2 estáticos voltam a PEDIR impostor (o 30.3 deixou-os
+                // a 60 — dentro da distância)
+                for (const char* nm : {"impA", "impB"}) {
+                    if (Tic* t = g_scene.get(g_scene.find(nm))) {
+                        if (MeshRenderer* mr =
+                                t->getComponent<MeshRenderer>()) {
+                            mr->impostorDistance = 20.0f;
+                        }
+                    }
+                }
+                MeshData msk30;
+                {
+                    const Vec3 P30[4] = {Vec3{-0.5f, -0.5f, 0.0f},
+                                         Vec3{0.5f, -0.5f, 0.0f},
+                                         Vec3{0.5f, 0.5f, 0.0f},
+                                         Vec3{-0.5f, 0.5f, 0.0f}};
+                    for (int k = 0; k < 4; ++k) {
+                        Vertex v30;
+                        v30.pos = P30[k];
+                        v30.normal = Vec3{0.0f, 0.0f, 1.0f};
+                        msk30.vertices.push_back(v30);
+                        for (int c = 0; c < 4; ++c) {
+                            msk30.skinJoints.push_back(0);
+                            msk30.skinWeights.push_back(c == 0 ? 1.0f
+                                                               : 0.0f);
+                        }
+                    }
+                    const u16 IDX30[6] = {0, 1, 2, 0, 2, 3};
+                    msk30.indices.assign(IDX30, IDX30 + 6);
+                }
+                std::vector<u8> bytesSkin30;
+                check(writeGMesh(msk30, bytesSkin30, err30),
+                      "30.4a o .gmesh skinado escrito");
+                check(g_storage->writeBytes("assets/impskin30.gmesh",
+                                            bytesSkin30.data(),
+                                            bytesSkin30.size()),
+                      "30.4b no storage REAL");
+                check(g_gpu.blockHull("assets/impskin30.gmesh") != nullptr,
+                      "30.4b2 o BlockMesh skinado aberto (o blockRebind "
+                      "só liga o ABERTO)");
+                const Handle h30s = g_scene.create("impS");
+                if (Tic* t30s = g_scene.get(h30s)) {
+                    if (Transform3D* tr30 =
+                            t30s->addComponent<Transform3D>()) {
+                        tr30->pos = Vec3{-6.0f, 0.0f, -50.0f};
+                        tr30->updateWorld();
+                    }
+                    if (MeshRenderer* mr30 =
+                            t30s->addComponent<MeshRenderer>()) {
+                        mr30->meshPath = "assets/impskin30.gmesh";
+                        mr30->impostorDistance = 20.0f;   // PEDIRIA impostor
+                    }
+                }
+                blockRebind();
+                glstub::reset();
+                g_renderer.beginFrame();
+                drawTics(vp30, eye30);
+                check(g_impFrame.drawn == 2,
+                      "30.4c O PIN: só os 2 estáticos desenham impostor "
+                      "(o skinado NUNCA — o guard lê a flag do meta)");
+                // o skinado desenhou PELOS BLOCOS (o caminho de sempre —
+                // 1 drawElements individual)
+                check(g_blockFrame.drawn == 1,
+                      "30.4d o skinado desenhou pelo bloco (o fallback "
+                      "do guard)");
+            }
+            // ---- 30.5 o FALLBACK honesto e a REGENERAÇÃO ---------------
+            // (a) o PNG CORROMPIDO (a escrita parcial de sempre): o
+            //     impostorTexture recusa (o loadPng falha) → os blocos
+            //     desenham — NUNCA um quad branco a mentir a silhueta;
+            // (b) o PNG removido: a regeneração sob demanda recupera o
+            //     sistema sozinho (o pico de RAM continua sendo UM bloco).
+            passo("30.5 o PNG corrompido: os blocos; removido: a "
+                  "regeneração");
+            {
+                std::vector<u8> lixo30 = {'i', 's', 't', 'o', ' ', 'n', 'a',
+                                          'o', ' ', 'e', ' ', 'p', 'n', 'g'};
+                check(g_storage->writeBytes("impostors/imp2b.png",
+                                            lixo30.data(), lixo30.size()),
+                      "30.5a o PNG corrompido no storage REAL (a escrita "
+                      "parcial de sempre)");
+                g_gpu.releaseAll();   // o TERM honesto (TODOS os ids GL
+                                      // morrem — o reload do INIT reabre)
+                check(g_gpu.blockHull("assets/imp2b.gmesh") != nullptr,
+                      "30.5b o reload do INIT reabre o BlockMesh");
+                check(g_gpu.blockHull("assets/impskin30.gmesh") != nullptr,
+                      "30.5b2 o reload reabre o skinado também");
+                blockRebind();
+                glstub::reset();
+                g_renderer.beginFrame();
+                drawTics(vp30, eye30);
+                check(!g_impFrame.any && g_impFrame.drawn == 0,
+                      "30.5c O PIN: NENHUM quad com o PNG corrompido (a "
+                      "silhueta mentida não existe)");
+                check(g_blockFrame.drawn == 5,
+                      "30.5d os 5 TICs desenham pelos blocos (2+2 "
+                      "estáticos + 1 skinado — o fallback honesto)");
+                check(g_storage->remove("impostors/imp2b.png"),
+                      "30.5e o PNG corrupto removido do storage REAL");
+                glstub::reset();
+                g_renderer.beginFrame();
+                drawTics(vp30, eye30);
+                check(g_storage->exists("impostors/imp2b.png") &&
+                          g_impFrame.drawn == 2,
+                      "30.5f a REGENERAÇÃO sob demanda (o sistema "
+                      "recupera-se sozinho — o pico de RAM é UM bloco)");
+            }
+        }
         }   // fim do else do 26.3 (o caminho do playback)
         g_gpu.releaseAll();
     }

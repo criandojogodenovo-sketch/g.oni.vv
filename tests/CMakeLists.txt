@@ -87,6 +87,7 @@ add_executable(test_core
         test_fase35fix_p1.cpp   # 0.11-T-FIX (Perna 1): os 6 pins do contorno
         test_fase35b_instancing.cpp   # 0.11-W (3.5b): os 9 pins do instancing
         test_fase375a_streaming.cpp   # 0.11-W (3.75a): os pins do streaming
+        test_fase375b_impostors.cpp   # 0.11-W (3.75b): os pins do impostor
         # 0.7.1: cenas múltiplas + transições (projeto e2e, SceneFx puro,
         # overlay CENAS, ações Scene.Load/Transition)
         test_scenes.cpp
@@ -146,6 +147,7 @@ add_executable(test_core
         ${CORE_DIR}/assets/TexturePolicy.cpp   # 0.10-M (PASSO 5A): os 3 perfis (o c33 também)
         ${CORE_DIR}/assets/ThumbRender.cpp     # 0.10-M (PASSO 5C): o render software das thumbs
         ${CORE_DIR}/assets/ThumbIndex.cpp      # 0.10-M (PASSO 5C): o índice (o browser puro)
+        ${CORE_DIR}/assets/ImpostorIndex.cpp   # 0.11-W (3.75b): o índice do impostor (o pico é UM bloco)
         ${CORE_DIR}/assets/TextureCompressor.cpp
         ${CORE_DIR}/assets/Etc2Compressor.cpp
         ${CORE_DIR}/assets/AstcCompressor.cpp
@@ -368,6 +370,7 @@ add_executable(c33_virtual
         ${CORE_DIR}/assets/TexturePolicy.cpp   # 0.10-M (PASSO 5A): os 3 perfis
         ${CORE_DIR}/assets/ThumbRender.cpp     # 0.10-M (PASSO 5C): o render software das thumbs
         ${CORE_DIR}/assets/ThumbIndex.cpp      # 0.10-M (PASSO 5C): o índice (render sob demanda)
+        ${CORE_DIR}/assets/ImpostorIndex.cpp   # 0.11-W (3.75b): o índice do impostor (paridade)
         ${CORE_DIR}/assets/TextureCompressor.cpp
         ${CORE_DIR}/assets/Etc2Compressor.cpp
         ${CORE_DIR}/assets/AstcCompressor.cpp

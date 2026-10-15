@@ -60,6 +60,11 @@
 #include "core/AnimationSystem.h"          // 0.11-T (R-045)
 #include "render/BlockMesh.h"   // 0.10-M (PASSO 4 · R-040): orçamentos+frustum
 #include "render/Mesh.h"        // 0.11-T (R-045): o mesh skinado do cull
+#include "render/Impostor.h"       // 0.11-W (3.75b · R-049): a decisão/matriz
+#include "render/GpuAssets.h"      // 0.11-W (3.75b · R-049): a textura do impostor
+#include "assets/ImpostorIndex.h"  // 0.11-W (3.75b · R-049): o PNG sob demanda
+#include "assets/ResourceManager.h"  // 0.11-W (3.75b · R-049): o storage do GpuAssets
+#include "assets/ThumbRender.h"    // 0.11-W (3.75b · R-049): o render alfa
 #include "render/Renderer.h"
 #include "render/Primitives.h"
 #include "ui/EditorUi.h"
@@ -6822,4 +6827,262 @@ TEST(regress_streaming) {
     EXPECT(f4.loads == 0);
     EXPECT(f4.pending == 0);
     EXPECT(f4.drawn == 12);
+}
+
+// ===========================================================================
+// SENTINELA — regress_impostors (0.11-W · 3.75b · R-049)
+// O IMPOSTOR NÃO MENTE: a decisão é a distância (0 = OFF, o limiar é
+// exclusivo no lado longe), o PNG alfa é REAL (o fundo transparente é o
+// que o MASK corta — o pixel prova), a geração é sob demanda com o pico
+// de UM bloco (o fantasma nunca nasce), o fallback é os BLOCOS (sem PNG
+// ou skinado NUNCA há quad) e o .goni transporta "impostorDist" (ausente
+// = OFF; o MESMO contrato do lodDist).
+// ===========================================================================
+namespace r049 {
+
+void r049Strip(MeshData& m, f32 cx, const std::string& mat) {
+    const u32 base = static_cast<u32>(m.vertices.size());
+    for (int iz = 0; iz <= 4; ++iz) {
+        for (int ix = 0; ix <= 4; ++ix) {
+            Vertex v;
+            v.pos = Vec3{cx - 1.0f + 2.0f * f32(ix) / 4.0f, 0.0f,
+                         -1.0f + 2.0f * f32(iz) / 4.0f};
+            v.normal = Vec3{0.0f, 1.0f, 0.0f};
+            v.uv = Vec2{f32(ix) / 4.0f, f32(iz) / 4.0f};
+            m.vertices.push_back(v);
+        }
+    }
+    MeshData::Group g;
+    g.material = mat;
+    g.firstIndex = static_cast<u32>(m.indices.size());
+    for (int iz = 0; iz < 4; ++iz) {
+        for (int ix = 0; ix < 4; ++ix) {
+            const u32 a = base + static_cast<u32>(iz * 5 + ix);
+            const u32 b = a + 5;
+            m.indices.push_back(static_cast<u16>(a));
+            m.indices.push_back(static_cast<u16>(b));
+            m.indices.push_back(static_cast<u16>(a + 1));
+            m.indices.push_back(static_cast<u16>(b));
+            m.indices.push_back(static_cast<u16>(b + 1));
+            m.indices.push_back(static_cast<u16>(a + 1));
+            g.indexCount += 6;
+        }
+    }
+    m.groups.push_back(g);
+}
+
+struct R049Storage final : vv::ProjectStorage {
+    std::map<std::string, std::string> files;
+    mutable u64 maxRead = 0;   // o maior single read (o pico do .gmesh)
+    std::string root() const override { return "/r049"; }
+    bool makeDirs(const std::string&) override { return true; }
+    bool exists(const std::string& relPath) const override {
+        return files.count(relPath) != 0;
+    }
+    vv::Presence probe(const std::string& relPath) const override {
+        return files.count(relPath) != 0 ? vv::Presence::Present
+                                         : vv::Presence::Absent;
+    }
+    bool writeText(const std::string& relPath,
+                   const std::string& text) override {
+        files[relPath] = text;
+        return true;
+    }
+    bool readText(const std::string& relPath, std::string& out) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        out = it->second;
+        return true;
+    }
+    bool writeBytes(const std::string& relPath, const void* data,
+                    size_t n) override {
+        files[relPath].assign(static_cast<const char*>(data), n);
+        return true;
+    }
+    bool readBytes(const std::string& relPath,
+                   std::vector<vv::u8>& out) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        if (relPath.find(".gmesh") != std::string::npos) {
+            maxRead = std::max(maxRead, it->second.size());
+        }
+        out.assign(it->second.begin(), it->second.end());
+        return !out.empty();
+    }
+    bool listDir(const std::string&,
+                 std::vector<std::string>&) const override {
+        return false;
+    }
+    bool statBytes(const std::string& relPath,
+                   vv::u64& outBytes) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        outBytes = it->second.size();
+        return true;
+    }
+    bool readBytesAt(const std::string& relPath, vv::u64 offset, size_t len,
+                     std::vector<vv::u8>& out) const override {
+        const auto it = files.find(relPath);
+        if (it == files.end()) return false;
+        if (offset + len > it->second.size()) return false;
+        if (relPath.find(".gmesh") != std::string::npos) {
+            maxRead = std::max(maxRead, static_cast<u64>(len));
+        }
+        out.assign(it->second.begin() + static_cast<long>(offset),
+                   it->second.begin() + static_cast<long>(offset + len));
+        return out.size() == len;
+    }
+};
+
+// o walk do drawTics (a MESMA mecânica do runImpostor dos pins — o
+// orquestrador REAL é aferrado pela FASE 30 do c33)
+struct R049Run {
+    u32 quads = 0;
+    u32 blockDc = 0;
+    u32 quadVerts = 0;
+};
+R049Run r049Frame(BlockMesh& bm, Renderer& r, Mesh& quad, const Mat4& vp,
+                  const Vec3& camEye, const std::vector<Mat4>& models,
+                  f32 impostorDistance, const Texture* impTex) {
+    R049Run out;
+    for (const Mat4& m : models) {
+        if (impTex != nullptr && !bm.skinned() &&
+            impostor::active(m, bm.boundsMin(), bm.boundsMax(), camEye,
+                             impostorDistance)) {
+            Mat4 bill;
+            if (impostor::billboard(m, bm.boundsMin(), bm.boundsMax(), camEye,
+                                    bill)) {
+                DrawProps impProps;
+                impProps.alphaMode = 1;
+                impProps.alphaCutoff = 0.5f;
+                impProps.baseColor[0] = impostor::kImpBaseColor;
+                impProps.baseColor[1] = impostor::kImpBaseColor;
+                impProps.baseColor[2] = impostor::kImpBaseColor;
+                const DrawStats ds =
+                    r.drawMesh(quad, bill, vp, impTex, nullptr, nullptr, 0,
+                               &impProps);
+                out.quadVerts += ds.vertices;
+                ++out.quads;
+                continue;
+            }
+        }
+        BlockMesh::Stats ss;
+        const DrawStats ds = bm.draw(r, m, vp, nullptr, nullptr, nullptr, 0,
+                                     ss, &camEye, 0.0f);
+        out.blockDc += ds.drawCalls;
+    }
+    return out;
+}
+
+} // namespace r049
+
+TEST(regress_impostors) {
+    glstub::reset();
+    using namespace r049;
+
+    std::string err;
+    MeshData m2;
+    r049Strip(m2, 0.0f, "verde");
+    r049Strip(m2, 10.0f, "ambar");
+    std::vector<u8> gmesh;
+    EXPECT(writeGMesh(m2, gmesh, err));
+    R049Storage st;
+    st.files["assets/r049.gmesh"].assign(
+        reinterpret_cast<const char*>(gmesh.data()), gmesh.size());
+    BlockMesh bm;
+    EXPECT(bm.open(st, "assets/r049.gmesh", err));
+    EXPECT(bm.table().size() == 2);
+
+    Renderer r;
+    EXPECT(r.init());
+    Mesh quad;
+    {
+        MeshData md;
+        impostor::quadMesh(md);
+        EXPECT(quad.create(md.vertices.data(),
+                           static_cast<u32>(md.vertices.size()),
+                           md.indices.data(),
+                           static_cast<u32>(md.indices.size())));
+    }
+    const Mat4 vp = Mat4::ortho(-200.0f, 200.0f, -200.0f, 200.0f, 0.1f,
+                                500.0f);
+    const Vec3 camEye{0.0f, 0.0f, 0.0f};
+    std::vector<Mat4> models{Mat4::translation(0.0f, 0.0f, -50.0f)};
+
+    // (1) A GERAÇÃO: sob demanda, o PNG RGBA nasce (o fundo transparente
+    //     é o que o MASK corta), o fantasma NUNCA nasce e o pico de RAM
+    //     é UM bloco (o maior single read < o ficheiro)
+    EXPECT(ImpostorIndex::ensureImpostor(st, "assets/r049.gmesh", false,
+                                         err));
+    EXPECT(st.exists("impostors/r049.png"));
+    EXPECT(!ImpostorIndex::ensureImpostor(st, "assets/fantasma.gmesh", false,
+                                          err));
+    EXPECT(!st.exists("impostors/fantasma.png"));
+    EXPECT(st.maxRead < gmesh.size());
+    {
+        const std::string& png = st.files["impostors/r049.png"];
+        RawImage img;
+        EXPECT(loadPng(reinterpret_cast<const u8*>(png.data()), png.size(),
+                       img, err));
+        EXPECT(img.width == 256 && img.height == 256);
+        bool anyOpaque = false, anyClear = false;
+        for (size_t i = 0; i < img.rgba.size(); i += 4) {
+            if (img.rgba[i + 3] == 0xFF) anyOpaque = true;
+            if (img.rgba[i + 3] == 0) anyClear = true;
+        }
+        EXPECT(anyOpaque && anyClear);   // o MASK tem o que cortar
+    }
+    // (2) A DECISÃO: 0 = OFF (os blocos de sempre); além da distância →
+    //     1 quad de 6 verts e ZERO dc de blocos
+    {
+        glstub::fb::enabled = true;   // os ids únicos (a textura do PNG)
+        ResourceManager rm;
+        rm.setStorage(&st);
+        GpuAssets gpu;
+        gpu.init(&rm);
+        const Texture* imp = gpu.impostorTexture("assets/r049.gmesh");
+        EXPECT(imp != nullptr);
+        const R049Run off = r049Frame(bm, r, quad, vp, camEye, models, 0.0f,
+                                      imp);
+        EXPECT(off.quads == 0);
+        EXPECT(off.blockDc == 2);   // os 2 blocos do TIC (o caminho de sempre)
+        const R049Run on = r049Frame(bm, r, quad, vp, camEye, models, 30.0f,
+                                     imp);
+        EXPECT(on.quads == 1);
+        EXPECT(on.quadVerts == 6);   // o quad de 4 verts / 6 índices
+        EXPECT(on.blockDc == 0);     // os blocos DESCANSARAM
+        // (3) O FALLBACK: sem textura (o PNG impossível) NUNCA há quad
+        const R049Run fb = r049Frame(bm, r, quad, vp, camEye, models, 30.0f,
+                                     nullptr);
+        EXPECT(fb.quads == 0);
+        EXPECT(fb.blockDc == 2);
+        gpu.releaseAll();
+        glstub::fb::enabled = false;
+    }
+    // (4) O .goni: ausente = OFF; com 120 a chave nasce e o load restaura
+    {
+        Scene scene;
+        Handle h = scene.create("A");
+        Tic* t = scene.get(h);
+        ASSERT(t != nullptr);
+        Transform3D* tr = t->addComponent<Transform3D>();
+        tr->pos = Vec3{1.0f, 2.0f, 3.0f};
+        tr->updateWorld();
+        MeshRenderer* mr = t->addComponent<MeshRenderer>();
+        ASSERT(mr != nullptr);
+        const std::string plain = SceneSerializer::dump(scene);
+        EXPECT(plain.find("impostorDist") == std::string::npos);
+        mr->impostorDistance = 120.0f;
+        const std::string on = SceneSerializer::dump(scene);
+        EXPECT(on.find("\"impostorDist\":") != std::string::npos);
+        SceneSerializer::LoadCtx ctx;
+        Scene s1;
+        EXPECT(SceneSerializer::loadText(s1, on, ctx));
+        EXPECT(s1.components().meshRenderers().at(0).impostorDistance ==
+               120.0f);
+        Scene s2;
+        EXPECT(SceneSerializer::loadText(s2, plain, ctx));
+        EXPECT(s2.components().meshRenderers().at(0).impostorDistance ==
+               0.0f);
+    }
 }

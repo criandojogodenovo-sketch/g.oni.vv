@@ -85,6 +85,16 @@ public:
     // os .goni da 0.11-T ficam byte a byte).
     bool streaming = true;
 
+    // 0.11-W (3.75b) — IMPOSTORES: a distância (em unidades) a partir da
+    // qual ESTE TIC desenha o PNG alfa da silhueta (o billboard em
+    // impostors/<stem>.png, gerado sob demanda com o pico de RAM de UM
+    // bloco) em vez dos blocos — 1 dc em vez de ~863. 0 = OFF (o default
+    // — o comportamento byte a byte do pré-3.75b; o dono liga por TIC).
+    // Skinado NUNCA (a pose é dinâmica — um PNG estático mente; o MESMO
+    // guard do instancing). Serializado no .goni como "impostorDist" SÓ
+    // quando != 0 (o MESMO contrato do "lodDist").
+    f32 impostorDistance = 0.0f;
+
     // F5-C/E: refs relativas do asset — vazias = procedural ("cube"/sem tex).
     // Vivem no componente para o serializer e para a UI mostrarem a origem.
     std::string meshPath;

@@ -2,11 +2,14 @@
 // 0.10-M (PASSO 4): + o caminho dos BLOCOS (BlockMesh por ref + hull).
 #include "render/GpuAssets.h"
 #include "assets/GOwnFormats.h"
+#include "assets/ImpostorIndex.h"
+#include "assets/PngLoader.h"
 #include "assets/TextureCompressor.h"
 #include "assets/TexturePipeline.h"
 #include "platform/Log.h"
 #include "platform/EngineLog.h"   // 0.10-M (PASSO 3B): elog — o dono lê o FICHEIRO
 #include "render/BlockMesh.h"
+#include "render/Impostor.h"
 #include "render/Mesh.h"
 #include "render/Texture.h"
 #include <cctype>
@@ -454,6 +457,8 @@ Mesh* GpuAssets::blockHull(const std::string& ref) {
 void GpuAssets::releaseAll() {
     gpuMeshes_.clear();
     gpuTextures_.clear();
+    impostorTextures_.clear();   // 0.11-W (3.75b): os impostores morrem com
+                                 // o contexto (a regeneração custa UM bloco)
     blockMeshes_.clear();   // TERM_WINDOW: o re-open é 192 B + tabela
     samplerApplied_.clear();   // 0.11-M: os sampliers morrem com as texturas
 }
@@ -490,6 +495,58 @@ const Texture* GpuAssets::textureWithSampler(const std::string& relPath,
                    "dobrar no device)", relPath.c_str());
     }
     return t;
+}
+
+// 0.11-W (3.75b) — o TEXTURE do impostor: o PNG RGBA de impostors/<stem>.png
+// (o ImpostorIndex gera sob demanda — o pico de RAM é UM bloco, o contrato
+// R-041) → loadPng (RGBA uniforme) → createFromRGBA + sampler CLAMP/LINEAR
+// (o billboard nunca repete). nullptr em falha — o chamador segue os blocos.
+const Texture* GpuAssets::impostorTexture(const std::string& assetRef) {
+    if (!rm_ || !rm_->storage()) {
+        return nullptr;
+    }
+    const auto it = impostorTextures_.find(assetRef);
+    if (it != impostorTextures_.end()) {
+        return it->second.get();   // o MESMO objeto GL — sem duplicar
+    }
+    ProjectStorage* st = rm_->storage();
+    std::string err;
+    if (!ImpostorIndex::ensureImpostor(*st, assetRef, /*force=*/false,
+                                       err)) {
+        elog::warn("impostor: '%s' sem PNG (%s) — o TIC segue o caminho "
+                   "dos blocos",
+                   assetRef.c_str(), err.c_str());
+        return nullptr;
+    }
+    // o PNG é pequeno e de tamanho limitado (256×256 RGBA ≤ ~60 KB) — o
+    // readBytes é o caminho certo (a regra R-041: readBytes fica para os
+    // ficheiros de tamanho constante/pequeno conhecido)
+    std::vector<u8> bytes;
+    if (!st->readBytes(ImpostorIndex::relFor(assetRef), bytes) ||
+        bytes.empty()) {
+        return nullptr;
+    }
+    RawImage img;
+    std::string perr;
+    if (!loadPng(bytes.data(), bytes.size(), img, perr) || !img.ok()) {
+        elog::warn("impostor: '%s' PNG inválido (%s) — o TIC segue os "
+                   "blocos",
+                   assetRef.c_str(), perr.c_str());
+        return nullptr;
+    }
+    auto t = std::make_unique<Texture>();
+    if (!t->createFromRGBA(img.rgba.data(), img.width, img.height)) {
+        return nullptr;
+    }
+    // o sampler do impostor (CLAMP nos dois eixos + LINEAR sem mipmap de
+    // terceiros — o createFromRGBA gera os mips de sempre; o wrap é o que
+    // importa: o quad usa uv 0..1 EXATOS)
+    t->setSampler(/*wrapS*/ 1, /*wrapT*/ 1, /*minF*/ 0, /*magF*/ 0);
+    Texture* raw = t.get();
+    impostorTextures_.emplace(assetRef, std::move(t));
+    elog::info("impostor: textura '%s' pronta (%ux%u RGBA, CLAMP/LINEAR)",
+               assetRef.c_str(), img.width, img.height);
+    return raw;
 }
 
 } // namespace vv

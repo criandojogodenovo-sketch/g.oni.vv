@@ -442,6 +442,28 @@ inline void sampleRGB(const TexObj* t, float u, float v, float* out) {
     }
 }
 
+// 0.11-W (3.75b): o canal ALPHA bilinear (o MASK do impostor corta por
+// aqui). RGBA = o canal 3; R8 = opaco (o atlas não tem alfa — o discard
+// nunca dispara, o MESMO comportamento do shader real, texel.a = 1);
+// FLAT/comprimida = opaca.
+inline float sampleAlpha(const TexObj* t, float u, float v) {
+    if (!t || t->channels != 4 || t->w < 1 || t->h < 1 || t->px.empty()) {
+        return 1.0f;
+    }
+    auto at = [&](int x, int y) -> float {
+        if (x < 0) x = 0; if (x >= t->w) x = t->w - 1;
+        if (y < 0) y = 0; if (y >= t->h) y = t->h - 1;
+        return float(t->px[(size_t(y) * t->w + size_t(x)) * 4 + 3]) / 255.0f;
+    };
+    const float fx = u * t->w - 0.5f, fy = v * t->h - 0.5f;
+    const int x0 = int(fx), y0 = int(fy);
+    const float tx = fx - float(x0), ty = fy - float(y0);
+    const float a = at(x0, y0), b = at(x0 + 1, y0);
+    const float c = at(x0, y0 + 1), d = at(x0 + 1, y0 + 1);
+    return (a * (1.0f - tx) + b * tx) * (1.0f - ty) +
+           (c * (1.0f - tx) + d * tx) * ty;
+}
+
 // fetch genérico por atributo (floats do buffer do VAO)
 struct VertFetch {
     const VaoObj* vao = nullptr;
@@ -476,6 +498,11 @@ struct ProgramKind {
     int skin = 0;                   // lit (uSkin)
     const float* bones = nullptr;   // lit (uBones)
     int instOn = 0;                 // lit (uInstOn — 0.11-W: 3.5b)
+    // 0.11-W (3.75b): as props do MASK (o impostor desenha com alphaMode
+    // 1 — o alpha do PNG corta o quad; o MESMO discard do shader real da
+    // 0.11-M FASE 2, linha uAlphaMode == 1 && alpha < uAlphaCutoff)
+    int alphaMode = 0;              // lit (uAlphaMode; 1 = MASK)
+    float alphaCutoff = 0.5f;       // lit (uAlphaCutoff)
     // grid (render/Grid.cpp — a grelha adaptativa 0.8.9)
     const float* gridVp = nullptr;  // uVP
     float center[3] = {};           // uCenter (xz da câmara)
@@ -567,6 +594,17 @@ inline ProgramKind resolveProgram() {
         if (locInst >= 0 && locInst < int(p->slots.size()) &&
             p->slots[size_t(locInst)].kind == 'I') {
             pk.instOn = p->slots[size_t(locInst)].i;
+        }
+        // 0.11-W (3.75b): as props do MASK (o discard do impostor)
+        const int locAMode = slotByName("uAlphaMode");
+        if (locAMode >= 0 && locAMode < int(p->slots.size()) &&
+            p->slots[size_t(locAMode)].kind == 'I') {
+            pk.alphaMode = p->slots[size_t(locAMode)].i;
+        }
+        const int locACut = slotByName("uAlphaCutoff");
+        if (locACut >= 0 && locACut < int(p->slots.size()) &&
+            p->slots[size_t(locACut)].kind == 'F') {
+            pk.alphaCutoff = p->slots[size_t(locACut)].f;
         }
         if (p->bonesSet) pk.bones = p->bones.data();
         return pk;
@@ -696,6 +734,14 @@ inline void rasterTriangle(const RVertex& a, const RVertex& b, const RVertex& c,
                 outG = (0.16f + alb[1] * diff) * tint[1];
                 outB = (0.16f + alb[2] * diff) * tint[2];
                 outA = 1.0f;
+                // 0.11-W (3.75b): o MASK do shader real (Material.cpp —
+                // «if (uAlphaMode == 1 && alpha < uAlphaCutoff) discard;»).
+                // O fragmento descartado NÃO EXISTE: sem cor, sem depth
+                // write (o continue aqui embaixo é o discard inteiro).
+                if (pk.alphaMode == 1) {
+                    const float a = sampleAlpha(tex, u, v);
+                    if (a < pk.alphaCutoff) continue;
+                }
             }
 
             uint8_t* dst = &color_[pi * 4];

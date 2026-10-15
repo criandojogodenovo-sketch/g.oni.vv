@@ -74,6 +74,7 @@
 #include "render/Cube.h"
 #include "render/Grid.h"
 #include "render/GpuAssets.h"
+#include "render/Impostor.h"   // 0.11-W (3.75b): a decisão/matriz/quad do impostor
 #include "render/Mesh.h"
 #include "render/Primitives.h"   // 0.8.0 (F7): primitivas procedurais
 #include "render/Renderer.h"
@@ -858,6 +859,32 @@ BlockFrameStats g_blockFramePrev;   // o log throttled compara contra este
 // mesmo TIC culled nos dois lados. O TIPO vive no DrawStats.h (a fonte
 // única — o harness do c33 lê o MESMO struct).
 SkinFrameStats g_skinFrame;
+
+// 0.11-W (3.75b) — as métricas do IMPOSTOR do frame (o MESMO padrão do
+// SkinFrameStats: o HUD/log espelham ISTO). O contador é o nº de TICs que
+// este frame desenhou como PNG alfa (o billboard) — os blocos deles
+// DESCANSARAM (o bl da status line conta só o caminho dos blocos).
+struct ImpostorFrameStats {
+    u32 drawn = 0;   // billboards desenhados neste frame
+    bool any = false;
+};
+ImpostorFrameStats g_impFrame;
+
+// 0.11-W (3.75b) — o QUAD unitário do impostor (4 verts, uv v=0 no topo).
+// O upload é UMA vez por contexto GL (o lazy no 1.º draw) e o TERM_WINDOW
+// destrói-o com o resto (o MESMO contrato do g_cubeMesh — nenhum id GL
+// sobrevive ao term).
+static Mesh g_impQuad;
+static void impostorQuadEnsure() {
+    if (!g_impQuad.ok()) {
+        MeshData md;
+        impostor::quadMesh(md);
+        g_impQuad.create(md.vertices.data(),
+                         static_cast<u32>(md.vertices.size()),
+                         md.indices.data(),
+                         static_cast<u32>(md.indices.size()));
+    }
+}
 
 // os 6 planos do VP do frame (a MESMA fonte do render por blocos) —
 // escritos no frame() depois do vp e consumidos PELO AnimationSystem no
@@ -5035,6 +5062,7 @@ void onAppCmd(android_app* app, i32 cmd) {
                 g_gpu.releaseAll();          // unique_ptr → ~Mesh/~Texture → glDelete*
                 g_font.destroy();            // atlas: glDeleteTextures + reset das métricas
                 g_cubeMesh.destroy();
+                g_impQuad.destroy();         // 0.11-W (3.75b): o quad do impostor
                 primMeshesDestroyAll();      // 0.8.10: prims SEM cache (posse)
                 g_grid.destroy();
                 g_renderer.shutdown();      // programa UI + VAO/VBO + whiteTex + lit
@@ -5084,10 +5112,15 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye) {
     DrawStats st{};
     g_blockFrame = BlockFrameStats{};   // as métricas DO frame (HUD/log)
     g_skinFrame = SkinFrameStats{};
+    g_impFrame = ImpostorFrameStats{};
     const ComponentStore& comps = g_scene.components();
     const auto& mrs = comps.meshRenderers();
     f32 skinPlanes[6][4];
     bool skinPlanesReady = false;   // os planos só se extraem com skinados
+    // 0.11-W (3.75b): os planos do IMPOSTOR (o MESMO padrão do skin cull —
+    // extraem-se UMA vez por frame, e só quando um impostor pergunta)
+    f32 impPlanes[6][4];
+    bool impPlanesReady = false;
     auto skinCulledNow = [&](Handle h, const MeshRenderer& mr) -> bool {
         if (!(mr.blocks != nullptr ? mr.blocks->skinned()
                                    : (mr.mesh != nullptr &&
@@ -5190,6 +5223,57 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye) {
                 g_skinFrame.any = true;
                 nBones = computeSkinMatrices(*sk, bones,
                                              SkeletonComp::kMaxBones);
+            }
+            // ---- 0.11-W (3.75b): o CAMINHO DO IMPOSTOR --------------------
+            // O TIC além da distância dele desenha o PNG alfa da silhueta
+            // (1 dc) em vez dos blocos. O guard é honesto: skinado NUNCA
+            // (a pose é dinâmica — um PNG estático mente); o PNG que não
+            // gera NUNCA vira quad (o fallback é o caminho dos blocos de
+            // sempre); fora do frustum NADA desenha (o MESMO cull
+            // conservativo dos blocos).
+            if (mr.impostorDistance > 0.0f && !mr.blocks->skinned()) {
+                const Vec3 impMn = mr.blocks->boundsMin();
+                const Vec3 impMx = mr.blocks->boundsMax();
+                if (impostor::active(model, impMn, impMx, camEye,
+                                     mr.impostorDistance)) {
+                    const Texture* impTex =
+                        mr.meshPath.empty()
+                            ? nullptr
+                            : g_gpu.impostorTexture(mr.meshPath);
+                    if (impTex) {
+                        if (!impPlanesReady) {
+                            BlockMesh::frustumPlanes(vp, impPlanes);
+                            impPlanesReady = true;
+                        }
+                        if (!BlockMesh::worldAabbVisible(model, impMn,
+                                                         impMx,
+                                                         impPlanes)) {
+                            continue;   // o AABB inteiro fora — o caminho
+                                        // dos blocos também não desenharia
+                        }
+                        Mat4 bill;
+                        if (impostor::billboard(model, impMn, impMx,
+                                                camEye, bill)) {
+                            impostorQuadEnsure();
+                            DrawProps impProps;   // os defaults + o MASK
+                            impProps.alphaMode = 1;   // o alpha do PNG corta
+                            impProps.alphaCutoff = 0.5f;
+                            impProps.baseColor[0] = impostor::kImpBaseColor;
+                            impProps.baseColor[1] = impostor::kImpBaseColor;
+                            impProps.baseColor[2] = impostor::kImpBaseColor;
+                            const DrawStats ds = g_renderer.drawMesh(
+                                g_impQuad, bill, vp, impTex, mr.tint,
+                                nullptr, 0, &impProps);
+                            g_impFrame.any = true;
+                            ++g_impFrame.drawn;
+                            st = st + ds;
+                            continue;
+                        }
+                    }
+                    // sem PNG (ou billboard degenerado): cai para o caminho
+                    // de sempre — os blocos (o fallback honesto, nunca um
+                    // quad branco a mentir a silhueta)
+                }
             }
             // ---- 0.11-W (3.5b): a COLHEITA do instancing ----------------
             // Skinado NUNCA funde (a pose é por TIC — §3.5b.2, o pin do
@@ -5510,7 +5594,7 @@ void statusLine(const DrawStats& st3d, const DrawStats& stGrid) {
                       g_texCache ? g_texCache->hits() : 0u,
                       g_texCache ? g_texCache->misses() : 0u);
     }
-    // 0.11-T (FASE 3.5a): o chip do SKINNED CULL — «skinned: culled/N»
+    // 0.11-T (FASE 3.5a): o chip do SKINNED CULL — «skinned: culled %u/%u»
     // (os skinados que o frame NÃO desenhou por estarem fora do frustum,
     // sobre os skinados em cena — o padrão do chip bl desenhados/totais;
     // SÓ nasce com skinados em cena: sem eles a linha fica byte a byte).
@@ -5519,6 +5603,14 @@ void statusLine(const DrawStats& st3d, const DrawStats& stGrid) {
         std::snprintf(status + len, sizeof(status) - len,
                       "  skinned: culled %u/%u", g_skinFrame.culled,
                       g_skinFrame.skinados);
+    }
+    // 0.11-W (3.75b): o chip do IMPOSTOR — «imp %u» (os TICs que este
+    // frame desenhou como PNG alfa; SÓ nasce com impostores ativos: sem
+    // eles a linha fica byte a byte — o MESMO padrão do chip skinned)
+    if (g_impFrame.any) {
+        const size_t len = std::strlen(status);
+        std::snprintf(status + len, sizeof(status) - len, "  imp %u",
+                      g_impFrame.drawn);
     }
     g_ui.statusLine(status);
     std::snprintf(g_statusLine, sizeof(g_statusLine), "%s", status);
@@ -6153,6 +6245,23 @@ void frame() {
                        g_skinFrame.culled, g_skinFrame.skinados,
                        static_cast<double>(BlockMesh::kSkinCullAabbSwell *
                                            100.0f));
+        }
+    }
+    // 0.11-W (3.75b) — o LOG do impostor (o MESMO padrão throttled: 1×/s
+    // e SÓ quando o número MUDA — o HUD diz «imp N» na mesma linha)
+    if (g_impFrame.any) {
+        static u32 s_lastImp = 0xFFFFFFFFu;
+        static double s_lastLog = -10.0;
+        static double s_clock = 0.0;
+        s_clock += g_frameDt;
+        if (g_impFrame.drawn != s_lastImp &&
+            s_clock - s_lastLog >=
+                static_cast<double>(g_blockLogIntervalSecs)) {
+            s_lastLog = s_clock;
+            s_lastImp = g_impFrame.drawn;
+            elog::info("impostores: %u (além da distância — o PNG alfa "
+                       "desenha, os blocos descansam)",
+                       g_impFrame.drawn);
         }
     }
     const DrawStats stGrid = g_grid.draw(vp, camEye, camFocus);

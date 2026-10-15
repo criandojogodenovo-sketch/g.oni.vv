@@ -49,6 +49,11 @@ u32 targetWidth(u32 cropW);
 // Devolve vazio = falha (zlib erro).
 std::vector<u8> encodePngRgb(const u8* rgb, u32 w, u32 h);
 
+// 0.11-W (3.75b): o IRMÃO RGBA (color type 6) — o alpha é o canal do MASK
+// do impostor (0 = o fundo transparente que o lit descarta). O MESMO
+// deflate/CRC; o encodePngRgb de cima fica byte a byte.
+std::vector<u8> encodePngRgba(const u8* rgba, u32 w, u32 h);
+
 // CRC32 (IEEE) — exposto para os testes aferirem contra valores conhecidos
 u32 crc32(const u8* data, size_t n, u32 seed = 0);
 

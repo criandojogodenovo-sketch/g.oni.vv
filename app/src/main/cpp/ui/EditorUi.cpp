@@ -1997,6 +1997,24 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                                                   : "streaming: não");
             break;
         }
+        case InspRow::Kind::ImpostorDistance: {
+            // 0.11-W (3.75b): "impostor: N u" — a distância a partir da
+            // qual ESTE TIC desenha o PNG alfa da silhueta em vez dos
+            // blocos (1 dc). 0 = OFF e o label DIZ "off" (nunca um 0
+            // silencioso); o MESMO padrão do slider do LOD. O .gmesh sem
+            // PNG gerável ignora o valor (o TIC segue os blocos).
+            if (mrEdit) {
+                f32 imp = mrEdit->impostorDistance;
+                ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "impostor",
+                              0.0f, 500.0f, imp,
+                              imp > 0.0f ? "%.0f u" : "off")) {
+                    mrEdit->impostorDistance = imp;
+                    edited = true;
+                }
+            }
+            break;
+        }
         case InspRow::Kind::ScriptEdit: {
             // 0.9.2 §10: abre o EDITOR DE SCRIPT (portrait + IME — o main
             // faz o par inseparável ao ver o flag)

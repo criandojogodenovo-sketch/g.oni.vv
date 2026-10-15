@@ -92,6 +92,14 @@ public:
     const Texture* textureWithSampler(const std::string& relPath,
                                       const u8 sampler[4]);
 
+    // 0.11-W (3.75b) — o TEXTURE do IMPOSTOR: o PNG RGBA de
+    // impostors/<stem>.png (gerado sob demanda pelo ImpostorIndex — o
+    // pico de RAM é UM bloco) → Texture com sampler CLAMP/LINEAR (o
+    // billboard NUNCA repete — o wrap REPEAT de sempre mancha a borda).
+    // nullptr = sem impostor (o PNG não gerou) — o chamador segue o
+    // caminho dos blocos (o fallback honesto; NUNCA um quad branco).
+    const Texture* impostorTexture(const std::string& assetRef);
+
     void releaseAll();   // TERM_WINDOW: apaga TUDO (blocks incluídos — o
                          // re-open custa 192 B + tabela, nada de dados)
 
@@ -105,6 +113,9 @@ private:
     TexturePipeline* pipeline_ = nullptr;
     std::unordered_map<std::string, std::unique_ptr<Mesh>> gpuMeshes_;
     std::unordered_map<std::string, std::unique_ptr<Texture>> gpuTextures_;
+    std::unordered_map<std::string, std::unique_ptr<Texture>>
+        impostorTextures_;   // 0.11-W (3.75b): os PNG alfa do impostor
+                             // (o MESMO contrato 1 ref = 1 objeto GL)
     std::unordered_map<std::string, std::unique_ptr<BlockMesh>> blockMeshes_;
     // 0.11-M (FASE 2): o sampler JÁ APLICADO por caminho (first-wins;
     // os 4 códigos kSampler* empacotados — 0 em tudo = sem sampler)

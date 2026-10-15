@@ -160,6 +160,11 @@ void appendComponentJson(Json& arr, const MeshRenderer* mr) {
     if (!mr->streaming) {
         c.addMember("streaming", Json::makeBool(false));
     }
+    // 0.11-W (3.75b) — impostores: SÓ quando != 0 (o MESMO contrato do
+    // lodDist — ausente = 0 = OFF no loader; os .goni antigos intocados)
+    if (mr->impostorDistance != 0.0f) {
+        c.addMember("impostorDist", Json::makeNumber(mr->impostorDistance));
+    }
     arr.addItem(std::move(c));
 }
 
@@ -569,6 +574,16 @@ void fillMeshRenderer(MeshRenderer* mr, const Json& comp, const LoadCtx& ctx) {
     if (const Json* js = comp.find("streaming");
         js && js->type == Json::Type::Bool) {
         mr->streaming = js->boolean;
+    }
+    // 0.11-W (3.75b): "impostorDist" opcional (o MESMO contrato do
+    // lodDist — ausente = 0 = OFF; negativo/zero não liga nunca)
+    mr->impostorDistance = 0.0f;
+    if (const Json* jimp = comp.find("impostorDist");
+        jimp && jimp->type == Json::Type::Number) {
+        const f32 vimp = static_cast<f32>(jimp->number);
+        if (vimp > 0.0f) {
+            mr->impostorDistance = vimp;
+        }
     }
 }
 

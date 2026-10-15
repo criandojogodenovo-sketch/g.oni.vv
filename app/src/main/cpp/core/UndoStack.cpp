@@ -39,6 +39,7 @@ TicSnap snapTic(const Scene& scene, Handle h) {
         s.lodDistance = mr->lodDistance;   // 0.11-T (3.5a)
         s.instancing = mr->instancing;     // 0.11-W (3.5b)
         s.streaming = mr->streaming;       // 0.11-W (3.75a)
+        s.impostorDistance = mr->impostorDistance;  // 0.11-W (3.75b)
         s.primOn = mr->primOn;
         s.primKind = mr->prim.kind;
         s.primRadius = mr->prim.radius;
@@ -99,6 +100,7 @@ Handle restoreTic(Scene& scene, const TicSnap& s, Handle current) {
             mr->lodDistance = s.lodDistance;   // 0.11-T (3.5a)
             mr->instancing = s.instancing;     // 0.11-W (3.5b)
             mr->streaming = s.streaming;       // 0.11-W (3.75a)
+            mr->impostorDistance = s.impostorDistance;  // 0.11-W (3.75b)
             if (mr->primOn != s.primOn || !s.primOn) {
                 // ligar/desligar prim ARMA o pedido (o main sobe no ponto
                 // seguro — o mesmo caminho do picker)
@@ -156,6 +158,7 @@ Handle pasteAsNew(Scene& scene, const TicSnap& s) {
             mr->lodDistance = s.lodDistance;   // 0.11-T (3.5a)
             mr->instancing = s.instancing;     // 0.11-W (3.5b)
             mr->streaming = s.streaming;       // 0.11-W (3.75a)
+            mr->impostorDistance = s.impostorDistance;  // 0.11-W (3.75b)
             mr->primOn = s.primOn;
             mr->prim.kind = s.primKind;
             mr->prim.radius = s.primRadius;

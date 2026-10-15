@@ -253,6 +253,120 @@ bool renderMesh(const MeshData& mesh, u32 size, std::vector<u8>& rgba) {
     return true;
 }
 
+// 0.11-W (3.75b) — o render do IMPOSTOR (o IRMÃO alfa do renderMesh).
+// O MESMO rasterizador (a MESMA câmara/z-bar/encaixe — a silhueta é a da
+// casa) com DUAS diferenças honestas: o fundo fica TRANSPARENTE (rgba 0)
+// e a geometria carrega o lambert CRU d = max(n·L, 0) em cinza puro com
+// alpha 0xFF (o draw compensa com o baseColor kImpBaseColor — ver o
+// render/Impostor.h). DETERMINÍSTICO igual. Corpo separado de propósito:
+// o renderMesh de cima fica BYTE A BYTE (os pins da thumb manda).
+bool renderMeshAlpha(const MeshData& mesh, u32 size, std::vector<u8>& rgba) {
+    rgba.assign(static_cast<size_t>(size) * size * 4, 0);   // TRANSPARENTE
+    if (!mesh.ok() || mesh.indices.size() < 3) {
+        return false;
+    }
+
+    // ---- o AABB (só os vértices REFERENCIADOS — igual ao renderMesh) ----
+    Vec3F mn{1e30f, 1e30f, 1e30f}, mx{-1e30f, -1e30f, -1e30f};
+    for (const u16 idx : mesh.indices) {
+        if (idx >= mesh.vertices.size()) {
+            return false;
+        }
+        const Vertex& v = mesh.vertices[idx];
+        mn = {std::min(mn.x, v.pos.x), std::min(mn.y, v.pos.y),
+              std::min(mn.z, v.pos.z)};
+        mx = {std::max(mx.x, v.pos.x), std::max(mx.y, v.pos.y),
+              std::max(mx.z, v.pos.z)};
+    }
+    const Vec3F center{(mn.x + mx.x) * 0.5f, (mn.y + mx.y) * 0.5f,
+                       (mn.z + mx.z) * 0.5f};
+    const Vec3F ext{std::max(mx.x - mn.x, 1e-3f), std::max(mx.y - mn.y, 1e-3f),
+                    std::max(mx.z - mn.z, 1e-3f)};
+
+    // ---- a câmara isométrica fixa (a MESMA vista 3/4 da casa) -----------
+    const Vec3F fwd = norm({-1.0f, -0.65f, -1.0f});
+    const Vec3F worldUp{0.0f, 1.0f, 0.0f};
+    const Vec3F right = norm(cross(worldUp, fwd));
+    const Vec3F up = cross(fwd, right);
+
+    const float hx = std::abs(dot(right, {ext.x * 0.5f, 0, 0})) +
+                     std::abs(dot(right, {0, ext.y * 0.5f, 0})) +
+                     std::abs(dot(right, {0, 0, ext.z * 0.5f}));
+    const float hy = std::abs(dot(up, {ext.x * 0.5f, 0, 0})) +
+                     std::abs(dot(up, {0, ext.y * 0.5f, 0})) +
+                     std::abs(dot(up, {0, 0, ext.z * 0.5f}));
+    const float scale = (static_cast<float>(size) * 0.42f) /
+                        std::max(hx, hy);
+
+    // ---- o z-buffer + o rasterizador (o MESMO loop do renderMesh) -------
+    std::vector<float> zbuf(static_cast<size_t>(size) * size, 1e30f);
+    const size_t triCount =
+        std::min<size_t>(mesh.indices.size() / 3, kMaxTrisPorThumb);
+    const int s = static_cast<int>(size);
+    for (size_t t = 0; t < triCount; ++t) {
+        const Vertex& a = mesh.vertices[mesh.indices[t * 3]];
+        const Vertex& b = mesh.vertices[mesh.indices[t * 3 + 1]];
+        const Vertex& c = mesh.vertices[mesh.indices[t * 3 + 2]];
+        Vec3F pa{a.pos.x - center.x, a.pos.y - center.y, a.pos.z - center.z};
+        Vec3F pb{b.pos.x - center.x, b.pos.y - center.y, b.pos.z - center.z};
+        Vec3F pc{c.pos.x - center.x, c.pos.y - center.y, c.pos.z - center.z};
+        const Vec3F n = norm(cross(sub(pb, pa), sub(pc, pa)));
+        // O LAMBERT CRU (sem ambient — o draw compensa; o Impostor.h
+        // deriva o kImpBaseColor EXATAMENTE para esta escolha)
+        const float d = std::max(dot(n, {kLightDir[0], kLightDir[1],
+                                          kLightDir[2]}), 0.0f);
+        const float ax = (dot(right, pa) + hx) * scale + size * 0.08f;
+        const float ay = (dot(up, pa) + hy) * scale;
+        const float az = dot(fwd, pa);
+        const float bx = (dot(right, pb) + hx) * scale + size * 0.08f;
+        const float by = (dot(up, pb) + hy) * scale;
+        const float bz = dot(fwd, pb);
+        const float cx = (dot(right, pc) + hx) * scale + size * 0.08f;
+        const float cy = (dot(up, pc) + hy) * scale;
+        const float cz = dot(fwd, pc);
+        const float sy0 = static_cast<float>(size) - ay - size * 0.08f;
+        const float sy1 = static_cast<float>(size) - by - size * 0.08f;
+        const float sy2 = static_cast<float>(size) - cy - size * 0.08f;
+        const float minX = std::min({ax, bx, cx});
+        const float maxX = std::max({ax, bx, cx});
+        const float minY = std::min({sy0, sy1, sy2});
+        const float maxY = std::max({sy0, sy1, sy2});
+        const int x0 = std::max(0, static_cast<int>(minX));
+        const int x1 = std::min(s - 1, static_cast<int>(maxX) + 1);
+        const int y0 = std::max(0, static_cast<int>(minY));
+        const int y1 = std::min(s - 1, static_cast<int>(maxY) + 1);
+        const float area = (bx - ax) * (sy2 - sy0) - (cx - ax) * (sy1 - sy0);
+        if (std::abs(area) < 1e-9f) {
+            continue;
+        }
+        for (int py = y0; py <= y1; ++py) {
+            for (int px = x0; px <= x1; ++px) {
+                const float fx = static_cast<float>(px) + 0.5f;
+                const float fy = static_cast<float>(py) + 0.5f;
+                const float w0 = ((bx - fx) * (sy2 - fy) - (cx - fx) * (sy1 - fy)) / area;
+                const float w1 = ((cx - fx) * (sy0 - fy) - (ax - fx) * (sy2 - fy)) / area;
+                const float w2 = 1.0f - w0 - w1;
+                if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) {
+                    continue;
+                }
+                const float z = w0 * az + w1 * bz + w2 * cz;
+                float& zRef = zbuf[static_cast<size_t>(py) * size + px];
+                if (z < zRef) {
+                    zRef = z;
+                    u8* p = &rgba[(static_cast<size_t>(py) * size + px) * 4];
+                    const u8 g = static_cast<u8>(
+                        std::min(255.0f, std::max(0.0f, d * 255.0f)));
+                    p[0] = g;
+                    p[1] = g;
+                    p[2] = g;
+                    p[3] = 0xFF;   // a geometria EXISTE (o MASK corta só o fundo)
+                }
+            }
+        }
+    }
+    return true;
+}
+
 void placeholder(const std::string& stem, u32 size, std::vector<u8>& rgba) {
     rgba.assign(static_cast<size_t>(size) * size * 4, 0);
     for (size_t i = 0; i < rgba.size(); i += 4) {
@@ -292,6 +406,15 @@ std::vector<u8> encodePng(const std::vector<u8>& rgba, u32 size) {
         }
     }
     return ::vv::thumb::encodePngRgb(rgb.data(), size, size);
+}
+
+// 0.11-W (3.75b): RGBA → PNG RGBA (color type 6) — o alpha é o canal do
+// MASK do impostor. Sem o drop (o canal alfa é O PONTO).
+std::vector<u8> encodePngRgba(const std::vector<u8>& rgba, u32 size) {
+    if (rgba.size() != static_cast<size_t>(size) * size * 4) {
+        return {};
+    }
+    return ::vv::thumb::encodePngRgba(rgba.data(), size, size);
 }
 
 } // namespace thumbrender
