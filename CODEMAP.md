@@ -1,6 +1,6 @@
 # CODEMAP.md — onde vive o quê
 
-Atualizado: 2026-10-16 · vc: 77
+Atualizado: 2026-10-17 · vc: 78
 
 > Convenção de paths: TODOS os caminhos deste ficheiro são relativos à
 > RAIZ do repo (exemplo: o registo da linguagem vive em
@@ -62,7 +62,8 @@ Atualizado: 2026-10-16 · vc: 77
   GONI_ONLY/GONI_SKIP), TestFramework.h (o TEST/EXPECT), test_sentinels.cpp
   (as sentinelas regress_*), test_ctx_pines.cpp (os pins dos índices da
   0.11-CTX), test_fase_y0_icone.cpp (os pins do ícone launcher da
-  0.11-Y — adaptativo + legacy + o antigo removido), test_fase375b_impostors.cpp,
+  0.11-Y — adaptativo + legacy + o antigo removido + a ESCALA do G
+  medida nos PNG reais via stb_image), test_fase375b_impostors.cpp,
   test_voni.cpp, test_bench.cpp,
   test_gmeshv3.cpp, voni_refgen.cpp (o gerador da referência), c33_virtual.cpp
   (o dispositivo virtual), CMakeLists.txt (a lista de fontes dos pins),
@@ -74,7 +75,8 @@ Atualizado: 2026-10-16 · vc: 77
   docs_lint_check.py (ci/forbidden_docs_patterns.txt), docs_lint_state.sh
   (a regra STATE.md do §1.2 da 0.11-CTX), release_identity_check.py,
   y0_gen_icons.py (o gerador dos PNGs do launcher da 0.11-Y a partir de
-  docs/iconegonevv.png),
+  docs/iconegonevv.png — a escala do Y-0-fix: o G SÓLIDO a 65 % da
+  zona segura),
   gmesh_docs_check.py, ui_vocab_check.py, theme_hex_check.py,
   hierarchy_check.py, jni_parity.py, link_parity.sh, check_main.sh,
   glyph_source_check.py, reload_concurrency_check.py, projects_ui_check.py,

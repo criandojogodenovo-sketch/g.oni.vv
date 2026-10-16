@@ -1,18 +1,25 @@
-// tests/test_fase_y0_icone.cpp — os pins da Y-0 (0.11-Y: o ícone «G em
-// chama» no launcher). O contrato do prompt da Y-0: o adaptativo compõe o
-// fundo sólido #08080A com o foreground nas 5 densidades (o canvas 108 dp
-// × densidade); o legacy (Android 7-) é o composto quadrado + round
-// (48/72/96/144/192); o manifest aponta @mipmap/ic_launcher{,_round}; o
-// ícone ANTIGO (o gerador 0.9.6.10, scripts/gen_app_icon.py) não sobra em
-// res/mipmap-*/. Os pins verificam EXISTÊNCIA e CONTEÚDO (a estrutura do
-// PNG via IHDR, o XML fonte, o manifest fonte) — NÃO verificam o desenho
-// pixel a pixel; a validação binária (aapt2 do APK) corre no job do APK
-// a cada build (o gate release-identity depende do build passar).
+// tests/test_fase_y0_icone.cpp — os pins da Y-0 + o fix da escala
+// (0.11-Y: o ícone «G em chama» no launcher). O contrato do prompt da
+// Y-0: o adaptativo compõe o fundo sólido #08080A com o foreground nas 5
+// densidades (o canvas 108 dp × densidade); o legacy (Android 7-) é o
+// composto quadrado + round (48/72/96/144/192); o manifest aponta
+// @mipmap/ic_launcher{,_round}; o ícone ANTIGO (o gerador 0.9.6.10,
+// scripts/gen_app_icon.py) não sobra em res/mipmap-*/. Os pins verificam
+// EXISTÊNCIA e CONTEÚDO (a estrutura do PNG via IHDR, o XML fonte, o
+// manifest fonte) — a validação binária (aapt2 do APK) corre no job do
+// APK a cada build. O Y-0-FIX acrescenta o y0_escala: o pin que MEDe o
+// glifo nos PNG reais (stb_image) e aferra a escala 65 % da zona segura
+// — a única exceção «pixel a pixel», nascida do bug que o C33 apanhou
+// (o G a ~25 % porque a bbox do halo fazia o enquadramento).
 //
 // As MUTAÇÕES do relatório (M-Y0a: foreground só numa densidade; M-Y0b:
 // manifest com o ícone antigo) correm contra uma CÓPIA do repo via
 // GONI_ROOT_OVERRIDE — o mesmo padrão dos pins ctx_* (test_ctx_pines.cpp).
 #include "TestFramework.h"
+
+#include "assets/stb/stb_image.h"  // SÓ as declarações — a implementação
+                                   // única vive no PngLoader.cpp da suíte
+                                   // (STBI_NO_STDIO: from_memory apenas)
 
 #include <sys/wait.h>
 
@@ -293,5 +300,148 @@ TEST(y0_antigo_removido) {
                            kOldHash[k] + 1);
             }
         }
+    }
+}
+
+namespace {
+
+// a bbox dos pixels que passam o predicado — a medida do glifo no PNG
+// REAL (o mesmo critério em todas as densidades; o max(bw,bh) é a
+// extensão do glifo, o que o enquadramento da Y-0 parte)
+struct GlyphBox {
+    long minx = 0, miny = 0, maxx = -1, maxy = -1;
+    bool found() const { return maxx >= 0; }
+    long w() const { return maxx - minx + 1; }
+    long h() const { return maxy - miny + 1; }
+};
+
+GlyphBox solidBoxAlpha(const unsigned char* px, int w, int h, int amin) {
+    GlyphBox g;
+    g.minx = w;   // a bbox SÓ encolhe do lado de fora (maxx = −1 = vazio)
+    g.miny = h;
+    for (long y = 0; y < h; ++y) {
+        const unsigned char* row = px + 4L * y * w;
+        for (long x = 0; x < w; ++x) {
+            if (row[4 * x + 3] >= amin) {
+                if (x < g.minx) g.minx = x;
+                if (x > g.maxx) g.maxx = x;
+                if (y < g.miny) g.miny = y;
+                if (y > g.maxy) g.maxy = y;
+            }
+        }
+    }
+    return g;
+}
+
+GlyphBox solidBoxLum(const unsigned char* px, int w, int h, float tmin) {
+    GlyphBox g;
+    g.minx = w;   // a bbox SÓ encolhe do lado de fora (maxx = −1 = vazio)
+    g.miny = h;
+    for (long y = 0; y < h; ++y) {
+        const unsigned char* row = px + 4L * y * w;
+        for (long x = 0; x < w; ++x) {
+            const float lum = 0.299f * row[4 * x] + 0.587f * row[4 * x + 1] +
+                              0.114f * row[4 * x + 2];
+            if (lum >= tmin) {
+                if (x < g.minx) g.minx = x;
+                if (x > g.maxx) g.maxx = x;
+                if (y < g.miny) g.miny = y;
+                if (y > g.maxy) g.maxy = y;
+            }
+        }
+    }
+    return g;
+}
+
+// o decode stb do PNG REAL (from_memory — o STBI_NO_STDIO do PngLoader
+// é o contrato da suíte); nullptr = falha (o chamador reporta)
+unsigned char* decodePng(const std::string& bytes, int& w, int& h) {
+    int n = 0;
+    return stbi_load_from_memory(
+        reinterpret_cast<const unsigned char*>(bytes.data()),
+        static_cast<int>(bytes.size()), &w, &h, &n, 4);
+}
+
+}  // namespace
+
+// y0_escala — O FIX Y-0-FIX: o G SÓLIDO (o núcleo opaco do fogo, sem o
+// halo) mede 65 % da zona segura no adaptativo (0.65 × 66 dp de 108 dp =
+// 39,7 % do canvas) e 65 % do lado no legacy. O BUG que o C33 apanhou: a
+// bbox de enquadramento era a do HALO (o brilho suave) e o G sólido
+// vivia lá dentro a ~69 % da caixa — no launcher, ~25 %. O pin mede os
+// PNG REAIS: no foreground (fundo transparente) o sólido é alpha ≥ 250;
+// no legacy (fundo #08080A opaco) é luminância ≥ 90 — o mesmo T1
+// calibrado da extração. A leitura por threshold fica ~9 % abaixo da
+// geométrica (a borda antialiased do fogo mistura no kernel do LANCZOS):
+// o calibrado MEDIDO é fg 0.359 do canvas e legacy 0.59 do lado — as
+// janelas aferram a calibração nos DOIS sentidos (voltar à escala do bug
+// ≈ 0.26/0.23, ou saltar acima, sai VERMELHO). A FOLGA é do
+// reenquadramento por densidade (o LANCZOS nas 5 escalas distintas).
+TEST(y0_escala) {
+    // o FOREGROUND: o sólido (alpha ≥ 250) entre 0.33 e 0.39 do canvas
+    for (int i = 0; i < 5; ++i) {
+        const std::string p = y0Root() + "/app/src/main/res/mipmap-" +
+                              kDens[i] + "/ic_launcher_foreground.png";
+        std::string b;
+        EXPECT_MSG(readFile(p, b), "mipmap-%s/ic_launcher_foreground.png "
+                                   "ilegível para o pin de escala",
+                   kDens[i]);
+        if (b.empty()) continue;
+        int w = 0, h = 0;
+        unsigned char* px = decodePng(b, w, h);
+        EXPECT_MSG(px != nullptr,
+                   "mipmap-%s/ic_launcher_foreground.png não decodifica "
+                   "(stb)",
+                   kDens[i]);
+        if (!px) continue;
+        const GlyphBox g = solidBoxAlpha(px, w, h, 250);
+        stbi_image_free(px);
+        EXPECT_MSG(g.found(), "mipmap-%s/ic_launcher_foreground.png sem "
+                              "conteúdo sólido (alpha ≥ 250)",
+                   kDens[i]);
+        if (!g.found()) continue;
+        const long bw = g.w(), bh = g.h();
+        const double frac =
+            static_cast<double>(bw > bh ? bw : bh) /
+            static_cast<double>(w);
+        EXPECT_MSG(frac >= 0.33 && frac <= 0.39,
+                   "mipmap-%s/ic_launcher_foreground.png: o G sólido mede "
+                   "%.1f%% do canvas — fora da janela da calibração "
+                   "[33..39]%% (o Y-0-fix calibrou 35.9%% = 65%% da zona "
+                   "segura; o bug do halo media ~25%%)",
+                   kDens[i], frac * 100.0);
+    }
+    // o LEGACY: o sólido (lum ≥ 90) entre 0.56 e 0.63 do lado
+    for (int i = 0; i < 5; ++i) {
+        const std::string p = y0Root() + "/app/src/main/res/mipmap-" +
+                              kDens[i] + "/ic_launcher.png";
+        std::string b;
+        EXPECT_MSG(readFile(p, b),
+                   "mipmap-%s/ic_launcher.png ilegível para o pin de "
+                   "escala",
+                   kDens[i]);
+        if (b.empty()) continue;
+        int w = 0, h = 0;
+        unsigned char* px = decodePng(b, w, h);
+        EXPECT_MSG(px != nullptr,
+                   "mipmap-%s/ic_launcher.png não decodifica (stb)",
+                   kDens[i]);
+        if (!px) continue;
+        const GlyphBox g = solidBoxLum(px, w, h, 90.0f);
+        stbi_image_free(px);
+        EXPECT_MSG(g.found(), "mipmap-%s/ic_launcher.png sem conteúdo "
+                              "sólido (lum ≥ 90)",
+                   kDens[i]);
+        if (!g.found()) continue;
+        const long bw = g.w(), bh = g.h();
+        const double frac =
+            static_cast<double>(bw > bh ? bw : bh) /
+            static_cast<double>(w);
+        EXPECT_MSG(frac >= 0.56 && frac <= 0.63,
+                   "mipmap-%s/ic_launcher.png: o G sólido mede %.1f%% do "
+                   "lado — fora da janela da calibração [56..63]%% (o "
+                   "Y-0-fix calibrou 59.4%% = 65%% do lado após a borda "
+                   "antialiased; o bug do halo media ~46%%)",
+                   kDens[i], frac * 100.0);
     }
 }

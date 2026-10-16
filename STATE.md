@@ -1,8 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-16 · vc: 77 · Último commit: este (o Y-0, o ícone
-no launcher; antes: b577dea o fix do ctx_refs, 85c4f94 o FECHO da
-0.11-CTX)
+Atualizado: 2026-10-17 · vc: 78 · Último commit: este (o Y-0-FIX, a
+escala do G no launcher; antes: a2d2248 o Y-0, b577dea o fix do
+ctx_refs, 85c4f94 o FECHO da 0.11-CTX)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -10,17 +10,21 @@ no launcher; antes: b577dea o fix do ctx_refs, 85c4f94 o FECHO da
 
 ## §1 Onde estamos
 
-- **Campanha atual: 0.11-Y (identidade visual) · Sub-fase: Y-0 (o
-  ícone no launcher) — FECHADA** (este commit; o CI é o árbitro).
+- **Campanha atual: 0.11-Y (identidade visual) · Sub-fase: Y-0-FIX (a
+  escala do G no launcher) — FECHADA** (este commit; o CI é o árbitro).
   Seguem-se Y-1 (o tema), Y-2 (o layout), Y-3 (os cartões) — cada uma
   só com CONTINUAR do dono.
+- **Y-0 (o ícone no launcher) — FECHADA com CI verde** (a2d2248) e o
+  pin C33 do dono apanhou o bug da escala (o G a ~25 %; o contrato
+  ~65 %) — o Y-0-FIX é este commit (a bbox de escala passa a ser o
+  CONTEÚDO SÓLIDO, 65 % da zona segura; o pin y0_escala guarda).
 - **0.11-CTX — FECHADA com CI verde** (deba7bb + ac2b780, 1a348f5,
   909b1ea, 85c4f94; os fixes da âncora R-015: e82155e + b577dea — o
   RELATORIO-0.9.6.md de volta a docs/ e o ctx_refs_ok a distinguir
   citação de transcrição). 98,8 % de redução no pior caso
   (docs/RELATORIO-0.11-CTX.md).
 - **0.11-W (Render Systems) implementada e com CI verde** — falta o PIN do
-  dono no C33 real: instalar o APK vigente (vc 77 hoje), importar a cena
+  dono no C33 real: instalar o APK vigente (vc 78 hoje), importar a cena
   de 203 MB, correr o bench R-017, colar o PNG do HUD. Baseline: FPS 5 ·
   bl 5164/5178 · 6 TICs. Alvo: 30+ FPS sem crash nem freeze no import.
 - O fecho da 0.11-W (relatório FECHO + R-048) só corre por ordem do dono
@@ -56,6 +60,12 @@ no launcher; antes: b577dea o fix do ctx_refs, 85c4f94 o FECHO da
   foreground na zona segura) + legacy composto nas 5 densidades; pins
   y0_* ×7 (test_fase_y0_icone.cpp); o ícone antigo (0.9.6.10) fora do
   launcher, intacto no histórico.
+- 0.11-Y Y-0-FIX Escala do G ✅ vc 78 — o pin C33 apanhou o G a ~25 %
+  (a bbox do HALO fazia o enquadramento); a bbox de escala passa a ser
+  o CONTEÚDO SÓLIDO (alpha==1 ⇔ lum ≥ T1) e o G ocupa 65 % da zona
+  segura (39,7 % do canvas; legacy 65 % do lado); 15 PNGs regenerados,
+  XMLs/manifest intactos; pin y0_escala NOVO (mede os PNG reais via
+  stb_image) — pins y0_* ×8; M-Y0-fix vermelho→reposto→verde.
 
 ## §3 O que está PENDENTE (por ordem)
 
@@ -132,6 +142,9 @@ Commits puramente documentais não são afetados.
 - `docs/RELATORIO-0.11-W-*.md` — a 0.11-W (o fecho é o BLOCO B).
 - `docs/RELATORIO-0.11-Y-Y0.md` — o relatório da Y-0 (o ícone no
   launcher; as mutações e os limites da extração).
+- `docs/RELATORIO-0.11-Y-Y0-FIX.md` — o relatório do Y-0-FIX (a escala
+  do G: a medição do C33, a regra do sólido, o pin y0_escala, a
+  M-Y0-fix).
 - `scripts/y0_gen_icons.py` — o gerador dos PNGs do launcher a partir
   da fonte do dono (o threshold de luminância documentado lá dentro).
 - `docs/arquivo/` — os relatórios das campanhas FECHADAS (71, git mv;
