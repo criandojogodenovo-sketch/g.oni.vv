@@ -15,11 +15,15 @@
 //     20-24dp; o traço grosso mantém o peso visual do launcher);
 //   • COR: a cor vem do CHAMADOR (âmbar do tema) — âmbar sobre
 //     grafite/transparente, NUNCA âmbar sobre âmbar (a função não desenha
-//     fundo nenhum);
-//   • o launcher (mipmap estático) é GERADO do mesmo desenho
-//     (scripts/gen_app_icon.py — a paridade é documentada, um PNG não
-//     executa C++); o espelho Java vive em UiIcons.drawBrand (a MESMA
-//     geometria, LOD e contrato — aferido por jni_parity dos 2 lados).
+//     fundo nenhum) — não há paleta AQUI para atualizar (a paleta vive no
+//     Theme, e o Theme é Y-1);
+//   • o launcher (0.11-Y · Y-0) é o PNG do dono — o «G em chama» de
+//     docs/iconegonevv.png, extraído por luminância
+//     (scripts/y0_gen_icons.py; fundo #08080A + adaptive + legacy); o
+//     glifo VETORIAL desta função continua a ser a marca IN-APP (o
+//     espelho Java vive em UiIcons.drawBrand — a MESMA geometria, LOD e
+//     contrato, aferida por jni_parity dos 2 lados). O gerador antigo do
+//     launcher (scripts/gen_app_icon.py, 0.9.6.10) ficou no histórico.
 //
 // Geometria (viewBox 0..24): o G = arco r=6.2 com a abertura à direita +
 // a barra horizontal até ao centro + o espelho vertical (o "G" do

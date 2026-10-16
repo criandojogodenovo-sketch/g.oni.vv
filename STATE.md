@@ -1,8 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-16 · vc: 76 · Último commit: este (o fix do
-ctx_refs; antes: e82155e a âncora R-015 de volta a docs/, 85c4f94 o
-FECHO da 0.11-CTX, 909b1ea a CTX-3)
+Atualizado: 2026-10-16 · vc: 77 · Último commit: este (o Y-0, o ícone
+no launcher; antes: b577dea o fix do ctx_refs, 85c4f94 o FECHO da
+0.11-CTX)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -10,25 +10,21 @@ FECHO da 0.11-CTX, 909b1ea a CTX-3)
 
 ## §1 Onde estamos
 
-- **Campanha 0.11-CTX — FECHADA (o fecho é este commit).** As três
-  sub-fases fechadas com o CI verde: CTX-1 STATE.md (deba7bb +
-  ac2b780), CTX-2 CODEMAP.md (1a348f5), CTX-3 arquivo + README curto
-  + DIARIO + TEMPLATE_PROMPT + o gate STATE.md no CI + a medição
-  (909b1ea — 98,8 % de redução no pior caso, docs/RELATORIO-0.11-CTX.md).
-  Cláusula calma cumprida: zero código de produção; o CI só foi
-  tocado no gate docs-lint/STATE.
+- **Campanha atual: 0.11-Y (identidade visual) · Sub-fase: Y-0 (o
+  ícone no launcher) — FECHADA** (este commit; o CI é o árbitro).
+  Seguem-se Y-1 (o tema), Y-2 (o layout), Y-3 (os cartões) — cada uma
+  só com CONTINUAR do dono.
+- **0.11-CTX — FECHADA com CI verde** (deba7bb + ac2b780, 1a348f5,
+  909b1ea, 85c4f94; os fixes da âncora R-015: e82155e + b577dea — o
+  RELATORIO-0.9.6.md de volta a docs/ e o ctx_refs_ok a distinguir
+  citação de transcrição). 98,8 % de redução no pior caso
+  (docs/RELATORIO-0.11-CTX.md).
 - **0.11-W (Render Systems) implementada e com CI verde** — falta o PIN do
-  dono no C33 real: instalar o APK vc 76, importar a cena de 203 MB,
-  correr o bench R-017, colar o PNG do HUD. Baseline: FPS 5 · bl 5164/5178 ·
-  6 TICs. Alvo: 30+ FPS sem crash nem freeze no import.
-- **O fix do fecho (R-015)** — a CTX-3 moveu a âncora VIVA do gate
-  release-identity (docs/RELATORIO-0.9.6.md) para o arquivo e os runs
-  de 909b1ea/85c4f94 ficaram VERMELHOS nele; e82155e devolveu-a a
-  docs/ (71 movidos, não 72) e este commit ensina ao pin ctx_refs_ok
-  que linhas de anotação (::error:: — a transcrição da MUTAÇÃO C, com
-  o RELATORIO-0.9.9 que nunca existiu) são evidência, não citação.
-- O fecho da 0.11-W (relatório FECHO + R-048) só corre DEPOIS da 0.11-CTX
-  fechar, por ordem do dono.
+  dono no C33 real: instalar o APK vigente (vc 77 hoje), importar a cena
+  de 203 MB, correr o bench R-017, colar o PNG do HUD. Baseline: FPS 5 ·
+  bl 5164/5178 · 6 TICs. Alvo: 30+ FPS sem crash nem freeze no import.
+- O fecho da 0.11-W (relatório FECHO + R-048) só corre por ordem do dono
+  (o BLOCO B).
 
 ## §2 O que está FEITO
 
@@ -55,6 +51,11 @@ FECHO da 0.11-CTX, 909b1ea a CTX-3)
 - 0.11-W 3.75b impostores (vc 76, 1524148 + caaef02) — PNG alfa por
   distância; dc do TIC longe = 1; R-049; fix caaef02 (o ImpostorIndex.cpp
   faltava no CMake do app).
+- 0.11-Y Y-0 Ícone no launcher ✅ vc 77 — o «G em chama»
+  (docs/iconegonevv.png) no launcher: adaptativo (fundo #08080A +
+  foreground na zona segura) + legacy composto nas 5 densidades; pins
+  y0_* ×7 (test_fase_y0_icone.cpp); o ícone antigo (0.9.6.10) fora do
+  launcher, intacto no histórico.
 
 ## §3 O que está PENDENTE (por ordem)
 
@@ -129,6 +130,10 @@ Commits puramente documentais não são afetados.
 - `docs/RELATORIO-0.11-CTX.md` — o relatório da campanha em curso (a
   medição da redução, as mutações, as divergências corrigidas).
 - `docs/RELATORIO-0.11-W-*.md` — a 0.11-W (o fecho é o BLOCO B).
+- `docs/RELATORIO-0.11-Y-Y0.md` — o relatório da Y-0 (o ícone no
+  launcher; as mutações e os limites da extração).
+- `scripts/y0_gen_icons.py` — o gerador dos PNGs do launcher a partir
+  da fonte do dono (o threshold de luminância documentado lá dentro).
 - `docs/arquivo/` — os relatórios das campanhas FECHADAS (71, git mv;
   o RELATORIO-0.9.6.md NÃO está lá — é a âncora viva do gate
   release-identity R-015; a 0.11-T-FIX também não — Perna 2 adiada, a

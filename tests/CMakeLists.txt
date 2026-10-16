@@ -331,6 +331,9 @@ add_executable(test_core
         # 0.11-CTX: os pins dos ÍNDICES (STATE.md — o contexto enxuto; o
         # gate do §1.2 é aferrado contra commits reais do histórico)
         test_ctx_pines.cpp
+        # 0.11-Y Y-0: os pins do ÍCONE no launcher (adaptativo + legacy +
+        # manifest + o antigo 0.9.6.10 removido — test_fase_y0_icone.cpp)
+        test_fase_y0_icone.cpp
         test_sentinels.cpp)
 
 

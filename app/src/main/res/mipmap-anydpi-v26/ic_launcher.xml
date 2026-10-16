@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.11-Y · Y-0: o ícone ADAPTATIVO (Android 8+) — o fundo sólido
+     #08080A (values/ic_launcher_background.xml) + o G em chama âmbar
+     (mipmap-*/ic_launcher_foreground.png, gerado de docs/iconegonevv.png
+     por scripts/y0_gen_icons.py). O ícone antigo (o gerador 0.9.6.10
+     gen_app_icon.py) fica no histórico do repo, não no launcher. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background"/>
+    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+</adaptive-icon>
