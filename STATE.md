@@ -1,7 +1,7 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-16 · vc: 76 · Último commit: 1a348f5 (a CTX-2;
-este commit fecha a CTX-3)
+Atualizado: 2026-10-16 · vc: 76 · Último commit: 909b1ea (a CTX-3;
+este commit é o FECHO da 0.11-CTX)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -9,18 +9,13 @@ este commit fecha a CTX-3)
 
 ## §1 Onde estamos
 
-- **Campanha em curso: 0.11-CTX** (contexto enxuto — só documentação).
-  - CTX-1 STATE.md — FECHADA (deba7bb + ac2b780, o fix do bit de
-    execução do gate; os pins ctx_state_* verdes).
-  - CTX-2 CODEMAP.md — FECHADA (1a348f5; os pins ctx_codemap_* verdes).
-  - CTX-3 arquivo + README <200 + DIARIO + TEMPLATE_PROMPT + o gate
-    ligado no CI + a medição — FECHADA neste commit (docs/arquivo/ com
-    72 relatórios movidos por git mv; o DIARIO com o README integral;
-    a medição real no docs/RELATORIO-0.11-CTX.md: 98,8 % de redução no
-    pior caso).
-  - A campanha 0.11-CTX está pronta para o commit de FECHO.
-  - Cláusula calma: zero código de produção; CI só é tocado no gate
-    docs-lint.
+- **Campanha 0.11-CTX — FECHADA (o fecho é este commit).** As três
+  sub-fases fechadas com o CI verde: CTX-1 STATE.md (deba7bb +
+  ac2b780), CTX-2 CODEMAP.md (1a348f5), CTX-3 arquivo + README curto
+  + DIARIO + TEMPLATE_PROMPT + o gate STATE.md no CI + a medição
+  (909b1ea — 98,8 % de redução no pior caso, docs/RELATORIO-0.11-CTX.md).
+  Cláusula calma cumprida: zero código de produção; o CI só foi
+  tocado no gate docs-lint/STATE.
 - **0.11-W (Render Systems) implementada e com CI verde** — falta o PIN do
   dono no C33 real: instalar o APK vc 76, importar a cena de 203 MB,
   correr o bench R-017, colar o PNG do HUD. Baseline: FPS 5 · bl 5164/5178 ·
@@ -56,13 +51,10 @@ este commit fecha a CTX-3)
 
 ## §3 O que está PENDENTE (por ordem)
 
-1. **Fecho 0.11-CTX** — o commit de fecho (o RELATORIO-0.11-CTX.md já
-   vive no repo desde a CTX-3; o fecho atualiza este índice e sela a
-   campanha com o CI verde).
-2. **Fecho 0.11-W (BLOCO B, só com CONTINUAR do dono)** — verificar R-048,
+1. **Fecho 0.11-W (BLOCO B, só com CONTINUAR do dono)** — verificar R-048,
    RELATORIO-0.11-W-FECHO.md, atualizar README/BACKLOG/STATE.md; o pin
    C33 (§1) entra no §3 do fecho.
-3. **3 métricas qualitativas da CTX** fecham no relatório da campanha
+2. **3 métricas qualitativas da CTX** fecham no relatório da campanha
    SEGUINTE (tempo até à 1.ª ação útil, erros de contexto, cobertura do
    CODEMAP).
 
