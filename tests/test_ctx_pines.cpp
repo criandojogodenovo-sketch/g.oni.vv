@@ -401,6 +401,16 @@ TEST(ctx_template_existe) {
 // existir no caminho citado OU no arquivo (docs/arquivo/<ficheiro> — a
 // convenção da mudança, documentada no README e no DIARIO). Uma ref que
 // não existe em lado nenhum = ponteiro morto = vermelho.
+//
+// EXCEÇÃO (o fix do R-015 do fecho): as LINHAS DE ANOTAÇÃO GitHub
+// (::error::, ::warning::) são a TRANSCRIÇÃO do output de um gate colada
+// como prova de mutação — ex. o §11 do RELATORIO-0.9.6.md cita
+// «::error::release-identity (R-015): docs/RELATORIO-0.9.9.md não
+// existe», onde o ficheiro citado não existe POR DESENHO (a MUTAÇÃO C
+// simulava o bump sem relatório e o gate É SUPOSTO gritar). Transcrição
+// de gate não é citação; evidência não se falsifica para satisfazer um
+// scanner — o scanner aprende a lê-la. Uma citação VIVA nunca começa
+// uma linha por "::".
 TEST(ctx_refs_ok) {
     const std::string root = ctxRoot();
     // os documentos vivos: a raiz de leitura + docs/ recursivo, exceto
@@ -426,7 +436,28 @@ TEST(ctx_refs_ok) {
         pos = nl + 1;
         std::string text;
         if (!readFile(root + "/" + file, text)) continue;
-        auto begin = std::sregex_iterator(text.begin(), text.end(), refRe);
+        // as linhas de anotação (1.º caractere não-branco = "::") saem
+        // do texto antes da varredura — ver o EXCEÇÃO no cabeçalho do pin
+        std::string filtrado;
+        filtrado.reserve(text.size());
+        size_t ls = 0;
+        while (ls < text.size()) {
+            const size_t le = text.find('\n', ls);
+            const std::string linha = text.substr(
+                ls, le == std::string::npos ? std::string::npos : le - ls);
+            const size_t primeiro = linha.find_first_not_of(" \t");
+            const bool anotacao =
+                primeiro != std::string::npos &&
+                linha.compare(primeiro, 2, "::") == 0;
+            if (!anotacao) {
+                filtrado.append(linha);
+                filtrado.append(1, '\n');
+            }
+            if (le == std::string::npos) break;
+            ls = le + 1;
+        }
+        auto begin =
+            std::sregex_iterator(filtrado.begin(), filtrado.end(), refRe);
         auto end = std::sregex_iterator();
         for (auto it = begin; it != end; ++it) {
             ++refs;

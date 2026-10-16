@@ -133,6 +133,21 @@ Notas honestas:
    gate («docs/RELATORIO-0.9.6.md não existe») e o fix devolveu-o a
    docs/ (71 movidos, não 72). O gate fez EXATAMENTE o seu trabalho:
    a identidade da release não se desfaz.
+8. **O scanner do ctx_refs_ok vs a transcrição da MUTAÇÃO C** — com o
+   RELATORIO-0.9.6.md de volta a docs/ (documento vivo, varrido), a
+   linha do gate «::error::release-identity (R-015): o RELATORIO-
+   0.9.9.md (caminho docs/) não existe» — a prova da mutação, §11 do
+   ficheiro — casou no regex das citações e o run do e82155e ficou
+   VERMELHO no ctx_refs_ok. O ficheiro citado nunca existiu — esse é
+   o PONTO da mutação (bump sem relatório → o gate grita). O fix é no
+   pin, não na evidência: as linhas de anotação GitHub (::) são
+   transcrição de output, não citação (uma citação viva não começa
+   por "::"); a MUTAÇÃO C fica intacta como prova. A/B na sandbox: o
+   pin velho reproduz o vermelho do CI ao byte; o novo fica verde,
+   prende a citação real injetada no STATE.md e repõe o verde. (Esta
+   prosa nomeia o ficheiro citado SEM o literal docs/ contíguo — o
+   scanner casaria a descrição como citação; a evidência byte a byte
+   está no §11 do RELATORIO-0.9.6.md.)
 
 ## §5 As referências validadas antes de mover (§3.1 do prompt)
 
@@ -202,18 +217,31 @@ decisão fechada reaberta; nada inventado.
 - 85c4f94 — 0.11-CTX: fecho (o contexto enxuto) — o STATE.md sela a
   campanha (o §3 aponta o BLOCO B, o fecho da 0.11-W, só com
   CONTINUAR do dono).
-- este commit — fix: o RELATORIO-0.9.6.md de volta a docs/ — o gate
+- e82155e — fix: o RELATORIO-0.9.6.md de volta a docs/ — o gate
   release-identity (R-015) apanhou a âncora movida (os runs de
   909b1ea e 85c4f94 VERMELHOS nele); docs/RELATORIO-0.9.6.md (git mv
   de docs/arquivo/) + docs/RELATORIO-0.11-CTX.md (a nota §4.7, o
   reconto 71/72, este §8 e o §9).
+- este commit — fix: o pin ctx_refs_ok distingue CITAÇÃO de
+  TRANSCRIÇÃO — com a âncora viva de novo, a linha ::error:: da
+  MUTAÇÃO C do RELATORIO-0.9.6.md (o RELATORIO-0.9.9.md — caminho
+  docs/ — que nunca existiu; esse é o ponto da mutação) caiu no
+  scanner como citação morta (o run do e82155e VERMELHO nele); as
+  linhas de anotação GitHub (::) saem da varredura — evidência não
+  se falsifica, o scanner aprende; A/B na sandbox: o pin velho
+  VERMELHO (idêntico ao CI), o novo VERDE, a citação real injetada
+  presa, o verde reposto; ficheiros: tests/test_ctx_pines.cpp +
+  STATE.md (a regra §1.2: fix com código leva o STATE no mesmo
+  commit) + este §4/§8/§9.
 
 ## §9 NÃO VERIFICADO
 
-- O CI do fix (a corrida em curso no momento da escrita) — o fecho da
-  campanha declara-se só com o VERDE em TODOS os jobs. Os runs de
-  909b1ea e 85c4f94 ficaram VERMELHOS no gate release-identity (a
-  âncora movida, ver a nota §4.7) — o fix é a última peça.
+- O CI deste commit (a corrida em curso no momento da escrita) — o
+  fecho da campanha declara-se só com o VERDE em TODOS os jobs. Os
+  runs de 909b1ea/85c4f94 caíram no gate release-identity (a âncora
+  movida, ver a nota §4.7) e o run do e82155e caiu no ctx_refs_ok (a
+  transcrição da MUTAÇÃO C tratada como citação, ver a nota §4.8) —
+  cada gate apanhou o seu; este commit fecha os dois.
 - Os 3 pins qualitativos do §6 — por construção, medem-se na campanha
   seguinte.
 - O efeito real da redução numa sessão com o prompt novo — o §6 mede.

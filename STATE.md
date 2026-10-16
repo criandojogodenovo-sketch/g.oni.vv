@@ -1,7 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-16 · vc: 76 · Último commit: 909b1ea (a CTX-3;
-este commit é o FECHO da 0.11-CTX)
+Atualizado: 2026-10-16 · vc: 76 · Último commit: este (o fix do
+ctx_refs; antes: e82155e a âncora R-015 de volta a docs/, 85c4f94 o
+FECHO da 0.11-CTX, 909b1ea a CTX-3)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -20,6 +21,12 @@ este commit é o FECHO da 0.11-CTX)
   dono no C33 real: instalar o APK vc 76, importar a cena de 203 MB,
   correr o bench R-017, colar o PNG do HUD. Baseline: FPS 5 · bl 5164/5178 ·
   6 TICs. Alvo: 30+ FPS sem crash nem freeze no import.
+- **O fix do fecho (R-015)** — a CTX-3 moveu a âncora VIVA do gate
+  release-identity (docs/RELATORIO-0.9.6.md) para o arquivo e os runs
+  de 909b1ea/85c4f94 ficaram VERMELHOS nele; e82155e devolveu-a a
+  docs/ (71 movidos, não 72) e este commit ensina ao pin ctx_refs_ok
+  que linhas de anotação (::error:: — a transcrição da MUTAÇÃO C, com
+  o RELATORIO-0.9.9 que nunca existiu) são evidência, não citação.
 - O fecho da 0.11-W (relatório FECHO + R-048) só corre DEPOIS da 0.11-CTX
   fechar, por ordem do dono.
 
@@ -122,8 +129,10 @@ Commits puramente documentais não são afetados.
 - `docs/RELATORIO-0.11-CTX.md` — o relatório da campanha em curso (a
   medição da redução, as mutações, as divergências corrigidas).
 - `docs/RELATORIO-0.11-W-*.md` — a 0.11-W (o fecho é o BLOCO B).
-- `docs/arquivo/` — os relatórios das campanhas FECHADAS (72, git mv;
-  a 0.11-T-FIX não está lá — Perna 2 adiada, a campanha não fechou).
+- `docs/arquivo/` — os relatórios das campanhas FECHADAS (71, git mv;
+  o RELATORIO-0.9.6.md NÃO está lá — é a âncora viva do gate
+  release-identity R-015; a 0.11-T-FIX também não — Perna 2 adiada, a
+  campanha não fechou).
 - `docs/TEMPLATE_PROMPT.md` — a pirâmide de leitura dos prompts.
 - `VONI_referencia.md` — a referência V.ONI gerada (fonte: VoniRegistry).
 - `ci/scope.txt` — os caminhos que uma campanha pode tocar.
