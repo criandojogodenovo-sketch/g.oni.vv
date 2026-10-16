@@ -5239,11 +5239,12 @@ int main() {
                               "blend(surface@0.80, bg) — a matematica do "
                               "device no pixel");
                         // translúcido a sério: NÃO é a surface sólida
-                        // (RECALIBRADO 0.9.6.10: a sólida é 22 — o
-                        // composto é 20; Δ2 > tolerância ±1)
-                        check(imgF.rgba[pi] != 22,
+                        // (RECALIBRADO 0.9.6.10: a sólida era 22; o
+                        // composto era 20; RECALIBRADO 0.11-Y: a sólida é
+                        // 21 e o composto 18 — Δ3 > tolerância ±1)
+                        check(imgF.rgba[pi] != 21,
                               "13.9 o VIDRO e translucido: o pixel NAO e a "
-                              "surface solida (a=1 desenharia 22)");
+                              "surface solida (a=1 desenharia 21)");
                     }
                 }
 
@@ -7240,8 +7241,9 @@ int main() {
                                      theme::kTheme.bg, glassBg);
                     // o CANTO (2,2) fora do raio 8dp: o fundo por trás
                     // (o painel duro mostraria o vidro do card)
+                    // RECALIBRADO 0.11-Y: o fundo é o POÇO #08080A (8,8,10)
                     probePx18(pngD, (u32)(dlg->x + 2.0f),
-                              (u32)(dlg->y + 2.0f), 14, 14, 16,
+                              (u32)(dlg->y + 2.0f), 8, 8, 10,
                               "18.4 J-04 o canto do diálogo é SUAVE (o "
                               "pixel (2,2) fora do raio 8dp mostra o fundo "
                               "— o painel duro mostraria o vidro)");

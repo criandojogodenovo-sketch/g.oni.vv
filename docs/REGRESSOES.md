@@ -453,6 +453,8 @@ Provas de mutação (coladas em mutacao-R028a/b/c/d/e-vermelho.txt): (a) **O AZU
 
 RECALIBRADOS pela mudança legítima (nota no sítio): `theme_tabela_spec_a_exata`→`theme_tabela_spec_f_exata` (test_toolbar: os valores EXATOS da spec F + o MONO Δ=0 + os alphas + voniComment), `theme_contraste_auditoria_spec` (+contrastOnGlass + a tinta), o wiring090 contrastes (re-validam sozinhos), `projects_ui_check.py` (TOKENS_F + ACCENT_INK + o rótulo «logo G com 4 setas»), o 13.1 (a matemática do vidro + o piso de conteúdo 3%), o comentário do manifest (o ícone novo + o gerador NO REPO).
 
+RECALIBRADA 0.11-Y (Y-1, a identidade visual G.One VV do dono): a sentinela `regress_identidade_grafite_ambar` aferra a TABELA NOVA — o poço bg #08080A (o mesmo do launcher), o vidro #151517/#1E1E21 (-5 %, o mesmo alfa), a hairline ÂMBAR #4A3714 α0.60 que SAI da rampa neutra (o RGB É o do accentDim — o check novo liga border==accentDim), o accent2 #FF6B00 MAIS quente que o accent (a tinta BG ≥4,5:1 sobre ele) e o glow #FF3D00 α0.25 exatos; `theme_tabela_spec_g_exata` com os exatos novos + os 2 tokens novos; `hierQuadsAmbar` com o discriminador de alfa (a border tem o MESMO RGB do accentDim com α0.60 — o fill da seleção é α1); os compostos do c33 recalculam via blendOver sozinhos (o literal do fundo 8,8,10 e o sólida 21 com nota); o clear dos impostores lê o TOKEN. Mutações da Y-1 (M-Y1a/b/c/d) coladas no RELATORIO-0.11-Y-Y1.md.
+
 ## R-029 · o caret desenhado desalinhado relativamente ao texto da linha tocada (FASE 0.9.6-MASTER · GRUPO UI · E5)
 
 | campo | valor |

@@ -28,10 +28,11 @@
 namespace vv {
 
 // Tokens do tema — 0.9.6.10 (GRUPO UI): ALIASES da tabela única
-// (ui/Theme.h, spec G grafite+âmbar+vidro). A pele inteira da app muda num
-// só sítio: BG=bg #0E0E10 α1, PANEL=surface #161618 α0.80 (VIDRO 80%),
-// LINE=border #2E2E32 α0.55, TEXT=text1 #ECECEE, ACCENT=accent #FFB020
-// (O ÂMBAR — a identidade spec G), WARN=warn #FF8A3D (laranja ≠ âmbar).
+// (ui/Theme.h, recalibrada 0.11-Y: o poço #08080A + a chama). A pele
+// inteira da app muda num só sítio: BG=bg #08080A α1, PANEL=surface
+// #151517 α0.80 (VIDRO 80%), LINE=border #4A3714 α0.60 (a hairline ÂMBAR
+// — a aresta quente do cristal), TEXT=text1 #ECECEE, ACCENT=accent
+// #FFB020 (O ÂMBAR — a identidade), WARN=warn #FF8A3D (laranja ≠ âmbar).
 // O struct completo com text2/accentInk/accentDim/danger/ok/scrim/
 // glassEdge/glassTop/eixos + a auditoria do vidro (blendOver/
 // contrastOnGlass) vive em Theme.h. OS ALPHAS VÊM CONOSCO (o pass UI
@@ -40,12 +41,16 @@ namespace theme {
 // (arrays C++ não se copiam em constexpr — MESMAS expressões do Theme.h para
 // igualdade bit-a-bit, LIGADAS por static_assert: mudar Theme.h sem aqui =
 // build MORRE — a fonte única continua sendo Theme.h)
-constexpr f32 BG[4]     = {14.0f / 255.0f, 14.0f / 255.0f, 16.0f / 255.0f, 1.0f};       // bg #0E0E10
-constexpr f32 PANEL[4]  = {22.0f / 255.0f, 22.0f / 255.0f, 24.0f / 255.0f, 0.80f};    // surface #161618 α0.80
-constexpr f32 LINE[4]   = {46.0f / 255.0f, 46.0f / 255.0f, 50.0f / 255.0f, 0.55f};    // border #2E2E32 α0.55
+constexpr f32 BG[4]     = {8.0f / 255.0f, 8.0f / 255.0f, 10.0f / 255.0f, 1.0f};       // bg #08080A (O POÇO — 0.11-Y)
+constexpr f32 PANEL[4]  = {21.0f / 255.0f, 21.0f / 255.0f, 23.0f / 255.0f, 0.80f};    // surface #151517 α0.80
+constexpr f32 LINE[4]   = {74.0f / 255.0f, 55.0f / 255.0f, 20.0f / 255.0f, 0.60f};    // border #4A3714 α0.60 (âmbar)
 constexpr f32 TEXT[4]   = {236.0f / 255.0f, 236.0f / 255.0f, 238.0f / 255.0f, 1.0f};  // text1 #ECECEE
 constexpr f32 ACCENT[4] = {255.0f / 255.0f, 176.0f / 255.0f, 32.0f / 255.0f, 1.0f};  // = accent (O ÂMBAR)
 constexpr f32 WARN[4]   = {255.0f / 255.0f, 138.0f / 255.0f, 61.0f / 255.0f, 1.0f};   // warn #FF8A3D (laranja)
+// 0.11-Y (Y-1): os DOIS tokens novos da chama — o gradiente dos botões
+// ativos (ACCENT topo → ACCENT2 fundo) e o glow de foco composto
+constexpr f32 ACCENT2[4]= {255.0f / 255.0f, 107.0f / 255.0f, 0.0f, 1.0f};             // accent2 #FF6B00 (O FOGO)
+constexpr f32 GLOW[4]   = {255.0f / 255.0f, 61.0f / 255.0f, 0.0f, 0.25f};             // glow #FF3D00 α0.25
 static_assert(BG[0] == theme::kTheme.bg[0] && BG[2] == theme::kTheme.bg[2],
               "BG desincronizado de Theme.h — fonte única violada");
 static_assert(PANEL[1] == theme::kTheme.surface[1] &&
@@ -63,6 +68,16 @@ static_assert(ACCENT[0] == theme::kTheme.accent[0] &&
                   ACCENT[2] == theme::kTheme.accent[2] &&
                   ACCENT[3] == theme::kTheme.accent[3],
               "ACCENT desincronizado de Theme.h — fonte única violada");
+static_assert(ACCENT2[0] == theme::kTheme.accent2[0] &&
+                  ACCENT2[1] == theme::kTheme.accent2[1] &&
+                  ACCENT2[2] == theme::kTheme.accent2[2] &&
+                  ACCENT2[3] == theme::kTheme.accent2[3],
+              "ACCENT2 desincronizado de Theme.h — fonte única violada");
+static_assert(GLOW[0] == theme::kTheme.glow[0] &&
+                  GLOW[1] == theme::kTheme.glow[1] &&
+                  GLOW[2] == theme::kTheme.glow[2] &&
+                  GLOW[3] == theme::kTheme.glow[3],
+              "GLOW desincronizado de Theme.h — fonte única violada");
 }
 
 // UiRect vive em ui/ScrollMath.h (matemática GL-free partilhada)
@@ -97,6 +112,22 @@ public:
     // — a auditoria de rects 0.9.0 conta o bounding box, que fica EXATO).
     void panelRounded(f32 x, f32 y, f32 w, f32 h, f32 radius,
                       const f32 color[4]);
+    // 0.11-Y (Y-1) — o painel arredondado com GRADIENTE VERTICAL: a MESMA
+    // escadaria do panelRounded, cada peça amostrada na SUA posição do
+    // span total (o gradiente contínuo accent→accent2 dos botões ATIVOS).
+    // top/bottom = as cores nos extremos do rect INTEIRO.
+    void panelRoundedGradientV(f32 x, f32 y, f32 w, f32 h, f32 radius,
+                               const f32 top[4], const f32 bottom[4]);
+    // 0.11-Y (Y-1) — A LINHA DO TOPO DO VIDRO (o brilho do cristal): 1dp
+    // de altura com o RGB do glow a 20% — desenhada DEPOIS de
+    // panelRounded/frameRounded (os primitivos de sempre ficam INTACTOS;
+    // o chamador do painel de cristal acrescenta esta linha por cima)
+    void glassTopLine(f32 x, f32 y, f32 w);
+    // 0.11-Y (Y-1) — O GLOW DE FOCO: 2 quads ATRÁS do elemento com alpha
+    // DECRESCENTE para fora (exp 4dp a glow.a×0.8, exp 8dp a glow.a×0.4 —
+    // a composição dos dois é a simulação honesta do blur, sem blur real).
+    // O chamador desenha ANTES do elemento (a ordem de pintura manda).
+    void focusGlow(f32 x, f32 y, f32 w, f32 h);
     // 0.9.0 — moldura com cantos curvos: 4 arestas retas (panel) + 4 arcos
     // (polilinhas no LINE batch com a MESMA espessura do traço). Para cards
     // e botões outline do design system.
@@ -432,6 +463,12 @@ private:
     // emite um quad recortado pelo clip_ (panel/label passam por aqui)
     bool emitTo(QuadBatch& b, f32 x, f32 y, f32 w, f32 h,
                 f32 u0, f32 v0, f32 u1, f32 v1, const f32 color[4]);
+    // 0.11-Y (Y-1): emite um quad com GRADIENTE vertical recortado — as
+    // cores de topo/fundo são AMOSTRADAS do span [spanY0,spanY1] nas
+    // posições clipadas (o gradiente contínuo sob qualquer recorte)
+    bool emitGradientV(QuadBatch& b, f32 x, f32 y, f32 w, f32 h,
+                       f32 spanY0, f32 spanY1, const f32 top[4],
+                       const f32 bottom[4]);
     // 0.8.6: glifo com CANTOS EXPLÍCITOS (itálico) — o clip é aproximado
     // pelo bounding rect do glifo e os cantos seguem a MESMA xform de rotação
     void emitGlyphCorners(QuadBatch& b, const f32 px[6], const f32 py[6],

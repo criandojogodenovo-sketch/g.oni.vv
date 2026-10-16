@@ -1,6 +1,6 @@
 # CODEMAP.md — onde vive o quê
 
-Atualizado: 2026-10-17 · vc: 78
+Atualizado: 2026-10-17 · vc: 79
 
 > Convenção de paths: TODOS os caminhos deste ficheiro são relativos à
 > RAIZ do repo (exemplo: o registo da linguagem vive em
@@ -50,8 +50,11 @@ Atualizado: 2026-10-17 · vc: 78
   PNG do impostor sob demanda — o pico de RAM é UM bloco, R-041),
   AstcCompressor/Etc2Compressor + vendor/.
 - **app/src/main/cpp/ui/** — a apresentação: EditorUi, EditorLayout.h (as
-  constantes — InspRow, as faixas k*Base), UiContext, UiEditor (as ops
-  de árvore PURAS), Theme.h (as ÚNICAS cores), ViewportChrome,
+  constantes — InspRow, as faixas k*Base), UiContext (com as primitivas
+  do cristal da 0.11-Y: panelRoundedGradientV / glassTopLine /
+  focusGlow + o QuadBatch::quadGradientV), UiEditor (as ops
+  de árvore PURAS), Theme.h (as ÚNICAS cores — a tabela 0.11-Y: o poço
+  #08080A + a chama accent2/glow), ViewportChrome,
   BottomPanel, SettingsPage, ScriptEditor, DocsScreen, Gizmo, hierarquia.
 - **app/src/main/cpp/components/** — os componentes do TIC: MeshRenderer
   (+ `impostorDistance`), CameraComp, Body3D, RigidBody3D, AudioPlayer,
@@ -63,7 +66,10 @@ Atualizado: 2026-10-17 · vc: 78
   (as sentinelas regress_*), test_ctx_pines.cpp (os pins dos índices da
   0.11-CTX), test_fase_y0_icone.cpp (os pins do ícone launcher da
   0.11-Y — adaptativo + legacy + o antigo removido + a ESCALA do G
-  medida nos PNG reais via stb_image), test_fase375b_impostors.cpp,
+  medida nos PNG reais via stb_image), test_fase_y1_tema.cpp (os pins
+  do TEMA da 0.11-Y — o poço #08080A + a chama accent2/glow + o
+  gradiente dos botões ativos + as primitivas do cristal),
+  test_fase375b_impostors.cpp,
   test_voni.cpp, test_bench.cpp,
   test_gmeshv3.cpp, voni_refgen.cpp (o gerador da referência), c33_virtual.cpp
   (o dispositivo virtual), CMakeLists.txt (a lista de fontes dos pins),

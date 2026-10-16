@@ -57,6 +57,7 @@
 #include "core/Scene.h"
 #include "core/SceneSerializer.h"
 #include "render/BlockMesh.h"
+#include "ui/Theme.h"   // 0.11-Y: o clear do beginFrame LÊ o token bg
 #include "render/GpuAssets.h"
 #include "render/Impostor.h"
 #include "render/Mesh.h"
@@ -505,13 +506,17 @@ TEST(fase375b_quad_mask_pixel) {
         EXPECT(std::memcmp(a, b, 4) == 0);          // a geometria é a MESMA
         EXPECT(a[3] == 0xFF);                        // opaca
     }
+    // o BG do beginFrame LIDO DO TOKEN (0.11-Y: o poço #08080A) — as
+    // provas de baixo comparam contra o token, não contra um literal
+    const u8 bgR = static_cast<u8>(vv::theme::kTheme.bg[0] * 255.0f + 0.5f);
+    const u8 bgG = static_cast<u8>(vv::theme::kTheme.bg[1] * 255.0f + 0.5f);
     // baixo (y = 20): com o MASK o fundo fica; sem o MASK o lit escreve
     for (u32 x : {20u, 32u, 44u}) {
         const u8* a = pxAt(withMask, x, 20);
         const u8* b = pxAt(noMask, x, 20);
         EXPECT(std::memcmp(a, b, 4) != 0);          // o discard FEZ diferença
-        // o fundo do beginFrame (o BG 0x14) permanece com o MASK
-        EXPECT(a[0] == 14 && a[1] == 14);   // o BG da casa (14,14,16)
+        // o fundo do beginFrame (o BG do token — o poço 0.11-Y) fica
+        EXPECT(a[0] == bgR && a[1] == bgG);   // o BG da casa (o token)
     }
     // (c) o depth do descartado NÃO escreve: um quad ATRÁS na região
     //     transparente passa o depth e desenha (o MASK não oclui o vazio)
@@ -533,7 +538,7 @@ TEST(fase375b_quad_mask_pixel) {
         EXPECT(a[3] == 0xFF);   // o segundo quad desenhou no vazio do 1.º
         // e o MESMO pixel no frame SÓ-A é o fundo (a prova de que a
         // diferença é do quad B atravessar o vazio descartado)
-        EXPECT(pxAt(withMask, 32, 25)[0] == 14);   // o BG (14,14,16)
+        EXPECT(pxAt(withMask, 32, 25)[0] == bgR);   // o BG (o token 0.11-Y)
     }
     glstub::fb::enabled = false;
     glstub::reset();

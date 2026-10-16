@@ -311,6 +311,133 @@ void UiContext::panelRounded(f32 x, f32 y, f32 w, f32 h, f32 radius,
     --auditComposite_;
 }
 
+// ---- 0.11-Y (Y-1) — O GRADIENTE VERTICAL (a chama dos botões ativos) ------
+// emite um quad com gradiente recortado: as cores são AMOSTRADAS do span
+// [spanY0,spanY1] nas posições clipadas (interpolação linear — amostrar no
+// ponto clipado == o gradiente verdadeiro do span completo sob o recorte).
+// A xform de rotação NÃO se aplica aqui (os gradientes da casa são
+// axis-aligned — os botões não rodam).
+bool UiContext::emitGradientV(QuadBatch& b, f32 x, f32 y, f32 w, f32 h,
+                              f32 spanY0, f32 spanY1, const f32 top[4],
+                              const f32 bottom[4]) {
+    scroll::Clipped cl;
+    if (!scroll::clipQuad(x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, clip_, cl)) {
+        return false;
+    }
+    const f32 span = spanY1 - spanY0;
+    const f32 t0 = span > 1e-6f
+                       ? (cl.y - spanY0) / span
+                       : 0.0f;   // posição do topo clipado no span
+    const f32 t1 = span > 1e-6f
+                       ? (cl.y + cl.h - spanY0) / span
+                       : 1.0f;   // posição do fundo clipado no span
+    f32 cTop[4], cBot[4];
+    for (int i = 0; i < 4; ++i) {
+        cTop[i] = top[i] + (bottom[i] - top[i]) * t0;
+        cBot[i] = top[i] + (bottom[i] - top[i]) * t1;
+    }
+    b.quadGradientV(cl.x, cl.y, cl.w, cl.h, cl.u0, cl.v0, cl.u1, cl.v1,
+                    cTop, cBot);
+    return true;
+}
+
+// a escadaria do panelRounded com GRADIENTE: cada peça é emitida por
+// emitGradientV com o SPAN do rect INTEIRO — o gradiente é contínuo
+// através das peças (o topo do painel é top, o fundo é bottom, sem
+// costuras). A mesma clampagem/clampa do raio do painel de sempre.
+void UiContext::panelRoundedGradientV(f32 x, f32 y, f32 w, f32 h, f32 radius,
+                                      const f32 top[4],
+                                      const f32 bottom[4]) {
+    if (auditing_ && auditComposite_ == 0) {
+        auditAdd_(layout::Entry::Panel, 0, x, y, w, h);
+    }
+    ++auditComposite_;   // a escadaria toda é UMA entrada (o bounding box)
+    if (w <= 0.0f || h <= 0.0f) {
+        --auditComposite_;
+        return;
+    }
+    const f32 half = (w < h ? w : h) * 0.5f;
+    const f32 r = radius < half ? (radius > 0.0f ? radius : 0.0f) : half;
+    if (r < 1.0f) {   // raio degenerado = rect cru com gradiente
+        const u32 fv0 = solids_.vertexCount();
+        emitGradientV(solids_, x, y, w, h, y, y + h, top, bottom);
+        const u32 fv1 = solids_.vertexCount();
+        if (fv1 > fv0) {
+            recordRun(solids_, 0u, fv0, fv1 - fv0);
+        }
+        --auditComposite_;
+        return;
+    }
+    const u32 fv0 = solids_.vertexCount();
+    // corpo (cruz central): coluna central inteira + 2 faixas laterais —
+    // TODAS com o span completo (o gradiente não tem costura)
+    emitGradientV(solids_, x + r, y, w - 2.0f * r, h, y, y + h, top, bottom);
+    emitGradientV(solids_, x, y + r, r, h - 2.0f * r, y, y + h, top, bottom);
+    emitGradientV(solids_, x + w - r, y + r, r, h - 2.0f * r, y, y + h,
+                  top, bottom);
+    // 4 cantos: a MESMA escadaria do panelRounded, cada faixa com o span
+    const f32 stepH = r / static_cast<f32>(kCornerSteps);
+    for (int i = 0; i < kCornerSteps; ++i) {
+        const f32 dy0 = static_cast<f32>(i) * stepH;
+        const f32 dy1 = static_cast<f32>(i + 1) * stepH;
+        const f32 in1 = cornerInset(r, dy1);   // largura no fundo (maior)
+        const f32 sh_ = dy1 - dy0;
+        const f32 sx = in1;
+        const f32 sw = r - in1;
+        if (sw > 0.05f) {
+            emitGradientV(solids_, x + sx, y + dy0, sw, sh_, y, y + h,
+                          top, bottom);   // top-left
+            emitGradientV(solids_, x + w - r, y + dy0, r - sx, sh_, y, y + h,
+                          top, bottom);   // top-right
+            emitGradientV(solids_, x + sx, y + h - dy1, sw, sh_, y, y + h,
+                          top, bottom);   // bottom-left
+            emitGradientV(solids_, x + w - r, y + h - dy1, r - sx, sh_,
+                          y, y + h, top, bottom);   // bottom-right
+        }
+    }
+    const u32 fv1 = solids_.vertexCount();
+    if (fv1 > fv0) {
+        recordRun(solids_, 0u, fv0, fv1 - fv0);   // z-order real (0.7.4)
+    }
+    --auditComposite_;
+}
+
+// 0.11-Y (Y-1) — A LINHA DO TOPO DO VIDRO: 1dp com o RGB do glow a 20%
+// (o brilho do cristal; o chamador desenha DEPOIS do panelRounded/frame)
+void UiContext::glassTopLine(f32 x, f32 y, f32 w) {
+    const f32 line[4] = {theme::GLOW[0], theme::GLOW[1], theme::GLOW[2],
+                         0.20f};   // o 20% do prompt da Y-1
+    const f32 h = theme::dp(1.0f);
+    const u32 fv = solids_.vertexCount();
+    if (emitTo(solids_, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, line)) {
+        recordRun(solids_, 0u, fv, 6u);
+    }
+}
+
+// 0.11-Y (Y-1) — O GLOW DE FOCO: 2 quads α DECRESCENTE para fora (4dp a
+// glow.a×0.8 = 0.20; 8dp a glow.a×0.4 = 0.10) — a composição simula o
+// blur do brilho sem blur real (a lei da casa: quads, não shaders)
+void UiContext::focusGlow(f32 x, f32 y, f32 w, f32 h) {
+    const f32 aIn = theme::GLOW[3] * 0.8f;    // 0.20
+    const f32 aOut = theme::GLOW[3] * 0.4f;   // 0.10
+    const f32 cIn[4] = {theme::GLOW[0], theme::GLOW[1], theme::GLOW[2], aIn};
+    const f32 cOut[4] = {theme::GLOW[0], theme::GLOW[1], theme::GLOW[2],
+                         aOut};
+    const f32 in = theme::dp(4.0f);
+    const f32 out = theme::dp(8.0f);
+    const u32 fv = solids_.vertexCount();
+    // o EXTERIOR primeiro (por baixo), o interior por cima — a alpha
+    // composta dos dois faz o degrau do brilho
+    emitTo(solids_, x - out, y - out, w + 2.0f * out, h + 2.0f * out,
+           0.0f, 0.0f, 1.0f, 1.0f, cOut);
+    emitTo(solids_, x - in, y - in, w + 2.0f * in, h + 2.0f * in,
+           0.0f, 0.0f, 1.0f, 1.0f, cIn);
+    const u32 fv1 = solids_.vertexCount();
+    if (fv1 > fv) {
+        recordRun(solids_, 0u, fv, fv1 - fv);
+    }
+}
+
 void UiContext::frameRounded(f32 x, f32 y, f32 w, f32 h, f32 t, f32 radius,
                              const f32 color[4]) {
     if (auditing_ && auditComposite_ == 0) {
@@ -549,6 +676,25 @@ bool UiContext::dragClaim(u64 id, f32 x, f32 y, f32 w, f32 h) {
     return active_ == id;
 }
 
+// 0.11-Y (Y-1) — o VISUAL DO BOTÃO: o estado ATIVO (held) é A CHAMA —
+// glow de foco atrás (2 quads α decrescente) + o FILL com o gradiente
+// VERTICAL accent→accent2 (a spec da Y-1). O repouso continua o vidro
+// (PANEL) de sempre. Compartilhado pelas duas passagens (audit/não-audit).
+namespace {
+void drawButtonVisual(UiContext& ui, f32 x, f32 y, f32 w, f32 h, bool held) {
+    if (held) {
+        ui.focusGlow(x, y, w, h);
+        ui.panelRoundedGradientV(x, y, w, h, theme::dp(theme::kRadiusCard),
+                                 theme::ACCENT, theme::ACCENT2);
+    } else {
+        ui.panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard),
+                        theme::PANEL);
+    }
+    ui.frameRounded(x, y, w, h, 1.0f, theme::dp(theme::kRadiusCard),
+                    theme::LINE);
+}
+} // namespace
+
 bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
     // 0.9.6.6 (GRUPO C): o texto do botão mede-se pelo CONTEXTO (fontWidth/
     // textMetrics — textK incluído). ANTES media-se pelo ATLAS CRU
@@ -562,15 +708,14 @@ bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
         const bool pressedInner = widgetHit(id, x, y, w, h);
         const bool downInner = input_ && input_->down(0);
         const bool heldInner = (active_ == id && downInner);
-        const f32* bg = heldInner ? theme::ACCENT : theme::PANEL;
         const f32* txt = heldInner ? theme::BG : theme::TEXT;
         // 0.9.6.6 (GRUPO C · CANTOS SUAVIZADOS): o button() é o CHOKE POINT
         // de TODOS os botões da app — cantos 8dp (spec A: «raios 8dp
         // cards/botões») por AQUI, um só sítio. (o raio é clampado a
         // min(w,h)/2 pelo panelRounded — teclas finas ficam pill sem medo)
-        panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard), bg);
-        frameRounded(x, y, w, h, 1.0f, theme::dp(theme::kRadiusCard),
-                     theme::LINE);
+        // 0.11-Y (Y-1): o visual mudou para o helper de cima (a chama no
+        // ativo: glow + gradiente accent→accent2)
+        drawButtonVisual(*this, x, y, w, h, heldInner);
         if (font_ && font_->ok() && text) {
             char fit[256];
             const char* shown = text;
@@ -600,12 +745,10 @@ bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
     const bool pressed = widgetHit(id, x, y, w, h);
     const bool down = input_ && input_->down(0);
     const bool held = (active_ == id && down);
-    const f32* bg  = held ? theme::ACCENT : theme::PANEL;
-    const f32* txt = held ? theme::BG     : theme::TEXT;
+    const f32* txt = held ? theme::BG : theme::TEXT;
     // 0.9.6.6 (GRUPO C · CANTOS SUAVIZADOS): idem — 8dp no choke point
-    panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard), bg);
-    frameRounded(x, y, w, h, 1.0f, theme::dp(theme::kRadiusCard),
-                 theme::LINE);
+    // 0.11-Y (Y-1): o MESMO helper da passagem de audit (a chama no ativo)
+    drawButtonVisual(*this, x, y, w, h, held);
 
     if (font_ && font_->ok() && text) {
         // F4.2/B2: o texto do botão nunca sai do rect — nomes longos de TIC

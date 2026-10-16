@@ -334,6 +334,10 @@ add_executable(test_core
         # 0.11-Y Y-0: os pins do ÍCONE no launcher (adaptativo + legacy +
         # manifest + o antigo 0.9.6.10 removido — test_fase_y0_icone.cpp)
         test_fase_y0_icone.cpp
+        # 0.11-Y Y-1: os pins do TEMA (o poço #08080A + a chama accent2/
+        # glow + o gradiente dos ativos + as primitivas do cristal —
+        # test_fase_y1_tema.cpp)
+        test_fase_y1_tema.cpp
         test_sentinels.cpp)
 
 

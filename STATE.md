@@ -1,8 +1,9 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-17 · vc: 78 · Último commit: este (o Y-0-FIX, a
-escala do G no launcher; antes: a2d2248 o Y-0, b577dea o fix do
-ctx_refs, 85c4f94 o FECHO da 0.11-CTX)
+Atualizado: 2026-10-17 · vc: 79 · Último commit: este (o Y-1, o TEMA —
+o poço #08080A + a chama accent2/glow no ecrã; antes: 25c1348 o
+Y-0-FIX, a2d2248 o Y-0, b577dea o fix do ctx_refs, 85c4f94 o FECHO da
+0.11-CTX)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -10,10 +11,17 @@ ctx_refs, 85c4f94 o FECHO da 0.11-CTX)
 
 ## §1 Onde estamos
 
-- **Campanha atual: 0.11-Y (identidade visual) · Sub-fase: Y-0-FIX (a
-  escala do G no launcher) — FECHADA** (este commit; o CI é o árbitro).
-  Seguem-se Y-1 (o tema), Y-2 (o layout), Y-3 (os cartões) — cada uma
-  só com CONTINUAR do dono.
+- **Campanha atual: 0.11-Y (identidade visual) · Sub-fase: Y-1 (o TEMA) —
+  FECHADA** (este commit; o CI é o árbitro). Seguem-se Y-2 (o layout)
+  e Y-3 (os cartões) — por autorização expressa do dono («faz todas as
+  fases e só para no fim da campanha Y»), arrancam logo o CI verde.
+- **Y-1 (o tema) — FECHADA com CI verde** (este commit): o poço
+  #08080A (o clear lê o token), o vidro -5 % com o mesmo alfa, a
+  hairline ÂMBAR #4A3714 α0.60, os tokens NOVOS accent2 #FF6B00 e
+  glow #FF3D00 α0.25; o botão ATIVO é a chama (glow de foco 2 quads α
+  decrescente + gradiente vertical accent→accent2 por vértice, zero
+  mudanças de shader); a glassTopLine (1 dp, glow a 20 %) pronta para
+  os cartões da Y-3; pins y1_* ×5 + M-Y1a/b/c/d vermelho→verde.
 - **Y-0 (o ícone no launcher) — FECHADA com CI verde** (a2d2248) e o
   pin C33 do dono apanhou o bug da escala (o G a ~25 %; o contrato
   ~65 %) — o Y-0-FIX é este commit (a bbox de escala passa a ser o
@@ -66,6 +74,14 @@ ctx_refs, 85c4f94 o FECHO da 0.11-CTX)
   segura (39,7 % do canvas; legacy 65 % do lado); 15 PNGs regenerados,
   XMLs/manifest intactos; pin y0_escala NOVO (mede os PNG reais via
   stb_image) — pins y0_* ×8; M-Y0-fix vermelho→reposto→verde.
+- 0.11-Y Y-1 Tema ✅ vc 79 — o poço #08080A (o clear lê o token) + o
+  vidro #151517/#1E1E21 (-5 %, mesmo alfa) + a hairline ÂMBAR
+  #4A3714 α0.60 + accent2 #FF6B00 e glow #FF3D00 α0.25 NOVOS; o botão
+  ativo é a chama (glow 2 quads α decrescente + gradiente vertical
+  accent→accent2 por vértice, zero mudanças de shader); glassTopLine
+  (1 dp, 20 %) pronta para a Y-3; pins y1_* ×5 (TU novo test_fase_y1_tema.cpp)
+  + M-Y1a/b/c/d vermelho→reposto→verde; R-028 recalibrada (a border
+  sai da rampa neutra — é o âmbar do accentDim).
 
 ## §3 O que está PENDENTE (por ordem)
 
@@ -145,6 +161,9 @@ Commits puramente documentais não são afetados.
 - `docs/RELATORIO-0.11-Y-Y0-FIX.md` — o relatório do Y-0-FIX (a escala
   do G: a medição do C33, a regra do sólido, o pin y0_escala, a
   M-Y0-fix).
+- `docs/RELATORIO-0.11-Y-Y1.md` — o relatório da Y-1 (o tema: o poço,
+  a chama, o gradiente por vértice, as primitivas do cristal, as
+  mutações M-Y1a..d).
 - `scripts/y0_gen_icons.py` — o gerador dos PNGs do launcher a partir
   da fonte do dono (o threshold de luminância documentado lá dentro).
 - `docs/arquivo/` — os relatórios das campanhas FECHADAS (71, git mv;

@@ -37,6 +37,25 @@ public:
         verts_.insert(verts_.end(), v, v + 6);
     }
 
+    // 0.11-Y (Y-1) — quad com GRADIENTE VERTICAL por vértice: os vértices
+    // de TOPO (0/3/5) levam a cor `top`, os de FUNDO (1/2/4) a cor `bottom`
+    // — o shader do pass UI (vColor varying) interpola o resto DE GRAÇA
+    // (zero mudanças de shader). O gradiente vive no ESPAÇO do quad: quem
+    // clipa amostra as cores nas posições clipadas (UiContext::emitGradientV).
+    void quadGradientV(f32 x, f32 y, f32 w, f32 h,
+                       f32 u0, f32 v0, f32 u1, f32 v1,
+                       const f32 top[4], const f32 bottom[4]) {
+        const QuadVertex v[6] = {
+            {x,     y,     u0, v0, top[0],    top[1],    top[2],    top[3]},
+            {x,     y + h, u0, v1, bottom[0], bottom[1], bottom[2], bottom[3]},
+            {x + w, y + h, u1, v1, bottom[0], bottom[1], bottom[2], bottom[3]},
+            {x,     y,     u0, v0, top[0],    top[1],    top[2],    top[3]},
+            {x + w, y + h, u1, v1, bottom[0], bottom[1], bottom[2], bottom[3]},
+            {x + w, y,     u1, v0, top[0],    top[1],    top[2],    top[3]},
+        };
+        verts_.insert(verts_.end(), v, v + 6);
+    }
+
     // 0.8.6 — quad com CANTOS EXPLÍCITOS (rotação de elementos de UI): os 6
     // vértices chegam já transformados (px/py); uv/cor seguem a convenção
     // (p0/p3 = topo-esq com uv (u0,v0); p1 = fundo-esq; p2/p4 = fundo-dir;

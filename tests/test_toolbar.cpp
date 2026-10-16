@@ -269,9 +269,13 @@ TEST(icones_pelo_nome_funcional) {
 // RECALIBRADO 0.9.6.10 (GRUPO UI · A REESCRITA DA APRESENTAÇÃO): os
 // valores EXATOS eram os da spec F (mono+vidro — accent BRANCO #F5F5F5);
 // o dono DECIDIU a Paleta A OFICIAL depois de ver o mono no device (os
-// fills brancos cegantes do anti-exemplo): GRAFITE+ÂMBAR+VIDRO
-// (#0E0E10/#161618/#202023/#2E2E32 + accent ÂMBAR #FFB020 + accentDim
-// #4A3714 + warn LARANJA #FF8A3D ≠ accent). A asserção continua EXATA.
+// fills brancos cegantes do anti-exemplo): GRAFITE+ÂMBAR+VIDRO.
+// RECALIBRADO 0.11-Y (Y-1 · a identidade visual G.One VV): o POÇO #08080A
+// (o mesmo do launcher), o vidro #151517/#1E1E21 (-5%), a hairline ÂMBAR
+// #4A3714 α0.60 (o RGB do accentDim — a aresta quente do cristal) + os
+// DOIS tokens novos: accent2 #FF6B00 (O FOGO — o gradiente dos ativos) e
+// glow #FF3D00 α0.25 (o brilho do foco/da linha do topo). A asserção
+// continua EXATA.
 
 TEST(theme_tabela_spec_g_exata) {
     // accent — O ÂMBAR: #FFB020 (o mono morreu com os fills brancos)
@@ -280,18 +284,33 @@ TEST(theme_tabela_spec_g_exata) {
     EXPECT(nearEqF(theme::kTheme.accent[2], 32.0f / 255.0f, 1e-4f));
     // O AZUL MORREU no accent: B é o canal MENOR (o âmbar é quente)
     EXPECT(theme::kTheme.accent[2] < theme::kTheme.accent[1]);
-    // bg #0E0E10 · surface #161618 · surface2 #202023 · border #2E2E32
-    // (a rampa GRAFITE — o tinge frio ≤4/255 no canal B)
-    EXPECT(nearEqF(theme::kTheme.bg[0], 14.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.surface[0], 22.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.surface2[1], 32.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.border[2], 50.0f / 255.0f, 1e-4f));
+    // bg #08080A · surface #151517 · surface2 #1E1E21 (0.11-Y: o POÇO e
+    // o vidro -5%; a rampa fria mantém-se nos NEUTROS)
+    EXPECT(nearEqF(theme::kTheme.bg[0], 8.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.surface[0], 21.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.surface2[1], 30.0f / 255.0f, 1e-4f));
+    // a hairline ÂMBAR (0.11-Y): o RGB É o do accentDim (#4A3714 — o sub-
+    // tom quente da aresta do cristal) com α0.60
+    EXPECT(nearEqF(theme::kTheme.border[0], 74.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.border[1], 55.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.border[2], 20.0f / 255.0f, 1e-4f));
     // O VIDRO (spec G): surface α0.80 (A DECISÃO DO DONO) · surface2 α0.86
-    // · border α0.55 · bg opaco
+    // · border α0.60 (0.11-Y) · bg opaco
     EXPECT(nearEqF(theme::kTheme.surface[3], 0.80f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.surface2[3], 0.86f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.border[3], 0.55f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.border[3], 0.60f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.bg[3], 1.0f, 1e-4f));
+    // 0.11-Y (Y-1) — os DOIS TOKENS NOVOS da chama: accent2 #FF6B00
+    // (O FOGO — a base do gradiente dos ativos; quente: R>G>B=0) e glow
+    // #FF3D00 α0.25 (o brilho do foco e da linha do topo)
+    EXPECT(nearEqF(theme::kTheme.accent2[0], 255.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.accent2[1], 107.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.accent2[2], 0.0f, 1e-4f));
+    EXPECT(theme::kTheme.accent2[1] < theme::kTheme.accent[1]);  // o fogo desce do âmbar
+    EXPECT(nearEqF(theme::kTheme.glow[0], 255.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.glow[1], 61.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.glow[2], 0.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.glow[3], 0.25f, 1e-4f));
     // o BORDO e o HIGHLIGHT do vidro (#FFFFFF1F / #FFFFFF0A — a spec G)
     EXPECT(nearEqF(theme::kTheme.glassEdge[0], 1.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.glassEdge[3], 31.0f / 255.0f, 1e-4f));

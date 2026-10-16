@@ -1209,6 +1209,9 @@ TEST(uieditor_selecao_unica_audit_id_pendurado_nao_e_selecao) {
 // o contador de QUADS âmbar (a LINHA da hierarquia acesa): os sólidos com
 // a cor accentDim (o fill + a barra de 3dp da linha selecionada). A linha
 // âmbar é DERIVADA — este contador é a prova VISUAL do highlight.
+// RECALIBRADO 0.11-Y: a hairline BORDER passou a ter o MESMO RGB do
+// accentDim (a aresta âmbar do cristal) com α0.60 — o discriminador do
+// FILL da seleção é o alfa CHEIO (1.0; a hairline é 0.60)
 int hierQuadsAmbar(const Env& e) {
     int n = 0;
     const QuadBatch& b = e.ui.solidsForTest();
@@ -1217,7 +1220,8 @@ int hierQuadsAmbar(const Env& e) {
     for (u32 i = 0; i + 5 < q; i += 6) {
         const bool cor = std::fabs(v[i].r - theme::kTheme.accentDim[0]) < 0.01f &&
                          std::fabs(v[i].g - theme::kTheme.accentDim[1]) < 0.01f &&
-                         std::fabs(v[i].b - theme::kTheme.accentDim[2]) < 0.01f;
+                         std::fabs(v[i].b - theme::kTheme.accentDim[2]) < 0.01f &&
+                         std::fabs(v[i].a - 1.0f) < 0.01f;
         if (cor) {
             ++n;   // o FILL accentDim (a barra lateral é o accent cheio)
         }

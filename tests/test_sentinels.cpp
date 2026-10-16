@@ -3698,16 +3698,20 @@ TEST(regress_barra_simbolos_ime) {
 // RECALIBRADA 0.9.6.10 (GRUPO UI · A REESCRITA DA APRESENTAÇÃO, ordem
 // expressa do dono): o mono do Grupo F (accent BRANCO #F5F5F5) morreu no
 // device — os fills do accent eram BLOCOS BRANCOS CEGANTES (o anti-exemplo
-// da imagem 2 do dono). A DECISÃO: Paleta A OFICIAL grafite+âmbar+vidro
-// (bg #0E0E10 · surface #161618 α0.80 · accent ÂMBAR #FFB020 · accentDim
-// #4A3714 · warn LARANJA #FF8A3D ≠ accent · ZERO AZUL no chrome).
-//   - regress_identidade_grafite_ambar — (1) a TABELA grafite a sério
-//     (os tokens de rampa NEUTROS-frios com B-R ≤ 4/255; o AZUL morto no
-//     chrome TODO); (2) O ÂMBAR (accent quente: R>G>B; accentPress mais
-//     escuro; a tinta ESCURA sobre o fill, 10,5:1); (3) O VIDRO α0.80
+// da imagem 2 do dono). A DECISÃO: Paleta A OFICIAL grafite+âmbar+vidro.
+// RECALIBRADA 0.11-Y (Y-1 · a identidade visual G.One VV): o POÇO #08080A
+// (o mesmo do launcher), a hairline ÂMBAR #4A3714 α0.60 SAI da rampa
+// neutra (a aresta quente do cristal — o RGB é o do accentDim por
+// contrato) e entram os DOIS tokens novos: accent2 #FF6B00 (O FOGO —
+// quente, a base do gradiente dos ativos) e glow #FF3D00 α0.25.
+//   - regress_identidade_grafite_ambar — (1) a TABELA (os tokens NEUTROS
+//     mantêm a rampa fria R==G, B-R ≤ 8; o AZUL morto no chrome TODO; a
+//     borda É o âmbar do accentDim); (2) O ÂMBAR (accent quente: R>G>B;
+//     accentPress mais escuro; a tinta ESCURA sobre o fill, 10,5:1; o
+//     accent2 MAIS QUENTE que o accent); (3) O VIDRO α0.80
 //     com a auditoria honesta (contrastOnGlassReal no caso REAL ≥4,5;
 //     contrastOnGlass no patológico para o que PODE flutuar); (4) a
-//     paleta V.ONI (conteúdo — a exceção documentada) no grafite; (5) o
+//     paleta V.ONI (conteúdo — a exceção documentada) no poço; (5) o
 //     blendOver puro; (6) os ALIASES ligados bit-a-bit; (7) o WARN
 //     LARANJA distinto do accent (a regra «nunca igual ao acento»).
 // ============================================================================
@@ -3723,17 +3727,23 @@ TEST(regress_identidade_grafite_ambar) {
     {
         const f32* rampa[] = {
             theme::kTheme.bg,      theme::kTheme.surface,
-            theme::kTheme.surface2, theme::kTheme.border,
-            theme::kTheme.text1,   theme::kTheme.text2,
-            theme::kTheme.accentInk};
-        for (int i = 0; i < 7; ++i) {
+            theme::kTheme.surface2, theme::kTheme.text1,
+            theme::kTheme.text2,   theme::kTheme.accentInk};
+        for (int i = 0; i < 6; ++i) {
             const f32 dRG = std::abs(rampa[i][0] - rampa[i][1]) * 255.0f;
             const f32 dB = (rampa[i][2] - rampa[i][0]) * 255.0f;
             EXPECT(dRG <= 2.0f);            // R==G (zero croma quente)
             EXPECT(dB >= -1.0f && dB <= 8.0f);   // o tinge grafite (frio, leve — o text2 #A6A6AD tem 7)
         }
+        // 0.11-Y: a BORDA saiu da rampa neutra — É O ÂMBAR da aresta do
+        // cristal: o RGB É o do accentDim (o contrato do sub-tom quente)
+        EXPECT(theme::kTheme.border[0] == theme::kTheme.accentDim[0]);
+        EXPECT(theme::kTheme.border[1] == theme::kTheme.accentDim[1]);
+        EXPECT(theme::kTheme.border[2] == theme::kTheme.accentDim[2]);
+        EXPECT(nearEqF(theme::kTheme.border[3], 0.60f, 1e-4f));
         // ZERO AZUL no chrome: nenhum token de chrome com B dominante
-        // (o azul #2196F3 da spec A e o navy da 0.9.0 morreram)
+        // (o azul #2196F3 da spec A e o navy da 0.9.0 morreram) — a BORDA
+        // continua no chrome (agora âmbar: R dominante, B morre à mesma)
         const f32* chrome[] = {
             theme::kTheme.bg,       theme::kTheme.surface,
             theme::kTheme.surface2, theme::kTheme.border,
@@ -3747,9 +3757,10 @@ TEST(regress_identidade_grafite_ambar) {
             // nenhum chrome com B−R > 25/255
             EXPECT((chrome[i][2] - chrome[i][0]) * 255.0f <= 25.0f);
         }
-        // os valores EXATOS da rampa (a decisão do dono — spec G)
-        EXPECT(nearEqF(theme::kTheme.bg[0], 14.0f / 255.0f, 1e-4f));
-        EXPECT(nearEqF(theme::kTheme.surface[0], 22.0f / 255.0f, 1e-4f));
+        // os valores EXATOS da rampa (a decisão do dono — spec G 0.9.6.10,
+        // o poço 0.11-Y)
+        EXPECT(nearEqF(theme::kTheme.bg[0], 8.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.surface[0], 21.0f / 255.0f, 1e-4f));
     }
 
     // ---- (2) O ÂMBAR: quente, com tinta escura e press mais escuro -----
@@ -3767,6 +3778,19 @@ TEST(regress_identidade_grafite_ambar) {
         EXPECT(nearEqF(theme::kTheme.accentDim[0], 74.0f / 255.0f, 1e-4f));
         EXPECT(theme::contrastRatio(theme::kTheme.text1,
                                     theme::kTheme.accentDim) >= 4.5f);
+        // 0.11-Y — O FOGO (accent2 #FF6B00): MAIS quente que o accent
+        // (o G desce de 176 para 107, o B morre) — a base do gradiente
+        // dos ativos; a tinta escura segura o piso também SOBRE ele
+        EXPECT(theme::kTheme.accent2[0] > theme::kTheme.accent2[1]);
+        EXPECT(theme::kTheme.accent2[1] > theme::kTheme.accent2[2]);
+        EXPECT(nearEqF(theme::kTheme.accent2[1], 107.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.accent2[2], 0.0f, 1e-4f));
+        EXPECT(theme::contrastRatio(theme::kTheme.bg,
+                                    theme::kTheme.accent2) >= 4.5f);
+        // 0.11-Y — O GLOW (#FF3D00 α0.25): o brilho da chama, decorativo
+        // (nunca texto em cima — só o glow composto e a linha do topo)
+        EXPECT(nearEqF(theme::kTheme.glow[1], 61.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.glow[3], 0.25f, 1e-4f));
     }
 
     // ---- (3) O VIDRO α0.80: os alphas + AS DUAS AUDITORIAS -------------
@@ -3778,7 +3802,7 @@ TEST(regress_identidade_grafite_ambar) {
     {
         EXPECT(nearEqF(theme::kTheme.surface[3], 0.80f, 1e-4f));   // vidro
         EXPECT(nearEqF(theme::kTheme.surface2[3], 0.86f, 1e-4f));  // denso
-        EXPECT(nearEqF(theme::kTheme.border[3], 0.55f, 1e-4f));    // hairline
+        EXPECT(nearEqF(theme::kTheme.border[3], 0.60f, 1e-4f));    // hairline ÂMBAR (0.11-Y)
         EXPECT(nearEqF(theme::kTheme.bg[3], 1.0f, 1e-4f));         // opaco
         // o bordo/highlight do vidro (a spec G: #FFFFFF1F / #FFFFFF0A)
         EXPECT(nearEqF(theme::kTheme.glassEdge[3], 31.0f / 255.0f, 1e-4f));
