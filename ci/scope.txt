@@ -34,3 +34,6 @@ VONI_referencia.md
 llms.txt
 llms-full.txt
 ESTUDOS.md
+# 0.11-CTX: STATE.md na raiz — o índice do estado lido sempre (o pedido
+# do dono na campanha; o CODEMAP.md entra no scope no fecho da CTX-2).
+STATE.md

@@ -328,6 +328,9 @@ add_executable(test_core
         # correm em TODAS as runs de CI, em todas as releases futuras. Os
         # nomes regress_* são o CONTRATO (remover/saltar exige aprovação
         # escrita do autor — ver docs/REGRESSOES.md).
+        # 0.11-CTX: os pins dos ÍNDICES (STATE.md — o contexto enxuto; o
+        # gate do §1.2 é aferrado contra commits reais do histórico)
+        test_ctx_pines.cpp
         test_sentinels.cpp)
 
 
