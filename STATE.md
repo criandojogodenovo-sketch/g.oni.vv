@@ -11,11 +11,13 @@ a Y-1 também), 3a6d934 o Y-1, 25c1348 o Y-0-FIX)
 
 ## §1 Onde estamos
 
-- **Campanha atual: 0.11-Y (identidade visual) · Sub-fase: Y-3 (os
-  CARTÕES — o cristal) — FECHADA** (este commit; o CI é o árbitro).
-  Segue-se o FECHO da campanha (os PNGs por ecrã no docs/y-*.png + o
-  relatório de fecho) — por autorização expressa do dono («faz todas
-  as fases e só para no fim da campanha Y»).
+- **Campanha 0.11-Y (identidade visual) — FECHADA** (o fecho é este
+  commit: os 13 PNGs por ecrã no docs/y-*.png + o pin y_fecho + o
+  RELATORIO-0.11-Y-FECHO.md; o CI é o árbitro). Y-0 (o ícone) · Y-0-FIX
+  (a escala) · Y-1 (o tema) · Y-2 (o layout) · Y-3 (os cartões) — as
+  5 sub-fases + o fix fechadas com CI verde; 20 pins novos; a FASE 31
+  (a varredura de 13 ecrãs) fica no replay para SEMPRE. PARAR — a
+  próxima campanha só arranca com CONTINUAR do dono.
 - **Y-1 (o tema) — FECHADA** (o commit 3a6d934): o poço #08080A (o
   clear lê o token), o vidro -5 % com o mesmo alfa, a hairline ÂMBAR
   #4A3714 α0.60, os tokens NOVOS accent2 #FF6B00 e glow #FF3D00 α0.25;
@@ -43,6 +45,11 @@ a Y-1 também), 3a6d934 o Y-1, 25c1348 o Y-0-FIX)
   divisores (a linha sólida D11 SUPERADA pela ordem da Y-3, a pill do
   drag fica); a FASE 31 confirma o layout intocado (1006/0); pins
   y3_* ×3 + M-Y3a/b vermelho→reposto→verde.
+- 0.11-Y FECHO ✅ vc 81 — os 13 PNGs por ecrã (docs/y-*.png, 1600×720,
+  o export de produção) + o pin y_fecho (a existência + a assinatura +
+  as dimensões + conteúdo; M-Fecho: um PNG removido → vermelho →
+  reposto → verde) + o RELATORIO-0.11-Y-FECHO.md (os 5 critérios C33
+  mapeados às provas).
 - **Y-0 (o ícone no launcher) — FECHADA com CI verde** (a2d2248) e o
   pin C33 do dono apanhou o bug da escala (o G a ~25 %; o contrato
   ~65 %) — o Y-0-FIX é este commit (a bbox de escala passa a ser o
@@ -198,6 +205,9 @@ Commits puramente documentais não são afetados.
 - `docs/RELATORIO-0.11-Y-Y3.md` — o relatório da Y-3 (o cristal: a
   linha do topo + os divisores gradientes, o D11 superado, as mutações
   M-Y3a/b).
+- `docs/RELATORIO-0.11-Y-FECHO.md` — o fecho da campanha (as 5
+  sub-fases + o fix, os critérios C33 mapeados às provas, os limites
+  declarados).
 - `scripts/y0_gen_icons.py` — o gerador dos PNGs do launcher a partir
   da fonte do dono (o threshold de luminância documentado lá dentro).
 - `docs/arquivo/` — os relatórios das campanhas FECHADAS (71, git mv;

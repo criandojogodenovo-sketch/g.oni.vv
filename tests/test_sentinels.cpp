@@ -4978,18 +4978,39 @@ TEST(regress_hotfix_defeitos) {
         const layout::Record& r = ui.auditRecord();
         ui.auditEnd();
         // na coluna do divisor NÃO existe NENHUM ponto (painel < 8×8dp):
-        // a "coluna de pontos flutuantes" morreu; a LINHA 1dp existe
-        bool linha1dp = false;
+        // a "coluna de pontos flutuantes" morreu
         for (const auto& e : r.entries) {
             const bool estreito = e.w < 8.0f && e.h < 8.0f;
             EXPECT_MSG(!estreito,
                        "D11: sobrou um ponto flutuante %.0fx%.0f no divisor",
                        (double)e.w, (double)e.h);
-            if (e.w <= 1.5f && e.h > 32.0f) {
-                linha1dp = true;
+        }
+        // RECALIBRADA 0.11-Y (Y-3): a LINHA SÓLIDA do D11 foi SUPERADA pela
+        // ordem expressa do dono («separadores com gradiente») — o divisor
+        // em repouso é agora o QUAD GRADIENTE (1dp, accentDim a cair do
+        // topo a0.90 -> a0.15; decorativo, fora do audit como os gizmos).
+        // O pin aferra o QUAD no batch (o mesmo padrão dos pins y3_*)
+        bool linha1dp = false;
+        const QuadBatch& bD11 = ui.solidsForTest();
+        const u32 nD11 = bD11.vertexCount() / 6u;
+        for (u32 q = 0; q < nD11; ++q) {
+            const QuadVertex* v = bD11.vertices() + q * 6;
+            f32 mnX = 1e9f, mxX = -1e9f, mnY = 1e9f, mxY = -1e9f;
+            for (u32 k = 0; k < 6; ++k) {
+                mnX = v[k].x < mnX ? v[k].x : mnX;
+                mxX = v[k].x > mxX ? v[k].x : mxX;
+                mnY = v[k].y < mnY ? v[k].y : mnY;
+                mxY = v[k].y > mxY ? v[k].y : mxY;
+            }
+            const f32 wq = mxX - mnX, hq = mxY - mnY;
+            if (wq <= 1.5f && hq > 32.0f &&
+                test::nearEqF(v[0].r, 74.0f / 255.0f, 1e-3f) &&
+                test::nearEqF(v[0].a, 0.90f, 1e-3f) &&
+                test::nearEqF(v[1].a, 0.15f, 1e-3f)) {
+                linha1dp = true;   // o quad do gradiente É o divisor
             }
         }
-        EXPECT(linha1dp);   // a linha sólida é o divisor
+        EXPECT(linha1dp);   // o divisor de cristal (o gradiente) existe
     }
 
     // ---- (9) D3: o empty-state NO RECT MINÚSCULO (a trava do fundo) -----

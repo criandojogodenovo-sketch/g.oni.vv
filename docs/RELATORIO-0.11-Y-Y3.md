@@ -64,6 +64,15 @@ Data: 2026-10-17 · Commit: este
   inteiro **1006 checks, 0 falhas** (a varredura dos 13 ecrãs corre
   com as linhas do topo e os divisores gradientes no ar — o contrato
   do layout não mexeu).
+- **O CI apanhou a sentinela D11 desatualizada** (o run do commit
+  011791e, job Testes do core): a `regress_hotfix_defeitos` (7) exigia
+  a linha sólida do D11 como ENTRADA de audit — o gradiente é
+  decorativo fora do audit (como os gizmos). A recalibração honesta
+  NESTE commit: o check (7) aferra o QUAD GRADIENTE no batch (1dp,
+  accentDim α0.90→α0.15 — o mesmo padrão dos pins y3_*); o check dos
+  pontos flutuantes fica intacto. A suíte INTEIRA local: 0 falhas
+  (GONI_SKIP dos 2 flakes conhecidos r039-disco e
+  streaming_paralelo-corrida-suspensa).
 - **versionCode: 80 → 81** (app/build.gradle:29, declarado no §14 do
   RELATORIO-0.9.6.md para o gate R-015).
 
@@ -87,6 +96,10 @@ Data: 2026-10-17 · Commit: este
 - app/src/main/cpp/ui/BottomPanel.cpp — a linha do topo do drawer
 - tests/test_fase_y3_cristal.cpp — NOVO TU (os 3 pins)
 - tests/CMakeLists.txt — o TU na suíte
+- tests/test_sentinels.cpp — o check (7) D11 recalibrado para o QUAD
+  GRADIENTE (o fix do CI: a sentinela do hotfix exigia a linha sólida
+  como entrada de audit; o divisor é o gradiente decorativo — o pin
+  aferra o quad no batch, o check dos pontos flutuantes fica)
 - app/build.gradle — versionCode 80 → 81
 - docs/RELATORIO-0.9.6.md — a entrada Y-3 no §14 (o par 0.9.6/81)
 - STATE.md — o §1 (Y-3 FECHADA), §2 (+linha), §8 (+relatório), vc 81

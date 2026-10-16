@@ -10179,6 +10179,27 @@ int main() {
                 }
             }
             ++varridos31;
+            // 0.11-Y FECHO: o PNG do ecrã para o docs/y-*.png do dono (o
+            // critério C33 ⑤). O export do frame já escreveu
+            // layout/<ecrã>.png no projeto (o caminho do Grupo B); a
+            // cópia para o cwd coleciona como o artefago da campanha
+            {
+                std::vector<u8> png31;
+                if (g_storage &&
+                    g_storage->readBytes(std::string("layout/") +
+                                             rec.screen + ".png",
+                                         png31) &&
+                    !png31.empty()) {
+                    fileapi::writeAll((std::string("y-") + nome + ".png")
+                                          .c_str(),
+                                      png31.data(), png31.size());
+                } else {
+                    check(false,
+                          (std::string("31 [") + nome +
+                           "] o PNG do export não saiu para o fecho")
+                              .c_str());
+                }
+            }
         };
 
         // (1) o editor 3D limpo

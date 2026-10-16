@@ -90,7 +90,8 @@ Atualizado: 2026-10-17 · vc: 81
   hierarchy_check.py, jni_parity.py, link_parity.sh, check_main.sh,
   glyph_source_check.py, reload_concurrency_check.py, projects_ui_check.py,
   gizmo_camera_medidas.py.
-- **docs/** — REGRESSOES.md (as sentinelas R-NNN), GMESH_formato.md e
+- **docs/** — os y-*.png (os 13 ecrãs da varredura da 0.11-Y, 1600×720),
+  REGRESSOES.md (as sentinelas R-NNN), GMESH_formato.md e
   GTEX_formato.md (a fonte de verdade dos formatos), LAYOUT_HIERARCHY.md,
   FASE3.5-PIN.md, RELATORIO-0.11-W-*.md (a campanha em curso), SAF_EXCEPTION.md,
   AUDIT_SAF_JNI.md, HANDSHAKE_AUDIT.md. (O arquivo das campanhas fechadas,
