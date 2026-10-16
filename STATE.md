@@ -1,7 +1,7 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-16 · vc: 76 · Último commit: ac2b780 (o fix do bit de
-execução do gate; este commit fecha a CTX-2)
+Atualizado: 2026-10-16 · vc: 76 · Último commit: 1a348f5 (a CTX-2;
+este commit fecha a CTX-3)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -12,10 +12,13 @@ execução do gate; este commit fecha a CTX-2)
 - **Campanha em curso: 0.11-CTX** (contexto enxuto — só documentação).
   - CTX-1 STATE.md — FECHADA (deba7bb + ac2b780, o fix do bit de
     execução do gate; os pins ctx_state_* verdes).
-  - CTX-2 CODEMAP.md — FECHADA neste commit (o mapa + o scope + as
-    mutações M-CTX1a/1b/2a/2b provadas, coladas no relatório de fecho).
+  - CTX-2 CODEMAP.md — FECHADA (1a348f5; os pins ctx_codemap_* verdes).
   - CTX-3 arquivo + README <200 + DIARIO + TEMPLATE_PROMPT + o gate
-    ligado no CI + a medição — pendente (a próxima).
+    ligado no CI + a medição — FECHADA neste commit (docs/arquivo/ com
+    72 relatórios movidos por git mv; o DIARIO com o README integral;
+    a medição real no docs/RELATORIO-0.11-CTX.md: 98,8 % de redução no
+    pior caso).
+  - A campanha 0.11-CTX está pronta para o commit de FECHO.
   - Cláusula calma: zero código de produção; CI só é tocado no gate
     docs-lint.
 - **0.11-W (Render Systems) implementada e com CI verde** — falta o PIN do
@@ -53,16 +56,13 @@ execução do gate; este commit fecha a CTX-2)
 
 ## §3 O que está PENDENTE (por ordem)
 
-1. **0.11-CTX CTX-3** — arquivar relatórios de campanhas fechadas em
-   docs/arquivo/ (git mv), encurtar README (<200 linhas), criar
-   docs/DIARIO.md e docs/TEMPLATE_PROMPT.md, ligar o gate STATE.md no
-   CI (o passo do workflow), medir a redução de contexto em
-   docs/RELATORIO-0.11-CTX.md.
-2. **Fecho 0.11-CTX** — relatório com a medição real; commit de fecho.
-3. **Fecho 0.11-W (BLOCO B, só com CONTINUAR do dono)** — verificar R-048,
+1. **Fecho 0.11-CTX** — o commit de fecho (o RELATORIO-0.11-CTX.md já
+   vive no repo desde a CTX-3; o fecho atualiza este índice e sela a
+   campanha com o CI verde).
+2. **Fecho 0.11-W (BLOCO B, só com CONTINUAR do dono)** — verificar R-048,
    RELATORIO-0.11-W-FECHO.md, atualizar README/BACKLOG/STATE.md; o pin
    C33 (§1) entra no §3 do fecho.
-4. **3 métricas qualitativas da CTX** fecham no relatório da campanha
+3. **3 métricas qualitativas da CTX** fecham no relatório da campanha
    SEGUINTE (tempo até à 1.ª ação útil, erros de contexto, cobertura do
    CODEMAP).
 
@@ -127,8 +127,11 @@ Commits puramente documentais não são afetados.
 - `ARCHITECTURE.md` — o mapa dos módulos (o porquê das camadas).
 - `docs/REGRESSOES.md` — sentinelas R-NNN (consulta, não leitura inteira).
 - `BACKLOG.md` — rastreador de campanhas (na RAIZ do repo).
-- `docs/RELATORIO-0.11-W-*.md` — a campanha em curso (4 relatórios).
-- `docs/arquivo/` — relatórios de campanhas fechadas (a partir da CTX-3).
+- `docs/RELATORIO-0.11-CTX.md` — o relatório da campanha em curso (a
+  medição da redução, as mutações, as divergências corrigidas).
+- `docs/RELATORIO-0.11-W-*.md` — a 0.11-W (o fecho é o BLOCO B).
+- `docs/arquivo/` — os relatórios das campanhas FECHADAS (72, git mv;
+  a 0.11-T-FIX não está lá — Perna 2 adiada, a campanha não fechou).
 - `docs/TEMPLATE_PROMPT.md` — a pirâmide de leitura dos prompts.
 - `VONI_referencia.md` — a referência V.ONI gerada (fonte: VoniRegistry).
 - `ci/scope.txt` — os caminhos que uma campanha pode tocar.

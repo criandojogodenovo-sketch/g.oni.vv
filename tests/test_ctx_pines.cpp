@@ -332,3 +332,124 @@ TEST(ctx_codemap_receitas) {
     EXPECT(s3.find("tests/CMakeLists.txt") != std::string::npos);
     EXPECT(s3.find("app/src/main/cpp/CMakeLists.txt") != std::string::npos);
 }
+
+// ---------------------------------------------------------------------------
+// 0.11-CTX CTX-3 — o arquivo, o README curto, o DIARIO, o TEMPLATE e as
+// referências vivas. O arquivo guarda os relatórios das campanhas
+// FECHADAS (git mv — histórico preservado); os da 0.11-W (campanha em
+// curso, o fecho é o BLOCO B) e os da 0.11-T-FIX (Perna 2 adiada pelo
+// dono — não fechada) ficam em docs/.
+// ---------------------------------------------------------------------------
+
+// ctx_arquivo_existe — o arquivo existe e recebeu os relatórios movidos
+// (as campanhas 0.6.x–0.10-M e as fases fechadas da 0.11: 72 ficheiros;
+// o teto honesto do pin é 50 — a prova de que a mudança foi em massa).
+TEST(ctx_arquivo_existe) {
+    const std::string cmd =
+        "ls " + ctxRoot() + "/docs/arquivo/RELATORIO-*.md 2>/dev/null | wc -l";
+    int code = 0;
+    const std::string out = runCapture(cmd, code);
+    long n = -1;
+    ASSERT(parseIntAfter(out, "", n) || sscanf(out.c_str(), "%ld", &n) == 1);
+    EXPECT_MSG(n >= 50,
+               "docs/arquivo/ com %ld relatórios — a mudança em massa "
+               "não aconteceu (esperados >= 50)", n);
+}
+
+// ctx_diario_existe — o DIARIO guarda o diário por versão (o conteúdo
+// longo do README antes da CTX-3, movido sem edição — as leis do fluxo
+// e os checklists do device preservados).
+TEST(ctx_diario_existe) {
+    std::string text;
+    EXPECT_MSG(readFile(ctxRoot() + "/docs/DIARIO.md", text),
+               "docs/DIARIO.md tem de existir (o diário por versão)");
+    const long lines =
+        static_cast<long>(std::count(text.begin(), text.end(), '\n'));
+    EXPECT_MSG(lines > 2000,
+               "docs/DIARIO.md com %ld linhas — o diário integral tem de "
+               "ter as ~4.5 mil linhas do README antigo", lines);
+}
+
+// ctx_readme_curto — o README é um ÍNDICE (<200 linhas); o conteúdo
+// longo foi para o DIARIO. Se voltou a crescer, a dívida vai para o
+// DIARIO, não para o README.
+TEST(ctx_readme_curto) {
+    std::string text;
+    ASSERT(readFile(ctxRoot() + "/README.md", text));
+    const long lines =
+        static_cast<long>(std::count(text.begin(), text.end(), '\n'));
+    EXPECT_MSG(lines < 200, "README.md com %ld linhas — o teto é 200 "
+                            "(o conteúdo longo vive em docs/DIARIO.md)",
+               lines);
+}
+
+// ctx_template_existe — a pirâmide de leitura existe e nomeia os dois
+// níveis obrigatórios (o Nível 0 = STATE + CODEMAP + o próprio prompt).
+TEST(ctx_template_existe) {
+    std::string text;
+    EXPECT_MSG(readFile(ctxRoot() + "/docs/TEMPLATE_PROMPT.md", text),
+               "docs/TEMPLATE_PROMPT.md tem de existir");
+    EXPECT(text.find("Nível 0") != std::string::npos);
+    EXPECT(text.find("STATE.md") != std::string::npos);
+    EXPECT(text.find("CODEMAP.md") != std::string::npos);
+    EXPECT(text.find("Nível 1") != std::string::npos);
+    EXPECT(text.find("Nível 2") != std::string::npos);
+}
+
+// ctx_refs_ok — nenhuma referência a docs/RELATORIO-*.md quebrada FORA
+// de docs/arquivo/: cada referência citada num documento vivo tem de
+// existir no caminho citado OU no arquivo (docs/arquivo/<ficheiro> — a
+// convenção da mudança, documentada no README e no DIARIO). Uma ref que
+// não existe em lado nenhum = ponteiro morto = vermelho.
+TEST(ctx_refs_ok) {
+    const std::string root = ctxRoot();
+    // os documentos vivos: a raiz de leitura + docs/ recursivo, exceto
+    // o arquivo (o histórico congelado não é reescrito — §0.6: não apagar)
+    std::string cmd =
+        "cd " + root + " && ls README.md ESTUDOS.md ARCHITECTURE.md "
+        "STATE.md CODEMAP.md BACKLOG.md VONI_referencia.md llms.txt "
+        "llms-full.txt 2>/dev/null; "
+        "find docs -name '*.md' -not -path 'docs/arquivo/*' 2>/dev/null";
+    int code = 0;
+    const std::string listing = runCapture(cmd, code);
+    ASSERT(!listing.empty());
+    static const std::regex refRe(
+        "docs/(arquivo/)?(RELATORIO-[A-Za-z0-9._-]+\\.md)");
+    long refs = 0, broken = 0;
+    size_t pos = 0;
+    while (pos <= listing.size()) {
+        const size_t nl = listing.find('\n', pos);
+        if (nl == std::string::npos && pos >= listing.size()) break;
+        const std::string file = listing.substr(
+            pos, nl == std::string::npos ? std::string::npos : nl - pos);
+        if (file.empty()) break;
+        pos = nl + 1;
+        std::string text;
+        if (!readFile(root + "/" + file, text)) continue;
+        auto begin = std::sregex_iterator(text.begin(), text.end(), refRe);
+        auto end = std::sregex_iterator();
+        for (auto it = begin; it != end; ++it) {
+            ++refs;
+            const bool citaArquivo = it->str(1).size() > 0;
+            const std::string rel = it->str(2);       // RELATORIO-X.md
+            const std::string citado = citaArquivo
+                                           ? "docs/arquivo/" + rel
+                                           : "docs/" + rel;
+            const std::string alternativo = citaArquivo
+                                                ? "docs/" + rel
+                                                : "docs/arquivo/" + rel;
+            std::ifstream direto(root + "/" + citado);
+            if (direto.is_open()) { direto.close(); continue; }
+            std::ifstream arq(root + "/" + alternativo);
+            if (arq.is_open()) { arq.close(); continue; }
+            ++broken;
+            EXPECT_MSG(false,
+                       "%s cita %s e o ficheiro não está nem em docs/ "
+                       "nem em docs/arquivo/ (ponteiro morto)",
+                       file.c_str(), citado.c_str());
+        }
+    }
+    EXPECT_MSG(refs > 0, "a varredura não apanhou NENHUMA referência a "
+                         "RELATORIO — o pin deixou de varrer a sério");
+    EXPECT(broken == 0);
+}

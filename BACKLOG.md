@@ -44,7 +44,7 @@
 | 0.11-M FASE 2 · GLTF MATERIAIS (a spec do dono) | o glTF COMPLETO: (1) o parse COMPLETO do material — alphaMode MASK/BLEND+alphaCutoff, doubleSided, os QUATRO factors (baseColor/metallic/roughness/emissive) e por SLOT o KHR_texture_transform + o índice do sampler; (2) o bloco GTB2 na cauda do .gmesh (o MESMO padrão do GTB1 — nomes→GTB1→GTB2, entradas fixas de 164 B, samplers nos códigos da casa `kSampler*` via a função pura `gltfSamplerToCodes`; retro-compat total: ficheiros novos abrem em builds antigas SEM saber, CRC mau = erro legível, o material 100% default NEM ENTRA); (3) o lit ganha as props (DrawProps: uBaseColor/uAlphaMode/uAlphaCutoff/uTwoSided/uEmissive/uUvRot/uUvOff — o MASK faz discard, o BLEND mistura com SRC_ALPHA/ONE_MINUS e depthMask FALSE, o two-sided desliga o cull com o verso iluminado, o transform UV é o vertex shader; nullptr = byte a byte); (4) o draw POR BLOCOS em DOIS passes (opacos na ordem da tabela → BLEND longe→perto pelo z de NDC — `blendDrawOrder` puro e estável); (5) os samplers no upload (Texture::setSampler first-wins por caminho + 1 linha de log); (6) o critério do runtime: .gmesh pequeno com materialCount>1 OU props não-default abre POR BLOCOS (o render POR MATERIAL — o mesh único desenhava tudo com a textura do material 0); (7) as THUMBS DE SLOT no inspector (o quad 24dp da textura VIVA via o resolver do Image, o orçamento do texto cede, kMaxImageBatches 4→8); (8) o u32 verificado por pins (accessor 5125 + o bloco use32) | **FEITO 0.11-M** (ver RELATORIO-0.11-M-MATERIAIS; 10 pins; c33 FASE 25 +27 = 824/824; test_core 0 falhas — r039 = o flake de DISCO da sandbox, o CI é o árbitro; gates locais verdes; versionCode 70) | ver commit |
 | 0.11-T FASE 3.5a · GPU EFFICIENCY — SKINNED CULL + LOD (a sub-fase da campanha 0.11-T, o pin docs/FASE3.5-PIN.md) | (1) o SKINNED CULL — o AnimationSystem salta os TICs skinados fora do frustum (AABB inchado 25%, NEM advance NEM apply — o tempo congela fora do ecrã), o drawTics re-testa com os planos frescos, o HUD/log mostram «skinned: culled N/M», sem frustum o custo é zero; (2) o LOD POR DISTÂNCIA — o import gera a cauda GLOD no .gmesh (o decimate ½ parity-weld determinístico, o MESMO padrão de cauda do GTB1/GTB2, o pico de RAM mantém-se por bloco), o draw troca normal→LOD pela distância do TIC ("lod distance: N u" no inspector, 0 = OFF o default jogável, o .goni transporta "lodDist" só quando != 0) | **FEITO 0.11-T 3.5a** (ver RELATORIO-0.11-T-3.5A; 5 pins novos + R-045 + as mutações M-3.5a1/M-3.5a2 coladas; c33 FASE 27 +12 = 869/869; a r039 flutua POR DISCO na sandbox com a cauda — o CI é o árbitro; versionCode 72; o pin do C33 fica para o dono) | ver commit |
 | 0.11-S FASE 3 · ESQUELETO/ANIMAÇÃO (a spec do dono) | (1) as INTERPOLAÇÕES glTF COMPLETAS — `Quat::slerp` (arco curto + fallback nlerp), `AnimCurve::Step/Slerp` no player, o parse transporta a interpolação (`GltfAnimSampler.interp`) e as tangentes do CUBICSPLINE INTACTAS, o `gltfCubicToKeys` converte hermite→bezier EXATO (pos/escala) e por diferença finita em euler (rot), LINEAR de rotação vira SLERP, a timeline mostra o rótulo REAL e o serializer viaja step/slerp por nome (o .gm já transportava a curva); (2) o UBO de **128 BONES** — `layout(std140) uniform Bones` 8 KB ≤ 16 KB garantidos ES 3.0, `setBones` por `glBufferSubData` determinístico com cauda de identidade + `glBindBufferBase`, cap DURO no import com log honesto e o PLAN B (palette de textura) DOCUMENTADO no §4 do relatório; (3) V.ONI **stop()/blend(nome, seg)** (o par do play/Import.Animation — crossfade com o tempo contínuo; defaults honestos no Host; VONI_referencia regenerada); (4) FIX do conversor apanhado pela FASE 26 — os clips do .gm nasciam VAZIOS para modelos skinados (o attach corria sem esqueleto; personagem convertido = estático para sempre; reimportar a fonte regenera) | **FEITO 0.11-S** (ver RELATORIO-0.11-S-ESQUELETO; 12 pins novos + 2 atualizados; test_core 0 falhas — r039 = o flake de DISCO da sandbox, o CI é o árbitro; c33 FASE 26 +33 = 857/857; gates locais verdes; versionCode 71) | ver commit |
-| 0.10-A · SKELETAL (o BACKLOG que a mensagem «pele ainda não suportada no streaming» nomeia) | (1) o CONVERSOR STREAMING escreve ossos+pesos nos blocos — o v3 JÁ reserva os atributos (`kAttrBones`/`kAttrWeights` no layout descrito do header; hoje um modelo COM PELE acima de 65535 vértices falha com «pele ainda não suportada no streaming (BACKLOG 0.10-A)» — mensagem clara com apontador para ESTA entrada; o merge ≤65535 é o que preserva joints/weights e o dragão de 32 MB entra por ser ≤65535); (2) os CLIPS de animação do glTF também no import expandido (hoje ficam para o import fundido) | **PARCIALMENTE FEITO 0.11-S** — o item (2) antigo (GPU skinning com bones em UBO) entrou na FASE 3: UBO std140 de 128 bones + `setBones` por `glBufferSubData`/`glBindBufferBase` (o relatório próprio: docs/RELATORIO-0.11-S-ESQUELETO.md §4 — o PLAN B >128 documentado); os itens (1) e (3) ficam **POR FAZER** — candidatos à FASE 4 (streaming/cache), decisão do dono | — |
+| 0.10-A · SKELETAL (o BACKLOG que a mensagem «pele ainda não suportada no streaming» nomeia) | (1) o CONVERSOR STREAMING escreve ossos+pesos nos blocos — o v3 JÁ reserva os atributos (`kAttrBones`/`kAttrWeights` no layout descrito do header; hoje um modelo COM PELE acima de 65535 vértices falha com «pele ainda não suportada no streaming (BACKLOG 0.10-A)» — mensagem clara com apontador para ESTA entrada; o merge ≤65535 é o que preserva joints/weights e o dragão de 32 MB entra por ser ≤65535); (2) os CLIPS de animação do glTF também no import expandido (hoje ficam para o import fundido) | **PARCIALMENTE FEITO 0.11-S** — o item (2) antigo (GPU skinning com bones em UBO) entrou na FASE 3: UBO std140 de 128 bones + `setBones` por `glBufferSubData`/`glBindBufferBase` (o relatório próprio: docs/arquivo/RELATORIO-0.11-S-ESQUELETO.md §4 — o PLAN B >128 documentado); os itens (1) e (3) ficam **POR FAZER** — candidatos à FASE 4 (streaming/cache), decisão do dono | — |
 | 0.10-M PASSO 3-b · OBJ SEM TETO (dívida assumida) | o streaming do OBJ gigante (o parser atual acumula v/vt/vn globais sem teto) — os 3 modelos do dono são GLB; o OBJ ≤65,535 segue o caminho vigente | **POR FAZER** — candidato a fase própria; decisão do dono | — |
 | HOTFIX · OS 12 DEFEITOS DA IMAGEM REAL (spec do dono) | D1 cabeçalho do inspector uma linha · D2 linha Transform no orçamento do rect (minWidth + reset ícone) · D3/D9 empty-states centrados+clipados nas 4 tabs · D4 Settings localizado + outline compacto + «concedido» texto · D5 a tab «Nós» morta (duplicado da hierarquia) · D6 a marca = glifo da função única com LOD (tile de letra morto) · D7 captura thumb.png 256×144 off-thread no save + fallback de iniciais (o ícone da app nunca é card) · D8 o glifo «U» saiu do rail (o ÍMAN redesenhado como ferradura) · D10 controlos de texto cru → ícones (Reset/List/Eye) · D11 divisor = linha 1dp + pill só no drag · D12 planos do gizmo preenchidos a 25% | **FEITO 0.9.6.18** (ver RELATORIO-0.9.6.18-HOTFIX-12-DEFEITOS; R-035 + gate ui_vocab + FASE 15 do device virtual) | ver commit |
 | HOTFIX 0.9.6.19 · OS ABERTOS DO RE-SIGN-OFF | R1 valores do Transform intocáveis (letra→padding→nunca o valor; piso 26dp em 180/220/260dp) · D17 a câmara objeto pequeno (glifo 24dp + frustum fino 1-2px mudo/âmbar + handles de canto 12dp + hit-test gizmo>handles>frustum intocável — o drag na cena move a câmara, provado com gesto injetado) · D14 menu contido + a CAUSA-RAIZ px cru (offset 0 na reabertura, nunca sob a tab bar, última linha alcançável) · D15 o menu no gate (Exportar OBJ; Snapping na allowlist explícita) · D16 o guard do frame limpo + o retry Java das thumbs + o log ok/falhou · D18 iniciais 1ª+última letra · D19 o switch com knob on/off (fonte única nos 2 inspetores) | **FEITO 0.9.6.19** (ver RELATORIO-0.9.6.19-HOTFIX-ABERTOS-DO-RESIGN; R-035 estendida + FASE 16 do device virtual; 8 mutações vermelho→verde; contrato §2.16-§2.19; versionCode 51) | ver commit |
@@ -161,7 +161,7 @@
   release-signed, 1,79 MB, expira 2027-01-11] · symbol gate) e o fix
   703f22f (run 38407319609 — 2 casts de printf + a frase honesta do §2,
   os 5 jobs verdes). Relatório:
-  docs/RELATORIO-0.10-M-PASSO6-VALIDACAO-FINAL.md (a tabela
+  docs/arquivo/RELATORIO-0.10-M-PASSO6-VALIDACAO-FINAL.md (a tabela
   §2 + o inventário §3 + o checklist de sign-off §4).
 - **POR FAZER (a prova de mesa do dono)**: o §4 do relatório com o APK
   vc 68 — os 3 modelos reais com as linhas contrato no engine.log, o
@@ -193,7 +193,7 @@
   M2 (clear sem origem) e M3 (draw sem audit) → vermelhas. test_core 0
   falhas · c33 797/797 (o 17.4 à lei nova: TICs VIVAS no conjunto da
   multi) · versionCode 68. Relatório:
-  docs/RELATORIO-0.10-M-HOTFIX-SELECAO-UNICA.md.
+  docs/arquivo/RELATORIO-0.10-M-HOTFIX-SELECAO-UNICA.md.
 - **POR FAZER (o sign-off do dono)**: reproduzir o vc 67 no device (troca
   de prim/mesh com a TIC selecionada; guarda-restauro de layout; apagar a
   TIC selecionada; abrir o catálogo num projeto novo) e ver os três
@@ -218,7 +218,7 @@
   M-P0a (sem visitados → abort) e M-P0b (sem lote → vermelho) →
   vermelhas. test_core 947/948 (o 1 = r039, flake de DISCO da sandbox)
   · c33 797/797 · versionCode 67. Relatório:
-  docs/RELATORIO-0.10-M-HOTFIX-P0-SUBTICS.md.
+  docs/arquivo/RELATORIO-0.10-M-HOTFIX-P0-SUBTICS.md.
 - **POR FAZER (o sign-off do dono)**: o city no device com a opção
   ativa (o overlay sem ANR + os 72 TICs) e o cancelamento a meio.
 
@@ -240,7 +240,7 @@
   (seletor hardcoded material 0) e M-MM2 (sufixo removido) → vermelhas.
   test_core 944/945 (o 1 = r039, flake de DISCO da sandbox) · c33
   797/797 · versionCode 66. Relatório:
-  docs/RELATORIO-0.10-M-HOTFIX-TEXTURAS-MULTIMAT.md.
+  docs/arquivo/RELATORIO-0.10-M-HOTFIX-TEXTURAS-MULTIMAT.md.
 - **POR FAZER (a fronteira documentada)**: o draw refletir o pick por
   material e os samplers 1-4 no shader lit = a 0.11-L (o sufixo honesto
   anuncia-a); .gmesh antigos = reimportar.
@@ -258,7 +258,7 @@
   era a linha clássica que arma o 0: «o picker escreve sempre no
   baseColor»). Mutações M-TB2a/M-TB2b vermelho→verde · test_core 935/0 ·
   c33 797/797. Relatório:
-  docs/RELATORIO-0.10-M-HOTFIX-TEXTURAS-VINCULA-2.md.
+  docs/arquivo/RELATORIO-0.10-M-HOTFIX-TEXTURAS-VINCULA-2.md.
 - **POR FAZER (o dono agenda)**: os samplers dos slots 1-4 no shader lit
   (mantém-se do hotfix 1); a edição por MATERIAL no Inspector (o conjunto
   do TIC é o material 0 do auto-bind — o render por material já é do
@@ -274,7 +274,7 @@
   vocabulário TIC) e a sub-árvore REAL (parentRec + TRS local + o
   TransformSystem a compor pais — a dívida «editor polish» do F3 paga).
   Mutações M-TB1/M-TB3 vermelho→verde · test_core 932/0 · c33 797/797.
-  Relatório: docs/RELATORIO-0.10-M-HOTFIX-TEXTURAS-VINCULA.md.
+  Relatório: docs/arquivo/RELATORIO-0.10-M-HOTFIX-TEXTURAS-VINCULA.md.
 - **POR FAZER (o dono agenda)**: os samplers dos slots 1-4 no shader lit
   (os slots ficam vinculados; o GL só carrega o baseColor de hoje —
   NÃO VERIFICADO no relatório §6); a migração dos .gmesh antigos é

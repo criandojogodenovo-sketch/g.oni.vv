@@ -54,6 +54,21 @@ jobs:
       - name: Gate docs-lint (R-016)
         run: python3 scripts/docs_lint_check.py
 
+      # 0.11-CTX (§1.2) — GATE STATE.md: o commit que toca código (app/,
+      # cpp/, tests/, tests-java/) e declara sub-fase/feat/fix no assunto
+      # TEM de viajar COM o STATE.md no diff; commit puramente documental
+      # é isento. O motor é o MESMO script que o pin ctx_state_gate_fecha
+      # aferra contra o histórico real (d0c765d/caaef02 → vermelho). O
+      # fallback do before segue o padrão do scope-check acima
+      - name: Gate STATE.md (0.11-CTX §1.2)
+        run: |
+          set -euo pipefail
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            BEFORE="HEAD^"
+          fi
+          bash scripts/docs_lint_state.sh "$BEFORE" "${{ github.sha }}"
+
       # 0.10-M (PASSO 1) — GATE DOS DOCS DE FORMATO: GMESH_formato.md e
       # GTEX_formato.md são a FONTE DE VERDADE dos formatos próprios; o
       # gate afere que os símbolos citados e as âncoras de bytes/números
