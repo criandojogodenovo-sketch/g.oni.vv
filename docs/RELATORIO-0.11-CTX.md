@@ -16,11 +16,15 @@ prompts + o gate STATE.md no CI:
   receitas de extensão, incluindo a CRÍTICA dos DOIS CMakeLists. A
   convenção de paths é relativa à RAIZ do repo, cumprida em todas as
   linhas (o pin aferra). CTX-2, commit 1a348f5.
-- **docs/arquivo/** — 72 relatórios das campanhas FECHADAS movidos com
-  `git mv` (0.6.x–0.9.6.x, 0.10-M completa, 0.11-H, 0.11-M, 0.11-S,
-  0.11-T, F5.5, F6). Ficam em `docs/`: os 4 relatórios da 0.11-W
-  (campanha em curso — o fecho é o BLOCO B) e os 2 da 0.11-T-FIX
-  (Perna 2 adiada pelo dono — a campanha não está fechada).
+- **docs/arquivo/** — 71 relatórios das campanhas FECHADAS movidos com
+  `git mv` (0.6.x–0.9.6.x — EXCETO o RELATORIO-0.9.6.md, ver abaixo —,
+  0.10-M completa, 0.11-H, 0.11-M, 0.11-S, 0.11-T, F5.5, F6). Ficam em
+  `docs/`: o RELATORIO-0.9.6.md (a âncora VIVA do gate release-identity
+  R-015 — o versionName 0.9.6 ainda é a identidade da release e o §14
+  acumula o log dos vcs; movê-lo deixa o CI VERMELHO, que foi
+  exatamente o que aconteceu e o gate apanhou), os 4 relatórios da
+  0.11-W (campanha em curso — o fecho é o BLOCO B) e os 2 da
+  0.11-T-FIX (Perna 2 adiada pelo dono — a campanha não está fechada).
 - **docs/DIARIO.md** (4 553 linhas) — o conteúdo INTEGRAL do README
   antes da CTX-3, movido sem edição (a regra «não apagar, mover»).
 - **README.md** cortado de 4 541 linhas / 292 344 bytes para 85
@@ -121,6 +125,14 @@ Notas honestas:
    **tests/test_voni.cpp** (o mapa usa o real).
 6. Todos os restantes caminhos citados no CODEMAP foram aferidos pelo
    pin ctx_codemap_ficheiros_existem (git ls-files) — verde.
+7. **RELATORIO-0.9.6.md NÃO é um relatório de campanha fechada** — é a
+   âncora VIVA do gate release-identity (R-015): o versionName 0.9.6
+   do build.gradle exige docs/RELATORIO-0.9.6.md presente em docs/ e
+   declarando o par com o versionCode corrente (o §14 acumula o log).
+   A CTX-3 moveu-o por engano; o run do fecho ficou VERMELHO nesse
+   gate («docs/RELATORIO-0.9.6.md não existe») e o fix devolveu-o a
+   docs/ (71 movidos, não 72). O gate fez EXATAMENTE o seu trabalho:
+   a identidade da release não se desfaz.
 
 ## §5 As referências validadas antes de mover (§3.1 do prompt)
 
@@ -180,17 +192,28 @@ decisão fechada reaberta; nada inventado.
 - deba7bb — docs: criar STATE.md (estado canónico) — CTX-1.
 - ac2b780 — fix: o bit de execução do gate STATE.md no git — CTX-1.
 - 1a348f5 — docs: criar CODEMAP.md (o mapa do código) — CTX-2.
-- este commit — docs: arquivo + gate STATE.md + template + medição —
-  CTX-3: docs/arquivo/ (72 git mv), docs/DIARIO.md (novo),
-  docs/TEMPLATE_PROMPT.md (novo), README.md (cortado), BACKLOG.md (7
-  paths), tests/test_ctx_pines.cpp (5 pins novos), .github/workflows/
+- 909b1ea — docs: arquivo + gate STATE.md + template + medição —
+  CTX-3: docs/arquivo/ (72 git mv — o 0.9.6 entre eles, por engano,
+  ver a nota §4.7), docs/DIARIO.md (novo), docs/TEMPLATE_PROMPT.md
+  (novo), README.md (cortado), BACKLOG.md (7 paths),
+  tests/test_ctx_pines.cpp (5 pins novos), .github/workflows/
   release.yml (o passo do gate), STATE.md (a atualização do mesmo
   commit).
+- 85c4f94 — 0.11-CTX: fecho (o contexto enxuto) — o STATE.md sela a
+  campanha (o §3 aponta o BLOCO B, o fecho da 0.11-W, só com
+  CONTINUAR do dono).
+- este commit — fix: o RELATORIO-0.9.6.md de volta a docs/ — o gate
+  release-identity (R-015) apanhou a âncora movida (os runs de
+  909b1ea e 85c4f94 VERMELHOS nele); docs/RELATORIO-0.9.6.md (git mv
+  de docs/arquivo/) + docs/RELATORIO-0.11-CTX.md (a nota §4.7, o
+  reconto 71/72, este §8 e o §9).
 
 ## §9 NÃO VERIFICADO
 
-- O CI deste commit (a corrida em curso no momento da escrita) — o
-  fecho da campanha declara-se só com o VERDE em TODOS os jobs.
+- O CI do fix (a corrida em curso no momento da escrita) — o fecho da
+  campanha declara-se só com o VERDE em TODOS os jobs. Os runs de
+  909b1ea e 85c4f94 ficaram VERMELHOS no gate release-identity (a
+  âncora movida, ver a nota §4.7) — o fix é a última peça.
 - Os 3 pins qualitativos do §6 — por construção, medem-se na campanha
   seguinte.
 - O efeito real da redução numa sessão com o prompt novo — o §6 mede.
