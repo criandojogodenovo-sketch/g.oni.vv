@@ -1,6 +1,6 @@
 # CODEMAP.md — onde vive o quê
 
-Atualizado: 2026-10-17 · vc: 80
+Atualizado: 2026-10-17 · vc: 81
 
 > Convenção de paths: TODOS os caminhos deste ficheiro são relativos à
 > RAIZ do repo (exemplo: o registo da linguagem vive em
@@ -70,7 +70,9 @@ Atualizado: 2026-10-17 · vc: 80
   do TEMA da 0.11-Y — o poço #08080A + a chama accent2/glow + o
   gradiente dos botões ativos + as primitivas do cristal),
   test_fase_y2_layout.cpp (os pins do LAYOUT da 0.11-Y — as regras
-  CruzaTabBar/PainelFora do validador), test_fase375b_impostors.cpp,
+  CruzaTabBar/PainelFora do validador), test_fase_y3_cristal.cpp (os
+  pins do CRISTAL da 0.11-Y — a linha do topo + os divisores com
+  gradiente nos painéis reais), test_fase375b_impostors.cpp,
   test_voni.cpp, test_bench.cpp,
   test_gmeshv3.cpp, voni_refgen.cpp (o gerador da referência), c33_virtual.cpp
   (o dispositivo virtual), CMakeLists.txt (a lista de fontes dos pins),

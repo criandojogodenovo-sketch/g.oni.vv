@@ -128,6 +128,11 @@ public:
     // a composição dos dois é a simulação honesta do blur, sem blur real).
     // O chamador desenha ANTES do elemento (a ordem de pintura manda).
     void focusGlow(f32 x, f32 y, f32 w, f32 h);
+    // 0.11-Y (Y-3) — O DIVISOR de cristal: 1dp de largura com o âmbar da
+    // aresta a CAIR do topo (accentDim α0.90 no topo → α0.15 no fundo —
+    // o gradiente vertical, o «separador gradiente» do dono; a linha
+    // sólida D11 é SUPERADA por esta ordem, a pill do drag fica)
+    void dividerGradientV(f32 x, f32 y, f32 h);
     // 0.9.0 — moldura com cantos curvos: 4 arestas retas (panel) + 4 arcos
     // (polilinhas no LINE batch com a MESMA espessura do traço). Para cards
     // e botões outline do design system.

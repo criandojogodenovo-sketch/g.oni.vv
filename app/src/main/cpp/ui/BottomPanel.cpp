@@ -252,6 +252,9 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
     }
     ui.panel(L.drawer.x, L.drawer.y, L.drawer.w, L.drawer.h,
              theme::kTheme.surface);
+    // 0.11-Y (Y-3): o cristal — a linha do topo do drawer (o brilho 1dp do
+    // glow a 20%; a borda de baixo fica a hairline âmbar de sempre)
+    ui.glassTopLine(L.drawer.x, L.drawer.y, L.drawer.w);
     ui.panel(L.drawer.x, L.drawer.y + L.drawer.h - 1.0f, L.drawer.w, 1.0f,
              theme::kTheme.border);
 

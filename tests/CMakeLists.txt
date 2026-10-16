@@ -341,6 +341,9 @@ add_executable(test_core
         # 0.11-Y Y-2: os pins do LAYOUT (as regras CruzaTabBar/PainelFora
         # do validador — test_fase_y2_layout.cpp)
         test_fase_y2_layout.cpp
+        # 0.11-Y Y-3: os pins do CRISTAL (os cartões — a linha do topo + os
+        # divisores com gradiente — test_fase_y3_cristal.cpp)
+        test_fase_y3_cristal.cpp
         test_sentinels.cpp)
 
 

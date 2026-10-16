@@ -1,9 +1,9 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-17 · vc: 80 · Último commit: este (o Y-2, o
-LAYOUT — as regras CruzaTabBar/PainelFora + a varredura de 13 ecrãs; o
-run VERDE deste commit fecha TAMBÉM a Y-1 (o probe 18.2 que o CI
-apanhou); antes: 3a6d934 o Y-1, 25c1348 o Y-0-FIX, a2d2248 o Y-0)
+Atualizado: 2026-10-17 · vc: 81 · Último commit: este (o Y-3, OS
+CARTÕES — o cristal: a linha do topo nos painéis/drawer/cards + os
+divisores com o âmbar a cair; antes: 6b1427f o Y-2 (o run VERDE fecha
+a Y-1 também), 3a6d934 o Y-1, 25c1348 o Y-0-FIX)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -11,11 +11,11 @@ apanhou); antes: 3a6d934 o Y-1, 25c1348 o Y-0-FIX, a2d2248 o Y-0)
 
 ## §1 Onde estamos
 
-- **Campanha atual: 0.11-Y (identidade visual) · Sub-fase: Y-2 (o
-  LAYOUT) — FECHADA** (este commit; o CI é o árbitro). Segue-se Y-3
-  (os cartões) e o fecho — por autorização expressa do dono («faz
-  todas as fases e só para no fim da campanha Y»), arranca logo o CI
-  verde.
+- **Campanha atual: 0.11-Y (identidade visual) · Sub-fase: Y-3 (os
+  CARTÕES — o cristal) — FECHADA** (este commit; o CI é o árbitro).
+  Segue-se o FECHO da campanha (os PNGs por ecrã no docs/y-*.png + o
+  relatório de fecho) — por autorização expressa do dono («faz todas
+  as fases e só para no fim da campanha Y»).
 - **Y-1 (o tema) — FECHADA** (o commit 3a6d934): o poço #08080A (o
   clear lê o token), o vidro -5 % com o mesmo alfa, a hairline ÂMBAR
   #4A3714 α0.60, os tokens NOVOS accent2 #FF6B00 e glow #FF3D00 α0.25;
@@ -37,6 +37,12 @@ apanhou); antes: 3a6d934 o Y-1, 25c1348 o Y-0-FIX, a2d2248 o Y-0)
   (rótulos deslizam para dentro); o Sobreposto não conta filhos
   clipped (11 falsos ERROS mortos); pins y2_* ×3 + M-Y2a/b
   vermelho→verde.
+- 0.11-Y Y-3 Cartões ✅ vc 81 — o cristal: a glassTopLine (1dp do glow
+  a 20 %) na hierarquia/inspector/drawer/card CRIAR/3 sheets + o
+  dividerGradientV NOVO (1dp, accentDim α0.90→α0.15 a cair) nos
+  divisores (a linha sólida D11 SUPERADA pela ordem da Y-3, a pill do
+  drag fica); a FASE 31 confirma o layout intocado (1006/0); pins
+  y3_* ×3 + M-Y3a/b vermelho→reposto→verde.
 - **Y-0 (o ícone no launcher) — FECHADA com CI verde** (a2d2248) e o
   pin C33 do dono apanhou o bug da escala (o G a ~25 %; o contrato
   ~65 %) — o Y-0-FIX é este commit (a bbox de escala passa a ser o
@@ -189,6 +195,9 @@ Commits puramente documentais não são afetados.
 - `docs/RELATORIO-0.11-Y-Y2.md` — o relatório da Y-2 (o layout: as
   regras CruzaTabBar/PainelFora, a varredura FASE 31, os 3 bugs reais,
   as mutações M-Y2a/b).
+- `docs/RELATORIO-0.11-Y-Y3.md` — o relatório da Y-3 (o cristal: a
+  linha do topo + os divisores gradientes, o D11 superado, as mutações
+  M-Y3a/b).
 - `scripts/y0_gen_icons.py` — o gerador dos PNGs do launcher a partir
   da fonte do dono (o threshold de luminância documentado lá dentro).
 - `docs/arquivo/` — os relatórios das campanhas FECHADAS (71, git mv;

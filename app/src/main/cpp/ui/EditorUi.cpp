@@ -462,9 +462,10 @@ void drawPanelDividers(UiContext& ui, const EditorState& st, bool rightPanel) {
         if (!on[i] || strips[i].w <= 0.0f || strips[i].h <= 1.0f) {
             continue;
         }
-        // a LINHA SÓLIDA (1dp na cor border — o divisor em repouso)
-        ui.panel(strips[i].x, strips[i].y, 1.0f, strips[i].h,
-                 theme::kTheme.border);
+        // a LINHA do cristal (1dp com o âmbar a CAIR do topo — o gradiente
+        // vertical da Y-3; a ordem do dono SUPERADA a linha sólida do D11,
+        // a pill do drag fica)
+        ui.dividerGradientV(strips[i].x, strips[i].y, strips[i].h);
         if (dragging[i]) {
             // o fundo ACENDE + a PILL de grip (só durante o drag)
             ui.panel(strips[i].x, strips[i].y, strips[i].w, strips[i].h,
@@ -554,7 +555,11 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
     const f32 h = panel.h;
 
     ui.panel(x, y, w, h, theme::kTheme.surface);
-    ui.panel(x + w - 1.0f, y, 1.0f, h, theme::kTheme.border);
+    // 0.11-Y (Y-3): o cristal — a linha do topo (o brilho 1dp do glow a
+    // 20%) e o divisor direito com o âmbar a CAIR (o gradiente vertical; a
+    // linha sólida D11 é superada pela ordem da Y-3)
+    ui.glassTopLine(x, y, w);
+    ui.dividerGradientV(x + w - 1.0f, y, h);
 
     // ---- árvore visível: raízes primeiro, filhos recursivamente ------------
     // (o filtro de pesquisa esconde linhas que não casam; os filhos de uma
@@ -1229,7 +1234,10 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     const f32 h = panel.h;
 
     ui.panel(x, y, w, h, theme::PANEL);
-    ui.panel(x, y, 1.0f, h, theme::LINE);   // separador esquerdo
+    // 0.11-Y (Y-3): o cristal — a linha do topo + o divisor esquerdo com o
+    // âmbar a cair (o MESMO contrato da hierarquia)
+    ui.glassTopLine(x, y, w);
+    ui.dividerGradientV(x, y, h);   // separador esquerdo (o gradiente Y-3)
 
     // FASE 9 (G2-8): o TIC selecionado MUDOU → o Inspector volta ao TOPO
     // (o scroll do TIC anterior não se arrasta para o novo — era por isso
@@ -2886,7 +2894,9 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     }
 
     // 0.9.6.6 (GRUPO C · CANTOS SUAVIZADOS): o CARD modal com raios 8dp
+    // 0.11-Y (Y-3): o cristal — a linha do topo (o brilho 1dp do glow)
     ui.panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard), theme::PANEL);
+    ui.glassTopLine(x, y, w);
     ui.frameRounded(x, y, w, h, 2.0f, theme::dp(theme::kRadiusCard),
                     theme::ACCENT);
     const f32 th = ui.fontHeight();
@@ -3053,6 +3063,8 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     // mesma classe R-018 dos sheets px crus do D14)
     ui.panelRounded(x, y, kSheetW, h, theme::dp(theme::kRadiusCard),
                     theme::kTheme.surface);
+    // 0.11-Y (Y-3): o cristal — a linha do topo do sheet (o brilho 1dp)
+    ui.glassTopLine(x, y, kSheetW);
     ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::dp(theme::kRadiusCard),
                     theme::kTheme.border);
 
@@ -3160,6 +3172,8 @@ int drawHierMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     }
     ui.panelRounded(x, y, kSheetW, h, theme::dp(theme::kRadiusCard),
                     theme::kTheme.surface);
+    // 0.11-Y (Y-3): o cristal — a linha do topo do sheet (o brilho 1dp)
+    ui.glassTopLine(x, y, kSheetW);
     ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::dp(theme::kRadiusCard),
                     theme::kTheme.border);
     static const struct {
@@ -3265,6 +3279,8 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     // mesma classe R-018 dos sheets px crus do D14)
     ui.panelRounded(x, y, kSheetW, h, theme::dp(theme::kRadiusCard),
                     theme::kTheme.surface);
+    // 0.11-Y (Y-3): o cristal — a linha do topo do sheet (o brilho 1dp)
+    ui.glassTopLine(x, y, kSheetW);
     ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::dp(theme::kRadiusCard),
                     theme::kTheme.border);
 
@@ -3835,7 +3851,9 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     }
 
     // 0.9.6.6 (GRUPO C · CANTOS SUAVIZADOS): o CARD modal com raios 8dp
+    // 0.11-Y (Y-3): o cristal — a linha do topo (o brilho 1dp do glow)
     ui.panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard), theme::PANEL);
+    ui.glassTopLine(x, y, w);
     ui.frameRounded(x, y, w, h, 2.0f, theme::dp(theme::kRadiusCard),
                     theme::ACCENT);
     const f32 th = ui.fontHeight();

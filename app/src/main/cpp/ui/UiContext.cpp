@@ -445,6 +445,21 @@ void UiContext::focusGlow(f32 x, f32 y, f32 w, f32 h) {
     }
 }
 
+// 0.11-Y (Y-3) — O DIVISOR de cristal: 1dp de largura, o âmbar a cair do
+// topo (accentDim α0.90 → α0.15 no fundo — o gradiente vertical; a linha
+// sólida do D11 é SUPERADA pela ordem da Y-3, a pill do drag fica)
+void UiContext::dividerGradientV(f32 x, f32 y, f32 h) {
+    const f32 top[4] = {theme::kTheme.accentDim[0], theme::kTheme.accentDim[1],
+                        theme::kTheme.accentDim[2], 0.90f};
+    const f32 bot[4] = {theme::kTheme.accentDim[0], theme::kTheme.accentDim[1],
+                        theme::kTheme.accentDim[2], 0.15f};
+    const f32 w = theme::dp(1.0f);
+    const u32 fv = solids_.vertexCount();
+    if (emitGradientV(solids_, x, y, w, h, y, y + h, top, bot)) {
+        recordRun(solids_, 0u, fv, solids_.vertexCount() - fv);
+    }
+}
+
 void UiContext::frameRounded(f32 x, f32 y, f32 w, f32 h, f32 t, f32 radius,
                              const f32 color[4]) {
     if (auditing_ && auditComposite_ == 0) {
