@@ -167,6 +167,9 @@ void UiContext::auditAdd_(layout::Entry::Kind kind, u64 id, f32 x, f32 y,
     e.w = w;
     e.h = h;
     e.clipped = inScroll_;
+    // 0.11-Y (Y-2): o scope do overlay de propósito (o toast) — TODAS as
+    // entradas dentro do scope são overlay (o painel E o texto)
+    e.overlay = auditOverlayScope_ > 0;
     // 0.9.6.8 (GRUPO E): a tecla COMPACTA (a barra de símbolos de 40dp da
     // spec E) — a flag vive SÓ durante a chamada de buttonCompact(); a
     // 1ª entrada Button apanha-a (o label do texto de dentro não é
@@ -209,6 +212,10 @@ void UiContext::auditLabel_(f32 xBaseline, f32 yBaseline, const char* shown,
     e.h = (font_->ascent() + font_->descent()) * k;
     e.fullW = fullW > 0.0f ? fullW : e.w;
     e.truncated = truncated;
+    // 0.11-Y (Y-2): o scope do overlay (o texto do toast leva overlay)
+    if (auditOverlayScope_ > 0) {
+        e.overlay = true;
+    }
     // PASSO 2: a flag de DESENHO (o padrão da rowFloor — a 1ª label
     // registada apanha-a e ela nunca escapa para o widget seguinte)
     if (auditFitByDesign_) {

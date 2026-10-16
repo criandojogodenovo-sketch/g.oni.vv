@@ -305,6 +305,11 @@ void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
     auto timeToX = [&](f32 t) { return keysX + (t / view) * keysW; };
 
     // régua: tick por segundo inteiro + rótulo
+    // 0.11-Y (Y-2): o rótulo do ÚLTIMO tick (x+3 perto da borda direita do
+    // rect) SANGRAVA o contentRect (medido no device virtual: [1503,530
+    // 13x14] vs a borda 1512 — o PainelFora/TextoSangra apanhou): o rótulo
+    // desliza PARA A ESQUERDA quando não cabe inteiro (nunca truncado —
+    // 13px de "2s" cabem deslizados; a folga entre ticks é ≥228px)
     {
         const f32 step = view > 8.0f ? 2.0f : 1.0f;
         for (f32 t = 0.0f; t <= view + 1e-4f; t += step) {
@@ -314,7 +319,12 @@ void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
             if (t > 0.0f) {
                 char lab[16];
                 std::snprintf(lab, sizeof(lab), "%gs", t);
-                ui.labelFitted(x + 3.0f, rulerY + kRulerH - 2.0f, lab,
+                f32 lx = x + 3.0f;
+                const f32 twLab = ui.fontWidth(lab);
+                if (lx + twLab > r.x + r.w) {
+                    lx = r.x + r.w - twLab;   // desliza para dentro
+                }
+                ui.labelFitted(lx, rulerY + kRulerH - 2.0f, lab,
                                theme::LINE, 44.0f);
             }
         }
@@ -502,13 +512,20 @@ void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
     }
 
     // ---- cursor do tempo (POR CIMA das rows; espessura 2, ACCENT) ----------
+    // 0.11-Y (Y-2): o timecode desliza para dentro quando encosta na borda
+    // direita do rect (o MESMO contrato do rótulo da régua — nunca sangra)
     {
         const f32 cx = timeToX(pl->time);
         ui.drawLine(cx, rulerY + 2.0f, cx, r.y + kTimelineH - 4.0f, 2.0f,
                     theme::ACCENT);
         char tc[32];
         std::snprintf(tc, sizeof(tc), "%.2fs", pl->time);
-        ui.labelFitted(cx + 4.0f, rulerY + kRulerH - 2.0f, tc, theme::ACCENT,
+        f32 lxTc = cx + 4.0f;
+        const f32 twTc = ui.fontWidth(tc);
+        if (lxTc + twTc > r.x + r.w) {
+            lxTc = r.x + r.w - twTc;   // desliza para dentro
+        }
+        ui.labelFitted(lxTc, rulerY + kRulerH - 2.0f, tc, theme::ACCENT,
                        64.0f);
     }
 

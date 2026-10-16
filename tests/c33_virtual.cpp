@@ -7173,11 +7173,15 @@ int main() {
                     // OPAQUE: o pixel no interior do card É o bg grafite
                     // exato (o vidro antigo deixaria a cena atravessar) —
                     // na banda de rodapé do card, longe do texto
+                    // RECALIBRADO 0.11-Y: o card lê o TOKEN bg — o poço
+                    // #08080A (8,8,10); o probe compara contra o token
                     probePx18(pngL, (u32)(card18->x + 24.0f),
-                              (u32)(card18->y + card18->h - 6.0f), 14, 14,
-                              16,
+                              (u32)(card18->y + card18->h - 6.0f),
+                              (int)(theme::kTheme.bg[0] * 255.0f + 0.5f),
+                              (int)(theme::kTheme.bg[1] * 255.0f + 0.5f),
+                              (int)(theme::kTheme.bg[2] * 255.0f + 0.5f),
                               "18.2 J-01 o card do log é OPAQUE (o pixel "
-                              "interior é o bg #0E0E10 exato — a cena não "
+                              "interior é o bg LIDO DO TOKEN — a cena não "
                               "atravessa)");
                 }
                 fileapi::writeAll("hotfix20-device-logs.png", pngL.data(),
@@ -10100,6 +10104,151 @@ int main() {
         }
         }   // fim do else do 26.3 (o caminho do playback)
         g_gpu.releaseAll();
+    }
+
+    // ---- FASE 31 — 0.11-Y (Y-2): A VARREDURA DO LAYOUT (o critério do
+    // dono: NENHUM ecrã com overflow e NADA a cruzar a tab bar de baixo).
+    // O caminho de produção: cada ecrã desenha pelo frame() REAL com o
+    // audit ligado (o mesmo mecanismo do export do Grupo B) e o registo
+    // corre no VALIDADOR da casa — as duas regras novas (CruzaTabBar/
+    // PainelFora) + as de sempre (fora_do_ecra/sobreposto/texto_sangra/
+    // rect_degenerado = 0 ERROS em todo o ecrã).
+    fase("FASE 31 — 0.11-Y Y-2: a varredura do layout (13 ecrãs, zero "
+         "overflow, nada cruza a tab bar)");
+    {
+        auto resetEditor31 = [&]() {
+            g_editor.settingsMenu = false;
+            g_editor.docsScreen.open = false;
+            g_editor.scriptWin.open = false;
+            g_editor.storageDialog = false;
+            g_editor.uiMode = false;
+            g_editor.audioMode = false;
+            g_bottom.bottomTab = 0;
+            g_bottom.drawerH = 240.0f;
+        };
+        u32 varridos31 = 0;
+        auto varre31 = [&](const char* nome) {
+            g_layoutExportPending = true;   // o audit arma no INÍCIO do frame
+            frame();
+            const layout::Record& rec = g_ui.auditRecord();
+            check(!rec.entries.empty(),
+                  (std::string("31 [") + nome +
+                   "] o registo tem entradas (o audit correu)").c_str());
+            const std::vector<layout::Problem> ps = layout::validate(rec);
+            u32 cruza31 = 0, fora31 = 0, erros31 = 0;
+            for (const auto& p : ps) {
+                if (p.rule == layout::Problem::CruzaTabBar) ++cruza31;
+                else if (p.rule == layout::Problem::PainelFora) ++fora31;
+                else if (p.sev == layout::Problem::Erro) ++erros31;
+            }
+            check(cruza31 == 0,
+                  (std::string("31 [") + nome +
+                   "] NADA cruza a tab bar de baixo (CruzaTabBar=" +
+                   std::to_string(cruza31) + ")")
+                      .c_str());
+            check(fora31 == 0,
+                  (std::string("31 [") + nome +
+                   "] NENHUM painel sangra o contentRect (PainelFora=" +
+                   std::to_string(fora31) + ")")
+                      .c_str());
+            check(erros31 == 0,
+                  (std::string("31 [") + nome +
+                   "] ZERO erros do validador no ecrã inteiro (ERROS=" +
+                   std::to_string(erros31) + ")")
+                      .c_str());
+            // o DETALHE (o log do replay diz a regra + o rect — a caça)
+            for (const auto& p : ps) {
+                if (p.sev == layout::Problem::Erro) {
+                    std::printf("      [31] %s: %s\n", nome,
+                                layout::describe(rec, p).c_str());
+                }
+            }
+            // o DUMP (GONI_DUMP31=<nome>): TODAS as entradas do ecrã — a
+            // caça aos ids do Sobreposto (desligado por default)
+            if (const char* dump31 = std::getenv("GONI_DUMP31")) {
+                if (nome == std::string(dump31)) {
+                    for (u32 k = 0; k < rec.entries.size(); ++k) {
+                        const auto& e31 = rec.entries[k];
+                        if (e31.y + e31.h < 600.0f) continue;   // só a base
+                        std::printf("      [dump31 %u] %s id=%llx "
+                                    "[%.0f,%.0f %.0fx%.0f] clip=%d\n",
+                                    k, e31.kindName(),
+                                    (unsigned long long)e31.id, e31.x, e31.y,
+                                    e31.w, e31.h, (int)e31.clipped);
+                    }
+                }
+            }
+            ++varridos31;
+        };
+
+        // (1) o editor 3D limpo
+        resetEditor31();
+        varre31("editor3d");
+        // (2..5) as 4 tabs do drawer (ficheiros/assets/consola/animação)
+        resetEditor31();
+        g_bottom.bottomTab = 1;
+        varre31("drawer-ficheiros");
+        resetEditor31();
+        g_bottom.bottomTab = 2;
+        varre31("drawer-assets");
+        resetEditor31();
+        g_bottom.bottomTab = 3;
+        varre31("drawer-consola");
+        resetEditor31();
+        g_bottom.bottomTab = 4;
+        varre31("drawer-animacao");
+        // (6) o modo UI (o canvas 2D)
+        resetEditor31();
+        g_editor.uiMode = true;
+        varre31("modo-ui");
+        // (7) o modo ÁUDIO (o workspace)
+        resetEditor31();
+        g_editor.audioMode = true;
+        varre31("modo-audio");
+        // (8) o Settings (o modal sobre o editor)
+        resetEditor31();
+        g_editor.settingsMenu = true;
+        varre31("settings");
+        // (9) as Docs
+        resetEditor31();
+        g_editor.docsScreen.open = true;
+        varre31("docs");
+        // (10) o editor de script (o caminho REAL: o TIC com ScriptComp)
+        resetEditor31();
+        {
+            const Handle ator31 = g_scene.find("Ator");
+            if (ator31.valid()) {
+                openScriptEditor(ator31);
+            } else {
+                const Handle h31 = g_scene.create("VarSweep31");
+                if (Tic* t31 = g_scene.get(h31)) {
+                    t31->addComponent<Transform3D>();
+                    t31->addComponent<ScriptComp>();
+                }
+                openScriptEditor(h31);
+            }
+        }
+        varre31("script");
+        // (11) o diálogo de storage
+        resetEditor31();
+        g_editor.storageDialog = true;
+        varre31("storage");
+        // (12) o PIOR CASO de camadas: o Settings sobre o drawer aberto
+        resetEditor31();
+        g_bottom.bottomTab = 1;
+        g_editor.settingsMenu = true;
+        varre31("settings+drawer");
+        // (13) o drawer com a ALTURA MÁXIMA efetiva (o cap de 35% — o
+        // drawer a empurrar o viewport no limite da spec)
+        resetEditor31();
+        g_bottom.bottomTab = 4;
+        g_bottom.drawerH = 400.0f;
+        varre31("drawer-max-400");
+        check(varridos31 == 13,
+              (std::string("31 os 13 ecrãs varridos (varridos=") +
+               std::to_string(varridos31) + ")")
+                  .c_str());
+        resetEditor31();   // o estado limpo para o resto do replay
     }
 
     // ---- sumário -----------------------------------------------------------

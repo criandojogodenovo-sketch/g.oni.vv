@@ -66,6 +66,13 @@ struct Entry {
     // avisa TextoTruncado nas entradas com esta flag; o dump JSON
     // documenta-a ("fit_por_desenho") para o auditor do device
     bool fitByDesign = false;
+    // 0.11-Y (Y-2): o FLOATING OVERLAY de propósito — o toast bottom-center
+    // (spec M/E: «por CIMA da tab bar»), desenhado por ÚLTIMO sobre tudo.
+    // O validador não o conta como cruzamento/overflow (o overlay é
+    // INTENCIONAL — a decisão da casa registada nas FASEs 15.x: «fora da
+    // conta»); o dump JSON documenta ("ov") e o audit marca via o scope
+    // auditOverlayBegin/End (o padrão do auditComposite)
+    bool overlay = false;
 
     bool interactive() const {
         return kind == Button || kind == Scroll || kind == Slider;
@@ -122,7 +129,16 @@ struct Problem {
         ToquePequeno,   // interativo abaixo do piso da SUA classe (40/36/32/28)
         TextoTruncado,  // label que o fit cortou com "…" (perdeu informação)
         TextoSangra,    // label SEM clip que sai do contentRect (o bug do C33)
-        RectDegenerado  // interativo com rect ≤ 0 (zona morta)
+        RectDegenerado, // interativo com rect ≤ 0 (zona morta)
+        // 0.11-Y (Y-2 · a varredura do layout do dono): as DUAS REGRAS
+        // NOVAS da identidade — o ecrã inteiro SEM overflow e NADA a
+        // cruzar a tab bar de baixo:
+        CruzaTabBar,    // entrada que ATRAVESSA a faixa da tab bar de baixo
+                        // (o interior da faixa é OU dela própria — contida —
+                        // OU intocado; o meio-de-fora é o defeito)
+        PainelFora      // painel/moldura (não-interativo) que Sangra o
+                        // contentRect — o overflow visual; o véu que
+                        // CONTÉM o contentRect é intencional e fica de fora
     };
     enum Sev : u8 { Erro, Aviso };
     Rule rule = ForaDoEcra;
@@ -137,6 +153,8 @@ struct Problem {
             case TextoTruncado: return "texto_truncado";
             case TextoSangra:   return "texto_sangra";
             case RectDegenerado:return "rect_degenerado";
+            case CruzaTabBar:   return "cruza_tab_bar";
+            case PainelFora:    return "painel_fora";
         }
         return "?";
     }

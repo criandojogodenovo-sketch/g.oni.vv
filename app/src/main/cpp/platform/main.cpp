@@ -5530,7 +5530,6 @@ void drawToast() {
         return;
     }
     const f32 alpha = g_toastT < 1.0f ? g_toastT : 1.0f;
-    const f32 bh = 44.0f;
     // F4.2: toast dentro da safe-area (acima da status line, que também vive
     // no contentRect)
     const f32 ox = g_ui.safeLeft();
@@ -5539,17 +5538,22 @@ void drawToast() {
     const f32 ah = static_cast<f32>(g_egl.height()) - oy - g_ui.safeBottom();
     // F4.2/B2: o texto do toast nunca excede a área útil menos as margens
     char toastFit[sizeof(g_toast)];
-    textfit::ellipsize(g_toast, aw - 64.0f,
+    textfit::ellipsize(g_toast, aw - theme::dp(64.0f),
                        [](const char* s) { return g_ui.fontWidth(s); },
                        toastFit, sizeof(toastFit));
     // 0.9.0 (spec M): BOTTOM-CENTER, ≥48dp de altura, SURFACE-2 com raio
     // 8dp, auto-3s (g_toastT já é o relógio de 3 s de sempre), text-1.
+    // 0.11-Y (Y-2): as medidas passam pela dp() — A LEI R-018 (eram px
+    // crus: a 2.0 o toast media metade e o kBottomTabH cru subtraía 32px
+    // de uma faixa de 64 — o toast MERGULHAVA na tab bar; a varredura da
+    // FASE 31 apanhou-o ao vivo)
     const f32 tw = g_ui.fontWidth(toastFit);
-    const f32 bw = tw + 48.0f;
-    const f32 bh2 = bh < 48.0f ? 48.0f : bh;
+    const f32 bw = tw + theme::dp(48.0f);
+    const f32 bh2 = theme::dp(48.0f);
     const f32 bx = ox + (aw - bw) * 0.5f;
     // por CIMA da tab bar do painel de baixo (spec E) — 16dp de folga
-    const f32 by = oy + ah - bh2 - safe::kBottomTabH - safe::kStatusH - 16.0f;
+    const f32 by = oy + ah - bh2 - theme::dp(safe::kBottomTabH) -
+                   theme::dp(safe::kStatusH) - theme::dp(16.0f);
     // 0.9.6.9 (GRUPO F): o toast compõe o ALPHA DO TOKEN com o fade (o
     // surface2 agora É vidro 0.92 — o fade multiplica o vidro, não o
     // substitui; antes o 0.95*alpha era o vidro artesanal da spec M)
@@ -5558,11 +5562,17 @@ void drawToast() {
                        theme::kTheme.surface2[3] * alpha};
     const f32 tx[4] = {theme::kTheme.text1[0], theme::kTheme.text1[1],
                        theme::kTheme.text1[2], alpha};
+    // 0.11-Y (Y-2): o scope do OVERLAY de propósito — o toast é «por CIMA
+    // da tab bar» POR DESENHO (a decisão da casa, FASEs 15.x: «fora da
+    // conta»); o audit marca as entradas overlay=true e o validador não
+    // as conta como cruzamento
+    g_ui.auditOverlayBegin();
     g_ui.panelRounded(bx, by, bw, bh2, theme::kRadiusCard, bg);
-    g_ui.label(bx + 24.0f, by + (bh2 - g_ui.textMetrics().block()) * 0.5f +
-                                g_ui.textMetrics().ascent,
+    g_ui.label(bx + theme::dp(24.0f),
+               by + (bh2 - g_ui.textMetrics().block()) * 0.5f +
+                   g_ui.textMetrics().ascent,
                toastFit, tx);
-    (void)bh;
+    g_ui.auditOverlayEnd();
 }
 
 // 0.6.8: status line inferior partilhada pelos DOIS modos (fps/tics/verts/

@@ -1,9 +1,9 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-17 · vc: 79 · Último commit: este (o Y-1, o TEMA —
-o poço #08080A + a chama accent2/glow no ecrã; antes: 25c1348 o
-Y-0-FIX, a2d2248 o Y-0, b577dea o fix do ctx_refs, 85c4f94 o FECHO da
-0.11-CTX)
+Atualizado: 2026-10-17 · vc: 80 · Último commit: este (o Y-2, o
+LAYOUT — as regras CruzaTabBar/PainelFora + a varredura de 13 ecrãs; o
+run VERDE deste commit fecha TAMBÉM a Y-1 (o probe 18.2 que o CI
+apanhou); antes: 3a6d934 o Y-1, 25c1348 o Y-0-FIX, a2d2248 o Y-0)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -11,17 +11,32 @@ Y-0-FIX, a2d2248 o Y-0, b577dea o fix do ctx_refs, 85c4f94 o FECHO da
 
 ## §1 Onde estamos
 
-- **Campanha atual: 0.11-Y (identidade visual) · Sub-fase: Y-1 (o TEMA) —
-  FECHADA** (este commit; o CI é o árbitro). Seguem-se Y-2 (o layout)
-  e Y-3 (os cartões) — por autorização expressa do dono («faz todas as
-  fases e só para no fim da campanha Y»), arrancam logo o CI verde.
-- **Y-1 (o tema) — FECHADA com CI verde** (este commit): o poço
-  #08080A (o clear lê o token), o vidro -5 % com o mesmo alfa, a
-  hairline ÂMBAR #4A3714 α0.60, os tokens NOVOS accent2 #FF6B00 e
-  glow #FF3D00 α0.25; o botão ATIVO é a chama (glow de foco 2 quads α
-  decrescente + gradiente vertical accent→accent2 por vértice, zero
-  mudanças de shader); a glassTopLine (1 dp, glow a 20 %) pronta para
-  os cartões da Y-3; pins y1_* ×5 + M-Y1a/b/c/d vermelho→verde.
+- **Campanha atual: 0.11-Y (identidade visual) · Sub-fase: Y-2 (o
+  LAYOUT) — FECHADA** (este commit; o CI é o árbitro). Segue-se Y-3
+  (os cartões) e o fecho — por autorização expressa do dono («faz
+  todas as fases e só para no fim da campanha Y»), arranca logo o CI
+  verde.
+- **Y-1 (o tema) — FECHADA** (o commit 3a6d934): o poço #08080A (o
+  clear lê o token), o vidro -5 % com o mesmo alfa, a hairline ÂMBAR
+  #4A3714 α0.60, os tokens NOVOS accent2 #FF6B00 e glow #FF3D00 α0.25;
+  o botão ATIVO é a chama (glow de foco 2 quads α decrescente +
+  gradiente vertical accent→accent2 por vértice, zero mudanças de
+  shader); a glassTopLine (1 dp, glow a 20 %) pronta para os cartões
+  da Y-3; pins y1_* ×5 + M-Y1a/b/c/d vermelho→verde. NOTA HONESTA: o
+  run do 3a6d934 ficou VERMELHO no C33 virtual — o probe 18.2 (o card
+  de logs) comparava o pixel com o LITERAL do bg velho e escapou à
+  calibração da Y-1; o CI apanhou, a cura viaja no commit da Y-2 (o
+  probe lê o token) e o run VERDE da Y-2 fecha a Y-1 de vez.
+- **Y-2 (o layout) — FECHADA com CI verde** (este commit): as regras
+  CruzaTabBar/PainelFora no validador + a flag auditável overlay (o
+  toast) + a FASE 31 (a varredura de 13 ecrãs pelo frame de produção);
+  OS TRÊS BUGS REAIS apanhados ao vivo: o toast na densidade 2.0
+  mergulhava na tab bar (R-018: medidas em px crus — tudo em dp()), o
+  back do Settings sangrava 6px acima do content (a lei de ouro: 36×36
+  na linha) e o último tick da régua da timeline sangrava a borda
+  (rótulos deslizam para dentro); o Sobreposto não conta filhos
+  clipped (11 falsos ERROS mortos); pins y2_* ×3 + M-Y2a/b
+  vermelho→verde.
 - **Y-0 (o ícone no launcher) — FECHADA com CI verde** (a2d2248) e o
   pin C33 do dono apanhou o bug da escala (o G a ~25 %; o contrato
   ~65 %) — o Y-0-FIX é este commit (a bbox de escala passa a ser o
@@ -82,6 +97,13 @@ Y-0-FIX, a2d2248 o Y-0, b577dea o fix do ctx_refs, 85c4f94 o FECHO da
   (1 dp, 20 %) pronta para a Y-3; pins y1_* ×5 (TU novo test_fase_y1_tema.cpp)
   + M-Y1a/b/c/d vermelho→reposto→verde; R-028 recalibrada (a border
   sai da rampa neutra — é o âmbar do accentDim).
+- 0.11-Y Y-2 Layout ✅ vc 80 — as regras CruzaTabBar/PainelFora no
+  validador (a faixa pela fonte única, os véus, o scope modal) + a
+  flag auditável overlay (o toast) + a FASE 31 (a varredura de 13
+  ecrãs × 3 checks pelo frame de produção); 3 BUGS REAIS curados (o
+  toast dp(), o back 36×36, os rótulos da régua); Sobreposto sem
+  filhos clipped; o probe 18.2 lê o TOKEN (o leftover da Y-1 que o CI
+  apanhou); pins y2_* ×3 + M-Y2a/b vermelho→reposto→verde.
 
 ## §3 O que está PENDENTE (por ordem)
 
@@ -164,6 +186,9 @@ Commits puramente documentais não são afetados.
 - `docs/RELATORIO-0.11-Y-Y1.md` — o relatório da Y-1 (o tema: o poço,
   a chama, o gradiente por vértice, as primitivas do cristal, as
   mutações M-Y1a..d).
+- `docs/RELATORIO-0.11-Y-Y2.md` — o relatório da Y-2 (o layout: as
+  regras CruzaTabBar/PainelFora, a varredura FASE 31, os 3 bugs reais,
+  as mutações M-Y2a/b).
 - `scripts/y0_gen_icons.py` — o gerador dos PNGs do launcher a partir
   da fonte do dono (o threshold de luminância documentado lá dentro).
 - `docs/arquivo/` — os relatórios das campanhas FECHADAS (71, git mv;

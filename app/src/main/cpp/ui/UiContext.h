@@ -208,6 +208,13 @@ public:
     // apanha (o padrão buttonCompact — nunca escapa). As constantes são
     // as nomeadas do LayoutDump.h — números frouxos NÃO passam.
     void auditRowFloorNext(f32 floorDp) { auditRowFloorNext_ = floorDp; }
+    // 0.11-Y (Y-2): o SCOPE do overlay de propósito (o toast): TODAS as
+    // entradas emitidas dentro do scope levam overlay=true (o padrão do
+    // auditComposite — begin/end em pares, nunca escapa)
+    void auditOverlayBegin() { ++auditOverlayScope_; }
+    void auditOverlayEnd() {
+        if (auditOverlayScope_ > 0) --auditOverlayScope_;
+    }
     // PASSO 2 (0.9.6.15): o corte do fit É O DESENHO (nomes de linha com
     // tip — spec B); o validador não avisa TextoTruncado nessa entrada.
     // O padrão da casa: flag consumida pela 1ª label registada, nunca escapa
@@ -560,6 +567,8 @@ private:
     layout::Record audit_;
     bool           auditing_ = false;
     u32            auditComposite_ = 0;
+    // 0.11-Y (Y-2): o scope do overlay de propósito (o toast) — acima
+    u32            auditOverlayScope_ = 0;
     // 0.9.6.8 (GRUPO E): viva SÓ durante buttonCompact() — a 1ª entrada
     // Button apanha-a (auditAdd_); nunca escapa da chamada
     bool           auditCompactNext_ = false;

@@ -169,10 +169,15 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
     ui.panel(0.0f, 0.0f, ui.screenWidth(), ui.screenHeight(),
              theme::kTheme.surface);
 
-    // ---- BACK 48dp + título 20sp no CABEÇALHO PADRÃO (56dp) ---------------
-    const f32 hdrH = theme::dp(safe::kTopBarH);   // 56dp REAL (R-018)
-    const UiRect back = {ox + theme::dp(8.0f), oy + (hdrH - theme::dp(48.0f)) * 0.5f,
-                         theme::dp(48.0f), theme::dp(48.0f)};
+    // ---- BACK + título 20sp no CABEÇALHO PADRÃO (36dp — PASSO 1) ----------
+    // 0.11-Y (Y-2): o back ERA um quadrado 48dp centrado no cabeçalho de
+    // 36dp — (36-48)/2 = -6: SANGRAVA 6px acima do contentRect (o device
+    // virtual apanhou: [8,18 48x48] vs o topo 24). A LEI DA CASA (PASSO 1):
+    // o elemento DE LINHA toma a ALTURA DA LINHA — o mesmo padrão do back
+    // das Docs (o hit = o quadrado hdrH×hdrH no topo da linha)
+    const f32 hdrH = theme::dp(safe::kTopBarH);   // 36dp REAL (R-018)
+    const UiRect back = {ox + theme::dp(8.0f), oy,
+                         theme::dp(hdrH), theme::dp(hdrH)};
     const bool backHeld = ui.widgetActive(kBackId);
     if (backHeld) {
         ui.panelRounded(back.x, back.y, back.w, back.h, theme::kRadiusCard,

@@ -338,6 +338,9 @@ add_executable(test_core
         # glow + o gradiente dos ativos + as primitivas do cristal —
         # test_fase_y1_tema.cpp)
         test_fase_y1_tema.cpp
+        # 0.11-Y Y-2: os pins do LAYOUT (as regras CruzaTabBar/PainelFora
+        # do validador — test_fase_y2_layout.cpp)
+        test_fase_y2_layout.cpp
         test_sentinels.cpp)
 
 

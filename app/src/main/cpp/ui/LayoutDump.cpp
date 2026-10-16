@@ -3,6 +3,9 @@
 // zero Android: o CI afere as regras com Records plantados à mão e o
 // device lê o resultado do frame REAL.
 #include "ui/LayoutDump.h"
+#include "ui/SafeArea.h"   // 0.11-Y (Y-2): a ALTURA da tab bar de baixo
+                           // (safe::kBottomTabH — a fonte única; o número
+                           // da faixa NUNCA se repete frouxo aqui)
 #include <cstdio>
 #include <cstring>
 
@@ -123,8 +126,99 @@ std::vector<Problem> validate(const Record& r) {
     const f32 cx = r.contentX(), cy = r.contentY();
     const f32 cw = r.contentW(), ch = r.contentH();
 
+    // 0.11-Y (Y-2): a faixa da tab bar de baixo EM PX do registo (a fonte
+    // única safe::kBottomTabH × a densidade do registo — o validador é
+    // puro, a densidade viaja no Record) + os índices dos VÉUS MODAIS:
+    // um painel desenhado ANTES que contém a faixa INTEIRA é a camada
+    // modal legítima (o ecrã-cheio do Settings/Docs/Script tapa a tab bar
+    // POR DESENHO — a mesma filosofia das regras de sempre: «painéis
+    // sobre painéis, camadas legítimas»); o que desenha DEPOIS do véu
+    // vive sobre o modal e não pode cruzar NADA (a faixa já não existe
+    // para ele). O defeito é ATRAVESSAR a borda da faixa na camada onde
+    // a faixa está VIVA.
+    const f32 bandH = safe::kBottomTabH * dens;
+    const f32 bandY0 = cy + ch - bandH;
+    const f32 bandY1 = cy + ch;
+    std::vector<bool> sobreModal;
+    sobreModal.assign(r.entries.size(), false);
+    for (u32 v = 0; v < r.entries.size(); ++v) {
+        const Entry& ve = r.entries[v];
+        if (ve.kind != Entry::Panel || ve.w <= 0.5f || ve.h <= 0.5f) continue;
+        // o véu: contém a faixa inteira (com a tolerância do ruído)
+        const bool veuDaFaixa = ve.x <= cx + kTol && ve.y <= bandY0 - kTol &&
+                                ve.x + ve.w >= cx + cw - kTol &&
+                                ve.y + ve.h >= bandY1 - kTol;
+        if (!veuDaFaixa) continue;
+        for (u32 w2 = v + 1; w2 < r.entries.size(); ++w2) {
+            sobreModal[w2] = true;   // tudo o que desenha DEPOIS do véu
+        }
+    }
+
     for (u32 i = 0; i < r.entries.size(); ++i) {
         const Entry& e = r.entries[i];
+
+        // ---- 0.11-Y (Y-2) — AS DUAS REGRAS NOVAS da identidade -------------
+        // correm para TODAS as entradas (o overflow não é só de botões);
+        // conteúdo de SCROLL (clipped) fica fora — o clip corta na borda
+        // da região POR DESENHO e a região é que vive acima da tab bar.
+        // 0.11-Y (Y-2): as entradas OVERLAY de propósito (o toast) ficam
+        // fora das DUAS regras novas — o overlay é intencional (a decisão
+        // da casa, FASEs 15.x: «fora da conta»; a flag auditável overlay)
+        if (!e.clipped && !sobreModal[i] && !e.overlay && e.w > 0.5f &&
+            e.h > 0.5f) {
+            // (a) CRUZA_TAB_BAR — a faixa da tab bar de baixo (a ÚLTIMA
+            // faixa do contentRect, altura safe::kBottomTabH): uma entrada
+            // ou vive FORA dela (acima) ou É DELA (as tabs/chips contidos);
+            // ATRAVESSAR a borda superior da faixa é o defeito (o conteúdo
+            // a meter o pé na barra — o que o dono mandou nunca acontecer).
+            {
+                // a faixa em px do REGISTO: a altura da barra (dp, a fonte
+                // única safe::kBottomTabH) × a densidade do registo (o
+                // validador é puro — a densidade viaja no Record, nunca na
+                // global do Theme — as variáveis bandY0/bandY1 do topo)
+                const f32 ov = e.y + e.h > bandY0 + kTol &&
+                                       e.y < bandY1 - kTol
+                                   ? ((e.y + e.h < bandY1 ? e.y + e.h : bandY1) -
+                                      (e.y > bandY0 ? e.y : bandY0))
+                                   : 0.0f;
+                const bool contida = e.y >= bandY0 - kTol &&
+                                     e.y + e.h <= bandY1 + kTol;
+                // o VÉU (a própria entrada): um painel que CONTÉM a faixa
+                // inteira cobre-a POR DESENHO (o ecrã-cheio dos modais) —
+                // intencional, como o véu do PainelFora
+                const bool veuDaFaixa =
+                    e.kind == Entry::Panel && e.x <= cx + kTol &&
+                    e.y <= bandY0 - kTol && e.x + e.w >= cx + cw - kTol &&
+                    e.y + e.h >= bandY1 - kTol;
+                if (ov > kTol && !contida && !veuDaFaixa) {
+                    Problem p;
+                    p.rule = Problem::CruzaTabBar;
+                    p.sev = Problem::Erro;
+                    p.ia = i;
+                    ps.push_back(p);
+                }
+            }
+            // (b) PAINEL_FORA — painel/moldura NÃO-interativo que sangra o
+            // contentRect (o overflow visual; os interativos JÁ são
+            // aferidos pelo ForaDoEcra de cima e as labels pelo
+            // TextoSangra). O VÉU de propósito (o scrim que CONTÉM o
+            // contentRect inteiro — cobrir tudo é o desenho) fica de fora.
+            if ((e.kind == Entry::Panel || e.kind == Entry::Frame) &&
+                (e.x < cx - kTol || e.y < cy - kTol ||
+                 e.x + e.w > cx + cw + kTol ||
+                 e.y + e.h > cy + ch + kTol)) {
+                const bool veu = e.x <= cx + kTol && e.y <= cy + kTol &&
+                                 e.x + e.w >= cx + cw - kTol &&
+                                 e.y + e.h >= cy + ch - kTol;
+                if (!veu) {
+                    Problem p;
+                    p.rule = Problem::PainelFora;
+                    p.sev = Problem::Erro;
+                    p.ia = i;
+                    ps.push_back(p);
+                }
+            }
+        }
 
         if (e.interactive()) {
             // RectDegenerado — a zona morta (desenha-se mas não existe)
@@ -203,13 +297,18 @@ std::vector<Problem> validate(const Record& r) {
 
     // Sobreposto — interativo×interativo com interseção real (>1px²) onde
     // NENHUM contém o outro (o scroll CONTÉM os seus botões-filhos — a
-    // relação pai-filho é legítima; o pisar parcial é o defeito)
+    // relação pai-filho é legítima; o pisar parcial é o defeito).
+    // 0.11-Y (Y-2): entradas CLIPPED saem do par — o rect delas é a
+    // posição NÃO-cortada do filho scrolled-out (o clip corta na borda da
+    // região POR DESENHO; o mesmo contrato do ForaDoEcra/TextoSangra): o
+    // visível de um filho clipado vive DENTRO da região, e a interseção
+    // do rect cru com a região/pai é o scroll a funcionar, não o defeito.
     for (u32 i = 0; i < r.entries.size(); ++i) {
         const Entry& a = r.entries[i];
-        if (!a.interactive()) continue;
+        if (!a.interactive() || a.clipped) continue;
         for (u32 j = i + 1; j < r.entries.size(); ++j) {
             const Entry& b = r.entries[j];
-            if (!b.interactive()) continue;
+            if (!b.interactive() || b.clipped) continue;
             const f32 ov = overlapArea(a, b);
             if (ov <= 1.0f) continue;
             if (contains(a, b) || contains(b, a)) continue;
@@ -289,6 +388,24 @@ std::string describe(const Record& r, const Problem& p) {
                           "%s %s(id %llx) com rect degenerado %.0fx%.0f",
                           p.sevName(), a.kindName(),
                           (unsigned long long)a.id, a.w, a.h);
+            break;
+        case Problem::CruzaTabBar:
+            // 0.11-Y (Y-2): a entrada atravessa a faixa da tab bar de baixo
+            std::snprintf(buf, sizeof(buf),
+                          "%s %s(id %llx) CRUZA a tab bar de baixo: "
+                          "[%.0f,%.0f %.0fx%.0f] (a faixa termina em y=%.0f)",
+                          p.sevName(), a.kindName(),
+                          (unsigned long long)a.id, a.x, a.y, a.w, a.h,
+                          r.screenH - r.insetB);
+            break;
+        case Problem::PainelFora:
+            // 0.11-Y (Y-2): o overflow visual do painel/moldura
+            std::snprintf(buf, sizeof(buf),
+                          "%s %s SANGRA o contentRect: [%.0f,%.0f %.0fx%.0f] "
+                          "vs ecrã %.0fx%.0f+%0.f,%0.f",
+                          p.sevName(), a.kindName(), a.x, a.y, a.w, a.h,
+                          r.contentW(), r.contentH(), r.contentX(),
+                          r.contentY());
             break;
         default:
             std::snprintf(buf, sizeof(buf), "problema ?");
