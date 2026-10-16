@@ -1,0 +1,204 @@
+# CODEMAP.md — onde vive o quê
+
+Atualizado: 2026-10-16 · vc: 76
+
+> Convenção de paths: TODOS os caminhos deste ficheiro são relativos à
+> RAIZ do repo (exemplo: o registo da linguagem vive em
+> app/src/main/cpp/voni/VoniRegistry.cpp) — nunca relativo à pasta cpp/,
+> nunca só o nome da camada. O índice é ÍNDICE, não é a verdade — se
+> divergir do código, investiga, reporta, corrige. Nunca inventa.
+
+## §1 Quero... (mapa rápido)
+
+| Quero... | Onde | Símbolos-chave |
+|---|---|---|
+| mexer no editor de script | app/src/main/cpp/ui/ScriptEditor.cpp | (UI da 0.9.2) |
+| mexer na linguagem V.ONI | app/src/main/cpp/voni/VoniRegistry.cpp | `kEntries` |
+| mexer no runtime V.ONI | app/src/main/cpp/voni/VoniVm.cpp | `kCommands` |
+| mexer nos linker/tyker | app/src/main/cpp/voni/VoniTykers.cpp | o motor dos tykers |
+| serializar a cena (.goni) | app/src/main/cpp/core/SceneSerializer.cpp | `dump` / `loadText` |
+| mexer no formato .gmesh | app/src/main/cpp/assets/GOwnFormats.cpp | `writeGMesh` / `readGMeshV3Meta` |
+| mexer no import streaming | app/src/main/cpp/assets/GmeshV3Stream.cpp | conversor v3 |
+| render por blocos | app/src/main/cpp/render/BlockMesh.cpp | `open` / `materializeBlock` / `draw` |
+| impostores (3.75b) | app/src/main/cpp/assets/ImpostorIndex.cpp + app/src/main/cpp/render/Impostor.h | `ensureImpostor` / `relFor` |
+| instancing de blocos (3.5b) | app/src/main/cpp/render/BlockMesh.cpp | draw por assinatura, teto 64 |
+| a despachante principal | app/src/main/cpp/platform/main.cpp | drawTics, ordem por frame |
+| adicionar um TU novo | DOIS CMakeLists (ver §3) | — |
+| a sentinela R-NNN | tests/test_sentinels.cpp | `regress_*` |
+
+## §2 Mapa por camada
+
+- **app/src/main/cpp/voni/** — a linguagem V.ONI: VoniRegistry (a fonte
+  única dos metadados), VoniCompile, VoniVm (o runtime, `kCommands`),
+  VoniTykers (o motor dos linkers/tykers), VoniEngineHost (a ponte com o
+  motor), VoniHighlight/VoniDocs (editor + docs). A referência gerada é
+  VONI_referencia.md (+ llms.txt/llms-full.txt) — regenerada pelo alvo
+  `voni_refgen` de tests/CMakeLists.txt.
+- **app/src/main/cpp/core/** — o motor puro: Scene/Tic (a unidade é TIC),
+  SceneSerializer (`.goni`: `dump`/`loadText`), ProjectStorage/FsStorage/
+  SafStorage (SAF), Tick.h (o `TickGroup` + `TickGroups::add`), UndoStack,
+  VoniSystem, Bench (R-017), AssetPersist, SceneTic.h (TIC + Transform3D).
+- **app/src/main/cpp/render/** — o desenho: Renderer, Mesh, Camera, Grid,
+  Cube/Primitives, Material, Texture, GpuAssets (+ `impostorTexture`),
+  BlockMesh (o render POR BLOCOS do .gmesh v3), Impostor.h (a decisão
+  PURA do impostor), QuadBatch, DrawStats, ThumbPng (PNG via zlib).
+- **app/src/main/cpp/assets/** — importadores e formatos GL-free:
+  GOwnFormats (.gmesh/.gtext/.gm), GmeshV3Stream (o streaming do
+  conversor), GltfImporter/GltfAnim/GltfTextures/GltfInstantiate,
+  ObjImporter, PngLoader, TexturePipeline/TexturePolicy/TextureCache,
+  MipGen, ThumbRender/ThumbIndex (thumbs software), ImpostorIndex (o
+  PNG do impostor sob demanda — o pico de RAM é UM bloco, R-041),
+  AstcCompressor/Etc2Compressor + vendor/.
+- **app/src/main/cpp/ui/** — a apresentação: EditorUi, EditorLayout.h (as
+  constantes — InspRow, as faixas k*Base), UiContext, UiEditor (as ops
+  de árvore PURAS), Theme.h (as ÚNICAS cores), ViewportChrome,
+  BottomPanel, SettingsPage, ScriptEditor, DocsScreen, Gizmo, hierarquia.
+- **app/src/main/cpp/components/** — os componentes do TIC: MeshRenderer
+  (+ `impostorDistance`), CameraComp, Body3D, RigidBody3D, AudioPlayer,
+  ScriptComp, AnimationPlayer, UI*, Input*.
+- **app/src/main/cpp/platform/** — Android: main.cpp (a despachante —
+  ANativeActivity, o ciclo por frame, drawTics), EngineLog, JNI glue.
+- **tests/** — a suíte do core (C++17, GL-free): test_main.cpp (o runner,
+  GONI_ONLY/GONI_SKIP), TestFramework.h (o TEST/EXPECT), test_sentinels.cpp
+  (as sentinelas regress_*), test_ctx_pines.cpp (os pins dos índices da
+  0.11-CTX), test_fase375b_impostors.cpp, test_voni.cpp, test_bench.cpp,
+  test_gmeshv3.cpp, voni_refgen.cpp (o gerador da referência), c33_virtual.cpp
+  (o dispositivo virtual), CMakeLists.txt (a lista de fontes dos pins),
+  stub/glstub_fb.h (o rasterizador honesto — SEM GLES real), fixtures/.
+- **app/src/main/java/vv/goni/** — a casca Java: VvActivity (JNI),
+  ReloadGate (R-005), ProjectsFormat/VvProjects/ProjectManagerActivity,
+  UiIcons.
+- **ci/** + **scripts/** — os gates: scope_check.py (ci/scope.txt),
+  docs_lint_check.py (ci/forbidden_docs_patterns.txt), docs_lint_state.sh
+  (a regra STATE.md do §1.2 da 0.11-CTX), release_identity_check.py,
+  gmesh_docs_check.py, ui_vocab_check.py, theme_hex_check.py,
+  hierarchy_check.py, jni_parity.py, link_parity.sh, check_main.sh,
+  glyph_source_check.py, reload_concurrency_check.py, projects_ui_check.py,
+  gizmo_camera_medidas.py.
+- **docs/** — REGRESSOES.md (as sentinelas R-NNN), GMESH_formato.md e
+  GTEX_formato.md (a fonte de verdade dos formatos), LAYOUT_HIERARCHY.md,
+  FASE3.5-PIN.md, RELATORIO-0.11-W-*.md (a campanha em curso), SAF_EXCEPTION.md,
+  AUDIT_SAF_JNI.md, HANDSHAKE_AUDIT.md. (O arquivo das campanhas fechadas,
+  o DIARIO e o TEMPLATE_PROMPT organizam-se na CTX-3 — entram aqui quando
+  existirem.)
+
+## §3 Pontos de extensão (receitas)
+
+### Adicionar um COMANDO V.ONI novo
+1. app/src/main/cpp/voni/VoniRegistry.cpp — entrada em `kEntries`
+   (o registo é a FONTE ÚNICA: docs, sintaxe e validação nascem daí).
+2. app/src/main/cpp/voni/VoniVm.cpp — handler em `kCommands`.
+3. app/src/main/cpp/voni/VoniEngineHost.h/.cpp — se o comando precisa do
+   motor (os hosts que não têm motor devolvem «indisponível» honesto).
+4. Regenerar a referência: construir e correr o alvo `voni_refgen`
+   (tests/CMakeLists.txt) — VONI_referencia.md + llms*.txt regenerados; a
+   bijeção é vigiada pela sentinela R-013.
+5. Pin em tests/test_voni.cpp (ou test_voni_* novo na suíte).
+6. docs/REGRESSOES.md — se for estrutural, sentinela nova com a mutação
+   colada no relatório.
+
+### Adicionar um COMPONENTE de tyker
+1. app/src/main/cpp/voni/VoniRegistry.cpp — a entrada do componente nos
+   metadados do registo central (o kComponents e o argc/min-max vivem NO
+   REGISTO — VoniRegistry.h —, não no Tykers; UMA fonte alimenta tudo).
+2. app/src/main/cpp/voni/VoniTykers.cpp — o handler (o MOTOR executa; a
+   tabela do registo aponta para ele).
+3. Regenerar com `voni_refgen`.
+4. Pin na suíte (o ciclo do linker, o find obrigatório, os args na
+   ativação).
+5. docs/REGRESSOES.md — sentinela se estrutural.
+
+### Adicionar um CAMPO no .goni
+1. app/src/main/cpp/components/<Component>.h — campo com default
+   explícito (o default é o contrato de compat).
+2. app/src/main/cpp/core/SceneSerializer.cpp — o `dump` escreve e o
+   `loadText` lê; campo NOVO só viaja no ficheiro quando != default
+   (os .goni antigos ficam byte a byte).
+3. Pin de compat byte a byte: ficheiro antigo lê igual; round-trip não
+   cria «edit» fantasma.
+
+### Adicionar um CAMPO no .gmesh
+1. app/src/main/cpp/assets/GOwnFormats.h — flag nova ou cauda opcional
+   (o padrão GTB1/GTB2: cauda encadeada, CRC, ficheiro novo abre em build
+   antiga SEM saber).
+2. app/src/main/cpp/assets/GOwnFormats.cpp — `writeGMesh` +
+   `readGMeshV3Meta` (e os leitores encadeados com out-param opcional —
+   os chamadores antigos ficam byte a byte).
+3. app/src/main/cpp/assets/GmeshV3Stream.cpp — se o streaming também
+   transporta o campo.
+4. app/src/main/cpp/render/BlockMesh.cpp — ler no `open`.
+5. Pins: o .gmesh antigo SEM a flag lê igual; CRC podre = erro legível;
+   docs/GMESH_formato.md atualizado (o gate gmesh-docs aferra).
+
+### Adicionar um SISTEMA (por frame)
+1. app/src/main/cpp/core/Tick.h — a ordem é o `TickGroup` (enum + 
+   `TickGroups::add`); escolher o grupo certo (o UI desenha DEPOIS, não é
+   um TickGroup).
+2. app/src/main/cpp/platform/main.cpp — registar o sistema e chamá-lo na
+   despachante (a ordem real por frame vive aqui — drawTics incluído).
+3. Considerar a posição face a Transform/Animation/Physics (o frame é
+   colheita → grupos → submissão).
+
+### Adicionar um FICHEIRO .cpp NOVO ← CRÍTICA
+1. Criar <nome>.h e <nome>.cpp na camada correta (app/src/main/cpp/<camada>/).
+2. Adicionar <nome>.cpp em tests/CMakeLists.txt (para os pins).
+3. Adicionar <nome>.cpp em app/src/main/cpp/CMakeLists.txt (para o APK —
+   o sítio onde o bug «undefined symbol no CI» vive).
+4. Verificar que AMBOS os CMakeLists têm o ficheiro:
+   `git grep "<nome>.cpp" -- '*CMakeLists.txt'` → 2 resultados.
+5. Se só der 1 resultado: falta um. Corrigir ANTES de commitar.
+
+JUSTIFICAÇÃO (a ferida real): a 3.75b (commit 1524148) adicionou
+app/src/main/cpp/assets/ImpostorIndex.cpp só ao tests/CMakeLists.txt. O
+APK morreu no link (undefined symbol ensureImpostor/relFor) porque o
+CMake do app não conhecia o ficheiro. O fix foi UMA linha (caaef02).
+Esta receita previne o mesmo bug; o caso test_wiring092.cpp/lista dos
+TUs de test NÃO entra no CMake do app (precedente: os test_*.cpp são
+só da suíte — a regra dos DOIS CMakeLists é para TU do core).
+
+### Adicionar uma SENTINELA
+1. tests/test_sentinels.cpp — função `regress_<nome>` (o nome é o
+   CONTRATO em docs/REGRESSOES.md).
+2. docs/REGRESSOES.md — entrada R-NNN nova (categoria, origem, comando,
+   declaração).
+3. Mutação OBRIGATÓRIA colada no relatório (quebrar o fix → vermelho →
+   repor → verde).
+
+### Mexer no render de blocos
+- app/src/main/cpp/render/BlockMesh.h — o contrato.
+- app/src/main/cpp/render/BlockMesh.cpp `open` — abrir (header + tabela
+  de blocos + materiais; ZERO bytes de dados).
+- app/src/main/cpp/render/BlockMesh.cpp `materializeBlock` — carregar UM
+  bloco (o pico de RAM é o span da faixa + o MeshData, R-041).
+- app/src/main/cpp/render/BlockMesh.cpp `draw` — desenhar (culling + LOD
+  + instancing por assinatura + ordem BLEND longe→perto).
+- app/src/main/cpp/render/BlockMesh.cpp `ensureBlock`/evict — a cache LRU.
+
+## §4 Padrões de leitura
+
+- O header ANTES do .cpp (o contrato está no header).
+- `git grep -n "símbolo"` e ler ±20 linhas — nunca ficheiros >1000 linhas
+  por inteiro.
+- Seguir o call chain: main → system → component → primitive.
+- Procurar TABELAS (`kEntries`, `kCommands`, InspRow) — o registo central
+  alimenta docs e validação.
+- Ler os pins ANTES de tocar no código (o teste diz o contrato real).
+
+## §5 Onde NÃO tocar sem ler primeiro
+
+- app/src/main/cpp/platform/main.cpp — a despachante (a ordem por frame).
+- app/src/main/cpp/core/SceneSerializer.cpp — a compat do .goni.
+- app/src/main/cpp/assets/GOwnFormats.cpp — a compat do .gmesh.
+- app/src/main/cpp/ui/EditorLayout.h — as constantes do editor (as leis
+  de desenho/toque).
+- app/src/main/cpp/voni/VoniRegistry.cpp — a fonte única da linguagem.
+- tests/CMakeLists.txt — a lista de fontes dos pins.
+- app/src/main/cpp/CMakeLists.txt — a lista de fontes do APK (a causa
+  raiz do bug ImpostorIndex da 3.75b foi o desalinhamento entre ESTES
+  DOIS ficheiros — ver a receita CRÍTICA do §3).
+
+## §6 Atualização
+
+Atualizar quando o código mudar. Se o CODEMAP não reflete o código, é
+dívida — corrigir antes de fechar a próxima sub-fase (a receita que
+falhar na prática corrige-se no MESMO commit que a usa).
