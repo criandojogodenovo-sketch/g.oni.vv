@@ -211,6 +211,15 @@ struct EditorState {
     // (bit 0 = Transform, 1 = Aparência, 2 = Comportamento)
     u8     inspUiCollapsed = 0;
 
+    // 0.12-B (B-3) — o CANVAS com a moldura do device: a proporção ANDROID
+    // escolhida no seletor do modo UI (0 = livre — o design de sempre;
+    // 1..3 = os presets 16:9 / 18:9 / 20:9 — ver uiDeviceAspect* em
+    // ui/UiEditor.h) + as guias de margem segura e a grelha de alinhamento
+    // (AMBAS ativáveis; nada disto desenha em Play)
+    u8     uiDeviceAspect = 0;
+    bool   uiSafeGuides = false;
+    bool   uiAlignGrid = false;
+
     // 0.9.0 (spec D) — modo SELECIONAR da toolbar do viewport (cursor): sem
     // gizmo; o toque no viewport seleciona TICs. Vive no estado para ser
     // afervel no CI.

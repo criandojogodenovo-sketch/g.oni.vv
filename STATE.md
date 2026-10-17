@@ -1,9 +1,9 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-18 · vc: 84 · Último commit: este (o 0.12-B B-2, O
-INSPECTOR DE UI — as 3 secções colapsáveis, os campos da base e por tipo,
-a zona morta do joystick, os resets por campo, os 5 pins; antes: 032ea2d
-o 0.12-B B-1, A ÁRVORE DE UI; antes: 3bdd9f9 o 0.12-A)
+Atualizado: 2026-10-18 · vc: 85 · Último commit: este (o 0.12-B B-3, O
+CANVAS com a moldura do device — o seletor de proporção, as guias, a
+grelha e o toast OPACO, os 3 pins; antes: 813b491 o B-2, O INSPECTOR DE
+UI; antes: 032ea2d o B-1, A ÁRVORE DE UI)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -11,8 +11,17 @@ o 0.12-B B-1, A ÁRVORE DE UI; antes: 3bdd9f9 o 0.12-A)
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-B (arquitetura da UI) — EM CURSO; B-1 e B-2 FECHADAS**
-  (o CI do push é o árbitro). **B-2 (o Inspector de UI — 2D + âncoras)**:
+- **Campanha 0.12-B (arquitetura da UI) — EM CURSO; B-1..B-3 FECHADAS**
+  (o CI do push é o árbitro). **B-3 (o canvas com a moldura do device)**:
+  o seletor de proporção ANDROID (as 3 chips do topo — uiCanvasChipsRect
+  é a fonte), a MOLDURA centrada com a ÁREA FORA ESCURA (α0.55 — o
+  elementRect continua a ser a fonte do layout), as guias de margem
+  segura e a grelha de alinhamento (ativáveis), o TOAST OPACO (a fonte
+  única vpchrome::toastColors — o contraste WCAG ≥4.5 não depende da
+  cena); pins ×3 (test_012b_canvas.cpp) + M-B3a/b vermelho→verde;
+  test_uilayout recalibrado (os glifos das chips saem da paridade).
+  test_core 0 falhas · c33 1006/0 · vc 85. O C33 do dono está no §24.
+  **B-2 (o Inspector de UI — 2D + âncoras)**: **B-2 (o Inspector de UI — 2D + âncoras)**:
   o Inspector de CONTROLO com as 3 secções colapsáveis (o colapso no
   EditorState::inspUiCollapsed; uiInspectorPlanControl é a fonte única),
   os campos da base (margens/pivô/rotação/esticar/opacidade), os campos
@@ -66,6 +75,9 @@ o 0.12-B B-1, A ÁRVORE DE UI; antes: 3bdd9f9 o 0.12-A)
 ## §2 O que está FEITO
 
 - 0.6.x–0.9.5 — fundação da engine (V.ONI core, device real, CI 5 jobs).
+- 0.12-B B-3 (vc 85) — o canvas com a moldura do device (no
+  RELATORIO-0.12-B.md §20..24): o seletor + a moldura + o véu + as guias
+  + a grelha + o toast opaco; pins ×3 + M-B3a/b; a paridade recalibrada.
 - 0.12-B B-2 (vc 84) — o Inspector de UI (no RELATORIO-0.12-B.md §14..19):
   as secções colapsáveis + os campos da base/por tipo + a zona morta
   (TouchControls::dead) + os resets + o «sem remover joystick»; pins ×5 +
@@ -96,21 +108,14 @@ o 0.12-B B-1, A ÁRVORE DE UI; antes: 3bdd9f9 o 0.12-A)
     JÁ EXISTEM (ficheiro:linha no relatório) — PÁRA no fix cego; os 5
     pins NOVOS da UI (test_012a_lodui.cpp) fecham o gap de cobertura;
     M-A1a/M-A1b vermelho→verde; ZERO produção trocada.
-  - **A-2** — o `refreshCatalog()` entra no ARRANQUE (projeto pronto) e
-    no fim de `createSceneNamed` (os contadores «0 cena(s)»/«sem
-    ficheiros» morrem); `sceneRowIcon()` NOVA (EditorUi.h/.cpp — a fonte
-    única: Icon::Scene substitui a claquete «partida» no seletor de
-    cenas); pins ficheiros_conta_cenas (a identidade do glifo pelo UV do
-    atlas) / assets_lista_mesh (a sequência no batch) /
-    cena_ativa_marcador; M-A2a/M-A2b vermelho→verde.
-  - **A-3** — `safe::scissor3dRect()` NOVA (SafeArea.h — o modo UI
-    reserva a largura do painel direito no SCISSOR; byte a byte fora do
-    modo UI; o glViewport fica no viewRect); o tooltip do gizmo morre
-    (legendTimer/legendArm no EditorState; o vpchrome::draw ganha
-    `dt, in` trailing com defaults byte a byte; nasce no largar da
-    escolha, vive 1,5 s, morre no largar seguinte); pins grelha_nao_vaza
-    / tooltip_morre_1500ms / tooltip_morre_release; M-A3a/M-A3b
-    vermelho→verde (o M-A3b REPRODUZ o bug do dono).
+  - **A-2** — o `refreshCatalog()` entra no ARRANQUE e no
+    `createSceneNamed` (os contadores a 0 morrem); `sceneRowIcon()` NOVA
+    (a fonte única do ícone de cena); pins ×3; M-A2a/M-A2b
+    vermelho→verde.
+  - **A-3** — `safe::scissor3dRect()` NOVA (o modo UI reserva o painel
+    direito no SCISSOR; byte a byte fora do modo UI) + o tooltip do
+    gizmo morre (legendTimer/legendArm; nasce no largar, vive 1,5 s);
+    pins ×3; M-A3a/M-A3b vermelho→verde.
   - **A-4** — a instrumentação sob `#ifdef GONI_BENCH_RAM` (o sampler
     `bench_ram:` 1×/s no engine.log) + o alvo opcional `bench_ram`
     (option OFF) — A CURVA REPRODUZ O SALTO: linear 50k…4,1M
@@ -129,19 +134,17 @@ o 0.12-B B-1, A ÁRVORE DE UI; antes: 3bdd9f9 o 0.12-A)
   layout, os cartões, o fecho com os 13 PNGs) — ver §1 e docs/
   RELATORIO-0.11-Y-FECHO.md.
 - 0.9.6 + 0.9.6.4–0.9.6.20 (vc 48–67) — identidade, grupos UI, editor,
-  import glTF real, orçamento 3D, leis de desenho/toque, janelas.
-- 0.10-M (vc 68) — .gmesh v3 por blocos: import streaming, render por
-  blocos, texturas, thumbs; PASSO 6 selou a tabela de medições.
+  import glTF, orçamento 3D, leis de desenho/toque, janelas.
+- 0.10-M (vc 68) — .gmesh v3 por blocos (streaming/blocos/texturas/thumbs).
 - 0.11-H FASE 1 hierarquia (vc 69) — drag-reparent, apagar/duplicar
   sub-árvore, colapso, ícone por tipo.
-- 0.11-M FASE 2 materiais glTF (vc 70) — parse completo, GTB2, props no
-  lit, blend por blocos, samplers no upload.
+- 0.11-M FASE 2 materiais glTF (vc 70) — parse, GTB2, props no lit,
+  blend por blocos, samplers no upload.
 - 0.11-S FASE 3 esqueleto/animação (vc 71) — slerp/cubic/step, UBO 128
-  bones, V.ONI stop/blend, fix do conversor de clips skinados.
-- 0.11-T FASE 3.5a GPU efficiency (vc 72) — skinned cull + LOD por
-  distância; corrida latente do corte paralelo documentada (§4.1).
-- 0.11-T-FIX Perna 1 (vc 73) — contorno da corrupção do corte paralelo.
-  Perna 2 ADIADA pelo dono (ver §7).
+  bones, V.ONI stop/blend, o fix dos clips skinados.
+- 0.11-T FASE 3.5a GPU efficiency (vc 72) — skinned cull + LOD;
+  0.11-T-FIX Perna 1 (vc 73) — o contorno da corrupção do corte paralelo
+  (Perna 2 ADIADA pelo dono — ver §7).
 - 0.11-W ABERTURA (docs) — cf6279a.
 - 0.11-W 3.5b instancing (vc 74, d0c765d) — blocos de mesma assinatura
   6 TICs → 1 dc; teto 64/draw; R-047.
@@ -170,12 +173,9 @@ o 0.12-B B-1, A ÁRVORE DE UI; antes: 3bdd9f9 o 0.12-A)
   + M-Y1a/b/c/d vermelho→reposto→verde; R-028 recalibrada (a border
   sai da rampa neutra — é o âmbar do accentDim).
 - 0.11-Y Y-2 Layout ✅ vc 80 — as regras CruzaTabBar/PainelFora no
-  validador (a faixa pela fonte única, os véus, o scope modal) + a
-  flag auditável overlay (o toast) + a FASE 31 (a varredura de 13
-  ecrãs × 3 checks pelo frame de produção); 3 BUGS REAIS curados (o
-  toast dp(), o back 36×36, os rótulos da régua); Sobreposto sem
-  filhos clipped; o probe 18.2 lê o TOKEN (o leftover da Y-1 que o CI
-  apanhou); pins y2_* ×3 + M-Y2a/b vermelho→reposto→verde.
+  validador + a flag overlay + a FASE 31 (13 ecrãs × 3 checks); 3 bugs
+  reais curados (o toast dp(), o back 36×36, os rótulos da régua); pins
+  y2_* ×3 + M-Y2a/b vermelho→verde.
 
 ## §3 O que está PENDENTE (por ordem)
 

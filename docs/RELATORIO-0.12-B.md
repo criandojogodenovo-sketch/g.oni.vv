@@ -367,3 +367,88 @@ do gesto do corpo».
 2. Mover o joystick (x/y ou drag no viewport), mudar o raio, tocar um
    reset (o valor volta), colapsar/abrir as secções.
 3. PNG do Inspector com o joystick selecionado.
+
+
+---
+
+# B-3 — O CANVAS com a moldura do device
+
+## 20. Objetivo e o que mudou
+
+O modo UI passa a mostrar O QUE O DEVICE VÊ: as **3 chips** no topo do
+viewport (a FONTE ÚNICA da geometria é uiCanvasChipsRect — o draw e os
+pins partilham os rects; os ids 8060..8062) — o seletor de proporção
+ANDROID (0=livre → 16:9 → 18:9 → 20:9, o tap cicla), o toggle das guias e
+o toggle da grelha. A **MOLDURA** (uiDeviceFrameRect — puro) é o rect da
+proporção escolhida CENTRADO no espaço de design, com o lado MAIOR a
+casar (o letterbox do device preview); a **ÁREA FORA escurece** (os 4
+bandos pretos α0.55) — o que o device não vê. O layout dos ELEMENTOS não
+muda (o elementRect continua a ser a fonte — a moldura é a pré-visualização
+honesta do corte, não uma re-ancoragem). As **GUIAS de margem segura**
+(ativáveis) são as 4 hairlines accent ao INSET da moldura pela safe-area
+do design; a **GRELHA de alinhamento** (ativável) são as hairlines a cada
+40px de design DENTRO da moldura. Nada disto desenha em Play.
+
+O **TOAST** é OPACO: a fonte única vpchrome::toastColors/toastBgAlpha/
+toastContrastRatio (o padrão sceneRowIcon — o draw do main consome as
+funções, os pins aferem-nas). O vidro surface2 α0.86 com o fade misturava
+a cena e o «joystick adicionado» ficava ilegível sobre fundo claro; o
+alfa 1 garante o contraste WCAG (L1+0.05)/(L2+0.05) ≥ 4.5 INDEPENDENTE do
+que está por baixo. O fade-out de alfa saiu (o toast vive os 1.8 s e
+desaparece — o corte seco é o preço honesto do contraste constante).
+
+## 21. Os pins (3/3 verdes — test_012b_canvas.cpp)
+
+1. **canvas_moldura** — a matemática pura dos 4 presets (os valores e os
+   nomes); o rect 16:9 no design 1600×720 = {160,0,1280,720} (w/h =
+   16/9), o 18:9 = {80,0,1440,720}, o 20:9 = o design inteiro; o DRAW: o
+   bando esquerdo do véu [t.ox, frameX0) com alfa 0.55 existe no batch e
+   DESAPARECE em «livre».
+2. **canvas_guias** — o tap nas CHIPS alterna (o estado e o draw); com a
+   safe-area NÃO-nula {10,12,14,16} a guia esquerda vive na coluna de
+   design fr.x+10 (DISTINTA da borda da moldura em fr.x) e morre no
+   segundo tap; a grelha tem as suas linhas a cada 40px dentro da moldura.
+3. **canvas_toast_contraste** — toastBgAlpha()==1.0; o bg é o TOKEN
+   surface2 com alfa 1 (nunca o vidro); o texto é o text1 opaco; o rácio
+   WCAG do par ≥ 4.5 (e ≤ 21 — o teto da escala).
+
+## 22. As mutações (vermelho → reposto → verde)
+
+- **M-B3a** (a moldura removida — o frameOn forçado a false):
+  canvas_moldura VERMELHO:
+  ```
+  canvas_moldura ... FALHOU (veilEsq)
+  ```
+  Reposto → 0 falhas.
+- **M-B3b** (o toast volta ao cinza-vidro — o alfa 0.86):
+  canvas_toast_contraste VERMELHO:
+  ```
+  canvas_toast_contraste ... FALHOU (toastBgAlpha()==1.0f; bg[3]==1.0f)
+  ```
+  Reposto → 0 falhas.
+
+## 23. Recalibrações e limites
+
+- test_uilayout (uilayout_paridade_editor_play_por_tipo) — RECALIBRADO com
+  nota: as chips são CHROME DE TEXTO no topo do viewport que o Play não
+  desenha — os glifos da banda delas saem da comparação de paridade (um
+  loop manual explícito; a geometria dos ELEMENTOS continua par a par).
+- As chips cobrem o canto superior-esquerdo do design (o chrome do editor
+  por cima do conteúdo — o padrão dos gizmos); o dono que precisar da
+  área livre desliga a moldura (livre) — as chips continuam (o seletor é
+  sempre visível).
+- O corte seco do toast (sem fade) é a decisão documentada: o contraste
+  constante vale mais que o fade decorativo (o M-B3b vigia).
+- A guia usa o INSET DA MOLURA pela safe-area do DESIGN (a margem das
+  âncoras) — a margem de CADA device real é o passo seguinte se o dono
+  quiser (o campo ficaria no seletor).
+
+## 24. Pin C33 (dono) — o protocolo do device
+
+1. Modo UI com um joystick → tocar a chip de proporção até «16:9» → a
+   moldura desenha com os lados escuros.
+2. Tocar «guias» → as 4 linhas âmbar dentro da moldura; tocar «grelha» →
+   as linhas de alinhamento.
+3. + → Joystick → o toast «joystick adicionado» LEGÍVEL (opaco) por cima
+   de qualquer fundo.
+4. PNG do viewport com a moldura + guias.

@@ -5572,14 +5572,14 @@ void drawToast() {
     // por CIMA da tab bar do painel de baixo (spec E) — 16dp de folga
     const f32 by = oy + ah - bh2 - theme::dp(safe::kBottomTabH) -
                    theme::dp(safe::kStatusH) - theme::dp(16.0f);
-    // 0.9.6.9 (GRUPO F): o toast compõe o ALPHA DO TOKEN com o fade (o
-    // surface2 agora É vidro 0.92 — o fade multiplica o vidro, não o
-    // substitui; antes o 0.95*alpha era o vidro artesanal da spec M)
-    const f32 bg[4] = {theme::kTheme.surface2[0], theme::kTheme.surface2[1],
-                       theme::kTheme.surface2[2],
-                       theme::kTheme.surface2[3] * alpha};
-    const f32 tx[4] = {theme::kTheme.text1[0], theme::kTheme.text1[1],
-                       theme::kTheme.text1[2], alpha};
+    // 0.12-B (B-3): o toast é OPACO — a FONTE ÚNICA vpchrome::toastColors
+    // (o vidro 0.86 com o fade misturava a cena e o «joystick adicionado»
+    // ficava ilegível; o contraste ≥4.5 agora não depende do que está por
+    // baixo — os pins aferem a fonte, o M-B3b devolve o cinza-vidro)
+    f32 bg[4];
+    f32 tx[4];
+    editor::vpchrome::toastColors(bg, tx);
+    (void)alpha;
     // 0.11-Y (Y-2): o scope do OVERLAY de propósito — o toast é «por CIMA
     // da tab bar» POR DESENHO (a decisão da casa, FASEs 15.x: «fora da
     // conta»); o audit marca as entradas overlay=true e o validador não

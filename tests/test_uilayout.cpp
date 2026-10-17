@@ -23,6 +23,7 @@
 //   • serialização .goni de tudo (spacing/pad/align/parent + alpha + image)
 //     com round-trip.
 #include "TestFramework.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -285,6 +286,24 @@ BothFrames renderBoth(const UiCanvas& c) {
     const UiRect view = safe::centerRect(kSW, kSH, ins, 0.0f, st.showInspector,
                                          st.hierW, st.inspW);
     out.t = uiViewportTransform(view, kSW, kSH);
+    // 0.12-B (B-3, RECALIBRADO): as CHIPS do canvas (o seletor de proporção
+    // + as toggles — a moldura do device) são CHROME DE TEXTO no TOPO do
+    // viewport que o Play não desenha — os glifos da banda delas saem da
+    // paridade (a geometria dos ELEMENTOS continua par a par)
+    const UiCanvasChips chips = uiCanvasChipsRect(view);
+    const f32 chipBandBottom = chips.aspect.y + chips.aspect.h + 4.0f;
+    // (loop manual — o filtro é simples e aferível à vista)
+    std::vector<Rect> filtrados;
+    filtrados.reserve(out.editGlyphs.size());
+    for (const Rect& r : out.editGlyphs) {
+        const bool naChips = r.y0 >= chips.aspect.y - 2.0f &&
+                             r.y0 < chipBandBottom &&
+                             r.x0 >= chips.aspect.x - 2.0f;
+        if (!naChips) {
+            filtrados.push_back(r);
+        }
+    }
+    out.editGlyphs = std::move(filtrados);
     return out;
 }
 

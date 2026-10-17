@@ -221,6 +221,27 @@ bool uiAddTreeJoystick(Scene& scene, EditorState& st);
 void uiDetachElement(UiCanvas& c, i32 element, f32 sw, f32 sh,
                      const safe::Insets& ins);
 
+// ---- 0.12-B (B-3) — o CANVAS com a moldura do device: matemática PURA -------
+//
+// O seletor de proporção ANDROID (as chips do topo do modo UI): 0 = livre
+// (o design de sempre — o ecrã inteiro), 1..3 = os presets 16:9 / 18:9 /
+// 20:9. A MOLDURA é o rect da proporção escolhida, CENTRADO no espaço de
+// design (o lado MAIOR casa com o design — o letterbox do device preview);
+// a área FORA dela escurece (o que o device não vê). Nada disto desenha em
+// Play — é chrome do editor.
+constexpr u32 kUiDeviceAspectCount = 4;   // livre + 3 presets
+const char* uiDeviceAspectName(u32 i);    // "livre" / "16:9" / "18:9" / "20:9"
+f32  uiDeviceAspectValue(u32 i);          // 0 (livre) ou w/h (16/9, 2, 20/9)
+// a moldura: o rect da proporção `aspect` centrado no design sw×sh (o
+// lado maior casa; degenerado → o design inteiro)
+UiRect uiDeviceFrameRect(u32 aspect, f32 sw, f32 sh);
+// a geometria das CHIPS do topo do viewport (FONTE ÚNICA — o draw e os
+// testes partilham os rects; a mesma casa do keyboardLayout)
+struct UiCanvasChips {
+    UiRect aspect{}, guides{}, grid{};   // em px DE ECRÃ (o viewport)
+};
+UiCanvasChips uiCanvasChipsRect(const UiRect& view);
+
 // ---- 0.8.6 — GIZMOS de UI: matemática PURA de escalar/rodar -----------------
 
 // ângulo do ponteiro em torno de (cx,cy), em GRAUS (atan2; -180..180)

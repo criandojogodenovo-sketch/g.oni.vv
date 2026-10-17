@@ -24,6 +24,7 @@
 #include "render/Camera.h"
 
 #include <cstdio>
+#include <cmath>
 
 namespace vv {
 namespace editor {
@@ -445,6 +446,48 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
     // (kVpAddTicIdRetired) desenha dentro do rect do viewport.
 
     return a;
+}
+
+// ---- 0.12-B (B-3) — o toast OPACO (a fonte única das cores) ----------------
+
+f32 toastBgAlpha() {
+    return 1.0f;   // opaco: o contraste não depende da cena por baixo
+}
+
+void toastColors(f32 outBg[4], f32 outText[4]) {
+    // os TOKENS da casa (a tabela 0.11-Y): o vidro surface2 passa a SÓLIDO
+    // para o toast (o mesmo RGB, o alfa 1 — o M-B3b devolve o cinza-vidro)
+    outBg[0] = theme::kTheme.surface2[0];
+    outBg[1] = theme::kTheme.surface2[1];
+    outBg[2] = theme::kTheme.surface2[2];
+    outBg[3] = toastBgAlpha();
+    outText[0] = theme::kTheme.text1[0];
+    outText[1] = theme::kTheme.text1[1];
+    outText[2] = theme::kTheme.text1[2];
+    outText[3] = 1.0f;
+}
+
+namespace {
+// a luminância RELATIVA WCAG (a linearização sRGB: c<=0.03928 → c/12.92;
+// caso contrário ((c+0.055)/1.055)^2.4) — o MESMO rácio dos pins
+f32 relLum(f32 c) {
+    if (c <= 0.03928f) {
+        return c / 12.92f;
+    }
+    return std::pow((c + 0.055f) / 1.055f, 2.4f);
+}
+} // namespace
+
+f32 toastContrastRatio() {
+    f32 bg[4], tx[4];
+    toastColors(bg, tx);
+    const f32 lb = 0.2126f * relLum(bg[0]) + 0.7152f * relLum(bg[1]) +
+                   0.0722f * relLum(bg[2]);
+    const f32 lt = 0.2126f * relLum(tx[0]) + 0.7152f * relLum(tx[1]) +
+                   0.0722f * relLum(tx[2]);
+    const f32 hi = lt > lb ? lt : lb;
+    const f32 lo = lt > lb ? lb : lt;
+    return (hi + 0.05f) / (lo + 0.05f);
 }
 
 } // namespace vpchrome

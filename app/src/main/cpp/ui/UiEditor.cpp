@@ -95,6 +95,58 @@ void drawModalBackdrop(UiContext& ui, f32 sw, f32 sh) {
 }
 
 // ---------------------------------------------------------------------------
+// 0.12-B (B-3) — o CANVAS com a moldura do device (as funções puras)
+// ---------------------------------------------------------------------------
+
+const char* uiDeviceAspectName(u32 i) {
+    switch (i) {
+        case 1: return "16:9";
+        case 2: return "18:9";
+        case 3: return "20:9";
+        default: return "livre";
+    }
+}
+
+f32 uiDeviceAspectValue(u32 i) {
+    switch (i) {
+        case 1: return 16.0f / 9.0f;
+        case 2: return 2.0f;             // 18:9
+        case 3: return 20.0f / 9.0f;
+        default: return 0.0f;            // livre
+    }
+}
+
+UiRect uiDeviceFrameRect(u32 aspect, f32 sw, f32 sh) {
+    const f32 a = uiDeviceAspectValue(aspect);
+    if (a <= 0.0f || sw <= 0.0f || sh <= 0.0f) {
+        return {0.0f, 0.0f, sw, sh};     // livre = o design inteiro
+    }
+    // o lado MAIOR casa com o design (o letterbox do device preview)
+    if (sw / sh > a) {
+        // o design é mais largo que o device → a moldura tem a ALTURA toda
+        const f32 w = sh * a;
+        return {(sw - w) * 0.5f, 0.0f, w, sh};
+    }
+    // o design é mais estreito (ou igual) → a moldura tem a LARGURA toda
+    const f32 h = sw / a;
+    return {0.0f, (sh - h) * 0.5f, sw, h};
+}
+
+UiCanvasChips uiCanvasChipsRect(const UiRect& view) {
+    // a linha no TOPO do viewport (dentro dele), 3 chips de 72×26 com 8 de
+    // folga — px de ecrã (o draw e os testes partilham a FONTE ÚNICA)
+    const f32 h = 26.0f;
+    const f32 w = 72.0f;
+    const f32 gap = 8.0f;
+    const f32 y = view.y + 8.0f;
+    UiCanvasChips c;
+    c.aspect = {view.x + 8.0f, y, w, h};
+    c.guides = {c.aspect.x + c.aspect.w + gap, y, w, h};
+    c.grid = {c.guides.x + c.guides.w + gap, y, w, h};
+    return c;
+}
+
+// ---------------------------------------------------------------------------
 // VIEWPORT 2D — o modo UI do separador "3D | UI"
 // ---------------------------------------------------------------------------
 
@@ -185,6 +237,35 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
 
     // moldura do espaço de design (o "ecrã" onde a UI vive em Play)
     ui.frame(t.ox, t.oy, sw * t.scale, sh * t.scale, 1.0f, theme::LINE);
+
+    // 0.12-B (B-3) — a MOLDURA DO DEVICE (a proporção Android escolhida no
+    // seletor): o rect centrado no design (o lado MAIOR casa — o letterbox
+    // do device preview); a ÁREA FORA escurece (o que o device não vê). O
+    // layout dos ELEMENTOS não muda (o elementRect é a fonte — a moldura é
+    // a pré-visualização honesta do corte)
+    const bool frameOn = st.uiDeviceAspect != 0;
+    UiRect fr{};
+    if (frameOn) {
+        fr = uiDeviceFrameRect(st.uiDeviceAspect, sw, sh);
+        const UiRect fs{t.ox + fr.x * t.scale, t.oy + fr.y * t.scale,
+                        fr.w * t.scale, fr.h * t.scale};
+        const f32 dim[4] = {0.0f, 0.0f, 0.0f, 0.55f};
+        const f32 vw = sw * t.scale;
+        const f32 vh = sh * t.scale;
+        if (fs.x > t.ox + 0.5f) {
+            ui.panel(t.ox, t.oy, fs.x - t.ox, vh, dim);
+        }
+        if (fs.x + fs.w < t.ox + vw - 0.5f) {
+            ui.panel(fs.x + fs.w, t.oy, t.ox + vw - (fs.x + fs.w), vh, dim);
+        }
+        if (fs.y > t.oy + 0.5f) {
+            ui.panel(t.ox, t.oy, vw, fs.y - t.oy, dim);
+        }
+        if (fs.y + fs.h < t.oy + vh - 0.5f) {
+            ui.panel(t.ox, fs.y + fs.h, vw, t.oy + vh - (fs.y + fs.h), dim);
+        }
+        ui.frame(fs.x, fs.y, fs.w, fs.h, 2.0f, theme::ACCENT);
+    }
 
     // 0.7.4 — RESOLVER (FONTE ÚNICA do layout; âncoras + safe-area REAL +
     // containers). O editor desenha o MESMO layout do Play, escalado —
@@ -346,8 +427,94 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
         }
     }
 
+    // 0.12-B (B-3) — AS CHIPS do topo (o seletor de proporção + as toggles):
+    // o draw e o hit no MESMO sítio (o padrão das rows); o tap numa chip
+    // NÃO chega ao gesto WYSIWYG (a chip consome-o)
+    bool chipConsumed = false;
+    if (!anyOverlayOpen(st)) {
+        const UiCanvasChips chips = uiCanvasChipsRect(view);
+        static const u64 kIds[3] = {kUiCvChipAsp, kUiCvChipGd, kUiCvChipGr};
+        char aspLabel[16];
+        std::snprintf(aspLabel, sizeof(aspLabel), "%s",
+                      uiDeviceAspectName(st.uiDeviceAspect));
+        const char* chipLabels[3] = {aspLabel, "guias", "grelha"};
+        const bool chipStates[3] = {frameOn, st.uiSafeGuides, st.uiAlignGrid};
+        for (u32 ci = 0; ci < 3; ++ci) {
+            const UiRect& cr = (&chips.aspect)[ci];
+            const bool held = ui.widgetActive(kIds[ci]);
+            ui.panelRounded(cr.x, cr.y, cr.w, cr.h,
+                            theme::dp(theme::kRadiusCard),
+                            held ? theme::kTheme.accentPress
+                                 : (chipStates[ci] ? theme::kTheme.surface2
+                                                   : theme::kTheme.surface));
+            ui.frameRounded(cr.x, cr.y, cr.w, cr.h, 1.0f,
+                            theme::dp(theme::kRadiusCard),
+                            chipStates[ci] ? theme::ACCENT
+                                           : theme::kTheme.border);
+            if (ui.hasFont()) {
+                const TextMetrics tm2 = ui.textMetrics();
+                ui.labelFitted(cr.x + theme::dp(6.0f),
+                               cr.y + (cr.h - tm2.block()) * 0.5f + tm2.ascent,
+                               chipLabels[ci],
+                               chipStates[ci] ? theme::ACCENT
+                                              : theme::kTheme.text2,
+                               cr.w - theme::dp(12.0f));
+            }
+            if (ui.widgetHit(kIds[ci], cr.x, cr.y, cr.w, cr.h)) {
+                chipConsumed = true;
+                if (ci == 0) {
+                    st.uiDeviceAspect = static_cast<u8>(
+                        (st.uiDeviceAspect + 1u) % kUiDeviceAspectCount);
+                } else if (ci == 1) {
+                    st.uiSafeGuides = !st.uiSafeGuides;
+                } else {
+                    st.uiAlignGrid = !st.uiAlignGrid;
+                }
+            }
+        }
+        // as GUIAS de margem segura (ativáveis): as 4 hairlines ao INSET do
+        // design (a MESMA margem que as âncoras contam) dentro da moldura
+        if (st.uiSafeGuides) {
+            const safe::Insets gins = ins;
+            f32 gl = t.ox + (fr.x + gins.left) * t.scale;
+            f32 gt = t.oy + (fr.y + gins.top) * t.scale;
+            f32 gr = t.ox + (fr.x + fr.w - gins.right) * t.scale;
+            f32 gb = t.oy + (fr.y + fr.h - gins.bottom) * t.scale;
+            ui.drawLine(gl, t.oy, gl, t.oy + sh * t.scale, 1.0f,
+                        theme::ACCENT);
+            ui.drawLine(gr, t.oy, gr, t.oy + sh * t.scale, 1.0f,
+                        theme::ACCENT);
+            ui.drawLine(t.ox, gt, t.ox + sw * t.scale, gt, 1.0f,
+                        theme::ACCENT);
+            ui.drawLine(t.ox, gb, t.ox + sw * t.scale, gb, 1.0f,
+                        theme::ACCENT);
+        }
+        // a GRELHA de alinhamento (ativável): as hairlines a cada 40px de
+        // design DENTRO da moldura (o corte do device é o que se alinha)
+        if (st.uiAlignGrid && frameOn) {
+            for (f32 gx = fr.x + 40.0f; gx < fr.x + fr.w - 0.5f; gx += 40.0f) {
+                ui.drawLine(t.ox + gx * t.scale,
+                            t.oy + fr.y * t.scale,
+                            t.ox + gx * t.scale,
+                            t.oy + (fr.y + fr.h) * t.scale, 1.0f,
+                            theme::kTheme.border);
+            }
+            for (f32 gy = fr.y + 40.0f; gy < fr.y + fr.h - 0.5f; gy += 40.0f) {
+                ui.drawLine(t.ox + fr.x * t.scale,
+                            t.oy + gy * t.scale,
+                            t.ox + (fr.x + fr.w) * t.scale,
+                            t.oy + gy * t.scale, 1.0f,
+                            theme::kTheme.border);
+            }
+        }
+    }
+
     // ---- gesto WYSIWYG (slot 0; NÃO corre por baixo de overlays) ---------
     if (anyOverlayOpen(st)) {
+        return;
+    }
+    if (chipConsumed) {
+        // a chip consumiu o toque — nada chega aos elementos/gizmos
         return;
     }
     if (st.elDrag && (st.selElement >= 0 || st.selJoystick)) {

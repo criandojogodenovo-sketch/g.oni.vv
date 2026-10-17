@@ -162,6 +162,19 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
              const ChromeState& cs, const Camera& camera, f32 drawerH,
              f32 dt = 0.0f, const InputState* in = nullptr);
 
+// ---- 0.12-B (B-3) — O TOAST com contraste garantido (a FONTE ÚNICA) --------
+//
+// O toast do editor («joystick adicionado», os toasts honestos das ações…
+// — o draw vive no main) era VIDRO translúcido (surface2 a α0.86 com o
+// fade a multiplicar): sobre cena clara o texto perdia o contraste e o
+// dono não lia. A cura: o toast é OPACO — o contraste não depende do que
+// está por baixo. Estas funções são a FONTE ÚNICA das cores do toast (o
+// draw do main consome-as; os pins aferem-nas — o padrão sceneRowIcon).
+f32 toastBgAlpha();   // 1.0 = opaco (o contrato B-3; o M-B3b volta ao cinza)
+void toastColors(f32 outBg[4], f32 outText[4]);   // os tokens resolvidos
+// o rácio de contraste WCAG do par (L1+0.05)/(L2+0.05) — ≥4.5 é o piso
+f32 toastContrastRatio();
+
 } // namespace vpchrome
 } // namespace editor
 } // namespace vv

@@ -836,6 +836,10 @@ constexpr u64 kUiInspStrch  = 8050;   // "esticar: sim/nao" (a 10.ª âncora)
 constexpr u64 kUiInspOpa    = 8051;   // opacidade (0..1)
 constexpr u64 kUiInspDead   = 8052;   // joystick: zona morta (fração do raio)
 constexpr u64 kUiInspRadius = 8053;   // joystick: raio (px; escreve size)
+// 0.12-B (B-3) — as CHIPS do canvas de UI (a moldura do device + as toggles)
+constexpr u64 kUiCvChipAsp  = 8060;   // o seletor de proporção (cicla)
+constexpr u64 kUiCvChipGd   = 8061;   // as guias de margem segura
+constexpr u64 kUiCvChipGr   = 8062;   // a grelha de alinhamento
 constexpr u64 kJoyX      = 8020;   // pos X (fração da área útil 0..1)
 constexpr u64 kJoyY      = 8021;
 constexpr u64 kJoySize   = 8022;   // escala do raio

@@ -93,6 +93,7 @@ add_executable(test_core
         test_012a_grelha_tooltip.cpp   # 0.12-A (A-3): o scissor do modo UI + o tooltip que morre
         test_012b_uitree.cpp   # 0.12-B (B-1): os pins da árvore de UI (UI como TICs)
         test_012b_inspui.cpp   # 0.12-B (B-2): os pins do Inspector de UI (2D + âncoras)
+        test_012b_canvas.cpp   # 0.12-B (B-3): os pins do canvas (a moldura + as guias + o toast)
         # 0.7.1: cenas múltiplas + transições (projeto e2e, SceneFx puro,
         # overlay CENAS, ações Scene.Load/Transition)
         test_scenes.cpp
