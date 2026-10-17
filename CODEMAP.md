@@ -1,6 +1,6 @@
 # CODEMAP.md — onde vive o quê
 
-Atualizado: 2026-10-17 · vc: 82
+Atualizado: 2026-10-18 · vc: 83
 
 > Convenção de paths: TODOS os caminhos deste ficheiro são relativos à
 > RAIZ do repo (exemplo: o registo da linguagem vive em
@@ -60,11 +60,33 @@ Atualizado: 2026-10-17 · vc: 82
   SafeArea.h (os rects puros — `scissor3dRect()` NOVO na 0.12-A: o
   scissor do pass 3D no modo UI),
   BottomPanel, SettingsPage, ScriptEditor, DocsScreen, Gizmo, hierarquia.
+  **0.12-B (a árvore de UI)**: UiRuntime.h/.cpp tem a VISTA da árvore
+  (UiTreeView + collectUiTree — o espelho UiCanvas alimenta o draw/hit/
+  layout de 0.7.x; o joystick tem rect DERIVADO do TouchControls) +
+  drawUiTree/hitTestUiTree/uiElementFromHit (o Play) + controlRect (os 9
+  cantos delegam no elementRect; o esticar = pai − margens) +
+  findElementAnywhere procura TICs de UI por NOME; UiEditor.h/.cpp tem a
+  CRIAÇÃO da árvore (ensureUiRoot/uiAddTreeElement/uiAddTreeJoystick +
+  uniqueNewTicName — a variante criação; o uniqueTicName do duplicate
+  sempre sufixa), o MODO ÁRVORE do viewport (espelho + sincronização de
+  volta no fim do drawUiViewport) e o Inspector de UI que edita o elem
+  AO VIVO quando o selecionado tem Control (reanchor/repante/apaga TIC).
 - **app/src/main/cpp/components/** — os componentes do TIC: MeshRenderer
   (+ `impostorDistance`), CameraComp, Body3D, RigidBody3D, AudioPlayer,
-  ScriptComp, AnimationPlayer, UI*, Input*.
+  ScriptComp, AnimationPlayer, UI*, Input*. **0.12-B (a árvore de UI)**:
+  Control.h (a BASE 2D dos elementos de UI — pos2D/tamanho/âncoras
+  9+esticar/margens/pivô/rotação/visível/opacidade; o payload por tipo é
+  o UiElement por valor no campo `elem`; os 10 kinds incluem Joystick;
+  o kind tem a FONTE no Control e o elem.kind fica espelhado) +
+  UIRoot.h (o marcador da raiz). O UiCanvas é DEPRECATED — só lê (a
+  compat: migrateUiCanvasToTree no SceneSerializer converte para a
+  árvore no load).
 - **app/src/main/cpp/platform/** — Android: main.cpp (a despachante —
   ANativeActivity, o ciclo por frame, drawTics), EngineLog, JNI glue.
+  **0.12-B**: o "+" em modo UI cria pela ÁRVORE (uiAddTreeElement/
+  uiAddTreeJoystick); o Play arma/aplica os botões da árvore
+  (hitTestUiTree/uiElementFromHit) e desenha a árvore + TODOS os
+  TouchControls.
 - **tests/** — a suíte do core (C++17, GL-free): test_main.cpp (o runner,
   GONI_ONLY/GONI_SKIP), TestFramework.h (o TEST/EXPECT), test_sentinels.cpp
   (as sentinelas regress_*), test_ctx_pines.cpp (os pins dos índices da
@@ -136,6 +158,17 @@ Atualizado: 2026-10-17 · vc: 82
 4. Pin na suíte (o ciclo do linker, o find obrigatório, os args na
    ativação).
 5. docs/REGRESSOES.md — sentinela se estrutural.
+
+### Adicionar um ELEMENTO DE UI novo (0.12-B)
+1. components/Control.h — o KIND novo no enum (o vocabulário em
+   controlKindName/controlKindFromName; o .goni partilha).
+2. components/UiCanvas.cpp — o tamanho/cor/texto default em
+   defaultSize/defaultColor/elementDefaultText (a FONTE ÚNICA da criação).
+3. ui/UiRuntime.cpp — o draw no drawElement (por kind) e o hit-test se
+   for interativo; a vista da árvore (collectUiTree) deriva o que for
+   preciso (o padrão do joystick).
+4. ui/Icons.h + hierIconFor (ui/EditorUi.cpp) — o ícone por tipo.
+5. Pins em tests/test_012b_uitree.cpp (o round-trip + o draw).
 
 ### Adicionar um CAMPO no .goni
 1. app/src/main/cpp/components/<Component>.h — campo com default

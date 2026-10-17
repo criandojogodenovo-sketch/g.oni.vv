@@ -28,6 +28,10 @@
 #include "core/Presets.h"
 #include "core/Project.h"
 #include "core/Scene.h"
+#include "components/Control.h"   // 0.12-B: a árvore de UI (recalibração)
+#include "components/UIRoot.h"
+#include <string>
+#include <vector>
 #include "core/SceneSerializer.h"
 #include "platform/InputState.h"
 #include "ui/EditorUi.h"
@@ -325,6 +329,28 @@ TEST(cenas_menu_lista_marca_ativa_troca_e_nova) {
 
 // ---- 4. ações declarativas Scene.Load / Scene.Transition --------------------------
 
+// 0.12-B (B-1, recalibração) — os elementos da árvore (UIRoot + filhos
+// Control) como lista de UiElement: o load converte o canvas antigo, os
+// round-trips aferram os dados NO FILHO
+static std::vector<UiElement> treeElemsOf(const Scene& s, const char* rootName) {
+    std::vector<UiElement> out;
+    const Tic* root = s.get(s.find(rootName));
+    if (!root || !root->getComponent<UIRoot>()) {
+        return out;
+    }
+    const i32 rootSlot = static_cast<i32>(root->handle.index);
+    s.forEachActive([&](const Tic& t) {
+        if (t.parent != rootSlot) {
+            return;
+        }
+        if (const Control* c = t.getComponent<Control>()) {
+            out.push_back(c->elem);
+            out.back().name = t.name;   // o nome TIC é a identidade
+        }
+    });
+    return out;
+}
+
 TEST(cenas_acoes_load_instant_e_transition_fade_slide) {
     Scene s;
     Tic* t = s.get(s.create("HUD"));
@@ -381,18 +407,22 @@ TEST(cenas_acoes_load_instant_e_transition_fade_slide) {
     EXPECT(std::string(out.toast).find("não existe") != std::string::npos);
 
     // round-trip .goni preserva act "trans" + param "slide"
+    // 0.12-B (B-1, RECALIBRADO): o LOAD converte o .goni antigo — UiCanvas
+    // abre como UIRoot + filhos Control (a ordem do prompt da campanha); o
+    // round-trip aferra os dados NO FILHO da árvore (o contrato novo)
     c->elements[0].param = "slide";
     const std::string text = SceneSerializer::dump(s);
     Scene s2;
     SceneSerializer::LoadCtx lctx;
     EXPECT(SceneSerializer::loadText(s2, text, lctx));
-    const UiCanvas* c2 =
-        s2.get(s2.find("HUD"))->getComponent<UiCanvas>();
-    EXPECT(c2 != nullptr && c2->elements.size() == 1);
-    EXPECT(c2->elements[0].action == UiElement::Action::TransitionScene);
-    EXPECT(c2->elements[0].param == "slide");
-    EXPECT(c2->elements[0].target == "nivel2");
-    // .goni de 0.7.0 (sem param) abre com fade default
+    Tic* hud2 = s2.get(s2.find("HUD"));
+    EXPECT(hud2 != nullptr && hud2->getComponent<UIRoot>() != nullptr);
+    const std::vector<UiElement> elems2 = treeElemsOf(s2, "HUD");
+    EXPECT(elems2.size() == 1);
+    EXPECT(elems2[0].action == UiElement::Action::TransitionScene);
+    EXPECT(elems2[0].param == "slide");
+    EXPECT(elems2[0].target == "nivel2");
+    // .goni de 0.7.0 (sem param) abre com fade default — convertido também
     const char* old = R"({"version":1,"tics":[
         {"id":0,"name":"HUD","active":true,"parent":-1,
          "components":[{"type":"UiCanvas","elements":[
@@ -401,9 +431,10 @@ TEST(cenas_acoes_load_instant_e_transition_fade_slide) {
             "act":"trans","target":"nivel2"}]}]}]})";
     Scene s3;
     EXPECT(SceneSerializer::loadText(s3, old, lctx));
-    const UiCanvas* c3 =
-        s3.get(s3.find("HUD"))->getComponent<UiCanvas>();
-    EXPECT(c3 != nullptr);
-    EXPECT(c3->elements[0].action == UiElement::Action::TransitionScene);
-    EXPECT(c3->elements[0].param.empty());   // fade default
+    Tic* hud3 = s3.get(s3.find("HUD"));
+    EXPECT(hud3 != nullptr && hud3->getComponent<UIRoot>() != nullptr);
+    const std::vector<UiElement> elems3 = treeElemsOf(s3, "HUD");
+    EXPECT(elems3.size() == 1);
+    EXPECT(elems3[0].action == UiElement::Action::TransitionScene);
+    EXPECT(elems3[0].param.empty());   // fade default
 }

@@ -257,11 +257,21 @@ TEST(wiring086_rot_fontscale_style_roundtrip_no_goni) {
     ASSERT(SceneSerializer::loadText(loaded, json, ctx));
     const Handle h2 = loaded.find("UI");
     ASSERT(h2.valid());
-    UiCanvas* cv = loaded.get(h2)->getComponent<UiCanvas>();
-    ASSERT(cv != nullptr && !cv->elements.empty());
-    EXPECT(nearEqF(cv->elements[0].fontScale, 1.75f));
-    EXPECT(cv->elements[0].textStyle == UiElement::TextStyle::Bold);
-    EXPECT(nearEqF(cv->elements[0].rot, -30.0f));
+    // 0.12-B (B-1, RECALIBRADO): o load converte — o label "rotulado" abre
+    // como TIC FILHO com Control; fscale/tstyle/rot voltam no elem dele
+    const Tic* root2 = loaded.get(h2);
+    ASSERT(root2 != nullptr);
+    EXPECT(root2->getComponent<UIRoot>() != nullptr);
+    const Control* ctl2 = nullptr;
+    loaded.forEachActive([&](const Tic& t) {
+        if (!ctl2 && t.parent == static_cast<i32>(h2.index)) {
+            ctl2 = t.getComponent<Control>();
+        }
+    });
+    ASSERT(ctl2 != nullptr);
+    EXPECT(nearEqF(ctl2->elem.fontScale, 1.75f));
+    EXPECT(ctl2->elem.textStyle == UiElement::TextStyle::Bold);
+    EXPECT(nearEqF(ctl2->elem.rot, -30.0f));
 }
 
 // ---- 5. ZERO SOBREPOSIÇÃO: o chrome completo em paisagem --------------------

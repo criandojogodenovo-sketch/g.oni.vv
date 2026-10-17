@@ -175,7 +175,26 @@ bool uiAddElement(Scene& scene, EditorState& st, u32 kind, f32 sw, f32 sh);
 // não existir), garante o UiCanvas e seleciona-o. Devolve o handle
 // (invalid só se a cena recusar a criação). O TIC aparece na Hierarchy como
 // qualquer outro (renomeável/duplicável/removível).
+// 0.12-B: DEPRECATED no fluxo de produção (a árvore é a via nova —
+// ensureUiRoot abaixo); mantém-se para a compat 0.7.x (testes/legado).
 Handle ensureUiTic(Scene& scene, EditorState& st);
+
+// ---- 0.12-B (B-1) — a ÁRVORE de UI: os elementos são TICs filhos do UIRoot
+//
+// assegura a raiz: o primeiro TIC ativo com UIRoot; sem raiz, cria o TIC
+// "UI" com o marcador (o UiCanvas já não nasce — deprecated; a compat do
+// serializer promove os antigos). Seleciona a raiz (padrão SELEÇÃO-ÚNICA).
+Handle ensureUiRoot(Scene& scene, EditorState& st);
+// cria o elemento-NA-ÁRVORE (kind 0..8 = Panel..HBox, o mapeamento de
+// uiPlusChoiceKind): TIC filho da raiz + Control com os MESMOS defaults de
+// criação do addElement (tamanho/cor/texto — fonte única). false se a cena
+// recusou (o chamador faz o toast honesto).
+bool uiAddTreeElement(Scene& scene, EditorState& st, u32 kind, f32 sw,
+                      f32 sh);
+// "+Joystick" na árvore: TIC filho com Control(Kind::Joystick) +
+// TouchControls (o runtime de input no MESMO TIC — a fonte da física nunca
+// muda). Nasce selecionado em edição (o padrão do +Joystick).
+bool uiAddTreeJoystick(Scene& scene, EditorState& st);
 
 // 0.7.4 — desliga um elemento do container (parent = "") CONSERVANDO a
 // posição visual: as âncoras passam a esquerda/topo e ox/oy derivam do rect

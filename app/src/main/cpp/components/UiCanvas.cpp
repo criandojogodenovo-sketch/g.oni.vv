@@ -10,6 +10,7 @@ namespace vv {
 namespace {
 
 // tamanho default por tipo de elemento (px) — o editor pode redimensionar
+// 0.12-B: PÚBLICO via UiCanvas::elementDefaults (a árvore Control reusa)
 void defaultSize(UiElement::Kind k, f32& w, f32& h) {
     switch (k) {
         case UiElement::Kind::Panel:   w = 320.0f; h = 180.0f; break;
@@ -58,8 +59,7 @@ void defaultColor(UiElement::Kind k, f32 out[4]) {
 i32 UiCanvas::addElement(UiElement::Kind kind, f32 designW, f32 designH) {
     UiElement e;
     e.kind = kind;
-    defaultSize(kind, e.w, e.h);
-    defaultColor(kind, e.color);
+    elementDefaults(kind, e.w, e.h, e.color);
     // nasce CENTRADO no espaço de design: âncora central (o offset conta
     // da ESQUERDA do elemento — ver elementRect) → ox = −w/2 põe o elemento
     // com o CENTRO em (designW/2, designH/2)
@@ -77,18 +77,28 @@ i32 UiCanvas::addElement(UiElement::Kind kind, f32 designW, f32 designH) {
         e.name = buf;
     }
 
-    if (kind == UiElement::Kind::Button) {
-        e.text = "Botão";   // texto default editável (teclado in-app)
-    } else if (kind == UiElement::Kind::Label || kind == UiElement::Kind::Card) {
-        e.text = "Texto";
-    } else if (kind == UiElement::Kind::Article) {
-        e.text = "Artigo com texto multilinha.";
-    } else if (kind == UiElement::Kind::Menu) {
-        e.text = "Jogar\nSair";
-    }
+    elementDefaultText(kind, e.text);
 
     elements.push_back(e);
     return static_cast<i32>(elements.size()) - 1;
+}
+
+// 0.12-B — os defaults por tipo, a FONTE ÚNICA (o addElement e a criação
+// na árvore de TICs partilham — o mesmo tamanho/cor/texto)
+void UiCanvas::elementDefaults(UiElement::Kind k, f32& w, f32& h, f32 color[4]) {
+    defaultSize(k, w, h);
+    defaultColor(k, color);
+}
+void UiCanvas::elementDefaultText(UiElement::Kind k, std::string& out) {
+    if (k == UiElement::Kind::Button) {
+        out = "Botão";   // texto default editável (teclado in-app)
+    } else if (k == UiElement::Kind::Label || k == UiElement::Kind::Card) {
+        out = "Texto";
+    } else if (k == UiElement::Kind::Article) {
+        out = "Artigo com texto multilinha.";
+    } else if (k == UiElement::Kind::Menu) {
+        out = "Jogar\nSair";
+    }
 }
 
 i32 UiCanvas::findElement(const std::string& elemName) const {
@@ -115,8 +125,14 @@ void UiCanvas::setAnchor(i32 idx, UiElement::AnchorH h, UiElement::AnchorV v,
     if (idx < 0 || static_cast<size_t>(idx) >= elements.size()) {
         return;
     }
-    UiElement& e = elements[static_cast<size_t>(idx)];
+    reanchor(elements[static_cast<size_t>(idx)], h, v, designW, designH,
+             insL, insT, insR, insB);
+}
 
+// 0.12-B — a FONTE ÚNICA da re-ancoragem (o corpo de sempre de setAnchor,
+// agora partilhado com o Inspector da árvore de TICs)
+void UiCanvas::reanchor(UiElement& e, UiElement::AnchorH h, UiElement::AnchorV v, f32 designW,
+                        f32 designH, f32 insL, f32 insT, f32 insR, f32 insB) {
     // posição absoluta ATUAL no espaço de design (fórmula do elementRect
     // com insets — ver ui/UiRuntime.h; aqui inline para o TU ficar livre de ui/)
     f32 x = 0.0f, y = 0.0f;

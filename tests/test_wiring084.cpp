@@ -420,7 +420,9 @@ TEST(wiring084_save_load_com_cena_grande_roundtrip_do_storm) {
     Scene loaded;
     SceneSerializer::LoadCtx ctx;   // resolvers vazios: meshes ficam null
     ASSERT(SceneSerializer::loadText(loaded, json, ctx));
-    EXPECT(loaded.count() == scene.count());
+    // 0.12-B (B-1, RECALIBRADO): o load converte o canvas (50 elementos →
+    // 50 TICs filhos) — a contagem cresce com a árvore
+    EXPECT(loaded.count() == scene.count() + 50u);
     const Handle uiH = loaded.find("UI");
     ASSERT(uiH.valid());
     AnimationPlayer* pl2 = loaded.get(uiH)->getComponent<AnimationPlayer>();
@@ -432,8 +434,22 @@ TEST(wiring084_save_load_com_cena_grande_roundtrip_do_storm) {
         EXPECT(pl2->activeClipPtr()->tracks[0].keys.size() == 1);
     }
     UiCanvas* cv2 = loaded.get(uiH)->getComponent<UiCanvas>();
-    ASSERT(cv2 != nullptr);
-    EXPECT(cv2->elements.size() == 50);
+    // 0.12-B (B-1, RECALIBRADO): o load converte o canvas em árvore (UIRoot
+    // + 50 filhos Control) — a CONTAGEM é nos filhos da raiz
+    EXPECT(cv2 == nullptr);
+    const Tic* uiRoot2 = loaded.get(uiH);
+    ASSERT(uiRoot2 != nullptr);
+    EXPECT(uiRoot2->getComponent<UIRoot>() != nullptr);
+    u32 nTreeElems = 0;
+    {
+        const i32 rootSlot = static_cast<i32>(uiH.index);
+        loaded.forEachActive([&](const Tic& t) {
+            if (t.parent == rootSlot && t.getComponent<Control>()) {
+                ++nTreeElems;
+            }
+        });
+    }
+    EXPECT(nTreeElems == 50u);
 }
 
 // ---- 4. steady state: NENHUM objeto GL novo por frame (realloc em loop) -----

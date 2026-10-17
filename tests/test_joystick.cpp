@@ -27,6 +27,8 @@
 #include <vector>
 #include "components/TouchControls.h"
 #include "components/UiCanvas.h"
+#include "components/Control.h"   // 0.12-B: a árvore de UI (recalibração)
+#include "components/UIRoot.h"
 #include "core/Presets.h"
 #include "core/Scene.h"
 #include "core/SceneSerializer.h"
@@ -328,6 +330,8 @@ TEST(compostos_menu_card_article_desenham_e_serializam) {
     ui.endFrame();
 
     // serialização: os três compostos fazem round-trip COMPLETO
+    // 0.12-B (B-1, RECALIBRADO): o load converte — os elementos voltam como
+    // TICs filhos (UIRoot + Control), na MESMA ordem e com os MESMOS dados
     Scene s;
     Tic* t = s.get(s.create("HUD"));
     UiCanvas* cc = t->addComponent<UiCanvas>();
@@ -336,14 +340,28 @@ TEST(compostos_menu_card_article_desenham_e_serializam) {
     Scene s2;
     SceneSerializer::LoadCtx ctx;
     EXPECT(SceneSerializer::loadText(s2, text, ctx));
-    const UiCanvas* back =
-        s2.get(s2.find("HUD"))->getComponent<UiCanvas>();
-    EXPECT(back != nullptr && back->elements.size() == 3);
-    EXPECT(back->elements[0].kind == UiElement::Kind::Menu);
-    EXPECT(back->elements[0].text == "Jogar>cena2\nOpcoes\nSair");
-    EXPECT(back->elements[1].kind == UiElement::Kind::Card);
-    EXPECT(back->elements[1].text == "Titulo");
-    EXPECT(back->elements[2].kind == UiElement::Kind::Article);
+    const Tic* backRoot = s2.get(s2.find("HUD"));
+    ASSERT(backRoot != nullptr);
+    EXPECT(backRoot->getComponent<UIRoot>() != nullptr);
+    EXPECT(backRoot->getComponent<UiCanvas>() == nullptr);   // convertido
+    std::vector<UiElement> back;
+    {
+        const i32 rootSlot = static_cast<i32>(backRoot->handle.index);
+        s2.forEachActive([&](const Tic& ch) {
+            if (ch.parent == rootSlot) {
+                if (const Control* ctl = ch.getComponent<Control>()) {
+                    back.push_back(ctl->elem);
+                    back.back().name = ch.name;
+                }
+            }
+        });
+    }
+    ASSERT(back.size() == 3);
+    EXPECT(back[0].kind == UiElement::Kind::Menu);
+    EXPECT(back[0].text == "Jogar>cena2\nOpcoes\nSair");
+    EXPECT(back[1].kind == UiElement::Kind::Card);
+    EXPECT(back[1].text == "Titulo");
+    EXPECT(back[2].kind == UiElement::Kind::Article);
     // os compostos criáveis pelo + (uiAddElement aceita 4..6) e os
     // CONTAINERS 0.7.4 (7=VBox, 8=HBox; 9 já não existe)
     Scene s3;

@@ -706,10 +706,257 @@ UiElement* findElementAnywhere(Scene& scene, const std::string& name,
             }
         }
     });
+    // 0.12-B — a ÁRVORE: os alvos Show/Hide/Toggle também se procuram pelos
+    // TICs de UI (o NOME do TIC é a identidade do elemento — o MESMO
+    // contrato dos nomes do canvas)
+    if (!found) {
+        scene.forEachActive([&](Tic& t) {
+            if (found) {
+                return;
+            }
+            if (Control* ctl = scene.components().controls().find(t.handle)) {
+                if (t.name == name) {
+                    found = &ctl->elem;
+                    outOwner = t.handle;
+                }
+            }
+        });
+    }
     return found;
 }
 
 } // namespace
+
+// ---- 0.12-B — a ÁRVORE de UI (UIRoot + filhos Control) ----------------------
+
+namespace {
+
+// mapa slot→Tic* numa passagem (o parent do Tic é ÍNDICE DE SLOT — resolver
+// por Handle direto exigiria a generation certa, que o slot esconde)
+void slotMap(const Scene& scene, std::vector<const Tic*>& out) {
+    u32 maxSlot = 0;
+    scene.forEachActive([&](const Tic& t) {
+        if (t.handle.index > maxSlot) {
+            maxSlot = t.handle.index;
+        }
+    });
+    out.assign(static_cast<size_t>(maxSlot) + 1u, nullptr);
+    scene.forEachActive([&](const Tic& t) {
+        if (t.handle.index < out.size()) {
+            out[t.handle.index] = &t;
+        }
+    });
+}
+
+} // namespace
+
+bool collectUiTree(const Scene& scene, f32 sw, f32 sh, const safe::Insets& ins,
+                   UiTreeView& out, bool respectTicVisibility) {
+    out = UiTreeView{};
+    Handle root = Handle::invalid();
+    scene.forEachActive([&](const Tic& t) {
+        if (!root.valid() &&
+            scene.components().uiRoots().find(t.handle) != nullptr) {
+            root = t.handle;
+        }
+    });
+    if (!root.valid()) {
+        return false;
+    }
+    out.root = root;
+    const i32 rootSlot = static_cast<i32>(root.index);
+
+    std::vector<const Tic*> bySlot;
+    slotMap(scene, bySlot);
+
+    // 1) todos os TICs com Control sob o raiz (ordem de slot = a de sempre).
+    //    A cadeia de pais sobe SÓ por TICs COM Control (um filho 3D do raiz
+    //    não entra na vista).
+    std::vector<Handle> kids;
+    std::vector<const Control*> ctrls;
+    scene.forEachActive([&](const Tic& t) {
+        const Control* ctl =
+            scene.components().controls().find(t.handle);
+        if (!ctl) {
+            return;
+        }
+        i32 p = t.parent;
+        u32 guard = 0;
+        bool under = false;
+        while (p >= 0 && guard++ < 256) {
+            if (p == rootSlot) {
+                under = true;
+                break;
+            }
+            const Tic* pt = static_cast<size_t>(p) < bySlot.size()
+                ? bySlot[static_cast<size_t>(p)] : nullptr;
+            if (!pt ||
+                scene.components().controls().find(pt->handle) == nullptr) {
+                break;   // pai ausente ou 3D — não é da árvore
+            }
+            p = pt->parent;
+        }
+        if (!under) {
+            return;
+        }
+        kids.push_back(t.handle);
+        ctrls.push_back(ctl);
+    });
+    if (kids.empty()) {
+        return true;   // raiz sem filhos — árvore válida e vazia
+    }
+
+    // 2) mapa slot→índice + nome dos CONTAINERS (o parent por NOME do
+    //    resolver 0.7.4) — o joystick tem rect DERIVADO do TouchControls
+    std::vector<i32> indexOfSlot;
+    for (const Handle& h : kids) {
+        if (h.index >= indexOfSlot.size()) {
+            indexOfSlot.resize(static_cast<size_t>(h.index) + 1u, -1);
+        }
+    }
+    for (size_t i = 0; i < kids.size(); ++i) {
+        indexOfSlot[kids[i].index] = static_cast<i32>(i);
+    }
+    out.tics = kids;
+    out.canvas.elements.resize(kids.size());
+    const f32 aw = sw - ins.left - ins.right;
+    const f32 ah = sh - ins.top - ins.bottom;
+    for (size_t i = 0; i < kids.size(); ++i) {
+        const Tic* t = scene.get(kids[i]);
+        const Control* ctl = ctrls[i];
+        if (!t) {
+            continue;
+        }
+        UiElement& m = out.canvas.elements[i];
+        m = ctl->elem;
+        m.name = t->name;   // o nome TIC é a identidade (hierarquia/alvos)
+        m.parent.clear();
+        if (t->parent != rootSlot && t->parent >= 0 &&
+            static_cast<size_t>(t->parent) < indexOfSlot.size() &&
+            indexOfSlot[static_cast<size_t>(t->parent)] >= 0) {
+            // o pai é OUTRO elemento da árvore: só containers dispõem
+            const Tic* pt = bySlot[static_cast<size_t>(t->parent)];
+            const Control* pc =
+                pt ? scene.components().controls().find(pt->handle) : nullptr;
+            if (pc && (pc->elem.kind == UiElement::Kind::VBox ||
+                       pc->elem.kind == UiElement::Kind::HBox)) {
+                m.parent = pt->name;
+            }
+        }
+        if (ctl->isJoystick()) {
+            // rect DERIVADO do TouchControls (a MESMA matemática do editor
+            // 0.7.3 — layoutFor sobre a área útil); o rect nunca sincroniza
+            if (const TouchControls* tc =
+                    scene.components().touchControls().find(kids[i])) {
+                const TouchControls::Layout jl = tc->layoutFor(aw, ah);
+                m.anchorH = UiElement::AnchorH::Left;
+                m.anchorV = UiElement::AnchorV::Top;
+                m.ox = jl.joyCX - jl.joyR;
+                m.oy = jl.joyCY - jl.joyR;
+                m.w = jl.joyR * 2.0f;
+                m.h = jl.joyR * 2.0f;
+                m.kind = UiElement::Kind::Panel;   // NUNCA passa no drawElement
+                m.visible = false;                 // o draw dele é o de sempre
+            }
+        }
+        // visibilidade: a do elemento E a do TIC (o Play respeita as duas;
+        // o editor passa respectTicVisibility=false — vê o que edita)
+        if (respectTicVisibility && !t->visible) {
+            m.visible = false;
+        }
+    }
+    return true;
+}
+
+u32 drawUiTree(UiContext& uictx, const Scene& scene, f32 sw, f32 sh,
+               const safe::Insets& ins) {
+    UiTreeView v;
+    if (!collectUiTree(scene, sw, sh, ins, v, true)) {
+        return 0;
+    }
+    // o raiz invisível esconde a árvore TODA (o mesmo contrato do canvas:
+    // TIC invisível não desenha em Play)
+    const Tic* rootTic = scene.get(v.root);
+    if (!rootTic || !rootTic->visible) {
+        return 0;
+    }
+    return drawCanvas(uictx, v.canvas, sw, sh, ins);
+}
+
+CanvasHit hitTestUiTree(const Scene& scene, f32 x, f32 y, f32 sw, f32 sh,
+                        const safe::Insets& ins) {
+    CanvasHit hit;
+    UiTreeView v;
+    if (!collectUiTree(scene, sw, sh, ins, v, true)) {
+        return hit;
+    }
+    const Tic* rootTic = scene.get(v.root);
+    if (!rootTic || !rootTic->visible) {
+        return hit;
+    }
+    // o MESMO hit-test do canvas sobre o espelho (Button/Menu, topo ganha) —
+    // mas o handle devolvido é o do TIC FILHO (a árvore é de TICs)
+    std::vector<CanvasLayout> L(v.canvas.elements.size());
+    resolveCanvasLayout(v.canvas, sw, sh, ins, L.data(),
+                        static_cast<u32>(v.canvas.elements.size()));
+    for (size_t i = 0; i < v.canvas.elements.size(); ++i) {
+        const UiElement& e = v.canvas.elements[i];
+        if (!L[i].shown) {
+            continue;
+        }
+        const UiRect r = L[i].rect;
+        if (!uiRotatedRectHit(r, e.rot, x, y)) {
+            continue;
+        }
+        if (e.kind == UiElement::Kind::Button) {
+            hit.valid = true;
+            hit.tic = v.tics[i];
+            hit.element = static_cast<i32>(i);
+            hit.menuItem = -1;
+        } else if (e.kind == UiElement::Kind::Menu) {
+            const UiRect row = menuItemRect(e, r, 0);
+            const UiRect last = menuItemRect(e, r, menuLineCount(e) - 1u);
+            if (y >= row.y && y < last.y + last.h) {
+                const f32 step = row.h + e.spacing;
+                const i32 rowIdx = step > 0.0f
+                    ? static_cast<i32>((y - r.y) / step) : 0;
+                if (rowIdx >= 0 &&
+                    static_cast<u32>(rowIdx) < menuLineCount(e)) {
+                    hit.valid = true;
+                    hit.tic = v.tics[i];
+                    hit.element = static_cast<i32>(i);
+                    hit.menuItem = rowIdx;
+                }
+            }
+        }
+    }
+    return hit;
+}
+
+bool uiElementFromHit(const Scene& scene, const CanvasHit& hit, UiElement& out) {
+    if (!hit.valid) {
+        return false;
+    }
+    const Tic* t = scene.get(hit.tic);
+    if (!t) {
+        return false;
+    }
+    // árvore (0.12-B): o hit aponta para um TIC filho com Control
+    if (const Control* ctl = scene.components().controls().find(hit.tic)) {
+        out = ctl->elem;
+        out.name = t->name;
+        return true;
+    }
+    // canvas legado (compat 0.7.0): o hit aponta para o elemento do canvas
+    if (const UiCanvas* c = scene.components().uiCanvases().find(hit.tic)) {
+        if (hit.element >= 0 &&
+            hit.element < static_cast<i32>(c->elements.size())) {
+            out = c->elements[static_cast<size_t>(hit.element)];
+            return true;
+        }
+    }
+    return false;
+}
 
 UiActionResult applyUiAction(Scene& scene, const UiElement& e,
                              const UiActionCtx& ctx,

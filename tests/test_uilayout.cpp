@@ -28,6 +28,8 @@
 #include <string>
 #include <vector>
 #include "components/UiCanvas.h"
+#include "components/Control.h"   // 0.12-B: a árvore de UI (recalibração)
+#include "components/UIRoot.h"
 #include "core/Scene.h"
 #include "core/SceneSerializer.h"
 #include "platform/InputState.h"
@@ -713,16 +715,37 @@ TEST(uilayout_serializacao_roundtrip_containers) {
     SceneSerializer::LoadCtx ctx;
     EXPECT(SceneSerializer::loadText(s2, text, ctx));
 
-    const UiCanvas* c2 = s2.get(s2.find("HUD"))->getComponent<UiCanvas>();
-    EXPECT(c2 != nullptr && c2->elements.size() == 2);
-    EXPECT(c2->elements[0].kind == UiElement::Kind::VBox);
-    EXPECT(nearEqF(c2->elements[0].spacing, 14.0f));
-    EXPECT(nearEqF(c2->elements[0].pad, 6.0f));
-    EXPECT(c2->elements[0].align == UiElement::Align::End);
-    EXPECT(nearEqF(c2->elements[0].color[3], 0.5f));
-    EXPECT(c2->elements[1].parent == "col");
-    EXPECT(c2->elements[1].image == "textures/wood.png");
-    EXPECT(nearEqF(c2->elements[1].color[3], 0.0f));
+    // 0.12-B (B-1, RECALIBRADO): o load converte — o VBox «col» e o botão
+    // filho voltam como TICs da árvore; o PARENT por nome segue NO ELEM do
+    // filho (o migrateUiCanvasToTree mapeia o container por NOME → pai TIC,
+    // e o elem.parent conserva o vocabulário 0.7.4 no .goni)
+    const Tic* hud2 = s2.get(s2.find("HUD"));
+    ASSERT(hud2 != nullptr);
+    EXPECT(hud2->getComponent<UIRoot>() != nullptr);
+    std::vector<UiElement> c2elems;
+    std::vector<const Tic*> c2tics;
+    {
+        // TODOS os TICs com Control da cena convertida (a ordem de slot = a
+        // ordem do array original; o botão é NETO da raiz — filho do VBox)
+        s2.forEachActive([&](const Tic& ch) {
+            if (const Control* ctl = ch.getComponent<Control>()) {
+                c2elems.push_back(ctl->elem);
+                c2tics.push_back(&ch);
+            }
+        });
+    }
+    ASSERT(c2elems.size() == 2);
+    EXPECT(c2elems[0].kind == UiElement::Kind::VBox);
+    EXPECT(nearEqF(c2elems[0].spacing, 14.0f));
+    EXPECT(nearEqF(c2elems[0].pad, 6.0f));
+    EXPECT(c2elems[0].align == UiElement::Align::End);
+    EXPECT(nearEqF(c2elems[0].color[3], 0.5f));
+    // o botão é TIC filho DO TIC do container (a estrutura nova) e o elem
+    // conserva o vocabulário (o .goni continua a escrever parent)
+    EXPECT(c2elems[1].parent == "col");
+    EXPECT(c2tics[1]->parent == static_cast<i32>(c2tics[0]->handle.index));
+    EXPECT(c2elems[1].image == "textures/wood.png");
+    EXPECT(nearEqF(c2elems[1].color[3], 0.0f));
 
     // 2º round-trip textual estável (defaults não voltam como campos)
     const std::string text2 = SceneSerializer::dump(s2);
@@ -738,11 +761,24 @@ TEST(uilayout_serializacao_roundtrip_containers) {
              "x":10,"y":10,"w":300,"h":200,"color":[0.1,0.1,0.1,1],
              "visible":true,"ah":"left","av":"top"}]}]}]})";
     EXPECT(SceneSerializer::loadText(s3, old, ctx));
-    const UiCanvas* c3 = s3.get(s3.find("HUD"))->getComponent<UiCanvas>();
-    EXPECT(c3 != nullptr && c3->elements.size() == 1);
-    EXPECT(c3->elements[0].spacing == 0.0f);   // default 0.7.3
-    EXPECT(c3->elements[0].pad == 8.0f);
-    EXPECT(c3->elements[0].parent.empty());
+    const Tic* hud3 = s3.get(s3.find("HUD"));
+    ASSERT(hud3 != nullptr);
+    EXPECT(hud3->getComponent<UIRoot>() != nullptr);
+    std::vector<UiElement> c3elems;
+    {
+        const i32 rootSlot = static_cast<i32>(hud3->handle.index);
+        s3.forEachActive([&](const Tic& ch) {
+            if (ch.parent == rootSlot) {
+                if (const Control* ctl = ch.getComponent<Control>()) {
+                    c3elems.push_back(ctl->elem);
+                }
+            }
+        });
+    }
+    ASSERT(c3elems.size() == 1);
+    EXPECT(c3elems[0].spacing == 0.0f);   // default 0.7.3
+    EXPECT(c3elems[0].pad == 8.0f);
+    EXPECT(c3elems[0].parent.empty());
 }
 
 // ---- 7. runs de submissão: z-order sólidos↔texturas -------------------------------

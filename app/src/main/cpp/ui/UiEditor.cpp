@@ -109,10 +109,48 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
     ui.frame(view.x, view.y, view.w, view.h, 1.0f, theme::LINE);
 
     Tic* tic = scene.get(st.selected);
+    // 0.12-B (B-1) — MODO ÁRVORE: a UI da cena é a árvore de TICs (UIRoot +
+    // filhos Control). O espelho (UiTreeView.canvas) alimenta o MESMO código
+    // de draw/hit/drag do canvas 0.7.x — e a sincronização volta ao fim da
+    // função. O caminho legado (UiCanvas no TIC selecionado) continua para a
+    // compat 0.7.x (cenas em memória dos testes; produção só tem árvore).
+    ui::UiTreeView tv;
+    const safe::Insets insTv = ui.safeArea();
+    const bool treeMode =
+        ui::collectUiTree(scene, sw, sh, insTv, tv, false);
     // 0.7.3: o joystick (TouchControls) é editável mesmo SEM canvas — o
     // early-return da dica só corre quando não há canvas NEM joystick
-    UiCanvas* canvas = tic ? tic->getComponent<UiCanvas>() : nullptr;
+    UiCanvas* canvas = nullptr;
     TouchControls* joy = tic ? tic->getComponent<TouchControls>() : nullptr;
+    if (treeMode) {
+        canvas = &tv.canvas;
+        // a seleção é do TIC (hierarquia e viewport partilham st.selected):
+        // selElement deriva do índice do selecionado na árvore
+        st.selElement = -1;
+        for (size_t i = 0; i < tv.tics.size(); ++i) {
+            if (tv.tics[i] == st.selected) {
+                st.selElement = static_cast<i32>(i);
+                break;
+            }
+        }
+        // o joystick em edição = o TIC selecionado tem TouchControls
+        joy = (tic && st.selElement >= 0) ? joy : nullptr;
+        if (joy && !joy->owner) {
+            joy = nullptr;   // defesa — nunca deve ocorrer
+        }
+    } else {
+        canvas = tic ? tic->getComponent<UiCanvas>() : nullptr;
+    }
+    if (treeMode && tv.count() == 0 && !joy) {
+        st.selElement = -1;
+        st.selJoystick = false;
+        st.elDrag = false;
+        const TextMetrics tm = ui.textMetrics();
+        ui.labelFitted(view.x + kPad, view.y + view.h * 0.5f + tm.ascent,
+                       "(UI vazia — use + para criar o primeiro elemento)",
+                       theme::LINE, view.w - 2.0f * kPad);
+        return;
+    }
     if (!canvas && !joy) {
         st.selElement = -1;
         st.selJoystick = false;
@@ -133,6 +171,11 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
     if (st.selElement >= static_cast<i32>(canvas->elements.size())) {
         st.selElement = -1;
         st.elDrag = false;
+    }
+    // 0.12-B: em modo árvore o joystick em edição é o TIC selecionado com
+    // TouchControls (os filhos joystick); selJoystick acompanha
+    if (treeMode) {
+        st.selJoystick = joy != nullptr;
     }
 
     // transform partilhado: draw + hit-test + drag usam O MESMO
@@ -157,8 +200,53 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
     // (drawTouchControlsAt) desenha a base + knob + JUMP no mini-ecrã (com
     // o transform) — o proxy simplificado da 0.7.3 era uma coisa no editor
     // e outra no Play (sem botão JUMP, knob próprio).
+    // 0.12-B (modo árvore): TODOS os filhos joystick desenham (cada TIC
+    // joystick desenha o SEU TouchControls); a moldura de seleção segue o
+    // selecionado. Legado: o joystick único do TIC selecionado (byte a byte).
     f32 joyX0 = 0.0f, joyY0 = 0.0f, joyX1 = 0.0f, joyY1 = 0.0f;
-    if (joy) {
+    if (treeMode) {
+        const f32 awU = sw - ins.left - ins.right;
+        const f32 ahU = sh - ins.top - ins.bottom;
+        for (size_t i = 0; i < tv.tics.size(); ++i) {
+            Tic* jt = scene.get(tv.tics[i]);
+            TouchControls* tjc =
+                jt ? jt->getComponent<TouchControls>() : nullptr;
+            if (!tjc) {
+                continue;
+            }
+            const TouchControls::Layout jl = tjc->layoutFor(awU, ahU);
+            const f32 j0x = t.ox + (ins.left + jl.joyCX - jl.joyR) * t.scale;
+            const f32 j0y = t.oy + (ins.top + jl.joyCY - jl.joyR) * t.scale;
+            const f32 j1x = t.ox + (ins.left + jl.joyCX + jl.joyR) * t.scale;
+            const f32 j1y = t.oy + (ins.top + jl.joyCY + jl.joyR) * t.scale;
+            {
+                const UiContext::ScopedClip clipJ(
+                    ui, {t.ox, t.oy, sw * t.scale, sh * t.scale});
+                const UiContext::ScopedTextScale scopedScale(ui, t.scale);
+                drawTouchControlsAt(ui, *tjc,
+                                    t.ox + ins.left * t.scale,
+                                    t.oy + ins.top * t.scale, awU, ahU,
+                                    t.scale);
+            }
+            const bool sel = tv.tics[i] == st.selected;
+            if (sel) {
+                joyX0 = j0x;
+                joyY0 = j0y;
+                joyX1 = j1x;
+                joyY1 = j1y;
+            }
+            ui.frame(j0x, j0y, j1x - j0x, j1y - j0y, sel ? 3.0f : 1.0f,
+                     sel ? theme::ACCENT : theme::LINE);
+            if (ui.hasFont()) {
+                const TextMetrics tm2 = ui.textMetrics();
+                ui.labelFitted(j0x, j1y + 4.0f + tm2.ascent, "joystick",
+                               theme::LINE, j1x - j0x);
+            }
+        }
+        if (st.selJoystick && !joy) {
+            st.selJoystick = false;   // o selecionado deixou de ser joystick
+        }
+    } else if (joy) {
         const TouchControls::Layout jl =
             joy->layoutFor(sw - ins.left - ins.right, sh - ins.top - ins.bottom);
         joyX0 = t.ox + (ins.left + jl.joyCX - jl.joyR) * t.scale;
@@ -398,6 +486,11 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
                 st.elDrag = true;
                 st.elDragX = px;
                 st.elDragY = py;
+                // 0.12-B (árvore): a seleção é do TIC — hierarquia e viewport
+                // partilham st.selected (a linha da Hierarchy acende)
+                if (treeMode && hit < static_cast<i32>(tv.tics.size())) {
+                    selectTic(st, tv.tics[static_cast<size_t>(hit)]);
+                }
             } else if (joy && px >= joyX0 && px < joyX1 && py >= joyY0 &&
                        py < joyY1) {
                 // o tap apanhou o PROXY do joystick (depois dos elementos)
@@ -405,6 +498,97 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
                 st.elDrag = true;
                 st.elDragX = px;
                 st.elDragY = py;
+            } else if (treeMode) {
+                // 0.12-B — os joysticks da árvore (os rects são DERIVADOS —
+                // não passam no hit dos elementos): tap no proxy de qualquer
+                // filho joystick seleciona-o. SEM hit nenhum: tap no vazio =
+                // a seleção volta à RAIZ (o selElement re-deriva do TIC —
+                // sem isto o −1 era desfeito no frame seguinte)
+                const f32 awU = sw - ins.left - ins.right;
+                const f32 ahU = sh - ins.top - ins.bottom;
+                bool joyHit = false;
+                for (size_t i = tv.tics.size(); i-- > 0;) {
+                    Tic* jt = scene.get(tv.tics[i]);
+                    TouchControls* tjc =
+                        jt ? jt->getComponent<TouchControls>() : nullptr;
+                    if (!tjc) {
+                        continue;
+                    }
+                    const TouchControls::Layout jl = tjc->layoutFor(awU, ahU);
+                    const f32 j0x =
+                        t.ox + (ins.left + jl.joyCX - jl.joyR) * t.scale;
+                    const f32 j0y =
+                        t.oy + (ins.top + jl.joyCY - jl.joyR) * t.scale;
+                    const f32 j1x =
+                        t.ox + (ins.left + jl.joyCX + jl.joyR) * t.scale;
+                    const f32 j1y =
+                        t.oy + (ins.top + jl.joyCY + jl.joyR) * t.scale;
+                    if (px >= j0x && px < j1x && py >= j0y && py < j1y) {
+                        selectTic(st, tv.tics[i]);
+                        st.selJoystick = true;
+                        st.elDrag = true;
+                        st.elDragX = px;
+                        st.elDragY = py;
+                        joyHit = true;
+                        break;
+                    }
+                }
+                if (!joyHit) {
+                    selectTic(st, tv.root);   // tap no vazio → a raiz
+                    st.selJoystick = false;
+                }
+            }
+        }
+    }
+
+    // 0.12-B — SINCRONIZAÇÃO da árvore (o fim dono do ciclo do espelho): as
+    // mutações do frame (drag/gizmos/detach/Inspector) viveram no ESPELHO e
+    // voltam agora para os Controls. Regras:
+    //   • rect DERIVADO nunca sincroniza (joystick: o TouchControls manda;
+    //     esticar: as margens mandam — o rect é recalculado a cada frame)
+    //   • o kind é do Control (fonte única — o espelho do joystick é Panel)
+    //   • o parent EDITADO (0.7.4) segue para a árvore de TICs: detach →
+    //     raiz; «colocar em» → o TIC do container
+    if (treeMode) {
+        const i32 rootSlot = static_cast<i32>(tv.root.index);
+        for (size_t i = 0;
+             i < tv.tics.size() && i < tv.canvas.elements.size(); ++i) {
+            Tic* t = scene.get(tv.tics[i]);
+            Control* ctl = t ? t->getComponent<Control>() : nullptr;
+            if (!t || !ctl) {
+                continue;
+            }
+            UiElement& src = tv.canvas.elements[i];
+            const bool derived = ctl->isJoystick() || ctl->stretch;
+            const f32 sOx = ctl->elem.ox, sOy = ctl->elem.oy;
+            const f32 sW = ctl->elem.w, sH = ctl->elem.h;
+            const auto sAH = ctl->elem.anchorH;
+            const auto sAV = ctl->elem.anchorV;
+            const UiElement::Kind sKind = ctl->elem.kind;
+            ctl->elem = src;
+            ctl->elem.name = t->name;   // o nome TIC manda (o rename é do TIC)
+            ctl->elem.kind = sKind;
+            if (derived) {
+                ctl->elem.ox = sOx;
+                ctl->elem.oy = sOy;
+                ctl->elem.w = sW;
+                ctl->elem.h = sH;
+                ctl->elem.anchorH = sAH;
+                ctl->elem.anchorV = sAV;
+            }
+            // o parent editado → árvore de TICs (só containers da árvore)
+            if (src.parent.empty()) {
+                if (t->parent != rootSlot) {
+                    t->parent = rootSlot;
+                }
+            } else {
+                const Handle hContainer = scene.find(src.parent);
+                Tic* pContainer = scene.get(hContainer);
+                if (pContainer && pContainer->getComponent<Control>() &&
+                    pContainer->getComponent<Control>()->isContainer() &&
+                    t->parent != static_cast<i32>(hContainer.index)) {
+                    t->parent = static_cast<i32>(hContainer.index);
+                }
             }
         }
     }
@@ -740,6 +924,10 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
     ui.panel(x + kPad, y + kHeaderH - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
 
     Tic* tic = scene.get(st.selected);
+    // 0.12-B (B-1) — ÁRVORE: o selecionado é um TIC de UI (com Control)? O
+    // Inspector edita o elem AO VIVO (sem espelho — o Control é a fonte);
+    // o joystick continua pelo drawJoystickInspector (o TouchControls)
+    Control* selCtrl = tic ? tic->getComponent<Control>() : nullptr;
     // 0.7.3 — JOYSTICK selecionado: o painel mostra o INSPECTOR DO
     // JOYSTICK (pos/tamanho/sens/cor/remover do TouchControls do TIC)
     TouchControls* joySel =
@@ -751,14 +939,21 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
         st.selJoystick = false;   // o componente sumiu — cai no fluxo normal
     }
     UiCanvas* canvas = tic ? tic->getComponent<UiCanvas>() : nullptr;
-    if (!canvas || st.selElement < 0 ||
-        st.selElement >= static_cast<i32>(canvas->elements.size())) {
+    UiElement* ep = nullptr;
+    if (selCtrl) {
+        ep = &selCtrl->elem;
+        ep->name = tic->name;   // o nome TIC é a identidade (sempre atual)
+    } else if (canvas && st.selElement >= 0 &&
+               st.selElement < static_cast<i32>(canvas->elements.size())) {
+        ep = &canvas->elements[static_cast<size_t>(st.selElement)];
+    }
+    if (!ep) {
         ui.labelFitted(x + kPad, y + kHeaderH + kRowH,
                        "(nenhum elemento selecionado)", theme::LINE,
                        w - 2.0f * kPad);
         return false;
     }
-    UiElement& e = canvas->elements[static_cast<size_t>(st.selElement)];
+    UiElement& e = *ep;
 
     // ---- PLANO (fonte única — o mesmo contrato do Inspector de TICs)
     const u32 nRows = uiInspectorRowCount(e, tm);
@@ -774,27 +969,67 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
     u32 colorIdx = 0;   // payload dos ColorSlider (0=R, 1=G, 2=B)
 
     // 0.7.4 — nome + container (filho) no cabeçalho
+    // 0.12-B (árvore): o pai mostrado deriva do PAI TIC (a árvore é a
+    // estrutura — elem.parent fica vazio nos Controls)
+    std::string displayParent = e.parent;
+    if (selCtrl && tic && tic->parent >= 0) {
+        displayParent.clear();
+        scene.forEachActive([&](const Tic& t) {
+            if (!displayParent.empty() ||
+                t.handle.index != static_cast<u32>(tic->parent)) {
+                return;
+            }
+            if (const Control* pc = t.getComponent<Control>()) {
+                if (pc->isContainer()) {
+                    displayParent = t.name;
+                }
+            }
+        });
+    }
     char nameLine[96];
-    if (!e.parent.empty()) {
+    if (!displayParent.empty()) {
         std::snprintf(nameLine, sizeof(nameLine), "%s  (%s em %s)",
                       e.name.c_str(), uiElementKindName(e.kind),
-                      e.parent.c_str());
+                      displayParent.c_str());
     } else {
         std::snprintf(nameLine, sizeof(nameLine), "%s  (%s)", e.name.c_str(),
                       uiElementKindName(e.kind));
     }
 
-    // 0.7.4 — lista de containers do canvas p/ o botão "colocar em".
+    // 0.7.4 — lista de containers p/ o botão "colocar em".
     // 0.8.9 (CRASH-PROOF): EXCLUI O PRÓPRIO elemento. O comentário antigo
     // dizia "inclui o próprio — o resolver guarda ciclos", mas só o sizeOf
     // tinha guard: o placeAt recursivo NÃO (0.8.8→0.8.9, crash do C33 por
     // stack exhaustion). Colocar um container DENTRO DE SI era um clique e
     // recursava infinitamente; agora a opção nem aparece (e o resolver tem
     // guard duplo por causa dos ficheiros já gravados com ciclo).
+    // 0.12-B (árvore): os containers são os TICs filhos da RAIZ (a estrutura
+    // vive nos TICs — o reparent é o gesto explícito da casa, 0.11-H)
     std::vector<std::string> containers;
-    for (const UiElement& o : canvas->elements) {
-        if (uiElementIsContainer(o.kind) && o.name != e.name) {
-            containers.push_back(o.name);
+    std::vector<Handle> containerHandles;
+    if (selCtrl) {
+        scene.forEachActive([&](Tic& t) {
+            if (!t.getComponent<UIRoot>()) {
+                return;
+            }
+            const i32 rootSlot = static_cast<i32>(t.handle.index);
+            scene.forEachActive([&](Tic& c) {
+                if (c.parent != rootSlot || c.handle == tic->handle) {
+                    return;
+                }
+                if (const Control* cc = c.getComponent<Control>()) {
+                    if (cc->isContainer()) {
+                        containers.push_back(c.name);
+                        containerHandles.push_back(c.handle);
+                    }
+                }
+            });
+        });
+    } else {
+        for (const UiElement& o : canvas->elements) {
+            if (uiElementIsContainer(o.kind) && o.name != e.name) {
+                containers.push_back(o.name);
+            }
         }
     }
 
@@ -1047,23 +1282,44 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                     edited = true;
                     break;
                 case UiInspRow::Kind::AnchorH:
-                    canvas->setAnchor(
-                        st.selElement,
-                        static_cast<UiElement::AnchorH>(
-                            (static_cast<u32>(e.anchorH) + 1u) % 3u),
-                        e.anchorV, ui.screenWidth(), ui.screenHeight(),
-                        ui.safeArea().left, ui.safeArea().top,
-                        ui.safeArea().right, ui.safeArea().bottom);
+                    if (selCtrl) {
+                        // 0.12-B — árvore: a MESMA re-ancoragem (a FONTE
+                        // ÚNICA reanchor), direto no Control ao vivo
+                        UiCanvas::reanchor(
+                            e, static_cast<UiElement::AnchorH>(
+                                   (static_cast<u32>(e.anchorH) + 1u) % 3u),
+                            e.anchorV, ui.screenWidth(), ui.screenHeight(),
+                            ui.safeArea().left, ui.safeArea().top,
+                            ui.safeArea().right, ui.safeArea().bottom);
+                    } else {
+                        canvas->setAnchor(
+                            st.selElement,
+                            static_cast<UiElement::AnchorH>(
+                                (static_cast<u32>(e.anchorH) + 1u) % 3u),
+                            e.anchorV, ui.screenWidth(), ui.screenHeight(),
+                            ui.safeArea().left, ui.safeArea().top,
+                            ui.safeArea().right, ui.safeArea().bottom);
+                    }
                     edited = true;
                     break;
                 case UiInspRow::Kind::AnchorV:
-                    canvas->setAnchor(
-                        st.selElement, e.anchorH,
-                        static_cast<UiElement::AnchorV>(
-                            (static_cast<u32>(e.anchorV) + 1u) % 3u),
-                        ui.screenWidth(), ui.screenHeight(),
-                        ui.safeArea().left, ui.safeArea().top,
-                        ui.safeArea().right, ui.safeArea().bottom);
+                    if (selCtrl) {
+                        UiCanvas::reanchor(
+                            e, e.anchorH,
+                            static_cast<UiElement::AnchorV>(
+                                (static_cast<u32>(e.anchorV) + 1u) % 3u),
+                            ui.screenWidth(), ui.screenHeight(),
+                            ui.safeArea().left, ui.safeArea().top,
+                            ui.safeArea().right, ui.safeArea().bottom);
+                    } else {
+                        canvas->setAnchor(
+                            st.selElement, e.anchorH,
+                            static_cast<UiElement::AnchorV>(
+                                (static_cast<u32>(e.anchorV) + 1u) % 3u),
+                            ui.screenWidth(), ui.screenHeight(),
+                            ui.safeArea().left, ui.safeArea().top,
+                            ui.safeArea().right, ui.safeArea().bottom);
+                    }
                     edited = true;
                     break;
                 case UiInspRow::Kind::TextBtn:
@@ -1120,6 +1376,52 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                     // 0.7.4 — cicla (nenhum) → containers → (nenhum). Ao
                     // SAIR de um container, o elemento fica NO SÍTIO onde
                     // estava (uiDetachElement conserva a posição visual)
+                    // 0.12-B (árvore): a estrutura é do TIC — o ciclo faz o
+                    // REPARENT direto (a op pura da 0.11-H; a posição visual
+                    // conserva-se pela MESMA regra do detach: ox/oy derivam
+                    // do rect atual)
+                    if (selCtrl) {
+                        Handle rootHandle = Handle::invalid();
+                        scene.forEachActive([&](Tic& t) {
+                            if (!rootHandle.valid() &&
+                                t.getComponent<UIRoot>()) {
+                                rootHandle = t.handle;
+                            }
+                        });
+                        const std::string& cur = displayParent;
+                        if (cur.empty()) {
+                            if (!containerHandles.empty()) {
+                                editor::reparentTic(scene, st.selected,
+                                                    containerHandles[0]);
+                            }
+                        } else {
+                            size_t ci = 0;
+                            for (size_t k = 0; k < containers.size(); ++k) {
+                                if (containers[k] == cur) {
+                                    ci = k;
+                                    break;
+                                }
+                            }
+                            if (ci + 1 < containerHandles.size()) {
+                                editor::reparentTic(
+                                    scene, st.selected,
+                                    containerHandles[ci + 1]);
+                            } else if (rootHandle.valid()) {
+                                // sai do último → a raiz, posição conservada
+                                const UiRect rNow = ui::elementRect(
+                                    e, ui.screenWidth(), ui.screenHeight(),
+                                    ui.safeArea());
+                                e.anchorH = UiElement::AnchorH::Left;
+                                e.anchorV = UiElement::AnchorV::Top;
+                                e.ox = rNow.x - ui.safeArea().left;
+                                e.oy = rNow.y - ui.safeArea().top;
+                                editor::reparentTic(scene, st.selected,
+                                                    rootHandle);
+                            }
+                        }
+                        edited = true;
+                        break;
+                    }
                     if (e.parent.empty()) {
                         if (!containers.empty()) {
                             e.parent = containers[0];
@@ -1145,9 +1447,28 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                     break;
                 }
                 case UiInspRow::Kind::Remove:
-                    canvas->elements.erase(
-                        canvas->elements.begin() + st.selElement);
-                    st.selElement = -1;
+                    if (selCtrl) {
+                        // 0.12-B — árvore: o botão APAGA O TIC (a sub-árvore
+                        // incluída — o padrão do 0.11-H) e a seleção volta
+                        // à raiz
+                        Handle rootHandle = Handle::invalid();
+                        scene.forEachActive([&](Tic& t) {
+                            if (!rootHandle.valid() &&
+                                t.getComponent<UIRoot>()) {
+                                rootHandle = t.handle;
+                            }
+                        });
+                        editor::destroyWithChildren(scene, st.selected);
+                        if (rootHandle.valid()) {
+                            selectTic(st, rootHandle);
+                        }
+                        st.selElement = -1;
+                        st.selJoystick = false;
+                    } else {
+                        canvas->elements.erase(
+                            canvas->elements.begin() + st.selElement);
+                        st.selElement = -1;
+                    }
                     edited = true;
                     break;
                 default:
@@ -1227,6 +1548,146 @@ Handle ensureUiTic(Scene& scene, EditorState& st) {
     }
     selectTic(st, h);   // SELEÇÃO-ÚNICA: o único escritor
     return h;
+}
+
+// ---------------------------------------------------------------------------
+// 0.12-B (B-1) — A ÁRVORE DE UI: "+ elemento" cria um TIC FILHO do UIRoot
+// ---------------------------------------------------------------------------
+// A UI nova é TICs (Label/Button/… são TICs com Control; o UIRoot marca a
+// raiz). O caminho legado (uiAddElement → UiCanvas) fica INTACTO para a
+// compat (os .goni/testes da 0.7.x); a produção usa SÓ esta via.
+
+// 0.12-B — assegura a RAIZ de UI: o primeiro TIC ativo com UIRoot; sem raiz,
+// cria o TIC "UI" (o nome de sempre da casa) SÓ com o marcador — o UiCanvas
+// já não nasce aqui (deprecated; a compat do serializer converte os antigos).
+Handle ensureUiRoot(Scene& scene, EditorState& st) {
+    Handle root = Handle::invalid();
+    scene.forEachActive([&](Tic& t) {
+        if (!root.valid() && t.getComponent<UIRoot>()) {
+            root = t.handle;
+        }
+    });
+    if (!root.valid()) {
+        root = scene.create("UI");
+        if (Tic* t = scene.get(root)) {
+            t->addComponent<UIRoot>();
+        }
+    }
+    if (root.valid()) {
+        selectTic(st, root);   // SELEÇÃO-ÚNICA: o único escritor
+    }
+    return root;
+}
+
+namespace {
+
+// nome único Godot-style ENTRE OS TICs da cena — a variante CRIAÇÃO
+// (base primeiro: "joystick", depois "joystick.001"… — o MESMO padrão do
+// addElement do canvas; o uniqueTicName do duplicateTic abaixo é a variante
+// DUPLICAR, que sempre sufixa). O truncamento a 28 é o contrato do nome.
+std::string uniqueNewTicName(Scene& scene, const std::string& base) {
+    std::string b = base;
+    if (b.size() > 28) {
+        b = b.substr(0, 28);
+    }
+    if (!scene.find(b).valid()) {
+        return b;   // o nome base está livre
+    }
+    char name[48];
+    u32 suffix = 1;
+    do {
+        std::snprintf(name, sizeof(name), "%s.%03u", b.c_str(), suffix);
+        ++suffix;
+    } while (scene.find(name).valid() && suffix < 1000);
+    return std::string(name);
+}
+
+// o filho novo herda a posição do elemento selecionado (o padrão 0.7.4:
+// nascer perto de onde se estava a trabalhar — mas no PAI raiz, nunca
+// dentro do selecionado: o reparent é gesto explícito da Hierarchy)
+void seedPosFromSelection(const Scene& scene, const EditorState& st,
+                          UiElement& e) {
+    const Tic* sel = scene.get(st.selected);
+    if (!sel) {
+        return;
+    }
+    if (const Control* c = sel->getComponent<Control>()) {
+        e.ox = c->elem.ox + 24.0f;   // o mesmo offset do irmão, deslocado
+        e.oy = c->elem.oy + 24.0f;
+        e.anchorH = c->elem.anchorH;
+        e.anchorV = c->elem.anchorV;
+    }
+}
+
+} // namespace
+
+// cria o elemento-NA-ÁRVORE (kind 0..8 = Panel..HBox, o mapeamento de
+// uiPlusChoiceKind). Devolve false se a cena recusou (o chamador toast).
+bool uiAddTreeElement(Scene& scene, EditorState& st, u32 kind, f32 sw,
+                      f32 sh) {
+    if (kind > 8) {
+        return false;   // 0..3 base; 4..6 compostos; 7..8 containers
+    }
+    const Handle root = ensureUiRoot(scene, st);
+    const Tic* rt = scene.get(root);
+    if (!rt) {
+        return false;
+    }
+    const auto k = static_cast<UiElement::Kind>(kind);
+    const Handle h = scene.create(
+        uniqueNewTicName(scene, uiElementKindName(k)),
+        static_cast<i32>(root.index));
+    Tic* t = scene.get(h);
+    if (!t) {
+        return false;
+    }
+    Control* ctl = t->addComponent<Control>();
+    if (!ctl) {
+        return false;
+    }
+    ctl->setKind(static_cast<Control::Kind>(kind));   // espelha o elem.kind
+    ctl->elem.name = t->name;   // o nome TIC é a identidade
+    // os MESMOS defaults de criação do addElement (tamanho/cor/texto —
+    // a FONTE ÚNICA partilhada), centrado como sempre
+    UiCanvas::elementDefaults(k, ctl->elem.w, ctl->elem.h, ctl->elem.color);
+    ctl->elem.anchorH = UiElement::AnchorH::Center;
+    ctl->elem.anchorV = UiElement::AnchorV::Middle;
+    ctl->elem.ox = -ctl->elem.w * 0.5f;
+    ctl->elem.oy = -ctl->elem.h * 0.5f;
+    UiCanvas::elementDefaultText(k, ctl->elem.text);
+    seedPosFromSelection(scene, st, ctl->elem);
+    (void)sw;
+    (void)sh;
+    selectTic(st, h);
+    st.selJoystick = false;
+    return true;
+}
+
+// 0.12-B — "+Joystick" na árvore: o TIC filho com Control(Kind::Joystick) +
+// TouchControls (o RUNTIME de input no MESMO TIC — a fonte da física nunca
+// muda; o Control posiciona/identifica, o TouchControls processa o gesto).
+bool uiAddTreeJoystick(Scene& scene, EditorState& st) {
+    const Handle root = ensureUiRoot(scene, st);
+    const Tic* rt = scene.get(root);
+    if (!rt) {
+        return false;
+    }
+    const Handle h = scene.create(uniqueNewTicName(scene, "joystick"),
+                                  static_cast<i32>(root.index));
+    Tic* t = scene.get(h);
+    if (!t) {
+        return false;
+    }
+    Control* ctl = t->addComponent<Control>();
+    TouchControls* tc = t->addComponent<TouchControls>();
+    if (!ctl || !tc) {
+        return false;
+    }
+    ctl->setKind(Control::Kind::Joystick);
+    ctl->elem.name = t->name;
+    selectTic(st, h);
+    st.selJoystick = true;   // nasce em edição (o padrão do +Joystick)
+    return true;
 }
 
 // 0.7.4 — desliga o elemento do container CONSERVANDO a posição visual:
@@ -1470,8 +1931,12 @@ Handle cloneTicInto(Scene& scene, Handle src, i32 parent,
     return nh;
 }
 
+// nome único Godot-style: vive NO BLOCO anónimo de cima (a criação da
+// árvore e o duplicateTic partilham a MESMA função)
+
 // nome único Godot-style a partir de `base` («base.001», «base.002»… contra
-// TODOS os nomes vivos da cena — o find() da cena continua determinístico).
+// TODOS os nomes vivos da cena — a variante DUPLICAR: o clone nunca herda o
+// nome do original; o truncamento a 28 é o contrato do commitTextInput)
 std::string uniqueTicName(Scene& scene, const std::string& base) {
     std::string b = base;
     if (b.size() > 28) {
@@ -1909,21 +2374,34 @@ bool commitTextInput(Scene& scene, EditorState& st) {
             const Handle found = scene.find(st.textBuf);
             if (!found.valid() || found == st.textTic) {
                 tic->name = st.textBuf;   // livre (ou é o próprio) → direto
-                return true;
+            } else {
+                // nome ocupado por OUTRO TIC ativo → sufixo Godot-style
+                char name[48];
+                u32 suffix = 1;
+                do {
+                    std::snprintf(name, sizeof(name), "%.28s.%03u", st.textBuf,
+                                  suffix);
+                    ++suffix;
+                } while (scene.find(name).valid() && suffix < 1000);
+                tic->name = name;
             }
-            // nome ocupado por OUTRO TIC ativo → sufixo Godot-style
-            char name[48];
-            u32 suffix = 1;
-            do {
-                std::snprintf(name, sizeof(name), "%.28s.%03u", st.textBuf,
-                              suffix);
-                ++suffix;
-            } while (scene.find(name).valid() && suffix < 1000);
-            tic->name = name;
+            // 0.12-B — árvore: o elem.name do Control segue o TIC (a
+            // identidade do elemento É o nome do TIC)
+            if (Control* ctl = tic->getComponent<Control>()) {
+                ctl->elem.name = tic->name;
+            }
             return true;
         }
         case 2: {   // texto do elemento
             Tic* tic = scene.get(st.textTic);
+            // 0.12-B — árvore: o texto vive no Control do TIC selecionado
+            if (const Control* ctl = tic ? tic->getComponent<Control>() : nullptr) {
+                (void)ctl;
+                if (Control* cw = tic->getComponent<Control>()) {
+                    cw->elem.text = st.textBuf;
+                    return true;
+                }
+            }
             UiCanvas* canvas = tic ? tic->getComponent<UiCanvas>() : nullptr;
             if (!canvas || st.textElement < 0 ||
                 st.textElement >= static_cast<i32>(canvas->elements.size())) {
@@ -1935,6 +2413,13 @@ bool commitTextInput(Scene& scene, EditorState& st) {
         }
         case 3: {   // alvo da ação
             Tic* tic = scene.get(st.textTic);
+            // 0.12-B — árvore: o alvo vive no Control do TIC selecionado
+            if (tic && tic->getComponent<Control>()) {
+                if (Control* cw = tic->getComponent<Control>()) {
+                    cw->elem.target = st.textBuf;
+                    return true;
+                }
+            }
             UiCanvas* canvas = tic ? tic->getComponent<UiCanvas>() : nullptr;
             if (!canvas || st.textElement < 0 ||
                 st.textElement >= static_cast<i32>(canvas->elements.size())) {
@@ -1946,6 +2431,18 @@ bool commitTextInput(Scene& scene, EditorState& st) {
         }
         case 4: {   // 0.8.6: cor do ELEMENTO por hex (#RRGGBB)
             Tic* tic = scene.get(st.textTic);
+            // 0.12-B — árvore: a cor vive no Control do TIC selecionado
+            if (tic && tic->getComponent<Control>()) {
+                f32 rgba[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+                if (!uiHexParse(st.textBuf, rgba)) {
+                    return false;   // inválido: o estado fica como estava
+                }
+                Control* cw = tic->getComponent<Control>();
+                cw->elem.color[0] = rgba[0];
+                cw->elem.color[1] = rgba[1];
+                cw->elem.color[2] = rgba[2];
+                return true;
+            }
             UiCanvas* canvas = tic ? tic->getComponent<UiCanvas>() : nullptr;
             if (!canvas || st.textElement < 0 ||
                 st.textElement >= static_cast<i32>(canvas->elements.size())) {

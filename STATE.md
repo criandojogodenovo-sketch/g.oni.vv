@@ -1,11 +1,9 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-17 · vc: 82 · Último commit: este (o 0.12-A, OS BUGS
-P0 — A-1 as rows LOD/impostor provadas com pins (a UI já existia: PÁRA no
-fix cego), A-2 os contadores com o refresh no arranque/criação + o ícone
-de cena em camadas, A-3 o scissor do modo UI + o tooltip que morre, A-4 a
-investigação RAM vs GPU com o veredito CACHE THRASH; antes: 32a6785 o
-Y-3+fecho da 0.11-Y)
+Atualizado: 2026-10-18 · vc: 83 · Último commit: este (o 0.12-B B-1, A
+ÁRVORE DE UI — UI como TICs: Control/UIRoot, a compat que converte, os 9
+pins + R-050; antes: 3bdd9f9 o 0.12-A, OS BUGS P0 — A-1..A-4; antes:
+32a6785 o Y-3+fecho da 0.11-Y)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -13,6 +11,23 @@ Y-3+fecho da 0.11-Y)
 
 ## §1 Onde estamos
 
+- **Campanha 0.12-B (arquitetura da UI) — EM CURSO; B-1 FECHADA** (o CI
+  do push é o árbitro): **B-1 (a árvore de UI — UI como TICs)** — o
+  Control NOVO (a base 2D: pos2D/tamanho/âncoras 9+esticar/margens/pivô/
+  rotação/visível/opacidade; os elementos são KINDS — sem classes novas,
+  a cláusula do prompt), o UIRoot NOVO (o marcador), um TIC filho por
+  elemento, o UiCanvas DEPRECATED (o leitor converte —
+  migrateUiCanvasToTree no fim do loadText; a animação Ui* resolve na
+  árvore), o serializer partilha o gerador/leitor de elemento e grava a
+  árvore (os campos da base só quando não-default), o editor tem o modo
+  árvore (a vista espelho + sincronização) e o Play desenha/hit-testa a
+  árvore; pins ×9 (test_012b_uitree.cpp) + M-B1a/b/c vermelho→verde;
+  **R-050 NOVA**; 8 recalibrações legítimas com nota (o CONTRATO DE
+  ABERTURA mudou por ordem do prompt); o UIRoot FANTASMA apanhado e
+  curado (o null check do dump — §10 do relatório). test_core 0 falhas ·
+  c33_virtual 1006/0 · vc 83. O pin C33 do dono (a PNG da hierarquia com
+  os 7 TICs) está no §12 do relatório. PRÓXIMA: B-2 (o Inspector de UI
+  2D + âncoras) por ordem do fluxo da campanha.
 - **Campanha 0.12-A (bugs P0) — FECHADA** (o CI do push é o árbitro):
   A-1 (o diagnóstico provou que as rows LOD/impostor JÁ EXISTEM na UI
   desde o vc 72/76 — PÁRA no fix cego por ordem do prompt; os 5 pins da
@@ -80,6 +95,25 @@ Y-3+fecho da 0.11-Y)
 ## §2 O que está FEITO
 
 - 0.6.x–0.9.5 — fundação da engine (V.ONI core, device real, CI 5 jobs).
+- 0.12-B B-1 (vc 83) — a árvore de UI (o relatório próprio:
+  docs/RELATORIO-0.12-B.md):
+  - **Control/UIRoot** — components/Control.h (a base 2D + os 10 kinds;
+    o payload é o UiElement por valor) + components/UIRoot.h (o
+    marcador); storages + registry ids 11/12 (o FIM — ids antigos
+    intactos).
+  - **A compat** — migrateUiCanvasToTree no loadText (UiCanvas → UIRoot
+    + filhos; o parent por NOME vira pai TIC; o canvas sai; DE MEMÓRIA)
+    + a animação Ui* resolve na árvore por nome (AnimationPlayer).
+  - **O serializer** — appendUiElementJson/fillUiElementJson (as fontes
+    partilhadas) + o Control com os campos da base opcionais + o UIRoot
+    com o null check OBRIGATÓRIO (o fantasma apanhado).
+  - **O editor** — ensureUiRoot/uiAddTreeElement/uiAddTreeJoystick; o
+    modo árvore no drawUiViewport (espelho + sync-back); o Inspector de
+    UI edita o elem ao vivo (reanchor/repante/apaga TIC);
+    uniqueNewTicName (a variante criação).
+  - **O Play** — drawUiTree/hitTestUiTree/uiElementFromHit; todos os
+    TouchControls desenham.
+  - **Pins ×9 + M-B1a/b/c** + **R-050**; 8 recalibrações com nota.
 - 0.12-A (vc 82) — os 4 bugs P0 fechados (o relatório próprio:
   docs/RELATORIO-0.12-A.md; a investigação: docs/
   RELATORIO-0.12-A-INVEST-RAM.md):
@@ -261,6 +295,9 @@ Commits puramente documentais não são afetados.
 - `docs/RELATORIO-0.11-Y-FECHO.md` — o fecho da campanha (as 5
   sub-fases + o fix, os critérios C33 mapeados às provas, os limites
   declarados).
+- `docs/RELATORIO-0.12-B.md` — o relatório da 0.12-B (a B-1: a
+  arquitetura, os pins ×9, as mutações coladas, as recalibrações, o
+  UIRoot fantasma, os limites, o protocolo C33 do dono).
 - `docs/RELATORIO-0.12-A.md` — o relatório da 0.12-A (os 4 bugs P0: os
   diagnósticos com ficheiro:linha, as decisões, os pins ×11, as 6
   mutações coladas, o achado fora da lista, os limites).

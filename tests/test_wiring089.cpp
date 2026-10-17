@@ -592,15 +592,25 @@ TEST(wiring089_load_cura_selfparent_com_erro_legivel) {
     EXPECT(SceneSerializer::loadText(scene, text, ctx));
     const Tic* t = scene.get(scene.find("ui"));
     ASSERT(t != nullptr);
-    const UiCanvas* c = t->getComponent<UiCanvas>();
+    // 0.12-B (B-1, RECALIBRADO): o load converte — o elemento cura-se no
+    // canvas (a cura do fillUiCanvas corre ANTES da conversão) e o filho
+    // Control nasce SEM parent (o TIC pai é a estrutura agora)
+    EXPECT(t->getComponent<UIRoot>() != nullptr);
+    const Control* c = nullptr;
+    scene.forEachActive([&](const Tic& ch) {
+        if (!c && ch.parent == static_cast<i32>(t->handle.index)) {
+            c = ch.getComponent<Control>();
+        }
+    });
     ASSERT(c != nullptr);
-    ASSERT(c->elements.size() == 1);
-    EXPECT(c->elements[0].parent.empty());   // CURADO ao carregar
+    EXPECT(c->elem.parent.empty());   // CURADO ao carregar
     EXPECT(logHas("era pai de SI MESMO"));   // erro legível no log
 
     // o resolver sob o elemento curado: SEM ciclo, SEM crash, disposto
+    UiCanvas tmp;
+    tmp.elements.push_back(c->elem);
     ui::CanvasLayout lay[2];
-    ui::resolveCanvasLayout(*c, 1280.0f, 720.0f, {}, lay, 2);
+    ui::resolveCanvasLayout(tmp, 1280.0f, 720.0f, {}, lay, 2);
     EXPECT(lay[0].laid == false);            // topo legítimo
 }
 

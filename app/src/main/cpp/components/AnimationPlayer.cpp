@@ -318,7 +318,6 @@ void AnimationPlayer::apply(Scene& scene, const Tic& owner) const {
         return;
     }
     Transform3D* tr = tic->getComponent<Transform3D>();
-    UiCanvas* ui = tic->getComponent<UiCanvas>();
     SkeletonComp* sk = tic->getComponent<SkeletonComp>();   // 0.8.2
     // 0.8.3: clip de BLEND (mesmos alvos por track; o peso mistura)
     const AnimClip* blendClipPtr = nullptr;
@@ -410,23 +409,42 @@ void AnimationPlayer::apply(Scene& scene, const Tic& owner) const {
             case AnimTarget::UiPos:
             case AnimTarget::UiColor:
             case AnimTarget::UiAlpha: {
-                if (!ui || track.element.empty()) {
+                if (track.element.empty()) {
                     break;
                 }
-                const i32 idx = ui->findElement(track.element);
-                if (idx < 0) {
-                    break;   // elemento sumiu — salta (nunca crasha)
+                // 0.12-B — ÁRVORE primeiro: os elementos de UI são TICs
+                // (UIRoot + filhos Control); o alvo por NOME resolve no TIC
+                // filho (o nome TIC é a identidade). O canvas legado fica
+                // como fallback (compat 0.8.0 — cenas em memória/antigas)
+                UiElement* eUi = nullptr;
+                if (UiCanvas* uiCanvas = tic->getComponent<UiCanvas>()) {
+                    const i32 idx = uiCanvas->findElement(track.element);
+                    if (idx >= 0) {
+                        eUi = &uiCanvas->elements[static_cast<size_t>(idx)];
+                    }
                 }
-                UiElement& e = ui->elements[static_cast<size_t>(idx)];
+                if (!eUi) {
+                    scene.forEachActive([&](Tic& t) {
+                        if (eUi || t.name != track.element) {
+                            return;
+                        }
+                        if (Control* ctl = t.getComponent<Control>()) {
+                            eUi = &ctl->elem;   // só TICs de UI (com Control)
+                        }
+                    });
+                }
+                if (!eUi) {
+                    break;   // alvo sumiu — salta (nunca crasha)
+                }
                 if (track.target == AnimTarget::UiPos) {
-                    e.ox = v[0];
-                    e.oy = v[1];
+                    eUi->ox = v[0];
+                    eUi->oy = v[1];
                 } else if (track.target == AnimTarget::UiColor) {
-                    e.color[0] = v[0];
-                    e.color[1] = v[1];
-                    e.color[2] = v[2];
+                    eUi->color[0] = v[0];
+                    eUi->color[1] = v[1];
+                    eUi->color[2] = v[2];
                 } else {
-                    e.color[3] = v[0];
+                    eUi->color[3] = v[0];
                 }
                 break;
             }

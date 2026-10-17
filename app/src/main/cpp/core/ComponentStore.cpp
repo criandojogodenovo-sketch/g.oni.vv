@@ -20,6 +20,7 @@ const ComponentStore& storeOf(const Scene* scene) {
 // 5=UiCanvas (0.7.0), 6=Camera (0.7.7 — sempre NO FIM: ids antigos intactos).
 // 0.8.0: 7=AnimationPlayer (depois da câmara, mesma regra: sempre no fim).
 // 0.8.2: 8=Skeleton (idem — ids antigos intactos).
+// 0.12-B: 11=Control, 12=UIRoot (a UI como árvore de TICs — sempre no fim).
 ComponentStore::ComponentStore(Scene* owner) : scene_(owner) {
     registry_.add("Transform3D", [](ComponentStore& s, Handle h) {
         return s.add<Transform3D>(h) != nullptr;
@@ -54,6 +55,12 @@ ComponentStore::ComponentStore(Scene* owner) : scene_(owner) {
     registry_.add("Script", [](ComponentStore& s, Handle h) {   // 0.9.2
         return s.add<ScriptComp>(h) != nullptr;
     });
+    registry_.add("Control", [](ComponentStore& s, Handle h) {   // 0.12-B
+        return s.add<Control>(h) != nullptr;
+    });
+    registry_.add("UIRoot", [](ComponentStore& s, Handle h) {    // 0.12-B
+        return s.add<UIRoot>(h) != nullptr;
+    });
 }
 
 void ComponentStore::removeAll(Handle h) {
@@ -68,6 +75,8 @@ void ComponentStore::removeAll(Handle h) {
     audioPlayers_.remove(h);   // 0.8.11   // 0.8.0
     skeletons_.remove(h);   // 0.8.2
     scripts_.remove(h);     // 0.9.2
+    controls_.remove(h);    // 0.12-B
+    uiRoots_.remove(h);     // 0.12-B
 }
 
 bool ComponentStore::hasAny(Handle h) const {

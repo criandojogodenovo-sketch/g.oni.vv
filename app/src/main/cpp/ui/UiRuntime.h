@@ -22,6 +22,7 @@
 // dependências INJETADAS em UiActionCtx (o padrão de AssetResolvers: a
 // lógica é pura/afervel; o main liga os objetos reais).
 #include "components/UiCanvas.h"
+#include "components/Control.h"   // 0.12-B: a árvore de UI (UIRoot + Control)
 #include "core/Handle.h"
 #include "core/Presets.h"    // PresetKind (spawn declarativo)
 #include "ui/SafeArea.h"
@@ -53,6 +54,22 @@ inline UiRect elementRect(const UiElement& e, f32 sw, f32 sh,
         case UiElement::AnchorV::Bottom: y = sh - ins.bottom - e.h + e.oy; break;
     }
     return {x, y, e.w, e.h};
+}
+
+// ---- 0.12-B — LAYOUT do Control (a base 2D da árvore de UI) ----------------
+// FONTE ÚNICA ao lado do elementRect (a MESMA camada de layout): os 9 CANTOS
+// delegam no elementRect (a MESMA matemática 3×3 + safe-area — zero
+// divergência); a âncora ESTICAR devolve o pai (o ecrã de design — os
+// containers por TIC dispõem os filhos no resolver de sempre) MENOS as
+// margens l/t/r/b.
+inline UiRect controlRect(const Control& c, f32 sw, f32 sh,
+                          const safe::Insets& ins) {
+    if (c.stretch) {
+        return {ins.left + c.marginL, ins.top + c.marginT,
+                sw - ins.left - ins.right - c.marginL - c.marginR,
+                sh - ins.top - ins.bottom - c.marginT - c.marginB};
+    }
+    return elementRect(c.elem, sw, sh, ins);
 }
 
 // ---- menu (composto 0.7.3 — geometria partilhada por draw + hit-test) -------
@@ -141,6 +158,44 @@ struct CanvasHit {
 // ponto fica por cima). Canvas de TIC inativo/invisível não hit-testa.
 CanvasHit hitTestCanvas(const Scene& scene, f32 x, f32 y, f32 sw, f32 sh,
                         const safe::Insets& ins);
+
+// ---- 0.12-B — a ÁRVORE de UI (UIRoot + filhos Control) -------------------------
+//
+// A UI da cena é uma ÁRVORE de TICs (B-1): um TIC raiz com UIRoot e um TIC
+// filho por elemento, cada filho com um Control. Esta VISTA espelha a
+// árvore num UiCanvas (os MESMOS tipos de dados do draw/hit-test/layout de
+// 0.7.x — zero código de desenho duplicado): os elems são CÓPIAS (o joystick
+// tem rect DERIVADO do TouchControls; um filho de container recebe o
+// `parent` = o NOME do TIC container — o resolver da 0.7.4 dispõe como
+// sempre). A ordem de slot = a ordem de desenho = a z-order (a mesma da
+// Hierarchy). SEM limite de filhos (o cap 32 é só do EDITOR, como antes).
+struct UiTreeView {
+    Handle root{};               // o TIC raiz (com UIRoot); invalid = sem árvore
+    std::vector<Handle> tics;    // os filhos, em ordem de slot (= z-order)
+    UiCanvas canvas;             // o espelho (elems por valor — SÓ LEITURA no
+                                 // runtime; o editor escreve e sincroniza)
+    u32 count() const { return static_cast<u32>(tics.size()); }
+};
+
+// recolhe a árvore (raiz = o PRIMEIRO TIC ativo com UIRoot). false sem raiz.
+// respectTicVisibility: o PLAY esconde os filhos de TIC invisível; o EDITOR
+// passa false (vê o que edita, como o canvas de sempre).
+bool collectUiTree(const Scene& scene, f32 sw, f32 sh, const safe::Insets& ins,
+                   UiTreeView& out, bool respectTicVisibility = true);
+
+// desenha a árvore no Play (por cima da cena; o raiz/filhos invisíveis não
+// desenham — o MESMO contrato de drawCanvas). Devolve os DESENHADOS.
+u32 drawUiTree(UiContext& uictx, const Scene& scene, f32 sw, f32 sh,
+               const safe::Insets& ins);
+
+// hit-test da árvore (Play): o TOPO ganha; só Button/Menu interativos —
+// o MESMO contrato do hitTestCanvas sobre o espelho da árvore.
+CanvasHit hitTestUiTree(const Scene& scene, f32 x, f32 y, f32 sw, f32 sh,
+                        const safe::Insets& ins);
+
+// resolve o UiElement de um hit (canvas legado OU árvore) — o caminho ÚNICO
+// do main para o applyUiAction; false se o hit/TIC morreu entretanto.
+bool uiElementFromHit(const Scene& scene, const CanvasHit& hit, UiElement& out);
 
 // ---- ações declarativas --------------------------------------------------------
 

@@ -5,6 +5,8 @@
 #include "components/TouchControls.h"
 #include "components/Transform3D.h"
 #include "components/UiCanvas.h"
+#include "components/Control.h"   // 0.12-B: a árvore de UI (UIRoot + filhos)
+#include "components/UIRoot.h"
 #include "components/CameraComp.h"   // 0.7.7: câmara de cena
 #include "components/AnimationPlayer.h"   // 0.8.0: animação (F7)
 #include "components/AudioPlayer.h"      // 0.8.11: áudio
@@ -212,9 +214,78 @@ void appendComponentJson(Json& arr, const TouchControls* tc) {
     arr.addItem(std::move(c));
 }
 
+// 0.12-B — o GERADOR de JSON de UM elemento de UI: a FONTE ÚNICA partilhada
+// pelo UiCanvas (compat 0.7.0) e pelo Control (a árvore nova) — o MESMO
+// vocabulário byte a byte (kind/name/text/image/x/y/w/h/color/visible/
+// spacing/pad/align/parent/ah/av/act/target/param/fscale/tstyle/rot).
+// Texto multilinha (Menu/Article) via '\n' nativo do JSON (string com escape).
+void appendUiElementJson(Json& je, const UiElement& e) {
+    je.addMember("kind", Json::makeString(uiElementKindName(e.kind)));
+    je.addMember("name", Json::makeString(e.name));
+    if (!e.text.empty()) {
+        je.addMember("text", Json::makeString(e.text));
+    }
+    if (!e.image.empty()) {
+        je.addMember("image", Json::makeString(e.image));
+    }
+    je.addMember("x", Json::makeNumber(e.ox));
+    je.addMember("y", Json::makeNumber(e.oy));
+    je.addMember("w", Json::makeNumber(e.w));
+    je.addMember("h", Json::makeNumber(e.h));
+    Json col = Json::makeArray();
+    for (int i = 0; i < 4; ++i) {
+        col.addItem(Json::makeNumber(e.color[i]));
+    }
+    je.addMember("color", std::move(col));
+    je.addMember("visible", Json::makeBool(e.visible));
+    // 0.7.4 — layout de containers/compostos: espaçamento, resguardo,
+    // alinhamento transversal e o CONTAINER pai (filhos por nome).
+    // Ausentes = defaults (0.7.3-compat: spacing 0, pad 8, start, topo)
+    if (e.spacing != 0.0f) {
+        je.addMember("spacing", Json::makeNumber(e.spacing));
+    }
+    if (e.pad != 8.0f) {
+        je.addMember("pad", Json::makeNumber(e.pad));
+    }
+    if (e.align != UiElement::Align::Start) {
+        je.addMember("align", Json::makeString(uiAlignName(e.align)));
+    }
+    if (!e.parent.empty()) {
+        je.addMember("parent", Json::makeString(e.parent));
+    }
+    // âncoras: "ah"/"av" = left|center|right / top|middle|bottom
+    const char* ah = e.anchorH == UiElement::AnchorH::Left ? "left"
+                   : e.anchorH == UiElement::AnchorH::Center ? "center" : "right";
+    const char* av = e.anchorV == UiElement::AnchorV::Top ? "top"
+                   : e.anchorV == UiElement::AnchorV::Middle ? "middle" : "bottom";
+    je.addMember("ah", Json::makeString(ah));
+    je.addMember("av", Json::makeString(av));
+    if (e.action != UiElement::Action::None) {
+        je.addMember("act", Json::makeString(uiActionName(e.action)));
+        je.addMember("target", Json::makeString(e.target));
+        // 0.7.1 — estilo da transição (Scene.Transition): fade|slide
+        if (e.action == UiElement::Action::TransitionScene &&
+            !e.param.empty()) {
+            je.addMember("param", Json::makeString(e.param));
+        }
+    }
+    // 0.8.6 — tipografia + rotação: ausentes = defaults (ficheiros 0.8.x
+    // abrem limpos; política forward-compat de sempre)
+    if (e.fontScale != 1.0f) {
+        je.addMember("fscale", Json::makeNumber(e.fontScale));
+    }
+    if (e.textStyle != UiElement::TextStyle::Normal) {
+        je.addMember("tstyle", Json::makeString(uiTextStyleName(e.textStyle)));
+    }
+    if (e.rot != 0.0f) {
+        je.addMember("rot", Json::makeNumber(e.rot));
+    }
+}
+
 // 0.7.0 — UiCanvas: elementos de UI criável (kind/nome/texto/rect/cor/
-// visível/âncoras/ação on-click). Texto multilinha (Menu/Article) via '\n'
-// nativo do JSON (string com escape).
+// visível/âncoras/ação on-click). COMPAT (0.12-B): DEPRECATED — o gerador
+// do JSON do elemento vive em appendUiElementJson (partilhado com o
+// Control); o leitor converte a árvore (migrateUiCanvasToTree).
 void appendComponentJson(Json& arr, const UiCanvas* canvas) {
     if (!canvas) {
         return;
@@ -224,69 +295,61 @@ void appendComponentJson(Json& arr, const UiCanvas* canvas) {
     Json elems = Json::makeArray();
     for (const UiElement& e : canvas->elements) {
         Json je = Json::makeObject();
-        je.addMember("kind", Json::makeString(uiElementKindName(e.kind)));
-        je.addMember("name", Json::makeString(e.name));
-        if (!e.text.empty()) {
-            je.addMember("text", Json::makeString(e.text));
-        }
-        if (!e.image.empty()) {
-            je.addMember("image", Json::makeString(e.image));
-        }
-        je.addMember("x", Json::makeNumber(e.ox));
-        je.addMember("y", Json::makeNumber(e.oy));
-        je.addMember("w", Json::makeNumber(e.w));
-        je.addMember("h", Json::makeNumber(e.h));
-        Json col = Json::makeArray();
-        for (int i = 0; i < 4; ++i) {
-            col.addItem(Json::makeNumber(e.color[i]));
-        }
-        je.addMember("color", std::move(col));
-        je.addMember("visible", Json::makeBool(e.visible));
-        // 0.7.4 — layout de containers/compostos: espaçamento, resguardo,
-        // alinhamento transversal e o CONTAINER pai (filhos por nome).
-        // Ausentes = defaults (0.7.3-compat: spacing 0, pad 8, start, topo)
-        if (e.spacing != 0.0f) {
-            je.addMember("spacing", Json::makeNumber(e.spacing));
-        }
-        if (e.pad != 8.0f) {
-            je.addMember("pad", Json::makeNumber(e.pad));
-        }
-        if (e.align != UiElement::Align::Start) {
-            je.addMember("align", Json::makeString(uiAlignName(e.align)));
-        }
-        if (!e.parent.empty()) {
-            je.addMember("parent", Json::makeString(e.parent));
-        }
-        // âncoras: "ah"/"av" = left|center|right / top|middle|bottom
-        const char* ah = e.anchorH == UiElement::AnchorH::Left ? "left"
-                       : e.anchorH == UiElement::AnchorH::Center ? "center" : "right";
-        const char* av = e.anchorV == UiElement::AnchorV::Top ? "top"
-                       : e.anchorV == UiElement::AnchorV::Middle ? "middle" : "bottom";
-        je.addMember("ah", Json::makeString(ah));
-        je.addMember("av", Json::makeString(av));
-        if (e.action != UiElement::Action::None) {
-            je.addMember("act", Json::makeString(uiActionName(e.action)));
-            je.addMember("target", Json::makeString(e.target));
-            // 0.7.1 — estilo da transição (Scene.Transition): fade|slide
-            if (e.action == UiElement::Action::TransitionScene &&
-                !e.param.empty()) {
-                je.addMember("param", Json::makeString(e.param));
-            }
-        }
-        // 0.8.6 — tipografia + rotação: ausentes = defaults (ficheiros 0.8.x
-        // abrem limpos; política forward-compat de sempre)
-        if (e.fontScale != 1.0f) {
-            je.addMember("fscale", Json::makeNumber(e.fontScale));
-        }
-        if (e.textStyle != UiElement::TextStyle::Normal) {
-            je.addMember("tstyle", Json::makeString(uiTextStyleName(e.textStyle)));
-        }
-        if (e.rot != 0.0f) {
-            je.addMember("rot", Json::makeNumber(e.rot));
-        }
+        appendUiElementJson(je, e);   // a fonte única (byte a byte)
         elems.addItem(std::move(je));
     }
     c.addMember("elements", std::move(elems));
+    arr.addItem(std::move(c));
+}
+
+// 0.12-B — UIRoot: o marcador da raiz da árvore de UI (presença basta).
+// ⚠ SÓ grava com componente REAL (o null check é OBRIGATÓRIO — sem ele cada
+// TIC nascia com um UIRoot fantasma no .goni e a migração de compat morria)
+void appendComponentJson(Json& arr, const UIRoot* root) {
+    if (!root) {
+        return;
+    }
+    Json c = Json::makeObject();
+    c.addMember("type", Json::makeString("UIRoot"));
+    arr.addItem(std::move(c));
+}
+
+// 0.12-B — Control: UM elemento de UI como TIC (a base 2D + o payload). Os
+// campos do elem usam O MESMO vocabulário do UiCanvas (o gerador partilhado);
+// os campos da base só viajam quando NÃO-default (a política de sempre):
+// stretch/ml/mt/mr/mb (esticar+margens), px/py (pivô), op (opacidade).
+void appendComponentJson(Json& arr, const Control* ctl) {
+    if (!ctl) {
+        return;
+    }
+    Json c = Json::makeObject();
+    c.addMember("type", Json::makeString("Control"));
+    c.addMember("kind", Json::makeString(controlKindName(ctl->kind())));
+    appendUiElementJson(c, ctl->elem);
+    if (ctl->stretch) {
+        c.addMember("stretch", Json::makeBool(true));
+    }
+    if (ctl->marginL != 0.0f) {
+        c.addMember("ml", Json::makeNumber(ctl->marginL));
+    }
+    if (ctl->marginT != 0.0f) {
+        c.addMember("mt", Json::makeNumber(ctl->marginT));
+    }
+    if (ctl->marginR != 0.0f) {
+        c.addMember("mr", Json::makeNumber(ctl->marginR));
+    }
+    if (ctl->marginB != 0.0f) {
+        c.addMember("mb", Json::makeNumber(ctl->marginB));
+    }
+    if (ctl->pivotX != 0.5f) {
+        c.addMember("px", Json::makeNumber(ctl->pivotX));
+    }
+    if (ctl->pivotY != 0.5f) {
+        c.addMember("py", Json::makeNumber(ctl->pivotY));
+    }
+    if (ctl->opacity != 1.0f) {
+        c.addMember("op", Json::makeNumber(ctl->opacity));
+    }
     arr.addItem(std::move(c));
 }
 
@@ -587,9 +650,110 @@ void fillMeshRenderer(MeshRenderer* mr, const Json& comp, const LoadCtx& ctx) {
     }
 }
 
+// 0.12-B — o LEITOR de UM elemento de UI SEM o "kind" (o chamador consome o
+// kind primeiro — o UiCanvas ignora kinds desconhecidos; o Control mapeia
+// pelo vocabulário próprio). A fonte única partilhada por fillUiCanvas e
+// fillControl: os MESMOS campos do gerador appendUiElementJson.
+void fillUiElementJson(UiElement& e, const Json& je) {
+    if (const Json* j = je.find("name"); j && j->type == Json::Type::String) {
+        e.name = j->string;
+    }
+    if (const Json* j = je.find("text"); j && j->type == Json::Type::String) {
+        e.text = j->string;
+    }
+    if (const Json* j = je.find("image"); j && j->type == Json::Type::String) {
+        e.image = j->string;
+    }
+    auto readF = [&je](const char* key, f32 def) -> f32 {
+        const Json* j = je.find(key);
+        return (j && j->type == Json::Type::Number) ? static_cast<f32>(j->number) : def;
+    };
+    e.ox = readF("x", 0.0f);
+    e.oy = readF("y", 0.0f);
+    e.w  = readF("w", 200.0f);
+    e.h  = readF("h", 80.0f);
+    if (const Json* jc = je.find("color");
+        jc && jc->type == Json::Type::Array && jc->items.size() == 4) {
+        for (int i = 0; i < 4; ++i) {
+            e.color[i] = static_cast<f32>(jc->items[static_cast<size_t>(i)].number);
+        }
+    }
+    if (const Json* j = je.find("visible"); j && j->type == Json::Type::Bool) {
+        e.visible = j->boolean;
+    }
+    // 0.7.4 — layout de containers/compostos (ausentes = defaults)
+    if (const Json* j = je.find("spacing");
+        j && j->type == Json::Type::Number) {
+        e.spacing = static_cast<f32>(j->number);
+    }
+    if (const Json* j = je.find("pad"); j && j->type == Json::Type::Number) {
+        e.pad = static_cast<f32>(j->number);
+    }
+    if (const Json* j = je.find("align"); j && j->type == Json::Type::String) {
+        if (j->string == "center")     e.align = UiElement::Align::Center;
+        else if (j->string == "end")   e.align = UiElement::Align::End;
+        else                            e.align = UiElement::Align::Start;
+    }
+    if (const Json* j = je.find("parent"); j && j->type == Json::Type::String) {
+        e.parent = j->string;
+        // 0.8.9 (CRASH-PROOF): CURA de auto-parent ao CARREGAR. Ficheiros
+        // gravados pelas versões 0.7.4–0.8.8 podem ter parent == o PRÓPRIO
+        // nome (o seletor "colocar em" incluía o próprio) — o ciclo
+        // crashava o placeAt com stack exhaustion. Ao carregar: o ciclo
+        // é removido com ERRO LEGÍVEL no log (o próximo save grava são).
+        // Ciclos MÚTUOS (A→B→A) não são curados aqui (custo); o guard do
+        // placeAt aborta-nos sem crash — ver UiRuntime.cpp 0.8.9.
+        if (!e.parent.empty() && e.parent == e.name) {
+            elog::error("load: elemento '%s' era pai de SI MESMO no .goni "
+                        "(ciclo da UI 0.7.4-0.8.8) — parent removido",
+                        e.name.c_str());
+            e.parent.clear();
+        }
+    }
+    auto readStr = [&je](const char* key) -> const char* {
+        const Json* j = je.find(key);
+        return (j && j->type == Json::Type::String) ? j->string.c_str() : "";
+    };
+    const char* ah = readStr("ah");
+    if (std::strcmp(ah, "center") == 0)      e.anchorH = UiElement::AnchorH::Center;
+    else if (std::strcmp(ah, "right") == 0)  e.anchorH = UiElement::AnchorH::Right;
+    else                                     e.anchorH = UiElement::AnchorH::Left;
+    const char* av = readStr("av");
+    if (std::strcmp(av, "middle") == 0)      e.anchorV = UiElement::AnchorV::Middle;
+    else if (std::strcmp(av, "bottom") == 0) e.anchorV = UiElement::AnchorV::Bottom;
+    else                                     e.anchorV = UiElement::AnchorV::Top;
+    const char* act = readStr("act");
+    if (std::strcmp(act, "show") == 0)       e.action = UiElement::Action::ShowPanel;
+    else if (std::strcmp(act, "hide") == 0)  e.action = UiElement::Action::HidePanel;
+    else if (std::strcmp(act, "toggle") == 0) e.action = UiElement::Action::TogglePanel;
+    else if (std::strcmp(act, "scene") == 0) e.action = UiElement::Action::LoadScene;
+    else if (std::strcmp(act, "spawn") == 0) e.action = UiElement::Action::Spawn;
+    else if (std::strcmp(act, "trans") == 0) e.action = UiElement::Action::TransitionScene;
+    else                                     e.action = UiElement::Action::None;
+    if (e.action != UiElement::Action::None) {
+        e.target = readStr("target");
+        if (const Json* j = je.find("param");
+            j && j->type == Json::Type::String) {
+            e.param = j->string;   // 0.7.1: fade|slide (ausente = fade)
+        }
+    }
+    // 0.8.6 — tipografia + rotação (ausentes = defaults; mig. amigável)
+    if (const Json* j = je.find("fscale");
+        j && j->type == Json::Type::Number) {
+        e.fontScale = static_cast<f32>(j->number);
+    }
+    if (const char* ts = readStr("tstyle"); ts[0] != '\0') {
+        e.textStyle = uiTextStyleFromName(ts);
+    }
+    if (const Json* j = je.find("rot"); j && j->type == Json::Type::Number) {
+        e.rot = static_cast<f32>(j->number);
+    }
+}
+
 // 0.7.0 — UiCanvas: reconstrói os elementos do .goni. Campos ausentes =
 // defaults do componente (forward-compat: elementos de versões futuras com
 // kinds desconhecidos são IGNORADOS — a política do serializer).
+// 0.12-B: o corpo partilha fillUiElementJson com o fillControl (a árvore).
 void fillUiCanvas(UiCanvas* canvas, const Json& comp) {
     if (!canvas) {
         return;
@@ -618,101 +782,37 @@ void fillUiCanvas(UiCanvas* canvas, const Json& comp) {
         } else {
             continue;
         }
-        if (const Json* j = je.find("name"); j && j->type == Json::Type::String) {
-            e.name = j->string;
-        }
-        if (const Json* j = je.find("text"); j && j->type == Json::Type::String) {
-            e.text = j->string;
-        }
-        if (const Json* j = je.find("image"); j && j->type == Json::Type::String) {
-            e.image = j->string;
-        }
-        auto readF = [&je](const char* key, f32 def) -> f32 {
-            const Json* j = je.find(key);
-            return (j && j->type == Json::Type::Number) ? static_cast<f32>(j->number) : def;
-        };
-        e.ox = readF("x", 0.0f);
-        e.oy = readF("y", 0.0f);
-        e.w  = readF("w", 200.0f);
-        e.h  = readF("h", 80.0f);
-        if (const Json* jc = je.find("color");
-            jc && jc->type == Json::Type::Array && jc->items.size() == 4) {
-            for (int i = 0; i < 4; ++i) {
-                e.color[i] = static_cast<f32>(jc->items[static_cast<size_t>(i)].number);
-            }
-        }
-        if (const Json* j = je.find("visible"); j && j->type == Json::Type::Bool) {
-            e.visible = j->boolean;
-        }
-        // 0.7.4 — layout de containers/compostos (ausentes = defaults)
-        if (const Json* j = je.find("spacing");
-            j && j->type == Json::Type::Number) {
-            e.spacing = static_cast<f32>(j->number);
-        }
-        if (const Json* j = je.find("pad"); j && j->type == Json::Type::Number) {
-            e.pad = static_cast<f32>(j->number);
-        }
-        if (const Json* j = je.find("align"); j && j->type == Json::Type::String) {
-            if (j->string == "center")     e.align = UiElement::Align::Center;
-            else if (j->string == "end")   e.align = UiElement::Align::End;
-            else                            e.align = UiElement::Align::Start;
-        }
-        if (const Json* j = je.find("parent"); j && j->type == Json::Type::String) {
-            e.parent = j->string;
-            // 0.8.9 (CRASH-PROOF): CURA de auto-parent ao CARREGAR. Ficheiros
-            // gravados pelas versões 0.7.4–0.8.8 podem ter parent == o PRÓPRIO
-            // nome (o seletor "colocar em" incluía o próprio) — o ciclo
-            // crashava o placeAt com stack exhaustion. Ao carregar: o ciclo
-            // é removido com ERRO LEGÍVEL no log (o próximo save grava são).
-            // Ciclos MÚTUOS (A→B→A) não são curados aqui (custo); o guard do
-            // placeAt aborta-nos sem crash — ver UiRuntime.cpp 0.8.9.
-            if (!e.parent.empty() && e.parent == e.name) {
-                elog::error("load: elemento '%s' era pai de SI MESMO no .goni "
-                            "(ciclo da UI 0.7.4-0.8.8) — parent removido",
-                            e.name.c_str());
-                e.parent.clear();
-            }
-        }
-        auto readStr = [&je](const char* key) -> const char* {
-            const Json* j = je.find(key);
-            return (j && j->type == Json::Type::String) ? j->string.c_str() : "";
-        };
-        const char* ah = readStr("ah");
-        if (std::strcmp(ah, "center") == 0)      e.anchorH = UiElement::AnchorH::Center;
-        else if (std::strcmp(ah, "right") == 0)  e.anchorH = UiElement::AnchorH::Right;
-        else                                     e.anchorH = UiElement::AnchorH::Left;
-        const char* av = readStr("av");
-        if (std::strcmp(av, "middle") == 0)      e.anchorV = UiElement::AnchorV::Middle;
-        else if (std::strcmp(av, "bottom") == 0) e.anchorV = UiElement::AnchorV::Bottom;
-        else                                     e.anchorV = UiElement::AnchorV::Top;
-        const char* act = readStr("act");
-        if (std::strcmp(act, "show") == 0)       e.action = UiElement::Action::ShowPanel;
-        else if (std::strcmp(act, "hide") == 0)  e.action = UiElement::Action::HidePanel;
-        else if (std::strcmp(act, "toggle") == 0) e.action = UiElement::Action::TogglePanel;
-        else if (std::strcmp(act, "scene") == 0) e.action = UiElement::Action::LoadScene;
-        else if (std::strcmp(act, "spawn") == 0) e.action = UiElement::Action::Spawn;
-        else if (std::strcmp(act, "trans") == 0) e.action = UiElement::Action::TransitionScene;
-        else                                     e.action = UiElement::Action::None;
-        if (e.action != UiElement::Action::None) {
-            e.target = readStr("target");
-            if (const Json* j = je.find("param");
-                j && j->type == Json::Type::String) {
-                e.param = j->string;   // 0.7.1: fade|slide (ausente = fade)
-            }
-        }
-        // 0.8.6 — tipografia + rotação (ausentes = defaults; mig. amigável)
-        if (const Json* j = je.find("fscale");
-            j && j->type == Json::Type::Number) {
-            e.fontScale = static_cast<f32>(j->number);
-        }
-        if (const char* ts = readStr("tstyle"); ts[0] != '\0') {
-            e.textStyle = uiTextStyleFromName(ts);
-        }
-        if (const Json* j = je.find("rot"); j && j->type == Json::Type::Number) {
-            e.rot = static_cast<f32>(j->number);
-        }
+        fillUiElementJson(e, je);   // a fonte única (o MESMO leitor do Control)
         canvas->elements.push_back(std::move(e));
     }
+}
+
+// 0.12-B — Control: reconstrói UM elemento-TIC da árvore. O kind usa o
+// vocabulário do Control (uiElementKindName + "joystick"); o payload do elem
+// partilha fillUiElementJson; os campos da base são opcionais (ausentes =
+// defaults — a política de compat de sempre).
+void fillControl(Control* ctl, const Json& comp) {
+    if (!ctl) {
+        return;
+    }
+    if (const Json* j = comp.find("kind"); j && j->type == Json::Type::String) {
+        ctl->setKind(controlKindFromName(j->string));
+    }
+    fillUiElementJson(ctl->elem, comp);
+    if (const Json* j = comp.find("stretch"); j && j->type == Json::Type::Bool) {
+        ctl->stretch = j->boolean;
+    }
+    auto readF = [&comp](const char* key, f32 def) -> f32 {
+        const Json* j = comp.find(key);
+        return (j && j->type == Json::Type::Number) ? static_cast<f32>(j->number) : def;
+    };
+    ctl->marginL = readF("ml", 0.0f);
+    ctl->marginT = readF("mt", 0.0f);
+    ctl->marginR = readF("mr", 0.0f);
+    ctl->marginB = readF("mb", 0.0f);
+    ctl->pivotX = readF("px", 0.5f);
+    ctl->pivotY = readF("py", 0.5f);
+    ctl->opacity = readF("op", 1.0f);
 }
 
 // 0.7.3 — TouchControls: campos editáveis (ausentes = defaults que
@@ -1254,6 +1354,8 @@ std::string dump(const Scene& scene) {
         appendComponentJson(comps, cs.skeletons().find(t.handle));      // 0.8.2
         appendComponentJson(comps, cs.audioPlayers().find(t.handle));   // 0.8.11
         appendComponentJson(comps, cs.scripts().find(t.handle));       // 0.9.2
+        appendComponentJson(comps, cs.controls().find(t.handle));      // 0.12-B
+        appendComponentJson(comps, cs.uiRoots().find(t.handle));       // 0.12-B
         jt.addMember("components", std::move(comps));
 
         tics.addItem(std::move(jt));
@@ -1276,6 +1378,81 @@ bool load(Scene& scene, const char* path, const LoadCtx& ctx) {
     }
     std::fclose(f);
     return loadText(scene, text, ctx);
+}
+
+// 0.12-B — COMPAT (B-1): o .goni antigo com UiCanvas abre como UIRoot +
+// filhos automáticos. Para cada TIC com UiCanvas NÃO-vazio (e sem UIRoot —
+// nunca converter uma árvore): o TIC hospedeiro ganha o marcador UIRoot;
+// cada elemento vira um TIC FILHO (nome = o do elemento, o padrão do
+// duplicateTic) com um Control (o elem por valor — âncoras 3×3/rot/…);
+// os elementos com `parent` (container por NOME da 0.7.4) ficam parentados
+// ao TIC filho do container. O UiCanvas SAI do TIC (deprecated — os
+// elementos novos nunca o usam; o componente vive no código SÓ para este
+// leitor). A migração é DE MEMÓRIA: o .goni no disco não é reescrito (o
+// próximo save já grava a árvore — o formato novo).
+// O TouchControls do hospedeiro NÃO se mexe (o input da física nunca muda;
+// joysticks antigos continuam a desenhar pelo caminho de sempre).
+void migrateUiCanvasToTree(Scene& scene) {
+    // 1) recolher os hospedeiros ANTES de criar (criar durante o
+    //    forEachActive invalida a iteração — Scene::create move nada em
+    //    slots_, mas o contrato da casa é iterar depois de criar)
+    std::vector<Handle> hosts;
+    scene.forEachActive([&](Tic& t) {
+        if (t.getComponent<UIRoot>()) {
+            return;   // já é árvore — nada a fazer
+        }
+        if (UiCanvas* c = t.getComponent<UiCanvas>();
+            c && !c->elements.empty()) {
+            hosts.push_back(t.handle);
+        }
+    });
+    for (const Handle hHost : hosts) {
+        Tic* host = scene.get(hHost);
+        if (!host) {
+            continue;
+        }
+        UiCanvas* c = host->getComponent<UiCanvas>();
+        if (!c) {
+            continue;
+        }
+        if (!host->addComponent<UIRoot>()) {
+            continue;   // a cena recusou — mantém o canvas (nunca perde dados)
+        }
+        // 2) um TIC filho por elemento (ordem do array = a de sempre)
+        std::vector<std::pair<std::string, Handle>> made;
+        made.reserve(c->elements.size());
+        const i32 parentSlot = static_cast<i32>(hHost.index);
+        for (const UiElement& e : c->elements) {
+            const std::string name =
+                e.name.empty() ? "elemento" : e.name;
+            const Handle ch = scene.create(name, parentSlot);
+            Tic* ct = scene.get(ch);
+            if (!ct) {
+                continue;   // a cena recusou — o elemento morre com o canvas
+            }
+            if (Control* ctl = ct->addComponent<Control>()) {
+                ctl->elem = e;                  // payload por valor (0.7.0)
+                ctl->elem.name = ct->name;      // o nome TIC é a identidade
+            }
+            made.emplace_back(e.name, ch);
+        }
+        // 3) containers por NOME (0.7.4) → pai TIC (o filho segue o container)
+        for (const auto& [elemName, hChild] : made) {
+            Tic* ct = scene.get(hChild);
+            Control* ctl = ct ? ct->getComponent<Control>() : nullptr;
+            if (!ct || !ctl || ctl->elem.parent.empty()) {
+                continue;
+            }
+            for (const auto& [otherName, hOther] : made) {
+                if (otherName == ctl->elem.parent && !(hOther == hChild)) {
+                    ct->parent = static_cast<i32>(hOther.index);
+                    break;
+                }
+            }
+        }
+        // 4) o canvas sai (deprecated) — a árvore é a única fonte daqui
+        host->removeComponent<UiCanvas>();
+    }
 }
 
 bool loadText(Scene& scene, const std::string& text, const LoadCtx& ctx) {
@@ -1350,7 +1527,11 @@ bool loadText(Scene& scene, const std::string& text, const LoadCtx& ctx) {
             } else if (jt2->string == "BodyComp") {
                 fillBodyComp(store.get<BodyComp>(h), jc);
             } else if (jt2->string == "UiCanvas") {
-                fillUiCanvas(store.get<UiCanvas>(h), jc);   // 0.7.0
+                fillUiCanvas(store.get<UiCanvas>(h), jc);   // 0.7.0 (compat)
+            } else if (jt2->string == "Control") {
+                fillControl(store.get<Control>(h), jc);   // 0.12-B: a árvore
+            } else if (jt2->string == "UIRoot") {
+                // marcador — presença basta (o factory já criou)
             } else if (jt2->string == "TouchControls") {
                 fillTouchControls(store.get<TouchControls>(h), jc);   // 0.7.3
             } else if (jt2->string == "Camera") {
@@ -1370,6 +1551,9 @@ bool loadText(Scene& scene, const std::string& text, const LoadCtx& ctx) {
     // 0.7.7 — invariante UMA câmara ativa por cena: a primeira (ordem do
     // manifesto) fica; as restantes saem (fallback orbit se nenhuma)
     enforceSingleActiveCamera(scene);
+    // 0.12-B — COMPAT: o .goni antigo com UiCanvas abre como UIRoot + filhos
+    // (a migração é DE MEMÓRIA — o ficheiro no disco não é reescrito)
+    migrateUiCanvasToTree(scene);
     return true;
 }
 

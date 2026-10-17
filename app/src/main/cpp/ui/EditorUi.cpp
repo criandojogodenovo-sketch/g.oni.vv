@@ -8,6 +8,8 @@
 #include "components/AudioPlayer.h"   // 0.8.11: inspector/seletor de clips
 #include "render/Camera.h"
 #include "components/TouchControls.h"
+#include "components/Control.h"   // 0.12-B: ícone por tipo dos elementos-TIC
+#include "components/UIRoot.h"    // 0.12-B: a raiz da árvore de UI
 #include <cmath>
 #include "components/CameraComp.h"   // 0.7.7: inspector/menu da câmara
 #include "components/BodyComp.h"     // FASE 9 (G2-7): ícone da hierarquia por corpo
@@ -500,6 +502,27 @@ void drawPanelDividers(UiContext& ui, const EditorState& st, bool rightPanel) {
 // FASE 5 (0.11-L): não há componente de luz na engine hoje — nada para
 // consultar aqui (limitação DECLARADA, não escondida).
 icons::Icon hierIconFor(const Tic& t) {
+    // 0.12-B (B-1) — a ÁRVORE DE UI: a raiz é o Monitor (o ecrã da UI); os
+    // elementos têm ícone por TIPO do Control (o conjunto existente — zero
+    // glifos novos; o vocabulário está no CODEMAP)
+    if (t.getComponent<UIRoot>()) {
+        return icons::Icon::Monitor;
+    }
+    if (const Control* ctl = t.getComponent<Control>()) {
+        switch (ctl->kind()) {
+            case Control::Kind::Label:    return icons::Icon::Sort;
+            case Control::Kind::Button:   return icons::Icon::Cursor;
+            case Control::Kind::Image:    return icons::Icon::Monitor;
+            case Control::Kind::Menu:     return icons::Icon::List;
+            case Control::Kind::Article:  return icons::Icon::List;
+            case Control::Kind::VBox:
+            case Control::Kind::HBox:     return icons::Icon::Grid;
+            case Control::Kind::Joystick: return icons::Icon::Person;
+            case Control::Kind::Panel:
+            case Control::Kind::Card:     return icons::Icon::Box;
+        }
+        return icons::Icon::Box;
+    }
     if (t.getComponent<CameraComp>()) {
         return icons::Icon::Camera;
     }

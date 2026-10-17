@@ -182,6 +182,20 @@ public:
     // o índice; nome único Godot-style ("panel", "panel.001", …)
     i32 addElement(UiElement::Kind kind, f32 designW, f32 designH);
 
+    // 0.12-B — os DEFAULTS de criação por tipo ficam PÚBLICOS: a árvore de UI
+    // (Control, B-1) cria elementos com O MESMO tamanho/cor/texto do canvas
+    // (uma só fonte — zero divergência de criação)
+    static void elementDefaults(UiElement::Kind k, f32& w, f32& h,
+                                f32 color[4]);
+    static void elementDefaultText(UiElement::Kind k, std::string& out);
+
+    // 0.12-B — RE-ANCORAGEM de UM elemento (a matemática de setAnchor sem o
+    // canvas): conserva a posição absoluta ao mudar a âncora. FONTE ÚNICA
+    // partilhada por setAnchor (canvas) e pelo Inspector da árvore (Control).
+    static void reanchor(UiElement& e, UiElement::AnchorH h,
+                         UiElement::AnchorV v, f32 designW, f32 designH,
+                         f32 insL, f32 insT, f32 insR, f32 insB);
+
     // índice do PRIMEIRO elemento com o nome (−1 se não existe) — alvo das
     // ações Show/Hide/Toggle e hit-test do editor
     i32 findElement(const std::string& elemName) const;

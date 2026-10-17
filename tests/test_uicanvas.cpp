@@ -22,6 +22,8 @@
 #include <vector>
 #include "components/MeshRenderer.h"
 #include "components/UiCanvas.h"
+#include "components/Control.h"   // 0.12-B: a árvore de UI (recalibração)
+#include "components/UIRoot.h"
 #include "core/Presets.h"
 #include "core/Scene.h"
 #include "core/SceneSerializer.h"
@@ -477,10 +479,24 @@ TEST(uicanvas_serializacao_roundtrip) {
     Tic* hud = s2.get(s2.find("HUD"));
     EXPECT(hud != nullptr);
     EXPECT(!hud->visible);   // visibilidade do TIC preservada
-    const UiCanvas* c2 = hud->getComponent<UiCanvas>();
-    EXPECT(c2 != nullptr && c2->elements.size() == 2);
+    // 0.12-B (B-1, RECALIBRADO): o load converte (UiCanvas → UIRoot + filhos
+    // Control) — os elementos voltam NOS FILHOS da árvore, na mesma ordem
+    EXPECT(hud->getComponent<UIRoot>() != nullptr);
+    std::vector<UiElement> elems2;
+    {
+        const i32 rootSlot = static_cast<i32>(hud->handle.index);
+        s2.forEachActive([&](const Tic& t) {
+            if (t.parent == rootSlot) {
+                if (const Control* cc = t.getComponent<Control>()) {
+                    elems2.push_back(cc->elem);
+                    elems2.back().name = t.name;
+                }
+            }
+        });
+    }
+    EXPECT(elems2.size() == 2);
 
-    const UiElement& p2 = c2->elements[0];
+    const UiElement& p2 = elems2[0];
     EXPECT(p2.kind == UiElement::Kind::Panel);
     EXPECT(p2.name == "fundo");
     EXPECT(nearEqF(p2.ox, 24.0f));
@@ -493,7 +509,7 @@ TEST(uicanvas_serializacao_roundtrip) {
     EXPECT(p2.anchorV == UiElement::AnchorV::Bottom);
     EXPECT(!p2.visible);
 
-    const UiElement& b2 = c2->elements[1];
+    const UiElement& b2 = elems2[1];
     EXPECT(b2.text == "JOGAR");
     EXPECT(b2.action == UiElement::Action::LoadScene);
     EXPECT(b2.target == "cena2");

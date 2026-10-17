@@ -1173,12 +1173,19 @@ u32 feedCanvasPlay(f32 w, f32 h) {
         g_input.pos(s, x, y);
         const ui::CanvasHit hit =
             ui::hitTestCanvas(g_scene, x, y, w, h, g_ui.safeArea());
-        if (hit.valid) {
+        // 0.12-B — a árvore arma os botões dela (o MESMO contrato: o dedo
+        // não vai aos TouchControls quando acerta um botão de UI)
+        const ui::CanvasHit hitTree =
+            !hit.valid ? ui::hitTestUiTree(g_scene, x, y, w, h,
+                                           g_ui.safeArea())
+                       : ui::CanvasHit{};
+        const ui::CanvasHit& eff = hit.valid ? hit : hitTree;
+        if (eff.valid) {
             g_playUi.armed = true;
             g_playUi.slot = s;
-            g_playUi.tic = hit.tic;
-            g_playUi.element = hit.element;
-            g_playUi.menuItem = hit.menuItem;
+            g_playUi.tic = eff.tic;
+            g_playUi.element = eff.element;
+            g_playUi.menuItem = eff.menuItem;
             claimed |= 1u << s;
         }
     }
@@ -1187,13 +1194,17 @@ u32 feedCanvasPlay(f32 w, f32 h) {
         g_input.pos(g_playUi.slot, x, y);
         const ui::CanvasHit hit =
             ui::hitTestCanvas(g_scene, x, y, w, h, g_ui.safeArea());
-        if (hit.valid && hit.tic == g_playUi.tic &&
-            hit.element == g_playUi.element) {
-            Tic* t = g_scene.get(hit.tic);
-            UiCanvas* c = t ? t->getComponent<UiCanvas>() : nullptr;
-            if (c && hit.element >= 0 &&
-                hit.element < static_cast<i32>(c->elements.size())) {
-                UiElement& e = c->elements[static_cast<size_t>(hit.element)];
+        // 0.12-B — a ÁRVORE entra no MESMO feed: sem hit nos canvases
+        // legados, os botões da árvore (TICs com Control) respondem
+        const ui::CanvasHit hitTree =
+            !hit.valid ? ui::hitTestUiTree(g_scene, x, y, w, h,
+                                           g_ui.safeArea())
+                       : ui::CanvasHit{};
+        const ui::CanvasHit& eff = hit.valid ? hit : hitTree;
+        if (eff.valid && eff.tic == g_playUi.tic &&
+            eff.element == g_playUi.element) {
+            UiElement e;
+            if (ui::uiElementFromHit(g_scene, eff, e)) {
                 const char* targetOverride = nullptr;
                 std::string tgt;
                 if (e.kind == UiElement::Kind::Menu && g_playUi.menuItem >= 0) {
@@ -1220,6 +1231,9 @@ u32 feedCanvasPlay(f32 w, f32 h) {
 }
 
 // desenha TODOS os canvases ativos e visíveis (UI por cima da cena)
+// 0.12-B: + a ÁRVORE de UI (UIRoot + filhos Control) — a UI nova;
+// os canvases legados (compat) desenham como sempre (vazios na prática:
+// o load converte)
 void drawCanvasPlay(f32 w, f32 h) {
     g_scene.forEachActive([&](const Tic& t) {
         if (!t.visible) {
@@ -1230,6 +1244,7 @@ void drawCanvasPlay(f32 w, f32 h) {
             ui::drawCanvas(g_ui, *c, w, h, g_ui.safeArea());
         }
     });
+    ui::drawUiTree(g_ui, g_scene, w, h, g_ui.safeArea());
 }
 
 // ---- 0.7.1: CENAS MÚLTIPLAS + TRANSIÇÕES ---------------------------------
@@ -6482,8 +6497,17 @@ void frame() {
         drawCanvasPlay(w, h);
         // TouchControls por cima de tudo (só existem em play — o feed no
         // início do frame já devolveu 0 claimed e tcDrawn=false no editor)
-        if (tcDrawn && tcDraw) {
-            editor::drawTouchControls(g_ui, *tcDraw, w, h);
+        // 0.12-B: TODOS os TICs com TouchControls desenham (a árvore pode
+        // ter N joysticks — um por TIC; com 1 fica byte a byte)
+        if (tcDrawn) {
+            auto& tcsAll = g_scene.components().touchControls();
+            for (u32 i = 0; i < tcsAll.size(); ++i) {
+                Tic* tOwner = g_scene.get(tcsAll.owner(i));
+                if (!tOwner || !tOwner->active) {
+                    continue;
+                }
+                editor::drawTouchControls(g_ui, tcsAll.at(i), w, h);
+            }
         }
         drawToast();
         statusLine(st3d, stGrid);
@@ -6965,39 +6989,34 @@ void frame() {
                 const int kind = editor::uiPlusChoiceKind(choice);
                 const bool hadTic = g_scene.get(g_editor.selected) != nullptr;
                 if (kind < 0) {
-                    // 0.7.3 — JOYSTICK: widget de TouchControls EDITÁVEL no
-                    // TIC selecionado (a UI do Player passa a ser esta
-                    // instância); seleciona-o no viewport 2D
-                    Tic* tic = g_scene.get(g_editor.selected);
-                    if (!tic) {
-                        showToast("selecione um TIC na Hierarchy");
+                    // 0.12-B (B-1) — JOYSTICK na ÁRVORE: o "+Joystick" cria
+                    // um TIC FILHO do UIRoot (Control Kind::Joystick +
+                    // TouchControls no MESMO TIC — o runtime de input não
+                    // muda). Dois joysticks = DOIS TICs distintos (o pin
+                    // ui_add_2_joysticks aferra).
+                    if (editor::uiAddTreeJoystick(g_scene, g_editor)) {
+                        showToast("joystick adicionado");
+                        LOGI("editor: joystick (TIC da árvore de UI) criado");
                     } else {
-                        TouchControls* tc = tic->getComponent<TouchControls>();
-                        if (!tc) {
-                            tc = tic->addComponent<TouchControls>();
-                        }
-                        if (tc) {
-                            g_editor.selJoystick = true;
-                            g_editor.selElement = -1;
-                            showToast("joystick adicionado");
-                            LOGI("editor: joystick (TouchControls) adicionado");
-                        }
+                        showToast("não foi possível criar o joystick");
                     }
-                } else if (editor::uiAddElement(g_scene, g_editor,
-                                               static_cast<u32>(kind), w, h)) {
-                    // 0.7.0: cria o elemento no canvas do TIC selecionado
-                    // (cria o canvas à primeira) e seleciona-o — WYSIWYG.
-                    // 0.7.4: com container selecionado nasce FILHO dele.
-                    // 0.7.5: SEM TIC selecionado o uiAddElement assegura/
-                    // cria o TIC DE UI ("UI", só com UiCanvas) — criar UI
-                    // nunca obrigou a um TIC 3D.
+                } else if (editor::uiAddTreeElement(g_scene, g_editor,
+                                                    static_cast<u32>(kind),
+                                                    w, h)) {
+                    // 0.12-B (B-1): cria o ELEMENTO-NA-ÁRVORE (TIC filho do
+                    // UIRoot + Control; a raiz nasce à primeira — o TIC
+                    // "UI"). O WYSIWYG mostra-o no frame seguinte (o
+                    // espelho da árvore alimenta o MESMO desenho).
+                    // 0.7.4: com container selecionado nasce FILHO dele
+                    // (o reparent segue o seed da posição — B-2 afina).
                     if (!hadTic) {
                         showToast("TIC 'UI' criado + elemento");
-                        LOGI("editor: TIC de UI criado (canvas hospedeiro)");
+                        LOGI("editor: raiz de UI criada (TIC 'UI' + UIRoot)");
                     } else {
                         showToast("elemento UI criado");
                     }
-                    LOGI("editor: elemento UI criado (kind %d)", kind);
+                    LOGI("editor: elemento UI criado na árvore (kind %d)",
+                         kind);
                 } else {
                     showToast("selecione um TIC na Hierarchy");
                 }
@@ -7262,8 +7281,16 @@ void frame() {
     }
 
     // F4: controlos de toque por cima de tudo (só em modo Play)
-    if (tcDrawn && tcDraw) {
-        editor::drawTouchControls(g_ui, *tcDraw, w, h);
+    // 0.12-B: TODOS os TICs com TouchControls (a árvore pode ter N)
+    if (tcDrawn) {
+        auto& tcsAll = g_scene.components().touchControls();
+        for (u32 i = 0; i < tcsAll.size(); ++i) {
+            Tic* tOwner = g_scene.get(tcsAll.owner(i));
+            if (!tOwner || !tOwner->active) {
+                continue;
+            }
+            editor::drawTouchControls(g_ui, tcsAll.at(i), w, h);
+        }
     }
 
     // overlay Menu → Save/Load cena do projeto (F5-A: caminhos relativos,

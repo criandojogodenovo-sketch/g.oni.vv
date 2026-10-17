@@ -22,7 +22,9 @@
 #include "components/TouchControls.h"
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
-#include "components/UiCanvas.h"   // 0.7.0: UI criável
+#include "components/UiCanvas.h"   // 0.7.0: UI criável (COMPAT — deprecated 0.12-B)
+#include "components/Control.h"     // 0.12-B: a base dos elementos de UI (TICs)
+#include "components/UIRoot.h"      // 0.12-B: o marcador da raiz de UI
 #include "components/CameraComp.h"  // 0.7.7: câmara de cena
 #include "components/AnimationPlayer.h"  // 0.8.0: animação (F7)
 #include "components/AudioPlayer.h"     // 0.8.11: áudio
@@ -104,6 +106,8 @@ public:
     ComponentStorage<AudioPlayer>& audioPlayers()      { return audioPlayers_; }  // 0.8.11
     ComponentStorage<SkeletonComp>&  skeletons()       { return skeletons_; }   // 0.8.2
     ComponentStorage<ScriptComp>&    scripts()         { return scripts_; }     // 0.9.2
+    ComponentStorage<Control>&      controls()        { return controls_; }    // 0.12-B
+    ComponentStorage<UIRoot>&       uiRoots()         { return uiRoots_; }     // 0.12-B
     const ComponentStorage<Transform3D>&  transforms() const      { return transforms_; }
     const ComponentStorage<MeshRenderer>& meshRenderers() const   { return meshRenderers_; }
     const ComponentStorage<InputMap>&     inputMaps() const       { return inputMaps_; }
@@ -115,6 +119,8 @@ public:
     const ComponentStorage<AudioPlayer>& audioPlayers() const      { return audioPlayers_; }  // 0.8.11
     const ComponentStorage<SkeletonComp>& skeletons() const        { return skeletons_; }   // 0.8.2
     const ComponentStorage<ScriptComp>&   scripts() const          { return scripts_; }     // 0.9.2
+    const ComponentStorage<Control>&     controls() const         { return controls_; }    // 0.12-B
+    const ComponentStorage<UIRoot>&      uiRoots() const          { return uiRoots_; }     // 0.12-B
 
     const ComponentRegistry& registry() const { return registry_; }
 
@@ -136,6 +142,8 @@ private:
     ComponentStorage<AudioPlayer> audioPlayers_;  // 0.8.11: áudio
     ComponentStorage<SkeletonComp>  skeletons_;   // 0.8.2: skinning (F7)
     ComponentStorage<ScriptComp>    scripts_;     // 0.9.2: V.ONI (.voni)
+    ComponentStorage<Control>       controls_;    // 0.12-B: elementos de UI (TICs)
+    ComponentStorage<UIRoot>        uiRoots_;     // 0.12-B: raiz de UI
     ComponentRegistry               registry_;
 };
 
@@ -227,6 +235,22 @@ inline ComponentStorage<ScriptComp>& ComponentStore::storageOf<ScriptComp>() {
 template <>
 inline const ComponentStorage<ScriptComp>& ComponentStore::storageOf<ScriptComp>() const {
     return scripts_;
+}
+template <>
+inline ComponentStorage<Control>& ComponentStore::storageOf<Control>() {
+    return controls_;   // 0.12-B
+}
+template <>
+inline ComponentStorage<UIRoot>& ComponentStore::storageOf<UIRoot>() {
+    return uiRoots_;   // 0.12-B
+}
+template <>
+inline const ComponentStorage<Control>& ComponentStore::storageOf<Control>() const {
+    return controls_;   // 0.12-B
+}
+template <>
+inline const ComponentStorage<UIRoot>& ComponentStore::storageOf<UIRoot>() const {
+    return uiRoots_;   // 0.12-B
 }
 
 } // namespace vv
