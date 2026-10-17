@@ -1,6 +1,6 @@
 # CODEMAP.md — onde vive o quê
 
-Atualizado: 2026-10-17 · vc: 81
+Atualizado: 2026-10-17 · vc: 82
 
 > Convenção de paths: TODOS os caminhos deste ficheiro são relativos à
 > RAIZ do repo (exemplo: o registo da linguagem vive em
@@ -54,7 +54,11 @@ Atualizado: 2026-10-17 · vc: 81
   do cristal da 0.11-Y: panelRoundedGradientV / glassTopLine /
   focusGlow + o QuadBatch::quadGradientV), UiEditor (as ops
   de árvore PURAS), Theme.h (as ÚNICAS cores — a tabela 0.11-Y: o poço
-  #08080A + a chama accent2/glow), ViewportChrome,
+  #08080A + a chama accent2/glow), ViewportChrome
+  (o chrome do viewport — o TOOLTIP do gizmo 0.12-A: legendTimer/
+  legendArm no EditorState; o draw ganhou `dt, in` trailing),
+  SafeArea.h (os rects puros — `scissor3dRect()` NOVO na 0.12-A: o
+  scissor do pass 3D no modo UI),
   BottomPanel, SettingsPage, ScriptEditor, DocsScreen, Gizmo, hierarquia.
 - **app/src/main/cpp/components/** — os componentes do TIC: MeshRenderer
   (+ `impostorDistance`), CameraComp, Body3D, RigidBody3D, AudioPlayer,
@@ -73,9 +77,16 @@ Atualizado: 2026-10-17 · vc: 81
   CruzaTabBar/PainelFora do validador), test_fase_y3_cristal.cpp (os
   pins do CRISTAL da 0.11-Y — a linha do topo + os divisores com
   gradiente nos painéis reais), test_fase375b_impostors.cpp,
+  test_012a_lodui.cpp (os pins da 0.12-A A-1: as rows LOD/impostor da
+  UI — row_existe/aplica/persiste/compat/default_off),
+  test_012a_contadores.cpp (os pins da 0.12-A A-2: os contadores pelo
+  UV do atlas + o marcador de cena), test_012a_grelha_tooltip.cpp (os
+  pins da 0.12-A A-3: o scissor3dRect + o ciclo do tooltip),
   test_voni.cpp, test_bench.cpp,
   test_gmeshv3.cpp, voni_refgen.cpp (o gerador da referência), c33_virtual.cpp
-  (o dispositivo virtual), CMakeLists.txt (a lista de fontes dos pins),
+  (o dispositivo virtual), bench_ram_curve.cpp (A-4: a curva 50k…12,3M
+  no hospedeiro — alvo opcional `bench_ram`, option GONI_BENCH_RAM OFF),
+  CMakeLists.txt (a lista de fontes dos pins),
   stub/glstub_fb.h (o rasterizador honesto — SEM GLES real), fixtures/.
 - **app/src/main/java/vv/goni/** — a casca Java: VvActivity (JNI),
   ReloadGate (R-005), ProjectsFormat/VvProjects/ProjectManagerActivity,
@@ -93,7 +104,9 @@ Atualizado: 2026-10-17 · vc: 81
 - **docs/** — os y-*.png (os 13 ecrãs da varredura da 0.11-Y, 1600×720),
   REGRESSOES.md (as sentinelas R-NNN), GMESH_formato.md e
   GTEX_formato.md (a fonte de verdade dos formatos), LAYOUT_HIERARCHY.md,
-  FASE3.5-PIN.md, RELATORIO-0.11-W-*.md (a campanha em curso), SAF_EXCEPTION.md,
+  FASE3.5-PIN.md, RELATORIO-0.12-A.md (a campanha 0.12-A),
+  RELATORIO-0.12-A-INVEST-RAM.md (a investigação RAM vs GPU do A-4),
+  RELATORIO-0.11-W-*.md (a 0.11-W), SAF_EXCEPTION.md,
   AUDIT_SAF_JNI.md, HANDSHAKE_AUDIT.md. (O arquivo das campanhas fechadas,
   o DIARIO e o TEMPLATE_PROMPT organizam-se na CTX-3 — entram aqui quando
   existirem.)

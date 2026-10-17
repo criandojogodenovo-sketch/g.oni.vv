@@ -1,9 +1,11 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-17 · vc: 81 · Último commit: este (o Y-3, OS
-CARTÕES — o cristal: a linha do topo nos painéis/drawer/cards + os
-divisores com o âmbar a cair; antes: 6b1427f o Y-2 (o run VERDE fecha
-a Y-1 também), 3a6d934 o Y-1, 25c1348 o Y-0-FIX)
+Atualizado: 2026-10-17 · vc: 82 · Último commit: este (o 0.12-A, OS BUGS
+P0 — A-1 as rows LOD/impostor provadas com pins (a UI já existia: PÁRA no
+fix cego), A-2 os contadores com o refresh no arranque/criação + o ícone
+de cena em camadas, A-3 o scissor do modo UI + o tooltip que morre, A-4 a
+investigação RAM vs GPU com o veredito CACHE THRASH; antes: 32a6785 o
+Y-3+fecho da 0.11-Y)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -11,13 +13,22 @@ a Y-1 também), 3a6d934 o Y-1, 25c1348 o Y-0-FIX)
 
 ## §1 Onde estamos
 
-- **Campanha 0.11-Y (identidade visual) — FECHADA** (o fecho é este
-  commit: os 13 PNGs por ecrã no docs/y-*.png + o pin y_fecho + o
-  RELATORIO-0.11-Y-FECHO.md; o CI é o árbitro). Y-0 (o ícone) · Y-0-FIX
+- **Campanha 0.12-A (bugs P0) — FECHADA** (o CI do push é o árbitro):
+  A-1 (o diagnóstico provou que as rows LOD/impostor JÁ EXISTEM na UI
+  desde o vc 72/76 — PÁRA no fix cego por ordem do prompt; os 5 pins da
+  UI novos + M-A1a/b vermelho→verde fecham o gap de cobertura), A-2 (o
+  refreshCatalog no arranque + na criação de cena; sceneRowIcon = camadas),
+  A-3 (scissor3dRect no modo UI + o tooltip legendTimer 1,5 s/largar),
+  A-4 (sampler bench_ram sob ifdef + o bench da curva + o veredito: a
+  cache de blocos a ciclizar — RAM, não GPU). test_core 1077/0 ·
+  c33_virtual 1006/0 · vc 82. PARAR — a próxima só arranca com CONTINUAR
+  do dono.
+- **Campanha 0.11-Y (identidade visual) — FECHADA** (o fecho é o commit
+  32a6785: os 13 PNGs por ecrã no docs/y-*.png + o pin y_fecho + o
+  RELATORIO-0.11-Y-FECHO.md). Y-0 (o ícone) · Y-0-FIX
   (a escala) · Y-1 (o tema) · Y-2 (o layout) · Y-3 (os cartões) — as
   5 sub-fases + o fix fechadas com CI verde; 20 pins novos; a FASE 31
-  (a varredura de 13 ecrãs) fica no replay para SEMPRE. PARAR — a
-  próxima campanha só arranca com CONTINUAR do dono.
+  (a varredura de 13 ecrãs) fica no replay para SEMPRE.
 - **Y-1 (o tema) — FECHADA** (o commit 3a6d934): o poço #08080A (o
   clear lê o token), o vidro -5 % com o mesmo alfa, a hairline ÂMBAR
   #4A3714 α0.60, os tokens NOVOS accent2 #FF6B00 e glow #FF3D00 α0.25;
@@ -69,6 +80,48 @@ a Y-1 também), 3a6d934 o Y-1, 25c1348 o Y-0-FIX)
 ## §2 O que está FEITO
 
 - 0.6.x–0.9.5 — fundação da engine (V.ONI core, device real, CI 5 jobs).
+- 0.12-A (vc 82) — os 4 bugs P0 fechados (o relatório próprio:
+  docs/RELATORIO-0.12-A.md; a investigação: docs/
+  RELATORIO-0.12-A-INVEST-RAM.md):
+  - **A-1** — o diagnóstico (os 4 pontos com ficheiro:linha): as rows
+    `lod distance`/`impostor` JÁ EXISTEM (EditorLayout.h:557/567,
+    EditorUi.cpp:1968/2008, os campos MeshRenderer.h:66/96); os pins da
+    3.5a/3.75b só aferravam o CAMPO — os 5 pins NOVOS da UI
+    (test_012a_lodui.cpp) fecham o gap; M-A1a/M-A1b vermelho→verde; ZERO
+    produção trocada (o PÁRA do prompt); as hipóteses do «dono não vê»
+    no relatório §1 (colapso persistido / mesh file / APK antigo).
+  - **A-2** — o `refreshCatalog()` entra no ARRANQUE (projeto pronto) e
+    no fim de `createSceneNamed` (os contadores «0 cena(s)»/«sem
+    ficheiros» morrem); `sceneRowIcon()` NOVA (EditorUi.h/.cpp — a fonte
+    única: Icon::Scene substitui a claquete «partida» no seletor de
+    cenas); pins ficheiros_conta_cenas (a identidade do glifo pelo UV do
+    atlas) / assets_lista_mesh (a sequência no batch) /
+    cena_ativa_marcador; M-A2a/M-A2b vermelho→verde.
+  - **A-3** — `safe::scissor3dRect()` NOVA (SafeArea.h — o modo UI
+    reserva a largura do painel direito no SCISSOR; byte a byte fora do
+    modo UI; o glViewport fica no viewRect); o tooltip do gizmo morre
+    (legendTimer/legendArm no EditorState; o vpchrome::draw ganha
+    `dt, in` trailing com defaults byte a byte; nasce no largar da
+    escolha, vive 1,5 s, morre no largar seguinte); pins grelha_nao_vaza
+    / tooltip_morre_1500ms / tooltip_morre_release; M-A3a/M-A3b
+    vermelho→verde (o M-A3b REPRODUZ o bug do dono).
+  - **A-4** — a instrumentação sob `#ifdef GONI_BENCH_RAM` (o sampler
+    `bench_ram:` 1×/s no engine.log) + o alvo opcional `bench_ram`
+    (option OFF) — A CURVA REPRODUZ O SALTO: linear 50k…4,1M
+    (0,01→1,11 ms) e explosão a 8,2M/12,3M (376/900 ms) no cruzamento
+    EXATO do teto de VRAM (192 MB) com 9 758/23 470 evictions/frame;
+    `evc_par == evc_orb` (o thrash continua com a câmara parada); o RSS
+    é LINEAR sem penhasco — VEREDITO: RAM (a cache de blocos a
+    ciclizar), NÃO GPU/CPU; o protocolo do dono + as recomendações no
+    relatório próprio.
+  - **O achado fora da lista (cláusula calma, NÃO fixado)**: o
+    `inspectorRowCount` subestima a MALHA em 4 rows para mesh file
+    (EditorLayout.h:433 vs o plano 6 rows; sem sintoma — o
+    contentHeight deriva do plano; o pior caso teórico 65 > o buffer
+    64) — documentado no relatório §6 para a próxima campanha.
+- 0.11-Y (vc 77–81) — a identidade visual completa (o ícone, o tema, o
+  layout, os cartões, o fecho com os 13 PNGs) — ver §1 e docs/
+  RELATORIO-0.11-Y-FECHO.md.
 - 0.9.6 + 0.9.6.4–0.9.6.20 (vc 48–67) — identidade, grupos UI, editor,
   import glTF real, orçamento 3D, leis de desenho/toque, janelas.
 - 0.10-M (vc 68) — .gmesh v3 por blocos: import streaming, render por
@@ -208,6 +261,14 @@ Commits puramente documentais não são afetados.
 - `docs/RELATORIO-0.11-Y-FECHO.md` — o fecho da campanha (as 5
   sub-fases + o fix, os critérios C33 mapeados às provas, os limites
   declarados).
+- `docs/RELATORIO-0.12-A.md` — o relatório da 0.12-A (os 4 bugs P0: os
+  diagnósticos com ficheiro:linha, as decisões, os pins ×11, as 6
+  mutações coladas, o achado fora da lista, os limites).
+- `docs/RELATORIO-0.12-A-INVEST-RAM.md` — a investigação RAM vs GPU do
+  A-4 (a curva do hospedeiro, a análise (a)-(d), o veredito CACHE
+  THRASH, o protocolo do device do dono, as recomendações).
+- `tests/bench_ram_curve.cpp` + o alvo `bench_ram` (tests/CMakeLists,
+  option GONI_BENCH_RAM OFF) — a curva 50k…12,3M do A-4 no hospedeiro.
 - `scripts/y0_gen_icons.py` — o gerador dos PNGs do launcher a partir
   da fonte do dono (o threshold de luminância documentado lá dentro).
 - `docs/arquivo/` — os relatórios das campanhas FECHADAS (71, git mv;

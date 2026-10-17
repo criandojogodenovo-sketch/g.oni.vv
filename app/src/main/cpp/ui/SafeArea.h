@@ -322,6 +322,22 @@ inline UiRect centerRect(f32 sw, f32 sh, const Insets& i, f32 drawerH,
     const f32 w = p.w - b.hier - rw;
     return {p.x + b.hier, p.y, w > 0.0f ? w : 0.0f, p.h};
 }
+// 0.12-A (A-3): o rect do SCISSOR do pass 3D. No modo UI o painel direito
+// (o Inspector de UI, ou o de TIC) vive DENTRO do viewRect (o inspRight do
+// editor 3D é falso em UI — o contrato WYSIWYG do painel) — o scissor do
+// pass 3D reserva a largura dele: a grelha 3D deixa de vazar por trás do
+// vidro (o C33 do dono; o pin grelha_nao_vaza aferra; M-A3a: devolver
+// viewRect sempre → vermelho). Fora do modo UI o rect é o de sempre
+// (byte a byte). O glViewport continua no viewRect — só o SCISSOR corta.
+inline UiRect scissor3dRect(const UiRect& viewRect, bool uiMode,
+                            bool uiPanelRight, f32 sw, f32 sh, const Insets& i,
+                            f32 drawerH, f32 hierRaw, f32 inspRaw) {
+    if (!uiMode) {
+        return viewRect;
+    }
+    return centerRect(sw, sh, i, drawerH, uiPanelRight, hierRaw, inspRaw,
+                      false);
+}
 // compat 0.8.x: as assinaturas de sempre (drawer fechado) — os callers antigos
 // e os testes herdaram-nas; wrappers explícitos para não os partir
 inline UiRect centerRect(f32 sw, f32 sh, const Insets& i) {

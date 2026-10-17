@@ -3229,6 +3229,10 @@ const char* sceneDisplayName(const std::string& sceneRelPath, char* out,
     return out;
 }
 
+// 0.12-A (A-2): o ícone da linha de cena — Icon::Scene (camadas; a fonte
+// única vive no header — o pin cena_ativa_marcador aferra ESTA função)
+icons::Icon sceneRowIcon() { return icons::Icon::Scene; }
+
 int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                    EditorState& st, const std::vector<std::string>& scenes,
                    u32 activeScene, f32 ax, f32 ay) {
@@ -3323,8 +3327,9 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
             ui.panel(x + theme::dp(4.0f), ry, kSheetW - theme::dp(8.0f), rowH,
                      theme::kTheme.surface2);
         }
-        // ícone de cena (clapper) + nome + CHECK na ativa (spec H)
-        icons::drawIcon(ui, icons::Icon::Clapper, x + theme::dp(16.0f),
+        // ícone de cena (CAMADAS — 0.12-A: a claquete lia-se como glifo
+        // partido; sceneRowIcon é a fonte única) + nome + CHECK na ativa
+        icons::drawIcon(ui, sceneRowIcon(), x + theme::dp(16.0f),
                         ry + (rowH - theme::dp(24.0f)) * 0.5f,
                         theme::dp(24.0f),
                         active ? theme::kTheme.accent : theme::kTheme.text2);
@@ -3348,7 +3353,7 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     }
     ui.endScroll();
     if (scenes.empty() && ui.hasFont()) {
-        icons::drawIcon(ui, icons::Icon::Clapper,
+        icons::drawIcon(ui, sceneRowIcon(),
                         x + kSheetW * 0.5f - theme::dp(16.0f),
                         listTop + theme::dp(20.0f), theme::dp(32.0f),
                         theme::kTheme.text2);

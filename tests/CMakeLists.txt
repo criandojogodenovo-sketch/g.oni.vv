@@ -88,6 +88,9 @@ add_executable(test_core
         test_fase35b_instancing.cpp   # 0.11-W (3.5b): os 9 pins do instancing
         test_fase375a_streaming.cpp   # 0.11-W (3.75a): os pins do streaming
         test_fase375b_impostors.cpp   # 0.11-W (3.75b): os pins do impostor
+        test_012a_lodui.cpp   # 0.12-A (A-1): os pins da UI das rows LOD/impostor
+        test_012a_contadores.cpp   # 0.12-A (A-2): os pins dos contadores + marcador de cena
+        test_012a_grelha_tooltip.cpp   # 0.12-A (A-3): o scissor do modo UI + o tooltip que morre
         # 0.7.1: cenas múltiplas + transições (projeto e2e, SceneFx puro,
         # overlay CENAS, ações Scene.Load/Transition)
         test_scenes.cpp
@@ -356,7 +359,7 @@ add_executable(test_core
 # REPLAY da sessão real do dono pelo frame() REAL do platform/main.cpp.
 # O CI corre-o e grepa o output contra ci/forbidden_log_patterns.txt —
 # qualquer padrão proibido = CI VERMELHO = release bloqueada.
-add_executable(c33_virtual
+set(GONI_CORE_SRCS
         ${CORE_DIR}/core/Scene.cpp
         ${CORE_DIR}/core/Time.cpp
         ${CORE_DIR}/core/Bench.cpp
@@ -484,6 +487,8 @@ add_executable(c33_virtual
         ${CORE_DIR}/ui/AudioWorkspace.cpp
         ${CORE_DIR}/ui/TextWindow.cpp   # 0.9.1: janela de texto (replay da rotação)
         ${CORE_DIR}/platform/ImeQueue.cpp   # 0.9.1: fila do IME + orientação
+                )
+add_executable(c33_virtual ${GONI_CORE_SRCS}
         c33_virtual.cpp)
 
 target_include_directories(test_core PRIVATE
@@ -589,3 +594,21 @@ target_compile_definitions(c33_virtual PRIVATE
         FIXTURE_DIR="${CMAKE_CURRENT_LIST_DIR}/fixtures"
         FONT_FIXTURE="${CMAKE_CURRENT_LIST_DIR}/fixtures/fonts/LiberationSans-Regular.ttf")
 target_link_libraries(c33_virtual pthread)
+
+# 0.12-A (A-4) — A CURVA RAM vs GPU (ALVO OPCIONAL, OFF por default): a
+# investigação do salto anormal do 3.º edifício. NÃO entra no test_core nem
+# no APK; constrói-se com cmake -DGONI_BENCH_RAM=ON ... && make bench_ram.
+# Mede a parte CPU do caminho de blocos (cull/sort/batching/LRU + evictions)
+# no hospedeiro — a GPU é do device (o sampler bench_ram: do main + o
+# logcat do dono fecham o veredito; docs/RELATORIO-0.12-A-INVEST-RAM.md).
+option(GONI_BENCH_RAM "Constrói o bench da curva RAM (A-4)" OFF)
+if(GONI_BENCH_RAM)
+    add_executable(bench_ram bench_ram_curve.cpp ${GONI_CORE_SRCS})
+    target_include_directories(bench_ram PRIVATE
+            ${CMAKE_CURRENT_LIST_DIR}/stub
+            ${CORE_DIR}
+            ${CORE_DIR}/vendor
+            ${CORE_DIR}/vendor/etcpak
+            ${CORE_DIR}/vendor/astc-encoder)
+    target_link_libraries(bench_ram z pthread)
+endif()

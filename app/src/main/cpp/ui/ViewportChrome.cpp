@@ -248,9 +248,31 @@ Layout layout(const UiRect& view) {
 }
 
 Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
-             const ChromeState& cs, const Camera& camera, f32 drawerH) {
+             const ChromeState& cs, const Camera& camera, f32 drawerH,
+             f32 dt, const InputState* in) {
     (void)camera;
     Actions a;
+    // 0.12-A (A-3): O CICLO DE VIDA DO TOOLTIP (a legenda de sempre virou
+    // transitória — o dono: «fica preso no viewport após o toque»):
+    //   • nasce no LARGAR do toque que escolheu a ferramenta (legendArm);
+    //   • morre aos 1,5s (o timer decai com o dt REAL do frame);
+    //   • morre no LARGAR do toque SEGUINTE (o release depois de viva).
+    // O release de nascimento é o MESMO edge — o else-if garante que não
+    // mata o que acaba de nascer (o pin morre_release usa um toque NOVO).
+    if (in != nullptr) {
+        if (st.legendArm && !in->down(0)) {
+            st.legendArm = false;
+            st.legendTimer = 1.5f;   // nasce no largar («após o toque»)
+        } else if (st.legendTimer > 0.0f && in->released(0)) {
+            st.legendTimer = 0.0f;   // o largar seguinte mata
+        }
+    }
+    if (st.legendTimer > 0.0f) {
+        st.legendTimer -= dt;
+        if (st.legendTimer < 0.0f) {
+            st.legendTimer = 0.0f;
+        }
+    }
     // G1-1: o rect da viewport com o drawerH REAL — o [+] acompanha o
     // painel de baixo (aberto = sobe; fechado = desce ao fundo)
     // GRUPO D: larguras de ESTADO (divisores) — o chrome acompanha os
@@ -277,23 +299,27 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
                        st.selectMode)) {
             st.selectMode = true;
             gz.mode = 0;
+            st.legendArm = true;   // 0.12-A (A-3): o tooltip nasce no largar
         }
         if (toolButton(ui, toolbar::kGizmoIds[0], L.rail[1], icons::Icon::Move,
                        !st.selectMode && gz.mode == 0)) {
             st.selectMode = false;
             gz.mode = 0;
+            st.legendArm = true;   // 0.12-A (A-3)
         }
         if (toolButton(ui, toolbar::kGizmoIds[1], L.rail[2],
                        icons::Icon::Rotate,
                        !st.selectMode && gz.mode == 1)) {
             st.selectMode = false;
             gz.mode = 1;
+            st.legendArm = true;   // 0.12-A (A-3)
         }
         if (toolButton(ui, toolbar::kGizmoIds[2], L.rail[3],
                        icons::Icon::Scale,
                        !st.selectMode && gz.mode == 2)) {
             st.selectMode = false;
             gz.mode = 2;
+            st.legendArm = true;   // 0.12-A (A-3)
         }
         // o ÍMAN: estado ativo/inativo, SEM texto (o valor segue no
         // tooltip do gizmo — G2-9)
@@ -330,8 +356,10 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
             }
         }
         // a LEGENDA: o nome da ferramenta ATIVA (12sp, à direita do rail,
-        // por baixo da fila do topo — nunca dentro do botão)
-        if (ui.hasFont() && L.legendVisible) {
+        // por baixo da fila do topo — nunca dentro do botão). 0.12-A (A-3):
+        // TRANSITÓRIA — só vive enquanto o tooltip tem tempo (o largar da
+        // escolha arma 1,5s; o largar seguinte mata — o C33 do dono)
+        if (ui.hasFont() && L.legendVisible && st.legendTimer > 0.0f) {
             const char* name = st.selectMode ? "Selecionar"
                                : gz.mode == 0 ? "Mover"
                                : gz.mode == 1 ? "Rodar"

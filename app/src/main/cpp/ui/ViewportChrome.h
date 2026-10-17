@@ -53,6 +53,7 @@
 #include "ui/Theme.h"
 #include "core/Types.h"
 #include "math/Math.h"   // Mat4 (column-major)
+#include "platform/InputState.h"   // 0.12-A (A-3): o largar do toque (tooltip)
 
 namespace vv {
 
@@ -158,7 +159,8 @@ struct Actions {
 };
 
 Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
-             const ChromeState& cs, const Camera& camera, f32 drawerH);
+             const ChromeState& cs, const Camera& camera, f32 drawerH,
+             f32 dt = 0.0f, const InputState* in = nullptr);
 
 } // namespace vpchrome
 } // namespace editor

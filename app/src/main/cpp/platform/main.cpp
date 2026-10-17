@@ -1406,6 +1406,9 @@ void createSceneNamed(const std::string& name) {
     showToast(msg);
     elog::info("cena: '%s' criada e ativa (%u cena(s) no projeto)",
                name.c_str(), (unsigned)g_project.scenes.size());
+    // 0.12-A (A-2): a árvore res:// acompanha (o padrão do doSwitchScene —
+    // sem isto o drawer Ficheiros ficava com a contagem STALE "0 cena(s)")
+    refreshCatalog();
 }
 
 // ---- 0.7.2: NAVEGADOR DE FICHEIROS + APLICAR-APÓS-IMPORT --------------------
@@ -6167,13 +6170,25 @@ void frame() {
     if (!g_editor.playMode) {
         const UiRect& vp3d = viewRect;   // a fonte ÚNICA (gizmo/orbit/tap idem)
         if (vp3d.w > 1.0f && vp3d.h > 1.0f) {
+            // 0.12-A (A-3): no modo UI o painel direito vive DENTRO do
+            // viewRect (o inspRight é falso em UI) — o SCISSOR reserva a
+            // largura dele (a grelha deixa de vazar por trás do vidro do
+            // Inspector; o pin grelha_nao_vaza aferra). O glViewport fica
+            // no viewRect — só o scissor corta.
+            const bool uiPanelRight =
+                g_editor.selElement >= 0 || g_editor.selJoystick ||
+                g_editor.showInspector;
+            const UiRect sc3d = safe::scissor3dRect(
+                viewRect, g_editor.uiMode, uiPanelRight, w, h,
+                g_ui.safeArea(), currentDrawerH(), g_editor.hierW,
+                g_editor.inspW);
             glViewport(static_cast<i32>(vp3d.x),
                        static_cast<i32>(h - vp3d.y - vp3d.h),
                        static_cast<i32>(vp3d.w), static_cast<i32>(vp3d.h));
             glEnable(GL_SCISSOR_TEST);
-            glScissor(static_cast<i32>(vp3d.x),
-                      static_cast<i32>(h - vp3d.y - vp3d.h),
-                      static_cast<i32>(vp3d.w), static_cast<i32>(vp3d.h));
+            glScissor(static_cast<i32>(sc3d.x),
+                      static_cast<i32>(h - sc3d.y - sc3d.h),
+                      static_cast<i32>(sc3d.w), static_cast<i32>(sc3d.h));
             scissor3d = true;
             // 0.9.6.12 (GRUPO J3 · R-024) — O LOG DE DIAGNÓSTICO DO RECT: a
             // spec J3 pede «JNI: viewport set to (x, y, w, h)» — a
@@ -6283,6 +6298,60 @@ void frame() {
     // (st3d + grid + UI do frame anterior): os verts/draw calls do relatório
     // são os da barra de estado DO MESMO frame (fonte única, R-017)
     benchTick(g_frameDt, st3d + stGrid + g_lastUiStats);
+
+#ifdef GONI_BENCH_RAM
+    // 0.12-A (A-4) — INSTRUMENTAÇÃO RAM vs GPU (removível: compila SÓ com
+    // -DGONI_BENCH_RAM; zero custo fora dela). 1 linha/segundo no engine.log
+    // com a TABELA do dono: tri, fps, frame_ms, rss_MB, pico_MB, mem livre,
+    // dc, bl. A análise vive em docs/RELATORIO-0.12-A-INVEST-RAM.md; o
+    // logcat (lowmemorykiller/reclaim) é do dono — o relatório diz o grepar.
+    static double s_benchRamClock = 0.0;
+    s_benchRamClock += g_frameDt;
+    if (s_benchRamClock >= 1.0) {
+        s_benchRamClock = 0.0;
+        double rssMb = -1.0, hwmMb = -1.0, livreMb = -1.0;
+        if (FILE* f = fopen("/proc/self/status", "r")) {
+            char line[128];
+            while (fgets(line, sizeof(line), f)) {
+                if (strncmp(line, "VmRSS:", 6) == 0) {
+                    double kb = 0.0;
+                    if (sscanf(line + 6, "%lf", &kb) == 1) {
+                        rssMb = kb / 1024.0;
+                    }
+                } else if (strncmp(line, "VmHWM:", 6) == 0) {
+                    double kb = 0.0;
+                    if (sscanf(line + 6, "%lf", &kb) == 1) {
+                        hwmMb = kb / 1024.0;
+                    }
+                }
+            }
+            fclose(f);
+        }
+        if (FILE* f = fopen("/proc/meminfo", "r")) {
+            char line[128];
+            while (fgets(line, sizeof(line), f)) {
+                if (strncmp(line, "MemAvailable:", 13) == 0) {
+                    double kb = 0.0;
+                    if (sscanf(line + 13, "%lf", &kb) == 1) {
+                        livreMb = kb / 1024.0;
+                    }
+                    break;
+                }
+            }
+            fclose(f);
+        }
+        const DrawStats tot = st3d + stGrid + g_lastUiStats;
+        const f32 frameMs = g_frameDt * 1000.0f;
+        elog::info("bench_ram: tri=%u fps=%.1f frame_ms=%.1f rss=%.1f "
+                   "pico=%.1f livre=%.1f dc=%u bl=%u blocos=%u "
+                   "carregados=%u a_transmitir=%u",
+                   tot.vertices / 3,
+                   frameMs > 0.001f ? 1000.0f / frameMs : 0.0f,
+                   static_cast<double>(frameMs), rssMb, hwmMb, livreMb,
+                   tot.drawCalls, g_blockFrame.drawn, g_blockFrame.total,
+                   g_blockFrame.loaded, g_blockFrame.pending);
+    }
+#endif
 
     // 0.7.8 — FRONTEIRA EXPLÍCITA 3D→UI: repor o estado GL que o pass 3D
     // deixou (LitMaterial liga depth/cull com a proj da câmara de jogo; o
@@ -6510,7 +6579,8 @@ void frame() {
             cs.canRedo = g_undo.canRedo();
             cs.snapValue = g_snapValue;
             const editor::vpchrome::Actions va = editor::vpchrome::draw(
-                g_ui, g_editor, g_gizmoMode, cs, g_camera, currentDrawerH());
+                g_ui, g_editor, g_gizmoMode, cs, g_camera, currentDrawerH(),
+                g_frameDt, &g_input);   // 0.12-A (A-3): o ciclo do tooltip
             if (va.undoPressed) {
                 const Handle uh = g_undo.undo(g_scene);
                 if (uh.valid()) {
@@ -8198,6 +8268,12 @@ void android_main(android_app* app) {
             g_texCache = std::make_unique<TextureCache>(*g_storage);
             g_pipeline = std::make_unique<TexturePipeline>(g_hwCompressor,
                                                            *g_texCache);
+            // 0.12-A (A-2): o catálogo + a árvore res:// nascerão com o
+            // projeto PRONTO (antes, o 1.º preenchimento só ocorria ao abrir
+            // um seletor/import — o drawer Ficheiros mostrava «0 cena(s)»
+            // e o Assets «sem ficheiros» com modelo importado de sessões
+            // anteriores; o mesmo gap que o pin ficheiros_conta_cenas trava)
+            refreshCatalog();
         }
         // F5.2: estado da permissão NO ARRANQUE (o Settings mostra o modo;
         // API < 30 → sem suporte → app-private sem nunca pedir).

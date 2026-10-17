@@ -268,6 +268,15 @@ struct EditorState {
     // [viewport settings] da toolbar do viewport abrem o MESMO popover)
     bool   vpSettingsMenu = false;
 
+    // 0.12-A (A-3) — O TOOLTIP do gizmo (a legenda de sempre virou
+    // transitória): nasce no LARGAR do toque que escolheu a ferramenta
+    // («após o toque» do dono), vive 1,5s e morre no largar do toque
+    // SEGUINTE (o pin tooltip_morre_release). legendTimer = segundos
+    // restantes (o vpchrome decai com o dt do frame; 0 = escondida);
+    // legendArm = a escolha em curso (o toque ainda pressionado).
+    f32    legendTimer = 0.0f;
+    bool   legendArm = false;
+
     // PASSO 3 (0.9.6.17): a âncora do menu de ficheiro — o ⋯ do viewport
     // arma a folha ANCORADA a ele (ax/ay em px; −1 = a âncora de sempre, o
     // botão Menu da top bar). O glifo/menu são os mesmos; só a âncora muda.
@@ -825,6 +834,12 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 // com os testes (FONTE ÚNICA do rótulo).
 const char* sceneDisplayName(const std::string& sceneRelPath, char* out,
                              size_t outCap);
+
+// 0.12-A (A-2): o ícone da LINHA de cena no seletor CENAS — Icon::Scene
+// (camadas). A claquete (Icon::Clapper) era o ícone da ANIMAÇÃO e a 24 dp
+// as listras diagonais liam-se como glifo partido (o C33 do dono) — a
+// função é a FONTE ÚNICA (o draw e o pin partilham, o padrão hierIconFor).
+icons::Icon sceneRowIcon();
 
 // F5.2: overlay IMPORT — candidatos de Download/Documents (File API direta).
 // Devolve 0 nada; i+1 = candidato i escolhido. Cap 8 linhas (mono, sem
