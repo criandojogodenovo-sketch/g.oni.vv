@@ -1,9 +1,10 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-18 · vc: 85 · Último commit: este (o 0.12-B B-3, O
-CANVAS com a moldura do device — o seletor de proporção, as guias, a
-grelha e o toast OPACO, os 3 pins; antes: 813b491 o B-2, O INSPECTOR DE
-UI; antes: 032ea2d o B-1, A ÁRVORE DE UI)
+Atualizado: 2026-10-18 · vc: 86 · Último commit: este (o 0.12-B B-4, O
+SELETOR DE CENAS COM AÇÕES — o renomear com o teclado in-app, o
+duplicar com nome único, o apagar 2-TAP, os 4 pins; antes: f722deb o
+B-3, O CANVAS; antes: 813b491 o B-2, O INSPECTOR DE UI; antes: 032ea2d
+o B-1, A ÁRVORE DE UI)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -11,8 +12,22 @@ UI; antes: 032ea2d o B-1, A ÁRVORE DE UI)
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-B (arquitetura da UI) — EM CURSO; B-1..B-3 FECHADAS**
-  (o CI do push é o árbitro). **B-3 (o canvas com a moldura do device)**:
+- **Campanha 0.12-B (arquitetura da UI) — FECHADA (B-1..B-4)** (o CI do
+  push é o árbitro). **B-4 (o seletor de cenas com ações)**: as 3
+  ações POR LINHA no menu CENAS — o RENOMEAR (o teclado in-app no
+  PROPÓSITO 8 novo, o nome atual pré-carregado; o caminho vem da fonte
+  pura sceneRenamePath com o MESMO filtro do addScene), o DUPLICAR (o
+  nome único Godot-style «main.001» — a MESMA convenção do
+  uniqueTicName; contra o manifesto E os órfãos do disco; o conteúdo
+  byte a byte; a cópia NÃO fica ativa) e o APAGAR 2-TAP (o 1.º toque
+  SÓ arma — a linha em «apagar?» com o ícone danger; o 2.º no MESMO
+  ícone confirma; o arm morre com o menu; a cena ATIVA recusa com
+  toast; o activeScene re-assenta) — as fontes puras
+  sceneRenamePath/sceneUniqueName/sceneDeleteAction partilhadas pelo
+  draw e pelos pins; os picks kScenesActBase+linha*4+ato; pins ×4
+  (test_012b_cenas.cpp) + M-B4a vermelho→verde (14 EXPECTs);
+  **R-051 NOVA**. test_core 0 falhas · c33 1006/0 · vc 86. SEM C33 na
+  B-4 (a ordem expressa do prompt). **B-3 (o canvas com a moldura do device)**:
   o seletor de proporção ANDROID (as 3 chips do topo — uiCanvasChipsRect
   é a fonte), a MOLDURA centrada com a ÁREA FORA ESCURA (α0.55 — o
   elementRect continua a ser a fonte do layout), as guias de margem
@@ -48,8 +63,8 @@ UI; antes: 032ea2d o B-1, A ÁRVORE DE UI)
   ABERTURA mudou por ordem do prompt); o UIRoot FANTASMA apanhado e
   curado (o null check do dump — §10 do relatório). test_core 0 falhas ·
   c33_virtual 1006/0 · vc 83. O pin C33 do dono (a PNG da hierarquia com
-  os 7 TICs) está no §12 do relatório. PRÓXIMA: B-2 (o Inspector de UI
-  2D + âncoras) por ordem do fluxo da campanha.
+  os 7 TICs) está no §12 do relatório. As B-2..B-4 fecharam por ordem
+  do fluxo (ver acima) e a campanha SELA-SE no B-4.
 - **Campanha 0.12-A (bugs P0) — FECHADA** (o CI do push é o árbitro):
   A-1 (o diagnóstico provou que as rows LOD/impostor JÁ EXISTEM na UI
   desde o vc 72/76 — PÁRA no fix cego por ordem do prompt; os 5 pins da
@@ -75,6 +90,10 @@ UI; antes: 032ea2d o B-1, A ÁRVORE DE UI)
 ## §2 O que está FEITO
 
 - 0.6.x–0.9.5 — fundação da engine (V.ONI core, device real, CI 5 jobs).
+- 0.12-B B-4 (vc 86) — as ações de cena (no RELATORIO-0.12-B.md
+  §25..29): o renomear/duplicar/apagar 2-tap + o manifesto round-trip;
+  pins ×4 + M-B4a; R-051; a CAMPANHA 0.12-B FECHA (sem C33 na B-4 — a
+  ordem expressa; a verificação é a suíte inteira + o c33_virtual).
 - 0.12-B B-3 (vc 85) — o canvas com a moldura do device (no
   RELATORIO-0.12-B.md §20..24): o seletor + a moldura + o véu + as guias
   + a grelha + o toast opaco; pins ×3 + M-B3a/b; a paridade recalibrada.
@@ -269,7 +288,9 @@ Commits puramente documentais não são afetados.
   declarados).
 - `docs/RELATORIO-0.12-B.md` — o relatório da 0.12-B (a B-1: a
   arquitetura, os pins ×9, as mutações coladas, as recalibrações, o
-  UIRoot fantasma, os limites, o protocolo C33 do dono).
+  UIRoot fantasma, os limites, o protocolo C33 do dono; a B-2 no §14+,
+  a B-3 no §20+, a B-4 no §25+ — as ações de cena, o R-051 e o fecho da
+  campanha).
 - `docs/RELATORIO-0.12-A.md` — o relatório da 0.12-A (os 4 bugs P0: os
   diagnósticos com ficheiro:linha, as decisões, os pins ×11, as 6
   mutações coladas, o achado fora da lista, os limites).

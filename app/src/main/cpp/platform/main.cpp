@@ -1426,6 +1426,111 @@ void createSceneNamed(const std::string& name) {
     refreshCatalog();
 }
 
+// 0.12-B (B-4) — RENOMEAR cena (o teclado in-app, propósito 8): o ficheiro
+// muda de nome (copia → escreve o novo → remove o velho) e o MANIFESTO
+// aponta o caminho novo. A cena ativa CONTINUA ativa (o activeScene é
+// índice — o rename não o mexe). O caminho novo vem da FONTE PURA
+// (sceneRenamePath — o MESMO filtro do addScene).
+void renameSceneInProject(u32 idx, const std::string& newName) {
+    if (!g_projectReady || !g_storage || idx >= g_project.scenes.size()) {
+        return;
+    }
+    std::string nv;
+    if (!editor::sceneRenamePath(g_project.scenes[idx], newName, nv)) {
+        showToast("nome de cena invalido");
+        return;
+    }
+    const std::string old = g_project.scenes[idx];
+    if (g_storage->exists(nv)) {
+        showToast("cena já existe");
+        elog::warn("cena: '%s' já existe no projeto", newName.c_str());
+        return;
+    }
+    std::string text;
+    if (!g_storage->readText(old, text) ||
+        !g_storage->writeText(nv, text) || !g_storage->remove(old)) {
+        showToast("renomear falhou (engine.log)");
+        elog::error("cena: renomear %s FALHOU", old.c_str());
+        return;
+    }
+    g_project.scenes[idx] = nv;
+    const bool ok = g_project.saveManifest(*g_storage);
+    elog::info("cena: renomeada '%s' -> '%s'%s", old.c_str(), nv.c_str(),
+               ok ? "" : " (manifesto FALHOU)");
+    showToast(ok ? "cena renomeada" : "cena renomeada (manifesto falhou)");
+    refreshCatalog();   // o Ficheiros lista o scenes/ — os nomes seguem
+}
+
+// 0.12-B (B-4) — DUPLICAR cena: o MESMO conteúdo num nome único Godot-style
+// («main» → «main.001»; a convenção do uniqueTicName, a variante DUPLICAR
+// que SEMPRE sufixa). A cópia NÃO fica ativa — o utilizador continua na
+// cena em que estava (a cópia nunca rouba o foco).
+void duplicateSceneInProject(u32 idx) {
+    if (!g_projectReady || !g_storage || idx >= g_project.scenes.size()) {
+        return;
+    }
+    const std::string src = g_project.scenes[idx];
+    char base[48];
+    editor::sceneDisplayName(src, base, sizeof(base));
+    // o nome único contra o manifesto E o storage (um órfão no disco conta
+    // — escrever por cima dele era destruir dados que o manifesto não vê)
+    std::vector<std::string> vista = g_project.scenes;
+    std::string candidate = editor::sceneUniqueName(vista, base);
+    while (g_storage->exists(std::string(Project::kDirScenes) + "/" +
+                             candidate + ".goni")) {
+        vista.push_back(std::string(Project::kDirScenes) + "/" + candidate +
+                        ".goni");
+        candidate = editor::sceneUniqueName(vista, base);
+    }
+    const std::string nv =
+        std::string(Project::kDirScenes) + "/" + candidate + ".goni";
+    std::string text;
+    if (!g_storage->readText(src, text) ||
+        !g_storage->writeText(nv, text)) {
+        showToast("duplicar falhou (engine.log)");
+        elog::error("cena: duplicar %s FALHOU", src.c_str());
+        return;
+    }
+    g_project.scenes.push_back(nv);   // SEM ativar (a cópia não rouba o foco)
+    const bool ok = g_project.saveManifest(*g_storage);
+    elog::info("cena: duplicada '%s' -> '%s'%s", src.c_str(), nv.c_str(),
+               ok ? "" : " (manifesto FALHOU)");
+    showToast(ok ? "cena duplicada" : "cena duplicada (manifesto falhou)");
+    refreshCatalog();
+}
+
+// 0.12-B (B-4) — APAGAR cena: só chega aqui com o 2.º toque (o menu só
+// devolve o pick CONFIRMADO — o 1.º fica no menu com a linha armada). A
+// cena ATIVA nunca se apaga (ative outra primeiro — sem cena ativa o
+// manifesto fica sem para onde voltar); o ficheiro sai do disco, a linha
+// sai do manifesto e o activeScene re-assenta se a apagada vinha antes.
+void deleteSceneInProject(u32 idx) {
+    if (!g_projectReady || !g_storage || idx >= g_project.scenes.size()) {
+        return;
+    }
+    if (idx == g_project.activeScene) {
+        showToast("ative outra cena para apagar esta");
+        elog::warn("cena: recusado apagar a ATIVA (%s)",
+                   g_project.scenes[idx].c_str());
+        return;
+    }
+    const std::string rel = g_project.scenes[idx];
+    if (!g_storage->remove(rel)) {
+        elog::warn("cena: o ficheiro %s já não existia (limpo na mesma)",
+                   rel.c_str());
+    }
+    g_project.scenes.erase(g_project.scenes.begin() +
+                           static_cast<ptrdiff_t>(idx));
+    if (g_project.activeScene > idx) {
+        --g_project.activeScene;   // a ativa re-assenta (índice menos um)
+    }
+    const bool ok = g_project.saveManifest(*g_storage);
+    elog::info("cena: apagada '%s'%s", rel.c_str(),
+               ok ? "" : " (manifesto FALHOU)");
+    showToast(ok ? "cena apagada" : "cena apagada (manifesto falhou)");
+    refreshCatalog();
+}
+
 // ---- 0.7.2: NAVEGADOR DE FICHEIROS + APLICAR-APÓS-IMPORT --------------------
 // O IMPORT robusto: navegar QUALQUER pasta do armazenamento (all-files),
 // com a GALERIA (DCIM/Camera, Pictures) nas raízes, o CAMINHO visível no
@@ -7784,6 +7889,7 @@ void frame() {
                             : g_editor.textPurpose == 4 ? "COR DO ELEMENTO"
                             : g_editor.textPurpose == 5 ? "COR DO TIC"
                             : g_editor.textPurpose == 7 ? "RENOMEAR CLIP"
+                            : g_editor.textPurpose == 8 ? "RENOMEAR CENA"
                             : g_editor.textPurpose == 9 ? "COMANDO DA CONSOLA"
                                                         : "ALVO DA AÇÃO";
         const int ch =
@@ -7829,6 +7935,17 @@ void frame() {
             } else if (g_editor.textPurpose == 1) {
                 // 0.7.1: NOVA CENA (o nome vem do teclado in-app)
                 createSceneNamed(g_editor.textBuf);
+            } else if (g_editor.textPurpose == 8) {
+                // 0.12-B (B-4) — RENOMEAR CENA: o alvo vive em textScene
+                // (o commit precisa do STORAGE/projeto — o mesmo motivo do
+                // propósito 1/7 ficar com o CHAMADOR)
+                if (g_projectReady && g_storage &&
+                    g_editor.textScene >= 0 && g_editor.textLen > 0) {
+                    renameSceneInProject(
+                        static_cast<u32>(g_editor.textScene),
+                        std::string(g_editor.textBuf));
+                }
+                g_editor.textScene = -1;
             } else if (g_editor.textPurpose == 7) {
                 // 0.8.11 — RENOMEAR CLIP: o commit precisa do STORAGE (o
                 // commitTextInput é puro cena+editor); copia bytes → remove
@@ -7897,6 +8014,26 @@ void frame() {
         if (pick == 1) {
             // nova cena: o TECLADO in-app pede o nome (propósito 1)
             editor::openTextInput(g_editor, 1, Handle{}, -1, "");
+        } else if (pick >= editor::kScenesActBase) {
+            // 0.12-B (B-4): as AÇÕES por linha (renomear/duplicar/apagar —
+            // o apagar só sai CONFIRMADO pelo 2.º toque; o 1.º fica no
+            // menu com a linha armada e nada chega ao main)
+            const int code = pick - editor::kScenesActBase;
+            const u32 idx = static_cast<u32>(code / 4);
+            const int act = code % 4;
+            if (idx < g_project.scenes.size()) {
+                if (act == editor::kSceneActRename) {
+                    char cur[48];
+                    editor::sceneDisplayName(g_project.scenes[idx], cur,
+                                             sizeof(cur));
+                    editor::openTextInput(g_editor, 8, Handle{}, -1, cur);
+                    g_editor.textScene = static_cast<i32>(idx);
+                } else if (act == editor::kSceneActDuplicate) {
+                    duplicateSceneInProject(idx);
+                } else if (act == editor::kSceneActDelete) {
+                    deleteSceneInProject(idx);
+                }
+            }
         } else if (pick >= 2) {
             const u32 idx = static_cast<u32>(pick - 2);
             if (idx != g_project.activeScene) {

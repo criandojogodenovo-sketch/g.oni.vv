@@ -179,6 +179,13 @@ struct EditorState {
     bool   removeDialog = false;    // confirmação de remoção (substitui o
                                     // "apagar" sem confirmação)
     bool   scenesMenu = false;      // 0.7.1: overlay CENAS (lista/nova/trocar)
+    // 0.12-B (B-4): as AÇÕES por linha do menu CENAS (renomear/duplicar/
+    // apagar 2-tap). O APAGAR segue o padrão da casa (o áudio confirma
+    // antes de apagar): o 1.º toque no ícone SÓ ARMA a linha (estado
+    // «apagar?» — o ícone fica danger), o 2.º toque no MESMO ícone é que
+    // devolve a ação ao main. Qualquer outro toque (outra linha, trocar,
+    // fora) DESARMA — e o arm morre com o menu.
+    i32    sceneDelArm = -1;       // a linha com o apagar ARMADO (−1 = nada)
     bool   fileBrowser = false;     // 0.7.2: overlay NAVEGADOR de ficheiros
     bool   applyAsk = false;        // 0.7.2: diálogo "aplicar ao TIC?" pós-import
 
@@ -197,6 +204,9 @@ struct EditorState {
                                     // 2 = texto de elemento, 3 = alvo de ação
     Handle textTic{};               // alvo do renomear
     i32    textElement = -1;        // alvo do texto/alvo (índice no canvas)
+    i32    textScene = -1;          // 0.12-B (B-4): a cena alvo do RENOMEAR
+                                    // (propósito 8 — índice no manifesto;
+                                    // o commit é do CHAMADOR, como o 1/7)
     char   textBuf[40] = "";       // buffer em edição
     u32    textLen = 0;
     bool   kbLower = false;         // 0.7.5: teclado em minúsculas (abc/ABC)
@@ -838,11 +848,53 @@ int drawStorageDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 // ACCENT; scroll id 44) + botão "+ Nova cena". Devolve:
 //   0 = nada este frame; 1 = "+ Nova cena"; 2.. = trocar para a cena
 //   (pick-2 = índice 0-based em `scenes`)
+// 0.12-B (B-4): cada linha ganha 3 ZONAS de ação à direita (renomear ·
+// duplicar · apagar 2-tap) — os picks de AÇÃO saem por kScenesActBase +
+// linha*4 + ato (o apagar só sai CONFIRMADO pelo 2.º toque; o 1.º fica
+// no menu com a linha armada).
 // `scenes` são os caminhos relativos do manifesto ("scenes/main.goni") —
 // o nome mostrado é o basename sem extensão.
 int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                    EditorState& st, const std::vector<std::string>& scenes,
                    u32 activeScene, f32 ax = -1.0f, f32 ay = -1.0f);
+
+// ---- 0.12-B (B-4): as ações de cena (a fonte única dos picks) -------------
+
+// o pick de AÇÃO na linha `row` (o return de drawScenesMenu): o ato é um
+// de kSceneAct*; o main decodifica (row = (pick-base)/4, ato = %4).
+constexpr int kScenesActBase = 100000;
+constexpr int kSceneActRename = 0;      // abrir o teclado (propósito 8)
+constexpr int kSceneActDuplicate = 1;   // copiar com nome único
+constexpr int kSceneActDelete = 2;      // apagar (só sai CONFIRMADO)
+inline int sceneActionPick(int row, int act) {
+    return kScenesActBase + row * 4 + act;
+}
+
+// o caminho RELATIVO do renomear ("scenes/a.goni" + "b" →
+// "scenes/b.goni"). O MESMO filtro do addScene (o vazio e / \ : . são
+// recusados — o stem simples é o contrato); o MESMO nome devolve false
+// (reescrever o ficheiro por nada nunca).
+bool sceneRenamePath(const std::string& rel, const std::string& newName,
+                     std::string& out);
+
+// o nome único para DUPLICAR ("main" → "main.001", "main.002"… — a MESMA
+// convenção Godot-style do uniqueTicName, a variante DUPLICAR que SEMPRE
+// sufixa; contra os caminhos da lista; o truncamento a 28 é o contrato do
+// nome). Pure — o pin aferra a sequência.
+std::string sceneUniqueName(const std::vector<std::string>& scenes,
+                            const std::string& base);
+
+// o passo do APAGAR 2-tap (a DECISÃO pura — o draw e o pin partilham):
+//   1 = ARMA (o 1.º toque NUNCA apaga; o menu fica aberto com a linha em
+//       estado «apagar?») · 2 = APAGA (o 2.º toque no MESMO ícone) ·
+// um toque no ícone de OUTRA linha RE-ARMA essa (nunca apaga direto).
+// A mutação M-B4a mora AQUI (o apagar sem confirmação).
+inline int sceneDeleteAction(i32 armedRow, i32 tappedRow) {
+    if (armedRow >= 0 && armedRow == tappedRow) {
+        return 2;   // o 2.º toque no MESMO ícone confirma
+    }
+    return 1;       // arma (ou re-arma noutra linha)
+}
 
 // nome de exibição da cena ("scenes/main.goni" → "main") — partilhado
 // com os testes (FONTE ÚNICA do rótulo).

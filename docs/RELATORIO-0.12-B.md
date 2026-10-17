@@ -452,3 +452,131 @@ desaparece — o corte seco é o preço honesto do contraste constante).
 3. + → Joystick → o toast «joystick adicionado» LEGÍVEL (opaco) por cima
    de qualquer fundo.
 4. PNG do viewport com a moldura + guias.
+
+## 25. B-4 — Objetivo e o que mudou
+
+O seletor de CENAS (o sheet do botão [Cena ▾]) só sabia CRIAR e TROCAR —
+as três operações de gestão do prompt (renomear com o teclado in-app,
+duplicar com nome único, apagar com confirmação) não existiam: gerir
+cenas era apagar o projeto à mão. A B-4 dá as três ações a cada linha do
+menu, sem uma classe nova (a cláusula do prompt):
+
+- **AS AÇÕES PURAS** (a fonte única, o padrão sceneRowIcon/toastColors —
+  o draw e os pins partilham): `sceneRenamePath` (ui/EditorUi.cpp:3263 —
+  o caminho novo «scenes/<nome>.goni» com o MESMO filtro do addScene: o
+  vazio e / \ : . recusados; o MESMO nome é false — reescrever o ficheiro
+  por nada nunca), `sceneUniqueName` (ui/EditorUi.cpp:3288 — «main» →
+  «main.001», a MESMA convenção Godot-style do uniqueTicName, a variante
+  DUPLICAR que SEMPRE sufixa; o truncamento a 28 é o contrato do nome) e
+  `sceneDeleteAction` (ui/EditorUi.h — a DECISÃO do 2-tap: o 1.º toque
+  NUNCA apaga, devolve 1 = arma; o 2.º no MESMO ícone devolve 2 = apaga;
+  um toque no ícone de OUTRA linha re-arma essa — nunca apaga direto).
+- **O MENU** (drawScenesMenu): cada linha ganha 3 ZONAS de ação de 40 dp
+  na borda direita (lápis · duplicar · lixeira — os ícones Rename/
+  Duplicate/Trash do atlas, zero glifos novos); o check da ativa (20 dp)
+  vem para junto ao nome; o nome usa labelFitted a 72 dp. O APAGAR segue
+  o padrão da casa (o áudio confirma antes de apagar): o 1.º toque SÓ
+  arma — a linha entra em estado «apagar?» (o ícone fica danger com a
+  moldura da zona na mesma tinta), o arm vive no
+  `EditorState::sceneDelArm` e MORRE com o menu (fora/fechar/trocar
+  desarmam); o 2.º toque no MESMO ícone é que sai para o main pelo pick
+  `kScenesActBase + linha*4 + ato` (os atos kSceneActRename/Duplicate/
+  Delete; a decodificação é do main). O RENOMEAR e o DUPLICAR saem no
+  1.º toque (ações seguras não pagam confirmação).
+- **O MAIN** (platform/main.cpp): `renameSceneInProject` (copia → escreve
+  o novo → remove o velho → o manifesto aponta o caminho novo; a cena
+  ativa CONTINUA ativa — o activeScene é índice; recusa nome ocupado no
+  manifesto E no disco), `duplicateSceneInProject` (o MESMO conteúdo
+  byte a byte num nome único Godot-style — contra o manifesto E os
+  órfãos do disco; a cópia NÃO fica ativa: nunca rouba o foco) e
+  `deleteSceneInProject` (o ficheiro sai do disco, a linha sai do
+  manifesto e o activeScene re-assenta se a apagada vinha antes; a cena
+  ATIVA nunca se apaga — «ative outra cena para apagar esta», sem cena
+  ativa o manifesto fica sem para onde voltar). Os três fecham com
+  refreshCatalog (o Ficheiros segue) e logam «cena: …» no engine.log.
+  O RENOMEAR usa o teclado in-app com o PROPÓSITO 8 NOVO (o título
+  «RENOMEAR CENA»; o alvo vive no `EditorState::textScene`; o nome atual
+  entra PRÉ-CARREGADO no buffer — o padrão openTextInput(initial)).
+
+## 26. Os pins (4/4 verdes — test_012b_cenas.cpp)
+
+- **cena_rename** — a fonte pura (o caminho certo; os 5 recusados:
+  vazio / a-barras / dois-pontos / ponto / barra inversa; o mesmo nome
+  false) + o GESTO real (o lápis da linha 1 devolve
+  `sceneActionPick(1, kSceneActRename)`, o menu fecha; o propósito 8
+  abre com o buffer pré-carregado).
+- **cena_duplicate** — a sequência «main» → «main.001» → «main.002» →
+  «main.003» contra o manifesto; sem colisão o sufixo entra NA MESMA
+  (nunca o nome nu); o truncamento a 28; o gesto real (o duplicar da
+  linha 0 devolve a ação).
+- **cena_delete_confirm** — a matriz da decisão pura (−1,0 → 1 arma;
+  0,0 → 2 confirma; 0,1 → 1 re-arma; 2,0 → 1; degenerado → 1) + o GESTO
+  real de ponta a ponta: 1.º toque arma e fica no menu (pick 0, arm 0);
+  2.º no MESMO ícone confirma (pick kSceneActDelete, menu fecha, arm −1);
+  toque no ícone de OUTRA linha re-arma (nenhuma apagada); toque no
+  corpo da linha desarma E troca; toque fora desarma e fecha.
+- **cena_serializa** — o MANIFESTO round-trip com as 3 ações aplicadas
+  pelo MESMO caminho do main sobre o FakeStorage da casa: cria (3 cenas,
+  activeScene 2, um setting verbatim) → abre IGUAL → renomeia (o velho
+  sai do disco, as irmãs intactas, a ativa é índice e não mexe) →
+  duplica (o conteúdo byte a byte, a cópia no fim da lista, sem roubar
+  o foco) → apaga uma NÃO-ativa que vinha ANTES da ativa (o índice
+  re-assenta: «boss» continua ativo; a cópia sobrevive).
+
+## 27. A mutação (vermelho → reposto → verde)
+
+- **M-B4a** (o apagar sem confirmação — sceneDeleteAction devolve SEMPRE
+  2): cena_delete_confirm VERMELHO com 14 EXPECTs (a matriz pura INTEIRA
+  — os 1.º toques devolviam 2 — e o gesto real: o 1.º toque "apagava"
+  direto, o menu nem ficava aberto):
+  ```
+  cena_delete_confirm ... FALHOU  test_012b_cenas.cpp:152  sceneDeleteAction(-1, 0) == 1
+  FALHOU  :154  sceneDeleteAction(0, 1) == 1
+  FALHOU  :156  sceneDeleteAction(2, 0) == 1
+  FALHOU  :157  sceneDeleteAction(-1, -1) == 1
+  FALHOU  :175  delTap(0) == 0
+  FALHOU  :176  e.st.scenesMenu
+  FALHOU  :177  e.st.sceneDelArm == 0
+  FALHOU  :186  delTap(0) == 0
+  FALHOU  :187  e.st.sceneDelArm == 0
+  FALHOU  :188  delTap(2) == 0
+  FALHOU  :189  e.st.sceneDelArm == 2
+  FALHOU  :198  delTap(0) == 0
+  (+ 2 EXPECTs irmãs do fecho/desarme — 14 no total)
+  ```
+  Reposto → 0 falhas. Os pins irmãs (cena_rename/duplicate/serializa)
+  ficaram VERDES durante a mutação — o isolamento provado.
+
+## 28. Recalibrações e limites
+
+- ZERO recalibrações: os pins das sub-fases anteriores e os do menu
+  (cenas_menu_lista_marca_ativa_troca_e_nova — o tap no CENTRO da linha
+  continua a trocar, o +Nova continua 1) passaram intactos.
+- O check da ativa MOVEU de posição (a borda direita da linha passou a
+  ser das ações) — nenhum pin o aferrava por posição (o cena_ativa_
+  marcador aferra o ÍCONE da linha, sceneRowIcon); o estado visual da
+  ativa (fill surface2 + ícone + nome em accent) fica intacto.
+- A cena ATIVA recusa o apagar (decisão honesta: sem cena ativa o
+  manifesto fica sem para onde voltar; a recusa toast+log) — o menu
+  arma-na na mesma; a recusa acontece no main com a mensagem clara.
+- O renomear NÃO reescreve referências DENTRO das cenas (scripts V.ONI
+  que citam «nomedacena.transition.for» ficam com o nome velho — o
+  engine.log registra o renomear; a atualização de citações é outra
+  campanha se o dono quiser).
+- O nome do duplicar consulta o manifesto E o storage (órfão no disco
+  conta — escrever por cima dele era destruir dados invisíveis).
+
+## 29. Fecho da campanha 0.12-B
+
+- A B-4 fecha a campanha (a ordem do prompt: B-1..B-4, depois PARAR).
+  Sem Pin C33 na B-4 (a ordem é expressa) — a verificação no device é
+  a varredura do c33_virtual (1006 checks, 0 falhas) + a suíte inteira
+  (test_core 0 falhas, GONI_SKIP dos 2 flakes conhecidos:
+  sentinela_r039 e regress_streaming_paralelo — o A/B da Y-1 provou que
+  existem no HEAD sem as mudanças).
+- **R-051 NOVA** (docs/REGRESSOES.md): «a cena não se apaga sem o 2.º
+  toque» — o padrão da casa do apagar, vigiado pelo cena_delete_confirm
+  + M-B4a colada acima.
+- O STATE.md sela a campanha (0.12-B FECHADA — a próxima só com
+  CONTINUAR do dono). versionCode 85 → 86 (o §14 do
+  RELATORIO-0.9.6.md declara o par novo para o gate R-015).

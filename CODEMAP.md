@@ -77,6 +77,15 @@ Atualizado: 2026-10-18 · vc: 83
   raio/zona morta/sens p/ Joystick; os botões de RESET por campo, o
   EditorState::inspUiCollapsed guarda o colapso; SEM "remover
   joystick" — o apagar é do TIC).
+  **0.12-B B-4 (as ações de cena)**: ui/EditorUi.h tem as FONTES PURAS
+  (sceneRenamePath — o caminho do renomear com o filtro do addScene;
+  sceneUniqueName — «main.001» Godot-style, a variante DUPLICAR;
+  sceneDeleteAction — a decisão do 2-tap; sceneActionPick/kScenesAct*
+  — os picks de ação) + o estado (EditorState::sceneDelArm — a linha
+  com o apagar armado; textScene — o alvo do propósito 8); o
+  drawScenesMenu desenha as 3 ZONAS de ação de 40 dp por linha
+  (lápis/duplicar/lixeira) e despacha pelo tap re-despachado do scroll
+  — o apagar só sai CONFIRMADO pelo 2.º toque.
 - **app/src/main/cpp/components/** — os componentes do TIC: MeshRenderer
   (+ `impostorDistance`), CameraComp, Body3D, RigidBody3D, AudioPlayer,
   ScriptComp, AnimationPlayer, UI*, Input*. **0.12-B (a árvore de UI)**:
@@ -93,7 +102,15 @@ Atualizado: 2026-10-18 · vc: 83
   **0.12-B**: o "+" em modo UI cria pela ÁRVORE (uiAddTreeElement/
   uiAddTreeJoystick); o Play arma/aplica os botões da árvore
   (hitTestUiTree/uiElementFromHit) e desenha a árvore + TODOS os
-  TouchControls.
+  TouchControls. **0.12-B B-4 (as ações de cena)**: main.cpp tem
+  renameSceneInProject (copia → escreve o novo → remove o velho → o
+  manifesto aponta o novo caminho; a ativa continua ativa),
+  duplicateSceneInProject (o MESMO conteúdo num nome único — contra o
+  manifesto E os órfãos do disco; a cópia não fica ativa) e
+  deleteSceneInProject (o ficheiro sai, a linha sai, o activeScene
+  re-assenta; a ATIVA recusa — «ative outra cena para apagar esta»);
+  o RENOMEAR usa o teclado in-app no PROPÓSITO 8 (o buffer
+  pré-carregado com o nome atual; o alvo em textScene).
 - **tests/** — a suíte do core (C++17, GL-free): test_main.cpp (o runner,
   GONI_ONLY/GONI_SKIP), TestFramework.h (o TEST/EXPECT), test_sentinels.cpp
   (as sentinelas regress_*), test_ctx_pines.cpp (os pins dos índices da
@@ -111,6 +128,12 @@ Atualizado: 2026-10-18 · vc: 83
   test_012a_contadores.cpp (os pins da 0.12-A A-2: os contadores pelo
   UV do atlas + o marcador de cena), test_012a_grelha_tooltip.cpp (os
   pins da 0.12-A A-3: o scissor3dRect + o ciclo do tooltip),
+  test_012b_uitree.cpp (os pins da B-1: a árvore de UI),
+  test_012b_inspui.cpp (os pins da B-2: o Inspector de UI),
+  test_012b_canvas.cpp (os pins da B-3: a moldura + as guias + o
+  toast), test_012b_cenas.cpp (os pins da B-4: cena_rename/
+  cena_duplicate/cena_delete_confirm — o 2-tap, M-B4a — e
+  cena_serializa — o manifesto round-trip no FakeStorage),
   test_voni.cpp, test_bench.cpp,
   test_gmeshv3.cpp, voni_refgen.cpp (o gerador da referência), c33_virtual.cpp
   (o dispositivo virtual), bench_ram_curve.cpp (A-4: a curva 50k…12,3M

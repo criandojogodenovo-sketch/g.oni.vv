@@ -21,6 +21,7 @@
 #include "render/Primitives.h"            // 0.8.0: seletor de primitivas
 #include "render/Mesh.h"                 // 0.8.9: AABB do mesh (normalização uniforme)
 #include "core/Scene.h"
+#include "core/Project.h"   // 0.12-B (B-4): kDirScenes (o caminho das cenas)
 #include "ui/UiEditor.h"                  // 0.8.6: uiHexFormat (linha hex)
 #include "ui/Icons.h"                    // 0.9.0: conjunto outline (spec A)
 #include "ui/Strings.h"                  // 0.9.6.18 (D4): a tabela localizada
@@ -3256,6 +3257,59 @@ const char* sceneDisplayName(const std::string& sceneRelPath, char* out,
 // única vive no header — o pin cena_ativa_marcador aferra ESTA função)
 icons::Icon sceneRowIcon() { return icons::Icon::Scene; }
 
+// 0.12-B (B-4) — o caminho do RENOMEAR: o MESMO filtro do addScene (só o
+// stem; / \ : . e o vazio recusados) e o MESMO nome é false (reescrever o
+// ficheiro por nada nunca). Pure — o pin cena_rename aferra a sequência.
+bool sceneRenamePath(const std::string& rel, const std::string& newName,
+                     std::string& out) {
+    std::string clean;
+    for (const char c : newName) {
+        if (c == '/' || c == '\\' || c == ':' || c == '.') {
+            return false;
+        }
+        clean.push_back(c);
+    }
+    if (clean.empty()) {
+        return false;
+    }
+    const std::string nv =
+        std::string(Project::kDirScenes) + "/" + clean + ".goni";
+    if (nv == rel) {
+        return false;
+    }
+    out = nv;
+    return true;
+}
+
+// 0.12-B (B-4) — o nome único do DUPLICAR («main» → «main.001», «main.002»…
+// — a MESMA convenção Godot-style do uniqueTicName, a variante DUPLICAR que
+// SEMPRE sufixa; o truncamento a 28 é o contrato do nome). Contra os
+// caminhos da lista (o stem transforma-se no rel para comparar).
+std::string sceneUniqueName(const std::vector<std::string>& scenes,
+                            const std::string& base) {
+    std::string b = base;
+    if (b.size() > 28) {
+        b = b.substr(0, 28);
+    }
+    auto ocupado = [&](const char* cand) {
+        const std::string rel =
+            std::string(Project::kDirScenes) + "/" + cand + ".goni";
+        for (const std::string& s : scenes) {
+            if (s == rel) {
+                return true;
+            }
+        }
+        return false;
+    };
+    char name[48];
+    u32 suffix = 1;
+    do {
+        std::snprintf(name, sizeof(name), "%s.%03u", b.c_str(), suffix);
+        ++suffix;
+    } while (ocupado(name) && suffix < 1000);
+    return std::string(name);
+}
+
 int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                    EditorState& st, const std::vector<std::string>& scenes,
                    u32 activeScene, f32 ax, f32 ay) {
@@ -3299,6 +3353,7 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
              sh - ui.safeTop() - ui.safeBottom(), theme::kTheme.scrimMenu);
     if (pressedOutside(in, x, y, kSheetW, h)) {
         st.scenesMenu = false;
+        st.sceneDelArm = -1;   // o arm morre com o menu (B-4)
         return 0;
     }
 
@@ -3351,7 +3406,7 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                      theme::kTheme.surface2);
         }
         // ícone de cena (CAMADAS — 0.12-A: a claquete lia-se como glifo
-        // partido; sceneRowIcon é a fonte única) + nome + CHECK na ativa
+        // partido; sceneRowIcon é a fonte única) + nome
         icons::drawIcon(ui, sceneRowIcon(), x + theme::dp(16.0f),
                         ry + (rowH - theme::dp(24.0f)) * 0.5f,
                         theme::dp(24.0f),
@@ -3361,15 +3416,35 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                                theme::dp(12.0f),
                            ry + (rowH - tm.block()) * 0.5f + tm.ascent, name,
                            active ? theme::kTheme.accent : theme::kTheme.text1,
-                           kSheetW - theme::dp(24.0f) - theme::dp(36.0f) -
-                               theme::dp(12.0f) - theme::dp(32.0f));
+                           theme::dp(72.0f));
         }
+        // o check da ativa (20 dp, junto ao nome — a direita da linha é
+        // das AÇÕES desde a B-4)
         if (active) {
-            icons::drawIcon(ui, icons::Icon::Check,
-                            x + kSheetW - theme::dp(16.0f) - theme::dp(24.0f),
-                            ry + (rowH - theme::dp(24.0f)) * 0.5f,
-                            theme::dp(24.0f), theme::kTheme.accent);
+            icons::drawIcon(ui, icons::Icon::Check, x + theme::dp(128.0f),
+                            ry + (rowH - theme::dp(20.0f)) * 0.5f,
+                            theme::dp(20.0f), theme::kTheme.accent);
         }
+        // 0.12-B (B-4): as 3 ZONAS de ação (40 dp cada na borda direita;
+        // o tap do scroll re-despacha — a MESMA geometria decide). O
+        // apagar ARMADO («apagar?» — espera o 2.º toque) desenha o ícone
+        // danger com a moldura da zona na mesma tinta.
+        const f32 ay0 = ry + (rowH - theme::dp(22.0f)) * 0.5f;
+        const bool armado =
+            st.sceneDelArm >= 0 && static_cast<u32>(st.sceneDelArm) == i;
+        if (armado) {
+            ui.frameRounded(x + theme::dp(232.0f), ry + theme::dp(4.0f),
+                            theme::dp(40.0f), rowH - theme::dp(8.0f), 1.0f,
+                            theme::dp(theme::kRadiusCard),
+                            theme::kTheme.danger);
+        }
+        icons::drawIcon(ui, icons::Icon::Rename, x + theme::dp(161.0f), ay0,
+                        theme::dp(22.0f), theme::kTheme.text2);
+        icons::drawIcon(ui, icons::Icon::Duplicate, x + theme::dp(201.0f),
+                        ay0, theme::dp(22.0f), theme::kTheme.text2);
+        icons::drawIcon(ui, icons::Icon::Trash, x + theme::dp(241.0f), ay0,
+                        theme::dp(22.0f),
+                        armado ? theme::kTheme.danger : theme::kTheme.text2);
         ui.widgetHit(6710 + static_cast<u64>(i), x + theme::dp(4.0f), ry,
                      kSheetW - theme::dp(8.0f),
                      rowH);   // só desenha (scroll re-despacha)
@@ -3391,13 +3466,38 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     if (newScene) {
         chosen = 1;
     } else if (ui.scrollTap(44, tx, ty)) {
-        const i32 row = static_cast<i32>((ty - listTop + off) / rowH);
-        if (row >= 0 && static_cast<u32>(row) < scenes.size()) {
-            chosen = row + 2;
+        const f32 ly = ty - listTop + off;
+        const i32 row = static_cast<i32>(ly / rowH);
+        if (row >= 0 && static_cast<u32>(row) < scenes.size() &&
+            ly >= 0.0f) {
+            const f32 lx = tx - x;
+            // 0.12-B (B-4): as ZONAS de ação (a MESMA geometria desenhada;
+            // o tap do scroll re-despacha). O APAGAR é 2-tap — o passo
+            // vem da DECISÃO pura (o pin e o draw partilham a fonte):
+            // o 1.º toque SÓ arma (fica no menu, a linha «apagar?»), o
+            // 2.º no MESMO ícone é que sai para o main.
+            if (lx >= theme::dp(232.0f)) {
+                if (sceneDeleteAction(st.sceneDelArm, row) == 2) {
+                    st.sceneDelArm = -1;
+                    chosen = sceneActionPick(row, kSceneActDelete);
+                } else {
+                    st.sceneDelArm = row;   // arma/re-arma
+                }
+            } else if (lx >= theme::dp(192.0f)) {
+                st.sceneDelArm = -1;
+                chosen = sceneActionPick(row, kSceneActDuplicate);
+            } else if (lx >= theme::dp(152.0f)) {
+                st.sceneDelArm = -1;
+                chosen = sceneActionPick(row, kSceneActRename);
+            } else {
+                st.sceneDelArm = -1;   // trocar de cena desarma
+                chosen = row + 2;
+            }
         }
     }
     if (chosen != 0) {
         st.scenesMenu = false;
+        st.sceneDelArm = -1;   // o arm morre com o menu (B-4)
     }
     return chosen;
 }
