@@ -77,7 +77,7 @@ Atualizado: 2026-10-18 · vc: 83
   raio/zona morta/sens p/ Joystick; os botões de RESET por campo, o
   EditorState::inspUiCollapsed guarda o colapso; SEM "remover
   joystick" — o apagar é do TIC).
-  **0.12-B B-4 (as ações de cena)**: ui/EditorUi.h tem as FONTES PURAS
+  **0.12-B B-4 (as ações de cena)**: app/src/main/cpp/ui/EditorUi.h tem as FONTES PURAS
   (sceneRenamePath — o caminho do renomear com o filtro do addScene;
   sceneUniqueName — «main.001» Godot-style, a variante DUPLICAR;
   sceneDeleteAction — a decisão do 2-tap; sceneActionPick/kScenesAct*

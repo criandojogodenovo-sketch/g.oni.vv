@@ -13,58 +13,29 @@ o B-1, A ÁRVORE DE UI)
 ## §1 Onde estamos
 
 - **Campanha 0.12-B (arquitetura da UI) — FECHADA (B-1..B-4)** (o CI do
-  push é o árbitro). **B-4 (o seletor de cenas com ações)**: as 3
-  ações POR LINHA no menu CENAS — o RENOMEAR (o teclado in-app no
-  PROPÓSITO 8 novo, o nome atual pré-carregado; o caminho vem da fonte
-  pura sceneRenamePath com o MESMO filtro do addScene), o DUPLICAR (o
-  nome único Godot-style «main.001» — a MESMA convenção do
-  uniqueTicName; contra o manifesto E os órfãos do disco; o conteúdo
-  byte a byte; a cópia NÃO fica ativa) e o APAGAR 2-TAP (o 1.º toque
-  SÓ arma — a linha em «apagar?» com o ícone danger; o 2.º no MESMO
-  ícone confirma; o arm morre com o menu; a cena ATIVA recusa com
-  toast; o activeScene re-assenta) — as fontes puras
-  sceneRenamePath/sceneUniqueName/sceneDeleteAction partilhadas pelo
-  draw e pelos pins; os picks kScenesActBase+linha*4+ato; pins ×4
-  (test_012b_cenas.cpp) + M-B4a vermelho→verde (14 EXPECTs);
-  **R-051 NOVA**. test_core 0 falhas · c33 1006/0 · vc 86. SEM C33 na
-  B-4 (a ordem expressa do prompt). **B-3 (o canvas com a moldura do device)**:
-  o seletor de proporção ANDROID (as 3 chips do topo — uiCanvasChipsRect
-  é a fonte), a MOLDURA centrada com a ÁREA FORA ESCURA (α0.55 — o
-  elementRect continua a ser a fonte do layout), as guias de margem
-  segura e a grelha de alinhamento (ativáveis), o TOAST OPACO (a fonte
-  única vpchrome::toastColors — o contraste WCAG ≥4.5 não depende da
-  cena); pins ×3 (test_012b_canvas.cpp) + M-B3a/b vermelho→verde;
-  test_uilayout recalibrado (os glifos das chips saem da paridade).
-  test_core 0 falhas · c33 1006/0 · vc 85. O C33 do dono está no §24.
-  **B-2 (o Inspector de UI — 2D + âncoras)**: **B-2 (o Inspector de UI — 2D + âncoras)**:
-  o Inspector de CONTROLO com as 3 secções colapsáveis (o colapso no
-  EditorState::inspUiCollapsed; uiInspectorPlanControl é a fonte única),
-  os campos da base (margens/pivô/rotação/esticar/opacidade), os campos
-  por tipo (texto/letra p/ Label e Button; RAIO/ZONA MORTA/sens p/
-  Joystick — a zona morta é o campo NOVO do TouchControls, default 0 =
-  byte a byte, o .goni grava `dead` só quando != 0), os botões de RESET
-  por campo (o quadrado 30px inteiro; a zona do reset com PRIORIDADE
-  sobre o skip dos sliders — o achado §17 do relatório) e SEM «remover
-  joystick» (o apagar é do TIC; o uiJoystickPlan/drawJoystickInspector
-  saíram; test_joystick recalibrado); pins ×5 (test_012b_inspui.cpp) +
-  M-B2a/b vermelho→verde. test_core 0 falhas · c33 1006/0 · vc 84. O C33
-  do dono (o PNG do inspector do joystick) está no §19 do relatório.
-  **B-1 (a árvore de UI — UI como TICs)**: **B-1 (a árvore de UI — UI como TICs)** — o
-  Control NOVO (a base 2D: pos2D/tamanho/âncoras 9+esticar/margens/pivô/
-  rotação/visível/opacidade; os elementos são KINDS — sem classes novas,
-  a cláusula do prompt), o UIRoot NOVO (o marcador), um TIC filho por
-  elemento, o UiCanvas DEPRECATED (o leitor converte —
-  migrateUiCanvasToTree no fim do loadText; a animação Ui* resolve na
-  árvore), o serializer partilha o gerador/leitor de elemento e grava a
-  árvore (os campos da base só quando não-default), o editor tem o modo
-  árvore (a vista espelho + sincronização) e o Play desenha/hit-testa a
-  árvore; pins ×9 (test_012b_uitree.cpp) + M-B1a/b/c vermelho→verde;
-  **R-050 NOVA**; 8 recalibrações legítimas com nota (o CONTRATO DE
-  ABERTURA mudou por ordem do prompt); o UIRoot FANTASMA apanhado e
-  curado (o null check do dump — §10 do relatório). test_core 0 falhas ·
-  c33_virtual 1006/0 · vc 83. O pin C33 do dono (a PNG da hierarquia com
-  os 7 TICs) está no §12 do relatório. As B-2..B-4 fecharam por ordem
-  do fluxo (ver acima) e a campanha SELA-SE no B-4.
+  push é o árbitro; os DETALHES vivem no RELATORIO-0.12-B.md).
+  **B-4 (o seletor de cenas com ações, vc 86)**: as 3 ações POR LINHA no
+  menu CENAS — o RENOMEAR (o teclado in-app no PROPÓSITO 8, o nome
+  pré-carregado; o caminho da fonte pura sceneRenamePath, o MESMO filtro
+  do addScene), o DUPLICAR (o nome único Godot-style «main.001» — contra
+  o manifesto E os órfãos do disco; o conteúdo byte a byte; a cópia não
+  fica ativa) e o APAGAR 2-TAP (o 1.º toque SÓ arma «apagar?», o 2.º no
+  MESMO ícone confirma; o arm morre com o menu; a ATIVA recusa; o
+  activeScene re-assenta) — as fontes puras partilhadas pelo draw e
+  pelos pins; pins ×4 (test_012b_cenas.cpp) + M-B4a vermelho→verde;
+  **R-051 NOVA**; SEM C33 (a ordem expressa do prompt). test_core 0
+  falhas · c33 1006/0 · vc 86. **B-3 (o canvas, vc 85)**: o seletor de
+  proporção ANDROID + a moldura com o véu escuro + as guias + a grelha +
+  o toast OPACO (o contraste WCAG ≥4.5); pins ×3 + M-B3a/b.
+  **B-2 (o Inspector de UI, vc 84)**: as 3 secções colapsáveis + os
+  campos da base/por tipo + a ZONA MORTA nova do TouchControls + os
+  resets por campo + SEM «remover joystick»; pins ×5 + M-B2a/b.
+  **B-1 (a árvore de UI, vc 83)**: Control + UIRoot (os storages
+  ids 11/12), um TIC filho por elemento, o UiCanvas DEPRECATED (a
+  conversão migrateUiCanvasToTree), o serializer grava a árvore, o
+  editor tem o modo árvore e o Play desenha/hit-testa; pins ×9 +
+  M-B1a/b/c; **R-050 NOVA**; o UIRoot FANTASMA curado (§10 do
+  relatório).
 - **Campanha 0.12-A (bugs P0) — FECHADA** (o CI do push é o árbitro):
   A-1 (o diagnóstico provou que as rows LOD/impostor JÁ EXISTEM na UI
   desde o vc 72/76 — PÁRA no fix cego por ordem do prompt; os 5 pins da
