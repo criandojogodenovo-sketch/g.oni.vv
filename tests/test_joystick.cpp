@@ -244,28 +244,57 @@ TEST(joystick_proxy_editavel_no_viewport_2d) {
     EXPECT(nearEqF(tc->relX - rx0, 200.0f / tr.scale / kSW, 0.01f));
     EXPECT(tc->relX <= 1.0f);
 
-    // plano do Inspector do joystick: y cumulativo (o contrato)
+    // ---- 0.12-B (B-2, RECALIBRADO): o INSPECTOR DO JOYSTICK é o Inspector
+    // de CONTROLO (as 3 secções colapsáveis — o plano de 0.7.x morreu) e o
+    // botão "remover joystick" (que tirava SÓ o COMPONENTE) morreu com ele:
+    // o apagar é do TIC ("remover elemento" — o padrão da árvore B-1)
+    EXPECT(uiAddTreeJoystick(scene, st));   // a árvore de produção (raiz+filho)
+    const std::vector<std::pair<Handle, UiElement>> joyElems = [&]() {
+        std::vector<std::pair<Handle, UiElement>> out;
+        scene.forEachActive([&](const Tic& t2) {
+            if (const Control* cc = t2.getComponent<Control>()) {
+                if (cc->isJoystick()) {
+                    out.push_back({t2.handle, cc->elem});
+                }
+            }
+        });
+        return out;
+    }();
+    ASSERT(joyElems.size() == 1);
+    Tic* joyTic = scene.get(joyElems[0].first);
+    ASSERT(joyTic != nullptr);
+    TouchControls* joyTc = joyTic->getComponent<TouchControls>();
+    ASSERT(joyTc != nullptr);
     const TextMetrics tm = ui.textMetrics();
-    UiInspRow plan[16];
-    const u32 n = uiJoystickPlan(tm, plan, 16);
-    EXPECT(n == 9u);   // nome + X + Y + tam + sens + R + G + B + remover
+    UiInspRow plan[48];
+    // com Transform+Aparência COLAPSADAS (bit 0|1) o Comportamento cabe no
+    // painel — a última linha (remover elemento) fica ao alcance do tap
+    // (o MESMO gesto do dono no device: colapsar e apagar); o ESTADO é a
+    // fonte do desenho — o plano e o frame partilham o MESMO colapso
+    const u8 col2Only = 0x03;
+    st.inspUiCollapsed = col2Only;
+    const u32 n = uiInspectorPlanControl(joyTc->owner->getComponent<Control>()->elem,
+                                         true, tm, col2Only, plan, 48);
+    EXPECT(n >= 6u);   // nome + 3 secções + visível + sens + zona morta + remover
     for (u32 i = 1; i < n; ++i) {
         EXPECT(plan[i].y >= plan[i - 1].y + plan[i - 1].h - 0.01f);
     }
+    EXPECT(plan[n - 1].kind == UiInspRow::Kind::Remove);   // a última é o apagar
     // o inspector desenha SEM crash e os sliders vivem no painel direito
     ui.beginFrame(nullptr, &in, kSW, kSH);
     EXPECT(drawUiInspector(ui, scene, st, in) || true);
     ui.endFrame();
-    // remover o joystick pelo botão do plano: o componente sai do TIC
+    // o tap na última linha ("remover elemento") APAGA O TIC — o componente
+    // e o TIC saem JUNTOS (nunca só o componente: o "remover joystick" morreu)
     const UiRect panel = safe::inspectorPanelRect(kSW, kSH, safe::Insets{});
-    const f32 rmY = panel.y + kHeaderH + 4.0f + plan[8].y + plan[8].h * 0.5f;
-    // (scroll do inspector: conteúdo 9 linhas cabe — offset 0)
+    const f32 rmY = panel.y + kHeaderH + 4.0f + plan[n - 1].y +
+                    plan[n - 1].h * 0.5f;
     in.injectDown(0, panel.x + panel.w * 0.5f, rmY);
     frame();
     in.injectUp(0);
     frame();
     EXPECT(!st.selJoystick);
-    EXPECT(t->getComponent<TouchControls>() == nullptr);
+    EXPECT(scene.get(joyElems[0].first) == nullptr);   // O TIC INTEIRO saiu
 }
 
 // ---- 5. compostos: Menu / Card / Article -------------------------------------------

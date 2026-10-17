@@ -260,3 +260,110 @@ c33_virtual 1006/0 · versionCode 82 → 83 (o §14 do RELATORIO-0.9.6.md
 declara o par novo para o gate R-015). STATE.md e CODEMAP.md viajam NESTE
 commit (a regra §1.2). PARAR — a B-2 só arranca por ordem do fluxo da
 campanha (o prompt da B manda «vc → próximo»).
+
+---
+
+# B-2 — O INSPECTOR DE UI (2D + âncoras)
+
+## 14. Objetivo e o que mudou
+
+O selecionado da árvore (um TIC com Control) tem agora um Inspector PRÓPRIO
+com a estrutura pedida pelo prompt: as **3 secções colapsáveis**
+(Transform / Aparência / Comportamento — o cabeçalho leva o chevron da casa
+e o tap alterna; o colapso vive no EditorState::inspUiCollapsed, o bit i =
+a secção i fechada), os **campos da base** que a B-1 introduziu (margens
+L/T/R/B, pivô X/Y, rotação, o toggle ESTICAR — a 10.ª âncora, cuja SAÍDA
+conserva a posição pelo rect atual com o MESMO padrão do uiDetachElement
+da 0.7.4 — e a opacidade), os **campos específicos por tipo** (Label/
+Button: texto, tamanho da letra, estilo, fundo A, hex, tex; **Joystick:
+raio 40..150 px, ZONA MORTA, sensibilidade, cor** — os campos do joystick
+escrevem o TouchControls do MESMO TIC: a fonte de input da física nunca
+muda) e os **botões de reset por campo** — o quadrado 30px com o ícone
+Reset à direita das linhas resetáveis; o valor do slider desloca-se para
+a esquerda e o quadrado fica INTEIRO dentro da linha e do painel (o
+«(não cortados)» do prompt). A **ZONA MORTA** é um campo NOVO do
+TouchControls (`dead`, a fração do raio em que o eixo lê 0; o default 0
+reproduz o comportamento de sempre byte a byte; o .goni grava `dead` só
+quando != 0 — a política de compat da casa).
+
+O plano é a FONTE ÚNICA (uiInspectorPlanControl — o MESMO contrato de y
+cumulativo dos planos do editor) partilhada com os pins; o caminho legado
+(canvas em memória dos testes 0.7.x) continua pelo plano antigo byte a
+byte. O uiJoystickPlan/drawJoystickInspector do 0.7.x SAÍRAM do código
+(mortos pelo «sem remover joystick») e o test_joystick foi recalibrado
+para o plano de CONTROLO.
+
+## 15. Os pins (5/5 verdes — test_012b_inspui.cpp)
+
+1. **insp_control_2d** — o plano mostra X/Y/W/H para um Control e os
+   sliders ESCREVEM o Control ao vivo (o drag do X a 90 % da faixa põe
+   ox > 1000; o W a 50 % põe w > 1000) — o MESMO contrato de interação do
+   Inspector 0.7.x.
+2. **insp_ancoras** — as rows AnchorH/AnchorV existem no plano e os 3×3
+   taps passam pelos 9 CANTOS; em cada um, controlRect == elementRect (a
+   MESMA matemática — zero divergência).
+3. **insp_sem_remover** — com TODAS as linhas do plano do joystick
+   tocadas: NENHUM caminho tira SÓ o componente TouchControls (TIC vivo ⇔
+   componente vivo); a linha Remove existe e leva o TIC INTEIRO (o padrão
+   da árvore B-1).
+4. **insp_campos_por_tipo** — os planos do Label e do Joystick diferem
+   campo a campo (Label: texto/letra/estilo/fundo A/âncoras; Joystick:
+   raio/zona morta/sens/opacidade; os 3 cabeçalhos de secção nos DOIS).
+5. **insp_reset_visivel** — ≥10 linhas com reset; o quadrado é inteiro
+   dentro da linha (h ≥ 30px) e do painel (x fixo); o reset da linha X
+   repõe o valor (o drag a 90 % → o reset → 0).
+
+## 16. As mutações (vermelho → reposto → verde)
+
+- **M-B2a** (as âncoras fora do plano — o push de AnchorH/AnchorV
+  removido): insp_ancoras VERMELHO:
+  ```
+  insp_ancoras ... FALHOU (anchors == 2u)
+  ```
+  Reposto → 0 falhas.
+- **M-B2b** (o tipo não muda os campos — o plano força joystick=false):
+  insp_campos_por_tipo VERMELHO (5 EXPECTs — o joystick perde
+  dead/radius/sens e ganha âncoras/tamanho de elemento):
+  ```
+  insp_campos_por_tipo ... FALHOU (has(jp, jn, Dead); has(Radius);
+  has(Sens); !has(AnchorH); !has(SizeW))
+  ```
+  Reposto → 0 falhas.
+
+## 17. O achado do drawUiInspector (a skip-list comia o reset)
+
+A 1.ª versão despachava o tap numa lista única: os SLIDERS eram saltados
+(`continue`) ANTES do check da zona de reset — o quadrado de reset das
+linhas de slider era INALCANÇÁVEL (o pin insp_reset_visivel apanhou: o tap
+no quadrado não repunha o valor). O fix estrutural: a zona de reset tem um
+LOOP PRÓPRIO com prioridade (só linhas reset; a zona [w−kPad−30, w−kPad]);
+o corpo das linhas despacha DEPOIS com o skip de sempre. A lição fica no
+relatório: «a zona nova de um widget de linha tem de entrar ANTES do skip
+do gesto do corpo».
+
+## 18. Recalibrações e limites
+
+- test_joystick (joystick_proxy_editavel_no_viewport_2d) — RECALIBRADO
+  com nota: a 2.ª metade usa o plano de CONTROLO (o de 0.7.x morreu com o
+  botão); o apagar verifica o TIC INTEIRO (nunca só o componente); o
+  colapso das 2 primeiras secções é o gesto honesto do dono (o plano e o
+  frame partilham o MESMO colapso).
+- O joystick não mostra W/H/âncoras/margens/pivô/rotação (o rect dele é
+  DERIVADO do TouchControls — B-1) nem tex/texto; mostra raio/zona
+  morta/sens/cor/opacidade — o plano é a fonte da diferença.
+- O pivô não-centro e a opacidade dos ELEMENTOS continuam sem aplicação no
+  draw (o B-1 §11 mantém-se; os campos são vivos e serializados — o draw
+  aplica no B-3 quando o canvas muda).
+- O RESET do raio (joystick) põe size=1 (raio 75px — a base do layout
+  0.7.3); o reset da cor do joystick repõe o LINE mono (0.1804 — o default
+  do TouchControls), o dos elementos repõe a cor POR TIPO (elementDefaults
+  — o Label volta transparente).
+
+## 19. Pin C33 (dono) — o protocolo do device
+
+1. Modo UI → criar um joystick (+ → Joystick) → selecioná-lo na
+   HIERARQUIA (o ícone de pessoa) → o painel direito mostra o INSPECTOR DE
+   CONTROLO (não o de 3D): as 3 secções com chevrons + x/y/raio.
+2. Mover o joystick (x/y ou drag no viewport), mudar o raio, tocar um
+   reset (o valor volta), colapsar/abrir as secções.
+3. PNG do Inspector com o joystick selecionado.

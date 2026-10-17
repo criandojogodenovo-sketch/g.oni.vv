@@ -1,9 +1,9 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-18 · vc: 83 · Último commit: este (o 0.12-B B-1, A
-ÁRVORE DE UI — UI como TICs: Control/UIRoot, a compat que converte, os 9
-pins + R-050; antes: 3bdd9f9 o 0.12-A, OS BUGS P0 — A-1..A-4; antes:
-32a6785 o Y-3+fecho da 0.11-Y)
+Atualizado: 2026-10-18 · vc: 84 · Último commit: este (o 0.12-B B-2, O
+INSPECTOR DE UI — as 3 secções colapsáveis, os campos da base e por tipo,
+a zona morta do joystick, os resets por campo, os 5 pins; antes: 032ea2d
+o 0.12-B B-1, A ÁRVORE DE UI; antes: 3bdd9f9 o 0.12-A)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -11,8 +11,21 @@ pins + R-050; antes: 3bdd9f9 o 0.12-A, OS BUGS P0 — A-1..A-4; antes:
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-B (arquitetura da UI) — EM CURSO; B-1 FECHADA** (o CI
-  do push é o árbitro): **B-1 (a árvore de UI — UI como TICs)** — o
+- **Campanha 0.12-B (arquitetura da UI) — EM CURSO; B-1 e B-2 FECHADAS**
+  (o CI do push é o árbitro). **B-2 (o Inspector de UI — 2D + âncoras)**:
+  o Inspector de CONTROLO com as 3 secções colapsáveis (o colapso no
+  EditorState::inspUiCollapsed; uiInspectorPlanControl é a fonte única),
+  os campos da base (margens/pivô/rotação/esticar/opacidade), os campos
+  por tipo (texto/letra p/ Label e Button; RAIO/ZONA MORTA/sens p/
+  Joystick — a zona morta é o campo NOVO do TouchControls, default 0 =
+  byte a byte, o .goni grava `dead` só quando != 0), os botões de RESET
+  por campo (o quadrado 30px inteiro; a zona do reset com PRIORIDADE
+  sobre o skip dos sliders — o achado §17 do relatório) e SEM «remover
+  joystick» (o apagar é do TIC; o uiJoystickPlan/drawJoystickInspector
+  saíram; test_joystick recalibrado); pins ×5 (test_012b_inspui.cpp) +
+  M-B2a/b vermelho→verde. test_core 0 falhas · c33 1006/0 · vc 84. O C33
+  do dono (o PNG do inspector do joystick) está no §19 do relatório.
+  **B-1 (a árvore de UI — UI como TICs)**: **B-1 (a árvore de UI — UI como TICs)** — o
   Control NOVO (a base 2D: pos2D/tamanho/âncoras 9+esticar/margens/pivô/
   rotação/visível/opacidade; os elementos são KINDS — sem classes novas,
   a cláusula do prompt), o UIRoot NOVO (o marcador), um TIC filho por
@@ -39,62 +52,24 @@ pins + R-050; antes: 3bdd9f9 o 0.12-A, OS BUGS P0 — A-1..A-4; antes:
   c33_virtual 1006/0 · vc 82. PARAR — a próxima só arranca com CONTINUAR
   do dono.
 - **Campanha 0.11-Y (identidade visual) — FECHADA** (o fecho é o commit
-  32a6785: os 13 PNGs por ecrã no docs/y-*.png + o pin y_fecho + o
-  RELATORIO-0.11-Y-FECHO.md). Y-0 (o ícone) · Y-0-FIX
-  (a escala) · Y-1 (o tema) · Y-2 (o layout) · Y-3 (os cartões) — as
-  5 sub-fases + o fix fechadas com CI verde; 20 pins novos; a FASE 31
-  (a varredura de 13 ecrãs) fica no replay para SEMPRE.
-- **Y-1 (o tema) — FECHADA** (o commit 3a6d934): o poço #08080A (o
-  clear lê o token), o vidro -5 % com o mesmo alfa, a hairline ÂMBAR
-  #4A3714 α0.60, os tokens NOVOS accent2 #FF6B00 e glow #FF3D00 α0.25;
-  o botão ATIVO é a chama (glow de foco 2 quads α decrescente +
-  gradiente vertical accent→accent2 por vértice, zero mudanças de
-  shader); a glassTopLine (1 dp, glow a 20 %) pronta para os cartões
-  da Y-3; pins y1_* ×5 + M-Y1a/b/c/d vermelho→verde. NOTA HONESTA: o
-  run do 3a6d934 ficou VERMELHO no C33 virtual — o probe 18.2 (o card
-  de logs) comparava o pixel com o LITERAL do bg velho e escapou à
-  calibração da Y-1; o CI apanhou, a cura viaja no commit da Y-2 (o
-  probe lê o token) e o run VERDE da Y-2 fecha a Y-1 de vez.
-- **Y-2 (o layout) — FECHADA com CI verde** (este commit): as regras
-  CruzaTabBar/PainelFora no validador + a flag auditável overlay (o
-  toast) + a FASE 31 (a varredura de 13 ecrãs pelo frame de produção);
-  OS TRÊS BUGS REAIS apanhados ao vivo: o toast na densidade 2.0
-  mergulhava na tab bar (R-018: medidas em px crus — tudo em dp()), o
-  back do Settings sangrava 6px acima do content (a lei de ouro: 36×36
-  na linha) e o último tick da régua da timeline sangrava a borda
-  (rótulos deslizam para dentro); o Sobreposto não conta filhos
-  clipped (11 falsos ERROS mortos); pins y2_* ×3 + M-Y2a/b
-  vermelho→verde.
-- 0.11-Y Y-3 Cartões ✅ vc 81 — o cristal: a glassTopLine (1dp do glow
-  a 20 %) na hierarquia/inspector/drawer/card CRIAR/3 sheets + o
-  dividerGradientV NOVO (1dp, accentDim α0.90→α0.15 a cair) nos
-  divisores (a linha sólida D11 SUPERADA pela ordem da Y-3, a pill do
-  drag fica); a FASE 31 confirma o layout intocado (1006/0); pins
-  y3_* ×3 + M-Y3a/b vermelho→reposto→verde.
-- 0.11-Y FECHO ✅ vc 81 — os 13 PNGs por ecrã (docs/y-*.png, 1600×720,
-  o export de produção) + o pin y_fecho (a existência + a assinatura +
-  as dimensões + conteúdo; M-Fecho: um PNG removido → vermelho →
-  reposto → verde) + o RELATORIO-0.11-Y-FECHO.md (os 5 critérios C33
-  mapeados às provas).
-- **Y-0 (o ícone no launcher) — FECHADA com CI verde** (a2d2248) e o
-  pin C33 do dono apanhou o bug da escala (o G a ~25 %; o contrato
-  ~65 %) — o Y-0-FIX é este commit (a bbox de escala passa a ser o
-  CONTEÚDO SÓLIDO, 65 % da zona segura; o pin y0_escala guarda).
-- **0.11-CTX — FECHADA com CI verde** (deba7bb + ac2b780, 1a348f5,
-  909b1ea, 85c4f94; os fixes da âncora R-015: e82155e + b577dea — o
-  RELATORIO-0.9.6.md de volta a docs/ e o ctx_refs_ok a distinguir
-  citação de transcrição). 98,8 % de redução no pior caso
-  (docs/RELATORIO-0.11-CTX.md).
-- **0.11-W (Render Systems) implementada e com CI verde** — falta o PIN do
-  dono no C33 real: instalar o APK vigente (vc 78 hoje), importar a cena
-  de 203 MB, correr o bench R-017, colar o PNG do HUD. Baseline: FPS 5 ·
-  bl 5164/5178 · 6 TICs. Alvo: 30+ FPS sem crash nem freeze no import.
-- O fecho da 0.11-W (relatório FECHO + R-048) só corre por ordem do dono
-  (o BLOCO B).
+  32a6785: os 13 PNGs por ecrã + o pin y_fecho). Y-0..Y-3 + o fix — 20
+  pins novos; a FASE 31 fica no replay para SEMPRE.
+- **0.11-Y (o tema o layout os cartões o fecho) e 0.11-CTX — FECHADAS**
+  com CI verde (os detalhes vivem no §2 e nos relatórios próprios; o
+  run do 3a6d934 ficou VERMELHO no probe 18.2 e o CI apanhou — a cura
+  viajou na Y-2; o RELATORIO-0.9.6.md voltou a docs/ e o ctx_refs_ok
+  distingue citação de transcrição; 98,8 % de redução no pior caso).
+- **0.11-W (Render Systems) com CI verde** — falta o PIN do dono no C33
+  real (instalar o APK vigente, importar 203 MB, R-017, PNG do HUD);
+  o fecho (BLOCO B) só por ordem do dono.
 
 ## §2 O que está FEITO
 
 - 0.6.x–0.9.5 — fundação da engine (V.ONI core, device real, CI 5 jobs).
+- 0.12-B B-2 (vc 84) — o Inspector de UI (no RELATORIO-0.12-B.md §14..19):
+  as secções colapsáveis + os campos da base/por tipo + a zona morta
+  (TouchControls::dead) + os resets + o «sem remover joystick»; pins ×5 +
+  M-B2a/b; o achado da skip-list (o reset com loop próprio).
 - 0.12-B B-1 (vc 83) — a árvore de UI (o relatório próprio:
   docs/RELATORIO-0.12-B.md):
   - **Control/UIRoot** — components/Control.h (a base 2D + os 10 kinds;
@@ -117,13 +92,10 @@ pins + R-050; antes: 3bdd9f9 o 0.12-A, OS BUGS P0 — A-1..A-4; antes:
 - 0.12-A (vc 82) — os 4 bugs P0 fechados (o relatório próprio:
   docs/RELATORIO-0.12-A.md; a investigação: docs/
   RELATORIO-0.12-A-INVEST-RAM.md):
-  - **A-1** — o diagnóstico (os 4 pontos com ficheiro:linha): as rows
-    `lod distance`/`impostor` JÁ EXISTEM (EditorLayout.h:557/567,
-    EditorUi.cpp:1968/2008, os campos MeshRenderer.h:66/96); os pins da
-    3.5a/3.75b só aferravam o CAMPO — os 5 pins NOVOS da UI
-    (test_012a_lodui.cpp) fecham o gap; M-A1a/M-A1b vermelho→verde; ZERO
-    produção trocada (o PÁRA do prompt); as hipóteses do «dono não vê»
-    no relatório §1 (colapso persistido / mesh file / APK antigo).
+  - **A-1** — o diagnóstico provou que as rows `lod distance`/`impostor`
+    JÁ EXISTEM (ficheiro:linha no relatório) — PÁRA no fix cego; os 5
+    pins NOVOS da UI (test_012a_lodui.cpp) fecham o gap de cobertura;
+    M-A1a/M-A1b vermelho→verde; ZERO produção trocada.
   - **A-2** — o `refreshCatalog()` entra no ARRANQUE (projeto pronto) e
     no fim de `createSceneNamed` (os contadores «0 cena(s)»/«sem
     ficheiros» morrem); `sceneRowIcon()` NOVA (EditorUi.h/.cpp — a fonte
@@ -161,7 +133,7 @@ pins + R-050; antes: 3bdd9f9 o 0.12-A, OS BUGS P0 — A-1..A-4; antes:
 - 0.10-M (vc 68) — .gmesh v3 por blocos: import streaming, render por
   blocos, texturas, thumbs; PASSO 6 selou a tabela de medições.
 - 0.11-H FASE 1 hierarquia (vc 69) — drag-reparent, apagar/duplicar
-  sub-árvore, colapso persistente, ícone por tipo.
+  sub-árvore, colapso, ícone por tipo.
 - 0.11-M FASE 2 materiais glTF (vc 70) — parse completo, GTB2, props no
   lit, blend por blocos, samplers no upload.
 - 0.11-S FASE 3 esqueleto/animação (vc 71) — slerp/cubic/step, UBO 128

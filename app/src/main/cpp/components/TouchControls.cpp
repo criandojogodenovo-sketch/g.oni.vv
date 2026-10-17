@@ -96,6 +96,14 @@ Vec2 TouchControls::axis() const {
         return Vec2{0.0f, 0.0f};
     }
     Vec2 a{(joyX_ - baseX_) / radius_, -(joyY_ - baseY_) / radius_};   // y do ecrã cresce para baixo
+    // 0.12-B (B-2) — ZONA MORTA: dedo dentro da fração `dead` do raio lê 0
+    // (o default 0 = o comportamento de sempre, byte a byte)
+    if (dead > 0.0f) {
+        const f32 d = std::sqrt(a.x * a.x + a.y * a.y);
+        if (d < dead) {
+            return Vec2{0.0f, 0.0f};
+        }
+    }
     // 0.7.3 — SENSIBILIDADE: multiplica o vetor e volta a clamps no círculo
     // unitário (sens 1 = o comportamento 0.6.x exato)
     a.x *= sens;

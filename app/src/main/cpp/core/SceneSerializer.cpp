@@ -204,6 +204,9 @@ void appendComponentJson(Json& arr, const TouchControls* tc) {
     if (tc->sens != 1.0f) {
         c.addMember("sens", Json::makeNumber(tc->sens));
     }
+    if (tc->dead != 0.0f) {
+        c.addMember("dead", Json::makeNumber(tc->dead));   // 0.12-B: a zona morta
+    }
     if (!defRest || tc->colR != 0.1804f) {
         Json col = Json::makeArray();
         col.addItem(Json::makeNumber(tc->colR));
@@ -831,6 +834,9 @@ void fillTouchControls(TouchControls* tc, const Json& comp) {
     }
     if (const Json* j = comp.find("sens"); j && j->type == Json::Type::Number) {
         tc->sens = static_cast<f32>(j->number);
+    }
+    if (const Json* j = comp.find("dead"); j && j->type == Json::Type::Number) {
+        tc->dead = static_cast<f32>(j->number);   // 0.12-B: a zona morta
     }
     if (const Json* jc = comp.find("color");
         jc && jc->type == Json::Type::Array && jc->items.size() == 3) {

@@ -44,7 +44,7 @@ namespace {
 // kPanelW=300 fixo saía do painel de 22% (260dp)
 bool uiSliderRow(UiContext& ui, u64 id, f32 x, f32 w, f32 rowTop, f32 rowH,
                  const TextMetrics& tm, const char* labelText, f32 minV,
-                 f32 maxV, f32& value, const char* fmt) {
+                 f32 maxV, f32& value, const char* fmt, f32 rightReserve = 0.0f) {
     const f32 baseline = inspBaseline(rowTop, rowH, tm);
     ui.labelFitted(x + kPad, baseline, labelText, theme::TEXT, 84.0f - kPad - 6.0f);
     const bool changed =
@@ -53,7 +53,9 @@ bool uiSliderRow(UiContext& ui, u64 id, f32 x, f32 w, f32 rowTop, f32 rowH,
     formatNum(val, sizeof(val), fmt, value);   // 0.9.6.19b (m2): -0 → 0
     if (ui.hasFont()) {
         const f32 tw = ui.fontWidth(val);
-        ui.label(x + w - kPad - tw, baseline, val, theme::TEXT);
+        // 0.12-B (B-2): o RESERVE à direita é a zona do BOTÃO DE RESET (a
+        // linha com reset desloca o valor para a esquerda — nada se corta)
+        ui.label(x + w - kPad - rightReserve - tw, baseline, val, theme::TEXT);
     }
     return changed;
 }
@@ -749,159 +751,133 @@ f32 uiInspectorContentHeight(const UiElement& e, const TextMetrics& m) {
     return rows[n - 1].y + rows[n - 1].h;
 }
 
-// ---- 0.7.3: plano do INSPECTOR DO JOYSTICK ---------------------------------
-// pos X/Y (frações 0..1) + tamanho + sensibilidade + cor R/G/B + remover —
-// o MESMO contrato de y cumulativo (linhas sequenciais, fonte única)
-u32 uiJoystickPlan(const TextMetrics& m, UiInspRow* rows, u32 cap) {
+// ---- 0.12-B (B-2) — o plano do INSPECTOR DE CONTROLO (a árvore) ------------
+// 3 SECÇÕES COLAPSÁVEIS (Transform/Aparência/Comportamento — o bit i de
+// `collapsed` = a secção i fechada), os campos da base (margens/pivô/
+// rotação/esticar/opacidade) e os CAMPOS POR TIPO (texto/letra p/ Label e
+// Button; raio/zona morta/sens p/ Joystick). SEM "remover joystick" — o
+// apagar é do TIC (a Hierarchy / "remover elemento"). O MESMO contrato de
+// y cumulativo (a fonte única partilhada com os pins).
+u32 uiInspectorPlanControl(const UiElement& e, bool joystick,
+                           const TextMetrics& m, u8 collapsed,
+                           UiInspRow* rows, u32 cap) {
     const f32 textH = inspTextRowH(m);
     const f32 btnH  = inspButtonRowH(m);
     const f32 sldH  = inspSliderRowH(m);
+    const f32 secH  = textH + 4.0f;
 
     u32 n = 0;
     f32 y = 0.0f;
-    auto push = [&](UiInspRow::Kind kind, f32 h, u64 id) {
+    auto push = [&](UiInspRow::Kind kind, f32 h, u64 id, u32 payload = 0,
+                    bool reset = false) {
         if (n >= cap) {
             return;
         }
-        rows[n].kind = kind;
-        rows[n].y    = y;
-        rows[n].h    = h;
-        rows[n].id   = id;
+        rows[n].kind    = kind;
+        rows[n].y       = y;
+        rows[n].h       = h;
+        rows[n].id      = id;
+        rows[n].payload = payload;
+        rows[n].reset   = reset;
         ++n;
         y += h;
     };
+    auto secOpen = [&](u32 idx) {
+        return (collapsed & static_cast<u8>(1u << idx)) == 0;
+    };
 
     push(UiInspRow::Kind::Name, textH, 0);
-    push(UiInspRow::Kind::PosX, sldH, kJoyX);
-    push(UiInspRow::Kind::PosY, sldH, kJoyY);
-    push(UiInspRow::Kind::SizeW, sldH, kJoySize);   // payload: tamanho
-    push(UiInspRow::Kind::Sens, sldH, kJoySens);
-    push(UiInspRow::Kind::ColR, sldH, kJoyR);
-    push(UiInspRow::Kind::ColG, sldH, kJoyG);
-    push(UiInspRow::Kind::ColB, sldH, kJoyB);
-    push(UiInspRow::Kind::Remove, btnH, kJoyRemove);
+
+    // ---- TRANSFORM (0) -----------------------------------------------------
+    push(UiInspRow::Kind::Sec, secH, kUiInspSecT, 0);
+    if (secOpen(0)) {
+        if (joystick) {
+            // o joystick posiciona por FRAÇÕES da área útil (o TouchControls
+            // é a fonte); raio = o tamanho físico — sem âncoras/margens
+            push(UiInspRow::Kind::PosX, sldH, kUiInspX, 0, true);
+            push(UiInspRow::Kind::PosY, sldH, kUiInspY, 0, true);
+            push(UiInspRow::Kind::Radius, sldH, kUiInspRadius, 0, true);
+        } else {
+            push(UiInspRow::Kind::PosX, sldH, kUiInspX, 0, true);
+            push(UiInspRow::Kind::PosY, sldH, kUiInspY, 0, true);
+            push(UiInspRow::Kind::SizeW, sldH, kUiInspW, 0, true);
+            push(UiInspRow::Kind::SizeH, sldH, kUiInspH, 0, true);
+            push(UiInspRow::Kind::AnchorH, btnH, kUiInspAnchH);
+            push(UiInspRow::Kind::AnchorV, btnH, kUiInspAnchV);
+            push(UiInspRow::Kind::StretchTgl, btnH, kUiInspStrch);
+            push(UiInspRow::Kind::MargL, sldH, kUiInspMargL, 0, true);
+            push(UiInspRow::Kind::MargT, sldH, kUiInspMargT, 0, true);
+            push(UiInspRow::Kind::MargR, sldH, kUiInspMargR, 0, true);
+            push(UiInspRow::Kind::MargB, sldH, kUiInspMargB, 0, true);
+            push(UiInspRow::Kind::PivotX, sldH, kUiInspPivX, 0, true);
+            push(UiInspRow::Kind::PivotY, sldH, kUiInspPivY, 0, true);
+            push(UiInspRow::Kind::Rot, sldH, kUiInspRot, 0, true);
+        }
+    }
+
+    // ---- APARÊNCIA (1) -------------------------------------------------------
+    push(UiInspRow::Kind::Sec, secH, kUiInspSecA, 1);
+    if (secOpen(1)) {
+        push(UiInspRow::Kind::ColR, sldH, kUiInspR, 0, true);
+        push(UiInspRow::Kind::ColG, sldH, kUiInspG, 0, true);
+        push(UiInspRow::Kind::ColB, sldH, kUiInspB, 0, true);
+        if (!joystick) {
+            push(UiInspRow::Kind::ColA, sldH, kUiInspA, 0, true);
+            push(UiInspRow::Kind::HexBtn, btnH, kUiInspHex);
+            if (uiElementHasText(e.kind)) {
+                push(UiInspRow::Kind::TextBtn, btnH, kUiInspText);
+                push(UiInspRow::Kind::FontScl, sldH, kUiInspFont, 0, true);
+                push(UiInspRow::Kind::TStyleBtn, btnH, kUiInspTStyle);
+            }
+            if (uiElementHasTexture(e.kind)) {
+                push(UiInspRow::Kind::TexBtn, btnH, kUiInspTex);
+            }
+        }
+        push(UiInspRow::Kind::Opacity, sldH, kUiInspOpa, 0, true);
+    }
+
+    // ---- COMPORTAMENTO (2) ----------------------------------------------------
+    push(UiInspRow::Kind::Sec, secH, kUiInspSecC, 2);
+    if (secOpen(2)) {
+        push(UiInspRow::Kind::VisToggle, btnH, kUiInspVis);
+        if (joystick) {
+            push(UiInspRow::Kind::Sens, sldH, kJoySens, 0, true);
+            push(UiInspRow::Kind::Dead, sldH, kUiInspDead, 0, true);
+        } else {
+            if (uiElementHasAction(e.kind)) {
+                push(UiInspRow::Kind::ActType, btnH, kUiInspAct);
+                if (e.action != UiElement::Action::None) {
+                    push(UiInspRow::Kind::ActTarget, btnH, kUiInspTarget);
+                }
+                if (e.action == UiElement::Action::TransitionScene) {
+                    push(UiInspRow::Kind::StyleBtn, btnH, kUiInspStyle);
+                }
+            }
+            if (e.kind == UiElement::Kind::Menu || uiElementIsContainer(e.kind)) {
+                push(UiInspRow::Kind::Spacing, sldH, kUiInspSpacing, 0, true);
+            }
+            if (uiElementIsContainer(e.kind)) {
+                push(UiInspRow::Kind::Pad, sldH, kUiInspPad, 0, true);
+            }
+            if (uiElementHasAlign(e.kind)) {
+                push(UiInspRow::Kind::AlignBtn, btnH, kUiInspAlign);
+            }
+            push(UiInspRow::Kind::ParentBtn, btnH, kUiInspParent);
+        }
+        push(UiInspRow::Kind::Remove, btnH, kUiInspRemove);   // APAGA O TIC
+    }
     return n;
 }
 
-f32 uiJoystickContentHeight(const TextMetrics& m) {
-    UiInspRow rows[16];
-    const u32 n = uiJoystickPlan(m, rows, 16);
+f32 uiInspectorContentHeightControl(const UiElement& e, bool joystick,
+                                    const TextMetrics& m, u8 collapsed) {
+    UiInspRow rows[48];
+    const u32 n = uiInspectorPlanControl(e, joystick, m, collapsed, rows, 48);
     if (n == 0) {
         return 0.0f;
     }
     return rows[n - 1].y + rows[n - 1].h;
 }
-
-// 0.7.3 — INSPECTOR DO JOYSTICK (TouchControls editável): sliders pos
-// X/Y (frações), tamanho, sensibilidade, cor R/G/B + remover. O plano
-// (uiJoystickPlan) é a FONTE ÚNICA — o mesmo contrato de y cumulativo.
-namespace {
-bool drawJoystickInspector(UiContext& ui, EditorState& st, Tic* tic,
-                           TouchControls* joy, f32 x, f32 y, f32 w, f32 h) {
-    const TextMetrics tm = ui.textMetrics();
-    ui.panel(x, y, w, h, theme::PANEL);
-    ui.panel(x, y, 1.0f, h, theme::LINE);
-    ui.label(x + kPad, y + kHeaderH * 0.5f + tm.block() * 0.30f,
-             "INSPECTOR UI", theme::TEXT);
-    ui.panel(x + kPad, y + kHeaderH - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
-
-    char nameLine[64];
-    std::snprintf(nameLine, sizeof(nameLine), "joystick  (%.24s)",
-                  tic->name.c_str());
-
-    UiInspRow plan[16];
-    const u32 n = uiJoystickPlan(tm, plan, 16);
-    const f32 contentH = uiJoystickContentHeight(tm);
-    const f32 contentTop = y + kHeaderH + 4.0f;
-    ui.beginScroll(kUiInspScrollId, {x, contentTop, w, h - kHeaderH - 4.0f},
-                   contentH);
-    const f32 off = ui.scrollOffset();
-
-    bool edited = false;
-    for (u32 i = 0; i < n; ++i) {
-        const UiInspRow& r = plan[i];
-        const f32 ry = contentTop + r.y - off;
-        switch (r.kind) {
-        case UiInspRow::Kind::Name:
-            ui.labelFitted(x + kPad, inspBaseline(ry, r.h, tm), nameLine,
-                           theme::ACCENT, w - 2.0f * kPad);
-            break;
-        case UiInspRow::Kind::PosX:
-            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "pos X", 0.0f, 1.0f,
-                            joy->relX, "%.2f")) {
-                edited = true;
-            }
-            break;
-        case UiInspRow::Kind::PosY:
-            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "pos Y", 0.0f, 1.0f,
-                            joy->relY, "%.2f")) {
-                edited = true;
-            }
-            break;
-        case UiInspRow::Kind::SizeW:   // payload: TAMANHO (escala do raio)
-            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "tamanho", 0.4f, 2.0f,
-                            joy->size, "%.2f")) {
-                edited = true;
-            }
-            break;
-        case UiInspRow::Kind::Sens:    // SENSIBILIDADE do joystick
-            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "sensib.", 0.2f, 3.0f,
-                            joy->sens, "%.2f")) {
-                edited = true;
-            }
-            break;
-        case UiInspRow::Kind::ColR:
-            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "cor R", 0.0f, 1.0f,
-                            joy->colR, "%.2f")) {
-                edited = true;
-            }
-            break;
-        case UiInspRow::Kind::ColG:
-            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "cor G", 0.0f, 1.0f,
-                            joy->colG, "%.2f")) {
-                edited = true;
-            }
-            break;
-        case UiInspRow::Kind::ColB:
-            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "cor B", 0.0f, 1.0f,
-                            joy->colB, "%.2f")) {
-                edited = true;
-            }
-            break;
-        case UiInspRow::Kind::Remove:
-            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
-                      "remover joystick");
-            break;
-        default:
-            break;
-        }
-    }
-    ui.endScroll();
-
-    // tap re-despachado → REMOVER (o único botão; sliders capturam sozinhos)
-    f32 tx = 0.0f, ty = 0.0f;
-    if (ui.scrollTap(kUiInspScrollId, tx, ty)) {
-        for (u32 i = 0; i < n; ++i) {
-            const UiInspRow& r = plan[i];
-            if (r.kind != UiInspRow::Kind::Remove) {
-                continue;
-            }
-            const f32 ry = contentTop + r.y - off;
-            if (tx < x + kPad || tx >= x + w - kPad) {
-                continue;
-            }
-            if (ty < ry + 2.0f || ty >= ry + r.h - 2.0f) {
-                continue;
-            }
-            // remove o COMPONENTE do TIC (o InputMap continua; sem fonte)
-            tic->removeComponent<TouchControls>();
-            st.selJoystick = false;
-            edited = true;
-        }
-    }
-    return edited;
-}
-} // namespace
 
 bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                      const InputState& in) {
@@ -924,20 +900,15 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
     ui.panel(x + kPad, y + kHeaderH - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
 
     Tic* tic = scene.get(st.selected);
-    // 0.12-B (B-1) — ÁRVORE: o selecionado é um TIC de UI (com Control)? O
-    // Inspector edita o elem AO VIVO (sem espelho — o Control é a fonte);
-    // o joystick continua pelo drawJoystickInspector (o TouchControls)
+    // 0.12-B (B-1/B-2) — ÁRVORE: o selecionado é um TIC de UI (com Control)?
+    // O Inspector de CONTROLO (as 3 secções colapsáveis) edita o elem AO VIVO
+    // — os campos do joystick (pos/raio/sens/zona morta/cor) escrevem o
+    // TouchControls do MESMO TIC (a fonte de input); o canvas legado segue
+    // pelo plano de 0.7.x (byte a byte)
     Control* selCtrl = tic ? tic->getComponent<Control>() : nullptr;
-    // 0.7.3 — JOYSTICK selecionado: o painel mostra o INSPECTOR DO
-    // JOYSTICK (pos/tamanho/sens/cor/remover do TouchControls do TIC)
-    TouchControls* joySel =
-        (tic && st.selJoystick) ? tic->getComponent<TouchControls>() : nullptr;
-    if (joySel) {
-        return drawJoystickInspector(ui, st, tic, joySel, x, y, w, h);
-    }
-    if (st.selJoystick) {
-        st.selJoystick = false;   // o componente sumiu — cai no fluxo normal
-    }
+    const bool selIsJoy = selCtrl && selCtrl->isJoystick();
+    TouchControls* selTc =
+        selIsJoy ? tic->getComponent<TouchControls>() : nullptr;
     UiCanvas* canvas = tic ? tic->getComponent<UiCanvas>() : nullptr;
     UiElement* ep = nullptr;
     if (selCtrl) {
@@ -956,10 +927,22 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
     UiElement& e = *ep;
 
     // ---- PLANO (fonte única — o mesmo contrato do Inspector de TICs)
+    // 0.12-B (B-2): o selecionado com Control usa o plano de CONTROLO
+    // (as 3 secções colapsáveis + os campos por tipo); o legado fica byte a byte
     const u32 nRows = uiInspectorRowCount(e, tm);
-    UiInspRow plan[32];
-    const u32 n = uiInspectorPlan(e, tm, plan, 32);
-    const f32 contentH = uiInspectorContentHeight(e, tm);
+    (void)nRows;
+    UiInspRow plan[48];
+    f32 contentH = 0.0f;
+    u32 n = 0;
+    if (selCtrl) {
+        n = uiInspectorPlanControl(e, selIsJoy, tm, st.inspUiCollapsed, plan,
+                                   48);
+        contentH = uiInspectorContentHeightControl(e, selIsJoy, tm,
+                                                   st.inspUiCollapsed);
+    } else {
+        n = uiInspectorPlan(e, tm, plan, 48);
+        contentH = uiInspectorContentHeight(e, tm);
+    }
     const f32 contentTop = y + kHeaderH + 4.0f;
     ui.beginScroll(kUiInspScrollId, {x, contentTop, w, h - kHeaderH - 4.0f},
                    contentH);
@@ -1036,41 +1019,169 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
     for (u32 i = 0; i < n; ++i) {
         const UiInspRow& r = plan[i];
         const f32 ry = contentTop + r.y - off;
+        // 0.12-B (B-2): a zona do BOTÃO DE RESET (as linhas com reset
+        // reservam 30px à direita — o valor do slider desloca-se, nada corta)
+        const f32 rr = r.reset ? theme::dp(30.0f) : 0.0f;
         switch (r.kind) {
         case UiInspRow::Kind::Name:
             ui.labelFitted(x + kPad, inspBaseline(ry, r.h, tm), nameLine,
                            theme::ACCENT, w - 2.0f * kPad);
             break;
+        case UiInspRow::Kind::Sec: {
+            // 0.12-B (B-2) — o CABEÇALHO DE SECÇÃO (colapsável): chevron +
+            // rótulo (o padrão da Hierarchy); o tap alterna o bit da secção
+            static const char* kSecNames[3] = {"Transform", "Aparência",
+                                               "Comportamento"};
+            const bool open = (st.inspUiCollapsed &
+                               static_cast<u8>(1u << r.payload)) == 0;
+            const bool heldS = ui.widgetActive(r.id);
+            if (heldS) {
+                ui.panel(x + kPad, ry, w - 2.0f * kPad, r.h,
+                         theme::kTheme.surface2);
+            }
+            icons::drawIcon(ui, open ? icons::Icon::ChevronDown
+                                     : icons::Icon::ChevronRight,
+                            x + kPad + theme::dp(4.0f),
+                            ry + (r.h - theme::dp(16.0f)) * 0.5f,
+                            theme::dp(16.0f), theme::kTheme.text2);
+            if (ui.hasFont()) {
+                ui.labelFitted(x + kPad + theme::dp(28.0f),
+                               inspBaseline(ry, r.h, tm), kSecNames[r.payload],
+                               theme::kTheme.text2,
+                               w - 2.0f * kPad - theme::dp(32.0f));
+            }
+            ui.panel(x + kPad, ry + r.h - 1.0f, w - 2.0f * kPad, 1.0f,
+                     theme::kTheme.border);
+            ui.widgetHit(r.id, x + kPad, ry, w - 2.0f * kPad, r.h);
+            break;
+        }
         case UiInspRow::Kind::PosX:
-            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "x", -3000.0f, 3000.0f,
-                            e.ox, "%.0f")) {
+            if (selIsJoy) {
+                // o joystick posiciona por FRAÇÕES (o TouchControls é a fonte)
+                if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "x", 0.0f, 1.0f,
+                                selTc->relX, "%.2f", rr)) {
+                    edited = true;
+                }
+            } else if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "x", -3000.0f,
+                                   3000.0f, e.ox, "%.0f", rr)) {
                 edited = true;
             }
             break;
         case UiInspRow::Kind::PosY:
-            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "y", -3000.0f, 3000.0f,
-                            e.oy, "%.0f")) {
+            if (selIsJoy) {
+                if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "y", 0.0f, 1.0f,
+                                selTc->relY, "%.2f", rr)) {
+                    edited = true;
+                }
+            } else if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "y", -3000.0f,
+                                   3000.0f, e.oy, "%.0f", rr)) {
                 edited = true;
             }
             break;
         case UiInspRow::Kind::SizeW:
             if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "lar", 8.0f, 3000.0f,
-                            e.w, "%.0f")) {
+                            e.w, "%.0f", rr)) {
                 edited = true;
             }
             break;
         case UiInspRow::Kind::SizeH:
             if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "alt", 8.0f, 3000.0f,
-                            e.h, "%.0f")) {
+                            e.h, "%.0f", rr)) {
                 edited = true;
             }
             break;
+        case UiInspRow::Kind::Radius: {
+            // 0.12-B — o RAIO do joystick (px; escreve a escala do raio, a
+            // base 75px do layout 0.7.3 — o MESMO campo `size` de sempre)
+            f32 rad = selTc->size * 75.0f;
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "raio", 40.0f, 150.0f,
+                            rad, "%.0f", rr)) {
+                selTc->size = rad / 75.0f;
+                edited = true;
+            }
+            break;
+        }
+        case UiInspRow::Kind::Dead:
+            // 0.12-B — a ZONA MORTA (fração do raio em que o eixo lê 0)
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "zona morta", 0.0f,
+                            0.4f, selTc->dead, "%.2f", rr)) {
+                edited = true;
+            }
+            break;
+        case UiInspRow::Kind::MargL:
+        case UiInspRow::Kind::MargT:
+        case UiInspRow::Kind::MargR:
+        case UiInspRow::Kind::MargB: {
+            static const char* kMarg[4] = {"margem L", "margem T", "margem R",
+                                           "margem B"};
+            const u32 mi = static_cast<u32>(r.kind) -
+                           static_cast<u32>(UiInspRow::Kind::MargL);
+            f32& mv = mi == 0 ? selCtrl->marginL
+                              : mi == 1 ? selCtrl->marginT
+                                        : mi == 2 ? selCtrl->marginR
+                                                  : selCtrl->marginB;
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, kMarg[mi], 0.0f,
+                            300.0f, mv, "%.0f", rr)) {
+                edited = true;
+            }
+            break;
+        }
+        case UiInspRow::Kind::PivotX:
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "pivo X", 0.0f, 1.0f,
+                            selCtrl->pivotX, "%.2f", rr)) {
+                edited = true;
+            }
+            break;
+        case UiInspRow::Kind::PivotY:
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "pivo Y", 0.0f, 1.0f,
+                            selCtrl->pivotY, "%.2f", rr)) {
+                edited = true;
+            }
+            break;
+        case UiInspRow::Kind::Rot:
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "rot", -180.0f,
+                            180.0f, e.rot, "%.0f", rr)) {
+                edited = true;
+            }
+            break;
+        case UiInspRow::Kind::Opacity:
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "opacidade", 0.0f,
+                            1.0f, selCtrl->opacity, "%.2f", rr)) {
+                edited = true;
+            }
+            break;
+        case UiInspRow::Kind::StretchTgl: {
+            // 0.12-B — o "esticar" (a 10.ª âncora): o switch da casa (o
+            // MESMO desenho do visível); ao SAIR do esticar a posição
+            // conserva-se (ox/oy derivam do rect atual — o padrão do detach)
+            const bool heldE = ui.widgetActive(r.id);
+            if (heldE) {
+                ui.panel(x + kPad, ry, w - 2.0f * kPad, r.h,
+                         theme::kTheme.surface2);
+            }
+            if (ui.hasFont()) {
+                ui.labelFitted(x + kPad + theme::dp(12.0f),
+                               ry + (r.h - tm.block()) * 0.5f + tm.ascent,
+                               "esticar", theme::kTheme.text1,
+                               w - 2.0f * kPad - theme::dp(56.0f));
+            }
+            editor::drawVisSwitch(ui, selCtrl->stretch, x + w - kPad,
+                                  ry + r.h * 0.5f);
+            ui.widgetHit(r.id, x + kPad, ry, w - 2.0f * kPad, r.h - 4.0f);
+            break;
+        }
         case UiInspRow::Kind::ColR:
         case UiInspRow::Kind::ColG:
         case UiInspRow::Kind::ColB: {
             static const char* kLabels[3] = {"cor R", "cor G", "cor B"};
+            // 0.12-B: o joystick escreve a cor do TOUCHCONTROLS (a do desenho)
+            f32& cv = selIsJoy
+                          ? (colorIdx == 0 ? selTc->colR
+                                           : colorIdx == 1 ? selTc->colG
+                                                           : selTc->colB)
+                          : e.color[colorIdx];
             if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, kLabels[colorIdx], 0.0f,
-                            1.0f, e.color[colorIdx], "%.2f")) {
+                            1.0f, cv, "%.2f", rr)) {
                 edited = true;
             }
             ++colorIdx;
@@ -1080,7 +1191,7 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
             // 0.7.4 — ALPHA do fundo: 0 = sem fundo (Label default);
             // Menu = caixas ON/OFF; Panel/Button translúcidos se < 1
             if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "fundo A", 0.0f, 1.0f,
-                            e.color[3], "%.2f")) {
+                            e.color[3], "%.2f", rr)) {
                 edited = true;
             }
             break;
@@ -1099,7 +1210,7 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
         case UiInspRow::Kind::FontScl:
             // 0.8.6 — TAMANHO DA LETRA do texto do elemento (×base 28 px)
             if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "letra", 0.5f, 3.0f,
-                            e.fontScale, "%.2fx")) {
+                            e.fontScale, "%.2fx", rr)) {
                 edited = true;
             }
             break;
@@ -1218,14 +1329,21 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
         case UiInspRow::Kind::Spacing:
             // 0.7.4 — espaçamento entre itens (Menu) / filhos (containers)
             if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "espaco", 0.0f, 40.0f,
-                            e.spacing, "%.0f")) {
+                            e.spacing, "%.0f", rr)) {
                 edited = true;
             }
             break;
         case UiInspRow::Kind::Pad:
             // 0.7.4 — resguardo interno do container
             if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "pad", 0.0f, 40.0f,
-                            e.pad, "%.0f")) {
+                            e.pad, "%.0f", rr)) {
+                edited = true;
+            }
+            break;
+        case UiInspRow::Kind::Sens:
+            // 0.7.3 — a SENSIBILIDADE do joystick
+            if (uiSliderRow(ui, r.id, x, w, ry, r.h, tm, "sensib.", 0.2f, 3.0f,
+                            selTc->sens, "%.2f", rr)) {
                 edited = true;
             }
             break;
@@ -1252,12 +1370,151 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                       "remover elemento");
             break;
         }
+        // 0.12-B (B-2) — o BOTÃO DE RESET da linha (as linhas com reset): o
+        // quadrado 30px à direita com o ícone da casa (a NOTA (não cortados):
+        // o valor do slider já deslocou-se para a esquerda — o quadrado é
+        // INTEIRO dentro da linha e do painel)
+        if (r.reset) {
+            const f32 rsz = theme::dp(30.0f);
+            const f32 rx0 = x + w - kPad - rsz;
+            const f32 ry0 = ry + (r.h - rsz) * 0.5f;
+            ui.panel(rx0, ry0, rsz, rsz, theme::kTheme.surface2);
+            ui.frame(rx0, ry0, rsz, rsz, 1.0f, theme::kTheme.border);
+            icons::drawIcon(ui, icons::Icon::Reset, rx0 + (rsz -
+                            theme::dp(18.0f)) * 0.5f,
+                            ry0 + (rsz - theme::dp(18.0f)) * 0.5f,
+                            theme::dp(18.0f), theme::kTheme.text2);
+        }
     }
     ui.endScroll();
 
     // tap re-despachado → botões do plano (hit-test no rect DESENHADO)
     f32 tx = 0.0f, ty = 0.0f;
     if (ui.scrollTap(kUiInspScrollId, tx, ty)) {
+        // 0.12-B (B-2) — a zona do RESET tem PRIORIDADE sobre o skip dos
+        // sliders (o quadrado 30px à direita das linhas com reset é o
+        // ÚNICO caminho de tap dessas linhas; o resto do corpo é do slider)
+        const f32 rz0 = x + w - kPad - theme::dp(30.0f);
+        for (u32 i = 0; i < n; ++i) {
+            const UiInspRow& r = plan[i];
+            if (!r.reset) {
+                continue;
+            }
+            const f32 ry = contentTop + r.y - off;
+            if (tx < rz0 || tx >= x + w - kPad) {
+                continue;
+            }
+            if (ty < ry + 2.0f || ty >= ry + r.h - 2.0f) {
+                continue;
+            }
+            switch (r.kind) {
+                    case UiInspRow::Kind::PosX:
+                        if (selIsJoy) {
+                            selTc->relX = 0.09375f;   // o default do 0.7.3
+                        } else {
+                            e.ox = 0.0f;
+                        }
+                        edited = true;
+                        break;
+                    case UiInspRow::Kind::PosY:
+                        if (selIsJoy) {
+                            selTc->relY = 0.7361f;
+                        } else {
+                            e.oy = 0.0f;
+                        }
+                        edited = true;
+                        break;
+                    case UiInspRow::Kind::SizeW:
+                    case UiInspRow::Kind::SizeH: {
+                        // os defaults POR TIPO (a FONTE ÚNICA elementDefaults)
+                        f32 dw = 0.0f, dh = 0.0f;
+                        f32 dcol[4];
+                        UiCanvas::elementDefaults(e.kind, dw, dh, dcol);
+                        if (r.kind == UiInspRow::Kind::SizeW) {
+                            e.w = dw;
+                        } else {
+                            e.h = dh;
+                        }
+                        edited = true;
+                        break;
+                    }
+                    case UiInspRow::Kind::MargL:
+                    case UiInspRow::Kind::MargT:
+                    case UiInspRow::Kind::MargR:
+                    case UiInspRow::Kind::MargB: {
+                        const u32 mi = static_cast<u32>(r.kind) -
+                                       static_cast<u32>(UiInspRow::Kind::MargL);
+                        if (mi == 0) selCtrl->marginL = 0.0f;
+                        else if (mi == 1) selCtrl->marginT = 0.0f;
+                        else if (mi == 2) selCtrl->marginR = 0.0f;
+                        else selCtrl->marginB = 0.0f;
+                        edited = true;
+                        break;
+                    }
+                    case UiInspRow::Kind::PivotX:
+                        selCtrl->pivotX = 0.5f;
+                        edited = true;
+                        break;
+                    case UiInspRow::Kind::PivotY:
+                        selCtrl->pivotY = 0.5f;
+                        edited = true;
+                        break;
+                    case UiInspRow::Kind::Rot:
+                        e.rot = 0.0f;
+                        edited = true;
+                        break;
+                    case UiInspRow::Kind::Opacity:
+                        selCtrl->opacity = 1.0f;
+                        edited = true;
+                        break;
+                    case UiInspRow::Kind::ColR:
+                    case UiInspRow::Kind::ColG:
+                    case UiInspRow::Kind::ColB:
+                    case UiInspRow::Kind::ColA: {
+                        // a cor default POR TIPO (o Label nasce transparente —
+                        // o mesmo contrato de criação)
+                        f32 dw = 0.0f, dh = 0.0f;
+                        f32 dcol[4];
+                        UiCanvas::elementDefaults(e.kind, dw, dh, dcol);
+                        const u32 ci =
+                            r.kind == UiInspRow::Kind::ColR
+                                ? 0
+                                : r.kind == UiInspRow::Kind::ColG
+                                      ? 1
+                                      : r.kind == UiInspRow::Kind::ColB ? 2 : 3;
+                        if (selIsJoy && ci < 3) {
+                            if (ci == 0) selTc->colR = 0.1804f;
+                            else if (ci == 1) selTc->colG = 0.1804f;
+                            else selTc->colB = 0.1804f;
+                        } else {
+                            e.color[ci] = dcol[ci];
+                        }
+                        edited = true;
+                        break;
+                    }
+                    case UiInspRow::Kind::FontScl:
+                        e.fontScale = 1.0f;
+                        edited = true;
+                        break;
+                    case UiInspRow::Kind::Sens:
+                        selTc->sens = 1.0f;
+                        edited = true;
+                        break;
+                    case UiInspRow::Kind::Dead:
+                        selTc->dead = 0.0f;
+                        edited = true;
+                        break;
+                    case UiInspRow::Kind::Radius:
+                        selTc->size = 1.0f;   // o raio volta a 75px
+                        edited = true;
+                        break;
+                default:
+                    break;
+            }
+            break;   // o tap consumiu-se no reset
+        }
+        // o corpo das linhas (fora da zona de reset): os botões/toggles —
+        // os sliders NÃO passam aqui (capturam o gesto diretamente)
         for (u32 i = 0; i < n; ++i) {
             const UiInspRow& r = plan[i];
             if (r.kind == UiInspRow::Kind::PosX || r.kind == UiInspRow::Kind::PosY ||
@@ -1266,6 +1523,12 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                 r.kind == UiInspRow::Kind::ColB || r.kind == UiInspRow::Kind::ColA ||
                 r.kind == UiInspRow::Kind::FontScl ||
                 r.kind == UiInspRow::Kind::Spacing || r.kind == UiInspRow::Kind::Pad ||
+                r.kind == UiInspRow::Kind::MargL || r.kind == UiInspRow::Kind::MargT ||
+                r.kind == UiInspRow::Kind::MargR || r.kind == UiInspRow::Kind::MargB ||
+                r.kind == UiInspRow::Kind::PivotX || r.kind == UiInspRow::Kind::PivotY ||
+                r.kind == UiInspRow::Kind::Rot || r.kind == UiInspRow::Kind::Opacity ||
+                r.kind == UiInspRow::Kind::Dead || r.kind == UiInspRow::Kind::Radius ||
+                r.kind == UiInspRow::Kind::Sens ||
                 r.kind == UiInspRow::Kind::Name) {
                 continue;   // sliders capturam o gesto diretamente
             }
@@ -1277,6 +1540,33 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
                 continue;
             }
             switch (r.kind) {
+                case UiInspRow::Kind::Sec:
+                    // 0.12-B (B-2) — o tap no cabeçalho ALTERNA a secção
+                    st.inspUiCollapsed = static_cast<u8>(
+                        st.inspUiCollapsed ^ static_cast<u8>(1u << r.payload));
+                    edited = true;
+                    break;
+                case UiInspRow::Kind::StretchTgl:
+                    // 0.12-B (B-2) — o "esticar" (a 10.ª âncora); ao SAIR, a
+                    // posição conserva-se (ox/oy derivam do rect ATUAL — o
+                    // padrão do uiDetachElement da 0.7.4)
+                    if (selCtrl) {
+                        if (selCtrl->stretch) {
+                            const safe::Insets insNow = ui.safeArea();
+                            const UiRect rNow = ui::controlRect(
+                                *selCtrl, ui.screenWidth(), ui.screenHeight(),
+                                insNow);
+                            selCtrl->stretch = false;
+                            selCtrl->elem.anchorH = UiElement::AnchorH::Left;
+                            selCtrl->elem.anchorV = UiElement::AnchorV::Top;
+                            selCtrl->elem.ox = rNow.x - insNow.left;
+                            selCtrl->elem.oy = rNow.y - insNow.top;
+                        } else {
+                            selCtrl->stretch = true;
+                        }
+                        edited = true;
+                    }
+                    break;
                 case UiInspRow::Kind::VisToggle:
                     e.visible = !e.visible;
                     edited = true;
@@ -1476,7 +1766,6 @@ bool drawUiInspector(UiContext& ui, Scene& scene, EditorState& st,
             }
         }
     }
-    (void)nRows;
     return edited;
 }
 

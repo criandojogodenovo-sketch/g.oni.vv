@@ -34,6 +34,10 @@ public:
     f32 relY = 0.7361f;    // default = 530px num ecrã 720 de altura
     f32 size = 1.0f;       // escala do raio (75px base)
     f32 sens = 1.0f;       // multiplicador do eixo (clamp |a|<=1)
+    // 0.12-B (B-2): ZONA MORTA — fração do raio em que o eixo lê 0 (o dedo
+    // perto do centro não arrasta o player). 0 = o comportamento de sempre
+    // (byte-compat: o campo só viaja no .goni quando != 0)
+    f32 dead = 0.0f;
     f32 colR = 0.1804f, colG = 0.1804f, colB = 0.1804f;   // mono LINE
 
     // layout DERIVADO dos campos (o default reproduz o fixo da 0.6.x)

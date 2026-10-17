@@ -206,6 +206,11 @@ struct EditorState {
     // central — ver safe::centerRect(sw,sh,in,rightPanel))
     bool   showInspector = true;
 
+    // 0.12-B (B-2) — SECÇÕES COLAPSÁVEIS do Inspector de UI (Transform /
+    // Aparência / Comportamento): o bit i = a secção i está COLAPSADA
+    // (bit 0 = Transform, 1 = Aparência, 2 = Comportamento)
+    u8     inspUiCollapsed = 0;
+
     // 0.9.0 (spec D) — modo SELECIONAR da toolbar do viewport (cursor): sem
     // gizmo; o toque no viewport seleciona TICs. Vive no estado para ser
     // afervel no CI.

@@ -820,6 +820,22 @@ constexpr u64 kUiInspHex    = 8032;   // 0.8.6: "hex: #RRGGBB" (teclado hex)
 constexpr u64 kUiInspFont   = 8033;   // 0.8.6: "letra: Nx" (escala da fonte)
 constexpr u64 kUiInspTStyle = 8034;   // 0.8.6: "letra estilo" (cicla)
 // 0.7.3 — inspector do JOYSTICK (TouchControls editável)
+// 0.12-B (B-2) — o Inspector de CONTROLO (a árvore): as secções + os
+// campos novos da base + os campos por tipo do joystick
+constexpr u64 kUiInspSecT   = 8040;   // cabeçalho da secção TRANSFORM
+constexpr u64 kUiInspSecA   = 8041;   // cabeçalho da secção APARÊNCIA
+constexpr u64 kUiInspSecC   = 8042;   // cabeçalho da secção COMPORTAMENTO
+constexpr u64 kUiInspMargL  = 8043;   // margem esquerda (esticar)
+constexpr u64 kUiInspMargT  = 8044;
+constexpr u64 kUiInspMargR  = 8045;
+constexpr u64 kUiInspMargB  = 8046;
+constexpr u64 kUiInspPivX   = 8047;   // pivô X (0..1)
+constexpr u64 kUiInspPivY   = 8048;   // pivô Y (0..1)
+constexpr u64 kUiInspRot    = 8049;   // rotação (graus)
+constexpr u64 kUiInspStrch  = 8050;   // "esticar: sim/nao" (a 10.ª âncora)
+constexpr u64 kUiInspOpa    = 8051;   // opacidade (0..1)
+constexpr u64 kUiInspDead   = 8052;   // joystick: zona morta (fração do raio)
+constexpr u64 kUiInspRadius = 8053;   // joystick: raio (px; escreve size)
 constexpr u64 kJoyX      = 8020;   // pos X (fração da área útil 0..1)
 constexpr u64 kJoyY      = 8021;
 constexpr u64 kJoySize   = 8022;   // escala do raio

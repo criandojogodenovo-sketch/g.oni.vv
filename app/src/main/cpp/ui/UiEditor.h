@@ -100,8 +100,17 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
 struct UiInspRow {
     enum class Kind : u8 {
         Name,       // nome + tipo do elemento (accent)
+        Sec,        // 0.12-B (B-2): cabeçalho de secção colapsável (payload
+                    // = o índice 0..2 no EditorState::inspUiCollapsed)
         PosX, PosY, // sliders ox/oy (design px) — ocultas em FILHOS de container
         SizeW, SizeH,   // sliders w/h
+        MargL, MargT, MargR, MargB,  // 0.12-B: margens do esticar (0..300)
+        PivotX, PivotY,              // 0.12-B: pivô (0..1)
+        Rot,                          // 0.12-B: rotação (graus, −180..180)
+        StretchTgl,                   // 0.12-B: "esticar: sim/nao" (a 10.ª âncora)
+        Opacity,                      // 0.12-B: opacidade (0..1)
+        Dead,                         // 0.12-B: joystick — zona morta (0..0.4)
+        Radius,                       // 0.12-B: joystick — raio (px; escreve size)
         ColR, ColG, ColB,   // sliders cor 0..1
         ColA,       // 0.7.4: slider ALPHA do fundo (0..1; Label nasce 0)
         VisToggle,      // "visivel: sim/nao" (botão re-despachado)
@@ -115,9 +124,9 @@ struct UiInspRow {
         ActTarget,      // "alvo: ..." (abre o teclado)
         StyleBtn,       // 0.7.1: "estilo: fade|slide" (cicla) — acao trans
         Sens,           // 0.7.3: slider de sensibilidade (joystick)
-        Remove,         // "remover elemento"/"remover joystick"
+        Remove,         // "remover elemento" (a árvore: APAGA O TIC)
         TexBtn,         // 0.7.4: "tex: ..." (Panel/Button/Image → seletor)
-        ParentBtn,      // 0.7.4: "colocar em: ..." (cicla containers do canvas)
+        ParentBtn,      // 0.7.4: "colocar em: ..." (cicla containers)
         Spacing,        // 0.7.4: slider espaçamento (Menu/containers)
         Pad,            // 0.7.4: slider padding (containers)
         AlignBtn,       // 0.7.4: "alinhamento: start/center/end" (Menu/containers)
@@ -126,6 +135,8 @@ struct UiInspRow {
     f32  y;
     f32  h;
     u64  id;
+    u32  payload = 0;   // 0.12-B: extra por kind (a secção do cabeçalho)
+    bool reset = false; // 0.12-B: a linha tem BOTÃO DE RESET (a zona à direita)
 };
 
 // o elemento tem TEXTO editável? (Label/Button/Card/Article/Menu)
@@ -148,10 +159,18 @@ u32 uiInspectorPlan(const UiElement& e, const TextMetrics& m, UiInspRow* rows,
                     u32 cap);
 f32  uiInspectorContentHeight(const UiElement& e, const TextMetrics& m);
 
-// 0.7.3 — plano do INSPECTOR DO JOYSTICK (TouchControls editável: pos/
-// tamanho/sensibilidade/cor/remover; o MESMO contrato de y cumulativo)
-u32 uiJoystickPlan(const TextMetrics& m, UiInspRow* rows, u32 cap);
-f32  uiJoystickContentHeight(const TextMetrics& m);
+// ---- 0.12-B (B-2) — o plano do INSPECTOR DE CONTROLO (a árvore): 3
+// SECÇÕES COLAPSÁVEIS (Transform/Aparência/Comportamento — o bit i de
+// `collapsed` = a secção i fechada), os campos da base (margens/pivô/
+// rotação/esticar/opacidade) e os CAMPOS POR TIPO (texto/letra p/ Label e
+// Button; raio/zona morta/sens p/ Joystick). SEM "remover joystick" (o
+// apagar é o TIC — a Hierarchy/"remover elemento"). FONTE ÚNICA partilhada
+// com os pins (o MESMO contrato de y cumulativo).
+u32 uiInspectorPlanControl(const UiElement& e, bool joystick,
+                           const TextMetrics& m, u8 collapsed,
+                           UiInspRow* rows, u32 cap);
+f32  uiInspectorContentHeightControl(const UiElement& e, bool joystick,
+                                     const TextMetrics& m, u8 collapsed);
 
 // desenha o Inspector de UI no painel direito (substitui o de TICs quando
 // há elemento selecionado em modo UI). Devolve true se algum valor mudou.
