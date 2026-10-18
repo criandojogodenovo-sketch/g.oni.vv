@@ -40,3 +40,19 @@ STATE.md
 # 0.11-CTX CTX-2: CODEMAP.md na raiz — o mapa do código lido sempre (a
 # promessa do comentário acima cumpre-se neste commit).
 CODEMAP.md
+# 0.12-C C-4 (A REPARAÇÃO): os 9 ficheiros de BASELINE que os commits
+# partidos da C-1..C-3 apagaram e a reparação (19427a3) devolveu — os
+# gate os via como «novos» porque a BASELINE de comparação era a árvore
+# quebrada (266bd3b). NENHUM deles é mudança de campanha: todos viveram
+# no repo desde antes do e8c9587 com o CI verde. O gate manda «alargar o
+# scope exige aprovação do dono (editar este ficheiro É o pedido)» — o
+# pedido é o RESTABELECIMENTO do baseline (a ordem do dono: «não confia
+# no build eu quero correções»).
+.gitignore
+build.gradle
+gradle.properties
+gradle/
+gradlew
+gradlew.bat
+settings.gradle
+test-wiring010-logs/
