@@ -416,6 +416,12 @@ struct Vm {
         // fonte única) e o argc afere-se pelos minArgs/maxArgs dela
         if (const reg::Entry* fe = reg::find(e.name);
             fe && fe->kind == reg::Kind::Funcao) {
+            // 0.12-U (3.9b): o spawn tem o TIPO como NOME CRU (o padrão dos
+            // slots de NOME do tykerwire — copy/colorpars/blend) — avaliar
+            // `esfera` mataria com "'esfera' não existe" antes do Host
+            if (e.name == "spawn") {
+                return evalSpawn(*fe, e);
+            }
             return evalFuncao(*fe, e);
         }
         fail(e.line, std::string("'") + e.name + "' não é uma função");
@@ -542,6 +548,48 @@ struct Vm {
         }
         fail(line, name + ": a entrada existe no registo mas não tem "
                         "runtime (erro interno)");
+    }
+
+    // ---- 0.12-U (3.9b): spawn(tipo, x, y, z) → TIC -------------------------
+    // O TIPO é NOME CRU (Txt entre aspas OU identificador — o padrão dos
+    // slots de NOME); x/y/z são números avaliados. O Host valida o tipo
+    // (a lista é DELA — a engine sabe o que existe) e devolve o NOME
+    // ÚNICO do TIC novo; o erro sobe com a LINHA (a Vm acrescenta).
+    Value evalSpawn(const reg::Entry& fe, const Expr& e) {
+        const u32 line = e.line;
+        const std::string name = e.name;
+        if (e.args.size() < fe.minArgs || e.args.size() > fe.maxArgs) {
+            fail(line, name + ": escreve assim — " + fe.syntax);
+        }
+        const Expr& a0 = *e.args[0];
+        std::string tipo;
+        if (a0.kind == Expr::Kind::Lit && a0.lit.t == Type::Txt) {
+            tipo = a0.lit.s;
+        } else if (a0.kind == Expr::Kind::Var) {
+            tipo = a0.name;
+        } else if (a0.kind == Expr::Kind::Path && a0.segs.size() == 1) {
+            tipo = a0.segs[0];
+        } else {
+            fail(line, "spawn: o tipo é \"esfera\" ou \"box\" (entre aspas "
+                            "ou nome cru)");
+        }
+        f64 xyz[3];
+        for (size_t i = 1; i < e.args.size() && i <= 3; ++i) {
+            Value v = eval(*e.args[i]);
+            if (!isNum(v)) {
+                fail(line, "spawn: x, y, z têm de ser números (veio " +
+                               typeName(v.t) + ")");
+            }
+            xyz[i - 1] = asNum(v);
+        }
+        std::string nome, herr;
+        if (!host.spawnTic(tipo, (f32)xyz[0], (f32)xyz[1], (f32)xyz[2],
+                           nome, herr)) {
+            fail(line, herr.empty() ? ("spawn: o tipo '" + tipo +
+                                            "' não existe")
+                                    : herr);
+        }
+        return Value::ofTic(nome);
     }
 
     // 0.12-U (3.9a): resolve um argumento da distance a UM PONTO — TIC usa

@@ -11,6 +11,7 @@
 #include "voni/VoniInternal.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -153,6 +154,34 @@ struct FakeHost : Host {
     }
 
     bool ticExists(const std::string& n) override { return tic(n) != nullptr; }
+
+    // 0.12-U (3.9b): o spawn do fake — valida o tipo (a lista é DELE) e
+    // CRIA o TIC (active/visible/nome único) para o devolvido ser usável
+    std::vector<std::string> spawned;
+    bool spawnTic(const std::string& tipo, f32 x, f32 y, f32 z,
+                  std::string& outName, std::string& err) override {
+        if (tipo != "esfera" && tipo != "box") {
+            err = "spawn: o tipo '" + tipo +
+                  "' não existe (tipos: esfera box)";
+            return false;
+        }
+        std::string nome = tipo;
+        int suf = 1;
+        char b[48];
+        while (tic(nome) != nullptr) {
+            std::snprintf(b, sizeof(b), "%s.%03d", tipo.c_str(), suf++);
+            nome = b;
+        }
+        FakeTic t;
+        t.name = nome;
+        t.pos[0] = x;
+        t.pos[1] = y;
+        t.pos[2] = z;
+        tics.push_back(t);
+        spawned.push_back(nome);
+        outName = nome;
+        return true;
+    }
 
     void moveTic(f32 dx, f32 dy, f32 dz) override {
         moved[0] += dx;
@@ -2304,4 +2333,154 @@ central main { on moment { } allmoments { } }
     auto ex = r.script.exported();
     EXPECT(ex[0].value.t == Type::Num);
     EXPECT(std::fabs(ex[0].value.n - 10.0) < 1e-12);   // a DELE soma
+}
+
+// ===========================================================================
+// 0.12-U (3.9b) — spawn(tipo, x, y, z) → TIC
+// O tipo é da lista do HOST (a engine: esfera/box); o TIC nasce
+// active/visible/nome único; o devolvido é USÁVEL (pos, distance).
+// ===========================================================================
+
+TEST(spawn_cria_tic_e_devolve) {
+    RunResult r = runScript(R"VONI(
+v#@+novo:TIC=spawn("esfera", 1, 2, 3)
+central main {
+  on moment { View P novo View P novo.pos }
+  allmoments { }
+}
+)VONI");
+    EXPECT(r.ok);
+    if (!r.ok || r.host.logs.size() < 2) return;
+    EXPECT(r.host.logs[0] == "voni: esfera");       // o TIC novo pelo NOME
+    EXPECT(r.host.logs[1] == "voni: (1, 2, 3)");    // nasceu NA POSIÇÃO
+    auto ex = r.script.exported();
+    EXPECT(ex.size() == 1 && ex[0].value.t == Type::Tic);
+    EXPECT(ex[0].value.tic == "esfera");
+}
+
+TEST(spawn_tipos_validos_e_registo) {
+    RunResult r = runScript(R"VONI(
+v#@+a:TIC=spawn("box", 0, 0, 0)
+v#@+b:TIC=spawn(esfera, 1, 1, 1)
+central main { on moment { } allmoments { } }
+)VONI");
+    EXPECT(r.ok);
+    auto ex = r.script.exported();
+    EXPECT(ex.size() == 2);
+    EXPECT(ex[0].value.tic == "box");
+    EXPECT(ex[1].value.tic == "esfera");   // o nome CRU também é tipo
+}
+
+TEST(spawn_tipo_desconhecido_erro_com_linha) {
+    // o tipo é da lista do HOST — o "cilindro" REMOVIDO (0.8.10) também
+    // é erro hoje (o primFromName de load é defesa, não porta)
+    RunResult e = runScript(
+        "central main { on moment { v#x:TIC=spawn(\"dragon\", 0, 0, 0) } "
+        "allmoments { } }");
+    EXPECT(!e.ok);
+    EXPECT(e.err.message.find("'dragon' não existe") != std::string::npos);
+    EXPECT(e.err.message.find("esfera box") != std::string::npos);
+    EXPECT(e.err.line == 1);
+    RunResult e2 = runScript(
+        "central main { on moment { v#x:TIC=spawn(\"cilindro\", 0, 0, 0) } "
+        "allmoments { } }");
+    EXPECT(!e2.ok);
+    EXPECT(e2.err.message.find("cilindro") != std::string::npos);
+    EXPECT(e2.err.line == 1);
+}
+
+TEST(spawn_forma_errada_ensina_a_sintaxe) {
+    RunResult a = runScript(
+        "central main { on moment { v#x:TIC=spawn(\"esfera\", 1, 2) } "
+        "allmoments { } }");
+    EXPECT(!a.ok);
+    EXPECT(a.err.message.find("spawn(tipo, x, y, z)") != std::string::npos);
+    RunResult b = runScript(
+        "central main { on moment { v#x:TIC=spawn(\"esfera\", \"a\", 2, 3) } "
+        "allmoments { } }");
+    EXPECT(!b.ok);
+    EXPECT(b.err.message.find("têm de ser números") != std::string::npos);
+    EXPECT(b.err.line == 1);
+    RunResult c = runScript(
+        "central main { on moment { v#x:TIC=spawn(1, 2, 3, 4) } "
+        "allmoments { } }");
+    EXPECT(!c.ok);
+    EXPECT(c.err.message.find("entre aspas") != std::string::npos);
+}
+
+TEST(spawn_nome_unico_na_serie) {
+    RunResult r = runScript(R"VONI(
+v#@+a:TIC=spawn("esfera", 0, 0, 0)
+v#@+b:TIC=spawn("esfera", 1, 0, 0)
+v#@+c:TIC=spawn("esfera", 2, 0, 0)
+v#@+d:TIC=spawn("box", 0, 0, 0)
+central main { on moment { } allmoments { } }
+)VONI");
+    EXPECT(r.ok);
+    auto ex = r.script.exported();
+    EXPECT(ex.size() == 4);
+    EXPECT(ex[0].value.tic == "esfera");        // a base
+    EXPECT(ex[1].value.tic == "esfera.001");    // Godot-style
+    EXPECT(ex[2].value.tic == "esfera.002");
+    EXPECT(ex[3].value.tic == "box");           // a base do OUTRO tipo
+    EXPECT(r.host.spawned.size() == 4);
+}
+
+TEST(spawn_tic_usavel_pos_distance) {
+    // o TIC devolvido é USÁVEL: escreve pos, lê, e entra na distance
+    FakeHost h;
+    h.tics.push_back({"jogador", {0, 0, 0}});
+    Error err;
+    Script s = Script::compile(R"VONI(
+v#@+novo:TIC=spawn("box", 0, 5, 0)
+central main {
+  on moment {
+    novo.pos.y=9
+    View P novo.pos.y
+    View P distance(novo, jogador)
+  }
+  allmoments { }
+}
+)VONI", err);
+    EXPECT(err.ok);
+    const bool st = s.runStart(h, err);
+    EXPECT(st);
+    if (!st || h.logs.size() < 2) return;
+    EXPECT(h.logs[0] == "voni: 9");    // a escrita no TIC novo chegou
+    EXPECT(h.logs[1] == "voni: 9");    // distance (0,9,0)→(0,0,0) = 9
+    FakeTic* n = h.tic("box");
+    EXPECT(n != nullptr && n->pos[1] == 9.0f);
+}
+
+TEST(spawn_host_sem_cena_erro_honesto) {
+    // o default do Host (sem cena) responde "indisponível" — o script não
+    // morre de forma seca; o erro sobe com a linha
+    struct HostSemSpawn : Host {
+        std::vector<std::string> logs;
+        void log(const char* l) override { logs.push_back(l); }
+        bool getProp(const std::string&, const std::vector<std::string>&,
+                     Value&, std::string&) override { return false; }
+        bool setProp(const std::string&, const std::vector<std::string>&,
+                     const Value&, std::string&) override { return false; }
+        bool ticExists(const std::string&) override { return false; }
+        void moveTic(f32, f32, f32) override {}
+        void explodeTic(bool) override {}
+        bool importAnim(const std::string&, std::string&) override {
+            return false;
+        }
+        bool transitionTo(const std::string&, const std::string&,
+                          std::string&) override { return false; }
+        std::string currentSceneName() override { return "c"; }
+        bool search(const std::string&, const std::vector<std::string>&,
+                    Value&, std::string&) override { return false; }
+        f64 frameDt() override { return 1.0 / 60.0; }
+    } h;
+    Error err;
+    Script s = Script::compile(
+        "central main { on moment { v#x:TIC=spawn(\"esfera\", 0, 0, 0) } "
+        "allmoments { } }", err);
+    EXPECT(err.ok);
+    EXPECT(!s.runStart(h, err));
+    EXPECT(err.message.find("indisponível") != std::string::npos);
+    EXPECT(err.line == 1);
 }

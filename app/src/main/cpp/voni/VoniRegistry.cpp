@@ -301,6 +301,14 @@ static const Entry kEntries[] = {
       "v++d=distance(jogador, alvo)\nv++d2=distance(jogador.pos, alvo.pos)",
       "hipot / dist entre posições",
       "", 0, CompKind::Nenhum, 2, 2 },
+    { "spawn", Kind::Funcao,
+      "spawn(tipo, x, y, z)",
+      "Cria um TIC na cena: o tipo é \"esfera\" ou \"box\" (os nomes do "
+      ".goni); nasce active/visible com nome único; devolve o TIC novo. "
+      "Tipo desconhecido = erro com linha.",
+      "v#novo:TIC=spawn(\"box\", 0, 0, -5)\nnovo.pos.y=1",
+      "instanciar objeto / add_child",
+      "", 0, CompKind::Nenhum, 4, 4 },
 
     // ---- LINKER (a forma de declaração — 0.9.5) ---------------------------
     { "linker", Kind::Linker,

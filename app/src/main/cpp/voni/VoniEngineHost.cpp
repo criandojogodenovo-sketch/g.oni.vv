@@ -12,7 +12,9 @@
 #include "components/Transform3D.h"
 #include "math/Math.h"
 #include "platform/EngineLog.h"
+#include "render/Primitives.h"          // 0.12-U (3.9b): os tipos do spawn
 
+#include <cstdio>
 #include <cmath>
 
 namespace voni {
@@ -34,6 +36,27 @@ EngineHost::EngineHost(vv::Scene& scene, vv::Handle hostTic,
                        const vv::voni_engine::SceneNameFn* sceneName)
     : scene_(scene), hostTic_(hostTic), transition_(transition),
       sceneName_(sceneName) {}
+
+namespace {
+
+// 0.12-U (3.9b): o nome único do spawn — a MESMA convenção do
+// createTicFromPreset (base, base.001, base.002… contra a cena viva;
+// limite prático 999 — o mesmo do Presets/uiEditor)
+std::string uniqueSpawnName(vv::Scene& scene, const std::string& base) {
+    if (!scene.find(base).valid()) {
+        return base;
+    }
+    char buf[96];
+    for (u32 i = 1; i < 1000u; ++i) {
+        std::snprintf(buf, sizeof(buf), "%s.%03u", base.c_str(), i);
+        if (!scene.find(buf).valid()) {
+            return std::string(buf);
+        }
+    }
+    return base + ".999";
+}
+
+} // namespace
 
 Tic* EngineHost::hostTic() { return scene_.get(hostTic_); }
 
@@ -380,6 +403,42 @@ bool EngineHost::blendAnim(const std::string& clip, f32 seconds,
     }
     err = "blend(): animação '" + clip + "' não encontrada";
     return false;
+}
+
+// 0.12-U (3.9b): spawn(tipo, x, y, z) → TIC — CRIA na cena REAL: o tipo
+// é da lista VIVA (0.8.10: esfera e box — o primFromName do render é
+// defesa de LOAD; aqui o script tem de ser HONESTO e o erro ENSINA os
+// tipos); nasce ACTIVE (Scene::create) + VISIBLE (o default do Tic) com
+// Transform3D na pos + MeshRenderer com a primitiva (o mesmo corpo do
+// preset Mesh do core/Presets.cpp) e NOME ÚNICO (a convenção base.001)
+bool EngineHost::spawnTic(const std::string& tipo, f32 x, f32 y, f32 z,
+                          std::string& outName, std::string& err) {
+    vv::PrimKind kind;
+    if (tipo == "esfera") {
+        kind = vv::PrimKind::Sphere;
+    } else if (tipo == "box") {
+        kind = vv::PrimKind::Box;
+    } else {
+        err = "spawn: o tipo '" + tipo +
+              "' não existe (tipos: esfera box)";
+        return false;
+    }
+    const vv::Handle h = scene_.create(uniqueSpawnName(scene_, tipo));
+    vv::Tic* t = scene_.get(h);
+    if (!t) {
+        err = "spawn: a cena recusou o TIC novo";
+        return false;
+    }
+    if (Transform3D* tr = t->addComponent<Transform3D>()) {
+        tr->pos = Vec3{x, y, z};
+        tr->updateWorld();
+    }
+    if (MeshRenderer* mr = t->addComponent<MeshRenderer>()) {
+        mr->primOn = true;
+        mr->prim = vv::primDefaults(kind);
+    }
+    outName = t->name;
+    return true;
 }
 
 bool EngineHost::transitionTo(const std::string& fromName,

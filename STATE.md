@@ -1,9 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-19 · vc: 98 · Último commit: este (o 0.12-U 3.9a — a
-primeira sub-fase do Bloco A, a REDUÇÃO DE TRABALHO da V.ONI: o View P
-universal + as 14 funções do registo + a distance; R-052 + M-3.9a1/2/3;
-o relatório próprio diz o resto)
+Atualizado: 2026-10-19 · vc: 99 · Último commit: este (o 0.12-U 3.9b — o
+SPAWN: o script cria TIC na cena pelo Host::spawnTic; nasce active/
+visible/nome único; R-053 + M-3.9b1/2; o relatório próprio diz o resto)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -23,6 +22,12 @@ o relatório próprio diz o resto)
   despacho no evalCall consulta a TABELA e o argc vem da entrada; a fn
   do utilizador vence); pins ×15 + R-052 + M-3.9a1/a2/a3
   vermelho→verde. test_core 0 falhas · c33 1010/0 · vc 98.
+  **3.9b (vc 99)**: o spawn(tipo, x, y, z) → TIC — a entrada no registo
+  (Funcao argc 4/4), o despacho no evalCall (o TIPO é nome cru), o
+  Host::spawnTic NOVO (default honesto «indisponível») e a EngineHost
+  real (a lista viva esfera/box; ACTIVE/VISIBLE + Transform3D +
+  MeshRenderer prim + o NOME ÚNICO base.001); pins ×9 + R-053 +
+  M-3.9b1/b2 vermelho→verde. test_core 0 falhas · c33 1010/0 · vc 99.
 - **Campanha 0.12-E (EMERGÊNCIA + REDESIGN 2.5D, FOGO AVERMELHADO) —
   FECHADA (E-1..E-3, vc 95–97)** (a ordem do dono abortou o SDF 3D;
   cláusulas: ZERO matemática 3D, ZERO mexidas no FontAtlas, TICs
@@ -59,19 +64,13 @@ o relatório próprio diz o resto)
   vazios com AÇÃO, os glifos únicos) + a REPARAÇÃO da árvore (614
   ficheiros de volta do e8c9587).
 - **Campanha 0.12-B (arquitetura da UI) — FECHADA (B-1..B-4, vc 83–86)**
-  (o CI do push é o árbitro; os DETALHES vivem no RELATORIO-0.12-B.md):
-  B-1 a árvore de UI (Control/UIRoot, o UiCanvas deprecated, o serializer,
-  o modo árvore + o Play — pins ×9, R-050); B-2 o Inspector de UI (as
-  secções colapsáveis + os campos por tipo + a zona morta — pins ×5);
-  B-3 o canvas (a moldura do device + as guias + o toast opaco — pins
-  ×3); B-4 as ações de cena (renomear/duplicar/apagar 2-tap — pins ×4,
-  R-051).
-- **Campanha 0.12-A (bugs P0) — FECHADA (vc 82)** (o CI do push é o
-  árbitro; os DETALHES vivem no RELATORIO-0.12-A.md + no INVEST-RAM):
-  A-1 as rows LOD/impostor JÁ EXISTEM (o diagnóstico PÁRA o fix cego; os
-  5 pins fecham o gap), A-2 o refreshCatalog no arranque, A-3 o
-  scissor3dRect + o tooltip 1,5 s, A-4 a investigação RAM vs GPU (o
-  veredito: a cache de blocos a ciclizar — RAM, não GPU).
+  (os DETALHES vivem no RELATORIO-0.12-B.md): B-1 a árvore de UI (pins
+  ×9, R-050), B-2 o Inspector de UI (pins ×5), B-3 o canvas (pins ×3),
+  B-4 as ações de cena 2-tap (pins ×4, R-051).
+- **Campanha 0.12-A (bugs P0) — FECHADA (vc 82)** (os DETALHES vivem no
+  RELATORIO-0.12-A.md + no INVEST-RAM): A-1 as rows LOD JÁ EXISTIAM,
+  A-2 o refreshCatalog no arranque, A-3 o scissor3dRect + o tooltip,
+  A-4 o veredito RAM (a cache de blocos a ciclizar).
 - **Campanha 0.11-Y (identidade visual) — FECHADA** (o fecho é o commit
   32a6785: os 13 PNGs por ecrã + o pin y_fecho). Y-0..Y-3 + o fix — 20
   pins novos; a FASE 31 fica no replay para SEMPRE.
@@ -82,6 +81,8 @@ o relatório próprio diz o resto)
 
 ## §2 O que está FEITO
 
+- 0.12-U 3.9b (vc 99) — o spawn (no RELATORIO-0.12-U-3.9b.md): o Host
+  ganha a porta de criação; pins ×9 + R-053 + M-3.9b1/b2.
 - 0.12-U 3.9a (vc 98) — o View P universal + as 14 funções do registo +
   a distance (no RELATORIO-0.12-U-3.9a.md): pins ×15 + R-052 +
   M-3.9a1/a2/a3; a campanha 0.12-U abre com o critério do platformer

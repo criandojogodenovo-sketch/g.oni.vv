@@ -7276,3 +7276,149 @@ TEST(regress_voni_matematica) {
         EXPECT(ref.find("### random_int") != std::string::npos);
     }
 }
+
+// ===========================================================================
+// R-053 (0.12-U 3.9b) — O SPAWN CRIA PELO HOST, COM NOME ÚNICO, E O
+// HOSPEDEIRO SEM CENA É HONESTO. O que se vigia: (1) a entrada existe
+// APENAS pela tabela (Kind::Funcao, argc 4/4, Docs completa); (2) o
+// default do Host (sem cena) responde «indisponível» — nunca crash, o
+// erro sobe com linha; (3) a cadeia registo→VM→Host→script entrega o TIC
+// com NOME ÚNICO em série (esfera, esfera.001) e o nome devolvido é o
+// que o script usa (o TIC é usável na pos).
+// A mutação cola no RELATORIO-0.12-U-3.9b.md (M-3.9b1/b2).
+// ===========================================================================
+namespace {
+
+struct Host053 : voni::Host {
+    std::vector<std::string> logs;
+    std::vector<std::pair<std::string, std::string>> spawns;   // tipo → nome
+    void log(const char* l) override { logs.push_back(l); }
+    bool getProp(const std::string& n, const std::vector<std::string>& ch,
+                 voni::Value& out, std::string& err) override {
+        for (const auto& s : spawns) {
+            if (s.second == n) {
+                if (ch.empty()) {
+                    out = voni::Value::ofTic(n);
+                    return true;
+                }
+                if (ch[0] == "pos") {
+                    out = voni::Value::ofVec3(1.0f, 2.0f, 3.0f);
+                    return true;
+                }
+            }
+        }
+        err = "TIC '" + n + "' não existe";
+        return false;
+    }
+    bool setProp(const std::string&, const std::vector<std::string>&,
+                 const voni::Value&, std::string&) override {
+        return false;
+    }
+    bool ticExists(const std::string& n) override {
+        for (const auto& s : spawns) {
+            if (s.second == n) return true;
+        }
+        return false;
+    }
+    void moveTic(f32, f32, f32) override {}
+    void explodeTic(bool) override {}
+    bool importAnim(const std::string&, std::string&) override {
+        return false;
+    }
+    bool transitionTo(const std::string&, const std::string&,
+                      std::string&) override { return false; }
+    std::string currentSceneName() override { return "c"; }
+    bool search(const std::string&, const std::vector<std::string>&,
+                voni::Value&, std::string&) override { return false; }
+    f64 frameDt() override { return 1.0 / 60.0; }
+    // o spawn do host-053: a lista é DELE (esfera/box) + nome único
+    bool spawnTic(const std::string& tipo, f32, f32, f32,
+                  std::string& outName, std::string& err) override {
+        if (tipo != "esfera" && tipo != "box") {
+            err = "spawn: o tipo '" + tipo +
+                  "' não existe (tipos: esfera box)";
+            return false;
+        }
+        std::string nome = tipo;
+        int suf = 1;
+        auto existe = [&](const std::string& n) {
+            for (const auto& s : spawns) {
+                if (s.second == n) return true;
+            }
+            return false;
+        };
+        while (existe(nome)) {
+            char b[48];
+            std::snprintf(b, sizeof(b), "%s.%03d", tipo.c_str(), suf++);
+            nome = b;
+        }
+        spawns.push_back({tipo, nome});
+        outName = nome;
+        return true;
+    }
+};
+
+} // namespace
+
+TEST(regress_spawn) {
+    using namespace voni;
+
+    // ---- (1) A FONTE ÚNICA: a entrada é Funcao argc 4/4 com Docs ---------
+    {
+        const reg::Entry* e = reg::find("spawn");
+        EXPECT_MSG(e != nullptr, "a entrada 'spawn' saiu do registo");
+        if (e) {
+            EXPECT(e->kind == reg::Kind::Funcao);
+            EXPECT(e->minArgs == 4 && e->maxArgs == 4);
+            EXPECT(e->syntax != nullptr && *e->syntax);
+            EXPECT(e->desc != nullptr && *e->desc);
+            EXPECT(e->example != nullptr && *e->example);
+            EXPECT(e->equiv != nullptr && *e->equiv);
+        }
+    }
+
+    // ---- (2) O HOSPEDEIRO SEM CENA É HONESTO (o default do Host) ---------
+    {
+        Error err;
+        Script s = Script::compile(
+            "central main { on moment { v#x:TIC=spawn(\"esfera\", 0, 0, 0) } "
+            "allmoments { } }", err);
+        EXPECT(err.ok);
+        Host052 semCena;   // o host do R-052 NÃO implementa spawn (default)
+        EXPECT(!s.runStart(semCena, err));
+        EXPECT_MSG(err.message.find("indisponível") != std::string::npos,
+                   "o default do spawnTic deixou de ser honesto ('%s')",
+                   err.message.c_str());
+        EXPECT(err.line == 1);
+    }
+
+    // ---- (3) A CADEIA COMPLETA: série única + o TIC devolvido é USÁVEL ---
+    {
+        Error err;
+        Script s = Script::compile(R"VONI(
+v#@+a:TIC=spawn("esfera", 1, 2, 3)
+v#@+b:TIC=spawn("esfera", 4, 5, 6)
+central main { on moment { View P a View P b View P a.pos.x } allmoments { } }
+)VONI", err);
+        EXPECT(err.ok);
+        Host053 h;
+        EXPECT(s.runStart(h, err));
+        EXPECT(h.spawns.size() == 2);
+        EXPECT(h.logs.size() == 3);
+        if (h.logs.size() == 3) {
+            EXPECT(h.logs[0] == "voni: esfera");        // a base
+            EXPECT(h.logs[1] == "voni: esfera.001");    // o ÚNICO seguinte
+            EXPECT(h.logs[2] == "voni: 1");             // o pos.x usável
+        }
+        // (4) o TIPO desconhecido morre com a LISTA no erro (com linha)
+        Error err2;
+        Script s2 = Script::compile(
+            "central main { on moment { v#x:TIC=spawn(\"colega\", 0, 0, 0) } "
+            "allmoments { } }", err2);
+        EXPECT(err2.ok);
+        Host053 h2;
+        EXPECT(!s2.runStart(h2, err2));
+        EXPECT(err2.message.find("esfera box") != std::string::npos);
+        EXPECT(err2.line == 1);
+    }
+}

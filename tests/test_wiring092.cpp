@@ -10,6 +10,7 @@
 #include "core/Scene.h"
 #include "core/Tic.h"
 #include "core/VoniSystem.h"
+#include "render/Primitives.h"   // 0.12-U (3.9b): o kind do spawn
 #include "core/SceneSerializer.h"
 #include "components/ScriptComp.h"
 #include "components/Transform3D.h"
@@ -912,4 +913,83 @@ TEST(voni_erros_que_ensinam_as_palavras_estrangeiras) {
             EXPECT(err.line >= 1);   // com linha (o editor acende a gutter)
         }
     }
+}
+
+// ===========================================================================
+// 0.12-U (3.9b) — spawn NA CENA REAL (EngineHost::spawnTic sobre Scene):
+// o TIC nasce ACTIVE/VISIBLE com Transform3D na pos + MeshRenderer com a
+// primitiva do tipo, e o NOME ÚNICO segue a convenção base.001
+// ===========================================================================
+TEST(voni_spawn_cria_tic_real_na_cena) {
+    VmEnv e;
+    e.script()->source = R"VONI(
+v#@+n1:TIC=spawn("esfera", 1, 2, 3)
+v#@+n2:TIC=spawn("esfera", 4, 5, 6)
+v#@+cubo:TIC=spawn("box", 0, 0, -5)
+central main { on moment { } allmoments { } }
+)VONI";
+    e.voni.playEnabled = true;
+    e.voni.tick(e.scene, 1.0f / 60.0f);
+
+    // o 1.º esfera: ACTIVE + VISIBLE + Transform3D na pos + prim esfera
+    const Handle h1 = e.scene.find("esfera");
+    EXPECT(h1.valid());
+    Tic* t1 = h1.valid() ? e.scene.get(h1) : nullptr;
+    EXPECT(t1 != nullptr);
+    if (t1) {
+        EXPECT(t1->active);      // nasce ACTIVE (o contrato do prompt)
+        EXPECT(t1->visible);     // nasce VISIBLE
+        Transform3D* tr = t1->getComponent<Transform3D>();
+        EXPECT(tr != nullptr);
+        if (tr) {
+            EXPECT(test::nearEqF(tr->pos.x, 1.0f) && test::nearEqF(tr->pos.y, 2.0f) &&
+                   test::nearEqF(tr->pos.z, 3.0f));
+        }
+        MeshRenderer* mr = t1->getComponent<MeshRenderer>();
+        EXPECT(mr != nullptr);
+        if (mr) {
+            EXPECT(mr->primOn);
+            EXPECT(mr->prim.kind == PrimKind::Sphere);
+        }
+    }
+    // o NOME ÚNICO: o 2.º esfera é esfera.001 (a convenção base.001)
+    const Handle h2 = e.scene.find("esfera.001");
+    EXPECT(h2.valid());
+    // o box: o kind certo (Box) e a pos certa
+    const Handle hb = e.scene.find("box");
+    EXPECT(hb.valid());
+    if (hb.valid()) {
+        MeshRenderer* mrb =
+            e.scene.get(hb)->getComponent<MeshRenderer>();
+        EXPECT(mrb != nullptr && mrb->primOn &&
+               mrb->prim.kind == PrimKind::Box);
+        Transform3D* trb = e.scene.get(hb)->getComponent<Transform3D>();
+        EXPECT(trb != nullptr && test::nearEqF(trb->pos.z, -5.0f));
+    }
+    // os nomes devolvidos aos @+ são os ÚNICOS criados
+    auto ex = e.voni.exported(e.scene, e.tic);
+    EXPECT(ex.size() == 3);
+    EXPECT(ex[0].value.tic == "esfera");
+    EXPECT(ex[1].value.tic == "esfera.001");
+    EXPECT(ex[2].value.tic == "box");
+}
+
+TEST(voni_spawn_tipo_desconhecido_mata_a_run_com_linha) {
+    VmEnv e;
+    e.script()->source =
+        "central main { on moment { v#x:TIC=spawn(\"colega\", 0, 0, 0) } "
+        "allmoments { } }";
+    e.voni.playEnabled = true;
+    e.voni.tick(e.scene, 1.0f / 60.0f);
+    // o erro que ENSINA a lista (a linha certa) sai pelo popError (o drain
+    // do VoniSystem — o 1º erro por run guarda-se, o main drena)
+    Handle t{};
+    voni::Error perr;
+    EXPECT(e.voni.popError(t, perr));
+    EXPECT(perr.message.find("colega") != std::string::npos);
+    EXPECT(perr.message.find("esfera box") != std::string::npos);
+    EXPECT(perr.line == 1);
+    voni::Error perr2;
+    EXPECT(!e.voni.popError(t, perr2));   // drenado: não volta
+    EXPECT(!e.scene.find("colega").valid());   // NADA nasceu
 }

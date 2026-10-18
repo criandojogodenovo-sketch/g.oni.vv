@@ -409,6 +409,16 @@ v++d=distance(jogador, alvo)
 v++d2=distance(jogador.pos, alvo.pos)
 ```
 
+### spawn
+- **Sintaxe**: `spawn(tipo, x, y, z)`
+- **Descrição**: Cria um TIC na cena: o tipo é "esfera" ou "box" (os nomes do .goni); nasce active/visible com nome único; devolve o TIC novo. Tipo desconhecido = erro com linha.
+- **Equivalência**: instanciar objeto / add_child
+- **Exemplo**:
+```
+v#novo:TIC=spawn("box", 0, 0, -5)
+novo.pos.y=1
+```
+
 ## Linkers
 
 ### linker

@@ -160,6 +160,23 @@ public:
         return false;
     }
 
+    // 0.12-U (3.9b): spawn(tipo, x, y, z) → TIC — CRIA um TIC na cena: o
+    // `tipo` é da lista do hospedeiro (a engine: "esfera" e "box", os
+    // nomes canónicos do .goni); o TIC nasce ACTIVE/VISIBLE com NOME
+    // ÚNICO (o nome novo devolve no outName — é ele que o script usa).
+    // O erro vem no `err` (a Vm acrescenta a LINHA). Default
+    // "indisponível" — hospedeiros sem cena respondem com erro legível,
+    // o script não morre (o padrão do stopAnim/blendAnim).
+    virtual bool spawnTic(const std::string& tipo, f32 x, f32 y, f32 z,
+                          std::string& outName, std::string& err) {
+        (void)tipo;
+        (void)x;
+        (void)y;
+        (void)z;
+        err = "spawn(): indisponível neste hospedeiro";
+        return false;
+    }
+
     // nomedacena.transition.for("destino") (spec §9 — NÃO se chama importar)
     // fromName tem de ser a cena ATUAL (decisão 🔶 documentada).
     virtual bool transitionTo(const std::string& fromName,

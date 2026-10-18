@@ -61,6 +61,8 @@ public:
     bool stopAnim(std::string& err) override;                     // 0.11-S
     bool blendAnim(const std::string& clip, f32 seconds,
                    std::string& err) override;                    // 0.11-S
+    bool spawnTic(const std::string& tipo, f32 x, f32 y, f32 z,
+                  std::string& outName, std::string& err) override;  // 0.12-U
     bool transitionTo(const std::string& fromName, const std::string& toName,
                       std::string& err) override;
     std::string currentSceneName() override;
