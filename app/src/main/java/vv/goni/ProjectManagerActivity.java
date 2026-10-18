@@ -99,6 +99,13 @@ public class ProjectManagerActivity extends Activity {
     static final int DANGER = 0xFFE5484D;
     static final int WARN = 0xFFFF8A3D;      // LARANJA (nunca == âmbar)
     static final int OK = 0xFF46A758;
+    // 0.12-D (D-4): a RAMPA DO FOGO — o espelho do Theme fire0..fire3
+    // (a identidade do «G em chama»; a MESMA família extraída do ícone
+    // real — a proveniência vive no scripts/d3_palette.py)
+    static final int FIRE0 = 0xFF7A1F0A;
+    static final int FIRE1 = 0xFFE8530F;
+    static final int FIRE2 = 0xFFFFA21F;
+    static final int FIRE3 = 0xFFFFE08A;
 
     private final List<VvProjects.Entry> all = new ArrayList<>();   // fonte (só a MAIN thread mexe — REG-001)
     private final List<VvProjects.Entry> shown = new ArrayList<>(); // filtro+ordem (idem)
@@ -182,7 +189,7 @@ public class ProjectManagerActivity extends Activity {
         emptyBox = new LinearLayout(this);
         emptyBox.setOrientation(LinearLayout.VERTICAL);
         emptyBox.setGravity(Gravity.CENTER);
-        View bigLogo = new BrandView(this, BORDER, /*lodFull=*/true);
+        View bigLogo = new BrandView(this, BORDER, /*lodFull=*/true, /*ignite=*/1f);
         emptyBox.addView(bigLogo, new LinearLayout.LayoutParams(dp(96), dp(96)));
         emptyTitle = new TextView(this);
         emptyTitle.setText("Nenhum projeto ainda");
@@ -253,7 +260,7 @@ public class ProjectManagerActivity extends Activity {
         // 0.9.6.18 (HOTFIX D6): o logo do cabeçalho é o GLIFO DESENHADO
         // pela ÚNICA função (a paridade da marca — o mesmo BrandView do
         // empty-state; 32dp = a versão completa), não um PNG solto
-        View logo = new BrandView(this, ACCENT, /*lodFull=*/true);
+        View logo = new BrandView(this, ACCENT, /*lodFull=*/true, /*ignite=*/1f);
         bar.addView(logo, new LinearLayout.LayoutParams(dp(32), dp(32)));
         TextView title = new TextView(this);
         title.setText("G.One VV");
@@ -738,18 +745,21 @@ public class ProjectManagerActivity extends Activity {
     private static final class BrandView extends View {
         private final int color;
         private final boolean lodFull;
+        private final float ignite;   // 0.12-D (D-4): a fração da chama
 
-        BrandView(Activity a, int color, boolean lodFull) {
+        BrandView(Activity a, int color, boolean lodFull, float ignite) {
             super(a);
             this.color = color;
             this.lodFull = lodFull;
+            this.ignite = ignite;
         }
 
         @Override
         protected void onDraw(Canvas c) {
             super.onDraw(c);
             UiIcons.drawBrand(c, getWidth() / 2f, getHeight() / 2f,
-                    Math.min(getWidth(), getHeight()), color, lodFull);
+                    Math.min(getWidth(), getHeight()), color, lodFull,
+                    ignite);
         }
     }
 

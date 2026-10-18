@@ -87,7 +87,12 @@ Atualizado: 2026-10-18 · vc: 91
   emissores no UiContext (sdfFireBorder/fireGlowBelow/drawEmbers COM O
   PORTÃO celebration — o editor nunca vê brasas; o Baixo mata os três) +
   a RAMPA fire0..fire3 no Theme (a proveniência: scripts/d3_palette.py) +
-  o relógio sdf::g_time no main loop;
+  o relógio sdf::g_time no main loop; **0.12-D D-4**: o
+  app/src/main/cpp/ui/Brand.h/.cpp — O «G EM CHAMA» (a identidade única:
+  as setas do glifo antigo FORA, a rampa por traço pela altura, o ignite
+  0..1 para a splash da D-6; o espelho Java UiIcons.drawBrand por
+  segmentos + os tokens FIRE no ProjectManagerActivity; o slot do LOGO
+  na Toolbar é a versão pequena),
   stub INCLUI este header) e o UiContext::sdfWidget (o emissor do
   widget — UM quad crescido para conter a sombra; o CHOKE POINT
   drawButtonVisual e o iconButton da barra emitem por AQUI — o premido é
@@ -202,6 +207,10 @@ Atualizado: 2026-10-18 · vc: 91
   ARITMÉTICA ADITIVA por píxel + o centro morto exato; fogo_glow_below;
   brasas_portao — o PORTÃO + o determinismo; fogo_toggle_baixo — o Baixo
   mata os três emissores),
+  test_012d_logo.cpp (os pins da 0.12-D D-4: logo_rampa_viva — a rampa
+  por quad pela altura; logo_ignite_porta — a revelação da base para o
+  topo + o determinismo; logo_setas_mortas — 16 segmentos nos LODs +
+  nenhum vértice além do G+capa; logo_lod_traco — o ×1.2 no pequeno),
   test_012c_picker.cpp (os pins da 0.12-C C-4: picker_compacto/
   picker_breadcrumb/picker_oculta_dot/empty_inspector/empty_assets/
   empty_hierarquia/icones_unicos — o 8.º, empty_projetos, é o gate

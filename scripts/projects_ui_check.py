@@ -39,6 +39,9 @@ TOKENS_F = ("0xFF0A0A0C", "0xFF131316", "0xFF1E1E21", "0xFF1B1B20",
             "0xFFECECEE", "0xFFA6A6AD", "0xFFFFB020", "0xFFE09A00",
             "0xFF0E0E10", "0xCC131316", "0xDB1E1E21", "0xFF4A3714",
             "0xFFE5484D", "0xFFFF8A3D", "0xFF46A758",
+            # 0.12-D (D-4): a RAMPA DO FOGO (o espelho do Theme fire0..fire3
+            # — a identidade do «G em chama» no lado Java)
+            "0xFF7A1F0A", "0xFFE8530F", "0xFFFFA21F", "0xFFFFE08A",
             # 0.9.6.18 (HOTFIX D7): a PALETA FIXA dos 6 matizes dos tiles
             # de iniciais (só em InitialsThumbView; matizes sóbrios sobre
             # grafite — o âmbar 0xFFE09A00 já era token)

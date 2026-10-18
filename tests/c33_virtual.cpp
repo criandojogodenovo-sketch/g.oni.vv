@@ -10518,6 +10518,56 @@ int main() {
         frame();
     }
 
+    // ---- FASE 34 — 0.12-D (D-4): O LOGO («G EM CHAMA») ---------------------
+    // O cabeçalho do editor (a versão PEQUENA das 3 do dono) desenha o
+    // glifo NOVO pela única função: a RAMPA do fogo por traço (a base
+    // escura, o topo quente) e AS SETAS MORTAS (16 segmentos no rect do
+    // logo). A versão MÉDIA é o launcher da Y-0; a GRANDE chega com a
+    // splash da D-6 (o drawLogo já leva o ignite).
+    fase("FASE 34 — 0.12-D D-4: o logo (o G em chama no cabeçalho)");
+    {
+        eglstub::g_surfaceW = 1536;
+        eglstub::g_surfaceH = 720;
+        android_app app34;
+        std::memset(&app34, 0, sizeof(app34));
+        app34.contentRect = {0, 24, 1512, 720};
+        onAppCmd(&app34, APP_CMD_INIT_WINDOW);
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+        frame();
+        const vv::editor::toolbar::TopBarLayout L34 =
+            vv::editor::toolbar::topbarLayout(
+            1536.0f, 720.0f, g_ui.safeArea(), g_editor.uiMode,
+            g_editor.audioMode);
+        const QuadBatch& bd34 = g_ui.solidsForTest();
+        const auto* vs34 = bd34.vertices();
+        u32 quadsLogo = 0, quentes = 0, escuros = 0;
+        for (u32 i = 0; i + 5 < bd34.vertexCount(); i += 6) {
+            // o quad vive no rect do LOGO? (o centro dos 6 vértices)
+            f32 sx = 0.0f, sy = 0.0f, sg = 0.0f, sr = 0.0f;
+            for (u32 k = i; k < i + 6; ++k) {
+                sx += vs34[k].x; sy += vs34[k].y;
+                sg += vs34[k].g; sr += vs34[k].r;
+            }
+            sx /= 6.0f; sy /= 6.0f; sg /= 6.0f; sr /= 6.0f;
+            if (sx >= L34.logo.x && sx < L34.logo.x + L34.logo.w &&
+                sy >= L34.logo.y && sy < L34.logo.y + L34.logo.h) {
+                ++quadsLogo;
+                if (sg < 0.40f && sr > 0.5f) ++escuros;   // a base do fogo
+                if (sg > 0.60f && sr > 0.9f) ++quentes;   // o bico quente
+            }
+        }
+        check(quadsLogo == 16u,
+              "34.1 o cabeçalho desenha 16 segmentos no rect do logo (as "
+              "setas do glifo antigo MORRERAM)");
+        check(escuros > 0 && quentes > 0,
+              "34.2 o logo do cabeçalho é a CHAMA (a base escura + o topo "
+              "quente — a rampa do ícone real, o mono âmbar morreu)");
+    }
+
     // ---- sumário -----------------------------------------------------------
     std::printf("\n== C33 VIRTUAL: %d check(s), %d falha(s) ==\n", g_checks, g_failed);
     if (g_failed == 0) {

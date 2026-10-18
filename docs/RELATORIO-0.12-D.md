@@ -422,3 +422,91 @@ rasterizador honesto → glReadPixels; o α do fb é inútil contra o clear
   no editor, o Baixo a matar a chama).
 - **O pin C33 REAL fica para o dono**: o PNG do botão premido com a chama
   a correr pela aresta (os 3 modos de Efeitos).
+
+## 4 · D-4 — O LOGO (o «G em chama» — a identidade única) (vc 94)
+
+### 4.1 O que foi feito
+
+- **`ui/Brand.h`/`Brand.cpp` reescritos — o «G EM CHAMA»**: a identidade
+  extraída do ícone REAL (docs/iconegonevv.png — o mesmo PNG do launcher
+  da Y-0 e a MESMA família da rampa fire0..fire3 da D-3):
+  - a cor de cada traço é a RAMPA DO FOGO do Theme amostrada pela ALTURA
+    do traço no viewBox (t: 0 na base = fire0 #7A1F0A, 1 no topo = fire3
+    #FFE08A — o que o ícone real faz: a base escura, o bico amarelo); o
+    âmbar MONO do glifo antigo MORREU;
+  - **AS 4 SETAS MORRERAM** nos dois LODs (a ordem do dono: os glifos
+    antigos das setas/mira fora — identidade única; o ícone real nunca as
+    teve): `segmentCountFor` = 16 nos LODs todos (era 28/20);
+  - **O `ignite` 0..1** — a fração da rampa revelada da BASE para o TOPO
+    (0 = apagada no accentDim, nem emite; 1 = a chama toda): o parâmetro
+    que a splash da D-6 anima; determinístico (o mesmo t = a mesma chama);
+  - o LOD vive no TRAÇO (×1.2 no <32dp — o que a contagem de segmentos,
+    agora igual nos dois, já não vê).
+- **AS 3 VERSÕES (a ordem do dono)**: PEQUENA = o slot do LOGO na barra
+  de topo (Toolbar.cpp — 24dp, ignite=1, o cabeçalho do editor); MÉDIA =
+  o launcher (os PNGs da Y-0, gerados do mesmo desenho — intocados);
+  GRANDE = a splash da D-6 (o `drawLogo(…, ignite)` já a serve).
+- **O espelho Java alinhado (a identidade única no produto todo)**:
+  `UiIcons.drawBrand` redesenhado — o MESMO G sem setas, o arco por
+  SEGMENTOS com a cor da rampa por altura (o helper `fireColor(t)`), o
+  `ignite` no parâmetro; os tokens `FIRE0..FIRE3` NOVOS no espelho do
+  Theme (ProjectManagerActivity) e o gate projects_ui_check aceita os 4
+  hexes (a edição do gate É o pedido); o BrandView leva o ignite (os 2
+  chamadores passam 1f).
+- **O ACHADO da auditoria (o overdraw da barra)**: a tabela antiga
+  `kGBarPts` tinha 4 pontos — o loop desenhava 3 segmentos e o do MEIO
+  RE-TRACEAVA a barra ao contrário (um quad desperdiçado por frame em
+  TODA a história da marca; a contagem «2 segmentos» do header mentia —
+  o Java já desenhava 2). A geometria certa: 3 pontos = 2 segmentos
+  (14+2 = 16).
+
+### 4.2 Os pins ×4 (tests/test_012d_logo.cpp)
+
+1. **logo_rampa_viva** — cada quad do glifo leva a cor da rampa na SUA
+   altura (a fórmula replicada no pin; divergência = vermelho); traços
+   quentes no topo e escuros na base existem; a rampa exata por quad
+   (±0.03) mata o mono por construção.
+2. **logo_ignite_porta** — ignite=0 NÃO emite nada; ignite=0.35 divide o
+   glifo (os traços com t<0.35 com a rampa, o resto accentDim); o mesmo t
+   = o mesmo glifo (o determinismo da animação).
+3. **logo_setas_mortas** — 16 segmentos nos DOIS LODs (a 24 e a 96dp) e
+   NENHUM vértice além do G+capa (r ≤ 8.0 vb — os eixos das setas
+   viviam a 8.2..11.0).
+4. **logo_lod_traco** — a espessura medida nos quads: 24dp = 2.4 (×1.2),
+   32dp = 2.667 (1.0) — o LOD do traço aferrado.
+
+### 4.3 As mutações (coladas)
+
+- **M-D4a** — a rampa MORTA (rampAt devolve o accent MONO — o fóssil):
+  ```
+  logo_rampa_viva ... FALHOU test_012d_logo.cpp:143 logo_rampa_viva: o
+  quad a yVB=17.5 (t=0.27) leu (1.000,0.690,0.125), a rampa prevê
+  (0.832,0.289,0.055) — a identidade não segue o ícone real
+  ```
+  (×16 quads, os irmãos verdes) reposto → **0 teste(s) com falha**.
+- **M-D4b** — AS SETAS DE VOLTA (os 4 eixos desenhados outra vez):
+  ```
+  logo_setas_mortas ... FALHOU test_012d_logo.cpp:237 logo_setas_mortas:
+  20 quads a size=24 — as setas (+12 segmentos no completo) parecem vivas
+  FALHOU test_012d_logo.cpp:251 logo_setas_mortas: um vértice a r=8.29 vb
+  (o G+capa termina a ~7.8; os eixos das setas começavam a 8.2) — o glifo
+  antigo sobreviveu
+  ```
+  (2 testes vermelhos — o lod_traco também, o isolamento provado)
+  reposto → **0 teste(s) com falha**.
+
+### 4.4 As recalibrações (com nota no sítio)
+
+- **D12 (8)** (test_sentinels.cpp) — a função do glifo: a contagem de
+  segmentos é IGUAL nos dois LODs (16 — as setas morreram) e o LOD vive
+  no traço; as EXPECTs «o completo tem mais segmentos» morreram com a
+  ordem.
+
+### 4.5 O estado da suíte
+
+- test_core: **0 falhas** (os 2 skips de disco conhecidos).
+- c33_virtual: **1016 checks, 0 falhas** — a FASE 34 NOVA (2 checks: os
+  16 segmentos no rect do logo do cabeçalho; a CHAMA no cabeçalho — a
+  base escura + o topo quente).
+- **O pin C33 REAL fica para o dono**: o PNG do cabeçalho (o G em chama
+  a 24dp) e do empty-state do projetos (96dp no Java).

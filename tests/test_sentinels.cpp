@@ -5076,12 +5076,15 @@ TEST(regress_hotfix_defeitos) {
     // ---- (8) D12: o preenchimento dos planos do gizmo a 25% -------------
     {
         EXPECT(nearEqF(vv::gizmo::kPlaneFillAlpha, 0.25f, 0.001f));
-        // a FUNÇÃO do glifo da marca (D6 — paridade dos sítios): o LOD
-        // divide em 32dp e a versão completa tem MAIS segmentos
-        EXPECT(editor::brand::segmentCountFor(24.0f) <
-               editor::brand::segmentCountFor(32.0f));
+        // a FUNÇÃO do glifo da marca (D6 — paridade dos sítios). 0.12-D
+        // (D-4) recalibra com nota: AS SETAS MORRERAM (a identidade única
+        // — o ícone real nunca as teve) e a contagem é IGUAL nos dois
+        // LODs (16 = 14 arco + 2 barra); o LOD vive agora no TRAÇO (×1.2
+        // no pequeno), que a contagem não vê
+        EXPECT(editor::brand::segmentCountFor(24.0f) == 16u);
+        EXPECT(editor::brand::segmentCountFor(32.0f) == 16u);
         EXPECT(editor::brand::segmentCountFor(96.0f) ==
-               editor::brand::segmentCountFor(32.0f));
+               editor::brand::segmentCountFor(24.0f));
         EXPECT(editor::brand::kLodFullMinDp == 32.0f);
     }
 

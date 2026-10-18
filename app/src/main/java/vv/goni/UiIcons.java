@@ -176,25 +176,29 @@ public final class UiIcons {
     }
 
     /**
-     * 0.9.6.18 (HOTFIX D6) — O GLIFO DA MARCA ("G com 4 setas"): o espelho
-     * Java do ui/Brand.cpp (brand::drawIcon) — a MESMA geometria, o MESMO
-     * LOD, a MESMA regra («UMA função para todos os sítios; derivar
-     * cor/traço/função duplicada = vermelho»). O launcher (mipmap estático)
-     * é GERADO do mesmo desenho (scripts/gen_app_icon.py); um PNG não
+     * 0.12-D (D-4) — O GLIFO DA MARCA («G EM CHAMA»): o espelho Java do
+     * ui/Brand.cpp (brand::drawLogo) — a MESMA geometria (as 4 setas do
+     * glifo antigo MORRERAM — a identidade única extraída do ícone real),
+     * a MESMA RAMPA (os tokens FIRE do ProjectManagerActivity — o espelho
+     * do Theme fire0..fire3, amostrada pela ALTURA de cada segmento: a
+     * base escura, o bico amarelo), o MESMO LOD (o traço ×1.2 no
+     * &lt;32dp). A regra mantém-se: «UMA função para todos os sítios;
+     * derivar cor/traço/função duplicada = vermelho». O launcher
+     * (mipmap estático da Y-0) é GERADO do mesmo desenho; um PNG não
      * executa Java/C++ — a paridade é documentada de ambos os lados.
      *
-     * @param lodFull true = versão COMPLETA (≥32dp — 4 setas COM pontas);
-     *                false = SIMPLIFICADA (&lt;32dp — 4 ticks, traço ~20%
-     *                mais grosso). NUNCA desenha fundo (âmbar sobre
-     *                grafite/transparente, nunca âmbar sobre âmbar).
+     * @param ignite 0..1 — a fração da rampa revelada da BASE para o TOPO
+     *               (0 = apagada no colorUnlit, 1 = a chama toda; a
+     *               splash da D-6 anima). NUNCA desenha fundo (fogo sobre
+     *               grafite/transparente, nunca fogo sobre fogo).
      */
     public static void drawBrand(Canvas c, float cx, float cy, float sizePx,
-                                 int color, boolean lodFull) {
+                                 int colorUnlit, boolean lodFull,
+                                 float ignite) {
         final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         p.setStyle(Paint.Style.STROKE);
         p.setStrokeCap(Paint.Cap.ROUND);
         p.setStrokeJoin(Paint.Join.ROUND);
-        p.setColor(color);
         // o traço do conjunto (size/12) — a simplificada ×1.2 (a spec: «traço
         // ~20% mais grosso»)
         p.setStrokeWidth(sizePx / 12f * (lodFull ? 1.0f : 1.2f));
@@ -202,34 +206,61 @@ public final class UiIcons {
         final float x = cx - sizePx / 2f, y = cy - sizePx / 2f;
         final float rG = 6.2f * k;             // o raio do arco do G
         final float gcx = x + 12f * k, gcy = y + 12f * k;
-        // o G: arco com a abertura à direita (55°..305° — o MESMO intervalo
-        // do Brand.cpp) + barra até perto do centro + espelho vertical
-        c.drawArc(gcx - rG, gcy - rG, gcx + rG, gcy + rG, 55f, 250f, false, p);
-        p.setStrokeCap(Paint.Cap.BUTT);
-        c.drawLine(x + 18.8f * k, y + 12f * k, x + 11.4f * k, y + 12f * k, p);
-        c.drawLine(x + 18.8f * k, y + 12f * k, x + 18.8f * k, y + 7.6f * k, p);
-        p.setStrokeCap(Paint.Cap.ROUND);
-        // as 4 setas a N/E/S/W (ecrã: -90/0/90/180)
-        final float[] ang = {-90f, 0f, 90f, 180f};
-        final float rIn = 8.2f * k, rTip = 11.0f * k, rBack = 2.0f * k;
-        for (float a : ang) {
-            final double rad = Math.toRadians(a);
-            final float ca = (float) Math.cos(rad), sa = (float) Math.sin(rad);
-            final float x0 = gcx + rIn * ca, y0 = gcy + rIn * sa;
-            final float x1 = gcx + rTip * ca, y1 = gcy + rTip * sa;
-            c.drawLine(x0, y0, x1, y1, p);   // o eixo
-            if (lodFull) {
-                // as PONTAS (2 traços a ±32° — o mesmo ±32° do Brand.cpp)
-                for (int s = -1; s <= 1; s += 2) {
-                    final double ha = Math.toRadians(a + 32f * s);
-                    final float hx = gcx + (rTip - rBack)
-                            * (float) Math.cos(ha);
-                    final float hy = gcy + (rTip - rBack)
-                            * (float) Math.sin(ha);
-                    c.drawLine(x1, y1, hx, hy, p);
-                }
+        final float ig = ignite < 0f ? 0f : (ignite > 1f ? 1f : ignite);
+        // a cor de UM segmento pela ALTURA do seu ponto médio (o MESMO t do
+        // Brand.cpp: 0 = fire0 na base, 1 = fire3 no topo; a revelação
+        // corre da base para o topo — t &lt; ignite acende; a amostra vive
+        // no helper fireColor(t) no fundo da classe)
+        // o G: o arco com a abertura à direita (55°..305°) desenhado por
+        // SEGMENTOS (14) — cada um com a cor da rampa na sua altura
+        final int segs = 14;
+        final float sweep = 250f / segs;
+        for (int i = 0; i < segs; ++i) {
+            final float midRad = (float) Math.toRadians(55f + (i + 0.5f)
+                    * sweep);
+            final float t = 1f - (12f + 6.2f * (float) Math.sin(midRad)) / 24f;
+            p.setStrokeWidth(sizePx / 12f * (lodFull ? 1.0f : 1.2f));
+            if (t < ig) {
+                p.setColor(fireColor(t));
+            } else {
+                p.setColor(colorUnlit);
             }
+            // o overlap de 0.5° tapa a junta entre arcos consecutivos
+            c.drawArc(gcx - rG, gcy - rG, gcx + rG, gcy + rG,
+                    55f + i * sweep - 0.25f, sweep + 0.5f, false, p);
         }
+        p.setStrokeCap(Paint.Cap.BUTT);
+        // a barra + o espelho (2 segmentos — as cores pela altura, o
+        // MESMO contrato do C++; a barra vive a y=12 → t=0.5, o espelho
+        // 7.6..12 → t~0.59 — a meio da rampa)
+        final float tBar = 1f - 12f / 24f;
+        p.setColor(tBar < ig ? fireColor(tBar) : colorUnlit);
+        c.drawLine(x + 18.8f * k, y + 12f * k, x + 11.4f * k, y + 12f * k, p);
+        final float tMir = 1f - (7.6f + 12f) * 0.5f / 24f;
+        p.setColor(tMir < ig ? fireColor(tMir) : colorUnlit);
+        c.drawLine(x + 18.8f * k, y + 12f * k, x + 18.8f * k, y + 7.6f * k, p);
+        // AS SETAS MORRERAM (o D-4) — nada a desenhar para lá do G
+    }
+
+    /** a amostra da RAMPA FIRE pela altura t 0..1 (o MESMO gradiente do
+     * Brand.cpp — fire0→fire1→fire2→fire3 nos nós 0/.33/.66/1) */
+    private static int fireColor(float t) {
+        t = t < 0f ? 0f : (t > 1f ? 1f : t);
+        final int[] ramp = {0xFF7A1F0A, 0xFFE8530F, 0xFFFFA21F, 0xFFFFE08A};
+        // (os MESMOS hexes dos tokens FIRE do ProjectManagerActivity — a
+        // duplicação literal aqui é a nota da paridade: UiIcons não
+        // depende da Activity)
+        float u = t * 3f;
+        int i = (int) u;
+        if (i >= 3) i = 2;
+        final float f = u - i;
+        final int a0 = ramp[i], a1 = ramp[i + 1];
+        final int r = (int) (((a0 >> 16) & 0xFF) * (1 - f)
+                + ((a1 >> 16) & 0xFF) * f);
+        final int g = (int) (((a0 >> 8) & 0xFF) * (1 - f)
+                + ((a1 >> 8) & 0xFF) * f);
+        final int b = (int) ((a0 & 0xFF) * (1 - f) + (a1 & 0xFF) * f);
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 
     /** Drawable de um ícone (para setCompoundDrawables/ImageView) */

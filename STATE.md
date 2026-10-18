@@ -1,12 +1,11 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-18 · vc: 93 · Último commit: este (o 0.12-D D-3, O
-FOGO — a borda animada do ativo em MISTURA ADITIVA (o aShape.w=1 + o
-fbm do ui/Fire.h), o glow por baixo, as brasas com PORTÃO (o editor
-nunca as vê), a rampa do dono fire0..fire3 no Theme, o relógio g_time,
-o Baixo a matar os três; os 5 pins + M-D3a/b; OS ACHADOS: o continue
-que saltava o blend, o 0x0304 ≠ GL_SRC_ALPHA, a banda sem teto para
-dentro; antes: 660e347 o D-2, O VIDRO REAL e FALSO; af41059 o D-1)
+Atualizado: 2026-10-18 · vc: 94 · Último commit: este (o 0.12-D D-4, O
+LOGO — o «G em chama»: as setas do glifo antigo MORRERAM, a rampa
+fire0..fire3 por traço pela altura, o ignite 0..1 para a splash da D-6,
+as 3 versões (cabeçalho/launcher/splash), o espelho Java alinhado, o
+achado do overdraw da barra; os 4 pins + M-D4a/b; antes: 58710ce o D-3,
+O FOGO; 660e347 o D-2, O VIDRO; af41059 o D-1, O SHADER SDF)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -15,7 +14,7 @@ dentro; antes: 660e347 o D-2, O VIDRO REAL e FALSO; af41059 o D-1)
 ## §1 Onde estamos
 
 - **Campanha 0.12-D (identidade visual: fogo, vidro, 3D) — ABERTA
-  (D-1..D-3 fechadas, D-4..D-8 na fila)** (a pré-condição era a 0.12-C fechada;
+  (D-1..D-4 fechadas, D-5..D-8 na fila)** (a pré-condição era a 0.12-C fechada;
   as cláusulas do dono: anti-overengineering — cada efeito com toggle
   «Efeitos: Alto / Médio / Baixo» — e anti-superficialidade — o botão
   ativo mostra bisel + brilho + fogo + sombra SIMULTANEAMENTE; os
@@ -41,32 +40,26 @@ dentro; antes: 660e347 o D-2, O VIDRO REAL e FALSO; af41059 o D-1)
   + o vidro FALSO nos fixos (glassPanelFake — o gradiente + o reflexo +
   o ruído + a Fresnel; a hierarquia e o inspector); pins ×4 + M-D2a/b +
   6 recalibrações. O C33 REAL fica para o dono.
-  **D-3 (o fogo, vc 93)**: a identidade da chama no que está ATIVO — o
-  ui/Fire.h NOVO (a FONTE ÚNICA: hash/valueNoise/fbm/fireBorder/ember; a
-  distância vem do roundRectSdf da D-1 — zero duplicação; o FS replica
-  linha a linha, o stub inclui o header, os pins chamam direto), a RAMPA
-  do dono no Theme (fire0 #7A1F0A→fire3 #FFE08A; a proveniência é o
-  scripts/d3_palette.py contra o ícone REAL), a BORDA ANIMADA do ativo
-  (o aShape.w=1 no batch SDF, o fbm a correr pela aresta em MISTURA
-  ADITIVA GL_SRC_ALPHA/GL_ONE), o GLOW POR BAIXO (2 quads α decrescente),
-  as BRASAS com PORTÃO (16 paramétricas; celebration=false emite ZERO —
-  a splash é da D-6 e o projetos da D-8), a COMPOSIÇÃO SIMULTÂNEA do
-  premido (a cláusula anti-superficialidade), o relógio sdf::g_time no
-  main loop e o Baixo a morder os TRÊS emissores (a D-7); pins ×5
-  (test_012d_fogo.cpp — o anima prova a ARITMÉTICA ADITIVA por píxel) +
-  M-D3a/M-D3b vermelho→verde + a FASE 33 do c33 (4 checks — o gesto REAL
-  no Stop da play bar). OS ACHADOS REAIS: o continue que saltava o blend
-  (o fogo nunca chegava ao fb), o 0x0304 ≠ GL_SRC_ALPHA (o aditivo nunca
-  ligava), a banda SEM TETO para dentro (o widget INTEIRO ardia — a
-  fórmula certa min(1−d, 1+d/bw)) e o «play em destaque» da C-2
-  inalcançável no replay (registado para o dono). test_core 0 falhas ·
-  c33 1014/0 · vc 93. O C33 REAL (o PNG do premido com a chama) fica
+  **D-3 (o fogo, vc 93)**: a chama no que está ATIVO — o ui/Fire.h NOVO
+  (a FONTE ÚNICA; a distância vem do roundRectSdf da D-1), a RAMPA do
+  dono no Theme (fire0→fire3; a proveniência é o d3_palette.py), a BORDA
+  ANIMADA do ativo (o aShape.w=1, o fbm pela aresta em MISTURA ADITIVA),
+  o GLOW POR BAIXO, as BRASAS com PORTÃO (o editor nunca as vê — a
+  splash é da D-6, o projetos da D-8), a COMPOSIÇÃO SIMULTÂNEA do
+  premido, o relógio g_time e o Baixo a morder os TRÊS emissores; pins
+  ×5 + M-D3a/b + a FASE 33. OS ACHADOS: o continue que saltava o blend,
+  o 0x0304 ≠ GL_SRC_ALPHA, a banda SEM TETO para dentro (o widget ardia)
+  e o «play em destaque» da C-2 inalcançável no replay (para o dono).
+  O fix do CI do D-2: a sentinela JVM R-005 aceita a 3.ª variante do
+  mecanismo (NPE — o slot lido a null entre clear e add). vc 93.
+  **D-4 (o logo, vc 94)**: o «G EM CHAMA» — as setas do glifo antigo
+  MORRERAM, a rampa fire0..fire3 por traço pela ALTURA (o âmbar mono
+  morreu), o ignite 0..1 para a splash da D-6, as 3 versões (o
+  cabeçalho 24dp / o launcher da Y-0 / a splash), o espelho Java
+  alinhado (o UiIcons.drawBrand por segmentos + os tokens FIRE) e o
+  ACHADO do overdraw da barra (o 3.º segmento re-traceado — 16 reais);
+  pins ×4 + M-D4a/b + a FASE 34. O C33 REAL (o PNG do cabeçalho) fica
   para o dono.
-  **fix (o CI do D-2, run 39123462169)**: a sentinela JVM R-005 apanhou a
-  TERCEIRA variante do mecanismo que documenta — a corrida
-  iterar-vs-clear+addAll lançou NullPointerException (o slot lido a null
-  ENTRE o clear e o add que o reescreve; aceites eram CME/NSEE). O gate
-  NÃO enfraquece (o antigo TEM de lançar, o novo zero). D-2 não tocou Java.
 - **Campanha 0.12-C (layout, organização e consistência) — FECHADA
   (C-1..C-4, vc 87–90)** (o CI do push é o árbitro; os DETALHES vivem no
   RELATORIO-0.12-C.md; a cláusula é anti-superficialidade — nada de
@@ -102,6 +95,9 @@ dentro; antes: 660e347 o D-2, O VIDRO REAL e FALSO; af41059 o D-1)
 
 ## §2 O que está FEITO
 
+- 0.12-D D-4 (vc 94) — o logo «G em chama» (no RELATORIO-0.12-D.md §4):
+  as setas mortas, a rampa por traço, o ignite, as 3 versões, o espelho
+  Java, o overdraw da barra; pins ×4 + M-D4a/b; a FASE 34.
 - 0.12-D D-3 (vc 93) — o fogo (no RELATORIO-0.12-D.md §3): a fonte única
   ui/Fire.h, a rampa do dono + a proveniência (d3_palette.py), a borda
   animada aditiva, o glow por baixo, as brasas com portão, a composição
