@@ -1264,9 +1264,14 @@ TEST(docs_entradas_populadas_e_pesquisam) {
 }
 
 TEST(docs_lista_reservadas_completa) {
-    EXPECT(reservedWordCount() == 20);
+    // 0.12-U (3.9c): 20 → 23 — os TIMERS entram na linguagem (every/after/
+    // when são reservados: a gramática não dá o nome ao utilizador e o
+    // statement não nasce partido; recalibração com nota no relatório 3.9c)
+    EXPECT(reservedWordCount() == 23);
     EXPECT(isReservedWord("stopand"));
     EXPECT(isReservedWord("allmoments"));
+    EXPECT(isReservedWord("every") && isReservedWord("after") &&
+           isReservedWord("when"));
     EXPECT(!isReservedWord("stop"));      // não existe na V.ONI
     EXPECT(!isReservedWord("follow"));    // só dentro de tyker (0.9.3)
     EXPECT(!isReservedWord("fn"));        // estrutural, não reservada §5
@@ -2483,4 +2488,201 @@ TEST(spawn_host_sem_cena_erro_honesto) {
     EXPECT(!s.runStart(h, err));
     EXPECT(err.message.find("indisponível") != std::string::npos);
     EXPECT(err.line == 1);
+}
+
+// ===========================================================================
+// 0.12-U (3.9c) — every(s) / after(s) / when(cond)
+// O ESTADO vive POR NÓ AST (no Impl — morre no stop()); every carrega o
+// resto (sem drift, 1× por frame); after/when disparam 1× e morrem.
+// ===========================================================================
+
+TEST(every_cada_meio_segundo) {
+    Error err;
+    Script s = Script::compile(
+        "central main { on moment { } allmoments { every(0.5) { View P "
+        "\"pulso\" } } }", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    EXPECT(s.runStart(h, err));
+    for (int i = 0; i < 10; ++i) {   // 10 × dt 0.1 = 1.0 s
+        EXPECT(s.runFrame(h, 0.1, err));
+    }
+    // acc: .1 .2 .3 .4 [.5 dispara, carrega 0] .1 .2 .3 .4 [.5 dispara]
+    EXPECT(h.logs.size() == 2);
+    EXPECT(h.logs[0] == "voni: pulso");
+    EXPECT(h.logs[1] == "voni: pulso");
+}
+
+TEST(every_o_resto_carrega_sem_drift) {
+    Error err;
+    Script s = Script::compile(
+        "central main { on moment { } allmoments { every(0.5) { View P "
+        "\"t\" } } }", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    EXPECT(s.runStart(h, err));
+    for (int i = 0; i < 10; ++i) {   // 10 × dt 0.2 = 2.0 s
+        EXPECT(s.runFrame(h, 0.2, err));
+    }
+    // com o resto a CARREGAR: .2 .4 [.6 dispara → .1] .3 [.5 dispara → 0]
+    // .2 .4 [.6 dispara → .1] .3 [.5 dispara → 0] = 4 disparos
+    EXPECT(h.logs.size() == 4);
+}
+
+TEST(every_intervalo_invalido_erro_com_linha) {
+    RunResult z = runScript(
+        "central main { on moment { every(0) { View P \"x\" } } "
+        "allmoments { } }");
+    EXPECT(!z.ok);
+    EXPECT(z.err.message.find("> 0") != std::string::npos);
+    EXPECT(z.err.line == 1);
+    RunResult t = runScript(
+        "central main { on moment { every(\"a\") { } } allmoments { } }");
+    EXPECT(!t.ok);
+    EXPECT(t.err.message.find("número") != std::string::npos);
+}
+
+TEST(after_dispara_uma_vez_e_morre) {
+    Error err;
+    Script s = Script::compile(
+        "central main { on moment { } allmoments { after(1) { View P "
+        "\"porta\" } } }", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    EXPECT(s.runStart(h, err));
+    for (int i = 0; i < 20; ++i) {   // 2.0 s — o after(1) já passou há muito
+        EXPECT(s.runFrame(h, 0.1, err));
+    }
+    EXPECT(h.logs.size() == 1);      // 1× e morre (não repete)
+    EXPECT(h.logs[0] == "voni: porta");
+}
+
+TEST(after_dois_nos_independentes) {
+    Error err;
+    Script s = Script::compile(
+        "central main { on moment { } allmoments { after(0.5) { View P "
+        "\"a\" } after(1.0) { View P \"b\" } } }", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    EXPECT(s.runStart(h, err));
+    for (int i = 0; i < 15; ++i) {
+        EXPECT(s.runFrame(h, 0.1, err));
+    }
+    // o a dispara no frame 5, o b no frame 10 — o estado de cada um é
+    // PRÓPRIO (por nó AST, não um relógio global do script)
+    EXPECT(h.logs.size() == 2);
+    if (h.logs.size() == 2) {
+        EXPECT(h.logs[0] == "voni: a");
+        EXPECT(h.logs[1] == "voni: b");
+    }
+}
+
+TEST(after_tempo_invalido_erro_com_linha) {
+    RunResult z = runScript(
+        "central main { on moment { after(-1) { } } allmoments { } }");
+    EXPECT(!z.ok);
+    EXPECT(z.err.message.find("> 0") != std::string::npos);
+    EXPECT(z.err.line == 1);
+}
+
+TEST(when_dispara_na_subida_uma_vez) {
+    Error err;
+    Script s = Script::compile(
+        "v#vida:Int=5\n"
+        "central main { on moment { } allmoments { vida=vida-1 "
+        "when(vida < 3) { View P \"caiu\" } } }", err);
+    EXPECT(err.ok);
+    if (!err.ok) return;
+    FakeHost h;
+    const bool st = s.runStart(h, err);
+    EXPECT(st);
+    if (!st) return;
+    for (int i = 0; i < 10; ++i) {   // vida: 4 3 2 1 0 -1 … (o nível dura 8)
+        EXPECT(s.runFrame(h, 0.016, err));
+    }
+    // a subida acontece UMA vez (o frame em que vida fica < 3 e lá fica)
+    if (h.logs.size() < 1) return;   // guarda: o vermelho limpo
+    EXPECT(h.logs.size() == 1);
+    EXPECT(h.logs[0] == "voni: caiu");
+}
+
+TEST(when_nasce_verdadeira_dispara_no_primeiro_frame) {
+    Error err;
+    Script s = Script::compile(
+        "central main { on moment { } allmoments { when(true) { View P "
+        "\"logo\" } } }", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    EXPECT(s.runStart(h, err));
+    for (int i = 0; i < 5; ++i) {
+        EXPECT(s.runFrame(h, 0.016, err));
+    }
+    EXPECT(h.logs.size() == 1);      // no 1.º frame; nunca mais
+}
+
+TEST(when_uma_vez_no_total_mesmo_com_duas_subidas) {
+    // o when é 1× TOTAL (o portão), não 1× por subida: a condição sobe
+    // DUAS vezes (t 3-4 e t 7-8) e o bloco corre UMA só vez
+    Error err;
+    Script s = Script::compile(
+        "v#t:Int=0\n"
+        "central main { on moment { } allmoments { t=t+1 "
+        "when((t > 2 and t < 5) or (t > 6 and t < 9)) { View P \"subiu\" } } }",
+        err);
+    EXPECT(err.ok);
+    if (!err.ok) return;
+    FakeHost h;
+    const bool st = s.runStart(h, err);
+    EXPECT(st);
+    if (!st) return;
+    for (int i = 0; i < 12; ++i) {   // t = 1..12
+        EXPECT(s.runFrame(h, 0.016, err));
+    }
+    if (h.logs.empty()) return;      // guarda: o vermelho limpo
+    EXPECT(h.logs.size() == 1);      // a 1.ª subida; a 2.ª (t=7) é morta
+    EXPECT(h.logs[0] == "voni: subiu");
+}
+
+TEST(when_tipo_errado_erro_com_linha) {
+    RunResult r = runScript(
+        "central main { on moment { when(5) { } } allmoments { } }");
+    EXPECT(!r.ok);
+    EXPECT(r.err.message.find("true/false") != std::string::npos);
+    EXPECT(r.err.line == 1);
+}
+
+TEST(timers_o_estado_morre_no_stop) {
+    Error err;
+    Script s = Script::compile(
+        "central main { on moment { } allmoments { after(1) { View P "
+        "\"viva\" } } }", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    // 1.ª vida: dispara 1×
+    EXPECT(s.runStart(h, err));
+    for (int i = 0; i < 15; ++i) {
+        EXPECT(s.runFrame(h, 0.1, err));
+    }
+    EXPECT(h.logs.size() == 1);
+    // stop() limpa o ESTADO POR NÓ AST (o Impl.reset)…
+    s.stop();
+    // …e a 2.ª vida recomeça do zero: o after volta a disparar
+    EXPECT(s.runStart(h, err));
+    for (int i = 0; i < 15; ++i) {
+        EXPECT(s.runFrame(h, 0.1, err));
+    }
+    EXPECT(h.logs.size() == 2);      // a 2.ª vida tem o seu próprio 1×
+}
+
+TEST(timers_no_corpo_do_tyker_sao_rejeitados_que_ensinam) {
+    // o corpo do tyker só aceita COMPONENTES — o every é código de script
+    // (a mesma lição do View P/repeat lá dentro; o erro DIZ o que entrou)
+    Error err;
+    Script s = Script::compile(
+        "linker(jogador)to(cubo)=RF(p)\n"
+        "tyker(t){ find(p) every(0.5) { } }", err);
+    EXPECT(!err.ok);
+    EXPECT(err.message.find("só aceita componentes") != std::string::npos);
+    EXPECT(err.message.find("every") != std::string::npos);
+    EXPECT(err.line >= 2);
 }

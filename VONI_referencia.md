@@ -90,6 +90,45 @@ last(vida > 0) { vida-=1 }
 last(n < 10) with n+=1 { }
 ```
 
+### every
+- **Sintaxe**: `every(segundos) { }`
+- **Descrição**: Corre o bloco a cada N segundos (o resto do período carrega para o ciclo seguinte — sem drift); dispara no máximo 1× por frame.
+- **Equivalência**: setInterval(() => { }, ms)
+- **Exemplo**:
+```
+central main {
+  allmoments {
+    every(0.5) { View P "pulso" }
+  }
+}
+```
+
+### after
+- **Sintaxe**: `after(segundos) { }`
+- **Descrição**: Corre o bloco UMA vez, passados N segundos desde o 1.º encontro desta linha (depois fica inativo para sempre).
+- **Equivalência**: setTimeout(() => { }, ms) (1×)
+- **Exemplo**:
+```
+central main {
+  allmoments {
+    after(3) { View P "portao" }
+  }
+}
+```
+
+### when
+- **Sintaxe**: `when(condição) { }`
+- **Descrição**: Corre o bloco UMA vez, no 1.º frame em que a condição está verdadeira (se já nasce verdadeira, é logo no 1.º; depois fica inativo para sempre).
+- **Equivalência**: on condition became true (edge)
+- **Exemplo**:
+```
+central main {
+  allmoments {
+    when(vida == 0) { View P "fim" }
+  }
+}
+```
+
 ### continue
 - **Sintaxe**: `continue`
 - **Descrição**: Salta o resto da iteração atual.

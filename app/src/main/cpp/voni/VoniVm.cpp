@@ -1017,8 +1017,94 @@ struct Vm {
             case Stmt::Kind::PathCall:
                 runCommand(s);
                 return Flow::None;
+
+            case Stmt::Kind::Timer:   // 0.12-U (3.9c): every/after/when
+                return execTimer(s);
         }
         fail(s.line, "instrução desconhecida (erro interno)");
+    }
+
+    // ---- 0.12-U (3.9c): EVERY / AFTER / WHEN (o estado é POR NÓ AST) ------
+    // O dt do FRAME corrente (vm.dt — o runStart usa o frameDt do Host);
+    // o acumulador vive no Impl (a chave é o NÓ — o program é estável) e
+    // MORRE no stop() (o restart recomeça do zero). Decisões 🔶:
+    //   • every: o RESTO do período CARREGA (sem drift); dispara no máx. 1×
+    //     por frame (um dt gigante nunca dispara em rajada);
+    //   • after: 1× e morre; o relógio começa no 1.º encontro da linha;
+    //   • when: 1× na SUBIDA da condição (se já nasce verdadeira, dispara
+    //     no 1.º frame);
+    //   • o corpo NÃO é ciclo: resume/continue referem-se ao construto
+    //     de FORA (o flow propaga) — o return devolve da fn.
+    Script::Impl::TimerState& timerStateFor(const Stmt& s) {
+        return st.timerStates[&s];   // cria a zero à 1.ª vez
+    }
+
+    Flow execTimer(const Stmt& s) {
+        Script::Impl::TimerState& ts = timerStateFor(s);
+        switch (s.timer) {
+            case Stmt::TimerKind::Every: {
+                Value v = eval(*s.timerArg);
+                if (!isNum(v)) {
+                    fail(s.line, std::string("every: o intervalo é um número ") +
+                                     "em segundos (veio " + typeName(v.t) + ")");
+                }
+                const f64 period = asNum(v);
+                if (period <= 0.0) {
+                    fail(s.line, "every: o intervalo tem de ser > 0 (veio " +
+                                     valueText(v) + ")");
+                }
+                ts.acc += dt;
+                if (ts.acc >= period) {
+                    ts.acc -= period;          // o resto carrega (sem drift)
+                    if (ts.acc < 0.0) {
+                        ts.acc = 0.0;
+                    }
+                    return execBlock(s.body);  // no máx. 1× por frame
+                }
+                return Flow::None;
+            }
+
+            case Stmt::TimerKind::After: {
+                if (ts.fired) {
+                    return Flow::None;   // 1× e morre (o contrato)
+                }
+                Value v = eval(*s.timerArg);
+                if (!isNum(v)) {
+                    fail(s.line, std::string("after: o tempo é um número em ") +
+                                     "segundos (veio " + typeName(v.t) + ")");
+                }
+                const f64 period = asNum(v);
+                if (period <= 0.0) {
+                    fail(s.line, "after: o tempo tem de ser > 0 (veio " +
+                                     valueText(v) + ")");
+                }
+                ts.acc += dt;   // o relógio começa no 1.º encontro da linha
+                if (ts.acc >= period) {
+                    ts.fired = true;
+                    return execBlock(s.body);
+                }
+                return Flow::None;
+            }
+
+            case Stmt::TimerKind::When: {
+                if (ts.fired) {
+                    return Flow::None;   // 1× e morre (o contrato)
+                }
+                Value c = eval(*s.timerArg);
+                if (c.t != Type::Bool) {
+                    fail(s.line, std::string("when() precisa de true/false ") +
+                                     "(veio " + typeName(c.t) + ")");
+                }
+                // 1.º frame em que está verdadeira (se já nasce verdadeira,
+                // é agora); o portão `fired` garante o 1× total do contrato
+                if (c.b) {
+                    ts.fired = true;
+                    return execBlock(s.body);
+                }
+                return Flow::None;
+            }
+        }
+        fail(s.line, "timer desconhecido (erro interno)");
     }
 
     void execAssign(const Stmt& s) {

@@ -111,8 +111,18 @@ Block       <- '{' Statement* '}'
 
 # statement: a ordem importa (PEG escolha ordenada) — VarDecl/IfChain/…
 # antes de Assignment/PathCall (senão 'x=1' comia o caminho 'x')
-Statement   <- VarDecl / IfChain / OptionStmt / LoopStmt
+Statement   <- VarDecl / IfChain / OptionStmt / LoopStmt / TimerStmt
              / JumpStmt / ReturnStmt / Assignment / PathCall
+
+# --- timers (0.12-U 3.9c): every(s)/after(s)/when(cond) -------------------
+# O ESTADO vive POR NÓ AST (o Impl guarda o acumulador/flags pelo ponteiro
+# do nó — o program é estável); as três formas são loops-like: bloco
+# obrigatório, a Expressão dentro dos parênteses é o s (segundos) ou a
+# condição. ANTES de Assignment/PathCall (a mesma razão dos loops).
+TimerStmt   <- EveryStmt / AfterStmt / WhenStmt
+EveryStmt   <- 'every' '(' Expr ')' Block
+AfterStmt   <- 'after' '(' Expr ')' Block
+WhenStmt    <- 'when' '(' Expr ')' Block
 
 # --- variáveis (§4): v++nome=valor · v#nome:Tipo=valor · @+ exporta --------
 VarDecl     <- VarInfExp / VarInf / VarTypExp / VarTyp
@@ -218,6 +228,7 @@ static const char* const kReserved[] = {
     "repeat", "last", "with", "continue", "resume", "move",
     "linker", "to", "tyker",
     "central", "main", "on", "moment", "allmoments",
+    "every", "after", "when",   // 0.12-U (3.9c): os timers são da linguagem
     nullptr,   // FASE 9 (loop ASan): o SENTINELA faltava — o loop `*p` lia
                // 8 B FORA do array em CADA chamada (desde a 0.9.2)
 };

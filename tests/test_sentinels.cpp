@@ -7422,3 +7422,118 @@ central main { on moment { View P a View P b View P a.pos.x } allmoments { } }
         EXPECT(err2.line == 1);
     }
 }
+
+// ===========================================================================
+// R-054 (0.12-U 3.9c) — OS TIMERS SÃO DA LINGUAGEM, O ESTADO É POR NÓ AST
+// E MORRE NO STOP. O que se vigia: (1) as 3 entradas existem (Linguagem,
+// Docs completas) e as 3 palavras são RESERVADAS (a gramática não as dá
+// como nomes ao utilizador); (2) o every CARREGA o resto do período (o
+// anti-drift é o contrato — o acc=0 honesto é a regressão); (3) o after
+// dispara 1× e morre; (4) o when dispara na SUBIDA (a borda, não o nível);
+// (5) o stop() mata o estado por nó (o restart recomeça — o estado vive no
+// Impl, não em static/global que sobreviveria às vidas do script).
+// A mutação cola no RELATORIO-0.12-U-3.9c.md (M-3.9c1/c2/c3).
+// ===========================================================================
+TEST(regress_voni_timers) {
+    using namespace voni;
+
+    // ---- (1) A FONTE ÚNICA + as palavras RESERVADAS -----------------------
+    static const char* const kTimers[] = {"every", "after", "when"};
+    for (const char* n : kTimers) {
+        const reg::Entry* e = reg::find(n);
+        EXPECT_MSG(e != nullptr, "o timer '%s' saiu do registo", n);
+        if (e) {
+            EXPECT(e->kind == reg::Kind::Linguagem);
+            EXPECT(e->syntax != nullptr && *e->syntax);
+            EXPECT(e->desc != nullptr && *e->desc);
+            EXPECT(e->equiv != nullptr && *e->equiv);
+        }
+        EXPECT_MSG(isReservedWord(n),
+                   "'%s' deixou de ser palavra reservada — a gramática "
+                   "daria o nome ao utilizador e o statement morria", n);
+    }
+    // o utilizador NÃO declara variável com o nome (o erro é claro)
+    {
+        Error err;
+        Script::compile("v#every:Int=1\ncentral main { }", err);
+        EXPECT(!err.ok);
+        EXPECT(err.message.find("reservada") != std::string::npos);
+    }
+
+    // ---- (2) O EVERY CARREGA O RESTO (o anti-drift é o contrato) ---------
+    {
+        Error err;
+        Script s = Script::compile(
+            "central main { on moment { } allmoments { every(0.5) { View P "
+            "\"t\" } } }", err);
+        EXPECT(err.ok);
+        Host052 h;
+        EXPECT(s.runStart(h, err));
+        for (int i = 0; i < 10; ++i) {   // 10 × 0.2 = 2.0 s
+            EXPECT(s.runFrame(h, 0.2, err));
+        }
+        // com o resto a carregar: [.6→.1] [.5→0] [.6→.1] [.5→0] = 4
+        EXPECT_MSG(h.logs.size() == 4,
+                   "o every disparou %zu vezes em 10×0.2s (o contrato é 4 — "
+                   "o resto do período deixou de carregar?)",
+                   h.logs.size());
+    }
+
+    // ---- (3) O AFTER DISPARA 1× E MORRE ----------------------------------
+    {
+        Error err;
+        Script s = Script::compile(
+            "central main { on moment { } allmoments { after(1) { View P "
+            "\"porta\" } } }", err);
+        EXPECT(err.ok);
+        Host052 h;
+        EXPECT(s.runStart(h, err));
+        for (int i = 0; i < 20; ++i) {   // 2.0 s
+            EXPECT(s.runFrame(h, 0.1, err));
+        }
+        EXPECT_MSG(h.logs.size() == 1,
+                   "o after disparou %zu vezes (o contrato é 1× e morre)",
+                   h.logs.size());
+    }
+
+    // ---- (4) O WHEN DISPARA NA SUBIDA (a borda, não o nível) -------------
+    {
+        Error err;
+        Script s = Script::compile(
+            "v#vida:Int=5\n"
+            "central main { on moment { } allmoments { vida=vida-1 "
+            "when(vida < 3) { View P \"caiu\" } } }", err);
+        EXPECT(err.ok);
+        Host052 h;
+        EXPECT(s.runStart(h, err));
+        for (int i = 0; i < 10; ++i) {
+            EXPECT(s.runFrame(h, 0.016, err));
+        }
+        EXPECT_MSG(h.logs.size() == 1,
+                   "o when disparou %zu vezes (o portão 1×-total morreu — "
+                   "a condição verdadeira está a re-disparar?)", h.logs.size());
+    }
+
+    // ---- (5) O STOP MATA O ESTADO POR NÓ (o restart recomeça) ------------
+    {
+        Error err;
+        Script s = Script::compile(
+            "central main { on moment { } allmoments { after(1) { View P "
+            "\"viva\" } } }", err);
+        EXPECT(err.ok);
+        Host052 h;
+        EXPECT(s.runStart(h, err));
+        for (int i = 0; i < 15; ++i) {
+            EXPECT(s.runFrame(h, 0.1, err));
+        }
+        EXPECT(h.logs.size() == 1);
+        s.stop();
+        EXPECT(s.runStart(h, err));
+        for (int i = 0; i < 15; ++i) {
+            EXPECT(s.runFrame(h, 0.1, err));
+        }
+        EXPECT_MSG(h.logs.size() == 2,
+                   "o after da 2.ª vida disparou %zu vezes (o estado por nó "
+                   "sobreviveu ao stop — viveu num static?)", h.logs.size());
+    }
+}

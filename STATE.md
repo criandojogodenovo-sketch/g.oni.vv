@@ -1,8 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-19 · vc: 99 · Último commit: este (o 0.12-U 3.9b — o
-SPAWN: o script cria TIC na cena pelo Host::spawnTic; nasce active/
-visible/nome único; R-053 + M-3.9b1/2; o relatório próprio diz o resto)
+Atualizado: 2026-10-19 · vc: 100 · Último commit: este (o 0.12-U 3.9c —
+os RELÓGIOS: every/after/when no AST+parser, o estado por nó AST que
+morre no stop; R-054 + M-3.9c1/2/3; o relatório próprio diz o resto)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -28,6 +28,10 @@ visible/nome único; R-053 + M-3.9b1/2; o relatório próprio diz o resto)
   real (a lista viva esfera/box; ACTIVE/VISIBLE + Transform3D +
   MeshRenderer prim + o NOME ÚNICO base.001); pins ×9 + R-053 +
   M-3.9b1/b2 vermelho→verde. test_core 0 falhas · c33 1010/0 · vc 99.
+  **3.9c (vc 100)**: every/after/when — a sintaxe nova no AST+parser
+  (as 3 palavras reservadas), o estado POR NÓ AST no Impl (morre no
+  stop; zero static); pins ×12 + R-054 + M-3.9c1/2/3. test_core 0
+  falhas · c33 1010/0 · vc 100. FALTA o FECHO (o platformer julga).
 - **Campanha 0.12-E (EMERGÊNCIA + REDESIGN 2.5D, FOGO AVERMELHADO) —
   FECHADA (E-1..E-3, vc 95–97)** (a ordem do dono abortou o SDF 3D;
   cláusulas: ZERO matemática 3D, ZERO mexidas no FontAtlas, TICs
@@ -56,13 +60,9 @@ visible/nome único; R-053 + M-3.9b1/2; o relatório próprio diz o resto)
   (C-1..C-4, vc 87–90)** (o CI do push é o árbitro; os DETALHES vivem no
   RELATORIO-0.12-C.md; a cláusula é anti-superficialidade — nada de
   controlos «de fachada»): C-1 as proporções (a hierarquia 20%, o
-  viewport ≥60% de fábrica, o hierHeaderRects), C-2 os menus e a barra
-  de topo (o menuSheetLayout, o play A CHAMA, o gizmo duplicado fora),
-  C-3 a tipografia/idioma/superfícies (a ESCADA de 4 tons, «Áudio»,
-  «N TICs»), C-4 o seletor de ficheiros + os estados vazios (o picker
-  pela fonte única, o breadcrumb, a pesquisa, as pastas ponto fora, os 4
-  vazios com AÇÃO, os glifos únicos) + a REPARAÇÃO da árvore (614
-  ficheiros de volta do e8c9587).
+  viewport ≥60%), C-2 os menus e a barra de topo, C-3 a tipografia/
+  idioma/superfícies (a ESCADA de 4 tons), C-4 o seletor + os estados
+  vazios com AÇÃO + a REPARAÇÃO da árvore (614 ficheiros de volta).
 - **Campanha 0.12-B (arquitetura da UI) — FECHADA (B-1..B-4, vc 83–86)**
   (os DETALHES vivem no RELATORIO-0.12-B.md): B-1 a árvore de UI (pins
   ×9, R-050), B-2 o Inspector de UI (pins ×5), B-3 o canvas (pins ×3),
@@ -72,15 +72,16 @@ visible/nome único; R-053 + M-3.9b1/2; o relatório próprio diz o resto)
   A-2 o refreshCatalog no arranque, A-3 o scissor3dRect + o tooltip,
   A-4 o veredito RAM (a cache de blocos a ciclizar).
 - **Campanha 0.11-Y (identidade visual) — FECHADA** (o fecho é o commit
-  32a6785: os 13 PNGs por ecrã + o pin y_fecho). Y-0..Y-3 + o fix — 20
-  pins novos; a FASE 31 fica no replay para SEMPRE.
-- **0.11-Y e 0.11-CTX — FECHADAS** com CI verde (os detalhes
-  vivem no §2 e nos relatórios próprios).
+  32a6785: os 13 PNGs + o pin y_fecho; a FASE 31 fica no replay).
+- **0.11-CTX — FECHADA** com CI verde (os detalhes no §2 e no relatório).
 - **0.11-W (Render Systems) com CI verde** — falta o PIN do dono no C33
   real; o fecho (BLOCO B) só por ordem do dono.
 
 ## §2 O que está FEITO
 
+- 0.12-U 3.9c (vc 100) — os relógios every/after/when (no
+  RELATORIO-0.12-U-3.9c.md): o estado por nó AST; pins ×12 + R-054 +
+  M-3.9c1/2/3.
 - 0.12-U 3.9b (vc 99) — o spawn (no RELATORIO-0.12-U-3.9b.md): o Host
   ganha a porta de criação; pins ×9 + R-053 + M-3.9b1/b2.
 - 0.12-U 3.9a (vc 98) — o View P universal + as 14 funções do registo +

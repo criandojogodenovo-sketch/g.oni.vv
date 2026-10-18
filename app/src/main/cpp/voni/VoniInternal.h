@@ -42,6 +42,16 @@ struct Script::Impl {
     tykers::Registry            rfReg;
     std::vector<tykers::TykerState> tykerRuns;
 
+    // 0.12-U (3.9c): o ESTADO DOS TIMERS POR NÓ AST (every/after/when) —
+    // a chave é o PONTEIRO do nó (o program é estável: shared_ptr; runs
+    // repetidos não recompilam) e o reset() limpa (o restart recomeça do
+    // zero — o mesmo contrato das variáveis globais)
+    struct TimerState {
+        f64  acc = 0.0;      // o acumulador (every/after) em segundos
+        bool fired = false;  // after/when já disparou (1× e morre)
+    };
+    std::unordered_map<const Stmt*, TimerState> timerStates;
+
     void reset() {
         started = false;
         running = false;
@@ -51,6 +61,7 @@ struct Script::Impl {
         lastInstr = 0;
         rfReg.clear();
         tykerRuns.clear();
+        timerStates.clear();   // 0.12-U (3.9c): o estado dos timers morre
     }
 };
 

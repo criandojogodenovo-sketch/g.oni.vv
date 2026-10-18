@@ -191,6 +191,12 @@ std::string strayNameOf(const Stmt& s) {
             }
             return p.empty() ? "comando" : p;
         }
+        case Stmt::Kind::Timer:    // 0.12-U (3.9c): o nome certo no erro
+            switch (s.timer) {
+                case Stmt::TimerKind::Every: return "every";
+                case Stmt::TimerKind::After: return "after";
+                default:                     return "when";
+            }
     }
     return "código de script";
 }
@@ -728,6 +734,27 @@ struct Compiler {
                                               : Stmt::Kind::Resume,
                               lineOf(sv));
         };
+
+        // 0.12-U (3.9c): every/after/when — a MESMA forma (arg + bloco), o
+        // tipo distingue-se no nó (a ação por valor — a lição FASE 9: as
+        // ações do parser VIVEM além do retorno de registerStatements)
+        auto timerAction = [](Stmt::TimerKind k) {
+            return [k](const peg::SemanticValues& sv) -> StmtP {
+                StmtP s = Stmt::make(Stmt::Kind::Timer, lineOf(sv));
+                s->timer = k;
+                s->timerArg = *std::any_cast<ExprP>(&sv[0]);
+                const BlockV* b = std::any_cast<BlockV>(&sv[1]);
+                s->body = b ? b->block : Block{};
+                return s;
+            };
+        };
+        parser["TimerStmt"] = [](const peg::SemanticValues& sv) -> std::any {
+            return sv[0];
+        };
+        parser["EveryStmt"] = timerAction(Stmt::TimerKind::Every);
+        parser["AfterStmt"] = timerAction(Stmt::TimerKind::After);
+        parser["WhenStmt"] = timerAction(Stmt::TimerKind::When);
+
         parser["ReturnStmt"] = [](const peg::SemanticValues& sv) -> StmtP {
             StmtP s = Stmt::make(Stmt::Kind::Return, lineOf(sv));
             if (!sv.empty()) {
@@ -1198,6 +1225,9 @@ struct Validator {
                 if (s.hasCounter) {
                     checkName(s.counter, s.line);
                 }
+                walkBlock(s.body);
+                break;
+            case Stmt::Kind::Timer:   // 0.12-U (3.9c): o corpo é validado
                 walkBlock(s.body);
                 break;
             default:

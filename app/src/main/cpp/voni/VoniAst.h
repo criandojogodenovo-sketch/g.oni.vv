@@ -112,6 +112,7 @@ struct Stmt {
         Resume,        // §6
         Return,        // §8
         PathCall,      // comandos/chamadas por caminho (§9)
+        Timer,         // 0.12-U (3.9c): every(s)/after(s)/when(cond)
     };
 
     Kind        kind = Kind::VarDecl;
@@ -153,6 +154,14 @@ struct Stmt {
     // PathCall (§9): argumentos entre '(' ')' (ou a string solta do View P)
     bool        hasArgs = false;
     std::vector<ExprP> args;
+
+    // Timer (0.12-U 3.9c): every(s)/after(s)/when(cond) — o ESTADO do
+    // acumulador/flags vive POR NÓ AST (no Script::Impl, chaveado pelo
+    // nó — o program é estável) e MORRE no stop() (o restart recomeça)
+    enum class TimerKind : u8 { Every, After, When };
+    TimerKind   timer = TimerKind::Every;
+    ExprP       timerArg;               // o s (Every/After) ou a condição (When)
+    // (o corpo é o `body` de cima — o mesmo campo do Repeat/Last)
 
     static StmtP make(Kind k, u32 line) {
         StmtP s(new Stmt);
