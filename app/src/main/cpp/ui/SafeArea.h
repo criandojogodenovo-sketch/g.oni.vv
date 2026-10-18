@@ -51,10 +51,16 @@ constexpr f32 kStatusH   = 0.0f;
 // ESTADO (divisores arrastáveis, o padrão da pega do drawer); kPanelW era
 // o default FIXO de 300. PASSO 2 (0.9.6.15 — spec do dono): os DEFAULTS
 // são POR PERCENTAGEM da largura do content —
-//   • HIERARQUIA 18% com piso kHierMinW = 140dp;
+//   • HIERARQUIA 20% com piso kHierMinW = 140dp (0.12-C C-1: era 18% —
+//     a ordem expressa do dono «Hierarquia ~20%»);
 //   • INSPECTOR 22% com piso kInspMinW = 180dp e TETO kInspMaxW = 260dp;
-//   • o VIEWPORT CENTRAL fica ≥55% nos ecrãs de referência (776/800/1536)
-//     — 18+22 = 40% deixam 60%; os pisos só falam em ecrãs < ~711dp.
+//   • o VIEWPORT CENTRAL fica ≥60% POR DEFEITO (0.12-C C-1; o «por
+//     defeito» é o estado de FÁBRICA: sem seleção o inspector é o TRILHO
+//     de 32dp — hier 20% + trilho ≥ 60% em qualquer ecrã de referência;
+//     COM seleção nos ecrãs ≥1300dp ≥60% — 20+22 = 42% antes dos pisos;
+//     nos ecrãs estreitos com seleção os pisos falam e o viewport fica
+//     ~56–58%, o piso ≥55% da R-033 mantém-se) — 18+22 = 40% deixavam
+//     60%; os pisos só falam em ecrãs < ~711dp.
 //   • SEM seleção o inspector colapsa ao TRILHO kInspTrackW = 32dp (a
 //     área junta-se ao viewport; volta ao selecionar um TIC — a regra é
 //     do dono, spec PASSO 2).
@@ -64,7 +70,8 @@ constexpr f32 kStatusH   = 0.0f;
 // fecha abaixo do que a barra de toque precisa.
 constexpr f32 kPanelW      = 300.0f;  // LEGACY (o default fixo da 0.9.0 —
                                       // wrappers compat 0.8.x ainda o citam)
-constexpr f32 kHierPct     = 0.18f;   // PASSO 2: default da hierarquia
+constexpr f32 kHierPct     = 0.20f;   // 0.12-C C-1: default da hierarquia
+                                      // (era 0.18 — a ordem do dono)
 constexpr f32 kInspPct     = 0.22f;   // PASSO 2: default do inspector
 constexpr f32 kHierMinW    = 140.0f;  // PASSO 2: piso hierarquia (era 200)
 constexpr f32 kInspMinW    = 180.0f;  // PASSO 2: piso inspector (era 272)

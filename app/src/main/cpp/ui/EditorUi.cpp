@@ -669,18 +669,26 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
             &st.hierCollapsed};
     wk.visit(-1, 0);
 
-    // ---- cabeçalho 48dp: título 12sp text-2 + [+] 48dp ----------------------
+    // ---- cabeçalho 28dp: título à ESQUERDA + [⋮][+] à direita -------------
+    // 0.12-C (C-1): a geometria do cabeçalho é a FONTE ÚNICA hierHeaderRects
+    // (EditorLayout.h) — o título vive no budget dele e ELIPSA com «…» quando
+    // não cabe (o dono: «os botões não sobrepõem o título»; no piso 140dp o
+    // título desenhava POR CIMA do ⋮ e do +). Os alvos continuam a LINHA
+    // (28dp — kHeadFloorDp).
     // 0.9.6.6 (GRUPO C): o [+], o chip e o campo de pesquisa são ALVOS —
     // ≥48dp REAL (a regra da casa) e dp em tudo (eram px crus: a auditoria
     // do Grupo B media o [+] a 56×40 e o campo a 268×40 — avisos <48dp).
     {
         const TextMetrics m = ui.textMetrics();
+        const HierHeaderRects hh = hierHeaderRects(w);
         const f32 base = y + (kHeaderH - m.block()) * 0.5f + m.ascent;
         // 0.9.6.10 (GRUPO UI · a imagem 1): o título do painel em 16sp
         // text1 (era 12sp text2 — os painéis da referência têm títulos
-        // PRÓPRIOS, não legendas)
-        ui.labelStyled(x + kPad, base, "Hierarquia", theme::kTheme.text1,
-                       theme::fontScale(theme::kFontSection), 0);
+        // PRÓPRIOS, não legendas). 0.12-C: labelFittedStyled no BUDGET —
+        // nunca cruza o ⋮ (elipse honesta)
+        ui.labelFittedStyled(x + hh.titleX, base, "Hierarquia",
+                             theme::kTheme.text1, hh.titleMaxW,
+                             theme::fontScale(theme::kFontSection), 0);
         // chip da MULTI-SELEÇÃO (aparece com ≥1 no conjunto): "N ×" limpa
         // PASSO 1: chip 28dp de altura (a LINHA do cabeçalho — o piso
         // kHeadFloorDp; o alvo é a linha do cabeçalho de 28dp)
@@ -720,8 +728,8 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
         // agora) — a referência tem botões QUIETOS: chip de vidro com o
         // ícone âmbar (o accent é ESTADO, não repouso — a regra spec A)
         // PASSO 1: alvo 28×28 (a LINHA do cabeçalho), desenho 24, ícone 16
-        const f32 hdrBtn = kHeaderH;
-        const UiRect pr = {x + w - kPad - hdrBtn, y, hdrBtn, hdrBtn};
+        // 0.12-C (C-1): o rect vem da FONTE ÚNICA hierHeaderRects
+        const UiRect pr = {x + hh.plus.x, y, hh.plus.w, hh.plus.h};
         ui.auditRowFloorNext(layout::kHeadFloorDp);
         bool plus = false;
         if (ui.widgetHit(kIdPlus, pr.x, pr.y, pr.w, pr.h)) {
@@ -741,7 +749,8 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                                  : theme::kTheme.accent);
         // o ⋮ da hierarquia (a imagem 1: cada painel com o seu menu) —
         // abre o sheet com as ações reais da árvore (o main despacha)
-        const UiRect dr = {pr.x - hdrBtn, y, hdrBtn, hdrBtn};
+        // 0.12-C (C-1): rect da FONTE ÚNICA (o ⋮ fica à ESQUERDA do +)
+        const UiRect dr = {x + hh.dots.x, y, hh.dots.w, hh.dots.h};
         ui.auditRowFloorNext(layout::kHeadFloorDp);
         const bool dotsHeld = ui.widgetActive(kHierDotsId);
         ui.panelRounded(dr.x, dr.y, dr.w, dr.h, theme::dp(theme::kRadiusCard),

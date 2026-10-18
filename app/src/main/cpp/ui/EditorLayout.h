@@ -71,6 +71,33 @@ constexpr u64 kHierSearchId    = 5500;   // linha de pesquisa (abre teclado 8)
 constexpr u64 kHierMultiClearId = 5501;  // chip "N ×" — limpa a multi-seleção
 constexpr u64 kHierMultiDistId = 5502;   // "distribuir" (≥3 selecionados)
 
+// 0.12-C (C-1) — O CABEÇALHO da hierarquia em linha PRÓPRIA: o título à
+// esquerda, as AÇÕES (⋮ e +) à direita, e o título ELIPSA quando não cabe
+// (o dono: «os botões não sobrepõem o título»). FONTE ÚNICA da geometria
+// do cabeçalho — o draw (EditorUi.cpp) e os pins partilham ESTA função;
+// as X são OFFSETS dentro do painel (o draw soma o x do painel).
+struct HierHeaderRects {
+    f32 titleX;      // onde o título começa (offset)
+    f32 titleMaxW;   // budget do título (0 = não cabe nada; nunca sobrepõe)
+    UiRect dots;     // o ⋮ (offsets; y = topo do painel)
+    UiRect plus;     // o + (offsets)
+};
+inline HierHeaderRects hierHeaderRects(f32 panelW) {
+    const f32 hdrBtn = kHeaderH;   // 28dp — o alvo é a LINHA do cabeçalho
+    HierHeaderRects r;
+    r.plus = {panelW - kPad - hdrBtn, 0.0f, hdrBtn, hdrBtn};
+    r.dots = {r.plus.x - hdrBtn, 0.0f, hdrBtn, hdrBtn};
+    r.titleX = kPad;
+    // o título vive entre o padding e 8dp antes do ⋮ (o MESMO respiro
+    // do hierChipSlot); em painel estreito o budget encolhe e o título
+    // ELIPSA — os botões NUNCA perdem o lugar nem cobrem o título
+    r.titleMaxW = r.dots.x - theme::dp(8.0f) - kPad;
+    if (r.titleMaxW < 0.0f) {
+        r.titleMaxW = 0.0f;
+    }
+    return r;
+}
+
 // GRUPO D (0.9.6.7) — DIVISORES arrastáveis hierarquia|viewport|inspector.
 // Pegas de arrasto (o padrão da pega do drawer): strip VISUAL de 12dp na
 // borda do painel + zona de toque de 20dp (12 do strip + 8 de folga PARA

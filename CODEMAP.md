@@ -50,7 +50,10 @@ Atualizado: 2026-10-18 · vc: 83
   PNG do impostor sob demanda — o pico de RAM é UM bloco, R-041),
   AstcCompressor/Etc2Compressor + vendor/.
 - **app/src/main/cpp/ui/** — a apresentação: EditorUi, EditorLayout.h (as
-  constantes — InspRow, as faixas k*Base), UiContext (com as primitivas
+  constantes — InspRow, as faixas k*Base; **0.12-C C-1**: hierHeaderRects
+  — a FONTE ÚNICA da geometria do cabeçalho da hierarquia: o título com
+  budget que ELIPSA + o ⋮ e o + à direita, o draw e os pins partilham),
+  UiContext (com as primitivas
   do cristal da 0.11-Y: panelRoundedGradientV / glassTopLine /
   focusGlow + o QuadBatch::quadGradientV), UiEditor (as ops
   de árvore PURAS), Theme.h (as ÚNICAS cores — a tabela 0.11-Y: o poço
@@ -58,7 +61,8 @@ Atualizado: 2026-10-18 · vc: 83
   (o chrome do viewport — o TOOLTIP do gizmo 0.12-A: legendTimer/
   legendArm no EditorState; o draw ganhou `dt, in` trailing),
   SafeArea.h (os rects puros — `scissor3dRect()` NOVO na 0.12-A: o
-  scissor do pass 3D no modo UI),
+  scissor do pass 3D no modo UI; **0.12-C C-1**: kHierPct=0.20 — a
+  hierarquia 20% e o viewport ≥60% por defeito),
   BottomPanel, SettingsPage, ScriptEditor, DocsScreen, Gizmo, hierarquia.
   **0.12-B (a árvore de UI)**: app/src/main/cpp/ui/UiRuntime.h/.cpp tem
   a VISTA da árvore (UiTreeView + collectUiTree — o espelho UiCanvas
@@ -134,6 +138,8 @@ Atualizado: 2026-10-18 · vc: 83
   toast), test_012b_cenas.cpp (os pins da B-4: cena_rename/
   cena_duplicate/cena_delete_confirm — o 2-tap, M-B4a — e
   cena_serializa — o manifesto round-trip no FakeStorage),
+  test_012c_paineis.cpp (os pins da 0.12-C C-1: viewport_60_pct/
+  painel_colapsado_default/hierarquia_cabecalho/divisor_drag),
   test_voni.cpp, test_bench.cpp,
   test_gmeshv3.cpp, voni_refgen.cpp (o gerador da referência), c33_virtual.cpp
   (o dispositivo virtual), bench_ram_curve.cpp (A-4: a curva 50k…12,3M

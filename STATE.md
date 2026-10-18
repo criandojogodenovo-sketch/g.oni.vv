@@ -1,10 +1,9 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-18 · vc: 86 · Último commit: este (o 0.12-B B-4, O
-SELETOR DE CENAS COM AÇÕES — o renomear com o teclado in-app, o
-duplicar com nome único, o apagar 2-TAP, os 4 pins; antes: f722deb o
-B-3, O CANVAS; antes: 813b491 o B-2, O INSPECTOR DE UI; antes: 032ea2d
-o B-1, A ÁRVORE DE UI)
+Atualizado: 2026-10-18 · vc: 87 · Último commit: este (o 0.12-C C-1, AS
+PROPORÇÕES E OS PAINÉIS — a hierarquia 20%, o viewport ≥60% por defeito,
+o cabeçalho da hierarquia em linha própria, os 4 pins; antes: e8c9587
+o 0.12-B B-4-fix; antes: dcd8907 o B-4, O SELETOR DE CENAS)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -12,6 +11,19 @@ o B-1, A ÁRVORE DE UI)
 
 ## §1 Onde estamos
 
+- **Campanha 0.12-C (layout, organização e consistência) — EM CURSO
+  (C-1 fechada; C-2..C-4 na ordem do prompt)**: a cláusula da campanha é
+  anti-superficialidade — nada de controlos «de fachada»; se um botão
+  não faz nada, sai.
+  **C-1 (as proporções e os painéis, vc 87)**: a hierarquia 20% (era 18%
+  — a ordem do dono), o viewport ≥60% por defeito (o trilho de 32dp é o
+  estado de fábrica; o piso ≥55% da R-033 mantém-se COM seleção nos
+  ecrãs estreitos), o cabeçalho da hierarquia em linha própria
+  (hierHeaderRects — o título elipsa, nunca sobrepõe as ações) e os 4
+  pins novos (test_012c_paineis.cpp) + M-C1a/M-C1b vermelho→verde. SEM
+  sentinela nova (os pins aferram). Os DETALHES no RELATORIO-0.12-C.md
+  §1. **C-2..C-4** (menus/topbar · tipografia/idioma/superfícies · seletor
+  + estados vazios) na ordem do prompt — PARAR no fim da C-4.
 - **Campanha 0.12-B (arquitetura da UI) — FECHADA (B-1..B-4)** (o CI do
   push é o árbitro; os DETALHES vivem no RELATORIO-0.12-B.md).
   **B-4 (o seletor de cenas com ações, vc 86)**: as 3 ações POR LINHA no

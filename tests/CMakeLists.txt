@@ -95,6 +95,7 @@ add_executable(test_core
         test_012b_inspui.cpp   # 0.12-B (B-2): os pins do Inspector de UI (2D + âncoras)
         test_012b_canvas.cpp   # 0.12-B (B-3): os pins do canvas (a moldura + as guias + o toast)
         test_012b_cenas.cpp   # 0.12-B (B-4): os pins do seletor de cenas (as ações)
+        test_012c_paineis.cpp   # 0.12-C (C-1): os pins das proporções e painéis
         # 0.7.1: cenas múltiplas + transições (projeto e2e, SceneFx puro,
         # overlay CENAS, ações Scene.Load/Transition)
         test_scenes.cpp

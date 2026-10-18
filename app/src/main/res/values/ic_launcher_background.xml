@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- 0.11-Y · Y-0: o fundo SÓLIDO do ícone adaptativo — #08080A, a ordem
-     expressa do dono (o tom do canvas do ícone novo, docs/iconegonevv.png).
-     O foreground (o G em chama) vive em mipmap-*/ic_launcher_foreground.png;
-     a composição adaptativa vive em mipmap-anydpi-v26/ic_launcher.xml. -->
-<resources>
-    <color name="ic_launcher_background">#08080A</color>
-</resources>

@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- 0.11-Y · Y-0: o ROUND adaptativo — idêntico ao ic_launcher.xml (a
-     mesma dupla fundo #08080A + foreground); os launchers que pedem o
-     roundIcon recebem o MESMO G em chama — a máscara circular é deles. -->
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@color/ic_launcher_background"/>
-    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-</adaptive-icon>
