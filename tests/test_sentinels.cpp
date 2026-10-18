@@ -2821,12 +2821,12 @@ TEST(regress_orcamento_gangorra) {
                    "/ 22%% (teto 260)", b.hier, b.insp);
         EXPECT(1512.0f - b.hier - b.insp >= 1512.0f * 0.55f - 0.01f);
     }
-    // ---- (b) o DEVICE (776dp): os percentuais caem NOS PISOS — hier 140
-    // (18% = 139,7) · insp 180 (22% = 170,7) · o viewport fica 456dp
-    // (58,8% ≥ 55% — o critério a; eram 288dp/37,1% no PASSO 1)
+    // ---- (b) o DEVICE (776dp): 0.12-C (C-1) — a hierarquia 20% (era 18%)
+    // já NÃO cai no piso 140 (20% = 155,2); o insp 22% = 170,7 cai no piso
+    // 180 · o viewport fica 440,8dp (56,8% ≥ 55% — o critério a)
     {
         const safe::PanelBudget b = safe::resolvePanels(776.0f, -1.0f, -1.0f);
-        EXPECT(nearEqF(b.hier, theme::dp(safe::kHierMinW)));   // 140 (o piso)
+        EXPECT(nearEqF(b.hier, 776.0f * safe::kHierPct));   // 155,2 (20%)
         EXPECT(b.insp >= theme::dp(safe::kInspMinW) - 0.01f &&
                b.insp <= theme::dp(safe::kInspMaxW) + 0.01f);   // [180..260]
         EXPECT(776.0f - b.hier - b.insp >=
@@ -2861,11 +2861,10 @@ TEST(regress_orcamento_gangorra) {
     {
         const safe::PanelBudget b = safe::resolvePanels(776.0f, -1600.0f,
                                                         -1600.0f);
-        EXPECT(nearEqF(b.hier, theme::dp(safe::kHierMinW)));   // clamp, n default
-        // hmm: raw -1600 é «negativo» → default... o CONTRATO é: só −1
-        // (ou qualquer <0) é default; o DRAG nunca escreve <0 (o snap
-        // guarda 0) — a hierarquia default do par é 140 no device (PASSO 2):
-        EXPECT(nearEqF(b.hier, 140.0f));
+        // raw < 0 é DEFAULT (não é clamp): o par negativo devolve o default
+        // de fábrica — 20% no device (0.12-C C-1: 776 × 0,20 = 155,2; o
+        // piso 140 já não manda no default):
+        EXPECT(nearEqF(b.hier, 776.0f * safe::kHierPct));
     }
     // ---- (e) o DRAWER nunca come o editor: o clamp deixa a faixa da
     // toolbar do viewport VIVA (BottomPanel::layout) — no device o
@@ -3255,17 +3254,24 @@ TEST(regress_divisores_arrastaveis) {
             EXPECT(r.x + r.w <= 200.0f + 288.0f + 0.01f);
             EXPECT(r.y + r.h <= 56.0f + 208.0f + 0.01f);
         }
-        // a degradação HONESTA: um rect SUB-mínimo ESCONDE o rail (a fila
-        // do topo e os cantos ficam — cabem no piso da casa)
+        // a degradação HONESTA: um rect SUB-mínimo ESCONDE o rail. A fila
+        // do topo CABE (0.12-C C-2: o gizmo do canto SAIU — a fila respira
+        // até à borda: 8+184+8 = 200dp no rect de 200; antes o gizmo
+        // empurrava-a para fora e ela ESCONDEIA). O gizmo fica rect ZERO
+        // (o pin mover_unico aferra) e a fila DENTRO do rect (nada sangra)
         const editor::vpchrome::Layout ltiny =
             editor::vpchrome::layout(UiRect{200.0f, 56.0f, 200.0f, 60.0f});
         EXPECT(!ltiny.railVisible);
-        // o rect de 200×60 não dá nem para a fila do topo ao lado do rail
-        // nem para a fila abaixo de um rail inexistente — a fila ESCONDE
-        // (0.12-C (C-2): o gizmo do canto SAIU com o duplicado do Mover —
-        // os rect ZERO; o canto direito fica TOTALMENTE limpo, o mesmo
-        // tratamento do [+] do D21)
-        EXPECT(ltiny.quick[0].w == 0.0f && ltiny.gizmoBtn.w == 0.0f);
+        EXPECT(ltiny.gizmoBtn.w == 0.0f);
+        EXPECT(ltiny.quick[0].w > 0.0f);
+        for (int qi = 0; qi < 4; ++qi) {
+            EXPECT(ltiny.quick[qi].x >= 200.0f - 0.01f);
+            EXPECT(ltiny.quick[qi].x + ltiny.quick[qi].w <=
+                   200.0f + 200.0f + 0.01f);
+            EXPECT(ltiny.quick[qi].y >= 56.0f - 0.01f);
+            EXPECT(ltiny.quick[qi].y + ltiny.quick[qi].h <=
+                   56.0f + 60.0f + 0.01f);
+        }
     }
 }
 
@@ -3758,10 +3764,11 @@ TEST(regress_identidade_grafite_ambar) {
             // nenhum chrome com B−R > 25/255
             EXPECT((chrome[i][2] - chrome[i][0]) * 255.0f <= 25.0f);
         }
-        // os valores EXATOS da rampa (a decisão do dono — spec G 0.9.6.10,
-        // o poço 0.11-Y)
-        EXPECT(nearEqF(theme::kTheme.bg[0], 8.0f / 255.0f, 1e-4f));
-        EXPECT(nearEqF(theme::kTheme.surface[0], 21.0f / 255.0f, 1e-4f));
+        // os valores EXATOS da rampa (a decisão do dono — 0.12-C C-3: a
+        // ESCADA DE SUPERFÍCIES supera o poço da Y-1, o padrão Y-3/D11:
+        // fundo #0A0A0C · painel #131316)
+        EXPECT(nearEqF(theme::kTheme.bg[0], 10.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.surface[0], 19.0f / 255.0f, 1e-4f));
     }
 
     // ---- (2) O ÂMBAR: quente, com tinta escura e press mais escuro -----
@@ -3854,10 +3861,11 @@ TEST(regress_identidade_grafite_ambar) {
         theme::blendOver(cinza, preto, out);
         EXPECT(nearEqF(out[0], 0.25f, 1e-5f));   // 50% cinza s/ preto
         // o composto do painel da hierarquia sobre o clear (o valor que a
-        // FASE 13.10 afere no PNG: 0.80·22+0.20·14 = 20.4 → 20)
+        // FASE 13.10 afere no PNG; 0.12-C C-3: 0.80·19+0.20·10 = 17.2 com
+        // a ESCADA nova — era 0.80·21+0.20·8 = 18.4 no poço da Y-1)
         f32 painel[4];
         theme::blendOver(theme::kTheme.surface, theme::kTheme.bg, painel);
-        EXPECT(nearEqF(painel[0], 20.4f / 255.0f, 0.01f));
+        EXPECT(nearEqF(painel[0], 17.2f / 255.0f, 0.01f));
     }
 
     // ---- (6) OS ALIASES LIGADOS (a fonte única bit-a-bit) ----------------

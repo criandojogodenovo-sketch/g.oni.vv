@@ -82,6 +82,20 @@ struct HierHeaderRects {
     UiRect dots;     // o ⋮ (offsets; y = topo do painel)
     UiRect plus;     // o + (offsets)
 };
+// 0.12-C (C-4) — o convite do vazio da HIERARQUIA (a FONTE ÚNICA — o draw
+// e o pin empty_hierarquia partilham): a LADDER mede ao vivo (o mais
+// comprido que caiba; no piso 140dp sai «+ cria um TIC» — nunca reticência
+// num convite). A MENSAGEM aponta para o + e o + fica VISÍVEL no cabeçalho
+// (hierHeaderRects — o pin aferra os DOIS lados do contrato)
+inline const char* hierEmptyInvite(bool searching, bool fitsFull,
+                                   bool fitsMid) {
+    if (searching) {
+        return fitsFull ? "nenhum TIC com esse nome" : "sem resultados";
+    }
+    return fitsFull ? "sem TICs - toca em + para criar"
+                    : (fitsMid ? "toca em + para criar" : "+ cria um TIC");
+}
+
 inline HierHeaderRects hierHeaderRects(f32 panelW) {
     const f32 hdrBtn = kHeaderH;   // 28dp — o alvo é a LINHA do cabeçalho
     HierHeaderRects r;
@@ -889,6 +903,69 @@ constexpr u64 kBrowserCloseId  = 6899;
 constexpr u64 kApplyYesId      = 6900;
 constexpr u64 kApplyNoId       = 6901;
 constexpr u64 kBrowserScrollId = 45;   // região de scroll da lista
+// 0.12-C (C-4) — o picker: o CAMPO de pesquisa (propósito 10) + os
+// SEGMENTOS do breadcrumb (o salto para a pasta do segmento)
+constexpr u64 kBrowserSearchId = 6902;
+constexpr u64 kBrowserCrumbBase = 6910;   // 6910..6915 (6 segmentos basta)
+// o IMPORTAR do estado vazio dos Assets (o drawer, tab 2)
+constexpr u64 kAssetsImportId = 6920;
+// o CRIAR TIC do estado vazio do Inspector (abre o plusMenu de presets)
+constexpr u64 kInspCreateTicId = 6921;
+
+// 0.12-C (C-4) — A FONTE ÚNICA da GEOMETRIA da folha do NAVEGADOR (o draw
+// e os pins partilham — o padrão menuSheetLayout da C-2). O card 92% com o
+// teto 900dp, CENTRADO na ÁREA ÚTIL (a safe-area respeitada: o card nunca
+// entra nos insets), a LINHA 48dp do dono e a ordem vertical:
+// breadcrumb → pesquisa → raízes → subir → lista (o Subir FIXO fora do
+// scroll — a regra do dono).
+struct BrowserSheetLayout {
+    f32 x, y, w, h;        // o card
+    f32 rowH;              // 48dp — a linha do dono (raízes/subir/linhas)
+    f32 crumbY, crumbH;    // a linha do BREADCRUMB (os segmentos saltam)
+    f32 searchY, searchH;  // o campo de pesquisa (40dp)
+    f32 rootsY;            // os atalhos (a linha de raízes)
+    f32 upY;               // o Subir (FIXO — nunca desliza com a lista)
+    f32 listTop;           // o topo da lista (dentro do card)
+};
+inline BrowserSheetLayout browserSheetLayout(f32 sw, f32 sh, f32 safeL,
+                                             f32 safeT, f32 safeR, f32 safeB,
+                                             f32 hdrH, u32 nRows) {
+    BrowserSheetLayout r;
+    const f32 aw = sw - safeL - safeR;
+    const f32 ah = sh - safeT - safeB;
+    const f32 rowH = theme::dp(48.0f);   // A LINHA do dono (~48dp)
+    r.rowH = rowH;
+    const f32 w = aw * 0.92f > theme::dp(900.0f) ? theme::dp(900.0f)
+                                                 : aw * 0.92f;
+    // o conteúdo FIXO da folha (título + breadcrumb + pesquisa + raízes +
+    // subir + folga) — a LISTA encolhe para caber e o SCROLL revela o
+    // resto (a regra D14 do menu: a folha nunca sai do contentRect)
+    const f32 fixH = hdrH + theme::dp(6.0f) + theme::dp(30.0f) +
+                     theme::dp(6.0f) + theme::dp(40.0f) + theme::dp(6.0f) +
+                     rowH + theme::dp(4.0f) + rowH + theme::dp(4.0f);
+    // no máx. 8 linhas VISÍVEIS (o scroll mostra as outras — o picker fica
+    // COMPACTO mesmo numa pasta cheia)
+    const f32 shown = static_cast<f32>(nRows < 8u ? nRows : 8u);
+    const f32 maxH = ah - theme::dp(16.0f);
+    f32 h = fixH + shown * rowH;
+    if (h > maxH) {
+        h = maxH > fixH ? maxH : fixH;   // ecrã minúsculo: a lista é que cede
+    }
+    r.w = w;
+    r.h = h;
+    r.x = safeL + (aw - w) * 0.5f;
+    r.y = safeT + (ah - h) * 0.5f > safeT + theme::dp(8.0f)
+              ? safeT + (ah - h) * 0.5f
+              : safeT + theme::dp(8.0f);
+    r.crumbY = r.y + hdrH + theme::dp(6.0f);
+    r.crumbH = theme::dp(30.0f);
+    r.searchY = r.crumbY + r.crumbH + theme::dp(6.0f);
+    r.searchH = theme::dp(40.0f);
+    r.rootsY = r.searchY + r.searchH + theme::dp(6.0f);
+    r.upY = r.rootsY + rowH + theme::dp(4.0f);
+    r.listTop = r.upY + rowH + theme::dp(4.0f);
+    return r;
+}
 
 // presets de ELEMENTO no "+" do modo UI (mesma faixa 20+i do menu de TICs —
 // os menus são mutuamente exclusivos: o + abre um OU outro conforme o modo)

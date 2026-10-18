@@ -1,6 +1,6 @@
 # CODEMAP.md — onde vive o quê
 
-Atualizado: 2026-10-18 · vc: 83
+Atualizado: 2026-10-18 · vc: 90
 
 > Convenção de paths: TODOS os caminhos deste ficheiro são relativos à
 > RAIZ do repo (exemplo: o registo da linguagem vive em
@@ -55,7 +55,10 @@ Atualizado: 2026-10-18 · vc: 83
   budget que ELIPSA + o ⋮ e o + à direita, o draw e os pins partilham;
   **0.12-C C-2**: menuSheetLayout — a FONTE ÚNICA do sheet do menu
   principal: a altura máxima + o maxOffset do scroll + a âncora 8dp com
-  clamp),
+  clamp; **0.12-C C-4**: browserSheetLayout — a FONTE ÚNICA da folha do
+  NAVEGADOR (a linha 48dp, a ordem breadcrumb→pesquisa→raízes→Subir
+  FIXO→lista, o card 92%/900dp dentro da safe-area) + hierEmptyInvite —
+  a LADDER do convite do vazio da hierarquia),
   UiContext (com as primitivas
   do cristal da 0.11-Y: panelRoundedGradientV / glassTopLine /
   focusGlow + o QuadBatch::quadGradientV), UiEditor (as ops
@@ -71,7 +74,11 @@ Atualizado: 2026-10-18 · vc: 83
   ViewportChrome **0.12-C C-2**: o GIZMO 40dp do canto REMOVIDO (o
   duplicado do Mover — o kVpGizmoId fica APOSENTADO como o kVpAddTicId do
   D21; os rects do layout são ZERO e o pin mover_unico aferra),
-  BottomPanel, SettingsPage, ScriptEditor, DocsScreen, Gizmo, hierarquia.
+  BottomPanel (com o emptyStateIcon(tab) da **0.12-C C-4** — a FONTE
+  ÚNICA do ícone do estado vazio por tab: o vazio usa o glifo da
+  PRÓPRIA função; o IMPORTAR do vazio dos Assets liga o
+  Actions::importPressed e o main abre o navegador na Download),
+  SettingsPage, ScriptEditor, DocsScreen, Gizmo, hierarquia.
   **0.12-B (a árvore de UI)**: app/src/main/cpp/ui/UiRuntime.h/.cpp tem
   a VISTA da árvore (UiTreeView + collectUiTree — o espelho UiCanvas
   alimenta o draw/hit/layout de 0.7.x; o joystick tem rect DERIVADO do
@@ -110,7 +117,10 @@ Atualizado: 2026-10-18 · vc: 83
   (a compat: migrateUiCanvasToTree no SceneSerializer converte para a
   árvore no load).
 - **app/src/main/cpp/platform/** — Android: main.cpp (a despachante —
-  ANativeActivity, o ciclo por frame, drawTics), EngineLog, JNI glue.
+  ANativeActivity, o ciclo por frame, drawTics), EngineLog, JNI glue,
+  FileApi **0.12-C C-4**: o listDirEntries OCULTA as pastas ponto
+  (as DIRETORIAS que começam por ponto saem; os ficheiros ponto ficam —
+  a decisão 0.8.5 intacta).
   **0.12-B**: o "+" em modo UI cria pela ÁRVORE (uiAddTreeElement/
   uiAddTreeJoystick); o Play arma/aplica os botões da árvore
   (hitTestUiTree/uiElementFromHit) e desenha a árvore + TODOS os
@@ -153,6 +163,10 @@ Atualizado: 2026-10-18 · vc: 83
   test_012c_idioma.cpp (os pins da 0.12-C C-3: escala_tipografica — o
   scan dos fontes com o strip do gate/idioma_consistente/maiusculas_
   uniformes/superficies_4_tons),
+  test_012c_picker.cpp (os pins da 0.12-C C-4: picker_compacto/
+  picker_breadcrumb/picker_oculta_dot/empty_inspector/empty_assets/
+  empty_hierarquia/icones_unicos — o 8.º, empty_projetos, é o gate
+  projects_ui_check.py),
   test_voni.cpp, test_bench.cpp,
   test_gmeshv3.cpp, voni_refgen.cpp (o gerador da referência), c33_virtual.cpp
   (o dispositivo virtual), bench_ram_curve.cpp (A-4: a curva 50k…12,3M

@@ -229,3 +229,146 @@ RELATORIO-0.9.6.md) + projects_ui_check VERDE + theme_hex_check VERDE
       (12/14/16/20), o idioma é PT consistente («Exportar para
       Downloads», «N TICs», «Áudio»), as superfícies têm 4 níveis visíveis
       e a borda âmbar separa os painéis — PNG.
+
+## 4. SUB-FASE C-4 — Seletor de ficheiros + estados vazios (versionCode 90)
+
+### 4.1 O que o prompt pedia e onde ficou
+
+| Pedido (C-4) | Onde ficou (fonte única) |
+|---|---|
+| Linhas ~48dp | `browserSheetLayout()` (ui/EditorLayout.h — a FONTE ÚNICA da geometria da folha, o draw e os pins partilham — o padrão menuSheetLayout da C-2): rowH = 48dp para raízes/subir/linhas |
+| Ícone à esquerda / nome alinhado à esquerda / seta à direita | as linhas do picker redesenhadas (ui/UiEditor.cpp drawFileBrowser): o ÍCONE de função à esquerda (pasta/mesh/imagem/áudio/desconhecido), o nome text1 alinhado à esquerda (os prefixos de texto «mesh:»/«tex:»/«/» morreram — o glifo diz o que era), o ChevronRight SÓ nas diretorias (ficheiros importam, não abrem) |
+| Breadcrumb | `browserCrumbs()` NOVA (ui/UiEditor.h — a FONTE ÚNICA dos pares rótulo/prefixo): o 1.º segmento é o rótulo da raiz casada (Raiz/Download/Docs/Camera/Pictures/Music), os restantes os componentes; os ANTECESSORES são ALVOS reais que saltam para a pasta (o main despacha pelo crumbPickOut — o breadcrumb NÃO é enfeite; o segmento ATUAL é texto accent, sem alvo); transbordo mostra os ÚLTIMOS segmentos com «…» |
+| «Subir» fixo | a linha de 48dp vive FORA do scroll (entre as raízes e a lista); o pin picker_compacto aferra `upY + rowH ≤ listTop` |
+| Pesquisa | o CAMPO 40dp na folha (kBrowserSearchId): o toque abre o teclado in-app no PROPÓSITO 10 (o título «PESQUISAR FICHEIROS»; o commit é puro — `EditorState::browserSearch`); o FILTRO é a função pura `browserFilterEntries()` (case-insensitive sobre o NOME; consulta vazia = a lista completa); o pick devolve o ÍNDICE ORIGINAL (o main despacha sobre o vetor cru — nunca dois mundos) |
+| Ocultar pastas ponto | o FILTRO entra no `listDirEntries` (platform/FileApi.cpp — a FONTE ÚNICA da listagem): as DIRETORIAS que começam por ponto SAEM (.thumbnails/.android); os FICHEIROS ponto ficam (a decisão 0.8.5 «todos os ficheiros entram» não se reabre) |
+| Safe-area padding | o card 92%/900dp nasce de `browserSheetLayout(sw, sh, safeL, safeT, safeR, safeB, …)` — centrado NA ÁREA ÚTIL, nunca nos insets (o pin mede 3 ecrãs) |
+| Vazio do Inspector: mensagem + ação | o «Nada selecionado» ganha o botão «+ criar TIC» (kInspCreateTicId) que abre O MESMO plusMenu de presets do + da hierarquia (ui/EditorUi.cpp drawInspector — o st.plusMenu é o estado que o main já despacha) |
+| Vazio dos Assets: botão Importar | mensagem «sem ficheiros no projeto» + o botão IMPORTAR (kAssetsImportId) ANCORADO AO FUNDO da grelha → `Actions::importPressed` → o main abre o NAVEGADOR na pasta Download (a kImportDirs[0]); com FILTRO de pasta ativo não há botão (o convite é limpar o filtro — o chip lá em cima já o faz) |
+| Vazio da Hierarquia | JÁ existia (o ícone Scene + o convite que aponta o +); a LADDER do convite extraída para `hierEmptyInvite()` (ui/EditorLayout.h — o draw e o pin partilham); o pin aferra os DOIS lados: o convite menciona o + e o + fica VISÍVEL no cabeçalho (hierHeaderRects) |
+| Vazio dos Projetos: G fraco + CTA | o espelho Java (ProjectManagerActivity.java): o glifo da marca no vazio passa de ACCENT a BORDER (o âmbar a 25% — o G não compete com o CTA) e o emptyBox ganha o BOTÃO «Novo projeto» (o MESMO askNewProject do cabeçalho) |
+| Ícones únicos por função | a LUPA voltou a ser SÓ «pesquisar» (as texturas do picker usam o Image NOVO — Icons.h/.cpp: moldura+sol+serra); o vazio dos Assets usa o BOX (a função da tab — usava a PASTA, o glifo dos Ficheiros); a FONTE ÚNICA `bottom::emptyStateIcon(tab)` alimenta os três vazios do drawer |
+
+### 4.2 Os achados (os bugs reais sob o pedido)
+
+1. **O gesto de rolar IMPORTAVA o ficheiro debaixo do dedo** — a 1.ª versão
+   das linhas novas usava `widgetHit` no loop: dentro de uma região de
+   scroll o PRESS dispararia no frame em que o dedo TOCA (o gesto de
+   rolar começaria um import). A cura é o padrão da casa (a fila da
+   hierarquia): o alvo da linha é SÓ o re-despacho do `scrollTap` — o
+   toque dispara no LARGAR e um arrasto é um arrasto.
+2. **O claim ADIADO do scroll comia o botão IMPORTAR** — com a lista
+   VAZIA a grelha abria MESMO ASSIM a região de scroll (contentH 8dp); o
+   endScroll resolve o claim pendente a favor do SCROLL (active_ = o id
+   do scroll) e o botão desenhado a seguir nunca capta o gesto. A cura:
+   lista vazia = SEM região de scroll (nada para rolar) — o estado vazio
+   é dono do próprio gesto.
+3. **O IMPORTAR não cabia no drawer de 240dp** — a banda de 72% da grelha
+   deixava o botão fora (a guarda não o desenhava). A cura: o botão
+   ANCORA-SE AO FUNDO da grelha e a banda da mensagem é o que sobra —
+   existe em TODA altura de drawer.
+4. **O vazio dos Assets mostrava o glifo dos Ficheiros** — a PASTA no
+   vazio dos Assets é o conflito função/glifo que o pin icones_unicos
+   vigia (a M-C4b reverte-a e o pin grita).
+5. **O achado da REPARAÇÃO (fora da lista da C-4, curado nesta sub-fase)**:
+   os commits da C-1..C-3 entraram de uma árvore INCOMPLETA e empurraram
+   614 deleções (a engine inteira — core/render/voni/tests/CI) para o
+   repo; a árvore completa voltou do e8c9587 (o fecho da 0.12-B) e as
+   6 recalibrações que a C-1..C-3 não tinham conseguido ver (os ficheiros
+   não estavam na árvore da sessão) entraram: test_toolbar
+   (theme_tabela_spec_g_exata), test_sentinels (regress_identidade_
+   grafite_ambar + regress_orcamento_gangorra + regress_divisores_
+   arrastaveis), test_wiring086 (os rects pela MESMA resolução — o
+   padrão test_timeline da C-2), c33_virtual (13.7 ×3, 15.6, 18.1 + os
+   VALIDADOR INTEIRO ×4) e a flag fitByDesign no título da hierarquia
+   (a elipse da C-1 É o desenho — o padrão PASSO 2 do nome de linha).
+
+### 4.3 Os pins (tests/test_012c_picker.cpp + o gate Java)
+
+1. **picker_compacto** — a linha 48dp a densidade 2.0; o card DENTRO da
+   área útil nos 3 ecrãs (landscape+nav, device estreito, retrato); ≤8
+   linhas visíveis (50 entradas → a lista encolhe, o scroll revela); a
+   ORDEM vertical breadcrumb→pesquisa→raízes→subir→lista; o Subir FIXO
+   (`upY + rowH ≤ listTop`); o campo de pesquisa 40dp.
+2. **picker_breadcrumb** — os segmentos do caminho da raiz (Raiz/Download/
+   sub: rótulos + prefixos; todo o path de segmento é PREFIXO do cwd); o SALTO no draw:
+   o toque no 1.º segmento sai pelo crumbPickOut == 1, nenhuma linha
+   escolhida e o picker NÃO fecha.
+3. **picker_oculta_dot** — a árvore de teste com .thumbnails/.android/
+   Download/.nomedia/modelo.obj: a listagem dá 1 diretoria (a normal),
+   ZERO pastas ponto, o .obj e o FICHEIRO ponto ficam (a decisão 0.8.5).
+4. **empty_inspector** — o painel aberto (pin P2-bis) com a cena vazia:
+   antes do toque o plusMenu está fechado; o toque no «+ criar TIC»
+   (a MESMA fórmula do draw) ABRE o plusMenu de presets.
+5. **empty_assets** — a tab 2 com o catálogo vazio: antes do toque nada;
+   o toque no IMPORTAR (ancorado ao fundo — a MESMA fórmula) liga o
+   Actions::importPressed.
+6. **empty_hierarquia** — a LADDER hierEmptyInvite (os 3 degraus + os 2
+   da pesquisa, TODOS a apontar o + quando é o caso) e o + VISÍVEL no
+   cabeçalho nos 140/220/300dp (o extremo direito, o ⋮ imediatamente à
+   esquerda — a fonte hierHeaderRects).
+7. **icones_unicos** — as 4 TABS do drawer pairwise distintas; o vazio
+   usa o glifo da PRÓPRIA função (emptyStateIcon: 1→Folder, 2→Box,
+   4→Clapper; 2 ≠ 1); as 5 linhas do picker pairwise distintas e a LUPA
+   fora delas; o glifo Image NOVO existe com segmentos próprios e o
+   iconByName("imagem") resolve.
+8. **empty_projetos** (o gate scripts/projects_ui_check.py — o espelho
+   Java não roda na suíte host, o padrão da C-3): o G do vazio FRACO
+   (BrandView com BORDER) e o CTA ligado ao askNewProject.
+
+### 4.4 As mutações (coladas)
+
+- **M-C4a** — as pastas ocultas de volta (o filtro do listDirEntries
+  morto com um `if (false && …)`). Resultado: **picker_oculta_dot
+  VERMELHA (2 EXPECTs** — «nDirs == 1u» e «nDotDirs == 0u»; as 6 irmãs
+  VERDES — o isolamento provado). Reposto → verde.
+- **M-C4b** — o vazio dos Assets volta à PASTA (o glifo dos Ficheiros:
+  `case 2: return icons::Icon::Folder;`). Resultado: **icones_unicos
+  VERMELHA (2 EXPECTs** — «emptyStateIcon(2) == Box» e
+  «emptyStateIcon(2) != emptyStateIcon(1)»; as 6 irmãs VERDES). Reposto
+  → verde.
+
+### 4.5 Verificação
+
+- test_core: 0 falhas nos grupos afetados — browser_ · wiring085_ ·
+  wiring087_ · 012c_ · uieditor_ · bottom/files (os pins das tabs) ·
+  regress_ · wiring090_ (a unicidade dos glifos) · hierarquia_ ·
+  inspector_ + os 7 pins novos. (Os 2 flakes conhecidos da sandbox
+  correm fora: regress_streaming_paralelo — a corrida latente §7 do
+  STATE.md — e sentinela_r039/o bloco 920 — pressão de DISCO/RAM da
+  sandbox; o CI é o árbitro, regra §5.)
+- c33_virtual: **1005 checks, 0 falhas** — inclui as recalibrações da
+  reparação (13.7 hierarquia 20% + os alvos escondidos com o rect ZERO,
+  15.6 o thumb 256×143 com o viewport mais estreito, 18.1 o sheet é O
+  ELEVADO opaco) e o 12.8b pela FONTE ÚNICA (o tap do par .gltf+.bin
+  vem da browserSheetLayout — o re-despacho do scroll).
+- theme_hex_check VERDE · ui_vocab_check VERDE · hierarchy_check VERDE ·
+  projects_ui_check VERDE (com o 2c novo).
+
+### 4.6 Pin C33 (o dono no device)
+
+- [ ] Abrir o picker (o «importar…» de um seletor ou o IMPORTAR do vazio
+      dos Assets): as linhas com ícone/nome/seta, o breadcrumb salta para
+      a pasta tocada, o «Subir» fica FIXO enquanto a lista rola, a
+      pesquisa filtra (o campo abre o teclado «PESQUISAR FICHEIROS») e
+      as pastas .thumbnails/.android não aparecem — PNG da lista.
+- [ ] Os 4 vazios: o Inspector aberto sem seleção mostra o «+ criar TIC»
+      que abre o menu de presets; os Assets vazios mostram o IMPORTAR que
+      abre o navegador; a Hierarquia vazia aponta o + e ele está no
+      cabeçalho; os Projetos sem nada mostram o G fraco e o botão «Novo
+      projeto» que abre o diálogo do nome — PNG de cada.
+- [ ] Os glifos: nenhuma função partilha ícone com outra (a lupa só no
+      campo de pesquisa; as texturas têm o glifo próprio).
+
+### 4.7 Limites (P-04)
+
+1. O vazio da CONSOLA não existe (o log vazio mostra as chips e a linha
+   de comando — o vazio ali seria fachada; a emptyStateIcon devolve o
+   Terminal para o caso 3 mas nada o desenha).
+2. A pesquisa do picker filtra a PASTA ABERTA (não é uma busca
+   recursiva no armazenamento — o alcance do prompt é a lista; uma busca
+   global é outro pedido).
+3. O commit do propósito 10 mantém a consulta entre pastas (procurar em
+   toda a Download é o uso real); limpar é apagar o texto e confirmar —
+   sem botão × próprio (menos um alvo de 8dp).
+4. As PNGs do C33 são do device do dono (a sessão local não tem device).

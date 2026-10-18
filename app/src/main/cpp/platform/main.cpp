@@ -1,0 +1,8572 @@
+// platform/main.cpp — android_main (glue) da G.One VV — F3.
+// Fluxo: glue → EGL/GLES3 (depth 24) → loop de timestep fixo
+//        → TickGroups (Pre→Up→Post→Render; TransformSystem no Update)
+//        → pass 3D (todos os TICs com MeshRenderer + grid, depth test)
+//        → pass UI (toolbar F1 + Hierarchy/Inspector/menus F3, sem depth).
+#include <android_native_app_glue.h>
+#include <android/configuration.h>   // 0.9.6.1 (PASSO 0): AConfiguration_getDensity
+#include <GLES3/gl3.h>
+#include <algorithm>   // 0.11-W (3.5b): stable_sort/find do batch instanciado
+#include <atomic>   // 0.8.10: progresso do import entre threads
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>   // 0.8.11: atof do settings.goni
+#include <cstring>   // 0.8.11: strcmp do probe
+#include <ctime>   // 0.8.11: nome do clip gravado (rec-<unix>.gi)
+#include <map>   // 0.8.11: cache de clipes .gi
+#include <memory>
+#include <mutex>   // 0.8.11: PCM da gravação entre worker e frame
+#include <thread>   // 0.8.10: import job fora do frame loop
+
+#include "assets/AssetConverter.h"   // 0.8.10: import streaming + formatos próprios
+#include "assets/ZipExtract.h"       // 0.8.10: archives (extrair ≠ importar)
+#include "assets/GiFormat.h"         // 0.8.11: clips .gi (ADPCM/OGG/MP3)
+#include "components/AudioPlayer.h"  // 0.8.11: o TIC de áudio
+#include "core/AudioEngine.h"        // 0.8.11: misturador
+#include "platform/AudioOut.h"       // 0.8.11: backend AAudio/AudioTrack
+#include "ui/AudioWorkspace.h"      // 0.8.11: o workspace modo ÁUDIO
+#include "assets/GOwnFormats.h"       // 0.8.10: .gmesh/.gtext/.gm
+#include "assets/ObjExporter.h"
+#include "assets/TextureCache.h"
+#include "assets/TexturePipeline.h"
+#include "assets/TexturePolicy.h"   // 0.10-M (5A): o perfil do projeto
+#include "components/CameraComp.h"   // 0.7.7: câmara de cena
+#include "components/MeshRenderer.h"
+#include "components/TouchControls.h"
+#include "components/Transform3D.h"
+#include "components/AnimationPlayer.h"   // 0.8.0 (F7): animação
+#include "components/SkeletonComp.h"   // 0.8.2 (F7): skinning
+#include "components/UiCanvas.h"   // 0.8.0: tracks de UI
+#include "assets/GltfAnim.h"   // 0.8.1 (F7): clips de animação do glTF
+#include "assets/GltfImporter.h"     // 0.9.6 (G6): parse do GLB do bench
+#include "assets/GltfInstantiate.h"  // 0.9.6 (G6): TIC do mesh importado
+#include "core/Bench.h"              // 0.9.6 (G6 · R-017): benchmarks reais
+#include "core/AnimationSystem.h"   // 0.8.0: avanço em Play
+#include "core/VoniSystem.h"   // 0.9.2: a "central" da V.ONI (spec §3)
+#include "voni/Voni.h"
+#include "voni/VoniRegistry.h"   // 0.9.5: a referência p/ o clipboard
+#include "core/AssetPersist.h"
+#include "core/FsStorage.h"
+#include "core/PlaySnapshot.h"
+#include "core/Presets.h"
+#include "core/Project.h"
+#include "core/SafStorage.h"
+#include "core/Scene.h"
+#include "core/SceneSerializer.h"
+#include "core/Tick.h"
+#include "core/Time.h"
+#include "core/TransformSystem.h"
+#include "core/CameraUtil.h"   // 0.7.7: uma câmara ativa por cena
+#include "physics/InputSource.h"
+#include "physics/PhysicsSystem.h"
+#include "platform/Log.h"
+#include "platform/EngineLog.h"
+#include "platform/BuildInfo.h"   // 0.8.10: identidade (banner/dumps)
+#include "platform/CrashHandler.h"
+#include "platform/EglContext.h"
+#include "platform/FileApi.h"
+#include "platform/InputState.h"
+#include "platform/StorageBridge.h"
+#include "platform/StoragePerm.h"
+#include "platform/ImeQueue.h"   // 0.9.1: fila do IME do sistema + orientação
+#include "render/BlockMesh.h"   // 0.10-M (PASSO 4): render por blocos
+#include "render/Camera.h"
+#include "render/Cube.h"
+#include "render/Grid.h"
+#include "render/GpuAssets.h"
+#include "render/Impostor.h"   // 0.11-W (3.75b): a decisão/matriz/quad do impostor
+#include "render/Mesh.h"
+#include "render/Primitives.h"   // 0.8.0 (F7): primitivas procedurais
+#include "render/Renderer.h"
+#include "render/ThumbPng.h"    // 0.9.0: miniatura do projeto (thumb.png)
+#include "core/SceneBounds.h"   // 0.8.9: AABB da cena → far dinâmico editor+Play
+#include "core/UndoStack.h"    // 0.9.0: undo/redo por snapshot
+#include "ui/EditorUi.h"
+#include "ui/Strings.h"   // 0.9.6.18 (D4a): a tabela localizada (o locale do device)
+#include "ui/Toolbar.h"   // 0.9.0: top bar 56 + tab bar de modo 48 (spec D)
+#include "ui/ViewportChrome.h"   // 0.9.0: stack/toolbar inferior/triad (spec D)
+#include "ui/BottomPanel.h"     // 0.9.0: painel de baixo + status 24dp (spec E/K)
+#include "ui/SettingsPage.h"   // 0.9.0: página de Settings (spec I)
+#include "ui/CamGizmo.h"   // 0.7.7: frustum/handles/câmara de jogo
+#include "ui/Gizmo.h"
+#include "ui/Timeline.h"   // 0.8.0 (F7): editor de timeline da animação
+#include "ui/FontAtlas.h"
+#include "ui/UiContext.h"
+#include "ui/UiEditor.h"   // 0.7.0: editor de UI dedicado (viewport 2D,
+                            // teclado in-app, menu contextual, diálogos)
+#include "ui/UiRuntime.h"  // 0.7.0: runtime da UI criável (draw/hit/ações)
+#include "ui/SceneFx.h"   // 0.7.1: transições de cena (fade/slide)
+
+using namespace vv;
+
+namespace {
+
+EglContext g_egl;
+Renderer   g_renderer;
+FontAtlas  g_font;
+UiContext  g_ui;
+InputState g_input;
+Scene      g_scene;
+Time       g_time;
+bool       g_ready = false;
+
+// ---- F2: viewport 3D -------------------------------------------------------
+Camera g_camera;              // orbit: 1 dedo = yaw/pitch, pinch = zoom (FIXA — F8)
+Mesh   g_cubeMesh;            // cubo procedural (PLACEHOLDER — F5 importa mesh)
+Grid   g_grid;                // grid de chão: quad 4 vértices + shader (F3.1; F8 pode virar gizmo)
+
+// ---- F3: editor ------------------------------------------------------------
+editor::EditorState g_editor;        // seleção + overlays
+TickGroups          g_systems;       // runner (não-dono)
+TransformSystem     g_transformSystem;
+
+// ---- 0.8.0 (F7): ANIMAÇÃO ---------------------------------------------------
+// Sistema no grupo Update (ANTES do TransformSystem: escreve pos/rot/scale
+// e chama updateWorld; o Transform reconfirma). Gate `enabled` como a
+// física — só avança em Play; o preview do editor vive na timeline.
+AnimationSystem     g_animSystem;
+timeline::State     g_timeline;      // scrub/keys/preview entre frames
+
+// ---- 0.8.10 (F8): TROCA DETERMINÍSTICA DE PRIMITIVA — SEM CACHE ----------
+// História (a fonte da intermitência do C33): 0.8.0 criou um cache de
+// meshes GL por assinatura (1 assinatura = 1 objeto partilhado por TODOS
+// os TICs); 0.8.7 deu-lhe cap+evicção+negative-cache; 0.8.9 validou antes
+// do upload. A intermitência SOBREVIVEU ("cubo funciona quase sempre,
+// esfera e cilindro só às vezes") porque TODAS as trocas partilhavam O
+// MESMO caminho de cache — evicção/release/rebind em qualquer ponto podia
+// mexer no mesh de OUTRO TIC. DECISÃO DO DONO (0.8.10): o cache MORRE.
+//
+// Nova regra — um mesh POR MeshRenderer com primOn, um SÓ caminho:
+//   • PEDIDO (pick do seletor, params no Inspector, load, preset):
+//     mr->primOn=true + mr->prim=<assinatura> + mr->mesh=null (PENDENTE);
+//   • PONTO SEGURO do frame (início, ANTES de qualquer submissão GL):
+//     primFlushPending() → primUploadOne(mr) por pendente:
+//       passo=gerador   → makePrimMesh (dados)
+//       passo=validacao → verts>0/idx>0, coords finitas, AABB não degen.
+//       passo=upload    → Mesh::create + SELF-CHECK (contagens pós-upload)
+//       passo=bind      → troca atómica do ponteiro; o ANTIGO vai p/ COVA
+//   • DEFERRED FREE: a cova (g_primGrave) morre no INÍCIO do frame
+//     SEGUINTE (primGraveDig) — os comandos do frame corrente ainda podem
+//     referenciar os buffers antigos; NUNCA se apaga no mesmo frame.
+//   • FALHA em qualquer passo: o mesh ANTERIOR fica (render continua),
+//     seleção intacta, primNeg=true (backoff — o rebind por frame NÃO
+//     insiste: anti retry-storm), log `mesh: troca <de>→<para>
+//     passo=<p> ERRO(<razão>)` + toast no ecrã.
+std::vector<std::unique_ptr<Mesh>> g_primOwners;   // posse: meshes VIVOS
+std::vector<std::unique_ptr<Mesh>> g_primGrave;    // deferred free (1 frame)
+u32  g_primSwapOk  = 0;   // contadores — stress no CI, diagnóstico do dono
+u32  g_primSwapErr = 0;
+
+// ---- F4: física + modo Play ------------------------------------------------
+phys::PhysicsSystem g_physics;       // TickGroup::Physics (só avança em Play)
+
+// 0.9.2 — A CENTRAL V.ONI: dispatcher dos scripts (TickGroup::Update; os
+// runs automáticos só em Play, os do editor vivem até stop). O hook de
+// transição liga às cenas ABAIXO (só depois de g_scenes existir).
+VoniSystem g_voni;
+// F4.2/B3: sandbox do Play — pose de editor capturada ao ENTRAR, restaurada
+// ao SAIR (a simulação é descartada; a física continua a correr só no Play)
+// 0.6.8: o MODO (editor↔play) vive em g_editor.playMode (EditorState) — a
+// transição completa é testável na suíte; o snapshot continua aqui.
+PlaySnapshot        g_playSnap;
+
+
+// ---- F5-A: projeto .goni + storage -----------------------------------------
+// F5.4 (Gestor de Projetos): a raiz é a PASTA ESCOLHIDA pelo utilizador no
+// ecrã inicial (SafStorage sobre o URI de árvore SAF com permissão
+// persistente — cada projeto na sua pasta, sem All Files Access). Sem
+// projeto SAF (lançamento direto/timeout/handshake em baixo) cai no
+// FsStorage app-private (getExternalFilesDir — comportamento 0.6.x).
+// O I/O de FICHEIROS do utilizador (import/export) continua pelo fluxo
+// All Files Access (F5.2) com File API direta — COEXISTE com o SAF.
+std::unique_ptr<ProjectStorage> g_storage;
+Project    g_project;
+bool       g_projectReady = false;   // storage + projeto com cena válida
+
+// ---- F5.2: All Files Access — fluxo de permissão + File API direta ---------
+storage::PermFlow g_perm;                  // máquina de estado (GL-free)
+std::vector<fileapi::Candidate> g_importCands;  // candidatos de Download/Documents
+std::vector<std::string> g_logLines;            // tail do engine.log p/ o viewer
+std::vector<std::string> g_logDumps;            // crash-*.dump p/ o viewer
+
+// ---- F5-E: assets de runtime (cache CPU → cache GPU) ------------------------
+// Refs relativas ("meshes/x.obj#0", "textures/y.png") → MeshData/RawImage no
+// ResourceManager (CPU, 1 parse) → Mesh*/Texture* no GpuAssets (GL, 1 upload).
+// TICs que partilham a mesma ref partilham o MESMO objeto de GPU.
+ResourceManager g_resources;
+GpuAssets       g_gpu;
+
+// F5.1-A: compressão + cache de texturas (o HardwareCompressor decide
+// ASTC vs ETC2 conforme a extensão detectada no boot; o cache em disco
+// evita re-comprimir o mesmo PNG entre arranques)
+HardwareCompressor g_hwCompressor;
+std::unique_ptr<TextureCache>    g_texCache;
+std::unique_ptr<TexturePipeline> g_pipeline;
+
+// F5-E: catálogo de assets p/ os seletores do Inspector (refresh ao abrir)
+editor::AssetCatalog g_catalog;
+int                  g_prevAssetMenu = 0;
+
+char g_selectedName[40] = "";   // nome do TIC p/ o ficheiro de export
+
+// 0.8.10 — SETTING "largar a fonte": false = source/<nome> é REMOVIDO
+// depois do import converter com sucesso (o projeto fica só com assets/).
+// Persistido por projeto em settings.goni ("keepSource=0/1").
+// 0.8.11: + "audioMaster=<0..1>" (o volume geral — as DEFINIÇÕES vivem
+// junto do áudio, mais abaixo, porque lêem o misturador global)
+// 0.10-M (EXT): + "expandNodes=0/1" — o import EXPANDIDO (BACKLOG
+// 0.10-M-ext feito): false (default) = o FUNDIDO de sempre por
+// performance mobile; true = um TIC por nó com mesh (peças editáveis)
+// 0.10-M (PASSO 5A): + "texPerfil=0/1/2" — o PERFIL de texturas do projeto
+// (0=Qualidade sem redução [default] · 1=Equilibrado · 2=Mobile; a tabela
+// vive em TexturePolicy; override por asset em textures/overrides.goni —
+// o override VENCE o perfil)
+bool g_keepSource = true;
+bool g_expandNodes = false;
+TexPerfil g_texPerfil = TexPerfil::Qualidade;
+void loadProjectSettings();   // definido após o bloco de áudio (usa o mixer)
+void saveProjectSettings();
+
+// 0.6.8: estado do gesto de orbit ENTRE frames — extraído para editor::
+// (OrbitState puro, afervel no CI; a lógica vive em EditorUi.cpp)
+editor::OrbitState g_orbit;
+
+// ---- 0.6.9: gizmos de transformação ------------------------------------------
+// Só no TIC selecionado, SÓ EM EDITOR (nunca em PLAY). O hit-test 3D corre
+// ANTES do orbit (o slot que apanha o gizmo NÃO orbita); o drag escreve no
+// Transform3D com âncoras (pose final = âncora + delta) e updateWorld().
+// 0.7.9 — GRAB-LOCK: o press edge captura o ALVO + o RAIO (base da câmara
+// no grab) + o PLANO FIXO (⟂ à câmara no grab, pela pos do TIC NO ARRANQUE)
+// + as âncoras todas (hit no plano, ângulo, distância). Durante o move NÃO
+// há hit-test: o delta do dedo é projetado no plano FIXO — o gizmo move-se
+// com o objeto mas o drag nunca depende do dedo estar sobre ele (fim da
+// oscilação/"fuga" do C33). Touch up liberta o lock.
+editor::toolbar::GizmoModeState g_gizmoMode;   // 0.7.6: vive na Toolbar
+
+// 0.9.0 — UNDO/REDO (scope funcional: "stack de operações ligada à stack
+// da viewport"): snapshot por operação; o drag do gizmo empurra no FIM
+// (press captura before, release empurra with after); picks/criar/apagar/
+// renomear idem. ÁREA DE TRANSFERÊNCIA (copy/paste): snapshot do TIC.
+editor::UndoStack g_undo;
+editor::TicSnap   g_clipSnap;
+bool              g_clipValid = false;
+editor::TicSnap   g_gizmoBefore;   // captura no ARM do grab
+bool              g_gizmoBeforeValid = false;
+f32               g_snapValue = 0.5f;   // 0.9.0: o valor do chip [snap: N]
+
+// 0.9.0 (spec E/G) — PAINEL DE BAIXO: tabs Ficheiros/Consola/Animação +
+// drawer (240 default, pega 160..400) + estado PERSISTENTE (layout.json)
+editor::bottom::BottomState g_bottom;
+
+// 0.9.0 (spec I) — modo IMERSIVO (JNI: window flags) + mic concedido;
+// PERSISTEM (layout.json / runtime check)
+bool g_immersive = false;
+bool g_micGranted = false;
+std::string g_lastLayoutSaved;   // o layout.json da última escrita
+// altura do drawer ABERTO neste frame (0 = fechado) — todos os rects do
+// viewport central/painéis passam por AQUI (safe::centerRect com drawerH)
+// P-08 (0.9.6.12 · GRUPO J1 · R-022): a FONTE ÚNICA da altura efetiva —
+// o MESMO safe::effectiveDrawerH que o bottom::layout usa para DESENHAR o
+// drawer. Antes este getter lia o drawer CRU e o draw tapava: no device
+// (drawer 240 persistido, viewport 208dp) o viewRect colapsava a ZERO e a
+// transform toolbar desenhou-se 56dp POR CIMA da top bar (defeitos 1+2).
+static f32 currentDrawerH() {
+    if (g_bottom.bottomTab <= 0) {
+        return 0.0f;
+    }
+    const safe::Insets in = g_ui.safeArea();
+    return safe::effectiveDrawerH(
+        g_bottom.drawerH,
+        safe::viewportRect(g_ui.screenWidth(), g_ui.screenHeight(), in).h,
+        g_ui.screenHeight() - in.top - in.bottom);   // PASSO 2: o cap de 35%
+}
+
+void showToast(const char* msg);   // fwd (definido abaixo)
+// 0.9.0 (spec G) — LAYOUT PERSISTENTE: layout.json na raiz do projeto
+// (bottom/drawer/inspector/secções colapsadas).
+//
+// FASE 9 (G1-5 — o log mostrava 4 writes em ~40 s): a versão antiga chamava
+// saveLayoutNow() a CADA FRAME — cada passo de 8dp do drag do painel de
+// baixo gravava UM ficheiro. AGORA: DEBOUNCE — grava 1,5 s após a ÚLTIMA
+// alteração (o timer RECOMEÇA a cada mudança — o drag inteiro = 1 write),
+// e na saída para segundo plano (flush imediato). NÃO grava se o conteúdo
+// não mudou. UMA linha de log: "layout guardado (motivo)".
+static f32 g_layoutSaveTimer = 0.0f;         // >0 = pendente (contagem 1,5 s)
+static char g_layoutSaveReason[48] = {0};
+// sombra do estado (para o MOTIVO da linha de log — qual campo mudou)
+static int g_layoutShadowTab = -1;
+static int g_layoutShadowDrawer = -1;
+static int g_layoutShadowInsp = -1;
+static u32 g_layoutShadowCollapsed = 0xFFFFFFFFu;
+// P2-bis: a sombra do PIN do inspector (o toggle do trilho/seta grava)
+static int g_layoutShadowPinned = -1;
+// GRUPO D: sombra das larguras dos divisores (hierW/inspW — px)
+static int g_layoutShadowHierW = -1;
+static int g_layoutShadowInspW = -1;
+
+static void saveLayoutNow(const char* reason) {
+    if (!g_storage) {
+        return;
+    }
+    const std::string data = editor::bottom::serializeLayout(
+        g_bottom, g_editor.showInspector,
+        g_editor.inspCollapsed | (g_editor.settingsCollapsed << 8),
+        g_editor.hierW, g_editor.inspW, g_editor.inspPinned,
+        g_editor.hierCollapsed);   // 0.11-H: a lista das TICs recolhidas
+    if (data == g_lastLayoutSaved) {
+        return;   // nada mudou — NÃO grava (a regra de sempre)
+    }
+    g_lastLayoutSaved = data;
+    g_storage->writeText("layout.json", data);
+    elog::info("layout guardado (%s)",
+               (reason && *reason) ? reason : "alteração");
+}
+
+// (re)agenda o save — cada alteração RECOMEÇA os 1,5 s (coalesce)
+static void scheduleLayoutSave(const char* reason) {
+    std::snprintf(g_layoutSaveReason, sizeof(g_layoutSaveReason), "%s",
+                  reason ? reason : "");
+    g_layoutSaveTimer = 1.5f;
+}
+
+// o TICK por frame: deteta a mudança (contra a SOMBRA — o último estado
+// VISTO, não o último escrito: com uma mudança pendente o timer conta SEM
+// parar), agenda com o MOTIVO do campo que mexeu e dispara o write quando
+// o debounce vence (o write em si só corre se o conteúdo diferir do disco)
+static void layoutSaveTick(f32 dt) {
+    if (!g_storage) {
+        return;
+    }
+    // 0.11-H (FASE 1): o draw da hierarquia ARMA o dirty no toggle do
+    // chevron — o save entra no MESMO debounce do layout (G1-5)
+    if (g_editor.hierCollapsedDirty) {
+        g_editor.hierCollapsedDirty = false;
+        scheduleLayoutSave("árvore recolhida/expandida");
+    }
+    const int tab = g_bottom.bottomTab;
+    const int drawer = static_cast<int>(g_bottom.drawerH);
+    const int insp = g_editor.showInspector ? 1 : 0;
+    const int pinned = g_editor.inspPinned ? 1 : 0;   // P2-bis
+    const u32 collapsed = g_editor.inspCollapsed |
+                          (g_editor.settingsCollapsed << 8);
+    // GRUPO D: as larguras EFETIVAS (a gangorra pode arredondar — a sombra
+    // acompanha o que o dono VÊ, não o que o estado cru diz)
+    const safe::PanelBudget pb = editor::resolveEditorPanels(
+        g_editor, g_ui.contentWidthPx());
+    const int hierW = static_cast<int>(pb.hier);
+    const int inspW = static_cast<int>(pb.insp);
+    const bool seen = tab == g_layoutShadowTab &&
+                      drawer == g_layoutShadowDrawer &&
+                      insp == g_layoutShadowInsp &&
+                      pinned == g_layoutShadowPinned &&
+                      collapsed == g_layoutShadowCollapsed &&
+                      hierW == g_layoutShadowHierW &&
+                      inspW == g_layoutShadowInspW;
+    if (!seen) {
+        // o MOTIVO: qual campo mudou desde o último VISTO
+        const char* why = "alteração";
+        if (tab != g_layoutShadowTab || drawer != g_layoutShadowDrawer) {
+            why = "painel de baixo";
+        } else if (insp != g_layoutShadowInsp) {
+            why = "inspector";
+        } else if (pinned != g_layoutShadowPinned) {
+            why = "pin do inspector";
+        } else if (hierW != g_layoutShadowHierW ||
+                   inspW != g_layoutShadowInspW) {
+            why = "divisores dos painéis";
+        } else {
+            why = "secções recolhidas";
+        }
+        scheduleLayoutSave(why);
+        g_layoutShadowTab = tab;
+        g_layoutShadowDrawer = drawer;
+        g_layoutShadowInsp = insp;
+        g_layoutShadowPinned = pinned;
+        g_layoutShadowCollapsed = collapsed;
+        g_layoutShadowHierW = hierW;
+        g_layoutShadowInspW = inspW;
+    }
+    if (g_layoutSaveTimer > 0.0f) {
+        g_layoutSaveTimer -= dt;
+        if (g_layoutSaveTimer <= 0.0f) {
+            g_layoutSaveTimer = 0.0f;
+            saveLayoutNow(g_layoutSaveReason);
+        }
+    }
+}
+
+// 0.9.0 (spec I/G) — carregar o layout no OPEN (defaults se ilegível)
+static void loadLayoutNow() {
+    g_lastLayoutSaved.clear();
+    if (g_storage) {
+        std::string text;
+        if (g_storage->readText("layout.json", text)) {
+            bool insp = true;
+            bool pin = false;   // P2-bis
+            u32 collapsed = 0;
+            if (editor::bottom::parseLayout(text, g_bottom, insp, collapsed,
+                                             &g_editor.hierW,
+                                             &g_editor.inspW, &pin,
+                                             &g_editor.hierCollapsed)) {
+                g_editor.showInspector = insp;
+                g_editor.inspPinned = pin;
+                g_editor.inspCollapsed = collapsed & 0xFFu;
+                g_editor.settingsCollapsed = (collapsed >> 8) & 0x3Fu;
+                g_lastLayoutSaved = text;
+                // FASE 9 (G1-5): a SOMBRA acompanha o estado carregado —
+                // sem isto o arranque agendava um write espúrio (a sombra
+                // nascia vazia e o 1º tick "via" mudança)
+                g_layoutShadowTab = g_bottom.bottomTab;
+                g_layoutShadowDrawer = static_cast<int>(g_bottom.drawerH);
+                g_layoutShadowInsp = g_editor.showInspector ? 1 : 0;
+                g_layoutShadowPinned = g_editor.inspPinned ? 1 : 0;
+                g_layoutShadowCollapsed = g_editor.inspCollapsed |
+                                          (g_editor.settingsCollapsed << 8);
+                // GRUPO D: a sombra das larguras (a RESOLUÇÃO efetiva — o
+                // clamp da gangorra conta; se o ecrã mudou desde o save, o
+                // re-clamp silencioso não agenda write espúrio)
+                const safe::PanelBudget pb = editor::resolveEditorPanels(
+                    g_editor, g_ui.contentWidthPx());
+                g_layoutShadowHierW = static_cast<int>(pb.hier);
+                g_layoutShadowInspW = static_cast<int>(pb.insp);
+                LOGI("layout: carregado (tab=%d drawer=%d insp=%d pin=%d "
+                     "hierW=%d inspW=%d)",
+                     g_bottom.bottomTab, static_cast<int>(g_bottom.drawerH),
+                     g_editor.showInspector ? 1 : 0,
+                     g_editor.inspPinned ? 1 : 0, g_layoutShadowHierW,
+                     g_layoutShadowInspW);
+            } else {
+                LOGI("layout: ilegivel — defaults");
+            }
+        }
+    }
+}
+
+// 0.9.0 (spec I) — IMERSIVO: esconde as barras do sistema (JNI pela
+// VvActivity; sem ponte = no-op logado — o editor segue)
+static void applyImmersiveMode() {
+    if (storage::jniSetImmersive(g_immersive)) {
+        elog::info("ui: imersivo aplicado (%s)", g_immersive ? "on" : "off");
+    } else {
+        elog::warn("ui: imersivo sem ponte JNI — ignorado");
+    }
+}
+
+// o viewer de logs de sempre usa g_logDumps — refresh da lista
+static void refreshLogDumps() {
+    g_logDumps.clear();
+    elog::listDumps(g_logDumps);
+}
+
+// encaminhamentos das ações de Settings (os corpos existem)
+void audioProbeRun();   // definido abaixo (o probe de áudio da 0.8.11)
+static void runAudioProbe() { audioProbeRun(); }
+static void reconvertAllAssets() {
+    // o MESMO caminho do "reconverter assets" de sempre: cada ficheiro de
+    // source/ volta pelo reconvertFile (0.8.10 — a fonte é a cópia própria)
+    int converted = 0, failed = 0;
+    std::vector<std::string> sources;
+    g_storage->listDir("source", sources);
+    for (const std::string& rel : sources) {
+        convert::Output out;
+        convert::Stats stats;
+        std::string err;
+        // 0.10-M (EXT): a reconversão honra o setting «expandir em sub-TICs» —
+        // quem importou fundido re-converte fundido; quem mudou o
+        // setting, re-converte no modo novo (o log do import diz qual)
+        if (convert::reconvertFile("source/" + rel, *g_storage, nullptr, out,
+                                   stats, err, nullptr, nullptr,
+                                   g_expandNodes)) {
+            ++converted;
+        } else {
+            ++failed;
+            elog::error("import: reconverter %s FALHOU — %s", rel.c_str(),
+                        err.c_str());
+        }
+    }
+    char msg[80];
+    std::snprintf(msg, sizeof(msg), "reconvertido: %d (%d falhas)", converted,
+                  failed);
+    showToast(msg);
+}
+
+// empurra UMA operação (antes/depois) — helper de 1 linha por call-site
+static void pushUndo(editor::TicSnap before, const Tic* tic) {
+    if (!tic) {
+        return;
+    }
+    g_undo.push(before, editor::snapTic(g_scene, tic->handle), tic->handle);
+}
+
+// 0.9.0 — CRIAÇÃO com undo (a op CREATE: before vazio + after = o TIC novo;
+// o undo re-cria pelo snapshot — mesmo após o delete da cena)
+static Handle createTicUndoable(PresetKind kind) {
+    editor::TicSnap empty;
+    const Handle h = createTicFromPreset(g_scene, kind, &g_cubeMesh,
+                                         g_renderer.litMaterial());
+    if (h.valid()) {
+        g_undo.push(empty, editor::snapTic(g_scene, h), h);
+    }
+    return h;
+}
+gizmo::GizmoState       g_gizmo;
+gizmo::Grab             g_grab;   // 0.7.9: o lock do drag em curso
+
+// 0.7.7 — drag dos HANDLES do frustum da câmara: 1..4 = canto do far
+// (fovY). 0.9.6.19 (D17-c): o handle do CENTRO/far MORREU (o far edita-se
+// no Inspector) e os handles correm DEPOIS do gizmo (a ordem do dono:
+// gizmo de mover > handles de canto > frustum intocável). Âncoras: pose
+// final = âncora + delta. 0.7.9 — o CENTRO projetado é capturado NO GRAB
+// — a orbit pode mexer com outro dedo que o delta do handle não salta.
+struct CamHandleDrag {
+    bool active = false;
+    u32  slot = 0;
+    int  handle = 0;          // 1..4 = canto i-1 (o 5/centro morreu no D17)
+    f32  anchorFov = 0.0f;
+    f32  anchorDist = 0.0f;   // |dedo − olho projetado| no arranque (fov)
+    f32  anchorOx = 0.0f;     // centro projetado (olho) NO GRAB (fov)
+    f32  anchorOy = 0.0f;
+} g_camHandle;
+// âncoras do gizmo ESCALAR numa câmara (o fator escala fov/orthoSize —
+// nunca o transform, que não tem significado numa câmara)
+f32 g_camScaleFov = 0.0f;
+f32 g_camScaleOrtho = 0.0f;
+
+// direção do mundo de um eixo/plano do gizmo (main-side)
+Vec3 axisDirLocal(gizmo::Axis a) {
+    switch (a) {
+        case gizmo::Axis::X: return {1.0f, 0.0f, 0.0f};
+        case gizmo::Axis::Y: return {0.0f, 1.0f, 0.0f};
+        case gizmo::Axis::Z: return {0.0f, 0.0f, 1.0f};
+        default:             return {0.0f, 0.0f, 0.0f};
+    }
+}
+
+void applyGizmoDrag(const gizmo::Grab& grab, const gizmo::ViewBasis& basis,
+                    f32 sw, f32 sh, f32 px, f32 py);
+
+// aplica o drag do handle de CANTO do frustum (0.7.9: o centro do raio é
+// o do GRAB — nunca re-ancora na geometria atual). D17: só os cantos
+// (fov); o far edita-se no Inspector.
+void applyCamHandleDrag(const Mat4& vp, const gizmo::ViewBasis& basis,
+                        f32 sw, f32 sh, f32 px, f32 py) {
+    (void)vp;
+    (void)basis;   // o drag usa o LOCK do grab, não a base atual
+    (void)sw;
+    (void)sh;
+    Tic* t = g_scene.get(g_editor.selected);
+    if (!t) {
+        return;
+    }
+    CameraComp* cc = t->getComponent<CameraComp>();
+    if (!cc) {
+        return;
+    }
+    // CANTO do far: fator radial do dedo em torno do olho projetado —
+    // o CENTRO é o do GRAB (nunca o projetado atual)
+    const f32 d = std::sqrt((px - g_camHandle.anchorOx) *
+                                (px - g_camHandle.anchorOx) +
+                            (py - g_camHandle.anchorOy) *
+                                (py - g_camHandle.anchorOy));
+    cc->fovY = camgizmo::dragFov(g_camHandle.anchorFov,
+                                 g_camHandle.anchorDist, d,
+                                 g_gizmoMode.snap);
+}
+
+// GRUPO D: o feed do gizmo recebe o RECT da viewport (hierarquia|
+// viewport|inspector — larguras dos divisores): TODA a matemática do
+// gizmo/handles corre RETO-LOCAL (px−view.x, py−view.y; NDC→view.w×view.h)
+// — coerente com a projeção de aspect DO RECT e com o draw (que soma a
+// origem de volta). O gate do press usa as coords de ECRÃ (o dedo é do
+// mundo; o rect é que é o mapa).
+u32 feedGizmo(const Mat4& vp, const Vec3& origin, f32 len,
+              const UiRect& view, const gizmo::ViewBasis& basis) {
+    const f32 mw = view.w;
+    const f32 mh = view.h;
+    if (!gizmo::visible(g_editor.playMode, true)) {
+        g_gizmo.active = gizmo::Axis::None;
+        g_gizmo.hovered = gizmo::Axis::None;
+        g_gizmo.dragSlot = -1;
+        g_grab = gizmo::Grab{};   // 0.7.9: sem gizmo não há lock
+        g_camHandle.active = false;
+        return 0;
+    }
+    // 0.7.7 — drag de HANDLE do frustum em curso: segue o MESMO slot
+    if (g_camHandle.active) {
+        const u32 slot = g_camHandle.slot;
+        if (g_input.down(slot)) {
+            f32 px, py;
+            g_input.pos(slot, px, py);
+            applyCamHandleDrag(vp, basis, mw, mh, px - view.x, py - view.y);
+            return 1u << slot;
+        }
+        g_camHandle.active = false;   // dedo levantado — lock libertado
+    }
+    // 0.7.9 — drag em curso (GRAB-LOCK): segue o MESMO slot SEM hit-test;
+    // o delta do dedo é projetado no plano FIXO do grab (o gizmo move-se
+    // com o objeto — o drag não depende do dedo estar sobre ele)
+    if (g_grab.valid()) {
+        const u32 slot = static_cast<u32>(g_grab.slot);
+        if (g_input.down(slot)) {
+            f32 px, py;
+            g_input.pos(slot, px, py);
+            applyGizmoDrag(g_grab, basis, mw, mh, px - view.x, py - view.y);
+            return 1u << slot;
+        }
+        // touch up — o lock é LIBERTADO (o próximo press volta ao hit-test)
+        // 0.9.0 — UNDO: o drag ACABOU → empurra a operação (no-op não entra)
+        if (g_gizmoBeforeValid) {
+            if (const Tic* t = g_scene.get(g_editor.selected)) {
+                g_undo.push(g_gizmoBefore, editor::snapTic(g_scene, t->handle),
+                            t->handle);
+            }
+            g_gizmoBeforeValid = false;
+        }
+        g_grab = gizmo::Grab{};
+        g_gizmo.active = gizmo::Axis::None;
+        g_gizmo.dragSlot = -1;
+        g_gizmo.hovered = gizmo::Axis::None;
+    }
+    // press edge → GRAB (hit-test com alvo GENEROSO, âncoras capturadas;
+    // só se o gesto nasce no viewport central — em coords de ECRÃ)
+    for (u32 slot = 0; slot < kMaxPointerSlots; ++slot) {
+        if (!g_input.pressed(slot)) {
+            continue;
+        }
+        f32 px, py;
+        g_input.pos(slot, px, py);
+        if (px < view.x || px >= view.x + view.w || py < view.y ||
+            py >= view.y + view.h) {
+            continue;   // nasceu fora do viewport (painéis/toolbar)
+        }
+        // GRUPO D: daqui para dentro é RETO-LOCAL
+        const f32 lx = px - view.x;
+        const f32 ly = py - view.y;
+        // 0.9.6.19 (D17-e) — A ORDEM DO DONO: GIZMO DE MOVER > HANDLES DE
+        // CANTO > frustum (intocável). O gizmo corre PRIMEIRO no press
+        // edge: com a câmara selecionada, um drag que começa no gizmo (no
+        // glifo) MOVE a câmara — nunca é capturado por um handle.
+        // 0.7.9 — GRAB-LOCK: captura alvo (raio generoso kGrabPx) + raio +
+        // plano FIXO + âncoras — tudo medido NO ARRANQUE
+        const gizmo::Grab grab =
+            gizmo::beginGrab(g_gizmo.mode, vp, origin, len, mw, mh, lx, ly,
+                             static_cast<i32>(slot), basis);
+        if (grab.valid()) {
+            g_grab = grab;
+            g_gizmo.active = grab.target;
+            g_gizmo.hovered = grab.target;
+            g_gizmo.dragSlot = static_cast<i32>(slot);
+            // 0.9.0 — UNDO: captura o BEFORE no ARM (o release empurra a op)
+            g_gizmoBefore = editor::snapTic(g_scene, g_editor.selected);
+            g_gizmoBeforeValid = g_scene.get(g_editor.selected) != nullptr;
+            if (const Tic* tc = g_scene.get(g_editor.selected)) {
+                if (const Transform3D* trc =
+                        tc->getComponent<Transform3D>()) {
+                    g_gizmo.anchorPos = trc->pos;
+                    g_gizmo.anchorRot = trc->rot;
+                    g_gizmo.anchorScale = trc->scale;
+                    // 0.7.7 — o ESCALAR numa câmara escala o FRUSTUM (fov/
+                    // orthoSize), não o transform: âncoras dos parâmetros
+                    if (const CameraComp* ccc =
+                            tc->getComponent<CameraComp>()) {
+                        if (g_gizmo.mode == gizmo::Mode::Scale) {
+                            g_camScaleFov = ccc->fovY;
+                            g_camScaleOrtho = ccc->orthoSize;
+                        }
+                    }
+                }
+            }
+            applyGizmoDrag(g_grab, basis, mw, mh, lx, ly);
+            return 1u << slot;
+        }
+        // 0.7.7 — HANDLES DE CANTO (SÓ depois do gizmo — D17-e): com uma
+        // CÂMARA selecionada, um toque perto de um canto do far é DELE
+        Tic* t = g_scene.get(g_editor.selected);
+        if (t) {
+            const CameraComp* cc = t->getComponent<CameraComp>();
+            const Transform3D* tr = t->getComponent<Transform3D>();
+            if (cc && tr) {
+                // o ASPECTO do frustum é o do JOGO (o ecrã todo — em Play
+                // a câmara renderiza a superfície); o cap é o PREVIEW do
+                // D20 (0.9.6.19b): clamp(12%·dist(olho→câmara), 48..120dp)
+                // — o MESMO do draw (os handles vivem nos cantos DELE)
+                // D20: o MESMO cone canónico do draw (aspect 1) — os
+                // handles vivem nos cantos DESENHADOS
+                const camgizmo::Frustum f = camgizmo::computeFrustum(
+                    *tr, *cc, 1.0f,
+                    camgizmo::previewCapWorld(vp, mw, mh, g_camera.eye(),
+                                              tr->pos));
+                const int h = camgizmo::pickHandle(vp, mw, mh, f, lx, ly);
+                if (h != 0) {
+                    g_camHandle.active = true;
+                    g_camHandle.slot = slot;
+                    g_camHandle.handle = h;
+                    g_camHandle.anchorFov = cc->fovY;
+                    f32 ox = 0.0f, oy = 0.0f;
+                    if (gizmo::projectPoint(vp, tr->pos, mw, mh, ox, oy)) {
+                        g_camHandle.anchorOx = ox;
+                        g_camHandle.anchorOy = oy;
+                        g_camHandle.anchorDist =
+                            std::sqrt((lx - ox) * (lx - ox) +
+                                      (ly - oy) * (ly - oy));
+                    } else {
+                        g_camHandle.anchorOx = lx;
+                        g_camHandle.anchorOy = ly;
+                        g_camHandle.anchorDist = 0.0f;
+                    }
+                    applyCamHandleDrag(vp, basis, mw, mh, lx, ly);
+                    return 1u << slot;
+                }
+            }
+        }
+    }
+    // hover (sem press): destaque do alvo sob o dedo (feedback visual —
+    // raio FINO, o alvo generoso é só do grab)
+    for (u32 slot = 0; slot < kMaxPointerSlots; ++slot) {
+        if (g_input.down(slot)) {
+            f32 px, py;
+            g_input.pos(slot, px, py);
+            g_gizmo.hovered = gizmo::pickAxis(g_gizmo.mode, vp, origin, len,
+                                               mw, mh, px - view.x,
+                                               py - view.y);
+            break;
+        }
+    }
+    return 0;
+}
+
+// aplica o drag do gizmo ao Transform3D do TIC selecionado (âncoras).
+// 0.7.9 — GRAB-LOCK: os hits de move/escalar-eixo vêm do PLANO FIXO do
+// grab (grabHit — raio da base do GRAB contra o plano pela pos de ARRANQUE);
+// rotate/escalar-uniforme medem contra o CENTRO projetado do GRAB. Nada
+// aqui re-ancora na pos ATUAL do gizmo (a causa da oscilação/fuga).
+void applyGizmoDrag(const gizmo::Grab& grab, const gizmo::ViewBasis& basis,
+                    f32 sw, f32 sh, f32 px, f32 py) {
+    Tic* t = g_scene.get(g_editor.selected);
+    if (!t || !grab.valid()) {
+        return;
+    }
+    Transform3D* tr = t->getComponent<Transform3D>();
+    if (!tr) {
+        return;
+    }
+    // 0.7.7 — CÂMARA: o ESCALAR ajusta fovY/orthoSize (o frustum escala;
+    // a escala do transform NÃO tem significado numa câmara — fica intacta).
+    // mover/rodar seguem o caminho normal do Transform3D (abaixo).
+    // 0.7.9: o fator é medido contra o CENTRO do GRAB (nunca o atual).
+    const bool snapCam = g_gizmoMode.snap;   // (antes do uso — o resto da
+                                             // função declara o seu depois)
+    if (g_gizmo.mode == gizmo::Mode::Scale) {
+        if (CameraComp* cc = t->getComponent<CameraComp>()) {
+            const f32 d = std::sqrt((px - grab.anchorOx) *
+                                        (px - grab.anchorOx) +
+                                    (py - grab.anchorOy) *
+                                        (py - grab.anchorOy));
+            const bool ortho =
+                cc->projection == CameraComp::Projection::Orthographic;
+            const f32 v = camgizmo::dragScaleToFov(
+                g_camScaleFov, g_camScaleOrtho, ortho, grab.anchorDist, d,
+                snapCam);
+            if (ortho) {
+                cc->orthoSize = v;
+            } else {
+                cc->fovY = v;
+            }
+            return;   // NUNCA escreve no transform da câmara
+        }
+    }
+    const gizmo::Axis a = grab.target;
+    const bool snap = g_gizmoMode.snap;
+
+    if (g_gizmo.mode == gizmo::Mode::Move) {
+        // 0.7.9 — hit AGORA no plano FIXO do grab (o raio é o do grab):
+        // o delta é estável mesmo com a câmara a orbitar noutro dedo
+        bool ok1 = false;
+        const Vec3 h0 = grab.anchorHit;
+        const Vec3 h1 = gizmo::grabHit(grab, px, py, sw, sh, ok1);
+        if (!ok1) {
+            return;
+        }
+        if (a == gizmo::Axis::X || a == gizmo::Axis::Y || a == gizmo::Axis::Z) {
+            tr->pos = gizmo::dragMoveAxis(g_gizmo.anchorPos,
+                                          axisDirLocal(a), h0, h1, snap);
+        } else {
+            // plano de drag (XY/XZ/YZ) — normal FIXA do grab
+            tr->pos = gizmo::dragMovePlane(g_gizmo.anchorPos, grab.planeNormal,
+                                           h0, h1, snap);
+        }
+    } else if (g_gizmo.mode == gizmo::Mode::Rotate) {
+        const Vec3 axis = axisDirLocal(a);
+        // ângulo do dedo em torno do CENTRO do GRAB (estável sob orbit)
+        const f32 ang = std::atan2(py - grab.anchorOy, px - grab.anchorOx);
+        tr->rot = gizmo::dragRotate(g_gizmo.anchorRot, axis, basis.fwd,
+                                    grab.anchorAngle, ang, snap);
+    } else {
+        if (a == gizmo::Axis::Center) {
+            const f32 d = std::sqrt((px - grab.anchorOx) *
+                                        (px - grab.anchorOx) +
+                                    (py - grab.anchorOy) *
+                                        (py - grab.anchorOy));
+            tr->scale = gizmo::dragScaleUniform(g_gizmo.anchorScale,
+                                                grab.anchorDist, d, snap);
+        } else {
+            bool ok1 = false;
+            const Vec3 h0 = grab.anchorHit;
+            const Vec3 h1 = gizmo::grabHit(grab, px, py, sw, sh, ok1);
+            if (!ok1) {
+                return;
+            }
+            tr->scale = gizmo::dragScaleAxis(g_gizmo.anchorScale, a,
+                                             axisDirLocal(a), h0, h1, snap);
+        }
+    }
+    // escreve no Transform3D COM worldDirty: o cache é recalculado já neste
+    // frame (feedback imediato) e o TransformSystem reconfirma no passo
+    tr->updateWorld();
+    tr->worldDirty = false;   // cache coerente com a nova pose
+}
+
+DrawStats g_lastUiStats;   // métricas do pass UI (disponíveis 1 frame depois)
+
+// 0.10-M (PASSO 4) — as métricas de BLOCOS do frame corrente (o HUD e o
+// log espelham ISTO: totais/visíveis/desenhados por frame, somados por
+// todos os BlockMesh desenhados; coerente com o DrawStats do drawTics)
+struct BlockFrameStats {
+    u32 total = 0;     // blocos na(s) tabela(s) desenhada(s) neste frame
+    u32 visible = 0;
+    u32 drawn = 0;
+    u32 drawCalls = 0;    // == dc dos blocos (já somados no st3d)
+    u32 drawnVerts = 0;   // == índices desenhados (já somados no st3d)
+    u32 loaded = 0;       // lazy: carregados neste frame
+    u32 instancesMerged = 0;  // 0.11-W (3.5b): blocos fundidos em draws
+                              // instanciados neste frame (o log espelha)
+    u32 pending = 0;      // 0.11-W (3.75a): visíveis à espera de vaga do
+                          // stream (não desenhados neste frame — o log
+                          // espelha «a transmitir» até a vaga secar)
+    u64 ramBytes = 0;
+    u64 vramBytes = 0;
+    bool any = false;
+};
+BlockFrameStats g_blockFrame;
+BlockFrameStats g_blockFramePrev;   // o log throttled compara contra este
+
+// 0.11-T (FASE 3.5a) — as métricas do SKINNED CULL do frame (o HUD e o
+// log espelham ISTO). O contador é o do LADO DO DRAW (os TICs skinados
+// que este frame NÃO desenhou por estarem fora do frustum — funciona em
+// editor E play, e é o número que a cena do pin mostra). O contador do
+// LADO DA ANIMAÇÃO (g_animSystem.skinnedCulled) fica para os pins do
+// test_core (fase35a_skinned_cull) — somá-los aqui DUPLICAVA (5+5) o
+// mesmo TIC culled nos dois lados. O TIPO vive no DrawStats.h (a fonte
+// única — o harness do c33 lê o MESMO struct).
+SkinFrameStats g_skinFrame;
+
+// 0.11-W (3.75b) — as métricas do IMPOSTOR do frame (o MESMO padrão do
+// SkinFrameStats: o HUD/log espelham ISTO). O contador é o nº de TICs que
+// este frame desenhou como PNG alfa (o billboard) — os blocos deles
+// DESCANSARAM (o bl da status line conta só o caminho dos blocos).
+struct ImpostorFrameStats {
+    u32 drawn = 0;   // billboards desenhados neste frame
+    bool any = false;
+};
+ImpostorFrameStats g_impFrame;
+
+// 0.11-W (3.75b) — o QUAD unitário do impostor (4 verts, uv v=0 no topo).
+// O upload é UMA vez por contexto GL (o lazy no 1.º draw) e o TERM_WINDOW
+// destrói-o com o resto (o MESMO contrato do g_cubeMesh — nenhum id GL
+// sobrevive ao term).
+static Mesh g_impQuad;
+static void impostorQuadEnsure() {
+    if (!g_impQuad.ok()) {
+        MeshData md;
+        impostor::quadMesh(md);
+        g_impQuad.create(md.vertices.data(),
+                         static_cast<u32>(md.vertices.size()),
+                         md.indices.data(),
+                         static_cast<u32>(md.indices.size()));
+    }
+}
+
+// os 6 planos do VP do frame (a MESMA fonte do render por blocos) —
+// escritos no frame() depois do vp e consumidos PELO AnimationSystem no
+// frame seguinte (o vp nasce DEPOIS dos systems — a ordem do Tick; o
+// inchamento conservativo do AABB cobre a diferença de um frame)
+f32 g_skinFrustum[6][4];
+bool g_skinFrustumValid = false;
+
+// 0.10-M (PASSO 4) — o INTERVALO do log de métricas (1 s no device — o
+// orbit produz a linha quando o culling muda; o harness põe 0 para
+// determinismo nos frames acelerados)
+f32 g_blockLogIntervalSecs = 1.0f;
+
+// 0.10-M (PASSO 4) — a STRING EXATA da status line do frame (o harness
+// afera o HUD «bl desenhados/totais» contra o que o device DESENHOU; o
+// diagnóstico do dono também a lê no crash dump)
+char g_statusLine[160] = "";
+
+// toast (mensagem transitória acima da status line — feedback Save/Load/criação)
+char g_toast[96] = "";
+f32  g_toastT = 0.0f;
+void showToast(const char* msg);   // fwd: usada pelo feedCanvasPlay (abaixo)
+
+// 0.9.0 (spec F) — MINIATURA DO PROJETO: todo o SAVE arma a captura; o FIM
+// do frame DEPOIS de desenhar (antes do swap) lê a viewport central do
+// backbuffer, faz crop 16:9 + downsample e escreve thumb.png na raiz do
+// projeto. A tela de projetos (Java) lê-o para o card (default = logo G).
+// 0.9.6.18 (HOTFIX D7) — A CAPTURA DA MINIATURA FORA DO HOT PATH.
+// O dono: «No save do projeto, captura o viewport (glReadPixels num target
+// downscaled ~256×144, encode PNG assíncrono, FORA do frame, no thread de
+// jobs já existente; orçamento: ≤~50ms off-thread, PNG ≤~60KB, gravado
+// como thumb.png dentro do projeto). Nunca no hot path do render.»
+//
+// O PADRÃO DA CASA é o ImportJob (std::thread + atómicos + join no main —
+// o MESMO da extração de arquivos). O corte:
+//   • GL thread (fim do frame, o ponto seguro de SEMPRE — endFrame,
+//     antes do swap): UM glReadPixels da viewport central → buffer RGBA;
+//     é o único trabalho no frame (ms, sem encode);
+//   • o thread de jobs: flip + crop 16:9 + downsample a 256×144 (o alvo
+//     da spec — era ≤480) + encode PNG + escrita no storage + o log do
+//     orçamento; NUNCA toca em estado da UI;
+//   • o main junta (join) o job terminado no fim do frame seguinte.
+// O save NUNCA bloqueia (b): o frame do save só lê píxeis; a falha de
+// captura é WARN no log (o fallback de iniciais é do lado Java — o card
+// sem thumb.png desenha as iniciais, nunca o ícone da app).
+struct ThumbJob {
+    std::thread worker;
+    std::atomic<bool> active{false};   // job a correr (o buffer é dele)
+    std::atomic<bool> done{false};     // worker terminou (join no main)
+    std::vector<u8> rgba;              // o frame capturado (dono: o worker)
+    u32 rw = 0, rh = 0;                // dims do buffer RGBA (bottom-up)
+    u64 msOff = 0;                     // o orçamento off-thread MEDIDO
+    size_t pngBytes = 0;               // o tamanho do PNG escrito
+    u32 tw = 0, th = 0;                // as dims do PNG
+    bool ok = false;
+} g_thumbJob;
+
+// o corpo do job (thread de jobs): RGBA cru → thumb.png no projeto
+static void thumbJobWorker(ThumbJob& j) {
+    const auto t0 = std::chrono::steady_clock::now();
+    j.ok = false;
+    j.pngBytes = 0;
+    // flip vertical IN PLACE (glReadPixels é bottom-up)
+    thumb::flipVerticalRgba(j.rgba.data(), j.rw, j.rh);
+    const thumb::CropRect c = thumb::crop169(j.rw, j.rh);
+    const u32 tw = thumb::targetWidth(c.w);   // o ALVO ~256 (a spec D7)
+    if (tw == 0 || c.w == 0) {
+        // 0.9.6.19 (D16): o formato do dono — ok/falhou COM o motivo
+        elog::warn("thumb: captura falhou (crop degenerado %ux%u) — save "
+                   "ok, fallback de iniciais no card",
+                   j.rw, j.rh);
+        j.msOff = static_cast<u64>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - t0)
+                .count());
+        j.done.store(true);
+        return;
+    }
+    const u32 th = static_cast<u32>((u64)c.h * tw / c.w);
+    if (th == 0) {
+        j.done.store(true);
+        return;
+    }
+    j.tw = tw;
+    j.th = th;
+    std::vector<u8> rgb(static_cast<size_t>(tw) * th * 3u);
+    thumb::downsampleRgb(j.rgba.data() + ((size_t)c.y * j.rw + c.x) * 4u,
+                         c.w, c.h, tw, th, rgb.data());
+    const std::vector<u8> png = thumb::encodePngRgb(rgb.data(), tw, th);
+    if (png.empty()) {
+        elog::warn("thumb: captura falhou (encode PNG %ux%u) — save ok, "
+                   "fallback de iniciais no card",
+                   tw, th);
+        j.msOff = static_cast<u64>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - t0)
+                .count());
+        j.done.store(true);
+        return;
+    }
+    const int hs = g_storage->openWriteStream("thumb.png");
+    if (hs <= 0) {
+        elog::warn("thumb: captura falhou (openWriteStream thumb.png) — "
+                   "save ok, fallback de iniciais no card");
+        j.done.store(true);
+        return;
+    }
+    if (!g_storage->writeStreamChunk(hs, png.data(), png.size())) {
+        elog::warn("thumb: captura falhou (escrita %zu B) — save ok, "
+                   "fallback de iniciais no card",
+                   png.size());
+        g_storage->closeWriteStream(hs);
+        j.done.store(true);
+        return;
+    }
+    g_storage->closeWriteStream(hs);
+    j.pngBytes = png.size();
+    j.ok = true;
+    j.msOff = static_cast<u64>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t0)
+            .count());
+    j.done.store(true);
+}
+
+// junta o job anterior SE terminado (chamado do main — o frame NUNCA
+// espera por um thumb)
+static void thumbJobReap() {
+    if (g_thumbJob.active.load() && g_thumbJob.done.load()) {
+        if (g_thumbJob.worker.joinable()) {
+            g_thumbJob.worker.join();
+        }
+        g_thumbJob.active.store(false);
+        // o LOG DO ORÇAMENTO (a spec: ≤~50ms off-thread, PNG ≤~60KB) —
+        // 0.9.6.19 (D16): o formato do dono «thumb: captura ok/falhou»
+        if (g_thumbJob.ok) {
+            elog::info("thumb: captura ok (%ux%u PNG %zu B, %llums "
+                       "off-thread; orçamento 50ms)%s",
+                       g_thumbJob.tw, g_thumbJob.th, g_thumbJob.pngBytes,
+                       (unsigned long long)g_thumbJob.msOff,
+                       g_thumbJob.pngBytes > 60u * 1024u
+                           ? " — AVISO: PNG acima do orçamento"
+                           : "");
+            if (g_thumbJob.pngBytes > 60u * 1024u) {
+                elog::warn("thumb: PNG %zu B > 60KB — o alvo 256×144 devia "
+                           "manter o PNG pequeno (verificar conteúdo)",
+                           g_thumbJob.pngBytes);
+            }
+            if (g_thumbJob.msOff > 50ull) {
+                elog::warn("thumb: %llums off-thread > orçamento 50ms",
+                           (unsigned long long)g_thumbJob.msOff);
+            }
+        }
+    }
+}
+
+bool g_thumbPending = false;
+// 0.9.6.19 (D16): o frame DO GESTO nunca é capturado — o save pelo menu
+// (Guardar cena/Sair) arma a captura NUM frame em que o sheet do menu
+// (e o backdrop opaco dos modais) está no backbuffer: o thumb saía com o
+// MENU desenhado por cima. O ARM põe 1 frame de CALMO: a captura corre
+// no fim do frame SEGUINTE (o menu já fechou) e SÓ num frame SEM overlay
+// modal (o guard no captureThumbIfPending re-arma).
+u32 g_thumbArmDelay = 0;
+
+// o ÚNICO ponto de armação da captura (todos os saves passam aqui — o
+// harness também: o mesmo caminho do device)
+void armThumbCapture() {
+    g_thumbPending = true;
+    g_thumbArmDelay = 1;
+}
+
+// a variante BLOQUEANTE (só no teardown/reboot da engine — quando o
+// storage vai ser destruído o worker NÃO pode sobreviver a ele)
+static void thumbJobWait() {
+    if (g_thumbJob.active.load()) {
+        if (g_thumbJob.worker.joinable()) {
+            g_thumbJob.worker.join();
+        }
+        g_thumbJob.active.store(false);
+        // 0.9.6.19 (D16): o destino do job fica no log (o worker logou o
+        // ok/falhou com o motivo; aqui fica o aceno do teardown)
+        elog::info("thumb: job do teardown colhido (%s)",
+                   g_thumbJob.ok ? "captura ok"
+                                 : "captura falhou — o card usa o fallback "
+                                   "de iniciais");
+    } else if (g_thumbPending) {
+        // a captura armada não chegou a correr (o destroy chegou antes do
+        // primeiro frame limpo) — a honestidade do D16: o card usa as
+        // iniciais e o log diz porquê
+        g_thumbPending = false;
+        elog::warn("thumb: captura falhou (teardown antes do frame limpo — "
+                   "o card usa o fallback de iniciais)");
+    }
+}
+
+// a captura armada AGUARDA frame limpo (o detalhe do mecanismo vive na
+// declaração de g_thumbPending, acima)
+
+// 0.9.6.5 (GRUPO B · FERRAMENTAS DE VERIFICAÇÃO) — O LAYOUT EXPORTADO:
+// o pedido arma AQUI (Diagnóstico ou harness), o PRÓXIMO frame desenha
+// com o audit ligado (cada widget regista o rect real) e o ponto de swap
+// escreve layout/<ecrã>.png (backbuffer inteiro, full-res) + .json (as
+// entradas) [+ auditoria-<ecrã>.txt com o veredito do validador]. O dono
+// obtém a VARA DE MEDIR: o que o ecrã TEM de verdade, em px.
+bool g_layoutExportPending = false;
+bool g_layoutAuditPending = false;
+// o audit correu NESTE frame? (o pedido armado A MEIO do frame — a ação do
+// Settings dispara durante o draw — não pode ser consumido pelo dump do
+// MESMO frame com o registo STALE do ecrã anterior; espera o próximo)
+bool g_layoutFrameAudited = false;
+
+// ---- 0.7.0: UI criável em PLAY (hit-test + ações declarativas) -------------
+// estado do on-click: press ARMA (o slot fica reclamado — não vai à câmara
+// nem aos controlos), release DENTRO do mesmo elemento DISPARA a ação (o
+// gesto clássico de botão). Puro o suficiente p/ ser reproduzido no CI
+// (o hitTestCanvas/applyUiAction são afervéis; aqui só a sequência).
+struct PlayUiPress {
+    bool armed = false;
+    u32  slot = 0;
+    Handle tic{};
+    i32  element = -1;
+    i32  menuItem = -1;
+} g_playUi;
+
+// UiActionCtx do device: spawn liga ao createTicFromPreset (cubo/lit do
+// renderer); sceneExists consulta o manifesto do projeto; loadScene chega
+// na 0.7.1 (transições fade/slide) — sem callback a ação é HONESTA (toast
+// "0.7.1", nunca um sucesso falso).
+// (fwd: definidos mais abaixo — a seção de storage/projeto/cenas)
+void loadSceneByName(const std::string& name, ui::SceneSwap style);
+SceneSerializer::LoadCtx makeLoadCtx();
+void refreshCatalog();
+void postLoadMigrateAndFixup();   // 0.8.10: migração silenciosa pós-load
+void primFlushPending();               // 0.8.10: troca no ponto seguro (fwd)
+void primGraveDig();
+void primMeshesToGrave();              // 0.8.10: posse p/ cova (troca de cena)
+ui::UiActionCtx makeUiActionCtx() {
+    ui::UiActionCtx ctx;
+    ctx.sceneExists = [](const std::string& name, void*) -> bool {
+        if (!g_projectReady) {
+            return false;
+        }
+        const std::string rel =
+            std::string(Project::kDirScenes) + "/" + name + ".goni";
+        for (const std::string& s : g_project.scenes) {
+            if (s == rel) {
+                return true;
+            }
+        }
+        return false;
+    };
+    // 0.7.1: Scene.Load (instantâneo) / Scene.Transition (fade/slide em
+    // Play) — o estilo chega pelo callback, a ação já validou a existência
+    ctx.loadScene = [](const std::string& name, ui::SceneSwap style, void*) {
+        loadSceneByName(name, style);
+    };
+    ctx.spawnPreset = [](PresetKind kind, void*) -> Handle {
+        // 0.8.10: o preset Mesh nasce com a ESFERA PENDENTE (primOn+params
+        // já vêm do preset; mesh=null sobe no PONTO SEGURO do frame seguinte
+        // — zero upload fora do início de frame). As restantes fontes
+        // continuam a ser o cubo procedural.
+        Mesh* mesh = &g_cubeMesh;
+        Handle hmesh = createTicFromPreset(g_scene, kind, mesh,
+                                           g_renderer.litMaterial());
+        if (kind == PresetKind::Mesh && hmesh.valid()) {
+            // 0.8.10: o preset arma o PEDIDO — o mesh sobe no ponto seguro
+            if (MeshRenderer* mr = g_scene.get(hmesh)->getComponent<MeshRenderer>()) {
+                mr->primPending = true;
+            }
+        }
+        return hmesh;
+    };
+    return ctx;
+}
+
+// hit-test dos canvases em Play (press/release); devolve a máscara de slots
+// reclamados pelos botões da UI (o dedo não vai aos TouchControls)
+u32 feedCanvasPlay(f32 w, f32 h) {
+    u32 claimed = 0;
+    for (u32 s = 0; s < kMaxPointerSlots; ++s) {
+        if (!g_input.pressed(s)) {
+            continue;
+        }
+        f32 x = 0.0f, y = 0.0f;
+        g_input.pos(s, x, y);
+        const ui::CanvasHit hit =
+            ui::hitTestCanvas(g_scene, x, y, w, h, g_ui.safeArea());
+        // 0.12-B — a árvore arma os botões dela (o MESMO contrato: o dedo
+        // não vai aos TouchControls quando acerta um botão de UI)
+        const ui::CanvasHit hitTree =
+            !hit.valid ? ui::hitTestUiTree(g_scene, x, y, w, h,
+                                           g_ui.safeArea())
+                       : ui::CanvasHit{};
+        const ui::CanvasHit& eff = hit.valid ? hit : hitTree;
+        if (eff.valid) {
+            g_playUi.armed = true;
+            g_playUi.slot = s;
+            g_playUi.tic = eff.tic;
+            g_playUi.element = eff.element;
+            g_playUi.menuItem = eff.menuItem;
+            claimed |= 1u << s;
+        }
+    }
+    if (g_playUi.armed && g_input.released(g_playUi.slot)) {
+        f32 x = 0.0f, y = 0.0f;
+        g_input.pos(g_playUi.slot, x, y);
+        const ui::CanvasHit hit =
+            ui::hitTestCanvas(g_scene, x, y, w, h, g_ui.safeArea());
+        // 0.12-B — a ÁRVORE entra no MESMO feed: sem hit nos canvases
+        // legados, os botões da árvore (TICs com Control) respondem
+        const ui::CanvasHit hitTree =
+            !hit.valid ? ui::hitTestUiTree(g_scene, x, y, w, h,
+                                           g_ui.safeArea())
+                       : ui::CanvasHit{};
+        const ui::CanvasHit& eff = hit.valid ? hit : hitTree;
+        if (eff.valid && eff.tic == g_playUi.tic &&
+            eff.element == g_playUi.element) {
+            UiElement e;
+            if (ui::uiElementFromHit(g_scene, eff, e)) {
+                const char* targetOverride = nullptr;
+                std::string tgt;
+                if (e.kind == UiElement::Kind::Menu && g_playUi.menuItem >= 0) {
+                    std::string label;
+                    if (ui::menuLineAt(e, static_cast<u32>(g_playUi.menuItem),
+                                       label, tgt)) {
+                        targetOverride = tgt.c_str();
+                    }
+                }
+                const ui::UiActionResult out =
+                    ui::applyUiAction(g_scene, e, makeUiActionCtx(),
+                                      targetOverride);
+                if (out.wantToast) {
+                    showToast(out.toast);
+                }
+                if (out.log[0] != '\0') {
+                    LOGI("%s", out.log);
+                }
+            }
+        }
+        g_playUi.armed = false;
+    }
+    return claimed;
+}
+
+// desenha TODOS os canvases ativos e visíveis (UI por cima da cena)
+// 0.12-B: + a ÁRVORE de UI (UIRoot + filhos Control) — a UI nova;
+// os canvases legados (compat) desenham como sempre (vazios na prática:
+// o load converte)
+void drawCanvasPlay(f32 w, f32 h) {
+    g_scene.forEachActive([&](const Tic& t) {
+        if (!t.visible) {
+            return;
+        }
+        if (const UiCanvas* c =
+                g_scene.components().uiCanvases().find(t.handle)) {
+            ui::drawCanvas(g_ui, *c, w, h, g_ui.safeArea());
+        }
+    });
+    ui::drawUiTree(g_ui, g_scene, w, h, g_ui.safeArea());
+}
+
+// ---- 0.7.1: CENAS MÚLTIPLAS + TRANSIÇÕES ---------------------------------
+// Cada cena = um .goni próprio no manifesto (Project::scenes). A troca
+// GUARDA a cena ATUAL no ficheiro dela, muda a ativa, persiste o manifesto
+// e carrega a nova (LoadCtx canônico — refs relativos re-ligam). Em PLAY a
+// troca anda dentro de uma TRANSIÇÃO (fade/slide): o swap acontece no
+// PONTO MÉDIO, com o ecrã tapado — nunca se vê a troca a seco.
+ui::SceneTransition g_sceneTrans;
+u32                  g_sceneTransIdx = 0xFFFFFFFFu;   // índice alvo
+f32                  g_frameDt = 0.0f;                // dt real do frame
+
+// troca DIRETA de cena (sem transição — editor / Scene.Load)
+void doSwitchScene(u32 idx) {
+    if (!g_projectReady || !g_storage || idx >= g_project.scenes.size() ||
+        idx == g_project.activeScene) {
+        return;
+    }
+    // 1) guarda a cena ATUAL no ficheiro dela (nada se perde na troca)
+    if (!g_project.saveActiveScene(*g_storage, g_scene)) {
+        showToast("falha ao salvar a cena atual");
+        elog::error("cena: salvar a cena ativa '%s' FALHOU antes da troca",
+                    g_project.activeScenePath()
+                        ? g_project.activeScenePath()->c_str()
+                        : "?");
+        return;   // sem gravar, sem trocar (a cena atual fica intacta)
+    }
+    // 2) muda a ativa + persiste o manifesto
+    g_project.activeScene = idx;
+    g_project.saveManifest(*g_storage);
+    armThumbCapture();   // 0.9.0/0.9.6.19 (D16): o ponto único de armação
+    // 0.8.10: a posse dos meshes de prim da cena ANTIGA vai para a cova
+    // (deferred free no próximo frame — os draws deste frame ainda contam)
+    primMeshesToGrave();
+    // 3) carrega a nova (LoadCtx canônico: refs relativos re-ligam)
+    const SceneSerializer::LoadCtx ctx = makeLoadCtx();
+    if (g_project.loadActiveScene(*g_storage, g_scene, ctx)) {
+        postLoadMigrateAndFixup();   // 0.8.10: migração silenciosa da nova
+        char name[48];
+        editor::sceneDisplayName(g_project.scenes[idx], name, sizeof(name));
+        char msg[64];
+        std::snprintf(msg, sizeof(msg), "cena: %s", name);
+        showToast(msg);
+        elog::info("cena: trocou para '%s' (%u tics)", name,
+                   (unsigned)g_scene.count());
+    } else {
+        showToast("falha ao carregar a cena");
+        elog::error("cena: load de '%s' FALHOU", g_project.scenes[idx].c_str());
+    }
+    editor::clearSelection(g_editor);   // seleção não sobrevive à troca
+    // 0.11-H (FASE 1): o colapso da árvore é estado DA CENA — a troca
+    // recomeça (a lista do layout.json é a da cena que estava aberta ao
+    // gravar; cada cena própria reabre com o SEU estado quando for a ativa
+    // no arranque — a limitação é documentada no relatório)
+    g_editor.hierCollapsed.clear();
+    g_editor.hierCollapsedDirty = false;
+    g_playUi.armed = false;
+    refreshCatalog();
+}
+
+// arranca a TRANSIÇÃO (em Play): o swap corre no ponto médio
+void startSceneTransition(u32 idx, const char* name, bool slide) {
+    g_sceneTrans.active = true;
+    g_sceneTrans.style = slide ? ui::SceneTransition::Style::Slide
+                                : ui::SceneTransition::Style::Fade;
+    g_sceneTrans.t = 0.0f;
+    g_sceneTrans.target = name ? name : "";
+    g_sceneTransIdx = idx;
+    elog::info("cena: transicao %s para '%s' iniciada",
+               slide ? "slide" : "fade", g_sceneTrans.target.c_str());
+}
+
+// carrega por NOME (ação declarativa — o estilo decide instantâneo/transição)
+void loadSceneByName(const std::string& name, ui::SceneSwap style) {
+    if (!g_projectReady || !g_storage) {
+        showToast("sem projeto — cenas indisponiveis");
+        return;
+    }
+    const std::string rel =
+        std::string(Project::kDirScenes) + "/" + name + ".goni";
+    for (u32 i = 0; i < g_project.scenes.size(); ++i) {
+        if (g_project.scenes[i] == rel) {
+            if (style != ui::SceneSwap::Instant && g_editor.playMode) {
+                startSceneTransition(i, name.c_str(),
+                                     style == ui::SceneSwap::Slide);
+            } else {
+                doSwitchScene(i);   // editor ou Scene.Load: troca direta
+            }
+            return;
+        }
+    }
+    char msg[96];
+    std::snprintf(msg, sizeof(msg), "cena '%s' não existe", name.c_str());
+    showToast(msg);
+}
+
+// nome da cena ATIVA (sem extensão/caminho) — o host da V.ONI usa para
+// validar o `nomedacena.transition.for` (origem == atual)
+static std::string currentSceneBaseName() {
+    if (const std::string* p = g_project.activeScenePath()) {
+        const size_t slash = p->rfind('/');
+        std::string base = slash == std::string::npos ? *p : p->substr(slash + 1);
+        const size_t dot = base.rfind('.');
+        if (dot != std::string::npos) {
+            base = base.substr(0, dot);
+        }
+        return base;
+    }
+    return std::string();
+}
+
+// 0.9.2 §9 — o hook transition.for da V.ONI: valida o destino no manifesto
+// e troca com FADE (em Play) — o estilo é do engine, a LINGUAGEM só pede.
+static bool voniTransitionHook(const std::string& from, const std::string& to,
+                               std::string& err) {
+    (void)from;   // o host JÁ validou origem==atual
+    if (!g_projectReady) {
+        err = "sem projeto aberto";
+        return false;
+    }
+    const std::string rel =
+        std::string(Project::kDirScenes) + "/" + to + ".goni";
+    for (u32 i = 0; i < g_project.scenes.size(); ++i) {
+        if (g_project.scenes[i] == rel) {
+            loadSceneByName(to, g_editor.playMode ? ui::SceneSwap::Fade
+                                                  : ui::SceneSwap::Instant);
+            elog::info("voni: transition.for('%s') -> '%s'", from.c_str(),
+                       to.c_str());
+            return true;
+        }
+    }
+    err = "cena '" + to + "' não existe";
+    return false;
+}
+
+// CRIA uma cena nova com nome (teclado in-app): guarda a atual, regista a
+// nova no manifesto (ativa) e escreve o .goni VAZIO dela
+void createSceneNamed(const std::string& name) {
+    if (!g_projectReady || !g_storage || name.empty()) {
+        return;
+    }
+    // 0) duplicados NUNCA passam (o addScene ATIVA a existente em vez de
+    // falhar — sem este guard o .goni dela seria APAGADO pela cena vazia)
+    const std::string rel =
+        std::string(Project::kDirScenes) + "/" + name + ".goni";
+    for (const std::string& s : g_project.scenes) {
+        if (s == rel) {
+            showToast("cena já existe");
+            elog::warn("cena: '%s' já existe no projeto", name.c_str());
+            return;
+        }
+    }
+    // 1) a cena ATUAL vai para o ficheiro DELA (antes da troca)
+    if (!g_project.saveActiveScene(*g_storage, g_scene)) {
+        showToast("falha ao salvar a cena atual");
+        return;
+    }
+    // 2) regista a nova e torna-a ativa
+    if (!g_project.addScene(name)) {
+        showToast("nome de cena invalido");
+        return;
+    }
+    // 3) cena VAZIA em memória → escreve o .goni novo + manifesto
+    primMeshesToGrave();   // 0.8.10: posse da cena antiga p/ cova
+    g_scene.clear();
+    editor::clearSelection(g_editor);
+    const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
+                    g_project.saveManifest(*g_storage);
+    armThumbCapture();   // 0.9.0/0.9.6.19 (D16): o ponto único de armação
+    char msg[64];
+    std::snprintf(msg, sizeof(msg), ok ? "cena criada: %s"
+                                        : "cena criada (manifesto falhou)",
+                  name.c_str());
+    showToast(msg);
+    elog::info("cena: '%s' criada e ativa (%u cena(s) no projeto)",
+               name.c_str(), (unsigned)g_project.scenes.size());
+    // 0.12-A (A-2): a árvore res:// acompanha (o padrão do doSwitchScene —
+    // sem isto o drawer Ficheiros ficava com a contagem STALE "0 cena(s)")
+    refreshCatalog();
+}
+
+// 0.12-B (B-4) — RENOMEAR cena (o teclado in-app, propósito 8): o ficheiro
+// muda de nome (copia → escreve o novo → remove o velho) e o MANIFESTO
+// aponta o caminho novo. A cena ativa CONTINUA ativa (o activeScene é
+// índice — o rename não o mexe). O caminho novo vem da FONTE PURA
+// (sceneRenamePath — o MESMO filtro do addScene).
+void renameSceneInProject(u32 idx, const std::string& newName) {
+    if (!g_projectReady || !g_storage || idx >= g_project.scenes.size()) {
+        return;
+    }
+    std::string nv;
+    if (!editor::sceneRenamePath(g_project.scenes[idx], newName, nv)) {
+        showToast("nome de cena invalido");
+        return;
+    }
+    const std::string old = g_project.scenes[idx];
+    if (g_storage->exists(nv)) {
+        showToast("cena já existe");
+        elog::warn("cena: '%s' já existe no projeto", newName.c_str());
+        return;
+    }
+    std::string text;
+    if (!g_storage->readText(old, text) ||
+        !g_storage->writeText(nv, text) || !g_storage->remove(old)) {
+        showToast("renomear falhou (engine.log)");
+        elog::error("cena: renomear %s FALHOU", old.c_str());
+        return;
+    }
+    g_project.scenes[idx] = nv;
+    const bool ok = g_project.saveManifest(*g_storage);
+    elog::info("cena: renomeada '%s' -> '%s'%s", old.c_str(), nv.c_str(),
+               ok ? "" : " (manifesto FALHOU)");
+    showToast(ok ? "cena renomeada" : "cena renomeada (manifesto falhou)");
+    refreshCatalog();   // o Ficheiros lista o scenes/ — os nomes seguem
+}
+
+// 0.12-B (B-4) — DUPLICAR cena: o MESMO conteúdo num nome único Godot-style
+// («main» → «main.001»; a convenção do uniqueTicName, a variante DUPLICAR
+// que SEMPRE sufixa). A cópia NÃO fica ativa — o utilizador continua na
+// cena em que estava (a cópia nunca rouba o foco).
+void duplicateSceneInProject(u32 idx) {
+    if (!g_projectReady || !g_storage || idx >= g_project.scenes.size()) {
+        return;
+    }
+    const std::string src = g_project.scenes[idx];
+    char base[48];
+    editor::sceneDisplayName(src, base, sizeof(base));
+    // o nome único contra o manifesto E o storage (um órfão no disco conta
+    // — escrever por cima dele era destruir dados que o manifesto não vê)
+    std::vector<std::string> vista = g_project.scenes;
+    std::string candidate = editor::sceneUniqueName(vista, base);
+    while (g_storage->exists(std::string(Project::kDirScenes) + "/" +
+                             candidate + ".goni")) {
+        vista.push_back(std::string(Project::kDirScenes) + "/" + candidate +
+                        ".goni");
+        candidate = editor::sceneUniqueName(vista, base);
+    }
+    const std::string nv =
+        std::string(Project::kDirScenes) + "/" + candidate + ".goni";
+    std::string text;
+    if (!g_storage->readText(src, text) ||
+        !g_storage->writeText(nv, text)) {
+        showToast("duplicar falhou (engine.log)");
+        elog::error("cena: duplicar %s FALHOU", src.c_str());
+        return;
+    }
+    g_project.scenes.push_back(nv);   // SEM ativar (a cópia não rouba o foco)
+    const bool ok = g_project.saveManifest(*g_storage);
+    elog::info("cena: duplicada '%s' -> '%s'%s", src.c_str(), nv.c_str(),
+               ok ? "" : " (manifesto FALHOU)");
+    showToast(ok ? "cena duplicada" : "cena duplicada (manifesto falhou)");
+    refreshCatalog();
+}
+
+// 0.12-B (B-4) — APAGAR cena: só chega aqui com o 2.º toque (o menu só
+// devolve o pick CONFIRMADO — o 1.º fica no menu com a linha armada). A
+// cena ATIVA nunca se apaga (ative outra primeiro — sem cena ativa o
+// manifesto fica sem para onde voltar); o ficheiro sai do disco, a linha
+// sai do manifesto e o activeScene re-assenta se a apagada vinha antes.
+void deleteSceneInProject(u32 idx) {
+    if (!g_projectReady || !g_storage || idx >= g_project.scenes.size()) {
+        return;
+    }
+    if (idx == g_project.activeScene) {
+        showToast("ative outra cena para apagar esta");
+        elog::warn("cena: recusado apagar a ATIVA (%s)",
+                   g_project.scenes[idx].c_str());
+        return;
+    }
+    const std::string rel = g_project.scenes[idx];
+    if (!g_storage->remove(rel)) {
+        elog::warn("cena: o ficheiro %s já não existia (limpo na mesma)",
+                   rel.c_str());
+    }
+    g_project.scenes.erase(g_project.scenes.begin() +
+                           static_cast<ptrdiff_t>(idx));
+    if (g_project.activeScene > idx) {
+        --g_project.activeScene;   // a ativa re-assenta (índice menos um)
+    }
+    const bool ok = g_project.saveManifest(*g_storage);
+    elog::info("cena: apagada '%s'%s", rel.c_str(),
+               ok ? "" : " (manifesto FALHOU)");
+    showToast(ok ? "cena apagada" : "cena apagada (manifesto falhou)");
+    refreshCatalog();
+}
+
+// ---- 0.7.2: NAVEGADOR DE FICHEIROS + APLICAR-APÓS-IMPORT --------------------
+// O IMPORT robusto: navegar QUALQUER pasta do armazenamento (all-files),
+// com a GALERIA (DCIM/Camera, Pictures) nas raízes, o CAMINHO visível no
+// topo, e a pergunta "aplicar ao TIC?" quando há um TIC com MeshRenderer
+// selecionado no fim do import.
+struct FileBrowserState {
+    bool open = false;
+    std::string cwd;                            // onde está a procurar
+    std::vector<fileapi::DirEntry> entries;     // conteúdo listado
+    bool failed = false;                        // opendir falhou
+} g_browser;
+struct ApplyAskState {
+    bool open = false;
+    char kind = 0;          // 'm' mesh | 't' textura
+    std::string rel;       // ref relativa importada ("textures/x.png")
+    std::string fileName;  // basename (p/ o diálogo)
+} g_applyAsk;
+
+// abre/re-carrega uma pasta do navegador
+void browserOpen(const std::string& path) {
+    g_browser.cwd = path;
+    g_browser.failed = !fileapi::listDirEntries(path, g_browser.entries);
+    g_browser.open = true;
+    elog::info("browser: %s (%u entrada(s)%s)", path.c_str(),
+               (unsigned)g_browser.entries.size(),
+               g_browser.failed ? ", opendir FALHOU" : "");
+}
+
+// ---- 0.8.11: ÁUDIO — misturador + backend + cache de clipes -----------------
+// O backend (AAudio no device; AudioTrack se o probe mandar; stub no CI)
+// puxa o MISTURADOR puro no callback — a engine nunca fala com o hardware.
+AudioEngine g_audioEngine;
+std::unique_ptr<audioout::Backend> g_audioOut;
+bool g_audioBackendReady = false;
+// cache de clipes decodificados (1 ref .gi → 1 GiClip)
+std::map<std::string, std::unique_ptr<GiClip>> g_audioClips;
+// catálogo de áudio p/ o Inspector/workspace (refresh ao abrir)
+std::vector<std::string> g_audioCatalog;
+// 0.8.11: o workspace ÁUDIO (estado + preview do clip selecionado)
+editor::AudioWorkspaceState g_audioWs;
+i32 g_audioPreviewVoice = -1;
+std::string g_audioPreviewClip;
+// MASTER VOLUME (Settings — persistido em settings.goni como audioMaster)
+f32 g_audioMaster = 1.0f;
+void audioRecTick();
+void audioPreviewTick();
+void audioRecordToggle();
+
+// ---- GRAVAÇÃO: o estado partilhado worker↔frame (a definição do worker
+// vive em baixo — DEVICE: AudioRecord JNI; HOST: mic sintético) ---------
+struct AudioRec {
+    std::thread th;
+    std::atomic<bool> on{false};
+    std::atomic<int> secs{0};
+    std::atomic<f32> level{0.0f};
+    std::mutex mx;
+    std::vector<i16> pcm;
+    u32 sampleRate = 44100;
+    std::chrono::steady_clock::time_point t0;
+};
+AudioRec g_audioRec;
+#ifdef __ANDROID__
+JavaVM* g_audioVm = nullptr;   // android_main registra (glue activity->vm)
+#endif
+
+const GiClip* audioClipFor(const std::string& rel) {
+    if (rel.empty() || !g_storage) {
+        return nullptr;
+    }
+    const auto it = g_audioClips.find(rel);
+    if (it != g_audioClips.end()) {
+        return it->second.get();   // hit (decodificado 1×)
+    }
+    std::vector<u8> bytes;
+    if (!g_storage->readBytes(rel, bytes) || bytes.empty()) {
+        return nullptr;
+    }
+    auto clip = std::make_unique<GiClip>();
+    std::string err;
+    if (!readGi(bytes.data(), bytes.size(), *clip, err)) {
+        elog::error("audio: %s invalido — %s", rel.c_str(), err.c_str());
+        return nullptr;
+    }
+    // captura os valores ANTES do move (a 1ª versão lia o unique_ptr já
+    // movido — o log saía com zeros)
+    const u16 ch = clip->channels;
+    const u32 sr = clip->sampleRate;
+    const f32 dur = clip->duration();
+    const GiCodec codec = clip->codec;
+    const GiClip* raw = clip.get();
+    g_audioClips.emplace(rel, std::move(clip));
+    elog::info("audio: load %s %uch %uHz %.2fs codec=%s", rel.c_str(), ch,
+               sr, dur, giCodecName(codec));
+    return raw;
+}
+
+void refreshAudioCatalog() {
+    g_audioCatalog.clear();
+    if (g_storage) {
+        std::vector<std::string> files;
+        if (g_storage->listDir("audio", files)) {
+            for (const std::string& f : files) {
+                if (f.size() > 3 && f.compare(f.size() - 3, 3, ".gi") == 0) {
+                    g_audioCatalog.push_back(std::string("audio/") + f);
+                }
+            }
+        }
+    }
+    // o catálogo do INSPECTOR (g_catalog.audio) segue o mesmo refresh — o
+    // seletor de clips (assetMenu 5) lê dali
+    g_catalog.audio = g_audioCatalog;
+}
+
+// settings.goni do projeto: fonte manter/largar + VOLUME GERAL (0.8.11).
+// Corre no post-load (a 0.8.10 definia isto mas NUNCA o LIA — o setting
+// só vivia na RAM; agora o boot do projeto aplica)
+void loadProjectSettings() {
+    g_keepSource = true;
+    g_audioMaster = 1.0f;
+    g_expandNodes = false;
+    g_texPerfil = TexPerfil::Qualidade;
+    if (g_storage) {
+        std::string text;
+        if (g_storage->readText("settings.goni", text)) {
+            g_keepSource = text.find("keepSource=0") == std::string::npos;
+            // 0.10-M (EXT): o modo do import (fundido = default mobile)
+            g_expandNodes = text.find("expandNodes=1") != std::string::npos;
+            const size_t p = text.find("audioMaster=");
+            if (p != std::string::npos) {
+                const f32 v = static_cast<f32>(std::atof(text.c_str() + p + 12));
+                if (v >= 0.0f && v <= 1.0f) {
+                    g_audioMaster = v;
+                }
+            }
+            // 0.10-M (PASSO 5A): o perfil de texturas do projeto
+            const size_t tp = text.find("texPerfil=");
+            if (tp != std::string::npos) {
+                g_texPerfil = texPerfilFromInt(
+                    std::atoi(text.c_str() + tp + 10));
+            }
+        }
+    }
+    g_audioEngine.master = g_audioMaster;
+    // PASSO 5A: o perfil desce ao pipeline (o import/reconvert/migração
+    // lêem-no daqui; o override por asset é lido a seguir)
+    if (g_pipeline) {
+        g_pipeline->setPerfil(g_texPerfil);
+        g_pipeline->clearOverrides();
+        u32 nOvr = 0;
+        std::string text;
+        if (g_storage && g_storage->readText("textures/overrides.goni",
+                                             text)) {
+            // uma linha por asset: «<stem> <maxDim>» — maxDim 0 = NUNCA
+            // reduzir; # inicia comentário (a convenção da casa)
+            size_t pos = 0;
+            while (pos < text.size()) {
+                size_t eol = text.find('\n', pos);
+                if (eol == std::string::npos) {
+                    eol = text.size();
+                }
+                std::string line = text.substr(pos, eol - pos);
+                pos = eol + 1;
+                if (!line.empty() && line.back() == '\r') {
+                    line.pop_back();
+                }
+                if (line.empty() || line[0] == '#') {
+                    continue;
+                }
+                const size_t sp = line.find(' ');
+                if (sp == std::string::npos || sp == 0 ||
+                    sp + 1 >= line.size()) {
+                    continue;
+                }
+                const std::string key = line.substr(0, sp);
+                const u32 dim =
+                    static_cast<u32>(std::strtoul(line.c_str() + sp + 1,
+                                                  nullptr, 10));
+                g_pipeline->setOverride(key, dim);
+                ++nOvr;
+            }
+        }
+        elog::info("textura: perfil %s (texPerfil=%d) — %u override(s) por "
+                   "asset (textures/overrides.goni)",
+                   texPerfilName(g_texPerfil), static_cast<int>(g_texPerfil),
+                   nOvr);
+    }
+}
+void saveProjectSettings() {
+    if (!g_storage) {
+        return;
+    }
+    char buf[128];
+    std::snprintf(buf, sizeof(buf),
+                  "keepSource=%s\naudioMaster=%.2f\nexpandNodes=%s\n"
+                  "texPerfil=%d\n",
+                  g_keepSource ? "1" : "0", g_audioMaster,
+                  g_expandNodes ? "1" : "0",
+                  static_cast<int>(g_texPerfil));
+    g_storage->writeText("settings.goni", buf);
+}
+
+// ---- preview do workspace (o MESMO misturador; 1 voz, sem loop) --------
+void audioPreviewToggle() {
+    if (g_audioPreviewVoice >= 0) {
+        g_audioEngine.stop(g_audioPreviewVoice);
+        g_audioPreviewVoice = -1;
+        g_audioPreviewClip.clear();
+        return;
+    }
+    if (g_audioWs.selected >= g_audioCatalog.size()) {
+        showToast("selecione um clip na lista");
+        return;
+    }
+    const std::string& rel = g_audioCatalog[g_audioWs.selected];
+    const GiClip* clip = audioClipFor(rel);
+    if (!clip) {
+        showToast("clip não carrega (engine.log)");
+        return;
+    }
+    g_audioPreviewVoice = g_audioEngine.play(clip, false, 1.0f, 1.0f);
+    g_audioPreviewClip = rel;
+    elog::info("audio: preview '%s' (%.2fs)", rel.c_str(), clip->duration());
+}
+void audioPreviewStop() {
+    if (g_audioPreviewVoice >= 0) {
+        g_audioEngine.stop(g_audioPreviewVoice);
+        g_audioPreviewVoice = -1;
+        g_audioPreviewClip.clear();
+    }
+}
+
+// o preview morreu sozinho (fim do clip)? limpa o estado p/ o botão voltar
+// a dizer "Play" — chamado no início do frame
+void audioPreviewTick() {
+    if (g_audioPreviewVoice >= 0 &&
+        !g_audioEngine.playing(g_audioPreviewVoice)) {
+        g_audioPreviewVoice = -1;
+        g_audioPreviewClip.clear();
+    }
+}
+
+// picos em cache por ref (a waveform não recalcula por frame)
+std::vector<f32> g_emptyPeaks;
+const std::vector<f32>& audioPeaksOf(const std::string& rel) {
+    static std::string lastRel;
+    static std::vector<f32> lastPeaks;
+    const GiClip* clip = audioClipFor(rel);
+    if (!clip) {
+        return g_emptyPeaks;
+    }
+    if (lastRel != rel || lastPeaks.empty()) {
+        clip->peaks(160, lastPeaks);
+        lastRel = rel;
+    }
+    return lastPeaks;
+}
+
+// o HOST do workspace (liga o desenho puro ao device)
+editor::AudioWorkspaceHost makeAudioWorkspaceHost() {
+    editor::AudioWorkspaceHost h;
+    h.onImport = []() {
+        // abre o navegador na raiz Music (o áudio do dono vive aí)
+        browserOpen("/storage/emulated/0/Music");
+        g_editor.fileBrowser = true;
+        g_editor.audioMode = true;   // volta ao workspace ao fechar
+    };
+    h.onRecord = []() { audioRecordToggle(); };
+    h.onPreviewToggle = []() { audioPreviewToggle(); };
+    h.onPreviewStop = []() { audioPreviewStop(); };
+    h.onDelete = [](const std::string& rel) {
+        if (!g_storage) {
+            return;
+        }
+        if (g_storage->remove(rel)) {
+            if (g_audioPreviewClip == rel) {
+                audioPreviewStop();
+            }
+            g_audioClips.erase(rel);
+            refreshAudioCatalog();
+            if (g_audioWs.selected >= g_audioCatalog.size() &&
+                !g_audioCatalog.empty()) {
+                g_audioWs.selected =
+                    static_cast<u32>(g_audioCatalog.size()) - 1;
+            }
+            elog::info("audio: clip '%s' apagado", rel.c_str());
+            showToast("clip apagado");
+        }
+    };
+    h.onAssign = []() {
+        Tic* tsel = g_scene.get(g_editor.selected);
+        AudioPlayer* au = tsel ? tsel->getComponent<AudioPlayer>() : nullptr;
+        if (!au) {
+            showToast("selecione um TIC de Audio (Hierarchy)");
+            return;
+        }
+        if (g_audioWs.selected >= g_audioCatalog.size()) {
+            showToast("selecione um clip na lista");
+            return;
+        }
+        au->clipPath = g_audioCatalog[g_audioWs.selected];
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "clip atribuido a '%s'",
+                      tsel->name.c_str());
+        showToast(msg);
+        elog::info("audio: clip '%s' atribuido ao TIC '%s'",
+                   au->clipPath.c_str(), tsel->name.c_str());
+    };
+    h.onRename = []() {
+        // teclado in-app (propósito 7 — o MESMO do renomear de TIC; o
+        // commit vive no frame(): precisa do storage, que é do main)
+        if (g_audioWs.selected < g_audioCatalog.size()) {
+            const std::string& rel = g_audioCatalog[g_audioWs.selected];
+            const size_t slash = rel.rfind('/');
+            const size_t dot = rel.rfind('.');
+            editor::openTextInput(
+                g_editor, 7, Handle{}, -1,
+                rel.substr(slash + 1, dot - slash - 1).c_str());
+        }
+    };
+    h.codecOf = [](const std::string& rel) -> const char* {
+        const GiClip* c = audioClipFor(rel);
+        return c ? giCodecName(c->codec) : "?";
+    };
+    h.durationOf = [](const std::string& rel) -> f32 {
+        const GiClip* c = audioClipFor(rel);
+        return c ? c->duration() : 0.0f;
+    };
+    h.peaksOf = &audioPeaksOf;
+    h.previewing = g_audioPreviewVoice >= 0;
+    h.previewPos = []() -> f32 {
+        return g_audioEngine.voiceProgress(g_audioPreviewVoice);
+    };
+    h.recording = g_audioRec.on.load();
+    h.recordSecs = g_audioRec.secs.load();
+    h.recordLevel = g_audioRec.level.load();
+    return h;
+}
+
+// Problema 3 (hotfix 0.9.3) — memória no ARRANQUE da engine: lê o
+// /proc/self/status (RSS + pico) e loga. POSIX PURO (device + host do
+// c33_virtual); NUNCA falha o boot (leitura best-effort, sem exceções).
+static void logBootMemory(const char* where) {
+    long rssKb = -1, hwmKb = -1;
+    if (FILE* f = ::fopen("/proc/self/status", "r")) {
+        char line[256];
+        while (::fgets(line, sizeof(line), f)) {
+            if (::sscanf(line, "VmRSS: %ld kB", &rssKb) == 1) { continue; }
+            if (::sscanf(line, "VmHWM: %ld kB", &hwmKb) == 1) { break; }
+        }
+        ::fclose(f);
+    }
+    elog::info("boot: memoria (%s) — RSS=%ld kB pico=%ld kB", where, rssKb,
+               hwmKb);
+}
+
+// arranca o backend (boot). 0.9.3 (REG-002/R-006): a CADEIA é
+//   Oboe (primário — google/oboe 1.9.3: AAudio na API 27+ com fallback
+//         OpenSL ES automático nos devices problemáticos como o Unisoc)
+//   → AAudio direto (o fallback fixado: porta StartGate + close-no-errCb)
+//   → AudioTrack (JNI — o fallback final de sempre)
+//   → SEM SOM (o editor funciona; NUNCA crasha por causa do áudio).
+// O arranque corre no INIT_WINDOW (a superfície já existe) — NUNCA no
+// onResume (o padrão exato do tombstone da app antiga: onResume →
+// startAudio direto; o RESUME desta engine só faz resume() do stream
+// vivo, e o StartGate impede o arranque duplo em QUALQUER caso).
+void audioBackendBoot() {
+    g_audioOut.reset(audioout::createOboe());
+    g_audioBackendReady = false;
+    if (g_audioOut && g_audioOut->start(44100, 2)) {
+        g_audioBackendReady = true;
+        elog::info("audio: backend %s ATIVO (44100 Hz stereo pedidos — "
+                   "o stream real manda e o misturador adapta)",
+                   g_audioOut->name());
+        return;
+    }
+    elog::warn("audio: Oboe recusou — fallback AAudio direto (porta R-006)");
+    g_audioOut.reset(audioout::createAAudio());
+    if (g_audioOut && g_audioOut->start(44100, 2)) {
+        g_audioBackendReady = true;
+        elog::info("audio: backend AAudio ATIVO (fallback 1)");
+        return;
+    }
+    elog::warn("audio: AAudio recusou — FALLBACK AudioTrack (documentado)");
+    g_audioOut.reset(audioout::createAudioTrack());
+    if (g_audioOut && g_audioOut->start(44100, 2)) {
+        g_audioBackendReady = true;
+        elog::info("audio: backend AudioTrack ATIVO (fallback 2)");
+        return;
+    }
+    elog::error("audio: NENHUM backend ligou (device sem áudio?) — o editor "
+                "continua SEM SOM");
+    g_audioOut.reset();
+}
+
+// troca o backend vivo (probe mandou fallback): para o atual, cria o novo
+bool audioBackendSwitch(bool toAudioTrack) {
+    if (!g_audioOut) {
+        return false;
+    }
+    const char* from = g_audioOut->name();
+    g_audioOut->stop();
+    g_audioOut.reset(toAudioTrack ? audioout::createAudioTrack()
+                                  : audioout::createOboe());
+    if (g_audioOut && g_audioOut->start(44100, 2)) {
+        g_audioBackendReady = true;
+        elog::warn("audio: TROCA de backend %s -> %s (probe)", from,
+                   g_audioOut->name());
+        return true;
+    }
+    elog::error("audio: troca p/ %s FALHOU — sem som (o misturador segue)",
+                toAudioTrack ? "AudioTrack" : "Oboe");
+    g_audioOut.reset();
+    g_audioBackendReady = false;
+    return false;
+}
+
+// ---- PROBE DE ESTABILIDADE (Settings → diagnóstico): 50× start/stop +
+// 10× pause/resume contra um backend FRESCO (nunca o vivo — o probe mata
+// o stream de propósito); a tabela vai ao engine.log e a DECISÃO
+// (shouldFallback) troca o backend vivo sozinha. 0.9.3: o probe corre
+// contra o OBOE (o primário) — é a estabilidade DELE que decide a troca
+// para AudioTrack ----------------------------------------------------------------
+// ============================================================================
+// 0.9.6 (G6 · R-017) — BENCHMARKS REAIS ======================================
+//
+// A máquina de fases corre DENTRO do frame (um passo por frame; os passos
+// "instantâneos" constroem/medem e avançam no frame seguinte). A parte
+// PURA (amostras/agregação/o bloco de 9 linhas/RSS/GLB de referência)
+// vive em core/Bench — afervada pelo test_core; AQUI fica a orquestração
+// que toca cena/import/probe — o caminho que o FASE 12.9 do c33_virtual
+// repete no CI.
+//
+// P-02: fora do bench o custo é UM if por frame (phase==Idle retorna no
+// topo do tick) — zero alocações, zero consultas, zero medições.
+// ============================================================================
+struct BenchRunner {
+    enum class Phase : u8 {
+        Idle = 0,   // nada em curso (o repo inteiro do frame é UM if)
+        DefRun,     // ~10s a medir a cena default (a que estava aberta)
+        BuildScene, // 1 frame: a cena bench (TICs fixos + mesh EMPACOTADO)
+        Import,     // 1 frame: GLB de referência → importFile (TEMPO) + TIC
+        BenchRun,   // ~10s a medir a cena bench (mesh importado)
+        Texture,    // 1 frame: 512×512 pela MESMA compressão do pipeline
+        Audio,      // 1 frame: o probe de sempre (device; host não mede)
+        Finish,     // 1 frame: RSS/JNI/projeto + relatório no log + limpeza
+        Done        // relatório pronto (Copiar no Diagnóstico)
+    };
+    Phase   phase = Phase::Idle;
+    double  phaseT = 0.0;
+    double  secs = 10.0;             // duração de CADA cena (harness encurta)
+    std::vector<double> samples;     // fps (1/dt) da cena corrente
+    bench::Report report{};
+    std::vector<Handle> benchTics;   // os TICs da cena bench (p/ remover)
+    DrawStats lastTotal{};           // mesma soma da statusLine do frame
+};
+BenchRunner g_bench;
+
+// hooks do harness (FASE 12.9 — o c33_virtual encurta as cenas para o CI
+// não dormir 20s; o PERCURSO é o mesmo, só a duração muda)
+void benchTestHookSetSecs(double s) { g_bench.secs = s; }
+bool benchTestHookDone() { return g_bench.phase == BenchRunner::Phase::Done; }
+const bench::Report& benchTestHookReport() { return g_bench.report; }
+
+static void benchStart() {
+    if (g_bench.phase != BenchRunner::Phase::Idle &&
+        g_bench.phase != BenchRunner::Phase::Done) {
+        showToast("bench: já em curso");
+        return;
+    }
+    bench::Report r{};
+    std::snprintf(r.version, sizeof(r.version), "%s",
+                  buildinfo::g_version);
+    r.versionCode = buildinfo::g_versionCode;
+    // arranques: as marcas do lifecycle deste processo (quem nunca saiu do
+    // foreground não tem warm — o relatório DIZ "não medido")
+    r.warmStartMs = bench::latestWarmMs();
+    r.coldStartMs = bench::latestColdMs();
+    g_bench.report = r;
+    g_bench.samples.clear();
+    g_bench.benchTics.clear();
+    g_bench.phaseT = 0.0;
+    g_bench.phase = BenchRunner::Phase::DefRun;
+    elog::info("bench: início (cena default %.1fs · cena bench %.1fs · "
+               "import+texturas+áudio no meio)", g_bench.secs, g_bench.secs);
+    showToast("bench: a correr — não fechar a app");
+}
+
+// a cena bench (BuildScene): 8×8 TICs em grelha fixa (cubo PRIMITIVO = o
+// mesh EMPACOTADO do engine — determinístico, zero I/O), já com o mesh
+// importado a chegar na fase seguinte. Zero aleatoriedade.
+static void benchBuildScene() {
+    int made = 0;
+    for (int iz = 0; iz < 8; ++iz) {
+        for (int ix = 0; ix < 8; ++ix) {
+            const Handle h = createTicFromPreset(
+                g_scene, PresetKind::Mesh, &g_cubeMesh,
+                g_renderer.litMaterial());
+            if (!h.valid()) {
+                continue;
+            }
+            Tic* t = g_scene.get(h);
+            if (!t) {
+                continue;
+            }
+            char nome[24];
+            std::snprintf(nome, sizeof(nome), "bench%02d", iz * 8 + ix);
+            t->name = nome;
+            if (Transform3D* tr = t->getComponent<Transform3D>()) {
+                tr->pos = Vec3{ (ix - 3.5f) * 2.5f, 0.0f,
+                                (iz - 3.5f) * 2.5f };
+            }
+            g_bench.benchTics.push_back(h);
+            ++made;
+        }
+    }
+    elog::info("bench: cena bench construída (%d TICs, grelha 8×8, cubo "
+               "empacotado)", made);
+}
+
+// o IMPORT de referência (Import): GLB determinístico (core/Bench) →
+// cache dir → convert::importFile DE PRODUÇÃO (o mesmo do worker) com
+// cronómetro → parse + gltfInstantiate: o TIC do mesh IMPORTADO entra na
+// cena bench (é o "mesh importado" da linha 4 do relatório) e a escala
+// do nó é lida do Transform3D REAL (round-trip 2.5 → report).
+static void benchImportRef() {
+    const std::string dir = storage::jniCacheDir();
+    if (dir.empty()) {
+        elog::warn("bench: import não medido — sem cache dir (ponte "
+                   "indisponível)");
+        return;   // importMs fica "não medido" (R-017: nunca inventa)
+    }
+    const std::string path = dir + "/benchref.glb";
+    std::vector<u8> glb;
+    bench::makeReferenceGlb(glb);
+    if (!fileapi::writeAll(path, glb.data(), glb.size())) {
+        elog::warn("bench: import não medido — falha ao escrever '%s' (%s)",
+                   path.c_str(), fileapi::errnoText().c_str());
+        return;
+    }
+    convert::Output out;
+    convert::Stats stats;
+    std::string err;
+    const auto t0 = std::chrono::steady_clock::now();
+    if (!convert::importFile(path, "benchref.glb", *g_storage,
+                             g_pipeline.get(), out, stats, err)) {
+        elog::warn("bench: import FALHOU — %s", err.c_str());
+        return;
+    }
+    const auto t1 = std::chrono::steady_clock::now();
+    g_bench.report.importMs = bench::Measured{
+        true, std::chrono::duration<double, std::milli>(t1 - t0).count() };
+    // o TIC do mesh importado (o parse do MESMO container em memória; o
+    // bindMesh é o GpuAssets REAL — o rebind de produção)
+    GltfModel model;
+    if (parseGlb(glb.data(), glb.size(), GltfBufferResolver{nullptr, 0},
+                 model, err)) {
+        GltfInstantiateCtx ctx;
+        ctx.bindMesh = [](void*, const std::string& ref) -> Mesh* {
+            return g_gpu.mesh(ref);
+        };
+        ctx.material = g_renderer.litMaterial();
+        const Handle h = gltfInstantiate(g_scene, model, "assets/benchref",
+                                         ctx);
+        if (h.valid()) {
+            g_bench.benchTics.push_back(h);
+            if (const Tic* t = g_scene.get(h)) {
+                if (const Transform3D* tr = t->getComponent<Transform3D>()) {
+                    g_bench.report.importScale = bench::Measured{
+                        true, static_cast<double>(tr->scale.x) };
+                }
+            }
+            elog::info("bench: import %.0f ms · TIC instanciado "
+                       "(escala lida do Transform3D: %.1f)",
+                       g_bench.report.importMs.value,
+                       g_bench.report.importScale.value);
+        }
+    } else {
+        elog::warn("bench: parse do GLB de referência falhou — %s",
+                   err.c_str());
+    }
+}
+
+// o tamanho do projeto (Finish): stat REAL ficheiro a ficheiro (a
+// interface statBytes — FsStorage = stat do SO, FakeStorage = bytes em
+// memória p/ o harness); no SAF não há stat — o relatório diz "não medido"
+static u64 benchProjectBytes() {
+    if (!g_storage) {
+        return 0;
+    }
+    u64 total = 0;
+    const char* dirs[] = { Project::kDirScenes, Project::kDirMeshes,
+                           Project::kDirTextures, Project::kDirSource,
+                           Project::kDirAssets };
+    for (const char* d : dirs) {
+        std::vector<std::string> files;
+        if (!g_storage->listDir(d, files)) {
+            continue;
+        }
+        for (const std::string& f : files) {
+            u64 sz = 0;
+            if (g_storage->statBytes(std::string(d) + "/" + f, sz)) {
+                total += sz;
+            }
+        }
+    }
+    std::vector<std::string> rootFiles;
+    if (g_storage->listDir(".", rootFiles)) {
+        for (const std::string& f : rootFiles) {
+            u64 sz = 0;
+            if (g_storage->statBytes(f, sz)) {
+                total += sz;
+            }
+        }
+    }
+    return total;
+}
+
+static void benchCopyReport() {
+    if (g_bench.phase != BenchRunner::Phase::Done) {
+        showToast("bench: sem relatório — Correr bench primeiro");
+        return;
+    }
+    const std::string text = bench::format(g_bench.report);
+    if (storage::jniClipboardCopy(text.c_str())) {
+        showToast("bench: relatório copiado");
+        elog::info("bench: relatório copiado (%zu bytes)", text.size());
+    } else {
+        showToast("bench: clipboard indisponível");
+    }
+}
+
+// o tick (chamado UMA vez por frame, logo após as contagens da cena — a
+// MESMA soma da statusLine: st3d + stGrid + UI do frame anterior)
+static void benchTick(f32 dt, const DrawStats& total) {
+    if (g_bench.phase == BenchRunner::Phase::Idle) {
+        return;   // P-02: o custo de não estar em bench é este if
+    }
+    g_bench.lastTotal = total;
+    const double d = static_cast<double>(dt);
+    switch (g_bench.phase) {
+    case BenchRunner::Phase::DefRun:
+        if (d > 0.0) {
+            g_bench.samples.push_back(1.0 / d);
+        }
+        g_bench.phaseT += d;
+        if (g_bench.phaseT >= g_bench.secs) {
+            g_bench.report.def = bench::aggregate(g_bench.samples);
+            g_bench.report.defVerts = bench::Measured{
+                true, static_cast<double>(total.vertices) };
+            g_bench.report.defDc = bench::Measured{
+                true, static_cast<double>(total.drawCalls) };
+            g_bench.phase = BenchRunner::Phase::BuildScene;
+        }
+        break;
+    case BenchRunner::Phase::BuildScene:
+        benchBuildScene();
+        g_bench.phase = BenchRunner::Phase::Import;
+        break;
+    case BenchRunner::Phase::Import:
+        benchImportRef();
+        g_bench.samples.clear();
+        g_bench.phaseT = 0.0;
+        g_bench.phase = BenchRunner::Phase::BenchRun;
+        break;
+    case BenchRunner::Phase::BenchRun:
+        if (d > 0.0) {
+            g_bench.samples.push_back(1.0 / d);
+        }
+        g_bench.phaseT += d;
+        if (g_bench.phaseT >= g_bench.secs) {
+            g_bench.report.scene = bench::aggregate(g_bench.samples);
+            g_bench.report.sceneVerts = bench::Measured{
+                true, static_cast<double>(total.vertices) };
+            g_bench.report.sceneDc = bench::Measured{
+                true, static_cast<double>(total.drawCalls) };
+            g_bench.phase = BenchRunner::Phase::Texture;
+        }
+        break;
+    case BenchRunner::Phase::Texture: {
+        // 512×512 determinístico (gradiente — zero aleatoriedade) pela
+        // MESMA máquina do pipeline (HardwareCompressor global: ASTC se a
+        // extensão existe, senão ETC2 — a escolha que o device faz)
+        RawImage img;
+        img.width = 512;
+        img.height = 512;
+        img.rgba.resize(512 * 512 * 4);
+        for (u32 y = 0; y < 512; ++y) {
+            for (u32 x = 0; x < 512; ++x) {
+                const size_t i = (static_cast<size_t>(y) * 512 + x) * 4;
+                img.rgba[i + 0] = static_cast<u8>(x >> 1);
+                img.rgba[i + 1] = static_cast<u8>(y >> 1);
+                img.rgba[i + 2] = static_cast<u8>((x ^ y) >> 1);
+                img.rgba[i + 3] = 255;
+            }
+        }
+        CompressedImage ci;
+        std::string cerr;
+        const auto t0 = std::chrono::steady_clock::now();
+        if (g_hwCompressor.compress(img, ci, cerr)) {
+            const auto t1 = std::chrono::steady_clock::now();
+            g_bench.report.texMs = bench::Measured{
+                true, std::chrono::duration<double, std::milli>(t1 - t0)
+                          .count() };
+            std::snprintf(g_bench.report.texFormat,
+                          sizeof(g_bench.report.texFormat), "%s",
+                          formatName(ci.format));
+            elog::info("bench: textura %s em %.0f ms",
+                       g_bench.report.texFormat,
+                       g_bench.report.texMs.value);
+        } else {
+            elog::warn("bench: compressão falhou — %s", cerr.c_str());
+        }
+        g_bench.phase = BenchRunner::Phase::Audio;
+        break;
+    }
+    case BenchRunner::Phase::Audio: {
+#if defined(__ANDROID__)
+        // device REAL (o APK): o MESMO probe do Settings (50+10 ciclos) —
+        // a linha do relatório é a mesma medição, não uma repetição. A
+        // guarda é de COMPILAÇÃO: o host/CI não tem device de áudio — o
+        // probe aqui seria uma medição do stub, e o R-017 manda DIZER
+        // "não medido" em vez de medir mentira
+        {
+            std::unique_ptr<audioout::Backend> probe(audioout::createOboe());
+            const audioout::ProbeResult r =
+                audioout::runProbe(probe.get(), 50, 10, 0);
+            probe->stop();
+            const u32 totalC = r.cycles + r.pauseCycles;
+            const u32 okC = totalC - r.failures - r.pauseFailures;
+            g_bench.report.audioOk = okC > totalC ? 0 : okC;
+            g_bench.report.audioTotal = totalC;
+            std::snprintf(g_bench.report.audioBackend,
+                          sizeof(g_bench.report.audioBackend), "%s",
+                          g_audioOut ? g_audioOut->name() : "?");
+            elog::info("bench: áudio %u/%u ok (backend %s)",
+                       g_bench.report.audioOk, g_bench.report.audioTotal,
+                       g_bench.report.audioBackend);
+        }
+#else
+        elog::info("bench: áudio não medido (host sem device de "
+                   "áudio — o probe corre no aparelho)");
+#endif
+        g_bench.phase = BenchRunner::Phase::Finish;
+        break;
+    }
+    case BenchRunner::Phase::Finish: {
+        bench::Report& r = g_bench.report;
+        const u64 rssKb = bench::readPeakRssKb();
+        if (rssKb > 0) {
+            r.rssPeakMb = bench::Measured{
+                true, static_cast<double>(rssKb) / 1024.0 };
+        }
+        // device/Android/APK (JNI — uma chamada por bench; no host devolve
+        // "" e a linha 1 diz "não medido" em vez de inventar um modelo)
+        const std::string info = storage::jniBenchDeviceInfo();
+        if (!info.empty()) {
+            const auto field = [&info](const char* key) -> std::string {
+                const std::string k = std::string(key) + "=";
+                const size_t p = info.find(k);
+                if (p == std::string::npos) {
+                    return "";
+                }
+                const size_t s = p + k.size();
+                const size_t e = info.find(';', s);
+                return info.substr(s, e == std::string::npos
+                                          ? std::string::npos
+                                          : e - s);
+            };
+            const std::string dev = field("device");
+            std::snprintf(r.device, sizeof(r.device), "%s", dev.c_str());
+            r.sdk = std::atoi(field("sdk").c_str());
+            const u64 apkBytes = std::strtoull(field("apkBytes").c_str(),
+                                               nullptr, 10);
+            if (apkBytes > 0) {
+                r.apkMb = bench::Measured{
+                    true, static_cast<double>(apkBytes) / (1024.0 * 1024.0) };
+            }
+            const std::string sha = field("apkSha");
+            if (sha.size() >= 12) {
+                std::snprintf(r.apkSha, sizeof(r.apkSha), "%.12s…",
+                              sha.c_str());
+                r.apkShaOk = bench::Measured{ true, 1.0 };
+            }
+        }
+        const u64 projBytes = benchProjectBytes();
+        if (projBytes > 0) {
+            r.projMb = bench::Measured{
+                true, static_cast<double>(projBytes) / (1024.0 * 1024.0) };
+        }
+        // o relatório no LOG (o dono cola do logcat se o clipboard falhar)
+        const std::string block = bench::format(r);
+        elog::info("bench: RELATÓRIO\n%s", block.c_str());
+        // a cena bench SAI (o editor volta exatamente ao que era — a cena
+        // default do dono nunca foi tocada; o .gmesh importado fica em
+        // assets/ e é listado pelo seletor como qualquer import)
+        for (Handle h : g_bench.benchTics) {
+            g_scene.destroy(h);
+        }
+        g_bench.benchTics.clear();
+        if (g_editor.selected.valid() && !g_scene.get(g_editor.selected)) {
+            editor::clearSelection(g_editor);
+        }
+        g_bench.phase = BenchRunner::Phase::Done;
+        showToast("bench: pronto — Copiar relatório no Diagnóstico");
+        break;
+    }
+    case BenchRunner::Phase::Idle:
+    case BenchRunner::Phase::Done:
+        break;   // sem trabalho (o Copiar Relatório é puxado, não empurrado)
+    }
+}
+
+void audioProbeRun() {
+    elog::info("audio: probe a correr (50 ciclos + 10 pause/resume)...");
+    std::unique_ptr<audioout::Backend> probe(audioout::createOboe());
+    const audioout::ProbeResult r =
+        audioout::runProbe(probe.get(), 50, 10, 0);
+    probe->stop();
+    const std::string table = audioout::probeTable(r, "oboe");
+    elog::info("%s", table.c_str());
+    if (r.shouldFallback() && g_audioOut && g_audioOut->ready() &&
+        std::strcmp(g_audioOut->name(), "oboe") == 0) {
+        audioBackendSwitch(true);
+        showToast("audio: backend instavel — AudioTrack ATIVO");
+    } else if (!r.shouldFallback()) {
+        showToast("audio: estavel (probe ok)");
+    } else {
+        showToast("audio: probe falhou — ver engine.log");
+    }
+}
+
+// play/stop de um AudioPlayer pelo MISTURADOR (o caminho ÚNICO: Play,
+// preview, tyker play())
+void audioPlayerStart(Tic& t) {
+    AudioPlayer* au = t.getComponent<AudioPlayer>();
+    if (!au || !au->hasClip()) {
+        return;
+    }
+    const GiClip* clip = audioClipFor(au->clipPath);
+    if (!clip) {
+        showToast("clip de áudio não encontrado");
+        return;
+    }
+    // posicional: a posição VIVA do TIC (o listener é a câmara)
+    Vec3 pos{0.0f, 0.0f, 0.0f};
+    if (const Transform3D* tr = t.getComponent<Transform3D>()) {
+        pos = tr->pos;
+    }
+    au->voiceId = g_audioEngine.play(clip, au->loop, au->volume, au->pitch);
+    if (au->voiceId >= 0 && au->posicional) {
+        g_audioEngine.setPosicional(au->voiceId, true, pos, au->raioInterno,
+                                    au->raioExterno);
+    }
+    elog::info("audio: play '%s' no TIC '%s' (vol %.2f pitch %.2f%s)",
+               au->clipPath.c_str(), t.name.c_str(), au->volume, au->pitch,
+               au->posicional ? " posicional" : "");
+}
+void audioPlayerStop(Tic& t) {
+    if (AudioPlayer* au = t.getComponent<AudioPlayer>()) {
+        if (au->voiceId >= 0) {
+            g_audioEngine.stop(au->voiceId);
+            au->voiceId = -1;
+        }
+    }
+}
+
+// o PREVIEW do INSPECTOR (o botão "ouvir" do AudioPlayer): o Inspector
+// (puro) só faz toggle do flag `previewing`; AQUI o main mapeia o flag ao
+// misturador — o mesmo caminho do Play
+void audioPreviewTick(Tic& t) {
+    AudioPlayer* au = t.getComponent<AudioPlayer>();
+    if (!au) {
+        return;
+    }
+    if (au->previewing && au->voiceId < 0) {
+        const GiClip* clip = audioClipFor(au->clipPath);
+        if (!clip) {
+            au->previewing = false;
+            showToast("clip de áudio não encontrado");
+            return;
+        }
+        au->voiceId = g_audioEngine.play(clip, au->loop, au->volume, au->pitch);
+        if (au->voiceId >= 0 && au->posicional) {
+            if (const Transform3D* tr = t.getComponent<Transform3D>()) {
+                g_audioEngine.setPosicional(au->voiceId, true, tr->pos,
+                                            au->raioInterno, au->raioExterno);
+            }
+        }
+        elog::info("audio: preview no TIC '%s' ('%s')", t.name.c_str(),
+                   au->clipPath.c_str());
+    } else if (!au->previewing && au->voiceId >= 0) {
+        g_audioEngine.stop(au->voiceId);
+        au->voiceId = -1;
+    } else if (au->previewing && au->voiceId >= 0 &&
+               !g_audioEngine.playing(au->voiceId)) {
+        // fim natural do clip (sem loop): o botão volta a "ouvir"
+        au->voiceId = -1;
+        au->previewing = false;
+    }
+}
+
+// ENTRAR em Play: autoplay liga (a regra do componente); SAIR: tudo para
+void audioEnterPlay() {
+    g_scene.forEachActive([&](Tic& t) {
+        AudioPlayer* au = t.getComponent<AudioPlayer>();
+        if (au && au->autoplay) {
+            au->previewing = false;   // o Play manda; preview não
+            audioPlayerStart(t);
+        }
+    });
+}
+void audioLeavePlay() {
+    g_audioEngine.stopAll();
+    g_scene.forEachActive([&](Tic& t) {
+        if (AudioPlayer* au = t.getComponent<AudioPlayer>()) {
+            au->voiceId = -1;
+        }
+    });
+}
+
+// listener = olho da câmara ATIVA (posicional atenua contra isto)
+void audioUpdateListener() {
+    Tic* camT = g_editor.playMode ? findActiveCameraTic(g_scene) : nullptr;
+    if (camT) {
+        if (const Transform3D* tr = camT->getComponent<Transform3D>()) {
+            g_audioEngine.setListener(tr->pos);
+        }
+    } else {
+        g_audioEngine.setListener(g_camera.eye());
+    }
+    // vozes posicionais seguem a POS VIVA dos TICs
+    g_scene.forEachActive([&](Tic& t) {
+        AudioPlayer* au = t.getComponent<AudioPlayer>();
+        if (au && au->voiceId >= 0 && au->posicional) {
+            if (const Transform3D* tr = t.getComponent<Transform3D>()) {
+                g_audioEngine.setPosicional(au->voiceId, true, tr->pos,
+                                            au->raioInterno, au->raioExterno);
+            }
+        }
+    });
+}
+
+// ---- 0.8.11: GRAVAÇÃO (mic → .gi ADPCM) -------------------------------------
+// DEVICE: AudioRecord (JNI) numa thread própria — PCM16 mono 44100 lido por
+// read(short[]) blocking; STOP → writeGi ADPCM → audio/rec-<unix>.gi.
+// HOST/CI: um "mic" SINTÉTICO (senoide 440 Hz) pela MESMA máquina de
+// estados (thread + mutex + t0 + level) — o teste afera o wiring inteiro
+// sem hardware (o caminho JNI compila só no build Android, que o CI
+// assembleRelease verifica; o padrão do StorageBridge). O guard `on` mata
+// o worker; o PCM viaja sob mutex.
+#ifdef __ANDROID__
+// worker do DEVICE: AudioRecord real (mic). A thread NASCE desanexada — o
+// attach usa a VM registada pelo audioout::setVm (android_main corre antes
+// de qualquer gravação ser possível). Falha de JNI = worker sai com log;
+// o toggle devolve o estado limpo ao utilizador.
+static void audioRecWorker(AudioRec& rec) {
+    JNIEnv* env = nullptr;
+    jint rc = 0;
+    if (!g_audioVm) {
+        elog::error("audio: gravacao sem VM registada");
+        return;
+    }
+    rc = g_audioVm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+    if (rc == JNI_EDETACHED) {
+        JavaVMAttachArgs args {};
+        args.version = JNI_VERSION_1_6;
+        args.name    = "goni-rec";
+        rc = g_audioVm->AttachCurrentThread(&env, &args);
+    }
+    if (rc != JNI_OK || !env) {
+        elog::error("audio: gravacao sem JNIEnv (rc=%d)", static_cast<int>(rc));
+        return;
+    }
+    // getMinBufferSize(44100, CHANNEL_IN_MONO=16, ENCODING_PCM_16BIT=2)
+    jclass arCls = env->FindClass("android/media/AudioRecord");
+    if (!arCls || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        elog::error("audio: AudioRecord não resolvida (RECORD_AUDIO concedida?)");
+        return;
+    }
+    jmethodID getMin = env->GetStaticMethodID(
+        arCls, "getMinBufferSize", "(III)I");
+    jmethodID ctor = env->GetMethodID(
+        arCls, "<init>", "(IIIII)V");
+    jmethodID startRec = env->GetMethodID(arCls, "startRecording", "()V");
+    jmethodID readM = env->GetMethodID(arCls, "read", "([SII)I");
+    jmethodID stopM = env->GetMethodID(arCls, "stop", "()V");
+    jmethodID relM = env->GetMethodID(arCls, "release", "()V");
+    if (!getMin || !ctor || !startRec || !readM || !stopM || !relM) {
+        env->ExceptionClear();
+        elog::error("audio: métodos do AudioRecord não achados");
+        return;
+    }
+    const jint minBuf = env->CallStaticIntMethod(
+        arCls, getMin, static_cast<jint>(rec.sampleRate),
+        16 /*CHANNEL_IN_MONO*/, 2 /*ENCODING_PCM_16BIT*/);
+    if (env->ExceptionCheck() || minBuf <= 0) {
+        env->ExceptionClear();
+        elog::error("audio: getMinBufferSize devolveu %d", static_cast<int>(minBuf));
+        return;
+    }
+    jobject rec_ = env->NewObject(arCls, ctor,
+                                  1 /*MIC*/, static_cast<jint>(rec.sampleRate),
+                                  16 /*MONO*/, 2 /*PCM16*/,
+                                  minBuf * 4);
+    if (env->ExceptionCheck() || !rec_) {
+        env->ExceptionClear();
+        elog::error("audio: NewObject AudioRecord FALHOU (permissao?)");
+        return;
+    }
+    env->CallVoidMethod(rec_, startRec);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        elog::error("audio: startRecording FALHOU");
+        env->CallVoidMethod(rec_, relM);
+        return;
+    }
+    const jint kChunk = 2048;
+    jshortArray arr = env->NewShortArray(kChunk);
+    while (rec.on.load()) {
+        const jint n = env->CallIntMethod(rec_, readM, arr, 0, kChunk);
+        if (env->ExceptionCheck() || n < 0) {
+            env->ExceptionClear();
+            elog::error("audio: AudioRecord.read FALHOU (%d)", static_cast<int>(n));
+            break;
+        }
+        if (n > 0) {
+            jshort tmp[2048];
+            env->GetShortArrayRegion(arr, 0, n, tmp);
+            i16 peak = 0;
+            {
+                const std::lock_guard<std::mutex> lk(rec.mx);
+                for (jint i = 0; i < n; ++i) {
+                    rec.pcm.push_back(tmp[i]);
+                    if (tmp[i] > peak) {
+                        peak = tmp[i];
+                    }
+                }
+            }
+            rec.level.store(static_cast<f32>(peak) / 32768.0f);
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    env->CallVoidMethod(rec_, stopM);
+    env->CallVoidMethod(rec_, relM);
+    env->ExceptionClear();
+    env->DeleteLocalRef(arr);
+    env->DeleteLocalRef(rec_);
+}
+#else
+// worker do HOST/CI: o mic SINTÉTICO — senoide 440 Hz mono; a MESMA
+// máquina de estados (append sob mutex + level do pico). Gera ~10× mais
+// rápido que o tempo real para os testes serem rápidos.
+static void audioRecWorker(AudioRec& rec) {
+    double t = 0.0;
+    const double dt = 1.0 / static_cast<double>(rec.sampleRate);
+    const i16 kAmp = 12000;
+    while (rec.on.load()) {
+        i16 peak = 0;
+        {
+            const std::lock_guard<std::mutex> lk(rec.mx);
+            for (int i = 0; i < 2205; ++i) {   // 50 ms de cada vez
+                const double s = std::sin(t * 2.0 * 3.14159265358979 * 440.0);
+                const i16 v = static_cast<i16>(s * kAmp);
+                rec.pcm.push_back(v);
+                if (v > peak) {
+                    peak = v;
+                }
+                t += dt;
+            }
+        }
+        rec.level.store(static_cast<f32>(peak) / 32768.0f);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+}
+#endif
+
+// o toggle do botão GRAVAR: arranca o worker; volta = STOP → o PCM vira
+// .gi ADPCM no projeto (audio/rec-<unix>.gi) + catálogo + log do rácio
+#ifdef __ANDROID__
+// DEVICE: o mic pede a RECORD_AUDIO runtime (VvActivity.ensureMicPermission
+// — o diálogo abre na 1ª vez; o dono re-toca GRAVAR e segue). Sem a ponte =
+// gravação desligada com log (o resto do áudio segue)
+static bool audioMicGranted() {
+    return storage::jniEnsureMicPermission();
+}
+#else
+// HOST/CI: o mic é SINTÉTICO — sem modelo de permissões (a PONTE real é
+// aferida à parte, contra o fake JNI)
+static bool audioMicGranted() {
+    return true;
+}
+#endif
+void audioRecordToggle() {
+    if (!g_audioRec.on.load()) {
+        if (!g_storage) {
+            showToast("sem projeto (gravacao guarda no projeto)");
+            return;
+        }
+        if (!audioMicGranted()) {
+            showToast("conceda o microfone e toque Gravar de novo");
+            elog::info("audio: gravacao a espera da permissao do mic");
+            return;
+        }
+        {
+            const std::lock_guard<std::mutex> lk(g_audioRec.mx);
+            g_audioRec.pcm.clear();
+        }
+        g_audioRec.on.store(true);
+        g_audioRec.secs.store(0);
+        g_audioRec.level.store(0.0f);
+        g_audioRec.t0 = std::chrono::steady_clock::now();
+        g_audioRec.th = std::thread(audioRecWorker, std::ref(g_audioRec));
+        elog::info("audio: gravacao ARRANCA (mic 44100 Hz mono → ADPCM)");
+        showToast("a gravar...");
+        return;
+    }
+    // ---- STOP: PCM → .gi ---------------------------------------------------
+    g_audioRec.on.store(false);
+    if (g_audioRec.th.joinable()) {
+        g_audioRec.th.join();
+    }
+    std::vector<i16> pcm;
+    {
+        const std::lock_guard<std::mutex> lk(g_audioRec.mx);
+        pcm.swap(g_audioRec.pcm);
+    }
+    const double secs = std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - g_audioRec.t0)
+                            .count();
+    g_audioRec.level.store(0.0f);
+    if (pcm.size() < 256) {
+        showToast("gravacao curta demais (ignorada)");
+        elog::warn("audio: gravacao com %zu amostras — ignorada", pcm.size());
+        return;
+    }
+    GiWriteIn wi;
+    wi.codec = GiCodec::Adpcm;
+    wi.sampleRate = g_audioRec.sampleRate;
+    wi.channels = 1;
+    wi.frames = pcm.size();
+    wi.pcm16 = pcm.data();
+    wi.name = "rec";
+    std::vector<u8> gi;
+    std::string err;
+    if (!writeGi(wi, gi, err)) {
+        showToast("gravacao falhou (engine.log)");
+        elog::error("audio: writeGi da gravacao FALHOU — %s", err.c_str());
+        return;
+    }
+    char rel[48];
+    std::snprintf(rel, sizeof(rel), "audio/rec-%lld.gi",
+                  static_cast<long long>(std::time(nullptr)));
+    g_storage->makeDirs("audio");
+    if (!g_storage->writeBytes(rel, gi.data(), gi.size())) {
+        showToast("falha ao gravar o clip no projeto");
+        elog::error("audio: gravacao de %s FALHOU", rel);
+        return;
+    }
+    refreshAudioCatalog();
+    // o rácio: PCM16 cru (o "custo" sem codec) vs o .gi final — 4:1 é o
+    // contrato do ADPCM (a linha exigida no log)
+    const double raw = static_cast<double>(pcm.size()) * 2.0;
+    const double ratio = gi.size() > 0 ? raw / static_cast<double>(gi.size())
+                                       : 0.0;
+    elog::info("audio: gravado %.1fs (%zu amostras) → %s (%zu B, ratio=%.1fx "
+               "ADPCM 4:1 vs PCM16)",
+               secs, pcm.size(), rel, gi.size(), ratio);
+    char msg[96];
+    std::snprintf(msg, sizeof(msg), "gravado: %.1fs", secs);
+    showToast(msg);
+}
+
+// o frame() alimenta o temporizador (o worker não mexe em atomics de UI)
+void audioRecTick() {
+    if (g_audioRec.on.load()) {
+        g_audioRec.secs.store(static_cast<int>(std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - g_audioRec.t0).count()));
+    }
+}
+
+// ---- 0.8.10: IMPORT JOB (cópia streaming + conversão em THREAD) -----------
+// O import de 500 MB NUNCA mais corre no frame loop: a cópia por chunks +
+// a conversão vivem numa THREAD própria; o frame() desenha o OVERLAY de
+// progresso (nome, bytes/total, barra) com botão CANCELAR; o FINALIZE
+// (catálogo, diálogo "aplicar ao TIC?") corre no frame() quando o job
+// sinaliza done — só a thread principal toca na cena/UI/GL. A RAM de pico
+// do job é um chunk (6 MB) + um range + um CompressedImage — nunca a fonte.
+struct ImportJob {
+    std::thread worker;
+    std::atomic<bool> active{false};   // job a correr (overlay visível)
+    std::atomic<bool> done{false};     // worker terminou (join no main)
+    std::atomic<bool> cancel{false};   // botão cancelar (o job observa)
+    std::atomic<u64> bytesDone{0};
+    std::atomic<u64> bytesTotal{0};
+    // resultado — SÓ o worker escreve; o main lê APÓS done==true
+    convert::Output out;
+    convert::Stats stats;
+    zip::ExtractStats zipStats;        // modo extract
+    int  mode = 0;                     // 0=import; 1=EXTRACT (archive)
+    std::string destDir;               // "extracted/<nome>" (modo 1)
+    std::string err;
+    std::string fileName;   // p/ o overlay e o diálogo
+} g_importJob;
+
+// ---- 0.10-M HOTFIX P0 — O JOB DO EXPAND (lotes por frame) ------------------
+// A cura (a) do dono: o expand INTEIRO no frame do finalize travava a UI
+// (importJobFinish corre na thread da UI — criar+configurar+ligar N TICs
+// de uma vez com blockHull+matBindsOf por peça = ANR no city e pior num
+// modelo grande). O job mantém o GltfExpandBatch vivo ENTRE frames; o
+// frame corre UM tick no PONTO SEGURO (o mesmo do importJobFinish) e o
+// overlay mostra o progresso (done/total) com o cancelamento limpo.
+// O finalize (composeWorlds + fit + seleção + toast) corre no frame em
+// que a última tick acaba — o MESMO estado final do caminho de sempre.
+// O job é DONO das cópias dos registos/refs (o g_importJob.out pode ser
+// sobreposto por um import novo — o guard do lançamento recusa import
+// com o expand a correr, mas a cópia é a defesa barata: ~200 KB a 2000).
+struct ExpandJob {
+    bool active = false;               // SÓ a thread da UI toca (sem átomos)
+    GltfExpandBatch batch;
+    std::vector<convert::Output::NodeOut> nodes;   // A CÓPIA (dono)
+    std::vector<std::string> refs;                 // A CÓPIA (dono)
+} g_expandJob;
+
+// progresso do job (chamado na THREAD do job): atualiza os atómicos e
+// devolve false quando o utilizador cancelou
+bool importJobProgress(void* user, u64 doneBytes, u64 totalBytes) {
+    ImportJob* job = static_cast<ImportJob*>(user);
+    job->bytesDone.store(doneBytes);
+    job->bytesTotal.store(totalBytes);
+    return !job->cancel.load();
+}
+
+// 0.10.6 (SAF-SEAM) — A LINHA «bytes/total» DO OVERLAY DE IMPORT, EXTRAÍDA
+// em função PURO com NOME (o padrão applyImportedAssetToSelectedTic: o
+// MESMO código corre no device e na suíte). O CONTRATO da spec:
+//   • o total vem do length do BRIDGE (os atómicos do job — a ponte
+//     worker→UI); length=0 (o bridge AINDA não anunciou, ou o provider
+//     mentiu no tamanho) com a fonte NÃO vazia → «copiando… N B» (os
+//     bytes que JÁ correram) — quando o valor REAL chega, MUDA para a
+//     fração;
+//   • NUNCA «0 / 0»: a linha de sempre dividia por MB e um total
+//     sub-megabyte (o cut reporta TRIÂNGULOS; o assembly, bytes de
+//     SAÍDA; a cópia, bytes da fonte — unidades mistas de sempre)
+//     arredondava para «0 / 0 MB» e o dono via 0/0 num import de 29 MB
+//     A CORRER (o cut do city: 72k «unidades» → 0 MB durante MINUTOS).
+//     Totais < 1 MB mostram-se em B (nunca zero à direita do «/»); sem
+//     total, «copiando…» com o contador.
+std::string importOverlayBytesText(u64 doneB, u64 totalB) {
+    char buf[64];
+    if (totalB == 0) {
+        // length=0: a fonte é REAL (o job corre) — o contador é o que HÁ
+        if (doneB == 0) {
+            std::snprintf(buf, sizeof(buf), "a copiar...");
+        } else {
+            std::snprintf(buf, sizeof(buf), "copiando... %llu B",
+                          static_cast<unsigned long long>(doneB));
+        }
+        return std::string(buf);
+    }
+    if (totalB < 1024ull * 1024ull) {
+        // total conhecido mas sub-MB: BYTES (a divisão de MB mentia «0/0»)
+        std::snprintf(buf, sizeof(buf), "%llu / %llu B",
+                      static_cast<unsigned long long>(doneB),
+                      static_cast<unsigned long long>(totalB));
+        return std::string(buf);
+    }
+    std::snprintf(buf, sizeof(buf), "%llu / %llu MB",
+                  static_cast<unsigned long long>(doneB / (1024ull * 1024ull)),
+                  static_cast<unsigned long long>(totalB / (1024ull * 1024ull)));
+    return std::string(buf);
+}
+
+// lança o job (chamado pelo browserImportFile no toque do utilizador).
+// false = já há um job a correr (não relança — o overlay é modal)
+bool importJobStart(const fileapi::DirEntry& e) {
+    if (g_importJob.active.load()) {
+        return false;
+    }
+    // 0.10-M HOTFIX P0 (a cura (d) — a reentrância): com o expand a correr
+    // NENHUM import arranca (o worker novo escreveria g_importJob.out e a
+    // cena mudaria por baixo do lote) — honesto no toast + no log
+    if (g_expandJob.active) {
+        showToast("expansao em curso — espera ou cancela no overlay");
+        elog::warn("import: recusado — o job do expand (em lotes) está a "
+                   "correr; cancela no overlay ou espera o fim");
+        return false;
+    }
+    if (!g_storage) {
+        return false;
+    }
+    std::string safe = e.name;
+    for (char& ch : safe) {
+        if (ch == '/' || ch == '\\' || ch == ':') ch = '_';
+    }
+    g_importJob.mode = 0;
+    g_importJob.fileName = e.name;   // NO GLOBAL (o local morria — o nome do
+                                     // overlay e o "largar fonte" liam vazio)
+    // 0.9.6.4 (GRUPO A) — A ORDEM IMPORTA: done=false ANTES de active=true.
+    // A ordem antiga (active primeiro) deixava uma janela em que o frame
+    // via active=true com done STALADO (true de um job antigo) e corria o
+    // importJobFinish — o JOIN de um worker RECÉM-NASCIDO: a UI BLOQUEAVA
+    // à espera do import inteiro (500 MB!) e finalizava com resultados
+    // AINDA NÃO ESCRITOS. Com done primeiro, um frame na janela vê
+    // active=false e segue — o finalize só acontece com o done NOVO.
+    g_importJob.done.store(false);
+    g_importJob.active.store(true);
+    g_importJob.cancel.store(false);
+    g_importJob.bytesDone.store(0);
+    g_importJob.bytesTotal.store(0);
+    ProjectStorage* st = g_storage.get();
+    TexturePipeline* pipe = g_pipeline.get();
+    const std::string srcPath = e.path;
+    const std::string srcName = safe;
+    // 0.10-M (EXT) — o modo do import capturado NO LANÇAMENTO (o setting
+    // pode mudar durante o job; o job corre com o que o dono escolheu)
+    const bool expandNodes = g_expandNodes;
+    g_importJob.worker = std::thread([st, pipe, srcPath, srcName,
+                                      expandNodes]() {
+        // cópia do estado do job para o LOCAL (o g_importJob fica estável
+        // para o progresso em atómicos; o resultado escreve-se no fim)
+        convert::Output out;
+        convert::Stats stats;
+        std::string err;
+        convert::importFile(srcPath, srcName, *st, pipe, out, stats, err,
+                            &importJobProgress, &g_importJob, expandNodes);
+        g_importJob.out = std::move(out);
+        g_importJob.stats = stats;
+        g_importJob.err = std::move(err);
+        g_importJob.done.store(true);
+    });
+    g_importJob.err.clear();
+    elog::info("import: job iniciado '%s' (thread própria — progresso no "
+               "overlay)", e.path.c_str());
+    return true;
+}
+
+// 0.8.10 — ARCHIVE: o toque num .zip/.rar lança a EXTRAÇÃO (passo 1 de 2).
+// RAR: sem unrar vendido (licença) → erro LEGÍVEL "usa .zip" (a tabela de
+// decisões vive no RELATÓRIO 0.8.10). ZIP: extrai STREAMING para
+// extracted/<nome>/ no projeto — nada é convertido neste passo.
+void browserExtractArchive(const fileapi::DirEntry& e) {
+    if (!g_storage || e.isDir) {
+        return;
+    }
+    const size_t dot = e.name.rfind('.');
+    std::string ext = dot == std::string::npos ? "" : e.name.substr(dot + 1);
+    for (char& c : ext) {
+        if (c >= 'A' && c <= 'Z') {
+            c = static_cast<char>(c - 'A' + 'a');
+        }
+    }
+    if (ext != "zip") {
+        char msg[96];
+        std::snprintf(msg, sizeof(msg),
+                      "rar: formato não suportado ainda — usa .zip");
+        showToast(msg);
+        elog::warn("archive: '%s' — RAR sem decoder (licenca unrar); usa "
+                   ".zip (a decisao esta no relatorio)", e.path.c_str());
+        return;
+    }
+    if (g_importJob.active.load()) {
+        showToast("import ja em curso...");
+        return;
+    }
+    // 0.10-M HOTFIX P0 (a cura (d)): o extract também respeita o expand
+    if (g_expandJob.active) {
+        showToast("expansao em curso — espera ou cancela no overlay");
+        return;
+    }
+    std::string safe = e.name;
+    for (char& ch : safe) {
+        if (ch == '/' || ch == '\\' || ch == ':') ch = '_';
+    }
+    const std::string stem = convert::stemOf(safe);
+    const std::string dest = std::string("extracted/") + stem;
+    ProjectStorage* st = g_storage.get();
+    const std::string srcPath = e.path;
+    g_importJob.mode = 1;
+    g_importJob.destDir = dest;
+    g_importJob.fileName = e.name;
+    g_importJob.active.store(true);
+    g_importJob.done.store(false);
+    g_importJob.cancel.store(false);
+    g_importJob.bytesDone.store(0);
+    g_importJob.bytesTotal.store(0);
+    g_importJob.err.clear();
+    g_importJob.worker = std::thread([st, srcPath, dest]() {
+        zip::ExtractStats zs;
+        std::string err;
+        zip::extractArchive(srcPath, *st, dest, zs, err,
+                            &importJobProgress, &g_importJob);
+        g_importJob.zipStats = zs;
+        g_importJob.err = std::move(err);
+        g_importJob.done.store(true);
+    });
+    elog::info("archive: job de extracao iniciado '%s' → %s (thread "
+               "propria; NADA converte neste passo)", e.path.c_str(),
+               dest.c_str());
+}
+
+// ---- 0.10-M HOTFIX P0 · O CICLO DE VIDA DO JOB DO EXPAND -------------------
+// O gancho POR PEÇA (o MESMO conteúdo do pós-instantiate de sempre, agora
+// por peça dentro do lote): (1) o auto-bind da grade INTEIRA dos materiais
+// do GTB1 (TEXTURAS-MULTIMAT — o material 0 nos campos de sempre, os
+// extras no matExtraTex); (2) o auto-tex da peça de 1 material (o caminho
+// TEXTURAS-VINCULA — o manual do dono nunca é sobrescrito; a peça sem
+// GTB1 segue honesta). TICs recém-nascidos — nada a limpar aqui.
+static void expandJobPerPiece(Scene& scene, Handle h, void* /*user*/) {
+    Tic* t = scene.get(h);
+    MeshRenderer* mr = t ? t->getComponent<MeshRenderer>() : nullptr;
+    if (!mr || mr->meshPath.empty()) {
+        return;
+    }
+    // (1) a grade dos N materiais do GTB1 da peça (a sonda para no false)
+    mr->matExtraTex.clear();
+    std::string binds[MeshRenderer::kMeshTexSlots];
+    u32 mi = 0;
+    while (mi < 64u && g_gpu.matBindsOf(mr->meshPath, mi, binds)) {
+        if (mi == 0) {
+            for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
+                if (!binds[s].empty()) {
+                    mr->texSlotRef(s) = binds[s];
+                }
+            }
+        } else {
+            for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
+                mr->matExtraTex.push_back(binds[s]);
+            }
+        }
+        ++mi;
+    }
+    // (2) o auto-tex da peça de 1 material (binds do BlockMesh aberto pelo
+    // blockHull do configure — o MESMO bloco que o render vai desenhar)
+    if (!mr->texPath.empty()) {
+        return;   // a grade já vinculou o baseColor — o manual não existe
+                  // aqui (recém-nascido), mas o guard é o mesmo de sempre
+    }
+    const BlockMesh* bm = g_gpu.blockMeshIfOpen(mr->meshPath);
+    if (bm == nullptr || bm->binds().empty()) {
+        return;
+    }
+    std::string rel;
+    for (const GMeshMatBind& b : bm->binds()) {
+        if (b.materialIndex == 0) {
+            rel = b.tex[kBindBaseColor];
+            break;
+        }
+    }
+    if (rel.empty()) {
+        return;
+    }
+    if (bm->materials().size() <= 1) {
+        if (const Texture* tex = g_gpu.texture(rel)) {
+            mr->texPath = rel;
+            mr->texture = tex;
+            elog::info("textura: vinculada '%s' slot baseColor -> %s (auto "
+                       "do import)",
+                       t->name.c_str(), rel.c_str());
+        } else {
+            elog::warn("textura: '%s' slot baseColor (%s) SEM ficheiro — o "
+                       "TIC fica sem (reimporta)",
+                       t->name.c_str(), rel.c_str());
+        }
+    }
+}
+
+// o ARRANQUE (o importJobFinish chama — a thread da UI): copia os
+// registos/refs (o job é DONO — o g_importJob.out pode ser sobreposto),
+// monta o ctx do blockHull (o MESMO binder do caminho de sempre) e arma o
+// lote; o progresso/overlay/cancel correm por frame a partir daqui
+void expandJobStart(const convert::Output& out) {
+    g_expandJob.nodes = out.expandNodes;
+    g_expandJob.refs = out.meshes;
+    static GltfInstantiateCtx ictx;   // os ponteiros do batch vivem além
+    ictx.user = &g_gpu;
+    ictx.bindMesh = [](void* user, const std::string& ref) -> Mesh* {
+        // blockHull: abre a peça pela TABELA (zero dados) + cria o hull de
+        // bounds — o blockRebind do ponto seguro do PRÓXIMO frame liga o
+        // BlockMesh* ao MeshRenderer (este frame ainda corre com o
+        // blocks==null dos TICs recém-nascidos)
+        return static_cast<GpuAssets*>(user)->blockHull(ref);
+    };
+    ictx.material = g_renderer.litMaterial();
+    g_expandJob.batch =
+        GltfExpandBatch::start(g_scene, g_expandJob.nodes, g_expandJob.refs,
+                               ictx);
+    g_expandJob.batch.perPiece = &expandJobPerPiece;
+    g_expandJob.batch.perPieceUser = nullptr;
+    g_expandJob.active = true;
+    elog::info("import: EXPANDIDO em lotes — %u peça(s) (%u por frame, "
+               "progresso no overlay; cancelar aí)%s",
+               g_expandJob.batch.total(), kGltfExpandBatchTics,
+               g_importJob.stats.expandLimited > 0
+                   ? " — LIMITE atingido (o resto ficou fora)"
+                   : "");
+}
+
+// o FINALIZE (a última tick acabou): o fit único + a composição + a
+// seleção + o toast/log (o MESMO conteúdo do caminho síncrono de sempre;
+// o aviso do LIMITE entra no toast — nunca silencioso)
+static void expandJobFinalize() {
+    const std::vector<Handle>& created = g_expandJob.batch.handles();
+    const std::vector<convert::Output::NodeOut>& nodes = g_expandJob.nodes;
+    // o FIT único (o MESMO alvo do applyAssetPick 0.8.9): a caixa do
+    // modelo INTEIRO em mundo (união das PEÇAS transformadas) define o
+    // fator — aplicado a CADA TIC novo como pos*=s e scale*=s (a
+    // translação FORA do TRS faz o conjunto encolher NO SÍTIO; o resto da
+    // cena NÃO é tocado — só os handles que ACABARAM de nascer)
+    if (!created.empty()) {
+        Vec3 mn{1e30f, 1e30f, 1e30f}, mx{-1e30f, -1e30f, -1e30f};
+        for (const Handle h : created) {
+            const Tic* owner = g_scene.get(h);
+            const MeshRenderer* mr =
+                owner ? owner->getComponent<MeshRenderer>() : nullptr;
+            // o BlockMesh da PEÇA pelo meshPath (a abertura do binder JÁ
+            // deixou o BlockMesh no mapa do GpuAssets — é ELE que tem o
+            // AABB do meta)
+            const BlockMesh* bm =
+                mr ? (mr->blocks ? mr->blocks
+                                 : g_gpu.blockMeshIfOpen(mr->meshPath))
+                   : nullptr;
+            const Transform3D* tr =
+                owner ? owner->getComponent<Transform3D>() : nullptr;
+            if (!bm || !tr) {
+                continue;
+            }
+            const Vec3 lo = bm->boundsMin();
+            const Vec3 hi = bm->boundsMax();
+            const Vec3 corn[8] = {
+                {lo.x, lo.y, lo.z}, {hi.x, lo.y, lo.z},
+                {lo.x, hi.y, lo.z}, {hi.x, hi.y, lo.z},
+                {lo.x, lo.y, hi.z}, {hi.x, lo.y, hi.z},
+                {lo.x, hi.y, hi.z}, {hi.x, hi.y, hi.z}};
+            for (const Vec3& c : corn) {
+                const Vec3 w{
+                    tr->world.m[0] * c.x + tr->world.m[4] * c.y +
+                        tr->world.m[8] * c.z + tr->world.m[12],
+                    tr->world.m[1] * c.x + tr->world.m[5] * c.y +
+                        tr->world.m[9] * c.z + tr->world.m[13],
+                    tr->world.m[2] * c.x + tr->world.m[6] * c.y +
+                        tr->world.m[10] * c.z + tr->world.m[14]};
+                mn.x = (std::min)(mn.x, w.x);
+                mn.y = (std::min)(mn.y, w.y);
+                mn.z = (std::min)(mn.z, w.z);
+                mx.x = (std::max)(mx.x, w.x);
+                mx.y = (std::max)(mx.y, w.y);
+                mx.z = (std::max)(mx.z, w.z);
+            }
+        }
+        const Vec3 ext{mx.x - mn.x, mx.y - mn.y, mx.z - mn.z};
+        const f32 maior =
+            ext.x > ext.y ? (ext.x > ext.z ? ext.x : ext.z)
+                          : (ext.y > ext.z ? ext.y : ext.z);
+        f32 s = 1.0f;
+        if (maior > 1e-6f && std::isfinite(maior)) {
+            s = editor::kImportTargetSize / maior;
+            if (!std::isfinite(s) || s <= 0.0f) {
+                s = 1.0f;   // defesa: geometria absurda = sem fit
+            }
+        }
+        if (s != 1.0f) {
+            for (size_t i = 0; i < created.size() && i < nodes.size(); ++i) {
+                // 0.10-M HOTFIX (f): a escala SÓ nas RAÍZES — os filhos
+                // têm TRS LOCAL e seguem o pai (escalar todos compunha s²
+                // na profundidade)
+                if (nodes[i].parentRec >= 0) {
+                    continue;
+                }
+                Tic* owner = g_scene.get(created[i]);
+                Transform3D* tr =
+                    owner ? owner->getComponent<Transform3D>() : nullptr;
+                if (tr) {
+                    tr->pos = Vec3{tr->pos.x * s, tr->pos.y * s,
+                                   tr->pos.z * s};
+                    tr->scale = Vec3{tr->scale.x * s, tr->scale.y * s,
+                                     tr->scale.z * s};
+                    tr->updateWorld();
+                }
+            }
+            // os filhos seguem o pai: recomps os mundos pela cadeia
+            gltfExpandComposeWorlds(nodes, created, g_scene);
+        }
+        // o 1º TIC selecionado (o dono VÊ a sub-árvore no inspector)
+        editor::selectTic(g_editor, created[0]);
+    }
+    if (g_importJob.stats.expandLimited > 0) {
+        char wmsg[160];
+        std::snprintf(wmsg, sizeof(wmsg),
+                      "expandido: %u TIC(s) — LIMITE (%u peça(s) fora)",
+                      static_cast<unsigned>(created.size()),
+                      g_importJob.stats.expandLimited);
+        showToast(wmsg);
+        elog::warn("import: EXPANDIDO — LIMITE %u atingido (%u peça(s) "
+                   "ficaram FORA; agrupa o glTF ou importa em partes)",
+                   convert::kGmeshV3ExpandMaxTics,
+                   g_importJob.stats.expandLimited);
+    } else {
+        char emsg[128];
+        std::snprintf(emsg, sizeof(emsg), "expandido: %u TIC(s) na cena",
+                      static_cast<unsigned>(created.size()));
+        showToast(emsg);
+    }
+    elog::info("import: EXPANDIDO — %u TIC(s) criados em lotes de %u (um "
+               "por nó com mesh; nomes do glTF; sub-árvore real — sub-TICs "
+               "com TRS local; culling por TIC pelos blocos)",
+               static_cast<unsigned>(created.size()),
+               kGltfExpandBatchTics);
+}
+
+// O TICK DO FRAME (o ponto seguro chama — o MESMO sítio do
+// importJobFinish): UM lote por frame; o overlay mostra o progresso; o
+// cancel do overlay limpa (os TICs criados MORREM — a cena fica como
+// estava); a última tick corre o finalize no MESMO frame
+void expandJobTick() {
+    if (!g_expandJob.active) {
+        return;
+    }
+    if (g_importJob.cancel.load()) {
+        // o cancelamento LIMPO (a cura do dono): os TICs já nascidos
+        // saem (ordem inversa — os filhos primeiro); a cena fica COMO
+        // ESTAVA e o toast diz a verdade
+        const u32 born = g_expandJob.batch.done();
+        g_expandJob.batch.cancel();
+        g_expandJob.active = false;
+        g_importJob.cancel.store(false);
+        showToast("expansão cancelada (a cena ficou como estava)");
+        elog::info("import: expandir em sub-TICs CANCELADO — %u TIC(s) "
+                   "recém-nascido(s) removido(s) (a cena limpa)",
+                   born);
+        return;
+    }
+    const bool doneNow = g_expandJob.batch.tick();
+    if (doneNow) {
+        expandJobFinalize();
+        g_expandJob.active = false;
+        g_expandJob.nodes.clear();
+        g_expandJob.refs.clear();
+    }
+}
+
+// FINALIZE no frame(): join + catálogo + diálogo aplicar/toast honesto
+void importJobFinish() {
+    if (g_importJob.worker.joinable()) {
+        g_importJob.worker.join();
+    }
+    g_importJob.active.store(false);
+    const bool canceled = g_importJob.stats.canceled;
+    const std::string& err = g_importJob.err;
+    if (canceled) {
+        showToast("import cancelado");
+        elog::info("import: cancelado pelo utilizador (sem estado parcial)");
+        return;
+    }
+    if (g_importJob.mode == 1) {
+        // ---- EXTRACT (passo 1 de 2): pasta com ficheiros CRUS, zero
+        // conversão; o browser ABRE a pasta (o passo 2 — importar — é
+        // manual, pelo fluxo de sempre)
+        const zip::ExtractStats& zs = g_importJob.zipStats;
+        g_importJob.mode = 0;
+        if (!err.empty()) {
+            showToast("extracao falhou (causa no engine.log)");
+            elog::error("archive: extracao FALHOU — %s", err.c_str());
+            return;
+        }
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "extraido: %u ficheiro(s) crus",
+                      zs.files);
+        showToast(msg);
+        elog::info("archive: extraido %u ficheiro(s) para %s (%u zip-slip "
+                   "rejeitado(s), %u aninhado(s) ignorado(s))",
+                   zs.files, g_importJob.destDir.c_str(), zs.rejected,
+                   zs.nested);
+        // o navegador abre a PASTA EXTRAÍDA (ficheiros crus visíveis)
+        const std::string abs =
+            joinRelPath(g_storage ? g_storage->root() : "",
+                        g_importJob.destDir);
+        if (!abs.empty()) {
+            browserOpen(abs);
+            g_editor.fileBrowser = true;
+        }
+        return;
+    }
+    if (!err.empty()) {
+        showToast("import falhou (causa no engine.log)");
+        elog::error("import: FALHOU — %s", err.c_str());
+        return;
+    }
+    // sucesso: catálogo vê os convertidos; pergunta "aplicar ao TIC?"
+    refreshCatalog();
+    // 0.8.10 — setting "largar a fonte": o convertido está garantido em
+    // assets/; a fonte sai (o botão "reconverter" reconverte quem ficar)
+    if (!g_keepSource && g_storage) {
+        const std::string srcRel =
+            std::string("source/") + g_importJob.fileName;
+        if (g_storage->remove(srcRel)) {
+            elog::info("import: fonte '%s' largada (setting) — convertido "
+                       "vive em assets/", srcRel.c_str());
+        }
+    }
+    const convert::Output& out = g_importJob.out;
+    char msg[128];
+    // 0.9.6.4 (GRUPO A · A3 — NUNCA SILENCIOSO): texturas que falharam
+    // (imagem podre, bufferView fora do buffer, mime não-PNG) DIZEM-SE no
+    // toast — o import SEGUE sem elas e o dono SABE (as causas estão no
+    // engine.log, uma linha por falha)
+    if (g_importJob.stats.texWarn > 0 && g_importJob.stats.primWarn > 0) {
+        std::snprintf(msg, sizeof(msg),
+                      "importado: %u mesh(es) — SEM %u textura(s) e %u "
+                      "primitiva(s) (avisos no engine.log)",
+                      out.meshes.empty() ? 0u
+                                         : static_cast<unsigned>(
+                                               out.meshes.size()),
+                      g_importJob.stats.texWarn, g_importJob.stats.primWarn);
+    } else if (g_importJob.stats.texWarn > 0) {
+        std::snprintf(msg, sizeof(msg),
+                      "importado: %u mesh(es) — SEM %u textura(s) (avisos no "
+                      "engine.log)",
+                      out.meshes.empty() ? 0u
+                                         : static_cast<unsigned>(
+                                               out.meshes.size()),
+                      g_importJob.stats.texWarn);
+    } else if (g_importJob.stats.primWarn > 0) {
+        std::snprintf(msg, sizeof(msg),
+                      "importado: %u mesh(es) — %u primitiva(s) FORA "
+                      "(bufferView fora do buffer; avisos no engine.log)",
+                      out.meshes.empty() ? 0u
+                                         : static_cast<unsigned>(
+                                               out.meshes.size()),
+                      g_importJob.stats.primWarn);
+    } else {
+        std::snprintf(msg, sizeof(msg), "importado: %u mesh(es), %u tex (%llu B)",
+                      out.meshes.size() + out.textures.size() > 0
+                          ? static_cast<unsigned>(out.meshes.size())
+                          : 0u,
+                      static_cast<unsigned>(out.textures.size()),
+                      static_cast<unsigned long long>(
+                          g_importJob.stats.outputBytes));
+    }
+    showToast(msg);
+    if (g_importJob.stats.texWarn > 0) {
+        elog::warn("import: %u textura(s) ficaram FORA (causas acima — o "
+                   "modelo entrou com material por defeito)",
+                   g_importJob.stats.texWarn);
+    }
+    if (g_importJob.stats.siblings > 0) {
+        elog::info("import: %u irmao(s) do .gltf copiado(s) para source/ "
+                   "(o reconvert funciona sem a pasta original)",
+                   g_importJob.stats.siblings);
+    }
+    // ---- 0.10-M (EXT) · A SUB-ÁRVORE ENTRA NA CENA (EM LOTES — P0) -------
+    // O import EXPANDIDO (setting «expandir em sub-TICs»): um TIC por nó com
+    // mesh — nomes do glTF preservados, a transformação no Transform3D, o
+    // MeshRenderer com a ref da PEÇA, as peças POR BLOCOS (kGmeshV3FlagPiece
+    // → blockHull). 0.10-M HOTFIX P0: NADA disto corre SÍNCRONO aqui — o
+    // importJobFinish é a thread da UI e o expand inteiro de uma vez era o
+    // ANR do dono (cura (a)). O job arranca AQUI e o frame corre UM lote
+    // por tick no ponto seguro, com progresso no overlay + cancelamento
+    // limpo (o overlay é o MESMO, agora com a fase «A EXPANDIR…»).
+    // GUARDA (a cura (d)): em PLAY a cena está a simular — o expand
+    // ADIA-SE (honesto: o modelo entra FUNDIDO? NÃO — os ficheiros já
+    // estão no disco; o dono reimporta fora do play).
+    if (!out.expandNodes.empty()) {
+        if (g_editor.playMode) {
+            showToast("expandir em sub-TICs adiado (estava em play)");
+            elog::warn("import: EXPANDIDO adiado — a cena estava em PLAY "
+                       "(os %u peça(s) ficam nos assets; reimporta fora do "
+                       "play para as ver na cena)",
+                       static_cast<unsigned>(out.expandNodes.size()));
+            return;
+        }
+        expandJobStart(out);
+        return;   // SEM diálogo «aplicar ao TIC?» — os TICs (em lotes) são
+                  // o resultado; o overlay mostra o progresso
+    }
+    Tic* tsel = g_scene.get(g_editor.selected);
+    if (tsel && tsel->getComponent<MeshRenderer>() &&
+        (!out.meshes.empty() || !out.textures.empty())) {
+        g_applyAsk.open = true;
+        g_applyAsk.kind = !out.meshes.empty() ? 'm' : 't';
+        g_applyAsk.rel = !out.meshes.empty() ? out.meshes[0]
+                                             : out.textures[0];
+        g_applyAsk.fileName = g_importJob.fileName;
+        g_editor.applyAsk = true;
+        elog::info("import: dialogo 'aplicar ao TIC?' aberto (%s → TIC '%s')",
+                   g_applyAsk.rel.c_str(), tsel->name.c_str());
+    }
+}
+
+// 0.8.11 — IMPORT DE ÁUDIO pelo navegador: fonte → .gi em audio/ + a
+// pergunta "aplicar ao TIC?" quando há AudioPlayer selecionado; o clip
+// entra no catálogo (Inspector + workspace ÁUDIO)
+void browserImportAudio(const fileapi::DirEntry& e) {
+    if (!g_storage || e.isDir) {
+        return;
+    }
+    // guarda de TAMANHO: o decode do áudio é em RAM (o streaming de 500 MB
+    // é para GEOMETRIA); um "áudio" de centenas de MB é lixo/corrompido
+    u64 srcBytes = 0;
+    if (fileapi::fileSize(e.path, srcBytes) && srcBytes > (256ull << 20)) {
+        showToast("audio demasiado grande (max 256 MB)");
+        elog::error("audio: import de '%s' recusado (%llu B > 256 MB)",
+                    e.path.c_str(), static_cast<unsigned long long>(srcBytes));
+        return;
+    }
+    std::vector<u8> bytes;
+    if (!fileapi::readAll(e.path.c_str(), bytes) || bytes.empty()) {
+        showToast("leitura falhou (causa no engine.log)");
+        elog::error("audio: leitura de '%s' FALHOU — %s", e.path.c_str(),
+                    fileapi::errnoText().c_str());
+        return;
+    }
+    GiImportOut out;
+    std::string err;
+    if (!importAudioToGi(bytes.data(), bytes.size(), e.name, out, err)) {
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "audio falhou (%s)", err.c_str());
+        showToast(msg);
+        elog::error("audio: import de '%s' FALHOU — %s", e.path.c_str(),
+                    err.c_str());
+        return;
+    }
+    g_storage->makeDirs("audio");
+    std::string safe = convert::sanitizeName(e.name);
+    const std::string rel =
+        std::string("audio/") + convert::stemOf(safe) + ".gi";
+    if (!g_storage->writeBytes(rel, out.gi.data(), out.gi.size())) {
+        showToast("falha ao gravar o clip no projeto");
+        elog::error("audio: gravacao de %s FALHOU", rel.c_str());
+        return;
+    }
+    // o RÁCIO no log (a linha exigida pelo prompt)
+    const double ratio = out.gi.size() > 0
+        ? static_cast<double>(out.sourceBytes) /
+          static_cast<double>(out.gi.size())
+        : 0.0;
+    elog::info("audio: import %s codec=%s ratio=%.2fx (%llu B -> %zu B, "
+               "%uch %uHz %.2fs)",
+               rel.c_str(), giCodecName(out.codec), ratio,
+               static_cast<unsigned long long>(out.sourceBytes),
+               out.gi.size(), out.channels, out.sampleRate, out.duration);
+    refreshAudioCatalog();
+    char msg[96];
+    std::snprintf(msg, sizeof(msg), "clip: %s (%.1fs)",
+                  convert::stemOf(safe).c_str(), out.duration);
+    showToast(msg);
+    // aplicar ao TIC selecionado (se tem AudioPlayer)
+    Tic* tsel = g_scene.get(g_editor.selected);
+    if (tsel && tsel->getComponent<AudioPlayer>()) {
+        g_applyAsk.open = true;
+        g_applyAsk.kind = 'a';   // áudio
+        g_applyAsk.rel = rel;
+        g_applyAsk.fileName = e.name;
+        g_editor.applyAsk = true;
+        elog::info("audio: dialogo 'aplicar ao TIC?' aberto (%s → '%s')",
+                   rel.c_str(), tsel->name.c_str());
+    }
+}
+
+// o toque no ficheiro escolhido: lança o JOB (streaming + conversão).
+// 0.9.6.4 (GRUPO A · A4): devolve FALSE quando o toque foi tratado SEM
+// importar e o browser deve CONTINUAR ABERTO (o ficheiro desapareceu — a
+// lista re-lista no sítio); true = caminho encaminhado (job/extract/audio/
+// erro de formato) e o dispatch fecha o browser como sempre.
+bool browserImportFile(const fileapi::DirEntry& e) {
+    if (!g_storage || e.isDir) {
+        return true;
+    }
+    // 0.9.6.4 (GRUPO A · A4) — ISFILE ANTES DO JOB: a lista do browser foi
+    // feita quando abriu; o ficheiro pode ter sido apagado/renomeado
+    // desde então. O toque num fantasma diz O QUE aconteceu e RE-LISTA a
+    // pasta no sítio (antes: o job arrancava e morria num «fonte ilegivel»
+    // seco).
+    if (!fileapi::isFile(e.path)) {
+        char msg[128];
+        std::snprintf(msg, sizeof(msg),
+                      "ficheiro não encontrado: %s (a lista atualizou)",
+                      e.name.c_str());
+        showToast(msg);
+        elog::warn("import: '%s' desapareceu de '%s' (lista desatualizada) "
+                   "— browser re-listado", e.name.c_str(), e.path.c_str());
+        // re-lista SEM fechar: o utilizador vê a pasta COMO ESTÁ
+        g_browser.failed =
+            !fileapi::listDirEntries(g_browser.cwd, g_browser.entries);
+        return false;
+    }
+    elog::info("import: ficheiro '%s' escolhido no navegador (1 toque = "
+               "seleciona/importa)", e.path.c_str());
+    // 0.8.10 — ARCHIVE (.zip/.rar): EXTRAIR (passo 1 de 2) — utilitário
+    // SEM conversão; o import de dentro da pasta extraída é que converte
+    if (e.kind == 'a') {
+        browserExtractArchive(e);
+        return true;
+    }
+    // 0.8.11 — ÁUDIO (.wav/.ogg/.mp3): importa → audio/<nome>.gi (ADPCM
+    // 4:1 ou passthrough) — síncrono (o decode é rápido; o overlay de
+    // progresso é para os 500 MB de geometria) com log do rácio
+    if (e.kind == 's') {
+        browserImportAudio(e);
+        return true;
+    }
+    // 0.8.5 — FORMATO NÃO SUPORTADO → ERRO CLARO (nunca silêncio)
+    if (e.kind == 0) {
+        const size_t dot = e.name.rfind('.');
+        const std::string ext = dot == std::string::npos
+                                    ? "(sem extensão)"
+                                    : e.name.substr(dot);
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "formato não suportado ainda: %s",
+                      ext.c_str());
+        showToast(msg);
+        elog::warn("import: '%s' — formato %s não suportado (aceites: "
+                   ".obj .gltf .glb .png .zip .rar)", e.path.c_str(),
+                   ext.c_str());
+        return true;
+    }
+    if (!importJobStart(e)) {
+        showToast("import ja em curso...");
+    }
+    return true;
+}
+
+// ---- 0.6.7: lifecycle GL -----------------------------------------------------
+// Contadores de janela: distinguem o 1º arranque (boot frio) das RE-CRIAÇÕES
+// do contexto EGL (voltar do fundo/recents sem matar a app — o caso que
+// deixava os glifos brancos "cubinhos" no C33). NENHUM recurso GL é assumido
+// vivo entre TERM_WINDOW e INIT_WINDOW: tudo é destruído no term (com o
+// contexto ainda corrente) e re-criado/re-uploaded no init.
+u32 g_windowInits = 0;   // APP_CMD_INIT_WINDOW vistos nesta execução
+u32 g_windowTerms = 0;   // APP_CMD_TERM_WINDOW vistos (contexto morto)
+
+void showToast(const char* msg) {
+    std::snprintf(g_toast, sizeof(g_toast), "%s", msg);
+    g_toastT = 1.8f;
+}
+
+// ---- 0.9.1 — JANELA DE TEXTO PESADO (abrir/fechar COM o par obrigatório) ----
+//
+// ABRIR  = portrait (JNI) + IME show + log da orientação (ime::setOrientation
+//          grava o estado e loga; o par de chamadas Java é o executor).
+// FECHAR = landscape + IME hide + log. O par é INSEPARÁVEL — os testes do
+//          device (wiring087) aferem os DOIS lados em cada transição.
+void openTextWindow() {
+    editor::textwin::open(g_editor.textWin);
+    if (ime::setOrientation(ime::Orientation::Portrait,
+                            "janela de texto aberta")) {
+        storage::jniSetOrientation(true);
+    }
+    storage::jniImeShow();
+    elog::info("texto: janela aberta — IME do sistema pedido (show)");
+}
+
+void closeTextWindow() {
+    editor::textwin::close(g_editor.textWin);
+    if (ime::setOrientation(ime::Orientation::Landscape,
+                            "janela de texto fechada")) {
+        storage::jniSetOrientation(false);
+    }
+    storage::jniImeHide();
+    elog::info("texto: janela fechada — IME escondido, landscape reposto");
+}
+
+// ---- 0.9.2 — EDITOR DE SCRIPT + DOCS -----------------------------------------
+//
+// O par INSEPARÁVEL do textWin aplica-se ao editor de script (janela de
+// TEXTO PESADO — spec 0.9.1 §1): abrir = portrait + IME show; fechar =
+// landscape + IME hide. O buffer SALVA no ScriptComp ao fechar (§10).
+// instala os hooks UMA vez no arranque do android_main (ver chamada abaixo)
+static void voniInstallHooks() {
+    g_voni.setSceneNameFn([]() { return currentSceneBaseName(); });
+    g_voni.setTransitionHook(&voniTransitionHook);
+}
+
+void openScriptEditor(Handle tic) {
+    Tic* t = g_scene.get(tic);
+    if (!t) {
+        return;
+    }
+    editor::scriptwin::open(g_editor.scriptWin, g_scene, tic);
+    if (ime::setOrientation(ime::Orientation::Portrait,
+                            "editor de script aberto")) {
+        storage::jniSetOrientation(true);
+    }
+    storage::jniImeShow();
+    elog::info("voni: editor de script aberto — portrait + IME");
+}
+
+void closeScriptEditor() {
+    // salva o fonte no componente (persistir §10 — o back NÃO descarta).
+    // FASE 9 (G0-1): o handle pode ter MORRIDO no ciclo TERM→INIT da
+    // rotação portrait (o reload do INIT_WINDOW re-cria os TICs) —
+    // re-valida por NOME antes de salvar (o padrão da seleção 0.8.12);
+    // sem isto a fonte NUNCA era gravada (get()==null) e o Run dava
+    // "TIC inválido".
+    editor::scriptwin::revalidateTic(g_editor.scriptWin, g_scene);
+    if (Tic* t = g_scene.get(g_editor.scriptWin.tic)) {
+        if (ScriptComp* sc = t->getComponent<ScriptComp>()) {
+            sc->source = g_editor.scriptWin.buf;
+        } else {
+            // o TIC existe mas perdeu o componente (cena trocada?) — cria
+            // um novo e salva (o fonte não se perde por um ciclo)
+            ScriptComp& sc2 = *t->addComponent<ScriptComp>();
+            sc2.source = g_editor.scriptWin.buf;
+        }
+    } else {
+        elog::warn("voni: fonte do editor PERDIDA no fecho (TIC '%s' não "
+                   "existe na cena)",
+                   g_editor.scriptWin.ticName);
+    }
+    editor::scriptwin::close(g_editor.scriptWin);
+    if (ime::setOrientation(ime::Orientation::Landscape,
+                            "editor de script fechado")) {
+        storage::jniSetOrientation(false);
+    }
+    storage::jniImeHide();
+    elog::info("voni: editor de script fechado — landscape reposto");
+}
+
+// Run do editor: (re)compila + arranca; o erro (com linha) volta para a
+// barra do editor + engine.log + toast
+void scriptEditorRun() {
+    // FASE 9 (G0-1): o handle pode ter morrido no ciclo da rotação —
+    // re-valida por NOME antes de compilar (senão "TIC inválido")
+    editor::scriptwin::revalidateTic(g_editor.scriptWin, g_scene);
+    voni::Error err;
+    if (!g_voni.editorRestart(g_scene, g_editor.scriptWin.tic,
+                              g_editor.scriptWin.buf.c_str(), err)) {
+        g_editor.scriptWin.errLine = err.line;
+        g_editor.scriptWin.errMsg = err.message;
+        // 0.9.6 (G2-7e): o PAR do botão Substituir (o erro de COMPILE
+        // também ensina — o gancho do VoniCompile preencheu o par)
+        g_editor.scriptWin.fixFrom = err.fixFrom;
+        g_editor.scriptWin.fixTo = err.fixTo;
+        g_editor.scriptWin.running = false;
+        elog::error("voni: script erro linha %u: %s", err.line,
+                    err.message.c_str());
+        std::snprintf(g_toast, sizeof(g_toast), "script: linha %u", err.line);
+        g_toastT = 1.8f;
+    } else {
+        g_editor.scriptWin.errLine = 0;
+        g_editor.scriptWin.errMsg.clear();
+        g_editor.scriptWin.fixFrom.clear();
+        g_editor.scriptWin.fixTo.clear();
+        g_editor.scriptWin.running = true;
+        elog::info("voni: script a correr (editor Run)");
+    }
+}
+
+void scriptEditorStop() {
+    g_voni.editorStop(g_editor.scriptWin.tic);
+    g_editor.scriptWin.running = false;
+    elog::info("voni: script parado (editor Stop)");
+}
+
+// 0.6.7: desliga os MeshRenderers dos objetos de GPU que vão morrer.
+// O g_gpu.releaseAll() APAGA os Mesh*/Texture* (unique_ptr + glDelete*) — os
+// ponteiros não-donos dos componentes ficariam PENDENTES (use-after-free no
+// próximo drawTics). Política:
+//   • &g_cubeMesh é um objeto ESTÁTICO re-criado NO SITIO no próximo init —
+//     o ponteiro continua válido (Mesh::destroy só zera os ids);
+//   • meshes/texturas do GpuAssets são APAGADOS → mesh/texture = nullptr;
+//     o reload da cena no INIT_WINDOW re-resolve via g_gpu.mesh/texture();
+//   • material aponta para o LitMaterial DO RENDERER (objeto estático,
+//     re-init no sitio) — mantém-se.
+// As refs RELATIVAS (meshPath/texPath) ficam intactas — são a fonte da
+// verdade para o re-bind (serializer).
+u32 detachRenderersFromGpu() {
+    u32 detached = 0;
+    auto& mrs = g_scene.components().meshRenderers();
+    for (u32 i = 0; i < mrs.size(); ++i) {
+        MeshRenderer& mr = mrs.at(i);
+        bool drop = false;
+        if (mr.mesh && mr.mesh != &g_cubeMesh) {
+            mr.mesh = nullptr;
+            drop = true;
+        }
+        if (mr.texture) {
+            mr.texture = nullptr;
+            drop = true;
+        }
+        // 0.10-M (PASSO 4): o BlockMesh do GpuAssets morre no releaseAll
+        // que se segue — o ponteiro não-dono sai AQUI (use-after-free nunca)
+        if (mr.blocks) {
+            mr.blocks = nullptr;
+            drop = true;
+        }
+        if (drop) {
+            ++detached;
+        }
+    }
+    return detached;
+}
+
+// F4.2 (B1): converte android_app->contentRect em Insets e injeta na UI.
+// Diagnóstico no device: esta linha do logcat mostra a superfície EGL, o
+// contentRect bruto e os insets resultantes (nav/status bar) — a causa raiz
+// do scroll morto no Inspector era a altura visível inflada pela nav bar.
+void applyContentRect(android_app* app) {
+    const i32 sw = g_egl.width();
+    const i32 sh = g_egl.height();
+    const ARect& cr = app->contentRect;
+    const safe::Insets ins = safe::insetsFromContentRect(
+        static_cast<f32>(sw), static_cast<f32>(sh),
+        cr.left, cr.top, cr.right, cr.bottom);
+    g_ui.setSafeArea(ins);
+    // 0.9.6.1 (PASSO 0 · R-018): a IDENTIDADE DO ECRÃ no log do arranque —
+    // a densidade (DisplayMetrics.density), a superfície e os insets EM PX E
+    // EM DP (o dono mediu o cabeçalho a 56px num ecrã de densidade 2.0: as
+    // medidas dp eram usadas como px; este log é a prova de qual é qual)
+    {
+        const f32 d = theme::g_density;
+        elog::info(
+            "display: densidade %.3f · superficie %dx%d px (%.0fx%.0f dp) · "
+            "insets L%.0f T%.0f R%.0f B%.0f px (%.0f %.0f %.0f %.0f dp)",
+            (double)d, (int)sw, (int)sh, (double)((f32)sw / d),
+            (double)((f32)sh / d), (double)ins.left, (double)ins.top,
+            (double)ins.right, (double)ins.bottom, (double)(ins.left / d),
+            (double)(ins.top / d), (double)(ins.right / d),
+            (double)(ins.bottom / d));
+    }
+    // 0.7.8 (defensivo): o CONTENT_RECT_CHANGED pode chegar SEM um
+    // WINDOW_RESIZED (barras do sistema a esconder/mostrar mudam a
+    // superfície em alguns OEMs) — re-sincroniza o tamanho do EGL e o
+    // viewport do renderer quando a superfície mudou, senão o pass de UI
+    // desenharia com viewport/ortográfica STALE (a causa raiz da UI
+    // gigante/cortada no Play do C33 — ver RELATORIO-0.7.8, secção 3).
+    g_egl.refreshSize();
+    if (g_egl.width() != sw || g_egl.height() != sh) {
+        g_renderer.resize(g_egl.width(), g_egl.height());
+    }
+    LOGI("safearea: surface %dx%d content [%d %d %d %d] "
+         "insets L%.0f T%.0f R%.0f B%.0f",
+         (int)sw, (int)sh, cr.left, cr.top, cr.right, cr.bottom,
+         (double)ins.left, (double)ins.top, (double)ins.right, (double)ins.bottom);
+}
+
+// F5-E: atualiza o catálogo (listDir nas pastas do projeto, filtro por ext.)
+// 0.8.10 — o catálogo lista CAMINHOS COMPLETOS (as refs que o
+// ResourceManager/GpuAssets resolvem): assets/*.gmesh|.gtext em PRIMEIRO
+// (formatos próprios, o que o runtime carrega) + legado meshes/|textures/
+// cujo convertido AINDA NÃO existe (falhou/marcou). O seletor do Inspector
+// e o "Sim" do diálogo usam as entradas DIRETAMENTE.
+// 0.9.6.10 (GRUPO UI): a ÁRVORE res:// do tab Ficheiros (as PASTAS REAIS
+// com contagens — construída AQUI junto do catálogo, ZERO IO por frame)
+editor::bottom::FilesTree g_filesTree;
+
+void refreshFilesTree() {
+    g_filesTree.n = 0;
+    g_filesTree.sceneCount =
+        g_projectReady ? static_cast<u32>(g_project.scenes.size()) : 0u;
+    if (!g_storage) {
+        return;
+    }
+    struct DirDef {
+        const char* dir;
+        const char* label;
+    };
+    static const DirDef kDirs[] = {
+        {Project::kDirAssets, "Modelos e texturas"},
+        {Project::kDirScenes, "Cenas"},
+        {Project::kDirSource, "Fontes importadas"},
+        {Project::kDirMeshes, "Malhas (legado)"},
+        {Project::kDirTextures, "Texturas (legado)"},
+        {Project::kDirAudio, "Sons"},
+    };
+    for (const DirDef& d : kDirs) {
+        if (g_filesTree.n >= 8) {
+            break;
+        }
+        std::vector<std::string> files;
+        u32 count = 0;
+        if (g_storage->listDir(d.dir, files)) {
+            count = static_cast<u32>(files.size());
+        }
+        g_filesTree.entries[g_filesTree.n++] = {d.dir, d.label, count};
+    }
+}
+
+void refreshCatalog() {
+    g_catalog.meshes.clear();
+    g_catalog.textures.clear();
+    refreshFilesTree();   // 0.9.6.10: a árvore acompanha o catálogo
+    if (!g_storage) {
+        return;
+    }
+    std::vector<std::string> files;
+    if (g_storage->listDir(Project::kDirAssets, files)) {
+        for (const std::string& f : files) {
+            const std::string rel = std::string(Project::kDirAssets) + "/" + f;
+            if (f.size() > 6 && f.compare(f.size() - 6, 6, ".gmesh") == 0) {
+                g_catalog.meshes.push_back(rel);
+            } else if (f.size() > 6 &&
+                       f.compare(f.size() - 6, 6, ".gtext") == 0) {
+                g_catalog.textures.push_back(rel);
+            }
+        }
+    }
+    // legado meshes/ (fontes 0.8.9-): só quem AINDA não tem convertido
+    files.clear();
+    if (g_storage->listDir(Project::kDirMeshes, files)) {
+        for (const std::string& f : files) {
+            if (fileapi::kindOfExtension(f) != 'm') {
+                continue;   // 0.8.5: classificação centralizada (lowercase)
+            }
+            const std::string stem = convert::stemOf(f);
+            bool jaConvertido = false;
+            for (const std::string& m : g_catalog.meshes) {
+                if (m.find(stem) != std::string::npos) {
+                    jaConvertido = true;
+                    break;
+                }
+            }
+            if (!jaConvertido) {
+                g_catalog.meshes.push_back(std::string("meshes/") + f);
+            }
+        }
+    }
+    files.clear();
+    if (g_storage->listDir(Project::kDirTextures, files)) {
+        for (const std::string& f : files) {
+            if (fileapi::kindOfExtension(f) != 't') {
+                continue;
+            }
+            const std::string stem = convert::stemOf(f);
+            bool jaConvertido = false;
+            for (const std::string& t : g_catalog.textures) {
+                if (t.find(stem) != std::string::npos) {
+                    jaConvertido = true;
+                    break;
+                }
+            }
+            if (!jaConvertido) {
+                g_catalog.textures.push_back(std::string("textures/") + f);
+            }
+        }
+    }
+}
+
+// 0.8.11 — VISUAL de editor do AudioPlayer (a técnica dos gizmos: pontos
+// 3D PROJETADOS para px de ecrã + polilinhas da UI): glifo de ALTIFALANTE
+// na posição do TIC + esfera WIREFRAME do raio externo (posicional). SÓ no
+// editor — em Play nada desenha (só soa). Corre no pass UI.
+// GRUPO D: (vw,vh,ox,oy) = o mapeamento da viewport 3D (defaults 0 = o
+// ecrã todo — o de sempre)
+void drawAudioGlyph(UiContext& ui, const Mat4& vp, f32 sw, f32 sh, const Tic& t,
+                    f32 vw = 0.0f, f32 vh = 0.0f, f32 ox = 0.0f,
+                    f32 oy = 0.0f) {
+    const AudioPlayer* au = t.getComponent<AudioPlayer>();
+    const Transform3D* tr = t.getComponent<Transform3D>();
+    if (!au || !tr || !t.active) {
+        return;
+    }
+    const f32 mw = (vw > 1.0f && vh > 1.0f) ? vw : sw;
+    const f32 mh = (vw > 1.0f && vh > 1.0f) ? vh : sh;
+    const Vec3 p = tr->pos;
+    const f32 col[4] = {au->voiceId >= 0 ? 0.28f : 0.90f,
+                        au->voiceId >= 0 ? 0.82f : 0.72f,
+                        au->voiceId >= 0 ? 0.36f : 0.30f, 1.0f};
+    auto seg = [&](const Vec3& a, const Vec3& b) {
+        f32 ax, ay, bx, by;
+        if (gizmo::projectPoint(vp, a, mw, mh, ax, ay, ox, oy) &&
+            gizmo::projectPoint(vp, b, mw, mh, bx, by, ox, oy)) {
+            ui.drawLine(ax, ay, bx, by, 2.0f, col);
+        }
+    };
+    // caixa + cone + ondas (plano local XY — glifo pequeno, leitura visual)
+    const Vec3 dx{0.11f, 0.0f, 0.0f};
+    const Vec3 dy{0.0f, 0.11f, 0.0f};
+    seg(p - dx - dy, p - dx + dy);
+    seg(p - dx + dy, p + Vec3{-0.02f, 0.08f, 0.0f});
+    seg(p + Vec3{-0.02f, 0.08f, 0.0f}, p + Vec3{-0.02f, -0.08f, 0.0f});
+    seg(p + Vec3{-0.02f, -0.08f, 0.0f}, p - dx - dy);
+    seg(p + Vec3{-0.02f, -0.08f, 0.0f}, p + dx - dy * 2.0f);
+    seg(p + dx - dy * 2.0f, p + dx + dy * 2.0f);
+    seg(p + dx + dy * 2.0f, p + Vec3{-0.02f, 0.08f, 0.0f});
+    seg(p + Vec3{0.14f, -0.06f, 0.0f}, p + Vec3{0.14f, 0.06f, 0.0f});
+    seg(p + Vec3{0.18f, -0.11f, 0.0f}, p + Vec3{0.18f, 0.11f, 0.0f});
+    // esfera wireframe do raio EXTERNO (posicional): 8 longitudes × 4 lat
+    if (au->posicional) {
+        const f32 R = au->raioExterno;
+        constexpr int kLon = 8;
+        constexpr int kLat = 4;
+        constexpr f32 kPi = 3.14159265f;
+        constexpr f32 kTau = 6.28318531f;
+        const f32 colR[4] = {0.47f, 0.59f, 1.0f, 0.9f};
+        for (int la = 0; la <= kLat; ++la) {
+            const f32 phi = static_cast<f32>(la) / kLat * kPi;
+            for (int lo = 0; lo < kLon; ++lo) {
+                const f32 th0 = static_cast<f32>(lo) / kLon * kTau;
+                const f32 th1 = static_cast<f32>(lo + 1) / kLon * kTau;
+                const Vec3 a{p.x + R * std::sin(phi) * std::cos(th0),
+                             p.y + R * std::cos(phi),
+                             p.z + R * std::sin(phi) * std::sin(th0)};
+                const Vec3 b{p.x + R * std::sin(phi) * std::cos(th1),
+                             p.y + R * std::cos(phi),
+                             p.z + R * std::sin(phi) * std::sin(th1)};
+                { f32 ax, ay, bx2, by2;
+                  if (gizmo::projectPoint(vp, a, sw, sh, ax, ay) &&
+                      gizmo::projectPoint(vp, b, sw, sh, bx2, by2)) {
+                      ui.drawLine(ax, ay, bx2, by2, 1.5f, colR);
+                  } }
+                if (la > 0) {
+                    const f32 phiP = static_cast<f32>(la - 1) / kLat * kPi;
+                    const Vec3 up{p.x + R * std::sin(phiP) * std::cos(th0),
+                                  p.y + R * std::cos(phiP),
+                                  p.z + R * std::sin(phiP) * std::sin(th0)};
+                    { f32 ux, uy, ax2, ay2;
+                      if (gizmo::projectPoint(vp, up, sw, sh, ux, uy) &&
+                          gizmo::projectPoint(vp, a, sw, sh, ax2, ay2)) {
+                          ui.drawLine(ux, uy, ax2, ay2, 1.5f, colR);
+                      } }
+                }
+            }
+        }
+    }
+}
+
+// F5-E: MeshData do cubo procedural (export do TIC sem asset importado)
+MeshData cubeToMeshData() {
+    const CubeMeshData c = makeCube(1.0f);
+    MeshData m;
+    m.name = "cube";
+    m.vertices.assign(c.vertices.begin(), c.vertices.end());
+    m.indices.assign(c.indices.begin(), c.indices.end());
+    MeshData::Group g;
+    g.name = "cube";
+    g.firstIndex = 0;
+    g.indexCount = static_cast<u32>(m.indices.size());
+    m.groups.push_back(g);
+    return m;
+}
+
+// ---- 0.8.10: PRIMITIVAS — O CAMINHO ÚNICO DA TROCA ------------------------
+// (substitui o cache 0.8.0→0.8.9; ver o comentário grande no topo do ficheiro)
+
+// nome curto de UMA assinatura p/ o log (esfera/box + o raio/tam que a distingue)
+static void primSigLabel(const PrimParams& p, char* out, size_t n) {
+    if (p.kind == PrimKind::Box) {
+        std::snprintf(out, n, "box(tam=%.2f)", p.size);
+    } else {
+        std::snprintf(out, n, "esfera(r=%.2f,seg=%d,an=%d)", p.radius,
+                      p.segments, p.rings);
+    }
+}
+
+// move a POSE do mesh antigo do MeshRenderer para a COVA (deferred free do
+// frame seguinte). O cubo estático do main NÃO é nosso — ignora-se.
+static void primRetire(Mesh* m) {
+    if (!m || m == &g_cubeMesh) {
+        return;
+    }
+    for (size_t i = 0; i < g_primOwners.size(); ++i) {
+        if (g_primOwners[i].get() == m) {
+            g_primGrave.push_back(std::move(g_primOwners[i]));
+            g_primOwners.erase(g_primOwners.begin() + static_cast<long>(i));
+            return;
+        }
+    }
+}
+
+// INÍCIO do frame: liberta os meshes que REFORMÁMOS no frame anterior —
+// com o contexto GL corrente e DEPOIS de os comandos do frame anterior
+// terem saído (nunca glDelete* de buffers ainda em voo).
+void primGraveDig() {
+    if (g_primGrave.empty()) {
+        return;
+    }
+    const u32 n = static_cast<u32>(g_primGrave.size());
+    for (std::unique_ptr<Mesh>& m : g_primGrave) {
+        if (m) {
+            m->destroy();
+        }
+    }
+    g_primGrave.clear();
+    elog::info("mesh: deferred free %u mesh(es) de prim (inicio do frame)", n);
+}
+
+// 0.8.10 — SELF-CHECK pós-upload: as CONTAGENS que o Mesh diz ter de
+// coincidir com as contagens da GEOMETRIA GERADA (apanha upload corrompido/
+// parcial — a discrepância é ERRO no passo upload e o fail-safe mantém o
+// mesh anterior). Puro + afervel no CI.
+bool primSelfCheck(const Mesh& m, u32 wantVerts, u32 wantIdx) {
+    if (!m.ok()) {
+        return false;
+    }
+    if (m.vertexCount() != wantVerts || m.indexCount() != wantIdx) {
+        return false;
+    }
+    // AABB de volta ≠ zero (geometria de mentira não passa)
+    return m.boundsMaxExtent() > 1e-6f;
+}
+
+// O ÚNICO caminho de troca (não há "hit de cache" nem caminho alternativo):
+// gera → valida → upload → self-check → bind, com deferred free do antigo.
+// Chamado SÓ do ponto seguro do frame (início, antes da submissão) pelo
+// primFlushPending, e pelo boot do INIT_WINDOW p/ os pendentes do load.
+// Falha: mesh anterior mantém, primNeg=true (backoff), toast + log com
+// passo E razão. NUNCA crash, NUNCA desseleciona.
+bool primUploadOne(MeshRenderer& mr) {
+    // "de" = a FONTE do mesh ligado AGORA (a verdade do render: cube/asset/
+    // prim com a assinatura anterior — primPrev, porque o pick já escreveu
+    // a nova em mr.prim); "para" = a assinatura PEDIDA.
+    char de[48], para[48];
+    if (mr.mesh == nullptr) {
+        std::snprintf(de, sizeof(de), "-");
+    } else if (mr.mesh == &g_cubeMesh) {
+        std::snprintf(de, sizeof(de), "cube");
+    } else if (!mr.meshPath.empty()) {
+        std::snprintf(de, sizeof(de), "asset");
+    } else {
+        primSigLabel(mr.primPrev, de, sizeof(de));
+    }
+    primSigLabel(mr.prim, para, sizeof(para));
+
+    // ---- passo=gerador -----------------------------------------------------
+    PrimMeshData data;
+    makePrimMesh(mr.prim, data);
+    if (!data.ok()) {
+        ++g_primSwapErr;
+        mr.primNeg = true;   // backoff: não re-tenta por frame
+        elog::error("mesh: troca %s→%s passo=gerador ERRO(geometria vazia — "
+                    "%u verts %u idx)", de, para,
+                    static_cast<unsigned>(data.vertices.size()),
+                    static_cast<unsigned>(data.indices.size()));
+        showToast("mesh: troca ERRO(gerador) — mantida a anterior");
+        return false;
+    }
+    elog::info("mesh: troca %s→%s passo=gerador ok verts=%u idx=%u", de, para,
+               static_cast<unsigned>(data.vertices.size()),
+               static_cast<unsigned>(data.indices.size()));
+
+    // ---- passo=validacao ---------------------------------------------------
+    for (size_t v = 0; v < data.vertices.size(); ++v) {
+        const Vec3& pos = data.vertices[v].pos;
+        if (!std::isfinite(pos.x) || !std::isfinite(pos.y) ||
+            !std::isfinite(pos.z)) {
+            ++g_primSwapErr;
+            mr.primNeg = true;
+            elog::error("mesh: troca %s→%s passo=validação ERRO(vert %zu "
+                        "não finito)", de, para, v);
+            showToast("mesh: troca ERRO(validação) — mantida a anterior");
+            return false;
+        }
+    }
+    {
+        Vec3 mn, mx;
+        primBounds(data, mn, mx);
+        const Vec3 ext{mx.x - mn.x, mx.y - mn.y, mx.z - mn.z};
+        const f32 maior = ext.x > ext.y ? (ext.x > ext.z ? ext.x : ext.z)
+                                        : (ext.y > ext.z ? ext.y : ext.z);
+        if (!(maior > 1e-6f)) {
+            ++g_primSwapErr;
+            mr.primNeg = true;
+            elog::error("mesh: troca %s→%s passo=validação ERRO(AABB "
+                        "degenerado — extensao %.3g)", de, para, maior);
+            showToast("mesh: troca ERRO(validação) — mantida a anterior");
+            return false;
+        }
+    }
+    elog::info("mesh: troca %s→%s passo=validação ok", de, para);
+
+    // ---- passo=upload + SELF-CHECK ----------------------------------------
+    std::unique_ptr<Mesh> nm = std::make_unique<Mesh>();
+    if (!nm->create(data.vertices.data(),
+                    static_cast<u32>(data.vertices.size()),
+                    data.indices.data(),
+                    static_cast<u32>(data.indices.size())) ||
+        !primSelfCheck(*nm, static_cast<u32>(data.vertices.size()),
+                       static_cast<u32>(data.indices.size()))) {
+        ++g_primSwapErr;
+        mr.primNeg = true;
+        nm.reset();   // ~Mesh com contexto corrente liberta o que subiu
+        elog::error("mesh: troca %s→%s passo=upload ERRO(upload GL/self-check "
+                    "— %u verts %u idx)", de, para,
+                    static_cast<unsigned>(data.vertices.size()),
+                    static_cast<unsigned>(data.indices.size()));
+        showToast("mesh: troca ERRO(upload) — mantida a anterior");
+        return false;
+    }
+    elog::info("mesh: troca %s→%s passo=upload ok verts=%u idx=%u "
+               "(self-check ok)", de, para,
+               static_cast<unsigned>(data.vertices.size()),
+               static_cast<unsigned>(data.indices.size()));
+
+    // ---- passo=bind: troca ATÓMICA + deferred free do antigo ---------------
+    // o ANTIGO (que renderizou até este ponto seguro) vai para a COVA —
+    // os seus buffers só são apagados no início do frame SEGUINTE
+    primRetire(mr.mesh);
+    mr.mesh = nm.get();
+    mr.material = g_renderer.litMaterial();
+    mr.primPrev = mr.prim;   // a cadeia: o "de" da PRÓXIMA troca é este
+    g_primOwners.push_back(std::move(nm));
+    ++g_primSwapOk;
+    elog::info("mesh: troca %s→%s passo=bind ok (cova=%zu vivos=%zu)",
+               de, para, g_primGrave.size(), g_primOwners.size());
+    return true;
+}
+
+// PONTO SEGURO: (a) sobe os PEDIDOS pendentes de prim (pick/params/load/
+// preset armaram primPending — o mesh ANTIGO renderizou até aqui e agora
+// o novo substitui-o com bind atómico + deferred free); (b) transfere para
+// a COVA os meshes marcados primRetire (picks none/cube/asset). Backoff:
+// primNeg não insiste por frame (anti retry-storm — o pedido NOVO limpa).
+void primFlushPending() {
+    auto& mrs = g_scene.components().meshRenderers();
+    for (u32 i = 0; i < mrs.size(); ++i) {
+        MeshRenderer& mr = mrs.at(i);
+        // pendente do pick/params/load OU rebind pós-TERM (mesh null com
+        // primOn: o detach do lifecycle — o mesmo caminho único de sempre;
+        // primNeg em falha mantém o mesh ANTIGO não-nulo, então este
+        // re-rebind NUNCA vira retry-storm)
+        if (mr.primOn && !mr.primNeg &&
+            (mr.primPending || mr.mesh == nullptr)) {
+            mr.primPending = false;   // consumido (falha = backoff, não retry)
+            primUploadOne(mr);
+        }
+        if (mr.primRetire) {
+            primRetire(mr.primRetire);
+            mr.primRetire = nullptr;
+        }
+    }
+}
+
+// 0.10-M (PASSO 4) — O REBIND DOS BLOCOS: liga o MeshRenderer ao BlockMesh
+// aberto do SEU meshPath (o GpuAssets é o dono; aberto pelo mesh() do
+// picker/serializer/load). Idempotente e barato (1 lookup por TIC com
+// meshPath por frame); a FONTE é o meshPath — o MESMO contrato do
+// resolveMesh, então pick/load/apply/ciclo de vida ficam cobertos por
+// construção. Chamado no PONTO SEGURO (antes de qualquer submissão).
+void blockRebind() {
+    auto& mrs = g_scene.components().meshRenderers();
+    for (u32 i = 0; i < mrs.size(); ++i) {
+        MeshRenderer& mr = mrs.at(i);
+        mr.blocks = nullptr;
+        if (!mr.meshPath.empty()) {
+            mr.blocks = g_gpu.blockMeshIfOpen(mr.meshPath);
+        }
+    }
+}
+
+// TERM_WINDOW: destrói os meshes VIVOS e os da cova (contexto AINDA corrente
+// — o mesmo contrato do cubo/grid). O reload do INIT_WINDOW re-pede tudo.
+void primMeshesDestroyAll() {
+    const u32 vivos = static_cast<u32>(g_primOwners.size());
+    const u32 cova = static_cast<u32>(g_primGrave.size());
+    for (std::unique_ptr<Mesh>& m : g_primOwners) {
+        if (m) {
+            m->destroy();
+        }
+    }
+    for (std::unique_ptr<Mesh>& m : g_primGrave) {
+        if (m) {
+            m->destroy();
+        }
+    }
+    g_primOwners.clear();
+    g_primGrave.clear();
+    // novo contexto, nova sorte: o backoff morre com o contexto; o
+    // pendente de load fica (o próximo frame re-sobe com o contexto novo)
+    {
+        auto& mrs2 = g_scene.components().meshRenderers();
+        for (u32 i = 0; i < mrs2.size(); ++i) {
+            mrs2.at(i).primNeg = false;
+            mrs2.at(i).primRetire = nullptr;
+        }
+    }
+    if (vivos + cova > 0) {
+        elog::info("lifecycle: %u mesh(es) de prim destruidos (%u vivos + "
+                   "%u na cova)", vivos + cova, vivos, cova);
+    }
+}
+
+// A cena ATUAL vai ser substituída (load/switch/cena nova): toda a posse
+// de meshes de prim vai para a COVA — o glDelete* corre no início do frame
+// SEGUINTE (deferred free: os MeshRenderers antigos podem ainda desenhar
+// neste frame; os ponteiros ficam VÁLIDOS até eles morrerem no clear()).
+// Nunca se apaga nada a meio do frame — o mesmo contrato da troca.
+void primMeshesToGrave() {
+    if (g_primOwners.empty()) {
+        return;
+    }
+    const u32 n = static_cast<u32>(g_primOwners.size());
+    for (std::unique_ptr<Mesh>& m : g_primOwners) {
+        g_primGrave.push_back(std::move(m));
+    }
+    g_primOwners.clear();
+    elog::info("mesh: %u mesh(es) de prim p/ cova (cena substituida)", n);
+}
+
+// ---- 0.8.10: PÓS-LOAD — migração de projeto antigo + refs + .gm -----------
+// Corre DEPOIS de cada loadActiveScene (boot/switch/menu):
+//   1. MIGRAÇÃO silenciosa: meshes/*.obj|gltf|glb + textures/*.png legados
+//      convertem para assets/*.gmesh|.gtext (+.gm) — 1× (idempotente);
+//   2. FIXUP de refs: MeshRenderer.meshPath "meshes/x.obj" →
+//      "assets/x.gmesh" quando o convertido existe (idem texturas); o TIC
+//      aponta o formato próprio e o runtime NUNCA mais toca na fonte;
+//   3. .gm IRMÃO: assets/x.gm existe → attachGAnim (clips + esqueleto) ao
+//      TIC dono do mesh (o mesmo attach do import).
+// NUNCA falha o load: cada passo é best-effort com log.
+void postLoadMigrateAndFixup() {
+    if (!g_storage || !g_projectReady) {
+        return;
+    }
+    // 0.8.11 — settings do projeto (fonte/volume) + catálogo de áudio: o
+    // load aplica (0.8.10 escrevia o settings.goni mas nunca o LIA)
+    loadProjectSettings();
+    loadLayoutNow();   // 0.9.0 (spec G): layout.json (bottom/drawer/inspector/secções)
+    refreshAudioCatalog();
+    // 1) migração (silenciosa — os assets convertem 1×)
+    convert::migrateLegacyAssets(*g_storage, g_pipeline.get());
+    // 2) fixup das refs da cena recém-carregada
+    bool refsChanged = false;
+    {
+        auto& mrs = g_scene.components().meshRenderers();
+        for (u32 i = 0; i < mrs.size(); ++i) {
+            MeshRenderer& mr = mrs.at(i);
+            if (mr.meshPath.compare(0, 7, "meshes/") == 0) {
+                const std::string stem =
+                    convert::stemOf(mr.meshPath.substr(7));
+                const std::string want =
+                    std::string("assets/") + stem + ".gmesh";
+                if (g_storage->exists(want)) {
+                    elog::info("asset: ref migrada '%s' -> '%s'",
+                               mr.meshPath.c_str(), want.c_str());
+                    mr.meshPath = want;
+                    refsChanged = true;
+                }
+            }
+            if (mr.texPath.compare(0, 9, "textures/") == 0) {
+                const std::string stem =
+                    convert::stemOf(mr.texPath.substr(9));
+                const std::string want =
+                    std::string("assets/") + stem + ".gtext";
+                if (g_storage->exists(want)) {
+                    mr.texPath = want;
+                    refsChanged = true;
+                }
+            }
+        }
+    }
+    if (refsChanged) {
+        // persiste as refs novas já (o próximo save é o do dono — este é o
+        // "em silêncio": abrir o projeto velho NÃO pede nada a ninguém)
+        g_project.saveActiveScene(*g_storage, g_scene);
+        refreshCatalog();
+    }
+    // 3) .gm irmão de cada ref .gmesh → clips + esqueleto
+    {
+        auto& mrs = g_scene.components().meshRenderers();
+        for (u32 i = 0; i < mrs.size(); ++i) {
+            MeshRenderer& mr = mrs.at(i);
+            if (mr.meshPath.size() > 6 &&
+                mr.meshPath.compare(mr.meshPath.size() - 6, 6, ".gmesh") == 0) {
+                const std::string gmRel = convert::ganimSiblingOf(mr.meshPath);
+                if (gmRel.empty() || !g_storage->exists(gmRel)) {
+                    continue;
+                }
+                std::vector<u8> gmb;
+                if (!g_storage->readBytes(gmRel, gmb) || gmb.empty()) {
+                    continue;
+                }
+                GAnimFile anim;
+                std::string aerr;
+                if (!readGAnim(gmb.data(), gmb.size(), anim, aerr)) {
+                    elog::warn("asset: %s invalido — %s (ignorado)",
+                               gmRel.c_str(), aerr.c_str());
+                    continue;
+                }
+                // o TIC dono: os componentes não guardam o dono — itera os
+                // TICs ativos (a cena é pequena) e casa o PONTEIRO
+                g_scene.forEachActive([&](Tic& t) {
+                    if (t.getComponent<MeshRenderer>() == &mr) {
+                        const u32 n = attachGAnim(g_scene, t.handle, anim);
+                        if (n > 0) {
+                            LOGI("asset: %u clip(s) do %s anexados ao TIC '%s'",
+                                 n, gmRel.c_str(), t.name.c_str());
+                        }
+                    }
+                });
+            }
+        }
+    }
+}
+
+// F5-E: LoadCtx canônico do device — resolvers ligam refs relativas aos
+// objetos de GPU em cache (1 ref = 1 upload; memória de GPU não duplica)
+SceneSerializer::LoadCtx makeLoadCtx() {
+    SceneSerializer::LoadCtx ctx;
+    ctx.cubeMesh = &g_cubeMesh;
+    ctx.material = g_renderer.litMaterial();
+    ctx.resolveMesh = [](const std::string& ref) -> Mesh* {
+        return g_gpu.mesh(ref);
+    };
+    ctx.resolveTex = [](const std::string& ref) -> const Texture* {
+        std::string warn;
+        const Texture* t = g_gpu.texture(ref, &warn);
+        if (!warn.empty()) {
+            showToast(warn.c_str());   // gate 2K — aviso 1× por carga
+        }
+        return t;
+    };
+    // 0.8.10 — MIGRAÇÃO de prim removida (cilindro/cone/plano/triangulo/
+    // torus/capsula → cube): log SEMPRE + toast UMA vez por load (a cena
+    // abre, nunca crash — a prim carrega como box pendente e sobe no ponto
+    // seguro do frame).
+    ctx.onPrimMigrated = [](const char* removedName) {
+        elog::warn("mesh: prim %s removido -> cube (0.8.10: so cubo e esfera)",
+                   removedName);
+        static bool toastedThisLoad = false;   // 1× por load (log = todas)
+        if (!toastedThisLoad) {
+            char msg[96];
+            std::snprintf(msg, sizeof(msg),
+                          "prim %s foi removida -> cube", removedName);
+            showToast(msg);
+            toastedThisLoad = true;
+        }
+    };
+    return ctx;
+}
+
+// F6: resolvers do seletor de assets (injetados no applyAssetPick — a
+// lógica de aplicação é PURA em ui/EditorUi e afervel no CI; aqui só se
+// liga aos objetos reais de runtime: GpuAssets/ResourceManager/cubo/lit)
+editor::AssetResolvers makeAssetResolvers() {
+    editor::AssetResolvers res;
+    res.mesh = [](const std::string& ref) -> Mesh* {
+        return g_gpu.mesh(ref);
+    };
+    res.texture = [](const std::string& ref, std::string* warn) -> const Texture* {
+        return g_gpu.texture(ref, warn);
+    };
+    res.meshTextureFor = [](const std::string& ref) -> std::string {
+        return g_resources.meshTextureFor(ref);   // textura embutida glTF/GLB
+    };
+    // 0.10-M HOTFIX TEXTURAS-VINCULA: o bind baseColor do GTB1 do .gmesh
+    res.baseColorBind = [](const std::string& ref,
+                           u32 materialIndex) -> std::string {
+        return g_gpu.baseColorBindOf(ref, materialIndex);
+    };
+    // 0.10-M HOTFIX-2: os CINCO binds do GTB1 (o auto-bind completo — os
+    // 5 slots do TIC ficam preenchidos no apply do mesh importado)
+    res.matBinds = [](const std::string& ref, u32 materialIndex,
+                      std::string (&out)[MeshRenderer::kMeshTexSlots]) -> bool {
+        return g_gpu.matBindsOf(ref, materialIndex, out);
+    };
+    res.cubeMesh = &g_cubeMesh;
+    res.material = g_renderer.litMaterial();
+    // 0.8.9: AABB do mesh COMO DADOS (o applyAssetPick é puro — nunca
+    // desreferencia o Mesh; aqui sim, no device, o Mesh é REAL)
+    res.meshExtent = [](const std::string& ref) -> Vec3 {
+        Mesh* m = g_gpu.mesh(ref);
+        return m ? m->boundsExtent() : Vec3{0.0f, 0.0f, 0.0f};
+    };
+    return res;
+}
+
+// 0.10.6 (SAF-SEAM) — O PÓS-FALHA DO PICK DE MESH (o MESMO relatório nos
+// DOIS dispatches: o «Sim» do diálogo pós-import e o seletor do Inspector).
+// O applyAssetPick já manteve o estado ANTERIOR do TIC (o mesh/prim de
+// sempre — nunca a troca silenciosa pela bola); o que FALTAVA era a CAUSA
+// no TOAST: o «falha ao carregar mesh» de sempre não dizia CORROMPIDO nem
+// mandava REIMPORTAR. AQUI: o último erro do GpuAssets diz «asset
+// corrompido, reimporta» → o toast REPETE a ordem + o catálogo re-lista
+// (a QUARENTENA renomeou o ficheiro p/ .corrupt — o picker deixa de o
+// oferecer); outras causas → a linha curta do erro. O estado do picker
+// (o mesh anterior no TIC) NÃO é tocado — só o DIAGNÓSTICO melhora.
+void reportMeshPickFailure(int menuKind) {
+    if (menuKind != 1) {
+        return;   // só o seletor de MESH (texturas têm o seu próprio toast)
+    }
+    const std::string& merr = g_gpu.lastMeshError();
+    if (merr.empty()) {
+        return;   // sem causa registada — o toast do applyAssetPick basta
+    }
+    if (merr.find("corrompido") != std::string::npos) {
+        showToast("asset corrompido, reimporta (renomeado .corrupt; causa "
+                  "no engine.log)");
+        elog::error("editor: pick FALHOU — asset em QUARENTENA (%s) — o "
+                    "TIC mantém o mesh anterior; REIMPORTA o ficheiro "
+                    "original", merr.c_str());
+        refreshCatalog();   // o .corrupt saiu do catálogo (o picker re-lista)
+    } else {
+        char msg[128];
+        std::snprintf(msg, sizeof(msg), "falha: %.96s", merr.c_str());
+        showToast(msg);
+    }
+}
+
+// 0.8.7 — o "Sim" do diálogo APLICAR-APÓS-IMPORT, EXTRAÍDO do corpo do
+// frame() para função com NOME: o MESMO código corre no device (frame) e
+// na suíte do hospedeiro (test_wiring087 — que inclui ESTE ficheiro). O
+// import aplica ao TIC selecionado: applyAssetPick (o caminho do seletor)
+// + clips/skin do glTF quando o mesh os traz.
+void applyImportedAssetToSelectedTic() {
+    // 0.8.11 — ÁUDIO: o "Sim" atribui o clip ao AudioPlayer do TIC
+    // selecionado (e toca um PREVIEW de 1 s — o dono OUVE que importou)
+    if (g_applyAsk.kind == 'a') {
+        Tic* tsel = g_scene.get(g_editor.selected);
+        AudioPlayer* au = tsel ? tsel->getComponent<AudioPlayer>() : nullptr;
+        if (au) {
+            au->clipPath = g_applyAsk.rel;
+            char msg[96];
+            std::snprintf(msg, sizeof(msg), "clip atribuido: %s",
+                          g_applyAsk.rel.c_str());
+            showToast(msg);
+            elog::info("audio: clip '%s' atribuido ao TIC '%s'",
+                       g_applyAsk.rel.c_str(), tsel->name.c_str());
+        } else {
+            showToast("selecione um TIC de Audio");
+            elog::warn("audio: aplicar sem AudioPlayer no TIC selecionado");
+        }
+        g_applyAsk.open = false;
+        g_editor.applyAsk = false;
+        return;
+    }
+    // 0.8.10: as entradas do catálogo são CAMINHOS COMPLETOS — o match é
+    // direto (a ref veio do import: assets/<x>.gmesh / .gtext)
+    const std::vector<std::string>& cat =
+        g_applyAsk.kind == 'm' ? g_catalog.meshes : g_catalog.textures;
+    bool applied = false;
+    for (size_t i = 0; i < cat.size(); ++i) {
+        if (cat[i] == g_applyAsk.rel) {
+            const int menuKind = g_applyAsk.kind == 'm' ? 1 : 2;
+            // 0.8.12 — o pick do ficheiro i: picker de MESH tem none(1) +
+            // cube(2) antes dos ficheiros (i+3); o de TEXTURA só none(1)
+            // antes (i+2)
+            const int pickOf = static_cast<int>(i) +
+                               (g_applyAsk.kind == 'm' ? 3 : 2);
+            elog::info("import: aplicando %s ao TIC selecionado (pick %d)",
+                       g_applyAsk.rel.c_str(), pickOf);
+            const editor::TicSnap uBefore =
+                editor::snapTic(g_scene, g_editor.selected);
+            const editor::AssetPickOutcome out = editor::applyAssetPick(
+                g_scene, g_editor.selected, menuKind, pickOf, g_catalog,
+                makeAssetResolvers(), g_editor.inspTexSlot);
+            applied = out.applied;
+            if (out.applied) {
+                pushUndo(uBefore, g_scene.get(g_editor.selected));
+            }
+            if (out.toast[0] != '\0') {
+                showToast(out.toast);
+            }
+            if (out.log[0] != '\0') {
+                elog::info("%s", out.log);   // 0.8.9: idem (o "Sim" do import prova o fit uniforme no log)
+            }
+            // 0.10.6 (SAF-SEAM) — a CAUSA no toast quando o mesh FALHOU
+            // («asset corrompido, reimporta» + o catálogo re-listado)
+            if (!out.applied) {
+                reportMeshPickFailure(menuKind);
+            }
+            // 0.8.7 — contagens do mesh APLICADO (o TIC tem meshes reais no
+            // caminho do import; o applyAssetPick é puro — não desreferencia)
+            if (out.applied) {
+                if (const Tic* tNew = g_scene.get(g_editor.selected)) {
+                    if (const MeshRenderer* mrNew =
+                            tNew->getComponent<MeshRenderer>()) {
+                        if (mrNew->mesh) {
+                            elog::info("import: aplicado verts=%u idx=%u",
+                                       mrNew->mesh->vertexCount(),
+                                       mrNew->mesh->indexCount());
+                        }
+                    }
+                }
+            }
+            // 0.8.10: ref CONVERTIDA (.gmesh) → clips+esqueleto do .gm
+            // irmão (o mesmo attach do load de cenas); ref LEGADA
+            // (gltf/glb) → o caminho de sempre (parse do modelo)
+            if (g_applyAsk.kind == 'm') {
+                const std::string gmRel = convert::ganimSiblingOf(
+                    g_applyAsk.rel);
+                GAnimFile anim;
+                std::string aerr;
+                std::vector<u8> gmb;
+                if (!gmRel.empty() && g_storage && g_storage->exists(gmRel) &&
+                    g_storage->readBytes(gmRel, gmb) && !gmb.empty() &&
+                    readGAnim(gmb.data(), gmb.size(), anim, aerr)) {
+                    const u32 nClips =
+                        attachGAnim(g_scene, g_editor.selected, anim);
+                    if (nClips > 0) {
+                        showToast("clips importados (timeline)");
+                        LOGI("editor: %u clip(s) do %s importados",
+                             nClips, gmRel.c_str());
+                    }
+                } else {
+                    std::string merr;
+                    if (auto mdl = g_resources.model(g_applyAsk.rel, merr)) {
+                        // 0.8.2 (F7): SKIN primeiro (os clips de JOINT
+                        // só entram com o esqueleto presente)
+                        const u32 nJoints =
+                            gltfAttachSkin(g_scene, g_editor.selected, *mdl);
+                        if (nJoints > 0) {
+                            LOGI("editor: esqueleto importado (%u joints)",
+                                 nJoints);
+                        }
+                        if (!mdl->animations.empty()) {
+                            const u32 nClips = gltfAttachClips(
+                                g_scene, g_editor.selected, *mdl);
+                            if (nClips > 0) {
+                                showToast("clips importados (timeline)");
+                                LOGI("editor: %u clip(s) de animação "
+                                     "importados de %s",
+                                     nClips, g_applyAsk.rel.c_str());
+                            }
+                        }
+                    }
+                }
+            }
+            break;
+        }
+    }
+    if (!applied) {
+        // o catálogo não tem a ref (refresh falhou?): HONESTO no log — o
+        // ficheiro está no projeto e aplica-se depois pelo seletor
+        elog::warn("import: '%s' NÃO aplicado — fora do catálogo (aplique "
+                   "pelo seletor do Inspector)",
+                   g_applyAsk.rel.c_str());
+    }
+    g_applyAsk.open = false;
+    g_editor.applyAsk = false;   // 0.8.7: as DUAS juntas — um stuck aqui é
+                                 // um modal INVISÍVEL para sempre (backdrop
+                                 // opaco sobre o editor = "engine travada")
+}
+
+// ---- F5.2: All Files Access — import/export por File API direta -------------
+
+// forward: usado pelo handler de retorno e pelas tentativas
+void beginExportToDownloads();
+
+// F5.5 — LOG DE TRANSIÇÃO do all-files ("storage: all-files granted=1/0" —
+// visível no log viewer do C33). force=true nos pontos onde TODO o valor
+// observado deve sair (boot, retorno das definições, re-verificação no
+// resume); nas tentativas de import/export só quando MUDA desde a última
+// linha (sem spam — a mesma verificação corre a cada tentativa).
+int g_grantedLogged = -1;   // último granted=N logado (-1 = nunca)
+
+void logAllFilesGranted(bool granted, const char* where, bool force = false) {
+    const int g = granted ? 1 : 0;
+    if (!force && g == g_grantedLogged) {
+        return;
+    }
+    g_grantedLogged = g;
+    elog::info("storage: all-files granted=%d (%s)", g, where);
+}
+
+// VERIFICAÇÃO fresca da permissão (1 chamada JNI estática por tentativa —
+// o utilizador pode ter ativado as definições sem voltar pela app)
+bool storageGrantedNow(bool* outSupported) {
+    bool mgr = false;
+    const bool supported = storage::jniStorageApiSupported(&mgr);
+    if (outSupported) {
+        *outSupported = supported;
+    }
+    if (supported) {
+        g_perm.setMode(mgr ? storage::Mode::AllFiles : storage::Mode::AppPrivate);
+    }
+    // F5.5: transição detetada numa TENTATIVA (ex.: o utilizador concedeu/
+    // revogou nas definições do sistema e voltou sem passar pelo fluxo da
+    // app) — só loga quando o valor é DIFERENTE da última linha.
+    logAllFilesGranted(supported && mgr, "verificacao por tentativa");
+    return supported && mgr;
+}
+
+// F5.5 — CAUDA do retorno das definições (toast claro + ação retomada 1×),
+// SEM transição de estado: o chamador já fez onSettingsReturn (o
+// onStorageResult diretamente, ou o resumeRecheck do APP_CMD_RESUME).
+// A recusa NUNCA relança as definições (nenhum loop — a próxima tentativa
+// é SEMPRE iniciada pelo utilizador).
+void resumePendingAfterReturn(bool granted) {
+    if (!granted) {
+        showToast("acesso não ativado — modo app-private");
+        return;
+    }
+    showToast("acesso concedido — File API direta");
+    // retoma a ação que abriu o diálogo (1 import, 2 export; None = foi
+    // aberto pelo Settings "Acesso a ficheiros…" — nada a retomar)
+    const storage::Action act = g_perm.takePendingAction();
+    if (act == storage::Action::Import) {
+        // 0.8.7: retoma COMO O TOQUE original — o NAVEGADOR abre (as duas
+        // flags; o mesmo caminho do attemptImport concedido, não o scan
+        // antigo — o dono escolhe de ONDE for, galeria incluída)
+        browserOpen(std::string(fileapi::kExternalRoot) + "/Download");
+        g_editor.fileBrowser = true;
+        elog::info("import: navegador ABERTO pos-concessao — retoma do "
+                   "dialogo (flag fileBrowser=1)");
+    } else if (act == storage::Action::Export) {
+        beginExportToDownloads();
+    }
+}
+
+// F5.5 — transição COMPLETA do retorno das definições (concedido ou não),
+// pelo onActivityResult (onStorageResult): estado + toast + ação retomada.
+void finishStorageReturn(bool granted) {
+    g_perm.onSettingsReturn(granted);
+    resumePendingAfterReturn(granted);
+}
+
+// handler injetado — chamado pelo bridge quando a Activity volta das
+// definições (kReqAllFiles). NO THREAD DA ENGINE (pollResult no loop):
+// re-verifica isExternalStorageManager e retoma a ação pendente.
+void onStorageResult(void* /*user*/, const saf::SafResult& r) {
+    if (r.request != storage::kReqAllFiles) {
+        elog::warn("storage: resultado de req=%d ignorado (esperado %d)",
+                   r.request, storage::kReqAllFiles);
+        return;
+    }
+    bool mgr = false;
+    const bool supported = storage::jniStorageApiSupported(&mgr);
+    const bool granted = supported && mgr;
+    logAllFilesGranted(granted, "retorno das definicoes", /*force=*/true);
+    // F5.5: a transição inteira (estado + toast + ação retomada) vive em
+    // finishStorageReturn — partilhada com a re-verificação do RESUME
+    finishStorageReturn(granted);
+    elog::info("storage: retorno das definicoes — supported=%d mgr=%d → %s "
+               "(modo %s)", supported ? 1 : 0, mgr ? 1 : 0,
+               granted ? "CONCEDIDO" : "negado/sem accao",
+               storage::modeLabel(g_perm.mode()));
+}
+
+// 0.8.7: openImportScan (varredura Download/Documents + overlay de
+// candidatos) foi REMOVIDO — o import é o NAVEGADOR 0.7.2 desde sempre no
+// caminho concedido; a retoma pós-diálogo abre o MESMO navegador (o
+// overlay de candidatos e o importCandidate ficam p/ o histórico dos
+// testes do browser).
+
+// EXPORT: mesh do TIC selecionado → /storage/emulated/0/Download/GOneVV/
+// export/export_<nome>.obj (File API direta, visível no gestor de ficheiros)
+// 0.10-M (PASSO 4): um mesh DE BLOCOS exporta pela TABELA (um bloco de
+// cada vez materializado, numeração global — o pico de RAM é 1 bloco,
+// nunca o modelo inteiro; o caminho do mesh único fica para os de sempre).
+void beginExportToDownloads() {
+    Tic* tsel = g_scene.get(g_editor.selected);
+    MeshRenderer* mrs = tsel ? tsel->getComponent<MeshRenderer>() : nullptr;
+    if (!mrs) {
+        showToast("selecione um TIC com mesh");
+        return;
+    }
+    std::string err;
+    const MeshData* src = nullptr;
+    MeshData cubeCopy;
+    BlockMesh* bm = nullptr;
+    if (!mrs->meshPath.empty()) {
+        // o caminho dos blocos primeiro (a TABELA — sem carregar nada)
+        bm = g_gpu.blockMeshIfOpen(mrs->meshPath);
+        if (!bm) {
+            g_gpu.mesh(mrs->meshPath);   // abre (se for o caminho de blocos)
+            bm = g_gpu.blockMeshIfOpen(mrs->meshPath);
+        }
+        if (!bm) {
+            src = g_resources.mesh(mrs->meshPath, err);   // mesh único
+        }
+    } else if (mrs->mesh == &g_cubeMesh) {
+        cubeCopy = cubeToMeshData();
+        src = &cubeCopy;
+    }
+    if (!bm && (!src || !src->ok())) {
+        showToast("mesh não disponível p/ export");
+        return;
+    }
+    char nameBuf[40];
+    std::snprintf(nameBuf, sizeof(nameBuf), "%.30s", tsel->name.c_str());
+    std::string outName = "export_" + std::string(nameBuf) + ".obj";
+    for (char& c : outName) {
+        if (c == '/' || c == '\\' || c == ':' || c == '#') c = '_';
+    }
+    std::string obj;
+    if (bm) {
+        // o STREAM por blocos: a TABELA manda, 1 bloco materializado de
+        // cada vez (o pico é o bloco, não o modelo — o contrato do PASSO 4)
+        ObjStreamBlock stream;
+        objStreamBegin(stream, tsel->name);
+        MeshData part;
+        for (size_t bi = 0; bi < bm->table().size(); ++bi) {
+            if (!bm->materializeBlock(bi, part, err)) {
+                elog::error("fileapi: export %s FALHOU no bloco %zu — %s",
+                            outName.c_str(), bi, err.c_str());
+                showToast("falha ao exportar (causa no engine.log)");
+                return;
+            }
+            const GMeshV3Block& blk = bm->table()[bi];
+            const std::string mat = blk.materialIndex < bm->materials().size()
+                ? bm->materials()[static_cast<size_t>(blk.materialIndex)]
+                : std::string();
+            objStreamAppend(stream, part,
+                            "bloco " + std::to_string(bi), mat);
+            part = MeshData{};   // o bloco morre AGORA (pico = 1 bloco)
+        }
+        obj = std::move(stream.out);
+        elog::info("fileapi: export por BLOCOS de '%s' — %u blocos, %llu "
+                   "verts, %llu tris (pico de RAM = 1 bloco)",
+                   mrs->meshPath.c_str(), stream.blocks,
+                   static_cast<unsigned long long>(stream.verts),
+                   static_cast<unsigned long long>(stream.tris));
+    } else {
+        obj = exportObj(*src);
+    }
+    const std::string path = std::string(fileapi::kExternalRoot) + "/" +
+                             fileapi::kExportRelDir + "/" + outName;
+    if (fileapi::writeAll(path, obj.data(), obj.size())) {
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "exportado: %s/%s",
+                      fileapi::kExportRelDir, outName.c_str());
+        showToast(msg);
+        elog::info("fileapi: export %s (%zu bytes) — File API direta",
+                   path.c_str(), obj.size());
+    } else {
+        showToast("falha ao exportar (causa no engine.log)");
+        elog::error("fileapi: export %s FALHOU — %s", path.c_str(),
+                    fileapi::errnoText().c_str());
+    }
+}
+
+// TENTATIVA de import: concedido → abre o NAVEGADOR (0.7.2: qualquer pasta
+// + galeria, com o caminho visível); senão → DIÁLOGO (1ª vez do fluxo) com a
+// ação pendente; bloqueado → mensagem HONESTA com a causa real
+void attemptImport() {
+    elog::info("import: toque no botão (projeto=%d granted-? a verificar)",
+               g_projectReady ? 1 : 0);
+    if (!g_projectReady) {
+        showToast("sem projeto — import indisponível");
+        elog::warn("import: SEM projeto — botão não faz nada (crie/abra um)");
+        return;
+    }
+    bool supported = false;
+    if (storageGrantedNow(&supported)) {
+        // 0.8.7 (fix do wiring MORTO do C33 — "o botão Import não abre
+        // nada"): o browserOpen põe g_browser.open mas o OVERLAY só desenha
+        // com g_editor.fileBrowser TAMBÉM a true (gate do frame:
+        // `g_editor.fileBrowser && g_browser.open`). Sem a segunda flag o
+        // navegador "abria" INVISÍVEL — o toque chegava ao handler, o
+        // estado abria, nada aparecia. As DUAS juntas, SEMPRE (o outro
+        // call-site do seletor de textura já fazia assim — era o único
+        // caminho que funcionava).
+        browserOpen(std::string(fileapi::kExternalRoot) + "/Download");
+        g_editor.fileBrowser = true;
+        elog::info("import: navegador ABERTO (Download) — flag fileBrowser=1 "
+                   "(o overlay desenha neste frame)");
+        return;
+    }
+    const storage::BlockReason why =
+        storage::blockReason(storage::handshakeOk(), supported);
+    if (why == storage::BlockReason::None) {
+        if (g_perm.requestAction(storage::Action::Import, true)) {
+            g_editor.storageDialog = true;   // o main desenha o diálogo
+            elog::info("storage: diálogo All Files aberto (import pendente)");
+        }
+        return;
+    }
+    showToast(storage::blockMessage(why));
+    elog::error("storage: import bloqueado — %s", storage::blockMessage(why));
+    if (why == storage::BlockReason::Unsupported) {
+        // marca o estado Unsupported no fluxo (o Settings mostra app-private)
+        g_perm.requestAction(storage::Action::Import, false);
+    }
+}
+
+// TENTATIVA de export (mesma forma do import — mensagens honestas)
+void attemptExport() {
+    bool supported = false;
+    if (storageGrantedNow(&supported)) {
+        beginExportToDownloads();
+        return;
+    }
+    const storage::BlockReason why =
+        storage::blockReason(storage::handshakeOk(), supported);
+    if (why == storage::BlockReason::None) {
+        if (g_perm.requestAction(storage::Action::Export, true)) {
+            g_editor.storageDialog = true;
+            elog::info("storage: diálogo All Files aberto (export pendente)");
+        }
+        return;
+    }
+    showToast(storage::blockMessage(why));
+    elog::error("storage: export bloqueado — %s", storage::blockMessage(why));
+    if (why == storage::BlockReason::Unsupported) {
+        g_perm.requestAction(storage::Action::Export, false);
+    }
+}
+
+// escolha do DIÁLOGO ("Permitir"/"Cancelar") — processada no frame em que
+// drawStorageDialog devolve != 0. O diálogo só existe pós-handshake, mas a
+// Activity pode ter sido recriada entretanto — a falha do lançamento é
+// diagnosticada com a causa REAL (handshake vs intent).
+void onStorageDialogChoice(int choice) {
+    if (choice == 1) {
+        g_perm.dialogAccept();
+        if (g_perm.consumeOpenSettings()) {
+            if (storage::jniOpenAllFilesSettings()) {
+                elog::info("storage: %s lançada — à espera do retorno",
+                           storage::kSettingsAction);
+            } else {
+                g_perm.dialogCancel();
+                if (!storage::handshakeOk()) {
+                    showToast("ponte Java indisponível (handshake)");
+                    elog::error("storage: lançamento de %s FALHOU — ponte Java "
+                                "indisponível (handshake)",
+                                storage::kSettingsAction);
+                } else {
+                    showToast("não consegui abrir as definições");
+                    elog::error("storage: lançamento de %s FALHOU (handshake "
+                                "OK — intent sem activity no aparelho?)",
+                                storage::kSettingsAction);
+                }
+            }
+        }
+    } else if (choice == 2) {
+        g_perm.dialogCancel();
+        showToast("sem acesso — modo app-private");
+        elog::info("storage: utilizador recusou (modo app-private)");
+    }
+}
+
+// IMPORT: copia o candidato escolhido para o projeto (por extensão:
+// obj/gltf/glb → meshes/, png → textures/) — File API lê, FsStorage grava
+void importCandidate(size_t idx) {
+    if (idx >= g_importCands.size() || !g_storage) {
+        return;
+    }
+    const fileapi::Candidate& c = g_importCands[idx];
+    std::vector<u8> bytes;
+    if (!fileapi::readAll(c.path, bytes) || bytes.empty()) {
+        showToast("leitura falhou (causa no engine.log)");
+        return;
+    }
+    const char* dir = (c.kind == 'm') ? Project::kDirMeshes
+                                      : Project::kDirTextures;
+    // nome de destino sanitizado
+    std::string safe = c.name;
+    for (char& ch : safe) {
+        if (ch == '/' || ch == '\\' || ch == ':') ch = '_';
+    }
+    const std::string rel = std::string(dir) + "/" + safe;
+    if (g_storage->writeBytes(rel, bytes.data(), bytes.size())) {
+        refreshCatalog();
+        elog::info("fileapi: import %s (%zu bytes) de %s", rel.c_str(),
+                   bytes.size(), c.path.c_str());
+        // 0.8.5: MESMO wiring do browserImportFile — aplicar-após-import
+        // com o diálogo (as DUAS flags: g_applyAsk E g_editor.applyAsk; era
+        // o 2.º caminho de import que também nunca perguntava)
+        Tic* tsel = g_scene.get(g_editor.selected);
+        if (tsel && tsel->getComponent<MeshRenderer>()) {
+            g_applyAsk.open = true;
+            g_applyAsk.kind = c.kind;
+            g_applyAsk.rel = rel;
+            g_applyAsk.fileName = c.name;
+            g_editor.applyAsk = true;
+        } else {
+            char msg[96];
+            std::snprintf(msg, sizeof(msg), "importado: %s", rel.c_str());
+            showToast(msg);
+        }
+    } else {
+        showToast("falha ao gravar no projeto");
+        elog::error("fileapi: import %s — gravação no projeto falhou",
+                    rel.c_str());
+    }
+}
+
+// rótulo curto do formato p/ a status line (F5.1-D)
+const char* shortTexFormat(CompressedFormat f) {
+    switch (f) {
+        case CompressedFormat::RGBA8:     return "rgba";
+        case CompressedFormat::ETC2_RGB:  return "etc2";
+        case CompressedFormat::ETC2_RGBA: return "eac";
+        case CompressedFormat::ASTC_4x4:  return "astc4";
+        case CompressedFormat::ASTC_6x6:  return "astc6";
+        default:                          return "?";
+    }
+}
+
+// 0.6.8: ENTRA no play — snapshot da pose + menus fechados (em play não há
+// edição; ao parar, os PAINÉIS voltam exatamente — scroll/seleção vivem
+// fora das flags de overlay e ficam intactos)
+void enterPlayMode() {
+    g_editor.playMode = true;
+    editor::closeAllOverlays(g_editor);
+    g_playUi.armed = false;   // 0.7.0: nenhum on-click armado atravessa a transição
+    // 0.8.0 (F7): o preview da timeline MORRE na transição (restaura a pose
+    // de editor ANTES do snapshot — o play de jogo captura a pose limpa)
+    timeline::stopPreview(g_scene, g_timeline.previewTic, g_timeline);
+    playSnapshotCapture(g_scene, g_playSnap);
+    // 0.8.0 (F7): TODOS os players arrancam do zero em Play (o critério de
+    // aceitação: "em Play objeto/UI anima")
+    auto& players = g_scene.components().animators();
+    for (u32 i = 0; i < players.size(); ++i) {
+        AnimationPlayer& pl = players.at(i);
+        const Tic* ownerTic = g_scene.get(players.owner(i));
+        pl.playing = ownerTic && ownerTic->active;
+        pl.time = 0.0f;
+        pl.resetDir();
+    }
+    g_animSystem.enabled = true;
+    g_voni.playEnabled = true;   // 0.9.2: scripts arrancam (autoPlay)
+    audioEnterPlay();   // 0.8.11: autoplay dos AudioPlayers
+    LOGI("ui: modo play — snapshot de %u transforms / %u bodies / %u ui-elems; "
+         "%u animation player(s) a tocar",
+         (unsigned)g_playSnap.transforms.size(),
+         (unsigned)g_playSnap.bodies.size(),
+         (unsigned)g_playSnap.uiElems.size(),
+         (unsigned)players.size());
+}
+
+// 0.6.8: SAI do play — repõe a pose de editor (PlaySnapshot intacto) e a UI
+// de EDITOR volta com os painéis nos seus sítios exatos
+void leavePlayMode() {
+    g_editor.playMode = false;
+    audioLeavePlay();   // 0.8.11: o sandbox de áudio também morre
+    g_animSystem.enabled = false;   // 0.8.0: animação só avança em Play
+    g_voni.playEnabled = false;   // 0.9.2: runs de Play morrem (as do
+    g_voni.stopPlayRuns();        // editor Run continuam até o Stop)
+    playSnapshotRestore(g_scene, g_playSnap);
+    // 0.8.0 (F7): players PARADOS no zero (o Play é sandbox — o estado de
+    // edição nunca herda "a meio de um clip")
+    auto& players = g_scene.components().animators();
+    for (u32 i = 0; i < players.size(); ++i) {
+        AnimationPlayer& pl = players.at(i);
+        pl.playing = false;
+        pl.time = 0.0f;
+        pl.resetDir();
+    }
+    LOGI("ui: modo editor — pose restaurada (%u transforms, %u ui-elems)",
+         (unsigned)g_playSnap.transforms.size(),
+         (unsigned)g_playSnap.uiElems.size());
+}
+
+// F4: alimenta os TouchControls ativos (só em modo Play) e devolve a máscara
+// de slots reclamados (a câmara ignora esses dedos)
+u32 feedTouchControls(f32 w, f32 h, bool& outDrawn, TouchControls** outTc) {
+    u32 claimed = 0;
+    outDrawn = false;
+    *outTc = nullptr;
+    if (!g_editor.playMode) {   // 0.6.8: modo de UI no EditorState
+        return 0;
+    }
+    auto& tcs = g_scene.components().touchControls();
+    TouchControls* first = nullptr;
+    for (u32 i = 0; i < tcs.size(); ++i) {
+        Tic* t = g_scene.get(tcs.owner(i));
+        if (!t || !t->active) {
+            continue;
+        }
+        TouchControls& tc = tcs.at(i);
+        if (!first) {
+            first = &tc;
+            *outTc = &tc;
+            outDrawn = true;
+        }
+        for (u32 s = 0; s < kMaxPointerSlots; ++s) {
+            // F4.2: w/h chegam como ÁREA ÚTIL; o toque vem em coords de ecrã
+            // → converte para o espaço do layout dos controlos (mesma
+            // transformação que drawTouchControls usa ao desenhar)
+            if (g_input.pressed(s)) {
+                f32 x, y;
+                g_input.pos(s, x, y);
+                if (tc.touchBegin(s, x - g_ui.safeLeft(), y - g_ui.safeTop(), w, h)) {
+                    claimed |= (1u << s);
+                }
+            } else if (g_input.down(s) && tc.ownsSlot(s)) {
+                f32 x, y;
+                g_input.pos(s, x, y);
+                tc.touchMove(s, x - g_ui.safeLeft(), y - g_ui.safeTop());
+                claimed |= (1u << s);
+            }
+            if (g_input.released(s)) {
+                tc.touchEnd(s);
+            }
+        }
+    }
+    return claimed;
+}
+// ---------------------------------------------------------------------------
+
+f32    g_fps = 0.0f;
+double g_fpsAccum = 0.0;
+u32    g_fpsFrames = 0;
+
+void onAppCmd(android_app* app, i32 cmd) {
+    switch (cmd) {
+        case APP_CMD_INIT_WINDOW: {
+            // 0.6.7 — diagnóstico do lifecycle: o 2º (e seguintes)
+            // INIT_WINDOW nesta execução são RE-CRIAÇÕES do contexto EGL
+            // (voltar do fundo/recents/reentrar no editor sem matar a app).
+            // Neste caso NENHUM recurso GL do ciclo anterior sobrevive — o
+            // TERM_WINDOW destruiu-os todos — e o boot abaixo re-cria e
+            // re-upe TUDO (fonte, cubo, grid, renderer, assets do g_gpu).
+            const bool contextRecreated = (g_windowTerms > 0);
+            ++g_windowInits;
+            if (contextRecreated) {
+                elog::warn("lifecycle: INIT_WINDOW #%u — contexto EGL "
+                           "RE-CRIADO (janela re-aberta sem matar a app; "
+                           "recursos GL do ciclo anterior foram libertos "
+                           "no TERM_WINDOW #%u — re-upload de tudo)",
+                           g_windowInits, g_windowTerms);
+            }
+            // F5.1-hotfix: boot em passos numerados — cada passo escreve
+            // "[boot N/6] <nome> OK/FALHOU" no engine.log. A ordem dentro
+            // do INIT_WINDOW segue a numeração (contentRect → fonts →
+            // renderer → scene); storage/physics já correram no android_main.
+            if (!g_egl.init(app->window)) {
+                elog::error("[boot 1/6] contentRect FALHOU (EGL init)");
+                break;
+            }
+            g_renderer.resize(g_egl.width(), g_egl.height());
+            applyContentRect(app);   // F4.2: safe-area desde o primeiro frame
+            elog::info("[boot 1/6] contentRect OK (surface %dx%d)",
+                       (int)g_egl.width(), (int)g_egl.height());
+            // F1 sem assets: fonte do sistema (primeira que existir vence).
+            // 0.6.7: após TERM_WINDOW o atlas está destruído (tex_ == 0) →
+            // isto é um RE-BAKE + RE-UPLOAD no contexto novo. O guard do
+            // loadFromPaths só evita o upload duplicado no MESMO contexto.
+            if (!g_font.loadFromPaths(kSystemFontPaths, kSystemFontPathCount, 28.0f)) {
+                elog::error("[boot 3/6] fonts FALHOU — nenhuma fonte do sistema — UI sem texto");
+            } else {
+                elog::info("[boot 3/6] fonts OK (sistema, 28px)%s",
+                           contextRecreated
+                               ? " — RE-UPLOAD no contexto novo (lifecycle)"
+                               : "");
+            }
+            g_ui.init();
+            g_ui.setFont(&g_font);
+            // 0.7.0: resolver de texturas da UI criável (elemento Image — ref
+            // relativa → Texture do GpuAssets; o mesmo cache do material)
+            g_ui.setImageResolver([](const std::string& ref) -> const Texture* {
+                std::string warn;
+                return g_gpu.texture(ref, &warn);
+            });
+            // F3: geometria procedural do viewport (mesh partilhado dos presets)
+            {
+                const CubeMeshData cube = makeCube(1.0f);
+                if (!g_cubeMesh.create(cube.vertices.data(),
+                                       static_cast<u32>(cube.vertices.size()),
+                                       cube.indices.data(),
+                                       static_cast<u32>(cube.indices.size()))) {
+                    elog::error("[boot 4/6] renderer FALHOU no passo: mesh do cubo");
+                }
+                if (!g_grid.init()) {
+                    elog::error("[boot 4/6] renderer FALHOU no passo: grid de chão");
+                }
+            }
+            if (!g_renderer.init()) {
+                elog::error("[boot 4/6] renderer FALHOU (shaders/materiais)");
+                break;
+            }
+            // F5-E: caches de assets ligados ao storage do projeto (F5.2:
+            // app-private — o SAF router foi removido)
+            if (g_storage) {
+                g_resources.setStorage(g_storage.get());
+                g_gpu.init(&g_resources);
+                if (g_pipeline) {
+                    // F5.1-A: ASTC só quando a extensão KHR existe (C33/Mali
+                    // tem; sem a extensão o HardwareCompressor cai p/ ETC2)
+                    const bool astc = glAstcSupported();
+                    g_hwCompressor.setAstcSupported(astc);
+                    // 0.10-M (PASSO 5A): o TETO FÍSICO do device — uma
+                    // textura maior que GL_MAX_TEXTURE_SIZE nunca crasha:
+                    // o pipeline halva do ORIGINAL e loga «teto do device»
+                    GLint maxTex = 0;
+#ifdef GL_MAX_TEXTURE_SIZE
+                    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTex);
+#endif
+                    if (maxTex > 0) {
+                        g_pipeline->setMaxTextureSize(
+                            static_cast<u32>(maxTex));
+                    }
+                    // o perfil do projeto re-aplica (a ordem load do projeto
+                    // × boot GL varia com o lifecycle — idempotente)
+                    g_pipeline->setPerfil(g_texPerfil);
+                    g_gpu.setPipeline(g_pipeline.get());
+                    g_texCache->resetStats();
+                    elog::info("f5.1: compressão de texturas ativa — ASTC %s (fallback ETC2), cache %s, GL_MAX_TEXTURE_SIZE=%d, perfil %s",
+                               astc ? "SIM" : "não",
+                               g_projectReady ? "textures/cache" : "off",
+                               static_cast<int>(maxTex),
+                               texPerfilName(g_texPerfil));
+                }
+            }
+            elog::info("[boot 4/6] renderer OK (shaders, materiais, geometria)");
+            // 0.8.11: backend de áudio (AAudio; fallback AudioTrack) — o
+            // misturador já vive no callback desde o arranque
+            audioBackendBoot();
+            // F5-A/3: recarrega a CENA ATIVA do projeto (refs relativos
+            // intactos; resolvers de mesh chegam na F5-E — por agora o
+            // LoadCtx liga o cubo procedural, tag "cube" das cenas antigas)
+            if (g_projectReady) {
+                // 0.8.12 — A SELEÇÃO SOBREVIVE ao ciclo de lifecycle: o
+                // reload re-cria os TICs com handles NOVOS (o handle antigo
+                // morre); guardamos o NOME do TIC selecionado ANTES do load
+                // e RE-VALIDAMOS/RE-MAPEAMOS depois (o Inspector deixava a
+                // seleção morrer silenciosamente — o dono re-selecionava a
+                // cada fundo/recents do Android).
+                char selName[64] = {0};
+                if (const Tic* selTic = g_scene.get(g_editor.selected)) {
+                    std::snprintf(selName, sizeof(selName), "%.60s",
+                                  selTic->name.c_str());
+                }
+                primMeshesToGrave();   // 0.8.10: posse antiga p/ cova (boot)
+                const SceneSerializer::LoadCtx ctx = makeLoadCtx();
+                if (g_project.loadActiveScene(*g_storage, g_scene, ctx)) {
+                    postLoadMigrateAndFixup();   // 0.8.10: migração silenciosa
+                    // 0.8.12 — RE-VALIDA o handle (re-mapeia por nome se o
+                    // reload re-criou os TICs; mantém se o handle vivo).
+                    // O ELEMENTO de UI selecionado não sobrevive (o índice
+                    // pós-reload pode apontar outro elemento — reset honesto;
+                    // o TIC continua selecionado).
+                    const Handle revalidated = editor::revalidateSelection(
+                        g_scene, g_editor.selected, selName);
+                    if (revalidated.valid() &&
+                        revalidated != g_editor.selected) {
+                        editor::selectTic(g_editor, revalidated);
+                        elog::info("lifecycle: seleção re-validada pós-INIT "
+                                   "WINDOW (re-mapeada por nome '%s')",
+                                   selName);
+                    } else if (!revalidated.valid() &&
+                               g_editor.selected.valid()) {
+                        elog::info("lifecycle: seleção pós-INIT WINDOW "
+                                   "dispensada (TIC '%s' não existe na cena "
+                                   "recarregada)", selName);
+                        editor::clearSelection(g_editor);
+                    }
+                    g_editor.selElement = -1;
+                    elog::info("[boot 6/6] scene OK → editor ('%s', %u tics)",
+                               g_project.activeScenePath()->c_str(), g_scene.count());
+                } else {
+                    elog::error("[boot 6/6] scene FALHOU ('%s') — editor arranca com cena vazia",
+                                g_project.activeScenePath()->c_str());
+                }
+                // FASE 9 (G0-1): o EDITOR DE SCRIPT/janela de texto abertos
+                // sobrevivem ao ciclo — o HANDLE do TIC dono é re-validado
+                // por NOME (o reload re-criou os TICs) e o IME é RE-PEDIDO
+                // (o showSoftInput do arranque foi contra a janela
+                // PRÉ-rotação — a rotação é o próprio TERM→INIT; sem isto o
+                // teclado não voltava e o editor parecia morto)
+                if (g_editor.scriptWin.open) {
+                    if (editor::scriptwin::revalidateTic(g_editor.scriptWin,
+                                                         g_scene)) {
+                        elog::info("lifecycle: editor de script re-validado "
+                                   "pós-INIT WINDOW (TIC '%s' por nome)",
+                                   g_editor.scriptWin.ticName);
+                    }
+                    storage::jniImeShow();
+                    elog::info("lifecycle: IME re-pedido pós-INIT (editor de "
+                               "script aberto)");
+                }
+                if (g_editor.textWin.open) {
+                    storage::jniImeShow();
+                }
+            } else {
+                elog::warn("[boot 6/6] scene SEM PROJETO — editor sem persistência");
+            }
+            g_ready = true;
+            logBootMemory("fim do boot");
+            elog::info("boot: janela pronta %dx%d", (int)g_egl.width(), (int)g_egl.height());
+            break;
+        }
+        case APP_CMD_WINDOW_RESIZED:
+        case APP_CMD_CONFIG_CHANGED:
+            g_egl.refreshSize();
+            g_renderer.resize(g_egl.width(), g_egl.height());
+            applyContentRect(app);   // F4.2: barras podem ter mudado
+            break;
+        case APP_CMD_CONTENT_RECT_CHANGED:
+            // F4.2 (fix raiz do B1): o sistema avisou que a área desenhável
+            // mudou (nav/status bar a aparecer/esconder) → reinsetar TUDO
+            applyContentRect(app);
+            break;
+        case APP_CMD_PAUSE:
+            // FASE 9 (G1-5): flush do debounce ao sair para segundo plano
+            // (o write pendente NÃO se perde)
+            if (g_layoutSaveTimer > 0.0f) {
+                g_layoutSaveTimer = 0.0f;
+                saveLayoutNow("saída para segundo plano");
+            }
+            // 0.8.11 — o áudio segue o lifecycle da activity: fundo =
+            // PAUSA do stream (AAudio/AudioTrack pausam DEBAIXO da mesma
+            // interface; o misturador NÃO esquece vozes — o resume continua
+            // de onde estava)
+            if (g_audioOut && g_audioBackendReady) {
+                g_audioOut->pause();
+                elog::info("audio: PAUSE (activity em fundo)");
+            }
+            break;
+        case APP_CMD_RESUME: {
+            // F5.5 — All Files Access: RE-VERIFICAÇÃO NO RETORNO (o
+            // "re-verificar no onResume" do fluxo). O caminho normal do
+            // retorno das definições é o onActivityResult (o Java corre-o
+            // ANTES do onResume), que enfileira p/ ESTE thread — a fila é
+            // drenada AQUI primeiro para que o retorno seja tratado pelo
+            // onStorageResult (a ordem natural; o drain é a mesma chamada
+            // do loop da engine, fila mutex-guarded). Se DEPOIS do drain o
+            // fluxo continua PendingSettings (ecrã de settings OEM que
+            // termina SEM setResult / volta pelos recents), a verificação
+            // FRESCA de isExternalStorageManager decide AGORA via
+            // resumeRecheck (política pura afervel no CI):
+            //   concedido → Granted + ação pendente RETOMADA (o import
+            //              prossegue sem re-pedir — o caminho feliz);
+            //   recusado → Idle + toast claro "acesso não ativado" SEM
+            //              relançar as definições (nenhum loop).
+            // Nada corre sem fluxo pendente (arranque frio e voltas do
+            // fundo incluídas — o guard é o estado do fluxo, não o cmd).
+            // NOTA: SEM setMode aqui antes do recheck — setMode(AllFiles)
+            // põe o estado em Granted e o recheck tem de ver PendingSettings.
+            while (storage::pollResult()) {
+            }
+            if (g_perm.state() == storage::FlowState::PendingSettings) {
+                bool mgr = false;
+                const bool supported = storage::jniStorageApiSupported(&mgr);
+                if (storage::resumeRecheck(g_perm, supported, mgr)) {
+                    // concedido ⟺ modo ficou AllFiles (PendingSettings
+                    // implica que NÃO era AllFiles antes do recheck)
+                    const bool granted =
+                        g_perm.mode() == storage::Mode::AllFiles;
+                    logAllFilesGranted(granted, "re-verificacao no resume",
+                                       /*force=*/true);
+                    elog::info("storage: resume sem onActivityResult — "
+                               "decisao aqui (supported=%d mgr=%d → modo %s)",
+                               supported ? 1 : 0, mgr ? 1 : 0,
+                               storage::modeLabel(g_perm.mode()));
+                    resumePendingAfterReturn(granted);
+                }
+            }
+            // 0.8.11 — o áudio ACORDA com a activity (o pause do fundo
+            // parou o stream; vozes/cursor ficaram intactos)
+            if (g_audioOut && g_audioBackendReady) {
+                g_audioOut->resume();
+                elog::info("audio: RESUME (activity de volta)");
+            }
+            break;
+        }
+        case APP_CMD_TERM_WINDOW:
+            // 0.6.7 (fix dos "cubinhos"): o EglContext::shutdown destrói a
+            // SURFACE E O CONTEXTO — TODOS os ids GL ficam órfãos. O código
+            // antigo só libertava cubo/grid/renderer: o atlas da fonte
+            // (tex_ != 0 stale → o guard saltava o re-upload) e os mapas do
+            // GpuAssets (Mesh*/Texture* com handles mortos) sobreviviam ao
+            // term e o próximo INIT_WINDOW usava-os → texto branco em quads
+            // e draws contra ids inválidos.
+            //
+            // Ordem obrigatória (tudo com o contexto AINDA corrente, o
+            // g_egl.shutdown é o ÚLTIMO a correr):
+            //   1. detach dos MeshRenderers (ponteiros de GPU vão morrer);
+            //   2. g_gpu.releaseAll() — glDelete* dos meshes/texturas;
+            //   3. g_font.destroy() — glDeleteTextures do atlas + reset;
+            //   4. cubo/grid/renderer (como antes);
+            //   5. EGL por fim.
+            // NENHUM recurso GL é assumido vivo entre term/init — o boot do
+            // INIT_WINDOW re-cria e re-upe tudo (fonte incluída).
+            g_ready = false;
+            {
+                const u32 detached = detachRenderersFromGpu();
+                const u32 gpuMeshes = g_gpu.meshCount();
+                const u32 gpuTextures = g_gpu.textureCount();
+                g_gpu.releaseAll();          // unique_ptr → ~Mesh/~Texture → glDelete*
+                g_font.destroy();            // atlas: glDeleteTextures + reset das métricas
+                g_cubeMesh.destroy();
+                g_impQuad.destroy();         // 0.11-W (3.75b): o quad do impostor
+                primMeshesDestroyAll();      // 0.8.10: prims SEM cache (posse)
+                g_grid.destroy();
+                g_renderer.shutdown();      // programa UI + VAO/VBO + whiteTex + lit
+                if (g_audioOut) {           // 0.8.11: áudio sai com o contexto
+                    g_audioOut->stop();
+                    g_audioBackendReady = false;
+                }
+                g_egl.shutdown();            // POR FIM: surface + contexto morrem
+                ++g_windowTerms;
+                elog::info("lifecycle: TERM_WINDOW #%u — contexto EGL destruído; "
+                           "libertados: %u mesh(es) gpu, %u textura(s) gpu, "
+                           "atlas da fonte (re-bake no próximo init), %u "
+                           "MeshRenderer(es) desligados; NENHUM recurso GL "
+                           "assumido vivo no próximo INIT_WINDOW",
+                           g_windowTerms, gpuMeshes, gpuTextures, detached);
+            }
+            break;
+        case APP_CMD_DESTROY:
+            g_ready = false;
+            break;
+        default:
+            break;
+    }
+}
+
+i32 onInputEvent(android_app* /*app*/, AInputEvent* event) {
+    return g_input.process(event) ? 1 : 0;
+}
+
+// pass 3D: desenha TODOS os TICs com MeshRenderer (F3) — já não é um cubo
+// hardcoded: o modelo vem do Transform3D do mesmo dono (cache world).
+// 0.7.0: TIC INVISÍVEL não desenha (gestão de TICs — física/lógica
+// continuam; só o render salta) e o TINT do MeshRenderer (cor por TIC,
+// sliders R/G/B do Inspector) vai ao drawMesh.
+// 0.10-M (PASSO 4): o caminho dos BLOCOS primeiro — mr->blocks (o
+// BlockMesh do meshPath, ligado pelo blockRebind do ponto seguro) desenha
+// BLOCO A BLOCO (frustum por AABB + lazy + LRU); o mr->mesh desses TICs é
+// o HULL de bounds (nunca desenhado — fica para cena/fit/gizmo).
+// 0.11-T (FASE 3.5a): (a) o SKINNED CULL do lado do DRAW — um TIC skinado
+// cujo AABB (inchado 25%) está TODO fora do frustum deste frame não
+// desenha e não paga computeSkinMatrices (o AnimationSystem já saltou o
+// avanço dele; este é o mesmo teste com os planos FRESCOS do frame — o
+// ping-pong de planos evita o pop de 1 frame); (b) o LOD por distância —
+// camEye + mr->lodDistance vão ao blocks->draw (o .gmesh sem cauda GLOD
+// ignora — byte a byte). Conta skinados/culled para o HUD/engine.log.
+DrawStats drawTics(const Mat4& vp, const Vec3& camEye) {
+    DrawStats st{};
+    g_blockFrame = BlockFrameStats{};   // as métricas DO frame (HUD/log)
+    g_skinFrame = SkinFrameStats{};
+    g_impFrame = ImpostorFrameStats{};
+    const ComponentStore& comps = g_scene.components();
+    const auto& mrs = comps.meshRenderers();
+    f32 skinPlanes[6][4];
+    bool skinPlanesReady = false;   // os planos só se extraem com skinados
+    // 0.11-W (3.75b): os planos do IMPOSTOR (o MESMO padrão do skin cull —
+    // extraem-se UMA vez por frame, e só quando um impostor pergunta)
+    f32 impPlanes[6][4];
+    bool impPlanesReady = false;
+    auto skinCulledNow = [&](Handle h, const MeshRenderer& mr) -> bool {
+        if (!(mr.blocks != nullptr ? mr.blocks->skinned()
+                                   : (mr.mesh != nullptr &&
+                                      mr.mesh->skinned()))) {
+            return false;
+        }
+        ++g_skinFrame.skinados;
+        if (!skinPlanesReady) {
+            BlockMesh::frustumPlanes(vp, skinPlanes);
+            skinPlanesReady = true;
+        }
+        Vec3 mn{0.0f, 0.0f, 0.0f}, mx{0.0f, 0.0f, 0.0f};
+        if (mr.blocks != nullptr) {
+            mn = mr.blocks->boundsMin();
+            mx = mr.blocks->boundsMax();
+        } else {
+            mn = mr.mesh->boundsMin();
+            mx = mr.mesh->boundsMax();
+        }
+        const Vec3 ext{(mx.x - mn.x) * BlockMesh::kSkinCullAabbSwell,
+                       (mx.y - mn.y) * BlockMesh::kSkinCullAabbSwell,
+                       (mx.z - mn.z) * BlockMesh::kSkinCullAabbSwell};
+        mn.x -= ext.x; mn.y -= ext.y; mn.z -= ext.z;
+        mx.x += ext.x; mx.y += ext.y; mx.z += ext.z;
+        Mat4 model = Mat4::identity();
+        if (const Transform3D* tr = comps.transforms().find(h)) {
+            model = tr->world;
+        }
+        const bool vis = BlockMesh::worldAabbVisible(model, mn, mx,
+                                                      skinPlanes);
+        if (!vis) {
+            ++g_skinFrame.culled;   // o lado do DRAW também conta (o HUD
+                                    // mostra o MAIOR dos dois lados)
+        }
+        return !vis;
+    };
+    // ---- 0.11-W (3.5b): o BATCH do instancing ------------------------------
+    // A COLHEITA corre por TIC (o MESMO cull/LOD do draw de sempre — a
+    // mesma classifyFrame); o AGRUPAMENTO por assinatura (§3.5b.2) e a
+    // SUBMISSÃO correm DEPOIS do loop: os opacos fundidos primeiro, os
+    // blends por TIC no fim (a ordem longe→perto de sempre dentro de cada
+    // TIC — agora DEPOIS de todos os opacos do frame, mais correto para
+    // o depth; entre TICs não-instanciados nada muda).
+    struct BatchPick {
+        BlockMesh* bm;
+        u32 entry;
+        const Mat4* model;   // o tr->world do store (estável no frame)
+        const Texture* tex;
+        const f32* tint;
+    };
+    struct BlendRow {
+        BlockMesh* bm;
+        const u32* entries;   // as ENTRADAS dos blends deste TIC
+        const f32* zNdc;
+        u32 count;
+        const Mat4* model;
+        const Texture* tex;
+        const f32* tint;
+    };
+    std::vector<BatchPick> batch;
+    std::vector<std::vector<u32>> blendIdxs;   // dono dos índices por TIC
+    std::vector<std::vector<f32>> blendZs;     // dono dos z por TIC
+    std::vector<BlendRow> blends;
+    std::vector<BlockMesh::InstPick> picks;
+    std::vector<const BlockMesh*> counted;   // o storage soma 1× por mesh
+    static const Mat4 kIdentityModel = Mat4::identity();
+    auto sameKey = [](const BatchPick& a, const BatchPick& b) {
+        return a.bm == b.bm && a.entry == b.entry && a.tex == b.tex &&
+               std::memcmp(a.tint, b.tint, 3 * sizeof(f32)) == 0;
+    };
+
+    for (u32 i = 0; i < mrs.size(); ++i) {
+        const MeshRenderer& mr = mrs.at(i);
+        if (!mr.mesh && !mr.blocks) {
+            continue;   // sem mesh (tag "none" de cena antiga) — nada a desenhar
+        }
+        const Tic* owner = g_scene.get(mrs.owner(i));
+        if (owner && !owner->visible) {
+            continue;   // 0.7.0: invisível — o editor e o play NÃO desenham
+        }
+        const Mat4* modelPtr = &kIdentityModel;
+        if (const Transform3D* tr = comps.transforms().find(mrs.owner(i))) {
+            modelPtr = &tr->world;   // mantido por TransformSystem (grupo Update)
+        }
+        const Mat4 model = *modelPtr;
+        // ---- 0.10-M (PASSO 4): O CAMINHO DOS BLOCOS -----------------------
+        if (mr.blocks) {
+            // 0.11-T (3.5a): o skinned cull do DRAW (antes do skin
+            // compute — o TIC fora do frustum não paga NADA)
+            const SkeletonComp* sk = comps.skeletons().find(mrs.owner(i));
+            if (sk != nullptr && skinCulledNow(mrs.owner(i), mr)) {
+                g_skinFrame.any = true;
+                continue;
+            }
+            // o skin segue o MESMO contrato (esqueleto do TIC + mesh com
+            // pele — cada bloco traz aJoints/aWeights próprios)
+            Mat4 bones[SkeletonComp::kMaxBones];
+            u32 nBones = 0;
+            if (sk && mr.blocks->skinned()) {
+                g_skinFrame.any = true;
+                nBones = computeSkinMatrices(*sk, bones,
+                                             SkeletonComp::kMaxBones);
+            }
+            // ---- 0.11-W (3.75b): o CAMINHO DO IMPOSTOR --------------------
+            // O TIC além da distância dele desenha o PNG alfa da silhueta
+            // (1 dc) em vez dos blocos. O guard é honesto: skinado NUNCA
+            // (a pose é dinâmica — um PNG estático mente); o PNG que não
+            // gera NUNCA vira quad (o fallback é o caminho dos blocos de
+            // sempre); fora do frustum NADA desenha (o MESMO cull
+            // conservativo dos blocos).
+            if (mr.impostorDistance > 0.0f && !mr.blocks->skinned()) {
+                const Vec3 impMn = mr.blocks->boundsMin();
+                const Vec3 impMx = mr.blocks->boundsMax();
+                if (impostor::active(model, impMn, impMx, camEye,
+                                     mr.impostorDistance)) {
+                    const Texture* impTex =
+                        mr.meshPath.empty()
+                            ? nullptr
+                            : g_gpu.impostorTexture(mr.meshPath);
+                    if (impTex) {
+                        if (!impPlanesReady) {
+                            BlockMesh::frustumPlanes(vp, impPlanes);
+                            impPlanesReady = true;
+                        }
+                        if (!BlockMesh::worldAabbVisible(model, impMn,
+                                                         impMx,
+                                                         impPlanes)) {
+                            continue;   // o AABB inteiro fora — o caminho
+                                        // dos blocos também não desenharia
+                        }
+                        Mat4 bill;
+                        if (impostor::billboard(model, impMn, impMx,
+                                                camEye, bill)) {
+                            impostorQuadEnsure();
+                            DrawProps impProps;   // os defaults + o MASK
+                            impProps.alphaMode = 1;   // o alpha do PNG corta
+                            impProps.alphaCutoff = 0.5f;
+                            impProps.baseColor[0] = impostor::kImpBaseColor;
+                            impProps.baseColor[1] = impostor::kImpBaseColor;
+                            impProps.baseColor[2] = impostor::kImpBaseColor;
+                            const DrawStats ds = g_renderer.drawMesh(
+                                g_impQuad, bill, vp, impTex, mr.tint,
+                                nullptr, 0, &impProps);
+                            g_impFrame.any = true;
+                            ++g_impFrame.drawn;
+                            st = st + ds;
+                            continue;
+                        }
+                    }
+                    // sem PNG (ou billboard degenerado): cai para o caminho
+                    // de sempre — os blocos (o fallback honesto, nunca um
+                    // quad branco a mentir a silhueta)
+                }
+            }
+            // ---- 0.11-W (3.5b): a COLHEITA do instancing ----------------
+            // Skinado NUNCA funde (a pose é por TIC — §3.5b.2, o pin do
+            // skin mismatch); o toggle OFF desenha como sempre. 0.11-W
+            // (3.75a): o streaming OFF também sai do batch — desenha
+            // individualmente pelo caminho de sempre (o lazy inline com o
+            // freeze de sempre — o fallback é o MESMO do instancing OFF).
+            if (mr.instancing && mr.streaming && !mr.blocks->skinned()) {
+                const u32 n = mr.blocks->collectVisible(
+                    model, vp, &camEye, mr.lodDistance, picks);
+                if (n > 0) {
+                    g_blockFrame.any = true;
+                    g_blockFrame.total += static_cast<u32>(
+                        mr.blocks->table().size());
+                    g_blockFrame.visible += n;
+                    // os bytes são DO MESH (não do TIC) — 1× por frame
+                    if (std::find(counted.begin(), counted.end(),
+                                  mr.blocks) == counted.end()) {
+                        counted.push_back(mr.blocks);
+                        BlockMesh::Stats ss;
+                        mr.blocks->storageStats(ss);
+                        g_blockFrame.ramBytes += ss.ramBytes;
+                        g_blockFrame.vramBytes += ss.vramBytes;
+                    }
+                    u32 nBlend = 0;
+                    for (const BlockMesh::InstPick& p : picks) {
+                        if (p.blend) {
+                            ++nBlend;
+                        }
+                    }
+                    if (nBlend > 0) {
+                        blendIdxs.emplace_back();
+                        blendZs.emplace_back();
+                        blendIdxs.back().reserve(nBlend);
+                        blendZs.back().reserve(nBlend);
+                        for (const BlockMesh::InstPick& p : picks) {
+                            if (p.blend) {
+                                blendIdxs.back().push_back(p.entry);
+                                blendZs.back().push_back(p.zNdc);
+                            } else {
+                                batch.push_back(BatchPick{
+                                    mr.blocks, p.entry, modelPtr, mr.texture,
+                                    mr.tint});
+                            }
+                        }
+                        blends.push_back(BlendRow{
+                            mr.blocks, blendIdxs.back().data(),
+                            blendZs.back().data(), nBlend, modelPtr,
+                            mr.texture, mr.tint});
+                    } else {
+                        for (const BlockMesh::InstPick& p : picks) {
+                            batch.push_back(BatchPick{mr.blocks, p.entry,
+                                                      modelPtr, mr.texture,
+                                                      mr.tint});
+                        }
+                    }
+                }
+                continue;
+            }
+            BlockMesh::Stats bs;
+            const DrawStats sb =
+                mr.blocks->draw(g_renderer, model, vp, mr.texture, mr.tint,
+                                nBones > 0 ? bones : nullptr, nBones, bs,
+                                &camEye, mr.lodDistance);
+            g_blockFrame.any = true;
+            g_blockFrame.total += bs.totalBlocks;
+            g_blockFrame.visible += bs.visible;
+            g_blockFrame.drawn += bs.drawn;
+            g_blockFrame.loaded += bs.loadedThisFrame;
+            g_blockFrame.drawCalls += sb.drawCalls;
+            g_blockFrame.drawnVerts += sb.vertices;   // índices desenhados
+                                                       // (== o st3d do frame)
+            g_blockFrame.ramBytes += bs.ramBytes;
+            g_blockFrame.vramBytes += bs.vramBytes;
+            st = st + sb;
+            continue;
+        }
+        // 0.8.2 (F7): mesh SKINADO com esqueleto → matrizes de skin ao
+        // shader (a pose vive nos joints; o TRS do TIC continua a ser o
+        // model matrix — o esqueleto é RELATIVO ao TIC)
+        const SkeletonComp* sk = comps.skeletons().find(mrs.owner(i));
+        if (sk != nullptr && skinCulledNow(mrs.owner(i), mr)) {
+            g_skinFrame.any = true;
+            continue;   // 0.11-T (3.5a): fora do frustum — nem skin nem draw
+        }
+        Mat4 bones[SkeletonComp::kMaxBones];
+        u32 nBones = 0;
+        if (sk && mr.mesh->skinned()) {
+            g_skinFrame.any = true;
+            nBones = computeSkinMatrices(*sk, bones, SkeletonComp::kMaxBones);
+        }
+        st = st + g_renderer.drawMesh(*mr.mesh, model, vp, mr.texture, mr.tint,
+                                      nBones > 0 ? bones : nullptr, nBones);
+    }
+
+    // ---- 0.11-W (3.5b): o AGRUPAMENTO dos opacos ------------------------
+    // A assinatura (bm, entry, tex, tint) — o MESMO mesh GPU desenha N
+    // TICs num draw instanciado (o teto de 64 fatia lá dentro, §3.5b.3).
+    // ---- 0.11-W (3.75a): o STREAM dos pendentes (as CAMADAS) ------------
+    // Os grupos e os blends NÃO residentes pedem vaga ANTES da submissão:
+    // o streamIn ordena por distância (perto primeiro — a distância MÍNIMA
+    // dos clones manda) e carrega até ao orçamento do frame; a submissão
+    // abaixo SÓ desenha o residente (a PORTA) — o resto conta
+    // «a transmitir» e chega nas vagas dos frames seguintes. O lazy inline
+    // de sempre fica INTACTO para os chamadores antigos (a porta só existe
+    // aqui, no orquestrador).
+    auto blockDist = [](BlockMesh* bm, u32 entry, const Mat4& m,
+                        const Vec3& eye) -> f32 {
+        // o centro do AABB do bloco NORMAL (o MESMO centro que o classify
+        // usa para o z dos blends; o LOD partilha-o) transformado pelo
+        // model do TIC, contra o camEye — unidades de mundo
+        const u32 blockIdx =
+            entry < static_cast<u32>(bm->table().size())
+                ? entry
+                : entry - static_cast<u32>(bm->table().size());
+        const GMeshV3Block& blk = bm->table()[blockIdx];
+        const f32 cx = (blk.aabbMin.x + blk.aabbMax.x) * 0.5f;
+        const f32 cy = (blk.aabbMin.y + blk.aabbMax.y) * 0.5f;
+        const f32 cz = (blk.aabbMin.z + blk.aabbMax.z) * 0.5f;
+        const f32 px = m.m[0] * cx + m.m[4] * cy + m.m[8] * cz + m.m[12];
+        const f32 py = m.m[1] * cx + m.m[5] * cy + m.m[9] * cz + m.m[13];
+        const f32 pz = m.m[2] * cx + m.m[6] * cy + m.m[10] * cz + m.m[14];
+        const f32 dx = px - eye.x;
+        const f32 dy = py - eye.y;
+        const f32 dz = pz - eye.z;
+        return std::sqrt(dx * dx + dy * dy + dz * dz);
+    };
+    std::vector<BlockMesh::StreamReq> reqs;
+    u32 pendingAll = 0;
+    if (!batch.empty()) {
+        std::stable_sort(batch.begin(), batch.end(),
+                         [](const BatchPick& a, const BatchPick& b) {
+                             if (a.bm != b.bm) return a.bm < b.bm;
+                             if (a.entry != b.entry) return a.entry < b.entry;
+                             if (a.tex != b.tex) return a.tex < b.tex;
+                             return std::memcmp(a.tint, b.tint,
+                                                3 * sizeof(f32)) < 0;
+                         });
+        size_t k = 0;
+        while (k < batch.size()) {
+            size_t j = k + 1;
+            while (j < batch.size() && sameKey(batch[j], batch[k])) {
+                ++j;
+            }
+            BlockMesh* bm = batch[k].bm;
+            const u32 entry = batch[k].entry;
+            if (!bm->resident(entry)) {
+                f32 dmin = blockDist(bm, entry, *batch[k].model, camEye);
+                for (size_t t = k + 1; t < j; ++t) {
+                    const f32 d =
+                        blockDist(bm, entry, *batch[t].model, camEye);
+                    if (d < dmin) dmin = d;
+                }
+                reqs.push_back(BlockMesh::StreamReq{bm, entry, dmin});
+            }
+            k = j;
+        }
+    }
+    // os blends pendentes também pedem vaga (a porta da submissão é a
+    // mesma — senão um blend fora da cache nunca chegava)
+    for (const BlendRow& b : blends) {
+        for (u32 t = 0; t < b.count; ++t) {
+            if (!b.bm->resident(b.entries[t])) {
+                reqs.push_back(BlockMesh::StreamReq{
+                    b.bm, b.entries[t],
+                    blockDist(b.bm, b.entries[t], *b.model, camEye)});
+            }
+        }
+    }
+    if (!reqs.empty()) {
+        g_blockFrame.loaded += BlockMesh::streamIn(
+            reqs.data(), static_cast<u32>(reqs.size()),
+            BlockMesh::kBlockStreamBudgetPerFrame);
+    }
+
+    // ---- 0.11-W (3.5b): a SUBMISSÃO dos opacos (3.75a: com a PORTA) -----
+    if (!batch.empty()) {
+        std::vector<Mat4> mats;
+        size_t k = 0;
+        while (k < batch.size()) {
+            size_t j = k + 1;
+            while (j < batch.size() && sameKey(batch[j], batch[k])) {
+                ++j;
+            }
+            const u32 n = static_cast<u32>(j - k);
+            if (!batch[k].bm->resident(batch[k].entry)) {
+                pendingAll += n;   // «a transmitir» — a vaga chega; NADA
+                                   // desenhado nem carregado inline
+                k = j;
+                continue;
+            }
+            mats.clear();
+            mats.reserve(n);
+            for (size_t t = k; t < j; ++t) {
+                mats.push_back(*batch[t].model);
+            }
+            BlockMesh::Stats ss;
+            const DrawStats ds = batch[k].bm->drawInstancedGroup(
+                g_renderer, batch[k].entry, mats.data(), n, vp, batch[k].tex,
+                batch[k].tint, ss);
+            g_blockFrame.drawn += ss.drawn;
+            g_blockFrame.loaded += ss.loadedThisFrame;
+            g_blockFrame.drawCalls += ds.drawCalls;
+            g_blockFrame.drawnVerts += ds.vertices;
+            g_blockFrame.instancesMerged += ds.instancesMerged;
+            st = st + ds;
+            k = j;
+        }
+    }
+    g_blockFrame.pending += pendingAll;
+    // os blends colhidos (a ordem longe→perto DENTRO de cada TIC; a
+    // submissão corre DEPOIS de todos os opacos — a única ordem em que a
+    // mistura clássica é correta para o frame inteiro). 0.11-W (3.75a): a
+    // PORTA do stream — só o residente entra; o filtro é ESTÁVEL (a ordem
+    // longe→perto sobrevive) e o pendente conta «a transmitir».
+    std::vector<u32> blendKeep;
+    std::vector<u32> blendEntF;
+    std::vector<f32> blendZF;
+    for (const BlendRow& b : blends) {
+        blendKeep.clear();
+        for (u32 t = 0; t < b.count; ++t) {
+            if (b.bm->resident(b.entries[t])) {
+                blendKeep.push_back(t);
+            }
+        }
+        pendingAll = b.count - static_cast<u32>(blendKeep.size());
+        g_blockFrame.pending += pendingAll;
+        if (blendKeep.empty()) {
+            continue;   // nada residente neste TIC — a vaga chega
+        }
+        blendEntF.clear();
+        blendZF.clear();
+        blendEntF.reserve(blendKeep.size());
+        blendZF.reserve(blendKeep.size());
+        for (u32 t : blendKeep) {
+            blendEntF.push_back(b.entries[t]);
+            blendZF.push_back(b.zNdc[t]);
+        }
+        BlockMesh::Stats ss;
+        const DrawStats ds = b.bm->drawBlendPicks(
+            g_renderer, blendEntF.data(), b.model, blendZF.data(),
+            static_cast<u32>(blendEntF.size()), vp, b.tex, b.tint, ss);
+        g_blockFrame.drawn += ss.drawn;
+        g_blockFrame.loaded += ss.loadedThisFrame;
+        g_blockFrame.drawCalls += ds.drawCalls;
+        g_blockFrame.drawnVerts += ds.vertices;
+        st = st + ds;
+    }
+    return st;
+}
+
+void drawToast() {
+    if (g_toastT <= 0.0f || !g_ui.hasFont()) {
+        return;
+    }
+    const f32 alpha = g_toastT < 1.0f ? g_toastT : 1.0f;
+    // F4.2: toast dentro da safe-area (acima da status line, que também vive
+    // no contentRect)
+    const f32 ox = g_ui.safeLeft();
+    const f32 oy = g_ui.safeTop();
+    const f32 aw = static_cast<f32>(g_egl.width()) - ox - g_ui.safeRight();
+    const f32 ah = static_cast<f32>(g_egl.height()) - oy - g_ui.safeBottom();
+    // F4.2/B2: o texto do toast nunca excede a área útil menos as margens
+    char toastFit[sizeof(g_toast)];
+    textfit::ellipsize(g_toast, aw - theme::dp(64.0f),
+                       [](const char* s) { return g_ui.fontWidth(s); },
+                       toastFit, sizeof(toastFit));
+    // 0.9.0 (spec M): BOTTOM-CENTER, ≥48dp de altura, SURFACE-2 com raio
+    // 8dp, auto-3s (g_toastT já é o relógio de 3 s de sempre), text-1.
+    // 0.11-Y (Y-2): as medidas passam pela dp() — A LEI R-018 (eram px
+    // crus: a 2.0 o toast media metade e o kBottomTabH cru subtraía 32px
+    // de uma faixa de 64 — o toast MERGULHAVA na tab bar; a varredura da
+    // FASE 31 apanhou-o ao vivo)
+    const f32 tw = g_ui.fontWidth(toastFit);
+    const f32 bw = tw + theme::dp(48.0f);
+    const f32 bh2 = theme::dp(48.0f);
+    const f32 bx = ox + (aw - bw) * 0.5f;
+    // por CIMA da tab bar do painel de baixo (spec E) — 16dp de folga
+    const f32 by = oy + ah - bh2 - theme::dp(safe::kBottomTabH) -
+                   theme::dp(safe::kStatusH) - theme::dp(16.0f);
+    // 0.12-B (B-3): o toast é OPACO — a FONTE ÚNICA vpchrome::toastColors
+    // (o vidro 0.86 com o fade misturava a cena e o «joystick adicionado»
+    // ficava ilegível; o contraste ≥4.5 agora não depende do que está por
+    // baixo — os pins aferem a fonte, o M-B3b devolve o cinza-vidro)
+    f32 bg[4];
+    f32 tx[4];
+    editor::vpchrome::toastColors(bg, tx);
+    (void)alpha;
+    // 0.11-Y (Y-2): o scope do OVERLAY de propósito — o toast é «por CIMA
+    // da tab bar» POR DESENHO (a decisão da casa, FASEs 15.x: «fora da
+    // conta»); o audit marca as entradas overlay=true e o validador não
+    // as conta como cruzamento
+    g_ui.auditOverlayBegin();
+    g_ui.panelRounded(bx, by, bw, bh2, theme::kRadiusCard, bg);
+    g_ui.label(bx + theme::dp(24.0f),
+               by + (bh2 - g_ui.textMetrics().block()) * 0.5f +
+                   g_ui.textMetrics().ascent,
+               toastFit, tx);
+    g_ui.auditOverlayEnd();
+}
+
+// 0.6.8: status line inferior partilhada pelos DOIS modos (fps/tics/verts/
+// dc/formato/cache — em play também é útil e não é painel de edição).
+// 0.10-M (PASSO 4): os BLOCOS do frame — «bl desenhados/totais» (a métrica
+// real do render por blocos, coerente com o dc/verts da MESMA linha; sem
+// blocos em cena o campo não aparece — a linha de sempre fica intacta).
+void statusLine(const DrawStats& st3d, const DrawStats& stGrid) {
+    const DrawStats total = st3d + stGrid + g_lastUiStats;
+    char status[160];
+    if (g_blockFrame.any) {
+        std::snprintf(status, sizeof(status),
+                      "fps %d  tics %u  verts %u  dc %u  bl %u/%u  am %u at %u"
+                      "  %s c%u/%u",
+                      static_cast<int>(g_fps + 0.5f), g_scene.count(),
+                      total.vertices, total.drawCalls, g_blockFrame.drawn,
+                      g_blockFrame.total, g_gpu.meshCount(),
+                      g_gpu.textureCount(),
+                      shortTexFormat(g_hwCompressor.lastFormat()),
+                      g_texCache ? g_texCache->hits() : 0u,
+                      g_texCache ? g_texCache->misses() : 0u);
+    } else {
+        std::snprintf(status, sizeof(status),
+                      "fps %d  tics %u  verts %u  dc %u  am %u at %u  %s c%u/%u",
+                      static_cast<int>(g_fps + 0.5f), g_scene.count(),
+                      total.vertices, total.drawCalls,
+                      g_gpu.meshCount(), g_gpu.textureCount(),
+                      shortTexFormat(g_hwCompressor.lastFormat()),
+                      g_texCache ? g_texCache->hits() : 0u,
+                      g_texCache ? g_texCache->misses() : 0u);
+    }
+    // 0.11-T (FASE 3.5a): o chip do SKINNED CULL — «skinned: culled %u/%u»
+    // (os skinados que o frame NÃO desenhou por estarem fora do frustum,
+    // sobre os skinados em cena — o padrão do chip bl desenhados/totais;
+    // SÓ nasce com skinados em cena: sem eles a linha fica byte a byte).
+    if (g_skinFrame.any) {
+        const size_t len = std::strlen(status);
+        std::snprintf(status + len, sizeof(status) - len,
+                      "  skinned: culled %u/%u", g_skinFrame.culled,
+                      g_skinFrame.skinados);
+    }
+    // 0.11-W (3.75b): o chip do IMPOSTOR — «imp %u» (os TICs que este
+    // frame desenhou como PNG alfa; SÓ nasce com impostores ativos: sem
+    // eles a linha fica byte a byte — o MESMO padrão do chip skinned)
+    if (g_impFrame.any) {
+        const size_t len = std::strlen(status);
+        std::snprintf(status + len, sizeof(status) - len, "  imp %u",
+                      g_impFrame.drawn);
+    }
+    g_ui.statusLine(status);
+    std::snprintf(g_statusLine, sizeof(g_statusLine), "%s", status);
+}
+
+// 0.9.0 (spec F) — captura da MINIATURA no fim do frame de um save.
+// Ponto SEGURO: depois do endFrame (frame completo no backbuffer, nada em
+// vias de desenho) e antes do swap (o conteúdo ainda está no buffer traseiro
+// — depois do swap o conteúdo é indefinido por definição EGL). Lê SÓ a
+// viewport central (a área 3D entre os painéis — SEM chrome; em Play, o
+// contentRect inteiro). 0.9.6.18 (HOTFIX D7): o frame SÓ faz o glReadPixels
+// (ms); o flip+crop+downsample (256×144)+encode PNG+escrita correm no
+// THREAD DE JOBS (o padrão ImportJob) — o hot path do render NUNCA espera
+// pelo encode, e o save NUNCA bloqueia.
+static void captureThumbIfPending(f32 w, f32 h) {
+    if (!g_thumbPending) {
+        return;
+    }
+    // D16: o frame do gesto (menu aberto) cede a vez ao frame seguinte
+    if (g_thumbArmDelay > 0) {
+        --g_thumbArmDelay;
+        return;
+    }
+    // D16: a captura é da CENA — um frame com overlay modal (menu,
+    // settings, browser, teclado, backdrop opaco) NUNCA é capturado;
+    // espera o primeiro frame limpo (re-arma; se o teardown chegar
+    // antes, o thumbJobWait loga a captura abandonada)
+    if (editor::anyOverlayOpen(g_editor)) {
+        return;
+    }
+    g_thumbPending = false;
+    if (!g_projectReady || !g_storage) {
+        elog::warn("thumb: captura falhou (sem projeto/storage)");
+        return;
+    }
+    // um job anterior ainda a correr? o NOVO save não o espera: arma de
+    // novo no próximo frame (o save mais recente vence — o buffer só é
+    // capturado quando o worker está livre)
+    if (g_thumbJob.active.load()) {
+        g_thumbPending = true;
+        return;
+    }
+    const UiRect r = g_editor.playMode
+        ? safe::contentRect(w, h, g_ui.safeArea())
+        : safe::centerRect(w, h, g_ui.safeArea(), currentDrawerH(),
+                           g_editor.showInspector, g_editor.hierW,
+                           g_editor.inspW);
+    const u32 rw = static_cast<u32>(r.w);
+    const u32 rh = static_cast<u32>(r.h);
+    if (rw < 16 || rh < 16) {
+        // viewport degenerado (transição/lifecycle) — sem thumb
+        elog::warn("thumb: captura falhou (viewport degenerado %ux%u)",
+                   rw, rh);
+        return;
+    }
+    // o TRABALHO DO FRAME: um glReadPixels (o mesmo ponto seguro de
+    // sempre — o frame completo está no backbuffer, ainda não passou ao
+    // ecrã); o buffer passa a ser DO worker
+    g_thumbJob.rgba.assign(static_cast<size_t>(rw) * rh * 4u, 0u);
+#ifndef GL_PACK_ALIGNMENT
+#define GL_PACK_ALIGNMENT 0x0D05   // stub do CI não define (GLES3 real define)
+#endif
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(static_cast<GLint>(r.x),
+                 static_cast<GLint>(h - r.y - r.h),
+                 static_cast<GLsizei>(rw), static_cast<GLsizei>(rh),
+                 GL_RGBA, GL_UNSIGNED_BYTE, g_thumbJob.rgba.data());
+    g_thumbJob.rw = rw;
+    g_thumbJob.rh = rh;
+    g_thumbJob.ok = false;
+    g_thumbJob.done.store(false);
+    g_thumbJob.active.store(true);
+    g_thumbJob.worker = std::thread(thumbJobWorker, std::ref(g_thumbJob));
+    elog::info("thumb: captura %ux%u lida no fim do frame — encode OFF-"
+               "thread (o render não espera)");
+}
+
+// ---- 0.9.6.5 (GRUPO B): O LAYOUT EXPORTADO + A AUDITORIA --------------------
+
+// o nome do ecrã ATIVO (a ordem é a dos fullscreen primeiro — o gating do
+// modalOpen já garante que só UM ecrã desenha; o nome documenta QUAL)
+static const char* currentScreenName() {
+    const editor::EditorState& st = g_editor;
+    if (g_importJob.active.load()) return "import";
+    if (st.playMode) return "play";
+    if (st.scriptWin.open) return "script";
+    if (st.docsScreen.open) return "docs";
+    if (st.settingsMenu) return "settings";
+    if (st.textWin.open) return "texto";
+    if (st.fileBrowser) return "browser";
+    if (st.logViewer) return "logs";
+    if (st.scenesMenu) return "cenas";
+    if (st.applyAsk) return "aplicar";
+    if (st.assetMenu != 0) return "seletor";
+    if (st.storageDialog) return "storage";
+    if (st.importMenu) return "menu_import";
+    if (st.fileMenu) return "menu_ficheiro";
+    if (st.plusMenu) return "menu_mais";
+    if (st.contextMenu) return "menu_contexto";
+    if (st.removeDialog) return "remover";
+    if (st.textInput) return "entrada_texto";
+    if (st.audioMode) return "audio";
+    if (st.uiMode) return "ui2d";
+    return "editor";
+}
+
+// escreve bytes no projeto (o padrão thumb: makeDirs do pai + stream)
+static bool layoutWriteFile(const char* rel, const u8* data, size_t n) {
+    std::string p(rel);
+    const size_t slash = p.rfind('/');
+    if (slash != std::string::npos) {
+        g_storage->makeDirs(p.substr(0, slash));
+    }
+    const int hs = g_storage->openWriteStream(rel);
+    if (hs <= 0) {
+        elog::error("layout: openWriteStream %s falhou", rel);
+        return false;
+    }
+    if (!g_storage->writeStreamChunk(hs, data, n)) {
+        elog::error("layout: escrita %s falhou (%zu B)", rel, n);
+        g_storage->closeWriteStream(hs);
+        return false;
+    }
+    g_storage->closeWriteStream(hs);
+    return true;
+}
+
+// o consumidor do pedido: corre no FIM do frame (frame COMPLETO no
+// backbuffer, antes do swap). PNG full-res + JSON das entradas; com o
+// audit pedido, o validador corre e o relatório vai para o log + projeto.
+static void layoutDumpIfPending(f32 w, f32 h) {
+    if (!g_layoutExportPending && !g_layoutAuditPending) {
+        return;
+    }
+    if (!g_layoutFrameAudited) {
+        // armado A MEIO deste frame (o botão do Settings disparou no draw):
+        // o registo atual é do ecrã ANTERIOR — NÃO consumir; o próximo frame
+        // desenha já com o audit ligado e é ele que exporta
+        return;
+    }
+    g_layoutExportPending = false;
+    const bool audit = g_layoutAuditPending;
+    g_layoutAuditPending = false;
+    if (!g_projectReady || !g_storage) {
+        elog::error("layout: sem projeto/storage — export cancelado");
+        return;
+    }
+    const layout::Record& rec = g_ui.auditRecord();
+    if (rec.entries.empty()) {
+        elog::error("layout: registo vazio (o audit não correu neste frame)");
+        return;
+    }
+    const u32 iw = static_cast<u32>(w);
+    const u32 ih = static_cast<u32>(h);
+    if (iw < 16 || ih < 16) {
+        elog::error("layout: superfície degenerada %ux%u", iw, ih);
+        return;
+    }
+    // ---- o PNG: o backbuffer INTEIRO (o ecrã como o dono o vê) ----------
+    std::vector<u8> rgba(static_cast<size_t>(iw) * ih * 4u);
+#ifndef GL_PACK_ALIGNMENT
+#define GL_PACK_ALIGNMENT 0x0D05
+#endif
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, static_cast<GLint>(iw), static_cast<GLint>(ih),
+                 GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    thumb::flipVerticalRgba(rgba.data(), iw, ih);   // GL é bottom-up
+    std::vector<u8> rgb(static_cast<size_t>(iw) * ih * 3u);
+    for (size_t i = 0; i < static_cast<size_t>(iw) * ih; ++i) {
+        rgb[i * 3u + 0u] = rgba[i * 4u + 0u];
+        rgb[i * 3u + 1u] = rgba[i * 4u + 1u];
+        rgb[i * 3u + 2u] = rgba[i * 4u + 2u];
+    }
+    const std::vector<u8> png = thumb::encodePngRgb(rgb.data(), iw, ih);
+    if (png.empty()) {
+        elog::error("layout: encode PNG falhou (%ux%u)", iw, ih);
+        return;
+    }
+    // ---- o JSON: as entradas REAIS do frame ------------------------------
+    const std::string json = layout::toJson(rec).dump();
+    char pngPath[96], jsonPath[96];
+    std::snprintf(pngPath, sizeof(pngPath), "layout/%s.png", rec.screen);
+    std::snprintf(jsonPath, sizeof(jsonPath), "layout/%s.json", rec.screen);
+    const bool okP = layoutWriteFile(pngPath, png.data(), png.size());
+    const bool okJ = layoutWriteFile(jsonPath,
+                                     reinterpret_cast<const u8*>(json.data()),
+                                     json.size());
+    elog::info("layout: export do ecrã \"%s\" — %s (%ux%u, %zu B) + %s "
+               "(%zu entradas, %zu B)",
+               rec.screen, okP ? pngPath : "PNG FALHOU", iw, ih, png.size(),
+               okJ ? jsonPath : "JSON FALHOU", rec.entries.size(), json.size());
+    // ---- a auditoria (o validador da casa sobre o ecrã REAL) -------------
+    if (audit) {
+        const std::vector<layout::Problem> ps = layout::validate(rec);
+        const std::string rep = layout::report(rec, ps);
+        elog::info("layout: AUDITORIA do ecrã \"%s\": %u ERRO(s), %u aviso(s)",
+                   rec.screen,
+                   [&]{ u32 n=0; for (auto& p:ps) if (p.sev==layout::Problem::Erro) ++n; return n; }(),
+                   [&]{ u32 n=0; for (auto& p:ps) if (p.sev==layout::Problem::Aviso) ++n; return n; }());
+        for (const layout::Problem& p : ps) {
+            const std::string line = layout::describe(rec, p);
+            if (p.sev == layout::Problem::Erro) {
+                elog::error("layout: %s", line.c_str());
+            } else {
+                elog::info("layout: %s", line.c_str());
+            }
+        }
+        char audPath[96];
+        std::snprintf(audPath, sizeof(audPath), "layout/auditoria-%s.txt",
+                      rec.screen);
+        const bool okA = layoutWriteFile(
+            audPath, reinterpret_cast<const u8*>(rep.data()), rep.size());
+        if (ps.empty()) {
+            showToast("auditoria: VERDE (relatório no projeto)");
+        } else {
+            char t[80];
+            u32 erros = 0, avisos = 0;
+            for (auto& p : ps) {
+                if (p.sev == layout::Problem::Erro) ++erros; else ++avisos;
+            }
+            std::snprintf(t, sizeof(t), "auditoria: %u erro(s), %u aviso(s)",
+                          erros, avisos);
+            showToast(t);
+        }
+        elog::info("layout: relatório %s (%zu B)%s", audPath, rep.size(),
+                   okA ? "" : " — ESCRITA FALHOU");
+    } else {
+        showToast("layout exportado (layout/ do projeto)");
+    }
+}
+
+void frame() {
+    const f32 w = static_cast<f32>(g_egl.width());
+    const f32 h = static_cast<f32>(g_egl.height());
+    g_layoutFrameAudited = false;   // GRUPO B: só o auditBegin deste frame acende
+
+    // 0.9.6.18 (HOTFIX D7): junta o job de thumb terminado (o frame NUNCA
+    // espera — só colhe o resultado se o worker já acabou)
+    thumbJobReap();
+
+    // 0.9.0 (spec E): o estado do drawer alimenta os rects dos painéis/
+    // viewport neste frame (a fonte é o BottomState — persistente)
+    g_editor.drawerH = currentDrawerH();
+
+    // 0.8.10 — O PONTO SEGURO DO FRAME (antes de QUALQUER submissão GL):
+    //   (1) COVA: liberta os meshes de prim reformados no frame ANTERIOR
+    //       (deferred free — os seus comandos já saíram);
+    //   (2) FLUSH: sobe os pedidos pendentes (pick/params/load/preset) pelo
+    //       caminho ÚNICO gera→valida→upload→self-check→bind.
+    // Aqui NADA foi desenhado ainda neste frame — um upload nunca colide
+    // com draws em curso, e um glDelete* nunca apanha buffers em voo.
+    primGraveDig();
+    primFlushPending();
+    blockRebind();   // 0.10-M (PASSO 4): os BlockMesh* do frame (meshPath)
+
+    // 0.8.10 — IMPORT JOB: o worker sinalizou done? join + finalize
+    // (catálogo/diálogo) AQUI, na thread da UI — nunca no worker.
+    if (g_importJob.active.load() && g_importJob.done.load()) {
+        importJobFinish();
+    }
+
+    // 0.10-M HOTFIX P0 — O TICK DO EXPAND (o MESMO ponto seguro): UM lote
+    // por frame fora do caminho quente (a cura (a) do ANR); o overlay
+    // mostra o progresso e o cancelamento limpa (o finalize corre na
+    // última tick — o MESMO estado final do caminho síncrono de sempre)
+    expandJobTick();
+
+    // 0.7.1 — TRANSIÇÃO DE CENA: avança o relógio e faz o SWAP no ponto
+    // médio (com o ecrã tapado — doSwitchScene guarda/carrega as cenas)
+    if (ui::transitionStep(g_sceneTrans, g_frameDt)) {
+        if (g_sceneTransIdx < g_project.scenes.size()) {
+            doSwitchScene(g_sceneTransIdx);
+        }
+        g_sceneTransIdx = 0xFFFFFFFFu;
+    }
+
+    // 0.10.7 HOTFIX SELEÇÃO-ÚNICA (cura 2 — o AUDIT DO FRAME): o id
+    // pendurado NÃO é seleção. Os jobs de cima (import/expand/transição)
+    // podem ter destruído TICs — o handle marcado pode estar MORTO. A
+    // auditoria corre AQUI, antes do PRIMEIRO leitor do frame (o gizmo em
+    // baixo), e devolve a cena limpa a TODOS (gizmo, deselect, hierarquia,
+    // inspector leem O MESMO estado neste frame). Os órfãos do multiSelect
+    // saem por compação (o chip «N x» nunca conta fantasmas).
+    if (editor::selectionAudit(g_scene, g_editor)) {
+        elog::info("seleção: audit do frame limpou id pendurado");
+    }
+
+    // F4: TouchControls primeiro (só em modo Play) — os dedos que nasceram
+    // nos controlos não vão para a câmara
+    bool tcDrawn = false;
+    TouchControls* tcDraw = nullptr;
+    const f32 tcW = w - g_ui.safeLeft() - g_ui.safeRight();   // F4.2: área útil
+    const f32 tcH = h - g_ui.safeTop() - g_ui.safeBottom();
+    u32 claimed = feedTouchControls(tcW, tcH, tcDrawn, &tcDraw);
+
+    // 0.7.0: UI criável em PLAY — hit-test por cima dos controlos (press
+    // armado; o slot reclamado não vai à câmara); o DRAW acontece no bloco
+    // do play (depois da play bar, antes dos TouchControls)
+    u32 canvasClaimed = 0;
+    if (g_editor.playMode) {
+        canvasClaimed = feedCanvasPlay(w, h);
+    } else {
+        g_playUi.armed = false;
+    }
+
+    // 0.6.9: gizmos — vp/base da câmara ANTES do orbit (o hit-test precisa
+    // delas para reclamar o slot que apanha o gizmo). Só em EDITOR com TIC
+    // selecionado que tenha Transform3D; o drag escreve no componente via
+    // âncoras (feedGizmo) e o slot reclamado NÃO orbita.
+    // 0.7.0: também NÃO em modo UI (o viewport central é o editor 2D — os
+    // gizmos são 3D; o orbit também fica desligado no modo UI)
+    // 0.9.6 (G1-3): e NÃO com overlay aberto — o DRAW já era gated pelo
+    // modalOpen desde 0.7.5 mas o INPUT não: com o Settings/Docs/editor
+    // abertos, tocar onde o gizmo ESTARIA arrastava o TIC por trás (a
+    // "cena mexe-se por trás" do relatório do dono). Input alinhado com
+    // o draw — a regra da casa: não desenhado = não interativo.
+    // GRUPO D (0.9.6.7): o viewRect (hierarquia|viewport|inspector com as
+    // larguras dos DIVISORES) vive AQUI — o gizmo, o orbit, o tap-de-
+    // seleção, o scissor e o draw TODOS consomem o MESMO rect; a câmara
+    // do editor projeta com o ASPECTO DO RECT (não o ecrã todo — antes o
+    // scissor CORTAVA uma faixa central de um ecrã largo: o dono via só
+    // ~22% do FOV horizontal no device)
+    const bool tlVisible = timeline::visible(g_editor.playMode, g_editor.uiMode,
+                                              g_scene, g_editor.selected);
+    // 0.9.0: a timeline vive no DRAWER (aba Animação) — o viewport central
+    // encolhe pelo drawer (currentDrawerH), não pela strip antiga
+    // GRUPO D: larguras de ESTADO (divisores) — o orbit acompanha os painéis
+    // PASSO 2 (0.9.6.15): o inspector no TRILHO (sem seleção) devolve a
+    // área ao viewport — a MESMA pergunta que o draw (inspectorCollapsed).
+    // SÓ no editor 3D: o modo UI tem o contrato próprio (paridade WYSIWYG
+    // play/edit — o painel de UI mantém a largura em ambos)
+    const bool inspRight =
+        g_editor.showInspector &&
+        !(g_editor.uiMode || editor::inspectorCollapsed(g_editor));
+    const UiRect viewRect = editor::centerRect(
+        w, h, g_ui.safeArea(), currentDrawerH(), inspRight,
+        g_editor.hierW, g_editor.inspW,
+        !g_editor.uiMode && editor::inspectorCollapsed(g_editor));
+    (void)tlVisible;
+    u32 gizmoClaimed = 0;
+    Tic* gizmoTic = g_scene.get(g_editor.selected);
+    Transform3D* gizmoTr =
+        (gizmoTic && gizmoTic->active) ? gizmoTic->getComponent<Transform3D>()
+                                        : nullptr;
+    if (gizmo::visible(g_editor.playMode || g_editor.uiMode, gizmoTr != nullptr) &&
+        !editor::anyOverlayOpen(g_editor)) {
+        // GRUPO D: o aspect DO RECT (a janela é o ecrã da câmara)
+        const Mat4 gview = g_camera.view();
+        const Mat4 gproj = g_camera.proj(viewRect.w / viewRect.h);
+        const Mat4 gvp = Mat4::mul(gproj, gview);
+        const gizmo::ViewBasis gbasis =
+            gizmo::viewBasis(g_camera, viewRect.w / viewRect.h);
+        const f32 glen = gizmo::gizmoLength(g_camera.dist);
+        // sincroniza o modo/snap da toolbar com o estado do gizmo
+        g_gizmo.mode = static_cast<gizmo::Mode>(g_gizmoMode.mode);
+        g_gizmo.snap = g_gizmoMode.snap;
+        gizmoClaimed = feedGizmo(gvp, gizmoTr->pos, glen, viewRect, gbasis);
+    } else {
+        g_gizmo.active = gizmo::Axis::None;
+        g_gizmo.hovered = gizmo::Axis::None;
+    }
+
+    // input do frame anterior → câmara (só gestos nascidos no viewport
+    // central da SAFE-AREA — gestos atrás da nav bar não orbitam, F4.2)
+    // 0.6.8: orbit DESATIVADO em play (guard playMode dentro — 1 dedo =
+    // controlos); lógica extraída p/ editor:: (afervel no CI)
+    // 0.6.9: claimed | gizmoClaimed — drag em gizmo NÃO orbita
+    // 0.7.0: orbit também DESATIVADO em modo UI (o viewport central é o
+    // editor 2D da UI — arrastar elementos não pode orbitar por baixo)
+    editor::updateCameraOrbit(
+        g_camera, g_orbit, g_input, viewRect,
+        claimed | gizmoClaimed | canvasClaimed,
+        g_editor.playMode || g_editor.uiMode || g_editor.audioMode ||
+            // 0.9.6 (G1-3): overlay aberto = o toque pertence AO overlay —
+            // o orbit da câmara por trás morria AQUI (a cena mexia-se por
+            // trás do Settings/Docs/editor; o draw do chrome já era gated
+            // pelo anyOverlayOpen, o input não)
+            editor::anyOverlayOpen(g_editor));
+
+    // 0.7.0 — DESSELECCIONAR: tap parado no vazio do viewport 3D limpa a
+    // seleção (só em editor 3D; o modo UI desseleciona o ELEMENTO no
+    // drawUiViewport, e a Hierarchy trata do seu vazio)
+    // 0.7.7 — o MESMO tap pode ter acertado numa câmara: nesse caso
+    // SELECIONA o TIC dela. 0.7.10 — PRIORIDADE DE OBJETOS + hit-test
+    // RESTRITO: o picker testa primeiro os TICs SELECIONÁVEIS (meshes,
+    // centro projetado a 44 px) e SÓ DEPOIS a câmara (CORPO/LENTE apenas
+    // — tocar no cone vazio não seleciona nem bloqueia o orbit).
+    // 0.8.12 — FIX DA PERDA DE SELEÇÃO DO C33: o deselect NÃO corre com
+    // overlays abertos nem no workspace de ÁUDIO. O overlay dos pickers é
+    // CENTRADO no viewport — o tap na LINHA do picker ou no backdrop caía
+    // DENTRO do viewRect, o deselect armava no press e LIMPAVA a seleção no
+    // release DO MESMO FRAME do pick (antes do dispatch, que via seleção
+    // morta e logava "ERRO(sem TIC com mesh selecionado)" com de="-" — a
+    // evidência exata dos logs 0.8.5/0.8.7/0.8.9/0.8.10). Os botões da UI
+    // não reclamam o slot de input externo — o guard é AQUI, no chamador.
+    // FASE 9 (G1-6): a seleção ANTES do tap (viewportTapClearsSelection
+    // limpa DENTRO — o log do motivo precisa do valor de antes)
+    const Handle selAntesTap = g_editor.selected;
+    if (!g_editor.playMode && !g_editor.uiMode && !g_editor.audioMode &&
+        !editor::anyOverlayOpen(g_editor)) {
+        if (editor::viewportTapClearsSelection(
+                g_editor, g_input, viewRect,
+                claimed | gizmoClaimed)) {
+            // GRUPO D: o tap-de-seleção projeta com o ASPECTO DO RECT e o
+            // pick corre RETO-LOCAL (consistente com o render/draw do 3D)
+            const Mat4 tapVp =
+                Mat4::mul(g_camera.proj(viewRect.w / viewRect.h),
+                          g_camera.view());
+            f32 px = 0.0f, py = 0.0f;
+            g_input.pos(0, px, py);
+            const Handle hc = camgizmo::pickSceneTic(
+                g_scene, tapVp, viewRect.w, viewRect.h, px - viewRect.x,
+                py - viewRect.y);
+            if (hc.valid()) {
+                if (hc != selAntesTap) {
+                    const Tic* nt = g_scene.get(hc);
+                    elog::info("seleção: TIC '%s' (toque no viewport)",
+                               nt ? nt->name.c_str() : "?");
+                }
+                editor::selectTic(g_editor, hc);
+            } else {
+                // FASE 9 (G1-6): CADA mudança de seleção LOGA o motivo
+                // (selAntesTap: o handle JÁ foi limpo lá dentro)
+                if (selAntesTap.valid()) {
+                    const Tic* velho = g_scene.get(selAntesTap);
+                    elog::info("seleção limpa: toque no vazio do viewport "
+                               "(era '%s')",
+                               velho ? velho->name.c_str() : "ID órfão");
+                }
+                editor::clearSelection(g_editor);
+            }
+        }
+    }
+
+    // F4: base de movimento do input = câmara (stick-cima afasta da câmara).
+    // 0.7.7: em PLAY com câmara de jogo ATIVA, a base vem da POSE DELA (o
+    // jogador move-se em relação ao que VÊ); sem câmara ativa, a orbit.
+    Tic* gameCamTic =
+        g_editor.playMode ? findActiveCameraTic(g_scene) : nullptr;
+    Transform3D* gameCamTr =
+        gameCamTic ? gameCamTic->getComponent<Transform3D>() : nullptr;
+    CameraComp* gameCamComp =
+        gameCamTic ? gameCamTic->getComponent<CameraComp>() : nullptr;
+    if (gameCamTr && gameCamComp) {
+        Vec3 fwd = camgizmo::gameForward(*gameCamTr);
+        Vec3 right = gameCamTr->rot.rotate(Vec3{1.0f, 0.0f, 0.0f});
+        fwd.y = 0.0f;
+        right.y = 0.0f;
+        fwd = normalized(fwd);
+        right = normalized(right);
+        if (length(fwd) > 0.5f) {
+            g_physics.frame.fwd = fwd;
+            g_physics.frame.right = right;
+        } else {
+            // câmara a olhar para a vertical: fallback da orbit
+            const f32 sy = std::sin(g_camera.yaw);
+            const f32 cy = std::cos(g_camera.yaw);
+            g_physics.frame.fwd = Vec3{-sy, 0.0f, -cy};
+            g_physics.frame.right = Vec3{cy, 0.0f, -sy};
+        }
+    } else {
+        const f32 sy = std::sin(g_camera.yaw);
+        const f32 cy = std::cos(g_camera.yaw);
+        g_physics.frame.fwd = Vec3{-sy, 0.0f, -cy};
+        g_physics.frame.right = Vec3{cy, 0.0f, -sy};
+    }
+    g_physics.enabled = g_editor.playMode;   // física só avança em modo Play
+    g_animSystem.enabled = g_editor.playMode;  // 0.8.0: animação idem (F7)
+    // 0.8.11 — o coração de áudio por frame: temporizador da gravação,
+    // preview do workspace (fim natural do clip), preview do INSPECTOR
+    // (o flag do AudioPlayer → misturador) e o listener posicional
+    audioRecTick();
+    audioPreviewTick();
+    if (Tic* selTic = g_scene.get(g_editor.selected)) {
+        audioPreviewTick(*selTic);
+    }
+    audioUpdateListener();   // posicional segue a câmara/TICs vivos
+
+    // ---- pass 3D: clear color+depth, TICs com MeshRenderer + grid com fade
+    // 0.7.7 — CÂMARA DE JOGO: em Play a cena renderiza pela câmara ATIVA
+    // (pose do Transform3D + parâmetros do CameraComp); sem câmara ativa o
+    // fallback é a orbit de edição. O EDITOR mantém a orbit SEMPRE (o
+    // frustum é que é o gizmo — nunca o render).
+    // 0.8.9 (ESPAÇO SEM TETOS): near/far DINÂMICOS por frame, derivados do
+    // ZOOM e do AABB da CENA (distância ao ponto mais longe + folga) — o far
+    // CONTÉM sempre a cena (objetos gigantes/longe nunca mais clipam) e o
+    // near segue o zoom (rácio saudável a qualquer escala). Recalculado por
+    // frame = cobre edição E load por construção.
+    Mat4 view;
+    Mat4 proj;
+    Vec3 camEye;
+    f32  camFocus;
+    Vec3 sceneMn, sceneMx;
+    f32  sceneRadius = 0.0f;
+    camerautil::sceneAABB(g_scene, sceneMn, sceneMx, sceneRadius);
+    if (gameCamTr && gameCamComp) {
+        // Play: far efetivo = max(farZ do dono, olho→mais-longe+10) — o
+        // slider do dono é PISO, nunca teto; near com defesa de rácio
+        // (≤ 100 000:1 contra z-fighting a distâncias enormes)
+        CameraComp playCam = *gameCamComp;
+        playCam.farZ = camerautil::playFar(
+            *gameCamComp,
+            camerautil::aabbFarthestDist(gameCamTr->pos, sceneMn, sceneMx));
+        playCam.nearZ = camerautil::playNear(*gameCamComp, playCam.farZ);
+        view = camgizmo::gameView(*gameCamTr);
+        proj = camgizmo::gameProj(playCam, w / h);
+        camEye = gameCamTr->pos;
+        camFocus = length(gameCamTr->pos);   // fade do grid: dist. ao centro
+    } else {
+        f32 clipNear = Camera::kDefaultNear, clipFar = Camera::kDefaultFar;
+        camerautil::editorClips(
+            g_camera.dist, camerautil::sceneFarthest(sceneMn, sceneMx),
+            clipNear, clipFar);
+        g_camera.setClips(clipNear, clipFar);
+        view = g_camera.view();
+        // GRUPO D: o EDITOR projeta com o ASPECTO DO RECT da viewport (a
+        // janela é o ecrã da câmara — antes era o aspect do ECRÃ TODO e o
+        // scissor CORTAVA a faixa central: o dono via ~22% do FOV
+        // horizontal no device de 800dp; o harness largo disfarçava)
+        proj = g_camera.proj(viewRect.w / viewRect.h);
+        camEye = g_camera.eye();
+        camFocus = g_camera.dist;
+    }
+    g_renderer.beginFrame();
+    const Mat4 vp = Mat4::mul(proj, view);
+    // 0.11-T (FASE 3.5a): os planos do VP deste frame para o SKINNED CULL
+    // (a MESMA extração do render por blocos) — o AnimationSystem consome
+    // -os no frame seguinte (o vp nasce DEPOIS dos systems; o inchamento
+    // conservativo do AABB cobre a diferença de 1 frame)
+    BlockMesh::frustumPlanes(vp, g_skinFrustum);
+    g_skinFrustumValid = true;
+    g_animSystem.frustum = g_skinFrustum;
+    g_animSystem.frustumValid = true;
+    // 0.9.6.1 (G1-3) — O RENDER 3D NÃO SANGRA: no EDITOR o pass 3D (malhas
+    // + grid) fica confinado ao retângulo da viewport por SCISSOR — o dono
+    // via as linhas azuis do grid POR BAIXO da barra de FPS e na faixa dos
+    // botões do sistema (o grid desenhava na superfície TODA). Em Play o
+    // render continua FULL-SCREEN (o jogo é dele — com a safe-area da UI).
+    // GRUPO D: além do scissor, o VIEWPORT GL passa a ser o RECT — o NDC
+    // do 3D mapeia DENTRO da janela (com o aspect do rect, nada fica
+    // cortado: a câmara vê a janela INTEIRA com o FOV dela); o beginUiPass
+    // repõe o viewport CHEIO para a UI (a fronteira 0.7.8)
+    bool scissor3d = false;
+    if (!g_editor.playMode) {
+        const UiRect& vp3d = viewRect;   // a fonte ÚNICA (gizmo/orbit/tap idem)
+        if (vp3d.w > 1.0f && vp3d.h > 1.0f) {
+            // 0.12-A (A-3): no modo UI o painel direito vive DENTRO do
+            // viewRect (o inspRight é falso em UI) — o SCISSOR reserva a
+            // largura dele (a grelha deixa de vazar por trás do vidro do
+            // Inspector; o pin grelha_nao_vaza aferra). O glViewport fica
+            // no viewRect — só o scissor corta.
+            const bool uiPanelRight =
+                g_editor.selElement >= 0 || g_editor.selJoystick ||
+                g_editor.showInspector;
+            const UiRect sc3d = safe::scissor3dRect(
+                viewRect, g_editor.uiMode, uiPanelRight, w, h,
+                g_ui.safeArea(), currentDrawerH(), g_editor.hierW,
+                g_editor.inspW);
+            glViewport(static_cast<i32>(vp3d.x),
+                       static_cast<i32>(h - vp3d.y - vp3d.h),
+                       static_cast<i32>(vp3d.w), static_cast<i32>(vp3d.h));
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(static_cast<i32>(sc3d.x),
+                      static_cast<i32>(h - sc3d.y - sc3d.h),
+                      static_cast<i32>(sc3d.w), static_cast<i32>(sc3d.h));
+            scissor3d = true;
+            // 0.9.6.12 (GRUPO J3 · R-024) — O LOG DE DIAGNÓSTICO DO RECT: a
+            // spec J3 pede «JNI: viewport set to (x, y, w, h)» — a
+            // arquitetura REAL não tem esse salto JNI (o glViewport vive no
+            // MESMO frame que calcula o rect; não há views Java a
+            // redimensionar), e o log equivalente da casa é ESTE: quando o
+            // retângulo visível MUDA (painel de baixo abre/fecha, divisores,
+            // rotação), a linha aparece com os QUATRO números + o aspect —
+            // se NÃO aparecer numa mudança de painéis, o evento não está a
+            // chegar ao render. Loga SÓ na mudança (nunca por frame).
+            {
+                static UiRect s_prevVp{0.0f, 0.0f, 0.0f, 0.0f};
+                static bool s_prevValid = false;
+                const bool changed =
+                    !s_prevValid ||
+                    std::fabs(s_prevVp.x - vp3d.x) > 0.5f ||
+                    std::fabs(s_prevVp.y - vp3d.y) > 0.5f ||
+                    std::fabs(s_prevVp.w - vp3d.w) > 0.5f ||
+                    std::fabs(s_prevVp.h - vp3d.h) > 0.5f;
+                if (changed) {
+                    elog::info(
+                        "vp3d: viewport set to (%.0f, %.0f, %.0f x %.0f) — "
+                        "aspect %.3f",
+                        (double)vp3d.x, (double)vp3d.y, (double)vp3d.w,
+                        (double)vp3d.h, (double)(vp3d.w / vp3d.h));
+                    s_prevVp = vp3d;
+                    s_prevValid = true;
+                }
+            }
+        }
+    }
+    const DrawStats st3d = drawTics(vp, camEye);
+    // 0.10-M (PASSO 4) — o LOG das métricas reais (AQUI: editor E play — o
+    // statusLine de baixo só vive em play; throttled 1×/s e só quando o nº
+    // de desenhados MUDA — o orbit do dono produz a linha quando o culling
+    // muda, sem afogar a rotação de 1 MB)
+    if (g_blockFrame.any) {
+        static double s_lastLog = -10.0;
+        static double s_clock = 0.0;
+        s_clock += g_frameDt;
+        if (g_blockFrame.drawn != g_blockFramePrev.drawn &&
+            s_clock - s_lastLog >=
+                static_cast<double>(g_blockLogIntervalSecs)) {
+            s_lastLog = s_clock;
+            elog::info(
+                "blocos: total=%u visiveis=%u desenhados=%u instanciados=%u "
+                "dc=%u verts=%u carregados-agora=%u a transmitir=%u "
+                "ram=%.1fMB vram=%.1fMB "
+                "(residente, orçamento %llu+%llu MB)",
+                g_blockFrame.total, g_blockFrame.visible,
+                g_blockFrame.drawn, g_blockFrame.instancesMerged,
+                g_blockFrame.drawCalls,
+                g_blockFrame.drawnVerts, g_blockFrame.loaded,
+                g_blockFrame.pending,
+                static_cast<double>(g_blockFrame.ramBytes) / (1024.0 * 1024.0),
+                static_cast<double>(g_blockFrame.vramBytes) / (1024.0 * 1024.0),
+                static_cast<unsigned long long>(kBlockCacheRamBudgetBytes /
+                                                (1024 * 1024)),
+                static_cast<unsigned long long>(kBlockCacheVramBudgetBytes /
+                                                (1024 * 1024)));
+        }
+        g_blockFramePrev = g_blockFrame;
+    }
+    // 0.11-T (FASE 3.5a) — o LOG do skinned cull (o MESMO padrão do log
+    // dos blocos: throttled 1×/s e SÓ quando o número MUDA — o corredor
+    // do pin produz a linha quando o culling muda, sem afogar o log)
+    if (g_skinFrame.any) {
+        static u32 s_lastCulled = 0xFFFFFFFFu;
+        static double s_lastLog = -10.0;
+        static double s_clock = 0.0;
+        s_clock += g_frameDt;
+        if (g_skinFrame.culled != s_lastCulled &&
+            s_clock - s_lastLog >=
+                static_cast<double>(g_blockLogIntervalSecs)) {
+            s_lastLog = s_clock;
+            s_lastCulled = g_skinFrame.culled;
+            elog::info("skinned: culled=%u de %u skinados (fora do frustum "
+                       "— nem animam nem desenham; AABB +%.0f%)",
+                       g_skinFrame.culled, g_skinFrame.skinados,
+                       static_cast<double>(BlockMesh::kSkinCullAabbSwell *
+                                           100.0f));
+        }
+    }
+    // 0.11-W (3.75b) — o LOG do impostor (o MESMO padrão throttled: 1×/s
+    // e SÓ quando o número MUDA — o HUD diz «imp N» na mesma linha)
+    if (g_impFrame.any) {
+        static u32 s_lastImp = 0xFFFFFFFFu;
+        static double s_lastLog = -10.0;
+        static double s_clock = 0.0;
+        s_clock += g_frameDt;
+        if (g_impFrame.drawn != s_lastImp &&
+            s_clock - s_lastLog >=
+                static_cast<double>(g_blockLogIntervalSecs)) {
+            s_lastLog = s_clock;
+            s_lastImp = g_impFrame.drawn;
+            elog::info("impostores: %u (além da distância — o PNG alfa "
+                       "desenha, os blocos descansam)",
+                       g_impFrame.drawn);
+        }
+    }
+    const DrawStats stGrid = g_grid.draw(vp, camEye, camFocus);
+    if (scissor3d) {
+        glDisable(GL_SCISSOR_TEST);   // a UI nunca é recortada (beginUiPass
+                                      // também repõe — defesa em camadas)
+    }
+    // 0.9.6 (G6 · R-017): o bench amostra AQUI — a MESMA soma da statusLine
+    // (st3d + grid + UI do frame anterior): os verts/draw calls do relatório
+    // são os da barra de estado DO MESMO frame (fonte única, R-017)
+    benchTick(g_frameDt, st3d + stGrid + g_lastUiStats);
+
+#ifdef GONI_BENCH_RAM
+    // 0.12-A (A-4) — INSTRUMENTAÇÃO RAM vs GPU (removível: compila SÓ com
+    // -DGONI_BENCH_RAM; zero custo fora dela). 1 linha/segundo no engine.log
+    // com a TABELA do dono: tri, fps, frame_ms, rss_MB, pico_MB, mem livre,
+    // dc, bl. A análise vive em docs/RELATORIO-0.12-A-INVEST-RAM.md; o
+    // logcat (lowmemorykiller/reclaim) é do dono — o relatório diz o grepar.
+    static double s_benchRamClock = 0.0;
+    s_benchRamClock += g_frameDt;
+    if (s_benchRamClock >= 1.0) {
+        s_benchRamClock = 0.0;
+        double rssMb = -1.0, hwmMb = -1.0, livreMb = -1.0;
+        if (FILE* f = fopen("/proc/self/status", "r")) {
+            char line[128];
+            while (fgets(line, sizeof(line), f)) {
+                if (strncmp(line, "VmRSS:", 6) == 0) {
+                    double kb = 0.0;
+                    if (sscanf(line + 6, "%lf", &kb) == 1) {
+                        rssMb = kb / 1024.0;
+                    }
+                } else if (strncmp(line, "VmHWM:", 6) == 0) {
+                    double kb = 0.0;
+                    if (sscanf(line + 6, "%lf", &kb) == 1) {
+                        hwmMb = kb / 1024.0;
+                    }
+                }
+            }
+            fclose(f);
+        }
+        if (FILE* f = fopen("/proc/meminfo", "r")) {
+            char line[128];
+            while (fgets(line, sizeof(line), f)) {
+                if (strncmp(line, "MemAvailable:", 13) == 0) {
+                    double kb = 0.0;
+                    if (sscanf(line + 13, "%lf", &kb) == 1) {
+                        livreMb = kb / 1024.0;
+                    }
+                    break;
+                }
+            }
+            fclose(f);
+        }
+        const DrawStats tot = st3d + stGrid + g_lastUiStats;
+        const f32 frameMs = g_frameDt * 1000.0f;
+        elog::info("bench_ram: tri=%u fps=%.1f frame_ms=%.1f rss=%.1f "
+                   "pico=%.1f livre=%.1f dc=%u bl=%u blocos=%u "
+                   "carregados=%u a_transmitir=%u",
+                   tot.vertices / 3,
+                   frameMs > 0.001f ? 1000.0f / frameMs : 0.0f,
+                   static_cast<double>(frameMs), rssMb, hwmMb, livreMb,
+                   tot.drawCalls, g_blockFrame.drawn, g_blockFrame.total,
+                   g_blockFrame.loaded, g_blockFrame.pending);
+    }
+#endif
+
+    // 0.7.8 — FRONTEIRA EXPLÍCITA 3D→UI: repor o estado GL que o pass 3D
+    // deixou (LitMaterial liga depth/cull com a proj da câmara de jogo; o
+    // grid alterna blend/depthmask) ANTES de qualquer widget: viewport
+    // CHEIO com o tamanho ATUAL, scissor off, depth off p/ a UI. O pass de
+    // UI NUNCA herda o estado do pass 3D — a UI de jogo volta ao tamanho/
+    // posição do resolver (coords de ecrã + safe-area), por cima da cena.
+    g_renderer.beginUiPass(static_cast<i32>(w), static_cast<i32>(h));
+
+    // ---- pass UI: immediate-mode da F1 por cima (sem depth — nunca ocluída)
+    g_ui.beginFrame(&g_renderer, &g_input, w, h);
+
+    // 0.9.6.5 (GRUPO B): pedido de export/auditoria pendente? O registo liga
+    // AGORA (antes do 1.º widget deste frame) — as entradas saem do draw
+    // real; o ponto de swap escreve os ficheiros (layoutDumpIfPending)
+    if (g_layoutExportPending || g_layoutAuditPending) {
+        g_ui.auditBegin(currentScreenName(), w, h, g_ui.safeTop(),
+                        g_ui.safeBottom(), g_ui.safeLeft(), g_ui.safeRight(),
+                        theme::g_density);
+        g_layoutFrameAudited = true;
+    }
+
+    // 0.8.10 — IMPORT EM CURSO: overlay MODAL (o resto da UI não desenha —
+    // o job é a única coisa que acontece; cancelar é a única ação).
+    // 0.10-M HOTFIX P0: o MESMO overlay tem a FASE DO EXPAND (o job dos
+    // lotes): «A EXPANDIR… d/t peças» + a barra + o MESMO cancelar (o
+    // expandJobTick do ponto seguro deste frame já correu — o progresso
+    // aqui é o do lote DESTE frame)
+    if (g_importJob.active.load() || g_expandJob.active) {
+        const bool expandPhase = !g_importJob.active.load() && g_expandJob.active;
+        const f32 ox = g_ui.safeLeft();
+        const f32 oy = g_ui.safeTop();
+        const f32 aw = w - ox - g_ui.safeRight();
+        const f32 ah = h - oy - g_ui.safeBottom();
+        const f32 pw = 420.0f;
+        const f32 ph = 172.0f;
+        const f32 x = ox + (aw - pw) * 0.5f;
+        const f32 y = oy + (ah - ph) * 0.5f;
+        g_ui.panel(x, y, pw, ph, theme::PANEL);
+        g_ui.frame(x, y, pw, ph, 2.0f, theme::ACCENT);
+        const f32 th = g_ui.fontHeight();
+        g_ui.label(x + 14.0f, y + 40.0f + th * 0.3f,
+                   expandPhase ? "A EXPANDIR..." : "IMPORT...", theme::TEXT);
+        char fname[72];
+        if (expandPhase) {
+            // 0.10-M HOTFIX P0 — O PROGRESSO VISÍVEL (o pin do dono): o
+            // done/total do lote (peças configuradas / peças no total)
+            std::snprintf(fname, sizeof(fname), "materializando sub-TICs: "
+                          "%u / %u",
+                          g_expandJob.batch.done(), g_expandJob.batch.total());
+        } else {
+            std::snprintf(fname, sizeof(fname), "%s",
+                          g_importJob.fileName.c_str());
+        }
+        g_ui.labelFitted(x + 14.0f, y + 64.0f + th * 0.3f, fname, theme::LINE,
+                         pw - 28.0f);
+        const u64 doneB = g_importJob.bytesDone.load();
+        const u64 totalB = g_importJob.bytesTotal.load();
+        // 0.10.6 (SAF-SEAM) — NUNCA «0 / 0»: length=0 → «copiando… N B»
+        // (os bytes que já correram; «a copiar…» antes do 1.º chunk);
+        // total sub-MB → B inteiros (a divisão de MB mentia «0 / 0 MB» no
+        // cut de 72k unidades do city — MINUTOS de 0/0 num import de 29 MB)
+        // 0.10-M HOTFIX P0: na fase do expand os BYTES estão velhos — a
+        // terceira linha diz a fração do lote (o d/t já está na linha de
+        // cima; aqui a BARRA é que segue o lote)
+        if (!expandPhase) {
+            g_ui.label(x + 14.0f, y + 88.0f + th * 0.3f,
+                       importOverlayBytesText(doneB, totalB).c_str(),
+                       theme::TEXT);
+        }
+        // barra de progresso (trilho + preenchimento ACCENT). Sem total
+        // conhecido o trilho fica VAZIO (o «copiando…» ao lado diz a
+        // verdade — uma barra a 0 com número nenhum era o 0/0 disfarçado)
+        const f32 bx = x + 14.0f;
+        const f32 bw = pw - 28.0f;
+        g_ui.panel(bx, y + 112.0f, bw, 12.0f, theme::LINE);
+        const f32 frac =
+            expandPhase
+                ? (g_expandJob.batch.total() > 0
+                       ? static_cast<f32>(g_expandJob.batch.done()) /
+                             static_cast<f32>(g_expandJob.batch.total())
+                       : 0.0f)
+                : (totalB > 0
+                       ? static_cast<f32>(doneB) / static_cast<f32>(totalB)
+                       : 0.0f);
+        if (frac > 0.0f) {
+            g_ui.panel(bx, y + 112.0f, bw * (frac > 1.0f ? 1.0f : frac),
+                       12.0f, theme::ACCENT);
+        }
+        // 0.9.6.6 (GRUPO C): o CANCELAR é alvo 48dp REAL com dp (era px cru)
+        // 0.10-M HOTFIX P0: o MESMO botão cancela a FASE DO EXPAND (o tick
+        // do frame seguinte vê o átomo e limpa — os TICs já nascidos saem;
+        // o cancelamento limpo é o pin do dono)
+        if (g_ui.button(0x81010, x + theme::dp(14.0f),
+                        y + ph - theme::dp(52.0f), pw - theme::dp(28.0f),
+                        theme::dp(48.0f), "cancelar")) {
+            g_importJob.cancel.store(true);
+            elog::info("import: cancelamento pedido (o job para no próximo "
+                       "chunk; na fase do expand o lote seguinte limpa)");
+        }
+        drawToast();
+        if (g_ui.auditing()) g_ui.auditEnd();
+        g_ui.endFrame();
+        g_lastUiStats = g_renderer.endFrame();
+        layoutDumpIfPending(w, h);   // GRUPO B: o modal também é ecrã
+        g_egl.swap();
+        g_input.clearEdges();
+        return;   // MODAL: nada mais desenha/processa este frame
+    }
+
+    if (g_editor.playMode) {
+        // ---- 0.6.8: PLAY — janela própria ----------------------------------
+        // Viewport fullscreen (painéis/toolbar escondidos) + UI CRIÁVEL por
+        // cima da cena (0.7.0 — canvases dos TICs ativos/visíveis) +
+        // TouchControls (ancorados na safe-area) + barra superior mínima.
+        // ORBIT DESATIVADO (o guard playMode do editor::updateCameraOrbit já
+        // correu acima — 1 dedo = controlos/botões da UI).
+        const bool stop = editor::drawPlayBar(g_ui, g_input, w, h,
+                                              static_cast<int>(g_fps + 0.5f));
+        if (stop) {
+            // Stop → EDITOR: pose restaurada (PlaySnapshot) + painéis
+            // repostos EXATAMENTE (os scrolls/seleção nunca foram tocados)
+            leavePlayMode();
+            showToast("modo editor");
+        }
+        // 0.7.0: UI criável POR CIMA da cena (antes dos controlos — os
+        // botões da UI ficam por baixo do joystick/jump quando sobrepõem)
+        drawCanvasPlay(w, h);
+        // TouchControls por cima de tudo (só existem em play — o feed no
+        // início do frame já devolveu 0 claimed e tcDrawn=false no editor)
+        // 0.12-B: TODOS os TICs com TouchControls desenham (a árvore pode
+        // ter N joysticks — um por TIC; com 1 fica byte a byte)
+        if (tcDrawn) {
+            auto& tcsAll = g_scene.components().touchControls();
+            for (u32 i = 0; i < tcsAll.size(); ++i) {
+                Tic* tOwner = g_scene.get(tcsAll.owner(i));
+                if (!tOwner || !tOwner->active) {
+                    continue;
+                }
+                editor::drawTouchControls(g_ui, tcsAll.at(i), w, h);
+            }
+        }
+        drawToast();
+        statusLine(st3d, stGrid);
+        // 0.7.1: o overlay da transição por cima de TUDO (a troca ao escuro)
+        ui::transitionDraw(g_ui, g_sceneTrans, w, h);
+        g_ui.endFrame();                       // submete solids + glyphs
+        g_lastUiStats = g_renderer.endFrame(); // UI por cima do 3D
+        if (g_ui.auditing()) g_ui.auditEnd();
+        layoutDumpIfPending(w, h);   // GRUPO B: o play também é ecrã
+        g_egl.swap();
+        g_input.clearEdges();
+        return;
+    }
+
+    // ---- 0.6.8: EDITOR — toolbar + painéis + menus (como sempre) ----------
+    // 0.6.9: gizmo PRIMEIRO (as linhas ficam POR BAIXO dos painéis —
+    // z-order correto de editor) e só com seleção em EDITOR
+    // 0.7.0: gizmos só no modo 3D (o modo UI desenha o viewport 2D no
+    // MESMO sítio — nunca os dois)
+    // 0.7.5 — OVERLAYS MODAIS: com um modal aberto o CHROME DO EDITOR não
+    // se desenha (nada de toolbar/painéis/canvas UI por trás/à mista com o
+    // overlay — o C33 via o texto do canvas ATRAVÉS do MENU) e no seu lugar
+    // desenha-se um BACKDROP OPACO que tapa o ecrã TODO. Os widgets são
+    // immediate-mode: não desenhados = não interativos (os toques só
+    // pertencem ao modal, que fecha com toque fora como sempre).
+    const bool modalOpen = editor::anyOverlayOpen(g_editor);
+    if (modalOpen) {
+        editor::drawModalBackdrop(g_ui, w, h);
+    }
+    // 0.7.7 — FRUSTUMS das câmaras da cena (wireframe na cor de marca; a
+    // selecionada ganha os handles do far). SÓ no editor 3D — nunca em
+    // Play (como os gizmos)
+    if (!modalOpen && camgizmo::visible(g_editor.playMode, g_editor.uiMode)) {
+        // GRUPO D: o desenho dos frustus mapeia pelo RECT da viewport (o
+        // aspect do frustum continua o do JOGO — dentro da drawAll).
+        // 0.9.6.19b (D20): o OLHO da orbit entra (o preview é
+        // clamp(12%·dist(olho→câmara), 48..120dp) constante em ecrã)
+        camgizmo::drawAll(g_ui, g_scene, vp, w, h, g_editor.selected,
+                          g_camera.eye(), viewRect.w, viewRect.h,
+                          viewRect.x, viewRect.y);
+    }
+    if (!modalOpen && gizmo::visible(g_editor.playMode || g_editor.uiMode,
+                                     gizmoTr != nullptr)) {
+        // GRUPO D: o gizmo desenha RETO-LOCAL + origem (consistente com o
+        // feedGizmo e o aspect do rect)
+        gizmo::drawGizmo(g_ui, vp, gizmoTr->pos,
+                         gizmo::gizmoLength(g_camera.dist), g_gizmo.mode,
+                         g_gizmo.hovered, viewRect.w, viewRect.h, viewRect.x,
+                         viewRect.y);
+    }
+    // ---- 0.9.0 — CHROME DE CIMA (spec D) ---------------------------------
+    // TOP BAR 56dp [Menu ≡][Cena ▾]·[pause][play][sliders]·[gear] + TAB BAR
+    // 48dp [3D][UI|ÁUDIO] com underline accent. O G4 (transformação)
+    // desceu para a TOOLBAR DO VIEWPORT (vpchrome — desenhada abaixo).
+    if (!modalOpen) {
+        const editor::toolbar::Actions ta = editor::toolbar::draw(g_ui,
+                                                                  g_editor);
+        if (ta.menuDropdown) {
+            // Menu → dropdown (Settings/Guardar/…/Sair) — a âncora VOLTA à
+            // de sempre (a top bar; o ⋯ do viewport arma a dele — PASSO 3)
+            g_editor.fileMenu = !g_editor.fileMenu;
+            if (g_editor.fileMenu) {
+                // 0.9.6.19 (D14): abre SEMPRE no topo — o slot do scroll
+                // persiste entre aberturas e o reciclo do beginScroll
+                // pode devolver o offset de OUTRA região (a 1.ª linha
+                // nascia cortada)
+                g_ui.scrollSetOffset(editor::kMenuScrollId, 0.0f);
+            }
+            g_editor.menuAx = -1.0f;
+            g_editor.menuAy = -1.0f;
+            g_editor.plusMenu = false;
+            g_editor.settingsMenu = false;
+            g_editor.hierMenu = false;
+        }
+        if (ta.cenaDropdown) {
+            // Cena → dropdown de cenas do projeto (overlay CENAS)
+            g_editor.scenesMenu = !g_editor.scenesMenu;
+            g_editor.plusMenu = false;
+            g_editor.settingsMenu = false;
+            g_editor.fileMenu = false;
+        }
+        if (ta.gearPressed) {
+            // 0.9.0 (spec I): o gear abre a PÁGINA de Settings
+            g_editor.settingsMenu = true;
+            elog::info("ui: pagina de settings aberta (gear)");
+        }
+
+        // ---- 0.9.0 — CHROME DO VIEWPORT (spec D): stack + toolbar inf. +
+        // triad. SÓ em modo 3D (UI/ÁUDIO substituem o viewport).
+        if (!g_editor.uiMode && !g_editor.audioMode) {
+            editor::vpchrome::ChromeState cs;
+            cs.canUndo = g_undo.canUndo();
+            cs.canRedo = g_undo.canRedo();
+            cs.snapValue = g_snapValue;
+            const editor::vpchrome::Actions va = editor::vpchrome::draw(
+                g_ui, g_editor, g_gizmoMode, cs, g_camera, currentDrawerH(),
+                g_frameDt, &g_input);   // 0.12-A (A-3): o ciclo do tooltip
+            if (va.undoPressed) {
+                const Handle uh = g_undo.undo(g_scene);
+                if (uh.valid()) {
+                    editor::selectTic(g_editor, uh);
+                    showToast("desfeito");
+                } else {
+                    showToast("nada a desfazer");
+                }
+            }
+            if (va.redoPressed) {
+                const Handle rh = g_undo.redo(g_scene);
+                if (rh.valid()) {
+                    editor::selectTic(g_editor, rh);
+                    showToast("refeito");
+                } else {
+                    showToast("nada a refazer");
+                }
+            }
+            if (va.savePressed && g_projectReady) {
+                // o MESMO caminho do "Guardar cena" do menu (assets+manifesto)
+                const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
+                                g_project.saveManifest(*g_storage);
+                armThumbCapture();   // 0.9.6.19 (D16): o ponto único
+                showToast(ok ? "cena salva" : "falha ao salvar");
+            }
+            // PASSO 3 (0.9.6.17): os botões DUPLICAR/COLAR saíram da
+            // viewport (a spec do dono: o topo é desfazer/refazer/guardar/⋯)
+            // — as ações vivem no menu ⋯ (itens 10/11 — eram 9/10 antes do
+            // D21; o MESMO código do bloco fileMenu lá em baixo; zero
+            // caminho perdido)
+            if (va.menuPressed) {
+                // o ⋯ do viewport abre o menu de ficheiro ANCORADO a ele
+                // (a âncora vai em st.menuAx/menuAy, armada no draw)
+                g_editor.fileMenu = !g_editor.fileMenu;
+                if (g_editor.fileMenu) {
+                    // 0.9.6.19 (D14): abre SEMPRE no topo (o slot do scroll
+                    // persiste/recicla — a 1.ª linha nascia cortada)
+                    g_ui.scrollSetOffset(editor::kMenuScrollId, 0.0f);
+                }
+                g_editor.plusMenu = false;
+                g_editor.settingsMenu = false;
+                g_editor.hierMenu = false;
+            }
+            // 0.9.6.19b (D21): va.addTicPressed FOI REMOVIDO — o [+] do
+            // viewport morreu (a ação vive no + da hierarquia e no menu ⋯
+            // «Novo objeto», o MESMO plusMenu de sempre)
+        }
+        if (ta.playPressed && !g_editor.playMode) {
+            // G2 play: a JANELA PLAY (sem painéis, orbit off); o Stop da
+            // play bar (ou o pause) volta ao EDITOR com a pose restaurada.
+            enterPlayMode();
+            showToast("modo play");
+        }
+        if (ta.pausePressed && g_editor.playMode) {
+            // defensivo: em play a barra não se desenha (o Stop da play bar
+            // é o caminho normal) — se algum dia se desenhar, pausa = sair
+            leavePlayMode();
+            showToast("modo editor");
+        }
+        if (ta.stopPressed) {
+            // 0.9.6.10 (GRUPO UI · a imagem 1): o ■ EXPLÍCITO da top bar —
+            // em play sai com a pose restaurada (o mesmo caminho do Stop
+            // da play bar); em editor informa (não há nada a parar)
+            if (g_editor.playMode) {
+                leavePlayMode();
+                showToast("modo editor");
+            } else {
+                showToast("já em modo editor");
+            }
+        }
+        if (ta.platformPressed) {
+            // 0.9.6.10 (GRUPO UI · a imagem 1): o chip da plataforma — o
+            // alvo REAL da build (Mobile/Android); informar, NÃO fingir
+            // que há outros alvos para escolher
+            showToast("plataforma alvo: Mobile (Android)");
+        }
+        // viewport 2D no modo UI (antes dos painéis — z-order de editor)
+        if (g_editor.uiMode) {
+            editor::drawUiViewport(g_ui, g_scene, g_editor, g_input, w, h);
+        }
+        // 0.8.11 — WORKSPACE ÁUDIO no MESMO sítio do viewport 2D (o rect
+        // do editor de UI: entre toolbar e timeline, sem o painel direito
+        // quando visível — NUNCA a área toda; painéis/toolbar ficam nos
+        // seus sítios e o frame segue o fluxo normal)
+        if (g_editor.audioMode) {
+            // 0.9.0: o workspace encolhe pelo DRAWER aberto (a timeline na
+            // aba Animação já não rouba altura ao viewport)
+            UiRect audioView = editor::centerRect(w, h, g_ui.safeArea(),
+                                                  currentDrawerH(),
+                                                  g_editor.showInspector,
+                                                  g_editor.hierW,
+                                                  g_editor.inspW);
+            editor::AudioWorkspaceHost host = makeAudioWorkspaceHost();
+            const int pickWs = editor::drawAudioWorkspace(
+                g_ui, g_input, audioView, g_audioWs, g_audioCatalog, host);
+            if (pickWs > 0) {
+                g_audioWs.selected = static_cast<u32>(pickWs - 1);
+                audioPreviewStop();   // trocar de clip mata o preview anterior
+            }
+        }
+    }
+
+    // F5.1-hotfix (1.4) + F5.2: overlay Settings — Exportar logs / Ver logs /
+    // 0.9.0 (spec I) — PÁGINA DE SETTINGS (full-screen, secções
+    // colapsáveis, back 56dp; a seleção do editor fica INTACTA)
+    if (g_editor.settingsMenu) {
+        const char* modeText = g_perm.mode() == storage::Mode::Unknown
+                                   ? ""
+                                   : storage::modeLabel(g_perm.mode());
+        char verLine[48];
+        std::snprintf(verLine, sizeof(verLine), "%s (vc %u)",
+                      buildinfo::g_version, buildinfo::g_versionCode);
+        editor::settings::Ctx sctx;
+        sctx.version = verLine;
+        sctx.git = buildinfo::g_git;   // PASSO 1: o commit no Sobre (era a status bar)
+        sctx.soSha = buildinfo::g_soSha;
+        sctx.storageMode = modeText;
+        sctx.keepSource = g_keepSource;
+        sctx.expandNodes = g_expandNodes;   // 0.10-M (EXT): o modo do import
+        sctx.audioMaster = g_audioMaster;
+        sctx.immersive = g_immersive;
+        sctx.allFilesGranted = g_perm.mode() == storage::Mode::AllFiles;
+        sctx.micGranted = g_micGranted;
+        sctx.dumpCount = static_cast<u32>(g_logDumps.size());
+        switch (editor::settings::draw(g_ui, g_input, g_editor, sctx)) {
+            case editor::settings::kResetLayout: {
+                // Repor layout (spec G): defaults + PERSISTE já
+                g_bottom.bottomTab = 0;
+                g_bottom.drawerH = safe::kDrawerDef;
+                g_editor.showInspector = true;
+                g_editor.inspPinned = false;   // P2-bis: o pin também repõe
+                g_editor.inspCollapsed = 0;
+                g_editor.settingsCollapsed = 0;
+                saveLayoutNow("repor layout");
+                showToast("layout reposto");
+                break;
+            }
+            case editor::settings::kToggleImmersive: {
+                g_immersive = !g_immersive;
+                applyImmersiveMode();
+                saveLayoutNow("imersivo");
+                showToast(g_immersive ? "imersivo: sim" : "imersivo: não");
+                elog::info("ui: modo imersivo = %s",
+                           g_immersive ? "on" : "off");
+                break;
+            }
+            case editor::settings::kToggleExpandNodes: {
+                // 0.10-M (EXT) — o modo do IMPORT (persistido no projeto):
+                // fundido (default — performance mobile) ↔ expandido (um
+                // TIC por nó com mesh, peças editáveis). O PRÓXIMO import
+                // usa a escolha (o job captura-a no lançamento); o
+                // «reconverter assets» também a honra
+                g_expandNodes = !g_expandNodes;
+                saveProjectSettings();
+                showToast(g_expandNodes
+                              ? "import: expandir em sub-TICs (peças)"
+                              : "import: fundido (default)");
+                elog::info("import: modo expandir em sub-TICs = %s (o próximo "
+                           "import e o reconverter usam ISTO — o fundido é "
+                           "o default de performance mobile)",
+                           g_expandNodes ? "on" : "off");
+                break;
+            }
+            case editor::settings::kAllFilesPressed: {
+                g_perm.dialogAccept();
+                if (storage::jniOpenAllFilesSettings()) {
+                    elog::info("storage: definicoes All Files lancadas");
+                } else {
+                    g_perm.dialogCancel();
+                    showToast("ponte Java indisponivel (handshake)");
+                }
+                break;
+            }
+            case editor::settings::kMicPressed: {
+                if (storage::jniEnsureMicPermission()) {
+                    showToast("permissao de microfone pedida");
+                } else {
+                    showToast("ponte Java indisponivel (handshake)");
+                }
+                break;
+            }
+            case editor::settings::kViewLogs: {
+                g_editor.logViewer = true;
+                g_editor.logViewerJustOpened = true;
+                g_logLines.clear();
+                elog::readTail(g_logLines, 300);
+                refreshLogDumps();
+                break;
+            }
+            case editor::settings::kExportLogs: {
+                int copied = 0;
+                if (storage::jniExportLogsToDownloads(&copied) && copied >= 0) {
+                    showToast("logs exportados");
+                    elog::info("logs: exportados %d ficheiro(s)", copied);
+                } else {
+                    showToast("export falhou (sem ficheiros? API<29?)");
+                }
+                break;
+            }
+            case editor::settings::kProbeAudio: {
+                runAudioProbe();
+                break;
+            }
+            case editor::settings::kRunBench: {
+                // 0.9.6 (G6 · R-017): a máquina de fases do bench arranca NO
+                // frame seguinte (o Settings fecha — o bench é um modal de
+                // facto: 20s+ de medições com toasts de progresso)
+                g_editor.settingsMenu = false;
+                benchStart();
+                break;
+            }
+            case editor::settings::kCopyBench: {
+                benchCopyReport();
+                break;
+            }
+            case editor::settings::kExportLayout: {
+                // 0.9.6.5 (GRUPO B): o Settings FECHA e o frame seguinte (o
+                // ecrã que ficou por baixo — normalmente o editor) é o
+                // exportado: PNG do backbuffer + JSON das regiões reais em
+                // layout/ do projeto. Um ecrã de cada vez, sem o modal à
+                // mista (o validador não pode ver camadas sobrepostas).
+                g_editor.settingsMenu = false;
+                g_layoutExportPending = true;
+                elog::info("layout: export armado (o próximo frame é o "
+                           "exportado)");
+                break;
+            }
+            case editor::settings::kAuditScreen: {
+                // 0.9.6.5 (GRUPO B): idem + o VALIDADOR corre no fim do
+                // export — cada problema logado (o dono cola o engine.log),
+                // o relatório inteiro em layout/auditoria-<ecrã>.txt
+                g_editor.settingsMenu = false;
+                g_layoutExportPending = true;
+                g_layoutAuditPending = true;
+                elog::info("layout: auditoria armada (o validador corre no "
+                           "fim do próximo frame)");
+                break;
+            }
+            case editor::settings::kOpenTextWindow: {
+                // 0.9.1 — o Settings fecha e a janela de texto fica COMO
+                // modal único (sem duplo-dispatch do mesmo toque nos dois
+                // botões back — o back da janela e o do settings são ambos
+                // 56dp no canto superior esquerdo)
+                g_editor.settingsMenu = false;
+                openTextWindow();
+                break;
+            }
+            case editor::settings::kOpenDocs: {
+                // 0.9.2 §11 — Settings fecha; o ecrã de Docs fica como
+                // modal único (o mesmo padrão do kOpenTextWindow)
+                g_editor.settingsMenu = false;
+                g_editor.docsScreen.open = true;
+                g_editor.docsScreen.queryLen = 0;
+                g_editor.docsScreen.query[0] = '\0';
+                g_editor.docsScreen.expanded = -1;
+                elog::info("voni: docs abertas");
+                break;
+            }
+            case editor::settings::kReconvert: {
+                reconvertAllAssets();
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    // F5.2: DIÁLOGO/IMPORT/LOGS desenhados DEPOIS dos painéis (ordem =
+    // z-order) — ver o bloco imediatamente antes de drawToast()
+
+    // F5-E: catálogo dos seletores — refresh quando um seletor ABRE
+    // 0.8.11: idem o catálogo de ÁUDIO (o seletor de clips é o assetMenu 5)
+    if (g_editor.assetMenu != 0 && g_editor.assetMenu != g_prevAssetMenu) {
+        refreshCatalog();
+        refreshAudioCatalog();
+        // 0.9.6.3 (R-020 · spec PASSO 1): o CONTEÚDO da lista de
+        // "Adicionar mesh" fica no log quando o seletor abre — o dono vê
+        // exatamente o que o seletor oferecia no momento
+        elog::info("catalog: seletor de mesh aberto com %zu item(ns)",
+                   g_catalog.meshes.size());
+        for (const std::string& m : g_catalog.meshes) {
+            elog::info("catalog: mesh na lista: %s", m.c_str());
+        }
+    }
+    g_prevAssetMenu = g_editor.assetMenu;
+
+    // F3: painéis do editor (Hierarquia esquerda, Inspector direita).
+    // 0.7.0: no modo UI com ELEMENTO selecionado o painel direito mostra o
+    // INSPECTOR DE UI (pos/size/cor/texto/visivel/âncoras/ação); sem elemento
+    // (ou em 3D) o Inspector de TICs de sempre.
+    // 0.7.5: com um MODAL aberto os painéis NÃO se desenham (o backdrop
+    // tapa o editor; nada de texto à mista — e sem desenho não há gesto)
+    if (!modalOpen) {
+        // GRUPO D (0.9.6.7): o INPUT dos divisores corre ANTES dos painéis —
+        // a pega RECLAMA o gesto primeiro (o toque na pega nunca vira scroll)
+        editor::dividerInput(g_ui, g_input, g_editor,
+                             g_editor.showInspector && !g_editor.uiMode);
+        if (editor::drawHierarchy(g_ui, g_scene, g_editor)) {
+            g_editor.plusMenu = true;   // "+" no cabeçalho abre os presets
+            g_editor.fileMenu = false;
+        }
+        // 0.11-H (FASE 1) — O CONSUMO do reparent do DRAG (o padrão dos
+        // pedidos do estado): o draw ARMOU, aqui é o PONTO SEGURO —
+        // revalidação com canReparentTo (a cena pode ter mudado no frame),
+        // undo do snapshot (o reparent é UMA edição de UM TIC — o TicSnap
+        // cobre), toast + log. O alvo invalid = drop no vazio = RAIZ.
+        if (g_editor.hierReparentPending) {
+            g_editor.hierReparentPending = false;
+            const Handle src = g_editor.hierReparentSrc;
+            const Handle dstP = g_editor.hierReparentDst;
+            const Tic* moved = g_scene.get(src);
+            if (moved && editor::canReparentTo(g_scene, src, dstP)) {
+                const editor::TicSnap before = editor::snapTic(g_scene, src);
+                if (editor::reparentTic(g_scene, src, dstP)) {
+                    g_undo.push(before, editor::snapTic(g_scene, src), src);
+                    char movedName[48];
+                    std::snprintf(movedName, sizeof(movedName), "%.40s",
+                                  moved->name.c_str());
+                    if (dstP.valid()) {
+                        const Tic* p = g_scene.get(dstP);
+                        showToast("reparent concluído");
+                        LOGI("hierarquia: '%s' reparentado para '%s'",
+                             movedName, p ? p->name.c_str() : "?");
+                    } else {
+                        showToast("TIC movido para a raiz");
+                        LOGI("hierarquia: '%s' reparentado para a RAIZ",
+                             movedName);
+                    }
+                }
+            } else if (moved) {
+                // a revalidação recusou (alvo morreu / ciclo): honesto
+                showToast("reparent recusado (alvo inválido ou ciclo)");
+                LOGI("hierarquia: reparent RECUSADO (canReparentTo false — "
+                     "alvo morto ou dentro da própria sub-árvore)");
+            }
+        }
+        const bool uiInsp =
+            g_editor.uiMode && (g_editor.selElement >= 0 || g_editor.selJoystick);
+        if (uiInsp) {
+            editor::drawUiInspector(g_ui, g_scene, g_editor, g_input);
+        } else if (g_editor.showInspector) {
+            // 0.7.6: o G5 da toolbar pode ter escondido o painel direito
+            editor::drawInspector(g_ui, g_scene, g_editor, &g_catalog,
+                                  &g_voni);   // 0.9.2: +vars @+ do script
+        }
+        // GRUPO D: os strips VISÍVEIS por cima da borda dos painéis (o input
+        // já correu acima; o draw é a última camada do chrome dos painéis)
+        editor::drawPanelDividers(g_ui, g_editor,
+                                  g_editor.showInspector && !g_editor.uiMode);
+        // 0.9.0 (spec E/K): a TIMELINE vive no DRAWER do painel de baixo
+        // (aba Animação). PASSO 2 (0.9.6.15): o AUTO-ABRIR da 0.8.0 SAIU —
+        // o drawer fica FECHADO por default (spec do dono: «o painel de
+        // baixo abre por toque») — quem quer a timeline TOCA a tab
+        // Animação; o main só desenha quando ela está aberta.
+        // 0.9.6.18 (HOTFIX D9): sem seleção com AnimationPlayer o drawer
+        // desenha o EMPTY-STATE centrado+clipado (antes ficava EM BRANCO)
+        if (g_bottom.bottomTab == 4 && tlVisible) {
+            const UiRect d = editor::bottom::layout(
+                w, h, g_ui.safeArea(), g_bottom).drawer;
+            const UiRect content = {
+                d.x, d.y + theme::dp(editor::bottom::kDrawerHandleH), d.w,
+                d.h - theme::dp(editor::bottom::kDrawerHandleH)};
+            if (timeline::canDraw(g_scene, g_editor.selected)) {
+                timeline::drawTimelineInRect(
+                    g_ui, g_input, g_scene, g_editor, g_timeline, g_frameDt,
+                    content);
+            } else {
+                editor::bottom::drawDrawerEmptyState(
+                    g_ui, content,
+                    "seleciona um TIC com Animação");
+            }
+        }
+    }
+
+    // overlay "+" → presets de TIC (3D) OU elementos de UI (modo UI, 0.7.0)
+    if (g_editor.plusMenu) {
+        const int choice = editor::drawPlusMenu(g_ui, g_input, w, h, g_editor);
+        if (choice > 0) {
+            if (g_editor.uiMode) {
+                // 0.7.4 — o mapa escolha→Kind vive em uiPlusChoiceKind
+                // (1..7 Panel..Article; 8 Joystick; 9/10 VBox/HBox)
+                const int kind = editor::uiPlusChoiceKind(choice);
+                const bool hadTic = g_scene.get(g_editor.selected) != nullptr;
+                if (kind < 0) {
+                    // 0.12-B (B-1) — JOYSTICK na ÁRVORE: o "+Joystick" cria
+                    // um TIC FILHO do UIRoot (Control Kind::Joystick +
+                    // TouchControls no MESMO TIC — o runtime de input não
+                    // muda). Dois joysticks = DOIS TICs distintos (o pin
+                    // ui_add_2_joysticks aferra).
+                    if (editor::uiAddTreeJoystick(g_scene, g_editor)) {
+                        showToast("joystick adicionado");
+                        LOGI("editor: joystick (TIC da árvore de UI) criado");
+                    } else {
+                        showToast("não foi possível criar o joystick");
+                    }
+                } else if (editor::uiAddTreeElement(g_scene, g_editor,
+                                                    static_cast<u32>(kind),
+                                                    w, h)) {
+                    // 0.12-B (B-1): cria o ELEMENTO-NA-ÁRVORE (TIC filho do
+                    // UIRoot + Control; a raiz nasce à primeira — o TIC
+                    // "UI"). O WYSIWYG mostra-o no frame seguinte (o
+                    // espelho da árvore alimenta o MESMO desenho).
+                    // 0.7.4: com container selecionado nasce FILHO dele
+                    // (o reparent segue o seed da posição — B-2 afina).
+                    if (!hadTic) {
+                        showToast("TIC 'UI' criado + elemento");
+                        LOGI("editor: raiz de UI criada (TIC 'UI' + UIRoot)");
+                    } else {
+                        showToast("elemento UI criado");
+                    }
+                    LOGI("editor: elemento UI criado na árvore (kind %d)",
+                         kind);
+                } else {
+                    showToast("selecione um TIC na Hierarchy");
+                }
+            } else if (choice == 5) {
+                // 0.7.7 — TIC de CÂMARA: Transform3D (pose) + CameraComp
+                // (perspetiva). Nasce A ATIVA da cena (uma só — CameraUtil)
+                const Handle hnew = g_scene.create("Camera");
+                Tic* ct = g_scene.get(hnew);
+                if (ct) {
+                    ct->addComponent<Transform3D>();
+                    if (ct->addComponent<CameraComp>()) {
+                        setOnlyActiveCamera(g_scene, hnew);
+                    }
+                    editor::selectTic(g_editor, hnew);
+                    showToast("Câmara criada (ativa)");
+                    LOGI("editor: TIC de câmara criada (ativa)");
+                }
+            } else if (choice == 6) {
+                // 0.8.0 (F7) — TIC "Mesh": Transform+MeshRenderer com a
+                // PRIMITIVA esfera default (SEM física — prototipagem pura;
+                // troca-se o tipo/params no Inspector, anima-se na timeline)
+                // 0.8.10: esfera default PENDENTE — o preset arma primOn+
+                // params + primPending; o mesh sobe no ponto seguro
+                const Handle hnew = createTicUndoable(PresetKind::Mesh);
+                if (hnew.valid()) {
+                    if (MeshRenderer* mr =
+                            g_scene.get(hnew)->getComponent<MeshRenderer>()) {
+                        mr->primPending = true;
+                    }
+                }
+                if (hnew.valid()) {
+                    editor::selectTic(g_editor, hnew);
+                    showToast("Mesh criado (esfera)");
+                    LOGI("editor: TIC Mesh criado (primitiva esfera default)");
+                }
+            } else if (choice == 7) {
+                // 0.8.11 — TIC "Audio": Transform + AudioPlayer (ESTRUTURA
+                // primeiro — o clip vem pelo Inspector/seletor de clips;
+                // glifo de altifalante no editor, som no Play)
+                const Handle hnew = createTicUndoable(PresetKind::Audio);
+                if (hnew.valid()) {
+                    editor::selectTic(g_editor, hnew);
+                    showToast("Audio criado (atribua o clip no Inspector)");
+                    LOGI("editor: TIC Audio criado (Transform+AudioPlayer)");
+                }
+            } else {
+                const PresetKind kind = static_cast<PresetKind>(choice - 1);
+                const Handle hnew = createTicUndoable(kind);
+                if (hnew.valid()) {
+                    editor::selectTic(g_editor, hnew);
+                    char msg[64];
+                    std::snprintf(msg, sizeof(msg), "%s criado", presetName(kind));
+                    showToast(msg);
+                    LOGI("editor: %s criado", presetName(kind));
+                }
+            }
+        }
+    }
+
+    // F5-E/F6: seletor de assets aberto → aplica no MeshRenderer selecionado.
+    // F6 (fix do C33 0.6.9): o menuKind é capturado ANTES do drawAssetMenu —
+    // o seletor FECHA a si próprio no clique (st.assetMenu = 0 dentro do
+    // draw) e o dispatch antigo lia g_editor.assetMenu DEPOIS da chamada
+    // (sempre 0 → bloco morto desde a F5-E: a escolha nunca chegava ao
+    // componente; o C33 via "tex: none" eterno, cubo cinzento e NENHUMA
+    // linha no engine.log). A lógica vive agora em editor::applyAssetPick
+    // (pura, afervel no CI) e o resultado traz o toast + a linha de log.
+    // 0.7.4: menuKind 3 = textura de ELEMENTO de UI (Inspector de UI, linha
+    // tex:) → applyUiTexPick (escreve a ref; a render resolve por frame) +
+    // "importar…" abre o NAVEGADOR 0.7.2 (o ficheiro cai em textures/).
+    // 0.8.12 — HINT de pick bloqueado: o Inspector seta o flag quando o
+    // toque em linha de picker não tinha alvo válido; o main converte-o em
+    // toast + linha de log AQUI (o toast vive no main — o Inspector é puro)
+    if (g_editor.pickBlockedHint) {
+        g_editor.pickBlockedHint = false;
+        showToast("seleciona um TIC com mesh");
+        elog::info("ui: pick bloqueado (sem seleção)");
+    }
+
+    // FASE 9 (G2-7): o LONG-PRESS no nome truncado da hierarquia pediu o
+    // nome completo — o main converte em toast (o Inspector é puro)
+    if (g_editor.nameTip[0]) {
+        showToast(g_editor.nameTip);
+        g_editor.nameTip[0] = '\0';
+    }
+
+    if (g_editor.assetMenu != 0) {
+        const int menuKind = g_editor.assetMenu;   // ANTES do draw (o pick fecha)
+        const int pick = editor::drawAssetMenu(g_ui, g_input, w, h, g_editor,
+                                               g_catalog, menuKind == 3);
+        if (pick > 0) {
+            if (menuKind == 3) {
+                if (pick == editor::kAssetPickImport) {
+                    // "importar…" → NAVEGADOR (0.7.2): o dono escolhe a
+                    // textura de onde for; o ficheiro importa para textures/
+                    // e fica no seletor (tex: de novo)
+                    browserOpen(fileapi::kBrowserRoots[0].path);
+                    g_editor.fileBrowser = true;
+                    LOGI("editor: importar textura — navegador aberto");
+                } else {
+                    const editor::UiTexPickOutcome out = editor::applyUiTexPick(
+                        g_scene, g_editor.selected, g_editor.selElement, pick,
+                        g_catalog);
+                    if (out.toast[0] != '\0') {
+                        showToast(out.toast);
+                    }
+                    if (out.log[0] != '\0') {
+                        LOGI("%s", out.log);
+                    }
+                }
+            } else if (menuKind == 5) {
+                // 0.8.11 — seletor de CLIPS: o "importar…" abre o navegador
+                // na raiz Music (o import de áudio volta ao workspace); o
+                // pick aplica clipPath ao AudioPlayer (dados puros)
+                if (pick == editor::kAssetPickImport) {
+                    browserOpen("/storage/emulated/0/Music");
+                    g_editor.fileBrowser = true;
+                    g_editor.audioMode = true;   // volta ao workspace
+                    LOGI("editor: importar audio — navegador aberto (Music)");
+                } else {
+                    const editor::TicSnap uBefore =
+                        editor::snapTic(g_scene, g_editor.selected);
+                    const editor::AssetPickOutcome out =
+                        editor::applyAssetPick(g_scene, g_editor.selected, 5,
+                                               pick, g_catalog,
+                                               makeAssetResolvers());
+                    if (out.applied) {
+                        pushUndo(uBefore, g_scene.get(g_editor.selected));
+                        elog::info("%s", out.log);
+                    } else {
+                        elog::warn("audio: pick %d sem AudioPlayer no TIC "
+                                   "selecionado",
+                                   pick);
+                    }
+                    if (out.toast[0] != '\0') {
+                        showToast(out.toast);
+                    }
+                }
+            } else {
+                // 0.8.12 — GUARDA DE UI no DISPATCH: os pickers de
+                // mesh/prim/tex (menuKind 1/2/4) só aplicam com um TIC
+                // VIVO selecionado que tenha MeshRenderer. Sem alvo (o
+                // picker ficou aberto e a seleção morreu, ou o TIC é
+                // câmara/áudio): HINT + log bloqueado — NUNCA o caminho
+                // "ERRO(sem TIC com mesh selecionado)" que o C33 viu
+                // (a linha de erro não diz ao dono o que fazer a seguir).
+                if (editor::pickerGuardBlocked(g_scene, g_editor.selected)) {
+                    showToast("seleciona um TIC com mesh");
+                    elog::info("ui: pick bloqueado (sem seleção) — pick %d "
+                               "no menu %d ignorado",
+                               pick, menuKind);
+                } else {
+                // 0.8.7 — LOGGING EMBUTIDO da TROCA: "mesh: troca <de>→<para>
+                // inicio" antes e "fim ok verts=N idx=M"/"ERRO(<razão>)"
+                // depois — o log viewer do C33 mostra a linha exata se algo
+                // falhar (a intermitência deixa de ser um mistério).
+                const MeshRenderer* mrOld = nullptr;
+                if (const Tic* tOld = g_scene.get(g_editor.selected)) {
+                    mrOld = tOld->getComponent<MeshRenderer>();
+                }
+                char de[32] = "-";
+                if (mrOld) {
+                    if (mrOld->primOn) {
+                        std::snprintf(de, sizeof(de), "prim %s",
+                                      primName(mrOld->prim.kind));
+                    } else if (mrOld->mesh == &g_cubeMesh) {
+                        std::snprintf(de, sizeof(de), "cube");
+                    } else if (!mrOld->meshPath.empty()) {
+                        std::snprintf(de, sizeof(de), "%.24s",
+                                      mrOld->meshPath.c_str());
+                    } else if (mrOld->mesh) {
+                        std::snprintf(de, sizeof(de), "mesh");
+                    }
+                }
+                const char* para = "-";   // destino (menuKind 4 = PrimKind)
+                char paraBuf[32];
+                if (menuKind == 4) {
+                    if (pick == 1) {
+                        std::snprintf(paraBuf, sizeof(paraBuf), "none");
+                    } else if (pick >= 2 && pick <= 9) {
+                        std::snprintf(paraBuf, sizeof(paraBuf), "prim %s",
+                                      primName(static_cast<PrimKind>(pick - 2)));
+                    } else {
+                        std::snprintf(paraBuf, sizeof(paraBuf), "pick %d", pick);
+                    }
+                    para = paraBuf;
+                } else if (menuKind == 1) {
+                    // 0.8.12: none=1, cube=2, ficheiros 3+ (labels legíveis
+                    // no log — o "mesh pick N" fica p/ os ficheiros)
+                    if (pick == 1) {
+                        std::snprintf(paraBuf, sizeof(paraBuf), "none");
+                    } else if (pick == 2) {
+                        std::snprintf(paraBuf, sizeof(paraBuf), "cube");
+                    } else {
+                        std::snprintf(paraBuf, sizeof(paraBuf), "mesh pick %d",
+                                      pick);
+                    }
+                    para = paraBuf;
+                } else if (menuKind == 2) {
+                    std::snprintf(paraBuf, sizeof(paraBuf), "tex pick %d",
+                                  pick);
+                    para = paraBuf;
+                }
+                elog::info("mesh: troca %s → %s inicio", de, para);
+                const editor::TicSnap uBefore =
+                    editor::snapTic(g_scene, g_editor.selected);
+                const editor::AssetPickOutcome out =
+                    editor::applyAssetPick(g_scene, g_editor.selected, menuKind,
+                                           pick, g_catalog, makeAssetResolvers(),
+                                           g_editor.inspTexSlot,
+                                           g_editor.inspMatIdx);
+                if (out.applied) {
+                    pushUndo(uBefore, g_scene.get(g_editor.selected));
+                }
+                // 0.8.7 — as CONTAGENS vêm do mesh APLICADO (o resolver do
+                // device devolve meshes REAIS; o applyAssetPick é puro e
+                // nunca desreferencia o Mesh — o contrato dos testes)
+                const MeshRenderer* mrNew = nullptr;
+                if (const Tic* tNew = g_scene.get(g_editor.selected)) {
+                    mrNew = tNew->getComponent<MeshRenderer>();
+                }
+                const Mesh* appliedMesh = mrNew ? mrNew->mesh : nullptr;
+                if (out.applied && appliedMesh) {
+                    elog::info("mesh: troca %s → %s fim ok verts=%u idx=%u",
+                               de, para, appliedMesh->vertexCount(),
+                               appliedMesh->indexCount());
+                } else if (out.applied) {
+                    elog::info("mesh: troca %s → %s fim ok (sem mesh — %s)",
+                               de, para,
+                               (menuKind == 4 && pick == 1) ? "prim desligado"
+                               : (menuKind == 1 && pick == 1)
+                                   ? "slot limpo (none)"
+                                   : "sem resolver");
+                } else {
+                    // 0.8.9 — ERRO HONESTO: distinguir "sem alvo" (o TIC
+                    // selecionado não tem MeshRenderer — ex.: seleção perdida
+                    // pós-restart) de "gerador/upload falhou" (o resolver
+                    // devolveu null — a causa exata está nas linhas
+                    // "mesh: prim … ERRO(…)" ACIMA). O C33 0.8.7 lia
+                    // "gerador/upload falhou" num caso que era SÓ seleção
+                    // perdida — o gerador estava bem.
+                    elog::error("mesh: troca %s → %s ERRO(%s)", de, para,
+                                mrOld ? "gerador/upload falhou — causa acima"
+                                      : "sem TIC com mesh selecionado");
+                }
+                if (out.toast[0] != '\0') {
+                    showToast(out.toast);
+                }
+                if (out.log[0] != '\0') {
+                    elog::info("%s", out.log);   // 0.8.9: vai ao engine.log (a prova no log viewer do C33)
+                }
+                // 0.10.6 (SAF-SEAM) — a CAUSA no toast quando o pick de MESH
+                // falhou (o TIC MANTÉM o mesh/prim anterior — nunca a bola
+                // silenciosa; o «asset corrompido, reimporta» + o catálogo
+                // re-listado sem o .corrupt)
+                if (!out.applied) {
+                    reportMeshPickFailure(menuKind);
+                }
+                }   // 0.8.12: fim do else do GUARDA (pick aplicado com alvo válido)
+            }
+        }
+    }
+
+    // F4: controlos de toque por cima de tudo (só em modo Play)
+    // 0.12-B: TODOS os TICs com TouchControls (a árvore pode ter N)
+    if (tcDrawn) {
+        auto& tcsAll = g_scene.components().touchControls();
+        for (u32 i = 0; i < tcsAll.size(); ++i) {
+            Tic* tOwner = g_scene.get(tcsAll.owner(i));
+            if (!tOwner || !tOwner->active) {
+                continue;
+            }
+            editor::drawTouchControls(g_ui, tcsAll.at(i), w, h);
+        }
+    }
+
+    // overlay Menu → Save/Load cena do projeto (F5-A: caminhos relativos,
+    // cena ativa guardada em scenes/<ativa>.goni + manifesto persistido)
+    // F5.2: menu de ficheiro com 5 itens — Save/Load/Export OBJ/Importar…/
+    // Export Downloads (o "Pasta (SAF)" foi REMOVIDO com o fluxo SAF)
+    if (g_editor.fileMenu) {
+        const editor::toolbar::TopBarLayout tbl = editor::toolbar::topbarLayout(
+            w, h, g_ui.safeArea(), g_editor.uiMode, g_editor.audioMode);
+        // PASSO 3: a âncora do ⋯ do viewport (quando armada) ou a da top bar
+        const f32 menuAx = g_editor.menuAx >= 0.0f ? g_editor.menuAx
+                                                   : tbl.menu.x;
+        const f32 menuAy = g_editor.menuAy >= 0.0f
+                               ? g_editor.menuAy
+                               : tbl.menu.y + tbl.menu.h;
+        const int choice = editor::drawFileMenu(g_ui, g_input, w, h, g_editor,
+                                                menuAx, menuAy,
+                                                g_snapValue > 0.0f);
+        if (choice == 7) {
+            // 0.9.6.19b (D21 · NOVO OBJETO NO MENU ⋯): o MESMO código do +
+            // da hierarquia (o bloco drawHierarchy no main) — abre o
+            // plusMenu de presets; NÃO é um caminho novo. O [+] do viewport
+            // que morria repetia isto.
+            g_editor.plusMenu = true;
+            g_editor.fileMenu = false;
+        } else if (choice == 8) {
+            // 0.9.6.10 (GRUPO UI · secção EDITAR): DESFAZER — o MESMO
+            // caminho do botão do viewport (o g_undo de sempre)
+            // 0.9.6.19b (D21): era choice 7 (o «Novo objeto» desloca +1)
+            const Handle uh = g_undo.undo(g_scene);
+            if (uh.valid()) {
+                editor::selectTic(g_editor, uh);
+                showToast("desfeito");
+            } else {
+                showToast("nada a desfazer");
+            }
+        } else if (choice == 9) {
+            // 0.9.6.10 (GRUPO UI · secção EDITAR): REFAZER
+            // 0.9.6.19b (D21): era choice 8 (o «Novo objeto» desloca +1)
+            const Handle rh = g_undo.redo(g_scene);
+            if (rh.valid()) {
+                editor::selectTic(g_editor, rh);
+                showToast("refeito");
+            } else {
+                showToast("nada a refazer");
+            }
+        } else if (choice == 10) {
+            // 0.9.6.10 (GRUPO UI · secção EDITAR): DUPLICAR — o MESMO
+            // caminho do botão do viewport (duplica E arma o clipboard)
+            // 0.9.6.19b (D21): era choice 9 (o «Novo objeto» desloca +1)
+            // 0.11-H (FASE 1): DEEP CLONE (a sub-árvore segue; com UM TIC é
+            // o duplicar de sempre)
+            if (const Tic* sel = g_scene.get(g_editor.selected)) {
+                g_clipSnap = editor::snapTic(g_scene, sel->handle);
+                g_clipValid = true;
+                const Handle dup = editor::duplicateWithChildren(
+                    g_scene, g_editor.selected);
+                if (dup.valid()) {
+                    editor::selectTic(g_editor, dup);
+                    showToast("TIC duplicado");
+                }
+            } else {
+                showToast("seleciona um TIC para duplicar");
+            }
+        } else if (choice == 11) {
+            // 0.9.6.10 (GRUPO UI · secção EDITAR): COLAR — o MESMO caminho
+            // do botão do viewport (o clipboard armado pelo duplicar/copiar)
+            // 0.9.6.19b (D21): era choice 10 (o «Novo objeto» desloca +1)
+            if (g_clipValid) {
+                const editor::TicSnap before;   // vazio = criação
+                const Handle h = editor::pasteAsNew(g_scene, g_clipSnap);
+                if (h.valid()) {
+                    g_undo.push(before, editor::snapTic(g_scene, h), h);
+                    editor::selectTic(g_editor, h);
+                    showToast("TIC colado");
+                }
+            } else {
+                showToast("nada para colar");
+            }
+        } else if (choice == 12) {
+            // 0.9.6.10 (GRUPO UI · secção VISUALIZAR): o TOGGLE REAL do
+            // íman (o mesmo estado do chip do viewport: 0 = desligado)
+            // 0.9.6.19b (D21): era choice 11 (o «Novo objeto» desloca +1)
+            g_snapValue = g_snapValue > 0.0f ? 0.0f : 0.5f;
+            showToast(g_snapValue > 0.0f ? "snapping ligado" : "snapping desligado");
+            elog::info("ui: snapping %s (menu Visualizar)",
+                       g_snapValue > 0.0f ? "ligado" : "desligado");
+        } else if (choice == 13) {
+            // 0.7.6: Settings (o item do dropdown do Menu — o botão próprio
+            // deixou de existir na barra). 0.9.6.19b (D21): era choice 12
+            g_editor.settingsMenu = true;
+            elog::info("ui: menu Settings aberto (dropdown do Menu)");
+        } else if (choice == 14) {
+            // 0.9.6.10 (GRUPO UI · secção FERRAMENTAS): VER LOGS — o MESMO
+            // viewer de sempre (tail 300 + dumps com badge ANTIGO)
+            // 0.9.6.19b (D21): era choice 13 (o «Novo objeto» desloca +1)
+            g_editor.logViewer = true;
+            g_editor.logViewerJustOpened = true;
+            g_logLines.clear();
+            elog::readTail(g_logLines, 300);
+            refreshLogDumps();
+        } else if (choice == 15) {
+            // 0.9.6.10 (GRUPO UI · secção AJUDA): a DOCUMENTAÇÃO V.ONI —
+            // o MESMO ecrã das Docs (a pesquisa estruturada do registo).
+            // 0.9.6.19b (D21): era choice 14 — o «Novo objeto» entrou na
+            // secção CENA e as escolhas seguintes deslocaram-se +1.
+            g_editor.docsScreen.open = true;
+            g_editor.docsScreen.queryLen = 0;
+            g_editor.docsScreen.query[0] = '\0';
+            g_editor.docsScreen.expanded = -1;
+            elog::info("ui: docs abertas (menu Ajuda)");
+        } else if (choice == 4 && g_projectReady) {
+            const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
+                            g_project.saveManifest(*g_storage);
+            armThumbCapture();   // 0.9.0/0.9.6.19 (D16): o ponto único
+            // F5.4-hotfix: Salvar materializa os assets que só existem em
+            // runtime (cubo procedural → meshes/cube.obj, formato OBJ já
+            // definido). Cada tipo de asset fica na SUBPASTA certa — a
+            // escrita em si loga "saf: write meshes/cube.obj — N bytes"
+            // (visível no "Ver logs"). Falha do asset NÃO desfaz a cena
+            // salva — o erro fica logado com a causa real.
+            std::vector<std::string> matWritten;
+            std::string matErr;
+            if (!persistSceneAssets(*g_storage, g_scene, matWritten, matErr)) {
+                elog::error("editor: salvar assets — %s", matErr.c_str());
+            }
+            for (const std::string& rel : matWritten) {
+                LOGI("editor: asset materializado no Salvar → %s", rel.c_str());
+            }
+            char msg[64];
+            std::snprintf(msg, sizeof(msg), ok ? "cena salva (%u tics)" : "falha ao salvar",
+                          g_scene.count());
+            showToast(msg);
+            LOGI("editor: %s → %s", msg, g_project.activeScenePath()->c_str());
+        } else if (choice == 5 && g_projectReady) {
+            primMeshesToGrave();   // 0.8.10: posse antiga p/ cova
+            const SceneSerializer::LoadCtx ctx = makeLoadCtx();
+            const bool ok = g_project.loadActiveScene(*g_storage, g_scene, ctx);
+            if (ok) {
+                postLoadMigrateAndFixup();   // 0.8.10: migração silenciosa
+            }
+            char msg[64];
+            std::snprintf(msg, sizeof(msg), ok ? "cena carregada (%u tics)" : "falha ao carregar",
+                          g_scene.count());
+            showToast(msg);
+            editor::clearSelection(g_editor);   // seleção antiga não sobrevive ao load
+            LOGI("editor: %s ← %s", msg, g_project.activeScenePath()->c_str());
+        } else if (choice == 6 && g_projectReady) {
+            // F5-E: Export OBJ — mesh do TIC selecionado → meshes/export_<nome>.obj
+            Tic* tsel = g_scene.get(g_editor.selected);
+            MeshRenderer* mrs = tsel ? tsel->getComponent<MeshRenderer>() : nullptr;
+            if (!mrs) {
+                showToast("selecione um TIC com mesh");
+            } else {
+                std::string err;
+                const MeshData* src = nullptr;
+                MeshData cubeCopy;
+                if (!mrs->meshPath.empty()) {
+                    src = g_resources.mesh(mrs->meshPath, err);
+                } else if (mrs->mesh == &g_cubeMesh) {
+                    cubeCopy = cubeToMeshData();
+                    src = &cubeCopy;
+                }
+                if (!src || !src->ok()) {
+                    showToast("mesh não disponível p/ export");
+                } else {
+                    std::snprintf(g_selectedName, sizeof(g_selectedName), "%.30s",
+                                  tsel->name.c_str());
+                    std::string outName = "export_" + std::string(g_selectedName) + ".obj";
+                    for (char& c : outName) {
+                        if (c == '/' || c == '\\' || c == ':' || c == '#') c = '_';
+                    }
+                    const std::string rel =
+                        std::string(Project::kDirMeshes) + "/" + outName;
+                    if (g_storage->writeText(rel, exportObj(*src))) {
+                        char msg[96];
+                        std::snprintf(msg, sizeof(msg), "export: %s", rel.c_str());
+                        showToast(msg);
+                        LOGI("editor: export OBJ → %s", rel.c_str());
+                    } else {
+                        showToast("falha ao exportar OBJ");
+                    }
+                }
+            }
+        } else if (choice == 2) {
+            // F5.2: IMPORTAR — All Files Access → varre Download/Documents →
+            // overlay de escolha → cópia para meshes/ ou textures/
+            attemptImport();
+        } else if (choice == 3) {
+            // F5.2: EXPORT DOWNLOADS — All Files Access → Download/GOneVV/export
+            attemptExport();
+        } else if (choice == 1) {
+            // 0.6.7: SAIR PARA PROJETOS — auto-save da cena + volta ao
+            // gestor SEM matar a app. A activity termina-se (finish() pela
+            // ponte Java — o gestor está na back stack); o APP_CMD_TERM_WINDOW
+            // que se segue liberta TODOS os recursos GL (lifecycle 0.6.7-a);
+            // reentrar arranca um novo android_main com contexto novo.
+            if (g_projectReady && g_storage) {
+                const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
+                                g_project.saveManifest(*g_storage);
+                armThumbCapture();   // 0.9.0/0.9.6.19 (D16): o ponto único
+                std::vector<std::string> matWritten;
+                std::string matErr;
+                persistSceneAssets(*g_storage, g_scene, matWritten, matErr);
+                for (const std::string& rel : matWritten) {
+                    LOGI("editor: asset materializado ao sair → %s", rel.c_str());
+                }
+                showToast(ok ? "cena salva — a sair…" : "save falhou — a sair…");
+                elog::info("editor: sair p/ projetos — auto-save %s (%u tics, "
+                           "%u asset(s) materializado(s))",
+                           ok ? "OK" : "FALHOU", g_scene.count(),
+                           (unsigned)matWritten.size());
+            } else {
+                elog::warn("editor: sair p/ projetos SEM projeto — nada a "
+                           "auto-salvar");
+            }
+            if (storage::jniFinishToLauncher()) {
+                elog::info("editor: finish() pedido à activity — o gestor "
+                           "retoma (app viva)");
+            } else {
+                showToast("não consegui sair (ponte Java — ver logs)");
+                elog::error("editor: jniFinishToLauncher FALHOU — fica no editor");
+            }
+        }
+    }
+
+    // 0.9.6.10 (GRUPO UI): o menu ⋮ da Hierarquia (as ações REAIS da
+    // árvore — limpar a multi-seleção / o nome completo do selecionado)
+    if (g_editor.hierMenu) {
+        const UiRect hierPanel = safe::hierarchyPanelRect(
+            w, h, g_ui.safeArea(), currentDrawerH(), g_editor.hierW,
+            g_editor.inspW);
+        const int hc = editor::drawHierMenu(
+            g_ui, g_input, w, h, g_editor,
+            hierPanel.x + hierPanel.w - theme::dp(16.0f) - theme::dp(48.0f),
+            hierPanel.y + theme::dp(48.0f));
+        if (hc == 1) {
+            g_editor.multiSelectCount = 0;
+            showToast("seleção limpa");
+        } else if (hc == 2) {
+            const Tic* sel = g_scene.get(g_editor.selected);
+            if (sel) {
+                showToast(sel->name.c_str());
+            } else {
+                showToast("nenhum TIC selecionado");
+            }
+        }
+    }
+
+    // F5.2: overlays de armazenamento — DEPOIS dos painéis (ordem = z-order):
+    // diálogo de permissão → import → viewer de logs (por cima de tudo)
+    if (g_editor.storageDialog) {
+        const int ch = editor::drawStorageDialog(g_ui, g_input, w, h, g_editor);
+        if (ch != 0) {
+            onStorageDialogChoice(ch);
+        }
+    }
+    if (g_editor.importMenu) {
+        const int pick = editor::drawImportMenu(g_ui, g_input, w, h, g_editor,
+                                                g_importCands);
+        if (pick > 0) {
+            importCandidate(static_cast<size_t>(pick - 1));
+        }
+    }
+    if (g_editor.logViewer) {
+        editor::drawLogViewer(g_ui, g_input, w, h, g_editor,
+                              g_logLines, g_logDumps);
+    }
+
+    // 0.9.1 — JANELA DE TEXTO (topmost): consome a fila do IME ANTES do
+    // desenho (o texto do frame entra no buffer deste frame) e fecha com
+    // o par landscape+imeHide quando o back é tocado. Modal: qualquer
+    // coisa do editor por baixo está gating pelo anyOverlayOpen.
+    // 0.9.2 — PEDIDO DO EDITOR DE SCRIPT (Inspector → "Editar script"):
+    // abre com o par inseparável portrait+IME (o mesmo do textWin)
+    if (g_editor.requestScriptEditor) {
+        g_editor.requestScriptEditor = false;
+        openScriptEditor(g_editor.scriptEditorTarget);
+    }
+
+    // 0.9.2 — ERROS DA V.ONI (a central drena 1×/frame): engine.log +
+    // toast + barra de erro do editor (se o script em edição é o dono)
+    {
+        Handle errTic{};
+        voni::Error verr;
+        if (g_voni.popError(errTic, verr)) {
+            elog::error("voni: script erro linha %u: %s", verr.line,
+                        verr.message.c_str());
+            std::snprintf(g_toast, sizeof(g_toast), "script: linha %u",
+                          verr.line);
+            g_toastT = 1.8f;
+            if (g_editor.scriptWin.open && g_editor.scriptWin.tic == errTic) {
+                g_editor.scriptWin.errLine = verr.line;
+                g_editor.scriptWin.errMsg = verr.message;
+                g_editor.scriptWin.running = false;
+                // 0.9.6 (G2-7e): o PAR do botão Substituir viaja com o
+                // erro (if→exist…; o 'break' traz o do contexto da run)
+                g_editor.scriptWin.fixFrom = verr.fixFrom;
+                g_editor.scriptWin.fixTo = verr.fixTo;
+            }
+        }
+    }
+
+    if (g_editor.textWin.open) {
+        ime::Event ev;
+        while (ime::poll(ev)) {
+            editor::textwin::applyEvent(g_editor.textWin, ev);
+        }
+        if (editor::textwin::draw(g_ui, g_input, g_editor.textWin,
+                                  w, h, g_frameDt) == 1) {
+            closeTextWindow();
+        }
+    }
+
+    // 0.9.2 — DOCS (Settings → Docs; landscape, com pesquisa in-app):
+    // back fecha; o campo de pesquisa abre o teclado (propósito 9).
+    // FASE 9 (G0-3): também abre PELA LUPA do editor de script (result 4) —
+    // as Docs desenham POR CIMA (o bloco do scriptWin abaixo fica gated).
+    if (g_editor.docsScreen.open) {
+        const int dr = editor::docswin::draw(g_ui, g_input,
+                                             g_editor.docsScreen, w, h);
+        if (dr == 1) {
+            g_editor.docsScreen.open = false;
+            elog::info("voni: docs fechadas");
+        } else if (dr == 4) {
+            editor::openTextInput(g_editor, 9, Handle{}, -1,
+                                  g_editor.docsScreen.query);
+        }
+    }
+
+    // 0.9.2 — EDITOR DE SCRIPT (portrait + IME — o par do textWin): a fila
+    // do IME alimenta o fonte; Run/Stop pelo VoniSystem; back SALVA no
+    // componente e fecha com landscape+imeHide.
+    // FASE 9 (G0-1): resultados 4 (lupa → Docs POR CIMA) e 5 (toque no
+    // corpo → RE-PETE o IME — sem perder foco); teclado in-app desenhado
+    // pelo próprio editor (o MESMO applyEvent do IME). Com as Docs abertas
+    // por cima o editor NÃO desenha (Docs é o modal corrente).
+    if (g_editor.scriptWin.open && !g_editor.docsScreen.open) {
+        ime::Event ev;
+        while (ime::poll(ev)) {
+            editor::scriptwin::applyEvent(g_editor.scriptWin, ev);
+        }
+        const int sr = editor::scriptwin::draw(
+            g_ui, g_input, g_editor.scriptWin, w, h, g_frameDt);
+        if (sr == 1) {
+            closeScriptEditor();   // salva o fonte + par landscape/IME
+        } else if (sr == 2) {
+            scriptEditorRun();
+        } else if (sr == 3) {
+            scriptEditorStop();
+        } else if (sr == 4) {
+            // lupa: Docs por cima (pesquisa filtra + exemplo)
+            g_editor.docsScreen.open = true;
+            g_editor.docsScreen.queryLen = 0;
+            g_editor.docsScreen.query[0] = '\0';
+            g_editor.docsScreen.expanded = -1;
+            elog::info("voni: docs abertas (lupa do editor de script)");
+        } else if (sr == 5) {
+            // toque no corpo: o IME do sistema é re-pedido (foco) — o
+            // teclado próprio já CEDOU lá dentro (a política G3: os dois
+            // são ALTERNATIVAS, nunca um por cima do outro)
+            storage::jniImeShow();
+            elog::info("voni: IME re-pedido (toque no corpo do editor)");
+        } else if (sr == 7) {
+            // 0.9.6.8 (GRUPO E): o resultado 7 MORREU com o teclado da
+            // engine (o rastreador E manda SUBSTITUÍ-lo pela barra de
+            // símbolos sobre o IME). O ramo fica DOCUMENTADO (o contrato
+            // de resultados do scriptwin é afervável na suíte) e NUNCA
+            // mais é emitido — o draw não o devolve.
+            elog::info("voni: resultado 7 obsoleto (o teclado da engine "
+                       "saiu na 0.9.6.8)");
+        } else if (sr == 6) {
+            // 0.9.5 · COPIAR REFERÊNCIA PARA IA: a referência V.ONI
+            // COMPLETA (gerada do REGISTO — a mesma fonte das Docs) vai
+            // para o clipboard como texto colável
+            const std::string ref = voni::reg::fullReferenceMarkdown();
+            if (storage::jniClipboardCopy(ref.c_str())) {
+                std::snprintf(g_toast, sizeof(g_toast),
+                              "Referência V.ONI copiada (%zu entradas)",
+                              voni::reg::all().size());
+                g_toastT = 1.8f;
+                elog::info("voni: referência V.ONI copiada p/ o clipboard "
+                           "(%zu entradas, %zu chars)",
+                           voni::reg::all().size(), ref.size());
+            } else {
+                std::snprintf(g_toast, sizeof(g_toast),
+                              "clipboard indisponível");
+                g_toastT = 1.8f;
+            }
+        }
+    }
+
+    // 0.7.0 — GESTÃO DE TICs: menu contextual (⋮) → Renomear/Remover/
+    // Duplicar/Visibilidade; diálogo de remoção COM CONFIRMAÇÃO; teclado
+    // in-app (renomear/texto de elemento/alvo de ação). Por cima de tudo —
+    // a ordem de desenho é o z-order.
+    if (g_editor.contextMenu) {
+        Tic* ct = g_scene.get(g_editor.contextTic);
+        if (!ct) {
+            g_editor.contextMenu = false;   // o TIC morreu entretanto
+        } else {
+            const int ch = editor::drawContextMenu(
+                g_ui, g_input, w, h, g_editor, ct->name.c_str(), ct->visible,
+                ct->getComponent<CameraComp>() != nullptr);   // 0.7.7
+            if (ch == 1) {
+                // RENOMEAR: teclado in-app (zero IME de sistema)
+                editor::openTextInput(g_editor, 0, g_editor.contextTic, -1,
+                                      ct->name.c_str());
+            } else if (ch == 2) {
+                // REMOVER: com confirmação (substitui o apagar sem aviso)
+                g_editor.removeDialog = true;
+            } else if (ch == 3) {
+                // DUPLICAR — 0.11-H (FASE 1): DEEP CLONE (a sub-árvore
+                // inteira, novos handles, nomes únicos); com UM TIC o
+                // comportamento é o de sempre, byte a byte
+                const u32 subN = editor::countSubtree(g_scene, g_editor.contextTic);
+                const Handle dup =
+                    editor::duplicateWithChildren(g_scene, g_editor.contextTic);
+                if (dup.valid()) {
+                    editor::selectTic(g_editor, dup);
+                    showToast(subN > 1 ? "sub-árvore duplicada"
+                                       : "TIC duplicado");
+                    if (const Tic* nd = g_scene.get(dup)) {
+                        LOGI("editor: TIC '%s' duplicado (sub-árvore %u TICs)",
+                             nd->name.c_str(), subN);
+                    }
+                }
+            } else if (ch == 4) {
+                // VISIBILIDADE: toggle (o olho da Hierarchy atalha o mesmo)
+                ct->visible = !ct->visible;
+            } else if (ch == 5) {
+                // 0.7.7 — ALINHAR À VISTA: copia a pose da orbit de edição
+                // para o transform da câmara (posição + orientação)
+                if (Transform3D* tr = ct->getComponent<Transform3D>()) {
+                    camgizmo::alignToView(*tr, g_camera);
+                    showToast("câmara alinhada à vista");
+                    LOGI("editor: câmara '%s' alinhada à vista de edição",
+                         ct->name.c_str());
+                }
+            }
+        }
+    }
+    if (g_editor.removeDialog) {
+        Tic* ct = g_scene.get(g_editor.contextTic);
+        if (!ct) {
+            g_editor.removeDialog = false;
+        } else {
+            // 0.11-H (FASE 1): o diálogo SABE o alcance (a sub-árvore inteira
+            // morre — o texto mostra o N; o dono nunca apaga às cegas)
+            const u32 subN = editor::countSubtree(g_scene, ct->handle);
+            const int ch =
+                editor::drawRemoveDialog(g_ui, g_input, w, h, g_editor,
+                                         ct->name.c_str(), subN);
+            if (ch == 1) {
+                char goneName[48];
+                std::snprintf(goneName, sizeof(goneName), "%.40s", ct->name.c_str());
+                if (subN <= 1) {
+                    // 0.9.0 — UNDO do delete de UM TIC (before = o TIC,
+                    // after = vazio; o undo re-cria pelo snapshot)
+                    const editor::TicSnap gone =
+                        editor::snapTic(g_scene, ct->handle);
+                    editor::TicSnap empty;
+                    g_undo.push(gone, empty, ct->handle);
+                    g_scene.destroy(g_editor.contextTic);
+                    showToast("TIC removido");
+                } else {
+                    // 0.11-H — APAGAR COM FILHOS: a sub-árvore INTEIRA (a
+                    // corrupção latente do delete simples — filhos com
+                    // parent para slot reutilizável — morre aqui). SEM undo
+                    // (o op do UndoStack cobre UM TIC; o diálogo diz
+                    // «não há desfazer» — a decisão documentada da FASE 1)
+                    const u32 n = editor::destroyWithChildren(
+                        g_scene, g_editor.contextTic);
+                    showToast("TICs removidos");
+                    LOGI("editor: sub-árvore de '%s' removida (%u TICs)",
+                         goneName, n);
+                }
+                if (g_editor.selected == g_editor.contextTic) {
+                    editor::clearSelection(g_editor);
+                }
+                if (subN <= 1) {
+                    LOGI("editor: TIC '%s' removido", goneName);
+                }
+            }
+        }
+    }
+    if (g_editor.textInput) {
+        const char* title = g_editor.textPurpose == 0 ? "RENOMEAR TIC"
+                            : g_editor.textPurpose == 1 ? "NOME DA NOVA CENA"
+                            : g_editor.textPurpose == 2 ? "TEXTO DO ELEMENTO"
+                            : g_editor.textPurpose == 4 ? "COR DO ELEMENTO"
+                            : g_editor.textPurpose == 5 ? "COR DO TIC"
+                            : g_editor.textPurpose == 7 ? "RENOMEAR CLIP"
+                            : g_editor.textPurpose == 8 ? "RENOMEAR CENA"
+                            : g_editor.textPurpose == 9 ? "COMANDO DA CONSOLA"
+                            : g_editor.textPurpose == 10 ? "PESQUISAR FICHEIROS"
+                                                        : "ALVO DA AÇÃO";
+        const int ch =
+            editor::drawTextInput(g_ui, g_input, w, h, g_editor, title);
+        if (ch == 1) {
+            if (g_editor.textPurpose == 9) {
+                // 0.9.6.10 (GRUPO UI · a imagem 1): O COMANDO DA CONSOLA —
+                // um conjunto PEQUENO e REAL (cada um liga a um caminho
+                // que JÁ existia; zero fingimento). O resultado LOGA (a
+                // consola é o sítio de sempre)
+                const std::string cmd(g_editor.textBuf);
+                if (cmd == "limpar") {
+                    g_logLines.clear();
+                    elog::info("consola: limpa por comando");
+                    showToast("consola limpa");
+                } else if (cmd == "ajuda") {
+                    elog::info("consola: comandos = limpar | ajuda | play | "
+                               "stop | snap");
+                } else if (cmd == "play") {
+                    if (!g_editor.playMode) {
+                        enterPlayMode();
+                        showToast("modo play");
+                    } else {
+                        elog::warn("consola: já em play");
+                    }
+                } else if (cmd == "stop") {
+                    if (g_editor.playMode) {
+                        leavePlayMode();
+                        showToast("modo editor");
+                    } else {
+                        elog::warn("consola: já em modo editor");
+                    }
+                } else if (cmd == "snap") {
+                    g_snapValue = g_snapValue > 0.0f ? 0.0f : 0.5f;
+                    elog::info("consola: snapping %s",
+                               g_snapValue > 0.0f ? "ligado" : "desligado");
+                } else if (!cmd.empty()) {
+                    elog::warn("consola: comando desconhecido '%s' (ajuda "
+                               "lista os comandos)", cmd.c_str());
+                }
+                g_logLines.clear();
+                elog::readTail(g_logLines, 300);   // a consola segue o log
+            } else if (g_editor.textPurpose == 1) {
+                // 0.7.1: NOVA CENA (o nome vem do teclado in-app)
+                createSceneNamed(g_editor.textBuf);
+            } else if (g_editor.textPurpose == 8) {
+                // 0.12-B (B-4) — RENOMEAR CENA: o alvo vive em textScene
+                // (o commit precisa do STORAGE/projeto — o mesmo motivo do
+                // propósito 1/7 ficar com o CHAMADOR)
+                if (g_projectReady && g_storage &&
+                    g_editor.textScene >= 0 && g_editor.textLen > 0) {
+                    renameSceneInProject(
+                        static_cast<u32>(g_editor.textScene),
+                        std::string(g_editor.textBuf));
+                }
+                g_editor.textScene = -1;
+            } else if (g_editor.textPurpose == 7) {
+                // 0.8.11 — RENOMEAR CLIP: o commit precisa do STORAGE (o
+                // commitTextInput é puro cena+editor); copia bytes → remove
+                // o velho → catálogo (o TIC selecionado segue a NOVA ref se
+                // a tinha)
+                if (g_storage && g_editor.textLen > 0 &&
+                    g_audioWs.selected < g_audioCatalog.size()) {
+                    const std::string old =
+                        g_audioCatalog[g_audioWs.selected];
+                    const std::string dir =
+                        old.substr(0, old.rfind('/') + 1);
+                    const std::string nv = dir +
+                        convert::sanitizeName(g_editor.textBuf) + ".gi";
+                    if (nv != old && !g_storage->exists(nv)) {
+                        std::vector<u8> b;
+                        if (g_storage->readBytes(old, b) &&
+                            g_storage->writeBytes(nv, b.data(), b.size()) &&
+                            g_storage->remove(old)) {
+                            g_audioClips.erase(old);
+                            refreshAudioCatalog();
+                            // TICs com a ref velha passam à nova (o clip é o
+                            // MESMO — só o nome mudou)
+                            g_scene.forEachActive([&](Tic& t) {
+                                if (AudioPlayer* au =
+                                        t.getComponent<AudioPlayer>()) {
+                                    if (au->clipPath == old) {
+                                        au->clipPath = nv;
+                                    }
+                                }
+                            });
+                            elog::info("audio: clip renomeado '%s' -> '%s'",
+                                       old.c_str(), nv.c_str());
+                            showToast("clip renomeado");
+                        } else {
+                            showToast("renomear falhou (engine.log)");
+                            elog::error("audio: renomear %s FALHOU",
+                                        old.c_str());
+                        }
+                    } else {
+                        showToast("nome invalido/ocupado");
+                    }
+                }
+            } else if (g_editor.textPurpose == 0) {
+                // 0.9.0 — RENAME com undo (before do TIC alvo; after = pós-commit)
+                const editor::TicSnap uBefore =
+                    editor::snapTic(g_scene, g_editor.textTic);
+                if (editor::commitTextInput(g_scene, g_editor)) {
+                    pushUndo(uBefore, g_scene.get(g_editor.textTic));
+                    showToast("aplicado");
+                }
+            } else if (g_editor.textPurpose == 10) {
+                // 0.12-C (C-4) — A PESQUISA do navegador: o commit é puro
+                // (browserSearch) e o FILTRO aplica-se no frame seguinte —
+                // sem toast (o resultado visível É o feedback)
+                editor::commitTextInput(g_scene, g_editor);
+            } else if (editor::commitTextInput(g_scene, g_editor)) {
+                showToast("aplicado");
+            }
+        }
+    }
+
+    // 0.7.1 — OVERLAY CENAS: lista do projeto (a ativa marcada) + nova/trocar
+    // (menu de EDITOR — em Play a troca vem pela ação declarativa com
+    // transição; aqui a troca é direta)
+    if (g_editor.scenesMenu && g_projectReady) {
+        const editor::toolbar::TopBarLayout tbl2 = editor::toolbar::topbarLayout(
+            w, h, g_ui.safeArea(), g_editor.uiMode, g_editor.audioMode);
+        const int pick = editor::drawScenesMenu(
+            g_ui, g_input, w, h, g_editor, g_project.scenes,
+            g_project.activeScene, tbl2.cena.x, tbl2.cena.y + tbl2.cena.h);
+        if (pick == 1) {
+            // nova cena: o TECLADO in-app pede o nome (propósito 1)
+            editor::openTextInput(g_editor, 1, Handle{}, -1, "");
+        } else if (pick >= editor::kScenesActBase) {
+            // 0.12-B (B-4): as AÇÕES por linha (renomear/duplicar/apagar —
+            // o apagar só sai CONFIRMADO pelo 2.º toque; o 1.º fica no
+            // menu com a linha armada e nada chega ao main)
+            const int code = pick - editor::kScenesActBase;
+            const u32 idx = static_cast<u32>(code / 4);
+            const int act = code % 4;
+            if (idx < g_project.scenes.size()) {
+                if (act == editor::kSceneActRename) {
+                    char cur[48];
+                    editor::sceneDisplayName(g_project.scenes[idx], cur,
+                                             sizeof(cur));
+                    editor::openTextInput(g_editor, 8, Handle{}, -1, cur);
+                    g_editor.textScene = static_cast<i32>(idx);
+                } else if (act == editor::kSceneActDuplicate) {
+                    duplicateSceneInProject(idx);
+                } else if (act == editor::kSceneActDelete) {
+                    deleteSceneInProject(idx);
+                }
+            }
+        } else if (pick >= 2) {
+            const u32 idx = static_cast<u32>(pick - 2);
+            if (idx != g_project.activeScene) {
+                doSwitchScene(idx);
+            }
+        }
+    }
+
+    // 0.7.2 — NAVEGADOR de ficheiros: breadcrumb/raízes/subir/lista (o
+    // caminho vive no breadcrumb da C-4); diretorias navegam, ficheiros
+    // IMPORTAM. 0.12-C (C-4): o pick da lista vem com o ÍNDICE ORIGINAL
+    // (a pesquisa filtra a VISTA — o main despacha sobre o vetor cru);
+    // o breadcrumb salta pelo crumbPick (o segmento tocado)
+    if (g_editor.fileBrowser && g_browser.open) {
+        int crumbPick = 0;
+        u32 rowIdx = 0;
+        const int pick = editor::drawFileBrowser(
+            g_ui, g_input, w, h, g_editor, g_browser.cwd, g_browser.entries,
+            g_browser.failed, &crumbPick, &rowIdx);
+        if (crumbPick > 0) {
+            // o BREADCRUMB (C-4): o segmento i → a pasta dele (o mesmo
+            // browserCrumbs que o draw desenhou — nunca dois mundos)
+            const std::vector<editor::BrowserCrumb> crumbs =
+                editor::browserCrumbs(g_browser.cwd);
+            if (crumbPick <= static_cast<int>(crumbs.size())) {
+                browserOpen(crumbs[static_cast<size_t>(crumbPick - 1)].path);
+            }
+        } else if (pick >= 1 && pick <= fileapi::kBrowserRootCount) {
+            browserOpen(fileapi::kBrowserRoots[pick - 1].path);
+        } else if (pick == fileapi::kBrowserRootCount + 1) {
+            browserOpen(fileapi::parentPath(g_browser.cwd));
+        } else if (pick >= fileapi::kBrowserRootCount + 2) {
+            if (rowIdx < g_browser.entries.size()) {
+                if (g_browser.entries[rowIdx].isDir) {
+                    browserOpen(g_browser.entries[rowIdx].path);
+                } else if (browserImportFile(g_browser.entries[rowIdx])) {
+                    // 0.9.6.4 (A4): o browser só fecha quando o toque foi
+                    // ENCAMINHADO (job/extract/audio/erro de formato); o
+                    // ficheiro que DESAPARECEU deixa o browser ABERTO com a
+                    // lista re-feita (o utilizador vê a pasta como está)
+                    g_browser.open = false;   // fecha ao importar
+                    g_editor.fileBrowser = false;
+                }
+            }
+        }
+    }
+
+    // 0.7.2 — APLICAR-APÓS-IMPORT: textura/mesh importada + TIC com
+    // MeshRenderer selecionado → "aplicar ao TIC?" (Sim aplica já)
+    if (g_editor.applyAsk && g_applyAsk.open) {
+        Tic* tsel = g_scene.get(g_editor.selected);
+        const char* ticName = tsel ? tsel->name.c_str() : "?";
+        const int ch = editor::drawApplyDialog(g_ui, g_input, w, h, g_editor,
+                                               g_applyAsk.fileName.c_str(),
+                                               ticName);
+        if (ch == 1) {
+            // 0.8.7: o corpo do "Sim" vive em applyImportedAssetToSelectedTic
+            // (extraído — o MESMO código é afervel no hospedeiro)
+            applyImportedAssetToSelectedTic();
+        }
+    }
+
+    // 0.8.11: glifos de ALTIFALANTE (+ esfera posicional) dos AudioPlayers
+    // — SÓ no editor (em Play nada desenha: só soa)
+    // 0.9.6 (G1-3): e NUNCA com overlay aberto — o ícone amarelo do áudio
+    // desenhava POR CIMA do Settings (o glifo corre no pass UI, DEPOIS do
+    // backdrop modal); com um ecrã cheio aberto, TUDO o que desenha sobre
+    // a cena sai do ecrã (a regra das camadas: cena < painéis < modais)
+    if (!g_editor.playMode && !g_editor.uiMode && !g_editor.audioMode &&
+        !modalOpen) {
+        const Mat4 glyphVp =
+            Mat4::mul(g_camera.proj(viewRect.w / viewRect.h), g_camera.view());
+        g_scene.forEachActive([&](Tic& t) {
+            drawAudioGlyph(g_ui, glyphVp, w, h, t, viewRect.w, viewRect.h,
+                           viewRect.x, viewRect.y);
+        });
+    }
+
+    drawToast();
+
+    // 0.9.0 (spec E/K) — PAINEL DE BAIXO: tabs + drawer (Ficheiros/Consola/
+    // Animação) + STATUS BAR 24dp ("FPS N · TICs N" — as abreviaturas
+    // morreram). Desenhado DEPOIS do viewport/painéis (o drawer cobre o
+    // fundo) e ANTES dos overlays (modais por cima de tudo).
+    // 0.9.6 (G1-4): ESCONDIDO em ecrãs cheios e com teclado aberto —
+    // este bloco corria DEPOIS dos overlays e a barra (drawer + status)
+    // desenhava POR CIMA do Settings/Docs/editor e do teclado do renomear
+    // (o bug "a barra de baixo aparece com o teclado aberto"). A camada
+    // fica: cena < painéis < modais < teclado — a barra pertence aos
+    // painéis; com um ecrã cheio ou teclado, ela sai do ecrã.
+    if (!editor::fullscreenOverlayOpen(g_editor) && !g_editor.textInput) {
+        // 0.9.6.1 (G1-3): FUNDO OPACO na faixa do INSET DE BAIXO (a barra
+        // de navegação do sistema) — com o scissor a conter o 3D, esta
+        // faixa fica com a cor de fundo da casa (o dono via o grid lá)
+        if (g_ui.safeBottom() > 0.0f) {
+            g_ui.panel(0.0f, h - g_ui.safeBottom(), w, g_ui.safeBottom(),
+                       theme::kTheme.bg);
+        }
+        // o log da consola = o MESMO tail do engine.log do viewer (120
+        // linhas chegam — a consola filra por chips)
+        std::vector<std::string> logTail;
+        elog::readTail(logTail, 120);
+        // PASSO 1 (0.9.6.14): StatusBarData REMOVIDA com a status bar —
+        // o «FPS · TICs» vive no canto direito da tab bar; a versão/commit
+        // em Settings › Sobre (sctx.git abaixo)
+        // 0.10-M (PASSO 4) — o HUD dos blocos no chip «FPS · TICs · bl n/m»
+        // (a métrica DO frame que acabou de desenhar — o mesmo g_blockFrame
+        // que o log throttled espelha; sem blocos o chip é o de sempre)
+        g_bottom.blDrawn = g_blockFrame.drawn;
+        g_bottom.blTotal = g_blockFrame.total;
+        const editor::bottom::Actions ba = editor::bottom::draw(
+            g_ui, g_input, g_editor, g_bottom, g_catalog, logTail,
+            static_cast<int>(g_fps + 0.5f), g_scene.count(), g_filesTree);
+        if (ba.commandPressed) {
+            // 0.9.6.10 (GRUPO UI): o campo de comando da consola abre o
+            // teclado da casa (o propósito 9 — o commit corre o comando)
+            editor::openTextInput(g_editor, 9, Handle::invalid(), -1, "");
+        }
+        if (ba.importPressed) {
+            // 0.12-C (C-4): o IMPORTAR do estado vazio dos Assets — o MESMO
+            // navegador do seletor (a fonte do projeto), aberto na pasta
+            // Download (a kImportDirs[0], onde o dono importa de)
+            browserOpen(fileapi::kBrowserRoots[1].path);
+            g_editor.fileBrowser = true;
+            LOGI("editor: importar (Assets vazio) — navegador aberto");
+        }
+        if (ba.filePick > 0) {
+            // card de Ficheiros → aplica ao TIC selecionado (o MESMO
+            // dispatch do seletor: menuKind por tipo, pick = i+1 doss files)
+            const int pick = ba.filePick;
+            if (editor::pickerGuardBlocked(g_scene, g_editor.selected)) {
+                g_editor.pickBlockedHint = true;
+            } else {
+                const editor::TicSnap uBefore =
+                    editor::snapTic(g_scene, g_editor.selected);
+                const editor::AssetPickOutcome out = editor::applyAssetPick(
+                    g_scene, g_editor.selected, ba.filePickKind, pick,
+                    g_catalog, makeAssetResolvers(), g_editor.inspTexSlot,
+                    g_editor.inspMatIdx);
+                if (out.applied) {
+                    pushUndo(uBefore, g_scene.get(g_editor.selected));
+                }
+                if (out.toast[0] != '\0') {
+                    showToast(out.toast);
+                }
+                if (out.log[0] != '\0') {
+                    elog::info("%s", out.log);
+                }
+            }
+        }
+        if (ba.exportPressed) {
+            // o MESMO Export do Settings: Downloads/GOneVV/logs (MediaStore)
+            int copied = 0;
+            if (storage::jniExportLogsToDownloads(&copied) && copied >= 0) {
+                showToast("logs exportados");
+                elog::info("logs: exportados %d ficheiro(s) para %s", copied,
+                           elog::kDownloadsRelPath);
+            } else {
+                showToast("export falhou (sem ficheiros? API<29?)");
+            }
+        }
+    }
+
+    // 0.9.0 (spec G) + FASE 9 (G1-5): o layout PERSISTE por diferença com
+    // DEBOUNCE de 1,5 s — o tick deteta a mudança, agenda e grava UMA vez
+    // 1,5 s após a ÚLTIMA alteração (o drag inteiro do drawer = 1 write;
+    // o log antigo mostrava 4 writes em ~40 s)
+    layoutSaveTick(g_frameDt);
+
+    // 0.7.1: o overlay da transição por cima de TUDO no editor também
+    ui::transitionDraw(g_ui, g_sceneTrans, w, h);
+
+    g_ui.endFrame();                       // submete solids + glyphs
+    g_lastUiStats = g_renderer.endFrame(); // desenha a UI por cima do 3D
+    if (g_ui.auditing()) g_ui.auditEnd();
+
+    // 0.9.0 (spec F) — a captura vem AQUI: o frame JÁ está completo no
+    // backbuffer (3D + UI + overlays) e AINDA não passou ao ecrã; lê a
+    // VIEWPORT CENTRAL (sem o chrome dos painéis; em Play, o contentRect),
+    // crop 16:9 + downsample ≤480 e escreve thumb.png na raiz do projeto.
+    captureThumbIfPending(w, h);
+    // 0.9.6.5 (GRUPO B): o layout exportado — MESMO ponto (frame completo,
+    // antes do swap); lê o backbuffer INTEIRO + o registo do audit.
+    layoutDumpIfPending(w, h);
+
+    g_egl.swap();
+    g_input.clearEdges();   // edges já consumidas pela UI/câmara neste frame
+}
+
+} // namespace
+
+void android_main(android_app* app) {
+    // F5.1-hotfix: log DUPLO (logcat + ficheiro) desde a 1ª linha.
+    // O boot ainda não tem os paths da activity? O elog usa o fallback
+    // android (Android/data/vv.goni/files/logs) — JNI_OnLoad já escreveu
+    // 0.8.12 — a linha de VERSÃO do arranque é o BANNER da identidade
+    // (boot: G.One VV <versão> versionCode <N> sha256 <…> git <…>) — vem
+    // da JNI (build_info.txt que o CI escreve em 2 passes); o banner
+    // com a changelog da campanha segue-se para o dono ler no log viewer.
+    elog::info("G.One VV 0.9.0 — EDITOR POLISH + DESIGN SYSTEM (spec A-M): "
+               "tabela de tokens + 49 ícones outline + hierarquia com "
+               "ícones de tipo/pesquisa/multi-seleção + inspector com "
+               "secções colapsáveis e caixas X/Y/Z 48dp + top bar 56/tab "
+               "bar 48 com underline accent + viewport com stack "
+               "undo/redo/save/dup/paste e toolbar rotulada + painel de "
+               "baixo com Ficheiros/Consola/Animação e drawer 240 + status "
+               "24dp + MENU/CENAS ancorados com scrim + página de Settings "
+               "com secções e imersivo + toasts bottom-center + undo/redo "
+               "por snapshot + miniaturas de projeto PNG no save + layout "
+               "persistente (layout.json)");
+    {
+        const char* root0 = app->activity
+            ? (app->activity->externalDataPath ? app->activity->externalDataPath
+                                               : app->activity->internalDataPath)
+            : nullptr;
+        if (root0) {
+            static char logsDir[512];
+            std::snprintf(logsDir, sizeof(logsDir), "%s/logs", root0);
+            elog::init(logsDir);
+        }
+    }
+    // F5.1-hotfix: crash dump PERMANENTE (todas as builds) — SIGSEGV/ABRT/
+    // BUS/FPE → crash-<ts>.dump legível (função+offset) no MESMO diretório
+    // do engine.log; o dump também é marcado no log ("CRASH …").
+    vv::crash::install(elog::dir());
+    elog::info("logs: %s (ativo=%d)", elog::dir()[0] ? elog::dir() : "<só-logcat>",
+               elog::active() ? 1 : 0);
+
+    // 0.9.6.1 (PASSO 0 · R-018): a DENSIDADE do device (DisplayMetrics.
+    // density == AConfiguration_getDensity/160) entra ANTES de qualquer
+    // layout — era a origem do bug das medidas dp desenhadas como px. O
+    // harness/testes ficam a 1.0 (o stub devolve 160) e o c33_virtual prova
+    // o mecanismo com 2.0 injetados (FASE 12.10).
+    {
+        const i32 dpi = app->config ? AConfiguration_getDensity(app->config)
+                                    : ACONFIGURATION_DENSITY_DEFAULT;
+        const f32 dens =
+            static_cast<f32>(dpi > 0 ? dpi : ACONFIGURATION_DENSITY_DEFAULT) /
+            160.0f;
+        theme::setDensity(dens);
+        editor::applyDensity();
+        elog::info("display: densidade %.3f (dpi %d/160) aplicada ao "
+                   "layout (dp real — R-018)",
+                   (double)theme::g_density, (int)dpi);
+        // 0.9.6.18 (HOTFIX D4a): a FONTE do locale para a tabela
+        // localizada (ui/Strings.h) — AConfiguration_getLanguage no MESMO
+        // ponto da densidade; o default é PT (a língua base da casa)
+        {
+            char lang[4] = {0, 0, 0, 0};
+            if (app->config) {
+                AConfiguration_getLanguage(app->config, lang);
+            }
+            strings::setLocale(lang);
+            elog::info("display: locale '%s' — a tabela localizada serve "
+                       "«%s»",
+                       strings::locale(),
+                       strings::tr(strings::Key::SettingsTitle));
+        }
+    }
+
+    // 0.8.11: o callback do backend puxa o MISTURADOR (instala 1× — o
+    // g_mix do AudioOut aponta para o AudioEngine global)
+    vv::audioout::setMixFn([](f32* out, u32 frames, u32 ch, u32 rate) {
+        g_audioEngine.mix(out, frames, ch, rate);
+    });
+#ifdef __ANDROID__
+    // a VM do glue alimenta o fallback AudioTrack (JNI) e a GRAVAÇÃO
+    // (AudioRecord) — as threads de áudio nascem desanexadas
+    vv::audioout::setVm(app->activity->vm);
+    g_audioVm = app->activity->vm;
+#endif
+
+    // 0.8.10 — BANNER DE VERSÃO no boot log (a identidade da build —
+    // versionCode/git/sha — é a 1ª linha que o log viewer mostra)
+    elog::info("%s", vv::buildinfo::banner().c_str());
+
+    // 0.6.7 — REENTRADA do android_main: a lib goni_vv fica CARREGADA no
+    // processo (o static init NÃO volta a correr) e uma NOVA VvActivity
+    // (reentrar no editor depois de "Sair para projetos") arranca ESTE
+    // android_main PELA 2ª VEZ — os globais estáticos trazem o estado da
+    // sessão anterior. Reset de TODO o estado de editor/cena/play/input:
+    //   • os recursos GL já foram destruídos no TERM_WINDOW (0.6.7-a) —
+    //     nada aqui toca em GL;
+    //   • os storages/projeto são remontados ABAIXO (slot do gestor ou
+    //     fallback app-private) — os unique_ptr substituem os antigos;
+    //   • TickGroups É esvaziado: sem isto, a física seria registada 2× e
+    //     daria DOIS passos por frame;
+    //   • g_windowInits/g_windowTerms NÃO são resetados — são contadores
+    //     do PROCESSO (o INIT_WINDOW da reentrada loga "contexto
+    //     RE-CRIADO", que é a verdade).
+    if (g_windowInits > 0 || g_windowTerms > 0) {
+        elog::info("lifecycle: REENTRADA do android_main (janelas anteriores: "
+                   "%u init(s), %u term(s)) — reset do estado de editor",
+                   g_windowInits, g_windowTerms);
+    }
+    g_systems.clear();
+    // GCC 13.3 do runner (ubuntu-24.04) tem um ICE em gimple_add_tmp_var
+    // com o temporário prvalue braced — a variável nomeada aplica os
+    // mesmos NSDMIs e copia; inclui playMode = false (0.6.8) e
+    // uiMode/seleção de elemento (0.7.0)
+    editor::EditorState editorFresh;
+    g_editor = editorFresh;
+    g_timeline = timeline::State{};   // 0.8.0: scrub/keys/preview da sessão anterior não vingam
+    g_animSystem.enabled = false;    // 0.8.0: idem física (gate fechado)
+    g_playSnap = PlaySnapshot{};
+    g_playUi = PlayUiPress{};   // 0.7.0: nenhum on-click de UI armado
+    g_sceneTrans = ui::SceneTransition{};   // 0.7.1: transição morta
+    g_sceneTransIdx = 0xFFFFFFFFu;
+    g_browser = FileBrowserState{};   // 0.7.2: browser fechado
+    g_applyAsk = ApplyAskState{};
+    g_scene.clear();
+    g_primOwners.clear();   // 0.8.10: TERM_WINDOW já destruiu (ids=0, no-op)
+    g_primGrave.clear();
+    g_input.resetAll();
+    g_project = Project{};
+    g_projectReady = false;
+    g_prevAssetMenu = 0;
+    g_catalog.meshes.clear();
+    g_catalog.textures.clear();
+    g_importCands.clear();
+    g_logLines.clear();
+    g_logDumps.clear();
+    g_toast[0] = '\0';
+    g_toastT = 0.0f;
+    g_lastUiStats = DrawStats{};
+    g_orbit = editor::OrbitState{};
+    g_texCache.reset();       // referenciam o storage antigo — libertados
+    g_pipeline.reset();        // ANTES dele (remontados quando houver storage)
+    thumbJobWait();   // 0.9.6.18 (D7): o worker nunca sobrevive ao storage
+    g_storage.reset();   // o antigo é destruído; remontado abaixo
+
+    // F5-A: storage do projeto — F5.4: GESTOR DE PROJETOS. O arranque
+    // ESPERE (até 3s) pelo projeto escolhido no ecrã inicial: a VvActivity
+    // empurra em nativeOpenProject (extras do Intent) → ProjectSlot.
+    // Chegou + handshake OK → SafStorage sobre a pasta SAF (a estrutura
+    // project.goni/scenes/meshes/textures é criada por openOrCreate).
+    // Sem projeto SAF → fallback app-private (comportamento 0.6.x).
+    {
+        const char* root = nullptr;
+        const bool isExternal = app->activity &&
+                                app->activity->externalDataPath != nullptr;
+        if (app->activity) {
+            root = app->activity->externalDataPath
+                       ? app->activity->externalDataPath
+                       : app->activity->internalDataPath;
+        }
+        // F5.2 (item 5): BOOT SELF-CHECK — o resultado do mapeamento
+        // (getExternalFilesDir null?) e o errno de cada fopen/opendir
+        // falhado ficam no engine.log ANTES de qualquer I/O pesado.
+        fileapi::logStorageSelfCheck(root, isExternal);
+
+        elog::info("storage: à espera do projeto do gestor (ProjectSlot, "
+                   "timeout 3000ms)");
+        storage::ProjectRequest req;
+        bool safReady = false;
+        if (storage::projectSlot().waitFor(&req, 3000)) {
+            if (storage::handshakeOk()) {
+                g_storage = std::make_unique<SafStorage>(storage::jniSafIo(),
+                                                         req.treeUri);
+                if (Project::openOrCreate(*g_storage, req.name, g_project)) {
+                    safReady = true;
+                    g_projectReady = g_project.activeScenePath() != nullptr;
+                    elog::info("projeto: '%s' pronto (SAF) — %u cena(s), "
+                               "ativa=%s",
+                               g_project.name.c_str(),
+                               (unsigned)g_project.scenes.size(),
+                               g_projectReady
+                                   ? g_project.activeScenePath()->c_str()
+                                   : "-");
+                } else {
+                    elog::error("projeto: '%s' SAF inutilizável — fallback "
+                                "app-private",
+                                req.name.c_str());
+                    thumbJobWait();   // 0.9.6.18 (D7): o worker não sobrevive
+                    g_storage.reset();
+                }
+            } else {
+                elog::error("storage: projeto '%s' recebido mas ponte Java "
+                            "indisponível (handshake) — modo app-private",
+                            req.name.c_str());
+            }
+        } else {
+            elog::info("storage: sem projeto SAF no arranque (timeout ou "
+                       "lançamento direto) — modo app-private");
+        }
+
+        if (!safReady) {
+            if (root) {
+                g_storage = std::make_unique<FsStorage>(root);
+                // F5.2: ponte Java (janela de permissões + retorno + export logs)
+                storage::setHandler(&onStorageResult, nullptr);
+                if (Project::openOrCreate(*g_storage, "projeto", g_project)) {
+                    g_projectReady = g_project.activeScenePath() != nullptr;
+                    elog::info("projeto: '%s' pronto em %s (%u cena(s), "
+                               "ativa=%s)",
+                               g_project.name.c_str(), root,
+                               (unsigned)g_project.scenes.size(),
+                               g_projectReady
+                                   ? g_project.activeScenePath()->c_str()
+                                   : "-");
+                } else {
+                    elog::error("projeto: storage inutilizável em %s — editor "
+                                "sem persistência", root);
+                }
+            } else {
+                elog::error("projeto: sem externalDataPath/internalDataPath — "
+                            "editor sem persistência");
+            }
+        } else {
+            // F5.2: ponte Java (janela de permissões + retorno + export logs)
+            storage::setHandler(&onStorageResult, nullptr);
+        }
+        if (g_storage) {
+            // F5.1-A: cache/pipeline vivem enquanto o storage viver
+            g_texCache = std::make_unique<TextureCache>(*g_storage);
+            g_pipeline = std::make_unique<TexturePipeline>(g_hwCompressor,
+                                                           *g_texCache);
+            // 0.12-A (A-2): o catálogo + a árvore res:// nascerão com o
+            // projeto PRONTO (antes, o 1.º preenchimento só ocorria ao abrir
+            // um seletor/import — o drawer Ficheiros mostrava «0 cena(s)»
+            // e o Assets «sem ficheiros» com modelo importado de sessões
+            // anteriores; o mesmo gap que o pin ficheiros_conta_cenas trava)
+            refreshCatalog();
+        }
+        // F5.2: estado da permissão NO ARRANQUE (o Settings mostra o modo;
+        // API < 30 → sem suporte → app-private sem nunca pedir).
+        // F5.3: o estado do HANDSHAKE entra na mesma linha — se a ponte
+        // Java estiver morta, o log diz "handshake=0" (a causa real) em vez
+        // de sugerir que o sistema é que não suporta All Files Access.
+        {
+            bool mgr = false;
+            const bool supported = storage::jniStorageApiSupported(&mgr);
+            g_perm.setMode(storage::resolveMode(supported, mgr));
+            elog::info("storage: All Files Access — handshake=%d supported=%d "
+                       "manager=%d → modo %s",
+                       storage::handshakeOk() ? 1 : 0,
+                       supported ? 1 : 0, mgr ? 1 : 0,
+                       storage::modeLabel(g_perm.mode()));
+            // F5.5: granted=1/0 da transição de BOOT (a 1ª linha do
+            // all-files que o log viewer mostra num arranque frio)
+            logAllFilesGranted(supported && mgr, "boot", /*force=*/true);
+        }
+        // [boot 2/6] storage — passo crítico do arranque (ficheiro legível
+        // no device: se o boot morrer aqui, o dono vê exatamente onde)
+        elog::info("[boot 2/6] storage %s (origem=%s, modo=%s)",
+                   g_storage ? "OK" : "FALHOU",
+                   safReady ? "SAF (pasta escolhida)"
+                            : (app->activity && app->activity->externalDataPath
+                                   ? "app-private (external)"
+                                   : "app-private (internal)"),
+                   storage::modeLabel(g_perm.mode()));
+    }
+
+    // F3/F4: systems do engine (ordem interna ao grupo = registo)
+    // 0.8.0 (F7): a ANIMAÇÃO registra ANTES do TransformSystem — escreve
+    // pos/rot/scale (updateWorld já no apply); o Transform reconfirma o
+    // cache no mesmo passo (nunca vê dados meio-escritos)
+    g_systems.add(TickGroup::Update, &g_animSystem);
+    g_systems.add(TickGroup::Update, &g_voni);   // 0.9.2: scripts ANTES do
+    // transform cache (move() reflete no world do MESMO passo)
+    voniInstallHooks();   // 0.9.2: transition.for + nome da cena atual
+    g_systems.add(TickGroup::Update, &g_transformSystem);
+    g_systems.add(TickGroup::Physics, &g_physics);   // entre Update e PostUpdate
+    elog::info("[boot 5/6] physics OK (tickgroups Update+Physics registados; "
+               "animação no Update antes do transform)");
+
+    app->onAppCmd = onAppCmd;
+    app->onInputEvent = onInputEvent;
+
+    double last = nowSeconds();
+    while (true) {
+        int ident = 0, events = 0;
+        android_poll_source* source = nullptr;
+        while ((ident = ALooper_pollAll(g_ready ? 0 : -1, nullptr, &events,
+                                        reinterpret_cast<void**>(&source))) >= 0) {
+            if (source) {
+                source->process(app, source);
+            }
+            if (app->destroyRequested) {
+                LOGI("loop: destroyRequested — fim");
+                return;
+            }
+        }
+        if (!g_ready) {
+            last = nowSeconds();
+            continue;
+        }
+
+        // F5.1-hotfix (auditoria JNI) / F5.2: resultados da Activity (retorno
+        // das definições de permissão) chegam do thread da UI e são
+        // processados AQUI (thread da engine, EGL corrente) — o handler toca
+        // em storage/scene/GPU e não pode correr no thread Java (crash
+        // garantido sem contexto GL). Se a janela não está pronta, o
+        // resultado fica na fila e é consumido mais tarde.
+        while (storage::pollResult()) {
+        }
+
+        const double nowT = nowSeconds();
+        const double realDt = nowT - last;
+        last = nowT;
+        g_frameDt = static_cast<f32>(realDt);   // 0.7.1: relógio da transição
+
+        // Loop de timestep fixo (guard anti-spiral dentro de Time).
+        const u32 steps = g_time.beginFrame(realDt);
+        for (u32 s = 0; s < steps; ++s) {
+            // F3: cada passo fixo roda os TickGroups na ordem
+            // PreUpdate → Update → PostUpdate → Render
+            g_systems.run(g_scene, static_cast<f32>(g_time.fixedDt));
+            g_time.endStep();
+        }
+
+        frame();
+        // 0.9.6 (G6): a marca da APRESENTAÇÃO — a cada frame (barato e
+        // idempotente: guarda a 1ª do processo para o cold e a 1ª após
+        // cada onResume para o warm — ver core/Bench)
+        bench::markFirstFrame();
+
+        if (g_toastT > 0.0f) {
+            g_toastT -= static_cast<f32>(realDt);
+        }
+
+        g_fpsAccum += realDt;
+        ++g_fpsFrames;
+        if (g_fpsAccum >= 0.5) {
+            g_fps = static_cast<f32>(g_fpsFrames / g_fpsAccum);
+            g_fpsAccum = 0.0;
+            g_fpsFrames = 0;
+        }
+    }
+}

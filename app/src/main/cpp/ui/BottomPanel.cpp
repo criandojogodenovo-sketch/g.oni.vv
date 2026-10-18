@@ -73,7 +73,19 @@ int lineLevel(const std::string& ln) {
 // namespace anónimo; ESTA é a porta com linkage externo — o header decla)
 void drawDrawerEmptyState(UiContext& ui, const UiRect& rect,
                           const char* label) {
-    drawEmptyState(ui, rect, icons::Icon::Clapper, label);
+    drawEmptyState(ui, rect, emptyStateIcon(4), label);
+}
+
+// 0.12-C (C-4) — a FONTE ÚNICA do ícone do vazio: o glifo da PRÓPRIA
+// função da tab (o vazio dos Assets usava a PASTA — o glifo dos Ficheiros;
+// o icones_unicos aferra a troca e a mutação M-C4b prova que o pin grita)
+icons::Icon emptyStateIcon(int tab) {
+    switch (tab) {
+        case 1: return icons::Icon::Folder;    // Ficheiros
+        case 2: return icons::Icon::Box;       // Assets (a MESMA função da tab)
+        case 4: return icons::Icon::Clapper;   // Animação
+        default: return icons::Icon::Terminal; // Consola (não desenha vazio)
+    }
 }
 
 // ---- 0.9.6.18 (HOTFIX D3+D9) — O EMPTY-STATE DAS TABS DO DRAWER ----------
@@ -397,7 +409,7 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
             // de conteúdo (a label antiga desenhava a listTop+rowH FIXO —
             // cruzava o limite inferior com o drawer curto e a linha âmbar
             // do tab atravessava-a)
-            drawEmptyState(ui, content, icons::Icon::Folder,
+            drawEmptyState(ui, content, emptyStateIcon(1),
                            "sem pastas (projeto sem ficheiros)");
         }
     }
@@ -503,7 +515,37 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
         const f32 gridTop = content.y + theme::dp(48.0f);
         const UiRect grid = {content.x, gridTop, content.w,
                              content.y + content.h - gridTop};
-        if (!bs.assetsList) {
+        if (nCards == 0 && ui.hasFont()) {
+            // ---- 0.12-C (C-4): O ESTADO VAZIO — MENSAGEM + AÇÃO. SEM
+            // região de scroll (nada para rolar — e a região comeria o
+            // gesto do botão: o claim ADIADO do endScroll vencia com o
+            // active_ do SCROLL e o IMPORTAR nunca disparava). O ícone é
+            // o BOX (a função ASSETS — o tab icon; a PASTA era o glifo dos
+            // Ficheiros: o icones_unicos aferra) e o botão IMPORTAR abre
+            // o NAVEGADOR na pasta Download (o Actions importPressed; o
+            // main despacha — nunca um botão de fachada). O botão
+            // ANCORA-SE AO FUNDO da grelha (a banda da mensagem é o que
+            // sobra — o IMPORTAR existe em TODA altura de drawer)
+            const f32 bh2 = theme::dp(40.0f);
+            const f32 bw2 = theme::dp(180.0f);
+            const f32 by2 = grid.y + grid.h - bh2 - theme::dp(8.0f);
+            const UiRect msgRect = {grid.x, grid.y, grid.w,
+                                    by2 - theme::dp(8.0f) - grid.y};
+            drawEmptyState(ui, msgRect, emptyStateIcon(2),
+                           prefix.empty() ? "sem ficheiros no projeto"
+                                          : "pasta vazia");
+            if (prefix.empty() && by2 > grid.y + theme::dp(8.0f)) {
+                // com FILTRO de pasta não há botão: o convite é limpar o
+                // filtro (o chip lá em cima já o faz — um segundo caminho
+                // seria fachada; a regra anti-superficialidade manda)
+                const f32 bx2 = grid.x + (grid.w - bw2) * 0.5f;
+                ui.auditRowFloorNext(layout::kTouchFloorDp);
+                if (ui.button(kAssetsImportId, bx2, by2, bw2, bh2,
+                              "Importar…")) {
+                    a.importPressed = true;
+                }
+            }
+        } else if (!bs.assetsList) {
             // ---- a GRELHA (cards 96dp com MINIATURAS REAIS) ----
             const f32 cardS = theme::dp(96.0f);
             const f32 step = theme::dp(120.0f);
@@ -620,16 +662,6 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
                     }
                 }
             }
-        }
-        if (nCards == 0 && ui.hasFont()) {
-            // 0.9.6.18 (HOTFIX D9): o empty-state CENTRADO no rect da
-            // grelha e clipado a ele (a label antiga vivia a content.y+136
-            // FIXO — saía do drawer por baixo da tab bar; o ícone de pasta
-            // gigante 40dp clipava). O ícone dimensiona-se ao rect.
-            drawEmptyState(ui, grid, icons::Icon::Folder,
-                           prefix.empty()
-                               ? "sem ficheiros - importe no seletor do Inspector"
-                               : "pasta vazia");
         }
     }
     // ---- TAB 3: A CONSOLA (spec K — RECALIBRADA 0.9.6.10: era a tab 2) ----

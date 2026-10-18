@@ -163,6 +163,55 @@ R-014 aplicada.
 
 ## 14. A EVIDÊNCIA (colada)
 
+- **0.12-C · C-4 — SELETOR DE FICHEIROS + ESTADOS VAZIOS** — o **PICKER
+  REFEITO** pela FONTE ÚNICA `browserSheetLayout()` (EditorLayout.h — o
+  draw e os pins partilham, o padrão menuSheetLayout da C-2): as LINHAS
+  48dp com ÍCONE de função à esquerda (pasta/mesh/imagem/áudio/?) + NOME
+  alinhado à esquerda (os prefixos «mesh:»/«tex:»/«/» morreram) + a SETA
+  SÓ nas diretorias · o **BREADCRUMB QUE SALTA** (`browserCrumbs()` NOVA
+  — os ANTECESSORES são alvos que abrem a pasta deles pelo crumbPickOut,
+  o segmento ATUAL é texto accent; transbordo = os últimos com «…») · a
+  **PESQUISA** (o campo 40dp → o teclado in-app no PROPÓSITO 10 «PESQUISAR
+  FICHEIROS»; o filtro puro `browserFilterEntries()` case-insensitive; o
+  pick devolve o ÍNDICE ORIGINAL — nunca dois mundos) · as **PASTAS
+  PONTO FORA** (o filtro no `listDirEntries` — a FONTE ÚNICA; os
+  FICHEIROS ponto ficam, a decisão 0.8.5 não se reabre) · o «Subir» FIXO
+  fora do scroll · a safe-area no card inteiro · OS **4 VAZIOS COM
+  MENSAGEM + AÇÃO** (a cláusula anti-superficialidade manda): o Inspector
+  ganha o «+ criar TIC» que abre O MESMO plusMenu do + da hierarquia, os
+  Assets ganham o IMPORTAR ancorado ao fundo que abre o navegador na
+  Download (o Actions::importPressed), a Hierarquia aponta o + e ele fica
+  VISÍVEL (a LADDER do convite extraída para `hierEmptyInvite()`), os
+  Projetos (o espelho Java) mostram o G FRACO (BORDER) e o BOTÃO «Novo
+  projeto» ligado ao askNewProject · OS **GLIFOS ÚNICOS POR FUNÇÃO**: a
+  lupa voltou a ser SÓ pesquisar (o Image NOVO no Icons.h/.cpp para as
+  texturas), o vazio dos Assets usa o BOX (usava a PASTA) pela FONTE
+  ÚNICA `bottom::emptyStateIcon(tab)` · pins ×8 NOVOS (test_012c_picker.
+  cpp: picker_compacto — a linha 48dp a 2.0 + o card dentro da área útil
+  nos 3 ecrãs + ≤8 visíveis + o Subir fora do scroll; picker_breadcrumb —
+  os segmentos/prefixos + o SALTO pelo crumbPickOut; picker_oculta_dot —
+  1 diretoria visível, ZERO pastas ponto, os ficheiros ponto ficam;
+  empty_inspector — o toque abre o plusMenu; empty_assets — o toque liga
+  o importPressed; empty_hierarquia — a ladder + o + visível nos
+  140/220/300dp; icones_unicos — as tabs/os vazios/as linhas pairwise
+  distintos + a lupa fora + o Image único; o empty_projetos vive no gate
+  projects_ui_check.py — o G fraco + o CTA) com as MUTAÇÕES **M-C4a** (o
+  filtro das pastas ponto morto → picker_oculta_dot VERMELHA com 2
+  EXPECTs, as 6 irmãs verdes) e **M-C4b** (o vazio dos Assets volta à
+  PASTA → icones_unicos VERMELHA com 2 EXPECTs, as 6 irmãs verdes)
+  vermelho→reposto→verde · OS ACHADOS REAIS da sub-fase: o gesto de
+  rolar importava o ficheiro debaixo do dedo (a cura: o re-despacho do
+  scrollTap SÓ — o padrão da fila da hierarquia), o claim ADIADO do
+  scroll comia o botão IMPORTAR (a cura: lista vazia = SEM região de
+  scroll) e o IMPORTAR não cabia no drawer de 240dp (a cura: ancorado ao
+  fundo) · A REPARAÇÃO (o achado fora da lista): os commits da C-1..C-3
+  entraram de uma árvore incompleta e empurraram 614 deleções — a
+  árvore completa voltou do e8c9587 com as 6 recalibrações que não se
+  conseguiam ver (test_toolbar/test_sentinels ×3/test_wiring086/c33 ×9 +
+  a flag fitByDesign no título da hierarquia) · verificação: test_core 0
+  falhas + c33_virtual **1005/0** · **versionCode 90** — o build vigente
+  da campanha 0.12-C. O 89 fica INTACTO como história. A campanha 0.12-C
+  FECHA (o PARAR do prompt). (o relatório próprio: docs/RELATORIO-0.12-C.md §4)
 - **0.12-C · C-3 — TIPOGRAFIA, IDIOMA, SUPERFÍCIES** — a **ESCALA
   TIPOGRÁFICA FIXA** (o Theme já tinha os 4 tokens 12/14/16/20 desde a
   0.9.6; o pin NOVO SCANEA os fontes de UI — o padrão stripComments do

@@ -2989,6 +2989,12 @@ bool commitTextInput(Scene& scene, EditorState& st) {
             st.docsScreen.expanded = -1;
             return true;
         }
+        case 10: {  // 0.12-C (C-4) — a pesquisa do NAVEGADOR de ficheiros
+            std::snprintf(st.browserSearch, sizeof(st.browserSearch), "%s",
+                          st.textBuf);
+            st.browserSearchLen = st.textLen;
+            return true;
+        }
         default:
             return false;   // propósito 1 (nome de cena): o chamador (0.7.1)
     }
@@ -2997,37 +3003,98 @@ bool commitTextInput(Scene& scene, EditorState& st) {
 
 // ---------------------------------------------------------------------------
 // 0.7.2 — NAVEGADOR DE FICHEIROS + APLICAR-APÓS-IMPORT
+// 0.12-C (C-4) — A REFORMA DO PICKER: breadcrumb SALTA (não é enfeite —
+// cada segmento é um alvo que abre a pasta dele), PESQUISA que filtra a
+// lista (propósito 10), LINHAS com ícone à esquerda / nome alinhado à
+// esquerda / seta à direita (os prefixos de texto "mesh:"/"tex:" morrem —
+// o ícone de tipo diz o que era), as PASTAS OCULTAS fora (listDirEntries),
+// o "Subir" FIXO fora do scroll e a safe-area no card inteiro.
 // ---------------------------------------------------------------------------
 
-std::string browserPathLabel(const std::string& cwd, f32 maxW,
-                             f32 (*measure)(const std::string&, void*),
-                             void* user) {
-    if (!measure || cwd.empty()) {
-        return cwd;
+std::vector<BrowserCrumb> browserCrumbs(const std::string& cwd) {
+    std::vector<BrowserCrumb> out;
+    if (cwd.empty()) {
+        return out;
     }
-    if (measure(cwd, user) <= maxW) {
-        return cwd;   // cabe inteiro — o caminho TODO visível
-    }
-    // não cabe: corta o INÍCIO e guarda o FIM (o dono quer ver ONDE está:
-    // "...DCIM/Camera" diz mais que "storage/emulated/0/D...")
-    const std::string dots = "...";
-    if (measure(dots, user) > maxW) {
-        return "";   // nem as reticências cabem — nada a mostrar
-    }
-    size_t lo = 0;
-    size_t hi = cwd.size();
-    while (lo + 1 < hi) {
-        const size_t mid = (lo + hi) / 2;
-        const std::string cand = dots + cwd.substr(mid);
-        if (measure(cand, user) <= maxW) {
-            hi = mid;   // ainda cabe — pode cortar mais do início
-        } else {
-            lo = mid;   // não cabe — corta mais ainda
+    // o 1.º segmento é a RAIZ: o rótulo do kBrowserRoots que a casou (ou
+    // o próprio caminho quando vive fora das raízes navegáveis)
+    std::string rootLabel;
+    std::string matchedPath;
+    std::string rest;
+    for (int i = 0; i < fileapi::kBrowserRootCount; ++i) {
+        const std::string rp = fileapi::kBrowserRoots[i].path;
+        if (cwd == rp || cwd.compare(0, rp.size(), rp) == 0) {
+            rootLabel = fileapi::kBrowserRoots[i].label;
+            matchedPath = rp;
+            rest = cwd.size() > rp.size() ? cwd.substr(rp.size()) : "";
+            break;
         }
     }
-    const std::string out =
-        hi < cwd.size() ? dots + cwd.substr(hi) : cwd;
-    return measure(out, user) <= maxW ? out : dots;   // defesa numérica
+    if (matchedPath.empty()) {
+        // fora das raízes: o 1.º segmento é o próprio caminho (salta para
+        // ele mesmo — o toque reabre a pasta; honesto e inofensivo)
+        out.push_back({cwd, cwd});
+        return out;
+    }
+    out.push_back({rootLabel, matchedPath});
+    // os componentes restantes, um segmento cada com o prefixo acumulado
+    std::string acc = matchedPath;
+    size_t pos = 0;
+    while (pos < rest.size()) {
+        size_t slash = rest.find('/', pos);
+        const std::string comp = rest.substr(
+            pos, slash == std::string::npos ? std::string::npos : slash - pos);
+        if (!comp.empty()) {
+            if (acc.empty() || acc.back() != '/') {
+                acc += "/";
+            }
+            acc += comp;
+            out.push_back({comp, acc});
+        }
+        if (slash == std::string::npos) {
+            break;
+        }
+        pos = slash + 1;
+    }
+    return out;
+}
+
+std::vector<u32> browserFilterEntries(const std::vector<fileapi::DirEntry>&
+                                          entries,
+                                      const char* query) {
+    std::vector<u32> out;
+    const std::string q = query ? query : "";
+    if (q.empty()) {
+        out.reserve(entries.size());
+        for (u32 i = 0; i < entries.size(); ++i) {
+            out.push_back(i);
+        }
+        return out;
+    }
+    // case-insensitive (o padrão entryNameLess da casa — ASCII honesto)
+    auto containsCI = [](const std::string& hay, const std::string& needle) {
+        if (needle.empty()) {
+            return true;
+        }
+        for (size_t i = 0; i + needle.size() <= hay.size(); ++i) {
+            size_t j = 0;
+            while (j < needle.size() &&
+                   std::tolower(static_cast<unsigned char>(hay[i + j])) ==
+                       std::tolower(static_cast<unsigned char>(needle[j]))) {
+                ++j;
+            }
+            if (j == needle.size()) {
+                return true;
+            }
+        }
+        return false;
+    };
+    for (u32 i = 0; i < entries.size(); ++i) {
+        if (containsCI(entries[i].name, q)) {
+            out.push_back(i);
+        }
+    }
+    return out;
 }
 
 std::string browserEmptyMessage(const std::string& cwd, bool opendirFailed) {
@@ -3041,28 +3108,23 @@ std::string browserEmptyMessage(const std::string& cwd, bool opendirFailed) {
 int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                     EditorState& st, const std::string& cwd,
                     const std::vector<fileapi::DirEntry>& entries,
-                    bool opendirFailed) {
-    // painel GRANDE (o browser precisa de espaço): 92% da área útil
-    // 0.9.6.6 (GRUPO C): dp REAL em TUDO (eram px crus — no device 2.0 o
-    // browser saía a metade; a auditoria do Grupo B media fechar 96×36,
-    // as 6 raízes 139,7×40 e o subir 868×44 — TODOS <48dp, avisos)
-    const f32 ox = ui.safeLeft();
-    const f32 oy = ui.safeTop();
-    const f32 aw = sw - ox - ui.safeRight();
-    const f32 ah = sh - oy - ui.safeBottom();
-    const f32 w = aw * 0.92f > theme::dp(900.0f) ? theme::dp(900.0f)
-                                                 : aw * 0.92f;
-    const f32 rowH = theme::dp(48.0f);
-    constexpr u32 kMaxRows = 8;   // linhas visíveis (o scroll revela o resto)
-    const u32 shown = entries.size() < kMaxRows
-                           ? static_cast<u32>(entries.size())
-                           : kMaxRows;
-    const f32 listH = static_cast<f32>(shown) * rowH;
-    const f32 h = kHeaderH + theme::dp(34.0f) /*caminho*/ +
-                  theme::dp(52.0f) /*raízes*/ + theme::dp(8.0f) +
-                  theme::dp(52.0f) /*subir*/ + theme::dp(8.0f) + listH + kPad;
-    const f32 x = ox + (aw - w) * 0.5f;
-    const f32 y = oy + (ah - h) * 0.5f;
+                    bool opendirFailed, int* crumbPickOut,
+                    u32* rowIndexOut) {
+    if (crumbPickOut) {
+        *crumbPickOut = 0;
+    }
+    if (rowIndexOut) {
+        *rowIndexOut = 0;
+    }
+    // a folha vem da FONTE ÚNICA (0.12-C C-4 — o draw e os pins partilham):
+    // o card 92%/900dp centrado NA ÁREA ÚTIL (a safe-area respeitada)
+    const BrowserSheetLayout L = browserSheetLayout(
+        sw, sh, static_cast<f32>(ui.safeLeft()), static_cast<f32>(ui.safeTop()),
+        static_cast<f32>(ui.safeRight()), static_cast<f32>(ui.safeBottom()),
+        kHeaderH, static_cast<u32>(entries.size()));
+    const f32 x = L.x, y = L.y, w = L.w, h = L.h;
+    const f32 rowH = L.rowH;
+    const f32 kPadB = theme::dp(16.0f);
 
     // toque fora fecha (cancela o import)
     f32 px = -1.0f, py = -1.0f;
@@ -3075,117 +3137,248 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         return 0;
     }
 
-    // 0.9.6.6 (GRUPO C · CANTOS SUAVIZADOS): o CARD modal com raios 8dp
-    // (spec A) — moldura idem (os full-bleed hierarchy/drawer ficam retos:
-    // são superfícies de ecrã, não cards)
+    // o CARD modal com raios 8dp — O CARTÃO da escada (0.12-C C-3)
     ui.panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard),
-                    theme::kTheme.card);   // 0.12-C: O CARTÃO
+                    theme::kTheme.card);
     ui.frameRounded(x, y, w, h, 2.0f, theme::dp(theme::kRadiusCard),
                     theme::ACCENT);
     const f32 th = ui.fontHeight();
-    ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "NAVEGADOR",
+    ui.label(x + kPadB, y + kHeaderH * 0.5f + th * 0.30f, "NAVEGADOR",
              theme::TEXT);
-    // o FECHAR: alvo 48dp REAL (era 96×36 px crus — aviso <48dp do Grupo B)
-    if (ui.button(kBrowserCloseId, x + w - kPad - theme::dp(96.0f),
+    // o FECHAR: alvo 48dp REAL
+    if (ui.button(kBrowserCloseId, x + w - kPadB - theme::dp(96.0f),
                   y + (kHeaderH - theme::dp(48.0f)) * 0.5f, theme::dp(96.0f),
                   theme::dp(48.0f), "fechar")) {
         st.fileBrowser = false;
         return 0;
     }
 
-    // CAMINHO NO TOPO — mostra ONDE procura (corta o início quando longo)
-    const f32 pathY = y + kHeaderH + theme::dp(6.0f);
-    ui.panel(x + kPad, pathY - theme::dp(18.0f), w - 2.0f * kPad,
-             theme::dp(30.0f), theme::BG);
-    const TextMetrics tm = ui.textMetrics();
-    const std::string pathText = browserPathLabel(
-        cwd, w - 2.0f * kPad - theme::dp(16.0f),
-        [](const std::string& s, void* user) -> f32 {
-            return static_cast<UiContext*>(user)->fontWidth(s.c_str());
-        },
-        &ui);
-    ui.labelFitted(x + kPad + theme::dp(8.0f), pathY + tm.ascent,
-                   pathText.c_str(), theme::ACCENT,
-                   w - 2.0f * kPad - theme::dp(16.0f));
-
-    // raízes: [Raiz][Download][Docs][Camera][Pictures][Music] (galeria + a
-    // raiz de ÁUDIO do dono 0.8.11; a largura reparte por TODAS) — alvo
-    // 48dp REAL (eram 40px crus; a largura reparte-se na mesma)
-    const f32 rootsY = pathY + theme::dp(34.0f) - theme::dp(18.0f) +
-                       theme::dp(12.0f);
-    const f32 rootW = (w - 2.0f * kPad -
-                       static_cast<f32>(fileapi::kBrowserRootCount - 1) *
-                           theme::dp(6.0f)) /
-                      static_cast<f32>(fileapi::kBrowserRootCount);
-    int chosen = 0;
-    for (int i = 0; i < fileapi::kBrowserRootCount; ++i) {
-        if (ui.button(kBrowserRootBase + static_cast<u64>(i),
-                      x + kPad + static_cast<f32>(i) * (rootW + theme::dp(6.0f)),
-                      rootsY, rootW, theme::dp(48.0f),
-                      fileapi::kBrowserRoots[i].label)) {
-            chosen = i + 1;
+    // ---- BREADCRUMB (C-4): os segmentos SÃO alvos — tocar SALTA (o main
+    // despacha pelo crumbPickOut; o browserCrumbs é a fonte dos pares) ----
+    {
+        const TextMetrics tm = ui.textMetrics();
+        const std::vector<BrowserCrumb> crumbs = browserCrumbs(cwd);
+        ui.panel(x + kPadB, L.crumbY - theme::dp(4.0f),
+                 w - 2.0f * kPadB, L.crumbH + theme::dp(8.0f), theme::BG);
+        const f32 maxW = w - 2.0f * kPadB - theme::dp(16.0f);
+        // mede a fila inteira; se não cabe, mostra os ÚLTIMOS segmentos
+        // (a regra do browserPathLabel antigo: o FIM é o que diz onde está)
+        const f32 sepW = ui.hasFont() ? ui.fontWidth(" › ") : 0.0f;
+        f32 total = 0.0f;
+        f32 widths[8];
+        u32 first = 0;
+        const u32 nC = static_cast<u32>(crumbs.size() < 8 ? crumbs.size() : 8);
+        for (u32 i = 0; i < nC; ++i) {
+            widths[i] = ui.hasFont() ? ui.fontWidth(crumbs[i].label.c_str())
+                                     : 0.0f;
+            total += widths[i];
+            if (i) {
+                total += sepW;
+            }
+        }
+        while (first < nC && total > maxW) {
+            total -= widths[first] + (first + 1 < nC ? sepW : 0.0f);
+            ++first;
+        }
+        f32 cx = x + kPadB + theme::dp(8.0f);
+        if (first > 0) {
+            ui.labelFitted(cx, L.crumbY + L.crumbH * 0.5f + tm.ascent * 0.5f,
+                           "…", theme::kTheme.text2, theme::dp(20.0f));
+            cx += theme::dp(20.0f) + (sepW > 0.0f ? sepW : theme::dp(8.0f));
+        }
+        for (u32 i = first; i < nC; ++i) {
+            const bool last = i + 1 == nC;
+            const f32 lw = widths[i];
+            if (last) {
+                // o segmento ATUAL (a pasta onde estou) — texto, sem alvo
+                ui.labelFitted(cx, L.crumbY + L.crumbH * 0.5f + tm.ascent,
+                               crumbs[i].label.c_str(), theme::ACCENT, maxW);
+                break;
+            }
+            // os ANTECESSORES são alvos reais (salta para a pasta)
+            ui.auditRowFloorNext(layout::kHeadFloorDp);
+            if (ui.widgetHit(kBrowserCrumbBase + i, cx, L.crumbY, lw + theme::dp(8.0f),
+                             L.crumbH)) {
+                if (crumbPickOut) {
+                    *crumbPickOut = static_cast<int>(i) + 1;
+                }
+            }
+            const bool crumbHeld =
+                ui.widgetActive(kBrowserCrumbBase + i);
+            ui.labelFitted(cx, L.crumbY + L.crumbH * 0.5f + tm.ascent,
+                           crumbs[i].label.c_str(),
+                           crumbHeld ? theme::kTheme.accentPress
+                                     : theme::kTheme.text2,
+                           lw + theme::dp(8.0f));
+            cx += lw + theme::dp(8.0f) + (sepW > 0.0f ? sepW : theme::dp(8.0f));
+            if (cx > x + w - kPadB) {
+                break;   // defesa numérica (o maxW já calculou, isto é cinto)
+            }
         }
     }
 
-    // subir (o pai; na raiz não faz nada — o main trata) — alvo 48dp REAL
-    // 0.8.11: o nº vem DEPOIS das raízes (count+1) — com a 6ª raiz (Music)
-    // o fixo "6" colidia: tocar Subir saltava para o Music
-    const f32 upY = rootsY + theme::dp(52.0f);
-    if (ui.button(kBrowserUpId, x + kPad, upY, w - 2.0f * kPad,
-                  theme::dp(48.0f), "^ Subir")) {
-        chosen = fileapi::kBrowserRootCount + 1;
+    // ---- PESQUISA (C-4): o campo 40dp com a lupa; o toque abre o teclado
+    // (propósito 10); a consulta FILTRA a lista (pura browserFilterEntries)
+    {
+        const UiRect sfield = {x + kPadB, L.searchY, w - 2.0f * kPadB,
+                               L.searchH};
+        ui.auditRowFloorNext(layout::kFieldFloorDp);
+        ui.panelRounded(sfield.x, sfield.y, sfield.w, sfield.h,
+                        theme::dp(theme::kRadiusField), theme::kTheme.bg);
+        ui.frameRounded(sfield.x, sfield.y, sfield.w, sfield.h, 1.0f,
+                        theme::dp(theme::kRadiusField), theme::kTheme.border);
+        icons::drawIcon(ui, icons::Icon::Search, sfield.x + theme::dp(10.0f),
+                        sfield.y + (sfield.h - theme::dp(20.0f)) * 0.5f,
+                        theme::dp(20.0f), theme::kTheme.text2);
+        if (ui.hasFont()) {
+            const TextMetrics tmS = ui.textMetrics();
+            const f32 bb = sfield.y + (sfield.h - tmS.block()) * 0.5f +
+                           tmS.ascent;
+            if (st.browserSearchLen > 0) {
+                ui.labelFitted(sfield.x + theme::dp(40.0f), bb,
+                               st.browserSearch, theme::kTheme.text1,
+                               sfield.w - theme::dp(52.0f));
+            } else {
+                ui.labelFitted(sfield.x + theme::dp(40.0f), bb,
+                               "pesquisar ficheiros", theme::kTheme.text2,
+                               sfield.w - theme::dp(52.0f));
+            }
+        }
+        if (ui.widgetHit(kBrowserSearchId, sfield.x, sfield.y, sfield.w,
+                         sfield.h)) {
+            st.textInput = true;
+            st.textPurpose = 10;   // a pesquisa do navegador
+            st.textTic = Handle::invalid();
+            std::snprintf(st.textBuf, sizeof(st.textBuf), "%s",
+                          st.browserSearch);
+            st.textLen = st.browserSearchLen;
+        }
     }
 
-    // lista: diretorias primeiro (ordem do listDirEntries); scroll id 45
-    const f32 listTop = upY + theme::dp(52.0f);
-    const UiRect region{x, listTop, w, listH};
-    const f32 contentH = static_cast<f32>(entries.size()) * rowH;
+    // raízes: [Raiz][Download][Docs][Camera][Pictures][Music] — alvo 48dp
+    {
+        const f32 rootW = (w - 2.0f * kPadB -
+                           static_cast<f32>(fileapi::kBrowserRootCount - 1) *
+                               theme::dp(6.0f)) /
+                          static_cast<f32>(fileapi::kBrowserRootCount);
+        int chosen = 0;
+        for (int i = 0; i < fileapi::kBrowserRootCount; ++i) {
+            if (ui.button(kBrowserRootBase + static_cast<u64>(i),
+                          x + kPadB + static_cast<f32>(i) * (rootW + theme::dp(6.0f)),
+                          L.rootsY, rootW, rowH,
+                          fileapi::kBrowserRoots[i].label)) {
+                chosen = i + 1;
+            }
+        }
+        // ---- Subir (o pai; na raiz não faz nada — o main trata). FIXO:
+        // vive FORA do scroll (a regra do dono — o pin picker_compacto
+        // aferra upY + rowH <= listTop)
+        if (ui.button(kBrowserUpId, x + kPadB, L.upY, w - 2.0f * kPadB, rowH,
+                      "^ Subir")) {
+            chosen = fileapi::kBrowserRootCount + 1;
+        }
+        if (chosen != 0) {
+            return chosen;   // as raízes/subir falam primeiro
+        }
+    }
+
+    // ---- a LISTA (com o filtro da pesquisa): as linhas com ÍCONE/nome/
+    // seta — o padrão das linhas da hierarquia. Os índices visíveis vêm da
+    // FONTE PURA (browserFilterEntries) — o pick devolve o índice ORIGINAL
+    // (o main despacha sobre o vetor cru; nunca dois mundos) -------------
+    const std::vector<u32> visible =
+        browserFilterEntries(entries, st.browserSearch);
+    const UiRect region{x, L.listTop, w, y + h - theme::dp(8.0f) - L.listTop};
+    const f32 contentH =
+        static_cast<f32>(visible.size()) * rowH + theme::dp(8.0f);
     ui.beginScroll(kBrowserScrollId, region, contentH);
     const f32 off = ui.scrollOffset();
-    for (size_t i = 0; i < entries.size(); ++i) {
-        const f32 ry = listTop + static_cast<f32>(i) * rowH - off;
-        char label[72];
-        if (entries[i].isDir) {
-            std::snprintf(label, sizeof(label), "/ %s",
-                          entries[i].name.c_str());
-        } else if (entries[i].kind == 'm') {
-            std::snprintf(label, sizeof(label), "mesh: %s",
-                          entries[i].name.c_str());
-        } else if (entries[i].kind == 't') {
-            std::snprintf(label, sizeof(label), "tex: %s",
-                          entries[i].name.c_str());
-        } else if (entries[i].kind == 's') {
-            // 0.8.11 — ÁUDIO (.wav/.ogg/.mp3 → importa p/ .gi)
-            std::snprintf(label, sizeof(label), "audio: %s",
-                          entries[i].name.c_str());
-        } else {
-            // 0.8.5: formato fora de obj/gltf/glb/png — VISÍVEL (o tap dá
-            // o erro claro no main; o "?" marca o que a engine não lê)
-            std::snprintf(label, sizeof(label), "? %s",
-                          entries[i].name.c_str());
+    u32 visibleRow = 0;
+    for (const u32 ei : visible) {
+        const f32 ry = L.listTop + static_cast<f32>(visibleRow) * rowH - off;
+        ++visibleRow;
+        if (ry + rowH < L.listTop || ry > L.listTop + region.h) {
+            continue;
         }
-        ui.button(kBrowserRowBase + static_cast<u64>(i), x + kPad,
-                  ry + theme::dp(2.0f), w - 2.0f * kPad, rowH - theme::dp(4.0f),
-                  label);   // só desenha (scroll)
+        const fileapi::DirEntry& e = entries[ei];
+        const bool held = ui.widgetActive(kBrowserRowBase + ei);
+        const UiRect row = {x + kPadB, ry + theme::dp(2.0f),
+                            w - 2.0f * kPadB, rowH - theme::dp(4.0f)};
+        if (held) {
+            ui.panelRounded(row.x, row.y, row.w, row.h,
+                            theme::dp(theme::kRadiusField),
+                            theme::kTheme.surface2);
+        }
+        // o ÍCONE de função à esquerda (C-4: uma função, um glifo — o
+        // icones_unicos aferra): pasta/mesh/imagem/áudio/desconhecido
+        icons::Icon ic = icons::Icon::Question;
+        if (e.isDir) {
+            ic = icons::Icon::Folder;
+        } else if (e.kind == 'm') {
+            ic = icons::Icon::Box;
+        } else if (e.kind == 't') {
+            ic = icons::Icon::Image;   // a LUPA voltou a ser SÓ pesquisar
+        } else if (e.kind == 's') {
+            ic = icons::Icon::Speaker;
+        }
+        icons::drawIcon(ui, ic, row.x + theme::dp(12.0f),
+                        row.y + (row.h - theme::dp(20.0f)) * 0.5f,
+                        theme::dp(20.0f),
+                        e.isDir ? theme::kTheme.accent : theme::kTheme.text2);
+        // o NOME alinhado à ESQUERDA (os prefixos "mesh:"/"tex:"/"/" morrem)
+        if (ui.hasFont()) {
+            const TextMetrics tmR = ui.textMetrics();
+            ui.labelFitted(row.x + theme::dp(44.0f),
+                           row.y + (row.h - tmR.block()) * 0.5f + tmR.ascent,
+                           e.name.c_str(),
+                           e.isDir ? theme::kTheme.text1
+                                   : theme::kTheme.text1,
+                           row.w - theme::dp(44.0f) - theme::dp(32.0f));
+        }
+        // a SETA à direita (só nas pastas — os ficheiros importam, não abrem)
+        if (e.isDir) {
+            icons::drawIcon(ui, icons::Icon::ChevronRight,
+                            row.x + row.w - theme::dp(28.0f),
+                            row.y + (row.h - theme::dp(16.0f)) * 0.5f,
+                            theme::dp(16.0f), theme::kTheme.text2);
+        }
+        // (o alvo da linha é o SCROLL TAP lá em baixo — o padrão da casa
+        // nas listas com scroll: o widgetHit aqui dispararia no PRESS e um
+        // gesto de rolar IMPORTAVA o ficheiro debaixo do dedo; a fila da
+        // hierarquia usa o MESMO re-despacho)
     }
     ui.endScroll();
-    if (entries.empty()) {
-        // mensagem COM O CAMINHO (nunca toast cego)
-        const std::string msg = browserEmptyMessage(cwd, opendirFailed);
-        ui.labelFitted(x + kPad, listTop + rowH * 0.5f + tm.ascent,
-                       msg.c_str(), theme::LINE, w - 2.0f * kPad);
+    if (visible.empty()) {
+        // vazio COM O CAMINHO (o browserEmptyMessage de sempre) ou SEM
+        // resultados da pesquisa (a consulta aparece — nunca um vazio cego)
+        const std::string msg =
+            st.browserSearchLen > 0
+                ? std::string("sem resultados para \"") + st.browserSearch +
+                      "\""
+                : browserEmptyMessage(cwd, opendirFailed);
+        const TextMetrics tm0 = ui.textMetrics();
+        ui.labelFitted(x + kPadB, L.listTop + rowH * 0.5f + tm0.ascent,
+                       msg.c_str(), theme::LINE, w - 2.0f * kPadB);
     }
 
     // tap re-despachado → linha da lista (a MESMA geometria desenhada)
-    // 0.8.11: as linhas começam DEPOIS de raízes+subir (count+2)
     f32 tx = 0.0f, ty = 0.0f;
-    if (chosen == 0 && ui.scrollTap(kBrowserScrollId, tx, ty)) {
-        const i32 row = static_cast<i32>((ty - listTop + off) / rowH);
-        if (row >= 0 && static_cast<u32>(row) < entries.size()) {
-            chosen = row + fileapi::kBrowserRootCount + 2;
+    if (ui.scrollTap(kBrowserScrollId, tx, ty)) {
+        const f32 cy = ty + off;
+        u32 vr = 0;
+        for (const u32 ei : visible) {
+            const f32 ry = L.listTop + static_cast<f32>(vr) * rowH;
+            ++vr;
+            if (cy >= ry && cy < ry + rowH) {
+                if (rowIndexOut) {
+                    *rowIndexOut = ei;
+                }
+                return fileapi::kBrowserRootCount + 2 + static_cast<int>(vr) -
+                       1;
+            }
         }
     }
-    return chosen;
+    return 0;
 }
 
 int drawApplyDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,

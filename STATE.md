@@ -1,10 +1,12 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-18 · vc: 89 · Último commit: este (o 0.12-C C-3, A
-TIPOGRAFIA O IDIOMA AS SUPERFÍCIES — a escada de 4 tons do dono, o
-«Áudio», o «Exportar para Downloads», o «N TICs», os 4 pins; antes:
-3e8984a o C-2, OS MENUS E A BARRA DE TOPO; antes: 64bb90f o C-1, AS
-PROPORÇÕES E OS PAINÉIS)
+Atualizado: 2026-10-18 · vc: 90 · Último commit: este (o 0.12-C C-4, O
+SELETOR DE FICHEIROS + OS ESTADOS VAZIOS — o picker pela fonte única
+browserSheetLayout, o breadcrumb que salta, a pesquisa propósito 10, as
+pastas ponto fora, os 4 vazios com AÇÃO, os glifos únicos, os 8 pins +
+M-C4a/b; a REPARAÇÃO da árvore — 614 ficheiros de volta do e8c9587;
+antes: 266bd3b o C-3, A TIPOGRAFIA O IDIOMA AS SUPERFÍCIES; antes:
+3e8984a o C-2, OS MENUS E A BARRA DE TOPO)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -12,10 +14,31 @@ PROPORÇÕES E OS PAINÉIS)
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-C (layout, organização e consistência) — EM CURSO
-  (C-1..C-3 fechadas; C-4 na ordem do prompt)**: a cláusula da campanha
-  é anti-superficialidade — nada de controlos «de fachada»; se um botão
-  não faz nada, sai.
+- **Campanha 0.12-C (layout, organização e consistência) — FECHADA
+  (C-1..C-4)** (o CI do push é o árbitro; os DETALHES vivem no
+  RELATORIO-0.12-C.md). A cláusula da campanha é anti-superficialidade —
+  nada de controlos «de fachada»; se um botão não faz nada, sai.
+  **C-4 (o seletor de ficheiros + os estados vazios, vc 90)**: o PICKER
+  pela FONTE ÚNICA browserSheetLayout (as linhas 48dp ícone+nome+seta; o
+  BREADCRUMB que SALTA — browserCrumbs; a PESQUISA propósito 10 com o
+  filtro puro browserFilterEntries; as PASTAS PONTO fora no
+  listDirEntries; o Subir FIXO; a safe-area no card) + os 4 VAZIOS COM
+  MENSAGEM + AÇÃO (o Inspector abre o plusMenu com o «+ criar TIC»; os
+  Assets ganham o IMPORTAR que abre o navegador na Download; a
+  Hierarquia aponta o + e ele fica VISÍVEL — hierEmptyInvite; os
+  Projetos no espelho Java: o G FRACO + o CTA «Novo projeto») + os
+  GLIFOS ÚNICOS por função (a lupa SÓ pesquisar; o Image NOVO para as
+  texturas; emptyStateIcon — o vazio dos Assets deixou de ser a PASTA) +
+  pins ×8 (test_012c_picker.cpp + o gate projects_ui_check) + M-C4a/b
+  vermelho→verde. Os ACHADOS REAIS: o gesto de rolar importava (o
+  re-despacho scrollTap SÓ), o claim do scroll comia o IMPORTAR (lista
+  vazia = sem região) e o botão não cabia no drawer 240 (ancorado ao
+  fundo). **A REPARAÇÃO**: os commits da C-1..C-3 entraram de uma árvore
+  INCOMPLETA e empurraram 614 deleções (a engine inteira) — a árvore
+  completa voltou do e8c9587 com as 6 recalibrações que faltavam
+  (test_toolbar, test_sentinels ×3, test_wiring086, c33 ×9 + a flag
+  fitByDesign no título da hierarquia). test_core 0 falhas · c33
+  1005/0 · vc 90.
   **C-3 (a tipografia o idioma as superfícies, vc 89)**: a ESCADA DE
   SUPERFÍCIES do dono (fundo #0A0A0C · painel #131316 · cartão #1B1B20
   · elevado #24242A — o poço da Y-1 superado pela ordem expressa; o
@@ -28,18 +51,15 @@ PROPORÇÕES E OS PAINÉIS)
   ÚNICA do sheet (altura máxima + scroll + âncora), o play A CHAMA em
   playMode, o GIZMO do canto REMOVIDO (o duplicado do Mover — a cláusula
   anti-superficialidade), os 4 pins novos (test_012c_chrome.cpp) +
-  M-C2a/M-C2b vermelho→verde + 5 recalibrações com nota (o canto direito,
-  a strip órfã do timeline, o tap do + pela fonte única). Os DETALHES no
+  M-C2a/M-C2b vermelho→verde + 5 recalibrações com nota. Os DETALHES no
   RELATORIO-0.12-C.md §2.
-  **C-1 (as proporções e os painéis, vc 87)**: a hierarquia 20% (era 18%
-  — a ordem do dono), o viewport ≥60% por defeito (o trilho de 32dp é o
-  estado de fábrica; o piso ≥55% da R-033 mantém-se COM seleção nos
+  **C-1 (as proporções e os painéis, vc 87)**: a hierarquia 20% (era
+  18% — a ordem do dono), o viewport ≥60% por defeito (o trilho de 32dp
+  é o estado de fábrica; o piso ≥55% da R-033 mantém-se COM seleção nos
   ecrãs estreitos), o cabeçalho da hierarquia em linha própria
   (hierHeaderRects — o título elipsa, nunca sobrepõe as ações) e os 4
   pins novos (test_012c_paineis.cpp) + M-C1a/M-C1b vermelho→verde. SEM
-  sentinela nova (os pins aferram). Os DETALHES no RELATORIO-0.12-C.md
-  §1. **C-4** (o seletor de ficheiros + os estados vazios) na ordem do
-  prompt — PARAR no fim.
+  sentinela nova. Os DETALHES no RELATORIO-0.12-C.md §1.
 - **Campanha 0.12-B (arquitetura da UI) — FECHADA (B-1..B-4)** (o CI do
   push é o árbitro; os DETALHES vivem no RELATORIO-0.12-B.md).
   **B-4 (o seletor de cenas com ações, vc 86)**: as 3 ações POR LINHA no
@@ -89,65 +109,65 @@ PROPORÇÕES E OS PAINÉIS)
 ## §2 O que está FEITO
 
 - 0.6.x–0.9.5 — fundação da engine (V.ONI core, device real, CI 5 jobs).
+- 0.12-C C-4 (vc 90) — o seletor + os vazios (no RELATORIO-0.12-C.md
+  §4): o picker pela fonte única (o breadcrumb que salta, a pesquisa
+  propósito 10, as pastas ponto fora, o Subir fixo, as linhas
+  ícone+nome+seta); os 4 vazios com AÇÃO; os glifos únicos (o Image
+  novo); pins ×8 + M-C4a/b; OS ACHADOS (o rolar importava, o claim
+  comia o IMPORTAR, o botão fora do drawer 240); A REPARAÇÃO da árvore
+  (614 ficheiros de volta + as 6 recalibrações); a CAMPANHA 0.12-C
+  FECHA.
+- 0.12-C C-3 (vc 89) — a escada de superfícies + o idioma (no
+  RELATORIO-0.12-C.md §3): os 4 tons + os tokens card/elevated; «Áudio»
+  /«Exportar para Downloads»/«N TICs»; pins ×4 + M-C3a/b.
+- 0.12-C C-2 (vc 88) — os menus e a barra de topo (no
+  RELATORIO-0.12-C.md §2): menuSheetLayout; o play A CHAMA; o GIZMO
+  fora (o duplicado do Mover); pins ×4 + M-C2a/b.
+- 0.12-C C-1 (vc 87) — as proporções e os painéis (no
+  RELATORIO-0.12-C.md §1): hierarquia 20%; viewport ≥60% de fábrica;
+  hierHeaderRects; pins ×4 + M-C1a/b.
 - 0.12-B B-4 (vc 86) — as ações de cena (no RELATORIO-0.12-B.md
   §25..29): o renomear/duplicar/apagar 2-tap + o manifesto round-trip;
-  pins ×4 + M-B4a; R-051; a CAMPANHA 0.12-B FECHA (sem C33 na B-4 — a
-  ordem expressa; a verificação é a suíte inteira + o c33_virtual).
+  pins ×4 + M-B4a; R-051; a CAMPANHA 0.12-B FECHA.
 - 0.12-B B-3 (vc 85) — o canvas com a moldura do device (no
   RELATORIO-0.12-B.md §20..24): o seletor + a moldura + o véu + as guias
-  + a grelha + o toast opaco; pins ×3 + M-B3a/b; a paridade recalibrada.
+  + a grelha + o toast opaco; pins ×3 + M-B3a/b.
 - 0.12-B B-2 (vc 84) — o Inspector de UI (no RELATORIO-0.12-B.md §14..19):
   as secções colapsáveis + os campos da base/por tipo + a zona morta
   (TouchControls::dead) + os resets + o «sem remover joystick»; pins ×5 +
-  M-B2a/b; o achado da skip-list (o reset com loop próprio).
+  M-B2a/b.
 - 0.12-B B-1 (vc 83) — a árvore de UI (o relatório próprio:
-  docs/RELATORIO-0.12-B.md):
-  - **Control/UIRoot** — components/Control.h (a base 2D + os 10 kinds;
-    o payload é o UiElement por valor) + components/UIRoot.h (o
-    marcador); storages + registry ids 11/12 (o FIM — ids antigos
-    intactos).
-  - **A compat** — migrateUiCanvasToTree no loadText (UiCanvas → UIRoot
-    + filhos; o parent por NOME vira pai TIC; o canvas sai; DE MEMÓRIA)
-    + a animação Ui* resolve na árvore por nome (AnimationPlayer).
-  - **O serializer** — appendUiElementJson/fillUiElementJson (as fontes
-    partilhadas) + o Control com os campos da base opcionais + o UIRoot
-    com o null check OBRIGATÓRIO (o fantasma apanhado).
-  - **O editor** — ensureUiRoot/uiAddTreeElement/uiAddTreeJoystick; o
-    modo árvore no drawUiViewport (espelho + sync-back); o Inspector de
-    UI edita o elem ao vivo (reanchor/repante/apaga TIC);
-    uniqueNewTicName (a variante criação).
-  - **O Play** — drawUiTree/hitTestUiTree/uiElementFromHit; todos os
-    TouchControls desenham.
-  - **Pins ×9 + M-B1a/b/c** + **R-050**; 8 recalibrações com nota.
+  docs/RELATORIO-0.12-B.md): Control/UIRoot (os storages ids 11/12); a
+  compat migrateUiCanvasToTree (o UiCanvas sai; DE MEMÓRIA); o
+  serializer (as fontes partilhadas appendUiElementJson/
+  fillUiElementJson; o UIRoot FANTASMA curado no §10); o editor (o modo
+  árvore com espelho + sync-back; o Inspector de UI; uniqueNewTicName);
+  o Play (drawUiTree/hitTestUiTree/uiElementFromHit); **Pins ×9 +
+  M-B1a/b/c** + **R-050**; 8 recalibrações com nota.
 - 0.12-A (vc 82) — os 4 bugs P0 fechados (o relatório próprio:
-  docs/RELATORIO-0.12-A.md; a investigação: docs/
-  RELATORIO-0.12-A-INVEST-RAM.md):
-  - **A-1** — o diagnóstico provou que as rows `lod distance`/`impostor`
-    JÁ EXISTEM (ficheiro:linha no relatório) — PÁRA no fix cego; os 5
-    pins NOVOS da UI (test_012a_lodui.cpp) fecham o gap de cobertura;
-    M-A1a/M-A1b vermelho→verde; ZERO produção trocada.
+  docs/RELATORIO-0.12-A.md; a investigação:
+  docs/RELATORIO-0.12-A-INVEST-RAM.md):
+  - **A-1** — as rows `lod distance`/`impostor` JÁ EXISTEM (ficheiro:
+    linha no relatório) — PÁRA no fix cego; os 5 pins NOVOS da UI
+    (test_012a_lodui.cpp) fecham o gap de cobertura; M-A1a/M-A1b
+    vermelho→verde; ZERO produção trocada.
   - **A-2** — o `refreshCatalog()` entra no ARRANQUE e no
     `createSceneNamed` (os contadores a 0 morrem); `sceneRowIcon()` NOVA
-    (a fonte única do ícone de cena); pins ×3; M-A2a/M-A2b
-    vermelho→verde.
+    (a fonte única do ícone de cena); pins ×3; M-A2a/M-A2b vermelho→verde.
   - **A-3** — `safe::scissor3dRect()` NOVA (o modo UI reserva o painel
     direito no SCISSOR; byte a byte fora do modo UI) + o tooltip do
     gizmo morre (legendTimer/legendArm; nasce no largar, vive 1,5 s);
     pins ×3; M-A3a/M-A3b vermelho→verde.
   - **A-4** — a instrumentação sob `#ifdef GONI_BENCH_RAM` (o sampler
     `bench_ram:` 1×/s no engine.log) + o alvo opcional `bench_ram`
-    (option OFF) — A CURVA REPRODUZ O SALTO: linear 50k…4,1M
-    (0,01→1,11 ms) e explosão a 8,2M/12,3M (376/900 ms) no cruzamento
-    EXATO do teto de VRAM (192 MB) com 9 758/23 470 evictions/frame;
-    `evc_par == evc_orb` (o thrash continua com a câmara parada); o RSS
-    é LINEAR sem penhasco — VEREDITO: RAM (a cache de blocos a
-    ciclizar), NÃO GPU/CPU; o protocolo do dono + as recomendações no
-    relatório próprio.
+    (option OFF) — A CURVA REPRODUZ O SALTO: linear 50k…4,1M e explosão
+    a 8,2M/12,3M no cruzamento EXATO do teto de VRAM (192 MB) com
+    9 758/23 470 evictions/frame; `evc_par == evc_orb`; o RSS é LINEAR —
+    VEREDITO: RAM (a cache de blocos a ciclizar), NÃO GPU/CPU; o
+    protocolo do dono + as recomendações no relatório próprio.
   - **O achado fora da lista (cláusula calma, NÃO fixado)**: o
     `inspectorRowCount` subestima a MALHA em 4 rows para mesh file
-    (EditorLayout.h:433 vs o plano 6 rows; sem sintoma — o
-    contentHeight deriva do plano; o pior caso teórico 65 > o buffer
-    64) — documentado no relatório §6 para a próxima campanha.
+    (EditorLayout.h:433; sem sintoma — documentado no relatório §6).
 - 0.11-Y (vc 77–81) — a identidade visual completa (o ícone, o tema, o
   layout, os cartões, o fecho com os 13 PNGs) — ver §1 e docs/
   RELATORIO-0.11-Y-FECHO.md.
@@ -171,29 +191,6 @@ PROPORÇÕES E OS PAINÉIS)
 - 0.11-W 3.75b impostores (vc 76, 1524148 + caaef02) — PNG alfa por
   distância; dc do TIC longe = 1; R-049; fix caaef02 (o ImpostorIndex.cpp
   faltava no CMake do app).
-- 0.11-Y Y-0 Ícone no launcher ✅ vc 77 — o «G em chama»
-  (docs/iconegonevv.png) no launcher: adaptativo (fundo #08080A +
-  foreground na zona segura) + legacy composto nas 5 densidades; pins
-  y0_* ×7 (test_fase_y0_icone.cpp); o ícone antigo (0.9.6.10) fora do
-  launcher, intacto no histórico.
-- 0.11-Y Y-0-FIX Escala do G ✅ vc 78 — o pin C33 apanhou o G a ~25 %
-  (a bbox do HALO fazia o enquadramento); a bbox de escala passa a ser
-  o CONTEÚDO SÓLIDO (alpha==1 ⇔ lum ≥ T1) e o G ocupa 65 % da zona
-  segura (39,7 % do canvas; legacy 65 % do lado); 15 PNGs regenerados,
-  XMLs/manifest intactos; pin y0_escala NOVO (mede os PNG reais via
-  stb_image) — pins y0_* ×8; M-Y0-fix vermelho→reposto→verde.
-- 0.11-Y Y-1 Tema ✅ vc 79 — o poço #08080A (o clear lê o token) + o
-  vidro #151517/#1E1E21 (-5 %, mesmo alfa) + a hairline ÂMBAR
-  #4A3714 α0.60 + accent2 #FF6B00 e glow #FF3D00 α0.25 NOVOS; o botão
-  ativo é a chama (glow 2 quads α decrescente + gradiente vertical
-  accent→accent2 por vértice, zero mudanças de shader); glassTopLine
-  (1 dp, 20 %) pronta para a Y-3; pins y1_* ×5 (TU novo test_fase_y1_tema.cpp)
-  + M-Y1a/b/c/d vermelho→reposto→verde; R-028 recalibrada (a border
-  sai da rampa neutra — é o âmbar do accentDim).
-- 0.11-Y Y-2 Layout ✅ vc 80 — as regras CruzaTabBar/PainelFora no
-  validador + a flag overlay + a FASE 31 (13 ecrãs × 3 checks); 3 bugs
-  reais curados (o toast dp(), o back 36×36, os rótulos da régua); pins
-  y2_* ×3 + M-Y2a/b vermelho→verde.
 
 ## §3 O que está PENDENTE (por ordem)
 
@@ -226,18 +223,25 @@ PROPORÇÕES E OS PAINÉIS)
 - Documentação sem placeholders nem achismo (docs-lint R-016).
 - STATE.md e CODEMAP.md são ÍNDICES; o código é a verdade.
 - O APK instalado no device é SEMPRE o artefacto assinado do CI.
+- 0.12-C: as PASTAS ponto ficam fora do picker; os FICHEIROS ponto
+  ficam (a decisão 0.8.5 mantém-se); a lupa é SÓ «pesquisar»; o vazio
+  usa o glifo da PRÓPRIA função (emptyStateIcon); os vazios têm SEMPRE
+  uma ação real (nunca um convite que manda procurar o botão).
 
 ## §5 Regras de convivência
 
 - Um commit só conta como fechado com o CI VERDE em todos os jobs.
 - Toda a regressão estrutural ganha sentinela R-NNN com a mutação COLADA
   no relatório (quebrar → vermelho → repor → verde).
--Compat byte a byte nos formatos .goni/.gmesh; defaults novos explícitos.
+- Compat byte a byte nos formatos .goni/.gmesh; defaults novos explícitos.
 - Cláusula calma de campanha: só o que o prompt da campanha manda.
 - PARAR entre campanhas — a próxima só arranca com CONTINUAR do dono.
 - Se o estado real divergir do esperado: PÁRA e reporta.
 - Commit que fecha sub-fase com código TEM de incluir STATE.md (o gate
   docs-lint valida; ver §6).
+- A árvore vai INTEIRA no commit (a lição da reparação: um git add -A
+  numa árvore parcial EMPURRA as deleções — conferir o diffstat antes
+  do push; 614 deleções = um repo partido).
 
 ## §6 Regra de atualização
 
@@ -265,45 +269,22 @@ Commits puramente documentais não são afetados.
 - `ARCHITECTURE.md` — o mapa dos módulos (o porquê das camadas).
 - `docs/REGRESSOES.md` — sentinelas R-NNN (consulta, não leitura inteira).
 - `BACKLOG.md` — rastreador de campanhas (na RAIZ do repo).
-- `docs/RELATORIO-0.11-CTX.md` — o relatório da campanha em curso (a
-  medição da redução, as mutações, as divergências corrigidas).
-- `docs/RELATORIO-0.11-W-*.md` — a 0.11-W (o fecho é o BLOCO B).
-- `docs/RELATORIO-0.11-Y-Y0.md` — o relatório da Y-0 (o ícone no
-  launcher; as mutações e os limites da extração).
-- `docs/RELATORIO-0.11-Y-Y0-FIX.md` — o relatório do Y-0-FIX (a escala
-  do G: a medição do C33, a regra do sólido, o pin y0_escala, a
-  M-Y0-fix).
-- `docs/RELATORIO-0.11-Y-Y1.md` — o relatório da Y-1 (o tema: o poço,
-  a chama, o gradiente por vértice, as primitivas do cristal, as
-  mutações M-Y1a..d).
-- `docs/RELATORIO-0.11-Y-Y2.md` — o relatório da Y-2 (o layout: as
-  regras CruzaTabBar/PainelFora, a varredura FASE 31, os 3 bugs reais,
-  as mutações M-Y2a/b).
-- `docs/RELATORIO-0.11-Y-Y3.md` — o relatório da Y-3 (o cristal: a
-  linha do topo + os divisores gradientes, o D11 superado, as mutações
-  M-Y3a/b).
-- `docs/RELATORIO-0.11-Y-FECHO.md` — o fecho da campanha (as 5
-  sub-fases + o fix, os critérios C33 mapeados às provas, os limites
-  declarados).
-- `docs/RELATORIO-0.12-B.md` — o relatório da 0.12-B (a B-1: a
-  arquitetura, os pins ×9, as mutações coladas, as recalibrações, o
-  UIRoot fantasma, os limites, o protocolo C33 do dono; a B-2 no §14+,
-  a B-3 no §20+, a B-4 no §25+ — as ações de cena, o R-051 e o fecho da
-  campanha).
-- `docs/RELATORIO-0.12-A.md` — o relatório da 0.12-A (os 4 bugs P0: os
-  diagnósticos com ficheiro:linha, as decisões, os pins ×11, as 6
-  mutações coladas, o achado fora da lista, os limites).
-- `docs/RELATORIO-0.12-A-INVEST-RAM.md` — a investigação RAM vs GPU do
-  A-4 (a curva do hospedeiro, a análise (a)-(d), o veredito CACHE
-  THRASH, o protocolo do device do dono, as recomendações).
+- `docs/RELATORIO-0.12-C.md` — o relatório da 0.12-C (a C-1 no §1, a C-2
+  no §2, a C-3 no §3, a C-4 no §4 — o picker, os vazios, os achados do
+  gesto/claim/drawer, a REPARAÇÃO da árvore, as mutações coladas).
+- `docs/RELATORIO-0.12-B.md` — o relatório da 0.12-B (a B-1 no §1..13,
+  a B-2 no §14+, a B-3 no §20+, a B-4 no §25+ — as ações de cena, o
+  R-051 e o fecho da campanha).
+- `docs/RELATORIO-0.12-A.md` + `docs/RELATORIO-0.12-A-INVEST-RAM.md` —
+  a 0.12-A (os 4 bugs P0 com ficheiro:linha, os pins ×11, as 6 mutações
+  coladas; a investigação RAM vs GPU com o veredito CACHE THRASH).
 - `tests/bench_ram_curve.cpp` + o alvo `bench_ram` (tests/CMakeLists,
   option GONI_BENCH_RAM OFF) — a curva 50k…12,3M do A-4 no hospedeiro.
 - `scripts/y0_gen_icons.py` — o gerador dos PNGs do launcher a partir
   da fonte do dono (o threshold de luminância documentado lá dentro).
 - `docs/arquivo/` — os relatórios das campanhas FECHADAS (71, git mv;
-  o RELATORIO-0.9.6.md NÃO está lá — é a âncora viva do gate
-  release-identity R-015; a 0.11-T-FIX também não — Perna 2 adiada, a
-  campanha não fechou).
+  o RELATORIO-0.9.6.md NÃO está lá — é a âncora do gate release-identity
+  R-015; a 0.11-T-FIX também não — Perna 2 adiada, a campanha não fechou).
 - `docs/TEMPLATE_PROMPT.md` — a pirâmide de leitura dos prompts.
 - `VONI_referencia.md` — a referência V.ONI gerada (fonte: VoniRegistry).
 - `ci/scope.txt` — os caminhos que uma campanha pode tocar.

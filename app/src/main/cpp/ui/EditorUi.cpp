@@ -685,7 +685,12 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
         // 0.9.6.10 (GRUPO UI · a imagem 1): o título do painel em 16sp
         // text1 (era 12sp text2 — os painéis da referência têm títulos
         // PRÓPRIOS, não legendas). 0.12-C: labelFittedStyled no BUDGET —
-        // nunca cruza o ⋮ (elipse honesta)
+        // nunca cruza o ⋮ (elipse honesta). A ELIPSE É O DESENHO (a spec
+        // C-1: «o título elipsa, nunca sobrepõe as ações») — a flag do
+        // PASSO 2 (o padrão do nome de linha) diz ao validador que o corte
+        // é intencional: no piso 140dp o budget não dá para «Hierarquia»
+        // a 16sp e o «…» é o contrato, não perda acidental
+        ui.auditFitByDesignNext();
         ui.labelFittedStyled(x + hh.titleX, base, "Hierarquia",
                              theme::kTheme.text1, hh.titleMaxW,
                              theme::fontScale(theme::kFontSection), 0);
@@ -1112,22 +1117,23 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                 // (0.9.6.15): a LADDER mede o texto ao vivo (o padrão da
                 // pesquisa/chips): o convite mais comprido que caiba — no
                 // PISO 140dp da hierarquia sai «+ cria um TIC», nunca
-                // reticência num convite
+                // reticência num convite). 0.12-C (C-4): a ESCADA do convite
+                // vive na FONTE ÚNICA hierEmptyInvite (EditorLayout.h — o
+                // draw e o pin empty_hierarquia partilham)
                 const f32 invW = w - 2.0f * kPad;
-                const char* invite;
-                if (needle && *needle) {
-                    invite = ui.fontWidth("nenhum TIC com esse nome") <= invW
-                                 ? "nenhum TIC com esse nome"
-                                 : "sem resultados";
-                } else {
-                    invite =
-                        ui.fontWidth("sem TICs - toca em + para criar") <=
-                                invW
-                            ? "sem TICs - toca em + para criar"
-                            : (ui.fontWidth("toca em + para criar") <= invW
-                                   ? "toca em + para criar"
-                                   : "+ cria um TIC");
-                }
+                const bool searching = needle && *needle;
+                const char* invite =
+                    searching
+                        ? hierEmptyInvite(
+                              true,
+                              ui.fontWidth("nenhum TIC com esse nome") <=
+                                  invW,
+                              false)
+                        : hierEmptyInvite(
+                              false,
+                              ui.fontWidth("sem TICs - toca em + para criar") <=
+                                  invW,
+                              ui.fontWidth("toca em + para criar") <= invW);
                 ui.labelFitted(x + kPad,
                                listTop + theme::dp(112.0f) - mv.block() +
                                    mv.ascent,
@@ -1348,13 +1354,26 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         // text2 #98A2B3 sobre surface #151A23 = 6,7:1 (≥4,5:1 da auditoria);
         // o ANTIGO "(nada selecionado)" era theme::LINE (1,7:1 — INVISÍVEL,
         // o problema documentado "quase invisível")
+        // 0.12-C (C-4): MENSAGEM + AÇÃO — o botão CRIAR TIC abre o MESMO
+        // plusMenu de presets do + da hierarquia (o main despacha; nunca
+        // um botão de fachada — o convite antigo mandava procurar o +
+        // pelo ecrã fora)
         const TextMetrics tm0 = ui.textMetrics();
-        const f32 base = y + (h - tm0.block()) * 0.5f + tm0.ascent;
+        const f32 base = y + (h * 0.5f - tm0.block()) * 0.5f + tm0.ascent;
         ui.labelFitted(x + kPad, base, "Nada selecionado",
                        theme::kTheme.text2, w - 2.0f * kPad);
         icons::drawIcon(ui, icons::Icon::Cursor, x + w * 0.5f - 16.0f,
                         base - tm0.block() - 40.0f, 32.0f,
                         theme::kTheme.text2);
+        const f32 bw = theme::dp(180.0f);
+        const f32 bh = theme::dp(40.0f);
+        const f32 bx = x + (w - bw) * 0.5f;
+        const f32 by = y + h * 0.5f + theme::dp(24.0f);
+        ui.auditRowFloorNext(layout::kTouchFloorDp);
+        if (by + bh <= y + h &&
+            ui.button(kInspCreateTicId, bx, by, bw, bh, "+ criar TIC")) {
+            st.plusMenu = true;   // o MESMO menu de presets do + da hierarquia
+        }
         return false;
     }
 

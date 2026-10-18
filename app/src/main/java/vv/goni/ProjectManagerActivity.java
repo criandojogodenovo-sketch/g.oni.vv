@@ -175,10 +175,14 @@ public class ProjectManagerActivity extends Activity {
         // o espelho Java do Brand.cpp — a paridade dos 4 sítios; 96dp ≥ 32
         // = a versão COMPLETA, setas com pontas), SEM fundo (âmbar sobre o
         // vidro do ecrã, nunca âmbar sobre âmbar)
+        // 0.12-C (C-4): o G do vazio fica FRACO (BORDER — o âmbar a 25%,
+        // o glifo não compete com o CTA) e a ação é um BOTÃO REAL (o MESMO
+        // askNewProject do cabeçalho — nunca um convite que manda procurar
+        // o botão pelo ecrã fora)
         emptyBox = new LinearLayout(this);
         emptyBox.setOrientation(LinearLayout.VERTICAL);
         emptyBox.setGravity(Gravity.CENTER);
-        View bigLogo = new BrandView(this, ACCENT, /*lodFull=*/true);
+        View bigLogo = new BrandView(this, BORDER, /*lodFull=*/true);
         emptyBox.addView(bigLogo, new LinearLayout.LayoutParams(dp(96), dp(96)));
         emptyTitle = new TextView(this);
         emptyTitle.setText("Nenhum projeto ainda");
@@ -188,11 +192,19 @@ public class ProjectManagerActivity extends Activity {
         emptyTitle.setPadding(0, dp(16), 0, dp(4));
         emptyBox.addView(emptyTitle);
         emptySub = new TextView(this);
-        emptySub.setText("Toque em “Novo projeto” para criar o primeiro");
+        emptySub.setText("Crie o seu primeiro projeto");
         emptySub.setTextColor(TEXT2);
         emptySub.setTextSize(14);
         emptySub.setGravity(Gravity.CENTER);
+        emptySub.setPadding(0, dp(4), 0, dp(20));
         emptyBox.addView(emptySub);
+        Button24 cta = new Button24(this, "Novo projeto",
+                UiIcons.PLUS, ACCENT, ACCENT_PRESS, false);
+        cta.setOnClickListener(v -> askNewProject());
+        LinearLayout.LayoutParams ctaLp =
+                new LinearLayout.LayoutParams(dp(220), dp(48));
+        ctaLp.gravity = Gravity.CENTER_HORIZONTAL;
+        emptyBox.addView(cta.view(), ctaLp);
         body.addView(emptyBox, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));

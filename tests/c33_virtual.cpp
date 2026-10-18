@@ -3518,22 +3518,18 @@ int main() {
                       !g_browser.entries.empty(),
                   "12.8b o browser lista a pasta do par");
             // a linha do par.gltf: ficheiros ordenados («par.gltf» é o
-            // 1.º dos 3) — a MESMA geometria do drawFileBrowser
-            // (landscape 1536x720, insets T96/B48):
-            //   oy=96 ah=576 w=900 x=318 h=362 y=203 listTop=389
+            // 1.º dos 3) — a MESMA geometria do drawFileBrowser pela FONTE
+            // ÚNICA browserSheetLayout (0.12-C C-4; o tap é o re-despacho
+            // do scroll — o padrão da casa nas listas com scroll)
             {
-                const f32 ox = 0.0f, oy = 96.0f;
-                const f32 aw = 1536.0f, ah = 576.0f;
-                const f32 w = 900.0f;
-                const f32 h = 48.0f + 34.0f + 52.0f + 8.0f + 52.0f + 8.0f +
-                              3.0f * 48.0f + 16.0f;
-                const f32 x = ox + (aw - w) * 0.5f;
-                const f32 y = oy + (ah - h) * 0.5f;
-                const f32 listTop = y + 48.0f + 6.0f + 34.0f - 18.0f + 12.0f +
-                                    52.0f + 52.0f;
+                // landscape 1536x720, insets T96/B48 (o harness da FASE)
+                const editor::BrowserSheetLayout lb =
+                    editor::browserSheetLayout(
+                        1536.0f, 720.0f, 0.0f, 96.0f, 0.0f, 48.0f,
+                        editor::kHeaderH, 3u);
                 const auto t0 = std::chrono::steady_clock::now();
                 // 1 TOQUE na linha (o A4: 1 toque = seleciona/importa)
-                tap(x + w * 0.5f, listTop + 24.0f);
+                tap(lb.x + lb.w * 0.5f, lb.listTop + 24.0f);
                 // 0.9.6.4 — espera o CICLO COMPLETO do job: o finalize do
                 // frame() faz o JOIN e publica os resultados; SÓ DEPOIS o
                 // estado do job é legível. (Esperar só pelo `done` tinha
@@ -4639,15 +4635,17 @@ int main() {
                     why += ")";
                     check(false, why.c_str());
                 }
-                // (c) A GANGORRA: hier 140dp | insp 180dp | vp 456dp no
-                // device — os defaults POR PERCENTAGEM do PASSO 2 (18%/22%
-                // caem nos pisos 140/180 no ecrã de 776dp) e o viewport
-                // fica 58,8% ≥ 55% (o critério a do dono)
+                // (c) A GANGORRA: hier 155,2dp | insp 180dp | vp 440,8dp no
+                // device — os defaults POR PERCENTAGEM (0.12-C C-1: a
+                // hierarquia 20% — era 18% e caía no piso 140; 20% de 776
+                // = 155,2 já não toca no piso) e o viewport fica 56,8% ≥
+                // 55% (o critério a do dono)
                 const safe::PanelBudget bd = editor::resolveEditorPanels(
                     g_editor, g_ui.contentWidthPx());
-                check(std::fabs(bd.hier - theme::dp(safe::kHierMinW)) < 1.0f,
-                      "13.7 a hierarquia default é o PISO 140dp (18% de 776 "
-                      "= 139,7 — spec PASSO 2)");
+                check(std::fabs(bd.hier - theme::dp(776.0f * safe::kHierPct)) <
+                          1.0f,
+                      "13.7 a hierarquia default é 20% (155,2dp de 776 — "
+                      "0.12-C C-1; o piso 140 já não manda)");
                 check(bd.insp >= theme::dp(safe::kInspMinW) - 1.0f &&
                           std::fabs(bd.insp - theme::dp(180.0f)) < 1.0f,
                       "13.7 o inspector default é o PISO 180dp (22% de 776 = "
@@ -4703,6 +4701,14 @@ int main() {
                         L.rail[4], L.quick[0], L.quick[1], L.quick[2],
                         L.quick[3], L.gizmoBtn};
                     for (const UiRect& r : all) {
+                        // 0.12-C (C-1): a hierarquia 20% estreita o centro —
+                        // com seleção no device a fila do topo já não cabe
+                        // ao lado do rail e ESCONDE (a degradação honesta);
+                        // o rect ZERO é «escondido» — nem dentro nem fora
+                        // (o MESMO tratamento do all40 da C-2)
+                        if (r.w <= 0.0f) {
+                            continue;
+                        }
                         if (r.x < vr.x - 0.5f || r.y < vr.y - 0.5f ||
                             r.x + r.w > vr.x + vr.w + 0.5f ||
                             r.y + r.h > vr.y + vr.h + 0.5f) {
@@ -5934,8 +5940,14 @@ int main() {
             check(!g_thumbJob.active.load(),
                   "15.6 D7 o job de thumb terminou (o worker colhido pelo frame)");
             check(g_thumbJob.ok, "15.6 D7 a captura ESCREVEU o thumb.png (save ok + thumb)");
-            check(g_thumbJob.tw == 256u && g_thumbJob.th == 144u,
-                  "15.6 D7 o PNG é 256x144 EXATO (o alvo da spec do dono)");
+            // 0.12-C (C-1): com a hierarquia 20% o viewport do device ficou
+            // MAIS ESTREITO (411px com seleção) — o crop 16:9 dá 411×231 e
+            // o alvo ~256 (a spec D7) escala 231*256/411 = 143,9 → 143 px
+            // (a divisão inteira; era 144 com o viewport mais largo da 18%).
+            // O teto de 256 e a relação 16:9 mantêm-se EXATOS
+            check(g_thumbJob.tw == 256u && g_thumbJob.th == 143u,
+                  "15.6 D7 o PNG é 256x143 (o alvo ~256 com o crop 16:9 do "
+                  "viewport 20% — a divisão inteira da escala)");
             char orcMsg[128];
             std::snprintf(orcMsg, sizeof(orcMsg),
                           "15.6 D7 o PNG esta dentro do orcamento de 60KB "
@@ -7018,9 +7030,11 @@ int main() {
             f32 veu40[4];
             theme::blendOver(theme::kTheme.scrimMenu, theme::kTheme.bg,
                              veu40);
-            // e o vidro do sheet (surface 80%) SOBRE o véu 40%
-            f32 glassSobreVeu[4];
-            theme::blendOver(theme::kTheme.surface, veu40, glassSobreVeu);
+            // 0.12-C (C-3): O SHEET É O ELEVADO (#24242A α1.00 — o topo da
+            // escada de superfícies; era o vidro surface 80%). OPACO: o
+            // pixel do sheet É o token, o véu não entra na conta (o
+            // contraste do menu deixa de depender do que está atrás)
+            const f32* sheetSobreVeu = theme::kTheme.elevated;
 
             // a sonda: relê o PNG (loadPng de produção) e compara o pixel
             // (er,eg,eb) com tolerância ±1 (o padrão 13.1/13.9)
@@ -7107,11 +7121,11 @@ int main() {
                     //     última linha): surface 80% SOBRE o véu 40%
                     probePx18(pngM, (u32)(sheet->x + 40.0f),
                               (u32)(sheet->y + sheet->h - 3.0f),
-                              (int)(glassSobreVeu[0] * 255.0f + 0.5f),
-                              (int)(glassSobreVeu[1] * 255.0f + 0.5f),
-                              (int)(glassSobreVeu[2] * 255.0f + 0.5f),
-                              "18.1 J-02 o vidro do sheet mantém 80% SOBRE "
-                              "o véu de 40% (o composto duplo no pixel)");
+                              (int)(sheetSobreVeu[0] * 255.0f + 0.5f),
+                              (int)(sheetSobreVeu[1] * 255.0f + 0.5f),
+                              (int)(sheetSobreVeu[2] * 255.0f + 0.5f),
+                              "18.1 J-02 o sheet mede O ELEVADO (0.12-C C-3: "
+                              "o topo opaco da escada — o véu não entra)");
                     // (c) o CANTO do sheet (raio 8dp — o J-04 no ancorado):
                     //     o pixel (2,2) diagonal fica FORA do raio → véu
                     probePx18(pngM, (u32)(sheet->x + 2.0f),

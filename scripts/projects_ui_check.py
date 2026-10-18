@@ -100,6 +100,21 @@ def main():
         print("OK  quadrado fantasma: o emptyBox INTEIRO (logo incluído) "
               "desliga com projetos")
 
+    # 2c) 0.12-C (C-4): O ESTADO VAZIO dos projetos — MENSAGEM + AÇÃO: o G
+    # FRACO (BORDER — o âmbar a 25%, o glifo não compete com o CTA) e o
+    # BOTÃO «Novo projeto» DENTRO do emptyBox ligado ao MESMO
+    # askNewProject do cabeçalho (nunca um convite que manda procurar o
+    # botão pelo ecrã fora — a cláusula anti-superficialidade)
+    if "new BrandView(this, BORDER" not in code:
+        bad += fail("empty_projetos: o G do vazio não está FRACO (BORDER — "
+                    "o glifo compete com o CTA)")
+    elif "cta.setOnClickListener(v -> askNewProject())" not in code:
+        bad += fail("empty_projetos: o CTA do vazio não abre o Novo projeto "
+                    "(convite sem ação = fachada)")
+    else:
+        print("OK  empty_projetos: o G FRACO (BORDER) + o CTA «Novo "
+              "projeto» ligado ao askNewProject")
+
     # 2b) botões: Novo FILL + Importar CONTORNO, 56dp
     if "dp(56)" not in code:
         bad += fail("botões 56dp ausentes")

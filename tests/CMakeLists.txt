@@ -98,6 +98,7 @@ add_executable(test_core
         test_012c_paineis.cpp   # 0.12-C (C-1): os pins das proporções e painéis
         test_012c_chrome.cpp   # 0.12-C (C-2): os pins dos menus e da barra de topo
         test_012c_idioma.cpp   # 0.12-C (C-3): os pins da escala/idioma/superfícies
+        test_012c_picker.cpp   # 0.12-C (C-4): os pins do seletor + estados vazios
         # 0.7.1: cenas múltiplas + transições (projeto e2e, SceneFx puro,
         # overlay CENAS, ações Scene.Load/Transition)
         test_scenes.cpp
