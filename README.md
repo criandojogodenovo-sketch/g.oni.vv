@@ -45,24 +45,20 @@ A convenção das referências: um relatório de campanha FECHADA vive em
 `docs/arquivo/` (movido com `git mv` — o histórico do git preserva a
 proveniência); os relatórios da campanha em curso vivem em `docs/`.
 
-## A campanha em curso — 0.11-CTX (contexto enxuto)
+## A última campanha — 0.12-U (V.ONI Bloco A, a redução de trabalho) — FECHADA
 
-A 0.11-CTX é uma campanha SÓ de documentação: a leitura de arranque
-das sessões passou de ~1,6 MB (o README integral + REGRESSOES + os
-relatórios todos) para dois índices curtos — `STATE.md` +
-`CODEMAP.md` — com o arquivo do histórico (`docs/arquivo/`), o diário
-(`docs/DIARIO.md`), o template de prompts e o gate STATE.md no CI (o
-commit de sub-fase com código viaja COM o STATE.md). A medição real da
-redução está em `docs/RELATORIO-0.11-CTX.md`.
-
-Em paralelo, a **0.11-W (Render Systems)** está implementada com o CI
-verde no vc 76 — instancing de blocos (3.5b), streaming progressivo do
-import (3.75a) e impostores PNG alfa por distância (3.75b). Falta o
-pin do dono no Realme C33 real: instalar o APK assinado do CI,
-importar a cena de 203 MB, correr o bench R-017 e colar o PNG do HUD
-(baseline FPS 5 · bl 5164/5178 · 6 TICs; alvo 30+ FPS sem crash nem
-freeze no import). O fecho da 0.11-W corre depois da CTX, por ordem do
-dono.
+O autor da V.ONI ganhou as 7 features que tiram trabalho: o `View P`
+universal (qualquer dos 7 tipos no log), as 14 FUNÇÕES do registo
+(abs/min/max/clamp/lerp/floor/ceil/round/sqrt/sin/cos/random/random_int/
+distance — sin/cos em GRAUS), o `spawn(tipo, x, y, z) → TIC` (o script
+CRIA na cena pela porta do Host — active/visible/nome único) e os
+relógios `every(s)/after(s)/when(cond)` (o estado por nó AST morre no
+stop). O juiz final foi o PLATFORMER: um script único de 25 linhas com
+as 7 features em cadeia corre verde no CI. A referência regenerada está
+em `VONI_referencia.md` (64 entradas) e a história em
+`docs/RELATORIO-0.12-U-*.md` (ABERTURA + 3 sub-fases + FECHO). A 0.11-W
+(Render Systems, vc 76) continua com o pin do dono no C33 real
+PENDENTE — o fecho corre por ordem do dono.
 
 ## Build
 
@@ -72,7 +68,7 @@ dono.
   assinado e o gate de símbolos de entrada.
 - O APK que o dono instala no device é SEMPRE o artefacto assinado do
   CI (`goni-vv-*-release-signed`), nunca um build local.
-- O versionCode vive em `app/build.gradle` (hoje 76) e fecha o par com
+- O versionCode vive em `app/build.gradle` (hoje 100) e fecha o par com
   o relatório de cada sub-fase.
 - Os gates de documentação correm em cada push: o docs-lint (R-016) e
   o gate STATE.md (0.11-CTX §1.2).

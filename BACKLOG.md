@@ -279,3 +279,22 @@
   (os slots ficam vinculados; o GL só carrega o baseColor de hoje —
   NÃO VERIFICADO no relatório §6); a migração dos .gmesh antigos é
   reimportar/reconverter (o GTB1 nasce no conversor).
+
+## 0.12-U — V.ONI BLOCO A (Redução de Trabalho) — FEITO
+
+- **FEITO 0.12-U (3 sub-fases + o FECHO)**: as 7 features da linguagem
+  do dono — (3.9a) o View P universal + as 14 FUNÇÕES do registo
+  (Kind::Funcao novo: abs/min/max/clamp/lerp/floor/ceil/round/sqrt/
+  sin/cos/random/random_int/distance — sin/cos em GRAUS, o despacho no
+  evalCall consulta a TABELA, a fn do utilizador vence); (3.9b) o
+  spawn(tipo, x, y, z) → TIC (o Host::spawnTic com o default honesto +
+  a EngineHost real: active/visible/nome único base.001, a lista viva
+  esfera/box); (3.9c) os relógios every(s)/after(s)/when(cond) (a
+  sintaxe no AST+parser, as palavras reservadas, o estado POR NÓ AST no
+  Impl que morre no stop — o every carrega o resto sem drift, os
+  portões 1×). O registo 50 → 64 entradas; a referência regenerada a
+  cada sub-fase (R-013 byte a byte). Pins ×37 + as sentinelas R-052/
+  R-053/R-054 + as mutações M-3.9a1..c3 vermelho→verde. O CRITÉRIO DO
+  PLATFORMER (o juiz final): o script único com as 7 features corre
+  verde — o Bloco A FECHA. test_core 0 falhas · c33 1010/0 · CI verde
+  · versionCode 100. Relatórios: docs/RELATORIO-0.12-U-*.md.

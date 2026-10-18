@@ -2686,3 +2686,109 @@ TEST(timers_no_corpo_do_tyker_sao_rejeitados_que_ensinam) {
     EXPECT(err.message.find("every") != std::string::npos);
     EXPECT(err.line >= 2);
 }
+
+// ===========================================================================
+// 0.12-U · FECHO — O CRITÉRIO DO PLATFORMER (o JUIZ FINAL do Bloco A)
+// UM ÚNICO script usa AS SETE FEATURES em cadeia — spawn (a plataforma, a
+// moeda, a porta), a matemática (min/clamp/lerp/abs/random_int), a
+// distance (a chegada), o when (a queda repõe + a moeda apanhada), o
+// after (a porta abre) e o every (a moeda pulsa) — contra o FakeHost com
+// dt simulado, frame a frame, do arranque ao objetivo. O Bloco A só
+// fecha com ESTE pin verde (o CI é a testemunha).
+// ===========================================================================
+TEST(platformer_bloco_a_juiz_final) {
+    static const char* kFase = R"VONI(
+// o platformer do dono — 7 features, zero relógios à mão
+v#@+dado:Int=random_int(1, 6)
+v#jogador:TIC=spawn("box", 0, 1, 0)
+v#plataforma:TIC=spawn("box", 0, 0, -4)
+v#moeda:TIC=spawn("esfera", 0, 1, -4)
+v#porta:TIC=spawn("box", 0, 0, -8)
+v#vy:Num=0
+v#vel:Num=0
+central main {
+  on moment {
+    View P "fase a correr"
+    View P abs(-42)
+  }
+  allmoments {
+    vel = min(vel + 0.1, 0.5)
+    jogador.pos.z = jogador.pos.z - vel
+    vy = clamp(vy - 0.5, -2, 0)
+    jogador.pos.y = jogador.pos.y + vy
+    moeda.pos.y = lerp(moeda.pos.y, 1 + vel, 0.5)
+    every(0.5) { View P "moeda pulsa" }
+    after(2) { View P "porta aberta" }
+    exist(jogador.pos.y < -1) {
+      jogador.pos.y = 1
+      vy = 0
+      View P "reposicao"
+    }
+    when(distance(jogador, moeda) < 1.5) { View P "moeda apanhada" }
+  }
+}
+)VONI";
+    Error err;
+    Script s = Script::compile(kFase, err);
+    EXPECT(err.ok);
+    if (!err.ok) {
+        std::printf("  (o juiz nem compilou: linha %u: %s)\n", err.line,
+                    err.message.c_str());
+        return;
+    }
+    FakeHost h;
+    const bool st = s.runStart(h, err);
+    EXPECT(st);
+    if (!st) return;
+
+    // 25 frames × dt 0.1 = 2.5 s de jogo
+    for (int i = 0; i < 25; ++i) {
+        EXPECT(s.runFrame(h, 0.1, err));
+    }
+
+    // ---- os contadores do juiz --------------------------------------------
+    int repos = 0, pulsos = 0, portas = 0, moedas = 0;
+    for (const std::string& l : h.logs) {
+        if (l == "voni: reposicao") ++repos;
+        if (l == "voni: moeda pulsa") ++pulsos;
+        if (l == "voni: porta aberta") ++portas;
+        if (l == "voni: moeda apanhada") ++moedas;
+    }
+    EXPECT(h.logs.size() >= 2);
+    if (h.logs.size() >= 2) {
+        EXPECT(h.logs[0] == "voni: fase a correr");   // o arranque
+        EXPECT(h.logs[1] == "voni: 42");              // o abs no debug
+    }
+    // a FÍSICA repôs 8 vezes (o ciclo de queda é 3 frames em 25 — a
+    // REPOLÍTICA é exist, que corre sempre; o when é EVENTO 1×)
+    EXPECT_MSG(repos == 8, "reposicao ×%d (o contrato é 8 — o exist da "
+                           "queda deixou de apanhar a subida?)", repos);
+    // o EVERY pulsa 5× (0.5s × 5 em 2.5s — o resto carrega)
+    EXPECT_MSG(pulsos == 5, "moeda pulsa ×%d (o contrato é 5)", pulsos);
+    // o AFTER abriu a porta 1× (aos 2.0s)
+    EXPECT_MSG(portas == 1, "porta aberta ×%d (o contrato é 1)", portas);
+    // o WHEN da chegada (a distance) apanhou a moeda 1× (o 1×-total)
+    EXPECT_MSG(moedas == 1, "moeda apanhada ×%d (o contrato é 1)", moedas);
+
+    // ---- o MUNDO mudou de verdade (o Host tem os estados) ------------------
+    // os spawns com nome único: box, box.001, esfera, box.002
+    EXPECT(h.tic("box") != nullptr);
+    EXPECT(h.tic("box.001") != nullptr);
+    EXPECT(h.tic("esfera") != nullptr);
+    EXPECT(h.tic("box.002") != nullptr);
+    // o jogador andou para a frente (a vel capped pelo min)
+    FakeTic* j = h.tic("box");
+    EXPECT(j != nullptr && j->pos[2] < -10.0f);
+    // a moeda subiu (o lerp a puxar para 1+vel)
+    FakeTic* m = h.tic("esfera");
+    EXPECT(m != nullptr && m->pos[1] > 1.0f);
+
+    // ---- os exports do Inspector -------------------------------------------
+    auto ex = s.exported();
+    EXPECT(ex.size() == 1);
+    if (ex.size() == 1) {
+        EXPECT(ex[0].name == "dado");
+        EXPECT(ex[0].value.t == Type::Int);
+        EXPECT(ex[0].value.i >= 1 && ex[0].value.i <= 6);   // o dado honesto
+    }
+}

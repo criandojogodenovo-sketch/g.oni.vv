@@ -10,11 +10,13 @@ morre no stop; R-054 + M-3.9c1/2/3; o relatório próprio diz o resto)
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-U (V.ONI BLOCO A — a REDUÇÃO DE TRABALHO) — EM CURSO
-  (3.9a fechada, vc 98)** (o dono abriu: View P universal + matemática
-  + distance + spawn + every/after/when; a prova do TODO é o CRITÉRIO
-  DO PLATFORMER — o Bloco A não fecha sem ele correr; as 7 features e
-  as regras vivem no RELATORIO-0.12-U-ABERTURA.md).
+- **Campanha 0.12-U (V.ONI BLOCO A — a REDUÇÃO DE TRABALHO) — FECHADA
+  (3.9a..3.9c + o FECHO, vc 98–100)** (as 7 features no registo — o
+  View P universal, as 14 Funções, o spawn pela porta do Host, os
+  relógios every/after/when com o estado por nó AST; 64 entradas; pins
+  ×37 + R-052/R-053/R-054 + M-3.9a1..c3; o CRITÉRIO DO PLATFORMER corre
+  VERDE — o juiz final; a história vive no RELATORIO-0.12-U-ABERTURA.md
+  e nos relatórios das sub-fases + o FECHO).
   **3.9a (vc 98)**: o View P aceita EXPRESSÃO dos 7 tipos via
   valueText() (a string de sempre byte a byte); as 14 FUNÇÕES no
   registo (Kind::Funcao NOVO — abs/min/max/clamp/lerp/floor/ceil/round/
@@ -22,16 +24,15 @@ morre no stop; R-054 + M-3.9c1/2/3; o relatório próprio diz o resto)
   despacho no evalCall consulta a TABELA e o argc vem da entrada; a fn
   do utilizador vence); pins ×15 + R-052 + M-3.9a1/a2/a3
   vermelho→verde. test_core 0 falhas · c33 1010/0 · vc 98.
-  **3.9b (vc 99)**: o spawn(tipo, x, y, z) → TIC — a entrada no registo
-  (Funcao argc 4/4), o despacho no evalCall (o TIPO é nome cru), o
-  Host::spawnTic NOVO (default honesto «indisponível») e a EngineHost
-  real (a lista viva esfera/box; ACTIVE/VISIBLE + Transform3D +
-  MeshRenderer prim + o NOME ÚNICO base.001); pins ×9 + R-053 +
-  M-3.9b1/b2 vermelho→verde. test_core 0 falhas · c33 1010/0 · vc 99.
+  **3.9b (vc 99)**: o spawn(tipo, x, y, z) → TIC — a entrada no registo,
+  o Host::spawnTic NOVO (default honesto) e a EngineHost real (a lista
+  viva esfera/box; ACTIVE/VISIBLE + Transform3D + prim + o NOME ÚNICO
+  base.001); pins ×9 + R-053 + M-3.9b1/b2. c33 1010/0 · vc 99.
   **3.9c (vc 100)**: every/after/when — a sintaxe nova no AST+parser
   (as 3 palavras reservadas), o estado POR NÓ AST no Impl (morre no
   stop; zero static); pins ×12 + R-054 + M-3.9c1/2/3. test_core 0
-  falhas · c33 1010/0 · vc 100. FALTA o FECHO (o platformer julga).
+  falhas · c33 1010/0 · vc 100. O FECHO correu (o platformer julgou
+  VERDE — a campanha fecha).
 - **Campanha 0.12-E (EMERGÊNCIA + REDESIGN 2.5D, FOGO AVERMELHADO) —
   FECHADA (E-1..E-3, vc 95–97)** (a ordem do dono abortou o SDF 3D;
   cláusulas: ZERO matemática 3D, ZERO mexidas no FontAtlas, TICs
@@ -47,22 +48,15 @@ morre no stop; R-054 + M-3.9c1/2/3; o relatório próprio diz o resto)
   SIMPLES 2D no UiContext, a maquinaria SDF/vidro/fogo fica DORMENTE
   (zero chamadores), 13 pins reformados + 6 recalibrações. c33 1007/0.
 - **Campanha 0.12-D (identidade visual) — PARCIALMENTE ABORTADA PELO
-  DONO (a 0.12-E)**: o D-4 (o LOGO, segmentos 2D) SOBREVIVE; o D-1 (o
-  shader SDF), o D-2 (o vidro real/falso) e o D-3 (o fogo do shader)
-  estão DORMENTES no código (zero chamadores — a história completa com
-  as mutações vive no RELATORIO-0.12-D.md §1..3); D-5..D-8 CANCELADOS
-  pela emergência. A FASE 3 do E re-faz a borda ativa como textura de
-  ruído 2D em scroll (a ordem do dono).
-  (D-1 vc 91 · D-2 vc 92 · D-3 vc 93 · D-4 vc 94 — os DETALHES
-  completos com os pins/mutações vivem no RELATORIO-0.12-D.md §1..4;
-  os commits af41059/660e347/58710ce/ae62bf0 contam o resto.)
+  DONO (a 0.12-E)**: o D-4 (o LOGO, vc 94) SOBREVIVE; o D-1 (SDF), o
+  D-2 (vidro) e o D-3 (fogo) estão DORMENTES (zero chamadores — vc
+  91-93); D-5..D-8 CANCELADOS. A história vive no
+  RELATORIO-0.12-D.md §1..4.
 - **Campanha 0.12-C (layout, organização e consistência) — FECHADA
-  (C-1..C-4, vc 87–90)** (o CI do push é o árbitro; os DETALHES vivem no
-  RELATORIO-0.12-C.md; a cláusula é anti-superficialidade — nada de
-  controlos «de fachada»): C-1 as proporções (a hierarquia 20%, o
-  viewport ≥60%), C-2 os menus e a barra de topo, C-3 a tipografia/
-  idioma/superfícies (a ESCADA de 4 tons), C-4 o seletor + os estados
-  vazios com AÇÃO + a REPARAÇÃO da árvore (614 ficheiros de volta).
+  (C-1..C-4, vc 87–90)** (os DETALHES no RELATORIO-0.12-C.md): C-1 as
+  proporções (a hierarquia 20%, o viewport ≥60%), C-2 os menus e a
+  barra de topo, C-3 a tipografia/idioma/superfícies, C-4 o seletor +
+  os vazios com AÇÃO + a REPARAÇÃO da árvore (614 de volta).
 - **Campanha 0.12-B (arquitetura da UI) — FECHADA (B-1..B-4, vc 83–86)**
   (os DETALHES vivem no RELATORIO-0.12-B.md): B-1 a árvore de UI (pins
   ×9, R-050), B-2 o Inspector de UI (pins ×5), B-3 o canvas (pins ×3),
@@ -79,6 +73,10 @@ morre no stop; R-054 + M-3.9c1/2/3; o relatório próprio diz o resto)
 
 ## §2 O que está FEITO
 
+- 0.12-U FECHO (vc 100) — o CRITÉRIO DO PLATFORMER corre VERDE (o pin
+  platformer_bloco_a_juiz_final: 7 features em cadeia, os contadores do
+  juiz batem) + README/ARCHITECTURE §5/BACKLOG atualizados (no
+  RELATORIO-0.12-U-FECHO.md) — a CAMPANHA 0.12-U FECHA.
 - 0.12-U 3.9c (vc 100) — os relógios every/after/when (no
   RELATORIO-0.12-U-3.9c.md): o estado por nó AST; pins ×12 + R-054 +
   M-3.9c1/2/3.
