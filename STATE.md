@@ -1,11 +1,9 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-19 · vc: 97 · Último commit: este (o 0.12-E E-3, OS
-EFEITOS 2.5D + O FECHO DA CAMPANHA — o vidro α0.85 + a linha âmbar do
-topo, a sombra falsa preta 15% deslocada 3dp, os ativos com o gradiente
-fireRed→fireOrange e a borda de ruído 2D em scroll lento (o ui/Noise2D.h
-NOVO, GL_REPEAT honesto no stub); pins ×4 + M-E3a/b + a FASE 35; a
-campanha 0.12-E FECHA com o CI como árbitro)
+Atualizado: 2026-10-19 · vc: 98 · Último commit: este (o 0.12-U 3.9a — a
+primeira sub-fase do Bloco A, a REDUÇÃO DE TRABALHO da V.ONI: o View P
+universal + as 14 funções do registo + a distance; R-052 + M-3.9a1/2/3;
+o relatório próprio diz o resto)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -13,35 +11,32 @@ campanha 0.12-E FECHA com o CI como árbitro)
 
 ## §1 Onde estamos
 
+- **Campanha 0.12-U (V.ONI BLOCO A — a REDUÇÃO DE TRABALHO) — EM CURSO
+  (3.9a fechada, vc 98)** (o dono abriu: View P universal + matemática
+  + distance + spawn + every/after/when; a prova do TODO é o CRITÉRIO
+  DO PLATFORMER — o Bloco A não fecha sem ele correr; as 7 features e
+  as regras vivem no RELATORIO-0.12-U-ABERTURA.md).
+  **3.9a (vc 98)**: o View P aceita EXPRESSÃO dos 7 tipos via
+  valueText() (a string de sempre byte a byte); as 14 FUNÇÕES no
+  registo (Kind::Funcao NOVO — abs/min/max/clamp/lerp/floor/ceil/round/
+  sqrt/sin/cos/random/random_int/distance; sin/cos em GRAUS; o
+  despacho no evalCall consulta a TABELA e o argc vem da entrada; a fn
+  do utilizador vence); pins ×15 + R-052 + M-3.9a1/a2/a3
+  vermelho→verde. test_core 0 falhas · c33 1010/0 · vc 98.
 - **Campanha 0.12-E (EMERGÊNCIA + REDESIGN 2.5D, FOGO AVERMELHADO) —
-  FECHADA (E-1..E-3, vc 95–97)** (a ordem do dono abortou o SDF 3D —
-  «Desliga o SDF e o cálculo 3D. Volta ao desenho simples no
-  UiContext»; cláusulas: ZERO matemática 3D, ZERO mexidas no FontAtlas,
-  a arquitetura de TICs intocada; os DETALHES vivem no
-  RELATORIO-0.12-E.md).
-  **E-3 (os efeitos 2.5D, vc 97)**: o vidro α0.85 + a LINHA ÂMBAR 1dp
-  do topo a 20% (o glassTopLine troca o glow pelo accent); a SOMBRA
-  FALSA preta α0.15 deslocada 3dp por baixo de cada botão (o token
-  dropShadow NOVO; o dp() da lei R-018); os ATIVOS com o gradiente
-  fireRed→fireOrange; a BORDA DE RUÍDO 2D em scroll lento (o
-  ui/Noise2D.h NOVO — tileável determinístico; a textura GL_REPEAT no
-  Renderer; o fireBorder2D no batch de imagens; o stub honra o REPEAT);
-  pins ×4 (test_012e_efeitos.cpp) + M-E3a/M-E3b vermelho→verde + a
-  FASE 35 do c33. test_core 0 falhas · c33 1010/0 · vc 97. O C33 REAL
-  (os PNGs do editor/menus) segue com a entrega.
-  **E-2 (o tema, vc 96)**: a paleta EXATA do dono no Theme.h — o
-  surface #141416, o text1 #F2F2F5 (+ o voniUser), os tokens NOVOS
-  fireRed/fireOrange (o combustível da FASE 3); os static_asserts do
-  UiContext.h + os 2 pins de varredura aferraram a fonte única no 1.º
-  build e foram curados no MESMO commit; 4 recalibrações com nota.
-  test_core 0 falhas · c33 1007/0 · vc 96.
-  **E-1 (a restauração, vc 95)**: o CHOKE POINT drawButtonVisual e o
-  iconButton voltam ao padrão Y-1; o VIDRO REAL sai do frame (o bloco de
-  captura do main.cpp) e o FALSO sai dos painéis (panel + glassTopLine);
-  os 6 menus voltam ao panelRounded; a maquinaria SDF/vidro/fogo fica
-  DORMENTE (zero chamadores); pins REFORMADOS (012d_sdf/vidro/fogo
-  apagados — 13 pins; FASE 32/33 do c33 — 9 checks) + 6 recalibrações
-  de volta. test_core 0 falhas · c33 1007/0 · vc 95.
+  FECHADA (E-1..E-3, vc 95–97)** (a ordem do dono abortou o SDF 3D;
+  cláusulas: ZERO matemática 3D, ZERO mexidas no FontAtlas, TICs
+  intocados; os DETALHES vivem no RELATORIO-0.12-E.md).
+  **E-3 (vc 97)**: o vidro α0.85 + a linha âmbar 1dp a 20%, a sombra
+  falsa preta α0.15 deslocada 3dp, os ativos com o gradiente
+  fireRed→fireOrange e a borda de ruído 2D em scroll (o ui/Noise2D.h
+  NOVO); pins ×4 + M-E3a/b + a FASE 35. c33 1010/0.
+  **E-2 (vc 96)**: a paleta EXATA do dono no Theme.h (o surface #141416,
+  o text1 #F2F2F5, os tokens fireRed/fireOrange novos); os
+  static_asserts aferraram a fonte única no 1.º build. c33 1007/0.
+  **E-1 (vc 95)**: a restauração da UI básica — o desenho volta ao
+  SIMPLES 2D no UiContext, a maquinaria SDF/vidro/fogo fica DORMENTE
+  (zero chamadores), 13 pins reformados + 6 recalibrações. c33 1007/0.
 - **Campanha 0.12-D (identidade visual) — PARCIALMENTE ABORTADA PELO
   DONO (a 0.12-E)**: o D-4 (o LOGO, segmentos 2D) SOBREVIVE; o D-1 (o
   shader SDF), o D-2 (o vidro real/falso) e o D-3 (o fogo do shader)
@@ -87,15 +82,19 @@ campanha 0.12-E FECHA com o CI como árbitro)
 
 ## §2 O que está FEITO
 
-- 0.12-E E-3 (vc 97) — os efeitos 2.5D + O FECHO (no RELATORIO-0.12-E.md
-  §3): sombra falsa, vidro 0.85+âmbar, gradiente fogo, ruído em scroll;
-  pins ×4 + M-E3a/b; a FASE 35; a campanha 0.12-E FECHA.
-- 0.12-E E-2 (vc 96) — o tema FOGO AVERMELHADO (no RELATORIO-0.12-E.md
-  §2): a paleta exata do dono, os 2 tokens novos, os gates a aferrar a
-  fonte única.
-- 0.12-E E-1 (vc 95) — a restauração da UI básica (no RELATORIO-0.12-E.md
-  §1): o SDF 3D abortado pelo dono, o desenho simples 2D de volta, os 13
-  pins reformados + as FASE 32/33 do c33, as 6 recalibrações de volta.
+- 0.12-U 3.9a (vc 98) — o View P universal + as 14 funções do registo +
+  a distance (no RELATORIO-0.12-U-3.9a.md): pins ×15 + R-052 +
+  M-3.9a1/a2/a3; a campanha 0.12-U abre com o critério do platformer
+  como juiz final.
+- 0.12-E E-3 (vc 97) — os efeitos 2.5D + o FECHO da 0.12-E (no
+  RELATORIO-0.12-E.md §3): sombra falsa, vidro 0.85+âmbar, gradiente
+  fogo, ruído em scroll; pins ×4 + M-E3a/b; a FASE 35.
+- 0.12-E E-2 (vc 96) — o tema FOGO AVERMELHADO (§2 do relatório): a
+  paleta exata do dono, os 2 tokens novos, os gates a aferrar a fonte
+  única.
+- 0.12-E E-1 (vc 95) — a restauração da UI básica (§1): o SDF 3D
+  abortado pelo dono, o desenho simples 2D de volta, os 13 pins
+  reformados + as FASE 32/33 do c33, as 6 recalibrações de volta.
 - 0.12-D D-4 (vc 94) — o logo «G em chama» (no RELATORIO-0.12-D.md §4):
   as setas mortas, a rampa por traço, o ignite, as 3 versões, o espelho
   Java, o overdraw da barra; pins ×4 + M-D4a/b; a FASE 34.

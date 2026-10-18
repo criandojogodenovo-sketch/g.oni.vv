@@ -189,12 +189,14 @@ v#vida:Int=100 · v#@+velocidade:Num=5.5
 ## Comandos
 
 ### View P
-- **Sintaxe**: `View P "texto"`
-- **Descrição**: Escreve texto no log da engine (prefixo voni:).
+- **Sintaxe**: `View P "texto" · View P expressão`
+- **Descrição**: Escreve no log da engine (prefixo voni:) — texto entre aspas OU qualquer valor (Int Num Txt Bool Vec2 Vec3 TIC); 0.12-U (3.9a).
 - **Equivalência**: print()
 - **Exemplo**:
 ```
 View P "ola mundo"
+View P 42
+View P jogador.pos
 ```
 
 ### View Object
@@ -276,6 +278,135 @@ v++px=Search.jogador.pos.x
 - **Exemplo**:
 ```
 jogador.pos.x=5
+```
+
+## Funções
+
+### abs
+- **Sintaxe**: `abs(x)`
+- **Descrição**: Valor absoluto: Int devolve Int, Num devolve Num.
+- **Equivalência**: abs() (igual)
+- **Exemplo**:
+```
+v++d=abs(-5)
+```
+
+### min
+- **Sintaxe**: `min(a, b)`
+- **Descrição**: O menor de dois números (Int com Int devolve Int; Num misturado devolve Num).
+- **Equivalência**: min(a, b)
+- **Exemplo**:
+```
+v++m=min(vida, 0)
+```
+
+### max
+- **Sintaxe**: `max(a, b)`
+- **Descrição**: O maior de dois números (Int com Int devolve Int; Num misturado devolve Num).
+- **Equivalência**: max(a, b)
+- **Exemplo**:
+```
+v++m=max(vida, 0)
+```
+
+### clamp
+- **Sintaxe**: `clamp(v, lo, hi)`
+- **Descrição**: Limita v ao intervalo [lo, hi] (v abaixo de lo devolve lo; acima de hi devolve hi).
+- **Equivalência**: max(lo, min(hi, v))
+- **Exemplo**:
+```
+v++v=clamp(vel, 0, 10)
+```
+
+### lerp
+- **Sintaxe**: `lerp(a, b, t)`
+- **Descrição**: Interpolação linear de a até b por t (0 = a, 1 = b, 0.5 = a meio); devolve Num.
+- **Equivalência**: a + (b - a) * t
+- **Exemplo**:
+```
+v++x=lerp(0, 10, 0.25)
+```
+
+### floor
+- **Sintaxe**: `floor(x)`
+- **Descrição**: Arredonda PARA BAIXO ao inteiro (2.7 → 2, -2.1 → -3); devolve Int.
+- **Equivalência**: math.floor(x) / Math.floor(x)
+- **Exemplo**:
+```
+v++n=floor(2.7)
+```
+
+### ceil
+- **Sintaxe**: `ceil(x)`
+- **Descrição**: Arredonda PARA CIMA ao inteiro (2.1 → 3, -2.7 → -2); devolve Int.
+- **Equivalência**: math.ceil(x) / Math.ceil(x)
+- **Exemplo**:
+```
+v++n=ceil(2.1)
+```
+
+### round
+- **Sintaxe**: `round(x)`
+- **Descrição**: Arredonda ao inteiro mais próximo (meio afasta do zero: 2.5 → 3, -2.5 → -3); devolve Int.
+- **Equivalência**: round(x) / Math.round(x)
+- **Exemplo**:
+```
+v++n=round(2.5)
+```
+
+### sqrt
+- **Sintaxe**: `sqrt(x)`
+- **Descrição**: Raiz quadrada; x negativo é erro legível (com linha).
+- **Equivalência**: math.sqrt(x) / Math.sqrt(x)
+- **Exemplo**:
+```
+v++r=sqrt(9)
+```
+
+### sin
+- **Sintaxe**: `sin(graus)`
+- **Descrição**: Seno de um ângulo em GRAUS (não radianos); devolve Num.
+- **Equivalência**: math.sin(radians(x)) / Math.sin(x * PI / 180)
+- **Exemplo**:
+```
+v++s=sin(90)
+```
+
+### cos
+- **Sintaxe**: `cos(graus)`
+- **Descrição**: Cosseno de um ângulo em GRAUS (não radianos); devolve Num.
+- **Equivalência**: math.cos(radians(x)) / Math.cos(x * PI / 180)
+- **Exemplo**:
+```
+v++c=cos(0)
+```
+
+### random
+- **Sintaxe**: `random()`
+- **Descrição**: Número aleatório Num em [0, 1) (0 incluso, 1 exclusivo) — novo a cada chamada.
+- **Equivalência**: random() / Math.random()
+- **Exemplo**:
+```
+v++d=random()
+```
+
+### random_int
+- **Sintaxe**: `random_int(min, max)`
+- **Descrição**: Inteiro aleatório ENTRE min e max (ambos inclusos); min > max é erro legível.
+- **Equivalência**: randint(min, max)
+- **Exemplo**:
+```
+v++dado=random_int(1, 6)
+```
+
+### distance
+- **Sintaxe**: `distance(a, b)`
+- **Descrição**: Distância entre dois pontos: cada argumento é um TIC (usa a pos dele) ou um Vec3 (ex.: jogador.pos); devolve Num.
+- **Equivalência**: hipot / dist entre posições
+- **Exemplo**:
+```
+v++d=distance(jogador, alvo)
+v++d2=distance(jogador.pos, alvo.pos)
 ```
 
 ## Linkers

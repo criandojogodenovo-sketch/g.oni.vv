@@ -1993,3 +1993,315 @@ TEST(exemplo_8_5_no_c33) {
         EXPECT(err.message.find("ciclo") != std::string::npos);
     }
 }
+
+// ===========================================================================
+// 0.12-U (3.9a) — View P UNIVERSAL + MATEMÁTICA INLINE + DISTANCE
+// O registo é a fonte única (as 14 entradas Kind::Funcao); a fn do
+// utilizador vence; sin/cos em GRAUS; erros com linha que ensinam.
+// ===========================================================================
+
+TEST(view_p_012u_num_bool_txt) {
+    RunResult r = runScript(R"VONI(
+central main {
+  on moment {
+    View P 42
+    View P true
+    View P 2.5
+    View P "texto de sempre"
+  }
+  allmoments { }
+}
+)VONI");
+    EXPECT(r.ok);
+    if (!r.ok || r.host.logs.size() < 4) return;   // guarda: a mutação falha antes
+    EXPECT(r.host.logs.size() == 4);
+    EXPECT(r.host.logs[0] == "voni: 42");
+    EXPECT(r.host.logs[1] == "voni: true");
+    EXPECT(r.host.logs[2] == "voni: 2.5");
+    EXPECT(r.host.logs[3] == "voni: texto de sempre");   // compat byte a byte
+}
+
+TEST(view_p_012u_vec_tic_e_componentes) {
+    FakeHost h;
+    h.tics.push_back({"jogador", {1, 2, 3}});
+    Error err;
+    Script s = Script::compile(
+        "central main { on moment { View P jogador View P jogador.pos "
+        "View P jogador.pos.x } allmoments { } }", err);
+    EXPECT(err.ok);
+    const bool st = s.runStart(h, err);
+    EXPECT(st);
+    if (!st || h.logs.size() < 3) return;   // guarda: a mutação falha antes
+    EXPECT(h.logs.size() == 3);
+    EXPECT(h.logs[0] == "voni: jogador");          // TIC → o nome
+    EXPECT(h.logs[1] == "voni: (1, 2, 3)");        // Vec3 → formato do valor
+    EXPECT(h.logs[2] == "voni: 1");                // componente .x → Num
+}
+
+TEST(view_p_012u_expressao_e_concat) {
+    RunResult r = runScript(R"VONI(
+central main {
+  on moment {
+    View P ("a" + "b")
+    View P (2 * 3)
+    View P abs(-7)
+  }
+  allmoments { }
+}
+)VONI");
+    EXPECT(r.ok);
+    if (!r.ok || r.host.logs.size() < 3) return;   // guarda: a mutação falha antes
+    EXPECT(r.host.logs.size() == 3);
+    EXPECT(r.host.logs[0] == "voni: ab");
+    EXPECT(r.host.logs[1] == "voni: 6");
+    EXPECT(r.host.logs[2] == "voni: 7");
+}
+
+TEST(mat_abs_preserva_o_tipo) {
+    RunResult r = runScript(R"VONI(
+v#@+i:Int=abs(-5)
+v#@+n:Num=abs(-2.5)
+v#@+z:Int=abs(3)
+central main { on moment { } allmoments { } }
+)VONI");
+    EXPECT(r.ok);
+    auto ex = r.script.exported();
+    EXPECT(ex.size() == 3);
+    EXPECT(ex[0].value.t == Type::Int && ex[0].value.i == 5);
+    EXPECT(ex[1].value.t == Type::Num);
+    EXPECT(std::fabs(ex[1].value.n - 2.5) < 1e-12);
+    EXPECT(ex[2].value.t == Type::Int && ex[2].value.i == 3);
+}
+
+TEST(mat_min_max_com_promocao) {
+    RunResult r = runScript(R"VONI(
+v#@+a:Int=min(3, 7)
+v#@+b:Num=max(2, 5.5)
+v#@+c:Int=min(-1, -7)
+central main { on moment { } allmoments { } }
+)VONI");
+    EXPECT(r.ok);
+    auto ex = r.script.exported();
+    EXPECT(ex[0].value.t == Type::Int && ex[0].value.i == 3);
+    EXPECT(ex[1].value.t == Type::Num);   // Num misturado → Num
+    EXPECT(std::fabs(ex[1].value.n - 5.5) < 1e-12);
+    EXPECT(ex[2].value.t == Type::Int && ex[2].value.i == -7);
+}
+
+TEST(mat_clamp_limita_e_erro_ordem) {
+    RunResult r = runScript(R"VONI(
+v#@+a:Int=clamp(15, 0, 10)
+v#@+b:Int=clamp(-3, 0, 10)
+v#@+c:Int=clamp(5, 0, 10)
+v#@+d:Num=clamp(2.5, 0, 10)
+central main { on moment { } allmoments { } }
+)VONI");
+    EXPECT(r.ok);
+    auto ex = r.script.exported();
+    EXPECT(ex[0].value.i == 10);   // acima → hi
+    EXPECT(ex[1].value.i == 0);    // abaixo → lo
+    EXPECT(ex[2].value.i == 5);    // dentro → v
+    EXPECT(ex[3].value.t == Type::Num);   // Num misturado → Num
+    // o mínimo maior que o máximo é erro legível (com linha)
+    RunResult e = runScript(
+        "central main { on moment { v++x=clamp(1, 5, 2) } allmoments { } }");
+    EXPECT(!e.ok);
+    EXPECT(e.err.message.find("mínimo") != std::string::npos);
+    EXPECT(e.err.line == 1);
+}
+
+TEST(mat_lerp_interpolacao_linear) {
+    RunResult r = runScript(R"VONI(
+v#@+a:Num=lerp(0, 10, 0.25)
+v#@+b:Num=lerp(10, 20, 0)
+v#@+c:Num=lerp(10, 20, 1)
+central main { on moment { } allmoments { } }
+)VONI");
+    EXPECT(r.ok);
+    auto ex = r.script.exported();
+    EXPECT(std::fabs(ex[0].value.n - 2.5) < 1e-12);
+    EXPECT(std::fabs(ex[1].value.n - 10.0) < 1e-12);
+    EXPECT(std::fabs(ex[2].value.n - 20.0) < 1e-12);
+}
+
+TEST(mat_floor_ceil_round_exatos) {
+    RunResult r = runScript(R"VONI(
+v#@+a:Int=floor(2.7)
+v#@+b:Int=floor(-2.1)
+v#@+c:Int=ceil(2.1)
+v#@+d:Int=ceil(-2.7)
+v#@+e:Int=round(2.5)
+v#@+f:Int=round(-2.5)
+v#@+g:Int=round(2.4)
+central main { on moment { } allmoments { } }
+)VONI");
+    EXPECT(r.ok);
+    auto ex = r.script.exported();
+    EXPECT(ex[0].value.i == 2);
+    EXPECT(ex[1].value.i == -3);   // floor para baixo
+    EXPECT(ex[2].value.i == 3);
+    EXPECT(ex[3].value.i == -2);   // ceil para cima
+    EXPECT(ex[4].value.i == 3);    // meio afasta do zero
+    EXPECT(ex[5].value.i == -3);
+    EXPECT(ex[6].value.i == 2);
+}
+
+TEST(mat_sqrt_e_negativo_erro_com_linha) {
+    RunResult r = runScript(R"VONI(
+v#@+a:Num=sqrt(9)
+v#@+b:Num=sqrt(2)
+central main { on moment { } allmoments { } }
+)VONI");
+    EXPECT(r.ok);
+    auto ex = r.script.exported();
+    EXPECT(ex[0].value.t == Type::Num && std::fabs(ex[0].value.n - 3.0) < 1e-12);
+    EXPECT(std::fabs(ex[1].value.n - 1.4142135623730951) < 1e-9);
+    RunResult e = runScript(
+        "central main { on moment { v++x=sqrt(-1) } allmoments { } }");
+    EXPECT(!e.ok);
+    EXPECT(e.err.message.find("negativo") != std::string::npos);
+    EXPECT(e.err.line == 1);
+}
+
+TEST(mat_sin_cos_em_graus) {
+    RunResult r = runScript(R"VONI(
+v#@+a:Num=sin(0)
+v#@+b:Num=sin(90)
+v#@+c:Num=cos(0)
+v#@+d:Num=cos(180)
+v#@+e:Num=sin(30)
+central main { on moment { } allmoments { } }
+)VONI");
+    EXPECT(r.ok);
+    auto ex = r.script.exported();
+    EXPECT(std::fabs(ex[0].value.n) < 1e-12);
+    EXPECT(std::fabs(ex[1].value.n - 1.0) < 1e-9);     // 90 GRAUS = 1
+    EXPECT(std::fabs(ex[2].value.n - 1.0) < 1e-12);
+    EXPECT(std::fabs(ex[3].value.n + 1.0) < 1e-9);     // 180 GRAUS = -1
+    EXPECT(std::fabs(ex[4].value.n - 0.5) < 1e-9);     // 30 GRAUS = 0.5
+}
+
+TEST(mat_random_na_faixa_0_1) {
+    RunResult r = runScript(R"VONI(
+v#@+a:Num=random()
+v#@+b:Num=random()
+v#@+c:Num=random()
+v#@+d:Num=random()
+v#@+e:Num=random()
+central main { on moment { } allmoments { } }
+)VONI");
+    EXPECT(r.ok);
+    auto ex = r.script.exported();
+    int distintos = 0;
+    for (size_t i = 0; i < ex.size(); ++i) {
+        EXPECT(ex[i].value.t == Type::Num);
+        EXPECT(ex[i].value.n >= 0.0 && ex[i].value.n < 1.0);
+        if (ex[i].value.n != ex[0].value.n) {
+            ++distintos;
+        }
+    }
+    EXPECT(distintos >= 1);   // novo a cada chamada (5 amostras)
+}
+
+TEST(mat_random_int_no_intervalo_fechado) {
+    RunResult r = runScript(R"VONI(
+v#@+a:Int=random_int(1, 6)
+v#@+b:Int=random_int(1, 6)
+v#@+c:Int=random_int(1, 6)
+v#@+d:Int=random_int(-2, 2)
+v#@+e:Int=random_int(7, 7)
+central main { on moment { } allmoments { } }
+)VONI");
+    EXPECT(r.ok);
+    auto ex = r.script.exported();
+    for (int i = 0; i < 3; ++i) {
+        EXPECT(ex[(size_t)i].value.t == Type::Int);
+        EXPECT(ex[(size_t)i].value.i >= 1 && ex[(size_t)i].value.i <= 6);
+    }
+    EXPECT(ex[3].value.i >= -2 && ex[3].value.i <= 2);
+    EXPECT(ex[4].value.i == 7);   // intervalo unitário
+    // min > max = erro legível
+    RunResult e = runScript(
+        "central main { on moment { v++x=random_int(5, 3) } "
+        "allmoments { } }");
+    EXPECT(!e.ok);
+    EXPECT(e.err.message.find("maior que o máximo") != std::string::npos);
+    // limite não inteiro = erro legível
+    RunResult e2 = runScript(
+        "central main { on moment { v++x=random_int(1.5, 6) } "
+        "allmoments { } }");
+    EXPECT(!e2.ok);
+    EXPECT(e2.err.message.find("inteiros") != std::string::npos);
+}
+
+TEST(mat_arity_e_desconhecida_ensinam) {
+    // o argc vem da ENTRADA do registo (a fonte única) e o erro ENSINA
+    RunResult a = runScript(
+        "central main { on moment { v++x=abs() } allmoments { } }");
+    EXPECT(!a.ok);
+    EXPECT(a.err.message.find("abs(x)") != std::string::npos);
+    EXPECT(a.err.line == 1);
+    RunResult b = runScript(
+        "central main { on moment { v++x=min(1) } allmoments { } }");
+    EXPECT(!b.ok);
+    EXPECT(b.err.message.find("min(a, b)") != std::string::npos);
+    // desconhecida continua com o erro de sempre
+    RunResult c = runScript(
+        "central main { on moment { v++x=gato(1) } allmoments { } }");
+    EXPECT(!c.ok);
+    EXPECT(c.err.message.find("'gato' não é uma função") != std::string::npos);
+}
+
+TEST(distance_tic_e_vec3) {
+    FakeHost h;
+    h.tics.push_back({"a", {0, 0, 0}});
+    h.tics.push_back({"b", {3, 4, 0}});
+    h.tics.push_back({"c", {0, 0, 2}});
+    Error err;
+    // TIC × TIC, Vec3 × Vec3 (propriedades), TIC × Vec3 (variável) e o
+    // EIXO Z (o 3-4-5 tem z=0 — o c do eixo z puro fecha a vaca)
+    Script s = Script::compile(R"VONI(
+v#p:Vec3=Search.b.pos
+v#@+d1:Num=distance(a, b)
+v#@+d2:Num=distance(a.pos, b.pos)
+v#@+d3:Num=distance(a, p)
+v#@+d4:Num=distance(a, c)
+central main { on moment { } allmoments { } }
+)VONI", err);
+    EXPECT(err.ok);
+    EXPECT(s.runStart(h, err));
+    auto ex = s.exported();
+    EXPECT(ex.size() == 4);
+    if (ex.size() < 4) return;
+    EXPECT(std::fabs(ex[0].value.n - 5.0) < 1e-9);    // o 3-4-5
+    EXPECT(std::fabs(ex[1].value.n - 5.0) < 1e-9);
+    EXPECT(std::fabs(ex[2].value.n - 5.0) < 1e-9);
+    EXPECT(std::fabs(ex[3].value.n - 2.0) < 1e-9);    // o eixo z conta
+    // argumento que não é TIC nem Vec3 = erro que ensina
+    RunResult e = runScript(
+        "central main { on moment { v++x=distance(\"x\", 1) } "
+        "allmoments { } }");
+    EXPECT(!e.ok);
+    EXPECT(e.err.message.find("TIC ou um Vec3") != std::string::npos);
+    // TIC inexistente = erro de resolução com linha
+    RunResult e2 = runScript(
+        "central main { on moment { v++x=distance(fantasma, a) } "
+        "allmoments { } }");
+    EXPECT(!e2.ok);
+    EXPECT(e2.err.message.find("fantasma") != std::string::npos);
+    EXPECT(e2.err.line == 1);
+}
+
+TEST(mat_fn_do_utilizador_vence_a_funcao_do_registo) {
+    // compat: quem já tinha fn min() continua a correr a DELE (o shadow é
+    // a regra da casa — params/globais fazem shadow, fns também)
+    RunResult r = runScript(R"VONI(
+fn min(a:Num, b:Num):Num { return a + b }
+v#@+x:Num=min(3, 7)
+central main { on moment { } allmoments { } }
+)VONI");
+    EXPECT(r.ok);
+    auto ex = r.script.exported();
+    EXPECT(ex[0].value.t == Type::Num);
+    EXPECT(std::fabs(ex[0].value.n - 10.0) < 1e-12);   // a DELE soma
+}

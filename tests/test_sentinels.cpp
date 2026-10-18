@@ -7149,3 +7149,130 @@ TEST(regress_impostors) {
                0.0f);
     }
 }
+
+// ===========================================================================
+// R-052 (0.12-U 3.9a) — A MATEMÁTICA É DO REGISTO, EM GRAUS, E O VIEW P É
+// UNIVERSAL. O que se vigia: (1) as funções existem APENAS porque a tabela
+// central as lista (a fonte única — apagar a entrada mata a função no
+// runtime); (2) sin/cos são em GRAUS (o contrato da casa — radianos é
+// regressão silenciosa); (3) o View P aceita os 7 tipos (o universal do
+// 3.9a — rejeitar não-Txt é a regressão do comando antigo); (4) a fn do
+// utilizador VENCE a função do registo (compat — o shadow da casa).
+// A mutação cola no RELATORIO-0.12-U-3.9a.md (M-3.9a1/a2).
+// ===========================================================================
+#include "voni/Voni.h"
+#include "voni/VoniRegistry.h"
+
+namespace {
+
+struct Host052 : voni::Host {
+    std::vector<std::string> logs;
+    void log(const char* l) override { logs.push_back(l); }
+    bool getProp(const std::string&, const std::vector<std::string>&,
+                 voni::Value&, std::string&) override { return false; }
+    bool setProp(const std::string&, const std::vector<std::string>&,
+                 const voni::Value&, std::string&) override { return false; }
+    bool ticExists(const std::string&) override { return false; }
+    void moveTic(f32, f32, f32) override {}
+    void explodeTic(bool) override {}
+    bool importAnim(const std::string&, std::string&) override {
+        return false;
+    }
+    bool transitionTo(const std::string&, const std::string&,
+                      std::string&) override { return false; }
+    std::string currentSceneName() override { return "c"; }
+    bool search(const std::string&, const std::vector<std::string>&,
+                voni::Value&, std::string&) override { return false; }
+    f64 frameDt() override { return 1.0 / 60.0; }
+};
+
+} // namespace
+
+TEST(regress_voni_matematica) {
+    using namespace voni;
+
+    // ---- (1) A FONTE ÚNICA: as 14 entradas existem como Kind::Funcao com
+    // Docs completas e o argc declarado (o mesmo contrato dos componentes)
+    static const char* const kFns[] = {
+        "abs", "min", "max", "clamp", "lerp", "floor", "ceil", "round",
+        "sqrt", "sin", "cos", "random", "random_int", "distance",
+    };
+    for (const char* n : kFns) {
+        const reg::Entry* e = reg::find(n);
+        EXPECT_MSG(e != nullptr, "a função '%s' saiu do registo — a fonte "
+                                 "única mente", n);
+        if (!e) continue;
+        EXPECT(e->kind == reg::Kind::Funcao);
+        EXPECT(e->syntax != nullptr && *e->syntax);
+        EXPECT(e->desc != nullptr && *e->desc);
+        EXPECT(e->example != nullptr && *e->example);
+        EXPECT(e->equiv != nullptr && *e->equiv);
+        EXPECT(e->maxArgs >= e->minArgs);
+    }
+    // o despacho runtime DEPENDE do kind: um nome que não é Funcao não
+    // chama (o 'View P' de sempre NÃO é função)
+    {
+        const reg::Entry* vp = reg::find("View P");
+        EXPECT(vp != nullptr && vp->kind == reg::Kind::Comando);
+    }
+
+    // ---- (2) GRAUS: sin(90) == 1 e cos(180) == -1 (radianos = regressão) -
+    {
+        Error err;
+        Script s = Script::compile(
+            "central main { on moment { View P sin(90) View P cos(180) } "
+            "allmoments { } }", err);
+        EXPECT(err.ok);
+        Host052 h;
+        EXPECT(s.runStart(h, err));
+        EXPECT(h.logs.size() == 2);
+        if (h.logs.size() == 2) {
+            EXPECT_MSG(h.logs[0] == "voni: 1",
+                       "sin(90) deu '%s' — graus virou radianos?",
+                       h.logs[0].c_str());
+            EXPECT(h.logs[1] == "voni: -1");
+        }
+    }
+
+    // ---- (3) VIEW P UNIVERSAL: número e booleano chegam ao log (a
+    // regressão é o comando antigo que exigia Txt entre aspas)
+    {
+        Error err;
+        Script s = Script::compile(
+            "central main { on moment { View P 42 View P true } "
+            "allmoments { } }", err);
+        EXPECT(err.ok);
+        Host052 h;
+        EXPECT(s.runStart(h, err));
+        EXPECT(h.logs.size() == 2);
+        if (h.logs.size() == 2) {
+            EXPECT(h.logs[0] == "voni: 42");
+            EXPECT(h.logs[1] == "voni: true");
+        }
+    }
+
+    // ---- (4) A FN DO UTILIZADOR VENCE (compat — o shadow da casa) --------
+    {
+        Error err;
+        Script s = Script::compile(
+            "fn abs(n:Num):Num { return n + 1 }\n"
+            "central main { on moment { View P abs(4) } allmoments { } }",
+            err);
+        EXPECT(err.ok);
+        Host052 h;
+        EXPECT(s.runStart(h, err));
+        EXPECT(h.logs.size() == 1);
+        if (h.logs.size() == 1) {
+            EXPECT(h.logs[0] == "voni: 5");   // a DELE soma (não |4|)
+        }
+    }
+
+    // ---- (5) a referência pública tem a secção FUNÇÕES (a fonte única
+    // alimenta a referência — o R-013 afere o byte a byte das linhas)
+    {
+        const std::string ref = reg::fullReferenceMarkdown();
+        EXPECT(ref.find("## Funções") != std::string::npos);
+        EXPECT(ref.find("### distance") != std::string::npos);
+        EXPECT(ref.find("### random_int") != std::string::npos);
+    }
+}

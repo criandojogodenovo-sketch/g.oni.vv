@@ -155,9 +155,12 @@ Assignment  <- Path AssignOp Expr
 AssignOp    <- < '+=' / '=' >
 # ViewStmt: o ÚNICO comando com segmentos separados por ESPAÇO (spec §9:
 # `View P "texto"` / `View Object`) — ANTES de Path (senão Path comia só
-# [View] e sobrava 'P'). Os restantes comandos são cadeias de pontos.
+# [View] e sobrava 'P'). 0.12-U (3.9a): o argumento passou a aceitar
+# EXPRESSÃO (os 7 tipos — `View P 42`, `View P jogador.pos`); o CallTail
+# tenta-se PRIMEIRO (a string de sempre segue o caminho de sempre — o
+# comportamento antigo fica byte a byte).
 PathCall    <- ViewStmt / Path CallTail?
-ViewStmt    <- 'View' IdentAny CallTail?
+ViewStmt    <- 'View' IdentAny (CallTail / Expr)?
 Path        <- IdentAny ('.' IdentAny)*
 CallTail    <- '(' ArgList? ')' / StrLit
 

@@ -24,6 +24,7 @@ const std::vector<Entry>& all() {
             Cat c = Cat::Linguagem;
             switch (e.kind) {
                 case reg::Kind::Comando:    c = Cat::Comando; break;
+                case reg::Kind::Funcao:     c = Cat::Funcao; break;
                 case reg::Kind::Linker:     c = Cat::Linker; break;
                 case reg::Kind::Tyker:      c = Cat::Tyker; break;
                 case reg::Kind::Componente: c = Cat::Componente; break;

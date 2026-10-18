@@ -539,16 +539,29 @@ struct Compiler {
             return pathCallFrom(p ? *p : PathToks{}, lineOf(sv), tail);
         };
         parser["ViewStmt"] = [&](const peg::SemanticValues& sv) -> StmtP {
-            // 'View' IdentAny CallTail? — os literais NÃO empurram valores:
-            // sv = [Tok(sub), (CallTailV)?]; o "View" vem do literal.
+            // 'View' IdentAny (CallTail / Expr)? — os literais NÃO empurram
+            // valores: sv = [Tok(sub), (arg)?]; o "View" vem do literal.
+            // 0.12-U (3.9a): o argumento é EXPRESSÃO (os 7 tipos — o
+            // `View P 42`/`View P jogador.pos` entram AQUI; a string de
+            // sempre continua pelo CallTail, o caminho antigo intacto)
             PathToks toks;
             toks.push_back(Tok{"View", lineOf(sv)});
             if (const Tok* sub = std::any_cast<Tok>(&sv[0])) {
                 toks.push_back(*sub);
             }
-            const CallTailV* tail =
-                sv.size() > 1 ? std::any_cast<CallTailV>(&sv[1]) : nullptr;
-            return pathCallFrom(toks, lineOf(sv), tail);
+            for (size_t i = 1; i < sv.size(); ++i) {
+                if (const CallTailV* tail = std::any_cast<CallTailV>(&sv[i])) {
+                    return pathCallFrom(toks, lineOf(sv), tail);
+                }
+                if (const ExprP* ex = std::any_cast<ExprP>(&sv[i])) {
+                    CallTailV t;   // a expressão viaja como 1 arg
+                    t.line = lineOf(sv);
+                    t.hasArgs = true;
+                    t.args.push_back(*ex);
+                    return pathCallFrom(toks, lineOf(sv), &t);
+                }
+            }
+            return pathCallFrom(toks, lineOf(sv), nullptr);
         };
 
         // exist/notexist + and( c(a) stopand ) (§7)

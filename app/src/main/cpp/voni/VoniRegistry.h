@@ -38,6 +38,8 @@ using vv::u8;
 enum class Kind : u8 {
     Linguagem = 0,   // §§3-8: central main, repeat, exist, fn, …
     Comando,         // §9: View P, move, Import.Animation, …
+    Funcao,          // 0.12-U (3.9a): expressões-função — abs/min/…/distance/
+                     // spawn (devolvem VALOR; os Comandos são instruções)
     Linker,          // 0.9.3: linker(A)to(B)=RF(nome)
     Tyker,           // 0.9.3: tyker(nome){ find(RF) … }
     Componente,      // 0.9.3: follow/look/orbit/copy/map/…
@@ -47,6 +49,7 @@ inline const char* kindName(Kind k) {
     switch (k) {
         case Kind::Linguagem:  return "Linguagem";
         case Kind::Comando:    return "Comando";
+        case Kind::Funcao:     return "Função";
         case Kind::Linker:     return "Linker";
         case Kind::Tyker:      return "Tyker";
         case Kind::Componente: return "Componente";

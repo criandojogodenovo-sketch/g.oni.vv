@@ -45,9 +45,11 @@ Atualizado: 2026-10-19 · vc: 95
 ## §2 Mapa por camada
 
 - **app/src/main/cpp/voni/** — a linguagem V.ONI: VoniRegistry (a fonte
-  única dos metadados), VoniCompile, VoniVm (o runtime, `kCommands`),
-  VoniTykers (o motor dos linkers/tykers), VoniEngineHost (a ponte com o
-  motor), VoniHighlight/VoniDocs (editor + docs). A referência gerada é
+  única dos metadados + as FUNÇÕES da 0.12-U — o Kind::Funcao: abs/min/
+  clamp/…/distance, UMA linha cada com Docs/argc), VoniCompile,
+  VoniVm (o runtime, `kCommands` + o evalFuncao — despacho pelo REGISTO,
+  sin/cos em GRAUS, View P universal), VoniTykers, VoniEngineHost (a
+  ponte com o motor), VoniHighlight/VoniDocs (editor + docs). A referência gerada é
   VONI_referencia.md (+ llms.txt/llms-full.txt) — regenerada pelo alvo
   `voni_refgen` de tests/CMakeLists.txt.
 - **app/src/main/cpp/core/** — o motor puro: Scene/Tic (a unidade é TIC),

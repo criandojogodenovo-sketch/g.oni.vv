@@ -85,6 +85,7 @@ prova do todo.
 4. **Prova de mutação obrigatória** (política #5 do REGRESSOES.md):
    pin verde → quebra fix → pin vermelho com a mensagem esperada →
    outputs colados → reposto → verde.
-5. **FECHO**: `docs/RELATORIO-0.12-U-FECHO.md` + README +
+5. **FECHO**: o relatório de fecho da campanha
+   (RELATORIO-0.12-U-FECHO.md — nasce NO fecho) + README +
    ARCHITECTURE §5 (as entradas novas) + BACKLOG + referência
    regenerada + CI verde. PARAR.

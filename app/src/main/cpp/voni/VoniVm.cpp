@@ -37,6 +37,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <random>
 #include <unordered_map>
 #include <vector>
 
@@ -150,6 +151,18 @@ namespace {
 
 // exceção leve de controlo — NUNCA sai da API (apanhada no boundary)
 struct VmFail {};
+
+// 0.12-U (3.9a): GRAUS → radianos (sin/cos recebem GRAUS — a convenção da
+// casa; a mesma constante do VoniEngineHost, aqui no lado GL-free)
+constexpr f64 kDegToRad = 0.017453292519943295;
+
+// 0.12-U (3.9a): o gerador de random()/random_int() — global do processo,
+// semeado uma vez; o sandbox NÃO expõe o estado (sem reseed pelo script —
+// sem ficheiros, sem rede, o isolamento §12 mantém-se)
+std::mt19937& voniRng() {
+    static std::mt19937 rng{std::random_device{}()};
+    return rng;
+}
 
 enum class Flow { None, Continue, Resume, Return };
 
@@ -386,18 +399,180 @@ struct Vm {
     }
 
     Value evalCall(const Expr& e) {
-        const FnDef* fn = findFn(e.name);
-        if (!fn) {
-            fail(e.line, std::string("'") + e.name + "' não é uma função");
+        // a fn do UTILIZADOR vence (compat: quem já tinha fn min() continua
+        // a correr a dela — o shadow é a regra dos params/globais)
+        if (const FnDef* fn = findFn(e.name)) {
+            std::vector<Value> args;
+            args.reserve(e.args.size());
+            for (const ExprP& a : e.args) {
+                args.push_back(eval(*a));
+            }
+            Value out;
+            callFn(*fn, args, e.line, out);
+            return out;
         }
+        // 0.12-U (3.9a): as FUNÇÕES DO REGISTO (a matemática + distance; o
+        // spawn entra na 3.9b) — o nome existe porque está na TABELA (a
+        // fonte única) e o argc afere-se pelos minArgs/maxArgs dela
+        if (const reg::Entry* fe = reg::find(e.name);
+            fe && fe->kind == reg::Kind::Funcao) {
+            return evalFuncao(*fe, e);
+        }
+        fail(e.line, std::string("'") + e.name + "' não é uma função");
+    }
+
+    // ---- 0.12-U (3.9a): FUNÇÕES DO REGISTO — a matemática + distance -----
+    // sin/cos em GRAUS (a convenção da casa: a rot do engine também é em
+    // graus — um só sistema de unidades na linguagem, decisão 🔶). Erros
+    // com LINHA que ensinam (a sintaxe vem da ENTRADA do registo).
+    Value evalFuncao(const reg::Entry& fe, const Expr& e) {
         std::vector<Value> args;
         args.reserve(e.args.size());
         for (const ExprP& a : e.args) {
             args.push_back(eval(*a));
         }
-        Value out;
-        callFn(*fn, args, e.line, out);
-        return out;
+        const std::string name = e.name;
+        const u32 line = e.line;
+        if (args.size() < fe.minArgs || args.size() > fe.maxArgs) {
+            fail(line, name + ": escreve assim — " + fe.syntax);
+        }
+        auto needNum = [&](const Value& v) -> f64 {
+            if (!isNum(v)) {
+                fail(line, name + ": precisa de número (veio " +
+                               typeName(v.t) + ")");
+            }
+            return asNum(v);
+        };
+        auto numArg = [&](size_t i) -> f64 { return needNum(args[i]); };
+
+        if (name == "abs") {
+            const Value& v = args[0];
+            if (v.t == Type::Int) {
+                return Value::ofInt(v.i < 0 ? -v.i : v.i);   // Int → Int
+            }
+            return Value::ofNum(std::fabs(needNum(v)));      // Num → Num
+        }
+        if (name == "min" || name == "max") {
+            const f64 a = numArg(0);
+            const f64 b = numArg(1);
+            const bool bothInt =
+                args[0].t == Type::Int && args[1].t == Type::Int;
+            const f64 r = name == "min" ? std::min(a, b) : std::max(a, b);
+            return bothInt ? Value::ofInt((i64)r) : Value::ofNum(r);
+        }
+        if (name == "clamp") {
+            const f64 v = numArg(0);
+            const f64 lo = numArg(1);
+            const f64 hi = numArg(2);
+            if (lo > hi) {
+                fail(line, "clamp: o mínimo (" + valueText(args[1]) +
+                               ") é maior que o máximo (" +
+                               valueText(args[2]) + ")");
+            }
+            const bool allInt = args[0].t == Type::Int &&
+                                args[1].t == Type::Int &&
+                                args[2].t == Type::Int;
+            const f64 r = std::min(std::max(v, lo), hi);
+            return allInt ? Value::ofInt((i64)r) : Value::ofNum(r);
+        }
+        if (name == "lerp") {
+            const f64 a = numArg(0);
+            const f64 b = numArg(1);
+            const f64 t = numArg(2);
+            return Value::ofNum(a + (b - a) * t);
+        }
+        if (name == "floor") {
+            return Value::ofInt((i64)std::floor(numArg(0)));
+        }
+        if (name == "ceil") {
+            return Value::ofInt((i64)std::ceil(numArg(0)));
+        }
+        if (name == "round") {
+            return Value::ofInt((i64)std::llround(numArg(0)));
+        }
+        if (name == "sqrt") {
+            const f64 v = numArg(0);
+            if (v < 0.0) {
+                fail(line, "sqrt: raiz de número negativo (" +
+                               valueText(args[0]) + ")");
+            }
+            return Value::ofNum(std::sqrt(v));
+        }
+        if (name == "sin") {
+            return Value::ofNum(std::sin(numArg(0) * kDegToRad));
+        }
+        if (name == "cos") {
+            return Value::ofNum(std::cos(numArg(0) * kDegToRad));
+        }
+        if (name == "random") {
+            std::uniform_real_distribution<f64> d(0.0, 1.0);
+            return Value::ofNum(d(voniRng()));
+        }
+        if (name == "random_int") {
+            // limites INTEIROS (Int, ou Num com valor inteiro exato — o
+            // mesmo contrato do repeat); min > max = erro legível
+            auto integral = [&](const Value& v) -> i64 {
+                if (v.t == Type::Int) {
+                    return v.i;
+                }
+                if (v.t == Type::Num && v.n == std::floor(v.n)) {
+                    return (i64)v.n;
+                }
+                fail(line, "random_int: os limites têm de ser inteiros (veio " +
+                               valueText(v) + ")");
+            };
+            const i64 lo = integral(args[0]);
+            const i64 hi = integral(args[1]);
+            if (lo > hi) {
+                fail(line, "random_int: o mínimo (" + valueText(args[0]) +
+                               ") é maior que o máximo (" +
+                               valueText(args[1]) + ")");
+            }
+            std::uniform_int_distribution<i64> d(lo, hi);
+            return Value::ofInt(d(voniRng()));
+        }
+        if (name == "distance") {
+            f64 ax, ay, az, bx, by, bz;
+            resolvePos(args[0], ax, ay, az, line, name);
+            resolvePos(args[1], bx, by, bz, line, name);
+            const f64 dx = ax - bx;
+            const f64 dy = ay - by;
+            const f64 dz = az - bz;
+            return Value::ofNum(std::sqrt(dx * dx + dy * dy + dz * dz));
+        }
+        fail(line, name + ": a entrada existe no registo mas não tem "
+                        "runtime (erro interno)");
+    }
+
+    // 0.12-U (3.9a): resolve um argumento da distance a UM PONTO — TIC usa
+    // a pos via Host (o TIC é nome, a cena é a verdade); Vec3 vai direto.
+    void resolvePos(const Value& v, f64& x, f64& y, f64& z, u32 line,
+                    const std::string& fname) {
+        if (v.t == Type::Vec3) {
+            x = v.v3[0];
+            y = v.v3[1];
+            z = v.v3[2];
+            return;
+        }
+        if (v.t == Type::Tic) {
+            Value out;
+            std::string herr;
+            std::vector<std::string> chain{"pos"};
+            if (!host.getProp(v.tic, chain, out, herr)) {
+                fail(line, herr.empty() ? ("'" + v.tic + "' não existe")
+                                        : herr);
+            }
+            if (out.t != Type::Vec3) {
+                fail(line, "'" + v.tic + "' não tem pos (veio " +
+                               typeName(out.t) + ")");
+            }
+            x = out.v3[0];
+            y = out.v3[1];
+            z = out.v3[2];
+            return;
+        }
+        fail(line, fname + ": cada argumento é um TIC ou um Vec3 (veio " +
+                       typeName(v.t) + ")");
     }
 
     const FnDef* findFn(const std::string& name) const {
@@ -1003,14 +1178,14 @@ struct Vm {
 
 bool cmdViewP(Vm& vm, const Stmt& s) {
     if (!s.hasArgs || s.args.size() != 1) {
-        vm.fail(s.line, "View P: escreve assim — View P \"texto\"");
+        vm.fail(s.line, "View P: escreve assim — View P \"texto\" ou "
+                        "View P expressão");
     }
     Value v = vm.eval(*s.args[0]);   // avalia UMA vez (args podem ter efeitos)
-    if (v.t != Type::Txt) {
-        vm.fail(s.line, std::string("View P: o texto vai entre aspas (veio ") +
-                           typeName(v.t) + ")");
-    }
-    vm.host.log(("voni: " + v.s).c_str());   // prefixo da spec §9
+    // 0.12-U (3.9a) · View P UNIVERSAL: os 7 tipos todos chegam ao log via
+    // valueText() (o Txt de sempre imprime IGUAL — compat byte a byte;
+    // Int/Num/Bool/Vec2/Vec3/TIC formatam como no Inspector)
+    vm.host.log(("voni: " + valueText(v)).c_str());   // prefixo da spec §9
     return true;
 }
 

@@ -24,6 +24,7 @@ using vv::u8;
 enum class Cat : u8 {
     Comando = 0,    // §9: View P, move, Import.Animation, …
     Linguagem,      // §§3-8: central main, repeat, exist, fn, v++, …
+    Funcao,         // 0.12-U (3.9a): abs/min/…/distance/spawn (expressões)
     Linker,         // 0.9.3 (spec 8): linker(A)to(B)=RF(nome)
     Tyker,          // 0.9.3: tyker(nome){ find(RF) … }
     Componente,     // 0.9.3: follow/look/orbit/…
@@ -33,6 +34,7 @@ inline const char* catName(Cat c) {
     switch (c) {
         case Cat::Comando:    return "Comando";
         case Cat::Linguagem:  return "Linguagem";
+        case Cat::Funcao:     return "Função";
         case Cat::Linker:     return "Linker";
         case Cat::Tyker:      return "Tyker";
         case Cat::Componente: return "Componente";
