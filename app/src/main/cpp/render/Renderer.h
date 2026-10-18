@@ -10,6 +10,7 @@
 #include "render/DrawStats.h"
 #include "render/Material.h"
 #include "render/QuadBatch.h"
+#include "render/SdfBatch.h"   // 0.12-D (D-1): o batch do shader SDF de widget
 
 namespace vv {
 
@@ -61,6 +62,10 @@ public:
 
     // pass UI (F1 mantido): submissões desenhadas em endFrame, sem depth
     void submit(const QuadBatch& batch, u32 texture);
+    // 0.12-D (D-1): a submissão do PASS SDF (o shader único de widget) —
+    // mesmo estado GL do pass UI (sem depth, blend SRC_ALPHA); os uniforms
+    // do nível (Efeitos Alto/Médio/Baixo) setam-se UMA vez por frame
+    void submitSdf(const SdfBatch& batch, u32 firstVertex, u32 vertexCount);
     // 0.7.4 — submissão por RANGE de vértices (z-order sólidos↔texturas:
     // o UiContext submete RUNS na ordem real de emissão; um mesmo batch
     // pode aparecer em vários runs com ranges diferentes)
@@ -90,6 +95,22 @@ private:
     u32 whiteTex_ = 0;
     i32 locProj_ = -1;
     i32 locTex_ = -1;
+    // 0.12-D (D-1) — o PASS SDF (o 3.º programa): o shader único de widget
+    u32 progSdf_ = 0;
+    u32 vaoSdf_ = 0;
+    u32 vboSdf_ = 0;
+    i32 locSdfProj_ = -1;
+    i32 locSdfBevel_ = -1;
+    i32 locSdfSpecDepth_ = -1;
+    i32 locSdfGlowW_ = -1;
+    i32 locSdfShadowDy_ = -1;
+    i32 locSdfShadowSoft_ = -1;
+    i32 locSdfShadowA_ = -1;
+    i32 locSdfSpecOn_ = -1;
+    i32 locSdfGlowOn_ = -1;
+    i32 locSdfSpecAdd_ = -1;
+    i32 locSdfGlowAdd_ = -1;
+    i32 locSdfAA_ = -1;
     // 3D (F2)
     LitMaterial lit_;
 
@@ -97,10 +118,12 @@ private:
     i32 h_ = 0;
 
     struct Submission {
-        const QuadBatch* batch;
+        const QuadBatch* batch;        // prog 0 (quads UI)
+        const SdfBatch* sdfBatch;      // 0.12-D: prog 1 (widgets SDF)
         u32 tex;
         u32 firstVertex;   // 0.7.4: range do batch (submissão por runs)
         u32 vertexCount;
+        bool sdf;          // 0.12-D: a submissão é do programa SDF
     };
     // 0.8.4 (fix "funções que param" do C33): o cap FIXO de 32 descartava
     // submissões em silêncio — e como os glifos são SEMPRE a última, com

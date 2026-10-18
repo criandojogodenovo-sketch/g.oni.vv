@@ -111,6 +111,10 @@ bool textIconButton(UiContext& ui, u64 id, const UiRect& r,
 // 0.12-C (C-2): o PLAY EM DESTAQUE QUANDO ATIVO (a ordem do dono) — em
 // playMode o play É A CHAMA (o padrão Y-1 dos ativos: o gradiente vertical
 // accent→accent2 no chip 28dp + a tinta escura por cima)
+// 0.12-D (D-1): o chip é o WIDGET SDF (o shader único — cantos perfeitos +
+// bisel + especular + brilho + sombra numa passagem; o glassTopLine MORRE:
+// o especular É o brilho do topo agora). Em repouso SEM fundo (o chip
+// transparente de sempre — nada desenhar).
 bool iconButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
                 bool active = false) {
     // PASSO 1: o alvo é a LINHA da barra (36dp — o piso kRowFloorDp)
@@ -120,15 +124,13 @@ bool iconButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
     const UiRect chip = {r.x, r.y + (r.h - kChipH()) * 0.5f, r.w, kChipH()};
     if (active && !held) {
         // A CHAMA: o fill com o GRADIENTE VERTICAL accent->accent2 (o
-        // MESMO tratamento dos botões ativos da Y-1) + o glassTopLine
-        ui.panelRoundedGradientV(chip.x, chip.y, chip.w, chip.h,
-                                 theme::kRadiusCard, theme::kTheme.accent,
-                                 theme::kTheme.accent2);
-        ui.glassTopLine(chip.x, chip.y, chip.w);
+        // MESMO tratamento dos botões ativos da Y-1) — agora pelo SDF
+        ui.sdfWidget(chip.x, chip.y, chip.w, chip.h, theme::dp(theme::kRadiusCard),
+                     theme::kTheme.accent, theme::kTheme.accent2);
     } else if (held || active) {
-        ui.panelRounded(chip.x, chip.y, chip.w, chip.h, theme::kRadiusCard,
-                        active ? theme::kTheme.accentPress
-                               : theme::kTheme.surface2);
+        ui.sdfWidget(chip.x, chip.y, chip.w, chip.h, theme::dp(theme::kRadiusCard),
+                     active ? theme::kTheme.accentPress : theme::kTheme.surface2,
+                     active ? theme::kTheme.accentPress : theme::kTheme.surface2);
     }
     const f32 s = kIconS();
     if (s >= theme::dp(12.0f)) {

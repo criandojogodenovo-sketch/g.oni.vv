@@ -2754,9 +2754,12 @@ TEST(regress_script_geom_unica) {
 
 TEST(regress_cantos_suavizados) {
     using namespace vv;
-    // o button() é o CHOKE POINT dos botões da app: cantos 8dp (spec A) —
-    // a ESCADARIA do panelRounded emite MAIS quads que o panel reto e a
-    // moldura segue o arco (frameRounded). Mede-se nos batches (GL-free).
+    // o button() é o CHOKE POINT dos botões da app: cantos 8dp (spec A).
+    // 0.12-D (D-1) — a RECALIBRAÇÃO honesta: os cantos deixaram de ser a
+    // ESCADARIA de quads (21 peças) — são o SHADER SDF ÚNICO de widget: o
+    // botão emite UM quad no batch sdf com o raio 8dp no vértice (os pins
+    // sdf_widget_cantos provam o arco por píxel no rasterizador honesto;
+    // este sentinela aferra o CONTRATO de emissão que os alimenta).
     FontAtlas font;
     const char* fp = FONT_FIXTURE;
     ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
@@ -2764,20 +2767,28 @@ TEST(regress_cantos_suavizados) {
     ui.init();
     ui.setFont(&font);
 
-    // o panel RETO de referência
+    // o panel RETO de referência (o solids continua o de sempre)
     ui.beginFrame(nullptr, nullptr, 1600.0f, 720.0f);
     ui.panel(10.0f, 10.0f, 200.0f, 96.0f, theme::PANEL);
     ui.endFrame();
     const u32 quadsReto = ui.solidsForTest().vertexCount() / 6;
 
-    // o button() AGORA: a escadaria + a moldura em arco
+    // o button() AGORA: UM widget SDF (a escadaria morreu)
     ui.beginFrame(nullptr, nullptr, 1600.0f, 720.0f);
     ui.button(0x99901, 10.0f, 10.0f, 200.0f, 96.0f, "Botao");
     ui.endFrame();
+    // (a) NENHUMA escadaria no solids (o fill não volta a ser degraus)
     const u32 quadsBotao = ui.solidsForTest().vertexCount() / 6;
-    // a escadaria (4 degraus × 4 cantos + o miolo) + a moldura em arco
-    // (polilinhas) — SEMPRE mais geometria que o recto
-    EXPECT(quadsBotao > quadsReto + 8u);
+    EXPECT(quadsBotao <= quadsReto + 2u);
+    // (b) o batch SDF tem o widget: 6 vértices, raio 8dp no vértice
+    const SdfBatch& sb = ui.sdfForTest();
+    EXPECT(sb.vertexCount() == 6u);
+    if (sb.vertexCount() == 6u) {
+        const f32 r = sb.vertices()[0].radius;
+        EXPECT(nearEqF(r, theme::dp(theme::kRadiusCard), 0.05f));
+        // o nível viaja no vértice (o toggle Efeitos)
+        EXPECT(sb.vertices()[0].level == f32(sdf::LEVEL_ALTO));
+    }
 }
 
 // ============================================================================

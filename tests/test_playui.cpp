@@ -25,6 +25,7 @@
 #include "render/Camera.h"
 #include "ui/EditorUi.h"
 #include "ui/Toolbar.h"
+#include "render/SdfBatch.h"
 #include "ui/FontAtlas.h"
 #include "ui/SafeArea.h"
 
@@ -263,17 +264,36 @@ TEST(play_play_bar_desenhada_com_stop_estado_e_aviso) {
     // (mais simples: verificar que HÁ glifos e que o frame do botão Stop
     // está no rect da play bar)
     (void)v; (void)n; (void)txt;
-    std::vector<Rect> solids;
-    collectRects(e.ui.solidsForTest(), solids);
     const UiRect bar = playBarRect(kSW, kSH, safe::Insets{});
     const UiRect stop = playStopButtonRect(bar);
-    // o botão Stop emite um quad DENTRO do rect esperado (exato)
+    // 0.12-D (D-1): o fill do botão é o WIDGET SDF (o shader único) — o
+    // quad do Stop vive no batch sdf (o quad cresce com o pad da sombra+AA,
+    // logo a margem); a largura do widget continua > 200
     bool achouStop = false;
-    for (const Rect& r : solids) {
-        if (r.x0 >= stop.x - 0.5f && r.y0 >= stop.y - 0.5f &&
-            r.x1 <= stop.x + stop.w + 0.5f && r.y1 <= stop.y + stop.h + 0.5f &&
-            r.x1 - r.x0 > 200.0f) {
-            achouStop = true;
+    {
+        const SdfBatch& sb = e.ui.sdfForTest();
+        const u32 n = sb.vertexCount();
+        for (u32 i = 0; i + 5 < n; i += 6) {
+            const SdfVertex* v = sb.vertices();
+            f32 mnX = 1e9f, mxX = -1e9f, mnY = 1e9f, mxY = -1e9f;
+            f32 hwMax = 0.0f;
+            for (u32 k = i; k < i + 6; ++k) {
+                mnX = v[k].x < mnX ? v[k].x : mnX;
+                mxX = v[k].x > mxX ? v[k].x : mxX;
+                mnY = v[k].y < mnY ? v[k].y : mnY;
+                mxY = v[k].y > mxY ? v[k].y : mxY;
+                hwMax = v[k].hw > hwMax ? v[k].hw : hwMax;
+            }
+            // o WIDGET (não o quad expandido): a largura e o centro vêm do
+            // próprio vértice (hw é o semi-wide do widget; o quad cresce
+            // com o pad da AA+sombra — a margem cobre)
+            const f32 wx = mxX - hwMax;      // o centro do widget
+            const f32 ww = 2.0f * hwMax;
+            if (wx >= stop.x - 2.0f && wx <= stop.x + stop.w + 2.0f &&
+                ww > 200.0f && mnY >= stop.y - 20.0f &&
+                mnY <= stop.y + stop.h + 2.0f) {
+                achouStop = true;
+            }
         }
     }
     EXPECT(achouStop);

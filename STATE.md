@@ -1,12 +1,11 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-18 · vc: 90 · Último commit: este (o 0.12-C C-4, O
-SELETOR DE FICHEIROS + OS ESTADOS VAZIOS — o picker pela fonte única
-browserSheetLayout, o breadcrumb que salta, a pesquisa propósito 10, as
-pastas ponto fora, os 4 vazios com AÇÃO, os glifos únicos, os 8 pins +
-M-C4a/b; a REPARAÇÃO da árvore — 614 ficheiros de volta do e8c9587;
-antes: 266bd3b o C-3, A TIPOGRAFIA O IDIOMA AS SUPERFÍCIES; antes:
-3e8984a o C-2, OS MENUS E A BARRA DE TOPO)
+Atualizado: 2026-10-18 · vc: 91 · Último commit: este (o 0.12-D D-1, O
+SHADER SDF ÚNICO DE WIDGET — o 3.º programa da engine com cantos SDF +
+bisel 3D + especular + brilho interno + sombra, o toggle «Efeitos: Alto /
+Médio / Baixo», os draws de botão substituídos, os 4 pins + M-D1a/b, a
+FASE 32 do c33; antes: 406871f o 0.12-C C-4, O SELETOR DE FICHEIROS + OS
+ESTADOS VAZIOS)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -14,6 +13,27 @@ antes: 266bd3b o C-3, A TIPOGRAFIA O IDIOMA AS SUPERFÍCIES; antes:
 
 ## §1 Onde estamos
 
+- **Campanha 0.12-D (identidade visual: fogo, vidro, 3D) — ABERTA
+  (D-1 fechada, D-2..D-8 na fila)** (a pré-condição era a 0.12-C fechada;
+  as cláusulas do dono: anti-overengineering — cada efeito com toggle
+  «Efeitos: Alto / Médio / Baixo» — e anti-superficialidade — o botão
+  ativo mostra bisel + brilho + fogo + sombra SIMULTANEAMENTE; os
+  DETALHES vivem no RELATORIO-0.12-D.md).
+  **D-1 (o shader SDF único de widget, vc 91)**: o 3.º PROGRAMA da engine
+  (progSdf_) com o ui/Sdf.h como FONTE ÚNICA da matemática (o FS replica
+  linha a linha; o rasterizador honesto do stub INCLUI o header — os
+  pins aferem os MESMOS pixéis que o device desenha): cantos SDF
+  perfeitos + bisel 3D (a normal do gradiente da distância) + especular
+  no topo + brilho interno + sombra projetada, numa passagem; o toggle
+  sdf::g_level (Baixo = só bisel + sombra simples); os draws de BOTÃO
+  substituídos (o choke point drawButtonVisual + o iconButton da barra →
+  UiContext::sdfWidget — o premido é o FOGO com bisel+brilho+sombra);
+  pins ×4 (test_012d_sdf.cpp) + M-D1a/M-D1b vermelho→verde + a FASE 32
+  do c33 (5 checks). OS ACHADOS REAIS: o REBIND do ARRAY_BUFFER após
+  submissões SDF (o upload do UI ia ao vboSdf_) e a CORRIDA FINA dos
+  jobs de import no c33 (o teto de 3000 frames = 5 ms de relógio; agora é
+  o RELÓGIO 10 s + yield). test_core 0 falhas · c33 1010/0 · vc 91. O
+  C33 REAL (o PNG do botão nos 3 modos) fica para o dono.
 - **Campanha 0.12-C (layout, organização e consistência) — FECHADA
   (C-1..C-4)** (o CI do push é o árbitro; os DETALHES vivem no
   RELATORIO-0.12-C.md). A cláusula da campanha é anti-superficialidade —
@@ -60,30 +80,14 @@ antes: 266bd3b o C-3, A TIPOGRAFIA O IDIOMA AS SUPERFÍCIES; antes:
   (hierHeaderRects — o título elipsa, nunca sobrepõe as ações) e os 4
   pins novos (test_012c_paineis.cpp) + M-C1a/M-C1b vermelho→verde. SEM
   sentinela nova. Os DETALHES no RELATORIO-0.12-C.md §1.
-- **Campanha 0.12-B (arquitetura da UI) — FECHADA (B-1..B-4)** (o CI do
-  push é o árbitro; os DETALHES vivem no RELATORIO-0.12-B.md).
-  **B-4 (o seletor de cenas com ações, vc 86)**: as 3 ações POR LINHA no
-  menu CENAS — o RENOMEAR (o teclado in-app no PROPÓSITO 8, o nome
-  pré-carregado; o caminho da fonte pura sceneRenamePath, o MESMO filtro
-  do addScene), o DUPLICAR (o nome único Godot-style «main.001» — contra
-  o manifesto E os órfãos do disco; o conteúdo byte a byte; a cópia não
-  fica ativa) e o APAGAR 2-TAP (o 1.º toque SÓ arma «apagar?», o 2.º no
-  MESMO ícone confirma; o arm morre com o menu; a ATIVA recusa; o
-  activeScene re-assenta) — as fontes puras partilhadas pelo draw e
-  pelos pins; pins ×4 (test_012b_cenas.cpp) + M-B4a vermelho→verde;
-  **R-051 NOVA**; SEM C33 (a ordem expressa do prompt). test_core 0
-  falhas · c33 1006/0 · vc 86. **B-3 (o canvas, vc 85)**: o seletor de
-  proporção ANDROID + a moldura com o véu escuro + as guias + a grelha +
-  o toast OPACO (o contraste WCAG ≥4.5); pins ×3 + M-B3a/b.
-  **B-2 (o Inspector de UI, vc 84)**: as 3 secções colapsáveis + os
-  campos da base/por tipo + a ZONA MORTA nova do TouchControls + os
-  resets por campo + SEM «remover joystick»; pins ×5 + M-B2a/b.
-  **B-1 (a árvore de UI, vc 83)**: Control + UIRoot (os storages
-  ids 11/12), um TIC filho por elemento, o UiCanvas DEPRECATED (a
-  conversão migrateUiCanvasToTree), o serializer grava a árvore, o
-  editor tem o modo árvore e o Play desenha/hit-testa; pins ×9 +
-  M-B1a/b/c; **R-050 NOVA**; o UIRoot FANTASMA curado (§10 do
-  relatório).
+- **Campanha 0.12-B (arquitetura da UI) — FECHADA (B-1..B-4, vc 83–86)**
+  (o CI do push é o árbitro; os DETALHES vivem no RELATORIO-0.12-B.md):
+  B-1 a árvore de UI (Control/UIRoot, o UiCanvas deprecated, o serializer,
+  o modo árvore + o Play — pins ×9, R-050); B-2 o Inspector de UI (as
+  secções colapsáveis + os campos por tipo + a zona morta — pins ×5);
+  B-3 o canvas (a moldura do device + as guias + o toast opaco — pins
+  ×3); B-4 as ações de cena (renomear/duplicar/apagar 2-tap — pins ×4,
+  R-051).
 - **Campanha 0.12-A (bugs P0) — FECHADA** (o CI do push é o árbitro):
   A-1 (o diagnóstico provou que as rows LOD/impostor JÁ EXISTEM na UI
   desde o vc 72/76 — PÁRA no fix cego por ordem do prompt; os 5 pins da
@@ -108,6 +112,11 @@ antes: 266bd3b o C-3, A TIPOGRAFIA O IDIOMA AS SUPERFÍCIES; antes:
 
 ## §2 O que está FEITO
 
+- 0.12-D D-1 (vc 91) — o shader SDF único de widget (no
+  RELATORIO-0.12-D.md §1): o 3.º programa (progSdf_), a fonte única
+  ui/Sdf.h, o toggle Alto/Médio/Baixo, os botões pelo widget SDF; pins ×4
+  + M-D1a/b; a FASE 32; os achados (o rebind do ARRAY_BUFFER, a corrida
+  fina dos jobs).
 - 0.6.x–0.9.5 — fundação da engine (V.ONI core, device real, CI 5 jobs).
 - 0.12-C C-4 (vc 90) — o seletor + os vazios (no RELATORIO-0.12-C.md
   §4): o picker pela fonte única (o breadcrumb que salta, a pesquisa
@@ -173,24 +182,11 @@ antes: 266bd3b o C-3, A TIPOGRAFIA O IDIOMA AS SUPERFÍCIES; antes:
   RELATORIO-0.11-Y-FECHO.md.
 - 0.9.6 + 0.9.6.4–0.9.6.20 (vc 48–67) — identidade, grupos UI, editor,
   import glTF, orçamento 3D, leis de desenho/toque, janelas.
-- 0.10-M (vc 68) — .gmesh v3 por blocos (streaming/blocos/texturas/thumbs).
-- 0.11-H FASE 1 hierarquia (vc 69) — drag-reparent, apagar/duplicar
-  sub-árvore, colapso, ícone por tipo.
-- 0.11-M FASE 2 materiais glTF (vc 70) — parse, GTB2, props no lit,
-  blend por blocos, samplers no upload.
-- 0.11-S FASE 3 esqueleto/animação (vc 71) — slerp/cubic/step, UBO 128
-  bones, V.ONI stop/blend, o fix dos clips skinados.
-- 0.11-T FASE 3.5a GPU efficiency (vc 72) — skinned cull + LOD;
-  0.11-T-FIX Perna 1 (vc 73) — o contorno da corrupção do corte paralelo
-  (Perna 2 ADIADA pelo dono — ver §7).
-- 0.11-W ABERTURA (docs) — cf6279a.
-- 0.11-W 3.5b instancing (vc 74, d0c765d) — blocos de mesma assinatura
-  6 TICs → 1 dc; teto 64/draw; R-047.
-- 0.11-W 3.75a streaming progressivo (vc 75, 0c11b14) — o freeze do
-  import morre por orçamento; pico de RAM = 1 bloco (R-041).
-- 0.11-W 3.75b impostores (vc 76, 1524148 + caaef02) — PNG alfa por
-  distância; dc do TIC longe = 1; R-049; fix caaef02 (o ImpostorIndex.cpp
-  faltava no CMake do app).
+- 0.10-M..0.11-W (vc 68–76) — o .gmesh v3 (streaming/blocos/impostores),
+  a hierarquia (drag-reparent), os materiais glTF, a animação skinada
+  (UBO 128), o skinned cull+LOD, o instancing e o streaming progressivo
+  (os DETALHES vivem nos relatórios próprios da docs/ e no §2 do
+  CODEMAP — o índice não é o arquivo).
 
 ## §3 O que está PENDENTE (por ordem)
 
@@ -269,6 +265,9 @@ Commits puramente documentais não são afetados.
 - `ARCHITECTURE.md` — o mapa dos módulos (o porquê das camadas).
 - `docs/REGRESSOES.md` — sentinelas R-NNN (consulta, não leitura inteira).
 - `BACKLOG.md` — rastreador de campanhas (na RAIZ do repo).
+- `docs/RELATORIO-0.12-D.md` — o relatório da 0.12-D (a D-1 no §1 — o
+  shader SDF, o toggle, os pins, as mutações, os achados do rebind e da
+  corrida dos jobs).
 - `docs/RELATORIO-0.12-C.md` — o relatório da 0.12-C (a C-1 no §1, a C-2
   no §2, a C-3 no §3, a C-4 no §4 — o picker, os vazios, os achados do
   gesto/claim/drawer, a REPARAÇÃO da árvore, as mutações coladas).

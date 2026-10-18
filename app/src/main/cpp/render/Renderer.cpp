@@ -3,6 +3,7 @@
 #include "math/Math.h"
 #include "platform/Log.h"
 #include "ui/Theme.h"   // 0.9.6.9: o clear lê o token bg (o vidro expõe o fundo)
+#include "ui/Sdf.h"     // 0.12-D (D-1): os parâmetros do nível (o toggle)
 #include <GLES3/gl3.h>
 #include <vector>
 
@@ -32,6 +33,117 @@ uniform sampler2D uTex;
 out vec4 outColor;
 void main() {
     outColor = vColor * texture(uTex, vUV).r;
+})";
+
+// 0.12-D (D-1) — o VS do PASS SDF (o shader único de widget): os atributos
+// viajam (aLocal/aShape/aColTop/aColBot); o FS desenha TUDO.
+constexpr char kSdfVsSrc[] = R"(#version 300 es
+layout(location = 0) in vec2 aPos;
+layout(location = 1) in vec4 aLocal;
+layout(location = 2) in vec4 aShape;
+layout(location = 3) in vec4 aColTop;
+layout(location = 4) in vec4 aColBot;
+uniform mat4 uProj;
+out vec4 vLocal;
+out vec4 vShape;
+out vec4 vTop;
+out vec4 vBot;
+void main() {
+    vLocal = aLocal;
+    vShape = aShape;
+    vTop = aColTop;
+    vBot = aColBot;
+    gl_Position = uProj * vec4(aPos, 0.0, 1.0);
+})";
+
+// ===== A RÉPLICA GLSL de ui/Sdf.h::shade() — LINHA A LINHA =================
+// (GLSL não inclui C++; a fonte única vive em ui/Sdf.h — alterar EM AMBOS.
+//  Os pins do stub (test_012d_sdf.cpp) aferem os MESMOS pixéis via
+//  ui/Sdf.h; o C33 do dono prova o device.)
+constexpr char kSdfFsSrc[] = R"(#version 300 es
+precision mediump float;
+in vec4 vLocal;   // lx, ly (locais ao topo-esq) + hw, hh
+in vec4 vShape;   // radius, level (reservado D-3), _, _
+in vec4 vTop;
+in vec4 vBot;
+uniform float uSdfBevel;
+uniform float uSdfSpecDepth;
+uniform float uSdfGlowW;
+uniform float uSdfShadowDy;
+uniform float uSdfShadowSoft;
+uniform float uSdfShadowA;
+uniform float uSdfSpecOn;
+uniform float uSdfGlowOn;
+uniform float uSdfSpecAdd;
+uniform float uSdfGlowAdd;
+uniform float uSdfAA;
+out vec4 outColor;
+float sdfClamp01(float x) { return clamp(x, 0.0, 1.0); }
+float roundRectSdf(vec2 p, vec2 b, float r) {
+    float rr = min(r, min(b.x, b.y));
+    if (rr <= 0.0) {
+        vec2 d = abs(p) - b;
+        vec2 o = max(d, vec2(0.0));
+        return (o.x > 0.0 || o.y > 0.0) ? length(o) : max(d.x, d.y);
+    }
+    vec2 q = abs(p) - b + rr;
+    vec2 a = max(q, vec2(0.0));
+    return length(a) + min(max(q.x, q.y), 0.0) - rr;
+}
+void roundRectNormal(vec2 p, vec2 b, float r, out vec2 n) {
+    float rr = min(r, min(b.x, b.y));
+    vec2 q = abs(p) - b + rr;
+    if (q.x > 0.0 || q.y > 0.0) {
+        vec2 a = max(q, vec2(0.0));
+        float l = length(a);
+        n = l > 1e-6 ? a / l : vec2(1.0, 0.0);
+        if (p.x < 0.0) n.x = -n.x;
+        if (p.y < 0.0) n.y = -n.y;
+    } else if (q.x > q.y) {
+        n = vec2(p.x >= 0.0 ? 1.0 : -1.0, 0.0);
+    } else {
+        n = vec2(0.0, p.y >= 0.0 ? 1.0 : -1.0);
+    }
+}
+void main() {
+    // vLocal = (lx, ly LOCAIS ao topo-esq, hw, hh) — o SDF é CENTER-RELATIVE
+    vec2 p = vLocal.xy - vLocal.zw;
+    vec2 b = vLocal.zw;
+    float r = vShape.x;
+    float aa = uSdfAA > 1e-4 ? uSdfAA : 1.0;
+    float d = roundRectSdf(p, b, r);
+    float aW = sdfClamp01(0.5 - d / aa);
+    float aS = 0.0;
+    if (uSdfShadowA > 0.0) {
+        float dS = roundRectSdf(p - vec2(0.0, uSdfShadowDy), b, r);
+        float soft = uSdfShadowSoft > 1e-4 ? uSdfShadowSoft : aa;
+        aS = uSdfShadowA * sdfClamp01(0.5 - dS / soft) * (1.0 - aW);
+    }
+    float aOut = sdfClamp01(aW + aS);
+    if (aOut <= 0.002) { outColor = vec4(0.0); return; }
+    float t = b.y > 1e-4 ? sdfClamp01((p.y + b.y) / (2.0 * b.y)) : 0.0;
+    vec3 rgb = mix(vTop.rgb, vBot.rgb, t);
+    vec2 n = vec2(0.0, -1.0);
+    if (uSdfBevel > 0.0 || uSdfSpecOn > 0.5) {
+        roundRectNormal(p, b, r, n);
+    }
+    if (uSdfBevel > 0.0 && aW > 0.0) {
+        float lam = sdfClamp01(-0.5534 * n.x - 0.8329 * n.y);
+        float edge = sdfClamp01(1.0 + d / max(uSdfBevel, 1e-4));
+        rgb *= 1.0 + (lam - 0.5) * 0.9 * edge;   // topo +30%, fundo −45%
+    }
+    if (uSdfSpecOn > 0.5) {
+        float up = sdfClamp01(-n.y);
+        float band = sdfClamp01(1.0 + d / max(uSdfSpecDepth, 1e-4));
+        rgb += uSdfSpecAdd * band * band * up * up;
+    }
+    if (uSdfGlowOn > 0.5) {
+        float depth = -d - uSdfBevel;
+        float ring = exp(-max(depth, 0.0) / max(uSdfGlowW, 1e-4));
+        float ga = uSdfGlowAdd * ring;
+        rgb += (1.0 - rgb) * 0.6 * ga;
+    }
+    outColor = vec4(rgb * aW / aOut, aOut);
 })";
 
 GLuint compileShader(GLenum type, const char* src) {
@@ -97,6 +209,63 @@ bool Renderer::init() {
                           reinterpret_cast<const void*>(4 * sizeof(f32)));
     glBindVertexArray(0);
 
+    // ---- pass SDF (0.12-D D-1) — o 3.º programa da engine
+    const GLuint sdfVs = compileShader(GL_VERTEX_SHADER, kSdfVsSrc);
+    const GLuint sdfFs = compileShader(GL_FRAGMENT_SHADER, kSdfFsSrc);
+    if (!sdfVs || !sdfFs) {
+        return false;
+    }
+    progSdf_ = glCreateProgram();
+    glAttachShader(progSdf_, sdfVs);
+    glAttachShader(progSdf_, sdfFs);
+    glLinkProgram(progSdf_);
+    glDeleteShader(sdfVs);
+    glDeleteShader(sdfFs);
+    ok = GL_FALSE;
+    glGetProgramiv(progSdf_, GL_LINK_STATUS, &ok);
+    if (ok != GL_TRUE) {
+        char log[512];
+        glGetProgramInfoLog(progSdf_, sizeof(log), nullptr, log);
+        LOGE("Renderer: falha ao linkar o programa SDF: %s", log);
+        return false;
+    }
+    locSdfProj_ = glGetUniformLocation(progSdf_, "uProj");
+    locSdfBevel_ = glGetUniformLocation(progSdf_, "uSdfBevel");
+    locSdfSpecDepth_ = glGetUniformLocation(progSdf_, "uSdfSpecDepth");
+    locSdfGlowW_ = glGetUniformLocation(progSdf_, "uSdfGlowW");
+    locSdfShadowDy_ = glGetUniformLocation(progSdf_, "uSdfShadowDy");
+    locSdfShadowSoft_ = glGetUniformLocation(progSdf_, "uSdfShadowSoft");
+    locSdfShadowA_ = glGetUniformLocation(progSdf_, "uSdfShadowA");
+    locSdfSpecOn_ = glGetUniformLocation(progSdf_, "uSdfSpecOn");
+    locSdfGlowOn_ = glGetUniformLocation(progSdf_, "uSdfGlowOn");
+    locSdfSpecAdd_ = glGetUniformLocation(progSdf_, "uSdfSpecAdd");
+    locSdfGlowAdd_ = glGetUniformLocation(progSdf_, "uSdfGlowAdd");
+    locSdfAA_ = glGetUniformLocation(progSdf_, "uSdfAA");
+
+    glGenVertexArrays(1, &vaoSdf_);
+    glGenBuffers(1, &vboSdf_);
+    glBindVertexArray(vaoSdf_);
+    glBindBuffer(GL_ARRAY_BUFFER, vboSdf_);
+    // SdfVertex: 20 floats, stride 80 — loc0 pos2, loc1 local4, loc2 shape4,
+    // loc3 top4, loc4 bot4
+    constexpr GLsizei kSdfStride = static_cast<GLsizei>(sizeof(SdfVertex));
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, kSdfStride,
+                          reinterpret_cast<const void*>(0));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, kSdfStride,
+                          reinterpret_cast<const void*>(2 * sizeof(f32)));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, kSdfStride,
+                          reinterpret_cast<const void*>(6 * sizeof(f32)));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, kSdfStride,
+                          reinterpret_cast<const void*>(10 * sizeof(f32)));
+    glEnableVertexAttribArray(4);
+    glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, kSdfStride,
+                          reinterpret_cast<const void*>(14 * sizeof(f32)));
+    glBindVertexArray(0);
+
     // Textura branca 1x1: quads sólidos passam pelo mesmo shader (texel = 1).
     glGenTextures(1, &whiteTex_);
     glBindTexture(GL_TEXTURE_2D, whiteTex_);
@@ -113,7 +282,8 @@ bool Renderer::init() {
         return false;
     }
 
-    LOGI("Renderer: pipeline 3D (Mesh/LitMaterial) + batch de quads UI pronto");
+    LOGI("Renderer: pipeline 3D (Mesh/LitMaterial) + batch de quads UI + "
+         "pass SDF de widget prontos");
     return true;
 }
 
@@ -269,6 +439,22 @@ void Renderer::submit(const QuadBatch& batch, u32 texture) {
     submit(batch, texture, 0, batch.vertexCount());
 }
 
+// 0.12-D (D-1) — a submissão do PASS SDF (o shader único de widget); o
+// estado GL é o do pass UI (afirmado em endFrame); os uniforms do nível
+// setam-se UMA vez por frame na primeira submissão SDF.
+void Renderer::submitSdf(const SdfBatch& batch, u32 firstVertex,
+                         u32 vertexCount) {
+    if (vertexCount == 0 || firstVertex >= batch.vertexCount()) {
+        return;
+    }
+    u32 end = firstVertex + vertexCount;
+    if (end > batch.vertexCount()) {
+        end = batch.vertexCount();
+    }
+    subs_.push_back(Submission{nullptr, &batch, 0, firstVertex,
+                               end - firstVertex, true});
+}
+
 // 0.7.4 — submissão por RANGE de vértices (z-order sólidos↔texturas:
 // o UiContext submete RUNS na ordem real de emissão). 0.8.4: acima do
 // limiar de aviso LOGA (o dono vê no log viewer) — nunca mais descarta.
@@ -292,7 +478,8 @@ void Renderer::submit(const QuadBatch& batch, u32 texture, u32 firstVertex,
     if (end > batch.vertexCount()) {
         end = batch.vertexCount();   // clamp: o range nunca passa do fim
     }
-    subs_.push_back(Submission{&batch, texture, firstVertex, end - firstVertex});
+    subs_.push_back(Submission{&batch, nullptr, texture, firstVertex,
+                               end - firstVertex, false});
 }
 
 DrawStats Renderer::endFrame() {
@@ -321,8 +508,53 @@ DrawStats Renderer::endFrame() {
     glBindVertexArray(vao_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
     DrawStats st;
+    bool sdfUniformsDone = false;   // os uniforms do nível: 1× por frame
     for (const Submission& s : subs_) {
+        if (s.sdf) {
+            // ---- 0.12-D (D-1): o PASS SDF (o 3.º programa) ----
+            const SdfBatch& b = *s.sdfBatch;
+            glUseProgram(progSdf_);
+            if (!sdfUniformsDone) {
+                // os PARÂMETROS do nível lidos no draw (o toggle
+                // sdf::g_level vale no frame inteiro — todos os widgets
+                // partilham; a densidade entra UMA vez aqui)
+                const sdf::LevelParams lp =
+                    sdf::paramsFor(sdf::g_level, theme::dp(1.0f));
+                const Mat4 proj = Mat4::ortho(
+                    0.0f, static_cast<f32>(w_), static_cast<f32>(h_), 0.0f,
+                    -1.0f, 1.0f);
+                glUniformMatrix4fv(locSdfProj_, 1, GL_FALSE, proj.m);
+                glUniform1f(locSdfBevel_, lp.bevel ? lp.bevelW : 0.0f);
+                glUniform1f(locSdfSpecDepth_, lp.specDepth);
+                glUniform1f(locSdfGlowW_, lp.glowW);
+                glUniform1f(locSdfShadowDy_, lp.shadowDy);
+                glUniform1f(locSdfShadowSoft_, lp.shadowSoft);
+                glUniform1f(locSdfShadowA_,
+                            (lp.bevel && lp.shadow) ? lp.shadowA : 0.0f);
+                glUniform1f(locSdfSpecOn_, lp.spec ? 1.0f : 0.0f);
+                glUniform1f(locSdfGlowOn_, lp.glow ? 1.0f : 0.0f);
+                glUniform1f(locSdfSpecAdd_, lp.specAdd);
+                glUniform1f(locSdfGlowAdd_, lp.glowAdd);
+                glUniform1f(locSdfAA_, 1.0f);
+                sdfUniformsDone = true;
+            }
+            glBindVertexArray(vaoSdf_);
+            glBindBuffer(GL_ARRAY_BUFFER, vboSdf_);
+            glBufferData(GL_ARRAY_BUFFER,
+                         static_cast<GLsizeiptr>(b.vertexBytes()),
+                         b.vertices(), GL_DYNAMIC_DRAW);
+            glDrawArrays(GL_TRIANGLES, static_cast<GLsizei>(s.firstVertex),
+                         static_cast<GLsizei>(s.vertexCount));
+            st.vertices += s.vertexCount;
+            st.drawCalls += 1;
+            continue;
+        }
         const QuadBatch& b = *s.batch;
+        glUseProgram(prog_);
+        // 0.12-D (D-1): o ARRAY_BUFFER pode estar no vboSdf_ (o pass SDF
+        // alterna) — o bind do UI re-afirma-se POR submissão (o upload é
+        // SEMPRE no buffer certo, como o VAO)
+        glBindBuffer(GL_ARRAY_BUFFER, vbo_);
         glBindTexture(GL_TEXTURE_2D, s.tex);
         // 0.7.4: range de vértices (runs) — o buffer sobe INTEIRO uma vez
         // por batch distinto seria o ideal; subir por submissão mantém a
@@ -342,6 +574,9 @@ DrawStats Renderer::endFrame() {
 
 void Renderer::shutdown() {
     lit_.destroy();
+    if (vboSdf_)   { glDeleteBuffers(1, &vboSdf_); vboSdf_ = 0; }
+    if (vaoSdf_)   { glDeleteVertexArrays(1, &vaoSdf_); vaoSdf_ = 0; }
+    if (progSdf_)  { glDeleteProgram(progSdf_); progSdf_ = 0; }
     if (vbo_)      { glDeleteBuffers(1, &vbo_); vbo_ = 0; }
     if (vao_)      { glDeleteVertexArrays(1, &vao_); vao_ = 0; }
     if (whiteTex_) { glDeleteTextures(1, &whiteTex_); whiteTex_ = 0; }

@@ -163,6 +163,33 @@ R-014 aplicada.
 
 ## 14. A EVIDÊNCIA (colada)
 
+- **0.12-D · D-1 — O SHADER SDF ÚNICO DE WIDGET** — o 3.º PROGRAMA da
+  engine (`progSdf_`): UM shader desenha QUALQUER widget com CANTOS
+  PERFEITOS (SDF analítico, AA pela própria distância), BISEL 3D (a
+  normal derivada do gradiente da distância — a ordem do prompt; a luz do
+  topo-esquerda: topo +30%, fundo −45%), REALCE ESPECULAR no topo, BRILHO
+  INTERNO nas bordas e SOMBRA PROJETADA por baixo — numa passagem. A
+  FONTE ÚNICA é o `ui/Sdf.h` (GL-free): o FS `kSdfFsSrc` replica-a LINHA
+  A LINHA e o rasterizador honesto do stub INCLUI-A (os pins aferem os
+  MESMOS pixéis). O TOGGLE «Efeitos: Alto / Médio / Baixo»
+  (`sdf::g_level` — Baixo: só bisel + sombra simples, a ordem expressa; a
+  D-7 liga ao Settings). OS DRAWS SUBSTITUÍDOS: o choke point
+  `drawButtonVisual` + o iconButton da barra emitem pelo WIDGET SDF
+  (`UiContext::sdfWidget` — o batch render/SdfBatch.h, UM widget = UM
+  quad); o premido mostra bisel + brilho + FOGO (accent→accent2) + sombra
+  SIMULTANEAMENTE (a cláusula anti-superficialidade); o frameRounded/glass
+  TopLine dos botões morreram (o bisel/especular É o tratamento da borda).
+  pins ×4 NOVOS (test_012d_sdf.cpp — o caminho REAL até glReadPixels;
+  sondas pelo CANAL R contra o bg — o α do fb é inútil contra o clear) +
+  M-D1a/M-D1b vermelho→verde + a FASE 32 do c33 (5 checks — o widget no
+  replay real + o toggle) + 4 recalibrações com nota. OS ACHADOS REAIS: o
+  REBIND do ARRAY_BUFFER após submissões SDF (o upload do UI ia ao
+  vboSdf_ — o bind re-afirma-se por submissão) e a CORRIDA FINA dos jobs
+  de import no c33 (o teto de 3000 frames = 5 ms de relógio expirava
+  antes do worker; o teto é o RELÓGIO 10 s + yield) (o relatório próprio:
+  docs/RELATORIO-0.12-D.md §1) · **versionCode 91** — o APK vigente da
+  fase D-1 (o PNG do botão nos 3 modos é o C33 do dono). O 90 fica
+  INTACTO como história.
 - **0.12-C · C-4 — SELETOR DE FICHEIROS + ESTADOS VAZIOS** — o **PICKER
   REFEITO** pela FONTE ÚNICA `browserSheetLayout()` (EditorLayout.h — o
   draw e os pins partilham, o padrão menuSheetLayout da C-2): as LINHAS

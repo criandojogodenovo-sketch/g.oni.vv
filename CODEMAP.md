@@ -1,6 +1,6 @@
 # CODEMAP.md — onde vive o quê
 
-Atualizado: 2026-10-18 · vc: 90
+Atualizado: 2026-10-18 · vc: 91
 
 > Convenção de paths: TODOS os caminhos deste ficheiro são relativos à
 > RAIZ do repo (exemplo: o registo da linguagem vive em
@@ -42,6 +42,11 @@ Atualizado: 2026-10-18 · vc: 90
   Cube/Primitives, Material, Texture, GpuAssets (+ `impostorTexture`),
   BlockMesh (o render POR BLOCOS do .gmesh v3), Impostor.h (a decisão
   PURA do impostor), QuadBatch, DrawStats, ThumbPng (PNG via zlib).
+  **0.12-D (D-1)**: app/src/main/cpp/render/SdfBatch.h (o batch dos WIDGETS SDF — UM
+  widget = UM quad de 18 floats) + o 3.º PROGRAMA no Renderer
+  (progSdf_ — o FS kSdfFsSrc replica o app/src/main/cpp/ui/Sdf.h::shade() LINHA A LINHA;
+  as submissões SDF viajam nos runs pelo flag `sdf` e os buffers/VAOs
+  re-afirmam-se POR submissão).
 - **app/src/main/cpp/assets/** — importadores e formatos GL-free:
   GOwnFormats (.gmesh/.gtext/.gm), GmeshV3Stream (o streaming do
   conversor), GltfImporter/GltfAnim/GltfTextures/GltfInstantiate,
@@ -61,7 +66,14 @@ Atualizado: 2026-10-18 · vc: 90
   a LADDER do convite do vazio da hierarquia),
   UiContext (com as primitivas
   do cristal da 0.11-Y: panelRoundedGradientV / glassTopLine /
-  focusGlow + o QuadBatch::quadGradientV), UiEditor (as ops
+  focusGlow + o QuadBatch::quadGradientV; **0.12-D D-1**: o
+  app/src/main/cpp/ui/Sdf.h — a FONTE ÚNICA da matemática SDF (o SDF analítico, a normal
+  do gradiente, o shade() — bisel/especular/brilho/sombra — e o TOGGLE
+  sdf::g_level «Efeitos Alto/Médio/Baixo»; o rasterizador honesto do
+  stub INCLUI este header) e o UiContext::sdfWidget (o emissor do
+  widget — UM quad crescido para conter a sombra; o CHOKE POINT
+  drawButtonVisual e o iconButton da barra emitem por AQUI — o premido é
+  o FOGO accent→accent2 com bisel+brilho+sombra), UiEditor (as ops
   de árvore PURAS), Theme.h (as ÚNICAS cores — a tabela 0.11-Y superada
   pela ESCADA 0.12-C: fundo #0A0A0C · painel #131316 · cartão #1B1B20 ·
   elevado #24242A + a chama accent2/glow; os tokens card/elevated são o
@@ -163,6 +175,10 @@ Atualizado: 2026-10-18 · vc: 90
   test_012c_idioma.cpp (os pins da 0.12-C C-3: escala_tipografica — o
   scan dos fontes com o strip do gate/idioma_consistente/maiusculas_
   uniformes/superficies_4_tons),
+  test_012d_sdf.cpp (os pins da 0.12-D D-1: sdf_widget_cantos — a
+  diagonal do canto BR É a função shade() por píxel; sdf_bisel;
+  sdf_sombra; sdf_toggle_baixo — o mesmo pixel entre Alto e Baixo;
+  sondas pelo CANAL R contra o bg — o α do fb é inútil contra o clear),
   test_012c_picker.cpp (os pins da 0.12-C C-4: picker_compacto/
   picker_breadcrumb/picker_oculta_dot/empty_inspector/empty_assets/
   empty_hierarquia/icones_unicos — o 8.º, empty_projetos, é o gate

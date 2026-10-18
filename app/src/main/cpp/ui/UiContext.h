@@ -13,11 +13,13 @@
 // ativa no C33 (B1).
 #include "render/QuadBatch.h"
 #include "render/Renderer.h"
+#include "render/SdfBatch.h"   // 0.12-D (D-1): o batch do shader SDF de widget
 #include "render/Texture.h"   // 0.7.0: quads texturados da UI criável
 #include "ui/FontAtlas.h"
 #include "ui/LayoutDump.h"   // 0.9.6.5 (GRUPO B): o registo do layout auditado
 #include "ui/ScrollMath.h"
 #include "ui/SafeArea.h"
+#include "ui/Sdf.h"         // 0.12-D (D-1): a matemática SDF (o nível)
 #include "ui/TextFit.h"
 #include "ui/Theme.h"     // 0.9.0: design system (tabela obrigatória spec A)
 #include "platform/InputState.h"
@@ -112,6 +114,16 @@ public:
 
     // widgets
     void panel(f32 x, f32 y, f32 w, f32 h, const f32 color[4]);
+    // 0.12-D (D-1) — O WIDGET SDF (o shader único): retângulo arredondado
+    // com cantos PERFEITOS (SDF analítico), bisel 3D, realce especular no
+    // topo, brilho interno nas bordas e sombra projetada por baixo — tudo
+    // numa passagem. O nível (Efeitos: Alto/Médio/Baixo) lê-se de
+    // sdf::g_level NO EMISSOR (o toggle global; Baixo = só bisel + sombra
+    // simples — a ordem do dono). top/bot = o gradiente vertical (top==bot
+    // = flat). Substitui os draws de BOTÃO (o choke point drawButtonVisual
+    // e o iconButton da barra) — o painel de vidro de sempre fica intacto.
+    void sdfWidget(f32 x, f32 y, f32 w, f32 h, f32 radius,
+                   const f32 top[4], const f32 bot[4]);
     // 0.9.0 — CANTOS CURVOS (spec A: raios 8dp cards/botões, 4dp campos/
     // chips): painel com cantos arredondados por ESCADARIA de quads (4 degraus
     // por canto — zero shaders, zero blur, zero custo exponencial; afervável
@@ -333,6 +345,8 @@ public:
     // painéis (linhas sequenciais, sem sobreposição, scroll a revelar o fundo)
     const QuadBatch& solidsForTest() const { return solids_; }
     const QuadBatch& glyphsForTest() const { return glyphs_; }
+    // 0.12-D (D-1): o batch SDF do frame (os widgets do shader único)
+    const SdfBatch& sdfForTest() const { return sdf_; }
     // 0.7.0: batch de IMAGENS da UI criável (quads texturados — o elemento
     // Image). Até 4 texturas distintas por frame; ordem de submissão:
     // solids → imagens (ordem de 1ª utilização) → glifos.
@@ -498,6 +512,8 @@ private:
     // Extende o run corrente quando é do MESMO batch+textura (batching
     // natural); caso contratório abre um run novo.
     void recordRun(QuadBatch& b, u32 tex, u32 firstVertex, u32 vertexCount);
+    // 0.12-D (D-1): o run do batch SDF (o mesmo batching pelo ponteiro)
+    void recordRunSdf(u32 firstVertex, u32 vertexCount);
 
     Renderer*         renderer_ = nullptr;
     const InputState* input_ = nullptr;
@@ -509,6 +525,7 @@ private:
     u64               active_ = 0;   // botão pressionado (immediate mode)
     QuadBatch         solids_;
     QuadBatch         glyphs_;
+    SdfBatch          sdf_;          // 0.12-D (D-1): os widgets SDF
 
     // 0.7.4 — runs de submissão em ORDEM (z-order sólidos↔texturas):
     // cada entrada aponta o batch + textura + range de vértices; o
@@ -523,6 +540,7 @@ private:
         u32              tex;          // 0 = sólidos (branca)
         u32              firstVertex;
         u32              vertexCount;
+        bool             sdf = false;  // 0.12-D: o run é do batch SDF
     };
     static constexpr u32 kMaxRuns = 64;   // limiar de aviso (não corta)
     std::vector<Run>     runs_;           // dinâmico — NUNCA descarta

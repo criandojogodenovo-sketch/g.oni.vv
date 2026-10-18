@@ -3539,9 +3539,23 @@ int main() {
                 // embaixo apagava a fixture SOB o worker — o errno=2 que
                 // se viu na 1ª rodada. active=false SÓ acontece DEPOIS do
                 // importJobFinish — é a testemunha certa.)
-                int guard = 0;
-                while (g_importJob.active.load() && guard++ < 3000) {
+                // 0.12-D: a espera é por TEMPO DE RELÓGIO (o worker
+                // compete com o main loop — 3000 frames ≈ 5 ms no harness
+                // era uma corrida fina que o agendamento decide; a
+                // intenção «o CICLO COMPLETO do job» é tempo real, com o
+                // teto de frames só contra hangs)
+                // o TETO é o RELÓGIO (10 s — contra hangs); os frames
+                // bombeiam o finalize e CEDem o CPU ao worker (o sleep é
+                // o que evita o main esgotar o quantum enquanto o job não
+                // termina — a corrida fina do teto de frames morreu aqui)
+                const auto jobT0 = std::chrono::steady_clock::now();
+                while (g_importJob.active.load() &&
+                       std::chrono::duration<double>(
+                           std::chrono::steady_clock::now() - jobT0)
+                               .count() < 10.0) {
                     frame();
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds(1));
                 }
                 frame();   // garante o importJobFinish (o finalize põe active=false)
                 check(g_importJob.err.empty(),
@@ -7529,9 +7543,15 @@ int main() {
             ent.kind = 'm';
             check(browserImportFile(ent),
                   "19.3 o job de import arranca (1 toque no corrompido)");
-            int guard = 0;
-            while (g_importJob.active.load() && guard++ < 3000) {
+            // 0.12-D: o MESMO relógio do fix 12.8b (o teto é o relógio)
+            const auto jobT0b = std::chrono::steady_clock::now();
+            while (g_importJob.active.load() &&
+                   std::chrono::duration<double>(
+                       std::chrono::steady_clock::now() - jobT0b)
+                               .count() < 10.0) {
                 frame();
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(1));
             }
             frame();   // o importJobFinish (quem LOGA 'import: FALHOU')
             check(!g_importJob.err.empty(),
@@ -10286,6 +10306,59 @@ int main() {
                std::to_string(varridos31) + ")")
                   .c_str());
         resetEditor31();   // o estado limpo para o resto do replay
+    }
+
+    // ---- FASE 32 — 0.12-D (D-1): O SHADER SDF ÚNICO DE WIDGET --------------
+    // O widget SDF no REPLAY REAL: o frame() do main emite os botões pelo
+    // batch sdf (o fills são o shader único — a escadaria morreu). Os
+    // checks aferram o CONTRATO de emissão (os píxeis são provados pelos
+    // pins test_012d_sdf no rasterizador honesto).
+    fase("FASE 32 — 0.12-D D-1: o shader SDF de widget (os botões no replay)");
+    {
+        eglstub::g_surfaceW = 1536;
+        eglstub::g_surfaceH = 720;
+        android_app app32;
+        std::memset(&app32, 0, sizeof(app32));
+        app32.contentRect = {0, 24, 1512, 720};
+        onAppCmd(&app32, APP_CMD_INIT_WINDOW);
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+        sdf::g_level = sdf::LEVEL_ALTO;   // o default de fábrica
+        frame();
+
+        // (1) os botões da barra de topo existem como WIDGETS SDF
+        const u32 n32 = g_ui.sdfForTest().vertexCount();
+        check(n32 >= 6u,
+              ("32.1 o replay emite widgets SDF (verts=" + std::to_string(n32) + ")").c_str());
+        // (2) o contrato do vértice: raio 8dp + nível ALTO no vértice
+        bool radiusOk32 = false, lvlOk32 = false, glassOk32 = false;
+        {
+            const SdfVertex* v32 = g_ui.sdfForTest().vertices();
+            for (u32 i = 0; i + 5 < n32; i += 6) {
+                radiusOk32 |= nearEqF(v32[i].radius, theme::dp(theme::kRadiusCard), 0.05f);
+                lvlOk32 |= nearEqF(v32[i].level, f32(sdf::LEVEL_ALTO), 0.01f);
+                glassOk32 |= nearEqF(v32[i].ta, 0.80f, 0.01f);   // o vidro PANEL
+            }
+        }
+        check(radiusOk32, "32.2 o raio do widget é o 8dp do card (spec A)");
+        check(lvlOk32, "32.3 o nível ALTO viaja no vértice (o toggle Efeitos)");
+        check(glassOk32, "32.4 o vidro PANEL α0.80 no repouso (a cor do tema)");
+        // (5) o TOGGLE: Baixo muda o nível no batch (o emissão lê g_level)
+        sdf::g_level = sdf::LEVEL_BAIXO;
+        frame();
+        bool lvlBaixo32 = false;
+        {
+            const SdfVertex* v32 = g_ui.sdfForTest().vertices();
+            for (u32 i = 0; i + 5 < g_ui.sdfForTest().vertexCount(); i += 6) {
+                lvlBaixo32 |= nearEqF(v32[i].level, f32(sdf::LEVEL_BAIXO), 0.01f);
+            }
+        }
+        check(lvlBaixo32, "32.5 Efeitos: Baixo chega ao batch (o toggle é REAL)");
+        sdf::g_level = sdf::LEVEL_ALTO;   // reposto
+        frame();
     }
 
     // ---- sumário -----------------------------------------------------------

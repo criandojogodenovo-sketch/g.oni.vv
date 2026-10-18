@@ -24,6 +24,11 @@
 
 #include "platform/InputState.h"
 #include "render/QuadBatch.h"
+#include "render/Renderer.h"
+#include "render/SdfBatch.h"
+#include <GLES3/gl3.h>
+#include "glstub_fb.h"
+#include <vector>
 #include "ui/Theme.h"
 #include "ui/UiContext.h"
 
@@ -256,83 +261,111 @@ TEST(y1_gradiente_botao) {
     const f32 bx = 60.0f, by = 40.0f, bw = 120.0f, bh = 40.0f;
     const f32 cx = bx + bw * 0.5f, cy = by + bh * 0.5f;
 
-    // (a) PREMIDO: o fill é o gradiente (topo accent, fundo accent2)
+    // 0.12-D (D-1) — a RECALIBRAÇÃO honesta: o fill do botão deixou de ser
+    // a escadaria panelRoundedGradientV no solids — é o WIDGET SDF (o
+    // shader único): as cores do gradiente viajam nos VÉRTICES do batch
+    // sdf (aColTop/aColBot exatos) e a CONTINUIDADE interpola no FS —
+    // provada por PÍXEL no rasterizador honesto do stub (fb).
+
+    // (a) PREMIDO: o gradiente accent->accent2 nos vértices do widget SDF
     {
         vv::InputState in;
         in.injectDown(0, cx, cy);   // a aresta de press DENTRO do botão
         vv::UiContext ui;
         ui.beginFrame(nullptr, &in, 480.0f, 320.0f);
-        const u32 before = ui.solidsForTest().vertexCount();
         const bool pressed = ui.button(0x9151ull, bx, by, bw, bh, "OK");
-        const u32 after = ui.solidsForTest().vertexCount();
-        // o frame do PRESS captura (o release é que devolve true — o
-        // contrato do widgetHit); o visual de held é provado pelo
-        // gradiente a seguir
+        // o frame do PRESS captura (o release é que devolve true)
         EXPECT(!pressed);
-        EXPECT(after > before + 6u);
-        // a coluna CENTRAL da escadaria: o quad que cruza a altura INTEIRA
-        // (topo == accent exato, fundo == accent2 exato — o span completo)
-        bool foundCentral = false, foundMid = false;
-        for (u32 i = before; i + 5 < after; i += 6) {
-            const vv::QuadVertex* v = ui.solidsForTest().vertices();
-            f32 mnY = 1e9f, mxY = -1e9f;
-            for (u32 k = i; k < i + 6; ++k) {
-                mnY = v[k].y < mnY ? v[k].y : mnY;
-                mxY = v[k].y > mxY ? v[k].y : mxY;
-            }
-            const bool fullSpan = test::nearEqF(mnY, by, 0.05f) &&
-                                  test::nearEqF(mxY, by + bh, 0.05f);
-            if (!fullSpan) continue;
-            foundCentral = true;
-            // o topo do quad é o ACCENT exato, o fundo o ACCENT2 exato
-            for (u32 k = i; k < i + 6; ++k) {
-                if (test::nearEqF(v[k].y, mnY, 0.05f)) {
-                    EXPECT(nearColor2(v[k].r, v[k].g, v[k].b, v[k].a, 1.0f,
-                                      176.0f / 255.0f, 32.0f / 255.0f, 1.0f));
+        const vv::SdfBatch& sb = ui.sdfForTest();
+        EXPECT_MSG(sb.vertexCount() >= 6u,
+                   "y1_gradiente: o botão premido não emitiu o widget SDF "
+                   "(%u vértices)", sb.vertexCount());
+        if (sb.vertexCount() >= 6u) {
+            const vv::SdfVertex* v = sb.vertices();
+            bool foundGrad = false;
+            for (u32 i = 0; i + 5 < sb.vertexCount(); i += 6) {
+                // f32 tx = vx - bx (o quad cresce com o pad; o widget é
+                // reconhecido pelo hw/hw == bw/2)
+                bool isWidget = true;
+                for (u32 k = i; k < i + 6; ++k) {
+                    if (!test::nearEqF(v[k].hw, bw * 0.5f, 0.05f) ||
+                        !test::nearEqF(v[k].hh, bh * 0.5f, 0.05f)) {
+                        isWidget = false;
+                    }
                 }
-                if (test::nearEqF(v[k].y, mxY, 0.05f)) {
-                    EXPECT(nearColor2(v[k].r, v[k].g, v[k].b, v[k].a, 1.0f,
-                                      107.0f / 255.0f, 0.0f, 1.0f));
+                if (!isWidget) continue;
+                foundGrad = true;
+                // o TOPO dos vértices é o ACCENT exato, o fundo o ACCENT2
+                for (u32 k = i; k < i + 6; ++k) {
+                    EXPECT(test::nearEqF(v[k].tr, 1.0f, 1e-4f) &&
+                           test::nearEqF(v[k].tg, 176.0f / 255.0f, 1e-4f) &&
+                           test::nearEqF(v[k].tb, 32.0f / 255.0f, 1e-4f));
+                    EXPECT(test::nearEqF(v[k].br, 1.0f, 1e-4f) &&
+                           test::nearEqF(v[k].bg, 107.0f / 255.0f, 1e-4f) &&
+                           test::nearEqF(v[k].bb, 0.0f, 1e-4f));
                 }
             }
+            EXPECT_MSG(foundGrad,
+                       "y1_gradiente: o widget SDF do botão (hw=bw/2) não "
+                       "foi encontrado no batch");
         }
-        EXPECT_MSG(foundCentral,
-                   "y1_gradiente: a coluna central do fill em span completo "
-                   "não foi encontrada no batch");
-        // o gradiente É CONTÍNUO através das peças: as bandas laterais e
-        // os degraus dos cantos são AMOSTRADOS do span completo — algum
-        // vértice do batch tem cor INTERMÉDIA entre accent e accent2
-        // (g entre 107 e 176, b entre 0 e 32 — a interpolação real)
-        for (u32 i = before; i < after; ++i) {
-            const vv::QuadVertex* v = ui.solidsForTest().vertices();
-            if (test::nearEqF(v[i].r, 1.0f, 1e-4f) &&
-                v[i].g > 107.0f / 255.0f + 0.005f &&
-                v[i].g < 176.0f / 255.0f - 0.005f &&
-                v[i].b > 0.001f && v[i].b < 32.0f / 255.0f - 0.001f &&
-                test::nearEqF(v[i].a, 1.0f, 1e-4f)) {
-                foundMid = true;
-            }
-        }
-        EXPECT_MSG(foundMid,
-                   "y1_gradiente: nenhum vértice INTERMÉDIO do degradê "
-                   "(o gradiente não é contínuo através das peças)");
         ui.endFrame();
     }
 
-    // (b) EM REPOUSO: SEM gradiente (nenhum vértice accent2 no fill) —
+    // (b) a CONTINUIDADE do degradê por PÍXEL (o FS interpola vTop->vBot):
+    // a 30% da altura o G está entre accent e accent2, a 70% mais perto do
+    // accent2 — e DECRESCENTE (o gradiente vertical do shader único)
+    {
+        glstub::fb::resetState();
+        glstub::fb::enabled = true;
+        vv::Renderer r;
+        ASSERT(r.init());
+        r.resize(480, 320);
+        r.beginFrame();
+        r.beginUiPass(480, 320);
+        vv::InputState in;
+        in.injectDown(0, cx, cy);
+        vv::UiContext ui;
+        ui.init();
+        ui.beginFrame(&r, &in, 480.0f, 320.0f);
+        ui.button(0x9151ull, bx, by, bw, bh, "OK");
+        ui.endFrame();
+        r.endFrame();
+        std::vector<unsigned char> px(size_t(480) * 320 * 4);
+        glReadPixels(0, 0, 480, 320, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+        glstub::fb::enabled = false;
+        auto gAt = [&](int sy) -> f32 {
+            const int row = 320 - 1 - sy;   // GL: linha 0 = fundo
+            return f32(px[(size_t(row) * 480 + size_t(cx)) * 4 + 1]) / 255.0f;
+        };
+        const f32 gTop = gAt(int(by + bh * 0.30f));    // fora do bisel/spec
+        const f32 gBot = gAt(int(by + bh * 0.70f));
+        // entre accent G (0.690) e accent2 G (0.420) — o glow polui ±0.08
+        EXPECT_MSG(gTop > 0.34f && gTop < 0.77f,
+                   "y1_gradiente: o G a 30%% da altura (%.2f) saiu da faixa "
+                   "do degradê accent->accent2", gTop);
+        EXPECT_MSG(gBot > 0.34f && gBot < 0.77f,
+                   "y1_gradiente: o G a 70%% da altura (%.2f) saiu da faixa "
+                   "do degradê accent->accent2", gBot);
+        EXPECT_MSG(gTop > gBot + 0.06f,
+                   "y1_gradiente: o degradê não desce (G 30%%=%.2f vs 70%%="
+                   "%.2f) — o gradiente vertical morreu no shader único",
+                   gTop, gBot);
+    }
+
+    // (c) EM REPOUSO: SEM fogo (nenhum vértice accent2 no batch sdf) —
     // o vidro PANEL de sempre
     {
         vv::InputState in;
         vv::UiContext ui;
         ui.beginFrame(nullptr, &in, 480.0f, 320.0f);
-        const u32 before = ui.solidsForTest().vertexCount();
         ui.button(0x9151ull, bx, by, bw, bh, "OK");
-        const u32 after = ui.solidsForTest().vertexCount();
         bool accent2Found = false;
-        for (u32 i = before; i < after; ++i) {
-            const vv::QuadVertex* v = ui.solidsForTest().vertices();
-            if (test::nearEqF(v[i].g, 107.0f / 255.0f, 1e-4f) &&
-                test::nearEqF(v[i].b, 0.0f, 1e-4f)) {
+        const vv::SdfBatch& sb = ui.sdfForTest();
+        for (u32 i = 0; i < sb.vertexCount(); ++i) {
+            const vv::SdfVertex* v = sb.vertices();
+            if (test::nearEqF(v[i].bg, 107.0f / 255.0f, 1e-4f) &&
+                test::nearEqF(v[i].bb, 0.0f, 1e-4f)) {
                 accent2Found = true;
             }
         }

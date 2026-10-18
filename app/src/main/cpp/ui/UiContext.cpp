@@ -13,6 +13,7 @@ constexpr f32 kPad    = 16.0f;
 void UiContext::init() {
     solids_.reserve(kMaxQuadsUi);
     glyphs_.reserve(kMaxQuadsUi);
+    sdf_.reserve(256);   // 0.12-D: os widgets SDF (botões da app)
     for (u32 i = 0; i < kMaxImageBatches; ++i) {
         images_[i].reserve(64);   // 0.7.0: poucas imagens por frame
     }
@@ -28,6 +29,7 @@ void UiContext::beginFrame(Renderer* renderer, const InputState* input,
     textScale_ = 1.0f;   // 0.7.4: reset por frame (só o viewport 2D escala)
     solids_.clear();
     glyphs_.clear();
+    sdf_.clear();   // 0.12-D (D-1): os widgets SDF recomeçam
     for (u32 i = 0; i < kMaxImageBatches; ++i) {   // 0.7.0
         images_[i].clear();
         imageTex_[i] = 0;
@@ -133,7 +135,17 @@ void UiContext::recordRun(QuadBatch& b, u32 tex, u32 firstVertex,
         runs_.back().vertexCount += vertexCount;
         return;
     }
-    runs_.push_back(Run{&b, tex, firstVertex, vertexCount});
+    runs_.push_back(Run{&b, tex, firstVertex, vertexCount, false});
+}
+
+// 0.12-D (D-1): o run do batch SDF — o batching pelo ponteiro (o mesmo
+// contrato do recordRun; o endFrame despacha o programa pelo flag)
+void UiContext::recordRunSdf(u32 firstVertex, u32 vertexCount) {
+    if (!runs_.empty() && runs_.back().sdf) {
+        runs_.back().vertexCount += vertexCount;
+        return;
+    }
+    runs_.push_back(Run{nullptr, 0u, firstVertex, vertexCount, true});
 }
 
 // ---- 0.9.6.5 (GRUPO B): o registo do layout ---------------------------------
@@ -698,22 +710,77 @@ bool UiContext::dragClaim(u64 id, f32 x, f32 y, f32 w, f32 h) {
     return active_ == id;
 }
 
+// 0.12-D (D-1) — O WIDGET SDF: UM quad (6 vértices) leva TUDO o que o FS
+// desenha (cantos SDF, bisel, especular, brilho, sombra). O quad cresce
+// para CONTER a sombra (por baixo) e a AA (à volta); as coords LOCAIS
+// mantêm-se relativas ao topo-esquerda do widget (podem ser negativas/
+// overflow — é assim que a sombra vive fora). O recorte é por interseção
+// (o MESMO contrato do emitTo — o scroll recorta o widget inteiro). O
+// nível lê-se de sdf::g_level NO EMISSOR (o toggle "Efeitos").
+void UiContext::sdfWidget(f32 x, f32 y, f32 w, f32 h, f32 radius,
+                          const f32 top[4], const f32 bot[4]) {
+    if (w <= 0.0f || h <= 0.0f) {
+        return;
+    }
+    if (auditing_ && auditComposite_ == 0) {
+        auditAdd_(layout::Entry::Panel, 0, x, y, w, h);   // o rect do WIDGET
+    }
+    const sdf::LevelParams p = sdf::paramsFor(sdf::g_level, theme::dp(1.0f));
+    const f32 aaPad = 1.5f;   // a AA da aresta (px)
+    const f32 padBot = aaPad + sdf::shadowPad(p);
+    // o quad expandido (topo/esq/dir só AA; fundo AA + sombra)
+    const f32 qx = x - aaPad;
+    const f32 qy = y - aaPad;
+    const f32 qw = w + 2.0f * aaPad;
+    const f32 qh = h + aaPad + padBot;
+    // clip por interseção (o MESMO contrato do emitTo)
+    f32 cx0 = qx > clip_.x ? qx : clip_.x;
+    f32 cy0 = qy > clip_.y ? qy : clip_.y;
+    f32 cx1 = qx + qw;
+    f32 cy1 = qy + qh;
+    cx1 = cx1 < clip_.x + clip_.w ? cx1 : clip_.x + clip_.w;
+    cy1 = cy1 < clip_.y + clip_.h ? cy1 : clip_.y + clip_.h;
+    if (cx1 <= cx0 || cy1 <= cy0) {
+        return;   // totalmente fora do clip
+    }
+    const f32 hw = w * 0.5f;
+    const f32 hh = h * 0.5f;
+    const f32 m = hw < hh ? hw : hh;
+    const f32 r = radius < m ? (radius > 0.0f ? radius : 0.0f) : m;
+    const u8 lvl = sdf::g_level;
+    const u32 fv = sdf_.vertexCount();
+    // 6 vértices na convenção do QuadBatch::quad (v0/v3 = topo-esq,
+    // v1 = fundo-esq, v2/v4 = fundo-dir, v5 = topo-dir)
+    const f32 VX[4] = {cx0, cx0, cx1, cx1};
+    const f32 VY[4] = {cy0, cy1, cy1, cy0};
+    const int IDX[6] = {0, 1, 2, 0, 2, 3};
+    for (const int i : IDX) {
+        sdf_.vertex(VX[i], VY[i], VX[i] - x, VY[i] - y, hw, hh, r, lvl,
+                    top, bot);
+    }
+    recordRunSdf(fv, sdf_.vertexCount() - fv);
+}
+
 // 0.11-Y (Y-1) — o VISUAL DO BOTÃO: o estado ATIVO (held) é A CHAMA —
 // glow de foco atrás (2 quads α decrescente) + o FILL com o gradiente
 // VERTICAL accent→accent2 (a spec da Y-1). O repouso continua o vidro
 // (PANEL) de sempre. Compartilhado pelas duas passagens (audit/não-audit).
+// 0.12-D (D-1) — OS DRAWS ATUAIS SUBSTITUÍDOS PELO SHADER ÚNICO: o fill é
+// agora o WIDGET SDF (cantos perfeitos + bisel + especular + brilho +
+// sombra numa passagem). O held MANTÉM o glow de foco da Y-1 e leva o
+// FOGO (accent→accent2) — bisel + brilho + fogo + sombra SIMULTANEAMENTE
+// (a cláusula anti-superficialidade). O frameRounded de 1dp MORRE: a
+// aresta do bisel É o tratamento da borda agora.
 namespace {
 void drawButtonVisual(UiContext& ui, f32 x, f32 y, f32 w, f32 h, bool held) {
     if (held) {
         ui.focusGlow(x, y, w, h);
-        ui.panelRoundedGradientV(x, y, w, h, theme::dp(theme::kRadiusCard),
-                                 theme::ACCENT, theme::ACCENT2);
+        ui.sdfWidget(x, y, w, h, theme::dp(theme::kRadiusCard),
+                     theme::kTheme.accent, theme::kTheme.accent2);
     } else {
-        ui.panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard),
-                        theme::PANEL);
+        ui.sdfWidget(x, y, w, h, theme::dp(theme::kRadiusCard),
+                     theme::kTheme.surface, theme::kTheme.surface);
     }
-    ui.frameRounded(x, y, w, h, 1.0f, theme::dp(theme::kRadiusCard),
-                    theme::LINE);
 }
 } // namespace
 
@@ -1125,6 +1192,11 @@ void UiContext::endFrame() {
     // intercalam-se conforme foram desenhados; os GLIFOS ficam por último
     // (texto sempre legível — a regra do tema desde a 0.7.0).
     for (const Run& r : runs_) {
+        if (r.sdf) {
+            // 0.12-D (D-1): o pass SDF (o shader único de widget)
+            renderer_->submitSdf(sdf_, r.firstVertex, r.vertexCount);
+            continue;
+        }
         renderer_->submit(*r.batch,
                            r.tex == 0u ? renderer_->whiteTexture()
                                        : r.tex,

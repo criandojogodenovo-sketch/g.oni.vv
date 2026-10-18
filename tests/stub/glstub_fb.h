@@ -49,6 +49,9 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include "ui/Sdf.h"   // 0.12-D (D-1): o shade() do WIDGET SDF — a FONTE ÚNICA
+                     // (o rasterizador corre a MESMA função que o FS GLSL
+                     //  replica linha a linha em render/Renderer.cpp)
 
 namespace glstub {
 namespace fb {
@@ -484,11 +487,12 @@ struct VertFetch {
     }
 };
 
-// o programa em uso resolvido por NOME: uProj → UI; uCenter → GRID;
+// o programa em uso resolvido por NOME: uSdfBevel → SDF (0.12-D, ANTES do
+// uProj — o SDF TAMBÉM tem uProj); uProj → UI; uCenter → GRID;
 // uVP+uModel → lit (a ORDEM importa: o grid TAMBÉM tem uVP, mas nunca
 // uModel/uCenter — o lit nunca tem uCenter)
 struct ProgramKind {
-    enum K { Unknown, Ui, Lit, Grid };
+    enum K { Unknown, Ui, Lit, Grid, Sdf };
     K kind = Unknown;
     const float* proj = nullptr;    // UI
     const float* vp = nullptr;      // lit
@@ -510,6 +514,11 @@ struct ProgramKind {
     float camPos[3] = {};           // uCamPos
     float fade[2] = {12.0f, 42.0f}; // uFade
     float step = 1.0f;              // uStep
+    // 0.12-D (D-1): os PARÂMETROS do nível SDF (os uniforms uSdf* — o
+    // toggle "Efeitos" resolvido no endFrame do Renderer)
+    vv::sdf::LevelParams sdf{};
+    bool sdfShadow = false;
+    float sdfAA = 1.0f;
 };
 
 inline ProgramKind resolveProgram() {
@@ -526,6 +535,38 @@ inline ProgramKind resolveProgram() {
         return loc >= 0 && loc < int(p->slots.size()) &&
                p->slots[size_t(loc)].kind == 'M';
     };
+    const auto hasF = [&](int loc) -> bool {
+        return loc >= 0 && loc < int(p->slots.size()) &&
+               p->slots[size_t(loc)].kind == 'F';
+    };
+    // 0.12-D (D-1): o SDF ANTES do uProj (o programa SDF também tem uProj —
+    // a chave é o uSdfBevel, que NENHUM outro programa consulta)
+    const int locBevel = slotByName("uSdfBevel");
+    if (hasF(locBevel)) {
+        pk.kind = ProgramKind::Sdf;
+        pk.sdf.bevel = true;
+        pk.sdf.bevelW = p->slots[size_t(locBevel)].f;
+        const auto fOf = [&](const char* n, float def) -> float {
+            const int l = slotByName(n);
+            return hasF(l) ? p->slots[size_t(l)].f : def;
+        };
+        pk.sdf.specDepth = fOf("uSdfSpecDepth", 5.0f);
+        pk.sdf.glowW = fOf("uSdfGlowW", 2.5f);
+        pk.sdf.shadowDy = fOf("uSdfShadowDy", 0.0f);
+        pk.sdf.shadowSoft = fOf("uSdfShadowSoft", 3.5f);
+        pk.sdf.shadowA = fOf("uSdfShadowA", 0.0f);
+        pk.sdf.specAdd = fOf("uSdfSpecAdd", 0.0f);
+        pk.sdf.glowAdd = fOf("uSdfGlowAdd", 0.0f);
+        pk.sdf.spec = fOf("uSdfSpecOn", 0.0f) > 0.5f;
+        pk.sdf.glow = fOf("uSdfGlowOn", 0.0f) > 0.5f;
+        pk.sdfShadow = pk.sdf.shadowA > 0.0f;
+        pk.sdfAA = fOf("uSdfAA", 1.0f);
+        const int locSdfProj = slotByName("uProj");
+        if (hasMat(locSdfProj)) {
+            pk.proj = p->slots[size_t(locSdfProj)].m;
+        }
+        return pk;
+    }
     const int locProj = slotByName("uProj");
     if (hasMat(locProj)) {
         pk.kind = ProgramKind::Ui;
@@ -618,6 +659,10 @@ struct RVertex {
     float u = 0, v = 0;
     float cr = 1, cg = 1, cb = 1, ca = 1;   // cor (UI)
     float nx = 0, ny = 0, nz = 1;           // normal EM MUNDO (lit)
+    // 0.12-D (D-1): os varyings do WIDGET SDF (locais/meias-ext/raio/cor)
+    float sLx = 0, sLy = 0, sHw = 0, sHh = 0, sRad = 0, sLvl = 0;
+    float sTr = 1, sTg = 1, sTb = 1, sTa = 1;
+    float sBr = 1, sBg = 1, sBb = 1, sBa = 1;
 };
 
 inline void ndcToWindow(const float* clip, float* outX, float* outY,
@@ -698,7 +743,37 @@ inline void rasterTriangle(const RVertex& a, const RVertex& b, const RVertex& c,
             const float v = (l0 * wa * a.v + l1 * wb_ * b.v + l2 * wc * c.v) * corr;
 
             float outR = 1.0f, outG = 1.0f, outB = 1.0f, outA = 1.0f;
-            if (pk.kind == ProgramKind::Ui) {
+            if (pk.kind == ProgramKind::Sdf) {
+                // 0.12-D (D-1): o WIDGET SDF rasterizado pela FONTE ÚNICA —
+                // vv::sdf::shade (ui/Sdf.h), a MESMA função que o FS GLSL
+                // replica linha a linha. Interpolação linear dos varyings
+                // (a orto da UI é w=1; o GPU interpola igual).
+                const float lxl = l0 * a.sLx + l1 * b.sLx + l2 * c.sLx;
+                const float lyl = l0 * a.sLy + l1 * b.sLy + l2 * c.sLy;
+                const float hwl = l0 * a.sHw + l1 * b.sHw + l2 * c.sHw;
+                const float hhl = l0 * a.sHh + l1 * b.sHh + l2 * c.sHh;
+                const float rdl = l0 * a.sRad + l1 * b.sRad + l2 * c.sRad;
+                vv::sdf::Shade sh;
+                sh.hw = hwl;
+                sh.hh = hhl;
+                sh.radius = rdl;
+                sh.top[0] = l0 * a.sTr + l1 * b.sTr + l2 * c.sTr;
+                sh.top[1] = l0 * a.sTg + l1 * b.sTg + l2 * c.sTg;
+                sh.top[2] = l0 * a.sTb + l1 * b.sTb + l2 * c.sTb;
+                sh.top[3] = l0 * a.sTa + l1 * b.sTa + l2 * c.sTa;
+                sh.bot[0] = l0 * a.sBr + l1 * b.sBr + l2 * c.sBr;
+                sh.bot[1] = l0 * a.sBg + l1 * b.sBg + l2 * c.sBg;
+                sh.bot[2] = l0 * a.sBb + l1 * b.sBb + l2 * c.sBb;
+                sh.bot[3] = l0 * a.sBa + l1 * b.sBa + l2 * c.sBa;
+                sh.p = pk.sdf;
+                sh.p.shadow = pk.sdfShadow;
+                float out4[4];
+                vv::sdf::shade(sh, lxl, lyl, pk.sdfAA, out4);
+                outR = out4[0];
+                outG = out4[1];
+                outB = out4[2];
+                outA = out4[3];
+            } else if (pk.kind == ProgramKind::Ui) {
                 // Renderer.cpp: outColor = vColor * texture(uTex, vUV).r
                 const float cr = (l0 * wa * a.cr + l1 * wb_ * b.cr + l2 * wc * c.cr) * corr;
                 const float cg = (l0 * wa * a.cg + l1 * wb_ * b.cg + l2 * wc * c.cg) * corr;
@@ -1043,6 +1118,29 @@ inline void drawCore(unsigned mode, int count, IdxOf idxOf, int instances = 1) {
                 r.cg = vf.attr(2, 1, vi, 1.0f);
                 r.cb = vf.attr(2, 2, vi, 1.0f);
                 r.ca = vf.attr(2, 3, vi, 1.0f);
+            } else if (pk.kind == ProgramKind::Sdf) {
+                // 0.12-D (D-1): aPos + aLocal(lx,ly,hw,hh) + aShape(radius,
+                // level) + aColTop + aColBot — o FS GLSL interpola os MESMOS
+                // varyings (a orto é w=1: linear == perspective-correct)
+                const float x = vf.attr(0, 0, vi, 0.0f);
+                const float y = vf.attr(0, 1, vi, 0.0f);
+                float clip[4];
+                mat4ByVec(pk.proj, x, y, 0.0f, 1.0f, clip);
+                ndcToWindow(clip, &r.x, &r.y, &r.z, &r.iw);
+                r.sLx = vf.attr(1, 0, vi, 0.0f);
+                r.sLy = vf.attr(1, 1, vi, 0.0f);
+                r.sHw = vf.attr(1, 2, vi, 0.0f);
+                r.sHh = vf.attr(1, 3, vi, 0.0f);
+                r.sRad = vf.attr(2, 0, vi, 0.0f);
+                r.sLvl = vf.attr(2, 1, vi, 0.0f);
+                r.sTr = vf.attr(3, 0, vi, 1.0f);
+                r.sTg = vf.attr(3, 1, vi, 1.0f);
+                r.sTb = vf.attr(3, 2, vi, 1.0f);
+                r.sTa = vf.attr(3, 3, vi, 1.0f);
+                r.sBr = vf.attr(4, 0, vi, 1.0f);
+                r.sBg = vf.attr(4, 1, vi, 1.0f);
+                r.sBb = vf.attr(4, 2, vi, 1.0f);
+                r.sBa = vf.attr(4, 3, vi, 1.0f);
             } else if (pk.kind == ProgramKind::Grid) {
                 // Grid.cpp VS: xz = uCenter.xz + aCorner*uExtent; o FRAGMENT
                 // quer o vWorld — viaja no u/v (interpolado perspective-
@@ -1097,6 +1195,28 @@ inline void drawCore(unsigned mode, int count, IdxOf idxOf, int instances = 1) {
 
 inline void drawArrays(unsigned mode, int first, int count) {
     drawCore(mode, count, [&](int i) { return int(first) + int(i); });
+}
+
+// 0.12-D (D-1): sonda de DEBUG/pins — o programa corrente resolvido (o
+// mesmo caminho do drawCore; o teste prova que o programa SDF é reconhecido)
+inline ProgramKind probeProgram() { return resolveProgram(); }
+
+// 0.12-D (D-1): sonda de DEBUG — os atributos do vértice `vi` do VAO
+// corrente (loc0..loc4, 4 componentes cada = 20 floats)
+inline void probeVertex(int vi, float out[20]) {
+    const VaoObj* vao = findVao_(curVao_);
+    VertFetch vf;
+    vf.vao = vao;
+    if (vao) {
+        for (int loc = 0; loc < 8; ++loc) {
+            vf.bufOf[loc] = findBuf_(vao->attribs[loc].buf);
+        }
+    }
+    for (int loc = 0; loc < 5; ++loc) {
+        for (int c = 0; c < 4; ++c) {
+            out[size_t(loc) * 4 + size_t(c)] = vf.attr(loc, c, vi, -999.0f);
+        }
+    }
 }
 
 // 0.11-W (3.5b): `instances` = o glDrawElementsInstanced do GLES 3.0
