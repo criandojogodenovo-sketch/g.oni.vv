@@ -94,3 +94,84 @@ o chip ganhou o hierChipSlot, o título não tinha a mesma proteção). A cura
    da hierarquia) — não se decidiu aqui sem ordem.
 2. As PNGs do C33 são do device do dono (a sessão local não tem device);
    o ANTES é o y-editor3d.png do fecho da 0.11-Y.
+
+## 2. SUB-FASE C-2 — Menus, sobreposições, barra de topo (versionCode 88)
+
+### 2.1 O que o prompt pedia e onde ficou
+
+| Pedido (C-2) | Onde ficou (fonte única) |
+|---|---|
+| Menu principal: altura máxima + scroll + fundo escurecido atrás (nunca cortado em baixo) | JÁ era o D14 + o scrim 40% do PASSO 4; a matemática extraída para `menuSheetLayout()` (ui/EditorLayout.h — o draw e os pins partilham); o pin `menu_scroll` aferra (896dp de conteúdo, maxH 644 no device, o fundo nunca cruza a tab bar) |
+| Menus ancorados ao botão (popover com seta) ou folha completa (não soltos) | TODOS os sheets da casa JÁ eram ancorados (o menu principal pelo menuAx/menuAy do ⋯; o CENAS e o ⋮ da hierarquia com o MESMO contrato ax/ay) — nenhum «solto»; o pin `menu_ancorado` aferra a âncora e os clamps. A SETA do popover: a casa não desenha glifo de seta nos sheets (o vidro nasce a 8dp do botão — a relação é inequívoca); inventar a seta seria glifo novo fora do pedido — NÃO verificado com o dono (P-04) |
+| Barra de topo em 3 zonas | JÁ era o G2-10; o pin `topbar_3_zonas` aferra as 3 zonas sem sobreposição nos 4 ecrãs de referência + a degradação 480dp |
+| Botão play em destaque quando ativo | o `iconButton` da top bar ganhou o parâmetro active — em playMode o play é A CHAMA (o gradiente accent→accent2 da Y-1 + tinta accentInk). NOTA P-04: em playMode a top bar NÃO desenha (a play bar mínima substitui — 0.6.8); o destaque ativa se a barra se desenhar (o main diz «se algum dia se desenhar»); o botão ATIVO da casa já é a chama no CHOKE POINT button() (a Y-1) — a play bar herda |
+| Ferramentas do viewport numa só barra (remover o duplicado do Mover) | O GIZMO 40dp do topo-direito REMOVIDO (mostrava O MESMO ícone da ferramenta ativa; a transição selectMode↔gizmo já vive no botão Selecionar do rail — sem função diferente = fachada = SAI); o id fica APOSENTADO (o padrão D21); o pin `mover_unico` aferra o gizmoBtn/gizmoPanel ZERO |
+| Barras flutuantes mais pequenas e encostadas às bordas | o rail/quick já encostam (m=8dp); com o gizmo fora, a fila do topo e a legenda respiram até à borda direita; os pais de vidro mantêm o padding 4dp e os alvos 40dp (a LEI DE OURO — não encolhem) |
+
+### 2.2 O achado (o que a remoção mudou)
+
+O gizmo do canto era o ÚLTIMO elemento do lado direito do viewport: com ele
+fora, a fila undo/redo/save/⋯ e a legenda da ferramenta ativa deixam de
+competir por largura em ecrãs estreitos (o topFits agora mede até à borda).
+O RAIL continua a ser a ÚNICA barra de ferramentas do viewport — «numa só
+barra», literal.
+
+### 2.3 Os pins (tests/test_012c_chrome.cpp)
+
+1. **menu_scroll** — o contentH real do menu (15 itens + 6 cabeçalhos =
+   896dp) num ecrã 720 → h=644 < contentH, maxOffset=252 > 0, o fundo do
+   sheet ≤ 688 (o topo da tab bar); o ecrã alto (1400) cabe inteiro com
+   maxOffset 0; o retrato 336 idem (h ≤ 304).
+2. **menu_ancorado** — y = ay+8 (o clamp não ativa com a âncora de 20dp);
+   a âncora baixa (600dp) ativa o clamp do fundo (y = 720−644−32); o clamp
+   horizontal com a âncora à direita extrema; sem âncora → centrado.
+3. **topbar_3_zonas** — esquerda ≤ centro ≤ direita em {1600, 1536, 776,
+   800}; o gear ancorado à borda; as tabs contíguas e iguais; a degradação
+   480dp tira o NOME e as zonas continuam sem tocar.
+4. **mover_unico** — o rail 5 ferramentas (o Mover é o rail[1]); o
+   gizmoBtn/gizmoPanel ZERO; a fila e os pais DENTRO do rect; o canto
+   sub-mínimo limpo.
+
+### 2.4 As mutações (coladas)
+
+- **M-C2a** — o menu cortado de volta (`menuSheetLayout` devolve
+  h=contentH sempre): **menu_scroll VERMELHA (14 EXPECTs** — «m.h <
+  contentH» e o teto 644 morrem) e **menu_ancorado VERMELHA (8** — a
+  mesma função). topbar_3_zonas e mover_unico VERDES — o isolamento das
+  irmãs provado. Reposto → verde.
+- **M-C2b** — o segundo Mover volta (gizmoBtn/gizmoPanel repostos no
+  layout): **mover_unico VERMELHA (6 EXPECTs** — os rects ZERO deixam de
+  ser zero). As irmãs verdes. Reposto → verde.
+
+### 2.5 Recalibrações legítimas (com nota no sítio)
+
+1. O canto direito deixou de ter alvo: test_sentinels (regress_chrome_passo3:
+   os alvos N−2, o ltiny, a escada 140/72dp, a coerência do rect) e
+   c33_virtual (FASEs 13.7/14.1/G2/D21: o canto limpo é o gizmoBtn ZERO).
+2. test_wiring090 ×3 testes (o vpchrome g11, a topbar g29, a fila N−2).
+3. test_timeline — a strip antiga (ÓRFÃ desde a 0.9.0: a timeline real
+   vive no drawer) vive no mundo do wrapper 300-fixo; o teste passa a
+   usar o MESMO raw nos painéis (a hier 20% de 1600 = 320 ultrapassava o
+   300 do wrapper e o «overlap» era um artefacto de dois mundos).
+4. test_uieditor — o tap do + vem da FONTE ÚNICA hierHeaderRects (o
+   hardcoded 300−16−14 caía no ⋮ com a hierarquia 20%). O crash do teste
+   era o tap a armar o ⋮ em vez do + (o canvas ficava null e o teste
+   desreferenciava) — curado pela fonte única, não pelo número.
+
+### 2.6 Verificação
+
+test_core: 0 falhas nos 21 grupos afetados — menu_ · topbar_ · mover_ ·
+viewport_ · painel_ · divisor_ · hierarquia_ · regress_ · 012a_ · 012b_ ·
+safearea_ · toolbar_ · wiring090_ · uieditor_ · uilayout_ · y2_ · y3_ ·
+scenes_ · play_ · scroll_ · timeline_. (O grupo uieditor_ corria ainda
+com o binário ASan para caçar o crash do tap — o crash era o teste, não a
+app; curado acima.)
+
+### 2.7 Pin C33 (o dono no device)
+
+- [ ] Abrir o menu principal (≡ ou ⋯ do viewport): o scroll funciona (15
+      itens), o fundo escurece, nada cortado em baixo — PNG do topo.
+- [ ] Confirmar: só há UM botão de mover no viewport (o rail esquerdo); o
+      canto superior direito está limpo.
+- [ ] A top bar: as 3 zonas não se sobrepõem; o play destaca-se durante o
+      play (se a barra estiver visível).

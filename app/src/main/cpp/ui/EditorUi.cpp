@@ -3050,36 +3050,17 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     const f32 contentH = static_cast<f32>(kItems) * kRowH +
                          6.0f * kHdrH + theme::dp(8.0f);
     f32 x, y;
-    // o ALTURA máxima disponível (o sheet NUNCA sai do contentRect — a
-    // invariante F4.2; o resto rola lá dentro). D14: a reserva do fundo
-    // é a TAB BAR (32dp — era 28px crus, MENOS que a barra: o «Documentação
-    // V. …» ficava debaixo dela).
-    const f32 maxH = sh - static_cast<f32>(ui.safeTop()) -
-                     theme::dp(safe::kToolbarH) - theme::dp(8.0f) -
-                     theme::dp(safe::kBottomTabH);
-    const f32 h = contentH < maxH ? contentH : maxH;
-    if (ax >= 0.0f && ay >= 0.0f) {
-        x = ax;
-        y = ay + theme::dp(8.0f);   // 8dp sob o botão (spec H)
-        // clamp ao contentRect (nada sai do ecrã — a invariante F4.2);
-        // D14: o fundo do sheet nunca passa do TOPO da tab bar
-        const f32 maxX = ui.safeLeft() + sw - ui.safeRight() - kSheetW - 4.0f;
-        if (x > maxX) {
-            x = maxX > ui.safeLeft() ? maxX : ui.safeLeft();
-        }
-        const f32 maxY = sh - ui.safeBottom() - h -
-                         theme::dp(safe::kBottomTabH);
-        if (y > maxY) {
-            y = maxY > static_cast<f32>(ui.safeTop()) + safe::kToolbarH
-                    ? maxY
-                    : static_cast<f32>(ui.safeTop()) + safe::kToolbarH;
-        }
-    } else {
-        f32 ox, oy, aw, ah;
-        overlayArea(sw, sh, ui.safeArea(), ox, oy, aw, ah);
-        x = ox + (aw - kSheetW) * 0.5f;
-        y = oy + (ah - h) * 0.5f;
-    }
+    // 0.12-C (C-2): a FONTE ÚNICA menuSheetLayout (EditorLayout.h) — a
+    // altura máxima + o scroll + a âncora 8dp sob o botão com clamp (o
+    // MESMO contrato que o draw tinha inline; o draw e os pins partilham)
+    const MenuSheetLayout ms =
+        menuSheetLayout(sw, sh, static_cast<f32>(ui.safeTop()),
+                        static_cast<f32>(ui.safeBottom()),
+                        static_cast<f32>(ui.safeLeft()),
+                        static_cast<f32>(ui.safeRight()), contentH, ax, ay,
+                        kSheetW);
+    x = ms.x;
+    y = ms.y;
 
     // PASSO 4 (0.9.6.20 · J-02): SCRIM MENU 40% («menus ancorados com fundo
     // 40%» — o véu dos ancorados desce de 60% para 40%; os modais centrados
@@ -3087,24 +3068,24 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     ui.panel(ui.safeLeft(), static_cast<f32>(ui.safeTop()),
              sw - ui.safeLeft() - ui.safeRight(),
              sh - ui.safeTop() - ui.safeBottom(), theme::kTheme.scrimMenu);
-    if (pressedOutside(in, x, y, kSheetW, h)) {
+    if (pressedOutside(in, x, y, kSheetW, ms.h)) {
         st.fileMenu = false;
         return 0;
     }
 
     // J-04: o raio em dp REAL (era kRadiusCard cru — 8px = 4dp a 2.0, a
     // mesma classe R-018 dos sheets px crus do D14)
-    ui.panelRounded(x, y, kSheetW, h, theme::dp(theme::kRadiusCard),
+    ui.panelRounded(x, y, kSheetW, ms.h, theme::dp(theme::kRadiusCard),
                     theme::kTheme.surface);
     // 0.11-Y (Y-3): o cristal — a linha do topo do sheet (o brilho 1dp)
     ui.glassTopLine(x, y, kSheetW);
-    ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::dp(theme::kRadiusCard),
+    ui.frameRounded(x, y, kSheetW, ms.h, 1.0f, theme::dp(theme::kRadiusCard),
                     theme::kTheme.border);
 
     const TextMetrics tm = ui.textMetrics();
     int chosen = 0;
     const UiRect region{x, y + theme::dp(4.0f), kSheetW,
-                        h - theme::dp(8.0f)};
+                        ms.h - theme::dp(8.0f)};
     ui.beginScroll(kMenuScrollId, region, contentH);
     const f32 off = ui.scrollOffset();
     // o y de CONTENT de cada linha (para o re-despacho do tap: dentro do
@@ -3119,7 +3100,7 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
             lastSec = kMenu[i].section;
             if (ui.hasFont()) {
                 const f32 hdrY = ry - off;
-                if (hdrY + kHdrH >= y && hdrY <= y + h) {
+                if (hdrY + kHdrH >= y && hdrY <= y + ms.h) {
                     ui.labelStyled(x + theme::dp(16.0f),
                                    hdrY + (kHdrH - tm.block()) * 0.5f +
                                        tm.ascent,
@@ -3132,7 +3113,7 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
         rowContentY[i] = ry;   // topo da linha EM COORDENADAS DE CONTENT
         const f32 rowY = ry - off;
         ry += kRowH;
-        if (rowY + kRowH < y || rowY > y + h) {
+        if (rowY + kRowH < y || rowY > y + ms.h) {
             continue;   // culled (fora do sheet)
         }
         const u64 id = kMenuRowBase + static_cast<u64>(i);

@@ -52,7 +52,10 @@ Atualizado: 2026-10-18 · vc: 83
 - **app/src/main/cpp/ui/** — a apresentação: EditorUi, EditorLayout.h (as
   constantes — InspRow, as faixas k*Base; **0.12-C C-1**: hierHeaderRects
   — a FONTE ÚNICA da geometria do cabeçalho da hierarquia: o título com
-  budget que ELIPSA + o ⋮ e o + à direita, o draw e os pins partilham),
+  budget que ELIPSA + o ⋮ e o + à direita, o draw e os pins partilham;
+  **0.12-C C-2**: menuSheetLayout — a FONTE ÚNICA do sheet do menu
+  principal: a altura máxima + o maxOffset do scroll + a âncora 8dp com
+  clamp),
   UiContext (com as primitivas
   do cristal da 0.11-Y: panelRoundedGradientV / glassTopLine /
   focusGlow + o QuadBatch::quadGradientV), UiEditor (as ops
@@ -63,6 +66,9 @@ Atualizado: 2026-10-18 · vc: 83
   SafeArea.h (os rects puros — `scissor3dRect()` NOVO na 0.12-A: o
   scissor do pass 3D no modo UI; **0.12-C C-1**: kHierPct=0.20 — a
   hierarquia 20% e o viewport ≥60% por defeito),
+  ViewportChrome **0.12-C C-2**: o GIZMO 40dp do canto REMOVIDO (o
+  duplicado do Mover — o kVpGizmoId fica APOSENTADO como o kVpAddTicId do
+  D21; os rects do layout são ZERO e o pin mover_unico aferra),
   BottomPanel, SettingsPage, ScriptEditor, DocsScreen, Gizmo, hierarquia.
   **0.12-B (a árvore de UI)**: app/src/main/cpp/ui/UiRuntime.h/.cpp tem
   a VISTA da árvore (UiTreeView + collectUiTree — o espelho UiCanvas
@@ -140,6 +146,8 @@ Atualizado: 2026-10-18 · vc: 83
   cena_serializa — o manifesto round-trip no FakeStorage),
   test_012c_paineis.cpp (os pins da 0.12-C C-1: viewport_60_pct/
   painel_colapsado_default/hierarquia_cabecalho/divisor_drag),
+  test_012c_chrome.cpp (os pins da 0.12-C C-2: menu_scroll/menu_ancorado/
+  topbar_3_zonas/mover_unico),
   test_voni.cpp, test_bench.cpp,
   test_gmeshv3.cpp, voni_refgen.cpp (o gerador da referência), c33_virtual.cpp
   (o dispositivo virtual), bench_ram_curve.cpp (A-4: a curva 50k…12,3M

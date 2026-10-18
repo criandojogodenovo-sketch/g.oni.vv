@@ -96,6 +96,7 @@ add_executable(test_core
         test_012b_canvas.cpp   # 0.12-B (B-3): os pins do canvas (a moldura + as guias + o toast)
         test_012b_cenas.cpp   # 0.12-B (B-4): os pins do seletor de cenas (as ações)
         test_012c_paineis.cpp   # 0.12-C (C-1): os pins das proporções e painéis
+        test_012c_chrome.cpp   # 0.12-C (C-2): os pins dos menus e da barra de topo
         # 0.7.1: cenas múltiplas + transições (projeto e2e, SceneFx puro,
         # overlay CENAS, ações Scene.Load/Transition)
         test_scenes.cpp

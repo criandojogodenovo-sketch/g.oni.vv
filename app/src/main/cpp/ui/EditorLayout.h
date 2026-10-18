@@ -902,5 +902,57 @@ constexpr int kAssetPickImport = 99;
 // 0.7.6 — toolbarModeRect/toolbarModeEndX foram REMOVIDOS: a barra
 // final de 5 grupos vive em ui/Toolbar.h (toolbar::layout é a fonte única).
 
+// ---- 0.12-C (C-2) — O SHEET ANCORADO (a fonte ÚNICA do menu principal) -----
+// O menu principal é uma FOLHA ancorada ao botão que o abriu: altura
+// MÁXIMA (nunca sai do contentRect — o resto ROLA lá dentro, o D14), o
+// fundo escurecido atrás (o scrimMenu do draw) e a âncora 8dp sob o botão
+// (spec H) com clamp ao contentRect. Os outros sheets da casa (CENAS/HIER)
+// partilham o MESMO contrato de âncora; este é o caso mais cheio (o
+// scroll). O draw (EditorUi.cpp drawFileMenu) e os pins partilham ESTA
+// função.
+struct MenuSheetLayout {
+    f32 h;          // a altura do sheet (min(contentH, maxH))
+    f32 maxOffset;  // o máximo do scroll (contentH − h; 0 = cabe inteiro)
+    f32 x;          // a posição final no ecrã (ancorada com clamp ou
+    f32 y;          //   centrada na área útil se sem âncora)
+};
+inline MenuSheetLayout menuSheetLayout(f32 sw, f32 sh, f32 safeTop,
+                                       f32 safeBottom, f32 safeLeft,
+                                       f32 safeRight, f32 contentH, f32 ax,
+                                       f32 ay, f32 sheetW) {
+    MenuSheetLayout r;
+    // a ALTURA máxima disponível (o sheet NUNCA sai do contentRect — a
+    // invariante F4.2; o resto rola lá dentro). D14: a reserva do fundo
+    // é a TAB BAR (32dp — o «Documentação V. …» ficava debaixo dela).
+    const f32 maxH = sh - safeTop - theme::dp(safe::kToolbarH) -
+                     theme::dp(8.0f) - theme::dp(safe::kBottomTabH);
+    r.h = contentH < maxH ? contentH : maxH;
+    r.maxOffset = contentH > r.h ? contentH - r.h : 0.0f;
+    if (ax >= 0.0f && ay >= 0.0f) {
+        r.x = ax;
+        r.y = ay + theme::dp(8.0f);   // 8dp sob o botão (spec H)
+        // clamp ao contentRect (nada sai do ecrã — a invariante F4.2);
+        // D14: o fundo do sheet nunca passa do TOPO da tab bar
+        const f32 maxX = safeLeft + sw - safeRight - sheetW - 4.0f;
+        if (r.x > maxX) {
+            r.x = maxX > safeLeft ? maxX : safeLeft;
+        }
+        const f32 maxY = sh - safeBottom - r.h - theme::dp(safe::kBottomTabH);
+        if (r.y > maxY) {
+            r.y = maxY > safeTop + safe::kToolbarH ? maxY
+                                                   : safeTop +
+                                                         safe::kToolbarH;
+        }
+    } else {
+        // sem âncora: centrado na área útil (o compat dos testes)
+        f32 ox, oy, aw, ah;
+        const safe::Insets in{safeLeft, safeTop, safeRight, safeBottom};
+        overlayArea(sw, sh, in, ox, oy, aw, ah);
+        r.x = ox + (aw - sheetW) * 0.5f;
+        r.y = oy + (ah - r.h) * 0.5f;
+    }
+    return r;
+}
+
 } // namespace editor
 } // namespace vv
