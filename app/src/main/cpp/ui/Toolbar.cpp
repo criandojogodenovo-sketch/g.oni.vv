@@ -125,8 +125,12 @@ bool iconButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
     if (active && !held) {
         // A CHAMA: o fill com o GRADIENTE VERTICAL accent->accent2 (o
         // MESMO tratamento dos botões ativos da Y-1) — agora pelo SDF
+        // 0.12-D (D-3): + O GLOW POR BAIXO + A BORDA DE FOGO animada
+        ui.fireGlowBelow(chip.x, chip.y, chip.w, chip.h);
         ui.sdfWidget(chip.x, chip.y, chip.w, chip.h, theme::dp(theme::kRadiusCard),
                      theme::kTheme.accent, theme::kTheme.accent2);
+        ui.sdfFireBorder(chip.x, chip.y, chip.w, chip.h,
+                         theme::dp(theme::kRadiusCard));
     } else if (held || active) {
         ui.sdfWidget(chip.x, chip.y, chip.w, chip.h, theme::dp(theme::kRadiusCard),
                      active ? theme::kTheme.accentPress : theme::kTheme.surface2,

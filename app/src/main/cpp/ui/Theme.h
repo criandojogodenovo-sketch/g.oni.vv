@@ -142,6 +142,14 @@ struct Theme {
     // tinta é o corpo do painel flutuante (o #6B6B76 α0.94 escurece SEM
     // apagar o que está atrás; o α é a opacidade do corpo)
     f32 glassInk[4];   // #6B6B76 α0.94
+    // 0.12-D (D-3): A RAMPA DO FOGO do dono — extraída do ícone REAL
+    // (docs/iconegonevv.png, o «G em chama»; o pin fogo_rampa aferra as 4
+    // contra a PALETA do PNG): a escura da base → o laranja → o âmbar
+    // quente → o amarelo do bico
+    f32 fire0[4];      // #7A1F0A (a base escura)
+    f32 fire1[4];      // #E8530F (o laranja)
+    f32 fire2[4];      // #FFA21F (o âmbar quente)
+    f32 fire3[4];      // #FFE08A (o amarelo do bico)
 };
 
 // hex→f32 normalizado (compile-time-friendly por field) — com ALPHA:
@@ -199,6 +207,11 @@ inline constexpr Theme kTheme{
     VV_RGB(158, 158, 158),  // axisDim
     // 0.12-D (D-2): a tinta do vidro real (#6B6B76 α0.94)
     VV_RGBA(107, 107, 118, 0.94f),  // glassInk
+    // 0.12-D (D-3): a RAMPA DO FOGO (extraída do ícone real)
+    VV_RGB(122, 31, 10),    // fire0  #7A1F0A
+    VV_RGB(232, 83, 15),    // fire1  #E8530F
+    VV_RGB(255, 162, 31),   // fire2  #FFA21F
+    VV_RGB(255, 224, 138),  // fire3  #FFE08A
 };
 #undef VV_RGB
 #undef VV_RGBA

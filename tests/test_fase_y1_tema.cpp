@@ -282,16 +282,41 @@ TEST(y1_gradiente_botao) {
                    "(%u vértices)", sb.vertexCount());
         if (sb.vertexCount() >= 6u) {
             const vv::SdfVertex* v = sb.vertices();
-            bool foundGrad = false;
+            bool foundGrad = false, foundChama = false;
             for (u32 i = 0; i + 5 < sb.vertexCount(); i += 6) {
                 // f32 tx = vx - bx (o quad cresce com o pad; o widget é
-                // reconhecido pelo hw/hw == bw/2)
-                bool isWidget = true;
+                // reconhecido pelo hw/hw == bw/2). 0.12-D (D-3): o PREMIDO
+                // emite TAMBÉM o quad da CHAMA (o aShape.w=1, as cores
+                // fire1→fire3) — o widget é o de fireOn < 0.5 (a
+                // recalibração com nota no relatório D §3)
+                bool isWidget = true, isChama = false;
                 for (u32 k = i; k < i + 6; ++k) {
                     if (!test::nearEqF(v[k].hw, bw * 0.5f, 0.05f) ||
                         !test::nearEqF(v[k].hh, bh * 0.5f, 0.05f)) {
                         isWidget = false;
                     }
+                    if (v[k].pad1 > 0.5f) {
+                        isChama = true;
+                    }
+                }
+                if (isChama) {
+                    // o quad da chama: fire1 no topo, fire3 no fundo (a
+                    // ordem do dono — a borda de fogo do ativo)
+                    bool chamaOk = true;
+                    for (u32 k = i; k < i + 6 && chamaOk; ++k) {
+                        chamaOk =
+                            test::nearEqF(v[k].tr, 232.0f / 255.0f, 1e-3f) &&
+                            test::nearEqF(v[k].tg, 83.0f / 255.0f, 1e-3f) &&
+                            test::nearEqF(v[k].tb, 15.0f / 255.0f, 1e-3f) &&
+                            test::nearEqF(v[k].br, 255.0f / 255.0f, 1e-3f) &&
+                            test::nearEqF(v[k].bg, 224.0f / 255.0f, 1e-3f) &&
+                            test::nearEqF(v[k].bb, 138.0f / 255.0f, 1e-3f);
+                    }
+                    EXPECT_MSG(chamaOk,
+                               "y1_gradiente: o quad da chama (D-3) não "
+                               "carrega fire1→fire3 nos vértices");
+                    foundChama = true;
+                    continue;
                 }
                 if (!isWidget) continue;
                 foundGrad = true;
@@ -308,6 +333,9 @@ TEST(y1_gradiente_botao) {
             EXPECT_MSG(foundGrad,
                        "y1_gradiente: o widget SDF do botão (hw=bw/2) não "
                        "foi encontrado no batch");
+            EXPECT_MSG(foundChama,
+                       "y1_gradiente: o premido perdeu o quad da CHAMA "
+                       "(a borda de fogo da D-3)");
         }
         ui.endFrame();
     }

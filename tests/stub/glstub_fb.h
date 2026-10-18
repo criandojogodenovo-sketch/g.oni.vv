@@ -50,8 +50,9 @@
 #include <string>
 #include <vector>
 #include "ui/Sdf.h"   // 0.12-D (D-1): o shade() do WIDGET SDF — a FONTE ÚNICA
-                     // (o rasterizador corre a MESMA função que o FS GLSL
-                     //  replica linha a linha em render/Renderer.cpp)
+                      // (o rasterizador corre a MESMA função que o FS GLSL
+                      //  replica linha a linha em render/Renderer.cpp)
+#include "ui/Fire.h"  // 0.12-D (D-3): o fbm/a borda de fogo — a MESMA fonte
 
 namespace glstub {
 namespace fb {
@@ -118,6 +119,7 @@ inline int scissor_[4] = {0, 0, 0, 0};
 inline bool depthOn_ = false;
 inline bool cullOn_ = false;
 inline bool blendOn_ = false;
+inline bool blendAdd_ = false;   // 0.12-D (D-3): o fogo — SRC_ALPHA/GL_ONE
 inline bool depthMask_ = true;
 
 // ---- framebuffer (linha 0 = FUNDO; convenção GL — glReadPixels direto) ------
@@ -360,6 +362,11 @@ inline void setScissorEnabled(bool on) { scissorOn_ = on; }
 inline void setDepthEnabled(bool on) { depthOn_ = on; }
 inline void setCullEnabled(bool on) { cullOn_ = on; }
 inline void setBlendEnabled(bool on) { blendOn_ = on; }
+// 0.12-D (D-3): o par de blend corrente (o único par era o clássico; o
+// FOGO usa o aditivo SRC_ALPHA/GL_ONE)
+inline void setBlendFunc(int src, int dst) {
+    blendAdd_ = (src == 0x0302 /*GL_SRC_ALPHA*/ && dst == 1 /*GL_ONE*/);
+}
 inline void setDepthMask(bool on) { depthMask_ = on; }
 inline void setClearColor(float r, float g, float b, float a) {
     clearColor_[0] = r; clearColor_[1] = g;
@@ -535,6 +542,9 @@ struct ProgramKind {
     bool sdfHasCap = false;
     float sdfCap[4] = {0, 0, 0, 0};
     float sdfSurfH = 0.0f;
+    // 0.12-D (D-3): a rampa do fogo (uFire1/uFire3)
+    float fire1[3] = {232.0f / 255.0f, 83.0f / 255.0f, 15.0f / 255.0f};
+    float fire3[3] = {255.0f / 255.0f, 224.0f / 255.0f, 138.0f / 255.0f};
 };
 
 inline ProgramKind resolveProgram() {
@@ -590,6 +600,19 @@ inline ProgramKind resolveProgram() {
                 pk.sdfHasCap = true;
             }
             pk.sdfSurfH = fOf("uSdfSurfH", 0.0f);
+            // 0.12-D (D-3): a rampa do fogo (o 'T' = o vec3 do uniform3f)
+            const int locF1 = slotByName("uFire1");
+            if (locF1 >= 0 && locF1 < int(p->slots.size()) &&
+                p->slots[size_t(locF1)].kind == 'T') {
+                std::memcpy(pk.fire1, p->slots[size_t(locF1)].v3,
+                            sizeof(float) * 3);
+            }
+            const int locF3 = slotByName("uFire3");
+            if (locF3 >= 0 && locF3 < int(p->slots.size()) &&
+                p->slots[size_t(locF3)].kind == 'T') {
+                std::memcpy(pk.fire3, p->slots[size_t(locF3)].v3,
+                            sizeof(float) * 3);
+            }
         }
         const int locSdfProj = slotByName("uProj");
         if (hasMat(locSdfProj)) {
@@ -692,6 +715,7 @@ struct RVertex {
     // 0.12-D (D-1): os varyings do WIDGET SDF (locais/meias-ext/raio/cor)
     float sLx = 0, sLy = 0, sHw = 0, sHh = 0, sRad = 0, sLvl = 0;
     float sPad0 = 0;   // 0.12-D (D-2): o ramo do vidro real (o aShape.z)
+    float sPad1 = 0;   // 0.12-D (D-3): o FOGO-ONLY (o aShape.w)
     float sTr = 1, sTg = 1, sTb = 1, sTa = 1;
     float sBr = 1, sBg = 1, sBb = 1, sBa = 1;
 };
@@ -775,6 +799,36 @@ inline void rasterTriangle(const RVertex& a, const RVertex& b, const RVertex& c,
 
             float outR = 1.0f, outG = 1.0f, outB = 1.0f, outA = 1.0f;
             if (pk.kind == ProgramKind::Sdf) {
+                // 0.12-D (D-3): o FOGO-ONLY (o aShape.w > 0.5) — a borda
+                // animada pela FONTE ÚNICA vv::fire::fireBorder (o mesmo
+                // cálculo que o FS GLSL replica); a saída é o flame com o
+                // α = a máscara e SEM continue: o pixel SEGUE para o bloco
+                // de escrita comum (o aditivo acontece lá — o continue da
+                // 1.ª versão saltava o blend e o fogo nunca chegava ao fb)
+                const float fireOnI =
+                    l0 * a.sPad1 + l1 * b.sPad1 + l2 * c.sPad1;
+                if (fireOnI > 0.5f) {
+                    const float lxl2 = l0 * a.sLx + l1 * b.sLx + l2 * c.sLx;
+                    const float lyl2 = l0 * a.sLy + l1 * b.sLy + l2 * c.sLy;
+                    const float hwl2 = l0 * a.sHw + l1 * b.sHw + l2 * c.sHw;
+                    const float hhl2 = l0 * a.sHh + l1 * b.sHh + l2 * c.sHh;
+                    const float rdl2 = l0 * a.sRad + l1 * b.sRad + l2 * c.sRad;
+                    float mask = 0.0f, n = 0.0f;
+                    vv::fire::fireBorder(lxl2, lyl2, hwl2, hhl2, rdl2,
+                                         pk.sdf.bevelW, vv::sdf::g_time,
+                                         mask, n);
+                    // o MESMO mix do FS: o laranja → o amarelo pelo fbm
+                    const float fr =
+                        pk.fire1[0] * (1.0f - n) + pk.fire3[0] * n;
+                    const float fg =
+                        pk.fire1[1] * (1.0f - n) + pk.fire3[1] * n;
+                    const float fb =
+                        pk.fire1[2] * (1.0f - n) + pk.fire3[2] * n;
+                    outR = fr * mask;
+                    outG = fg * mask;
+                    outB = fb * mask;
+                    outA = mask;
+                } else {
                 // 0.12-D (D-1): o WIDGET SDF rasterizado pela FONTE ÚNICA —
                 // vv::sdf::shade (ui/Sdf.h), a MESMA função que o FS GLSL
                 // replica linha a linha. Interpolação linear dos varyings
@@ -843,6 +897,7 @@ inline void rasterTriangle(const RVertex& a, const RVertex& b, const RVertex& c,
                 outG = out4[1];
                 outB = out4[2];
                 outA = out4[3];
+                }
             } else if (pk.kind == ProgramKind::Ui) {
                 // Renderer.cpp: outColor = vColor * texture(uTex, vUV).r
                 const float cr = (l0 * wa * a.cr + l1 * wb_ * b.cr + l2 * wc * c.cr) * corr;
@@ -894,7 +949,13 @@ inline void rasterTriangle(const RVertex& a, const RVertex& b, const RVertex& c,
             float dg = float(dst[1]) / 255.0f;
             float db = float(dst[2]) / 255.0f;
             float da = float(dst[3]) / 255.0f;
-            if (blendOn_) {   // SRC_ALPHA / ONE_MINUS_SRC_ALPHA (o par único)
+            if (blendOn_ && blendAdd_) {
+                // 0.12-D (D-3): o FOGO — MISTURA ADITIVA (SRC_ALPHA/GL_ONE)
+                dr += outR * outA;
+                dg += outG * outA;
+                db += outB * outA;
+                da = outA + da * (1.0f - outA);
+            } else if (blendOn_) {   // SRC_ALPHA / ONE_MINUS_SRC_ALPHA
                 dr = outR * outA + dr * (1.0f - outA);
                 dg = outG * outA + dg * (1.0f - outA);
                 db = outB * outA + db * (1.0f - outA);
@@ -1204,6 +1265,7 @@ inline void drawCore(unsigned mode, int count, IdxOf idxOf, int instances = 1) {
                 r.sRad = vf.attr(2, 0, vi, 0.0f);
                 r.sLvl = vf.attr(2, 1, vi, 0.0f);
                 r.sPad0 = vf.attr(2, 2, vi, 0.0f);   // 0.12-D: o texOn
+                r.sPad1 = vf.attr(2, 3, vi, 0.0f);   // 0.12-D (D-3): o fireOn
                 r.sTr = vf.attr(3, 0, vi, 1.0f);
                 r.sTg = vf.attr(3, 1, vi, 1.0f);
                 r.sTb = vf.attr(3, 2, vi, 1.0f);
@@ -1351,6 +1413,7 @@ inline void resetState() {
     depthOn_ = false;
     cullOn_ = false;
     blendOn_ = false;
+    blendAdd_ = false;   // 0.12-D (D-3)
     depthMask_ = true;
     scissor_[0] = scissor_[1] = scissor_[2] = scissor_[3] = 0;
     clearColor_[0] = clearColor_[1] = clearColor_[2] = clearColor_[3] = 0.0f;

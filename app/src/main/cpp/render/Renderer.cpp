@@ -82,8 +82,36 @@ uniform float uSdfAA;
 uniform sampler2D uSdfTex;
 uniform vec4 uSdfCap;    // o rect capturado (x,y,w,h em px de ecrã y-down)
 uniform float uSdfSurfH; // a altura da superfície (o flip do fragCoord)
+// 0.12-D (D-3): O FOGO — o ramo da borda animada (o fbm do ui/Fire.h
+// replicado; a mistura ADITIVA é o par do pass de fogo GL_SRC_ALPHA/GL_ONE)
+uniform float uSdfTime;  // o tempo da animação (s)
+uniform vec3 uFire1;     // #E8530F (o laranja da rampa)
+uniform vec3 uFire3;     // #FFE08A (o amarelo do bico)
 out vec4 outColor;
 float sdfClamp01(float x) { return clamp(x, 0.0, 1.0); }
+// ===== a réplica do ui/Fire.h (o hash + o value noise + o fbm) =============
+float fireHash(vec2 p) {
+    vec2 q = floor(abs(p) * 4096.0);
+    uint h = (uint(q.x) * 374761393u) ^ (uint(q.y) * 668265263u);
+    h = (h ^ (h >> 13u)) * 1274126177u;
+    h = h ^ (h >> 16u);
+    return float(h & 65535u) / 65535.0;
+}
+float fireValueNoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    float a = fireHash(i);
+    float b = fireHash(i + vec2(1.0, 0.0));
+    float c = fireHash(i + vec2(0.0, 1.0));
+    float d = fireHash(i + vec2(1.0, 1.0));
+    return a + (b - a) * u.x + (c - a) * u.y + (a - b - c + d) * u.x * u.y;
+}
+float fireFbm(vec2 p, float time) {
+    float n1 = fireValueNoise(vec2(p.x, p.y + time * 0.9));
+    float n2 = fireValueNoise(vec2(p.x * 2.3 + 7.7, p.y * 2.3 - time * 1.7));
+    return n1 * 0.65 + n2 * 0.35;
+}
 float roundRectSdf(vec2 p, vec2 b, float r) {
     float rr = min(r, min(b.x, b.y));
     if (rr <= 0.0) {
@@ -117,6 +145,21 @@ void main() {
     float r = vShape.x;
     float aa = uSdfAA > 1e-4 ? uSdfAA : 1.0;
     float d = roundRectSdf(p, b, r);
+    // 0.12-D (D-3): o FOGO-ONLY (aShape.w > 0.5) — a borda animada em
+    // MISTURA ADITIVA: o corpo é transparente, a chama vive na banda da
+    // aresta modulada pelo fbm (a réplica do ui/Fire.h)
+    if (vShape.w > 0.5) {
+        float bw = uSdfBevel > 1e-4 ? uSdfBevel : 1.0;
+        // a banda: 1 na aresta, morre a bevelW dentro E a 1px fora (o
+        // clamp nos DOIS lados — a réplica do ui/Fire.h fireBorder)
+        float edge = clamp(min(1.0 - d, 1.0 + d / bw), 0.0, 1.0);
+        float ang = atan(p.y, p.x);
+        float n = fireFbm(vec2(cos(ang) * 3.0 + b.x,
+                               sin(ang) * 3.0 + b.y), uSdfTime);
+        float mask = clamp(edge * (0.35 + 0.65 * n), 0.0, 1.0);
+        outColor = vec4(mix(uFire1, uFire3, n) * mask, mask);
+        return;
+    }
     float aW = sdfClamp01(0.5 - d / aa);
     float aS = 0.0;
     if (uSdfShadowA > 0.0) {
@@ -261,6 +304,9 @@ bool Renderer::init() {
     locSdfTex_ = glGetUniformLocation(progSdf_, "uSdfTex");
     locSdfCap_ = glGetUniformLocation(progSdf_, "uSdfCap");
     locSdfSurfH_ = glGetUniformLocation(progSdf_, "uSdfSurfH");
+    locSdfTime_ = glGetUniformLocation(progSdf_, "uSdfTime");
+    locFire1_ = glGetUniformLocation(progSdf_, "uFire1");
+    locFire3_ = glGetUniformLocation(progSdf_, "uFire3");
 
     glGenVertexArrays(1, &vaoSdf_);
     glGenBuffers(1, &vboSdf_);
@@ -464,7 +510,7 @@ void Renderer::submit(const QuadBatch& batch, u32 texture) {
 // setam-se UMA vez por frame na primeira submissão SDF. 0.12-D (D-2):
 // `tex` != 0 = o VIDRO REAL (o widget amostra a cena borrada).
 void Renderer::submitSdf(const SdfBatch& batch, u32 firstVertex,
-                         u32 vertexCount, u32 tex) {
+                         u32 vertexCount, u32 tex, bool blendAdd) {
     if (vertexCount == 0 || firstVertex >= batch.vertexCount()) {
         return;
     }
@@ -473,7 +519,7 @@ void Renderer::submitSdf(const SdfBatch& batch, u32 firstVertex,
         end = batch.vertexCount();
     }
     subs_.push_back(Submission{nullptr, &batch, tex, firstVertex,
-                               end - firstVertex, true});
+                               end - firstVertex, true, blendAdd});
 }
 
 // 0.7.4 — submissão por RANGE de vértices (z-order sólidos↔texturas:
@@ -567,12 +613,31 @@ DrawStats Renderer::endFrame() {
                 if (locSdfTex_ >= 0) {
                     glUniform1i(locSdfTex_, 0);
                 }
+                // 0.12-D (D-3): o tempo da animação + a rampa do fogo
+                if (locSdfTime_ >= 0) {
+                    glUniform1f(locSdfTime_, sdf::g_time);
+                }
+                if (locFire1_ >= 0) {
+                    glUniform3f(locFire1_, theme::kTheme.fire1[0],
+                                theme::kTheme.fire1[1],
+                                theme::kTheme.fire1[2]);
+                }
+                if (locFire3_ >= 0) {
+                    glUniform3f(locFire3_, theme::kTheme.fire3[0],
+                                theme::kTheme.fire3[1],
+                                theme::kTheme.fire3[2]);
+                }
                 sdfUniformsDone = true;
             }
             if (s.tex != 0) {
                 // 0.12-D (D-2): o VIDRO REAL — a textura da cena borrada
                 glActiveTexture(GL_TEXTURE0);
                 glBindTexture(GL_TEXTURE_2D, s.tex);
+            }
+            // 0.12-D (D-3): o FOGO em MISTURA ADITIVA (o par do pass de
+            // fogo — o estado repõe-se no fim da submissão)
+            if (s.blendAdd) {
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE /*aditivo — o pass do fogo*/);
             }
             glBindVertexArray(vaoSdf_);
             glBindBuffer(GL_ARRAY_BUFFER, vboSdf_);
@@ -581,6 +646,9 @@ DrawStats Renderer::endFrame() {
                          b.vertices(), GL_DYNAMIC_DRAW);
             glDrawArrays(GL_TRIANGLES, static_cast<GLsizei>(s.firstVertex),
                          static_cast<GLsizei>(s.vertexCount));
+            if (s.blendAdd) {
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            }
             st.vertices += s.vertexCount;
             st.drawCalls += 1;
             continue;

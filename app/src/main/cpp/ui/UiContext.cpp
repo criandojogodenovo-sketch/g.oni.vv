@@ -1,4 +1,5 @@
 #include "ui/UiContext.h"
+#include "ui/Fire.h"   // 0.12-D (D-3): as brasas paramétricas
 #include "ui/Glass.h"   // 0.12-D (D-2): o hash do ruído do vidro falso
 #include <cstring>
 
@@ -142,12 +143,15 @@ void UiContext::recordRun(QuadBatch& b, u32 tex, u32 firstVertex,
 // 0.12-D (D-1): o run do batch SDF — o batching pelo ponteiro + a textura
 // do VIDRO REAL (o mesmo contrato do recordRun; o endFrame despacha o
 // programa pelo flag e amarra a textura da captura)
-void UiContext::recordRunSdf(u32 firstVertex, u32 vertexCount, u32 tex) {
-    if (!runs_.empty() && runs_.back().sdf && runs_.back().tex == tex) {
+void UiContext::recordRunSdf(u32 firstVertex, u32 vertexCount, u32 tex,
+                             bool blendAdd) {
+    if (!runs_.empty() && runs_.back().sdf && runs_.back().tex == tex &&
+        runs_.back().blendAdd == blendAdd) {
         runs_.back().vertexCount += vertexCount;
         return;
     }
-    runs_.push_back(Run{nullptr, tex, firstVertex, vertexCount, true});
+    runs_.push_back(
+        Run{nullptr, tex, firstVertex, vertexCount, true, blendAdd});
 }
 
 // ---- 0.9.6.5 (GRUPO B): o registo do layout ---------------------------------
@@ -807,6 +811,122 @@ void UiContext::sdfWidgetGlass(f32 x, f32 y, f32 w, f32 h, f32 radius,
     recordRunSdf(fv, sdf_.vertexCount() - fv, texId);
 }
 
+// 0.12-D (D-3) — A BORDA DE FOGO: o quad do widget em FOGO-ONLY (o
+// aShape.w=1) submetido em MISTURA ADITIVA — o fbm animado do ui/Fire.h
+// (a réplica GLSL no FS) desenha a chama a CORRER pela aresta. O rect
+// cresce como o widget (a chama vive na banda da aresta + 1px fora).
+void UiContext::sdfFireBorder(f32 x, f32 y, f32 w, f32 h, f32 radius) {
+    if (w <= 0.0f || h <= 0.0f) {
+        return;
+    }
+    // 0.12-D (D-7): «Efeitos: Baixo = sem ruído» — a borda animada É o
+    // ruído (o fbm); em Baixo NEMEMITE (o pin fogo_toggle_baixo aferra).
+    if (sdf::g_level == sdf::LEVEL_BAIXO) {
+        return;
+    }
+    const sdf::LevelParams p = sdf::paramsFor(sdf::g_level, theme::dp(1.0f));
+    const f32 aaPad = 2.0f;   // a chama transborda 1px fora + a AA
+    const f32 qx = x - aaPad;
+    const f32 qy = y - aaPad;
+    const f32 qw = w + 2.0f * aaPad;
+    const f32 qh = h + 2.0f * aaPad;
+    f32 cx0 = qx > clip_.x ? qx : clip_.x;
+    f32 cy0 = qy > clip_.y ? qy : clip_.y;
+    f32 cx1 = qx + qw;
+    f32 cy1 = qy + qh;
+    cx1 = cx1 < clip_.x + clip_.w ? cx1 : clip_.x + clip_.w;
+    cy1 = cy1 < clip_.y + clip_.h ? cy1 : clip_.y + clip_.h;
+    if (cx1 <= cx0 || cy1 <= cy0) {
+        return;
+    }
+    const f32 hw = w * 0.5f;
+    const f32 hh = h * 0.5f;
+    const f32 m = hw < hh ? hw : hh;
+    const f32 r = radius < m ? (radius > 0.0f ? radius : 0.0f) : m;
+    const u8 lvl = sdf::g_level;
+    const u32 fv = sdf_.vertexCount();
+    const f32 VX[4] = {cx0, cx0, cx1, cx1};
+    const f32 VY[4] = {cy0, cy1, cy1, cy0};
+    const int IDX[6] = {0, 1, 2, 0, 2, 3};
+    for (const int i : IDX) {
+        sdf_.vertex(VX[i], VY[i], VX[i] - x, VY[i] - y, hw, hh, r, lvl,
+                    theme::kTheme.fire1, theme::kTheme.fire3, 0.0f, 1.0f);
+    }
+    recordRunSdf(fv, sdf_.vertexCount() - fv, 0u, /*blendAdd=*/true);
+}
+
+// 0.12-D (D-3) — O GLOW POR BAIXO: o gradiente do glow a CAIR por baixo
+// do elemento ativo (2 quads α decrescente — o padrão honesto da casa,
+// o mesmo do focusGlow; a chama reflete-se no "chão")
+void UiContext::fireGlowBelow(f32 x, f32 y, f32 w, f32 h) {
+    // 0.12-D (D-7): em Baixo o brilho extra morre (o ativo continua
+    // legível pelo fill accent→accent2 do widget + o bisel)
+    if (sdf::g_level == sdf::LEVEL_BAIXO) {
+        return;
+    }
+    const f32 d1 = theme::dp(6.0f);
+    const f32 d2 = theme::dp(12.0f);
+    const f32 aIn = theme::kTheme.glow[3] * 1.2f;    // 0.30
+    const f32 aOut = theme::kTheme.glow[3] * 0.5f;   // 0.125
+    const f32 cIn[4] = {theme::kTheme.glow[0], theme::kTheme.glow[1],
+                        theme::kTheme.glow[2], aIn};
+    const f32 cOut[4] = {theme::kTheme.glow[0], theme::kTheme.glow[1],
+                         theme::kTheme.glow[2], aOut};
+    const f32 zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    const u32 fv = solids_.vertexCount();
+    emitGradientV(solids_, x + theme::dp(2.0f), y + h, w - theme::dp(4.0f),
+                  d2, y + h, y + h + d2, cOut, zero);
+    emitGradientV(solids_, x + theme::dp(6.0f), y + h, w - theme::dp(12.0f),
+                  d1, y + h, y + h + d1, cIn, zero);
+    const u32 fv1 = solids_.vertexCount();
+    if (fv1 > fv) {
+        recordRun(solids_, 0u, fv, fv1 - fv);
+    }
+}
+
+// 0.12-D (D-3) — AS BRASAS: as partículas paramétricas do ui/Fire.h
+// (determinísticas no tempo) emitidas como quads com a RAMPA do tema. O
+// PORTÃO: `celebration=false` = ZERO emissão — o editor nunca as vê.
+void UiContext::drawEmbers(f32 x, f32 y, f32 w, f32 h, f32 time,
+                           bool celebration) {
+    if (!celebration || w <= 0.0f || h <= 0.0f) {
+        return;   // O PORTÃO (a cláusula do prompt: nunca no editor)
+    }
+    // 0.12-D (D-7): «Baixo = sem brasas» — o toggle morde TAMBÉM aqui
+    if (sdf::g_level == sdf::LEVEL_BAIXO) {
+        return;
+    }
+    constexpr int kCount = 16;   // 10-20 (o meio do intervalo do prompt)
+    const u32 fv = solids_.vertexCount();
+    for (int i = 0; i < kCount; ++i) {
+        f32 e[4];
+        fire::ember(i, time, w, h, e);
+        // a cor pela rampa do tema: quente (t alto) → escura (t baixo)
+        const f32 t = e[3];
+        f32 col[4];
+        if (t > 0.66f) {
+            for (int c = 0; c < 3; ++c) {
+                col[c] = theme::kTheme.fire2[c] +
+                         (theme::kTheme.fire3[c] - theme::kTheme.fire2[c]) *
+                             ((t - 0.66f) / 0.34f);
+            }
+        } else {
+            for (int c = 0; c < 3; ++c) {
+                col[c] = theme::kTheme.fire0[c] +
+                         (theme::kTheme.fire2[c] - theme::kTheme.fire0[c]) *
+                             (t / 0.66f);
+            }
+        }
+        col[3] = 0.25f + 0.55f * t;   // apaga ao subir
+        emitTo(solids_, x + e[0] - e[2], y + e[1] - e[2], e[2] * 2.0f,
+               e[2] * 2.0f, 0.0f, 0.0f, 1.0f, 1.0f, col);
+    }
+    const u32 fv1 = solids_.vertexCount();
+    if (fv1 > fv) {
+        recordRun(solids_, 0u, fv, fv1 - fv);
+    }
+}
+
 // 0.12-D (D-2) — O VIDRO FALSO (os painéis FIXOS): o gradiente
 // semi-opaco (surface no topo → surface2 no fundo — o MESMO caminho do
 // emitGradientV, o span é o rect inteiro), a BORDA CLARA 1px (o glassEdge
@@ -911,9 +1031,15 @@ void UiContext::emitQuadCornersClipped(const f32 px[6], const f32 py[6],
 namespace {
 void drawButtonVisual(UiContext& ui, f32 x, f32 y, f32 w, f32 h, bool held) {
     if (held) {
+        // 0.12-D (D-3): o ATIVO mostra bisel + brilho + FOGO + sombra
+        // SIMULTANEAMENTE (a cláusula anti-superficialidade) — o glow de
+        // foco da Y-1 + O GLOW POR BAIXO + o widget (o fogo no gradiente)
+        // + A BORDA DE FOGO animada (o fbm aditivo)
         ui.focusGlow(x, y, w, h);
+        ui.fireGlowBelow(x, y, w, h);
         ui.sdfWidget(x, y, w, h, theme::dp(theme::kRadiusCard),
                      theme::kTheme.accent, theme::kTheme.accent2);
+        ui.sdfFireBorder(x, y, w, h, theme::dp(theme::kRadiusCard));
     } else {
         ui.sdfWidget(x, y, w, h, theme::dp(theme::kRadiusCard),
                      theme::kTheme.surface, theme::kTheme.surface);
@@ -1332,7 +1458,8 @@ void UiContext::endFrame() {
         if (r.sdf) {
             // 0.12-D (D-1/D-2): o pass SDF (o shader único; a textura do
             // vidro real viaja no run)
-            renderer_->submitSdf(sdf_, r.firstVertex, r.vertexCount, r.tex);
+            renderer_->submitSdf(sdf_, r.firstVertex, r.vertexCount, r.tex,
+                                 r.blendAdd);
             continue;
         }
         renderer_->submit(*r.batch,

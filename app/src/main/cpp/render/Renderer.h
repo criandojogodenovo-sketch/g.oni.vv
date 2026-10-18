@@ -84,7 +84,7 @@ public:
     // 0.12-D (D-2): `tex` != 0 liga o ramo uSdfTexOn (o VIDRO REAL — o
     // widget amostra a textura da cena borrada com a tinta escura)
     void submitSdf(const SdfBatch& batch, u32 firstVertex, u32 vertexCount,
-                   u32 tex = 0);
+                   u32 tex = 0, bool blendAdd = false);
     // 0.7.4 — submissão por RANGE de vértices (z-order sólidos↔texturas:
     // o UiContext submete RUNS na ordem real de emissão; um mesmo batch
     // pode aparecer em vários runs com ranges diferentes)
@@ -135,6 +135,10 @@ private:
     i32 locSdfTex_ = -1;
     i32 locSdfCap_ = -1;      // uSdfCap (x,y,w,h do rect capturado, px)
     i32 locSdfSurfH_ = -1;    // uSdfSurfH (a altura da superfície — o flip y)
+    // 0.12-D (D-3): o FOGO (o tempo + a rampa)
+    i32 locSdfTime_ = -1;
+    i32 locFire1_ = -1;
+    i32 locFire3_ = -1;
     // 3D (F2)
     LitMaterial lit_;
 
@@ -160,6 +164,7 @@ private:
         u32 firstVertex;   // 0.7.4: range do batch (submissão por runs)
         u32 vertexCount;
         bool sdf;          // 0.12-D: a submissão é do programa SDF
+        bool blendAdd = false;   // 0.12-D (D-3): o fogo em MISTURA ADITIVA
     };
     // 0.8.4 (fix "funções que param" do C33): o cap FIXO de 32 descartava
     // submissões em silêncio — e como os glifos são SEMPRE a última, com

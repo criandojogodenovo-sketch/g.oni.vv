@@ -131,6 +131,22 @@ public:
     // sdfWidget com a tinta).
     void sdfWidgetGlass(f32 x, f32 y, f32 w, f32 h, f32 radius,
                         const f32 ink[4], u32 texId);
+    // 0.12-D (D-3) — A BORDA DE FOGO do elemento ATIVO: o MESMO quad do
+    // widget em modo FOGO-ONLY (o aShape.w) — o fbm animado no tempo em
+    // MISTURA ADITIVA (o par GL_SRC_ALPHA/GL_ONE da submissão). O chamador
+    // desenha DEPOIS do widget (a chama por cima da aresta).
+    void sdfFireBorder(f32 x, f32 y, f32 w, f32 h, f32 radius);
+    // 0.12-D (D-3) — O GLOW POR BAIXO dos elementos ativos: o gradiente
+    // vertical do glow a CAIR por baixo do rect (a reflexão da chama no
+    // «chão» do elemento; quads α decrescente — o padrão honesto da casa)
+    void fireGlowBelow(f32 x, f32 y, f32 w, f32 h);
+    // 0.12-D (D-3) — AS BRASAS: 10-20 partículas a subir (paramétricas no
+    // tempo — o ui/Fire.h), SÓ nos ecrãs de CELEBRAÇÃO (a splash e o ecrã
+    // de projetos). O PORTÃO É AQUI: `celebration=false` emite ZERO quads
+    // — o editor NUNCA as vê (a cláusula do prompt; o pin brasas_portao
+    // aferra o portão e a contagem; a splash é da D-6 e o ecrã de projetos
+    // da D-8 — os consumidores chegam com elas).
+    void drawEmbers(f32 x, f32 y, f32 w, f32 h, f32 time, bool celebration);
     // 0.12-D (D-2) — O VIDRO FALSO (os painéis FIXOS): o gradiente
     // semi-opaco (surface→surface2), a BORDA CLARA 1px (o glassEdge — a
     // FRESNEL), o REFLEXO DIAGONAL (os veios brancos fracos no topo-esq)
@@ -527,7 +543,8 @@ private:
     // natural); caso contratório abre um run novo.
     void recordRun(QuadBatch& b, u32 tex, u32 firstVertex, u32 vertexCount);
     // 0.12-D (D-1): o run do batch SDF (o mesmo batching pelo ponteiro)
-    void recordRunSdf(u32 firstVertex, u32 vertexCount, u32 tex = 0);
+    void recordRunSdf(u32 firstVertex, u32 vertexCount, u32 tex = 0,
+                      bool blendAdd = false);
     // 0.12-D (D-2): o quad de CANTOS explícitos clipado (o reflexo diagonal)
     void emitQuadCornersClipped(const f32 px[6], const f32 py[6],
                                 const f32 color[4]);
@@ -565,6 +582,7 @@ public:
         u32              firstVertex;
         u32              vertexCount;
         bool             sdf = false;  // 0.12-D: o run é do batch SDF
+        bool             blendAdd = false;   // D-3: o fogo aditivo
     };
     static constexpr u32 kMaxRuns = 64;   // limiar de aviso (não corta)
     std::vector<Run>     runs_;           // dinâmico — NUNCA descarta

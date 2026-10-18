@@ -267,3 +267,158 @@ rasterizador honesto → glReadPixels; o α do fb é inútil contra o clear
   esquivam o grão; 18.1 J-02 — o sheet mede O VIDRO REAL: escuro e nunca
   o véu cru; y3 ×2 e o uitree no test_core — o mesmo contrato).
 - **O pin C33 REAL fica para o dono**: o PNG do menu com a cena por trás.
+
+## 3 · D-3 — O FOGO (a borda animada dos ativos, o glow por baixo, as brasas) (vc 93)
+
+### 3.1 O que foi feito
+
+- **`ui/Fire.h` NOVO — a FONTE ÚNICA da matemática do fogo** (GL-free,
+  header-only, o padrão do ui/Sdf.h da D-1 com TRÊS consumidores: o FS do
+  pass SDF replica linha a linha, o rasterizador honesto do stub INCLUI o
+  header e corre as MESMAS funções, os pins chamam diretamente):
+  `hash21`/`valueNoise`/`fbm` (o ruído de 2 oitavas — a 2.ª desloca no
+  tempo: a chama «a correr» pela borda), `fireBorder` (a máscara da banda
+  da aresta × o fbm animado — devolve a MÁSCARA e o fbm cru, o mix da cor
+  usa-o; a DISTÂNCIA vem de `sdf::roundRectSdf`, a fonte da D-1 — zero
+  duplicação) e `ember` (as brasas paramétricas: o mesmo t dá as MESMAS
+  brasas — zero estado, zero alocação).
+- **A RAMPA DO DONO no Theme** (R-030 — a cor vive SÓ na tabela):
+  `fire0 #7A1F0A → fire1 #E8530F → fire2 #FFA21F → fire3 #FFE08A`. A
+  proveniência da extração é o `scripts/d3_palette.py` NOVO (o PNG real
+  docs/iconegonevv.png — o mesmo «G em chama» da Y-0; o núcleo quente
+  lum≥90, R>B, 4 âncoras por quartil de luminância). A saída colada:
+  ```
+  amostra quente: 55054 pixels (lum ≥ 90, R > B)
+  fire0 extraído #D04D03 · ordem do dono #7A1F0A · família
+  fire1 extraído #E66F04 · ordem do dono #E8530F · família
+  fire2 extraído #FC9800 · ordem do dono #FFA21F · família
+  fire3 extraído #FECC62 · ordem do dono #FFE08A · família
+  família quente (R ≥ G > B nas 4 âncoras): SIM
+  ```
+  (a extração mede a família quente; a VERDADE é a ordem do dono — o pin
+  fogo_rampa aferra os 4 tokens aos hexes da ordem.)
+- **A BORDA DE FOGO do elemento ativo** — `UiContext::sdfFireBorder`: o
+  MESMO quad do widget em modo FOGO-ONLY (o `aShape.w=1` novo no
+  SdfBatch::vertex) submetido em **MISTURA ADITIVA** (o par
+  GL_SRC_ALPHA/GL_ONE — o run leva o flag `blendAdd` e o endFrame do
+  Renderer liga-o à volta do drawArrays, reposto no fim). O FS ganha o
+  ramo `vShape.w > 0.5` (o corpo transparente, a chama na banda) e os
+  uniforms `uSdfTime`/`uFire1`/`uFire3`.
+- **O GLOW POR BAIXO** — `UiContext::fireGlowBelow`: 2 quads α decrescente
+  (o padrão honesto da casa, o mesmo do focusGlow da Y-1) a CAIR por baixo
+  do rect (a reflexão da chama no «chão» do elemento).
+- **AS BRASAS** — `UiContext::drawEmbers`: 16 partículas (o meio do
+  intervalo 10-20 do prompt) emitidas como quads com a RAMPA do tema, com
+  **O PORTÃO**: `celebration=false` emite ZERO — o editor NUNCA as vê. Os
+  consumidores chegam com as suas campanhas (a splash é da D-6; o ecrã de
+  projetos da D-8 — o Brand.h já documenta o mesmo padrão «quando
+  existirem»).
+- **A COMPOSIÇÃO SIMULTÂNEA (a cláusula anti-superficialidade)**: o premido
+  do choke point `drawButtonVisual` mostra glow de foco + GLOW POR BAIXO +
+  widget (o gradiente accent→accent2) + BORDA DE FOGO animada + bisel +
+  especular + sombra NO MESMO frame; o chip ATIVO da barra de topo
+  (iconButton) ganha o mesmo tratamento.
+- **O relógio do fogo**: `sdf::g_time` (ui/Sdf.h) avança no main loop
+  (`sdf::g_time += g_frameDt`) — a chama corre com o frame; os testes põem
+  o t diretamente (determinismo).
+- **O TOGGLE da D-7 morde os três emissores**: em `LEVEL_BAIXO` a borda
+  NEMEMITE (a borda É o ruído), o glow morre e as brasas morrem — o ativo
+  continua legível pelo fill accent→accent2 do widget (o que a D-1 deixou
+  em todos os níveis).
+- **O stub aprende o aditivo**: o `glBlendFunc` do gl3.h alimenta o
+  `fb::setBlendFunc` (o par SRC_ALPHA/GL_ONE liga o aditivo) e o
+  rasterizador soma `dst += out·outA` no ramo aditivo — o fogo no fb é a
+  MESMA aritmética que o device faz.
+
+### 3.2 Os pins ×5 (tests/test_012d_fogo.cpp — pelo caminho REAL)
+
+1. **fogo_rampa** — os 4 tokens EXATOS da ordem do dono + a luminância
+   estritamente crescente (a base escura → o bico amarelo) + a família
+   quente (R>B nas 4).
+2. **fogo_borda_anima** — 3 frames pelo caminho REAL (t=0, t=1.7, widget
+   sós): a banda da aresta MUDA com o tempo (Δ>10 — o fbm corre), ACENDE
+   sobre o widget sós (Δ>15 — a flama aditiva) e o centro morto é EXATO
+   (Δ≤1 — a máscara morre a bevelW para dentro); um pixel da banda obedece
+   à ARITMÉTICA ADITIVA lida = widget + flama·mask² (±0.04 — se o blend
+   fosse o clássico, o destino multiplicaria por (1−α) e o lido ficaria
+   ABAIXO por C·mask²).
+3. **fogo_glow_below** — 12 vértices (2 quads), o pé QUENTE (r>b+20), o
+   decaimento monotónico e NADA acima do rect.
+4. **brasas_portao** — o PORTÃO: celebration=false emite ZERO (o editor
+   chama e não nasce UMA); true emite 96 (16×6); o determinismo (o mesmo
+   t = as mesmas brasas), a SUBIDA (y decresce), o tamanho 1.5..4px e o x
+   dentro do rect com a folga do wobble.
+5. **fogo_toggle_baixo** — em BAIXO: a borda emite 0 (Alto 6), as brasas 0
+   (Alto 96), o glow 0 (Alto 12) — a cláusula D-7 aferrada nos três.
+
+### 3.3 As mutações (coladas)
+
+- **M-D3a** — o fbm MORTO (`return 0.5f;` na fonte única):
+  ```
+  fogo_borda_anima ... FALHOU test_012d_fogo.cpp:177 fogo_borda_anima:
+  a banda da aresta é IGUAL entre t=0 e t=1.7 (Δmáx=0.0) — o fbm morreu,
+  a chama não corre
+  1 teste(s) com falha
+  ```
+  reposto → **0 teste(s) com falha** (o isolamento: só o anima morreu —
+  o aritmética-aditiva e o resto da suíte ficaram verdes).
+- **M-D3b** — o PORTÃO removido (drawEmbers ignora `celebration`):
+  ```
+  brasas_portao ... FALHOU test_012d_fogo.cpp:303 brasas_portao: o portão
+  está ABERTO (o editor emitiu brasas) — a cláusula «nunca no editor»
+  morreu
+  FALHOU test_012d_fogo.cpp:309 brasas_portao: a celebração emitiu 192
+  vértices, as 16 brasas são 96 — a contagem do prompt (10-20) morreu?
+  2 teste(s) com falha
+  ```
+  reposto → **0 teste(s) com falha**.
+
+### 3.4 Os achados reais (o «não confia no build» do dono)
+
+1. **O `continue` que saltava o blend** — a 1.ª versão do ramo de fogo no
+   rasterizador do stub terminava em `continue` («o fogo não passa pelo
+   shade») — que salta TAMBÉM o bloco de escrita: **o fogo nunca chegava
+   ao framebuffer**. O ramo é if/else agora (o pixel segue para o blend
+   comum). Apanhado à mão na auditoria ao WIP (o pin ainda não existia).
+2. **O `0x0304` no lugar de `0x0302`** — o `fb::setBlendFunc` comparava o
+   src com `0x0304` (GL_DST_ALPHA!) comentado «GL_SRC_ALPHA»: o aditivo
+   NUNCA ligava. GL_SRC_ALPHA é 0x0302.
+3. **A banda SEM TETO para dentro** — a fórmula
+   `edge = 1 − (d+1)/(bw+1)` só mata o lado de FORA; para dentro (d<−1) o
+   edge CRESCIA sem teto — **o widget inteiro ardia** (o pin
+   fogo_borda_anima leu Δ=73 no centro morto e o y1_gradiente_botao leu G
+   saturado a 30%/70% da altura). A fórmula certa (replicada nos TRÊS
+   lados): `edge = clamp01(min(1 − d, 1 + d/bw))` — 1 na aresta, morre a
+   bevelW para dentro e a 1px para fora.
+4. **A duplicação do SDF no stub** — o WIP replicava a distância inline
+   com uma divergência real (o rr negativo caía no min(hw,hh) em vez de 0)
+   — substituída pela chamada à FONTE ÚNICA `fireBorder` (o header que o
+   FS replica).
+5. **O «play em destaque» da C-2 é inalcançável no replay** — em Play o
+   frame() retorna ANTES do top bar (a janela própria do Play): o chip do
+   play com `st.playMode` nunca desenha. A FASE 33 usa o caminho que a
+   cláusula descreve: o gesto REAL de premir o Stop da play bar (um
+   ui.button verdadeiro) — a chama entra no batch. O achado fica
+   registado para o dono decidir o destino do parâmetro (a C-2 é
+   campanha fechada).
+
+### 3.5 As recalibrações (com nota no sítio)
+
+- **y1_gradiente_botao** (test_fase_y1_tema.cpp) — o premido emite AGORA
+  TAMBÉM o quad da chama (o mesmo hw/hh do widget): a varredura distingue
+  pelo `aShape.w` (o widget é o de fireOn<0.5) e ganhou a afirmação NOVA
+  de que a chama carrega fire1→fire3 nos vértices. O gradiente
+  accent→accent2 do widget continua EXATO (as EXPECTs originais intactas);
+  as sondas de píxel voltaram ao verde com a banda certa (a queimadura do
+  interior era o achado 3, não mudança de contrato).
+
+### 3.6 O estado da suíte
+
+- test_core: **0 falhas** (os 2 skips de disco conhecidos:
+  sentinela_r039 e regress_streaming_paralelo — os artefactos /tmp/goni_tb*
+  do texbind cheiam a sandbox; o CI é o árbitro).
+- c33_virtual: **1014 checks, 0 falhas** — a FASE 33 NOVA (4 checks: a
+  chama do premido no replay, as cores fire1→fire3 nos vértices, o PORTÃO
+  no editor, o Baixo a matar a chama).
+- **O pin C33 REAL fica para o dono**: o PNG do botão premido com a chama
+  a correr pela aresta (os 3 modos de Efeitos).

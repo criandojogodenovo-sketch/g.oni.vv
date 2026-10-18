@@ -37,11 +37,12 @@ public:
 
     void vertex(f32 px, f32 py, f32 lx, f32 ly, f32 hw, f32 hh, f32 radius,
                 u8 level, const f32 top[4], const f32 bot[4],
-                f32 texOn = 0.0f) {
+                f32 texOn = 0.0f, f32 fireOn = 0.0f) {
         const SdfVertex v{px,     py,
                           lx,     ly,     hw,     hh,
                           radius, static_cast<f32>(level),
-                          texOn,  0.0f,   // aShape.z = o VIDRO REAL (D-2)
+                          texOn,  fireOn, // aShape.z = vidro real (D-2);
+                                          // aShape.w = FOGO-ONLY (D-3)
                           top[0], top[1], top[2], top[3],
                           bot[0], bot[1], bot[2], bot[3]};
         verts_.push_back(v);

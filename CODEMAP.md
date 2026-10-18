@@ -46,7 +46,11 @@ Atualizado: 2026-10-18 · vc: 91
   widget = UM quad de 18 floats) + o 3.º PROGRAMA no Renderer
   (progSdf_ — o FS kSdfFsSrc replica o app/src/main/cpp/ui/Sdf.h::shade() LINHA A LINHA;
   as submissões SDF viajam nos runs pelo flag `sdf` e os buffers/VAOs
-  re-afirmam-se POR submissão). **0.12-D (D-2)**: app/src/main/cpp/ui/Glass.h
+  re-afirmam-se POR submissão). **0.12-D (D-3)**: o ramo FOGO-ONLY no FS
+  (o aShape.w=1 — a chama na banda da aresta em MISTURA ADITIVA
+  GL_SRC_ALPHA/GL_ONE; os uniforms uSdfTime/uFire1/uFire3; o run leva o
+  flag blendAdd e o endFrame liga-o à volta do drawArrays) replicando o
+  app/src/main/cpp/ui/Fire.h LINHA A LINHA. **0.12-D (D-2)**: app/src/main/cpp/ui/Glass.h
   (as fontes puras — o BLUR DUAL KAWASE, a downsample 2×2, a DECISÃO da
   CACHE glassCacheDirty e o hash do ruído) + o captureGlass no Renderer
   (o glReadPixels com o flip, a redução 1/4, o blur, o upload; a cache
@@ -76,6 +80,14 @@ Atualizado: 2026-10-18 · vc: 91
   app/src/main/cpp/ui/Sdf.h — a FONTE ÚNICA da matemática SDF (o SDF analítico, a normal
   do gradiente, o shade() — bisel/especular/brilho/sombra — e o TOGGLE
   sdf::g_level «Efeitos Alto/Médio/Baixo»; o rasterizador honesto do
+  stub inclui-o). **0.12-D D-3**: o app/src/main/cpp/ui/Fire.h — a FONTE
+  ÚNICA do FOGO (o fbm de 2 oitavas animado no tempo, a máscara da banda
+  da aresta — 1 na aresta, morre a bevelW dentro e 1px fora —, as brasas
+  paramétricas ember; a distância vem do roundRectSdf da D-1) + os
+  emissores no UiContext (sdfFireBorder/fireGlowBelow/drawEmbers COM O
+  PORTÃO celebration — o editor nunca vê brasas; o Baixo mata os três) +
+  a RAMPA fire0..fire3 no Theme (a proveniência: scripts/d3_palette.py) +
+  o relógio sdf::g_time no main loop;
   stub INCLUI este header) e o UiContext::sdfWidget (o emissor do
   widget — UM quad crescido para conter a sombra; o CHOKE POINT
   drawButtonVisual e o iconButton da barra emitem por AQUI — o premido é
@@ -185,6 +197,11 @@ Atualizado: 2026-10-18 · vc: 91
   diagonal do canto BR É a função shade() por píxel; sdf_bisel;
   sdf_sombra; sdf_toggle_baixo — o mesmo pixel entre Alto e Baixo;
   sondas pelo CANAL R contra o bg — o α do fb é inútil contra o clear),
+  test_012d_fogo.cpp (os pins da 0.12-D D-3: fogo_rampa — os 4 tokens da
+  ordem do dono; fogo_borda_anima — a banda muda com o tempo + a
+  ARITMÉTICA ADITIVA por píxel + o centro morto exato; fogo_glow_below;
+  brasas_portao — o PORTÃO + o determinismo; fogo_toggle_baixo — o Baixo
+  mata os três emissores),
   test_012c_picker.cpp (os pins da 0.12-C C-4: picker_compacto/
   picker_breadcrumb/picker_oculta_dot/empty_inspector/empty_assets/
   empty_hierarquia/icones_unicos — o 8.º, empty_projetos, é o gate

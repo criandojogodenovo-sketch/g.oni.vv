@@ -8583,6 +8583,9 @@ void android_main(android_app* app) {
         const double realDt = nowT - last;
         last = nowT;
         g_frameDt = static_cast<f32>(realDt);   // 0.7.1: relógio da transição
+        // 0.12-D (D-3): o relógio do FOGO — a chama dos ativos corre com o
+        // frame (o ui/Fire.h é paramétrico: o mesmo t dá a mesma chama)
+        sdf::g_time += g_frameDt;
 
         // Loop de timestep fixo (guard anti-spiral dentro de Time).
         const u32 steps = g_time.beginFrame(realDt);

@@ -179,6 +179,7 @@ typedef intptr_t      GLintptr;      // 0.11-S: o offset do glBufferSubData
 #define GL_BLEND 0x0BE2
 #define GL_DEPTH_TEST 0x0B71
 #define GL_SRC_ALPHA 0x0302
+#define GL_ONE 1
 #define GL_ONE_MINUS_SRC_ALPHA 0x0303
 #define GL_COLOR_BUFFER_BIT 0x00004000
 #define GL_DEPTH_BUFFER_BIT 0x00000100
@@ -502,11 +503,18 @@ inline void glDepthMask(GLboolean b) {
 inline void glDepthFunc(GLenum) {}
 // 0.11-M (FASE 2): o par do blend do passe BLEND (o MESMO do grid/UI)
 #define GL_SRC_ALPHA 0x0302
+#define GL_ONE 1
 #define GL_ONE_MINUS_SRC_ALPHA 0x0303
 inline void glBlendFunc(GLenum sfactor, GLenum dfactor) {
     ++glstub::stats.blendFuncCalls;
     glstub::stats.lastBlendSrc = sfactor;
     glstub::stats.lastBlendDst = dfactor;
+    // 0.12-D (D-3): o par do FOGO (SRC_ALPHA/GL_ONE) liga o aditivo no fb
+    // (GL_SRC_ALPHA = 0x0302 — o 0x0304 é GL_DST_ALPHA, o bug que o
+    // CI/pins apanhariam: o aditivo nunca ligava)
+    if (glstub::fb::enabled) {
+        glstub::fb::setBlendFunc(int(sfactor), int(dfactor));
+    }
 }
 // 0.11-M (FASE 2): os samplers do glTF — o wrap/filter que a FASE 25 aferre
 #define GL_TEXTURE_WRAP_S 0x2802

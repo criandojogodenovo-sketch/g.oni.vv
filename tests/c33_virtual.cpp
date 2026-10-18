@@ -10429,6 +10429,95 @@ int main() {
         frame();
     }
 
+    // ---- FASE 33 — 0.12-D (D-3): O FOGO ------------------------------------
+    // A chama do ativo no REPLAY REAL: o gesto de PREMIR o Stop da play bar
+    // (um ui.button verdadeiro em Play) mostra bisel + brilho + FOGO + sombra
+    // SIMULTANEAMENTE (a cláusula anti-superficialidade) — o quad da chama
+    // (aShape.w=1, fire1→fire3) entra no batch. O portão das brasas NUNCA
+    // abre no editor; o Baixo mata a chama. Os PÍXEIS são provados pelos
+    // pins test_012d_fogo (o rasterizador honesto); aqui o CONTRATO.
+    fase("FASE 33 — 0.12-D D-3: o fogo (a chama do premido no replay)");
+    {
+        eglstub::g_surfaceW = 1536;
+        eglstub::g_surfaceH = 720;
+        android_app app33;
+        std::memset(&app33, 0, sizeof(app33));
+        app33.contentRect = {0, 24, 1512, 720};
+        onAppCmd(&app33, APP_CMD_INIT_WINDOW);
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+        sdf::g_level = sdf::LEVEL_ALTO;
+        // (1) o PREMIDO: o dedo no Stop (o gesto REAL — down SEM up)
+        const bool playModeAntes = g_editor.playMode;
+        g_editor.playMode = true;
+        frame();   // o play frame limpo (a play bar desenhada em repouso)
+        const UiRect bar33 = editor::playBarRect(1536.0f, 720.0f, g_ui.safeArea());
+        const UiRect stop33 = editor::playStopButtonRect(bar33);
+        g_input.injectDown(0, stop33.x + stop33.w * 0.5f,
+                           stop33.y + stop33.h * 0.5f);
+        frame();
+        bool chamaOk33 = false, chamaCor33 = false;
+        {
+            const SdfVertex* v33 = g_ui.sdfForTest().vertices();
+            for (u32 i = 0; i + 5 < g_ui.sdfForTest().vertexCount(); i += 6) {
+                if (v33[i].pad1 > 0.5f) {
+                    chamaOk33 = true;
+                    // as cores da chama viajam nos vértices (fire1→fire3)
+                    chamaCor33 =
+                        nearEqF(v33[i].tr, 232.0f / 255.0f, 0.01f) &&
+                        nearEqF(v33[i].br, 255.0f / 255.0f, 0.01f);
+                }
+            }
+        }
+        check(chamaOk33, "33.1 o PREMIDO (o Stop da play bar) emite a CHAMA "
+                         "(aShape.w=1) no replay");
+        check(chamaCor33, "33.2 a chama carrega fire1→fire3 nos vértices");
+        // o dedo SAI do botão e larga FORA (cancelamento limpo — o click
+        // não dispara e o play não para)
+        g_input.injectMove(0, 1500.0f, 700.0f);
+        frame();
+        g_input.injectUp(0);
+        frame();
+        // (2) O PORTÃO das brasas: no editor (celebration=false) NEM UMA
+        g_editor.playMode = false;
+        frame();
+        const u32 solidsAntes33 = g_ui.solidsForTest().vertexCount();
+        g_ui.drawEmbers(0.0f, 0.0f, 400.0f, 300.0f, 1.0f,
+                        /*celebration=*/false);
+        check(g_ui.solidsForTest().vertexCount() == solidsAntes33,
+              "33.3 o PORTÃO: o editor (celebration=false) emite ZERO "
+              "brasas (a cláusula do prompt)");
+        // (3) o TOGGLE: Baixo mata a chama (a D-7 — sem ruído)
+        sdf::g_level = sdf::LEVEL_BAIXO;
+        g_editor.playMode = true;
+        frame();
+        const UiRect bar33b = editor::playBarRect(1536.0f, 720.0f, g_ui.safeArea());
+        const UiRect stop33b = editor::playStopButtonRect(bar33b);
+        g_input.injectDown(0, stop33b.x + stop33b.w * 0.5f,
+                           stop33b.y + stop33b.h * 0.5f);
+        frame();
+        bool chamaBaixo33 = false;
+        {
+            const SdfVertex* v33b = g_ui.sdfForTest().vertices();
+            for (u32 i = 0; i + 5 < g_ui.sdfForTest().vertexCount(); i += 6) {
+                chamaBaixo33 |= v33b[i].pad1 > 0.5f;
+            }
+        }
+        check(!chamaBaixo33, "33.4 Efeitos: Baixo mata a chama (a D-7)");
+        // reposição (o dedo sai, o play morre, o nível volta — o estado
+        // limpo para o resto do replay)
+        g_input.injectMove(0, 1500.0f, 700.0f);
+        frame();
+        g_input.injectUp(0);
+        g_input.resetAll();
+        g_editor.playMode = playModeAntes;
+        sdf::g_level = sdf::LEVEL_ALTO;
+        frame();
+    }
+
     // ---- sumário -----------------------------------------------------------
     std::printf("\n== C33 VIRTUAL: %d check(s), %d falha(s) ==\n", g_checks, g_failed);
     if (g_failed == 0) {

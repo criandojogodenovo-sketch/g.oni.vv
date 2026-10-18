@@ -31,6 +31,8 @@ namespace sdf {
 // ---- o TOGGLE (Efeitos: Alto / Médio / Baixo) -------------------------------
 enum : u8 { LEVEL_BAIXO = 0, LEVEL_MEDIO = 1, LEVEL_ALTO = 2 };
 inline u8 g_level = LEVEL_ALTO;   // o default de fábrica; Settings escreve
+inline f32 g_time = 0.0f;         // 0.12-D (D-3): o tempo da animação (s) —
+                                  // o main avança por frame; os testes põem
 
 // os PARÂMETROS POR NÍVEL — `s` = theme::dp(1.0f) (a densidade entra UMA
 // vez, aqui; tudo o resto é px). Replicado no END FRAME do Renderer (os
