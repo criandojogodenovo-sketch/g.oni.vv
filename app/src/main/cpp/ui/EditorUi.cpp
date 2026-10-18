@@ -578,10 +578,11 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
     const f32 w = panel.w;
     const f32 h = panel.h;
 
-    // 0.12-D (D-2): O VIDRO FALSO (o painel FIXO — o gradiente semi-opaco
-    // surface→surface2 + a borda clara 1px (a Fresnel) + o reflexo
-    // diagonal + o ruído fraco; a fonte única glassPanelFake)
-    ui.glassPanelFake(x, y, w, h);
+    // 0.12-E (E-1 · EMERGÊNCIA): o vidro falso da D-2 MORREU com o SDF
+    // (abortado pelo dono). O painel volta ao simples 2D: o painel de
+    // sempre + a linha do topo do cristal (o brilho 1dp do glow a 20%)
+    ui.panel(x, y, w, h, theme::kTheme.surface);
+    ui.glassTopLine(x, y, w);
     // o divisor direito com o âmbar a CAIR (o gradiente vertical da Y-3)
     ui.dividerGradientV(x + w - 1.0f, y, h);
 
@@ -1272,9 +1273,10 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     const f32 w = panel.w;
     const f32 h = panel.h;
 
-    // 0.12-D (D-2): O VIDRO FALSO (o painel FIXO do inspector — a mesma
-    // fonte única glassPanelFake da hierarquia)
-    ui.glassPanelFake(x, y, w, h);
+    // 0.12-E (E-1): o MESMO regresso do painel simples + a linha do topo
+    // (a fonte única era o glassPanelFake da D-2 — abortado com o SDF)
+    ui.panel(x, y, w, h, theme::PANEL);
+    ui.glassTopLine(x, y, w);
     ui.dividerGradientV(x, y, h);   // separador esquerdo (o gradiente Y-3)
 
     // FASE 9 (G2-8): o TIC selecionado MUDOU → o Inspector volta ao TOPO
@@ -2946,10 +2948,9 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 
     // 0.9.6.6 (GRUPO C · CANTOS SUAVIZADOS): o CARD modal com raios 8dp
     // 0.11-Y (Y-3): o cristal — a linha do topo (o brilho 1dp do glow)
-    // 0.12-D (D-2): O VIDRO REAL no card modal (a cena borrada sob a
-    // tinta; o widget SDF mantém o tratamento do shader único)
-    ui.sdfWidgetGlass(x, y, w, h, theme::dp(theme::kRadiusCard),
-                      theme::kTheme.glassInk, ui.glassTexture());
+    // 0.12-E (E-1): o vidro REAL da D-2 morreu com o SDF — painel de sempre
+    ui.panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard), theme::PANEL);
+    ui.glassTopLine(x, y, w);
     ui.frameRounded(x, y, w, h, 2.0f, theme::dp(theme::kRadiusCard),
                     theme::ACCENT);
     const f32 th = ui.fontHeight();
@@ -3097,11 +3098,9 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 
     // J-04: o raio em dp REAL (era kRadiusCard cru — 8px = 4dp a 2.0, a
     // mesma classe R-018 dos sheets px crus do D14)
-    // 0.12-D (D-2): O VIDRO REAL (o painel flutuante — a cena borrada 1/4 +
-                    // o Kawase dual sob a tinta do tema; o widget SDF mantém
-                    // o bisel/especular/sombra do shader único)
-    ui.sdfWidgetGlass(x, y, kSheetW, ms.h, theme::dp(theme::kRadiusCard),
-                      theme::kTheme.glassInk, ui.glassTexture());
+    // 0.12-E (E-1): o vidro REAL da D-2 morreu com o SDF — O ELEVADO volta
+    ui.panelRounded(x, y, kSheetW, ms.h, theme::dp(theme::kRadiusCard),
+                    theme::kTheme.elevated);   // 0.12-C: O ELEVADO
     // 0.11-Y (Y-3): o cristal — a linha do topo do sheet (o brilho 1dp)
     ui.glassTopLine(x, y, kSheetW);
     ui.frameRounded(x, y, kSheetW, ms.h, 1.0f, theme::dp(theme::kRadiusCard),
@@ -3209,10 +3208,9 @@ int drawHierMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         st.hierMenu = false;
         return 0;
     }
-    // 0.12-D (D-2): O VIDRO REAL (o painel flutuante — a cena borrada sob a
-                    // tinta do tema, o widget SDF do shader único)
-    ui.sdfWidgetGlass(x, y, kSheetW, h, theme::dp(theme::kRadiusCard),
-                      theme::kTheme.glassInk, ui.glassTexture());
+    // 0.12-E (E-1): o vidro REAL da D-2 morreu com o SDF — O ELEVADO volta
+    ui.panelRounded(x, y, kSheetW, h, theme::dp(theme::kRadiusCard),
+                    theme::kTheme.elevated);   // 0.12-C: O ELEVADO
     // 0.11-Y (Y-3): o cristal — a linha do topo do sheet (o brilho 1dp)
     ui.glassTopLine(x, y, kSheetW);
     ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::dp(theme::kRadiusCard),
@@ -3376,10 +3374,9 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 
     // J-04: o raio em dp REAL (era kRadiusCard cru — 8px = 4dp a 2.0, a
     // mesma classe R-018 dos sheets px crus do D14)
-    // 0.12-D (D-2): O VIDRO REAL (o painel flutuante — a cena borrada sob a
-                    // tinta do tema, o widget SDF do shader único)
-    ui.sdfWidgetGlass(x, y, kSheetW, h, theme::dp(theme::kRadiusCard),
-                      theme::kTheme.glassInk, ui.glassTexture());
+    // 0.12-E (E-1): o vidro REAL da D-2 morreu com o SDF — O ELEVADO volta
+    ui.panelRounded(x, y, kSheetW, h, theme::dp(theme::kRadiusCard),
+                    theme::kTheme.elevated);   // 0.12-C: O ELEVADO
     // 0.11-Y (Y-3): o cristal — a linha do topo do sheet (o brilho 1dp)
     ui.glassTopLine(x, y, kSheetW);
     ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::dp(theme::kRadiusCard),
@@ -3721,9 +3718,9 @@ int drawImportMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     }
 
     // J-04: o CARD com raios 8dp (o fecho das janelas quadradas)
-    // 0.12-D (D-2): O VIDRO REAL no menu IMPORT (a cena borrada sob a tinta)
-    ui.sdfWidgetGlass(x, y, kMenuW, h, theme::dp(theme::kRadiusCard),
-                      theme::kTheme.glassInk, ui.glassTexture());
+    // 0.12-E (E-1): o vidro REAL da D-2 morreu com o SDF — o PANEL volta
+    ui.panelRounded(x, y, kMenuW, h, theme::dp(theme::kRadiusCard),
+                    theme::PANEL);
     ui.frameRounded(x, y, kMenuW, h, 2.0f, theme::dp(theme::kRadiusCard),
                     theme::ACCENT);
     const f32 th = ui.fontHeight();
@@ -4000,10 +3997,9 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 
     // 0.9.6.6 (GRUPO C · CANTOS SUAVIZADOS): o CARD modal com raios 8dp
     // 0.11-Y (Y-3): o cristal — a linha do topo (o brilho 1dp do glow)
-    // 0.12-D (D-2): O VIDRO REAL no card modal (a cena borrada sob a
-    // tinta; o widget SDF mantém o tratamento do shader único)
-    ui.sdfWidgetGlass(x, y, w, h, theme::dp(theme::kRadiusCard),
-                      theme::kTheme.glassInk, ui.glassTexture());
+    // 0.12-E (E-1): o vidro REAL da D-2 morreu com o SDF — painel de sempre
+    ui.panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard), theme::PANEL);
+    ui.glassTopLine(x, y, w);
     ui.frameRounded(x, y, w, h, 2.0f, theme::dp(theme::kRadiusCard),
                     theme::ACCENT);
     const f32 th = ui.fontHeight();

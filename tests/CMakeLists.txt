@@ -99,9 +99,10 @@ add_executable(test_core
         test_012c_chrome.cpp   # 0.12-C (C-2): os pins dos menus e da barra de topo
         test_012c_idioma.cpp   # 0.12-C (C-3): os pins da escala/idioma/superfícies
         test_012c_picker.cpp   # 0.12-C (C-4): os pins do seletor + estados vazios
-        test_012d_sdf.cpp   # 0.12-D (D-1): os pins do shader SDF de widget (cantos/bisel/sombra/toggle)
-        test_012d_vidro.cpp   # 0.12-D (D-2): os pins do vidro (real/falso/fresnel/cache)
-        test_012d_fogo.cpp   # 0.12-D (D-3): os pins do fogo (rampa/anima/glow/brasas)
+        # 0.12-E (E-1): test_012d_sdf/vidro/fogo REFORMADOS — o SDF 3D e o
+        # vidro/fogo do shader único foram ABORTADOS pelo dono (o device via
+        # texto partido e caixas pretas); os pins aferiam o batch sdf, que
+        # deixou de ter emissão. Os NOVOS pins 2.5D chegam na FASE 3 do E.
         test_012d_logo.cpp   # 0.12-D (D-4): os pins do logo (rampa/ignite/setas mortas/lod)
         # 0.7.1: cenas múltiplas + transições (projeto e2e, SceneFx puro,
         # overlay CENAS, ações Scene.Load/Transition)

@@ -5248,11 +5248,11 @@ int main() {
                     check(hier != nullptr,
                           "13.9 o painel da hierarquia esta no registo");
                     if (hier) {
-                        // 0.12-D (D-2) — a RECALIBRAÇÃO honesta: o painel
-                        // FIXO é o VIDRO FALSO (o gradiente surface→surface
-                        // 2): o TOPO mede o composto surface@0.80 e o FUNDO
-                        // o surface2@0.86 (3 sondas em x para esquivar o
-                        // grão do ruído — o hash é esparso por construção)
+                        // 0.12-E (E-1): a recalibração D-2 reverte — o vidro
+                        // falso MORREU com o SDF abortado; o painel FIXO é
+                        // de volta o vidro LISO (a surface α0.80) no corpo
+                        // TODO (topo E fundo medem o MESMO composto — o
+                        // blend do device no pixel)
                         const u32 pxC =
                             (u32)(hier->x + hier->w * 0.5f);
                         const u32 pyT = (u32)(hier->y + 8.0f);
@@ -5261,7 +5261,7 @@ int main() {
                         f32 topF[4], botF[4];
                         theme::blendOver(theme::kTheme.surface,
                                          theme::kTheme.bg, topF);
-                        theme::blendOver(theme::kTheme.surface2,
+                        theme::blendOver(theme::kTheme.surface,
                                          theme::kTheme.bg, botF);
                         auto probeGlass = [&](const u32 py, const f32 want[4],
                                               bool& ok) {
@@ -5294,8 +5294,8 @@ int main() {
                               "falso — a matematica do device no pixel)");
                         check(okB,
                               "13.9 o VIDRO: o FUNDO do painel mede o "
-                              "composto surface2@0.86 (a escada do vidro "
-                              "falso)");
+                              "MESMO composto surface@0.80 (o vidro liso "
+                              "voltou — a matematica do device no pixel)");
                         // translúcido a sério: NÃO é a surface sólida
                         // (a sondas do topo; a sólida desenharia 21 — o
                         // composto do vidro dá 18)
@@ -10376,147 +10376,16 @@ int main() {
         resetEditor31();   // o estado limpo para o resto do replay
     }
 
-    // ---- FASE 32 — 0.12-D (D-1): O SHADER SDF ÚNICO DE WIDGET --------------
-    // O widget SDF no REPLAY REAL: o frame() do main emite os botões pelo
-    // batch sdf (o fills são o shader único — a escadaria morreu). Os
-    // checks aferram o CONTRATO de emissão (os píxeis são provados pelos
-    // pins test_012d_sdf no rasterizador honesto).
-    fase("FASE 32 — 0.12-D D-1: o shader SDF de widget (os botões no replay)");
-    {
-        eglstub::g_surfaceW = 1536;
-        eglstub::g_surfaceH = 720;
-        android_app app32;
-        std::memset(&app32, 0, sizeof(app32));
-        app32.contentRect = {0, 24, 1512, 720};
-        onAppCmd(&app32, APP_CMD_INIT_WINDOW);
-        if (!g_font.ok()) {
-            const char* paths[] = {FONT_FIXTURE};
-            g_font.loadFromPaths(paths, 1, 28.0f);
-        }
-        g_ui.setFont(&g_font);
-        sdf::g_level = sdf::LEVEL_ALTO;   // o default de fábrica
-        frame();
-
-        // (1) os botões da barra de topo existem como WIDGETS SDF
-        const u32 n32 = g_ui.sdfForTest().vertexCount();
-        check(n32 >= 6u,
-              ("32.1 o replay emite widgets SDF (verts=" + std::to_string(n32) + ")").c_str());
-        // (2) o contrato do vértice: raio 8dp + nível ALTO no vértice
-        bool radiusOk32 = false, lvlOk32 = false, glassOk32 = false;
-        {
-            const SdfVertex* v32 = g_ui.sdfForTest().vertices();
-            for (u32 i = 0; i + 5 < n32; i += 6) {
-                radiusOk32 |= nearEqF(v32[i].radius, theme::dp(theme::kRadiusCard), 0.05f);
-                lvlOk32 |= nearEqF(v32[i].level, f32(sdf::LEVEL_ALTO), 0.01f);
-                glassOk32 |= nearEqF(v32[i].ta, 0.80f, 0.01f);   // o vidro PANEL
-            }
-        }
-        check(radiusOk32, "32.2 o raio do widget é o 8dp do card (spec A)");
-        check(lvlOk32, "32.3 o nível ALTO viaja no vértice (o toggle Efeitos)");
-        check(glassOk32, "32.4 o vidro PANEL α0.80 no repouso (a cor do tema)");
-        // (5) o TOGGLE: Baixo muda o nível no batch (o emissão lê g_level)
-        sdf::g_level = sdf::LEVEL_BAIXO;
-        frame();
-        bool lvlBaixo32 = false;
-        {
-            const SdfVertex* v32 = g_ui.sdfForTest().vertices();
-            for (u32 i = 0; i + 5 < g_ui.sdfForTest().vertexCount(); i += 6) {
-                lvlBaixo32 |= nearEqF(v32[i].level, f32(sdf::LEVEL_BAIXO), 0.01f);
-            }
-        }
-        check(lvlBaixo32, "32.5 Efeitos: Baixo chega ao batch (o toggle é REAL)");
-        sdf::g_level = sdf::LEVEL_ALTO;   // reposto
-        frame();
-    }
-
-    // ---- FASE 33 — 0.12-D (D-3): O FOGO ------------------------------------
-    // A chama do ativo no REPLAY REAL: o gesto de PREMIR o Stop da play bar
-    // (um ui.button verdadeiro em Play) mostra bisel + brilho + FOGO + sombra
-    // SIMULTANEAMENTE (a cláusula anti-superficialidade) — o quad da chama
-    // (aShape.w=1, fire1→fire3) entra no batch. O portão das brasas NUNCA
-    // abre no editor; o Baixo mata a chama. Os PÍXEIS são provados pelos
-    // pins test_012d_fogo (o rasterizador honesto); aqui o CONTRATO.
-    fase("FASE 33 — 0.12-D D-3: o fogo (a chama do premido no replay)");
-    {
-        eglstub::g_surfaceW = 1536;
-        eglstub::g_surfaceH = 720;
-        android_app app33;
-        std::memset(&app33, 0, sizeof(app33));
-        app33.contentRect = {0, 24, 1512, 720};
-        onAppCmd(&app33, APP_CMD_INIT_WINDOW);
-        if (!g_font.ok()) {
-            const char* paths[] = {FONT_FIXTURE};
-            g_font.loadFromPaths(paths, 1, 28.0f);
-        }
-        g_ui.setFont(&g_font);
-        sdf::g_level = sdf::LEVEL_ALTO;
-        // (1) o PREMIDO: o dedo no Stop (o gesto REAL — down SEM up)
-        const bool playModeAntes = g_editor.playMode;
-        g_editor.playMode = true;
-        frame();   // o play frame limpo (a play bar desenhada em repouso)
-        const UiRect bar33 = editor::playBarRect(1536.0f, 720.0f, g_ui.safeArea());
-        const UiRect stop33 = editor::playStopButtonRect(bar33);
-        g_input.injectDown(0, stop33.x + stop33.w * 0.5f,
-                           stop33.y + stop33.h * 0.5f);
-        frame();
-        bool chamaOk33 = false, chamaCor33 = false;
-        {
-            const SdfVertex* v33 = g_ui.sdfForTest().vertices();
-            for (u32 i = 0; i + 5 < g_ui.sdfForTest().vertexCount(); i += 6) {
-                if (v33[i].pad1 > 0.5f) {
-                    chamaOk33 = true;
-                    // as cores da chama viajam nos vértices (fire1→fire3)
-                    chamaCor33 =
-                        nearEqF(v33[i].tr, 232.0f / 255.0f, 0.01f) &&
-                        nearEqF(v33[i].br, 255.0f / 255.0f, 0.01f);
-                }
-            }
-        }
-        check(chamaOk33, "33.1 o PREMIDO (o Stop da play bar) emite a CHAMA "
-                         "(aShape.w=1) no replay");
-        check(chamaCor33, "33.2 a chama carrega fire1→fire3 nos vértices");
-        // o dedo SAI do botão e larga FORA (cancelamento limpo — o click
-        // não dispara e o play não para)
-        g_input.injectMove(0, 1500.0f, 700.0f);
-        frame();
-        g_input.injectUp(0);
-        frame();
-        // (2) O PORTÃO das brasas: no editor (celebration=false) NEM UMA
-        g_editor.playMode = false;
-        frame();
-        const u32 solidsAntes33 = g_ui.solidsForTest().vertexCount();
-        g_ui.drawEmbers(0.0f, 0.0f, 400.0f, 300.0f, 1.0f,
-                        /*celebration=*/false);
-        check(g_ui.solidsForTest().vertexCount() == solidsAntes33,
-              "33.3 o PORTÃO: o editor (celebration=false) emite ZERO "
-              "brasas (a cláusula do prompt)");
-        // (3) o TOGGLE: Baixo mata a chama (a D-7 — sem ruído)
-        sdf::g_level = sdf::LEVEL_BAIXO;
-        g_editor.playMode = true;
-        frame();
-        const UiRect bar33b = editor::playBarRect(1536.0f, 720.0f, g_ui.safeArea());
-        const UiRect stop33b = editor::playStopButtonRect(bar33b);
-        g_input.injectDown(0, stop33b.x + stop33b.w * 0.5f,
-                           stop33b.y + stop33b.h * 0.5f);
-        frame();
-        bool chamaBaixo33 = false;
-        {
-            const SdfVertex* v33b = g_ui.sdfForTest().vertices();
-            for (u32 i = 0; i + 5 < g_ui.sdfForTest().vertexCount(); i += 6) {
-                chamaBaixo33 |= v33b[i].pad1 > 0.5f;
-            }
-        }
-        check(!chamaBaixo33, "33.4 Efeitos: Baixo mata a chama (a D-7)");
-        // reposição (o dedo sai, o play morre, o nível volta — o estado
-        // limpo para o resto do replay)
-        g_input.injectMove(0, 1500.0f, 700.0f);
-        frame();
-        g_input.injectUp(0);
-        g_input.resetAll();
-        g_editor.playMode = playModeAntes;
-        sdf::g_level = sdf::LEVEL_ALTO;
-        frame();
-    }
+    // ---- FASE 32/33 REFORMADAS (0.12-E · E-1 · EMERGÊNCIA) ------------------
+    // O SHADER SDF ÚNICO DE WIDGET (D-1) e O FOGO (D-3) foram ABORTADOS POR
+    // ORDEM DO DONO: no device real o shader único estragou o TEXTO, o
+    // LAYOUT e pintou CAIXAS PRETAS flutuantes («Desliga o SDF e o cálculo
+    // 3D. Volta ao desenho simples no UiContext»). Os checks 32.1..32.5 e
+    // 33.1..33.4 aferiam o CONTRATO de emissão do batch sdf — a emissão
+    // morreu (zero chamadores no produto), os checks saem COM a campanha.
+    // A maquinaria dormente (SdfBatch/progSdf_/Fire.h) continua no código;
+    // os píxeis que o DEVICE desenha hoje voltam a ser a escadaria 2D de
+    // quads (os pins y1/y3/cantos/playui recalibrados de volta no E-1).
 
     // ---- FASE 34 — 0.12-D (D-4): O LOGO («G EM CHAMA») ---------------------
     // O cabeçalho do editor (a versão PEQUENA das 3 do dono) desenha o

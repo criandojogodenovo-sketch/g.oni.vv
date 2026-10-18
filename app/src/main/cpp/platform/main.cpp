@@ -6484,47 +6484,11 @@ void frame() {
     // ---- pass UI: immediate-mode da F1 por cima (sem depth — nunca ocluída)
     g_ui.beginFrame(&g_renderer, &g_input, w, h);
 
-    // 0.12-D (D-2) — O VIDRO REAL: os overlays flutuam sobre o VIEWPORT —
-    // a captura da cena (1/4 + o blur dual Kawase, no RENDERER com CACHE)
-    // corre ANTES de qualquer widget deste frame (o fb ainda é a cena).
-    // A DECISÃO DA CACHE é a fonte pura glassCacheDirty (a câmara, a cena,
-    // o rect, a superfície): com overlay aberto o orbit está MORTE
-    // (anyOverlayOpen — o gate do updateCameraOrbit) — a captura do OPEN é
-    // a que fica, e o teto honesto está documentado no relatório (a edição
-    // pelo inspector com o menu aberto só refresca no próximo evento).
-    {
-        const bool overlayD2 = editor::anyOverlayOpen(g_editor);
-        static glass::CacheState s_glassLast{};
-        static bool s_glassHas = false;
-        if (overlayD2) {
-            const UiRect vrD2 = safe::viewportRect(w, h, g_ui.safeArea());
-            glass::CacheState cur;
-            cur.camYaw = g_camera.yaw;
-            cur.camPitch = g_camera.pitch;
-            cur.camDist = g_camera.dist;
-            cur.sceneVersion = g_scene.count() * 64u +
-                               (g_editor.selected.valid()
-                                    ? g_editor.selected.index
-                                    : 0u);
-            cur.capX = vrD2.x;
-            cur.capY = vrD2.y;
-            cur.capW = vrD2.w;
-            cur.capH = vrD2.h;
-            cur.surfaceW = w;
-            cur.surfaceH = h;
-            if (!s_glassHas || glass::glassCacheDirty(s_glassLast, cur)) {
-                g_renderer.glassInvalidate();
-                s_glassLast = cur;
-                s_glassHas = true;
-            }
-            g_ui.setGlassTexture(g_renderer.captureGlass(
-                static_cast<i32>(vrD2.x), static_cast<i32>(vrD2.y),
-                static_cast<i32>(vrD2.w), static_cast<i32>(vrD2.h)));
-        } else {
-            g_ui.setGlassTexture(0);
-            s_glassHas = false;   // o overlay fechou — o próximo abre FRESH
-        }
-    }
+    // 0.12-E (E-1 · EMERGÊNCIA): A CAPTURA DO VIDRO REAL (D-2) MORREU — o
+    // glReadPixels + o blur Kawase alimentavam o ramo de textura do shader
+    // SDF abortado pelo dono (as «caixas pretas flutuantes» no device). O
+    // bloco inteiro sai: NENHUM menu consome textura de vidro; os painéis
+    // voltaram ao desenho simples 2D (panelRounded + glassTopLine).
 
     // 0.9.6.5 (GRUPO B): pedido de export/auditoria pendente? O registo liga
     // AGORA (antes do 1.º widget deste frame) — as entradas saem do draw
@@ -8583,8 +8547,10 @@ void android_main(android_app* app) {
         const double realDt = nowT - last;
         last = nowT;
         g_frameDt = static_cast<f32>(realDt);   // 0.7.1: relógio da transição
-        // 0.12-D (D-3): o relógio do FOGO — a chama dos ativos corre com o
-        // frame (o ui/Fire.h é paramétrico: o mesmo t dá a mesma chama)
+        // 0.12-E (E-1): o relógio sobrevive ao fogo SDF abortado — os
+        // EFEITOS 2.5D da FASE 3 (a textura de ruído em scroll lento nas
+        // bordas ativas) consomem-no (o mesmo t = a mesma textura — o
+        // determinismo dos pins); o Fire.h/fbm MORREU com a D-3.
         sdf::g_time += g_frameDt;
 
         // Loop de timestep fixo (guard anti-spiral dentro de Time).

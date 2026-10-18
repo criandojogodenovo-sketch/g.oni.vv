@@ -517,17 +517,16 @@ TEST(cameratic_criacao_e_menu_contextual) {
     drawContextMenu(ui, in, kSW, kSH, st, "Camera", true, true);
     ui.endFrame();
     // 5 botões + título: o batch tem pelo menos os quads dos 5
-    // 0.12-D (D-1): o fill dos botões é o WIDGET SDF — a conta inclui os
-    // DOIS batches (os quads sólidos + os widgets SDF)
-    const u32 nCam = ui.solidsForTest().vertexCount() / 6 +
-                     ui.sdfForTest().vertexCount() / 6;
+    // (cada botão = painel + moldura 4 = 5 quads + painel do menu)
+    // 0.12-E (E-1): a conta volta ao SOLIDS (o SDF 3D abortado — zero
+    // widgets sdf no batch; a soma sdfForTest é o 0 de sempre)
+    const u32 nCam = ui.solidsForTest().vertexCount() / 6;
     ui.beginFrame(nullptr, &in, kSW, kSH);
     EditorState st2;
     st2.contextMenu = true;
     drawContextMenu(ui, in, kSW, kSH, st2, "Cubo", true, false);
     ui.endFrame();
-    const u32 nNoCam = ui.solidsForTest().vertexCount() / 6 +
-                       ui.sdfForTest().vertexCount() / 6;
+    const u32 nNoCam = ui.solidsForTest().vertexCount() / 6;
     EXPECT(nCam > nNoCam);   // com câmara há UMA linha a mais
 }
 

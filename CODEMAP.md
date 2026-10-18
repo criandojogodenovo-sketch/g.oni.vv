@@ -1,7 +1,20 @@
 # CODEMAP.md — onde vive o quê
 
-Atualizado: 2026-10-18 · vc: 91
+Atualizado: 2026-10-19 · vc: 95
 
+> 0.12-E (E-1 · EMERGÊNCIA): o shader SDF de widget (D-1), o vidro
+> real/falso (D-2) e o fogo do shader único (D-3) estão DORMENTES — a
+> ordem do dono abortou o SDF 3D (estragou texto/layout no device). Os
+> símbolos continuam no código com ZERO chamadores no produto (o
+> app/src/main/cpp/ui/Sdf.h, o app/src/main/cpp/render/SdfBatch.h, o
+> app/src/main/cpp/ui/Glass.h, o app/src/main/cpp/ui/Fire.h, o
+> progSdf_/captureGlass do app/src/main/cpp/render/Renderer.cpp e os
+> emissores UiContext::sdfWidget/sdfWidgetGlass/glassPanelFake/
+> sdfFireBorder/fireGlowBelow/drawEmbers).
+> O desenho do produto voltou ao SIMPLES 2D (o padrão Y-1: painel +
+> gradiente + frame + glassTopLine). O LOGO de D-4 (Brand.h/.cpp) segue
+> VIVO (segmentos 2D — nunca foi SDF).
+>
 > Convenção de paths: TODOS os caminhos deste ficheiro são relativos à
 > RAIZ do repo (exemplo: o registo da linguagem vive em
 > app/src/main/cpp/voni/VoniRegistry.cpp) — nunca relativo à pasta cpp/,
@@ -42,7 +55,7 @@ Atualizado: 2026-10-18 · vc: 91
   Cube/Primitives, Material, Texture, GpuAssets (+ `impostorTexture`),
   BlockMesh (o render POR BLOCOS do .gmesh v3), Impostor.h (a decisão
   PURA do impostor), QuadBatch, DrawStats, ThumbPng (PNG via zlib).
-  **0.12-D (D-1)**: app/src/main/cpp/render/SdfBatch.h (o batch dos WIDGETS SDF — UM
+  **0.12-D (D-1 — DORMENTE desde a 0.12-E)**: app/src/main/cpp/render/SdfBatch.h (o batch dos WIDGETS SDF — UM
   widget = UM quad de 18 floats) + o 3.º PROGRAMA no Renderer
   (progSdf_ — o FS kSdfFsSrc replica o app/src/main/cpp/ui/Sdf.h::shade() LINHA A LINHA;
   as submissões SDF viajam nos runs pelo flag `sdf` e os buffers/VAOs

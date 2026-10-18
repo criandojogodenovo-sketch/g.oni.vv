@@ -41,3 +41,15 @@ test-sentinels-cache/
 *.dump
 build-asan/
 build-dbg/
+# 0.12-E (E-1): os ARTEFACTOS dos harnesses (o c33/layout sweep escrevem
+# PNG/JSON de prova na RAIZ do repo — nunca são fonte, o scope-check
+# rejeitava-os; padrões documentados no RELATORIO-0.12-E.md §1)
+/hotfix*.png
+/hotfix*.json
+/j2-device-*.png
+/j2-device-*.json
+/layout-harness-*.png
+/layout-harness-*.json
+/layout-harness-*.txt
+/passo4-*.png
+/y-*.png

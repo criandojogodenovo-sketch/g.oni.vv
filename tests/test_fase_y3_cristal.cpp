@@ -113,24 +113,21 @@ TEST(y3_cristal_hierarquia) {
     e.begin();
     editor::drawHierarchy(e.ui, e.scene, e.st);
 
-    // (a) 0.12-D (D-2) — a RECALIBRAÇÃO honesta: o topo do cristal deixou
-    // de ser a LINHA 1dp do glow — o painel FIXO é o VIDRO FALSO: o CORPO
-    // é o GRADIENTE semi-opaco surface (topo) → surface2 (fundo) no rect
-    // inteiro do painel (a fonte única glassPanelFake)
+    // (a) a LINHA DO TOPO: o quad 1dp no TOPO do painel com o RGB do glow
+    // a α0.20, com a LARGURA do painel
+    // 0.12-E (E-1): a recalibração D-2 reverte — o vidro falso MORREU com
+    // o SDF abortado; o cristal volta à linha 1dp do topo
     const bool topo = findQuad(e.ui, [&](f32 x, f32 y, f32 w, f32 h,
                                          const f32 top[4], const f32 bot[4]) {
         return test::nearEqF(y, p.y, 0.05f) &&
-               test::nearEqF(h, p.h, 0.05f) &&
+               test::nearEqF(h, 1.0f, 0.05f) &&
                test::nearEqF(x, p.x, 0.05f) &&
                test::nearEqF(w, p.w, 0.05f) &&
-               sameC(top, 19.0f / 255.0f, 19.0f / 255.0f, 22.0f / 255.0f,
-                     0.80f) &&
-               sameC(bot, 30.0f / 255.0f, 30.0f / 255.0f, 33.0f / 255.0f,
-                     0.86f);
+               sameC(top, 1.0f, 61.0f / 255.0f, 0.0f, 0.20f);
     });
     EXPECT_MSG(topo,
-               "y3_hierarquia: o GRADIENTE do vidro falso (surface→surface2 "
-               "no rect do painel) não foi encontrado no batch");
+               "y3_hierarquia: a LINHA DO TOPO do cristal (1dp do glow a "
+               "20% na largura do painel) não foi encontrada no batch");
 
     // (b) o DIVISOR direito: o quad 1dp de largura na borda direita do
     // painel com o GRADIENTE (topo accentDim α0.90 → fundo α0.15)
@@ -178,20 +175,17 @@ TEST(y3_cristal_inspector) {
     e.begin();
     editor::drawInspector(e.ui, e.scene, e.st, nullptr);
 
-    // 0.12-D (D-2): o MESMO contrato do vidro falso (o gradiente do corpo)
+    // a LINHA DO TOPO (o MESMO contrato da hierarquia — o vidro falso da
+    // D-2 morreu com o SDF; o cristal 1dp do glow a 20% volta)
     const bool topo = findQuad(e.ui, [&](f32 x, f32 y, f32 w, f32 h,
                                          const f32 top[4], const f32 bot[4]) {
         return test::nearEqF(y, p.y, 0.05f) &&
-               test::nearEqF(h, p.h, 0.05f) &&
+               test::nearEqF(h, 1.0f, 0.05f) &&
                test::nearEqF(x, p.x, 0.05f) &&
                test::nearEqF(w, p.w, 0.05f) &&
-               sameC(top, 19.0f / 255.0f, 19.0f / 255.0f, 22.0f / 255.0f,
-                     0.80f) &&
-               sameC(bot, 30.0f / 255.0f, 30.0f / 255.0f, 33.0f / 255.0f,
-                     0.86f);
+               sameC(top, 1.0f, 61.0f / 255.0f, 0.0f, 0.20f);
     });
-    EXPECT_MSG(topo,
-               "y3_inspector: o gradiente do vidro falso em falta");
+    EXPECT_MSG(topo, "y3_inspector: a linha do topo do cristal em falta");
     const bool div = findQuad(e.ui, [&](f32 x, f32 y, f32 w, f32 h,
                                         const f32 top[4], const f32 bot[4]) {
         return test::nearEqF(x, p.x, 0.05f) &&

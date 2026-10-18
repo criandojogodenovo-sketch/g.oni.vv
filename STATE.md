@@ -1,11 +1,11 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-18 · vc: 94 · Último commit: este (o 0.12-D D-4, O
-LOGO — o «G em chama»: as setas do glifo antigo MORRERAM, a rampa
-fire0..fire3 por traço pela altura, o ignite 0..1 para a splash da D-6,
-as 3 versões (cabeçalho/launcher/splash), o espelho Java alinhado, o
-achado do overdraw da barra; os 4 pins + M-D4a/b; antes: 58710ce o D-3,
-O FOGO; 660e347 o D-2, O VIDRO; af41059 o D-1, O SHADER SDF)
+Atualizado: 2026-10-19 · vc: 95 · Último commit: este (o 0.12-E E-1, A
+RESTAURAÇÃO DA UI BÁSICA — a ORDEM DE EMERGÊNCIA do dono: o SDF 3D do
+widget (D-1) e o vidro/fogo do shader único (D-2/D-3) estragaram o TEXTO
+e o LAYOUT no device; o desenho voltou ao simples 2D no UiContext, os
+pins reformados, o LOGO de D-4 sobrevive; a FASE 2 (a paleta FOGO
+AVERMELHADO) e a FASE 3 (os efeitos 2.5D) seguem na fila do dono)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -13,53 +13,33 @@ O FOGO; 660e347 o D-2, O VIDRO; af41059 o D-1, O SHADER SDF)
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-D (identidade visual: fogo, vidro, 3D) — ABERTA
-  (D-1..D-4 fechadas, D-5..D-8 na fila)** (a pré-condição era a 0.12-C fechada;
-  as cláusulas do dono: anti-overengineering — cada efeito com toggle
-  «Efeitos: Alto / Médio / Baixo» — e anti-superficialidade — o botão
-  ativo mostra bisel + brilho + fogo + sombra SIMULTANEAMENTE; os
-  DETALHES vivem no RELATORIO-0.12-D.md).
-  **D-1 (o shader SDF único de widget, vc 91)**: o 3.º PROGRAMA da engine
-  (progSdf_) com o ui/Sdf.h como FONTE ÚNICA da matemática (o FS replica
-  linha a linha; o rasterizador honesto do stub INCLUI o header — os
-  pins aferem os MESMOS pixéis que o device desenha): cantos SDF
-  perfeitos + bisel 3D (a normal do gradiente da distância) + especular
-  no topo + brilho interno + sombra projetada, numa passagem; o toggle
-  sdf::g_level (Baixo = só bisel + sombra simples); os draws de BOTÃO
-  substituídos (o choke point drawButtonVisual + o iconButton da barra →
-  UiContext::sdfWidget — o premido é o FOGO com bisel+brilho+sombra);
-  pins ×4 (test_012d_sdf.cpp) + M-D1a/M-D1b vermelho→verde + a FASE 32
-  do c33 (5 checks). OS ACHADOS REAIS: o REBIND do ARRAY_BUFFER após
-  submissões SDF (o upload do UI ia ao vboSdf_) e a CORRIDA FINA dos
-  jobs de import no c33 (o teto de 3000 frames = 5 ms de relógio; agora é
-  o RELÓGIO 10 s + yield). test_core 0 falhas · c33 1010/0 · vc 91. O
-  C33 REAL (o PNG do botão nos 3 modos) fica para o dono.
-  **D-2 (o vidro real e falso, vc 92)**: o vidro REAL nos flutuantes (a
-  captura 1/4 + o blur dual Kawase com a CACHE — a decisão pura; o ramo
-  uSdfTexOn do MESMO widget SDF + a tinta glassInk NOVA; 6 menus trocados)
-  + o vidro FALSO nos fixos (glassPanelFake — o gradiente + o reflexo +
-  o ruído + a Fresnel; a hierarquia e o inspector); pins ×4 + M-D2a/b +
-  6 recalibrações. O C33 REAL fica para o dono.
-  **D-3 (o fogo, vc 93)**: a chama no que está ATIVO — o ui/Fire.h NOVO
-  (a FONTE ÚNICA; a distância vem do roundRectSdf da D-1), a RAMPA do
-  dono no Theme (fire0→fire3; a proveniência é o d3_palette.py), a BORDA
-  ANIMADA do ativo (o aShape.w=1, o fbm pela aresta em MISTURA ADITIVA),
-  o GLOW POR BAIXO, as BRASAS com PORTÃO (o editor nunca as vê — a
-  splash é da D-6, o projetos da D-8), a COMPOSIÇÃO SIMULTÂNEA do
-  premido, o relógio g_time e o Baixo a morder os TRÊS emissores; pins
-  ×5 + M-D3a/b + a FASE 33. OS ACHADOS: o continue que saltava o blend,
-  o 0x0304 ≠ GL_SRC_ALPHA, a banda SEM TETO para dentro (o widget ardia)
-  e o «play em destaque» da C-2 inalcançável no replay (para o dono).
-  O fix do CI do D-2: a sentinela JVM R-005 aceita a 3.ª variante do
-  mecanismo (NPE — o slot lido a null entre clear e add). vc 93.
-  **D-4 (o logo, vc 94)**: o «G EM CHAMA» — as setas do glifo antigo
-  MORRERAM, a rampa fire0..fire3 por traço pela ALTURA (o âmbar mono
-  morreu), o ignite 0..1 para a splash da D-6, as 3 versões (o
-  cabeçalho 24dp / o launcher da Y-0 / a splash), o espelho Java
-  alinhado (o UiIcons.drawBrand por segmentos + os tokens FIRE) e o
-  ACHADO do overdraw da barra (o 3.º segmento re-traceado — 16 reais);
-  pins ×4 + M-D4a/b + a FASE 34. O C33 REAL (o PNG do cabeçalho) fica
-  para o dono.
+- **Campanha 0.12-E (EMERGÊNCIA + REDESIGN 2.5D, FOGO AVERMELHADO) —
+  ABERTA (E-1 fechada; FASE 2 da paleta e FASE 3 dos efeitos 2.5D na
+  fila do dono)** (a ordem do dono abortou o SDF 3D — «Desliga o SDF e
+  o cálculo 3D. Volta ao desenho simples no UiContext»; cláusulas: ZERO
+  matemática 3D, ZERO mexidas no FontAtlas, a arquitetura de TICs
+  intocada; os DETALHES vivem no RELATORIO-0.12-E.md).
+  **E-1 (a restauração, vc 95)**: o CHOKE POINT drawButtonVisual e o
+  iconButton voltam ao padrão Y-1 (o ativo = glow + gradiente
+  accent→accent2; o repouso = panelRounded + frameRounded 1dp); o VIDRO
+  REAL sai do frame (o bloco de captura do main.cpp inteiro) e o FALSO
+  sai dos painéis (hierarquia/inspector voltam ao ui.panel +
+  glassTopLine); os 6 menus voltam ao panelRounded + glassTopLine; a
+  maquinaria SDF/vidro/fogo fica DORMENTE (zero chamadores); pins
+  REFORMADOS (test_012d_sdf/vidro/fogo apagados — 13 pins; FASE 32/33 do
+  c33 saem — 9 checks) + recalibrações DE VOLTA (playui/y1/y3/cantos/
+  cameratic/13.9). test_core 0 falhas · c33 1007/0 · vc 95. O C33 REAL
+  (o PNG do editor restaurado) fica para o dono.
+- **Campanha 0.12-D (identidade visual) — PARCIALMENTE ABORTADA PELO
+  DONO (a 0.12-E)**: o D-4 (o LOGO, segmentos 2D) SOBREVIVE; o D-1 (o
+  shader SDF), o D-2 (o vidro real/falso) e o D-3 (o fogo do shader)
+  estão DORMENTES no código (zero chamadores — a história completa com
+  as mutações vive no RELATORIO-0.12-D.md §1..3); D-5..D-8 CANCELADOS
+  pela emergência. A FASE 3 do E re-faz a borda ativa como textura de
+  ruído 2D em scroll (a ordem do dono).
+  (D-1 vc 91 · D-2 vc 92 · D-3 vc 93 · D-4 vc 94 — os DETALHES
+  completos com os pins/mutações vivem no RELATORIO-0.12-D.md §1..4;
+  os commits af41059/660e347/58710ce/ae62bf0 contam o resto.)
 - **Campanha 0.12-C (layout, organização e consistência) — FECHADA
   (C-1..C-4, vc 87–90)** (o CI do push é o árbitro; os DETALHES vivem no
   RELATORIO-0.12-C.md; a cláusula é anti-superficialidade — nada de
@@ -95,6 +75,9 @@ O FOGO; 660e347 o D-2, O VIDRO; af41059 o D-1, O SHADER SDF)
 
 ## §2 O que está FEITO
 
+- 0.12-E E-1 (vc 95) — a restauração da UI básica (no RELATORIO-0.12-E.md
+  §1): o SDF 3D abortado pelo dono, o desenho simples 2D de volta, os 13
+  pins reformados + as FASE 32/33 do c33, as 6 recalibrações de volta.
 - 0.12-D D-4 (vc 94) — o logo «G em chama» (no RELATORIO-0.12-D.md §4):
   as setas mortas, a rampa por traço, o ignite, as 3 versões, o espelho
   Java, o overdraw da barra; pins ×4 + M-D4a/b; a FASE 34.
@@ -261,9 +244,12 @@ Commits puramente documentais não são afetados.
 - `ARCHITECTURE.md` — o mapa dos módulos (o porquê das camadas).
 - `docs/REGRESSOES.md` — sentinelas R-NNN (consulta, não leitura inteira).
 - `BACKLOG.md` — rastreador de campanhas (na RAIZ do repo).
+- `docs/RELATORIO-0.12-E.md` — o relatório da 0.12-E (a EMERGÊNCIA: o
+  E-1 no §1 — o aborto do SDF 3D, os pins reformados, as recalibrações;
+  as FASE 2/3 do redesign 2.5D fecham nos §2/§3).
 - `docs/RELATORIO-0.12-D.md` — o relatório da 0.12-D (a D-1 no §1 — o
   shader SDF, o toggle, os pins, as mutações, os achados do rebind e da
-  corrida dos jobs).
+  corrida dos jobs; D-1..D-3 DORMENTES desde a 0.12-E — a história).
 - `docs/RELATORIO-0.12-C.md` — o relatório da 0.12-C (a C-1 no §1, a C-2
   no §2, a C-3 no §3, a C-4 no §4 — o picker, os vazios, os achados do
   gesto/claim/drawer, a REPARAÇÃO da árvore, as mutações coladas).

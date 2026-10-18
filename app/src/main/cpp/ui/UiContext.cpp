@@ -1022,28 +1022,29 @@ void UiContext::emitQuadCornersClipped(const f32 px[6], const f32 py[6],
 // glow de foco atrás (2 quads α decrescente) + o FILL com o gradiente
 // VERTICAL accent→accent2 (a spec da Y-1). O repouso continua o vidro
 // (PANEL) de sempre. Compartilhado pelas duas passagens (audit/não-audit).
-// 0.12-D (D-1) — OS DRAWS ATUAIS SUBSTITUÍDOS PELO SHADER ÚNICO: o fill é
-// agora o WIDGET SDF (cantos perfeitos + bisel + especular + brilho +
-// sombra numa passagem). O held MANTÉM o glow de foco da Y-1 e leva o
-// FOGO (accent→accent2) — bisel + brilho + fogo + sombra SIMULTANEAMENTE
-// (a cláusula anti-superficialidade). O frameRounded de 1dp MORRE: a
-// aresta do bisel É o tratamento da borda agora.
+// (0.12-D D-1/D-3 chegaram a substituir este desenho pelo widget SDF com
+// bisel/fogo — ABORTADO pelo dono na 0.12-E: ver a nota dentro.)
 namespace {
+// 0.12-E (E-1 · EMERGÊNCIA): O SDF 3D DO WIDGET FOI ABORTADO POR ORDEM DO
+// DONO — no device real o shader único estragou o TEXTO, o LAYOUT e
+// pintou CAIXAS PRETAS flutuantes (a ordem: «Desliga o SDF e o cálculo 3D.
+// Volta ao desenho simples no UiContext»). O desenho volta ao simples 2D
+// de sempre (o padrão Y-1): o ativo é o glow de foco + o gradiente
+// vertical accent→accent2; o repouso é o painel liso + o frame 1dp.
+// A maquinaria SDF (sdfWidget/SdfBatch/progSdf_) fica DORMENTE no código
+// (zero chamadores no produto; os pins dela foram reformados neste commit
+// — o relatório 0.12-E documenta).
 void drawButtonVisual(UiContext& ui, f32 x, f32 y, f32 w, f32 h, bool held) {
     if (held) {
-        // 0.12-D (D-3): o ATIVO mostra bisel + brilho + FOGO + sombra
-        // SIMULTANEAMENTE (a cláusula anti-superficialidade) — o glow de
-        // foco da Y-1 + O GLOW POR BAIXO + o widget (o fogo no gradiente)
-        // + A BORDA DE FOGO animada (o fbm aditivo)
         ui.focusGlow(x, y, w, h);
-        ui.fireGlowBelow(x, y, w, h);
-        ui.sdfWidget(x, y, w, h, theme::dp(theme::kRadiusCard),
-                     theme::kTheme.accent, theme::kTheme.accent2);
-        ui.sdfFireBorder(x, y, w, h, theme::dp(theme::kRadiusCard));
+        ui.panelRoundedGradientV(x, y, w, h, theme::dp(theme::kRadiusCard),
+                                 theme::ACCENT, theme::ACCENT2);
     } else {
-        ui.sdfWidget(x, y, w, h, theme::dp(theme::kRadiusCard),
-                     theme::kTheme.surface, theme::kTheme.surface);
+        ui.panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard),
+                        theme::PANEL);
     }
+    ui.frameRounded(x, y, w, h, 1.0f, theme::dp(theme::kRadiusCard),
+                    theme::LINE);
 }
 } // namespace
 
