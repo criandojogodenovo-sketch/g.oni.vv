@@ -100,6 +100,7 @@ add_executable(test_core
         test_012c_idioma.cpp   # 0.12-C (C-3): os pins da escala/idioma/superfícies
         test_012c_picker.cpp   # 0.12-C (C-4): os pins do seletor + estados vazios
         test_012d_sdf.cpp   # 0.12-D (D-1): os pins do shader SDF de widget (cantos/bisel/sombra/toggle)
+        test_012d_vidro.cpp   # 0.12-D (D-2): os pins do vidro (real/falso/fresnel/cache)
         # 0.7.1: cenas múltiplas + transições (projeto e2e, SceneFx puro,
         # overlay CENAS, ações Scene.Load/Transition)
         test_scenes.cpp

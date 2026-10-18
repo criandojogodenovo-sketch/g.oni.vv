@@ -169,3 +169,101 @@ rasterizador honesto → glReadPixels; o α do fb é inútil contra o clear
   sdf (a largura/centro lidos do próprio vértice hw).
 - `cameratic_criacao_e_menu_contextual` (test_cameratic.cpp) — a conta de
   widgets inclui o batch sdf.
+
+## 2 · D-2 — O VIDRO (REAL e FALSO) (vc 92)
+
+### 2.1 O que foi feito
+
+- **`ui/Glass.h` NOVO — as fontes PURAS partilhadas**: o BLUR DUAL KAWASE
+  (`kawasePass` — o padrão de 8 offsets, k=1 na 1.ª passagem e k=2 na 2.ª,
+  o "dual" do prompt; `kawaseBlurDual` com ping-pong), a DOWNSAMPLE 2×2
+  (`downsample2x2` — duas reduções dão o 1/4 de resolução), a DECISÃO DA
+  CACHE (`glassCacheDirty` — a câmara de orbit, a versão da cena, o rect
+  capturado e a superfície; «só recalcular se o que está atrás mudou») e
+  o RUÍDO FRACO do vidro falso (`glassNoise` — hash inteiro do SÍTIO, não
+  do tempo: não cintila).
+- **O VIDRO REAL (os painéis FLUTUANTES)**: `Renderer::captureGlass(x,y,w,h)`
+  — o glReadPixels da região (y convertida para GL no sítio; o flip de
+  linhas depois, para a textura ficar em ecrã y-down), a redução a 1/4,
+  o blur dual e o upload GL_RGBA. A CACHE no renderer (`glassDirty_` +
+  o contador `glassCaptures_`). O main (platform/main.cpp) decide com
+  `glass::glassCacheDirty` (o estado da câmara/cena/rect) ANTES de
+  qualquer widget (o fb ainda é a cena) e fornece a textura ao UiContext
+  (`setGlassTexture`). O CONSUMO: **o MESMO widget SDF da D-1** com o
+  ramo `uSdfTexOn` (o aShape.z) — o FS/stub amostra a cena borrada em
+  espaço de ECRÃ sobre o rect capturado e multiplica pela TINTA ESCURA
+  (`theme::kTheme.glassInk` NOVO no Theme — #6B6B76 α0.94; o produto e o
+  mix do α são IDÊNTICOS nos dois lados). Os cantos, o bisel, o especular
+  e a sombra do shader único continuam — o vidro não perde o tratamento.
+  OS PAINÉIS FLUTUANTES TROCADOS: o menu IMPORT (kMenuW), o card do
+  plusMenu e do assetMenu, e os 3 sheets ELEVADO (o fileMenu, o hierMenu
+  e o scenesMenu).
+- **O VIDRO FALSO (os painéis FIXOS)**: `UiContext::glassPanelFake()` —
+  (1) o GRADIENTE semi-opaco surface→surface2 no corpo (o emitGradientV),
+  (2) o REFLEXO DIAGONAL (3 veios brancos a α 0.05/0.03/0.02, 45°, no
+  quadrante topo-esquerda — quads rotacionados clipados), (3) o RUÍDO
+  FRACO (células de 16px, ~1 em 5 nasce, α 0.04, determinístico), (4) a
+  BORDA CLARA 1px (o glassEdge — a FRESNEL). Aplicado à HIERARQUIA e ao
+  INSPECTOR (o glassTopLine da Y-3 sai — a borda do vidro É o brilho do
+  topo agora; os divisores âmbar da Y-3 ficam).
+- **A FRESNEL**: a borda mais clara que o interior — o glassEdge do tema
+  (branco α0.12) no vidro falso, o especular do widget no real.
+
+### 2.2 Os pins (test_012d_vidro.cpp)
+
+1. **vidro_real_blur** — (a) a função pura: o delta espalha (o centro
+   desce, os vizinhos a 4px sobem, o canto longe intacto); (b) o CAMINHO
+   REAL: a captura + o widget de vidro sobre um quadrado brilhante — o
+   centro sob o vidro desceu e o vizinho fora do quadrado acendeu contra
+   o fundo (o blur espalhou no píxel).
+2. **vidro_falso_ok** — o corpo com o GRADIENTE exato (topo surface α0.80,
+   fundo surface2 α0.86 no rect do painel) + o REFLEXO DIAGONAL no batch
+   (quads brancos fracos não axis-aligned).
+3. **vidro_fresnel** — a borda esquerda do painel falso lê mais clara que
+   o interior a 8px.
+4. **vidro_cache** — duas capturas sem invalidação = UMA passagem (o
+   contador fica em 1, a textura é a mesma); a invalidação recomeça
+   (contador 2); e a DECISÃO PURA (a câmara/a cena mudam → suja).
+
+### 2.3 As mutações (coladas)
+
+- **M-D2a — o blur removido** (o capture devolve a redução SEM o Kawase):
+  ```
+  vidro_real_blur ... FALHOU  test_012d_vidro.cpp:148
+    vidro_real_blur: o vizinho fora do quadrado (35) não acendeu contra o
+    fundo (32) — o blur não espalhou
+  1 teste(s) com falha
+  ```
+- **M-D2b — a cache removida** (o capture recalcula sempre):
+  ```
+  vidro_cache ... FALHOU  test_012d_vidro.cpp:268
+    vidro_cache: a captura sem invalidação re-blurou (2) — a cache morreu?
+  vidro_cache ... FALHOU  test_012d_vidro.cpp:279
+    vidro_cache: a captura após a invalidação não correu (3)
+  2 EXPECTs vermelhas
+  ```
+  ambas repostas → verde.
+
+### 2.4 Os achados reais
+
+1. **A ORIENTAÇÃO da captura**: o glReadPixels devolve a origem NO FUNDO
+   (GL) — sem o flip de linhas o painel mostrava a cena de cabeça para
+   baixo. O y do chamador (ecrã y-down) converte-se no sítio único
+   (captureGlass) e o flip segue — a textura fica na convenção do ecrã.
+2. **O 13.9 e o grão**: as sondas de píxel do c33 passaram a esquivar o
+   RUÍDO do vidro falso (3 sondas em x — o hash é esparso, ~1 em 5
+   células; a tolerância honesta ±2).
+3. **O teto da cache (documentado, não escondido)**: com o overlay aberto
+   o orbit está MORTE (o gate anyOverlayOpen) — a captura do OPEN é a que
+   fica; a edição pelo INSPECTOR com um menu aberto só refresca no
+   próximo evento da cache (a câmara/o rect/a contagem de TICs). O caso
+   comum (a órbita → abrir o menu) está sempre certo.
+
+### 2.5 O estado da suíte
+
+- test_core: **0 falhas** (os 4 skips de disco conhecidos).
+- c33_virtual: **1010 checks, 0 falhas** — com 3 recalibrações com nota
+  (13.9 ×2 — o gradiente do vidro falso nos DOIS lados com as sondas que
+  esquivam o grão; 18.1 J-02 — o sheet mede O VIDRO REAL: escuro e nunca
+  o véu cru; y3 ×2 e o uitree no test_core — o mesmo contrato).
+- **O pin C33 REAL fica para o dono**: o PNG do menu com a cena por trás.

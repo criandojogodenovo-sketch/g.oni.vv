@@ -77,6 +77,11 @@ uniform float uSdfGlowOn;
 uniform float uSdfSpecAdd;
 uniform float uSdfGlowAdd;
 uniform float uSdfAA;
+// 0.12-D (D-2): o ramo do VIDRO REAL — o widget amostra a textura da cena
+// borrada (a captura 1/4 + o blur dual Kawase) com a TINTA ESCURA
+uniform sampler2D uSdfTex;
+uniform vec4 uSdfCap;    // o rect capturado (x,y,w,h em px de ecrã y-down)
+uniform float uSdfSurfH; // a altura da superfície (o flip do fragCoord)
 out vec4 outColor;
 float sdfClamp01(float x) { return clamp(x, 0.0, 1.0); }
 float roundRectSdf(vec2 p, vec2 b, float r) {
@@ -121,8 +126,20 @@ void main() {
     }
     float aOut = sdfClamp01(aW + aS);
     if (aOut <= 0.002) { outColor = vec4(0.0); return; }
+    // a cor base: o GRADIENTE vertical dos vértices (a tinta do widget) —
+    // ou a CENA BORRADA (o vidro real: o ramo uSdfTexOn do aShape.z, o
+    // UV em espaço de ECRÃ sobre o rect capturado)
     float t = b.y > 1e-4 ? sdfClamp01((p.y + b.y) / (2.0 * b.y)) : 0.0;
     vec3 rgb = mix(vTop.rgb, vBot.rgb, t);
+    if (vShape.z > 0.5) {
+        float sy = uSdfSurfH - gl_FragCoord.y;
+        vec2 suv = vec2((gl_FragCoord.x - uSdfCap.x) / max(uSdfCap.z, 1.0),
+                        (sy - uSdfCap.y) / max(uSdfCap.w, 1.0));
+        vec3 scene = texture(uSdfTex, suv).rgb;
+        // a TINTA ESCURA: a cena borrada × a tinta; o α da tinta mistura
+        // com a cor plana (o MESMO produto do rasterizador do stub)
+        rgb = mix(vTop.rgb, scene * vTop.rgb, sdfClamp01(vTop.a));
+    }
     vec2 n = vec2(0.0, -1.0);
     if (uSdfBevel > 0.0 || uSdfSpecOn > 0.5) {
         roundRectNormal(p, b, r, n);
@@ -241,6 +258,9 @@ bool Renderer::init() {
     locSdfSpecAdd_ = glGetUniformLocation(progSdf_, "uSdfSpecAdd");
     locSdfGlowAdd_ = glGetUniformLocation(progSdf_, "uSdfGlowAdd");
     locSdfAA_ = glGetUniformLocation(progSdf_, "uSdfAA");
+    locSdfTex_ = glGetUniformLocation(progSdf_, "uSdfTex");
+    locSdfCap_ = glGetUniformLocation(progSdf_, "uSdfCap");
+    locSdfSurfH_ = glGetUniformLocation(progSdf_, "uSdfSurfH");
 
     glGenVertexArrays(1, &vaoSdf_);
     glGenBuffers(1, &vboSdf_);
@@ -441,9 +461,10 @@ void Renderer::submit(const QuadBatch& batch, u32 texture) {
 
 // 0.12-D (D-1) — a submissão do PASS SDF (o shader único de widget); o
 // estado GL é o do pass UI (afirmado em endFrame); os uniforms do nível
-// setam-se UMA vez por frame na primeira submissão SDF.
+// setam-se UMA vez por frame na primeira submissão SDF. 0.12-D (D-2):
+// `tex` != 0 = o VIDRO REAL (o widget amostra a cena borrada).
 void Renderer::submitSdf(const SdfBatch& batch, u32 firstVertex,
-                         u32 vertexCount) {
+                         u32 vertexCount, u32 tex) {
     if (vertexCount == 0 || firstVertex >= batch.vertexCount()) {
         return;
     }
@@ -451,7 +472,7 @@ void Renderer::submitSdf(const SdfBatch& batch, u32 firstVertex,
     if (end > batch.vertexCount()) {
         end = batch.vertexCount();
     }
-    subs_.push_back(Submission{nullptr, &batch, 0, firstVertex,
+    subs_.push_back(Submission{nullptr, &batch, tex, firstVertex,
                                end - firstVertex, true});
 }
 
@@ -536,7 +557,22 @@ DrawStats Renderer::endFrame() {
                 glUniform1f(locSdfSpecAdd_, lp.specAdd);
                 glUniform1f(locSdfGlowAdd_, lp.glowAdd);
                 glUniform1f(locSdfAA_, 1.0f);
+                if (locSdfCap_ >= 0) {
+                    glUniform4f(locSdfCap_, glassCapRect_[0], glassCapRect_[1],
+                                glassCapRect_[2], glassCapRect_[3]);
+                }
+                if (locSdfSurfH_ >= 0) {
+                    glUniform1f(locSdfSurfH_, static_cast<f32>(h_));
+                }
+                if (locSdfTex_ >= 0) {
+                    glUniform1i(locSdfTex_, 0);
+                }
                 sdfUniformsDone = true;
+            }
+            if (s.tex != 0) {
+                // 0.12-D (D-2): o VIDRO REAL — a textura da cena borrada
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, s.tex);
             }
             glBindVertexArray(vaoSdf_);
             glBindBuffer(GL_ARRAY_BUFFER, vboSdf_);
@@ -574,6 +610,7 @@ DrawStats Renderer::endFrame() {
 
 void Renderer::shutdown() {
     lit_.destroy();
+    if (glassTex_) { glDeleteTextures(1, &glassTex_); glassTex_ = 0; }
     if (vboSdf_)   { glDeleteBuffers(1, &vboSdf_); vboSdf_ = 0; }
     if (vaoSdf_)   { glDeleteVertexArrays(1, &vaoSdf_); vaoSdf_ = 0; }
     if (progSdf_)  { glDeleteProgram(progSdf_); progSdf_ = 0; }
@@ -581,6 +618,86 @@ void Renderer::shutdown() {
     if (vao_)      { glDeleteVertexArrays(1, &vao_); vao_ = 0; }
     if (whiteTex_) { glDeleteTextures(1, &whiteTex_); whiteTex_ = 0; }
     if (prog_)     { glDeleteProgram(prog_); prog_ = 0; }
+}
+
+// 0.12-D (D-2) — O VIDRO REAL: a captura da região do ECRÃ (o viewport,
+// onde os menus flutuam), a redução a 1/4 (duas boxes 2×2), o BLUR DUAL
+// KAWASE (ui/Glass.h — a MESMA função pura que os pins aferem) e o upload
+// GL_RGBA. A CACHE: só corre quando glassDirty_ (o main invalida quando o
+// que está atrás muda); o contador serve o pin vidro_cache.
+u32 Renderer::captureGlass(i32 x, i32 y, i32 w, i32 h) {
+    if (!glassDirty_ && glassTex_ != 0) {
+        return glassTex_;   // a CACHE — o blur só corre quando preciso
+    }
+    if (w <= 0 || h <= 0) {
+        return glassTex_;
+    }
+    // o rect capturado (clampado à superfície) — o que o FS usa para o UV
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > w_) w = w_ - x;
+    if (y + h > h_) h = h_ - y;
+    if (w <= 0 || h <= 0) {
+        return glassTex_;
+    }
+    glassCapRect_[0] = static_cast<f32>(x);
+    glassCapRect_[1] = static_cast<f32>(y);
+    glassCapRect_[2] = static_cast<f32>(w);
+    glassCapRect_[3] = static_cast<f32>(h);
+
+    // (1) a leitura da região (full-res; o MESMO caminho do glReadPixels
+    // que o pipeline de thumbs usa — o stub rasteriza e lê a sério). O y
+    // chega em ECRÃ (y-down) e o glReadPixels quer GL (y-up: origem no
+    // fundo) — a conversão é AQUI (o chamador pensa em ecrã sempre)
+    glassRead_.assign(size_t(w) * size_t(h) * 4u, 0);
+    glReadPixels(x, h_ - (y + h), w, h, GL_RGBA, GL_UNSIGNED_BYTE,
+                 glassRead_.data());
+    // o glReadPixels devolve a ORIGEM NO FUNDO (GL) — FLIP das linhas para
+    // a textura ficar em ECRÃ (y-down, a mesma convenção do FS): linha 0
+    // da textura = o TOPO do rect capturado
+    {
+        std::vector<u8> tmpRow(size_t(w) * 4u);
+        for (int r = 0; r < h / 2; ++r) {
+            u8* a = glassRead_.data() + size_t(r) * size_t(w) * 4u;
+            u8* b = glassRead_.data() + size_t(h - 1 - r) * size_t(w) * 4u;
+            std::memcpy(tmpRow.data(), a, size_t(w) * 4u);
+            std::memcpy(a, b, size_t(w) * 4u);
+            std::memcpy(b, tmpRow.data(), size_t(w) * 4u);
+        }
+    }
+
+    // (2) a redução a 1/4 (duas boxes 2×2)
+    const int hw = w / 2 > 0 ? w / 2 : 1;
+    const int hh = h / 2 > 0 ? h / 2 : 1;
+    glassHalf_.assign(size_t(hw) * size_t(hh) * 4u, 0);
+    glass::downsample2x2(glassRead_.data(), w, h, glassHalf_.data());
+    const int qw = hw / 2 > 0 ? hw / 2 : 1;
+    const int qh = hh / 2 > 0 ? hh / 2 : 1;
+    glassQuarter_.assign(size_t(qw) * size_t(qh) * 4u, 0);
+    glass::downsample2x2(glassHalf_.data(), hw, hh, glassQuarter_.data());
+
+    // (3) o BLUR DUAL KAWASE (2 passagens — a função pura partilhada)
+    glassTmp_.assign(glassQuarter_.size(), 0);
+    glassBlur_.assign(glassQuarter_.size(), 0);
+    glass::kawaseBlurDual(glassQuarter_.data(), qw, qh, glassTmp_.data(),
+                          glassBlur_.data());
+
+    // (4) o upload (GL_RGBA — o stub guarda os pixéis a sério)
+    if (glassTex_ == 0) {
+        glGenTextures(1, &glassTex_);
+    }
+    glBindTexture(GL_TEXTURE_2D, glassTex_);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, qw, qh, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, glassBlur_.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glassW_ = qw;
+    glassH_ = qh;
+    glassDirty_ = false;
+    ++glassCaptures_;
+    return glassTex_;
 }
 
 } // namespace vv

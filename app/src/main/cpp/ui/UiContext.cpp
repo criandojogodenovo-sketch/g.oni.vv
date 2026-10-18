@@ -1,4 +1,5 @@
 #include "ui/UiContext.h"
+#include "ui/Glass.h"   // 0.12-D (D-2): o hash do ruído do vidro falso
 #include <cstring>
 
 namespace vv {
@@ -138,14 +139,15 @@ void UiContext::recordRun(QuadBatch& b, u32 tex, u32 firstVertex,
     runs_.push_back(Run{&b, tex, firstVertex, vertexCount, false});
 }
 
-// 0.12-D (D-1): o run do batch SDF — o batching pelo ponteiro (o mesmo
-// contrato do recordRun; o endFrame despacha o programa pelo flag)
-void UiContext::recordRunSdf(u32 firstVertex, u32 vertexCount) {
-    if (!runs_.empty() && runs_.back().sdf) {
+// 0.12-D (D-1): o run do batch SDF — o batching pelo ponteiro + a textura
+// do VIDRO REAL (o mesmo contrato do recordRun; o endFrame despacha o
+// programa pelo flag e amarra a textura da captura)
+void UiContext::recordRunSdf(u32 firstVertex, u32 vertexCount, u32 tex) {
+    if (!runs_.empty() && runs_.back().sdf && runs_.back().tex == tex) {
         runs_.back().vertexCount += vertexCount;
         return;
     }
-    runs_.push_back(Run{nullptr, 0u, firstVertex, vertexCount, true});
+    runs_.push_back(Run{nullptr, tex, firstVertex, vertexCount, true});
 }
 
 // ---- 0.9.6.5 (GRUPO B): o registo do layout ---------------------------------
@@ -758,7 +760,142 @@ void UiContext::sdfWidget(f32 x, f32 y, f32 w, f32 h, f32 radius,
         sdf_.vertex(VX[i], VY[i], VX[i] - x, VY[i] - y, hw, hh, r, lvl,
                     top, bot);
     }
-    recordRunSdf(fv, sdf_.vertexCount() - fv);
+    recordRunSdf(fv, sdf_.vertexCount() - fv, 0u);
+}
+
+// 0.12-D (D-2) — O VIDRO REAL: o mesmo quad do sdfWidget com o texOn no
+// aShape.z e a textura da captura no run (o FS/stub amostra a cena borrada
+// e multiplica pela tinta). A emissão é IDÊNTICA (o mesmo rect crescido,
+// o mesmo clip) — só o flag e a textura mudam.
+void UiContext::sdfWidgetGlass(f32 x, f32 y, f32 w, f32 h, f32 radius,
+                               const f32 ink[4], u32 texId) {
+    if (w <= 0.0f || h <= 0.0f) {
+        return;
+    }
+    if (auditing_ && auditComposite_ == 0) {
+        auditAdd_(layout::Entry::Panel, 0, x, y, w, h);   // o rect do WIDGET
+    }
+    const sdf::LevelParams p = sdf::paramsFor(sdf::g_level, theme::dp(1.0f));
+    const f32 aaPad = 1.5f;   // a AA da aresta (px)
+    const f32 padBot = aaPad + sdf::shadowPad(p);
+    const f32 qx = x - aaPad;
+    const f32 qy = y - aaPad;
+    const f32 qw = w + 2.0f * aaPad;
+    const f32 qh = h + aaPad + padBot;
+    f32 cx0 = qx > clip_.x ? qx : clip_.x;
+    f32 cy0 = qy > clip_.y ? qy : clip_.y;
+    f32 cx1 = qx + qw;
+    f32 cy1 = qy + qh;
+    cx1 = cx1 < clip_.x + clip_.w ? cx1 : clip_.x + clip_.w;
+    cy1 = cy1 < clip_.y + clip_.h ? cy1 : clip_.y + clip_.h;
+    if (cx1 <= cx0 || cy1 <= cy0) {
+        return;
+    }
+    const f32 hw = w * 0.5f;
+    const f32 hh = h * 0.5f;
+    const f32 m = hw < hh ? hw : hh;
+    const f32 r = radius < m ? (radius > 0.0f ? radius : 0.0f) : m;
+    const u8 lvl = sdf::g_level;
+    const u32 fv = sdf_.vertexCount();
+    const f32 VX[4] = {cx0, cx0, cx1, cx1};
+    const f32 VY[4] = {cy0, cy1, cy1, cy0};
+    const int IDX[6] = {0, 1, 2, 0, 2, 3};
+    for (const int i : IDX) {
+        sdf_.vertex(VX[i], VY[i], VX[i] - x, VY[i] - y, hw, hh, r, lvl,
+                    ink, ink, texId != 0 ? 1.0f : 0.0f);
+    }
+    recordRunSdf(fv, sdf_.vertexCount() - fv, texId);
+}
+
+// 0.12-D (D-2) — O VIDRO FALSO (os painéis FIXOS): o gradiente
+// semi-opaco (surface no topo → surface2 no fundo — o MESMO caminho do
+// emitGradientV, o span é o rect inteiro), a BORDA CLARA 1px (o glassEdge
+// — a FRESNEL: a borda é sempre mais clara que o interior), o REFLEXO
+// DIAGONAL (os 3 veios brancos fracos paralelos à diagonal, no quadrante
+// topo-esquerda) e o RUÍDO FRACO (o hash glassNoise por células de 16px —
+// ~1 em 5 nasce, α 0.02, o MESMO padrão frame a frame).
+void UiContext::glassPanelFake(f32 x, f32 y, f32 w, f32 h) {
+    if (w <= 0.0f || h <= 0.0f) {
+        return;
+    }
+    if (auditing_ && auditComposite_ == 0) {
+        auditAdd_(layout::Entry::Panel, 0, x, y, w, h);
+    }
+    ++auditComposite_;   // o painel inteiro é UMA entrada (o rect)
+    // (1) o GRADIENTE semi-opaco: surface (topo) → surface2 (fundo)
+    const u32 fv0 = solids_.vertexCount();
+    emitGradientV(solids_, x, y, w, h, y, y + h, theme::kTheme.surface,
+                  theme::kTheme.surface2);
+    // (2) o REFLEXO DIAGONAL: 3 veios paralelos (45°) no quadrante
+    // topo-esquerda — quads finos ROTACIONADOS via quadCorners (branco a
+    // α 0.05/0.03/0.02 — a luz que desliza no vidro)
+    {
+        const f32 diag = (w < h ? w : h) * 0.5f;
+        const f32 aDiag[3] = {0.05f, 0.03f, 0.02f};
+        const f32 offK[3] = {0.18f, 0.34f, 0.48f};   // ao longo da diagonal
+        const f32 thick = 3.0f;
+        for (int i = 0; i < 3; ++i) {
+            const f32 cx = x + diag * offK[i];
+            const f32 cy = y + diag * offK[i];
+            // o veio: um segmento diagonal com espessura (o padrão do
+            // drawLine — o rect rotacionado), CLIPADO pelo painel
+            const f32 len = diag * 0.55f;
+            const f32 dxn = 0.7071f, dyn = 0.7071f;   // 45° y-down
+            const f32 nx = -dyn * thick * 0.5f;
+            const f32 ny = dxn * thick * 0.5f;
+            const f32 px[6] = {cx + nx,             cx - nx,
+                               cx + dxn * len - nx, cx + nx,
+                               cx + dxn * len - nx, cx + dxn * len + nx};
+            const f32 py[6] = {cy + ny,             cy - ny,
+                               cy + dyn * len - ny, cy + ny,
+                               cy + dyn * len - ny, cy + dyn * len + ny};
+            const f32 col[4] = {1.0f, 1.0f, 1.0f, aDiag[i]};
+            emitQuadCornersClipped(px, py, col);
+        }
+    }
+    // (3) o RUÍDO FRACO: as células de 16px — ~1 em 5 nasce (o hash),
+    // α 0.02 (o grão do vidro; determinístico por SÍTIO)
+    {
+        const f32 cell = 16.0f;
+        const u32 nx = static_cast<u32>(w / cell);
+        const u32 ny = static_cast<u32>(h / cell);
+        for (u32 j = 0; j < ny; ++j) {
+            for (u32 i = 0; i < nx; ++i) {
+                if (glass::glassNoise(int(i), int(j), 7u) < 0.2f) {
+                    emitTo(solids_, x + f32(i) * cell + 2.0f,
+                           y + f32(j) * cell + 2.0f, cell - 4.0f, cell - 4.0f,
+                           0.0f, 0.0f, 1.0f, 1.0f,
+                           theme::kTheme.glassTop);   // branco α0.04
+                }
+            }
+        }
+    }
+    const u32 fv1 = solids_.vertexCount();
+    if (fv1 > fv0) {
+        recordRun(solids_, 0u, fv0, fv1 - fv0);
+    }
+    // (4) a BORDA CLARA 1px (a FRESNEL — desenhada DEPOIS do corpo, como
+    // o frameRounded de sempre; o glassEdge é o branco α0.12 do tema)
+    frameRounded(x, y, w, h, 1.0f, 0.0f, theme::kTheme.glassEdge);
+    --auditComposite_;
+}
+
+// o quad com CANTOS EXPLÍCITOS + clip (o helper do reflexo diagonal)
+void UiContext::emitQuadCornersClipped(const f32 px[6], const f32 py[6],
+                                       const f32 color[4]) {
+    f32 mnX = px[0], mxX = px[0], mnY = py[0], mxY = py[0];
+    for (u32 i = 1; i < 6; ++i) {
+        mnX = px[i] < mnX ? px[i] : mnX;
+        mxX = px[i] > mxX ? px[i] : mxX;
+        mnY = py[i] < mnY ? py[i] : mnY;
+        mxY = py[i] > mxY ? py[i] : mxY;
+    }
+    if (mxX < clip_.x || mnX >= clip_.x + clip_.w ||
+        mxY < clip_.y || mnY >= clip_.y + clip_.h) {
+        return;   // totalmente fora do clip
+    }
+    solids_.quadCorners(px, py, 0.0f, 0.0f, 1.0f, 1.0f,
+                        color[0], color[1], color[2], color[3]);
 }
 
 // 0.11-Y (Y-1) — o VISUAL DO BOTÃO: o estado ATIVO (held) é A CHAMA —
@@ -1193,8 +1330,9 @@ void UiContext::endFrame() {
     // (texto sempre legível — a regra do tema desde a 0.7.0).
     for (const Run& r : runs_) {
         if (r.sdf) {
-            // 0.12-D (D-1): o pass SDF (o shader único de widget)
-            renderer_->submitSdf(sdf_, r.firstVertex, r.vertexCount);
+            // 0.12-D (D-1/D-2): o pass SDF (o shader único; a textura do
+            // vidro real viaja no run)
+            renderer_->submitSdf(sdf_, r.firstVertex, r.vertexCount, r.tex);
             continue;
         }
         renderer_->submit(*r.batch,

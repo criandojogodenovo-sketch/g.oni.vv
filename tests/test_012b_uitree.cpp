@@ -324,10 +324,13 @@ TEST(uitree_hierarquia_arvore) {
     in.clearEdges();
     std::vector<Rect5> rects2;
     collectRects5(ui.solidsForTest(), rects2);
+    // 0.12-D (D-2): o vidro FALSO da hierarquia deixa o RUÍDO fraco no
+    // batch (as células de grão do glassPanelFake) — o chevron é o TRAÇO
+    // fino do drawLine (h ≤ 8): a sonda aferra o traço, não o grão
     bool chevronVazio = false;
     for (const Rect5& r : rects2) {
         if (r.x0 >= 18.0f && r.x1 <= 38.0f && r.y0 >= 96.0f &&
-            r.y1 <= 96.0f + 36.0f) {
+            r.y1 <= 96.0f + 36.0f && (r.y1 - r.y0) <= 8.0f) {
             chevronVazio = true;
         }
     }

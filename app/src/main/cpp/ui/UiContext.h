@@ -124,6 +124,20 @@ public:
     // e o iconButton da barra) — o painel de vidro de sempre fica intacto.
     void sdfWidget(f32 x, f32 y, f32 w, f32 h, f32 radius,
                    const f32 top[4], const f32 bot[4]);
+    // 0.12-D (D-2) — O VIDRO REAL: o MESMO widget SDF com o ramo da
+    // textura (a cena borrada 1/4 + o Kawase dual) — a tinta INK colore o
+    // blur (o produto). `texId` = a textura capturada pelo Renderer
+    // (captureGlass — a cache decide; 0 = sem textura → igual ao
+    // sdfWidget com a tinta).
+    void sdfWidgetGlass(f32 x, f32 y, f32 w, f32 h, f32 radius,
+                        const f32 ink[4], u32 texId);
+    // 0.12-D (D-2) — O VIDRO FALSO (os painéis FIXOS): o gradiente
+    // semi-opaco (surface→surface2), a BORDA CLARA 1px (o glassEdge — a
+    // FRESNEL), o REFLEXO DIAGONAL (os veios brancos fracos no topo-esq)
+    // e o RUÍDO FRACO (o hash glassNoise — células esparsas a α mínimo).
+    // Puro UI (quads — o custo é O(rect/16) células; o hash é do SÍTIO,
+    // não do tempo — não cintila).
+    void glassPanelFake(f32 x, f32 y, f32 w, f32 h);
     // 0.9.0 — CANTOS CURVOS (spec A: raios 8dp cards/botões, 4dp campos/
     // chips): painel com cantos arredondados por ESCADARIA de quads (4 degraus
     // por canto — zero shaders, zero blur, zero custo exponencial; afervável
@@ -513,7 +527,16 @@ private:
     // natural); caso contratório abre um run novo.
     void recordRun(QuadBatch& b, u32 tex, u32 firstVertex, u32 vertexCount);
     // 0.12-D (D-1): o run do batch SDF (o mesmo batching pelo ponteiro)
-    void recordRunSdf(u32 firstVertex, u32 vertexCount);
+    void recordRunSdf(u32 firstVertex, u32 vertexCount, u32 tex = 0);
+    // 0.12-D (D-2): o quad de CANTOS explícitos clipado (o reflexo diagonal)
+    void emitQuadCornersClipped(const f32 px[6], const f32 py[6],
+                                const f32 color[4]);
+    // 0.12-D (D-2): a textura do VIDRO REAL do frame (0 = nenhuma captura
+    // — os menus caem no widget de tinta simples; o main fornece por frame)
+    u32   glassTexId_ = 0;
+public:
+    void setGlassTexture(u32 texId) { glassTexId_ = texId; }
+    u32  glassTexture() const { return glassTexId_; }
 
     Renderer*         renderer_ = nullptr;
     const InputState* input_ = nullptr;
@@ -537,7 +560,8 @@ private:
     // acima de kSubWarn); reserve(64) = zero realloc em steady state.
     struct Run {
         const QuadBatch* batch;
-        u32              tex;          // 0 = sólidos (branca)
+        u32              tex;          // 0 = sólidos (branca); o SDF: a
+                                       // textura do VIDRO REAL (D-2)
         u32              firstVertex;
         u32              vertexCount;
         bool             sdf = false;  // 0.12-D: o run é do batch SDF

@@ -11,6 +11,8 @@
 #include "render/Material.h"
 #include "render/QuadBatch.h"
 #include "render/SdfBatch.h"   // 0.12-D (D-1): o batch do shader SDF de widget
+#include "ui/Glass.h"          // 0.12-D (D-2): o blur dual Kawase + a cache
+#include <vector>
 
 namespace vv {
 
@@ -60,12 +62,29 @@ public:
                                 const f32* tint = nullptr,
                                 const DrawProps* props = nullptr);
 
+    // 0.12-D (D-2) — O VIDRO REAL: a captura da cena para textura a 1/4
+    // de resolução + o BLUR DUAL KAWASE (ui/Glass.h) + o upload. A CACHE:
+    // só recalcula quando glassInvalidate() foi chamada (o main invalida
+    // quando o que está atrás muda — a órbita, a cena, o rect); devolve o
+    // id da textura e o rect CAPTURADO em px de ecrã (y-down).
+    u32 captureGlass(i32 x, i32 y, i32 w, i32 h);
+    void glassInvalidate() { glassDirty_ = true; }
+    // o estado da cache (os pins do vidro_cache aferem o contador)
+    u32 glassCapturesForTest() const { return glassCaptures_; }
+    bool glassDirtyForTest() const { return glassDirty_; }
+    u32 glassTextureForTest() const { return glassTex_; }
+    // o rect capturado (px de ecrã y-down; o FS e o stub derivam o UV)
+    const f32* glassCapRectForTest() const { return glassCapRect_; }
+
     // pass UI (F1 mantido): submissões desenhadas em endFrame, sem depth
     void submit(const QuadBatch& batch, u32 texture);
     // 0.12-D (D-1): a submissão do PASS SDF (o shader único de widget) —
     // mesmo estado GL do pass UI (sem depth, blend SRC_ALPHA); os uniforms
     // do nível (Efeitos Alto/Médio/Baixo) setam-se UMA vez por frame
-    void submitSdf(const SdfBatch& batch, u32 firstVertex, u32 vertexCount);
+    // 0.12-D (D-2): `tex` != 0 liga o ramo uSdfTexOn (o VIDRO REAL — o
+    // widget amostra a textura da cena borrada com a tinta escura)
+    void submitSdf(const SdfBatch& batch, u32 firstVertex, u32 vertexCount,
+                   u32 tex = 0);
     // 0.7.4 — submissão por RANGE de vértices (z-order sólidos↔texturas:
     // o UiContext submete RUNS na ordem real de emissão; um mesmo batch
     // pode aparecer em vários runs com ranges diferentes)
@@ -111,11 +130,28 @@ private:
     i32 locSdfSpecAdd_ = -1;
     i32 locSdfGlowAdd_ = -1;
     i32 locSdfAA_ = -1;
+    // 0.12-D (D-2): o ramo do VIDRO REAL no mesmo shader (uSdfTexOn vem no
+    // aShape.z por widget; a captura e a superfície em uniforms)
+    i32 locSdfTex_ = -1;
+    i32 locSdfCap_ = -1;      // uSdfCap (x,y,w,h do rect capturado, px)
+    i32 locSdfSurfH_ = -1;    // uSdfSurfH (a altura da superfície — o flip y)
     // 3D (F2)
     LitMaterial lit_;
 
     i32 w_ = 0;
     i32 h_ = 0;
+
+    // 0.12-D (D-2): a CACHE do vidro (a textura borrada + o carimbo)
+    u32 glassTex_ = 0;
+    i32 glassW_ = 0, glassH_ = 0;      // as dims da textura (1/4)
+    bool glassDirty_ = true;           // nasce suja (a 1.ª captura)
+    u32 glassCaptures_ = 0;            // o contador (o pin vidro_cache)
+    f32 glassCapRect_[4] = {0, 0, 0, 0};
+    std::vector<u8> glassRead_;        // o palco do glReadPixels (full-res)
+    std::vector<u8> glassHalf_;        // o 1/2
+    std::vector<u8> glassQuarter_;     // o 1/4
+    std::vector<u8> glassTmp_;         // o ping do kawase
+    std::vector<u8> glassBlur_;        // o pong (o resultado)
 
     struct Submission {
         const QuadBatch* batch;        // prog 0 (quads UI)

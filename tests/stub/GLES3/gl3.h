@@ -313,12 +313,13 @@ inline void glUniform2f(GLint loc, GLfloat x, GLfloat y) {
 }
 // 0.11-M (FASE 2): uBaseColor (vec4) + uUvRot (mat2 column-major)
 inline void glUniform4f(GLint loc, GLfloat x, GLfloat y, GLfloat z, GLfloat w) {
-    (void)loc;
     glstub::stats.lastUniform4f[0] = x;
     glstub::stats.lastUniform4f[1] = y;
     glstub::stats.lastUniform4f[2] = z;
     glstub::stats.lastUniform4f[3] = w;
     ++glstub::stats.uniform4fCalls;
+    // 0.12-D (D-2): o uSdfCap (o rect do vidro real) grava no slot do fb
+    if (glstub::fb::enabled) glstub::fb::uniform4f(loc, x, y, z, w);
 }
 inline void glUniformMatrix2fv(GLint loc, GLsizei count, GLboolean,
                                const GLfloat* m) {

@@ -163,6 +163,31 @@ R-014 aplicada.
 
 ## 14. A EVIDÊNCIA (colada)
 
+- **0.12-D · D-2 — O VIDRO (REAL e FALSO)** — o VIDRO REAL nos painéis
+  FLUTUANTES: a captura da cena (`Renderer::captureGlass` — o glReadPixels
+  com o y convertido no sítio + o flip de linhas), a redução a 1/4 (duas
+  boxes 2×2), o BLUR DUAL KAWASE (ui/Glass.h — a função pura partilhada,
+  k=1 e k=2) e o upload GL_RGBA; o CONSUMO é o MESMO widget SDF da D-1
+  com o ramo uSdfTexOn (o aShape.z) — o FS/stub amostra a cena borrada em
+  espaço de ecrã e multiplica pela TINTA ESCURA (theme::kTheme.glassInk
+  NOVO — #6B6B76 α0.94; o produto idêntico nos dois lados); os cantos, o
+  bisel e a sombra do shader único continuam. Os menus trocados: o IMPORT,
+  o plusMenu, o assetMenu e os 3 sheets ELEVADO. O VIDRO FALSO nos painéis
+  FIXOS (a hierarquia + o inspector): `UiContext::glassPanelFake()` — o
+  gradiente surface→surface2 + o REFLEXO DIAGONAL (3 veios brancos) + o
+  RUÍDO FRACO (o hash glassNoise por células — determinístico do SÍTIO) +
+  a BORDA CLARA 1px (a FRESNEL). A CACHE: a decisão pura
+  `glassCacheDirty` (a câmara/a cena/o rect/a superfície) — o blur só
+  recalcula quando o que está atrás muda (com o overlay aberto o orbit
+  está morte — a captura do OPEN é a que fica; o teto documentado). pins
+  ×4 NOVOS (test_012d_vidro.cpp — a função pura + o caminho REAL até
+  glReadPixels) + M-D2a/M-D2b vermelho→verde + 3 recalibrações no c33
+  (13.9 ×2 + 18.1 — as sondas esquivam o grão do ruído) + 3 no test_core
+  (y3 ×2, uitree). OS ACHADOS: a orientação GL da captura (o flip), o
+  grão nas sondas e o teto da cache documentado (o relatório próprio:
+  docs/RELATORIO-0.12-D.md §2) · **versionCode 92** — o APK vigente da
+  fase D-2 (o PNG do menu com a cena por trás é o C33 do dono). O 91 fica
+  INTACTO como história.
 - **0.12-D · D-1 — O SHADER SDF ÚNICO DE WIDGET** — o 3.º PROGRAMA da
   engine (`progSdf_`): UM shader desenha QUALQUER widget com CANTOS
   PERFEITOS (SDF analítico, AA pela própria distância), BISEL 3D (a

@@ -138,6 +138,10 @@ struct Theme {
     f32 axisY[4];      // #5ACB5F verde (Y)
     f32 axisZ[4];      // #4F92F5 azul (Z — conteúdo, NÃO chrome)
     f32 axisDim[4];    // #9E9E9E cinza (central)
+    // 0.12-D (D-2): a TINTA ESCURA do vidro real — o blur da cena × esta
+    // tinta é o corpo do painel flutuante (o #6B6B76 α0.94 escurece SEM
+    // apagar o que está atrás; o α é a opacidade do corpo)
+    f32 glassInk[4];   // #6B6B76 α0.94
 };
 
 // hex→f32 normalizado (compile-time-friendly por field) — com ALPHA:
@@ -193,6 +197,8 @@ inline constexpr Theme kTheme{
     VV_RGB(90, 203, 95),    // axisY
     VV_RGB(79, 146, 245),   // axisZ
     VV_RGB(158, 158, 158),  // axisDim
+    // 0.12-D (D-2): a tinta do vidro real (#6B6B76 α0.94)
+    VV_RGBA(107, 107, 118, 0.94f),  // glassInk
 };
 #undef VV_RGB
 #undef VV_RGBA

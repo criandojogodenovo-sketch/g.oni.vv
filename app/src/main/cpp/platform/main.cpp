@@ -6484,6 +6484,48 @@ void frame() {
     // ---- pass UI: immediate-mode da F1 por cima (sem depth — nunca ocluída)
     g_ui.beginFrame(&g_renderer, &g_input, w, h);
 
+    // 0.12-D (D-2) — O VIDRO REAL: os overlays flutuam sobre o VIEWPORT —
+    // a captura da cena (1/4 + o blur dual Kawase, no RENDERER com CACHE)
+    // corre ANTES de qualquer widget deste frame (o fb ainda é a cena).
+    // A DECISÃO DA CACHE é a fonte pura glassCacheDirty (a câmara, a cena,
+    // o rect, a superfície): com overlay aberto o orbit está MORTE
+    // (anyOverlayOpen — o gate do updateCameraOrbit) — a captura do OPEN é
+    // a que fica, e o teto honesto está documentado no relatório (a edição
+    // pelo inspector com o menu aberto só refresca no próximo evento).
+    {
+        const bool overlayD2 = editor::anyOverlayOpen(g_editor);
+        static glass::CacheState s_glassLast{};
+        static bool s_glassHas = false;
+        if (overlayD2) {
+            const UiRect vrD2 = safe::viewportRect(w, h, g_ui.safeArea());
+            glass::CacheState cur;
+            cur.camYaw = g_camera.yaw;
+            cur.camPitch = g_camera.pitch;
+            cur.camDist = g_camera.dist;
+            cur.sceneVersion = g_scene.count() * 64u +
+                               (g_editor.selected.valid()
+                                    ? g_editor.selected.index
+                                    : 0u);
+            cur.capX = vrD2.x;
+            cur.capY = vrD2.y;
+            cur.capW = vrD2.w;
+            cur.capH = vrD2.h;
+            cur.surfaceW = w;
+            cur.surfaceH = h;
+            if (!s_glassHas || glass::glassCacheDirty(s_glassLast, cur)) {
+                g_renderer.glassInvalidate();
+                s_glassLast = cur;
+                s_glassHas = true;
+            }
+            g_ui.setGlassTexture(g_renderer.captureGlass(
+                static_cast<i32>(vrD2.x), static_cast<i32>(vrD2.y),
+                static_cast<i32>(vrD2.w), static_cast<i32>(vrD2.h)));
+        } else {
+            g_ui.setGlassTexture(0);
+            s_glassHas = false;   // o overlay fechou — o próximo abre FRESH
+        }
+    }
+
     // 0.9.6.5 (GRUPO B): pedido de export/auditoria pendente? O registo liga
     // AGORA (antes do 1.º widget deste frame) — as entradas saem do draw
     // real; o ponto de swap escreve os ficheiros (layoutDumpIfPending)

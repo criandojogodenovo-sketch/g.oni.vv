@@ -1,11 +1,11 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-18 · vc: 91 · Último commit: este (o 0.12-D D-1, O
-SHADER SDF ÚNICO DE WIDGET — o 3.º programa da engine com cantos SDF +
-bisel 3D + especular + brilho interno + sombra, o toggle «Efeitos: Alto /
-Médio / Baixo», os draws de botão substituídos, os 4 pins + M-D1a/b, a
-FASE 32 do c33; antes: 406871f o 0.12-C C-4, O SELETOR DE FICHEIROS + OS
-ESTADOS VAZIOS)
+Atualizado: 2026-10-18 · vc: 92 · Último commit: este (o 0.12-D D-2, O
+VIDRO REAL e FALSO — a captura da cena 1/4 + o blur dual Kawase com a
+cache, o ramo uSdfTexOn do shader único com a tinta glassInk, os menus
+flutuantes trocados; o vidro falso nos painéis fixos (o gradiente + o
+reflexo + o ruído + a Fresnel); os 4 pins + M-D2a/b; antes: af41059 o
+D-1, O SHADER SDF ÚNICO DE WIDGET)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -34,52 +34,23 @@ ESTADOS VAZIOS)
   jobs de import no c33 (o teto de 3000 frames = 5 ms de relógio; agora é
   o RELÓGIO 10 s + yield). test_core 0 falhas · c33 1010/0 · vc 91. O
   C33 REAL (o PNG do botão nos 3 modos) fica para o dono.
+  **D-2 (o vidro real e falso, vc 92)**: o vidro REAL nos flutuantes (a
+  captura 1/4 + o blur dual Kawase com a CACHE — a decisão pura; o ramo
+  uSdfTexOn do MESMO widget SDF + a tinta glassInk NOVA; 6 menus trocados)
+  + o vidro FALSO nos fixos (glassPanelFake — o gradiente + o reflexo +
+  o ruído + a Fresnel; a hierarquia e o inspector); pins ×4 + M-D2a/b +
+  6 recalibrações. O C33 REAL fica para o dono.
 - **Campanha 0.12-C (layout, organização e consistência) — FECHADA
-  (C-1..C-4)** (o CI do push é o árbitro; os DETALHES vivem no
-  RELATORIO-0.12-C.md). A cláusula da campanha é anti-superficialidade —
-  nada de controlos «de fachada»; se um botão não faz nada, sai.
-  **C-4 (o seletor de ficheiros + os estados vazios, vc 90)**: o PICKER
-  pela FONTE ÚNICA browserSheetLayout (as linhas 48dp ícone+nome+seta; o
-  BREADCRUMB que SALTA — browserCrumbs; a PESQUISA propósito 10 com o
-  filtro puro browserFilterEntries; as PASTAS PONTO fora no
-  listDirEntries; o Subir FIXO; a safe-area no card) + os 4 VAZIOS COM
-  MENSAGEM + AÇÃO (o Inspector abre o plusMenu com o «+ criar TIC»; os
-  Assets ganham o IMPORTAR que abre o navegador na Download; a
-  Hierarquia aponta o + e ele fica VISÍVEL — hierEmptyInvite; os
-  Projetos no espelho Java: o G FRACO + o CTA «Novo projeto») + os
-  GLIFOS ÚNICOS por função (a lupa SÓ pesquisar; o Image NOVO para as
-  texturas; emptyStateIcon — o vazio dos Assets deixou de ser a PASTA) +
-  pins ×8 (test_012c_picker.cpp + o gate projects_ui_check) + M-C4a/b
-  vermelho→verde. Os ACHADOS REAIS: o gesto de rolar importava (o
-  re-despacho scrollTap SÓ), o claim do scroll comia o IMPORTAR (lista
-  vazia = sem região) e o botão não cabia no drawer 240 (ancorado ao
-  fundo). **A REPARAÇÃO**: os commits da C-1..C-3 entraram de uma árvore
-  INCOMPLETA e empurraram 614 deleções (a engine inteira) — a árvore
-  completa voltou do e8c9587 com as 6 recalibrações que faltavam
-  (test_toolbar, test_sentinels ×3, test_wiring086, c33 ×9 + a flag
-  fitByDesign no título da hierarquia). test_core 0 falhas · c33
-  1005/0 · vc 90.
-  **C-3 (a tipografia o idioma as superfícies, vc 89)**: a ESCADA DE
-  SUPERFÍCIES do dono (fundo #0A0A0C · painel #131316 · cartão #1B1B20
-  · elevado #24242A — o poço da Y-1 superado pela ordem expressa; o
-  espelho Java alinhado — estava na 0.9.6.10!), «Áudio»/«Exportar para
-  Downloads»/«N TICs», os 4 pins novos (test_012c_idioma.cpp — o scan
-  da escala com o strip do gate) + M-C3a/M-C3b vermelho→verde + 3
-  recalibrações (y1, o toast B-3, o c33). Os DETALHES no
-  RELATORIO-0.12-C.md §3.
-  **C-2 (os menus e a barra de topo, vc 88)**: o menuSheetLayout FONTE
-  ÚNICA do sheet (altura máxima + scroll + âncora), o play A CHAMA em
-  playMode, o GIZMO do canto REMOVIDO (o duplicado do Mover — a cláusula
-  anti-superficialidade), os 4 pins novos (test_012c_chrome.cpp) +
-  M-C2a/M-C2b vermelho→verde + 5 recalibrações com nota. Os DETALHES no
-  RELATORIO-0.12-C.md §2.
-  **C-1 (as proporções e os painéis, vc 87)**: a hierarquia 20% (era
-  18% — a ordem do dono), o viewport ≥60% por defeito (o trilho de 32dp
-  é o estado de fábrica; o piso ≥55% da R-033 mantém-se COM seleção nos
-  ecrãs estreitos), o cabeçalho da hierarquia em linha própria
-  (hierHeaderRects — o título elipsa, nunca sobrepõe as ações) e os 4
-  pins novos (test_012c_paineis.cpp) + M-C1a/M-C1b vermelho→verde. SEM
-  sentinela nova. Os DETALHES no RELATORIO-0.12-C.md §1.
+  (C-1..C-4, vc 87–90)** (o CI do push é o árbitro; os DETALHES vivem no
+  RELATORIO-0.12-C.md; a cláusula é anti-superficialidade — nada de
+  controlos «de fachada»): C-1 as proporções (a hierarquia 20%, o
+  viewport ≥60% de fábrica, o hierHeaderRects), C-2 os menus e a barra
+  de topo (o menuSheetLayout, o play A CHAMA, o gizmo duplicado fora),
+  C-3 a tipografia/idioma/superfícies (a ESCADA de 4 tons, «Áudio»,
+  «N TICs»), C-4 o seletor de ficheiros + os estados vazios (o picker
+  pela fonte única, o breadcrumb, a pesquisa, as pastas ponto fora, os 4
+  vazios com AÇÃO, os glifos únicos) + a REPARAÇÃO da árvore (614
+  ficheiros de volta do e8c9587).
 - **Campanha 0.12-B (arquitetura da UI) — FECHADA (B-1..B-4, vc 83–86)**
   (o CI do push é o árbitro; os DETALHES vivem no RELATORIO-0.12-B.md):
   B-1 a árvore de UI (Control/UIRoot, o UiCanvas deprecated, o serializer,
@@ -88,30 +59,26 @@ ESTADOS VAZIOS)
   B-3 o canvas (a moldura do device + as guias + o toast opaco — pins
   ×3); B-4 as ações de cena (renomear/duplicar/apagar 2-tap — pins ×4,
   R-051).
-- **Campanha 0.12-A (bugs P0) — FECHADA** (o CI do push é o árbitro):
-  A-1 (o diagnóstico provou que as rows LOD/impostor JÁ EXISTEM na UI
-  desde o vc 72/76 — PÁRA no fix cego por ordem do prompt; os 5 pins da
-  UI novos + M-A1a/b vermelho→verde fecham o gap de cobertura), A-2 (o
-  refreshCatalog no arranque + na criação de cena; sceneRowIcon = camadas),
-  A-3 (scissor3dRect no modo UI + o tooltip legendTimer 1,5 s/largar),
-  A-4 (sampler bench_ram sob ifdef + o bench da curva + o veredito: a
-  cache de blocos a ciclizar — RAM, não GPU). test_core 1077/0 ·
-  c33_virtual 1006/0 · vc 82. PARAR — a próxima só arranca com CONTINUAR
-  do dono.
+- **Campanha 0.12-A (bugs P0) — FECHADA (vc 82)** (o CI do push é o
+  árbitro; os DETALHES vivem no RELATORIO-0.12-A.md + no INVEST-RAM):
+  A-1 as rows LOD/impostor JÁ EXISTEM (o diagnóstico PÁRA o fix cego; os
+  5 pins fecham o gap), A-2 o refreshCatalog no arranque, A-3 o
+  scissor3dRect + o tooltip 1,5 s, A-4 a investigação RAM vs GPU (o
+  veredito: a cache de blocos a ciclizar — RAM, não GPU).
 - **Campanha 0.11-Y (identidade visual) — FECHADA** (o fecho é o commit
   32a6785: os 13 PNGs por ecrã + o pin y_fecho). Y-0..Y-3 + o fix — 20
   pins novos; a FASE 31 fica no replay para SEMPRE.
-- **0.11-Y (o tema o layout os cartões o fecho) e 0.11-CTX — FECHADAS**
-  com CI verde (os detalhes vivem no §2 e nos relatórios próprios; o
-  run do 3a6d934 ficou VERMELHO no probe 18.2 e o CI apanhou — a cura
-  viajou na Y-2; o RELATORIO-0.9.6.md voltou a docs/ e o ctx_refs_ok
-  distingue citação de transcrição; 98,8 % de redução no pior caso).
+- **0.11-Y e 0.11-CTX — FECHADAS** com CI verde (os detalhes
+  vivem no §2 e nos relatórios próprios).
 - **0.11-W (Render Systems) com CI verde** — falta o PIN do dono no C33
-  real (instalar o APK vigente, importar 203 MB, R-017, PNG do HUD);
-  o fecho (BLOCO B) só por ordem do dono.
+  real; o fecho (BLOCO B) só por ordem do dono.
 
 ## §2 O que está FEITO
 
+- 0.12-D D-2 (vc 92) — o vidro real e falso (no RELATORIO-0.12-D.md §2):
+  a captura + o Kawase dual + a cache, o ramo uSdfTexOn, o vidro falso
+  (gradiente/reflexo/ruído/Fresnel); pins ×4 + M-D2a/b; os achados (o
+  flip da captura, o grão nas sondas, o teto da cache).
 - 0.12-D D-1 (vc 91) — o shader SDF único de widget (no
   RELATORIO-0.12-D.md §1): o 3.º programa (progSdf_), a fonte única
   ui/Sdf.h, o toggle Alto/Médio/Baixo, os botões pelo widget SDF; pins ×4

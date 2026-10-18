@@ -46,7 +46,13 @@ Atualizado: 2026-10-18 · vc: 91
   widget = UM quad de 18 floats) + o 3.º PROGRAMA no Renderer
   (progSdf_ — o FS kSdfFsSrc replica o app/src/main/cpp/ui/Sdf.h::shade() LINHA A LINHA;
   as submissões SDF viajam nos runs pelo flag `sdf` e os buffers/VAOs
-  re-afirmam-se POR submissão).
+  re-afirmam-se POR submissão). **0.12-D (D-2)**: app/src/main/cpp/ui/Glass.h
+  (as fontes puras — o BLUR DUAL KAWASE, a downsample 2×2, a DECISÃO da
+  CACHE glassCacheDirty e o hash do ruído) + o captureGlass no Renderer
+  (o glReadPixels com o flip, a redução 1/4, o blur, o upload; a cache
+  com o contador glassCapturesForTest) + o ramo uSdfTexOn do shader
+  único (o aShape.z — o widget de vidro amostra a cena borrada × a tinta
+  glassInk do Theme).
 - **app/src/main/cpp/assets/** — importadores e formatos GL-free:
   GOwnFormats (.gmesh/.gtext/.gm), GmeshV3Stream (o streaming do
   conversor), GltfImporter/GltfAnim/GltfTextures/GltfInstantiate,

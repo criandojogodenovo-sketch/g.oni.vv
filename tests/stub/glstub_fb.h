@@ -326,6 +326,18 @@ inline void uniform3f(int loc, float x, float y, float z) {
     UniSlot& s = p->slots[size_t(loc)];
     s.kind = 'T'; s.v3[0] = x; s.v3[1] = y; s.v3[2] = z;
 }
+// 0.12-D (D-2): o uSdfCap (vec4 — o rect capturado do vidro real)
+inline void uniform4f(int loc, float x, float y, float z, float w) {
+    ProgObj* p = findProg_(curProg_);
+    if (!p || loc < 0 || loc >= int(p->slots.size())) return;
+    UniSlot& s = p->slots[size_t(loc)];
+    s.kind = 'Q';
+    s.v3[0] = x; s.v3[1] = y; s.v3[2] = z;
+    s.i = int(w * 1024.0f);   // o 4.º float viaja no i (o w é ≤ 2^21)
+}
+inline float uniform4fW(const UniSlot& s) {
+    return float(s.i) / 1024.0f;
+}
 inline void uniform1i(int loc, int v) {
     ProgObj* p = findProg_(curProg_);
     if (!p || loc < 0 || loc >= int(p->slots.size())) return;
@@ -519,6 +531,10 @@ struct ProgramKind {
     vv::sdf::LevelParams sdf{};
     bool sdfShadow = false;
     float sdfAA = 1.0f;
+    // 0.12-D (D-2): o VIDRO REAL (o rect capturado + a superfície)
+    bool sdfHasCap = false;
+    float sdfCap[4] = {0, 0, 0, 0};
+    float sdfSurfH = 0.0f;
 };
 
 inline ProgramKind resolveProgram() {
@@ -561,6 +577,20 @@ inline ProgramKind resolveProgram() {
         pk.sdf.glow = fOf("uSdfGlowOn", 0.0f) > 0.5f;
         pk.sdfShadow = pk.sdf.shadowA > 0.0f;
         pk.sdfAA = fOf("uSdfAA", 1.0f);
+        // 0.12-D (D-2): o rect capturado (o ramo do vidro real)
+        {
+            const int locCap = slotByName("uSdfCap");
+            if (locCap >= 0 && locCap < int(p->slots.size()) &&
+                p->slots[size_t(locCap)].kind == 'Q') {
+                const UniSlot& s = p->slots[size_t(locCap)];
+                pk.sdfCap[0] = s.v3[0];
+                pk.sdfCap[1] = s.v3[1];
+                pk.sdfCap[2] = s.v3[2];
+                pk.sdfCap[3] = uniform4fW(s);
+                pk.sdfHasCap = true;
+            }
+            pk.sdfSurfH = fOf("uSdfSurfH", 0.0f);
+        }
         const int locSdfProj = slotByName("uProj");
         if (hasMat(locSdfProj)) {
             pk.proj = p->slots[size_t(locSdfProj)].m;
@@ -661,6 +691,7 @@ struct RVertex {
     float nx = 0, ny = 0, nz = 1;           // normal EM MUNDO (lit)
     // 0.12-D (D-1): os varyings do WIDGET SDF (locais/meias-ext/raio/cor)
     float sLx = 0, sLy = 0, sHw = 0, sHh = 0, sRad = 0, sLvl = 0;
+    float sPad0 = 0;   // 0.12-D (D-2): o ramo do vidro real (o aShape.z)
     float sTr = 1, sTg = 1, sTb = 1, sTa = 1;
     float sBr = 1, sBg = 1, sBb = 1, sBa = 1;
 };
@@ -767,6 +798,45 @@ inline void rasterTriangle(const RVertex& a, const RVertex& b, const RVertex& c,
                 sh.bot[3] = l0 * a.sBa + l1 * b.sBa + l2 * c.sBa;
                 sh.p = pk.sdf;
                 sh.p.shadow = pk.sdfShadow;
+                // 0.12-D (D-2): o VIDRO REAL — o aShape.z > 0.5 liga o ramo
+                // da textura (a cena borrada); o nível do widget viaja em
+                // aShape.w (o texOn desloca o level — o FS GLSL lê vShape.z
+                // e o level é o aShape.w)
+                float texOn = l0 * a.sPad0 + l1 * b.sPad0 + l2 * c.sPad0;
+                float lvl = l0 * a.sLvl + l1 * b.sLvl + l2 * c.sLvl;
+                if (texOn > 0.5f && tex && tex->channels == 4 &&
+                    tex->w > 0 && tex->h > 0 && pk.sdfHasCap) {
+                    // o UV em espaço de ECRÃ (y-down) sobre o rect capturado
+                    const float sx = fx;                      // o centro do px
+                    const float sy = float(viewport_[3]) - fy; // o flip GL
+                    float u = (sx - pk.sdfCap[0]) /
+                              (pk.sdfCap[2] > 1.0f ? pk.sdfCap[2] : 1.0f);
+                    float v = (sy - pk.sdfCap[1]) /
+                              (pk.sdfCap[3] > 1.0f ? pk.sdfCap[3] : 1.0f);
+                    u = u < 0.0f ? 0.0f : (u > 1.0f ? 1.0f : u);
+                    v = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+                    float texel[3];
+                    sampleRGB(tex, u, v, texel);
+                    // a TINTA ESCURA: a cena × a tinta; o α da tinta mistura
+                    // (o MESMO mix do FS — a fonte única manda)
+                    const float inkA =
+                        l0 * a.sTa + l1 * b.sTa + l2 * c.sTa;
+                    const float mixA = inkA < 0.0f ? 0.0f
+                                       : (inkA > 1.0f ? 1.0f : inkA);
+                    sh.top[0] = sh.top[0] * (1.0f - mixA) +
+                                texel[0] * sh.top[0] * mixA;
+                    sh.top[1] = sh.top[1] * (1.0f - mixA) +
+                                texel[1] * sh.top[1] * mixA;
+                    sh.top[2] = sh.top[2] * (1.0f - mixA) +
+                                texel[2] * sh.top[2] * mixA;
+                    sh.bot[0] = sh.bot[0] * (1.0f - mixA) +
+                                texel[0] * sh.bot[0] * mixA;
+                    sh.bot[1] = sh.bot[1] * (1.0f - mixA) +
+                                texel[1] * sh.bot[1] * mixA;
+                    sh.bot[2] = sh.bot[2] * (1.0f - mixA) +
+                                texel[2] * sh.bot[2] * mixA;
+                    (void)lvl;
+                }
                 float out4[4];
                 vv::sdf::shade(sh, lxl, lyl, pk.sdfAA, out4);
                 outR = out4[0];
@@ -1133,6 +1203,7 @@ inline void drawCore(unsigned mode, int count, IdxOf idxOf, int instances = 1) {
                 r.sHh = vf.attr(1, 3, vi, 0.0f);
                 r.sRad = vf.attr(2, 0, vi, 0.0f);
                 r.sLvl = vf.attr(2, 1, vi, 0.0f);
+                r.sPad0 = vf.attr(2, 2, vi, 0.0f);   // 0.12-D: o texOn
                 r.sTr = vf.attr(3, 0, vi, 1.0f);
                 r.sTg = vf.attr(3, 1, vi, 1.0f);
                 r.sTb = vf.attr(3, 2, vi, 1.0f);

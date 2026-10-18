@@ -5248,26 +5248,64 @@ int main() {
                     check(hier != nullptr,
                           "13.9 o painel da hierarquia esta no registo");
                     if (hier) {
-                        const u32 px =
+                        // 0.12-D (D-2) — a RECALIBRAÇÃO honesta: o painel
+                        // FIXO é o VIDRO FALSO (o gradiente surface→surface
+                        // 2): o TOPO mede o composto surface@0.80 e o FUNDO
+                        // o surface2@0.86 (3 sondas em x para esquivar o
+                        // grão do ruído — o hash é esparso por construção)
+                        const u32 pxC =
                             (u32)(hier->x + hier->w * 0.5f);
-                        const u32 py = (u32)(hier->y + hier->h * 0.5f);
-                        const size_t pi =
-                            (size_t(py) * imgF.width + px) * 4;
-                        const i32 d0 = (i32)imgF.rgba[pi] - e8[0];
-                        const i32 d1 = (i32)imgF.rgba[pi + 1] - e8[1];
-                        const i32 d2 = (i32)imgF.rgba[pi + 2] - e8[2];
-                        check(d0 >= -1 && d0 <= 1 && d1 >= -1 && d1 <= 1 &&
-                                  d2 >= -1 && d2 <= 1,
-                              "13.9 o VIDRO: o painel e o composto "
-                              "blend(surface@0.80, bg) — a matematica do "
-                              "device no pixel");
+                        const u32 pyT = (u32)(hier->y + 8.0f);
+                        const u32 pyB =
+                            (u32)(hier->y + hier->h - 8.0f);
+                        f32 topF[4], botF[4];
+                        theme::blendOver(theme::kTheme.surface,
+                                         theme::kTheme.bg, topF);
+                        theme::blendOver(theme::kTheme.surface2,
+                                         theme::kTheme.bg, botF);
+                        auto probeGlass = [&](const u32 py, const f32 want[4],
+                                              bool& ok) {
+                            for (int dx = -24; dx <= 24; dx += 16) {
+                                const u32 px = u32(i32(pxC) + dx);
+                                const size_t pi =
+                                    (size_t(py) * imgF.width + px) * 4;
+                                const i32 d0 =
+                                    (i32)imgF.rgba[pi] -
+                                    (i32)(want[0] * 255.0f + 0.5f);
+                                const i32 d1 =
+                                    (i32)imgF.rgba[pi + 1] -
+                                    (i32)(want[1] * 255.0f + 0.5f);
+                                const i32 d2 =
+                                    (i32)imgF.rgba[pi + 2] -
+                                    (i32)(want[2] * 255.0f + 0.5f);
+                                if (d0 >= -2 && d0 <= 2 && d1 >= -2 &&
+                                    d1 <= 2 && d2 >= -2 && d2 <= 2) {
+                                    ok = true;
+                                    return;
+                                }
+                            }
+                        };
+                        bool okT = false, okB = false;
+                        probeGlass(pyT, topF, okT);
+                        probeGlass(pyB, botF, okB);
+                        check(okT,
+                              "13.9 o VIDRO: o TOPO do painel mede o "
+                              "composto surface@0.80 (o gradiente do vidro "
+                              "falso — a matematica do device no pixel)");
+                        check(okB,
+                              "13.9 o VIDRO: o FUNDO do painel mede o "
+                              "composto surface2@0.86 (a escada do vidro "
+                              "falso)");
                         // translúcido a sério: NÃO é a surface sólida
-                        // (RECALIBRADO 0.9.6.10: a sólida era 22; o
-                        // composto era 20; RECALIBRADO 0.11-Y: a sólida é
-                        // 21 e o composto 18 — Δ3 > tolerância ±1)
-                        check(imgF.rgba[pi] != 21,
-                              "13.9 o VIDRO e translucido: o pixel NAO e a "
-                              "surface solida (a=1 desenharia 21)");
+                        // (a sondas do topo; a sólida desenharia 21 — o
+                        // composto do vidro dá 18)
+                        {
+                            const size_t piT =
+                                (size_t(pyT) * imgF.width + pxC) * 4;
+                            check(imgF.rgba[piT] != 21,
+                                  "13.9 o VIDRO e translucido: o pixel NAO "
+                                  "e a surface solida (a=1 desenharia 21)");
+                        }
                     }
                 }
 
@@ -5334,14 +5372,25 @@ int main() {
                                              theme::kTheme.bg, expF);
                             const i32 e8 =
                                 (i32)(expF[0] * 255.0f + 0.5f);
-                            // o interior da hierarquia a 2.0 (o rect da
-                            // 13.6 dobra: [0,160 600x1136])
-                            const size_t pi =
-                                (size_t(600) * img2x.width + 300) * 4;
-                            const i32 d = (i32)img2x.rgba[pi] - e8;
-                            check(d >= -1 && d <= 1,
-                                  "13.9 o VIDRO a 2.0: o MESMO composto "
-                                  "(as cores nao escalam — so o layout)");
+                            // 0.12-D (D-2): o TOPO da hierarquia a 2.0 (o
+                            // rect da 13.6 dobra: [0,160 600x1136] — o
+                            // gradiente do vidro falso mede o composto do
+                            // TOPO: as cores nao escalam, so o layout; 3
+                            // sondas em x esquivam o grão do ruído)
+                            bool ok2x = false;
+                            for (const int dy : {168, 170, 172}) {
+                                for (const int dx : {-40, 0, 40}) {
+                                    const size_t pi =
+                                        (size_t(dy) * img2x.width +
+                                         size_t(300 + dx)) * 4;
+                                    const i32 d = (i32)img2x.rgba[pi] - e8;
+                                    if (d >= -2 && d <= 2) ok2x = true;
+                                }
+                            }
+                            check(ok2x,
+                                  "13.9 o VIDRO a 2.0: o MESMO composto no "
+                                  "TOPO do gradiente (as cores nao escalam "
+                                  "— so o layout)");
                         } else {
                             check(false,
                                   "13.9 o PNG 2x relido (a invariancia do "
@@ -7131,15 +7180,34 @@ int main() {
                               "18.1 J-02 o véu do menu ⋯ mede preto 40% (o "
                               "composto do scrimMenu sobre o bg — a "
                               "matemática do device no pixel)");
-                    // (b) o VIDRO do sheet na banda de rodapé (4dp sob a
-                    //     última linha): surface 80% SOBRE o véu 40%
-                    probePx18(pngM, (u32)(sheet->x + 40.0f),
-                              (u32)(sheet->y + sheet->h - 3.0f),
-                              (int)(sheetSobreVeu[0] * 255.0f + 0.5f),
-                              (int)(sheetSobreVeu[1] * 255.0f + 0.5f),
-                              (int)(sheetSobreVeu[2] * 255.0f + 0.5f),
-                              "18.1 J-02 o sheet mede O ELEVADO (0.12-C C-3: "
-                              "o topo opaco da escada — o véu não entra)");
+                    // (b) 0.12-D (D-2) — a RECALIBRAÇÃO honesta: o sheet
+                    //     é o VIDRO REAL (a tinta do tema sobre a cena
+                    //     borrada): a banda de rodapé mede ESCURO (a tinta
+                    //     #6B6B76 × a cena ≤ 60) e NUNCA o véu cru
+                    {
+                        vv::RawImage img18;
+                        std::string err18;
+                        const bool ok18 =
+                            vv::loadPng(pngM.data(), pngM.size(), img18,
+                                        err18) &&
+                            img18.ok();
+                        check(ok18, "18.1 o PNG do menu decodifica");
+                        if (ok18) {
+                            const u32 vx18 = (u32)(sheet->x + 40.0f);
+                            const u32 vy18 =
+                                (u32)(sheet->y + sheet->h - 3.0f);
+                            const size_t pi18 =
+                                (size_t(vy18) * img18.width + vx18) * 4;
+                            const i32 r18 = (i32)img18.rgba[pi18];
+                            const i32 veu18 =
+                                (i32)(veu40[0] * 255.0f + 0.5f);
+                            check(r18 < 90 &&
+                                      (r18 - veu18) * (r18 - veu18) > 16,
+                                  "18.1 J-02 o sheet mede O VIDRO REAL (a "
+                                  "tinta escurece a cena borrada — nunca o "
+                                  "véu cru)");
+                        }
+                    }
                     // (c) o CANTO do sheet (raio 8dp — o J-04 no ancorado):
                     //     o pixel (2,2) diagonal fica FORA do raio → véu
                     probePx18(pngM, (u32)(sheet->x + 2.0f),
