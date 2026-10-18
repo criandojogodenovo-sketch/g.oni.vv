@@ -12,13 +12,10 @@ Atualizado: 2026-10-19 · vc: 95
 > emissores UiContext::sdfWidget/sdfWidgetGlass/glassPanelFake/
 > sdfFireBorder/fireGlowBelow/drawEmbers).
 > O desenho do produto voltou ao SIMPLES 2D (o padrão Y-1: painel +
-> gradiente + frame + glassTopLine). A FASE 3 do E (E-3) ligou os
-> EFEITOS 2.5D do dono por cima: o app/src/main/cpp/ui/Noise2D.h (a
-> FONTE ÚNICA do ruído tileável + o fireScrollOffset), a textura de
-> ruído GL_REPEAT no init do app/src/main/cpp/render/Renderer.cpp, o
-> emissor UiContext::fireBorder2D (as 4 bandas no batch de imagens), o
-> token dropShadow (a sombra 2.5D no drawButtonVisual/iconButton), o
-> surface α0.85 e o glassTopLine ÂMBAR a 20%. O LOGO de D-4 (Brand.h/.cpp) segue
+> gradiente + frame + glassTopLine). A E-3 ligou os EFEITOS 2.5D por
+> cima: o app/src/main/cpp/ui/Noise2D.h (o ruído tileável + o scroll),
+> a textura GL_REPEAT no Renderer.cpp, o emissor UiContext::fireBorder2D,
+> o token dropShadow (a sombra), o surface α0.85 e o topo ÂMBAR 20%. O LOGO de D-4 (Brand.h/.cpp) segue
 > VIVO (segmentos 2D — nunca foi SDF).
 >
 > Convenção de paths: TODOS os caminhos deste ficheiro são relativos à
