@@ -175,3 +175,57 @@ app; curado acima.)
       canto superior direito está limpo.
 - [ ] A top bar: as 3 zonas não se sobrepõem; o play destaca-se durante o
       play (se a barra estiver visível).
+
+## 3. SUB-FASE C-3 — Tipografia, idioma, superfícies (versionCode 89)
+
+### 3.1 O que o prompt pedia e onde ficou
+
+| Pedido (C-3) | Onde ficou |
+|---|---|
+| Escala tipográfica fixa 12/14/16/20 | JÁ era a escala do Theme (kFontCaption/Body/Section/Screen desde a 0.9.6); o pin `escala_tipografica` SCANEA os fontes de UI (o stripComments do gate ui_vocab) e aferra que nenhum literal fora do conjunto existe |
+| «Exportar Downloads» → «Exportar para Downloads» | EditorUi.cpp (a tabela do menu) + o pin `idioma_consistente` (a ausência da forma antiga, a presença da nova) |
+| Maiúsculas uniformes: «ÁUDIO» → «Áudio» | Toolbar.cpp (a tab) + o pin `maiusculas_uniformes` («3D»/«UI» ficam — siglas) |
+| «TICs 2» → «2 TICs» | BottomPanel.cpp (o chip «FPS · N TICs») + o pin |
+| «Perspetiva»/«Global»/«Nós» | JÁ não existem como controlos (a strip morreu no PASSO 3, a vista Nós no D5 — a ordem «se são placeholders, saem» JÁ estava executada); o pin vigia o regresso dos literais |
+| Superfícies: 4 tons distintos com borda âmbar | a ESCADA NOVA no Theme: bg #0A0A0C · surface(painel) #131316 α0.80 · card #1B1B20 (NOVO) · elevated #24242A (NOVO); aplicados nos cards reais (browser/diálogos/seletor/teclado) e nos sheets (menus/toast); a border âmbar mantém (#4A3714 α0.60); o pin `superficies_4_tons` aferra os hexes exatos, a distinção e o contraste |
+
+### 3.2 As decisões (documentadas)
+
+1. O poço #08080A da Y-1 é SUPERADO pelo fundo #0A0A0C do dono (o padrão
+   Y-3/D11: a ordem expressa mais recente manda). O launcher fica com o
+   seu fundo próprio (outro domínio — os pins y0 não mudam).
+2. O vidro α0.80 do painel mantém-se (a decisão de vidro é também do
+   dono, Y-1; a C-3 dá o RGB do token — o pin aferra o RGB exato).
+3. O toast sobe para O ELEVADO (o topo da escada; o alfa 1 do B-3
+   mantém-se — o contraste não depende da cena).
+4. O espelho Java tinha os hexes da 0.9.6.10 (desatualizado da Y-1!) —
+   alinhado agora com a escada inteira + o hex velho inline trocado pelo
+   token (o gate projects_ui_check recalibrado).
+
+### 3.3 As mutações (coladas)
+
+- **M-C3a** — um `fontScale(18.0f)` injetado no draw do título da
+  hierarquia: **escala_tipografica VERMELHA (2 EXPECTs** — o scan apanha
+  o literal no código stripado: «[escala] 1 literais fora do conjunto»).
+  As irmãs verdes. Reposto → verde. (A 1.ª versão do scan tinha o teto
+  de 12 chars que saltava TODOS os literais — curada no sítio, o teto é
+  18: os literais da casa cabem em 16.)
+- **M-C3b** — o cartão igualado ao painel (no Theme E no alias do
+  UiContext — os DOIS lados mudam juntos para o static_assert não morrer
+  antes do pin): **superficies_4_tons VERMELHA (4 EXPECTs** — os hexes
+  exatos e a distinção morrem). As irmãs verdes. Reposto → verde.
+
+### 3.4 Verificação
+
+test_core: 0 falhas nos 23 grupos afetados (ver §14 do
+RELATORIO-0.9.6.md) + projects_ui_check VERDE + theme_hex_check VERDE
+(0 hex fora do Theme) + ui_vocab_check VERDE + docs-lint VERDE.
+
+### 3.5 Pin C33 (o dono no device)
+
+- [ ] Percorrer todos os ecrãs (editor 3D · modo UI · modo Áudio · o
+      drawer ×4 · Settings · Docs · Script · o menu principal · o browser
+      · o seletor de cenas): a escala de texto é a mesma família em tudo
+      (12/14/16/20), o idioma é PT consistente («Exportar para
+      Downloads», «N TICs», «Áudio»), as superfícies têm 4 níveis visíveis
+      e a borda âmbar separa os painéis — PNG.

@@ -320,7 +320,9 @@ TopBarActions drawTopBar(UiContext& ui, EditorState& st) {
         {&L.tab3d,    kMode3dId,    icons::Icon::Cube,     "3D",
          !st.uiMode && !st.audioMode},
         {&L.tabUi,    kModeUiId,    icons::Icon::Monitor,  "UI",    st.uiMode},
-        {&L.tabAudio, kModeAudioId, icons::Icon::Speaker,  "ÁUDIO", st.audioMode},
+        // 0.12-C (C-3): as maiúsculas uniformes — «Áudio» como «Menu»/«Cena»
+        // (o «3D»/«UI» ficam: são siglas)
+        {&L.tabAudio, kModeAudioId, icons::Icon::Speaker,  "Áudio", st.audioMode},
     };
     for (int i = 0; i < 3; ++i) {
         const UiRect& r = *tabs[i].r;

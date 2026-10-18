@@ -1,9 +1,10 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-18 · vc: 88 · Último commit: este (o 0.12-C C-2, OS
-MENUS E A BARRA DE TOPO — o menuSheetLayout fonte única, o play em
-destaque, o Mover duplicado fora, os 4 pins; antes: 64bb90f o C-1, AS
-PROPORÇÕES E OS PAINÉIS; antes: e8c9587 o 0.12-B B-4-fix)
+Atualizado: 2026-10-18 · vc: 89 · Último commit: este (o 0.12-C C-3, A
+TIPOGRAFIA O IDIOMA AS SUPERFÍCIES — a escada de 4 tons do dono, o
+«Áudio», o «Exportar para Downloads», o «N TICs», os 4 pins; antes:
+3e8984a o C-2, OS MENUS E A BARRA DE TOPO; antes: 64bb90f o C-1, AS
+PROPORÇÕES E OS PAINÉIS)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -12,9 +13,17 @@ PROPORÇÕES E OS PAINÉIS; antes: e8c9587 o 0.12-B B-4-fix)
 ## §1 Onde estamos
 
 - **Campanha 0.12-C (layout, organização e consistência) — EM CURSO
-  (C-1..C-2 fechadas; C-3..C-4 na ordem do prompt)**: a cláusula da
-  campanha é anti-superficialidade — nada de controlos «de fachada»; se
-  um botão não faz nada, sai.
+  (C-1..C-3 fechadas; C-4 na ordem do prompt)**: a cláusula da campanha
+  é anti-superficialidade — nada de controlos «de fachada»; se um botão
+  não faz nada, sai.
+  **C-3 (a tipografia o idioma as superfícies, vc 89)**: a ESCADA DE
+  SUPERFÍCIES do dono (fundo #0A0A0C · painel #131316 · cartão #1B1B20
+  · elevado #24242A — o poço da Y-1 superado pela ordem expressa; o
+  espelho Java alinhado — estava na 0.9.6.10!), «Áudio»/«Exportar para
+  Downloads»/«N TICs», os 4 pins novos (test_012c_idioma.cpp — o scan
+  da escala com o strip do gate) + M-C3a/M-C3b vermelho→verde + 3
+  recalibrações (y1, o toast B-3, o c33). Os DETALHES no
+  RELATORIO-0.12-C.md §3.
   **C-2 (os menus e a barra de topo, vc 88)**: o menuSheetLayout FONTE
   ÚNICA do sheet (altura máxima + scroll + âncora), o play A CHAMA em
   playMode, o GIZMO do canto REMOVIDO (o duplicado do Mover — a cláusula
@@ -29,8 +38,8 @@ PROPORÇÕES E OS PAINÉIS; antes: e8c9587 o 0.12-B B-4-fix)
   (hierHeaderRects — o título elipsa, nunca sobrepõe as ações) e os 4
   pins novos (test_012c_paineis.cpp) + M-C1a/M-C1b vermelho→verde. SEM
   sentinela nova (os pins aferram). Os DETALHES no RELATORIO-0.12-C.md
-  §1. **C-3..C-4** (tipografia/idioma/superfícies · seletor + estados
-  vazios) na ordem do prompt — PARAR no fim da C-4.
+  §1. **C-4** (o seletor de ficheiros + os estados vazios) na ordem do
+  prompt — PARAR no fim.
 - **Campanha 0.12-B (arquitetura da UI) — FECHADA (B-1..B-4)** (o CI do
   push é o árbitro; os DETALHES vivem no RELATORIO-0.12-B.md).
   **B-4 (o seletor de cenas com ações, vc 86)**: as 3 ações POR LINHA no

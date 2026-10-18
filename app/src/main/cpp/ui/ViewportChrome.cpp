@@ -424,11 +424,12 @@ f32 toastBgAlpha() {
 }
 
 void toastColors(f32 outBg[4], f32 outText[4]) {
-    // os TOKENS da casa (a tabela 0.11-Y): o vidro surface2 passa a SÓLIDO
-    // para o toast (o mesmo RGB, o alfa 1 — o M-B3b devolve o cinza-vidro)
-    outBg[0] = theme::kTheme.surface2[0];
-    outBg[1] = theme::kTheme.surface2[1];
-    outBg[2] = theme::kTheme.surface2[2];
+    // os TOKENS da casa: 0.12-C (C-3) o toast é O ELEVADO (o topo da
+    // escada de superfícies — SÓLIDO, o alfa 1 do B-3 mantém; o
+    // M-B3b devolve o cinza-vidro)
+    outBg[0] = theme::kTheme.elevated[0];
+    outBg[1] = theme::kTheme.elevated[1];
+    outBg[2] = theme::kTheme.elevated[2];
     outBg[3] = toastBgAlpha();
     outText[0] = theme::kTheme.text1[0];
     outText[1] = theme::kTheme.text1[1];

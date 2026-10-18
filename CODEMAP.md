@@ -59,8 +59,10 @@ Atualizado: 2026-10-18 · vc: 83
   UiContext (com as primitivas
   do cristal da 0.11-Y: panelRoundedGradientV / glassTopLine /
   focusGlow + o QuadBatch::quadGradientV), UiEditor (as ops
-  de árvore PURAS), Theme.h (as ÚNICAS cores — a tabela 0.11-Y: o poço
-  #08080A + a chama accent2/glow), ViewportChrome
+  de árvore PURAS), Theme.h (as ÚNICAS cores — a tabela 0.11-Y superada
+  pela ESCADA 0.12-C: fundo #0A0A0C · painel #131316 · cartão #1B1B20 ·
+  elevado #24242A + a chama accent2/glow; os tokens card/elevated são o
+  que os cards/sheets/toast consomem), ViewportChrome
   (o chrome do viewport — o TOOLTIP do gizmo 0.12-A: legendTimer/
   legendArm no EditorState; o draw ganhou `dt, in` trailing),
   SafeArea.h (os rects puros — `scissor3dRect()` NOVO na 0.12-A: o
@@ -148,6 +150,9 @@ Atualizado: 2026-10-18 · vc: 83
   painel_colapsado_default/hierarquia_cabecalho/divisor_drag),
   test_012c_chrome.cpp (os pins da 0.12-C C-2: menu_scroll/menu_ancorado/
   topbar_3_zonas/mover_unico),
+  test_012c_idioma.cpp (os pins da 0.12-C C-3: escala_tipografica — o
+  scan dos fontes com o strip do gate/idioma_consistente/maiusculas_
+  uniformes/superficies_4_tons),
   test_voni.cpp, test_bench.cpp,
   test_gmeshv3.cpp, voni_refgen.cpp (o gerador da referência), c33_virtual.cpp
   (o dispositivo virtual), bench_ram_curve.cpp (A-4: a curva 50k…12,3M

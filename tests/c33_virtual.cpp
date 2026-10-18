@@ -7249,7 +7249,7 @@ int main() {
                     // (o painel duro mostraria o vidro do card)
                     // RECALIBRADO 0.11-Y: o fundo é o POÇO #08080A (8,8,10)
                     probePx18(pngD, (u32)(dlg->x + 2.0f),
-                              (u32)(dlg->y + 2.0f), 8, 8, 10,
+                              (u32)(dlg->y + 2.0f), 10, 10, 12,
                               "18.4 J-04 o canto do diálogo é SUAVE (o "
                               "pixel (2,2) fora do raio 8dp mostra o fundo "
                               "— o painel duro mostraria o vidro)");

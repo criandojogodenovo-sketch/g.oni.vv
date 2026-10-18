@@ -3004,7 +3004,9 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
         {"Importar…",           icons::Icon::Upload,  0},
         // 0.9.6.19 (D15): «Export Downloads» era EN — a tabela do menu
         // inteira é PT (o gate ui_vocab caça o regresso de «Export «)
-        {"Exportar Downloads",  icons::Icon::Download, 0},
+        // 0.12-C (C-3): «Exportar Downloads» → «Exportar para Downloads»
+        // (o idioma do dono — a preposição que faltava)
+        {"Exportar para Downloads", icons::Icon::Download, 0},
         // CENA
         {"Guardar cena",        icons::Icon::Save,    1},
         {"Carregar cena",       icons::Icon::Folder,  1},
@@ -3076,7 +3078,7 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     // J-04: o raio em dp REAL (era kRadiusCard cru — 8px = 4dp a 2.0, a
     // mesma classe R-018 dos sheets px crus do D14)
     ui.panelRounded(x, y, kSheetW, ms.h, theme::dp(theme::kRadiusCard),
-                    theme::kTheme.surface);
+                    theme::kTheme.elevated);   // 0.12-C: O ELEVADO
     // 0.11-Y (Y-3): o cristal — a linha do topo do sheet (o brilho 1dp)
     ui.glassTopLine(x, y, kSheetW);
     ui.frameRounded(x, y, kSheetW, ms.h, 1.0f, theme::dp(theme::kRadiusCard),
@@ -3185,7 +3187,7 @@ int drawHierMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         return 0;
     }
     ui.panelRounded(x, y, kSheetW, h, theme::dp(theme::kRadiusCard),
-                    theme::kTheme.surface);
+                    theme::kTheme.elevated);   // 0.12-C: O ELEVADO
     // 0.11-Y (Y-3): o cristal — a linha do topo do sheet (o brilho 1dp)
     ui.glassTopLine(x, y, kSheetW);
     ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::dp(theme::kRadiusCard),
@@ -3350,7 +3352,7 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     // J-04: o raio em dp REAL (era kRadiusCard cru — 8px = 4dp a 2.0, a
     // mesma classe R-018 dos sheets px crus do D14)
     ui.panelRounded(x, y, kSheetW, h, theme::dp(theme::kRadiusCard),
-                    theme::kTheme.surface);
+                    theme::kTheme.elevated);   // 0.12-C: O ELEVADO
     // 0.11-Y (Y-3): o cristal — a linha do topo do sheet (o brilho 1dp)
     ui.glassTopLine(x, y, kSheetW);
     ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::dp(theme::kRadiusCard),
