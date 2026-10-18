@@ -1,11 +1,11 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-19 · vc: 95 · Último commit: este (o 0.12-E E-1, A
-RESTAURAÇÃO DA UI BÁSICA — a ORDEM DE EMERGÊNCIA do dono: o SDF 3D do
-widget (D-1) e o vidro/fogo do shader único (D-2/D-3) estragaram o TEXTO
-e o LAYOUT no device; o desenho voltou ao simples 2D no UiContext, os
-pins reformados, o LOGO de D-4 sobrevive; a FASE 2 (a paleta FOGO
-AVERMELHADO) e a FASE 3 (os efeitos 2.5D) seguem na fila do dono)
+Atualizado: 2026-10-19 · vc: 96 · Último commit: este (o 0.12-E E-2, O
+TEMA FOGO AVERMELHADO — a paleta EXATA do dono no Theme.h: o painel
+#141416, o text1 #F2F2F5 (+ o voniUser a seguir), os tokens NOVOS
+fireRed #D92B04 e fireOrange #FF5E00; os static_asserts e os 2 pins de
+varredura aferraram a fonte única e foram curados no MESMO commit; a
+FASE 3 (os efeitos 2.5D) segue na fila do dono)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -19,6 +19,12 @@ AVERMELHADO) e a FASE 3 (os efeitos 2.5D) seguem na fila do dono)
   o cálculo 3D. Volta ao desenho simples no UiContext»; cláusulas: ZERO
   matemática 3D, ZERO mexidas no FontAtlas, a arquitetura de TICs
   intocada; os DETALHES vivem no RELATORIO-0.12-E.md).
+  **E-2 (o tema, vc 96)**: a paleta EXATA do dono no Theme.h — o
+  surface #141416, o text1 #F2F2F5 (+ o voniUser), os tokens NOVOS
+  fireRed/fireOrange (o combustível da FASE 3); os static_asserts do
+  UiContext.h + os 2 pins de varredura aferraram a fonte única no 1.º
+  build e foram curados no MESMO commit; 4 recalibrações com nota.
+  test_core 0 falhas · c33 1007/0 · vc 96.
   **E-1 (a restauração, vc 95)**: o CHOKE POINT drawButtonVisual e o
   iconButton voltam ao padrão Y-1 (o ativo = glow + gradiente
   accent→accent2; o repouso = panelRounded + frameRounded 1dp); o VIDRO
@@ -75,6 +81,9 @@ AVERMELHADO) e a FASE 3 (os efeitos 2.5D) seguem na fila do dono)
 
 ## §2 O que está FEITO
 
+- 0.12-E E-2 (vc 96) — o tema FOGO AVERMELHADO (no RELATORIO-0.12-E.md
+  §2): a paleta exata do dono, os 2 tokens novos, os gates a aferrar a
+  fonte única.
 - 0.12-E E-1 (vc 95) — a restauração da UI básica (no RELATORIO-0.12-E.md
   §1): o SDF 3D abortado pelo dono, o desenho simples 2D de volta, os 13
   pins reformados + as FASE 32/33 do c33, as 6 recalibrações de volta.

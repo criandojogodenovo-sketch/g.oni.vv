@@ -107,9 +107,49 @@ mutações M-D1a/b, M-D2a/b, M-D3a/b continuam coladas lá como história):
 
 ## 2 · E-2 — O TEMA FOGO AVERMELHADO (a paleta EXATA do dono)
 
-*(fecha no commit da FASE 2 — a paleta é a ordem: bg #0A0A0C obsidiana ·
-surface #141416 painéis · fireRed #D92B04 brasa escura · fireOrange
-#FF5E00 brasa quente · amber #FFB020 destaque · text1 #F2F2F5.)*
+### 2.1 A paleta (a ordem literal, aplicada ao Theme.h)
+
+| token | ordem do dono | antes | estado |
+|---|---|---|---|
+| `bg` | #0A0A0C (obsidiana) | #0A0A0C | JÁ ERA EXATO — intacto |
+| `surface` | #141416 (painéis) | #131316 | **TROCADO** (o α0.80 do vidro mantém até a FASE 3 o subir a 0.85) |
+| `fireRed` | #D92B04 (brasa escura) | — | **TOKEN NOVO** |
+| `fireOrange` | #FF5E00 (brasa quente) | — | **TOKEN NOVO** |
+| `accent` (amber) | #FFB020 (destaque) | #FFB020 | JÁ ERA EXATO — intacto |
+| `text1` | #F2F2F5 | #ECECEE | **TROCADO** (+ o `voniUser` segue o text1 — o contrato de sempre) |
+
+- Os comentários do Theme.h documentam a proveniência (a ordem do dono, a
+  paleta FOGO AVERMELHADO 0.12-E) e a tabela de hexes do cabeçalho
+  (F2F2F5=(242,242,245) · 141416=(20,20,22) · D92B04=(217,43,4) ·
+  FF5E00=(255,94,0)) fica no sítio de sempre.
+- **Os NOVOS tokens ficam SEM consumidores na E-2** — o consumo é a FASE
+  3 (o gradiente dos ativos fireRed→fireOrange). O Theme é a FONTE ÚNICA;
+  a paleta entra primeiro, os efeitos 2.5D ligam-na em seguida (a ordem
+  do dono tem as duas fases separadas).
+
+### 2.2 Os gates aferram a fonte única (e funcionaram)
+
+- Os **static_asserts do UiContext.h** (PANEL/TEXT) morreram COM O BUILD
+  no 1.º build local — os aliases legados estavam desincronizados da
+  tabela. Corrigidos no MESMO commit (a fonte única é REAL: PANEL
+  #141416 α0.80, TEXT #F2F2F5).
+- Os **2 pins de varredura de fonte** (y1_tokens e superficies_4_tons
+  contam `VV_RGBA(20, 20, 22, 0.80f)` ÚNICO no Theme.h) recalibrados com
+  nota — o contrato «a tabela tem UM só sítio» mantém-se.
+- Recalibrações com nota: test_toolbar (surface[0]=20/255 + o
+  voniUser==text1), test_sentinels (regress_identidade_grafite_ambar — o
+  painel novo na identidade), test_fase_y1_tema (o token do painel),
+  test_012c_idioma (superficies_4_tons).
+- **theme_hex_check VERDE** — 0 hex fora do Theme (os 2 novos hexes
+  nascem no ÚNICO sítio permitido).
+
+### 2.3 O estado da suíte
+
+- test_core: **0 falhas** (o skip de disco conhecido — a R-039).
+- c33_virtual: **1007 checks, 0 falhas** (o 13.9 mede os compostos PELOS
+  tokens — a paleta nova atravessa sem tocar no check).
+- **versionCode 95 → 96** (o §14 do RELATORIO-0.9.6.md declara o par;
+  o C33 REAL fica para o dono).
 
 ## 3 · E-3 — OS EFEITOS 2.5D (só desenho 2D)
 

@@ -286,11 +286,10 @@ TEST(theme_tabela_spec_g_exata) {
     EXPECT(nearEqF(theme::kTheme.accent[2], 32.0f / 255.0f, 1e-4f));
     // O AZUL MORREU no accent: B é o canal MENOR (o âmbar é quente)
     EXPECT(theme::kTheme.accent[2] < theme::kTheme.accent[1]);
-    // bg #0A0A0C · surface #131316 · surface2 #1E1E21 (0.12-C C-3: a
-    // ESCADA do dono — o fundo e o PAINEL novos; a rampa fria mantém-se
-    // nos NEUTROS)
+    // bg #0A0A0C · surface #141416 (0.12-E E-2: a paleta do dono — era o
+    // #131316 da escada 0.12-C) · surface2 #1E1E21
     EXPECT(nearEqF(theme::kTheme.bg[0], 10.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.surface[0], 19.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.surface[0], 20.0f / 255.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.surface2[1], 30.0f / 255.0f, 1e-4f));
     // a hairline ÂMBAR (0.11-Y): o RGB É o do accentDim (#4A3714 — o sub-
     // tom quente da aresta do cristal) com α0.60
@@ -318,8 +317,9 @@ TEST(theme_tabela_spec_g_exata) {
     EXPECT(nearEqF(theme::kTheme.glassEdge[0], 1.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.glassEdge[3], 31.0f / 255.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.glassTop[3], 10.0f / 255.0f, 1e-4f));
-    // text1 #ECECEE · text2 #A6A6AD · scrim 60%
-    EXPECT(nearEqF(theme::kTheme.text1[0], 236.0f / 255.0f, 1e-4f));
+    // text1 #F2F2F5 (0.12-E E-2: a paleta do dono — era #ECECEE)
+    // text2 #A6A6AD · scrim 60%
+    EXPECT(nearEqF(theme::kTheme.text1[0], 242.0f / 255.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.text2[1], 166.0f / 255.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.scrim[3], 0.60f, 1e-4f));
     // accentInk ESCURO (#0E0E10 — a tinta sobre o fill ÂMBAR, 10,5:1)

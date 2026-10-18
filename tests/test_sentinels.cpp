@@ -3768,9 +3768,9 @@ TEST(regress_identidade_grafite_ambar) {
         }
         // os valores EXATOS da rampa (a decisão do dono — 0.12-C C-3: a
         // ESCADA DE SUPERFÍCIES supera o poço da Y-1, o padrão Y-3/D11:
-        // fundo #0A0A0C · painel #131316)
+        // fundo #0A0A0C · painel #141416 (0.12-E E-2: a paleta do dono)
         EXPECT(nearEqF(theme::kTheme.bg[0], 10.0f / 255.0f, 1e-4f));
-        EXPECT(nearEqF(theme::kTheme.surface[0], 19.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.surface[0], 20.0f / 255.0f, 1e-4f));
     }
 
     // ---- (2) O ÂMBAR: quente, com tinta escura e press mais escuro -----

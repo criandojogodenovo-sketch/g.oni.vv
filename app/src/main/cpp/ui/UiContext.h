@@ -44,12 +44,12 @@ namespace theme {
 // igualdade bit-a-bit, LIGADAS por static_assert: mudar Theme.h sem aqui =
 // build MORRE — a fonte única continua sendo Theme.h)
 constexpr f32 BG[4]     = {10.0f / 255.0f, 10.0f / 255.0f, 12.0f / 255.0f, 1.0f};     // bg #0A0A0C (O FUNDO — escada 0.12-C)
-constexpr f32 PANEL[4]  = {19.0f / 255.0f, 19.0f / 255.0f, 22.0f / 255.0f, 0.80f};    // surface #131316 α0.80 (O PAINEL — 0.12-C)
+constexpr f32 PANEL[4]  = {20.0f / 255.0f, 20.0f / 255.0f, 22.0f / 255.0f, 0.80f};    // surface #141416 α0.80 (O PAINEL — paleta 0.12-E; era o #131316 da 0.12-C)
 // 0.12-C (C-3): os DOIS níveis novos da escada de superfícies
 constexpr f32 CARD[4]     = {27.0f / 255.0f, 27.0f / 255.0f, 32.0f / 255.0f, 1.0f};   // card #1B1B20 (O CARTÃO)
 constexpr f32 ELEVATED[4] = {36.0f / 255.0f, 36.0f / 255.0f, 42.0f / 255.0f, 1.0f};   // elevated #24242A (O ELEVADO)
 constexpr f32 LINE[4]   = {74.0f / 255.0f, 55.0f / 255.0f, 20.0f / 255.0f, 0.60f};    // border #4A3714 α0.60 (âmbar)
-constexpr f32 TEXT[4]   = {236.0f / 255.0f, 236.0f / 255.0f, 238.0f / 255.0f, 1.0f};  // text1 #ECECEE
+constexpr f32 TEXT[4]   = {242.0f / 255.0f, 242.0f / 255.0f, 245.0f / 255.0f, 1.0f};  // text1 #F2F2F5 (a paleta 0.12-E; era #ECECEE)
 constexpr f32 ACCENT[4] = {255.0f / 255.0f, 176.0f / 255.0f, 32.0f / 255.0f, 1.0f};  // = accent (O ÂMBAR)
 constexpr f32 WARN[4]   = {255.0f / 255.0f, 138.0f / 255.0f, 61.0f / 255.0f, 1.0f};   // warn #FF8A3D (laranja)
 // 0.11-Y (Y-1): os DOIS tokens novos da chama — o gradiente dos botões

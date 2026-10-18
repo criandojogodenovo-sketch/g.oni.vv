@@ -17,11 +17,13 @@
 // pela ESCADA DE SUPERFÍCIES da 0.12-C (C-3, a ordem expressa do dono —
 // o padrão Y-3/D11): o FUNDO #0A0A0C + o PAINEL #131316 + o CARTÃO
 // #1B1B20 + o ELEVADO #24242A — 4 tons distintos com a borda âmbar
-// subtil entre painéis:
+// subtil entre painéis (PAINEL #141416 desde a 0.12-E E-2 — a paleta
+// EXATA do FOGO AVERMELHADO do dono):
 //   bg         #0A0A0C α1.00 — fundo da app (o FUNDO da escada; == o
 //              clear, o contrato «o clear lê o token")
-//   surface    #131316 α0.80 — VIDRO 80% (o PAINEL da escada; a mesma
-//              decisão de vidro do dono): painéis
+//   surface    #141416 α0.80 — VIDRO 80% (o PAINEL da escada; a mesma
+//              decisão de vidro do dono): painéis (o RGB #141416 é o da
+//              paleta FOGO AVERMELHADO 0.12-E; o α sobe a 0.85 na FASE 3)
 //   surface2   #1E1E21 α0.86 — vidro denso (premido, chips ativos)
 //   card       #1B1B20 α1.00 — os CARTÕES (0.12-C)
 //   elevated   #24242A α1.00 — os MENUS/SHEETS/TOAST (0.12-C)
@@ -34,7 +36,8 @@
 //   glow       #FF3D00 α0.25 — O BRILHO DA CHAMA (novo 0.11-Y): o glow de
 //              foco (2 quads α decrescente) e a linha 1dp do topo do vidro
 //              (a 20% — desenhada a seguir a panelRounded/frameRounded)
-//   text1      #ECECEE α1.00 — texto primário (15,4:1 sobre surface)
+//   text1      #F2F2F5 α1.00 — texto primário (0.12-E E-2: a paleta do
+//              dono — era #ECECEE; 15,9:1 sobre surface)
 //   text2      #A6A6AD α1.00 — texto secundário (7,5:1 sobre surface)
 //   accent     #FFB020 α1.00 — O ÂMBAR (a identidade; era o branco mono)
 //   accentPress#E09A00 α1.00 — âmbar premido (feedback de toque)
@@ -103,7 +106,8 @@ struct Theme {
     f32 glassEdge[4];  // #FFFFFF α0.12 (0x1F — a aresta de luz do vidro)
     f32 glassTop[4];   // #FFFFFF α0.04 (0x0A — o highlight do topo)
     // texto
-    f32 text1[4];      // #ECECEE α1.00
+    f32 text1[4];      // #F2F2F5 α1.00 (0.12-E E-2: a paleta FOGO
+                       // AVERMELHADO do dono — era #ECECEE)
     f32 text2[4];      // #A6A6AD α1.00 (7,5:1 sobre surface)
     // ação (O ÂMBAR — a identidade spec G; o mono morreu com os fills
     // brancos cegantes do anti-exemplo)
@@ -150,6 +154,12 @@ struct Theme {
     f32 fire1[4];      // #E8530F (o laranja)
     f32 fire2[4];      // #FFA21F (o âmbar quente)
     f32 fire3[4];      // #FFE08A (o amarelo do bico)
+    // 0.12-E (E-2): A PALETA FOGO AVERMELHADO do dono (a ordem EXATA —
+    // «Atualiza o ui/Theme.h com esta paleta»): as BRASAS do redesign 2.5D
+    // (o gradiente dos ativos da FASE 3: fireRed no topo → fireOrange no
+    // fundo; o âmbar/accent fica como o brilho de destaque)
+    f32 fireRed[4];    // #D92B04 (brasa escura)
+    f32 fireOrange[4]; // #FF5E00 (brasa quente)
 };
 
 // hex→f32 normalizado (compile-time-friendly por field) — com ALPHA:
@@ -166,19 +176,21 @@ struct Theme {
 // E5484D=(229,72,77)
 // FF8A3D=(255,138,61) · 46A758=(70,167,88) · E9493B=(233,73,59)
 // 5ACB5F=(90,203,95) · 4F92F5=(79,146,245) · 9E9E9E=(158,158,158)
+// 0.12-E E-2 (a paleta FOGO AVERMELHADO do dono): F2F2F5=(242,242,245)
+// 141416=(20,20,22) · D92B04=(217,43,4) · FF5E00=(255,94,0)
 inline constexpr Theme kTheme{
     VV_RGB(10, 10, 12),          // bg         (O FUNDO #0A0A0C — a escada
                                  //  0.12-C; o poço #08080A foi superado
                                  //  pela ordem expressa do dono, padrão Y-3)
-    VV_RGBA(19, 19, 22, 0.80f),  // surface    α0.80 — O VIDRO (o PAINEL
-                                 //  #131316 da escada 0.12-C)
+    VV_RGBA(20, 20, 22, 0.80f),  // surface    α0.80 — O VIDRO (o PAINEL
+                                 //  #141416 da paleta 0.12-E)
     VV_RGBA(30, 30, 33, 0.86f),  // surface2   α0.86 — vidro denso
     VV_RGB(27, 27, 32),          // card       (O CARTÃO #1B1B20 — 0.12-C)
     VV_RGB(36, 36, 42),          // elevated   (O ELEVADO #24242A — 0.12-C)
     VV_RGBA(74, 55, 20, 0.60f),  // border     α0.60 — hairline ÂMBAR (0.11-Y)
     VV_RGBA(255, 255, 255, 31.0f / 255.0f),   // glassEdge (#FFFFFF1F)
     VV_RGBA(255, 255, 255, 10.0f / 255.0f),   // glassTop  (#FFFFFF0A)
-    VV_RGB(236, 236, 238),       // text1
+    VV_RGB(242, 242, 245),       // text1      (#F2F2F5 — a paleta 0.12-E)
     VV_RGB(166, 166, 173),       // text2
     VV_RGB(255, 176, 32),        // accent     (O ÂMBAR)
     VV_RGB(255, 107, 0),         // accent2    (O FOGO — gradiente ativo)
@@ -191,12 +203,13 @@ inline constexpr Theme kTheme{
     VV_RGB(70, 167, 88),         // ok
     {0.0f, 0.0f, 0.0f, 0.60f},   // scrim (60%)
     {0.0f, 0.0f, 0.0f, 0.40f},   // scrimMenu (40% — PASSO 4, menus ancorados)
-    // V.ONI (sintaxe = conteúdo): voniUser passa a text1 (#ECECEE); no
-    // poço #08080A TODOS ≥5,8:1 (user 16,9 · engine 9,5 · reserved 8,3
-    // · string 9,9 · number 14,2 · comment 5,8) — recalibrado 0.11-Y
+    // V.ONI (sintaxe = conteúdo): voniUser segue o text1 (#F2F2F5 — a
+    // paleta 0.12-E; era #ECECEE); no fundo #0A0A0C TODOS ≥5,8:1
+    // (user 17,6 · engine 9,5 · reserved 8,3 · string 9,9 · number 14,2
+    // · comment 5,8) — recalibrado 0.11-Y, o user segue o text1 na E-2
     VV_RGB(179, 157, 219),  // voniReserved
     VV_RGB(138, 180, 248),  // voniEngine
-    VV_RGB(236, 236, 238),  // voniUser
+    VV_RGB(242, 242, 245),  // voniUser (== text1 #F2F2F5 — a paleta 0.12-E)
     VV_RGB(129, 199, 132),  // voniString
     VV_RGB(255, 213, 79),   // voniNumber
     VV_RGB(138, 138, 138),  // voniComment
@@ -212,6 +225,9 @@ inline constexpr Theme kTheme{
     VV_RGB(232, 83, 15),    // fire1  #E8530F
     VV_RGB(255, 162, 31),   // fire2  #FFA21F
     VV_RGB(255, 224, 138),  // fire3  #FFE08A
+    // 0.12-E (E-2): A PALETA FOGO AVERMELHADO do dono (EXATA)
+    VV_RGB(217, 43, 4),     // fireRed    #D92B04 (brasa escura)
+    VV_RGB(255, 94, 0),     // fireOrange #FF5E00 (brasa quente)
 };
 #undef VV_RGB
 #undef VV_RGBA

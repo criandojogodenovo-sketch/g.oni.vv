@@ -81,10 +81,11 @@ TEST(y1_tokens) {
     // (a) o kTheme COMPILADO (a verdade que a app inteira consome)
     // 0.12-C (C-3 · recalibração legítima): a ESCADA DE SUPERFÍCIES do
     // dono supera o poço da Y-1 (o padrão Y-3/D11) — o FUNDO #0A0A0C e o
-    // PAINEL #131316 (o α0.80 do vidro mantém)
+    // PAINEL #141416 (0.12-E E-2: a paleta FOGO AVERMELHADO do dono —
+    // era o #131316 da escada 0.12-C; o α0.80 do vidro mantém)
     EXPECT(nearColor(theme::kTheme.bg, 10.0f / 255.0f, 10.0f / 255.0f,
                      12.0f / 255.0f, 1.0f));
-    EXPECT(nearColor(theme::kTheme.surface, 19.0f / 255.0f, 19.0f / 255.0f,
+    EXPECT(nearColor(theme::kTheme.surface, 20.0f / 255.0f, 20.0f / 255.0f,
                      22.0f / 255.0f, 0.80f));
     // OS DOIS NÍVEIS NOVOS da escada (o CARTÃO e o ELEVADO)
     EXPECT(nearColor(theme::kTheme.card, 27.0f / 255.0f, 27.0f / 255.0f,
@@ -125,7 +126,8 @@ TEST(y1_tokens) {
                "y1_tokens: o bg VV_RGB(10,10,12) tem de aparecer EXATAMENTE "
                "1x (encontrado %u) — 0.12-C: a escada do dono",
                countSub(src, "VV_RGB(10, 10, 12)"));
-    EXPECT(countSub(src, "VV_RGBA(19, 19, 22, 0.80f)") == 1);
+    // 0.12-E E-2: o painel é o #141416 da paleta do dono (era #131316)
+    EXPECT(countSub(src, "VV_RGBA(20, 20, 22, 0.80f)") == 1);
     EXPECT(countSub(src, "VV_RGBA(30, 30, 33, 0.86f)") == 1);
     EXPECT(countSub(src, "VV_RGBA(74, 55, 20, 0.60f)") == 1);
     EXPECT(countSub(src, "VV_RGB(255, 107, 0)") == 1);
