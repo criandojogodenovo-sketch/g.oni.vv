@@ -1,0 +1,661 @@
+name: release
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+    inputs:
+      store_pw:
+        description: 'Senha da keystore (apenas p/ o job init-keystore)'
+        required: false
+        default: ''
+      key_alias:
+        description: 'Alias da chave (apenas p/ o job init-keystore)'
+        required: false
+        default: 'vv'
+      key_pw:
+        description: 'Senha da chave (apenas p/ o job init-keystore)'
+        required: false
+        default: ''
+
+jobs:
+  core-tests:
+    name: Testes do core (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      # 0.9.6 (P-01): fetch-depth 0 — o gate scope-check precisa do diff
+      # before..after do push (o checkout raso de 1 commit não tem o before)
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 0.9.6 (CLÁUSULA P-01) — GATE SCOPE-CHECK: o diff deste push contra
+      # ci/scope.txt; UM ficheiro fora do scope aprovado = VERMELHO = a
+      # campanha tocou onde não devia (PARAR e perguntar ao dono). O
+      # fallback (before inexistente/zero — 1º push de um ramo novo)
+      # afera o commit corrente HEAD^..HEAD
+      - name: Gate scope-check (Clausula P-01 — ci/scope.txt)
+        run: |
+          set -euo pipefail
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            BEFORE="HEAD^"
+          fi
+          python3 scripts/scope_check.py "$BEFORE" "${{ github.sha }}"
+
+      # 0.9.6 (G5/R-016) — GATE DOCS-LINT: a documentação vista de fora
+      # (docs/ inteiro — RELATÓRIOS incluídos — + README + ESTUDOS +
+      # ARCHITECTURE + VONI_referencia + llms) sem placeholders, sem
+      # marcadores de pendência (palavra inteira: "TODOS"/"todo" do
+      # português não casam), sem texto de enchimento e sem linguagem de
+      # achismo. A lista vive em ci/forbidden_docs_patterns.txt (a fonte);
+      # este passo é só o motor. UM match = vermelho = release bloqueada
+      - name: Gate docs-lint (R-016)
+        run: python3 scripts/docs_lint_check.py
+
+      # 0.11-CTX (§1.2) — GATE STATE.md: o commit que toca código (app/,
+      # cpp/, tests/, tests-java/) e declara sub-fase/feat/fix no assunto
+      # TEM de viajar COM o STATE.md no diff; commit puramente documental
+      # é isento. O motor é o MESMO script que o pin ctx_state_gate_fecha
+      # aferra contra o histórico real (d0c765d/caaef02 → vermelho). O
+      # fallback do before segue o padrão do scope-check acima
+      - name: Gate STATE.md (0.11-CTX §1.2)
+        run: |
+          set -euo pipefail
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            BEFORE="HEAD^"
+          fi
+          bash scripts/docs_lint_state.sh "$BEFORE" "${{ github.sha }}"
+
+      # 0.10-M (PASSO 1) — GATE DOS DOCS DE FORMATO: GMESH_formato.md e
+      # GTEX_formato.md são a FONTE DE VERDADE dos formatos próprios; o
+      # gate afere que os símbolos citados e as âncoras de bytes/números
+      # batem com o código (o formato mudou sem os docs = vermelho)
+      - name: Gate docs de formato (0.10-M — GMESH/GTEX fonte de verdade)
+        run: python3 scripts/gmesh_docs_check.py
+
+      # 0.9.6.18 (HOTFIX D5+D10) — GATE UI-VOCAB: «nenhum controlo é texto
+      # cru, nenhum duplicado sobrevive» — o vocabulário proibido («Nós»,
+      # o «R» nu, «grelha» como texto, o tile de letra da marca, o encode
+      # no hot path) voltar ao fonte = vermelho = release bloqueada
+      - name: Gate ui-vocab (D5/D10 — o vocabulário do dono)
+        run: python3 scripts/ui_vocab_check.py
+
+      # 0.9.6.10 (GRUPO UI · R-030) — GATE THEME-HEX: «qualquer hex fora
+      # do ficheiro de Theme = CI vermelho» (a ordem expressa do dono na
+      # spec G). As cores do chrome vivem SÓ em ui/Theme.h (a tabela
+      # única) + os espelhos ligados por static_assert (UiContext.h/
+      # Gizmo.h); um literal hex de cor noutro sítio da camada de UI é um
+      # token órfão — o fóssil da spec A de novo. UM match = vermelho
+      - name: Gate theme-hex (R-030 — cores so no Theme)
+        run: python3 scripts/theme_hex_check.py
+      # 0.9.6.12 (P-08 · GRUPO J1 · R-022) — GATE HIERARCHY-CHECK: o
+      # contrato da hierarquia (docs/LAYOUT_HIERARCHY.md) é a fonte oficial
+      # da árvore de regiões do editor; o gate afere que o contrato cita
+      # símbolos REAIS (nada de fantasmas) e que as sentinelas R-022..R-025
+      # (regress_hierarquia_contrato e irmãs) vivem no fonte. Região nova
+      # sem contrato, contrato a mentir ou sentinela apagada = VERMELHO
+      - name: Gate hierarchy-check (P-08/R-022 — o contrato da arvore)
+        run: python3 scripts/hierarchy_check.py
+
+      # 0.9.6.19b (D20) — GATE DAS MEDIDAS DO GIZMO DA CÂMARA: o pin medível
+      # do dono («bounding ≤6% com seleção / ≤4% sem, método PASSO 0, 2
+      # densidades») — o dump docs/hotfix19b-gizmo-medidas.json nasce do
+      # device virtual (FASE 17.5) e é revalidado AQUI a cada push
+      - name: Gate medidas do gizmo da camara (D20 — o contrato medivel)
+        run: python3 scripts/gizmo_camera_medidas.py
+
+      - name: Configurar build dos testes
+        run: cmake -S tests -B build-tests -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compilar
+        # 0.9.5: só o alvo que ESTE job afere (o c33_virtual compila no
+        # próprio job) — metade do tempo de build por job
+        # -j2 fix for infra OOM; revert to --parallel when pool stable
+        run: cmake --build build-tests --target test_core --parallel 2
+
+      - name: Executar suíte do core
+        run: ctest --test-dir build-tests --output-on-failure -R "^core$"
+
+      # 0.11-T (FASE 3.5a · §4.1 do relatório) — DIAGNÓSTICO TEMPORÁRIO da
+      # corrida latente do corte paralelo do streaming (o SIGSEGV no
+      # pthread_join do convertGltfToV3 que o pré-3.5a também mostra com
+      # muitos workers). O CI é o ÚNICO sítio com os workers reais onde
+      # ela dispara — este passo corre o crasher sob TSAN com os MESMOS
+      # workers e imprime o hardware_concurrency REAL do runner. O passo
+      # NÃO decide o veredicto do job (continue-on-error) — a caça é do
+      # §4.1 e as opções estão reportadas ao dono.
+      - name: Diagnóstico TSAN (temporário — §4.1)
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          printf '#include <thread>\n#include <cstdio>\nint main(){std::printf("hw_concurrency=%%u\\n", std::thread::hardware_concurrency());}' > /tmp/hw.cpp
+          g++ /tmp/hw.cpp -o /tmp/hw && /tmp/hw
+          cmake -S tests -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=thread -O1 -g"
+          cmake --build build-tsan --target test_core --parallel 2
+          GONI_ONLY=safstream TSAN_OPTIONS="halt_on_error=0 history_size=7" ./build-tsan/test_core || true
+
+      # F5.1: paridade de compilação do main.cpp no hospedeiro (stubs) —
+      # erros de símbolo no main.cpp apareciam só no job do NDK
+      - name: Check de sintaxe dos TUs device-only (stubs)
+        run: ./scripts/check_main.sh
+
+      # F5.2: paridade de LINK da lib inteira (CMake da app) — o check de
+      # sintaxe não apanha símbolos ausentes (FileApi.cpp fora do CMake da
+      # app só explodia no job do NDK)
+      - name: Paridade de ligação da lib goni_vv (stubs)
+        run: ./scripts/link_parity.sh
+
+      # F5.4: PARIDADE JNI — cada `native` da VvActivity.java tem de estar
+      # na tabela RegisterNatives com a MESMA assinatura (apanhou já na 1ª
+      # execução um 'I' a mais em nativeOnActivityResult) e o static
+      # System.loadLibrary tem de existir (o dlopen do NativeActivity não
+      # corre o JNI_OnLoad — causa raiz do UnsatisfiedLinkError na 0.6.3)
+      - name: Paridade JNI (VvActivity ↔ RegisterNatives)
+        run: python3 scripts/jni_parity.py
+
+      # 0.7.6 — TELA DE PROJETOS: formatação PURA na JVM do hospedeiro
+      # (folderLabel limpa o prefixo interno "primary:", dateLabel formata
+      # a última edição) + check estrutural do ecrã (uma criação, sem
+      # botão extra, lista nome+data, contorno #8AB4F8)
+      - name: Testes da tela de projetos (JVM host)
+        run: |
+          mkdir -p build-java
+          javac -d build-java             app/src/main/java/vv/goni/ProjectsFormat.java             tests-java/ProjectsFormatTest.java
+          java -cp build-java ProjectsFormatTest
+      - name: Estrutura da tela de projetos (check)
+        run: python3 scripts/projects_ui_check.py
+
+      # 0.9.3 (hotfix REG-001/R-005) — SENTINELAS JVM DO RELOAD: o portão
+      # ReloadGate (single-flight + coalesce) + o modelo do esqueleto da
+      # tela: 10/100 threads, projetos corrompidos, heap pressionada
+      # (-Xmx48m — o adversário de memória), worker que lança não deixa o
+      # portão preso. O MECANISMO do crash original é reproduzido e
+      # apanhado DENTRO do regress_concurrent_reload (prova de deteção).
+      - name: Sentinelas JVM do reload (REG-001/R-005)
+        run: |
+          javac -d build-java             app/src/main/java/vv/goni/ReloadGate.java             tests-java/ReloadGateTest.java
+          # -Xmx48m: o heap pressionado do adversário (≈83% p/ o lastico de
+          # 40MB) — o mesmo espírito do device de 3.9GB sob carga
+          java -Xmx48m -cp build-java ReloadGateTest
+
+      # 0.9.3 — CHECK ESTRUTURAL do fix na Activity REAL: confinamento da
+      # lambda io (nunca all/shown/missingUris), publicação no main.post,
+      # try/catch por entrada, portão, contadores, tetos. Apanha a REVERSÃO
+      # do fix no fonte (que a suíte JVM não vê)
+      - name: Check estrutural do reload (REG-001)
+        run: python3 scripts/reload_concurrency_check.py
+
+      # FASE 9 (R-008) — GATE DE ACENTOS do fonte: nenhum literal de UI sem
+      # acento volta ao código (o atlas cobre Latin-1 + Ext-A desde a G1-2;
+      # a sentinela regress_glyph_coverage afere o atlas, isto afere as
+      # strings). UM match = vermelho = release bloqueada
+      - name: Gate de acentos do fonte (R-008)
+        run: python3 scripts/glyph_source_check.py
+
+  # 0.8.12 — O DISPOSITIVO VIRTUAL + SENTINELAS + GATES: o "PC virtual"
+  # obrigatório do dono. Reproduz o C33 (1536x720 + insets, /tmp read-only
+  # errno=30, cache dir da app via JNI, content:// SAF, lifecycle EGL
+  # TERM/INIT, ASTC, taps replayáveis pelo frame() real) e corre o REPLAY
+  # da sessão real do dono. O output é colado no relatório; harness
+  # vermelho = release bloqueada. Os jobs de release DEPENDEM disto.
+  c33-virtual:
+    name: C33 virtual (dispositivo + sentinelas + gates)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar build dos testes
+        run: cmake -S tests -B build-tests -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compilar (suíte + harness do dispositivo virtual)
+        # 0.9.5: só o alvo que ESTE job afere (o replay; o test_core compila
+        # no próprio job) — metade do tempo de build por job
+        # -j2 fix for infra OOM; revert to --parallel when pool stable
+        run: cmake --build build-tests --target c33_virtual --parallel 2
+
+      # as SENTINELAS (regress_*) correm dentro do test_core — TODAS as
+      # runs, TODAS as releases futuras, para sempre (docs/REGRESSOES.md).
+      # 0.9.5 (builds com target): ESTE job afere o REPLAY; o test_core
+      # (com as sentinelas) corre no job dele — a cobertura total é a mesma,
+      # cada suíte exatamente UMA vez por run
+      - name: Replay da sessão real no C33 virtual (com sentinelas do ctest)
+        run: ctest --test-dir build-tests --output-on-failure -R "^c33_virtual_replay$"
+
+      # o output do replay p/ o gate de padrões (o binário é rápido; o tee
+      # deixa o passo-a-passo no log do job — o que o relatório cola)
+      - name: Saida do replay p/ o gate (c33-replay.txt)
+        run: |
+          set -euo pipefail
+          ./build-tests/c33_virtual > c33-replay.txt
+
+      # 0.9.3 (hotfix REG-001) — as SENTINELAS JVM também correm AQUI (o
+      # gate delas precisa do output neste job; o core-tests corre-as como
+      # testes unitários — correr duas vezes é barato e o gate fica
+      # autossuficiente)
+      - name: Sentinelas JVM do reload (p/ o gate)
+        run: |
+          set -euo pipefail
+          mkdir -p build-java-gate
+          javac -d build-java-gate             app/src/main/java/vv/goni/ReloadGate.java             tests-java/ReloadGateTest.java
+          java -Xmx48m -cp build-java-gate ReloadGateTest 2>&1 | tee java-sentinels.txt
+
+      # TAREFA 7.3 — GATE DE PADRÕES PROIBIDOS: o output do replay + o
+      # engine.log do dispositivo virtual contra ci/forbidden_log_patterns.txt.
+      # QUALQUER match = CI VERMELHO = release bloqueada. A lista vive em
+      # FICHEIRO (bugs futuros acrescentam sem tocar em código).
+      - name: Gate de padrões proibidos (forbidden_log_patterns.txt)
+        run: |
+          set -euo pipefail
+          PATTERNS="ci/forbidden_log_patterns.txt"
+          test -f "$PATTERNS" || { echo "::error::ci/forbidden_log_patterns.txt ausente"; exit 1; }
+          # padrões relevantes para o output do replay (padrões com acento/
+          # específicos de outras superfícies não colidem aqui por construção)
+          FOUND=0
+          while IFS= read -r pat; do
+            case "$pat" in ''|\#*) continue;; esac
+            if grep -F -q -- "$pat" c33-replay.txt c33-virtual-logs/engine.log 2>/dev/null; then
+              echo "::error::PADRÃO PROIBIDO no output do dispositivo virtual: $pat"
+              grep -F -n -- "$pat" c33-replay.txt c33-virtual-logs/engine.log || true
+              FOUND=1
+            fi
+          done < "$PATTERNS"
+          if [ "$FOUND" -ne 0 ]; then
+            echo "GATE VERMELHO: padrões proibidos presentes — release BLOQUEADA"
+            exit 1
+          fi
+          echo "GATE VERDE: zero padrões proibidos no replay do C33 virtual"
+
+      # 0.9.3 (hotfix) — GATE DAS ASSINATURAS DE CRASH (ci/forbidden_patterns.txt):
+      # as assinaturas EXATAS dos dois crashes do hotfix (REG-001/REG-002) +
+      # o watchdog do Problema 3, contra o output COMBINADO (sentinelas JVM +
+      # replay + engine.log). grep -E (expressões). QUALQUER match = VERMELHO.
+      - name: Gate das assinaturas de crash (forbidden_patterns.txt)
+        run: |
+          set -euo pipefail
+          PATTERNS="ci/forbidden_patterns.txt"
+          test -f "$PATTERNS" || { echo "::error::ci/forbidden_patterns.txt ausente"; exit 1; }
+          FOUND=0
+          while IFS= read -r pat; do
+            case "$pat" in ''|\#*) continue;; esac
+            if grep -E -q -- "$pat" java-sentinels.txt c33-replay.txt c33-virtual-logs/engine.log 2>/dev/null; then
+              echo "::error::ASSINATURA DE CRASH no output (R-005/R-006): $pat"
+              grep -E -n -- "$pat" java-sentinels.txt c33-replay.txt c33-virtual-logs/engine.log || true
+              FOUND=1
+            fi
+          done < "$PATTERNS"
+          if [ "$FOUND" -ne 0 ]; then
+            echo "GATE VERMELHO: assinatura de crash presente — release BLOQUEADA"
+            exit 1
+          fi
+          echo "GATE VERDE: zero assinaturas de crash (R-005/R-006/P3) no output combinado"
+
+      # TAREFA 4 — GATE DO LITERAL /tmp: nenhum literal de caminho /tmp em
+      # FileApi/código de assets/migração (o bug R-002 vivia num literal).
+      # O grep mira APENAS aspas+barra+tmp (literais de string C); os
+      # comentários sem aspas não contam.
+      - name: Gate do literal /tmp (FileApi + assets/migração)
+        run: |
+          set -euo pipefail
+          if grep -rn -E "['\"]/tmp"               app/src/main/cpp/platform/FileApi.cpp               app/src/main/cpp/platform/FileApi.h               app/src/main/cpp/assets/ ; then
+            echo "::error::LITERAL /tmp em FileApi/assets — o Android tem /tmp READ-ONLY (errno=30, R-002). Use .staging/ do projeto ou o cache dir da app (getCacheDir)."
+            exit 1
+          fi
+          echo "GATE VERDE: nenhum literal /tmp em FileApi/assets/migração"
+
+      - name: Publicar o output do replay (evidência para o relatório)
+        uses: actions/upload-artifact@v4
+        with:
+          name: c33-virtual-replay-log
+          path: |
+            c33-replay.txt
+            java-sentinels.txt
+            c33-virtual-logs/engine.log
+          if-no-files-found: error
+
+      # 0.9.6.5 (GRUPO B · FERRAMENTAS DE VERIFICAÇÃO) — OS LAYOUTS EXPORTADOS:
+      # os PNGs (backbuffer full-res rasterizado pelo C33 virtual) + JSONs
+      # (as entradas reais do frame) + a auditoria de cada ecrã. É o
+      # material do relatório do estado atual e a LINHA DE BASE dos Grupos
+      # C-I (o dono VÊ o que o harness viu, sem precisar do device).
+      - name: Publicar os layouts exportados (PNG+JSON+auditoria)
+        uses: actions/upload-artifact@v4
+        with:
+          name: layout-screens-c33-virtual
+          path: |
+            layout-harness-*.png
+            layout-harness-*.json
+            layout-harness-auditoria.txt
+          if-no-files-found: error
+
+  build-release:
+    name: APK release arm64 (assinado via secrets)
+    # 0.8.12 — a release DEPENDE das sentinelas + gate de padrões + harness
+    # do dispositivo virtual (sentinela vermelha = NÃO HÁ APK)
+    needs: [core-tests, c33-virtual]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Instalar componentes Android fixos (NDK/CMake/SDK 34)
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SDKMANAGER" ] || SDKMANAGER="$(command -v sdkmanager)"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" --install "ndk;26.3.11579264" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Decodificar keystore dos secrets
+        env:
+          VV_KEYSTORE: ${{ secrets.VV_KEYSTORE }}
+        run: |
+          if [ -n "$VV_KEYSTORE" ]; then
+            mkdir -p app/keystore
+            printf '%s' "$VV_KEYSTORE" | base64 -d > app/keystore/vv-release.jks
+            echo "VV_SIGNING=1" >> "$GITHUB_ENV"
+            echo "Keystore decodificada — assinatura release ativa."
+          else
+            echo "VV_SIGNING=0" >> "$GITHUB_ENV"
+            echo "::warning::Secret VV_KEYSTORE ausente — o APK sai UNSIGNED. Rode o job init-keystore, guarde a keystore offline e configure os secrets VV_*."
+          fi
+
+      # 0.8.10 — IDENTIDADE DA BUILD (build_info.txt nos assets do APK):
+      # 1º assembleRelease → extrai a .so arm64 → sha256 REAL dela → escreve
+      # app/src/main/assets/build_info.txt (git/epoch/soSha256/version) →
+      # 2º assembleRelease embute o ficheiro (a .so não muda — o gradle
+      # re-usa o build; o sha continua válido). O CrashHandler põe esta
+      # identidade no NOME e header de TODO crash dump.
+      - name: assembleRelease (passo 1 — .so para o sha256)
+        env:
+          VV_STORE_PW: ${{ secrets.VV_STORE_PW }}
+          VV_KEY_ALIAS: ${{ secrets.VV_KEY_ALIAS }}
+          VV_KEY_PW: ${{ secrets.VV_KEY_PW }}
+        run: ./gradlew assembleRelease --stacktrace --no-daemon
+
+      - name: Escrever assets/build_info.txt (identidade)
+        run: |
+          set -euo pipefail
+          APK="$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)"
+          unzip -q "${APK}" 'lib/arm64-v8a/*' -d libinfo
+          SO="libinfo/lib/arm64-v8a/libgoni_vv.so"
+          test -f "${SO}"
+          SO_SHA="$(sha256sum "${SO}" | cut -d' ' -f1)"
+          VCODE="$(grep -oE 'versionCode [0-9]+' app/build.gradle | head -n1 | grep -oE '[0-9]+')"
+          VNAME="$(grep -oE "versionName '[0-9.]+'" app/build.gradle | head -n1 | grep -oE "[0-9.]+")"
+          # 0.9.6 (R-015): o par de identidade SOBE para o env do job — o
+          # nome do artifact (abaixo) e o gate de identidade leem DAQUI
+          echo "VNAME=${VNAME}" >> "$GITHUB_ENV"
+          echo "VCODE=${VCODE}" >> "$GITHUB_ENV"
+          mkdir -p app/src/main/assets
+          {
+            echo "version=${VNAME}"
+            echo "versionCode=${VCODE}"
+            echo "git=${GITHUB_SHA}"
+            echo "soSha256=${SO_SHA}"
+            echo "epoch=$(date +%s)"
+          } > app/src/main/assets/build_info.txt
+          echo "--- build_info.txt ---"
+          cat app/src/main/assets/build_info.txt
+
+      - name: assembleRelease (passo 2 — embute a identidade)
+        env:
+          VV_STORE_PW: ${{ secrets.VV_STORE_PW }}
+          VV_KEY_ALIAS: ${{ secrets.VV_KEY_ALIAS }}
+          VV_KEY_PW: ${{ secrets.VV_KEY_PW }}
+        run: ./gradlew assembleRelease --stacktrace --no-daemon
+
+      - name: Verificar assinatura (apksigner)
+        if: env.VV_SIGNING == '1'
+        run: $ANDROID_HOME/build-tools/34.0.0/apksigner verify --print-certs app/build/outputs/apk/release/*.apk
+
+      - name: "Conteúdo do APK (verificação — lib arm64, sem dex próprio)"
+        run: unzip -l app/build/outputs/apk/release/*.apk
+
+      # 0.9.6 (G0 · R-015) — GATE RELEASE-IDENTITY: nome do artifact ==
+      # versionName no build config == versão do RELATORIO a fechar.
+      # VERMELHO se divergir — a causa raiz real: o run verde do fecho
+      # 0.9.5 publicou 'goni-vv-0.9.4-release-signed' (nome LITERAL no
+      # workflow) com o build.gradle já em 0.9.5/48
+      - name: Gate release-identity (R-015 — artifact == build == relatorio)
+        run: python3 scripts/release_identity_check.py
+
+      - name: Publicar artifact do APK
+        uses: actions/upload-artifact@v4
+        with:
+          # 0.9.6 (R-015): o nome NÃO é literal — vem do versionName do
+          # build.gradle (exportado no passo build_info acima). O gate
+          # release-identity aferiu a bijeção ANTES do upload
+          name: goni-vv-${{ env.VNAME }}-release${{ env.VV_SIGNING == '1' && '-signed' || '-UNSIGNED' }}
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+  verify-entry-symbols:
+    name: verify-entry-symbols (gate ANativeActivity_onCreate / android_main)
+    needs: build-release
+    runs-on: ubuntu-latest
+    steps:
+      # F5.4: checkout OBRIGATÓRIO — o gate agora corre o jni_parity.py
+      # (paridade Java↔tabela↔.dynsym), que vive no repo
+      - uses: actions/checkout@v4
+
+      # F4.2: download por PATTERN — o nome do artifact contém 'vv' (igual ao
+      # secret VV_KEY_ALIAS), e o GitHub DESCARTA outputs que contêm segredo
+      # mascarado ('Skip output since it may contain secret'). Outputs com o
+      # nome do artifact eram silenciosamente esvaziados; com pattern o job
+      # é robusto ao mascaramento e a mudanças de versão.
+      - name: Baixar APK release
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-release*'
+          # 0.9.6 (R-015): merge-multiple DESLIGADO — o artifact baixa no
+          # SEU diretório (apk/goni-vv-<versão>-release-signed/…) e o gate
+          # de identidade abaixo afere o NOME REAL publicado. O find do
+          # APK continua a funcionar (procura recursiva); continua UM
+          # artifact a casar com o pattern em pushes normais
+          merge-multiple: false
+          path: apk
+
+      # 0.9.6 (G0 · R-015) — a ponta SOLTA da identidade: o nome do
+      # artifact que foi MESMO publicado (o diretório baixado) casa com
+      # o versionName do build. É o fim-a-fim do gate (o passo do
+      # build-release aferiu o modelo; este afere a realidade)
+      - name: Gate release-identity do artifact real (R-015)
+        run: |
+          set -euo pipefail
+          ARTDIR="$(find apk -mindepth 1 -maxdepth 1 -type d -name 'goni-vv-*' | head -n 1)"
+          test -n "$ARTDIR" || { echo "::error::artifact do APK não encontrado em apk/"; exit 1; }
+          python3 scripts/release_identity_check.py --artifact-name "$(basename "$ARTDIR")"
+
+      - name: Extrair libgoni_vv.so do APK (arm64-v8a)
+        run: |
+          set -euo pipefail
+          APK="$(find apk -type f -name '*.apk' | head -n 1)"
+          echo "APK: ${APK}"
+          mkdir -p libcheck
+          unzip -q "${APK}" 'lib/arm64-v8a/*' -d libcheck
+          SO="libcheck/lib/arm64-v8a/libgoni_vv.so"
+          test -f "${SO}" || { echo "::error::libgoni_vv.so não encontrada no APK"; exit 1; }
+          echo "SO=${SO}" >> "$GITHUB_ENV"
+
+      - name: "nm -D — confirmar exportação dos símbolos de entrada"
+        run: |
+          set -euo pipefail
+          SO="${SO}"
+          # nm -D lê ELF aarch64 no binutils do runner; readelf é o fallback
+          # arquitetura-agnóstico caso nm não reconheça o formato.
+          if nm -D "${SO}" > dynsyms.txt 2> nm.err; then
+            echo "Ferramenta: nm -D"
+          else
+            echo "nm não leu o ELF ($(cat nm.err)) — usando readelf --dyn-syms"
+            readelf --dyn-syms "${SO}" > dynsyms.txt
+          fi
+          echo "--- .dynsym (símbolos de entrada) ---"
+          grep -E 'ANativeActivity_onCreate|android_main|JNI_OnLoad|Java_vv_goni_VvActivity_nativeOnActivityResult|Java_vv_goni_VvActivity_nativeRegisterActivity|Java_vv_goni_VvActivity_nativeOpenProject' dynsyms.txt || true
+          grep -q 'ANativeActivity_onCreate' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: ANativeActivity_onCreate — o APK vai crashar com UnsatisfiedLinkError no arranque."; exit 1; }
+          grep -q 'android_main' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: android_main — entry point do glue não foi ligado."; exit 1; }
+          grep -q 'JNI_OnLoad' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: JNI_OnLoad — registo explícito de nativos (F5.1-hotfix) não foi ligado."; exit 1; }
+          grep -q 'Java_vv_goni_VvActivity_nativeOnActivityResult' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: Java_vv_goni_VvActivity_nativeOnActivityResult — ponte SAF/Java sem o callback JNI."; exit 1; }
+          grep -q 'Java_vv_goni_VvActivity_nativeRegisterActivity' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: Java_vv_goni_VvActivity_nativeRegisterActivity — handshake invertido (F5.3) sem o método de registo."; exit 1; }
+          grep -q 'Java_vv_goni_VvActivity_nativeOpenProject' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: Java_vv_goni_VvActivity_nativeOpenProject — Gestor de Projetos (F5.4) sem o método de abertura do projeto."; exit 1; }
+          # 0.8.7 — AUDITORIA DE EXISTÊNCIA (precedente real: FileApi.cpp
+          # estava nos testes mas NÃO no CMake da app → testes verdes,
+          # device sem a feature). O GERADOR DE PRIMITIVAS (makePrimMesh/
+          # primDefaults/primName — render/Primitives.cpp), o gerador de
+          # geometria por ASSINATURA e o DISPATCH DA TROCA (applyAssetPick —
+          # ui/EditorUi.cpp, chamado pelo main no caminho real) têm de estar
+          # no BINÁRIO DA APP. Os nomes C++ ficam MANGLED mas CONTÊM o
+          # identificador literal (_ZN2vv11makePrimMeshE…), o grep apanha.
+          echo "--- .dynsym (gerador de primitivas + troca) ---"
+          grep -E 'makePrimMesh|primDefaults|primName|primClamp|applyAssetPick' dynsyms.txt || true
+          # 0.8.10 — FORMATOS PRÓPRIOS + STREAMING + ARCHIVES: os leitores/
+          # escritores de .gmesh/.gtext/.gm, o conversor streaming e o
+          # extrator de ZIP têm de estar no BINÁRIO DA APP (o precedente
+          # FileApi: testes verdes + device sem a feature = gate obrigatório)
+          echo "--- .dynsym (formatos próprios + streaming + zip 0.8.10) ---"
+          grep -E 'writeGMesh|readGMesh|readGText|readGAnim|primMeshHash|importFile|extractArchive|attachGAnim|migrateLegacyAssets' dynsyms.txt || true
+          for SYM in writeGMesh readGMesh readGText readGAnim primMeshHash extractArchive attachGAnim; do
+            grep -q "${SYM}" dynsyms.txt \
+              || { echo "::error::SÍMBOLO AUSENTE: vv::${SYM} — os FORMATOS PRÓPRIOS/streaming/zip 0.8.10 não estão no APK (ficheiro fora da build da app?)."; exit 1; }
+          done
+          # 0.8.11 — ÁUDIO: o contentor .gi (write/read), o IMPORT, os codecs
+          # OGG/MP3 e o PROBE (a decisão de fallback) têm de estar no BINÁRIO
+          # DA APP — o mesmo precedente FileApi (testes verdes + APK sem
+          # áudio seria o bug invisível de sempre)
+          echo "--- .dynsym (áudio 0.8.11: .gi + import + codecs + probe) ---"
+          grep -E 'writeGi|readGi|importAudioToGi|imaEncode|imaDecode|decodeOgg|decodeMp3|runProbe|probeTable|drawAudioWorkspace' dynsyms.txt || true
+          for SYM in writeGi readGi importAudioToGi imaEncode imaDecode decodeOgg decodeMp3 runProbe probeTable drawAudioWorkspace; do
+            grep -q "${SYM}" dynsyms.txt \
+              || { echo "::error::SÍMBOLO AUSENTE: vv::${SYM} — o ÁUDIO 0.8.11 não está no APK (contentor .gi/import/codecs/probe — ficheiro fora da build da app?)."; exit 1; }
+          done
+          grep -q 'importFile' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: vv::convert::importFile — o CONVERSOR STREAMING não está no APK."; exit 1; }
+          grep -q 'migrateLegacyAssets' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: vv::convert::migrateLegacyAssets — a MIGRAÇÃO de projetos antigos não está no APK."; exit 1; }
+          grep -q 'makePrimMesh' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: vv::makePrimMesh — o GERADOR DE PRIMITIVAS não está no APK (render/Primitives.cpp fora da build da app? O seletor listaria as formas mas nenhuma troca geraria geometria)."; exit 1; }
+          grep -q 'primDefaults' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: vv::primDefaults — defaults por tipo (a troca pede-os ao gerador) fora do binário."; exit 1; }
+          grep -q 'primName' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: vv::primName — nomes canónicos (serializer + seletor) fora do binário."; exit 1; }
+          grep -q 'primClamp' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: vv::primClamp — defesa de parâmetros do gerador fora do binário."; exit 1; }
+          grep -q 'applyAssetPick' dynsyms.txt \
+            || { echo "::error::SÍMBOLO AUSENTE: vv::editor::applyAssetPick — o DISPATCH da troca (seletor→MeshRenderer) fora do binário."; exit 1; }
+          # F5.4 (pedido do dono): PARIDADE COMPLETA Java↔.so — o gate afere
+          # TODOS os natives da VvActivity.java contra o .dynsym real (não só
+          # a lista fixa acima) + assinaturas contra a tabela RegisterNatives
+          python3 scripts/jni_parity.py dynsyms.txt
+          echo "OK: ANativeActivity_onCreate, android_main, JNI_OnLoad, TODOS os natives da VvActivity (registo, resultado, openProject) E o gerador de primitivas + dispatch da troca (makePrimMesh/primDefaults/primName/primClamp/applyAssetPick) exportados em libgoni_vv.so"
+
+      # F5.3 (TAREFA 1 institucionalizada): gate do MANIFEST BINÁRIO do APK
+      # real — aferições que provaram que 0.6.2 tinha o manifest correto mas
+      # a ponte morria em runtime (docs/HANDSHAKE_AUDIT.md). hasCode=true +
+      # launcher VvActivity + lib_name goni_vv têm de estar em TODO build.
+      - name: "Gate do manifest binário (hasCode + VvActivity + lib_name)"
+        run: |
+          set -euo pipefail
+          APK="$(find apk -type f -name '*.apk' | head -n 1)"
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          AAPT2="$(ls "${SDK}"/build-tools/*/aapt2 | sort -V | tail -n 1)"
+          "${AAPT2}" dump xmltree "${APK}" --file AndroidManifest.xml > manifest.txt
+          cat manifest.txt
+          # 1) hasCode=true (tipo 0x12 = boolean, valor 0x1) — a VvActivity
+          #    (dex) é instanciada pelo sistema, não a NativeActivity nua
+          grep -E 'android:hasCode.*(type 0x12\)0x1|=true|0x1$)' manifest.txt \
+            || { echo "::error::MANIFEST: hasCode != true — VvActivity não seria instanciada (todas as pontes JNI morrem)."; exit 1; }
+          # 2) activities da ponte: ProjectManagerActivity (F5.4 — gestor é
+          #    o LAUNCHER) e VvActivity (handshake + bridges SAF)
+          grep -q 'vv.goni.ProjectManagerActivity' manifest.txt \
+            || { echo "::error::MANIFEST: vv.goni.ProjectManagerActivity ausente — Gestor de Projetos (F5.4) não é o ecrã inicial."; exit 1; }
+          grep -q 'vv.goni.VvActivity' manifest.txt \
+            || { echo "::error::MANIFEST: activity vv.goni.VvActivity ausente — handshake invertido impossível."; exit 1; }
+          # 3) meta-data lib_name = goni_vv (loadLibrary no super.onCreate —
+          #    sem ele, JNI_OnLoad/RegisterNatives nunca correm)
+          grep -q 'goni_vv' manifest.txt \
+            || { echo "::error::MANIFEST: meta-data android.app.lib_name != goni_vv."; exit 1; }
+          # 4) F5.5 (fix C33 0.6.9): MANAGE_EXTERNAL_STORAGE DECLARADO no
+          #    manifest BINÁRIO — sem a declaração o sistema não tem o que
+          #    conceder (a app não aparecia na lista "Acesso a todos os
+          #    ficheiros" e isExternalStorageManager() era sempre false —
+          #    o fluxo de settings nunca podia funcionar). A presença é
+          #    complementada pela verificação no device (lista + toggle).
+          grep -q 'android.permission.MANAGE_EXTERNAL_STORAGE' manifest.txt \
+            || { echo "::error::MANIFEST: uses-permission MANAGE_EXTERNAL_STORAGE ausente — o sistema não tem o que conceder (All Files Access morto; ver docs/SAF_EXCEPTION.md)."; exit 1; }
+          echo "OK: manifest binário — hasCode=true, vv.goni.VvActivity como activity, lib_name=goni_vv, MANAGE_EXTERNAL_STORAGE declarado"
+
+      - name: Verificar assinatura (apksigner)
+        run: |
+          set -euo pipefail
+          APK="$(find apk -type f -name '*.apk' | head -n 1)"
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          APKSIGNER="$(ls "${SDK}"/build-tools/*/apksigner | sort -V | tail -n 1)"
+          "${APKSIGNER}" verify --print-certs "${APK}"
+
+  init-keystore:
+    name: init-keystore (gera a keystore uma vez — guardar offline)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Gerar keystore PKCS12 (uma vez)
+        env:
+          PW_STORE: ${{ inputs.store_pw || secrets.VV_STORE_PW }}
+          PW_ALIAS: ${{ inputs.key_alias || secrets.VV_KEY_ALIAS || 'vv' }}
+          PW_KEY: ${{ inputs.key_pw || secrets.VV_KEY_PW }}
+        run: |
+          if [ -z "$PW_STORE" ] || [ -z "$PW_KEY" ]; then
+            echo "::error::Informe 'store_pw' e 'key_pw' no workflow_dispatch (ou configure os secrets VV_STORE_PW/VV_KEY_PW)."
+            exit 1
+          fi
+          if [ "$PW_STORE" != "$PW_KEY" ]; then
+            echo "::error::PKCS12 exige store_pw == key_pw (keytool mapeia a senha da chave para a senha da keystore)."
+            exit 1
+          fi
+          keytool -genkeypair -v -keystore vv-release.jks -storetype PKCS12 \
+            -alias "$PW_ALIAS" -keyalg RSA -keysize 2048 -validity 10950 \
+            -storepass "$PW_STORE" -keypass "$PW_KEY" \
+            -dname "CN=G.One VV, OU=VV, O=G.One VV, L=Luanda, ST=Luanda, C=AO"
+
+      - name: Publicar artifact da keystore
+        uses: actions/upload-artifact@v4
+        with:
+          name: vv-release-keystore
+          path: vv-release.jks
+          if-no-files-found: error
+
+      - name: Instruções para o dono (sumário do job)
+        run: |
+          {
+            echo "## init-keystore — próximos passos"
+            echo ""
+            echo "1. Baixe o artifact **vv-release-keystore** e guarde OFFLINE (sem ele não há updates com a mesma assinatura)."
+            echo "2. Anote as senhas usadas no dispatch (ou nos secrets VV_STORE_PW / VV_KEY_PW)."
+            echo "3. Gere o base64: \`base64 -w0 vv-release.jks\`"
+            echo "4. Configure os secrets: **VV_KEYSTORE** (base64), **VV_STORE_PW**, **VV_KEY_ALIAS**, **VV_KEY_PW**."
+            echo "5. Rode o workflow de novo — o artifact do APK vira **-signed**."
+            echo ""
+            echo "Atenção: trocar de keystore muda a assinatura — exige desinstalar/reinstalar no device."
+          } >> "$GITHUB_STEP_SUMMARY"

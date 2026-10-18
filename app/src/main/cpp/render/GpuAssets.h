@@ -1,0 +1,126 @@
+#pragma once
+// render/GpuAssets.h — cache de objetos GL por ref (F5-E, device).
+//
+// Segunda metade do contrato do ResourceManager: 1 ref relativa → 1
+// MeshData (CPU, cache lá) → 1 objeto GL (AQUI). Chamadas repetidas com a
+// mesma ref devolvem o MESMO ponteiro — TICs diferentes que usam
+// "meshes/x.obj" partilham VBO/VAO e a mesma textura: a memória de GPU NÃO
+// duplica (critério de aceitação da F5).
+//
+// O upload acontece no PRIMEIRO uso (lazy) — cenas carregam mesmo com
+// assets pesados; o custo de GL paga-se quando o mesh entra em cena.
+//
+// 0.10-M (PASSO 4) — O CAMINHO DOS BLOCOS: um .gmesh v3 que o mesh único
+// RECUSARIA (>65 535 verts ou estimativa > kMeshLoadBudgetBytes) abre por
+// aqui como BlockMesh (a TABELA, nunca os dados) e mesh(ref) devolve o
+// HULL de bounds — um Mesh* VÁLIDO com o AABB global do meta, para o
+// contrato do picker/serializer (fit/cena/bounds SEM carregar nada). O
+// render é do BlockMesh (drawTics consulta MeshRenderer::blocks
+// PRIMEIRO — o hull nunca desenha). 1 ref = 1 BlockMesh (como 1 ref =
+// 1 Mesh): a memória não duplica. TERM_WINDOW: releaseAll apaga tudo —
+// o re-open do INIT custa 192 B + tabela (nunca dados; o mesmo contrato
+// do re-upload dos Mesh comuns).
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include "assets/ResourceManager.h"
+#include "render/BlockMesh.h"   // PASSO 4: unique_ptr<BlockMesh> pede o tipo
+                                    // COMPLETO nos TUs que instanciam GpuAssets
+                                    // (o header é GL-free — o GL vive nos .cpp)
+#include "render/Mesh.h"
+#include "render/Texture.h"
+// (os headers acima são GL-free — o GL vive nos .cpp; o unique_ptr abaixo
+// precisa do tipo COMPLETO quando main.cpp instancia o destrutor do cache)
+
+namespace vv {
+
+class TexturePipeline;
+
+class GpuAssets {
+public:
+    // rm não-dono (tem de viver enquanto o GpuAssets viver)
+    void init(ResourceManager* rm) { rm_ = rm; }
+    // F5.1-A: pipeline de texturas (cache disco + compressão) — opcional;
+    // sem pipeline, o caminho legacy F5 (passthrough) é usado.
+    void setPipeline(TexturePipeline* p) { pipeline_ = p; }
+
+    // nullptr se a ref não resolve (erro no RM ou upload GL falhou).
+    // Para um .gmesh v3 DE BLOCOS devolve o HULL de bounds (ver acima).
+    Mesh* mesh(const std::string& ref);
+
+    // 0.10-M (PASSO 4): o BlockMesh ABERTO desta ref (nullptr se não está
+    // aberto — mesh(ref) abre-o; o lookup puro para o drawTics/export).
+    BlockMesh* blockMeshIfOpen(const std::string& ref) const;
+
+    // 0.10-M (EXT): abre (ou encontra) o BlockMesh da ref + cria o hull —
+    // o caminho do mesh() quando o peek diz «blocos». PÚBLICO porque o
+    // import EXPANDIDO ata as PEÇAS por AQUI (o binder do
+    // gltfExpandInstantiate: a peça abre POR BLOCOS pelo
+    // kGmeshV3FlagPiece — o culling por TIC — mesmo sendo pequena).
+    Mesh* blockHull(const std::string& ref);
+
+    // 0.10-M HOTFIX TEXTURAS-VINCULA — o caminho LIGEIRO do auto-bind (o
+    // apply/reload sem abrir BlockMesh): peek 192 B + statBytes + a faixa
+    // dos materiais; devolve o caminho .gtext do slot baseColor do
+    // material ("" = sem bind/sem stat — o chamador segue honesto).
+    std::string baseColorBindOf(const std::string& ref, u32 materialIndex);
+
+    // 0.10-M HOTFIX-2 (TEXTURAS-VINCULA-2) — o MESMO caminho ligeiro, os
+    // CINCO slots: o bug do device («só o baseColor fica preenchido») era
+    // o auto-bind só-baseColor; o TIC fica com os 5 slots do GTB1 (o
+    // material pedidxo). false = sem bind/sem stat — o chamador segue
+    // honesto (out fica todo vazio).
+    bool matBindsOf(const std::string& ref, u32 materialIndex,
+                    std::string (&out)[kBindSlotCount]);
+
+    // 0.10.6 (SAF-SEAM) — o ÚLTIMO erro de mesh()/blockHull() (a linha do
+    // «asset corrompido, reimporta» chega ao TOAST do picker, não SÓ ao
+    // engine.log: a spec manda o estado do picker ANTERIOR + a mensagem
+    // CLARA — nunca a troca silenciosa pela bola). Vazio = sem falha
+    // recente (o sucesso limpa). Thread do main (o picker corre lá).
+    const std::string& lastMeshError() const { return lastMeshErr_; }
+
+    // aviso (gate 2K no fallback) sai da carga — o chamador mostra em toast
+    const Texture* texture(const std::string& relPath, std::string* warn = nullptr);
+
+    // 0.11-M (FASE 2): resolve a textura E aplica o sampler do glTF (os
+    // códigos kSampler* da casa — o GTB2 transporta). FIRST-WINS por
+    // caminho: a 1.ª resolução com sampler não-default vence; um material
+    // seguinte com sampler DIFERENTE para a MESMA textura é logado e
+    // ignorado (a alternativa — texturas duplicadas por sampler — é
+    // memória a dobrar no device; o limite fica documentado no relatório).
+    const Texture* textureWithSampler(const std::string& relPath,
+                                      const u8 sampler[4]);
+
+    // 0.11-W (3.75b) — o TEXTURE do IMPOSTOR: o PNG RGBA de
+    // impostors/<stem>.png (gerado sob demanda pelo ImpostorIndex — o
+    // pico de RAM é UM bloco) → Texture com sampler CLAMP/LINEAR (o
+    // billboard NUNCA repete — o wrap REPEAT de sempre mancha a borda).
+    // nullptr = sem impostor (o PNG não gerou) — o chamador segue o
+    // caminho dos blocos (o fallback honesto; NUNCA um quad branco).
+    const Texture* impostorTexture(const std::string& assetRef);
+
+    void releaseAll();   // TERM_WINDOW: apaga TUDO (blocks incluídos — o
+                         // re-open custa 192 B + tabela, nada de dados)
+
+    // telemetria p/ a status line do editor (objetos GL vivos)
+    u32 meshCount() const { return static_cast<u32>(gpuMeshes_.size()); }
+    u32 textureCount() const { return static_cast<u32>(gpuTextures_.size()); }
+    u32 blockMeshCount() const { return static_cast<u32>(blockMeshes_.size()); }
+
+private:
+    ResourceManager* rm_ = nullptr;
+    TexturePipeline* pipeline_ = nullptr;
+    std::unordered_map<std::string, std::unique_ptr<Mesh>> gpuMeshes_;
+    std::unordered_map<std::string, std::unique_ptr<Texture>> gpuTextures_;
+    std::unordered_map<std::string, std::unique_ptr<Texture>>
+        impostorTextures_;   // 0.11-W (3.75b): os PNG alfa do impostor
+                             // (o MESMO contrato 1 ref = 1 objeto GL)
+    std::unordered_map<std::string, std::unique_ptr<BlockMesh>> blockMeshes_;
+    // 0.11-M (FASE 2): o sampler JÁ APLICADO por caminho (first-wins;
+    // os 4 códigos kSampler* empacotados — 0 em tudo = sem sampler)
+    std::unordered_map<std::string, u32> samplerApplied_;
+    std::string lastMeshErr_;   // 0.10.6 (SAF-SEAM): o último erro de mesh
+};
+
+} // namespace vv

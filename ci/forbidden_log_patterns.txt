@@ -1,0 +1,15 @@
+# ci/forbidden_log_patterns.txt — PADRÕES PROIBIDOS NO OUTPUT (0.8.12).
+#
+# O gate do CI corre o REPLAY do dispositivo virtual (c33_virtual) e grepa
+# o engine.log + output contra CADA linha deste ficheiro. QUALQUER match =
+# CI VERMELHO = RELEASE BLOQUEADA. A lista vive em FICHEIRO (não em código)
+# para que bugs futuros acrescentem padrões sem tocar em código — a linha
+# nova entra com a entrada correspondente em docs/REGRESSOES.md.
+#
+# Regras: UMA linha = UM padrão (grep -F, fixo, sem regex); linhas vazias e
+# começadas por # são ignoradas; codificação UTF-8 (as linhas de log reais
+# têm acentos — o grep lê bytes, o ficheiro tem de os ter iguais).
+sem TIC com mesh selecionado
+mkdir falhou em '/tmp'
+staging falhou
+ERRO(gerador/upload falhou)

@@ -1,0 +1,14 @@
+{
+  "release": "0.9.6.19b",
+  "item": "D20",
+  "densidade": 2.0,
+  "viewport_px": [1272.0, 536.0],
+  "preview_dp_alvo": [48.0, 120.0],
+  "preview_cap_mundo": 1.3106,
+  "bounding_sem_px": [896.0, 295.5, 122.0, 116.0],
+  "bounding_com_px": [896.0, 285.5, 132.0, 136.0],
+  "pct_area_sem": 2.074,
+  "pct_area_com": 2.632,
+  "pin_sem_pct": 4.0,
+  "pin_com_pct": 6.0
+}

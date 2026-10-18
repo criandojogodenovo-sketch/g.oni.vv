@@ -1,0 +1,272 @@
+// tests/test_components.cpp — F3: ComponentStorage SoA, ComponentRegistry,
+// ComponentStore (add/get/remove + attach/detach) e integração com Scene.
+#include "TestFramework.h"
+#include <cstring>
+#include "core/Component.h"
+#include "core/ComponentRegistry.h"
+#include "core/ComponentStorage.h"
+#include "core/ComponentStore.h"
+#include "core/Scene.h"
+#include "components/InputMap.h"
+#include "components/MeshRenderer.h"
+#include "components/Transform3D.h"
+
+using namespace vv;
+using ::test::nearEqF;
+
+namespace {
+
+// Componente de teste para contar hooks (o storage é template — aceita
+// qualquer tipo derivado de Component, mesmo fora do ComponentStore).
+struct CountingComp : Component {
+    static int attached;
+    static int detached;
+    void attach() override { ++attached; }
+    void detach() override { ++detached; }
+};
+int CountingComp::attached = 0;
+int CountingComp::detached = 0;
+
+} // namespace
+
+TEST(storage_add_find_remove_soa) {
+    Scene s;
+    ComponentStorage<CountingComp> st;
+    const Handle a = s.create("a");
+    const Handle b = s.create("b");
+    const Handle c = s.create("c");
+
+    CountingComp::attached = 0;
+    CountingComp::detached = 0;
+
+    EXPECT(st.add(a, s.get(a)) != nullptr);
+    EXPECT(st.add(b, s.get(b)) != nullptr);
+    EXPECT(st.add(c, s.get(c)) != nullptr);
+    EXPECT(CountingComp::attached == 3);
+    EXPECT(st.size() == 3u);
+    EXPECT(st.owner(0) == a && st.owner(1) == b && st.owner(2) == c);
+
+    EXPECT(st.find(b) != nullptr);
+    st.find(b)->owner = s.get(b);   // owner coerente
+    EXPECT(st.find(b)->owner == s.get(b));
+    EXPECT(!st.find(Handle::invalid()));
+
+    // remove do meio → swap-remove: dono 'c' toma o índice de 'b'
+    EXPECT(st.remove(b));
+    EXPECT(st.size() == 2u);
+    EXPECT(st.find(b) == nullptr);
+    EXPECT(st.owner(1) == c);
+    EXPECT(CountingComp::detached == 1);
+}
+
+TEST(storage_recusa_duplicado_e_handle_invalido) {
+    Scene s;
+    ComponentStorage<Transform3D> st;
+    const Handle a = s.create("a");
+    EXPECT(st.add(a, s.get(a)) != nullptr);
+    EXPECT(st.add(a, s.get(a)) == nullptr);   // um por tipo por TIC
+    EXPECT(st.size() == 1u);
+    EXPECT(!st.remove(a.index == 0 ? Handle{99u, 1u} : Handle{99u, 1u}));
+    EXPECT(!st.remove(Handle::invalid()));
+    EXPECT(st.remove(a));                     // limpa
+    EXPECT(st.size() == 0u);
+}
+
+TEST(registry_registo_find_factory) {
+    Scene s;
+    ComponentStore store(&s);
+    const Handle h = s.create("tic");
+
+    // ordem de registo fixa (contrato do ctor)
+    // 0.7.0: +UiCanvas; 0.7.7: +Camera — SEMPRE NO FIM (ids intactos)
+    EXPECT(store.registry().count() == 13u);   // 0.9.2: +Script; 0.8.11: +AudioPlayer; 0.8.0: +AnimationPlayer; 0.8.2: +Skeleton; 0.12-B: +Control/UIRoot (a árvore)
+    EXPECT(store.registry().find("Transform3D") == 0);
+    EXPECT(store.registry().find("MeshRenderer") == 1);
+    EXPECT(store.registry().find("InputMap") == 2);
+    EXPECT(store.registry().find("BodyComp") == 3);
+    EXPECT(store.registry().find("TouchControls") == 4);
+    EXPECT(store.registry().find("UiCanvas") == 5);
+    EXPECT(store.registry().find("Camera") == 6);   // 0.7.7
+    EXPECT(store.registry().find("AudioPlayer") == 9);   // 0.8.11 (depois do Skeleton 8)
+    EXPECT(store.registry().find("Control") == 11);      // 0.12-B (a árvore de UI)
+    EXPECT(store.registry().find("UIRoot") == 12);       // 0.12-B (a raiz)
+    EXPECT(store.registry().find("Desconhecido") == -1);
+
+    // factory por id e por nome
+    const i32 id = store.registry().find("Transform3D");
+    EXPECT(store.registry().create(static_cast<u32>(id), store, h));
+    EXPECT(store.get<Transform3D>(h) != nullptr);
+    EXPECT(!store.registry().create(static_cast<u32>(id), store, h));   // duplicado
+    EXPECT(!store.registry().create(999u, store, h));                   // id fora
+
+    EXPECT(store.registry().create("InputMap", store, h));
+    EXPECT(store.get<InputMap>(h) != nullptr);
+
+    const ComponentTypeRecord* rec = store.registry().at(1);
+    EXPECT(rec != nullptr);
+    EXPECT(rec->name != nullptr && std::strcmp(rec->name, "MeshRenderer") == 0);
+    EXPECT(store.registry().at(42u) == nullptr);
+}
+
+TEST(store_add_get_remove_ciclo_completo) {
+    Scene s;
+    ComponentStore store(&s);
+    const Handle h = s.create("cubo");
+
+    Transform3D init;
+    init.pos = Vec3{1.0f, 2.0f, 3.0f};
+    init.rot = Quat::axisAngle(Vec3{0.0f, 1.0f, 0.0f}, 0.5f);
+    init.scale = Vec3{2.0f, 2.0f, 2.0f};
+    init.updateWorld();
+
+    Transform3D* tr = store.add<Transform3D>(h, init);
+    EXPECT(tr != nullptr);
+    EXPECT(tr->owner == s.get(h));                 // owner aponta para o Tic
+    EXPECT(tr->pos.x == 1.0f && tr->pos.y == 2.0f && tr->pos.z == 3.0f);
+
+    MeshRenderer* mr = store.add<MeshRenderer>(h);
+    EXPECT(mr != nullptr && mr->mesh == nullptr && mr->material == nullptr);
+
+    // get<const> via overload const
+    const Scene& cs = s;
+    const ComponentStore& cstore = store;
+    EXPECT(cstore.get<Transform3D>(h) != nullptr);
+
+    // remove: detach + swap; getAll vazio
+    EXPECT(store.remove<Transform3D>(h));
+    EXPECT(store.get<Transform3D>(h) == nullptr);
+    EXPECT(store.remove<Transform3D>(h) == false);   // segunda vez falha
+
+    store.removeAll(h);
+    EXPECT(store.get<MeshRenderer>(h) == nullptr);
+    EXPECT(!store.hasAny(h));
+}
+
+TEST(store_sem_dono_recusa_add) {
+    ComponentStore store(nullptr);   // situação só de teste — fora da Scene
+    EXPECT(!store.hasAny(Handle::invalid()));
+    // add sem Scene não pode crashar: devolve nullptr
+    EXPECT(store.registry().count() == 13u);   // 0.9.2: +Script; 0.8.11: +AudioPlayer; 0.8.2: +Skeleton; 0.8.0: +AnimationPlayer; 0.12-B: +Control/UIRoot
+}
+
+TEST(tic_api_add_get_remove_componente) {
+    Scene s;   // Scene é dona do store; Tic::addComponent passa por lá
+    const Handle h = s.create("tic");
+    Tic* t = s.get(h);
+    EXPECT(t->scene == &s);
+
+    Transform3D* tr = t->addComponent<Transform3D>();
+    EXPECT(tr != nullptr);
+    EXPECT(tr->owner == t);
+    EXPECT(t->getComponent<Transform3D>() == tr);
+
+    // add<T>(init) copia dados e preserva o owner do storage
+    Transform3D init;
+    init.pos = Vec3{3.0f, 4.0f, 5.0f};
+    const Handle h2 = s.create("outro");
+    Transform3D* tr2 = s.get(h2)->addComponent<Transform3D>(init);
+    EXPECT(tr2 != nullptr);
+    EXPECT(tr2->owner != nullptr && tr2->owner != t);   // owner = o novo Tic
+    EXPECT(tr2->pos.x == 3.0f && tr2->pos.y == 4.0f && tr2->pos.z == 5.0f);
+    EXPECT(!t->addComponent(*tr));   // duplicado do mesmo tipo → nullptr
+
+    InputMap* im = t->addComponent<InputMap>();
+    EXPECT(im != nullptr);
+    EXPECT(s.components().hasAny(h));
+
+    EXPECT(t->removeComponent<InputMap>());
+    EXPECT(t->getComponent<InputMap>() == nullptr);
+    EXPECT(!t->removeComponent<InputMap>());
+}
+
+TEST(tic_sem_scene_recusa_composicao) {
+    Tic solto;   // nunca passou pela Scene::create
+    EXPECT(solto.addComponent<Transform3D>() == nullptr);
+    EXPECT(solto.getComponent<Transform3D>() == nullptr);
+    EXPECT(!solto.removeComponent<Transform3D>());
+}
+
+TEST(scene_destroy_remove_componentes_do_tic) {
+    Scene s;
+    const Handle h = s.create("a");
+    s.get(h)->addComponent<Transform3D>();
+    s.get(h)->addComponent<MeshRenderer>();
+
+    EXPECT(s.components().transforms().size() == 1u);
+    EXPECT(s.components().meshRenderers().size() == 1u);
+    EXPECT(s.components().hasAny(h));
+
+    EXPECT(s.destroy(h));
+    EXPECT(!s.components().hasAny(h));                 // removidos no destroy
+    EXPECT(s.components().transforms().size() == 0u);
+    EXPECT(s.components().meshRenderers().size() == 0u);
+
+    // slot reutilizado: novo TIC nasce limpo, sem herdar componentes
+    const Handle b = s.create("b");
+    EXPECT(b.index == h.index);
+    EXPECT(s.get(b)->getComponent<Transform3D>() == nullptr);
+    EXPECT(!s.components().hasAny(b));
+}
+
+TEST(scene_clear_limpa_tics_e_componentes) {
+    Scene s;
+    const Handle a = s.create("a");
+    const Handle b = s.create("b");
+    s.get(a)->addComponent<Transform3D>();
+    s.get(b)->addComponent<Transform3D>();
+    s.get(b)->addComponent<MeshRenderer>();
+
+    s.clear();
+    EXPECT(s.count() == 0u);
+    EXPECT(s.components().transforms().size() == 0u);
+    EXPECT(s.components().meshRenderers().size() == 0u);
+    EXPECT(!s.alive(a) && !s.alive(b));
+
+    // após clear, criar de novo reutiliza índices na ordem ascendente
+    const Handle c = s.create("c");
+    const Handle d = s.create("d");
+    EXPECT(c.index == 0u && d.index == 1u);
+}
+
+TEST(forEachActive_visita_so_os_ativos) {
+    Scene s;
+    const Handle a = s.create("a");
+    const Handle b = s.create("b");
+    s.create("c");
+    s.destroy(b);
+
+    u32 visitados = 0;
+    bool viuA = false, viuB = false;
+    s.forEachActive([&](const Tic& t) {
+        ++visitados;
+        if (t.handle == a) viuA = true;
+        if (t.handle == b) viuB = true;
+    });
+    EXPECT(visitados == 2u);   // 'b' está destruído
+    EXPECT(viuA && !viuB);
+}
+
+TEST(transform3d_trs_matrix) {
+    Transform3D tr;
+    tr.pos = Vec3{1.0f, 2.0f, 3.0f};
+    tr.rot = Quat::axisAngle(Vec3{0.0f, 1.0f, 0.0f}, 1.5707963f);   // +90° yaw
+    tr.scale = Vec3{2.0f, 1.0f, 1.0f};
+    tr.updateWorld();
+
+    // local (1,0,0) → scale (2,0,0) → rotY90 (0,0,-2) → translação (1,2,1)
+    f32 out[4];
+    Mat4::transformPoint4(tr.world, Vec3{1.0f, 0.0f, 0.0f}, out);
+    EXPECT(nearEqF(out[0], 1.0f));
+    EXPECT(nearEqF(out[1], 2.0f));
+    EXPECT(nearEqF(out[2], 1.0f));
+
+    // identidade: pos=(0,0.5,0) default dos presets, rot e scale neutros
+    Transform3D base;
+    base.pos = Vec3{0.0f, 0.5f, 0.0f};
+    base.updateWorld();
+    f32 out2[4];
+    Mat4::transformPoint4(base.world, Vec3{0.5f, -0.5f, 0.0f}, out2);
+    EXPECT(nearEqF(out2[0], 0.5f));
+    EXPECT(nearEqF(out2[1], 0.0f));
+    EXPECT(nearEqF(out2[2], 0.0f));
+}

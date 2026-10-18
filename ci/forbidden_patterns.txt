@@ -1,0 +1,27 @@
+# ci/forbidden_patterns.txt — ASSINATURAS DE CRASH PROIBIDAS (hotfix 0.9.3).
+#
+# O GATE (job c33-virtual do release.yml) grepa o output COMBINADO dos
+# sentinelas JVM (ReloadGateTest), do replay do c33_virtual e do engine.log
+# contra CADA linha deste ficheiro com grep -E (expressões estendidas).
+# QUALQUER match = CI VERMELHO = RELEASE BLOQUEADA.
+#
+# Diferente do ci/forbidden_log_patterns.txt (sintomas de log do replay,
+# grep -F, 0.8.12): ESTE ficheiro mira as ASSINATURAS DOS DOIS CRASHES do
+# hotfix 0.9.3 (REG-001/REG-002 do relatório = R-005/R-006 do registo):
+#   • a exceção Java que matava o vv.goni ao abrir (23×/dia no RMX3624);
+#   • o sinal nativo dos tombstones AAudio/Unisoc (app antiga
+#     com.goni.runtime);
+#   • o watchdog dos processos pressionados (Problema 3).
+#
+# Regras: UMA linha = UMA expressão (grep -E); linhas vazias e começadas
+# por # são ignoradas. AS MENSAGENS dos checks/testes NUNCA citam estes
+# padrões no caminho verde (a lição 0.8.12-c: o gate grepa o PRÓPRIO
+# output de verificação — citar o padrão numa mensagem de sucesso seria
+# falso positivo).
+#
+# ATENÇÃO ao acrescentar: verifique primeiro que NENHUM output legítimo
+# (logs informativos, mensagens de check do harness) contém o padrão.
+ConcurrentModificationException
+SIGSEGV.*AAudio
+AAudio_createStreamBuilder\+160
+FinalizerWatchdogDaemon

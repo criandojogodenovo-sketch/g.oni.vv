@@ -1,0 +1,4 @@
+// build.gradle raiz — G.One VV 0.1.0 (F1)
+plugins {
+    id 'com.android.application' version '8.5.2' apply false
+}

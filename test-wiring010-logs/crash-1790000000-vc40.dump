@@ -1,0 +1,9 @@
+G.One VV — crash dump (legível sem ndk-stack)
+build: 0.8.10-teste (versionCode 40)
+git: abcd1234
+so: deadbeef...
+epoch: 1790000000
+signal: SIGSEGV (11)
+frames: 1
+#00 pc 0x1234  <desconhecido>
+nota: offset 0x… = pc - base do módulo; addr2line -e libgoni_vv.so <offset> resolve a linha no CI.

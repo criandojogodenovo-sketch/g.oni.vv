@@ -1,0 +1,52 @@
+#pragma once
+// assets/GltfAnim.h — animações/skins glTF → AnimationPlayer (0.8.1/0.8.2, F7).
+//
+// gltfAttachClips percorre as GltfAnimation do modelo e converte, para o
+// TIC dado, os channels cujo NÓ ALVO é `rootNode` (default 0) em tracks do
+// clip: translation → TicPos, rotation → TicRot (quat→EULER GRAUS, a
+// convenção do player/Inspector — lossy em rotações compostas, documentado
+// no RELATORIO-0.8.0 §5.2), scale → TicScale. Channels de OUTROS nós são
+// SALTADOS (o player é por-TIC; joints pedem a 0.8.2 — skinning).
+//
+// 0.8.2: gltfAttachSkin cria o SkeletonComp (joints pais-primeiro + bind
+// TRS + inverseBind) e gltfAttachClips ganha os tracks de JOINT (por nome
+// de joint): canais cujo nó é joint da 1ª skin viram JointPos/JointRot/
+// JointScale — o apply escreve o TRS LOCAL do joint e o render compõe.
+//
+// Cada animação vira um CLIP nomeado no AnimationPlayer do TIC (cria-o se
+// não existe); o clip "edit" da timeline NÃO é tocado (os importados
+// ACRESCENTAM — reimportar duplica; o dono apaga na mão se quiser).
+// Animações sem channel útil para o nó ficam DE FORA (clip vazio não entra).
+//
+// GL-free / host-testável (o CI constrói fixtures .glb em código).
+#include "assets/GltfImporter.h"
+#include "assets/GOwnFormats.h"
+#include "core/Handle.h"
+
+namespace vv {
+
+class Scene;
+
+// devolve o NÚMERO de clips acrescentados ao player do TIC
+u32 gltfAttachClips(Scene& scene, Handle tic, const GltfModel& model,
+                    i32 rootNode = 0);
+
+// 0.11-S (FASE 3): CUBICSPLINE glTF → keys bezier da casa — PURO (o CI
+// aferre contra a hermite de referência canal a canal). `values` no layout
+// glTF [in, valor, out] ×3 por key; `rot` converte quats→euler graus (as
+// tangentes por diferença finita — aproximação documentada no .cpp).
+// keysz malformado (times vazio/values curtos) → out vazio.
+void gltfCubicToKeys(const std::vector<f32>& times,
+                     const std::vector<f32>& values, u32 comps, bool rot,
+                     std::vector<AnimKey>& out);
+
+// 0.8.2: cria o SkeletonComp do TIC com a 1ª skin do modelo (joints +
+// inverseBind). Devolve o número de joints (0 se sem skin/já tem esqueleto)
+u32 gltfAttachSkin(Scene& scene, Handle tic, const GltfModel& model,
+                   u32 skinIdx = 0);
+
+// 0.8.10: .gm (formato próprio) → clips + SkeletonComp do TIC — o caminho
+// do load de cenas convertidas (assets/<x>.gm irmão do .gmesh referenciado)
+u32 attachGAnim(Scene& scene, Handle tic, const GAnimFile& anim);
+
+} // namespace vv
