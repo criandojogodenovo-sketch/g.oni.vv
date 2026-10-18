@@ -21,9 +21,8 @@
 // EXATA do FOGO AVERMELHADO do dono):
 //   bg         #0A0A0C α1.00 — fundo da app (o FUNDO da escada; == o
 //              clear, o contrato «o clear lê o token")
-//   surface    #141416 α0.80 — VIDRO 80% (o PAINEL da escada; a mesma
-//              decisão de vidro do dono): painéis (o RGB #141416 é o da
-//              paleta FOGO AVERMELHADO 0.12-E; o α sobe a 0.85 na FASE 3)
+//   surface    #141416 α0.85 — O VIDRO da FASE 3 do E (a ordem do dono:
+//              «fundo escuro com alpha 0.85»; era o α0.80 da 0.11-Y)
 //   surface2   #1E1E21 α0.86 — vidro denso (premido, chips ativos)
 //   card       #1B1B20 α1.00 — os CARTÕES (0.12-C)
 //   elevated   #24242A α1.00 — os MENUS/SHEETS/TOAST (0.12-C)
@@ -126,6 +125,14 @@ struct Theme {
     f32 ok[4];         // #46A758 α1.00
     f32 scrim[4];      // preto 60% (véu modal)
     f32 scrimMenu[4];  // preto 40% (véu dos menus ANCORADOS — PASSO 4)
+    // 0.12-E (E-3 · FASE 3.2): A SOMBRA FALSA da profundidade 2.5D — o
+    // retângulo preto 15% deslocado 3dp por baixo de CADA botão (a ordem:
+    // «Em vez de 3D, desenha um retângulo preto com 15% de opacidade
+    // deslocado 3px para baixo e para a direita por baixo de cada botão»;
+    // o 3px do dono à densidade de referência 1.0 — a LEI DA CASA R-018
+    // manda dp(): o deslocamento escala com a densidade como todo o
+    // layout, o efeito é o MESMO em qualquer ecrã)
+    f32 dropShadow[4]; // preto α0.15 (a sombra 2.5D)
     // 0.9.2 — PALETA V.ONI (spec §10 🔶 — coloração do editor de script;
     // o parser classifica tokens, AS CORES VIVEM AQUI — flip de 1 token).
     // CONTEÚDO, não chrome (exceção documentada ao «zero azul» — como os
@@ -182,8 +189,8 @@ inline constexpr Theme kTheme{
     VV_RGB(10, 10, 12),          // bg         (O FUNDO #0A0A0C — a escada
                                  //  0.12-C; o poço #08080A foi superado
                                  //  pela ordem expressa do dono, padrão Y-3)
-    VV_RGBA(20, 20, 22, 0.80f),  // surface    α0.80 — O VIDRO (o PAINEL
-                                 //  #141416 da paleta 0.12-E)
+    VV_RGBA(20, 20, 22, 0.85f),  // surface    α0.85 — O VIDRO da FASE 3
+                                 //  (o PAINEL #141416 da paleta 0.12-E)
     VV_RGBA(30, 30, 33, 0.86f),  // surface2   α0.86 — vidro denso
     VV_RGB(27, 27, 32),          // card       (O CARTÃO #1B1B20 — 0.12-C)
     VV_RGB(36, 36, 42),          // elevated   (O ELEVADO #24242A — 0.12-C)
@@ -203,6 +210,7 @@ inline constexpr Theme kTheme{
     VV_RGB(70, 167, 88),         // ok
     {0.0f, 0.0f, 0.0f, 0.60f},   // scrim (60%)
     {0.0f, 0.0f, 0.0f, 0.40f},   // scrimMenu (40% — PASSO 4, menus ancorados)
+    {0.0f, 0.0f, 0.0f, 0.15f},   // dropShadow (a sombra 2.5D — FASE 3.2)
     // V.ONI (sintaxe = conteúdo): voniUser segue o text1 (#F2F2F5 — a
     // paleta 0.12-E; era #ECECEE); no fundo #0A0A0C TODOS ≥5,8:1
     // (user 17,6 · engine 9,5 · reserved 8,3 · string 9,9 · number 14,2

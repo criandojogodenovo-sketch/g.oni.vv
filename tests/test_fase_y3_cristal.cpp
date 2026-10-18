@@ -123,11 +123,12 @@ TEST(y3_cristal_hierarquia) {
                test::nearEqF(h, 1.0f, 0.05f) &&
                test::nearEqF(x, p.x, 0.05f) &&
                test::nearEqF(w, p.w, 0.05f) &&
-               sameC(top, 1.0f, 61.0f / 255.0f, 0.0f, 0.20f);
+               sameC(top, 1.0f, 176.0f / 255.0f, 32.0f / 255.0f, 0.20f);
     });
     EXPECT_MSG(topo,
-               "y3_hierarquia: a LINHA DO TOPO do cristal (1dp do glow a "
-               "20% na largura do painel) não foi encontrada no batch");
+               "y3_hierarquia: a LINHA DO TOPO do cristal (1dp do âmbar a "
+               "20% na largura do painel — FASE 3 do E) não foi "
+               "encontrada no batch");
 
     // (b) o DIVISOR direito: o quad 1dp de largura na borda direita do
     // painel com o GRADIENTE (topo accentDim α0.90 → fundo α0.15)
@@ -183,7 +184,7 @@ TEST(y3_cristal_inspector) {
                test::nearEqF(h, 1.0f, 0.05f) &&
                test::nearEqF(x, p.x, 0.05f) &&
                test::nearEqF(w, p.w, 0.05f) &&
-               sameC(top, 1.0f, 61.0f / 255.0f, 0.0f, 0.20f);
+               sameC(top, 1.0f, 176.0f / 255.0f, 32.0f / 255.0f, 0.20f);
     });
     EXPECT_MSG(topo, "y3_inspector: a linha do topo do cristal em falta");
     const bool div = findQuad(e.ui, [&](f32 x, f32 y, f32 w, f32 h,

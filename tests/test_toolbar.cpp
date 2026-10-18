@@ -298,7 +298,7 @@ TEST(theme_tabela_spec_g_exata) {
     EXPECT(nearEqF(theme::kTheme.border[2], 20.0f / 255.0f, 1e-4f));
     // O VIDRO (spec G): surface α0.80 (A DECISÃO DO DONO) · surface2 α0.86
     // · border α0.60 (0.11-Y) · bg opaco
-    EXPECT(nearEqF(theme::kTheme.surface[3], 0.80f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.surface[3], 0.85f, 1e-4f));   // FASE 3
     EXPECT(nearEqF(theme::kTheme.surface2[3], 0.86f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.border[3], 0.60f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.bg[3], 1.0f, 1e-4f));

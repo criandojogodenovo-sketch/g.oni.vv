@@ -153,7 +153,89 @@ mutações M-D1a/b, M-D2a/b, M-D3a/b continuam coladas lá como história):
 
 ## 3 · E-3 — OS EFEITOS 2.5D (só desenho 2D)
 
-*(fecha no commit da FASE 3 — o vidro α0.85 + a linha 1dp âmbar a 20% no
-topo; a sombra falsa preta 15% deslocada 3px; os ativos com o gradiente
-vertical fireRed→fireOrange; a textura de ruído 2D em scroll lento (UV
-offset) nas bordas ativas — ZERO shaders matemáticos.)*
+### 3.1 As 4 receitas da ordem do dono (todas QUADS, zero shaders novos)
+
+- **(3.1) O VIDRO**: o `surface` α0.80 → **α0.85** (o fundo escuro dos
+  painéis) + a **LINHA 1dp do topo com o ÂMBAR a 20%** — o
+  `glassTopLine` troca o RGB do glow (#FF3D00, o fóssil da Y-1) pelo
+  `accent` #FFB020 ao mesmo 20% (o reflexo da luz). O preço: 0 (o emissor
+  já existia; a cor vem do token da fonte única).
+- **(3.2) A PROFUNDIDADE FALSA**: o **retângulo preto α0.15 deslocado
+  3dp para baixo e para a direita por baixo de CADA botão** (o token
+  `dropShadow` NOVO no Theme — preto 15%). O deslocamento é
+  `theme::dp(3)` — o «3px do dono» à densidade de referência 1.0; a lei
+  R-018 manda dp() (a sombra escala com o ecrã como todo o layout — o
+  efeito é o MESMO em qualquer densidade). O CHOKE POINT
+  `drawButtonVisual` emite-a em repouso E no ativo (o premido não perde
+  a profundidade); o `iconButton` da barra segue o mesmo contrato.
+- **(3.3) OS BOTÕES ATIVOS**: o **gradiente vertical 2D
+  fireRed→fireOrange** (a paleta da E-2 finalmente consumida; o
+  accent→accent2 da Y-1 sai do ativo — os tokens accent/accent2 vivem
+  para os restantes usos). O glow de foco da Y-1 fica (o feedback de
+  press é 2D puro e não foi revogado).
+- **(3.4) O FOGO ANIMADO**: a **textura 2D de ruído em SCROLL LENTO (UV
+  offset)** — `ui/Noise2D.h` NOVO, a FONTE ÚNICA (GL-free): value noise
+  64×64 TILEÁVEL determinístico (o hash embrulha na CÉLULA 8×8 — o pin
+  prova `pixel(x+64,y) == pixel(x,y)`; a emenda do GL_REPEAT fecha por
+  construção), o `fireScrollOffset(t) = t·6px/s / 64` (o mesmo t = a
+  mesma borda). O upload vive no `Renderer::init` (GL_RGBA, GL_REPEAT,
+  POT 64); o emissor `UiContext::fireBorder2D` desenha as 4 BANDAS 2dp do
+  perímetro no batch de imagens com o vColor = fireOrange (o FS da UI é
+  `vColor·tex.r` — o ruído modula o brilho da brasa). O rasterizador
+  honesto do stub HONRA o REPEAT agora: o `glTexParameteri` escreve o
+  wrap na textura ligada (o fb) e os samplers fazem o fract antes do
+  texel — o mesmo comportamento do driver. **ZERO shaders matemáticos**
+  (a ordem do dono; o fbm da D-3 continua morto).
+
+### 3.2 Os pins ×4 (tests/test_012e_efeitos.cpp) + as mutações (coladas)
+
+1. **sombra_25d** — a COLUNA CENTRAL da escadaria da sombra (o span de Y
+   completo do rect deslocado) com o preto α0.15, em repouso E no ativo +
+   o token no Theme. **M-E3a** (a sombra removida do repouso):
+   ```
+   sombra_25d ... FALHOU test_012e_efeitos.cpp:89 sombra_25d: o retângulo
+   preto 15% deslocado (+3,+3) não foi emitido por baixo do botão em
+   repouso
+   ```
+   reposto → **0 teste(s) com falha**.
+2. **vidro_85_topline_ambar** — o token α0.85 + a linha 1dp âmbar a 20%
+   pelo emissor REAL (o mesmo que os painéis chamam).
+3. **fogo2d_scroll** — o caminho REAL (Renderer+fb no rasterizador
+   honesto): a banda do topo do botão premido vive no batch de imagens e
+   o u0 dela é `fireScrollOffset(t)` EXATO (t=0 → 0; t=2 → 0.1875).
+   **M-E3b** (o scroll morto — o offset congelado):
+   ```
+   fogo2d_scroll ... FALHOU test_012e_efeitos.cpp:208 fogo2d_scroll: o
+   t=2.0 devia dar offset 0.1875 (leu 0.0000)
+   FALHOU test_012e_efeitos.cpp:231 (o determinismo do offset)
+   ```
+   (2 testes vermelhos) reposto → **0 teste(s) com falha**.
+4. **fogo2d_determinismo** — o tile perfeito ((x+64,y)==(x,y) numa
+   varredura), o wrap do offset em [0,1), a volta completa (64/6 s) e o
+   grão BRASA (os vizinhos 1px nunca saltam >64 níveis — o smoothstep).
+
+### 3.3 As recalibrações (com nota no sítio)
+
+- **y1_tokens / superficies_4_tons** — o `VV_RGBA(20, 20, 22, 0.85f)`
+  único no Theme.h (a fonte única segue aferrada pelo countSub).
+- **theme_tabela_spec_g_exata / regress_identidade_grafite_ambar** — o
+  α do painel 0.85.
+- **y1_primitivas / y3_cristal ×2** — a linha do topo é o ÂMBAR a 20%.
+- **y1_gradiente_botao** — o gradiente do ativo é fireRed→fireOrange
+  (topo 217/43/4 exato, fundo 255/94/0 exato; a continuidade pela faixa
+  g 43..94 com r 217..255).
+- **c33 13.9** — mede os compostos PELOS tokens (atravessou sem tocar).
+
+### 3.4 O estado da suíte (o fecho da 0.12-E)
+
+- test_core: **0 falhas** (o skip de disco conhecido — a R-039) — os 4
+  pins novos verdes, as mutações M-E3a/M-E3b provadas.
+- c33_virtual: **1010 checks, 0 falhas** — a FASE 35 NOVA (3 checks: a
+  sombra no replay, a linha âmbar no replay, a textura de ruído viva).
+- **versionCode 96 → 97** (o §14 do RELATORIO-0.9.6.md declara o par; o
+  C33 REAL — os PNGs do editor/menus com o tema 2.5D — segue anexado à
+  entrega).
+- **A campanha 0.12-E FECHA** (E-1 restauração · E-2 paleta · E-3
+  efeitos): a UI básica está de volta com o tema FOGO AVERMELHADO do
+  dono, o texto é desenhado SEMPRE por cima (o FontAtlas intocado), a
+  arquitetura de TICs intocada e ZERO matemática 3D no chrome.

@@ -19,7 +19,9 @@
 #include "ui/LayoutDump.h"   // 0.9.6.5 (GRUPO B): o registo do layout auditado
 #include "ui/ScrollMath.h"
 #include "ui/SafeArea.h"
-#include "ui/Sdf.h"         // 0.12-D (D-1): a matemática SDF (o nível)
+#include "ui/Sdf.h"         // 0.12-D (D-1): a matemática SDF (o nível;
+                            // g_time alimenta o scroll da FASE 3 do E)
+#include "ui/Noise2D.h"    // 0.12-E (E-3): a fonte única do ruído 2D
 #include "ui/TextFit.h"
 #include "ui/Theme.h"     // 0.9.0: design system (tabela obrigatória spec A)
 #include "platform/InputState.h"
@@ -44,7 +46,7 @@ namespace theme {
 // igualdade bit-a-bit, LIGADAS por static_assert: mudar Theme.h sem aqui =
 // build MORRE — a fonte única continua sendo Theme.h)
 constexpr f32 BG[4]     = {10.0f / 255.0f, 10.0f / 255.0f, 12.0f / 255.0f, 1.0f};     // bg #0A0A0C (O FUNDO — escada 0.12-C)
-constexpr f32 PANEL[4]  = {20.0f / 255.0f, 20.0f / 255.0f, 22.0f / 255.0f, 0.80f};    // surface #141416 α0.80 (O PAINEL — paleta 0.12-E; era o #131316 da 0.12-C)
+constexpr f32 PANEL[4]  = {20.0f / 255.0f, 20.0f / 255.0f, 22.0f / 255.0f, 0.85f};    // surface #141416 α0.85 (O PAINEL — o vidro da FASE 3 do 0.12-E; era α0.80)
 // 0.12-C (C-3): os DOIS níveis novos da escada de superfícies
 constexpr f32 CARD[4]     = {27.0f / 255.0f, 27.0f / 255.0f, 32.0f / 255.0f, 1.0f};   // card #1B1B20 (O CARTÃO)
 constexpr f32 ELEVATED[4] = {36.0f / 255.0f, 36.0f / 255.0f, 42.0f / 255.0f, 1.0f};   // elevated #24242A (O ELEVADO)
@@ -147,6 +149,13 @@ public:
     // aferra o portão e a contagem; a splash é da D-6 e o ecrã de projetos
     // da D-8 — os consumidores chegam com elas).
     void drawEmbers(f32 x, f32 y, f32 w, f32 h, f32 time, bool celebration);
+    // 0.12-E (E-3 · FASE 3.4) — A BORDA DE FOGO 2D do elemento ATIVO: as
+    // 4 bandas do perímetro com a TEXTURA DE RUÍDO em scroll lento (o UV
+    // offset de noise2d::fireScrollOffset(sdf::g_time); o vColor é o
+    // fireOrange — o FS da UI amostra o canal R como brilho). A ordem do
+    // dono: textura 2D em scroll, NÃO shaders matemáticos (o fbm da D-3
+    // morreu com a E-1). Determinístico: o mesmo t = a mesma borda.
+    void fireBorder2D(f32 x, f32 y, f32 w, f32 h, f32 radius);
     // 0.12-D (D-2) — O VIDRO FALSO (os painéis FIXOS): o gradiente
     // semi-opaco (surface→surface2), a BORDA CLARA 1px (o glassEdge — a
     // FRESNEL), o REFLEXO DIAGONAL (os veios brancos fracos no topo-esq)

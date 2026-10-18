@@ -3810,7 +3810,7 @@ TEST(regress_identidade_grafite_ambar) {
     // os pisos; text2/severidade vivem em painéis dokados (a regra da
     // casa — o gate é a própria regra, documentada no Theme.h)
     {
-        EXPECT(nearEqF(theme::kTheme.surface[3], 0.80f, 1e-4f));   // vidro
+        EXPECT(nearEqF(theme::kTheme.surface[3], 0.85f, 1e-4f));   // FASE 3   // vidro
         EXPECT(nearEqF(theme::kTheme.surface2[3], 0.86f, 1e-4f));  // denso
         EXPECT(nearEqF(theme::kTheme.border[3], 0.60f, 1e-4f));    // hairline ÂMBAR (0.11-Y)
         EXPECT(nearEqF(theme::kTheme.bg[3], 1.0f, 1e-4f));         // opaco

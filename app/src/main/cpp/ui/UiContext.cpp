@@ -1,6 +1,7 @@
 #include "ui/UiContext.h"
 #include "ui/Fire.h"   // 0.12-D (D-3): as brasas paramétricas
 #include "ui/Glass.h"   // 0.12-D (D-2): o hash do ruído do vidro falso
+#include "ui/Noise2D.h"   // 0.12-E (E-3): o ruído 2D das bordas ativas
 #include <cstring>
 
 namespace vv {
@@ -430,8 +431,12 @@ void UiContext::panelRoundedGradientV(f32 x, f32 y, f32 w, f32 h, f32 radius,
 // 0.11-Y (Y-1) — A LINHA DO TOPO DO VIDRO: 1dp com o RGB do glow a 20%
 // (o brilho do cristal; o chamador desenha DEPOIS do panelRounded/frame)
 void UiContext::glassTopLine(f32 x, f32 y, f32 w) {
-    const f32 line[4] = {theme::GLOW[0], theme::GLOW[1], theme::GLOW[2],
-                         0.20f};   // o 20% do prompt da Y-1
+    // 0.12-E (E-3 · FASE 3.1): a ordem do dono — «uma linha de 1px no
+    // topo com a cor amber a 20% de opacidade (o reflexo da luz)». Era o
+    // RGB do glow (#FF3D00) da Y-1; agora é o ÂMBAR (o accent #FFB020)
+    // ao MESMO 20%.
+    const f32 line[4] = {theme::kTheme.accent[0], theme::kTheme.accent[1],
+                         theme::kTheme.accent[2], 0.20f};
     const f32 h = theme::dp(1.0f);
     const u32 fv = solids_.vertexCount();
     if (emitTo(solids_, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, line)) {
@@ -1035,16 +1040,37 @@ namespace {
 // (zero chamadores no produto; os pins dela foram reformados neste commit
 // — o relatório 0.12-E documenta).
 void drawButtonVisual(UiContext& ui, f32 x, f32 y, f32 w, f32 h, bool held) {
+    // 0.12-E (E-3) — O VISUAL 2.5D do dono (as cláusulas da FASE 3, TODAS
+    // SIMULTÂNEAS no premido — a lição anti-superficialidade):
+    //  (3.2) A PROFUNDIDADE FALSA: o retângulo preto 15% deslocado 3px
+    //        para baixo e para a direita POR BAIXO de cada botão (a
+    //        sombra; o deslocamento em dp — a lei R-018 — o 3px do dono
+    //        à densidade de referência);
+    //  (3.3) OS ATIVOS: o gradiente vertical 2D fireRed→fireOrange (a
+    //        paleta FOGO AVERMELHADO da E-2 — o accent→accent2 da Y-1
+    //        fica para o repouso de outros estados, os tokens vivem);
+    //  (3.4) A BORDA DE FOGO do ativo: a textura 2D de ruído em scroll
+    //        lento (UV offset) — ZERO shaders matemáticos;
+    //  o repouso mantém o vidro PANEL + o frame 1dp (agora COM sombra).
+    const f32 so = theme::dp(3.0f);   // o deslocamento da sombra
     if (held) {
-        ui.focusGlow(x, y, w, h);
+        ui.panelRounded(x + so, y + so, w, h,
+                        theme::dp(theme::kRadiusCard),
+                        theme::kTheme.dropShadow);
+        ui.focusGlow(x, y, w, h);   // o feedback de press da Y-1 (2D puro)
         ui.panelRoundedGradientV(x, y, w, h, theme::dp(theme::kRadiusCard),
-                                 theme::ACCENT, theme::ACCENT2);
+                                 theme::kTheme.fireRed,
+                                 theme::kTheme.fireOrange);
+        ui.fireBorder2D(x, y, w, h, theme::dp(theme::kRadiusCard));
     } else {
+        ui.panelRounded(x + so, y + so, w, h,
+                        theme::dp(theme::kRadiusCard),
+                        theme::kTheme.dropShadow);
         ui.panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard),
                         theme::PANEL);
+        ui.frameRounded(x, y, w, h, 1.0f, theme::dp(theme::kRadiusCard),
+                        theme::LINE);
     }
-    ui.frameRounded(x, y, w, h, 1.0f, theme::dp(theme::kRadiusCard),
-                    theme::LINE);
 }
 } // namespace
 
@@ -1433,6 +1459,58 @@ bool UiContext::imageQuad(f32 x, f32 y, f32 w, f32 h, const std::string& ref,
         return true;
     }
     return false;
+}
+
+// 0.12-E (E-3 · FASE 3.4) — A BORDA DE FOGO 2D do elemento ATIVO: 4
+// bandas (a espessura 2dp) com a TEXTURA DE RUÍDO do Renderer (o upload
+// do init come o ui/Noise2D.h — TILEÁVEL, GL_REPEAT) em SCROLL LENTO: o
+// UV offset é noise2d::fireScrollOffset(sdf::g_time) (6 px/s — o mesmo t
+// = a mesma borda). O vColor é o fireOrange (a brasa quente da paleta do
+// dono); o FS da UI amostra tex.r — o ruído MODULA o brilho da brasa.
+// ZERO shaders matemáticos (a ordem do dono — o fbm da D-3 morreu).
+// O custo é O(1) por widget ativo (4 quads — 24 vértices).
+void UiContext::fireBorder2D(f32 x, f32 y, f32 w, f32 h, f32 radius) {
+    (void)radius;   // as bandas retas cobrem o perímetro (os cantos ficam
+                    // para o frame do widget — o efeito lê-se igual)
+    if (!renderer_ || renderer_->noiseTexture() == 0 ||
+        w <= 0.0f || h <= 0.0f) {
+        return;
+    }
+    const u32 texId = renderer_->noiseTexture();
+    // o slot da textura no batch de imagens (o MESMO padrão do imageQuad)
+    u32 slot = imageCount_;
+    for (u32 i = 0; i < imageCount_; ++i) {
+        if (imageTex_[i] == texId) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == imageCount_) {
+        if (imageCount_ >= kMaxImageBatches) {
+            return;   // cap de texturas por frame (documentado)
+        }
+        imageTex_[slot] = texId;
+        ++imageCount_;
+    }
+    const f32 bw = theme::dp(2.0f);   // a espessura da banda
+    const f32 off = noise2d::fireScrollOffset(sdf::g_time);
+    const f32* col = theme::kTheme.fireOrange;
+    // top/bottom (o scroll anda em U pela largura; V anda a espessura)
+    const f32 uT0 = off, uT1 = off + w / f32(noise2d::kNoiseSize);
+    const f32 vB = off + bw / f32(noise2d::kNoiseSize);
+    // left/right (o scroll anda em V pela altura)
+    const f32 uSE = off + bw / f32(noise2d::kNoiseSize);
+    const f32 vL0 = off, vL1 = off + (h - 2.0f * bw) / f32(noise2d::kNoiseSize);
+    const u32 fv0 = images_[slot].vertexCount();
+    if (emitTo(images_[slot], x, y, w, bw, uT0, off, uT1, vB, col)) {
+        emitTo(images_[slot], x, y + h - bw, w, bw, uT0, off, uT1, vB, col);
+        emitTo(images_[slot], x, y + bw, bw, h - 2.0f * bw, off, vL0, uSE,
+               vL1, col);
+        emitTo(images_[slot], x + w - bw, y + bw, bw, h - 2.0f * bw, off,
+               vL0, uSE, vL1, col);
+        recordRun(images_[slot], texId, fv0,
+                  images_[slot].vertexCount() - fv0);
+    }
 }
 
 void UiContext::endFrame() {

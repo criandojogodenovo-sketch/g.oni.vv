@@ -100,6 +100,10 @@ public:
     }
 
     u32 whiteTexture() const { return whiteTex_; }
+    // 0.12-E (E-3 · FASE 3.4): a TEXTURA DE RUÍDO 2D das bordas ativas
+    // (64×64, tileável, GL_REPEAT — o upload no init come o ui/Noise2D.h,
+    // a FONTE ÚNICA da matemática; o emissor é o UiContext::fireBorder2D)
+    u32 noiseTexture() const { return noiseTex_; }
     i32 width() const { return w_; }
     i32 height() const { return h_; }
 
@@ -112,6 +116,7 @@ private:
     u32 vao_ = 0;
     u32 vbo_ = 0;
     u32 whiteTex_ = 0;
+    u32 noiseTex_ = 0;   // 0.12-E (E-3): a textura de ruído 2D das bordas
     i32 locProj_ = -1;
     i32 locTex_ = -1;
     // 0.12-D (D-1) — o PASS SDF (o 3.º programa): o shader único de widget

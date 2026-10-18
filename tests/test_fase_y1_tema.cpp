@@ -81,12 +81,12 @@ TEST(y1_tokens) {
     // (a) o kTheme COMPILADO (a verdade que a app inteira consome)
     // 0.12-C (C-3 · recalibração legítima): a ESCADA DE SUPERFÍCIES do
     // dono supera o poço da Y-1 (o padrão Y-3/D11) — o FUNDO #0A0A0C e o
-    // PAINEL #141416 (0.12-E E-2: a paleta FOGO AVERMELHADO do dono —
-    // era o #131316 da escada 0.12-C; o α0.80 do vidro mantém)
+    // PAINEL #141416 α0.85 (0.12-E E-3: a FASE 3 do dono — «fundo escuro
+    // com alpha 0.85»; o RGB é a paleta da E-2)
     EXPECT(nearColor(theme::kTheme.bg, 10.0f / 255.0f, 10.0f / 255.0f,
                      12.0f / 255.0f, 1.0f));
     EXPECT(nearColor(theme::kTheme.surface, 20.0f / 255.0f, 20.0f / 255.0f,
-                     22.0f / 255.0f, 0.80f));
+                     22.0f / 255.0f, 0.85f));
     // OS DOIS NÍVEIS NOVOS da escada (o CARTÃO e o ELEVADO)
     EXPECT(nearColor(theme::kTheme.card, 27.0f / 255.0f, 27.0f / 255.0f,
                      32.0f / 255.0f, 1.0f));
@@ -127,7 +127,7 @@ TEST(y1_tokens) {
                "1x (encontrado %u) — 0.12-C: a escada do dono",
                countSub(src, "VV_RGB(10, 10, 12)"));
     // 0.12-E E-2: o painel é o #141416 da paleta do dono (era #131316)
-    EXPECT(countSub(src, "VV_RGBA(20, 20, 22, 0.80f)") == 1);
+    EXPECT(countSub(src, "VV_RGBA(20, 20, 22, 0.85f)") == 1);
     EXPECT(countSub(src, "VV_RGBA(30, 30, 33, 0.86f)") == 1);
     EXPECT(countSub(src, "VV_RGBA(74, 55, 20, 0.60f)") == 1);
     EXPECT(countSub(src, "VV_RGB(255, 107, 0)") == 1);
@@ -200,8 +200,10 @@ TEST(y1_primitivas) {
             mxY = v[i].y > mxY ? v[i].y : mxY;
             mnX = v[i].x < mnX ? v[i].x : mnX;
             mxX = v[i].x > mxX ? v[i].x : mxX;
+            // 0.12-E (E-3 · FASE 3.1): a linha do topo é o ÂMBAR a 20%
+            // (a ordem do dono — era o RGB do glow #FF3D00 da Y-1)
             EXPECT(nearColor2(v[i].r, v[i].g, v[i].b, v[i].a, 1.0f,
-                              61.0f / 255.0f, 0.0f, 0.20f));
+                              176.0f / 255.0f, 32.0f / 255.0f, 0.20f));
         }
         EXPECT(test::nearEqF(mxY - mnY, 1.0f, 1e-3f));   // 1dp (densidade 1)
         EXPECT(test::nearEqF(mnX, 100.0f, 1e-3f) &&
@@ -286,15 +288,19 @@ TEST(y1_gradiente_botao) {
                                   test::nearEqF(mxY, by + bh, 0.05f);
             if (!fullSpan) continue;
             foundCentral = true;
-            // o topo do quad é o ACCENT exato, o fundo o ACCENT2 exato
+            // o topo do quad é o FIRERED exato, o fundo o FIREORANGE
+            // exato (0.12-E E-3 · FASE 3.3: o gradiente da paleta FOGO
+            // AVERMELHADO do dono — o accent→accent2 da Y-1 morreu)
             for (u32 k = i; k < i + 6; ++k) {
                 if (test::nearEqF(v[k].y, mnY, 0.05f)) {
-                    EXPECT(nearColor2(v[k].r, v[k].g, v[k].b, v[k].a, 1.0f,
-                                      176.0f / 255.0f, 32.0f / 255.0f, 1.0f));
+                    EXPECT(nearColor2(v[k].r, v[k].g, v[k].b, v[k].a,
+                                      217.0f / 255.0f, 43.0f / 255.0f,
+                                      4.0f / 255.0f, 1.0f));
                 }
                 if (test::nearEqF(v[k].y, mxY, 0.05f)) {
-                    EXPECT(nearColor2(v[k].r, v[k].g, v[k].b, v[k].a, 1.0f,
-                                      107.0f / 255.0f, 0.0f, 1.0f));
+                    EXPECT(nearColor2(v[k].r, v[k].g, v[k].b, v[k].a,
+                                      255.0f / 255.0f, 94.0f / 255.0f,
+                                      0.0f, 1.0f));
                 }
             }
         }
@@ -303,14 +309,16 @@ TEST(y1_gradiente_botao) {
                    "não foi encontrada no batch");
         // o gradiente É CONTÍNUO através das peças: as bandas laterais e
         // os degraus dos cantos são AMOSTRADOS do span completo — algum
-        // vértice do batch tem cor INTERMÉDIA entre accent e accent2
-        // (g entre 107 e 176, b entre 0 e 32 — a interpolação real)
+        // vértice do batch tem cor INTERMÉDIA entre fireRed e fireOrange
+        // (0.12-E E-3: g entre 43 e 94, r entre 217 e 255 — a interpolação
+        // real da paleta FOGO AVERMELHADO)
         for (u32 i = before; i < after; ++i) {
             const vv::QuadVertex* v = ui.solidsForTest().vertices();
-            if (test::nearEqF(v[i].r, 1.0f, 1e-4f) &&
-                v[i].g > 107.0f / 255.0f + 0.005f &&
-                v[i].g < 176.0f / 255.0f - 0.005f &&
-                v[i].b > 0.001f && v[i].b < 32.0f / 255.0f - 0.001f &&
+            if (v[i].r > 217.0f / 255.0f + 0.005f &&
+                v[i].r < 255.0f / 255.0f - 0.005f &&
+                v[i].g > 43.0f / 255.0f + 0.005f &&
+                v[i].g < 94.0f / 255.0f - 0.005f &&
+                v[i].b > 0.0f && v[i].b < 4.0f / 255.0f &&
                 test::nearEqF(v[i].a, 1.0f, 1e-4f)) {
                 foundMid = true;
             }

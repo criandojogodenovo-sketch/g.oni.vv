@@ -535,6 +535,14 @@ inline void glTexParameteri(GLenum target, GLenum pname, GLint param) {
     glstub::stats.lastTexParamTarget = target;
     glstub::stats.lastTexParamPname = pname;
     glstub::stats.lastTexParamValue = param;
+    // 0.12-E (E-3): o WRAP HONESTO — no fb o glTexParameteri ESCREVE o
+    // wrap na textura LIGADA (o mesmo que o driver faz; o REPEAT 0x2901
+    // é o que o rasterizador honesto honra no sampleR/sampleRGB)
+    if (glstub::fb::enabled &&
+        (pname == 0x2802 /*GL_TEXTURE_WRAP_S*/ ||
+         pname == 0x2803 /*GL_TEXTURE_WRAP_T*/)) {
+        glstub::fb::setTexWrap(pname, param);
+    }
 }
 inline void glReadPixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum, GLenum, void* dst) {
     if (glstub::fb::enabled) glstub::fb::readPixels(x, y, w, h, dst);

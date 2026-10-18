@@ -1,4 +1,5 @@
 #include "render/Renderer.h"
+#include "ui/Noise2D.h"   // 0.12-E (E-3): a fonte única do ruído 2D
 #include "render/Mesh.h"
 #include "math/Math.h"
 #include "platform/Log.h"
@@ -341,6 +342,37 @@ bool Renderer::init() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // 0.12-E (E-3 · FASE 3.4) — A TEXTURA DE RUÍDO 2D das bordas ativas:
+    // 64×64 RGBA (o R é o que o FS da UI amostra — vColor·tex.r), o
+    // conteúdo vem do ui/Noise2D.h (TILEÁVEL — a emenda do REPEAT é
+    // perfeita por construção) e o wrap é GL_REPEAT (o scroll em UV
+    // repete; POT obrigatório em ES 3.0 — 64 é POT)
+    {
+        u8 px[vv::noise2d::kNoiseSize * vv::noise2d::kNoiseSize * 4];
+        for (u32 y = 0; y < vv::noise2d::kNoiseSize; ++y) {
+            for (u32 x = 0; x < vv::noise2d::kNoiseSize; ++x) {
+                const u8 v = vv::noise2d::noisePixel(static_cast<i32>(x),
+                                                     static_cast<i32>(y));
+                const size_t i = (size_t(y) * vv::noise2d::kNoiseSize +
+                                  size_t(x)) * 4;
+                px[i] = v; px[i + 1] = v; px[i + 2] = v; px[i + 3] = 0xFF;
+            }
+        }
+        glGenTextures(1, &noiseTex_);
+        glBindTexture(GL_TEXTURE_2D, noiseTex_);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+                     static_cast<GLsizei>(vv::noise2d::kNoiseSize),
+                     static_cast<GLsizei>(vv::noise2d::kNoiseSize), 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, px);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        LOGI("Renderer: textura de ruido 2D das bordas ativas pronta "
+             "(%ux%u tileavel, GL_REPEAT)", vv::noise2d::kNoiseSize,
+             vv::noise2d::kNoiseSize);
+    }
 
     // ---- pass 3D (F2)
     if (!lit_.init()) {
@@ -685,6 +717,7 @@ void Renderer::shutdown() {
     if (vbo_)      { glDeleteBuffers(1, &vbo_); vbo_ = 0; }
     if (vao_)      { glDeleteVertexArrays(1, &vao_); vao_ = 0; }
     if (whiteTex_) { glDeleteTextures(1, &whiteTex_); whiteTex_ = 0; }
+    if (noiseTex_) { glDeleteTextures(1, &noiseTex_); noiseTex_ = 0; }
     if (prog_)     { glDeleteProgram(prog_); prog_ = 0; }
 }
 

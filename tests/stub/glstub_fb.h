@@ -65,6 +65,11 @@ struct TexObj {
     int w = 0, h = 0;
     int channels = 0;      // 1 (GL_R8) / 4 (GL_RGBA); 0 = FLAT (comprimida)
     std::vector<uint8_t> px;
+    // 0.12-E (E-3): o WRAP honesto (o GL ES default é CLAMP_TO_EDGE; o
+    // glTexParameteri honra o GL_REPEAT — a textura de ruído das bordas
+    // ativas rola em UV e a emenda tem de repetir como no device)
+    int wrapS = 0x812E;   // GL_CLAMP_TO_EDGE
+    int wrapT = 0x812E;   // GL_CLAMP_TO_EDGE
 };
 struct BufObj {
     unsigned id = 0;
@@ -198,6 +203,15 @@ inline void onGenTexture(unsigned id) { texs_.push_back(TexObj{id, 0, 0, 0, {}})
 inline void onGenBuffer(unsigned id) { bufs_.push_back(BufObj{id, {}}); }
 
 inline void bindTexture(unsigned id) { curTex_ = id; }
+// 0.12-E (E-3): o wrap da textura LIGADA (o glTexParameteri do gl3.h
+// delega AQUI quando o fb está ligado — o rasterizador honesto lê os
+// campos no sampleR/sampleRGB)
+inline void setTexWrap(int pname, int param) {
+    TexObj* t = findTex_(curTex_);
+    if (!t) return;
+    if (pname == 0x2802 /*GL_TEXTURE_WRAP_S*/) t->wrapS = param;
+    if (pname == 0x2803 /*GL_TEXTURE_WRAP_T*/) t->wrapT = param;
+}
 
 inline void texImage2D(int internalformat, int w, int h, int format,
                        const void* pixels) {
@@ -422,6 +436,10 @@ inline float sampleR(const TexObj* t, float u, float v) {
     if (!t || t->channels != 1 || t->w < 1 || t->h < 1 || t->px.empty()) {
         return 1.0f;
     }
+    // 0.12-E (E-3): o REPEAT honesto (o MESMO comportamento do sampler GL
+    // — o fract antes do texel; o CLAMP mantém o caminho de sempre)
+    if (t->wrapS == 0x2901) { u = u - std::floor(u); }
+    if (t->wrapT == 0x2901) { v = v - std::floor(v); }
     auto at = [&](int x, int y) -> float {
         if (x < 0) x = 0; if (x >= t->w) x = t->w - 1;
         if (y < 0) y = 0; if (y >= t->h) y = t->h - 1;
@@ -448,6 +466,9 @@ inline void sampleRGB(const TexObj* t, float u, float v, float* out) {
         out[0] = out[1] = out[2] = 1.0f;
         return;
     }
+    // 0.12-E (E-3): o REPEAT honesto (idem sampleR)
+    if (t->wrapS == 0x2901) { u = u - std::floor(u); }
+    if (t->wrapT == 0x2901) { v = v - std::floor(v); }
     auto at = [&](int x, int y, int c) -> float {
         if (x < 0) x = 0; if (x >= t->w) x = t->w - 1;
         if (y < 0) y = 0; if (y >= t->h) y = t->h - 1;

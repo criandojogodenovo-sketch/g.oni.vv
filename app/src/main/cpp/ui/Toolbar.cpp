@@ -122,15 +122,22 @@ bool iconButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
     const bool pressed = ui.widgetHit(id, r.x, r.y, r.w, r.h);
     const bool held = ui.widgetActive(id);
     const UiRect chip = {r.x, r.y + (r.h - kChipH()) * 0.5f, r.w, kChipH()};
+    // 0.12-E (E-3): o chip segue o visual 2.5D do drawButtonVisual — a
+    // sombra falsa 3dp + o ATIVO com o gradiente FOGO AVERMELHADO
+    // (fireRed→fireOrange) + a borda de ruído em scroll (a textura 2D);
+    // o held/ativo simples mantém surface2/accentPress (a sombra fica)
     if (active && !held) {
-        // A CHAMA: o fill com o GRADIENTE VERTICAL accent->accent2 (o
-        // MESMO tratamento dos botões ativos da Y-1) + o glassTopLine
+        ui.panelRounded(chip.x + theme::dp(3.0f), chip.y + theme::dp(3.0f),
+                        chip.w, chip.h, theme::kRadiusCard,
+                        theme::kTheme.dropShadow);
         ui.panelRoundedGradientV(chip.x, chip.y, chip.w, chip.h,
-                                 theme::kRadiusCard, theme::kTheme.accent,
-                                 theme::kTheme.accent2);
-        ui.glassTopLine(chip.x, chip.y, chip.w);
+                                 theme::kRadiusCard, theme::kTheme.fireRed,
+                                 theme::kTheme.fireOrange);
+        ui.fireBorder2D(chip.x, chip.y, chip.w, chip.h,
+                        theme::kRadiusCard);
     } else if (held || active) {
-        ui.panelRounded(chip.x, chip.y, chip.w, chip.h, theme::kRadiusCard,
+        ui.panelRounded(chip.x + theme::dp(3.0f), chip.y + theme::dp(3.0f),
+                        chip.w, chip.h, theme::kRadiusCard,
                         active ? theme::kTheme.accentPress
                                : theme::kTheme.surface2);
     }

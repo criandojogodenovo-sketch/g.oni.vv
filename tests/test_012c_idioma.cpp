@@ -235,10 +235,10 @@ TEST(superficies_4_tons) {
     // (a) os 4 TOKENS com os hexes exatos do dono
     EXPECT(nearColor(theme::kTheme.bg, 10.0f / 255.0f, 10.0f / 255.0f,
                      12.0f / 255.0f, 1.0f));            // #0A0A0C
-    // 0.12-E E-2: o PAINEL é o #141416 da paleta FOGO AVERMELHADO do
-    // dono (era o #131316 da escada 0.12-C — a recalibração com nota)
+    // 0.12-E E-2/E-3: o PAINEL é o #141416 α0.85 da paleta FOGO
+    // AVERMELHADO do dono (era o #131316 α0.80 da escada 0.12-C)
     EXPECT(nearColor(theme::kTheme.surface, 20.0f / 255.0f,
-                     20.0f / 255.0f, 22.0f / 255.0f, 0.80f));   // #141416
+                     20.0f / 255.0f, 22.0f / 255.0f, 0.85f));   // #141416
     EXPECT(nearColor(theme::kTheme.card, 27.0f / 255.0f, 27.0f / 255.0f,
                      32.0f / 255.0f, 1.0f));            // #1B1B20
     EXPECT(nearColor(theme::kTheme.elevated, 36.0f / 255.0f,
@@ -266,7 +266,7 @@ TEST(superficies_4_tons) {
     ASSERT(readFile(repoRoot() + "/app/src/main/cpp/ui/Theme.h", src));
     EXPECT(countSub(src, "VV_RGB(10, 10, 12)"));
     // 0.12-E E-2: o #141416 da paleta FOGO AVERMELHADO (era #131316)
-    EXPECT(countSub(src, "VV_RGBA(20, 20, 22, 0.80f)"));
+    EXPECT(countSub(src, "VV_RGBA(20, 20, 22, 0.85f)"));
     EXPECT(countSub(src, "VV_RGB(27, 27, 32)"));
     EXPECT(countSub(src, "VV_RGB(36, 36, 42)"));
     // (e) o contraste do texto primário mantém o piso WCAG sobre o novo

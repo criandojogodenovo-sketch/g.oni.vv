@@ -10387,6 +10387,69 @@ int main() {
     // os píxeis que o DEVICE desenha hoje voltam a ser a escadaria 2D de
     // quads (os pins y1/y3/cantos/playui recalibrados de volta no E-1).
 
+    // ---- FASE 35 — 0.12-E (E-3): OS EFEITOS 2.5D ---------------------------
+    // O replay REAL com o redesign do dono: a SOMBRA falsa 2.5D (o preto
+    // 15% deslocado 3dp por baixo dos botões — no batch solids), a LINHA
+    // ÂMBAR do topo dos painéis (o reflexo da luz a 20%) e a borda de
+    // RUÍDO do ativo (a textura 2D em scroll — o batch de imagens). Os
+    // pins por píxel/quad vivem no test_012e_efeitos.
+    fase("FASE 35 — 0.12-E E-3: os efeitos 2.5D (sombra/âmbar/ruído)");
+    {
+        eglstub::g_surfaceW = 1536;
+        eglstub::g_surfaceH = 720;
+        android_app app35;
+        std::memset(&app35, 0, sizeof(app35));
+        app35.contentRect = {0, 24, 1512, 720};
+        onAppCmd(&app35, APP_CMD_INIT_WINDOW);
+        if (!g_font.ok()) {
+            const char* paths[] = {FONT_FIXTURE};
+            g_font.loadFromPaths(paths, 1, 28.0f);
+        }
+        g_ui.setFont(&g_font);
+        frame();
+        // (1) a SOMBRA: o frame do editor tem quads pretos α0.15 no solids
+        bool sombra35 = false;
+        {
+            const QuadVertex* v35 = g_ui.solidsForTest().vertices();
+            const u32 n35 = g_ui.solidsForTest().vertexCount();
+            for (u32 i = 0; i + 5 < n35; i += 6) {
+                if (v35[i].a > 0.144f && v35[i].a < 0.156f &&
+                    v35[i].r < 0.01f && v35[i].g < 0.01f &&
+                    v35[i].b < 0.01f) {
+                    sombra35 = true;
+                }
+            }
+        }
+        check(sombra35,
+              "35.1 a SOMBRA 2.5D no replay (o preto 15% por baixo dos "
+              "botões — a profundidade falsa do dono)");
+        // (2) a LINHA ÂMBAR do topo: o reflexo a 20% existe no frame
+        bool linha35 = false;
+        {
+            const QuadVertex* v35 = g_ui.solidsForTest().vertices();
+            const u32 n35 = g_ui.solidsForTest().vertexCount();
+            for (u32 i = 0; i + 5 < n35; i += 6) {
+                if (v35[i].a > 0.19f && v35[i].a < 0.21f &&
+                    v35[i].r > 0.99f &&
+                    v35[i].g > 174.0f / 255.0f &&
+                    v35[i].g < 178.0f / 255.0f &&
+                    v35[i].b > 30.0f / 255.0f &&
+                    v35[i].b < 34.0f / 255.0f) {
+                    linha35 = true;
+                }
+            }
+        }
+        check(linha35,
+              "35.2 a LINHA ÂMBAR do topo no replay (o reflexo 1dp a 20% "
+              "— a FASE 3.1 do dono)");
+        // (3) o RUÍDO: a textura de ruído está no Renderer (o upload do
+        //     init) e o widget ativo a consumir é provado pelos pins; aqui
+        //     o CONTRATO: a textura existe (id != 0)
+        check(g_renderer.noiseTexture() != 0u,
+              "35.3 a textura de ruído 2D das bordas ativas está viva "
+              "(o upload tileável GL_REPEAT do init)");
+    }
+
     // ---- FASE 34 — 0.12-D (D-4): O LOGO («G EM CHAMA») ---------------------
     // O cabeçalho do editor (a versão PEQUENA das 3 do dono) desenha o
     // glifo NOVO pela única função: a RAMPA do fogo por traço (a base
