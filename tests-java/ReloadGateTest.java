@@ -287,8 +287,18 @@ public final class ReloadGateTest {
                 // clear() ganha a corrida). AS DUAS provam o mecanismo do
                 // REG-001 (o flake do run 37219675961 — a classe detetada
                 // foi NoSuchElementException, mesmo mecanismo)
+                // 0.12-D (fix do run 39123462169 — o CI do D-2): a TERCEIRA
+                // variante do MESMO mecanismo — NullPointerException: o
+                // iterador lê elementData[cursor] no INTERVALO entre o
+                // clear() (size=0, slots a null) e o add() que reescreve o
+                // slot — o next() devolve null e o s.isEmpty() rebenta. A
+                // corrida é a mesma (iterar vs clear+addAll); a classe é o
+                // acaso do escalonamento. O gate NÃO enfraquece: o padrão
+                // antigo TEM de lançar (o check mecanismoDetetado fica) e
+                // o padrão novo TEM de lançar zero exceções.
                 check(cls.startsWith("ConcurrentModification")
-                        || cls.equals("NoSuchElementException"),
+                        || cls.equals("NoSuchElementException")
+                        || cls.equals("NullPointerException"),
                         "R-005: o mecanismo do crash original lanca a excecao "
                         + "esperada (classe detetada: " + cls + ")");
             }

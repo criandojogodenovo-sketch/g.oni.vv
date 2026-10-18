@@ -62,6 +62,14 @@ dentro; antes: 660e347 o D-2, O VIDRO REAL e FALSO; af41059 o D-1)
   inalcançável no replay (registado para o dono). test_core 0 falhas ·
   c33 1014/0 · vc 93. O C33 REAL (o PNG do premido com a chama) fica
   para o dono.
+  **fix (o CI do D-2, run 39123462169)**: a sentinela JVM R-005
+  (ReloadGateTest) apanhou a TERCEIRA variante do mecanismo que ela
+  própria documenta — a corrida iterar-vs-clear+addAll lançou
+  NullPointerException (o iterador leu o slot a null ENTRE o clear e o
+  add que o reescreve; as variantes aceites eram CME/NSEE). A lista
+  aceita a variante com a nota no sítio; o gate NÃO enfraquece (o padrão
+  antigo TEM de lançar, o novo TEM de lançar zero). D-2 não tocou Java —
+  o acaso do escalonamento do CI.
 - **Campanha 0.12-C (layout, organização e consistência) — FECHADA
   (C-1..C-4, vc 87–90)** (o CI do push é o árbitro; os DETALHES vivem no
   RELATORIO-0.12-C.md; a cláusula é anti-superficialidade — nada de
