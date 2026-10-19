@@ -82,6 +82,15 @@ public:
     bool saveActiveScene(ProjectStorage& st, const Scene& scene) const;
     bool loadActiveScene(ProjectStorage& st, Scene& scene,
                          const SceneSerializer::LoadCtx& ctx) const;
+
+    // 0.12-QoL D — O AUTO-SAVE: o MESMO dump da cena ativa num ficheiro
+    // PRÓPRIO na RAIZ do projeto («autosave.goni» — o seguro de vida do
+    // motor; nunca toca no .goni principal). false = storage ausente ou
+    // escrita falhada (o tick seguinte tenta de novo).
+    bool saveAutosave(ProjectStorage& st, const Scene& scene) const;
+    // Lê o autosave (o [Recuperar] do pop-up); false = ausente/corrompido.
+    bool loadAutosave(ProjectStorage& st, Scene& scene,
+                      const SceneSerializer::LoadCtx& ctx) const;
 };
 
 } // namespace vv

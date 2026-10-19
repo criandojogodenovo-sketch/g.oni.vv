@@ -404,6 +404,13 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
 
 // diálogo APLICAR-APÓS-IMPORT: 0 nada / 1 = Sim (aplica) / 2 = Nao.
 // Fecha com toque fora (= Nao).
+// 0.12-QoL D — o pop-up da RECUPERAÇÃO do auto-save: «Encontrámos
+// trabalho não guardado. Desejas recuperar?» com [Recuperar]/[Descartar]
+// (o padrão do drawApplyDialog — o card centrado com véu; o toque fora
+// devolve 2 = NÃO destrutivo: o autosave fica no disco para a próxima).
+int drawAutosaveDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                       EditorState& st);
+
 int drawApplyDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                     EditorState& st, const char* fileName, const char* ticName);
 

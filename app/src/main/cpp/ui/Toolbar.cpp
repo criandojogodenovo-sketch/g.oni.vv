@@ -17,6 +17,7 @@
 #include "ui/UiContext.h"
 #include "ui/Brand.h"     // 0.9.6.18 (D6): o glifo da marca numa função
 
+#include <cmath>
 #include <cstdio>
 
 namespace vv {
@@ -364,6 +365,24 @@ TopBarActions drawTopBar(UiContext& ui, EditorState& st) {
     ui.panel(L.underline.x, L.underline.y, L.underline.w, L.underline.h,
              theme::kTheme.accent);
 
+    // 0.12-QoL D — O INDICADOR do AUTO-SAVE: o pequeno ✓ que PISCA quando
+    // o auto-save grava (a ordem do dono: «um pequeno ícone no canto
+    // superior (tipo uma nuvem ou um visto ✓) que pisca quando o
+    // auto-save ocorre, para o utilizador saber que está seguro»). Vive
+    // à ESQUERDA do grupo play/pause (o canto superior direito); o alpha
+    // oscila (o piscar) enquanto st.autosaveFlash > 0 — o main decai.
+    if (st.autosaveFlash > 0.0f) {
+        const f32 isz = theme::dp(20.0f);
+        const f32 ix = L.play.x - theme::dp(8.0f) - isz;
+        const f32 iy = L.play.y + (L.play.h - isz) * 0.5f;
+        // o piscar: o seno do tempo restante (2 ciclos por segundo) —
+        // o alpha nunca desce de 0.25 (o ✓ nunca desaparece a meio)
+        const f32 wave = 0.625f + 0.375f * std::sin(st.autosaveFlash *
+                                                    12.566f);
+        f32 ck[4] = {theme::kTheme.ok[0], theme::kTheme.ok[1],
+                     theme::kTheme.ok[2], wave};
+        icons::drawIcon(ui, icons::Icon::Check, ix, iy, isz, ck);
+    }
     // 0.12-C (C-2): o PLAY EM DESTAQUE quando ativo (a ordem do dono) —
     // em playMode o botão é A CHAMA (o gradiente dos ativos da Y-1)
     if (iconButton(ui, kTbPlayId, L.play, icons::Icon::Play, st.playMode)) {

@@ -40,6 +40,7 @@
 #include <cstdio>
 #include <cstring>
 #include <sys/stat.h>   // 0.11-T-FIX (R-046): o sfixRmRf (S_ISDIR)
+#include <sys/time.h>   // 0.12-QoL D (R-056): o backdate do mtime
 // 0.9.6.5 (GRUPO B · R-024): o encode/decode do PNG exportado + o layout
 #include "render/ThumbPng.h"
 #include "assets/PngLoader.h"
@@ -52,6 +53,7 @@
 #include "core/SceneSerializer.h"
 #include "core/SafStorage.h"
 #include "core/Project.h"
+#include "core/AutoSave.h"
 #include "components/CameraComp.h"
 #include "components/MeshRenderer.h"
 #include "components/Transform3D.h"
@@ -7690,6 +7692,96 @@ struct DotTreeR057 {
 };
 
 } // namespace
+
+// ---- R-056 — O AUTO-SAVE É O SEGURO DE VIDA (0.12-QoL D) ---------------------
+// A ordem do dono: a cada 3 minutos com mudanças, gravar autosave.goni na
+// pasta do projeto; ao abrir, o autosave MAIS RECENTE que o .goni principal
+// pergunta [Recuperar]/[Descartar]. O tick corre no FIM DO FRAME.
+TEST(regress_qol_autosave) {
+    using namespace vv;
+    // (1) as DECISÕES puras: o timer 180s + a recuperação honesta
+    EXPECT(vv::autosave::kPeriodSec == 180.0f);
+    EXPECT(!autosave::due(0.0f));
+    EXPECT(!autosave::due(179.9f));
+    EXPECT(autosave::due(180.0f));
+    EXPECT(autosave::due(360.0f));
+    // a recuperação: só com AS DUAS DATAS e o autosave estritamente mais
+    // recente; sem datas (−1 — o SAF não expõe stat) NUNCA pergunta
+    EXPECT(autosave::decide(-1.0, -1.0) == autosave::Recovery::None);
+    EXPECT(autosave::decide(50.0, -1.0) == autosave::Recovery::None);
+    EXPECT(autosave::decide(-1.0, 40.0) == autosave::Recovery::None);
+    EXPECT(autosave::decide(40.0, 50.0) == autosave::Recovery::None);
+    EXPECT(autosave::decide(50.0, 50.0) == autosave::Recovery::None);
+    EXPECT(autosave::decide(50.0, 40.0) == autosave::Recovery::Recover);
+    // (2) O CICLO REAL no FsStorage (ficheiros de verdade): o autosave
+    // grava na RAIZ do projeto, o load volta, o mtime decide
+    char tmpl[] = "/tmp/goni-r056-XXXXXX";
+    const char* mkd = mkdtemp(tmpl);
+    ASSERT(mkd != nullptr);
+    FsStorage st(mkd);
+    Project p;
+    ASSERT(Project::createNew(st, "r056", p));
+    Scene cena;
+    const Handle h = cena.create("Casa");
+    Tic* t = cena.get(h);
+    Transform3D* tr = t->addComponent<Transform3D>();
+    tr->pos = Vec3{1.0f, 2.0f, 3.0f};
+    // o autosave grava (o MESMO dump do serializer; o principal INTACTO)
+    EXPECT(p.saveAutosave(st, cena));
+    {
+        std::string principal, autoTexto;
+        ASSERT(st.readText("autosave.goni", autoTexto));
+        ASSERT(st.readText(*p.activeScenePath(), principal));
+        EXPECT(autoTexto != principal);   // a cena ainda não foi salva
+        // o mtime: o autosave existe e é conhecido
+        EXPECT(st.modifiedTime("autosave.goni") > 0.0);
+    }
+    // a cena sofre uma MUDANÇA + o autosave de novo → mais recente
+    tr->pos = Vec3{9.0f, 9.0f, 9.0f};
+    EXPECT(p.saveAutosave(st, cena));
+    // o recovery decision: o autosave (agora) vs o principal (o cenário
+    // REAL do dono: a cena foi gravada ANTES do trabalho não guardado —
+    // o mtime do principal atrasa 60s; o mtime tem granularidade de 1s)
+    {
+        // backdate de verdade: o ficheiro principal recebe AGORA−60s
+        struct stat st0;
+        const std::string full =
+            std::string(mkd) + "/" + *p.activeScenePath();
+        ASSERT(::stat(full.c_str(), &st0) == 0);
+        struct timeval tv[2];
+        tv[0].tv_sec = st0.st_atime - 60;
+        tv[0].tv_usec = 0;
+        tv[1].tv_sec = st0.st_mtime - 60;
+        tv[1].tv_usec = 0;
+        ASSERT(::utimes(full.c_str(), tv) == 0);
+    }
+    const f64 mAuto = st.modifiedTime(autosave::kAutosaveFile);
+    const f64 mScene = st.modifiedTime(*p.activeScenePath());
+    EXPECT_MSG(mScene < mAuto,
+               "R-056: o principal (%.0f) tem de ser mais velho que o "
+               "autosave (%.0f)", mScene, mAuto);
+    EXPECT(autosave::decide(mAuto, mScene) == autosave::Recovery::Recover);
+    // o [Recuperar]: o MESMO loadText da casa (o round-trip do dump)
+    Scene volta;
+    const SceneSerializer::LoadCtx ctx;
+    EXPECT(p.loadAutosave(st, volta, ctx));
+    const Tic* lv = nullptr;
+    volta.forEachActive([&](const Tic& tc) { lv = &tc; });
+    ASSERT(lv != nullptr);
+    EXPECT(lv->name == "Casa");
+    if (const Transform3D* lt = lv->getComponent<Transform3D>()) {
+        EXPECT(nearEqF(lt->pos.x, 9.0f, 1e-4f));   // a MUDANÇA veio no auto
+    }
+    // (3) o DESCARTAR remove o ficheiro (a decisão do dono)
+    EXPECT(st.remove(autosave::kAutosaveFile));
+    EXPECT(st.modifiedTime(autosave::kAutosaveFile) < 0.0);
+    // (4) os UI ids do pop-up (a faixa própria)
+    EXPECT(editor::kAutoYesId == 6930u && editor::kAutoNoId == 6931u);
+    // limpeza
+    st.remove(*p.activeScenePath());
+    st.remove("project.goni");
+    ::rmdir(mkd);
+}
 
 // ---- R-057 — O NAVEGADOR NÃO VOLTAM AO RUÍDO (0.12-QoL B) -------------------
 // A ordem do dono (o feedback Redbr1): o navegador de ficheiros é uma LISTA

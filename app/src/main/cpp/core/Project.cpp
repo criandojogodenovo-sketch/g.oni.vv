@@ -1,5 +1,6 @@
 // core/Project.cpp — manifesto do projeto .goni (F5-A).
 #include "core/Project.h"
+#include "core/AutoSave.h"
 #include "core/Scene.h"
 
 namespace vv {
@@ -162,6 +163,22 @@ bool Project::saveActiveScene(ProjectStorage& st, const Scene& scene) const {
         return false;
     }
     return st.writeText(*rel, SceneSerializer::dump(scene));
+}
+
+bool Project::saveAutosave(ProjectStorage& st, const Scene& scene) const {
+    // 0.12-QoL D: o MESMO dump do serializer no ficheiro próprio (a raiz
+    // do projeto — ao lado do project.goni; o .goni principal INTACTO)
+    return st.writeText(autosave::kAutosaveFile,
+                        SceneSerializer::dump(scene));
+}
+
+bool Project::loadAutosave(ProjectStorage& st, Scene& scene,
+                           const SceneSerializer::LoadCtx& ctx) const {
+    std::string text;
+    if (!st.readText(autosave::kAutosaveFile, text)) {
+        return false;
+    }
+    return SceneSerializer::loadText(scene, text, ctx);
 }
 
 bool Project::loadActiveScene(ProjectStorage& st, Scene& scene,

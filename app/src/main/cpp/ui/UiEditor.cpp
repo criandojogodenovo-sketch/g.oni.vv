@@ -3450,6 +3450,54 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     return 0;
 }
 
+int drawAutosaveDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                       EditorState& st) {
+    // 0.12-QoL D — O POP-UP DA RECUPERAÇÃO (o padrão do drawApplyDialog:
+    // o card centrado + o véu 60% + o toque fora = NÃO destrutivo — o
+    // autosave fica no disco; a pergunta volta no PRÓXIMO arranque)
+    const f32 h = storageDialogHeight();
+    const f32 ox = ui.safeLeft();
+    const f32 oy = ui.safeTop();
+    const f32 aw = sw - ox - ui.safeRight();
+    const f32 ah = sh - oy - ui.safeBottom();
+    const UiRect dlg = centeredMenuRect(ox, oy, aw, ah, h);
+
+    f32 px = -1.0f, py = -1.0f;
+    if (in.pressed(0)) {
+        in.pos(0, px, py);
+    }
+    if (in.pressed(0) &&
+        !(px >= dlg.x && px < dlg.x + dlg.w && py >= dlg.y &&
+          py < dlg.y + dlg.h)) {
+        return 2;   // fora = manter o autosave (a decisão é do dono)
+    }
+
+    ui.panelRounded(dlg.x, dlg.y, dlg.w, dlg.h, theme::dp(theme::kRadiusCard),
+                    theme::kTheme.card);
+    ui.frameRounded(dlg.x, dlg.y, dlg.w, dlg.h, 2.0f,
+                    theme::dp(theme::kRadiusCard),
+                    theme::kTheme.border);   // 0.12-QoL A: inativo cinza
+    const f32 th = ui.fontHeight();
+    ui.label(dlg.x + kPad, dlg.y + kHeaderH * 0.5f + th * 0.30f,
+             "AUTO-SAVE", theme::TEXT);
+    ui.labelFitted(dlg.x + kPad, dlg.y + kHeaderH + 20.0f,
+                   "Encontrámos trabalho não guardado.",
+                   theme::TEXT, dlg.w - 2.0f * kPad);
+    ui.labelFitted(dlg.x + kPad, dlg.y + kHeaderH + 54.0f,
+                   "Desejas recuperar?", theme::TEXT, dlg.w - 2.0f * kPad);
+
+    UiRect yes{}, no{};
+    storageDialogButtons(dlg, yes, no);
+    int chosen = 0;
+    if (ui.button(kAutoYesId, yes.x, yes.y, yes.w, yes.h, "Recuperar")) {
+        chosen = 1;
+    }
+    if (ui.button(kAutoNoId, no.x, no.y, no.w, no.h, "Descartar")) {
+        chosen = 2;
+    }
+    return chosen;
+}
+
 int drawApplyDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                     EditorState& st, const char* fileName, const char* ticName) {
     const f32 h = storageDialogHeight();   // título + linhas + 2 botões

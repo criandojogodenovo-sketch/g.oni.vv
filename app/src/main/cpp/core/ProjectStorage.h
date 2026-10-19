@@ -77,6 +77,15 @@ public:
     virtual bool listDir(const std::string& relDir,
                          std::vector<std::string>& outFiles) const = 0;
 
+    // 0.12-QoL D — o mtime de UM ficheiro do projeto (SEGUNDOS desde a
+    // época; o auto-save compara o autosave.goni com o .goni principal).
+    // DEFAULT −1 = DESCONHECIDO (o SAF não expõe stat — a decisão da
+    // recuperação é honesta: sem as duas datas, NÃO há pergunta).
+    virtual f64 modifiedTime(const std::string& relPath) const {
+        (void)relPath;
+        return -1.0;
+    }
+
     // 0.9.6 (G6 · R-017) — tamanho de UM ficheiro do projeto (o bench do
     // relatório precisa do TOTAL em bytes sem LER os ficheiros).
     // default: false (não suportado — o SAF não tem stat barato; o bench

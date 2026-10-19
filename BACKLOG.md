@@ -280,6 +280,29 @@
   NÃO VERIFICADO no relatório §6); a migração dos .gmesh antigos é
   reimportar/reconverter (o GTB1 nasce no conversor).
 
+## 0.12-QoL — UI Polish, Navegador de Ficheiros e Auto-Save — FEITO
+
+- **FEITO 0.12-QoL (4 sub-fases, A..D)**: a cláusula calma (refinamento
+  de UI 2.5D e persistência, ZERO lógica de motor). **A** a LIMPEZA
+  VISUAL (o top bar só com o ícone do G, a pesquisa recolhida na LUPA
+  que expande, o border dos INATIVOS #24242A — o âmbar só no
+  ativo/selecionado —, os vãos X/Y/Z 12dp + a margem do Reset 8dp, o X
+  de fechar no menu de cenas; pins ×5 + M-QoLa1/x2 + 8 recalibrações
+  com nota). **B** o NAVEGADOR compacto (os chips quietos no lugar dos
+  botões gigantes, a seta (>) em todas as linhas, o « / » no
+  breadcrumb, TUDO o que é ponto fora — a 0.8.5 SUPERADA; R-057 + pins
+  ×2 + M-QoLb1). **C** o VIEWPORT limpo (a teia do frustum só com a
+  câmara selecionada, o rail sem o pai quadrado gigante, o grid com o
+  fade suave pela fonte única gridFadeForDist; R-058 + pins ×3 +
+  M-QoLc1). **D** o AUTO-SAVE (o timer 180s com o dirty honesto, o
+  autosave.goni NA RAIZ — o .goni principal INTACTO, a recuperação com
+  o pop-up [Recuperar]/[Descartar] 1× por processo, o ✓ verde que
+  pisca; core/AutoSave.h NOVO + o modifiedTime no storage; R-056 + pins
+  ×3 + M-QoLd1). Pins ×13 NOVOS (test_012qol.cpp) + as sentinelas
+  R-056/R-057/R-058 + as mutações vermelho→reposto→verde. test_core
+  1194 OK / 0 falhas · c33 1010/0 · os gates verdes · versionCode 105.
+  Relatório: docs/RELATORIO-0.12-QoL.md.
+
 ## 0.12-U — V.ONI BLOCO A (Redução de Trabalho) — FEITO
 
 - **FEITO 0.12-U (3 sub-fases + o FECHO)**: as 7 features da linguagem

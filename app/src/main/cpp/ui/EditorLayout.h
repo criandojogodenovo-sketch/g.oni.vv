@@ -910,6 +910,9 @@ constexpr u64 kBrowserScrollId = 45;   // região de scroll da lista
 // SEGMENTOS do breadcrumb (o salto para a pasta do segmento)
 constexpr u64 kBrowserSearchId = 6902;
 constexpr u64 kBrowserCrumbBase = 6910;   // 6910..6915 (6 segmentos basta)
+// 0.12-QoL D — o pop-up do AUTO-SAVE (a recuperação): [Recuperar]/[Descartar]
+constexpr u64 kAutoYesId = 6930;
+constexpr u64 kAutoNoId  = 6931;
 // o IMPORTAR do estado vazio dos Assets (o drawer, tab 2)
 constexpr u64 kAssetsImportId = 6920;
 // o CRIAR TIC do estado vazio do Inspector (abre o plusMenu de presets)

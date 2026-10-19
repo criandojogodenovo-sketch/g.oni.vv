@@ -246,6 +246,13 @@ struct EditorState {
     // false = só a lupa; true = o campo aberto (o × limpa e fecha).
     bool   hierSearchOpen = false;
 
+    // 0.12-QoL D — O AUTO-SAVE: o pop-up de RECUPERAÇÃO (o main arma ao
+    // abrir o projeto quando o autosave.goni é mais recente que o .goni
+    // principal) + o FLASH do indicador (segundos restantes — o ✓ pisca
+    // na barra de topo quando o auto-save grava; decai com o dt real).
+    bool   autoAsk = false;
+    f32    autosaveFlash = 0.0f;
+
     // 0.12-C (C-4) — PESQUISA do NAVEGADOR de ficheiros (o teclado in-app
     // propósito 10 escreve aqui; vazio = a lista completa). FILTRO case-
     // insensitive sobre o NOME; sobrevive à navegação (procurar em toda a

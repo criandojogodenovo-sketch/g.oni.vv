@@ -359,6 +359,20 @@ void FsStorage::closeWriteStream(int handle) {
     reg.erase(it);
 }
 
+f64 FsStorage::modifiedTime(const std::string& relPath) const {
+    // 0.12-QoL D: o mtime em SEGUNDOS (st_mtime); rel inválido/ausente → −1
+    // (o contrato do default: desconhecido NUNCA recupera às cegas)
+    const std::string real = joinRelPath(root_, relPath);
+    if (real.empty()) {
+        return -1.0;
+    }
+    struct stat st;
+    if (::stat(real.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
+        return -1.0;
+    }
+    return static_cast<f64>(st.st_mtime);
+}
+
 bool FsStorage::remove(const std::string& relPath) {
     if (!validRelPath(relPath)) {
         return false;

@@ -50,6 +50,7 @@
 #include "core/PlaySnapshot.h"
 #include "core/Presets.h"
 #include "core/Project.h"
+#include "core/AutoSave.h"
 #include "core/SafStorage.h"
 #include "core/Scene.h"
 #include "core/SceneSerializer.h"
@@ -1119,6 +1120,20 @@ void loadSceneByName(const std::string& name, ui::SceneSwap style);
 SceneSerializer::LoadCtx makeLoadCtx();
 void refreshCatalog();
 void postLoadMigrateAndFixup();   // 0.8.10: migração silenciosa pós-load
+
+// ---- 0.12-QoL D: O AUTO-SAVE (o seguro de vida do motor) -------------------
+// O TIMER do dono: a cada 180s, SE houver alterações na cena (o dump difere
+// do último persistido), gravar autosave.goni NA RAIZ DO PROJETO. Corre NO
+// FIM DO FRAME (1×/3min não muda o perfil; um thread separado complicaria
+// o SAF sem necessidade — a ordem do dono aceita as duas formas). A
+// RECUPERAÇÃO: ao abrir o projeto, se o autosave.goni for MAIS RECENTE que
+// o .goni principal, o pop-up 2.5D pergunta [Recuperar]/[Descartar].
+void autoSaveOnSceneLoaded();   // o hook DEPOIS de cada load (boot/lifecycle)
+void autoSaveTick(double realDt);   // o fim de frame (o timer + a gravação)
+double g_autoClock = 0.0;           // o relógio do frame (soma o dt real)
+double g_autoLastTick = 0.0;        // o último tick do timer
+std::string g_autoLastDump;         // o último dump persistido (o dirty)
+bool g_autoBootAsked = false;       // a pergunta de recuperação é 1×
 void primFlushPending();               // 0.8.10: troca no ponto seguro (fwd)
 void primGraveDig();
 void primMeshesToGrave();              // 0.8.10: posse p/ cova (troca de cena)
@@ -4134,6 +4149,73 @@ void primMeshesToGrave() {
     elog::info("mesh: %u mesh(es) de prim p/ cova (cena substituida)", n);
 }
 
+// ---- 0.12-QoL D: as implementações do AUTO-SAVE ----------------------------
+void autoSaveOnSceneLoaded() {
+    // (a) o dirty recomeça honesto: o estado ACABADO de carregar É o
+    // baseline (um boot sem mudanças NUNCA grava autosave)
+    if (g_storage && g_projectReady) {
+        g_autoLastDump = SceneSerializer::dump(g_scene);
+    } else {
+        g_autoLastDump.clear();
+    }
+    // (b) a RECUPERAÇÃO — 1× por processo (o boot; os reloads do lifecycle
+    // NÃO re-perguntam — a escolha do dono sobrevive ao INIT WINDOW)
+    if (g_autoBootAsked || !g_storage || !g_projectReady) {
+        return;
+    }
+    g_autoBootAsked = true;
+    const f64 mAuto =
+        g_storage->modifiedTime(autosave::kAutosaveFile);
+    const std::string* rel = g_project.activeScenePath();
+    const f64 mScene = rel ? g_storage->modifiedTime(*rel) : -1.0;
+    if (autosave::decide(mAuto, mScene) == autosave::Recovery::Recover) {
+        g_editor.autoAsk = true;   // o pop-up 2.5D pergunta (o draw no frame)
+        elog::info("autosave: trabalho não guardado é MAIS RECENTE que o "
+                   "principal — a perguntar ao dono");
+    } else {
+        elog::info("autosave: nada a recuperar (sem autosave, sem datas "
+                   "conhecidas, ou o principal está atual)");
+    }
+}
+
+void autoSaveTick(double realDt) {
+    // o FLASH do indicador decai com o dt REAL (o ✓ pisca ~2.4s)
+    if (g_editor.autosaveFlash > 0.0f) {
+        g_editor.autosaveFlash -= static_cast<f32>(realDt);
+        if (g_editor.autosaveFlash < 0.0f) {
+            g_editor.autosaveFlash = 0.0f;
+        }
+    }
+    if (!g_storage || !g_projectReady) {
+        return;
+    }
+    g_autoClock += realDt;
+    // o timer do dono: 180s desde o último tick
+    if (!autosave::due(static_cast<f32>(g_autoClock - g_autoLastTick))) {
+        return;
+    }
+    g_autoLastTick = g_autoClock;
+    // SÓ no EDITOR: o Play muta a cena em runtime (spawn/physics) —
+    // gravar esses estados era persistir o momento, não o trabalho
+    if (g_editor.playMode) {
+        return;
+    }
+    // o dirty HONESTO: o dump difere do último persistido?
+    std::string dump;
+    dump = SceneSerializer::dump(g_scene);
+    if (dump == g_autoLastDump) {
+        return;   // nada mudou — nada a gravar (o tick passa)
+    }
+    if (g_project.saveAutosave(*g_storage, g_scene)) {
+        g_autoLastDump = dump;
+        g_editor.autosaveFlash = 2.4f;   // o ✓ pisca — o dono sabe
+        elog::info("autosave: gravado (%u tics) — autosave.goni",
+                   (unsigned)g_scene.count());
+    } else {
+        elog::error("autosave: a gravação FALHOU (o tick seguinte tenta)");
+    }
+}
+
 // ---- 0.8.10: PÓS-LOAD — migração de projeto antigo + refs + .gm -----------
 // Corre DEPOIS de cada loadActiveScene (boot/switch/menu):
 //   1. MIGRAÇÃO silenciosa: meshes/*.obj|gltf|glb + textures/*.png legados
@@ -5058,6 +5140,8 @@ void onAppCmd(android_app* app, i32 cmd) {
                 const SceneSerializer::LoadCtx ctx = makeLoadCtx();
                 if (g_project.loadActiveScene(*g_storage, g_scene, ctx)) {
                     postLoadMigrateAndFixup();   // 0.8.10: migração silenciosa
+                    autoSaveOnSceneLoaded();   // 0.12-QoL D: o baseline do
+                                               // dirty + a recuperação 1×
                     // 0.8.12 — RE-VALIDA o handle (re-mapeia por nome se o
                     // reload re-criou os TICs; mantém se o handle vivo).
                     // O ELEMENTO de UI selecionado não sobrevive (o índice
@@ -8175,6 +8259,37 @@ void frame() {
         }
     }
 
+    // 0.12-QoL D — A RECUPERAÇÃO do auto-save: [Recuperar] carrega o
+    // autosave.goni por cima da cena (o MESMO loadText do .goni principal
+    // + o pós-load da casa); [Descartar] apaga o ficheiro. O toque fora
+    // devolve 2 SEM destruir (o autosave fica para a próxima).
+    if (g_editor.autoAsk) {
+        const int ch = editor::drawAutosaveDialog(g_ui, g_input, w, h,
+                                                  g_editor);
+        if (ch == 1) {
+            const SceneSerializer::LoadCtx ctx = makeLoadCtx();
+            if (g_project.loadAutosave(*g_storage, g_scene, ctx)) {
+                postLoadMigrateAndFixup();
+                autoSaveOnSceneLoaded();   // o baseline do dirty renasce
+                editor::clearSelection(g_editor);
+                showToast("trabalho recuperado do auto-save");
+                elog::info("autosave: RECUPERADO pelo dono (%u tics)",
+                           (unsigned)g_scene.count());
+            } else {
+                showToast("o auto-save está corrompido — descartado");
+                elog::error("autosave: o load do RECUPERAR falhou — o "
+                            "ficheiro sai (o principal intacto)");
+                g_storage->remove(autosave::kAutosaveFile);
+            }
+            g_editor.autoAsk = false;
+        } else if (ch == 2) {
+            g_storage->remove(autosave::kAutosaveFile);
+            g_editor.autoAsk = false;
+            showToast("auto-save descartado");
+            elog::info("autosave: DESCARTADO pelo dono");
+        }
+    }
+
     // 0.8.11: glifos de ALTIFALANTE (+ esfera posicional) dos AudioPlayers
     // — SÓ no editor (em Play nada desenha: só soa)
     // 0.9.6 (G1-3): e NUNCA com overlay aberto — o ícone amarelo do áudio
@@ -8634,6 +8749,8 @@ void android_main(android_app* app) {
         // idempotente: guarda a 1ª do processo para o cold e a 1ª após
         // cada onResume para o warm — ver core/Bench)
         bench::markFirstFrame();
+
+        autoSaveTick(realDt);   // 0.12-QoL D: o timer 180s + o flash do ✓
 
         if (g_toastT > 0.0f) {
             g_toastT -= static_cast<f32>(realDt);

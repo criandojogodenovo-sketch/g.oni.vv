@@ -262,3 +262,78 @@ encolhe; os gates ≤4%/≤6% continuam a cumprir-se).
 saltado no sandbox) · c33_virtual **1010/0** · docs-lint VERDE · as
 mutações vermelho→reposto→verde. **versionCode 104** — o build vigente.
 O 103 fica INTACTO como história.
+
+## §4 D — Auto-Save e Recuperação de Crash
+
+**O que mudou** (vc 105):
+
+1. **O timer.** A cada **180s** (3 minutos — `autosave::kPeriodSec`), SE
+   houver alterações na cena, gravar **autosave.goni NA RAIZ DO
+   PROJETO** (`Project::saveAutosave` — o MESMO dump do SceneSerializer
+   num ficheiro PRÓPRIO; o .goni principal INTACTO). O dirty é HONESTO:
+   o dump da cena compara-se ao último persistido
+   (`g_autoLastDump`) — o baseline renasce em CADA load
+   (`autoSaveOnSceneLoaded`), um boot sem mudanças NUNCA grava. Corre
+   NO FIM DO FRAME (`autoSaveTick(realDt)` — 1×/3min não muda o
+   perfil; um thread separado complicaria o SAF sem necessidade, a
+   forma que o prompt aceita). SÓ NO EDITOR: o Play muta a cena em
+   runtime (spawn/física) — gravar isso era persistir o momento, não o
+   trabalho.
+2. **A recuperação.** Ao abrir o projeto (1× por processo — os reloads
+   do lifecycle não re-perguntam), o `ProjectStorage::modifiedTime`
+   (NOVO — o default −1 é honesto «desconhecido»; o FsStorage devolve o
+   stat real) compara o autosave.goni com o .goni principal:
+   `autosave::decide` → o autosave ESTRITAMENTE mais recente arma
+   `EditorState::autoAsk` e o pop-up 2.5D pergunta «**Encontrámos
+   trabalho não guardado. Desejas recuperar?**» com
+   **[Recuperar]**/​**[Descartar]** (o padrão do drawApplyDialog — o
+   card centrado + véu; o toque fora devolve 2 SEM destruir: o autosave
+   fica para a próxima). O [Recuperar] carrega pelo MESMO loadText +
+   pós-load da casa; um autosave corrompido é removido com o principal
+   intacto e o toast diz o que aconteceu. O [Descartar] apaga o
+   ficheiro.
+3. **O indicador.** O pequeno **✓ verde** (o visto do conjunto outline)
+   vive à ESQUERDA do grupo play/pause na barra de topo e **PISCA**
+   durante ~2,4s quando o auto-save grava (`EditorState::autosaveFlash`
+   — o seno de 2 ciclos/s com o piso 0.25; o decay é com o dt REAL).
+
+**Sentinela R-056** (`regress_qol_autosave`) — (1) as decisões puras
+(180s, os limites do due, os 6 casos do decide — o desconhecido nunca
+pergunta); (2) o CICLO REAL no FsStorage: createNew → saveAutosave ×2 →
+o mtime do principal atrasado 60s (a granularidade de 1s do filesystem)
+→ **Recover** → o loadAutosave devolve a MUDANÇA (pos 9,9,9) → o
+remove do descartar; (3) os ids do pop-up. Entrada completa no
+docs/REGRESSOES.md.
+
+**Pins** (test_012qol.cpp): `qol_d_autosave_decisoes` (o período + os
+limites + a honestidade do decide), `qol_d_ciclo_real` (o ciclo real no
+FsStorage: o principal intacto, o [Recuperar] volta, o [Descartar]
+apaga), `qol_d_pop_up_e_indicador` (os 2 alvos do pop-up MEDIDOS na
+mesma linha + o toque fora = 2 + as FONTEs do ✓ e do texto).
+
+**Mutações** (Policy #5 — vermelho → repor → verde):
+
+- **M-QoLd1** (o timer morto — o `due()` devolve false sempre):
+  ```
+  regress_qol_autosave                           ...  FALHOU  tests/test_sentinels.cpp:7706  autosave::due(180.0f)
+    FALHOU  tests/test_sentinels.cpp:7707  autosave::due(360.0f)
+  (reposto → regress_qol_autosave VERDE)
+  ```
+
+**Verificação**: test_core 1194 OK / 0 falhas (o bench r039 saltado no
+sandbox) · c33_virtual **1010/0** · docs-lint VERDE · as mutações
+vermelho→reposto→verde. **versionCode 105** — o build vigente da
+CAMPANHA FECHADA. O 104 fica INTACTO como história.
+
+## §5 O fecho da campanha
+
+- As 4 sub-fases (A/B/C/D) fecham com commit + push próprios, o
+  STATE.md no MESMO commit e CI verde — a regra §5 da casa.
+- A referência V.ONI NÃO regenera: ZERO entradas no registo (a cláusula
+  calma — o R-013 segue aferrado).
+- O achado fora da lista (cláusula calma, NÃO fixado): o gate
+  ctx_state_curto (o teto <300 linhas do STATE.md) apanhou o índice em
+  300 exato no commit do B — os 2 runs vermelhos do B vivem no histórico
+  do CI; o fix (B-fix + B-fix2) devolveu o teto e corrigiu a ordem do
+  R-057 (o CI é o árbitro).
+- O CODEMAP.md e o BACKLOG.md atualizam-se no commit do D (o fecho).

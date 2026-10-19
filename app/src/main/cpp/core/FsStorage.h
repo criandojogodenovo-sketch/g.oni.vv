@@ -35,6 +35,8 @@ public:
     void closeWriteStream(int handle) override;
     // 0.8.10 — remove ficheiro (setting "largar a fonte")
     bool remove(const std::string& relPath) override;
+    // 0.12-QoL D — o mtime REAL (stat; o auto-save compara as datas)
+    f64 modifiedTime(const std::string& relPath) const override;
     bool listDir(const std::string& relDir,
                  std::vector<std::string>& outFiles) const override;
 

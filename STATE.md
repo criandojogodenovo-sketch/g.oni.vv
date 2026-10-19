@@ -1,9 +1,9 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-19 · vc: 104 · Último commit: este (o 0.12-QoL C —
-o VIEWPORT limpo: a teia do frustum só com a câmara selecionada, o rail
-sem o fundo quadrado gigante, o grid com o fade suave (R-058); o
-relatório próprio diz o resto)
+Atualizado: 2026-10-19 · vc: 105 · Último commit: este (o 0.12-QoL D +
+o FECHO — o AUTO-SAVE: o timer 180s com o dirty honesto, o autosave.goni
+na raiz, a recuperação com o pop-up [Recuperar]/[Descartar], o ✓ que
+pisca; R-056; A CAMPANHA 0.12-QoL FECHA)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -11,9 +11,10 @@ relatório próprio diz o resto)
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-QoL (UI POLISH + NAVEGADOR + AUTO-SAVE) — EM CURSO
-  (A..D)** (a cláusula calma: refinamento de UI 2.5D e persistência,
-  ZERO lógica de motor; a história vive no RELATORIO-0.12-QoL.md).
+- **Campanha 0.12-QoL (UI POLISH + NAVEGADOR + AUTO-SAVE) — FECHADA
+  (A..D, vc 102–105)** (a cláusula calma: refinamento de UI 2.5D e
+  persistência, ZERO lógica de motor; a história vive no
+  RELATORIO-0.12-QoL.md).
   **A (vc 102)**: o top bar SEM o texto do nome (só o ícone do G), a
   pesquisa da hierarquia recolhida na LUPA que expande ao toque (o ×
   limpa e recolhe), o border dos INATIVOS #24242A (o âmbar só no
@@ -21,16 +22,9 @@ relatório próprio diz o resto)
   X/Y/Z 12dp + a margem mínima 8dp do Reset, o X (48×48) no menu de
   cenas; pins ×5 + M-QoLa1/x2; 8 recalibrações com nota. CI verde
   (1befd71).
-  **B (vc 103)**: os atalhos e o Subir deixam de ser BOTÕES âmbar
-  (chips quietos, geometria/ids intactos), a seta (>) em TODAS as
-  linhas, o separador « / » no breadcrumb, TUDO o que é ponto FORA (a
-  0.8.5 SUPERADA pela ordem do dono); R-057 + pins ×2 + M-QoLb1; o
-  picker_oculta_dot recalibrado com nota.
-  **C (vc 104)**: a TEIA do frustum SÓ com a câmara selecionada (o
-  glifo mudo fica — o alvo do toque), o rail SEM o pai quadrado
-  gigante (os chips individuais ficam; o rect fica no layout), o grid
-  com o fade suave pela fonte única gridFadeForDist (o caída dobra);
-  R-058 + pins ×3 + M-QoLc1; o d17 recalibrado com nota.
+  **B (vc 103)**: os atalhos e o Subir deixam de ser BOTÕES âmbar (chips quietos, geometria/ids intactos), a seta (>) em TODAS as linhas, o « / » no breadcrumb, TUDO o que é ponto FORA (a 0.8.5 SUPERADA); R-057 + pins ×2 + M-QoLb1; o picker_oculta_dot recalibrado.
+  **C (vc 104)**: a TEIA do frustum SÓ com a câmara selecionada (o glifo mudo fica), o rail SEM o pai quadrado gigante, o grid com o fade suave pela fonte única gridFadeForDist; R-058 + pins ×3 + M-QoLc1; o d17 recalibrado.
+  **D (vc 105)**: o TIMER 180s com o dirty HONESTO (o dump difere), o autosave.goni NA RAIZ (o principal INTACTO), a recuperação 1× com o pop-up [Recuperar]/[Descartar], o ✓ verde que PISCA; R-056 + pins ×3 + M-QoLd1. **A CAMPANHA FECHA.**
 - **Campanha 0.12-X (CÂMARA DE TERCEIRA PESSOA) — FECHADA (3.9x, vc
   101)** (o camrig + camdrag + limit no REGISTO como Contínuos; o
   yaw/pitch no TykerState; o Host::lookDelta com o consumo a ZERAR; o
@@ -100,6 +94,11 @@ relatório próprio diz o resto)
   §3): a teia do frustum sob seleção, o rail flutuante, o grid suave;
   R-058 + pins ×3 + M-QoLc1 vermelho→reposto→verde (colada no §3); o
   d17 recalibrado com nota.
+- 0.12-QoL D (vc 105) — o AUTO-SAVE (no RELATORIO-0.12-QoL.md §4): o
+  timer 180s + o autosave.goni na raiz + a recuperação com o pop-up +
+  o ✓ que pisca; core/AutoSave.h NOVO (as decisões puras), o
+  Project::saveAutosave/loadAutosave, o ProjectStorage::modifiedTime;
+  R-056 + pins ×3 + M-QoLd1 vermelho→reposto→verde (colada no §4).
 - 0.12-X 3.9x (vc 101) — a câmara de terceira pessoa (no
   RELATORIO-0.12-X-CAMRIG.md): camrig(d,h,suav) + camdrag(sens) +
   limit como Contínuos no REGISTO; o TykerState guarda camYaw/camPitch;
@@ -137,29 +136,24 @@ relatório próprio diz o resto)
   dono; pins ×13 + M-D1a/b..D3a/b; DORMENTES desde a 0.12-E (os
   achados: o rebind do ARRAY_BUFFER, a corrida dos jobs, o flip da
   captura, o continue do blend, a banda sem teto).
-- 0.6.x–0.9.5 — fundação da engine (V.ONI core, device real, CI 5 jobs).
-- 0.12-C (vc 87–90) — layout, organização e consistência (no
+- 0.6.x–0.9.5 — fundação da engine (V.ONI core, device real, CI 5 jobs).- 0.12-C (vc 87–90) — layout, organização e consistência (no
   RELATORIO-0.12-C.md §1..4): C-1 as proporções (hierarquia 20%,
   viewport ≥60%, hierHeaderRects); C-2 os menus e a barra de topo
   (menuSheetLayout, o play A CHAMA, o gizmo duplicado fora); C-3 a
   escada de superfícies + o idioma (os 4 tons, card/elevated); C-4 o
   picker + os vazios com AÇÃO + A REPARAÇÃO da árvore (614 de volta);
   pins ×20 + M-C1a/b..C4a/b.
-- 0.12-B B-4 (vc 86) — as ações de cena (no RELATORIO-0.12-B.md
-  §25..29): o renomear/duplicar/apagar 2-tap + o manifesto round-trip;
-  pins ×4 + M-B4a; R-051; a CAMPANHA 0.12-B FECHA.
-- 0.12-B B-3 (vc 85) — o canvas com a moldura do device (no
-  RELATORIO-0.12-B.md §20..24): o seletor + a moldura + o véu + as guias
-  + a grelha + o toast opaco; pins ×3 + M-B3a/b.
-- 0.12-B B-2 (vc 84) — o Inspector de UI (no RELATORIO-0.12-B.md §14..19):
-  as secções colapsáveis + os campos da base/por tipo + a zona morta
-  (TouchControls::dead) + os resets + o «sem remover joystick»; pins ×5 +
-  M-B2a/b.
-- 0.12-B B-1 (vc 83) — a árvore de UI (o relatório próprio:
-  docs/RELATORIO-0.12-B.md): Control/UIRoot + a compat
-  migrateUiCanvasToTree + o serializer com as fontes partilhadas + o
-  editor em modo árvore + o Play; pins ×9 + M-B1a/b/c + R-050; 8
-  recalibrações com nota.
+- 0.12-B B-3/B-4 (vc 85–86) — o canvas com a moldura do device (o
+  seletor, o véu, as guias, a grelha, o toast; pins ×3 + M-B3a/b) e as
+  ações de cena (o renomear/duplicar/apagar 2-tap + o manifesto
+  round-trip; pins ×4 + M-B4a; R-051) — no RELATORIO-0.12-B.md
+  §20..29; a CAMPANHA 0.12-B FECHA.
+- 0.12-B B-1/B-2 (vc 83–84) — a árvore de UI (Control/UIRoot, a compat
+  migrateUiCanvasToTree, o serializer, o editor em modo árvore, o Play;
+  pins ×9 + M-B1a/b/c + R-050) e o Inspector de UI (as secções
+  colapsáveis, os campos da base/por tipo, a zona morta, os resets, o
+  «sem remover joystick»; pins ×5 + M-B2a/b) — no
+  RELATORIO-0.12-B.md §1..19; 8 recalibrações com nota.
 - 0.12-A (vc 82) — os 4 bugs P0 fechados (o ficheiro:linha, os pins e
   o veredito vivem no relatório próprio: docs/RELATORIO-0.12-A.md + o
   INVEST-RAM): A-1 as rows LOD JÁ EXISTIAM (PÁRA no fix cego; pins ×5);
@@ -169,14 +163,9 @@ relatório próprio diz o resto)
   cache de blocos a ciclizar); pins com M-A1a/b..A3a/b vermelho→verde;
   o achado fora da lista (inspectorRowCount −4 rows mesh, sem sintoma)
   documentado no relatório §6.
-- 0.11-Y (vc 77–81) — a identidade visual completa (o ícone, o tema, o
-  layout, os cartões, o fecho com os 13 PNGs).
-- 0.9.6 + 0.9.6.4–0.9.6.20 (vc 48–67) — identidade, grupos UI, editor,
-  import glTF, orçamento 3D, leis de desenho/toque, janelas.
-- 0.10-M..0.11-W (vc 68–76) — o .gmesh v3, a hierarquia, os materiais
-  glTF, a animação skinada, o skinned cull+LOD, o instancing e o
-  streaming progressivo (os DETALHES vivem nos relatórios da docs/ — o
-  índice não é o arquivo).
+- 0.11-Y (vc 77–81) — a identidade visual completa (o ícone, o tema, o layout, os cartões, o fecho com os 13 PNGs).
+- 0.9.6 + 0.9.6.4–0.9.6.20 (vc 48–67) — identidade, grupos UI, editor, import glTF, orçamento 3D, leis de desenho/toque, janelas.
+- 0.10-M..0.11-W (vc 68–76) — o .gmesh v3, a hierarquia, os materiais glTF, a animação skinada, o skinned cull+LOD, o instancing e o streaming progressivo (os DETALHES vivem nos relatórios da docs/ — o índice não é o arquivo).
 
 ## §3 O que está PENDENTE (por ordem)
 

@@ -1,22 +1,19 @@
 # CODEMAP.md — onde vive o quê
 
-Atualizado: 2026-10-19 · vc: 95
+Atualizado: 2026-10-19 · vc: 105
 
-> 0.12-E (E-1 · EMERGÊNCIA): o shader SDF de widget (D-1), o vidro
-> real/falso (D-2) e o fogo do shader único (D-3) estão DORMENTES — a
-> ordem do dono abortou o SDF 3D (estragou texto/layout no device). Os
-> símbolos continuam no código com ZERO chamadores no produto (o
-> app/src/main/cpp/ui/Sdf.h, o app/src/main/cpp/render/SdfBatch.h, o
-> app/src/main/cpp/ui/Glass.h, o app/src/main/cpp/ui/Fire.h, o
-> progSdf_/captureGlass do app/src/main/cpp/render/Renderer.cpp e os
-> emissores UiContext::sdfWidget/sdfWidgetGlass/glassPanelFake/
-> sdfFireBorder/fireGlowBelow/drawEmbers).
-> O desenho do produto voltou ao SIMPLES 2D (o padrão Y-1: painel +
-> gradiente + frame + glassTopLine). A E-3 ligou os EFEITOS 2.5D por
-> cima: o app/src/main/cpp/ui/Noise2D.h (o ruído tileável + o scroll),
-> a textura GL_REPEAT no Renderer.cpp, o emissor UiContext::fireBorder2D,
-> o token dropShadow (a sombra), o surface α0.85 e o topo ÂMBAR 20%. O LOGO de D-4 (Brand.h/.cpp) segue
-> VIVO (segmentos 2D — nunca foi SDF).
+> 0.12-E (E-1 · EMERGÊNCIA): o SDF de widget (D-1), o vidro (D-2) e o
+> fogo (D-3) estão DORMENTES (a ordem do dono abortou o SDF 3D) — os
+> símbolos vivem com ZERO chamadores: o app/src/main/cpp/ui/Sdf.h, o
+> app/src/main/cpp/render/SdfBatch.h, o app/src/main/cpp/ui/Glass.h, o
+> app/src/main/cpp/ui/Fire.h, o progSdf_/captureGlass do
+> app/src/main/cpp/render/Renderer.cpp e os emissores
+> sdfWidget/sdfWidgetGlass/glassPanelFake/sdfFireBorder/fireGlowBelow/
+> drawEmbers. O desenho do produto é o SIMPLES 2D (Y-1) + os EFEITOS
+> 2.5D da E-3 (o app/src/main/cpp/ui/Noise2D.h, o fireBorder2D, o
+> dropShadow, o surface α0.85, o topo ÂMBAR 20%). O LOGO de D-4
+> (app/src/main/cpp/ui/Brand.h/.cpp) segue VIVO (segmentos 2D — nunca
+> foi SDF).
 >
 > Convenção de paths: TODOS os caminhos deste ficheiro são relativos à
 > RAIZ do repo (exemplo: o registo da linguagem vive em
@@ -54,8 +51,13 @@ Atualizado: 2026-10-19 · vc: 95
   `voni_refgen` de tests/CMakeLists.txt.
 - **app/src/main/cpp/core/** — o motor puro: Scene/Tic (a unidade é TIC),
   SceneSerializer (`.goni`: `dump`/`loadText`), ProjectStorage/FsStorage/
-  SafStorage (SAF), Tick.h (o `TickGroup` + `TickGroups::add`), UndoStack,
-  VoniSystem, Bench (R-017), AssetPersist, SceneTic.h (TIC + Transform3D).
+  SafStorage (SAF; **0.12-QoL D**: o `modifiedTime` — o default −1 é o
+  desconhecido honesto, o FsStorage devolve o stat), **0.12-QoL D**:
+  AutoSave.h (as DECISÕES PURAS — o kPeriodSec 180, o due, o decide) +
+  o Project::saveAutosave/loadAutosave (o autosave.goni NA RAIZ — o
+  .goni principal INTACTO), Tick.h (o `TickGroup` + `TickGroups::add`),
+  UndoStack, VoniSystem, Bench (R-017), AssetPersist, SceneTic.h (TIC +
+  Transform3D).
 - **app/src/main/cpp/render/** — o desenho: Renderer, Mesh, Camera, Grid,
   Cube/Primitives, Material, Texture, GpuAssets (+ `impostorTexture`),
   BlockMesh (o render POR BLOCOS do .gmesh v3), Impostor.h (a decisão
@@ -68,20 +70,18 @@ Atualizado: 2026-10-19 · vc: 95
   (o aShape.w=1 — a chama na banda da aresta em MISTURA ADITIVA
   GL_SRC_ALPHA/GL_ONE; os uniforms uSdfTime/uFire1/uFire3; o run leva o
   flag blendAdd e o endFrame liga-o à volta do drawArrays) replicando o
-  app/src/main/cpp/ui/Fire.h LINHA A LINHA. **0.12-D (D-2)**: app/src/main/cpp/ui/Glass.h
-  (as fontes puras — o BLUR DUAL KAWASE, a downsample 2×2, a DECISÃO da
-  CACHE glassCacheDirty e o hash do ruído) + o captureGlass no Renderer
-  (o glReadPixels com o flip, a redução 1/4, o blur, o upload; a cache
-  com o contador glassCapturesForTest) + o ramo uSdfTexOn do shader
-  único (o aShape.z — o widget de vidro amostra a cena borrada × a tinta
-  glassInk do Theme).
+  app/src/main/cpp/ui/Fire.h LINHA A LINHA. **0.12-D (D-2)**:
+  app/src/main/cpp/ui/Glass.h (as fontes puras — o BLUR DUAL KAWASE, a
+  downsample 2×2, a CACHE glassCacheDirty e o hash do ruído) + o
+  captureGlass no Renderer (o glReadPixels com o flip, a redução 1/4, o
+  blur, o upload) + o ramo uSdfTexOn do shader único (o widget de vidro
+  amostra a cena borrada × a tinta glassInk do Theme).
 - **app/src/main/cpp/assets/** — importadores e formatos GL-free:
   GOwnFormats (.gmesh/.gtext/.gm), GmeshV3Stream (o streaming do
   conversor), GltfImporter/GltfAnim/GltfTextures/GltfInstantiate,
   ObjImporter, PngLoader, TexturePipeline/TexturePolicy/TextureCache,
-  MipGen, ThumbRender/ThumbIndex (thumbs software), ImpostorIndex (o
-  PNG do impostor sob demanda — o pico de RAM é UM bloco, R-041),
-  AstcCompressor/Etc2Compressor + vendor/.
+  MipGen, ThumbRender/ThumbIndex, ImpostorIndex (o pico de RAM é UM
+  bloco, R-041), AstcCompressor/Etc2Compressor + vendor/.
 - **app/src/main/cpp/ui/** — a apresentação: EditorUi, EditorLayout.h (as
   constantes — InspRow, as faixas k*Base; **0.12-C C-1**: hierHeaderRects
   — a FONTE ÚNICA da geometria do cabeçalho da hierarquia: o título com
@@ -111,13 +111,20 @@ Atualizado: 2026-10-19 · vc: 95
   0..1 para a splash da D-6; o espelho Java UiIcons.drawBrand por
   segmentos + os tokens FIRE no ProjectManagerActivity; o slot do LOGO
   na Toolbar é a versão pequena),
-  stub INCLUI este header) e o UiContext::sdfWidget (o emissor do
-  widget — UM quad crescido para conter a sombra; o CHOKE POINT
-  drawButtonVisual e o iconButton da barra emitem por AQUI — o premido é
+  stub INCLUI este header) e o UiContext::sdfWidget (o emissor do widget —
+  UM quad crescido para conter a sombra; o CHOKE POINT drawButtonVisual e o
+  iconButton da barra emitem por AQUI — o premido é
   o FOGO accent→accent2 com bisel+brilho+sombra), UiEditor (as ops
-  de árvore PURAS), Theme.h (as ÚNICAS cores — a tabela 0.11-Y superada
-  pela ESCADA 0.12-C: fundo #0A0A0C · painel #131316 · cartão #1B1B20 ·
-  elevado #24242A + a chama accent2/glow; os tokens card/elevated são o
+  de árvore PURAS + **0.12-QoL B/C/D**: o navegador COMPACTO (os chips
+  quietos no lugar dos botões, a seta em todas as linhas, o « / » no
+  breadcrumb, o FileApi sem pontos — R-057) + o drawAutosaveDialog (a
+  recuperação com [Recuperar]/[Descartar] — R-056)), Theme.h (as ÚNICAS
+  cores — a tabela 0.11-Y superada pela ESCADA 0.12-C: fundo #0A0A0C ·
+  painel #141416 · cartão #1B1B20 · elevado #24242A + a chama
+  accent2/glow; os tokens card/elevated são o
+  que os cards/sheets/toast consomem; **0.12-QoL A**: o border dos
+  INATIVOS #24242A — o âmbar só no ativo/selecionado — e o divisor do
+  UiContext lê o border),
   que os cards/sheets/toast consomem), ViewportChrome
   (o chrome do viewport — o TOOLTIP do gizmo 0.12-A: legendTimer/
   legendArm no EditorState; o draw ganhou `dt, in` trailing),
@@ -188,16 +195,11 @@ Atualizado: 2026-10-19 · vc: 95
   pré-carregado com o nome atual; o alvo em textScene).
 - **tests/** — a suíte do core (C++17, GL-free): test_main.cpp (o runner,
   GONI_ONLY/GONI_SKIP), TestFramework.h (o TEST/EXPECT), test_sentinels.cpp
-  (as sentinelas regress_*), test_ctx_pines.cpp (os pins dos índices da
-  0.11-CTX), test_fase_y0_icone.cpp (os pins do ícone launcher da
-  0.11-Y — adaptativo + legacy + o antigo removido + a ESCALA do G
-  medida nos PNG reais via stb_image), test_fase_y1_tema.cpp (os pins
-  do TEMA da 0.11-Y — o poço #08080A + a chama accent2/glow + o
-  gradiente dos botões ativos + as primitivas do cristal),
-  test_fase_y2_layout.cpp (os pins do LAYOUT da 0.11-Y — as regras
-  CruzaTabBar/PainelFora do validador), test_fase_y3_cristal.cpp (os
-  pins do CRISTAL da 0.11-Y — a linha do topo + os divisores com
-  gradiente nos painéis reais), test_fase375b_impostors.cpp,
+  (as sentinelas regress_* — **0.12-QoL**: R-056 o auto-save, R-057 o
+  navegador, R-058 o viewport), test_ctx_pines.cpp (os pins dos índices da
+  0.11-CTX), test_fase_y0_icone.cpp (o ícone launcher da 0.11-Y),
+  test_fase_y1_tema.cpp (o TEMA da 0.11-Y), test_fase_y2_layout.cpp (o
+  LAYOUT), test_fase_y3_cristal.cpp (o CRISTAL), test_fase375b_impostors.cpp,
   test_012a_lodui.cpp (os pins da 0.12-A A-1: as rows LOD/impostor da
   UI — row_existe/aplica/persiste/compat/default_off),
   test_012a_contadores.cpp (os pins da 0.12-A A-2: os contadores pelo
@@ -239,9 +241,7 @@ Atualizado: 2026-10-19 · vc: 95
   no hospedeiro — alvo opcional `bench_ram`, option GONI_BENCH_RAM OFF),
   CMakeLists.txt (a lista de fontes dos pins),
   stub/glstub_fb.h (o rasterizador honesto — SEM GLES real), fixtures/.
-- **app/src/main/java/vv/goni/** — a casca Java: VvActivity (JNI),
-  ReloadGate (R-005), ProjectsFormat/VvProjects/ProjectManagerActivity,
-  UiIcons.
+- **app/src/main/java/vv/goni/** — a casca Java: VvActivity (JNI), ReloadGate (R-005), ProjectsFormat/VvProjects/ProjectManagerActivity, UiIcons.
 - **ci/** + **scripts/** — os gates: scope_check.py (ci/scope.txt),
   docs_lint_check.py (ci/forbidden_docs_patterns.txt), docs_lint_state.sh
   (a regra STATE.md do §1.2 da 0.11-CTX), release_identity_check.py,
