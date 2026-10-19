@@ -155,9 +155,11 @@ Frustum computeFrustum(const Transform3D& tr, const CameraComp& cam,
 // testes e o Play ficam IGUAIS). O ASPECTO do frustum continua sw/sh da
 // SUPERFÍCIE (o jogo renderiza o ecrã todo em Play — o shape não muda).
 
-// desenha UMA câmara no estado D17/D20: glifo + frustum fino (mudo a 35% sem
-// seleção, âmbar com seleção); `selected` acrescenta os HANDLES de canto
-// 10dp (D20). Editor-only (o chamador faz o gate).
+// desenha UMA câmara: o GLIFO sempre (mudo a 35% sem seleção, âmbar com
+// seleção — o alvo do toque); o FRUSTUM FINO (as linhas) SÓ com seleção
+// desde a 0.12-QoL C (a teia fica invisível por defeito — a ordem do
+// dono); `selected` acrescenta os HANDLES de canto 10dp (D20).
+// Editor-only (o chamador faz o gate).
 void drawFrustum(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
                  const Frustum& f, bool selected, f32 vw = 0.0f,
                  f32 vh = 0.0f, f32 ox = 0.0f, f32 oy = 0.0f);

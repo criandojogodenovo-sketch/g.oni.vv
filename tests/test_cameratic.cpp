@@ -623,27 +623,44 @@ TEST(cameratic_d17_objeto_pequeno_estados_e_medidas) {
     InputState in;
     const Mat4 vp = editorVp(kSW / kSH);
 
-    // SEM seleção: o frustum mudo (alfa ~0.35 no batch) + ZERO handles
+    // SEM seleção: SÓ o glifo mudo (0.12-QoL C — a TEIA de linhas fica
+    // INVISÍVEL por defeito, a ordem do dono; era «o frustum mudo a 35%
+    // desenhava» e recalibrou-se com nota). ZERO linhas LONGAS (as arestas
+    // do cone) + ZERO âmbar (handles fora).
     ui.beginFrame(nullptr, &in, kSW, kSH);
     drawAll(ui, c.scene, vp, kSW, kSH, Handle{}, editorEye());
     ui.endFrame();
     {
         const auto& vb = ui.solidsForTest();
-        u32 muted = 0, amber = 0;
+        u32 muted = 0, amber = 0, longos = 0;
         const f32* accent = vv::theme::kTheme.accent;
         for (u32 i = 0; i + 5 < vb.vertexCount(); i += 6) {
-            const auto& v = vb.vertices()[i];
-            (void)v;
             const auto& v0 = vb.vertices()[i];
+            f32 mnx = 1e9f, mxx = -1e9f, mny = 1e9f, mxy = -1e9f;
+            for (u32 k = 0; k < 6; ++k) {
+                const auto& v = vb.vertices()[i + k];
+                mnx = v.x < mnx ? v.x : mnx;
+                mxx = v.x > mxx ? v.x : mxx;
+                mny = v.y < mny ? v.y : mny;
+                mxy = v.y > mxy ? v.y : mxy;
+            }
+            const f32 ext = (mxx - mnx) > (mxy - mny) ? (mxx - mnx)
+                                                      : (mxy - mny);
+            if (ext > vv::theme::dp(40.0f)) {
+                ++longos;   // uma aresta do frustum (o cone é grande)
+            }
             if (v0.a > 0.30f && v0.a < 0.40f) {
-                ++muted;   // o cinza mudo ~35%
+                ++muted;   // o cinza mudo ~35% (o glifo)
             }
             if (v0.a > 0.95f && v0.r == accent[0] && v0.g == accent[1] &&
                 v0.b == accent[2]) {
-                ++amber;   // âmbar cheio (handle) — não deve existir
+                ++amber;   // âmbar cheio — não deve existir
             }
         }
-        EXPECT(muted > 0u);   // o frustum mudo está presente (pin)
+        EXPECT_MSG(longos == 0u,
+                   "QoL C: a teia do frustum NÃO desenha sem seleção "
+                   "(%u arestas longas vazaram)", longos);
+        EXPECT(muted > 0u);   // o GLIFO mudo continua (o alvo do toque)
         EXPECT(amber == 0u);  // ZERO handles sem seleção (pin)
     }
 

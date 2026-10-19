@@ -1,9 +1,9 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-19 · vc: 103 · Último commit: este (o 0.12-QoL B —
-o NAVEGADOR compacto: os chips quietos no lugar dos botões gigantes, a
-seta em todas as linhas, o « / » no breadcrumb, TUDO o que é ponto fora
-(R-057); o relatório próprio diz o resto)
+Atualizado: 2026-10-19 · vc: 104 · Último commit: este (o 0.12-QoL C —
+o VIEWPORT limpo: a teia do frustum só com a câmara selecionada, o rail
+sem o fundo quadrado gigante, o grid com o fade suave (R-058); o
+relatório próprio diz o resto)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -26,6 +26,11 @@ seta em todas as linhas, o « / » no breadcrumb, TUDO o que é ponto fora
   linhas, o separador « / » no breadcrumb, TUDO o que é ponto FORA (a
   0.8.5 SUPERADA pela ordem do dono); R-057 + pins ×2 + M-QoLb1; o
   picker_oculta_dot recalibrado com nota.
+  **C (vc 104)**: a TEIA do frustum SÓ com a câmara selecionada (o
+  glifo mudo fica — o alvo do toque), o rail SEM o pai quadrado
+  gigante (os chips individuais ficam; o rect fica no layout), o grid
+  com o fade suave pela fonte única gridFadeForDist (o caída dobra);
+  R-058 + pins ×3 + M-QoLc1; o d17 recalibrado com nota.
 - **Campanha 0.12-X (CÂMARA DE TERCEIRA PESSOA) — FECHADA (3.9x, vc
   101)** (o camrig + camdrag + limit no REGISTO como Contínuos; o
   yaw/pitch no TykerState; o Host::lookDelta com o consumo a ZERAR; o
@@ -89,7 +94,12 @@ seta em todas as linhas, o « / » no breadcrumb, TUDO o que é ponto fora
   button fora das raízes/Subir), a seta (>) nas linhas todas, o « / »
   no breadcrumb, o FileApi sem pontos (pastas E ficheiros); R-057 +
   pins ×2 + M-QoLb1 vermelho→reposto→verde (colada no §2); o
-  picker_oculta_dot recalibrado com nota.
+  picker_oculta_dot recalibrado com nota. O CI apanhou a ordem trocada
+  do R-057 (2 runs vermelhos) — corrigida no B-fix2 (fe90703).
+- 0.12-QoL C (vc 104) — o VIEWPORT limpo (no RELATORIO-0.12-QoL.md
+  §3): a teia do frustum sob seleção, o rail flutuante, o grid suave;
+  R-058 + pins ×3 + M-QoLc1 vermelho→reposto→verde (colada no §3); o
+  d17 recalibrado com nota.
 - 0.12-X 3.9x (vc 101) — a câmara de terceira pessoa (no
   RELATORIO-0.12-X-CAMRIG.md): camrig(d,h,suav) + camdrag(sens) +
   limit como Contínuos no REGISTO; o TykerState guarda camYaw/camPitch;
@@ -128,23 +138,13 @@ seta em todas as linhas, o « / » no breadcrumb, TUDO o que é ponto fora
   achados: o rebind do ARRAY_BUFFER, a corrida dos jobs, o flip da
   captura, o continue do blend, a banda sem teto).
 - 0.6.x–0.9.5 — fundação da engine (V.ONI core, device real, CI 5 jobs).
-- 0.12-C C-4 (vc 90) — o seletor + os vazios (no RELATORIO-0.12-C.md
-  §4): o picker pela fonte única (o breadcrumb que salta, a pesquisa
-  propósito 10, as pastas ponto fora, o Subir fixo, as linhas
-  ícone+nome+seta); os 4 vazios com AÇÃO; os glifos únicos (o Image
-  novo); pins ×8 + M-C4a/b; OS ACHADOS (o rolar importava, o claim
-  comia o IMPORTAR, o botão fora do drawer 240); A REPARAÇÃO da árvore
-  (614 ficheiros de volta + as 6 recalibrações); a CAMPANHA 0.12-C
-  FECHA.
-- 0.12-C C-3 (vc 89) — a escada de superfícies + o idioma (no
-  RELATORIO-0.12-C.md §3): os 4 tons + os tokens card/elevated; «Áudio»
-  /«Exportar para Downloads»/«N TICs»; pins ×4 + M-C3a/b.
-- 0.12-C C-2 (vc 88) — os menus e a barra de topo (no
-  RELATORIO-0.12-C.md §2): menuSheetLayout; o play A CHAMA; o GIZMO
-  fora (o duplicado do Mover); pins ×4 + M-C2a/b.
-- 0.12-C C-1 (vc 87) — as proporções e os painéis (no
-  RELATORIO-0.12-C.md §1): hierarquia 20%; viewport ≥60% de fábrica;
-  hierHeaderRects; pins ×4 + M-C1a/b.
+- 0.12-C (vc 87–90) — layout, organização e consistência (no
+  RELATORIO-0.12-C.md §1..4): C-1 as proporções (hierarquia 20%,
+  viewport ≥60%, hierHeaderRects); C-2 os menus e a barra de topo
+  (menuSheetLayout, o play A CHAMA, o gizmo duplicado fora); C-3 a
+  escada de superfícies + o idioma (os 4 tons, card/elevated); C-4 o
+  picker + os vazios com AÇÃO + A REPARAÇÃO da árvore (614 de volta);
+  pins ×20 + M-C1a/b..C4a/b.
 - 0.12-B B-4 (vc 86) — as ações de cena (no RELATORIO-0.12-B.md
   §25..29): o renomear/duplicar/apagar 2-tap + o manifesto round-trip;
   pins ×4 + M-B4a; R-051; a CAMPANHA 0.12-B FECHA.

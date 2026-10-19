@@ -23,6 +23,12 @@
 #include "ui/SafeArea.h"
 #include "render/QuadBatch.h"
 #include "platform/FileApi.h"
+#include "ui/CamGizmo.h"
+#include "ui/ViewportChrome.h"
+#include "render/Camera.h"
+#include "render/Grid.h"
+#include "components/Transform3D.h"
+#include "components/CameraComp.h"
 #include "ui/UiEditor.h"
 
 #include <cmath>
@@ -502,4 +508,153 @@ TEST(qol_b_ponto_fora) {
     ::rmdir((root + "/.git").c_str());
     ::rmdir((root + "/Pasta").c_str());
     ::rmdir(root.c_str());
+}
+
+// ---- PIN qol_c_frustum_sob_selecao --------------------------------------------
+// «A teia de linhas da câmara fica INVISÍVEL por defeito. Só aparece se o
+// utilizador selecionar a câmara na Hierarquia.» (a sentinela R-058 aferra;
+// este pin mede o DESENHO no env do QoL)
+TEST(qol_c_frustum_sob_selecao) {
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+    QolEnv e;
+    ASSERT(e.ok);
+    const Handle h = e.scene.create("Camera");
+    Tic* t = e.scene.get(h);
+    t->addComponent<Transform3D>();
+    t->addComponent<CameraComp>();
+    const Camera orbit;
+    const Mat4 vp = Mat4::mul(orbit.proj(1600.0f / 720.0f), orbit.view());
+    const Vec3 eye = orbit.eye();
+    // SEM seleção: ZERO arestas longas (a teia); o glifo mudo segue
+    e.begin();
+    camgizmo::drawAll(e.ui, e.scene, vp, 1600.0f, 720.0f, Handle{}, eye);
+    e.end();
+    {
+        const QuadBatch& solids = e.ui.solidsForTest();
+        u32 longos = 0;
+        for (u32 q = 0; q + 5 < solids.vertexCount(); q += 6) {
+            const QuadVertex* v = solids.vertices() + q;
+            f32 mnx = 1e9f, mxx = -1e9f, mny = 1e9f, mxy = -1e9f;
+            for (u32 k = 0; k < 6; ++k) {
+                mnx = v[k].x < mnx ? v[k].x : mnx;
+                mxx = v[k].x > mxx ? v[k].x : mxx;
+                mny = v[k].y < mny ? v[k].y : mny;
+                mxy = v[k].y > mxy ? v[k].y : mxy;
+            }
+            const f32 ext = (mxx - mnx) > (mxy - mny) ? (mxx - mnx)
+                                                      : (mxy - mny);
+            if (ext > theme::dp(40.0f)) {
+                ++longos;
+            }
+        }
+        EXPECT_MSG(longos == 0u,
+                   "qol_c_frustum_sob_selecao: a teia invisível por defeito "
+                   "(%u arestas longas)", longos);
+    }
+    // COM seleção: a teia (as arestas longas) volta — é o modo de edição
+    e.begin();
+    camgizmo::drawAll(e.ui, e.scene, vp, 1600.0f, 720.0f, h, eye);
+    e.end();
+    {
+        const QuadBatch& solids = e.ui.solidsForTest();
+        u32 longos = 0;
+        for (u32 q = 0; q + 5 < solids.vertexCount(); q += 6) {
+            const QuadVertex* v = solids.vertices() + q;
+            f32 mnx = 1e9f, mxx = -1e9f, mny = 1e9f, mxy = -1e9f;
+            for (u32 k = 0; k < 6; ++k) {
+                mnx = v[k].x < mnx ? v[k].x : mnx;
+                mxx = v[k].x > mxx ? v[k].x : mxx;
+                mny = v[k].y < mny ? v[k].y : mny;
+                mxy = v[k].y > mxy ? v[k].y : mxy;
+            }
+            const f32 ext = (mxx - mnx) > (mxy - mny) ? (mxx - mnx)
+                                                      : (mxy - mny);
+            if (ext > theme::dp(40.0f)) {
+                ++longos;
+            }
+        }
+        // 12 arestas na cena; as que ficam ATRÁS do olho não projetam (o
+        // edge() salta) — o piso é a teia VISÍVEL (8 neste enquadramento)
+        EXPECT_MSG(longos >= 6u,
+                   "qol_c_frustum_sob_selecao: a teia volta COM a câmara "
+                   "selecionada (%u arestas)", longos);
+    }
+}
+
+// ---- PIN qol_c_rail_flutuante -------------------------------------------------
+// «Os botões de Mover/Rodar/Escalar flutuam sem o fundo preto quadrado
+// gigante.» O pai de vidro do RAIL morreu; os chips individuais ficam.
+TEST(qol_c_rail_flutuante) {
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+    QolEnv e;
+    ASSERT(e.ok);
+    editor::toolbar::GizmoModeState gz;
+    vpchrome::ChromeState cs;
+    Camera camera;
+    e.begin();
+    vpchrome::draw(e.ui, e.st, gz, cs, camera, 0.0f, 1.0f / 60.0f, nullptr);
+    e.end();
+    // o LAYOUT mantém o rect do rail (o contrato dos pins C-2) — mas o
+    // DESENHO do pai morreu: ZERO quads do vidro do pai (surface2 α~0.52
+    // a 60%) na banda do rail que NÃO seja um chip de botão (surface
+    // α~0.51 — o RGB distingue: 30 vs 20)
+    const UiRect view = safe::centerRect(1600.0f, 720.0f, safe::Insets{},
+                                         0.0f, e.st.showInspector, e.st.hierW,
+                                         e.st.inspW,
+                                         inspectorCollapsed(e.st));
+    const vpchrome::Layout L = vpchrome::layout(view);
+    EXPECT(L.railVisible);   // o rail existe (só o pai é que morreu)
+    const QuadBatch& solids = e.ui.solidsForTest();
+    u32 vidroPai = 0;
+    for (u32 q = 0; q + 5 < solids.vertexCount(); q += 6) {
+        const QuadVertex* v = solids.vertices() + q;
+        f32 mnx = 1e9f, mxx = -1e9f, mny = 1e9f, mxy = -1e9f;
+        for (u32 k = 0; k < 6; ++k) {
+            mnx = v[k].x < mnx ? v[k].x : mnx;
+            mxx = v[k].x > mxx ? v[k].x : mxx;
+            mny = v[k].y < mny ? v[k].y : mny;
+            mxy = v[k].y > mxy ? v[k].y : mxy;
+        }
+        // um quad do PAI cobriria a largura do rail inteiro (btn+8dp)
+        const f32 wq = mxx - mnx;
+        const bool noRail = (mny >= L.railPanel.y - 1.0f &&
+                             mny <= L.railPanel.y + L.railPanel.h + 1.0f &&
+                             mnx >= L.railPanel.x - 1.0f &&
+                             mnx <= L.railPanel.x + L.railPanel.w + 1.0f);
+        const bool larguraDoPai = wq >= L.railPanel.w - 0.5f;
+        if (noRail && larguraDoPai) {
+            ++vidroPai;
+        }
+    }
+    EXPECT_MSG(vidroPai == 0u,
+               "qol_c_rail_flutuante: o pai de vidro do rail não desenha "
+               "(%u quads do pai)", vidroPai);
+}
+
+// ---- PIN qol_c_grid_fade_suave ------------------------------------------------
+// «O grid deve ter um fade suave com a distância.» A FONTE ÚNICA
+// gridFadeForDist (a sentinela R-058 aferra; este pin aferra a janela
+// de TRABALHO que o dono vê: o caída 2.2× com o piso 60).
+TEST(qol_c_grid_fade_suave) {
+    f32 st0 = 0.0f, en0 = 0.0f;
+    Grid::gridFadeForDist(6.0f, st0, en0);
+    // o feel de trabalho: 12..72 (era 12..42 — a janela dobra)
+    EXPECT(nearEq(st0, 12.0f));
+    EXPECT(nearEq(en0, 72.0f));
+    // o caída NUNCA desce abaixo de 60 (a suavidade é o contrato)
+    f32 st1 = 0.0f, en1 = 0.0f;
+    for (f32 f = 0.5f; f <= 4000.0f; f *= 2.0f) {
+        Grid::gridFadeForDist(f, st1, en1);
+        EXPECT_MSG(en1 - st1 >= 60.0f - 0.01f,
+                   "qol_c_grid_fade_suave: o caída em foco %.1f é %.1f "
+                   "(< 60 — a borda dura voltou)", (double)f,
+                   (double)(en1 - st1));
+        EXPECT(st1 >= 12.0f - 0.01f);   // o piso do início
+    }
+    // a FONTE: o draw consome a função (o artefato pinado)
+    std::string src;
+    ASSERT(readFile(repoRoot() + "/app/src/main/cpp/render/Grid.cpp", src));
+    EXPECT(countSub(src, "gridFadeForDist(focus, start, end)") == 1);
 }

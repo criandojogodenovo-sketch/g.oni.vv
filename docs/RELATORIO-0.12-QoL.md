@@ -205,3 +205,60 @@ do pin documenta a superação).
 sandbox) · c33_virtual **1010/0** · docs-lint VERDE · as mutações
 vermelho→reposto→verde. **versionCode 103** — o build vigente. O 102
 fica INTACTO como história.
+
+## §3 C — O Viewport 3D Limpo
+
+**O que mudou** (vc 104):
+
+1. **A teia do frustum invisível por defeito.** As 12 arestas do frustum
+   (near + cone + far) SÓ desenham com a câmara SELECIONADA
+   (CamGizmo.cpp — o bloco fica dentro do `if (selected)`). O GLIFO mudo
+   (a 35%) continua sempre — é o alvo do toque que seleciona a câmara
+   (pickCameraTic). Com seleção: a teia âmbar 2px + os handles de canto
+   como sempre. O toggle «frustum» do Inspector continua a esconder
+   TUDO (o gate do drawAll intacto). O comportamento D17 «mudo a 35%
+   desenhava» fica SUPERADO pela ordem do dono.
+2. **O rail flutuante.** O pai de vidro do rail
+   (`glassPanel(L.railPanel)`) SAI do draw — os botões Selecionar/Mover/
+   Rodar/Escalar/Íman flutuam SEM o fundo preto quadrado gigante; cada
+   um mantém o SEU chip quieto (surface + borda). O RECT do railPanel
+   continua no layout (o contrato dos pins mover_unico/d17 — nenhuma
+   recalibração); só o desenho morre. A fila do topo (undo/redo/save)
+   mantém o pai.
+3. **O grid com fade suave.** `Grid::gridFadeForDist` NOVA — a FONTE
+   ÚNICA da janela do fade radial (o draw e os pins partilham): o início
+   fica 1.1×foco (piso 12) e o CAÍDO DOBRA — 2.2×foco com piso 60 (era
+   1.5×/30). O foco de trabalho 6 → fade 12..72 (era 12..42); o horizonte
+   perde-se gradualmente, sem a borda dura. O smoothstep do FS mantém-se.
+
+**Sentinela R-058** (`regress_qol_viewport`) — (1) câmara sem seleção:
+ZERO arestas longas no batch + o glifo presente; (2) com seleção: o
+desenho volta; (3) a janela do fade nos 3 regimes + o caída ≥ 60 em
+qualquer foco. Entrada completa no docs/REGRESSOES.md.
+
+**Pins** (test_012qol.cpp): `qol_c_frustum_sob_selecao` (a teia
+invisível por defeito / volta com seleção — as arestas medidas no
+batch), `qol_c_rail_flutuante` (o rect do rail existe, o pai de vidro
+não desenha), `qol_c_grid_fade_suave` (a janela 12..72 no trabalho, o
+caída ≥ 60 em toda a escada de focos, o draw consome a fonte).
+
+**Mutações** (Policy #5 — vermelho → repor → verde):
+
+- **M-QoLc1** (a teia de volta para TODAS — o `if (selected)` morre):
+  ```
+  regress_qol_viewport                           ...  FALHOU  tests/test_sentinels.cpp:7786  R-058: a teia do frustum NÃO desenha sem seleção (8 arestas longas vazaram)
+  regress_qol_viewport                           FALHOU
+  qol_c_frustum_sob_selecao                      ...  FALHOU  tests/test_012qol.cpp:551  qol_c_frustum_sob_selecao: a teia invisível por defeito (8 arestas longas)
+  (reposto → os dois VERDES)
+  ```
+
+**Recalibração com nota**: `cameratic_d17_objeto_pequeno_estados_e_medidas`
+(test_cameratic.cpp) — o «mudo a 35% presente» passa a «ZERO linhas
+longas + o glifo mudo presente» (a teia é o ruído que o dono mandou
+fora). Os pins d20/play/toggle passam SEM recalibração (o bounding só
+encolhe; os gates ≤4%/≤6% continuam a cumprir-se).
+
+**Verificação**: test_core 1183 OK / 0 falhas (×2 runs, o bench r039
+saltado no sandbox) · c33_virtual **1010/0** · docs-lint VERDE · as
+mutações vermelho→reposto→verde. **versionCode 104** — o build vigente.
+O 103 fica INTACTO como história.

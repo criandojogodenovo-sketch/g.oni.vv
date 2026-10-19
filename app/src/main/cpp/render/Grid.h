@@ -51,6 +51,22 @@ public:
         return step;
     }
 
+    // 0.12-QoL C (A ORDEM DO DONO: «o grid deve ter um fade suave com a
+    // distância») — a FONTE ÚNICA da JANELA do fade radial (o draw e o
+    // pin partilham): a janela ALARGA (era início 1.1×foco + 0.4×foco de
+    // caída; agora 1.1× + 2.2× — a perda é GRADUAL, sem a borda dura) e
+    // o shader suaviza com smoothstep (o suave de sempre).
+    //   foco 6  → fade 12..~59 (o feel de trabalho, mais ar que o 12..42)
+    //   foco 60 → fade 66..~198
+    //   foco 0  → os pisos de sempre (12 + 60)
+    static void gridFadeForDist(f32 focusDist, f32& outStart, f32& outEnd) {
+        const f32 focus = focusDist > 0.0f ? focusDist : 6.0f;
+        const f32 s1 = focus * 1.1f;
+        outStart = s1 > 12.0f ? s1 : 12.0f;
+        const f32 e1 = focus * 2.2f;
+        outEnd = outStart + (e1 > 60.0f ? e1 : 60.0f);
+    }
+
     bool init(f32 extent = kExtentDefault, f32 step = kStepDefault);
     void destroy();
 

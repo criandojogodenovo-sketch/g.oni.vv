@@ -163,11 +163,19 @@ void drawFrustum(UiContext& ui, const Mat4& vp, f32 sw, f32 sh,
 
     // (b) o FRUSTUM FINO: near + cone near→far + far — as linhas NUNCA
     // hit-testam (f); o corpo/lente wireframe da 0.7.7 morreu (o glifo é
-    // o corpo — (a))
-    for (int i = 0; i < 4; ++i) {
-        edge(ui, vp, mw, mh, ox, oy, f.nearC[i], f.nearC[(i + 1) % 4], w, col);
-        edge(ui, vp, mw, mh, ox, oy, f.farC[i], f.farC[(i + 1) % 4], w, col);
-        edge(ui, vp, mw, mh, ox, oy, f.nearC[i], f.farC[i], w, col);
+    // o corpo — (a)). 0.12-QoL C (A ORDEM DO DONO · Redbr1): a TEIA de
+    // linhas fica INVISÍVEL por defeito — SÓ a câmara SELECIONADA na
+    // Hierarquia desenha o frustum (o viewport limpo; o glifo mudo
+    // continua — é o alvo do toque que seleciona). O toggle do Inspector
+    // (showFrustum) continua a esconder TUDO no drawAll.
+    if (selected) {
+        for (int i = 0; i < 4; ++i) {
+            edge(ui, vp, mw, mh, ox, oy, f.nearC[i], f.nearC[(i + 1) % 4], w,
+                 col);
+            edge(ui, vp, mw, mh, ox, oy, f.farC[i], f.farC[(i + 1) % 4], w,
+                 col);
+            edge(ui, vp, mw, mh, ox, oy, f.nearC[i], f.farC[i], w, col);
+        }
     }
 
     // (a) o GLIFO ~24dp CONSTANTE EM ECRÃ no olho (o mesmo padrão dos

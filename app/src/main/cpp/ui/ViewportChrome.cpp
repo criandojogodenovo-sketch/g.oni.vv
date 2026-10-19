@@ -288,8 +288,12 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
     const Layout L = layout(vpView);
 
     // ---- OS PAIS DE VIDRO (a regra do pai-painelinho — nada flutua sem
-    // pai) — a 60% de alfa (PASSO 3) ----
-    glassPanel(ui, L.railPanel, theme::kRadiusCard);
+    // pai) — a 60% de alfa (PASSO 3). 0.12-QoL C (A ORDEM DO DONO ·
+    // Redbr1): o pai do RAIL SAI — os botões de Mover/Rodar/Escalar
+    // flutuam SEM o fundo preto quadrado gigante; cada um tem o SEU chip
+    // quieto (o toolButton desenha). O rect do railPanel continua a
+    // existir no layout (o contrato dos pins — a banda da hierarquia);
+    // só o DESENHO morre. A fila do topo (undo/redo/save) mantém o pai.
     glassPanel(ui, L.quickPanel, theme::kRadiusCard);
     glassPanel(ui, L.gizmoPanel, kGizmoBtnDp);
     // 0.9.6.19b (D21): o pai de vidro do [+] (plusPanel) FOI REMOVIDO

@@ -188,14 +188,11 @@ DrawStats Grid::draw(const Mat4& vp, const Vec3& camPos, f32 focusDist) const {
     if (locStep_ >= 0) {
         glUniform1f(locStep_, step);
     }
-    // fade adaptativo ao zoom: no zoom de trabalho (6) recolhe-se para
-    // ~12..42 (o feel do grid de linhas da F2); no zoom máx abre em função
-    // do foco — sempre muito antes da borda do quad (extent dinâmico ≥
-    // 2.5× o foco)
-    const f32 s1 = focus * 1.1f;
-    const f32 start = s1 > 12.0f ? s1 : 12.0f;
-    const f32 e1 = focus * 1.5f;
-    const f32 end = start + (e1 > 30.0f ? e1 : 30.0f);
+    // fade adaptativo ao zoom pela FONTE ÚNICA (0.12-QoL C: a janela
+    // suave — o caída dobra; o smoothstep do FS faz a perda gradual) —
+    // sempre muito antes da borda do quad (extent dinâmico ≥ 2.5× o foco)
+    f32 start = 0.0f, end = 0.0f;
+    gridFadeForDist(focus, start, end);
     if (locFade_ >= 0) {
         glUniform2f(locFade_, start, end);
     }
