@@ -69,8 +69,7 @@ seta em todas as linhas, o « / » no breadcrumb, TUDO o que é ponto fora
 - **Campanha 0.11-Y (identidade visual) — FECHADA** (o fecho é o commit
   32a6785: os 13 PNGs + o pin y_fecho; a FASE 31 fica no replay).
 - **0.11-CTX — FECHADA** com CI verde (os detalhes no §2 e no relatório).
-- **0.11-W (Render Systems) com CI verde** — falta o PIN do dono no C33
-  real; o fecho (BLOCO B) só por ordem do dono.
+- **0.11-W (Render Systems) com CI verde** — falta o PIN do dono no C33 real; o fecho (BLOCO B) só por ordem do dono.
 
 ## §2 O que está FEITO
 
