@@ -2802,7 +2802,8 @@ TEST(regress_cantos_suavizados) {
 // ============================================================================
 #include "ui/ViewportChrome.h"     // R-026: o chrome adaptativo do viewport
 #include "ui/Gizmo.h"              // R-026: projectPoint com o rect
-#include "render/Camera.h"         // R-026: a proj com o aspect do rect
+#include "render/Camera.h"
+#include "render/Grid.h"         // R-026: a proj com o aspect do rect
 #include "ui/CamGizmo.h"           // R-026: pickSceneTic (o pick coerente)
 #include "render/Mesh.h"           // R-026: o AABB do pick
 #include "render/Cube.h"           // R-026: makeCube (o mesh real do pick)
@@ -7718,11 +7719,12 @@ TEST(regress_qol_picker) {
     }
     EXPECT(temAnim && temDownload && temObj && temFoto && temAzul);
     EXPECT(out.size() == 5u);   // 2 pastas + 3 ficheiros (os 2 ponto fora)
-    // (2) a ORDEM: pastas PRIMEIRO alfabético (CI), depois ficheiros alfabético
+    // (2) a ORDEM: pastas PRIMEIRO alfabético (CI — entryNameLess), depois
+    // os ficheiros CI: azul.txt < Foto.PNG < modelo.obj
     EXPECT(out[0].isDir && out[0].name == "Anim");
     EXPECT(out[1].isDir && out[1].name == "Download");
-    EXPECT(!out[2].isDir && out[2].name == "Foto.PNG");
-    EXPECT(!out[3].isDir && out[3].name == "azul.txt");
+    EXPECT(!out[2].isDir && out[2].name == "azul.txt");
+    EXPECT(!out[3].isDir && out[3].name == "Foto.PNG");
     EXPECT(!out[4].isDir && out[4].name == "modelo.obj");
     // (3) a FONTE do breadcrumb: o separador « / » (o caminho lê-se como
     // caminho — a ordem do dono no QoL B)
@@ -7731,6 +7733,83 @@ TEST(regress_qol_picker) {
     EXPECT(readFileText(REPO_ROOT "/app/src/main/cpp/ui/UiEditor.cpp", src));
     EXPECT(src.find("ui.fontWidth(\" / \")") != std::string::npos);
 #endif
+}
+
+// ---- R-058 — O VIEWPORT LIMPO NÃO VOLTA AO RUÍDO (0.12-QoL C) ---------------
+// A ordem do dono (o feedback Redbr1): o viewport deixou de aguentar a
+// TEIA de linhas da câmara (SÓ com a câmara selecionada), os botões de
+// ferramenta flutuam SEM o fundo preto quadrado gigante e o grid perde-se
+// num fade SUAVE com a distância.
+TEST(regress_qol_viewport) {
+    using namespace vv;
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+    // (1) a câmara SEM seleção: ZERO linhas do frustum (o glifo mudo é o
+    // único desenho — o alvo do toque que seleciona)
+    Scene scene;
+    const Handle h = scene.create("Camera");
+    Tic* t = scene.get(h);
+    Transform3D* tr = t->addComponent<Transform3D>();
+    (void)tr;
+    t->addComponent<CameraComp>();
+    FontAtlas font;
+    const char* fp = FONT_FIXTURE;
+    ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+    UiContext ui;
+    ui.init();
+    ui.setFont(&font);
+    InputState in;
+    const Camera orbit;   // a orbit de edição default
+    const Mat4 vp = Mat4::mul(orbit.proj(1600.0f / 720.0f), orbit.view());
+    const Vec3 eye = orbit.eye();   // o OLHO da MESMA orbit (o D20)
+    ui.beginFrame(nullptr, &in, 1600.0f, 720.0f);
+    camgizmo::drawAll(ui, scene, vp, 1600.0f, 720.0f, Handle{}, eye);
+    ui.endFrame();
+    {
+        const auto& vb = ui.solidsForTest();
+        u32 longos = 0;
+        for (u32 i = 0; i + 5 < vb.vertexCount(); i += 6) {
+            f32 mnx = 1e9f, mxx = -1e9f, mny = 1e9f, mxy = -1e9f;
+            for (u32 k = 0; k < 6; ++k) {
+                const auto& v = vb.vertices()[i + k];
+                mnx = v.x < mnx ? v.x : mnx;
+                mxx = v.x > mxx ? v.x : mxx;
+                mny = v.y < mny ? v.y : mny;
+                mxy = v.y > mxy ? v.y : mxy;
+            }
+            const f32 ext = (mxx - mnx) > (mxy - mny) ? (mxx - mnx)
+                                                      : (mxy - mny);
+            if (ext > theme::dp(40.0f)) {
+                ++longos;   // uma aresta do cone do frustum
+            }
+        }
+        EXPECT_MSG(longos == 0u,
+                   "R-058: a teia do frustum NÃO desenha sem seleção "
+                   "(%u arestas longas vazaram)", longos);
+        EXPECT(vb.vertexCount() > 0u);   // o glifo mudo continua
+    }
+    // (2) COM seleção: a teia volta (o dono seleciona e edita)
+    ui.beginFrame(nullptr, &in, 1600.0f, 720.0f);
+    camgizmo::drawAll(ui, scene, vp, 1600.0f, 720.0f, h, eye);
+    ui.endFrame();
+    EXPECT(ui.solidsForTest().vertexCount() > 0u);
+    // (3) o GRID: a janela do fade é a FONTE ÚNICA (suave — o caída 2.2×
+    // com o piso 60; era 1.5×/30 — a borda dura morreu)
+    {
+        f32 st0 = 0.0f, en0 = 0.0f;
+        Grid::gridFadeForDist(6.0f, st0, en0);
+        EXPECT(nearEqF(st0, 12.0f, 0.01f));
+        EXPECT(nearEqF(en0, 72.0f, 0.01f));   // 12 + max(60, 6·2.2)
+        Grid::gridFadeForDist(60.0f, st0, en0);
+        EXPECT(nearEqF(st0, 66.0f, 0.01f));
+        EXPECT(nearEqF(en0, 198.0f, 0.01f));  // 66 + max(60, 132)
+        Grid::gridFadeForDist(0.0f, st0, en0);   // sem foco = os pisos
+        EXPECT(nearEqF(st0, 12.0f, 0.01f) && nearEqF(en0, 72.0f, 0.01f));
+        // o caída é SEMPRE ≥ 60 (a suavidade é o contrato)
+        f32 st1 = 0.0f, en1 = 0.0f;
+        Grid::gridFadeForDist(5000.0f, st1, en1);
+        EXPECT(en1 - st1 >= 60.0f);
+    }
 }
 
 TEST(regress_camrig) {
