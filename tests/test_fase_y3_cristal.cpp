@@ -139,14 +139,14 @@ TEST(y3_cristal_hierarquia) {
                test::nearEqF(w, 1.0f, 0.05f) &&
                test::nearEqF(y, p.y, 0.05f) &&
                test::nearEqF(h, p.h, 0.05f) &&
-               sameC(top, 74.0f / 255.0f, 55.0f / 255.0f, 20.0f / 255.0f,
+               sameC(top, 36.0f / 255.0f, 36.0f / 255.0f, 42.0f / 255.0f,
                      0.90f) &&
-               sameC(bot, 74.0f / 255.0f, 55.0f / 255.0f, 20.0f / 255.0f,
+               sameC(bot, 36.0f / 255.0f, 36.0f / 255.0f, 42.0f / 255.0f,
                      0.15f);
     });
     EXPECT_MSG(div,
-               "y3_hierarquia: o DIVISOR com gradiente (accentDim a0.90 "
-               "-> a0.15, 1dp na borda direita) não foi encontrado");
+               "y3_hierarquia: o DIVISOR com gradiente (border #24242A a0.90 "
+               "-> a0.15 — 0.12-QoL A, era o âmbar) não foi encontrado");
 
     // (c) A LINHA SÓLIDA MORREU: nenhum quad 1dp-wide full-height com cor
     // ÚNICA de border (a linha sólida do D11 é superada — o gradiente é
@@ -155,9 +155,9 @@ TEST(y3_cristal_hierarquia) {
                                            const f32 top[4],
                                            const f32 bot[4]) {
         return test::nearEqF(w, 1.0f, 0.05f) && h > p.h * 0.9f &&
-               sameC(top, 74.0f / 255.0f, 55.0f / 255.0f, 20.0f / 255.0f,
+               sameC(top, 36.0f / 255.0f, 36.0f / 255.0f, 42.0f / 255.0f,
                      0.60f) &&
-               sameC(bot, 74.0f / 255.0f, 55.0f / 255.0f, 20.0f / 255.0f,
+               sameC(bot, 36.0f / 255.0f, 36.0f / 255.0f, 42.0f / 255.0f,
                      0.60f);
     });
     EXPECT_MSG(!solida,
@@ -192,9 +192,9 @@ TEST(y3_cristal_inspector) {
         return test::nearEqF(x, p.x, 0.05f) &&
                test::nearEqF(w, 1.0f, 0.05f) &&
                test::nearEqF(h, p.h, 0.05f) &&
-               sameC(top, 74.0f / 255.0f, 55.0f / 255.0f, 20.0f / 255.0f,
+               sameC(top, 36.0f / 255.0f, 36.0f / 255.0f, 42.0f / 255.0f,
                      0.90f) &&
-               sameC(bot, 74.0f / 255.0f, 55.0f / 255.0f, 20.0f / 255.0f,
+               sameC(bot, 36.0f / 255.0f, 36.0f / 255.0f, 42.0f / 255.0f,
                      0.15f);
     });
     EXPECT_MSG(div, "y3_inspector: o divisor com gradiente em falta");
@@ -218,9 +218,9 @@ TEST(y3_cristal_divisores) {
                test::nearEqF(y, safe::panelsRect(1536.0f, 720.0f,
                                                  safe::Insets{}, 0.0f).y,
                              0.05f) &&
-               sameC(top, 74.0f / 255.0f, 55.0f / 255.0f, 20.0f / 255.0f,
+               sameC(top, 36.0f / 255.0f, 36.0f / 255.0f, 42.0f / 255.0f,
                      0.90f) &&
-               sameC(bot, 74.0f / 255.0f, 55.0f / 255.0f, 20.0f / 255.0f,
+               sameC(bot, 36.0f / 255.0f, 36.0f / 255.0f, 42.0f / 255.0f,
                      0.15f);
     });
     EXPECT_MSG(div,

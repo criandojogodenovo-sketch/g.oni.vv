@@ -70,6 +70,8 @@ inline f32 hierarchyContentHeight(u32 ticCount) {
 constexpr u64 kHierSearchId    = 5500;   // linha de pesquisa (abre teclado 8)
 constexpr u64 kHierMultiClearId = 5501;  // chip "N ×" — limpa a multi-seleção
 constexpr u64 kHierMultiDistId = 5502;   // "distribuir" (≥3 selecionados)
+// 0.12-QoL A: o × dentro do campo EXPANDIDO (limpa + fecha a lupa)
+constexpr u64 kHierSearchClearId = 5503;
 
 // 0.12-C (C-1) — O CABEÇALHO da hierarquia em linha PRÓPRIA: o título à
 // esquerda, as AÇÕES (⋮ e +) à direita, e o título ELIPSA quando não cabe
@@ -426,11 +428,12 @@ constexpr u32 kInspBitAnim      = 1u << 6;
 constexpr u32 kInspBitScript    = 1u << 7;   // 0.9.2: V.ONI
 
 // altura de UMA linha de Transform (PASSO 1: título 12sp + caixas 32dp +
-// folga — a spec: «campos 32dp»; eram caixas de 48)
+// folga — a spec: «campos 32dp»; eram caixas de 48). 0.12-QoL A: a folga
+// sobe 4→8dp (a ordem do dono: mais ar entre as linhas X/Y/Z e os botões).
 inline f32 inspTransformRowH(const TextMetrics& m) {
     (void)m;
     return theme::dp(24.0f) + theme::dp(4.0f) + theme::dp(32.0f) +
-           theme::dp(4.0f);   // título + caixas 32dp + folga
+           theme::dp(8.0f);   // título + caixas 32dp + folga (QoL A: 8)
 }
 // altura do CABEÇALHO de secção (28dp — PASSO 1: os cabeçalhos dos painéis;
 // eram 48)

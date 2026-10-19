@@ -6531,11 +6531,12 @@ int main() {
                 check(editor::transformValueSpace(tb) >=
                           editor::kTfValueMinDp - 0.01f,
                       "16.4 R1 o espaço do valor cumpre o piso (o valor é intocável)");
-                // 0.9.6.19b (m3 · A LIMIAR DO DONO): a letra do eixo SÓ sai
-                // abaixo de ~200dp de painel; a 212/260 ela COEXISTE com o
-                // valor (o padding da linha cede antes); a 180 pode sair
+                // 0.9.6.19b (m3) recalibrado 0.12-QoL A: com os vãos 12dp
+                // (a ordem do dono) a coexistência letra+valor começa a
+                // 216dp de painel (era 212 — o passo (c) da R1 dropa a
+                // letra DEPOIS do padding, com o valor ≥ piso); a 180 pode sair
                 const bool letra = tb.axisLabels;
-                if (iw >= 212) {
+                if (iw >= 216) {
                     std::snprintf(msg, sizeof(msg),
                                   "16.4/m3 a %ddp a letra do eixo FICA "
                                   "(letra+valor coexistem)", iw);

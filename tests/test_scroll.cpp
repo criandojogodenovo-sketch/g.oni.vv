@@ -192,7 +192,9 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     // inteira (+8dp) — 1046 → 1054
     // 0.10-M HOTFIX TEXTURAS-VINCULA: a secção Material ganhou as 5
     // linhas de SLOT (36 dp cada) — 1054 → 1234
-    EXPECT(nearEqF(contentH, 1234.0f));
+    // 0.12-QoL A: as 3 linhas Transform 64 → 68 (a folga do dono) —
+    // 1234 → 1246
+    EXPECT(nearEqF(contentH, 1246.0f));
 
     // cursor Y PARTILHADO: linhas sequenciais (y estritamente crescente, sem
     // reinício por secção), todas dentro do conteúdo, e o fundo do plano =
@@ -236,9 +238,10 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     // 1046 − 42 + 36 = 1040; PASSO 2 (0.9.6.15): a linha de miniaturas
     // reserva a LEGENDA INTEIRA (+8dp) — 1040 + 8 = 1048
     // 0.10-M HOTFIX TEXTURAS-VINCULA: as 5 linhas de SLOT (+180 dp) —
-    // 1048 → 1228
+    // 1048 → 1228; 0.12-QoL A: as 3 linhas Transform 64 → 68 —
+    // 1228 → 1240
     EXPECT(nearEqF(inspectorContentHeight(inspectorProfile(*tic), m, false, 0u),
-                   1228.0f));
+                   1240.0f));
 }
 
 TEST(scroll_hierarquia_todos_os_tics_atingeis) {
@@ -311,7 +314,7 @@ TEST(scroll_linhas_mesh_tex_atingiveis_no_scroll) {
     // topo da linha mesh — 0.9.6.6 (GRUPO C): 48+48+48+3×80+48 = 432
     // PASSO 1 (0.9.6.14): o plano (fonte única) põe a mesh em 320 — as
     // linhas da spec (36 · secção 28 · transform 64)
-    EXPECT(nearEqF(plan[meshIdx].y, 320.0f));
+    EXPECT(nearEqF(plan[meshIdx].y, 332.0f));
     // 0.8.0: a linha "prim:" fica entre mesh e tex (a ALTURA dela —
     // simbólico desde 0.9.6.6: zero números que driftam com o piso 48dp)
     EXPECT(nearEqF(plan[texIdx].y, plan[meshIdx].y + plan[meshIdx].h +

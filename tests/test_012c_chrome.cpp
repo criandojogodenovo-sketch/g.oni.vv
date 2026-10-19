@@ -166,11 +166,13 @@ TEST(topbar_3_zonas) {
         EXPECT(nearEq(L.tabUi.x, L.tab3d.x + L.tab3d.w));
         EXPECT(nearEq(L.tabAudio.x, L.tabUi.x + L.tabUi.w));
     }
-    // (e) a degradação honesta: num ecrã apertado o NOME e o CHIP saem —
-    // as zonas continuam SEM tocar
+    // (e) a degradação honesta: num ecrã apertado o CHIP da plataforma
+    // sai — as zonas continuam SEM tocar. 0.12-QoL A recalibra com nota:
+    // o TEXTO "G.One" (e o flag showName) MORRERAM (a ordem do dono — a
+    // barra fica só com o ÍCONE do logo; o chip é o primeiro a ceder)
     {
         const toolbar::TopBarLayout L = toolbar::topbarLayout(480.0f, 320.0f, in, false, false);
-        EXPECT(!L.showName);
+        EXPECT(!L.showPlatform);
         const f32 leftEnd = L.cena.x + L.cena.w;
         EXPECT(leftEnd <= L.tab3d.x + 0.01f);
         EXPECT(L.tabAudio.x + L.tabAudio.w <= L.play.x + 0.01f);

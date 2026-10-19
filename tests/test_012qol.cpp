@@ -1,0 +1,392 @@
+// tests/test_012qol.cpp — 0.12-QoL: UI POLISH, NAVEGADOR E AUTO-SAVE.
+//
+// Os pins da campanha (um grupo por sub-fase; o B/C/D entram nos commits
+// delas):
+//   A. qol_a_topbar_so_logo   — o texto "G.One" SAIU (só o ícone do G)
+//      qol_a_lupa_expande     — a pesquisa recolhe-se em lupa e EXPANDE ao toque
+//      qol_a_border_cinza     — as bordas dos INATIVOS são o cinza #24242A
+//      qol_a_inspector_ar     — os vãos X/Y/Z 12dp + o Reset com margem
+//      qol_a_cenas_x_fecha    — o X do menu de cenas fecha (bem visível)
+//
+// CLÁUSULA CALMA: NADA de lógica de motor — só a pele (Theme/draw/layout).
+//
+// MUTAÇÕES (coladas no RELATORIO-0.12-QoL.md):
+//   M-QoLa1 — o texto "G.One" de volta no drawTopBar → qol_a_topbar_so_logo
+//             vermelho
+//   M-QoLa2 — o border de volta ao âmbar #4A3714 → qol_a_border_cinza +
+//             regress_identidade_grafite_ambar vermelhos
+#include "TestFramework.h"
+#include "ui/EditorUi.h"
+#include "ui/EditorLayout.h"
+#include "ui/Toolbar.h"
+#include "ui/Theme.h"
+#include "ui/SafeArea.h"
+#include "render/QuadBatch.h"
+
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <string>
+#include <vector>
+
+using namespace vv;
+using namespace vv::editor;
+
+namespace {
+
+bool nearEq(f32 a, f32 b, f32 eps = 0.05f) {
+    return std::fabs(a - b) <= eps;
+}
+
+// o padrão do test_012c_idioma (a raiz do repo com override das mutações)
+std::string repoRoot() {
+    if (const char* e = std::getenv("GONI_ROOT_OVERRIDE")) return e;
+#ifdef REPO_ROOT
+    return REPO_ROOT;
+#else
+    return ".";
+#endif
+}
+
+bool readFile(const std::string& path, std::string& out) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f.is_open()) return false;
+    out.assign(std::istreambuf_iterator<char>(f),
+               std::istreambuf_iterator<char>());
+    return true;
+}
+
+u32 countSub(const std::string& hay, const std::string& needle) {
+    u32 n = 0;
+    for (size_t p = hay.find(needle); p != std::string::npos;
+         p = hay.find(needle, p + needle.size())) {
+        ++n;
+    }
+    return n;
+}
+
+// o env do draw (o padrão CnEnv do test_012b_cenas — densidade 1)
+struct QolEnv {
+    FontAtlas  font;
+    UiContext  ui;
+    InputState input;
+    EditorState st;
+    Scene      scene;
+    bool       ok = false;
+
+    QolEnv() {
+        const char* fontPath = FONT_FIXTURE;
+        ok = font.loadFromPaths(&fontPath, 1, 28.0f);
+        if (!ok) {
+            return;
+        }
+        ui.init();
+        ui.setFont(&font);
+        ui.setSafeArea(safe::Insets{});
+    }
+
+    void begin() {
+        ui.beginFrame(nullptr, &input, 1600.0f, 720.0f);
+        // o modo AUDIT (o padrão da sentinela 48dp — o registo que os pins
+        // leem só existe com o auditBegin ativo)
+        ui.auditBegin("qol", 1600.0f, 720.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+    }
+    void end() {
+        ui.endFrame();
+        input.clearEdges();
+    }
+};
+
+// o rect do painel da hierarquia (o mesmo do draw)
+UiRect hierPanel(const QolEnv& e) {
+    return safe::hierarchyPanelRect(1600.0f, 720.0f, safe::Insets{},
+                                    e.st.drawerH, e.st.hierW, e.st.inspW);
+}
+
+} // namespace
+
+// ---- PIN qol_a_topbar_so_logo ------------------------------------------------
+// «Remover o texto "G.One" ao lado do logo. Deixar apenas o ícone do G.One.»
+// A prova: o Menu começa ONDE o logo acaba (não há slot de nome entre eles)
+// e a degradação estreita já não tem o degrau do nome (o chip é o 1.º a sair).
+TEST(qol_a_topbar_so_logo) {
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+    const safe::Insets in{};
+    {
+        const toolbar::TopBarLayout L =
+            toolbar::topbarLayout(1600.0f, 720.0f, in, false, false);
+        // SEM nome: o [Menu] encosta ao logo (com o vão de grupo de 12dp)
+        EXPECT_MSG(nearEq(L.menu.x, L.logo.x + L.logo.w),
+                   "qol_a_topbar_so_logo: o Menu nasce no fim do logo "
+                   "(o slot do nome morreu) — menu.x %.1f vs %.1f",
+                   (double)L.menu.x, (double)(L.logo.x + L.logo.w));
+        EXPECT(L.showPlatform);   // o chip continua no largo
+    }
+    {
+        // ecrã apertado: o chip sai (o degrau do NOME já não existe)
+        const toolbar::TopBarLayout L =
+            toolbar::topbarLayout(480.0f, 320.0f, in, false, false);
+        EXPECT(!L.showPlatform);
+        EXPECT(nearEq(L.logo.w, theme::dp(40.0f)));   // o logo NUNCA encolhe
+    }
+    // a FONTE: o drawTopBar já não escreve "G.One" (o artefato pinado)
+    std::string src;
+    ASSERT(readFile(repoRoot() + "/app/src/main/cpp/ui/Toolbar.cpp", src));
+    EXPECT(countSub(src, "\"G.One\"") == 0);
+}
+
+// ---- PIN qol_a_lupa_expande ---------------------------------------------------
+// «A barra "pesquisar TIC" transforma-se num ícone de Lupa. Só expande para
+// a barra de texto quando o utilizador toca nela.»
+TEST(qol_a_lupa_expande) {
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+    QolEnv e;
+    ASSERT(e.ok);
+
+    // (1) RECOLHIDA por defeito: o alvo 5500 é o CHIP da lupa 32×32 na
+    // direita da linha (a coluna das ações) — não o campo inteiro
+    e.begin();
+    drawHierarchy(e.ui, e.scene, e.st);
+    e.end();
+    const UiRect panel = hierPanel(e);
+    bool lupa = false;
+    f32 lx = 0.0f, ly = 0.0f, lw = 0.0f, lh = 0.0f;
+    for (const auto& en : e.ui.auditRecord().entries) {
+        if (en.kind == layout::Entry::Button && en.id == 5500u) {
+            lupa = true;
+            lx = en.x;
+            ly = en.y;
+            lw = en.w;
+            lh = en.h;
+        }
+    }
+    EXPECT_MSG(lupa, "qol_a_lupa_expande: a lupa (id 5500) existe recolhida");
+    EXPECT_MSG(nearEq(lw, theme::dp(32.0f)) && nearEq(lh, theme::dp(32.0f)),
+               "qol_a_lupa_expande: o chip da lupa é 32×32 (o piso do "
+               "campo) — %.1f×%.1f", (double)lw, (double)lh);
+    EXPECT_MSG(nearEq(lx + lw, panel.x + panel.w - theme::dp(16.0f)),
+               "qol_a_lupa_expande: a lupa encosta à coluna das ações "
+               "(16dp do painel)");
+    EXPECT(!e.st.hierSearchOpen);
+
+    // (2) o TOQUE na lupa EXPANDE e pede o teclado (propósito 8) — o
+    // clique da casa dispara no LARGAR (o padrão down→frame→up→frame)
+    e.input.injectDown(0, lx + lw * 0.5f, ly + lh * 0.5f);
+    e.begin();
+    drawHierarchy(e.ui, e.scene, e.st);
+    e.end();
+    e.input.injectUp(0);
+    e.begin();
+    drawHierarchy(e.ui, e.scene, e.st);
+    e.end();
+    EXPECT_MSG(e.st.hierSearchOpen,
+               "qol_a_lupa_expande: o toque na lupa expande");
+    EXPECT(e.st.textPurpose == 8);
+    EXPECT(e.st.textInput);   // o teclado in-app abriu com o campo
+
+    // (3) EXPANDIDA: o campo ocupa a linha (o alvo 5500 é largo de novo) e
+    // o × (5503) existe; escrever texto mantém a expansão
+    e.st.hierSearchLen = static_cast<u32>(
+        std::snprintf(e.st.hierSearch, sizeof(e.st.hierSearch), "%s", "Cas"));
+    e.begin();
+    drawHierarchy(e.ui, e.scene, e.st);
+    e.end();
+    bool campo = false, xOk = false;
+    f32 fx = 0.0f, fw = 0.0f, cx = 0.0f, cy = 0.0f, cw = 0.0f;
+    for (const auto& en : e.ui.auditRecord().entries) {
+        if (en.kind == layout::Entry::Button && en.id == 5500u) {
+            campo = true;
+            fx = en.x;
+            fw = en.w;
+        }
+        if (en.kind == layout::Entry::Button && en.id == 5503u) {
+            xOk = true;
+            cx = en.x;
+            cy = en.y;
+            cw = en.w;
+        }
+    }
+    EXPECT_MSG(campo && nearEq(fw, panel.w - theme::dp(32.0f)),
+               "qol_a_lupa_expande: o campo expandido ocupa a linha");
+    EXPECT_MSG(xOk && nearEq(cw, theme::dp(28.0f)),
+               "qol_a_lupa_expande: o × (id 5503) existe dentro do campo");
+    // o × limpa e RECOLHE (o clique dispara no largar — down→frame→up→frame)
+    e.input.injectDown(0, cx + cw * 0.5f, cy + cw * 0.5f);
+    e.begin();
+    drawHierarchy(e.ui, e.scene, e.st);
+    e.end();
+    e.input.injectUp(0);
+    e.begin();
+    drawHierarchy(e.ui, e.scene, e.st);
+    e.end();
+    EXPECT_MSG(e.st.hierSearchLen == 0 && !e.st.hierSearchOpen,
+               "qol_a_lupa_expande: o × limpa e recolhe a lupa");
+}
+
+// ---- PIN qol_a_border_cinza ---------------------------------------------------
+// «As bordas laranjas (glass) dos painéis inativos passam a cinza escuro
+// (#24242A). O laranja fica APENAS para o ativo/selecionado.»
+TEST(qol_a_border_cinza) {
+    // o token É o cinza do ELEVADO (#24242A), opaco — a borda deixa de ser
+    // vidro âmbar
+    EXPECT(nearEq(theme::kTheme.border[0], 36.0f / 255.0f));
+    EXPECT(nearEq(theme::kTheme.border[1], 36.0f / 255.0f));
+    EXPECT(nearEq(theme::kTheme.border[2], 42.0f / 255.0f));
+    EXPECT(nearEq(theme::kTheme.border[3], 1.0f));
+    EXPECT(theme::kTheme.border[0] == theme::kTheme.elevated[0] &&
+           theme::kTheme.border[1] == theme::kTheme.elevated[1] &&
+           theme::kTheme.border[2] == theme::kTheme.elevated[2]);
+    // o âmbar sobrevive APENAS no accentDim (o fill da SELEÇÃO) — intacto
+    EXPECT(nearEq(theme::kTheme.accentDim[0], 74.0f / 255.0f));
+    // o divisor ENTRE PAINÉIS segue o border (a fonte única — o y3 pin
+    // mede o quad; aqui aferra o contrato do token)
+    std::string src;
+    ASSERT(readFile(repoRoot() + "/app/src/main/cpp/ui/UiContext.cpp", src));
+    EXPECT(countSub(src, "theme::kTheme.border[0], theme::kTheme.border[1]") >=
+           1);   // o dividerGradientV lê o border
+    EXPECT(countSub(src, "theme::kTheme.accentDim[0], theme::kTheme.accentDim[1]") ==
+           0);   // o âmbar do divisor morreu
+}
+
+// ---- PIN qol_a_inspector_ar ---------------------------------------------------
+// «Aumentar o espaçamento entre os campos X/Y/Z e entre os botões. O Reset
+// deve ter margem para não colar à borda do ecrã.» A prova DESENHADA: os
+// vãos entre as caixas são 12dp e o reset NUNCA cola (margem ≥ 8dp).
+TEST(qol_a_inspector_ar) {
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+    QolEnv e;
+    ASSERT(e.ok);
+    e.st.selected = e.scene.create("Corpo");
+    e.begin();
+    drawInspector(e.ui, e.scene, e.st, nullptr);
+    e.end();
+    // as caixas X/Y/Z: os PAINÉIS bg (o fill #0A0A0C α1) de 32dp da linha
+    // Posição — os 3 primeiros pela ordem de emissão. A medição é no
+    // batch de sólidos (os campos são re-despachados pelo scroll — não
+    // deixam alvos no registo de auditoria).
+    f32 boxX[8], boxW[8], boxY[8];
+    int nB = 0;
+    const UiRect panel = safe::inspectorPanelRect(1600.0f, 720.0f,
+                                                  safe::Insets{});
+    const QuadBatch& solids = e.ui.solidsForTest();
+    for (u32 q = 0; q + 5 < solids.vertexCount() && nB < 8; q += 6) {
+        const QuadVertex* v = solids.vertices() + q;
+        f32 mnx = 1e9f, mxx = -1e9f, mny = 1e9f, mxy = -1e9f;
+        for (u32 k = 0; k < 6; ++k) {
+            mnx = v[k].x < mnx ? v[k].x : mnx;
+            mxx = v[k].x > mxx ? v[k].x : mxx;
+            mny = v[k].y < mny ? v[k].y : mny;
+            mxy = v[k].y > mxy ? v[k].y : mxy;
+        }
+        const f32 wq = mxx - mnx, hq = mxy - mny;
+        // o fill bg do campo (r≈10/255, a=1) com a altura do campo 32dp
+        if (nearEq(hq, theme::dp(32.0f), 0.5f) && wq > theme::dp(20.0f) &&
+            nearEq(v[0].r, 10.0f / 255.0f, 1e-3f) &&
+            nearEq(v[0].a, 1.0f, 1e-3f) && v[0].x >= panel.x) {
+            boxX[nB] = mnx;
+            boxW[nB] = wq;
+            boxY[nB] = mny;
+            ++nB;
+        }
+    }
+    EXPECT_MSG(nB >= 3,
+               "qol_a_inspector_ar: as 3 caixas X/Y/Z existem (%d)", nB);
+    if (nB >= 3) {
+        // as 3 primeiras são a linha Posição (mesma Y)
+        EXPECT(nearEq(boxY[0], boxY[1]) && nearEq(boxY[1], boxY[2]));
+        // os quads capturados são o CENTRO da escadaria do panelRounded —
+        // o vão ENTRE CAIXAS medido = vão real + 2×raio do canto (4dp cada)
+        const f32 gap0 = boxX[1] - (boxX[0] + boxW[0]);
+        const f32 gap1 = boxX[2] - (boxX[1] + boxW[1]);
+        const f32 wantGap =
+            theme::dp(12.0f + 2.0f * theme::kRadiusField);   // 12 + 2×4
+        EXPECT_MSG(nearEq(gap0, wantGap) && nearEq(gap1, wantGap),
+                   "qol_a_inspector_ar: os vãos X|Y|Z são 12dp (QoL A; "
+                   "medidos %0.f com os cantos) — %.1f / %.1f",
+                   (double)(wantGap * theme::g_density), (double)gap0,
+                   (double)gap1);
+        // o RESET (o chip 40 depois do 3.º campo + vão 12) tem margem à
+        // direita do painel — nunca cola à borda do ecrã
+        const f32 linhaRight = boxX[2] + boxW[2];
+        EXPECT_MSG(linhaRight + theme::dp(12.0f) + theme::dp(40.0f) <=
+                       panel.x + panel.w + 0.01f,
+                   "qol_a_inspector_ar: a linha + reset cabe com margem");
+    }
+    // a FONTE: os vãos são os kTfGap* 12 (o artefato pinado)
+    std::string src;
+    ASSERT(readFile(repoRoot() + "/app/src/main/cpp/ui/EditorUi.cpp", src));
+    EXPECT(countSub(src, "kTfGapBox   = 12.0f") == 1);
+    EXPECT(countSub(src, "kTfGapReset = 12.0f") == 1);
+    EXPECT(countSub(src, "kTfRowPadMin = 8.0f") == 1);
+}
+
+// ---- PIN qol_a_cenas_x_fecha --------------------------------------------------
+// «Garantir que o botão "Nova Cena" e o "X" para fechar estão bem visíveis
+// e com o espaçamento correto.» O X (48×48) vive à direita do Nova cena e
+// o toque fecha SEM ação.
+TEST(qol_a_cenas_x_fecha) {
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+    QolEnv e;
+    ASSERT(e.ok);
+    const std::vector<std::string> scenes = {"scenes/main.goni",
+                                             "scenes/nivel.goni"};
+
+    // (1) a geometria: Nova cena + X na MESMA linha, o X 48×48 à direita
+    e.begin();
+    drawScenesMenu(e.ui, e.input, 1600.0f, 720.0f, e.st, scenes, 0);
+    e.end();
+    f32 nx = 0, ny = 0, nw = 0, nh = 0, cx = 0, cy = 0, cw = 0, ch = 0;
+    bool nova = false, xOk = false;
+    for (const auto& en : e.ui.auditRecord().entries) {
+        if (en.kind == layout::Entry::Button && en.id == 6700u) {
+            nova = true;
+            nx = en.x;
+            ny = en.y;
+            nw = en.w;
+            nh = en.h;
+        }
+        if (en.kind == layout::Entry::Button && en.id == 6799u) {
+            xOk = true;
+            cx = en.x;
+            cy = en.y;
+            cw = en.w;
+            ch = en.h;
+        }
+    }
+    ASSERT(nova);
+    EXPECT_MSG(xOk, "qol_a_cenas_x_fecha: o X (id 6799) existe");
+    EXPECT_MSG(nearEq(cw, theme::dp(48.0f)) && nearEq(ch, theme::dp(48.0f)),
+               "qol_a_cenas_x_fecha: o X é 48×48 (bem visível)");
+    EXPECT_MSG(nearEq(cy, ny) && cx >= nx + nw,
+               "qol_a_cenas_x_fecha: o X na mesma linha, à direita do "
+               "Nova cena, sem sobrepor");
+    EXPECT(e.st.scenesMenu == false);   // o draw não abre o menu (o main arma)
+
+    // (2) o toque no X fecha o menu aberto SEM ação (o retorno é −1; o
+    // clique dispara no largar — down→frame→up→frame)
+    e.st.scenesMenu = true;
+    e.input.injectDown(0, cx + cw * 0.5f, cy + ch * 0.5f);
+    {
+        e.ui.beginFrame(nullptr, &e.input, 1600.0f, 720.0f);
+        drawScenesMenu(e.ui, e.input, 1600.0f, 720.0f, e.st, scenes, 0);
+        e.ui.endFrame();
+        e.input.clearEdges();
+    }
+    e.input.injectUp(0);
+    const int pick = [&] {
+        e.ui.beginFrame(nullptr, &e.input, 1600.0f, 720.0f);
+        const int p = drawScenesMenu(e.ui, e.input, 1600.0f, 720.0f, e.st,
+                                     scenes, 0);
+        e.ui.endFrame();
+        e.input.clearEdges();
+        return p;
+    }();
+    EXPECT_MSG(pick == -1,
+               "qol_a_cenas_x_fecha: o X fecha sem escolher cena");
+    EXPECT(!e.st.scenesMenu);
+}

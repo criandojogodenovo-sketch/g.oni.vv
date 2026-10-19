@@ -84,16 +84,23 @@ bool pressedOutside(const InputState& in, f32 x, f32 y, f32 w, f32 h) {
 // diferentes, e o tap ainda usava gaps em px crus).
 //
 // As tentativas (em dp úteis = w − 2×kPad):
-//   1. painel largo:  3×64 + 2×8 + 8 + 40 = 256 → caixas 64 + reset CHIP 40
+//   1. painel largo:  3×64 + 2×12 + 12 + 40 = 268 → caixas 64 + reset CHIP 40
 //   2. encolhe:       boxW = (útil − 24 − 40)/3 com PISO 48 → o chip fica
 //   3. abaixo do piso: o reset vira ÍCONE 20 inline —
 //                     boxW = (útil − 24 − 20)/3 com PISO 40; no piso do
-//                     painel da casa (180dp → 164 úteis) dá 40 exato
-//                     (3×40+2×8+8+20 = 164). A ÚLTIMA DEFESA: se mesmo
-//                     assim a linha passar do útil, as caixas encolhem —
-//                     o rect do painel é a LEI (nada fora dele).
-constexpr f32 kTfGapBox   = 8.0f;   // o vão ENTRE caixas
-constexpr f32 kTfGapReset = 8.0f;   // o vão antes do reset
+//                     painel da casa (180dp → 164 úteis) o padding da linha
+//                     cede (8dp de cada lado — 0.12-QoL A) e a caixa fica
+//                     41.3 (o valor mantém o piso — R1)
+//                     A ÚLTIMA DEFESA: se mesmo assim a linha passar do
+//                     útil, as caixas encolhem — o rect do painel é a LEI
+//                     (nada fora dele).
+// 0.12-QoL A (A ORDEM DO DONO · Redbr1): «Aumentar o espaçamento (padding)
+// entre os campos X/Y/Z e entre os botões. O botão Reset deve ter margem
+// para não colar à borda do ecrã.» — os vãos sobem 8→12dp e a margem
+// mínima da linha 4→8dp (o Reset nunca cola); o piso do valor 26→22 (o
+// preço do vão maior no piso 180dp — «-12»/«45»/«1.2e» continuam a ler-se).
+constexpr f32 kTfGapBox   = 12.0f;  // o vão ENTRE caixas (era 8 — QoL A)
+constexpr f32 kTfGapReset = 12.0f;  // o vão antes do reset (era 8 — QoL A)
 constexpr f32 kTfChipW    = 40.0f;  // o chip do reset (a lei de ouro: alvo 40)
 constexpr f32 kTfIconW    = 20.0f;  // o ícone inline do reset
 constexpr f32 kTfWideBox  = 64.0f;  // a caixa larga (3×64 = o painel 272 antigo)
@@ -202,17 +209,19 @@ TransformBudget transformRowBudget(f32 usableWdp) {
         b.axisLabels = false;
     }
     // (b) ainda sem o piso? o PADDING DA LINHA cede: as caixas usam a
-    //     largura toda do painel (as margens de 16dp caem a 4dp — o MESMO
-    //     regime do reset que a tentativa escolheu) e a caixa re-computa.
+    //     largura quase toda do painel (as margens de 16dp caem a 8dp —
+    //     0.12-QoL A: a margem que nunca some) e a caixa re-computa.
     if (transformValueSpace(b) < kTfValueMinDp) {
         b.rowPadDropped = true;
-        constexpr f32 kTfRowPadMin = 4.0f;   // a margem que nunca some
+        // 0.12-QoL A: a margem que nunca some 4→8dp (a ordem do dono — o
+        // Reset com margem para não colar à borda do ecrã)
+        constexpr f32 kTfRowPadMin = 8.0f;
         const f32 cheio =
-            usableWdp + 2.0f * (16.0f - kTfRowPadMin);   // 16→4 de cada lado
+            usableWdp + 2.0f * (16.0f - kTfRowPadMin);   // 16→8 de cada lado
         const f32 resetBudget = b.resetIcon ? kTfIconW : kTfChipW;
+        const f32 piso = b.resetIcon ? kTfFloorBox : kTfMinBox;
         const f32 w3 =
             (cheio - 2.0f * kTfGapBox - kTfGapReset - resetBudget) / 3.0f;
-        const f32 piso = b.resetIcon ? kTfFloorBox : kTfMinBox;
         b.boxW = w3 >= piso ? w3 : piso;
         const f32 totalCheio =
             3.0f * b.boxW + 2.0f * kTfGapBox + kTfGapReset + b.resetW;
@@ -221,6 +230,13 @@ TransformBudget transformRowBudget(f32 usableWdp) {
             if (b.boxW < 16.0f) {
                 b.boxW = 16.0f;   // o scissor do painel é a última defesa
             }
+        }
+        // (c) 0.12-QoL A: ainda sem o piso do valor COM a letra? a LETRA
+        //     cede TAMBÉM (a ordem R1 continua: letra → padding → letra →
+        //     NUNCA o valor — os vãos 12dp do QoL A custam o espaço que a
+        //     letra usava entre ~200 e ~216dp de painel)
+        if (b.axisLabels && transformValueSpace(b) < kTfValueMinDp) {
+            b.axisLabels = false;   // o valor cresce boxW−26 → boxW−12
         }
     }
     return b;
@@ -773,48 +789,110 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
         if (ui.widgetHit(kHierDotsId, dr.x, dr.y, dr.w, dr.h)) {
             st.hierMenu = !st.hierMenu;
         }
-        // ---- pesquisa 32dp (PASSO 1: o CAMPO da spec — o campo OCUPA a
-        // linha kSearchRowH inteira; o piso de campo 32, LayoutDump.h) ----
+        // ---- pesquisa (0.12-QoL A — A ORDEM DO DONO · Redbr1): a barra
+        // «pesquisar TIC» vive RECOLHIDA num ÍCONE DE LUPA (chip 28dp, a
+        // coluna das ações do cabeçalho); SÓ EXPANDE para o campo de texto
+        // quando o utilizador toca nela (ou quando há texto a filtrar — o
+        // filtro visível manda). Menos poluição, a barra só existe quando
+        // é útil. O × dentro do campo limpa e recolhe. A LINHA mantém a
+        // altura de sempre (kSearchRowH — a geometria da lista não muda).
         const f32 sy = y + kHeaderH;
         ui.panel(x, sy, w, 1.0f, theme::kTheme.border);
-        const UiRect sfield = {x + kPad, sy, w - 2.0f * kPad, kSearchRowH};
-        ui.auditRowFloorNext(layout::kFieldFloorDp);
-        ui.panelRounded(sfield.x, sfield.y, sfield.w, sfield.h,
-                        theme::dp(theme::kRadiusField), theme::kTheme.bg);
-        ui.frameRounded(sfield.x, sfield.y, sfield.w, sfield.h, 1.0f,
-                        theme::dp(theme::kRadiusField), theme::kTheme.border);
-        icons::drawIcon(ui, icons::Icon::Search,
-                        sfield.x + theme::dp(10.0f),
-                        sfield.y + (sfield.h - theme::dp(20.0f)) * 0.5f,
-                        theme::dp(20.0f), theme::kTheme.text2);
-        if (ui.hasFont()) {
-            const TextMetrics mm = ui.textMetrics();
-            const f32 bb = sfield.y + (sfield.h - mm.block()) * 0.5f +
-                           mm.ascent;
-            // PASSO 2 (0.9.6.15): o placeholder DEGRADA POR ORDEM (o padrão
-            // dos chips da strip R-023): «pesquisar TIC» quando o campo dá,
-            // «pesquisar» no PISO 140dp da hierarquia (spec PASSO 2) — o
-            // campo nunca desenha reticência no placeholder
-            const f32 phBudget = sfield.w - theme::dp(40.0f) - theme::dp(12.0f);
-            const char* ph = ui.fontWidth("pesquisar TIC") <= phBudget
-                                 ? "pesquisar TIC"
-                                 : "pesquisar";
-            if (st.hierSearchLen) {
-                ui.labelFitted(sfield.x + theme::dp(40.0f), bb, st.hierSearch,
-                               theme::kTheme.text1, phBudget);
-            } else {
-                ui.labelFitted(sfield.x + theme::dp(40.0f), bb, ph,
-                               theme::kTheme.text2, phBudget);
+        const bool expandida = st.hierSearchOpen || st.hierSearchLen > 0;
+        if (!expandida) {
+            // RECOLHIDA: SÓ a lupa (chip 32×32 — o PISO do campo de classe;
+            // ocupa a linha toda, à direita, sob o [+])
+            const f32 chipS = kSearchRowH;
+            const UiRect lup = {x + w - kPad - chipS,
+                                sy + (kSearchRowH - chipS) * 0.5f, chipS,
+                                chipS};
+            ui.auditRowFloorNext(layout::kFieldFloorDp);
+            const bool lupaHeld = ui.widgetActive(kHierSearchId);
+            ui.panelRounded(lup.x, lup.y, lup.w, lup.h,
+                            theme::dp(theme::kRadiusCard),
+                            lupaHeld ? theme::kTheme.surface2
+                                     : theme::kTheme.surface);
+            ui.frameRounded(lup.x, lup.y, lup.w, lup.h, 1.0f,
+                            theme::dp(theme::kRadiusCard),
+                            theme::kTheme.border);
+            icons::drawIcon(ui, icons::Icon::Search,
+                            lup.x + (lup.w - theme::dp(18.0f)) * 0.5f,
+                            lup.y + (lup.h - theme::dp(18.0f)) * 0.5f,
+                            theme::dp(18.0f), theme::kTheme.text2);
+            // o toque EXPANDE e abre o teclado (propósito 8) — o campo é
+            // desenhado no frame SEGUINTE com o MESMO propósito
+            if (ui.widgetHit(kHierSearchId, lup.x, lup.y, lup.w, lup.h)) {
+                st.hierSearchOpen = true;
+                st.textInput = true;
+                st.textPurpose = 8;   // pesquisa da hierarquia
+                st.textTic = Handle::invalid();
+                std::snprintf(st.textBuf, sizeof(st.textBuf), "%s",
+                              st.hierSearch);
+                st.textLen = st.hierSearchLen;
             }
-        }
-        // o CAMPO abre o teclado (propósito 8) — captura normal FORA do scroll
-        if (ui.widgetHit(kHierSearchId, sfield.x, sfield.y, sfield.w,
-                         sfield.h)) {
-            st.textInput = true;
-            st.textPurpose = 8;   // pesquisa da hierarquia
-            st.textTic = Handle::invalid();
-            std::snprintf(st.textBuf, sizeof(st.textBuf), "%s", st.hierSearch);
-            st.textLen = st.hierSearchLen;
+        } else {
+            // EXPANDIDA: o campo de sempre + o × (limpa e recolhe)
+            const UiRect sfield = {x + kPad, sy, w - 2.0f * kPad,
+                                   kSearchRowH};
+            ui.auditRowFloorNext(layout::kFieldFloorDp);
+            ui.panelRounded(sfield.x, sfield.y, sfield.w, sfield.h,
+                            theme::dp(theme::kRadiusField), theme::kTheme.bg);
+            ui.frameRounded(sfield.x, sfield.y, sfield.w, sfield.h, 1.0f,
+                            theme::dp(theme::kRadiusField),
+                            theme::kTheme.border);
+            icons::drawIcon(ui, icons::Icon::Search,
+                            sfield.x + theme::dp(10.0f),
+                            sfield.y + (sfield.h - theme::dp(20.0f)) * 0.5f,
+                            theme::dp(20.0f), theme::kTheme.text2);
+            // o × (chip 28 dentro do campo, à direita): limpa e RECOLHE
+            const f32 chipS = theme::dp(28.0f);
+            const UiRect cx = {sfield.x + sfield.w - chipS - theme::dp(2.0f),
+                               sfield.y + (sfield.h - chipS) * 0.5f, chipS,
+                               chipS};
+            if (ui.hasFont()) {
+                const TextMetrics mm = ui.textMetrics();
+                const f32 bb = sfield.y + (sfield.h - mm.block()) * 0.5f +
+                               mm.ascent;
+                // PASSO 2 (0.9.6.15): o placeholder DEGRADA POR ORDEM (o
+                // padrão dos chips da strip R-023): «pesquisar TIC» quando o
+                // campo dá, «pesquisar» no PISO 140dp da hierarquia — o
+                // campo nunca desenha reticência no placeholder
+                const f32 phBudget = sfield.w - theme::dp(40.0f) -
+                                     chipS - theme::dp(12.0f);
+                const char* ph = ui.fontWidth("pesquisar TIC") <= phBudget
+                                     ? "pesquisar TIC"
+                                     : "pesquisar";
+                if (st.hierSearchLen) {
+                    ui.labelFitted(sfield.x + theme::dp(40.0f), bb,
+                                   st.hierSearch, theme::kTheme.text1,
+                                   phBudget);
+                } else {
+                    ui.labelFitted(sfield.x + theme::dp(40.0f), bb, ph,
+                                   theme::kTheme.text2, phBudget);
+                }
+                // o glifo × (2 traços cruzados — o conjunto outline não tem
+                // um ícone X; o desenho é o MESMO do caret: geometria pura)
+                const f32 mx = cx.x + cx.w * 0.5f;
+                const f32 my = cx.y + cx.h * 0.5f;
+                const f32 r4 = theme::dp(5.0f);
+                ui.drawLine(mx - r4, my - r4, mx + r4, my + r4,
+                            theme::dp(2.0f), theme::kTheme.text2);
+                ui.drawLine(mx - r4, my + r4, mx + r4, my - r4,
+                            theme::dp(2.0f), theme::kTheme.text2);
+            }
+            if (ui.widgetHit(kHierSearchClearId, cx.x, cx.y, cx.w, cx.h)) {
+                st.hierSearch[0] = '\0';
+                st.hierSearchLen = 0;
+                st.hierSearchOpen = false;   // volta à lupa
+            } else if (ui.widgetHit(kHierSearchId, sfield.x, sfield.y,
+                                    sfield.w, sfield.h)) {
+                st.textInput = true;
+                st.textPurpose = 8;   // pesquisa da hierarquia
+                st.textTic = Handle::invalid();
+                std::snprintf(st.textBuf, sizeof(st.textBuf), "%s",
+                              st.hierSearch);
+                st.textLen = st.hierSearchLen;
+            }
         }
 
         // ---- lista (scroll) ----
@@ -2777,7 +2855,8 @@ void drawTouchControlsAt(UiContext& ui, const TouchControls& tc, f32 ox,
     if (held) {
         ui.panel(bx2, by2, bw, bh, theme::TEXT);
     }
-    ui.frame(bx2, by2, bw, bh, 2.0f * k, held ? theme::PANEL : theme::ACCENT);
+    ui.frame(bx2, by2, bw, bh, 2.0f * k,
+             held ? theme::PANEL : theme::LINE);   // 0.12-QoL A: inativo
     if (ui.hasFont()) {
         const f32 tw = ui.fontWidth("JUMP");
         const f32 thh = ui.fontHeight();
@@ -3382,10 +3461,19 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     ui.frameRounded(x, y, kSheetW, h, 1.0f, theme::dp(theme::kRadiusCard),
                     theme::kTheme.border);
 
-    // ＋ Nova cena — FILL ACCENT (spec H), fixo no topo
+    // ＋ Nova cena — FILL ACCENT (spec H), fixo no topo. 0.12-QoL A (a
+    // ordem do dono): o botão encolhe para dar o X de FECHAR bem visível
+    // à direita (48×48, o alvo da casa) com o espaçamento correto — fechar
+    // deixa de exigir acertar no véu lá fora.
     const f32 newBtnY = y + theme::dp(4.0f);
+    constexpr f32 kCloseS = 48.0f;   // o alvo do X (dp)
     const UiRect newBtn = {x + theme::dp(8.0f), newBtnY,
-                           kSheetW - theme::dp(16.0f), theme::dp(48.0f)};
+                           kSheetW - theme::dp(16.0f) - theme::dp(kCloseS) -
+                               theme::dp(4.0f),
+                           theme::dp(48.0f)};
+    const UiRect closeBtn = {x + kSheetW - theme::dp(8.0f) -
+                                 theme::dp(kCloseS),
+                             newBtnY, theme::dp(kCloseS), theme::dp(48.0f)};
     const bool newHeld = ui.widgetActive(6700);
     ui.panelRounded(newBtn.x, newBtn.y, newBtn.w, newBtn.h,
                     theme::kRadiusCard,
@@ -3402,6 +3490,25 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     }
     const bool newScene = ui.widgetHit(6700, newBtn.x, newBtn.y, newBtn.w,
                                        newBtn.h);
+    // o X de FECHAR (0.12-QoL A): chip quieto (surface) com o glifo × —
+    // 2 traços cruzados (o conjunto outline não tem X; geometria pura)
+    {
+        ui.auditRowFloorNext(layout::kRowFloorDp);
+        const bool closeHeld = ui.widgetActive(6799);
+        ui.panelRounded(closeBtn.x, closeBtn.y, closeBtn.w, closeBtn.h,
+                        theme::dp(theme::kRadiusCard),
+                        closeHeld ? theme::kTheme.surface2
+                                  : theme::kTheme.surface);
+        ui.frameRounded(closeBtn.x, closeBtn.y, closeBtn.w, closeBtn.h, 1.0f,
+                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
+        const f32 mx = closeBtn.x + closeBtn.w * 0.5f;
+        const f32 my = closeBtn.y + closeBtn.h * 0.5f;
+        const f32 r6 = theme::dp(8.0f);
+        ui.drawLine(mx - r6, my - r6, mx + r6, my + r6, theme::dp(2.5f),
+                    theme::kTheme.text1);
+        ui.drawLine(mx - r6, my + r6, mx + r6, my - r6, theme::dp(2.5f),
+                    theme::kTheme.text1);
+    }
 
     // separador fino + lista (scroll id 44)
     ui.panel(x + theme::dp(16.0f), newBtnY + theme::dp(48.0f) + theme::dp(4.0f),
@@ -3481,6 +3588,9 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     f32 tx = 0.0f, ty = 0.0f;
     if (newScene) {
         chosen = 1;
+    } else if (ui.widgetHit(6799, closeBtn.x, closeBtn.y, closeBtn.w,
+                            closeBtn.h)) {
+        chosen = -1;   // 0.12-QoL A: o X fecha SEM ação (o véu de fora continua)
     } else if (ui.scrollTap(44, tx, ty)) {
         const f32 ly = ty - listTop + off;
         const i32 row = static_cast<i32>(ly / rowH);
@@ -3548,7 +3658,7 @@ int drawSettingsMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     }
 
     ui.panel(x, y, kMenuW, h, theme::PANEL);
-    ui.frame(x, y, kMenuW, h, 2.0f, theme::ACCENT);
+    ui.frame(x, y, kMenuW, h, 2.0f, theme::LINE);   // 0.12-QoL A: inativo
     const f32 th = ui.fontHeight();
     ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f, "SETTINGS", theme::TEXT);
 
@@ -3938,7 +4048,7 @@ int drawAssetMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
             return 0;
         }
         ui.panel(x, y, w, h, theme::PANEL);
-        ui.frame(x, y, w, h, 2.0f, theme::ACCENT);
+        ui.frame(x, y, w, h, 2.0f, theme::LINE);   // 0.12-QoL A: inativo
         const f32 th = ui.fontHeight();
         ui.label(x + kPad, y + kHeaderH * 0.5f + th * 0.30f,
                  "PRIMITIVA", theme::TEXT);

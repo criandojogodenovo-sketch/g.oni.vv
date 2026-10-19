@@ -1,9 +1,9 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-19 · vc: 101 · Último commit: este (o 0.12-X 3.9x —
-a CÂMARA DE TERCEIRA PESSOA: camrig + camdrag + limit no registo, o
-Host::lookDelta, o conflito no compilador; R-055 + M-3.9x1/x2; o
-relatório próprio diz o resto)
+Atualizado: 2026-10-19 · vc: 102 · Último commit: este (o 0.12-QoL A — a
+LIMPEZA VISUAL da UI: o top bar só com o ícone, a lupa que expande, o
+border cinza #24242A, o ar no Inspector, o X nas cenas; o relatório
+próprio diz o resto)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -11,6 +11,15 @@ relatório próprio diz o resto)
 
 ## §1 Onde estamos
 
+- **Campanha 0.12-QoL (UI POLISH + NAVEGADOR + AUTO-SAVE) — EM CURSO
+  (A..D)** (a cláusula calma: refinamento de UI 2.5D e persistência,
+  ZERO lógica de motor; a história vive no RELATORIO-0.12-QoL.md).
+  **A (vc 102)**: o top bar SEM o texto do nome (só o ícone do G), a
+  pesquisa da hierarquia recolhida na LUPA que expande ao toque (o ×
+  limpa e recolhe), o border dos INATIVOS #24242A (o âmbar só no
+  ativo/selecionado — o divisor e os cards modais incluídos), os vãos
+  X/Y/Z 12dp + a margem mínima 8dp do Reset, o X (48×48) no menu de
+  cenas; pins ×5 + M-QoLa1/x2; 8 recalibrações com nota.
 - **Campanha 0.12-X (CÂMARA DE TERCEIRA PESSOA) — FECHADA (3.9x, vc
   101)** (o camrig + camdrag + limit no REGISTO como Contínuos; o
   yaw/pitch no TykerState; o Host::lookDelta com o consumo a ZERAR; o
@@ -27,17 +36,12 @@ relatório próprio diz o resto)
 - **Campanha 0.12-E (EMERGÊNCIA + REDESIGN 2.5D, FOGO AVERMELHADO) —
   FECHADA (E-1..E-3, vc 95–97)** (a ordem do dono abortou o SDF 3D;
   cláusulas: ZERO matemática 3D, ZERO mexidas no FontAtlas, TICs
-  intocados; os DETALHES vivem no RELATORIO-0.12-E.md).
-  **E-3 (vc 97)**: o vidro α0.85 + a linha âmbar 1dp a 20%, a sombra
-  falsa preta α0.15 deslocada 3dp, os ativos com o gradiente
-  fireRed→fireOrange e a borda de ruído 2D em scroll (o ui/Noise2D.h
-  NOVO); pins ×4 + M-E3a/b + a FASE 35. c33 1010/0.
-  **E-2 (vc 96)**: a paleta EXATA do dono no Theme.h (o surface #141416,
-  o text1 #F2F2F5, os tokens fireRed/fireOrange novos); os
-  static_asserts aferraram a fonte única no 1.º build. c33 1007/0.
-  **E-1 (vc 95)**: a restauração da UI básica — o desenho volta ao
-  SIMPLES 2D no UiContext, a maquinaria SDF/vidro/fogo fica DORMENTE
-  (zero chamadores), 13 pins reformados + 6 recalibrações. c33 1007/0.
+  intocados; E-1 o desenho simples 2D de volta + 13 pins reformados +
+  6 recalibrações; E-2 a paleta EXATA do dono no Theme.h + os tokens
+  fireRed/fireOrange + os static_asserts da fonte única; E-3 o vidro
+  α0.85 + a linha âmbar 1dp a 20%, a sombra falsa, o gradiente
+  fireRed→fireOrange nos ativos, o ui/Noise2D.h; pins ×4 + M-E3a/b;
+  os DETALHES vivem no RELATORIO-0.12-E.md).
 - **Campanha 0.12-D (identidade visual) — PARCIALMENTE ABORTADA PELO
   DONO (a 0.12-E)**: o D-4 (o LOGO, vc 94) SOBREVIVE; o D-1 (SDF), o
   D-2 (vidro) e o D-3 (fogo) estão DORMENTES (zero chamadores — vc
@@ -64,6 +68,17 @@ relatório próprio diz o resto)
 
 ## §2 O que está FEITO
 
+- 0.12-QoL A (vc 102) — a LIMPEZA VISUAL (no RELATORIO-0.12-QoL.md §1):
+  o top bar só com o ÍCONE do G (o slot do nome morto, o padrão D21);
+  a pesquisa da hierarquia RECOLHIDA na lupa 32×32 que EXPANDE ao toque
+  (o × 5503 limpa e recolhe; hierSearchOpen no EditorState); o border
+  dos INATIVOS #24242A (o token border recolorado + o alias LINE + o
+  divisorGradientV + as molduras ACCENT dos cards modais — o âmbar só
+  no ativo/selecionado); os vãos X/Y/Z 8→12dp + a margem mínima 4→8dp
+  (o piso do valor 26→22 e o passo (c) letra→padding→letra na escada
+  R1) + a folga vertical 64→68dp; o X de fechar (48×48) no menu de
+  cenas; pins ×5 (test_012qol.cpp) + M-QoLa1/x2 vermelho→reposto→verde
+  (coladas no §1 do relatório); 8 recalibrações com nota.
 - 0.12-X 3.9x (vc 101) — a câmara de terceira pessoa (no
   RELATORIO-0.12-X-CAMRIG.md): camrig(d,h,suav) + camdrag(sens) +
   limit como Contínuos no REGISTO; o TykerState guarda camYaw/camPitch;
@@ -95,21 +110,12 @@ relatório próprio diz o resto)
 - 0.12-D D-4 (vc 94) — o logo «G em chama» (no RELATORIO-0.12-D.md §4):
   as setas mortas, a rampa por traço, o ignite, as 3 versões, o espelho
   Java, o overdraw da barra; pins ×4 + M-D4a/b; a FASE 34.
-- 0.12-D D-3 (vc 93) — o fogo (no RELATORIO-0.12-D.md §3): a fonte única
-  ui/Fire.h, a rampa do dono + a proveniência (d3_palette.py), a borda
-  animada aditiva, o glow por baixo, as brasas com portão, a composição
-  simultânea, o toggle Baixo nos três; pins ×5 + M-D3a/b; os achados (o
-  continue do blend, o 0x0304, a banda sem teto, a duplicação do stub, o
-  play em destaque da C-2).
-- 0.12-D D-2 (vc 92) — o vidro real e falso (no RELATORIO-0.12-D.md §2):
-  a captura + o Kawase dual + a cache, o ramo uSdfTexOn, o vidro falso
-  (gradiente/reflexo/ruído/Fresnel); pins ×4 + M-D2a/b; os achados (o
-  flip da captura, o grão nas sondas, o teto da cache).
-- 0.12-D D-1 (vc 91) — o shader SDF único de widget (no
-  RELATORIO-0.12-D.md §1): o 3.º programa (progSdf_), a fonte única
-  ui/Sdf.h, o toggle Alto/Médio/Baixo, os botões pelo widget SDF; pins ×4
-  + M-D1a/b; a FASE 32; os achados (o rebind do ARRAY_BUFFER, a corrida
-  fina dos jobs).
+- 0.12-D D-1..D-3 (vc 91–93) — o shader SDF de widget, o vidro real e
+  falso e o fogo (no RELATORIO-0.12-D.md §1..3): a fonte única ui/Sdf.h
+  + o 3.º programa, o Kawase dual + a cache, o ui/Fire.h + a rampa do
+  dono; pins ×13 + M-D1a/b..D3a/b; DORMENTES desde a 0.12-E (os
+  achados: o rebind do ARRAY_BUFFER, a corrida dos jobs, o flip da
+  captura, o continue do blend, a banda sem teto).
 - 0.6.x–0.9.5 — fundação da engine (V.ONI core, device real, CI 5 jobs).
 - 0.12-C C-4 (vc 90) — o seletor + os vazios (no RELATORIO-0.12-C.md
   §4): o picker pela fonte única (o breadcrumb que salta, a pesquisa
@@ -146,30 +152,15 @@ relatório próprio diz o resto)
   árvore com espelho + sync-back; o Inspector de UI; uniqueNewTicName);
   o Play (drawUiTree/hitTestUiTree/uiElementFromHit); **Pins ×9 +
   M-B1a/b/c** + **R-050**; 8 recalibrações com nota.
-- 0.12-A (vc 82) — os 4 bugs P0 fechados (o relatório próprio:
-  docs/RELATORIO-0.12-A.md; a investigação:
-  docs/RELATORIO-0.12-A-INVEST-RAM.md):
-  - **A-1** — as rows `lod distance`/`impostor` JÁ EXISTEM (ficheiro:
-    linha no relatório) — PÁRA no fix cego; os 5 pins NOVOS da UI
-    (test_012a_lodui.cpp) fecham o gap de cobertura; M-A1a/M-A1b
-    vermelho→verde; ZERO produção trocada.
-  - **A-2** — o `refreshCatalog()` entra no ARRANQUE e no
-    `createSceneNamed` (os contadores a 0 morrem); `sceneRowIcon()` NOVA
-    (a fonte única do ícone de cena); pins ×3; M-A2a/M-A2b vermelho→verde.
-  - **A-3** — `safe::scissor3dRect()` NOVA (o modo UI reserva o painel
-    direito no SCISSOR; byte a byte fora do modo UI) + o tooltip do
-    gizmo morre (legendTimer/legendArm; nasce no largar, vive 1,5 s);
-    pins ×3; M-A3a/M-A3b vermelho→verde.
-  - **A-4** — a instrumentação sob `#ifdef GONI_BENCH_RAM` (o sampler
-    `bench_ram:` 1×/s no engine.log) + o alvo opcional `bench_ram`
-    (option OFF) — A CURVA REPRODUZ O SALTO: linear 50k…4,1M e explosão
-    a 8,2M/12,3M no cruzamento EXATO do teto de VRAM (192 MB) com
-    9 758/23 470 evictions/frame; `evc_par == evc_orb`; o RSS é LINEAR —
-    VEREDITO: RAM (a cache de blocos a ciclizar), NÃO GPU/CPU; o
-    protocolo do dono + as recomendações no relatório próprio.
-  - **O achado fora da lista (cláusula calma, NÃO fixado)**: o
-    `inspectorRowCount` subestima a MALHA em 4 rows para mesh file
-    (EditorLayout.h:433; sem sintoma — documentado no relatório §6).
+- 0.12-A (vc 82) — os 4 bugs P0 fechados (o ficheiro:linha, os pins e
+  o veredito vivem no relatório próprio: docs/RELATORIO-0.12-A.md + o
+  INVEST-RAM): A-1 as rows LOD JÁ EXISTIAM (PÁRA no fix cego; pins ×5);
+  A-2 o refreshCatalog no arranque + sceneRowIcon (pins ×3); A-3 o
+  scissor3dRect + o tooltip do gizmo (pins ×3); A-4 a instrumentação
+  GONI_BENCH_RAM com a CURVA a reproduzir o salto (veredito: RAM — a
+  cache de blocos a ciclizar); pins com M-A1a/b..A3a/b vermelho→verde;
+  o achado fora da lista (inspectorRowCount −4 rows mesh, sem sintoma)
+  documentado no relatório §6.
 - 0.11-Y (vc 77–81) — a identidade visual completa (o ícone, o tema, o
   layout, os cartões, o fecho com os 13 PNGs) — ver §1 e docs/
   RELATORIO-0.11-Y-FECHO.md.
@@ -258,6 +249,9 @@ Commits puramente documentais não são afetados.
 - `ARCHITECTURE.md` — o mapa dos módulos (o porquê das camadas).
 - `docs/REGRESSOES.md` — sentinelas R-NNN (consulta, não leitura inteira).
 - `BACKLOG.md` — rastreador de campanhas (na RAIZ do repo).
+- `docs/RELATORIO-0.12-QoL.md` — o relatório da 0.12-QoL (o A no §1 —
+  a limpeza visual, as mutações coladas, as recalibrações com nota; os
+  B/C/D entram nos §2..4 à medida que fecham).
 - `docs/RELATORIO-0.12-X-CAMRIG.md` — o relatório da 0.12-X (a câmara
   de terceira pessoa: as convenções fechadas, o hook lookDelta, o
   TIMING do input, as mutações coladas no §5).

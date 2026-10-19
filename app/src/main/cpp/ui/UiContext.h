@@ -33,9 +33,10 @@ namespace vv {
 
 // Tokens do tema — 0.9.6.10 (GRUPO UI): ALIASES da tabela única
 // (ui/Theme.h, recalibrada 0.11-Y: o poço #08080A + a chama). A pele
-// inteira da app muda num só sítio: BG=bg #08080A α1, PANEL=surface
-// #151517 α0.80 (VIDRO 80%), LINE=border #4A3714 α0.60 (a hairline ÂMBAR
-// — a aresta quente do cristal), TEXT=text1 #ECECEE, ACCENT=accent
+// inteira da app muda num só sítio: BG=bg #0A0A0C α1, PANEL=surface
+// #141416 α0.85 (O VIDRO), LINE=border #24242A α1.00 (0.12-QoL A: a
+// borda dos INATIVOS é o cinza escuro — a hairline ÂMBAR #4A3714 α0.60
+// morreu com o feedback Redbr1), TEXT=text1 #F2F2F5, ACCENT=accent
 // #FFB020 (O ÂMBAR — a identidade), WARN=warn #FF8A3D (laranja ≠ âmbar).
 // O struct completo com text2/accentInk/accentDim/danger/ok/scrim/
 // glassEdge/glassTop/eixos + a auditoria do vidro (blendOver/
@@ -50,7 +51,7 @@ constexpr f32 PANEL[4]  = {20.0f / 255.0f, 20.0f / 255.0f, 22.0f / 255.0f, 0.85f
 // 0.12-C (C-3): os DOIS níveis novos da escada de superfícies
 constexpr f32 CARD[4]     = {27.0f / 255.0f, 27.0f / 255.0f, 32.0f / 255.0f, 1.0f};   // card #1B1B20 (O CARTÃO)
 constexpr f32 ELEVATED[4] = {36.0f / 255.0f, 36.0f / 255.0f, 42.0f / 255.0f, 1.0f};   // elevated #24242A (O ELEVADO)
-constexpr f32 LINE[4]   = {74.0f / 255.0f, 55.0f / 255.0f, 20.0f / 255.0f, 0.60f};    // border #4A3714 α0.60 (âmbar)
+constexpr f32 LINE[4]   = {36.0f / 255.0f, 36.0f / 255.0f, 42.0f / 255.0f, 1.0f};     // border #24242A (0.12-QoL A: borda INATIVA cinza)
 constexpr f32 TEXT[4]   = {242.0f / 255.0f, 242.0f / 255.0f, 245.0f / 255.0f, 1.0f};  // text1 #F2F2F5 (a paleta 0.12-E; era #ECECEE)
 constexpr f32 ACCENT[4] = {255.0f / 255.0f, 176.0f / 255.0f, 32.0f / 255.0f, 1.0f};  // = accent (O ÂMBAR)
 constexpr f32 WARN[4]   = {255.0f / 255.0f, 138.0f / 255.0f, 61.0f / 255.0f, 1.0f};   // warn #FF8A3D (laranja)

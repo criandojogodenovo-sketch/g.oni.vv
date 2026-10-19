@@ -133,7 +133,9 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     // inteira (+8dp) — 1046 → 1054
     // 0.10-M HOTFIX TEXTURAS-VINCULA: a secção Material ganhou as 5
     // linhas de SLOT (36 dp cada) — 1054 → 1234
-    EXPECT(nearEqF(contentH, 1234.0f));
+    // 0.12-QoL A: as 3 linhas Transform ganham folga 4→8dp (64 → 68 cada)
+    // — a ordem do dono (mais ar entre os campos) — 1234 → 1246
+    EXPECT(nearEqF(contentH, 1246.0f));
 
     // DEPOIS: painel dentro do contentRect [0,24,·,628] (status 24 + nav 92)
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);

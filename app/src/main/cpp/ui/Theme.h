@@ -16,9 +16,10 @@
 // 0.11-Y (Y-1) — A TABELA RECALIBRADA (a chama sobre o poço), SUPERADA
 // pela ESCADA DE SUPERFÍCIES da 0.12-C (C-3, a ordem expressa do dono —
 // o padrão Y-3/D11): o FUNDO #0A0A0C + o PAINEL #131316 + o CARTÃO
-// #1B1B20 + o ELEVADO #24242A — 4 tons distintos com a borda âmbar
-// subtil entre painéis (PAINEL #141416 desde a 0.12-E E-2 — a paleta
-// EXATA do FOGO AVERMELHADO do dono):
+// #1B1B20 + o ELEVADO #24242A — 4 tons distintos (PAINEL #141416 desde
+// a 0.12-E E-2 — a paleta EXATA do FOGO AVERMELHADO do dono). A BORDA
+// entre painéis, âmbar subtil na 0.12-C, é #24242A desde a 0.12-QoL A
+// (o dono: o laranja fica APENAS para o ativo/selecionado — Redbr1):
 //   bg         #0A0A0C α1.00 — fundo da app (o FUNDO da escada; == o
 //              clear, o contrato «o clear lê o token")
 //   surface    #141416 α0.85 — O VIDRO da FASE 3 do E (a ordem do dono:
@@ -26,8 +27,9 @@
 //   surface2   #1E1E21 α0.86 — vidro denso (premido, chips ativos)
 //   card       #1B1B20 α1.00 — os CARTÕES (0.12-C)
 //   elevated   #24242A α1.00 — os MENUS/SHEETS/TOAST (0.12-C)
-//   border     #4A3714 α0.60 — hairline ÂMBAR (o RGB do accentDim — o
-//              sub-tom quente da aresta do cristal; era o grafite #2E2E32)
+//   border     #24242A α1.00 — a borda dos INATIVOS (0.12-QoL A: o dono
+//              manda o cinza escuro; o âmbar fica APENAS no ativo/selecionado
+//              — a aresta âmbar da 0.11-Y/0.12-C morre com o feedback Redbr1)
 //   glassEdge  #FFFFFF α0.12 — o BORDO do vidro (0x1F — luz na aresta)
 //   glassTop   #FFFFFF α0.04 — highlight do TOPO do vidro (0x0A)
 //   accent2    #FF6B00 α1.00 — O FOGO (novo 0.11-Y): a base do gradiente
@@ -100,8 +102,12 @@ struct Theme {
     f32 elevated[4];   // #24242A α1.00 (os menus/sheets/toast — o nível
                        //  mais alto da escada)
     // traço
-    f32 border[4];     // #4A3714 α0.60 (hairline ÂMBAR — o RGB do accentDim;
-                       //  a aresta quente do cristal, 0.11-Y)
+    f32 border[4];     // #24242A α1.00 (0.12-QoL A — A ORDEM DO DONO: as
+                       //  bordas dos painéis/chips/campos INATIVOS são o
+                       //  CINZA ESCURO do ELEVADO; o âmbar fica APENAS
+                       //  para o ativo/selecionado. Supera a hairline
+                       //  ÂMBAR #4A3714 α0.60 da 0.11-Y/0.12-C — a aresta
+                       //  quente do cristal morre com o feedback Redbr1)
     f32 glassEdge[4];  // #FFFFFF α0.12 (0x1F — a aresta de luz do vidro)
     f32 glassTop[4];   // #FFFFFF α0.04 (0x0A — o highlight do topo)
     // texto
@@ -178,6 +184,8 @@ struct Theme {
 #define VV_RGB(r, g, b) VV_RGBA(r, g, b, 1.0f)
 
 // 08080A=(8,8,10) · 151517=(21,21,23) · 1E1E21=(30,30,33) · 4A3714=(74,55,20)
+// 0.12-QoL A: 24242A=(36,36,42) — o border INATIVO (o âmbar #4A3714 só
+// sobrevive no accentDim, o fill da SELEÇÃO)
 // ECECEE=(236,236,238) · A6A6AD=(166,166,173) · FFB020=(255,176,32)
 // FF6B00=(255,107,0) · FF3D00=(255,61,0) · E09A00=(224,154,0)
 // E5484D=(229,72,77)
@@ -194,7 +202,8 @@ inline constexpr Theme kTheme{
     VV_RGBA(30, 30, 33, 0.86f),  // surface2   α0.86 — vidro denso
     VV_RGB(27, 27, 32),          // card       (O CARTÃO #1B1B20 — 0.12-C)
     VV_RGB(36, 36, 42),          // elevated   (O ELEVADO #24242A — 0.12-C)
-    VV_RGBA(74, 55, 20, 0.60f),  // border     α0.60 — hairline ÂMBAR (0.11-Y)
+    VV_RGB(36, 36, 42),          // border     (#24242A — 0.12-QoL A: as
+                                 //  bordas INATIVAS cinza; o âmbar só no ativo)
     VV_RGBA(255, 255, 255, 31.0f / 255.0f),   // glassEdge (#FFFFFF1F)
     VV_RGBA(255, 255, 255, 10.0f / 255.0f),   // glassTop  (#FFFFFF0A)
     VV_RGB(242, 242, 245),       // text1      (#F2F2F5 — a paleta 0.12-E)

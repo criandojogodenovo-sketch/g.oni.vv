@@ -291,16 +291,17 @@ TEST(theme_tabela_spec_g_exata) {
     EXPECT(nearEqF(theme::kTheme.bg[0], 10.0f / 255.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.surface[0], 20.0f / 255.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.surface2[1], 30.0f / 255.0f, 1e-4f));
-    // a hairline ÂMBAR (0.11-Y): o RGB É o do accentDim (#4A3714 — o sub-
-    // tom quente da aresta do cristal) com α0.60
-    EXPECT(nearEqF(theme::kTheme.border[0], 74.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.border[1], 55.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.border[2], 20.0f / 255.0f, 1e-4f));
-    // O VIDRO (spec G): surface α0.80 (A DECISÃO DO DONO) · surface2 α0.86
-    // · border α0.60 (0.11-Y) · bg opaco
+    // a BORDA dos INATIVOS (0.12-QoL A — a ordem do dono · Redbr1): o
+    // CINZA ESCURO #24242A (o RGB do ELEVADO); o âmbar #4A3714 só sobrevive
+    // no accentDim (o fill da SELEÇÃO). Era a hairline ÂMBAR α0.60 da 0.11-Y.
+    EXPECT(nearEqF(theme::kTheme.border[0], 36.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.border[1], 36.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.border[2], 42.0f / 255.0f, 1e-4f));
+    // O VIDRO (spec G): surface α0.85 (A DECISÃO DO DONO) · surface2 α0.86
+    // · border opaco (0.12-QoL A — a borda deixa de ser vidro) · bg opaco
     EXPECT(nearEqF(theme::kTheme.surface[3], 0.85f, 1e-4f));   // FASE 3
     EXPECT(nearEqF(theme::kTheme.surface2[3], 0.86f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.border[3], 0.60f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.border[3], 1.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.bg[3], 1.0f, 1e-4f));
     // 0.11-Y (Y-1) — os DOIS TOKENS NOVOS da chama: accent2 #FF6B00
     // (O FOGO — a base do gradiente dos ativos; quente: R>G>B=0) e glow

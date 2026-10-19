@@ -30,14 +30,14 @@ namespace {
 // 0.9.6.1 (PASSO 0 · R-018): os valores são DP e multiplicam pela densidade
 // AQUI (na fonte do layout da barra) — antes eram px crus: no C33 os alvos
 // media ~24dp reais e o "Cena" truncava a "C…"
-// 0.9.6.10 (GRUPO UI · região TOPO da imagem 1): o LOGO (G âmbar) e
-// o NOME "G.One" à EXTREMA esquerda; o STOP (■) ao lado do play/pause;
+// 0.9.6.10 (GRUPO UI · região TOPO da imagem 1): o LOGO (G âmbar) à
+// EXTREMA esquerda (o TEXTO do nome da marca SAIU — 0.12-QoL A, a ordem
+// do dono: fica APENAS o ícone); o STOP (■) ao lado do play/pause;
 // o CHIP de plataforma antes do gear (o alvo REAL: Android)
 f32 kPadOuter()  { return theme::dp(12.0f); }   // margem da barra aos extremos
 f32 kBtnH()      { return theme::dp(safe::kTopBarH); }  // alvo = a linha toda
 f32 kChipH()     { return theme::dp(28.0f); }  // o DESENHO do botão (na barra 36)
 f32 kLogoW()     { return theme::dp(40.0f); }  // o G âmbar (alvo inteiro)
-f32 kNameW()     { return theme::dp(48.0f); }  // "G.One" 14sp
 f32 kMenuW()     { return theme::dp(84.0f); }  // [≡ Menu]  (ícone + palavra)
 f32 kCenaW()     { return theme::dp(92.0f); }  // [Cena ▾] — largura para
                                                 // o rótulo inteiro
@@ -168,13 +168,13 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
     // escala graciosa: as larguras naturais encolhem PROPORCIONALMENTE se
     // o ecrã for estreito. Os botões de ÍCONE (play/pause/stop/gear + o
     // LOGO) NUNCA ENCOLHEM (o alvo 40dp é o PISO); o k divide
-    // só Menu/Cena/tabs/nome/plataforma. A DEGRADAÇÃO HONESTA (GRUPO UI):
-    // o NOME "G.One" some primeiro (k<0.78 — o logo fica, é a
-    // identidade), o CHIP da plataforma depois (k<0.62 — é informativo,
-    // o alvo REAL é sempre Android; fica na lista honesta do relatório).
+    // só Menu/Cena/tabs/plataforma. A DEGRADAÇÃO HONESTA (GRUPO UI,
+    // recalibrada 0.12-QoL A: o NOME da marca JÁ NÃO EXISTE — o primeiro a
+    // sair é o CHIP da plataforma (k<0.62 — é informativo, o alvo REAL é
+    // sempre Android; fica na lista honesta do relatório).
     const f32 nIcon = 5;   // play/pause/stop/gear + logo
     f32 natFlex = kMenuW() + theme::dp(4.0f) + kCenaW() + 3.0f * kTabW() +
-                  kPlatW() + kNameW();
+                  kPlatW();
     const f32 natW = natFlex + nIcon * kIconBtn() + 2.0f * theme::dp(8.0f);
     auto scaleK = [&](f32 flexW) {
         const f32 iconsW = nIcon * kIconBtn();
@@ -187,12 +187,7 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
     if (natW + 4.0f * kGroupGap() > avail) {
         k = scaleK(natFlex);
     }
-    L.showName = k >= 0.78f;
     L.showPlatform = k >= 0.62f;
-    if (!L.showName) {
-        natFlex -= kNameW();
-        k = scaleK(natFlex);
-    }
     if (!L.showPlatform) {
         natFlex -= kPlatW();
         k = scaleK(natFlex);
@@ -201,7 +196,6 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
     L.cena.w  = kCenaW() * k;
     L.tab3d.w = L.tabUi.w = L.tabAudio.w = kTabW() * k;
     L.platform.w = kPlatW() * k;
-    L.name.w  = kNameW();
     L.logo.w  = kIconBtn();
     // os botões de ÍCONE nunca encolhem (o piso 40dp da casa)
     L.play.w = L.pause.w = L.stop.w = L.gear.w = kIconBtn();
@@ -214,12 +208,9 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
         r.h = kBtnH();
     };
 
-    // ---- esquerda: [G][G.One][≡ Menu][Cena ▾] ----
+    // ---- esquerda: [G][≡ Menu][Cena ▾] ----
     f32 x = L.bar.x + kPadOuter();
     place(L.logo, x);            x += L.logo.w;
-    if (L.showName) {
-        place(L.name, x);        x += L.name.w;
-    }
     place(L.menu, x);            x += L.menu.w;
     place(L.cena, x + theme::dp(4.0f));     x += theme::dp(4.0f) + L.cena.w;
 
@@ -291,18 +282,13 @@ TopBarActions drawTopBar(UiContext& ui, EditorState& st) {
     // teve). O slot é a versão PEQUENA das 3 do dono (a grande é a splash
     // da D-6; a média é o launcher da Y-0) — 24dp, ignite=1 (o editor vive).
     // O toque continua a não fazer nada (é a marca, não um botão).
+    // 0.12-QoL A (a ordem do dono): o TEXTO do nome ao lado SAIU — a barra
+    // respira e a identidade é o GLIFO sozinho (o mesmo padrão da splash).
     {
         const UiRect& r = L.logo;
         const f32 gs = theme::dp(24.0f);
         editor::brand::drawLogo(ui, r.x + (r.w - gs) * 0.5f,
                                 r.y + (r.h - gs) * 0.5f, gs, 1.0f);
-        if (L.showName && ui.hasFont()) {
-            // o NOME ao lado do glifo (14sp text1 — some no aperto)
-            const TextMetrics m = ui.textMetrics();
-            ui.label(L.name.x + theme::dp(6.0f),
-                     L.name.y + (L.name.h - m.block()) * 0.5f + m.ascent,
-                     "G.One", theme::kTheme.text1);
-        }
     }
 
     if (textIconButton(ui, kTbMenuId, L.menu, icons::Icon::Hamburger, "Menu",

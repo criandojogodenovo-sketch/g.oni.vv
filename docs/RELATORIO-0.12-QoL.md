@@ -1,0 +1,144 @@
+# RELATORIO-0.12-QoL — UI Polish, Navegador de Ficheiros e Auto-Save
+
+A campanha 0.12-QoL (a ordem do dono): refinamento de UI 2.5D e
+persistência, com a CLÁUSULA CALMA — sem quebrar lógica de motor (o
+V.ONI, a física, o .goni/.gmesh byte a byte e os TICs ficam intactos).
+
+Cada sub-fase fecha com commit + push próprios, o STATE.md no MESMO
+commit (regra §6) e CI verde. Este relatório cresce por secções: o A no
+§1, o B no §2, o C no §3, o D no §4.
+
+## §0 A abertura (as verificações que bloqueiam tudo)
+
+1. **vc 101 ou superior?** SIM — o STATE.md declara vc 101 e o
+   `app/build.gradle` tinha `versionCode 101` (a 0.12-X fechou o par).
+2. **Os gates verdes?** SIM — o run do CI do commit `69382a6` (o fecho
+   da 0.12-X) acabou em **success** nos 5 jobs (core ✓ c33 ✓
+   entry-symbols ✓ APK assinado ✓ keystore skip esperado).
+3. **O STATE.md tem a 0.12-X como fechada?** SIM — o §1 declara
+   «Campanha 0.12-X (CÂMARA DE TERCEIRA PESSOA) — FECHADA (3.9x, vc
+   101)».
+
+Leitura obrigatória feita antes de codar: STATE.md, CODEMAP.md,
+ui/Theme.h, ui/EditorUi.cpp, ui/Toolbar.cpp, ui/SettingsPage.cpp (mais
+os contratos que as sub-fases tocam: ui/Icons.h, ui/EditorLayout.h,
+ui/ViewportChrome.cpp/h, ui/CamGizmo.h/.cpp, render/Grid.h/.cpp,
+core/Project.h, core/ProjectStorage.h, tests/test_012c_*.cpp,
+tests/test_sentinels.cpp, tests/c33_virtual.cpp, ci/scope.txt).
+
+Decisão de compat registada já na abertura: o QoL-B manda ocultar
+FICHEIROS que começam por ponto — a decisão 0.8.5/0.12-C (os ficheiros
+ponto ficam) é SUPERADA pela ordem expressa do dono neste prompt; a
+entrada do §4 do STATE.md atualiza-se no commit do B.
+
+## §1 A — Limpeza Visual da UI (o feedback do Redbr1)
+
+**O que mudou** (vc 102):
+
+1. **Top bar sem o texto do nome.** O slot `name` e o flag `showName`
+   MORRERAM do `TopBarLayout` (ui/Toolbar.h — o padrão D21: sem
+   chamadores, sem fantasmas). O `topbarLayout` já não reserva os 48dp
+   do nome (o degrau k<0.78 da degradação morreu — o CHIP da plataforma
+   passou a ser o primeiro a sair, k<0.62) e o `drawTopBar` desenha
+   APENAS o «G em chama» 24dp (o glifo da D-4 segue vivo — é a
+   identidade). A barra respira: o Menu começa onde o logo acaba.
+2. **A pesquisa da hierarquia recolhida numa LUPA.** A barra «pesquisar
+   TIC» (o campo 32dp sempre visível) vive RECOLHIDA num chip 32×32 com
+   o ícone de lupa, à direita da linha (a coluna das ações do
+   cabeçalho). O toque EXPANDE para o campo de texto (e abre o teclado,
+   propósito 8 — o mesmo de sempre); com texto o campo mantém-se aberto;
+   o × (28dp, dentro do campo à direita, id 5503) limpa e RECOLHE. O
+   estado novo `EditorState::hierSearchOpen` (ui/EditorUi.h) guarda a
+   expansão; a altura da linha (kSearchRowH) fica IGUAL — a geometria da
+   lista não muda.
+3. **As bordas dos inativos em cinza #24242A.** O token `border` do
+   Theme.h deixa de ser a hairline ÂMBAR #4A3714 α0.60 (a aresta do
+   cristal da 0.11-Y/0.12-C) e passa a **#24242A α1.00** — o cinza
+   escuro do ELEVADO, o RGB que o dono pediu. A mudança de UM token
+   arrasta: o alias `LINE` do UiContext.h (ligado por static_assert), o
+   divisor ENTRE PAINÉIS (`dividerGradientV` — a cor cai do border ao
+   invés do accentDim, o gradiente α0.90→0.15 mantém-se) e TODAS as
+   molduras `frameRounded` de chips/campos/panéis inativos (o [+] e o ⋮
+   do cabeçalho, os campos X/Y/Z, o campo de pesquisa, o chip de
+   plataforma, o card do NAVEGADOR, o diálogo APLICAR, o painel da
+   Timeline, os menus CLIPS/NOVO TRACK/SETTINGS/PRIMITIVA, o botão JUMP).
+   O ÂMBAR fica APENAS para o ativo/selecionado: o gradiente fogo dos
+   botões ativos, o underline da tab, o fill accentDim da seleção, o
+   gravador de áudio ativo, o waveform do clip SELECIONADO, a moldura do
+   device no Play (pinada pela B-3), o glow de foco.
+4. **Ar no Inspector.** Os vãos ENTRE os campos X/Y/Z e antes do Reset
+   sobem 8→12dp (`kTfGapBox`/`kTfGapReset`); a margem mínima da linha
+   (o regime do padding cedido) sobe 4→8dp (`kTfRowPadMin` — o Reset
+   NUNCA cola à borda do ecrã); a folga vertical de cada linha Transform
+   sobe 4→8dp (`inspTransformRowH` 64→68 — mais ar entre as linhas e os
+   botões). O preço fechado com o dono em vista: o piso do valor 26→22dp
+   (`kTfValueMinDp` — «-12»/«45»/«1.2e» continuam a ler-se) e a escada
+   R1 ganha o passo (c) letra→padding→LETRA→nunca o valor (a coexistência
+   letra+valor começa a 216dp de painel, era 212).
+5. **O X no menu de cenas.** O botão «Nova cena» encolhe 4dp à direita e
+   o **X de fechar** (48×48, o alvo da casa, id 6799) fica bem visível
+   ao lado — fechar deixa de exigir acertar no véu lá fora. O toque no
+   X devolve −1 (fecha SEM ação; o main trata −1/0 como «nada»), o arm
+   do apagar morre com o menu como sempre.
+
+**Pins** (tests/test_012qol.cpp NOVO, registado no tests/CMakeLists.txt):
+`qol_a_topbar_so_logo` (o Menu encosta ao logo + o chip é o primeiro a
+ceder + a FONTE sem o literal do nome), `qol_a_lupa_expande` (o chip
+32×32 na coluna das ações + o toque expande com propósito 8 + o × limpa
+e recolhe), `qol_a_border_cinza` (o token #24242A == o ELEVADO, o
+accentDim intacto, o divisor lê o border), `qol_a_inspector_ar` (os vãos
+12dp MEDIDOS nos quads desenhados + a linha+reset cabe com margem + a
+FONTE com os kTfGap*/RowPadMin), `qol_a_cenas_x_fecha` (o X 48×48 à
+direita do Nova cena, sem sobrepor + o toque fecha com retorno −1).
+
+**Mutações** (Policy #5 — vermelho → repor → verde):
+
+- **M-QoLa1** (o texto do nome de volta no `drawTopBar`):
+  ```
+  qol_a_topbar_so_logo                           ...  FALHOU  tests/test_012qol.cpp:137  countSub(src, "\"G.One\"") == 0
+  qol_a_topbar_so_logo                           FALHOU
+  (reposto → qol_a_topbar_so_logo OK)
+  ```
+- **M-QoLa2** (o border de volta ao âmbar — no PAR que a fonte única
+  manda: Theme.h + o alias LINE do UiContext.h): a 1.ª tentativa (só o
+  Theme.h) morreu no BUILD — o `static_assert` do UiContext.h («LINE
+  desincronizado de Theme.h — fonte única violada») apanhou-a ANTES do
+  teste, a defesa a funcionar. Com o par mutado:
+  ```
+  qol_a_border_cinza                             ...  FALHOU  tests/test_012qol.cpp:235  nearEq(theme::kTheme.border[0], 36.0f / 255.0f)
+  y3_cristal_divisores                           ...  FALHOU  tests/test_fase_y3_cristal.cpp:226  y3_divisores: a linha em repouso do drawPanelDividers tem de ser o GRADIENTE (a0.90 -> a0.15) — a sólida do D11 voltou?
+  regress_identidade_grafite_ambar               ...  FALHOU  tests/test_sentinels.cpp:3752  nearEqF(theme::kTheme.border[0], 36.0f / 255.0f, 1e-4f)
+  (reposto → os três VERDES)
+  ```
+
+**Recalibrações com nota** (todas pela mesma ordem do dono — mais
+espaçamento e o cinza dos inativos; o precedente da casa: as 8 da
+0.12-B, as 6 da 0.12-C, as 6 da 0.12-E):
+
+1. `test_012c_chrome.cpp` (e) — o degrau do NOME morreu: o pin passa a
+   exigir `!showPlatform` no ecrã apertado.
+2. `test_fase_y1_tema.cpp` — o border é #24242A (a igualdade com o
+   accentDim morreu); a FONTE: `VV_RGB(36, 36, 42)` ×2 (elevado+border),
+   o âmbar `VV_RGBA(74, 55, 20, 0.60f)` ×0.
+3. `test_012c_idioma.cpp` — superficies_4_tons: o border cinza.
+4. `test_fase_y3_cristal.cpp` — os 3 pins do divisor medem o gradiente
+   do BORDER (36/36/42 α0.90→0.15; era o âmbar 74/55/20).
+5. `test_toolbar.cpp` — theme_tabela_spec_g_exata: border #24242A α1.
+6. `test_sentinels.cpp` regress_identidade_grafite_ambar — o border
+   voltou à rampa neutra (R==G, B−R=6 ≤ 25 — o zero-azul segue verde).
+7. `test_sentinels.cpp` regress_hotfix_defeitos (D2+R1+m3) — os números
+   do orçamento com os vãos 12: a 164 úteis caixas 36 exato (letra fora,
+   padding intacto, valor 24 ≥ piso 22); a 208 o reset é ÍCONE com letra
+   (boxW 50.7); o piso do CHIP com letra+valor fica a 220 úteis; o largo
+   a 260 dá boxW 61.3; o cheio do padding dropado passa a útil+16; o m3
+   recalibra a limiar da letra para 184 úteis (216dp de painel).
+8. `test_safearea.cpp` + `test_scroll.cpp` — as alturas de conteúdo
+   +12dp (3 linhas Transform 64→68): 1234→1246, 1228→1240, a mesh desce
+   320→332. E o `c33_virtual.cpp` (16.4/m3) recalibra a limiar para 216dp
+   — o device virtual fecha 1010/0.
+
+**Verificação**: test_core 1178 OK, 0 falhas com o bench r039 saltado
+(`GONI_SKIP` — o flake de disco/RAM conhecido do sandbox; no CI corre
+inteiro) · c33_virtual **1010/0** · docs-lint VERDE · os pins ×5 novos
+verdes · as mutações vermelho→reposto→verde. **versionCode 102** — o
+build vigente da campanha 0.12-QoL. O 101 fica INTACTO como história.

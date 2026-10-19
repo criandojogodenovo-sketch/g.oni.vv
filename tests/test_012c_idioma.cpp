@@ -254,13 +254,11 @@ TEST(superficies_4_tons) {
     EXPECT(!(theme::kTheme.bg[0] == theme::kTheme.card[0] &&
              theme::kTheme.bg[1] == theme::kTheme.card[1] &&
              theme::kTheme.bg[2] == theme::kTheme.card[2]));
-    // (c) a borda âmbar subtil entre painéis (a hairline da Y-1 — o RGB é
-    // o do accentDim, o sub-tom quente da aresta)
-    EXPECT(nearColor(theme::kTheme.border, 74.0f / 255.0f, 55.0f / 255.0f,
-                     20.0f / 255.0f, 0.60f));
-    EXPECT(theme::kTheme.border[0] == theme::kTheme.accentDim[0] &&
-           theme::kTheme.border[1] == theme::kTheme.accentDim[1] &&
-           theme::kTheme.border[2] == theme::kTheme.accentDim[2]);
+    // (c) a borda dos INATIVOS entre painéis (0.12-QoL A — a ordem do
+    // dono · Redbr1): o CINZA #24242A; o âmbar subtil da Y-1 morre (o
+    // accentDim intacto como o fill da SELEÇÃO)
+    EXPECT(nearColor(theme::kTheme.border, 36.0f / 255.0f, 36.0f / 255.0f,
+                     42.0f / 255.0f, 1.0f));
     // (d) a FONTE leva os hexes exatos (o artefato pinado)
     std::string src;
     ASSERT(readFile(repoRoot() + "/app/src/main/cpp/ui/Theme.h", src));

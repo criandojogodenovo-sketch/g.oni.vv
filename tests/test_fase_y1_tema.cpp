@@ -98,12 +98,11 @@ TEST(y1_tokens) {
              theme::kTheme.card[0] == theme::kTheme.elevated[0]));
     EXPECT(nearColor(theme::kTheme.surface2, 30.0f / 255.0f, 30.0f / 255.0f,
                      33.0f / 255.0f, 0.86f));
-    // a hairline ÂMBAR: o RGB É o do accentDim (o contrato do sub-tom)
-    EXPECT(nearColor(theme::kTheme.border, 74.0f / 255.0f, 55.0f / 255.0f,
-                     20.0f / 255.0f, 0.60f));
-    EXPECT(theme::kTheme.border[0] == theme::kTheme.accentDim[0] &&
-           theme::kTheme.border[1] == theme::kTheme.accentDim[1] &&
-           theme::kTheme.border[2] == theme::kTheme.accentDim[2]);
+    // a BORDA dos INATIVOS (0.12-QoL A): o cinza #24242A — o âmbar só no
+    // ativo/selecionado (a ordem do dono; o contrato do sub-tom accentDim
+    // morre — o accentDim fica como o fill da SELEÇÃO, intacto)
+    EXPECT(nearColor(theme::kTheme.border, 36.0f / 255.0f, 36.0f / 255.0f,
+                     42.0f / 255.0f, 1.0f));
     // os INTACTOS
     EXPECT(nearColor(theme::kTheme.accent, 1.0f, 176.0f / 255.0f,
                      32.0f / 255.0f, 1.0f));
@@ -129,7 +128,10 @@ TEST(y1_tokens) {
     // 0.12-E E-2: o painel é o #141416 da paleta do dono (era #131316)
     EXPECT(countSub(src, "VV_RGBA(20, 20, 22, 0.85f)") == 1);
     EXPECT(countSub(src, "VV_RGBA(30, 30, 33, 0.86f)") == 1);
-    EXPECT(countSub(src, "VV_RGBA(74, 55, 20, 0.60f)") == 1);
+    // 0.12-QoL A: o border é o #24242A (o âmbar VV_RGBA(74,55,20,0.60)
+    // MORREU — o accentDim continua com o RGB dele, mas opaco)
+    EXPECT(countSub(src, "VV_RGB(36, 36, 42)") == 2);   // elevated + border
+    EXPECT(countSub(src, "VV_RGBA(74, 55, 20, 0.60f)") == 0);
     EXPECT(countSub(src, "VV_RGB(255, 107, 0)") == 1);
     EXPECT(countSub(src, "VV_RGBA(255, 61, 0, 0.25f)") == 1);
     // os valores VELHOS da tabela morrem (o accentInk é o ÚNICO

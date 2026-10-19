@@ -3744,12 +3744,15 @@ TEST(regress_identidade_grafite_ambar) {
             EXPECT(dRG <= 2.0f);            // R==G (zero croma quente)
             EXPECT(dB >= -1.0f && dB <= 8.0f);   // o tinge grafite (frio, leve — o text2 #A6A6AD tem 7)
         }
-        // 0.11-Y: a BORDA saiu da rampa neutra — É O ÂMBAR da aresta do
-        // cristal: o RGB É o do accentDim (o contrato do sub-tom quente)
-        EXPECT(theme::kTheme.border[0] == theme::kTheme.accentDim[0]);
-        EXPECT(theme::kTheme.border[1] == theme::kTheme.accentDim[1]);
-        EXPECT(theme::kTheme.border[2] == theme::kTheme.accentDim[2]);
-        EXPECT(nearEqF(theme::kTheme.border[3], 0.60f, 1e-4f));
+        // 0.12-QoL A (recalibrado com nota — a ordem do dono · Redbr1): a
+        // BORDA voltou à rampa neutra (#24242A = o RGB do ELEVADO, R==G,
+        // tinge frio leve); o ÂMBAR da aresta da 0.11-Y morre — o laranja
+        // fica APENAS para o ativo/selecionado. O accentDim mantém o RGB
+        // quente como o fill da SELEÇÃO.
+        EXPECT(nearEqF(theme::kTheme.border[0], 36.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.border[1], 36.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.border[2], 42.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.border[3], 1.0f, 1e-4f));
         // ZERO AZUL no chrome: nenhum token de chrome com B dominante
         // (o azul #2196F3 da spec A e o navy da 0.9.0 morreram) — a BORDA
         // continua no chrome (agora âmbar: R dominante, B morre à mesma)
@@ -3812,7 +3815,7 @@ TEST(regress_identidade_grafite_ambar) {
     {
         EXPECT(nearEqF(theme::kTheme.surface[3], 0.85f, 1e-4f));   // FASE 3   // vidro
         EXPECT(nearEqF(theme::kTheme.surface2[3], 0.86f, 1e-4f));  // denso
-        EXPECT(nearEqF(theme::kTheme.border[3], 0.60f, 1e-4f));    // hairline ÂMBAR (0.11-Y)
+        EXPECT(nearEqF(theme::kTheme.border[3], 1.0f, 1e-4f));     // borda INATIVA opaca (0.12-QoL A; era a hairline âmbar α0.60)
         EXPECT(nearEqF(theme::kTheme.bg[3], 1.0f, 1e-4f));         // opaco
         // o bordo/highlight do vidro (a spec G: #FFFFFF1F / #FFFFFF0A)
         EXPECT(nearEqF(theme::kTheme.glassEdge[3], 31.0f / 255.0f, 1e-4f));
@@ -4849,40 +4852,51 @@ TEST(regress_hotfix_defeitos) {
     editor::applyDensity();
 
     // ---- (1) D2: o ORÇAMENTO da linha Transform (o campo Z cortado) ----
+    // 0.12-QoL A (recalibrado com nota — a ordem do dono · Redbr1): os
+    // vãos 8→12dp e a margem mínima 4→8dp; o piso do valor 26→22. A 164
+    // úteis: a letra sai (a), o padding NÃO cede (o valor 24 ≥ 22) e as
+    // caixas ficam a 36 (3×36+2×12+12+20 = 164 exato)
     {
-        // o PISO do painel da casa: 180dp → 164dp úteis → caixas 40 EXATO
-        // e o reset ÍCONE inline (a spec do dono); a linha inteira cabe
+        // o PISO do painel da casa: 180dp → 164dp úteis → caixas 36 e o
+        // reset ÍCONE inline (a spec do dono); a linha inteira cabe
         const editor::TransformBudget b164 = editor::transformRowBudget(164.0f);
-        EXPECT(nearEqF(b164.boxW, 40.0f, 0.01f));
+        EXPECT(nearEqF(b164.boxW, 36.0f, 0.01f));
         EXPECT(b164.resetIcon && nearEqF(b164.resetW, 20.0f, 0.01f));
-        const f32 total164 = 3.0f * b164.boxW + 2.0f * 8.0f + 8.0f + b164.resetW;
+        EXPECT(!b164.rowPadDropped);   // o valor 24 ≥ piso 22 — sem ceder
+        const f32 total164 = 3.0f * b164.boxW + 2.0f * 12.0f + 12.0f + b164.resetW;
         EXPECT(total164 <= 164.0f + 0.01f);   // NADA fora do rect
-        // o PISO 48 com o chip: usable = 3×48+2×8+8+40 = 208dp exato.
-        // 0.9.6.19b (m3): a 208 úteis (≥ limiar 168) a LETRA É OBRIGATÓRIA —
-        // como 48−12−14 = 22dp < piso 26, o PADDING DA LINHA cede (as caixas
-        // usam a largura toda) e a caixa re-computa a 56: letra + valor
-        // coexistem (o regime antigo boxW 48 com a letra a saltar morreu)
+        // o largo (a 208 úteis): o reset vira ÍCONE (o chip 40 já não cabe
+        // com os vãos 12 — o chip volta a 220 úteis) e a letra FICA (o
+        // valor 50.7−26 = 24.7 ≥ piso 22)
         const editor::TransformBudget b208 = editor::transformRowBudget(208.0f);
-        EXPECT_MSG(nearEqF(b208.boxW, 56.0f, 0.01f) && !b208.resetIcon &&
-                       nearEqF(b208.resetW, 40.0f, 0.01f) && b208.axisLabels &&
-                       b208.rowPadDropped,
-                   "D2+m3: a 208 úteis o regime é letra obrigatória + "
-                   "padding cedido (boxW %.1f)",
+        EXPECT_MSG(nearEqF(b208.boxW, 50.7f, 0.1f) && b208.resetIcon &&
+                       nearEqF(b208.resetW, 20.0f, 0.01f) && b208.axisLabels &&
+                       !b208.rowPadDropped,
+                   "D2+QoL A: a 208 úteis o reset é ícone e a letra fica "
+                   "(boxW %.1f)",
                    (double)b208.boxW);
-        // o largo (≥256dp úteis): caixas 64 + chip 40 (letra + valor cabem
-        // SEM ceder o padding — o valor fica com 34dp ≥ piso)
+        // o CHIP volta a 220 úteis (3×48+2×12+12+40 = 220 exato — o piso 48
+        // do chip com os vãos 12 da QoL A)
+        const editor::TransformBudget b220 = editor::transformRowBudget(220.0f);
+        EXPECT_MSG(nearEqF(b220.boxW, 48.0f, 0.01f) && !b220.resetIcon &&
+                       b220.axisLabels && !b220.rowPadDropped,
+                   "D2+QoL A: a 220 úteis o piso do chip é 48 com letra "
+                   "(boxW %.1f)",
+                   (double)b220.boxW);
+        // o largo (≥268dp úteis): caixas 64 + chip 40 — a 260 o orçamento
+        // encolhe para 61.3 (letra + valor cabem SEM ceder o padding)
         const editor::TransformBudget b260 = editor::transformRowBudget(260.0f);
-        EXPECT(nearEqF(b260.boxW, 64.0f, 0.01f) && !b260.resetIcon);
+        EXPECT(nearEqF(b260.boxW, 61.3f, 0.1f) && !b260.resetIcon);
         // INVARIANTE: em QUALQUER largura que a casa produz (o piso do
         // painel 180dp → 164dp úteis; abaixo disso a scissor do painel é
         // a última defesa, documentada) a linha inteira nunca passa do
-        // útil — com o padding dropado a linha usa o CHEIO (útil + 24;
-        // a regra m3/R1 do dono)
+        // útil — com o padding dropado a linha usa o CHEIO (útil + 16;
+        // a regra m3/R1 do dono com a margem mínima 8dp da QoL A)
         for (f32 u = 164.0f; u <= 320.0f; u += 4.0f) {
             const editor::TransformBudget b = editor::transformRowBudget(u);
             const f32 total =
-                3.0f * b.boxW + 2.0f * 8.0f + 8.0f + b.resetW;
-            const f32 util = u + (b.rowPadDropped ? 24.0f : 0.0f);
+                3.0f * b.boxW + 2.0f * 12.0f + 12.0f + b.resetW;
+            const f32 util = u + (b.rowPadDropped ? 16.0f : 0.0f);
             EXPECT_MSG(total <= util + 0.01f,
                        "D2: a linha transform transborda (%.1f > %.1f)",
                        (double)total, (double)util);
@@ -5019,13 +5033,14 @@ TEST(regress_hotfix_defeitos) {
             }
             const f32 wq = mxX - mnX, hq = mxY - mnY;
             if (wq <= 1.5f && hq > 32.0f &&
-                test::nearEqF(v[0].r, 74.0f / 255.0f, 1e-3f) &&
+                test::nearEqF(v[0].r, 36.0f / 255.0f, 1e-3f) &&
                 test::nearEqF(v[0].a, 0.90f, 1e-3f) &&
                 test::nearEqF(v[1].a, 0.15f, 1e-3f)) {
                 linha1dp = true;   // o quad do gradiente É o divisor
             }
         }
-        EXPECT(linha1dp);   // o divisor de cristal (o gradiente) existe
+        EXPECT(linha1dp);   // o divisor de cristal (o gradiente; 0.12-QoL A:
+                            // a cor é o BORDER #24242A — era o âmbar)
     }
 
     // ---- (9) D3: o empty-state NO RECT MINÚSCULO (a trava do fundo) -----
@@ -5099,13 +5114,14 @@ TEST(regress_hotfix_defeitos) {
                        c.nome, (double)editor::transformValueSpace(b),
                        (double)editor::kTfValueMinDp);
             // a ORDEM do dono: a letra só sai DEPOIS de esgotada a caixa
-            // inteira; e a linha INTEIRA continua dentro do útil — D21 nota:
-            // com o PADDING DROPADO a linha usa o cheio (útil + 24)
-            const f32 rowPad = b.rowPadDropped ? 4.0f : 16.0f;
-            const f32 total = 3.0f * b.boxW + 2.0f * 8.0f + 8.0f + b.resetW +
+            // inteira; e a linha INTEIRA continua dentro do útil — QoL A:
+            // com o PADDING DROPADO a linha usa o cheio (útil + 16 — a
+            // margem mínima 8dp de cada lado)
+            const f32 rowPad = b.rowPadDropped ? 8.0f : 16.0f;
+            const f32 total = 3.0f * b.boxW + 2.0f * 12.0f + 12.0f + b.resetW +
                               2.0f * (16.0f - rowPad);
             const f32 utilEfetivo =
-                c.util + (b.rowPadDropped ? 24.0f : 0.0f);
+                c.util + (b.rowPadDropped ? 16.0f : 0.0f);
             EXPECT_MSG(total <= utilEfetivo + 0.01f,
                        "R1 %s: a linha transborda (%.1f > %.1f)",
                        c.nome, (double)total, (double)utilEfetivo);
@@ -5127,42 +5143,46 @@ TEST(regress_hotfix_defeitos) {
                        (double)(editor::transformValueSpace(b) *
                                 theme::dp(1.0f)));
         }
-        // a 180dp (164 úteis) a LETRA sai (o 1.º a ceder — a ordem do dono)
+        // a 180dp (164 úteis) a LETRA sai (o 1.º a ceder — a ordem do dono);
+        // o valor fica com 24dp (o piso 22 da QoL A)
         const editor::TransformBudget b164 = editor::transformRowBudget(164.0f);
         EXPECT(!b164.axisLabels);   // o valor ficou com a caixa inteira
-        EXPECT(nearEqF(editor::transformValueSpace(b164), 28.0f, 0.01f));
+        EXPECT(nearEqF(editor::transformValueSpace(b164), 24.0f, 0.01f));
         // a 260dp (244 úteis) a letra FICA (cabe letra + valor)
         const editor::TransformBudget b244 = editor::transformRowBudget(244.0f);
         EXPECT(b244.axisLabels);
         // MUTAÇÃO M-R1 (a fórmula antiga): maxVw = boxW−28 a 164 úteis dá
         // 40−28 = 12dp < kTfValueMinDp — vermelho (o pin acima apanha-a)
 
-        // ---- 0.9.6.19b (m3): A LIMIAR DA LETRA (o dono: «a letra só sai
-        // abaixo de ~200dp de painel; entre 200 e 260 letra+valor coexistem;
-        // o valor nunca sai»). A convenção do draw: útil = painel − 2×kPad
-        // → o limiar kTfAxisMinUsableDp = 168 úteis = ~200dp de painel.
+        // ---- 0.9.6.19b (m3) recalibrado 0.12-QoL A: A LIMIAR DA LETRA ----
+        // O dono: «a letra só sai abaixo de ~200dp de painel; entre 200 e
+        // 260 letra+valor coexistem; o valor nunca sai.» Com os vãos 12dp
+        // da QoL A o espaço que a letra usava aumenta 8dp: a coexistência
+        // começa a 216dp de painel (184 úteis — o passo (c) da R1 dropa a
+        // letra DEPOIS do padding, sempre com o valor ≥ piso). A convenção
+        // do draw: útil = painel − 2×kPad.
         {
-            // a 212dp de painel (180 úteis) a letra FICA e o piso cumpre-se
-            // (o padding da linha cede antes)
-            const editor::TransformBudget b212 =
-                editor::transformRowBudget(180.0f);
-            EXPECT_MSG(b212.axisLabels,
-                       "m3: a 212dp de painel a letra do eixo TEM de ficar "
-                       "(letra+valor coexistem — a mutação M-m3 volta a "
-                       "dropá-la)");
-            EXPECT_MSG(editor::transformValueSpace(b212) >=
+            // a 216dp de painel (184 úteis) a letra FICA e o piso cumpre-se
+            // (o padding da linha cede antes; boxW 48 → valor 22 exato)
+            const editor::TransformBudget b216 =
+                editor::transformRowBudget(184.0f);
+            EXPECT_MSG(b216.axisLabels,
+                       "m3+QoL A: a 216dp de painel a letra do eixo TEM de "
+                       "ficar (letra+valor coexistem — a mutação M-m3 volta "
+                       "a dropá-la)");
+            EXPECT_MSG(editor::transformValueSpace(b216) >=
                            editor::kTfValueMinDp - 0.01f,
-                       "m3: a 212dp o piso do valor cumpre-se COM a letra "
-                       "(%.1fdp)",
-                       (double)editor::transformValueSpace(b212));
-            // a INVARIANTE da limiar: acima de 168 úteis a letra NUNCA sai;
-            // abaixo, pode — mas o valor nunca fica vazio
+                       "m3+QoL A: a 216dp o piso do valor cumpre-se COM a "
+                       "letra (%.1fdp)",
+                       (double)editor::transformValueSpace(b216));
+            // a INVARIANTE da limiar: acima de 184 úteis a letra NUNCA sai;
+            // abaixo, pode — mas o valor nunca fica sem espaço legível
             for (f32 util = 140.0f; util <= 320.0f; util += 2.0f) {
                 const editor::TransformBudget bb =
                     editor::transformRowBudget(util);
-                if (util >= editor::kTfAxisMinUsableDp) {
+                if (util >= 184.0f) {
                     EXPECT_MSG(bb.axisLabels,
-                               "m3: a %.0f úteis (≥limiar) a letra saiu",
+                               "m3+QoL A: a %.0f úteis (≥limiar) a letra saiu",
                                (double)util);
                 }
                 EXPECT_MSG(editor::transformValueSpace(bb) >= 20.0f,

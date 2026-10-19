@@ -240,6 +240,11 @@ struct EditorState {
     // o teclado in-app propósito 8 escreve nele; vazio = sem filtro)
     char   hierSearch[32] = "";
     u32    hierSearchLen = 0;
+    // 0.12-QoL A (a ordem do dono · Redbr1): a barra «pesquisar TIC» vive
+    // RECOLHIDA num ÍCONE DE LUPA; SÓ expande para o campo de texto quando
+    // o utilizador toca nele (ou quando há texto — o filtro visível manda).
+    // false = só a lupa; true = o campo aberto (o × limpa e fecha).
+    bool   hierSearchOpen = false;
 
     // 0.12-C (C-4) — PESQUISA do NAVEGADOR de ficheiros (o teclado in-app
     // propósito 10 escreve aqui; vazio = a lista completa). FILTRO case-
@@ -483,7 +488,10 @@ struct HierChipSlot {
 };
 HierChipSlot hierChipSlot(f32 panelWpx, f32 titleEndPx, f32 chipWpx);
 
-inline constexpr f32 kTfValueMinDp = 26.0f;
+// 0.12-QoL A: 26→22dp — o preço dos vãos 12dp (a ordem do dono: mais
+// espaçamento entre os campos X/Y/Z) no piso 180dp de painel. «-12»/«45»/
+// «1.2e» continuam a ler-se (os valores da casa são %.2g — curtos).
+inline constexpr f32 kTfValueMinDp = 22.0f;
 
 // ---- 0.9.6.19b (m3 · a LIMIAR DA LETRA DO EIXO) ----------------------------
 // O dono: «a letra só sai abaixo de ~200dp de painel; entre 200 e 260dp

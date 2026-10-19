@@ -200,7 +200,9 @@ void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
 
     // ---- painel (strip) ------------------------------------------------------
     ui.panel(r.x, r.y, r.w, kTimelineH, theme::PANEL);
-    ui.frame(r.x, r.y, r.w, kTimelineH, 2.0f, theme::ACCENT);
+    // 0.12-QoL A: a borda do painel INATIVO é o border cinza (o âmbar só
+    // no ativo/selecionado — a ordem do dono)
+    ui.frame(r.x, r.y, r.w, kTimelineH, 2.0f, theme::LINE);
     ui.panel(r.x, r.y + theme::dp(kHeaderH) - 1.0f, r.w, 1.0f, theme::LINE);
     const f32 th = ui.fontHeight();
 
@@ -547,7 +549,7 @@ void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
             tl.clipMenu = false;
         } else {
             ui.panel(x, y, w, h, theme::PANEL);
-            ui.frame(x, y, w, h, 2.0f, theme::ACCENT);
+            ui.frame(x, y, w, h, 2.0f, theme::LINE);   // 0.12-QoL A: inativo
             ui.label(x + 12.0f, y + kHeaderH * 0.5f + th * 0.30f, "CLIPS",
                      theme::TEXT);
             for (u32 i = 0; i < shown; ++i) {
@@ -625,7 +627,7 @@ void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
             tl.addTrackMenu = false;
         } else {
             ui.panel(x, y, w, h, theme::PANEL);
-            ui.frame(x, y, w, h, 2.0f, theme::ACCENT);
+            ui.frame(x, y, w, h, 2.0f, theme::LINE);   // 0.12-QoL A: inativo
             ui.label(x + 12.0f, y + kHeaderH * 0.5f + th * 0.30f,
                      "NOVO TRACK", theme::TEXT);
             static const AnimTarget kTargets[6] = {

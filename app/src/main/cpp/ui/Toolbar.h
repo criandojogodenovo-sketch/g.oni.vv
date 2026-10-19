@@ -67,12 +67,16 @@ constexpr u64 kTbStopId      = 18;
 constexpr u64 kTbPlatformId  = 19;
 
 // ---- A BARRA ÚNICA (56dp — FASE 9 G2-10) --------------------------------------
-// 0.9.6.10 (GRUPO UI · a região TOPO da imagem 1): [G logo + nome][≡ Menu]
+// 0.9.6.10 (GRUPO UI · a região TOPO da imagem 1): [G logo][≡ Menu]
 // [Cena ▾] · tabs de modo ao CENTRO · [▶][⏸][■][chip plataforma][⚙] — a
 // MESMA família da barra de topo da referência (o azul dela é o âmbar nosso)
+// 0.12-QoL A (A ORDEM DO DONO · Redbr1): o TEXTO "G.One" ao lado do logo
+// SAIU — fica APENAS o ÍCONE (o G em chama É a identidade; o nome era
+// poluição visual e roubava largura à barra). O slot `name` e o flag
+// `showName` MORRERAM (o padrão D21 — sem chamadores, sem fantasmas).
 struct TopBarLayout {
     UiRect bar{};                 // a faixa toda (safe::toolbarRect — 56dp)
-    UiRect logo{}, name{};        // EXTREMA esquerda: o G âmbar + "G.One"
+    UiRect logo{};                // EXTREMA esquerda: o G em chama (SÓ ele)
     UiRect menu{}, cena{};        // esquerda (ícone hamburger/folder + texto)
     UiRect tab3d{}, tabUi{}, tabAudio{};   // CENTRO — tabs de modo (G2-10)
     UiRect underline{};           // do tab ATIVO (2dp accent, fundo da barra)
@@ -80,8 +84,7 @@ struct TopBarLayout {
     UiRect play{}, pause{}, stop{};  // direita (ícones — a imagem 1: ▶⏸■)
     UiRect platform{};            // o chip da plataforma alvo (Android)
     UiRect gear{};                // extrema direita (ancorado)
-    bool   showName = true;       // o nome some primeiro no aperto
-    bool   showPlatform = true;   // o chip some depois (é informativo)
+    bool   showPlatform = true;   // o chip some primeiro no aperto (informativo)
     f32    iconSize = 24.0f;      // 24dp dentro dos alvos 48dp (spec A)
 };
 

@@ -468,14 +468,18 @@ void UiContext::focusGlow(f32 x, f32 y, f32 w, f32 h) {
     }
 }
 
-// 0.11-Y (Y-3) — O DIVISOR de cristal: 1dp de largura, o âmbar a cair do
-// topo (accentDim α0.90 → α0.15 no fundo — o gradiente vertical; a linha
-// sólida do D11 é SUPERADA pela ordem da Y-3, a pill do drag fica)
+// 0.11-Y (Y-3) — O DIVISOR de cristal: 1dp de largura, a cor a cair do
+// topo (α0.90 → α0.15 no fundo — o gradiente vertical; a linha sólida do
+// D11 é SUPERADA pela ordem da Y-3, a pill do drag fica). A COR é o BORDER
+// desde a 0.12-QoL A (o cinza dos inativos; era o âmbar accentDim).
 void UiContext::dividerGradientV(f32 x, f32 y, f32 h) {
-    const f32 top[4] = {theme::kTheme.accentDim[0], theme::kTheme.accentDim[1],
-                        theme::kTheme.accentDim[2], 0.90f};
-    const f32 bot[4] = {theme::kTheme.accentDim[0], theme::kTheme.accentDim[1],
-                        theme::kTheme.accentDim[2], 0.15f};
+    // 0.12-QoL A (a ordem do dono): o divisor ENTRE PAINÉIS segue o border
+    // (#24242A — o cinza dos inativos); o âmbar do accentDim (a aresta
+    // quente da 0.11-Y) morre — o laranja fica APENAS para o ativo/selecionado
+    const f32 top[4] = {theme::kTheme.border[0], theme::kTheme.border[1],
+                        theme::kTheme.border[2], 0.90f};
+    const f32 bot[4] = {theme::kTheme.border[0], theme::kTheme.border[1],
+                        theme::kTheme.border[2], 0.15f};
     const f32 w = theme::dp(1.0f);
     const u32 fv = solids_.vertexCount();
     if (emitGradientV(solids_, x, y, w, h, y, y + h, top, bot)) {

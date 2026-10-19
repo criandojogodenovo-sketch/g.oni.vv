@@ -3140,8 +3140,10 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     // o CARD modal com raios 8dp — O CARTÃO da escada (0.12-C C-3)
     ui.panelRounded(x, y, w, h, theme::dp(theme::kRadiusCard),
                     theme::kTheme.card);
+    // 0.12-QoL A: a moldura do card INATIVO é o border cinza (o âmbar
+    // brilhante fica APENAS para o ativo/selecionado — a ordem do dono)
     ui.frameRounded(x, y, w, h, 2.0f, theme::dp(theme::kRadiusCard),
-                    theme::ACCENT);
+                    theme::kTheme.border);
     const f32 th = ui.fontHeight();
     ui.label(x + kPadB, y + kHeaderH * 0.5f + th * 0.30f, "NAVEGADOR",
              theme::TEXT);
@@ -3406,7 +3408,8 @@ int drawApplyDialog(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     ui.panelRounded(dlg.x, dlg.y, dlg.w, dlg.h, theme::dp(theme::kRadiusCard),
                     theme::kTheme.card);   // 0.12-C: O CARTÃO
     ui.frameRounded(dlg.x, dlg.y, dlg.w, dlg.h, 2.0f,
-                    theme::dp(theme::kRadiusCard), theme::ACCENT);
+                    theme::dp(theme::kRadiusCard),
+                    theme::kTheme.border);   // 0.12-QoL A: inativo
     const f32 th = ui.fontHeight();
     ui.label(dlg.x + kPad, dlg.y + kHeaderH * 0.5f + th * 0.30f,
              "APLICAR AO TIC?", theme::TEXT);
