@@ -22,9 +22,12 @@
 #include "ui/Theme.h"
 #include "ui/SafeArea.h"
 #include "render/QuadBatch.h"
+#include "platform/FileApi.h"
+#include "ui/UiEditor.h"
 
 #include <cmath>
 #include <cstdio>
+#include <unistd.h>
 #include <cstdlib>
 #include <fstream>
 #include <string>
@@ -389,4 +392,114 @@ TEST(qol_a_cenas_x_fecha) {
     EXPECT_MSG(pick == -1,
                "qol_a_cenas_x_fecha: o X fecha sem escolher cena");
     EXPECT(!e.st.scenesMenu);
+}
+
+// ---- PIN qol_b_navegador_compacto ---------------------------------------------
+// «O navegador de ficheiros parece botões gigantes → lista compacta.»
+// A prova DESENHADA: as raízes e o Subir deixam de emitir o gradiente
+// âmbar do choke point button() (o fill é surface/borda — os quads do
+// card), a seta (>) existe nas linhas dos FICHEIROS também e o breadcrumb
+// desenha o separador « / ».
+TEST(qol_b_navegador_compacto) {
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+    QolEnv e;
+    ASSERT(e.ok);
+    std::vector<fileapi::DirEntry> entries;
+    fileapi::DirEntry d1;
+    d1.name = "Download";
+    d1.isDir = true;
+    fileapi::DirEntry f1;
+    f1.name = "modelo.obj";
+    f1.kind = 'm';
+    entries.push_back(d1);
+    entries.push_back(f1);
+    e.st.fileBrowser = true;
+    e.begin();
+    (void)drawFileBrowser(e.ui, e.input, 1600.0f, 720.0f, e.st, "/Download",
+                          entries, false);
+    e.end();
+    // os ALVOS continuam nos ids de sempre (a geometria não mudou — o
+    // picker_compacto da C-4 segue aferrado): 6 raízes + Subir + fechar
+    u32 roots = 0, subir = 0, fechar = 0;
+    for (const auto& en : e.ui.auditRecord().entries) {
+        if (en.kind == layout::Entry::Button) {
+            if (en.id >= 6850u && en.id < 6856u) {
+                ++roots;
+            }
+            if (en.id == 6860u) {
+                ++subir;
+            }
+            if (en.id == 6899u) {
+                ++fechar;
+            }
+        }
+    }
+    EXPECT_MSG(roots == 6u && subir == 1u && fechar == 1u,
+               "qol_b_navegador_compacto: os alvos de sempre existem "
+               "(raízes %u, subir %u, fechar %u)", roots, subir, fechar);
+    // o FILHO VISUAL: ZERO quads do gradiente âmbar (#FFB020→#FF6B00 — o
+    // fill do button) nas BANDAS das raízes e do Subir; o fill lá é
+    // surface (#141416 α0.85). (Fora destas bandas o accent é legítimo —
+    // o thumb do scrollbar, por exemplo.)
+    const BrowserSheetLayout L = browserSheetLayout(
+        1600.0f, 720.0f, 0.0f, 0.0f, 0.0f, 0.0f, theme::dp(28.0f), 2u);
+    const QuadBatch& solids = e.ui.solidsForTest();
+    u32 accentFill = 0;
+    for (u32 q = 0; q + 5 < solids.vertexCount(); q += 6) {
+        const QuadVertex* v = solids.vertices() + q;
+        f32 mny = 1e9f;
+        for (u32 k = 0; k < 6; ++k) {
+            mny = v[k].y < mny ? v[k].y : mny;
+        }
+        const bool banda = (mny >= L.rootsY - 1.0f &&
+                            mny <= L.upY + L.rowH + 1.0f);
+        // o gradiente do button: topo âmbar puro (r=1, g≈0.69, a=1)
+        if (banda && nearEq(v[0].r, 1.0f, 1e-3f) &&
+            nearEq(v[0].g, 176.0f / 255.0f, 2e-3f) &&
+            nearEq(v[0].a, 1.0f, 1e-3f)) {
+            ++accentFill;
+        }
+    }
+    EXPECT_MSG(accentFill == 0u,
+               "qol_b_navegador_compacto: ZERO botões âmbar gigantes nas "
+               "bandas raízes/Subir (%u sobraram)", accentFill);
+    // a FONTE: as raízes/subir desenham com panelRounded + frameRounded
+    // (o padrão quieto) e o breadcrumb tem o separador « / »
+    std::string src;
+    ASSERT(readFile(repoRoot() + "/app/src/main/cpp/ui/UiEditor.cpp", src));
+    EXPECT(countSub(src, "ui.fontWidth(\" / \")") == 1);
+    EXPECT(countSub(src, "\"^ Subir\"") == 0);   // o botão gigante morreu
+}
+
+// ---- PIN qol_b_ponto_fora -----------------------------------------------------
+// «Ocultar ficheiros/pastas que começam com "."». A prova REAL no FileApi
+// (o R-057 é a sentinela; este pin aferra a superfície do draw: a lista
+// que chega ao browser já não tem pontos).
+TEST(qol_b_ponto_fora) {
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+    char tmpl[] = "/tmp/goni-qolb-XXXXXX";
+    const char* mkd = mkdtemp(tmpl);
+    ASSERT(mkd != nullptr);
+    const std::string root = mkd;
+    fileapi::makeDirs(root);
+    fileapi::makeDirs(root + "/.git");
+    fileapi::makeDirs(root + "/Pasta");
+    fileapi::writeAll(root + "/.oculto.txt", "x", 1);
+    fileapi::writeAll(root + "/visivel.goni", "{}", 2);
+    std::vector<fileapi::DirEntry> out;
+    ASSERT(fileapi::listDirEntries(root, out));
+    EXPECT(out.size() == 2u);   // a Pasta + o visivel.goni
+    for (const fileapi::DirEntry& en : out) {
+        EXPECT(en.name[0] != '.');
+    }
+    EXPECT(out[0].isDir && out[0].name == "Pasta");
+    EXPECT(!out[1].isDir && out[1].name == "visivel.goni");
+    // limpeza
+    ::remove((root + "/.oculto.txt").c_str());
+    ::remove((root + "/visivel.goni").c_str());
+    ::rmdir((root + "/.git").c_str());
+    ::rmdir((root + "/Pasta").c_str());
+    ::rmdir(root.c_str());
 }

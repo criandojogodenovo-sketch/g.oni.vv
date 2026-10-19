@@ -219,20 +219,19 @@ bool listDirEntries(const std::string& dir, std::vector<DirEntry>& out) {
                 isDir = false;   // DT_DIR mas o stat nega — FUSE mentiu
             }
         }
-        // 0.12-C (C-4 — A ORDEM DO DONO): as PASTAS OCULTAS (começam por
-        // ponto) SAEM da lista do navegador — o .thumbnails/.android/.cache
-        // do Android era ruído de navegação (o dono desce onde quer ir).
-        // SÓ DIRECTORIAS: os ficheiros ponto mantêm a decisão 0.8.5 (TODOS
-        // os ficheiros entram — o dono vê o que lá está e o toque diz o
-        // erro claro; não se reabre aqui). O pin picker_oculta_dot aferra.
-        if (isDir && !name.empty() && name[0] == '.') {
+        // 0.12-C (C-4): as PASTAS OCULTAS saíam da lista. 0.12-QoL B (A
+        // ORDEM DO DONO, o feedback Redbr1): TUDO o que começa por ponto
+        // SAI — pastas E ficheiros (.git, .thumbnails, .nomedia eram
+        // ruído de navegação). A decisão 0.8.5 («os ficheiros ponto
+        // ficam») fica SUPERADA por esta ordem expressa; o R-057 aferra.
+        if (!name.empty() && name[0] == '.') {
             continue;
         }
         de.isDir = isDir;
         if (isDir) {
             dirs.push_back(de);   // TODAS as diretorias (navegar = subir/descer)
         } else {
-            // 0.8.5: TODOS os ficheiros entram (kind 0 = não suportado) —
+            // TODOS os ficheiros visíveis entram (kind 0 = não suportado) —
             // o dono vê o .fbx na lista e, ao tocar, recebe o erro CLARO
             // "formato não suportado ainda" (antes: invisíveis = silêncio)
             de.kind = kindOfExtension(name);

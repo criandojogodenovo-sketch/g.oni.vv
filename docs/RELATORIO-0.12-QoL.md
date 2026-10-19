@@ -142,3 +142,66 @@ espaçamento e o cinza dos inativos; o precedente da casa: as 8 da
 inteiro) · c33_virtual **1010/0** · docs-lint VERDE · os pins ×5 novos
 verdes · as mutações vermelho→reposto→verde. **versionCode 102** — o
 build vigente da campanha 0.12-QoL. O 101 fica INTACTO como história.
+
+## §2 B — O Navegador de Ficheiros (ZArchiver Style)
+
+**O que mudou** (vc 103):
+
+1. **As linhas compactas.** Os atalhos de raiz ([Raiz][Download]…[Music])
+   deixam de ser os SEIS BOTÕES do choke point `ui.button` (o gradiente
+   âmbar + glow — os «botões gigantes» do Redbr1) e passam a CHIPS
+   QUIETOS: surface α0.85 + borda cinza (o border do QoL-A) + texto
+   text2; premido = surface2. O **Subir** deixa de ser o botão
+   «^ Subir» gigante e passa a LINHA COMPACTA: o chevron-up (2 traços)
+   + «Subir» à esquerda, o mesmo chip quieto. A GEOMETRIA não muda —
+   os ids (6850..6855, 6860), a linha 48dp, o Subir FIXO fora do scroll
+   (o pin picker_compacto da C-4 segue aferrado sem recalibração).
+2. **A seta (>) em TODAS as linhas** (a ordem do dono): as pastas
+   mantinham o chevron; os ficheiros passam a tê-lo também, mais
+   esbatido (α 0.4 — o desativado da casa): nas pastas diz «abre», nos
+   ficheiros diz «importa».
+3. **O breadcrumb ganha o separador**: «Raiz / Download» desenha o «/»
+   entre os segmentos (o espaço já estava reservado — o glifo é novo);
+   o exemplo literal do prompt do dono.
+4. **TUDO o que começa por ponto FORA** (FileApi::listDirEntries): as
+   pastas ponto já saíam desde a C-4; os FICHEIROS ponto (o .nomedia,
+   o .git stray) saem TAMBÉM. A decisão 0.8.5 («os ficheiros ponto
+   ficam») fica SUPERADA pela ordem expressa do dono neste prompt — o
+   comentário no sítio documenta a superação.
+5. **A ordenação** pastas-primeiro-alfabético-depois-ficheiros já era o
+   comportamento desde a C-4 (o sort dirs/files com entryNameLess CI) —
+   o R-057 aferra para nunca regredir (o test_browser.cpp já a pinava;
+   agora há sentinela própria).
+
+**Sentinela R-057** (`regress_qol_picker`, tests/test_sentinels.cpp) —
+árvore própria em /tmp (2 pastas + 3 ficheiros + .thumbnails + .nomedia):
+(1) ZERO entradas ocultas; (2) a ordem exata Anim, Download, Foto.PNG,
+azul.txt, modelo.obj; (3) a FONTE do breadcrumb com o « / ». Entrada
+completa no docs/REGRESSOES.md.
+
+**Pins** (test_012qol.cpp): `qol_b_navegador_compacto` (os alvos de
+sempre nos ids de sempre + ZERO quads do gradiente âmbar nas bandas
+raízes/Subir + a FONTE sem «^ Subir»), `qol_b_ponto_fora` (a lista real
+do FileApi sem pontos, Pasta+visivel.goni na ordem).
+
+**Mutações** (Policy #5 — vermelho → repor → verde):
+
+- **M-QoLb1** (o repositório da 0.8.5 — o filtro volta a deixar passar
+  FICHEIROS ponto):
+  ```
+  regress_qol_picker                             ...  FALHOU  tests/test_sentinels.cpp:7706  R-057: a entrada oculta «.nomedia» vazou para a lista
+    FALHOU  tests/test_sentinels.cpp:7720  out.size() == 5u
+    FALHOU  tests/test_sentinels.cpp:7724  !out[2].isDir && out[2].name == "Foto.PNG"
+  regress_qol_picker                             FALHOU
+  012c_picker_oculta_dot                         ...  FALHOU  tests/test_012c_picker.cpp:220  nDotFiles == 0u
+  (reposto → regress_qol_picker OK + 012c_picker_oculta_dot OK)
+  ```
+
+**Recalibração com nota**: `012c_picker_oculta_dot` (test_012c_picker.cpp)
+— o EXPECT(hasDotFile) da 0.8.5 morre: ZERO ficheiros ponto (o comentário
+do pin documenta a superação).
+
+**Verificação**: test_core 1180 OK / 0 falhas (o bench r039 saltado no
+sandbox) · c33_virtual **1010/0** · docs-lint VERDE · as mutações
+vermelho→reposto→verde. **versionCode 103** — o build vigente. O 102
+fica INTACTO como história.

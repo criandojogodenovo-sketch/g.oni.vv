@@ -3165,7 +3165,7 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         const f32 maxW = w - 2.0f * kPadB - theme::dp(16.0f);
         // mede a fila inteira; se não cabe, mostra os ÚLTIMOS segmentos
         // (a regra do browserPathLabel antigo: o FIM é o que diz onde está)
-        const f32 sepW = ui.hasFont() ? ui.fontWidth(" › ") : 0.0f;
+        const f32 sepW = ui.hasFont() ? ui.fontWidth(" / ") : 0.0f;
         f32 total = 0.0f;
         f32 widths[8];
         u32 first = 0;
@@ -3212,7 +3212,16 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                            crumbHeld ? theme::kTheme.accentPress
                                      : theme::kTheme.text2,
                            lw + theme::dp(8.0f));
-            cx += lw + theme::dp(8.0f) + (sepW > 0.0f ? sepW : theme::dp(8.0f));
+            cx += lw + theme::dp(8.0f);
+            // 0.12-QoL B: o SEPARADOR visível «Raiz / Download» (a ordem do
+            // dono — o caminho lê-se como caminho, não como botões soltos)
+            if (sepW > 0.0f) {
+                ui.labelFitted(cx, L.crumbY + L.crumbH * 0.5f + tm.ascent,
+                               "/", theme::kTheme.text2, sepW);
+                cx += sepW;
+            } else {
+                cx += theme::dp(8.0f);
+            }
             if (cx > x + w - kPadB) {
                 break;   // defesa numérica (o maxW já calculou, isto é cinto)
             }
@@ -3257,7 +3266,11 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
         }
     }
 
-    // raízes: [Raiz][Download][Docs][Camera][Pictures][Music] — alvo 48dp
+    // raízes: [Raiz][Download][Docs][Camera][Pictures][Music] — 0.12-QoL B
+    // (a ordem do dono · «o navegador parecia botões gigantes»): os atalhos
+    // deixam de ser os BOTÕES âmbar do choke point e passam a CHIPS QUIETOS
+    // (surface + borda cinza + texto text2) — a linha 48dp da casa mantém-se
+    // (o alvo é a linha; o pin picker_compacto aferra a geometria)
     {
         const f32 rootW = (w - 2.0f * kPadB -
                            static_cast<f32>(fileapi::kBrowserRootCount - 1) *
@@ -3265,19 +3278,69 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                           static_cast<f32>(fileapi::kBrowserRootCount);
         int chosen = 0;
         for (int i = 0; i < fileapi::kBrowserRootCount; ++i) {
-            if (ui.button(kBrowserRootBase + static_cast<u64>(i),
-                          x + kPadB + static_cast<f32>(i) * (rootW + theme::dp(6.0f)),
-                          L.rootsY, rootW, rowH,
-                          fileapi::kBrowserRoots[i].label)) {
+            const UiRect rr = {x + kPadB + static_cast<f32>(i) *
+                                                   (rootW + theme::dp(6.0f)),
+                               L.rootsY, rootW, rowH};
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            if (ui.widgetHit(kBrowserRootBase + static_cast<u64>(i), rr.x,
+                             rr.y, rr.w, rr.h)) {
                 chosen = i + 1;
+            }
+            const bool rootHeld =
+                ui.widgetActive(kBrowserRootBase + static_cast<u64>(i));
+            ui.panelRounded(rr.x, rr.y, rr.w, rr.h,
+                            theme::dp(theme::kRadiusField),
+                            rootHeld ? theme::kTheme.surface2
+                                     : theme::kTheme.surface);
+            ui.frameRounded(rr.x, rr.y, rr.w, rr.h, 1.0f,
+                            theme::dp(theme::kRadiusField),
+                            theme::kTheme.border);
+            if (ui.hasFont()) {
+                const TextMetrics tmR0 = ui.textMetrics();
+                ui.labelFitted(rr.x + theme::dp(8.0f),
+                               rr.y + (rr.h - tmR0.block()) * 0.5f +
+                                   tmR0.ascent,
+                               fileapi::kBrowserRoots[i].label,
+                               rootHeld ? theme::kTheme.text1
+                                        : theme::kTheme.text2,
+                               rr.w - theme::dp(16.0f));
             }
         }
         // ---- Subir (o pai; na raiz não faz nada — o main trata). FIXO:
         // vive FORA do scroll (a regra do dono — o pin picker_compacto
-        // aferra upY + rowH <= listTop)
-        if (ui.button(kBrowserUpId, x + kPadB, L.upY, w - 2.0f * kPadB, rowH,
-                      "^ Subir")) {
-            chosen = fileapi::kBrowserRootCount + 1;
+        // aferra upY + rowH <= listTop). 0.12-QoL B: LINHA COMPACTA — o
+        // chevron-up (2 traços) + «Subir» à esquerda, o chip quieto de
+        // sempre (o BOTÃO âmbar gigante morreu com o feedback)
+        {
+            const UiRect ur = {x + kPadB, L.upY, w - 2.0f * kPadB, rowH};
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            if (ui.widgetHit(kBrowserUpId, ur.x, ur.y, ur.w, ur.h)) {
+                chosen = fileapi::kBrowserRootCount + 1;
+            }
+            const bool upHeld = ui.widgetActive(kBrowserUpId);
+            ui.panelRounded(ur.x, ur.y, ur.w, ur.h,
+                            theme::dp(theme::kRadiusField),
+                            upHeld ? theme::kTheme.surface2
+                                   : theme::kTheme.surface);
+            ui.frameRounded(ur.x, ur.y, ur.w, ur.h, 1.0f,
+                            theme::dp(theme::kRadiusField),
+                            theme::kTheme.border);
+            // o glifo ^ (2 traços — o chevron para cima, geometria pura)
+            const f32 ux = ur.x + theme::dp(16.0f);
+            const f32 uy = ur.y + ur.h * 0.5f;
+            const f32 colU[4] = {theme::kTheme.text2[0],
+                                 theme::kTheme.text2[1],
+                                 theme::kTheme.text2[2], 1.0f};
+            ui.drawLine(ux - theme::dp(5.0f), uy + theme::dp(2.5f), ux,
+                        uy - theme::dp(2.5f), theme::dp(2.0f), colU);
+            ui.drawLine(ux, uy - theme::dp(2.5f), ux + theme::dp(5.0f),
+                        uy + theme::dp(2.5f), theme::dp(2.0f), colU);
+            if (ui.hasFont()) {
+                const TextMetrics tmU = ui.textMetrics();
+                ui.label(ux + theme::dp(12.0f),
+                         ur.y + (ur.h - tmU.block()) * 0.5f + tmU.ascent,
+                         "Subir", theme::kTheme.text2);
+            }
         }
         if (chosen != 0) {
             return chosen;   // as raízes/subir falam primeiro
@@ -3337,12 +3400,16 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                                    : theme::kTheme.text1,
                            row.w - theme::dp(44.0f) - theme::dp(32.0f));
         }
-        // a SETA à direita (só nas pastas — os ficheiros importam, não abrem)
-        if (e.isDir) {
+        // a SETA à direita (0.12-QoL B: a seta (>) em TODAS as linhas — a
+        // ordem do dono; nas PASTAS diz «abre», nos FICHEIROS diz «importa»
+        // — mais esbatida, o α 0.4 do desativado da casa)
+        {
+            f32 arrCol[4] = {theme::kTheme.text2[0], theme::kTheme.text2[1],
+                             theme::kTheme.text2[2], e.isDir ? 1.0f : 0.4f};
             icons::drawIcon(ui, icons::Icon::ChevronRight,
                             row.x + row.w - theme::dp(28.0f),
                             row.y + (row.h - theme::dp(16.0f)) * 0.5f,
-                            theme::dp(16.0f), theme::kTheme.text2);
+                            theme::dp(16.0f), arrCol);
         }
         // (o alvo da linha é o SCROLL TAP lá em baixo — o padrão da casa
         // nas listas com scroll: o widgetHit aqui dispararia no PRESS e um

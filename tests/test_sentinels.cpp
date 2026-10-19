@@ -7660,7 +7660,78 @@ struct Host055 : voni::Host {
     }
 };
 
+// árvore de teste do R-057 em /tmp (o padrão TempTree do test_012c_picker)
+struct DotTreeR057 {
+    std::string root;
+    explicit DotTreeR057() {
+        char tmpl[] = "/tmp/goni-r057-XXXXXX";
+        const char* mkd = mkdtemp(tmpl);
+        root = mkd ? std::string(mkd) : "/tmp/goni-r057";
+        fileapi::makeDirs(root);
+        fileapi::makeDirs(root + "/.thumbnails");        // a PASTA oculta
+        fileapi::makeDirs(root + "/Download");
+        fileapi::makeDirs(root + "/Anim");
+        fileapi::writeAll(root + "/modelo.obj", "o", 1);
+        fileapi::writeAll(root + "/.nomedia", "x", 1);   // o FICHEIRO oculto
+        fileapi::writeAll(root + "/Foto.PNG", "p", 1);
+        fileapi::writeAll(root + "/azul.txt", "t", 1);
+    }
+    ~DotTreeR057() {
+        ::remove((root + "/modelo.obj").c_str());
+        ::remove((root + "/.nomedia").c_str());
+        ::remove((root + "/Foto.PNG").c_str());
+        ::remove((root + "/azul.txt").c_str());
+        ::rmdir((root + "/.thumbnails").c_str());
+        ::rmdir((root + "/Download").c_str());
+        ::rmdir((root + "/Anim").c_str());
+        ::rmdir(root.c_str());
+    }
+};
+
 } // namespace
+
+// ---- R-057 — O NAVEGADOR NÃO VOLTAM AO RUÍDO (0.12-QoL B) -------------------
+// A ordem do dono (o feedback Redbr1): o navegador de ficheiros é uma LISTA
+// COMPACTA — pastas PRIMEIRO por ordem alfabética, depois os ficheiros; e
+// TUDO o que começa por ponto FORA (o .git/.thumbnails/.nomedia eram ruído).
+// A decisão 0.8.5 («os ficheiros ponto ficam») ficou SUPERADA por esta ordem
+// expressa — o pin picker_oculta_dot recalibrou-se no MESMO commit.
+TEST(regress_qol_picker) {
+    using namespace vv;
+    DotTreeR057 t;
+    std::vector<fileapi::DirEntry> out;
+    ASSERT(fileapi::listDirEntries(t.root, out));
+    // (1) ZERO entradas ocultas (pastas E ficheiros — o contrato QoL B)
+    for (const fileapi::DirEntry& e : out) {
+        EXPECT_MSG(e.name.empty() || e.name[0] != '.',
+                   "R-057: a entrada oculta «%s» vazou para a lista",
+                   e.name.c_str());
+    }
+    bool temAnim = false, temDownload = false, temObj = false;
+    bool temFoto = false, temAzul = false;
+    for (const fileapi::DirEntry& e : out) {
+        temAnim = temAnim || e.name == "Anim";
+        temDownload = temDownload || e.name == "Download";
+        temObj = temObj || e.name == "modelo.obj";
+        temFoto = temFoto || e.name == "Foto.PNG";
+        temAzul = temAzul || e.name == "azul.txt";
+    }
+    EXPECT(temAnim && temDownload && temObj && temFoto && temAzul);
+    EXPECT(out.size() == 5u);   // 2 pastas + 3 ficheiros (os 2 ponto fora)
+    // (2) a ORDEM: pastas PRIMEIRO alfabético (CI), depois ficheiros alfabético
+    EXPECT(out[0].isDir && out[0].name == "Anim");
+    EXPECT(out[1].isDir && out[1].name == "Download");
+    EXPECT(!out[2].isDir && out[2].name == "Foto.PNG");
+    EXPECT(!out[3].isDir && out[3].name == "azul.txt");
+    EXPECT(!out[4].isDir && out[4].name == "modelo.obj");
+    // (3) a FONTE do breadcrumb: o separador « / » (o caminho lê-se como
+    // caminho — a ordem do dono no QoL B)
+    std::string src;
+#if defined(REPO_ROOT)
+    EXPECT(readFileText(REPO_ROOT "/app/src/main/cpp/ui/UiEditor.cpp", src));
+    EXPECT(src.find("ui.fontWidth(\" / \")") != std::string::npos);
+#endif
+}
 
 TEST(regress_camrig) {
     using namespace voni;

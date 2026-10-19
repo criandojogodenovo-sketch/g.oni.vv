@@ -7,8 +7,9 @@
 //                          linhas visíveis e o Subir FIXO fora do scroll
 //   2. picker_breadcrumb — os segmentos (rótulo da raiz + prefixos) e o
 //                          SALTO pelo crumbPickOut (o toque num segmento)
-//   3. picker_oculta_dot — as PASTAS OCULTAS (ponto) fora da lista (os
-//                          ficheiros ponto ficam — a decisão 0.8.5 mantém)
+//   3. picker_oculta_dot — TUDO o que começa por ponto fora da lista
+//                          (0.12-QoL B: pastas E ficheiros — a decisão
+//                          0.8.5 fica SUPERADA pela ordem do dono)
 //   4. empty_inspector   — mensagem + AÇÃO (o botão abre o plusMenu real)
 //   5. empty_assets      — mensagem + botão IMPORTAR (o Actions real)
 //   6. empty_hierarquia  — o convite aponta para o + e o + fica VISÍVEL
@@ -194,25 +195,30 @@ TEST(012c_picker_oculta_dot) {
         EXPECT(!"opendir falhou na árvore de teste");
         return;
     }
-    // as PASTAS OCULTAS (.thumbnails/.android) FORA da lista (a ordem do
-    // dono na C-4) — a única diretoria visível é a normal
-    u32 nDirs = 0, nDotDirs = 0;
-    bool hasDotFile = false, hasObj = false;
+    // TUDO o que começa por ponto FORA da lista (0.12-QoL B — a ordem do
+    // dono; na C-4 eram só as pastas: a 0.8.5 dos ficheiros ponto fica
+    // SUPERADA por esta ordem expressa)
+    u32 nDirs = 0, nDotDirs = 0, nDotFiles = 0;
+    bool hasObj = false;
     for (const fileapi::DirEntry& e : out) {
+        if (!e.name.empty() && e.name[0] == '.') {
+            if (e.isDir) {
+                ++nDotDirs;
+            } else {
+                ++nDotFiles;
+            }
+            continue;
+        }
         if (e.isDir) {
             ++nDirs;
-            if (!e.name.empty() && e.name[0] == '.') {
-                ++nDotDirs;
-            }
         } else {
-            hasDotFile = hasDotFile || e.name == ".nomedia";
             hasObj = hasObj || e.name == "modelo.obj";
         }
     }
     EXPECT(nDirs == 1u);        // só a «Download»
     EXPECT(nDotDirs == 0u);     // ZERO pastas ocultas — o pin
+    EXPECT(nDotFiles == 0u);    // ZERO ficheiros ocultos (0.12-QoL B)
     EXPECT(hasObj);             // o .obj continua
-    EXPECT(hasDotFile);         // os FICHEIROS ponto ficam (0.8.5 intacta)
 }
 
 // ---- 4. empty_inspector -----------------------------------------------------

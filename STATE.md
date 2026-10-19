@@ -1,9 +1,9 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-19 · vc: 102 · Último commit: este (o 0.12-QoL A — a
-LIMPEZA VISUAL da UI: o top bar só com o ícone, a lupa que expande, o
-border cinza #24242A, o ar no Inspector, o X nas cenas; o relatório
-próprio diz o resto)
+Atualizado: 2026-10-19 · vc: 103 · Último commit: este (o 0.12-QoL B —
+o NAVEGADOR compacto: os chips quietos no lugar dos botões gigantes, a
+seta em todas as linhas, o « / » no breadcrumb, TUDO o que é ponto fora
+(R-057); o relatório próprio diz o resto)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -19,7 +19,13 @@ próprio diz o resto)
   limpa e recolhe), o border dos INATIVOS #24242A (o âmbar só no
   ativo/selecionado — o divisor e os cards modais incluídos), os vãos
   X/Y/Z 12dp + a margem mínima 8dp do Reset, o X (48×48) no menu de
-  cenas; pins ×5 + M-QoLa1/x2; 8 recalibrações com nota.
+  cenas; pins ×5 + M-QoLa1/x2; 8 recalibrações com nota. CI verde
+  (1befd71).
+  **B (vc 103)**: os atalhos e o Subir deixam de ser BOTÕES âmbar
+  (chips quietos, geometria/ids intactos), a seta (>) em TODAS as
+  linhas, o separador « / » no breadcrumb, TUDO o que é ponto FORA (a
+  0.8.5 SUPERADA pela ordem do dono); R-057 + pins ×2 + M-QoLb1; o
+  picker_oculta_dot recalibrado com nota.
 - **Campanha 0.12-X (CÂMARA DE TERCEIRA PESSOA) — FECHADA (3.9x, vc
   101)** (o camrig + camdrag + limit no REGISTO como Contínuos; o
   yaw/pitch no TykerState; o Host::lookDelta com o consumo a ZERAR; o
@@ -79,6 +85,12 @@ próprio diz o resto)
   R1) + a folga vertical 64→68dp; o X de fechar (48×48) no menu de
   cenas; pins ×5 (test_012qol.cpp) + M-QoLa1/x2 vermelho→reposto→verde
   (coladas no §1 do relatório); 8 recalibrações com nota.
+- 0.12-QoL B (vc 103) — o NAVEGADOR compacto (no RELATORIO-0.12-QoL.md
+  §2): os chips quietos no lugar dos botões gigantes (o choke point
+  button fora das raízes/Subir), a seta (>) nas linhas todas, o « / »
+  no breadcrumb, o FileApi sem pontos (pastas E ficheiros); R-057 +
+  pins ×2 + M-QoLb1 vermelho→reposto→verde (colada no §2); o
+  picker_oculta_dot recalibrado com nota.
 - 0.12-X 3.9x (vc 101) — a câmara de terceira pessoa (no
   RELATORIO-0.12-X-CAMRIG.md): camrig(d,h,suav) + camdrag(sens) +
   limit como Contínuos no REGISTO; o TykerState guarda camYaw/camPitch;
@@ -145,13 +157,10 @@ próprio diz o resto)
   (TouchControls::dead) + os resets + o «sem remover joystick»; pins ×5 +
   M-B2a/b.
 - 0.12-B B-1 (vc 83) — a árvore de UI (o relatório próprio:
-  docs/RELATORIO-0.12-B.md): Control/UIRoot (os storages ids 11/12); a
-  compat migrateUiCanvasToTree (o UiCanvas sai; DE MEMÓRIA); o
-  serializer (as fontes partilhadas appendUiElementJson/
-  fillUiElementJson; o UIRoot FANTASMA curado no §10); o editor (o modo
-  árvore com espelho + sync-back; o Inspector de UI; uniqueNewTicName);
-  o Play (drawUiTree/hitTestUiTree/uiElementFromHit); **Pins ×9 +
-  M-B1a/b/c** + **R-050**; 8 recalibrações com nota.
+  docs/RELATORIO-0.12-B.md): Control/UIRoot + a compat
+  migrateUiCanvasToTree + o serializer com as fontes partilhadas + o
+  editor em modo árvore + o Play; pins ×9 + M-B1a/b/c + R-050; 8
+  recalibrações com nota.
 - 0.12-A (vc 82) — os 4 bugs P0 fechados (o ficheiro:linha, os pins e
   o veredito vivem no relatório próprio: docs/RELATORIO-0.12-A.md + o
   INVEST-RAM): A-1 as rows LOD JÁ EXISTIAM (PÁRA no fix cego; pins ×5);
@@ -162,15 +171,13 @@ próprio diz o resto)
   o achado fora da lista (inspectorRowCount −4 rows mesh, sem sintoma)
   documentado no relatório §6.
 - 0.11-Y (vc 77–81) — a identidade visual completa (o ícone, o tema, o
-  layout, os cartões, o fecho com os 13 PNGs) — ver §1 e docs/
-  RELATORIO-0.11-Y-FECHO.md.
+  layout, os cartões, o fecho com os 13 PNGs).
 - 0.9.6 + 0.9.6.4–0.9.6.20 (vc 48–67) — identidade, grupos UI, editor,
   import glTF, orçamento 3D, leis de desenho/toque, janelas.
-- 0.10-M..0.11-W (vc 68–76) — o .gmesh v3 (streaming/blocos/impostores),
-  a hierarquia (drag-reparent), os materiais glTF, a animação skinada
-  (UBO 128), o skinned cull+LOD, o instancing e o streaming progressivo
-  (os DETALHES vivem nos relatórios próprios da docs/ e no §2 do
-  CODEMAP — o índice não é o arquivo).
+- 0.10-M..0.11-W (vc 68–76) — o .gmesh v3, a hierarquia, os materiais
+  glTF, a animação skinada, o skinned cull+LOD, o instancing e o
+  streaming progressivo (os DETALHES vivem nos relatórios da docs/ — o
+  índice não é o arquivo).
 
 ## §3 O que está PENDENTE (por ordem)
 
@@ -250,8 +257,8 @@ Commits puramente documentais não são afetados.
 - `docs/REGRESSOES.md` — sentinelas R-NNN (consulta, não leitura inteira).
 - `BACKLOG.md` — rastreador de campanhas (na RAIZ do repo).
 - `docs/RELATORIO-0.12-QoL.md` — o relatório da 0.12-QoL (o A no §1 —
-  a limpeza visual, as mutações coladas, as recalibrações com nota; os
-  B/C/D entram nos §2..4 à medida que fecham).
+  a limpeza visual; o B no §2 — o navegador compacto; as mutações
+  coladas, as recalibrações com nota; os C/D entram nos §3/§4).
 - `docs/RELATORIO-0.12-X-CAMRIG.md` — o relatório da 0.12-X (a câmara
   de terceira pessoa: as convenções fechadas, o hook lookDelta, o
   TIMING do input, as mutações coladas no §5).
