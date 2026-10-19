@@ -331,9 +331,15 @@ CAMPANHA FECHADA. O 104 fica INTACTO como história.
   STATE.md no MESMO commit e CI verde — a regra §5 da casa.
 - A referência V.ONI NÃO regenera: ZERO entradas no registo (a cláusula
   calma — o R-013 segue aferrado).
-- O achado fora da lista (cláusula calma, NÃO fixado): o gate
-  ctx_state_curto (o teto <300 linhas do STATE.md) apanhou o índice em
-  300 exato no commit do B — os 2 runs vermelhos do B vivem no histórico
-  do CI; o fix (B-fix + B-fix2) devolveu o teto e corrigiu a ordem do
-  R-057 (o CI é o árbitro).
+- O achado fora da lista (cláusula calma, NÃO fixado): os 3 runs
+  vermelhos intermediários do B vivem no histórico do CI — o CI é o
+  árbitro e apanhou TUDO: (1) o 98d9da8 (o B) com o STATE.md em 300
+  exato (o teto do ctx_state_curto) e a ordem trocada nas expectativas
+  do R-057 (o entryNameLess é CI puro — azul.txt < Foto.PNG); (2) o
+  de463f2 (o B-fix do teto) com a ordem ainda errada; (3) o fe90703 (o
+  B-fix2 da ordem) com o R-058 chegando ANTES do código do C (o build
+  morreu no gridFadeForDist que só o 4a03d64 traz). O C (4a03d64) fechou
+  tudo — CI SUCCESS; o D corre na cabeça. Os 2 commits de fix são
+  honestos no histórico (o índice e as expectativas emendam-se NO MESMO
+  espírito da regra: o CI diz a verdade).
 - O CODEMAP.md e o BACKLOG.md atualizam-se no commit do D (o fecho).
