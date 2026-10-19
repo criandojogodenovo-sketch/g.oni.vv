@@ -1144,6 +1144,33 @@ struct Validator {
                 }
                 checkComp(c);
             }
+            // 0.12-X: o camrig não divide o tyker com follow/look — a câmara
+            // que segue E olha é UMA. O erro ENSINA e viaja com o par do
+            // botão Substituir (fixFrom/fixTo trocam a palavra; o argc novo
+            // o editor ensina no erro seguinte — a caminho do camrig).
+            bool hasCamrig = false;
+            for (const TykerComp& c : t.comps) {
+                if (c.name == "camrig") {
+                    hasCamrig = true;
+                    break;
+                }
+            }
+            if (hasCamrig) {
+                for (const TykerComp& c : t.comps) {
+                    if (c.name == "follow" || c.name == "look") {
+                        if (err.ok) {
+                            err = Error::teach(
+                                c.line,
+                                "camrig já segue e olha o alvo — o " +
+                                    c.name +
+                                    " sobra no mesmo tyker (remove-o ou "
+                                    "troca-o por camrig)",
+                                c.name, "camrig");
+                        }
+                        return;
+                    }
+                }
+            }
         }
     }
 

@@ -3499,10 +3499,23 @@ void closeTextWindow() {
 // O par INSEPARÁVEL do textWin aplica-se ao editor de script (janela de
 // TEXTO PESADO — spec 0.9.1 §1): abrir = portrait + IME show; fechar =
 // landscape + IME hide. O buffer SALVA no ScriptComp ao fechar (§10).
+// 0.12-X: o acumulador do OLHAR (camdrag) — vive AQUI (o hook abaixo
+// consome-o); o rasto por slot dos dedos vive junto ao feedTouchControls
+f32 g_lookDx = 0.0f, g_lookDy = 0.0f;
 // instala os hooks UMA vez no arranque do android_main (ver chamada abaixo)
 static void voniInstallHooks() {
     g_voni.setSceneNameFn([]() { return currentSceneBaseName(); });
     g_voni.setTransitionHook(&voniTransitionHook);
+    // 0.12-X: o delta do olhar (camdrag) — o frame alimenta (a soma dos
+    // dedos não reclamados), o consumo pelo camdrag ZERA (o 2.º consumidor
+    // do mesmo frame recebe zeros — nunca dobra o gesto)
+    g_voni.setLookDeltaFn([](f32& dx, f32& dy) {
+        dx = g_lookDx;
+        dy = g_lookDy;
+        g_lookDx = 0.0f;
+        g_lookDy = 0.0f;
+        return true;
+    });
 }
 
 void openScriptEditor(Handle tic) {
@@ -4858,6 +4871,21 @@ void leavePlayMode() {
 
 // F4: alimenta os TouchControls ativos (só em modo Play) e devolve a máscara
 // de slots reclamados (a câmara ignora esses dedos)
+// 0.12-X — O OLHAR (camdrag): o acumulador + o rasto por slot dos dedos de
+// olhar. O frame() soma o delta (pos-atual − pos-anterior) dos dedos que a
+// UI NÃO reclamou (controlos/canvas/gizmo), SÓ em Play; o tick da V.ONI
+// consome pelo Host::lookDelta (o padrão do g_physics.frame.fwd — o frame
+// alimenta, o passo fixo seguinte consome). O dedo nasce com a máscara do
+// frame do press: se nasceu num controlo, NUNCA é olhar (a regra F3 do dono
+// do gesto).
+struct LookTrack {
+    bool down = false;       // o slot está a ser rastreado (nasceu livre)
+    bool claimed = false;    // nasceu reclamado pela UI — nunca é olhar
+    f32  x = 0.0f, y = 0.0f; // último pos (px ecrã)
+};
+LookTrack g_lookTrack[kMaxPointerSlots];   // o acumulador (g_lookDx/Dy)
+                                           // vive junto ao voniInstallHooks
+
 u32 feedTouchControls(f32 w, f32 h, bool& outDrawn, TouchControls** outTc) {
     u32 claimed = 0;
     outDrawn = false;
@@ -6104,6 +6132,45 @@ void frame() {
     } else {
         g_gizmo.active = gizmo::Axis::None;
         g_gizmo.hovered = gizmo::Axis::None;
+    }
+
+    // 0.12-X: alimenta o OLHAR (camdrag) — a soma do delta dos dedos NÃO
+    // reclamados (controlos/canvas/gizmo), SÓ em Play. O tick da V.ONI
+    // consome pelo Host::lookDelta no passo fixo seguinte (o padrão do
+    // g_physics.frame.fwd); o consumo zera o acumulador. O dedo nasce com
+    // a máscara do press: se nasceu reclamado, NUNCA é olhar (a regra F3).
+    if (g_editor.playMode) {
+        const u32 uiClaimed = claimed | gizmoClaimed | canvasClaimed;
+        for (u32 s = 0; s < kMaxPointerSlots; ++s) {
+            if (g_input.released(s)) {
+                g_lookTrack[s] = LookTrack{};
+                continue;
+            }
+            if (g_input.pressed(s)) {
+                f32 x, y;
+                g_input.pos(s, x, y);
+                g_lookTrack[s].down = true;
+                g_lookTrack[s].claimed = (uiClaimed & (1u << s)) != 0;
+                g_lookTrack[s].x = x;
+                g_lookTrack[s].y = y;
+                continue;   // o press não gera delta (a âncora do gesto)
+            }
+            if (g_input.down(s) && g_lookTrack[s].down &&
+                !g_lookTrack[s].claimed) {
+                f32 x, y;
+                g_input.pos(s, x, y);
+                g_lookDx += x - g_lookTrack[s].x;
+                g_lookDy += y - g_lookTrack[s].y;
+                g_lookTrack[s].x = x;
+                g_lookTrack[s].y = y;
+            }
+        }
+    } else {
+        for (u32 s = 0; s < kMaxPointerSlots; ++s) {
+            g_lookTrack[s] = LookTrack{};   // fora do Play o rasto limpa
+        }
+        g_lookDx = 0.0f;   // e o acumulador idem — o olhar é SÓ de Play
+        g_lookDy = 0.0f;
     }
 
     // input do frame anterior → câmara (só gestos nascidos no viewport

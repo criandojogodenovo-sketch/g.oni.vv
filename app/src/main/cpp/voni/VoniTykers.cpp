@@ -1,7 +1,7 @@
 // voni/VoniTykers.cpp — o runtime dos linkers & tykers (ver header).
 //
 // O QUE VIVE AQUI: o registo de RFs por script (com a rejeição de CICLOS e
-// o teto de profundidade 256), e os HANDLERS dos 13 componentes — a tabela
+// o teto de profundidade 256), e os HANDLERS dos 16 componentes — a tabela
 // que liga nome→handler vive no REGISTO CENTRAL (VoniRegistry.cpp), que é
 // também a fonte das Docs de cada um (Docs obrigatória por entrada).
 //
@@ -632,6 +632,140 @@ bool compShading(Ctx& c, const Comp& m, std::string& err) {
     (void)c;
     (void)m;
     (void)err;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// 0.12-X — A CÂMARA DE TERCEIRA PESSOA (camrig + camdrag)
+//
+// As convenções da câmara de jogo (as DECISÕES FECHADAS da 0.12-X): o −Z
+// local é a direção de visão e +Y o up (CameraComp.h); o rot da V.ONI é
+// GRAUS Euler XYZ e o EngineHost converte com fromEuler(pitch, yaw, roll)
+// na ordem YXZ — com roll 0, o −Z local aponta no mundo
+//   fwd(yaw, pitch) = (−cos(p)·sin(y), sin(p), −cos(p)·cos(y))
+// (a mesma derivação do alignToView do CamGizmo). O yaw que aponta o −Z a
+// um alvo é atan2(−dx, −dz); o pitch é asin(dy/|d|).
+//
+// O PAR camrig/camdrag: o camdrag roda o yaw/pitch do TykerState com o
+// arrasto do dedo; o camrig assenta a câmara com eles. O yaw é o azimute
+// DA CÂMARA em volta do alvo (a posição dela no plano XZ), não a direção
+// de visão — arrastar para a direita roda a VISTA para a direita (a câmara
+// orbita para o lado −X), arrastar para baixo baixa o olhar (a câmara
+// sobe); o sens negativo inverte (o escritor do script decide).
+// ---------------------------------------------------------------------------
+
+namespace {
+
+constexpr f32 kCamPitchMin = -20.0f;   // FIXO (decisão fechada da 0.12-X)
+constexpr f32 kCamPitchMax = 70.0f;
+constexpr f32 kCamDegToRad = 0.017453292519943295f;
+constexpr f32 kCamRadToDeg = 57.29577951308232f;
+
+// dir(yaw, pitch) — a direção DO alvo PARA a câmara (o offset esférico:
+// yaw = azimute no plano XZ, pitch = elevação)
+void camOffsetDir(f32 yawDeg, f32 pitchDeg, f32 out[3]) {
+    const f32 y = yawDeg * kCamDegToRad;
+    const f32 p = pitchDeg * kCamDegToRad;
+    out[0] = std::sin(y) * std::cos(p);
+    out[1] = std::sin(p);
+    out[2] = std::cos(y) * std::cos(p);
+}
+
+} // namespace
+
+// camrig(d,h[,suav]): a câmara assenta a distância d e a altura h acima do
+// alvo (o pivô é alvo+(0,h,0) — pitch 0 deixa-a EXATAMENTE h acima), olha
+// para alvo+h/2, suavizada por (1 − e^(−suav·dt)) — o mesmo decaimento do
+// follow. limit(min,max) clampa a distância FINAL (após a suavização),
+// contra o pivô. Orientação: o −Z local aponta ao alvo+h/2 (GRAUS no rot).
+bool compCamrig(Ctx& c, const Comp& m, std::string& err) {
+    f64 d = 0.0, h = 0.0, suav = 0.0;
+    if (!argNum(m, 0, d, err) || !argNum(m, 1, h, err)) {
+        return false;
+    }
+    if (m.vals.size() >= 3 && !argNum(m, 2, suav, err)) {
+        return false;
+    }
+    std::string origem;
+    if (!sideTic(c.link.origem, "camrig", origem, err)) {
+        return false;
+    }
+    f32 tp[3];
+    if (!targetPos(c, tp, err)) {
+        return false;   // alvo inválido (TIC sem Transform3D) = erro cedo
+    }
+    // o pivô do rig: alvo + h acima (a câmara orbita ESTE ponto à dist. d)
+    const f32 pivot[3] = {tp[0], tp[1] + (f32)h, tp[2]};
+    f32 dir[3];
+    camOffsetDir(c.st.camYaw, c.st.camPitch, dir);
+    const f32 desired[3] = {pivot[0] + dir[0] * (f32)d,
+                            pivot[1] + dir[1] * (f32)d,
+                            pivot[2] + dir[2] * (f32)d};
+    f32 op[3];
+    if (!ticPos(c.host, origem, op, err)) {
+        return false;   // a câmara sem Transform3D é erro cedo idem
+    }
+    f32 np[3];
+    if (suav > 0.0) {
+        const f32 kk = (f32)(1.0 - std::exp(-suav * c.dt));
+        np[0] = op[0] + (desired[0] - op[0]) * kk;
+        np[1] = op[1] + (desired[1] - op[1]) * kk;
+        np[2] = op[2] + (desired[2] - op[2]) * kk;
+    } else {
+        np[0] = desired[0];
+        np[1] = desired[1];
+        np[2] = desired[2];
+    }
+    clampLimit(c.st, pivot, op, np);   // limit(min,max): APÓS a suavização
+    if (!setTicPos(c.host, origem, np, err)) {
+        return false;
+    }
+    // orientação: o −Z local aponta a alvo+h/2 (a meia-altura do rig — a
+    // convenção lookAt da câmara de jogo; rot em GRAUS no canal do EngineHost)
+    const f32 la[3] = {tp[0], tp[1] + (f32)h * 0.5f, tp[2]};
+    const f32 dv[3] = {la[0] - np[0], la[1] - np[1], la[2] - np[2]};
+    const f32 len = std::sqrt(dv[0] * dv[0] + dv[1] * dv[1] + dv[2] * dv[2]);
+    if (len < 1e-6f) {
+        err = "camrig: a câmara caiu EM CIMA do ponto de olhar — afasta-a "
+              "(a distância d tem de ser maior que 0)";
+        return false;
+    }
+    const f32 pitchDeg = std::asin(dv[1] / len) * kCamRadToDeg;
+    const f32 yawDeg = std::atan2(-dv[0], -dv[2]) * kCamRadToDeg;
+    std::string herr;
+    if (!c.host.setProp(origem, {"rot"},
+                        Value::ofVec3(pitchDeg, yawDeg, 0.0f), herr)) {
+        err = herr;
+        return false;
+    }
+    return true;
+}
+
+// camdrag(sens): roda o yaw/pitch do TykerState com o delta do arrasto (o
+// consumo do Host::lookDelta ZERA o acumulador — 2 tykers com camdrag não
+// dobram o gesto). Sem input no hospedeiro (lookDelta false) é no-op
+// honesto — o script não morre (o padrão do stopAnim). O pitch é clamped
+// FIXO -20..70; o yaw é 360° livre (normalizado 0..360).
+bool compCamdrag(Ctx& c, const Comp& m, std::string& err) {
+    f64 sens = 0.0;
+    if (!argNum(m, 0, sens, err)) {
+        return false;
+    }
+    f32 dx = 0.0f, dy = 0.0f;
+    if (!c.host.lookDelta(dx, dy)) {
+        return true;   // hospedeiro sem input — não morre, não roda
+    }
+    c.st.camYaw -= dx * (f32)sens;    // arrastar p/ a direita roda a vista p/ a direita
+    c.st.camPitch += dy * (f32)sens;  // arrastar p/ baixo baixa o olhar (a câmara sobe)
+    if (c.st.camPitch < kCamPitchMin) {
+        c.st.camPitch = kCamPitchMin;
+    }
+    if (c.st.camPitch > kCamPitchMax) {
+        c.st.camPitch = kCamPitchMax;
+    }
+    if (c.st.camYaw >= 360.0f || c.st.camYaw < 0.0f) {
+        c.st.camYaw -= std::floor(c.st.camYaw / 360.0f) * 360.0f;
+    }
     return true;
 }
 

@@ -70,6 +70,12 @@ public:
     void setSceneNameFn(std::function<std::string()> fn) {
         sceneNameFn_ = std::move(fn);
     }
+    // 0.12-X: o delta do arrasto de olhar (camdrag) — o main instala o
+    // real (o acumulador que o frame alimenta e o consumo zera); sem hook
+    // o Host::lookDelta responde false e o camdrag ignora (nunca morre)
+    void setLookDeltaFn(std::function<bool(f32&, f32&)> fn) {
+        lookDeltaFn_ = std::move(fn);
+    }
 
     void tick(Scene& scene, f32 dt) override;
 
@@ -98,6 +104,7 @@ private:
     std::function<bool(const std::string&, const std::string&, std::string&)>
         transitionHook_;
     std::function<std::string()> sceneNameFn_;
+    std::function<bool(f32&, f32&)> lookDeltaFn_;   // 0.12-X (camdrag)
 
     // erro fatal pendente (popError drena → main: engine.log/toast/editor)
     voni::Error lastFatal_;

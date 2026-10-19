@@ -7537,3 +7537,302 @@ TEST(regress_voni_timers) {
                    "sobreviveu ao stop — viveu num static?)", h.logs.size());
     }
 }
+
+// ===========================================================================
+// R-055 (0.12-X) — A CÂMARA DE TERCEIRA PESSOA NÃO PERDE AS CONVENÇÕES.
+// O que se vigia: (1) as 2 entradas existem APENAS pela tabela (Componente
+// Continuo, argc fechado, Docs completas); (2) as convenções da CÂMARA —
+// o −Z local é a visão (o rot em GRAUS no canal da casa), o pivô é
+// alvo+h, o olhar é alvo+h/2, a suavização é 1−e^(−suav·dt); (3) o
+// camdrag: yaw 360° livre NORMALIZADO, pitch clamped FIXO −20..70, o
+// consumo do lookDelta ZERA (2 consumidores nunca dobram o gesto) e o
+// hospedeiro sem input é no-op honesto (o script não morre); (4) o
+// camrig não divide o tyker com follow/look (o erro ENSINA com o par do
+// Substituir); (5) a referência pública tem as secções novas.
+// A mutação cola no RELATORIO-0.12-X-CAMRIG.md (M-3.9x1/x2).
+// ===========================================================================
+namespace {
+
+struct Host055 : voni::Host {
+    struct TicP {
+        std::string name;
+        f32 pos[3] = {0, 0, 0};
+        f32 rot[3] = {0, 0, 0};   // GRAUS (a convenção do engine)
+    };
+    std::vector<TicP> tics;
+    f32 lookDx = 0.0f, lookDy = 0.0f;
+    bool hasLook = false;   // false = o hospedeiro sem input (o default)
+
+    TicP* tic(const std::string& n) {
+        for (auto& t : tics) {
+            if (t.name == n) return &t;
+        }
+        return nullptr;
+    }
+    void log(const char*) override {}
+    bool getProp(const std::string& n, const std::vector<std::string>& ch,
+                 voni::Value& out, std::string& err) override {
+        TicP* t = tic(n);
+        if (!t) {
+            err = "TIC '" + n + "' não existe";
+            return false;
+        }
+        if (ch.empty()) {
+            out = voni::Value::ofTic(n);
+            return true;
+        }
+        if (ch[0] == "pos") {
+            out = voni::Value::ofVec3(t->pos[0], t->pos[1], t->pos[2]);
+            return true;
+        }
+        if (ch[0] == "rot") {
+            out = voni::Value::ofVec3(t->rot[0], t->rot[1], t->rot[2]);
+            return true;
+        }
+        err = "propriedade '" + ch[0] + "' não existe";
+        return false;
+    }
+    bool setProp(const std::string& n, const std::vector<std::string>& ch,
+                 const voni::Value& v, std::string& err) override {
+        TicP* t = tic(n);
+        if (!t) {
+            err = "TIC '" + n + "' não existe";
+            return false;
+        }
+        if (ch.size() == 1 && ch[0] == "pos" && v.t == voni::Type::Vec3) {
+            t->pos[0] = v.v3[0];
+            t->pos[1] = v.v3[1];
+            t->pos[2] = v.v3[2];
+            return true;
+        }
+        if (ch.size() == 1 && ch[0] == "rot" && v.t == voni::Type::Vec3) {
+            t->rot[0] = v.v3[0];
+            t->rot[1] = v.v3[1];
+            t->rot[2] = v.v3[2];
+            return true;
+        }
+        err = "escrita não suportada no host-055";
+        return false;
+    }
+    bool ticExists(const std::string& n) override { return tic(n) != nullptr; }
+    void moveTic(f32, f32, f32) override {}
+    void explodeTic(bool) override {}
+    bool importAnim(const std::string&, std::string&) override {
+        return false;
+    }
+    bool transitionTo(const std::string&, const std::string&,
+                      std::string&) override { return false; }
+    std::string currentSceneName() override { return "c"; }
+    bool search(const std::string&, const std::vector<std::string>&,
+                voni::Value&, std::string&) override { return false; }
+    f64 frameDt() override { return 1.0 / 60.0; }
+    bool lookDelta(f32& dx, f32& dy) override {
+        if (!hasLook) {
+            dx = 0.0f;
+            dy = 0.0f;
+            return false;
+        }
+        dx = lookDx;
+        dy = lookDy;
+        lookDx = 0.0f;
+        lookDy = 0.0f;
+        return true;
+    }
+};
+
+} // namespace
+
+TEST(regress_camrig) {
+    using namespace voni;
+
+    // ---- (1) A FONTE ÚNICA: as 2 entradas são Componente Continuo com o
+    // argc fechado e as Docs completas (o exemplo é o TRIO da campanha) ---
+    {
+        const reg::Entry* rig = reg::find("camrig");
+        EXPECT_MSG(rig != nullptr, "a entrada 'camrig' saiu do registo");
+        if (rig) {
+            EXPECT(rig->kind == reg::Kind::Componente);
+            EXPECT(rig->compKind == reg::CompKind::Continuo);
+            EXPECT(rig->minArgs == 2 && rig->maxArgs == 3);
+            EXPECT(rig->syntax != nullptr && *rig->syntax);
+            EXPECT(rig->desc != nullptr && *rig->desc);
+            EXPECT(rig->example != nullptr && *rig->example);
+            EXPECT(std::string(rig->example).find("camdrag") !=
+                   std::string::npos);
+        }
+        const reg::Entry* drag = reg::find("camdrag");
+        EXPECT_MSG(drag != nullptr, "a entrada 'camdrag' saiu do registo");
+        if (drag) {
+            EXPECT(drag->kind == reg::Kind::Componente);
+            EXPECT(drag->compKind == reg::CompKind::Continuo);
+            EXPECT(drag->minArgs == 1 && drag->maxArgs == 1);
+            EXPECT(drag->syntax != nullptr && *drag->syntax);
+            EXPECT(drag->desc != nullptr && *drag->desc);
+        }
+    }
+
+    // ---- (2) AS CONVENÇÕES DA CÂMARA: snap d/h + o olhar alvo+h/2 com o
+    // −Z local (pitch −10.62° / yaw 0 para o rig (8,3) do exemplo) --------
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(camera)to(jogador)=RF(cam)\n"
+            "tyker(camera_jogo){ find(cam) camrig(8, 3) }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        Host055 h;
+        h.tics.push_back({"camera", {40, 40, 40}});
+        h.tics.push_back({"jogador", {0, 0, 0}});
+        EXPECT(s.runStart(h, err));
+        EXPECT(s.runFrame(h, h.frameDt(), err));
+        Host055::TicP* cam = h.tic("camera");
+        EXPECT(cam != nullptr);
+        EXPECT(test::nearEqF(cam->pos[0], 0.0f, 1e-3f));
+        EXPECT(test::nearEqF(cam->pos[1], 3.0f, 1e-3f));   // o pivô alvo+h
+        EXPECT(test::nearEqF(cam->pos[2], 8.0f, 1e-3f));   // d a +Z (yaw 0)
+        // o −Z aponta a alvo+h/2 = (0,1.5,0): pitch −10.62°, yaw 0 (GRAUS)
+        EXPECT_MSG(test::nearEqF(cam->rot[0], -10.62f, 1e-2f),
+                   "o pitch da câmara deu %.3f (o contrato é −10.62 — o −Z "
+                   "deixou de apontar a alvo+h/2?)", cam->rot[0]);
+        EXPECT(test::nearEqF(cam->rot[1], 0.0f, 1e-2f));
+    }
+    // a suavização é 1−e^(−suav·dt): o 1.º passo dá exatamente d0·(1−k)
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(camera)to(jogador)=RF(cam)\n"
+            "tyker(camera_jogo){ find(cam) camrig(8, 3, 6) }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        Host055 h;
+        h.tics.push_back({"camera", {40, 0, 0}});
+        h.tics.push_back({"jogador", {0, 0, 0}});
+        EXPECT(s.runStart(h, err));
+        EXPECT(s.runFrame(h, h.frameDt(), err));
+        Host055::TicP* cam = h.tic("camera");
+        EXPECT(cam != nullptr);
+        const f32 k = 1.0f - std::exp(-6.0f / 60.0f);
+        const f32 d0 = std::sqrt(40.0f * 40.0f + 9.0f + 64.0f);
+        const f32 d1 = std::sqrt(cam->pos[0] * cam->pos[0] +
+                                 (cam->pos[1] - 3.0f) * (cam->pos[1] - 3.0f) +
+                                 (cam->pos[2] - 8.0f) * (cam->pos[2] - 8.0f));
+        EXPECT_MSG(test::nearEqF(d1, d0 * (1.0f - k), 5e-3f),
+                   "o 1.º passo suavizado deu %.4f (o contrato é "
+                   "d0·(1−k)=%.4f)", d1, d0 * (1.0f - k));
+    }
+    // o limit clampa a distância FINAL contra o pivô (após a suavização)
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(camera)to(jogador)=RF(cam)\n"
+            "tyker(camera_jogo){ find(cam) camrig(20, 0, 6) limit(3, 12) }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        Host055 h;
+        h.tics.push_back({"camera", {40, 0, 0}});
+        h.tics.push_back({"jogador", {0, 0, 0}});
+        EXPECT(s.runStart(h, err));
+        EXPECT(s.runFrame(h, h.frameDt(), err));
+        Host055::TicP* cam = h.tic("camera");
+        EXPECT(cam != nullptr);
+        const f32 len = std::sqrt(cam->pos[0] * cam->pos[0] +
+                                  cam->pos[1] * cam->pos[1] +
+                                  cam->pos[2] * cam->pos[2]);
+        EXPECT_MSG(test::nearEqF(len, 12.0f, 1e-2f),
+                   "a distância final deu %.3f (o contrato é 12 — o limit "
+                   "deixou de clamping APÓS a suavização?)", len);
+    }
+
+    // ---- (3) O CAMDRAG: yaw 360° normalizado, pitch FIXO, consumo 1× ----
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(camera)to(jogador)=RF(cam)\n"
+            "tyker(camera_jogo){ find(cam) camdrag(1) camrig(4, 0) }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        Host055 h;
+        h.hasLook = true;
+        h.tics.push_back({"camera", {0, 0, 0}});
+        h.tics.push_back({"jogador", {0, 0, 0}});
+        EXPECT(s.runStart(h, err));
+        EXPECT(s.runFrame(h, h.frameDt(), err));
+        Host055::TicP* cam = h.tic("camera");
+        EXPECT(cam != nullptr);
+        EXPECT(test::nearEqF(cam->pos[2], 4.0f, 1e-3f));
+        // yaw: −90 orbita a +X; +360 devolve ao MESMO sítio (normalizado)
+        h.lookDx = -90.0f;
+        EXPECT(s.runFrame(h, h.frameDt(), err));
+        EXPECT(test::nearEqF(cam->pos[0], 4.0f, 1e-3f));
+        h.lookDx = -360.0f;
+        EXPECT(s.runFrame(h, h.frameDt(), err));
+        EXPECT(test::nearEqF(cam->pos[0], 4.0f, 1e-3f));
+        // pitch: +200 CLAMPA a 70 (FIXO — o teto nunca passa)
+        h.lookDy = 200.0f;
+        EXPECT(s.runFrame(h, h.frameDt(), err));
+        EXPECT_MSG(test::nearEqF(cam->pos[1],
+                                 4.0f * std::sin(70.0f * 3.14159265f / 180.0f),
+                                 1e-2f),
+                   "o pitch passou do teto 70 (pos.y=%.3f — o clamp FIXO "
+                   "morreu?)", cam->pos[1]);
+        // e −400 clampa a −20 (o chão)
+        h.lookDy = -400.0f;
+        EXPECT(s.runFrame(h, h.frameDt(), err));
+        EXPECT(test::nearEqF(cam->pos[1],
+                             4.0f * std::sin(-20.0f * 3.14159265f / 180.0f),
+                             1e-2f));
+        // o consumo ZERA: frame sem gesto NÃO repete o anterior
+        EXPECT(s.runFrame(h, h.frameDt(), err));
+        EXPECT(test::nearEqF(cam->pos[1],
+                             4.0f * std::sin(-20.0f * 3.14159265f / 180.0f),
+                             1e-2f));
+    }
+    // o hospedeiro SEM input é no-op honesto (o script não morre)
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(camera)to(jogador)=RF(cam)\n"
+            "tyker(camera_jogo){ find(cam) camdrag(0.3) }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        Host055 h;   // hasLook=false — o default da base
+        h.tics.push_back({"camera", {0, 0, 0}});
+        h.tics.push_back({"jogador", {0, 0, 0}});
+        EXPECT(s.runStart(h, err));
+        for (int i = 0; i < 10; ++i) {
+            EXPECT(s.runFrame(h, h.frameDt(), err));
+        }
+    }
+
+    // ---- (4) O COMPILADOR NÃO DEIXA O CAMRIG DIVIDIR O TYKER ------------
+    {
+        Error err;
+        Script::compile(
+            "linker(camera)to(jogador)=RF(cam)\n"
+            "tyker(c){ find(cam) camrig(8, 3) follow(2) }\n"
+            "central main { }\n", err);
+        EXPECT(!err.ok);
+        EXPECT(err.message.find("camrig") != std::string::npos);
+        EXPECT(err.message.find("sobra") != std::string::npos);
+        EXPECT(err.fixFrom == "follow");
+        EXPECT(err.fixTo == "camrig");
+    }
+    {
+        Error err;
+        Script::compile(
+            "linker(camera)to(jogador)=RF(cam)\n"
+            "tyker(c){ find(cam) camrig(8, 3) look() }\n"
+            "central main { }\n", err);
+        EXPECT(!err.ok);
+        EXPECT(err.fixFrom == "look");
+        EXPECT(err.fixTo == "camrig");
+    }
+
+    // ---- (5) A REFERÊNCIA PÚBLICA TEM AS SECÇÕES NOVAS (a fonte única
+    // alimenta a referência — o R-013 afere o byte a byte das linhas) ----
+    {
+        const std::string ref = reg::fullReferenceMarkdown();
+        EXPECT(ref.find("### camrig") != std::string::npos);
+        EXPECT(ref.find("### camdrag") != std::string::npos);
+    }
+}

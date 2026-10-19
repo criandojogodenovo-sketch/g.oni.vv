@@ -12,6 +12,8 @@
 #include "core/VoniSystem.h"
 #include "render/Primitives.h"   // 0.12-U (3.9b): o kind do spawn
 #include "core/SceneSerializer.h"
+#include "core/Project.h"        // 0.12-X: o round-trip .goni REAL
+#include "FakeStorage.h"         // (o storage em memória da casa)
 #include "components/ScriptComp.h"
 #include "components/Transform3D.h"
 #include "voni/Voni.h"
@@ -992,4 +994,180 @@ TEST(voni_spawn_tipo_desconhecido_mata_a_run_com_linha) {
     voni::Error perr2;
     EXPECT(!e.voni.popError(t, perr2));   // drenado: não volta
     EXPECT(!e.scene.find("colega").valid());   // NADA nasceu
+}
+
+// ===========================================================================
+// 0.12-X — A CÂMARA DE TERCEIRA PESSOA NO MOTOR REAL (VoniSystem +
+// EngineHost sobre Scene): o camrig assenta pos+rot do Transform3D da
+// câmara, o camdrag consome o delta pelo hook lookDelta do VoniSystem, o
+// alvo sem Transform3D é erro cedo e o .goni preserva o script.
+// ===========================================================================
+namespace {
+
+struct CamEnv {
+    Scene scene;
+    VoniSystem voni;
+    Handle cam{};
+    Handle jogador{};
+
+    CamEnv() {
+        cam = scene.create("camera");
+        scene.get(cam)->addComponent<Transform3D>();
+        jogador = scene.create("jogador");
+        scene.get(jogador)->addComponent<Transform3D>();
+        scene.get(jogador)->addComponent<ScriptComp>();
+    }
+
+    Transform3D* camTr() {
+        return scene.get(cam)->getComponent<Transform3D>();
+    }
+};
+
+} // namespace
+
+TEST(voni_motor_camrig_assenta_a_camara_real) {
+    CamEnv e;
+    e.scene.get(e.jogador)->getComponent<ScriptComp>()->source =
+        "linker(camera)to(jogador)=RF(cam)\n"
+        "tyker(camera_jogo){ find(cam) camrig(8, 3) }\n"
+        "central main { }\n";
+    {
+        Transform3D* tr = e.camTr();
+        tr->pos = Vec3{40.0f, 40.0f, 40.0f};
+        tr->updateWorld();
+    }
+    voni::Error err;
+    EXPECT(e.voni.editorStart(e.scene, e.jogador, err));
+    e.voni.tick(e.scene, 1.0f / 60.0f);
+    Transform3D* tr = e.camTr();
+    // snap: distância 8 do pivô (0,3,0), a +Z; olha alvo+h/2 (pitch −10.62)
+    EXPECT(test::nearEqF(tr->pos.x, 0.0f, 1e-3f));
+    EXPECT(test::nearEqF(tr->pos.y, 3.0f, 1e-3f));
+    EXPECT(test::nearEqF(tr->pos.z, 8.0f, 1e-3f));
+    f32 px = 0, py = 0, pz = 0;
+    Quat::toEuler(tr->rot, px, py, pz);
+    const f32 deg = 57.29577951308232f;
+    EXPECT(test::nearEqF(px * deg, -10.62f, 1e-2f));
+    EXPECT(test::nearEqF(py * deg, 0.0f, 1e-2f));
+}
+
+TEST(voni_motor_camdrag_roda_pelo_hook_real) {
+    CamEnv e;
+    e.scene.get(e.jogador)->getComponent<ScriptComp>()->source =
+        "linker(camera)to(jogador)=RF(cam)\n"
+        "tyker(camera_jogo){ find(cam) camdrag(1) camrig(4, 0) }\n"
+        "central main { }\n";
+    // o acumulador do MAIN simulado: o frame alimenta, o consumo ZERA (o
+    // contrato do Host::lookDelta — 2 consumidores nunca dobram o gesto)
+    f32 accX = 0.0f, accY = 0.0f;
+    e.voni.setLookDeltaFn([&accX, &accY](f32& dx, f32& dy) {
+        dx = accX;
+        dy = accY;
+        accX = 0.0f;
+        accY = 0.0f;
+        return true;
+    });
+    voni::Error err;
+    EXPECT(e.voni.editorStart(e.scene, e.jogador, err));
+    e.voni.tick(e.scene, 1.0f / 60.0f);
+    Transform3D* tr = e.camTr();
+    EXPECT(test::nearEqF(tr->pos.z, 4.0f, 1e-3f));   // yaw 0 → a +Z
+    // UM gesto de −90 → yaw 90 → a câmara orbita para +X
+    accX = -90.0f;
+    e.voni.tick(e.scene, 1.0f / 60.0f);
+    EXPECT(test::nearEqF(tr->pos.x, 4.0f, 1e-3f));
+    EXPECT(test::nearEqF(tr->pos.z, 0.0f, 1e-3f));
+    // SEM gesto novo: o acumulador ficou a ZERO (o consumo zerou) — a
+    // câmara NÃO continua a rodar
+    for (int i = 0; i < 10; ++i) {
+        e.voni.tick(e.scene, 1.0f / 60.0f);
+    }
+    EXPECT(test::nearEqF(tr->pos.x, 4.0f, 1e-3f));
+    // SEM hook nenhum (o VoniSystem fresco): o camdrag é no-op — o script
+    // vive, a câmara não roda (o padrão do hospedeiro sem input)
+    CamEnv e2;
+    e2.scene.get(e2.jogador)->getComponent<ScriptComp>()->source =
+        "linker(camera)to(jogador)=RF(cam)\n"
+        "tyker(camera_jogo){ find(cam) camdrag(0.3) camrig(4, 0) }\n"
+        "central main { }\n";
+    voni::Error err2;
+    EXPECT(e2.voni.editorStart(e2.scene, e2.jogador, err2));
+    for (int i = 0; i < 5; ++i) {
+        e2.voni.tick(e2.scene, 1.0f / 60.0f);
+    }
+    Transform3D* tr2 = e2.camTr();
+    EXPECT(test::nearEqF(tr2->pos.z, 4.0f, 1e-3f));   // yaw 0 — nada rodou
+    EXPECT(test::nearEqF(tr2->pos.x, 0.0f, 1e-3f));
+}
+
+TEST(voni_motor_camrig_sem_transform_erro_cedo) {
+    CamEnv e;
+    // o destino EXISTE mas não tem Transform3D — o getProp("pos") falha e
+    // o 1.º frame morre com o erro CEDO (nunca câmara parada em silêncio)
+    Handle fantasma = e.scene.create("fantasma");   // sem Transform3D
+    (void)fantasma;
+    e.scene.get(e.jogador)->getComponent<ScriptComp>()->source =
+        "linker(camera)to(fantasma)=RF(cam)\n"
+        "tyker(camera_jogo){ find(cam) camrig(8, 3) }\n"
+        "central main { }\n";
+    voni::Error err;
+    EXPECT(e.voni.editorStart(e.scene, e.jogador, err));
+    e.voni.tick(e.scene, 1.0f / 60.0f);
+    Handle t{};
+    voni::Error perr;
+    EXPECT(e.voni.popError(t, perr));
+    EXPECT(perr.message.find("fantasma") != std::string::npos);
+    EXPECT(perr.message.find("Transform3D") != std::string::npos);
+    // e a câmara NÃO mexeu (o erro veio ANTES do assentar)
+    Transform3D* tr = e.camTr();
+    EXPECT(test::nearEqF(tr->pos.x, 0.0f, 1e-5f));
+}
+
+TEST(voni_goni_roundtrip_preserva_o_camrig) {
+    // o caminho REAL do .goni: Project.saveActiveScene → open →
+    // loadActiveScene — o fonte do script volta BYTE A BYTE e o script
+    // carregado AINDA corre (a câmara assenta no motor real)
+    const char* fonte =
+        "linker(camera)to(jogador)=RF(cam)\n"
+        "tyker(camera_jogo){ find(cam) camrig(8, 3, 6) camdrag(0.3) "
+        "limit(3, 12) }\n"
+        "central main { }\n";
+    Scene salvo;
+    Handle cam = salvo.create("camera");
+    salvo.get(cam)->addComponent<Transform3D>();
+    Handle jogador = salvo.create("jogador");
+    salvo.get(jogador)->addComponent<Transform3D>();
+    salvo.get(jogador)->addComponent<ScriptComp>();
+    salvo.get(jogador)->getComponent<ScriptComp>()->source = fonte;
+
+    FakeStorage fs;
+    Project p;
+    ASSERT(Project::createNew(fs, "camteste", p));
+    EXPECT(p.saveActiveScene(fs, salvo));   // scenes/main.goni
+
+    Project q;
+    ASSERT(Project::open(fs, q));
+    Scene carregado;
+    SceneSerializer::LoadCtx ctx;   // defaults (paths vazios)
+    EXPECT(q.loadActiveScene(fs, carregado, ctx));
+    Tic* t = carregado.get(carregado.find("jogador"));
+    EXPECT(t != nullptr);
+    ScriptComp* sc = t->getComponent<ScriptComp>();
+    EXPECT(sc != nullptr);
+    EXPECT(sc->source == fonte);   // byte a byte (o trio no .goni)
+
+    // o script CARREGADO corre no motor real (a vida depois do disco) —
+    // com suav 6 o exponencial dá passos de ~9.5%: 600 ticks convergem
+    VoniSystem voni;
+    Handle jc = carregado.find("jogador");
+    voni::Error err;
+    EXPECT(voni.editorStart(carregado, jc, err));
+    for (int i = 0; i < 600; ++i) {
+        voni.tick(carregado, 1.0f / 60.0f);
+    }
+    Transform3D* tr = carregado.get(carregado.find("camera"))
+                          ->getComponent<Transform3D>();
+    EXPECT(tr != nullptr);
+    EXPECT(test::nearEqF(tr->pos.y, 3.0f, 1e-2f));   // converge ao pivô (0,3,0)
+    EXPECT(test::nearEqF(tr->pos.z, 8.0f, 1e-2f));   // a distância 8 a +Z
 }

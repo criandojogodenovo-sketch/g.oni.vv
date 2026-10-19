@@ -33,9 +33,10 @@ inline f32 locRad2Deg(f32 r) { return r * 57.2957795131f; }
 
 EngineHost::EngineHost(vv::Scene& scene, vv::Handle hostTic,
                        const vv::voni_engine::TransitionHook* transition,
-                       const vv::voni_engine::SceneNameFn* sceneName)
+                       const vv::voni_engine::SceneNameFn* sceneName,
+                       const vv::voni_engine::LookDeltaFn* lookDelta)
     : scene_(scene), hostTic_(hostTic), transition_(transition),
-      sceneName_(sceneName) {}
+      sceneName_(sceneName), lookDelta_(lookDelta) {}
 
 namespace {
 
@@ -439,6 +440,13 @@ bool EngineHost::spawnTic(const std::string& tipo, f32 x, f32 y, f32 z,
     }
     outName = t->name;
     return true;
+}
+
+// 0.12-X: o delta do arrasto de olhar (camdrag) — delega no hook que o
+// main alimenta; sem hook (hospedeiro sem input) devolve false e o
+// camdrag ignora (o script não morre — o padrão do stopAnim/spawnTic)
+bool EngineHost::lookDelta(f32& dx, f32& dy) {
+    return lookDelta_ && *lookDelta_ ? (*lookDelta_)(dx, dy) : false;
 }
 
 bool EngineHost::transitionTo(const std::string& fromName,

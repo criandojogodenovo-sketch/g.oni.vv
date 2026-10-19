@@ -548,7 +548,7 @@ tyker(s){ find(p) Change(destino)to(cubo2) }
 
 ### point
 - **Sintaxe**: `point() · point(x,y,z)`
-- **Descrição**: point(x,y,z) fixa um ponto absoluto como alvo do follow/look/orbit; point() limpa o ponto e volta ao destino vivo.
+- **Descrição**: point(x,y,z) fixa um ponto absoluto como alvo do follow/look/orbit/camrig; point() limpa o ponto e volta ao destino vivo.
 - **Equivalência**: alvo fixo (coordenadas)
 - **Exemplo**:
 ```
@@ -594,7 +594,7 @@ tyker(t){ find(a) blend(correr, 0.4) }
 
 ### limit
 - **Sintaxe**: `limit(min,max)`
-- **Descrição**: Limita a distância da origem ao alvo entre min e max (aplica-se ao follow e ao orbit).
+- **Descrição**: Limita a distância da origem ao alvo entre min e max (aplica-se ao follow, ao orbit e ao camrig — no camrig clampa a distância final, após a suavização).
 - **Equivalência**: clamp da distância
 - **Exemplo**:
 ```
@@ -608,6 +608,25 @@ tyker(s){ find(p) follow(2) limit(1, 10) }
 - **Exemplo**:
 ```
 tyker(s){ find(p) delay(2) follow(1) }
+```
+
+### camrig
+- **Sintaxe**: `camrig(d,h) · camrig(d,h,suav)`
+- **Descrição**: Câmara de terceira pessoa: assenta a distância d e a altura h acima do alvo (o pivô roda com o yaw/pitch do camdrag), olha para alvo+h/2; suav (por segundo) suaviza a perseguição; limit(min,max) clampa a distância final. Não se mistura com follow/look.
+- **Equivalência**: câmara de terceira pessoa
+- **Exemplo**:
+```
+linker(camera)to(jogador)=RF(cam)
+tyker(camera_jogo){ find(cam) camrig(8, 3, 6) camdrag(0.3) limit(3, 12) }
+```
+
+### camdrag
+- **Sintaxe**: `camdrag(sens)`
+- **Descrição**: Roda a câmara com o arrasto do dedo: yaw 360° livre, pitch limitado a -20..70 graus; só lê o que os controlos de toque não reclamaram e só corre em Play (o sens negativo inverte).
+- **Equivalência**: olhar com o dedo (touch look)
+- **Exemplo**:
+```
+tyker(camera_jogo){ find(cam) camrig(8, 3, 6) camdrag(0.3) }
 ```
 
 ### shading

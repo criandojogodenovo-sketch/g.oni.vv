@@ -1,8 +1,9 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-19 · vc: 100 · Último commit: este (o 0.12-U 3.9c —
-os RELÓGIOS: every/after/when no AST+parser, o estado por nó AST que
-morre no stop; R-054 + M-3.9c1/2/3; o relatório próprio diz o resto)
+Atualizado: 2026-10-19 · vc: 101 · Último commit: este (o 0.12-X 3.9x —
+a CÂMARA DE TERCEIRA PESSOA: camrig + camdrag + limit no registo, o
+Host::lookDelta, o conflito no compilador; R-055 + M-3.9x1/x2; o
+relatório próprio diz o resto)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -10,6 +11,12 @@ morre no stop; R-054 + M-3.9c1/2/3; o relatório próprio diz o resto)
 
 ## §1 Onde estamos
 
+- **Campanha 0.12-X (CÂMARA DE TERCEIRA PESSOA) — FECHADA (3.9x, vc
+  101)** (o camrig + camdrag + limit no REGISTO como Contínuos; o
+  yaw/pitch no TykerState; o Host::lookDelta com o consumo a ZERAR; o
+  conflito camrig↔follow/look no compilador com o par do Substituir;
+  pins ×14 + R-055 + M-3.9x1/x2; a história vive no
+  RELATORIO-0.12-X-ABERTURA.md e no RELATORIO-0.12-X-CAMRIG.md).
 - **Campanha 0.12-U (V.ONI BLOCO A — a REDUÇÃO DE TRABALHO) — FECHADA
   (3.9a..3.9c + o FECHO, vc 98–100)** (as 7 features no registo — o
   View P universal, as 14 Funções, o spawn pela porta do Host, os
@@ -17,22 +24,6 @@ morre no stop; R-054 + M-3.9c1/2/3; o relatório próprio diz o resto)
   ×37 + R-052/R-053/R-054 + M-3.9a1..c3; o CRITÉRIO DO PLATFORMER corre
   VERDE — o juiz final; a história vive no RELATORIO-0.12-U-ABERTURA.md
   e nos relatórios das sub-fases + o FECHO).
-  **3.9a (vc 98)**: o View P aceita EXPRESSÃO dos 7 tipos via
-  valueText() (a string de sempre byte a byte); as 14 FUNÇÕES no
-  registo (Kind::Funcao NOVO — abs/min/max/clamp/lerp/floor/ceil/round/
-  sqrt/sin/cos/random/random_int/distance; sin/cos em GRAUS; o
-  despacho no evalCall consulta a TABELA e o argc vem da entrada; a fn
-  do utilizador vence); pins ×15 + R-052 + M-3.9a1/a2/a3
-  vermelho→verde. test_core 0 falhas · c33 1010/0 · vc 98.
-  **3.9b (vc 99)**: o spawn(tipo, x, y, z) → TIC — a entrada no registo,
-  o Host::spawnTic NOVO (default honesto) e a EngineHost real (a lista
-  viva esfera/box; ACTIVE/VISIBLE + Transform3D + prim + o NOME ÚNICO
-  base.001); pins ×9 + R-053 + M-3.9b1/b2. c33 1010/0 · vc 99.
-  **3.9c (vc 100)**: every/after/when — a sintaxe nova no AST+parser
-  (as 3 palavras reservadas), o estado POR NÓ AST no Impl (morre no
-  stop; zero static); pins ×12 + R-054 + M-3.9c1/2/3. test_core 0
-  falhas · c33 1010/0 · vc 100. O FECHO correu (o platformer julgou
-  VERDE — a campanha fecha).
 - **Campanha 0.12-E (EMERGÊNCIA + REDESIGN 2.5D, FOGO AVERMELHADO) —
   FECHADA (E-1..E-3, vc 95–97)** (a ordem do dono abortou o SDF 3D;
   cláusulas: ZERO matemática 3D, ZERO mexidas no FontAtlas, TICs
@@ -73,6 +64,12 @@ morre no stop; R-054 + M-3.9c1/2/3; o relatório próprio diz o resto)
 
 ## §2 O que está FEITO
 
+- 0.12-X 3.9x (vc 101) — a câmara de terceira pessoa (no
+  RELATORIO-0.12-X-CAMRIG.md): camrig(d,h,suav) + camdrag(sens) +
+  limit como Contínuos no REGISTO; o TykerState guarda camYaw/camPitch;
+  o Host::lookDelta (o consumo ZERA — o main alimenta SÓ em Play com os
+  dedos não reclamados); o compilador rejeita camrig+follow/look; pins
+  ×14 (10 VM + 4 de motor real/.goni) + R-055 + M-3.9x1/x2.
 - 0.12-U FECHO (vc 100) — o CRITÉRIO DO PLATFORMER corre VERDE (o pin
   platformer_bloco_a_juiz_final: 7 features em cadeia, os contadores do
   juiz batem) + README/ARCHITECTURE §5/BACKLOG atualizados (no
@@ -261,6 +258,11 @@ Commits puramente documentais não são afetados.
 - `ARCHITECTURE.md` — o mapa dos módulos (o porquê das camadas).
 - `docs/REGRESSOES.md` — sentinelas R-NNN (consulta, não leitura inteira).
 - `BACKLOG.md` — rastreador de campanhas (na RAIZ do repo).
+- `docs/RELATORIO-0.12-X-CAMRIG.md` — o relatório da 0.12-X (a câmara
+  de terceira pessoa: as convenções fechadas, o hook lookDelta, o
+  TIMING do input, as mutações coladas no §5).
+- `docs/RELATORIO-0.12-X-ABERTURA.md` — a abertura da 0.12-X (as 3
+  verificações §0.2 + as 5 perguntas com ficheiro:linha).
 - `docs/RELATORIO-0.12-E.md` — o relatório da 0.12-E (a EMERGÊNCIA: o
   E-1 no §1 — o aborto do SDF 3D, os pins reformados, as recalibrações;
   as FASE 2/3 do redesign 2.5D fecham nos §2/§3).

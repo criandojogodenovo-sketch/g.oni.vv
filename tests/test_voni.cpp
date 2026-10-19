@@ -229,6 +229,25 @@ struct FakeHost : Host {
         return getProp(target, chain, out, err);
     }
     f64 frameDt() override { return dt; }
+
+    // 0.12-X: o canal do OLHAR (camdrag) — o teste empurra o delta do
+    // arrasto; o consumo do camdrag ZERA o acumulador (o contrato do
+    // Host::lookDelta). hasLookInput=false simula o hospedeiro SEM input
+    // (o default da base devolve false — o camdrag ignora, não morre).
+    f32 lookDx = 0.0f, lookDy = 0.0f;
+    bool hasLookInput = false;
+    bool lookDelta(f32& dx, f32& dy) override {
+        if (!hasLookInput) {
+            dx = 0.0f;
+            dy = 0.0f;
+            return false;
+        }
+        dx = lookDx;
+        dy = lookDy;
+        lookDx = 0.0f;
+        lookDy = 0.0f;
+        return true;
+    }
 };
 
 // helpers ---------------------------------------------------------------
@@ -1782,6 +1801,532 @@ TEST(limit_corta_a_distancia) {
     EXPECT(seg != nullptr);
     // follow() queria COLAR (dist 0); o limit(5,10) segura a 5 (o mínimo)
     EXPECT(test::nearEqF(seg->pos[0], 5.0f, 1e-3f));
+}
+
+// ===========================================================================
+// 0.12-X — A CÂMARA DE TERCEIRA PESSOA (camrig + camdrag + limit)
+//
+// As convenções fechadas (ABERTURA §2): o −Z local é a direção de visão
+// (CameraComp.h), o rot da V.ONI é GRAUS Euler XYZ com o fromEuler YXZ —
+// com roll 0, o −Z aponta (−cos(p)·sin(y), sin(p), −cos(p)·cos(y)). O yaw
+// do camrig é o azimute DA CÂMARA em volta do pivô (alvo+h): a posição
+// dela no plano XZ; o offset esférico é (sin(y)·cos(p), sin(p),
+// cos(y)·cos(p)) — yaw 0 / pitch 0 deixa a câmara a +Z do pivô, OLHANDO
+// o pivô. O camdrag roda o yaw/pitch do TykerState pelo delta que o
+// hospedeiro entrega (o consumo ZERA); o pitch é clamped FIXO −20..70.
+// ===========================================================================
+
+TEST(camrig_assenta_distancia_altura_e_olhar) {
+    Error err;
+    Script s = Script::compile(
+        "linker(camera)to(jogador)=RF(cam)\n"
+        "tyker(camera_jogo){ find(cam) camrig(8, 3) }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"camera", {40, 40, 40}});
+    h.tics.push_back({"jogador", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 1));
+    FakeTic* cam = h.tic("camera");
+    EXPECT(cam != nullptr);
+    // sem suav = SNAP: distância 3D 8 do PIVÔ (alvo+h = (0,3,0)), a +Z
+    // (yaw 0, pitch 0 — o estado inicial do TykerState)
+    EXPECT(test::nearEqF(cam->pos[0], 0.0f, 1e-3f));
+    EXPECT(test::nearEqF(cam->pos[1], 3.0f, 1e-3f));
+    EXPECT(test::nearEqF(cam->pos[2], 8.0f, 1e-3f));
+    // a distância 3D ao pivô é d (a altura h entra no pivô, não no eixo Y)
+    const f32 dx = cam->pos[0], dy = cam->pos[1] - 3.0f, dz = cam->pos[2];
+    EXPECT(test::nearEqF(std::sqrt(dx*dx + dy*dy + dz*dz), 8.0f, 1e-3f));
+    // olha para alvo+h/2 = (0,1.5,0): pitch = asin(−1.5/√66.25) ≈ −10.62°,
+    // yaw = 0 (a convenção da CÂMARA: atan2(−dx,−dz) — o −Z aponta ao alvo)
+    EXPECT(test::nearEqF(cam->rot[0], -10.62f, 1e-2f));
+    EXPECT(test::nearEqF(cam->rot[1], 0.0f, 1e-2f));
+    EXPECT(test::nearEqF(cam->rot[2], 0.0f, 1e-2f));
+}
+
+TEST(camrig_suaviza_sem_ultrapassar) {
+    Error err;
+    Script s = Script::compile(
+        "linker(camera)to(jogador)=RF(cam)\n"
+        "tyker(camera_jogo){ find(cam) camrig(8, 3, 6) }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.tics.push_back({"camera", {40, 0, 0}});
+    h.tics.push_back({"jogador", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    // o decaimento da casa: k = 1 − e^(−suav·dt); suav 6, dt 1/60 →
+    // k = 1 − e^(−0.1) ≈ 0.0952 — o 1.º passo dá ~9.5% do caminho
+    const f32 k = 1.0f - std::exp(-6.0f * (1.0f / 60.0f));
+    const f32 d0 = std::sqrt(40.0f*40.0f + 9.0f + 64.0f);   // ao desejado
+    EXPECT(runFrames(s, h, 1));
+    FakeTic* cam = h.tic("camera");
+    EXPECT(cam != nullptr);
+    // a distância AO DESEJADO (0,3,8) após 1 frame é exatamente d0·(1−k) —
+    // o exponencial deu UM passo: aproximou, não chegou, não passou
+    const f32 dist1 = std::sqrt(cam->pos[0]*cam->pos[0] +
+                                (cam->pos[1]-3.0f)*(cam->pos[1]-3.0f) +
+                                (cam->pos[2]-8.0f)*(cam->pos[2]-8.0f));
+    EXPECT(dist1 < d0);   // aproximou
+    EXPECT_MSG(test::nearEqF(dist1, d0 * (1.0f - k), 5e-3f),
+               "o 1.º passo deu dist=%.4f (o contrato é d0·(1−k)=%.4f — "
+               "o decaimento deixou de ser 1−e^(−suav·dt)?)",
+               dist1, d0 * (1.0f - k));
+    // nenhum frame ULTRAPASSA: a distância ao desejado só diminui
+    f32 prev = dist1;
+    for (int i = 0; i < 5; ++i) {
+        EXPECT(runFrames(s, h, 1));
+        const f32 dd = std::sqrt(cam->pos[0]*cam->pos[0] +
+                                 (cam->pos[1]-3.0f)*(cam->pos[1]-3.0f) +
+                                 (cam->pos[2]-8.0f)*(cam->pos[2]-8.0f));
+        EXPECT(dd < prev);   // monótona — nunca zigzag nem overshoot
+        prev = dd;
+    }
+    // converge ao desejado (0,3,8) — o exponencial nunca cola num passo
+    EXPECT(runFrames(s, h, 600));
+    EXPECT(test::nearEqF(cam->pos[0], 0.0f, 1e-2f));
+    EXPECT(test::nearEqF(cam->pos[1], 3.0f, 1e-2f));
+    EXPECT(test::nearEqF(cam->pos[2], 8.0f, 1e-2f));
+}
+
+TEST(camdrag_yaw_360_livre_e_normalizado) {
+    Error err;
+    Script s = Script::compile(
+        "linker(camera)to(jogador)=RF(cam)\n"
+        "tyker(camera_jogo){ find(cam) camdrag(1) camrig(4, 0) }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.hasLookInput = true;
+    h.tics.push_back({"camera", {0, 0, 0}});
+    h.tics.push_back({"jogador", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 1));
+    FakeTic* cam = h.tic("camera");
+    EXPECT(cam != nullptr);
+    EXPECT(test::nearEqF(cam->pos[2], 4.0f, 1e-3f));   // yaw 0 → a +Z
+    // arrastar −90 → yaw 90 → a câmara orbita para +X
+    h.lookDx = -90.0f;
+    EXPECT(runFrames(s, h, 1));
+    EXPECT(test::nearEqF(cam->pos[0], 4.0f, 1e-3f));
+    EXPECT(test::nearEqF(cam->pos[2], 0.0f, 1e-3f));
+    // a volta COMPLETA (mais 360°) devolve à MESMA posição — o yaw é 360°
+    // livre e NORMALIZA (450 → 90; o contrato: nunca cresce sem fim)
+    h.lookDx = -360.0f;
+    EXPECT(runFrames(s, h, 1));
+    EXPECT(test::nearEqF(cam->pos[0], 4.0f, 1e-3f));
+    // e no sentido NEGATIVO (−630 → 90) idem — o floor do wrap cobre os 2
+    h.lookDx = 720.0f;
+    EXPECT(runFrames(s, h, 1));
+    EXPECT(test::nearEqF(cam->pos[0], 4.0f, 1e-3f));
+    // o −Z da câmara aponta AO ALVO: com a câmara a +X, o yaw do rot é 90°
+    EXPECT(test::nearEqF(cam->rot[1], 90.0f, 1e-2f));
+}
+
+TEST(camdrag_pitch_clamp_fixo_menos_20_a_70) {
+    Error err;
+    Script s = Script::compile(
+        "linker(camera)to(jogador)=RF(cam)\n"
+        "tyker(camera_jogo){ find(cam) camdrag(1) camrig(4, 0) }\n"
+        "central main { }\n", err);
+    EXPECT(err.ok);
+    FakeHost h;
+    h.hasLookInput = true;
+    h.tics.push_back({"camera", {0, 0, 0}});
+    h.tics.push_back({"jogador", {0, 0, 0}});
+    EXPECT(s.runStart(h, err));
+    EXPECT(runFrames(s, h, 1));
+    FakeTic* cam = h.tic("camera");
+    EXPECT(cam != nullptr);
+    // arrastar MUITO para cima (+200): o pitch CLAMPA a 70 (FIXO — o
+    // contrato da campanha; a câmara sobe ao teto e FICA)
+    h.lookDy = 200.0f;
+    EXPECT(runFrames(s, h, 1));
+    EXPECT(test::nearEqF(cam->pos[1], 4.0f * std::sin(70.0f * 3.14159265f /
+                                                          180.0f), 1e-2f));
+    EXPECT(test::nearEqF(cam->pos[2], 4.0f * std::cos(70.0f * 3.14159265f /
+                                                          180.0f), 1e-2f));
+    // mais gesto para cima: CONTINUA no teto (não passa de 70)
+    h.lookDy = 200.0f;
+    EXPECT(runFrames(s, h, 1));
+    EXPECT(test::nearEqF(cam->pos[1], 4.0f * std::sin(70.0f * 3.14159265f /
+                                                          180.0f), 1e-2f));
+    // arrastar MUITO para baixo: clampa a −20 (o chão do pitch)
+    h.lookDy = -400.0f;
+    EXPECT(runFrames(s, h, 1));
+    EXPECT(test::nearEqF(cam->pos[1], 4.0f * std::sin(-20.0f * 3.14159265f /
+                                                           180.0f), 1e-2f));
+    EXPECT(test::nearEqF(cam->pos[2], 4.0f * std::cos(-20.0f * 3.14159265f /
+                                                           180.0f), 1e-2f));
+    // o olhar acompanha: no teto o rot.pitch é −70 (a câmara a +70 olha
+    // para BAIXO — o −Z aponta ao alvo)
+    h.lookDy = 0.0f;
+    EXPECT(runFrames(s, h, 1));
+    h.lookDy = 900.0f;   // de −20 direto ao teto
+    EXPECT(runFrames(s, h, 1));
+    EXPECT(test::nearEqF(cam->rot[0], -70.0f, 1e-2f));
+}
+
+TEST(camrig_limit_clampa_a_distancia_final) {
+    // limit contra o PIVÔ, APÓS a suavização (o contrato da 0.12-X)
+    {
+        // snap acima do teto: camrig(20,0) → 20 > 12 → fica a 12
+        Error err;
+        Script s = Script::compile(
+            "linker(camera)to(jogador)=RF(cam)\n"
+            "tyker(c){ find(cam) camrig(20, 0) limit(3, 12) }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        FakeHost h;
+        h.tics.push_back({"camera", {0, 0, 0}});
+        h.tics.push_back({"jogador", {0, 0, 0}});
+        EXPECT(s.runStart(h, err));
+        EXPECT(runFrames(s, h, 1));
+        FakeTic* cam = h.tic("camera");
+        EXPECT(cam != nullptr);
+        EXPECT(test::nearEqF(cam->pos[2], 12.0f, 1e-3f));
+    }
+    {
+        // snap abaixo do chão: camrig(2,0) → 2 < 3 → sobe a 3
+        Error err;
+        Script s = Script::compile(
+            "linker(camera)to(jogador)=RF(cam)\n"
+            "tyker(c){ find(cam) camrig(2, 0) limit(3, 12) }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        FakeHost h;
+        h.tics.push_back({"camera", {0, 0, 0}});
+        h.tics.push_back({"jogador", {0, 0, 0}});
+        EXPECT(s.runStart(h, err));
+        EXPECT(runFrames(s, h, 1));
+        FakeTic* cam = h.tic("camera");
+        EXPECT(cam != nullptr);
+        EXPECT(test::nearEqF(cam->pos[2], 3.0f, 1e-3f));
+    }
+    {
+        // APÓS a suavização: de (40,0,0) o passo suavizado iria a ~36.2 do
+        // pivô; o limit(3,12) segura a distância FINAL em 12 — o mesmo
+        // frame (o clamp é contra o pivô, na direção de onde veio)
+        Error err;
+        Script s = Script::compile(
+            "linker(camera)to(jogador)=RF(cam)\n"
+            "tyker(c){ find(cam) camrig(20, 0, 6) limit(3, 12) }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        FakeHost h;
+        h.tics.push_back({"camera", {40, 0, 0}});
+        h.tics.push_back({"jogador", {0, 0, 0}});
+        EXPECT(s.runStart(h, err));
+        EXPECT(runFrames(s, h, 1));
+        FakeTic* cam = h.tic("camera");
+        EXPECT(cam != nullptr);
+        const f32 len = std::sqrt(cam->pos[0]*cam->pos[0] +
+                                  cam->pos[1]*cam->pos[1] +
+                                  cam->pos[2]*cam->pos[2]);
+        EXPECT(test::nearEqF(len, 12.0f, 1e-2f));
+        // ... e NÃO é a posição suavizada sem clamp (~36.2 no eixo X)
+        EXPECT(cam->pos[0] < 12.5f);
+    }
+}
+
+TEST(camdrag_consumo_zera_e_sem_input_e_noop) {
+    // (1) o consumo ZERA o acumulador: o 2.º frame SEM gesto não repete o
+    // anterior (se o hook não zerasse, o yaw dobrava e a câmara fugia)
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(camera)to(jogador)=RF(cam)\n"
+            "tyker(c){ find(cam) camdrag(1) camrig(4, 0) }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        FakeHost h;
+        h.hasLookInput = true;
+        h.tics.push_back({"camera", {0, 0, 0}});
+        h.tics.push_back({"jogador", {0, 0, 0}});
+        EXPECT(s.runStart(h, err));
+        EXPECT(runFrames(s, h, 1));
+        FakeTic* cam = h.tic("camera");
+        EXPECT(cam != nullptr);
+        h.lookDx = -90.0f;
+        EXPECT(runFrames(s, h, 1));
+        EXPECT(test::nearEqF(cam->pos[0], 4.0f, 1e-3f));   // yaw 90
+        EXPECT(runFrames(s, h, 1));   // SEM gesto novo
+        EXPECT(test::nearEqF(cam->pos[0], 4.0f, 1e-3f));   // FICOU (não dobra)
+        EXPECT(runFrames(s, h, 30));
+        EXPECT(test::nearEqF(cam->pos[0], 4.0f, 1e-3f));   // parada para sempre
+    }
+    // (2) o hospedeiro SEM input (o default do Host: lookDelta false) é
+    // no-op HONESTO — o camdrag ignora e o script NÃO morre
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(camera)to(jogador)=RF(cam)\n"
+            "tyker(c){ find(cam) camdrag(0.3) camrig(4, 0) }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        FakeHost h;   // hasLookInput=false (o default)
+        h.tics.push_back({"camera", {0, 0, 0}});
+        h.tics.push_back({"jogador", {0, 0, 0}});
+        EXPECT(s.runStart(h, err));
+        EXPECT(runFrames(s, h, 10));   // vivo — o false é ignorado
+        FakeTic* cam = h.tic("camera");
+        EXPECT(cam != nullptr);
+        // o camrig SEMPRE assenta (isso é DELE); o yaw/pitch ficaram a 0 —
+        // a câmara no snap de yaw 0 (a +Z), rot olhando o alvo
+        EXPECT(test::nearEqF(cam->pos[2], 4.0f, 1e-3f));
+        EXPECT(test::nearEqF(cam->rot[1], 0.0f, 1e-2f));
+    }
+    // (3) DOIS tykers com camdrag NÃO dobram o gesto: o 2.º consumidor do
+    // mesmo frame recebe zeros (o contrato documentado no hook)
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(cam1)to(jogador)=RF(a)\n"
+            "linker(cam2)to(jogador)=RF(b)\n"
+            "tyker(c1){ find(a) camdrag(1) camrig(4, 0) }\n"
+            "tyker(c2){ find(b) camdrag(1) camrig(4, 0) }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        FakeHost h;
+        h.hasLookInput = true;
+        h.tics.push_back({"cam1", {0, 0, 0}});
+        h.tics.push_back({"cam2", {0, 0, 0}});
+        h.tics.push_back({"jogador", {0, 0, 0}});
+        EXPECT(s.runStart(h, err));
+        EXPECT(runFrames(s, h, 1));
+        h.lookDx = -90.0f;   // UM gesto
+        EXPECT(runFrames(s, h, 1));
+        FakeTic* c1 = h.tic("cam1");
+        FakeTic* c2 = h.tic("cam2");
+        EXPECT(c1 != nullptr && c2 != nullptr);
+        const bool c1Rodou = test::nearEqF(c1->pos[0], 4.0f, 1e-2f);
+        const bool c2Rodou = test::nearEqF(c2->pos[0], 4.0f, 1e-2f);
+        // EXATAMENTE UM dos dois consumiu o delta (a ordem dos tykers é a
+        // da declaração; o 2.º recebeu zeros) — nunca os DOIS
+        EXPECT(c1Rodou != c2Rodou);
+    }
+}
+
+TEST(camrig_follow_ou_look_no_mesmo_tyker_erro_que_ensina) {
+    // camrig + follow: o compilador REJEITA (a câmara que segue E olha é
+    // UMA) — o erro ensina e viaja com o par do botão Substituir
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(camera)to(jogador)=RF(cam)\n"
+            "tyker(c){ find(cam) camrig(8, 3) follow(2) }\n"
+            "central main { }\n", err);
+        EXPECT(!err.ok);
+        EXPECT(err.message.find("camrig") != std::string::npos);
+        EXPECT(err.message.find("follow") != std::string::npos);
+        EXPECT(err.message.find("sobra") != std::string::npos);
+        EXPECT(err.fixFrom == "follow");
+        EXPECT(err.fixTo == "camrig");
+        EXPECT(err.line == 2);
+    }
+    // camrig + look: idem (o look SÓ aponta; o camrig já faz os dois)
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(camera)to(jogador)=RF(cam)\n"
+            "tyker(c){ find(cam) look() camrig(8, 3) }\n"
+            "central main { }\n", err);
+        EXPECT(!err.ok);
+        EXPECT(err.message.find("look") != std::string::npos);
+        EXPECT(err.fixFrom == "look");
+        EXPECT(err.fixTo == "camrig");
+    }
+    // o TRIO ABENÇOADO compila: camrig + camdrag + limit no mesmo tyker
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(camera)to(jogador)=RF(cam)\n"
+            "tyker(camera_jogo){ find(cam) camrig(8, 3, 6) camdrag(0.3) "
+            "limit(3, 12) }\n"
+            "central main { }\n", err);
+        EXPECT_MSG(err.ok, "o trio camrig+camdrag+limit tem de compilar "
+                           "('%s')", err.message.c_str());
+    }
+    // follow/look SEM camrig continuam legais (o conflito é SÓ do camrig)
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(a)to(b)=RF(p)\n"
+            "tyker(c){ find(p) follow(2) look() }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+    }
+}
+
+TEST(camrig_camdrag_args_ensinam_a_sintaxe) {
+    // camrig sem args / 1 arg / 4 args: o argc do REGISTO ensina (2..3)
+    {
+        Error err;
+        Script::compile(
+            "linker(a)to(b)=RF(p)\ntyker(c){ find(p) camrig() }\n"
+            "central main { }\n", err);
+        EXPECT(!err.ok);
+        EXPECT(err.message.find("escreve assim") != std::string::npos);
+        EXPECT(err.message.find("camrig(d,h)") != std::string::npos);
+    }
+    {
+        Error err;
+        Script::compile(
+            "linker(a)to(b)=RF(p)\ntyker(c){ find(p) camrig(8) }\n"
+            "central main { }\n", err);
+        EXPECT(!err.ok);
+        EXPECT(err.message.find("camrig") != std::string::npos);
+    }
+    {
+        Error err;
+        Script::compile(
+            "linker(a)to(b)=RF(p)\ntyker(c){ find(p) camrig(8, 3, 6, 9) }\n"
+            "central main { }\n", err);
+        EXPECT(!err.ok);
+        EXPECT(err.message.find("camrig(d,h)") != std::string::npos);
+    }
+    // camdrag sem args: o argc 1..1 idem
+    {
+        Error err;
+        Script::compile(
+            "linker(a)to(b)=RF(p)\ntyker(c){ find(p) camdrag() }\n"
+            "central main { }\n", err);
+        EXPECT(!err.ok);
+        EXPECT(err.message.find("camdrag(sens)") != std::string::npos);
+    }
+    // o TIPO errado (Txt no lugar de número): a ativação falha COM LINHA
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(camera)to(jogador)=RF(cam)\n"
+            "tyker(c){ find(cam) camrig(8, \"alto\") }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);   // o TIPO é dinâmico — compila
+        FakeHost h;
+        h.tics.push_back({"camera", {0, 0, 0}});
+        h.tics.push_back({"jogador", {0, 0, 0}});
+        EXPECT(s.runStart(h, err));
+        Error ferr;
+        EXPECT(!s.runFrame(h, h.dt, ferr));
+        EXPECT(ferr.message.find("tem de ser um número") != std::string::npos);
+        EXPECT(ferr.message.find("camrig") != std::string::npos);
+    }
+}
+
+TEST(camrig_sem_alvo_valido_erro_cedo_com_linha) {
+    // o destino do linker NÃO existe no hospedeiro: o 1.º frame morre com
+    // o erro do getProp (o alvo inválido é erro CEDO — nunca câmara parada
+    // em silêncio)
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(camera)to(fantasma)=RF(cam)\n"
+            "tyker(c){ find(cam) camrig(8, 3) }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        FakeHost h;
+        h.tics.push_back({"camera", {0, 0, 0}});   // o destino NÃO está aqui
+        EXPECT(s.runStart(h, err));
+        Error ferr;
+        EXPECT(!s.runFrame(h, h.dt, ferr));
+        EXPECT(ferr.message.find("fantasma") != std::string::npos);
+        EXPECT(ferr.line == 2);
+    }
+    // a CÂMARA sem posição (TIC inexistente no lado origem) idem
+    {
+        Error err;
+        Script s = Script::compile(
+            "linker(fantasma)to(jogador)=RF(cam)\n"
+            "tyker(c){ find(cam) camrig(8, 3) }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        FakeHost h;
+        h.tics.push_back({"jogador", {0, 0, 0}});
+        EXPECT(s.runStart(h, err));
+        Error ferr;
+        EXPECT(!s.runFrame(h, h.dt, ferr));
+        EXPECT(ferr.message.find("fantasma") != std::string::npos);
+    }
+}
+
+TEST(camrig_compat_012u_intacto) {
+    // o registo NOVO não mexeu nos VELHOS: follow/orbit/limit comportam-se
+    // byte a byte como na 0.12-U, e os relógios 3.9c idem
+    {
+        // follow(2) → (2,0,0) (o mesmo contrato do follow_distancia)
+        Error err;
+        Script s = Script::compile(
+            "linker(seguidor)to(alvo)=RF(p)\n"
+            "tyker(s){ find(p) follow(2) }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        FakeHost h;
+        h.tics.push_back({"seguidor", {10, 0, 0}});
+        h.tics.push_back({"alvo", {0, 0, 0}});
+        EXPECT(s.runStart(h, err));
+        EXPECT(runFrames(s, h, 1));
+        FakeTic* seg = h.tic("seguidor");
+        EXPECT(seg != nullptr);
+        EXPECT(test::nearEqF(seg->pos[0], 2.0f, 1e-3f));
+    }
+    {
+        // orbit(2, 90) 60 frames → (0,0,2) (o mesmo contrato do orbit)
+        Error err;
+        Script s = Script::compile(
+            "linker(lua)to(planeta)=RF(p)\n"
+            "tyker(s){ find(p) orbit(2, 90) }\n"
+            "central main { }\n", err);
+        EXPECT(err.ok);
+        FakeHost h;
+        h.tics.push_back({"lua", {2, 0, 0}});
+        h.tics.push_back({"planeta", {0, 0, 0}});
+        EXPECT(s.runStart(h, err));
+        EXPECT(runFrames(s, h, 60));
+        FakeTic* lua = h.tic("lua");
+        EXPECT(lua != nullptr);
+        EXPECT(test::nearEqF(lua->pos[0], 0.0f, 1e-2f));
+        EXPECT(test::nearEqF(lua->pos[2], 2.0f, 1e-2f));
+    }
+    {
+        // every(0.5) em 10×0.2s dispara 4× (o anti-drift da R-054)
+        Error err;
+        Script s = Script::compile(
+            "central main { on moment { } allmoments { every(0.5) { "
+            "View P \"t\" } } }", err);
+        EXPECT(err.ok);
+        FakeHost h;
+        EXPECT(s.runStart(h, err));
+        for (int i = 0; i < 10; ++i) {
+            EXPECT(s.runFrame(h, 0.2, err));
+        }
+        EXPECT(h.logs.size() == 4);
+    }
+    // a FORMA das entradas no registo (a fonte única): os contínuos novos
+    // com o argc fechado e o kind certo; os velhos intactos
+    {
+        const reg::Entry* rig = reg::find("camrig");
+        EXPECT(rig != nullptr);
+        if (rig) {
+            EXPECT(rig->kind == reg::Kind::Componente);
+            EXPECT(rig->compKind == reg::CompKind::Continuo);
+            EXPECT(rig->minArgs == 2 && rig->maxArgs == 3);
+            EXPECT(rig->syntax != nullptr && *rig->syntax);
+            EXPECT(rig->example != nullptr && *rig->example);
+        }
+        const reg::Entry* drag = reg::find("camdrag");
+        EXPECT(drag != nullptr);
+        if (drag) {
+            EXPECT(drag->kind == reg::Kind::Componente);
+            EXPECT(drag->compKind == reg::CompKind::Continuo);
+            EXPECT(drag->minArgs == 1 && drag->maxArgs == 1);
+        }
+        const reg::Entry* fol = reg::find("follow");
+        EXPECT(fol != nullptr);
+        if (fol) {
+            EXPECT(fol->minArgs == 0 && fol->maxArgs == 2);
+        }
+    }
 }
 
 TEST(delay_adiia_a_ativacao) {

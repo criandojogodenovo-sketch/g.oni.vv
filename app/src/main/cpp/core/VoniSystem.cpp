@@ -40,7 +40,8 @@ bool VoniSystem::ensureStarted(Scene& scene, Run& r, voni::Error& err) {
         if (!err.ok) {
             return false;
         }
-        voni::EngineHost host(scene, r.tic, &transitionHook_, &sceneNameFn_);
+        voni::EngineHost host(scene, r.tic, &transitionHook_, &sceneNameFn_,
+                              &lookDeltaFn_);
         if (!r.script.runStart(host, err)) {
             return false;
         }
@@ -183,7 +184,7 @@ void VoniSystem::tick(Scene& scene, f32 dt) {
         }
         if (r.script.started() && r.script.running()) {
             voni::EngineHost host(scene, r.tic, &transitionHook_,
-                                  &sceneNameFn_);
+                                  &sceneNameFn_, &lookDeltaFn_);
             voni::Error err;
             if (!r.script.runFrame(host, (f64)dt, err)) {
                 if (!r.deadLogged) {

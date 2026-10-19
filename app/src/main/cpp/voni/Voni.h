@@ -177,6 +177,21 @@ public:
         return false;
     }
 
+    // 0.12-X: lookDelta(dx, dy) — o DELTA do arrasto de olhar (camdrag)
+    // acumulado no frame pelo main: a soma de (pos-atual − pos-anterior)
+    // dos dedos que a UI NÃO reclamou (controlos de toque/canvas/gizmo),
+    // só em Play. O main alimenta a cada frame ANTES da V.ONI tickar (o
+    // padrão do g_physics.frame.fwd: o frame alimenta, o tick seguinte
+    // consome — e o consumo ZERA o acumulador, o que auto-protege tykers
+    // múltiplos: quem consome 2.º recebe zeros). false = sem input no
+    // hospedeiro (o camdrag ignora e o script não morre — o padrão do
+    // stopAnim/spawnTic).
+    virtual bool lookDelta(f32& dx, f32& dy) {
+        (void)dx;
+        (void)dy;
+        return false;
+    }
+
     // nomedacena.transition.for("destino") (spec §9 — NÃO se chama importar)
     // fromName tem de ser a cena ATUAL (decisão 🔶 documentada).
     virtual bool transitionTo(const std::string& fromName,

@@ -34,6 +34,10 @@ using TransitionHook = std::function<bool(const std::string& from,
                                           const std::string& to,
                                           std::string& err)>;
 using SceneNameFn = std::function<std::string()>;
+// 0.12-X: o delta do arrasto de olhar (camdrag) — o main alimenta o
+// acumulador por frame; o consumo DEVE zerar (o 2.º consumidor do mesmo
+// frame recebe zeros — a auto-proteção do Host::lookDelta)
+using LookDeltaFn = std::function<bool(f32& dx, f32& dy)>;
 
 } // namespace voni_engine
 } // namespace vv
@@ -45,7 +49,8 @@ class EngineHost : public Host {
 public:
     EngineHost(vv::Scene& scene, vv::Handle hostTic,
                const vv::voni_engine::TransitionHook* transition,
-               const vv::voni_engine::SceneNameFn* sceneName);
+               const vv::voni_engine::SceneNameFn* sceneName,
+               const vv::voni_engine::LookDeltaFn* lookDelta = nullptr);
 
     void log(const char* line) override;
     bool getProp(const std::string& ticName,
@@ -63,6 +68,7 @@ public:
                    std::string& err) override;                    // 0.11-S
     bool spawnTic(const std::string& tipo, f32 x, f32 y, f32 z,
                   std::string& outName, std::string& err) override;  // 0.12-U
+    bool lookDelta(f32& dx, f32& dy) override;                       // 0.12-X
     bool transitionTo(const std::string& fromName, const std::string& toName,
                       std::string& err) override;
     std::string currentSceneName() override;
@@ -90,6 +96,7 @@ private:
 
     const vv::voni_engine::TransitionHook* transition_;
     const vv::voni_engine::SceneNameFn* sceneName_;
+    const vv::voni_engine::LookDeltaFn* lookDelta_;
     f64 dt_ = 1.0 / 60.0;   // o VoniSystem pode afinar por tick
 public:
     void setDt(f64 dt) { dt_ = dt; }

@@ -112,8 +112,16 @@ struct TykerState {
     bool hasPoint = false;     // point(x,y,z): alvo absoluto
     f32  point[3] = {0, 0, 0};
     bool hasLimit = false;     // limit(min,max): distância do follow/orbit
+                               // e da distância final do camrig (0.12-X)
     f32  limMin = 0, limMax = 0;
     f32  orbitAngle = 0.0f;    // orbit(d,vel): ângulo corrente (graus)
+
+    // 0.12-X: a câmara de terceira pessoa — o yaw/pitch vivem AQUI (junto
+    // ao orbitAngle): o camdrag alimenta (arrasto não reclamado), o camrig
+    // consome (o pivô do rig roda com eles). Graus; yaw 360° livre
+    // (normalizado 0..360), pitch clamped FIXO -20..70 pelo camdrag.
+    f32  camYaw = 0.0f;        // camdrag: azimute da câmara em volta do alvo
+    f32  camPitch = 0.0f;      // camdrag: elevação da câmara (graus)
 
     // colorpars fora do parâmetro 'cor': guardado p/ o shading() futuro
     std::map<std::string, std::string> colorParams;
@@ -153,6 +161,8 @@ bool compBlend(Ctx& c, const Comp& m, std::string& err);   // 0.11-S
 bool compLimit(Ctx& c, const Comp& m, std::string& err);
 bool compDelay(Ctx& c, const Comp& m, std::string& err);
 bool compShading(Ctx& c, const Comp& m, std::string& err);
+bool compCamrig(Ctx& c, const Comp& m, std::string& err);   // 0.12-X
+bool compCamdrag(Ctx& c, const Comp& m, std::string& err);  // 0.12-X
 
 } // namespace tykers
 } // namespace voni

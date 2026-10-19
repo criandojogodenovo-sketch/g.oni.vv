@@ -403,8 +403,8 @@ static const Entry kEntries[] = {
       "", 0, CompKind::Pontual, 0, 0 },
     { "point", Kind::Componente,
       "point() · point(x,y,z)",
-      "point(x,y,z) fixa um ponto absoluto como alvo do follow/look/orbit; "
-      "point() limpa o ponto e volta ao destino vivo.",
+      "point(x,y,z) fixa um ponto absoluto como alvo do follow/look/orbit/"
+      "camrig; point() limpa o ponto e volta ao destino vivo.",
       "tyker(s){ find(p) point(0, 1, 0) follow(2) }",
       "alvo fixo (coordenadas)",
       "", 0, CompKind::Pontual, 0, 3 },
@@ -440,7 +440,8 @@ static const Entry kEntries[] = {
     { "limit", Kind::Componente,
       "limit(min,max)",
       "Limita a distância da origem ao alvo entre min e max (aplica-se ao "
-      "follow e ao orbit).",
+      "follow, ao orbit e ao camrig — no camrig clampa a distância final, "
+      "após a suavização).",
       "tyker(s){ find(p) follow(2) limit(1, 10) }",
       "clamp da distância",
       "", 0, CompKind::Pontual, 2, 2 },
@@ -451,6 +452,26 @@ static const Entry kEntries[] = {
       "tyker(s){ find(p) delay(2) follow(1) }",
       "esperar N segundos",
       "", 0, CompKind::Pontual, 1, 1 },
+
+    // ---- CÂMARA DE TERCEIRA PESSOA (0.12-X — contínuos) -------------------
+    { "camrig", Kind::Componente,
+      "camrig(d,h) · camrig(d,h,suav)",
+      "Câmara de terceira pessoa: assenta a distância d e a altura h acima "
+      "do alvo (o pivô roda com o yaw/pitch do camdrag), olha para "
+      "alvo+h/2; suav (por segundo) suaviza a perseguição; limit(min,max) "
+      "clampa a distância final. Não se mistura com follow/look.",
+      "linker(camera)to(jogador)=RF(cam)\ntyker(camera_jogo){ find(cam) "
+      "camrig(8, 3, 6) camdrag(0.3) limit(3, 12) }",
+      "câmara de terceira pessoa",
+      "", 0, CompKind::Continuo, 2, 3 },
+    { "camdrag", Kind::Componente,
+      "camdrag(sens)",
+      "Roda a câmara com o arrasto do dedo: yaw 360° livre, pitch limitado "
+      "a -20..70 graus; só lê o que os controlos de toque não reclamaram e "
+      "só corre em Play (o sens negativo inverte).",
+      "tyker(camera_jogo){ find(cam) camrig(8, 3, 6) camdrag(0.3) }",
+      "olhar com o dedo (touch look)",
+      "", 0, CompKind::Continuo, 1, 1 },
 
     // ---- RESERVADO ---------------------------------------------------------
     { "shading", Kind::Componente,
@@ -542,6 +563,8 @@ const CompRow kComponents[] = {
     {"limit",      &tykers::compLimit},
     {"delay",      &tykers::compDelay},
     {"shading",    &tykers::compShading},
+    {"camrig",     &tykers::compCamrig},      // 0.12-X
+    {"camdrag",    &tykers::compCamdrag},     // 0.12-X
 };
 
 // instalações de teste (installForTest) — guardadas à parte, consultadas
