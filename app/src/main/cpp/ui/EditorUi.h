@@ -125,6 +125,12 @@ struct EditorState {
     // único global). Afervel na suíte (o pin da auditoria de estado).
     u8     inspTexSlot = 0;
 
+    // 0.12-Y-fix — A INTENÇÃO HDRI: o botão "hdri:" do WorldEnvironment
+    // arma ISTO; o main consome (abre o NAVEGADOR com a intenção e o
+    // pick do .png/.hdr escreve o Environment + o ambient pela média).
+    // Vive no estado (o mesmo padrão do pickBlockedHint — afervável).
+    bool   hdriPick = false;
+
     // 0.10-M HOTFIX TEXTURAS-MULTIMAT — O MATERIAL ARMADO da secção
     // Material (0..N-1; 0 = o de sempre). O seletor «material: i/N» (as
     // setas ‹ ›) arma ISTO; as 5 linhas de slot mostram O MATERIAL

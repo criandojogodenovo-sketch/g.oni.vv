@@ -334,8 +334,107 @@ tests/test_wiring011.cpp + docs/REGRESSOES.md (R-060) +
 docs/RELATORIO-0.12-Y.md (este) + docs/RELATORIO-0.9.6.md (§14, o par
 vc 108) + STATE.md + app/build.gradle (versionCode 108).
 
+## §3-FIX · O FIX DO DONO — A UI DO ENVIRONMENT E O BIND DAS TEXTURAS (vc 109)
+
+O dono testou o APK (vc 108) no telemóvel e reportou DOIS problemas:
+(1) o Inspector do TIC WorldEnvironment só mostrava Transform/Animação/
+Script — o componente existia, a UI NÃO (o C criou o TIC, o serializer e
+o main, mas NENHUM controlo no Inspector); (2) o modelo continua BRANCO —
+o material não mostra a textura e ninguém sabe porquê. O fix segue a
+AÇÃO do dono à letra.
+
+### O que mudou (por ficheiro)
+
+- **ui/EditorLayout.h** — o perfil ganha `env` (o Environment presente);
+  o BIT NOVO `kInspBitEnvironment` (bit8, persiste no inspCollapsed); os
+  5 KINDS NOVOS (EnvSky/EnvHdri/EnvAmb/EnvFogD/EnvFogC); os ids
+  5420..5424 (a faixa da câmara 5400..5412 e os fields 5530+ intocados);
+  o plano empurra a secção (cabeçalho + 5 linhas NA ORDEM do dono: céu →
+  hdri → ambiente → névoa → cor da névoa).
+- **ui/EditorUi.cpp** — os 5 casos de draw: céu/névoa = linha hex + SWATCH
+  vivo (o MESMO padrão da linha hex do tint), hdri = botão de linha
+  inteira com o NOME limpo, ambiente = slider 0..2, névoa = slider 0..1
+  (o clampFields da casa em cada escrita); o tap re-despacha os 3 botões
+  (céu/névoa → teclado hex propósitos 11/12; hdri → a INTENÇÃO
+  `st.hdriPick`); os rótulos do Environment preenchidos no pré-pass; a
+  kTitles[9] ganha "Environment".
+- **ui/EditorUi.h** — o campo `hdriPick` no EditorState (o contrato
+  UI→main, o padrão pickBlockedHint).
+- **ui/UiEditor.cpp** — os propósitos 11/12 entram no MESMO teclado hex
+  da casa (a tecla "#" e o parse `uiHexParse`); o commitTextInput
+  escreve skyColor/fogColor + clampFields (inválido = estado intacto —
+  o contrato do hex).
+- **platform/main.cpp** — o fluxo HDRI COMPLETO: a intenção abre o
+  NAVEGADOR na raiz de sempre (`browserOpen` mata qualquer intenção
+  antiga — o browser aberto por outra via NUNCA sequestra o pick); o
+  `browserImportHdri` NOVO intercepta o pick do .png ANTES do import de
+  sempre: valida (isFile + loadPng), escreve `textures/hdri_<stem>.png`
+  (colisão → sufixo -2/-3), aponta o `hdriPath` do Environment do TIC
+  selecionado e calcula o ambient pela MÉDIA CPU (as MESMAS fontes puras
+  — sem segundo I/O); .hdr → fora do escopo HOJE com aviso honesto (o
+  decoder RGBE não existe na casa — o .goni aceita o ref, o import
+  precisa do decoder próprio); sem TIC WorldEnvironment → toast + log.
+- **assets/GltfTextures.cpp** — O LOG DA ORDEM DO DONO, LITERAL:
+  `[material] textura extraida: <nome> -> <caminho> (slot <slot>)` por
+  textura escrita + o skip NUNCA mais silencioso (`[material] slot X
+  IGNORADO: mime 'image/jpeg' fora do escopo` — a causa comum do modelo
+  branco diz-se AGORA no engine.log).
+- **assets/GltfImporter.cpp** — o log do parse do material: cada slot que
+  o glTF liga sai como `[material] material N (nome): slot baseColor ->
+  imagem M` (o dono vê O QUE o material pediu ANTES da extração).
+- **render/Material.cpp/.h** — A GARANTIA DO BIND: o sampler do albedo
+  chama-se **uBaseColorTex** (o nome do contrato, o slot 0 do PBR) no FS
+  e no init (o fallback `uTex` é o retro-guarda); `setTexture` liga a
+  textura ao UNIT 0 (o normal fica no 1, o rough/metal no 2 — os três
+  nunca colidem) e o LOGI do init diz o contrato.
+- **O THUMB DO BASECOLOR (Inspector)** — a VERDADE do slot 0: a grade do
+  material pode estar vazia com a textura VIVA (o bind clássico pelo
+  texPath); o slot 0 vazio agora HERDA o texPath no pré-pass — o rótulo
+  e o thumb 24dp da linha baseColor mostram a textura REAL (o dono VÊ se
+  carregou; o resolver que falha desenha a moldura honesta de sempre).
+
+### Pins (test_012y.cpp)
+
+- **inspector_worldenv** — o plano do Inspector de um TIC
+  Transform+Environment: 1 cabeçalho Environment + AS 5 LINHAS na ORDEM
+  (os ids 5420..5424 distintos, fora da faixa da câmara), o colapso
+  esconde as 5 e deixa o cabeçalho, a altura do conteúdo reflete, e um
+  TIC SEM Environment NÃO ganha a secção.
+- **pbr_texture_bind** — o CONTRATO no fonte (o FS declara
+  `uniform sampler2D uBaseColorTex;` e o init consulta o nome — a
+  leitura é a verdade, o fb auto-regista qualquer nome) + o LitMaterial
+  REAL no stub fb: `setTexture(tex)` → uHasTex=1 + o sampler no UNIT 0 +
+  o bind da textura do albedo; `setTexture(nullptr)` → uHasTex=0 SEM
+  bind; o setPbr (normal 1 / rough-metal 2) não rouba o unit 0.
+
+### Mutações (vermelho → reposto → verde)
+
+- **M-Yf1** (o NOME do contrato morre — o FS volta a `uTex`):
+  `pbr_texture_bind` VERMELHO («o FS nao declara o sampler
+  uBaseColorTex»). REPOSTO → VERDE.
+- **M-Yf2** (a secção Environment morta — o push do plano sai):
+  `inspector_worldenv` VERMELHO (5 EXPECTs — as linhas, o colapso, a
+  altura). REPOSTO → VERDE.
+
+### Verificação
+
+- test_core local: os 2 pins NOVOS + a suíte inteira VERDES (as únicas
+  falhas locais = os flakes da sandbox documentados — o fork do
+  sentinela_r039 e o crash intermitente do regress_streaming_paralelo,
+  provados preexistentes; **o CI é o árbitro**).
+- c33_virtual 1009/0.
+
+### Ficheiros
+
+ui/EditorLayout.h + ui/EditorUi.h + ui/EditorUi.cpp + ui/UiEditor.cpp +
+render/Material.h + render/Material.cpp + assets/GltfTextures.cpp +
+assets/GltfImporter.cpp + platform/main.cpp + tests/test_012y.cpp +
+docs/RELATORIO-0.12-Y.md (este) + docs/RELATORIO-0.9.6.md (§14, o par
+vc 109) + STATE.md + app/build.gradle (versionCode 109).
+
 ## §4 · As mutações (índice)
 
-Ver §1 (M-Ya1/M-Ya2), §2 (M-Yb1) e §3 (M-Yc1/M-Yc2).
+Ver §1 (M-Ya1/M-Ya2), §2 (M-Yb1), §3 (M-Yc1/M-Yc2) e §3-FIX
+(M-Yf1/M-Yf2).
 
 ## §5 · O fecho da campanha (preenchido no FECHO)

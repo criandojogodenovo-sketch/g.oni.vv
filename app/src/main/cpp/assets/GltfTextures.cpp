@@ -12,6 +12,7 @@
 #include "assets/GltfTextures.h"
 #include "assets/PngLoader.h"
 #include "assets/TextureCache.h"   // hashBytes (FNV-1a 64 partilhado)
+#include "platform/EngineLog.h"   // 0.12-Y-fix: o LOG do material que o dono lê
 
 namespace vv {
 
@@ -57,6 +58,11 @@ bool extractGltfTextures(ProjectStorage& st, const GltfModel& model,
             continue;
         }
         if (img.mime != "image/png") {
+            // 0.12-Y-fix: o SKIP nunca mais é silencioso (o modelo branco do
+            // dono tinha de dizer O QUE aconteceu — o jpeg é a causa comum)
+            elog::warn("[material] textura IGNORADA (mesh %zu): mime '%s' "
+                       "fora do escopo — o slot fica vazio",
+                       m, img.mime.c_str());
             continue;   // jpeg/unknown — fora do escopo (sem textura, sem falha)
         }
         // valida: os bytes têm de ser um PNG decodificável (lixo nunca entra
@@ -84,6 +90,9 @@ bool extractGltfTextures(ProjectStorage& st, const GltfModel& model,
         }
         dedup.emplace(hash, rel);
         outMeshTex[m] = rel;
+        // 0.12-Y-fix (a ordem do dono): o par NOME -> CAMINHO no engine.log
+        elog::info("[material] textura extraida: %s -> %s",
+                   rel.substr(rel.find_last_of('/') + 1).c_str(), rel.c_str());
     }
     return true;
 }
@@ -137,6 +146,12 @@ bool extractGltfTexSlots(ProjectStorage& st, const GltfModel& model,
                 continue;
             }
             if (img.mime != "image/png") {
+                // 0.12-Y-fix: o skip do slot NUNCA silencioso (o dono lê o
+                // engine.log e sabe PORQUE é que o modelo ficou branco)
+                elog::warn("[material] slot %s IGNORADO (mesh %zu): mime "
+                           "'%s' fora do escopo",
+                           kBindSlotName(static_cast<u8>(s)), m,
+                           img.mime.c_str());
                 continue;   // jpeg/fora do escopo — sem textura, sem falha
             }
             RawImage probe;
@@ -165,6 +180,11 @@ bool extractGltfTexSlots(ProjectStorage& st, const GltfModel& model,
             }
             dedup.emplace(hash, rel);
             outSlots.tex[m * 5 + static_cast<size_t>(s)] = rel;
+            // 0.12-Y-fix (a ordem do dono, LITERAL): «[material] textura
+            // extraida: <nome> -> <caminho>» — o slot vai no prefixo
+            elog::info("[material] textura extraida: %s -> %s (slot %s)",
+                       nm, rel.c_str(),
+                       kBindSlotName(static_cast<u8>(s)));
         }
     }
     return true;

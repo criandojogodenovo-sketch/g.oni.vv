@@ -2767,7 +2767,10 @@ int drawTextInput(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     // código) — a geometria é a mesma, o CARÁTER é do modo.
     // 0.8.9: em modo NUMÉRICO (propósito 6) a tecla vira "-" (sinal) e a
     // tecla do traço vira "." (decimal) — dígitos estão na linha de baixo.
-    const bool hexMode = st.textPurpose == 4 || st.textPurpose == 5;
+    // 0.12-Y-fix: o céu/névoa do WorldEnvironment entram no MESMO teclado
+    // hex da casa (propósitos 11/12)
+    const bool hexMode = st.textPurpose == 4 || st.textPurpose == 5 ||
+                         st.textPurpose == 11 || st.textPurpose == 12;
     const bool numMode = st.textPurpose == 6;
     if (ui.button(kKbCaseId, k.caseKey.x, k.caseKey.y, k.caseKey.w,
                   k.caseKey.h,
@@ -2929,6 +2932,40 @@ bool commitTextInput(Scene& scene, EditorState& st) {
             mr->tint[0] = rgba[0];
             mr->tint[1] = rgba[1];
             mr->tint[2] = rgba[2];
+            return true;
+        }
+        case 11: {   // 0.12-Y-fix: cor do CÉU (Environment) por hex
+            Tic* tic = scene.get(st.textTic);
+            Environment* env =
+                tic ? tic->getComponent<Environment>() : nullptr;
+            if (!env) {
+                return false;
+            }
+            f32 rgba[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+            if (!uiHexParse(st.textBuf, rgba)) {
+                return false;   // inválido: o estado fica como estava
+            }
+            env->skyColor[0] = rgba[0];
+            env->skyColor[1] = rgba[1];
+            env->skyColor[2] = rgba[2];
+            env->clampFields();
+            return true;
+        }
+        case 12: {   // 0.12-Y-fix: cor da NÉVOA (Environment) por hex
+            Tic* tic = scene.get(st.textTic);
+            Environment* env =
+                tic ? tic->getComponent<Environment>() : nullptr;
+            if (!env) {
+                return false;
+            }
+            f32 rgba[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+            if (!uiHexParse(st.textBuf, rgba)) {
+                return false;   // inválido: o estado fica como estava
+            }
+            env->fogColor[0] = rgba[0];
+            env->fogColor[1] = rgba[1];
+            env->fogColor[2] = rgba[2];
+            env->clampFields();
             return true;
         }
         case 6: {   // 0.8.9 — CAMPO NUMÉRICO SEM TETO do Inspector (Transform3D)

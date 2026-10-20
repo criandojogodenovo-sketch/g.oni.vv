@@ -1,9 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-20 · vc: 108 · Último commit: este (o 0.12-Y C —
-o PIPELINE PBR: os 5 slots do glTF na pasta do modelo, o bind auto, o
-lit PBR-lite pela fonte única render/Pbr.h, o TIC WorldEnvironment;
-M-Yc1/2)
+Atualizado: 2026-10-21 · vc: 109 · Último commit: este (o 0.12-Y C-FIX —
+a UI do Environment no Inspector + o bind uBaseColorTex + o log do
+material; M-Yf1/2)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -11,25 +10,25 @@ M-Yc1/2)
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A, B e C
-  fechadas, vc 108; o FECHO a seguir)** (a cláusula calma: SÓ o prompt; a
-  V.ONI intocada; a história vive no RELATORIO-0.12-Y-ABERTURA.md + o
-  RELATORIO-0.12-Y.md).
-  **C (vc 108)**: o PIPELINE PBR — os 5 slots do glTF na PASTA DO MODELO
-  assets/<stem>/textures/ (a dedup FNV-1a, a uri externa passa), o BIND
-  AUTO pelo meshTexSlotFor, o lit PBR-LITE pela FONTE ÚNICA render/Pbr.h
-  (o normal map por DERIVADAS DE ECRÃ, o rough/metal empacotado, a névoa
-  exp2 com density 0 = MORTA, o uAmbientScale), o TIC WorldEnvironment
-  NOVO (o 7.º preset — o céu é o clear, o HDRI ilumina pela MÉDIA CPU
-  com o PISO 0.25); pins ×4 (test_012y.cpp) + R-060 + M-Yc1/2
-  vermelho→reposto→verde; 3 recalibrações com nota (registry 14, o
-  texbind na pasta, o menu 8 linhas).
-  **B (vc 107)**: o ÍCONE IA — a FONTE gerada com o prompt EXATO do dono
-  (obsidiana + veias de magma), a extração por TEXTURA (o high-pass: o
-  luminância da Y-0 comeria a obsidiana), o tile a 65% da ZONA SEGURA, os
-  15 PNGs (5 densidades × 3) + o fundo #0A0A0C (A ORDEM DO DONO);
-  icon_ia_mipmaps + y0_background/y0_escala recalibrados com nota +
-  M-Yb1.
+- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A, B, C e o
+  C-FIX fechadas, vc 109; o FECHO a seguir)** (a cláusula calma: SÓ o
+  prompt; a V.ONI intocada; a história vive no RELATORIO-0.12-Y-ABERTURA.md
+  + o RELATORIO-0.12-Y.md).
+  **C-FIX (vc 109)**: o TESTE DO DONO (Inspector do WorldEnvironment
+  VAZIO + modelo BRANCO) — a secção Environment NO Inspector (céu hex ·
+  hdri pelo NAVEGADOR · ambiente · névoa · névoa hex, tudo no .goni), o
+  albedo = uBaseColorTex (unit 0), o LOG «[material] textura extraida» +
+  o skip jpeg falado + o thumb do baseColor; pins ×2 + M-Yf1/2.
+  **C (vc 108)**: o PIPELINE PBR — os 5 slots na PASTA DO MODELO
+  assets/<stem>/textures/ (dedup FNV-1a, uri externa passa), o BIND AUTO
+  pelo meshTexSlotFor, o lit PBR-LITE pela FONTE ÚNICA render/Pbr.h (o
+  normal por DERIVADAS, o rough/metal, a névoa exp2 0=MORTA, o
+  uAmbientScale), o TIC WorldEnvironment NOVO (o 7.º preset); pins ×4 +
+  R-060 + M-Yc1/2; 3 recalibrações com nota.
+  **B (vc 107)**: o ÍCONE IA — a FONTE com o prompt EXATO do dono
+  (obsidiana + magma), a extração por TEXTURA high-pass, o tile a 65% da
+  ZONA SEGURA, os 15 PNGs (5 densidades × 3) + o fundo #0A0A0C (A ORDEM
+  DO DONO); icon_ia_mipmaps + 2 recalibrações com nota + M-Yb1.
   **A (vc 106)**: o PAN da câmara — a 6.ª FERRAMENTA no rail (o glifo
   Hand, id 33, a legenda «Pan»), o Camera::pan pela FONTE ÚNICA pura
   (camWorldPerPixel/camRightVec/camUpVec; o target no plano da câmara,

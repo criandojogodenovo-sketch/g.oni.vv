@@ -28,9 +28,13 @@
 #include "ui/SafeArea.h"
 #include "ui/ViewportChrome.h"
 #include "ui/Icons.h"
+#include "ui/FontAtlas.h"          // 0.12-Y-fix: TextMetrics (o plano do inspector)
 #include "render/Camera.h"
+#include "render/Material.h"       // 0.12-Y-fix: o bind do uBaseColorTex
+#include "render/Texture.h"        // 0.12-Y-fix: a textura do pin do bind
 #include "render/QuadBatch.h"
 #include "platform/InputState.h"
+#include <GLES3/gl3.h>             // 0.12-Y-fix: o stub (stats + fb do bind)
 
 #include <cmath>
 #include <cstdio>
@@ -699,4 +703,184 @@ TEST(env_roundtrip) {
     EXPECT(tp->getComponent<Environment>() != nullptr);
     EXPECT(tp->getComponent<MeshRenderer>() == nullptr);   // ESTRUTURA
     EXPECT(tp->getComponent<BodyComp>() == nullptr);       // SEM física
+}
+
+// ---- PIN inspector_worldenv (0.12-Y-fix) ------------------------------------
+// A ordem do dono: «o Inspector só mostra Transform, Animação e Script» —
+// a secção Environment com os 5 controlos TEM de aparecer no TIC que tem
+// o componente WorldEnvironment. O plano do Inspector É a fonte do layout
+// (o draw consome-o linha a linha — o pin aferre a FONTE).
+TEST(inspector_worldenv) {
+    Scene scene;
+    const Handle h = scene.create("we");
+    scene.get(h)->addComponent<Transform3D>();
+    scene.get(h)->addComponent<Environment>();
+    const Tic* t = scene.get(h);
+    ASSERT(t != nullptr);
+    const InspProfile prof = inspectorProfile(*t);
+    EXPECT(prof.env);
+    EXPECT(!prof.mr);   // o preset WorldEnvironment NÃO inventa Malha
+
+    const TextMetrics tm{};
+    InspRow rows[64];
+    const u32 n = inspectorPlan(prof, tm, false, 0, rows);
+    u32 sec = 0, sky = 0, hdri = 0, amb = 0, fogd = 0, fogc = 0;
+    i32 iSky = -1, iHdri = -1, iAmb = -1, iFogd = -1, iFogc = -1;
+    for (u32 i = 0; i < n; ++i) {
+        const InspRow& r = rows[i];
+        if (r.kind == InspRow::Kind::Section &&
+            r.payload == kInspBitEnvironment) {
+            ++sec;
+        }
+        if (r.id == kInspectorEnvSky) {
+            ++sky;
+            iSky = static_cast<i32>(i);
+        }
+        if (r.id == kInspectorEnvHdri) {
+            ++hdri;
+            iHdri = static_cast<i32>(i);
+        }
+        if (r.id == kInspectorEnvAmb) {
+            ++amb;
+            iAmb = static_cast<i32>(i);
+        }
+        if (r.id == kInspectorEnvFogD) {
+            ++fogd;
+            iFogd = static_cast<i32>(i);
+        }
+        if (r.id == kInspectorEnvFogC) {
+            ++fogc;
+            iFogc = static_cast<i32>(i);
+        }
+    }
+    EXPECT_MSG(sec == 1, "esperava 1 cabecalho Environment, vi %u", sec);
+    EXPECT_MSG(sky == 1 && hdri == 1 && amb == 1 && fogd == 1 && fogc == 1,
+               "as 5 linhas do Environment: sky=%u hdri=%u amb=%u fogd=%u "
+               "fogc=%u",
+               sky, hdri, amb, fogd, fogc);
+    // a ORDEM do dono: céu → hdri → ambiente → névoa → cor da névoa
+    EXPECT(iSky >= 0 && iSky < iHdri && iHdri < iAmb && iAmb < iFogd &&
+           iFogd < iFogc);
+    // os ids NÃO colidem com a faixa da câmara (5400..5412) nem entre si
+    EXPECT(kInspectorEnvSky != kInspectorEnvHdri &&
+           kInspectorEnvHdri != kInspectorEnvAmb &&
+           kInspectorEnvAmb != kInspectorEnvFogD &&
+           kInspectorEnvFogD != kInspectorEnvFogC);
+
+    // COLAPSADA: o bit novo esconde as 5 linhas e deixa o cabeçalho
+    const u32 nc = inspectorPlan(prof, tm, false, kInspBitEnvironment, rows);
+    u32 secC = 0, skyC = 0;
+    for (u32 i = 0; i < nc; ++i) {
+        const InspRow& r = rows[i];
+        if (r.kind == InspRow::Kind::Section &&
+            r.payload == kInspBitEnvironment) {
+            ++secC;
+        }
+        if (r.id == kInspectorEnvSky) {
+            ++skyC;
+        }
+    }
+    EXPECT_MSG(secC == 1 && skyC == 0,
+               "colapsada: cabecalho=%u linhas de ceu=%u (0 esperado)", secC,
+               skyC);
+    // o conteúdo aberto é MAIS alto que o colapsado (o scroll não corta)
+    EXPECT(inspectorContentHeight(prof, tm, false, 0) >
+           inspectorContentHeight(prof, tm, false, kInspBitEnvironment));
+
+    // o TIC SEM Environment NÃO ganha a secção (o Transform de sempre)
+    Scene s2;
+    const Handle h2 = s2.create("plano");
+    s2.get(h2)->addComponent<Transform3D>();
+    const InspProfile p2 = inspectorProfile(*s2.get(h2));
+    EXPECT(!p2.env);
+    InspRow rows2[64];
+    const u32 n2 = inspectorPlan(p2, tm, false, 0, rows2);
+    for (u32 i = 0; i < n2; ++i) {
+        EXPECT(!(rows2[i].kind == InspRow::Kind::Section &&
+                 rows2[i].payload == kInspBitEnvironment));
+    }
+}
+
+// ---- PIN pbr_texture_bind (0.12-Y-fix) --------------------------------------
+// A ordem do dono: «garante que o bind() do shader envia o uBaseColorTex
+// para o slot correto da GPU». O pin corre o LitMaterial REAL no stub fb:
+// o uniform existe PELO NOME do contrato, setTexture(tex) liga uHasTex=1,
+// mete o sampler no UNIT 0 (o slot baseColor) e binda a textura;
+// setTexture(nullptr) desliga SEM bind (o lit de sempre byte a byte).
+TEST(pbr_texture_bind) {
+    // O CONTRATO NO FONTE (o fb auto-regista QUALQUER nome consultado —
+    // a leitura do Material.cpp É a verdade do nome; a mutação do nome
+    // morre AQUI antes de qualquer GL)
+    std::string msrc;
+    ASSERT(readFile(repoRoot() +
+                        "/app/src/main/cpp/render/Material.cpp",
+                    msrc));
+    EXPECT_MSG(countSub(msrc, "uniform sampler2D uBaseColorTex;") >= 1,
+               "o FS nao declara o sampler uBaseColorTex (o contrato do "
+               "slot 0)");
+    EXPECT_MSG(countSub(msrc, "glGetUniformLocation(prog_, "
+                              "\"uBaseColorTex\")") >= 1,
+               "o init nao consulta uBaseColorTex pelo nome");
+
+    glstub::fb::enabled = true;
+    glstub::fb::resetState();
+    glstub::reset();
+
+    LitMaterial mat;
+    ASSERT(mat.init());
+    mat.use();   // o programa do lit fica corrente no stub
+
+    // o CONTRATO: o uniform uBaseColorTex EXISTE no programa (o albedo tem
+    // o nome do slot 0 — o retro-guarda uTex só entra se o nome morrer)
+    const GLint locBase =
+        glGetUniformLocation(glstub::fb::curProg_, "uBaseColorTex");
+    EXPECT_MSG(locBase >= 0,
+               "uBaseColorTex nao existe no programa do lit (loc=%d)",
+               static_cast<int>(locBase));
+
+    // a textura 2x2 (o RGBA direto — o caminho curto da casa)
+    Texture tex;
+    const u8 px[2 * 2 * 4] = {255, 64, 32, 255, 255, 64, 32, 255,
+                              255, 64, 32, 255, 255, 64, 32, 255};
+    ASSERT(tex.createFromRGBA(px, 2, 2));
+    ASSERT(tex.ok());
+
+    glstub::reset();   // os contadores a partir do setTexture
+    mat.setTexture(&tex);
+    EXPECT_MSG(glstub::stats.lastUniform1f == 1.0f,
+               "uHasTex devia ser 1.0, foi %.2f", glstub::stats.lastUniform1f);
+    EXPECT_MSG(glstub::stats.lastUniform1i == 0,
+               "o sampler uBaseColorTex devia ir ao unit 0, foi %d",
+               glstub::stats.lastUniform1i);
+    EXPECT_MSG(glstub::stats.lastBoundTexture == tex.handle(),
+               "o bind de textura devia ser a do albedo (%u), foi %u",
+               tex.handle(), glstub::stats.lastBoundTexture);
+    EXPECT(glstub::stats.boundTextures == 1);
+
+    // nullptr = o caminho de sempre: uHasTex 0 e NENHUM bind (o lit F2)
+    glstub::reset();
+    mat.setTexture(nullptr);
+    EXPECT(glstub::stats.lastUniform1f == 0.0f);
+    EXPECT(glstub::stats.boundTextures == 0);
+
+    // os SAMPLERS do PBR nunca colidem: normal no 1, rough/metal no 2 (o
+    // setPbr liga os seus units SEM tocar no albedo — o mesmo draw)
+    Texture nrm;
+    const u8 npx[2 * 2 * 4] = {};
+    ASSERT(nrm.createFromRGBA(npx, 2, 2));
+    Texture rmt;
+    ASSERT(rmt.createFromRGBA(npx, 2, 2));
+    glstub::reset();
+    mat.setPbr(&nrm, &rmt, 0.5f, 0.5f);
+    mat.setTexture(&tex);   // o albedo volta ao 0 DEPOIS do setPbr
+    EXPECT_MSG(glstub::stats.lastBoundTexture == tex.handle(),
+               "o albedo manda no unit 0 mesmo com PBR ativo (%u)",
+               glstub::stats.lastBoundTexture);
+
+    mat.destroy();
+    tex.destroy();
+    nrm.destroy();
+    rmt.destroy();
+    glstub::fb::enabled = false;
+    glstub::fb::resetState();
 }

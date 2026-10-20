@@ -132,7 +132,7 @@ private:
     u32 prog_ = 0;
     i32 locVP_ = -1;
     i32 locModel_ = -1;
-    i32 locTex_ = -1;
+    i32 locTex_ = -1;    // 0.12-Y-fix: uBaseColorTex (fallback uTex) — unit 0
     i32 locHasTex_ = -1;
     i32 locTint_ = -1;   // 0.7.0: uTint (cor por TIC)
     i32 locSkin_ = -1;   // 0.8.2: uSkin (ramo de bones)

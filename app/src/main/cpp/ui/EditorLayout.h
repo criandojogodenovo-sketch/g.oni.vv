@@ -37,6 +37,7 @@
 #include "components/CameraComp.h"   // 0.7.7: inspector da câmara
 #include "components/AnimationPlayer.h"   // 0.8.0: inspector da animação
 #include "components/AudioPlayer.h"   // 0.8.11: inspector de áudio
+#include "components/Environment.h"   // 0.12-Y-fix: inspector do WorldEnvironment
 #include "components/UiCanvas.h"   // 0.8.0: canAnim (elementos animáveis)
 
 namespace vv {
@@ -177,6 +178,14 @@ constexpr u64 kInspectorCamOrtho   = 5403;
 constexpr u64 kInspectorCamProj    = 5410;
 constexpr u64 kInspectorCamActive  = 5411;
 constexpr u64 kInspectorCamFrustum = 5412;   // 0.7.10: toggle do gizmo
+
+// 0.12-Y-fix — inspector do WORLDENVIRONMENT (faixa 5420..5429; a câmara
+// vive em 5400..5412, os fields do Transform em 5530+ — zero colisões)
+constexpr u64 kInspectorEnvSky  = 5420;   // "céu: #RRGGBB" (teclado hex 11)
+constexpr u64 kInspectorEnvHdri = 5421;   // "hdri: …" (o NAVEGADOR)
+constexpr u64 kInspectorEnvAmb  = 5422;   // slider ambiente 0..2
+constexpr u64 kInspectorEnvFogD = 5423;   // slider névoa 0..1
+constexpr u64 kInspectorEnvFogC = 5424;   // "névoa: #RRGGBB" (teclado hex 12)
 // 0.8.0 (F7) — primitiva procedural do MeshRenderer + animação
 constexpr u64 kInspectorPrimSel   = 5003;   // "prim: esfera ▸" (seletor)
 constexpr u64 kInspectorPrimR     = 5600;   // slider raio/size
@@ -259,6 +268,9 @@ struct InspProfile {
     // 0.8.9 — IMPORT DE FICHEIRO: linhas dims + "escala: original" (o fit
     // uniforme normaliza o TAMANHO; estes mostram/devolvem o original)
     bool fileMesh = false;
+    // 0.12-Y-fix: o WorldEnvironment presente (secção Environment com os
+    // 5 controlos — céu/hdri/ambiente/névoa/cor da névoa)
+    bool env = false;
     // 0.10-M HOTFIX TEXTURAS-MULTIMAT: nº de materiais do mesh do TIC (o
     // seletor «material: i/N» só entra com >1 — a grade do MeshRenderer é
     // a fonte, zero I/O no caminho quente)
@@ -276,6 +288,7 @@ inline InspProfile inspectorProfile(const Tic& tic) {
     p.anim = tic.getComponent<AnimationPlayer>() != nullptr;   // 0.8.0
     p.au = tic.getComponent<AudioPlayer>() != nullptr;   // 0.8.11
     p.script = tic.getComponent<ScriptComp>() != nullptr;   // 0.9.2
+    p.env = tic.getComponent<Environment>() != nullptr;   // 0.12-Y-fix
     if (const MeshRenderer* mr = tic.getComponent<MeshRenderer>()) {
         p.prim = mr->primOn;   // 0.8.0
         p.primKind = mr->prim.kind;
@@ -369,6 +382,12 @@ struct InspRow {
         AuPos,       // "posicional: sim/nao" (atenuação pela distância)
         AuRint,      // slider raio interno (ouvido a 100%)
         AuRext,      // slider raio externo (silêncio)
+        // 0.12-Y-fix — WORLDENVIRONMENT (a secção Environment)
+        EnvSky,      // "céu: #RRGGBB" + swatch (teclado hex, propósito 11)
+        EnvHdri,     // "hdri: <nome>" (abre o NAVEGADOR .png/.hdr)
+        EnvAmb,      // slider ambiente 0..2 (o multiplicador do ambient)
+        EnvFogD,     // slider névoa (densidade exp2) 0..1 (0 = morta)
+        EnvFogC,     // "névoa: #RRGGBB" + swatch (teclado hex, propósito 12)
     };
     Kind kind;
     f32  y;     // topo da linha em COORDS DE CONTEÚDO (cumulativo)
@@ -426,6 +445,7 @@ constexpr u32 kInspBitFisica    = 1u << 4;
 constexpr u32 kInspBitAudio     = 1u << 5;
 constexpr u32 kInspBitAnim      = 1u << 6;
 constexpr u32 kInspBitScript    = 1u << 7;   // 0.9.2: V.ONI
+constexpr u32 kInspBitEnvironment = 1u << 8; // 0.12-Y-fix: WorldEnvironment
 
 // altura de UMA linha de Transform (PASSO 1: título 12sp + caixas 32dp +
 // folga — a spec: «campos 32dp»; eram caixas de 48). 0.12-QoL A: a folga
@@ -516,6 +536,13 @@ inline u32 inspectorRowCount(const InspProfile& p, bool selectable,
         n += 1;
         if (!(collapsed & kInspBitAudio)) {
             n += 9;
+        }
+    }
+    // ---- ENVIRONMENT (bit8 — 0.12-Y-fix): o WorldEnvironment -------------
+    if (p.env) {
+        n += 1;
+        if (!(collapsed & kInspBitEnvironment)) {
+            n += 5;   // céu + hdri + ambiente + névoa + cor da névoa
         }
     }
     // ---- SCRIPT V.ONI (bit7 — 0.9.2): secção SEMPRE presente ----------
@@ -685,6 +712,21 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
             push(InspRow::Kind::AuPos, btnH, kInspectorAuPos);
             push(InspRow::Kind::AuRint, sldH, kInspectorAuRint);
             push(InspRow::Kind::AuRext, sldH, kInspectorAuRext);
+        }
+    }
+    // ---- ENVIRONMENT (0.12-Y-fix) — o inspector do WorldEnvironment: os
+    // 5 controlos da ordem (céu hex · hdri navegador · ambiente 0..2 ·
+    // névoa 0..1 · cor da névoa hex). O preset é SÓ Transform+Environment
+    // (sem mesh/física) — a secção é o CORPO do TIC.
+    if (p.env) {
+        push(InspRow::Kind::Section, secH, kInspSectionBase + 8,
+             kInspBitEnvironment);
+        if (!(collapsed & kInspBitEnvironment)) {
+            push(InspRow::Kind::EnvSky, btnH, kInspectorEnvSky);
+            push(InspRow::Kind::EnvHdri, btnH, kInspectorEnvHdri);
+            push(InspRow::Kind::EnvAmb, sldH, kInspectorEnvAmb);
+            push(InspRow::Kind::EnvFogD, sldH, kInspectorEnvFogD);
+            push(InspRow::Kind::EnvFogC, btnH, kInspectorEnvFogC);
         }
     }
     // ---- SCRIPT V.ONI (0.9.2 §10) — sempre disponível num TIC ----------

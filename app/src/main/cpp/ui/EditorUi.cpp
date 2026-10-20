@@ -1525,6 +1525,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     MeshRenderer* mrEdit = tic->getComponent<MeshRenderer>();
     // 0.8.11 — o AudioPlayer do TIC (clip/preview/toggles/sliders)
     AudioPlayer* auEdit = tic->getComponent<AudioPlayer>();
+    // 0.12-Y-fix — o Environment do TIC (o Inspector do WorldEnvironment)
+    Environment* envEdit = tic->getComponent<Environment>();
     char meshLabel[64] = "";
     char texLabel[64] = "";
     // 0.10-M HOTFIX TEXTURAS-VINCULA: os rótulos dos 5 slots (só preenchidos
@@ -1536,6 +1538,21 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     // textura VIVA — o mesmo resolver do elemento Image; vazia = sem)
     char slotRefs[MeshRenderer::kMeshTexSlots][96] = {};
     char inputLine[48] = "";
+    // 0.12-Y-fix: os rótulos do Environment (o hdri mostra o NOME limpo;
+    // os hexes formatados UMA vez — o draw só consome)
+    char envHdriLabel[80] = "";
+    char envSkyHex[12] = "";
+    char envFogHex[12] = "";
+    if (envEdit) {
+        if (!envEdit->hdriPath.empty()) {
+            std::snprintf(envHdriLabel, sizeof(envHdriLabel), "hdri: %s",
+                          assetBasename(envEdit->hdriPath));
+        } else {
+            std::snprintf(envHdriLabel, sizeof(envHdriLabel), "hdri: -");
+        }
+        uiHexFormat(envEdit->skyColor, envSkyHex, sizeof(envSkyHex));
+        uiHexFormat(envEdit->fogColor, envFogHex, sizeof(envFogHex));
+    }
     char camProjLabel[48] = "";   // 0.7.7
     char camActiveLabel[48] = "";
     char camFrustumLabel[48] = "";   // 0.7.10: toggle do gizmo
@@ -1583,12 +1600,28 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 std::snprintf(slotRefs[s], sizeof(slotRefs[s]), "%s",
                               p.c_str());
             }
+            // 0.12-Y-fix: a VERDADE do baseColor — o slot 0 É o texPath
+            // (o caminho clássico do bind auto); com a grade vazia mas a
+            // textura VIVA, o thumb da linha baseColor saía vazio. O ref
+            // do texPath alimenta o thumb (o dono VÊ se carregou).
+            if (s == 0 && slotRefs[0][0] == '\0' && !mr->texPath.empty() &&
+                mr->texPath.size() < sizeof(slotRefs[0])) {
+                std::snprintf(slotRefs[0], sizeof(slotRefs[0]), "%s",
+                              mr->texPath.c_str());
+            }
             // o NOME é que trunca (o padrão textfit do button) — o sufixo
             // honesto fica visível mesmo no painel estreito do device
+            // 0.12-Y-fix: o base do RÓTULO segue a MESMA verdade do thumb
+            // (slot 0 sem grade = o texPath — nunca «baseColor: —» com
+            // textura viva ao lado)
+            const char* truth =
+                (s == 0 && p.empty() && !mr->texPath.empty())
+                    ? mr->texPath.c_str()
+                    : p.c_str();
             char base[64] = "";
-            if (!p.empty()) {
+            if (truth && truth[0] != '\0') {
                 std::snprintf(base, sizeof(base), "%s",
-                              assetBasename(p.c_str()));
+                              assetBasename(truth));
                 char full[160];
                 editor::inspTexSlotLabel(full, sizeof(full),
                                          kBindSlotName(static_cast<u8>(s)), s,
@@ -1843,11 +1876,12 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             // bit no EditorState::inspCollapsed (PERSISTE — spec G)
             const u32 bit = r.payload;
             const bool open = !(st.inspCollapsed & bit);
-            static const char* kTitles[8] = {"Transform", "Camera", "Malha",
+            static const char* kTitles[9] = {"Transform", "Camera", "Malha",
                                              "Material", "Física", "Áudio",
-                                             "Animação", "Script"};
+                                             "Animação", "Script",
+                                             "Environment"};
             u32 titleIdx = 0;
-            for (u32 b = 0; b < 8; ++b) {
+            for (u32 b = 0; b < 9; ++b) {
                 if (bit == (1u << b)) {
                     titleIdx = b;
                 }
@@ -2506,6 +2540,79 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 }
             }
             break;
+        // ---- 0.12-Y-fix — WORLDENVIRONMENT (a secção Environment) ------------
+        case InspRow::Kind::EnvSky: {
+            // "céu: #RRGGBB" + swatch VIVO (o MESMO padrão da linha hex do
+            // tint: tocar abre o teclado em modo hex — propósito 11)
+            if (envEdit) {
+                const f32 swS = 48.0f;
+                const f32 swX = x + w - kPad - swS;
+                const f32 swY = ry + (r.h - swS) * 0.5f;
+                const f32 sky4[4] = {envEdit->skyColor[0], envEdit->skyColor[1],
+                                     envEdit->skyColor[2], 1.0f};
+                ui.panelRounded(swX, swY, swS, swS, theme::kRadiusField, sky4);
+                ui.frameRounded(swX, swY, swS, swS, 1.0f, theme::kRadiusField,
+                                theme::kTheme.border);
+                char label[40];
+                std::snprintf(label, sizeof(label), "céu: %s", envSkyHex);
+                const f32 btnW = (swX - 8.0f) - (x + kPad);
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                ui.button(r.id, x + kPad, ry + 2.0f, btnW, r.h - 4.0f, label);
+            }
+            break;
+        }
+        case InspRow::Kind::EnvHdri:
+            // "hdri: <nome>" — o tap pede o NAVEGADOR (o main abre com a
+            // intenção HDRI: o .png/.hdr escolhido escreve o Environment e
+            // o ambient sai da MÉDIA CPU do equirect)
+            ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry, w - 2.0f * kPad, r.h,
+                      envHdriLabel);
+            break;
+        case InspRow::Kind::EnvAmb:
+            // slider ambiente 0..2 (o multiplicador do ambient — o HDRI
+            // aplica por cima; o clampFields da casa mantém o contrato)
+            if (envEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "ambiente", 0.0f,
+                              2.0f, envEdit->ambient, "%.2f")) {
+                    envEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::EnvFogD:
+            // slider névoa (densidade exp2) 0..1 — 0 = MORTA (o lit de
+            // sempre: o contrato do Pbr.h)
+            if (envEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);   // PASSO 1: a linha da spec
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "névoa", 0.0f, 1.0f,
+                              envEdit->fogDensity, "%.2f")) {
+                    envEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::EnvFogC: {
+            // "névoa: #RRGGBB" + swatch (o MESMO padrão do céu; propósito 12)
+            if (envEdit) {
+                const f32 swS = 48.0f;
+                const f32 swX = x + w - kPad - swS;
+                const f32 swY = ry + (r.h - swS) * 0.5f;
+                const f32 fog4[4] = {envEdit->fogColor[0], envEdit->fogColor[1],
+                                     envEdit->fogColor[2], 1.0f};
+                ui.panelRounded(swX, swY, swS, swS, theme::kRadiusField, fog4);
+                ui.frameRounded(swX, swY, swS, swS, 1.0f, theme::kRadiusField,
+                                theme::kTheme.border);
+                char label[40];
+                std::snprintf(label, sizeof(label), "névoa: %s", envFogHex);
+                const f32 btnW = (swX - 8.0f) - (x + kPad);
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                ui.button(r.id, x + kPad, ry + 2.0f, btnW, r.h - 4.0f, label);
+            }
+            break;
+        }
         }
     }
 
@@ -2566,6 +2673,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 r.kind != InspRow::Kind::AuLoop &&      // 0.8.11
                 r.kind != InspRow::Kind::AuPos &&       // 0.8.11
                 r.kind != InspRow::Kind::Instancing &&  // 0.11-W (3.5b)
+                r.kind != InspRow::Kind::EnvSky &&      // 0.12-Y-fix: hex céu
+                r.kind != InspRow::Kind::EnvHdri &&     // 0.12-Y-fix: navegador
+                r.kind != InspRow::Kind::EnvFogC &&     // 0.12-Y-fix: hex névoa
                 !isSection &&                           // 0.9.0: colapsar
                 r.kind != InspRow::Kind::TransformRow &&// 0.9.0: caixas X/Y/Z + R
                 r.kind != InspRow::Kind::Slider) {      // 0.8.9: zona do VALOR
@@ -2722,6 +2832,28 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 if (AudioPlayer* au = tic->getComponent<AudioPlayer>()) {
                     au->posicional = !au->posicional;
                     au->clampFields();
+                }
+            } else if (r.kind == InspRow::Kind::EnvSky) {
+                // 0.12-Y-fix — teclado hex (propósito 11); o commit escreve
+                // o céu (inválido = estado intacto, o contrato do hex)
+                if (Environment* e = tic->getComponent<Environment>()) {
+                    char cur[12];
+                    uiHexFormat(e->skyColor, cur, sizeof(cur));
+                    openTextInput(st, 11, st.selected, -1, cur);
+                }
+            } else if (r.kind == InspRow::Kind::EnvFogC) {
+                // 0.12-Y-fix — teclado hex (propósito 12) para a NÉVOA
+                if (Environment* e = tic->getComponent<Environment>()) {
+                    char cur[12];
+                    uiHexFormat(e->fogColor, cur, sizeof(cur));
+                    openTextInput(st, 12, st.selected, -1, cur);
+                }
+            } else if (r.kind == InspRow::Kind::EnvHdri) {
+                // 0.12-Y-fix — o NAVEGADOR com a intenção HDRI (o flag é o
+                // contrato UI→main: o main abre o browser e intercepta o
+                // pick do .png/.hdr escrevendo o Environment + o ambient)
+                if (tic->getComponent<Environment>()) {
+                    st.hdriPick = true;
                 }
             } else if (r.kind == InspRow::Kind::Instancing) {
                 // 0.11-W (3.5b): o toggle do fundo de blocos (o default é

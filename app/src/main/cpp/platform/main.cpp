@@ -1564,8 +1564,18 @@ struct ApplyAskState {
     std::string fileName;  // basename (p/ o diálogo)
 } g_applyAsk;
 
+// 0.12-Y-fix — A INTENÇÃO HDRI do navegador: o botão "hdri:" do
+// WorldEnvironment arma-a (via EditorState::hdriPick); o pick do .png
+// escreve DIRETO o Environment do TIC selecionado (sem diálogo «aplicar
+// ao TIC?» — a intenção É a aplicação; o .goni transporta pelo dump).
+bool g_hdriPickPending = false;
+
 // abre/re-carrega uma pasta do navegador
 void browserOpen(const std::string& path) {
+    // 0.12-Y-fix: QUALQUER abertura nova mata a intenção HDRI antiga (o
+    // browser aberto por outra via NUNCA sequestra o 1.º pick; a intenção
+    // HDRI re-arma DEPOIS do browserOpen)
+    g_hdriPickPending = false;
     g_browser.cwd = path;
     g_browser.failed = !fileapi::listDirEntries(path, g_browser.entries);
     g_browser.open = true;
@@ -3433,6 +3443,116 @@ void browserImportAudio(const fileapi::DirEntry& e) {
 // importar e o browser deve CONTINUAR ABERTO (o ficheiro desapareceu — a
 // lista re-lista no sítio); true = caminho encaminhado (job/extract/audio/
 // erro de formato) e o dispatch fecha o browser como sempre.
+// 0.12-Y-fix — IMPORT DE HDRI pelo navegador (a intenção do botão "hdri:"
+// do WorldEnvironment): o equirect entra COMO PNG EM textures/hdri_*.png
+// (a média CPU do ambient precisa dos BYTES crus — o .gtext comprimido
+// não os tem; a migração NUNCA apaga o original, o ref sobrevive ao load)
+// e o ref + o ambient escrevem NO Environment do TIC selecionado.
+// .hdr → fora do escopo HOJE (o decoder RGBE não existe na casa) — o
+// aviso diz o que usar; outra coisa → o aviso do formato. Devolve FALSE
+// só quando o browser deve CONTINUAR ABERTO (ficheiro desapareceu — o
+// MESMO contrato do browserImportFile).
+bool browserImportHdri(const fileapi::DirEntry& e) {
+    if (!g_storage || e.isDir) {
+        return true;
+    }
+    if (!fileapi::isFile(e.path)) {
+        char msg[128];
+        std::snprintf(msg, sizeof(msg),
+                      "ficheiro não encontrado: %s (a lista atualizou)",
+                      e.name.c_str());
+        showToast(msg);
+        elog::warn("environment: HDRI '%s' desapareceu (lista "
+                   "desatualizada) — browser re-listado",
+                   e.path.c_str());
+        g_browser.failed =
+            !fileapi::listDirEntries(g_browser.cwd, g_browser.entries);
+        return false;
+    }
+    // a extensão decide (o local lowerExt — o FileApi não exporta o seu)
+    std::string ext;
+    {
+        const size_t dot = e.name.rfind('.');
+        if (dot != std::string::npos && dot + 1 < e.name.size()) {
+            ext = e.name.substr(dot + 1);
+            for (char& c : ext) {
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+        }
+    }
+    Tic* tsel = g_scene.get(g_editor.selected);
+    Environment* env =
+        tsel ? tsel->getComponent<Environment>() : nullptr;
+    if (!env) {
+        showToast("seleciona um TIC WorldEnvironment");
+        elog::warn("environment: HDRI '%s' sem TIC WorldEnvironment "
+                   "selecionado — pick ignorado",
+                   e.path.c_str());
+        return true;
+    }
+    if (ext != "png") {
+        char msg[128];
+        std::snprintf(msg, sizeof(msg),
+                      "HDRI: .%s fora do escopo — usa PNG equirect 2:1",
+                      ext.empty() ? "(sem extensão)" : ext.c_str());
+        showToast(msg);
+        elog::warn("environment: HDRI '%s' recusado (extensão .%s — o "
+                   "decoder da casa é PNG; o .hdr precisa do RGBE)",
+                   e.path.c_str(), ext.c_str());
+        return true;
+    }
+    std::vector<u8> bytes;
+    if (!fileapi::readAll(e.path, bytes) || bytes.empty()) {
+        showToast("leitura falhou (causa no engine.log)");
+        elog::error("environment: leitura do HDRI '%s' FALHOU",
+                    e.path.c_str());
+        return true;
+    }
+    // valida ANTES de escrever: um PNG ilegível nunca entra no projeto
+    RawImage probe;
+    std::string perr;
+    if (!loadPng(bytes.data(), bytes.size(), probe, perr)) {
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "PNG inválido: %.40s", perr.c_str());
+        showToast(msg);
+        elog::error("environment: HDRI '%s' inválido — %s", e.path.c_str(),
+                    perr.c_str());
+        return true;
+    }
+    // nome sanitizado + colisão (hdri_<stem>.png; existe → sufixo -2, -3)
+    const std::string stem = convert::sanitizeName(
+        e.name.substr(0, e.name.size() - ext.size() - 1));
+    std::string rel = "textures/hdri_" + stem + ".png";
+    for (int tryN = 2; g_storage->exists(rel) && tryN < 100; ++tryN) {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "-%d", tryN);
+        rel = "textures/hdri_" + stem + buf + ".png";
+    }
+    if (!g_storage->makeDirs("textures") ||
+        !g_storage->writeBytes(rel, bytes.data(), bytes.size())) {
+        showToast("gravar HDRI falhou (engine.log)");
+        elog::error("environment: writeBytes '%s' FALHOU", rel.c_str());
+        return true;
+    }
+    env->hdriPath = rel;
+    // o ambient sai da MÉDIA CPU (as MESMAS fontes puras do apply de
+    // sempre — o PNG acabado de ler É a média, sem segundo I/O)
+    {
+        f32 avg[3];
+        averageColor(probe.rgba.data(), probe.width, probe.height, avg);
+        env->ambient = ambientFromAvg(avg);
+    }
+    refreshCatalog();   // o PNG entra no catálogo (o seletor de texturas vê)
+    char msg[96];
+    std::snprintf(msg, sizeof(msg), "HDRI aplicado: %.48s",
+                  rel.c_str());
+    showToast(msg);
+    elog::info("environment: HDRI '%s' → %s (ambient %.2f, TIC '%s')",
+               e.path.c_str(), rel.c_str(), static_cast<double>(env->ambient),
+               tsel->name.c_str());
+    return true;
+}
+
 bool browserImportFile(const fileapi::DirEntry& e) {
     if (!g_storage || e.isDir) {
         return true;
@@ -7452,6 +7572,21 @@ void frame() {
         elog::info("ui: pick bloqueado (sem seleção)");
     }
 
+    // 0.12-Y-fix — A INTENÇÃO HDRI: o botão "hdri:" do WorldEnvironment
+    // pediu o NAVEGADOR; o main abre na raiz de sempre COM a intenção
+    // armada (o pick do .png escreve o Environment — browserImportHdri)
+    if (g_editor.hdriPick) {
+        g_editor.hdriPick = false;
+        const Tic* tsel = g_scene.get(g_editor.selected);
+        if (tsel && tsel->getComponent<Environment>()) {
+            browserOpen(fileapi::kBrowserRoots[0].path);
+            g_hdriPickPending = true;   // DEPOIS do open (o open limpa)
+            g_editor.fileBrowser = true;
+            LOGI("environment: selecionar HDRI — navegador aberto "
+                 "(.png equirect)");
+        }
+    }
+
     // FASE 9 (G2-7): o LONG-PRESS no nome truncado da hierarquia pediu o
     // nome completo — o main converte em toast (o Inspector é puro)
     if (g_editor.nameTip[0]) {
@@ -8326,6 +8461,14 @@ void frame() {
             if (rowIdx < g_browser.entries.size()) {
                 if (g_browser.entries[rowIdx].isDir) {
                     browserOpen(g_browser.entries[rowIdx].path);
+                } else if (g_hdriPickPending &&
+                           browserImportHdri(g_browser.entries[rowIdx])) {
+                    // 0.12-Y-fix — A INTENÇÃO HDRI ANTES do import de
+                    // sempre: o .png escolhido escreve o Environment e o
+                    // browser FECHA (o mesmo A4: o consumido fecha)
+                    g_hdriPickPending = false;
+                    g_browser.open = false;
+                    g_editor.fileBrowser = false;
                 } else if (browserImportFile(g_browser.entries[rowIdx])) {
                     // 0.9.6.4 (A4): o browser só fecha quando o toque foi
                     // ENCAMINHADO (job/extract/audio/erro de formato); o

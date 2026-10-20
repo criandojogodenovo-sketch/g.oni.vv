@@ -89,7 +89,7 @@ in vec3 vNormal;
 in vec2 vUV;
 in vec3 vWorldPos;
 out vec4 outColor;
-uniform sampler2D uTex;
+uniform sampler2D uBaseColorTex;   // 0.12-Y-fix: o ALBEDO é o slot 0 — o nome é o contrato
 uniform float uHasTex;
 uniform vec3 uTint;
 uniform vec4 uBaseColor;
@@ -134,7 +134,7 @@ void main() {
     float diff = max(dot(n, kLightDir), 0.0);
     vec4 texel = vec4(1.0);
     if (uHasTex > 0.5) {
-        texel = texture(uTex, vUV);
+        texel = texture(uBaseColorTex, vUV);
     }
     vec3 alb = kAlbedo * texel.rgb * uBaseColor.rgb;
     float alpha = uBaseColor.a * texel.a;
@@ -195,7 +195,13 @@ bool LitMaterial::init() {
     }
     locVP_ = glGetUniformLocation(prog_, "uVP");
     locModel_ = glGetUniformLocation(prog_, "uModel");
-    locTex_ = glGetUniformLocation(prog_, "uTex");
+    // 0.12-Y-fix (a ordem do dono): o albedo liga-se pelo nome do CONTRATO
+    // uBaseColorTex (o slot 0 do PBR); o fallback uTex é o retro-guarda do
+    // lit antigo — os dois caminhos chegam ao MESMO unit 0.
+    locTex_ = glGetUniformLocation(prog_, "uBaseColorTex");
+    if (locTex_ < 0) {
+        locTex_ = glGetUniformLocation(prog_, "uTex");
+    }
     locHasTex_ = glGetUniformLocation(prog_, "uHasTex");
     locTint_ = glGetUniformLocation(prog_, "uTint");
     locSkin_ = glGetUniformLocation(prog_, "uSkin");        // 0.8.2
@@ -232,7 +238,8 @@ bool LitMaterial::init() {
     locFogDensity_ = glGetUniformLocation(prog_, "uFogDensity");
     locAmbientScale_ = glGetUniformLocation(prog_, "uAmbientScale");
     locEye_ = glGetUniformLocation(prog_, "uEye");
-    LOGI("LitMaterial: lit difusa fixa + ambient + textura opcional + uTint "
+    LOGI("LitMaterial: lit difusa fixa + ambient + uBaseColorTex (unit 0 — "
+         "o albedo slot 0) + uTint "
          "+ skin (UBO Bones[128]) + instancing (UBO Instances[64]) + props "
          "do material glTF (alpha/factors/twoSided/uvTransform) pronto");
     return true;
@@ -271,14 +278,16 @@ void LitMaterial::setModel(const Mat4& model) const {
     }
 }
 
-// F5-E: liga a textura albedo (unit 0) e ativa uHasTex; nullptr desativa —
-// sem textura o shader produz EXATAMENTE o resultado da F2.
+// F5-E: liga a textura albedo (unit 0 — o uBaseColorTex) e ativa uHasTex;
+// nullptr desativa — sem textura o shader produz EXATAMENTE o resultado
+// da F2. 0.12-Y-fix: o bind do albedo É o slot baseColor (o unit 0 é o
+// MESMO que o PBR-lite espera — o normal 1 e o rough/metal 2 nunca colidem).
 void LitMaterial::setTexture(const Texture* tex) const {
     if (locHasTex_ >= 0) {
         glUniform1f(locHasTex_, tex ? 1.0f : 0.0f);
     }
     if (tex && locTex_ >= 0) {
-        tex->bind(0);   // albedo no unit 0
+        tex->bind(0);   // o albedo/baseColor no unit 0 (o contrato)
         glUniform1i(locTex_, 0);
     }
 }

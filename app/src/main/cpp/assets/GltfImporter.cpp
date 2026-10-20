@@ -837,6 +837,27 @@ bool parseGltf(const char* json, size_t len, const std::vector<u8>& bin,
                 }
                 parseTexInfo(*ot, 4, gm);   // kBindOcclusion
             }
+            // 0.12-Y-fix (a ordem do dono): o LOG do material no parse —
+            // cada slot que o glTF liga aparece no engine.log com o índice
+            // da IMAGEM (a extração — GltfTextures.cpp — faz o par
+            // «[material] textura extraida: <nome> -> <caminho>»; aqui o
+            // dono vê O QUE o material pediu ANTES da extração)
+            {
+                const i32 slots[5] = {gm.baseColorTex, gm.normalTex,
+                                      gm.metalRoughTex, gm.emissiveTex,
+                                      gm.occlusionTex};
+                static const char* kSlotNames[5] = {
+                    "baseColor", "normal", "metalRough", "emissive",
+                    "occlusion"};
+                for (int s = 0; s < 5; ++s) {
+                    if (slots[s] >= 0) {
+                        elog::info("[material] material %zu (%s): slot %s -> "
+                                   "imagem %d",
+                                   out.materials.size(), gm.name.c_str(),
+                                   kSlotNames[s], slots[s]);
+                    }
+                }
+            }
             out.materials.push_back(std::move(gm));
         }
     }

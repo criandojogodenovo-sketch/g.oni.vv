@@ -393,6 +393,37 @@ R-014 aplicada.
   docs-lint VERDE · **versionCode 105** — o build vigente da CAMPANHA
   0.12-QoL FECHADA. O 104 fica INTACTO como história.
 
+- **0.12-Y · 3.Y-C-FIX — A UI DO ENVIRONMENT E O BIND DAS TEXTURAS (o
+  teste do dono no telemóvel)** — DOIS problemas do APK (vc 108): o
+  Inspector do WorldEnvironment VAZIO (só Transform/Animação/Script) e o
+  modelo BRANCO. (1) A SECÇÃO **Environment** NO Inspector (o perfil
+  `env` + o bit8 persistente + os ids 5420..5424): as 5 linhas da ordem
+  do dono — **céu** (hex + swatch vivo, teclado 11), **hdri** (o botão
+  abre o NAVEGADOR; o pick do .png valida, escreve
+  `textures/hdri_<stem>.png`, aponta o Environment e calcula o ambient
+  pela MÉDIA CPU; .hdr = aviso honesto — o decoder RGBE é out-of-scope
+  hoje), **ambiente** (slider 0..2), **névoa** (slider 0..1), **cor da
+  névoa** (hex, teclado 12) — TODOS leem/escrevem a struct Environment e
+  o .goni transporta (o roundtrip do C manda); (2) O BIND: o sampler do
+  albedo chama-se **uBaseColorTex** (o contrato do slot 0 no FS + no
+  init, o fallback uTex é o retro-guarda) e o setTexture liga ao UNIT 0
+  (normal 1 / rough-metal 2 nunca colidem) + O LOG DO MATERIAL (a ordem
+  do dono, LITERAL): `[material] textura extraida: <nome> -> <caminho>`
+  por extração + o skip jpeg NUNCA mais silencioso (a causa comum do
+  branco diz-se no engine.log) + o log do parse por slot do material +
+  o THUMB do baseColor com a VERDADE do slot 0 (a grade vazia herda o
+  texPath — o dono VÊ se carregou) · pins ×2 NOVOS
+  (`inspector_worldenv` — o plano com as 5 linhas na ordem + o colapso +
+  o TIC sem Environment limpo; `pbr_texture_bind` — o contrato no fonte
+  + o LitMaterial REAL no stub: uHasTex=1, unit 0, sem bind no nullptr) +
+  M-Yf1 (o nome do contrato morto) M-Yf2 (a secção morta)
+  vermelho→reposto→verde (coladas no RELATORIO-0.12-Y.md §3-FIX) ·
+  verificação: test_core os pins VERDES (os flakes da sandbox
+  documentados — o fork do r039 e o streaming_paralelo preexistente; o
+  CI é o árbitro) · c33_virtual 1009/0 · docs-lint VERDE ·
+  **versionCode 109** — o build vigente da campanha 0.12-Y. O 108 fica
+  INTACTO como história.
+
 - **0.12-Y · 3.Y-A — O PAN DA CÂMARA (a MÃOZINHA)** — a 6.ª FERRAMENTA
   no rail do viewport (Selecionar/Mover/Rodar/Escalar/**PAN**/Íman — o
   glifo Hand novo, o id 33, a legenda «Pan»): o Camera::pan NOVO move o
