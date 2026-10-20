@@ -1,8 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-20 · vc: 106 · Último commit: este (o 0.12-Y A —
-o PAN da câmara: a 6.ª ferramenta no rail, o Camera::pan pela fonte
-única, o pan de 2 dedos LIVRE; pins ×5 + R-059 + M-Ya1/2)
+Atualizado: 2026-10-20 · vc: 107 · Último commit: este (o 0.12-Y B —
+o ÍCONE IA: a fonte com o prompt do dono, a extração por textura, o
+tile a 65% da zona segura, os 15 PNGs, o fundo #0A0A0C; M-Yb1)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -10,10 +10,16 @@ o PAN da câmara: a 6.ª ferramenta no rail, o Camera::pan pela fonte
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A fechou,
-  vc 106; B/C a seguir)** (a cláusula calma: SÓ o prompt; a V.ONI
-  intocada; a história vive no RELATORIO-0.12-Y-ABERTURA.md + o
+- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A e B
+  fechadas, vc 107; C a seguir)** (a cláusula calma: SÓ o prompt; a
+  V.ONI intocada; a história vive no RELATORIO-0.12-Y-ABERTURA.md + o
   RELATORIO-0.12-Y.md).
+  **B (vc 107)**: o ÍCONE IA — a FONTE gerada com o prompt EXATO do dono
+  (obsidiana + veias de magma), a extração por TEXTURA (o high-pass: o
+  luminância da Y-0 comeria a obsidiana), o tile a 65% da ZONA SEGURA, os
+  15 PNGs (5 densidades × 3) + o fundo #0A0A0C (A ORDEM DO DONO);
+  icon_ia_mipmaps + y0_background/y0_escala recalibrados com nota +
+  M-Yb1.
   **A (vc 106)**: o PAN da câmara — a 6.ª FERRAMENTA no rail (o glifo
   Hand, id 33, a legenda «Pan»), o Camera::pan pela FONTE ÚNICA pura
   (camWorldPerPixel/camRightVec/camUpVec; o target no plano da câmara,
@@ -42,22 +48,8 @@ o PAN da câmara: a 6.ª ferramenta no rail, o Camera::pan pela fonte
   conflito camrig↔follow/look no compilador com o par do Substituir;
   pins ×14 + R-055 + M-3.9x1/x2; a história vive no
   RELATORIO-0.12-X-ABERTURA.md e no RELATORIO-0.12-X-CAMRIG.md).
-- **Campanha 0.12-U (V.ONI BLOCO A — a REDUÇÃO DE TRABALHO) — FECHADA
-  (3.9a..3.9c + o FECHO, vc 98–100)** (as 7 features no registo — o
-  View P universal, as 14 Funções, o spawn pela porta do Host, os
-  relógios every/after/when com o estado por nó AST; 64 entradas; pins
-  ×37 + R-052/R-053/R-054 + M-3.9a1..c3; o CRITÉRIO DO PLATFORMER corre
-  VERDE — o juiz final; a história vive no RELATORIO-0.12-U-ABERTURA.md
-  e nos relatórios das sub-fases + o FECHO).
-- **Campanha 0.12-E (EMERGÊNCIA + REDESIGN 2.5D, FOGO AVERMELHADO) —
-  FECHADA (E-1..E-3, vc 95–97)** (a ordem do dono abortou o SDF 3D;
-  cláusulas: ZERO matemática 3D, ZERO mexidas no FontAtlas, TICs
-  intocados; E-1 o desenho simples 2D de volta + 13 pins reformados +
-  6 recalibrações; E-2 a paleta EXATA do dono no Theme.h + os tokens
-  fireRed/fireOrange + os static_asserts da fonte única; E-3 o vidro
-  α0.85 + a linha âmbar 1dp a 20%, a sombra falsa, o gradiente
-  fireRed→fireOrange nos ativos, o ui/Noise2D.h; pins ×4 + M-E3a/b;
-  os DETALHES vivem no RELATORIO-0.12-E.md).
+- **Campanha 0.12-U (V.ONI BLOCO A — a REDUÇÃO DE TRABALHO) — FECHADA (3.9a..3.9c + o FECHO, vc 98–100)** (as 7 features no registo — o View P universal, as 14 Funções, o spawn pela porta do Host, os relógios every/after/when com o estado por nó AST; 64 entradas; pins ×37 + R-052/R-053/R-054 + M-3.9a1..c3; o platformer do juiz final VERDE; a história nos RELATORIO-0.12-U-*.md).
+- **Campanha 0.12-E (EMERGÊNCIA + REDESIGN 2.5D, FOGO AVERMELHADO) — FECHADA (E-1..E-3, vc 95–97)** (a ordem do dono abortou o SDF 3D; ZERO matemática 3D, ZERO FontAtlas, TICs intocados; E-1 o desenho simples de volta, E-2 a paleta EXATA no Theme.h, E-3 o vidro α0.85 + a sombra + o gradiente fogo + o Noise2D.h; pins ×4 + M-E3a/b; os DETALHES no RELATORIO-0.12-E.md).
 - **Campanha 0.12-D (identidade visual) — PARCIALMENTE ABORTADA PELO
   DONO (a 0.12-E)**: o D-4 (o LOGO, vc 94) SOBREVIVE; o D-1 (SDF), o
   D-2 (vidro) e o D-3 (fogo) estão DORMENTES (zero chamadores — vc

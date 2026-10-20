@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 0.11-Y · Y-0: o fundo SÓLIDO do ícone adaptativo — #08080A, a ordem
-     expressa do dono (o tom do canvas do ícone novo, docs/iconegonevv.png).
-     O foreground (o G em chama) vive em mipmap-*/ic_launcher_foreground.png;
-     a composição adaptativa vive em mipmap-anydpi-v26/ic_launcher.xml. -->
+<!-- 0.12-Y (3.Y-B): o fundo SÓLIDO do ícone adaptativo — #0A0A0C, a
+     ordem expressa do dono (supera o #08080A da Y-0; o canvas do ícone
+     IA novo, docs/iconegonevv-ai.png, gerado pelo prompt EXATO do dono
+     e processado por scripts/y_gen_ai_icon.py). O foreground (o tile
+     de obsidiana com o G de magma) vive em
+     mipmap-*/ic_launcher_foreground.png; a composição adaptativa vive
+     em mipmap-anydpi-v26/ic_launcher.xml. -->
 <resources>
-    <color name="ic_launcher_background">#08080A</color>
+    <color name="ic_launcher_background">#0A0A0C</color>
 </resources>

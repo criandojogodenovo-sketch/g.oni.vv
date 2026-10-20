@@ -112,7 +112,77 @@ platform/main.cpp + tests/test_012y.cpp (NOVO) + tests/test_sentinels.cpp
 docs/RELATORIO-0.12-Y.md (este) + docs/RELATORIO-0.9.6.md (§14, o par
 vc 106) + STATE.md + app/build.gradle (versionCode 106).
 
-## §2 · 3.Y-B — O ÍCONE IA (preenchido na sub-fase)
+## §2 · 3.Y-B — O ÍCONE IA (obsidiana + magma)
+
+**A ordem do dono**: «USA A TUA FERRAMENTA DE GERAÇÃO DE IMAGEM para
+criar: "A premium 3D app icon, a stylized letter G made of dark obsidian
+glass with glowing red magma veins inside. Studio lighting, pure black
+background, high resolution, Unreal Engine 5 style." Processa: remove o
+fundo preto (threshold de luminância ou canal alpha), aplica a Safe Zone
+do Android (o G ocupa ~65% do centro), gera os 5 tamanhos de mipmap (mdpi
+a xxxhdpi), atualiza o ic_launcher_foreground.png e o ic_launcher.xml
+(fundo #0A0A0C).»
+
+### O que mudou
+
+- **`docs/iconegonevv-ai.png` (NOVO, 1024×1024)** — a FONTE gerada pela
+  ferramenta de imagem AI com o prompt EXATO do dono (o padrão D-3/Y-0:
+  a fonte vive no repo, é história).
+- **`scripts/y_gen_ai_icon.py` (NOVO)** — o gerador da 0.12-Y (o irmão do
+  y0_gen_icons.py). O ACHADO da extração: o threshold de luminância da
+  Y-0 NÃO serve a fonte nova (a face da obsidiana é lum≈9 — comeria o
+  tile; o reflexo vermelho do chão é lum≈52 — passaria como conteúdo).
+  A EXTRAÇÃO é por TEXTURA (high-pass |im − blur| ≥ 6 no canal máximo):
+  o fundo gradiente e o reflexo são SUAVES (morrem no high-pass — a
+  densidade cai a 0.00–0.03), o tile é TEXTURADO (rebordo/veias/grão —
+  a densidade 0.57–0.69); a projeção com o piso de 25% dá a bbox,
+  encolhe 4 px, quadrifica-se pelo menor lado centrado e recebe a
+  máscara round-rect antialiased (raio 13%) — os pixels do tile ficam
+  INTACTOS (nada de un-premultiply: a fonte não é um glifo sobre preto).
+  O realce mild do launcher (saturação +18%, contraste +10%, brilho +5%)
+  para a legibilidade nos tamanhos pequenos — NADA de retouche da arte.
+- **A ESCALA** — o MESMO contrato Y-0-FIX que o dono validou no device:
+  o tile ocupa 65% da ZONA SEGURA do adaptativo (66 dp de 108 dp ⇒
+  39,72% do canvas — a diagonal 43 dp cabe na zona segura e no viewport
+  de 72 dp); no legacy 65% do lado.
+- **Os 15 PNGs** (5 densidades × 3): foreground 108/162/216/324/432 (o
+  canvas 108 dp) + legacy 48/72/96/144/192 (ic_launcher + ic_launcher_
+  round com a máscara circular, o círculo cheio do bg).
+- **`values/ic_launcher_background.xml`** — o fundo passa a **#0A0A0C**
+  (A ORDEM DO DONO, supera o #08080A da Y-0; a nota da superação fica no
+  comentário). O manifest JÁ aponta `@mipmap/ic_launcher`
+  (AndroidManifest.xml:48) e o adaptativo compõe o foreground — o APK do
+  CI é a prova do link (o aapt2 morre se faltar recurso; o pin
+  y0_aapt2/y0_manifest da Y-0 continua a aferrar).
+
+### Pins
+
+- `icon_ia_mipmaps` (test_012y.cpp) — as dimensões EXATAS dos 15 PNGs
+  (o header IHDR parseado à mão: legacy 48/72/96/144/192, foreground
+  108/162/216/324/432), a FONTE IA no repo, o GERADOR com o contrato
+  (TILE_FILL 0.65 · SAFE_ZONE_DP 66 · o bg (10,10,12)), o manifest a
+  apontar, o fundo #0A0A0C na LINHA da cor (a menção histórica no
+  comentário fica) e o adaptativo a compor o foreground.
+- **Recalibrações com nota** (a arte mudou, o CONTRATO 65% fica):
+  `y0_background` (#0A0A0C — a ordem do dono), `y0_escala` (o foreground
+  [38..41]% — o tile mede 39.5–39.8%; o legacy [52..66]% — o lum≥90
+  apanha o G+rebordo claros DENTRO do tile: o mdpi perde o rebordo no
+  kernel (54.2%), o xxxhdpi apanha-o todo (64.1%)).
+
+### Prova de mutação
+
+- **M-Yb1** (a safe zone VIOLADA — TILE_FILL 0.65 → 0.25, o bug Y-0
+  original de volta): `icon_ia_mipmaps` VERMELHO («TILE_FILL = 0.65»
+  fora da fonte) + `y0_escala` VERMELHO («o conteúdo sólido mede 14.8%
+  do canvas — fora da janela [38..41]%»). REPOSTO + regenerado → os 2
+  VERDES. Colada acima.
+
+### Verificação
+
+- test_core local: os pins VERDES (a única falha local = o fork do
+  medicoes, o flake da sandbox documentado — o CI é o árbitro).
+- Os 3 lançadores cobertos: adaptativo (Android 8+), legacy quadrado e
+  legacy redondo.
 
 ## §3 · 3.Y-C — O PIPELINE PBR (preenchido na sub-fase)
 

@@ -37,6 +37,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#include <utility>
 
 using namespace vv;
 using namespace vv::editor;
@@ -421,4 +422,79 @@ TEST(pan_rail_sexta) {
         EXPECT_MSG(!e.st.panMode,
                    "pan_rail_sexta: o Mover tem de desarmar o panMode");
     }
+}
+
+// ---- PIN icon_ia_mipmaps (0.12-Y B) -------------------------------------------
+// O ÍCONE GERADO POR IA (obsidiana + magma): a FONTE vive no repo
+// (docs/iconegonevv-ai.png — o prompt EXATO do dono), o gerador é o
+// scripts/y_gen_ai_icon.py (a safe zone 65% do contrato Y-0-FIX), os 5
+// mipmaps × 3 ficheiros têm as dimensões EXATAS por densidade, o
+// manifest aponta @mipmap/ic_launcher e o fundo do adaptativo é
+// #0A0A0C (a ordem do dono, supera o #08080A da Y-0).
+TEST(icon_ia_mipmaps) {
+    // (1) as DIMENSÕES exatas dos 15 PNGs (o header IHDR: w nos bytes
+    // 16..19, h nos 20..23, big-endian — parse puro, sem zlib). O LEGACY
+    // (ic_launcher/round) usa o lado do launcher 48..192; o FOREGROUND
+    // usa o canvas adaptativo 108 dp × densidade (108..432) — o mesmo
+    // par da DENS do gerador.
+    struct D { const char* dir; u32 legacy; u32 fg; };
+    const D dens[] = {{"mdpi", 48u, 108u}, {"hdpi", 72u, 162u},
+                      {"xhdpi", 96u, 216u}, {"xxhdpi", 144u, 324u},
+                      {"xxxhdpi", 192u, 432u}};
+    for (const D& d : dens) {
+        const std::pair<const char*, u32> files[3] = {
+            {"ic_launcher.png", d.legacy},
+            {"ic_launcher_round.png", d.legacy},
+            {"ic_launcher_foreground.png", d.fg}};
+        for (const auto& ff : files) {
+            const char* f = ff.first;
+            const u32 side = ff.second;
+            const std::string p = repoRoot() + "/app/src/main/res/mipmap-" +
+                                  d.dir + "/" + f;
+            std::string png;
+            if (!readFile(p, png)) png.clear();
+            EXPECT_MSG(!png.empty(),
+                       "icon_ia_mipmaps: falta %s", p.c_str());
+            ASSERT(png.size() > 24);   // o header IHDR cabe
+            EXPECT_MSG(png.compare(0, 8, "\x89PNG\r\n\x1a\n") == 0,
+                       "icon_ia_mipmaps: %s não é PNG", f);
+            const u32 w = (u32((unsigned char)png[16]) << 24) |
+                          (u32((unsigned char)png[17]) << 16) |
+                          (u32((unsigned char)png[18]) << 8) |
+                          u32((unsigned char)png[19]);
+            const u32 h = (u32((unsigned char)png[20]) << 24) |
+                          (u32((unsigned char)png[21]) << 16) |
+                          (u32((unsigned char)png[22]) << 8) |
+                          u32((unsigned char)png[23]);
+            EXPECT_MSG(w == side && h == side,
+                       "icon_ia_mipmaps: %s/%s é %ux%u (esperado %ux%u)",
+                       d.dir, f, w, h, side, side);
+        }
+    }
+    // (2) a FONTE IA vive no repo (o padrão D-3/Y-0: a fonte é história)
+    std::string src;
+    ASSERT(readFile(repoRoot() + "/docs/iconegonevv-ai.png", src));
+    EXPECT(src.size() > 10000);   // um PNG real, não um placeholder
+    // (3) o GERADOR: a safe zone 65% do contrato Y-0-FIX + o fundo novo
+    ASSERT(readFile(repoRoot() + "/scripts/y_gen_ai_icon.py", src));
+    EXPECT(countSub(src, "TILE_FILL = 0.65") == 1);
+    EXPECT(countSub(src, "SAFE_ZONE_DP = 66.0") == 1);
+    EXPECT(countSub(src, "(10, 10, 12)") == 1);   // o #0A0A0C
+    // (4) o MANIFEST aponta o ícone (o caminho do launcher)
+    ASSERT(readFile(repoRoot() + "/app/src/main/AndroidManifest.xml", src));
+    EXPECT(countSub(src, "@mipmap/ic_launcher") >= 1);
+    // (5) o fundo do adaptativo é #0A0A0C (a ordem do dono na 0.12-Y)
+    ASSERT(readFile(repoRoot() +
+                    "/app/src/main/res/values/ic_launcher_background.xml",
+                    src));
+    EXPECT(countSub(src, "<color name=\"ic_launcher_background\">"
+                         "#0A0A0C</color>") == 1);
+    // o Y-0 SUPERADO na LINHA da cor (a menção histórica no comentário
+    // fica — é a nota da superação)
+    EXPECT(countSub(src, "ic_launcher_background\">#08080A") == 0);
+    // (6) o adaptativo compõe o foreground
+    ASSERT(readFile(repoRoot() +
+                    "/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml",
+                    src));
+    EXPECT(countSub(src, "@mipmap/ic_launcher_foreground") == 1);
 }

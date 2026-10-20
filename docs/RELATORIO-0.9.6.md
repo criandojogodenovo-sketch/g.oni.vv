@@ -413,6 +413,21 @@ R-014 aplicada.
   docs-lint VERDE · **versionCode 106** — o build vigente da campanha
   0.12-Y. O 105 fica INTACTO como história.
 
+- **0.12-Y · 3.Y-B — O ÍCONE IA (obsidiana + magma)** — a FONTE gerada
+  pela ferramenta de imagem AI com o prompt EXATO do dono
+  (docs/iconegonevv-ai.png) + o gerador scripts/y_gen_ai_icon.py (a
+  extração por TEXTURA high-pass — o luminância da Y-0 comeria a
+  obsidiana e deixaria passar o reflexo) + o tile a 65% da ZONA SEGURA
+  (o contrato Y-0-FIX) + os 15 PNGs (5 densidades × launcher/round/
+  foreground) + o fundo **#0A0A0C** (A ORDEM DO DONO, supera o #08080A)
+  · pins: icon_ia_mipmaps (as 15 dimensões IHDR + a fonte + o gerador +
+  o manifest) + as recalibrações com nota (y0_background, y0_escala) +
+  M-Yb1 (a safe zone violada a 25% — 2 vermelhos) vermelho→reposto→verde
+  (colada no RELATORIO-0.12-Y.md §2) · verificação: test_core os pins
+  VERDES (o flake do medicoes é o único vermelho local — o CI é o
+  árbitro) · docs-lint VERDE · **versionCode 107** — o build vigente da
+  campanha 0.12-Y. O 106 fica INTACTO como história.
+
 - **0.12-QoL · C — O VIEWPORT 3D LIMPO** — a TEIA de linhas do frustum
   SÓ desenha com a câmara SELECIONADA (o glifo mudo fica — o alvo do
   toque; o toggle do Inspector mantém-se) + o pai de vidro do RAIL sai

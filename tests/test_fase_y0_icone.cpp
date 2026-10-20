@@ -117,7 +117,9 @@ TEST(y0_foreground) {
     }
 }
 
-// y0_background — o fundo sólido é o #08080A (a ordem expressa do dono)
+// y0_background — o fundo sólido do adaptativo. 0.12-Y (3.Y-B): A ORDEM
+// DO DONO muda o tom para #0A0A0C (supera o #08080A da Y-0 — o canvas do
+// ícone IA novo, docs/iconegonevv-ai.png); recalibrado com nota.
 TEST(y0_background) {
     std::string text;
     EXPECT_MSG(readFile(y0Root() +
@@ -126,7 +128,7 @@ TEST(y0_background) {
                         text),
                "values/ic_launcher_background.xml em falta");
     if (text.empty()) return;
-    EXPECT(text.find("<color name=\"ic_launcher_background\">#08080A"
+    EXPECT(text.find("<color name=\"ic_launcher_background\">#0A0A0C"
                      "</color>") != std::string::npos);
 }
 
@@ -404,11 +406,14 @@ TEST(y0_escala) {
         const double frac =
             static_cast<double>(bw > bh ? bw : bh) /
             static_cast<double>(w);
-        EXPECT_MSG(frac >= 0.33 && frac <= 0.39,
-                   "mipmap-%s/ic_launcher_foreground.png: o G sólido mede "
+        EXPECT_MSG(frac >= 0.38 && frac <= 0.41,
+                   "mipmap-%s/ic_launcher_foreground.png: o conteúdo sólido "
+                   "mede "
                    "%.1f%% do canvas — fora da janela da calibração "
-                   "[33..39]%% (o Y-0-fix calibrou 35.9%% = 65%% da zona "
-                   "segura; o bug do halo media ~25%%)",
+                   "[38..41]%% (0.12-Y: o TILE de obsidiana do ícone IA a "
+                   "65%% da zona segura = 39.7%% do canvas — o Y-0 media "
+                   "35.9%% com o glifo de fogo; a arte mudou, o CONTRATO "
+                   "65%% fica)",
                    kDens[i], frac * 100.0);
     }
     // o LEGACY: o sólido (lum ≥ 90) entre 0.56 e 0.63 do lado
@@ -437,11 +442,15 @@ TEST(y0_escala) {
         const double frac =
             static_cast<double>(bw > bh ? bw : bh) /
             static_cast<double>(w);
-        EXPECT_MSG(frac >= 0.56 && frac <= 0.63,
-                   "mipmap-%s/ic_launcher.png: o G sólido mede %.1f%% do "
-                   "lado — fora da janela da calibração [56..63]%% (o "
-                   "Y-0-fix calibrou 59.4%% = 65%% do lado após a borda "
-                   "antialiased; o bug do halo media ~46%%)",
+        EXPECT_MSG(frac >= 0.52 && frac <= 0.66,
+                   "mipmap-%s/ic_launcher.png: o conteúdo claro mede %.1f%% "
+                   "do "
+                   "lado — fora da janela da calibração [52..66]%% (0.12-Y: "
+                   "a arte nova é o TILE de obsidiana a 65%% do lado; o "
+                   "lum≥90 apanha o G+rebordo claros DENTRO do tile — o "
+                   "mdpi perde o rebordo escuro no kernel (54.2%%), o "
+                   "xxxhdpi apanha-o todo (64.1%%); o Y-0 media 59.4%% com "
+                   "o glifo de fogo)",
                    kDens[i], frac * 100.0);
     }
 }
