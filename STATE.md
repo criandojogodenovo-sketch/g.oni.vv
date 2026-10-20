@@ -28,13 +28,7 @@ origin/main sincronizado (d9b62a1, CI success)
   (A..D, vc 102–105)** (a cláusula calma: refinamento de UI 2.5D e
   persistência, ZERO lógica de motor; a história vive no
   RELATORIO-0.12-QoL.md).
-  **A (vc 102)**: o top bar SEM o texto do nome (só o ícone do G), a
-  pesquisa da hierarquia recolhida na LUPA que expande ao toque (o ×
-  limpa e recolhe), o border dos INATIVOS #24242A (o âmbar só no
-  ativo/selecionado — o divisor e os cards modais incluídos), os vãos
-  X/Y/Z 12dp + a margem mínima 8dp do Reset, o X (48×48) no menu de
-  cenas; pins ×5 + M-QoLa1/x2; 8 recalibrações com nota. CI verde
-  (1befd71).
+  **A (vc 102)**: o top bar SÓ com o ícone do G (o texto morre), a pesquisa recolhida na LUPA que expande ao toque (o × limpa e recolhe), o border dos INATIVOS #24242A (o âmbar APENAS no ativo/selecionado — o divisor e os cards modais incluídos), os vãos X/Y/Z 12dp + a margem mínima 8dp do Reset, o X (48×48) no menu de cenas; pins ×5 + M-QoLa1/x2 + 8 recalibrações com nota; CI verde (1befd71).
   **B (vc 103)**: os atalhos e o Subir deixam de ser BOTÕES âmbar (chips quietos, geometria/ids intactos), a seta (>) em TODAS as linhas, o « / » no breadcrumb, TUDO o que é ponto FORA (a 0.8.5 SUPERADA); R-057 + pins ×2 + M-QoLb1; o picker_oculta_dot recalibrado.
   **C (vc 104)**: a TEIA do frustum SÓ com a câmara selecionada (o glifo mudo fica), o rail SEM o pai quadrado gigante, o grid com o fade suave pela fonte única gridFadeForDist; R-058 + pins ×3 + M-QoLc1; o d17 recalibrado.
   **D (vc 105)**: o TIMER 180s com o dirty HONESTO (o dump difere), o autosave.goni NA RAIZ (o principal INTACTO), a recuperação 1× com o pop-up [Recuperar]/[Descartar], o ✓ verde que PISCA; R-056 + pins ×3 + M-QoLd1. **A CAMPANHA FECHA.**
