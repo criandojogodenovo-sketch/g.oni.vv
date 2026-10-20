@@ -100,6 +100,8 @@ enum class Icon : u8 {
     Image,          // imagem/textura (rect + círculo + serra) — a LUPA fica
                     // SÓ para pesquisar (o icones_unicos: uma função, um
                     // glifo — a textura no picker deixou de ser a lupa)
+    // ---- 0.12-Y (3.Y-A — a MÃOZINHA do Pan) ----
+    Hand,           // mão aberta (a 6.ª ferramenta do rail: o Pan da câmara)
     Count
 };
 

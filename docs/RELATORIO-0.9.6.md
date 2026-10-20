@@ -393,6 +393,26 @@ R-014 aplicada.
   docs-lint VERDE · **versionCode 105** — o build vigente da CAMPANHA
   0.12-QoL FECHADA. O 104 fica INTACTO como história.
 
+- **0.12-Y · 3.Y-A — O PAN DA CÂMARA (a MÃOZINHA)** — a 6.ª FERRAMENTA
+  no rail do viewport (Selecionar/Mover/Rodar/Escalar/**PAN**/Íman — o
+  glifo Hand novo, o id 33, a legenda «Pan»): o Camera::pan NOVO move o
+  TARGET no plano da câmara pela FONTE ÚNICA pura (camWorldPerPixel =
+  2·dist·tan(fovY/2)/viewH + camRightVec/camUpVec — a velocidade do dedo
+  1:1 em qualquer zoom; dedo→direita ⇒ target ESQUERDA — agarra a cena);
+  o modo Pan: 1 dedo arrasta o foco SEM orbitar (a seleção por tap fica);
+  o pan de 2 DEDOS é LIVRE (o midpoint arrasta em qualquer modo de
+  ferramenta, o pinch mantém o zoom — o 1.º frame só ancora) · R-059
+  (`regress_pan` — a direção + a magnitude + o pan de 2 dedos + a
+  exclusividade) + pins ×5 NOVOS (pan_camera_math/pan_modo_um_dedo/
+  pan_dois_dedos_livre/pan_pinch_intacto/pan_rail_sexta — test_012y.cpp) +
+  M-Ya1 (o pan invertido — 4 vermelhos) M-Ya2 (o pan de 2 dedos morto — 2
+  vermelhos) vermelho→reposto→verde (coladas no RELATORIO-0.12-Y.md §1) ·
+  verificação: test_core os pins VERDES (as únicas falhas locais são os
+  flakes da sandbox documentados — o fork do medicoes; o crash do
+  regress_streaming_paralelo é preexistente, PROVADO no HEAD pristine) ·
+  docs-lint VERDE · **versionCode 106** — o build vigente da campanha
+  0.12-Y. O 105 fica INTACTO como história.
+
 - **0.12-QoL · C — O VIEWPORT 3D LIMPO** — a TEIA de linhas do frustum
   SÓ desenha com a câmara SELECIONADA (o glifo mudo fica — o alvo do
   toque; o toggle do Inspector mantém-se) + o pai de vidro do RAIL sai

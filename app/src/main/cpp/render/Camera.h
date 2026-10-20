@@ -21,8 +21,31 @@
 //     limite conhecido; origin rebasing é feature FUTURA (não implementar).
 #include "core/Types.h"
 #include "math/Math.h"
+#include <cmath>
 
 namespace vv {
+
+// ---- 0.12-Y (3.Y-A): A FONTE ÚNICA da matemática do PAN ---------------------
+// PURAS (o padrão gridFadeForDist — desenha e os pins aferem a MESMA
+// função): os eixos do PLANO DA CÂMARA + a escala px→mundo no foco.
+//   right = (cos yaw, 0, −sin yaw) — horizontal, ortogonal ao yaw;
+//   camUp = cross(right, forward) = (−sp·sy, cp, −sp·cy) — o "cima do
+//   ecrã" projetado no mundo (a pitch ±89° fica horizontal — top-down);
+//   worldPerPixel = 2·dist·tan(fovY/2)/viewH — o tamanho real de 1 px no
+//   plano do target (o pan à velocidade do dedo em QUALQUER zoom).
+inline f32 camWorldPerPixel(f32 dist, f32 fovY, f32 viewHPx) {
+    return viewHPx > 0.0f
+               ? 2.0f * dist * std::tan(fovY * 0.5f) / viewHPx
+               : 0.0f;
+}
+inline Vec3 camRightVec(f32 yaw) {
+    return Vec3{std::cos(yaw), 0.0f, -std::sin(yaw)};
+}
+inline Vec3 camUpVec(f32 yaw, f32 pitch) {
+    const f32 cp = std::cos(pitch);
+    const f32 sp = std::sin(pitch);
+    return Vec3{-sp * std::sin(yaw), cp, -sp * std::cos(yaw)};
+}
 
 class Camera {
 public:
@@ -64,6 +87,13 @@ public:
     // fator multiplicativo da distância (>1 afasta, <1 aproxima)
     void zoomBy(f32 factor);
     void setDistance(f32 d);
+    // 0.12-Y (3.Y-A): o PAN — desloca o TARGET no plano da câmara (agarra
+    // a cena): dxPx para a direita empurra a cena para a direita (o alvo
+    // anda para a ESQUERDA no eixo right); dyPx para baixo (o y do ecrã
+    // cresce para baixo) empurra a cena para baixo (o alvo SOBE no camUp).
+    // A escala px→mundo é a fonte única camWorldPerPixel (a velocidade do
+    // dedo constante em QUALQUER zoom/distância). viewHPx ≤ 0 = nada.
+    void pan(f32 dxPx, f32 dyPx, f32 viewHPx);
 
     f32 pitchClamped(f32 p) const;
     f32 distClamped(f32 d) const;

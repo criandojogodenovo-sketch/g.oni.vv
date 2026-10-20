@@ -4659,15 +4659,18 @@ void closeAllOverlays(EditorState& st) {
 // A lógica é INTACTA (regra F3 do dono-do-gesto, pinch, clamps da Camera);
 // o que muda: o estado vive num OrbitState puro e o PLAY desliga o orbit.
 void updateCameraOrbit(Camera& cam, OrbitState& st, const InputState& in,
-                       const UiRect& view, u32 claimedMask, bool playMode) {
+                       const UiRect& view, u32 claimedMask, bool playMode,
+                       bool panMode) {
     // 0.6.8: em PLAY o orbit está DESATIVADO — 1 dedo = controlos de toque.
     // O gesto pendente é RESETADO (um drag que começou no editor e o Play
     // entretanto não pode continuar a orbitar) e o estado fica limpo para
-    // o regresso ao editor.
+    // o regresso ao editor. 0.12-Y: o midpoint do pan de 2 dedos idem.
     if (playMode) {
         st.active = false;
         st.gestureInView = false;
         st.pinchPrev = 0.0f;
+        st.pinchMidX = 0.0f;
+        st.pinchMidY = 0.0f;
         return;
     }
 
@@ -4681,6 +4684,8 @@ void updateCameraOrbit(Camera& cam, OrbitState& st, const InputState& in,
         st.gestureInView = false;
         st.active = false;
         st.pinchPrev = 0.0f;
+        st.pinchMidX = 0.0f;
+        st.pinchMidY = 0.0f;
         return;
     }
 
@@ -4718,15 +4723,33 @@ void updateCameraOrbit(Camera& cam, OrbitState& st, const InputState& in,
         }
         if (got0 && got1) {
             const f32 d = std::sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
-            if (st.pinchPrev > 0.0f && d > 1.0f) {
-                cam.zoomBy(st.pinchPrev / d);   // dedos afastam → aproxima
+            // 0.12-Y (3.Y-A): E O PAN — o MIDPOINT dos 2 dedos arrasta a
+            // câmara (o pan de 2 dedos é LIVRE: funciona em qualquer modo
+            // de ferramenta, a ordem do dono). O 1.º frame de 2 dedos SÓ
+            // ancora o midpoint (o MESMO contrato do pinch — nada de
+            // salto); do 2.º em diante o delta do midpoint desloca o
+            // TARGET no plano da câmara e o delta da distância faz o
+            // zoom de sempre.
+            const f32 mx = (x0 + x1) * 0.5f;
+            const f32 my = (y0 + y1) * 0.5f;
+            const bool hadGesture = st.pinchPrev > 0.0f;
+            if (hadGesture) {
+                if (d > 1.0f) {
+                    cam.zoomBy(st.pinchPrev / d);   // dedos afastam → aproxima
+                }
+                cam.pan(mx - st.pinchMidX, my - st.pinchMidY,
+                        static_cast<f32>(view.h));
             }
             st.pinchPrev = d;
+            st.pinchMidX = mx;
+            st.pinchMidY = my;
         }
         st.active = false;
         return;
     }
     st.pinchPrev = 0.0f;
+    st.pinchMidX = 0.0f;
+    st.pinchMidY = 0.0f;
     if (active == 1) {
         for (u32 s = 0; s < kMaxPointerSlots; ++s) {
             if (!in.down(s)) continue;
@@ -4734,7 +4757,14 @@ void updateCameraOrbit(Camera& cam, OrbitState& st, const InputState& in,
             f32 x, y;
             in.pos(s, x, y);
             if (st.active) {
-                cam.orbit((x - st.x) * kSens, (y - st.y) * kSens);
+                if (panMode) {
+                    // 0.12-Y (3.Y-A): a MÃOZINHA — 1 dedo arrasta a CÂMARA
+                    // (o target no plano da câmara, o Camera::pan); o
+                    // yaw/pitch ficam intactos.
+                    cam.pan(x - st.x, y - st.y, static_cast<f32>(view.h));
+                } else {
+                    cam.orbit((x - st.x) * kSens, (y - st.y) * kSens);
+                }
             }
             st.x = x;
             st.y = y;

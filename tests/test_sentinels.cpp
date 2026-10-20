@@ -8098,3 +8098,107 @@ TEST(regress_camrig) {
         EXPECT(ref.find("### camdrag") != std::string::npos);
     }
 }
+
+// ---- R-059 — O PAN DA CÂMARA NÃO MORRE NEM INVERTE (0.12-Y A) --------------
+// A ordem do dono: o Pan (a MÃOZINHA) é a 6.ª ferramenta do rail, 1 dedo
+// arrasta o foco no plano da câmara e 2 dedos arranham em QUALQUER modo
+// mantendo o pinch. A classe vigiada: o pan INVERTIDO (a cena foge do
+// dedo), o pan de 2 dedos MORTO (o midpoint deixa de alimentar o
+// Camera::pan) e a órbita a vazar para o target (a exclusividade morre).
+TEST(regress_pan) {
+    using namespace vv;
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+    const UiRect view{0.0f, 0.0f, 1080.0f, 600.0f};
+    // (1) a DIREÇÃO do pan (a fonte única em render/Camera.h): dedo →
+    // direita ⇒ o target anda para a ESQUERDA (agarra a cena); dedo ↓ ⇒
+    // o target SOBE. Com yaw=0/pitch=0 os eixos são o +x/+y puros.
+    {
+        Camera cam;
+        cam.yaw = 0.0f;
+        cam.pitch = 0.0f;
+        cam.pan(100.0f, 0.0f, 600.0f);
+        EXPECT_MSG(cam.target.x < 0.0f && cam.target.y == 0.0f,
+                   "R-059: o pan para a direita tem de levar o target para "
+                   "a ESQUERDA (target.x %.4f)", (double)cam.target.x);
+        const f32 dx = -cam.target.x;
+        cam.pan(0.0f, 100.0f, 600.0f);
+        EXPECT_MSG(cam.target.y > 0.0f,
+                   "R-059: o pan para baixo tem de SUBIR o target "
+                   "(target.y %.4f)", (double)cam.target.y);
+        // a magnitude é a fonte única: 100 px × 2·dist·tan(fov/2)/600
+        EXPECT_MSG(nearEqF(dx, 100.0f * camWorldPerPixel(6.0f, cam.fovY,
+                                                             600.0f), 1e-5f),
+                   "R-059: a magnitude do pan sai da fonte única (%.6f)",
+                   (double)dx);
+        EXPECT_MSG(nearEqF(cam.yaw, 0.0f, 1e-6f) &&
+                       nearEqF(cam.pitch, 0.0f, 1e-6f) &&
+                       nearEqF(cam.dist, 6.0f, 1e-6f),
+                   "R-059: o pan NÃO pode tocar na rotação/zoom");
+    }
+    // (2) O PAN DE 2 DEDOS É LIVRE (sem panMode): o midpoint arrasta o
+    // target e o pinch mantém o zoom — a cadeia inteira (ancora → pan)
+    {
+        Camera cam;
+        cam.yaw = 0.0f;
+        cam.pitch = 0.0f;
+        editor::OrbitState st;
+        InputState in;
+        in.injectDown(0, 400.0f, 300.0f);
+        in.injectDown(1, 500.0f, 300.0f);
+        editor::updateCameraOrbit(cam, st, in, view, 0, false, false);
+        in.injectMove(0, 440.0f, 300.0f);
+        in.injectMove(1, 540.0f, 300.0f);   // mid +40 px, d igual
+        editor::updateCameraOrbit(cam, st, in, view, 0, false, false);
+        in.injectUp(0);
+        in.injectUp(1);
+        editor::updateCameraOrbit(cam, st, in, view, 0, false, false);
+        EXPECT_MSG(nearEqF(-cam.target.x,
+                             40.0f * camWorldPerPixel(6.0f, cam.fovY, 600.0f),
+                             1e-5f),
+                   "R-059: o pan de 2 dedos MORREU (o midpoint não arrasta "
+                   "— target.x %.5f)", (double)cam.target.x);
+        EXPECT_MSG(nearEqF(cam.dist, 6.0f, 1e-5f),
+                   "R-059: d constante não pode zoom (%.5f)",
+                   (double)cam.dist);
+        EXPECT_MSG(nearEqF(cam.yaw, 0.0f, 1e-6f),
+                   "R-059: 2 dedos NUNCA orbitam (yaw %.5f)",
+                   (double)cam.yaw);
+    }
+    // (3) A EXCLUSIVIDADE: 1 dedo com panMode NÃO orbita (o yaw fica) e
+    // sem panMode o target NÃO mexe (a orbit de sempre intacta)
+    {
+        Camera cam;
+        cam.yaw = 0.0f;
+        cam.pitch = 0.0f;
+        editor::OrbitState st;
+        InputState in;
+        in.injectDown(0, 400.0f, 300.0f);
+        editor::updateCameraOrbit(cam, st, in, view, 0, false, true);
+        in.injectMove(0, 500.0f, 300.0f);
+        editor::updateCameraOrbit(cam, st, in, view, 0, false, true);
+        in.injectUp(0);
+        editor::updateCameraOrbit(cam, st, in, view, 0, false, true);
+        EXPECT_MSG(cam.target.x < 0.0f && nearEqF(cam.yaw, 0.0f, 1e-6f),
+                   "R-059: o modo Pan tem de arrastar o target SEM orbitar "
+                   "(target.x %.4f yaw %.5f)", (double)cam.target.x,
+                   (double)cam.yaw);
+    }
+    {
+        Camera cam;
+        cam.yaw = 0.0f;
+        cam.pitch = 0.0f;
+        editor::OrbitState st;
+        InputState in;
+        in.injectDown(0, 400.0f, 300.0f);
+        editor::updateCameraOrbit(cam, st, in, view, 0, false, false);
+        in.injectMove(0, 500.0f, 300.0f);
+        editor::updateCameraOrbit(cam, st, in, view, 0, false, false);
+        in.injectUp(0);
+        editor::updateCameraOrbit(cam, st, in, view, 0, false, false);
+        EXPECT_MSG(cam.target.x == 0.0f && cam.yaw != 0.0f,
+                   "R-059: sem panMode a orbit de sempre tem de viver "
+                   "INTACTA (target.x %.4f yaw %.5f)", (double)cam.target.x,
+                   (double)cam.yaw);
+    }
+}

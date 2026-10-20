@@ -45,6 +45,25 @@ void Camera::zoomBy(f32 factor) {
     }
 }
 
+// 0.12-Y (3.Y-A): o PAN — o TARGET desloca-se NO PLANO DA CÂMARA (o padrão
+// do editor: agarrar a cena). A direção é a fonte única (camRightVec/
+// camUpVec/camWorldPerPixel em Camera.h — os pins aferem a MESMA função):
+//   • dxPx > 0 (dedo para a direita) → target anda para a ESQUERDA no
+//     eixo right (a cena segue o dedo para a direita);
+//   • dyPx > 0 (dedo para baixo — o y do ecrã cresce para baixo) → target
+//     SOBE no camUp (a cena segue o dedo para baixo);
+//   • a escala worldPerPixel = 2·dist·tan(fovY/2)/viewH mantém a
+//     velocidade 1:1 com o dedo em QUALQUER distância/zoom;
+//   • viewHPx ≤ 0 = degenerado (nada — nunca divide por zero).
+void Camera::pan(f32 dxPx, f32 dyPx, f32 viewHPx) {
+    const f32 wpp = camWorldPerPixel(dist, fovY, viewHPx);
+    if (wpp <= 0.0f) {
+        return;
+    }
+    target = target - camRightVec(yaw) * (dxPx * wpp);
+    target = target + camUpVec(yaw, pitch) * (dyPx * wpp);
+}
+
 void Camera::setDistance(f32 d) {
     dist = distClamped(d);
 }

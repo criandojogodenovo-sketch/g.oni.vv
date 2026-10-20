@@ -1,9 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-20 · vc: 105 · Último commit: docs — a ABERTURA da
-0.12-Y (o Salto Visual e de Assets: o Pan da câmara, o ícone IA, o
-pipeline PBR + WorldEnvironment); o §0.2 correu VERDE contra o
-origin/main sincronizado (d9b62a1, CI success)
+Atualizado: 2026-10-20 · vc: 106 · Último commit: este (o 0.12-Y A —
+o PAN da câmara: a 6.ª ferramenta no rail, o Camera::pan pela fonte
+única, o pan de 2 dedos LIVRE; pins ×5 + R-059 + M-Ya1/2)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -11,15 +10,20 @@ origin/main sincronizado (d9b62a1, CI success)
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (vc 105→)**
-  (a cláusula calma: SÓ o prompt — Pan/Ícone IA/PBR; a V.ONI intocada;
-  a história vive no RELATORIO-0.12-Y-ABERTURA.md). O §0.2 VERDE com
-  evidência (vc 105 · CI success do d9b62a1 · a QoL FECHADA aqui em
-  baixo) — e o INCIDENTE do ambiente documentado (o clone herdado
-  estava desatualizado; o fetch/reset sincronizou, zero trabalho
-  perdido). **3.Y-A** o Pan: Camera::pan (o target no plano da câmara,
-  worldPerPixel da fonte única) + 2 dedos = pinch E pan + a 6.ª
-  ferramenta no rail (Hand, id 33); R-059 + M-Ya1/2. **3.Y-B** o ícone
+- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A fechou,
+  vc 106; B/C a seguir)** (a cláusula calma: SÓ o prompt; a V.ONI
+  intocada; a história vive no RELATORIO-0.12-Y-ABERTURA.md + o
+  RELATORIO-0.12-Y.md).
+  **A (vc 106)**: o PAN da câmara — a 6.ª FERRAMENTA no rail (o glifo
+  Hand, id 33, a legenda «Pan»), o Camera::pan pela FONTE ÚNICA pura
+  (camWorldPerPixel/camRightVec/camUpVec; o target no plano da câmara,
+  agarra a cena), o modo Pan (1 dedo arrasta SEM orbitar) e o pan de 2
+  DEDOS LIVRE (o midpoint em qualquer modo, o pinch intacto, o 1.º frame
+  só ancora); pins ×5 (test_012y.cpp) + R-059 + M-Ya1/2
+  vermelho→reposto→verde; os achados fora da lista (o kCheck do glifo ✓
+  com um traço morto) documentados. O §0.2 VERDE com evidência (vc 105 ·
+  CI success do d9b62a1) e o INCIDENTE do ambiente (o clone herdado
+  desatualizado; o fetch/reset sincronizou — zero trabalho perdido). **3.Y-B** o ícone
   IA (obsidiana+fogo) → os 5 mipmaps + o fundo #0A0A0C. **3.Y-C** o
   pipeline PBR: assets/<stem>/textures/ + o bind auto dos 5 slots + o
   lit PBR-lite (normal/rough/metal) + o TIC WorldEnvironment (HDRI

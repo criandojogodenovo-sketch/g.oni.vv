@@ -75,6 +75,11 @@ constexpr u64 kVpSnapValId = 36;   // botão de ÍMAN (toggle do snap)
 constexpr u64 kVpMenuId    = 37;   // PASSO 3: o ⋯ do topo-esquerdo (abre o
                                    // menu de ficheiro ancorado a ele — o id
                                    // 37 do settings morto volta a usar-se)
+// 0.12-Y (3.Y-A): a MÃOZINHA — a 6.ª ferramenta do rail (o Pan da câmara).
+// O id 33 (kVpDupId) foi REMOVIDO no PASSO 3 SEM pin caçador (ao
+// contrário do 38 aposentado do D21 — esse NUNCA volta); o reuso segue o
+// precedente do 37 (o kVpMenuId).
+constexpr u64 kVpPanId     = 33;
 // 0.9.6.19b (D21): kVpAddTicId (38) APOSENTADO — o [+] do viewport morreu.
 // O id PERMANECE aqui SÓ para o pin (nenhum widget com este id desenha
 // dentro do rect do viewport, em estado nenhum — a mutação M-D21 repõe um
@@ -118,9 +123,11 @@ inline void chromeCol(const f32* c, f32 out[4]) {
 }
 
 struct Layout {
-    UiRect rail[5]{};         // Selecionar/Mover/Rodar/Escalar/Íman (coluna-
-                              // major; a degradação em colunas é a do stack
-                              // antigo — viewports baixos dividem a coluna)
+    // 0.12-Y (3.Y-A): 6 ferramentas — Selecionar/Mover/Rodar/Escalar/PAN/
+    // Íman (o Pan entra entre o Escalar e o Íman — "junto ao
+    // Mover/Rodar/Escalar", a ordem do dono; col-major; a degradação em
+    // colunas é a do stack antigo — viewports baixos dividem a coluna)
+    UiRect rail[6]{};
     u32    railCols = 1;
     bool   railVisible = true;   // false = viewport tão baixo que nem 2
                                  // colunas cabem (a degradação honesta)

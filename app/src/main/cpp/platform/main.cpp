@@ -6264,6 +6264,8 @@ void frame() {
     // 0.6.9: claimed | gizmoClaimed — drag em gizmo NÃO orbita
     // 0.7.0: orbit também DESATIVADO em modo UI (o viewport central é o
     // editor 2D da UI — arrastar elementos não pode orbitar por baixo)
+    // 0.12-Y (3.Y-A): g_editor.panMode — a MÃOZINHA (1 dedo = pan em vez
+    // de orbit; o pan de 2 dedos é LIVRE e vive dentro do updateCameraOrbit)
     editor::updateCameraOrbit(
         g_camera, g_orbit, g_input, viewRect,
         claimed | gizmoClaimed | canvasClaimed,
@@ -6272,7 +6274,8 @@ void frame() {
             // o orbit da câmara por trás morria AQUI (a cena mexia-se por
             // trás do Settings/Docs/editor; o draw do chrome já era gated
             // pelo anyOverlayOpen, o input não)
-            editor::anyOverlayOpen(g_editor));
+            editor::anyOverlayOpen(g_editor),
+        g_editor.panMode);
 
     // 0.7.0 — DESSELECCIONAR: tap parado no vazio do viewport 3D limpa a
     // seleção (só em editor 3D; o modo UI desseleciona o ELEMENTO no

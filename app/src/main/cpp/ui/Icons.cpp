@@ -673,6 +673,22 @@ constexpr Polyline kTrashLines[] = {
     {16, 2}, {18, 2},
 };
 
+// ---- 0.12-Y (3.Y-A): a MÃOZINHA (o Pan) — contorno fechado de mão aberta
+// (3 dedos + polegar, segmentos retos — a regra do conjunto). Desenho em
+// 0..24: a palma 7..17 × 9..20, os dedos acima (topes 5.4–6.2), o polegar
+// à direita (a ponta 17.6,9.6).
+constexpr f32 kHandPts[] = {
+    7.0f, 20.0f,    6.2f, 14.0f,   6.2f, 9.2f,    // lado esquerdo sobe
+    6.2f, 6.2f,     8.4f, 6.2f,    8.4f, 10.0f,   // dedo 1 (indicador)
+    8.4f, 5.4f,     10.8f, 5.4f,  10.8f, 10.0f,  // dedo 2 (médio)
+    10.8f, 6.0f,    13.2f, 6.0f,  13.2f, 10.5f,  // dedo 3 (anelar)
+    15.4f, 8.2f,    17.6f, 9.6f,  17.8f, 13.5f,  // polegar para fora
+    16.6f, 20.0f,   7.0f, 20.0f,                 // base + fecho
+};
+constexpr Polyline kHandLines[] = {
+    {0, 17},   // o contorno fechado (16 segmentos)
+};
+
 // ---- Rename (lápis) ------------------------------------------------------------------------------------------
 constexpr f32 kRenamePts[] = {
     4.5f, 19.5f,  5.5f, 15.8f,    // corpo fechado
@@ -881,6 +897,7 @@ const IconDef kDefs[] = {
     {kResetPts,         28, kResetLines,         3},
     {kListPts,          12, kListLines,          6},
     {kImagePts,         30, kImageLines,        15},
+    {kHandPts,          17, kHandLines,          1},
 };
 static_assert(sizeof(kDefs) / sizeof(kDefs[0]) ==
               static_cast<size_t>(Icon::Count), "tabela de ícones incompleta");
@@ -1055,6 +1072,7 @@ i32 iconByName(const char* name) {
         {Icon::Trash, "lixo"}, {Icon::Rename, "renomear"},
         {Icon::Duplicate, "duplicar"}, {Icon::Assign, "atribuir"},
         {Icon::Back, "back"},
+        {Icon::Hand, "mao"},
         {Icon::Static, "tic_static"}, {Icon::Rigid, "tic_rigid"},
     };
     for (const auto& e : kNames) {

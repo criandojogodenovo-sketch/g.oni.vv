@@ -101,6 +101,7 @@ add_executable(test_core
         test_012c_picker.cpp   # 0.12-C (C-4): os pins do seletor + estados vazios
         test_012e_efeitos.cpp   # 0.12-E (E-3): os pins dos efeitos 2.5D (sombra/vidro 0.85+âmbar/ruído scroll)
         test_012qol.cpp   # 0.12-QoL: os pins da UI polish (lupa/border cinza/espaçamento/X cenas)
+        test_012y.cpp   # 0.12-Y: os pins do salto visual (pan da câmara/ícone IA/PBR)
         # 0.12-E (E-1): test_012d_sdf/vidro/fogo REFORMADOS — o SDF 3D e o
         # vidro/fogo do shader único foram ABORTADOS pelo dono (o device via
         # texto partido e caixas pretas); os pins aferiam o batch sdf, que

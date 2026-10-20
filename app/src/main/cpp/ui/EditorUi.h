@@ -235,6 +235,12 @@ struct EditorState {
     // afervel no CI.
     bool   selectMode = false;
 
+    // 0.12-Y (3.Y-A) — modo PAN (a MÃOZINHA, a 6.ª ferramenta do rail):
+    // 1 dedo arrasta a CÂMARA (o target no plano — o Camera::pan) em vez
+    // de orbitar; a seleção por tap mantém-se (o tap parado é tap). O
+    // pan de 2 dedos é LIVRE (não precisa deste modo — updateCameraOrbit).
+    bool   panMode = false;
+
     // ---- 0.9.0 (spec B + scope funcional) ----------------------------------
     // PESQUISA de TIC por nome no header da hierarquia (o buffer vive AQUI —
     // o teclado in-app propósito 8 escreve nele; vazio = sem filtro)
@@ -595,19 +601,28 @@ void drawTouchControlsAt(UiContext& ui, const TouchControls& tc, f32 ox,
 // Estado do gesto de orbit ENTRE frames (era globais do main — agora é
 // puro/testável: o main cria um OrbitState e passa por referência).
 struct OrbitState {
-    bool active = false;         // 1 dedo em orbit
-    f32  x = 0.0f, y = 0.0f;     // último ponto do dedo de orbit
+    bool active = false;         // 1 dedo em orbit/pan
+    f32  x = 0.0f, y = 0.0f;     // último ponto do dedo de orbit/pan
     f32  pinchPrev = 0.0f;      // distância entre dedos no frame anterior
     bool gestureInView = false;  // F3: gesto nasce só no viewport central
+    // 0.12-Y (3.Y-A): o PAN de 2 DEDOS — o midpoint do frame anterior
+    // (o pan nasce no 2.º frame de 2 dedos, o MESMO contrato do pinch:
+    // o 1.º frame SÓ ancora, nada de salto). Resetado nos mesmos portões
+    // do pinchPrev (0 dedos, playMode, 1 dedo).
+    f32  pinchMidX = 0.0f, pinchMidY = 0.0f;
 };
 
-// Orbit da câmara (extraído do main p/ ser afervel no CI).
+// Orbit/PAN da câmara (extraído do main p/ ser afervel no CI).
 // Regra F3: o PRIMEIRO toque decide o dono do gesto (nascido no viewport
-// central e não reclamado pelos TouchControls). 1 dedo = yaw/pitch,
-// ≥2 dedos = pinch. 0.6.8: playMode=true DESATIVA o orbit (1 dedo =
+// central e não reclamado pelos TouchControls). 1 dedo = yaw/pitch (ou
+// PAN quando panMode — a 6.ª ferramenta do rail), ≥2 dedos = pinch E
+// pan ao mesmo tempo (a distância dos dedos faz zoom, o MIDPOINT
+// arrasta — 0.12-Y 3.Y-A: o pan livre em qualquer modo de ferramenta,
+// a ordem do dono). 0.6.8: playMode=true DESATIVA o orbit (1 dedo =
 // controlos) e RESETA o gesto pendente — o estado fica limpo p/ o regresso.
 void updateCameraOrbit(Camera& cam, OrbitState& st, const InputState& in,
-                       const UiRect& view, u32 claimedMask, bool playMode);
+                       const UiRect& view, u32 claimedMask, bool playMode,
+                       bool panMode = false);
 
 // Fecha TODOS os overlays/menus (transição EDITOR→PLAY: em play nada de
 // edição fica aberto; ao parar, os PAINÉIS voltam exatamente — os offsets

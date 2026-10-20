@@ -140,12 +140,14 @@ Layout layout(const UiRect& view) {
 
     // (1) o RAIL esquerdo (col-major; a degradação em colunas é a do stack
     // antigo: o MENOR nº de colunas que caiba na altura útil)
+    // 0.12-Y (3.Y-A): 6 ferramentas (o PAN entra — a MÃOZINHA)
+    constexpr u32 kRailTools = 6u;
     const f32 availH = view.h - 2.0f * m;
     const f32 availW = view.w - 2.0f * m;
     u32 cols = 1;
     bool fits = false;
-    for (; cols < 5; ++cols) {
-        const u32 rows = (5u + cols - 1u) / cols;   // ceil(5/cols)
+    for (; cols < 6; ++cols) {
+        const u32 rows = (kRailTools + cols - 1u) / cols;   // ceil(6/cols)
         const f32 needH = static_cast<f32>(rows) * btn +
                           static_cast<f32>(rows - 1u) * gap;
         const f32 needW = static_cast<f32>(cols) * btn +
@@ -157,8 +159,8 @@ Layout layout(const UiRect& view) {
     }
     L.railVisible = fits;
     L.railCols = fits ? cols : 1u;
-    const u32 rowsPerCol = (5u + L.railCols - 1u) / L.railCols;
-    for (u32 i = 0; i < 5; ++i) {
+    const u32 rowsPerCol = (kRailTools + L.railCols - 1u) / L.railCols;
+    for (u32 i = 0; i < kRailTools; ++i) {
         if (!L.railVisible) {
             L.rail[i] = {0.0f, 0.0f, 0.0f, 0.0f};
             continue;
@@ -305,41 +307,57 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
         if (toolButton(ui, kVpSelectId, L.rail[0], icons::Icon::Cursor,
                        st.selectMode)) {
             st.selectMode = true;
+            st.panMode = false;   // 0.12-Y: os modos são exclusivos
             gz.mode = 0;
             st.legendArm = true;   // 0.12-A (A-3): o tooltip nasce no largar
         }
         if (toolButton(ui, toolbar::kGizmoIds[0], L.rail[1], icons::Icon::Move,
-                       !st.selectMode && gz.mode == 0)) {
+                       !st.selectMode && gz.mode == 0 && !st.panMode)) {
             st.selectMode = false;
+            st.panMode = false;
             gz.mode = 0;
             st.legendArm = true;   // 0.12-A (A-3)
         }
         if (toolButton(ui, toolbar::kGizmoIds[1], L.rail[2],
                        icons::Icon::Rotate,
-                       !st.selectMode && gz.mode == 1)) {
+                       !st.selectMode && gz.mode == 1 && !st.panMode)) {
             st.selectMode = false;
+            st.panMode = false;
             gz.mode = 1;
             st.legendArm = true;   // 0.12-A (A-3)
         }
         if (toolButton(ui, toolbar::kGizmoIds[2], L.rail[3],
                        icons::Icon::Scale,
-                       !st.selectMode && gz.mode == 2)) {
+                       !st.selectMode && gz.mode == 2 && !st.panMode)) {
             st.selectMode = false;
+            st.panMode = false;
             gz.mode = 2;
             st.legendArm = true;   // 0.12-A (A-3)
+        }
+        // 0.12-Y (3.Y-A): a MÃOZINHA — o PAN (o target no plano da câmara;
+        // o pan de 2 dedos é LIVRE e não precisa deste modo). O panMode
+        // comporta-se como o selectMode no que toca ao gizmo da toolbar
+        // (os chips Mover/Rodar/Escalar apagam-no) mas a seleção por tap
+        // mantém-se (o tap parado continua a ser tap).
+        if (toolButton(ui, kVpPanId, L.rail[4], icons::Icon::Hand,
+                       st.panMode)) {
+            st.panMode = true;
+            st.selectMode = false;
+            gz.mode = 0;   // o gizmo volta Mover ao sair do Pan (o padrão)
+            st.legendArm = true;   // 0.12-A (A-3): o tooltip nasce no largar
         }
         // o ÍMAN: estado ativo/inativo, SEM texto (o valor segue no
         // tooltip do gizmo — G2-9)
         {
-            const bool pressed = ui.widgetHit(kVpSnapValId, L.rail[4].x,
-                                              L.rail[4].y, L.rail[4].w,
-                                              L.rail[4].h);
+            const bool pressed = ui.widgetHit(kVpSnapValId, L.rail[5].x,
+                                              L.rail[5].y, L.rail[5].w,
+                                              L.rail[5].h);
             const bool held = ui.widgetActive(kVpSnapValId);
             const bool on = gz.snap || held;
             const f32 inset = theme::dp(4.0f);
-            const UiRect d = {L.rail[4].x + inset, L.rail[4].y + inset,
-                              L.rail[4].w - 2.0f * inset,
-                              L.rail[4].h - 2.0f * inset};
+            const UiRect d = {L.rail[5].x + inset, L.rail[5].y + inset,
+                              L.rail[5].w - 2.0f * inset,
+                              L.rail[5].h - 2.0f * inset};
             f32 accent[4], surface[4], border[4], onCol[4], offCol[4];
             colA(theme::kTheme.accent, accent);
             colA(theme::kTheme.surface, surface);
@@ -353,9 +371,9 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
                                 theme::dp(theme::kRadiusCard), border);
             }
             icons::drawIcon(ui, icons::Icon::Snap,
-                            L.rail[4].x + (L.rail[4].w - theme::dp(20.0f)) *
+                            L.rail[5].x + (L.rail[5].w - theme::dp(20.0f)) *
                                               0.5f,
-                            L.rail[4].y + (L.rail[4].h - theme::dp(20.0f)) *
+                            L.rail[5].y + (L.rail[5].h - theme::dp(20.0f)) *
                                               0.5f,
                             theme::dp(20.0f), on ? onCol : offCol);
             if (pressed) {
@@ -367,7 +385,8 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
         // TRANSITÓRIA — só vive enquanto o tooltip tem tempo (o largar da
         // escolha arma 1,5s; o largar seguinte mata — o C33 do dono)
         if (ui.hasFont() && L.legendVisible && st.legendTimer > 0.0f) {
-            const char* name = st.selectMode ? "Selecionar"
+            const char* name = st.panMode ? "Pan"
+                               : st.selectMode ? "Selecionar"
                                : gz.mode == 0 ? "Mover"
                                : gz.mode == 1 ? "Rodar"
                                               : "Escalar";
