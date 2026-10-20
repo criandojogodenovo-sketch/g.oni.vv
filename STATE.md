@@ -1,9 +1,9 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-19 · vc: 105 · Último commit: este (o 0.12-QoL D +
-o FECHO — o AUTO-SAVE: o timer 180s com o dirty honesto, o autosave.goni
-na raiz, a recuperação com o pop-up [Recuperar]/[Descartar], o ✓ que
-pisca; R-056; A CAMPANHA 0.12-QoL FECHA)
+Atualizado: 2026-10-20 · vc: 105 · Último commit: docs — a ABERTURA da
+0.12-Y (o Salto Visual e de Assets: o Pan da câmara, o ícone IA, o
+pipeline PBR + WorldEnvironment); o §0.2 correu VERDE contra o
+origin/main sincronizado (d9b62a1, CI success)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -11,6 +11,19 @@ pisca; R-056; A CAMPANHA 0.12-QoL FECHA)
 
 ## §1 Onde estamos
 
+- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (vc 105→)**
+  (a cláusula calma: SÓ o prompt — Pan/Ícone IA/PBR; a V.ONI intocada;
+  a história vive no RELATORIO-0.12-Y-ABERTURA.md). O §0.2 VERDE com
+  evidência (vc 105 · CI success do d9b62a1 · a QoL FECHADA aqui em
+  baixo) — e o INCIDENTE do ambiente documentado (o clone herdado
+  estava desatualizado; o fetch/reset sincronizou, zero trabalho
+  perdido). **3.Y-A** o Pan: Camera::pan (o target no plano da câmara,
+  worldPerPixel da fonte única) + 2 dedos = pinch E pan + a 6.ª
+  ferramenta no rail (Hand, id 33); R-059 + M-Ya1/2. **3.Y-B** o ícone
+  IA (obsidiana+fogo) → os 5 mipmaps + o fundo #0A0A0C. **3.Y-C** o
+  pipeline PBR: assets/<stem>/textures/ + o bind auto dos 5 slots + o
+  lit PBR-lite (normal/rough/metal) + o TIC WorldEnvironment (HDRI
+  equirect + céu/névoa); R-060 + M-Yc1/2.
 - **Campanha 0.12-QoL (UI POLISH + NAVEGADOR + AUTO-SAVE) — FECHADA
   (A..D, vc 102–105)** (a cláusula calma: refinamento de UI 2.5D e
   persistência, ZERO lógica de motor; a história vive no
