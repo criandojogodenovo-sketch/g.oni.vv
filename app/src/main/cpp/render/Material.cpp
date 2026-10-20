@@ -1,5 +1,6 @@
 #include "render/Material.h"
 #include "render/Texture.h"
+#include "render/Pbr.h"   // 0.12-Y: a fonte única das fórmulas PBR-lite
 #include "assets/GOwnFormats.h"   // 0.11-M: o GMeshMatProps do GTB2 (fromGMesh)
 #include "platform/Log.h"
 #include <GLES3/gl3.h>
@@ -46,6 +47,7 @@ uniform mat2 uUvRot;
 uniform vec2 uUvOff;
 out vec3 vNormal;
 out vec2 vUV;
+out vec3 vWorldPos;   // 0.12-Y: a névoa/especular precisam da posição
 void main() {
     vec4 pos = vec4(aPos, 1.0);
     vec3 nrm = aNormal;
@@ -66,18 +68,26 @@ void main() {
     }
     vNormal = mat3(m) * nrm;
     vUV = uUvRot * aUV + uUvOff;
+    vWorldPos = (m * pos).xyz;
     gl_Position = uVP * m * pos;
 })";
 
 // 0.11-M (FASE 2): uBaseColor (o factor multiplicativo do glTF), uEmissive
-// (self-glow — a luz PBR GGX completa é a FASE 5), uAlphaMode/uAlphaCutoff
-// (MASK = discard abaixo do cutoff; BLEND = alpha no outColor para o
-// blend SRC_ALPHA/ONE_MINUS_SRC_ALPHA do draw) e uTwoSided (o verso com
-// a normal invertida — o culling OFF é do draw, o verso é daqui).
+// (self-glow), uAlphaMode/uAlphaCutoff (MASK = discard abaixo do cutoff;
+// BLEND = alpha no outColor) e uTwoSided (o verso com a normal invertida).
+// 0.12-Y (3.Y-C): O LIT PBR-LITE — uNormalTex (unit 1) com a perturbação
+// por DERIVADAS DE ECRÃ (dFdx/dFdy do ES 3.0 — a TBN sem atributos novos
+// no mesh: o mesh antigo fica byte a byte), uRoughMetalTex (unit 2, o
+// glTF empacota roughness no G e metallic no B), os FATORES
+// uRoughness/uMetallic (o default glTF 1/1 — mas SÓ entram com texturas
+// ou fatores explícitos; o caminho de sempre passa nullptr = os defaults
+// preservam o lit antigo) e a NÉVOA (uFogColor/uFogDensity — a exp2 da
+// fonte única render/Pbr.h; density 0 = morta = byte a byte).
 constexpr char kFsSrc[] = R"(#version 300 es
 precision mediump float;
 in vec3 vNormal;
 in vec2 vUV;
+in vec3 vWorldPos;
 out vec4 outColor;
 uniform sampler2D uTex;
 uniform float uHasTex;
@@ -87,6 +97,16 @@ uniform vec3 uEmissive;
 uniform int uAlphaMode;
 uniform float uAlphaCutoff;
 uniform int uTwoSided;
+uniform sampler2D uNormalTex;
+uniform float uHasNormal;
+uniform sampler2D uRoughMetalTex;
+uniform float uHasRoughMetal;
+uniform float uRoughness;
+uniform float uMetallic;
+uniform vec3 uFogColor;
+uniform float uFogDensity;
+uniform float uAmbientScale;   // o WorldEnvironment (o HDRI ilumina)
+uniform vec3 uEye;
 const vec3 kLightDir = vec3(0.4545, 0.7435, 0.2891);  // já normalizada, PARA a luz
 const vec3 kAmbient  = vec3(0.16);
 const vec3 kAlbedo   = vec3(0.58);
@@ -94,6 +114,22 @@ void main() {
     vec3 n = normalize(vNormal);
     if (uTwoSided == 1 && !gl_FrontFacing) {
         n = -n;   // o verso de um material doubleSided ilumina com a normal dele
+    }
+    // 0.12-Y: o NORMAL MAP por derivadas de ecrã (a TBN do mesh sem
+    // atributos tangent — a mesma conta do render/Pbr.h nas fontes puras)
+    if (uHasNormal > 0.5) {
+        vec3 tng = normalize(dFdx(vWorldPos));
+        vec3 btg = normalize(cross(n, tng));
+        tng = cross(btg, n);
+        vec3 tn = texture(uNormalTex, vUV).xyz * 2.0 - 1.0;
+        n = normalize(tng * tn.x + btg * tn.y + n * tn.z);
+    }
+    float rough = uRoughness;
+    float metal = uMetallic;
+    if (uHasRoughMetal > 0.5) {
+        vec2 rm = texture(uRoughMetalTex, vUV).gb;   // o pacote glTF
+        rough = rm.x;
+        metal = rm.y;
     }
     float diff = max(dot(n, kLightDir), 0.0);
     vec4 texel = vec4(1.0);
@@ -105,7 +141,16 @@ void main() {
     if (uAlphaMode == 1 && alpha < uAlphaCutoff) {
         discard;   // MASK: abaixo do cutoff o fragmento NÃO EXISTE (depth intacto)
     }
-    vec3 c = kAmbient + alb * diff + uEmissive;
+    // 0.12-Y: o PBR-lite (as fórmulas da fonte única render/Pbr.h)
+    float shin = 4.0 + (1.0 - clamp(rough, 0.0, 1.0)) * (1.0 - clamp(rough, 0.0, 1.0)) * 252.0;
+    vec3 vdir = normalize(uEye - vWorldPos);
+    vec3 h = normalize(kLightDir + vdir);
+    float spec = pow(max(dot(n, h), 0.0), shin);
+    float mdiff = 1.0 - clamp(metal, 0.0, 1.0) * 0.85;
+    vec3 c = kAmbient * uAmbientScale + alb * mdiff * diff + spec * mix(vec3(0.04), alb, metal) + uEmissive;
+    // a névoa exp2 (density 0 = morta — o byte a byte do lit de sempre)
+    float fog = 1.0 - exp(-pow(length(uEye - vWorldPos) * uFogDensity, 2.0));
+    c = mix(c, uFogColor, clamp(fog, 0.0, 1.0));
     outColor = vec4(c * uTint, uAlphaMode == 2 ? alpha : 1.0);
 })";
 
@@ -175,6 +220,18 @@ bool LitMaterial::init() {
     locEmissive_ = glGetUniformLocation(prog_, "uEmissive");
     locUvRot_ = glGetUniformLocation(prog_, "uUvRot");
     locUvOff_ = glGetUniformLocation(prog_, "uUvOff");
+    // 0.12-Y (3.Y-C): o PBR-lite + a névoa (os locations — o -1 honesto
+    // quando o link não os tem; o draw de sempre passa os defaults)
+    locNormalTex_ = glGetUniformLocation(prog_, "uNormalTex");
+    locHasNormal_ = glGetUniformLocation(prog_, "uHasNormal");
+    locRoughMetalTex_ = glGetUniformLocation(prog_, "uRoughMetalTex");
+    locHasRoughMetal_ = glGetUniformLocation(prog_, "uHasRoughMetal");
+    locRoughness_ = glGetUniformLocation(prog_, "uRoughness");
+    locMetallic_ = glGetUniformLocation(prog_, "uMetallic");
+    locFogColor_ = glGetUniformLocation(prog_, "uFogColor");
+    locFogDensity_ = glGetUniformLocation(prog_, "uFogDensity");
+    locAmbientScale_ = glGetUniformLocation(prog_, "uAmbientScale");
+    locEye_ = glGetUniformLocation(prog_, "uEye");
     LOGI("LitMaterial: lit difusa fixa + ambient + textura opcional + uTint "
          "+ skin (UBO Bones[128]) + instancing (UBO Instances[64]) + props "
          "do material glTF (alpha/factors/twoSided/uvTransform) pronto");
@@ -192,6 +249,10 @@ void LitMaterial::destroy() {
     locInstOn_ = -1;
     locBaseColor_ = locAlphaMode_ = locAlphaCutoff_ = locTwoSided_ = -1;
     locEmissive_ = locUvRot_ = locUvOff_ = -1;   // 0.11-M
+    locNormalTex_ = locHasNormal_ = locRoughMetalTex_ = locHasRoughMetal_ = -1;
+    locRoughness_ = locMetallic_ = -1;           // 0.12-Y
+    locFogColor_ = locFogDensity_ = locEye_ = -1;
+    locAmbientScale_ = -1;
 }
 
 void LitMaterial::use() const {
@@ -351,11 +412,64 @@ DrawProps DrawProps::fromGMesh(const GMeshMatProps& p) {
     for (int i = 0; i < 3; ++i) {
         d.emissive[i] = p.emissive[i];
     }
+    d.metallic = p.metallic;       // 0.12-Y: os FATORES do GTB2 entram
+    d.roughness = p.roughness;
     khrTextureTransformMat2(p.uvRotation[0], p.uvScale[0][0], p.uvScale[0][1],
                             d.uvRot);
     d.uvOff[0] = p.uvOffset[0][0];
     d.uvOff[1] = p.uvOffset[0][1];
     return d;
+}
+
+// ---- 0.12-Y (3.Y-C): o PBR-lite A CADA draw (o MESMO contrato do uTint/
+// uProps — uniforms nascem a 0, o default É EXPLÍCITO: nullptr = o lit de
+// sempre byte a byte: sem normal, sem rough/metal textura, fatores 1.0
+// do glTF com o albedo difuso cheio — o comportamento pré-0.12-Y) ———
+void LitMaterial::setPbr(const Texture* normalTex, const Texture* roughMetalTex,
+                         f32 metallic, f32 roughness) const {
+    if (locHasNormal_ >= 0) {
+        glUniform1f(locHasNormal_, normalTex ? 1.0f : 0.0f);
+    }
+    if (normalTex && locNormalTex_ >= 0) {
+        normalTex->bind(1);   // o normal no unit 1 (o albedo é o 0)
+        glUniform1i(locNormalTex_, 1);
+    }
+    if (locHasRoughMetal_ >= 0) {
+        glUniform1f(locHasRoughMetal_, roughMetalTex ? 1.0f : 0.0f);
+    }
+    if (roughMetalTex && locRoughMetalTex_ >= 0) {
+        roughMetalTex->bind(2);   // o rough/metal no unit 2
+        glUniform1i(locRoughMetalTex_, 2);
+    }
+    if (locRoughness_ >= 0) {
+        glUniform1f(locRoughness_, roughness);
+    }
+    if (locMetallic_ >= 0) {
+        glUniform1f(locMetallic_, metallic);
+    }
+}
+
+void LitMaterial::setFog(const f32 rgb[3], f32 density, const Vec3& eye) const {
+    if (locFogColor_ >= 0 && rgb) {
+        glUniform3f(locFogColor_, rgb[0], rgb[1], rgb[2]);
+    }
+    if (locFogDensity_ >= 0) {
+        glUniform1f(locFogDensity_, density);
+    }
+    if (locAmbientScale_ >= 0) {
+        glUniform1f(locAmbientScale_, 1.0f);   // o default de sempre
+    }
+    if (locEye_ >= 0) {
+        glUniform3f(locEye_, eye.x, eye.y, eye.z);
+    }
+}
+
+// 0.12-Y: o AMBIENT do WorldEnvironment (o HDRI ilumina — o default de
+// sempre é 1.0 e é definido a CADA setFog; este é o "boost" do ambiente)
+void LitMaterial::setAmbientScale(f32 scale) const {
+    if (locAmbientScale_ >= 0) {
+        glUniform1f(locAmbientScale_, scale);
+    }
 }
 
 } // namespace vv

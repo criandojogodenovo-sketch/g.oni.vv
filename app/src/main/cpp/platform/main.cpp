@@ -2979,6 +2979,28 @@ static void expandJobPerPiece(Scene& scene, Handle h, void* /*user*/) {
         }
         ++mi;
     }
+    // 0.12-Y (3.Y-C): O BIND AUTO dos slots VAZIOS pela EXTRAÇÃO NOVA (a
+    // pasta assets/<stem>/textures/ — os 5 slots do material; a grade do
+    // GTB1 pode não os ter, a extração TEM). O caminho é a verdade — o
+    // Texture* entra quando a cache GPU o tem (o draw usa o ponteiro).
+    if (&g_resources != nullptr) {
+        for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
+            std::string& slot = mr->texSlotRef(s);
+            if (!slot.empty()) {
+                continue;
+            }
+            const std::string rel = g_resources.meshTexSlotFor(mr->meshPath,
+                                                               static_cast<int>(s));
+            if (rel.empty()) {
+                continue;
+            }
+            slot = rel;
+            if (s == 0 && mr->texPath.empty()) {
+                mr->texPath = rel;
+                mr->texture = g_gpu.texture(rel);
+            }
+        }
+    }
     // (2) o auto-tex da peça de 1 material (binds do BlockMesh aberto pelo
     // blockHull do configure — o MESMO bloco que o render vai desenhar)
     if (!mr->texPath.empty()) {
@@ -4150,6 +4172,34 @@ void primMeshesToGrave() {
 }
 
 // ---- 0.12-QoL D: as implementações do AUTO-SAVE ----------------------------
+// 0.12-Y (3.Y-C): o AMBIENT dos HDRIs — cada Environment com hdriPath
+// recebe o multiplicador da MÉDIA CPU do equirect (averageColor +
+// ambientFromAvg — as fontes puras do components/Environment.h; o PNG
+// ilegível mantém o ambient que tem — a honestidade do import).
+void environmentApplyHdri() {
+    auto& envs = g_scene.components().environments();
+    for (u32 i = 0; i < envs.size(); ++i) {
+        Environment& e = envs.at(i);
+        if (e.hdriPath.empty() || !g_storage) {
+            continue;
+        }
+        std::vector<u8> bytes;
+        if (!g_storage->readBytes(e.hdriPath, bytes) || bytes.empty()) {
+            continue;
+        }
+        RawImage img;
+        std::string err;
+        if (!loadPng(bytes.data(), bytes.size(), img, err) || !img.ok()) {
+            continue;
+        }
+        f32 avg[3];
+        averageColor(img.rgba.data(), img.width, img.height, avg);
+        e.ambient = ambientFromAvg(avg);
+        elog::info("environment: HDRI '%s' → ambient %.2f",
+                   e.hdriPath.c_str(), (double)e.ambient);
+    }
+}
+
 void autoSaveOnSceneLoaded() {
     // (a) o dirty recomeça honesto: o estado ACABADO de carregar É o
     // baseline (um boot sem mudanças NUNCA grava autosave)
@@ -5140,6 +5190,7 @@ void onAppCmd(android_app* app, i32 cmd) {
                 const SceneSerializer::LoadCtx ctx = makeLoadCtx();
                 if (g_project.loadActiveScene(*g_storage, g_scene, ctx)) {
                     postLoadMigrateAndFixup();   // 0.8.10: migração silenciosa
+                    environmentApplyHdri();   // 0.12-Y: o ambient dos HDRIs
                     autoSaveOnSceneLoaded();   // 0.12-QoL D: o baseline do
                                                // dirty + a recuperação 1×
                     // 0.8.12 — RE-VALIDA o handle (re-mapeia por nome se o
@@ -5349,6 +5400,37 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye) {
     g_skinFrame = SkinFrameStats{};
     g_impFrame = ImpostorFrameStats{};
     const ComponentStore& comps = g_scene.components();
+    // 0.12-Y (3.Y-C): o WORLDENVIRONMENT do frame (o 1.º ATIVO manda — o
+    // invariante da câmara ativa). O CÉU é o clear (sobreposto ao token),
+    // a NÉVOA exp2 + o AMBIENT (o HDRI ilumina pela média CPU) entram nos
+    // uniforms do lit AQUI (1× por frame — os draws só consomem). SEM
+    // Environment: os defaults de sempre (density 0 = morta, ambient 1 =
+    // o lit byte a byte).
+    {
+        const Environment* env = nullptr;
+        const auto& envs = comps.environments();
+        for (u32 i = 0; i < envs.size(); ++i) {
+            const Tic* t = g_scene.get(envs.owner(i));
+            if (t && t->active && envs.at(i).active) {
+                env = &envs.at(i);
+                break;
+            }
+        }
+        if (env != nullptr) {
+            glClearColor(env->skyColor[0], env->skyColor[1],
+                         env->skyColor[2], 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+        }
+        const f32 density = env ? env->fogDensity : 0.0f;
+        const f32* fogc = env ? env->fogColor : theme::kTheme.bg;
+        const f32 amb = env ? env->ambient : 1.0f;
+        Material* lit = g_renderer.litMaterial();
+        if (lit) {
+            lit->use();
+            lit->setFog(fogc, density, camEye);
+            lit->setAmbientScale(amb);
+        }
+    }
     const auto& mrs = comps.meshRenderers();
     f32 skinPlanes[6][4];
     bool skinPlanesReady = false;   // os planos só se extraem com skinados
@@ -7326,6 +7408,15 @@ void frame() {
                     editor::selectTic(g_editor, hnew);
                     showToast("Audio criado (atribua o clip no Inspector)");
                     LOGI("editor: TIC Audio criado (Transform+AudioPlayer)");
+                }
+            } else if (choice == 8) {
+                // 0.12-Y (3.Y-C) — TIC "WorldEnvironment": Transform +
+                // Environment (o céu/névoa/HDRI da cena; o 1.º ATIVO manda)
+                const Handle hnew = createTicUndoable(PresetKind::WorldEnvironment);
+                if (hnew.valid()) {
+                    editor::selectTic(g_editor, hnew);
+                    showToast("WorldEnvironment criado (céu/névoa/HDRI)");
+                    LOGI("editor: TIC WorldEnvironment criado");
                 }
             } else {
                 const PresetKind kind = static_cast<PresetKind>(choice - 1);

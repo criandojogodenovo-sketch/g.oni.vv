@@ -428,6 +428,37 @@ R-014 aplicada.
   árbitro) · docs-lint VERDE · **versionCode 107** — o build vigente da
   campanha 0.12-Y. O 106 fica INTACTO como história.
 
+- **0.12-Y · 3.Y-C — O PIPELINE PBR + O WORLDENVIRONMENT** — o glTF lê
+  AGORA os 5 slots (baseColor/normal/metalRough/emissive/occlusion — o
+  parse já lia, a extração só levava o baseColor) e escreve na PASTA DO
+  MODELO **assets/<stem>/textures/** (a ordem do dono; a dedup FNV-1a
+  por bytes; a uri externa passa-through; o modelo sem nome usa
+  "modelo") · o BIND AUTO liga os slots vazios ao MeshRenderer pelo
+  `meshTexSlotFor` (o caminho é a verdade — o slot 0 alimenta o
+  texPath/texture) · o LIT ganha o **PBR-LITE** pela FONTE ÚNICA NOVA
+  render/Pbr.h (o normal map por DERIVADAS DE ECRÃ dFdx/dFdy — a TBN
+  sem atributos novos, o mesh antigo byte a byte; o rough/metal
+  empacotado glTF no unit 2; os fatores do GTB2 entram; a NÉVOA exp2 com
+  density 0 = MORTA = o lit de sempre; o uAmbientScale) · o TIC
+  **WorldEnvironment** NOVO no "+" (o 7.º preset — Transform+Environment
+  SEM mesh/física): o CÉU é o clear, a névoa + o ambient do HDRI pela
+  MÉDIA CPU (averageColor + ambientFromAvg — o PISO 0.25 nunca deixa o
+  HDRI escuro apagar a cena), o 1.º ATIVO manda · o .goni guarda
+  sky/fog/density/ambient/hdri/active (defaults omitidos =
+  forward-compat) · o AssetConverter cria a pasta do alvo e o migrate
+  aceita as 2 gerações (assets/<stem>.gmesh OU assets/<stem>/<stem>.gmesh)
+  · pins ×4 NOVOS (pbr_fontes · env_media · gltf_5slots_pasta ·
+  env_roundtrip) + as recalibrações com nota (registry 13→14, os meshes
+  do texbind na pasta do modelo, o Count 6→7 + a geometria 8 linhas do
+  menu "+") + **R-060** (`regress_pbr_worldenv`) + M-Yc1 (a névoa
+  invertida) M-Yc2 (o .goni perde o HDRI) vermelho→reposto→verde
+  (coladas no RELATORIO-0.12-Y.md §3) · verificação: test_core os pins
+  VERDES (corrida completa 1206 OK; os flakes da sandbox documentados —
+  o fork do medicoes e o crash intermitente do streaming_paralelo
+  provado preexistente; o CI é o árbitro) · c33_virtual 1009/0 ·
+  docs-lint VERDE · **versionCode 108** — o build vigente da campanha
+  0.12-Y. O 107 fica INTACTO como história.
+
 - **0.12-QoL · C — O VIEWPORT 3D LIMPO** — a TEIA de linhas do frustum
   SÓ desenha com a câmara SELECIONADA (o glifo mudo fica — o alvo do
   toque; o toggle do Inspector mantém-se) + o pai de vidro do RAIL sai

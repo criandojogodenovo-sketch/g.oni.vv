@@ -184,10 +184,158 @@ a xxxhdpi), atualiza o ic_launcher_foreground.png e o ic_launcher.xml
 - Os 3 lançadores cobertos: adaptativo (Android 8+), legacy quadrado e
   legacy redondo.
 
-## §3 · 3.Y-C — O PIPELINE PBR (preenchido na sub-fase)
+## §3 · 3.Y-C — O PIPELINE PBR + O WORLDENVIRONMENT
+
+**A ordem do dono**: «O utilizador importou um modelo 3D e as texturas não
+apareceram. Lê o material do glTF e extrai Albedo, Normal, Roughness e
+Metallic. Cria a pasta assets/NomeDoModelo/ e coloca lá o .gmesh e uma
+subpasta textures/ com as imagens. Conecta-as automaticamente ao
+MeshRenderer (os 4 slots). Activa as capacidades no Material.cpp. NOVO
+PRESET NO "+": cria um TIC que permite carregar um HDRI (mapa 360) para
+iluminar a cena e definir a cor do céu/fog.»
+
+### O que mudou
+
+- **`render/Pbr.h` NOVO** — a FONTE ÚNICA da matemática PBR-lite (o
+  padrão camWorldPerPixel/gridFadeForDist: puras no header, o FS do lit
+  replica LINHA A LINHA e os pins aferem a MESMA conta sem GL):
+  `roughToShininess` (rough 0..1 → expoente 4..256, o quadrado suaviza),
+  `blinnSpec` (o half-vector H = normalize(L+V)), `metallicDiffuseScale`
+  (o metal não tem difusa — escala 1−metallic·0.85), `fogFactorExp2`
+  (1−exp(−(d·ρ)²); density 0 = MORTA = o lit de sempre byte a byte) e
+  `equirectUv` (o uv do mapa 360: u = 0.5 + atan2(z,x)/2π, v = acos(−y)/π).
+- **`render/Material.{h,cpp}`** — o lit ganha o PBR-LITE a cada draw:
+  uNormalTex (unit 1) com a perturbação por DERIVADAS DE ECRÃ (dFdx/dFdy
+  do ES 3.0 — a TBN sem atributos novos no mesh: o mesh antigo fica byte
+  a byte), uRoughMetalTex (unit 2, o pacote glTF: roughness no G,
+  metallic no B), os FATORES uRoughness/uMetallic (o default glTF 1/1),
+  a NÉVOA (uFogColor/uFogDensity) e o uAmbientScale (o HDRI do
+  WorldEnvironment). A API nova: `setPbr(normalTex, roughMetalTex,
+  metallic, roughness)` + `setFog(rgb, density, eye)` +
+  `setAmbientScale(scale)` — nullptr/density 0 = os ramos mortos = o lit
+  de sempre (o contrato byte a byte do draw antigo). O DrawProps ganha
+  metallic/roughness (o GTB2 já os guardava desde a 0.11-M — agora ENTRAM
+  no draw via fromGMesh).
+- **`assets/GltfTextures.{h,cpp}`** — `extractGltfTexSlots` NOVO: os 5
+  SLOTS do material glTF (baseColor/normal/metalRough/emissive/occlusion —
+  o parse já lia os índices, a extração só levava o baseColor) na PASTA
+  DO MODELO `assets/<stem>/textures/` (a ordem do dono; o modelo sem nome
+  usa "modelo" — a pasta nunca é a raiz); a mesma dedup FNV-1a por BYTES
+  (1 ficheiro por textura única); a textura EXTERNA (uri) passa-through;
+  jpeg/fora do escopo não falha o import. `GltfModel::meshTexSlots`
+  (meshes × 5 achatado, "" = slot vazio) ao lado do meshTexture antigo
+  (os consumidores antigos ficam byte a byte).
+- **`assets/ResourceManager.{h,cpp}`** — `meshTexSlotFor(ref, slot)` NOVO
+  ("meshes/x.glb#0" → assets/<stem>/textures/gltf_<hash>.png), a mesma
+  regra do sub-ref do mesh().
+- **`assets/AssetConverter.cpp`** — o `writeAsset` cria a PASTA do alvo
+  (o makeDirs antes do writeBytes — o .gmesh pode nascer em subpasta) e o
+  `migrateLegacyAssets` aceita as DUAS gerações (assets/<stem>.gmesh OU
+  assets/<stem>/<stem>.gmesh — os .goni antigos intactos).
+- **`components/Environment.h` NOVO** — o TIC WORLDENVIRONMENT é DADOS:
+  skyColor/fogColor/fogDensity/ambient/hdriPath/active + clampFields (o
+  padrão AudioPlayer); as FONTES PURAS `averageColor` (a média CPU do
+  equirect, o teto ~4096 amostras) e `ambientFromAvg` (a luminância
+  (0.2126, 0.7152, 0.0722) × ganho 4 — o PISO 0.25 nunca deixa o HDRI
+  escuro apagar a cena; o TETO 4). GL-free (o CI prova sem GL).
+- **`core/ComponentStore.{h,cpp}`** — o registry ganha "Environment" (o
+  14.º componente — os ids dos 13 existentes INTACTOS) + o storage
+  environments_ + o removeAll/hasAny.
+- **`core/Presets.{h,cpp}`** — `PresetKind::WorldEnvironment` (o 7.º
+  preset): SÓ Transform+Environment (SEM mesh, SEM física — a estrutura
+  primeiro; a origem, que o "sítio" não importa — o singleton lógico da
+  cena como a câmara); `presetName` → "WorldEnvironment".
+- **`core/SceneSerializer.cpp`** — o Environment no .goni (append + fill:
+  sky/fog/fogDensity/ambient/hdri/active; os DEFAULTS OMITIDOS = o
+  componente novo — forward-compat como o resto do serializer; o
+  clampFields no load).
+- **`ui/EditorUi.cpp`** — o menu "+" 3D passa a 8 itens (o 8.º é o
+  WorldEnvironment).
+- **`platform/main.cpp`** — (a) o BIND AUTO dos slots vazios no
+  `expandJobPerPiece` (o caminho é a verdade: `meshTexSlotFor` → slot, o
+  slot 0 também alimenta o texPath/texture quando a cache GPU o tem);
+  (b) `environmentApplyHdri` no pós-load (cada HDRI → ambient pela média
+  CPU; o PNG ilegível mantém o ambient que tem — a honestidade do
+  import); (c) o frame do lit: o 1.º Environment ATIVO manda (o
+  invariante da câmara ativa) — o CÉU é o clear (sobreposto ao token), a
+  NÉVOA + o AMBIENT entram nos uniforms 1× por frame (os draws só
+  consomem); SEM Environment = os defaults de sempre (density 0, ambient
+  1 — o lit byte a byte); (d) o choice 8 do menu cria o TIC (o toast
+  ensina «céu/névoa/HDRI»).
+
+### Pins (tests/test_012y.cpp +4)
+
+- `pbr_fontes` — a fonte única: o shininess (0→256, 1→4, 0.5→67, o
+  clamp), o especular (N=H→1, perpendicular→0), o mix metálico
+  (1.0→0.15), a névoa (density 0 = MORTA; d·ρ=1 → 0.6321) e o uv
+  equirect (+x→(0.5,0.5), −y→v=0, +z→u=0.75).
+- `env_media` — a média CPU: vazio/zero sem crash, 1×1 vermelho →
+  luminância 0.2126 → ambient 0.85, branco → o teto 4, preto → o PISO
+  0.25, 2×2 misturado → 0.5.
+- `gltf_5slots_pasta` — a EXTRAÇÃO: 2 meshes × 5 slots na PASTA do modelo
+  (assets/cidade/textures/gltf_*.png), os slots vazios honestos, o DEDUP
+  (3 imagens iguais → 1 ficheiro no disco), o stem vazio → "modelo", a
+  FONTE (o caminho "/textures" no GltfTextures.cpp + a ordem
+  kBindBaseColor no GTB2).
+- `env_roundtrip` — o TIC sobrevive ao .goni (os 6 campos byte a byte) +
+  o preset NOVO (o nome + a estrutura Transform+Environment).
+
+### Recalibrações (com nota)
+
+- `test_components` — o registry 13 → 14 (o Environment entra NO FIM —
+  os ids dos 13 intactos, o contrato da ordem fixa).
+- `test_texbind` — os meshes do catálogo na PASTA do modelo
+  (assets/m/m.gmesh) — a forma nova do caminho; o CONTRATO do bind auto
+  (5 slots no apply, a troca de mesh) intacto.
+- `test_wiring011` — `PresetKind::Count` 6 → 7; a geometria do menu "+"
+  3D passa a 8 linhas (o teste media 7 e o toque saía do card real —
+  apanho honesto da recalibração).
+
+### Sentinela R-060 `regress_pbr_worldenv` (tests/test_sentinels.cpp)
+
+Vigia a CLASSE: a fórmula PBR fora da fonte única (o shader e os pins a
+divergir às escondidas), a névoa a vazar para o lit de sempre (density 0
+tem de ser MORTA), o HDRI escuro a APAGAR a cena (o piso 0.25 do
+ambient), o .goni a PERDER o WorldEnvironment no roundtrip e a ORDEM dos
+slots (meshes×5, a ordem kBind*) a regredir. Entrada NOVA no
+`docs/REGRESSOES.md`.
+
+### Mutações (vermelho → reposto → verde)
+
+- **M-Yc1** (a névoa INVERTIDA — `fogFactorExp2` perde o `1−` e vira
+  exp(−(d·ρ)²): perto molhado, longe limpo, e density 0 → 1.0 — a MORTA
+  morreu): `pbr_fontes` VERMELHO («fogFactorExp2(1.0,1.0) 0.6321» +
+  «fogFactorExp2(10.0,0.1) 0.6321»), `regress_pbr_worldenv` VERMELHO
+  («R-060: a curva exp2 mudou (d·ρ=1 → 0.6321)»). REPOSTO → os 2 VERDES.
+- **M-Yc2** (o .goni PERDE O HDRI — o `if (!hdriPath.empty())` do
+  `appendComponentJson(Environment)` morto): `env_roundtrip` VERMELHO
+  (o "atardecer.png" sai do dump), `regress_pbr_worldenv` VERMELHO
+  («R-060: o .goni PERDEU o HDRI (o mapa 360)»). REPOSTO → os 2 VERDES.
+
+### Verificação
+
+- test_core local: os 4 pins + a R-060 VERDES (corrida completa 1206 OK;
+  as únicas falhas locais = os flakes da sandbox documentados — o fork
+  do medicoes e o crash intermitente do regress_streaming_paralelo,
+  provado preexistente na §1; **o CI é o árbitro**).
+- c33_virtual 1009/0.
+
+### Ficheiros
+
+render/Pbr.h (NOVO) + render/Material.h + render/Material.cpp +
+assets/GltfTextures.h + assets/GltfTextures.cpp + assets/GltfImporter.h +
+assets/ResourceManager.h + assets/ResourceManager.cpp +
+assets/AssetConverter.cpp + components/Environment.h (NOVO) +
+core/ComponentStore.h + core/ComponentStore.cpp + core/Presets.h +
+core/Presets.cpp + core/SceneSerializer.cpp + ui/EditorUi.cpp +
+platform/main.cpp + tests/test_012y.cpp + tests/test_sentinels.cpp
+(R-060) + tests/test_components.cpp + tests/test_texbind.cpp +
+tests/test_wiring011.cpp + docs/REGRESSOES.md (R-060) +
+docs/RELATORIO-0.12-Y.md (este) + docs/RELATORIO-0.9.6.md (§14, o par
+vc 108) + STATE.md + app/build.gradle (versionCode 108).
 
 ## §4 · As mutações (índice)
 
-Ver §1 (M-Ya1/M-Ya2) e as secções §2/§3 quando fechadas.
+Ver §1 (M-Ya1/M-Ya2), §2 (M-Yb1) e §3 (M-Yc1/M-Yc2).
 
 ## §5 · O fecho da campanha (preenchido no FECHO)

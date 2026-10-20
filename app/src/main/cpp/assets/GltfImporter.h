@@ -195,6 +195,13 @@ struct GltfModel {
     // por hash); vazio = sem textura. Alinhado com meshes.
     std::vector<std::string> meshTexture;
 
+    // 0.12-Y (3.Y-C): os 5 SLOTS por mesh (a ordem kBindBaseColor..
+    // kBindOcclusion; meshes × 5 achatado; "" = slot vazio) — os
+    // ficheiros em assets/<stem>/textures/ (a ordem do dono). Preenchido
+    // pelo ResourceManager ao lado do meshTexture (que fica para os
+    // consumidores antigos byte a byte).
+    std::vector<std::string> meshTexSlots;
+
     // 0.9.6.12 (A2/R-014 · a spec 2d): primitivas LARGADAS por bufferView
     // que genuinamente excede o buffer (exporter malformado) — DEGRADA em
     // vez de matar o import: cada queda LOGA W com a linha completa

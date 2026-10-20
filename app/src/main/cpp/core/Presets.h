@@ -31,7 +31,10 @@ enum class PresetKind : u32 {
                            // esfera default do cache; SEM física)
     Audio           = 5,   // 0.8.11: só Transform+AudioPlayer (o clip vem
                            // pelo Inspector; SEM mesh, SEM física)
-    Count           = 6,
+    WorldEnvironment = 6,  // 0.12-Y (3.Y-C): só Transform+Environment — o
+                           // céu/névoa/HDRI da cena (o 1.º ATIVO manda;
+                           // SEM mesh, SEM física)
+    Count           = 7,
 };
 
 // Nome canônico do preset (usado no menu "+" e como nome base do TIC).

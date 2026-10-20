@@ -265,6 +265,14 @@ bool copyToStorage(const std::string& srcAbs, ProjectStorage& st,
 bool writeAsset(ProjectStorage& st, const std::string& rel,
                 const std::vector<u8>& bytes, u64& outBytes,
                 std::string& err) {
+    // 0.12-Y (3.Y-C): a PASTA DO MODELO — assets/<stem>/<stem>.gmesh vive
+    // numa SUBPASTA; o writeBytes falha sem a pasta (o makeDirs antes)
+    {
+        const size_t slash = rel.find_last_of('/');
+        if (slash != std::string::npos && slash > 0) {
+            st.makeDirs(rel.substr(0, slash));
+        }
+    }
     if (!st.writeBytes(rel, bytes.data(), bytes.size())) {
         err = "gravacao falhou: " + rel;
         return false;
@@ -2201,11 +2209,15 @@ u32 migrateLegacyAssets(ProjectStorage& st, TexturePipeline* pipeline) {
                 continue;
             }
             const std::string stem = stemOf(f);
-            // já convertido? (assets/<stem>.gmesh ou .gtext)
+            // já convertido? (assets/<stem>.gmesh ou .gtext — e desde a
+            // 0.12-Y TAMBÉM a pasta do modelo assets/<stem>/<stem>.gmesh;
+            // as duas gerações coexistem, os .goni antigos ficam intactos)
             const char* wantExt = d == 0 ? ".gmesh" : ".gtext";
             const std::string wantRel =
                 std::string("assets/") + stem + wantExt;
-            if (st.exists(wantRel)) {
+            const std::string wantRelFolder = std::string("assets/") + stem +
+                                              "/" + stem + wantExt;
+            if (st.exists(wantRel) || st.exists(wantRelFolder)) {
                 continue;
             }
             Output out;

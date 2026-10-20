@@ -1,8 +1,9 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-20 · vc: 107 · Último commit: este (o 0.12-Y B —
-o ÍCONE IA: a fonte com o prompt do dono, a extração por textura, o
-tile a 65% da zona segura, os 15 PNGs, o fundo #0A0A0C; M-Yb1)
+Atualizado: 2026-10-20 · vc: 108 · Último commit: este (o 0.12-Y C —
+o PIPELINE PBR: os 5 slots do glTF na pasta do modelo, o bind auto, o
+lit PBR-lite pela fonte única render/Pbr.h, o TIC WorldEnvironment;
+M-Yc1/2)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -10,10 +11,19 @@ tile a 65% da zona segura, os 15 PNGs, o fundo #0A0A0C; M-Yb1)
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A e B
-  fechadas, vc 107; C a seguir)** (a cláusula calma: SÓ o prompt; a
+- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A, B e C
+  fechadas, vc 108; o FECHO a seguir)** (a cláusula calma: SÓ o prompt; a
   V.ONI intocada; a história vive no RELATORIO-0.12-Y-ABERTURA.md + o
   RELATORIO-0.12-Y.md).
+  **C (vc 108)**: o PIPELINE PBR — os 5 slots do glTF na PASTA DO MODELO
+  assets/<stem>/textures/ (a dedup FNV-1a, a uri externa passa), o BIND
+  AUTO pelo meshTexSlotFor, o lit PBR-LITE pela FONTE ÚNICA render/Pbr.h
+  (o normal map por DERIVADAS DE ECRÃ, o rough/metal empacotado, a névoa
+  exp2 com density 0 = MORTA, o uAmbientScale), o TIC WorldEnvironment
+  NOVO (o 7.º preset — o céu é o clear, o HDRI ilumina pela MÉDIA CPU
+  com o PISO 0.25); pins ×4 (test_012y.cpp) + R-060 + M-Yc1/2
+  vermelho→reposto→verde; 3 recalibrações com nota (registry 14, o
+  texbind na pasta, o menu 8 linhas).
   **B (vc 107)**: o ÍCONE IA — a FONTE gerada com o prompt EXATO do dono
   (obsidiana + veias de magma), a extração por TEXTURA (o high-pass: o
   luminância da Y-0 comeria a obsidiana), o tile a 65% da ZONA SEGURA, os
@@ -29,11 +39,7 @@ tile a 65% da zona segura, os 15 PNGs, o fundo #0A0A0C; M-Yb1)
   vermelho→reposto→verde; os achados fora da lista (o kCheck do glifo ✓
   com um traço morto) documentados. O §0.2 VERDE com evidência (vc 105 ·
   CI success do d9b62a1) e o INCIDENTE do ambiente (o clone herdado
-  desatualizado; o fetch/reset sincronizou — zero trabalho perdido). **3.Y-B** o ícone
-  IA (obsidiana+fogo) → os 5 mipmaps + o fundo #0A0A0C. **3.Y-C** o
-  pipeline PBR: assets/<stem>/textures/ + o bind auto dos 5 slots + o
-  lit PBR-lite (normal/rough/metal) + o TIC WorldEnvironment (HDRI
-  equirect + céu/névoa); R-060 + M-Yc1/2.
+  desatualizado; o fetch/reset sincronizou — zero trabalho perdido).
 - **Campanha 0.12-QoL (UI POLISH + NAVEGADOR + AUTO-SAVE) — FECHADA
   (A..D, vc 102–105)** (a cláusula calma: refinamento de UI 2.5D e
   persistência, ZERO lógica de motor; a história vive no

@@ -62,6 +62,11 @@ public:
     // ("meshes/x.glb#0" → "textures/gltf_<hash>.png"; "" = sem textura).
     std::string meshTextureFor(const std::string& ref) const;
 
+    // 0.12-Y (3.Y-C): o SLOT `slot` (0..4, a ordem kBind* do GTB2) do mesh
+    // de `ref` ("meshes/x.glb#0" → "assets/<stem>/textures/gltf_<hash>.png";
+    // "" = o slot vazio). Os consumidores: o bind AUTO dos 5 slots.
+    std::string meshTexSlotFor(const std::string& ref, int slot) const;
+
     void releaseMesh(const std::string& ref);
     void releaseImage(const std::string& relPath);
 

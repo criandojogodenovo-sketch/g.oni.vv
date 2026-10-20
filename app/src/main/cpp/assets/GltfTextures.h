@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 #include "assets/GltfImporter.h"
+#include "assets/GOwnFormats.h"   // 0.12-Y: kBindSlotCount (a ordem kBind*)
 #include "core/ProjectStorage.h"
 
 namespace vv {
@@ -25,6 +26,18 @@ namespace vv {
 // `outMeshTex` fica com model.meshes.size() entradas ("" = sem textura).
 bool extractGltfTextures(ProjectStorage& st, const GltfModel& model,
                          std::vector<std::string>& outMeshTex,
+                         std::string& err);
+
+// ---- 0.12-Y (3.Y-C): os 5 SLOTS na PASTA DO MODELO -------------------------
+// tex = meshes × kBindSlotCount (a ordem kBindBaseColor..kBindOcclusion
+// do GTB2; "" = o slot vazio). Os ficheiros vivem em
+// assets/<modelStem>/textures/ (a ordem do dono). GL-free (FakeStorage).
+struct GltfTexSlots {
+    size_t meshes = 0;
+    std::vector<std::string> tex;
+};
+bool extractGltfTexSlots(ProjectStorage& st, const GltfModel& model,
+                         const std::string& modelStem, GltfTexSlots& outSlots,
                          std::string& err);
 
 // nome canónico do ficheiro extraído (hash dos BYTES do PNG)

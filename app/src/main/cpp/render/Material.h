@@ -56,6 +56,8 @@ struct DrawProps {
     f32 emissive[3] = {0.0f, 0.0f, 0.0f};
     f32 uvRot[4] = {1.0f, 0.0f, 0.0f, 1.0f};   // mat2 column-major
     f32 uvOff[2] = {0.0f, 0.0f};
+    f32 metallic = 1.0f;      // 0.12-Y (3.Y-C): os FATORES do GTB2 (o
+    f32 roughness = 1.0f;     //   default glTF; o FS mistura pelo PBR-lite)
 
     // o SLOT 0 (baseColor) do GTB2 → DrawProps. Os factores
     // metallic/roughness e os transforms dos slots 1-4 esperam o lit
@@ -91,6 +93,19 @@ public:
     // uniforms nascem a 0 e o default É explícito: nullptr = o default
     // de sempre = o comportamento byte a byte dos draws pré-FASE 2)
     void setProps(const DrawProps* p) const;
+
+    // 0.12-Y (3.Y-C) — O PBR-LITE A CADA draw: o normal map (unit 1) + o
+    // rough/metal (unit 2, o pacote glTF roughness no G metallic no B) +
+    // os fatores. nullptr nas texturas = os ramos mortos (o lit de
+    // sempre). A névoa/olho em setFog (o WorldEnvironment injeta).
+    void setPbr(const Texture* normalTex, const Texture* roughMetalTex,
+                f32 metallic, f32 roughness) const;
+    // a névoa exp2 + a posição do olho (a fonte única render/Pbr.h;
+    // density 0 = morta = o byte a byte do lit de sempre)
+    void setFog(const f32 rgb[3], f32 density, const Vec3& eye) const;
+    // o multiplicador do ambient (o HDRI do WorldEnvironment; o setFog
+    // repõe 1.0 — o boost vive SÓ no frame com Environment ativo)
+    void setAmbientScale(f32 scale) const;
 
     // tem de casar com o SkeletonComp (limite do bloco UBO no shader)
     static constexpr u32 kMaxBones = 128;   // 0.11-S: 128 (era 64)
@@ -145,6 +160,17 @@ private:
     i32 locEmissive_ = -1;    // uEmissive (vec3)
     i32 locUvRot_ = -1;       // uUvRot (mat2)
     i32 locUvOff_ = -1;       // uUvOff (vec2)
+    // 0.12-Y (3.Y-C): o PBR-lite + a névoa
+    i32 locNormalTex_ = -1;       // uNormalTex (unit 1)
+    i32 locHasNormal_ = -1;       // uHasNormal
+    i32 locRoughMetalTex_ = -1;   // uRoughMetalTex (unit 2)
+    i32 locHasRoughMetal_ = -1;   // uHasRoughMetal
+    i32 locRoughness_ = -1;       // uRoughness
+    i32 locMetallic_ = -1;        // uMetallic
+    i32 locFogColor_ = -1;        // uFogColor (vec3)
+    i32 locFogDensity_ = -1;      // uFogDensity (float)
+    i32 locAmbientScale_ = -1;    // uAmbientScale (float — o HDRI)
+    i32 locEye_ = -1;             // uEye (vec3)
 };
 
 // F3: alias pedido pela spec — MeshRenderer guarda `Material*`. A F3 tem um

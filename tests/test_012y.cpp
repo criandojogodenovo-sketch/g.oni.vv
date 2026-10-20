@@ -498,3 +498,205 @@ TEST(icon_ia_mipmaps) {
                     src));
     EXPECT(countSub(src, "@mipmap/ic_launcher_foreground") == 1);
 }
+
+// ---- (0.12-Y C) — os pins do PBR e do WorldEnvironment ---------------------
+#include "render/Pbr.h"
+#include "components/Environment.h"
+#include "assets/GltfTextures.h"
+#include "assets/GltfImporter.h"
+#include "core/SceneSerializer.h"
+#include "core/Presets.h"
+#include "FakeStorage.h"
+
+// ---- PIN pbr_fontes -----------------------------------------------------------
+// As FONTE ÚNICA do lit PBR-lite (render/Pbr.h): o shininess do roughness,
+// o especular Blinn-Phong, o mix metálico, a névoa exp2 e o uv equirect —
+// o FS replica LINHA A LINHA (os mesmos números).
+TEST(pbr_fontes) {
+    // o shininess: rough 0 = 256 (quase-espelho), rough 1 = 4 (o piso),
+    // rough 0.5 = 4 + 0.25·252 = 67 (o quadrado suaviza)
+    EXPECT(nearEq(pbr::roughToShininess(0.0f), 256.0f, 0.01f));
+    EXPECT(nearEq(pbr::roughToShininess(1.0f), 4.0f, 0.01f));
+    EXPECT(nearEq(pbr::roughToShininess(0.5f), 67.0f, 0.01f));
+    EXPECT(nearEq(pbr::roughToShininess(2.0f), 4.0f, 0.01f));   // clamp
+    // o especular: N=H → 1; perpendicular → 0
+    const Vec3 n{0.0f, 0.0f, 1.0f};
+    EXPECT(nearEq(pbr::blinnSpec(n, n, 32.0f), 1.0f, 1e-5f));
+    const Vec3 h90{1.0f, 0.0f, 0.0f};
+    EXPECT(pbr::blinnSpec(n, h90, 32.0f) == 0.0f);
+    EXPECT(pbr::blinnSpec(n, Vec3{-1.0f, 0.0f, 0.0f}, 32.0f) == 0.0f);
+    // o mix metálico: dielétrico 1.0, metal 0.15
+    EXPECT(nearEq(pbr::metallicDiffuseScale(0.0f), 1.0f, 1e-6f));
+    EXPECT(nearEq(pbr::metallicDiffuseScale(1.0f), 0.15f, 1e-6f));
+    // a névoa exp2: density 0 = MORTA (o byte a byte do lit de sempre);
+    // d·ρ=1 → 1−e⁻¹ ≈ 0.632
+    EXPECT(pbr::fogFactorExp2(100.0f, 0.0f) == 0.0f);
+    EXPECT(nearEq(pbr::fogFactorExp2(1.0f, 1.0f), 0.6321f, 1e-3f));
+    EXPECT(nearEq(pbr::fogFactorExp2(10.0f, 0.1f), 0.6321f, 1e-3f));
+    // o uv equirect: +x → (0.5, 0.5) · −y (o TOPO da imagem) → v=0 ·
+    // +z → u=0.75
+    f32 uv[2];
+    pbr::equirectUv(Vec3{1.0f, 0.0f, 0.0f}, uv);
+    EXPECT(nearEq(uv[0], 0.5f, 1e-5f) && nearEq(uv[1], 0.5f, 1e-5f));
+    pbr::equirectUv(Vec3{0.0f, -1.0f, 0.0f}, uv);
+    EXPECT(nearEq(uv[1], 0.0f, 1e-5f));
+    pbr::equirectUv(Vec3{0.0f, 0.0f, 1.0f}, uv);
+    EXPECT(nearEq(uv[0], 0.75f, 1e-5f));
+}
+
+// ---- PIN env_media ----------------------------------------------------------
+// O WorldEnvironment ilumina pela MÉDIA CPU do HDRI (averageColor +
+// ambientFromAvg — as fontes puras do components/Environment.h).
+TEST(env_media) {
+    // vazio/zero → preto (sem crash)
+    f32 avg[3];
+    averageColor(nullptr, 0, 0, avg);
+    EXPECT(avg[0] == 0.0f && avg[1] == 0.0f && avg[2] == 0.0f);
+    // 1×1 vermelho puro → (1,0,0) → a luminância 0.2126 → ambient com o
+    // ganho ×4 (0.85) — o piso 0.25 não ativa
+    const u8 px[4] = {255, 0, 0, 255};
+    averageColor(px, 1, 1, avg);
+    EXPECT(nearEq(avg[0], 1.0f, 1e-6f) && avg[1] == 0.0f && avg[2] == 0.0f);
+    EXPECT(nearEq(ambientFromAvg(avg), 0.2126f * 4.0f, 1e-3f));
+    // branco → luminância 1 → o teto 4
+    const u8 w[4] = {255, 255, 255, 255};
+    averageColor(w, 1, 1, avg);
+    EXPECT(ambientFromAvg(avg) == 4.0f);
+    // preto → o PISO 0.25 (o HDRI escuro nunca apaga a cena)
+    const u8 b[4] = {0, 0, 0, 255};
+    averageColor(b, 1, 1, avg);
+    EXPECT(ambientFromAvg(avg) == 0.25f);
+    // 2×2 misturado → a média dos 4 (o passo cap 4096 amostra tudo)
+    const u8 q[16] = {255, 255, 255, 255, 0,   0,   0,   255,
+                      255, 255, 255, 255, 0,   0,   0,   255};
+    averageColor(q, 2, 2, avg);
+    EXPECT(nearEq(avg[0], 0.5f, 1e-6f));
+}
+
+// ---- PIN gltf_5slots_pasta ---------------------------------------------------
+// O dono: «Lê o material do glTF e extrai Albedo, Normal, Roughness e
+// Metallic. Cria a pasta assets/NomeDoModelo/ e coloca lá o .gmesh e uma
+// subpasta textures/ com as imagens.» — a EXTRAÇÃO dos 5 slots na pasta
+// do modelo (o .gmesh na pasta é o AssetConverter — o pin aferra a fonte).
+TEST(gltf_5slots_pasta) {
+    FakeStorage st;
+    const std::vector<u8> pngA = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+    // um PNG real do fixture (o extrator valida o decode)
+    std::string fix = repoRoot() +
+                      "/tests/fixtures/yellow4.png";
+    std::string pngBytes;
+    ASSERT(readFile(fix, pngBytes));
+    const std::vector<u8> png(pngBytes.begin(), pngBytes.end());
+
+    // o modelo SINTÉTICO: 2 meshes · 2 materiais · 3 imagens (o mesh 0 com
+    // os 5 slots, o mesh 1 só baseColor)
+    GltfModel model;
+    MeshData mesh;
+    model.meshes.push_back(mesh);
+    model.meshes.push_back(mesh);
+    model.meshMaterial.push_back(0);
+    model.meshMaterial.push_back(1);
+    GltfMaterial m0;
+    m0.baseColorTex = 0;
+    m0.normalTex = 1;
+    m0.metalRoughTex = 2;
+    GltfMaterial m1;   // só baseColor
+    m1.baseColorTex = 0;
+    model.materials.push_back(m0);
+    model.materials.push_back(m1);
+    for (int i = 0; i < 3; ++i) {
+        GltfImage img;
+        img.bytes = png;
+        img.mime = "image/png";
+        model.images.push_back(img);
+    }
+
+    GltfTexSlots slots;
+    std::string err;
+    EXPECT(extractGltfTexSlots(st, model, "cidade", slots, err));
+    EXPECT(err.empty());
+    EXPECT(slots.meshes == 2u);
+    ASSERT(slots.tex.size() == 10u);   // 2 meshes × 5 slots
+    // o mesh 0: os 4 slots preenchidos (baseColor/normal/metalRough; o
+    // emissive/occlusion sem imagem = vazios) — TODOS na PASTA do modelo
+    for (int s = 0; s < 3; ++s) {
+        const std::string& rel = slots.tex[static_cast<size_t>(s)];
+        EXPECT_MSG(rel.rfind("assets/cidade/textures/gltf_", 0) == 0,
+                   "gltf_5slots_pasta: o slot %d saiu da PASTA DO MODELO "
+                   "(%s)", s, rel.c_str());
+        EXPECT(st.exists(rel));
+    }
+    EXPECT(slots.tex[3].empty() && slots.tex[4].empty());
+    // o mesh 1: só o baseColor
+    EXPECT(!slots.tex[5].empty());
+    for (int s = 1; s < 5; ++s) {
+        EXPECT(slots.tex[5 + static_cast<size_t>(s)].empty());
+    }
+    // o DEDUP: as 3 imagens IGUAIS → 1 ficheiro no disco
+    std::vector<std::string> files;
+    EXPECT(st.listDir("assets/cidade/textures", files));
+    EXPECT(files.size() == 1u);
+    // o stem vazio → a pasta "modelo" (nunca a raiz)
+    GltfTexSlots slots2;
+    EXPECT(extractGltfTexSlots(st, model, "", slots2, err));
+    EXPECT(!slots2.tex.empty() &&
+           slots2.tex[0].rfind("assets/modelo/textures/", 0) == 0);
+    // a FONTE: as texturas nascem na PASTA do modelo (a ordem do dono);
+    // o .gmesh continua em assets/<stem>.gmesh — a subpasta dele é a
+    // campanha própria (a onda de recalibração não cabe na 3.Y-C)
+    std::string src;
+    ASSERT(readFile(repoRoot() + "/app/src/main/cpp/assets/GltfTextures.cpp",
+                    src));
+    EXPECT(countSub(src, "assets/\" +\n        (modelStem.empty()") >= 1 ||
+           countSub(src, "\"/textures\"") >= 1);
+    ASSERT(readFile(repoRoot() + "/app/src/main/cpp/assets/GOwnFormats.h",
+                    src));
+    EXPECT(countSub(src, "kBindBaseColor = 0") == 1);   // a ordem dos slots
+}
+
+// ---- PIN env_roundtrip -------------------------------------------------------
+// O TIC WorldEnvironment sobrevive ao .goni: o dump/loadText preserva
+// sky/fog/density/ambient/hdri/active (o serializer novo).
+TEST(env_roundtrip) {
+    Scene a;
+    const Handle h = a.create("WorldEnvironment");
+    a.get(h)->addComponent<Transform3D>();
+    Environment* e = a.get(h)->addComponent<Environment>();
+    e->skyColor[0] = 0.30f;
+    e->skyColor[2] = 0.60f;
+    e->fogColor[1] = 0.40f;
+    e->fogDensity = 0.08f;
+    e->ambient = 1.75f;
+    e->hdriPath = "assets/hdri/atardecer.png";
+    e->clampFields();
+    const std::string dump = SceneSerializer::dump(a);
+    EXPECT(countSub(dump, "\"Environment\"") == 1);
+    EXPECT(countSub(dump, "atardecer.png") == 1);
+
+    Scene b;
+    SceneSerializer::LoadCtx ctx;   // defaults (paths vazios)
+    ASSERT(SceneSerializer::loadText(b, dump, ctx));
+    const Handle hf = b.find("WorldEnvironment");
+    ASSERT(hf.valid());
+    const Tic* t = b.get(hf);
+    ASSERT(t != nullptr);
+    const Environment* e2 = t->getComponent<Environment>();
+    ASSERT(e2 != nullptr);
+    EXPECT(nearEq(e2->skyColor[0], 0.30f, 1e-5f));
+    EXPECT(nearEq(e2->skyColor[2], 0.60f, 1e-5f));
+    EXPECT(nearEq(e2->fogColor[1], 0.40f, 1e-5f));
+    EXPECT(nearEq(e2->fogDensity, 0.08f, 1e-6f));
+    EXPECT(nearEq(e2->ambient, 1.75f, 1e-6f));
+    EXPECT(e2->hdriPath == "assets/hdri/atardecer.png");
+    // o preset NOVO existe (a ordem do dono: «novo preset no "+"»)
+    EXPECT(std::string(presetName(PresetKind::WorldEnvironment)) ==
+           "WorldEnvironment");
+    Scene c;
+    const Handle hp = createTicFromPreset(c, PresetKind::WorldEnvironment,
+                                          nullptr, nullptr);
+    const Tic* tp = c.get(hp);
+    ASSERT(tp != nullptr);
+    EXPECT(tp->getComponent<Environment>() != nullptr);
+    EXPECT(tp->getComponent<MeshRenderer>() == nullptr);   // ESTRUTURA
+    EXPECT(tp->getComponent<BodyComp>() == nullptr);       // SEM física
+}

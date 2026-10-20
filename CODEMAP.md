@@ -59,26 +59,24 @@ Atualizado: 2026-10-19 · vc: 105
   UndoStack, VoniSystem, Bench (R-017), AssetPersist, SceneTic.h (TIC +
   Transform3D).
 - **app/src/main/cpp/render/** — o desenho: Renderer, Mesh, Camera, Grid,
-  Cube/Primitives, Material, Texture, GpuAssets (+ `impostorTexture`),
-  BlockMesh (o render POR BLOCOS do .gmesh v3), Impostor.h (a decisão
-  PURA do impostor), QuadBatch, DrawStats, ThumbPng (PNG via zlib).
-  **0.12-D (D-1 — DORMENTE desde a 0.12-E)**: app/src/main/cpp/render/SdfBatch.h (o batch dos WIDGETS SDF — UM
-  widget = UM quad de 18 floats) + o 3.º PROGRAMA no Renderer
-  (progSdf_ — o FS kSdfFsSrc replica o app/src/main/cpp/ui/Sdf.h::shade() LINHA A LINHA;
-  as submissões SDF viajam nos runs pelo flag `sdf` e os buffers/VAOs
-  re-afirmam-se POR submissão). **0.12-D (D-3)**: o ramo FOGO-ONLY no FS
-  (o aShape.w=1 — a chama na banda da aresta em MISTURA ADITIVA
-  GL_SRC_ALPHA/GL_ONE; os uniforms uSdfTime/uFire1/uFire3; o run leva o
-  flag blendAdd e o endFrame liga-o à volta do drawArrays) replicando o
-  app/src/main/cpp/ui/Fire.h LINHA A LINHA. **0.12-D (D-2)**:
-  app/src/main/cpp/ui/Glass.h (as fontes puras — o BLUR DUAL KAWASE, a
-  downsample 2×2, a CACHE glassCacheDirty e o hash do ruído) + o
-  captureGlass no Renderer (o glReadPixels com o flip, a redução 1/4, o
-  blur, o upload) + o ramo uSdfTexOn do shader único (o widget de vidro
-  amostra a cena borrada × a tinta glassInk do Theme).
+  Cube/Primitives, Material (+ o PBR-LITE pela FONTE ÚNICA **Pbr.h** — o
+  normal por derivadas, o rough/metal glTF, a névoa exp2 (0 = MORTA), o
+  uAmbientScale; **0.12-Y**), Texture, GpuAssets (+ `impostorTexture`),
+  BlockMesh (por BLOCOS do .gmesh v3), Impostor.h (a decisão PURA),
+  QuadBatch, DrawStats, ThumbPng (PNG via zlib).
+  **0.12-D (DORMENTE desde a 0.12-E)**: D-1 o SdfBatch.h (1 widget = 1
+  quad de 18 floats) + o 3.º PROGRAMA progSdf_ (o FS replica o
+  app/src/main/cpp/ui/Sdf.h LINHA A LINHA; os runs pelo flag `sdf`,
+  os buffers POR submissão) + D-3 o ramo FOGO-ONLY (aShape.w=1, a chama
+  aditiva GL_SRC_ALPHA/GL_ONE, uSdfTime/uFire1/uFire3) replicando o
+  app/src/main/cpp/ui/Fire.h + D-2 o app/src/main/cpp/ui/Glass.h (o
+  KAWASE dual, a cache glassCacheDirty) + o captureGlass (o readPixels
+  com flip, o blur, o upload) + o ramo uSdfTexOn (o vidro amostra a cena
+  × glassInk).
 - **app/src/main/cpp/assets/** — importadores e formatos GL-free:
   GOwnFormats (.gmesh/.gtext/.gm), GmeshV3Stream (o streaming do
-  conversor), GltfImporter/GltfAnim/GltfTextures/GltfInstantiate,
+  conversor), GltfImporter/GltfAnim/GltfTextures/GltfInstantiate (os
+  **5 SLOTS** na PASTA assets/<stem>/textures/ + o bind auto; **0.12-Y**),
   ObjImporter, PngLoader, TexturePipeline/TexturePolicy/TextureCache,
   MipGen, ThumbRender/ThumbIndex, ImpostorIndex (o pico de RAM é UM
   bloco, R-041), AstcCompressor/Etc2Compressor + vendor/.
@@ -167,7 +165,8 @@ Atualizado: 2026-10-19 · vc: 105
   — o apagar só sai CONFIRMADO pelo 2.º toque.
 - **app/src/main/cpp/components/** — os componentes do TIC: MeshRenderer
   (+ `impostorDistance`), CameraComp, Body3D, RigidBody3D, AudioPlayer,
-  ScriptComp, AnimationPlayer, UI*, Input*. **0.12-B (a árvore de UI)**:
+  **Environment** (o WorldEnvironment: o céu é o clear, o HDRI pela MÉDIA
+  CPU, o piso 0.25; **0.12-Y**), ScriptComp, AnimationPlayer, UI*, Input*. **0.12-B (a árvore de UI)**:
   app/src/main/cpp/components/Control.h (a BASE 2D dos elementos de UI —
   pos2D/tamanho/âncoras 9+esticar/margens/pivô/rotação/visível/opacidade;
   o payload por tipo é o UiElement por valor no campo `elem`; os 10 kinds

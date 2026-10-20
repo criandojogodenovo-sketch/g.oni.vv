@@ -595,7 +595,7 @@ TEST(bind2_autobind_5_slots_no_apply_e_troca_de_mesh) {
     mr->texPath = "assets/velha.gtext";       // do mesh anterior
     mr->texNormal = "assets/vestigio.gtext";  // idem
     editor::AssetCatalog cat;
-    cat.meshes = {"assets/m.gmesh", "assets/o.gmesh", "assets/s.gmesh"};
+    cat.meshes = {"assets/m/m.gmesh", "assets/o/o.gmesh", "assets/s/s.gmesh"};
     editor::AssetResolvers res;
     static Texture dummy;
     static Mesh* const kMeshSent = reinterpret_cast<Mesh*>(0x21);
@@ -608,13 +608,13 @@ TEST(bind2_autobind_5_slots_no_apply_e_troca_de_mesh) {
         for (u32 s = 0; s < MeshRenderer::kMeshTexSlots; ++s) {
             out[s].clear();
         }
-        if (ref == "assets/m.gmesh") {
+        if (ref == "assets/m/m.gmesh") {
             out[0] = "assets/m_0.gtext"; out[1] = "assets/m_1.gtext";
             out[2] = "assets/m_2.gtext"; out[3] = "assets/m_3.gtext";
             out[4] = "assets/m_4.gtext";
             return true;
         }
-        if (ref == "assets/o.gmesh") {
+        if (ref == "assets/o/o.gmesh") {
             out[0] = "assets/o_0.gtext"; out[1] = "assets/o_1.gtext";
             return true;
         }
@@ -624,7 +624,7 @@ TEST(bind2_autobind_5_slots_no_apply_e_troca_de_mesh) {
     const editor::AssetPickOutcome o1 =
         editor::applyAssetPick(scene, h, 1, 3, cat, res, 0);
     ASSERT(o1.applied);
-    EXPECT(mr->meshPath == "assets/m.gmesh");
+    EXPECT(mr->meshPath == "assets/m/m.gmesh");
     EXPECT(mr->texPath == "assets/m_0.gtext");   // slot 0 + GL carregado
     EXPECT(mr->texture == &dummy);
     EXPECT(mr->texNormal == "assets/m_1.gtext");
@@ -791,7 +791,7 @@ TEST(multimat_3_materiais_import_seletor_e_slots) {
     EXPECT(nSlots == 5u);  // as 5 linhas de slot continuam 5
     // mesh de 1 material: SEM a linha do seletor (o comportamento de sempre)
     editor::AssetCatalog cat2;
-    cat2.meshes = {"assets/o.gmesh"};
+    cat2.meshes = {"assets/o/o.gmesh"};
     editor::AssetResolvers res2;
     res2.mesh = res.mesh;
     res2.texture = res.texture;
@@ -825,7 +825,7 @@ TEST(multimat_pick_no_material_2_nao_toca_no_0) {
     const Handle h = scene.create("tic");
     MeshRenderer* mr = scene.get(h)->addComponent<MeshRenderer>();
     ASSERT(mr != nullptr);
-    mr->meshPath = "assets/m.gmesh";
+    mr->meshPath = "assets/m/m.gmesh";
     mr->texPath = "assets/m0_0.gtext";
     mr->texNormal = "assets/m0_1.gtext";
     mr->texMetalRough = "assets/m0_2.gtext";
@@ -1012,10 +1012,10 @@ TEST(expand_p0_limite_de_pecas_e_aviso) {
 // num só frame; o progresso done/total avança; o cancelamento LIMPA) ----
 TEST(expand_p0_lote_progresso_e_cancelamento_limpo) {
     Scene scene;
-    // 100 registos COM peça (a ref é a "assets/x.gmesh" — o bindMesh null
+    // 100 registos COM peça (a ref é a "assets/x/x.gmesh" — o bindMesh null
     // do ctx deixa o meshPath, o reload re-liga; o pin conta o lote)
     std::vector<convert::Output::NodeOut> nodes;
-    std::vector<std::string> refs = {"assets/x.gmesh"};
+    std::vector<std::string> refs = {"assets/x/x.gmesh"};
     for (u32 i = 0; i < 100; ++i) {
         convert::Output::NodeOut no;
         no.name = "p" + std::to_string(i);
@@ -1068,7 +1068,7 @@ TEST(expand_p0_lote_progresso_e_cancelamento_limpo) {
     const Tic* t0 = scene2.get(created[0]);
     ASSERT(t0 != nullptr);
     EXPECT(t0->getComponent<MeshRenderer>() != nullptr);
-    EXPECT(t0->getComponent<MeshRenderer>()->meshPath == "assets/x.gmesh");
+    EXPECT(t0->getComponent<MeshRenderer>()->meshPath == "assets/x/x.gmesh");
 }
 
 // ---- a composição de pais no TransformSystem (a dívida do polish paga) -----

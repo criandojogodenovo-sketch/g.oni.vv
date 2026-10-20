@@ -128,6 +128,18 @@ ResourceManager::loadModel(const std::string& path, std::string& err) {
         if (extractGltfTextures(*storage_, *model, meshTex, texErr)) {
             model->meshTexture = std::move(meshTex);
         }
+        // 0.12-Y (3.Y-C): os 5 SLOTS na pasta do modelo (assets/<stem>/
+        // textures/ — a ordem do dono). Falha NÃO invalida o mesh (o
+        // mesmo contrato do baseColor).
+        GltfTexSlots slots;
+        std::string stem = path;
+        const size_t slash = stem.find_last_of('/');
+        if (slash != std::string::npos) stem = stem.substr(slash + 1);
+        const size_t dot = stem.find_last_of('.');
+        if (dot != std::string::npos) stem = stem.substr(0, dot);
+        if (extractGltfTexSlots(*storage_, *model, stem, slots, texErr)) {
+            model->meshTexSlots = std::move(slots.tex);
+        }
     }
 
     const auto res = models_.emplace(path, std::move(model));
@@ -285,6 +297,35 @@ const MeshData* ResourceManager::mesh(const std::string& ref, std::string& err) 
 
     err = "formato de mesh não suportado: ." + ext;
     return nullptr;
+}
+
+// 0.12-Y (3.Y-C): o slot `slot` (0..4, a ordem kBind*) do mesh de `ref`
+// ("meshes/x.glb#0" → assets/<stem>/textures/gltf_<hash>.png; "" = vazio).
+std::string ResourceManager::meshTexSlotFor(const std::string& ref,
+                                            int slot) const {
+    if (slot < 0 || slot >= static_cast<int>(kBindSlotCount)) {
+        return {};
+    }
+    std::string path;
+    i32 sub = -1;
+    splitSubRef(ref, path, sub);
+    const auto it = models_.find(path);
+    if (it == models_.end()) {
+        return {};
+    }
+    const GltfModel& m = *it->second;
+    if (sub < 0) {
+        sub = m.meshes.size() == 1 ? 0 : -1;   // mesma regra do mesh()
+    }
+    if (sub < 0 || sub >= static_cast<i32>(m.meshes.size())) {
+        return {};
+    }
+    const size_t idx = static_cast<size_t>(sub) * kBindSlotCount +
+                       static_cast<size_t>(slot);
+    if (idx >= m.meshTexSlots.size()) {
+        return {};
+    }
+    return m.meshTexSlots[idx];
 }
 
 std::string ResourceManager::meshTextureFor(const std::string& ref) const {

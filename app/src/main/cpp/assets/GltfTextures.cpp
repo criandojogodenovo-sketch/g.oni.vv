@@ -1,4 +1,11 @@
 // assets/GltfTextures.cpp — extração/dedup de texturas embutidas (F5.1-B).
+// 0.12-Y (3.Y-C): os 5 SLOTS do material glTF (baseColor/normal/
+// metalRough/emissive/occlusion — o parse já lia os índices, a extração
+// só levava o baseColor) + a PASTA POR MODELO: os ficheiros vão para
+// assets/<stem>/textures/ (a ordem do dono: «cria a pasta
+// assets/NomeDoModelo/ e coloca lá o .gmesh e uma subpasta textures/»;
+// os imports antigos na raiz textures/ continuam a carregar — os
+// rel-paths guardados nos .goni ficam intactos).
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -77,6 +84,88 @@ bool extractGltfTextures(ProjectStorage& st, const GltfModel& model,
         }
         dedup.emplace(hash, rel);
         outMeshTex[m] = rel;
+    }
+    return true;
+}
+
+// ---- 0.12-Y (3.Y-C): OS 5 SLOTS + A PASTA DO MODELO ------------------------
+// A mesma dedup FNV-1a, mas (a) TODOS os slots do material (o parse já
+// lia os 5 índices — GltfMaterial::baseColorTex/normalTex/metalRoughTex/
+// emissiveTex/occlusionTex) e (b) os ficheiros em
+// assets/<stem>/textures/ (a ordem do dono). `outSlots` fica
+// model.meshes.size() × 5 ("" = o slot vazio — o mesmo contrato do
+// outMeshTex). O modelo SEM nome usa "modelo" (a pasta nunca é a raiz).
+bool extractGltfTexSlots(ProjectStorage& st, const GltfModel& model,
+                         const std::string& modelStem,
+                         GltfTexSlots& outSlots, std::string& err) {
+    err.clear();
+    outSlots.meshes = model.meshes.size();
+    outSlots.tex.assign(outSlots.meshes * kBindSlotCount,
+                        std::string());
+    const std::string dir =
+        std::string("assets/") +
+        (modelStem.empty() ? std::string("modelo") : modelStem) +
+        "/textures";
+    // dedup GLOBAL ao modelo: 1 ficheiro por textura única (o hash é do
+    // BYTES — o mesmo contrato do extractGltfTextures)
+    std::unordered_map<u64, std::string> dedup;
+    for (size_t m = 0; m < model.meshes.size(); ++m) {
+        const i32 matIdx =
+            m < model.meshMaterial.size() ? model.meshMaterial[m] : -1;
+        if (matIdx < 0 ||
+            matIdx >= static_cast<i32>(model.materials.size())) {
+            continue;
+        }
+        const GltfMaterial& mat = model.materials[static_cast<size_t>(matIdx)];
+        const i32 slots[5] = {mat.baseColorTex, mat.normalTex,
+                              mat.metalRoughTex, mat.emissiveTex,
+                              mat.occlusionTex};
+        for (int s = 0; s < 5; ++s) {
+            const i32 imgIdx = slots[s];
+            if (imgIdx < 0 ||
+                imgIdx >= static_cast<i32>(model.images.size())) {
+                continue;
+            }
+            const GltfImage& img = model.images[static_cast<size_t>(imgIdx)];
+            if (img.bytes.empty()) {
+                // externa (uri relativo seguro) → pass-through APONTANDO a
+                // pasta do modelo (o uri fica RELATIVO ao .gltf original;
+                // copiar o ficheiro é do chamador — o contrato da F5)
+                if (!img.uriPath.empty() && validRelPath(img.uriPath)) {
+                    outSlots.tex[m * 5 + static_cast<size_t>(s)] = img.uriPath;
+                }
+                continue;
+            }
+            if (img.mime != "image/png") {
+                continue;   // jpeg/fora do escopo — sem textura, sem falha
+            }
+            RawImage probe;
+            std::string perr;
+            if (!loadPng(img.bytes.data(), img.bytes.size(), probe, perr)) {
+                err = "glTF: textura embutida inválida: " + perr;
+                continue;
+            }
+            const u64 hash =
+                TextureCache::hashBytes(img.bytes.data(), img.bytes.size());
+            const auto it = dedup.find(hash);
+            if (it != dedup.end()) {
+                outSlots.tex[m * 5 + static_cast<size_t>(s)] = it->second;
+                continue;
+            }
+            char nm[64];
+            std::snprintf(nm, sizeof(nm), "gltf_%016llx.png",
+                          static_cast<unsigned long long>(hash));
+            const std::string rel = dir + "/" + nm;
+            if (!st.exists(rel)) {
+                if (!st.makeDirs(dir) ||
+                    !st.writeBytes(rel, img.bytes.data(), img.bytes.size())) {
+                    err = "glTF: falha ao escrever " + rel;
+                    continue;
+                }
+            }
+            dedup.emplace(hash, rel);
+            outSlots.tex[m * 5 + static_cast<size_t>(s)] = rel;
+        }
     }
     return true;
 }

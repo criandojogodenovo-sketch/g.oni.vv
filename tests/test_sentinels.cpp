@@ -8202,3 +8202,137 @@ TEST(regress_pan) {
                    (double)cam.yaw);
     }
 }
+
+// ---- R-060 — O PBR-LITE E O WORLDENVIRONMENT NÃO MORREM (0.12-Y C) ----------
+// A ordem do dono: o glTF lê Albedo/Normal/Roughness/Metallic, cria a pasta
+// assets/NomeDoModelo/ com o .gmesh + textures/, liga os slots sozinho e o
+// preset novo «WorldEnvironment» carrega um HDRI (mapa 360) que ilumina a
+// cena e define a cor do céu/névoa. A classe vigiada: a FÓRMULA PBR fora da
+// fonte única (o shader e os pins divergem às escondidas), a NÉVOA a vazar
+// para o lit de sempre (density 0 tem de ser MORTA — byte a byte), o HDRI
+// escuro a APAGAR a cena (o piso do ambient), o .goni a PERDER o
+// WorldEnvironment no roundtrip e a ORDEM dos slots a regredir.
+#include "render/Pbr.h"                  // 0.12-Y (R-060): a fonte única
+#include "components/Environment.h"      // 0.12-Y (R-060): o WorldEnvironment
+#include "assets/GltfTextures.h"         // 0.12-Y (R-060): os 5 slots
+#include "assets/GltfImporter.h"
+#include "core/Presets.h"                // 0.12-Y (R-060): o preset novo
+TEST(regress_pbr_worldenv) {
+    using namespace vv;
+    // (1) A FONTE ÚNICA (render/Pbr.h): a névoa exp2 com density 0 é MORTA
+    // (o lit de sempre byte a byte) e a curva d·ρ=1 → 1−e⁻¹ ≈ 0.632
+    {
+        EXPECT_MSG(pbr::fogFactorExp2(100.0f, 0.0f) == 0.0f,
+                   "R-060: a névoa com density 0 tem de estar MORTA (o lit "
+                   "de sempre) — f=%.4f",
+                   (double)pbr::fogFactorExp2(100.0f, 0.0f));
+        EXPECT_MSG(nearEqF(pbr::fogFactorExp2(1.0f, 1.0f), 0.6321f, 1e-3f),
+                   "R-060: a curva exp2 mudou (d·ρ=1 → 0.6321)");
+        // o shininess aferrado: rough 0 = 256 (quase-espelho), rough 1 = 4
+        EXPECT_MSG(nearEqF(pbr::roughToShininess(0.0f), 256.0f, 0.01f) &&
+                       nearEqF(pbr::roughToShininess(1.0f), 4.0f, 0.01f),
+                   "R-060: o expoente do especular saiu dos limites "
+                   "[4..256] da fonte única");
+        // o mix metálico: o metal NÃO TEM difusa cheia (1.0 → 0.15)
+        EXPECT_MSG(nearEqF(pbr::metallicDiffuseScale(1.0f), 0.15f, 1e-6f),
+                   "R-060: o metal perdeu o mix da difusa (o look plástico "
+                   "voltou)");
+    }
+    // (2) O AMBIENT DO HDRI (components/Environment.h): o HDRI escuro
+    // NUNCA apaga a cena (o piso 0.25) e o claro respeita o teto 4
+    {
+        const f32 escuro[3] = {0.0f, 0.0f, 0.0f};
+        const f32 claro[3] = {1.0f, 1.0f, 1.0f};
+        EXPECT_MSG(nearEqF(ambientFromAvg(escuro), 0.25f, 1e-6f),
+                   "R-060: o HDRI escuro tem de respeitar o PISO 0.25 do "
+                   "ambient (a cena nunca fica negra)");
+        EXPECT_MSG(ambientFromAvg(claro) == 4.0f,
+                   "R-060: o teto do ambient é 4.0");
+    }
+    // (3) O ROUNDTRIP (.goni): o WorldEnvironment sobrevive ao dump/load
+    // — o serializer novo não pode perder NENHUM campo
+    {
+        Scene a;
+        const Handle h = a.create("WorldEnvironment");
+        a.get(h)->addComponent<Transform3D>();
+        Environment* e = a.get(h)->addComponent<Environment>();
+        e->skyColor[0] = 0.30f;
+        e->skyColor[2] = 0.60f;
+        e->fogColor[1] = 0.40f;
+        e->fogDensity = 0.08f;
+        e->ambient = 1.75f;
+        e->hdriPath = "assets/hdri/atardecer.png";
+        e->clampFields();
+        const std::string dump = SceneSerializer::dump(a);
+        EXPECT_MSG(dump.find("\"Environment\"") != std::string::npos,
+                   "R-060: o .goni PERDEU o componente Environment");
+        EXPECT_MSG(dump.find("atardecer.png") != std::string::npos,
+                   "R-060: o .goni PERDEU o HDRI (o mapa 360)");
+        Scene b;
+        SceneSerializer::LoadCtx ctx;
+        ASSERT(SceneSerializer::loadText(b, dump, ctx));
+        const Handle hf = b.find("WorldEnvironment");
+        ASSERT(hf.valid());
+        const Environment* e2 = b.get(hf)->getComponent<Environment>();
+        ASSERT(e2 != nullptr);
+        EXPECT_MSG(nearEqF(e2->fogDensity, 0.08f, 1e-6f) &&
+                       nearEqF(e2->ambient, 1.75f, 1e-6f) &&
+                       nearEqF(e2->skyColor[2], 0.60f, 1e-5f) &&
+                       e2->hdriPath == "assets/hdri/atardecer.png",
+                   "R-060: o roundtrip do Environment perdeu campos "
+                   "(density %.4f ambient %.4f sky.b %.4f hdri '%s')",
+                   (double)e2->fogDensity, (double)e2->ambient,
+                   (double)e2->skyColor[2], e2->hdriPath.c_str());
+    }
+    // (4) O PRESET (a porta do «+»): o nome e a ESTRUTURA (Transform +
+    // Environment — SEM mesh, SEM física)
+    {
+        EXPECT_MSG(std::string(presetName(PresetKind::WorldEnvironment)) ==
+                       "WorldEnvironment",
+                   "R-060: o preset WorldEnvironment saiu do menu (+)");
+        EXPECT_MSG(static_cast<u32>(PresetKind::Count) == 7,
+                   "R-060: a contagem de presets regressou (7 com o "
+                   "WorldEnvironment)");
+        Scene s;
+        const Handle hp =
+            createTicFromPreset(s, PresetKind::WorldEnvironment, nullptr,
+                                nullptr);
+        ASSERT(hp.valid());
+        const Tic* t = s.get(hp);
+        ASSERT(t != nullptr);
+        EXPECT_MSG(t->getComponent<Environment>() != nullptr &&
+                       t->getComponent<MeshRenderer>() == nullptr,
+                   "R-060: o preset WorldEnvironment tem de ser ESTRUTURA "
+                   "(Transform+Environment, SEM mesh)");
+    }
+    // (5) A EXTRAÇÃO dos 5 slots: o tamanho é meshes×5 (a ordem kBind*) e
+    // a textura EXTERNA (uri) passa no slot certo
+    {
+        GltfModel model;
+        MeshData mesh;
+        model.meshes.push_back(mesh);
+        model.meshes.push_back(mesh);
+        model.meshMaterial.push_back(0);
+        model.meshMaterial.push_back(-1);   // o mesh 1 SEM material
+        GltfMaterial m0;
+        m0.normalTex = 0;   // SÓ o normal (o slot 1) — prova a ORDEM
+        model.materials.push_back(m0);
+        GltfImage img;      // externa (sem bytes): o uri passa-through
+        img.uriPath = "texturas/parede_n.png";
+        model.images.push_back(img);
+        FakeStorage st;
+        GltfTexSlots slots;
+        std::string err;
+        EXPECT(extractGltfTexSlots(st, model, "cidade", slots, err));
+        EXPECT_MSG(slots.tex.size() == 10u,
+                   "R-060: os slots têm de ser meshes×5 (10) — são %zu",
+                   slots.tex.size());
+        EXPECT_MSG(slots.tex[1] == "texturas/parede_n.png" &&
+                       slots.tex[0].empty() && slots.tex[2].empty(),
+                   "R-060: o slot 1 (normal) perdeu a ordem kBind* "
+                   "(tex[0]='%s' tex[1]='%s')", slots.tex[0].c_str(),
+                   slots.tex[1].c_str());
+        EXPECT_MSG(slots.tex[5].empty() && slots.tex[9].empty(),
+                   "R-060: o mesh SEM material não pode herdar slots");
+    }
+}

@@ -1,5 +1,6 @@
 #include "core/Presets.h"
 #include "components/AudioPlayer.h"
+#include "components/Environment.h"
 #include "components/BodyComp.h"
 #include "components/InputMap.h"
 #include "components/MeshRenderer.h"
@@ -18,6 +19,8 @@ const char* presetName(PresetKind kind) {
         case PresetKind::RigidBody3D:     return "RigidBody3D";
         case PresetKind::Mesh:            return "Mesh";   // 0.8.0 (F7)
         case PresetKind::Audio:           return "Audio";  // 0.8.11
+        case PresetKind::WorldEnvironment:
+            return "WorldEnvironment";   // 0.12-Y (3.Y-C)
         default:                          return "Tic";
     }
 }
@@ -69,6 +72,17 @@ Handle createTicFromPreset(Scene& scene, PresetKind kind,
     // clip atribui-se no Inspector; autoplay/loop/volume/pitch idem)
     if (kind == PresetKind::Audio) {
         tic->addComponent<AudioPlayer>();
+        return h;
+    }
+
+    // 0.12-Y (3.Y-C): o preset WORLDENVIRONMENT é ESTRUTURA — Transform +
+    // Environment (o céu/névoa/HDRI da cena; o 1.º ATIVO manda; SEM mesh,
+    // SEM física). O TIC fica na origem (o "sítio" não importa — é um
+    // singleton lógico da cena, como a câmara).
+    if (kind == PresetKind::WorldEnvironment) {
+        tr->pos = Vec3{0.0f, 0.0f, 0.0f};
+        tr->updateWorld();
+        tic->addComponent<Environment>();
         return h;
     }
 

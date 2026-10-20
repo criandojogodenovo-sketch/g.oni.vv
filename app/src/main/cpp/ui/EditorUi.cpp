@@ -3005,7 +3005,8 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     // 0.8.11: o 7º é o TIC "Audio" (Transform+AudioPlayer; o clip atribui-se
     // no Inspector/seletor — a ESTRUTURA primeiro, o som depois).
     const bool uiMode = st.uiMode;
-    const int kItems = uiMode ? 10 : 7;   // 0.7.7: Camera; 0.8.0: Mesh; 0.8.11: Audio
+    // 0.12-Y (3.Y-C): o 8.º preset do 3D é o TIC "WorldEnvironment"
+    const int kItems = uiMode ? 10 : 8;   // 0.7.7: Camera; 0.8.0: Mesh; 0.8.11: Audio; 0.12-Y: WorldEnvironment
     // PASSO 1 (0.9.6.14): as linhas do menu são alvos de 40dp (a LEI DE
     // OURO — eram 56 num passo de 64; nada ≥48 no editor)
     const f32 rowH = 40.0f;
@@ -3041,8 +3042,9 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     // nasce A ativa — o main chama setOnlyActiveCamera)
     // 0.8.0 (F7): o 6º é o TIC "Mesh" (esfera procedural, SEM física)
     // 0.8.11: o 7º é o TIC "Audio" (Transform+AudioPlayer, SEM mesh)
-    const char* names[7] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
-                            "RigidBody3D", "Camera", "Mesh", "Audio"};
+    const char* names[8] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
+                            "RigidBody3D", "Camera", "Mesh", "Audio",
+                            "WorldEnvironment"};
     // 0.7.4: + VBox/HBox (containers de layout — filhos automáticos)
     const char* elems[10] = {"Panel", "Label", "Button", "Image",
                              "Menu", "Card", "Article", "Joystick",

@@ -10,6 +10,7 @@
 #include "components/CameraComp.h"   // 0.7.7: câmara de cena
 #include "components/AnimationPlayer.h"   // 0.8.0: animação (F7)
 #include "components/AudioPlayer.h"      // 0.8.11: áudio
+#include "components/Environment.h"     // 0.12-Y: WorldEnvironment
 #include "components/SkeletonComp.h"  // 0.8.2: esqueleto (F7)
 #include "core/CameraUtil.h"          // 0.7.7: uma ativa por cena
 #include "core/ComponentStore.h"
@@ -1232,6 +1233,77 @@ void appendComponentJson(Json& arr, const AudioPlayer* au) {
     arr.addItem(std::move(c));
 }
 
+// 0.12-Y (3.Y-C) — Environment: sky/fog/density/ambient/hdri/active.
+// Defaults omitidos (o lit de sempre: névoa morta, ambient 1, sem HDRI).
+void appendComponentJson(Json& arr, const Environment* env) {
+    if (!env) {
+        return;
+    }
+    Json c = Json::makeObject();
+    c.addMember("type", Json::makeString("Environment"));
+    auto putCol = [&](const char* key, const f32 v[4]) {
+        Json a = Json::makeArray();
+        for (int i = 0; i < 3; ++i) {
+            a.addItem(Json::makeNumber(v[i]));
+        }
+        c.addMember(key, std::move(a));
+    };
+    putCol("sky", env->skyColor);
+    putCol("fog", env->fogColor);
+    if (env->fogDensity != 0.0f) {
+        c.addMember("fogDensity", Json::makeNumber(env->fogDensity));
+    }
+    if (env->ambient != 1.0f) {
+        c.addMember("ambient", Json::makeNumber(env->ambient));
+    }
+    if (!env->hdriPath.empty()) {
+        c.addMember("hdri", Json::makeString(env->hdriPath));
+    }
+    if (!env->active) {
+        c.addMember("active", Json::makeNumber(0));
+    }
+    arr.addItem(std::move(c));
+}
+
+// 0.12-Y (3.Y-C): reconstrói o Environment (defaults ausentes = o
+// componente — forward-compat como o resto do serializer).
+void fillEnvironment(Environment* env, const Json& comp) {
+    if (!env) {
+        return;
+    }
+    auto readCol = [&comp](const char* key, f32 out[4]) {
+        const Json* j = comp.find(key);
+        if (j && j->type == Json::Type::Array && j->items.size() >= 3) {
+            for (int i = 0; i < 3; ++i) {
+                if (j->items[static_cast<size_t>(i)].type ==
+                    Json::Type::Number) {
+                    out[i] = static_cast<f32>(
+                        j->items[static_cast<size_t>(i)].number);
+                }
+            }
+        }
+    };
+    readCol("sky", env->skyColor);
+    readCol("fog", env->fogColor);
+    if (const Json* j = comp.find("fogDensity");
+        j && j->type == Json::Type::Number) {
+        env->fogDensity = static_cast<f32>(j->number);
+    }
+    if (const Json* j = comp.find("ambient");
+        j && j->type == Json::Type::Number) {
+        env->ambient = static_cast<f32>(j->number);
+    }
+    if (const Json* j = comp.find("hdri");
+        j && j->type == Json::Type::String) {
+        env->hdriPath = j->string;
+    }
+    if (const Json* j = comp.find("active");
+        j && j->type == Json::Type::Number) {
+        env->active = j->number != 0.0;
+    }
+    env->clampFields();
+}
+
 void appendComponentJson(Json& arr, const AnimationPlayer* ap) {
     if (!ap) {
         return;
@@ -1359,6 +1431,8 @@ std::string dump(const Scene& scene) {
         appendComponentJson(comps, cs.animators().find(t.handle));     // 0.8.0
         appendComponentJson(comps, cs.skeletons().find(t.handle));      // 0.8.2
         appendComponentJson(comps, cs.audioPlayers().find(t.handle));   // 0.8.11
+        appendComponentJson(comps, cs.environments().find(t.handle));   // 0.12-Y
+        // BISECT-2: env dump off
         appendComponentJson(comps, cs.scripts().find(t.handle));       // 0.9.2
         appendComponentJson(comps, cs.controls().find(t.handle));      // 0.12-B
         appendComponentJson(comps, cs.uiRoots().find(t.handle));       // 0.12-B
@@ -1548,6 +1622,10 @@ bool loadText(Scene& scene, const std::string& text, const LoadCtx& ctx) {
                 fillSkeleton(store.get<SkeletonComp>(h), jc);   // 0.8.2
             } else if (jt2->string == "AudioPlayer") {
                 fillAudioPlayer(store.get<AudioPlayer>(h), jc);   // 0.8.11
+            } else if (jt2->string == "Environment") {
+                fillEnvironment(store.get<Environment>(h), jc);   // 0.12-Y
+            } else if (jt2->string == "Environment") {
+                fillEnvironment(store.get<Environment>(h), jc);   // 0.12-Y
             } else if (jt2->string == "Script") {
                 fillScriptComp(store.get<ScriptComp>(h), jc);   // 0.9.2
             }
