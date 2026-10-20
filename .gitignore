@@ -53,3 +53,4 @@ build-dbg/
 /layout-harness-*.txt
 /passo4-*.png
 /y-*.png
+tests/build-obj/
