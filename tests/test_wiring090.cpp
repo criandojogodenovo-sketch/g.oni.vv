@@ -826,7 +826,7 @@ TEST(hierarquia_long_press_nome_truncado_g27) {
     e.frame();
     // a zona do nome da 1ª linha (painel 300: ícone 16+24+8 … olho a 212)
     const f32 nameX = 16.0f + 24.0f + 8.0f + 8.0f;
-    const f32 rowY = 36.0f + 28.0f + 32.0f + 18.0f;   // PASSO 1: chrome+header+pesq/2 (linha 36)
+    const f32 rowY = 40.0f + 28.0f + 32.0f + 20.0f;   // FASE UI: barra 40 + header + pesq/2 (linha 40)
     // dedo PARADO 29 frames: ainda NADA (o limiar é 30 = ~0,5s)
     e.input.injectDown(0, nameX + 40.0f, rowY);
     for (int i = 0; i < 29; ++i) {

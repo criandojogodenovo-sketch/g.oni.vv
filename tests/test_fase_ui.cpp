@@ -170,6 +170,26 @@ TEST(ui_topbar_40dp_composicao) {
                "ui_topbar_40dp: a linha da plataforma vive nas Definições");
 }
 
+// ---- PIN ui_hierarquia_40dp — AS LINHAS DO DONO (a parte C) ----------------
+TEST(ui_hierarquia_40dp) {
+    // (a) a LINHA: 40dp na fonte (o extern que o draw e o hit partilham)
+    EXPECT(test::nearEqF(editor::kRowH, theme::dp(40.0f), 1e-4f));
+    // (b) A FONTE: o olho/⋮ desenha SÓ na selecionada (o gate `if
+    // (selected)`) e o hit-test gated por `controlsRow`; a indentação lê
+    // a escala do dono (kSpace3=16 — o 24 literal morreu)
+    std::string src;
+    ASSERT(readFile(repoRoot() + "/app/src/main/cpp/ui/EditorUi.cpp", src));
+    EXPECT_MSG(countSub(src, "if (selected) {") >= 1 &&
+                   countSub(src, "controlsRow &&") >= 2,
+               "ui_hierarquia_40dp: o olho/⋮ é SÓ da linha selecionada "
+               "(draw gated + hit gated)");
+    EXPECT_MSG(countSub(src, "theme::dp(theme::kSpace3)") >= 2,
+               "ui_hierarquia_40dp: a indentação lê a escala do dono");
+    // (c) o NOME completo nas linhas não selecionadas (o budget largura
+    // toda — a reticência só quando não couber)
+    EXPECT(countSub(src, "(x + w - theme::dp(12.0f) - nameX)") == 1);
+}
+
 // ---- PIN ui_sobreposicao_topbar — A BARRA NÃO TAPA NADA NEM SAI ----------
 // 3 resoluções × 2 orientações (a regra da fase). Os alvos vêm da FONTE
 // ÚNICA topbarLayout — o MESMO desenho que a app faz.

@@ -3789,9 +3789,9 @@ int main() {
         check(status.h == 0.0f,
               "12.10 a status line tem altura ZERO (REMOVIDA no PASSO 1 — "
               "o FPS·TICs vive na tab bar de baixo)");
-        check(editor::kRowH == 72.0f && editor::kPad == 32.0f,
-              "12.10 as linhas/paddings dos painéis duplicam (36dp/16dp "
-              "reais — PASSO 1; applyDensity)");
+        check(editor::kRowH == 80.0f && editor::kPad == 32.0f,
+              "12.10 as linhas/paddings dos painéis duplicam (40dp/16dp "
+              "reais — FASE UI C; applyDensity)");
         check(safe::kTopBarH == 40.0f && theme::dp(safe::kTopBarH) == 80.0f,
               "12.10 o dp() da casa multiplica pela densidade corrente");
         // (b) 0.9.6.8 (GRUPO E · RECALIBRADO): o teclado da engine SAIU —
@@ -3813,9 +3813,9 @@ int main() {
         theme::setDensity(1.0f);
         editor::applyDensity();
         const UiRect bar1 = safe::toolbarRect(1536.0f, 720.0f, zero);
-        check(bar1.h == 40.0f && editor::kRowH == 36.0f,
+        check(bar1.h == 40.0f && editor::kRowH == 40.0f,
               "12.10 com densidade 1.0 o layout é EXATAMENTE o da spec "
-              "(FASE UI B: barra 40, linhas 36 — os testes não mudam)");
+              "(FASE UI B/C: barra 40, linhas 40 — os testes não mudam)");
     }
 
     // ---- 12.11 (0.9.6.2 · R-019): O TOQUE MOVE O CURSOR ---------------------
@@ -4725,10 +4725,9 @@ int main() {
                     // saiu — os alvos do chrome são N−2 (9), o gizmoBtn
                     // ZERO fica no array e o check de 40dp tem de o
                     // ignorar (rect zero = escondido)
-                    const UiRect all[10] = {
+                    const UiRect all[7] = {
                         L.rail[0], L.rail[1], L.rail[2], L.rail[3],
-                        L.rail[4], L.quick[0], L.quick[1], L.quick[2],
-                        L.quick[3], L.gizmoBtn};
+                        L.rail[4], L.quick[0], L.gizmoBtn};
                     for (const UiRect& r : all) {
                         // 0.12-C (C-1): a hierarquia 20% estreita o centro —
                         // com seleção no device a fila do topo já não cabe

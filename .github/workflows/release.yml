@@ -116,8 +116,15 @@ jobs:
         # -j2 fix for infra OOM; revert to --parallel when pool stable
         run: cmake --build build-tests --target test_core --parallel 2
 
-      - name: Executar suíte do core
-        run: ctest --test-dir build-tests --output-on-failure -R "^core$"
+      # FASE UI (o diagnóstico do bad_alloc do B): o ctest SUPRIME a saída
+      # viva e o abort mata a prova — o passo corre o binário DIRETO com a
+      # saída ao vivo no log (o último teste impresso É o suspeito) antes
+      # do gate ctest de sempre. O binário corre 2× no job (o custo é o
+      # dobro do passo; o gate continua a ser o ctest).
+      - name: Executar suíte do core (saída ao vivo — diagnóstico)
+        run: |
+          stdbuf -o0 -e0 ./build-tests/test_core | tee core-live.log
+          ctest --test-dir build-tests --output-on-failure -R "^core$"
 
       # 0.11-T (FASE 3.5a · §4.1 do relatório) — DIAGNÓSTICO TEMPORÁRIO da
       # corrida latente do corte paralelo do streaming (o SIGSEGV no

@@ -1,10 +1,10 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-21 · vc: 112 · Último commit: este (a FASE UI B — a
-barra de topo 40dp com a direita nova: undo/redo/guardar subiram do
-viewport + play/stop/gear; o Pause na PLAY BAR com o mundo congelado; o
-«Android» nas Definições; o apanho do CI da A curado — a sonda 35.2 lê a
-brasa e nasce o scripts/build_c33.py; ui_topbar_40dp_composicao)
+Atualizado: 2026-10-21 · vc: 113 · Último commit: este (a FASE UI C — a
+hierarquia com as linhas 40dp do dono, o olho e o ⋮ SÓ na linha
+selecionada (draw gated + hit gated), o nome de largura inteira nas não
+selecionadas e a indentação pela escala (16); ui_hierarquia_40dp +
+M-UIc)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -13,7 +13,7 @@ brasa e nasce o scripts/build_c33.py; ui_topbar_40dp_composicao)
 ## §1 Onde estamos
 
 - **Campanha FASE UI (O REDESIGN VISUAL, envios 1/5 + 2/5) — EM CURSO
-  (A e B fechadas, vc 112; C/D/E a seguir)** (a cláusula calma: SÓ visual,
+  (A, B e C fechadas, vc 113; D/E a seguir)** (a cláusula calma: SÓ visual,
   layout e UX — core/V.ONI/importadores/física/.gmesh intocados; um
   commit por parte, CI verde entre elas; a história vive no
   RELATORIO-FASE-UI.md).
@@ -34,6 +34,13 @@ brasa e nasce o scripts/build_c33.py; ui_topbar_40dp_composicao)
   11 sondas stale recalibradas (os pickers a mirrar o overlayArea); pin
   ui_topbar_40dp_composicao + M-UIb; test_core 0 falhas + c33 1009/0
   local.
+  **C (vc 113)**: A HIERARQUIA — as linhas 40dp (kRowH na fonte única), o
+  OLHO e o ⋮ SÓ na linha selecionada (o draw gated `if (selected)` + o
+  hit gated `controlsRow` — a MESMA condição; nas outras linhas a zona é
+  corpo), o nome de largura inteira nas não selecionadas (a reticência só
+  quando não couber) e a indentação pela escala do dono (kSpace3 16); pin
+  ui_hierarquia_40dp + M-UIc; 6 recalibrações com nota; test_core 0
+  falhas + c33 1009/0 local.
 - **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A, B, C, o
   C-FIX e o D fechadas, vc 110; o FECHO a seguir)** (a cláusula calma: SÓ o
   prompt; a V.ONI intocada; a história vive no RELATORIO-0.12-Y-ABERTURA.md
@@ -77,12 +84,8 @@ brasa e nasce o scripts/build_c33.py; ui_topbar_40dp_composicao)
   pins ×14 + R-055 + M-3.9x1/x2; a história vive no
   RELATORIO-0.12-X-ABERTURA.md e no RELATORIO-0.12-X-CAMRIG.md).
 - **Campanha 0.12-U (V.ONI BLOCO A — a REDUÇÃO DE TRABALHO) — FECHADA (3.9a..3.9c + o FECHO, vc 98–100)** (as 7 features no registo — o View P universal, as 14 Funções, o spawn pela porta do Host, os relógios every/after/when com o estado por nó AST; 64 entradas; pins ×37 + R-052/R-053/R-054 + M-3.9a1..c3; o platformer do juiz final VERDE; a história nos RELATORIO-0.12-U-*.md).
-- **Campanha 0.12-E (EMERGÊNCIA + REDESIGN 2.5D, FOGO AVERMELHADO) — FECHADA (E-1..E-3, vc 95–97)** (a ordem do dono abortou o SDF 3D; ZERO matemática 3D, ZERO FontAtlas, TICs intocados; E-1 o desenho simples de volta, E-2 a paleta EXATA no Theme.h, E-3 o vidro α0.85 + a sombra + o gradiente fogo + o Noise2D.h; pins ×4 + M-E3a/b; os DETALHES no RELATORIO-0.12-E.md).
-- **Campanha 0.12-D (identidade visual) — PARCIALMENTE ABORTADA PELO
-  DONO (a 0.12-E)**: o D-4 (o LOGO, vc 94) SOBREVIVE; o D-1 (SDF), o
-  D-2 (vidro) e o D-3 (fogo) estão DORMENTES (zero chamadores — vc
-  91-93); D-5..D-8 CANCELADOS. A história vive no
-  RELATORIO-0.12-D.md §1..4.
+- **Campanha 0.12-E (EMERGÊNCIA + REDESIGN 2.5D) — FECHADA (E-1..E-3, vc 95–97)** (o SDF 3D abortado; E-1 o desenho simples, E-2 a paleta no Theme.h — superada pela FASE UI A —, E-3 os efeitos 2.5D; no RELATORIO-0.12-E.md).
+- **Campanha 0.12-D (identidade visual) — PARCIALMENTE ABORTADA (a 0.12-E)**: o D-4 (o LOGO) sobrevive; o D-1/D-2/D-3 DORMENTES; D-5..D-8 CANCELADOS (no RELATORIO-0.12-D.md).
 - **Campanha 0.12-C (layout, organização e consistência) — FECHADA
   (C-1..C-4, vc 87–90)** (os DETALHES no RELATORIO-0.12-C.md): C-1 as
   proporções (a hierarquia 20%, o viewport ≥60%), C-2 os menus e a

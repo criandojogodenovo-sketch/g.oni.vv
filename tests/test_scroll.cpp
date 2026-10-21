@@ -4,6 +4,7 @@
 // geometria do indicador e ATINGIBILIDADE do conteúdo dos painéis
 // (ui/EditorLayout.h — Inspector com BodyComp/add TouchControls no fundo,
 // Hierarchy com >10 TICs).
+#include <cstdio>
 #include "TestFramework.h"
 #include "ui/ScrollMath.h"
 #include "ui/EditorLayout.h"
@@ -194,7 +195,8 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     // linhas de SLOT (36 dp cada) — 1054 → 1234
     // 0.12-QoL A: as 3 linhas Transform 64 → 68 (a folga do dono) —
     // 1234 → 1246
-    EXPECT(nearEqF(contentH, 1246.0f));
+    // FASE UI C: o piso 40 — 1246 → 1322 (19 linhas de piso × +4dp)
+    EXPECT(nearEqF(contentH, 1322.0f));
 
     // cursor Y PARTILHADO: linhas sequenciais (y estritamente crescente, sem
     // reinício por secção), todas dentro do conteúdo, e o fundo do plano =
@@ -241,7 +243,7 @@ TEST(scroll_inspector_conteudo_e_botao_fundo_atingivel) {
     // 1048 → 1228; 0.12-QoL A: as 3 linhas Transform 64 → 68 —
     // 1228 → 1240
     EXPECT(nearEqF(inspectorContentHeight(inspectorProfile(*tic), m, false, 0u),
-                   1240.0f));
+                   1320.0f));   // FASE UI C: o piso 40 (1240 + 20×4)
 }
 
 TEST(scroll_hierarquia_todos_os_tics_atingeis) {
@@ -252,11 +254,11 @@ TEST(scroll_hierarquia_todos_os_tics_atingeis) {
     EXPECT(s.count() == 14u);
 
     const f32 contentH = hierarchyContentHeight(14);
-    EXPECT(nearEqF(contentH, 504.0f));   // PASSO 1: 14 × 36 (a linha da spec)
+    EXPECT(nearEqF(contentH, 560.0f));   // FASE UI C: 14 × 40 (a linha do dono)
 
     const f32 listTop = 164.0f;   // PASSO 1: y=104 + cabeçalho 28 + pesquisa 32
     const f32 listH = 400.0f;     // teórico (scroll math pura) — FORÇA o
-                                  // scroll: 14×36 = 504 caberia em 540 sem ele
+                                  // scroll: 14×40 = 560 não cabe em 400
 
     // sem scroll a linha 13 (a 14.ª) fica cortada — o comportamento antigo
     const f32 row13_0 = listTop + 13.0f * kRowH;
@@ -264,7 +266,7 @@ TEST(scroll_hierarquia_todos_os_tics_atingeis) {
 
     // com o scroll no máximo TODAS as linhas cabem na região, incluindo a 13
     const f32 off = clampOffset(999.0f, contentH, listH);
-    EXPECT(nearEqF(off, 104.0f));   // 504 − 400
+    EXPECT(nearEqF(off, 160.0f));   // 560 − 400
     const f32 row13 = listTop + 13.0f * kRowH - off;
     EXPECT(row13 >= listTop);
     EXPECT(row13 + kRowH <= listTop + listH);
@@ -272,7 +274,7 @@ TEST(scroll_hierarquia_todos_os_tics_atingeis) {
 
 TEST(scroll_hierarquia_row_sob_tap) {
     const f32 listTop = 164.0f;   // PASSO 1: +32 da linha de pesquisa
-    const f32 off = 104.0f;   // máximo do teste anterior (14 TICs × 36)
+    const f32 off = 160.0f;   // máximo do teste anterior (14 TICs × 40)
 
     // tap no meio da linha 13 com o offset no máximo → índice 13
     EXPECT(hierarchyRowAtTap(listTop + 13.0f * kRowH - off + 10.0f,
@@ -314,7 +316,10 @@ TEST(scroll_linhas_mesh_tex_atingiveis_no_scroll) {
     // topo da linha mesh — 0.9.6.6 (GRUPO C): 48+48+48+3×80+48 = 432
     // PASSO 1 (0.9.6.14): o plano (fonte única) põe a mesh em 320 — as
     // linhas da spec (36 · secção 28 · transform 64)
-    EXPECT(nearEqF(plan[meshIdx].y, 332.0f));
+    // FASE UI C: o piso das linhas sobe (kRowH 40) — a Name acima da mesh
+    // cresce +4dp (332 → 336)
+    // FASE UI C: o piso 40 — a Name acima da mesh cresce +4dp (332 → 340)
+    EXPECT(nearEqF(plan[meshIdx].y, 340.0f));
     // 0.8.0: a linha "prim:" fica entre mesh e tex (a ALTURA dela —
     // simbólico desde 0.9.6.6: zero números que driftam com o piso 48dp)
     EXPECT(nearEqF(plan[texIdx].y, plan[meshIdx].y + plan[meshIdx].h +

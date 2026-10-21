@@ -26,7 +26,7 @@ TransformToolbar, ViewportRail, BottomDock, BottomBar) mapeiam assim:
 | Nome conceptual | Região real | Fonte no código (símbolo que manda) |
 |---|---|---|
 | RootLayout | o contentRect (superfície − insets) | `safe::contentRect` em `ui/SafeArea.h` |
-| TopNavigationBar | TOP BAR 36dp (PASSO 1) | `safe::toolbarRect` em `ui/SafeArea.h`; desenhada por `toolbar::draw` em `ui/Toolbar.cpp` |
+| TopNavigationBar | TOP BAR 40dp (FASE UI B) | `safe::toolbarRect` em `ui/SafeArea.h`; desenhada por `toolbar::draw` em `ui/Toolbar.cpp` |
 | ViewportContainerLayout | viewportRect (entre a top bar e a tab bar) | `safe::viewportRect` em `ui/SafeArea.h` |
 | GLSurfaceView | o passe 3D (glViewport+glScissor no centerRect) | o bloco `scissor3d` em `platform/main.cpp` |
 | TransformToolbar | REMOVIDA no PASSO 3 (0.9.6.17): a toolbar inferior HORIZONTAL saiu — as ferramentas vivem no RAIL ESQUERDO vertical (a spec do dono: nada full-width sobre a cena; o duplicar/colar saíram da viewport e vivem no menu ⋯ itens 9/10) | `vpchrome::layout` em `ui/ViewportChrome.cpp` |
@@ -40,7 +40,7 @@ TransformToolbar, ViewportRail, BottomDock, BottomBar) mapeiam assim:
 contentRect (superfície EGL − insets do sistema)
 ├── PASS 3D (a "cena") — glViewport/glScissor = centerRect; aspect do rect
 │   └── (a câmara projeta com o aspect DO RECT, nunca do ecrã todo)
-├── TOP BAR (36dp — PASSO 1, faixa de topo)          [toolbar::draw]
+├── TOP BAR (40dp — FASE UI B, faixa de topo)        [toolbar::draw]
 ├── VIEWPORT REGION (safe::viewportRect)             [pai lógico]
 │   ├── STRIP do topo — REMOVIDA no PASSO 3 (a barra full-width é
 │   │   PROIBIDA pela spec do dono; os chips [Cena][Perspetiva][Global]

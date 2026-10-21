@@ -43,14 +43,14 @@ namespace editor {
 // campo/pesquisa 32 (eram TUDO 48 — a lei de ouro: nada ≥48 no editor)
 f32 kPad       = 16.0f;
 f32 kHeaderH   = 28.0f;
-f32 kRowH      = 36.0f;
+f32 kRowH      = 40.0f;   // FASE UI C: a linha do dono (era 36)
 f32 kSearchRowH = 32.0f;
 f32 kMenuW     = 340.0f;
 
 void applyDensity() {
     kPad        = theme::dp(16.0f);
     kHeaderH    = theme::dp(28.0f);
-    kRowH       = theme::dp(36.0f);
+    kRowH       = theme::dp(40.0f);   // FASE UI C: a linha do dono
     kSearchRowH = theme::dp(32.0f);
     kMenuW      = theme::dp(340.0f);
 }
@@ -992,7 +992,7 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                 continue;
             }
             const f32 ry = listTop + static_cast<f32>(r) * kRowH - off;
-            const f32 indent = static_cast<f32>(rows[r].depth) * theme::dp(24.0f);
+            const f32 indent = static_cast<f32>(rows[r].depth) * theme::dp(theme::kSpace3);
             // 0.11-H: as zonas da linha — [chev 24][ícone 40][nome][olho][⋮]
             const f32 chevX = x + theme::dp(16.0f) + indent;
             const f32 iconZoneX = chevX + chevW;
@@ -1083,12 +1083,17 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                             inkOn ? theme::kTheme.accent
                                   : theme::kTheme.text2);
 
-            // ---- nome 14sp (flex, truncado) ----
+            // ---- nome 14sp (flex, truncado SÓ quando não cabe) ----
+            // FASE UI C: nas linhas NÃO selecionadas o nome usa a largura
+            // TODA (os controlos só existem na selecionada — o nome nunca
+            // trunca antes do necessário)
             if (ui.hasFont()) {
                 const TextMetrics m2 = ui.textMetrics();
                 const f32 base = ry + (kRowH - m2.block()) * 0.5f + m2.ascent;
                 const f32 nameX = iconX + theme::dp(24.0f) + theme::dp(8.0f);
-                const f32 nameW = eyeX - nameX - theme::dp(8.0f);
+                const f32 nameW = selected
+                                      ? (eyeX - nameX - theme::dp(8.0f))
+                                      : (x + w - theme::dp(12.0f) - nameX);
                 // PASSO 2: o nome trunca POR DESENHO (a spec B dá o tip do
                 // long-press como o acesso ao nome completo) — o validador
                 // não avisa (a flag vive SÓ para a label registada)
@@ -1122,20 +1127,25 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
             }
 
             // ---- olho / ⋮ (ícones 20 em zonas 40×Linha — PASSO 1; só
-            // desenham — o tap é re-despachado pelo scroll) ----
-            icons::drawIcon(ui, t->visible ? icons::Icon::Eye
-                                           : icons::Icon::EyeOff,
-                            eyeX + (zoneW - theme::dp(20.0f)) * 0.5f,
-                            ry + (kRowH - theme::dp(20.0f)) * 0.5f,
-                            theme::dp(20.0f),
-                            inkOn ? theme::kTheme.accentInk
-                                  : theme::kTheme.text2);
-            icons::drawIcon(ui, icons::Icon::Dots,
-                            dotsX + (zoneW - theme::dp(20.0f)) * 0.5f,
-                            ry + (kRowH - theme::dp(20.0f)) * 0.5f,
-                            theme::dp(20.0f),
-                            inkOn ? theme::kTheme.accentInk
-                                  : theme::kTheme.text2);
+            // desenham — o tap é re-despachado pelo scroll). FASE UI C (a
+            // ordem do dono): SÓ na linha SELECIONADA — as outras linhas
+            // respiram (o nome ocupa tudo; os controlos aparecem com a
+            // seleção) ----
+            if (selected) {
+                icons::drawIcon(ui, t->visible ? icons::Icon::Eye
+                                               : icons::Icon::EyeOff,
+                                eyeX + (zoneW - theme::dp(20.0f)) * 0.5f,
+                                ry + (kRowH - theme::dp(20.0f)) * 0.5f,
+                                theme::dp(20.0f),
+                                inkOn ? theme::kTheme.accentInk
+                                      : theme::kTheme.text2);
+                icons::drawIcon(ui, icons::Icon::Dots,
+                                dotsX + (zoneW - theme::dp(20.0f)) * 0.5f,
+                                ry + (kRowH - theme::dp(20.0f)) * 0.5f,
+                                theme::dp(20.0f),
+                                inkOn ? theme::kTheme.accentInk
+                                      : theme::kTheme.text2);
+            }
         }
         ui.endScroll();
         // 0.11-H: o alvo do drag (DEPOIS do loop — o frame da transição
@@ -1237,19 +1247,23 @@ bool drawHierarchy(UiContext& ui, Scene& scene, EditorState& st) {
                     // device com densidade ≠ 1; o fix passa pelo padrão da
                     // casa: desenho e toque partilham a MESMA matemática)
                     const f32 indent = static_cast<f32>(rows[sel].depth) *
-                                       theme::dp(24.0f);
+                                       theme::dp(theme::kSpace3);
                     const f32 chevHit = x + theme::dp(16.0f) + indent;
                     const f32 iconX = chevHit + chevW;
                     const f32 eyeHit = eyeX;             // zona de 40dp
                     const f32 dotsHit = dotsX;
                     const f32 zonePx = zoneW;   // px reais da zona (dp)
-                    if (ty >= ry && ty < ry + kRowH && tx >= eyeHit &&
-                        tx < eyeHit + zonePx) {
+                    // FASE UI C: o OLHO e o ⋮ só respondem na linha
+                    // SELECIONADA (o desenho é o contrato; nas outras
+                    // linhas a zona é corpo da linha — seleciona)
+                    const bool controlsRow = (st.selected == t->handle);
+                    if (controlsRow && ty >= ry && ty < ry + kRowH &&
+                        tx >= eyeHit && tx < eyeHit + zonePx) {
                         if (Tic* tt = scene.get(t->handle)) {
                             tt->visible = !tt->visible;   // OLHO: toggle
                         }
-                    } else if (ty >= ry && ty < ry + kRowH && tx >= dotsHit &&
-                               tx < dotsHit + zonePx) {
+                    } else if (controlsRow && ty >= ry && ty < ry + kRowH &&
+                               tx >= dotsHit && tx < dotsHit + zonePx) {
                         st.contextMenu = true;           // ⋮: menu (spec L)
                         st.contextTic = t->handle;
                     } else if (ty >= ry && ty < ry + kRowH &&

@@ -162,3 +162,43 @@ Reposto: 0 falhas (test_core + c33_virtual 1009/0 — os DOIS alvos, o CI
 **Verificação**: test_core 0 falhas · c33_virtual 1009/0 local (os DOIS
 alvos) · docs-lint VERDE · release-identity/R-015 VERDE vc 112 ·
 **versionCode 112** (o §14 declara o par no MESMO commit).
+
+## §3 PARTE C — HIERARQUIA (40dp, os controlos só na selecionada)
+
+**O que mudou**:
+
+- **AS LINHAS 40DP**: kRowH 36 → 40 (o toque mínimo da fase nas linhas
+  todas; o conteúdo da hierarquia cresce 40×N — o scroll acompanha pela
+  fonte única hierarchyContentHeight/hierarchyRowAtTap).
+- **O OLHO E O ⋮ SÓ NA LINHA SELECIONADA** (a ordem do dono): o draw é
+  gated por `if (selected)` e o hit-test por `controlsRow` (a MESMA
+  condição — desenho e toque NUNCA divergem); nas linhas não
+  selecionadas a zona é CORPO (o toque seleciona — nada de toggles
+  acidentais).
+- **O NOME COMPLETO**: nas linhas não selecionadas o nome usa a largura
+  TODA da linha (a reticência só quando não couber — o budget do nome
+  cresce; na selecionada o nome cede as zonas ao olho/⋮).
+- **A INDENTAÇÃO DOS FILHOS**: o literal 24dp morre — a indentação lê a
+  ESCALA DO DONO (theme::kSpace3 = 16; draw e hit-test partilham).
+- **O «+» DO CABEÇALHO** já criava TIC (o menu de presets — o fluxo do
+  C-4; a ordem confirma, nada a mudar).
+
+**Pins**: ui_hierarquia_40dp (test_fase_ui.cpp — a linha 40 no extern, a
+FONTE com o draw gated + o hit gated, a indentação pela escala, o nome de
+largura inteira) · recalibrações com nota: test_uieditor (o teste do olho
+reescrito: o Env pré-seleciona, o toggle só com seleção, a linha do Outro
+prova o corpo), test_fase1_hierarquia (kTestRowH 40), test_scroll (as 5
+linhas de piso + a mesh 340), test_safearea (contentH 800/1322), 
+test_wiring090 (o rowY do long-press), c33 (o 12.10: as linhas 80px @2.0).
+
+**Mutação M-UIc** (o olho em TODAS as linhas de volta — o gate morto):
+
+```
+ui_hierarquia_40dp ... FALHOU  test_fase_ui.cpp:182  ui_hierarquia_40dp: o olho/⋮ é SÓ da linha selecionada (draw gated + hit gated)
+```
+
+Reposto: 0 falhas (test_core + c33_virtual 1009/0 — o CI é o árbitro).
+
+**Verificação**: test_core 0 falhas · c33_virtual 1009/0 local ·
+docs-lint VERDE · release-identity/R-015 VERDE vc 113 · **versionCode
+113** (o §14 declara o par no MESMO commit).

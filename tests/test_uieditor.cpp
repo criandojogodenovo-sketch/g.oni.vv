@@ -690,25 +690,41 @@ TEST(uieditor_hierarquia_olho_e_dots_e_vazio) {
     EXPECT(e.ok);
     e.frame();
 
-    // geometria (spec B · PASSO 1): linha 36dp [ícone tipo 20 na zona 40]
-    // [nome flex][olho 40zona][⋮ 40zona] — as zonas vêm do draw: painel
-    // x=0 w=300 → olho x=212..252, ⋮ x=256..296; listTop = chrome 36
-    // (barra única) + cabeçalho 28 + pesquisa 32 = 96
+    // geometria (FASE UI C): linha 40dp [ícone tipo 20 na zona 40]
+    // [nome flex][olho 40zona][⋮ 40zona SÓ na selecionada] — as zonas vêm
+    // do draw: painel x=0 w=300 → olho x=212..252, ⋮ x=256..296;
+    // listTop = chrome 40 (FASE UI B) + cabeçalho 28 + pesquisa 32 = 100
     const f32 panelW = 300.0f;   // safe::kPanelW (painel padrão)
     const f32 zoneW = 40.0f;     // a zona de toque (PASSO 1)
     const f32 eyeX = panelW - zoneW - 8.0f - zoneW;    // 212
     const f32 dotsX = panelW - zoneW - 4.0f;           // 256
-    const f32 listTop = 36.0f + 28.0f + 32.0f;
-    const f32 rowCY = listTop + 18.0f;   // meia linha de 36
+    const f32 listTop = 40.0f + 28.0f + 32.0f;
+    const f32 rowCY = listTop + 20.0f;   // meia linha de 40
 
-    // OLHO: toggle de visibilidade imediato
+    // FASE UI C: o OLHO só responde na linha SELECIONADA — o Env já
+    // seleciona a hud (o setup), o toque alterna; depois DESSELECIONA e
+    // prova que o olho deixa de responder
+    EXPECT(e.st.selected == e.hud);   // o setup seleciona
     EXPECT(e.scene.get(e.hud)->visible);
     e.tap(eyeX + zoneW * 0.5f, rowCY);
-    EXPECT(!e.scene.get(e.hud)->visible);
+    EXPECT(!e.scene.get(e.hud)->visible);   // o olho alterna (selecionada)
     e.tap(eyeX + zoneW * 0.5f, rowCY);
     EXPECT(e.scene.get(e.hud)->visible);
+    // a linha NÃO selecionada NÃO responde ao olho (o toque é corpo:
+    // muda a SELEÇÃO e nada mais)
+    const Handle other = e.scene.create("Outro");
+    e.frame();
+    e.st.selected = other;
+    e.frame();
+    const f32 rowCY1 = listTop + 1.0f * 40.0f + 20.0f;   // a linha 2 (Outro)
+    e.tap(eyeX + zoneW * 0.5f, rowCY1);   // o olho da linha do OUTRO
+    EXPECT(e.st.selected == other);   // o toque mudou a seleção (corpo)
+    EXPECT(e.scene.get(e.hud)->visible);   // a hud NÃO alternou
 
-    // "⋮" abre o menu contextual
+    // "⋮" abre o menu contextual (a seleção volta à hud — o bloco anterior
+    // deixou o Outro selecionado)
+    e.st.selected = e.hud;
+    e.frame();
     EXPECT(!e.st.contextMenu);
     e.tap(dotsX + zoneW * 0.5f, rowCY);
     EXPECT(e.st.contextMenu);
@@ -721,7 +737,7 @@ TEST(uieditor_hierarquia_olho_e_dots_e_vazio) {
 
     // VAZIO da lista (abaixo da última linha, dentro do painel) DESSELECIONA
     EXPECT(e.st.selected.valid());
-    e.tap(150.0f, listTop + 3.0f * 36.0f + 8.0f);   // sob a linha do único TIC
+    e.tap(150.0f, listTop + 3.0f * 40.0f + 8.0f);   // sob a linha do único TIC
     EXPECT(!e.st.selected.valid());
 }
 

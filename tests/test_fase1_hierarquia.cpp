@@ -349,8 +349,8 @@ constexpr f32 kSH = 720.0f;
 // onde os globals kHeaderH/kSearchRowH/kRowH do EditorUi.cpp estão nos
 // defaults 28/32/36 e o applyDensity nunca corre):
 // listTop = chrome 36 + cabeçalho 28 + pesquisa 32 = 96; linha 36
-constexpr f32 kListTop = 36.0f + 28.0f + 32.0f;
-constexpr f32 kTestRowH = 36.0f;   // (kRowH é extern de vv::editor — renome
+constexpr f32 kListTop = 40.0f + 28.0f + 32.0f;   // FASE UI B: barra 40
+constexpr f32 kTestRowH = 40.0f;   // FASE UI C: a linha do dono (kRowH é extern)
                                    //  para não colidir com o using)
 
 struct HierEnv {
@@ -403,7 +403,7 @@ struct HierEnv {
     static f32 iconCX(u32 row, u32 depth) {
         return 16.0f + 24.0f * depth + 24.0f + 20.0f;
     }
-    static f32 rowCY(u32 row) { return kListTop + row * kTestRowH + 18.0f; }
+    static f32 rowCY(u32 row) { return kListTop + row * kTestRowH + 20.0f; }
 
     void drag(f32 x0, f32 y0, f32 x1, f32 y1) {
         input.injectDown(0, x0, y0);
@@ -447,7 +447,7 @@ TEST(fase1_drag_para_o_vazio_da_lista_vai_para_a_raiz) {
     // o FILHO (linha 1) solto no vazio ABAIXO das linhas (dentro da lista)
     // → RAIZ (o contrato do drop no vazio)
     e.drag(HierEnv::iconCX(1, 1), HierEnv::rowCY(1),
-           150.0f, kListTop + 7.0f * kTestRowH + 18.0f);
+           150.0f, kListTop + 7.0f * kTestRowH + 20.0f);
     EXPECT(e.appliedReparents == 1u);
     EXPECT(parentSlotOf(e.scene, t.filho) == -1);
     // o neto veio junto (o pai dele mudou, ele continua pendurado)

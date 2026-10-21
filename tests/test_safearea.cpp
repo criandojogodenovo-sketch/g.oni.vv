@@ -3,6 +3,7 @@
 // dentro do contentRect, e a REGRESSÃO do bug do C33: com a altura REAL do
 // painel (nav bar contabilizada) o overflow do Inspector é detetado e o
 // scroll ativa — antes, com o visibleHeight inflado, maxOffset era 0.
+#include <cstdio>
 #include "TestFramework.h"
 #include "ui/SafeArea.h"
 #include "ui/EditorLayout.h"   // kHeaderH — alturas de conteúdo partilhadas
@@ -135,7 +136,9 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     // linhas de SLOT (36 dp cada) — 1054 → 1234
     // 0.12-QoL A: as 3 linhas Transform ganham folga 4→8dp (64 → 68 cada)
     // — a ordem do dono (mais ar entre os campos) — 1234 → 1246
-    EXPECT(nearEqF(contentH, 1246.0f));
+    // FASE UI C: o piso das linhas sobe com a kRowH do dono (40) —
+    // 19 linhas de piso × +4dp = 1246 → 1322
+    EXPECT(nearEqF(contentH, 1322.0f));
 
     // DEPOIS: painel dentro do contentRect [0,24,·,628] (status 24 + nav 92)
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);
@@ -174,7 +177,7 @@ TEST(safearea_hierarchy_com_insets_todos_os_tics) {
         s.create("t");
     }
     const f32 contentH = hierarchyContentHeight(20);
-    EXPECT(nearEqF(contentH, 720.0f));   // PASSO 1: 20 × 36 (a linha da spec)
+    EXPECT(nearEqF(contentH, 800.0f));   // FASE UI C: 20 × 40 (a linha do dono)
 
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);
     const UiRect panel = hierarchyPanelRect(1600.0f, 720.0f, in);
@@ -184,7 +187,7 @@ TEST(safearea_hierarchy_com_insets_todos_os_tics) {
     EXPECT(nearEqF(listH, 472.0f));   // panel 532 − 28 − 32 (FASE UI B)
 
     const f32 off = scroll::clampOffset(999.0f, contentH, listH);
-    EXPECT(nearEqF(off, 248.0f));    // 720 − 472
+    EXPECT(nearEqF(off, 328.0f));    // 800 − 472
     // última linha (a 20.ª) inteira dentro da região com o offset no máximo
     const f32 row19 = listTop + 19.0f * kRowH - off;
     EXPECT(row19 >= listTop);

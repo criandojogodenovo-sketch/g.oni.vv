@@ -424,6 +424,17 @@ R-014 aplicada.
   **versionCode 109** — o build vigente da campanha 0.12-Y. O 108 fica
   INTACTO como história.
 
+- **FASE UI · C — A HIERARQUIA 40DP** — as linhas 40dp (kRowH na fonte
+  única; o scroll acompanha) · o OLHO e o ⋮ SÓ na linha selecionada (o
+  draw gated `if (selected)` + o hit gated `controlsRow` — a MESMA
+  condição; nas outras linhas a zona é corpo) · o nome de largura inteira
+  nas não selecionadas (a reticência só quando não couber) · a indentação
+  lê a escala do dono (kSpace3 16 — o literal 24 morreu) · pin
+  ui_hierarquia_40dp + M-UIc vermelho→reposto→verde (colada no
+  RELATORIO-FASE-UI.md §3) · 6 recalibrações com nota · verificação:
+  test_core 0 falhas · c33_virtual 1009/0 local · **versionCode 113** —
+  o build vigente da FASE UI. O 112 fica INTACTO como história.
+
 - **FASE UI · B — A BARRA SUPERIOR 40DP** — a direita NOVA (undo/redo/
   guardar subiram do viewport + play/stop/gear; o Pause vive na PLAY BAR
   com o mundo REALMENTE congelado e o «Android» é a linha «plataforma»
