@@ -179,8 +179,9 @@ struct Env {
     UiRect content() const {
         const bottom::Layout L =
             bottom::layout(kSW, kSH, safe::Insets{}, bs);
-        return {L.drawer.x, L.drawer.y + theme::dp(bottom::kDrawerHandleH),
-                L.drawer.w, L.drawer.h - theme::dp(bottom::kDrawerHandleH)};
+        // FASE UI F: o conteúdo é a FONTE ÚNICA Layout::content (a pega 24dp
+        // E a fila de tabs 40dp já descontadas lá)
+        return L.content;
     }
 
     // os glifos DENTRO de uma banda do conteúdo, NA ORDEM DE EMISSÃO

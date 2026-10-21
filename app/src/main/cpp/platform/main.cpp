@@ -283,10 +283,20 @@ static f32 currentDrawerH() {
         return 0.0f;
     }
     const safe::Insets in = g_ui.safeArea();
+    // FASE UI F: o cap da tab (a Animação abre a ~40% — kDrawerMaxPctAnim;
+    // as outras ficam nos 35%) e o PISO (a Animação cresce até caber a
+    // timeline kTimelineH + a pega + a fila de tabs)
+    const f32 maxPct = g_bottom.bottomTab == 4 ? safe::kDrawerMaxPctAnim
+                                               : safe::kDrawerMaxPct;
+    const f32 minHp = g_bottom.bottomTab == 4
+                          ? theme::dp(timeline::kTimelineH +
+                                      editor::bottom::kDrawerHandleH +
+                                      editor::bottom::kTabRowH)
+                          : 0.0f;
     return safe::effectiveDrawerH(
         g_bottom.drawerH,
         safe::viewportRect(g_ui.screenWidth(), g_ui.screenHeight(), in).h,
-        g_ui.screenHeight() - in.top - in.bottom);   // PASSO 2: o cap de 35%
+        g_ui.screenHeight() - in.top - in.bottom, maxPct, minHp);
 }
 
 void showToast(const char* msg);   // fwd (definido abaixo)
@@ -7478,11 +7488,12 @@ void frame() {
         // 0.9.6.18 (HOTFIX D9): sem seleção com AnimationPlayer o drawer
         // desenha o EMPTY-STATE centrado+clipado (antes ficava EM BRANCO)
         if (g_bottom.bottomTab == 4 && tlVisible) {
-            const UiRect d = editor::bottom::layout(
-                w, h, g_ui.safeArea(), g_bottom).drawer;
-            const UiRect content = {
-                d.x, d.y + theme::dp(editor::bottom::kDrawerHandleH), d.w,
-                d.h - theme::dp(editor::bottom::kDrawerHandleH)};
+            // FASE UI F: o rect do conteúdo é a FONTE ÚNICA Layout::content
+            // (pega 24dp + a fila de tabs 40dp já descontadas — o MESMO
+            // rect que o draw das outras tabs consome)
+            const UiRect content =
+                editor::bottom::layout(w, h, g_ui.safeArea(), g_bottom)
+                    .content;
             if (timeline::canDraw(g_scene, g_editor.selected)) {
                 timeline::drawTimelineInRect(
                     g_ui, g_input, g_scene, g_editor, g_timeline, g_frameDt,

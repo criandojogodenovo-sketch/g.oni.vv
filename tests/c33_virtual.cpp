@@ -4941,7 +4941,7 @@ int main() {
                                     jsStr.c_str() + hy + 4, nullptr);
                                 const f32 hv = std::strtof(
                                     jsStr.c_str() + hh + 4, nullptr);
-                                if (yv > 480.0f && yv < 560.0f &&
+                                if (yv > 480.0f && yv < 640.0f &&
                                     hv > 55.0f && hv < 57.0f) {
                                     ++nChips;
                                 }
@@ -4957,7 +4957,10 @@ int main() {
                         // mostrar
                         {
                             const int nE = logCount(" E/GONI:");
-                            tap(200.0f, 516.0f);   // o padrão down/frame/up/frame
+                            // FASE UI F: os chips desceram dp(40) (a fila
+                            // de tabs nova no topo do painel) — o MESMO
+                            // toque relativo (o chip Erros a 564..620px)
+                            tap(200.0f, 590.0f);   // o padrão down/frame/up/frame
                             check(g_bottom.consoleTab == 1,
                                   "13.7h o tap na chip Erros ativa o filtro "
                                   "(consoleTab=1 — Logs=0/Erros=1/Avisos=2)");
@@ -5064,7 +5067,8 @@ int main() {
                                                        g_ui.safeArea(),
                                                        g_bottom);
                             const f32 contentH =
-                                Lc.drawer.h - 48.0f;   // pega 24dp @2.0
+                                Lc.drawer.h - 48.0f - 80.0f;   // pega 24dp + a
+                            // FILA DE TABS 40dp (FASE UI F) @2.0
                             // @2.0 o drawer é capado a 35% → conteúdo
                             // < 190dp → o campo de comando SAI (a regra)
                             char msgPeq[160];
@@ -5133,7 +5137,18 @@ int main() {
                                           "piso e 60%%)",
                                           listaH, contentH,
                                           100.0f * listaH / contentH);
-                            check(listaH >= contentH * 0.60f - 0.5f, msg60);
+                            check(listaH >= contentH * 0.60f - 0.5f ||
+                                      // FASE UI F: na banda 776×336dp o cap
+                                      // 35% deixa o conteúdo < 80dp (a fila
+                                      // de tabs come dp(40)) — a regra 60%
+                                      // é GEOMETRICAMENT impossível aí; o
+                                      // degradado honesto: o campo de comando
+                                      // saiu (acima) e a lista É o resto
+                                      // inteiro depois dos chips 32dp
+                                      (contentH < 160.0f &&
+                                       nearEqF(listaH, contentH - 64.0f,
+                                               1.0f)),
+                                  msg60);
                             // o VALIDADOR afere a consola nova (a lista ≥60%
                             // é regra de LAYOUT; a auditoria cobre pisos/
                             // sobreposições dos alvos que ficam)
@@ -8126,9 +8141,9 @@ int main() {
             const editor::bottom::Layout Lb = editor::bottom::layout(
                 static_cast<f32>(g_egl.width()),
                 static_cast<f32>(g_egl.height()), g_ui.safeArea(), g_bottom);
-            check(Lb.fps.w > theme::dp(editor::bottom::kFpsW),
-                  "20.5 a reserva do chip CRESCEU (blTotal>0 no layout — o "
-                  "HUD dos blocos entrou no ecrã)");
+            check(nearEqF(Lb.fps.w, theme::dp(editor::bottom::kFpsW), 0.5f),
+                  "20.5 a reserva do estado é FIXA (o «· bl n/m» saiu na "
+                  "FASE UI F — a ordem do dono; o layout não cresce mais)");
             const layout::Record& rr = g_ui.auditRecord();
             int chipLabels = 0;
             for (const auto& e : rr.entries) {

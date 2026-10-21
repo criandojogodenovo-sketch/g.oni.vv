@@ -273,6 +273,123 @@ TEST(ui_inspector_cabecalho) {
     }
 }
 
+// ---- PIN ui_paineis_dock — A PARTE F (a barra fina + o painel encaixado) --
+// «Barra inferior fina (32dp): à esquerda o botão "Painéis ▾" (contorno
+// brasa quando o painel está aberto), à direita o estado em mono "60 FPS ·
+// 6 TICs". Remover o "bl 2/2". Ao tocar em Painéis abre um painel
+// ENCAIXADO por baixo do viewport... altura arrastável; lembra a última
+// aba; altura inicial ~30%/~40%; a Consola mostra um ponto vermelho na aba
+// e no botão quando há erro. Fecha ao tocar em ▾ ou em Painéis.»
+TEST(ui_paineis_dock) {
+    // (a) A BARRA: o botão Painéis à ESQUERDA e o estado à direita — sem
+    // sobreposição em 5 ecrãs (o harness da fase)
+    const struct { i32 w, h; const char* ctx; } screens[] = {
+        {776, 336, "paisagem-S"}, {1600, 720, "paisagem-M"},
+        {2560, 1440, "paisagem-L"}, {720, 1600, "retrato-M"},
+        {1440, 2560, "retrato-L"},
+    };
+    for (const auto& sc : screens) {
+        theme::setDensity(1.0f);
+        const safe::Insets in{};
+        for (int tab = 0; tab <= 4; ++tab) {
+            editor::bottom::BottomState bs;
+            bs.bottomTab = tab;
+            bs.drawerH = 240.0f;
+            const editor::bottom::Layout L =
+                editor::bottom::layout((f32)sc.w, (f32)sc.h, in, bs);
+            std::vector<RectNamed> ws;
+            ws.push_back({"paineis", L.panelsBtn});
+            ws.push_back({"fps", L.fps});
+            checkInsideAndDisjoint(ws, L.tabBar, sc.ctx, sc.w, sc.h);
+            // a barra INTEIRA no fundo do ecrã
+            EXPECT(L.tabBar.y + L.tabBar.h <= (f32)sc.h + 0.5f);
+            if (tab > 0) {
+                // (b) O ENCAIXE: o viewport SOBE — o painel é a faixa acima
+                // da barra (não é janela por cima): o content do painel
+                // termina ONDE a barra começa e o viewport central perde a
+                // altura (o MESMO effectiveDrawerH do main)
+                std::vector<RectNamed> wp;
+                wp.push_back({"handle", L.handle});
+                wp.push_back({"tabrow", L.tabRow});
+                wp.push_back({"conteudo", L.content});
+                checkInsideAndDisjoint(wp, L.drawer, sc.ctx, sc.w, sc.h);
+                EXPECT(L.drawer.y + L.drawer.h <= L.tabBar.y + 0.5f);
+                const UiRect vp = safe::viewportRect((f32)sc.w, (f32)sc.h, in);
+                // o MESMO contrato do layout (o cap da tab + o piso da
+                // Animação — kTimelineH + pega + fila)
+                const f32 minHp =
+                    tab == 4 ? theme::dp(192.0f + editor::bottom::kDrawerHandleH +
+                                         editor::bottom::kTabRowH)
+                             : 0.0f;
+                const f32 dEff = safe::effectiveDrawerH(
+                    bs.drawerH, vp.h, (f32)sc.h - in.top - in.bottom,
+                    tab == 4 ? safe::kDrawerMaxPctAnim : safe::kDrawerMaxPct,
+                    minHp);
+                EXPECT(test::nearEqF(L.drawer.h, dEff, 0.5f));
+                // as 4 TABS na fila, disjuntas, dentro dela
+                std::vector<RectNamed> wt;
+                for (int i = 0; i < 4; ++i) {
+                    char nm[16];
+                    std::snprintf(nm, sizeof(nm), "tab%d", i + 1);
+                    wt.push_back({nm, L.tab[i]});
+                }
+                checkInsideAndDisjoint(wt, L.tabRow, sc.ctx, sc.w, sc.h);
+            }
+        }
+    }
+    // (c) A ALTURA INICIAL por tab (a ordem: ~30% · ~40% na Animação)
+    EXPECT(test::nearEqF(editor::bottom::tabDefaultHPct(1), 0.30f, 1e-4f));
+    EXPECT(test::nearEqF(editor::bottom::tabDefaultHPct(2), 0.30f, 1e-4f));
+    EXPECT(test::nearEqF(editor::bottom::tabDefaultHPct(3), 0.30f, 1e-4f));
+    EXPECT(test::nearEqF(editor::bottom::tabDefaultHPct(4), 0.40f, 1e-4f));
+    EXPECT(test::nearEqF(editor::bottom::tabDefaultH(4, 1000.0f), 400.0f,
+                         1e-4f));   // clamp ao teto cru da pega
+    EXPECT(test::nearEqF(editor::bottom::tabDefaultH(1, 1000.0f), 300.0f,
+                         1e-4f));
+    // (d) O ANIMAÇÃO CABE A TIMELINE: o piso efetivo (kTimelineH + pega +
+    // fila) cabe dentro do cap de 40% num ecrã de referência
+    {
+        theme::setDensity(1.0f);
+        const safe::Insets in{};
+        editor::bottom::BottomState bs;
+        bs.bottomTab = 4;
+        bs.drawerH = 160.0f;   // o dono arrastou ao mínimo cru
+        const editor::bottom::Layout L =
+            editor::bottom::layout(1600.0f, 720.0f, in, bs);
+        const f32 conteudo = L.content.h;
+        EXPECT(conteudo + 0.5f >= theme::dp(192.0f));   // a timeline cabe
+    }
+    // (e) A FONTE: o botão Painéis com o contorno brasa aberto + o PONTO
+    // VERMELHO na aba e no botão + o «· bl n/m» MORTO + o estado novo
+    {
+        std::string src;
+        ASSERT(readFile(repoRoot() + "/app/src/main/cpp/ui/BottomPanel.cpp",
+                        src));
+        EXPECT_MSG(countSub(src, "kTheme.danger") >= 3,
+                   "ui_paineis_dock: o PONTO VERMELHO vive na aba Consola e "
+                   "no botão Painéis (2 pontos + a cor das linhas E/)");
+        EXPECT_MSG(countSub(src, "\"Painéis\"") == 1,
+                   "ui_paineis_dock: o rótulo do botão é «Painéis»");
+        EXPECT_MSG(countSub(src, "bl %u/%u") == 0,
+                   "ui_paineis_dock: o «· bl n/m» saiu do estado (a ordem)");
+        EXPECT_MSG(countSub(src, "%d FPS · %u TICs") == 1,
+                   "ui_paineis_dock: o estado é «60 FPS · 6 TICs» (a ordem)");
+        EXPECT(countSub(src, "open ? theme::kTheme.accent") >= 1);
+        // (f) LEMBRAR A ÚLTIMA ABA: o roundtrip do layout.json leva lastTab
+        std::string dump = "bottomTab=0\ndrawerH=240\nlastTab=3\ninspector=0\n";
+        editor::bottom::BottomState bs2;
+        bool show = false;
+        u32 coll = 0;
+        EXPECT(editor::bottom::parseLayout(dump, bs2, show, coll));
+        EXPECT(bs2.lastTab == 3);   // a última aba volta
+        // os ficheiros antigos (sem lastTab) ficam no default 1
+        std::string velho = "bottomTab=2\ndrawerH=240\ninspector=0\n";
+        editor::bottom::BottomState bs3;
+        EXPECT(editor::bottom::parseLayout(velho, bs3, show, coll));
+        EXPECT(bs3.lastTab == 1);
+    }
+}
+
 // ---- PIN ui_sobreposicao_topbar — A BARRA NÃO TAPA NADA NEM SAI ----------
 // 3 resoluções × 2 orientações (a regra da fase). Os alvos vêm da FONTE
 // ÚNICA topbarLayout — o MESMO desenho que a app faz.

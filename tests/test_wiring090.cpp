@@ -661,7 +661,10 @@ TEST(consola_chips_filtram_erros_e_cards_aplicam) {
     const f32 w1 = e.ui.fontWidth("Logs") + 24.0f;
     const f32 w2 = e.ui.fontWidth("Erros") + 24.0f;
     const f32 errosX = t0 + w0 + 8.0f + w1 + 8.0f + w2 * 0.5f;
-    const f32 errosY = L.drawer.y + 12.0f + 4.0f + 18.0f;
+    // FASE UI F: o Y lê o conteúdo da FONTE ÚNICA (a fila de tabs 40dp
+    // mudou o topo do conteúdo — o MESMO toque relativo de sempre: o chip
+    // está a content.y + kConChipPad(2), 28dp de altura; o toque a +10)
+    const f32 errosY = L.content.y + 10.0f;
     e.tap(errosX, errosY);
     EXPECT(e.bs.consoleTab == 2);
     // cards: tab Ficheiros → o card 0 (quad.obj) devolve pick

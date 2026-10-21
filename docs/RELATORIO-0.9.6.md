@@ -634,3 +634,28 @@ R-014 aplicada.
   história. (o relatório próprio: docs/RELATORIO-0.12-QoL.md §1)
 
 - **0.12-X · 3.9x — CAMRIG + CAMDRAG: A CÂMARA DE TERCEIRA PESSOA (o autor deixa de escrever câmara à mão)** — as 2 entradas NOVAS no registo (Kind::Componente, CompKind::**Continuo**, argc 2..3 / 1..1 — Docs com o exemplo do TRIO: `find(cam) camrig(8, 3, 6) camdrag(0.3) limit(3, 12)`): o **camrig(d,h[,suav])** assenta a câmara à distância 3D d do PIVÔ (alvo+h) na direção esférica do yaw/pitch do TykerState, olha para alvo+h/2 (o rot em GRAUS pelo canal da casa — a convenção da CÂMARA −Z, yaw atan2(−dx,−dz), pitch asin(dy/|d|); o look dos OBJETOS usa a DELE e fica FORA — a cláusula calma), suaviza com o decaimento da casa 1−e^(−suav·dt) (sem suav = snap) e o limit(min,max) clampa a distância FINAL APÓS a suavização contra o pivô; o **camdrag(sens)** consome o `Host::lookDelta(dx,dy)` NOVO (o default false é honesto — o hospedeiro sem input nunca mata o script; o consumo ZERA o acumulador — 2 tykers nunca dobram o gesto), yaw 360° livre NORMALIZADO, pitch clamped FIXO −20..70 (decisão fechada da campanha); o yaw/pitch vivem no TykerState (camYaw/camPitch, junto ao orbitAngle); o **main.cpp** alimenta o acumulador SÓ em Play com os deltas dos dedos que os controlos/canvas/gizmo NÃO reclamaram (o dedo nasce com a máscara do press — se nasceu reclamado NUNCA é olhar; o TIMING é o da casa: o frame alimenta, o 1.º passo fixo seguinte consome — a MESMA latência do g_physics.frame.fwd, os dois sincronizados) + o **compilador** rejeita camrig+follow/look no mesmo tyker (o erro ENSINA com o par fixFrom/fixTo do Substituir) + sem alvo válido = erro CEDO com linha · pins ×14 NOVOS (10 VM no test_voni.cpp + 4 de MOTOR REAL no test_wiring092.cpp — o camrig no Transform3D real, o camdrag pelo VoniSystem.setLookDeltaFn ponta a ponta, o erro cedo sem Transform3D, o TRIO pelo caminho REAL do .goni byte a byte + a vida depois do disco) + **R-055** (`regress_camrig`) + M-3.9x1 (o consumo do olhar fora) M-3.9x2 (o conflito ignorado no compilador) vermelho→reposto→verde (coladas no RELATORIO-0.12-X-CAMRIG.md §4) · a referência regenerada (16566 → 17549 bytes, 66 entradas; R-013 byte a byte) · verificação: test_core 0 falhas (o skip de disco conhecido — o CI é o árbitro) · os 12 gates locais verdes · STATE.md 299 (<300) · **versionCode 101** — o build vigente da 0.12-X. O 100 fica INTACTO como história (o relatório próprio: docs/RELATORIO-0.12-X-CAMRIG.md).
+
+- **FASE UI · F — BARRA INFERIOR FINA + PAINEL ENCAIXADO (a ordem do
+  dono, envio 3/5)** — a barra de 32dp com SÓ o botão **«Painéis ▾»** à
+  esquerda (CONTORNO BRASA com o painel aberto; o chevron por geometria)
+  e o estado **«60 FPS · 6 TICs»** à direita (o «· bl n/m» APOSENTOU — a
+  reserva kFpsW ficou FIXA); as 4 TABS (Ficheiros/Assets/Consola/
+  Animação) subiram para a FILA DE 40dp no CABEÇALHO do painel
+  ENCAIXADO (o viewport SOBE — o mecanismo P-08 intocado; o conteúdo é a
+  FONTE ÚNICA Layout::content partilhada pelo draw e pelo main); o
+  Painéis abre com a ÚLTIMA aba (lastTab no layout.json, retrocompatível)
+  e fecha no ▾/Painéis (a aba ativa não fecha mais); a ALTURA INICIAL
+  ~30% (Fich/Assets/Consola) e ~40% (Animação) pela fonte pura
+  tabDefaultHPct/tabDefaultH com o arrasto do dono a mandar depois
+  (hCustom); a Animação tem teto 40% (kDrawerMaxPctAnim) E PISO que cabe
+  a timeline (kTimelineH+pega+fila) com a TIMELINE CLIPADA ao rect
+  (ScopedClip na strip — os overlays fora do clip) — nada cruza a barra
+  em 13 ecrãs (FASE 31); o PONTO VERMELHO (danger 6dp) na aba Consola e
+  no botão quando há erro no log · pin `ui_paineis_dock` (test_fase_ui:
+  a barra em 5 ecrãs × 5 estados, o encaixe, os defaults, o piso, a
+  fonte, o roundtrip lastTab) + M-UIf (o encaixe frouxo) vermelho→
+  reposto→verde · recalibrações com nota (test_012a_contadores,
+  test_wiring090, c33 13.7h/13.7i/20.5/FASE 31) · verificação: test_core
+  0 falhas · c33_virtual 1010/0 · docs-lint VERDE · **versionCode 116** —
+  o build vigente. O 115 fica INTACTO como história. (o relatório
+  próprio: docs/RELATORIO-FASE-UI.md §9)

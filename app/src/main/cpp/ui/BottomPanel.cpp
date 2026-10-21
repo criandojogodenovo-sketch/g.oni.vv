@@ -1,9 +1,10 @@
-// ui/BottomPanel.cpp — painel de baixo + tab bar 32dp (0.9.0 spec E/K ·
-// PASSO 1 0.9.6.14: a status bar de 24dp FOI REMOVIDA — o «FPS · TICs»
-// vive no canto direito da tab bar; a versão/commit em Settings › Sobre).
+// ui/BottomPanel.cpp — a BARRA INFERIOR FINA + O PAINEL ENCAIXADO (FASE UI
+// F — a ordem do dono; o PASSO 1 0.9.6.14 foi superado: a barra de 32dp
+// tem SÓ o «Painéis ▾» à esquerda e o estado à direita; as 4 TABS vivem
+// no CABEÇALHO do painel encaixado, que SOBE com o viewport).
 //
 // Tema: theme::kTheme (tabela spec A) — tabs ativas com texto accent +
-// underline 2dp, drawer surface, pega com traços (grip), consola mono 12sp
+// underline 2dp, painel surface, pega com traços (grip), consola mono 12sp
 // colorida por nível (parse do prefixo do engine.log: I/W/E), cards 96dp
 // com ícone de tipo (cubo/lupa→imageQuad/speaker/pasta p/ cenas).
 #include "ui/BottomPanel.h"
@@ -133,35 +134,52 @@ void drawEmptyState(UiContext& ui, const UiRect& rect, icons::Icon ic,
 Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st) {
     Layout L;
     L.tabBar = safe::bottomTabRect(sw, sh, in);
+    // FASE UI F: o botão «Painéis ▾» à ESQUERDA (reserva kPanelsBtnW) e o
+    // estado «N FPS · N TICs» à DIREITA (reserva kFpsW — o «· bl n/m»
+    // APOSENTADO pela ordem do dono)
+    L.panelsBtn = {L.tabBar.x, L.tabBar.y, theme::dp(kPanelsBtnW),
+                   L.tabBar.h};
+    L.fps = {L.tabBar.x + L.tabBar.w - theme::dp(kFpsW), L.tabBar.y,
+             theme::dp(kFpsW), L.tabBar.h};
     // P-08 (0.9.6.12 · GRUPO J1 · R-022): a altura efetiva vem da FONTE
     // ÚNICA (safe::effectiveDrawerH) — o MESMO valor que o main usa para os
-    // rects do centro (currentDrawerH). Antes o cap vivia AQUI e o main lia
-    // o drawer CRU: no device o viewRect colapsava a 0 e a transform
-    // toolbar desenhava-se por cima da top bar (os defeitos 1+2 do dono).
+    // rects do centro (currentDrawerH). FASE UI F: a tab Animação cap a
+    // 40% (kDrawerMaxPctAnim), as outras ficam nos 35%.
     const f32 vpH = safe::viewportRect(sw, sh, in).h;
-    const f32 contentH = sh - in.top - in.bottom;   // PASSO 2: o cap de 35%
-    const f32 d = safe::effectiveDrawerH(st.drawerH, vpH, contentH);
+    const f32 contentH = sh - in.top - in.bottom;
+    const f32 maxPct =
+        st.bottomTab == 4 ? safe::kDrawerMaxPctAnim : safe::kDrawerMaxPct;
+    // FASE UI F: a Animação cresce até caber a TIMELINE (a régua + as
+    // faixas + o cursor — kTimelineH + a pega + a fila de tabs; nos ecrãs
+    // pequenos o cap manda e a timeline clipa dentro do rect)
+    const f32 minHp = st.bottomTab == 4
+                          ? theme::dp(timeline::kTimelineH + kDrawerHandleH +
+                                      kTabRowH)
+                          : 0.0f;
+    const f32 d =
+        safe::effectiveDrawerH(st.drawerH, vpH, contentH, maxPct, minHp);
     L.drawer = {in.left, L.tabBar.y - d, sw - in.left - in.right, d};
     L.handle = {in.left, L.drawer.y, sw - in.left - in.right,
                 theme::dp(kDrawerHandleH)};   // PASSO 2: pega 24dp (era 12)
     L.drawerTop = L.drawer.y;
-    // PASSO 1 (0.9.6.14): as 4 tabs vivem à ESQUERDA do canto direito
-    // «FPS · TICs» (a reserva kFpsW; a status bar de 24dp morreu)
-    // 0.10-M (PASSO 4): com BLOCOS em cena a reserva CRESCE (o chip ganha
-    // «· bl n/m» — o HUD do render por blocos; sem blocos, o de sempre)
-    const f32 fpsW = theme::dp(st.blTotal > 0 ? kFpsW + kFpsWBlocks : kFpsW);
-    L.fps = {L.tabBar.x + L.tabBar.w - fpsW, L.tabBar.y, fpsW, L.tabBar.h};
-    const f32 tabsW = L.tabBar.w - L.fps.w;
-    const f32 third = tabsW / 4.0f;
-    L.tab[0] = {L.tabBar.x, L.tabBar.y, third, L.tabBar.h};
-    L.tab[1] = {L.tabBar.x + third, L.tabBar.y, third, L.tabBar.h};
-    L.tab[2] = {L.tabBar.x + 2.0f * third, L.tabBar.y, third, L.tabBar.h};
-    L.tab[3] = {L.tabBar.x + 3.0f * third, L.tabBar.y, third, L.tabBar.h};
+    // FASE UI F: a FILA DE TABS dentro do painel (40dp — a ordem: as abas
+    // Ficheiros/Assets/Consola/Animação no cabeçalho do painel; o conteúdo
+    // fica por baixo). O conteúdo é o rect que o draw e o MAIN (a
+    // timeline) partilham — uma só fonte.
+    L.tabRow = {in.left, L.handle.y + L.handle.h, sw - in.left - in.right,
+                theme::dp(kTabRowH)};
+    const f32 tabW = L.tabRow.w / 4.0f;
+    for (int i = 0; i < 4; ++i) {
+        L.tab[i] = {L.tabRow.x + static_cast<f32>(i) * tabW, L.tabRow.y,
+                    tabW, L.tabRow.h};
+    }
     if (st.bottomTab > 0 && st.bottomTab <= 4) {
         L.underline = L.tab[st.bottomTab - 1];
-        L.underline.y = L.tabBar.y;
+        L.underline.y = L.tabRow.y + L.tabRow.h - 2.0f;
         L.underline.h = 2.0f;
     }
+    L.content = {L.tabRow.x, L.tabRow.y + L.tabRow.h, L.tabRow.w,
+                 L.drawer.y + L.drawer.h - (L.tabRow.y + L.tabRow.h)};
     return L;
 }
 
@@ -175,75 +193,92 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
     const Layout L = layout(ui.screenWidth(), ui.screenHeight(), insets, bs);
     const TextMetrics tmText = ui.textMetrics();   // 0.9.6.10: o browser
 
-    // ---- fundo da tab bar ----
+    // FASE UI F: há ERRO no log? (o ponto vermelho da Consola — na ABA e
+    // no BOTÃO Painéis; a MESMA cor danger das linhas E/)
+    bool hasErr = false;
+    for (const std::string& ln : logLines) {
+        if (isErrorLine(ln)) {
+            hasErr = true;
+            break;
+        }
+    }
+
+    // ---- fundo da barra inferior fina (32dp) ----
     ui.panel(L.tabBar.x, L.tabBar.y, L.tabBar.w, L.tabBar.h, theme::kTheme.bg);
     ui.panel(L.tabBar.x, L.tabBar.y, 1.0f, L.tabBar.h, theme::kTheme.border);
     ui.panel(L.tabBar.x + L.tabBar.w - 1.0f, L.tabBar.y, 1.0f, L.tabBar.h,
              theme::kTheme.border);
 
-    // ---- tabs (ícone 20 + palavra 12sp; ativo = accent + underline 2dp) ----
-    // 0.9.6.10 (GRUPO UI · a imagem 1): 4 tabs — Ficheiros (a árvore
-    // res://) · Assets (a grelha de miniaturas) · Consola · Animação
-    // PASSO 1 (0.9.6.14): a faixa é 32dp — o alvo é a CÉLULA inteira (o
-    // piso de linha 32, LayoutDump.h); ícone 20, palavra caption 12sp
-    const struct {
-        u64        id;
-        icons::Icon ic;
-        const char* word;
-    } tabs[4] = {
-        {kTabFilesId,   icons::Icon::Folder,   "Ficheiros"},
-        {kTabAssetsId,  icons::Icon::Box,      "Assets"},
-        {kTabConsoleId, icons::Icon::Terminal, "Consola"},
-        {kTabAnimId,    icons::Icon::Clapper,  "Animação"},
-    };
-    for (int i = 0; i < 4; ++i) {
-        const UiRect& r = L.tab[i];
-        const bool active = bs.bottomTab == i + 1;
-        ui.auditRowFloorNext(layout::kFieldFloorDp);   // linha de 32dp
-        const bool pressed = ui.widgetHit(tabs[i].id, r.x, r.y, r.w, r.h);
-        if (ui.widgetActive(tabs[i].id)) {
-            ui.panel(r.x, r.y, r.w, r.h, theme::kTheme.surface2);
-        }
-        const f32 s = theme::dp(20.0f);   // PASSO 1: ícone 20 (era 24)
-        const f32 wordW = ui.hasFont() ? ui.fontWidth(tabs[i].word) : 0.0f;
-        const f32 gap = theme::dp(6.0f);
-        const f32 x0 = r.x + (r.w - (s + gap + wordW)) * 0.5f;
-        icons::drawIcon(ui, tabs[i].ic, x0, r.y + (r.h - s) * 0.5f, s,
-                        active ? theme::kTheme.accent : theme::kTheme.text2);
+    // ---- FASE UI F: o botão «Painéis ▾» (a esquerda) ----
+    // fechado: chip quieto (surface) + chevron para baixo; aberto:
+    // CONTORNO BRASA (frameRounded accent) + chevron para cima — a ordem
+    // literal. O PONTO VERMELHO acende quando a consola tem erro.
+    {
+        const UiRect& r = L.panelsBtn;
+        // o chip visual (28dp centrado na barra de 32) — o ALVO é a célula
+        // TODA (a barra é a faixa de toque; o piso da linha é o kField 32)
+        const f32 chipH = theme::dp(24.0f);
+        const f32 chipY = r.y + (r.h - chipH) * 0.5f;
+        const f32 chipX = r.x + theme::dp(8.0f);
+        const f32 chipW = r.w - theme::dp(12.0f);
+        const bool open = bs.bottomTab > 0;
+        const bool held = ui.widgetActive(kPanelsBtnId);
+        ui.panelRounded(chipX, chipY, chipW, chipH, theme::kRadiusField,
+                        held ? theme::kTheme.surface2
+                             : theme::kTheme.surface);
+        ui.frameRounded(chipX, chipY, chipW, chipH, 1.0f, theme::kRadiusField,
+                        open ? theme::kTheme.accent : theme::kTheme.border);
         if (ui.hasFont()) {
-            // PASSO 1: a palavra da tab em CAPTION 12sp
-            ui.labelStyled(x0 + s + gap, textBaseline(ui, r), tabs[i].word,
-                           active ? theme::kTheme.accent
-                                  : theme::kTheme.text2,
+            const f32 base = chipY + (chipH - tmText.block()) * 0.5f +
+                             tmText.ascent;
+            ui.labelStyled(chipX + theme::dp(10.0f), base, "Painéis",
+                           theme::kTheme.text1,
                            theme::fontScale(theme::kFontCaption), 0);
         }
-        if (pressed) {
-            // tocar na tab ATIVA fecha o drawer (toggle — spec E)
-            bs.bottomTab = active ? 0 : (i + 1);
+        // o chevron (2 traços — para BAIXO fechado, para CIMA aberto)
+        {
+            const f32 cx = chipX + chipW - theme::dp(14.0f);
+            const f32 cy = chipY + chipH * 0.5f;
+            const f32 half = theme::dp(4.0f);
+            const f32 dy = open ? -half : half;
+            ui.drawLine(cx - half, cy - dy * 0.5f, cx, cy + dy * 0.5f,
+                        theme::dp(2.0f),
+                        open ? theme::kTheme.accent : theme::kTheme.text2);
+            ui.drawLine(cx, cy + dy * 0.5f, cx + half, cy - dy * 0.5f,
+                        theme::dp(2.0f),
+                        open ? theme::kTheme.accent : theme::kTheme.text2);
         }
-    }
-    if (bs.bottomTab > 0) {
-        ui.panel(L.underline.x, L.underline.y, L.underline.w, L.underline.h,
-                 theme::kTheme.accent);
+        if (hasErr) {
+            // O PONTO VERMELHO no botão (6dp danger no canto do chip)
+            ui.panelRounded(chipX + chipW - theme::dp(5.0f),
+                            chipY - theme::dp(2.0f), theme::dp(6.0f),
+                            theme::dp(6.0f), 3.0f, theme::kTheme.danger);
+        }
+        ui.auditRowFloorNext(layout::kFieldFloorDp);
+        if (ui.widgetHit(kPanelsBtnId, r.x, r.y, r.w, r.h)) {
+            if (open) {
+                bs.lastTab = bs.bottomTab;   // lembra a aba para a próxima
+                bs.bottomTab = 0;            // fecha (▾ / Painéis)
+                bs.hCustom = false;
+            } else {
+                // abre com a ÚLTIMA aba (a ordem: «lembra a última aba»)
+                const int tab =
+                    bs.lastTab >= 1 && bs.lastTab <= 4 ? bs.lastTab : 1;
+                bs.bottomTab = tab;
+                if (!bs.hCustom) {
+                    bs.drawerH = tabDefaultH(
+                        tab, ui.screenHeight() - insets.top - insets.bottom);
+                }
+            }
+        }
     }
 
-    // ---- PASSO 1 (0.9.6.14): o «FPS n · TICs n» no CANTO DIREITO da
-    // tab bar (a status bar de 24dp foi REMOVIDA — a spec: a faixa extra
-    // sai; a versão/commit vivem em Settings › Sobre). Caption 12sp
-    // text-2, right-aligned na reserva, o fit trunca honestamente.
-    // 0.10-M (PASSO 4): com blocos em cena o chip ganha «· bl n/m» — os
-    // DESNENADOS/TOTAIS do frame (a métrica REAL do render por blocos,
-    // coerente com o dc/verts do LOG; muda com o orbit — o culling à vista)
+    // ---- FASE UI F: o estado «N FPS · N TICs» (a direita, mono é a
+    // dívida declarada da parte A — o atlas 2.º; o «· bl n/m» saiu) ----
     if (ui.hasFont()) {
         char fpsTxt[48];
-        if (bs.blTotal > 0) {
-            // 0.12-C (C-3): «TICs 2» → «2 TICs» (a ordem natural)
-            std::snprintf(fpsTxt, sizeof(fpsTxt), "FPS %d · %u TICs · bl %u/%u",
-                          fps, ticCount, bs.blDrawn, bs.blTotal);
-        } else {
-            std::snprintf(fpsTxt, sizeof(fpsTxt), "FPS %d · %u TICs", fps,
-                          ticCount);
-        }
+        std::snprintf(fpsTxt, sizeof(fpsTxt), "%d FPS · %u TICs", fps,
+                      ticCount);
         const TextMetrics tmF = ui.textMetrics();
         const f32 padF = theme::dp(8.0f);
         const f32 maxW = L.fps.w - 2.0f * padF;
@@ -259,21 +294,23 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
                        theme::fontScale(theme::kFontCaption), 0);
     }
 
-    // ---- drawer ----
+    // ---- o PAINEL ENCAIXADO (não é janela — o viewport sobe: os rects
+    // do centro comem a altura pelo panelsRect/currentDrawerH) ----
     if (bs.bottomTab == 0) {
         return a;
     }
     ui.panel(L.drawer.x, L.drawer.y, L.drawer.w, L.drawer.h,
              theme::kTheme.surface);
-    // 0.11-Y (Y-3): o cristal — a linha do topo do drawer (o brilho 1dp do
-    // glow a 20%; a borda de baixo fica a hairline âmbar de sempre)
+    // 0.11-Y (Y-3): o cristal — a linha do topo do painel (o brilho 1dp do
+    // glow a 20%; a borda de baixo fica a hairline de sempre)
     ui.glassTopLine(L.drawer.x, L.drawer.y, L.drawer.w);
     ui.panel(L.drawer.x, L.drawer.y + L.drawer.h - 1.0f, L.drawer.w, 1.0f,
              theme::kTheme.border);
 
-    // pega de arrasto (12dp com traços verticais — o grip). DRAG REAL:
+    // pega de arrasto (24dp com traços verticais — o grip). DRAG REAL:
     // press na pega arma; o movimento vertical do dedo redimensiona o
-    // drawer AO VIVO (160..400 — passos de 8 no layout; release fixa)
+    // painel AO VIVO (160..400 — passos de 8 no layout; release fixa);
+    // FASE UI F: o arrasto arma hCustom (os defaults ~30/40% respeitam-no)
     {
         f32 px = -1.0f, py = -1.0f;
         if (in.down(0)) {
@@ -289,6 +326,9 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
         }
         if (bs.dragActive && in.down(0)) {
             const f32 want = bs.dragBaseH + (bs.dragStartY - py);
+            if (want != bs.drawerH) {
+                bs.hCustom = true;
+            }
             bs.drawerH = want < safe::kDrawerMin ? safe::kDrawerMin
                         : want > safe::kDrawerMax ? safe::kDrawerMax
                                                   : want;
@@ -310,12 +350,80 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
         }
     }
 
-    // conteúdo do drawer por tab (rect RECALCULADO — o drag pode ter mudado
-    // a altura NESTE frame; a pega fica no topo do drawer novo)
+    // ---- FASE UI F: a FILA DE TABS no cabeçalho do painel (40dp) ----
+    {
+        ui.panel(L.tabRow.x, L.tabRow.y, L.tabRow.w, L.tabRow.h,
+                 theme::kTheme.surface2);
+        ui.panel(L.tabRow.x, L.tabRow.y + L.tabRow.h - 1.0f, L.tabRow.w, 1.0f,
+                 theme::kTheme.border);
+        const struct {
+            u64        id;
+            icons::Icon ic;
+            const char* word;
+        } tabs[4] = {
+            {kTabFilesId,   icons::Icon::Folder,   "Ficheiros"},
+            {kTabAssetsId,  icons::Icon::Box,      "Assets"},
+            {kTabConsoleId, icons::Icon::Terminal, "Consola"},
+            {kTabAnimId,    icons::Icon::Clapper,  "Animação"},
+        };
+        for (int i = 0; i < 4; ++i) {
+            const UiRect& r = L.tab[i];
+            const bool active = bs.bottomTab == i + 1;
+            ui.auditRowFloorNext(layout::kFieldFloorDp);
+            const bool pressed = ui.widgetHit(tabs[i].id, r.x, r.y, r.w, r.h);
+            if (ui.widgetActive(tabs[i].id)) {
+                ui.panel(r.x, r.y, r.w, r.h, theme::kTheme.surface);
+            }
+            const f32 s = theme::dp(18.0f);
+            const f32 wordW = ui.hasFont() ? ui.fontWidth(tabs[i].word) : 0.0f;
+            const f32 gap = theme::dp(6.0f);
+            // o PONTO VERMELHO da Consola (o espaço conta no centrado)
+            const f32 dotW =
+                (i == 2 && hasErr) ? theme::dp(6.0f) + theme::dp(4.0f) : 0.0f;
+            const f32 x0 = r.x + (r.w - (s + gap + wordW + dotW)) * 0.5f;
+            icons::drawIcon(ui, tabs[i].ic, x0,
+                            r.y + (r.h - s) * 0.5f, s,
+                            active ? theme::kTheme.accent
+                                   : theme::kTheme.text2);
+            if (ui.hasFont()) {
+                // a palavra da aba em CAPTION 12sp (ativo = accent)
+                ui.labelStyled(x0 + s + gap, textBaseline(ui, r), tabs[i].word,
+                               active ? theme::kTheme.accent
+                                      : theme::kTheme.text2,
+                               theme::fontScale(theme::kFontCaption), 0);
+            }
+            if (i == 2 && hasErr) {
+                // O PONTO VERMELHO na aba Consola (a ordem literal)
+                ui.panelRounded(x0 + s + gap + wordW + theme::dp(4.0f),
+                                r.y + r.h * 0.5f - theme::dp(3.0f),
+                                theme::dp(6.0f), theme::dp(6.0f), 3.0f,
+                                theme::kTheme.danger);
+            }
+            if (pressed) {
+                // FASE UI F: tocar numa aba TROCA (fechar é do Painéis ▾);
+                // a altura inicial da tab aplica-se sem arrasto (hCustom)
+                if (bs.bottomTab != i + 1) {
+                    bs.bottomTab = i + 1;
+                    bs.lastTab = i + 1;
+                    if (!bs.hCustom) {
+                        bs.drawerH = tabDefaultH(
+                            i + 1,
+                            ui.screenHeight() - insets.top - insets.bottom);
+                    }
+                }
+            }
+        }
+        if (bs.bottomTab > 0 && bs.bottomTab <= 4) {
+            ui.panel(L.underline.x, L.underline.y, L.underline.w,
+                     L.underline.h, theme::kTheme.accent);
+        }
+    }
+
+    // conteúdo da aba (rect da FONTE ÚNICA — o drag pode ter mudado a
+    // altura NESTE frame; o layout recalcula e o main partilha do MESMO
+    // L.content para a timeline)
     const Layout L2 = layout(ui.screenWidth(), ui.screenHeight(), insets, bs);
-    const UiRect content = {L2.drawer.x, L2.drawer.y + theme::dp(kDrawerHandleH),
-                            L2.drawer.w,
-                            L2.drawer.h - theme::dp(kDrawerHandleH)};
+    const UiRect content = L2.content;
     // ---- 0.9.6.10 (GRUPO UI · a imagem 1) · TAB 1: A ÁRVORE res:// --------
     // A região esquerda-baixa da referência («Ficheiros: árvore res:// com
     // Assets/Cenas/…»): as PASTAS REAIS do projeto com contagem; o toque
@@ -886,11 +994,12 @@ std::string serializeLayout(const BottomState& bs, bool showInspector,
                             u32 inspCollapsed, f32 hierW, f32 inspW,
                             bool inspPinned,
                             const std::vector<std::string>& hierCollapsed) {
-    char buf[144];
+    char buf[176];
     std::snprintf(buf, sizeof(buf),
-                  "bottomTab=%d\ndrawerH=%d\ninspector=%d\ninspCollapsed=%u\n"
+                  "bottomTab=%d\ndrawerH=%d\nlastTab=%d\ninspector=%d\n"
+                  "inspCollapsed=%u\n"
                   "hierW=%d\ninspW=%d\ninspPinned=%d\n",
-                  bs.bottomTab, static_cast<int>(bs.drawerH),
+                  bs.bottomTab, static_cast<int>(bs.drawerH), bs.lastTab,
                   showInspector ? 1 : 0, inspCollapsed,
                   static_cast<int>(hierW), static_cast<int>(inspW),
                   inspPinned ? 1 : 0);
@@ -926,7 +1035,7 @@ bool parseLayout(const std::string& data, BottomState& bs, bool& showInspector,
     if (data.empty()) {
         return false;
     }
-    int tab = -1, dh = -1, insp = -1, hw = -9999, iw = -9999, pin = 0;
+    int tab = -1, dh = -1, lt = 0, insp = -1, hw = -9999, iw = -9999, pin = 0;
     unsigned collapsed = 0xFFFFFFFFu;
     if (hierCollapsed) {
         hierCollapsed->clear();   // 0.11-H: o out-param é SEMPRE reposto
@@ -937,6 +1046,8 @@ bool parseLayout(const std::string& data, BottomState& bs, bool& showInspector,
             tab = std::atoi(p + 10);
         } else if (std::strncmp(p, "drawerH=", 8) == 0) {
             dh = std::atoi(p + 8);
+        } else if (std::strncmp(p, "lastTab=", 8) == 0) {
+            lt = std::atoi(p + 8);   // FASE UI F: a ÚLTIMA aba aberta
         } else if (std::strncmp(p, "inspector=", 10) == 0) {
             insp = std::atoi(p + 10);
         } else if (std::strncmp(p, "inspCollapsed=", 14) == 0) {
@@ -968,6 +1079,11 @@ bool parseLayout(const std::string& data, BottomState& bs, bool& showInspector,
         return false;   // ilegível → defaults ("Repor layout")
     }
     bs.bottomTab = tab;
+    // FASE UI F: a última aba (AUSENTE nos ficheiros antigos = lt 0 → o
+    // default 1 fica; fora da faixa 1..4 também)
+    if (lt >= 1 && lt <= 4) {
+        bs.lastTab = lt;
+    }
     if (dh >= static_cast<int>(safe::kDrawerMin) &&
         dh <= static_cast<int>(safe::kDrawerMax)) {
         bs.drawerH = static_cast<f32>(dh);

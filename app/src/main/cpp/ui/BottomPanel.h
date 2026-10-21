@@ -1,28 +1,30 @@
 #pragma once
-// ui/BottomPanel.h — PAINEL DE BAIXO 0.9.0 (spec E/K) · PASSO 1 (0.9.6.14):
+// ui/BottomPanel.h — PAINEL DE BAIXO (FASE UI F — a ordem do dono):
 //
-//   TAB BAR 32dp largura total (era 48): [Ficheiros][Assets][Consola]
-//   [Animação] à ESQUERDA — ícone 20 + palavra 12sp, ativo com texto
-//   accent + underline 2dp; à DIREITA o «FPS n · TICs n» (a status bar de
-//   24dp MORREU — a spec PASSO 1: a faixa extra sai; a versão/commit
-//   vivem em Settings › Sobre)
-//   DRAWER: abre só por TOQUE na tab (PASSO 2: SEM auto-abrir — o default
-//   do editor é FECHADO); DEFAULT 240dp, PEGA de arrasto 24dp na borda
-//   superior (o ESTADO cru vai 160..400, passos de 8dp — spec E — mas a
-//   ALTURA EFETIVA é capada a 35% da altura do content pela fonte única
-//   safe::effectiveDrawerH, spec PASSO 2); tocar na tab ATIVA fecha
+//   BARRA INFERIOR FINA 32dp (sempre visível):
+//     [Painéis ▾]  ................................  60 FPS · 6 TICs
+//     à ESQUERDA o botão «Painéis ▾» (CONTORNO BRASA quando o painel
+//     está aberto; o ponto vermelho acende quando há erro na consola);
+//     à DIREITA o estado «60 FPS · 6 TICs» (o «· bl n/m» SAIU — a ordem)
+//   PAINEL ENCAIXADO (NÃO é janela por cima — o viewport SOBE e fica
+//     visível; os rects do centro comem a altura pelo panelsRect):
+//     ┌ pega 24dp (arrasto — altura lembra-se) ─────────────┐
+//     │ [Ficheiros][Assets][Consola][Animação]  (aba 40dp)  │
+//     │ conteúdo da aba                                     │
+//     └─────────────────────────────────────────────────────┘
+//   • abre pelo Painéis com a ÚLTIMA aba aberta (lastTab — persiste)
+//   • altura inicial ~30% (Ficheiros/Assets/Consola) · ~40% (Animação)
+//     — tabDefaultHPct; o arrasto do dono manda depois (hCustom)
+//   • fecha ao tocar em ▾ ou no Painéis (a aba ativa NÃO fecha mais)
+//   • Consola com PONTO VERMELHO na aba e no botão quando há erro
+//   • Animação: a timeline de sempre (régua + faixas + losangos + o
+//     cursor de tempo EM BRASA — ui/Timeline.h intocado)
 //
-// CONTEÚDO do drawer (spec K):
-//   • FICHEIROS: grelha de cards 96dp (miniatura por imageQuad quando há
-//     textura, ícone de tipo caso contrário) + nome 12sp — o toque aplica
-//     ao TIC selecionado pelo MESMO caminho do seletor (applyAssetPick)
-//   • CONSOLA: linhas mono 12sp coloridas por nível (I=text-2, W=warn,
-//     E=danger), chips INTERNOS de CABEÇALHO 28dp (PASSO 2 — e a chip
-//     «Consola» SAIU: duplicava a TAB; a vista COMPLETA do log é a chip
-//     «Logs», Erros/Avisos filtram), toggle auto-scroll, [Export]; o
-//     toque numa linha EXPANDE (texto inteiro — o truncado abre)
-//   • ANIMAÇÃO: a TIMELINE de sempre dentro do rect do drawer (tracks +
-//     régua/keys + transporte + scrub — ui/Timeline.h intocado)
+// CONTEÚDO (o de sempre):
+//   • FICHEIROS: árvore res:// (pastas reais + contagem → abre Assets
+//     filtrado)   • ASSETS: grelha/lista com miniaturas reais
+//   • CONSOLA: chips Logs/Erros/Avisos + linhas mono por nível + comando
+//   • ANIMAÇÃO: drawTimelineInRect (o main liga)
 #include "ui/EditorLayout.h"
 #include "ui/Icons.h"
 #include "ui/SafeArea.h"
@@ -63,6 +65,9 @@ constexpr u64 kTreeScrollId = 49;    // scroll da árvore res://
 constexpr u64 kAssetsListRowBase = 5630;  // linhas da vista em LISTA
 constexpr u64 kConsoleTabBase = 5632;  // 0.9.6.10: tabs Consola/Logs/Erros/Avisos
 constexpr u64 kCmdFieldId    = 5636;  // 0.9.6.10: o campo de comando da consola
+// FASE UI F: o botão «Painéis ▾» da barra (a esquerda; o id fora das
+// faixas das tabs — o painel abre/fecha AQUI)
+constexpr u64 kPanelsBtnId   = 5638;
 constexpr u64 kConsoleScrollId = 47; // região de scroll da consola
 constexpr u64 kFilesScrollId  = 48;  // região de scroll dos ficheiros
 
@@ -90,8 +95,16 @@ struct BottomState {
     // 0.9.6.10 (GRUPO UI · a imagem 1): o dock inferior passou a 4 tabs —
     // Ficheiros (a árvore res://) · Assets (a grelha com miniaturas) ·
     // Consola · Animação (a timeline de sempre)
+    // FASE UI F: 0 = FECHADO (o painel abre/fecha pelo botão Painéis;
+    // a ÚLTIMA aba fica em lastTab — o Painéis reabre-a)
     int bottomTab = 0;        // 0 fechado · 1 ficheiros · 2 assets ·
                               // 3 consola · 4 animação
+    // FASE UI F: a ÚLTIMA aba aberta (persiste no layout.json; os
+    // ficheiros antigos não têm a linha → default 1)
+    int  lastTab = 1;
+    // FASE UI F: o dono JÁ ARRASTOU a altura nesta abertura (os defaults
+    // ~30%/~40% da tab só se aplicam sem isto; morre ao fechar)
+    bool hCustom = false;
     f32  drawerH = 240.0f;    // default spec E (160..400)
     bool consoleOnlyErrors = false;
     bool consoleAutoScroll = true;
@@ -100,9 +113,9 @@ struct BottomState {
     // tudo) e a vista (grelha/lista — o toggle da imagem 1)
     int  filesFolder = -1;
     bool assetsList = false;
-    // 0.10-M (PASSO 4): as métricas de BLOCOS do frame (o main alimenta
-    // com g_blockFrame — o chip «FPS · TICs» cresce para «… · bl n/m» SÓ
-    // quando há blocos em cena; sem blocos o layout é O DE SEMPRE)
+    // 0.10-M (PASSO 4 · APOSENTADO NA FASE UI F): as métricas de BLOCOS
+    // do frame — o «· bl n/m» SAIU do estado (a ordem do dono); os
+    // campos ficam (compat dos chamadores) mas NADA os desenha
     u32  blDrawn = 0;
     u32  blTotal = 0;
     // 0.9.6.10: a consola da imagem 1 — TABS Consola/Logs/Erros/Avisos
@@ -130,19 +143,35 @@ struct FilesTree {
 };
 
 // ---- layout PURO --------------------------------------------------------------
-// PASSO 1 (0.9.6.14): a faixa FPS·TICs da tab bar (o canto direito) — a
+// FASE UI F: a ALTURA INICIAL por tab (a ordem do dono: ~30% nos
+// Ficheiros/Assets/Consola, ~40% na Animação) — a FONTE ÚNICA do
+// default; o draw aplica-a ao ENTRAR na tab (open ou troca) enquanto o
+// dono não arrastou a pega (hCustom)
+inline f32 tabDefaultHPct(int tab) { return tab == 4 ? 0.40f : 0.30f; }
+// a ALTURA INICIAL em px do tab dado (contentH em px — o contentRect;
+// clamp ao intervalo cru da pega 160..400 — o cap EFETIVO é o
+// safe::effectiveDrawerH, que fala depois no layout)
+inline f32 tabDefaultH(int tab, f32 contentH) {
+    f32 d = contentH * tabDefaultHPct(tab);
+    if (d < safe::kDrawerMin) d = safe::kDrawerMin;
+    if (d > safe::kDrawerMax) d = safe::kDrawerMax;
+    return d;
+}
+// PASSO 1 (0.9.6.14): a faixa FPS·TICs da barra (o canto direito) — a
 // largura é RESERVA FIXA em dp (o layout é PURO, não mede fonte; o draw
 // right-alinha o texto e o fit trunca honestamente se não couber)
-constexpr f32 kFpsW = 112.0f;   // dp — o canto direito da tab bar
-// 0.10-M (PASSO 4): o EXTRA da reserva quando há BLOCOS em cena (o chip
-// ganha «· bl n/m» — o HUD do render por blocos; sem blocos a reserva é
-// a de sempre e o layout fica INTACTO byte a byte)
-constexpr f32 kFpsWBlocks = 72.0f;   // dp — «· bl 123/920» no caption
+constexpr f32 kFpsW = 112.0f;   // dp — o canto direito da barra
+// FASE UI F: o botão «Painéis ▾» (a esquerda) — reserva fixa dp (o
+// rótulo + o chevron cabem; o layout é PURO)
+constexpr f32 kPanelsBtnW = 96.0f;   // dp
 // PASSO 2 (0.9.6.15 — spec do dono): a PEGA do drawer tem 24dp de altura
 // (era 12 — a MESMA medida dos divisores dos painéis, kDividerHitW) e os
 // chips INTERNOS da consola são de CABEÇALHO 28dp (era 36 — o piso
 // kHeadFloorDp; a chip «Consola» duplicada SAIU)
 constexpr f32 kDrawerHandleH = 24.0f;  // dp — a pega de arrasto do drawer
+// FASE UI F: a fila de TABS DENTRO do painel (40dp — o toque mínimo da
+// fase; as tabs SAÍRAM da barra de 32 para o cabeçalho do painel)
+constexpr f32 kTabRowH = 40.0f;        // dp
 constexpr f32 kConChipH      = 28.0f;  // dp — os chips Logs/Erros/Avisos
 //
 // P2-bis (0.9.6.16 — A DECISÃO DO DONO sobre «consola ≥60%»): com a tab
@@ -171,18 +200,21 @@ inline bool conCmdVisible(f32 contentHdp) {
 }
 
 struct Layout {
-    UiRect tabBar{};             // faixa 32dp (bottomTabRect)
-    UiRect tab[4]{};             // 0.9.6.10: Ficheiros/Assets/Consola/Animação
-                                 // (PASSO 1: à esquerda do canto FPS·TICs)
-    UiRect fps{};                // PASSO 1: o canto direito «FPS n · TICs n»
-    UiRect underline{};          // do tab ativo (2dp accent)
-    UiRect drawer{};             // conteúdo (por CIMA da tab bar)
+    UiRect tabBar{};             // a BARRA INFERIOR fina 32dp (bottomTabRect)
+    UiRect panelsBtn{};          // FASE UI F: o botão «Painéis ▾» (a esquerda)
+    UiRect fps{};                // o canto direito «N FPS · N TICs»
+    UiRect drawer{};             // o PAINEL ENCAIXADO (por cima da barra)
     UiRect handle{};             // pega de arrasto (borda sup. do drawer)
+    UiRect tabRow{};             // FASE UI F: a fila de tabs DENTRO do painel
+    UiRect tab[4]{};             // Ficheiros/Assets/Consola/Animação (na fila)
+    UiRect underline{};          // do tab ativo (2dp accent)
+    UiRect content{};            // o conteúdo da aba (sob a fila de tabs)
     f32    drawerTop = 0.0f;     // y da pega
 };
 
 // resolve o layout (drawerH CLAMPADO a 160..400 em passos de 8; a altura
-// EFETIVA é capada pela fonte única — kViewportMinH e 35% do content)
+// EFETIVA é capada pela fonte única — kViewportMinH e 35% do content; a
+// tab Animação cap a 40% pela ordem da FASE UI F)
 Layout layout(f32 sw, f32 sh, const safe::Insets& in, const BottomState& st);
 
 // ---- DRAW -----------------------------------------------------------------------
@@ -212,6 +244,8 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
 // serializa/parse PURO do estado do layout (bottom + inspector + painéis) —
 // afervel no CI. Formato (uma linha por campo, chave=valor):
 //   bottomTab=N drawerH=N inspector=0/1 inspCollapsed=0x..
+// FASE UI F: lastTab=N (a ÚLTIMA aba aberta — AUSENTE nos ficheiros
+// antigos = default 1; o formato é retrocompatível)
 // GRUPO D: hierW=N inspW=N (larguras dp dos divisores; AUSENTE nos
 // ficheiros antigos = default −1 — o formato é retrocompatível)
 // P2-bis: inspPinned=0/1 (o pin do inspector; AUSENTE nos ficheiros

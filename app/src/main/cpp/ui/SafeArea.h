@@ -95,17 +95,26 @@ constexpr f32 kViewportMinH = 88.0f;
 // kDrawerMaxPct da ALTURA do content (35%). O cap vive AQUI (a fonte
 // única) — a pega continua a escrever 160..400 no ESTADO cru, mas o que
 // desenha e o que come o viewport é o EFETIVO.
-constexpr f32 kDrawerMaxPct = 0.35f;
+// FASE UI F (a ordem do dono): a tab ANIMAÇÃO abre a ~40% — o cap dela
+// é kDrawerMaxPctAnim (os Ficheiros/Assets/Consola ficam nos 35%).
+constexpr f32 kDrawerMaxPct     = 0.35f;
+constexpr f32 kDrawerMaxPctAnim = 0.40f;
 
 // P-08 (GRUPO J1 · R-022) — A ALTURA EFETIVA DO DRAWER (a fonte ÚNICA).
 // Ordem: clamp da pega (160..400) → o CAP DUPLO pelo piso do viewport
 // central E pelo teto de 35% da altura do content (o MENOR manda —
 // kViewportMinH garante a toolbar/strip, kDrawerMaxPct garante a spec do
 // PASSO 2) → passos de 8dp.
+// FASE UI F: o teto da tab entra POR PARÂMETRO (o default mantém os 35%
+// — os chamadores da Animação passam kDrawerMaxPctAnim) e o PISO
+// efetivo também (minHp — a Animação cresce até caber a timeline
+// kTimelineH+pega+fila quando o ecrã permite; o CAP continua a mandar
+// nos ecrãs pequenos — a timeline clipa, nada cruza a barra).
 // vpH = safe::viewportRect(sw, sh, in).h (a altura do viewport lógico);
 // contentH = a altura do CONTENTRECT em px (sh − in.top − in.bottom) —
 // o 35% é da ALTURA QUE O EDITOR VÊ (a superfície menos os insets).
-inline f32 effectiveDrawerH(f32 rawDrawerH, f32 vpH, f32 contentH) {
+inline f32 effectiveDrawerH(f32 rawDrawerH, f32 vpH, f32 contentH,
+                            f32 maxPct = kDrawerMaxPct, f32 minHp = 0.0f) {
     f32 d = rawDrawerH;
     if (d < theme::dp(kDrawerMin)) {
         d = theme::dp(kDrawerMin);
@@ -115,14 +124,20 @@ inline f32 effectiveDrawerH(f32 rawDrawerH, f32 vpH, f32 contentH) {
     }
     f32 cap = vpH - theme::dp(kViewportMinH);
     if (contentH > 0.0f) {
-        const f32 cap35 = contentH * kDrawerMaxPct;
-        if (cap35 < cap) {
-            cap = cap35;
+        const f32 capPct = contentH * (maxPct > 0.0f ? maxPct : kDrawerMaxPct);
+        if (capPct < cap) {
+            cap = capPct;
         }
     }
     const f32 capPos = cap > 0.0f ? cap : 0.0f;
     if (d > capPos) {
         d = capPos;
+    }
+    // FASE UI F: o PISO da tab (a Animação cresce até caber a timeline —
+    // nunca acima do CAP: nos ecrãs pequenos o cap manda e a timeline
+    // clipa dentro do rect)
+    if (minHp > 0.0f && minHp < capPos && d < minHp) {
+        d = minHp;
     }
     if (d <= 0.0f) {
         return 0.0f;

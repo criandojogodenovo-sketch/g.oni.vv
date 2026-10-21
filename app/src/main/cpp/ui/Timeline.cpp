@@ -198,13 +198,23 @@ void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
     const f32 sh = ui.screenHeight();
     const UiRect r = rectIn;   // 0.9.0: o rect vem do chamador (strip OU drawer)
 
+    // FASE UI F: A TIMELINE NUNCA SAI DO SEU RECT — o painel/strip desenha
+    // kTimelineH FIXOS e o rect do painel encaixado pode ser MENOR (os
+    // ecrãs pequenos capam o drawer antes do mínimo da timeline). O clip
+    // é a rede (só a STRIP — os overlays de CLIPS/+track são pop-ups de
+    // ecrã inteiro e desenham DEPOIS, fora do clip): o quadro/régua/faixas
+    // cortam NO FUNDO do rect, nada cruza a barra de baixo (a regra da
+    // fase: nada tapa nada nem sai).
+    const f32 th = ui.fontHeight();   // (a strip e as overlays leem)
+    {
+        UiContext::ScopedClip clipF(ui, r);
+
     // ---- painel (strip) ------------------------------------------------------
     ui.panel(r.x, r.y, r.w, kTimelineH, theme::PANEL);
     // 0.12-QoL A: a borda do painel INATIVO é o border cinza (o âmbar só
     // no ativo/selecionado — a ordem do dono)
     ui.frame(r.x, r.y, r.w, kTimelineH, 2.0f, theme::LINE);
     ui.panel(r.x, r.y + theme::dp(kHeaderH) - 1.0f, r.w, 1.0f, theme::LINE);
-    const f32 th = ui.fontHeight();
 
     // ---- preview (avança com dt REAL — editor, passo fixo não corre) --------
     if (pl->playing) {
@@ -530,6 +540,7 @@ void drawTimelineInRect(UiContext& ui, const InputState& in, Scene& scene,
         ui.labelFitted(lxTc, rulerY + kRulerH - 2.0f, tc, theme::ACCENT,
                        64.0f);
     }
+    }   // fim do clip da STRIP (os overlays desenham sem clip)
 
     // ---- overlay de CLIPS (0.8.1): lista + "novo (edit)" --------------------
     if (tl.clipMenu) {

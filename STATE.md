@@ -1,10 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-21 · vc: 115 · Último commit: este (a FASE UI E — o
-Inspector: o cabeçalho do TIC com o NOME em brasa + o TIPO por baixo
-(44dp), as BARRINHAS do eixo nas caixas Pos/Rot/Escala (as letras
-X/Y/Z morreram), as secções recolhíveis confirmadas, o vazio discreto
-com o «+ criar TIC»; ui_inspector_cabecalho + M-UIe)
+Atualizado: 2026-10-21 · vc: 116 · Último commit: este (a FASE UI F — a barra fina
+32dp com o «Painéis ▾» + o estado «60 FPS · 6 TICs» (o bl saiu), as 4 TABS na fila
+40dp do painel ENCAIXADO, lastTab, ~30/40%, a timeline cabendo, o ponto vermelho;
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -12,8 +10,8 @@ com o «+ criar TIC»; ui_inspector_cabecalho + M-UIe)
 
 ## §1 Onde estamos
 
-- **Campanha FASE UI (O REDESIGN VISUAL, envios 1/5 + 2/5) — EM CURSO
-  (A..E fechadas, vc 115; os envios 3/5..5/5 não chegaram)** (a cláusula
+- **Campanha FASE UI (O REDESIGN VISUAL, envios 1/5..3/5) — EM CURSO
+  (A..F fechadas, vc 116; os envios 4/5..5/5 não chegaram)** (a cláusula
   calma: SÓ visual, layout e UX — core/V.ONI/importadores/física/.gmesh
   intocados; um commit por parte, CI verde entre elas; a história vive
   no RELATORIO-FASE-UI.md, os 16 itens no §6, os não-feitos no §8).
@@ -24,32 +22,37 @@ com o «+ criar TIC»; ui_inspector_cabecalho + M-UIe)
   escala 4/8/12/16 + raios 6-8 + o espelho Java alinhado + o contraste
   validado antes do commit; pins ui_tokens_brasa + ui_sobreposicao_topbar
   + M-UIa; 9 recalibrações com nota.
-  **B (vc 112)**: A BARRA 40DP — a direita nova (undo/redo/guardar
-  subiram do viewport para TODOS os modos; os ids 3/19/30/31/32
-  aposentados, os 20/21/22 novos), o Pause na PLAY BAR (o mundo congelado
-  de verdade), o «Android» nas Definições, a fila do viewport morta para
-  o chip ⋯; O ACHADO DO CI (o A vermelho na sonda 35.2 — a lacuna dos
-  DOIS alvos): a cura + o build_c33.py NOVO + 11 sondas stale
-  recalibradas; ui_topbar_40dp_composicao + M-UIb; test_core 0 falhas +
-  c33 1009/0 local.
+  **B (vc 112)**: A BARRA 40DP — a direita nova (undo/redo/guardar subiram
+  do viewport para TODOS os modos; os ids 3/19/30/31/32 aposentados, os
+  20/21/22 novos), o Pause na PLAY BAR (o mundo congelado de verdade), o
+  «Android» nas Definições, a fila do viewport morta para o chip ⋯; O
+  ACHADO DO CI (o A vermelho na sonda 35.2 — a lacuna dos DOIS alvos): a
+  cura + o build_c33.py NOVO + 11 sondas stale recalibradas;
+  ui_topbar_40dp_composicao + M-UIb; test_core 0 falhas + c33 1009/0 local.
   **C (vc 113)**: A HIERARQUIA — as linhas 40dp (kRowH na fonte única), o
-  OLHO e o ⋮ SÓ na selecionada (draw gated + hit gated — a MESMA
-  condição; nas outras a zona é corpo), o nome de largura inteira e a
-  indentação pela escala (16); ui_hierarquia_40dp + M-UIc; 6
-  recalibrações; test_core 0 falhas + c33 1009/0 local.
+  OLHO e o ⋮ SÓ na selecionada (draw gated + hit gated — a MESMA condição;
+  nas outras a zona é corpo), o nome de largura inteira e a indentação pela
+  escala (16); ui_hierarquia_40dp + M-UIc; 6 recalibrações; test_core 0
+  falhas + c33 1009/0 local.
   **D (vc 114)**: O VIEWPORT — a coluna das 4 FERRAMENTAS (o ativo É a
-  brasa), o Íman e a MÃO desceram a CHIPS sob o rail (os MESMOS ids
-  33/36; o par INTEIRO tem de caber — o achado da M-UId), os divisores
-  (24dp + os pisos) e a persistência layout.json confirmados; 
-  pan_rail_sexta recalibrado + ui_divisores_persistencia + M-UId;
-  test_core 0 falhas + c33 1010/0 local.
-  **E (vc 115)**: O INSPECTOR — o cabeçalho do TIC (o NOME em brasa +
-  o TIPO por baixo, a lista das secções presentes; 44dp com seleção), a
+  brasa), o Íman e a MÃO desceram a CHIPS sob o rail (os MESMOS ids 33/36;
+  o par INTEIRO tem de caber — o achado da M-UId), os divisores (24dp + os
+  pisos) e a persistência layout.json confirmados; pan_rail_sexta
+  recalibrado + ui_divisores_persistencia + M-UId; test_core 0 falhas +
+  c33 1010/0 local.
+  **E (vc 115)**: O INSPECTOR — o cabeçalho do TIC (o NOME em brasa + o
+  TIPO por baixo, a lista das secções presentes; 44dp com seleção), a
   BARRINHA do eixo nas caixas Pos/Rot/Escala (3×12dp na cor do eixo; as
-  letras X/Y/Z morreram — o valor ganhou o espaço), as secções
-  recolhíveis confirmadas no plano, o vazio discreto com o «+ criar
-  TIC»; ui_inspector_cabecalho + M-UIe; 9 recalibrações; test_core 0
-  falhas + c33 1010/0 local.
+  letras X/Y/Z morreram — o valor ganhou o espaço), as secções recolhíveis
+  confirmadas no plano, o vazio discreto com o «+ criar TIC»;
+  ui_inspector_cabecalho + M-UIe; 9 recalibrações; test_core 0 falhas +
+  c33 1010/0 local.
+  **F (vc 116)**: A BARRA FINA + O PAINEL ENCAIXADO — o «Painéis ▾»
+  (contorno brasa aberto) + o estado «60 FPS · 6 TICs» (o bl saiu), as 4
+  TABS na FILA 40dp do painel (o viewport SOBE; conteúdo = Layout::content),
+  a ÚLTIMA aba lembrada (lastTab), alturas ~30%/~40% (hCustom manda), a
+  Animação com teto 40% + PISO que cabe a timeline (clipada) e o PONTO
+  VERMELHO do erro; ui_paineis_dock + M-UIf; c33 13.7h/i/20.5/31.
 - **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A, B, C, o
   C-FIX e o D fechadas, vc 110; o FECHO a seguir)** (a cláusula calma: SÓ o
   prompt; a V.ONI intocada; a história vive no RELATORIO-0.12-Y-ABERTURA.md
@@ -105,13 +108,7 @@ com o «+ criar TIC»; ui_inspector_cabecalho + M-UIe)
   ×9, R-050), B-2 o Inspector de UI (pins ×5), B-3 o canvas (pins ×3),
   B-4 as ações de cena 2-tap (pins ×4, R-051).
 - **Campanha 0.12-A (bugs P0) — FECHADA (vc 82)** (os DETALHES vivem no
-  RELATORIO-0.12-A.md + no INVEST-RAM): A-1 as rows LOD JÁ EXISTIAM,
-  A-2 o refreshCatalog no arranque, A-3 o scissor3dRect + o tooltip,
-  A-4 o veredito RAM (a cache de blocos a ciclizar).
-- **Campanha 0.11-Y (identidade visual) — FECHADA** (o fecho é o commit
-  32a6785: os 13 PNGs + o pin y_fecho; a FASE 31 fica no replay).
-- **0.11-CTX — FECHADA** com CI verde (os detalhes no §2 e no relatório).
-- **0.11-W (Render Systems) com CI verde** — falta o PIN do dono no C33 real; o fecho (BLOCO B) só por ordem do dono.
+  RELATORIO-0.12-A.md + no INVEST-RAM): A-1 as rows LOD JÁ EXISTIAM,A-2 o refreshCatalog no arranque, A-3 o scissor3dRect + o tooltip,A-4 o veredito RAM (a cache de blocos a ciclizar).- **Campanha 0.11-Y (identidade visual) — FECHADA** (o fecho é o commit32a6785: os 13 PNGs + o pin y_fecho; a FASE 31 fica no replay).- **0.11-CTX — FECHADA** com CI verde (os detalhes no §2 e no relatório).- **0.11-W (Render Systems) com CI verde** — falta o PIN do dono no C33 real; o fecho (BLOCO B) só por ordem do dono.
 
 ## §2 O que está FEITO
 

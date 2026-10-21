@@ -389,3 +389,94 @@ do §5.
   que eles ordenarem (a fila é a ordem do dono).
 - **Core, V.ONI, importadores, física e .gmesh**: INTOCÁVEIS (a
   cláusula calma da fase — o diff da fase não os toca).
+
+---
+
+# ENVIOS 3/5 + 4/5 (as partes F, G e H — um commit por parte)
+
+## §9 PARTE F — BARRA INFERIOR E PAINEL ENCAIXADO (a ordem do dono)
+
+**O que mudou** (ui/BottomPanel.h/.cpp + ui/SafeArea.h + o main):
+
+- **A BARRA FINA 32dp**: à ESQUERDA o botão **«Painéis ▾»** (o chip 24dp
+  centrado na barra; o ALVO é a célula inteira — a barra É a faixa de
+  toque) e à DIREITA o estado **«60 FPS · 6 TICs»** (caption 12sp text2,
+  right-aligned na reserva kFpsW 112dp). O «· bl n/m» APOSENTOU (a ordem
+  literal: «remover o bl 2/2») — a reserva deixou de crescer (o pin
+  20.5 recalibrado: a reserva É FIXA). O chevron desenha por geometria
+  (2 traços): para BAIXO fechado, para CIMA aberto.
+- **O CONTORNO BRASA**: com o painel aberto o chip leva `frameRounded`
+  na cor accent (a ordem: «contorno brasa quando o painel está aberto»);
+  fechado, o border cinza de sempre.
+- **O PAINEL ENCAIXADO** (não é janela por cima): as 4 TABS saíram da
+  barra para o CABEÇALHO do painel — **fila de 40dp** (o toque mínimo da
+  fase) sob a pega de 24dp, com o ícone + a palavra 12sp, o ativo em
+  accent + o underline 2dp. O conteúdo é a FONTE ÚNICA `Layout::content`
+  (o draw das 4 abas E o main para a timeline partilham o MESMO rect —
+  a classe do R-019 nunca mais). O viewport SOBE: os rects do centro
+  comem a altura pelo `panelsRect`/`currentDrawerH` (o mecanismo P-08
+  intocado — o pin prova o encaixe).
+- **ABRIR/FECHAR**: o Painéis abre com a **ÚLTIMA aba** (`lastTab` —
+  nova no BottomState, persistida no layout.json como `lastTab=N`,
+  retrocompatível: os ficheiros antigos sem a linha ficam com o default
+  1). Fecha ao tocar no Painéis (▾) — a aba ativa NÃO fecha mais (a
+  ordem: «fecha ao tocar em ▾ ou em Painéis»).
+- **A ALTURA INICIAL por tab**: `tabDefaultHPct`/`tabDefaultH` (a fonte
+  única pura) — **~30%** (Ficheiros/Assets/Consola) e **~40%**
+  (Animação), clamp ao intervalo cru 160..400; aplica-se ao ENTRAR na
+  tab (abrir ou trocar) enquanto o dono não arrastou a pega
+  (`hCustom` — o arrasto manda e morre ao fechar). O CAP efetivo
+  acompanha: a Animação tem teto 40% (`safe::kDrawerMaxPctAnim`) e
+  **PISO** — a `effectiveDrawerH` cresce o drawer até caber a timeline
+  (`kTimelineH` + pega + fila) quando o ecrã permite; nos ecrãs pequenos
+  o cap manda e a TIMELINE CLIPA dentro do rect (`ScopedClip` na strip
+  de ui/Timeline.cpp — os overlays de CLIPS/+track continuam pop-ups de
+  ecrã inteiro, fora do clip). Nada cruza a barra de baixo em nenhum
+  ecrã (a regra da fase).
+- **O PONTO VERMELHO**: com linhas `E/` no engine.log (o MESMO
+  classificador da consola), a ABA Consola e o BOTÃO Painéis acendem o
+  ponto danger de 6dp (a ordem: «um ponto vermelho na aba e no botão
+  quando há erro»).
+- **A ANIMAÇÃO**: a timeline de sempre (régua de tempo, uma faixa por
+  propriedade, keyframes em losango, o cursor de tempo EM BRASA) — a
+  ordem confirma o que já vivia em ui/Timeline.cpp; o que mudou é a
+  casa (o piso de altura + o clip) e o rect (a fonte única).
+
+**A prova** (tests/test_fase_ui.cpp — o pin `ui_paineis_dock`):
+(a) a barra em **5 ecrãs** (paisagem-S/M/L × retrato-M/L) × os 5 estados
+do painel — o botão Painéis e o estado disjuntos DENTRO da barra;
+(b) o ENCAIXE — pega/fila/conteúdo dentro do painel, o fundo do painel
+== o topo da barra, a altura efetiva == a fonte única (cap + piso da
+tab); (c) os defaults 30/40% + o clamp; (d) a Animação cabe a timeline
+(o piso efetivo num ecrã de referência); (e) a FONTE — o rótulo
+«Painéis», os ≥3 `kTheme.danger` (os 2 pontos + as linhas E/), o
+`bl %u/%u` MORTO, o estado «%d FPS · %u TICs», o contorno accent aberto;
+(f) o roundtrip `lastTab` + o retrocompatível sem a linha.
+
+**M-UIf** (o encaixe frouxo: o fundo do painel +4px DENTRO da barra)
+vermelho→reposto→verde: `ui_paineis_dock` «L.drawer.y + L.drawer.h <=
+L.tabBar.y» VERMELHO (20 EXPECTs; capturado ao vivo). A cura é a
+reposição; a lição fica.
+
+**Recalibrações com nota**: test_012a_contadores (o `content()` do Env
+lê a FONTE ÚNICA Layout::content), test_wiring090 (o tap da chip Erros
+lê `L.content.y` — a fila desceu o conteúdo dp(40); o roundtrip do
+layout leva lastTab), c33_virtual 13.7h (a janela dos chips +80px e o
+tap a 590 — a fila de tabs), 13.7i (o contentH desconta a fila; o
+degradado honesto da regra 60%: na banda 776×336dp o cap 35% deixa o
+conteúdo < 80dp — geometricamente impossível; o que fica é o campo de
+comando FORA e a lista como o resto inteiro), 20.5 (a reserva FIXA — o
+bl saiu), FASE 31 (a timeline clipada — CruzaTabBar=0 em 13 ecrãs).
+
+**Verificação**: test_core 0 falhas (a corrida completa local) ·
+c33_virtual **1010/0** · theme_hex/ui_vocab/glyph/hierarchy VERDES ·
+docs-lint VERDE 121 · release-identity/R-015 VERDE vc 116 ·
+**versionCode: 115 → 116** (o §14 do RELATORIO-0.9.6.md declara o par
+no MESMO commit).
+
+**O que NÃO foi feito na F**: o estado «em mono» continua no atlas sans
+(o 2.º atlas mono é a dívida DECLARADA da parte A — §8); o «· bl n/m»
+não ganhou nome novo (a ordem dizia «remover OU mostrá-lo com nome
+claro» — remover é o simples e foi o escolhido); a timeline mantém o
+cap de 3 faixas visíveis com o «+N tracks» de sempre (a lista honesta
+da 0.8.0).
