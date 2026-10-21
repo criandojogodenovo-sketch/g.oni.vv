@@ -31,7 +31,9 @@
 #include "ui/FontAtlas.h"          // 0.12-Y-fix: TextMetrics (o plano do inspector)
 #include "render/Camera.h"
 #include "render/Material.h"       // 0.12-Y-fix: o bind do uBaseColorTex
+#include "render/SkyRenderer.h"    // 3.Y-D: as puras do céu + o quad fullscreen
 #include "render/Texture.h"        // 0.12-Y-fix: a textura do pin do bind
+#include "ui/UiEditor.h"           // 3.Y-D: commitTextInput (os hexes 13/14/15)
 #include "render/QuadBatch.h"
 #include "platform/InputState.h"
 #include <GLES3/gl3.h>             // 0.12-Y-fix: o stub (stats + fb do bind)
@@ -77,6 +79,10 @@ u32 countSub(const std::string& hay, const std::string& needle) {
     }
     return n;
 }
+
+// 3.Y-D: o stripper de comentários vive no TestFramework.h (test:: — o
+// padrão partilhado; a M-Yd1 provou que a prosa não pode satisfazer o
+// contrato de fonte)
 
 // o env do draw do chrome (o padrão QolEnv do test_012qol — densidade 1)
 struct YEnv {
@@ -883,4 +889,429 @@ TEST(pbr_texture_bind) {
     rmt.destroy();
     glstub::fb::enabled = false;
     glstub::fb::resetState();
+}
+
+// ---- PIN env_sky_type (0.12-Y 3.Y-D) -----------------------------------------
+// A ordem do dono: «O COMPONENTE ENVIRONMENT adiciona as propriedades
+// skyType/skyColorHorizon/skyColorZenith/sunColor/sunDirection/
+// cloudCoverage/cloudSpeed» + «env_sky_type: a serialização do .goni guarda
+// e carrega o skyType e as propriedades das nuvens». As puras do céu (o
+// padrão Pbr.h — o FS replica LINHA A LINHA) + o componente + o roundtrip +
+// o CONTRATO NO FONTE + o draw REAL no stub (o uTime é a alma — M-Yd1).
+TEST(env_sky_type) {
+    // (1) AS PURAS — o gradiente (o horizonte e o zénite nos extremos)
+    {
+        const f32 hor[3] = {0.29f, 0.56f, 0.89f};
+        const f32 zen[3] = {0.12f, 0.23f, 0.54f};
+        f32 out[3];
+        sky::skyGradient(0.0f, hor, zen, out);
+        EXPECT_MSG(out[0] == hor[0] && out[1] == hor[1] && out[2] == hor[2],
+                   "env_sky_type: dir.y=0 devia ser a cor do HORIZONTE");
+        sky::skyGradient(1.0f, hor, zen, out);
+        EXPECT_MSG(nearEq(out[0], zen[0], 1e-5f) &&
+                       nearEq(out[1], zen[1], 1e-5f) &&
+                       nearEq(out[2], zen[2], 1e-5f),
+                   "env_sky_type: dir.y=1 devia ser a cor do ZÉNITE");
+        sky::skyGradient(-0.5f, hor, zen, out);   // abaixo do horizonte
+        EXPECT_MSG(out[1] == hor[1],
+                   "env_sky_type: abaixo do horizonte fica o HORIZONTE "
+                   "(o clamp 0..1 morreu)");
+        sky::skyGradient(0.5f, hor, zen, out);
+        EXPECT_MSG(nearEq(out[0], (hor[0] + zen[0]) * 0.5f, 1e-5f),
+                   "env_sky_type: o meio do gradiente é o MIX 0.5");
+        // o sol: o disco e o halo (os limites)
+        EXPECT_MSG(sky::sunDisk(1.0f) == 1.0f,
+                   "env_sky_type: o centro do sol é o DISCO cheio");
+        EXPECT_MSG(sky::sunDisk(0.9f) == 0.0f,
+                   "env_sky_type: fora do disco não há disco");
+        EXPECT_MSG(nearEq(sky::sunGlow(1.0f), sky::kSunGlowGain, 1e-5f),
+                   "env_sky_type: o halo no centro vale o ganho");
+        EXPECT_MSG(sky::sunGlow(0.0f) == 0.0f,
+                   "env_sky_type: o halo morre a 90° do sol");
+        // o fade das nuvens no horizonte
+        EXPECT_MSG(sky::horizonFade(0.0f) == 0.0f &&
+                       sky::horizonFade(1.0f) == 1.0f,
+                   "env_sky_type: as nuvens morrem no horizonte e vivem no "
+                   "zénite");
+        // a cobertura: 0 = céu limpo (TODO o FBM debaixo do limiar),
+        // 1 = nublado (o meio do FBM é nuvem)
+        EXPECT_MSG(sky::cloudAlpha(0.95f, 0.0f) == 0.0f,
+                   "env_sky_type: coverage 0 = CÉU LIMPO (a nuvem morreu)");
+        EXPECT_MSG(sky::cloudAlpha(0.5f, 1.0f) == 1.0f,
+                   "env_sky_type: coverage 1 = NUBLADO (o céu sumiu)");
+        EXPECT_MSG(sky::cloudAlpha(0.5f, 0.8f) >=
+                       sky::cloudAlpha(0.5f, 0.4f),
+                   "env_sky_type: mais cobertura NUNCA dá menos nuvem");
+        // o FBM: os limites [0,1] + o determinismo (o mesmo uv = o mesmo
+        // valor — o hash é inteiro, sem sin)
+        f32 mn = 2.0f, mx = -2.0f;
+        for (int i = 0; i < 64; ++i) {
+            const f32 v = sky::fbm2(i * 0.137f, i * 0.291f - 3.0f);
+            if (v < mn) mn = v;
+            if (v > mx) mx = v;
+        }
+        EXPECT_MSG(mn >= 0.0f && mx <= 1.0f,
+                   "env_sky_type: o FBM saiu de [0,1] (mn=%.3f mx=%.3f)",
+                   (double)mn, (double)mx);
+        EXPECT_MSG(sky::fbm2(1.7f, 2.3f) == sky::fbm2(1.7f, 2.3f),
+                   "env_sky_type: o ruído NÃO é determinístico");
+        // (2) O VENTO E O TEMPO — a M-Yd1 vive AQUI (a nuvem parada é o
+        // defeito que o dono nomeou: «o shader não usa o tempo»)
+        f32 w0[2], w1[2], wz[2];
+        sky::windOffset(0.0f, 0.02f, w0);
+        EXPECT_MSG(w0[0] == 0.0f && w0[1] == 0.0f,
+                   "env_sky_type: o tempo 0 é o offset 0");
+        sky::windOffset(10.0f, 0.02f, w1);
+        EXPECT_MSG(w1[0] > w0[0] && w1[1] > w0[1],
+                   "env_sky_type: O TEMPO NÃO EMPURRA AS NUVENS (M-Yd1 "
+                   "vermelho — o céu ficou parado)");
+        sky::windOffset(1000.0f, 0.0f, wz);
+        EXPECT_MSG(wz[0] == 0.0f && wz[1] == 0.0f,
+                   "env_sky_type: vento 0 = parado de sempre (o speed manda)");
+    }
+    // (3) A BASE DA CÂMARA (a extração da vista — a orbit e a de jogo)
+    {
+        const Mat4 ident = Mat4::identity();
+        Vec3 r, u, f;
+        EXPECT(sky::viewBasis(ident, r, u, f));
+        EXPECT_MSG(nearEq(r.x, 1.0f, 1e-5f) && nearEq(u.y, 1.0f, 1e-5f) &&
+                       nearEq(f.z, -1.0f, 1e-5f),
+                   "env_sky_type: a identidade dá right/up/fwd canónicos");
+        // a orbit de sempre: eye (0,0,6) → target origem olha para −Z
+        const Mat4 view = Mat4::lookAt(Vec3{0.0f, 0.0f, 6.0f},
+                                       Vec3{0.0f, 0.0f, 0.0f},
+                                       Vec3{0.0f, 1.0f, 0.0f});
+        EXPECT(sky::viewBasis(view, r, u, f));
+        EXPECT_MSG(nearEq(f.z, -1.0f, 1e-4f) && nearEq(r.x, 1.0f, 1e-4f) &&
+                       nearEq(u.y, 1.0f, 1e-4f),
+                   "env_sky_type: a base do lookAt extrai-se das LINHAS");
+        // o tan/aspect a partir da PROJEÇÃO (a fonte perspective da casa)
+        const Mat4 proj = Mat4::perspective(1.0472f, 2.0f, 0.5f, 450.0f);
+        EXPECT_MSG(nearEq(sky::tanFovYFromProj(proj), 0.5774f, 1e-3f),
+                   "env_sky_type: tan(fovY/2) sai do m[5] da projeção");
+        EXPECT_MSG(nearEq(sky::aspectFromProj(proj), 2.0f, 1e-3f),
+                   "env_sky_type: o aspect sai da razão m[5]/m[0]");
+        // a direção: o centro do ecrã É a frente; o canto direito abre
+        Vec3 d;
+        sky::viewDir(0.0f, 0.0f, r, u, f, 2.0f, 0.5774f, d);
+        EXPECT_MSG(nearEq(d.x, 0.0f, 1e-5f) && nearEq(d.z, -1.0f, 1e-5f),
+                   "env_sky_type: o ndc (0,0) olha para a FRENTE");
+        sky::viewDir(1.0f, 0.0f, r, u, f, 2.0f, 0.5774f, d);
+        EXPECT_MSG(d.x > 0.0f,
+                   "env_sky_type: o ndc x=1 abre para a DIREITA da câmara");
+    }
+    // (4) O COMPONENTE — os defaults e a clamp (o padrão AudioPlayer)
+    {
+        Environment e;
+        EXPECT_MSG(e.skyType == Environment::kSkyTypeSolid,
+                   "env_sky_type: o default é o CÓR SÓLIDA (o C de sempre "
+                   "byte a byte)");
+        EXPECT_MSG(nearEq(e.cloudCoverage, 0.4f, 1e-6f) &&
+                       nearEq(e.cloudSpeed, 0.02f, 1e-6f),
+                   "env_sky_type: os defaults do dono (0.4 / 0.02)");
+        EXPECT_MSG(nearEq(e.skyColorHorizon[0],
+                          Environment::kHorizonDefault[0], 1e-7f),
+                   "env_sky_type: o horizonte nasce #4A90E2");
+        e.skyType = 7;                    // corrupção → o sólido seguro
+        e.cloudCoverage = 1.5f;
+        e.cloudSpeed = -0.1f;
+        e.skyColorZenith[0] = 2.0f;
+        e.sunColor[1] = -0.5f;
+        // a direção do sol: só o Y leva o 2.0 (os outros a ZERO — o default
+        // não é nulo; a norma tem de vir de UM eixo só para o teste falar)
+        e.sunDirection[0] = 0.0f;
+        e.sunDirection[1] = 2.0f;
+        e.sunDirection[2] = 0.0f;
+        e.clampFields();
+        EXPECT_MSG(e.skyType == Environment::kSkyTypeSolid,
+                   "env_sky_type: skyType SÓ tem 0 e 1 (a corrupção cai no "
+                   "sólido)");
+        EXPECT_MSG(nearEq(e.cloudCoverage, 1.0f, 1e-6f) &&
+                       nearEq(e.cloudSpeed, 0.0f, 1e-6f),
+                   "env_sky_type: cobertura teto 1, vento piso 0");
+        EXPECT_MSG(nearEq(e.skyColorZenith[0], 1.0f, 1e-6f) &&
+                       nearEq(e.sunColor[1], 0.0f, 1e-6f),
+                   "env_sky_type: as cores vivem em [0,1]");
+        EXPECT_MSG(nearEq(e.sunDirection[1], 1.0f, 1e-5f),
+                   "env_sky_type: a direção do sol NORMALIZA");
+        e.sunDirection[0] = 0.0f;
+        e.sunDirection[1] = 0.0f;
+        e.sunDirection[2] = 0.0f;
+        e.clampFields();
+        EXPECT_MSG(nearEq(e.sunDirection[1],
+                          Environment::kSunDirDefault[1], 1e-6f),
+                   "env_sky_type: o sol nulo cai no default da tarde");
+        EXPECT_MSG(Environment::kSpeedMax == 0.2f,
+                   "env_sky_type: o teto do vento é 0.2 (10× a brisa)");
+    }
+    // (5) O ROUNDTRIP (.goni) — os campos novos sobrevivem E os defaults
+    // saem FORA do dump (o forward-compat da casa)
+    {
+        Scene a;
+        const Handle h = a.create("Ceu");
+        a.get(h)->addComponent<Transform3D>();
+        Environment* e = a.get(h)->addComponent<Environment>();
+        e->skyType = Environment::kSkyTypeProcedural;
+        e->skyColorHorizon[0] = 0.15f;
+        e->skyColorZenith[2] = 0.91f;
+        e->sunColor[1] = 0.75f;
+        e->sunDirection[0] = 0.6f;
+        e->sunDirection[1] = 0.8f;
+        e->sunDirection[2] = 0.0f;   // a norma é 1.0 exata — o roundtrip
+                                     // transporta SEM renormalização visível
+        e->cloudCoverage = 0.85f;
+        e->cloudSpeed = 0.11f;
+        e->clampFields();
+        const std::string dump = SceneSerializer::dump(a);
+        EXPECT_MSG(countSub(dump, "\"skyType\"") == 1,
+                   "env_sky_type: o .goni GUARDA o skyType");
+        EXPECT_MSG(countSub(dump, "\"skyHor\"") == 1 &&
+                       countSub(dump, "\"skyZen\"") == 1 &&
+                       countSub(dump, "\"sunCol\"") == 1 &&
+                       countSub(dump, "\"sunDir\"") == 1,
+                   "env_sky_type: o .goni guarda as cores do céu e do sol");
+        EXPECT_MSG(countSub(dump, "\"cloudCov\"") == 1 &&
+                       countSub(dump, "\"cloudSpd\"") == 1,
+                   "env_sky_type: o .goni guarda AS NUVENS (a ordem do dono)");
+        Scene b;
+        SceneSerializer::LoadCtx ctx;
+        ASSERT(SceneSerializer::loadText(b, dump, ctx));
+        const Handle hf = b.find("Ceu");
+        ASSERT(hf.valid());
+        const Environment* e2 = b.get(hf)->getComponent<Environment>();
+        ASSERT(e2 != nullptr);
+        EXPECT_MSG(e2->skyType == Environment::kSkyTypeProcedural,
+                   "env_sky_type: o céu carrega PROCEDURAL");
+        EXPECT_MSG(nearEq(e2->skyColorHorizon[0], 0.15f, 1e-5f) &&
+                       nearEq(e2->skyColorZenith[2], 0.91f, 1e-5f) &&
+                       nearEq(e2->sunColor[1], 0.75f, 1e-5f),
+                   "env_sky_type: as cores voltam byte a byte");
+        EXPECT_MSG(nearEq(e2->cloudCoverage, 0.85f, 1e-5f) &&
+                       nearEq(e2->cloudSpeed, 0.11f, 1e-5f),
+                   "env_sky_type: as NUVENS voltam byte a byte");
+        EXPECT_MSG(nearEq(e2->sunDirection[0], 0.6f, 1e-4f) &&
+                       nearEq(e2->sunDirection[1], 0.8f, 1e-4f),
+                   "env_sky_type: a direção do sol volta (normalizada)");
+        // os DEFAULTS ficam FORA do dump (o .goni antigo carrega igual)
+        Scene c;
+        const Handle hc = c.create("limpo");
+        c.get(hc)->addComponent<Transform3D>();
+        c.get(hc)->addComponent<Environment>();
+        const std::string dump2 = SceneSerializer::dump(c);
+        EXPECT_MSG(countSub(dump2, "skyType") == 0 &&
+                       countSub(dump2, "cloudCov") == 0 &&
+                       countSub(dump2, "skyHor") == 0,
+                   "env_sky_type: os defaults SAEM FORA do .goni "
+                   "(forward-compat — o M-Yd2 da serialização)");
+    }
+    // (6) O CONTRATO NO FONTE (o FS replica as puras — a M-Yd1 morre AQUI
+    // antes de qualquer GL; SEM comentários — a prosa não satisfaz)
+    {
+        std::string src;
+        ASSERT(readFile(repoRoot() +
+                        "/app/src/main/cpp/render/SkyRenderer.cpp",
+                        src));
+        const std::string code = test::stripCppComments(src);
+        EXPECT_MSG(countSub(code, "uniform float uTime;") >= 1,
+                   "env_sky_type: o FS declara uTime (o relógio das "
+                   "nuvens)");
+        EXPECT_MSG(countSub(code, "vec2(kWindDirX, kWindDirY) * (uTime * uSpeed)") >= 1,
+                   "env_sky_type: O TEMPO EMPURRA O UV DAS NUVENS no FS "
+                   "(a expressão do contrato — M-Yd1 morre AQUI)");
+        EXPECT_MSG(countSub(code, "float fbm2(") >= 1,
+                   "env_sky_type: o FS tem o FBM (a réplica das puras)");
+    }
+    // (7) O DRAW REAL no stub (o padrão pbr_texture_bind): os uniforms
+    // existem PELO NOME e o draw manda O TEMPO (o ÚLTIMO 1f — o contrato
+    // da ordem) e a direção do sol (o ÚLTIMO 3f)
+    {
+        glstub::fb::enabled = true;
+        glstub::fb::resetState();
+        glstub::reset();
+        SkyRenderer s;
+        ASSERT(s.init());
+        s.use();   // o programa do céu fica corrente no stub (o padrão do
+                   // pbr_texture_bind — a consulta registra PELO NOME)
+        const GLint locTime =
+            glGetUniformLocation(glstub::fb::curProg_, "uTime");
+        EXPECT_MSG(locTime >= 0,
+                   "env_sky_type: uTime não existe no programa do céu");
+        EXPECT(glGetUniformLocation(glstub::fb::curProg_, "uSunDir") >= 0);
+        EXPECT(glGetUniformLocation(glstub::fb::curProg_, "uCoverage") >= 0);
+
+        SkyRenderer::Params p;
+        p.time = 3.5f;
+        p.speed = 0.02f;
+        p.coverage = 0.7f;
+        p.sunDir[0] = 0.6f;
+        p.sunDir[1] = 0.8f;
+        p.sunDir[2] = 0.0f;
+        glstub::reset();
+        const DrawStats st = s.draw(p);
+        EXPECT_MSG(st.vertices == 4 && st.drawCalls == 1,
+                   "env_sky_type: o céu é UM quad de 4 vértices");
+        EXPECT_MSG(glstub::stats.lastUniform1f == 3.5f,
+                   "env_sky_type: o uTime vai AO SHADER (%.2f — o tempo é "
+                   "a alma; M-Yd1 morre AQUI)",
+                   (double)glstub::stats.lastUniform1f);
+        EXPECT_MSG(glstub::stats.lastUniform3f[0] == 0.6f &&
+                       glstub::stats.lastUniform3f[1] == 0.8f,
+                   "env_sky_type: a direção do sol vai ao shader (o "
+                   "ÚLTIMO vec3 — a ordem do draw é o contrato)");
+        p.time = 0.0f;
+        glstub::reset();
+        (void)s.draw(p);
+        EXPECT_MSG(glstub::stats.lastUniform1f == 0.0f,
+                   "env_sky_type: o tempo 0 chega ao shader como 0 (não "
+                   "confundir com uniform ausente)");
+        s.destroy();
+        glstub::fb::enabled = false;
+        glstub::fb::resetState();
+    }
+}
+
+// ---- PIN inspector_sky (0.12-Y 3.Y-D) -----------------------------------------
+// A ordem do dono: «Quando o TIC WorldEnvironment for selecionado, mostra
+// um dropdown para skyType. Se skyType == 1 (Procedural), mostra os campos
+// de cor, cobertura e velocidade das nuvens». O PLANO é a fonte (o mesmo
+// contrato do inspector_worldenv) — o M-Yd2 mata a CONDIÇÃO e o modo
+// sólido ganha nuvens que não devia ter.
+TEST(inspector_sky) {
+    const TextMetrics tm{};
+    Scene scene;
+    const Handle h = scene.create("ceu");
+    scene.get(h)->addComponent<Transform3D>();
+    Environment* env = scene.get(h)->addComponent<Environment>();
+    ASSERT(env != nullptr);
+
+    // (1) MODO SÓLIDO (skyType 0): o dropdown entra, AS NUVENS NÃO (o
+    // M-Yd2 vive exatamente aqui)
+    {
+        const InspProfile prof = inspectorProfile(*scene.get(h));
+        EXPECT(prof.env);
+        EXPECT_MSG(prof.envSkyType == 0,
+                   "inspector_sky: o perfil transporta o TIPO de céu");
+        InspRow rows[64];
+        const u32 n = inspectorPlan(prof, tm, false, 0, rows);
+        u32 type = 0, hor = 0, zen = 0, sunc = 0, cov = 0, spd = 0;
+        i32 iType = -1, iSky = -1;
+        for (u32 i = 0; i < n; ++i) {
+            const InspRow& r = rows[i];
+            if (r.id == kInspectorEnvSkyType) {
+                ++type;
+                iType = static_cast<i32>(i);
+            }
+            if (r.id == kInspectorEnvHor) ++hor;
+            if (r.id == kInspectorEnvZen) ++zen;
+            if (r.id == kInspectorEnvSunC) ++sunc;
+            if (r.id == kInspectorEnvCov) ++cov;
+            if (r.id == kInspectorEnvSpd) ++spd;
+            if (r.id == kInspectorEnvSky) iSky = static_cast<i32>(i);
+        }
+        EXPECT_MSG(type == 1,
+                   "inspector_sky: o dropdown do tipo falta (vi %u)", type);
+        EXPECT_MSG(hor == 0 && zen == 0 && sunc == 0 && cov == 0 && spd == 0,
+                   "inspector_sky: NO MODO SÓLIDO as nuvens NÃO entram "
+                   "(hor=%u zen=%u sol=%u cov=%u spd=%u — M-Yd2 vermelho)",
+                   hor, zen, sunc, cov, spd);
+        EXPECT_MSG(iType >= 0 && iType < iSky,
+                   "inspector_sky: o tipo vem ANTES do céu sólido");
+        // a contagem da FÓRMULA bate com o plano (as duas fontes uma só)
+        EXPECT_MSG(inspectorRowCount(prof, false, 0) == n,
+                   "inspector_sky: a fórmula do rowCount divergiu do plano "
+                   "(%u vs %u)",
+                   inspectorRowCount(prof, false, 0), n);
+    }
+    // (2) MODO PROCEDURAL (skyType 1): as 5 linhas na ORDEM do dono
+    {
+        env->skyType = Environment::kSkyTypeProcedural;
+        const InspProfile prof = inspectorProfile(*scene.get(h));
+        EXPECT_MSG(prof.envSkyType == 1,
+                   "inspector_sky: o perfil segue o componente (procedural)");
+        InspRow rows[64];
+        const u32 n = inspectorPlan(prof, tm, false, 0, rows);
+        i32 iType = -1, iHor = -1, iZen = -1, iSun = -1, iCov = -1,
+            iSpd = -1, iSky = -1;
+        for (u32 i = 0; i < n; ++i) {
+            const InspRow& r = rows[i];
+            if (r.id == kInspectorEnvSkyType) iType = static_cast<i32>(i);
+            if (r.id == kInspectorEnvHor) iHor = static_cast<i32>(i);
+            if (r.id == kInspectorEnvZen) iZen = static_cast<i32>(i);
+            if (r.id == kInspectorEnvSunC) iSun = static_cast<i32>(i);
+            if (r.id == kInspectorEnvCov) iCov = static_cast<i32>(i);
+            if (r.id == kInspectorEnvSpd) iSpd = static_cast<i32>(i);
+            if (r.id == kInspectorEnvSky) iSky = static_cast<i32>(i);
+        }
+        EXPECT_MSG(iType >= 0 && iHor >= 0 && iZen >= 0 && iSun >= 0 &&
+                       iCov >= 0 && iSpd >= 0,
+                   "inspector_sky: faltam linhas no procedural "
+                   "(type=%d hor=%d zen=%d sol=%d cov=%d spd=%d)",
+                   iType, iHor, iZen, iSun, iCov, iSpd);
+        // a ORDEM do dono: tipo → horizonte → zénite → sol → nuvens →
+        // vento → e o resto da secção (céu/hdri/ambiente/névoa)
+        EXPECT_MSG(iType < iHor && iHor < iZen && iZen < iSun &&
+                       iSun < iCov && iCov < iSpd && iSpd < iSky,
+                   "inspector_sky: a ORDEM procedural saiu da especificação");
+        EXPECT_MSG(inspectorRowCount(prof, false, 0) == n,
+                   "inspector_sky: a fórmula divergiu do plano procedural");
+        // os ids NÃO colidem (a faixa 5425..5430 é própria)
+        EXPECT(kInspectorEnvSkyType != kInspectorEnvHor &&
+               kInspectorEnvHor != kInspectorEnvZen &&
+               kInspectorEnvZen != kInspectorEnvSunC &&
+               kInspectorEnvSunC != kInspectorEnvCov &&
+               kInspectorEnvCov != kInspectorEnvSpd);
+        // (3) COLAPSADA: o bit8 esconde TUDO (o dropdown incluído)
+        const u32 nc = inspectorPlan(prof, tm, false, kInspBitEnvironment,
+                                     rows);
+        u32 envRows = 0;
+        for (u32 i = 0; i < nc; ++i) {
+            if (rows[i].id >= kInspectorEnvSkyType &&
+                rows[i].id <= kInspectorEnvSpd) {
+                ++envRows;
+            }
+        }
+        EXPECT_MSG(envRows == 0,
+                   "inspector_sky: colapsada ainda mostra %u linhas de céu",
+                   envRows);
+    }
+    // (4) O COMMIT dos hexes (13/14/15) — o teclado escreve o componente
+    {
+        EditorState st;
+        st.textTic = h;
+        f32 rgba[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        // o horizonte
+        std::snprintf(st.textBuf, sizeof(st.textBuf), "#112233");
+        st.textLen = 7;
+        st.textPurpose = 13;
+        EXPECT(commitTextInput(scene, st));
+        uiHexParse("#112233", rgba);
+        EXPECT_MSG(nearEq(env->skyColorHorizon[0], rgba[0], 1e-5f) &&
+                       nearEq(env->skyColorHorizon[2], rgba[2], 1e-5f),
+                   "inspector_sky: o hex 13 NÃO chega ao horizonte");
+        // o zénite
+        std::snprintf(st.textBuf, sizeof(st.textBuf), "#445566");
+        st.textLen = 7;
+        st.textPurpose = 14;
+        EXPECT(commitTextInput(scene, st));
+        uiHexParse("#445566", rgba);
+        EXPECT_MSG(nearEq(env->skyColorZenith[1], rgba[1], 1e-5f),
+                   "inspector_sky: o hex 14 NÃO chega ao zénite");
+        // o sol
+        std::snprintf(st.textBuf, sizeof(st.textBuf), "#FFDDAA");
+        st.textLen = 7;
+        st.textPurpose = 15;
+        EXPECT(commitTextInput(scene, st));
+        uiHexParse("#FFDDAA", rgba);
+        EXPECT_MSG(nearEq(env->sunColor[0], 1.0f, 1e-5f) &&
+                       nearEq(env->sunColor[2], rgba[2], 1e-5f),
+                   "inspector_sky: o hex 15 NÃO chega ao sol");
+        // inválido = estado intacto (o contrato do hex)
+        const f32 antes = env->skyColorHorizon[0];
+        std::snprintf(st.textBuf, sizeof(st.textBuf), "zzz");
+        st.textLen = 3;
+        st.textPurpose = 13;
+        EXPECT(!commitTextInput(scene, st));
+        EXPECT_MSG(env->skyColorHorizon[0] == antes,
+                   "inspector_sky: o hex inválido ESTRAGOU o horizonte");
+    }
 }

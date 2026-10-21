@@ -30,6 +30,49 @@ struct Case {
     void (*fn)();
 };
 
+// 0.12-Y (3.Y-D): o FONTE SEM COMENTÁRIOS (o padrão do ui_vocab_check) —
+// os contratos de fonte (countSub sobre o .cpp) são CÓDIGO, não prosa: um
+// comentário com a expressão NÃO satisfaz (a M-Yd1 provou o falso verde).
+inline std::string stripCppComments(const std::string& src) {
+    std::string out;
+    out.reserve(src.size());
+    bool inStr = false;
+    for (size_t i = 0; i < src.size(); ++i) {
+        if (inStr) {
+            out += src[i];
+            if (src[i] == '\\' && i + 1 < src.size()) {
+                out += src[++i];
+            } else if (src[i] == '"') {
+                inStr = false;
+            }
+            continue;
+        }
+        if (src[i] == '"') {
+            inStr = true;
+            out += src[i];
+            continue;
+        }
+        if (src[i] == '/' && i + 1 < src.size() && src[i + 1] == '/') {
+            while (i < src.size() && src[i] != '\n') ++i;
+            if (i < src.size()) out += '\n';
+            continue;
+        }
+        if (src[i] == '/' && i + 1 < src.size() && src[i + 1] == '*') {
+            i += 2;
+            while (i + 1 < src.size() &&
+                   !(src[i] == '*' && src[i + 1] == '/')) {
+                if (src[i] == '\n') out += '\n';
+                ++i;
+            }
+            ++i;
+            continue;
+        }
+        out += src[i];
+    }
+    return out;
+}
+
+
 // 0.10-M (PASSO 5A): o teste EM CURSO (o handler de crash do test_main
 // diz o NOME — o banner órfão do CI não dizia nada)
 inline const char*& currentName() {

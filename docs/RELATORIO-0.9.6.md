@@ -424,6 +424,22 @@ R-014 aplicada.
   **versionCode 109** — o build vigente da campanha 0.12-Y. O 108 fica
   INTACTO como história.
 
+- **0.12-Y · 3.Y-D — O CÉU PROCEDURAL COM NUVENS ANIMADAS** — o shader do
+  céu (render/SkyRenderer.{h,cpp} NOVOS: o quad fullscreen, o gradiente
+  horizonte→zénite, o sol disco/halo, as nuvens FBM 2D com hash inteiro e
+  O TEMPO no UV; as puras sky:: replicadas LINHA A LINHA pelo FS), o
+  Environment com skyType/cores do céu/sol/direção/cobertura/vento no
+  .goni (defaults omitidos), o Inspector com o dropdown + os 5 campos
+  condicionais (os hex 13/14/15, os sliders nuvens/vento), o main desenha
+  ANTES dos modelos com o relógio g_skyTime 1× por frame · pins ×2
+  (env_sky_type · inspector_sky, test_012y.cpp) + R-061
+  regress_procedural_sky (test_sentinels.cpp + REGRESSOES) + M-Yd1/2
+  vermelho→reposto→verde (coladas no RELATORIO-0.12-Y-SKY.md §3; o achado
+  do falso verde POR COMENTÁRIO → test::stripCppComments) · verificação:
+  test_core 1208 OK com os flakes da sandbox excluídos (o CI é o árbitro)
+  · docs-lint VERDE · **versionCode 110** — o build vigente da campanha
+  0.12-Y. O 109 fica INTACTO como história.
+
 - **0.12-Y · 3.Y-A — O PAN DA CÂMARA (a MÃOZINHA)** — a 6.ª FERRAMENTA
   no rail do viewport (Selecionar/Mover/Rodar/Escalar/**PAN**/Íman — o
   glifo Hand novo, o id 33, a legenda «Pan»): o Camera::pan NOVO move o

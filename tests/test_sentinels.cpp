@@ -69,6 +69,7 @@
 #include "assets/ThumbRender.h"    // 0.11-W (3.75b · R-049): o render alfa
 #include "render/Renderer.h"
 #include "render/Primitives.h"
+#include "render/SkyRenderer.h"   // 0.12-Y (3.Y-D · R-061): as puras do céu
 #include "ui/EditorUi.h"
 #include "platform/EngineLog.h"
 #include "platform/FileApi.h"
@@ -8334,5 +8335,175 @@ TEST(regress_pbr_worldenv) {
                    slots.tex[1].c_str());
         EXPECT_MSG(slots.tex[5].empty() && slots.tex[9].empty(),
                    "R-060: o mesh SEM material não pode herdar slots");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// R-061 — O CÉU PROCEDURAL NÃO MORRE — A FONTE ÚNICA, O VENTO COM TEMPO, O
+// ROUNDTRIP DO CÉU, O INSPECTOR CONDICIONAL E O CONTRATO DO FS (0.12-Y 3.Y-D)
+// ---------------------------------------------------------------------------
+// Sintoma vigiado: as NUVENS PARADAS (o tempo fora do UV — M-Yd1); o modo
+// COR SÓLIDA a mostrar campos de nuvens (a condição morta no plano — M-Yd2);
+// o .goni a perder o skyType/nuvens no roundtrip; a base da câmara a sair
+// da fonte única (o FS e as puras a divergir). A origem: o prompt da
+// sub-fase D — «Adicionar Céu Procedural com Nuvens Animadas ao
+// WorldEnvironment» (a performance mobile é prioridade — FBM 2D, ZERO
+// raymarching).
+TEST(regress_procedural_sky) {
+    using namespace vv;
+    using namespace vv::editor;   // o plano/ids do Inspector (EditorLayout.h)
+    // (1) A FONTE ÚNICA (render/SkyRenderer.h): o vento USA O TEMPO (a
+    // M-Yd1 mata o tempo — a nuvem parada é o defeito nomeado do dono), o
+    // gradiente é horizonte→zénite e a cobertura 0 é o céu limpo
+    {
+        f32 w0[2], w1[2];
+        sky::windOffset(0.0f, 0.02f, w0);
+        sky::windOffset(10.0f, 0.02f, w1);
+        EXPECT_MSG(w1[0] > w0[0] && w1[1] > w0[1],
+                   "R-061: O TEMPO NÃO EMPURRA AS NUVENS (o vento parou — "
+                   "M-Yd1 vermelho)");
+        sky::windOffset(500.0f, 0.0f, w0);
+        EXPECT_MSG(w0[0] == 0.0f && w0[1] == 0.0f,
+                   "R-061: vento 0 tem de ser o céu parado de sempre");
+        const f32 hor[3] = {0.29f, 0.56f, 0.89f};
+        const f32 zen[3] = {0.12f, 0.23f, 0.54f};
+        f32 col[3];
+        sky::skyGradient(0.0f, hor, zen, col);
+        EXPECT_MSG(nearEqF(col[1], hor[1], 1e-5f),
+                   "R-061: o gradiente em dir.y=0 não é o HORIZONTE");
+        sky::skyGradient(1.0f, hor, zen, col);
+        EXPECT_MSG(nearEqF(col[1], zen[1], 1e-5f),
+                   "R-061: o gradiente em dir.y=1 não é o ZÉNITE");
+        EXPECT_MSG(sky::cloudAlpha(0.95f, 0.0f) == 0.0f,
+                   "R-061: cobertura 0 = CÉU LIMPO (a nuvem não morre "
+                   "mais)");
+        Vec3 rB, uB, fB;
+        EXPECT_MSG(sky::viewBasis(Mat4::identity(), rB, uB, fB),
+                   "R-061: a extração da base degenerou na identidade");
+    }
+    // (2) O ROUNDTRIP (.goni): o céu procedural sobrevive ao dump/load —
+    // o serializer novo não pode perder NENHUM campo do dono
+    {
+        Scene a;
+        const Handle h = a.create("Ceu");
+        a.get(h)->addComponent<Transform3D>();
+        Environment* e = a.get(h)->addComponent<Environment>();
+        e->skyType = Environment::kSkyTypeProcedural;
+        e->skyColorHorizon[1] = 0.42f;
+        e->skyColorZenith[0] = 0.33f;
+        e->sunColor[2] = 0.61f;
+        e->sunDirection[0] = 0.0f;
+        e->sunDirection[1] = 1.0f;
+        e->sunDirection[2] = 0.0f;
+        e->cloudCoverage = 0.75f;
+        e->cloudSpeed = 0.13f;
+        e->clampFields();
+        const std::string dump = SceneSerializer::dump(a);
+        EXPECT_MSG(dump.find("\"skyType\"") != std::string::npos,
+                   "R-061: o .goni PERDEU o skyType");
+        EXPECT_MSG(dump.find("\"cloudCov\"") != std::string::npos &&
+                       dump.find("\"cloudSpd\"") != std::string::npos,
+                   "R-061: o .goni PERDEU AS NUVENS (cobertura/vento)");
+        EXPECT_MSG(dump.find("\"skyHor\"") != std::string::npos &&
+                       dump.find("\"skyZen\"") != std::string::npos &&
+                       dump.find("\"sunCol\"") != std::string::npos &&
+                       dump.find("\"sunDir\"") != std::string::npos,
+                   "R-061: o .goni PERDEU as cores do céu/sol");
+        Scene b;
+        SceneSerializer::LoadCtx ctx;
+        ASSERT(SceneSerializer::loadText(b, dump, ctx));
+        const Handle hf = b.find("Ceu");
+        ASSERT(hf.valid());
+        const Environment* e2 = b.get(hf)->getComponent<Environment>();
+        ASSERT(e2 != nullptr);
+        EXPECT_MSG(e2->skyType == Environment::kSkyTypeProcedural,
+                   "R-061: o céu carregou SÓLIDO (o skyType morreu no "
+                   "roundtrip)");
+        EXPECT_MSG(nearEqF(e2->cloudCoverage, 0.75f, 1e-5f) &&
+                       nearEqF(e2->cloudSpeed, 0.13f, 1e-5f),
+                   "R-061: as NUVENS não voltam do .goni");
+        EXPECT_MSG(nearEqF(e2->skyColorHorizon[1], 0.42f, 1e-5f) &&
+                       nearEqF(e2->sunDirection[1], 1.0f, 1e-4f),
+                   "R-061: as cores/direção do sol não voltam do .goni");
+        // os DEFAULTS ficam fora do dump (o .goni antigo carrega igual)
+        Scene c;
+        const Handle hc = c.create("limpo");
+        c.get(hc)->addComponent<Transform3D>();
+        c.get(hc)->addComponent<Environment>();
+        const std::string dump2 = SceneSerializer::dump(c);
+        EXPECT_MSG(dump2.find("skyType") == std::string::npos &&
+                       dump2.find("cloudCov") == std::string::npos,
+                   "R-061: os defaults do céu INVADIRAM o .goni (o "
+                   "forward-compat morreu)");
+    }
+    // (3) O INSPECTOR CONDICIONAL: o modo COR SÓLIDA NÃO mostra nuvens (a
+    // M-Yd2 mata a condição do plano — o dropdown ganha irmãos fantasma)
+    {
+        Scene s;
+        const Handle h = s.create("ceu");
+        s.get(h)->addComponent<Transform3D>();
+        s.get(h)->addComponent<Environment>();
+        const TextMetrics tm{};
+        InspRow rows[64];
+        {
+            const InspProfile prof = inspectorProfile(*s.get(h));
+            EXPECT_MSG(prof.envSkyType == 0,
+                       "R-061: o perfil não transporta o tipo de céu");
+            const u32 n = inspectorPlan(prof, tm, false, 0, rows);
+            u32 cloudRows = 0;
+            for (u32 i = 0; i < n; ++i) {
+                if (rows[i].id == kInspectorEnvHor ||
+                    rows[i].id == kInspectorEnvZen ||
+                    rows[i].id == kInspectorEnvSunC ||
+                    rows[i].id == kInspectorEnvCov ||
+                    rows[i].id == kInspectorEnvSpd) {
+                    ++cloudRows;
+                }
+            }
+            EXPECT_MSG(cloudRows == 0,
+                       "R-061: O MODO SÓLIDO MOSTRA %u CAMPOS DE NUVENS "
+                       "(M-Yd2 vermelho — a condição morreu)",
+                       cloudRows);
+        }
+        // e o PROCEDURAL mostra AS 6 na ordem (o dropdown + os 5 campos)
+        s.get(h)->getComponent<Environment>()->skyType =
+            Environment::kSkyTypeProcedural;
+        {
+            const InspProfile prof = inspectorProfile(*s.get(h));
+            const u32 n = inspectorPlan(prof, tm, false, 0, rows);
+            i32 iT = -1, iH = -1, iZ = -1, iS = -1, iC = -1, iV = -1;
+            for (u32 i = 0; i < n; ++i) {
+                const u64 id = rows[i].id;
+                if (id == kInspectorEnvSkyType) iT = static_cast<i32>(i);
+                if (id == kInspectorEnvHor) iH = static_cast<i32>(i);
+                if (id == kInspectorEnvZen) iZ = static_cast<i32>(i);
+                if (id == kInspectorEnvSunC) iS = static_cast<i32>(i);
+                if (id == kInspectorEnvCov) iC = static_cast<i32>(i);
+                if (id == kInspectorEnvSpd) iV = static_cast<i32>(i);
+            }
+            EXPECT_MSG(iT >= 0 && iH >= 0 && iZ >= 0 && iS >= 0 && iC >= 0 &&
+                           iV >= 0,
+                       "R-061: faltam linhas no plano procedural "
+                       "(%d %d %d %d %d %d)",
+                       iT, iH, iZ, iS, iC, iV);
+            EXPECT_MSG(iT < iH && iH < iZ && iZ < iS && iS < iC && iC < iV,
+                       "R-061: a ORDEM procedural saiu da especificação");
+        }
+    }
+    // (4) O CONTRATO NO FONTE (o FS replica as puras — o tempo no UV é a
+    // linha do contrato; a M-Yd1 morre AQUI antes de qualquer GL; SEM
+    // comentários — a prosa não satisfaz, o padrão do ui_vocab_check)
+    {
+        std::string src;
+        EXPECT(readFileText(REPO_ROOT
+                            "/app/src/main/cpp/render/SkyRenderer.cpp",
+                            src));
+        const std::string code = test::stripCppComments(src);
+        EXPECT_MSG(code.find("vec2(kWindDirX, kWindDirY) * (uTime * uSpeed)") !=
+                       std::string::npos,
+                   "R-061: o FS DEIXOU DE USAR O TEMPO no UV das nuvens "
+                   "(a nuvem parada voltou — M-Yd1)");
+        EXPECT_MSG(code.find("uniform float uTime;") != std::string::npos,
+                   "R-061: o FS perdeu o uniform uTime");
     }
 }

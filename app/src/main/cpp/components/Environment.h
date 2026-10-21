@@ -21,18 +21,46 @@
 // GL-free: puras testáveis no CI (averageColor + ambientFromAvg).
 #include "core/Component.h"
 #include "core/Types.h"
+#include <cmath>
 #include <string>
 
 namespace vv {
 
 class Environment : public Component {
 public:
+    // ---- 0.12-Y (3.Y-D): os TIPOS de céu (o dropdown do Inspector) --------
+    static constexpr u8 kSkyTypeSolid = 0;       // o clear de sempre (o C)
+    static constexpr u8 kSkyTypeProcedural = 1;  // o gradiente + sol + nuvens
+    // os DEFAULTS do céu procedural (o dono deu os hexes de exemplo; o
+    // serializer compara contra estas constantes — uma fonte só)
+    static constexpr f32 kHorizonDefault[3] = {0.2902f, 0.5647f, 0.8863f};
+    static constexpr f32 kZenithDefault[3]  = {0.1176f, 0.2275f, 0.5412f};
+    static constexpr f32 kSunColDefault[3]  = {1.0f, 0.8667f, 0.6667f};
+    static constexpr f32 kSunDirDefault[3]  = {0.5571f, 0.7428f, -0.3714f};
+    static constexpr f32 kCoverageDefault = 0.4f;
+    static constexpr f32 kSpeedDefault    = 0.02f;
+    static constexpr f32 kSpeedMax        = 0.2f;   // o teto do slider (10×)
+
     f32 skyColor[4] = {0.040f, 0.045f, 0.065f, 1.0f};  // o céu (o clear)
     f32 fogColor[4] = {0.040f, 0.045f, 0.065f, 1.0f};  // a névoa
     f32 fogDensity = 0.0f;    // 0 = MORTA (o lit de sempre — o contrato)
     f32 ambient = 1.0f;       // o multiplicador do ambient (o HDRI escala)
     std::string hdriPath;     // o ref do equirect ("" = sem — o céu é a cor)
     bool active = true;       // o 1.º ATIVO da cena manda
+
+    // ---- 0.12-Y (3.Y-D): O CÉU PROCEDURAL (o TIC WorldEnvironment manda
+    // no SkyRenderer quando skyType == 1; o 0 é o byte a byte do C) ------
+    u8  skyType = kSkyTypeSolid;   // 0 = cor sólida, 1 = procedural
+    f32 skyColorHorizon[3] = {kHorizonDefault[0], kHorizonDefault[1],
+                              kHorizonDefault[2]};   // #4A90E2
+    f32 skyColorZenith[3]  = {kZenithDefault[0], kZenithDefault[1],
+                              kZenithDefault[2]};    // #1E3A8A
+    f32 sunColor[3]        = {kSunColDefault[0], kSunColDefault[1],
+                              kSunColDefault[2]};    // #FFDDAA
+    f32 sunDirection[3]    = {kSunDirDefault[0], kSunDirDefault[1],
+                              kSunDirDefault[2]};    // normalizado
+    f32 cloudCoverage      = kCoverageDefault;  // 0 = limpo, 1 = nublado
+    f32 cloudSpeed         = kSpeedDefault;     // o vento (UV/s)
 
     // a clamp dos campos (o padrão AudioPlayer::clampFields)
     void clampFields() {
@@ -45,6 +73,36 @@ public:
             if (skyColor[i] > 1.0f) skyColor[i] = 1.0f;
             if (fogColor[i] < 0.0f) fogColor[i] = 0.0f;
             if (fogColor[i] > 1.0f) fogColor[i] = 1.0f;
+        }
+        // 3.Y-D: o tipo SÓ tem dois estados (qualquer outra coisa é
+        // corrupção de dados — o sólido é o seguro, o C de sempre)
+        if (skyType != kSkyTypeProcedural) {
+            skyType = kSkyTypeSolid;
+        }
+        f32* cols[3] = {skyColorHorizon, skyColorZenith, sunColor};
+        for (int c = 0; c < 3; ++c) {
+            for (int i = 0; i < 3; ++i) {
+                if (cols[c][i] < 0.0f) cols[c][i] = 0.0f;
+                if (cols[c][i] > 1.0f) cols[c][i] = 1.0f;
+            }
+        }
+        if (cloudCoverage < 0.0f) cloudCoverage = 0.0f;
+        if (cloudCoverage > 1.0f) cloudCoverage = 1.0f;
+        if (cloudSpeed < 0.0f) cloudSpeed = 0.0f;
+        if (cloudSpeed > kSpeedMax) cloudSpeed = kSpeedMax;
+        // a direção do sol NORMALIZA (o FS só consome direção; a norma
+        // própria é o contrato — o zero cai no default da tarde)
+        const f32 len = std::sqrt(sunDirection[0] * sunDirection[0] +
+                                  sunDirection[1] * sunDirection[1] +
+                                  sunDirection[2] * sunDirection[2]);
+        if (len > 1e-6f) {
+            sunDirection[0] /= len;
+            sunDirection[1] /= len;
+            sunDirection[2] /= len;
+        } else {
+            sunDirection[0] = kSunDirDefault[0];
+            sunDirection[1] = kSunDirDefault[1];
+            sunDirection[2] = kSunDirDefault[2];
         }
     }
 };

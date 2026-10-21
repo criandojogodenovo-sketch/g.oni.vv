@@ -63,7 +63,8 @@ Atualizado: 2026-10-19 · vc: 105
   normal por derivadas, o rough/metal glTF, a névoa exp2 (0 = MORTA), o
   uAmbientScale; **0.12-Y**), Texture, GpuAssets (+ `impostorTexture`),
   BlockMesh (por BLOCOS do .gmesh v3), Impostor.h (a decisão PURA),
-  QuadBatch, DrawStats, ThumbPng (PNG via zlib).
+  QuadBatch, DrawStats, ThumbPng (PNG via zlib), SkyRenderer.{h,cpp}
+  (**0.12-Y D**: o CÉU PROCEDURAL — o quad fullscreen + as puras sky:: que o FS replica).
   **0.12-D (DORMENTE desde a 0.12-E)**: D-1 o SdfBatch.h (1 widget = 1
   quad de 18 floats) + o 3.º PROGRAMA progSdf_ (o FS replica o
   app/src/main/cpp/ui/Sdf.h LINHA A LINHA; os runs pelo flag `sdf`,

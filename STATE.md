@@ -1,8 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-21 · vc: 109 · Último commit: este (o 0.12-Y C-FIX —
-a UI do Environment no Inspector + o bind uBaseColorTex + o log do
-material; M-Yf1/2)
+Atualizado: 2026-10-21 · vc: 110 · Último commit: este (o 0.12-Y D — o
+CÉU PROCEDURAL com nuvens animadas no WorldEnvironment: SkyRenderer + o
+skyType no .goni + o Inspector condicional; M-Yd1/2)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -10,10 +10,11 @@ material; M-Yf1/2)
 
 ## §1 Onde estamos
 
-- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A, B, C e o
-  C-FIX fechadas, vc 109; o FECHO a seguir)** (a cláusula calma: SÓ o
+- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A, B, C, o
+  C-FIX e o D fechadas, vc 110; o FECHO a seguir)** (a cláusula calma: SÓ o
   prompt; a V.ONI intocada; a história vive no RELATORIO-0.12-Y-ABERTURA.md
   + o RELATORIO-0.12-Y.md).
+  **D (vc 110)**: o CÉU PROCEDURAL (no RELATORIO-0.12-Y-SKY.md) — o shader do céu (render/SkyRenderer.{h,cpp} NOVOS, o padrão Pbr.h: o quad fullscreen + o gradiente horizonte→zénite + o sol disco/halo + as nuvens FBM 2D com hash inteiro e O TEMPO no UV; a base da câmara extraída da vista, válida na orbit E no Play), o Environment ganha skyType/cores do céu/sol/direção/cobertura/vento (o clampFields normaliza o sol), o .goni transporta com defaults omitidos, o Inspector ganha o dropdown "céu: cor sólida|procedural" + os 5 campos SÓ no procedural (ids 5425..5430, os hex 13/14/15, os sliders nuvens/vento), o main desenha o quad ANTES dos modelos com skyType==1 (o 0 = o clear de sempre byte a byte) e o relógio g_skyTime avança 1× por frame; pins ×2 (env_sky_type · inspector_sky) + R-061 regress_procedural_sky + M-Yd1/2 vermelho→reposto→verde (o achado: o falso verde POR COMENTÁRIO nasceu o test::stripCppComments); test_core 1208 OK (os flakes da sandbox excluídos — o CI é o árbitro).
   **C-FIX (vc 109)**: o TESTE DO DONO (Inspector do WorldEnvironment
   VAZIO + modelo BRANCO) — a secção Environment NO Inspector (céu hex ·
   hdri pelo NAVEGADOR · ambiente · névoa · névoa hex, tudo no .goni), o

@@ -79,6 +79,7 @@
 #include "render/Mesh.h"
 #include "render/Primitives.h"   // 0.8.0 (F7): primitivas procedurais
 #include "render/Renderer.h"
+#include "render/SkyRenderer.h"   // 0.12-Y (3.Y-D): o céu procedural
 #include "render/ThumbPng.h"    // 0.9.0: miniatura do projeto (thumb.png)
 #include "core/SceneBounds.h"   // 0.8.9: AABB da cena → far dinâmico editor+Play
 #include "core/UndoStack.h"    // 0.9.0: undo/redo por snapshot
@@ -115,6 +116,12 @@ bool       g_ready = false;
 Camera g_camera;              // orbit: 1 dedo = yaw/pitch, pinch = zoom (FIXA — F8)
 Mesh   g_cubeMesh;            // cubo procedural (PLACEHOLDER — F5 importa mesh)
 Grid   g_grid;                // grid de chão: quad 4 vértices + shader (F3.1; F8 pode virar gizmo)
+// 0.12-Y (3.Y-D): O CÉU PROCEDURAL — o quad fullscreen desenhado PRIMEIRO
+// quando o WorldEnvironment pede skyType == 1 (o 0 = o clear de sempre,
+// byte a byte). g_skyTime é o relógio das NUVENS (frame real — a pausa
+// congela o céu; a mesma honra do sdf::g_time).
+SkyRenderer g_sky;
+f32         g_skyTime = 0.0f;
 
 // ---- F3: editor ------------------------------------------------------------
 editor::EditorState g_editor;        // seleção + overlays
@@ -5249,6 +5256,9 @@ void onAppCmd(android_app* app, i32 cmd) {
                 if (!g_grid.init()) {
                     elog::error("[boot 4/6] renderer FALHOU no passo: grid de chão");
                 }
+                if (!g_sky.init()) {
+                    elog::error("[boot 4/6] renderer FALHOU no passo: céu procedural");
+                }
             }
             if (!g_renderer.init()) {
                 elog::error("[boot 4/6] renderer FALHOU (shaders/materiais)");
@@ -5471,6 +5481,7 @@ void onAppCmd(android_app* app, i32 cmd) {
                 g_impQuad.destroy();         // 0.11-W (3.75b): o quad do impostor
                 primMeshesDestroyAll();      // 0.8.10: prims SEM cache (posse)
                 g_grid.destroy();
+                g_sky.destroy();             // 0.12-Y (3.Y-D): o céu procedural
                 g_renderer.shutdown();      // programa UI + VAO/VBO + whiteTex + lit
                 if (g_audioOut) {           // 0.8.11: áudio sai com o contexto
                     g_audioOut->stop();
@@ -5514,7 +5525,12 @@ i32 onInputEvent(android_app* /*app*/, AInputEvent* event) {
 // ping-pong de planos evita o pop de 1 frame); (b) o LOD por distância —
 // camEye + mr->lodDistance vão ao blocks->draw (o .gmesh sem cauda GLOD
 // ignora — byte a byte). Conta skinados/culled para o HUD/engine.log.
-DrawStats drawTics(const Mat4& vp, const Vec3& camEye) {
+// 0.12-Y (3.Y-D): o 3.º argumento é a VISTA (a fonte da BASE da câmara —
+// sky::viewBasis; a orbit e a câmara de jogo passam as duas por lookAt).
+// O CÉU PROCEDURAL desenha PRIMEIRO no bloco do Environment (o clear de
+// sempre fica byte a byte — o quad pinta POR CIMA dele com skyType 1).
+DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
+                   const Mat4& proj) {
     DrawStats st{};
     g_blockFrame = BlockFrameStats{};   // as métricas DO frame (HUD/log)
     g_skinFrame = SkinFrameStats{};
@@ -5540,6 +5556,28 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye) {
             glClearColor(env->skyColor[0], env->skyColor[1],
                          env->skyColor[2], 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
+            // 0.12-Y (3.Y-D) — O CÉU PROCEDURAL: com skyType == 1 o quad
+            // fullscreen pinta POR CIMA do clear (o gradiente + o sol + as
+            // nuvens com O TEMPO ACUMULADO g_skyTime — a ordem do dono:
+            // «Passa o time acumulado do motor para o shader»). O 0 = o
+            // clear de sempre (o quad NEM EXISTE no frame — byte a byte).
+            if (env->skyType == Environment::kSkyTypeProcedural &&
+                g_sky.ok()) {
+                SkyRenderer::Params sp;
+                sky::viewBasis(view, sp.right, sp.up, sp.fwd);
+                sp.aspect = sky::aspectFromProj(proj);
+                sp.tanHalfFovY = sky::tanFovYFromProj(proj);
+                sp.time = g_skyTime;
+                sp.coverage = env->cloudCoverage;
+                sp.speed = env->cloudSpeed;
+                for (int i = 0; i < 3; ++i) {
+                    sp.horizon[i] = env->skyColorHorizon[i];
+                    sp.zenith[i] = env->skyColorZenith[i];
+                    sp.sunCol[i] = env->sunColor[i];
+                    sp.sunDir[i] = env->sunDirection[i];
+                }
+                g_sky.draw(sp);
+            }
         }
         const f32 density = env ? env->fogDensity : 0.0f;
         const f32* fogc = env ? env->fogColor : theme::kTheme.bg;
@@ -6696,7 +6734,11 @@ void frame() {
             }
         }
     }
-    const DrawStats st3d = drawTics(vp, camEye);
+    // 0.12-Y (3.Y-D): o relógio das NUVENS avança com o frame REAL (a pausa
+    // congela o céu — a mesma honra do sdf::g_time; 1× por frame, nunca por
+    // passo fixo — o céu é render, não lógica)
+    g_skyTime += g_frameDt;
+    const DrawStats st3d = drawTics(vp, camEye, view, proj);
     // 0.10-M (PASSO 4) — o LOG das métricas reais (AQUI: editor E play — o
     // statusLine de baixo só vive em play; throttled 1×/s e só quando o nº
     // de desenhados MUDA — o orbit do dono produz a linha quando o culling
@@ -8278,6 +8320,11 @@ void frame() {
                             : g_editor.textPurpose == 8 ? "RENOMEAR CENA"
                             : g_editor.textPurpose == 9 ? "COMANDO DA CONSOLA"
                             : g_editor.textPurpose == 10 ? "PESQUISAR FICHEIROS"
+                            : g_editor.textPurpose == 11 ? "COR DO CÉU"
+                            : g_editor.textPurpose == 12 ? "COR DA NÉVOA"
+                            : g_editor.textPurpose == 13 ? "COR DO HORIZONTE"
+                            : g_editor.textPurpose == 14 ? "COR DO ZÉNITE"
+                            : g_editor.textPurpose == 15 ? "COR DO SOL"
                                                         : "ALVO DA AÇÃO";
         const int ch =
             editor::drawTextInput(g_ui, g_input, w, h, g_editor, title);

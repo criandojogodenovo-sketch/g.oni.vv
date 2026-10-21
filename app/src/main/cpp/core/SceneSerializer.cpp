@@ -1235,6 +1235,8 @@ void appendComponentJson(Json& arr, const AudioPlayer* au) {
 
 // 0.12-Y (3.Y-C) — Environment: sky/fog/density/ambient/hdri/active.
 // Defaults omitidos (o lit de sempre: névoa morta, ambient 1, sem HDRI).
+// 3.Y-D: os campos do CÉU PROCEDURAL (skyType + cores + sol + nuvens)
+// entram pela MESMA lei — default omitido, o .goni antigo carrega igual.
 void appendComponentJson(Json& arr, const Environment* env) {
     if (!env) {
         return;
@@ -1247,6 +1249,17 @@ void appendComponentJson(Json& arr, const Environment* env) {
             a.addItem(Json::makeNumber(v[i]));
         }
         c.addMember(key, std::move(a));
+    };
+    // o putCol3 (3.Y-D): o array 3 só sai quando DIVERGE do default (o
+    // M-Yd2 da serialização é o if morto — o roundtrip do pin vê)
+    auto putCol3 = [&](const char* key, const f32 v[3], const f32 def[3]) {
+        if (v[0] != def[0] || v[1] != def[1] || v[2] != def[2]) {
+            Json a = Json::makeArray();
+            for (int i = 0; i < 3; ++i) {
+                a.addItem(Json::makeNumber(v[i]));
+            }
+            c.addMember(key, std::move(a));
+        }
     };
     putCol("sky", env->skyColor);
     putCol("fog", env->fogColor);
@@ -1261,6 +1274,20 @@ void appendComponentJson(Json& arr, const Environment* env) {
     }
     if (!env->active) {
         c.addMember("active", Json::makeNumber(0));
+    }
+    // ---- 3.Y-D: o CÉU PROCEDURAL (defaults omitidos = forward-compat) ----
+    if (env->skyType != Environment::kSkyTypeSolid) {
+        c.addMember("skyType", Json::makeNumber(env->skyType));
+    }
+    putCol3("skyHor", env->skyColorHorizon, Environment::kHorizonDefault);
+    putCol3("skyZen", env->skyColorZenith, Environment::kZenithDefault);
+    putCol3("sunCol", env->sunColor, Environment::kSunColDefault);
+    putCol3("sunDir", env->sunDirection, Environment::kSunDirDefault);
+    if (env->cloudCoverage != Environment::kCoverageDefault) {
+        c.addMember("cloudCov", Json::makeNumber(env->cloudCoverage));
+    }
+    if (env->cloudSpeed != Environment::kSpeedDefault) {
+        c.addMember("cloudSpd", Json::makeNumber(env->cloudSpeed));
     }
     arr.addItem(std::move(c));
 }
@@ -1300,6 +1327,36 @@ void fillEnvironment(Environment* env, const Json& comp) {
     if (const Json* j = comp.find("active");
         j && j->type == Json::Type::Number) {
         env->active = j->number != 0.0;
+    }
+    // ---- 3.Y-D: o CÉU PROCEDURAL (os campos ausentes = os defaults) -----
+    if (const Json* j = comp.find("skyType");
+        j && j->type == Json::Type::Number) {
+        env->skyType = j->number != 0.0 ? Environment::kSkyTypeProcedural
+                                        : Environment::kSkyTypeSolid;
+    }
+    auto readCol3 = [&comp](const char* key, f32 out[3]) {
+        const Json* j = comp.find(key);
+        if (j && j->type == Json::Type::Array && j->items.size() >= 3) {
+            for (int i = 0; i < 3; ++i) {
+                if (j->items[static_cast<size_t>(i)].type ==
+                    Json::Type::Number) {
+                    out[i] = static_cast<f32>(
+                        j->items[static_cast<size_t>(i)].number);
+                }
+            }
+        }
+    };
+    readCol3("skyHor", env->skyColorHorizon);
+    readCol3("skyZen", env->skyColorZenith);
+    readCol3("sunCol", env->sunColor);
+    readCol3("sunDir", env->sunDirection);
+    if (const Json* j = comp.find("cloudCov");
+        j && j->type == Json::Type::Number) {
+        env->cloudCoverage = static_cast<f32>(j->number);
+    }
+    if (const Json* j = comp.find("cloudSpd");
+        j && j->type == Json::Type::Number) {
+        env->cloudSpeed = static_cast<f32>(j->number);
     }
     env->clampFields();
 }

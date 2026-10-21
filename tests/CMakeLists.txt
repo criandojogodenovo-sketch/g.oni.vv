@@ -329,6 +329,9 @@ add_executable(test_core
         # TUs deixa de ser device-only e passam a ser cobertos no hospedeiro
         ${CORE_DIR}/platform/EglContext.cpp
         ${CORE_DIR}/render/Grid.cpp
+        # 0.12-Y (3.Y-D): o céu procedural — o test_wiring087 #include
+        # platform/main.cpp (o drawTics desenha o quad quando skyType==1)
+        ${CORE_DIR}/render/SkyRenderer.cpp
         # 0.8.11: ÁUDIO — o misturador/contentor .gi/codecs + o backend
         # COMUM (AudioOut.cpp: probe harness + currentMixFn; as fábricas
         # stub existem SÓ no host — o TU do device não compila aqui) + o
@@ -492,6 +495,7 @@ set(GONI_CORE_SRCS
         ${CORE_DIR}/render/BlockMesh.cpp   # 0.10-M (PASSO 4): render por blocos
         ${CORE_DIR}/platform/EglContext.cpp
         ${CORE_DIR}/render/Grid.cpp
+        ${CORE_DIR}/render/SkyRenderer.cpp   # 0.12-Y (3.Y-D): o céu procedural
         ${CORE_DIR}/assets/GiFormat.cpp
         ${CORE_DIR}/assets/AudioCodecs.cpp
         ${CORE_DIR}/core/AudioEngine.cpp

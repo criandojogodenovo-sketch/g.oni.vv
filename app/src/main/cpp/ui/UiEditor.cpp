@@ -2968,6 +2968,57 @@ bool commitTextInput(Scene& scene, EditorState& st) {
             env->clampFields();
             return true;
         }
+        case 13: {   // 3.Y-D: cor do HORIZONTE (Environment) por hex
+            Tic* tic = scene.get(st.textTic);
+            Environment* env =
+                tic ? tic->getComponent<Environment>() : nullptr;
+            if (!env) {
+                return false;
+            }
+            f32 rgba[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+            if (!uiHexParse(st.textBuf, rgba)) {
+                return false;   // inválido: o estado fica como estava
+            }
+            env->skyColorHorizon[0] = rgba[0];
+            env->skyColorHorizon[1] = rgba[1];
+            env->skyColorHorizon[2] = rgba[2];
+            env->clampFields();
+            return true;
+        }
+        case 14: {   // 3.Y-D: cor do ZÉNITE (Environment) por hex
+            Tic* tic = scene.get(st.textTic);
+            Environment* env =
+                tic ? tic->getComponent<Environment>() : nullptr;
+            if (!env) {
+                return false;
+            }
+            f32 rgba[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+            if (!uiHexParse(st.textBuf, rgba)) {
+                return false;   // inválido: o estado fica como estava
+            }
+            env->skyColorZenith[0] = rgba[0];
+            env->skyColorZenith[1] = rgba[1];
+            env->skyColorZenith[2] = rgba[2];
+            env->clampFields();
+            return true;
+        }
+        case 15: {   // 3.Y-D: cor do SOL (Environment) por hex
+            Tic* tic = scene.get(st.textTic);
+            Environment* env =
+                tic ? tic->getComponent<Environment>() : nullptr;
+            if (!env) {
+                return false;
+            }
+            f32 rgba[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+            if (!uiHexParse(st.textBuf, rgba)) {
+                return false;   // inválido: o estado fica como estava
+            }
+            env->sunColor[0] = rgba[0];
+            env->sunColor[1] = rgba[1];
+            env->sunColor[2] = rgba[2];
+            env->clampFields();
+            return true;
+        }
         case 6: {   // 0.8.9 — CAMPO NUMÉRICO SEM TETO do Inspector (Transform3D)
             // st.textElement = índice do campo: 0..2 pos, 3..5 rot (graus),
             // 6..8 escala. strtof EXIGE consumo total; não-finito/inválido =

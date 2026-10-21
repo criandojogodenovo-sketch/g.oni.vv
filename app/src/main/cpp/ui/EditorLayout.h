@@ -179,13 +179,21 @@ constexpr u64 kInspectorCamProj    = 5410;
 constexpr u64 kInspectorCamActive  = 5411;
 constexpr u64 kInspectorCamFrustum = 5412;   // 0.7.10: toggle do gizmo
 
-// 0.12-Y-fix — inspector do WORLDENVIRONMENT (faixa 5420..5429; a câmara
-// vive em 5400..5412, os fields do Transform em 5530+ — zero colisões)
+// 0.12-Y-fix — inspector do WORLDENVIRONMENT (faixa 5420..5439; a câmara
+// vive em 5400..5412, os fields do Transform em 5530+ — zero colisões;
+// 3.Y-D acrescenta o tipo de céu + os 5 campos procedurais 5425..5430)
 constexpr u64 kInspectorEnvSky  = 5420;   // "céu: #RRGGBB" (teclado hex 11)
 constexpr u64 kInspectorEnvHdri = 5421;   // "hdri: …" (o NAVEGADOR)
 constexpr u64 kInspectorEnvAmb  = 5422;   // slider ambiente 0..2
 constexpr u64 kInspectorEnvFogD = 5423;   // slider névoa 0..1
 constexpr u64 kInspectorEnvFogC = 5424;   // "névoa: #RRGGBB" (teclado hex 12)
+// 0.12-Y (3.Y-D) — O CÉU PROCEDURAL (o dropdown + os 5 campos)
+constexpr u64 kInspectorEnvSkyType = 5425; // "céu: cor sólida|procedural"
+constexpr u64 kInspectorEnvHor  = 5426;   // "horizonte: #RRGGBB" (hex 13)
+constexpr u64 kInspectorEnvZen  = 5427;   // "zénite: #RRGGBB" (hex 14)
+constexpr u64 kInspectorEnvSunC = 5428;   // "sol: #RRGGBB" (hex 15)
+constexpr u64 kInspectorEnvCov  = 5429;   // slider nuvens 0..1
+constexpr u64 kInspectorEnvSpd  = 5430;   // slider vento 0..0.2
 // 0.8.0 (F7) — primitiva procedural do MeshRenderer + animação
 constexpr u64 kInspectorPrimSel   = 5003;   // "prim: esfera ▸" (seletor)
 constexpr u64 kInspectorPrimR     = 5600;   // slider raio/size
@@ -271,6 +279,9 @@ struct InspProfile {
     // 0.12-Y-fix: o WorldEnvironment presente (secção Environment com os
     // 5 controlos — céu/hdri/ambiente/névoa/cor da névoa)
     bool env = false;
+    // 0.12-Y (3.Y-D): o TIPO de céu do Environment (0 = sólida, 1 =
+    // procedural — o plano é CONDICIONAL a isto: o M-Yd2 vive aqui)
+    u32 envSkyType = 0;
     // 0.10-M HOTFIX TEXTURAS-MULTIMAT: nº de materiais do mesh do TIC (o
     // seletor «material: i/N» só entra com >1 — a grade do MeshRenderer é
     // a fonte, zero I/O no caminho quente)
@@ -289,6 +300,9 @@ inline InspProfile inspectorProfile(const Tic& tic) {
     p.au = tic.getComponent<AudioPlayer>() != nullptr;   // 0.8.11
     p.script = tic.getComponent<ScriptComp>() != nullptr;   // 0.9.2
     p.env = tic.getComponent<Environment>() != nullptr;   // 0.12-Y-fix
+    if (const Environment* envP = tic.getComponent<Environment>()) {
+        p.envSkyType = envP->skyType;   // 0.12-Y (3.Y-D): o plano condiciona
+    }
     if (const MeshRenderer* mr = tic.getComponent<MeshRenderer>()) {
         p.prim = mr->primOn;   // 0.8.0
         p.primKind = mr->prim.kind;
@@ -388,6 +402,14 @@ struct InspRow {
         EnvAmb,      // slider ambiente 0..2 (o multiplicador do ambient)
         EnvFogD,     // slider névoa (densidade exp2) 0..1 (0 = morta)
         EnvFogC,     // "névoa: #RRGGBB" + swatch (teclado hex, propósito 12)
+        // 0.12-Y (3.Y-D) — O CÉU PROCEDURAL (o dropdown + os 5 campos;
+        // os 5 SÓ entram com skyType == 1 — o M-Yd2 vive nesta condição)
+        EnvSkyType,  // "céu: cor sólida|procedural" (o ciclar do CamProj)
+        EnvHor,      // "horizonte: #RRGGBB" + swatch (teclado hex 13)
+        EnvZen,      // "zénite: #RRGGBB" + swatch (teclado hex 14)
+        EnvSunC,     // "sol: #RRGGBB" + swatch (teclado hex 15)
+        EnvCov,      // slider nuvens 0..1 (a cobertura)
+        EnvSpd,      // slider vento 0..0.2 (a velocidade)
     };
     Kind kind;
     f32  y;     // topo da linha em COORDS DE CONTEÚDO (cumulativo)
@@ -542,6 +564,10 @@ inline u32 inspectorRowCount(const InspProfile& p, bool selectable,
     if (p.env) {
         n += 1;
         if (!(collapsed & kInspBitEnvironment)) {
+            n += 1;   // o tipo de céu (3.Y-D — o dropdown sempre visível)
+            if (p.envSkyType == Environment::kSkyTypeProcedural) {
+                n += 5;   // horizonte + zénite + sol + nuvens + vento
+            }
             n += 5;   // céu + hdri + ambiente + névoa + cor da névoa
         }
     }
@@ -714,14 +740,26 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
             push(InspRow::Kind::AuRext, sldH, kInspectorAuRext);
         }
     }
-    // ---- ENVIRONMENT (0.12-Y-fix) — o inspector do WorldEnvironment: os
-    // 5 controlos da ordem (céu hex · hdri navegador · ambiente 0..2 ·
-    // névoa 0..1 · cor da névoa hex). O preset é SÓ Transform+Environment
-    // (sem mesh/física) — a secção é o CORPO do TIC.
+    // ---- ENVIRONMENT (0.12-Y-fix) — o inspector do WorldEnvironment: o
+    // TIPO de céu (3.Y-D) + os 5 controlos da ordem (céu hex · hdri
+    // navegador · ambiente 0..2 · névoa 0..1 · cor da névoa hex) + os 5
+    // campos PROCEDURAIS condicionais (horizonte/zénite/sol/nuvens/vento).
+    // O preset é SÓ Transform+Environment (sem mesh/física) — a secção é
+    // o CORPO do TIC.
     if (p.env) {
         push(InspRow::Kind::Section, secH, kInspSectionBase + 8,
              kInspBitEnvironment);
         if (!(collapsed & kInspBitEnvironment)) {
+            push(InspRow::Kind::EnvSkyType, btnH, kInspectorEnvSkyType);
+            // 3.Y-D: os campos procedurais SÓ com skyType == 1 (o M-Yd2
+            // mata esta condição — o modo sólido NÃO tem nuvens)
+            if (p.envSkyType == Environment::kSkyTypeProcedural) {
+                push(InspRow::Kind::EnvHor, btnH, kInspectorEnvHor);
+                push(InspRow::Kind::EnvZen, btnH, kInspectorEnvZen);
+                push(InspRow::Kind::EnvSunC, btnH, kInspectorEnvSunC);
+                push(InspRow::Kind::EnvCov, sldH, kInspectorEnvCov);
+                push(InspRow::Kind::EnvSpd, sldH, kInspectorEnvSpd);
+            }
             push(InspRow::Kind::EnvSky, btnH, kInspectorEnvSky);
             push(InspRow::Kind::EnvHdri, btnH, kInspectorEnvHdri);
             push(InspRow::Kind::EnvAmb, sldH, kInspectorEnvAmb);

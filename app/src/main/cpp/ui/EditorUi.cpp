@@ -1539,10 +1539,15 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     char slotRefs[MeshRenderer::kMeshTexSlots][96] = {};
     char inputLine[48] = "";
     // 0.12-Y-fix: os rótulos do Environment (o hdri mostra o NOME limpo;
-    // os hexes formatados UMA vez — o draw só consome)
+    // os hexes formatados UMA vez — o draw só consome). 3.Y-D: o rótulo do
+    // TIPO de céu + os 3 hexes procedurais (o swatch desenha a cor viva)
     char envHdriLabel[80] = "";
     char envSkyHex[12] = "";
     char envFogHex[12] = "";
+    char envTypeLabel[28] = "";
+    char envHorHex[12] = "";
+    char envZenHex[12] = "";
+    char envSunHex[12] = "";
     if (envEdit) {
         if (!envEdit->hdriPath.empty()) {
             std::snprintf(envHdriLabel, sizeof(envHdriLabel), "hdri: %s",
@@ -1552,6 +1557,14 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
         }
         uiHexFormat(envEdit->skyColor, envSkyHex, sizeof(envSkyHex));
         uiHexFormat(envEdit->fogColor, envFogHex, sizeof(envFogHex));
+        // 3.Y-D: o dropdown do tipo de céu (o MESMO estilo do CamProj)
+        std::snprintf(envTypeLabel, sizeof(envTypeLabel), "céu: %s",
+                      envEdit->skyType == Environment::kSkyTypeProcedural
+                          ? "procedural"
+                          : "cor sólida");
+        uiHexFormat(envEdit->skyColorHorizon, envHorHex, sizeof(envHorHex));
+        uiHexFormat(envEdit->skyColorZenith, envZenHex, sizeof(envZenHex));
+        uiHexFormat(envEdit->sunColor, envSunHex, sizeof(envSunHex));
     }
     char camProjLabel[48] = "";   // 0.7.7
     char camActiveLabel[48] = "";
@@ -2541,6 +2554,99 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             }
             break;
         // ---- 0.12-Y-fix — WORLDENVIRONMENT (a secção Environment) ------------
+        case InspRow::Kind::EnvSkyType: {
+            // 3.Y-D — o DROPDOWN do tipo de céu (o ciclar do CamProj: um
+            // tap alterna sólida ↔ procedural; o sólido é o C de sempre)
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
+                      envTypeLabel);
+            break;
+        }
+        case InspRow::Kind::EnvHor: {
+            // 3.Y-D — "horizonte: #RRGGBB" + swatch vivo (o MESMO padrão
+            // do céu: tocar abre o teclado hex — propósito 13)
+            if (envEdit) {
+                const f32 swS = 48.0f;
+                const f32 swX = x + w - kPad - swS;
+                const f32 swY = ry + (r.h - swS) * 0.5f;
+                const f32 hor4[4] = {envEdit->skyColorHorizon[0],
+                                     envEdit->skyColorHorizon[1],
+                                     envEdit->skyColorHorizon[2], 1.0f};
+                ui.panelRounded(swX, swY, swS, swS, theme::kRadiusField, hor4);
+                ui.frameRounded(swX, swY, swS, swS, 1.0f, theme::kRadiusField,
+                                theme::kTheme.border);
+                char label[44];
+                std::snprintf(label, sizeof(label), "horizonte: %s", envHorHex);
+                const f32 btnW = (swX - 8.0f) - (x + kPad);
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                ui.button(r.id, x + kPad, ry + 2.0f, btnW, r.h - 4.0f, label);
+            }
+            break;
+        }
+        case InspRow::Kind::EnvZen: {
+            // 3.Y-D — "zénite: #RRGGBB" + swatch (teclado hex 14)
+            if (envEdit) {
+                const f32 swS = 48.0f;
+                const f32 swX = x + w - kPad - swS;
+                const f32 swY = ry + (r.h - swS) * 0.5f;
+                const f32 zen4[4] = {envEdit->skyColorZenith[0],
+                                     envEdit->skyColorZenith[1],
+                                     envEdit->skyColorZenith[2], 1.0f};
+                ui.panelRounded(swX, swY, swS, swS, theme::kRadiusField, zen4);
+                ui.frameRounded(swX, swY, swS, swS, 1.0f, theme::kRadiusField,
+                                theme::kTheme.border);
+                char label[42];
+                std::snprintf(label, sizeof(label), "zénite: %s", envZenHex);
+                const f32 btnW = (swX - 8.0f) - (x + kPad);
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                ui.button(r.id, x + kPad, ry + 2.0f, btnW, r.h - 4.0f, label);
+            }
+            break;
+        }
+        case InspRow::Kind::EnvSunC: {
+            // 3.Y-D — "sol: #RRGGBB" + swatch (teclado hex 15)
+            if (envEdit) {
+                const f32 swS = 48.0f;
+                const f32 swX = x + w - kPad - swS;
+                const f32 swY = ry + (r.h - swS) * 0.5f;
+                const f32 sun4[4] = {envEdit->sunColor[0], envEdit->sunColor[1],
+                                     envEdit->sunColor[2], 1.0f};
+                ui.panelRounded(swX, swY, swS, swS, theme::kRadiusField, sun4);
+                ui.frameRounded(swX, swY, swS, swS, 1.0f, theme::kRadiusField,
+                                theme::kTheme.border);
+                char label[36];
+                std::snprintf(label, sizeof(label), "sol: %s", envSunHex);
+                const f32 btnW = (swX - 8.0f) - (x + kPad);
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                ui.button(r.id, x + kPad, ry + 2.0f, btnW, r.h - 4.0f, label);
+            }
+            break;
+        }
+        case InspRow::Kind::EnvCov:
+            // 3.Y-D — slider NUVENS 0..1 (a cobertura: 0 = céu limpo,
+            // 1 = nublado; o clampFields da casa mantém o contrato)
+            if (envEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "nuvens", 0.0f,
+                              1.0f, envEdit->cloudCoverage, "%.2f")) {
+                    envEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::EnvSpd:
+            // 3.Y-D — slider VENTO 0..0.2 (a velocidade em UV/s; o default
+            // 0.02 é o brisa de sempre)
+            if (envEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "vento", 0.0f,
+                              Environment::kSpeedMax, envEdit->cloudSpeed,
+                              "%.3f")) {
+                    envEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
         case InspRow::Kind::EnvSky: {
             // "céu: #RRGGBB" + swatch VIVO (o MESMO padrão da linha hex do
             // tint: tocar abre o teclado em modo hex — propósito 11)
@@ -2676,6 +2782,10 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 r.kind != InspRow::Kind::EnvSky &&      // 0.12-Y-fix: hex céu
                 r.kind != InspRow::Kind::EnvHdri &&     // 0.12-Y-fix: navegador
                 r.kind != InspRow::Kind::EnvFogC &&     // 0.12-Y-fix: hex névoa
+                r.kind != InspRow::Kind::EnvSkyType &&  // 3.Y-D: o dropdown
+                r.kind != InspRow::Kind::EnvHor &&      // 3.Y-D: hex horizonte
+                r.kind != InspRow::Kind::EnvZen &&      // 3.Y-D: hex zénite
+                r.kind != InspRow::Kind::EnvSunC &&     // 3.Y-D: hex sol
                 !isSection &&                           // 0.9.0: colapsar
                 r.kind != InspRow::Kind::TransformRow &&// 0.9.0: caixas X/Y/Z + R
                 r.kind != InspRow::Kind::Slider) {      // 0.8.9: zona do VALOR
@@ -2847,6 +2957,38 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                     char cur[12];
                     uiHexFormat(e->fogColor, cur, sizeof(cur));
                     openTextInput(st, 12, st.selected, -1, cur);
+                }
+            } else if (r.kind == InspRow::Kind::EnvSkyType) {
+                // 3.Y-D — o CICLAR do tipo de céu (sólida ↔ procedural;
+                // o padrão CamProj — o plano do frame seguinte mostra os
+                // campos do estado novo)
+                if (Environment* e = tic->getComponent<Environment>()) {
+                    e->skyType =
+                        e->skyType == Environment::kSkyTypeProcedural
+                            ? Environment::kSkyTypeSolid
+                            : Environment::kSkyTypeProcedural;
+                }
+            } else if (r.kind == InspRow::Kind::EnvHor) {
+                // 3.Y-D — teclado hex (propósito 13); o commit escreve o
+                // horizonte (inválido = estado intacto, o contrato do hex)
+                if (Environment* e = tic->getComponent<Environment>()) {
+                    char cur[12];
+                    uiHexFormat(e->skyColorHorizon, cur, sizeof(cur));
+                    openTextInput(st, 13, st.selected, -1, cur);
+                }
+            } else if (r.kind == InspRow::Kind::EnvZen) {
+                // 3.Y-D — teclado hex (propósito 14) para o ZÉNITE
+                if (Environment* e = tic->getComponent<Environment>()) {
+                    char cur[12];
+                    uiHexFormat(e->skyColorZenith, cur, sizeof(cur));
+                    openTextInput(st, 14, st.selected, -1, cur);
+                }
+            } else if (r.kind == InspRow::Kind::EnvSunC) {
+                // 3.Y-D — teclado hex (propósito 15) para a cor do SOL
+                if (Environment* e = tic->getComponent<Environment>()) {
+                    char cur[12];
+                    uiHexFormat(e->sunColor, cur, sizeof(cur));
+                    openTextInput(st, 15, st.selected, -1, cur);
                 }
             } else if (r.kind == InspRow::Kind::EnvHdri) {
                 // 0.12-Y-fix — o NAVEGADOR com a intenção HDRI (o flag é o

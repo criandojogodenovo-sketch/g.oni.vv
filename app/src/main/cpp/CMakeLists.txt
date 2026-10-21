@@ -189,6 +189,8 @@ add_library(goni_vv SHARED
         render/Primitives.cpp
         render/Grid.h
         render/Grid.cpp
+        render/SkyRenderer.h   # 0.12-Y (3.Y-D): o céu procedural (gradiente +
+        render/SkyRenderer.cpp #   sol + nuvens FBM 2D animadas — o padrão Pbr.h)
         render/Camera.h
         render/Camera.cpp
         render/DrawStats.h
