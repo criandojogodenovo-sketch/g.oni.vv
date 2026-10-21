@@ -244,17 +244,17 @@ TEST(qol_a_lupa_expande) {
 // «As bordas laranjas (glass) dos painéis inativos passam a cinza escuro
 // (#24242A). O laranja fica APENAS para o ativo/selecionado.»
 TEST(qol_a_border_cinza) {
-    // o token É o cinza do ELEVADO (#24242A), opaco — a borda deixa de ser
-    // vidro âmbar
-    EXPECT(nearEq(theme::kTheme.border[0], 36.0f / 255.0f));
-    EXPECT(nearEq(theme::kTheme.border[1], 36.0f / 255.0f));
-    EXPECT(nearEq(theme::kTheme.border[2], 42.0f / 255.0f));
+    // o token É A LINHA do dono (#26262C na FASE UI), opaco — a borda
+    // deixa de ser vidro âmbar (QoL A) e hoje é o cinza frio do dono
+    EXPECT(nearEq(theme::kTheme.border[0], 38.0f / 255.0f));
+    EXPECT(nearEq(theme::kTheme.border[1], 38.0f / 255.0f));
+    EXPECT(nearEq(theme::kTheme.border[2], 44.0f / 255.0f));
     EXPECT(nearEq(theme::kTheme.border[3], 1.0f));
     EXPECT(theme::kTheme.border[0] == theme::kTheme.elevated[0] &&
            theme::kTheme.border[1] == theme::kTheme.elevated[1] &&
            theme::kTheme.border[2] == theme::kTheme.elevated[2]);
-    // o âmbar sobrevive APENAS no accentDim (o fill da SELEÇÃO) — intacto
-    EXPECT(nearEq(theme::kTheme.accentDim[0], 74.0f / 255.0f));
+    // o FILL da SELEÇÃO é o FUNDO DE SELEÇÃO do dono (#2B1810 na FASE UI)
+    EXPECT(nearEq(theme::kTheme.accentDim[0], 43.0f / 255.0f));
     // o divisor ENTRE PAINÉIS segue o border (a fonte única — o y3 pin
     // mede o quad; aqui aferra o contrato do token)
     std::string src;
@@ -278,8 +278,8 @@ TEST(qol_a_inspector_ar) {
     e.begin();
     drawInspector(e.ui, e.scene, e.st, nullptr);
     e.end();
-    // as caixas X/Y/Z: os PAINÉIS bg (o fill #0A0A0C α1) de 32dp da linha
-    // Posição — os 3 primeiros pela ordem de emissão. A medição é no
+    // as caixas X/Y/Z: os PAINÉIS bg (o fill #0B0B0D α1 na FASE UI) de
+    // 32dp da linha Posição — os 3 primeiros pela ordem de emissão. A medição é no
     // batch de sólidos (os campos são re-despachados pelo scroll — não
     // deixam alvos no registo de auditoria).
     f32 boxX[8], boxW[8], boxY[8];
@@ -297,9 +297,9 @@ TEST(qol_a_inspector_ar) {
             mxy = v[k].y > mxy ? v[k].y : mxy;
         }
         const f32 wq = mxx - mnx, hq = mxy - mny;
-        // o fill bg do campo (r≈10/255, a=1) com a altura do campo 32dp
+        // o fill bg do campo (r≈11/255 na FASE UI, a=1) com a altura 32dp
         if (nearEq(hq, theme::dp(32.0f), 0.5f) && wq > theme::dp(20.0f) &&
-            nearEq(v[0].r, 10.0f / 255.0f, 1e-3f) &&
+            nearEq(v[0].r, 11.0f / 255.0f, 1e-3f) &&
             nearEq(v[0].a, 1.0f, 1e-3f) && v[0].x >= panel.x) {
             boxX[nB] = mnx;
             boxW[nB] = wq;
@@ -317,7 +317,7 @@ TEST(qol_a_inspector_ar) {
         const f32 gap0 = boxX[1] - (boxX[0] + boxW[0]);
         const f32 gap1 = boxX[2] - (boxX[1] + boxW[1]);
         const f32 wantGap =
-            theme::dp(12.0f + 2.0f * theme::kRadiusField);   // 12 + 2×4
+            theme::dp(12.0f + 2.0f * theme::kRadiusField);   // 12 + 2×6
         EXPECT_MSG(nearEq(gap0, wantGap) && nearEq(gap1, wantGap),
                    "qol_a_inspector_ar: os vãos X|Y|Z são 12dp (QoL A; "
                    "medidos %0.f com os cantos) — %.1f / %.1f",
@@ -465,15 +465,16 @@ TEST(qol_b_navegador_compacto) {
         }
         const bool banda = (mny >= L.rootsY - 1.0f &&
                             mny <= L.upY + L.rowH + 1.0f);
-        // o gradiente do button: topo âmbar puro (r=1, g≈0.69, a=1)
+        // o gradiente do button: topo da brasa pura (r=1, g≈0.353, a=1)
         if (banda && nearEq(v[0].r, 1.0f, 1e-3f) &&
-            nearEq(v[0].g, 176.0f / 255.0f, 2e-3f) &&
+            nearEq(v[0].g, 90.0f / 255.0f, 2e-3f) &&
+            nearEq(v[0].b, 31.0f / 255.0f, 2e-3f) &&
             nearEq(v[0].a, 1.0f, 1e-3f)) {
             ++accentFill;
         }
     }
     EXPECT_MSG(accentFill == 0u,
-               "qol_b_navegador_compacto: ZERO botões âmbar gigantes nas "
+               "qol_b_navegador_compacto: ZERO botões brasa gigantes nas "
                "bandas raízes/Subir (%u sobraram)", accentFill);
     // a FONTE: as raízes/subir desenham com panelRounded + frameRounded
     // (o padrão quieto) e o breadcrumb tem o separador « / »

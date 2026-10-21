@@ -77,27 +77,28 @@ public class ProjectManagerActivity extends Activity {
     // GRAFITE+ÂMBAR+VIDRO, A REESCRITA DA APRESENTAÇÃO por ordem do dono).
     // O mono morreu no device (os fills brancos do accent eram BLOCOS
     // CEGANTES — o anti-exemplo do dono): a Paleta A OFICIAL é grafite
-    // #0E0E10 + âmbar #FFB020 + vidro 80%. O ACCENT_INK continua ESCURO
-    // (10,5:1 sobre o âmbar). Os CARDS mantêm o véu do vidro (GLA α0.80).
-    // 0.12-C (C-3): a ESCADA DE SUPERFÍCIES alinhada com o ui/Theme.h (a
-    // ordem expressa do dono: fundo #0A0A0C · painel #131316 · cartão
-    // #1B1B20 · elevado #24242A — o poço #08080A superou-se)
-    static final int BG = 0xFF0A0A0C;        // o FUNDO da escada
-    static final int SURFACE = 0xFF131316;   // o PAINEL (RGB p/ texto/estado)
-    static final int SURFACE2 = 0xFF1E1E21;  // surface-2 (premido)
-    static final int CARD = 0xFF1B1B20;      // O CARTÃO da escada
-    static final int ELEVATED = 0xFF24242A;  // O ELEVADO da escada
-    static final int BORDER = 0xFF4A3714;    // border (a hairline ÂMBAR — Y-1)
-    static final int TEXT1 = 0xFFECECEE;     // text-1
-    static final int TEXT2 = 0xFFA6A6AD;     // text-2 (7,5:1)
-    static final int ACCENT = 0xFFFFB020;    // accent — O ÂMBAR (a spec G)
-    static final int ACCENT_PRESS = 0xFFE09A00;
-    static final int ACCENT_INK = 0xFF0E0E10; // tinta SOBRE âmbar (10,5:1)
-    static final int ACCENT_DIM = 0xFF4A3714; // o fill da seleção (âmbar 25%)
-    static final int SURFACE_GLA = 0xCC131316; // vidro: α0.80 (cards/sheets)
-    static final int SURFACE2_GLA = 0xDB1E1E21; // vidro denso: α0.86
+    // #0E0E10 + brasa #FF5A1F + vidro 85%. O ACCENT_INK continua ESCURO
+    // (6,2:1 sobre a brasa). Os CARDS mantêm o véu do vidro (GLA α0.80).
+    // FASE UI (parte A): A PALETA DO DONO alinhada com o ui/Theme.h —
+    // fundo #0B0B0D · painel #121215 · elementos #1B1B20 · elevado/linhas
+    // #26262C · texto #E8E6E3/#8A8A93 · A BRASA ÚNICA #FF5A1F (o âmbar
+    // #FFB020 morreu; o fundo de seleção é o #2B1810 da ordem)
+    static final int BG = 0xFF0B0B0D;        // o FUNDO (o dono na FASE UI)
+    static final int SURFACE = 0xFF121215;   // o PAINEL (RGB p/ texto/estado)
+    static final int SURFACE2 = 0xFF1A1A1E;  // surface-2 (premido)
+    static final int CARD = 0xFF1B1B20;      // OS ELEMENTOS da escada
+    static final int ELEVATED = 0xFF26262C;  // O ELEVADO da escada
+    static final int BORDER = 0xFF26262C;    // AS LINHAS 1px do dono
+    static final int TEXT1 = 0xFFE8E6E3;     // text-1
+    static final int TEXT2 = 0xFF8A8A93;     // text-2 (5,5:1)
+    static final int ACCENT = 0xFFFF5A1F;    // accent — A BRASA (destaque ÚNICO)
+    static final int ACCENT_PRESS = 0xFFD94A16;
+    static final int ACCENT_INK = 0xFF0E0E10; // tinta SOBRE a brasa (6,2:1)
+    static final int ACCENT_DIM = 0xFF2B1810; // O FUNDO DE SELEÇÃO do dono
+    static final int SURFACE_GLA = 0xCC121215; // vidro: α0.80 (cards/sheets)
+    static final int SURFACE2_GLA = 0xDB1A1A1E; // vidro denso: α0.86
     static final int DANGER = 0xFFE5484D;
-    static final int WARN = 0xFFFF8A3D;      // LARANJA (nunca == âmbar)
+    static final int WARN = 0xFFFF8A3D;      // LARANJA (nunca == brasa)
     static final int OK = 0xFF46A758;
     // 0.12-D (D-4): a RAMPA DO FOGO — o espelho do Theme fire0..fire3
     // (a identidade do «G em chama»; a MESMA família extraída do ícone
@@ -779,7 +780,7 @@ public class ProjectManagerActivity extends Activity {
         // a paleta fixa (6 matizes SÓBRIOS — saturação contida, todos
         // legíveis sobre o grafite da casa; NUNCA cores vivas de placeholder)
         private final int[] HUES = {
-                0xFFE09A00,   // âmbar (a cor da casa, escurecida)
+                0xFFD94A16,   // a brasa da casa, escurecida (FASE UI)
                 0xFFC4573B,   // terracota
                 0xFF3E8E7E,   // azul-petróleo
                 0xFF5B7FA6,   // azul-ardósia
@@ -832,7 +833,7 @@ public class ProjectManagerActivity extends Activity {
             p.setStyle(android.graphics.Paint.Style.STROKE);
             final float sw = dp(1);   // o dp da CASA (o dp2 local morreu — duplicava a derivação)
             p.setStrokeWidth(sw);
-            p.setColor(0xFF4A3714);   // o BORDER da casa
+            p.setColor(BORDER);   // o token da casa (AS LINHAS #26262C da FASE UI)
             c.drawRect(sw / 2f, sw / 2f, getWidth() - sw / 2f,
                     getHeight() - sw / 2f, p);
             p.setColor(hue);

@@ -424,6 +424,20 @@ R-014 aplicada.
   **versionCode 109** — o build vigente da campanha 0.12-Y. O 108 fica
   INTACTO como história.
 
+- **FASE UI · A — TOKENS E IDENTIDADE** — O FICHEIRO ÚNICO DE TOKENS
+  (ui/Theme.h) com A PALETA DO DONO (os hexes EXATOS: fundo #0B0B0D ·
+  painéis #121215 α0.85 · elementos #1B1B20 · linhas 1px #26262C · texto
+  #E8E6E3/#8A8A93 · A BRASA ÚNICA #FF5A1F — o âmbar #FFB020 morreu ·
+  seleção #2B1810 · eixos #E5484D/#3FB950/#3B82F6) + a escala 4/8/12/16 +
+  os raios 6-8 · o espelho Java alinhado (o TOKENS_F do gate
+  recalibrado, os 2 hexes inline mortos) · pins ×2 (ui_tokens_brasa ·
+  ui_sobreposicao_topbar, test_fase_ui.cpp NOVO — o teste automático de
+  sobreposição da fase) + M-UIa vermelho→reposto→verde (colada no
+  RELATORIO-FASE-UI.md §1) · 9 recalibrações com nota · verificação:
+  test_core 0 falhas na corrida completa (o CI é o árbitro) ·
+  theme_hex/ui_vocab/projects_ui VERDES · **versionCode 111** — o build
+  vigente da FASE UI. O 110 fica INTACTO como história.
+
 - **0.12-Y · 3.Y-D — O CÉU PROCEDURAL COM NUVENS ANIMADAS** — o shader do
   céu (render/SkyRenderer.{h,cpp} NOVOS: o quad fullscreen, o gradiente
   horizonte→zénite, o sol disco/halo, as nuvens FBM 2D com hash inteiro e

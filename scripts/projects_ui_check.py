@@ -31,13 +31,16 @@ FMT = ROOT / "app/src/main/java/vv/goni/ProjectsFormat.java"
 VVP = ROOT / "app/src/main/java/vv/goni/VvProjects.java"
 ICN = ROOT / "app/src/main/java/vv/goni/UiIcons.java"
 
-# 0.12-C (C-3): a ESCADA DE SUPERFÍCIES no espelho Java (os tokens novos
-# com os hexes do dono; os antigos 0xFF0E0E10/0xFF161618/0xFF202023/
-# 0xFF2E2E32/0xCC161618/0xDB202023 saem — os velhos hexes fora do Java)
-TOKENS_F = ("0xFF0A0A0C", "0xFF131316", "0xFF1E1E21", "0xFF1B1B20",
-            "0xFF24242A",
-            "0xFFECECEE", "0xFFA6A6AD", "0xFFFFB020", "0xFFE09A00",
-            "0xFF0E0E10", "0xCC131316", "0xDB1E1E21", "0xFF4A3714",
+# 0.12-C (C-3) recalibrada pela FASE UI (parte A): a PALETA DO DONO no
+# espelho Java (fundo #0B0B0D · painel #121215 · elementos #1B1B20 ·
+# elevado #26262C · texto #E8E6E3/#8A8A93 · A BRASA #FF5A1F; os velhos
+# 0xFF0A0A0C/0xFF131316/0xFF1E1E21/0xFF24242A/0xFFECECEE/0xFFFFB020/
+# 0xFFE09A00/0xCC131316/0xDB1E1E21/0xFF4A3714 saem — os velhos hexes
+# fora do Java)
+TOKENS_F = ("0xFF0B0B0D", "0xFF121215", "0xFF1A1A1E", "0xFF1B1B20",
+            "0xFF26262C",
+            "0xFFE8E6E3", "0xFF8A8A93", "0xFFFF5A1F", "0xFFD94A16",
+            "0xFF0E0E10", "0xCC121215", "0xDB1A1A1E", "0xFF2B1810",
             "0xFFE5484D", "0xFFFF8A3D", "0xFF46A758",
             # 0.12-D (D-4): a RAMPA DO FOGO (o espelho do Theme fire0..fire3
             # — a identidade do «G em chama» no lado Java)

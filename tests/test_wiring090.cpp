@@ -149,16 +149,17 @@ f32 trfRowY(UiContext& ui, Scene& sc, Handle h, u32 idx) {
 
 } // namespace
 
-// ---- A: escala/raios da spec (múltiplos de 8; 4 só p/ ícones) -----------------
+// ---- A: escala/raios da spec (a escala do dono na FASE UI: 4/8/12/16) --------
 TEST(theme_escala_8dp_e_raios_da_spec) {
     EXPECT(nearEqF(theme::kSpace1, 8.0f));
     EXPECT(nearEqF(theme::kSpace2, 16.0f));
-    EXPECT(nearEqF(theme::kSpace3, 24.0f));   // recuo dos filhos (spec B)
+    EXPECT(nearEqF(theme::kSpaceMid, 12.0f));  // FASE UI: o 12 da escala
+    EXPECT(nearEqF(theme::kSpace3, 16.0f));    // recuo dos filhos (FASE UI)
     EXPECT(nearEqF(theme::kTarget, 40.0f));   // PASSO 1: a LEI DE OURO (40/32)
     EXPECT(nearEqF(theme::kTargetGap, 8.0f));
     EXPECT(nearEqF(theme::kIcon, 20.0f));     // PASSO 1: ícone 20 (era 24)
     EXPECT(nearEqF(theme::kRadiusCard, 8.0f));   // cards/botões
-    EXPECT(nearEqF(theme::kRadiusField, 4.0f));  // campos/chips
+    EXPECT(nearEqF(theme::kRadiusField, 6.0f));  // campos/chips (raio 6-8)
     // tipografia: 12/14/16/20sp com fontScale = sp/14
     EXPECT(nearEqF(theme::fontScale(theme::kFontCaption), 12.0f / 14.0f));
     EXPECT(nearEqF(theme::fontScale(theme::kFontBody), 1.0f));

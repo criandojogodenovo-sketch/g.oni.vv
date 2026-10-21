@@ -1,84 +1,76 @@
 #pragma once
-// ui/Theme.h — DESIGN SYSTEM 0.9.6.10 (spec G · GRAFITE+ÂMBAR+VIDRO),
-// RECALIBRADO 0.11-Y (Y-1 · a identidade visual G.One VV do dono): o poço
-// #08080A + a chama (accent2/glow) + a aresta âmbar do cristal.
+// ui/Theme.h — DESIGN SYSTEM 0.9.6.10 (spec G), RECALIBRADO 0.11-Y (Y-1),
+// pela escada 0.12-C, pelo fogo 0.12-E — e AGORA pela FASE UI (A ORDEM DO
+// DONO, envio 1/5 · parte A): a paleta BRASA sobre a pedra escura — o
+// destaque ÚNICO #FF5A1F (o âmbar #FFB020 MORREU) e a escada de superfícies
+// com os hexes EXATOS do dono.
 //
 // FONTE ÚNICA das cores/espaçamentos/tipografia/raios de TODO o editor e da
 // tela de projetos. 🔶 MUDANÇA ISOLADA: trocar UM token aqui muda a app toda.
 //
-// 0.9.6.10 (GRUPO UI · A REESCRITA DA APRESENTAÇÃO, por ordem expressa do
-// dono): a PALETA A OFICIAL — grafite + âmbar + vidro (a decisão do dono
-// depois de ver o mono no device: os fills brancos do accent mono eram
-// BLOCOS BRANCOS CEGANTES — o anti-exemplo da imagem 2). O AZUL morreu do
-// chrome TODO (a promessa «zero azul» da spec G; o azul do eixo Z do gizmo
-// e da sintaxe V.ONI são CONTEÚDO — exceção documentada de sempre).
-//
-// 0.11-Y (Y-1) — A TABELA RECALIBRADA (a chama sobre o poço), SUPERADA
-// pela ESCADA DE SUPERFÍCIES da 0.12-C (C-3, a ordem expressa do dono —
-// o padrão Y-3/D11): o FUNDO #0A0A0C + o PAINEL #131316 + o CARTÃO
-// #1B1B20 + o ELEVADO #24242A — 4 tons distintos (PAINEL #141416 desde
-// a 0.12-E E-2 — a paleta EXATA do FOGO AVERMELHADO do dono). A BORDA
-// entre painéis, âmbar subtil na 0.12-C, é #24242A desde a 0.12-QoL A
-// (o dono: o laranja fica APENAS para o ativo/selecionado — Redbr1):
-//   bg         #0A0A0C α1.00 — fundo da app (o FUNDO da escada; == o
+// FASE UI (parte A) — A TABELA DO DONO (os hexes EXATOS da ordem):
+//   bg         #0B0B0D α1.00 — fundo viewport (o FUNDO da escada; == o
 //              clear, o contrato «o clear lê o token")
-//   surface    #141416 α0.85 — O VIDRO da FASE 3 do E (a ordem do dono:
-//              «fundo escuro com alpha 0.85»; era o α0.80 da 0.11-Y)
-//   surface2   #1E1E21 α0.86 — vidro denso (premido, chips ativos)
-//   card       #1B1B20 α1.00 — os CARTÕES (0.12-C)
-//   elevated   #24242A α1.00 — os MENUS/SHEETS/TOAST (0.12-C)
-//   border     #24242A α1.00 — a borda dos INATIVOS (0.12-QoL A: o dono
-//              manda o cinza escuro; o âmbar fica APENAS no ativo/selecionado
-//              — a aresta âmbar da 0.11-Y/0.12-C morre com o feedback Redbr1)
-//   glassEdge  #FFFFFF α0.12 — o BORDO do vidro (0x1F — luz na aresta)
-//   glassTop   #FFFFFF α0.04 — highlight do TOPO do vidro (0x0A)
-//   accent2    #FF6B00 α1.00 — O FOGO (novo 0.11-Y): a base do gradiente
-//              VERTICAL dos botões ativos (accent no topo → accent2 em baixo)
-//   glow       #FF3D00 α0.25 — O BRILHO DA CHAMA (novo 0.11-Y): o glow de
-//              foco (2 quads α decrescente) e a linha 1dp do topo do vidro
-//              (a 20% — desenhada a seguir a panelRounded/frameRounded)
-//   text1      #F2F2F5 α1.00 — texto primário (0.12-E E-2: a paleta do
-//              dono — era #ECECEE; 15,9:1 sobre surface)
-//   text2      #A6A6AD α1.00 — texto secundário (7,5:1 sobre surface)
-//   accent     #FFB020 α1.00 — O ÂMBAR (a identidade; era o branco mono)
-//   accentPress#E09A00 α1.00 — âmbar premido (feedback de toque)
-//   accentInk  #0E0E10 α1.00 — tinta SOBRE âmbar (10,5:1 — escura)
-//   accentDim  #4A3714 α1.00 — o âmbar a 25% sobre grafite: o FILL da
-//                              SELEÇÃO (linha da hierarquia, chips) + a
-//                              BARRA ESQUERDA é o accent puro
-//   danger     #E5484D α1.00 — semântica (exceção documentada, como sempre)
-//   warn       #FF8A3D α1.00 — LARANJA (nunca == accent: hue 24° vs 39°)
+//   surface    #121215 α0.85 — OS PAINÉIS (o vidro da casa; o α0.85 da
+//              FASE 3 do 0.12-E mantém-se — a ordem nova muda o RGB)
+//   surface2   #1A1A1E α0.86 — vidro denso (premido, chips ativos)
+//   card       #1B1B20 α1.00 — OS ELEMENTOS (o dono deu o MESMO hex da
+//              escada 0.12-C — o token nem mexe)
+//   elevated   #26262C α1.00 — os MENUS/SHEETS/TOAST (o nível mais alto;
+//              == border, o padrão da casa desde a 0.12-QoL A)
+//   border     #26262C α1.00 — AS LINHAS 1px (o dono: «linhas 1px #26262C»)
+//   glassEdge  #FFFFFF α0.12 — o BORDO do vidro (o «vidro» da ordem nova:
+//              borda fina + leve brilho no selecionado — o glow em baixo)
+//   glassTop   #FFFFFF α0.04 — highlight do TOPO do vidro
+//   accent     #FF5A1F α1.00 — A BRASA (o destaque ÚNICO; o hex exato da
+//              ordem). SÓ em: seleção, aba ativa, Play, botão principal,
+//              cursor de tempo. O ÂMBAR #FFB020 morreu (a ordem: «remover
+//              o âmbar atual»); SEM azul como destaque (o azul do eixo Z e
+//              da sintaxe V.ONI são CONTEÚDO — exceção documentada)
+//   accent2    #E0440F α1.00 — a brasa ESCURA (a base do gradiente VERTICAL
+//              dos botões ativos: accent no topo → accent2 em baixo; mesma
+//              família da brasa — o destaque continua ÚNICO)
+//   accentPress#D94A16 α1.00 — brasa premida (feedback de toque)
+//   accentInk  #0E0E10 α1.00 — tinta SOBRE a brasa (6,2:1 — escura)
+//   accentDim  #2B1810 α1.00 — O FUNDO DE SELEÇÃO do dono (a barra lava +
+//              o fill translúcido da linha selecionada)
+//   glow       #FF5A1F α0.25 — O BRILHO DA BRASA (o glow de foco composto
+//              2 quads + a linha 1dp do topo do vidro a 20%)
+//   text1      #E8E6E3 α1.00 — texto primário (o hex exato do dono;
+//              15,1:1 sobre o painel composto)
+//   text2      #8A8A93 α1.00 — texto secundário (5,5:1 sobre surface)
+//   danger     #E5484D α1.00 — semântica (== o axisX novo do dono)
+//   warn       #FF8A3D α1.00 — LARANJA semântico (nunca == accent)
 //   ok         #46A758 α1.00
-//   scrim      preto 60% — véu MODAL (os cards centrados que têm véu)
-//   scrimMenu  preto 40% — véu dos MENUS ANCORADOS (PASSO 4 · 0.9.6.20:
-//              «menus ancorados com fundo 40%» — o véu mais leve mantém a
-//              cena legível à volta do menu; os modais mantêm os 60%)
+//   scrim      preto 60% — véu MODAL (mantém-se)
+//   scrimMenu  preto 40% — véu dos MENUS ANCORADOS (mantém-se)
+//   axisX/Y/Z  #E5484D · #3FB950 · #3B82F6 — OS EIXOS do dono (exatos;
+//              CONTEÚDO 3D, não chrome — o azul do Z é a exceção de sempre)
 //
-// CONTRASTE — OS PISOS REAIS (o padrão honesto, recalibrado 0.11-Y): sobre
-// surface SÓLIDA e sobre o VIDRO REAL (α0.80 sobre o poço #08080A — o que
-// está de facto por trás dos painéis laterais): text1 15,4/15,6:1 ·
-// text2 7,5/7,6:1 · accent 10,0/10,1:1 · danger 4,7:1 · warn 7,8:1 ·
-// ok 6,0:1 — TODO o texto ≥4,5:1 e TODO o componente ≥3:1.
-// O CASO PATOLÓGICO (cena BRANCA PURA por trás do vidro 80%): text1 8,3:1
-// ✓ · accent 5,3:1 ✓ · text2 4,0:1 · danger 2,5:1 — A REGRA DA CASA que
-// o torna honesto: TEXTO SECUNDÁRIO E SEMÂNTICA NÃO FLUTUAM sobre a cena
-// viva — sobre vidro flutuante usa-se text1; severidade vive em painéis
-// dokados (surface sólida). blendOver/contrastOnGlass medem TUDO no CI.
+// CONTRASTE — OS PISOS REAIS (validados ANTES do commit, o padrão da casa):
+// sobre o painel composto (α0.85 sobre o fundo): text1 15,1:1 · text2
+// 5,5:1 · accent 6,1:1 · danger 4,8:1 · warn 8,0:1 · ok 6,2:1 — TODO o
+// texto ≥4,5:1 e TODO o componente ≥3:1. O pior caso do vidro (cena BRANCA
+// PURA por trás): text1 9,7:1 ✓ · accent 3,9:1 ✓ — a REGRA DA CASA mantém-
+// se: TEXTO SECUNDÁRIO E SEMÂNTICA NÃO FLUTUAM sobre a cena viva — sobre
+// vidro flutuante usa-se text1; severidade vive em painéis dokados.
+// blendOver/contrastOnGlass medem TUDO no CI.
 //
-// ESCALA: espaçamento em múltiplos de 8dp (4 só p/ ícones internos);
-// PASSO 1: alvos desenho 32 / toque 40 com ≥8dp entre eles; nada ≥48;
-// texto 12sp legendas/status,
-// 14sp corpo/linhas, 16sp títulos de secção, 20sp títulos de ecrã;
-// raios 8dp cards/botões, 4dp campos/chips. Zero emoji, zero blur/sombras
+// ESCALA: espaçamento 4/8/12/16 (A ESCALA DO DONO na parte A — o 12 entrou
+// como kSpaceMid; o 24 do recuo de filhos morre na parte C); alvos desenho
+// 32 / toque 40 com ≥8dp entre eles; nada ≥48; texto 12sp legendas/status,
+// 14sp corpo/linhas, 16sp títulos de secção, 20sp títulos de ecrã — sans
+// para a UI (o atlas único da casa); estado/código mono é o alvo da fase
+// (o 2.º atlas é dívida declarada no relatório). Raios 8dp cards/botões,
+// 6dp campos/chips (A ORDEM: raio 6-8). Zero emoji, zero blur/sombras
 // REAIS (immediate-mode C++; o "canto curvo" é escadaria de quads —
-// UiContext::panelRounded). 0.11-Y: o GRADIENTE entrou (por vértice, o
-// varying do pass UI — quadGradientV) e o GLOW do foco é COMPOSTO (2 quads
-// α decrescente — a simulação honesta do brilho, sem blur real). O vidro
-// NÃO tem backdrop blur (spec G).
+// UiContext::panelRounded). O GLOW do foco é COMPOSTO (2 quads α
+// decrescente — a simulação honesta do brilho, sem blur real). O vidro
+// NÃO tem backdrop blur.
 //
 // COMPATIBILIDADE: os tokens históricos (BG/PANEL/LINE/TEXT/ACCENT/WARN de
 // UiContext.h) continuam a existir e APONTAM para ESTA tabela — a app
-// inteira muda de pele num só sítio (desde a 0.9.0; agora grafite+âmbar).
+// inteira muda de pele num só sítio (desde a 0.9.0; agora pedra+brasa).
 #include "core/Types.h"
 #include <cmath>
 
@@ -89,43 +81,42 @@ namespace theme {
 struct Theme {
     // cores de fundo (o ALPHA é o VIDRO: 1.0 = opaco, <1.0 = vê-se o que
     // está por trás — o pass UI desenha TODO com blend desde a F1)
-    f32 bg[4];         // #08080A α1.00 (O POÇO — igual ao clear da app)
-    f32 surface[4];    // #131316 α0.80 (VIDRO 80% — a spec do dono; o RGB
-                       //  é o PAINEL da escada 0.12-C)
-    f32 surface2[4];   // #1E1E21 α0.86 (vidro denso — premido)
-    // 0.12-C (C-3) — A ESCADA DE SUPERFÍCIES do dono (4 tons distintos com
-    // a borda âmbar subtil entre painéis): fundo #0A0A0C (o bg acima) ·
-    // painel #131316 (a surface acima) · CARTÃO #1B1B20 (os cards) ·
-    // ELEVADO #24242A (menus/sheets/toast — o que flutua por cima)
-    f32 card[4];       // #1B1B20 α1.00 (os cartões — os cards do drawer, o
-                       //  browser, o diálogo aplicar)
-    f32 elevated[4];   // #24242A α1.00 (os menus/sheets/toast — o nível
+    f32 bg[4];         // #0B0B0D α1.00 (O FUNDO VIEWPORT do dono — igual ao
+                       //  clear da app)
+    f32 surface[4];    // #121215 α0.85 (OS PAINÉIS do dono — o vidro da
+                       //  casa; o RGB é novo, o α0.85 mantém-se)
+    f32 surface2[4];   // #1A1A1E α0.86 (vidro denso — premido)
+    // A ESCADA DE SUPERFÍCIES (0.12-C C-3, recalibrada pela FASE UI com os
+    // hexes EXATOS do dono): fundo #0B0B0D (o bg acima) · painel #121215
+    // (a surface acima) · ELEMENTOS #1B1B20 (os cards) · ELEVADO #26262C
+    // (menus/sheets/toast — o que flutua por cima)
+    f32 card[4];       // #1B1B20 α1.00 (OS ELEMENTOS do dono — os cards do
+                       //  drawer, o browser, o diálogo aplicar)
+    f32 elevated[4];   // #26262C α1.00 (os menus/sheets/toast — o nível
                        //  mais alto da escada)
     // traço
-    f32 border[4];     // #24242A α1.00 (0.12-QoL A — A ORDEM DO DONO: as
-                       //  bordas dos painéis/chips/campos INATIVOS são o
-                       //  CINZA ESCURO do ELEVADO; o âmbar fica APENAS
-                       //  para o ativo/selecionado. Supera a hairline
-                       //  ÂMBAR #4A3714 α0.60 da 0.11-Y/0.12-C — a aresta
-                       //  quente do cristal morre com o feedback Redbr1)
+    f32 border[4];     // #26262C α1.00 — AS LINHAS 1px do dono (as bordas
+                       //  dos painéis/chips/campos INATIVOS; o destaque
+                       //  fica APENAS no ativo/selecionado — a regra da
+                       //  casa que se mantém)
     f32 glassEdge[4];  // #FFFFFF α0.12 (0x1F — a aresta de luz do vidro)
     f32 glassTop[4];   // #FFFFFF α0.04 (0x0A — o highlight do topo)
     // texto
-    f32 text1[4];      // #F2F2F5 α1.00 (0.12-E E-2: a paleta FOGO
-                       // AVERMELHADO do dono — era #ECECEE)
-    f32 text2[4];      // #A6A6AD α1.00 (7,5:1 sobre surface)
-    // ação (O ÂMBAR — a identidade spec G; o mono morreu com os fills
-    // brancos cegantes do anti-exemplo)
-    f32 accent[4];     // #FFB020 α1.00 (âmbar; 10,0:1 sobre surface)
-    f32 accent2[4];    // #FF6B00 α1.00 (O FOGO — a base do gradiente dos
-                       //  botões ATIVOS: accent topo → accent2 fundo, 0.11-Y)
-    f32 accentPress[4];// #E09A00 α1.00 (premido — mais escuro, feedback)
-    f32 accentInk[4];  // #0E0E10 α1.00 (tinta SOBRE âmbar — escura, 10,5:1)
-    f32 accentDim[4];  // #4A3714 α1.00 (o fill da SELEÇÃO: âmbar 25% sobre
-                       //  grafite; text1 9,6:1 e accent 6,2:1 em cima dele)
-    f32 glow[4];       // #FF3D00 α0.25 (O BRILHO DA CHAMA — o glow de foco
+    f32 text1[4];      // #E8E6E3 α1.00 (o TEXTO do dono na FASE UI)
+    f32 text2[4];      // #8A8A93 α1.00 (o TEXTO SECUNDÁRIO do dono; 5,5:1
+                       //  sobre surface)
+    // ação (A BRASA — o destaque ÚNICO da FASE UI; o âmbar morreu)
+    f32 accent[4];     // #FF5A1F α1.00 (A BRASA; 6,1:1 sobre surface)
+    f32 accent2[4];    // #E0440F α1.00 (a brasa ESCURA — a base do gradiente
+                       //  dos botões ATIVOS: accent topo → accent2 fundo)
+    f32 accentPress[4];// #D94A16 α1.00 (premido — mais escuro, feedback)
+    f32 accentInk[4];  // #0E0E10 α1.00 (tinta SOBRE a brasa — escura, 6,2:1)
+    f32 accentDim[4];  // #2B1810 α1.00 (O FUNDO DE SELEÇÃO do dono: a linha
+                       //  selecionada e os chips ativos; text1 13,6:1 e
+                       //  accent 5,4:1 em cima dele)
+    f32 glow[4];       // #FF5A1F α0.25 (O BRILHO DA BRASA — o glow de foco
                        //  composto 2 quads α decrescente + a linha 1dp do
-                       //  topo do vidro a 20%, 0.11-Y)
+                       //  topo do vidro a 20%)
     f32 danger[4];     // #E5484D α1.00 (semântica — exceção documentada)
     f32 warn[4];       // #FF8A3D α1.00 (LARANJA — hue 24°, nunca o accent 39°)
     f32 ok[4];         // #46A758 α1.00
@@ -150,10 +141,11 @@ struct Theme {
     f32 voniNumber[4];     // #FFD54F números (amarelo)
     f32 voniComment[4];    // #8A8A8A comentários (5,8:1 no poço — 0.11-Y)
     // EIXOS DO GIZMO (CONTEÚDO 3D, não chrome — a exceção documentada
-    // desde 0.6.9; vivem AQUI porque a spec G manda: cores SÓ no Theme)
-    f32 axisX[4];      // #E9493B vermelho (X)
-    f32 axisY[4];      // #5ACB5F verde (Y)
-    f32 axisZ[4];      // #4F92F5 azul (Z — conteúdo, NÃO chrome)
+    // desde 0.6.9; vivem AQUI porque a spec manda: cores SÓ no Theme;
+    // FASE UI: os hexes EXATOS do dono)
+    f32 axisX[4];      // #E5484D vermelho (X)
+    f32 axisY[4];      // #3FB950 verde (Y)
+    f32 axisZ[4];      // #3B82F6 azul (Z — conteúdo, NÃO chrome)
     f32 axisDim[4];    // #9E9E9E cinza (central)
     // 0.12-D (D-2): a TINTA ESCURA do vidro real — o blur da cena × esta
     // tinta é o corpo do painel flutuante (o #6B6B76 α0.94 escurece SEM
@@ -171,8 +163,9 @@ struct Theme {
     // «Atualiza o ui/Theme.h com esta paleta»): as BRASAS do redesign 2.5D
     // (o gradiente dos ativos da FASE 3: fireRed no topo → fireOrange no
     // fundo; o âmbar/accent fica como o brilho de destaque)
-    f32 fireRed[4];    // #D92B04 (brasa escura)
-    f32 fireOrange[4]; // #FF5E00 (brasa quente)
+    f32 fireRed[4];    // #FF5A1F (A BRASA — o topo do gradiente dos ativos;
+                       //  a FASE UI re-alinha o par à brasa ÚNICA do dono)
+    f32 fireOrange[4]; // #E0440F (a brasa escura — o fundo do gradiente)
 };
 
 // hex→f32 normalizado (compile-time-friendly por field) — com ALPHA:
@@ -183,68 +176,65 @@ struct Theme {
      static_cast<f32>(b) / 255.0f, static_cast<f32>(a)}
 #define VV_RGB(r, g, b) VV_RGBA(r, g, b, 1.0f)
 
-// 08080A=(8,8,10) · 151517=(21,21,23) · 1E1E21=(30,30,33) · 4A3714=(74,55,20)
-// 0.12-QoL A: 24242A=(36,36,42) — o border INATIVO (o âmbar #4A3714 só
-// sobrevive no accentDim, o fill da SELEÇÃO)
-// ECECEE=(236,236,238) · A6A6AD=(166,166,173) · FFB020=(255,176,32)
-// FF6B00=(255,107,0) · FF3D00=(255,61,0) · E09A00=(224,154,0)
-// E5484D=(229,72,77)
-// FF8A3D=(255,138,61) · 46A758=(70,167,88) · E9493B=(233,73,59)
-// 5ACB5F=(90,203,95) · 4F92F5=(79,146,245) · 9E9E9E=(158,158,158)
-// 0.12-E E-2 (a paleta FOGO AVERMELHADO do dono): F2F2F5=(242,242,245)
-// 141416=(20,20,22) · D92B04=(217,43,4) · FF5E00=(255,94,0)
+// FASE UI parte A (os hexes EXATOS do dono): 0B0B0D=(11,11,13) ·
+// 121215=(18,18,21) · 1A1A1E=(26,26,30) · 26262C=(38,38,44)
+// E8E6E3=(232,230,227) · 8A8A93=(138,138,147) · FF5A1F=(255,90,31)
+// E0440F=(224,68,15) · D94A16=(217,74,22) · 2B1810=(43,24,16)
+// E5484D=(229,72,77) · 3FB950=(63,185,80) · 3B82F6=(59,130,246)
 inline constexpr Theme kTheme{
-    VV_RGB(10, 10, 12),          // bg         (O FUNDO #0A0A0C — a escada
-                                 //  0.12-C; o poço #08080A foi superado
+    VV_RGB(11, 11, 13),          // bg         (O FUNDO #0B0B0D do dono — a
+                                 //  escada FASE UI; a 0A0A0C foi superada
                                  //  pela ordem expressa do dono, padrão Y-3)
-    VV_RGBA(20, 20, 22, 0.85f),  // surface    α0.85 — O VIDRO da FASE 3
-                                 //  (o PAINEL #141416 da paleta 0.12-E)
-    VV_RGBA(30, 30, 33, 0.86f),  // surface2   α0.86 — vidro denso
-    VV_RGB(27, 27, 32),          // card       (O CARTÃO #1B1B20 — 0.12-C)
-    VV_RGB(36, 36, 42),          // elevated   (O ELEVADO #24242A — 0.12-C)
-    VV_RGB(36, 36, 42),          // border     (#24242A — 0.12-QoL A: as
-                                 //  bordas INATIVAS cinza; o âmbar só no ativo)
+    VV_RGBA(18, 18, 21, 0.85f),  // surface    α0.85 — O VIDRO da casa
+                                 //  (o PAINEL #121215 da FASE UI)
+    VV_RGBA(26, 26, 30, 0.86f),  // surface2   α0.86 — vidro denso
+    VV_RGB(27, 27, 32),          // card       (OS ELEMENTOS #1B1B20 — o
+                                 //  dono deu o MESMO hex da escada)
+    VV_RGB(38, 38, 44),          // elevated   (O ELEVADO #26262C)
+    VV_RGB(38, 38, 44),          // border     (#26262C — AS LINHAS 1px do
+                                 //  dono; o destaque só no ativo)
     VV_RGBA(255, 255, 255, 31.0f / 255.0f),   // glassEdge (#FFFFFF1F)
     VV_RGBA(255, 255, 255, 10.0f / 255.0f),   // glassTop  (#FFFFFF0A)
-    VV_RGB(242, 242, 245),       // text1      (#F2F2F5 — a paleta 0.12-E)
-    VV_RGB(166, 166, 173),       // text2
-    VV_RGB(255, 176, 32),        // accent     (O ÂMBAR)
-    VV_RGB(255, 107, 0),         // accent2    (O FOGO — gradiente ativo)
-    VV_RGB(224, 154, 0),         // accentPress
-    VV_RGB(14, 14, 16),          // accentInk  (tinta escura no âmbar)
-    VV_RGB(74, 55, 20),          // accentDim  (o fill da seleção)
-    VV_RGBA(255, 61, 0, 0.25f),  // glow       (O BRILHO DA CHAMA — 0.11-Y)
+    VV_RGB(232, 230, 227),       // text1      (#E8E6E3 — o texto do dono)
+    VV_RGB(138, 138, 147),       // text2      (#8A8A93)
+    VV_RGB(255, 90, 31),         // accent     (A BRASA — o destaque ÚNICO)
+    VV_RGB(224, 68, 15),         // accent2    (a brasa escura — gradiente)
+    VV_RGB(217, 74, 22),         // accentPress
+    VV_RGB(14, 14, 16),          // accentInk  (tinta escura na brasa)
+    VV_RGB(43, 24, 16),          // accentDim  (O FUNDO DE SELEÇÃO #2B1810)
+    VV_RGBA(255, 90, 31, 0.25f), // glow       (O BRILHO DA BRASA)
     VV_RGB(229, 72, 77),         // danger
-    VV_RGB(255, 138, 61),        // warn       (LARANJA ≠ âmbar)
+    VV_RGB(255, 138, 61),        // warn       (LARANJA ≠ brasa)
     VV_RGB(70, 167, 88),         // ok
     {0.0f, 0.0f, 0.0f, 0.60f},   // scrim (60%)
     {0.0f, 0.0f, 0.0f, 0.40f},   // scrimMenu (40% — PASSO 4, menus ancorados)
     {0.0f, 0.0f, 0.0f, 0.15f},   // dropShadow (a sombra 2.5D — FASE 3.2)
-    // V.ONI (sintaxe = conteúdo): voniUser segue o text1 (#F2F2F5 — a
-    // paleta 0.12-E; era #ECECEE); no fundo #0A0A0C TODOS ≥5,8:1
-    // (user 17,6 · engine 9,5 · reserved 8,3 · string 9,9 · number 14,2
-    // · comment 5,8) — recalibrado 0.11-Y, o user segue o text1 na E-2
+    // V.ONI (sintaxe = conteúdo): voniUser segue o text1 (#E8E6E3 — a
+    // FASE UI); no fundo #0B0B0D TODOS ≥5,7:1 (user 15,8 · engine 9,3 ·
+    // reserved 8,2 · string 9,8 · number 13,9 · comment 5,7) — a paleta
+    // V.ONI intocada (conteúdo), o user segue o text1 como sempre
     VV_RGB(179, 157, 219),  // voniReserved
     VV_RGB(138, 180, 248),  // voniEngine
-    VV_RGB(242, 242, 245),  // voniUser (== text1 #F2F2F5 — a paleta 0.12-E)
+    VV_RGB(232, 230, 227),  // voniUser (== text1 #E8E6E3 — a FASE UI)
     VV_RGB(129, 199, 132),  // voniString
     VV_RGB(255, 213, 79),   // voniNumber
     VV_RGB(138, 138, 138),  // voniComment
-    // EIXOS (conteúdo 3D — os MESMOS valores de sempre do gizmo)
-    VV_RGB(233, 73, 59),    // axisX
-    VV_RGB(90, 203, 95),    // axisY
-    VV_RGB(79, 146, 245),   // axisZ
+    // EIXOS (conteúdo 3D — OS HEXES EXATOS DO DONO na FASE UI)
+    VV_RGB(229, 72, 77),    // axisX  #E5484D
+    VV_RGB(63, 185, 80),    // axisY  #3FB950
+    VV_RGB(59, 130, 246),   // axisZ  #3B82F6 (conteúdo, NÃO chrome)
     VV_RGB(158, 158, 158),  // axisDim
     // 0.12-D (D-2): a tinta do vidro real (#6B6B76 α0.94)
     VV_RGBA(107, 107, 118, 0.94f),  // glassInk
-    // 0.12-D (D-3): a RAMPA DO FOGO (extraída do ícone real)
+    // 0.12-D (D-3): a RAMPA DO FOGO (extraída do ícone real — o LOGO é
+    // identidade, a FASE UI não o toca)
     VV_RGB(122, 31, 10),    // fire0  #7A1F0A
     VV_RGB(232, 83, 15),    // fire1  #E8530F
     VV_RGB(255, 162, 31),   // fire2  #FFA21F
     VV_RGB(255, 224, 138),  // fire3  #FFE08A
-    // 0.12-E (E-2): A PALETA FOGO AVERMELHADO do dono (EXATA)
-    VV_RGB(217, 43, 4),     // fireRed    #D92B04 (brasa escura)
-    VV_RGB(255, 94, 0),     // fireOrange #FF5E00 (brasa quente)
+    // FASE UI: o par do gradiente dos ativos RE-ALINHADO à brasa ÚNICA
+    VV_RGB(255, 90, 31),    // fireRed    #FF5A1F (A BRASA — o topo)
+    VV_RGB(224, 68, 15),    // fireOrange #E0440F (a brasa escura — o fundo)
 };
 #undef VV_RGB
 #undef VV_RGBA
@@ -256,13 +246,18 @@ inline constexpr Theme kTheme{
 // nesses usos), WARN=warn. Definidos em UiContext.h (aliases) para não
 // duplicar símbolos.
 
-// ---- ESPAÇAMENTO (múltiplos de 8dp; 4 só p/ ícones internos) ---------------
+// ---- ESPAÇAMENTO (A ESCALA DO DONO na FASE UI: 4/8/12/16) ----------------
 constexpr f32 kSpaceIcon = 4.0f;    // exceção: ícones DENTRO de alvos
 constexpr f32 kSpace1 = 8.0f;       // vão mínimo entre alvos de toque
+constexpr f32 kSpaceMid = 12.0f;    // FASE UI: o 12 da escala do dono (vãos
+                                    //  médios — os vãos X/Y/Z do inspector
+                                    //  já o usavam por ordem da QoL A)
 constexpr f32 kSpace2 = 16.0f;      // padding de painel/card
-constexpr f32 kSpace3 = 24.0f;      // recuo de filhos na hierarquia
-constexpr f32 kSpace4 = 32.0f;
-constexpr f32 kSpace5 = 40.0f;
+constexpr f32 kSpace3 = 16.0f;      // recuo de filhos na hierarquia (a
+                                    //  FASE UI parte C alinha o recuo à
+                                    //  escala do dono — era 24)
+constexpr f32 kSpace4 = 32.0f;      // (2×16 — fora da escala base, mantém-
+constexpr f32 kSpace5 = 40.0f;      //  se pelos chamadores existentes)
 constexpr f32 kSpace6 = 48.0f;
 
 // ---- ALVOS DE TOQUE (PASSO 1 · 0.9.6.14 — a LEI DE OURO da spec) -----------
@@ -360,9 +355,10 @@ inline f32 centeredBaseline(f32 ascentBase, f32 descentBase, f32 rectY,
     return rectY + (rectH - (a + d)) * 0.5f + a;
 }
 
-// ---- RAIOS (cantos curvos por escadaria de quads) ---------------------------
+// ---- RAIOS (cantos curvos por escadaria de quads — A ORDEM: raio 6-8) ----
 constexpr f32 kRadiusCard  = 8.0f;   // cards/botões primários
-constexpr f32 kRadiusField = 4.0f;   // campos/chips
+constexpr f32 kRadiusField = 6.0f;   // campos/chips (a FASE UI subiu o 4
+                                     //  para o 6 da banda do dono)
 
 // ---- AUDITORIA DE CONTRASTE (WCAG 2.x, PURA — host-testável no CI) ----------
 // razão de luminância relativa entre duas cores RGBA (alpha ignorado —

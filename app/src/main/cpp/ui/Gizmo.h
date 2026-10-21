@@ -50,12 +50,12 @@ enum class Axis : u8 {
 };
 
 // cores de eixo (exceção documentada ao tema — SÓ nos gizmos 3D; CONTEÚDO,
-// não chrome). 0.9.6.10 (GRUPO UI · spec G): os VALORES vivem no Theme
-// (theme::kTheme.axisX/Y/Z/dim — «cores só no ficheiro de Theme», o gate
-// R-030); o hover é o ACCENT âmbar (era branco mono — a identidade nova)
-inline constexpr f32 kAxisX[4]     = {233.0f / 255.0f, 73.0f / 255.0f, 59.0f / 255.0f, 1.0f};   // vermelho #E9493B
-inline constexpr f32 kAxisY[4]     = {90.0f / 255.0f, 203.0f / 255.0f, 95.0f / 255.0f, 1.0f};   // verde #5ACB5F
-inline constexpr f32 kAxisZ[4]     = {79.0f / 255.0f, 146.0f / 255.0f, 245.0f / 255.0f, 1.0f};  // azul #4F92F5
+// não chrome). Os VALORES vivem no Theme (theme::kTheme.axisX/Y/Z/dim —
+// «cores só no ficheiro de Theme», o gate R-030); FASE UI: os hexes EXATOS
+// do dono (#E5484D · #3FB950 · #3B82F6); o hover é o ACCENT brasa
+inline constexpr f32 kAxisX[4]     = {229.0f / 255.0f, 72.0f / 255.0f, 77.0f / 255.0f, 1.0f};   // vermelho #E5484D
+inline constexpr f32 kAxisY[4]     = {63.0f / 255.0f, 185.0f / 255.0f, 80.0f / 255.0f, 1.0f};   // verde #3FB950
+inline constexpr f32 kAxisZ[4]     = {59.0f / 255.0f, 130.0f / 255.0f, 246.0f / 255.0f, 1.0f};  // azul #3B82F6
 inline constexpr f32 kAxisDim[4]   = {158.0f / 255.0f, 158.0f / 255.0f, 158.0f / 255.0f, 1.0f};// cinza #9E9E9E
 static_assert(kAxisX[0] == theme::kTheme.axisX[0] && kAxisZ[2] == theme::kTheme.axisZ[2],
               "eixos desincronizados de Theme.h — fonte única violada (gate R-030)");

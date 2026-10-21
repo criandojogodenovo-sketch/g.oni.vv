@@ -122,10 +122,10 @@ TEST(sombra_25d) {
 // a cor amber a 20% de opacidade (o reflexo da luz)».
 TEST(vidro_85_topline_ambar) {
     vv::theme::setDensity(1.0f);
-    // (a) o TOKEN: o surface α0.85 (o corpo do vidro)
-    EXPECT(nearC(vv::theme::kTheme.surface, 20.0f / 255.0f, 20.0f / 255.0f,
-                 22.0f / 255.0f, 0.85f));
-    // (b) a LINHA: 1dp, no topo, ÂMBAR (#FFB020) a α0.20 — pelo emissor
+    // (a) o TOKEN: o surface α0.85 (o corpo do vidro — o #121215 da FASE UI)
+    EXPECT(nearC(vv::theme::kTheme.surface, 18.0f / 255.0f, 18.0f / 255.0f,
+                 21.0f / 255.0f, 0.85f));
+    // (b) a LINHA: 1dp, no topo, A BRASA (#FF5A1F) a α0.20 — pelo emissor
     //     real (o mesmo que os painéis/menus chamam)
     {
         vv::UiContext ui;
@@ -140,14 +140,14 @@ TEST(vidro_85_topline_ambar) {
                 test::nearEqF(q.y1 - q.y0, 1.0f, 0.05f) &&
                 test::nearEqF(q.x1 - q.x0, 200.0f, 0.05f) &&
                 test::nearEqF(q.r, 1.0f, 0.01f) &&
-                test::nearEqF(q.g, 176.0f / 255.0f, 0.01f) &&
-                test::nearEqF(q.b, 32.0f / 255.0f, 0.01f) &&
+                test::nearEqF(q.g, 90.0f / 255.0f, 0.01f) &&
+                test::nearEqF(q.b, 31.0f / 255.0f, 0.01f) &&
                 test::nearEqF(q.a, 0.20f, 0.01f)) {
                 linha = true;
             }
         }
         EXPECT_MSG(linha,
-                   "vidro_85_topline: a linha 1dp do topo não saiu ÂMBAR a "
+                   "vidro_85_topline: a linha 1dp do topo não saiu BRASA a "
                    "20%% (o reflexo da luz da ordem do dono)");
     }
 }

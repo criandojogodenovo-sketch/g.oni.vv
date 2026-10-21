@@ -79,69 +79,72 @@ bool nearColor2(f32 r, f32 g, f32 b, f32 a, f32 er, f32 eg, f32 eb, f32 ea,
 // ---- PIN 1 — a TABELA (a fonte Theme.h + o kTheme compilado) ---------------
 TEST(y1_tokens) {
     // (a) o kTheme COMPILADO (a verdade que a app inteira consome)
-    // 0.12-C (C-3 · recalibração legítima): a ESCADA DE SUPERFÍCIES do
-    // dono supera o poço da Y-1 (o padrão Y-3/D11) — o FUNDO #0A0A0C e o
-    // PAINEL #141416 α0.85 (0.12-E E-3: a FASE 3 do dono — «fundo escuro
-    // com alpha 0.85»; o RGB é a paleta da E-2)
-    EXPECT(nearColor(theme::kTheme.bg, 10.0f / 255.0f, 10.0f / 255.0f,
-                     12.0f / 255.0f, 1.0f));
-    EXPECT(nearColor(theme::kTheme.surface, 20.0f / 255.0f, 20.0f / 255.0f,
-                     22.0f / 255.0f, 0.85f));
-    // OS DOIS NÍVEIS NOVOS da escada (o CARTÃO e o ELEVADO)
+    // FASE UI (parte A · recalibração legítima): A PALETA BRASA do dono
+    // supera a escada 0.12-C/0.12-E (o padrão Y-3/D11) — o FUNDO #0B0B0D,
+    // o PAINEL #121215 α0.85 e o destaque ÚNICO #FF5A1F (o âmbar morreu)
+    EXPECT(nearColor(theme::kTheme.bg, 11.0f / 255.0f, 11.0f / 255.0f,
+                     13.0f / 255.0f, 1.0f));
+    EXPECT(nearColor(theme::kTheme.surface, 18.0f / 255.0f, 18.0f / 255.0f,
+                     21.0f / 255.0f, 0.85f));
+    // OS DOIS NÍVEIS da escada (OS ELEMENTOS e o ELEVADO)
     EXPECT(nearColor(theme::kTheme.card, 27.0f / 255.0f, 27.0f / 255.0f,
                      32.0f / 255.0f, 1.0f));
-    EXPECT(nearColor(theme::kTheme.elevated, 36.0f / 255.0f, 36.0f / 255.0f,
-                     42.0f / 255.0f, 1.0f));
+    EXPECT(nearColor(theme::kTheme.elevated, 38.0f / 255.0f, 38.0f / 255.0f,
+                     44.0f / 255.0f, 1.0f));
     // os 4 tons são DISTINTOS (a regra do dono)
     EXPECT(!(theme::kTheme.bg[0] == theme::kTheme.surface[0] &&
              theme::kTheme.surface[0] == theme::kTheme.card[0] &&
              theme::kTheme.card[0] == theme::kTheme.elevated[0]));
-    EXPECT(nearColor(theme::kTheme.surface2, 30.0f / 255.0f, 30.0f / 255.0f,
-                     33.0f / 255.0f, 0.86f));
-    // a BORDA dos INATIVOS (0.12-QoL A): o cinza #24242A — o âmbar só no
-    // ativo/selecionado (a ordem do dono; o contrato do sub-tom accentDim
-    // morre — o accentDim fica como o fill da SELEÇÃO, intacto)
-    EXPECT(nearColor(theme::kTheme.border, 36.0f / 255.0f, 36.0f / 255.0f,
-                     42.0f / 255.0f, 1.0f));
+    EXPECT(nearColor(theme::kTheme.surface2, 26.0f / 255.0f, 26.0f / 255.0f,
+                     30.0f / 255.0f, 0.86f));
+    // AS LINHAS 1px do dono: o #26262C — o destaque só no ativo/selecionado
+    EXPECT(nearColor(theme::kTheme.border, 38.0f / 255.0f, 38.0f / 255.0f,
+                     44.0f / 255.0f, 1.0f));
     // os INTACTOS
-    EXPECT(nearColor(theme::kTheme.accent, 1.0f, 176.0f / 255.0f,
-                     32.0f / 255.0f, 1.0f));
-    EXPECT(nearColor(theme::kTheme.accentDim, 74.0f / 255.0f, 55.0f / 255.0f,
-                     20.0f / 255.0f, 1.0f));
+    EXPECT(nearColor(theme::kTheme.accent, 1.0f, 90.0f / 255.0f,
+                     31.0f / 255.0f, 1.0f));
+    EXPECT(nearColor(theme::kTheme.accentDim, 43.0f / 255.0f, 24.0f / 255.0f,
+                     16.0f / 255.0f, 1.0f));
     EXPECT(nearColor(theme::kTheme.danger, 229.0f / 255.0f, 72.0f / 255.0f,
                      77.0f / 255.0f, 1.0f));
     EXPECT(nearColor(theme::kTheme.warn, 1.0f, 138.0f / 255.0f,
                      61.0f / 255.0f, 1.0f));
     EXPECT(nearColor(theme::kTheme.ok, 70.0f / 255.0f, 167.0f / 255.0f,
                      88.0f / 255.0f, 1.0f));
-    // OS DOIS NOVOS (O FOGO e O BRILHO)
-    EXPECT(nearColor(theme::kTheme.accent2, 1.0f, 107.0f / 255.0f, 0.0f,
-                     1.0f));
-    EXPECT(nearColor(theme::kTheme.glow, 1.0f, 61.0f / 255.0f, 0.0f, 0.25f));
+    // OS DOIS da brasa (o gradiente e o brilho)
+    EXPECT(nearColor(theme::kTheme.accent2, 224.0f / 255.0f, 68.0f / 255.0f,
+                     15.0f / 255.0f, 1.0f));
+    EXPECT(nearColor(theme::kTheme.glow, 1.0f, 90.0f / 255.0f, 31.0f / 255.0f,
+                     0.25f));
     // (b) a FONTE (o artefago pinado — GONI_ROOT_OVERRIDE nas mutações)
     std::string src;
     ASSERT(readFile(y1Root() + "/app/src/main/cpp/ui/Theme.h", src));
-    EXPECT_MSG(countSub(src, "VV_RGB(10, 10, 12)") == 1,
-               "y1_tokens: o bg VV_RGB(10,10,12) tem de aparecer EXATAMENTE "
-               "1x (encontrado %u) — 0.12-C: a escada do dono",
-               countSub(src, "VV_RGB(10, 10, 12)"));
-    // 0.12-E E-2: o painel é o #141416 da paleta do dono (era #131316)
-    EXPECT(countSub(src, "VV_RGBA(20, 20, 22, 0.85f)") == 1);
-    EXPECT(countSub(src, "VV_RGBA(30, 30, 33, 0.86f)") == 1);
-    // 0.12-QoL A: o border é o #24242A (o âmbar VV_RGBA(74,55,20,0.60)
-    // MORREU — o accentDim continua com o RGB dele, mas opaco)
-    EXPECT(countSub(src, "VV_RGB(36, 36, 42)") == 2);   // elevated + border
-    EXPECT(countSub(src, "VV_RGBA(74, 55, 20, 0.60f)") == 0);
-    EXPECT(countSub(src, "VV_RGB(255, 107, 0)") == 1);
-    EXPECT(countSub(src, "VV_RGBA(255, 61, 0, 0.25f)") == 1);
-    // os valores VELHOS da tabela morrem (o accentInk é o ÚNICO
-    // VV_RGB(14, 14, 16) que fica — a tinta sobre o âmbar não muda)
+    EXPECT_MSG(countSub(src, "VV_RGB(11, 11, 13)") == 1,
+               "y1_tokens: o bg VV_RGB(11,11,13) tem de aparecer EXATAMENTE "
+               "1x (encontrado %u) — FASE UI: o fundo do dono",
+               countSub(src, "VV_RGB(11, 11, 13)"));
+    // o painel é o #121215 da FASE UI
+    EXPECT(countSub(src, "VV_RGBA(18, 18, 21, 0.85f)") == 1);
+    EXPECT(countSub(src, "VV_RGBA(26, 26, 30, 0.86f)") == 1);
+    // as LINHAS são o #26262C (elevated + border partilham o RGB)
+    EXPECT(countSub(src, "VV_RGB(38, 38, 44)") == 2);
+    // a BRASA: accent + fireRed partilham o RGB; o glow com alfa próprio
+    EXPECT(countSub(src, "VV_RGB(255, 90, 31)") == 2);
+    EXPECT(countSub(src, "VV_RGBA(255, 90, 31, 0.25f)") == 1);
+    EXPECT(countSub(src, "VV_RGB(224, 68, 15)") == 2);   // accent2 + fireOrange
+    EXPECT(countSub(src, "VV_RGB(43, 24, 16)") == 1);    // O FUNDO DE SELEÇÃO
+    // os valores VELHOS da tabela MORREM (o âmbar saiu; o accentInk é o
+    // ÚNICO VV_RGB(14,14,16) que fica)
     EXPECT_MSG(countSub(src, "VV_RGB(14, 14, 16)") == 1,
                "y1_tokens: VV_RGB(14,14,16) só no accentInk (encontrado %u)",
                countSub(src, "VV_RGB(14, 14, 16)"));
-    EXPECT(countSub(src, "VV_RGBA(22, 22, 24") == 0);
-    EXPECT(countSub(src, "VV_RGBA(32, 32, 35") == 0);
-    EXPECT(countSub(src, "VV_RGBA(46, 46, 50") == 0);
+    EXPECT(countSub(src, "VV_RGB(10, 10, 12)") == 0);
+    EXPECT(countSub(src, "VV_RGBA(20, 20, 22, 0.85f)") == 0);
+    EXPECT(countSub(src, "VV_RGB(36, 36, 42)") == 0);
+    EXPECT(countSub(src, "VV_RGB(255, 176, 32)") == 0);
+    EXPECT(countSub(src, "VV_RGB(74, 55, 20)") == 0);
+    EXPECT(countSub(src, "VV_RGB(255, 107, 0)") == 0);
+    EXPECT(countSub(src, "VV_RGBA(255, 61, 0, 0.25f)") == 0);
 }
 
 // ---- PIN 2 — os ALIASES ligados bit-a-bit (a promessa da fonte única) ------
@@ -202,10 +205,10 @@ TEST(y1_primitivas) {
             mxY = v[i].y > mxY ? v[i].y : mxY;
             mnX = v[i].x < mnX ? v[i].x : mnX;
             mxX = v[i].x > mxX ? v[i].x : mxX;
-            // 0.12-E (E-3 · FASE 3.1): a linha do topo é o ÂMBAR a 20%
-            // (a ordem do dono — era o RGB do glow #FF3D00 da Y-1)
+            // FASE UI (parte A): a linha do topo é a BRASA a 20%
+            // (a ordem do dono — o âmbar #FFB020 morreu)
             EXPECT(nearColor2(v[i].r, v[i].g, v[i].b, v[i].a, 1.0f,
-                              176.0f / 255.0f, 32.0f / 255.0f, 0.20f));
+                              90.0f / 255.0f, 31.0f / 255.0f, 0.20f));
         }
         EXPECT(test::nearEqF(mxY - mnY, 1.0f, 1e-3f));   // 1dp (densidade 1)
         EXPECT(test::nearEqF(mnX, 100.0f, 1e-3f) &&
@@ -235,7 +238,7 @@ TEST(y1_primitivas) {
                 mnY = v[i].y < mnY ? v[i].y : mnY;
                 mxY = v[i].y > mxY ? v[i].y : mxY;
                 EXPECT(nearColor2(v[i].r, v[i].g, v[i].b, v[i].a, 1.0f,
-                                  61.0f / 255.0f, 0.0f, v[base].a));
+                                  90.0f / 255.0f, 31.0f / 255.0f, v[base].a));
             }
         };
         f32 x0, x1, y0, y1, aOut, aIn;
@@ -291,18 +294,18 @@ TEST(y1_gradiente_botao) {
             if (!fullSpan) continue;
             foundCentral = true;
             // o topo do quad é o FIRERED exato, o fundo o FIREORANGE
-            // exato (0.12-E E-3 · FASE 3.3: o gradiente da paleta FOGO
-            // AVERMELHADO do dono — o accent→accent2 da Y-1 morreu)
+            // exato (FASE UI: o par RE-ALINHADO à brasa ÚNICA do dono —
+            // o fogo avermelhado da E-2 morre)
             for (u32 k = i; k < i + 6; ++k) {
                 if (test::nearEqF(v[k].y, mnY, 0.05f)) {
                     EXPECT(nearColor2(v[k].r, v[k].g, v[k].b, v[k].a,
-                                      217.0f / 255.0f, 43.0f / 255.0f,
-                                      4.0f / 255.0f, 1.0f));
+                                      255.0f / 255.0f, 90.0f / 255.0f,
+                                      31.0f / 255.0f, 1.0f));
                 }
                 if (test::nearEqF(v[k].y, mxY, 0.05f)) {
                     EXPECT(nearColor2(v[k].r, v[k].g, v[k].b, v[k].a,
-                                      255.0f / 255.0f, 94.0f / 255.0f,
-                                      0.0f, 1.0f));
+                                      224.0f / 255.0f, 68.0f / 255.0f,
+                                      15.0f / 255.0f, 1.0f));
                 }
             }
         }
@@ -312,15 +315,15 @@ TEST(y1_gradiente_botao) {
         // o gradiente É CONTÍNUO através das peças: as bandas laterais e
         // os degraus dos cantos são AMOSTRADOS do span completo — algum
         // vértice do batch tem cor INTERMÉDIA entre fireRed e fireOrange
-        // (0.12-E E-3: g entre 43 e 94, r entre 217 e 255 — a interpolação
-        // real da paleta FOGO AVERMELHADO)
+        // (FASE UI: g entre 68 e 90, r entre 224 e 255 — a interpolação
+        // real da brasa)
         for (u32 i = before; i < after; ++i) {
             const vv::QuadVertex* v = ui.solidsForTest().vertices();
-            if (v[i].r > 217.0f / 255.0f + 0.005f &&
+            if (v[i].r > 224.0f / 255.0f + 0.005f &&
                 v[i].r < 255.0f / 255.0f - 0.005f &&
-                v[i].g > 43.0f / 255.0f + 0.005f &&
-                v[i].g < 94.0f / 255.0f - 0.005f &&
-                v[i].b > 0.0f && v[i].b < 4.0f / 255.0f &&
+                v[i].g > 68.0f / 255.0f + 0.005f &&
+                v[i].g < 90.0f / 255.0f - 0.005f &&
+                v[i].b > 15.0f / 255.0f && v[i].b < 31.0f / 255.0f &&
                 test::nearEqF(v[i].a, 1.0f, 1e-4f)) {
                 foundMid = true;
             }
@@ -343,13 +346,13 @@ TEST(y1_gradiente_botao) {
         bool accent2Found = false;
         for (u32 i = before; i < after; ++i) {
             const vv::QuadVertex* v = ui.solidsForTest().vertices();
-            if (test::nearEqF(v[i].g, 107.0f / 255.0f, 1e-4f) &&
-                test::nearEqF(v[i].b, 0.0f, 1e-4f)) {
+            if (test::nearEqF(v[i].g, 68.0f / 255.0f, 1e-4f) &&
+                test::nearEqF(v[i].b, 15.0f / 255.0f, 1e-4f)) {
                 accent2Found = true;
             }
         }
         EXPECT_MSG(!accent2Found,
-                   "y1_gradiente: o botão EM REPOUSO não pode ter o fogo "
+                   "y1_gradiente: o botão EM REPOUSO não pode ter a brasa "
                    "(accent2 só no estado ativo)");
         ui.endFrame();
     }

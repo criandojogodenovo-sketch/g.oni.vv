@@ -233,16 +233,15 @@ TEST(maiusculas_uniformes) {
 // os 4 DISTINCTOS e a borda âmbar subtil entre painéis.
 TEST(superficies_4_tons) {
     // (a) os 4 TOKENS com os hexes exatos do dono
-    EXPECT(nearColor(theme::kTheme.bg, 10.0f / 255.0f, 10.0f / 255.0f,
-                     12.0f / 255.0f, 1.0f));            // #0A0A0C
-    // 0.12-E E-2/E-3: o PAINEL é o #141416 α0.85 da paleta FOGO
-    // AVERMELHADO do dono (era o #131316 α0.80 da escada 0.12-C)
-    EXPECT(nearColor(theme::kTheme.surface, 20.0f / 255.0f,
-                     20.0f / 255.0f, 22.0f / 255.0f, 0.85f));   // #141416
+    // FASE UI (parte A · recalibração): os hexes EXATOS do dono
+    EXPECT(nearColor(theme::kTheme.bg, 11.0f / 255.0f, 11.0f / 255.0f,
+                     13.0f / 255.0f, 1.0f));            // #0B0B0D
+    EXPECT(nearColor(theme::kTheme.surface, 18.0f / 255.0f,
+                     18.0f / 255.0f, 21.0f / 255.0f, 0.85f));   // #121215
     EXPECT(nearColor(theme::kTheme.card, 27.0f / 255.0f, 27.0f / 255.0f,
                      32.0f / 255.0f, 1.0f));            // #1B1B20
-    EXPECT(nearColor(theme::kTheme.elevated, 36.0f / 255.0f,
-                     36.0f / 255.0f, 42.0f / 255.0f, 1.0f));    // #24242A
+    EXPECT(nearColor(theme::kTheme.elevated, 38.0f / 255.0f,
+                     38.0f / 255.0f, 44.0f / 255.0f, 1.0f));    // #26262C
     // (b) os 4 são DISTINTOS (a mutação M-C3b iguala o cartão ao painel
     // e morre AQUI)
     EXPECT(!(theme::kTheme.bg[0] == theme::kTheme.surface[0] &&
@@ -254,19 +253,17 @@ TEST(superficies_4_tons) {
     EXPECT(!(theme::kTheme.bg[0] == theme::kTheme.card[0] &&
              theme::kTheme.bg[1] == theme::kTheme.card[1] &&
              theme::kTheme.bg[2] == theme::kTheme.card[2]));
-    // (c) a borda dos INATIVOS entre painéis (0.12-QoL A — a ordem do
-    // dono · Redbr1): o CINZA #24242A; o âmbar subtil da Y-1 morre (o
-    // accentDim intacto como o fill da SELEÇÃO)
-    EXPECT(nearColor(theme::kTheme.border, 36.0f / 255.0f, 36.0f / 255.0f,
-                     42.0f / 255.0f, 1.0f));
+    // (c) AS LINHAS 1px do dono (FASE UI): o #26262C — o destaque só no
+    // ativo/selecionado (a regra da casa que se mantém)
+    EXPECT(nearColor(theme::kTheme.border, 38.0f / 255.0f, 38.0f / 255.0f,
+                     44.0f / 255.0f, 1.0f));
     // (d) a FONTE leva os hexes exatos (o artefato pinado)
     std::string src;
     ASSERT(readFile(repoRoot() + "/app/src/main/cpp/ui/Theme.h", src));
-    EXPECT(countSub(src, "VV_RGB(10, 10, 12)"));
-    // 0.12-E E-2: o #141416 da paleta FOGO AVERMELHADO (era #131316)
-    EXPECT(countSub(src, "VV_RGBA(20, 20, 22, 0.85f)"));
+    EXPECT(countSub(src, "VV_RGB(11, 11, 13)"));
+    EXPECT(countSub(src, "VV_RGBA(18, 18, 21, 0.85f)"));
     EXPECT(countSub(src, "VV_RGB(27, 27, 32)"));
-    EXPECT(countSub(src, "VV_RGB(36, 36, 42)"));
+    EXPECT(countSub(src, "VV_RGB(38, 38, 44)"));
     // (e) o contraste do texto primário mantém o piso WCAG sobre o novo
     // fundo (o texto 15+:1 e o accent 10+:1 — o dono não perde legibilidade)
     EXPECT(theme::contrastOnBg(theme::kTheme.text1) >= 4.5f);

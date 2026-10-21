@@ -3732,9 +3732,11 @@ TEST(regress_identidade_grafite_ambar) {
     using namespace vv;
     theme::setDensity(1.0f);
 
-    // ---- (1) A RAMPA GRAFITE: neutra-fria, ZERO AZUL no chrome ---------
-    // o grafite da spec G: R==G e B-R ∈ [0..4]/255 (o tinge frio mínimo
-    // que dá o tom grafite). As EXCEÇÕES documentadas (danger/warn/ok
+    // ---- (1) A RAMPA DA PEDRA: quase-neutra, ZERO AZUL no chrome -------
+    // FASE UI (recalibrada com nota): o dono deu um text1 QUENTE
+    // (#E8E6E3 — R−G=2, B−R=−5) e um text2 levemente frio (#8A8A93,
+    // B−R=9) — a banda alarga para [−8..12] e o R==G tolera 2 (o branco
+    // quente do dono). As EXCEÇÕES documentadas (danger/warn/ok
     // semânticos, a paleta V.ONI de sintaxe, os EIXOS do gizmo) são COR
     // ou AZUL por CONTRATO — conteúdo, não chrome (desde 0.6.9)
     {
@@ -3745,17 +3747,15 @@ TEST(regress_identidade_grafite_ambar) {
         for (int i = 0; i < 6; ++i) {
             const f32 dRG = std::abs(rampa[i][0] - rampa[i][1]) * 255.0f;
             const f32 dB = (rampa[i][2] - rampa[i][0]) * 255.0f;
-            EXPECT(dRG <= 2.0f);            // R==G (zero croma quente)
-            EXPECT(dB >= -1.0f && dB <= 8.0f);   // o tinge grafite (frio, leve — o text2 #A6A6AD tem 7)
+            EXPECT(dRG <= 2.0f);            // R==G (zero croma quente — o #E8E6E3 do dono tem 2)
+            EXPECT(dB >= -8.0f && dB <= 12.0f);  // a banda da pedra (o text1 quente tem −5, o text2 tem 9)
         }
-        // 0.12-QoL A (recalibrado com nota — a ordem do dono · Redbr1): a
-        // BORDA voltou à rampa neutra (#24242A = o RGB do ELEVADO, R==G,
-        // tinge frio leve); o ÂMBAR da aresta da 0.11-Y morre — o laranja
-        // fica APENAS para o ativo/selecionado. O accentDim mantém o RGB
-        // quente como o fill da SELEÇÃO.
-        EXPECT(nearEqF(theme::kTheme.border[0], 36.0f / 255.0f, 1e-4f));
-        EXPECT(nearEqF(theme::kTheme.border[1], 36.0f / 255.0f, 1e-4f));
-        EXPECT(nearEqF(theme::kTheme.border[2], 42.0f / 255.0f, 1e-4f));
+        // FASE UI: AS LINHAS 1px do dono (#26262C = o RGB do ELEVADO,
+        // R==G, tinge frio leve); o destaque fica APENAS no
+        // ativo/selecionado. O accentDim é O FUNDO DE SELEÇÃO (#2B1810).
+        EXPECT(nearEqF(theme::kTheme.border[0], 38.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.border[1], 38.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.border[2], 44.0f / 255.0f, 1e-4f));
         EXPECT(nearEqF(theme::kTheme.border[3], 1.0f, 1e-4f));
         // ZERO AZUL no chrome: nenhum token de chrome com B dominante
         // (o azul #2196F3 da spec A e o navy da 0.9.0 morreram) — a BORDA
@@ -3767,46 +3767,47 @@ TEST(regress_identidade_grafite_ambar) {
             theme::kTheme.accent,   theme::kTheme.accentPress,
             theme::kTheme.accentInk, theme::kTheme.accentDim};
         for (int i = 0; i < 10; ++i) {
+            // FASE UI (banda recalibrada): o text2 #8A8A93 do dono tem
+            // B−R=9 — o teto do tinge frio sobe de 8 para 10
             EXPECT(chrome[i][2] <=
-                   std::max(chrome[i][0], chrome[i][1]) + 8.0f / 255.0f);
+                   std::max(chrome[i][0], chrome[i][1]) + 10.0f / 255.0f);
             // e AZUL de verdade (o #2196F3 da spec A: B−R≈207) morto:
             // nenhum chrome com B−R > 25/255
             EXPECT((chrome[i][2] - chrome[i][0]) * 255.0f <= 25.0f);
         }
-        // os valores EXATOS da rampa (a decisão do dono — 0.12-C C-3: a
-        // ESCADA DE SUPERFÍCIES supera o poço da Y-1, o padrão Y-3/D11:
-        // fundo #0A0A0C · painel #141416 (0.12-E E-2: a paleta do dono)
-        EXPECT(nearEqF(theme::kTheme.bg[0], 10.0f / 255.0f, 1e-4f));
-        EXPECT(nearEqF(theme::kTheme.surface[0], 20.0f / 255.0f, 1e-4f));
+        // os valores EXATOS da rampa (a FASE UI — os hexes do dono:
+        // fundo #0B0B0D · painel #121215 α0.85)
+        EXPECT(nearEqF(theme::kTheme.bg[0], 11.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.surface[0], 18.0f / 255.0f, 1e-4f));
     }
 
-    // ---- (2) O ÂMBAR: quente, com tinta escura e press mais escuro -----
+    // ---- (2) A BRASA: quente, com tinta escura e press mais escuro -----
     {
         EXPECT(theme::kTheme.accent[0] > theme::kTheme.accent[1]);
         EXPECT(theme::kTheme.accent[1] > theme::kTheme.accent[2]);
-        EXPECT(nearEqF(theme::kTheme.accent[0], 1.0f, 1e-4f));   // #FFB020
-        EXPECT(nearEqF(theme::kTheme.accent[1], 176.0f / 255.0f, 1e-4f));
-        EXPECT(nearEqF(theme::kTheme.accent[2], 32.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.accent[0], 1.0f, 1e-4f));   // #FF5A1F
+        EXPECT(nearEqF(theme::kTheme.accent[1], 90.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.accent[2], 31.0f / 255.0f, 1e-4f));
         EXPECT(theme::kTheme.accentPress[0] < theme::kTheme.accent[0]);
-        EXPECT(theme::kTheme.accentInk[0] < 0.5f);   // ESCURA (10,5:1)
+        EXPECT(theme::kTheme.accentInk[0] < 0.5f);   // ESCURA (6,2:1)
         EXPECT(theme::contrastRatio(theme::kTheme.accentInk,
                                     theme::kTheme.accent) >= 4.5f);
-        // accentDim — o FILL da seleção (#4A3714): text1 9,6:1 em cima
-        EXPECT(nearEqF(theme::kTheme.accentDim[0], 74.0f / 255.0f, 1e-4f));
+        // accentDim — O FUNDO DE SELEÇÃO do dono (#2B1810): text1 13,6:1
+        EXPECT(nearEqF(theme::kTheme.accentDim[0], 43.0f / 255.0f, 1e-4f));
         EXPECT(theme::contrastRatio(theme::kTheme.text1,
                                     theme::kTheme.accentDim) >= 4.5f);
-        // 0.11-Y — O FOGO (accent2 #FF6B00): MAIS quente que o accent
-        // (o G desce de 176 para 107, o B morre) — a base do gradiente
-        // dos ativos; a tinta escura segura o piso também SOBRE ele
+        // FASE UI — a brasa ESCURA (accent2 #E0440F): a base do gradiente
+        // dos ativos (o G desce de 90 para 68) — o destaque continua
+        // ÚNICO (mesma família da brasa); a tinta escura segura o piso
         EXPECT(theme::kTheme.accent2[0] > theme::kTheme.accent2[1]);
         EXPECT(theme::kTheme.accent2[1] > theme::kTheme.accent2[2]);
-        EXPECT(nearEqF(theme::kTheme.accent2[1], 107.0f / 255.0f, 1e-4f));
-        EXPECT(nearEqF(theme::kTheme.accent2[2], 0.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.accent2[1], 68.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.accent2[2], 15.0f / 255.0f, 1e-4f));
         EXPECT(theme::contrastRatio(theme::kTheme.bg,
                                     theme::kTheme.accent2) >= 4.5f);
-        // 0.11-Y — O GLOW (#FF3D00 α0.25): o brilho da chama, decorativo
+        // FASE UI — O GLOW (#FF5A1F α0.25): o brilho da brasa, decorativo
         // (nunca texto em cima — só o glow composto e a linha do topo)
-        EXPECT(nearEqF(theme::kTheme.glow[1], 61.0f / 255.0f, 1e-4f));
+        EXPECT(nearEqF(theme::kTheme.glow[1], 90.0f / 255.0f, 1e-4f));
         EXPECT(nearEqF(theme::kTheme.glow[3], 0.25f, 1e-4f));
     }
 
@@ -3870,11 +3871,11 @@ TEST(regress_identidade_grafite_ambar) {
         theme::blendOver(cinza, preto, out);
         EXPECT(nearEqF(out[0], 0.25f, 1e-5f));   // 50% cinza s/ preto
         // o composto do painel da hierarquia sobre o clear (o valor que a
-        // FASE 13.10 afere no PNG; 0.12-C C-3: 0.80·19+0.20·10 = 17.2 com
-        // a ESCADA nova — era 0.80·21+0.20·8 = 18.4 no poço da Y-1)
+        // FASE 13.10 afere no PNG; FASE UI: 0.85·18+0.15·11 = 16.95 com a
+        // paleta do dono — era 0.85·20+0.15·10 = 18.5 na 0.12-E)
         f32 painel[4];
         theme::blendOver(theme::kTheme.surface, theme::kTheme.bg, painel);
-        EXPECT(nearEqF(painel[0], 17.2f / 255.0f, 0.01f));
+        EXPECT(nearEqF(painel[0], 16.95f / 255.0f, 0.01f));
     }
 
     // ---- (6) OS ALIASES LIGADOS (a fonte única bit-a-bit) ----------------
@@ -3889,14 +3890,15 @@ TEST(regress_identidade_grafite_ambar) {
         EXPECT(nearEqF(theme::WARN[1], theme::kTheme.warn[1], 1e-6f));
     }
 
-    // ---- (7) O WARN LARANJA ≠ O ÂMBAR (a regra da spec G) ---------------
+    // ---- (7) O WARN LARANJA ≠ A BRASA (a regra da casa) ----------------
     // «warn #FF8A3D (laranja, NUNCA igual ao acento)»: o laranja tem o
-    // canal B quase 2× o do âmbar e o G bem mais baixo — dois tons
-    // distintos a olho nu e em contas
+    // canal B quase 2× o da brasa — dois tons distintos a olho nu e em
+    // contas (FASE UI: o G do warn fica ACIMA do da brasa, que é mais
+    // vermelha — a distinção é o B, não o G)
     {
         EXPECT(theme::kTheme.warn[2] > theme::kTheme.accent[2] * 1.5f);
-        EXPECT(theme::kTheme.warn[1] < theme::kTheme.accent[1]);
-        // e os DOIS passam o piso sobre surface (warn 7,7:1 · accent 9,9:1)
+        EXPECT(theme::kTheme.warn[1] > theme::kTheme.accent[1]);
+        // e os DOIS passam o piso sobre surface (warn 8,0:1 · accent 6,1:1)
         EXPECT(theme::contrastOnSurface(theme::kTheme.warn) >= 3.0f);
     }
 }
@@ -5037,14 +5039,14 @@ TEST(regress_hotfix_defeitos) {
             }
             const f32 wq = mxX - mnX, hq = mxY - mnY;
             if (wq <= 1.5f && hq > 32.0f &&
-                test::nearEqF(v[0].r, 36.0f / 255.0f, 1e-3f) &&
+                test::nearEqF(v[0].r, 38.0f / 255.0f, 1e-3f) &&
                 test::nearEqF(v[0].a, 0.90f, 1e-3f) &&
                 test::nearEqF(v[1].a, 0.15f, 1e-3f)) {
                 linha1dp = true;   // o quad do gradiente É o divisor
             }
         }
-        EXPECT(linha1dp);   // o divisor de cristal (o gradiente; 0.12-QoL A:
-                            // a cor é o BORDER #24242A — era o âmbar)
+        EXPECT(linha1dp);   // o divisor de cristal (o gradiente; FASE UI:
+                            // a cor é o BORDER #26262C — as linhas do dono)
     }
 
     // ---- (9) D3: o empty-state NO RECT MINÚSCULO (a trava do fundo) -----
@@ -5374,7 +5376,7 @@ TEST(regress_janelas_passo4) {
 
     // ---- (J-04) OS RAIOS dos cards (o tema é a fonte única) ---------------
     EXPECT(nearEqF(theme::kRadiusCard, 8.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kRadiusField, 4.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kRadiusField, 6.0f, 1e-4f));   // FASE UI: raio 6-8
 
     // ---- (J-01) O WRAP puro (medidor fake mono 10px/code point) -----------
     //      «corte/scroll/wrap»: o wrap é o textwrap::wrap (a fonte única

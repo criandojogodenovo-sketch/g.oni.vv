@@ -277,64 +277,64 @@ TEST(icones_pelo_nome_funcional) {
 // glow #FF3D00 α0.25 (o brilho do foco/da linha do topo). A asserção
 // continua EXATA. 0.12-C (C-3): a ESCADA DE SUPERFÍCIES do dono supera o
 // poço (o padrão Y-3/D11 — a ordem expressa mais recente manda): o fundo
-// #0A0A0C (10,10,12) e o painel #131316 (19,19,22 α0.80) — os hexes aqui.
+// #0B0B0D (11,11,13) e o painel #121215 (18,18,21 α0.85) — os hexes aqui.
 
 TEST(theme_tabela_spec_g_exata) {
-    // accent — O ÂMBAR: #FFB020 (o mono morreu com os fills brancos)
+    // accent — A BRASA: #FF5A1F (o destaque ÚNICO da FASE UI; o âmbar
+    // #FFB020 morreu com a ordem do dono)
     EXPECT(nearEqF(theme::kTheme.accent[0], 255.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.accent[1], 176.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.accent[2], 32.0f / 255.0f, 1e-4f));
-    // O AZUL MORREU no accent: B é o canal MENOR (o âmbar é quente)
+    EXPECT(nearEqF(theme::kTheme.accent[1], 90.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.accent[2], 31.0f / 255.0f, 1e-4f));
+    // O AZUL MORREU no accent: B é o canal MENOR (a brasa é quente)
     EXPECT(theme::kTheme.accent[2] < theme::kTheme.accent[1]);
-    // bg #0A0A0C · surface #141416 (0.12-E E-2: a paleta do dono — era o
-    // #131316 da escada 0.12-C) · surface2 #1E1E21
-    EXPECT(nearEqF(theme::kTheme.bg[0], 10.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.surface[0], 20.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.surface2[1], 30.0f / 255.0f, 1e-4f));
-    // a BORDA dos INATIVOS (0.12-QoL A — a ordem do dono · Redbr1): o
-    // CINZA ESCURO #24242A (o RGB do ELEVADO); o âmbar #4A3714 só sobrevive
-    // no accentDim (o fill da SELEÇÃO). Era a hairline ÂMBAR α0.60 da 0.11-Y.
-    EXPECT(nearEqF(theme::kTheme.border[0], 36.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.border[1], 36.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.border[2], 42.0f / 255.0f, 1e-4f));
+    // bg #0B0B0D · surface #121215 (a FASE UI) · surface2 #1A1A1E
+    EXPECT(nearEqF(theme::kTheme.bg[0], 11.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.surface[0], 18.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.surface2[1], 26.0f / 255.0f, 1e-4f));
+    // AS LINHAS 1px do dono (FASE UI): o #26262C (o RGB do ELEVADO); o
+    // destaque fica APENAS no ativo/selecionado (a regra da casa)
+    EXPECT(nearEqF(theme::kTheme.border[0], 38.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.border[1], 38.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.border[2], 44.0f / 255.0f, 1e-4f));
     // O VIDRO (spec G): surface α0.85 (A DECISÃO DO DONO) · surface2 α0.86
     // · border opaco (0.12-QoL A — a borda deixa de ser vidro) · bg opaco
     EXPECT(nearEqF(theme::kTheme.surface[3], 0.85f, 1e-4f));   // FASE 3
     EXPECT(nearEqF(theme::kTheme.surface2[3], 0.86f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.border[3], 1.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.bg[3], 1.0f, 1e-4f));
-    // 0.11-Y (Y-1) — os DOIS TOKENS NOVOS da chama: accent2 #FF6B00
-    // (O FOGO — a base do gradiente dos ativos; quente: R>G>B=0) e glow
-    // #FF3D00 α0.25 (o brilho do foco e da linha do topo)
-    EXPECT(nearEqF(theme::kTheme.accent2[0], 255.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.accent2[1], 107.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.accent2[2], 0.0f, 1e-4f));
-    EXPECT(theme::kTheme.accent2[1] < theme::kTheme.accent[1]);  // o fogo desce do âmbar
+    // FASE UI — a brasa ESCURA: accent2 #E0440F (a base do gradiente dos
+    // ativos; quente: R>G>B) e glow #FF5A1F α0.25 (o brilho do foco e da
+    // linha do topo)
+    EXPECT(nearEqF(theme::kTheme.accent2[0], 224.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.accent2[1], 68.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.accent2[2], 15.0f / 255.0f, 1e-4f));
+    EXPECT(theme::kTheme.accent2[1] < theme::kTheme.accent[1]);  // a brasa desce para a escura
     EXPECT(nearEqF(theme::kTheme.glow[0], 255.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.glow[1], 61.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.glow[2], 0.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.glow[1], 90.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.glow[2], 31.0f / 255.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.glow[3], 0.25f, 1e-4f));
     // o BORDO e o HIGHLIGHT do vidro (#FFFFFF1F / #FFFFFF0A — a spec G)
     EXPECT(nearEqF(theme::kTheme.glassEdge[0], 1.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.glassEdge[3], 31.0f / 255.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.glassTop[3], 10.0f / 255.0f, 1e-4f));
-    // text1 #F2F2F5 (0.12-E E-2: a paleta do dono — era #ECECEE)
-    // text2 #A6A6AD · scrim 60%
-    EXPECT(nearEqF(theme::kTheme.text1[0], 242.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.text2[1], 166.0f / 255.0f, 1e-4f));
+    // text1 #E8E6E3 · text2 #8A8A93 (A FASE UI) · scrim 60%
+    EXPECT(nearEqF(theme::kTheme.text1[0], 232.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.text2[1], 138.0f / 255.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.scrim[3], 0.60f, 1e-4f));
-    // accentInk ESCURO (#0E0E10 — a tinta sobre o fill ÂMBAR, 10,5:1)
+    // accentInk ESCURO (#0E0E10 — a tinta sobre a brasa, 6,2:1)
     EXPECT(nearEqF(theme::kTheme.accentInk[0], 14.0f / 255.0f, 1e-4f));
-    // accentDim #4A3714 — o FILL DA SELEÇÃO (âmbar 25% sobre grafite)
-    EXPECT(nearEqF(theme::kTheme.accentDim[0], 74.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.accentDim[1], 55.0f / 255.0f, 1e-4f));
-    EXPECT(nearEqF(theme::kTheme.accentDim[2], 20.0f / 255.0f, 1e-4f));
+    // accentDim #2B1810 — O FUNDO DE SELEÇÃO do dono (FASE UI)
+    EXPECT(nearEqF(theme::kTheme.accentDim[0], 43.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.accentDim[1], 24.0f / 255.0f, 1e-4f));
+    EXPECT(nearEqF(theme::kTheme.accentDim[2], 16.0f / 255.0f, 1e-4f));
     // warn LARANJA #FF8A3D — NUNCA igual ao accent (hue 24° vs 39°)
     EXPECT(nearEqF(theme::kTheme.warn[0], 255.0f / 255.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.warn[1], 138.0f / 255.0f, 1e-4f));
     EXPECT(nearEqF(theme::kTheme.warn[2], 61.0f / 255.0f, 1e-4f));
-    EXPECT(theme::kTheme.warn[2] > theme::kTheme.accent[2]);   // laranja ≠ âmbar
-    EXPECT(theme::kTheme.warn[1] < theme::kTheme.accent[1]);
+    EXPECT(theme::kTheme.warn[2] > theme::kTheme.accent[2]);   // laranja ≠ brasa
+    // a REGRA DA CASA (o sentinela): o B do warn > 1.5× o B da brasa —
+    // o laranja fica NO outro extremo quente, nunca é um 2.º destaque
+    EXPECT(theme::kTheme.warn[2] > 1.5f * theme::kTheme.accent[2]);
     // voniComment #8A8A8A (5,6:1 no grafite — mantém-se do F)
     EXPECT(nearEqF(theme::kTheme.voniComment[0], 138.0f / 255.0f, 1e-4f));
     // voniUser == text1 (o grafite trouxe o user ao text1 da casa)

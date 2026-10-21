@@ -32,33 +32,33 @@
 namespace vv {
 
 // Tokens do tema — 0.9.6.10 (GRUPO UI): ALIASES da tabela única
-// (ui/Theme.h, recalibrada 0.11-Y: o poço #08080A + a chama). A pele
-// inteira da app muda num só sítio: BG=bg #0A0A0C α1, PANEL=surface
-// #141416 α0.85 (O VIDRO), LINE=border #24242A α1.00 (0.12-QoL A: a
-// borda dos INATIVOS é o cinza escuro — a hairline ÂMBAR #4A3714 α0.60
-// morreu com o feedback Redbr1), TEXT=text1 #F2F2F5, ACCENT=accent
-// #FFB020 (O ÂMBAR — a identidade), WARN=warn #FF8A3D (laranja ≠ âmbar).
-// O struct completo com text2/accentInk/accentDim/danger/ok/scrim/
-// glassEdge/glassTop/eixos + a auditoria do vidro (blendOver/
-// contrastOnGlass) vive em Theme.h. OS ALPHAS VÊM CONOSCO (o pass UI
-// desenha com blend desde a F1).
+// (ui/Theme.h, recalibrada 0.11-Y, pela escada 0.12-C e AGORA pela FASE
+// UI: a pedra escura + A BRASA ÚNICA #FF5A1F). A pele inteira da app muda
+// num só sítio: BG=bg #0B0B0D α1, PANEL=surface #121215 α0.85 (O VIDRO),
+// LINE=border #26262C α1.00 (AS LINHAS 1px do dono), TEXT=text1 #E8E6E3,
+// ACCENT=accent #FF5A1F (A BRASA — o destaque ÚNICO; o âmbar morreu),
+// WARN=warn #FF8A3D (laranja ≠ brasa). O struct completo com text2/
+// accentInk/accentDim/danger/ok/scrim/glassEdge/glassTop/eixos + a
+// auditoria do vidro (blendOver/contrastOnGlass) vive em Theme.h. OS
+// ALPHAS VÊM CONOSCO (o pass UI desenha com blend desde a F1).
 namespace theme {
 // (arrays C++ não se copiam em constexpr — MESMAS expressões do Theme.h para
 // igualdade bit-a-bit, LIGADAS por static_assert: mudar Theme.h sem aqui =
 // build MORRE — a fonte única continua sendo Theme.h)
-constexpr f32 BG[4]     = {10.0f / 255.0f, 10.0f / 255.0f, 12.0f / 255.0f, 1.0f};     // bg #0A0A0C (O FUNDO — escada 0.12-C)
-constexpr f32 PANEL[4]  = {20.0f / 255.0f, 20.0f / 255.0f, 22.0f / 255.0f, 0.85f};    // surface #141416 α0.85 (O PAINEL — o vidro da FASE 3 do 0.12-E; era α0.80)
+constexpr f32 BG[4]     = {11.0f / 255.0f, 11.0f / 255.0f, 13.0f / 255.0f, 1.0f};     // bg #0B0B0D (O FUNDO — FASE UI)
+constexpr f32 PANEL[4]  = {18.0f / 255.0f, 18.0f / 255.0f, 21.0f / 255.0f, 0.85f};    // surface #121215 α0.85 (O PAINEL — o vidro da casa)
 // 0.12-C (C-3): os DOIS níveis novos da escada de superfícies
-constexpr f32 CARD[4]     = {27.0f / 255.0f, 27.0f / 255.0f, 32.0f / 255.0f, 1.0f};   // card #1B1B20 (O CARTÃO)
-constexpr f32 ELEVATED[4] = {36.0f / 255.0f, 36.0f / 255.0f, 42.0f / 255.0f, 1.0f};   // elevated #24242A (O ELEVADO)
-constexpr f32 LINE[4]   = {36.0f / 255.0f, 36.0f / 255.0f, 42.0f / 255.0f, 1.0f};     // border #24242A (0.12-QoL A: borda INATIVA cinza)
-constexpr f32 TEXT[4]   = {242.0f / 255.0f, 242.0f / 255.0f, 245.0f / 255.0f, 1.0f};  // text1 #F2F2F5 (a paleta 0.12-E; era #ECECEE)
-constexpr f32 ACCENT[4] = {255.0f / 255.0f, 176.0f / 255.0f, 32.0f / 255.0f, 1.0f};  // = accent (O ÂMBAR)
+constexpr f32 CARD[4]     = {27.0f / 255.0f, 27.0f / 255.0f, 32.0f / 255.0f, 1.0f};   // card #1B1B20 (OS ELEMENTOS)
+constexpr f32 ELEVATED[4] = {38.0f / 255.0f, 38.0f / 255.0f, 44.0f / 255.0f, 1.0f};   // elevated #26262C (O ELEVADO)
+constexpr f32 LINE[4]   = {38.0f / 255.0f, 38.0f / 255.0f, 44.0f / 255.0f, 1.0f};     // border #26262C (AS LINHAS 1px)
+constexpr f32 TEXT[4]   = {232.0f / 255.0f, 230.0f / 255.0f, 227.0f / 255.0f, 1.0f};  // text1 #E8E6E3 (a FASE UI)
+constexpr f32 ACCENT[4] = {255.0f / 255.0f, 90.0f / 255.0f, 31.0f / 255.0f, 1.0f};   // = accent (A BRASA)
 constexpr f32 WARN[4]   = {255.0f / 255.0f, 138.0f / 255.0f, 61.0f / 255.0f, 1.0f};   // warn #FF8A3D (laranja)
 // 0.11-Y (Y-1): os DOIS tokens novos da chama — o gradiente dos botões
 // ativos (ACCENT topo → ACCENT2 fundo) e o glow de foco composto
-constexpr f32 ACCENT2[4]= {255.0f / 255.0f, 107.0f / 255.0f, 0.0f, 1.0f};             // accent2 #FF6B00 (O FOGO)
-constexpr f32 GLOW[4]   = {255.0f / 255.0f, 61.0f / 255.0f, 0.0f, 0.25f};             // glow #FF3D00 α0.25
+// (FASE UI: o par alinhado à brasa ÚNICA)
+constexpr f32 ACCENT2[4]= {224.0f / 255.0f, 68.0f / 255.0f, 15.0f / 255.0f, 1.0f};            // accent2 #E0440F (a brasa escura)
+constexpr f32 GLOW[4]   = {255.0f / 255.0f, 90.0f / 255.0f, 31.0f / 255.0f, 0.25f};           // glow #FF5A1F α0.25
 static_assert(BG[0] == theme::kTheme.bg[0] && BG[2] == theme::kTheme.bg[2],
               "BG desincronizado de Theme.h — fonte única violada");
 static_assert(PANEL[1] == theme::kTheme.surface[1] &&

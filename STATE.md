@@ -1,9 +1,11 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-21 · vc: 110 · Último commit: este (o 0.12-Y D — o
-CÉU PROCEDURAL com nuvens animadas no WorldEnvironment: SkyRenderer + o
-skyType no .goni + o Inspector condicional; M-Yd1/2; o fix do replay —
-os 17 chamadores do drawTics no c33_virtual com view+proj, 1009/0)
+Atualizado: 2026-10-21 · vc: 111 · Último commit: este (a FASE UI A — a
+paleta BRASA do dono no ficheiro único de tokens: bg #0B0B0D · painéis
+#121215 · elementos #1B1B20 · linhas #26262C · texto #E8E6E3/#8A8A93 ·
+a brasa ÚNICA #FF5A1F (o âmbar morreu) · seleção #2B1810 · eixos
+#E5484D/#3FB950/#3B82F6 · escala 4/8/12/16 · raio 6-8; o espelho Java e
+o TOKENS_F alinhados; ui_tokens_brasa + ui_sobreposicao_topbar)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -11,6 +13,23 @@ os 17 chamadores do drawTics no c33_virtual com view+proj, 1009/0)
 
 ## §1 Onde estamos
 
+- **Campanha FASE UI (O REDESIGN VISUAL, envios 1/5 + 2/5) — EM CURSO
+  (A fechada, vc 111; B/C/D/E a seguir)** (a cláusula calma: SÓ visual,
+  layout e UX — core/V.ONI/importadores/física/.gmesh intocados; um
+  commit por parte, CI verde entre elas; a história vive no
+  RELATORIO-FASE-UI.md).
+  **A (vc 111)**: O FICHEIRO ÚNICO DE TOKENS com a paleta do dono (os
+  hexes EXATOS: fundo #0B0B0D · painéis #121215 α0.85 · elementos
+  #1B1B20 · linhas 1px #26262C · texto #E8E6E3/#8A8A93 · A BRASA ÚNICA
+  #FF5A1F — o âmbar #FFB020 morreu · seleção #2B1810 · eixos
+  #E5484D/#3FB950/#3B82F6) + a escala 4/8/12/16 (kSpaceMid novo, kSpace3
+  24→16) + raios 6-8 (kRadiusField 4→6) + o espelho Java alinhado (o
+  TOKENS_F do gate recalibrado) + a sonda do c33 lê o fundo do TOKEN;
+  contraste validado antes do commit (texto ≥4,5:1, componentes ≥3:1);
+  pins ui_tokens_brasa + ui_sobreposicao_topbar (o teste automático de
+  sobreposição da fase) + M-UIa vermelho→reposto→verde; 9 recalibrações
+  com nota (o sentinela da identidade alarga a banda da rampa para o
+  branco quente do dono).
 - **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A, B, C, o
   C-FIX e o D fechadas, vc 110; o FECHO a seguir)** (a cláusula calma: SÓ o
   prompt; a V.ONI intocada; a história vive no RELATORIO-0.12-Y-ABERTURA.md
@@ -44,11 +63,9 @@ os 17 chamadores do drawTics no c33_virtual com view+proj, 1009/0)
 - **Campanha 0.12-QoL (UI POLISH + NAVEGADOR + AUTO-SAVE) — FECHADA
   (A..D, vc 102–105)** (a cláusula calma: refinamento de UI 2.5D e
   persistência, ZERO lógica de motor; a história vive no
-  RELATORIO-0.12-QoL.md).
-  **A (vc 102)**: o top bar SÓ com o ícone do G (o texto morre), a pesquisa recolhida na LUPA que expande ao toque (o × limpa e recolhe), o border dos INATIVOS #24242A (o âmbar APENAS no ativo/selecionado — o divisor e os cards modais incluídos), os vãos X/Y/Z 12dp + a margem mínima 8dp do Reset, o X (48×48) no menu de cenas; pins ×5 + M-QoLa1/x2 + 8 recalibrações com nota; CI verde (1befd71).
-  **B (vc 103)**: os atalhos e o Subir deixam de ser BOTÕES âmbar (chips quietos, geometria/ids intactos), a seta (>) em TODAS as linhas, o « / » no breadcrumb, TUDO o que é ponto FORA (a 0.8.5 SUPERADA); R-057 + pins ×2 + M-QoLb1; o picker_oculta_dot recalibrado.
-  **C (vc 104)**: a TEIA do frustum SÓ com a câmara selecionada (o glifo mudo fica), o rail SEM o pai quadrado gigante, o grid com o fade suave pela fonte única gridFadeForDist; R-058 + pins ×3 + M-QoLc1; o d17 recalibrado.
-  **D (vc 105)**: o TIMER 180s com o dirty HONESTO (o dump difere), o autosave.goni NA RAIZ (o principal INTACTO), a recuperação 1× com o pop-up [Recuperar]/[Descartar], o ✓ verde que PISCA; R-056 + pins ×3 + M-QoLd1. **A CAMPANHA FECHA.**
+  RELATORIO-0.12-QoL.md: A a limpeza visual, B o navegador compacto,
+  C o viewport limpo, D o auto-save — pins ×13 + M-QoLa1/x2..QoLd1 +
+  R-056/R-057/R-058).
 - **Campanha 0.12-X (CÂMARA DE TERCEIRA PESSOA) — FECHADA (3.9x, vc
   101)** (o camrig + camdrag + limit no REGISTO como Contínuos; o
   yaw/pitch no TykerState; o Host::lookDelta com o consumo a ZERAR; o
@@ -82,33 +99,9 @@ os 17 chamadores do drawTics no c33_virtual com view+proj, 1009/0)
 
 ## §2 O que está FEITO
 
-- 0.12-QoL A (vc 102) — a LIMPEZA VISUAL (no RELATORIO-0.12-QoL.md §1):
-  o top bar só com o ÍCONE do G (o slot do nome morto, o padrão D21);
-  a pesquisa da hierarquia RECOLHIDA na lupa 32×32 que EXPANDE ao toque
-  (o × 5503 limpa e recolhe; hierSearchOpen no EditorState); o border
-  dos INATIVOS #24242A (o token border recolorado + o alias LINE + o
-  divisorGradientV + as molduras ACCENT dos cards modais — o âmbar só
-  no ativo/selecionado); os vãos X/Y/Z 8→12dp + a margem mínima 4→8dp
-  (o piso do valor 26→22 e o passo (c) letra→padding→letra na escada
-  R1) + a folga vertical 64→68dp; o X de fechar (48×48) no menu de
-  cenas; pins ×5 (test_012qol.cpp) + M-QoLa1/x2 vermelho→reposto→verde
-  (coladas no §1 do relatório); 8 recalibrações com nota.
-- 0.12-QoL B (vc 103) — o NAVEGADOR compacto (no RELATORIO-0.12-QoL.md
-  §2): os chips quietos no lugar dos botões gigantes (o choke point
-  button fora das raízes/Subir), a seta (>) nas linhas todas, o « / »
-  no breadcrumb, o FileApi sem pontos (pastas E ficheiros); R-057 +
-  pins ×2 + M-QoLb1 vermelho→reposto→verde (colada no §2); o
-  picker_oculta_dot recalibrado com nota. O CI apanhou a ordem trocada
-  do R-057 (2 runs vermelhos) — corrigida no B-fix2 (fe90703).
-- 0.12-QoL C (vc 104) — o VIEWPORT limpo (no RELATORIO-0.12-QoL.md
-  §3): a teia do frustum sob seleção, o rail flutuante, o grid suave;
-  R-058 + pins ×3 + M-QoLc1 vermelho→reposto→verde (colada no §3); o
-  d17 recalibrado com nota.
-- 0.12-QoL D (vc 105) — o AUTO-SAVE (no RELATORIO-0.12-QoL.md §4): o
-  timer 180s + o autosave.goni na raiz + a recuperação com o pop-up +
-  o ✓ que pisca; core/AutoSave.h NOVO (as decisões puras), o
-  Project::saveAutosave/loadAutosave, o ProjectStorage::modifiedTime;
-  R-056 + pins ×3 + M-QoLd1 vermelho→reposto→verde (colada no §4).
+- 0.12-QoL A..D (vc 102–105) — a limpeza visual, o navegador compacto,
+  o viewport limpo e o auto-save (no RELATORIO-0.12-QoL.md §1..§4 — o
+  índice não é o arquivo).
 - 0.12-X 3.9x (vc 101) — a câmara de terceira pessoa (no
   RELATORIO-0.12-X-CAMRIG.md): camrig(d,h,suav) + camdrag(sens) +
   limit como Contínuos no REGISTO; o TykerState guarda camYaw/camPitch;

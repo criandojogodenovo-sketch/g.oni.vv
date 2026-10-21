@@ -4020,20 +4020,24 @@ int main() {
                       "(o registo bate com o PNG)");
             }
             // PIXEL vs REGISTO (2): a BANDA da toolbar (56px) POVOADA — a
-            // fração de pixels != clear (RECALIBRADO 0.9.6.9 · GRUPO F: o
-            // piso era 30% quando a banda pintava um bg DIFERENTE do clear
-            // — o navy #0B0E13 vs o clear #141414 davam 100% «povoado» de
-            // graça; com o MONO a banda pinta o TOKEN bg que É o clear —
-            // a população é o CONTEÚDO (ícones/rótulos ≈5,5% medidos); o
-            // piso novo 3% afere o MESMO contrato: a banda não está VAZIA)
+            // fração de pixels != clear (RECALIBRADO 0.9.6.9 · GRUPO F; o
+            // piso era 30% quando a banda pintava um bg DIFERENTE do clear;
+            // hoje a banda pinta o TOKEN bg que É o clear — a população é
+            // o CONTEÚDO (ícones/rótulos); o piso 3% afere o MESMO
+            // contrato: a banda não está VAZIA. FASE UI: o clear é o
+            // #0B0B0D do dono — o fundo lê-se do TOKEN, não de literal)
             {
+                const i32 bgR = (i32)(theme::kTheme.bg[0] * 255.0f + 0.5f);
+                const i32 bgG = (i32)(theme::kTheme.bg[1] * 255.0f + 0.5f);
+                const i32 bgB = (i32)(theme::kTheme.bg[2] * 255.0f + 0.5f);
                 u32 diff = 0, tot2 = 0;
                 for (u32 y = 24; y < 80; ++y) {
                     for (u32 x = 0; x < img.width; x += 3) {
                         const size_t pi = (size_t(y) * img.width + x) * 4;
                         ++tot2;
-                        if (img.rgba[pi] != 20 || img.rgba[pi + 1] != 20 ||
-                            img.rgba[pi + 2] != 20) {
+                        if (img.rgba[pi] != bgR ||
+                            img.rgba[pi + 1] != bgG ||
+                            img.rgba[pi + 2] != bgB) {
                             ++diff;
                         }
                     }
