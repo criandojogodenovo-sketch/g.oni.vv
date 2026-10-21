@@ -312,6 +312,17 @@ ui_inspector_cabecalho ... FALHOU  test_fase_ui.cpp:240  ui_inspector_cabecalho:
 
 Reposto: 0 falhas (test_core + c33_virtual 1010/0 — o CI é o árbitro).
 
+**O ACHADO DO CI (o 1.º push da E ficou VERMELHO — a lição de novo)**:
+o bloco (d) do pin usava os tipos do plano SEM o qualificador
+(`InspProfile` em vez de `editor::InspProfile` — o estilo do irmão
+ui_sobreposicao_topbar) e o build local INCREMENTAL não recompilou o TU
+(o objeto stale passou a suíte local); o CI compilou limpo e morreu no
+passo «Compilar» (`InspProfile was not declared in this scope`). A
+cura no commit do fix: os tipos qualificados com `editor::`. A lição
+aferrada: quando o pin muda, o TU recompila COM PROVA (o .o apagado à
+mão) — o build incremental cala-se, o CI é o árbitro (a mesma lição do
+585217f e da B, agora no TU).
+
 **Verificação**: test_core 0 falhas (o único vermelho local = o fork
 do sentinela_r039, o flake da sandbox documentado — o CI é o árbitro)
 · c33_virtual 1010/0 local (os DOIS alvos) · theme_hex/ui_vocab/glyph/

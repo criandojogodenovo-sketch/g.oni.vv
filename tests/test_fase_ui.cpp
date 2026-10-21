@@ -249,24 +249,25 @@ TEST(ui_inspector_cabecalho) {
     // — a PROVA é no PLANO (a fonte única, GL-free): os cabeçalhos ficam,
     // os campos morrem com o bit
     {
-        InspProfile prof{};
+        editor::InspProfile prof{};
         prof.tr = true;
         prof.mr = true;
         prof.bc = true;
         const TextMetrics m{};
-        InspRow rows[64];
-        const u32 nAll = inspectorPlan(prof, m, false, 0u, rows);
+        editor::InspRow rows[64];
+        const u32 nAll = editor::inspectorPlan(prof, m, false, 0u, rows);
         u32 sec = 0, trf = 0;
         for (u32 i = 0; i < nAll; ++i) {
-            if (rows[i].kind == InspRow::Kind::Section) ++sec;
-            if (rows[i].kind == InspRow::Kind::TransformRow) ++trf;
+            if (rows[i].kind == editor::InspRow::Kind::Section) ++sec;
+            if (rows[i].kind == editor::InspRow::Kind::TransformRow) ++trf;
         }
         EXPECT(sec == 5);   // Transform + Malha + Material + Física + Script
         EXPECT(trf == 3);   // Pos/Rotação/Escala abertos por omissão
-        const u32 nT = inspectorPlan(prof, m, false, kInspBitTransform, rows);
+        const u32 nT = editor::inspectorPlan(prof, m, false,
+                                             editor::kInspBitTransform, rows);
         u32 trf2 = 0;
         for (u32 i = 0; i < nT; ++i) {
-            if (rows[i].kind == InspRow::Kind::TransformRow) ++trf2;
+            if (rows[i].kind == editor::InspRow::Kind::TransformRow) ++trf2;
         }
         EXPECT(trf2 == 0);   // o bit FECHA a secção (só o cabeçalho fica)
     }
