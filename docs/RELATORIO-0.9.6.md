@@ -424,6 +424,18 @@ R-014 aplicada.
   **versionCode 109** — o build vigente da campanha 0.12-Y. O 108 fica
   INTACTO como história.
 
+- **FASE UI · D — VIEWPORT E FERRAMENTAS** — a coluna das 4 FERRAMENTAS
+  (Selecionar/Mover/Rodar/Escalar — o desenho 32 na banda 30-36 do dono,
+  o ativo É A BRASA) · o Íman e a MÃO (Pan) desceram a CHIPS pequenos sob
+  o rail (os MESMOS ids 33/36 e o MESMO despacho; o par INTEIRO tem de
+  caber — o achado da M-UId) · os divisores (24dp + os pisos) e a
+  persistência layout.json confirmados e aferrados pelo pin novo · pins
+  pan_rail_sexta recalibrado + ui_divisores_persistencia NOVO + M-UId
+  vermelho→reposto→verde (colada no RELATORIO-FASE-UI.md §4) ·
+  verificação: test_core 0 falhas · c33_virtual 1010/0 local ·
+  **versionCode 114** — o build vigente da FASE UI. O 113 fica INTACTO
+  como história.
+
 - **FASE UI · C — A HIERARQUIA 40DP** — as linhas 40dp (kRowH na fonte
   única; o scroll acompanha) · o OLHO e o ⋮ SÓ na linha selecionada (o
   draw gated `if (selected)` + o hit gated `controlsRow` — a MESMA

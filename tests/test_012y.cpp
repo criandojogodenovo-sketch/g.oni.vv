@@ -332,37 +332,39 @@ TEST(pan_pinch_intacto) {
     }
 }
 
-// ---- PIN pan_rail_sexta -------------------------------------------------------
-// A MÃOZINHA é a 6.ª FERRAMENTA do rail: rail[4] = Pan (id 33 — o 38
-// aposentado NUNCA volta), rail[5] = Íman; o toque arma o st.panMode; a
-// legenda diz "Pan"; a degradação em colunas continua honesta.
+// ---- PIN pan_rail_sexta (recalibrado FASE UI D) --------------------------------
+// A MÃOZINHA e o ÍMAN desceram a CHIPS sob o rail (a ordem do dono na
+// FASE UI D: a coluna é das 4 ferramentas 30-36dp); os MESMOS ids
+// (kVpPanId 33 — o 38 aposentado NUNCA volta; kVpSnapValId 36); o toque
+// arma o st.panMode; a legenda diz "Pan".
 TEST(pan_rail_sexta) {
     theme::setDensity(1.0f);
     editor::applyDensity();
-    // (1) a geometria: 6 botões numa coluna (viewport alto); o Pan fica
-    // ENTRE o Escalar (rail[3]) e o Íman (rail[5]) — "junto ao
-    // Mover/Rodar/Escalar" (a ordem do dono)
+    // (1) a geometria: o rail é a coluna das 4 FERRAMENTAS; os CHIPS (mão
+    // + íman) ficam SOB o railPanel — o Pan é chips[0] (id 33)
     const UiRect view{0.0f, 0.0f, 800.0f, 600.0f};
     const vpchrome::Layout L = vpchrome::layout(view);
     ASSERT(L.railVisible);
-    EXPECT(nearEq(L.rail[4].w, theme::dp(vpchrome::kRailBtn)));
-    EXPECT_MSG(L.rail[4].y > L.rail[3].y,
-               "pan_rail_sexta: o Pan (rail[4]) fica SOB o Escalar");
-    EXPECT_MSG(nearEq(L.rail[4].y - L.rail[3].y,
+    EXPECT_MSG(L.chips[0].w > 0.0f,
+               "pan_rail_sexta: os chips existem (a mão + o íman)");
+    EXPECT_MSG(L.chips[0].y > L.rail[3].y,
+               "pan_rail_sexta: o Pan (chip) fica SOB o Escalar (rail[3])");
+    EXPECT_MSG(nearEq(L.chips[0].w, theme::dp(vpchrome::kRailBtn)),
+               "pan_rail_sexta: o chip mantém o alvo de toque 40dp");
+    EXPECT_MSG(nearEq(L.chips[1].y - L.chips[0].y,
                       theme::dp(vpchrome::kRailBtn + vpchrome::kRailGap)),
-               "pan_rail_sexta: o passo do rail é 48dp");
-    EXPECT_MSG(nearEq(L.rail[5].y - L.rail[4].y,
-                      theme::dp(vpchrome::kRailBtn + vpchrome::kRailGap)),
-               "pan_rail_sexta: o Íman desceu para rail[5]");
+               "pan_rail_sexta: o Íman desceu para chips[1]");
     EXPECT(vpchrome::kVpPanId == 33u);   // o 38 aposentado NUNCA volta
-    // o rail inteiro cabe no view (6·40 + 5·8 = 280dp + margens)
-    EXPECT(L.rail[5].y + L.rail[5].h <= view.y + view.h + 0.5f);
-    // (2) viewport BAIXO: a degradação em 2 colunas (3 rows × 2 cols)
+    // a coluna inteira (rail + chips) cabe no view
+    EXPECT(L.chips[1].y + L.chips[1].h <= view.y + view.h + 0.5f);
+    // (2) viewport BAIXO: 4 ferramentas cabem numa coluna a 220dp
+    // (4×40+3×8 = 184 ≤ 220−16 — o railCols fica 1; a degradação honesta)
     {
         const vpchrome::Layout L2 = vpchrome::layout(UiRect{0.0f, 0.0f, 800.0f, 220.0f});
         EXPECT(L2.railVisible);
-        EXPECT(L2.railCols >= 2u);
-        EXPECT(L2.rail[5].w > 0.0f);   // as 6 ferramentas cabem em 2 colunas
+        EXPECT(L2.rail[3].w > 0.0f);   // as 4 ferramentas na coluna
+        // os chips morrem se a altura não chegar (o rail tem prioridade)
+        EXPECT(L2.chips[0].w == 0.0f);   // 184+8+88 = 280 > 204 disponíveis
     }
     // (3) o glifo Hand existe no conjunto e respeita o viewBox (o pin
     // icones_conjunto_completo_dentro_do_viewbox cobre-o automaticamente)

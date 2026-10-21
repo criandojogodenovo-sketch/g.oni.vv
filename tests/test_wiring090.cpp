@@ -342,17 +342,26 @@ TEST(inspector_sem_selecao_vira_trilho_32dp) {
 TEST(vpchrome_stack_sem_sobreposicao_alvos_48) {
     const UiRect view = safe::centerRect(kSW, kSH, safe::Insets{}, 0.0f, true);
     const vpchrome::Layout L = vpchrome::layout(view);
-    // o RAIL esquerdo (as 5 ferramentas): alvos ≥40 e sem sobreposição
-    for (int i = 0; i < 5; ++i) {
-        EXPECT(L.rail[i].w >= 40.0f - 0.01f);   // a lei de ouro
-        EXPECT(L.rail[i].h >= 40.0f - 0.01f);
-        for (int j = i + 1; j < 5; ++j) {
-            const f32 ox = std::min(L.rail[i].x + L.rail[i].w,
-                                    L.rail[j].x + L.rail[j].w) -
-                           std::max(L.rail[i].x, L.rail[j].x);
-            const f32 oy = std::min(L.rail[i].y + L.rail[i].h,
-                                    L.rail[j].y + L.rail[j].h) -
-                           std::max(L.rail[i].y, L.rail[j].y);
+    // o RAIL esquerdo (FASE UI D: as 4 ferramentas + os 2 chips): alvos
+    // ≥40 e sem sobreposição
+    const UiRect alvos[6] = {L.rail[0], L.rail[1], L.rail[2],
+                             L.rail[3], L.chips[0], L.chips[1]};
+    for (int i = 0; i < 6; ++i) {
+        if (alvos[i].w <= 0.0f) {
+            continue;   // a degradação esconde (rect zero)
+        }
+        EXPECT(alvos[i].w >= 40.0f - 0.01f);   // a lei de ouro
+        EXPECT(alvos[i].h >= 40.0f - 0.01f);
+        for (int j = i + 1; j < 6; ++j) {
+            if (alvos[j].w <= 0.0f) {
+                continue;
+            }
+            const f32 ox = std::min(alvos[i].x + alvos[i].w,
+                                    alvos[j].x + alvos[j].w) -
+                           std::max(alvos[i].x, alvos[j].x);
+            const f32 oy = std::min(alvos[i].y + alvos[i].h,
+                                    alvos[j].y + alvos[j].h) -
+                           std::max(alvos[i].y, alvos[j].y);
             EXPECT(ox <= 0.01f || oy <= 0.01f);
         }
     }

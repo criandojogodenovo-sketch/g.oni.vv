@@ -1,10 +1,10 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-21 · vc: 113 · Último commit: este (a FASE UI C — a
-hierarquia com as linhas 40dp do dono, o olho e o ⋮ SÓ na linha
-selecionada (draw gated + hit gated), o nome de largura inteira nas não
-selecionadas e a indentação pela escala (16); ui_hierarquia_40dp +
-M-UIc)
+Atualizado: 2026-10-21 · vc: 114 · Último commit: este (a FASE UI D — a
+coluna das 4 ferramentas no viewport (o ativo É a brasa), o Íman e a MÃO
+desceram a chips pequenos sob o rail (os mesmos ids 33/36), os divisores
+24dp + os pisos + a persistência layout.json confirmados; 
+pan_rail_sexta recalibrado + ui_divisores_persistencia + M-UId)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -13,7 +13,7 @@ M-UIc)
 ## §1 Onde estamos
 
 - **Campanha FASE UI (O REDESIGN VISUAL, envios 1/5 + 2/5) — EM CURSO
-  (A, B e C fechadas, vc 113; D/E a seguir)** (a cláusula calma: SÓ visual,
+  (A..D fechadas, vc 114; a E a seguir)** (a cláusula calma: SÓ visual,
   layout e UX — core/V.ONI/importadores/física/.gmesh intocados; um
   commit por parte, CI verde entre elas; a história vive no
   RELATORIO-FASE-UI.md).
@@ -25,22 +25,24 @@ M-UIc)
   validado antes do commit; pins ui_tokens_brasa + ui_sobreposicao_topbar
   + M-UIa; 9 recalibrações com nota.
   **B (vc 112)**: A BARRA 40DP — a direita nova (undo/redo/guardar
-  subiram do viewport para TODOS os modos + play/stop/gear; os ids
-  3/19/30/31/32 aposentados, os 20/21/22 novos), o Pause na PLAY BAR
-  (id 6, o mundo congelado de verdade — os passos fixos não correm), o
-  «Android» nas Definições (a linha «plataforma»), a fila do viewport
-  morta para o chip ⋯; O ACHADO DO CI (o A vermelho na sonda 35.2 do
-  c33 — a lacuna dos DOIS alvos de novo): a cura + o build_c33.py NOVO +
-  11 sondas stale recalibradas (os pickers a mirrar o overlayArea); pin
-  ui_topbar_40dp_composicao + M-UIb; test_core 0 falhas + c33 1009/0
-  local.
+  subiram do viewport para TODOS os modos; os ids 3/19/30/31/32
+  aposentados, os 20/21/22 novos), o Pause na PLAY BAR (o mundo congelado
+  de verdade), o «Android» nas Definições, a fila do viewport morta para
+  o chip ⋯; O ACHADO DO CI (o A vermelho na sonda 35.2 — a lacuna dos
+  DOIS alvos): a cura + o build_c33.py NOVO + 11 sondas stale
+  recalibradas; ui_topbar_40dp_composicao + M-UIb; test_core 0 falhas +
+  c33 1009/0 local.
   **C (vc 113)**: A HIERARQUIA — as linhas 40dp (kRowH na fonte única), o
-  OLHO e o ⋮ SÓ na linha selecionada (o draw gated `if (selected)` + o
-  hit gated `controlsRow` — a MESMA condição; nas outras linhas a zona é
-  corpo), o nome de largura inteira nas não selecionadas (a reticência só
-  quando não couber) e a indentação pela escala do dono (kSpace3 16); pin
-  ui_hierarquia_40dp + M-UIc; 6 recalibrações com nota; test_core 0
-  falhas + c33 1009/0 local.
+  OLHO e o ⋮ SÓ na selecionada (draw gated + hit gated — a MESMA
+  condição; nas outras a zona é corpo), o nome de largura inteira e a
+  indentação pela escala (16); ui_hierarquia_40dp + M-UIc; 6
+  recalibrações; test_core 0 falhas + c33 1009/0 local.
+  **D (vc 114)**: O VIEWPORT — a coluna das 4 FERRAMENTAS (o ativo É a
+  brasa), o Íman e a MÃO desceram a CHIPS sob o rail (os MESMOS ids
+  33/36; o par INTEIRO tem de caber — o achado da M-UId), os divisores
+  (24dp + os pisos) e a persistência layout.json confirmados; 
+  pan_rail_sexta recalibrado + ui_divisores_persistencia + M-UId;
+  test_core 0 falhas + c33 1010/0 local.
 - **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A, B, C, o
   C-FIX e o D fechadas, vc 110; o FECHO a seguir)** (a cláusula calma: SÓ o
   prompt; a V.ONI intocada; a história vive no RELATORIO-0.12-Y-ABERTURA.md
@@ -83,7 +85,7 @@ M-UIc)
   conflito camrig↔follow/look no compilador com o par do Substituir;
   pins ×14 + R-055 + M-3.9x1/x2; a história vive no
   RELATORIO-0.12-X-ABERTURA.md e no RELATORIO-0.12-X-CAMRIG.md).
-- **Campanha 0.12-U (V.ONI BLOCO A — a REDUÇÃO DE TRABALHO) — FECHADA (3.9a..3.9c + o FECHO, vc 98–100)** (as 7 features no registo — o View P universal, as 14 Funções, o spawn pela porta do Host, os relógios every/after/when com o estado por nó AST; 64 entradas; pins ×37 + R-052/R-053/R-054 + M-3.9a1..c3; o platformer do juiz final VERDE; a história nos RELATORIO-0.12-U-*.md).
+- **Campanha 0.12-U (V.ONI BLOCO A) — FECHADA (3.9a..3.9c + o FECHO, vc 98–100)** (as 7 features no registo, 64 entradas; pins ×37 + R-052..R-054; o platformer do juiz VERDE; nos RELATORIO-0.12-U-*.md).
 - **Campanha 0.12-E (EMERGÊNCIA + REDESIGN 2.5D) — FECHADA (E-1..E-3, vc 95–97)** (o SDF 3D abortado; E-1 o desenho simples, E-2 a paleta no Theme.h — superada pela FASE UI A —, E-3 os efeitos 2.5D; no RELATORIO-0.12-E.md).
 - **Campanha 0.12-D (identidade visual) — PARCIALMENTE ABORTADA (a 0.12-E)**: o D-4 (o LOGO) sobrevive; o D-1/D-2/D-3 DORMENTES; D-5..D-8 CANCELADOS (no RELATORIO-0.12-D.md).
 - **Campanha 0.12-C (layout, organização e consistência) — FECHADA
@@ -153,17 +155,9 @@ M-UIc)
   escada de superfícies + o idioma (os 4 tons, card/elevated); C-4 o
   picker + os vazios com AÇÃO + A REPARAÇÃO da árvore (614 de volta);
   pins ×20 + M-C1a/b..C4a/b.
-- 0.12-B B-3/B-4 (vc 85–86) — o canvas com a moldura do device (o
-  seletor, o véu, as guias, a grelha, o toast; pins ×3 + M-B3a/b) e as
-  ações de cena (o renomear/duplicar/apagar 2-tap + o manifesto
-  round-trip; pins ×4 + M-B4a; R-051) — no RELATORIO-0.12-B.md
-  §20..29; a CAMPANHA 0.12-B FECHA.
-- 0.12-B B-1/B-2 (vc 83–84) — a árvore de UI (Control/UIRoot, a compat
-  migrateUiCanvasToTree, o serializer, o editor em modo árvore, o Play;
-  pins ×9 + M-B1a/b/c + R-050) e o Inspector de UI (as secções
-  colapsáveis, os campos da base/por tipo, a zona morta, os resets, o
-  «sem remover joystick»; pins ×5 + M-B2a/b) — no
-  RELATORIO-0.12-B.md §1..19; 8 recalibrações com nota.
+- 0.12-B (vc 83–86) — a árvore de UI, o Inspector de UI, o canvas com a
+  moldura e as ações de cena 2-tap (pins ×21 + R-050/R-051; no
+  RELATORIO-0.12-B.md).
 - 0.12-A (vc 82) — os 4 bugs P0 fechados (o ficheiro:linha, os pins e
   o veredito vivem no relatório próprio: docs/RELATORIO-0.12-A.md + o
   INVEST-RAM): A-1 as rows LOD JÁ EXISTIAM (PÁRA no fix cego; pins ×5);

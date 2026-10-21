@@ -80,11 +80,11 @@ bool railButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
 // botão de ferramenta (0.9.6.1 · G1-2 → PASSO 3): SÓ ÍCONE — o nome vive
 // na LEGENDA (à direita do rail). Alvo 40, desenho 32, ícone 20.
 bool toolButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
-                bool active) {
+                bool active, f32 insetDp = 4.0f) {
     const bool pressed = ui.widgetHit(id, r.x, r.y, r.w, r.h);
     const bool held = ui.widgetActive(id);
     const bool on = active || held;
-    const f32 inset = theme::dp(4.0f);
+    const f32 inset = theme::dp(insetDp);
     const UiRect d = {r.x + inset, r.y + inset, r.w - 2.0f * inset,
                       r.h - 2.0f * inset};
     f32 accent[4], surface[4], border[4], onCol[4], offCol[4];
@@ -141,7 +141,7 @@ Layout layout(const UiRect& view) {
     // (1) o RAIL esquerdo (col-major; a degradação em colunas é a do stack
     // antigo: o MENOR nº de colunas que caiba na altura útil)
     // 0.12-Y (3.Y-A): 6 ferramentas (o PAN entra — a MÃOZINHA)
-    constexpr u32 kRailTools = 6u;
+    constexpr u32 kRailTools = 4u;   // FASE UI D: as 4 ferramentas
     const f32 availH = view.h - 2.0f * m;
     const f32 availW = view.w - 2.0f * m;
     u32 cols = 1;
@@ -181,6 +181,25 @@ Layout layout(const UiRect& view) {
                        railW + theme::dp(8.0f), railH + theme::dp(8.0f)};
     } else {
         L.railPanel = {0.0f, 0.0f, 0.0f, 0.0f};
+    }
+    // FASE UI D: os CHIPS (mão + íman) SOB o rail — os alvos 40dp de
+    // sempre (o desenho é menor: o inset 6 no toolButton); a coluna inteira
+    // cabe? os chips morrem na degradação (o rail tem prioridade)
+    if (L.railVisible) {
+        const f32 cy = L.railPanel.y + L.railPanel.h + gap;
+        // os DOIS chips têm de caber (o par: 2 alvos + o vão)
+        const bool chipsFit =
+            (cy + 2.0f * btn + gap <= view.y + view.h);
+        for (int i = 0; i < 2; ++i) {
+            L.chips[i] = chipsFit
+                             ? UiRect{L.rail[0].x,
+                                      cy + static_cast<f32>(i) * (btn + gap),
+                                      btn, btn}
+                             : UiRect{0.0f, 0.0f, 0.0f, 0.0f};
+        }
+    } else {
+        L.chips[0] = {0.0f, 0.0f, 0.0f, 0.0f};
+        L.chips[1] = {0.0f, 0.0f, 0.0f, 0.0f};
     }
 
     // (2) O GIZMO DO CANTO — REMOVIDO na 0.12-C (C-2 · A ORDEM DO DONO):
@@ -330,30 +349,30 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
             gz.mode = 2;
             st.legendArm = true;   // 0.12-A (A-3)
         }
-        // 0.12-Y (3.Y-A): a MÃOZINHA — o PAN (o target no plano da câmara;
-        // o pan de 2 dedos é LIVRE e não precisa deste modo). O panMode
-        // comporta-se como o selectMode no que toca ao gizmo da toolbar
-        // (os chips Mover/Rodar/Escalar apagam-no) mas a seleção por tap
-        // mantém-se (o tap parado continua a ser tap).
-        if (toolButton(ui, kVpPanId, L.rail[4], icons::Icon::Hand,
-                       st.panMode)) {
-            st.panMode = true;
-            st.selectMode = false;
-            gz.mode = 0;   // o gizmo volta Mover ao sair do Pan (o padrão)
-            st.legendArm = true;   // 0.12-A (A-3): o tooltip nasce no largar
-        }
-        // o ÍMAN: estado ativo/inativo, SEM texto (o valor segue no
-        // tooltip do gizmo — G2-9)
-        {
-            const bool pressed = ui.widgetHit(kVpSnapValId, L.rail[5].x,
-                                              L.rail[5].y, L.rail[5].w,
-                                              L.rail[5].h);
+        // FASE UI D: a MÃO (Pan) e o ÍMAN vivem nos CHIPS sob o rail (os
+        // alvos 40dp de sempre, o desenho 28 — os MESMOS ids 33/36, o
+        // MESMO despacho; a coluna das ferramentas respira)
+        if (L.chips[0].w > 0.0f) {
+            // 0.12-Y (3.Y-A): a MÃOZINHA — o PAN (o target no plano da
+            // câmara; o pan de 2 dedos é LIVRE e não precisa deste modo)
+            if (toolButton(ui, kVpPanId, L.chips[0], icons::Icon::Hand,
+                           st.panMode, 6.0f)) {
+                st.panMode = true;
+                st.selectMode = false;
+                gz.mode = 0;   // o gizmo volta Mover ao sair do Pan
+                st.legendArm = true;   // 0.12-A (A-3): o tooltip no largar
+            }
+            // o ÍMAN: estado ativo/inativo, SEM texto (o valor segue no
+            // tooltip do gizmo — G2-9)
+            const bool pressed =
+                ui.widgetHit(kVpSnapValId, L.chips[1].x, L.chips[1].y,
+                             L.chips[1].w, L.chips[1].h);
             const bool held = ui.widgetActive(kVpSnapValId);
             const bool on = gz.snap || held;
-            const f32 inset = theme::dp(4.0f);
-            const UiRect d = {L.rail[5].x + inset, L.rail[5].y + inset,
-                              L.rail[5].w - 2.0f * inset,
-                              L.rail[5].h - 2.0f * inset};
+            const f32 inset = theme::dp(6.0f);
+            const UiRect d = {L.chips[1].x + inset, L.chips[1].y + inset,
+                              L.chips[1].w - 2.0f * inset,
+                              L.chips[1].h - 2.0f * inset};
             f32 accent[4], surface[4], border[4], onCol[4], offCol[4];
             colA(theme::kTheme.accent, accent);
             colA(theme::kTheme.surface, surface);
@@ -367,10 +386,10 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
                                 theme::dp(theme::kRadiusCard), border);
             }
             icons::drawIcon(ui, icons::Icon::Snap,
-                            L.rail[5].x + (L.rail[5].w - theme::dp(20.0f)) *
-                                              0.5f,
-                            L.rail[5].y + (L.rail[5].h - theme::dp(20.0f)) *
-                                              0.5f,
+                            L.chips[1].x +
+                                (L.chips[1].w - theme::dp(20.0f)) * 0.5f,
+                            L.chips[1].y +
+                                (L.chips[1].h - theme::dp(20.0f)) * 0.5f,
                             theme::dp(20.0f), on ? onCol : offCol);
             if (pressed) {
                 gz.snap = !gz.snap;

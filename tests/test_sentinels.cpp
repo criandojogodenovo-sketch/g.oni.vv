@@ -3243,7 +3243,9 @@ TEST(regress_divisores_arrastaveis) {
         // o rect do DEVICE em dp a 1.0 (hier 200 | vp 288×208)
         const editor::vpchrome::Layout ldev =
             editor::vpchrome::layout(UiRect{200.0f, 56.0f, 288.0f, 208.0f});
-        EXPECT(ldev.railVisible && ldev.railCols >= 2u);   // colunas
+        // FASE UI D (recalibrado): as 4 ferramentas cabem numa COLUNA
+        // (4×40+3×8 = 184 ≤ 208−16) — o railCols desce para 1
+        EXPECT(ldev.railVisible && ldev.railCols == 1u);   // coluna única
         // FASE UI B (recalibrada com nota): o chip ⋯ ÚNICO CABE no topo
         // (a fila de 4 descia — o chip de 40dp respira ao lado do rail;
         // nunca sai do rect — a regra de sempre)
@@ -3252,9 +3254,14 @@ TEST(regress_divisores_arrastaveis) {
         // 0.12-C (C-2): o gizmo do canto SAIU (o duplicado do Mover) — os
         // alvos do chrome são N−2 (9: o rail 5 + a fila 4)
         // FASE UI B: a fila é o chip ⋯ único (o undo/redo/save subiram)
+        // FASE UI D: o rail é das 4 ferramentas (os chips são outros alvos)
         const UiRect all[] = {ldev.rail[0],   ldev.rail[1],  ldev.rail[2],
-                              ldev.rail[3],   ldev.rail[4],  ldev.quick[0]};
+                              ldev.rail[3],   ldev.chips[0], ldev.chips[1],
+                              ldev.quick[0]};
         for (const UiRect& r : all) {
+            if (r.w <= 0.0f) {
+                continue;   // FASE UI D: a degradação ESCONDE (rect zero)
+            }
             EXPECT(r.w >= 40.0f - 0.01f && r.h >= 40.0f - 0.01f);
             EXPECT(r.x >= 200.0f - 0.01f && r.y >= 56.0f - 0.01f);
             EXPECT(r.x + r.w <= 200.0f + 288.0f + 0.01f);
@@ -3265,15 +3272,19 @@ TEST(regress_divisores_arrastaveis) {
         // até à borda: 8+184+8 = 200dp no rect de 200; antes o gizmo
         // empurrava-a para fora e ela ESCONDEIA). O gizmo fica rect ZERO
         // (o pin mover_unico aferra) e a fila DENTRO do rect (nada sangra)
+        // FASE UI D (recalibrado): com 4 ferramentas o rail cabe em 200×60
+        // numa LINHA (4 cols × 40 = 184 ≤ 184) — o sub-mínimo que ESCONDE
+        // desce para 150dp de largura (o piso honesto: nenhum arranjo
+        // cabe); o chip ⋯ único respira e o loop é do chip ÚNICO
         const editor::vpchrome::Layout ltiny =
-            editor::vpchrome::layout(UiRect{200.0f, 56.0f, 200.0f, 60.0f});
+            editor::vpchrome::layout(UiRect{200.0f, 56.0f, 150.0f, 60.0f});
         EXPECT(!ltiny.railVisible);
         EXPECT(ltiny.gizmoBtn.w == 0.0f);
         EXPECT(ltiny.quick[0].w > 0.0f);
-        for (int qi = 0; qi < 4; ++qi) {
+        for (int qi = 0; qi < 1; ++qi) {
             EXPECT(ltiny.quick[qi].x >= 200.0f - 0.01f);
             EXPECT(ltiny.quick[qi].x + ltiny.quick[qi].w <=
-                   200.0f + 200.0f + 0.01f);
+                   200.0f + 150.0f + 0.01f);
             EXPECT(ltiny.quick[qi].y >= 56.0f - 0.01f);
             EXPECT(ltiny.quick[qi].y + ltiny.quick[qi].h <=
                    56.0f + 60.0f + 0.01f);
@@ -4048,9 +4059,10 @@ TEST(regress_hierarquia_contrato) {
             // D21 (0.9.6.19b): o [+] do fundo-direito saiu — os alvos são
             // N−1 (10) e o §1/§3 do contrato perderam o [+] e kCornerBtn)
             // FASE UI B: a fila é o chip ⋯ único (N−1 alvos)
-            const UiRect targets[7] = {
-                L.rail[0], L.rail[1], L.rail[2], L.rail[3], L.rail[4],
-                L.quick[0], L.gizmoBtn};
+            // FASE UI D: rail 4 ferramentas + 2 chips (N alvos)
+            const UiRect targets[8] = {
+                L.rail[0], L.rail[1], L.rail[2], L.rail[3],
+                L.chips[0], L.chips[1], L.quick[0], L.gizmoBtn};
             for (const UiRect& r : targets) {
                 if (r.w > 0.0f && r.h > 0.0f) {   // degenerado = escondido
                     EXPECT_MSG(safe::rectInside(r, view),
@@ -4178,9 +4190,9 @@ TEST(regress_texto_strip_campo) {
             }
             // (b) os 10 alvos ≥40dp e DENTRO do rect (a lei de ouro; D21:
             // o [+] saiu — N−1)
-            const UiRect all[7] = {L.rail[0],  L.rail[1],  L.rail[2],
-                                   L.rail[3],  L.rail[4],  L.quick[0],
-                                   L.gizmoBtn};
+            const UiRect all[8] = {L.rail[0],  L.rail[1],  L.rail[2],
+                                   L.rail[3],  L.chips[0], L.chips[1],
+                                   L.quick[0], L.gizmoBtn};
             for (const UiRect& r : all) {
                 if (r.w > 0.0f && r.h > 0.0f) {
                     EXPECT_MSG(r.w >= theme::dp(40.0f) - 0.5f &&
@@ -4212,11 +4224,14 @@ TEST(regress_texto_strip_campo) {
         // direito tornaram-se taautológicas com os rects ZERO e saem; a
         // prova do canto limpo é o lt/vtt abaixo (gizmoBtn == 0)
 
-        // (c) a ESCADA: 220dp — o rail 2 colunas; FASE UI B: o chip ⋯
-        // único cabe no TOPO (a fila de 4 descia — o chip respira)
+        // (c) a ESCADA: 220dp — FASE UI D (recalibrado): as 4 ferramentas
+        // cabem numa COLUNA (184 ≤ 204) e os CHIPS também (o par termina
+        // a 328? NÃO: 184+16(railPanel)+8+88 = 296 > 204 — os chips
+        // ESCONDEM e o chip ⋯ respira no topo)
         {
             const editor::vpchrome::Layout ln = checkLayout("220dp", 220.0f, 208.0f);
-            EXPECT(ln.railVisible && ln.railCols >= 2u);
+            EXPECT(ln.railVisible && ln.railCols == 1u);
+            EXPECT(ln.chips[0].w == 0.0f);   // o par não cabe — esconde
             EXPECT(ln.quick[0].w > 0.0f);
             EXPECT(ln.quick[0].y <= ln.rail[0].y + ln.rail[0].h);
         }
@@ -4228,9 +4243,10 @@ TEST(regress_texto_strip_campo) {
             // 0.12-C (C-2): o gizmo saiu — o canto direito fica LIMPO
             EXPECT(lt.gizmoBtn.w == 0.0f);
         }
-        // 72dp — nem o rail cabe (esconde); o canto fica limpo
+        // 36dp — FASE UI D (recalibrado): com 4 ferramentas a coluna de 40
+        // cabe até 56dp de largura — o «nem o rail cabe» desce a 36dp
         {
-            const editor::vpchrome::Layout vtt = checkLayout("72dp", 72.0f, 208.0f);
+            const editor::vpchrome::Layout vtt = checkLayout("36dp", 36.0f, 208.0f);
             EXPECT(!vtt.railVisible);
             EXPECT(vtt.gizmoBtn.w == 0.0f);   // 0.12-C: sem o gizmo do canto
         }

@@ -202,3 +202,59 @@ Reposto: 0 falhas (test_core + c33_virtual 1009/0 — o CI é o árbitro).
 **Verificação**: test_core 0 falhas · c33_virtual 1009/0 local ·
 docs-lint VERDE · release-identity/R-015 VERDE vc 113 · **versionCode
 113** (o §14 declara o par no MESMO commit).
+
+## §4 PARTE D — VIEWPORT E FERRAMENTAS (a coluna das 4 + os chips)
+
+**O que mudou**:
+
+- **A COLUNA DAS 4 FERRAMENTAS**: o rail é Selecionar/Mover/Rodar/
+  Escalar (o desenho 32dp na banda 30-36 do dono, o alvo de toque 40 —
+  a lei de ouro); a ferramenta ATIVA É A BRASA (o fill accent + a tinta
+  escura — o padrão que a parte A re-alinhou ao #FF5A1F).
+- **O ÍMAN E A MÃO (Pan) DESCERAM A CHIPS** (a ordem do dono): os chips
+  pequenos SOB o railPanel (o desenho 28dp dentro do alvo 40) — os
+  MESMOS ids de sempre (kVpPanId 33, kVpSnapValId 36) e o MESMO despacho
+  (o toque arma o panMode / alterna o snap — zero lógica nova). A
+  degradação: os chips morrem primeiro (o rail tem prioridade) e o par
+  INTEIRO tem de caber (o achado da M-UId: o fit do 1.º chip só não
+  chega — o regress_hierarquia_contrato apanhou o 2.º a sair do rect).
+- **O VIEWPORT CONTINUA A MAIOR ÁREA**: as frações da C-1 (hierarquia
+  20%, viewport ≥60%) intocadas; nada de botões grandes no centro (o
+  gizmo do canto continua morto — o C-2).
+- **OS DIVISORES**: a zona de toque 24dp, os pisos (hierarquia 140 ·
+  inspector 180..260 · viewport 288) e a PERSISTÊNCIA layout.json
+  (hierW/inspW) JÁ EXISTIAM (o Grupo D + o divisor_drag) — a ordem
+  confirma; o pin novo aferra o contrato à fase.
+- **O ACHADO FORA DA LISTA**: a degradação do rail de 4 é MAIS
+  tolerante que a de 6 (a coluna única cabe a 184dp de altura, a linha
+  única a 200dp de largura) — as sondas de stress da casa recalibraram
+  para os pisos honestos novos (o ltiny 150dp, o vtt 36dp).
+
+**Pins**: pan_rail_sexta recalibrado (os chips sob o rail, o id 33 vivo,
+a degradação nova) · ui_divisores_persistencia NOVO (a zona 24dp + os
+pisos + o roundtrip layout.json 200/240) · recalibrações com nota:
+test_sentinels (os arrays com chips, o railCols 1 no dev rect, a escada
+220, o ltiny 150, o vtt 36), test_wiring090 (os alvos 6), c33 (os 3
+loops do 9.9), test_012y (o pin do pan).
+
+**Mutação M-UId** (o fit do par volta ao 1.º chip — o 2.º sai do rect):
+
+```
+regress_hierarquia_contrato ... FALHOU  test_sentinels.cpp:4068  C33 1536x720@2.0 raw=100000: um alvo do chrome sai do rect da viewport
+```
+
+Reposto: 0 falhas (test_core + c33_virtual 1010/0 — o CI é o árbitro).
+
+**O ACHADO GRAVE (o bad_alloc do B, fechado)**: o commit B levou um UB
+real — o loop `ltiny.quick[qi]` de 4 iterações lia PASTO do array
+`UiRect quick[1]` (a recalibração incompleta da fila). O Release no
+runner transformava o lixo lido em `std::bad_alloc` (2× no CI); a suíte
+local passava por sorte (o lixo benigno no mesmo sítio). O diagnóstico
+do C (a saída ao vivo) apanhou o ciclo de falhas do OOB no runner — a
+cura é a D: o loop é do chip ÚNICO (`qi < 1`) e o sub-mínimo honesto é
+o ltiny 150dp. A lição na ferramenta: o build local (test_core + c33)
+não vê UB de build Release do runner — o gate é o CI.
+
+**Verificação**: test_core 0 falhas · c33_virtual 1010/0 local ·
+docs-lint VERDE · release-identity/R-015 VERDE vc 114 · **versionCode
+114** (o §14 declara o par no MESMO commit).

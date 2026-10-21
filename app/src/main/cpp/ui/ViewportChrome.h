@@ -126,14 +126,15 @@ inline void chromeCol(const f32* c, f32 out[4]) {
 }
 
 struct Layout {
-    // 0.12-Y (3.Y-A): 6 ferramentas — Selecionar/Mover/Rodar/Escalar/PAN/
-    // Íman (o Pan entra entre o Escalar e o Íman — "junto ao
-    // Mover/Rodar/Escalar", a ordem do dono; col-major; a degradação em
-    // colunas é a do stack antigo — viewports baixos dividem a coluna)
-    UiRect rail[6]{};
+    // FASE UI D (a ordem do dono): a coluna é das 4 FERRAMENTAS
+    // (Selecionar/Mover/Rodar/Escalar — 30-36dp); o Íman e a MÃO (Pan)
+    // desceram a CHIPS pequenos (a coluna respira; nada tapa o centro)
+    UiRect rail[4]{};
     u32    railCols = 1;
     bool   railVisible = true;   // false = viewport tão baixo que nem 2
                                  // colunas cabem (a degradação honesta)
+    UiRect chips[2]{};        // a MÃO (Pan) + o ÍMAN (chips pequenos, sob o
+                              // rail — os MESMOS ids de sempre 33/36)
     UiRect quick[1]{};        // o ⋯ (FASE UI B: a fila perdeu o undo/redo/
                               // save — subiram para a barra de topo)
     UiRect gizmoBtn{};        // o gizmo 40dp do topo-direito

@@ -2247,14 +2247,20 @@ int main() {
                 safe::centerRect(sw, sh, ins, 0.0f, g_editor.showInspector);
             const editor::vpchrome::Layout lA = editor::vpchrome::layout(vA);
             const editor::vpchrome::Layout* a = &lA;
-            // o RAIL esquerdo (as 5 ferramentas) + os cantos DENTRO do rect
+            // o RAIL esquerdo (FASE UI D: as 4 ferramentas + os 2 chips)
+            // DENTRO do rect — os rects ZERO (a degradação) saem
             bool railOkA = true;
-            for (u32 i = 0; i < 5; ++i) {
+            for (u32 i = 0; i < 4; ++i) {
                 railOkA = railOkA && safe::rectInside(a->rail[i], vA);
             }
+            railOkA = railOkA &&
+                      (a->chips[0].w <= 0.0f ||
+                       safe::rectInside(a->chips[0], vA)) &&
+                      (a->chips[1].w <= 0.0f ||
+                       safe::rectInside(a->chips[1], vA));
             check(railOkA && safe::rectInside(a->railPanel, vA),
-                  "painel FECHADO: o rail esquerdo (5 ferramentas) DENTRO do "
-                  "rect da viewport");
+                  "painel FECHADO: o rail esquerdo (4 ferramentas + chips) "
+                  "DENTRO do rect da viewport");
             // o chip do topo (⋯ — FASE UI B: a fila é o chip único; o
             // undo/redo/save subiram para a barra)
             const bool quickOkA = safe::rectInside(a->quick[0], vA);
@@ -2280,9 +2286,14 @@ int main() {
             const editor::vpchrome::Layout lB = editor::vpchrome::layout(vB);
             const editor::vpchrome::Layout* b = &lB;
             bool dentroB = safe::rectInside(b->quickPanel, vB);
-            for (u32 i = 0; i < 5; ++i) {
+            for (u32 i = 0; i < 4; ++i) {
                 dentroB = dentroB && safe::rectInside(b->rail[i], vB);
             }
+            dentroB = dentroB &&
+                      (b->chips[0].w <= 0.0f ||
+                       safe::rectInside(b->chips[0], vB)) &&
+                      (b->chips[1].w <= 0.0f ||
+                       safe::rectInside(b->chips[1], vB));
             check(dentroB, "painel ABERTO (240px): o chrome SOBE com o "
                            "rect — nunca cobre o painel de baixo");
             // 0.12-C (C-2): o acompanhamento do topo é do RAIL + da fila
@@ -2291,11 +2302,16 @@ int main() {
             // do drawer (y >= topo do painel)
             const f32 drawerTop = sh - 240.0f;
             bool foraDoDrawer = true;   // 0.12-C: o gizmo saiu (o rail abaixo)
-            for (u32 i = 0; i < 5; ++i) {
+            for (u32 i = 0; i < 4; ++i) {
                 foraDoDrawer =
                     foraDoDrawer &&
                     b->rail[i].y + b->rail[i].h <= drawerTop + 0.5f;
             }
+            foraDoDrawer = foraDoDrawer &&
+                           (b->chips[0].w <= 0.0f ||
+                            b->chips[0].y + b->chips[0].h <= drawerTop + 0.5f) &&
+                           (b->chips[1].w <= 0.0f ||
+                            b->chips[1].y + b->chips[1].h <= drawerTop + 0.5f);
             check(foraDoDrawer, "nenhum botão pisa a faixa do painel de baixo");
             // largura mínima: o rail esquerdo cabe na viewport mais estreita
             // (1600×720 com Inspector + drawer = o pior caso do dono)
@@ -4725,9 +4741,10 @@ int main() {
                     // saiu — os alvos do chrome são N−2 (9), o gizmoBtn
                     // ZERO fica no array e o check de 40dp tem de o
                     // ignorar (rect zero = escondido)
-                    const UiRect all[7] = {
+                    // FASE UI D: rail 4 + 2 chips + o chip ⋯ (o gizmo ZERO)
+                    const UiRect all[8] = {
                         L.rail[0], L.rail[1], L.rail[2], L.rail[3],
-                        L.rail[4], L.quick[0], L.gizmoBtn};
+                        L.chips[0], L.chips[1], L.quick[0], L.gizmoBtn};
                     for (const UiRect& r : all) {
                         // 0.12-C (C-1): a hierarquia 20% estreita o centro —
                         // com seleção no device a fila do topo já não cabe

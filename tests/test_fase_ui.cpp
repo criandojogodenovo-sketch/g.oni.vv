@@ -13,6 +13,7 @@
 #include "ui/ScrollMath.h"
 #include "ui/Toolbar.h"
 #include "ui/EditorLayout.h"
+#include "ui/BottomPanel.h"
 #include "TestFramework.h"
 #include <cstdio>
 #include <cstdlib>
@@ -188,6 +189,37 @@ TEST(ui_hierarquia_40dp) {
     // (c) o NOME completo nas linhas não selecionadas (o budget largura
     // toda — a reticência só quando não couber)
     EXPECT(countSub(src, "(x + w - theme::dp(12.0f) - nameX)") == 1);
+}
+
+// ---- PIN ui_divisores_persistencia — A PARTE D -----------------------------
+// «Divisores arrastáveis com zona de toque 24dp + tamanhos mínimos +
+// guardar/restaurar o layout entre sessões» — a FONTE ÚNICA e o
+// roundtrip do layout.json (o mesmo contrato do divisor_drag)
+TEST(ui_divisores_persistencia) {
+    // (a) a ZONA DE TOQUE: 24dp na fonte única (a ordem do dono)
+    EXPECT(test::nearEqF(editor::kDividerHitW, 24.0f, 1e-4f));
+    // (b) os TAMANHOS MÍNIMOS (a gangorra do resolvePanels)
+    EXPECT(test::nearEqF(safe::kHierMinW, 140.0f, 1e-4f));
+    EXPECT(test::nearEqF(safe::kInspMinW, 180.0f, 1e-4f));
+    EXPECT(test::nearEqF(safe::kInspMaxW, 260.0f, 1e-4f));
+    EXPECT(test::nearEqF(safe::kViewportMinW, 288.0f, 1e-4f));
+    // (c) A PERSISTÊNCIA: o serializeLayout leva hierW/inspW (o
+    // layout.json — a sessão seguinte restaura)
+    std::string src;
+    ASSERT(readFile(repoRoot() + "/app/src/main/cpp/ui/BottomPanel.cpp", src));
+    EXPECT(countSub(src, "hierW=") >= 1);
+    EXPECT(countSub(src, "inspW=") >= 1);
+    // (d) o roundtrip REAL: 200/240 vão e voltam (o mesmo contrato do
+    // divisor_drag — aqui aferrado ao contrato da fase)
+    std::string dump = "bottomTab=0\ndrawerH=0\ninspector=1\n"
+                       "inspCollapsed=0\nhierW=200\ninspW=240\n";
+    f32 hw = -1.0f, iw = -1.0f;
+    bool show = false;
+    u32 coll = 0;
+    editor::bottom::BottomState bs{};
+    EXPECT(editor::bottom::parseLayout(dump, bs, show, coll, &hw, &iw));
+    EXPECT(test::nearEqF(hw, 200.0f, 1e-4f));
+    EXPECT(test::nearEqF(iw, 240.0f, 1e-4f));
 }
 
 // ---- PIN ui_sobreposicao_topbar — A BARRA NÃO TAPA NADA NEM SAI ----------
