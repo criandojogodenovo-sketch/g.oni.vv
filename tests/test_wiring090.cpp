@@ -567,7 +567,9 @@ TEST(menu_sheet_ancorado_8dp_sob_o_botao) {
         toolbar::topbarLayout(kSW, kSH, safe::Insets{}, false, false);
     const f32 ax = tb.menu.x;
     const f32 ay = tb.menu.y + tb.menu.h + 8.0f;   // +8dp (spec H)
-    e.tap(ax + 140.0f, ay + 28.0f + 24.0f);   // linha 0 (sob o cabeçalho)
+    // FASE UI G: a FAIXA DO X (40dp) vive no topo do sheet — a 1ª linha
+    // desceu dp(40) (a ordem: «botão fechar sempre acessível»)
+    e.tap(ax + 140.0f, ay + 40.0f + 28.0f + 24.0f);   // linha 0 (sob o X)
     EXPECT(!e.st.fileMenu);
     // toque FORA (longe, no canto oposto) fecha SEM ação
     e.st.fileMenu = true;

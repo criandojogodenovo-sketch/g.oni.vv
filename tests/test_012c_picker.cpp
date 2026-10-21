@@ -94,7 +94,8 @@ TEST(012c_picker_compacto) {
     {
         theme::setDensity(2.0f);
         const BrowserSheetLayout ld = browserSheetLayout(
-            1600.0f, 720.0f, 0.0f, 48.0f, 0.0f, 48.0f, editor::kHeaderH, 30u);
+            1600.0f, 720.0f, 0.0f, 48.0f, 0.0f, 48.0f, editor::kHeaderH,
+            30u, theme::dp(safe::kBottomTabH));   // FASE UI G
         EXPECT(nearEqF(ld.rowH, theme::dp(48.0f), 0.01f));
         theme::setDensity(1.0f);
     }
@@ -109,7 +110,8 @@ TEST(012c_picker_compacto) {
     };
     for (const Screen& s : scr) {
         const BrowserSheetLayout L = browserSheetLayout(
-            s.sw, s.sh, s.sl, s.st, s.sr, s.sb, editor::kHeaderH, 50u);
+            s.sw, s.sh, s.sl, s.st, s.sr, s.sb, editor::kHeaderH, 50u,
+            theme::dp(safe::kBottomTabH));   // FASE UI G
         // dentro da ÁREA ÚTIL (a safe-area respeitada em TODO o lado)
         EXPECT(L.x >= s.sl - 0.01f && L.y >= s.st - 0.01f);
         EXPECT(L.x + L.w <= s.sw - s.sr + 0.01f);
@@ -163,7 +165,8 @@ TEST(012c_picker_breadcrumb) {
     };
     const BrowserSheetLayout L =
         browserSheetLayout(1600.0f, 720.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                           editor::kHeaderH, 1u);
+                           editor::kHeaderH, 1u,
+                           theme::dp(safe::kBottomTabH));
     st.fileBrowser = true;
     int crumbPick = 0;
     u32 rowIdx = 0;

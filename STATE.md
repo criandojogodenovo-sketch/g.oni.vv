@@ -1,8 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-21 · vc: 116 · Último commit: este (a FASE UI F — a barra fina
-32dp com o «Painéis ▾» + o estado «60 FPS · 6 TICs» (o bl saiu), as 4 TABS na fila
-40dp do painel ENCAIXADO, lastTab, ~30/40%, a timeline cabendo, o ponto vermelho;
+Atualizado: 2026-10-21 · vc: 117 · Último commit: este (a FASE UI G — as folhas
+contidas: o teto de 85% do ecrã, o navegador nunca por baixo da barra, o X de
+fechar no menu principal, a ordem vertical do navegador confirmada;
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -11,7 +11,7 @@ Atualizado: 2026-10-21 · vc: 116 · Último commit: este (a FASE UI F — a bar
 ## §1 Onde estamos
 
 - **Campanha FASE UI (O REDESIGN VISUAL, envios 1/5..3/5) — EM CURSO
-  (A..F fechadas, vc 116; os envios 4/5..5/5 não chegaram)** (a cláusula
+  (A..G fechadas, vc 117; os envios 4/5..5/5 não chegaram)** (a cláusula
   calma: SÓ visual, layout e UX — core/V.ONI/importadores/física/.gmesh
   intocados; um commit por parte, CI verde entre elas; a história vive
   no RELATORIO-FASE-UI.md, os 16 itens no §6, os não-feitos no §8).
@@ -53,6 +53,9 @@ Atualizado: 2026-10-21 · vc: 116 · Último commit: este (a FASE UI F — a bar
   a ÚLTIMA aba lembrada (lastTab), alturas ~30%/~40% (hCustom manda), a
   Animação com teto 40% + PISO que cabe a timeline (clipada) e o PONTO
   VERMELHO do erro; ui_paineis_dock + M-UIf; c33 13.7h/i/20.5/31.
+  **G (vc 117)**: AS FOLHAS CONTIDAS — o teto de 85% (kSheetMaxPct), o
+  navegador com a reserva da barra, o X de fechar no menu (7411);
+  ui_sheets_conteudos + M-UIg (a lição do HEADER stale: touch no TU).
 - **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A, B, C, o
   C-FIX e o D fechadas, vc 110; o FECHO a seguir)** (a cláusula calma: SÓ o
   prompt; a V.ONI intocada; a história vive no RELATORIO-0.12-Y-ABERTURA.md

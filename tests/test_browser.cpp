@@ -240,7 +240,8 @@ TEST(browser_overlay_raizes_subir_e_entradas) {
     // geometria (0.12-C C-4): vem da FONTE ÚNICA browserSheetLayout (o draw
     // e o teste partilham — o padrão menuSheetLayout da C-2)
     const BrowserSheetLayout L =
-        browserSheetLayout(kSW, kSH, 0.0f, 0.0f, 0.0f, 0.0f, kHeaderH, 3u);
+        browserSheetLayout(kSW, kSH, 0.0f, 0.0f, 0.0f, 0.0f, kHeaderH, 3u,
+                           theme::dp(safe::kBottomTabH));   // FASE UI G
     const f32 w = L.w;
     const f32 x = L.x;
     const f32 y = L.y;

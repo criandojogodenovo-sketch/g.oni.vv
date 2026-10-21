@@ -1007,6 +1007,10 @@ constexpr u64 kInspCreateTicId = 6921;
 // entra nos insets), a LINHA 48dp do dono e a ordem vertical:
 // breadcrumb → pesquisa → raízes → subir → lista (o Subir FIXO fora do
 // scroll — a regra do dono).
+// FASE UI G (a ordem do dono): a altura MÁXIMA de TODAS as folhas é 85%
+// do ecrã (kSheetMaxPct) e o card do NAVEGADOR nunca desce POR BAIXO da
+// barra de baixo (bottomReserve — a reserva da barra entra no cálculo).
+constexpr f32 kSheetMaxPct = 0.85f;
 struct BrowserSheetLayout {
     f32 x, y, w, h;        // o card
     f32 rowH;              // 48dp — a linha do dono (raízes/subir/linhas)
@@ -1018,10 +1022,19 @@ struct BrowserSheetLayout {
 };
 inline BrowserSheetLayout browserSheetLayout(f32 sw, f32 sh, f32 safeL,
                                              f32 safeT, f32 safeR, f32 safeB,
-                                             f32 hdrH, u32 nRows) {
+                                             f32 hdrH, u32 nRows,
+                                             // FASE UI G: a reserva da
+                                             // BARRA de baixo (o card nunca
+                                             // desce por baixo dela; o
+                                             // default 0 = compat)
+                                             f32 bottomReserve = 0.0f) {
     BrowserSheetLayout r;
     const f32 aw = sw - safeL - safeR;
-    const f32 ah = sh - safeT - safeB;
+    // a área útil VERTICAL acima da barra (a ordem: nunca por baixo dela;
+    // 8dp de respiro)
+    const f32 ah = sh - safeT - safeB -
+                   (bottomReserve > 0.0f ? bottomReserve + theme::dp(8.0f)
+                                         : 0.0f);
     const f32 rowH = theme::dp(48.0f);   // A LINHA do dono (~48dp)
     r.rowH = rowH;
     const f32 w = aw * 0.92f > theme::dp(900.0f) ? theme::dp(900.0f)
@@ -1036,9 +1049,14 @@ inline BrowserSheetLayout browserSheetLayout(f32 sw, f32 sh, f32 safeL,
     // COMPACTO mesmo numa pasta cheia)
     const f32 shown = static_cast<f32>(nRows < 8u ? nRows : 8u);
     const f32 maxH = ah - theme::dp(16.0f);
+    // FASE UI G: o TETO DE 85% DO ECRÃ (a regra das folhas — o menor manda)
+    const f32 teto85 = (sh - safeT - safeB) * kSheetMaxPct;
     f32 h = fixH + shown * rowH;
     if (h > maxH) {
         h = maxH > fixH ? maxH : fixH;   // ecrã minúsculo: a lista é que cede
+    }
+    if (h > teto85) {
+        h = teto85 > fixH ? teto85 : fixH;
     }
     r.w = w;
     r.h = h;
@@ -1090,9 +1108,13 @@ inline MenuSheetLayout menuSheetLayout(f32 sw, f32 sh, f32 safeTop,
     // a ALTURA máxima disponível (o sheet NUNCA sai do contentRect — a
     // invariante F4.2; o resto rola lá dentro). D14: a reserva do fundo
     // é a TAB BAR (32dp — o «Documentação V. …» ficava debaixo dela).
+    // FASE UI G: e o TETO DE 85% DO ECRÃ (a regra das folhas — o MENOR
+    // dos dois manda).
     const f32 maxH = sh - safeTop - theme::dp(safe::kToolbarH) -
                      theme::dp(8.0f) - theme::dp(safe::kBottomTabH);
-    r.h = contentH < maxH ? contentH : maxH;
+    const f32 teto85 = (sh - safeTop - safeBottom) * kSheetMaxPct;
+    const f32 maxEfetivo = maxH < teto85 ? maxH : teto85;
+    r.h = contentH < maxEfetivo ? contentH : maxEfetivo;
     r.maxOffset = contentH > r.h ? contentH - r.h : 0.0f;
     if (ax >= 0.0f && ay >= 0.0f) {
         r.x = ax;

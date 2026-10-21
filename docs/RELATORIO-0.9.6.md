@@ -659,3 +659,24 @@ R-014 aplicada.
   0 falhas · c33_virtual 1010/0 · docs-lint VERDE · **versionCode 116** —
   o build vigente. O 115 fica INTACTO como história. (o relatório
   próprio: docs/RELATORIO-FASE-UI.md §9)
+
+- **FASE UI · G — MENUS E DIÁLOGOS CONTIDOS (a ordem do dono, envio
+  3/5)** — o TETO DE 85% DO ECRÃ em todas as folhas (kSheetMaxPct na
+  fonte única EditorLayout.h — o menuSheetLayout, o browserSheetLayout e
+  o menu de Cenas; o MENOR do teto e do cap de contentRect manda) + o
+  NAVEGADOR nunca desce POR BAIXO da barra inferior (bottomReserve na
+  fonte única — o card centra-se acima da barra de 32dp) + o X DE FECHAR
+  no MENU PRINCIPAL (kMenuCloseId 7411 — a faixa fixa de 40dp no topo do
+  sheet; os irmãos 6799 Cenas/6899 navegador já viviam) + a ordem
+  vertical do navegador confirmada (breadcrumb → pesquisa → raízes →
+  Subir → lista com scroll — o C-4 intocado) + o indicador de scroll da
+  casa nas folhas · pin `ui_sheets_conteudos` (o teto em 5 ecrãs com
+  conteúdo gigante, o fundo ≤ o topo da barra, a ordem vertical, a fonte
+  do X e do indicador) + M-UIg (o teto morto) vermelho→reposto→verde
+  (a lição do HEADER stale: o TU do pin precisa de touch — a 4.ª rodada
+  da lição incremental) · recalibrações com nota (os chamadores da fonte
+  única com a reserva, o toque da âncora +dp(40), o 17.2 D21 no c33 — o
+  offset 400 + a caça documentada) · verificação: test_core 0 falhas ·
+  c33_virtual 1010/0 · docs-lint VERDE · **versionCode 117** — o build
+  vigente. O 116 fica INTACTO como história. (o relatório próprio:
+  docs/RELATORIO-FASE-UI.md §10)

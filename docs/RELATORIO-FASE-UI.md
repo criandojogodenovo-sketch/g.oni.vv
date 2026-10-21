@@ -480,3 +480,64 @@ não ganhou nome novo (a ordem dizia «remover OU mostrá-lo com nome
 claro» — remover é o simples e foi o escolhido); a timeline mantém o
 cap de 3 faixas visíveis com o «+N tracks» de sempre (a lista honesta
 da 0.8.0).
+
+## §10 PARTE G — MENUS E DIÁLOGOS (as folhas contidas)
+
+**O que mudou** (ui/EditorLayout.h + ui/EditorUi.cpp + ui/UiEditor.cpp):
+
+- **O TETO DE 85% DO ECRÃ**: `kSheetMaxPct = 0.85` (a fonte única em
+  EditorLayout.h) — o `menuSheetLayout` (o menu principal) e o
+  `browserSheetLayout` (o navegador) capam a altura a 85% do ecrã (o
+  MENOR do teto-85 e do cap de contentRect de sempre manda); o menu de
+  Cenas também (o clamp inline com o teto da overlayArea — a lista é que
+  cede e o SCROLL revela o resto; a região da lista acompanha a altura
+  real do sheet).
+- **NUNCA POR BAIXO DA BARRA INFERIOR**: o `browserSheetLayout` recebe
+  `bottomReserve` (a reserva da barra de 32dp + 8dp de respiro) — o card
+  do navegador centra-se na área útil ACIMA da barra e o fundo nunca a
+  atravessa. O menu principal já reservava a tab bar (o D14) e continua;
+  o menu de Cenas é ancorado com clamp ao topo da barra (o D14 de
+  sempre).
+- **O BOTÃO FECHAR SEMPRE ACESSÍVEL**: o MENU PRINCIPAL ganhou o X de
+  fechar (o `kMenuCloseId` 7411 NOVO — a faixa fixa de 40dp no topo do
+  sheet, o glifo de 2 traços cruzados como os irmãos); fechar deixa de
+  exigir acertar no véu lá fora. Os outros dois JÁ tinham (o X das
+  Cenas 6799 — 0.12-QoL A; o «fechar» do navegador 6899) — a ordem
+  confirma.
+- **O NAVEGADOR (cabeçalho fixo, caminho, pesquisa, lista com scroll)**:
+  a ordem confirma o que o C-4 já fez — o breadcrumb (o caminho que
+  salta), o campo de pesquisa 40dp, as raízes e o Subir FIXOS fora do
+  scroll e a lista com scroll próprio (≤8 linhas visíveis); o pin prova
+  a ordem vertical pela fonte única.
+- **O SCROLL COM INDICADOR VISÍVEL**: o indicador da casa (`scroll::`
+  `indicator` — o thumb de 3dp com o piso 24) desenha nas regiões de
+  scroll das folhas (o mecanismo do endScroll, intocado) — a ordem
+  confirma o que já vivia.
+
+**A prova** (o pin `ui_sheets_conteudos`): (a) o teto de 85% no menu E no
+navegador em **5 ecrãs** com conteúdo gigante (3000px/64 linhas — o teto
+fala sempre); o fundo do navegador ≤ o topo da barra em todos; a ordem
+vertical do cabeçalho do navegador (breadcrumb → pesquisa → raízes →
+Subir → lista) aferrada; (b) a FONTE — o `kMenuCloseId` vive no menu, o
+`scroll::indicator` é o da casa.
+
+**M-UIg** (o teto de 85% morto no menuSheetLayout) vermelho→reposto→
+verde: `ui_sheets_conteudos` «o menu passa do teto de 85% (h=640
+teto=612)» VERMELHO nos ecrãs M/L; capturado ao vivo. A LIÇÃO da rodada
+(a 4.ª vez — 585217f, a B, o TU, agora o HEADER): o build incremental
+não recompila os TUs que só INCLUEM o cabeçalho mudado — a mutação em
+EditorLayout.h precisou de `touch` no TU do pin para a prova ficar
+honestamente vermelha.
+
+**Recalibrações com nota**: test_012c_picker/test_browser/test_012qol
+(os chamadores da fonte única levam a MESMA reserva da barra que o
+draw), test_wiring090 (a 1.ª linha do menu desceu a faixa do X — o toque
+da âncora soma dp(40)), c33_virtual (o tap do par.gltf leva a reserva;
+o 17.2 D21 — o offset do scroll sobe para 400 e a caça do rótulo
+documentada: as linhas não registam Button — o despacho é do scrollTap —
+e o «FERRAMENTAS», de largura parecida, fica FORA da banda visível).
+
+**Verificação**: test_core 0 falhas · c33_virtual **1010/0** ·
+theme_hex/ui_vocab/glyph/hierarchy VERDES · docs-lint VERDE ·
+release-identity/R-015 VERDE vc 117 · **versionCode: 116 → 117** (o §14
+declara o par no MESMO commit).

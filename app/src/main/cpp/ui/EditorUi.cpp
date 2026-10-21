@@ -3525,7 +3525,10 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     labels[12] = strings::tr(strings::Key::OpenSettings);
 
     const f32 contentH = static_cast<f32>(kItems) * kRowH +
-                         6.0f * kHdrH + theme::dp(8.0f);
+                         6.0f * kHdrH + theme::dp(8.0f) +
+                         // FASE UI G: a FAIXA DO X (o fechar sempre
+                         // acessível — o sheet cresce para a caber)
+                         theme::dp(40.0f);
     f32 x, y;
     // 0.12-C (C-2): a FONTE ÚNICA menuSheetLayout (EditorLayout.h) — a
     // altura máxima + o scroll + a âncora 8dp sob o botão com clamp (o
@@ -3562,23 +3565,49 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 
     const TextMetrics tm = ui.textMetrics();
     int chosen = 0;
-    const UiRect region{x, y + theme::dp(4.0f), kSheetW,
-                        ms.h - theme::dp(8.0f)};
+    // FASE UI G: a FAIXA FIXA do X de fechar (40dp no topo do sheet — o
+    // irmão do X das Cenas/6799 e do navegador/6899; a ordem: «botão
+    // fechar sempre acessível»)
+    const f32 closeH = theme::dp(40.0f);
+    const UiRect closeBtn = {x + kSheetW - theme::dp(8.0f) - closeH,
+                             y + theme::dp(4.0f), closeH, closeH};
+    {
+        const bool closeHeldG = ui.widgetActive(kMenuCloseId);
+        ui.panelRounded(closeBtn.x, closeBtn.y, closeBtn.w, closeBtn.h,
+                        theme::dp(theme::kRadiusField),
+                        closeHeldG ? theme::kTheme.surface2
+                                   : theme::kTheme.surface);
+        const f32 mx = closeBtn.x + closeBtn.w * 0.5f;
+        const f32 my = closeBtn.y + closeBtn.h * 0.5f;
+        const f32 r6 = theme::dp(8.0f);
+        ui.drawLine(mx - r6, my - r6, mx + r6, my + r6, theme::dp(2.5f),
+                    theme::kTheme.text1);
+        ui.drawLine(mx - r6, my + r6, mx + r6, my - r6, theme::dp(2.5f),
+                    theme::kTheme.text1);
+        if (ui.widgetHit(kMenuCloseId, closeBtn.x, closeBtn.y, closeBtn.w,
+                         closeBtn.h)) {
+            st.fileMenu = false;
+            return 0;   // o X fecha SEM ação (o véu de fora continua)
+        }
+    }
+    const UiRect region{x, y + theme::dp(4.0f) + closeH, kSheetW,
+                        ms.h - theme::dp(8.0f) - closeH};
     ui.beginScroll(kMenuScrollId, region, contentH);
     const f32 off = ui.scrollOffset();
     // o y de CONTENT de cada linha (para o re-despacho do tap: dentro do
     // scroll o botão SÓ desenha — o tap nasce da região e é mapeado aqui,
     // o MESMO padrão dos cards dos Ficheiros no BottomPanel)
     f32 rowContentY[kItems];
-    f32 ry = y + theme::dp(4.0f);
+    f32 ry = region.y;
     int lastSec = -1;
     for (int i = 0; i < kItems; ++i) {
         // o CABEÇALHO da secção (12sp text2 — a imagem 1)
         if (kMenu[i].section != lastSec) {
             lastSec = kMenu[i].section;
             if (ui.hasFont()) {
-                const f32 hdrY = ry - off;
-                if (hdrY + kHdrH >= y && hdrY <= y + ms.h) {
+                const f32 hdrY = ry - off;   // o topo do cabeçalho no ecrã
+                if (hdrY + kHdrH >= region.y &&
+                    hdrY <= region.y + region.h) {
                     ui.labelStyled(x + theme::dp(16.0f),
                                    hdrY + (kHdrH - tm.block()) * 0.5f +
                                        tm.ascent,
@@ -3591,8 +3620,8 @@ int drawFileMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
         rowContentY[i] = ry;   // topo da linha EM COORDENADAS DE CONTENT
         const f32 rowY = ry - off;
         ry += kRowH;
-        if (rowY + kRowH < y || rowY > y + ms.h) {
-            continue;   // culled (fora do sheet)
+        if (rowY + kRowH < region.y || rowY > region.y + region.h) {
+            continue;   // culled (fora da região de scroll do sheet)
         }
         const u64 id = kMenuRowBase + static_cast<u64>(i);
         const bool held = ui.widgetActive(id);
@@ -3791,8 +3820,18 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     const f32 rowH = theme::dp(48.0f);
     const u32 shown = scenes.size() < 6u ? static_cast<u32>(scenes.size()) : 6u;
     const f32 listH = static_cast<f32>(shown) * rowH;
-    const f32 h = theme::dp(48.0f) + theme::dp(56.0f) + theme::dp(8.0f) +
-                  listH + theme::dp(8.0f);
+    f32 h = theme::dp(48.0f) + theme::dp(56.0f) + theme::dp(8.0f) +
+            listH + theme::dp(8.0f);
+    // FASE UI G: o TETO DE 85% DO ECRÃ (a regra das folhas — a lista é
+    // que cede e o SCROLL revela o resto; a região da lista acompanha)
+    {
+        f32 ox0, oy0, aw0, ah0;
+        editor::overlayArea(sw, sh, ui.safeArea(), ox0, oy0, aw0, ah0);
+        const f32 teto85 = ah0 * kSheetMaxPct;
+        if (h > teto85 && teto85 > theme::dp(120.0f)) {
+            h = teto85;
+        }
+    }
     f32 x, y;
     if (ax >= 0.0f && ay >= 0.0f) {
         x = ax;
@@ -3885,11 +3924,16 @@ int drawScenesMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh,
                     theme::kTheme.text1);
     }
 
-    // separador fino + lista (scroll id 44)
+    // separador fino + lista (scroll id 44) — a REGIÃO da lista é o que
+    // sobra do sheet (o teto de 85% pode tê-la encolhido; o scroll revela)
     ui.panel(x + theme::dp(16.0f), newBtnY + theme::dp(48.0f) + theme::dp(4.0f),
              kSheetW - theme::dp(32.0f), 1.0f, theme::kTheme.border);
     const f32 listTop = newBtnY + theme::dp(56.0f) + theme::dp(8.0f);
-    const UiRect region{x, listTop, kSheetW, listH};
+    const f32 listRegionH =
+        (y + h - theme::dp(8.0f)) > listTop
+            ? (y + h - theme::dp(8.0f)) - listTop
+            : listH;
+    const UiRect region{x, listTop, kSheetW, listRegionH};
     const f32 contentH = static_cast<f32>(scenes.size()) * rowH;
     ui.beginScroll(44, region, contentH);
     const f32 off = ui.scrollOffset();

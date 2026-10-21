@@ -3550,10 +3550,13 @@ int main() {
             // do scroll — o padrão da casa nas listas com scroll)
             {
                 // landscape 1536x720, insets T96/B48 (o harness da FASE)
+                // FASE UI G: a MESMA RESERVA da barra que o draw passa
+                // (o card nunca desce por baixo dela)
                 const editor::BrowserSheetLayout lb =
                     editor::browserSheetLayout(
                         1536.0f, 720.0f, 0.0f, 96.0f, 0.0f, 48.0f,
-                        editor::kHeaderH, 3u);
+                        editor::kHeaderH, 3u,
+                        theme::dp(safe::kBottomTabH));
                 const auto t0 = std::chrono::steady_clock::now();
                 // 1 TOQUE na linha (o A4: 1 toque = seleciona/importa)
                 tap(lb.x + lb.w * 0.5f, lb.listTop + 24.0f);
@@ -6788,11 +6791,17 @@ int main() {
                 check(g_editor.fileMenu, "17.2 D21 o menu ⋯ abriu");
                 // o «Novo objeto» fica abaixo da dobra no portrait — rola o
                 // scroll PRÓPRIO do menu até ele (o D14 garante as linhas
-                // alcançáveis; aqui alcançamos a linha nova)
-                g_ui.scrollSetOffset(editor::kMenuScrollId, 300.0f);
+                // alcançáveis; aqui alcançamos a linha nova). FASE UI G: a
+                // FAIXA DO X (40dp) come dp(40) da região — a linha desceu,
+                // o offset sobe dp(100) para a trazer à banda visível
+                g_ui.scrollSetOffset(editor::kMenuScrollId, 400.0f);
                 g_layoutExportPending = true;
                 frame();
                 const layout::Record& rm = g_ui.auditRecord();
+                // a caça pelo RÓTULO (as linhas não registam Button — o
+                // despacho é do scrollTap; FASE UI G: o offset 400 põe a
+                // linha na banda visível e o cabeçalho «FERRAMENTAS» — o
+                // único rótulo de largura parecida — fica FORA dela)
                 const f32 wNovo = g_ui.fontWidth("Novo objeto");
                 bool achou = false;
                 f32 rx = 0.0f, ry = 0.0f;
@@ -6812,9 +6821,9 @@ int main() {
                                       pngM.data(), pngM.size());
                 }
                 if (achou) {
-                    // o tap na LINHA do rótulo (o alvo é a linha inteira)
-                    g_input.injectDown(0, rx + wNovo * 0.5f,
-                                       ry + theme::dp(10.0f));
+                    // o tap no CENTRO do alvo da linha (o alvo é a linha
+                    // inteira — rx/ry JÁ são o centro do Button registado)
+                    g_input.injectDown(0, rx, ry);
                     frame();
                     g_input.injectUp(0);
                     frame();

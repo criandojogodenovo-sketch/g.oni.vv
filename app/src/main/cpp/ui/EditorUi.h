@@ -740,6 +740,10 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
 // scroll do sheet (kMenuScrollId 7410 — faixa exclusiva)
 constexpr u64 kMenuRowBase   = 7400;
 constexpr u64 kMenuScrollId  = 7410;
+// FASE UI G: o X de FECHAR do menu principal (o canto do sheet — «botão
+// fechar sempre acessível»; os irmãos: 6799 no menu de Cenas, 6899 no
+// navegador)
+constexpr u64 kMenuCloseId   = 7411;
 constexpr u64 kInspTabBase   = 7430;   // 0.9.6.10: tabs Inspector/Nós —
                                        // 0.9.6.18 (D5): a 2ª tab MORREU
                                        // (duplicado da hierarquia); o id

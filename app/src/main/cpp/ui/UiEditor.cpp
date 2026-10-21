@@ -3206,10 +3206,13 @@ int drawFileBrowser(UiContext& ui, const InputState& in, f32 sw, f32 sh,
     }
     // a folha vem da FONTE ÚNICA (0.12-C C-4 — o draw e os pins partilham):
     // o card 92%/900dp centrado NA ÁREA ÚTIL (a safe-area respeitada)
+    // FASE UI G: a RESERVA da barra de baixo — o card nunca desce por
+    // baixo dela (a ordem: «nunca... por baixo da barra inferior»)
     const BrowserSheetLayout L = browserSheetLayout(
         sw, sh, static_cast<f32>(ui.safeLeft()), static_cast<f32>(ui.safeTop()),
         static_cast<f32>(ui.safeRight()), static_cast<f32>(ui.safeBottom()),
-        kHeaderH, static_cast<u32>(entries.size()));
+        kHeaderH, static_cast<u32>(entries.size()),
+        theme::dp(safe::kBottomTabH));
     const f32 x = L.x, y = L.y, w = L.w, h = L.h;
     const f32 rowH = L.rowH;
     const f32 kPadB = theme::dp(16.0f);

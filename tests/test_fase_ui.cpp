@@ -390,6 +390,67 @@ TEST(ui_paineis_dock) {
     }
 }
 
+// ---- PIN ui_sheets_conteudos — A PARTE G (as folhas contidas) -------------
+// «Menu, Navegador de ficheiros, lista de Cenas e todos os pop-ups: nunca
+// cortados nem por baixo da barra inferior, altura máxima 85% do ecrã,
+// scroll com indicador visível, botão fechar sempre acessível. Navegador:
+// cabeçalho fixo, caminho, pesquisa e lista com scroll.»
+TEST(ui_sheets_conteudos) {
+    // (a) O TETO DE 85%: menuSheetLayout E browserSheetLayout respeitam-no
+    // em 5 ecrãs, mesmo com conteúdo gigante
+    const struct { i32 w, h; const char* ctx; } screens[] = {
+        {776, 336, "paisagem-S"}, {1600, 720, "paisagem-M"},
+        {2560, 1440, "paisagem-L"}, {720, 1600, "retrato-M"},
+        {1440, 2560, "retrato-L"},
+    };
+    for (const auto& sc : screens) {
+        theme::setDensity(1.0f);
+        const f32 sw = (f32)sc.w, sh = (f32)sc.h;
+        // o menu (conteúdo 3000px — nunca cabe; o teto fala)
+        const editor::MenuSheetLayout ms = editor::menuSheetLayout(
+            sw, sh, 0.0f, 0.0f, 0.0f, 0.0f, 3000.0f, 8.0f, 48.0f,
+            theme::dp(280.0f));
+        EXPECT_MSG(ms.h <= sh * editor::kSheetMaxPct + 0.5f,
+                   "ui_sheets_conteudos(%s): o menu passa do teto de 85%% "
+                   "(h=%.0f teto=%.0f)", sc.ctx, (double)ms.h,
+                   (double)(sh * editor::kSheetMaxPct));
+        EXPECT(ms.h > 0.0f);
+        // o navegador (a reserva da barra: o fundo do card NUNCA desce por
+        // baixo da barra de baixo)
+        const f32 reserva = theme::dp(safe::kBottomTabH);
+        const editor::BrowserSheetLayout lb = editor::browserSheetLayout(
+            sw, sh, 0.0f, 0.0f, 0.0f, 0.0f, theme::dp(56.0f), 64u, reserva);
+        EXPECT_MSG(lb.y + lb.h <= sh - reserva + 0.5f,
+                   "ui_sheets_conteudos(%s): o navegador desce POR BAIXO da "
+                   "barra (fundo=%.0f limite=%.0f)", sc.ctx,
+                   (double)(lb.y + lb.h), (double)(sh - reserva));
+        EXPECT_MSG(lb.h <= sh * editor::kSheetMaxPct + 0.5f,
+                   "ui_sheets_conteudos(%s): o navegador passa do teto de "
+                   "85%%", sc.ctx);
+        // o Cabeçalho FIXO: o breadcrumb/pesquisa/raízes/subir têm yFixos
+        // e a lista começa DEPOIS deles (a ordem vertical do C-4 intocada)
+        EXPECT(lb.listTop > lb.upY);
+        EXPECT(lb.upY > lb.rootsY);
+        EXPECT(lb.rootsY > lb.searchY);
+        EXPECT(lb.searchY > lb.crumbY);
+    }
+    // (b) A FONTE: os botões FECHAR vivem nos três (o menu 7411 novo, as
+    // Cenas 6799, o navegador 6899) e o INDICADOR de scroll é o da casa
+    {
+        std::string src;
+        ASSERT(readFile(repoRoot() + "/app/src/main/cpp/ui/EditorUi.cpp",
+                        src));
+        EXPECT_MSG(countSub(src, "kMenuCloseId") >= 2,
+                   "ui_sheets_conteudos: o X de fechar vive no MENU (a faixa "
+                   "fixa de 40dp — a ordem «fechar sempre acessível»)");
+        ASSERT(readFile(repoRoot() + "/app/src/main/cpp/ui/UiContext.cpp",
+                        src));
+        EXPECT_MSG(countSub(src, "scroll::indicator") >= 1,
+                   "ui_sheets_conteudos: o INDICADOR de scroll é o da casa "
+                   "(o thumb da região — visível quando há o que rolar)");
+    }
+}
+
 // ---- PIN ui_sobreposicao_topbar — A BARRA NÃO TAPA NADA NEM SAI ----------
 // 3 resoluções × 2 orientações (a regra da fase). Os alvos vêm da FONTE
 // ÚNICA topbarLayout — o MESMO desenho que a app faz.

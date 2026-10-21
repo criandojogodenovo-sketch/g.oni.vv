@@ -453,7 +453,8 @@ TEST(qol_b_navegador_compacto) {
     // surface (#141416 α0.85). (Fora destas bandas o accent é legítimo —
     // o thumb do scrollbar, por exemplo.)
     const BrowserSheetLayout L = browserSheetLayout(
-        1600.0f, 720.0f, 0.0f, 0.0f, 0.0f, 0.0f, theme::dp(28.0f), 2u);
+        1600.0f, 720.0f, 0.0f, 0.0f, 0.0f, 0.0f, theme::dp(28.0f), 2u,
+        theme::dp(safe::kBottomTabH));   // FASE UI G
     const QuadBatch& solids = e.ui.solidsForTest();
     u32 accentFill = 0;
     for (u32 q = 0; q + 5 < solids.vertexCount(); q += 6) {
