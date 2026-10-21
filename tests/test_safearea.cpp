@@ -147,8 +147,10 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     // 532 = 428 + 40 − 32? NÃO: o painel vive no contentRect [24..628] —
     // 628−24−40 (a barra do dono)−32 (tabs) = 532
     EXPECT(nearEqF(panel.h, 532.0f));
-    const f32 listH = panel.h - kHeaderH - 4.0f;
-    EXPECT(nearEqF(listH, 500.0f));   // 532 − 28 (cabeçalho) − 4
+    // FASE UI E: o cabeçalho do TIC é 44dp (o nome em brasa + o tipo por
+    // baixo — a receita vive SEMPRE com um TIC selecionado)
+    const f32 listH = panel.h - theme::dp(44.0f) - 4.0f;
+    EXPECT(nearEqF(listH, 484.0f));   // 532 − 44 (cabeçalho do TIC) − 4
     const f32 mo = scroll::maxOffset(contentH, listH);
     EXPECT(mo > 0.0f);                        // scroll ATIVA
     EXPECT(nearEqF(mo, contentH - listH));
@@ -160,7 +162,7 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     EXPECT(n > 0);
     const InspRow& last = plan[n - 1];
     EXPECT(last.kind == InspRow::Kind::ScriptAdd);   // 0.9.2: add script no fundo
-    const f32 contentTop = panel.y + kHeaderH + 4.0f;
+    const f32 contentTop = panel.y + theme::dp(44.0f) + 4.0f;
     const f32 off = scroll::clampOffset(999.0f, contentH, listH);
     const f32 btnTop = contentTop + last.y - off;
     EXPECT(btnTop >= contentTop);

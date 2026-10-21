@@ -424,6 +424,32 @@ R-014 aplicada.
   **versionCode 109** — o build vigente da campanha 0.12-Y. O 108 fica
   INTACTO como história.
 
+- **FASE UI · E — O INSPECTOR** — o CABEÇALHO do TIC: o NOME em brasa
+  (14sp, a reticência só quando não couber) e o TIPO por baixo (12sp —
+  a lista das secções presentes, o MESMO perfil do plano; o cabeçalho
+  cresce 28→44dp com seleção, o «Inspector» fica para o vazio; o
+  orçamento do nome reserva a célula do recolher 40dp — nada tapa
+  nada) · a BARRINHA COLORIDA do eixo nas caixas Pos/Rotação/Escala
+  (3dp × 12dp na cor do eixo, centrada na caixa de 32dp; as LETRAS
+  X/Y/Z morreram — «sem letras gigantes»; o valor começa a 12dp e o
+  seu espaço CRESCIU com a letra morta, o piso R1 mantém-se) · as
+  SECÇÕES RECOLHÍVEIS (Transform/Física/Material…) JÁ EXISTIAM (os 9
+  bits do 0.9.0 que persistem) — a ordem confirma e o pin prova no
+  plano (os cabeçalhos ficam, os campos morrem com o bit) · o ESTADO
+  VAZIO discreto («Nada selecionado») com o «+ criar TIC» que abre o
+  MESMO plusMenu do + da hierarquia (o caminho do C-4) · pin
+  ui_inspector_cabecalho (a fonte + as barrinhas + as letras mortas +
+  as secções no plano + o orçamento do nome com o pin ativo) · M-UIe
+  (as letras de volta) vermelho→reposto→verde (colada no
+  RELATORIO-FASE-UI.md §5) · recalibrações com nota (test_wiring090 ×2
+  os toques do Transform, test_safearea o scroll do Player 500→484,
+  test_ui ×6 as geometrias do cabeçalho 44) · verificação: test_core
+  0 falhas (o único vermelho local = o fork do sentinela_r039, o flake
+  da sandbox documentado — o CI é o árbitro) · c33_virtual 1010/0
+  local (os DOIS alvos) · theme_hex/ui_vocab/glyph/hierarchy/
+  projects_ui VERDES · **versionCode 115** — o build vigente da FASE
+  UI. O 114 fica INTACTO como história.
+
 - **FASE UI · D — VIEWPORT E FERRAMENTAS** — a coluna das 4 FERRAMENTAS
   (Selecionar/Mover/Rodar/Escalar — o desenho 32 na banda 30-36 do dono,
   o ativo É A BRASA) · o Íman e a MÃO (Pan) desceram a CHIPS pequenos sob

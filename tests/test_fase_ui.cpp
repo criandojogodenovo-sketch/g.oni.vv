@@ -222,6 +222,56 @@ TEST(ui_divisores_persistencia) {
     EXPECT(test::nearEqF(iw, 240.0f, 1e-4f));
 }
 
+// ---- PIN ui_inspector_cabecalho — A PARTE E --------------------------------
+// «Cabeçalho: nome do TIC (brasa) e o tipo por baixo; pos/rot/esc em 3
+// campos com barrinha colorida do eixo e valor, sem letras gigantes»
+TEST(ui_inspector_cabecalho) {
+    // (a) A FONTE: o cabeçalho desenha o NOME em accent quando há TIC
+    // (o título «Inspector» fica para o vazio) e o TIPO vem do perfil
+    std::string src;
+    ASSERT(readFile(repoRoot() + "/app/src/main/cpp/ui/EditorUi.cpp", src));
+    EXPECT(countSub(src, "ui.labelStyled(x + kPad, nameBase, shown, theme::kTheme.accent") == 1);
+    EXPECT(countSub(src, "\"Environment\"") >= 1);   // a tabela do tipo
+    EXPECT(countSub(src, "headerH = theme::dp(44.0f);") == 1);
+    // (b) AS BARRINHAS: o draw da barra de 3dp na cor do eixo e as LETRAS
+    // mortas (o valor com o padL 12 — o espaço da barra)
+    EXPECT(countSub(src, "theme::dp(3.0f),") >= 1 &&
+           countSub(src, "kAxisCol[axis]);") >= 1);
+    EXPECT_MSG(countSub(src, "ui.label(bx + theme::dp(6.0f), boxBase, kAxis[axis],") == 0,
+               "ui_inspector_cabecalho: as letras X/Y/Z morreram (a barrinha "
+               "identifica o eixo — a ordem do dono)");
+    // (c) O ESTADO VAZIO: o «criar TIC» vive no vazio (o caminho do C-4)
+    EXPECT(countSub(src, "kInspCreateTicId") >= 1);
+    // (e) O NOME NÃO TAPA O RECOLHER (a regra da fase: nada tapa nada) —
+    // o orçamento do nome reserva a célula 40dp do pin/unpin quando fixado
+    EXPECT(countSub(src, "st.inspPinned ? theme::dp(40.0f) : 0.0f") == 1);
+    // (d) AS SECÇÕES RECOLHÍVEIS (a ordem: «Transform, Física, Material…»)
+    // — a PROVA é no PLANO (a fonte única, GL-free): os cabeçalhos ficam,
+    // os campos morrem com o bit
+    {
+        InspProfile prof{};
+        prof.tr = true;
+        prof.mr = true;
+        prof.bc = true;
+        const TextMetrics m{};
+        InspRow rows[64];
+        const u32 nAll = inspectorPlan(prof, m, false, 0u, rows);
+        u32 sec = 0, trf = 0;
+        for (u32 i = 0; i < nAll; ++i) {
+            if (rows[i].kind == InspRow::Kind::Section) ++sec;
+            if (rows[i].kind == InspRow::Kind::TransformRow) ++trf;
+        }
+        EXPECT(sec == 5);   // Transform + Malha + Material + Física + Script
+        EXPECT(trf == 3);   // Pos/Rotação/Escala abertos por omissão
+        const u32 nT = inspectorPlan(prof, m, false, kInspBitTransform, rows);
+        u32 trf2 = 0;
+        for (u32 i = 0; i < nT; ++i) {
+            if (rows[i].kind == InspRow::Kind::TransformRow) ++trf2;
+        }
+        EXPECT(trf2 == 0);   // o bit FECHA a secção (só o cabeçalho fica)
+    }
+}
+
 // ---- PIN ui_sobreposicao_topbar — A BARRA NÃO TAPA NADA NEM SAI ----------
 // 3 resoluções × 2 orientações (a regra da fase). Os alvos vêm da FONTE
 // ÚNICA topbarLayout — o MESMO desenho que a app faz.

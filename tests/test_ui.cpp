@@ -235,8 +235,9 @@ TEST(ui_scroll_revela_ultimo_campo) {
     const f32 contentH = inspectorContentHeight(prof, tm, true, 0u);
 
     const UiRect panel = safe::inspectorPanelRect(kSW, kSH, safe::Insets{});
-    const f32 contentTop = panel.y + kHeaderH + 4.0f;
-    const f32 listH = panel.h - kHeaderH - 4.0f;
+    const f32 contentTop =
+        panel.y + theme::dp(44.0f) + 4.0f;   // FASE UI E: o cabeçalho do TIC
+    const f32 listH = panel.h - theme::dp(44.0f) - 4.0f;
     EXPECT(contentH > listH);   // o caso C33 tem de transbordar
 
     // frame 1: press edge dentro da região (margem ESQUERDA do painel —
@@ -288,7 +289,8 @@ TEST(ui_slider_captura_dentro_do_scroll) {
     const f32 r0 = mr->tint[0];
 
     const UiRect panel = safe::inspectorPanelRect(kSW, kSH, safe::Insets{});
-    const f32 contentTop = panel.y + kHeaderH + 4.0f;
+    const f32 contentTop =
+        panel.y + theme::dp(44.0f) + 4.0f;   // FASE UI E: o cabeçalho do TIC
     // linha "cor R" — derivada do PLANO com as métricas reais (não diverge
     // do desenho)
     const TextMetrics tm = e.ui.textMetrics();
@@ -310,7 +312,7 @@ TEST(ui_slider_captura_dentro_do_scroll) {
     // scroll: contentH − listH); com o clamp a linha fica VISÍVEL no fundo
     const f32 contentHIns =
         inspectorContentHeight(inspectorProfile(*tic), tm, true, 0u);
-    const f32 listHIns = panel.h - kHeaderH - 4.0f;
+    const f32 listHIns = panel.h - theme::dp(44.0f) - 4.0f;
     const f32 maxOffIns = contentHIns > listHIns ? contentHIns - listHIns : 0.0f;
     const f32 targetOff = (colY - 40.0f) < maxOffIns ? (colY - 40.0f) : maxOffIns;
     e.input.injectDown(0, panel.x + panel.w * 0.5f, contentTop + 200.0f);
@@ -351,7 +353,8 @@ TEST(ui_tap_redespachado_botoes_do_plano) {
     InspRow plan[64];   // 0.10-M HOTFIX: o plano cresceu (as 5 linhas de slot)
     const u32 n = inspectorPlan(prof, tm, true, 0u, plan);
     const UiRect panel = safe::inspectorPanelRect(kSW, kSH, safe::Insets{});
-    const f32 contentTop = panel.y + kHeaderH + 4.0f;
+    const f32 contentTop =
+        panel.y + theme::dp(44.0f) + 4.0f;   // FASE UI E: o cabeçalho do TIC
 
     auto rowOf = [&](InspRow::Kind k) -> const InspRow* {
         for (u32 i = 0; i < n; ++i) {
@@ -382,7 +385,7 @@ TEST(ui_tap_redespachado_botoes_do_plano) {
     // offset (o MESMO cálculo do re-despacho: contentTop + y − off)
     e.frame();   // cria o slot de scroll do Inspector
     const f32 contentH = inspectorContentHeight(prof, tm, true, 0u);
-    const f32 listH = panel.h - kHeaderH - 4.0f;
+    const f32 listH = panel.h - theme::dp(44.0f) - 4.0f;
     const f32 off = scroll::clampOffset(9999.0f, contentH, listH);
     e.ui.scrollSetOffset(kInspectorScrollId, off);
     e.input.injectDown(0, panel.x + panel.w * 0.5f,
@@ -423,7 +426,8 @@ TEST(ui_tap_na_linha_de_slot_arma_o_slot) {
     InspRow plan[64];
     const u32 n = inspectorPlan(prof, tm, true, 0u, plan);
     const UiRect panel = safe::inspectorPanelRect(kSW, kSH, safe::Insets{});
-    const f32 contentTop = panel.y + kHeaderH + 4.0f;
+    const f32 contentTop =
+        panel.y + theme::dp(44.0f) + 4.0f;   // FASE UI E: o cabeçalho do TIC
 
     // as 5 linhas de slot (kInspectorTexSlot0..+4) com ids DISTINTOS
     f32 slotY[MeshRenderer::kMeshTexSlots] = {};
@@ -440,7 +444,7 @@ TEST(ui_tap_na_linha_de_slot_arma_o_slot) {
 
     e.frame();   // cria o slot de scroll do Inspector
     const f32 contentH = inspectorContentHeight(prof, tm, true, 0u);
-    const f32 listH = panel.h - kHeaderH - 4.0f;
+    const f32 listH = panel.h - theme::dp(44.0f) - 4.0f;
     // a secção Material fica A MEIO do plano — rolamos SÓ o suficiente para
     // a linha ficar visível (o max-offset do addTc deixa-a ACIMA da janela)
     const f32 off = scroll::clampOffset(slotY[1] - 24.0f, contentH, listH);
@@ -510,7 +514,8 @@ TEST(ui_seletor_de_material_troca_e_o_pick_escreve_no_material) {
     InspRow plan[64];
     const u32 n = inspectorPlan(prof, tm, true, 0u, plan);
     const UiRect panel = safe::inspectorPanelRect(kSW, kSH, safe::Insets{});
-    const f32 contentTop = panel.y + kHeaderH + 4.0f;
+    const f32 contentTop =
+        panel.y + theme::dp(44.0f) + 4.0f;   // FASE UI E: o cabeçalho do TIC
     f32 selY = -1.0f;
     f32 slotY[MeshRenderer::kMeshTexSlots] = {};
     u32 nSlots = 0;
@@ -530,7 +535,7 @@ TEST(ui_seletor_de_material_troca_e_o_pick_escreve_no_material) {
 
     e.frame();   // cria o slot de scroll do Inspector
     const f32 contentH = inspectorContentHeight(prof, tm, true, 0u);
-    const f32 listH = panel.h - kHeaderH - 4.0f;
+    const f32 listH = panel.h - theme::dp(44.0f) - 4.0f;
     const f32 off = scroll::clampOffset(selY - 24.0f, contentH, listH);
     e.ui.scrollSetOffset(kInspectorScrollId, off);
     const f32 rowL = panel.x + panel.w * 0.5f - (panel.w - 2.0f * 16.0f) * 0.5f;

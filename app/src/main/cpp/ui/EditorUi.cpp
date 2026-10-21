@@ -1395,11 +1395,87 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     //     uma tab só a faixa de tabs inteira não existe, e o espaço da
     //     linha 1 liberta-se para o recolher do pin (que antes vivia numa
     //     linha própria por falta de espaço MEDIDO no device).
+    // FASE UI E (a ordem do dono): o cabeçalho mostra o NOME do TIC (em
+    // brasa) e o TIPO por baixo (a lista de secções presentes — o perfil);
+    // sem seleção o título «Inspector» fica como sempre. O cabeçalho
+    // cresce para 44dp com seleção (nome 14sp + tipo 12sp).
+    f32 headerH = kHeaderH;
     {
+        Tic* ticH = scene.get(st.selected);
         const TextMetrics mh = ui.textMetrics();
-        const f32 base = y + (kHeaderH - mh.block()) * 0.5f + mh.ascent;
-        ui.labelStyled(x + kPad, base, "Inspector", theme::kTheme.text1,
-                       theme::fontScale(theme::kFontSection), 0);
+        if (ticH != nullptr) {
+            headerH = theme::dp(44.0f);
+            const f32 nameBase =
+                y + theme::dp(4.0f) + mh.ascent *
+                                         (theme::kFontBody / 14.0f);
+            char nomeBuf[64];
+            std::snprintf(nomeBuf, sizeof(nomeBuf), "%s",
+                          ticH->name.c_str());
+            char fitted[64];
+            const f32 maxW = w - 2.0f * kPad -
+                             (st.inspPinned ? theme::dp(40.0f) : 0.0f);
+            const char* shown = nomeBuf;
+            if (ui.hasFont() && ui.fontWidth(nomeBuf) > maxW) {
+                textfit::ellipsize(nomeBuf, maxW,
+                                   [&](const char* str) {
+                                       return ui.fontWidth(str);
+                                   },
+                                   fitted, sizeof(fitted));
+                shown = fitted;
+            }
+            ui.labelStyled(x + kPad, nameBase, shown, theme::kTheme.accent,
+                           theme::fontScale(theme::kFontBody), 0);
+            // o TIPO: as secções presentes (o MESMO plano do conteúdo —
+            // a lista nunca diverge do que o Inspector mostra)
+            const InspProfile pH = inspectorProfile(*ticH);
+            static const struct {
+                bool InspProfile::*flag;
+                const char* nome;
+            } kTipo[9] = {
+                {&InspProfile::tr, "Transform"},
+                {&InspProfile::cam, "Câmara"},
+                {&InspProfile::mr, "Malha"},
+                {&InspProfile::bc, "Física"},
+                {&InspProfile::au, "Áudio"},
+                {&InspProfile::anim, "Animação"},
+                {&InspProfile::script, "Script"},
+                {&InspProfile::env, "Environment"},
+                {&InspProfile::im, "Input"},
+            };
+            std::string tipo;
+            for (const auto& k : kTipo) {
+                if (pH.*(k.flag)) {
+                    if (!tipo.empty()) {
+                        tipo += " · ";
+                    }
+                    tipo += k.nome;
+                }
+            }
+            if (ui.hasFont()) {
+                const f32 tipoBase =
+                    y + theme::dp(24.0f) + mh.ascent *
+                                                 (theme::kFontCaption / 14.0f);
+                char tf[96];
+                std::snprintf(tf, sizeof(tf), "%s", tipo.c_str());
+                char tfF[96];
+                const char* tShown = tf;
+                if (ui.fontWidth(tf) > maxW) {
+                    textfit::ellipsize(tf, maxW,
+                                       [&](const char* str) {
+                                           return ui.fontWidth(str);
+                                       },
+                                       tfF, sizeof(tfF));
+                    tShown = tfF;
+                }
+                ui.labelStyled(x + kPad, tipoBase, tShown,
+                               theme::kTheme.text2,
+                               theme::fontScale(theme::kFontCaption), 0);
+            }
+        } else {
+            const f32 base = y + (kHeaderH - mh.block()) * 0.5f + mh.ascent;
+            ui.labelStyled(x + kPad, base, "Inspector", theme::kTheme.text1,
+                           theme::fontScale(theme::kFontSection), 0);
+        }
         // o RECOLHER (o par do pin do P2-bis): célula 40×28 na DIREITA da
         // linha 1 (o D1 manda «pin/fechar à direita»), só existe ENQUANTO
         // fixado; o piso da classe cabeçalho (kHeadFloorDp)
@@ -1426,10 +1502,12 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             }
         }
     }
-    ui.panel(x + kPad, y + kHeaderH - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
+    // FASE UI E: o traço e o conteúdo seguem a altura do cabeçalho
+    // (44dp com o TIC selecionado — o nome + o tipo; 28 sem seleção)
+    ui.panel(x + kPad, y + headerH - 1.0f, w - 2.0f * kPad, 1.0f, theme::LINE);
     // a altura do cabeçalho EFETIVA: a linha 1 sola (a linha própria do
     // recolher MORREU com o espaço libertado pelo D5)
-    const f32 headH = kHeaderH;
+    const f32 headH = headerH;   // FASE UI E: a altura do cabeçalho novo
 
     // ---- 0.9.6.18 (HOTFIX D5) — a vista «Nós» FOI REMOVIDA --------------
     // Conteúdo real medido pela leitura (P-04): `scene.forEachActive` em
@@ -1970,29 +2048,36 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 ui.frameRounded(bx, boxY, boxW, boxH, 1.0f,
                                 theme::dp(theme::kRadiusField),
                                 theme::kTheme.border);
-                static const char* kAxis[3] = {"X", "Y", "Z"};
-                // 0.9.6.10 (GRUPO UI · a imagem 1): os rótulos X/Y/Z
-                // COLORIDOS pelas cores dos EIXOS do gizmo (os tokens do
-                // Theme — conteúdo, a exceção documentada de sempre)
+                // 0.9.6.10 (GRUPO UI): as cores dos EIXOS do gizmo (os
+                // tokens do Theme — conteúdo, a exceção documentada)
                 static const f32* const kAxisCol[3] = {
                     theme::kTheme.axisX, theme::kTheme.axisY,
                     theme::kTheme.axisZ};
-                // 0.9.6.19 (R1): O VALOR É INTOCÁVEL — a LETRA do eixo só
+                // FASE UI E (a ordem do dono): a BARRINHA COLORIDA do eixo —
+                // 3dp de largura × 12dp, a cor do eixo, CENTRADA na caixa de
+                // 32dp, à esquerda do valor. As LETRAS X/Y/Z morrem («sem
+                // letras gigantes»): a barrinha identifica o eixo e o título
+                // da linha (Posição/Rotação/Escala) identifica o campo. O
+                // valor começa a 12dp (a barra termina a 9dp — sem toque).
+                if (tb.axisLabels) {
+                    ui.panel(bx + theme::dp(6.0f),
+                             boxY + (boxH - theme::dp(12.0f)) * 0.5f,
+                             theme::dp(3.0f), theme::dp(12.0f),
+                             kAxisCol[axis]);
+                }
+                // 0.9.6.19 (R1): O VALOR É INTOCÁVEL — a BARRINHA só
                 // desenha se o orçamento a manteve (axisLabels); o valor
                 // tem SEMPRE o espaço do orçamento (transformValueSpace —
                 // o pin: valor NÃO-VAZIO nos 3 campos em 180/220/260dp).
-                if (ui.hasFont() && tb.axisLabels) {
-                    ui.label(bx + theme::dp(6.0f), boxBase, kAxis[axis],
-                             kAxisCol[axis]);
-                }
                 if (ui.hasFont()) {
-                    // valor ENTRE o rótulo do eixo (se existir) e a borda
-                    // direita — labelFitted TRUNCA mas o piso do orçamento
-                    // garante espaço para valor não-vazio (a fórmula antiga
-                    // maxVw = boxW−28 a 180dp dava 9.3dp: nem o «…» cabia)
-                    const f32 padL = theme::dp(6.0f);
+                    // valor ENTRE a barrinha do eixo (se existir) e a
+                    // borda direita — o piso do orçamento garante espaço
+                    // para valor não-vazio (a fórmula antiga maxVw =
+                    // boxW−28 a 180dp dava 9.3dp: nem o «…» cabia)
+                    const f32 padL = tb.axisLabels ? theme::dp(12.0f)
+                                                   : theme::dp(6.0f);
                     const f32 maxVw = tb.axisLabels
-                        ? boxW - padL - theme::dp(14.0f) - theme::dp(6.0f)
+                        ? boxW - padL - theme::dp(6.0f)
                         : boxW - 2.0f * padL;
                     char fitted[16];
                     const char* shown = val;

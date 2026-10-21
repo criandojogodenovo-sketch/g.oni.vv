@@ -1,10 +1,10 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-21 · vc: 114 · Último commit: este (a FASE UI D — a
-coluna das 4 ferramentas no viewport (o ativo É a brasa), o Íman e a MÃO
-desceram a chips pequenos sob o rail (os mesmos ids 33/36), os divisores
-24dp + os pisos + a persistência layout.json confirmados; 
-pan_rail_sexta recalibrado + ui_divisores_persistencia + M-UId)
+Atualizado: 2026-10-21 · vc: 115 · Último commit: este (a FASE UI E — o
+Inspector: o cabeçalho do TIC com o NOME em brasa + o TIPO por baixo
+(44dp), as BARRINHAS do eixo nas caixas Pos/Rot/Escala (as letras
+X/Y/Z morreram), as secções recolhíveis confirmadas, o vazio discreto
+com o «+ criar TIC»; ui_inspector_cabecalho + M-UIe)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -13,10 +13,10 @@ pan_rail_sexta recalibrado + ui_divisores_persistencia + M-UId)
 ## §1 Onde estamos
 
 - **Campanha FASE UI (O REDESIGN VISUAL, envios 1/5 + 2/5) — EM CURSO
-  (A..D fechadas, vc 114; a E a seguir)** (a cláusula calma: SÓ visual,
-  layout e UX — core/V.ONI/importadores/física/.gmesh intocados; um
-  commit por parte, CI verde entre elas; a história vive no
-  RELATORIO-FASE-UI.md).
+  (A..E fechadas, vc 115; os envios 3/5..5/5 não chegaram)** (a cláusula
+  calma: SÓ visual, layout e UX — core/V.ONI/importadores/física/.gmesh
+  intocados; um commit por parte, CI verde entre elas; a história vive
+  no RELATORIO-FASE-UI.md, os 16 itens no §6, os não-feitos no §8).
   **A (vc 111)**: O FICHEIRO ÚNICO DE TOKENS com a paleta do dono (os
   hexes EXATOS: fundo #0B0B0D · painéis #121215 · elementos #1B1B20 ·
   linhas #26262C · texto #E8E6E3/#8A8A93 · A BRASA ÚNICA #FF5A1F (o
@@ -43,6 +43,13 @@ pan_rail_sexta recalibrado + ui_divisores_persistencia + M-UId)
   (24dp + os pisos) e a persistência layout.json confirmados; 
   pan_rail_sexta recalibrado + ui_divisores_persistencia + M-UId;
   test_core 0 falhas + c33 1010/0 local.
+  **E (vc 115)**: O INSPECTOR — o cabeçalho do TIC (o NOME em brasa +
+  o TIPO por baixo, a lista das secções presentes; 44dp com seleção), a
+  BARRINHA do eixo nas caixas Pos/Rot/Escala (3×12dp na cor do eixo; as
+  letras X/Y/Z morreram — o valor ganhou o espaço), as secções
+  recolhíveis confirmadas no plano, o vazio discreto com o «+ criar
+  TIC»; ui_inspector_cabecalho + M-UIe; 9 recalibrações; test_core 0
+  falhas + c33 1010/0 local.
 - **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A, B, C, o
   C-FIX e o D fechadas, vc 110; o FECHO a seguir)** (a cláusula calma: SÓ o
   prompt; a V.ONI intocada; a história vive no RELATORIO-0.12-Y-ABERTURA.md

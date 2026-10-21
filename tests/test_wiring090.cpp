@@ -274,10 +274,11 @@ TEST(inspector_caixas_xyz_abrem_teclado_campo_certo) {
     e.st.selected = h;
     e.frame();
     // linha Pos (TransformRow 0): o y LIDO DO PLANO (0.9.6.6 — zero números
-    // mágicos; o contentTop = painel.y + kHeaderH + 4 de sempre)
+    // mágicos; o contentTop = painel.y + cabeçalho + 4 de sempre — FASE UI E:
+    // o cabeçalho do TIC é 44dp, o nome + o tipo)
     const UiRect panel =
         safe::inspectorPanelRect(kSW, kSH, safe::Insets{}, 0.0f);
-    const f32 contentTop = panel.y + kHeaderH + 4.0f;
+    const f32 contentTop = panel.y + theme::dp(44.0f) + 4.0f;
     const f32 trf0 = trfRowY(e.ui, e.scene, h, 0);
     EXPECT(trf0 > 0.0f);
     // a caixa: título 24dp e a caixa ALINHADA ao fundo do bloco de 80dp
@@ -310,9 +311,10 @@ TEST(inspector_botao_r_restat_a_linha) {
     e.frame();
     // linha Escala (TransformRow 2): o y LIDO DO PLANO (0.9.6.6 — era
     // «278» hardcoded); R em x = panel.x + w - kPad - 24 (o centro do 48dp)
+    // FASE UI E: o cabeçalho do TIC é 44dp (o nome + o tipo)
     const UiRect panel =
         safe::inspectorPanelRect(kSW, kSH, safe::Insets{}, 0.0f);
-    const f32 contentTop = panel.y + kHeaderH + 4.0f;
+    const f32 contentTop = panel.y + theme::dp(44.0f) + 4.0f;
     const f32 trf2 = trfRowY(e.ui, e.scene, h, 2);
     EXPECT(trf2 > 0.0f);
     const f32 boxY2 = contentTop + trf2 + theme::dp(24.0f);

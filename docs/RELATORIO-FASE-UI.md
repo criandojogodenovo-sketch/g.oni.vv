@@ -258,3 +258,123 @@ não vê UB de build Release do runner — o gate é o CI.
 **Verificação**: test_core 0 falhas · c33_virtual 1010/0 local ·
 docs-lint VERDE · release-identity/R-015 VERDE vc 114 · **versionCode
 114** (o §14 declara o par no MESMO commit).
+
+## §5 PARTE E — INSPECTOR (o cabeçalho do TIC + as barrinhas do eixo)
+
+**O que mudou**:
+
+- **O CABEÇALHO DO TIC** (a ordem: «nome do TIC (brasa) e o tipo por
+  baixo»): com seleção o cabeçalho cresce 28 → 44dp — o NOME em BRASA
+  (14sp, a reticência só quando não couber) e o TIPO por baixo (12sp —
+  a lista das secções PRESENTES, lida do MESMO perfil que alimenta o
+  plano: Transform · Câmara · Malha · Física · Áudio · Animação ·
+  Script · Environment · Input; a lista nunca diverge do que o corpo
+  mostra). Sem seleção o título «Inspector» fica como sempre (28dp).
+  O orçamento do nome reserva a célula do recolher (40dp) quando o
+  painel está fixado — nada tapa nada (a regra da fase). O traço
+  divisor e o topo do scroll seguem a altura nova (a fonte única).
+- **AS BARRINHAS DO EIXO** (a ordem: «cada um com barrinha colorida do
+  eixo e valor, sem letras gigantes»): as LETRAS X/Y/Z das caixas de
+  Posição/Rotação/Escala MORRERAM — a BARRINHA 3dp × 12dp na COR DO
+  EIXO (os tokens axisX/Y/Z #E5484D/#3FB950/#3B82F6 — conteúdo, a
+  exceção documentada de sempre) identifica o eixo, centrada na caixa
+  de 32dp; o valor começa a 12dp (a barra termina a 9dp — sem toque) e
+  o espaço do valor CRESCIU 8dp com a letra morta (o piso R1 do valor
+  não-vazio mantém-se — o orçamento transformRowBudgetPx intocado). O
+  título da linha (Posição/Rotação/Escala) identifica o campo.
+- **AS SECÇÕES RECOLHÍVEIS** (a ordem: «Transform, Física,
+  Material...») JÁ EXISTIAM — os 9 bits do 0.9.0 (Transform/Câmara/
+  Malha/Material/Física/Áudio/Animação/Script/Environment) persistem
+  no EditorState::inspCollapsed e os cabeçalhos têm a altura da casa.
+  A ordem confirma; o pin prova no PLANO (os 5 cabeçalhos do perfil
+  Transform+Malha+Física+Material+Script ficam, os 3 campos do
+  Transform morrem com o bit).
+- **O ESTADO VAZIO** (a ordem: «uma linha discreta; o botão "criar
+  TIC" sai daqui»): a linha discreta «Nada selecionado» (text2) e o
+  botão «+ criar TIC» sai daí — abre o MESMO plusMenu de presets do +
+  da hierarquia (o caminho do C-4; nada duplicado, o convite não é de
+  fachada).
+
+**Pins**: ui_inspector_cabecalho (test_fase_ui.cpp — (a) a fonte do
+cabeçalho (o nome em accent + a tabela do tipo + os 44dp), (b) as
+barrinhas + as LETRAS MORTAS, (c) o criar TIC do vazio, (d) as secções
+recolhíveis no plano, (e) o orçamento do nome com o pin ativo) ·
+recalibrações com nota: test_wiring090 (os 2 toques do Transform sobem
+para o cabeçalho 44dp), test_safearea (o scroll do Player: listH
+500 → 484), test_ui (as 6 geometrias do scroll/planos com o cabeçalho
+do TIC).
+
+**Mutação M-UIe** (as letras de volta — a ordem do dono violada):
+
+```
+ui_inspector_cabecalho ... FALHOU  test_fase_ui.cpp:240  ui_inspector_cabecalho: as letras X/Y/Z morreram (a barrinha identifica o eixo — a ordem do dono)
+```
+
+Reposto: 0 falhas (test_core + c33_virtual 1010/0 — o CI é o árbitro).
+
+**Verificação**: test_core 0 falhas (o único vermelho local = o fork
+do sentinela_r039, o flake da sandbox documentado — o CI é o árbitro)
+· c33_virtual 1010/0 local (os DOIS alvos) · theme_hex/ui_vocab/glyph/
+hierarchy/projects_ui VERDES · release-identity/R-015 VERDE vc 115 ·
+**versionCode 115** (o §14 declara o par no MESMO commit).
+
+## §6 OS 16 ITENS DA FASE (o estado de cada um)
+
+| # | O item da ordem | Onde vive | Estado |
+|---|---|---|---|
+| 1 | Tokens num ficheiro ÚNICO (cores/espaços/raios/alturas/fontes) | ui/Theme.h | ✓ A (§1) |
+| 2 | Nada hardcoded nos painéis (a parede static_assert) | Theme/UiContext/Gizmo + theme_hex_check | ✓ A (§1) |
+| 3 | Layout proporcional (o desktop virá depois) | safe::resolvePanels + as frações da C-1 | ✓ A (§1) |
+| 4 | A paleta do dono (os hexes exatos) | ui/Theme.h + ui_tokens_brasa | ✓ A (§1) |
+| 5 | O âmbar removido; brasa #FF5A1F destaque ÚNICO; sem azul de destaque | ui/Theme.h (a regra R>G>B) | ✓ A (§1) |
+| 6 | Eixos X/Y/Z #E5484D / #3FB950 / #3B82F6 | ui/Theme.h + Gizmo.h | ✓ A (§1) |
+| 7 | Espaços 4/8/12/16 · raios 6-8 · bordas 1px · o vidro com o brilho na seleção | ui/Theme.h (kSpaceMid 12 · kRadiusField 6) | ✓ A (§1) |
+| 8 | Sans para a UI, mono para o estado e o código | ui/Theme.h (a tipografia da casa) | ✓ A (§1) |
+| 9 | Barra superior 40dp: logo/Menu/Cena · os modos com a aba sublinhada a brasa · undo/redo/guardar/Play/Stop/definições | safe::kTopBarH + toolbar::topbarLayout + ui_topbar_40dp_composicao | ✓ B (§2) |
+| 10 | O Pause e o «Android» para dentro (a play bar / as Definições) | kPlayPauseId 6 + a linha «plataforma» | ✓ B (§2) |
+| 11 | Hierarquia 40dp: ícone + nome completo · olho/⋮ SÓ na selecionada · a indentação · o «+» cria TIC | kRowH 40 + ui_hierarquia_40dp | ✓ C (§3) |
+| 12 | Viewport maior área · a coluna de 4 ferramentas à esquerda DENTRO (30-36dp, a ativa em brasa) · Íman/Mão em chips | ViewportChrome (o rail 4 + os chips 28/40) | ✓ D (§4) |
+| 13 | Divisores arrastáveis (toque 24dp, os pisos) · guardar/restaurar o layout | ui_divisores_persistencia (layout.json hierW/inspW) | ✓ D (§4) |
+| 14 | Inspector: o cabeçalho com o nome do TIC (brasa) e o tipo por baixo | headerH 44 + ui_inspector_cabecalho | ✓ E (§5) |
+| 15 | Pos/Rotação/Escala com a barrinha colorida do eixo e o valor (sem letras gigantes) | a barrinha 3×12dp + a M-UIe fechada | ✓ E (§5) |
+| 16 | O estado vazio discreto; o «criar TIC» sai daí | kInspCreateTicId (o plusMenu do C-4) | ✓ E (§5) |
+
+As secções recolhíveis do Inspector (Transform/Física/Material…) já
+viviam (os 9 bits do 0.9.0) — a ordem confirma; a prova fica no pin (d)
+do §5.
+
+## §7 AS CAPTURAS (a regra da fase)
+
+- **O artefacto do CI** `layout-screens-c33-virtual` (o job C33
+  virtual): os PNG+JSON do harness — o editor, o script, os docs e o
+  browser a **1536×720** (a resolução REAL do C33, paisagem), o editor
+  a densidade 2.0 (`editor-2x`) e o modo-UI device; a ROTAÇÃO retrato
+  **720×1536** é provada viva nas sondas do replay (7.3) e a área do
+  editor aferrada nos dois lados.
+- **A regra «3 resoluções, retrato e paisagem» é o teste automático**:
+  o ui_sobreposicao_topbar afere a barra em **5 ecrãs ≥640dp** —
+  paisagem-S/M/L (776×336 · 1600×720 · 2560×1440) × retrato-M/L
+  (720×1600 · 1440×2560) — nada tapa nada nem sai do ecrã; o pin corre
+  em TODA a suíte (não é uma captura congelada: é o layout medido de
+  novo a cada corrida).
+- O que NÃO há: captura de device FÍSICO (o CI não tem telemóvel — a
+  validação final no aparelho é do dono, ver §8).
+
+## §8 O QUE NÃO FOI FEITO (a lista honesta da fase)
+
+- **Desktop / ecrãs grandes**: o layout continua mobile-first
+  proporcional (a ordem: «o desktop virá depois») — nenhum modo desktop
+  foi inventado.
+- **Blur, sombras pesadas ou animações de duração**: fora por ordem
+  (custam FPS); o «vidro» mantém o padrão da casa (a borda fina + o
+  brilho no topo da seleção, sem blur real).
+- **Capturas em device físico**: o CI produz o dispositivo VIRTUAL
+  (C33 1536×720) — a validação no telemóvel é do dono.
+- **A banda <640dp**: a degradação documentada da parte B (o editor é
+  paisagem-first); o paisagem-S (776×336) é o piso testado, não o alvo.
+- **Temas alternativos ou um 2.º destaque**: a brasa é ÚNICA por ordem;
+  não há seletor de tema nem modo claro.
+- **Os envios 3/5..5/5**: NÃO chegaram — nada desta fase antecipa o
+  que eles ordenarem (a fila é a ordem do dono).
+- **Core, V.ONI, importadores, física e .gmesh**: INTOCÁVEIS (a
+  cláusula calma da fase — o diff da fase não os toca).
