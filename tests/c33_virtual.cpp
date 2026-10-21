@@ -994,33 +994,46 @@ void javaRegistersWithCacheDir() {
 // ---- geometria do overlay do picker (a MESMA fórmula do drawAssetMenu) -----
 struct PickerGeom {
     f32 x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;
-    f32 rowCy(int row) const { return y + editor::kHeaderH + static_cast<f32>(row) * 48.0f + 20.0f; }
+    // o centro da linha REAL: o fill nasce a y+31 (o cabeçalho 28 + 3)
+    //  e as linhas são 36dp (a medição do solids na FASE UI B)
+    f32 rowCy(int row) const { return y + 31.0f + static_cast<f32>(row) * 36.0f + 18.0f; }
     f32 cx() const { return x + w * 0.5f; }
 };
 
+// FASE UI B: a geom MIRRORA o draw (o overlayArea do EditorLayout.h + as
+// linhas reais 36dp — o y+31 medido no solids; a versão stale usava linhas
+// de 48dp sem o chrome e morria 1px acima do alvo com a barra de 40)
 PickerGeom meshPickerGeom(size_t files) {
-    const size_t shown = files < 5 ? files : 5;
     PickerGeom g;
     g.w = editor::kMenuW;
-    g.h = editor::kHeaderH + static_cast<f32>(shown + 2) * 48.0f + editor::kPad;
-    const f32 ox = g_ui.safeLeft();
-    const f32 oy = g_ui.safeTop();
-    const f32 aw = static_cast<f32>(g_egl.width()) - ox - g_ui.safeRight();
-    const f32 ah = static_cast<f32>(g_egl.height()) - oy - g_ui.safeBottom();
+    f32 ox, oy, aw, ah;
+    editor::overlayArea(static_cast<f32>(g_egl.width()),
+                        static_cast<f32>(g_egl.height()), g_ui.safeArea(),
+                        ox, oy, aw, ah);
+    const f32 rowH = 36.0f;                       // kAssetRowH do draw
+    const f32 fixedH = editor::kHeaderH + 2.0f * rowH + editor::kPad;
+    const f32 maxListH = ah - fixedH - theme::dp(8.0f);
+    const f32 fullListH = static_cast<f32>(files) * rowH;
+    const f32 listH = fullListH < maxListH ? fullListH : maxListH;
+    g.h = fixedH + listH;
     g.x = ox + (aw - g.w) * 0.5f;
     g.y = oy + (ah - g.h) * 0.5f;
     return g;
 }
 
 PickerGeom texPickerGeom(size_t files) {
-    const size_t shown = files < 5 ? files : 5;
     PickerGeom g;
     g.w = editor::kMenuW;
-    g.h = editor::kHeaderH + static_cast<f32>(shown + 1) * 48.0f + editor::kPad;
-    const f32 ox = g_ui.safeLeft();
-    const f32 oy = g_ui.safeTop();
-    const f32 aw = static_cast<f32>(g_egl.width()) - ox - g_ui.safeRight();
-    const f32 ah = static_cast<f32>(g_egl.height()) - oy - g_ui.safeBottom();
+    f32 ox, oy, aw, ah;
+    editor::overlayArea(static_cast<f32>(g_egl.width()),
+                        static_cast<f32>(g_egl.height()), g_ui.safeArea(),
+                        ox, oy, aw, ah);
+    const f32 rowH = 36.0f;                       // kAssetRowH do draw
+    const f32 fixedH = editor::kHeaderH + 1.0f * rowH + editor::kPad;
+    const f32 maxListH = ah - fixedH - theme::dp(8.0f);
+    const f32 fullListH = static_cast<f32>(files) * rowH;
+    const f32 listH = fullListH < maxListH ? fullListH : maxListH;
+    g.h = fixedH + listH;
     g.x = ox + (aw - g.w) * 0.5f;
     g.y = oy + (ah - g.h) * 0.5f;
     return g;
@@ -2242,19 +2255,16 @@ int main() {
             check(railOkA && safe::rectInside(a->railPanel, vA),
                   "painel FECHADO: o rail esquerdo (5 ferramentas) DENTRO do "
                   "rect da viewport");
-            // a fila do topo (undo/redo/save/⋯) + os cantos
-            bool quickOkA = true;
-            for (int i = 0; i < 4; ++i) {
-                quickOkA = quickOkA && safe::rectInside(a->quick[i], vA);
-            }
+            // o chip do topo (⋯ — FASE UI B: a fila é o chip único; o
+            // undo/redo/save subiram para a barra)
+            const bool quickOkA = safe::rectInside(a->quick[0], vA);
             check(quickOkA && safe::rectInside(a->quickPanel, vA),
-                  "a fila do topo (undo/redo/save/⋯) dentro do rect "
-                  "(0.12-C C-2: o gizmo do canto saiu — o duplicado do "
-                  "Mover); o rail já foi aferrado acima");
+                  "o chip do topo (⋯) dentro do rect (FASE UI B: a fila é "
+                  "o chip único — o rail já foi aferrado acima)");
             // 0.9.6.19b (D21): o canto inferior DIREITO fica LIMPO — o [+]
             // morreu; o alvo mais a sul do lado direito é a fila do topo
-            check(safe::rectInside(a->quick[3], vA),
-                  "o ⋯ fica dentro do rect (a fila pode descer na "
+            check(safe::rectInside(a->quick[0], vA),
+                  "o ⋯ fica dentro do rect (o chip pode descer na "
                   "degradação — o D21 é o canto INFERIOR limpo)");
             // 0.12-C (C-2): o gizmo saiu — nada no canto direito de todo
             check(a->gizmoBtn.w == 0.0f,
@@ -2377,17 +2387,18 @@ int main() {
         {
             // a BARRA ÚNICA: kToolbarH = 36 (PASSO 1) — o viewport GANHOU
             // os 20dp da barra mais baixa + os 24dp da status removida
-            check(nearEqF(safe::kToolbarH, 36.0f),
-                  "kToolbarH = 36 (menu+tabs numa barra — G2-10 · PASSO 1)");
+            check(nearEqF(safe::kToolbarH, 40.0f),
+                  "kToolbarH = 40 (FASE UI B — a ordem do dono; o toque "
+                  "mínimo da fase vale para TODA a barra)");
             const UiRect viewG2 = safe::centerRect(
                 static_cast<f32>(g_egl.width()),
                 static_cast<f32>(g_egl.height()), g_ui.safeArea(), 0.0f,
                 false);
             const f32 hAntiga = static_cast<f32>(g_egl.height()) - 104.0f -
                                 safe::kStatusH - safe::kBottomTabH;
-            check(nearEqF(viewG2.h, hAntiga + 68.0f),
-                  "o viewport central GANHOU 68px (barra 36 + status 0 vs "
-                  "o antigo 56+24+48 — PASSO 1)");
+            check(nearEqF(viewG2.h, hAntiga + 64.0f),
+                  "o viewport central GANHOU 64px (barra 40 + status 0 vs "
+                  "o antigo 56+24+48 — o chrome é 72 = 40+0+32)");
             // o TRIAD morreu (os pontinhos fantasma) — o layout do chrome
             // não tem triad (compila). D21 (0.9.6.19b): o canto direito só
             // tem o GIZMO do topo — o fundo-direito fica LIMPO
@@ -3771,9 +3782,9 @@ int main() {
         editor::applyDensity();
         const safe::Insets zero{};
         const UiRect bar = safe::toolbarRect(1536.0f, 720.0f, zero);
-        check(bar.h == 72.0f,
-              "12.10 com densidade 2.0 a barra de cima mede 72px (36dp "
-              "REAL — PASSO 1; o bug era 56px)");
+        check(bar.h == 80.0f,
+              "12.10 com densidade 2.0 a barra de cima mede 80px (40dp "
+              "REAL — FASE UI B; o bug era 56px)");
         const UiRect status = safe::statusRect(1536.0f, 720.0f, zero);
         check(status.h == 0.0f,
               "12.10 a status line tem altura ZERO (REMOVIDA no PASSO 1 — "
@@ -3781,7 +3792,7 @@ int main() {
         check(editor::kRowH == 72.0f && editor::kPad == 32.0f,
               "12.10 as linhas/paddings dos painéis duplicam (36dp/16dp "
               "reais — PASSO 1; applyDensity)");
-        check(safe::kTopBarH == 36.0f && theme::dp(safe::kTopBarH) == 72.0f,
+        check(safe::kTopBarH == 40.0f && theme::dp(safe::kTopBarH) == 80.0f,
               "12.10 o dp() da casa multiplica pela densidade corrente");
         // (b) 0.9.6.8 (GRUPO E · RECALIBRADO): o teclado da engine SAIU —
         // a vara passa a aferir a BARRA DE SÍMBOLOS (a spec E: 40dp = 80px
@@ -3802,9 +3813,9 @@ int main() {
         theme::setDensity(1.0f);
         editor::applyDensity();
         const UiRect bar1 = safe::toolbarRect(1536.0f, 720.0f, zero);
-        check(bar1.h == 36.0f && editor::kRowH == 36.0f,
+        check(bar1.h == 40.0f && editor::kRowH == 36.0f,
               "12.10 com densidade 1.0 o layout é EXATAMENTE o da spec "
-              "PASSO 1 (os testes não mudam)");
+              "(FASE UI B: barra 40, linhas 36 — os testes não mudam)");
     }
 
     // ---- 12.11 (0.9.6.2 · R-019): O TOQUE MOVE O CURSOR ---------------------
@@ -10428,7 +10439,9 @@ int main() {
         check(sombra35,
               "35.1 a SOMBRA 2.5D no replay (o preto 15% por baixo dos "
               "botões — a profundidade falsa do dono)");
-        // (2) a LINHA ÂMBAR do topo: o reflexo a 20% existe no frame
+        // (2) a LINHA DO TOPO: o reflexo a 20% existe no frame (FASE UI A:
+        //     a linha é A BRASA #FF5A1F — o âmbar #FFB020 morreu; a sonda
+        //     lê o TOKEN, não um literal)
         bool linha35 = false;
         {
             const QuadVertex* v35 = g_ui.solidsForTest().vertices();
@@ -10436,17 +10449,17 @@ int main() {
             for (u32 i = 0; i + 5 < n35; i += 6) {
                 if (v35[i].a > 0.19f && v35[i].a < 0.21f &&
                     v35[i].r > 0.99f &&
-                    v35[i].g > 174.0f / 255.0f &&
-                    v35[i].g < 178.0f / 255.0f &&
-                    v35[i].b > 30.0f / 255.0f &&
-                    v35[i].b < 34.0f / 255.0f) {
+                    v35[i].g > 88.0f / 255.0f &&
+                    v35[i].g < 92.0f / 255.0f &&
+                    v35[i].b > 29.0f / 255.0f &&
+                    v35[i].b < 33.0f / 255.0f) {
                     linha35 = true;
                 }
             }
         }
         check(linha35,
-              "35.2 a LINHA ÂMBAR do topo no replay (o reflexo 1dp a 20% "
-              "— a FASE 3.1 do dono)");
+              "35.2 a LINHA DA BRASA do topo no replay (o reflexo 1dp a 20% "
+              "— a FASE 3.1 do dono, recalibrada pela FASE UI A)");
         // (3) o RUÍDO: a textura de ruído está no Renderer (o upload do
         //     init) e o widget ativo a consumir é provado pelos pins; aqui
         //     o CONTRATO: a textura existe (id != 0)

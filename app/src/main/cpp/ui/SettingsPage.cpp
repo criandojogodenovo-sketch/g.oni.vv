@@ -266,6 +266,11 @@ Result draw(UiContext& ui, const InputState& in, EditorState& st, const Ctx& ctx
             res = kToggleImmersive;
         }
         y += settingsRowH();
+        // FASE UI B (a ordem do dono): o seletor «Android» saiu da barra
+        // de topo e vive AQUI — informativo (o alvo REAL da build; não há
+        // outros alvos para escolher — a honestidade de sempre)
+        infoRow(ui, ox, y, aw, "plataforma", "Mobile (Android)");
+        y += settingsRowH();
     }
 
     // ---- ÁUDIO ---------------------------------------------------------------

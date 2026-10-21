@@ -136,13 +136,12 @@ TEST(qol_a_topbar_so_logo) {
                    "qol_a_topbar_so_logo: o Menu nasce no fim do logo "
                    "(o slot do nome morreu) — menu.x %.1f vs %.1f",
                    (double)L.menu.x, (double)(L.logo.x + L.logo.w));
-        EXPECT(L.showPlatform);   // o chip continua no largo
+        // FASE UI B: o chip da plataforma SAIU da barra (a linha
+        // «Plataforma» vive nas Definições) — o apertado só encolhe o flex
     }
     {
-        // ecrã apertado: o chip sai (o degrau do NOME já não existe)
         const toolbar::TopBarLayout L =
             toolbar::topbarLayout(480.0f, 320.0f, in, false, false);
-        EXPECT(!L.showPlatform);
         EXPECT(nearEq(L.logo.w, theme::dp(40.0f)));   // o logo NUNCA encolhe
     }
     // a FONTE: o drawTopBar já não escreve "G.One" (o artefato pinado)

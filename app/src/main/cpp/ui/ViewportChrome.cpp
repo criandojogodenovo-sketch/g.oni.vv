@@ -194,13 +194,14 @@ Layout layout(const UiRect& view) {
     L.gizmoBtn = {0.0f, 0.0f, 0.0f, 0.0f};
     L.gizmoPanel = {0.0f, 0.0f, 0.0f, 0.0f};
 
-    // (3) a fila do TOPO (undo/redo/save/⋯): a POSIÇÃO decide-se por
+    // (3) o chip do TOPO (⋯ — FASE UI B: a fila do topo perdeu o
+    // undo/redo/save, que subiram para a BARRA; a POSIÇÃO decide-se por
     // tentativa — (a) o TOPO, ao lado do rail e ANTES DA BORDA DIREITA
     // (o layout primário; 0.12-C: o gizmo do canto saiu — a fila respira
     // até à borda); (b) senão PARA BAIXO do rail (o rect estreito); (c)
     // senão ESCONDE (a degradação honesta — a fila NUNCA sai do rect; a
     // regra vale para o piso kViewportMinW=288dp da casa)
-    const f32 quickW = 4.0f * qbtn + 3.0f * qgap;
+    const f32 quickW = qbtn;
     const f32 qxTop = view.x + m +
                       (L.railVisible ? railW + theme::dp(12.0f) : 0.0f);
     const bool topFits =
@@ -222,15 +223,10 @@ Layout layout(const UiRect& view) {
     }
     const bool quickFits = topFits || belowFits;
     if (!quickFits) {
-        for (int i = 0; i < 4; ++i) {
-            L.quick[i] = {0.0f, 0.0f, 0.0f, 0.0f};
-        }
+        L.quick[0] = {0.0f, 0.0f, 0.0f, 0.0f};
         L.quickPanel = {0.0f, 0.0f, 0.0f, 0.0f};
     } else {
-        for (int i = 0; i < 4; ++i) {
-            L.quick[i] = {qx + static_cast<f32>(i) * (qbtn + qgap), qy, qbtn,
-                          qbtn};
-        }
+        L.quick[0] = {qx, qy, qbtn, qbtn};
         L.quickPanel = {qx - theme::dp(4.0f), qy - theme::dp(4.0f),
                         quickW + theme::dp(8.0f), qbtn + theme::dp(8.0f)};
     }
@@ -401,25 +397,15 @@ Actions draw(UiContext& ui, EditorState& st, toolbar::GizmoModeState& gz,
         }
     }
 
-    // ---- a fila do TOPO: desfazer/refazer/guardar/⋯ ----
+    // ---- o chip do TOPO (⋯ — FASE UI B: o undo/redo/save subiram para a
+    // barra de topo; a fila morre e fica o menu de ficheiro ancorado) ----
     if (L.quick[0].w > 0.0f) {
-        if (railButton(ui, kVpUndoId, L.quick[0], icons::Icon::Undo,
-                       cs.canUndo)) {
-            a.undoPressed = true;
-        }
-        if (railButton(ui, kVpRedoId, L.quick[1], icons::Icon::Redo,
-                       cs.canRedo)) {
-            a.redoPressed = true;
-        }
-        if (railButton(ui, kVpSaveId, L.quick[2], icons::Icon::Save, true)) {
-            a.savePressed = true;
-        }
         // o ⋯: abre o menu de ficheiro ANCORADO a ele (a folha de sempre;
         // o glifo é o ⋮ da casa — o mesmo do menu da hierarquia)
-        if (railButton(ui, kVpMenuId, L.quick[3], icons::Icon::Dots, true)) {
+        if (railButton(ui, kVpMenuId, L.quick[0], icons::Icon::Dots, true)) {
             a.menuPressed = true;
-            st.menuAx = L.quick[3].x;
-            st.menuAy = L.quick[3].y + L.quick[3].h;
+            st.menuAx = L.quick[0].x;
+            st.menuAy = L.quick[0].y + L.quick[0].h;
         }
     }
 

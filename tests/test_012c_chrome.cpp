@@ -49,13 +49,14 @@ TEST(menu_scroll) {
     const f32 contentH = menuContentH();
     // 15×48 + 6×28 + 8 = 896dp de conteúdo
     EXPECT(nearEq(contentH, 896.0f));
-    // o ecrã de referência 1600×720 (sem insets): maxH = 720−36−8−32 = 644
+    // o ecrã de referência 1600×720 (sem insets): maxH = 720−40−8−32 = 640
+    // (FASE UI B: a barra de topo é 40dp — a ordem do dono)
     {
         const MenuSheetLayout m =
             menuSheetLayout(1600.0f, 720.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                             contentH, 100.0f, 40.0f, theme::dp(280.0f));
         EXPECT(m.h < contentH - 0.01f);          // o sheet é MENOR que o conteúdo
-        EXPECT(m.h <= 720.0f - 36.0f - 8.0f - 32.0f + 0.01f);   // nunca sai
+        EXPECT(m.h <= 720.0f - 40.0f - 8.0f - 32.0f + 0.01f);   // nunca sai
         EXPECT(m.maxOffset > 0.0f);              // há O QUE rolar
         EXPECT(nearEq(m.maxOffset, contentH - m.h));
         // o fundo do sheet nunca cruza a tab bar (o D14)
@@ -90,7 +91,7 @@ TEST(menu_ancorado) {
     editor::applyDensity();
     const f32 contentH = menuContentH();
     // (a) o sheet SAI DE BAIXO do botão: y = ay + 8dp, x = ax (com o
-    // conteúdo 896dp o h = 644 e o clamp do fundo é y ≤ 44 — uma âncora
+    // conteúdo 896dp o h = 640 e o clamp do fundo é y ≤ 48 — uma âncora
     // de 20dp fica SEM clamp: y = 28)
     {
         const MenuSheetLayout m =
@@ -105,7 +106,7 @@ TEST(menu_ancorado) {
         const MenuSheetLayout m =
             menuSheetLayout(1600.0f, 720.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                             contentH, 100.0f, 600.0f, theme::dp(280.0f));
-        EXPECT(nearEq(m.y, 720.0f - 644.0f - 32.0f));
+        EXPECT(nearEq(m.y, 720.0f - 640.0f - 32.0f));
     }
     // (b) o clamp horizontal: uma âncora à direita extrema NÃO deixa o
     // sheet sair do ecrã
@@ -153,9 +154,10 @@ TEST(topbar_3_zonas) {
         EXPECT_MSG(leftEnd <= centerStart + 0.01f,
                    "topbar_3_zonas %.0fdp: a esquerda (%.0f) cruza o centro "
                    "(%.0f)", s.w, leftEnd, centerStart);
-        // (b) o CENTRO termina antes da DIREITA
+        // (b) o CENTRO termina antes da DIREITA (FASE UI B: o grupo da
+        // direita começa no UNDO — o mais à esquerda dos 6)
         const f32 centerEnd = L.tabAudio.x + L.tabAudio.w;
-        const f32 rightStart = L.play.x;
+        const f32 rightStart = L.undo.x;
         EXPECT_MSG(centerEnd <= rightStart + 0.01f,
                    "topbar_3_zonas %.0fdp: o centro (%.0f) cruza a direita "
                    "(%.0f)", s.w, centerEnd, rightStart);
@@ -166,16 +168,16 @@ TEST(topbar_3_zonas) {
         EXPECT(nearEq(L.tabUi.x, L.tab3d.x + L.tab3d.w));
         EXPECT(nearEq(L.tabAudio.x, L.tabUi.x + L.tabUi.w));
     }
-    // (e) a degradação honesta: num ecrã apertado o CHIP da plataforma
-    // sai — as zonas continuam SEM tocar. 0.12-QoL A recalibra com nota:
-    // o TEXTO "G.One" (e o flag showName) MORRERAM (a ordem do dono — a
-    // barra fica só com o ÍCONE do logo; o chip é o primeiro a ceder)
+    // (e) a degradação honesta: num ecrã apertado o flex encolhe ao piso
+    // — as zonas continuam SEM tocar (FASE UI B: o chip da plataforma SAIU
+    // da barra — a linha «Plataforma» vive nas Definições; o recorte é o
+    // k do flex com o piso 0.55)
     {
-        const toolbar::TopBarLayout L = toolbar::topbarLayout(480.0f, 320.0f, in, false, false);
-        EXPECT(!L.showPlatform);
+        // 640dp: o piso do k ainda respira (as zonas SEM tocar)
+        const toolbar::TopBarLayout L = toolbar::topbarLayout(640.0f, 320.0f, in, false, false);
         const f32 leftEnd = L.cena.x + L.cena.w;
         EXPECT(leftEnd <= L.tab3d.x + 0.01f);
-        EXPECT(L.tabAudio.x + L.tabAudio.w <= L.play.x + 0.01f);
+        EXPECT(L.tabAudio.x + L.tabAudio.w <= L.undo.x + 0.01f);
     }
 }
 
@@ -197,11 +199,10 @@ TEST(mover_unico) {
     // (b) o GIZMO do canto NÃO EXISTE mais (os rects ZERO)
     EXPECT(L.gizmoBtn.w == 0.0f && L.gizmoBtn.h == 0.0f);
     EXPECT(L.gizmoPanel.w == 0.0f);
-    // (c) a fila do topo (undo/redo/save/⋯) existe e NUNCA sai do rect
+    // (c) o chip do topo (⋯ — FASE UI B: a fila é o chip único) existe
+    // e NUNCA sai do rect
     EXPECT(L.quick[0].w > 0.0f);
-    for (int i = 0; i < 4; ++i) {
-        EXPECT(safe::rectInside(L.quick[i], view));
-    }
+    EXPECT(safe::rectInside(L.quick[0], view));
     // (d) as barras flutuantes ficam DENTRO do rect (nada transborda)
     EXPECT(safe::rectInside(L.railPanel, view));
     EXPECT(safe::rectInside(L.quickPanel, view));

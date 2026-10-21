@@ -54,3 +54,4 @@ build-dbg/
 /passo4-*.png
 /y-*.png
 tests/build-obj/
+tests/build-obj-c33/

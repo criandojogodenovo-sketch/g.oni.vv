@@ -424,6 +424,20 @@ R-014 aplicada.
   **versionCode 109** — o build vigente da campanha 0.12-Y. O 108 fica
   INTACTO como história.
 
+- **FASE UI · B — A BARRA SUPERIOR 40DP** — a direita NOVA (undo/redo/
+  guardar subiram do viewport + play/stop/gear; o Pause vive na PLAY BAR
+  com o mundo REALMENTE congelado e o «Android» é a linha «plataforma»
+  das Definições; os ids 3/19/30/31/32 aposentados, os 20/21/22 novos) ·
+  a fila do viewport morre para o chip ⋯ · O ACHADO DO CI: o A ficou
+  vermelho na sonda 35.2 do c33 (a linha âmbar) — a cura + o
+  scripts/build_c33.py NOVO (o gate da casa: compilar os DOIS alvos;
+  11 sondas stale recalibradas com o harness a mirrar o overlayArea) ·
+  pins ui_topbar_40dp_composicao + ui_sobreposicao_topbar estendido ·
+  M-UIb vermelho→reposto→verde (colada no RELATORIO-FASE-UI.md §2) ·
+  verificação: test_core 0 falhas · c33_virtual 1009/0 local (os DOIS
+  alvos) · **versionCode 112** — o build vigente da FASE UI. O 111 fica
+  INTACTO como história.
+
 - **FASE UI · A — TOKENS E IDENTIDADE** — O FICHEIRO ÚNICO DE TOKENS
   (ui/Theme.h) com A PALETA DO DONO (os hexes EXATOS: fundo #0B0B0D ·
   painéis #121215 α0.85 · elementos #1B1B20 · linhas 1px #26262C · texto

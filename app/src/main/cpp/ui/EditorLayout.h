@@ -869,6 +869,9 @@ inline f32 importMenuHeight(u32 rows) {
 // presets 20..23): MESMO tamanho/posição que os botões da toolbar (esquerda,
 // 240x56, centrado na altura de 88 px).
 constexpr u64 kPlayStopId = 5;
+// FASE UI B: o PAUSE da play bar (a ordem do dono — o pause saiu da top
+// bar e vive no «menu do Play»; o vizinho do Stop na faixa exclusiva)
+constexpr u64 kPlayPauseId = 6;
 
 inline UiRect playBarRect(f32 sw, f32 sh, const safe::Insets& i) {
     // mesma faixa da toolbar (kToolbarH) — o PLAY substitui a toolbar no topo

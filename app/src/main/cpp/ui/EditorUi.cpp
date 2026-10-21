@@ -5052,24 +5052,38 @@ void updateCameraOrbit(Camera& cam, OrbitState& st, const InputState& in,
     }
 }
 
-bool drawPlayBar(UiContext& ui, const InputState& in, f32 sw, f32 sh, int fps) {
+bool drawPlayBar(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                 int fps, bool paused, bool& pauseToggled) {
     // F4.2: barra na faixa da toolbar, DENTRO da safe-area (nada atrás da
     // nav/status bar). Tema mono — mesma linguagem da toolbar.
+    // FASE UI B (a ordem do dono): o PAUSE vive AQUI (o «menu do Play» —
+    // saiu da top bar); o botão alterna o mundo congelado (os sistemas
+    // param, o render continua) e o estado diz «em pausa».
+    pauseToggled = false;
     const UiRect r = playBarRect(sw, sh, ui.safeArea());
     ui.panel(r.x, r.y, r.w, r.h, theme::PANEL);
     ui.panel(r.x, r.y + r.h - 1.0f, r.w, 1.0f, theme::LINE);
 
-    // Stop (id 5 — faixa exclusiva; ver EditorLayout.h)
+    // Pause/Retomar (id 6 — o vizinho do Stop; o glifo alterna ⏸/▶)
     const UiRect stop = playStopButtonRect(r);
+    const UiRect pause = {stop.x - theme::dp(8.0f) - stop.w, stop.y, stop.w,
+                          stop.h};
+    if (ui.button(kPlayPauseId, pause.x, pause.y, pause.w, pause.h,
+                  paused ? "Retomar" : "Pausar")) {
+        pauseToggled = true;
+    }
+
+    // Stop (id 5 — faixa exclusiva; ver EditorLayout.h)
     const bool stopClicked = ui.button(kPlayStopId, stop.x, stop.y, stop.w,
                                        stop.h, "Stop");
 
     if (ui.hasFont()) {
         const f32 th = ui.fontHeight();
         const f32 cy = r.y + r.h * 0.5f + th * 0.30f;
-        // estado "a correr" + fps ao lado do Stop
+        // estado + fps ao lado do Stop (o estado diz a verdade: em pausa)
         char run[64];
-        std::snprintf(run, sizeof(run), "a correr · fps %d", fps);
+        std::snprintf(run, sizeof(run), "%s · fps %d",
+                      paused ? "em pausa" : "a correr", fps);
         ui.label(stop.x + stop.w + 24.0f, cy, run, theme::TEXT);
         // aviso à direita: nunca sai da barra (labelFitted)
         const f32 warnW = r.w * 0.5f;

@@ -5078,6 +5078,7 @@ const char* shortTexFormat(CompressedFormat f) {
 // fora das flags de overlay e ficam intactos)
 void enterPlayMode() {
     g_editor.playMode = true;
+    g_editor.paused = false;   // FASE UI B: o play arranca A CORRER
     editor::closeAllOverlays(g_editor);
     g_playUi.armed = false;   // 0.7.0: nenhum on-click armado atravessa a transição
     // 0.8.0 (F7): o preview da timeline MORRE na transição (restaura a pose
@@ -5109,6 +5110,7 @@ void enterPlayMode() {
 // de EDITOR volta com os painéis nos seus sítios exatos
 void leavePlayMode() {
     g_editor.playMode = false;
+    g_editor.paused = false;   // FASE UI B: sair do play descongela o mundo
     audioLeavePlay();   // 0.8.11: o sandbox de áudio também morre
     g_animSystem.enabled = false;   // 0.8.0: animação só avança em Play
     g_voni.playEnabled = false;   // 0.9.2: runs de Play morrem (as do
@@ -6993,8 +6995,16 @@ void frame() {
         // TouchControls (ancorados na safe-area) + barra superior mínima.
         // ORBIT DESATIVADO (o guard playMode do editor::updateCameraOrbit já
         // correu acima — 1 dedo = controlos/botões da UI).
+        bool pauseToggled = false;   // FASE UI B: o Pause vive na play bar
         const bool stop = editor::drawPlayBar(g_ui, g_input, w, h,
-                                              static_cast<int>(g_fps + 0.5f));
+                                              static_cast<int>(g_fps + 0.5f),
+                                              g_editor.paused, pauseToggled);
+        if (pauseToggled) {
+            // Pausar/Retomar: o mundo CONGELA (os sistemas não correm —
+            // o main loop salta os passos fixos) e o render continua
+            g_editor.paused = !g_editor.paused;
+            showToast(g_editor.paused ? "em pausa" : "a correr");
+        }
         if (stop) {
             // Stop → EDITOR: pose restaurada (PlaySnapshot) + painéis
             // repostos EXATAMENTE (os scrolls/seleção nunca foram tocados)
@@ -7072,6 +7082,10 @@ void frame() {
     // 48dp [3D][UI|ÁUDIO] com underline accent. O G4 (transformação)
     // desceu para a TOOLBAR DO VIEWPORT (vpchrome — desenhada abaixo).
     if (!modalOpen) {
+        // FASE UI B: o estado do undo/redo para a barra (o glifo a 0.35
+        // quando não há histórico — o toque segue para o toast honesto)
+        g_editor.canUndo = g_undo.canUndo();
+        g_editor.canRedo = g_undo.canRedo();
         const editor::toolbar::Actions ta = editor::toolbar::draw(g_ui,
                                                                   g_editor);
         if (ta.menuDropdown) {
@@ -7108,37 +7122,14 @@ void frame() {
         // triad. SÓ em modo 3D (UI/ÁUDIO substituem o viewport).
         if (!g_editor.uiMode && !g_editor.audioMode) {
             editor::vpchrome::ChromeState cs;
-            cs.canUndo = g_undo.canUndo();
-            cs.canRedo = g_undo.canRedo();
-            cs.snapValue = g_snapValue;
+            cs.snapValue = g_snapValue;   // FASE UI B: o canUndo/canRedo
+            // subiu para o EditorState (a barra de topo consome-o)
             const editor::vpchrome::Actions va = editor::vpchrome::draw(
                 g_ui, g_editor, g_gizmoMode, cs, g_camera, currentDrawerH(),
                 g_frameDt, &g_input);   // 0.12-A (A-3): o ciclo do tooltip
-            if (va.undoPressed) {
-                const Handle uh = g_undo.undo(g_scene);
-                if (uh.valid()) {
-                    editor::selectTic(g_editor, uh);
-                    showToast("desfeito");
-                } else {
-                    showToast("nada a desfazer");
-                }
-            }
-            if (va.redoPressed) {
-                const Handle rh = g_undo.redo(g_scene);
-                if (rh.valid()) {
-                    editor::selectTic(g_editor, rh);
-                    showToast("refeito");
-                } else {
-                    showToast("nada a refazer");
-                }
-            }
-            if (va.savePressed && g_projectReady) {
-                // o MESMO caminho do "Guardar cena" do menu (assets+manifesto)
-                const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
-                                g_project.saveManifest(*g_storage);
-                armThumbCapture();   // 0.9.6.19 (D16): o ponto único
-                showToast(ok ? "cena salva" : "falha ao salvar");
-            }
+            // FASE UI B: o undo/redo/save SUBIRAM para a barra de topo
+            // (o despacho vive no bloco ta.* lá em cima, em TODOS os
+            // modos); o ⋯ do viewport mantém o menu de ficheiro
             // PASSO 3 (0.9.6.17): os botões DUPLICAR/COLAR saíram da
             // viewport (a spec do dono: o topo é desfazer/refazer/guardar/⋯)
             // — as ações vivem no menu ⋯ (itens 10/11 — eram 9/10 antes do
@@ -7161,17 +7152,39 @@ void frame() {
             // viewport morreu (a ação vive no + da hierarquia e no menu ⋯
             // «Novo objeto», o MESMO plusMenu de sempre)
         }
+        // FASE UI B — o UNDO/REDO/GUARDAR subiram do viewport PARA A BARRA
+        // (a ordem do dono): o MESMO caminho do bloco vpchrome, agora em
+        // TODOS os modos (3D/UI/Áudio — a barra é comum)
+        if (ta.undoPressed) {
+            const Handle uh = g_undo.undo(g_scene);
+            if (uh.valid()) {
+                editor::selectTic(g_editor, uh);
+                showToast("desfeito");
+            } else {
+                showToast("nada a desfazer");
+            }
+        }
+        if (ta.redoPressed) {
+            const Handle rh = g_undo.redo(g_scene);
+            if (rh.valid()) {
+                editor::selectTic(g_editor, rh);
+                showToast("refeito");
+            } else {
+                showToast("nada a refazer");
+            }
+        }
+        if (ta.savePressed && g_projectReady) {
+            // o MESMO caminho do "Guardar cena" do menu (assets+manifesto)
+            const bool ok = g_project.saveActiveScene(*g_storage, g_scene) &&
+                            g_project.saveManifest(*g_storage);
+            armThumbCapture();   // 0.9.6.19 (D16): o ponto único
+            showToast(ok ? "cena salva" : "falha ao salvar");
+        }
         if (ta.playPressed && !g_editor.playMode) {
             // G2 play: a JANELA PLAY (sem painéis, orbit off); o Stop da
             // play bar (ou o pause) volta ao EDITOR com a pose restaurada.
             enterPlayMode();
             showToast("modo play");
-        }
-        if (ta.pausePressed && g_editor.playMode) {
-            // defensivo: em play a barra não se desenha (o Stop da play bar
-            // é o caminho normal) — se algum dia se desenhar, pausa = sair
-            leavePlayMode();
-            showToast("modo editor");
         }
         if (ta.stopPressed) {
             // 0.9.6.10 (GRUPO UI · a imagem 1): o ■ EXPLÍCITO da top bar —
@@ -7183,12 +7196,6 @@ void frame() {
             } else {
                 showToast("já em modo editor");
             }
-        }
-        if (ta.platformPressed) {
-            // 0.9.6.10 (GRUPO UI · a imagem 1): o chip da plataforma — o
-            // alvo REAL da build (Mobile/Android); informar, NÃO fingir
-            // que há outros alvos para escolher
-            showToast("plataforma alvo: Mobile (Android)");
         }
         // viewport 2D no modo UI (antes dos painéis — z-order de editor)
         if (g_editor.uiMode) {
@@ -9020,7 +9027,11 @@ void android_main(android_app* app) {
         sdf::g_time += g_frameDt;
 
         // Loop de timestep fixo (guard anti-spiral dentro de Time).
-        const u32 steps = g_time.beginFrame(realDt);
+        // FASE UI B: o PAUSE congela o MUNDO — os passos fixos não correm
+        // (o acumulador não cresce: o tempo retoma exatamente onde parou)
+        // e o render continua (a play bar diz «em pausa»)
+        const bool frozen = g_editor.playMode && g_editor.paused;
+        const u32 steps = frozen ? 0u : g_time.beginFrame(realDt);
         for (u32 s = 0; s < steps; ++s) {
             // F3: cada passo fixo roda os TickGroups na ordem
             // PreUpdate → Update → PostUpdate → Render

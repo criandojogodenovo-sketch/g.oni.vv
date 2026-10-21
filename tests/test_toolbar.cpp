@@ -124,24 +124,25 @@ u64 iconSegHash(icons::Icon ic) {
 // ---- FASE 9 (G2-9/G2-10): A BARRA ÚNICA — menu+tabs+ações numa faixa ----
 // (a tab bar FUNDEU-SE; o botão sliders MORREU — inventário G0-4)
 
-TEST(topbar_layout_56dp_alvos48_sem_sobreposicao) {
+TEST(topbar_layout_40dp_alvos40_sem_sobreposicao) {
     const safe::Insets in{0.0f, 24.0f, 0.0f, 24.0f};   // C33
     const toolbar::TopBarLayout L =
         toolbar::topbarLayout(kSW, kSH, in, false, false);
-    EXPECT(nearEqF(L.bar.h, 36.0f));   // PASSO 1: a linha da spec (era 56)
+    EXPECT(nearEqF(L.bar.h, 40.0f));   // FASE UI B: a linha do dono (era 36)
     EXPECT(nearEqF(L.bar.y, 24.0f));
     const UiRect content = safe::contentRect(kSW, kSH, in);
     EXPECT(safe::rectInside(L.bar, content));
-    // FASE 9: 8 widgets (menu, cena, 3 tabs, pause, play, gear) — SEM sliders
-    const UiRect rects[8] = {L.menu,   L.cena,   L.tab3d,  L.tabUi,
-                             L.tabAudio, L.pause, L.play,  L.gear};
-    const char* names[8] = {"menu", "cena", "tab3d", "tabUi",
-                            "tabAudio", "pause", "play", "gear"};
-    for (int i = 0; i < 8; ++i) {
-        EXPECT(rects[i].h >= 36.0f - 0.01f);   // o alvo é a LINHA (36)
+    // FASE UI B: 10 widgets (menu, cena, 3 tabs, undo, redo, save, play,
+    // stop, gear) — o Pause e o chip Android SAÍRAM (a play bar / as
+    // Definições); a posição do stop (o undo fica entre o flex e o save)
+    const UiRect rects[10] = {L.menu,   L.cena,   L.tab3d,  L.tabUi,
+                              L.tabAudio, L.undo, L.redo, L.save,
+                              L.play,     L.gear};
+    for (int i = 0; i < 10; ++i) {
+        EXPECT(rects[i].h >= 40.0f - 0.01f);   // o alvo é a LINHA (40)
         EXPECT(rects[i].w > 0.0f);
         EXPECT(safe::rectInside(rects[i], content));
-        for (int j = i + 1; j < 8; ++j) {
+        for (int j = i + 1; j < 10; ++j) {
             const f32 ox = std::min(rects[i].x + rects[i].w, rects[j].x + rects[j].w) -
                             std::max(rects[i].x, rects[j].x);
             const f32 oy = std::min(rects[i].y + rects[i].h, rects[j].y + rects[j].h) -
@@ -173,12 +174,13 @@ TEST(topbar_layout_ecra_estreito_encolhe_gracioso) {
         toolbar::topbarLayout(1000.0f, kSH, safe::Insets{}, false, false);
     const UiRect content = safe::contentRect(1000.0f, kSH, safe::Insets{});
     EXPECT(safe::rectInside(L.bar, content));
-    const UiRect rects[8] = {L.menu,   L.cena,   L.tab3d,  L.tabUi,
-                             L.tabAudio, L.pause, L.play,  L.gear};
-    for (int i = 0; i < 8; ++i) {
+    const UiRect rects[10] = {L.menu,   L.cena,   L.tab3d,  L.tabUi,
+                              L.tabAudio, L.undo, L.redo, L.save,
+                              L.play,     L.gear};
+    for (int i = 0; i < 10; ++i) {
         EXPECT(rects[i].w > 0.0f);
         EXPECT(rects[i].h > 0.0f);
-        for (int j = i + 1; j < 8; ++j) {
+        for (int j = i + 1; j < 10; ++j) {
             const f32 ox = std::min(rects[i].x + rects[i].w, rects[j].x + rects[j].w) -
                             std::max(rects[i].x, rects[j].x);
             const f32 oy = std::min(rects[i].y + rects[i].h, rects[j].y + rects[j].h) -

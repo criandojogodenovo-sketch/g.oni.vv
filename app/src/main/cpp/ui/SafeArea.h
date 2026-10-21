@@ -35,12 +35,12 @@ namespace vv {
 namespace safe {
 
 // ---- alturas/larguras do chrome (FONTES ÚNICAS) ----------------------------
-// PASSO 1 (0.9.6.14 · spec UI do dono): a barra única de 36dp UMA linha
-// (era 56 — os 20dp poupados vão TODOS ao viewport, o critério (c))
-constexpr f32 kTopBarH   = 36.0f;   // barra de cima
+// PASSO 1 (0.9.6.14): a barra única UMA linha (era 56); FASE UI B (a
+// ordem do dono): 40dp — o toque mínimo da fase vale para TODA a barra
+constexpr f32 kTopBarH   = 40.0f;   // barra de cima (FASE UI B — a ordem do dono; era 36)
 // FASE 9 (G2-10 — A FUSÃO): a tab bar de modo fundiu-se à top bar
 // (as tabs [3D|UI|ÁUDIO] vivem AO CENTRO da barra — ui/Toolbar.cpp)
-constexpr f32 kToolbarH  = kTopBarH;           // 36
+constexpr f32 kToolbarH  = kTopBarH;           // 40 (FASE UI B)
 constexpr f32 kModeTabH  = 48.0f;   // LEGACY: só p/ modeTabRect (compat de testes)
 // PASSO 1: a STATUS BAR 24dp desapareceu (a spec: «a status extra sai») —
 // o «FPS n · TICs n» vive na tab bar de baixo (direita) e a versão/commit

@@ -157,6 +157,12 @@ struct EditorState {
     // controlos). O estado vive AQUI (não numa global do main) para a
     // transição completa editor→play→editor ser testável na suíte.
     bool   playMode = false;
+    // FASE UI B: o PAUSE do play (a play bar alterna; o mundo congela —
+    // os sistemas não correm, o render continua) + o estado do undo/redo
+    // para a barra de topo (o main alimenta 1× por frame)
+    bool   paused = false;
+    bool   canUndo = false;
+    bool   canRedo = false;
 
     // ---- 0.7.0 — UI CRIÁVEL + GESTÃO DE TICs ---------------------------------
     bool   uiMode = false;          // separador "3D | UI": true = viewport 2D
@@ -639,7 +645,8 @@ void closeAllOverlays(EditorState& st);
 // botão Stop à esquerda + "a correr" + fps + aviso "simulação — alterações
 // descartadas ao parar" à direita. Devolve true no frame em que Stop é
 // clicado (o main sai do play: PlaySnapshot restore + painéis repostos).
-bool drawPlayBar(UiContext& ui, const InputState& in, f32 sw, f32 sh, int fps);
+bool drawPlayBar(UiContext& ui, const InputState& in, f32 sw, f32 sh,
+                 int fps, bool paused, bool& pauseToggled);
 
 // ---- 0.7.0: UI CRIÁVEL + GESTÃO DE TICs (ui/UiEditor.h tem o resto) ----------
 // (0.7.6: o separador "3D | UI" e o grupo Mover/Rodar/Escalar/Snap passaram

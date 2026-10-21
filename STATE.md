@@ -1,11 +1,10 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-21 · vc: 111 · Último commit: este (a FASE UI A — a
-paleta BRASA do dono no ficheiro único de tokens: bg #0B0B0D · painéis
-#121215 · elementos #1B1B20 · linhas #26262C · texto #E8E6E3/#8A8A93 ·
-a brasa ÚNICA #FF5A1F (o âmbar morreu) · seleção #2B1810 · eixos
-#E5484D/#3FB950/#3B82F6 · escala 4/8/12/16 · raio 6-8; o espelho Java e
-o TOKENS_F alinhados; ui_tokens_brasa + ui_sobreposicao_topbar)
+Atualizado: 2026-10-21 · vc: 112 · Último commit: este (a FASE UI B — a
+barra de topo 40dp com a direita nova: undo/redo/guardar subiram do
+viewport + play/stop/gear; o Pause na PLAY BAR com o mundo congelado; o
+«Android» nas Definições; o apanho do CI da A curado — a sonda 35.2 lê a
+brasa e nasce o scripts/build_c33.py; ui_topbar_40dp_composicao)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -14,22 +13,27 @@ o TOKENS_F alinhados; ui_tokens_brasa + ui_sobreposicao_topbar)
 ## §1 Onde estamos
 
 - **Campanha FASE UI (O REDESIGN VISUAL, envios 1/5 + 2/5) — EM CURSO
-  (A fechada, vc 111; B/C/D/E a seguir)** (a cláusula calma: SÓ visual,
+  (A e B fechadas, vc 112; C/D/E a seguir)** (a cláusula calma: SÓ visual,
   layout e UX — core/V.ONI/importadores/física/.gmesh intocados; um
   commit por parte, CI verde entre elas; a história vive no
   RELATORIO-FASE-UI.md).
   **A (vc 111)**: O FICHEIRO ÚNICO DE TOKENS com a paleta do dono (os
-  hexes EXATOS: fundo #0B0B0D · painéis #121215 α0.85 · elementos
-  #1B1B20 · linhas 1px #26262C · texto #E8E6E3/#8A8A93 · A BRASA ÚNICA
-  #FF5A1F — o âmbar #FFB020 morreu · seleção #2B1810 · eixos
-  #E5484D/#3FB950/#3B82F6) + a escala 4/8/12/16 (kSpaceMid novo, kSpace3
-  24→16) + raios 6-8 (kRadiusField 4→6) + o espelho Java alinhado (o
-  TOKENS_F do gate recalibrado) + a sonda do c33 lê o fundo do TOKEN;
-  contraste validado antes do commit (texto ≥4,5:1, componentes ≥3:1);
-  pins ui_tokens_brasa + ui_sobreposicao_topbar (o teste automático de
-  sobreposição da fase) + M-UIa vermelho→reposto→verde; 9 recalibrações
-  com nota (o sentinela da identidade alarga a banda da rampa para o
-  branco quente do dono).
+  hexes EXATOS: fundo #0B0B0D · painéis #121215 · elementos #1B1B20 ·
+  linhas #26262C · texto #E8E6E3/#8A8A93 · A BRASA ÚNICA #FF5A1F (o
+  âmbar morreu) · seleção #2B1810 · eixos #E5484D/#3FB950/#3B82F6) + a
+  escala 4/8/12/16 + raios 6-8 + o espelho Java alinhado + o contraste
+  validado antes do commit; pins ui_tokens_brasa + ui_sobreposicao_topbar
+  + M-UIa; 9 recalibrações com nota.
+  **B (vc 112)**: A BARRA 40DP — a direita nova (undo/redo/guardar
+  subiram do viewport para TODOS os modos + play/stop/gear; os ids
+  3/19/30/31/32 aposentados, os 20/21/22 novos), o Pause na PLAY BAR
+  (id 6, o mundo congelado de verdade — os passos fixos não correm), o
+  «Android» nas Definições (a linha «plataforma»), a fila do viewport
+  morta para o chip ⋯; O ACHADO DO CI (o A vermelho na sonda 35.2 do
+  c33 — a lacuna dos DOIS alvos de novo): a cura + o build_c33.py NOVO +
+  11 sondas stale recalibradas (os pickers a mirrar o overlayArea); pin
+  ui_topbar_40dp_composicao + M-UIb; test_core 0 falhas + c33 1009/0
+  local.
 - **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A, B, C, o
   C-FIX e o D fechadas, vc 110; o FECHO a seguir)** (a cláusula calma: SÓ o
   prompt; a V.ONI intocada; a história vive no RELATORIO-0.12-Y-ABERTURA.md

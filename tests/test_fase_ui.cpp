@@ -12,13 +12,43 @@
 #include "ui/SafeArea.h"
 #include "ui/ScrollMath.h"
 #include "ui/Toolbar.h"
+#include "ui/EditorLayout.h"
 #include "TestFramework.h"
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <string>
 #include <vector>
 
 using namespace vv;
 
 namespace {
+
+std::string repoRoot() {
+    if (const char* e = std::getenv("GONI_ROOT_OVERRIDE")) return e;
+#ifdef REPO_ROOT
+    return REPO_ROOT;
+#else
+    return ".";
+#endif
+}
+
+bool readFile(const std::string& path, std::string& out) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f.is_open()) return false;
+    out.assign(std::istreambuf_iterator<char>(f),
+               std::istreambuf_iterator<char>());
+    return true;
+}
+
+u32 countSub(const std::string& hay, const std::string& needle) {
+    u32 n = 0;
+    for (size_t p = hay.find(needle); p != std::string::npos;
+         p = hay.find(needle, p + needle.size())) {
+        ++n;
+    }
+    return n;
+}
 
 bool nearC(const f32 c[4], int r, int g, int b, f32 a) {
     return test::nearEqF(c[0], r / 255.0f, 1e-4f) &&
@@ -105,6 +135,41 @@ TEST(ui_tokens_brasa) {
     EXPECT(theme::kRadiusField >= 6.0f && theme::kRadiusCard <= 8.0f);
 }
 
+// ---- PIN ui_topbar_40dp — A BARRA DO DONO (a parte B) ----------------------
+// 40dp, a direita nova (undo/redo/save/play/stop/gear — subiram do
+// viewport), o Pause na PLAY BAR e o «Android» nas Definições
+TEST(ui_topbar_40dp_composicao) {
+    // (a) a ALTURA: o token da fonte única é 40 (a ordem do dono; era 36)
+    EXPECT(test::nearEqF(safe::kTopBarH, 40.0f, 1e-4f));
+    EXPECT(test::nearEqF(safe::kToolbarH, safe::kTopBarH, 1e-6f));
+    // (b) a DIREITA NOVA existe na barra (os ids fora das faixas antigas)
+    EXPECT(editor::toolbar::kTbUndoId > editor::toolbar::kTbGearId);
+    EXPECT(editor::toolbar::kTbSaveId > editor::toolbar::kTbRedoId);
+    // (c) o PAUSE vive na PLAY BAR (o vizinho do Stop — o id 6) e NUNCA
+    // volta à barra (o id 3 do pause está aposentado — o layout não o tem:
+    // o campo pause MORREU do TopBarLayout, o compilar é a prova D21)
+    EXPECT(editor::kPlayPauseId == 6u);
+    EXPECT(editor::kPlayStopId == 5u);
+    // (d) a FONTE: o drawTopBar já não desenha pause/plataforma (o
+    // artefato pinado — GONI_ROOT_OVERRIDE nas mutações)
+    std::string src;
+    ASSERT(readFile(repoRoot() + "/app/src/main/cpp/ui/Toolbar.cpp", src));
+    EXPECT_MSG(countSub(src, "kTbPauseId") == 0,
+               "ui_topbar_40dp: o kTbPauseId não desenha mais (aposentado)");
+    EXPECT_MSG(countSub(src, "kTbPlatformId") == 0,
+               "ui_topbar_40dp: o kTbPlatformId não desenha mais");
+    EXPECT(countSub(src, "kTbUndoId") >= 1);
+    EXPECT(countSub(src, "kTbRedoId") >= 1);
+    EXPECT(countSub(src, "kTbSaveId") >= 1);
+    // (e) o «Android» vive nas DEFINIÇÕES (a linha «plataforma»)
+    std::string set;
+    ASSERT(readFile(repoRoot() + "/app/src/main/cpp/ui/SettingsPage.cpp",
+                    set));
+    EXPECT_MSG(countSub(set, "\"plataforma\"") == 1 &&
+                   countSub(set, "Mobile (Android)") == 1,
+               "ui_topbar_40dp: a linha da plataforma vive nas Definições");
+}
+
 // ---- PIN ui_sobreposicao_topbar — A BARRA NÃO TAPA NADA NEM SAI ----------
 // 3 resoluções × 2 orientações (a regra da fase). Os alvos vêm da FONTE
 // ÚNICA topbarLayout — o MESMO desenho que a app faz.
@@ -134,17 +199,15 @@ TEST(ui_sobreposicao_topbar) {
         ws.push_back({"tab3d", L.tab3d});
         ws.push_back({"tabUi", L.tabUi});
         ws.push_back({"tabAudio", L.tabAudio});
+        ws.push_back({"undo", L.undo});
+        ws.push_back({"redo", L.redo});
+        ws.push_back({"save", L.save});
         ws.push_back({"play", L.play});
         ws.push_back({"stop", L.stop});
         ws.push_back({"gear", L.gear});
-        if (L.pause.w > 0.0f) {
-            const RectNamed rn = {"pause", L.pause};
-            ws.push_back(rn);
-        }
-        if (L.showPlatform && L.platform.w > 0.0f) {
-            const RectNamed rn = {"plataforma", L.platform};
-            ws.push_back(rn);
-        }
+        // FASE UI B: o Pause e o chip «Android» SAÍRAM da barra (a play
+        // bar / as Definições — a ordem do dono); a sobreposição afere a
+        // direita NOVA: undo/redo/save/play/stop/gear
         // o underline do ativo DESENHA sob a tab ativa (é 2dp no fundo da
         // barra, deliberadamente sobreposto) — fora da aferição
         checkInsideAndDisjoint(ws, L.bar, sc.ctx, sc.w, sc.h);

@@ -359,12 +359,13 @@ TEST(vpchrome_stack_sem_sobreposicao_alvos_48) {
     // a fila do topo (undo/redo/save/⋯) — nada sobrepõe
     // (D21 0.9.6.19b: o [+] do fundo-direito MORREU; 0.12-C (C-2): o
     // gizmo do topo-direito SAIU — o duplicado do Mover; os alvos são N−2)
-    const UiRect quicks[4] = {L.quick[0], L.quick[1], L.quick[2],
-                              L.quick[3]};
-    for (int i = 0; i < 4; ++i) {
+    // FASE UI B: a fila é o ÚNICO chip ⋯ (o undo/redo/save subiram para
+    // a barra de topo)
+    const UiRect quicks[1] = {L.quick[0]};
+    for (int i = 0; i < 1; ++i) {
         EXPECT(quicks[i].h >= 40.0f - 0.01f);
         EXPECT(quicks[i].w >= 40.0f - 0.01f);
-        for (int j = i + 1; j < 4; ++j) {
+        for (int j = i + 1; j < 1; ++j) {
             const f32 ox = std::min(quicks[i].x + quicks[i].w,
                                     quicks[j].x + quicks[j].w) -
                            std::max(quicks[i].x, quicks[j].x);
@@ -392,7 +393,7 @@ TEST(vpchrome_toolbar_ancorada_a_viewport_g11) {
         const vpchrome::Layout L = vpchrome::layout(view);
         EXPECT(nearEqF(L.rail[0].y, view.y + 8.0f));
         EXPECT(safe::rectInside(L.rail[0], view));
-        EXPECT(safe::rectInside(L.quick[3], view));
+        EXPECT(safe::rectInside(L.quick[0], view));
         // D21: o canto inferior direito não tem controlos. 0.12-C (C-2):
         // o gizmo do topo-direito SAIU (o duplicado do Mover) — o canto
         // direito fica LIMPO de todo
@@ -423,7 +424,7 @@ TEST(vpchrome_toolbar_ancorada_a_viewport_g11) {
     {
         const UiRect view{300.0f, 104.0f, 420.0f, 400.0f};
         const vpchrome::Layout L = vpchrome::layout(view);
-        EXPECT(safe::rectInside(L.quick[3], view));
+        EXPECT(safe::rectInside(L.quick[0], view));
         EXPECT(L.gizmoBtn.w == 0.0f);   // 0.12-C (C-2): o gizmo saiu
         EXPECT(safe::rectInside(L.rail[0], view));
     }
@@ -851,13 +852,13 @@ TEST(hierarquia_long_press_nome_truncado_g27) {
 // e a status saiu — os px vão TODOS ao viewport) e o botão sliders NÃO
 // EXISTE mais (inventário G0-4)
 TEST(topbar_unica_56dp_e_viewport_ganha_48_g29) {
-    // a fonte única do chrome diz 36 (PASSO 1)
-    EXPECT(nearEqF(safe::kToolbarH, 36.0f));
+    // a fonte única do chrome diz 40 (FASE UI B — a ordem do dono)
+    EXPECT(nearEqF(safe::kToolbarH, 40.0f));
     EXPECT(nearEqF(safe::kToolbarH, safe::kTopBarH));
     // o viewport central GANHOU os px: em 1600×720 sem insets/drawer
     const UiRect view = safe::centerRect(1600.0f, 720.0f, safe::Insets{});
     const f32 hAntiga = 720.0f - 104.0f - 24.0f - 48.0f;   // chrome antigo (176)
-    EXPECT(nearEqF(view.h, hAntiga + 108.0f));   // o chrome novo é 68 (36+0+32)
+    EXPECT(nearEqF(view.h, hAntiga + 104.0f));   // o chrome é 72 (40+0+32)
     // o TRIAD morreu (os "pontinhos fantasma"): o layout NÃO tem triad —
     // compila = o campo não existe. D21 (0.9.6.19b) pôs o GIZMO no canto;
     // 0.12-C (C-2): o gizmo SAIU (o duplicado do Mover) — o canto direito

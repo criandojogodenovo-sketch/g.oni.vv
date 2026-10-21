@@ -46,12 +46,14 @@ struct GizmoModeState {
 };
 
 // ---- ids dos widgets (faixas exclusivas — UiContext é im-mode) -------------
-// Herdados: Menu=1, Play=2, Pause=3, 3D/UI=11/12, cena=14, ÁUDIO=15.
+// Herdados: Menu=1, Play=2, Pause=3 (APOSENTADO na FASE UI B — o pause
+// vive na PLAY BAR), 3D/UI=11/12, cena=14, ÁUDIO=15.
 // kTbSlidersId (16) REMOVIDO na FASE 9 (G0-4/G2-9: o botão estava MORTO —
 // slidersPressed nunca era consumido). O id fica LIVRE.
 constexpr u64 kTbMenuId      = 1;
 constexpr u64 kTbPlayId      = 2;
-constexpr u64 kTbPauseId     = 3;
+// kTbPauseId (3) APOSENTADO na FASE UI B (a ordem do dono: o Pause saiu da
+// barra — vive na PLAY BAR, ao lado do Stop; o id NUNCA volta)
 constexpr u64 kGizmoIds[3]   = {7, 8, 9};    // mover/rodar/escalar (toolbar do viewport 0.9.0)
 constexpr u64 kTbSnapId      = 10;            // (legacy: o snap vive agora no íman do viewport)
 constexpr u64 kMode3dId      = 11;
@@ -61,31 +63,38 @@ constexpr u64 kTbCenaId      = 14;
 constexpr u64 kModeAudioId   = 15;
 constexpr u64 kTbGearId      = 17;   // 0.9.0: PÁGINA de Settings (spec I)
 // 0.9.6.10 (GRUPO UI · região TOPO da imagem 1): o STOP explícito (o
-// botão de sair do play ao lado do play/pause — a imagem 1 manda) e o
-// CHIP de plataforma (o alvo REAL da build: Mobile/Android)
+// botão de sair do play ao lado do play — a imagem 1 manda)
 constexpr u64 kTbStopId      = 18;
-constexpr u64 kTbPlatformId  = 19;
+// kTbPlatformId (19) APOSENTADO na FASE UI B (a ordem do dono: o seletor
+// «Android» saiu da barra — vive nas DEFINIÇÕES, a linha «Plataforma»)
+// FASE UI B (a ordem do dono — a direita da barra): desfazer/refazer/
+// guardar DESCERAM do viewport (a fila do topo morre na parte D) e
+// subiram PARA A BARRA — ids novos fora das faixas existentes
+constexpr u64 kTbUndoId      = 20;
+constexpr u64 kTbRedoId      = 21;
+constexpr u64 kTbSaveId      = 22;
 
-// ---- A BARRA ÚNICA (56dp — FASE 9 G2-10) --------------------------------------
+// ---- A BARRA ÚNICA (40dp — FASE UI B, A ORDEM DO DONO) ------------------------
 // 0.9.6.10 (GRUPO UI · a região TOPO da imagem 1): [G logo][≡ Menu]
-// [Cena ▾] · tabs de modo ao CENTRO · [▶][⏸][■][chip plataforma][⚙] — a
-// MESMA família da barra de topo da referência (o azul dela é o âmbar nosso)
+// [Cena ▾] · tabs de modo ao CENTRO · a direita muda na FASE UI B:
+// [↶][↷][disquete][▶][■][⚙] — o Pause e o chip «Android» SAÍRAM (o pause
+// vive na play bar; a plataforma é uma linha das Definições) e o
+// desfazer/refazer/guardar SUBIRAM do viewport
 // 0.12-QoL A (A ORDEM DO DONO · Redbr1): o TEXTO "G.One" ao lado do logo
 // SAIU — fica APENAS o ÍCONE (o G em chama É a identidade; o nome era
 // poluição visual e roubava largura à barra). O slot `name` e o flag
 // `showName` MORRERAM (o padrão D21 — sem chamadores, sem fantasmas).
 struct TopBarLayout {
-    UiRect bar{};                 // a faixa toda (safe::toolbarRect — 56dp)
+    UiRect bar{};                 // a faixa toda (safe::toolbarRect — 40dp)
     UiRect logo{};                // EXTREMA esquerda: o G em chama (SÓ ele)
     UiRect menu{}, cena{};        // esquerda (ícone hamburger/folder + texto)
     UiRect tab3d{}, tabUi{}, tabAudio{};   // CENTRO — tabs de modo (G2-10)
-    UiRect underline{};           // do tab ATIVO (2dp accent, fundo da barra)
+    UiRect underline{};           // do tab ATIVO (2dp brasa, fundo da barra)
     u32    active = 0;            // 0=3D, 1=UI, 2=ÁUDIO
-    UiRect play{}, pause{}, stop{};  // direita (ícones — a imagem 1: ▶⏸■)
-    UiRect platform{};            // o chip da plataforma alvo (Android)
+    UiRect undo{}, redo{}, save{};  // direita (FASE UI B — subiram do viewport)
+    UiRect play{}, stop{};          // direita (ícones — ▶■)
     UiRect gear{};                // extrema direita (ancorado)
-    bool   showPlatform = true;   // o chip some primeiro no aperto (informativo)
-    f32    iconSize = 24.0f;      // 24dp dentro dos alvos 48dp (spec A)
+    f32    iconSize = 24.0f;      // 20dp dentro dos alvos da linha (PASSO 1)
 };
 
 // resolve o layout da barra única (tabs ao centro, gear SEMPRE à direita,
@@ -97,10 +106,11 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
 struct TopBarActions {
     bool menuDropdown = false;
     bool cenaDropdown = false;
+    bool undoPressed  = false;    // FASE UI B: subiram do viewport
+    bool redoPressed  = false;
+    bool savePressed  = false;
     bool playPressed  = false;
-    bool pausePressed = false;
     bool stopPressed  = false;    // 0.9.6.10: o ■ explícito (sai do play)
-    bool platformPressed = false; // 0.9.6.10: o chip do alvo (informativo)
     bool gearPressed  = false;    // abre a página de Settings (spec I)
     bool modeChanged  = false;    // uma das tabs [3D|UI|ÁUDIO] mudou o modo
 };
@@ -115,10 +125,11 @@ TopBarActions drawTopBar(UiContext& ui, EditorState& st);
 struct Actions {
     bool menuDropdown = false;
     bool cenaDropdown = false;
+    bool undoPressed  = false;
+    bool redoPressed  = false;
+    bool savePressed  = false;
     bool playPressed  = false;
-    bool pausePressed = false;
     bool stopPressed  = false;
-    bool platformPressed = false;
     bool gearPressed  = false;
     bool modeChanged  = false;
 };

@@ -37,14 +37,13 @@ namespace {
 // o CHIP de plataforma antes do gear (o alvo REAL: Android)
 f32 kPadOuter()  { return theme::dp(12.0f); }   // margem da barra aos extremos
 f32 kBtnH()      { return theme::dp(safe::kTopBarH); }  // alvo = a linha toda
-f32 kChipH()     { return theme::dp(28.0f); }  // o DESENHO do botão (na barra 36)
-f32 kLogoW()     { return theme::dp(40.0f); }  // o G âmbar (alvo inteiro)
+f32 kChipH()     { return theme::dp(28.0f); }  // o DESENHO do botão (na barra 40)
+f32 kLogoW()     { return theme::dp(40.0f); }  // o G brasa (alvo inteiro)
 f32 kMenuW()     { return theme::dp(84.0f); }  // [≡ Menu]  (ícone + palavra)
 f32 kCenaW()     { return theme::dp(92.0f); }  // [Cena ▾] — largura para
                                                 // o rótulo inteiro
 f32 kTabW()      { return theme::dp(72.0f); }  // cada tab [3D]/[UI]/[ÁUDIO]
-f32 kIconBtn()   { return theme::dp(40.0f); }  // [play][pause][stop][gear]
-f32 kPlatW()     { return theme::dp(76.0f); }  // o chip [Android ▾]
+f32 kIconBtn()   { return theme::dp(40.0f); }  // [↶][↷][save][▶][■][⚙]
 f32 kGroupGap()  { return theme::dp(12.0f); }  // vão entre grupos
 f32 kIconS()     { return theme::dp(20.0f); }  // PASSO 1: os ícones da barra
 
@@ -107,8 +106,10 @@ bool textIconButton(UiContext& ui, u64 id, const UiRect& r,
     return pressed;
 }
 
-// botão de ÍCONE puro (pause/play/gear): held = fill surface2 NO CHIP,
-// ícone text1 (o accent fica para ESTADOS, não para repouso — spec A)
+// botão de ÍCONE puro (undo/redo/save/play/stop/gear): held = fill
+// surface2 NO CHIP, ícone text1 (o destaque fica para ESTADOS — spec A).
+// O desativado (undo/redo sem histórico) desenha o glifo a 0.35 — o
+// toque continua a informar (o toast «nada a desfazer» de sempre)
 // 0.12-C (C-2): o PLAY EM DESTAQUE QUANDO ATIVO (a ordem do dono) — em
 // playMode o play É A CHAMA (o padrão Y-1 dos ativos: o gradiente vertical
 // accent→accent2 no chip 28dp + a tinta escura por cima)
@@ -117,7 +118,7 @@ bool textIconButton(UiContext& ui, u64 id, const UiRect& r,
 // nota no drawButtonVisual do UiContext). O glassTopLine do topo regressa.
 // Em repouso SEM fundo (o chip transparente de sempre — nada desenhar).
 bool iconButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
-                bool active = false) {
+                bool active = false, bool enabled = true) {
     // PASSO 1: o alvo é a LINHA da barra (36dp — o piso kRowFloorDp)
     ui.auditRowFloorNext(layout::kRowFloorDp);
     const bool pressed = ui.widgetHit(id, r.x, r.y, r.w, r.h);
@@ -144,10 +145,18 @@ bool iconButton(UiContext& ui, u64 id, const UiRect& r, icons::Icon icon,
     }
     const f32 s = kIconS();
     if (s >= theme::dp(12.0f)) {
-        icons::drawIcon(ui, icon, r.x + (r.w - s) * 0.5f,
-                        r.y + (r.h - s) * 0.5f, s,
-                        active ? theme::kTheme.accentInk
-                               : theme::kTheme.text1);
+        if (enabled) {
+            icons::drawIcon(ui, icon, r.x + (r.w - s) * 0.5f,
+                            r.y + (r.h - s) * 0.5f, s,
+                            active ? theme::kTheme.accentInk
+                                   : theme::kTheme.text1);
+        } else {
+            f32 dim[4] = {theme::kTheme.text1[0], theme::kTheme.text1[1],
+                          theme::kTheme.text1[2],
+                          theme::kTheme.text1[3] * 0.35f};
+            icons::drawIcon(ui, icon, r.x + (r.w - s) * 0.5f,
+                            r.y + (r.h - s) * 0.5f, s, dim);
+        }
     }
     return pressed;
 }
@@ -167,15 +176,14 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
         return L;   // degenerado — só o fundo
     }
     // escala graciosa: as larguras naturais encolhem PROPORCIONALMENTE se
-    // o ecrã for estreito. Os botões de ÍCONE (play/pause/stop/gear + o
-    // LOGO) NUNCA ENCOLHEM (o alvo 40dp é o PISO); o k divide
-    // só Menu/Cena/tabs/plataforma. A DEGRADAÇÃO HONESTA (GRUPO UI,
-    // recalibrada 0.12-QoL A: o NOME da marca JÁ NÃO EXISTE — o primeiro a
-    // sair é o CHIP da plataforma (k<0.62 — é informativo, o alvo REAL é
-    // sempre Android; fica na lista honesta do relatório).
-    const f32 nIcon = 5;   // play/pause/stop/gear + logo
-    f32 natFlex = kMenuW() + theme::dp(4.0f) + kCenaW() + 3.0f * kTabW() +
-                  kPlatW();
+    // o ecrã for estreito. Os botões de ÍCONE (undo/redo/save/play/stop/
+    // gear + o LOGO) NUNCA ENCOLHEM (o alvo 40dp é o PISO); o k divide
+    // só Menu/Cena/tabs. FASE UI B: o chip da plataforma SAIU da barra
+    // (a linha «Plataforma» vive nas Definições) — a degradação é a
+    // escada k do flex com o piso 0.55 (a banda <580dp é a degradação
+    // documentada: o editor é paisagem-first; o relatório diz)
+    const f32 nIcon = 7;   // undo/redo/save/play/stop/gear + logo
+    f32 natFlex = kMenuW() + theme::dp(4.0f) + kCenaW() + 3.0f * kTabW();
     const f32 natW = natFlex + nIcon * kIconBtn() + 2.0f * theme::dp(8.0f);
     auto scaleK = [&](f32 flexW) {
         const f32 iconsW = nIcon * kIconBtn();
@@ -188,18 +196,13 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
     if (natW + 4.0f * kGroupGap() > avail) {
         k = scaleK(natFlex);
     }
-    L.showPlatform = k >= 0.62f;
-    if (!L.showPlatform) {
-        natFlex -= kPlatW();
-        k = scaleK(natFlex);
-    }
     L.menu.w  = kMenuW() * k;
     L.cena.w  = kCenaW() * k;
     L.tab3d.w = L.tabUi.w = L.tabAudio.w = kTabW() * k;
-    L.platform.w = kPlatW() * k;
     L.logo.w  = kIconBtn();
     // os botões de ÍCONE nunca encolhem (o piso 40dp da casa)
-    L.play.w = L.pause.w = L.stop.w = L.gear.w = kIconBtn();
+    L.undo.w = L.redo.w = L.save.w = kIconBtn();
+    L.play.w = L.stop.w = L.gear.w = kIconBtn();
     L.iconSize = kIconS();
 
     const f32 by = L.bar.y + (L.bar.h - kBtnH()) * 0.5f;
@@ -215,19 +218,19 @@ TopBarLayout topbarLayout(f32 sw, f32 sh, const safe::Insets& in,
     place(L.menu, x);            x += L.menu.w;
     place(L.cena, x + theme::dp(4.0f));     x += theme::dp(4.0f) + L.cena.w;
 
-    // ---- direita: [play][pause][stop][Android ▾][gear] (ancorados) ----
+    // ---- direita: [↶][↷][save][▶][■][⚙] (ancorados; FASE UI B) ----
     f32 rgx = L.bar.x + L.bar.w - kPadOuter() - L.gear.w;
     place(L.gear, rgx);          rgx -= theme::dp(8.0f);
-    if (L.showPlatform) {
-        rgx -= L.platform.w;
-        place(L.platform, rgx);  rgx -= theme::dp(8.0f);
-    }
     rgx -= L.stop.w;
     place(L.stop, rgx);          rgx -= theme::dp(8.0f);
-    rgx -= L.pause.w;
-    place(L.pause, rgx);         rgx -= theme::dp(8.0f);
     rgx -= L.play.w;
-    place(L.play, rgx);
+    place(L.play, rgx);          rgx -= theme::dp(8.0f);
+    rgx -= L.save.w;
+    place(L.save, rgx);          rgx -= theme::dp(8.0f);
+    rgx -= L.redo.w;
+    place(L.redo, rgx);          rgx -= theme::dp(8.0f);
+    rgx -= L.undo.w;
+    place(L.undo, rgx);
 
     // ---- centro: as tabs [3D][UI][ÁUDIO] — centradas na BARRA; se não
     // couberem entre a esquerda e a direita, comprimem-se ao espaço útil ----
@@ -369,12 +372,12 @@ TopBarActions drawTopBar(UiContext& ui, EditorState& st) {
     // o auto-save grava (a ordem do dono: «um pequeno ícone no canto
     // superior (tipo uma nuvem ou um visto ✓) que pisca quando o
     // auto-save ocorre, para o utilizador saber que está seguro»). Vive
-    // à ESQUERDA do grupo play/pause (o canto superior direito); o alpha
+    // à ESQUERDA do grupo da direita (o canto superior direito); o alpha
     // oscila (o piscar) enquanto st.autosaveFlash > 0 — o main decai.
     if (st.autosaveFlash > 0.0f) {
         const f32 isz = theme::dp(20.0f);
-        const f32 ix = L.play.x - theme::dp(8.0f) - isz;
-        const f32 iy = L.play.y + (L.play.h - isz) * 0.5f;
+        const f32 ix = L.undo.x - theme::dp(8.0f) - isz;
+        const f32 iy = L.undo.y + (L.undo.h - isz) * 0.5f;
         // o piscar: o seno do tempo restante (2 ciclos por segundo) —
         // o alpha nunca desce de 0.25 (o ✓ nunca desaparece a meio)
         const f32 wave = 0.625f + 0.375f * std::sin(st.autosaveFlash *
@@ -383,55 +386,30 @@ TopBarActions drawTopBar(UiContext& ui, EditorState& st) {
                      theme::kTheme.ok[2], wave};
         icons::drawIcon(ui, icons::Icon::Check, ix, iy, isz, ck);
     }
+    // FASE UI B — a direita NOVA: desfazer/refazer/guardar (subiram do
+    // viewport) + play/stop/gear. O desativado (sem histórico) desenha o
+    // glifo a 0.35 e o toque segue para o toast honesto do main.
+    if (iconButton(ui, kTbUndoId, L.undo, icons::Icon::Undo, false,
+                   st.canUndo)) {
+        a.undoPressed = true;
+    }
+    if (iconButton(ui, kTbRedoId, L.redo, icons::Icon::Redo, false,
+                   st.canRedo)) {
+        a.redoPressed = true;
+    }
+    if (iconButton(ui, kTbSaveId, L.save, icons::Icon::Save)) {
+        a.savePressed = true;
+    }
     // 0.12-C (C-2): o PLAY EM DESTAQUE quando ativo (a ordem do dono) —
     // em playMode o botão é A CHAMA (o gradiente dos ativos da Y-1)
     if (iconButton(ui, kTbPlayId, L.play, icons::Icon::Play, st.playMode)) {
         a.playPressed = true;
     }
-    if (iconButton(ui, kTbPauseId, L.pause, icons::Icon::Pause)) {
-        a.pausePressed = true;
-    }
     // 0.9.6.10 (GRUPO UI · a imagem 1): o STOP explícito — o ■ ao lado do
-    // play/pause (o main sai do modo play; em editor fica esbatido — o
-    // estado é o mesmo do play/pause defensivo de sempre)
+    // play (o main sai do modo play; em editor fica esbatido — o
+    // estado é o mesmo do play defensivo de sempre)
     if (iconButton(ui, kTbStopId, L.stop, icons::Icon::Stop)) {
         a.stopPressed = true;
-    }
-    // o CHIP da plataforma (a imagem 1: o seletor): o alvo REAL da build —
-    // "Android" (o toque informa; NÃO há alvos falsos para escolher — a
-    // lista honesta do relatório diz exactamente isto)
-    if (L.showPlatform) {
-        const UiRect& r = L.platform;
-        const bool held = ui.widgetActive(kTbPlatformId);
-        ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusField),
-                        held ? theme::kTheme.surface2 : theme::kTheme.surface);
-        ui.frameRounded(r.x, r.y, r.w, r.h, 1.0f,
-                        theme::dp(theme::kRadiusField), theme::kTheme.border);
-        if (ui.hasFont()) {
-            const TextMetrics m = ui.textMetrics();
-            const f32 tw = ui.fontWidth("Android");
-            const f32 gap = theme::dp(4.0f);
-            const f32 total = tw + gap + theme::dp(8.0f);
-            const f32 x0 = r.x + (r.w - total) * 0.5f;
-            // PASSO 1: o chip em CAPTION 12sp
-            ui.labelStyled(x0, r.y + (r.h - m.block()) * 0.5f + m.ascent,
-                           "Android", theme::kTheme.text2,
-                           theme::fontScale(theme::kFontCaption), 0);
-            // o caret ▾ do chip
-            const f32 cy = r.y + r.h * 0.5f;
-            const f32 cx = x0 + tw + gap + theme::dp(4.0f);
-            const f32 col[4] = {theme::kTheme.text2[0], theme::kTheme.text2[1],
-                                theme::kTheme.text2[2], 1.0f};
-            ui.drawLine(cx - theme::dp(3.0f), cy - theme::dp(2.0f), cx,
-                        cy + theme::dp(2.0f), theme::dp(2.0f), col);
-            ui.drawLine(cx, cy + theme::dp(2.0f), cx + theme::dp(3.0f),
-                        cy - theme::dp(2.0f), theme::dp(2.0f), col);
-        }
-        // PASSO 1: o chip também é da LINHA (36dp — kRowFloorDp)
-        ui.auditRowFloorNext(layout::kRowFloorDp);
-        if (ui.widgetHit(kTbPlatformId, r.x, r.y, r.w, r.h)) {
-            a.platformPressed = true;
-        }
     }
     if (iconButton(ui, kTbGearId, L.gear, icons::Icon::Gear)) {
         a.gearPressed = true;
@@ -447,10 +425,11 @@ Actions draw(UiContext& ui, EditorState& st) {
     const TopBarActions t = drawTopBar(ui, st);
     a.menuDropdown = t.menuDropdown;
     a.cenaDropdown = t.cenaDropdown;
+    a.undoPressed  = t.undoPressed;
+    a.redoPressed  = t.redoPressed;
+    a.savePressed  = t.savePressed;
     a.playPressed  = t.playPressed;
-    a.pausePressed = t.pausePressed;
     a.stopPressed  = t.stopPressed;
-    a.platformPressed = t.platformPressed;
     a.gearPressed  = t.gearPressed;
     a.modeChanged  = t.modeChanged;
     return a;

@@ -101,3 +101,64 @@ fonte única funciona).
 da sandbox excluídos via GONI_SKIP — o CI é o árbitro) · theme_hex/ui_vocab/
 projects_ui VERDES · **versionCode 111** (o §14 do RELATORIO-0.9.6.md
 declara o par no MESMO commit).
+
+## §2 PARTE B — BARRA SUPERIOR (40dp, a ordem do dono)
+
+**O que mudou**:
+
+- **A ALTURA**: safe::kTopBarH 36 → 40dp (o toque mínimo da fase vale
+  para TODA a barra; os ~4dp poupados vão ao viewport).
+- **A DIREITA NOVA**: [↶ desfazer][↷ refazer][💾 guardar][▶ Play][■ Stop]
+  [⚙ definições] — o undo/redo/save SUBIRAM do viewport (a fila do topo
+  do chrome morre e fica o chip ⋯; os ids 30/31/32 ficam APOSENTADOS, os
+  novos 20/21/22 fora das faixas existentes). O despacho vive no bloco
+  da barra e vale em TODOS os modos (3D/UI/Áudio — a barra é comum). O
+  desativado (sem histórico) desenha o glifo a 0.35 e o toque segue para
+  o toast honesto («nada a desfazer» — o caminho de sempre).
+- **O PAUSE SAIU DA BARRA** (a ordem: «para dentro de um menu do Play»):
+  vive na PLAY BAR (o botão [Pausar]/[Retomar], id 6, ao lado do Stop) e
+  o estado é REAL — o main congela o mundo (os passos fixos não correm, o
+  acumulador do tempo não cresce: o play retoma exatamente onde parou), o
+  render continua e a barra diz «em pausa · fps N». O id 3 (kTbPauseId)
+  fica APOSENTADO (o padrão D21).
+- **O SELETOR «Android» SAIU DA BARRA** (a ordem: «para dentro das
+  definições»): a linha informativa «plataforma: Mobile (Android)» na
+  secção Geral do Settings (o alvo REAL da build; não há outros alvos —
+  a honestidade de sempre). O id 19 fica APOSENTADO.
+- **A DEGRADAÇÃO**: o chip da plataforma já não é o primeiro a ceder (não
+  existe) — a escada é o k do flex com o piso 0.55; a banda <580dp é a
+  degradação documentada (o editor é paisagem-first; §8).
+- **O ACHADO DO CI (a lacuna dos DOIS alvos de novo)**: o commit A ficou
+  VERMELHO no CI — a sonda 35.2 do c33_virtual aferrava a LINHA ÂMBAR
+  (o build local não compilava o c33: o build_tests.py só leva o
+  test_core). A cura no MESMO commit da B: a sonda lê A BRASA e nasce o
+  **scripts/build_c33.py** (o irmão do build_tests.py — o gate da casa é
+  compilar os DOIS alvos; a lição do 585217f registrada na ferramenta).
+  O c33 apanhou MAIS 11 sondas stale (as geometrias dos pickers com
+  linhas de 48dp sem o chrome, a fila de 4, as alturas 36) — todas
+  recalibradas com o harness a MIRROR o overlayArea real (a medição dos
+  quads provou o y+31/36dp).
+
+**Pins**: ui_topbar_40dp_composicao (test_fase_ui.cpp — a altura 40 na
+fonte única, os ids novos fora das faixas, o kPlayPauseId=6 na play bar,
+a FONTE sem kTbPauseId/kTbPlatformId e com os 3 novos, a linha
+«plataforma» nas Definições) · ui_sobreposicao_topbar estendido à direita
+nova (12 alvos, 5 ecrãs ≥640dp) · recalibrações com nota: test_toolbar
+(2 pins), test_012c_chrome (topbar_3_zonas + menu_scroll 640 +
+menu_ancorado), test_012qol (o showPlatform morreu), test_safearea (4
+valores derivados), test_wiring090 (o G29 + a fila), test_sentinels
+(densidade 80px, os ids aposentados, o chip único), test_playui (a
+assinatura do pause), c33_virtual (9 sondas).
+
+**Mutação M-UIb** (a barra volta a 36 — a ordem do dono violada):
+
+```
+ui_topbar_40dp_composicao ... FALHOU  test_fase_ui.cpp:143  nearEqF(safe::kTopBarH, 40.0f, 1e-4f)
+```
+
+Reposto: 0 falhas (test_core + c33_virtual 1009/0 — os DOIS alvos, o CI
+é o árbitro).
+
+**Verificação**: test_core 0 falhas · c33_virtual 1009/0 local (os DOIS
+alvos) · docs-lint VERDE · release-identity/R-015 VERDE vc 112 ·
+**versionCode 112** (o §14 declara o par no MESMO commit).

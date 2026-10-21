@@ -67,9 +67,12 @@ struct EditorState;
 namespace vpchrome {
 
 // ---- ids (faixa 30..39 — livre desde a F5; presets 20..23, scroll 41..46) --
-constexpr u64 kVpUndoId    = 30;
-constexpr u64 kVpRedoId    = 31;
-constexpr u64 kVpSaveId    = 32;
+// FASE UI B (a ordem do dono): o undo/redo/save SUBIRAM para a barra de
+// topo — os ids 30/31/32 ficam APOSENTADOS (o padrão do 38: nunca voltam;
+// o ⋯ mantém o menu de ficheiro ancorado, o MESMO kVpMenuId de sempre)
+constexpr u64 kVpUndoIdRetired = 30;
+constexpr u64 kVpRedoIdRetired = 31;
+constexpr u64 kVpSaveIdRetired = 32;
 constexpr u64 kVpSelectId  = 35;   // modo Selecionar (cursor — SEM gizmo)
 constexpr u64 kVpSnapValId = 36;   // botão de ÍMAN (toggle do snap)
 constexpr u64 kVpMenuId    = 37;   // PASSO 3: o ⋯ do topo-esquerdo (abre o
@@ -93,8 +96,8 @@ constexpr u64 kVpGizmoId   = 39;   // PASSO 3: o gizmo 40dp do topo-direito
 
 // ---- estado que o chrome precisa (o main possui TUDO; aqui só flags) -------
 struct ChromeState {
-    bool canUndo = false;     // há operações na pilha (botão aceso)
-    bool canRedo = false;
+    // FASE UI B: o canUndo/canRedo MORREU daqui (o undo/redo subiram para
+    // a barra de topo — o estado vive no EditorState e é consumido lá)
     f32  snapValue = 0.5f;    // o valor do snap (0 = snap off)
     // canPaste REMOVIDO no PASSO 3 (o botão Colar saiu da viewport; o menu
     // ⋯ cola pelo estado g_clipValid do main — nada a apagar aqui)
@@ -131,7 +134,8 @@ struct Layout {
     u32    railCols = 1;
     bool   railVisible = true;   // false = viewport tão baixo que nem 2
                                  // colunas cabem (a degradação honesta)
-    UiRect quick[4]{};        // desfazer/refazer/guardar/⋯ (fila do topo)
+    UiRect quick[1]{};        // o ⋯ (FASE UI B: a fila perdeu o undo/redo/
+                              // save — subiram para a barra de topo)
     UiRect gizmoBtn{};        // o gizmo 40dp do topo-direito
     // 0.9.6.19b (D21): addTicBtn/plusPanel REMOVIDOS — o [+] morreu
     // os PAIS DE VIDRO (a regra do pai-painelinho — nada flutua sem pai)
@@ -158,9 +162,8 @@ Layout layout(const UiRect& view);
 // menu de ficheiro (st.fileMenu + as âncoras st.menuAx/menuAy); o gizmo
 // alterna st.selectMode. Devolve as ações do frame (o main executa).
 struct Actions {
-    bool undoPressed  = false;
-    bool redoPressed  = false;
-    bool savePressed  = false;
+    // FASE UI B: o undoPressed/redoPressed/savePressed MORRERAM (os botões
+    // subiram para a barra de topo — os consumos vivem no bloco ta.*)
     bool menuPressed  = false;    // PASSO 3: o ⋯ do topo-esquerdo
     // 0.9.6.19b (D21): addTicPressed REMOVIDO — o [+] do viewport morreu
 };

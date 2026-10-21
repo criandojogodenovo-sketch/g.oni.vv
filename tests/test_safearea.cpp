@@ -106,7 +106,7 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     // scroll morria — maxOffset 0
     const f32 contentOld = 536.0f;
     const f32 listOld = (720.0f - kToolbarH - kStatusH) - kHeaderH - 4.0f;
-    EXPECT(nearEqF(listOld, 652.0f));   // PASSO 1: kToolbarH=36, kHeaderH=28
+    EXPECT(nearEqF(listOld, 648.0f));   // FASE UI B: kToolbarH=40, kHeaderH=28
     EXPECT(nearEqF(scroll::maxOffset(contentOld, listOld), 0.0f));   // bug antigo
 
     // F5.0-fix → 0.9.0: o plano tem SECÇÕES COLAPSÁVEIS de 48dp (spec C) e
@@ -140,11 +140,12 @@ TEST(safearea_inspector_scroll_ativa_com_nav_bar) {
     // DEPOIS: painel dentro do contentRect [0,24,·,628] (status 24 + nav 92)
     const Insets in = insetsFromContentRect(1600.0f, 720.0f, 0, 24, 1600, 628);
     const UiRect panel = inspectorPanelRect(1600.0f, 720.0f, in);
-    // FASE 9 (G2-10): 476 = 428 + 48; PASSO 1 (0.9.6.14): 536 = 428 + 36
-    // (barra 36, tabs de baixo 32, status 0 — o viewport/painel ganham)
-    EXPECT(nearEqF(panel.h, 536.0f));
+    // FASE 9 (G2-10): 476 = 428 + 48; PASSO 1: 536 = 428 + 36; FASE UI B:
+    // 532 = 428 + 40 − 32? NÃO: o painel vive no contentRect [24..628] —
+    // 628−24−40 (a barra do dono)−32 (tabs) = 532
+    EXPECT(nearEqF(panel.h, 532.0f));
     const f32 listH = panel.h - kHeaderH - 4.0f;
-    EXPECT(nearEqF(listH, 504.0f));   // 536 − 28 (cabeçalho) − 4
+    EXPECT(nearEqF(listH, 500.0f));   // 532 − 28 (cabeçalho) − 4
     const f32 mo = scroll::maxOffset(contentH, listH);
     EXPECT(mo > 0.0f);                        // scroll ATIVA
     EXPECT(nearEqF(mo, contentH - listH));
@@ -180,10 +181,10 @@ TEST(safearea_hierarchy_com_insets_todos_os_tics) {
     // PASSO 1: cabeçalho 28 + LINHA DE PESQUISA 32 (spec B/PASSO 1)
     const f32 listTop = panel.y + kHeaderH + kSearchRowH;
     const f32 listH = panel.h - kHeaderH - kSearchRowH;
-    EXPECT(nearEqF(listH, 476.0f));   // panel 536 (60..596) − 28 − 32
+    EXPECT(nearEqF(listH, 472.0f));   // panel 532 − 28 − 32 (FASE UI B)
 
     const f32 off = scroll::clampOffset(999.0f, contentH, listH);
-    EXPECT(nearEqF(off, 244.0f));    // 720 − 476
+    EXPECT(nearEqF(off, 248.0f));    // 720 − 472
     // última linha (a 20.ª) inteira dentro da região com o offset no máximo
     const f32 row19 = listTop + 19.0f * kRowH - off;
     EXPECT(row19 >= listTop);

@@ -1512,7 +1512,7 @@ TEST(regress_density_escala_dp) {
     // ---- (a) densidade 2.0 (o par do C33): os dp duplicam ------------------
     theme::setDensity(2.0f);
     const UiRect bar = safe::toolbarRect(1536.0f, 720.0f, zero);
-    EXPECT(nearEqF(bar.h, 72.0f));   // PASSO 1: 36dp REAL (o bug era 56px)
+    EXPECT(nearEqF(bar.h, 80.0f));   // FASE UI B: 40dp REAL (era 36→72)
     EXPECT(nearEqF(theme::dp(48.0f), 96.0f));   // o dp é dp REAL
     const UiRect status = safe::statusRect(1536.0f, 720.0f, zero);
     EXPECT(nearEqF(status.h, 0.0f));   // PASSO 1: a status foi REMOVIDA
@@ -1526,7 +1526,7 @@ TEST(regress_density_escala_dp) {
     // ---- (b) densidade 1.0: o layout da spec PASSO 1 -----------------------
     theme::setDensity(1.0f);
     const UiRect bar1 = safe::toolbarRect(1536.0f, 720.0f, zero);
-    EXPECT(nearEqF(bar1.h, 36.0f));
+    EXPECT(nearEqF(bar1.h, 40.0f));   // FASE UI B: a barra do dono
     EXPECT(nearEqF(theme::dp(48.0f), 48.0f));
     EXPECT(nearEqF(editor::scriptwin::symbolBarHeight(), 40.0f));
 }
@@ -3244,16 +3244,16 @@ TEST(regress_divisores_arrastaveis) {
         const editor::vpchrome::Layout ldev =
             editor::vpchrome::layout(UiRect{200.0f, 56.0f, 288.0f, 208.0f});
         EXPECT(ldev.railVisible && ldev.railCols >= 2u);   // colunas
-        // a fila do topo DESCE para baixo do rail (nunca sai do rect —
-        // 0.9.6.19b · D21: o [+] do fundo-direito MORREU; o canto fica limpo)
-        EXPECT(ldev.quick[0].y > ldev.rail[0].y + ldev.rail[0].h);
+        // FASE UI B (recalibrada com nota): o chip ⋯ ÚNICO CABE no topo
+        // (a fila de 4 descia — o chip de 40dp respira ao lado do rail;
+        // nunca sai do rect — a regra de sempre)
         // TODOS os alvos ≥40dp (PASSO 1: a lei de ouro) e DENTRO do rect
         // (o stack TRANBORDAVA antes do Grupo D). D21: os alvos eram N−1;
         // 0.12-C (C-2): o gizmo do canto SAIU (o duplicado do Mover) — os
         // alvos do chrome são N−2 (9: o rail 5 + a fila 4)
+        // FASE UI B: a fila é o chip ⋯ único (o undo/redo/save subiram)
         const UiRect all[] = {ldev.rail[0],   ldev.rail[1],  ldev.rail[2],
-                              ldev.rail[3],   ldev.rail[4],  ldev.quick[0],
-                              ldev.quick[1],  ldev.quick[2], ldev.quick[3]};
+                              ldev.rail[3],   ldev.rail[4],  ldev.quick[0]};
         for (const UiRect& r : all) {
             EXPECT(r.w >= 40.0f - 0.01f && r.h >= 40.0f - 0.01f);
             EXPECT(r.x >= 200.0f - 0.01f && r.y >= 56.0f - 0.01f);
@@ -4047,9 +4047,10 @@ TEST(regress_hierarquia_contrato) {
             // (PASSO 3: o rail de ferramentas + a fila do topo + o gizmo.
             // D21 (0.9.6.19b): o [+] do fundo-direito saiu — os alvos são
             // N−1 (10) e o §1/§3 do contrato perderam o [+] e kCornerBtn)
-            const UiRect targets[10] = {
+            // FASE UI B: a fila é o chip ⋯ único (N−1 alvos)
+            const UiRect targets[7] = {
                 L.rail[0], L.rail[1], L.rail[2], L.rail[3], L.rail[4],
-                L.quick[0], L.quick[1], L.quick[2], L.quick[3], L.gizmoBtn};
+                L.quick[0], L.gizmoBtn};
             for (const UiRect& r : targets) {
                 if (r.w > 0.0f && r.h > 0.0f) {   // degenerado = escondido
                     EXPECT_MSG(safe::rectInside(r, view),
@@ -4177,10 +4178,9 @@ TEST(regress_texto_strip_campo) {
             }
             // (b) os 10 alvos ≥40dp e DENTRO do rect (a lei de ouro; D21:
             // o [+] saiu — N−1)
-            const UiRect all[10] = {L.rail[0],   L.rail[1],   L.rail[2],
-                                    L.rail[3],   L.rail[4],   L.quick[0],
-                                    L.quick[1],  L.quick[2],  L.quick[3],
-                                    L.gizmoBtn};
+            const UiRect all[7] = {L.rail[0],  L.rail[1],  L.rail[2],
+                                   L.rail[3],  L.rail[4],  L.quick[0],
+                                   L.gizmoBtn};
             for (const UiRect& r : all) {
                 if (r.w > 0.0f && r.h > 0.0f) {
                     EXPECT_MSG(r.w >= theme::dp(40.0f) - 0.5f &&
@@ -4195,11 +4195,12 @@ TEST(regress_texto_strip_campo) {
                                tag);
                 }
             }
-            // (d) a fila do topo NUNCA pisa o gizmo (mesma banda de y)
+            // (d) o chip do topo NUNCA pisa o gizmo (mesma banda de y;
+            // FASE UI B: o chip é o único da fila)
             if (L.quick[0].w > 0.0f &&
                 L.quick[0].y < L.gizmoBtn.y + L.gizmoBtn.h &&
                 L.gizmoBtn.y < L.quick[0].y + L.quick[0].h) {
-                EXPECT(L.quick[3].x + L.quick[3].w <= L.gizmoPanel.x + 0.5f);
+                EXPECT(L.quick[0].x + L.quick[0].w <= L.gizmoPanel.x + 0.5f);
             }
             return L;
         };
@@ -4211,17 +4212,19 @@ TEST(regress_texto_strip_campo) {
         // direito tornaram-se taautológicas com os rects ZERO e saem; a
         // prova do canto limpo é o lt/vtt abaixo (gizmoBtn == 0)
 
-        // (c) a ESCADA: 220dp — o rail 2 colunas e a fila DESCE
+        // (c) a ESCADA: 220dp — o rail 2 colunas; FASE UI B: o chip ⋯
+        // único cabe no TOPO (a fila de 4 descia — o chip respira)
         {
             const editor::vpchrome::Layout ln = checkLayout("220dp", 220.0f, 208.0f);
             EXPECT(ln.railVisible && ln.railCols >= 2u);
             EXPECT(ln.quick[0].w > 0.0f);
-            EXPECT(ln.quick[0].y > ln.rail[0].y + ln.rail[0].h);
+            EXPECT(ln.quick[0].y <= ln.rail[0].y + ln.rail[0].h);
         }
-        // 140dp — a fila do topo JÁ NÃO CABE (esconde; o resto fica)
+        // 140dp — FASE UI B: o chip ÚNICO CABE (a fila de 4 escondia — o
+        // chip de 40dp respira ao lado do rail)
         {
             const editor::vpchrome::Layout lt = checkLayout("140dp", 140.0f, 208.0f);
-            EXPECT(lt.quick[0].w == 0.0f);   // a fila esconde (honesto)
+            EXPECT(lt.quick[0].w > 0.0f);   // o chip cabe (o único)
             // 0.12-C (C-2): o gizmo saiu — o canto direito fica LIMPO
             EXPECT(lt.gizmoBtn.w == 0.0f);
         }
@@ -4963,22 +4966,35 @@ TEST(regress_hotfix_defeitos) {
         EXPECT(thumb::targetWidth(c.w) == 256u);
     }
 
-    // ---- (5) D8: undo/redo SÓ na fila do topo (o rail não repete) -------
+    // ---- (5) D8: os ids de ação NUNCA colidem (FASE UI B recalibra: o
+    // undo/redo/save SUBIRAM para a barra de topo — os ids 30..32 do
+    // viewport ficam APOSENTADOS e o rail usa SÓ ids de ferramenta
+    // (35/36 + os kGizmoIds); o undo/redo/save da barra vivem em 20..22,
+    // fora das faixas do chrome e das ferramentas — R-022 estendida)
     {
-        // os ids de AÇÃO do chrome do viewport: undo/redo/save vivem na
-        // FILA DO TOPO (30..32) e o rail usa SÓ ids de ferramenta
-        // (35/36 + os kGizmoIds) — nenhum id de ação aparece em dois
-        // containers (R-022 estendida)
-        EXPECT(editor::vpchrome::kVpUndoId < editor::vpchrome::kVpSelectId);
-        EXPECT(editor::vpchrome::kVpRedoId < editor::vpchrome::kVpSelectId);
-        EXPECT(editor::vpchrome::kVpSelectId != editor::vpchrome::kVpUndoId &&
-               editor::vpchrome::kVpSnapValId != editor::vpchrome::kVpUndoId &&
-               editor::vpchrome::kVpSnapValId != editor::vpchrome::kVpRedoId &&
-               editor::vpchrome::kVpSnapValId != editor::vpchrome::kVpSaveId);
-        // as 5 ferramentas do rail têm ids PRÓPRIOS (cursor/gizmo 0..2/ímã)
-        EXPECT(editor::toolbar::kGizmoIds[0] != editor::vpchrome::kVpUndoId &&
-               editor::toolbar::kGizmoIds[1] != editor::vpchrome::kVpUndoId &&
-               editor::toolbar::kGizmoIds[2] != editor::vpchrome::kVpUndoId);
+        EXPECT(editor::vpchrome::kVpUndoIdRetired <
+               editor::vpchrome::kVpSelectId);
+        EXPECT(editor::vpchrome::kVpRedoIdRetired <
+               editor::vpchrome::kVpSelectId);
+        EXPECT(editor::vpchrome::kVpSelectId !=
+               editor::vpchrome::kVpUndoIdRetired &&
+               editor::vpchrome::kVpSnapValId !=
+                   editor::vpchrome::kVpUndoIdRetired &&
+               editor::vpchrome::kVpSnapValId !=
+                   editor::vpchrome::kVpRedoIdRetired &&
+               editor::vpchrome::kVpSnapValId !=
+                   editor::vpchrome::kVpSaveIdRetired);
+        // as ferramentas do rail têm ids PRÓPRIOS (cursor/gizmo 0..2/ímã)
+        EXPECT(editor::toolbar::kGizmoIds[0] !=
+                   editor::vpchrome::kVpUndoIdRetired &&
+               editor::toolbar::kGizmoIds[1] !=
+                   editor::vpchrome::kVpUndoIdRetired &&
+               editor::toolbar::kGizmoIds[2] !=
+                   editor::vpchrome::kVpUndoIdRetired);
+        // FASE UI B: os ids novos da barra (20..22) não colidem com
+        // NENHUMA faixa existente (a barra 1..19, o rail 30..39)
+        EXPECT(editor::toolbar::kTbUndoId > editor::toolbar::kTbGearId &&
+               editor::toolbar::kTbSaveId < editor::vpchrome::kVpUndoIdRetired);
         // o glifo do ÍMAN já não lê como "U": a ferradura nova tem os
         // CAPACETES dos pólos mais largos que os braços (7 segmentos, o
         // traço do conjunto) — a prova visual é o PNG P-05

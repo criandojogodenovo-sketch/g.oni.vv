@@ -98,7 +98,8 @@ struct Env {
 
         ui.beginFrame(nullptr, &input, kSW, kSH);
         if (st.playMode) {
-            if (drawPlayBar(ui, input, kSW, kSH, fps)) {
+            bool pToggled = false;   // FASE UI B: a assinatura do pause
+            if (drawPlayBar(ui, input, kSW, kSH, fps, false, pToggled)) {
                 leavePlay();
             }
         } else {
