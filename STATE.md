@@ -2,7 +2,8 @@
 
 Atualizado: 2026-10-21 · vc: 110 · Último commit: este (o 0.12-Y D — o
 CÉU PROCEDURAL com nuvens animadas no WorldEnvironment: SkyRenderer + o
-skyType no .goni + o Inspector condicional; M-Yd1/2)
+skyType no .goni + o Inspector condicional; M-Yd1/2; o fix do replay —
+os 17 chamadores do drawTics no c33_virtual com view+proj, 1009/0)
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.

@@ -8997,7 +8997,7 @@ int main() {
             const int cdAntes = glstub::stats.cullDisableCalls;
             const Mat4 view25 = g_camera.view();
             const Mat4 proj25 = g_camera.proj(1512.0f / 696.0f);
-            drawTics(Mat4::mul(proj25, view25), g_camera.eye());
+            drawTics(Mat4::mul(proj25, view25), g_camera.eye(), view25, proj25);
             // O PIN DO BLEND: o passe do vidro ligou o blend clássico com
             // a escrita de depth OFF (o 1.º drawMesh do blend)
             check(glstub::stats.blendFuncCalls - blendAntes == 1,
@@ -9245,7 +9245,7 @@ int main() {
             g_renderer.beginFrame();
             const Mat4 view26 = g_camera.view();
             const Mat4 proj26 = g_camera.proj(1512.0f / 696.0f);
-            const DrawStats st26 = drawTics(Mat4::mul(proj26, view26), g_camera.eye());
+            const DrawStats st26 = drawTics(Mat4::mul(proj26, view26), g_camera.eye(), view26, proj26);
             check(st26.drawCalls == 1,
                   "26.4a o personagem DESENHA (1 draw)");
             check(glstub::stats.drawElementsCalls == 1,
@@ -9335,7 +9335,7 @@ int main() {
             g_renderer.beginFrame();
             const Mat4 view26b = g_camera.view();
             const Mat4 proj26b = g_camera.proj(1512.0f / 696.0f);
-            const DrawStats st26b = drawTics(Mat4::mul(proj26b, view26b), g_camera.eye());
+            const DrawStats st26b = drawTics(Mat4::mul(proj26b, view26b), g_camera.eye(), view26b, proj26b);
             check(st26b.drawCalls == 10,
                   "26.5b O PIN: 10 draws (UM por personagem — a casa não "
                   "batcha skin, o custo é contado honesto)");
@@ -9463,7 +9463,7 @@ int main() {
                 // ficam TODOS atrás do plano near
                 const Mat4 vp27c =
                     Mat4::ortho(-30.0f, 30.0f, -30.0f, 30.0f, 0.1f, 100.0f);
-                const DrawStats ds27c = drawTics(vp27c, Vec3{0.0f, 0.0f, 0.0f});
+                const DrawStats ds27c = drawTics(vp27c, Vec3{0.0f, 0.0f, 0.0f}, Mat4::identity(), vp27c);
                 check(g_skinFrame.any && g_skinFrame.skinados == 10,
                       "27.2b os 10 skinados vistos pelo draw (o contador "
                       "SkinFrameStats vive — a fonte do HUD)");
@@ -9586,7 +9586,7 @@ int main() {
             g_renderer.beginFrame();
             const Mat4 vp28 =
                 Mat4::ortho(-30.0f, 30.0f, -30.0f, 30.0f, 0.1f, 100.0f);
-            const DrawStats ds28 = drawTics(vp28, Vec3{0.0f, 0.0f, 0.0f});
+            const DrawStats ds28 = drawTics(vp28, Vec3{0.0f, 0.0f, 0.0f}, Mat4::identity(), vp28);
             check(g_blockFrame.any &&
                       glstub::stats.drawElementsInstancedCalls == 1 &&
                       glstub::stats.lastInstanceCount == 6,
@@ -9613,7 +9613,7 @@ int main() {
                 glstub::reset();
                 g_renderer.beginFrame();
                 const DrawStats ds28b =
-                    drawTics(vp28, Vec3{0.0f, 0.0f, 0.0f});
+                    drawTics(vp28, Vec3{0.0f, 0.0f, 0.0f}, Mat4::identity(), vp28);
                 check(g_blockFrame.instancesMerged == 5 &&
                           glstub::stats.drawElementsInstancedCalls == 1 &&
                           glstub::stats.lastInstanceCount == 5,
@@ -9669,7 +9669,7 @@ int main() {
                 blockRebind();
                 glstub::reset();
                 g_renderer.beginFrame();
-                drawTics(vp28, Vec3{0.0f, 0.0f, 0.0f});
+                drawTics(vp28, Vec3{0.0f, 0.0f, 0.0f}, Mat4::identity(), vp28);
                 // a prova RELATIVA: os 6 estáticos fundem (o ÚNICO draw
                 // instanciado é ×6 — o lastInstanceCount diz) e o skinado
                 // desenha INDIVIDUAL (1 drawElements). Se o guard do skin
@@ -9799,7 +9799,7 @@ int main() {
             {
                 glstub::reset();
                 g_renderer.beginFrame();
-                drawTics(vp29, eye29);
+                drawTics(vp29, eye29, Mat4::identity(), vp29);
                 check(g_blockFrame.any && g_blockFrame.total == 72,
                       "29.1a o total é 12 blocos × 6 clones (a colheita)");
                 check(g_blockFrame.loaded ==
@@ -9844,7 +9844,7 @@ int main() {
             {
                 glstub::reset();
                 g_renderer.beginFrame();
-                drawTics(vp29, eye29);
+                drawTics(vp29, eye29, Mat4::identity(), vp29);
                 check(g_blockFrame.loaded == 4,
                       "29.3a a última vaga carrega os 4 que faltavam");
                 check(g_blockFrame.pending == 0,
@@ -9860,7 +9860,7 @@ int main() {
             {
                 glstub::reset();
                 g_renderer.beginFrame();
-                drawTics(vp29, eye29);
+                drawTics(vp29, eye29, Mat4::identity(), vp29);
                 check(g_blockFrame.loaded == 0 && g_blockFrame.pending == 0,
                       "29.4a o steady state (0 loads, 0 pendentes)");
                 check(g_blockFrame.drawn == 72 && g_blockFrame.drawCalls == 12,
@@ -9878,7 +9878,7 @@ int main() {
                 }
                 glstub::reset();
                 g_renderer.beginFrame();
-                drawTics(vp29, eye29);
+                drawTics(vp29, eye29, Mat4::identity(), vp29);
                 check(g_blockFrame.loaded == 0 && g_blockFrame.pending == 0,
                       "29.5b o TIC OFF não conta «a transmitir» (o lazy "
                       "inline de sempre — tudo residente)");
@@ -10017,7 +10017,7 @@ int main() {
             {
                 glstub::reset();
                 g_renderer.beginFrame();
-                drawTics(vp30, eye30);
+                drawTics(vp30, eye30, Mat4::identity(), vp30);
                 check(!g_impFrame.any && g_impFrame.drawn == 0,
                       "30.1a NENHUM impostor com a distância 0 (o OFF)");
                 check(g_blockFrame.drawn == 4,
@@ -10039,7 +10039,7 @@ int main() {
                 setImpDist("impB", 20.0f);
                 glstub::reset();
                 g_renderer.beginFrame();
-                drawTics(vp30, eye30);
+                drawTics(vp30, eye30, Mat4::identity(), vp30);
                 check(g_storage->exists("impostors/imp2b.png"),
                       "30.2a O PIN: o PNG nasceu SOB DEMANDA no storage "
                       "REAL (o pico de RAM foi UM bloco)");
@@ -10086,7 +10086,7 @@ int main() {
                 setImpDist("impB", 60.0f);
                 glstub::reset();
                 g_renderer.beginFrame();
-                drawTics(vp30, eye30);
+                drawTics(vp30, eye30, Mat4::identity(), vp30);
                 check(!g_impFrame.any && g_impFrame.drawn == 0,
                       "30.3a NENHUM impostor a 50 u com o limiar 60 (o "
                       "limiar é EXCLUSIVO no lado longe — o MESMO "
@@ -10155,7 +10155,7 @@ int main() {
                 blockRebind();
                 glstub::reset();
                 g_renderer.beginFrame();
-                drawTics(vp30, eye30);
+                drawTics(vp30, eye30, Mat4::identity(), vp30);
                 check(g_impFrame.drawn == 2,
                       "30.4c O PIN: só os 2 estáticos desenham impostor "
                       "(o skinado NUNCA — o guard lê a flag do meta)");
@@ -10189,7 +10189,7 @@ int main() {
                 blockRebind();
                 glstub::reset();
                 g_renderer.beginFrame();
-                drawTics(vp30, eye30);
+                drawTics(vp30, eye30, Mat4::identity(), vp30);
                 check(!g_impFrame.any && g_impFrame.drawn == 0,
                       "30.5c O PIN: NENHUM quad com o PNG corrompido (a "
                       "silhueta mentida não existe)");
@@ -10200,7 +10200,7 @@ int main() {
                       "30.5e o PNG corrupto removido do storage REAL");
                 glstub::reset();
                 g_renderer.beginFrame();
-                drawTics(vp30, eye30);
+                drawTics(vp30, eye30, Mat4::identity(), vp30);
                 check(g_storage->exists("impostors/imp2b.png") &&
                           g_impFrame.drawn == 2,
                       "30.5f a REGENERAÇÃO sob demanda (o sistema "

@@ -163,6 +163,16 @@ time acumulado do motor para o shader.»
 
 ## §4 · Verificação
 
+- **A LACUNA QUE O CI A PANO** (a honestidade da corrida vermelha): o
+  build local (scripts/build_tests.py) só compila o ALVO test_core — o
+  CI compila TAMBÉM o c33_virtual, e os 17 chamadores do drawTics lá
+  dentro (FASE 25..30) ficaram com a assinatura velha de 2 argumentos →
+  o passo «Compilar» do job C33 ficou VERMELHO no 1.º push. A cura: os
+  17 chamadores passam view+proj (FASE 25/26 têm as variáveis; os grupos
+  ORTHO 27c/28/29/30 passam Mat4::identity() + o próprio vp — o céu
+  NUNCA desenha nestes FASEs: o Environment dos harnesses é o sólido de
+  sempre, byte a byte). O replay local do c33 (g++-14 + zlib, as flags do
+  CMakeLists): **1009 checks, 0 falhas**.
 - **test_core** — 1208 OK, 0 falhas com os flakes da sandbox excluídos
   (GONI_SKIP: regress_streaming_paralelo — o crash preexistente provado;
   sentinela_r039/medicoes_010m/medicao_010m — o fork flaky documentado; o
@@ -173,5 +183,5 @@ time acumulado do motor para o shader.»
   que compila o main.cpp — incluído).
 - **versionCode: 109 → 110** (o §14 do RELATORIO-0.9.6.md declara o par
   no MESMO commit para o gate R-015).
-- **STATE.md** — atualizado no MESMO commit (a regra §6; 296 → 299 < 300).
+- **STATE.md** — atualizado no MESMO commit (a regra §6; 297 < 300).
 - **CODEMAP.md** — o SkyRenderer entra no bullet do render/ (399 < 400).
