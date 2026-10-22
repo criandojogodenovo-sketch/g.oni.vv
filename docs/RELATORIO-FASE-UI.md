@@ -541,3 +541,123 @@ e o «FERRAMENTAS», de largura parecida, fica FORA da banda visível).
 theme_hex/ui_vocab/glyph/hierarchy VERDES · docs-lint VERDE ·
 release-identity/R-015 VERDE vc 117 · **versionCode: 116 → 117** (o §14
 declara o par no MESMO commit).
+
+---
+
+## §11 PARTE H — EDITOR DE CÓDIGO (a ordem do dono + a CAUSA dos defeitos)
+
+**A ordem**: o TOPO diz a que TIC pertence o script (o nome no título) e
+os EXPORTÁVEIS do fonte; as ABAS dos scripts abertos (a ativa com o
+sublinhado brasa); os nºs de linha discretos; a fonte MONO no código
+(«o mono do código é o alvo da fase» — a dívida do 2.º atlas da parte A,
+PAGA); a barra de símbolos ENXUTA `{ } ( ) [ ] ; = " . , Tab`; pesquisa,
+Run, copiar/colar e desfazer/refazer NA MESMA FAMÍLIA de ícones; a
+coloração com a BRASA SÓ nas reservadas (string/número/comentário em
+neutras distintas); o fundo da linha atual mais claro; e a REPARAÇÃO do
+cursor (o offset) e do desempenho — COM A CAUSA DITA.
+
+**AS CAUSAS ENCONTRADAS** (a auditoria da UI de render; a lógica da
+linguagem INTACTA):
+
+1. **O «cursor desalinhado» — a causa real**: os buffers do draw eram
+   `char[256]` (a linha, a peça e o prefixo do caret). Linhas acima de
+   255 bytes RENDERIZAVAM truncadas (o invariant R-010 «renderizado ==
+   guardado» morria no cap) enquanto o caret e o toque mediam o prefixo
+   INTEIRO do buffer — a vista e o caret DIVERGIAM com a linha e o erro
+   crescia à direita. **A cura**: os caps sobem para 512 (linha/peça/
+   prefixo/índice) e a nota do cap honesto fica no código. A geometria
+   x/y em si JÁ era única e correta (o R-019/C2/E5 das fases antigas —
+   a largura do atlas é aditiva por code point; a auditoria confirmou).
+2. **O «tremor» — a causa real**: o scroll-follow do caret era ABSOLUTO
+   e corria TODOS os frames: com a linha do caret fora da vista, o
+   `scrollSetOffset` SOBRESCREVIA o offset do dedo (o arrasto
+   renderizava no caret, o dedo perdia o comando e, no release, a vista
+   voltava — rubber-band). **A cura**: o follow só-no-EVENTO — os
+   trackers `followCaret/followVersion` no State; o scroll serve o
+   caret UMA VEZ por mudança do caret/versão do buffer (a abertura
+   inclui), e fora disso o offset é DO DEDO e ninguém o escreve.
+3. **O custo por frame** (secundário, medido no código): o culling do C
+   (só as linhas visíveis tokenizam) mantém-se; a reconstrução do
+   índice por tecla é O(linhas) e fica (a nota honesta — o custo é por
+   EDIÇÃO, não por frame; a cura incremental tocaria o cache da
+   classificação — fora do escopo da UI).
+
+**O por-ficheiro** (8 ficheiros, nenhum novo):
+
+- `ui/ScriptEditor.{h,cpp}` — o título = o NOME DO TIC + o subtítulo
+  «exporta: …» (o parser puro `exportedVarsOf` dos `#@+`/`++@+`, ordem
+  do fonte, sem duplicados, teto 6); as ABAS (o `TabSnap` dorme o ativo,
+  o `switchTab` acorda por move, teto `kMaxTabs=6` — a 7.ª abertura
+  derruba a mais antiga INATIVA, o log diz); o UNDO/REDO por EVENTO
+  (`UndoStep` = buffer+caret ANTES; texto/del/enter/tab/fix/dica
+  empilham UM passo; teto 100; o redo morre com a mutação nova); os
+  botões da família (undo/redo/copiar-código/colar na cadeia E1 do
+  header — os glifos Undo/Redo/Copy/Paste que JÁ existiam; o ⋯ recebe
+  os 7 extras); a barra de símbolos ENXUTA (11 símbolos + o TAB, o
+  12.º item, a emitir o MESMO `ime::Event::Tab`); a BANDA da linha
+  corrente (o surface sob o texto); os caps 512; o FOLLOW só-no-evento;
+  os ids do ⋯/overflow re-manscionados para fora da banda das teclas
+  (a colisão latente 6570 morta).
+- `ui/Theme.h` — a paleta V.ONI: as reservadas = A BRASA (o MESMO valor
+  do accent) e string `#B5AFA6` / número `#D6D2C8` / comentário
+  `#7E7E86` / engine `== text2` — neutras distintas, todas ≥4,5:1 no
+  bg E na banda (o roxo/azul/amarelo do 0.9.2 morreram).
+- `ui/UiContext.{h,cpp}` — o 2.º ATLAS: `fontMono_` + o MODO por-bloco
+  (`monoMode(true/false)`) — as métricas e os glifos do mono e o batch
+  PRÓPRIO `glyphsMono_` (o endFrame submete-o DEPOIS do sans, a mesma
+  regra «texto por último»). Sem mono carregado o modo cai para o sans
+  (degradação honesta, nunca um editor morto).
+- `ui/FontAtlas.{h,cpp}` — os paths MONO do sistema (DroidSansMono →
+  RobotoMono → NotoSansMono → CutiveMono → Cousine → monospace).
+- `platform/main.cpp` — o boot do mono (o MESMO ciclo de vida do atlas
+  sans: bake no INIT_WINDOW, destroy no TERM); os resultados 8
+  (copiar o código)/9 (colar PELO applyEvent — o caminho do IME, o
+  undo empilha); o `closeScriptEditor` salva TODAS as abas (o ativo E
+  os snapshots, cada um revalidado pelo SEU nome).
+- `platform/StorageBridge.{h,cpp}` + `VvActivity.java` — o
+  `jniClipboardPaste()` (a leitura do ClipboardManager; vazio = toast
+  honesto, nunca crash).
+
+**A prova** (o pin `ui_codigo_editor` + as recalibrações): (a) os
+exportáveis (ordem/dedup/teto 6); (b) o undo/redo por evento (o redo
+morre com a mutação nova — a mensagem do pin É a da mutação); (c) as
+abas (o snapshot acorda com buffer+caret+nome; a 7.ª derruba a mais
+antiga; nada troca fora da faixa); (d) os ids fora da banda das teclas;
+(e) A SOBREPOSIÇÃO em 2 retratos (as abas ≥44dp, dentro do ecrã,
+disjuntas, sob o cabeçalho; o validador da casa 0 problemas). As
+recalibrações com nota: R-027 (a barra enxuta — 2 páginas no device,
+1 no harness; o TAB no slot 12), test_wiring092 (a família no header —
+os toques nos novos x), y1_tokens (a brasa 3×: accent+fireRed+
+voniReserved), theme_tabela (o comment #7E7E86), c33_virtual (11.9/12.11
+— o corpo desce os 40dp da tira; 11.10/11.11 — os botões nos novos x;
+12.7 — a página 1/1 e a ',' no slot 11).
+
+**M-UIh** (o redo sobrevive à mutação nova) vermelho→reposto→verde:
+`ui_codigo_editor` «o redo SOBREVIVEU à mutação nova» VERMELHO
+(capturado ao vivo no estado mutado); colada aqui.
+
+**As capturas**: o harness do c33 escreve `layout-harness-script.png`
+(720×1536 retrato, o editor com a tira de abas + a família no header) e
+`layout-harness-device.png` (o device 360dp) — os artefactos do CI.
+
+**Verificação**: test_core **0 falhas** (a suíte completa + o pin novo)
+· c33_virtual **1008/0** (os DOIS alvos) · theme_hex/ui_vocab/glyph/
+hierarchy/jni_parity VERDES · docs-lint VERDE · scope VERDE ·
+release-identity/R-015 VERDE vc 118 · **versionCode: 117 → 118** (o §14
+declara o par no MESMO commit).
+
+**O que a parte H NÃO fez** (a lista honesta):
+
+- **Seleção de texto** (arrasto para selecionar, copiar SÓ a seleção):
+  o copiar leva o buffer INTEIRO (a ordem não pedia seleção; o caret é
+  único desde o G0-1).
+- **Pesquisa DENTRO do código** (o find/replace do editor): a lupa é a
+  pesquisa das DOCS (o que sempre foi); o find no fonte não foi
+  ordenado.
+- **Multi-janela/undo entre abas**: o undo é POR ABA (o passo vive no
+  snapshot dela); não há histórico global.
+- **O cap 512**: linhas acima disso truncam à VISTA (o caret/toque
+  seguem o buffer — a nota no código); a cura completa (render em
+  fatias) não foi ordenada.
+- **A linguagem V.ONI**: INTOCADA (a cláusula da fase — o classificador,
+  o compilador e a VM não viram uma linha).

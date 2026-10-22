@@ -11,6 +11,7 @@
 #include "core/Scene.h"
 #include "components/ScriptComp.h"
 #include "ui/Icons.h"
+#include "ui/TextFit.h"   // FASE UI H: a elipse dos nomes das abas
 #include "ui/Theme.h"
 #include "voni/VoniHighlight.h"
 
@@ -177,7 +178,9 @@ const std::vector<u32>& ensureLineIndex(State& st) {
             const u32 ls = st.lineStarts.back();
             // o estado bc AO FIM desta linha (tokeniza-a UMA VEZ por edição;
             // o 1.º visível do draw começa JÁ certo — nunca varre desde 0)
-            char line[256];
+            // FASE UI H: o cap 512 (era 256 — linhas longas truncavam o
+            // ÍNDICE e o estado bc dizia mentira a jusante)
+            char line[512];
             const u32 len = (i - ls) < sizeof(line) - 1
                                 ? (i - ls)
                                 : (u32)sizeof(line) - 1;
@@ -256,13 +259,12 @@ const f32* clsColor(voni::hl::Cls c) {
 // spec E; a exceção compacta do validador, vigiada pela sentinela R-027).
 // ----------------------------------------------------------------------------
 
-// os 22 símbolos da spec (a página 123 do teclado antigo, SEM os extras
-// $ % & | ~ ^ \ ' — o GBoard já os tem na própria página de símbolos):
-// { } ( ) [ ] = + - * / < > ! , . ; : " _ # @ — TODOS, como a spec exigia
-const char* const kSymbols[22] = {
-    "{", "}", "(", ")", "[", "]", "=", "+", "-", "*",
-    "/", "<", ">", "!", ",", ".", ";", ":", "\"", "_",
-    "#", "@",
+// os 11 símbolos do set ENXUTO do H (a ordem do dono: «{ } ( ) [ ] ; =
+// " . ,» — o que o GBoard não põe à mão no código; o resto sai: + - * /
+// < > ! : _ # @ vivem na página de símbolos do próprio teclado) + a 12.ª
+// tecla TAB (kSymTabItem — desenhada pela barra, emite o ime::Event::Tab)
+const char* const kSymbols[11] = {
+    "{", "}", "(", ")", "[", "]", ";", "=", "\"", ".", ",",
 };
 
 f32 symbolBarHeight() {
@@ -286,7 +288,7 @@ u32 symKeysVisible(f32 contentW) {
 
 u32 symPageCount(f32 contentW) {
     const u32 perPage = symKeysVisible(contentW) - 1;   // a 1ª é o seletor
-    return (22u + perPage - 1u) / perPage;              // ceil(22/perPage)
+    return (kSymItemCount + perPage - 1u) / perPage;    // ceil(12/perPage)
 }
 
 // desenha a barra dokada SOBRE o IME (y = o TOPO da barra); devolve true
@@ -320,13 +322,29 @@ bool drawSymbolBar(UiContext& ui, State& st, f32 w, f32 y) {
         }
         x += keyW;
     }
-    // as TECLAS dos símbolos da página corrente
+    // as TECLAS dos itens da página corrente (11 símbolos; a 12.ª é o TAB)
     bool typed = false;
     const u32 first = st.symPage * perPage;
     for (u32 k = 0; k < perPage; ++k) {
         const u32 idx = first + k;
-        if (idx >= 22) {
+        if (idx >= kSymItemCount) {
             break;   // a última página pode ser curta
+        }
+        if (idx == kSymTabItem) {
+            // a TECLA TAB (o 12.º item — o MESMO ime::Event::Tab do IME:
+            // os esqueletos do registo e a indent herdam o caminho)
+            if (ui.buttonCompact(kSymKeyBase + static_cast<u64>(k), x, y,
+                                 keyW, barH, "Tab")) {
+                ime::Event ev;
+                ev.isText = false;
+                ev.key = ime::Key::Tab;
+                applyEvent(st, ev);
+                typed = true;
+                elog::info("editor: TAB pela barra (pagina %u)",
+                           st.symPage + 1);
+            }
+            x += keyW;
+            continue;
         }
         if (ui.buttonCompact(kSymKeyBase + static_cast<u64>(k), x, y, keyW,
                              barH, kSymbols[idx])) {
@@ -368,7 +386,87 @@ bool revalidateTic(State& st, Scene& scene) {
     return false;   // o TIC morreu mesmo (cena trocada)
 }
 
+// ----------------------------------------------------------------------------
+// FASE UI H · AS ABAS — o ativo vive nos campos do State (a verdade); os
+// inativos dormem como TabSnap. A troca MOVE (std::move — zero cópias
+// profundas de buffer). O teto kMaxTabs: a 7.ª abertura reutiliza a MAIS
+// ANTIGA inativa (o log diz — nada cresce sem fim numa tira de 360dp).
+// ----------------------------------------------------------------------------
+namespace {
+
+// escreve o estado ATIVO para um snapshot (o dono da troca/fecho)
+void snapFromActive(State::TabSnap& out, const State& st) {
+    out.tic = st.tic;
+    std::snprintf(out.ticName, sizeof(out.ticName), "%.63s", st.ticName);
+    out.buf = st.buf;
+    out.caret = st.caret;
+    out.bufVersion = st.bufVersion;
+    out.lineStarts = st.lineStarts;
+    out.lineBc = st.lineBc;
+    out.indexVersion = st.indexVersion;
+    out.errLine = st.errLine;
+    out.errMsg = st.errMsg;
+    out.fixFrom = st.fixFrom;
+    out.fixTo = st.fixTo;
+    out.running = st.running;
+    out.undo = st.undo;
+    out.redo = st.redo;
+}
+
+// carrega um snapshot para o estado ATIVO (o swap-in da troca)
+void activeFromSnap(State& st, State::TabSnap&& in) {
+    st.tic = in.tic;
+    std::snprintf(st.ticName, sizeof(st.ticName), "%.63s", in.ticName);
+    st.buf = std::move(in.buf);
+    st.caret = in.caret;
+    st.bufVersion = in.bufVersion;
+    st.lineStarts = std::move(in.lineStarts);
+    st.lineBc = std::move(in.lineBc);
+    st.indexVersion = in.indexVersion;
+    st.errLine = in.errLine;
+    st.errMsg = std::move(in.errMsg);
+    st.fixFrom = std::move(in.fixFrom);
+    st.fixTo = std::move(in.fixTo);
+    st.running = in.running;
+    st.undo = std::move(in.undo);
+    st.redo = std::move(in.redo);
+}
+} // namespace
+
 void open(State& st, Scene& scene, Handle tic) {
+    // FASE UI H · AS ABAS: abrir com o editor JÁ aberto NÃO descarta o
+    // script corrente — ele DORME como snapshot (a strip mostra os dois);
+    // o TIC já aberto (pelo NOME — o padrão da casa) apenas ACORDA.
+    // O teto kMaxTabs: a abertura além dele deixa cair a mais ANTIGA
+    // inativa (o log diz — a tira de 360dp não cresce sem fim).
+    if (st.open) {
+        char nome[64];
+        nome[0] = '\0';
+        if (Tic* t = scene.get(tic)) {
+            std::snprintf(nome, sizeof(nome), "%.63s", t->name.c_str());
+        }
+        for (u32 i = 0; i < st.tabs.size(); ++i) {
+            if (nome[0] && std::strcmp(st.tabs[i].ticName, nome) == 0) {
+                // a posição i da tira (i+1 se fica à direita do ativo)
+                switchTab(st, i < st.activeTab ? i : i + 1);
+                return;
+            }
+        }
+        State::TabSnap dormindo;
+        snapFromActive(dormindo, st);
+        if (tabTotal(st) >= State::kMaxTabs) {
+            st.tabs.erase(st.tabs.begin());   // a mais antiga INATIVA cai
+            if (st.activeTab > 0) {
+                --st.activeTab;   // as posições desceram todas de 1
+            }
+        }
+        // o ativo dorme na SUA posição da sequência inativa (os anteriores
+        // a ele mantêm o sítio) e o novo assume a CAUDA da tira
+        st.tabs.insert(st.tabs.begin() + st.activeTab, std::move(dormindo));
+        st.activeTab = static_cast<u32>(st.tabs.size());
+        elog::info("editor: aba nova — %u abertas ('%s' ativa)",
+                   tabTotal(st), st.ticName);
+    }
     st.open = true;
     st.tic = tic;
     st.scrollOff = 0.0f;
@@ -377,6 +475,10 @@ void open(State& st, Scene& scene, Handle tic) {
     st.errMsg.clear();
     st.running = false;
     st.symPage = 0;   // 0.9.6.8 (E): a barra de símbolos recomeça na 1ª página
+    st.undo.clear();  // FASE UI H: o undo/redo do script novo começa vazio
+    st.redo.clear();
+    st.followCaret = 0xFFFFFFFFu;    // o follow serve UMA vez (abre no fim)
+    st.followVersion = 0xFFFFFFFFu;
     // carrega o fonte do componente (se existir); SEM fonte guardada abre
     // com o ESQUELETO base e o cursor NO INTERIOR (G0-2)
     bool loaded = false;
@@ -404,7 +506,15 @@ void close(State& st) {
     // o buffer NÃO se descarta ao fechar por acidente: o main salva no
     // componente quando o back é tocado (persistir §10) — o estado mantém
     // o buffer até o main decidir (o close() limpa só a janela).
+    // FASE UI H: o main salva TODAS as abas (o ativo E os snapshots) antes
+    // de chamar o close — aqui a contagem zera com a janela.
     st.running = false;
+    st.tabs.clear();
+    st.activeTab = 0;
+    st.undo.clear();
+    st.redo.clear();
+    st.followCaret = 0xFFFFFFFFu;
+    st.followVersion = 0xFFFFFFFFu;
 }
 
 bool applyEvent(State& st, const ime::Event& ev) {
@@ -416,6 +526,13 @@ bool applyEvent(State& st, const ime::Event& ev) {
     }
     const u32 caretBefore = st.caret;
     const bool wasEnd = st.caret == st.buf.size();
+    // FASE UI H: o snapshot do UNDO — UM por EVENTO (o enter com indent,
+    // o Tab do esqueleto, o texto — cada um desfaz INTEIRO); só nos
+    // eventos que mexem no buffer (as setas navegam — não empilham)
+    if (ev.isText || ev.key == ime::Key::Del || ev.key == ime::Key::Enter ||
+        ev.key == ime::Key::Tab) {
+        pushUndo(st);
+    }
     // 0.9.5: qualquer EDIÇÃO limpa a explicação do toque (a strip volta à
     // mini-descrição em tempo real da palavra que está a ser digitada)
     if (ev.isText || ev.key == ime::Key::Del || ev.key == ime::Key::Enter) {
@@ -637,6 +754,7 @@ void applyFix(State& st) {
     if (st.fixFrom.empty() || st.fixTo.empty() || st.errLine == 0) {
         return;
     }
+    pushUndo(st);   // FASE UI H: o SUBSTITUIR desfaz inteiro (um evento)
     // início em bytes da linha errLine (1-based)
     u32 ls = 0;
     for (u32 k = 1; k < st.errLine && ls < st.buf.size(); ++k) {
@@ -692,6 +810,135 @@ void applyFix(State& st) {
     st.fixTo.clear();
 }
 
+// ----------------------------------------------------------------------------
+// FASE UI H · O UNDO/REDO (por evento) — o passo é o buffer+caret ANTES da
+// mutação; o redo morre a cada mutação nova (o clássico). Teto 100 passos
+// (o mais antigo cai — scripts reais nunca o alcançam; a memória fica
+// limitada mesmo com fontes grandes).
+// ----------------------------------------------------------------------------
+namespace {
+constexpr u32 kUndoMax = 100;
+
+void truncateUndo(std::vector<UndoStep>& u) {
+    if (u.size() > kUndoMax) {
+        u.erase(u.begin(), u.begin() + (u.size() - kUndoMax));
+    }
+}
+} // namespace
+
+void pushUndo(State& st) {
+    st.undo.push_back(UndoStep{st.buf, st.caret});
+    truncateUndo(st.undo);
+    st.redo.clear();   // a mutação nova mata o redo (o clássico)
+}
+
+bool undoStep(State& st) {
+    if (st.undo.empty()) {
+        return false;
+    }
+    UndoStep& s = st.undo.back();
+    // o estado ATUAL vai ao redo (o par clássico); o passo volta ao buffer
+    st.redo.push_back(UndoStep{st.buf, st.caret});
+    truncateUndo(st.redo);
+    st.buf = std::move(s.buf);
+    st.caret = s.caret <= st.buf.size() ? s.caret
+                                        : static_cast<u32>(st.buf.size());
+    st.undo.pop_back();
+    ++st.bufVersion;   // o índice de linhas rebuilda; o follow leva o caret
+    st.blink = 0.0f;
+    return true;
+}
+
+bool redoStep(State& st) {
+    if (st.redo.empty()) {
+        return false;
+    }
+    UndoStep& s = st.redo.back();
+    st.undo.push_back(UndoStep{st.buf, st.caret});
+    truncateUndo(st.undo);
+    st.buf = std::move(s.buf);
+    st.caret = s.caret <= st.buf.size() ? s.caret
+                                        : static_cast<u32>(st.buf.size());
+    st.redo.pop_back();
+    ++st.bufVersion;
+    st.blink = 0.0f;
+    return true;
+}
+
+
+u32 tabTotal(const State& st) {
+    return static_cast<u32>(1u + st.tabs.size());   // o ativo + os inativos
+}
+
+bool switchTab(State& st, u32 i) {
+    if (i >= tabTotal(st) || i == st.activeTab) {
+        return false;
+    }
+    // o ativo DORME na SUA posição; o da posição i acorda (o teto nunca
+    // muda — a troca é um swap de conteúdos, a contagem fica)
+    const u32 slot = i < st.activeTab ? i : i - 1;   // índice em tabs[]
+    State::TabSnap dormindo;
+    snapFromActive(dormindo, st);
+    activeFromSnap(st, std::move(st.tabs[slot]));
+    st.tabs[slot] = std::move(dormindo);
+    st.activeTab = i;
+    st.blink = 0.0f;
+    st.helpTapped = false;
+    st.helpWord.clear();
+    elog::info("editor: aba %u/%u ativa ('%s')", i + 1, tabTotal(st),
+               st.ticName);
+    return true;
+}
+
+// ----------------------------------------------------------------------------
+// FASE UI H · OS EXPORTÁVEIS do cabeçalho (a ordem do dono: «o TIC + os
+// exportáveis»): os idents após «#@+» e «++@+» (a spec §4 — os mesmos que
+// o Inspector mostra), na ordem do fonte, sem duplicados, teto 6 (o
+// subtítulo de 1 linha; o resto cabe no código — nunca um layout novo).
+// ----------------------------------------------------------------------------
+std::vector<std::string> exportedVarsOf(const std::string& src) {
+    std::vector<std::string> out;
+    auto identAte = [&src](u32 i) {
+        u32 e = i;
+        while (e < src.size() &&
+               (std::isalnum(static_cast<unsigned char>(src[e])) ||
+                src[e] == '_')) {
+            ++e;
+        }
+        return e;
+    };
+    auto empurra = [&out](const std::string& nome) {
+        if (nome.empty() || out.size() >= 6) {
+            return;
+        }
+        for (const std::string& ja : out) {
+            if (ja == nome) {
+                return;   // sem duplicados (a ordem do fonte mantém-se)
+            }
+        }
+        out.push_back(nome);
+    };
+    u32 i = 0;
+    const u32 n = static_cast<u32>(src.size());
+    while (i + 3 <= n) {
+        if (src[i] == '#' && src[i + 1] == '@' && src[i + 2] == '+') {
+            const u32 e = identAte(i + 3);
+            empurra(src.substr(i + 3, e - (i + 3)));
+            i = e;
+            continue;
+        }
+        if (src[i] == '+' && src[i + 1] == '+' && src[i + 2] == '@' &&
+            i + 3 < n && src[i + 3] == '+') {
+            const u32 e = identAte(i + 4);
+            empurra(src.substr(i + 4, e - (i + 4)));
+            i = e;
+            continue;
+        }
+        ++i;
+    }
+    return out;
+}
+
 int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
          f32 dt) {
     (void)in;
@@ -745,12 +992,15 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     const f32 stopX = ins.left + contentW - theme::dp(8.0f) - actionW;
     const f32 runX = stopX - theme::dp(8.0f) - actionW;
     const f32 actionEdge = runX - theme::dp(12.0f);
-    // (b) os EXTRAS por prioridade: LUPA (a pesquisa das Docs) > COPIAR
-    // (a referência colável) > NÍVEL (I/N/S) — da direita para a esquerda;
-    // cada um cabe só se o título mantiver o piso 48dp
+    // (b) os EXTRAS por prioridade (FASE UI H — a família de ícones do
+    // dono: «pesquisa, Run, copiar/colar, desfazer/refazer»): LUPA (as
+    // Docs) > UNDO > REDO > COPIAR o código > COLAR > COPIAR a referência
+    // > NÍVEL — da direita para a esquerda; cada um cabe só se o título
+    // mantiver o piso 48dp, senão recolhem para o «⋯» (o menu tem os 7)
     const f32 bW = theme::dp(48.0f);
     const f32 gap = theme::dp(8.0f);
-    f32 lupaX = -1.0f, copyX = -1.0f, helpX = -1.0f;
+    f32 lupaX = -1.0f, undoX = -1.0f, redoX = -1.0f, copyCodeX = -1.0f;
+    f32 pasteX = -1.0f, copyX = -1.0f, helpX = -1.0f;
     f32 cursor = actionEdge;
     int fitted = 0;
     auto tryFit = [&](f32& slot) {
@@ -763,12 +1013,16 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         return false;
     };
     tryFit(lupaX);
+    tryFit(undoX);
+    tryFit(redoX);
+    tryFit(copyCodeX);
+    tryFit(pasteX);
     tryFit(copyX);
     tryFit(helpX);
     // (c) o «⋯» se ALGO recolheu — no primeiro slot livre; se NEM ele
     // cabe, toma o lugar do extra mais à esquerda (o menu já o contém)
     f32 dotsX = -1.0f;
-    if (fitted < 3) {
+    if (fitted < 7) {
         if (cursor - bW - gap - titleX >= tMin) {
             cursor -= bW + gap;
             dotsX = cursor + gap;
@@ -776,6 +1030,14 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
             dotsX = helpX; helpX = -1.0f;   // o nível cede ao ⋯ (está no menu)
         } else if (copyX >= 0.0f) {
             dotsX = copyX; copyX = -1.0f;
+        } else if (pasteX >= 0.0f) {
+            dotsX = pasteX; pasteX = -1.0f;
+        } else if (copyCodeX >= 0.0f) {
+            dotsX = copyCodeX; copyCodeX = -1.0f;
+        } else if (redoX >= 0.0f) {
+            dotsX = redoX; redoX = -1.0f;
+        } else if (undoX >= 0.0f) {
+            dotsX = undoX; undoX = -1.0f;
         } else if (lupaX >= 0.0f) {
             dotsX = lupaX; lupaX = -1.0f;
         }
@@ -785,6 +1047,10 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     if (dotsX >= 0.0f) leftEdge = dotsX;
     if (helpX >= 0.0f && helpX < leftEdge) leftEdge = helpX;
     if (copyX >= 0.0f && copyX < leftEdge) leftEdge = copyX;
+    if (pasteX >= 0.0f && pasteX < leftEdge) leftEdge = pasteX;
+    if (copyCodeX >= 0.0f && copyCodeX < leftEdge) leftEdge = copyCodeX;
+    if (redoX >= 0.0f && redoX < leftEdge) leftEdge = redoX;
+    if (undoX >= 0.0f && undoX < leftEdge) leftEdge = undoX;
     if (lupaX >= 0.0f && lupaX < leftEdge) leftEdge = lupaX;
     f32 titleW = leftEdge - gap - titleX;
     if (titleW < tMin) {
@@ -793,93 +1059,110 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
 
     // título 20sp + hint 12sp — 0.9.6.10 (E1): o título é SEMPRE visível
     // (titleW tem o piso 48dp — a spec manda «nada por cima do título»);
-    // o subtítulo só na zona larga (>=120dp)
+    // o subtítulo só na zona larga (>=120dp).
+    // FASE UI H (a ordem do dono): o TÍTULO é o NOME DO TIC dono («a que
+    // TIC pertence o script») e o subtítulo diz os EXPORTÁVEIS do fonte
+    // (os #@+ / ++@+ — os mesmos que o Inspector mostra)
     {
         const TextMetrics m = ui.textMetrics();
         const theme::HeaderBaselines hb =
             theme::headerBaselines(m.ascent, m.descent, hdrH);
-        ui.labelFittedStyled(titleX, topY + hb.title, "Script",
+        const char* titulo = st.ticName[0] ? st.ticName : "Script";
+        ui.labelFittedStyled(titleX, topY + hb.title, titulo,
                              theme::kTheme.text1,
                              titleW > 0.0f ? titleW : 1.0f,
                              theme::fontScale(theme::kFontScreen), 0);
         if (titleW >= theme::dp(120.0f)) {
-            ui.labelStyled(titleX, topY + hb.sub, "V.ONI · .voni",
+            const std::vector<std::string> ex = exportedVarsOf(st.buf);
+            char sub[128];
+            if (ex.empty()) {
+                std::snprintf(sub, sizeof(sub), "V.ONI · sem exportáveis");
+            } else {
+                // «exporta: a, b, c» — teto 3 nomes na linha (o subtítulo
+                // NUNCA corta a meio de um nome; o resto vive no código)
+                char lista[96];
+                lista[0] = '\0';
+                u32 usados = 0;
+                for (const std::string& n : ex) {
+                    if (usados == 3) break;
+                    const int w2 = std::snprintf(lista + std::strlen(lista),
+                                                 sizeof(lista) - std::strlen(lista),
+                                                 "%s%s", usados ? ", " : "",
+                                                 n.c_str());
+                    if (w2 < 0) break;
+                    ++usados;
+                }
+                std::snprintf(sub, sizeof(sub), "exporta: %s%s",
+                              lista, usados < ex.size() ? ", …" : "");
+            }
+            ui.labelStyled(titleX, topY + hb.sub, sub,
                            theme::kTheme.text2,
                            theme::fontScale(theme::kFontCaption), 0);
         }
     }
 
-    // LUPA (G0-3): abre as Docs POR CIMA (a pesquisa filtra as entradas
-    // estruturadas e mostra o exemplo). Alvo 48dp — SÓ se coube no header
-    // (E1: senão vive no «⋯»).
-    if (lupaX >= 0.0f) {
-        const UiRect r{lupaX, hdrBtnY, theme::dp(48.0f), theme::dp(48.0f)};
-        const bool held = ui.widgetActive(kDocsId);
+    // ---- FASE UI H · OS EXTRAS COM A MESMA FAMÍLIA DE ÍCONES ---------------
+    // «Pesquisa, Run, copiar/colar, desfazer/refazer — a mesma família de
+    // ícones»: os glifos Undo/Redo/Copy/Paste do Icons.h (os da barra de
+    // topo da FASE UI B) nos alvos 48dp do E1; o desativado desenha a 0.35
+    // (o padrão da barra). O botão de ícone ÚNICO (o padrão do R-019: o
+    // desenho e o toque no MESMO sítio — nunca 7 cópias à mão).
+    auto iconBtn = [&](u64 id, f32 x, icons::Icon ic, const f32* tint) {
+        if (x < 0.0f) {
+            return false;
+        }
+        const UiRect r{x, hdrBtnY, theme::dp(48.0f), theme::dp(48.0f)};
+        const bool held = ui.widgetActive(id);
         ui.panelRounded(r.x, r.y, r.w, r.h, theme::dp(theme::kRadiusCard),
                         held ? theme::kTheme.surface2
                              : theme::kTheme.surface);
-        ui.frameRounded(r.x, r.y, r.w, r.h, 1.0f, theme::dp(theme::kRadiusCard),
-                        theme::kTheme.border);
-        icons::drawIcon(ui, icons::Icon::Search,
-                        r.x + (r.w - theme::dp(24.0f)) * 0.5f,
+        ui.frameRounded(r.x, r.y, r.w, r.h, 1.0f,
+                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
+        icons::drawIcon(ui, ic, r.x + (r.w - theme::dp(24.0f)) * 0.5f,
                         r.y + (r.h - theme::dp(24.0f)) * 0.5f,
-                        theme::dp(24.0f), theme::kTheme.text1);
-        if (ui.widgetHit(kDocsId, r.x, r.y, r.w, r.h)) {
-            result = 4;
-        }
-
-        // 0.9.5 · COPIAR REFERÊNCIA: a referência V.ONI COMPLETA como
-        // texto colável p/ IAs — o main põe no clipboard via JNI (result 6);
-        // SÓ se coube (E1: senão vive no «⋯»)
-        if (copyX >= 0.0f) {
-        const UiRect rc{copyX, hdrBtnY, theme::dp(48.0f), theme::dp(48.0f)};
-        const bool heldC = ui.widgetActive(kCopyRefId);
-        ui.panelRounded(rc.x, rc.y, rc.w, rc.h, theme::dp(theme::kRadiusCard),
-                        heldC ? theme::kTheme.surface2
-                              : theme::kTheme.surface);
-        ui.frameRounded(rc.x, rc.y, rc.w, rc.h, 1.0f,
-                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
-        icons::drawIcon(ui, icons::Icon::Copy,
-                        rc.x + (rc.w - theme::dp(24.0f)) * 0.5f,
-                        rc.y + (rc.h - theme::dp(24.0f)) * 0.5f,
-                        theme::dp(24.0f), theme::kTheme.text1);
-        if (ui.widgetHit(kCopyRefId, rc.x, rc.y, rc.w, rc.h)) {
-            result = 6;
-        }
-
-        // (0.9.6 G3 · O BOTÃO DO TECLADO PRÓPRIO SAIU no Grupo E — o
-        // teclado da engine morreu com ele; o IME do sistema é o ÚNICO
-        // teclado e a BARRA DE SÍMBOLOS cobre a página 123)
-
-        }   // (fim do if copyX)
-        // 0.9.5 · O NÍVEL DA AJUDA (I/N/S): Iniciante (desc+exemplo) ·
-        // Normal (desc) · Silencioso (nada) — um toque cicla; SÓ se coube
-        if (helpX >= 0.0f) {
-        const UiRect rl{helpX, hdrBtnY, theme::dp(48.0f), theme::dp(48.0f)};
-        const bool heldL = ui.widgetActive(kHelpLevelId);
-        ui.panelRounded(rl.x, rl.y, rl.w, rl.h, theme::dp(theme::kRadiusCard),
-                        heldL ? theme::kTheme.surface2
-                              : theme::kTheme.surface);
-        ui.frameRounded(rl.x, rl.y, rl.w, rl.h, 1.0f,
-                        theme::dp(theme::kRadiusCard), theme::kTheme.border);
-        // 0.9.6.1 (G1-1): o ícone Question = "ajuda"; aceso (accent)
-        // quando ela aparece
-        const f32 iq = theme::dp(24.0f);
-        icons::drawIcon(ui, icons::Icon::Question,
-                        rl.x + (rl.w - iq) * 0.5f,
-                        rl.y + (rl.h - iq) * 0.5f, iq,
-                        st.helpLevel == 2 ? theme::kTheme.text2
-                                          : theme::kTheme.accent);
-        if (ui.widgetHit(kHelpLevelId, rl.x, rl.y, rl.w, rl.h)) {
-            st.helpLevel = static_cast<u8>((st.helpLevel + 1) % 3);
-        }
-        }
+                        theme::dp(24.0f), tint);
+        return ui.widgetHit(id, r.x, r.y, r.w, r.h);
+    };
+    const f32 tintOff[4] = {theme::kTheme.text1[0], theme::kTheme.text1[1],
+                            theme::kTheme.text1[2], 0.35f};
+    // LUPA (G0-3): as Docs POR CIMA (a pesquisa da família)
+    if (iconBtn(kDocsId, lupaX, icons::Icon::Search, theme::kTheme.text1)) {
+        result = 4;
+    }
+    // UNDO/REDO (o par por evento — esbatidos com a pilha vazia)
+    if (iconBtn(kUndoId, undoX, icons::Icon::Undo,
+                st.undo.empty() ? tintOff : theme::kTheme.text1)) {
+        undoStep(st);
+    }
+    if (iconBtn(kRedoId, redoX, icons::Icon::Redo,
+                st.redo.empty() ? tintOff : theme::kTheme.text1)) {
+        redoStep(st);
+    }
+    // COPIAR O CÓDIGO (result 8 — o main põe o buffer no clipboard) e
+    // COLAR (result 9 — o main lê o clipboard e entra pelo applyEvent)
+    if (iconBtn(kCopyCodeId, copyCodeX, icons::Icon::Copy,
+                theme::kTheme.text1)) {
+        result = 8;
+    }
+    if (iconBtn(kPasteId, pasteX, icons::Icon::Paste, theme::kTheme.text1)) {
+        result = 9;
+    }
+    // 0.9.5 · COPIAR REFERÊNCIA (a referência colável p/ IAs — result 6)
+    if (iconBtn(kCopyRefId, copyX, icons::Icon::Copy, theme::kTheme.text1)) {
+        result = 6;
+    }
+    // 0.9.5 · O NÍVEL DA AJUDA (I/N/S) — um toque cicla; aceso quando aparece
+    if (iconBtn(kHelpLevelId, helpX, icons::Icon::Question,
+                st.helpLevel == 2 ? theme::kTheme.text2
+                                  : theme::kTheme.accent)) {
+        st.helpLevel = static_cast<u8>((st.helpLevel + 1) % 3);
     }
 
     // ---- 0.9.6.10 (E1) · O «⋯» E O MENU DE OVERFLOW -----------------------
     // Os extras que não couberam vivem AQUI (o menu abre por baixo do
-    // botão; fechar = toque fora ou re-toque). As AÇÕES são as MESMAS dos
-    // botões (result 4 = Docs · result 6 = copiar referência · nível cicla)
+    // botão; fechar = toque fora ou re-toque). FASE UI H: as 7 linhas da
+    // família (as AÇÕES são as MESMAS dos botões — o undo/redo executam
+    // AQUI DENTRO, os resultados 4/6/8/9 sobem ao main, o nível cicla)
     if (dotsX >= 0.0f) {
         const UiRect rd{dotsX, hdrBtnY, theme::dp(48.0f), theme::dp(48.0f)};
         const bool heldD = ui.widgetActive(kHeaderDotsId);
@@ -900,19 +1183,24 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         }
         if (st.headerOverflow) {
             // o MENU: as AÇÕES que não couberam no header (na ordem da
-            // prioridade) — lupa, copiar, nível (só as escondidas)
+            // prioridade — só as escondidas; a 10/11 executam o undo/redo)
             struct Row { const char* label; icons::Icon ic; int action; };
-            Row rows[3] = {
+            Row rows[7] = {
                 {"Pesquisar (Docs)", icons::Icon::Search, 4},
+                {"Desfazer", icons::Icon::Undo, 10},
+                {"Refazer", icons::Icon::Redo, 11},
+                {"Copiar código", icons::Icon::Copy, 8},
+                {"Colar", icons::Icon::Paste, 9},
                 {"Copiar referência", icons::Icon::Copy, 6},
                 {"Nível da ajuda", icons::Icon::Question, 7},
             };
-            const bool show[3] = {lupaX < 0.0f, copyX < 0.0f,
-                                  helpX < 0.0f};
+            const bool show[7] = {lupaX < 0.0f, undoX < 0.0f, redoX < 0.0f,
+                                  copyCodeX < 0.0f, pasteX < 0.0f,
+                                  copyX < 0.0f, helpX < 0.0f};
             const f32 menuW = theme::dp(224.0f);
             const f32 rowH = theme::dp(48.0f);
             int nRows = 0;
-            for (int i = 0; i < 3; ++i) {
+            for (int i = 0; i < 7; ++i) {
                 if (show[i]) ++nRows;
             }
             const f32 menuH = static_cast<f32>(nRows) * rowH + theme::dp(8.0f);
@@ -925,7 +1213,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
             const TextMetrics mm = ui.textMetrics();
             f32 ry = my + theme::dp(4.0f);
             int ri = 0;
-            for (int i = 0; i < 3; ++i) {
+            for (int i = 0; i < 7; ++i) {
                 if (!show[i]) continue;
                 const u64 id = kHeaderOverflowBase + static_cast<u64>(ri);
                 const bool held = ui.widgetActive(id);
@@ -944,15 +1232,36 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
                 }
                 if (ui.widgetHit(id, mx + theme::dp(4.0f), ry,
                                  menuW - theme::dp(8.0f), rowH)) {
-                    if (rows[i].action == 4) {
-                        result = 4;
-                        st.headerOverflow = false;
-                    } else if (rows[i].action == 6) {
-                        result = 6;
-                        st.headerOverflow = false;
-                    } else {
-                        st.helpLevel = static_cast<u8>((st.helpLevel + 1) % 3);
-                        st.headerOverflow = false;
+                    switch (rows[i].action) {
+                        case 4:
+                            result = 4;
+                            st.headerOverflow = false;
+                            break;
+                        case 6:
+                            result = 6;
+                            st.headerOverflow = false;
+                            break;
+                        case 8:
+                            result = 8;
+                            st.headerOverflow = false;
+                            break;
+                        case 9:
+                            result = 9;
+                            st.headerOverflow = false;
+                            break;
+                        case 10:
+                            undoStep(st);
+                            st.headerOverflow = false;
+                            break;
+                        case 11:
+                            redoStep(st);
+                            st.headerOverflow = false;
+                            break;
+                        default:
+                            st.helpLevel =
+                                static_cast<u8>((st.helpLevel + 1) % 3);
+                            st.headerOverflow = false;
+                            break;
                     }
                 }
                 ry += rowH;
@@ -1036,13 +1345,83 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         strip1.empty()
             ? 0.0f
             : (strip2.empty() ? theme::dp(kHelpStripH) : theme::dp(kHelpStrip2H));
-    const UiRect body{ins.left, topY + hdrH, contentW,
-                      bottomLim - (topY + hdrH) - errBarH - symH - stripH};
+    // FASE UI H · A STRIP DE ABAS (40dp sob o cabeçalho — o toque mínimo
+    // da fase): as abas dos scripts abertos, a ATIVA com o fundo accentDim
+    // + o texto brasa + o SUBLINHADO BRASA de 2dp no fundo (a ordem do
+    // dono). O corpo desce a strip inteira — nada sobrepõe.
+    const f32 tabsY = topY + hdrH;
+    const f32 tabsH = theme::dp(40.0f);
+    {
+        const u32 nTabs = tabTotal(st);
+        const f32 tGap = theme::dp(4.0f);
+        f32 tw = (contentW - theme::dp(8.0f) -
+                  static_cast<f32>(nTabs - 1) * tGap) / static_cast<f32>(nTabs);
+        if (tw > theme::dp(96.0f)) {
+            tw = theme::dp(96.0f);
+        }
+        if (tw < theme::dp(44.0f)) {
+            tw = theme::dp(44.0f);   // o piso do toque; o excesso corta
+                                     // (a degradação honesta — o ativo é
+                                     // sempre o 1.º desenhado que cabe)
+        }
+        ui.panel(ins.left, tabsY, contentW, tabsH, theme::kTheme.surface);
+        ui.panel(ins.left, tabsY + tabsH - 1.0f, contentW, 1.0f,
+                 theme::kTheme.border);
+        const TextMetrics tmT = ui.textMetrics();
+        const f32 capA2 = tmT.ascent * (theme::kFontCaption / 14.0f);
+        const f32 capD2 = tmT.descent * (theme::kFontCaption / 14.0f);
+        f32 tx = ins.left + theme::dp(4.0f);
+        for (u32 i = 0; i < nTabs; ++i) {
+            const bool ativa = (i == st.activeTab);
+            char nome[64];
+            if (ativa) {
+                std::snprintf(nome, sizeof(nome), "%s",
+                              st.ticName[0] ? st.ticName : "Script");
+            } else {
+                // a posição i da tira mapeia o slot do vetor (o ativo
+                // NÃO está no vetor — o slot salta-o; o padrão do swap)
+                std::snprintf(nome, sizeof(nome), "%s",
+                              st.tabs[i < st.activeTab ? i : i - 1].ticName);
+            }
+            if (ativa) {
+                ui.panel(tx, tabsY + theme::dp(2.0f), tw, tabsH - theme::dp(4.0f),
+                         theme::kTheme.accentDim);
+            }
+            if (ui.hasFont()) {
+                char fit2[64];
+                textfit::ellipsize(
+                    nome, tw - theme::dp(12.0f),
+                    [&](const char* s) { return ui.fontWidth(s); },
+                    fit2, sizeof(fit2));
+                ui.labelStyled(tx + theme::dp(6.0f),
+                               tabsY + (tabsH - (capA2 + capD2)) * 0.5f + capA2,
+                               fit2, ativa ? theme::kTheme.accent
+                                           : theme::kTheme.text2,
+                               theme::fontScale(theme::kFontCaption), 0);
+            }
+            if (ativa) {
+                // o SUBLINHADO BRASA da ativa (2dp no fundo da strip)
+                ui.panel(tx, tabsY + tabsH - theme::dp(2.0f), tw,
+                         theme::dp(2.0f), theme::kTheme.accent);
+            }
+            if (ui.widgetHit(kTabBase + static_cast<u64>(i), tx, tabsY, tw,
+                             tabsH)) {
+                switchTab(st, i);
+            }
+            tx += tw + tGap;
+        }
+    }
+    const UiRect body{ins.left, tabsY + tabsH, contentW,
+                      bottomLim - (tabsY + tabsH) - errBarH - symH - stripH};
     const f32 lh = lineHeight(ui);
     const std::vector<u32>& lineIdx = ensureLineIndex(st);
     const u32 nLines = static_cast<u32>(lineIdx.size());
     const f32 contentH = static_cast<f32>(nLines) * lh + theme::dp(16.0f);
 
+    // FASE UI H · O MONO DO CÓDIGO (o 2.º atlas): o gutter E o código no
+    // mono da casa (o que faltar no OEM cai para o sans — degradação
+    // honesta); a strip de ajuda e o header ficam no sans de sempre
+    ui.monoMode(true);
     ui.beginScroll(kScrollId, body, contentH);
 
     // o scroll SEGUE O CARET (não o fim — o caret agora move-se livre):
@@ -1067,21 +1446,38 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     // e do toque: dp(8) + linha*lh; lineTopOnScreen soma body.y e o scroll)
     const f32 caretTop = theme::dp(8.0f) + static_cast<f32>(caretLine) * lh;
     const f32 caretBot = caretTop + lh;
-    f32 want = 0.0f;
-    if (contentH > body.h) {
-        want = ui.scrollOffset();
-        if (caretBot - want > body.h) {
-            want = caretBot - body.h;   // caret saiu por baixo — segue
+    // FASE UI H · O FOLLOW SÓ-NO-EVENTO (a cura do «scroll luta com o
+    // dedo» — a CAUSA do tremor reportada, no relatório §11): o follow
+    // ABSOLUTO escrevia o offset TODOS os frames; com o caret fora da
+    // vista o arrasto do utilizador RENDERIZAVA no caret (o dedo perdia
+    // o comando) e no release o offset voltava — a vista rubber-band.
+    // AGORA o scroll serve o caret UMA VEZ por mudança do caret/versão
+    // do buffer (a abertura inclui: os trackers nascem inválidos); fora
+    // disso o offset é DO DEDO e NINGUÉM o escreve.
+    f32 off = ui.scrollOffset();
+    const bool follow = st.followCaret != st.caret ||
+                        st.followVersion != st.bufVersion;
+    if (follow) {
+        if (contentH > body.h) {
+            f32 want = off;
+            if (caretBot - want > body.h) {
+                want = caretBot - body.h;   // caret saiu por baixo — segue
+            }
+            if (caretTop - want < 0.0f) {
+                want = caretTop;            // saiu por cima — segue
+            }
+            if (want > contentH - body.h) {
+                want = contentH - body.h;
+            }
+            if (want < 0.0f) {
+                want = 0.0f;
+            }
+            ui.scrollSetOffset(kScrollId, want);
+            off = want;
         }
-        if (caretTop - want < 0.0f) {
-            want = caretTop;            // saiu por cima — segue
-        }
-        if (want > contentH - body.h) {
-            want = contentH - body.h;
-        }
+        st.followCaret = st.caret;
+        st.followVersion = st.bufVersion;
     }
-    ui.scrollSetOffset(kScrollId, want);
-    const f32 off = ui.scrollOffset();
 
     // gutter de nºs de linha (48dp — fundo surface, texto text2 12sp)
     ui.panel(ins.left, body.y, theme::dp(48.0f), body.h, theme::kTheme.surface);
@@ -1118,6 +1514,14 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
     voni::hl::BlockCommentState bcState =
         firstVis < st.lineBc.size() ? st.lineBc[firstVis]
                                     : voni::hl::BlockCommentState{};
+    // FASE UI H · A BANDA da linha corrente (a ordem do dono: «o fundo da
+    // linha actual um pouco mais claro»): o surface sob o texto; sob o
+    // gutter também (o painel do gutter é o MESMO surface — a faixa fica
+    // contínua e o número acorda dentro dela). Antes do texto, nunca por cima.
+    if (caretLine >= firstVis && caretLine <= lastVis) {
+        ui.panel(body.x, lineTopOnScreen(body.y, caretLine, lh, off), body.w,
+                 lh, theme::kTheme.surface);
+    }
     char num[16];
     for (u32 i = firstVis; i <= lastVis; ++i) {
         const u32 start = lineIdx[i];
@@ -1126,7 +1530,11 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
             ++end;
         }
         const u32 len = end - start;
-        char line[256];
+        // FASE UI H: o cap 512 (era 256 — a CAUSA do desalinho do cursor
+        // nas linhas longas: o texto RENDERIZAVA truncado, o caret media
+        // o prefixo INTEIRO do buffer — a vista e o caret divergiam com
+        // a linha; a nota no relatório §11)
+        char line[512];
         if (len < sizeof(line)) {
             std::memcpy(line, st.buf.data() + start, len);
             line[len] = '\0';
@@ -1164,7 +1572,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         ++dbgLinesTokenized;
         {
             f32 x = xCode;
-            char piece[256];
+            char piece[512];
             for (const RenderPiece& rp : pieces) {
                 if (rp.len == 0 || rp.begin >= lineStr.size()) {
                     continue;
@@ -1188,7 +1596,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
                 const u32 colBytes = st.caret >= start && st.caret <= end
                                          ? st.caret - start
                                          : 0;
-                char before[256];
+                char before[512];
                 const u32 bl = colBytes < sizeof(before)
                                    ? colBytes
                                    : (u32)sizeof(before) - 1;
@@ -1205,6 +1613,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
         }
     }
     ui.endScroll();
+    ui.monoMode(false);   // FASE UI H: o sans de sempre volta para o resto
 
     // ---- 0.9.6.8 (GRUPO E) · A BARRA DE SÍMBOLOS SOBRE O IME -----------------
     // Dokada no limite REAL do teclado do sistema (a faixa de 40dp da
@@ -1274,6 +1683,7 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
                 const u32 ws =
                     st.caret - static_cast<u32>(w0.size());
                 if (w0.size() <= st.caret) {
+                    pushUndo(st);   // FASE UI H: a dica desfaz inteiro
                     st.buf.erase(ws, w0.size());
                     st.caret = ws;
                     ++st.bufVersion;   // 0.9.6.6: a dica inseriu o esqueleto

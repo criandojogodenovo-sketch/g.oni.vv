@@ -823,43 +823,51 @@ TEST(scriptwin_toque_na_palavra_explica_com_exemplo) {
 TEST(scriptwin_botao_nivel_cicla_e_o_tab_do_teclado_existe) {
     // (RECALIBRADO no GRUPO E: o teclado da engine SAIU — o teste do
     // nível fica, o do TAB vira o da BARRA DE SÍMBOLOS no fim)
+    // (RECALIBRADO na FASE UI H: a família de 7 extras — lupa/undo/redo/
+    // copiar/colar/copy-ref/nível — o NÍVEL e o copy-ref não cabem no
+    // header do 720dp e vivem no «⋯» (dotsX=220): o toque abre o menu e
+    // aciona a LINHA; as ações são as MESMAS dos botões)
     UiEnv e;
     namespace sw = vv::editor::scriptwin;
     sw::open(e.st.scriptWin, e.scene, e.tic);
 
     // o botão do NÍVEL cicla N→S→I→N (o draw processa o toque)
     EXPECT(e.st.scriptWin.helpLevel == 1);
-    // 0.9.6.8 (GRUPO E · header flexível): 720×1536 portrait — o botão do
-    // nível ancorou à direita (helpX=388: copy 444, lupa 500, run 560,
-    // stop 640 — as fórmulas do draw; o antigo docsX-200=304 MORREU com o
-    // header que media a partir da lupa)
-    e.tap(388.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
+    // 720×1536 portrait — FASE UI H: a família de 7 extras CABE TODA no
+    // header do 720 (o actionEdge 548, o passo 56): lupa 500, undo 444,
+    // redo 388, copiar 332, colar 276, copy-ref 220, nível 164 (as
+    // fórmulas do draw; o ⋯ só nasce quando ALGO recolhe)
+    e.tap(164.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
     EXPECT(e.st.scriptWin.helpLevel == 2);
-    e.tap(388.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
+    e.tap(164.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
     EXPECT(e.st.scriptWin.helpLevel == 0);
-    e.tap(388.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
+    e.tap(164.0f + 24.0f, 28.0f, 720.0f, 1536.0f);
     EXPECT(e.st.scriptWin.helpLevel == 1);
 
-    // 0.9.6.8 (GRUPO E): A BARRA DE SÍMBOLOS substituiu a linha de baixo do
-    // teclado — dokada SOBRE o IME (inset injetado como o device manda) e
-    // insere os símbolos da spec NO cursor (o MESMO applyEvent do IME).
-    // A 720dp: 14 teclas (keyW = 720/14); a 1ª é o seletor «1/2», a 2ª é '{'
+    // 0.9.6.8 (GRUPO E): A BARRA DE SÍMBOLOS dokada SOBRE o IME insere os
+    // símbolos NO cursor (o MESMO applyEvent do IME). FASE UI H: o set
+    // enxuto — a 720dp UMA página (keyW = 720/14, 13 botões em 14 slots:
+    // a 1ª é o seletor «1/1», a 2ª é '{', a 12.ª é a ',' e a 13.ª é o Tab)
     {
         vv::ime::setBottomInset(280.0f);   // o GBoard aberto (a medida real)
         const f32 keyW = 720.0f / 14.0f;
         const f32 barY = 1536.0f - 280.0f - 40.0f;
-        EXPECT(vv::editor::scriptwin::symPageCount(720.0f) == 2u);
+        EXPECT(vv::editor::scriptwin::symPageCount(720.0f) == 1u);
         e.st.scriptWin.buf = "exist";
         ++e.st.scriptWin.bufVersion;
         e.st.scriptWin.caret = 5;
         // a 2ª tecla é '{' (a 1ª é o seletor de página)
         e.tap(keyW * 1.5f, barY + 20.0f, 720.0f, 1536.0f);
         EXPECT(e.st.scriptWin.buf == "exist{");
-        // o seletor cicla 1/2 -> 2/2 (a página 2 começa em '!')
+        // o seletor com 1 página fica na própria (o ciclo é identidade),
+        // a PENÚLTIMA tecla é a ',' da ordem (o slot 11) e a ÚLTIMA é o
+        // TAB (o slot 12 — o MESMO ime::Event::Tab: a indent de 2 espaços)
         e.tap(keyW * 0.5f, barY + 20.0f, 720.0f, 1536.0f);
-        EXPECT(e.st.scriptWin.symPage == 1);
-        e.tap(keyW * 1.5f, barY + 20.0f, 720.0f, 1536.0f);
-        EXPECT(e.st.scriptWin.buf == "exist{!");
+        EXPECT(e.st.scriptWin.symPage == 0);
+        e.tap(keyW * 11.5f, barY + 20.0f, 720.0f, 1536.0f);
+        EXPECT(e.st.scriptWin.buf == "exist{,");
+        e.tap(keyW * 12.5f, barY + 20.0f, 720.0f, 1536.0f);
+        EXPECT(e.st.scriptWin.buf == "exist{,  ");
         vv::ime::setBottomInset(0.0f);   // o IME fecha com a janela
     }
 }
@@ -870,9 +878,9 @@ TEST(scriptwin_botao_copiar_referencia_devolve_6) {
     sw::open(e.st.scriptWin, e.scene, e.tic);
 
     // o botão 📋 devolve 6 (o main põe no clipboard via JNI) — 720 portrait:
-    // 0.9.6.8 (E · header flexível): copyX=444 (lupa 500, run 560, stop 640)
+    // FASE UI H: a família cabe toda — o copy-ref é o 6.º da fila (copyX=220)
     int r = 0;
-    e.input.injectDown(0, 444.0f + 24.0f, 28.0f);
+    e.input.injectDown(0, 220.0f + 24.0f, 28.0f);
     e.ui.beginFrame(nullptr, &e.input, 720.0f, 1536.0f);
     r = sw::draw(e.ui, e.input, e.st.scriptWin, 720.0f, 1536.0f, 0.0f);
     e.ui.endFrame();

@@ -337,8 +337,9 @@ TEST(theme_tabela_spec_g_exata) {
     // a REGRA DA CASA (o sentinela): o B do warn > 1.5× o B da brasa —
     // o laranja fica NO outro extremo quente, nunca é um 2.º destaque
     EXPECT(theme::kTheme.warn[2] > 1.5f * theme::kTheme.accent[2]);
-    // voniComment #8A8A8A (5,6:1 no grafite — mantém-se do F)
-    EXPECT(nearEqF(theme::kTheme.voniComment[0], 138.0f / 255.0f, 1e-4f));
+    // voniComment #7E7E86 (a neutra escura do H — 4,9:1 no bg #0B0B0D;
+    // o cinza plano #8A8A8A do grafite morreu com a família nova)
+    EXPECT(nearEqF(theme::kTheme.voniComment[0], 126.0f / 255.0f, 1e-4f));
     // voniUser == text1 (o grafite trouxe o user ao text1 da casa)
     EXPECT(theme::kTheme.voniUser[0] == theme::kTheme.text1[0]);
 }

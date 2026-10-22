@@ -514,6 +514,30 @@ public class VvActivity extends NativeActivity {
         });
     }
 
+    // FASE UI H - o COLAR do editor de codigo: devolve o texto do
+    // ClipboardManager (getPrimaryClip) ou null (vazio/sem texto/erro —
+    // o nativo da o toast honesto). O editor TEM foco quando o IME esta
+    // aberto sobre ele (a leitura do Android 10+ exige isso)
+    public String clipboardPaste() {
+        try {
+            final android.content.ClipboardManager cm =
+                    (android.content.ClipboardManager) getSystemService(
+                            android.content.Context.CLIPBOARD_SERVICE);
+            if (cm == null || !cm.hasPrimaryClip()) {
+                return null;
+            }
+            final android.content.ClipData.Item it =
+                    cm.getPrimaryClip().getItemAt(0);
+            final String t = it != null ? it.getText() : null;
+            Log.i("GONI", "java: clipboardPaste "
+                    + (t != null ? t.length() : 0) + " chars");
+            return t != null && t.length() > 0 ? t.toString() : null;
+        } catch (Throwable t2) {
+            Log.e("GONI", "java: clipboardPaste FALHOU", t2);
+            return null;
+        }
+    }
+
     // 0.9.6 (G6/R-017) - o BENCH: device/Android/APK (sha256+bytes) para a
     // linha 1 e a linha 9 do relatorio colavel. Chamado PELO NATIVO uma vez
     // por bench (nunca no caminho de frames). Formato da resposta:

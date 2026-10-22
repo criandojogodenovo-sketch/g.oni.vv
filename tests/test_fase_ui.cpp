@@ -498,3 +498,209 @@ TEST(ui_sobreposicao_topbar) {
                L.bar.y + L.bar.h <= (f32)sc.h + 0.5f);
     }
 }
+
+// ---- PIN ui_codigo_editor — A PARTE H (o EDITOR DE CÓDIGO) -----------------
+// A ordem do dono: «o TIC a que pertence + os exportáveis no topo; as abas
+// dos scripts abertos com a ativa em brasa; desfazer/refazer e copiar/colar
+// na mesma família; fundo #0B0B0D; linha atual mais clara». O pin aferra:
+//   (a) os EXPORTÁVEIS (o parser puro dos #@+ / ++@+ — a spec §4);
+//   (b) o UNDO/REDO por evento (o texto/del/enter/tab empilham UM passo;
+//       o redo morre com a mutação nova; o teto 100);
+//   (c) as ABAS (o abrir com o editor aberto NÃO descarta — o snapshot
+//       acorda no switchTab; o teto kMaxTabs derruba a mais antiga);
+//   (d) os IDS fora da banda das teclas (a colisão latente do 6570 morta);
+//   (e) A SOBREPOSIÇÃO: a tira de abas sob o cabeçalho, o corpo sob a tira
+//       e as abas ≥44dp sem sair do ecrã (2 retratos — o editor é retrato).
+//   (f) A FONTE: o follow só-no-evento (os trackers no State) e o mono do
+//       2.º atlas (o modo cai para o sans sem a fonte — degradação honesta).
+TEST(ui_codigo_editor) {
+    namespace sw = editor::scriptwin;
+    theme::setDensity(1.0f);
+    editor::applyDensity();
+
+    // (a) OS EXPORTÁVEIS: a ordem do fonte, sem duplicados, teto 6
+    {
+        const std::vector<std::string> ex = sw::exportedVarsOf(
+            "v#@+velocidade:Num=5.5\n"
+            "v#vida:Int=100\n"          // v# SEM @+ — NÃO é exportável
+            "x = #@+velocidade\n"        // duplicado — morre
+            "v++@+combustivel=1.0\n"     // a 2.ª forma da spec §4
+            "v#@+ultimo\n");
+        EXPECT(ex.size() == 3);
+        EXPECT(ex[0] == "velocidade");
+        EXPECT(ex[1] == "combustivel");
+        EXPECT(ex[2] == "ultimo");
+        EXPECT(sw::exportedVarsOf("central main { }\n").empty());
+        // o teto 6: sete exportáveis → os 6 primeiros (o subtítulo é 1 linha)
+        const std::vector<std::string> m7 = sw::exportedVarsOf(
+            "#@+a\n#@+b\n#@+c\n#@+d\n#@+e\n#@+f\n#@+g\n");
+        EXPECT(m7.size() == 6 && m7[5] == "f");
+    }
+
+    // (b) O UNDO/REDO POR EVENTO (o caminho PÚBLICO applyEvent)
+    {
+        Scene scene;
+        const Handle tic = scene.create("ator");
+        scene.get(tic)->addComponent<ScriptComp>();
+        sw::State st;
+        sw::open(st, scene, tic);   // o esqueleto; o undo nasce vazio
+        EXPECT(st.undo.empty() && st.redo.empty());
+        const std::string base = st.buf;
+        const u32 caret0 = st.caret;
+        ime::Event ev;
+        ev.isText = true;
+        ev.text = "xy";
+        EXPECT(sw::applyEvent(st, ev));
+        EXPECT(st.buf.size() == base.size() + 2);
+        // o UNDO devolve o par exato (buffer + caret)
+        EXPECT(sw::undoStep(st));
+        EXPECT(st.buf == base && st.caret == caret0);
+        // a mutação NOVA com o redo PENDENTE MATA-O (o clássico — o
+        // M-UIh deixa o redo sobreviver aqui)
+        EXPECT(sw::applyEvent(st, ev));
+        EXPECT(st.buf.size() == base.size() + 2);
+        EXPECT_MSG(st.redo.empty(),
+                   "ui_codigo_editor: o redo SOBREVIVEU à mutação nova "
+                   "(o passo morto volta a valer)");
+        // o undo devolve o passo (e alimenta o redo com o estado corrente)
+        EXPECT(sw::undoStep(st));
+        EXPECT(st.buf == base && st.caret == caret0);
+        EXPECT(!sw::undoStep(st));   // a pilha esvaziou
+        // o REDO repõe o "xy" que o undo tinha retirado (o par clássico)
+        EXPECT(sw::redoStep(st));
+        EXPECT(st.caret == caret0 + 2);
+    }
+
+    // (c) AS ABAS: abrir com o editor aberto dorme o ativo; a troca acorda
+    {
+        Scene scene;
+        const Handle a = scene.create("Jogador");
+        scene.get(a)->addComponent<ScriptComp>();
+        scene.get(a)->getComponent<ScriptComp>()->source = "central a { }\n";
+        const Handle b = scene.create("Inimigo");
+        scene.get(b)->addComponent<ScriptComp>();
+        scene.get(b)->getComponent<ScriptComp>()->source = "central b { }\n";
+        sw::State st;
+        sw::open(st, scene, a);
+        st.caret = 4;   // o estado editado do A
+        sw::open(st, scene, b);   // A DORME, B acorda no fim do fonte dele
+        EXPECT(sw::tabTotal(st) == 2u && st.activeTab == 1u);
+        EXPECT(st.buf == "central b { }\n" && st.ticName ==
+                   std::string("Inimigo"));
+        // a troca devolve o A INTEIRO (buffer + caret + nome)
+        EXPECT(sw::switchTab(st, 0));
+        EXPECT(st.buf == "central a { }\n" && st.caret == 4u &&
+                   st.ticName == std::string("Jogador"));
+        EXPECT(!sw::switchTab(st, 0));   // a mesma aba não troca
+        EXPECT(!sw::switchTab(st, 9));   // fora da faixa não troca
+        // o teto: a 7.ª abertura derruba a mais antiga (fica com 6)
+        for (u32 k = 0; k < 6; ++k) {
+            const Handle h = scene.create("extra" + std::to_string(k));
+            scene.get(h)->addComponent<ScriptComp>();
+            sw::open(st, scene, h);
+        }
+        EXPECT(sw::tabTotal(st) == sw::State::kMaxTabs);
+        EXPECT(!sw::switchTab(st, 6));   // nada além do teto
+    }
+
+    // (d) OS IDS fora da banda das teclas (o ⋯ a 6570 COLIDIA com a 11.ª
+    // tecla em páginas largas — a colisão latente morre no H)
+    EXPECT(sw::kHeaderDotsId > sw::kSymKeyBase + 13u);
+    EXPECT(sw::kUndoId > sw::kHeaderOverflowBase + 6u);
+    EXPECT(sw::kTabBase > sw::kPasteId);
+
+    // (e+f) A SOBREPOSIÇÃO da tira de abas + a FONTE do follow/mono
+    {
+        std::string src;
+        ASSERT(readFile(repoRoot() +
+                        "/app/src/main/cpp/ui/ScriptEditor.cpp", src));
+        // o FOLLOW SÓ-NO-EVENTO: o scrollSetOffset vive DENTRO do if
+        // (follow) — o follow absoluto de todos os frames morreu (a cura
+        // do «scroll luta com o dedo» — a causa do tremor reportada)
+        EXPECT_MSG(countSub(src, "st.followCaret = st.caret;") == 1,
+                   "ui_codigo_editor: o follow só-no-evento não está na "
+                   "fonte (o scrollSetOffset tem de viver no if follow)");
+        // o MONO do código: o modo liga no corpo e desliga no fim
+        EXPECT(countSub(src, "ui.monoMode(true)") == 1);
+        EXPECT(countSub(src, "ui.monoMode(false)") == 1);
+        // a BANDA da linha corrente existe (o fundo mais claro do dono)
+        EXPECT(countSub(src, "theme::kTheme.surface);") >= 1);
+
+        const struct { i32 w, h; const char* ctx; } screens[] = {
+            {720, 1600, "retrato-M"}, {1440, 2560, "retrato-L"},
+        };
+        for (const auto& sc : screens) {
+            const char* fp = FONT_FIXTURE;
+            FontAtlas font;
+            ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+            UiContext ui;
+            ui.init();
+            ui.setFont(&font);
+            ui.setMonoFont(&font);   // o fixture como mono (a mesma fonte —
+                                     // o contrato do MODO é o que afere)
+            ui.setSafeArea(safe::Insets{});
+            InputState input;
+            editor::EditorState st;
+            Scene scene;
+            const Handle a = scene.create("Jogador");
+            scene.get(a)->addComponent<ScriptComp>();
+            const Handle b = scene.create("Inimigo");
+            scene.get(b)->addComponent<ScriptComp>();
+            sw::open(st.scriptWin, scene, a);
+            sw::open(st.scriptWin, scene, b);   // 2 abas
+            EXPECT(ui.monoActive() == false);  // sem monoMode ligado
+            ui.monoMode(true);
+            EXPECT(ui.monoActive() == true);   // o mono aceito
+            ui.monoMode(false);
+            ui.auditBegin("script-h", (f32)sc.w, (f32)sc.h, 0, 0, 0, 0, 1.0f);
+            ui.beginFrame(nullptr, &input, (f32)sc.w, (f32)sc.h);
+            sw::draw(ui, input, st.scriptWin, (f32)sc.w, (f32)sc.h,
+                     1.0f / 60.0f);
+            ui.endFrame();
+            ui.auditEnd();
+            const layout::Record& rec = ui.auditRecord();
+            // as ABAS no registo: as 2 com toque ≥40dp de alto, dentro do
+            // ecrã, disjuntas entre si e SOB o cabeçalho (a tira inteira)
+            f32 stripTop = 1e9f, stripBot = -1.0f;
+            UiRect tabs[2];
+            u32 nTabs = 0;
+            for (const auto& en : rec.entries) {
+                if (en.kind == layout::Entry::Button &&
+                    en.id >= sw::kTabBase &&
+                    en.id < sw::kTabBase + sw::State::kMaxTabs) {
+                    EXPECT_MSG(en.h >= 40.0f - 0.5f && en.w >= 44.0f - 0.5f,
+                               "ui_codigo_editor(%s): a aba é pequena "
+                               "(%.0f×%.0f — o toque mínimo da fase)",
+                               sc.ctx, (double)en.w, (double)en.h);
+                    EXPECT(en.x >= -0.5f &&
+                           en.x + en.w <= (f32)sc.w + 0.5f);
+                    EXPECT(en.y >= editor::scriptwin::kTopH - 0.5f);
+                    if (nTabs < 2) tabs[nTabs] = {en.x, en.y, en.w, en.h};
+                    ++nTabs;
+                    stripTop = stripTop < en.y ? stripTop : en.y;
+                    stripBot = stripBot > en.y + en.h ? stripBot : en.y + en.h;
+                }
+            }
+            EXPECT_MSG(nTabs == 2,
+                       "ui_codigo_editor(%s): as 2 abas no registo (%u)",
+                       sc.ctx, nTabs);
+            if (nTabs == 2) {
+                // disjuntas (o gap 4dp entre elas — nada tapa nada)
+                const bool disj =
+                    tabs[0].x + tabs[0].w <= tabs[1].x + 0.5f ||
+                    tabs[1].x + tabs[1].w <= tabs[0].x + 0.5f;
+                EXPECT_MSG(disj, "ui_codigo_editor(%s): as abas tocam-se",
+                           sc.ctx);
+            }
+            // a tira sob o cabeçalho e o CORPO não sobe para ela: o scroll
+            // do código começa onde a tira acaba (a fonte: body.y do draw)
+            EXPECT(stripTop >= editor::scriptwin::kTopH - 0.5f);
+            EXPECT(stripBot <= (f32)sc.h);
+            // o VALIDADOR da casa: 0 problemas no frame inteiro do editor
+            const auto probs = layout::validate(rec);
+            EXPECT_MSG(probs.empty(),
+                       "ui_codigo_editor(%s): o validador apanhou %zu "
+                       "problemas", sc.ctx, probs.size());
+        }
+    }
+}

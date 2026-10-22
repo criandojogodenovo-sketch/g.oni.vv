@@ -99,6 +99,7 @@ jmethodID g_midSetImmersive = nullptr;   // 0.9.0: VvActivity.setImmersive(Z)V
 jmethodID g_midSetOrientation = nullptr; // VvActivity.setOrientation(Z)V
 jmethodID g_midImeShow = nullptr;        // VvActivity.imeShow()V
 jmethodID g_midClipboardCopy = nullptr;  // 0.9.5: VvActivity.clipboardCopy(String)V
+jmethodID g_midClipboardPaste = nullptr; // FASE UI H: VvActivity.clipboardPaste()Ljava/lang/String;
 jmethodID g_midBenchInfo = nullptr;     // 0.9.6 (G6): VvActivity.benchDeviceInfo()String
 jmethodID g_midImeHide = nullptr;        // VvActivity.imeHide()V
 // 0.8.12 — o CACHE DIR da app: VvActivity.cacheDirPath()String — o STAGING
@@ -359,6 +360,17 @@ void cacheActivityMethods(JNIEnv* env) {
                     "copiar-referência avisa (sem crash)");
     } else {
         elog::info("jni: VvActivity.clipboardCopy OK (clipboard)");
+    }
+    // FASE UI H — a LEITURA do clipboard (o botão COLAR do editor: o texto
+    // do ClipboardManager entra PELO applyEvent — o mesmo caminho do IME)
+    g_midClipboardPaste = env->GetMethodID(
+        g_activityCls, "clipboardPaste", "()Ljava/lang/String;");
+    if (!g_midClipboardPaste || clearPendingException(env)) {
+        g_midClipboardPaste = nullptr;
+        elog::error("jni: VvActivity.clipboardPaste NÃO encontrada — o "
+                    "colar avisa com toast (sem crash)");
+    } else {
+        elog::info("jni: VvActivity.clipboardPaste OK (o colar do editor)");
     }
 
     // 0.8.12 — o CACHE DIR da app (não crítico: sem ele o STAGING da
@@ -778,6 +790,34 @@ bool jniClipboardCopy(const char* utf8) {
     env->CallVoidMethod(g_activity, g_midClipboardCopy, jtext);
     env->DeleteLocalRef(jtext);
     return !clearPendingException(env);
+}
+
+// FASE UI H — o COLAR do editor de código: o texto do ClipboardManager
+// (getPrimaryClip) como UTF-8. Vazio = clipboard vazio/sem texto/ponte
+// indisponível (o chamador dá o toast honesto — nunca crash; o Android 10+
+// limita a leitura a apps com foco — o editor TEM (o IME aberto sobre ele))
+std::string jniClipboardPaste() {
+    if (!handshakeOk() || !g_midClipboardPaste) {
+        elog::warn("jni: clipboardPaste indisponível — ponte Java sem o "
+                   "método (o colar dá o toast)");
+        return "";
+    }
+    JNIEnv* env = attachedEnv();
+    if (!env) {
+        elog::warn("jni: clipboardPaste sem env do thread chamador");
+        return "";
+    }
+    const jobject jtext =
+        env->CallObjectMethod(g_activity, g_midClipboardPaste);
+    if (clearPendingException(env) || !jtext) {
+        return "";   // null do Java = clipboard sem texto
+    }
+    const char* utf = env->GetStringUTFChars(
+        static_cast<jstring>(jtext), nullptr);
+    std::string out = utf ? utf : "";
+    env->ReleaseStringUTFChars(static_cast<jstring>(jtext), utf);
+    env->DeleteLocalRef(jtext);
+    return out;
 }
 
 // 0.8.11 — o MICROFONE da gravação: true = concedida, false = diálogo

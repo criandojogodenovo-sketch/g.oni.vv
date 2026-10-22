@@ -132,14 +132,21 @@ struct Theme {
     f32 dropShadow[4]; // preto α0.15 (a sombra 2.5D)
     // 0.9.2 — PALETA V.ONI (spec §10 🔶 — coloração do editor de script;
     // o parser classifica tokens, AS CORES VIVEM AQUI — flip de 1 token).
-    // CONTEÚDO, não chrome (exceção documentada ao «zero azul» — como os
-    // EIXOS do gizmo, sempre foram)
-    f32 voniReserved[4];   // #B39DDB reservadas (roxo)
-    f32 voniEngine[4];     // #8AB4F8 engine/maiúsculas (azul — conteúdo)
-    f32 voniUser[4];       // #ECECEE utilizador (== text1)
-    f32 voniString[4];     // #81C784 strings (verde)
-    f32 voniNumber[4];     // #FFD54F números (amarelo)
-    f32 voniComment[4];    // #8A8A8A comentários (5,8:1 no poço — 0.11-Y)
+    // FASE UI H (a ordem do dono: «brasa só nas palavras reservadas»):
+    // as reservadas são A BRASA (o MESMO valor do accent — o destaque
+    // único dentro do editor é a sintaxe); string/número/comentário/engine
+    // passaram a NEUTRAS DISTINTAS (a família cinza quente da casa — o
+    // roxo/azul/amarelo do 0.9.2 morreram). CONTEÚDO, não chrome.
+    f32 voniReserved[4];   // #FF5A1F reservadas (A BRASA — o MESMO valor do
+                           //  accent; 6,3:1 no bg)
+    f32 voniEngine[4];     // #8A8A93 engine/maiúsculas (== text2 — neutra;
+                           //  5,8:1 no bg)
+    f32 voniUser[4];       // #E8E6E3 utilizador (== text1)
+    f32 voniString[4];     // #B5AFA6 strings (neutra média quente — 9,0:1
+                           //  no bg; 8,6:1 na banda da linha corrente)
+    f32 voniNumber[4];     // #D6D2C8 números (neutra clara — 13,0:1 no bg)
+    f32 voniComment[4];    // #7E7E86 comentários (neutra escura — 4,9:1 no
+                           //  bg; 4,6:1 na banda da linha corrente)
     // EIXOS DO GIZMO (CONTEÚDO 3D, não chrome — a exceção documentada
     // desde 0.6.9; vivem AQUI porque a spec manda: cores SÓ no Theme;
     // FASE UI: os hexes EXATOS do dono)
@@ -209,16 +216,17 @@ inline constexpr Theme kTheme{
     {0.0f, 0.0f, 0.0f, 0.60f},   // scrim (60%)
     {0.0f, 0.0f, 0.0f, 0.40f},   // scrimMenu (40% — PASSO 4, menus ancorados)
     {0.0f, 0.0f, 0.0f, 0.15f},   // dropShadow (a sombra 2.5D — FASE 3.2)
-    // V.ONI (sintaxe = conteúdo): voniUser segue o text1 (#E8E6E3 — a
-    // FASE UI); no fundo #0B0B0D TODOS ≥5,7:1 (user 15,8 · engine 9,3 ·
-    // reserved 8,2 · string 9,8 · number 13,9 · comment 5,7) — a paleta
-    // V.ONI intocada (conteúdo), o user segue o text1 como sempre
-    VV_RGB(179, 157, 219),  // voniReserved
-    VV_RGB(138, 180, 248),  // voniEngine
+    // V.ONI (sintaxe = conteúdo): FASE UI H — a brasa nas RESERVADAS (o
+    // MESMO valor do accent) e as restantes NEUTRAS distintas; no fundo
+    // #0B0B0D TODOS ≥4,5:1 (user 15,8 · number 13,0 · string 9,0 ·
+    // reserved 6,3 · engine 5,8 · comment 4,9) — a mesma família cinza
+    // quente da casa, sem roxo/azul/amarelo
+    VV_RGB(255, 90, 31),    // voniReserved (A BRASA == accent #FF5A1F)
+    VV_RGB(138, 138, 147),  // voniEngine (== text2 #8A8A93)
     VV_RGB(232, 230, 227),  // voniUser (== text1 #E8E6E3 — a FASE UI)
-    VV_RGB(129, 199, 132),  // voniString
-    VV_RGB(255, 213, 79),   // voniNumber
-    VV_RGB(138, 138, 138),  // voniComment
+    VV_RGB(181, 175, 166),  // voniString #B5AFA6 (neutra média quente)
+    VV_RGB(214, 210, 200),  // voniNumber #D6D2C8 (neutra clara)
+    VV_RGB(126, 126, 134),  // voniComment #7E7E86 (neutra escura)
     // EIXOS (conteúdo 3D — OS HEXES EXATOS DO DONO na FASE UI)
     VV_RGB(229, 72, 77),    // axisX  #E5484D
     VV_RGB(63, 185, 80),    // axisY  #3FB950
@@ -426,9 +434,10 @@ inline f32 contrastOnGlassReal(const f32 token[4]) {
     return contrastRatio(token, w);
 }
 
-// 0.9.6.10 · recalibrado 0.11-Y — contraste dos tokens V.ONI sobre o BG
-// (#08080A): voniUser 16,9:1 · voniEngine 9,5:1 · voniReserved 8,3:1 ·
-// voniString 9,9:1 · voniNumber 14,2:1 · voniComment 5,8:1 (todos ≥4,5:1)
+// 0.9.6.10 · recalibrado FASE UI H — contraste dos tokens V.ONI sobre o BG
+// (#0B0B0D): voniUser 15,8:1 · voniNumber 13,0:1 · voniString 9,0:1 ·
+// voniReserved (a brasa) 6,3:1 · voniEngine 5,8:1 · voniComment 4,9:1
+// (todos ≥4,5:1)
 inline f32 contrastOnBg(const f32 color[4]) {
     return contrastRatio(color, kTheme.bg);
 }

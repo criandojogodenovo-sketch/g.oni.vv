@@ -106,6 +106,7 @@ namespace {
 EglContext g_egl;
 Renderer   g_renderer;
 FontAtlas  g_font;
+FontAtlas  g_fontMono;   // FASE UI H: o 2.º atlas — o MONO do código
 UiContext  g_ui;
 InputState g_input;
 Scene      g_scene;
@@ -3713,6 +3714,8 @@ void closeScriptEditor() {
     // re-valida por NOME antes de salvar (o padrão da seleção 0.8.12);
     // sem isto a fonte NUNCA era gravada (get()==null) e o Run dava
     // "TIC inválido".
+    // FASE UI H: TODAS as abas salvam (o ativo E os snapshots inativos —
+    // cada um revalidado pelo SEU nome; a fonte de nenhum se perde)
     editor::scriptwin::revalidateTic(g_editor.scriptWin, g_scene);
     if (Tic* t = g_scene.get(g_editor.scriptWin.tic)) {
         if (ScriptComp* sc = t->getComponent<ScriptComp>()) {
@@ -3727,6 +3730,27 @@ void closeScriptEditor() {
         elog::warn("voni: fonte do editor PERDIDA no fecho (TIC '%s' não "
                    "existe na cena)",
                    g_editor.scriptWin.ticName);
+    }
+    for (editor::scriptwin::State::TabSnap& tb :
+         g_editor.scriptWin.tabs) {
+        // revalida o dono PELO NOME (o padrão do ativo — o mesmo ciclo)
+        Handle h = tb.tic;
+        if (!g_scene.get(h) && tb.ticName[0]) {
+            h = g_scene.find(tb.ticName);
+        }
+        if (Tic* t = g_scene.get(h)) {
+            if (ScriptComp* sc = t->getComponent<ScriptComp>()) {
+                sc->source = tb.buf;
+            } else {
+                ScriptComp& sc2 = *t->addComponent<ScriptComp>();
+                sc2.source = tb.buf;
+            }
+            elog::info("voni: aba inativa salva ('%s', %zu chars)",
+                       tb.ticName, tb.buf.size());
+        } else {
+            elog::warn("voni: aba PERDIDA no fecho (TIC '%s' não existe)",
+                       tb.ticName);
+        }
     }
     editor::scriptwin::close(g_editor.scriptWin);
     if (ime::setOrientation(ime::Orientation::Landscape,
@@ -5250,6 +5274,18 @@ void onAppCmd(android_app* app, i32 cmd) {
             }
             g_ui.init();
             g_ui.setFont(&g_font);
+            // FASE UI H: o 2.º ATLAS — o MONO do código (o editor de
+            // script). Falhou (OEM enxuto/hospedeiro)? O monoMode cai para
+            // o sans de sempre — o editor NUNCA fica sem texto.
+            if (g_fontMono.loadFromPaths(kMonoFontPaths, kMonoFontPathCount,
+                                         28.0f)) {
+                elog::info("[boot 3/6] font MONO OK (o código do editor em "
+                           "mono)");
+            } else {
+                elog::warn("[boot 3/6] font MONO FALHOU — o código do "
+                           "editor segue no sans (degradação honesta)");
+            }
+            g_ui.setMonoFont(&g_fontMono);
             // 0.7.0: resolver de texturas da UI criável (elemento Image — ref
             // relativa → Texture do GpuAssets; o mesmo cache do material)
             g_ui.setImageResolver([](const std::string& ref) -> const Texture* {
@@ -5489,6 +5525,7 @@ void onAppCmd(android_app* app, i32 cmd) {
                 const u32 gpuTextures = g_gpu.textureCount();
                 g_gpu.releaseAll();          // unique_ptr → ~Mesh/~Texture → glDelete*
                 g_font.destroy();            // atlas: glDeleteTextures + reset das métricas
+                g_fontMono.destroy();        // FASE UI H: o mono também (o MESMO ciclo)
                 g_cubeMesh.destroy();
                 g_impQuad.destroy();         // 0.11-W (3.75b): o quad do impostor
                 primMeshesDestroyAll();      // 0.8.10: prims SEM cache (posse)
@@ -8229,6 +8266,44 @@ void frame() {
             } else {
                 std::snprintf(g_toast, sizeof(g_toast),
                               "clipboard indisponível");
+                g_toastT = 1.8f;
+            }
+        } else if (sr == 8) {
+            // FASE UI H · COPIAR O CÓDIGO: o buffer INTEIRO vai para o
+            // clipboard (o botão da família Copy — o mesmo JNI da
+            // referência, outro texto)
+            if (storage::jniClipboardCopy(
+                    g_editor.scriptWin.buf.c_str())) {
+                std::snprintf(g_toast, sizeof(g_toast),
+                              "código copiado (%zu chars)",
+                              g_editor.scriptWin.buf.size());
+                g_toastT = 1.6f;
+                elog::info("voni: código copiado p/ o clipboard (%zu chars)",
+                           g_editor.scriptWin.buf.size());
+            } else {
+                std::snprintf(g_toast, sizeof(g_toast),
+                              "clipboard indisponível");
+                g_toastT = 1.8f;
+            }
+        } else if (sr == 9) {
+            // FASE UI H · COLAR: o clipboard entra PELO applyEvent (o
+            // MESMO caminho do IME — o undo empilha, o índice rebuilda,
+            // o caret segue); vazio = toast honesto, nunca silêncio
+            const std::string clip = storage::jniClipboardPaste();
+            if (!clip.empty()) {
+                editor::scriptwin::State& sw = g_editor.scriptWin;
+                ime::Event ev;
+                ev.isText = true;
+                ev.text = clip;
+                editor::scriptwin::applyEvent(sw, ev);
+                std::snprintf(g_toast, sizeof(g_toast), "colado (%zu chars)",
+                              clip.size());
+                g_toastT = 1.6f;
+                elog::info("voni: colado do clipboard (%zu chars) — caret %u",
+                           clip.size(), sw.caret);
+            } else {
+                std::snprintf(g_toast, sizeof(g_toast),
+                              "clipboard vazio/indisponível");
                 g_toastT = 1.8f;
             }
         }

@@ -128,8 +128,13 @@ TEST(y1_tokens) {
     EXPECT(countSub(src, "VV_RGBA(26, 26, 30, 0.86f)") == 1);
     // as LINHAS são o #26262C (elevated + border partilham o RGB)
     EXPECT(countSub(src, "VV_RGB(38, 38, 44)") == 2);
-    // a BRASA: accent + fireRed partilham o RGB; o glow com alfa próprio
-    EXPECT(countSub(src, "VV_RGB(255, 90, 31)") == 2);
+    // a BRASA: accent + fireRed + voniReserved partilham o RGB (o H pôs a
+    // brasa nas RESERVADAS — o destaque único dentro do editor é a sintaxe);
+    // o glow com alfa próprio
+    EXPECT_MSG(countSub(src, "VV_RGB(255, 90, 31)") == 3,
+               "y1_tokens: a brasa VV_RGB(255,90,31) tem de aparecer 3x "
+               "(accent + fireRed + voniReserved do H — encontrado %u)",
+               countSub(src, "VV_RGB(255, 90, 31)"));
     EXPECT(countSub(src, "VV_RGBA(255, 90, 31, 0.25f)") == 1);
     EXPECT(countSub(src, "VV_RGB(224, 68, 15)") == 2);   // accent2 + fireOrange
     EXPECT(countSub(src, "VV_RGB(43, 24, 16)") == 1);    // O FUNDO DE SELEÇÃO

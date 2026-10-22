@@ -16,6 +16,7 @@ constexpr f32 kPad    = 16.0f;
 void UiContext::init() {
     solids_.reserve(kMaxQuadsUi);
     glyphs_.reserve(kMaxQuadsUi);
+    glyphsMono_.reserve(kMaxQuadsUi);   // FASE UI H: o mono do código
     sdf_.reserve(256);   // 0.12-D: os widgets SDF (botões da app)
     for (u32 i = 0; i < kMaxImageBatches; ++i) {
         images_[i].reserve(64);   // 0.7.0: poucas imagens por frame
@@ -32,6 +33,7 @@ void UiContext::beginFrame(Renderer* renderer, const InputState* input,
     textScale_ = 1.0f;   // 0.7.4: reset por frame (só o viewport 2D escala)
     solids_.clear();
     glyphs_.clear();
+    glyphsMono_.clear();   // FASE UI H: o mono recomeça vazio
     sdf_.clear();   // 0.12-D (D-1): os widgets SDF recomeçam
     for (u32 i = 0; i < kMaxImageBatches; ++i) {   // 0.7.0
         images_[i].clear();
@@ -213,22 +215,22 @@ void UiContext::auditLabel_(f32 xBaseline, f32 yBaseline, const char* shown,
     // button/labelFitted não re-regista (quem chama regista a entrada
     // CERTA — o button com a truncagem do SEU texto, o labelFitted com o
     // fullW do texto ORIGINAL)
-    if (!auditing_ || auditComposite_ != 0 || !font_ || !font_->ok() ||
+    if (!auditing_ || auditComposite_ != 0 || !fnt() || !fnt()->ok() ||
         !shown) {
         return;
     }
     layout::Entry e;
     e.kind = layout::Entry::Label;
     e.x = xBaseline;
-    e.y = yBaseline - font_->ascent() * k;
+    e.y = yBaseline - fnt()->ascent() * k;
     // PASSO 1 (0.9.6.14): a largura registada é a DESENHADA (widthOf × k
     // TOTAL — o sp incluído, o MESMO fator do ascent/descent acima). ERA
     // fontWidth(s) SEM o sp: as labels caption (12sp) ficavam ~14% mais
     // largas NO REGISTO do que os glifos no ecrã — um falso «SANGRA» no
     // validador para qualquer caption perto da borda (o FPS·TICs da tab
     // bar, o primeiro caso real)
-    e.w = font_->widthOf(shown) * k;
-    e.h = (font_->ascent() + font_->descent()) * k;
+    e.w = fnt()->widthOf(shown) * k;
+    e.h = (fnt()->ascent() + fnt()->descent()) * k;
     e.fullW = fullW > 0.0f ? fullW : e.w;
     e.truncated = truncated;
     // 0.11-Y (Y-2): o scope do overlay (o texto do toast leva overlay)
@@ -552,7 +554,7 @@ void UiContext::label(f32 xBaseline, f32 yBaseline, const char* text, const f32 
 // batches como o label de sempre.
 void UiContext::labelStyled(f32 xBaseline, f32 yBaseline, const char* text,
                             const f32 color[4], f32 fontScale, u8 style) {
-    if (!font_ || !font_->ok() || !text) {
+    if (!fnt() || !fnt()->ok() || !text) {
         return;
     }
     if (std::getenv("VV_DBG_LABEL") && xBaseline > 1330.0f &&
@@ -570,6 +572,9 @@ void UiContext::labelStyled(f32 xBaseline, f32 yBaseline, const char* text,
     auditLabel_(xBaseline, yBaseline, text, 0.0f, false, k);
     const bool bold = style == static_cast<u8>(1);
     const bool italic = style == static_cast<u8>(2);
+    // FASE UI H: em monoMode os glifos vão ao batch PRÓPRIO (a textura do
+    // 2.º atlas submetida à parte no endFrame — o batch é de textura única)
+    QuadBatch& gb = mono_ ? glyphsMono_ : glyphs_;
     f32 penX = xBaseline;
     // FASE 9 (G1-2 — ACENTOS): iteração UTF-8 por CODE POINT — o atlas
     // cobre Latin-1 + Latin Ext-A + …; glifo ausente avança 0.30·altura
@@ -577,9 +582,9 @@ void UiContext::labelStyled(f32 xBaseline, f32 yBaseline, const char* text,
     for (const char* p = text; *p;) {
         u32 bytes = 1;
         const u32 cp = utf8Decode(p, &bytes);
-        const Glyph* g = font_->glyphFor(cp);
+        const Glyph* g = fnt()->glyphFor(cp);
         if (!g) {
-            penX += font_->height() * 0.30f * k;
+            penX += fnt()->height() * 0.30f * k;
             p += bytes;
             continue;
         }
@@ -597,9 +602,9 @@ void UiContext::labelStyled(f32 xBaseline, f32 yBaseline, const char* text,
                                    gx + ox + shear, gx + ox + gw, gx + ox + gw + shear};
                 const f32 py[6] = {gy, gy + gh, gy + gh,
                                    gy, gy + gh, gy};
-                emitGlyphCorners(glyphs_, px, py, g->u0, g->v0, g->u1, g->v1, color);
+                emitGlyphCorners(gb, px, py, g->u0, g->v0, g->u1, g->v1, color);
             } else {
-                emitTo(glyphs_, gx + ox, gy, gw, gh,
+                emitTo(gb, gx + ox, gy, gw, gh,
                        g->u0, g->v0, g->u1, g->v1, color);
             }
         }
@@ -623,7 +628,7 @@ void UiContext::labelFittedStyled(f32 xBaseline, f32 yBaseline,
     }
     const f32 k = textScale_ * theme::textK() *
                   (fontScale > 0.05f ? fontScale : 1.0f);
-    const f32 fullW = font_ ? font_->widthOf(text) * k : 0.0f;
+    const f32 fullW = fnt() ? fnt()->widthOf(text) * k : 0.0f;
     if (fullW <= maxW) {
         // coube INTEIRO — a entrada diz a largura REAL (nunca trunca);
         // o labelStyled() de dentro regista POR ELE (não há duplo)
@@ -632,7 +637,7 @@ void UiContext::labelFittedStyled(f32 xBaseline, f32 yBaseline,
     }
     char buf[256];
     textfit::ellipsize(
-        text, maxW, [&](const char* s) { return font_->widthOf(s) * k; },
+        text, maxW, [&](const char* s) { return fnt()->widthOf(s) * k; },
         buf, sizeof(buf));
     if (buf[0]) {
         // TRUNCOU — a entrada carrega a largura INTEIRA do texto original
@@ -1099,7 +1104,7 @@ bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
         // 0.11-Y (Y-1): o visual mudou para o helper de cima (a chama no
         // ativo: glow + gradiente accent→accent2)
         drawButtonVisual(*this, x, y, w, h, heldInner);
-        if (font_ && font_->ok() && text) {
+        if (fnt() && fnt()->ok() && text) {
             char fit[256];
             const char* shown = text;
             if (fontWidth(text) > w - fitPad) {
@@ -1133,7 +1138,7 @@ bool UiContext::button(u64 id, f32 x, f32 y, f32 w, f32 h, const char* text) {
     // 0.11-Y (Y-1): o MESMO helper da passagem de audit (a chama no ativo)
     drawButtonVisual(*this, x, y, w, h, held);
 
-    if (font_ && font_->ok() && text) {
+    if (fnt() && fnt()->ok() && text) {
         // F4.2/B2: o texto do botão nunca sai do rect — nomes longos de TIC
         // na Hierarchy eram cortados pela borda do botão
         char fit[256];
@@ -1410,7 +1415,7 @@ void UiContext::statusLine(const char* text) {
     panel(r.x, r.y, r.w, r.h, theme::PANEL);
     panel(r.x, r.y, r.w, 1.0f, theme::LINE);   // separador superior
 
-    if (font_ && font_->ok() && text) {
+    if (fnt() && fnt()->ok() && text) {
         // 0.9.6.6 (GRUPO C): 12sp CAPTION (spec E — a linha de estado é
         // legenda) com baseline CENTRADA pelas métricas do contexto e o
         // FIT de sempre (nunca sai do rect). ANTES: label de CORPO no
@@ -1552,6 +1557,11 @@ void UiContext::endFrame() {
     }
     if (font_ && font_->ok()) {
         renderer_->submit(glyphs_, font_->texture());
+    }
+    // FASE UI H: o MONO do código — o 2.º batch DEPOIS do sans (a mesma
+    // regra «texto por último»; só existe quando carregou e emitiu)
+    if (fontMono_ && fontMono_->ok() && !glyphsMono_.empty()) {
+        renderer_->submit(glyphsMono_, fontMono_->texture());
     }
 }
 

@@ -2720,7 +2720,9 @@ int main() {
             // posição dela acende a strip com a explicação + exemplo
             g_editor.scriptWin.helpLevel = 1;   // Normal
             const f32 lh11 = 28.0f + 10.0f;     // (linha do corpo ~38px)
-            tap(90.0f, 56.0f + 8.0f + lh11 * 0.5f);
+            // FASE UI H: a tira de abas de 40dp desce o corpo — o toque
+            // acompanha (56 do header + 40 da tira + o padding da linha)
+            tap(90.0f, 56.0f + 40.0f + 8.0f + lh11 * 0.5f);
             check(g_editor.scriptWin.helpTapped,
                   "o toque numa palavra marca o estado de explicação");
             const std::string l1 =
@@ -2734,14 +2736,15 @@ int main() {
 
         passo("11.10 os níveis I/N/S: Silencioso apaga a strip");
         {
-            // 0.9.6.8 (E · header flexível): o botão do nível ancorou à
-            // direita — helpX=388 (copy 444, lupa 500, run 560, stop 640)
-            tap(388.0f + 24.0f, 28.0f);
+            // FASE UI H (a família de 7 extras CABE no 720dp): o botão do
+            // nível é o 7.º da fila — helpX=164 (copy-ref 220, colar 276,
+            // copiar 332, redo 388, undo 444, lupa 500, run 560, stop 640)
+            tap(164.0f + 24.0f, 28.0f);
             check(g_editor.scriptWin.helpLevel == 2, "N → S (Silencioso)");
             check(editor::scriptwin::helpStripLine1(g_editor.scriptWin)
                       .empty(),
                   "Silencioso: a strip APAGA (sem encher o ecrã)");
-            tap(388.0f + 24.0f, 28.0f);
+            tap(164.0f + 24.0f, 28.0f);
             check(g_editor.scriptWin.helpLevel == 0, "S → I (Iniciante)");
             check(!editor::scriptwin::helpStripLine1(g_editor.scriptWin)
                       .empty(),
@@ -2749,7 +2752,7 @@ int main() {
             check(!editor::scriptwin::helpStripLine2(g_editor.scriptWin)
                       .empty(),
                   "Iniciante: SEMPRE com o exemplo (2 linhas)");
-            tap(388.0f + 24.0f, 28.0f);
+            tap(164.0f + 24.0f, 28.0f);
             check(g_editor.scriptWin.helpLevel == 1, "I → N (volta ao Normal)");
         }
 
@@ -2757,7 +2760,7 @@ int main() {
         {
             g_jni.void_calls.clear();
             g_jni.last_new_string.clear();
-            tap(444.0f + 24.0f, 28.0f);   // o botão 📋 (copyX=444, E flexível)
+            tap(220.0f + 24.0f, 28.0f);   // o botão 📋 (copyX=220 — o 6.º da família do H)
             frame();
             bool sawClip = false;
             for (const auto& c : g_jni.void_calls) {
@@ -3039,7 +3042,7 @@ int main() {
             check(editor::scriptwin::symbolBarHeight() == 40.0f,
                   "12.3 a barra de símbolos mede 40dp EXATOS (a spec E)");
             const f32 barY = 1536.0f - 280.0f - 40.0f;
-            const f32 keyW3 = 720.0f / 14.0f;
+            const f32 keyW3 = 720.0f / 14.0f;   // FASE UI H: o seletor + 12 itens (13 botões em 14 slots)
             const u32 len0 = (u32)g_editor.scriptWin.buf.size();
             const u32 caret0 = g_editor.scriptWin.caret;
             tap(keyW3 * 1.5f, barY + 20.0f);   // a tecla '{' (a 2ª)
@@ -3203,15 +3206,16 @@ int main() {
             // em h − inset − 40dp
             vv::ime::setBottomInset(280.0f);
             frame();
-            const f32 keyW = 720.0f / 14.0f;   // 14 teclas @720dp
+            const f32 keyW = 720.0f / 14.0f;   // FASE UI H: 14 slots @720dp (13 botões — a última baía fica vazia)
             const f32 barY = 1536.0f - 280.0f - 40.0f;
             check(editor::scriptwin::symKeysVisible(720.0f) == 14u &&
-                      editor::scriptwin::symPageCount(720.0f) == 2u,
-                  "12.7 a 720dp: 14 teclas visíveis, 2 páginas (a adaptação)");
-            // as PÁGINAS cobrem os 24 símbolos da spec (união = o set TODO)
+                      editor::scriptwin::symPageCount(720.0f) == 1u,
+                  "12.7 a 720dp: 14 teclas cabíveis, 1 página (o set "
+                  "enxuto de 12 itens cabe inteiro)");
+            // a PÁGINA cobre os 12 itens (11 símbolos + o Tab)
             {
-                bool seen[22] = {};
-                for (u32 pg = 0; pg < 2; ++pg) {
+                bool seen[12] = {};
+                for (u32 pg = 0; pg < 1; ++pg) {
                     g_editor.scriptWin.symPage = (u8)pg;
                     // o padrao da 13.2: o pedido armado popula o registo
                     g_layoutExportPending = true;
@@ -3228,10 +3232,9 @@ int main() {
                     }
                     check(keys >= 8, "12.7 cada página da barra desenha as "
                           "teclas (>=40dp cada, compactas da spec E)");
-                    // os símbolos da página: a tecla k da página pg é o
-                    // símbolo (pg*13 + k-1); a página 2 é CURTA (9)
-                    const u32 n = pg == 0 ? 13u : 9u;
-                    for (u32 k = 1; k <= n; ++k) {
+                    // os itens da página: a tecla k é o item (pg*13 + k-1)
+                    // — 1 página com 12 itens (o seletor não conta)
+                    for (u32 k = 1; k <= 12u; ++k) {
                         seen[pg * 13u + (k - 1u)] = true;
                     }
                 }
@@ -3239,12 +3242,13 @@ int main() {
                 for (bool s : seen) {
                     total += s ? 1u : 0u;
                 }
-                check(total == 22,
-                      "12.7 as 2 páginas cobrem os 22 símbolos da spec "
-                      "(a união é o set TODO)");
+                check(total == 12,
+                      "12.7 a página cobre os 12 itens (11 símbolos + o "
+                      "Tab — a união é o set TODO do H)");
             }
-            // (b) o SELETOR cicla 1/2 -> 2/2 -> 1/2 e os símbolos entram
-            // NO CURSOR (o MESMO applyEvent do IME)
+            // (b) o SELETOR com 1 página fica na própria (1/1) e os itens
+            // entram NO CURSOR (o MESMO applyEvent do IME); a ÚLTIMA tecla
+            // (o slot 12) é a ',' da ordem do dono
             {
                 g_editor.scriptWin.symPage = 0;
                 g_editor.scriptWin.buf = "abc";
@@ -3254,14 +3258,11 @@ int main() {
                 check(g_editor.scriptWin.buf == "abc{",
                       "12.7 o '{' entra NO CURSOR (a 2ª tecla da página 1)");
                 tap(keyW * 0.5f, barY + 20.0f);   // o seletor
-                check(g_editor.scriptWin.symPage == 1,
-                      "12.7 o seletor cicla 1/2 -> 2/2");
-                tap(keyW * 1.5f, barY + 20.0f);   // '!' (1.º da página 2)
-                check(g_editor.scriptWin.buf == "abc{!",
-                      "12.7 o '!' entra NO CURSOR (a página 2 começa em '!')");
-                tap(keyW * 0.5f, barY + 20.0f);   // o seletor de volta
                 check(g_editor.scriptWin.symPage == 0,
-                      "12.7 o seletor cicla 2/2 -> 1/2 (o ciclo fecha)");
+                      "12.7 o seletor com 1 página fica na própria (1/1)");
+                tap(keyW * 11.5f, barY + 20.0f);  // a ',' (o slot 11)
+                check(g_editor.scriptWin.buf == "abc{,",
+                      "12.7 a ',' entra NO CURSOR (a penúltima tecla da ordem)");
                 check(logHas("barra de simbolos -> pagina"),
                       "12.7 o LOG da página existe (o dono segue no engine.log)");
                 check(logHas("simbolo '{' pela barra"),
@@ -3872,7 +3873,9 @@ int main() {
         // ao próprio teste)
         const f32 lh = vv::editor::scriptwin::lineHeight(g_ui);
         const safe::Insets ins11 = g_ui.safeArea();
-        const f32 bodyY = 96.0f + vv::theme::dp(56.0f);
+        // FASE UI H: a tira de abas de 40dp desce o corpo (56 do header +
+        // 40 da tira — o MESMO body.y do draw)
+        const f32 bodyY = 96.0f + vv::theme::dp(56.0f + 40.0f);
         const f32 yLine3 = vv::editor::scriptwin::lineTopOnScreen(
                                bodyY, 2u, lh, g_ui.scrollOffset()) +
                            lh * 0.5f;
@@ -4246,21 +4249,24 @@ int main() {
                     }
                 }
             }
-            check(barKeys == 14,
-                  "13.3 a barra desenha as 14 teclas (o seletor + 13 "
-                  "simbolos da pagina 1 @720dp)");
+            check(barKeys == 13,
+                  "13.3 a barra desenha as 13 teclas (o seletor + 12 "
+                  "itens da pagina 1 @720dp — o set enxuto do H)");
             check(compactas == barKeys,
                   "13.3 TODAS as teclas da barra estao marcadas compactas "
                   "no JSON (a excecao da spec E visivel)");
             check(barTop > 0.0f && nearEqF(barTop, 1536.0f - 280.0f - 40.0f),
                   "13.3 a barra dokada SOBRE o IME (y = h - inset - 40dp)");
             // (c) o TECLADO DA ENGINE MORREU: nenhuma tecla do range
-            // antigo (kKbBase+40..60 do space/arrows/enter) — o Grupo E
+            // antigo (kKbBase+40..60 do space/arrows/enter) — o Grupo E.
+            // FASE UI H: a banda ENXUGOU para o LITERAL do teclado velho
+            // (o ⋯/undo/redo/abas novos vivem em 6576..6599 — a cauda da
+            // faixa; o fantasma procurado são as teclas +40..+60 de sempre)
             {
                 bool fantasmas = false;
                 for (auto& e : rec.entries) {
                     if (e.kind == layout::Entry::Button &&
-                        e.id >= editor::scriptwin::kSymKeyBase + 14 &&
+                        e.id >= editor::scriptwin::kSymKeyBase + 40 &&
                         e.id <= editor::scriptwin::kSymKeyBase + 60) {
                         fantasmas = true;   // as teclas antigas 6560+40..60
                     }
@@ -4417,8 +4423,9 @@ int main() {
                           "(h - 880px - 80px)");
                     check(nearEqF(keyW, 720.0f / 9.0f) && keyW >= 80.0f - 0.5f,
                           "13.8 as teclas do device >=40dp de largura (80px @2.0)");
-                    check(editor::scriptwin::symPageCount(720.0f) == 3u,
-                          "13.8 o device tem 3 paginas (22 simbolos / 8 por pagina)");
+                    check(editor::scriptwin::symPageCount(720.0f) == 2u,
+                          "13.8 o device tem 2 paginas (12 itens / 8 por "
+                          "pagina — o set enxuto do H)");
                 }
                 // (4) o título FICA e NADA SANGRA (RECALIBRADO
                 // 0.9.6.10 · GRUPO UI · E1): a spec manda «header flexível,

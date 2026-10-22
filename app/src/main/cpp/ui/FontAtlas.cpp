@@ -20,6 +20,23 @@ const char* const kSystemFontPaths[] = {
 const u32 kSystemFontPathCount =
     static_cast<u32>(sizeof(kSystemFontPaths) / sizeof(kSystemFontPaths[0]));
 
+// FASE UI H — o 2.º ATLAS (a dívida da parte A): as fontes MONO do código
+// do editor (a ordem é a de tentativa; a 1.ª que abrir com a cobertura dos
+// acentos vence — o MESMO contrato do loadFromPaths). Sem nenhuma (OEM
+// enxuto/hospedeiro) o editor cai para o sans de sempre — degradação
+// honesta, nunca um editor morto.
+const char* const kMonoFontPaths[] = {
+    "/system/fonts/DroidSansMono.ttf",
+    "/system/fonts/RobotoMono-Regular.ttf",
+    "/system/fonts/NotoSansMono-Regular.ttf",
+    "/system/fonts/CutiveMono.ttf",
+    "/system/fonts/Cousine-Regular.ttf",
+    "/system/fonts/monospace.ttf",
+};
+
+const u32 kMonoFontPathCount =
+    static_cast<u32>(sizeof(kMonoFontPaths) / sizeof(kMonoFontPaths[0]));
+
 // FASE 9 (G1-2): os code points que o PORTUGUÊS EXIGE — a cobertura é
 // verificada NO BAKE (uma fonte OEM sem eles é rejeitada; a próxima da
 // lista entra). A sentinela R-008 afere por hasGlyph().

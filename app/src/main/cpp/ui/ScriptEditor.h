@@ -75,7 +75,11 @@ class VoniSystem;
 namespace editor {
 namespace scriptwin {
 
-// IDs (faixa 6550..6599 — depois do textwin 6500..6549)
+// IDs (faixa 6550..6599 — depois do textwin 6500..6549). FASE UI H: os ids
+// do ⋯/overflow RE-MANSIONADOS para fora da banda das teclas da barra
+// (kSymKeyBase+0..13 chegava a 6573 — o ⋯ a 6570 COLIDIA com a 11.ª tecla
+// em páginas largas; a colisão latente morre aqui) e os botões novos
+// (undo/redo/copiar/colar + as abas) entraram na cauda da faixa.
 constexpr u64 kBackId = 6550;   // ← fechar (56dp)
 constexpr u64 kRunId  = 6551;   // ▶ Run  (48dp)
 constexpr u64 kStopId = 6552;   // ■ Stop (48dp)
@@ -86,10 +90,18 @@ constexpr u64 kCopyRefId = 6556;   // 📋 copiar referência V.ONI (0.9.5)
 constexpr u64 kFixId = 6557;   // 0.9.6 (G2-7e): botão SUBSTITUIR da barra de erro
 constexpr u64 kSymBarPageId = 6558; // 0.9.6.8 (E): a PÁGINA da barra de símbolos
 constexpr u64 kHintStripId = 6559; // 0.9.6.1 (G2-8): a dica insere o esqueleto
-constexpr u64 kSymKeyBase = 6560;   // 0.9.6.8 (E): as teclas da barra (≤13/página)
+constexpr u64 kSymKeyBase = 6560;   // 0.9.6.8 (E): as teclas da barra (≤14/página)
 // 0.9.6.10 (GRUPO UI · E1): o «⋯» do header e as linhas do menu overflow
-constexpr u64 kHeaderDotsId = 6570;     // o botão ⋯ (abre/fecha o menu)
-constexpr u64 kHeaderOverflowBase = 6571;  // linhas do menu (3)
+// FASE UI H: fora da banda das teclas (6560..6573) — ver a nota acima
+constexpr u64 kHeaderDotsId = 6576;     // o botão ⋯ (abre/fecha o menu)
+constexpr u64 kHeaderOverflowBase = 6577;  // linhas do menu (até 7)
+// FASE UI H — os botões da MESMA FAMÍLIA de ícones (Undo/Redo/Copy/Paste
+// já existem no Icons.h — os glifos da barra de topo da FASE UI B)
+constexpr u64 kUndoId = 6584;      // ↶ desfazer
+constexpr u64 kRedoId = 6585;      // ↷ refazer
+constexpr u64 kCopyCodeId = 6586;  // copiar o CÓDIGO (o clipboard)
+constexpr u64 kPasteId = 6587;     // colar do clipboard no caret
+constexpr u64 kTabBase = 6588;     // as abas dos scripts abertos (até 6)
 // (o antigo kKbBase — as 54 teclas do teclado da engine — SAIU no Grupo E)
 
 constexpr f32 kTopH = 56.0f;    // barra de topo (padrão D)
@@ -101,6 +113,15 @@ constexpr f32 kHelpStrip2H = 56.0f;  // 2 linhas (Iniciante/toque)
 // isto e o cursor NO INTERIOR (posição do caret após "allmoments { ").
 extern const char* const kSkeleton;
 extern const u32 kSkeletonCaret;
+
+// FASE UI H — o PASSO do UNDO: o snapshot do buffer + caret ANTES de uma
+// mutação do utilizador (texto/apagar/enter/tab/fix/dica). Por EVENTO (um
+// enter com indent = UM passo — o applyEvent tira-o uma vez), não por
+// insert: o Tab do esqueleto desfaz INTEIRO (erase+insert juntos).
+struct UndoStep {
+    std::string buf;
+    u32 caret = 0;
+};
 
 // 0.9.6 (G2-7b · R-010) — O PLANO DE RENDER de uma linha: as PEÇAS que o
 // editor desenha, cobrindo TODOS os bytes (os GAPS entre tokens — espaços,
@@ -124,6 +145,31 @@ struct State {
     u32 caret = 0;              // offset em BYTES do cursor (G0-1)
     f32 blink = 0.0f;           // caret
     f32 scrollOff = 0.0f;
+    // FASE UI H · AS ABAS dos scripts abertos (a ordem do dono: «abas dos
+    // scripts abertos, a ativa com o sublinhado brasa»). O ATIVO vive NOS
+    // campos de cima (buf/caret/errLine... — a verdade corrente); os
+    // INATIVOS dormem AQUI como snapshots e trocam de lugar na troca de
+    // aba (o switchTab move — zero cópias profundas). O fecho (BACK) salva
+    // o ativo E todos os inativos nos seus componentes (main).
+    struct TabSnap {
+        Handle tic{};
+        char ticName[64] = {0};
+        std::string buf;
+        u32 caret = 0;
+        u32 bufVersion = 0;
+        std::vector<u32> lineStarts;
+        std::vector<voni::hl::BlockCommentState> lineBc;
+        u32 indexVersion = 0xFFFFFFFFu;
+        u32 errLine = 0;
+        std::string errMsg;
+        std::string fixFrom, fixTo;
+        bool running = false;
+        std::vector<UndoStep> undo, redo;
+    };
+    static constexpr u32 kMaxTabs = 6;   // o piso da largura: 6×44dp cabem
+                                         // em 360dp (a degradação honesta)
+    std::vector<TabSnap> tabs;           // os scripts abertos INATIVOS
+    u32 activeTab = 0;                   // o índice da aba ativa (0..tabs.size())
     // 0.9.6.6 (GRUPO C · PERF+GEOMETRIA): O ÍNDICE DE LINHAS — reconstruído
     // quando o buffer muda (bufVersion bumped em CADA mutação: insert/
     // apagar/tab/fix/dica/open). lineCount, a linha do caret e o início de
@@ -166,19 +212,57 @@ struct State {
     // case/default/elif não têm troca direta válida)
     std::string fixFrom;        // a palavra estrangeira (ex.: "if")
     std::string fixTo;          // o equivalente V.ONI (ex.: "exist")
+    // FASE UI H · O UNDO/REDO: os passos do script ATIVO (por evento — ver
+    // UndoStep); o redo esvazia a cada mutação nova
+    std::vector<UndoStep> undo;
+    std::vector<UndoStep> redo;
+    // FASE UI H · O FOLLOW SÓ-NO-EVENTO (a cura do «scroll luta com o
+    // dedo»): o scroll-follow do caret passou a correr UMA VEZ por
+    // mudança do caret/versão do buffer — nunca contra um arrasto em
+    // curso (a CAUSA do tremor reportada: o follow ABSOLUTO escrevia o
+    // offset TODOS os frames e o arrasto do utilizador voltava ao caret)
+    u32 followCaret = 0xFFFFFFFFu;    // o último caret servido (inválido = segue)
+    u32 followVersion = 0xFFFFFFFFu;  // a última versão servida
 };
 
 // 0.9.6 (G2-7e): aplica o SUBSTITUIR (troca fixFrom→fixTo na linha do
 // erro; o caret segue; o erro limpa)
 void applyFix(State& st);
 
+// ---- FASE UI H · O UNDO/REDO + AS ABAS + OS EXPORTÁVEIS --------------------
+// o UNDO/REDO por EVENTO (o passo = o buffer+caret ANTES da mutação); o
+// botão desenha esbatido com a pilha vazia (o padrão dos desativados da B)
+bool undoStep(State& st);
+bool redoStep(State& st);
+// o snapshot ANTES da mutação (applyEvent/applyFix/dica chamam — UM por
+// evento, nunca um por insert: o Tab do esqueleto desfaz inteiro)
+void pushUndo(State& st);
+// a TROCA de aba: o ativo dorme nos seus campos, o da posição i acorda
+// (move — zero cópias profundas). false = índice inválido/já ativo
+bool switchTab(State& st, u32 i);
+// o nº de abas abertas (o ativo + os inativos — o que a strip desenha)
+u32 tabTotal(const State& st);
+// os NOMES EXPORTÁVEIS do fonte (o cabeçalho do H: «o TIC + os
+// exportáveis»): os idents após «#@+» e «++@+» (a spec §4 — aparecem no
+// Inspector), em ordem de aparecimento, sem duplicados, teto 6
+std::vector<std::string> exportedVarsOf(const std::string& src);
+
 // ---- 0.9.6.8 (GRUPO E) · A BARRA DE SÍMBOLOS (a spec: 40dp sobre o IME) ---
-// Os 22 símbolos da spec V.ONI (a página «123» do teclado antigo — TODOS
-// os que o GBoard não tem à mão: { } ( ) [ ] = + - * / < > ! , . ; : " _
-// # @); as teclas emitem pelo MESMO applyEvent do IME. A GEOMETRIA é
+// FASE UI H (a ordem do dono): o set ENXUTO do código — «{ } ( ) [ ] ; =
+// " . , Tab». Onze símbolos + a tecla TAB (a 12.ª — emite o MESMO
+// ime::Event::Tab do applyEvent: os esqueletos/indent herdam). As páginas
+// adaptativas mantêm-se (o device 360dp continua em 2: 8 símbolos + 3
+// símbolos e o Tab); o que o GBoard tem (+ - * / < > ! : _ # @) sai —
+// nada de teclas mortas na barra.
+// as teclas emitem pelo MESMO applyEvent do IME. A GEOMETRIA é
 // exportada (a sentinela R-027 e a FASE 13.8 aférem a barra pelo MESMO
 // caminho do draw — a lição do R-019: nunca 2 cópias).
-extern const char* const kSymbols[22];
+extern const char* const kSymbols[11];
+// o índice do item TAB na fila da barra (11 símbolos + o Tab = 12 itens;
+// a tecla Tab emite ime::Event com key=Tab — o caminho do applyEvent)
+constexpr u32 kSymTabItem = 11;
+// o nº de ITENS da barra (símbolos + o Tab — o que as páginas cobrem)
+constexpr u32 kSymItemCount = 12;
 // a altura da barra em px REAL (40dp — a spec E; densidade aplicada)
 f32 symbolBarHeight();
 // nº de teclas visíveis (a página ADAPTA à largura: 9 no device 360dp,

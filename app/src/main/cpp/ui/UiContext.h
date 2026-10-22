@@ -476,13 +476,13 @@ public:
     // ecrã deixa de ter texto 2× desproporcional; a invariância da
     // escala, ver Theme.h). Quem mede com o ATLAS CRU (font_->widthOf)
     // DIVERGE do que desenha — o bug do button() corrigido neste grupo.
-    bool hasFont() const { return font_ && font_->ok(); }
+    bool hasFont() const { return fnt() && fnt()->ok(); }
     f32  fontWidth(const char* text) const {
-        return font_ ? font_->widthOf(text) * textScale_ * theme::textK()
+        return fnt() ? fnt()->widthOf(text) * textScale_ * theme::textK()
                     : 0.0f;
     }
     f32  fontHeight() const {
-        return font_ ? font_->height() * textScale_ * theme::textK() : 0.0f;
+        return fnt() ? fnt()->height() * textScale_ * theme::textK() : 0.0f;
     }
     // F5.0-fix: métricas verticais REAIS da fonte assada (fallback 28 px sem
     // fonte — o caso dos testes de hospedeiro sem atlas). O layout deriva
@@ -490,8 +490,8 @@ public:
     // (as métricas voltam JÁ na escala do texto corrente — textK incluído)
     TextMetrics textMetrics() const {
         const TextMetrics m = hasFont()
-                                  ? TextMetrics{font_->ascent(),
-                                                font_->descent()}
+                                  ? TextMetrics{fnt()->ascent(),
+                                                fnt()->descent()}
                                   : TextMetrics{};
         const f32 k = textScale_ * theme::textK();
         return TextMetrics{m.ascent * k, m.descent * k};
@@ -564,10 +564,25 @@ private:
 public:
     void setGlassTexture(u32 texId) { glassTexId_ = texId; }
     u32  glassTexture() const { return glassTexId_; }
+    // FASE UI H: o mono do código (o 2.º atlas — ver fontMono_ acima)
+    void setMonoFont(FontAtlas* font) { fontMono_ = font; }
+    void monoMode(bool on) { mono_ = on && fontMono_ && fontMono_->ok(); }
+    bool monoActive() const { return mono_; }
 
     Renderer*         renderer_ = nullptr;
     const InputState* input_ = nullptr;
     FontAtlas*        font_ = nullptr;
+    // FASE UI H — o SEGUNDO ATLAS (a dívida da parte A paga): o MONO do
+    // código do editor de script. Atlas próprio (os paths mono em
+    // FontAtlas) + um MODO POR-BLOCO: os labels emitidos com monoMode(true)
+    // usam as métricas/os glifos do mono e vão ao batch PRÓPRIO
+    // (glyphsMono_ — o batch de glifos é de textura única; o endFrame
+    // submete-o DEPOIS do sans, a mesma regra «texto por último»). Sem
+    // mono carregado (hospedeiro/OEM sem a fonte) o modo cai para o sans
+    // de sempre — a degradação honesta, nunca um editor morto.
+    FontAtlas*        fontMono_ = nullptr;
+    bool              mono_ = false;
+    FontAtlas* fnt() const { return (mono_ && fontMono_) ? fontMono_ : font_; }
     f32               sw_ = 0.0f;
     f32               sh_ = 0.0f;
     f32               textScale_ = 1.0f;   // 0.7.4: viewport 2D (paridade)
@@ -575,6 +590,8 @@ public:
     u64               active_ = 0;   // botão pressionado (immediate mode)
     QuadBatch         solids_;
     QuadBatch         glyphs_;
+    QuadBatch         glyphsMono_;   // FASE UI H: o texto mono do código
+                                     // (o 2.º atlas — submetido à parte)
     SdfBatch          sdf_;          // 0.12-D (D-1): os widgets SDF
 
     // 0.7.4 — runs de submissão em ORDEM (z-order sólidos↔texturas):

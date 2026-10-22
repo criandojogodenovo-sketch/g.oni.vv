@@ -97,6 +97,12 @@ bool jniImeHide();
 // chamador avisa com toast — nunca crash)
 bool jniClipboardCopy(const char* utf8);
 
+// FASE UI H — o COLAR do editor de código: o texto do ClipboardManager
+// como UTF-8 (o botão Colar entra pelo applyEvent — o caminho do IME).
+// Vazio = clipboard vazio/sem texto/ponte indisponível (o chamador dá o
+// toast honesto — nunca crash)
+std::string jniClipboardPaste();
+
 // 0.8.12 — o CACHE DIR da app (getCacheDir da Activity via JNI): o STAGING
 // da reconversão por SAF escreve aqui (caminho absoluto REAL, escrevível
 // no Android sem permissões — JAMAIS /tmp, read-only no device com

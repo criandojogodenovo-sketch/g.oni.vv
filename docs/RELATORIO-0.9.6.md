@@ -680,3 +680,16 @@ R-014 aplicada.
   c33_virtual 1010/0 · docs-lint VERDE · **versionCode 117** — o build
   vigente. O 116 fica INTACTO como história. (o relatório próprio:
   docs/RELATORIO-FASE-UI.md §10)
+
+### §14-h — FASE UI H (o editor de código) — versionCode 118
+
+**G8** (o par declarado no MESMO commit, a regra do §14): o editor de
+código da FASE UI H — o TIC + os exportáveis no topo, as ABAS com a
+ativa em brasa, o undo/redo por evento, o copiar/colar na família de
+ícones, a barra enxuta `{ } ( ) [ ] ; = " . , Tab`, a brasa SÓ nas
+reservadas, o mono do 2.º atlas, a banda da linha corrente — e AS CAUSAS
+dos defeitos reportadas no relatório da fase (o cap 256 do draw vs o
+caret = o desalinho; o follow ABSOLUTO de todos os frames = o tremor).
+verificação: test_core 0 falhas · c33_virtual 1008/0 · docs-lint VERDE ·
+**versionCode 118** — o build vigente. O 117 fica INTACTO como história.
+(o relatório próprio: docs/RELATORIO-FASE-UI.md §11)

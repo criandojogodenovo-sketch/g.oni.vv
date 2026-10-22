@@ -142,4 +142,8 @@ private:
 extern const char* const kSystemFontPaths[];
 extern const u32 kSystemFontPathCount;
 
+// FASE UI H — os paths MONO do código (o 2.º atlas; o mesmo contrato).
+extern const char* const kMonoFontPaths[];
+extern const u32 kMonoFontPathCount;
+
 } // namespace vv

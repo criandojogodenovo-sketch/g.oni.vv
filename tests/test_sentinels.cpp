@@ -3422,15 +3422,17 @@ TEST(regress_barra_simbolos_ime) {
         EXPECT(editor::scriptwin::symKeysVisible(720.0f) == 14u);
         EXPECT(editor::scriptwin::symKeysVisible(2000.0f) == 14u);  // teto
         EXPECT(editor::scriptwin::symKeysVisible(300.0f) == 9u);    // piso
-        // as páginas cobrem os 22 símbolos: ceil(22/(n-1))
-        EXPECT(editor::scriptwin::symPageCount(360.0f) == 3u);   // 8/página
-        EXPECT(editor::scriptwin::symPageCount(720.0f) == 2u);   // 13/página
-        // os 22 símbolos da spec (a página «123» do teclado antigo): a
-        // união das páginas é o set TODO — { } ( ) [ ] = + - * / < > ! , .
-        // ; : " _ # @ (o teclado da engine SAIU; a barra herda o contrato)
+        // as páginas cobrem os 12 itens (11 símbolos + o Tab): ceil(12/(n-1))
+        EXPECT(editor::scriptwin::symPageCount(360.0f) == 2u);   // 8/página
+        EXPECT(editor::scriptwin::symPageCount(720.0f) == 1u);   // 13/página
+        // os 11 símbolos do set ENXUTO do H (a ordem do dono) + o Tab (o
+        // 12.º item, desenhado pela barra): { } ( ) [ ] ; = " . , — o que
+        // o GBoard não põe à mão no código; o resto vive no teclado dele
         EXPECT(std::string(editor::scriptwin::kSymbols[0]) == "{");
         EXPECT(std::string(editor::scriptwin::kSymbols[1]) == "}");
-        EXPECT(std::string(editor::scriptwin::kSymbols[21]) == "@");
+        EXPECT(std::string(editor::scriptwin::kSymbols[10]) == ",");
+        EXPECT(editor::scriptwin::kSymItemCount == 12u);
+        EXPECT(editor::scriptwin::kSymTabItem == 11u);
         // densidade 2.0: a barra dobra (a vara da R-018 no componente novo)
         theme::setDensity(2.0f);
         EXPECT(nearEqF(editor::scriptwin::symbolBarHeight(), 80.0f));
@@ -3477,7 +3479,7 @@ TEST(regress_barra_simbolos_ime) {
                 }
             }
         }
-        EXPECT(barKeys == 14u);   // 720dp: o seletor + 13 símbolos
+        EXPECT(barKeys == 13u);   // 720dp: o seletor + 12 itens (1 página)
         EXPECT(nearEqF(barTop, 1536.0f - 280.0f - 40.0f));   // SOBRE o IME
         EXPECT(nearEqF(keyW, 720.0f / 14.0f));
         EXPECT(nearEqF(keyH, 40.0f));
@@ -3489,7 +3491,7 @@ TEST(regress_barra_simbolos_ime) {
         }
 
         // a TECLA insere NO CARET (o MESMO applyEvent do IME): o tap na
-        // 2ª tecla (a 1ª é o seletor) é o '{' da spec
+        // 2ª tecla (a 1ª é o seletor) é o '{' da ordem do dono
         const u32 caret0 = st.scriptWin.caret;
         input.injectDown(0, (720.0f / 14.0f) * 1.5f, barTop + 20.0f);
         ui.beginFrame(nullptr, &input, 720.0f, 1536.0f);
@@ -3505,7 +3507,10 @@ TEST(regress_barra_simbolos_ime) {
         EXPECT(st.scriptWin.buf[caret0] == '{' &&
                    st.scriptWin.caret == caret0 + 1);
 
-        // o SELETOR cicla a página e a página 2 começa em '!'
+        // o SELETOR com 1 PÁGINA fica na própria (o ciclo fecha em 1/1) e
+        // as teclas entram NO CARET: a ',' é o slot 11 (kSymbols[10]) e o
+        // TAB é o slot 12 (o 12.º item — o MESMO ime::Event::Tab, a
+        // indent de 2 espaços cai no cursor)
         EXPECT(st.scriptWin.symPage == 0);
         input.injectDown(0, (720.0f / 14.0f) * 0.5f, barTop + 20.0f);
         ui.beginFrame(nullptr, &input, 720.0f, 1536.0f);
@@ -3518,9 +3523,9 @@ TEST(regress_barra_simbolos_ime) {
                                 1.0f / 60.0f);
         ui.endFrame();
         input.clearEdges();
-        EXPECT(st.scriptWin.symPage == 1);
+        EXPECT(st.scriptWin.symPage == 0);   // 1 página: o ciclo é identidade
         const u32 caret1 = st.scriptWin.caret;
-        input.injectDown(0, (720.0f / 14.0f) * 1.5f, barTop + 20.0f);
+        input.injectDown(0, (720.0f / 14.0f) * 11.5f, barTop + 20.0f);
         ui.beginFrame(nullptr, &input, 720.0f, 1536.0f);
         editor::scriptwin::draw(ui, input, st.scriptWin, 720.0f, 1536.0f,
                                 1.0f / 60.0f);
@@ -3531,8 +3536,24 @@ TEST(regress_barra_simbolos_ime) {
                                 1.0f / 60.0f);
         ui.endFrame();
         input.clearEdges();
-        EXPECT(st.scriptWin.buf[caret1] == '!' &&
+        EXPECT(st.scriptWin.buf[caret1] == ',' &&
                    st.scriptWin.caret == caret1 + 1);
+        // o TAB (o slot 12 — o 12.º item): a indent de 2 espaços NO caret
+        // (o MESMO ime::Event::Tab do IME — os esqueletos herdam o caminho)
+        const u32 caret2 = st.scriptWin.caret;
+        input.injectDown(0, (720.0f / 14.0f) * 12.5f, barTop + 20.0f);
+        ui.beginFrame(nullptr, &input, 720.0f, 1536.0f);
+        editor::scriptwin::draw(ui, input, st.scriptWin, 720.0f, 1536.0f,
+                                1.0f / 60.0f);
+        ui.endFrame();
+        input.injectUp(0);
+        ui.beginFrame(nullptr, &input, 720.0f, 1536.0f);
+        editor::scriptwin::draw(ui, input, st.scriptWin, 720.0f, 1536.0f,
+                                1.0f / 60.0f);
+        ui.endFrame();
+        input.clearEdges();
+        EXPECT(st.scriptWin.caret == caret2 + 2 &&
+                   st.scriptWin.buf.compare(caret2, 2, "  ") == 0);
 
         // IME FECHADO (inset 0): a barra SOME (o frame auditado confirma)
         vv::ime::setBottomInset(0.0f);
@@ -3851,12 +3872,16 @@ TEST(regress_identidade_grafite_ambar) {
         EXPECT(theme::contrastOnSurface(theme::kTheme.ok) >= 3.0f);
     }
 
-    // ---- (4) A PALETA V.ONI NO GRAFITE (conteúdo, não chrome) ----------
-    // o grafite #0E0E10 é MAIS ESCURO que o #141414 do mono — TODOS os
-    // tokens V.ONI GANHAM contraste (o comment #8A8A8A fica a 5,6:1)
+    // ---- (4) A PALETA V.ONI NO GRAFITE (FASE UI H: as neutras + a brasa) --
+    // o comment #7E7E86 (a neutra escura — 4,9:1 no bg #0B0B0D) e TODOS os
+    // tokens ≥4,5:1; as reservadas são A BRASA (o MESMO valor do accent)
     {
-        EXPECT(nearEqF(theme::kTheme.voniComment[0], 138.0f / 255.0f,
+        EXPECT(nearEqF(theme::kTheme.voniComment[0], 126.0f / 255.0f,
                        1e-4f));
+        EXPECT(nearEqF(theme::kTheme.voniReserved[0],
+                       theme::kTheme.accent[0], 1e-4f) &&
+                   nearEqF(theme::kTheme.voniReserved[2],
+                           theme::kTheme.accent[2], 1e-4f));
         EXPECT(theme::contrastOnBg(theme::kTheme.voniUser) >= 4.5f);
         EXPECT(theme::contrastOnBg(theme::kTheme.voniEngine) >= 4.5f);
         EXPECT(theme::contrastOnBg(theme::kTheme.voniReserved) >= 4.5f);
