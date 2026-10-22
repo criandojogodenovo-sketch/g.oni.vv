@@ -91,8 +91,9 @@ TEST(menu_ancorado) {
     editor::applyDensity();
     const f32 contentH = menuContentH();
     // (a) o sheet SAI DE BAIXO do botão: y = ay + 8dp, x = ax (com o
-    // conteúdo 896dp o h = 640 e o clamp do fundo é y ≤ 48 — uma âncora
-    // de 20dp fica SEM clamp: y = 28)
+    // conteúdo 896dp o h = 612 — o TETO DE 85% da FASE UI G manda: 0.85×720
+    // = 612 < o maxH 640 — e o clamp do fundo é y ≤ 76 — uma âncora de
+    // 20dp fica SEM clamp: y = 28)
     {
         const MenuSheetLayout m =
             menuSheetLayout(1600.0f, 720.0f, 0.0f, 0.0f, 0.0f, 0.0f,
@@ -101,12 +102,14 @@ TEST(menu_ancorado) {
         EXPECT(nearEq(m.y, 28.0f));   // 20 + 8 (o clamp não ativou)
     }
     // (a2) uma âncora BAIXA ativa o clamp vertical (o fundo nunca passa
-    // o topo da tab bar — o D14)
+    // o topo da tab bar — o D14). FASE UI G: o h É o teto de 85% (612 =
+    // 0.85×720 — o MENOR dos dois manda), o fundo fica em 720−612−32.
     {
         const MenuSheetLayout m =
             menuSheetLayout(1600.0f, 720.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                             contentH, 100.0f, 600.0f, theme::dp(280.0f));
-        EXPECT(nearEq(m.y, 720.0f - 640.0f - 32.0f));
+        EXPECT(nearEq(m.h, 612.0f));   // o teto de 85% (não o maxH 640)
+        EXPECT(nearEq(m.y, 720.0f - 612.0f - 32.0f));
     }
     // (b) o clamp horizontal: uma âncora à direita extrema NÃO deixa o
     // sheet sair do ecrã
