@@ -273,8 +273,13 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
         }
     }
 
-    // ---- FASE UI F: o estado «N FPS · N TICs» (a direita, mono é a
-    // dívida declarada da parte A — o atlas 2.º; o «· bl n/m» saiu) ----
+    // ---- FASE UI F: o estado «N FPS · N TICs» (a direita, EM MONO — a
+    // ordem literal; a dívida do 2.º atlas foi PAGA na parte H e o estado
+    // agora a usa: sem mono carregado o modo cai no sans, a degradação
+    // honesta; as métricas seguem o modo — fnt() resolve o mono e o
+    // alinhamento à direita mede o MESMO atlas que desenha;
+    // o «· bl n/m» saiu) ----
+    ui.monoMode(true);
     if (ui.hasFont()) {
         char fpsTxt[48];
         std::snprintf(fpsTxt, sizeof(fpsTxt), "%d FPS · %u TICs", fps,
@@ -293,6 +298,7 @@ Actions draw(UiContext& ui, const InputState& in, EditorState& st,
                        fpsTxt, theme::kTheme.text2,
                        theme::fontScale(theme::kFontCaption), 0);
     }
+    ui.monoMode(false);   // o sans de sempre volta para o resto do painel
 
     // ---- o PAINEL ENCAIXADO (não é janela — o viewport sobe: os rects
     // do centro comem a altura pelo panelsRect/currentDrawerH) ----

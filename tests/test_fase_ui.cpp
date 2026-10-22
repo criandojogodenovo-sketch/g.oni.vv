@@ -374,6 +374,12 @@ TEST(ui_paineis_dock) {
                    "ui_paineis_dock: o «· bl n/m» saiu do estado (a ordem)");
         EXPECT_MSG(countSub(src, "%d FPS · %u TICs") == 1,
                    "ui_paineis_dock: o estado é «60 FPS · 6 TICs» (a ordem)");
+        // O ESTADO EM MONO (a ordem literal; a dívida do 2.º atlas paga na
+        // H — o estado agora a usa; sem mono carregado o modo cai no sans)
+        EXPECT_MSG(countSub(src, "ui.monoMode(true)") == 1 &&
+                       countSub(src, "ui.monoMode(false)") == 1,
+                   "ui_paineis_dock: o estado «N FPS · N TICs» não está EM "
+                   "MONO (o modo por-bloco tem de envolver o label)");
         EXPECT(countSub(src, "open ? theme::kTheme.accent") >= 1);
         // (f) LEMBRAR A ÚLTIMA ABA: o roundtrip do layout.json leva lastTab
         std::string dump = "bottomTab=0\ndrawerH=240\nlastTab=3\ninspector=0\n";

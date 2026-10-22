@@ -385,8 +385,9 @@ do §5.
   paisagem-first); o paisagem-S (776×336) é o piso testado, não o alvo.
 - **Temas alternativos ou um 2.º destaque**: a brasa é ÚNICA por ordem;
   não há seletor de tema nem modo claro.
-- **Os envios 3/5..5/5**: NÃO chegaram — nada desta fase antecipa o
-  que eles ordenarem (a fila é a ordem do dono).
+- **Os envios 3/5..5/5**: o 3/5 e o 4/5 CHEGARAM (as partes F/G/H —
+  §9/§10/§11 abaixo); o **5/5 NÃO chegou** — nada antecipa o que ele
+  ordenar (a fila é a ordem do dono).
 - **Core, V.ONI, importadores, física e .gmesh**: INTOCÁVEIS (a
   cláusula calma da fase — o diff da fase não os toca).
 
@@ -474,12 +475,19 @@ docs-lint VERDE 121 · release-identity/R-015 VERDE vc 116 ·
 **versionCode: 115 → 116** (o §14 do RELATORIO-0.9.6.md declara o par
 no MESMO commit).
 
-**O que NÃO foi feito na F**: o estado «em mono» continua no atlas sans
-(o 2.º atlas mono é a dívida DECLARADA da parte A — §8); o «· bl n/m»
-não ganhou nome novo (a ordem dizia «remover OU mostrá-lo com nome
-claro» — remover é o simples e foi o escolhido); a timeline mantém o
-cap de 3 faixas visíveis com o «+N tracks» de sempre (a lista honesta
-da 0.8.0).
+**O que NÃO foi feito na F**: o «· bl n/m» não ganhou nome novo (a ordem
+dizia «remover OU mostrá-lo com nome claro» — remover é o simples e foi
+o escolhido); a timeline mantém o cap de 3 faixas visíveis com o «+N
+tracks» de sempre (a lista honesta da 0.8.0).
+
+**A DÍVIDA DO MONO NO ESTADO (fechada depois da H)**: a F deixou o
+estado «em mono» no atlas sans porque o 2.º atlas NÃO existia (a dívida
+DECLARADA da parte A — §8). A H pagou o atlas (§11) e o estado agora o
+usa: o label «N FPS · N TICs» vive entre `monoMode(true/false)` (a MESMA
+fonte única do código — as métricas seguem o modo, `fnt()` resolve o
+mono, e sem mono carregado o modo cai no sans, a degradação honesta). O
+pin `ui_paineis_dock` (e) afere o envolvimento por fonte (o
+`countSub` dos DOIS liga/desliga na fonte do BottomPanel).
 
 ## §10 PARTE G — MENUS E DIÁLOGOS (as folhas contidas)
 
