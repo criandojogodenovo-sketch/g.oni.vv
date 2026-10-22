@@ -528,7 +528,7 @@ public class VvActivity extends NativeActivity {
             }
             final android.content.ClipData.Item it =
                     cm.getPrimaryClip().getItemAt(0);
-            final String t = it != null ? it.getText() : null;
+            final CharSequence t = it != null ? it.getText() : null;
             Log.i("GONI", "java: clipboardPaste "
                     + (t != null ? t.length() : 0) + " chars");
             return t != null && t.length() > 0 ? t.toString() : null;
