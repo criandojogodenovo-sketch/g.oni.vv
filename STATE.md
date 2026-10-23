@@ -29,7 +29,10 @@ RELATORIO-0.12-Y-F2-WEATHER.md);
   Ambient (o ciclar + intensidade; o aviso honesto sem emissor).
   pins ×5 (wind_tic_cria · ambient_rain_preset · ambient_snow_preset ·
   ambient_serialize · wind_uniform_passed — tests/test_012y_f2.cpp
-  NOVO) + R-064 regress_weather + M-Yg1/M-Yg2 VERMELHAS AO VIVO.
+  NOVO) + R-064 regress_weather + M-Yg1/M-Yg2 VERMELHAS AO VIVO. O
+  HOTFIX do CI (o mesmo vc): o repoRoot() do pin devolvia "." e o ctest
+  corre com cwd = build-tests — a macro REPO_ROOT do cmake manda (o
+  padrão test_012y.cpp).
 
 - **Campanha 0.12-V (OS 3 BUGS DO VIEWPORT 3D) — FECHADA no código
   (vc 123; o CI VERDE)** (a cláusula calma: SÓ viewport/gizmo/render do

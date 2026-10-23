@@ -48,8 +48,15 @@ bool nearEq(f32 a, f32 b, f32 eps = 1e-5f) {
 }
 
 std::string repoRoot() {
-    const char* env = std::getenv("GONI_REPO_ROOT");
-    return env ? std::string(env) : std::string(".");
+    // o padrão da casa (test_012y.cpp): a macro do cmake manda (o ctest
+    // corre com cwd = build-tests — o "." morre no CI; a lição do job
+    // vermelho da 0.12-Y-F2)
+    if (const char* e = std::getenv("GONI_ROOT_OVERRIDE")) return e;
+#ifdef REPO_ROOT
+    return REPO_ROOT;
+#else
+    return ".";
+#endif
 }
 
 // o contador de sub-string (o padrão dos pins de fonte da casa)
