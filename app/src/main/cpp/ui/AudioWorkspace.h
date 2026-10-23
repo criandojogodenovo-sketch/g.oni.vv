@@ -20,6 +20,20 @@
 namespace vv {
 namespace editor {
 
+// FASE UI I — os IDS do workspace EXPORTADOS (o padrão ScriptEditor.h: os
+// pins do CI aférram os rects desenhados pelo registo da auditoria — os
+// ids viviam num anonymous ns e o teste não os via)
+constexpr u64 kAudioIdClipBase = 0x900000ull;   // as linhas da lista
+constexpr u64 kAudioIdImport   = 0x900100ull;
+constexpr u64 kAudioIdRecord   = 0x900101ull;
+constexpr u64 kAudioIdPlay     = 0x900102ull;
+constexpr u64 kAudioIdStop     = 0x900103ull;
+constexpr u64 kAudioIdRename   = 0x900104ull;
+constexpr u64 kAudioIdDelete   = 0x900105ull;
+constexpr u64 kAudioIdDeleteYes = 0x900106ull;
+constexpr u64 kAudioIdDeleteNo  = 0x900107ull;
+constexpr u64 kAudioIdAssign   = 0x900108ull;
+
 // estado do workspace (o main é o dono; sobrevive à troca de aba)
 struct AudioWorkspaceState {
     u32 selected = 0;        // clip selecionado na lista

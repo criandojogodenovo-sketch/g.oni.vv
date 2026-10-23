@@ -24,6 +24,10 @@
 #include "core/Scene.h"
 #include "platform/InputState.h"
 #include "ui/EditorUi.h"
+#include "ui/BottomPanel.h"   // FASE UI I: o drawEmptyState da casa (o MESMO
+                              // helper das tabs do drawer — nada duplicado)
+#include "ui/LayoutDump.h"    // o piso do toque do botão solto (kTouchFloorDp)
+#include "ui/UiContext.h"
 
 namespace {
 // 0.8.9 — graus→radianos local (o commit do campo numérico converte rot)
@@ -199,23 +203,50 @@ void drawUiViewport(UiContext& ui, Scene& scene, EditorState& st,
         st.selElement = -1;
         st.selJoystick = false;
         st.elDrag = false;
-        const TextMetrics tm = ui.textMetrics();
-        ui.labelFitted(view.x + kPad, view.y + view.h * 0.5f + tm.ascent,
-                       "(UI vazia — use + para criar o primeiro elemento)",
-                       theme::LINE, view.w - 2.0f * kPad);
+        // FASE UI I — O ESTADO VAZIO LEGÍVEL (a ordem do dono): o helper
+        // da CASA (o MESMO drawEmptyState das tabs do drawer — ícone +
+        // mensagem em text2, centrados e clipados ao rect) e o BOTÃO «+»
+        // CLARO de 44dp (o caminho do C-4: abre O MESMO plusMenu de
+        // presets do + da barra — nada duplicado; sem TIC o dispatch cria
+        // o TIC 'UI' e o elemento. NADA de convite que manda procurar o
+        // botão pelo ecrã fora — a regra anti-superficialidade)
+        const f32 bh2 = theme::dp(44.0f);
+        const f32 bw2 = theme::dp(200.0f);
+        const UiRect msg{view.x + kPad, view.y + kPad,
+                         view.w - 2.0f * kPad,
+                         view.h - 2.0f * kPad - bh2 - theme::dp(8.0f)};
+        bottom::drawEmptyState(ui, msg, icons::Icon::Monitor,
+                       "UI vazia — cria o primeiro elemento");
+        ui.auditRowFloorNext(layout::kTouchFloorDp);
+        if (ui.button(kUiEmptyPlusId, view.x + (view.w - bw2) * 0.5f,
+                      view.y + view.h - bh2 - theme::dp(16.0f), bw2, bh2,
+                      "+ criar elemento")) {
+            st.plusMenu = true;
+        }
         return;
     }
     if (!canvas && !joy) {
         st.selElement = -1;
         st.selJoystick = false;
         st.elDrag = false;
-        const TextMetrics tm = ui.textMetrics();
         // 0.7.4: sem TIC selecionado o "+" CRIA o TIC de UI (ensureUiTic no
-        // dispatch) — a dica diz o caminho (não obriga a TIC 3D)
-        ui.labelFitted(view.x + kPad, view.y + view.h * 0.5f + tm.ascent,
-                       tic ? "(UI vazia — use + para criar o primeiro elemento)"
-                           : "(use + para criar UI — nasce o TIC 'UI')",
-                       theme::LINE, view.w - 2.0f * kPad);
+        // dispatch) — FASE UI I: o MESMO estado vazio legível do ramo
+        // acima (o helper da casa + o botão «+» claro; a dica diz o que
+        // nasce — o TIC 'UI' + o elemento)
+        const f32 bh2 = theme::dp(44.0f);
+        const f32 bw2 = theme::dp(200.0f);
+        const UiRect msg{view.x + kPad, view.y + kPad,
+                         view.w - 2.0f * kPad,
+                         view.h - 2.0f * kPad - bh2 - theme::dp(8.0f)};
+        bottom::drawEmptyState(ui, msg, icons::Icon::Monitor,
+                       tic ? "UI vazia — cria o primeiro elemento"
+                           : "Sem UI — o + cria o TIC 'UI' e o elemento");
+        ui.auditRowFloorNext(layout::kTouchFloorDp);
+        if (ui.button(kUiEmptyPlusId, view.x + (view.w - bw2) * 0.5f,
+                      view.y + view.h - bh2 - theme::dp(16.0f), bw2, bh2,
+                      "+ criar elemento")) {
+            st.plusMenu = true;
+        }
         return;
     }
     static const UiCanvas kEmptyCanvas;   // canvas de LEITURA (só joystick)

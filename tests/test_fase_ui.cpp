@@ -14,6 +14,8 @@
 #include "ui/Toolbar.h"
 #include "ui/EditorLayout.h"
 #include "ui/BottomPanel.h"
+#include "ui/AudioWorkspace.h"   // FASE UI I: o pin das abas Áudio/UI
+#include "ui/UiEditor.h"         // FASE UI I: o estado vazio do editor de UI
 #include "TestFramework.h"
 #include <cstdio>
 #include <cstdlib>
@@ -721,5 +723,266 @@ TEST(ui_codigo_editor) {
                        "ui_codigo_editor(%s): o validador apanhou %zu "
                        "problemas", sc.ctx, probs.size());
         }
+    }
+}
+
+// =========================================================================
+// FASE UI I — AS ABAS ÁUDIO E UI (a ordem do dono) — o pin ui_audio_ui:
+//   ÁUDIO: o rótulo CLIPS numa faixa FIXA FORA do scroll (nunca sob os
+//   botões nem sob a lista), a waveform FIXA 80dp, as ações do clip numa
+//   linha, a confirmação de apagar como MODAL com botões de 40dp e NADA
+//   desenhado fora do rect do workspace (o orçamento vertical é a fonte
+//   única — a lista é que cede; antes a reserva fixa de 196dp estourava
+//   o viewport com o piso da lista).
+//   UI: o estado vazio LEGÍVEL (o helper da casa das tabs do drawer) com
+//   o botão «+» claro de 44dp que abre O MESMO plusMenu de presets (o
+//   caminho do C-4 — nada duplicado).
+TEST(ui_audio_ui) {
+    // ---- (a) ÁUDIO: o orçamento vertical em 2 viewports -----------------
+    {
+        const char* fp = FONT_FIXTURE;
+        FontAtlas font;
+        ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+        UiContext ui;
+        ui.init();
+        ui.setFont(&font);
+        ui.setSafeArea(safe::Insets{});
+        InputState input;
+        editor::AudioWorkspaceState st;
+        const std::vector<std::string> clips = {"audio/salto.gi",
+                                                "audio/musica.gi"};
+        editor::AudioWorkspaceHost host;   // sem callbacks (o draw é puro)
+        // a FÓRMULA do orçamento (a MESMA do draw — nada de números mágicos)
+        const UiRect view{100.0f, 100.0f, 1000.0f, 500.0f};
+        const f32 listTop = view.y + 6.0f + 44.0f + 4.0f + 22.0f + 2.0f;
+        const f32 actionsY = view.y + view.h - 4.0f - 40.0f;
+        ui.auditBegin("audio-i", 1600.0f, 720.0f, 0, 0, 0, 0, 1.0f);
+        ui.beginFrame(nullptr, &input, 1600.0f, 720.0f);
+        editor::drawAudioWorkspace(ui, input, view, st, clips, host);
+        ui.endFrame();
+        ui.auditEnd();
+        const layout::Record& rec = ui.auditRecord();
+        u32 nWave80 = 0;
+        u32 nLblFaixa = 0;
+        for (const auto& en : rec.entries) {
+            // (1) NADA fora do rect do workspace (a sobreposição morreu —
+            // antes a waveform e as ações estouravam com o piso da lista)
+            EXPECT_MSG(en.x >= view.x - 0.5f && en.y >= view.y - 0.5f &&
+                       en.x + en.w <= view.x + view.w + 0.5f &&
+                       en.y + en.h <= view.y + view.h + 0.5f,
+                       "ui_audio_ui: um %s sai do rect (%.0f,%.0f %.0f×%.0f)",
+                       en.kindName(), (double)en.x, (double)en.y,
+                       (double)en.w, (double)en.h);
+            // (2) a waveform FIXA 80dp existe (o clip selecionado)
+            if (en.kind == layout::Entry::Panel && en.h == 80.0f &&
+                en.y > listTop) {
+                ++nWave80;
+            }
+            // (3) a faixa do rótulo CLIPS (entre a barra e a lista) tem O
+            // RÓTULO (a presença — a mutação M-UIi tira-o e o pin fica
+            // vermelho) e NENHUM BOTÃO — o rótulo nunca fica por baixo de
+            // botões nem da lista (a ordem literal)
+            if (en.kind == layout::Entry::Label &&
+                en.y >= view.y + 50.0f && en.y + en.h <= listTop + 0.5f) {
+                ++nLblFaixa;
+            }
+            if (en.y < listTop - 1.0f && en.y + en.h > view.y + 50.0f &&
+                en.kind == layout::Entry::Button) {
+                EXPECT_MSG(false,
+                           "ui_audio_ui: um botão invade a faixa do "
+                           "rótulo CLIPS (%.0f,%.0f %.0f×%.0f)",
+                           (double)en.x, (double)en.y, (double)en.w,
+                           (double)en.h);
+            }
+        }
+        EXPECT_MSG(nWave80 >= 1,
+                   "ui_audio_ui: a waveform FIXA 80dp não está no registo");
+        EXPECT_MSG(nLblFaixa == 1,
+                   "ui_audio_ui: o rótulo CLIPS não está na faixa fixa "
+                   "(%u rótulos — a mutação M-UIi morre aqui)",
+                   nLblFaixa);
+        // (4) os 4 botões da barra + as 2 linhas da lista com toque ≥40
+        u32 nTop = 0, nRows = 0;
+        for (const auto& en : rec.entries) {
+            if (en.kind != layout::Entry::Button) {
+                continue;
+            }
+            if (en.id >= editor::kAudioIdImport &&
+                en.id <= editor::kAudioIdStop) {
+                ++nTop;
+                EXPECT(en.h >= 44.0f - 0.5f);
+            }
+            if (en.id >= editor::kAudioIdClipBase &&
+                en.id < editor::kAudioIdClipBase + clips.size()) {
+                ++nRows;
+                EXPECT_MSG(en.h >= 40.0f - 0.5f && en.y >= listTop - 0.5f,
+                           "ui_audio_ui: a linha da lista sobe para a "
+                           "faixa do rótulo (y=%.0f)", (double)en.y);
+            }
+        }
+        EXPECT(nTop == 4);
+        EXPECT(nRows == 2);
+        // (5) as AÇÕES do clip numa linha (renomear/apagar/atribuir): os
+        // 3 botões à MESMA altura, 40dp, ancorados ao fundo do rect
+        u32 nAct = 0;
+        f32 actY = -1.0f;
+        for (const auto& en : rec.entries) {
+            if (en.kind == layout::Entry::Button &&
+                ((en.id >= editor::kAudioIdRename &&
+                  en.id <= editor::kAudioIdDelete) ||
+                 en.id == editor::kAudioIdAssign)) {
+                ++nAct;
+                if (actY < 0.0f) {
+                    actY = en.y;
+                }
+                EXPECT(en.h >= 40.0f - 0.5f);
+                EXPECT(en.y + en.h <= view.y + view.h + 0.5f);
+            }
+        }
+        EXPECT_MSG(nAct == 3, "ui_audio_ui: as 3 ações do clip (%u)", nAct);
+        for (const auto& en : rec.entries) {
+            if (en.kind == layout::Entry::Button &&
+                ((en.id >= editor::kAudioIdRename &&
+                  en.id <= editor::kAudioIdDelete) ||
+                 en.id == editor::kAudioIdAssign)) {
+                EXPECT_MSG(en.y == actY,
+                           "ui_audio_ui: as ações do clip não estão numa "
+                           "linha (y=%.0f vs %.0f)", (double)en.y,
+                           (double)actY);
+            }
+        }
+        EXPECT(actY >= actionsY - 0.5f);   // ancoradas ao fundo
+        // o VALIDADOR da casa: 0 problemas
+        const auto probs = layout::validate(rec);
+        EXPECT_MSG(probs.empty(),
+                   "ui_audio_ui: o validador apanhou %zu problemas",
+                   probs.size());
+    }
+
+    // ---- (b) ÁUDIO: o MODAL de apagar (botões 40dp, dentro do rect) -----
+    {
+        const char* fp = FONT_FIXTURE;
+        FontAtlas font;
+        ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+        UiContext ui;
+        ui.init();
+        ui.setFont(&font);
+        ui.setSafeArea(safe::Insets{});
+        InputState input;
+        editor::AudioWorkspaceState st;
+        st.confirmDelete = true;   // armado
+        const std::vector<std::string> clips = {"audio/salto.gi"};
+        editor::AudioWorkspaceHost host;
+        const UiRect view{100.0f, 100.0f, 1000.0f, 500.0f};
+        ui.auditBegin("audio-i-modal", 1600.0f, 720.0f, 0, 0, 0, 0, 1.0f);
+        ui.beginFrame(nullptr, &input, 1600.0f, 720.0f);
+        editor::drawAudioWorkspace(ui, input, view, st, clips, host);
+        ui.endFrame();
+        ui.auditEnd();
+        const layout::Record& rec = ui.auditRecord();
+        u32 nYes = 0, nNo = 0;
+        for (const auto& en : rec.entries) {
+            EXPECT(en.x >= view.x - 0.5f &&
+                   en.x + en.w <= view.x + view.w + 0.5f &&
+                   en.y >= view.y - 0.5f &&
+                   en.y + en.h <= view.y + view.h + 0.5f);
+            if (en.kind == layout::Entry::Button &&
+                en.id == editor::kAudioIdDeleteYes) {
+                ++nYes;
+                EXPECT_MSG(en.h >= 40.0f - 0.5f,
+                           "ui_audio_ui: o APAGAR do modal é pequeno "
+                           "(%.0f — o toque mínimo da fase)", (double)en.h);
+            }
+            if (en.kind == layout::Entry::Button &&
+                en.id == editor::kAudioIdDeleteNo) {
+                ++nNo;
+            }
+        }
+        EXPECT(nYes == 1 && nNo == 1);
+    }
+
+    // ---- (c) ÁUDIO: o estado vazio da lista (legível) + o guard honesto --
+    {
+        const char* fp = FONT_FIXTURE;
+        FontAtlas font;
+        ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+        UiContext ui;
+        ui.init();
+        ui.setFont(&font);
+        ui.setSafeArea(safe::Insets{});
+        InputState input;
+        editor::AudioWorkspaceState st;
+        const std::vector<std::string> none;
+        editor::AudioWorkspaceHost host;
+        const UiRect view{100.0f, 100.0f, 1000.0f, 500.0f};
+        ui.auditBegin("audio-i-vazio", 1600.0f, 720.0f, 0, 0, 0, 0, 1.0f);
+        ui.beginFrame(nullptr, &input, 1600.0f, 720.0f);
+        editor::drawAudioWorkspace(ui, input, view, st, none, host);
+        ui.endFrame();
+        ui.auditEnd();
+        // sem clips NÃO há waveform (nada selecionado) e nada sai do rect
+        for (const auto& en : ui.auditRecord().entries) {
+            EXPECT(en.x >= view.x - 0.5f && en.y >= view.y - 0.5f &&
+                   en.x + en.w <= view.x + view.w + 0.5f &&
+                   en.y + en.h <= view.y + view.h + 0.5f);
+        }
+        // viewport ABAIXO do orçamento mínimo: o guard honesto (0 — nada
+        // desenha fora do rect; a degradação declarada da parte I)
+        ui.beginFrame(nullptr, &input, 1600.0f, 720.0f);
+        const int tiny = editor::drawAudioWorkspace(
+            ui, input, UiRect{100.0f, 100.0f, 1000.0f, 90.0f}, st, none,
+            host);
+        ui.endFrame();
+        EXPECT(tiny == 0);
+    }
+
+    // ---- (d) UI: o estado vazio legível com o botão «+» claro ------------
+    {
+        const char* fp = FONT_FIXTURE;
+        FontAtlas font;
+        ASSERT(font.loadFromPaths(&fp, 1, 28.0f));
+        UiContext ui;
+        ui.init();
+        ui.setFont(&font);
+        ui.setSafeArea(safe::Insets{});
+        InputState input;
+        editor::EditorState st;
+        Scene scene;   // vazia — o ramo «Sem UI» do estado vazio
+        const f32 kSW = 1600.0f, kSH = 720.0f;
+        ui.auditBegin("ui-i-vazio", kSW, kSH, 0, 0, 0, 0, 1.0f);
+        ui.beginFrame(nullptr, &input, kSW, kSH);
+        editor::drawUiViewport(ui, scene, st, input, kSW, kSH);
+        ui.endFrame();
+        ui.auditEnd();
+        const layout::Record& rec = ui.auditRecord();
+        UiRect plus{-1.0f, -1.0f, 0.0f, 0.0f};
+        for (const auto& en : rec.entries) {
+            if (en.kind == layout::Entry::Button &&
+                en.id == editor::kUiEmptyPlusId) {
+                plus = {en.x, en.y, en.w, en.h};
+                EXPECT_MSG(en.h >= 44.0f - 0.5f,
+                           "ui_audio_ui: o «+» do vazio é pequeno (%.0f)",
+                           (double)en.h);
+            }
+        }
+        EXPECT_MSG(plus.w > 0.0f,
+                   "ui_audio_ui: o botão «+» do estado vazio da UI não "
+                   "está no registo");
+        // o TOQUE no «+» abre O MESMO plusMenu de presets (o caminho do
+        // C-4 — o dispatch do main cria o TIC 'UI' + o elemento)
+        ASSERT(plus.w > 0.0f);
+        st.plusMenu = false;
+        input.injectDown(0, plus.x + plus.w * 0.5f, plus.y + plus.h * 0.5f);
+        ui.beginFrame(nullptr, &input, kSW, kSH);
+        editor::drawUiViewport(ui, scene, st, input, kSW, kSH);
+        ui.endFrame();
+        input.injectUp(0);
+        ui.beginFrame(nullptr, &input, kSW, kSH);
+        editor::drawUiViewport(ui, scene, st, input, kSW, kSH);
+        ui.endFrame();
+        input.clearEdges();
+        EXPECT_MSG(st.plusMenu,
+                   "ui_audio_ui: o «+» do vazio não abre o plusMenu de "
+                   "presets (um convite sem ação é fachada)");
     }
 }

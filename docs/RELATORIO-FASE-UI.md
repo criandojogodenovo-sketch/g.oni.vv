@@ -687,3 +687,94 @@ declara o par no MESMO commit).
   fatias) não foi ordenada.
 - **A linguagem V.ONI**: INTOCADA (a cláusula da fase — o classificador,
   o compilador e a VM não viram uma linha).
+
+## §12 PARTE I — ABAS ÁUDIO E UI (a ordem do dono)
+
+**A ordem**: o ÁUDIO com a lista de clips SEM SOBREPOSIÇÃO (o rótulo
+«CLIPS» nunca por baixo dos botões nem da lista), a waveform com ALTURA
+FIXA ~80dp, os botões Importar/Gravar/Play/Stop no estilo da casa, as
+ações do clip (renomear/apagar/atribuir a TIC) NUMA LINHA; o UI com o
+estado vazio LEGÍVEL, bom contraste e um botão «+» claro.
+
+**O que a auditoria achou** (o defeito real): o rótulo «CLIPS» vivia
+DENTRO do conteúdo do scroll e a reserva fixa de baixo (196dp) era
+somada a um PISO da lista de 80dp — em viewports baixos (drawer aberto
+em paisagem) o empilhamento ESTOURAVA o rect: a waveform (96dp) e as
+ações desenhavam PARA ALÉM do workspace (sobre a barra de baixo). A
+confirmação de apagar tinha botões de 22dp (o toque mínimo da fase é
+40) e o rótulo/estado vazio usavam o token LINE (#26262C — quase
+invisível no fundo).
+
+**O orçamento vertical (a cura — a fonte única no AudioWorkspace.cpp)**:
+barra de ações 44 → faixa do rótulo CLIPS 22 (FIXA, FORA do scroll) →
+lista FLEXÍVEL (piso 40) → waveform FIXA 80 (só entra se a lista ficar
+com o piso) → ações do clip 40 ancoradas ao fundo do rect. A lista é
+que CEDE; abaixo do orçamento mínimo o workspace NÃO desenha (o guard
+honesto). A confirmação de apagar tornou-se MODAL no rect da waveform
+(desenhada por último, borda danger, botões de 40dp) — nada cresce para
+lá do viewport. O rótulo e o estado vazio («sem clips — toca em
+Importar ou Gravar») passaram para o text2 (5,5:1). O overlay de
+gravação entrou no orçamento (recH).
+
+**O editor de UI**: os DOIS estados vazios (árvore sem filhos e sem
+TIC/canvas) usam o MESMO `drawEmptyState` das tabs do drawer (o helper
+da casa — ícone Monitor + mensagem em text2, centrados e clipados) e
+ganham o BOTÃO «+» CLARO de 44dp (`kUiEmptyPlusId 6922`) que abre O
+MESMO plusMenu de presets do + da barra (o caminho do C-4 — sem TIC o
+dispatch cria o TIC 'UI' + o elemento; nada duplicado, o convite sem
+ação é fachada e a casa não a tem).
+
+**O por-ficheiro** (4 ficheiros, nenhum novo):
+- `ui/AudioWorkspace.{h,cpp}` — o orçamento vertical (os kBtnH/kHeaderH/
+  kWaveH/kActH/kListMinH como constexpr comentados); os ids EXPORTADOS
+  para o header (o padrão ScriptEditor.h — os pins aférram-nos); a
+  faixa CLIPS fora do scroll; a waveform 80dp fixa; o modal de apagar;
+  o estado vazio legível; o guard do orçamento.
+- `ui/UiEditor.cpp` — os dois estados vazios legíveis com o botão «+»
+  (o plusMenu do C-4); os includes BottomPanel/LayoutDump.
+- `ui/EditorLayout.h` — o `kUiEmptyPlusId 6922` (a cauda dos ids de
+  estado vazio 6920/6921).
+
+**A prova** (o pin `ui_audio_ui` no test_fase_ui.cpp): (a) o orçamento
+em viewport 1000×500 — NADA fora do rect, a faixa CLIPS com O rótulo e
+SEM botão nenhum, a waveform 80dp no registo, as 4 teclas ≥44, as 2
+linhas ≥40 sob a faixa, as 3 ações NUMA linha ancoradas ao fundo, o
+validador da casa 0 problemas; (b) o MODAL de apagar com os botões de
+40dp dentro do rect; (c) o vazio sem waveform + o guard honesto no
+viewport 90dp (devolve 0); (d) o vazio do editor de UI com o «+» de
+44dp e O TOQUE a abrir o plusMenu (st.plusMenu — a fachada morre).
+Recalibração com nota: wiring011_workspace_toques (a geometria nova —
+a faixa 22, a waveform 80, as ações no fundo, o APAGAR do modal no
+rect da waveform).
+
+**M-UIi** (o rótulo CLIPS morre do draw) vermelho→reposto→verde:
+`ui_audio_ui` «o rótulo CLIPS não está na faixa fixa (0 rótulos)»
+VERMELHO ao vivo no estado mutado (com o .o recompilado — a lição do
+TU); colada aqui.
+
+**As capturas**: o sweep FASE 31 do c33 (5 ecrãs ≥640dp, 3 paisagens ×
+2 retratos) varre o «modo-audio» e o «modo-ui» — o layout NOVO passa
+pelo validador em todos (c33 1008/0); os PNGs y-modo-audio/y-modo-ui
+regeneram-se na corrida.
+
+**Verificação**: test_core 0 falhas (GONI_SKIP=r039,streaming_paralelo
+— os flakes de disco da sandbox documentados; o CI é o árbitro) ·
+c33_virtual 1008/0 · theme_hex/ui_vocab/glyph/hierarchy/projects_ui
+VERDES · docs-lint VERDE 121 · release-identity/R-015 VERDE vc 119 ·
+**versionCode: 118 → 119** (o §14 do RELATORIO-0.9.6.md declara o par
+no MESMO commit).
+
+**O que a parte I NÃO fez** (a lista honesta):
+
+- **Trim/corta do clip** (a dívida 🔶 desde 0.8.11): continua fora do
+  escopo (a ordem da parte I não o pedia).
+- **A gravação a reescrever o layout**: o overlay de gravação entra no
+  orçamento (a lista cede) mas não redesenha nada por cima — a barra
+  de nível continua a de 10dp de sempre.
+- **Viewports abaixo de ~164dp** (paisagem com o drawer na altura
+  máxima + overlay de gravação): o workspace não desenha (o guard) — a
+  degradação declarada; o host de hoje nunca o manda tão baixo.
+- **As capturas de device reais**: as da fase vêm do harness do c33
+  (FASE 31); o device físico é do dono.
+- **O Java/Importador/ÁudioEngine**: INTOCADOS (a cláusula da fase —
+  o workspace é só visual/layout).

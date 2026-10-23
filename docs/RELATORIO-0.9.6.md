@@ -693,3 +693,19 @@ caret = o desalinho; o follow ABSOLUTO de todos os frames = o tremor).
 verificação: test_core 0 falhas · c33_virtual 1008/0 · docs-lint VERDE ·
 **versionCode 118** — o build vigente. O 117 fica INTACTO como história.
 (o relatório próprio: docs/RELATORIO-FASE-UI.md §11)
+
+### §14-i — FASE UI I (as abas Áudio e UI) — versionCode 119
+
+**G8** (o par declarado no MESMO commit, a regra do §14): o workspace
+ÁUDIO com o ORÇAMENTO VERTICAL (a fonte única): o rótulo «CLIPS» numa
+faixa FIXA fora do scroll (nunca sob os botões nem sob a lista), a
+waveform FIXA 80dp, as ações do clip numa linha e a confirmação de
+apagar como MODAL no rect da waveform com botões de 40dp — a lista é
+que cede e nada desenha fora do rect (o guard honesto abaixo do
+orçamento); o estado vazio legível (o helper da casa). O editor de UI
+com o estado vazio LEGÍVEL (o MESMO drawEmptyState das tabs do drawer)
+e o botão «+» claro de 44dp que abre O MESMO plusMenu de presets (o
+caminho do C-4). verificação: test_core 0 falhas (o pin ui_audio_ui) ·
+c33_virtual 1008/0 · docs-lint VERDE · **versionCode 119** — o build
+vigente. O 118 fica INTACTO como história. (o relatório próprio:
+docs/RELATORIO-FASE-UI.md §12)

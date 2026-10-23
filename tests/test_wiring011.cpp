@@ -678,6 +678,11 @@ TEST(wiring011_workspace_toques_chamam_o_host) {
     };
 
     // ---- geometria (a MESMA fórmula do draw — nada de números mágicos) --
+    // FASE UI I (recalibração com nota): o ORÇAMENTO VERTICAL NOVO — a
+    // faixa do rótulo CLIPS (22dp FIXA fora do scroll) entra entre a barra
+    // e a lista; a waveform é FIXA 80dp e as ações ANCORAM-SE ao fundo do
+    // rect (actionsY = oy+ah-4-40) — a lista é que cede (a sobreposição do
+    // antigo empilhamento morreu)
     const f32 ox = view.x, oy = view.y, aw = view.w, ah = view.h;
     const f32 btnW = (aw - 12.0f - 3.0f * 8.0f) * 0.25f;   // 241
     const f32 barY = oy + 6.0f;
@@ -685,8 +690,8 @@ TEST(wiring011_workspace_toques_chamam_o_host) {
                       ox + 6.0f + btnW + 8.0f + btnW * 0.5f,
                       ox + 6.0f + 2.0f * (btnW + 8.0f) + btnW * 0.5f,
                       ox + 6.0f + 3.0f * (btnW + 8.0f) + btnW * 0.5f};
-    const f32 listTop = barY + 52.0f;
-    const f32 row1Y = listTop + 30.0f + 46.0f + 23.0f;   // 2ª linha (i=1)
+    const f32 listTop = barY + 44.0f + 4.0f + 22.0f + 2.0f;
+    const f32 row1Y = listTop + 46.0f + 23.0f;   // 2ª linha (i=1)
 
     // IMPORTAR (1º botão da barra de ações)
     EXPECT(tap(b[0], barY + 22.0f) == 0);
@@ -707,9 +712,8 @@ TEST(wiring011_workspace_toques_chamam_o_host) {
 
     // APAGAR exige CONFIRMAÇÃO: o 1º toque arma, o APAGAR confirma
     host.h.recording = false;
-    const f32 listH = ah - (listTop - oy) - 196.0f;
-    const f32 waveY = listTop + listH + 10.0f;
-    const f32 actionsY = waveY + 102.0f;
+    const f32 actionsY = oy + ah - 4.0f - 40.0f;   // a linha de ações (fundo)
+    const f32 waveY = actionsY - 8.0f - 80.0f;     // a waveform FIXA 80dp
     const f32 abW = (aw - 12.0f - 2.0f * 8.0f) * 0.3333f;
     const f32 aRnm = ox + 6.0f + abW * 0.5f;
     const f32 aDel = ox + 6.0f + abW + 8.0f + abW * 0.5f;
@@ -717,7 +721,9 @@ TEST(wiring011_workspace_toques_chamam_o_host) {
     tap(aDel, actionsY + 20.0f);
     EXPECT(host.deleted.empty());   // armado, NÃO apagou
     EXPECT(st.confirmDelete);
-    tap(ox + aw * 0.5f - 60.0f, actionsY + 46.0f + 26.0f);
+    // o modal ocupa o rect da waveform; o APAGAR (40dp) fica à esquerda
+    const f32 cbW = (aw - 12.0f - 8.0f) * 0.5f;
+    tap(ox + 6.0f + cbW * 0.5f, waveY + 34.0f + 20.0f);
     EXPECT(host.deleted == "audio/musica.gi");   // o CONFIRMA apagou
     EXPECT(!st.confirmDelete);
 

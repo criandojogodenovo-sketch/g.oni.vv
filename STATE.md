@@ -1,8 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-23 · vc: 118 · Último commit: este (o fix do CURSOR do
-editor de código — o toque media o SANS sobre o corpo desenhado em MONO
-+ o enviesamento 2dp; a causa 4 no §11 do RELATORIO-FASE-UI);
+Atualizado: 2026-10-23 · vc: 119 · Último commit: este (a FASE UI I — as abas
+ÁUDIO e UI: o orçamento vertical do workspace + o estado vazio legível com o «+»
+claro (o plusMenu do C-4); o §12 do RELATORIO-FASE-UI);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -10,33 +10,29 @@ editor de código — o toque media o SANS sobre o corpo desenhado em MONO
 
 ## §1 Onde estamos
 
-- **Campanha FASE UI (O REDESIGN VISUAL, envios 1/5..4/5) — EM CURSO
-  (A..H fechadas, vc 118; o 5/5 não chegou)** (a cláusula calma: SÓ
-  visual, layout e UX — core/V.ONI/importadores/física/.gmesh intocados;
-  um commit por parte, CI verde entre elas; a história vive no
-  RELATORIO-FASE-UI.md, os 16 itens no §6, os não-feitos no §8).
+- **Campanha FASE UI (O REDESIGN VISUAL, envios 1/5..5/5) — EM CURSO
+  (A..I fechadas, vc 119; a J do 5/5 pendente)** (a cláusula calma: SÓ
+  visual, layout e UX — core/V.ONI/importadores/física/.gmesh
+  intocados; um commit por parte, CI verde entre elas; a história no
+  RELATORIO-FASE-UI.md, os não-feitos no §8).
   **A (vc 111)**: O FICHEIRO ÚNICO DE TOKENS com a paleta do dono (os
-  hexes EXATOS: fundo #0B0B0D · painéis #121215 · elementos #1B1B20 ·
-  linhas #26262C · texto #E8E6E3/#8A8A93 · A BRASA ÚNICA #FF5A1F ·
-  seleção #2B1810 · eixos #E5484D/#3FB950/#3B82F6) + a escala 4/8/12/16
-  + raios 6-8 + o espelho Java + o contraste validado; pins
-  ui_tokens_brasa + ui_sobreposicao_topbar + M-UIa; 9 recalibrações.
+  hexes EXATOS da ordem: fundo #0B0B0D · painéis #121215 · elementos
+  #1B1B20 · linhas #26262C · texto #E8E6E3/#8A8A93 · A BRASA ÚNICA
+  #FF5A1F · seleção #2B1810 · eixos #E5484D/#3FB950/#3B82F6) + a escala
+  4/8/12/16 + raios 6-8 + o espelho Java; ui_tokens_brasa + M-UIa.
   **B (vc 112)**: A BARRA 40DP — a direita nova (undo/redo/guardar em
   TODOS os modos), o Pause na PLAY BAR, o «Android» nas Definições, o
-  chip ⋯; O ACHADO DO CI (a sonda 35.2 — a lacuna dos DOIS alvos): a
-  cura + o build_c33.py NOVO + 11 sondas stale;
-  ui_topbar_40dp_composicao + M-UIb; test_core 0 falhas + c33 1009/0.
+  chip ⋯; O ACHADO DO CI (a sonda 35.2): a cura + o build_c33.py NOVO;
+  ui_topbar_40dp_composicao + M-UIb; c33 1009/0.
   **C (vc 113)**: A HIERARQUIA — as linhas 40dp, o OLHO e o ⋮ SÓ na
-  selecionada (draw gated + hit gated), o nome inteiro e a indentação
-  pela escala; ui_hierarquia_40dp + M-UIc; 6 recalibrações; 0 falhas.
+  selecionada, o nome inteiro e a indentação pela escala;
+  ui_hierarquia_40dp + M-UIc.
   **D (vc 114)**: O VIEWPORT — a coluna das 4 FERRAMENTAS (o ativo É a
-  brasa), o Íman e a MÃO em CHIPS sob o rail (os MESMOS ids 33/36), os
-  divisores e a persistência confirmados; ui_divisores_persistencia +
-  M-UId; 0 falhas + c33 1010/0.
+  brasa), o Íman e a MÃO em CHIPS sob o rail, os divisores e a
+  persistência confirmados; ui_divisores_persistencia + M-UId.
   **E (vc 115)**: O INSPECTOR — o cabeçalho do TIC (o NOME em brasa + o
-  TIPO por baixo; 44dp), a BARRINHA do eixo (as letras X/Y/Z morreram),
-  o vazio com o «+ criar TIC»; ui_inspector_cabecalho + M-UIe;
-  9 recalibrações; 0 falhas + c33 1010/0.
+  TIPO por baixo; 44dp), a BARRINHA do eixo (as letras morreram), o
+  vazio com o «+ criar TIC»; ui_inspector_cabecalho + M-UIe.
   **F (vc 116)**: A BARRA FINA + O PAINEL ENCAIXADO — o «Painéis ▾»
   (contorno brasa aberto) + o estado «60 FPS · 6 TICs» (o bl saiu), as 4
   TABS na FILA 40dp (o viewport SOBE), a ÚLTIMA aba lembrada, alturas
@@ -45,15 +41,17 @@ editor de código — o toque media o SANS sobre o corpo desenhado em MONO
   **G (vc 117)**: AS FOLHAS CONTIDAS — o teto de 85% (kSheetMaxPct), a
   reserva da barra no navegador, o X de fechar no menu (7411);
   ui_sheets_conteudos + M-UIg (a lição do HEADER stale: touch no TU).
-  **H (vc 118)**: O EDITOR DE CÓDIGO — o TIC + os exportáveis no topo,
-  as ABAS (a ativa em brasa; teto 6), o undo/redo por evento, o
-  copiar/colar na família de ícones, a barra enxuta `{ } ( ) [ ] ; = "
-  . , Tab`, a BRASA SÓ nas reservadas (as neutras novas no Theme), o
-  MONO do 2.º atlas (o modo por-bloco + o batch próprio) e a banda da
-  linha corrente; AS CAUSAS ditas no §11: o cap 256 do draw (o
-  desalinho nas linhas longas — sobe para 512) e o follow ABSOLUTO do
-  scroll (o tremor — só-no-evento); ui_codigo_editor + M-UIh;
-  R-027/wiring092/c33 recalibrados; jniClipboardPaste (o colar).
+  **H (vc 118)**: O EDITOR DE CÓDIGO — o TIC + os exportáveis, as ABAS
+  (em brasa; teto 6), o undo/redo por evento, a barra enxuta, a BRASA
+  SÓ nas reservadas, o MONO do 2.º atlas e a banda da linha corrente;
+  AS CAUSAS no §11 do relatório (o cap 256→512; o follow
+  só-no-evento); ui_codigo_editor + M-UIh; jniClipboardPaste.
+  **I (vc 119)**: AS ABAS ÁUDIO E UI — o ÁUDIO com o ORÇAMENTO VERTICAL
+  (o rótulo CLIPS FIXO fora do scroll, a waveform FIXA 80dp, as ações
+  numa linha, o modal de apagar com 40dp, a lista a ceder, o guard
+  honesto); o UI com o vazio LEGÍVEL (o drawEmptyState da casa) + o
+  «+» claro de 44dp (o plusMenu do C-4); ui_audio_ui + M-UIi.
+
 - **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — EM CURSO (A, B, C, o
   C-FIX e o D fechadas, vc 110; o FECHO a seguir)** (a cláusula calma: SÓ o
   prompt; a V.ONI intocada; a história vive no RELATORIO-0.12-Y-ABERTURA.md

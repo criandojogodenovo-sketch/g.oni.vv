@@ -1000,6 +1000,9 @@ constexpr u64 kAutoNoId  = 6931;
 constexpr u64 kAssetsImportId = 6920;
 // o CRIAR TIC do estado vazio do Inspector (abre o plusMenu de presets)
 constexpr u64 kInspCreateTicId = 6921;
+// FASE UI I: o «+» do estado vazio do EDITOR DE UI (abre o MESMO plusMenu
+// de presets — o caminho do C-4; sem TIC o dispatch cria o TIC 'UI')
+constexpr u64 kUiEmptyPlusId = 6922;
 
 // 0.12-C (C-4) — A FONTE ÚNICA da GEOMETRIA da folha do NAVEGADOR (o draw
 // e os pins partilham — o padrão menuSheetLayout da C-2). O card 92% com o
