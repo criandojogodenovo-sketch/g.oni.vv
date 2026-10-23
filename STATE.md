@@ -1,8 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-22 · vc: 118 · Último commit: este (a FASE UI H — o editor
-de código: o TIC + os exportáveis, as abas, o undo/redo, o mono do 2.º atlas
-e AS CAUSAS dos defeitos ditas — o cap 256 e o follow absoluto; §11);
+Atualizado: 2026-10-23 · vc: 118 · Último commit: este (o fix do CURSOR do
+editor de código — o toque media o SANS sobre o corpo desenhado em MONO
++ o enviesamento 2dp; a causa 4 no §11 do RELATORIO-FASE-UI);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.

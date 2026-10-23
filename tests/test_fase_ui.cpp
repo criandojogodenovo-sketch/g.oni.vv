@@ -629,6 +629,19 @@ TEST(ui_codigo_editor) {
         // o MONO do código: o modo liga no corpo e desliga no fim
         EXPECT(countSub(src, "ui.monoMode(true)") == 1);
         EXPECT(countSub(src, "ui.monoMode(false)") == 1);
+        // 0.9.6.11 (cursor): o hit-test do toque mede no atlas do CÓDIGO
+        // (fontWidthCode — o MESMO do corpo em mono; o fontWidth global
+        // media o SANS depois do monoMode(false) e o x→coluna derivava
+        // 1-2 caracteres) e o «- caretInset()» morreu do chamador (o
+        // enviesamento de 2dp resolvia uma banda à esquerda de cada
+        // fronteira UM carácter cedo — a regra do meio fica exata)
+        EXPECT_MSG(countSub(src, "ui.fontWidthCode(one)") == 1,
+                   "ui_codigo_cursor: o toque tem de medir pelo atlas do "
+                   "CÓDIGO (fontWidthCode) — o fontWidth global diverge do "
+                   "corpo desenhado em mono");
+        EXPECT_MSG(countSub(src, "tx - xCode2 - caretInset()") == 0,
+                   "ui_codigo_cursor: o -caretInset() do toque enviesa o "
+                   "x 2dp à esquerda (cursor um carácter cedo na banda)");
         // a BANDA da linha corrente existe (o fundo mais claro do dono)
         EXPECT(countSub(src, "theme::kTheme.surface);") >= 1);
 

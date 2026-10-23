@@ -589,6 +589,24 @@ linguagem INTACTA):
    índice por tecla é O(linhas) e fica (a nota honesta — o custo é por
    EDIÇÃO, não por frame; a cura incremental tocaria o cache da
    classificação — fora do escopo da UI).
+4. **O cursor «entre as letras» — a causa que a H NÃO viu** (0.9.6.11,
+   reportada no device depois da H): o hit-test do toque media as
+   larguras com o `fontWidth` global — mas o bloco do toque corre
+   DEPOIS do `monoMode(false)` do fim do scroll, enquanto o corpo é
+   desenhado em MONO desde a H. O x→coluna media o SANS (proporcional)
+   sobre um corpo desenhado em MONO — o desvio acumula ao longo da
+   linha e o cursor caía 1-2 caracteres ao lado (tocar entre «a» e «r»
+   resolvia outra fronteira). **A cura**: `fontWidthCode` no UiContext
+   (o atlas do CÓDIGO — o mesmo do corpo, com a mesma degradação
+   honesta sem mono) usado pelo hit-test. Sub-causa no mesmo toque: o
+   «- caretInset()» enviesava o x 2dp à esquerda — numa banda à
+   esquerda de cada fronteira o cursor resolvia UM carácter cedo; a
+   regra do meio (metade esquerda antes / metade direita depois) fica
+   EXATA sem ele. A métrica em si já era real e aditiva (`widthOf`
+   soma os avanços por code point — a auditoria re-confirmou); nem o
+   scroll vertical (o inverso exato `lineAtScreenY`), nem o padding
+   (`codeX` — a fonte única), nem floor/round (o meio já era o
+   contrato) tinham culpa.
 
 **O por-ficheiro** (8 ficheiros, nenhum novo):
 

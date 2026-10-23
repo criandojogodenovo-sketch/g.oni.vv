@@ -1787,13 +1787,24 @@ int draw(UiContext& ui, const InputState& in, State& st, f32 w, f32 h,
                 const u32 ls2 = idx[li];   // O(1) — o início da linha do ÍNDICE
                 // coluna: o carácter mais próximo pelas métricas REAIS, por
                 // CODE POINT (um acento não conta 2 — o old media por BYTE)
+                // 0.9.6.11 (cursor) · AS CAUSAS do desalinho «entre a e r
+                // caía ao lado»: (1) O ATLAS — este bloco corre DEPOIS do
+                // monoMode(false) do fim do scroll e o fontWidth media o
+                // SANS (proporcional) sobre um corpo desenhado em MONO (a
+                // parte H) — o x→coluna derivava 1-2 caracteres; mede agora
+                // pelo atlas do CÓDIGO (fontWidthCode — o MESMO do draw).
+                // (2) O ENVIESAMENTO DE 2DP — o «- caretInset()» puxava o
+                // toque 2dp à esquerda: numa banda à esquerda de cada
+                // fronteira o cursor resolvia UM carácter cedo (a regra do
+                // meio fica EXATA sem ele — a fronteira mais próxima do
+                // toque, metade esquerda antes / metade direita depois).
                 const f32 xCode2 = codeX(ins);
                 const u32 le2 = lineEndOf(st.buf, ls2);
                 const std::string line =
                     st.buf.substr(ls2, le2 - ls2);
                 const u32 col = caretInLineForX(
-                    line, tx - xCode2 - caretInset(),
-                    [&](const char* one) { return ui.fontWidth(one); });
+                    line, tx - xCode2,
+                    [&](const char* one) { return ui.fontWidthCode(one); });
                 const u32 bo = ls2 + col;
                 // ★ O FIX: o offset sob o dedo PASSA A SER o cursor ★
                 st.caret = bo;

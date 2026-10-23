@@ -481,6 +481,17 @@ public:
         return fnt() ? fnt()->widthOf(text) * textScale_ * theme::textK()
                     : 0.0f;
     }
+    // 0.9.6.11 (cursor): a largura no atlas do CÓDIGO — o MESMO atlas do
+    // corpo do editor de script (o mono se carregado; o sans na degradação
+    // honesta — a MESMA regra do monoMode). O hit-test do toque mede por
+    // AQUI: o bloco do toque corre DEPOIS do monoMode(false) do fim do
+    // scroll e o fontWidth global devolvia as larguras do SANS
+    // (proporcional) sobre um corpo desenhado em MONO — o mapeamento
+    // x→coluna derivava 1-2 caracteres (a causa do cursor ao lado).
+    f32  fontWidthCode(const char* text) const {
+        FontAtlas* f = (fontMono_ && fontMono_->ok()) ? fontMono_ : font_;
+        return f ? f->widthOf(text) * textScale_ * theme::textK() : 0.0f;
+    }
     f32  fontHeight() const {
         return fnt() ? fnt()->height() * textScale_ * theme::textK() : 0.0f;
     }
