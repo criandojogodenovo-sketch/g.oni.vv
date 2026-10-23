@@ -35,6 +35,7 @@ uniform float uSpeed;
 uniform float uCoverage;
 uniform float uHeight;    // 0.12-Y-E: a escala vertical das nuvens
 uniform float uStars;     // 0.12-Y-E: o gate das estrelas (o branch uniforme)
+uniform float uThunderFlash; // 0.12-Y-F2: o FLASH da trovoada (0..1)
 uniform vec3 uHorizon;
 uniform vec3 uZenith;
 uniform vec3 uSunCol;
@@ -164,6 +165,9 @@ void main() {
     col = mix(col, cloudCol, a);
     // o DISCO depois das nuvens (morre atrás da nuvem densa)
     col += uSunCol * sunDisk(d) * (1.0 - a);
+    // o FLASH da trovoada (0.12-Y-F2 — a linha EXATA do prompt; sem
+    // geometria de raio: o ecrã inteiro aclara azul-frio e morre em ~0.33 s)
+    col += vec3(uThunderFlash * 0.6, uThunderFlash * 0.65, uThunderFlash * 0.75);
     outColor = vec4(col, 1.0);
 })";
 
@@ -220,6 +224,7 @@ bool SkyRenderer::init() {
     locCoverage_ = glGetUniformLocation(prog_, "uCoverage");
     locHeight_ = glGetUniformLocation(prog_, "uHeight");   // 0.12-Y-E
     locStars_ = glGetUniformLocation(prog_, "uStars");     // 0.12-Y-E
+    locThunder_ = glGetUniformLocation(prog_, "uThunderFlash");   // 0.12-Y-F2
     locHor_ = glGetUniformLocation(prog_, "uHorizon");
     locZen_ = glGetUniformLocation(prog_, "uZenith");
     locSunCol_ = glGetUniformLocation(prog_, "uSunCol");
@@ -250,6 +255,7 @@ void SkyRenderer::destroy() {
     locRight_ = locUp_ = locFwd_ = locAspect_ = locTanF_ = -1;
     locTime_ = locSpeed_ = locCoverage_ = -1;
     locHeight_ = locStars_ = -1;
+    locThunder_ = -1;   // 0.12-Y-F2
     locHor_ = locZen_ = locSunCol_ = locSunDir_ = -1;
     vertexCount_ = 0;
 }
@@ -287,6 +293,11 @@ DrawStats SkyRenderer::draw(const Params& p) const {
     }
     if (locStars_ >= 0) {
         glUniform1f(locStars_, p.stars);
+    }
+    // o FLASH da trovoada (0.12-Y-F2) — ANTES do uTime: o ÚLTIMO 1f do
+    // draw continua a ser o relógio das nuvens (o contrato do pin da D)
+    if (locThunder_ >= 0) {
+        glUniform1f(locThunder_, p.thunder);
     }
     if (locHor_ >= 0) {
         glUniform3f(locHor_, p.horizon[0], p.horizon[1], p.horizon[2]);

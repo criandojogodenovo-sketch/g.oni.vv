@@ -38,6 +38,8 @@
 #include "components/AnimationPlayer.h"   // 0.8.0: inspector da animação
 #include "components/AudioPlayer.h"   // 0.8.11: inspector de áudio
 #include "components/Environment.h"   // 0.12-Y-fix: inspector do WorldEnvironment
+#include "components/WindTIC.h"   // 0.12-Y-F2: inspector do vento
+#include "components/AmbientEnvironment.h"   // 0.12-Y-F2: inspector do clima
 #include "components/UiCanvas.h"   // 0.8.0: canAnim (elementos animáveis)
 
 namespace vv {
@@ -208,6 +210,14 @@ constexpr u64 kInspectorPeColA  = 5444;   // "cor início: #RRGGBB" (hex 16)
 constexpr u64 kInspectorPeColB  = 5445;   // "cor fim: #RRGGBB" (hex 17)
 constexpr u64 kInspectorPeGrav  = 5446;   // slider gravidade Y -20..20
 constexpr u64 kInspectorPeTex   = 5447;   // "textura: ..." (o NAVEGADOR)
+// 0.12-Y-F2 — VENTO (faixa 5450..5453)
+constexpr u64 kInspectorWindDirX = 5450;  // slider vento x -1..1
+constexpr u64 kInspectorWindDirY = 5451;  // slider vento y -1..1
+constexpr u64 kInspectorWindDirZ = 5452;  // slider vento z -1..1
+constexpr u64 kInspectorWindStr  = 5453;  // slider força 0..10
+// 0.12-Y-F2 — CLIMA (faixa 5456..5457)
+constexpr u64 kInspectorAmbWeather = 5456; // "clima: nenhum|chuva|neve|trovoada" (o ciclar)
+constexpr u64 kInspectorAmbInt     = 5457; // slider intensidade 0..1
 // 0.8.0 (F7) — primitiva procedural do MeshRenderer + animação
 constexpr u64 kInspectorPrimSel   = 5003;   // "prim: esfera ▸" (seletor)
 constexpr u64 kInspectorPrimR     = 5600;   // slider raio/size
@@ -296,6 +306,10 @@ struct InspProfile {
     // 0.12-Y-F1: o ParticleEmitter presente (secção com os 8 controlos —
     // máx/vida/tamanhos/cores hex/gravidade/textura)
     bool pe = false;
+    // 0.12-Y-F2: o vento global presente (secção com os 4 controlos —
+    // direção x/y/z + força) e o clima presente (tipo + intensidade)
+    bool wind = false;
+    bool amb = false;
     // 0.12-Y (3.Y-D): o TIPO de céu do Environment (0 = sólida, 1 =
     // procedural — o plano é CONDICIONAL a isto: o M-Yd2 vive aqui)
     u32 envSkyType = 0;
@@ -318,6 +332,8 @@ inline InspProfile inspectorProfile(const Tic& tic) {
     p.script = tic.getComponent<ScriptComp>() != nullptr;   // 0.9.2
     p.env = tic.getComponent<Environment>() != nullptr;   // 0.12-Y-fix
     p.pe = tic.getComponent<ParticleEmitter>() != nullptr;   // 0.12-Y-F1
+    p.wind = tic.getComponent<WindTIC>() != nullptr;   // 0.12-Y-F2
+    p.amb = tic.getComponent<AmbientEnvironment>() != nullptr;   // 0.12-Y-F2
     if (const Environment* envP = tic.getComponent<Environment>()) {
         p.envSkyType = envP->skyType;   // 0.12-Y (3.Y-D): o plano condiciona
     }
@@ -442,6 +458,15 @@ struct InspRow {
         PeColB,      // "cor fim: #RRGGBB" + swatch (teclado hex 17)
         PeGrav,      // slider gravidade Y -20..20 (o caso real: fogo/chuva)
         PeTex,       // botão "textura: <nome|procedural>" (o NAVEGADOR)
+        // 0.12-Y-F2 — VENTO + CLIMA (as secções do WindTIC/AmbientEnvironment)
+        WindSection, // cabeçalho "Wind" + separador
+        WindDirX,    // slider vento x -1..1 (o vetor normaliza no clamp)
+        WindDirY,    // slider vento y -1..1
+        WindDirZ,    // slider vento z -1..1
+        WindStr,     // slider força 0..10 (a brisa 1.0 da fábrica)
+        AmbSection,  // cabeçalho "Ambient" + separador
+        AmbWeather,  // "clima: nenhum|chuva|neve|trovoada" (o ciclar da casa)
+        AmbInt,      // slider intensidade 0..1 (o COUNT do preset escala)
     };
     Kind kind;
     f32  y;     // topo da linha em COORDS DE CONTEÚDO (cumulativo)
@@ -501,6 +526,8 @@ constexpr u32 kInspBitAnim      = 1u << 6;
 constexpr u32 kInspBitScript    = 1u << 7;   // 0.9.2: V.ONI
 constexpr u32 kInspBitEnvironment = 1u << 8; // 0.12-Y-fix: WorldEnvironment
 constexpr u32 kInspBitParticles  = 1u << 9; // 0.12-Y-F1: ParticleEmitter
+constexpr u32 kInspBitWind       = 1u << 10; // 0.12-Y-F2: WindTIC
+constexpr u32 kInspBitAmbient    = 1u << 11; // 0.12-Y-F2: AmbientEnvironment
 
 // altura de UMA linha de Transform (PASSO 1: título 12sp + caixas 32dp +
 // folga — a spec: «campos 32dp»; eram caixas de 48). 0.12-QoL A: a folga
@@ -830,6 +857,31 @@ inline u32 inspectorPlan(const InspProfile& p, const TextMetrics& m,
             push(InspRow::Kind::PeColB, btnH, kInspectorPeColB);
             push(InspRow::Kind::PeGrav, sldH, kInspectorPeGrav);
             push(InspRow::Kind::PeTex, btnH, kInspectorPeTex);
+        }
+    }
+    // ---- VENTO (0.12-Y-F2) — a secção do WindTIC: a direção (x/y/z — o
+    // vetor normaliza no clamp) + a força (o vento GLOBAL que o
+    // ParticleRenderer consome antes do draw call)
+    if (p.wind) {
+        push(InspRow::Kind::WindSection, secH, kInspSectionBase + 10,
+             kInspBitWind);
+        if (!(collapsed & kInspBitWind)) {
+            push(InspRow::Kind::WindDirX, sldH, kInspectorWindDirX);
+            push(InspRow::Kind::WindDirY, sldH, kInspectorWindDirY);
+            push(InspRow::Kind::WindDirZ, sldH, kInspectorWindDirZ);
+            push(InspRow::Kind::WindStr, sldH, kInspectorWindStr);
+        }
+    }
+    // ---- CLIMA (0.12-Y-F2) — a secção do AmbientEnvironment: o TIPO
+    // (o ciclar da casa: nenhum→chuva→neve→trovoada — a mudança chama o
+    // applyWeatherPreset no ParticleEmitter do MESMO TIC) + a
+    // intensidade (o COUNT do preset escala)
+    if (p.amb) {
+        push(InspRow::Kind::AmbSection, secH, kInspSectionBase + 11,
+             kInspBitAmbient);
+        if (!(collapsed & kInspBitAmbient)) {
+            push(InspRow::Kind::AmbWeather, btnH, kInspectorAmbWeather);
+            push(InspRow::Kind::AmbInt, sldH, kInspectorAmbInt);
         }
     }
     // ---- SCRIPT V.ONI (0.9.2 §10) — sempre disponível num TIC ----------

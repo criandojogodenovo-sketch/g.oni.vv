@@ -39,6 +39,8 @@ public:
         f32  lifetime = 2.0f;
         f32  vel[3]   = {0, 3, 0};
         f32  grav[3]  = {0, -4, 0};
+        f32  wind[3]  = {0, 0, 0};    // 0.12-Y-F2: o vento global (o 1.º
+                                      // WindTIC ativo; zero = a F1 byte a byte)
         f32  startSize = 0.25f;
         f32  endSize   = 0.05f;
         f32  startCol[4] = {1, 0.72f, 0.25f, 1};
@@ -66,6 +68,8 @@ private:
     i32 locPos_ = -1;
     i32 locVel_ = -1;
     i32 locGrav_ = -1;
+    i32 locWind_ = -1;   // 0.12-Y-F2: uWind (3f — o uTime continua o
+                         // ÚLTIMO 1f do draw: o contrato do pin intacto)
     i32 locStartSize_ = -1;
     i32 locEndSize_ = -1;
     i32 locStartCol_ = -1;

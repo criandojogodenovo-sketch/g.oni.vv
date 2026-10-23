@@ -1,7 +1,9 @@
 #include "core/Presets.h"
+#include "components/AmbientEnvironment.h"
 #include "components/AudioPlayer.h"
 #include "components/Environment.h"
 #include "components/ParticleEmitter.h"
+#include "components/WindTIC.h"
 #include "components/BodyComp.h"
 #include "components/InputMap.h"
 #include "components/MeshRenderer.h"
@@ -24,6 +26,14 @@ const char* presetName(PresetKind kind) {
             return "WorldEnvironment";   // 0.12-Y (3.Y-C)
         case PresetKind::ParticleEmitter:
             return "ParticleEmitter";    // 0.12-Y-F1
+        case PresetKind::Wind:
+            return "Wind";               // 0.12-Y-F2
+        case PresetKind::Rain:
+            return "Rain";               // 0.12-Y-F2
+        case PresetKind::Snow:
+            return "Snow";               // 0.12-Y-F2
+        case PresetKind::Storm:
+            return "Storm";              // 0.12-Y-F2
         default:                          return "Tic";
     }
 }
@@ -94,6 +104,39 @@ Handle createTicFromPreset(Scene& scene, PresetKind kind,
     // SEM mesh, SEM física de corpos). Assenta no grid como os objetos.
     if (kind == PresetKind::ParticleEmitter) {
         tic->addComponent<ParticleEmitter>();
+        return h;
+    }
+
+    // 0.12-Y-F2: o preset WIND é ESTRUTURA — Transform + WindTIC (o vento
+    // GLOBAL da cena; o 1.º ATIVO manda — o «sítio» não importa, como o
+    // WorldEnvironment). SEM mesh, SEM física, SEM partículas.
+    if (kind == PresetKind::Wind) {
+        tr->pos = Vec3{0.0f, 0.0f, 0.0f};
+        tr->updateWorld();
+        tic->addComponent<WindTIC>();
+        return h;
+    }
+
+    // 0.12-Y-F2: os presets de CLIMA (Rain/Snow/Storm) são Transform +
+    // ParticleEmitter + AmbientEnvironment NO MESMO TIC (a decisão do
+    // dono: o clima CONFIGURA o emissor — applyWeatherPreset corre na
+    // criação; assenta no grid como os objetos — a chuva CAI do sítio).
+    if (kind == PresetKind::Rain || kind == PresetKind::Snow ||
+        kind == PresetKind::Storm) {
+        AmbientEnvironment* ae = tic->addComponent<AmbientEnvironment>();
+        if (ae) {
+            ae->weatherType = (kind == PresetKind::Rain)
+                                  ? AmbientEnvironment::kWeatherRain
+                                  : (kind == PresetKind::Snow)
+                                        ? AmbientEnvironment::kWeatherSnow
+                                        : AmbientEnvironment::kWeatherStorm;
+            ae->intensity = (kind == PresetKind::Storm) ? 0.7f : 0.5f;
+        }
+        if (ParticleEmitter* pe = tic->addComponent<ParticleEmitter>()) {
+            if (ae) {
+                ae->applyWeatherPreset(pe);   // o clima de fábrica
+            }
+        }
         return h;
     }
 

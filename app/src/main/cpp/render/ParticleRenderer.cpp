@@ -74,6 +74,7 @@ bool ParticleRenderer::init() {
     locPos_ = glGetUniformLocation(prog_, "uPos");
     locVel_ = glGetUniformLocation(prog_, "uVel");
     locGrav_ = glGetUniformLocation(prog_, "uGrav");
+    locWind_ = glGetUniformLocation(prog_, "uWind");   // 0.12-Y-F2
     locStartSize_ = glGetUniformLocation(prog_, "uStartSize");
     locEndSize_ = glGetUniformLocation(prog_, "uEndSize");
     locStartCol_ = glGetUniformLocation(prog_, "uStartCol");
@@ -122,6 +123,7 @@ void ParticleRenderer::destroy() {
     if (vao_) { glDeleteVertexArrays(1, &vao_); vao_ = 0; }
     if (prog_) { glDeleteProgram(prog_); prog_ = 0; }
     locVP_ = locRight_ = locUp_ = locPos_ = locVel_ = locGrav_ = -1;
+    locWind_ = -1;   // 0.12-Y-F2
     locStartSize_ = locEndSize_ = locStartCol_ = locEndCol_ = -1;
     locHasTex_ = locTex_ = -1;
     locTime_ = -1;
@@ -209,6 +211,11 @@ DrawStats ParticleRenderer::draw(const Params& p) const {
     }
     if (locGrav_ >= 0) {
         glUniform3f(locGrav_, p.grav[0], p.grav[1], p.grav[2]);
+    }
+    // o VENTO GLOBAL (0.12-Y-F2 — o desvio acumulado uWind·t no VS; o
+    // zero = o caminho de sempre da F1 byte a byte)
+    if (locWind_ >= 0) {
+        glUniform3f(locWind_, p.wind[0], p.wind[1], p.wind[2]);
     }
     if (locStartSize_ >= 0) {
         glUniform1f(locStartSize_, p.startSize);

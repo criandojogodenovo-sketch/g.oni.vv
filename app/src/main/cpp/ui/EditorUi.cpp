@@ -1633,6 +1633,8 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     // 0.12-Y-fix — o Environment do TIC (o Inspector do WorldEnvironment)
     Environment* envEdit = tic->getComponent<Environment>();
     ParticleEmitter* peEdit = tic->getComponent<ParticleEmitter>();   // 0.12-Y-F1
+    WindTIC* windEdit = tic->getComponent<WindTIC>();   // 0.12-Y-F2
+    AmbientEnvironment* aeEdit = tic->getComponent<AmbientEnvironment>();   // 0.12-Y-F2
     char meshLabel[64] = "";
     char texLabel[64] = "";
     // 0.10-M HOTFIX TEXTURAS-VINCULA: os rótulos dos 5 slots (só preenchidos
@@ -1658,6 +1660,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
     char peColAHex[12] = "";     // 0.12-Y-F1: o hex da cor de início
     char peColBHex[12] = "";     // 0.12-Y-F1: o hex da cor de fim
     char peTexLabel[96] = "";    // 0.12-Y-F1: o rótulo do botão textura
+    char ambWeatherLabel[32] = "";   // 0.12-Y-F2: o rótulo do clima
     if (envEdit) {
         if (!envEdit->hdriPath.empty()) {
             std::snprintf(envHdriLabel, sizeof(envHdriLabel), "hdri: %s",
@@ -1686,6 +1689,13 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                       peEdit->texturePath.empty()
                           ? "procedural"
                           : peEdit->texturePath.c_str());
+    }
+    if (aeEdit) {
+        // 0.12-Y-F2: o rótulo do clima (a MESMA ordem do ciclar)
+        static const char* kWeatherNames[4] = {"nenhum", "chuva", "neve",
+                                               "trovoada"};
+        std::snprintf(ambWeatherLabel, sizeof(ambWeatherLabel), "clima: %s",
+                      kWeatherNames[aeEdit->weatherType & 3u]);
     }
     char camProjLabel[48] = "";   // 0.7.7
     char camActiveLabel[48] = "";
@@ -2959,6 +2969,121 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
             ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad, r.h - 4.0f,
                       peTexLabel);
             break;
+        case InspRow::Kind::WindSection: {
+            // 0.12-Y-F2 — o cabeçalho COLAPSÁVEL da secção Wind (o MESMO
+            // padrão do PeSection: título + chevron + bit persistente)
+            const u32 bit = r.payload;
+            const bool open = !(st.inspCollapsed & bit);
+            if (ui.widgetActive(r.id)) {
+                ui.panel(x + 4.0f, ry, w - 8.0f, r.h, theme::kTheme.surface2);
+            }
+            const TextMetrics m2 = ui.textMetrics();
+            const f32 base = ry + (r.h - m2.block()) * 0.5f + m2.ascent;
+            ui.label(x + kPad, base, "Wind", theme::kTheme.text1);
+            icons::drawIcon(ui,
+                            open ? icons::Icon::ChevronDown
+                                 : icons::Icon::ChevronRight,
+                            x + w - kPad - theme::dp(20.0f),
+                            ry + (r.h - theme::dp(20.0f)) * 0.5f,
+                            theme::dp(20.0f), theme::kTheme.text2);
+            ui.panel(x + kPad, ry + r.h - 1.0f, w - 2.0f * kPad, 1.0f,
+                     theme::kTheme.border);
+            break;
+        }
+        case InspRow::Kind::WindDirX:
+            // 0.12-Y-F2 — slider VENTO X -1..1 (o vetor NORMALIZA no
+            // clamp — o contrato do componente; o desvio acumula no VS)
+            if (windEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "vento x",
+                              -1.0f, 1.0f, windEdit->windDirection[0],
+                              "%.2f")) {
+                    windEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::WindDirY:
+            // 0.12-Y-F2 — slider VENTO Y -1..1
+            if (windEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "vento y",
+                              -1.0f, 1.0f, windEdit->windDirection[1],
+                              "%.2f")) {
+                    windEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::WindDirZ:
+            // 0.12-Y-F2 — slider VENTO Z -1..1
+            if (windEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "vento z",
+                              -1.0f, 1.0f, windEdit->windDirection[2],
+                              "%.2f")) {
+                    windEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::WindStr:
+            // 0.12-Y-F2 — slider FORÇA 0..10 (a brisa 1.0 da fábrica; a
+            // magnitude dobra/triplica o desvio das partículas)
+            if (windEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "força",
+                              0.0f, WindTIC::kStrengthMax,
+                              windEdit->windStrength, "%.1f")) {
+                    windEdit->clampFields();
+                    edited = true;
+                }
+            }
+            break;
+        case InspRow::Kind::AmbSection: {
+            // 0.12-Y-F2 — o cabeçalho COLAPSÁVEL da secção Ambient (o
+            // MESMO padrão do WindSection)
+            const u32 bit = r.payload;
+            const bool open = !(st.inspCollapsed & bit);
+            if (ui.widgetActive(r.id)) {
+                ui.panel(x + 4.0f, ry, w - 8.0f, r.h, theme::kTheme.surface2);
+            }
+            const TextMetrics m2 = ui.textMetrics();
+            const f32 base = ry + (r.h - m2.block()) * 0.5f + m2.ascent;
+            ui.label(x + kPad, base, "Ambient", theme::kTheme.text1);
+            icons::drawIcon(ui,
+                            open ? icons::Icon::ChevronDown
+                                 : icons::Icon::ChevronRight,
+                            x + w - kPad - theme::dp(20.0f),
+                            ry + (r.h - theme::dp(20.0f)) * 0.5f,
+                            theme::dp(20.0f), theme::kTheme.text2);
+            ui.panel(x + kPad, ry + r.h - 1.0f, w - 2.0f * kPad, 1.0f,
+                     theme::kTheme.border);
+            break;
+        }
+        case InspRow::Kind::AmbWeather:
+            // 0.12-Y-F2 — o botão do TIPO de clima (a LÓGICA vive no
+            // despacho do tap — o MESMO padrão do EnvCyc: o draw só
+            // desenha, o despacho cicla e aplica o preset)
+            ui.auditRowFloorNext(layout::kRowFloorDp);
+            ui.button(r.id, x + kPad, ry + 2.0f, w - 2.0f * kPad,
+                      r.h - 4.0f, ambWeatherLabel);
+            break;
+        case InspRow::Kind::AmbInt:
+            // 0.12-Y-F2 — slider INTENSIDADE 0..1 (o COUNT do preset
+            // escala: 1500/800/2000 × intensity; a REAPLICAÇÃO do preset
+            // mantém o emissor honesto com o clima visível)
+            if (aeEdit) {
+                ui.auditRowFloorNext(layout::kRowFloorDp);
+                if (sliderRow(ui, r.id, x, w, ry, r.h, tm, "intensidade",
+                              0.0f, 1.0f, aeEdit->intensity, "%.2f")) {
+                    aeEdit->clampFields();
+                    aeEdit->applyWeatherPreset(
+                        tic->getComponent<ParticleEmitter>());
+                    edited = true;
+                }
+            }
+            break;
         case InspRow::Kind::EnvSky: {
             // "céu: #RRGGBB" + swatch VIVO (o MESMO padrão da linha hex do
             // tint: tocar abre o teclado em modo hex — propósito 11)
@@ -3072,7 +3197,9 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 r.kind == InspRow::Kind::Section ||
                 r.kind == InspRow::Kind::CamSection ||
                 r.kind == InspRow::Kind::AuSection ||
-                r.kind == InspRow::Kind::PeSection;   // 0.12-Y-F1
+                r.kind == InspRow::Kind::PeSection ||   // 0.12-Y-F1
+                r.kind == InspRow::Kind::WindSection ||   // 0.12-Y-F2
+                r.kind == InspRow::Kind::AmbSection;   // 0.12-Y-F2
             if (r.kind != InspRow::Kind::AddTc &&
                 r.kind != InspRow::Kind::MeshButton &&
                 r.kind != InspRow::Kind::TexButton &&
@@ -3103,6 +3230,7 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 r.kind != InspRow::Kind::PeColA &&      // 0.12-Y-F1: hex início
                 r.kind != InspRow::Kind::PeColB &&      // 0.12-Y-F1: hex fim
                 r.kind != InspRow::Kind::PeTex &&       // 0.12-Y-F1: navegador
+                r.kind != InspRow::Kind::AmbWeather &&  // 0.12-Y-F2: o clima
                 !isSection &&                           // 0.9.0: colapsar
                 r.kind != InspRow::Kind::TransformRow &&// 0.9.0: caixas X/Y/Z + R
                 r.kind != InspRow::Kind::Slider) {      // 0.8.9: zona do VALOR
@@ -3333,9 +3461,27 @@ bool drawInspector(UiContext& ui, Scene& scene, EditorState& st,
                 // 0.12-Y-F1 — o NAVEGADOR pela INTENÇÃO (o MESMO contrato
                 // UI→main do hdri: o flag arma e o main abre o browser e
                 // intercepta o 1.º pick de .png)
-                if (ParticleEmitter* e = tic->getComponent<ParticleEmitter>()) {
-                    (void)e;
+                if (tic->getComponent<ParticleEmitter>()) {
                     st.partTexPick = true;
+                }
+            } else if (r.kind == InspRow::Kind::AmbWeather) {
+                // 0.12-Y-F2 — o CICLAR do clima (o padrão CamProj: tocar
+                // avança nenhum→chuva→neve→trovoada). A MUDANÇA chama o
+                // applyWeatherPreset NO ParticleEmitter DO MESMO TIC (a
+                // decisão de arquitetura do dono; sem PE: o aviso honesto)
+                if (AmbientEnvironment* e =
+                        tic->getComponent<AmbientEnvironment>()) {
+                    e->weatherType =
+                        static_cast<u8>((e->weatherType + 1u) & 3u);
+                    e->clampFields();
+                    if (!e->applyWeatherPreset(
+                            tic->getComponent<ParticleEmitter>())) {
+                        elog::warn("ambient: TIC '%s' tem clima sem "
+                                   "ParticleEmitter — o preset não aplica "
+                                   "(add um ParticleEmitter ao MESMO TIC)",
+                                   tic->name.c_str());
+                    }
+                    edited = true;
                 }
             } else if (r.kind == InspRow::Kind::EnvHdri) {
                 // 0.12-Y-fix — o NAVEGADOR com a intenção HDRI (o flag é o
@@ -3628,7 +3774,8 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     const bool uiMode = st.uiMode;
     // 0.12-Y (3.Y-C): o 8.º preset do 3D é o TIC "WorldEnvironment"
     // 0.12-Y-F1: o 9.º é o TIC "ParticleEmitter" (as partículas GPU)
-    const int kItems = uiMode ? 10 : 9;   // 0.7.7: Camera; 0.8.0: Mesh; 0.8.11: Audio; 0.12-Y: WorldEnvironment; 0.12-Y-F1: Partículas
+    // 0.12-Y-F2: o 10.º..13.º são Wind / Rain / Snow / Storm (o clima)
+    const int kItems = uiMode ? 10 : 13;   // 0.7.7: Camera; 0.8.0: Mesh; 0.8.11: Audio; 0.12-Y: WorldEnvironment; 0.12-Y-F1: Partículas; 0.12-Y-F2: Wind/Rain/Snow/Storm
     // PASSO 1 (0.9.6.14): as linhas do menu são alvos de 40dp (a LEI DE
     // OURO — eram 56 num passo de 64; nada ≥48 no editor)
     const f32 rowH = 40.0f;
@@ -3664,9 +3811,10 @@ int drawPlusMenu(UiContext& ui, const InputState& in, f32 sw, f32 sh, EditorStat
     // nasce A ativa — o main chama setOnlyActiveCamera)
     // 0.8.0 (F7): o 6º é o TIC "Mesh" (esfera procedural, SEM física)
     // 0.8.11: o 7º é o TIC "Audio" (Transform+AudioPlayer, SEM mesh)
-    const char* names[9] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
-                            "RigidBody3D", "Camera", "Mesh", "Audio",
-                            "WorldEnvironment", "ParticleEmitter"};
+    const char* names[13] = {"PlayerBody3D", "CharacterBody3D", "StaticBody3D",
+                             "RigidBody3D", "Camera", "Mesh", "Audio",
+                             "WorldEnvironment", "ParticleEmitter",
+                             "Wind", "Rain", "Snow", "Storm"};
     // 0.7.4: + VBox/HBox (containers de layout — filhos automáticos)
     const char* elems[10] = {"Panel", "Label", "Button", "Image",
                              "Menu", "Card", "Article", "Joystick",

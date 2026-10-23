@@ -37,7 +37,16 @@ enum class PresetKind : u32 {
     ParticleEmitter  = 7,  // 0.12-Y-F1: só Transform+ParticleEmitter — o
                            // emissor de partículas GPU (a física vive NO
                            // VERTEX SHADER; SEM mesh, SEM física de corpos)
-    Count           = 8,
+    Wind             = 8,  // 0.12-Y-F2: só Transform+WindTIC — o vento
+                           // GLOBAL da cena (o 1.º ATIVO manda; SEM mesh,
+                           // SEM física, SEM partículas)
+    Rain             = 9,  // 0.12-Y-F2: Transform+ParticleEmitter+
+                           // AmbientEnvironment (weatherType 1, 0.5) — o
+                           // clima CONFIGURA o emissor do MESMO TIC
+    Snow             = 10, // 0.12-Y-F2: idem (weatherType 2, 0.5)
+    Storm            = 11, // 0.12-Y-F2: idem (weatherType 3, 0.7) — a
+                           // trovoada (o flash no céu via uThunderFlash)
+    Count           = 12,
 };
 
 // Nome canônico do preset (usado no menu "+" e como nome base do TIC).

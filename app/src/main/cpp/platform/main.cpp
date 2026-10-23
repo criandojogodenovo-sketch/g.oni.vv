@@ -5763,6 +5763,23 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
                                env->skyColorZenith, env->sunColor, gradeNow);
             sky::sunDirFromTime(env->timeOfDay, sunDirNow);
         }
+        // 0.12-Y-F2: o FLASH da TROVOADA — o 1.º AmbientEnvironment ATIVO
+        // em STORM manda (o update do timer corre no frame, ANTES do
+        // drawTics — o valor aqui é o fresco; SEM STORM: 0.0 = o céu de
+        // sempre byte a byte)
+        f32 thunderNow = 0.0f;
+        {
+            const auto& aes = comps.ambients();
+            for (u32 i = 0; i < aes.size(); ++i) {
+                const Tic* at = g_scene.get(aes.owner(i));
+                if (at && at->active && aes.at(i).active &&
+                    aes.at(i).weatherType ==
+                        AmbientEnvironment::kWeatherStorm) {
+                    thunderNow = aes.at(i).thunderFlash;
+                    break;
+                }
+            }
+        }
         if (env != nullptr) {
             glClearColor(env->skyColor[0], env->skyColor[1],
                          env->skyColor[2], 1.0f);
@@ -5784,6 +5801,7 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
                 sp.speed = env->cloudSpeed;
                 sp.height = env->cloudHeight;
                 sp.stars = gradeNow.stars;
+                sp.thunder = thunderNow;   // 0.12-Y-F2: o flash da trovoada
                 for (int i = 0; i < 3; ++i) {
                     sp.horizon[i] = gradeNow.hor[i];
                     sp.zenith[i] = gradeNow.zen[i];
@@ -6227,6 +6245,22 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
     // opacos; depth test ON, depth write OFF). O uTime é o g_fxTime (o
     // relógio do frame real: a pausa congela — a mesma honra do céu) e a
     // base da câmara é a MESMA extração do céu (sky::viewBasis).
+    // ---- 0.12-Y-F2: o VENTO GLOBAL — o 1.º WindTIC ATIVO da cena manda
+    // (wind = direção × força → uWind; SEM WindTIC: (0,0,0) — a F1 byte
+    // a byte). O FLASH da trovoada já foi lido no bloco do Environment
+    // (o céu desenha ANTES das partículas — a ordem do frame).
+    f32 windNow[3] = {0.0f, 0.0f, 0.0f};
+    {
+        const auto& wnds = comps.winds();
+        for (u32 i = 0; i < wnds.size(); ++i) {
+            const Tic* wt = g_scene.get(wnds.owner(i));
+            if (wt && wt->active && wnds.at(i).active) {
+                windVector(wnds.at(i), windNow);   // a FONTE ÚNICA (o pin
+                                                   // aferra a mesma conta)
+                break;
+            }
+        }
+    }
     if (g_particles.ok()) {
         const auto& pes = comps.particleEmitters();
         for (u32 i = 0; i < pes.size(); ++i) {
@@ -6257,6 +6291,9 @@ DrawStats drawTics(const Mat4& vp, const Vec3& camEye, const Mat4& view,
             pp.pos[1] = tr->world.m[13];   // mesma leitura do impostor)
             pp.pos[2] = tr->world.m[14];
             pp.time = g_fxTime;
+            pp.wind[0] = windNow[0];   // 0.12-Y-F2: o vento GLOBAL (o
+            pp.wind[1] = windNow[1];   // 1.º WindTIC ativo; (0,0,0) sem
+            pp.wind[2] = windNow[2];   // nenhum — a F1 byte a byte)
             const ParticleEmitter& pe = pes.at(i);
             pp.lifetime = pe.lifetime;
             pp.vel[0] = pe.velocity[0];
@@ -7045,6 +7082,27 @@ void frame() {
                     em->timeOfDay += em->dayCycleSpeed * g_frameDt;
                     em->clampFields();
                 }
+                break;
+            }
+        }
+    }
+    // 0.12-Y-F2: a TROVOADA — o update do STORM (o pseudocódigo EXATO do
+    // dono: o timer desce, o raio arma o flash 1.0 e re-agenda
+    // random(3,8)s, o flash morre a 3.0/s — vive ~0.33s). O 1.º
+    // AmbientEnvironment ATIVO manda (o MESMO invariante do clear/ciclo);
+    // o random vem do hash INTEIRO da casa sobre o relógio fx
+    // (determinístico — o CI e o device vêem a MESMA sequência, zero
+    // rand()).
+    {
+        auto& aesMut = g_scene.components().ambients();
+        for (u32 i = 0; i < aesMut.size(); ++i) {
+            const Tic* t = g_scene.get(aesMut.owner(i));
+            if (t && t->active && aesMut.at(i).active) {
+                const u32 h = fx::hashFx(
+                    static_cast<u32>(g_fxTime * 1000.0f));
+                aesMut.at(i).updateStorm(
+                    g_frameDt,
+                    static_cast<f32>(h & 0xFFFFu) / 65535.0f);
                 break;
             }
         }
@@ -7913,6 +7971,35 @@ void frame() {
                     editor::selectTic(g_editor, hnew);
                     showToast("ParticleEmitter criado (jorro de fábrica)");
                     LOGI("editor: TIC ParticleEmitter criado");
+                }
+            } else if (choice == 10) {
+                // 0.12-Y-F2 — TIC "Wind": Transform + WindTIC (o vento
+                // GLOBAL da cena; o ParticleRenderer consome-o ANTES do
+                // draw call — sem emissor nenhum na cena, não faz nada)
+                const Handle hnew = createTicUndoable(PresetKind::Wind);
+                if (hnew.valid()) {
+                    editor::selectTic(g_editor, hnew);
+                    showToast("Wind criado (vento global)");
+                    LOGI("editor: TIC Wind criado (Transform+WindTIC)");
+                }
+            } else if (choice == 11 || choice == 12 || choice == 13) {
+                // 0.12-Y-F2 — TICs "Rain"/"Snow"/"Storm": Transform +
+                // ParticleEmitter + AmbientEnvironment NO MESMO TIC (a
+                // decisão de arquitetura: o clima CONFIGURA o emissor —
+                // applyWeatherPreset corre NA CRIAÇÃO; a trovoada Flasha
+                // o céu via uThunderFlash, sem geometria de raio)
+                const PresetKind kind = choice == 11 ? PresetKind::Rain
+                                      : choice == 12 ? PresetKind::Snow
+                                                     : PresetKind::Storm;
+                const Handle hnew = createTicUndoable(kind);
+                if (hnew.valid()) {
+                    editor::selectTic(g_editor, hnew);
+                    char msg[64];
+                    std::snprintf(msg, sizeof(msg), "%s criado",
+                                  presetName(kind));
+                    showToast(msg);
+                    LOGI("editor: TIC %s criado (clima+emissor no MESMO "
+                         "TIC)", presetName(kind));
                 }
             } else {
                 const PresetKind kind = static_cast<PresetKind>(choice - 1);

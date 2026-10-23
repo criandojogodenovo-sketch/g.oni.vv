@@ -13,7 +13,8 @@
 // A vida (a fórmula EXATA do prompt — o pin conta-a no fonte):
 //   float localTime = mod(uTime + (seed * 100.0), lifetime);
 //   pos = pos_inicial + (velocity * localTime)
-//                       + (0.5 * gravity * localTime * localTime);
+//                       + (0.5 * gravity * localTime * localTime)
+//                       + (uWind * localTime);   ← 0.12-Y-F2: O VENTO
 //   float lifeProgress = localTime / lifetime;
 #include "core/Types.h"
 #include <cmath>
@@ -91,6 +92,18 @@ inline void particlePos(const f32 origin[3], const f32 vel[3],
     }
 }
 
+// a POSIÇÃO COM VENTO (0.12-Y-F2 — a sobrecarga que o VS replica):
+// origem + velocity*t + 0.5*gravity*t² + wind*t (o desvio acumulado;
+// wind (0,0,0) devolve o caminho de sempre byte a byte — a F1 intacta)
+inline void particlePos(const f32 origin[3], const f32 vel[3],
+                        const f32 grav[3], const f32 wind[3], f32 lt,
+                        f32 out[3]) {
+    for (int i = 0; i < 3; ++i) {
+        out[i] = origin[i] + vel[i] * lt + 0.5f * grav[i] * lt * lt
+                             + wind[i] * lt;
+    }
+}
+
 // o PROGRESSO da vida [0,1) — interpola tamanho/cor e arma o fade out
 inline f32 lifeProgress(f32 lt, f32 lifetime) {
     return (lifetime > 1e-6f) ? lt / lifetime : 0.0f;
@@ -125,6 +138,7 @@ inline constexpr const char* kVertexSrc =
     "uniform vec3 uPos;\n"        // a origem do emissor (o TIC no mundo)
     "uniform vec3 uVel;\n"
     "uniform vec3 uGrav;\n"
+    "uniform vec3 uWind;\n"       // 0.12-Y-F2: o vento global (o WindTIC)
     "uniform float uTime;\n"
     "uniform float uLifetime;\n"
     "uniform float uStartSize;\n"
@@ -136,7 +150,8 @@ inline constexpr const char* kVertexSrc =
     "    float localTime = mod(uTime + (seed * 100.0), uLifetime);\n"
     "    vec3 p = uPos + aOriginSeed.xyz\n"
     "              + (uVel * localTime)\n"
-    "              + (0.5 * uGrav * localTime * localTime);\n"
+    "              + (0.5 * uGrav * localTime * localTime)\n"
+    "              + (uWind * localTime);\n"
     "    float lifeProgress = localTime / uLifetime;\n"
     "    float sz = uStartSize + (uEndSize - uStartSize) * lifeProgress;\n"
     "    vec3 quad = p + uRight * (aCorner.x * sz)\n"

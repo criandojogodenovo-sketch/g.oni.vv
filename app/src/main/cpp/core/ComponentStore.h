@@ -30,6 +30,8 @@
 #include "components/AudioPlayer.h"     // 0.8.11: áudio
 #include "components/Environment.h"     // 0.12-Y: WorldEnvironment
 #include "components/ParticleEmitter.h" // 0.12-Y-F1: partículas GPU
+#include "components/WindTIC.h"          // 0.12-Y-F2: vento global
+#include "components/AmbientEnvironment.h" // 0.12-Y-F2: clima (chuva/neve/trovoada)
 #include "components/ScriptComp.h"    // 0.9.2: V.ONI (script .voni)
 #include "components/SkeletonComp.h"  // 0.8.2: skinning (F7)
 
@@ -108,6 +110,8 @@ public:
     ComponentStorage<AudioPlayer>& audioPlayers()      { return audioPlayers_; }  // 0.8.11
     ComponentStorage<Environment>& environments()      { return environments_; }  // 0.12-Y
     ComponentStorage<ParticleEmitter>& particleEmitters() { return particleEmitters_; }  // 0.12-Y-F1
+    ComponentStorage<WindTIC>& winds()                  { return winds_; }  // 0.12-Y-F2
+    ComponentStorage<AmbientEnvironment>& ambients()    { return ambients_; }  // 0.12-Y-F2
     ComponentStorage<SkeletonComp>&  skeletons()       { return skeletons_; }   // 0.8.2
     ComponentStorage<ScriptComp>&    scripts()         { return scripts_; }     // 0.9.2
     ComponentStorage<Control>&      controls()        { return controls_; }    // 0.12-B
@@ -123,6 +127,8 @@ public:
     const ComponentStorage<AudioPlayer>& audioPlayers() const      { return audioPlayers_; }  // 0.8.11
     const ComponentStorage<Environment>& environments() const      { return environments_; }  // 0.12-Y
     const ComponentStorage<ParticleEmitter>& particleEmitters() const { return particleEmitters_; }  // 0.12-Y-F1
+    const ComponentStorage<WindTIC>& winds() const                 { return winds_; }  // 0.12-Y-F2
+    const ComponentStorage<AmbientEnvironment>& ambients() const   { return ambients_; }  // 0.12-Y-F2
     const ComponentStorage<SkeletonComp>& skeletons() const        { return skeletons_; }   // 0.8.2
     const ComponentStorage<ScriptComp>&   scripts() const          { return scripts_; }     // 0.9.2
     const ComponentStorage<Control>&     controls() const         { return controls_; }    // 0.12-B
@@ -148,6 +154,8 @@ private:
     ComponentStorage<AudioPlayer> audioPlayers_;  // 0.8.11: áudio
     ComponentStorage<Environment> environments_;  // 0.12-Y: WorldEnvironment
     ComponentStorage<ParticleEmitter> particleEmitters_;  // 0.12-Y-F1: partículas
+    ComponentStorage<WindTIC> winds_;                     // 0.12-Y-F2: vento
+    ComponentStorage<AmbientEnvironment> ambients_;       // 0.12-Y-F2: clima
     ComponentStorage<SkeletonComp>  skeletons_;   // 0.8.2: skinning (F7)
     ComponentStorage<ScriptComp>    scripts_;     // 0.9.2: V.ONI (.voni)
     ComponentStorage<Control>       controls_;    // 0.12-B: elementos de UI (TICs)
@@ -225,6 +233,14 @@ inline ComponentStorage<ParticleEmitter>& ComponentStore::storageOf<ParticleEmit
     return particleEmitters_;   // 0.12-Y-F1
 }
 template <>
+inline ComponentStorage<WindTIC>& ComponentStore::storageOf<WindTIC>() {
+    return winds_;   // 0.12-Y-F2
+}
+template <>
+inline ComponentStorage<AmbientEnvironment>& ComponentStore::storageOf<AmbientEnvironment>() {
+    return ambients_;   // 0.12-Y-F2
+}
+template <>
 inline ComponentStorage<SkeletonComp>& ComponentStore::storageOf<SkeletonComp>() {
     return skeletons_;
 }
@@ -247,6 +263,14 @@ inline const ComponentStorage<Environment>& ComponentStore::storageOf<Environmen
 template <>
 inline const ComponentStorage<ParticleEmitter>& ComponentStore::storageOf<ParticleEmitter>() const {
     return particleEmitters_;   // 0.12-Y-F1
+}
+template <>
+inline const ComponentStorage<WindTIC>& ComponentStore::storageOf<WindTIC>() const {
+    return winds_;   // 0.12-Y-F2
+}
+template <>
+inline const ComponentStorage<AmbientEnvironment>& ComponentStore::storageOf<AmbientEnvironment>() const {
+    return ambients_;   // 0.12-Y-F2
 }
 template <>
 inline const ComponentStorage<SkeletonComp>& ComponentStore::storageOf<SkeletonComp>() const {

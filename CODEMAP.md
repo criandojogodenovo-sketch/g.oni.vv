@@ -1,7 +1,15 @@
 # CODEMAP.md — onde vive o quê
 
-Atualizado: 2026-10-24 · vc: 123
+Atualizado: 2026-10-24 · vc: 124
 
+> 0.12-Y-F2: o CLIMA E O VENTO — o
+> app/src/main/cpp/components/WindTIC.h (o vento GLOBAL, a fonte pura
+> windVector) + o app/src/main/cpp/components/AmbientEnvironment.h (o
+> clima CONFIGURA o ParticleEmitter do MESMO TIC — applyWeatherPreset/
+> updateStorm; presets Wind/Rain/Snow/Storm); o uWind no
+> app/src/main/cpp/render/ParticleShader.h + o uThunderFlash no
+> app/src/main/cpp/render/SkyRenderer.cpp (FLASH DE ECRÃ). Pins:
+> test_012y_f2 + R-064.
 > 0.12-V: a composição parent∘local tem FONTE ÚNICA no
 > app/src/main/cpp/core/TransformSystem.h (composeWorld — o tick E o
 > feedback do gizmo/Inspector partilham; worldToLocalPos é a inversa
@@ -10,16 +18,13 @@ Atualizado: 2026-10-24 · vc: 123
 > do main (o MESMO par no hit e no draw); pins: test_012v_viewport.
 > 0.12-E (E-1 · EMERGÊNCIA): o SDF de widget (D-1), o vidro (D-2) e o
 > fogo (D-3) estão DORMENTES (a ordem do dono abortou o SDF 3D) — ZERO
-> chamadores: o app/src/main/cpp/ui/Sdf.h, o
-> app/src/main/cpp/render/SdfBatch.h, o app/src/main/cpp/ui/Glass.h, o
-> app/src/main/cpp/ui/Fire.h, o progSdf_/captureGlass do
-> app/src/main/cpp/render/Renderer.cpp e os emissores sdfWidget/
-> sdfWidgetGlass/glassPanelFake/sdfFireBorder/fireGlowBelow/drawEmbers.
-> O desenho do produto é o SIMPLES 2D (Y-1) + os EFEITOS 2.5D da E-3 (o
-> app/src/main/cpp/ui/Noise2D.h, o fireBorder2D, o dropShadow, o
-> surface α0.85, o topo ÂMBAR 20%). O LOGO de D-4
-> (app/src/main/cpp/ui/Brand.h/.cpp) segue VIVO (segmentos 2D — nunca
-> foi SDF).
+> chamadores: o app/src/main/cpp/ui/Sdf.h, o app/src/main/cpp/render/
+> SdfBatch.h, o app/src/main/cpp/ui/Glass.h, o
+> app/src/main/cpp/ui/Fire.h e os emissores sdfWidget/glassPanelFake/
+> sdfFireBorder/fireGlowBelow/drawEmbers. O desenho do produto é o
+> SIMPLES 2D (Y-1) + os EFEITOS 2.5D da E-3 (o app/src/main/cpp/ui/
+> Noise2D.h, fireBorder2D, dropShadow). O LOGO de D-4
+> (app/src/main/cpp/ui/Brand.h/.cpp) segue VIVO (2D).
 >
 > Convenção de paths: TODOS os caminhos deste ficheiro são relativos à
 > RAIZ do repo (exemplo: o registo da linguagem vive em
@@ -70,7 +75,12 @@ Atualizado: 2026-10-24 · vc: 123
   uAmbientScale; **0.12-Y**), Texture, GpuAssets (+ `impostorTexture`),
   BlockMesh (por BLOCOS do .gmesh v3), Impostor.h (a decisão PURA),
   QuadBatch, DrawStats, ThumbPng (PNG via zlib), SkyRenderer.{h,cpp}
-  (**0.12-Y D**: o CÉU PROCEDURAL — o quad fullscreen + as puras sky:: que o FS replica).
+  (**0.12-Y D**: o CÉU PROCEDURAL — o quad fullscreen + as puras sky:: que o FS replica;
+  **0.12-Y-F2**: o uThunderFlash — o FLASH da trovoada lido do
+  AmbientEnvironment ATIVO em STORM), ParticleRenderer.{h,cpp} +
+  ParticleShader.h (**0.12-Y-F1**: as partículas GPU; **0.12-Y-F2**: o
+  uWind — o vento GLOBAL do 1.º WindTIC ATIVO, a sobrecarga pura
+  particlePos com vento),
   **0.12-D (DORMENTE desde a 0.12-E)**: D-1 o SdfBatch.h + o 3.º
   PROGRAMA progSdf_ (o FS replica o app/src/main/cpp/ui/Sdf.h LINHA A
   LINHA; runs pelo flag `sdf`) + D-3 o ramo FOGO-ONLY replicando o
@@ -99,20 +109,15 @@ Atualizado: 2026-10-24 · vc: 123
   focusGlow + o QuadBatch::quadGradientV; **0.12-D D-1**: o
   app/src/main/cpp/ui/Sdf.h — a FONTE ÚNICA da matemática SDF (o SDF analítico, a normal
   do gradiente, o shade() — bisel/especular/brilho/sombra — e o TOGGLE
-  sdf::g_level «Efeitos Alto/Médio/Baixo»; o rasterizador honesto do
-  stub inclui-o). **0.12-D D-3**: o app/src/main/cpp/ui/Fire.h — a FONTE
-  ÚNICA do FOGO (o fbm de 2 oitavas animado no tempo, a máscara da banda
-  da aresta — 1 na aresta, morre a bevelW dentro e 1px fora —, as brasas
-  paramétricas ember; a distância vem do roundRectSdf da D-1) + os
-  emissores no UiContext (sdfFireBorder/fireGlowBelow/drawEmbers COM O
-  PORTÃO celebration — o editor nunca vê brasas; o Baixo mata os três) +
-  a RAMPA fire0..fire3 no Theme (a proveniência: scripts/d3_palette.py) +
-  o relógio sdf::g_time no main loop; **0.12-D D-4**: o
-  app/src/main/cpp/ui/Brand.h/.cpp — O «G EM CHAMA» (a identidade única:
-  as setas do glifo antigo FORA, a rampa por traço pela altura, o ignite
-  0..1 para a splash da D-6; o espelho Java UiIcons.drawBrand por
-  segmentos + os tokens FIRE no ProjectManagerActivity; o slot do LOGO
-  na Toolbar é a versão pequena),
+  sdf::g_level; o stub inclui-o). **0.12-D D-3**: o app/src/main/cpp/ui/Fire.h — a FONTE
+  ÚNICA do FOGO (o fbm de 2 oitavas, a máscara da banda da aresta, as
+  brasas ember) + os emissores no UiContext (sdfFireBorder/
+  fireGlowBelow/drawEmbers COM O PORTÃO celebration — o Baixo mata os
+  três) + a RAMPA fire0..fire3 no Theme (scripts/d3_palette.py) + o
+  relógio sdf::g_time no main loop; **0.12-D D-4**: o
+  app/src/main/cpp/ui/Brand.h/.cpp — O «G EM CHAMA» (a rampa por traço,
+  o ignite 0..1; o espelho Java UiIcons.drawBrand; o slot do LOGO na
+  Toolbar é a versão pequena),
   stub INCLUI este header) e o UiContext::sdfWidget (o emissor do widget —
   UM quad crescido para conter a sombra; o CHOKE POINT drawButtonVisual e o
   iconButton da barra emitem por AQUI — o premido é
@@ -126,8 +131,7 @@ Atualizado: 2026-10-24 · vc: 123
   accent2/glow; os tokens card/elevated são o
   que os cards/sheets/toast consomem; **0.12-QoL A**: o border dos
   INATIVOS #24242A — o âmbar só no ativo/selecionado — e o divisor do
-  UiContext lê o border),
-  que os cards/sheets/toast consomem), ViewportChrome
+  UiContext lê o border), ViewportChrome
   (o chrome do viewport — o TOOLTIP do gizmo 0.12-A: legendTimer/
   legendArm no EditorState; o draw ganhou `dt, in` trailing),
   SafeArea.h (os rects puros — `scissor3dRect()` NOVO na 0.12-A: o
@@ -170,7 +174,12 @@ Atualizado: 2026-10-24 · vc: 123
 - **app/src/main/cpp/components/** — os componentes do TIC: MeshRenderer
   (+ `impostorDistance`), CameraComp, Body3D, RigidBody3D, AudioPlayer,
   **Environment** (o WorldEnvironment: o céu é o clear, o HDRI pela MÉDIA
-  CPU, o piso 0.25; **0.12-Y**), ScriptComp, AnimationPlayer, UI*, Input*. **0.12-B (a árvore de UI)**:
+  CPU, o piso 0.25; **0.12-Y**), **ParticleEmitter** (0.12-Y-F1: as
+  partículas GPU — a física no VS), **WindTIC** (0.12-Y-F2: o vento
+  GLOBAL — windVector é a fonte pura) + **AmbientEnvironment**
+  (0.12-Y-F2: o clima — applyWeatherPreset configura o PE do MESMO TIC;
+  updateStorm gere o flash; o runtime NUNCA serializa), ScriptComp,
+  AnimationPlayer, UI*, Input*. **0.12-B (a árvore de UI)**:
   app/src/main/cpp/components/Control.h (a BASE 2D dos elementos de UI —
   pos2D/tamanho/âncoras 9+esticar/margens/pivô/rotação/visível/opacidade;
   o payload por tipo é o UiElement por valor no campo `elem`; os 10 kinds
@@ -188,14 +197,11 @@ Atualizado: 2026-10-24 · vc: 123
   uiAddTreeJoystick); o Play arma/aplica os botões da árvore
   (hitTestUiTree/uiElementFromHit) e desenha a árvore + TODOS os
   TouchControls. **0.12-B B-4 (as ações de cena)**: main.cpp tem
-  renameSceneInProject (copia → escreve o novo → remove o velho → o
-  manifesto aponta o novo caminho; a ativa continua ativa),
-  duplicateSceneInProject (o MESMO conteúdo num nome único — contra o
-  manifesto E os órfãos do disco; a cópia não fica ativa) e
-  deleteSceneInProject (o ficheiro sai, a linha sai, o activeScene
-  re-assenta; a ATIVA recusa — «ative outra cena para apagar esta»);
-  o RENOMEAR usa o teclado in-app no PROPÓSITO 8 (o buffer
-  pré-carregado com o nome atual; o alvo em textScene).
+  renameSceneInProject (copia → escreve → remove o velho → o manifesto
+  aponta o novo; a ativa continua), duplicateSceneInProject (o MESMO
+  conteúdo num nome único) e deleteSceneInProject (o ficheiro/linha
+  saem; a ATIVA recusa); o RENOMEAR usa o teclado in-app no
+  PROPÓSITO 8 (o buffer pré-carregado; o alvo em textScene).
 - **tests/** — a suíte do core (C++17, GL-free): test_main.cpp (o runner,
   GONI_ONLY/GONI_SKIP), TestFramework.h (o TEST/EXPECT), test_sentinels.cpp
   (as sentinelas regress_* — R-056/057/058...), test_ctx_pines.cpp (os
@@ -207,6 +213,7 @@ Atualizado: 2026-10-24 · vc: 123
   test_012a_grelha_tooltip.cpp (A-3), test_012b_uitree.cpp (B-1),
   test_012b_inspui.cpp (B-2), test_012v_viewport.cpp (**0.12-V**: os 4
   pins do viewport pelo caminho REAL — sondas de píxel),
+  test_012y_f2.cpp (**0.12-Y-F2**: os 5 pins do clima/vento),
   test_012b_canvas.cpp (os pins da B-3: a moldura + as guias + o
   toast), test_012b_cenas.cpp (os pins da B-4: cena_rename/
   cena_duplicate/cena_delete_confirm — o 2-tap, M-B4a — e
@@ -215,9 +222,8 @@ Atualizado: 2026-10-24 · vc: 123
   painel_colapsado_default/hierarquia_cabecalho/divisor_drag),
   test_012c_chrome.cpp (os pins da 0.12-C C-2: menu_scroll/menu_ancorado/
   topbar_3_zonas/mover_unico),
-  test_012c_idioma.cpp (os pins da 0.12-C C-3: escala_tipografica — o
-  scan dos fontes com o strip do gate/idioma_consistente/maiusculas_
-  uniformes/superficies_4_tons),
+  test_012c_idioma.cpp (os pins da 0.12-C C-3: escala_tipografica/
+  idioma_consistente/maiusculas_uniformes/superficies_4_tons),
   test_012d_sdf.cpp (os pins da 0.12-D D-1: sdf_widget_cantos — a
   diagonal do canto BR É a função shade() por píxel; sdf_bisel;
   sdf_sombra; sdf_toggle_baixo — o mesmo pixel entre Alto e Baixo;
@@ -227,10 +233,8 @@ Atualizado: 2026-10-24 · vc: 123
   ARITMÉTICA ADITIVA por píxel + o centro morto exato; fogo_glow_below;
   brasas_portao — o PORTÃO + o determinismo; fogo_toggle_baixo — o Baixo
   mata os três emissores),
-  test_012d_logo.cpp (os pins da 0.12-D D-4: logo_rampa_viva — a rampa
-  por quad pela altura; logo_ignite_porta — a revelação da base para o
-  topo + o determinismo; logo_setas_mortas — 16 segmentos nos LODs +
-  nenhum vértice além do G+capa; logo_lod_traco — o ×1.2 no pequeno),
+  test_012d_logo.cpp (os pins da 0.12-D D-4: logo_rampa_viva,
+  logo_ignite_porta, logo_setas_mortas, logo_lod_traco),
   test_012c_picker.cpp (os pins da 0.12-C C-4: picker_compacto/
   picker_breadcrumb/picker_oculta_dot/empty_inspector/empty_assets/
   empty_hierarquia/icones_unicos — o 8.º, empty_projetos, é o gate
@@ -252,15 +256,12 @@ Atualizado: 2026-10-24 · vc: 123
   hierarchy_check.py, jni_parity.py, link_parity.sh, check_main.sh,
   glyph_source_check.py, reload_concurrency_check.py, projects_ui_check.py,
   gizmo_camera_medidas.py.
-- **docs/** — os y-*.png (os 13 ecrãs da varredura da 0.11-Y, 1600×720),
-  REGRESSOES.md (as sentinelas R-NNN), GMESH_formato.md e
-  GTEX_formato.md (a fonte de verdade dos formatos), LAYOUT_HIERARCHY.md,
-  FASE3.5-PIN.md, RELATORIO-0.12-A.md (a campanha 0.12-A),
-  RELATORIO-0.12-A-INVEST-RAM.md (a investigação RAM vs GPU do A-4),
-  RELATORIO-0.11-W-*.md (a 0.11-W), SAF_EXCEPTION.md,
-  AUDIT_SAF_JNI.md, HANDSHAKE_AUDIT.md. (O arquivo das campanhas fechadas,
-  o DIARIO e o TEMPLATE_PROMPT organizam-se na CTX-3 — entram aqui quando
-  existirem.)
+- **docs/** — os y-*.png (os 13 ecrãs da 0.11-Y), REGRESSOES.md (as
+  sentinelas R-NNN), GMESH_formato.md e GTEX_formato.md (a fonte de
+  verdade dos formatos), LAYOUT_HIERARCHY.md, FASE3.5-PIN.md, os
+  RELATORIO-0.12-* (as campanhas + o INVEST-RAM), RELATORIO-0.11-W-*.md,
+  SAF_EXCEPTION.md, AUDIT_SAF_JNI.md, HANDSHAKE_AUDIT.md. (O arquivo das
+  campanhas fechadas organiza-se na CTX-3.)
 
 ## §3 Pontos de extensão (receitas)
 
@@ -343,13 +344,11 @@ Atualizado: 2026-10-24 · vc: 123
    `git grep "<nome>.cpp" -- '*CMakeLists.txt'` → 2 resultados.
 5. Se só der 1 resultado: falta um. Corrigir ANTES de commitar.
 
-JUSTIFICAÇÃO (a ferida real): a 3.75b (commit 1524148) adicionou
-app/src/main/cpp/assets/ImpostorIndex.cpp só ao tests/CMakeLists.txt. O
-APK morreu no link (undefined symbol ensureImpostor/relFor) porque o
-CMake do app não conhecia o ficheiro. O fix foi UMA linha (caaef02).
-Esta receita previne o mesmo bug; o caso test_wiring092.cpp/lista dos
-TUs de test NÃO entra no CMake do app (precedente: os test_*.cpp são
-só da suíte — a regra dos DOIS CMakeLists é para TU do core).
+JUSTIFICAÇÃO (a ferida real): a 3.75b (1524148) adicionou
+app/src/main/cpp/assets/ImpostorIndex.cpp só ao tests/CMakeLists.txt —
+o APK morreu no link (undefined symbol). O fix foi UMA linha (caaef02).
+Os test_*.cpp são só da suíte — a regra dos DOIS CMakeLists é para TU
+do core.
 
 ### Adicionar uma SENTINELA
 1. tests/test_sentinels.cpp — função `regress_<nome>` (o nome é o

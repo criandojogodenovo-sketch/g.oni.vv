@@ -64,8 +64,14 @@ ComponentStore::ComponentStore(Scene* owner) : scene_(owner) {
     registry_.add("UIRoot", [](ComponentStore& s, Handle h) {    // 0.12-B
         return s.add<UIRoot>(h) != nullptr;
     });
-    registry_.add("ParticleEmitter", [](ComponentStore& s, Handle h) {   // 0.12-Y-F1 (SEMPRE NO FIM — os ids intactos)
+    registry_.add("ParticleEmitter", [](ComponentStore& s, Handle h) {   // 0.12-Y-F1
         return s.add<ParticleEmitter>(h) != nullptr;
+    });
+    registry_.add("WindTIC", [](ComponentStore& s, Handle h) {   // 0.12-Y-F2 (SEMPRE NO FIM — os ids intactos)
+        return s.add<WindTIC>(h) != nullptr;
+    });
+    registry_.add("AmbientEnvironment", [](ComponentStore& s, Handle h) {   // 0.12-Y-F2 (SEMPRE NO FIM — os ids intactos)
+        return s.add<AmbientEnvironment>(h) != nullptr;
     });
 }
 
@@ -81,6 +87,8 @@ void ComponentStore::removeAll(Handle h) {
     audioPlayers_.remove(h);   // 0.8.11   // 0.8.0
     environments_.remove(h);   // 0.12-Y
     particleEmitters_.remove(h);   // 0.12-Y-F1
+    winds_.remove(h);   // 0.12-Y-F2
+    ambients_.remove(h);   // 0.12-Y-F2
     skeletons_.remove(h);   // 0.8.2
     scripts_.remove(h);     // 0.9.2
     controls_.remove(h);    // 0.12-B
@@ -99,7 +107,9 @@ bool ComponentStore::hasAny(Handle h) const {
            skeletons_.find(h) != nullptr ||   // 0.8.2
            scripts_.find(h) != nullptr ||   // 0.9.2
            environments_.find(h) != nullptr ||   // 0.12-Y
-           particleEmitters_.find(h) != nullptr;   // 0.12-Y-F1
+           particleEmitters_.find(h) != nullptr ||   // 0.12-Y-F1
+           winds_.find(h) != nullptr ||   // 0.12-Y-F2
+           ambients_.find(h) != nullptr;   // 0.12-Y-F2
 }
 
 } // namespace vv

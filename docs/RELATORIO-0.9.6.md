@@ -790,3 +790,25 @@ REAL do device — sondas de píxel) + R-063 regress_viewport_gizmo_world +
 M-V1/M-V2/M-V3 VERMELHAS AO VIVO → suíte 0 falhas · c33_virtual 1008/0 ·
 gates VERDES · **versionCode 123** — o build vigente. O 122 fica INTACTO
 como história. (o relatório próprio: docs/RELATORIO-0.12-V-VIEWPORT.md)
+
+### §14-n — 0.12-Y-F2 (o clima e o vento: AmbientEnvironment + WindTIC) — versionCode 124
+
+**G8** (o par declarado no MESMO commit, a regra do §14): a DECISÃO DE
+ARQUITETURA do dono honrada à letra (a opção A): o AmbientEnvironment
+NÃO renderiza partículas — CONFIGURA o ParticleEmitter do MESMO TIC
+(applyWeatherPreset na criação E na mudança no Inspector); o WindTIC
+fornece o vento global lido pelo ParticleRenderer (uWind antes do draw
+call — o 1.º WindTIC ATIVO manda, o windVector é a fonte); a trovoada é
+um FLASH DE ECRÃ via uniform no sky shader (a linha exata do prompt no
+FS, sem geometria de raio); sem emissor o clima avisa e não aplica;
+GLES 3.0 — zero compute. Os presets do «+»: Wind / Rain / Snow / Storm
+(13 itens; o Rain/Snow/Storm nascem com o clima APLICADO). O .goni
+transporta weather/intensity + dir/strength (defaults omitidos; o
+runtime da trovoada NUNCA viaja). verificação: pins wind_tic_cria ·
+ambient_rain_preset · ambient_snow_preset · ambient_serialize ·
+wind_uniform_passed (tests/test_012y_f2.cpp NOVO) + R-064
+regress_weather + M-Yg1/M-Yg2 VERMELHAS AO VIVO → suíte 0 falhas
+(GONI_SKIP dos 2 flakes de disco da sandbox + os 2 devoradores das
+medições — o CI é o árbitro) · gates VERDES · **versionCode 124** — o
+build vigente. O 123 fica INTACTO como história. (o relatório próprio:
+docs/RELATORIO-0.12-Y-F2-WEATHER.md)

@@ -1,8 +1,8 @@
 # STATE.md — estado do projeto
 
-Atualizado: 2026-10-24 · vc: 123 · Último commit: este (a 0.12-V — os 3
-BUGS DO VIEWPORT 3D: o teleporte do gizmo, a âncora no mundo, o tamanho
-em píxel constante; o RELATORIO-0.12-V-VIEWPORT.md);
+Atualizado: 2026-10-24 · vc: 124 · Último commit: este (a 0.12-Y-F2 —
+o CLIMA E O VENTO: AmbientEnvironment + WindTIC; o
+RELATORIO-0.12-Y-F2-WEATHER.md);
 
 > Este ficheiro é um ÍNDICE, não é a verdade — a verdade é o código.
 > Em caso de divergência: investigar, reportar, corrigir o índice. Nunca inventar.
@@ -10,26 +10,38 @@ em píxel constante; o RELATORIO-0.12-V-VIEWPORT.md);
 
 ## §1 Onde estamos
 
+- **Campanha 0.12-Y-F2 (O CLIMA E O VENTO) — FECHADA no código
+  (vc 124; a história no RELATORIO-0.12-Y-F2-WEATHER.md)** (a cláusula
+  calma: SÓ o prompt — física, V.ONI, importador glTF e tema INTACTOS;
+  a DECISÃO DE ARQUITETURA do dono honrada: o AmbientEnvironment NÃO
+  renderiza partículas — CONFIGURA o ParticleEmitter do MESMO TIC).
+  **F2 (vc 124)**: o WindTIC (o vento GLOBAL: direção normalizada +
+  força 0..10; o 1.º ATIVO manda; a fonte pura windVector) · o
+  AmbientEnvironment (NONE/RAIN/SNOW/STORM + intensity; o
+  applyWeatherPreset com os valores EXATOS do prompt corre NA CRIAÇÃO
+  E na mudança no Inspector; o updateStorm com o flash 1.0 → 3.0/s e o
+  re-agenda random(3,8)s) · o VS das partículas ganha
+  `+ (uWind * localTime)` (a F1 byte a byte sem vento) · o FS do céu
+  ganha a linha do uThunderFlash (FLASH DE ECRÃ, sem geometria de
+  raio) · os presets Wind/Rain/Snow/Storm (o «+» com 13 itens) · o
+  .goni transporta weather/intensity + dir/strength (o runtime NUNCA
+  viaja) · o Inspector ganha as secções Wind (3 sliders + força) e
+  Ambient (o ciclar + intensidade; o aviso honesto sem emissor).
+  pins ×5 (wind_tic_cria · ambient_rain_preset · ambient_snow_preset ·
+  ambient_serialize · wind_uniform_passed — tests/test_012y_f2.cpp
+  NOVO) + R-064 regress_weather + M-Yg1/M-Yg2 VERMELHAS AO VIVO.
+
 - **Campanha 0.12-V (OS 3 BUGS DO VIEWPORT 3D) — FECHADA no código
-  (vc 123; o CI VERDE em cada parte)** (a cláusula calma: SÓ
-  viewport/gizmo/render do editor + testes — física, V.ONI,
-  importador glTF e tema INTACTOS; a história no
-  RELATORIO-0.12-V-VIEWPORT.md).
-  **V (vc 123)**: o DIAGNÓSTICO com ficheiro:linha antes de mexer (a
-  ordem do dono) e a cura: (1) o TELEPORTE do arrasto — o feedback
-  imediato escrevia world = TRS LOCAL (o mesh saltava para o gizmo
-  durante o drag e voltava ao largar); (2) o GIZMO ancorado no
-  tr->pos local-as-world (o mesh desenha na TRANSLAÇÃO do world);
-  (3) o TAMANHO variável (dist_da_órbita·k, sem tan(fov/2)). A cura: a
-  FONTE ÚNICA TransformSystem::composeWorld (o tick e o feedback
-  partilham) + worldToLocalPos (o drag corre no mundo, o TRS guarda
-  local) + gizmoAnchor (a MESMA origem+comprimento no hit e no draw) +
-  a fórmula do dono dist·tan(fov/2)·kScreenLen (k 0.16; o toque ≥48px).
-  O importador/preset PROVADOS inocentes (GltfInstantiate.cpp:82-86,
-  Presets.cpp:54, SceneSerializer.cpp:1789-1794). pins ×4
-  (viewport_modelo_sem_gizmo · _gizmo_no_mundo · _drag_sem_teleporte ·
-  _px_constante — o caminho REAL com sondas de píxel) + R-063 +
-  M-V1/V2/V3 VERMELHAS AO VIVO.
+  (vc 123; o CI VERDE)** (a cláusula calma: SÓ viewport/gizmo/render do
+  editor + testes; a história no RELATORIO-0.12-V-VIEWPORT.md).
+  **V (vc 123)**: o DIAGNÓSTICO com ficheiro:linha antes de mexer e a
+  cura: (1) o TELEPORTE do arrasto (o feedback escrevia world = TRS
+  LOCAL); (2) o GIZMO ancorado no tr->pos local-as-world; (3) o TAMANHO
+  variável (sem tan(fov/2)). A FONTE ÚNICA TransformSystem::composeWorld
+  + worldToLocalPos + gizmoAnchor (o MESMO par no hit e no draw) + a
+  fórmula do dono dist·tan(fov/2)·kScreenLen (k 0.16; o toque ≥48px).
+  O importador/preset PROVADOS inocentes. pins ×4 (o caminho REAL com
+  sondas de píxel) + R-063 + M-V1/V2/V3 VERMELHAS AO VIVO.
 
 - **Campanha FASE UI (O REDESIGN VISUAL) — A..J FECHADAS (vc 111..120,
   o CI VERDE em cada parte; um commit por parte; a história e os
@@ -43,78 +55,72 @@ em píxel constante; o RELATORIO-0.12-V-VIEWPORT.md);
   orçamento vertical) · J a TELA DE PROJETOS (o ícone da engine + o
   Importar secundário). Pins ×10 + M-UIa..j.
 
-- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — A..E, o C-FIX e a
-  F1 fechadas (vc 106..122)** (a cláusula calma: SÓ o prompt; a
+- **Campanha 0.12-Y (O SALTO VISUAL E DE ASSETS) — A..E, o C-FIX, a F1
+  e a F2 fechadas (vc 106..124)** (a cláusula calma: SÓ o prompt; a
   V.ONI intocada; a história nos RELATORIO-0.12-Y-*.md).
   **F1 (vc 122)**: o TIC PARTICLEEMITTER (no
   RELATORIO-0.12-Y-F1-PARTICLES.md) — VERTEX SHADER ANIMATION (GLES 3.0,
   ZERO compute): o CPU gera UMA VEZ o VBO de seeds (teto 2000; o slider
   só muda o count) e o VS faz a balística com o tempo local
   mod(uTime+seed·100, life); UM glDrawArraysInstanced por emissor; o FS
-  lê a textura OU o disco procedural + o fade out; o preset ParticleEmitter
-  (o 9.º do "+"); o Inspector com a secção (máx/vida/tamanhos/hex
-  16-17/gravidade/textura pelo NAVEGADOR); o .goni transporta; a PAUSA
-  congela o g_fxTime; pins ×3 + R-062 + M-Yf1/M-Yf2 AO VIVO (a M-Yf2
-  apanhou um pin AMBÍGUO — apertado, a lição M-UIj).
+  lê a textura OU o disco procedural + o fade out; o preset (o 9.º do
+  "+"); o Inspector com a secção; o .goni transporta; a PAUSA congela o
+  g_fxTime; pins ×3 + R-062 + M-Yf1/M-Yf2 AO VIVO (a M-Yf2 apanhou um
+  pin AMBÍGUO — apertado, a lição M-UIj).
   **E (vc 121)**: o CICLO DIA/NOITE (no RELATORIO-0.12-Y-E-SKY.md) — a
   grade dos 4 estados NO CPU 1×/frame (o FS consome os uniforms JÁ
   graduados; ESTRELAS num branch uniforme); o sol roda pelo relógio e a
   DIRECTIONAL sincroniza; cloudHeight escala o plano; autoCycle (anel
   24h); Inspector +4; .goni: tod/cycSpd/cycOn/cloudH; pins ×4 +
   R-061(5) + M-Ye1/M-Ye2 AO VIVO.
-  **D (vc 110)**: o CÉU PROCEDURAL (no RELATORIO-0.12-Y-SKY.md) — o shader do céu (render/SkyRenderer.{h,cpp} NOVOS, o padrão Pbr.h: o quad fullscreen + o gradiente horizonte→zénite + o sol disco/halo + as nuvens FBM 2D com hash inteiro e O TEMPO no UV; a base da câmara extraída da vista, válida na orbit E no Play), o Environment ganha skyType/cores do céu/sol/direção/cobertura/vento (o clampFields normaliza o sol), o .goni transporta com defaults omitidos, o Inspector ganha o dropdown "céu: cor sólida|procedural" + os 5 campos SÓ no procedural (ids 5425..5430, os hex 13/14/15, os sliders nuvens/vento), o main desenha o quad ANTES dos modelos com skyType==1 (o 0 = o clear de sempre byte a byte) e o relógio g_skyTime avança 1× por frame; pins ×2 (env_sky_type · inspector_sky) + R-061 regress_procedural_sky + M-Yd1/2 vermelho→reposto→verde (o achado: o falso verde POR COMENTÁRIO nasceu o test::stripCppComments); test_core 1208 OK (os flakes da sandbox excluídos — o CI é o árbitro).
+  **D (vc 110)**: o CÉU PROCEDURAL (no RELATORIO-0.12-Y-SKY.md) — o
+  shader do céu (render/SkyRenderer.{h,cpp} NOVOS: o quad fullscreen +
+  o gradiente + o sol + as nuvens FBM 2D com hash inteiro e O TEMPO no
+  UV; a base da câmara extraída da vista), o Environment ganha
+  skyType/cores/sol/nuvens/vento, o .goni transporta, o Inspector com o
+  dropdown + os 5 campos SÓ no procedural (o main desenha o quad ANTES
+  dos modelos com skyType==1 e o g_skyTime avança 1×/frame); pins ×2 +
+  R-061 + M-Yd1/2 (o achado: o falso verde POR COMENTÁRIO nasceu o
+  test::stripCppComments).
   **C-FIX (vc 109)**: o TESTE DO DONO (Inspector do WorldEnvironment
   VAZIO + modelo BRANCO) — a secção Environment NO Inspector (céu hex ·
   hdri pelo NAVEGADOR · ambiente · névoa · névoa hex, tudo no .goni), o
-  albedo = uBaseColorTex (unit 0), o LOG «[material] textura extraida» +
-  o skip jpeg falado + o thumb do baseColor; pins ×2 + M-Yf1/2.
+  albedo = uBaseColorTex (unit 0), o thumb do baseColor; pins ×2.
   **C (vc 108)**: o PIPELINE PBR — os 5 slots na PASTA DO MODELO
-  assets/<stem>/textures/ (dedup FNV-1a, uri externa passa), o BIND AUTO
-  pelo meshTexSlotFor, o lit PBR-LITE pela FONTE ÚNICA render/Pbr.h (o
-  normal por DERIVADAS, o rough/metal, a névoa exp2 0=MORTA, o
-  uAmbientScale), o TIC WorldEnvironment NOVO (o 7.º preset); pins ×4 +
-  R-060 + M-Yc1/2; 3 recalibrações com nota.
-  **B (vc 107)**: o ÍCONE IA — a FONTE com o prompt EXATO do dono
-  (obsidiana + magma), a extração por TEXTURA high-pass, o tile a 65% da
-  ZONA SEGURA, os 15 PNGs (5 densidades × 3) + o fundo #0A0A0C (A ORDEM
-  DO DONO); icon_ia_mipmaps + 2 recalibrações com nota + M-Yb1.
-  **A (vc 106)**: o PAN da câmara — a 6.ª FERRAMENTA no rail (o glifo
-  Hand, id 33), o Camera::pan pela FONTE ÚNICA pura, o modo Pan (1 dedo
-  SEM orbitar) e o pan de 2 DEDOS LIVRE (o pinch intacto); pins ×5 +
-  R-059 + M-Ya1/2 vermelho→reposto→verde. O §0.2 VERDE com evidência
-  (vc 105 · CI do d9b62a1) e o INCIDENTE do ambiente (o clone herdado
-  desatualizado; o fetch/reset sincronizou — zero trabalho perdido).
+  assets/<stem>/textures/ (dedup FNV-1a), o BIND AUTO, o lit PBR-LITE
+  pela FONTE ÚNICA render/Pbr.h (normal por derivadas, rough/metal,
+  névoa exp2 0=MORTA, uAmbientScale), o TIC WorldEnvironment NOVO (o
+  7.º preset); pins ×4 + R-060 + M-Yc1/2.
+  **B (vc 107)**: o ÍCONE IA — a FONTE com o prompt EXATO do dono, a
+  extração por TEXTURA high-pass, o tile a 65% da ZONA SEGURA, os 15
+  PNGs + o fundo #0A0A0C; icon_ia_mipmaps + M-Yb1.
+  **A (vc 106)**: o PAN da câmara — a 6.ª FERRAMENTA no rail, o
+  Camera::pan pela FONTE ÚNICA pura, o modo Pan (1 dedo SEM orbitar) e
+  o pan de 2 DEDOS LIVRE (o pinch intacto); pins ×5 + R-059 + M-Ya1/2.
 - **Campanha 0.12-QoL (UI POLISH + NAVEGADOR + AUTO-SAVE) — FECHADA
-  (A..D, vc 102–105)** (a história + os não-feitos no
-  RELATORIO-0.12-QoL.md; pins ×13 + R-056/057/058).
+  (A..D, vc 102–105)** (no RELATORIO-0.12-QoL.md; pins ×13 + R-056/057/058).
 - **Campanha 0.12-X (CÂMARA DE TERCEIRA PESSOA) — FECHADA (3.9x, vc
-  101)** (o camrig/camdrag/limit como Contínuos, o Host::lookDelta a
-  ZERAR, o conflito camrig↔follow no compilador; pins ×14 + R-055; no
-  RELATORIO-0.12-X-CAMRIG.md).
+  101)** (camrig/camdrag/limit como Contínuos, o lookDelta a ZERAR, o
+  conflito camrig↔follow; pins ×14 + R-055; no RELATORIO-0.12-X-CAMRIG.md).
 - **Campanha 0.12-U (V.ONI BLOCO A) — FECHADA (3.9a..3.9c + o FECHO, vc 98–100)** (as 7 features no registo, 64 entradas; pins ×37 + R-052..R-054; o platformer do juiz VERDE; nos RELATORIO-0.12-U-*.md).
 - **Campanha 0.12-E (EMERGÊNCIA + REDESIGN 2.5D) — FECHADA (E-1..E-3, vc 95–97)** (o SDF 3D abortado; E-1 o desenho simples, E-2 a paleta no Theme.h — superada pela FASE UI A —, E-3 os efeitos 2.5D; no RELATORIO-0.12-E.md).
 - **Campanha 0.12-D (identidade visual) — PARCIALMENTE ABORTADA (a 0.12-E)**: o D-4 (o LOGO) sobrevive; o D-1/D-2/D-3 DORMENTES; D-5..D-8 CANCELADOS (no RELATORIO-0.12-D.md).
-- **Campanha 0.12-C (layout) — FECHADA (C-1..C-4, vc 87–90)** (os
-  DETALHES no RELATORIO-0.12-C.md: as proporções, os menus, a
-  tipografia e o seletor com os vazios com AÇÃO).
+- **Campanha 0.12-C (layout) — FECHADA (C-1..C-4, vc 87–90)** (no
+  RELATORIO-0.12-C.md: proporções, menus, tipografia, seletor).
 - **Campanha 0.12-B (arquitetura da UI) — FECHADA (B-1..B-4, vc 83–86)**
-  (a árvore de UI, o Inspector de UI, o canvas e as ações 2-tap; os
-  DETALHES no RELATORIO-0.12-B.md).
-- **Campanha 0.12-A (bugs P0) — FECHADA (vc 82)** (os DETALHES no
-  RELATORIO-0.12-A.md: as rows LOD, o refreshCatalog, o tooltip e o
-  veredito RAM).- **Campanha 0.11-Y (identidade visual) — FECHADA** (o fecho é o commit32a6785: os 13 PNGs + o pin y_fecho; a FASE 31 fica no replay).- **0.11-CTX — FECHADA** com CI verde (os detalhes no §2 e no relatório).- **0.11-W (Render Systems) com CI verde** — falta o PIN do dono no C33 real; o fecho (BLOCO B) só por ordem do dono.
+  (a árvore de UI, o Inspector de UI, o canvas, as ações 2-tap; no RELATORIO-0.12-B.md).
+- **Campanha 0.12-A (bugs P0) — FECHADA (vc 82)** (as rows LOD, o
+  refreshCatalog, o tooltip e o veredito RAM; no RELATORIO-0.12-A.md).- **Campanha 0.11-Y (identidade visual) — FECHADA** (o fecho é o commit32a6785: os 13 PNGs + o pin y_fecho; a FASE 31 fica no replay).- **0.11-CTX — FECHADA** com CI verde (os detalhes no §2 e no relatório).- **0.11-W (Render Systems) com CI verde** — falta o PIN do dono no C33 real; o fecho (BLOCO B) só por ordem do dono.
 
 ## §2 O que está FEITO
 
 - 0.12-QoL A..D (vc 102–105) — a limpeza visual, o navegador compacto,
-  o viewport limpo e o auto-save (no RELATORIO-0.12-QoL.md §1..§4 — o
-  índice não é o arquivo).
+  o viewport limpo e o auto-save (no RELATORIO-0.12-QoL.md §1..§4).
 - 0.12-X 3.9x (vc 101) — a câmara de terceira pessoa (no
-  RELATORIO-0.12-X-CAMRIG.md): camrig(d,h,suav) + camdrag(sens) +
-  limit como Contínuos no REGISTO; o TykerState guarda camYaw/camPitch;
-  o Host::lookDelta (o consumo ZERA — o main alimenta SÓ em Play com os
-  dedos não reclamados); o compilador rejeita camrig+follow/look; pins
-  ×14 (10 VM + 4 de motor real/.goni) + R-055 + M-3.9x1/x2.
+  RELATORIO-0.12-X-CAMRIG.md): camrig/camdrag/limit como Contínuos no
+  REGISTO; o TykerState guarda camYaw/camPitch; o lookDelta (o consumo
+  ZERA em Play); o compilador rejeita camrig+follow/look; pins ×14 +
+  R-055 + M-3.9x1/x2.
 - 0.12-U FECHO (vc 100) — o CRITÉRIO DO PLATFORMER corre VERDE (o pin
   platformer_bloco_a_juiz_final: 7 features em cadeia, os contadores do
   juiz batem) + README/ARCHITECTURE §5/BACKLOG atualizados (no
@@ -175,8 +181,7 @@ em píxel constante; o RELATORIO-0.12-V-VIEWPORT.md);
    RELATORIO-0.11-W-FECHO.md, atualizar README/BACKLOG/STATE.md; o pin
    C33 (§1) entra no §3 do fecho.
 2. **3 métricas qualitativas da CTX** fecham no relatório da campanha
-   SEGUINTE (tempo até à 1.ª ação útil, erros de contexto, cobertura do
-   CODEMAP).
+   SEGUINTE (tempo até à 1.ª ação útil, erros de contexto, cobertura do CODEMAP).
 
 ## §4 Decisões fechadas (NÃO REABRIR)
 

@@ -73,6 +73,8 @@
 #include "render/SkyRenderer.h"   // 0.12-Y (3.Y-D · R-061): as puras do céu
 #include "render/ParticleRenderer.h"  // 0.12-Y-F1 (R-062): o draw real
 #include "render/ParticleShader.h"    // 0.12-Y-F1 (R-062): as puras fx::
+#include "components/WindTIC.h"             // 0.12-Y-F2 (R-064): o vento
+#include "components/AmbientEnvironment.h"  // 0.12-Y-F2 (R-064): o clima
 #include "core/Presets.h"             // 0.12-Y-F1 (R-062): a fábrica
 #include "ui/EditorUi.h"
 #include "platform/EngineLog.h"
@@ -8354,9 +8356,9 @@ TEST(regress_pbr_worldenv) {
         EXPECT_MSG(std::string(presetName(PresetKind::WorldEnvironment)) ==
                        "WorldEnvironment",
                    "R-060: o preset WorldEnvironment saiu do menu (+)");
-        EXPECT_MSG(static_cast<u32>(PresetKind::Count) == 8,
-                   "R-060: a contagem de presets regressou (8 com o "
-                   "ParticleEmitter da 0.12-Y-F1)");
+        EXPECT_MSG(static_cast<u32>(PresetKind::Count) == 12,
+                   "R-060: a contagem de presets regressou (12 com o "
+                   "Wind/Rain/Snow/Storm da 0.12-Y-F2)");
         Scene s;
         const Handle hp =
             createTicFromPreset(s, PresetKind::WorldEnvironment, nullptr,
@@ -8856,5 +8858,182 @@ TEST(regress_viewport_gizmo_world) {
                    "R-063: o Inspector deixou de compor com o pai "
                    "(sítios=%d < 4 — o teleporte volta nos edits — M-V1)",
                    sites);
+    }
+}
+
+// ============================================================================
+// R-064 (0.12-Y-F2) — O CLIMA E O VENTO NÃO MORREM — regress_weather
+//
+// A decisão de arquitetura do dono: o AmbientEnvironment NÃO renderiza
+// partículas — CONFIGURA o ParticleEmitter do MESMO TIC (applyWeatherPreset,
+// na criação E na mudança no Inspector); o WindTIC fornece o vento global
+// lido pelo ParticleRenderer (uWind antes do draw call); a trovoada é um
+// flash de ecrã via uniform no sky shader (SEM geometria de raio). As
+// mutações vigiadas: M-Yg1 (o uWind ignorado no VS — as partículas não
+// desviam) e M-Yg2 (o applyWeatherPreset não chamado — o preset não aplica).
+// ============================================================================
+TEST(regress_weather) {
+    // (1) O VENTO no VS — a fórmula do prompt SEM comentários (o stripper
+    //     da lição M-Yd1 mata o falso verde por prosa — M-Yg1 vive AQUI)
+    {
+        std::string src;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/render/ParticleShader.h", src));
+        const std::string code = test::stripCppComments(src);
+        EXPECT_MSG(code.find("uniform vec3 uWind;") != std::string::npos,
+                   "R-064: o uniform uWind saiu do VS");
+        EXPECT_MSG(code.find("(uWind * localTime)") != std::string::npos,
+                   "R-064: o TERMO DO VENTO saiu da posição do VS (a "
+                   "fórmula do prompt — M-Yg1)");
+        // a sobrecarga pura replica o VS (a fonte única do vento)
+        const f32 p0[3] = {0.0f, 0.0f, 0.0f};
+        const f32 vel[3] = {0.0f, 0.0f, 0.0f};
+        const f32 grav[3] = {0.0f, 0.0f, 0.0f};
+        const f32 wind[3] = {1.5f, 0.0f, 0.0f};
+        f32 p[3];
+        fx::particlePos(p0, vel, grav, wind, 2.0f, p);
+        EXPECT_MSG(nearEqF(p[0], 3.0f, 1e-4f),
+                   "R-064: a pura COM vento não desvia (wind·t)");
+        // o uTime continua o ÚLTIMO 1f do draw (o contrato da casa)
+        glstub::fb::enabled = true;
+        glstub::fb::resetState();
+        glstub::reset();
+        ParticleRenderer pr;
+        EXPECT(pr.init());
+        ParticleRenderer::Params pp;
+        pp.maxParticles = 50;
+        pp.time = 4.5f;
+        pp.wind[1] = 3.0f;
+        pr.draw(pp);
+        EXPECT_MSG(nearEqF(glstub::stats.lastUniform3f[1], 3.0f, 1e-6f),
+                   "R-064: o uWind não chega ao shader (M-Yg1 no render)");
+        EXPECT_MSG(nearEqF(glstub::stats.lastUniform1f, 4.5f, 1e-6f),
+                   "R-064: o uTime deixou de ser o ÚLTIMO 1f (%.2f)",
+                   (double)glstub::stats.lastUniform1f);
+        pr.destroy();
+        glstub::fb::enabled = false;
+        glstub::fb::resetState();
+    }
+    // (2) O CLIMA CONFIGURA O EMISSOR — na criação do preset E na mudança
+    //     no Inspector (M-Yg2: o applyWeatherPreset não chamado)
+    {
+        Scene scene;
+        const Handle hr =
+            createTicFromPreset(scene, PresetKind::Rain, nullptr, nullptr);
+        EXPECT_MSG(hr.valid(),
+                   "R-064: o preset Rain morreu (Transform+PE+AE)");
+        const AmbientEnvironment* ae =
+            scene.get(hr)->getComponent<AmbientEnvironment>();
+        const ParticleEmitter* pe =
+            scene.get(hr)->getComponent<ParticleEmitter>();
+        EXPECT_MSG(ae != nullptr && pe != nullptr &&
+                       nearEqF(pe->gravity[1], -12.0f, 1e-5f) &&
+                       nearEqF(pe->lifetime, 1.2f, 1e-5f),
+                   "R-064: o preset Rain não nasce com o clima aplicado "
+                   "(grav %.1f vida %.2f — M-Yg2)",
+                   (double)(pe ? pe->gravity[1] : 0.0f),
+                   (double)(pe ? pe->lifetime : 0.0f));
+        EXPECT_MSG(ae != nullptr &&
+                       ae->weatherType == AmbientEnvironment::kWeatherRain,
+                   "R-064: o clima do preset não é chuva");
+        // a NEVE (o pin do dono: lifetime 4.0)
+        Scene s2;
+        const Handle hs =
+            createTicFromPreset(s2, PresetKind::Snow, nullptr, nullptr);
+        const ParticleEmitter* pe2 =
+            s2.get(hs)->getComponent<ParticleEmitter>();
+        EXPECT_MSG(pe2 != nullptr && nearEqF(pe2->lifetime, 4.0f, 1e-5f),
+                   "R-064: a neve não vive 4.0 s");
+        // o INSPECTOR cicla e aplica (o contrato no fonte)
+        std::string ui;
+        EXPECT(readFileText(REPO_ROOT "/app/src/main/cpp/ui/EditorUi.cpp",
+                            ui));
+        const std::string uiCode = test::stripCppComments(ui);
+        EXPECT_MSG(uiCode.find("applyWeatherPreset(") != std::string::npos,
+                   "R-064: o Inspector deixou de chamar o "
+                   "applyWeatherPreset na mudança do clima (M-Yg2)");
+        EXPECT_MSG(uiCode.find("(e->weatherType + 1u) & 3u") !=
+                       std::string::npos,
+                   "R-064: o ciclar do clima saiu do despacho (o padrão "
+                   "CamProj)");
+        // a FONTE do preset (os valores EXATOS do prompt vivem no
+        // componente — o serializer e o Inspector partilham)
+        std::string comp;
+        EXPECT(readFileText(REPO_ROOT
+                            "/app/src/main/cpp/components/"
+                            "AmbientEnvironment.h",
+                            comp));
+        const std::string compCode = test::stripCppComments(comp);
+        EXPECT_MSG(compCode.find("-12.0f") != std::string::npos &&
+                       compCode.find("-18.0f") != std::string::npos &&
+                       compCode.find("1.2f") != std::string::npos &&
+                       compCode.find("-1.2f") != std::string::npos &&
+                       compCode.find("4.0f") != std::string::npos,
+                   "R-064: os valores do preset do clima saíram do "
+                   "componente (a fonte única)");
+    }
+    // (3) O FLASH da TROVOADA no céu — a linha EXATA do prompt no FS (sem
+    //     geometria de raio) e o update do STORM no frame (antes do draw)
+    {
+        std::string sky;
+        EXPECT(readFileText(
+            REPO_ROOT "/app/src/main/cpp/render/SkyRenderer.cpp", sky));
+        const std::string skyCode = test::stripCppComments(sky);
+        EXPECT_MSG(skyCode.find("col += vec3(uThunderFlash * 0.6, "
+                                "uThunderFlash * 0.65, uThunderFlash * "
+                                "0.75);") != std::string::npos,
+                   "R-064: a linha do FLASH saiu do FS do céu");
+        EXPECT_MSG(skyCode.find("uniform float uThunderFlash;") !=
+                       std::string::npos,
+                   "R-064: o uniform uThunderFlash saiu do FS");
+        std::string mainSrc;
+        EXPECT(readFileText(REPO_ROOT "/app/src/main/cpp/platform/main.cpp",
+                            mainSrc));
+        EXPECT_MSG(mainSrc.find("sp.thunder = thunderNow;") !=
+                       std::string::npos,
+                   "R-064: o céu deixou de consumir o flash do clima");
+        EXPECT_MSG(mainSrc.find("updateStorm(") != std::string::npos,
+                   "R-064: o update do STORM saiu do frame (o flash não "
+                   "arma nem morre)");
+        // o flash só entra com STORM ATIVO (a condição no lookup)
+        EXPECT_MSG(mainSrc.find(
+                       "AmbientEnvironment::kWeatherStorm") !=
+                       std::string::npos,
+                   "R-064: o lookup do flash perdeu a condição do STORM");
+    }
+    // (4) O .GONI transporta o clima e o vento — e NUNCA o runtime
+    {
+        Scene scene;
+        const Handle h = scene.create("W");
+        scene.get(h)->addComponent<Transform3D>();
+        AmbientEnvironment* ae =
+            scene.get(h)->addComponent<AmbientEnvironment>();
+        ae->weatherType = AmbientEnvironment::kWeatherSnow;
+        ae->intensity = 0.9f;
+        ae->thunderFlash = 0.5f;   // runtime — nunca viaja
+        WindTIC* w = scene.get(h)->addComponent<WindTIC>();
+        w->windStrength = 7.5f;
+        const std::string dump = SceneSerializer::dump(scene);
+        EXPECT_MSG(dump.find("\"AmbientEnvironment\"") != std::string::npos &&
+                       dump.find("\"weather\"") != std::string::npos &&
+                       dump.find("\"intensity\"") != std::string::npos &&
+                       dump.find("\"WindTIC\"") != std::string::npos &&
+                       dump.find("\"strength\"") != std::string::npos,
+                   "R-064: o .goni PERDEU o clima/vento");
+        EXPECT_MSG(dump.find("thunder") == std::string::npos,
+                   "R-064: o RUNTIME da trovoada INVADIU o .goni");
+        Scene b;
+        SceneSerializer::LoadCtx ctx;
+        ASSERT(SceneSerializer::loadText(b, dump, ctx));
+        const AmbientEnvironment* ae2 =
+            b.get(b.find("W"))->getComponent<AmbientEnvironment>();
+        const WindTIC* w2 = b.get(b.find("W"))->getComponent<WindTIC>();
+        EXPECT_MSG(ae2 != nullptr &&
+                       ae2->weatherType ==
+                           AmbientEnvironment::kWeatherSnow &&
+                       nearEqF(ae2->intensity, 0.9f, 1e-5f) &&
+                       w2 != nullptr && nearEqF(w2->windStrength, 7.5f,
+                                                1e-5f),
+                   "R-064: o clima/vento não volta do .goni");
     }
 }

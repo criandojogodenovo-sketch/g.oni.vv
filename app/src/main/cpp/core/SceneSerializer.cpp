@@ -12,6 +12,8 @@
 #include "components/AudioPlayer.h"      // 0.8.11: áudio
 #include "components/Environment.h"     // 0.12-Y: WorldEnvironment
 #include "components/ParticleEmitter.h"  // 0.12-Y-F1: partículas GPU
+#include "components/WindTIC.h"          // 0.12-Y-F2: vento global
+#include "components/AmbientEnvironment.h" // 0.12-Y-F2: clima
 #include "components/SkeletonComp.h"  // 0.8.2: esqueleto (F7)
 #include "core/CameraUtil.h"          // 0.7.7: uma ativa por cena
 #include "core/ComponentStore.h"
@@ -1513,6 +1515,78 @@ void fillParticleEmitter(ParticleEmitter* pe, const Json& comp) {
     pe->clampFields();
 }
 
+// ---- 0.12-Y-F2 — WindTIC: a brisa da fábrica é silêncio (o default
+// (1,0,0)·1.0 fica FORA do dump — o .goni antigo carrega byte a byte)
+void appendComponentJson(Json& arr, const WindTIC* w) {
+    if (!w) {
+        return;
+    }
+    Json c = Json::makeObject();
+    c.addMember("type", Json::makeString("WindTIC"));
+    static constexpr f32 kDirDef[3] = {WindTIC::kDirDefault[0],
+                                       WindTIC::kDirDefault[1],
+                                       WindTIC::kDirDefault[2]};
+    bool dDef = true;
+    for (int i = 0; i < 3; ++i) {
+        dDef = dDef && w->windDirection[i] == kDirDef[i];
+    }
+    if (!dDef) {
+        Json d = Json::makeArray();
+        for (int i = 0; i < 3; ++i) {
+            d.addItem(Json::makeNumber(w->windDirection[i]));
+        }
+        c.addMember("dir", std::move(d));
+    }
+    if (w->windStrength != WindTIC::kStrengthDefault) {
+        c.addMember("strength", Json::makeNumber(w->windStrength));
+    }
+    arr.addItem(std::move(c));
+}
+
+void fillWindTIC(WindTIC* w, const Json& comp) {
+    if (const Json* j = comp.find("dir");
+        j && j->type == Json::Type::Array && j->items.size() == 3) {
+        for (int i = 0; i < 3; ++i) {
+            w->windDirection[i] = static_cast<f32>(j->items[i].number);
+        }
+    }
+    if (const Json* j = comp.find("strength");
+        j && j->type == Json::Type::Number) {
+        w->windStrength = static_cast<f32>(j->number);
+    }
+    w->clampFields();   // a direção NORMALIZA ao carregar (o contrato)
+}
+
+// ---- 0.12-Y-F2 — AmbientEnvironment: SÓ weatherType + intensity viajam
+// (o thunderFlash/thunderTimer são RUNTIME — a cena carrega SEM raio
+// pendente; os defaults ficam FORA do dump)
+void appendComponentJson(Json& arr, const AmbientEnvironment* ae) {
+    if (!ae) {
+        return;
+    }
+    Json c = Json::makeObject();
+    c.addMember("type", Json::makeString("AmbientEnvironment"));
+    if (ae->weatherType != AmbientEnvironment::kWeatherNone) {
+        c.addMember("weather", Json::makeNumber(ae->weatherType));
+    }
+    if (ae->intensity != AmbientEnvironment::kIntensityDefault) {
+        c.addMember("intensity", Json::makeNumber(ae->intensity));
+    }
+    arr.addItem(std::move(c));
+}
+
+void fillAmbientEnvironment(AmbientEnvironment* ae, const Json& comp) {
+    if (const Json* j = comp.find("weather");
+        j && j->type == Json::Type::Number) {
+        ae->weatherType = static_cast<u8>(j->number);
+    }
+    if (const Json* j = comp.find("intensity");
+        j && j->type == Json::Type::Number) {
+        ae->intensity = static_cast<f32>(j->number);
+    }
+    ae->clampFields();   // o tipo desconhecido cai no NONE (o seguro)
+}
+
 void appendComponentJson(Json& arr, const AnimationPlayer* ap) {
     if (!ap) {
         return;
@@ -1642,6 +1716,8 @@ std::string dump(const Scene& scene) {
         appendComponentJson(comps, cs.audioPlayers().find(t.handle));   // 0.8.11
         appendComponentJson(comps, cs.environments().find(t.handle));   // 0.12-Y
         appendComponentJson(comps, cs.particleEmitters().find(t.handle));   // 0.12-Y-F1
+        appendComponentJson(comps, cs.winds().find(t.handle));   // 0.12-Y-F2
+        appendComponentJson(comps, cs.ambients().find(t.handle));   // 0.12-Y-F2
         // BISECT-2: env dump off
         appendComponentJson(comps, cs.scripts().find(t.handle));       // 0.9.2
         appendComponentJson(comps, cs.controls().find(t.handle));      // 0.12-B
@@ -1836,6 +1912,10 @@ bool loadText(Scene& scene, const std::string& text, const LoadCtx& ctx) {
                 fillEnvironment(store.get<Environment>(h), jc);   // 0.12-Y
             } else if (jt2->string == "ParticleEmitter") {
                 fillParticleEmitter(store.get<ParticleEmitter>(h), jc);   // 0.12-Y-F1
+            } else if (jt2->string == "WindTIC") {
+                fillWindTIC(store.get<WindTIC>(h), jc);   // 0.12-Y-F2
+            } else if (jt2->string == "AmbientEnvironment") {
+                fillAmbientEnvironment(store.get<AmbientEnvironment>(h), jc);   // 0.12-Y-F2
             } else if (jt2->string == "Script") {
                 fillScriptComp(store.get<ScriptComp>(h), jc);   // 0.9.2
             }

@@ -373,6 +373,9 @@ public:
         f32  speed = 0.02f;           // o vento (UV/s)
         f32  height = 1.0f;           // 0.12-Y-E: a escala vertical das nuvens
         f32  stars = 0.0f;            // 0.12-Y-E: o gate das estrelas (0..1)
+        f32  thunder = 0.0f;          // 0.12-Y-F2: o FLASH da trovoada
+                                      // (0..1 — o AmbientEnvironment STORM;
+                                      // 0 = o céu de sempre byte a byte)
     };
 
     bool init();      // compila/linka o programa + o quad (o padrão Grid)
@@ -404,6 +407,9 @@ private:
     i32 locCoverage_ = -1;
     i32 locHeight_ = -1;   // 0.12-Y-E: a escala vertical das nuvens
     i32 locStars_ = -1;    // 0.12-Y-E: o gate das estrelas
+    i32 locThunder_ = -1;  // 0.12-Y-F2: o flash da trovoada (entra ANTES do
+                           // uTime — o ÚLTIMO 1f do draw continua a ser o
+                           // relógio das nuvens, o contrato do pin da D)
     i32 locHor_ = -1;
     i32 locZen_ = -1;
     i32 locSunCol_ = -1;
